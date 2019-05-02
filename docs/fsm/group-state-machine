@@ -1,0 +1,60 @@
+@startuml
+
+title Group States
+[*] --> Single
+Single : just a primary
+Single : (single, )
+
+note right of Single
+  This can also be entered
+  at any time by calling
+  remove_node() on one
+  of the nodes
+end note
+
+State "New Standby" as WaitStandby
+WaitStandby: just added a new node
+WaitStandby: (single, wait_standby)
+
+Single -down-> WaitStandby
+
+State "Ready to replicate" as WaitPrimary
+WaitPrimary: creating the replication slot
+WaitPrimary: (wait_primary, wait_standby)
+
+WaitStandby -down-> WaitPrimary
+
+State "Catching Up" as CatchingUp
+CatchingUp: a primary and a lagging secondary
+CatchingUp: (wait_primary, catching_up)
+
+WaitPrimary -down-> CatchingUp
+
+State "Caught Up" as CaughtUp
+CaughtUp: a primary and a ready secondary
+CaughtUp: (primary, secondary)
+
+CatchingUp -down-> CaughtUp
+CaughtUp --> CatchingUp
+
+state "Failing Over" as FailingOver
+FailingOver : (draining, prepare_promotion)
+
+CaughtUp -down-> FailingOver
+CaughtUp --> FailingOver : perform_failover()
+CatchingUp --> FailingOver : perform_failover()
+
+Demoted : (demoted, prepare_promotion)
+
+FailingOver -down-> DemoteTimeout
+
+state "Demote Timeout" as DemoteTimeout
+DemoteTimeout : (demote_timeout, stop_replication)
+
+DemoteTimeout -down-> Demoted
+
+Demoted : (demoted, wait_primary)
+
+Demoted --> CatchingUp : taken if the failed\nnode reappears
+
+@enduml

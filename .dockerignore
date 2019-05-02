@@ -1,0 +1,4 @@
+.git
+src/bin/pg_autoctl/pg_autoctl
+docs
+Dockerfile

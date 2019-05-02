@@ -1,0 +1,22 @@
+# Vendored-in librairies
+
+## log.c
+
+A very simple lib for handling logs in C is available at
+
+  https://github.com/rxi/log.c
+
+It says that
+
+  log.c and log.h should be dropped into an existing project and compiled
+  along with it.
+
+So this directory contains a _vendored-in_ copy of the log.c repository.
+
+## SubCommands.c
+
+The single-header library is used to implement parsing "modern" command lines.
+
+## Configuration file parsing
+
+We utilize the "ini.h" ini-file reader from https://github.com/mattiasgustavsson/libs

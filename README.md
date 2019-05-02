@@ -1,0 +1,171 @@
+# pg_auto_failover
+
+pg_auto_failover is an extension for PostgreSQL that monitors and manages failover
+for a Postgres cluster. It is optimised for simplicity and correctness.
+
+![pg_auto_failover Architecture](docs/pg_auto_failover-arch.png?raw=true "pg_auto_failover Architecture")
+
+To use pg_auto_failover, you set up one PostgreSQL server as a monitor node and two
+PostgreSQL servers as data nodes, one primary and one secondary. The monitor
+node tracks the health of the data nodes and implements a failover state
+machine. On the PostgreSQL nodes, the `pg_autoctl` program runs alongside
+PostgreSQL and runs the necessary commands to configure streaming
+replication.
+
+pg_auto_failover implements a single PostgreSQL service using multiple nodes with
+automated failover, and automates PostgreSQL maintenance operations in a way
+that guarantees availability of the service to its users and applications.
+
+To that end, pg_auto_failover uses three nodes (machines, servers) per PostgreSQL
+service:
+
+  - a PostgreSQL primary node,
+  - a PostgreSQL secondary node, using Synchronous Hot Standby,
+  - a pg_auto_failover Monitor node that acts both as a witness and an orchestrator.
+
+The pg_auto_failover Monitor implements a state machine and relies on in-core
+PostgreSQL facilities to deliver HA. For example. when the *secondary* node
+is detected to be unavailable, or when its lag is too important, then the
+Monitor removes it from the `synchronous_standby_names` setting on the
+*primary* node. Until the *secondary* is back to being monitored healthy,
+failover and switchover operations are not allowed, preventing data loss.
+
+## Building pg_auto_failover, and first steps with the solution
+
+pg_auto_failover consists of the following parts:
+
+  - a PostgreSQL extension named `pgautofailover`,
+  - a PostgreSQL service to operate the pg_auto_failover monitor,
+  - a pg_auto_failover keeper to operate your PostgreSQL instances, see `pg_autoctl run`.
+
+To build the project, just type `make`.
+
+~~~ bash
+$ make
+$ make install
+~~~
+
+For this to work though, the PostgreSQL client (libpq) and server
+(postgresql-server-dev) libraries must be available in your standard include
+and link paths.
+
+The `make install` step will deploy the `pgautofailover` PostgreSQL extension in
+the PostgreSQL directory for extensions as pointed by `pg_config`, and
+install the `pg_autoctl` binary command in the directory pointed to by
+`pg_config --bindir`, alongside other PostgreSQL tools such as `pg_ctl` and
+`pg_controldata`.
+
+## Using pg_auto_failover
+
+Once the building and installation is done, follow those steps:
+
+  1. Install and start a pg_auto_failover monitor on your monitor machine:
+
+     ~~~ bash
+     $ pg_autoctl create monitor --pgdata /path/to/pgdata     \
+                                 --nodename `hostname --fqdn`
+     ~~~
+
+     Once this command is done, you should have a running PostgreSQL
+     instance on the machine, installed in the directory pointed to by the
+     `--pgdata` option, using the default port 5432.
+
+     You may change the port using `--pgport`.
+
+     The command also creates a `autoctl` user and database, and a
+     `autoctl_node` user for the other nodes to use. In the `pg_auto_failover`
+     database, the extension `pgautofailover` is installed, and some *background
+     worker* jobs are active already, waiting until a PostgreSQL node gets
+     registered to run health-checks on it.
+
+  2. Install and start a primary PostgreSQL instance:
+
+     ~~~ bash
+     $ pg_autoctl create postgres --pgdata /path/to/pgdata     \
+                                  --nodename `hostname -fqdn`  \
+                                  --monitor postgres://autoctl_node@host/pg_auto_failover
+     ~~~
+
+     This command is using lots of default parameters that you may want to
+     override, see its `--help` output for details. The three parameters
+     used above are mandatory, though:
+
+       - `--pgdata` sets the PGDATA directory where to install PostgreSQL,
+         and if not given as an command line option then the environment
+         variable `PGDATA` is used, when defined.
+
+       - `--nodename` is used by other nodes to connect to this one, so it
+         should be an hostname or an IP address that is reachable by the
+         other members (localhost probably won't work).
+
+       - `--monitor` is the Postgres URI used to connect to the monitor that
+         we deployed with the previous command, you should replace `host` in
+         the connection string to point to the right host and port.
+
+         Also, pg_auto_failover currently makes no provision on the monitor node
+         with respect to database connection privileges, that are edited in
+         PostgreSQL `pg_hba.conf` file. So please adjust the setup to allow
+         for your keepers to be able to connect to the monitor.
+
+     The initialisation step probes the given `--pgdata` directory for an
+     existing PostgreSQL cluster, and when the directory doesn't exist it
+     will go ahead and `pg_ctl initdb` one for you, after having registered
+     the local node (`nodename:pgport`) to the pg_auto_failover monitor.
+
+     Now that the installation is ready we can run the keeper service, which
+     connects to the pg_auto_failover monitor every 5 seconds and implement the
+     state transitions when needed:
+
+     ~~~ bash
+     $ pg_autoctl run --pgdata /path/to/pgdata
+     ~~~
+
+
+  3. Install and start a secondary PostgreSQL instance:
+
+     ~~~ bash
+     $ pg_autoctl create postgres --pgdata /path/to/pgdata     \
+                                  --nodename `hostname -fqdn`  \
+                                  --monitor postgres://autoctl_node@host/pg_auto_failover
+     ~~~
+
+     This command is the same as in the previous section, because it's all
+     about initializing a PostgreSQL node again. This time, the monitor has
+     a node registered as a primary server already, in the state SINGLE.
+     Given this current state, the monitor is assigning this new node the
+     role of a standby, and `pg_autoctl create` makes that happen.
+
+     The command waits until the primary has prepared the PostgreSQL
+     replication, which means editing `pg_hba.conf` to allow for connecting
+     the standby with the *replication* privilege, and creating a
+     replication slot for the standby.
+
+     Once everything is ready, the monitor assign the goal state CATCHINGUP
+     to the secondary server, which can now `pg_basebackup` from the
+     primary, install its `recovery.conf` and start the PostgreSQL service.
+
+     Once the `pg_autoctl create` command is done, again, it's important
+     to run the keeper's service:
+
+     ~~~ bash
+     $ pg_autoctl run --pgdata /path/to/pgdata
+     ~~~
+
+That's it! You now have a running pg_auto_failover setup with two PostgreSQL nodes
+using Streaming Replication to implement fault-tolerance.
+
+## Formations and Groups
+
+In the previous example, the options `--formation` and `--group` are not
+used. This means we've been using the default values: the default formation
+is named *default* and the default group id is zero (0).
+
+It's possible to add other services to the same running monitor by using
+another formation.
+
+## Finite State Machine
+
+Here's a machine generated representation of the Keeper FSM, obtained thanks
+to graphviz:
+
+![pg_auto_failover Finite State Machine](docs/fsm.png?raw=true "pg_auto_failover Finite State Machine")
