@@ -3,7 +3,7 @@
 Installing pg_auto_failover
 ===========================
 
-We provide native system packages for pg_auto_failover on most popular Linux distributions. To download the packages you will need to obtain a Citus Enterprise Edition key -- `contact us <https://www.citusdata.com/about/contact_us>`_ to get one.
+We provide native system packages for pg_auto_failover on most popular Linux distributions.
 
 Use the steps below to install pg_auto_failover on PostgreSQL 11.
 
@@ -16,7 +16,7 @@ Ubuntu or Debian
   curl https://install.citusdata.com/community/deb.sh | sudo bash
 
   # install pg_auto_failover
-  sudo apt-get install postgresql-11-auto-failover10
+  sudo apt-get install postgresql-11-auto-failover
 
   # confirm installation
   /usr/bin/pg_autoctl --version

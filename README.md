@@ -82,7 +82,7 @@ Once the building and installation is done, follow those steps:
 
      ~~~ bash
      $ pg_autoctl create postgres --pgdata /path/to/pgdata     \
-                                  --nodename `hostname -fqdn`  \
+                                  --nodename `hostname --fqdn`  \
                                   --monitor postgres://autoctl_node@host/pg_auto_failover
      ~~~
 
