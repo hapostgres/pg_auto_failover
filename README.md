@@ -1,7 +1,7 @@
 # pg_auto_failover
 
-pg_auto_failover is an extension for PostgreSQL that monitors and manages failover
-for a Postgres cluster. It is optimised for simplicity and correctness.
+pg_auto_failover is an extension and service for PostgreSQL that monitors and manages
+automated failover for a Postgres cluster. It is optimized for simplicity and correctness.
 
 ![pg_auto_failover Architecture](docs/pg_auto_failover-arch.png?raw=true "pg_auto_failover Architecture")
 
@@ -163,9 +163,43 @@ is named *default* and the default group id is zero (0).
 It's possible to add other services to the same running monitor by using
 another formation.
 
-## Finite State Machine
+## Contributing
 
-Here's a machine generated representation of the Keeper FSM, obtained thanks
-to graphviz:
+This project welcomes contributions and suggestions. Most contributions require you to
+agree to a Contributor License Agreement (CLA) declaring that you have the right to,
+and actually do, grant us the rights to use your contribution. For details, visit
+https://cla.microsoft.com.
 
-![pg_auto_failover Finite State Machine](docs/fsm.png?raw=true "pg_auto_failover Finite State Machine")
+When you submit a pull request, a CLA-bot will automatically determine whether you need
+to provide a CLA and decorate the PR appropriately (e.g., label, comment). Simply follow the
+instructions provided by the bot. You will only need to do this once across all repositories using our CLA.
+
+This project has adopted the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/).
+For more information see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/)
+or contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.
+
+## Reporting Security Issues
+
+Security issues and bugs should be reported privately, via email, to the Microsoft Security
+Response Center (MSRC) at [secure@microsoft.com](mailto:secure@microsoft.com). You should
+receive a response within 24 hours. If for some reason you do not, please follow up via
+email to ensure we received your original message. Further information, including the
+[MSRC PGP](https://technet.microsoft.com/en-us/security/dn606155) key, can be found in
+the [Security TechCenter](https://technet.microsoft.com/en-us/security/default).
+
+## Authors
+
+* [Dimitri Fontaine](https://github.com/dimitri)
+* [Nils Dijk](https://github.com/thanodnl)
+* [Marco Slot](https://github.com/marcoslot)
+* [Louise Grandjonc](https://github.com/louiseGrandjonc)
+* [Hadi Moshayedi](https://github.com/pykello)
+* [Lukas Fittl](https://github.com/lfittl)
+
+## License
+
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+This project is licensed under the PostgreSQL License, see LICENSE file for details.
+
+This project includes bundled third-party dependencies, see NOTICE file for details.
