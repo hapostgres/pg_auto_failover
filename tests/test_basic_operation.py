@@ -25,7 +25,7 @@ def test_001_init_primary():
 
 def test_001_stop_postgres():
     node1.stop_postgres()
-    node1.wait_until_pg_is_running()
+    assert node1.wait_until_pg_is_running()
 
 def test_002_create_t1():
     node1.run_sql_query("CREATE TABLE t1(a int)")

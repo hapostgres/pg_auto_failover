@@ -130,14 +130,20 @@ class PGNode:
             return False
         return True
 
-    def pg_is_running(self):
+    def pg_is_running(self, timeout=COMMAND_TIMEOUT):
         """
         Returns true when Postgres is running. We use pg_ctl status.
         """
         status_command = [shutil.which('pg_ctl'), '-D', self.datadir, 'status']
         status_proc = self.vnode.run(status_command)
-        out, err = status_proc.communicate(timeout=COMMAND_TIMEOUT)
+        out, err = status_proc.communicate(timeout=timeout)
         if status_proc.returncode == 0:
+            # pg_ctl status is happy to report 0 (Postgres is running) even
+            # when it's still "starting" and thus not ready for queries.
+            #
+            # because our tests need to be able to send queries to Postgres,
+            # the "starting" status is not good enough for us, we're only
+            # happy with "ready".
             pidfile = os.path.join(self.datadir, 'postmaster.pid')
             with open(pidfile, "r") as p:
                 pg_status = p.readlines()[7]
