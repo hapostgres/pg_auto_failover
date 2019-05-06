@@ -860,7 +860,7 @@ keeper_init_state_write(Keeper *keeper)
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
 
-	initState.pg_autoctl_state_version = PG_AUTOCTL_KEEPER_STATE_VERSION;
+	initState.pg_autoctl_state_version = PG_AUTOCTL_STATE_VERSION;
 
 	if (!pg_setup_init(&pgSetup, &(keeper->config.pgSetup),
 					   missingPgdataIsOk, pgIsNotRunningIsOk))
@@ -955,7 +955,7 @@ keeper_init_state_read(Keeper *keeper, KeeperStateInit *initState)
 		((KeeperStateInit *) content)->pg_autoctl_state_version;
 
 	if (fileSize >= sizeof(KeeperStateData)
-		&& pg_autoctl_state_version == PG_AUTOCTL_KEEPER_STATE_VERSION)
+		&& pg_autoctl_state_version == PG_AUTOCTL_STATE_VERSION)
 	{
 		memcpy(initState, content, sizeof(KeeperStateInit));
 		free(content);

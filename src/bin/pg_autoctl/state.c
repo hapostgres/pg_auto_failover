@@ -75,9 +75,9 @@ keeper_state_read(KeeperStateData *keeperState, const char *filename)
 static bool
 keeper_state_is_readable(int pg_autoctl_state_version)
 {
-	return pg_autoctl_state_version == PG_AUTOCTL_KEEPER_STATE_VERSION
+	return pg_autoctl_state_version == PG_AUTOCTL_STATE_VERSION
 		|| (pg_autoctl_state_version == 1
-			&& PG_AUTOCTL_KEEPER_STATE_VERSION == 2);
+			&& PG_AUTOCTL_STATE_VERSION == 2);
 }
 
 /*
@@ -174,7 +174,7 @@ keeper_state_init(KeeperStateData *keeperState)
 {
 	memset(keeperState, 0, sizeof(KeeperStateData));
 
-	keeperState->pg_autoctl_state_version = PG_AUTOCTL_KEEPER_STATE_VERSION;
+	keeperState->pg_autoctl_state_version = PG_AUTOCTL_STATE_VERSION;
 	keeperState->current_node_id = -1;
 	keeperState->current_group = 1;
 
