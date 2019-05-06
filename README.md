@@ -6,38 +6,22 @@
 pg_auto_failover is an extension and service for PostgreSQL that monitors and manages
 automated failover for a Postgres cluster. It is optimized for simplicity and correctness and supports Postgres 10 and newer.
 
+We set up one PostgreSQL server as a **monitor** node as well as a **primary** and **secondary** node for storing data. The monitor node tracks the health of the data nodes and implements a failover state machine. On the PostgreSQL nodes, the `pg_autoctl` program runs alongside PostgreSQL and runs the necessary commands to configure synchronous streaming replication.
+
 ![pg_auto_failover Architecture](docs/pg_auto_failover-arch.png?raw=true "pg_auto_failover Architecture")
 
-To use pg_auto_failover, you set up one PostgreSQL server as a monitor node and two
-PostgreSQL servers as data nodes, one primary and one secondary. The monitor
-node tracks the health of the data nodes and implements a failover state
-machine. On the PostgreSQL nodes, the `pg_autoctl` program runs alongside
-PostgreSQL and runs the necessary commands to configure streaming
-replication.
-
-pg_auto_failover implements a single PostgreSQL service using multiple nodes with
-automated failover, and automates PostgreSQL maintenance operations in a way
-that guarantees availability of the service to its users and applications.
-
-To that end, pg_auto_failover uses three nodes (machines, servers) per PostgreSQL
-service:
-
-  - a PostgreSQL primary node,
-  - a PostgreSQL secondary node, using Synchronous Hot Standby,
-  - a pg_auto_failover Monitor node that acts both as a witness and an orchestrator.
-
 The pg_auto_failover Monitor implements a state machine and relies on in-core
-PostgreSQL facilities to deliver HA. For example. when the *secondary* node
+PostgreSQL facilities to deliver HA. For example. when the **secondary** node
 is detected to be unavailable, or when its lag is too important, then the
 Monitor removes it from the `synchronous_standby_names` setting on the
-*primary* node. Until the *secondary* is back to being monitored healthy,
+**primary** node. Until the **secondary** is back to being monitored healthy,
 failover and switchover operations are not allowed, preventing data loss.
 
 pg_auto_failover consists of the following parts:
 
-  - a PostgreSQL extension named `pgautofailover`,
-  - a PostgreSQL service to operate the pg_auto_failover monitor,
-  - a pg_auto_failover keeper to operate your PostgreSQL instances, see `pg_autoctl run`.
+  - a PostgreSQL extension named `pgautofailover`
+  - a PostgreSQL service to operate the pg_auto_failover monitor
+  - a pg_auto_failover keeper to operate your PostgreSQL instances, see `pg_autoctl run`
 
 ## Installing pg_auto_failover from packages
 
