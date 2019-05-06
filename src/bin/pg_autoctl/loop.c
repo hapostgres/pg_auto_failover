@@ -157,33 +157,6 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 
 		CHECK_FOR_FAST_SHUTDOWN;
 
-		/*
-		 * If we see that PostgreSQL is not running when we know it should be,
-		 * the least we can do is start PostgreSQL again. Same if PostgreSQL is
-		 * running and we are DEMOTED, or in another one of those states where
-		 * the monitor asked us to stop serving queries, in order to ensure
-		 * consistency.
-		 *
-		 * That said, only enfore current state when we have a recent enough
-		 * version of it, meaning that we could contact the monitor in the
-		 * previous loop. Doing things that way prevents the keeper from
-		 * restarting PostgreSQL at boot time to then be told to go to DEMOTE
-		 * state by the monitor because the other node has been promoted while
-		 * this node was busy rebooting.
-		 */
-		if (couldContactMonitor)
-		{
-			if (!keeper_ensure_current_state(keeper))
-			{
-				log_warn("pg_autoctl failed to ensure current state \"%s\": "
-						 "PostgreSQL %s running",
-						 NodeStateToString(keeperState->current_role),
-						 postgres->pgIsRunning ? "is" : "is not");
-			}
-		}
-
-		CHECK_FOR_FAST_SHUTDOWN;
-
 		reportPgIsRunning = ReportPgIsRunning(keeper);
 
 		/* a single line of logs every 5s whatever happens is nice to have */
@@ -237,6 +210,34 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 				{
 					keeperState->assigned_role = DEMOTE_TIMEOUT_STATE;
 				}
+			}
+		}
+
+		CHECK_FOR_FAST_SHUTDOWN;
+
+		/*
+		 * If we see that PostgreSQL is not running when we know it should be,
+		 * the least we can do is start PostgreSQL again. Same if PostgreSQL is
+		 * running and we are DEMOTED, or in another one of those states where
+		 * the monitor asked us to stop serving queries, in order to ensure
+		 * consistency.
+		 *
+		 * Only enfore current state when we have a recent enough version of
+		 * it, meaning that we could contact the monitor.
+		 *
+		 * We need to prevent the keeper from restarting PostgreSQL at boot
+		 * time when meanwhile the Monitor did set our goal_state to DEMOTED
+		 * because the other node has been promoted, which could happen if this
+		 * node was rebooting for a long enough time.
+		 */
+		if (couldContactMonitor)
+		{
+			if (!keeper_ensure_current_state(keeper))
+			{
+				log_warn("pg_autoctl failed to ensure current state \"%s\": "
+						 "PostgreSQL %s running",
+						 NodeStateToString(keeperState->current_role),
+						 postgres->pgIsRunning ? "is" : "is not");
 			}
 		}
 
