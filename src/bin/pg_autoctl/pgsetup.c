@@ -463,9 +463,6 @@ read_pg_pidfile(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 	char line[BUFSIZE];
 	char pidfile[MAXPGPATH];
 
-	// Reset status to avoid keeping stale results in case postmaster isn't running
-	pgSetup->pm_status = POSTMASTER_STATUS_UNKNOWN;
-
 	join_path_components(pidfile, pgSetup->pgdata, "postmaster.pid");
 
 	if ((fp = fopen(pidfile, "r")) == NULL)
@@ -676,9 +673,13 @@ pg_setup_is_ready(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 		int warnings = 0;
 
 		/*
-		 * Refresh postmaster status
+		 * Invalidate in-memory Postmaster status cache.
+		 *
+		 * This makes sure we enter the main loop and attempt to read the
+		 * postmaster.pid file at least once: if Postgres was stopped, then the
+		 * file that we've read previously might not exists any-more.
 		 */
-		(void) read_pg_pidfile(pgSetup, pg_is_not_running_is_ok);
+		pgSetup->pm_status = POSTMASTER_STATUS_UNKNOWN;
 
 		/*
 		 * Sometimes `pg_ctl start` returns with success and Postgres is still
