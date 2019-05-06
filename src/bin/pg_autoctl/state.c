@@ -27,7 +27,7 @@
 #include "pgsql.h"
 #include "state.h"
 
-static bool keeper_state_is_readable(int state_file_pg_autoctl_version);
+static bool keeper_state_is_readable(int pg_autoctl_state_version);
 
 
 /*
@@ -38,7 +38,7 @@ keeper_state_read(KeeperStateData *keeperState, const char *filename)
 {
 	char *content = NULL;
 	long fileSize;
-	int state_file_pg_autoctl_version = 0;
+	int pg_autoctl_state_version = 0;
 
 	log_debug("Reading current state from \"%s\"", filename);
 
@@ -48,11 +48,11 @@ keeper_state_read(KeeperStateData *keeperState, const char *filename)
 		return false;
 	}
 
-	state_file_pg_autoctl_version =
+	pg_autoctl_state_version =
 		((KeeperStateData *) content)->pg_autoctl_state_version;
 
 	if (fileSize >= sizeof(KeeperStateData)
-		&& keeper_state_is_readable(state_file_pg_autoctl_version))
+		&& keeper_state_is_readable(pg_autoctl_state_version))
 	{
 		memcpy(keeperState, content, sizeof(KeeperStateData));
 		free(content);
@@ -73,10 +73,10 @@ keeper_state_read(KeeperStateData *keeperState, const char *filename)
  * given version of pg_autoctl.
  */
 static bool
-keeper_state_is_readable(int state_file_pg_autoctl_version)
+keeper_state_is_readable(int pg_autoctl_state_version)
 {
-	return state_file_pg_autoctl_version == PG_AUTOCTL_KEEPER_STATE_VERSION
-		|| (state_file_pg_autoctl_version == 1
+	return pg_autoctl_state_version == PG_AUTOCTL_KEEPER_STATE_VERSION
+		|| (pg_autoctl_state_version == 1
 			&& PG_AUTOCTL_KEEPER_STATE_VERSION == 2);
 }
 
