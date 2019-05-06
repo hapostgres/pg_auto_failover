@@ -673,6 +673,15 @@ pg_setup_is_ready(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 		int warnings = 0;
 
 		/*
+		 * Invalidate in-memory Postmaster status cache.
+		 *
+		 * This makes sure we enter the main loop and attempt to read the
+		 * postmaster.pid file at least once: if Postgres was stopped, then the
+		 * file that we've read previously might not exists any-more.
+		 */
+		pgSetup->pm_status = POSTMASTER_STATUS_UNKNOWN;
+
+		/*
 		 * Sometimes `pg_ctl start` returns with success and Postgres is still
 		 * in crash recovery replaying WAL files, in the "starting" state
 		 * rather than the "ready" state.

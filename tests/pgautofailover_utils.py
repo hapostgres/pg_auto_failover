@@ -114,20 +114,62 @@ class PGNode:
 
     def stop_postgres(self):
         """
-        Stops the postgres process by running "postgres --wait --mode immediate".
+        Stops the postgres process by running:
+          pg_ctl -D ${self.datadir} --wait --mode immediate stop
         """
         stop_command = [shutil.which('pg_ctl'), '-D', self.datadir,
                         '--wait', '--mode', 'immediate', 'stop']
         stop_proc = self.vnode.run(stop_command)
         out, err = stop_proc.communicate(timeout=COMMAND_TIMEOUT)
         if stop_proc.returncode > 0:
-            print("stopping postgres for '%s' failed, out: %s\n, err: %s",
-                  out, err)
+            print("stopping postgres for '%s' failed, out: %s\n, err: %s"
+                  %(out, err))
             return False
         elif stop_proc.returncode is None:
             print("stopping postgres for '%s' timed out")
             return False
         return True
+
+    def pg_is_running(self, timeout=COMMAND_TIMEOUT):
+        """
+        Returns true when Postgres is running. We use pg_ctl status.
+        """
+        status_command = [shutil.which('pg_ctl'), '-D', self.datadir, 'status']
+        status_proc = self.vnode.run(status_command)
+        out, err = status_proc.communicate(timeout=timeout)
+        if status_proc.returncode == 0:
+            # pg_ctl status is happy to report 0 (Postgres is running) even
+            # when it's still "starting" and thus not ready for queries.
+            #
+            # because our tests need to be able to send queries to Postgres,
+            # the "starting" status is not good enough for us, we're only
+            # happy with "ready".
+            pidfile = os.path.join(self.datadir, 'postmaster.pid')
+            with open(pidfile, "r") as p:
+                pg_status = p.readlines()[7]
+            return pg_status.startswith("ready")
+        elif status_proc.returncode > 0:
+            # ignore `pg_ctl status` output, silently try again till timeout
+            return False
+        elif status_proc.returncode is None:
+            print("pg_ctl status timed out after %ds" % timeout)
+            return False
+
+    def wait_until_pg_is_running(self, timeout=STATE_CHANGE_TIMEOUT):
+        """
+        Waits until the underlying Postgres process is running.
+        """
+        for i in range(timeout):
+            time.sleep(1)
+
+            if self.pg_is_running():
+                return True
+
+        else:
+            print("Postgres is still not running in %s after %d attempts" %
+                  (self.datadir, timeout))
+            return False
+
 
 class DataNode(PGNode):
     def __init__(self, datadir, vnode, port, username, database, monitor,
