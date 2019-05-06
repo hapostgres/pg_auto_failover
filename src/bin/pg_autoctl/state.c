@@ -49,7 +49,7 @@ keeper_state_read(KeeperStateData *keeperState, const char *filename)
 	}
 
 	state_file_pg_autoctl_version =
-		((KeeperStateData *) content)->pg_autoctl_version;
+		((KeeperStateData *) content)->pg_autoctl_state_version;
 
 	if (fileSize >= sizeof(KeeperStateData)
 		&& keeper_state_is_readable(state_file_pg_autoctl_version))
@@ -75,9 +75,9 @@ keeper_state_read(KeeperStateData *keeperState, const char *filename)
 static bool
 keeper_state_is_readable(int state_file_pg_autoctl_version)
 {
-	return state_file_pg_autoctl_version == PG_AUTOCTL_KEEPER_VERSION
+	return state_file_pg_autoctl_version == PG_AUTOCTL_KEEPER_STATE_VERSION
 		|| (state_file_pg_autoctl_version == 1
-			&& PG_AUTOCTL_KEEPER_VERSION ==2);
+			&& PG_AUTOCTL_KEEPER_STATE_VERSION == 2);
 }
 
 /*
@@ -174,7 +174,7 @@ keeper_state_init(KeeperStateData *keeperState)
 {
 	memset(keeperState, 0, sizeof(KeeperStateData));
 
-	keeperState->pg_autoctl_version = PG_AUTOCTL_KEEPER_VERSION;
+	keeperState->pg_autoctl_state_version = PG_AUTOCTL_KEEPER_STATE_VERSION;
 	keeperState->current_node_id = -1;
 	keeperState->current_group = 1;
 
@@ -215,7 +215,7 @@ log_keeper_state(KeeperStateData *keeperState)
 
 	log_trace("state.pg_control_version: %u", keeperState->pg_control_version);
 	log_trace("state.system_identifier: %" PRIu64, keeperState->system_identifier);
-	log_trace("state.pg_autoctl_version: %d", keeperState->pg_autoctl_version);
+	log_trace("state.pg_autoctl_state_version: %d", keeperState->pg_autoctl_state_version);
 	log_trace("state.current_node_id: %d", keeperState->current_node_id);
 	log_trace("state.current_group: %d", keeperState->current_group);
 	log_trace("state.current_nodes_version: %" PRIu64,
@@ -253,49 +253,47 @@ print_keeper_state(KeeperStateData *keeperState, FILE *stream)
 	/*
 	 * First, the roles.
 	 */
-	fprintf(stream, "Current Role:           %s\n", current_role);
-	fprintf(stream, "Assigned Role:          %s\n", assigned_role);
+	fprintf(stream, "Current Role:             %s\n", current_role);
+	fprintf(stream, "Assigned Role:            %s\n", assigned_role);
 
 	/*
 	 * Now, other nodes situation, are we in a network partition.
 	 */
-	fprintf(stream, "Last Monitor Contact:   %s\n",
+	fprintf(stream, "Last Monitor Contact:     %s\n",
 			epoch_to_string(keeperState->last_monitor_contact));
 
-	fprintf(stream, "Last Secondary Contact: %s\n",
+	fprintf(stream, "Last Secondary Contact:   %s\n",
 			epoch_to_string(keeperState->last_secondary_contact));
 
 	/*
 	 * pg_autoctl information.
 	 */
-	fprintf(stream, "pg_autoctl version:     %d\n",
-			keeperState->pg_autoctl_version);
-	fprintf(stream, "group:                  %d\n", keeperState->current_group);
-	fprintf(stream, "node id:                %d\n", keeperState->current_node_id);
-	fprintf(stream, "nodes version:          %" PRIu64 "\n",
+	fprintf(stream, "pg_autoctl state version: %d\n",
+			keeperState->pg_autoctl_state_version);
+	fprintf(stream, "group:                    %d\n", keeperState->current_group);
+	fprintf(stream, "node id:                  %d\n", keeperState->current_node_id);
+	fprintf(stream, "nodes version:            %" PRIu64 "\n",
 			keeperState->current_nodes_version);
 
 	/*
 	 * PostgreSQL bits.
 	 */
-	fprintf(stream,
-			"PostgreSQL Version:     %u\n", keeperState->pg_control_version);
-	fprintf(stream,
-			"PostgreSQL CatVersion:  %u\n", keeperState->catalog_version_no);
-	fprintf(stream,
-			"PostgreSQL System Id:   %" PRIu64 "\n",
+	fprintf(stream, "PostgreSQL Version:       %u\n",
+			keeperState->pg_control_version);
+	fprintf(stream, "PostgreSQL CatVersion:    %u\n",
+			keeperState->catalog_version_no);
+	fprintf(stream, "PostgreSQL System Id:     %" PRIu64 "\n",
 			keeperState->system_identifier);
 
 	/* prepared transaction? */
 	if (!IS_EMPTY_STRING_BUFFER(keeperState->preparedTransactionName))
 	{
-		fprintf(stream,
-				"Prepared Transaction:   %s on coordinator\n",
+		fprintf(stream, "Prepared Transaction:     %s on coordinator\n",
 				keeperState->preparedTransactionName);
 	}
 	else
 	{
-		fprintf(stream, "Prepared Transaction:   ␀\n");
+		fprintf(stream, "Prepared Transaction:     ␀\n");
 	}
 
 	fflush(stream);

@@ -860,7 +860,7 @@ keeper_init_state_write(Keeper *keeper)
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
 
-	initState.pg_autoctl_version = PG_AUTOCTL_KEEPER_VERSION;
+	initState.pg_autoctl_state_version = PG_AUTOCTL_KEEPER_STATE_VERSION;
 
 	if (!pg_setup_init(&pgSetup, &(keeper->config.pgSetup),
 					   missingPgdataIsOk, pgIsNotRunningIsOk))
@@ -890,7 +890,7 @@ keeper_init_state_write(Keeper *keeper)
 	log_info("Writing keeper init state file at \"%s\"",
 			 keeper->config.pathnames.init);
 	log_debug("keeper_init_state_write: version = %d",
-			  initState.pg_autoctl_version);
+			  initState.pg_autoctl_state_version);
 	log_debug("keeper_init_state_write: pgInitState = %s",
 			  PreInitPostgreInstanceStateToString(initState.pgInitState));
 
@@ -952,10 +952,10 @@ keeper_init_state_read(Keeper *keeper, KeeperStateInit *initState)
 	}
 
 	state_file_pg_autoctl_version =
-		((KeeperStateInit *) content)->pg_autoctl_version;
+		((KeeperStateInit *) content)->pg_autoctl_state_version;
 
 	if (fileSize >= sizeof(KeeperStateData)
-		&& state_file_pg_autoctl_version == PG_AUTOCTL_KEEPER_VERSION)
+		&& state_file_pg_autoctl_version == PG_AUTOCTL_KEEPER_STATE_VERSION)
 	{
 		memcpy(initState, content, sizeof(KeeperStateInit));
 		free(content);

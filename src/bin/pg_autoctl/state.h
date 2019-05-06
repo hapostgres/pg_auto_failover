@@ -75,7 +75,7 @@ typedef enum
  */
 typedef struct
 {
-	int pg_autoctl_version;
+	int pg_autoctl_state_version;
 
 	/* PostgreSQL instance information, from pg_ctl and pg_controldata */
 	int pg_version;
@@ -112,7 +112,7 @@ typedef enum
 
 typedef struct
 {
-	int pg_autoctl_version;
+	int pg_autoctl_state_version;
 	PreInitPostgreInstanceState pgInitState;
 } KeeperStateInit;
 

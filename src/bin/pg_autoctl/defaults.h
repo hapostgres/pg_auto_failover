@@ -11,11 +11,10 @@
 #define DEFAULTS_H
 
 /* to be written in the state file */
-#define PG_AUTOCTL_KEEPER_VERSION 1
+#define PG_AUTOCTL_KEEPER_STATE_VERSION 1
 
 /* additional version information for printing version on CLI */
-#define PG_AUTOCTL_KEEPER_MINOR_VERSION 0
-#define PG_AUTOCTL_KEEPER_PATCH_VERSION 0
+#define PG_AUTOCTL_VERSION "1.0.0"
 
 /* environment variable to use to make DEBUG facilities available */
 #define PG_AUTOCTL_DEBUG "PG_AUTOCTL_DEBUG"
