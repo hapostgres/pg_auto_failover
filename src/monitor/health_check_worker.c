@@ -228,7 +228,7 @@ HealthCheckWorkerLauncherMain(Datum arg)
 	BackgroundWorkerInitializeConnection(NULL, NULL, 0);
 
 	/* Make background worker recognisable in pg_stat_activity */
-	pgstat_report_appname("pg_auto_failover health check launcher");
+	pgstat_report_appname("pg_auto_failover monitor launcher");
 
 	launcherContext = AllocSetContextCreateExtended(CurrentMemoryContext,
 													"Health Check Launcher Context",
@@ -329,7 +329,7 @@ StartHealthCheckWorker(DatabaseListEntry *db)
 	snprintf(worker.bgw_library_name, BGW_MAXLEN, "pgautofailover");
 	snprintf(worker.bgw_function_name, BGW_MAXLEN, "HealthCheckWorkerMain");
 	snprintf(worker.bgw_name, BGW_MAXLEN,
-			 "pg_auto_failover_health_checker worker");
+			 "pg_auto_failover monitor worker");
 
 	if (!RegisterDynamicBackgroundWorker(&worker, &handle))
 	{
