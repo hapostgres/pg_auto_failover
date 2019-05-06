@@ -95,8 +95,21 @@ Once the building and installation is done, follow those steps:
          variable `PGDATA` is used, when defined.
 
        - `--nodename` is used by other nodes to connect to this one, so it
-         should be an hostname or an IP address that is reachable by the
+         should be a hostname or an IP address that is reachable by the
          other members (localhost probably won't work).
+         
+         The provided `--nodename` is going to be used by pg_auto_failover
+         to grant connection privileges in the Postgres HBA file. When using
+         a hostname rather than an IP address, please make sure that reverse
+         DNS is then working with the provided hostname, because that's how
+         Postgres will then match any connection attempt with the HBA rules
+         for granting connections, as described in Postgres documentation
+         for [the pg_hba.conf
+         file](https://www.postgresql.org/docs/current/auth-pg-hba-conf.html),
+         at the *address* field.
+
+         In particular, this matching is done when setting-up replication
+         from the primary to the secondary node by pg_auto_failover.
 
        - `--monitor` is the Postgres URI used to connect to the monitor that
          we deployed with the previous command, you should replace `host` in
