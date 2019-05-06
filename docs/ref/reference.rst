@@ -56,6 +56,8 @@ keeper::
       uri     Show the postgres uri to use to connect to pg_auto_failover nodes
       events  Prints monitor's state of nodes in a given formation and group
       state   Prints monitor's state of nodes in a given formation and group
+      ipaddr  Print this node's IP address information
+      cidr    Print this node's CIDR information
 
     pg_autoctl enable
       secondary  Enable secondary nodes on a formation
@@ -206,6 +208,21 @@ commands can be used, from any node in the setup.
 
     For details about the options to the command, see above in the ``pg_autoctl
     show events`` command.
+
+  - ``pg_autoctl show ipaddr``
+
+    This command outputs the Local Area Network IP address of the current
+    host, as discoverd by ``pg_autoctl`` and used to compute the CIDR to
+    open in the Postgres HBA file.
+
+    This command can be used to register the ``--nodename`` of the current
+    node to the monitor at ``pg_autoctl create`` time.
+
+  - ``pg_autoctl show cidr``
+
+    This command outputs the local network CIDR address range as discovered
+    by ``pg_autoctl`` and used when computing the connection privileges to
+    grant in the Postgres HBA file.
 
 pg_auto_failover Postgres Node Initialization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

@@ -53,7 +53,7 @@ distinctive port (6000):
    pg_autoctl create monitor   \
      --pgdata ./monitor     \
      --pgport 6000          \
-     --nodename `hostname --fqdn`
+     --nodename `pg_autoctl show ipaddr`
 
 This command initializes a PostgreSQL cluster at the location pointed
 by the ``--pgdata`` option. When ``--pgdata`` is omitted, ``pg_autoctl``

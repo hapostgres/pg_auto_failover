@@ -84,6 +84,8 @@ extern CommandLine service_reload_command;
 extern CommandLine show_uri_command;
 extern CommandLine show_events_command;
 extern CommandLine show_state_command;
+extern CommandLine show_ipaddr_command;
+extern CommandLine show_cidr_command;
 
 
 int cli_create_node_getopts(int argc, char **argv,

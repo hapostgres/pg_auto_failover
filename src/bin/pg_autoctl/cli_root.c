@@ -37,6 +37,8 @@ CommandLine *show_subcommands[] = {
 	&show_uri_command,
 	&show_events_command,
 	&show_state_command,
+	&show_ipaddr_command,
+	&show_cidr_command,
 	NULL
 };
 

@@ -33,6 +33,8 @@ static int eventCount = 10;
 static int cli_show_state_getopts(int argc, char **argv);
 static void cli_show_state(int argc, char **argv);
 static void cli_show_events(int argc, char **argv);
+static void cli_show_ipaddr(int argc, char **argv);
+static void cli_show_cidr(int argc, char **argv);
 
 static int cli_show_uri_getopts(int argc, char **argv);
 static void cli_show_uri(int argc, char **argv);
@@ -69,7 +71,15 @@ CommandLine show_state_command =
 				 cli_show_state_getopts,
 				 cli_show_state);
 
+CommandLine show_ipaddr_command =
+	make_command("ipaddr",
+				 "Print this node's IP address information", "", "",
+				 NULL, cli_show_ipaddr);
 
+CommandLine show_cidr_command =
+	make_command("cidr",
+				 "Print this node's CIDR information", "", "",
+				 NULL, cli_show_cidr);
 
 /*
  * keeper_cli_monitor_state_getopts parses the command line options for the
@@ -425,4 +435,50 @@ cli_show_monitor_uri(int argc, char **argv)
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 	}
+}
+
+
+/*
+ * cli_show_ipaddr displays the LAN IP address of the current node, as used
+ * when computing the CIDR address range to open in the HBA file.
+ */
+static void
+cli_show_ipaddr(int argc, char **argv)
+{
+	char ipAddr[BUFSIZE];
+
+	if (!fetchLocalIPAddress(ipAddr, BUFSIZE))
+	{
+		log_warn("Failed to determine network configuration.");
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	fprintf(stdout, "%s\n", ipAddr);
+}
+
+
+/*
+ * cli_show_cidr displays the LAN CIDR that pg_autoctl grants connections to in
+ * the HBA file for setting up Postgres streaming replication and connections
+ * to the monitor.
+ */
+static void
+cli_show_cidr(int argc, char **argv)
+{
+	char ipAddr[BUFSIZE];
+	char cidr[BUFSIZE];
+
+	if (!fetchLocalIPAddress(ipAddr, BUFSIZE))
+	{
+		log_warn("Failed to determine network configuration.");
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	if (!fetchLocalCIDR(ipAddr, cidr, BUFSIZE))
+	{
+		log_warn("Failed to determine network configuration.");
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	fprintf(stdout, "%s\n", cidr);
 }
