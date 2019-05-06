@@ -615,7 +615,7 @@ wait_until_primary_is_ready(Keeper *keeper,
 	bool pgIsRunning = false;
 	int64_t replicationLag = 0L;
 	char *pgsrSyncState = "";
-	int errors = 0;
+	int errors = 0, tries = 0;
 	bool firstLoop = true;
 
 	/* wait until the primary is ready for us to pg_basebackup */
@@ -626,7 +626,7 @@ wait_until_primary_is_ready(Keeper *keeper,
 		}
 		else
 		{
-			sleep(1);
+			sleep(PG_AUTOCTL_KEEPER_SLEEP_TIME);
 		}
 
 		if (!monitor_node_active(&(keeper->monitor),
@@ -653,6 +653,15 @@ wait_until_primary_is_ready(Keeper *keeper,
 						  "to retry and finish the local setup");
 				return false;
 			}
+		}
+		++tries;
+
+		if (tries == 3)
+		{
+			log_info("Still waiting for the monitor to drive us to state \"%s\"",
+					 NodeStateToString(CATCHINGUP_STATE));
+			log_warn("Please make sure that the primary node is currently "
+					 "running `pg_autoctl run` and contacting the monitor.");
 		}
 
 		log_trace("wait_until_primary_is_ready: %s",
