@@ -205,6 +205,6 @@ keeper_cli_help(int argc, char **argv)
 void
 keeper_cli_print_version(int argc, char **argv)
 {
-	fprintf(stdout, "pg_autoctl version %d \n", PG_AUTOCTL_KEEPER_VERSION);
+	fprintf(stdout, "pg_autoctl version %s\n", PG_AUTOCTL_VERSION);
 	exit(0);
 }
