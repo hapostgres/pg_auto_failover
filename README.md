@@ -1,7 +1,10 @@
 # pg_auto_failover
 
+[![Slack Status](http://slack.citusdata.com/badge.svg)](https://slack.citusdata.com)
+[![Documentation Status](https://readthedocs.org/projects/pg-auto-failover/badge/?version=latest)](https://pg-auto-failover.readthedocs.io/en/latest/?badge=latest)
+
 pg_auto_failover is an extension and service for PostgreSQL that monitors and manages
-automated failover for a Postgres cluster. It is optimized for simplicity and correctness.
+automated failover for a Postgres cluster. It is optimized for simplicity and correctness and supports Postgres 10 and newer.
 
 ![pg_auto_failover Architecture](docs/pg_auto_failover-arch.png?raw=true "pg_auto_failover Architecture")
 
@@ -30,13 +33,41 @@ Monitor removes it from the `synchronous_standby_names` setting on the
 *primary* node. Until the *secondary* is back to being monitored healthy,
 failover and switchover operations are not allowed, preventing data loss.
 
-## Building pg_auto_failover, and first steps with the solution
-
 pg_auto_failover consists of the following parts:
 
   - a PostgreSQL extension named `pgautofailover`,
   - a PostgreSQL service to operate the pg_auto_failover monitor,
   - a pg_auto_failover keeper to operate your PostgreSQL instances, see `pg_autoctl run`.
+
+## Installing pg_auto_failover from packages
+
+Ubuntu or Debian:
+
+```bash
+# Add the repository to your system
+curl https://install.citusdata.com/community/deb.sh | sudo bash
+
+# Install pg_auto_failover
+sudo apt-get install postgresql-11-auto-failover
+
+# Confirm installation
+/usr/bin/pg_autoctl --version
+```
+
+Fedora, CentOS, or Red Hat:
+
+```bash
+# Add the repository to your system
+curl https://install.citusdata.com/community/rpm.sh | sudo bash
+
+# Install pg_auto_failover
+sudo yum install -y pg-auto-failover10_11
+
+# Confirm installation
+/usr/pgsql-11/bin/pg_autoctl --version
+```
+
+## Building pg_auto_failover from source
 
 To build the project, just type `make`.
 
