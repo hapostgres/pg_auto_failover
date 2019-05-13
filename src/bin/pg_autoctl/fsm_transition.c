@@ -27,7 +27,6 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "coordinator.h"
 #include "defaults.h"
 #include "pgctl.h"
 #include "fsm.h"

@@ -18,7 +18,6 @@
 
 #include "cli_common.h"
 #include "commandline.h"
-#include "coordinator.h"
 #include "defaults.h"
 #include "fsm.h"
 #include "ini_file.h"
