@@ -13,6 +13,7 @@
 
 #include "cli_common.h"
 #include "commandline.h"
+#include "ipaddr.h"
 #include "keeper.h"
 #include "keeper_config.h"
 #include "log.h"

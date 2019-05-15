@@ -21,6 +21,7 @@
 #include "defaults.h"
 #include "fsm.h"
 #include "ini_file.h"
+#include "ipaddr.h"
 #include "keeper_config.h"
 #include "keeper_pg_init.h"
 #include "keeper.h"
@@ -39,6 +40,11 @@ static int cli_create_monitor_getopts(int argc, char **argv);
 static void cli_create_monitor(int argc, char **argv);
 
 static void cli_drop_node(int argc, char **argv);
+
+static bool discover_nodename(char *nodename, int size,
+							  const char *monitorHostname, int monitorPort);
+static void check_nodename(const char *nodename);
+
 
 CommandLine create_monitor_command =
 	make_command("monitor",
@@ -95,7 +101,8 @@ cli_create_config(Keeper *keeper, KeeperConfig *config)
 	 *   - configuration exists already, we need PGDATA
 	 *   - configuration doesn't exist already, we need PGDATA, and more
 	 */
-	if (!keeper_config_set_pathnames_from_pgdata(&config->pathnames, config->pgSetup.pgdata))
+	if (!keeper_config_set_pathnames_from_pgdata(&config->pathnames,
+												 config->pgSetup.pgdata))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_ARGS);
@@ -218,9 +225,38 @@ cli_create_postgres(int argc, char **argv)
 	Keeper keeper = { 0 };
 	KeeperConfig config = keeperOptions;
 
-	/* pg_autoctl create worker: mark ourselves as a coordinator node */
+	/* pg_autoctl create postgres: mark ourselves as a standalone node */
 	config.pgSetup.pgKind = NODE_KIND_STANDALONE;
 	strlcpy(config.nodeKind, "standalone", NAMEDATALEN);
+
+	/* take care of the nodename */
+	if (IS_EMPTY_STRING_BUFFER(config.nodename))
+	{
+		char monitorHostname[_POSIX_HOST_NAME_MAX];
+		int monitorPort = 0;
+
+		if (!hostname_from_uri(config.monitor_pguri,
+							   monitorHostname, _POSIX_HOST_NAME_MAX,
+							   &monitorPort))
+		{
+			log_fatal("Failed to parse --monitor Postgres URI: \"%s\"",
+					  config.monitor_pguri);
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		if (!discover_nodename((char *) &(config.nodename),
+							   _POSIX_HOST_NAME_MAX,
+							   monitorHostname,
+							   monitorPort))
+		{
+			log_fatal("Failed to setup --nodename, see above for details");
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+	}
+	else
+	{
+		(void) check_nodename(config.nodename);
+	}
 
 	if (!cli_create_config(&keeper, &config))
 	{
@@ -415,6 +451,23 @@ cli_create_monitor(int argc, char **argv)
 	}
 	else
 	{
+		/* take care of the nodename */
+		if (IS_EMPTY_STRING_BUFFER(config.nodename))
+		{
+			if (!discover_nodename((char *) (&config.nodename),
+								   _POSIX_HOST_NAME_MAX ,
+								   PG_AUTOCTL_DEFAULT_SERVICE_NAME,
+								   PG_AUTOCTL_DEFAULT_SERVICE_PORT))
+			{
+				log_fatal("Failed to setup --nodename, see above for details");
+				exit(EXIT_CODE_BAD_ARGS);
+			}
+		}
+		else
+		{
+			(void) check_nodename(config.nodename);
+		}
+
 		/* set our MonitorConfig from the command line options now. */
 		monitor_config_init(&config,
 							missingPgdataIsOk, pgIsNotRunningIsOk);
@@ -504,4 +557,124 @@ cli_drop_node(int argc, char **argv)
 	}
 
 	keeper_config_destroy(&config);
+}
+
+
+/*
+ * discover_nodename discovers a suitable --nodename default value in three
+ * steps:
+ *
+ * 1. First find the local LAN IP address by connecting a socket() to either an
+ *    internet service (8.8.8.8:53) or to the monitor's hostname and port, and
+ *    then inspecting which local address has been used.
+ *
+ * 2. Use the local IP address obtained in the first step and do a reverse DNS
+ *    lookup for it. The answer is our candidate default --nodename.
+ *
+ * 3. Do a DNS lookup for the candidate default --nodename. If we get back a IP
+ *    address that matches one of the local network interfaces, we keep the
+ *    candidate, the DNS lookup that Postgres does at connection time is
+ *    expected to then work.
+ *
+ * All this dansing around DNS lookups is necessary in order to mimic Postgres
+ * HBA matching of hostname rules against client IP addresses: the hostname in
+ * the HBA rule is resolved and compared to the client IP address. We want the
+ * --nodename we use to resolve to an IP address that exists on the local
+ * Postgres server.
+ *
+ * Worst case here is that we fail to discover a --nodename and then ask the
+ * user to provide one for us.
+ *
+ * monitorHostname and monitorPort are used to open a socket to that address,
+ * in order to find the right outbound interface. When creating a monitor node,
+ * of course, we don't have the monitorHostname yet: we are trying to discover
+ * it... in that case we use PG_AUTOCTL_DEFAULT_SERVICE_NAME and PORT, which
+ * are the Google DNS service: 8.8.8.8:53, expected to be reachable.
+ */
+static bool
+discover_nodename(char *nodename, int size,
+				  const char *monitorHostname, int monitorPort)
+{
+	/*
+	 * Try and find a default --nodename. The --nodename is mandatory, so
+	 * when not provided for by the user, then failure to discover a
+	 * suitable nodename is a fatal error.
+	 */
+	char ipAddr[BUFSIZE];
+	char localIpAddr[BUFSIZE];
+	char hostname[_POSIX_HOST_NAME_MAX];
+
+	/* fetch our local address among the network interfaces */
+	if (!fetchLocalIPAddress(ipAddr, BUFSIZE, monitorHostname, monitorPort))
+	{
+		log_fatal("Failed to find a local IP address, "
+				  "please provide --nodename.");
+		return false;
+	}
+	log_debug("check_or_discover_nodename: ip %s", ipAddr);
+
+	/* do a reverse DNS lookup from our local LAN ip address */
+	if (!findHostnameFromLocalIpAddress(ipAddr,
+										hostname, _POSIX_HOST_NAME_MAX))
+	{
+		log_fatal("Failed to resove the DNS hostname for IP address \"%s\", "
+				  "see above for details.", ipAddr);
+		return false;
+	}
+	log_debug("check_or_discover_nodename: host %s", hostname);
+
+	/* do a DNS lookup of the hostname we got from the IP address */
+	if (!findHostnameLocalAddress(hostname, localIpAddr, BUFSIZE))
+	{
+		log_fatal("Failed to retrieve a local IP address for discovered "
+				  "hostname \"%s\", please provide --nodename", hostname);
+		return false;
+	}
+	log_debug("check_or_discover_nodename: ip %s", localIpAddr);
+
+	strlcpy(nodename, hostname, size);
+	log_info("Using nodename \"%s\", which resolves to IP address \"%s\"",
+			 nodename, localIpAddr);
+
+	return true;
+}
+
+
+/*
+ * check_nodename runs some DNS check against the provided --nodename in order
+ * to warn the user in case we might later fail to use it in the Postgres HBA
+ * setup.
+ *
+ * The main trouble we guard against is from HBA authentication. Postgres HBA
+ * check_hostname() does a DNS lookup of the hostname found in the pg_hba.conf
+ * file and then compares the IP addresses obtained to the client IP address,
+ * and refuses the connection where there's no match.
+ */
+static void
+check_nodename(const char *nodename)
+{
+	char localIpAddress[INET_ADDRSTRLEN];
+	IPType ipType = ip_address_type(nodename);
+
+	if (ipType == IPTYPE_NONE)
+	{
+		if (!findHostnameLocalAddress(nodename,
+									  localIpAddress, INET_ADDRSTRLEN))
+		{
+			log_warn(
+				"Failed to resolve nodename \"%s\" to a local IP address, "
+				"automated pg_hba.conf setup might fail.", nodename);
+		}
+	}
+	else
+	{
+		char cidr[BUFSIZE];
+
+		if (!fetchLocalCIDR(nodename, cidr, BUFSIZE))
+		{
+			log_warn("Failed to find adress \"%s\" in local network "
+					 "interfaces, automated pg_hba.conf setup might fail.",
+					 nodename);
+		}
+	}
 }

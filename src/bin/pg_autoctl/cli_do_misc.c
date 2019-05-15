@@ -156,6 +156,7 @@ keeper_cli_create_monitor_user(int argc, char **argv)
 	bool postgresNotRunningOk = false;
 	int urlLength = 0;
 	char monitorHostname[_POSIX_HOST_NAME_MAX];
+	int monitorPort = 0;
 
 	/*
 	 * Monitor does not use a password, we expect it to login and immediately
@@ -176,7 +177,8 @@ keeper_cli_create_monitor_user(int argc, char **argv)
 	}
 
 	if (!hostname_from_uri(config.monitor_pguri,
-						   monitorHostname, _POSIX_HOST_NAME_MAX))
+						   monitorHostname, _POSIX_HOST_NAME_MAX,
+						   &monitorPort))
 	{
 		log_fatal("Failed to determine monitor hostname");
 		exit(EXIT_CODE_BAD_ARGS);

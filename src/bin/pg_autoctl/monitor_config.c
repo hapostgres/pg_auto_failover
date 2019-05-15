@@ -386,7 +386,9 @@ monitor_config_get_postgres_uri(MonitorConfig *config, char *connectionString,
 		 * PostgreSQL server to open it up to the local area network, e.g.
 		 * 129.168.1.0/23, so it should just work here.
 		 */
-		if (!fetchLocalIPAddress(host, BUFSIZE))
+		if (!fetchLocalIPAddress(host, BUFSIZE,
+								 PG_AUTOCTL_DEFAULT_SERVICE_NAME,
+								 PG_AUTOCTL_DEFAULT_SERVICE_PORT))
 		{
 			/* error is already logged */
 			return false;
