@@ -1365,3 +1365,74 @@ pgsql_listen(PGSQL *pgsql, char *channels[])
 
 	return true;
 }
+
+
+/*
+ * pgsql_alter_extension_update_to executes ALTER EXTENSION ... UPDATE TO ...
+ */
+bool
+pgsql_alter_extension_update_to(PGSQL *pgsql,
+								const char *extname, const char *version)
+{
+	char command[BUFSIZE];
+	char *escapedIdentifier, *escapedVersion;
+	PGconn *connection = NULL;
+	PGresult *result = NULL;
+
+	/* open a connection upfront since it is needed by PQescape functions */
+	connection = pgsql_open_connection(pgsql);
+	if (connection == NULL)
+	{
+		/* error message was logged in pgsql_open_connection */
+		return false;
+	}
+
+	/* escape the extname */
+	escapedIdentifier = PQescapeIdentifier(connection, extname, strlen(extname));
+	if (escapedIdentifier == NULL)
+	{
+		log_error("Failed to update extension \"%s\": %s", extname,
+				  PQerrorMessage(connection));
+		pgsql_finish(pgsql);
+		return false;
+	}
+
+	/* escape the version */
+	escapedVersion = PQescapeIdentifier(connection, version, strlen(version));
+	if (escapedIdentifier == NULL)
+	{
+		log_error("Failed to update extension \"%s\" to version \"%s\": %s",
+				  extname, version,
+				  PQerrorMessage(connection));
+		pgsql_finish(pgsql);
+		return false;
+	}
+
+	/* now build the SQL command */
+	snprintf(command, BUFSIZE, "ALTER EXTENSION %s UPDATE TO %s",
+			 escapedIdentifier, escapedVersion);
+
+	PQfreemem(escapedIdentifier);
+	PQfreemem(escapedVersion);
+
+	log_debug("Running command on Postgres: %s;", command);
+
+	result = PQexec(connection, command);
+
+	if (!is_response_ok(result))
+	{
+		char *sqlstate = PQresultErrorField(result, PG_DIAG_SQLSTATE);
+
+		log_error("Error %s while running Postgres query: %s: %s",
+				  sqlstate, command, PQerrorMessage(connection));
+		PQclear(result);
+		clear_results(connection);
+		pgsql_finish(pgsql);
+		return false;
+	}
+
+	PQclear(result);
+	clear_results(connection);
+
+	return true;
+}

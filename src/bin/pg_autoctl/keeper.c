@@ -601,6 +601,46 @@ keeper_get_replication_state(Keeper *keeper)
 
 
 /*
+ * keeper_check_monitor_extension_version checks that the monitor we connect to
+ * has an extension version compatible with our expectations.
+ */
+bool
+keeper_check_monitor_extension_version(Keeper *keeper)
+{
+	Monitor *monitor = &(keeper->monitor);
+	MonitorExtensionVersion version = { 0 };
+
+	if (!monitor_get_extension_version(monitor, &version))
+	{
+		log_fatal("Failed to check version compatibility with the monitor "
+				  "extension \"%s\", see above for details",
+				  PG_AUTOCTL_MONITOR_EXTENSION_NAME);
+		return false;
+	}
+
+	/* from a member of the cluster, we don't try to upgrade the extension */
+	if (strcmp(version.installedVersion, PG_AUTOCTL_EXTENSION_VERSION) != 0)
+	{
+		log_fatal("The monitor at \"%s\" has extension \"%s\" version \"%s\", "
+				  "this pg_autoctl version requires version \"%s\".",
+				  keeper->config.monitor_pguri,
+				  PG_AUTOCTL_MONITOR_EXTENSION_NAME,
+				  PG_AUTOCTL_EXTENSION_VERSION,
+				  version.installedVersion);
+		log_info("Please connect to the monitor node and restart pg_autoctl.");
+		return false;
+	}
+	else
+	{
+		log_info("The version of extenstion \"%s\" is \"%s\" on the monitor",
+				 PG_AUTOCTL_MONITOR_EXTENSION_NAME, version.installedVersion);
+	}
+
+	return true;
+}
+
+
+/*
  * keeper_register_and_init registers the local node to the pg_auto_failover
  * Monitor in the given initialState, and then create the state on-disk with
  * the assigned goal from the Monitor.

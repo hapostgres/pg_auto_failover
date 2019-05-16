@@ -40,6 +40,11 @@ typedef struct StateNotification
 	int			nodePort;
 } StateNotification;
 
+typedef struct MonitorExtensionVersion
+{
+	char defaultVersion[BUFSIZE];
+	char installedVersion[BUFSIZE];
+} MonitorExtensionVersion;
 
 bool monitor_init(Monitor *monitor, char *url);
 void monitor_finish(Monitor *monitor);
@@ -76,5 +81,10 @@ bool monitor_start_maintenance(Monitor *monitor, char *host, int port);
 bool monitor_stop_maintenance(Monitor *monitor, char *host, int port);
 
 bool monitor_get_notifications(Monitor *monitor);
+
+bool monitor_get_extension_version(Monitor *monitor,
+								   MonitorExtensionVersion *version);
+bool monitor_extension_update(Monitor *monitor, char *targetVersion);
+bool monitor_ensure_extension_version(Monitor *monitor);
 
 #endif /* MONITOR_H */

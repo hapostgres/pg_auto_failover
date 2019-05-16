@@ -149,4 +149,7 @@ bool pgsql_get_wal_lag_from_standby(PGSQL *pgsql, int64_t *walLag);
 
 bool pgsql_listen(PGSQL *pgsql, char *channels[]);
 
+bool pgsql_alter_extension_update_to(PGSQL *pgsql,
+									 const char *extname, const char *version);
+
 #endif /* PGSQL_H */
