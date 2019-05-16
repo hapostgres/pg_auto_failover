@@ -611,29 +611,36 @@ discover_nodename(char *nodename, int size,
 				  "please provide --nodename.");
 		return false;
 	}
-	log_debug("check_or_discover_nodename: ip %s", ipAddr);
+
+	/* from there on we can take the ipAddr as the default --nodename */
+	strlcpy(nodename, ipAddr, size);
+	log_debug("check_or_discover_nodename: local ip %s", ipAddr);
 
 	/* do a reverse DNS lookup from our local LAN ip address */
 	if (!findHostnameFromLocalIpAddress(ipAddr,
 										hostname, _POSIX_HOST_NAME_MAX))
 	{
-		log_fatal("Failed to resove the DNS hostname for IP address \"%s\", "
-				  "see above for details.", ipAddr);
-		return false;
+		/* errors have already been logged */
+		log_info("Using local IP address \"%s\" as the --nodename.", ipAddr);
+		return true;
 	}
-	log_debug("check_or_discover_nodename: host %s", hostname);
+	log_debug("check_or_discover_nodename: host from ip %s", hostname);
 
 	/* do a DNS lookup of the hostname we got from the IP address */
 	if (!findHostnameLocalAddress(hostname, localIpAddr, BUFSIZE))
 	{
-		log_fatal("Failed to retrieve a local IP address for discovered "
-				  "hostname \"%s\", please provide --nodename", hostname);
-		return false;
+		/* errors have already been logged */
+		log_info("Using local IP address \"%s\" as the --nodename.", ipAddr);
+		return true;
 	}
-	log_debug("check_or_discover_nodename: ip %s", localIpAddr);
+	log_debug("check_or_discover_nodename: ip from host %s", localIpAddr);
 
+	/*
+	 * ok ipAddr resolves to an hostname that resolved back to a local address,
+	 * we should be able to use the hostname in pg_hba.conf
+	 */
 	strlcpy(nodename, hostname, size);
-	log_info("Using nodename \"%s\", which resolves to IP address \"%s\"",
+	log_info("Using --nodename \"%s\", which resolves to IP address \"%s\"",
 			 nodename, localIpAddr);
 
 	return true;

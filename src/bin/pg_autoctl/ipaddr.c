@@ -56,7 +56,7 @@ fetchLocalIPAddress(char *localIpAddress, int size,
     //Socket could not be created
     if (sock < 0)
     {
-        log_error("Failed to create a socket: %s", strerror(errno));
+        log_warn("Failed to create a socket: %s", strerror(errno));
         return false;
     }
 
@@ -78,7 +78,7 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 		}
 		else
 		{
-			log_error("Failed to connect: %s", strerror(errno));
+			log_warn("Failed to connect: %s", strerror(errno));
 			return false;
 		}
     }
@@ -86,7 +86,7 @@ fetchLocalIPAddress(char *localIpAddress, int size,
     err = getsockname(sock, (struct sockaddr*) &name, &namelen);
     if (err < 0)
     {
-        log_error("Failed to get IP address from socket: %s", strerror(errno));
+        log_warn("Failed to get IP address from socket: %s", strerror(errno));
         return false;
     }
 
@@ -98,7 +98,7 @@ fetchLocalIPAddress(char *localIpAddress, int size,
     }
     else
     {
-		log_error("Failed to determine local ip address: %s", strerror(errno));
+		log_warn("Failed to determine local ip address: %s", strerror(errno));
     }
     close(sock);
 
@@ -123,7 +123,7 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 
 	if (getifaddrs(&ifaddr) == -1)
 	{
-		log_error("Failed to get the list of local network inferfaces: %s",
+		log_warn("Failed to get the list of local network inferfaces: %s",
 				  strerror(errno));
 		return false;
 	}
@@ -359,7 +359,7 @@ findHostnameLocalAddress(const char *hostname, char *localIpAddress, int size)
 
 	if (getifaddrs(&ifaddr) == -1)
 	{
-		log_error("Failed to get the list of local network inferfaces: %s",
+		log_warn("Failed to get the list of local network inferfaces: %s",
 				  strerror(errno));
 		return false;
 	}
@@ -402,7 +402,7 @@ findHostnameLocalAddress(const char *hostname, char *localIpAddress, int size)
 									  localIpAddress,
 									  size) == NULL)
 						{
-							log_error("Failed to determine local ip address: "
+							log_warn("Failed to determine local ip address: "
 									  "%s", strerror(errno));
 							return false;
 						}
@@ -431,7 +431,7 @@ findHostnameLocalAddress(const char *hostname, char *localIpAddress, int size)
 									  size) == NULL)
 						{
 							/* check size >= INET6_ADDRSTRLEN */
-							log_error("Failed to determine local ip address: "
+							log_warn("Failed to determine local ip address: "
 									  "%s", strerror(errno));
 							return false;
 						}
@@ -511,7 +511,7 @@ findHostnameFromLocalIpAddress(char *localIpAddress, char *hostname, int size)
 
 		if (ret != 0)
 		{
-			log_error("Failed to resolve hostname \"%s\": %s",
+			log_warn("Failed to resolve hostname from address \"%s\": %s",
 					  localIpAddress, gai_strerror(ret));
 			return false;
 		}

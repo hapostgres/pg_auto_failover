@@ -167,8 +167,8 @@ cli_show_lookup(int argc, char **argv)
 		if (!findHostnameFromLocalIpAddress(ipAddr,
 											hostname, _POSIX_HOST_NAME_MAX))
 		{
-			log_warn("Failed to reverse lookup IP address \"%s\", "
-					 "see above for details.", ipAddr);
+			/* errors already logged, keep the ipAddr, show exit failure */
+			fprintf(stdout, "%s\n", ipAddr);
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 
@@ -177,6 +177,9 @@ cli_show_lookup(int argc, char **argv)
 		{
 			log_fatal("Failed to check nodename \"%s\", see above for details",
 					  hostname);
+			/* keep ipAddr and show exit failure */
+			fprintf(stdout, "%s\n", ipAddr);
+
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 
@@ -209,8 +212,10 @@ cli_show_nodename(int argc, char **argv)
 	/* do a reverse DNS lookup from this local address to an hostname */
 	if (!findHostnameFromLocalIpAddress(ipAddr, hostname, _POSIX_HOST_NAME_MAX))
 	{
-		log_warn("Failed to discover a default --nodename, "
-				  "see above for details.");
+		/* the nodename is going to be the ipAddr in that case */
+		fprintf(stdout, "%s\n", ipAddr);
+
+		/* still indicate it was a failure */
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 	log_debug("cli_show_nodename: host %s", hostname);
@@ -218,8 +223,10 @@ cli_show_nodename(int argc, char **argv)
 	/* do a lookup of the host name and see that we get a local address back */
 	if (!findHostnameLocalAddress(hostname, localIpAddress, BUFSIZE))
 	{
-		log_fatal("Failed to check nodename \"%s\", see above for details",
-				  hostname);
+		/* the nodename is going to be the ipAddr in that case */
+		fprintf(stdout, "%s\n", ipAddr);
+
+		/* still indicate it was a failure */
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 	log_debug("cli_show_nodename: ip %s", localIpAddress);
