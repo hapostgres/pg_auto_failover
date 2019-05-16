@@ -133,7 +133,6 @@ static void
 cli_show_lookup(int argc, char **argv)
 {
 	char *nodename;
-	char localIpAddress[INET_ADDRSTRLEN];
 	IPType ipType = IPTYPE_NONE;
 
 	if (argc != 1)
@@ -146,7 +145,9 @@ cli_show_lookup(int argc, char **argv)
 
 	if (ipType == IPTYPE_NONE)
 	{
-		if (!findHostnameLocalAddress(nodename, localIpAddress, INET_ADDRSTRLEN))
+		char localIpAddress[BUFSIZE];
+
+		if (!findHostnameLocalAddress(nodename, localIpAddress, BUFSIZE))
 		{
 			log_fatal("Failed to check nodename \"%s\", see above for details",
 					  nodename);
@@ -157,17 +158,29 @@ cli_show_lookup(int argc, char **argv)
 	}
 	else
 	{
-		char cidr[BUFSIZE];
+		/* an IP address has been given, we do a reverse lookup */
+		char *ipAddr = nodename;
+		char hostname[_POSIX_HOST_NAME_MAX];
+		char localIpAddress[BUFSIZE];
 
-		if (!fetchLocalCIDR(nodename, cidr, BUFSIZE))
+		/* reverse DNS lookup to fetch the hostname */
+		if (!findHostnameFromLocalIpAddress(ipAddr,
+											hostname, _POSIX_HOST_NAME_MAX))
 		{
-			log_fatal("Failed to find address \"%s\" in local network interfaces.",
-					  nodename);
+			log_warn("Failed to reverse lookup IP address \"%s\", "
+					 "see above for details.", ipAddr);
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 
-		fprintf(stdout, "%s\n", cidr);
-		fprintf(stdout, "%s\n", nodename);
+		/* DNS lookup of the given hostname to make sure we get back here */
+		if (!findHostnameLocalAddress(hostname, localIpAddress, BUFSIZE))
+		{
+			log_fatal("Failed to check nodename \"%s\", see above for details",
+					  hostname);
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+
+		fprintf(stdout, "%s: %s\n", localIpAddress, hostname);
 	}
 }
 

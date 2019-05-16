@@ -339,13 +339,11 @@ bool
 findHostnameLocalAddress(const char *hostname, char *localIpAddress, int size)
 {
 	int error;
-	char port[6];
     struct addrinfo *dns_lookup_addr;
-
 	struct addrinfo *dns_addr;
 	struct ifaddrs *ifaddr, *ifa;
 
-	error = getaddrinfo(hostname, port, 0, &dns_lookup_addr);
+	error = getaddrinfo(hostname, NULL, 0, &dns_lookup_addr);
 	if (error != 0)
 	{
 		log_warn("Failed to resolve DNS name \"%s\": %s",
@@ -490,29 +488,40 @@ ip_address_type(const char *hostname)
 bool
 findHostnameFromLocalIpAddress(char *localIpAddress, char *hostname, int size)
 {
-	int ret;
-	struct sockaddr_in addr = { 0 };
+	int ret = 0;
 	char hbuf[NI_MAXHOST];
+	struct addrinfo *lookup, *ai;
+	struct sockaddr_storage address;
+	socklen_t address_len;
 
-	addr.sin_family = AF_INET;
-
-	if (inet_aton(localIpAddress, &addr.sin_addr) == 0)
-	{
-		/* localIpAddress should come from our own code paths */
-		log_error("BUG: Failed to parse IP address \"%s\"", localIpAddress);
-		return false;
-	}
-
-	ret = getnameinfo((const struct sockaddr *) &addr, sizeof(addr),
-					  hbuf, sizeof(hbuf), NULL, 0, NI_NAMEREQD);
-
+	/* parse ipv4 or ipv6 address using getaddrinfo() */
+	ret = getaddrinfo(localIpAddress, NULL, 0, &lookup);
 	if (ret != 0)
 	{
-		log_error("Failed to resolve hostname \"%s\": %s",
-				  localIpAddress, gai_strerror(ret));
+		log_warn("Failed to resolve DNS name \"%s\": %s",
+				 localIpAddress, gai_strerror(ret));
 		return false;
 	}
 
-	snprintf(hostname, size, "%s", hbuf);
+	/* now reverse lookup (NI_NAMEREQD) the address with getnameinfo() */
+	for (ai = lookup; ai; ai = ai->ai_next)
+	{
+		ret = getnameinfo(ai->ai_addr, ai->ai_addrlen,
+						  hbuf, sizeof(hbuf), NULL, 0, NI_NAMEREQD);
+
+		if (ret != 0)
+		{
+			log_error("Failed to resolve hostname \"%s\": %s",
+					  localIpAddress, gai_strerror(ret));
+			return false;
+		}
+
+		snprintf(hostname, size, "%s", hbuf);
+
+		/* stop at the first hostname found */
+		break;
+	}
+	freeaddrinfo(lookup);
+
 	return true;
 }
