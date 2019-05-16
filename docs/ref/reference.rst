@@ -492,3 +492,9 @@ commands, only available in debug environments::
       init     Initialize the standby server using pg_basebackup
       rewind   Rewind a demoted primary server using pg_rewind
       promote  Promote a standby server to become writable
+
+    pg_autoctl do show
+      ipaddr    Print this node's IP address information
+      cidr      Print this node's CIDR information
+      lookup    Print this node's DNS lookup information
+      nodename  Print this node's default nodename
