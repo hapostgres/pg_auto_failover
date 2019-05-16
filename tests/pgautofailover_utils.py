@@ -194,7 +194,7 @@ class DataNode(PGNode):
         create_command = [shutil.which('pg_autoctl'), 'create',
                           self.role.command(),
                         '--pgdata', self.datadir,
-                        '--nodename', str(self.vnode.address),
+                        #'--nodename', str(self.vnode.address),
                         '--pghost', pghost,
                         '--pgport', str(self.port),
                         '--pgctl', shutil.which('pg_ctl'),
