@@ -95,7 +95,6 @@ typedef struct
 	uint64_t last_secondary_contact;
 	int64_t xlog_lag;
 	int keeper_is_paused;
-	char preparedTransactionName[PREPARED_TRANSACTION_NAMELEN];
 } KeeperStateData;
 
 
