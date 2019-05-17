@@ -13,7 +13,6 @@
 #include <unistd.h>
 
 
-#include "coordinator.h"
 #include "file_utils.h"
 #include "keeper.h"
 #include "keeper_config.h"
@@ -22,7 +21,6 @@
 
 
 static bool keeper_get_replication_state(Keeper *keeper);
-static bool keeper_remove_from_coordinator(Keeper *keeper, KeeperConfig *config);
 
 
 /*
@@ -738,30 +736,6 @@ keeper_remove(Keeper *keeper, KeeperConfig *config)
 		}
 	}
 
-	if (config->pgSetup.pgKind == NODE_KIND_CITUS_WORKER
-		&& (keeper->state.current_role == SINGLE_STATE
-			|| keeper->state.current_role == INIT_STATE)
-		&& keeper->state.assigned_role != WAIT_STANDBY_STATE)
-	{
-		NodeAddress coordinatorNodeAddress = { 0 };
-		Coordinator coordinator = { 0 };
-
-		log_info("Removing local node from the Citus Coordinator");
-
-		/*
-		 * We don't consider this failure with the coordinator to be fatal,
-		 * because it might be that the node is not to be found on the
-		 * coordinator, or that the coordinator node itself doesn't exist yet,
-		 * or anymore. Just move on with keeper_remove().
-		 */
-		if (!keeper_remove_from_coordinator(keeper, config))
-		{
-			log_error("Failed to remove local node from coordinator %s:%d, "
-					  "see above for details",
-					  coordinator.node.host, coordinator.node.port);
-		}
-	}
-
 	log_info("Removing local node from the pg_auto_failover monitor.");
 
 	/*
@@ -795,48 +769,6 @@ keeper_remove(Keeper *keeper, KeeperConfig *config)
 		return false;
 	}
 
-	return true;
-}
-
-
-/*
- * keeper_remove_from_coordinator removes the local node from the coordinator
- * pg_dist_node metadata, first reaching out to the pg_auto_failover monitor to
- * know who is the coordinator.
- */
-static bool
-keeper_remove_from_coordinator(Keeper *keeper, KeeperConfig *config)
-{
-	NodeAddress coordinatorNodeAddress = { 0 };
-	Coordinator coordinator = { 0 };
-
-	if (!monitor_get_coordinator(&(keeper->monitor),
-								 config->formation,
-								 &coordinatorNodeAddress))
-	{
-		/* errors have already been logged */
-		return false;
-	}
-
-	if (!coordinator_init(&coordinator, &coordinatorNodeAddress, keeper))
-	{
-		/* mmm, that's serious, stop now */
-		log_fatal("Failed to contact the coordinator because its URL "
-				  "is invalid, see above for details");
-		return false;
-	}
-
-	if (!coordinator_remove_node(&coordinator, keeper))
-	{
-		log_error("Failed to remove local node from coordinator %s:%d, "
-				  "see above for details",
-				  coordinator.node.host, coordinator.node.port);
-		return false;
-	}
-
-	log_info("Removed node %s:%d from the coordinator %s:%d",
-			 config->nodename, config->pgSetup.pgport,
-			 coordinator.node.host, coordinator.node.port);
 	return true;
 }
 

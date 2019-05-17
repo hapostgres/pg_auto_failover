@@ -14,7 +14,6 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "coordinator.h"
 #include "defaults.h"
 #include "fsm.h"
 #include "keeper.h"
@@ -28,8 +27,6 @@
 
 
 static bool keepRunning = true;
-
-static bool keeper_service_init_cleanup(Keeper *keeper);
 
 static bool is_network_healthy(Keeper *keeper);
 static bool in_network_partition(KeeperStateData *keeperState, uint64_t now,
@@ -257,22 +254,6 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 		}
 
 		/*
-		 * Check if we have to clean-up a prepared transaction: many error
-		 * conditions might lead to us leaving one being.
-		 */
-		if (!coordinator_update_cleanup(keeper))
-		{
-			/*
-			 * We're going to retry at next run anyway, and it's not clear that
-			 * a user would act on themselves to fix the problem, so make the
-			 * report a WARN rather than a full ERROR.
-			 */
-			log_warn("Failed to clean-up prepared transasction \"%s\" "
-					 "on the coordinator node, see above for details",
-					 keeperState->preparedTransactionName);
-		}
-
-		/*
 		 * Even if a transition failed, we still write the state file to update
 		 * timestamps used for the network partition checks.
 		 */
@@ -349,14 +330,6 @@ keeper_service_init(Keeper *keeper, pid_t *pid)
 		}
 	}
 
-	/* Clean-up from previous round of execution, if necessary. */
-	if (!keeper_service_init_cleanup(keeper))
-	{
-		log_fatal("Failed to clean-up from previous execution, "
-				  "see above for details.");
-		return false;
-	}
-
 	/* Ok, we're going to start. Time to create our PID file. */
 	*pid = getpid();
 
@@ -366,66 +339,6 @@ keeper_service_init(Keeper *keeper, pid_t *pid)
 		return false;
 	}
 
-	return true;
-}
-
-
-/*
- * keeper_service_cleanup implements the cleanup that is necessary at start-up
- * time, cleaning from a previous run of the keeper that might have been
- * interrupted in-flight.
- *
- * At this time the only clean-up that is needed in `pg_autoctl` concerns
- * prepared transactions. If pg_autoctl has been interrupted with prepared
- * transactions in-flight, we want to cancel them before entering the main
- * loop.
- */
-static bool
-keeper_service_init_cleanup(Keeper *keeper)
-{
-	KeeperConfig *config = &(keeper->config);
-
-	/*
-	 * Before entering our main loop, in the case that we are managing a Citus
-	 * worker node, check if the coordinator may have a left-over prepared
-	 * transaction that we don't know about, and ROLLBACK PREPARED in that
-	 * case.
-	 *
-	 * The situation might happen when the keeper fails in between preparing
-	 * the transaction on the coordinator and saving its state, which is why we
-	 * need to check about that at startup.
-	 *
-	 * The only case when we are at risk is when we're a worker node with an
-	 * empty preparedTransactionName in its state. When we have one, it means
-	 * we managed to keep track, we may move on.
-	 */
-	if (config->pgSetup.pgKind == NODE_KIND_CITUS_WORKER
-		&& IS_EMPTY_STRING_BUFFER(keeper->state.preparedTransactionName))
-	{
-		Coordinator coordinator = { 0 };
-
-		/*
-		 * We don't have a coordinator at the moment. That's a strange
-		 * situation, because we require a coordinator to complete init, but
-		 * not fatal: not having a coordinator known available from the monitor
-		 * doesn't prevent this worker node from starting.
-		 */
-		if (coordinator_init_from_monitor(&coordinator, keeper))
-		{
-			/*
-			 * Here we have a coordinator to talk to. Failing to clean a
-			 * possibly stale prepared transaction on the coordinator is a
-			 * fatal error for our startup of the keeper here: someone needs to
-			 * please do something about it.
-			 */
-			if (!coordinator_cleanup_lost_transaction(keeper, &coordinator))
-			{
-				log_fatal("Failed to clean-up a lost PREPARED TRANSACTION on "
-						  "the coordinator, see above for details.");
-				return false;
-			}
-		}
-	}
 	return true;
 }
 

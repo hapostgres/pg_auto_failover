@@ -234,9 +234,6 @@ log_keeper_state(KeeperStateData *keeperState)
 
 	log_trace("state.keeper_is_paused: %d", keeperState->keeper_is_paused);
 	log_trace("state.pg_version: %d", keeperState->pg_version);
-
-	log_trace("state.preparedTransactionName: %s",
-			  keeperState->preparedTransactionName);
 }
 
 
@@ -284,17 +281,6 @@ print_keeper_state(KeeperStateData *keeperState, FILE *stream)
 			keeperState->catalog_version_no);
 	fprintf(stream, "PostgreSQL System Id:     %" PRIu64 "\n",
 			keeperState->system_identifier);
-
-	/* prepared transaction? */
-	if (!IS_EMPTY_STRING_BUFFER(keeperState->preparedTransactionName))
-	{
-		fprintf(stream, "Prepared Transaction:     %s on coordinator\n",
-				keeperState->preparedTransactionName);
-	}
-	else
-	{
-		fprintf(stream, "Prepared Transaction:     ␀\n");
-	}
 
 	fflush(stream);
 }

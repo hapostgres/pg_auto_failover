@@ -16,7 +16,6 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "coordinator.h"
 #include "defaults.h"
 #include "keeper.h"
 #include "pgctl.h"
@@ -315,9 +314,7 @@ keeper_fsm_step(Keeper *keeper)
 	/* roll the state machine forward */
 	if (!keeper_fsm_reach_assigned_state(keeper))
 	{
-		/* errors have already been logged, now clean-up prepared transaction */
-		(void) coordinator_update_cleanup(keeper);
-
+		/* errors have already been logged */
 		return false;
 	}
 

@@ -13,7 +13,6 @@
 #include "postgres_fe.h"
 
 #include "cli_common.h"
-#include "coordinator.h"
 #include "defaults.h"
 #include "fsm.h"
 #include "keeper.h"
@@ -53,8 +52,6 @@ static bool wait_until_primary_is_ready(Keeper *config,
 										MonitorAssignedState *assignedState);
 
 static bool keeper_pg_init_node_active(Keeper *keeper);
-
-static bool keeper_pg_init_add_inactive_node(Keeper *keeper);
 
 /*
  * keeper_pg_init initialises a pg_autoctl keeper and its local PostgreSQL
@@ -587,15 +584,6 @@ keeper_init_maybe_initdb(Keeper *keeper, bool *pgInstanceIsOurs)
 			/* errors have already been logged */
 			return false;
 		}
-
-		/*
-		 * One more thing: in the case of initializing a Citus worker, now is
-		 * the time to add the worker node on the Citus coordinator.
-		 */
-		if (pgSetup.pgKind == NODE_KIND_CITUS_WORKER)
-		{
-			return keeper_pg_init_add_inactive_node(keeper);
-		}
 	}
 
 	return true;
@@ -946,135 +934,6 @@ keeper_pg_init_node_active(Keeper *keeper)
 
 		return false;
 	}
-
-	return true;
-}
-
-
-/*
- * keeper_pg_init_add_inactive_node fetches the coordinator host and port and
- * then calls master_add_inactive_node() there. Of course, it might be that the
- * coordinator node isn't ready yet, in which case we loop until we have a
- * coordinator to talk to.
- */
-static bool
-keeper_pg_init_add_inactive_node(Keeper *keeper)
-{
-	Monitor *monitor = &(keeper->monitor);
-	KeeperConfig *config = &(keeper->config);
-	PostgresSetup pgSetup = config->pgSetup;
-
-	NodeAddress coordinatorNodeAddress = { 0 };
-	Coordinator coordinator = { 0 };
-	CoordinatorNode node = { 0 };
-
-	int errors = 0;
-	int retries = COORDINATOR_IS_READY_TIMEOUT / PG_AUTOCTL_KEEPER_SLEEP_TIME;
-	bool gotCoordinatorNode = false;
-
-	/* wait until the primary is ready for us to pg_basebackup */
-	while (!gotCoordinatorNode)
-	{
-		gotCoordinatorNode = monitor_get_coordinator(monitor,
-													 config->formation,
-													 &coordinatorNodeAddress);
-
-		if (!gotCoordinatorNode)
-		{
-			++errors;
-
-			log_warn("Failed to get the coordinator for formation \"%s\" "
-					 "from the monitor at %s",
-					 config->formation,
-					 config->monitor_pguri);
-
-			if (errors > retries)
-			{
-				log_error("Failed to contact the monitor %d times in a row now, "
-						  "so we stop trying. You can do `pg_autoctl create` "
-						  "to retry and finish the local setup",
-						  retries);
-				return false;
-			}
-
-			/* the coordinator might need more time to show up. */
-			sleep(PG_AUTOCTL_KEEPER_SLEEP_TIME);
-		}
-	}
-
-	/*
-	 * We now have a coordinator to talk to: add ourselves as inactive.
-	 */
-	if (!coordinator_init(&coordinator, &coordinatorNodeAddress, keeper))
-	{
-		log_fatal("Failed to contact the coordinator because its URL is invalid, "
-				  "see above for details");
-		return false;
-	}
-
-	if (!coordinator_add_inactive_node(&coordinator, keeper, &node))
-	{
-		/*
-		 * master_add_inactive_node() is idempotent: if the node already has
-		 * been added, nothing changes, in particular if the node is active
-		 * already then the function happily let the node active.
-		 */
-		log_fatal("Failed to add current node to the Citus coordinator, "
-				  "see above for details");
-		return false;
-	}
-
-	log_info("Added node %s:%d as %s in formation \"%s\" at coordinator %s:%d",
-			 node.nodename, node.nodeport,
-			 node.isactive ? "active" : "inactive", config->formation,
-			 coordinator.node.host, coordinator.node.port);
-
-	/* and activate the new node now, if needed */
-	if (!node.isactive)
-	{
-		/*
-		 * Node activation may fail because of database schema using user
-		 * defined data types or lacking constraints, in which case we want to
-		 * succeed the init process and allow users to complete activation of
-		 * the node later.
-		 *
-		 * This can then be done either from the coordinator by calling the
-		 * master_activate_node function, or with the `pg_autoctl activate`
-		 * command.
-		 */
-		if (!coordinator_activate_node(&coordinator, keeper, &node))
-		{
-			keeperInitWarnings = true;
-
-			log_warn("Failed to activate current node to the Citus coordinator, "
-					 "see above for details");
-			log_warn("Please fix reported issues and manually activate this node "
-					 "by running the command: pg_autoctl activate");
-			return true;
-		}
-
-		log_info("Activated node %s:%d in formation \"%s\" coordinator %s:%d",
-				 node.nodename, node.nodeport, config->formation,
-				 coordinator.node.host, coordinator.node.port);
-	}
-
-	/*
-	 * If there is a proxyport add it to pg_dist_poolinfo
-	 */
-	if (pgSetup.proxyport > 0)
-	{
-		if (!coordinator_upsert_poolinfo_port(&coordinator, keeper))
-		{
-			log_fatal("Failed to add proxyport to pg_dist_poolinfo, "
-					  "see above for details");
-			return false;
-		}
-
-		log_info("Added proxyport %d to pg_dist_poolinfo", pgSetup.proxyport);
-	}
-
-	/* disconnect from PostgreSQL on the coordinator now */
-	pgsql_finish(&coordinator.pgsql);
 
 	return true;
 }
