@@ -77,8 +77,7 @@ Once the building and installation is done, follow those steps:
   1. Install and start a pg_auto_failover monitor on your monitor machine:
 
      ~~~ bash
-     $ pg_autoctl create monitor --pgdata /path/to/pgdata     \
-                                 --nodename `hostname --fqdn`
+     $ pg_autoctl create monitor --pgdata /path/to/pgdata
      ~~~
 
      Once this command is done, you should have a running PostgreSQL
@@ -86,6 +85,12 @@ Once the building and installation is done, follow those steps:
      `--pgdata` option, using the default port 5432.
 
      You may change the port using `--pgport`.
+
+     The Postgres instance created will listen by default on all its network
+     interfaces, and the monitor nodename is determined automatically by
+     `pg_autoctl` by having a look at the network interfaces on the machine
+     and doing some reverse then forward DNS queries. You may force the
+     regitered nodename used with the `--nodename` option.
 
      The command also creates a `autoctl` user and database, and a
      `autoctl_node` user for the other nodes to use. In the `pg_auto_failover`
@@ -97,7 +102,6 @@ Once the building and installation is done, follow those steps:
 
      ~~~ bash
      $ pg_autoctl create postgres --pgdata /path/to/pgdata     \
-                                  --nodename `hostname --fqdn`  \
                                   --monitor postgres://autoctl_node@host/pg_auto_failover
      ~~~
 
@@ -109,10 +113,37 @@ Once the building and installation is done, follow those steps:
          and if not given as an command line option then the environment
          variable `PGDATA` is used, when defined.
 
-       - `--nodename` is used by other nodes to connect to this one, so it
-         should be a hostname or an IP address that is reachable by the
+       - The nodename of this server is automatically discovered by
+         `pg_autoctl`, and used by the other nodes to then connect to the
+         newly created node: the monitor connects for running its
+         health-checks, and the secondary instance connects using the
+         replication protocol.
+
+         To determine your nodename `pg_autoctl` implements the following
+         three steps:
+
+           1. open a connection to the monitor and looks the TCP/IP client
+              address that has been used to make that connection.
+
+           2. Do a reverse DNS lookup on this IP address to fetch a
+              hostname for our local machine.
+
+           3. If the reverse DNS lookup is successfull , then `pg_autoctl`
+              does with a forward DNS lookup of that hostname.
+
+         When the forward DNS lookup repsonse in step 3. is an IP address
+         found in one of our local network interfaces, then `pg_autoctl`
+         uses the hostname found in step 2. as the default `--nodename`.
+         Otherwise it uses the IP address found in step 1.
+
+         You may use the `--nodename` command line option to bypass the
+         whole DNS lookup based process and force the local node name to a
+         fixed value.
+
+         The `--nodename` is used by other nodes to connect to this one, so
+         it should be a hostname or an IP address that is reachable by the
          other members (localhost probably won't work).
-         
+
          The provided `--nodename` is going to be used by pg_auto_failover
          to grant connection privileges in the Postgres HBA file. When using
          a hostname rather than an IP address, please make sure that reverse
@@ -153,7 +184,6 @@ Once the building and installation is done, follow those steps:
 
      ~~~ bash
      $ pg_autoctl create postgres --pgdata /path/to/pgdata     \
-                                  --nodename `hostname -fqdn`  \
                                   --monitor postgres://autoctl_node@host/pg_auto_failover
      ~~~
 
