@@ -702,6 +702,32 @@ create_database_and_extension(Keeper *keeper)
 
 	char *pg_regress_sock_dir = getenv("PG_REGRESS_SOCK_DIR");
 
+	char hbaFilePath[MAXPGPATH];
+
+	/* we didn't start PostgreSQL yet, also we just ran initdb */
+	snprintf(hbaFilePath, MAXPGPATH, "%s/pg_hba.conf", pgSetup->pgdata);
+
+	/*
+	 * The Postgres URI given to the user by our facility is going to use
+	 * --dbname and --nodename, as per the following command:
+	 *
+	 *   $ pg_autoctl show uri --formation default
+	 *
+	 * We need to make it so that the user can actually use that connection
+	 * string with at least the --username used to create the database.
+	 */
+	if (!pghba_ensure_host_rule_exists(hbaFilePath,
+									   HBA_DATABASE_DBNAME,
+									   pgSetup->dbname,
+									   pg_setup_get_username(pgSetup),
+									   config->nodename,
+									   "trust"))
+	{
+		log_error("Failed to edit \"%s\" to grant connections to \"%s\", "
+				  "see above for details", hbaFilePath, config->nodename);
+		return false;
+	}
+
 	/*
 	 * In test environments using PG_REGRESS_SOCK_DIR="" to disable unix socket
 	 * directory, we have to connect to the address from pghost.
@@ -709,11 +735,6 @@ create_database_and_extension(Keeper *keeper)
 	if (pg_regress_sock_dir != NULL
 		&& strcmp(pg_regress_sock_dir, "") == 0)
 	{
-		char hbaFilePath[MAXPGPATH];
-
-		/* we didn't start PostgreSQL yet, also we just ran initdb */
-		snprintf(hbaFilePath, MAXPGPATH, "%s/pg_hba.conf", pgSetup->pgdata);
-
 		log_info("Granting connection from \"%s\" in \"%s\"",
 				 pgSetup->pghost, hbaFilePath);
 

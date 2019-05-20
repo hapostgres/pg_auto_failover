@@ -98,7 +98,18 @@ Once the building and installation is done, follow those steps:
      worker* jobs are active already, waiting until a PostgreSQL node gets
      registered to run health-checks on it.
 
-  2. Install and start a primary PostgreSQL instance:
+  2. Get the Postgres URI (connection string) for the monitor node:
+
+     ~~~ bash
+     $ pg_autoctl show uri
+     postgres://autoctl_node@host/pg_auto_failover
+     ~~~
+
+     The following two steps are going to use the option `--monitor` which
+     expects that connection string. So copy/paste your actual Postgres URI
+     for the monitor in the next steps.
+
+  3. Install and start a primary PostgreSQL instance:
 
      ~~~ bash
      $ pg_autoctl create postgres --pgdata /path/to/pgdata     \
@@ -180,7 +191,7 @@ Once the building and installation is done, follow those steps:
      ~~~
 
 
-  3. Install and start a secondary PostgreSQL instance:
+  4. Install and start a secondary PostgreSQL instance:
 
      ~~~ bash
      $ pg_autoctl create postgres --pgdata /path/to/pgdata     \
@@ -220,6 +231,26 @@ is named *default* and the default group id is zero (0).
 
 It's possible to add other services to the same running monitor by using
 another formation.
+
+## Application and Connection Strings
+
+To retrieve the connection string to use at the application level, use the
+following command:
+
+~~~ bash
+$ pg_autoctl show uri --formation default --pgdata ...
+postgres://nodea:7020,nodeb:7010/citus?target_session_attrs=read-write
+~~~
+
+You can use that connection string from within your application, adjusting
+the username that is used to connect. By default, pg_auto_failover edits the
+Postgres HBA rules to allow the `--username` given at `pg_autoctl create
+postgres` time to connect to this URI from the database node itself.
+
+To allow application servers to connect to the Postgres database, edit your
+`pg_hba.conf` file as documented in [the pg_hba.conf
+file](https://www.postgresql.org/docs/current/auth-pg-hba-conf.html) chapter
+of the PostgreSQL documentation.
 
 ## Contributing
 
