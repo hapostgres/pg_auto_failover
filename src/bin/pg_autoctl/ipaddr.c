@@ -199,7 +199,7 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 			found = true;
 			break;
 		}
-    }
+	}
 	freeifaddrs(ifaddr);
 
 	if (!found)
