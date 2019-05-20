@@ -1374,6 +1374,7 @@ bool
 pgsql_alter_extension_update_to(PGSQL *pgsql,
 								const char *extname, const char *version)
 {
+	int n = 0;
 	char command[BUFSIZE];
 	char *escapedIdentifier, *escapedVersion;
 	PGconn *connection = NULL;
@@ -1409,8 +1410,16 @@ pgsql_alter_extension_update_to(PGSQL *pgsql,
 	}
 
 	/* now build the SQL command */
-	snprintf(command, BUFSIZE, "ALTER EXTENSION %s UPDATE TO %s",
-			 escapedIdentifier, escapedVersion);
+	n = snprintf(command, BUFSIZE, "ALTER EXTENSION %s UPDATE TO %s",
+				 escapedIdentifier, escapedVersion);
+
+	if (n >= BUFSIZE)
+	{
+		log_error("BUG: pg_autoctl only supports SQL string up to %d bytes, "
+				  "a SQL string of %d bytes is needed to "
+				  "update the \"%s\" extension.",
+				  BUFSIZE, n, extname);
+	}
 
 	PQfreemem(escapedIdentifier);
 	PQfreemem(escapedVersion);

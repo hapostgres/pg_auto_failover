@@ -1271,8 +1271,8 @@ parseExtensionVersion(void *ctx, PGresult *result)
 
 	if (PQgetisnull(result, 0, 0) || PQgetisnull(result, 0, 1))
 	{
-		log_error("pgautofailover default_version or installed_version "
-				  "returned by monitor is NULL");
+		log_error("default_version or installed_version for extension \"%s\" "
+				  "is NULL ", PG_AUTOCTL_MONITOR_EXTENSION_NAME);
 		context->parsedOK = false;
 		return;
 	}
@@ -1322,8 +1322,8 @@ monitor_extension_update(Monitor *monitor, char *targetVersion)
  * not the case, we blindly try to update the extension version on the monitor
  * to the target version we have in our default.h.
  *
- * NOTE: we don't check here if that's an upgrade or a downgrade, we rely on
- * the extension's upgrade path to be free of downgrade paths (such as
+ * NOTE: we don't check here if the update is an upgrade or a downgrade, we
+ * rely on the extension's update path to be free of downgrade paths (such as
  * pgautofailover--1.2--1.1.sql).
  */
 bool
@@ -1360,7 +1360,7 @@ monitor_ensure_extension_version(Monitor *monitor)
 		if (!prepare_connection_to_current_system_user(monitor,
 													   &dbOwnerMonitor))
 		{
-			log_error("Failed to upgrade extension \"%s\" to version \"%s\": "
+			log_error("Failed to update extension \"%s\" to version \"%s\": "
 					  "failed prepare a connection string to the "
 					  "monitor as the database owner",
 					  PG_AUTOCTL_MONITOR_EXTENSION_NAME,
@@ -1407,8 +1407,8 @@ monitor_ensure_extension_version(Monitor *monitor)
 static bool
 prepare_connection_to_current_system_user(Monitor *source, Monitor *target)
 {
-	const char *keywords[31] = { 0 };
-	const char *values[31] = { 0 };
+	const char *keywords[41] = { 0 };
+	const char *values[41] = { 0 };
 
 	char *errmsg;
 	PQconninfoOption *conninfo, *option;
@@ -1432,6 +1432,13 @@ prepare_connection_to_current_system_user(Monitor *source, Monitor *target)
 		}
 		else if (option->val)
 		{
+			if (argCount == 40)
+			{
+				log_error("Failed to parse Postgres URI options: "
+						  "pg_autoctl supports up to 40 options "
+						  "and we are parsing more than that.");
+				return false;
+			}
 			keywords[argCount] = option->keyword;
 			values[argCount] = option->val;
 			++argCount;
