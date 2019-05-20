@@ -1060,7 +1060,6 @@ hostname_from_uri(const char *pguri,
 			{
 				/* we expect a single port number in a monitor's URI */
 				*port = atoi(option->val);
-
 				++found;
 			}
 			else

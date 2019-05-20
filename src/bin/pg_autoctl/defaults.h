@@ -67,8 +67,8 @@
 #define CITUS_EXTENSION_NAME "citus"
 
 /* Default external service provider to use to discover local IP address */
-#define PG_AUTOCTL_DEFAULT_SERVICE_NAME "8.8.8.8"
-#define PG_AUTOCTL_DEFAULT_SERVICE_PORT 53
+#define DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME "8.8.8.8"
+#define DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT 53
 
 /*
  * Error codes returned to the shell in case something goes wrong.

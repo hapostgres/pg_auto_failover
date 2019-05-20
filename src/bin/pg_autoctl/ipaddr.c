@@ -323,15 +323,19 @@ ipv6eq(struct sockaddr_in6 *a, struct sockaddr_in6 *b)
 	int			i;
 
 	for (i = 0; i < 16; i++)
+	{
 		if (a->sin6_addr.s6_addr[i] != b->sin6_addr.s6_addr[i])
+		{
 			return false;
+		}
+	}
 
 	return true;
 }
 
 
 /*
- * findHostnameLocalAddress does a reverse DNS lookup given an hostname
+ * findHostnameLocalAddress does a reverse DNS lookup given a hostname
  * (--nodename), and if the DNS lookup fails or doesn't return any local IP
  * address, then returns false.
  */
@@ -339,9 +343,9 @@ bool
 findHostnameLocalAddress(const char *hostname, char *localIpAddress, int size)
 {
 	int error;
-    struct addrinfo *dns_lookup_addr;
+	struct addrinfo *dns_lookup_addr;
 	struct addrinfo *dns_addr;
-	struct ifaddrs *ifaddr, *ifa;
+	struct ifaddrs *ifaddrList, *ifaddr;
 
 	error = getaddrinfo(hostname, NULL, 0, &dns_lookup_addr);
 	if (error != 0)
@@ -357,10 +361,10 @@ findHostnameLocalAddress(const char *hostname, char *localIpAddress, int size)
 	 * have a corresponding local interface bound to the IP address.
 	 */
 
-	if (getifaddrs(&ifaddr) == -1)
+	if (getifaddrs(&ifaddrList) == -1)
 	{
 		log_warn("Failed to get the list of local network inferfaces: %s",
-				  strerror(errno));
+				 strerror(errno));
 		return false;
 	}
 
@@ -369,75 +373,76 @@ findHostnameLocalAddress(const char *hostname, char *localIpAddress, int size)
 	 * addresses) in a nested loop fashion: lists are not sorted, and we
 	 * expect something like a dozen entry per list anyway.
 	 */
-	for (dns_addr=dns_lookup_addr; dns_addr; dns_addr = dns_addr->ai_next)
+	for (dns_addr = dns_lookup_addr;
+		 dns_addr != NULL;
+		 dns_addr = dns_addr->ai_next)
 	{
 		/*
 		 * Skip loopback addresses, we want to be able to connect to
 		 * hostname from other nodes.
 		 */
-		if (!(dns_addr->ai_flags & IFF_LOOPBACK))
+		if ((dns_addr->ai_flags & IFF_LOOPBACK))
 		{
-			for (ifa = ifaddr; ifa; ifa = ifa->ifa_next)
+			continue;
+		}
+
+		for (ifaddr = ifaddrList; ifaddr != NULL; ifaddr = ifaddr->ifa_next)
+		{
+			if (ifaddr->ifa_addr->sa_family == AF_INET
+				&& dns_addr->ai_family == AF_INET)
 			{
-				/*
-				 * TODO: implement ipv6 support
-				 */
-				if (ifa->ifa_addr->sa_family == AF_INET
-					&& dns_addr->ai_family == AF_INET)
+				struct sockaddr_in *ip =
+					(struct sockaddr_in *) ifaddr->ifa_addr;
+
+				if (ipv4eq(ip, (struct sockaddr_in *) dns_addr->ai_addr))
 				{
-					struct sockaddr_in *ip =
-						(struct sockaddr_in *) ifa->ifa_addr;
+					/*
+					 * Found an IP address in the DNS answer that
+					 * matches one of the interfaces IP addresses on
+					 * the machine.
+					 */
+					freeaddrinfo(dns_lookup_addr);
 
-					if (ipv4eq(ip, (struct sockaddr_in *) dns_addr->ai_addr))
+					if (inet_ntop(AF_INET,
+								  (void *) &(ip->sin_addr),
+								  localIpAddress,
+								  size) == NULL)
 					{
-						/*
-						 * Found an IP address in the DNS answer that
-						 * matches one of the interfaces IP addresses on
-						 * the machine.
-						 */
-						freeaddrinfo(dns_lookup_addr);
-
-						if (inet_ntop(AF_INET,
-									  (void *) &(ip->sin_addr),
-									  localIpAddress,
-									  size) == NULL)
-						{
-							log_warn("Failed to determine local ip address: "
-									  "%s", strerror(errno));
-							return false;
-						}
-
-						return true;
+						log_warn("Failed to determine local ip address: %s",
+								 strerror(errno));
+						return false;
 					}
+
+					return true;
 				}
-				else if (ifa->ifa_addr->sa_family == AF_INET6
-						 && dns_addr->ai_family == AF_INET6)
+			}
+			else if (ifaddr->ifa_addr->sa_family == AF_INET6
+					 && dns_addr->ai_family == AF_INET6)
+			{
+				struct sockaddr_in6 *ip =
+					(struct sockaddr_in6 *) ifaddr->ifa_addr;
+
+				if (ipv6eq(ip, (struct sockaddr_in6 *) dns_addr->ai_addr))
 				{
-					struct sockaddr_in6 *ip =
-						(struct sockaddr_in6 *) ifa->ifa_addr;
+					/*
+					 * Found an IP address in the DNS answer that
+					 * matches one of the interfaces IP addresses on
+					 * the machine.
+					 */
+					freeaddrinfo(dns_lookup_addr);
 
-					if (ipv6eq(ip, (struct sockaddr_in6 *) dns_addr->ai_addr))
+					if (inet_ntop(AF_INET6,
+								  (void *) &(ip->sin6_addr),
+								  localIpAddress,
+								  size) == NULL)
 					{
-						/*
-						 * Found an IP address in the DNS answer that
-						 * matches one of the interfaces IP addresses on
-						 * the machine.
-						 */
-						freeaddrinfo(dns_lookup_addr);
-
-						if (inet_ntop(AF_INET6,
-									  (void *) &(ip->sin6_addr),
-									  localIpAddress,
-									  size) == NULL)
-						{
-							/* check size >= INET6_ADDRSTRLEN */
-							log_warn("Failed to determine local ip address: "
-									  "%s", strerror(errno));
-							return false;
-						}
-
-						return true;
+						/* check size >= INET6_ADDRSTRLEN */
+						log_warn("Failed to determine local ip address: %s",
+								 strerror(errno));
+						return false;
 					}
+
+					return true;
 				}
 			}
 		}
@@ -482,8 +487,8 @@ ip_address_type(const char *hostname)
 
 
 /*
- * findHostnameFromLocalIpAddress does a reverse DNS lookup from the local IP
- * address that we found in fetchLocalIPAddress, given as a parameter.
+ * findHostnameFromLocalIpAddress does a reverse DNS lookup from a given IP
+ * address, and returns the first hostname of the DNS response.
  */
 bool
 findHostnameFromLocalIpAddress(char *localIpAddress, char *hostname, int size)

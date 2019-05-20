@@ -263,8 +263,8 @@ pghba_enable_lan_cidr(PGSQL *pgsql, HBADatabaseType databaseType,
 
 	/* add our local network address to the HBA, if we can determine it */
 	if (!fetchLocalIPAddress(ipAddr, BUFSIZE,
-							 PG_AUTOCTL_DEFAULT_SERVICE_NAME,
-							 PG_AUTOCTL_DEFAULT_SERVICE_PORT))
+							 DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME,
+							 DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT))
 	{
 		log_warn("Failed to determine network configuration, "
 				 "skipping HBA settings");

@@ -82,8 +82,8 @@ cli_show_ipaddr(int argc, char **argv)
 	char ipAddr[BUFSIZE];
 
 	if (!fetchLocalIPAddress(ipAddr, BUFSIZE,
-							 PG_AUTOCTL_DEFAULT_SERVICE_NAME,
-							 PG_AUTOCTL_DEFAULT_SERVICE_PORT))
+							 DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME,
+							 DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT))
 	{
 		log_warn("Failed to determine network configuration.");
 		exit(EXIT_CODE_INTERNAL_ERROR);
@@ -105,8 +105,8 @@ cli_show_cidr(int argc, char **argv)
 	char cidr[BUFSIZE];
 
 	if (!fetchLocalIPAddress(ipAddr, BUFSIZE,
-							 PG_AUTOCTL_DEFAULT_SERVICE_NAME,
-							 PG_AUTOCTL_DEFAULT_SERVICE_PORT))
+							 DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME,
+							 DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT))
 	{
 		log_warn("Failed to determine network configuration.");
 		exit(EXIT_CODE_INTERNAL_ERROR);
@@ -127,7 +127,6 @@ cli_show_cidr(int argc, char **argv)
  * address that exists on the local list of interfaces, or a hostname that a
  * DNS lookup solves to an IP address we have on the local machine.
  *
- * TODO: then do a reverse lookup of that IP address!
  */
 static void
 cli_show_lookup(int argc, char **argv)
@@ -201,8 +200,8 @@ cli_show_nodename(int argc, char **argv)
 
 	/* fetch the default local address used when connecting remotely */
 	if (!fetchLocalIPAddress(ipAddr, BUFSIZE,
-							 PG_AUTOCTL_DEFAULT_SERVICE_NAME,
-							 PG_AUTOCTL_DEFAULT_SERVICE_PORT))
+							 DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME,
+							 DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT))
 	{
 		log_warn("Failed to determine network configuration.");
 		exit(EXIT_CODE_INTERNAL_ERROR);

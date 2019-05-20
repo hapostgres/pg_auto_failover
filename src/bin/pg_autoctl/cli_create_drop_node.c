@@ -239,8 +239,8 @@ cli_create_postgres(int argc, char **argv)
 							   monitorHostname, _POSIX_HOST_NAME_MAX,
 							   &monitorPort))
 		{
-			log_fatal("Failed to parse --monitor Postgres URI: \"%s\"",
-					  config.monitor_pguri);
+			log_fatal("Failed to determine monitor hostname when parsing "
+					  "Postgres URI \"%s\"", config.monitor_pguri);
 			exit(EXIT_CODE_BAD_ARGS);
 		}
 
@@ -249,12 +249,24 @@ cli_create_postgres(int argc, char **argv)
 							   monitorHostname,
 							   monitorPort))
 		{
-			log_fatal("Failed to setup --nodename, see above for details");
+			log_fatal("Failed to auto-detect the hostname of this machine, "
+					  "please provide one via --nodename");
 			exit(EXIT_CODE_BAD_ARGS);
 		}
 	}
 	else
 	{
+		/*
+		 * When provided with a --nodename option, we run some checks on the
+		 * user provided value based on Postgres usage for the hostname in its
+		 * HBA setup. Both forward and reverse DNS needs to return meaningful
+		 * values for the connections to be granted when using a hostname.
+		 *
+		 * That said network setup is something complex and we don't pretend we
+		 * are able to avoid any and all false negatives in our checks, so we
+		 * only WARN when finding something that might be fishy, and proceed
+		 * with the setup of the local node anyway.
+		 */
 		(void) check_nodename(config.nodename);
 	}
 
@@ -451,20 +463,33 @@ cli_create_monitor(int argc, char **argv)
 	}
 	else
 	{
-		/* take care of the nodename */
+		/* Take care of the --nodename */
 		if (IS_EMPTY_STRING_BUFFER(config.nodename))
 		{
 			if (!discover_nodename((char *) (&config.nodename),
 								   _POSIX_HOST_NAME_MAX ,
-								   PG_AUTOCTL_DEFAULT_SERVICE_NAME,
-								   PG_AUTOCTL_DEFAULT_SERVICE_PORT))
+								   DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME,
+								   DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT))
 			{
-				log_fatal("Failed to setup --nodename, see above for details");
+				log_fatal("Failed to auto-detect the hostname of this machine, "
+						  "please provide one via --nodename");
 				exit(EXIT_CODE_BAD_ARGS);
 			}
 		}
 		else
 		{
+			/*
+			 * When provided with a --nodename option, we run some checks on
+			 * the user provided value based on Postgres usage for the hostname
+			 * in its HBA setup. Both forward and reverse DNS needs to return
+			 * meaningful values for the connections to be granted when using a
+			 * hostname.
+			 *
+			 * That said network setup is something complex and we don't
+			 * pretend we are able to avoid any and all false negatives in our
+			 * checks, so we only WARN when finding something that might be
+			 * fishy, and proceed with the setup of the local node anyway.
+			 */
 			(void) check_nodename(config.nodename);
 		}
 
@@ -614,7 +639,7 @@ discover_nodename(char *nodename, int size,
 
 	/* from there on we can take the ipAddr as the default --nodename */
 	strlcpy(nodename, ipAddr, size);
-	log_debug("check_or_discover_nodename: local ip %s", ipAddr);
+	log_debug("discover_nodename: local ip %s", ipAddr);
 
 	/* do a reverse DNS lookup from our local LAN ip address */
 	if (!findHostnameFromLocalIpAddress(ipAddr,
@@ -624,7 +649,7 @@ discover_nodename(char *nodename, int size,
 		log_info("Using local IP address \"%s\" as the --nodename.", ipAddr);
 		return true;
 	}
-	log_debug("check_or_discover_nodename: host from ip %s", hostname);
+	log_debug("discover_nodename: host from ip %s", hostname);
 
 	/* do a DNS lookup of the hostname we got from the IP address */
 	if (!findHostnameLocalAddress(hostname, localIpAddr, BUFSIZE))
@@ -633,7 +658,7 @@ discover_nodename(char *nodename, int size,
 		log_info("Using local IP address \"%s\" as the --nodename.", ipAddr);
 		return true;
 	}
-	log_debug("check_or_discover_nodename: ip from host %s", localIpAddr);
+	log_debug("discover_nodename: ip from host %s", localIpAddr);
 
 	/*
 	 * ok ipAddr resolves to an hostname that resolved back to a local address,
