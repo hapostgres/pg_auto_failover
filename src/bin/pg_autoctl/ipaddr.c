@@ -116,7 +116,7 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 bool
 fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 {
-	char network[INET_ADDRSTRLEN];
+	char network[INET6_ADDRSTRLEN];
 	struct ifaddrs *ifaddr, *ifa;
 	int prefix = 0;
 	bool found = false;
