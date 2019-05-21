@@ -144,18 +144,35 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 
 				struct in_addr s_network;
 
-				inet_ntop(AF_INET,
-						  (void*) &netmask4->sin_addr, netmask, INET_ADDRSTRLEN);
+				if (inet_ntop(AF_INET, (void*) &netmask4->sin_addr,
+							  netmask, INET_ADDRSTRLEN) == NULL)
+				{
+					log_error("Failed to determine local network CIDR: %s",
+							  strerror(errno));
+					return false;
+				}
 
-				inet_ntop(AF_INET,
-						  (void*) &address4->sin_addr, address, INET_ADDRSTRLEN);
+				if (inet_ntop(AF_INET, (void*) &address4->sin_addr,
+							  address, INET_ADDRSTRLEN) == NULL)
+				{
+					log_error("Failed to determine local network CIDR: %s",
+							  strerror(errno));
+					return false;
+				}
+
 
 				s_network.s_addr =
 					address4->sin_addr.s_addr & netmask4->sin_addr.s_addr;
 
 				prefix = countSetBits(netmask4->sin_addr.s_addr);
 
-				inet_ntop(AF_INET, (void*) &s_network, network, INET_ADDRSTRLEN);
+				if (inet_ntop(AF_INET, (void*) &s_network,
+							  network, INET_ADDRSTRLEN) == NULL)
+				{
+					log_error("Failed to determine local network CIDR: %s",
+							  strerror(errno));
+					return false;
+				}
 
 				break;
 			}
@@ -170,11 +187,21 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 
 				struct in6_addr s_network;
 
-				inet_ntop(AF_INET6, (void*) &netmask6->sin6_addr,
-						  netmask, INET6_ADDRSTRLEN);
+				if (inet_ntop(AF_INET6, (void*) &netmask6->sin6_addr,
+							  netmask, INET6_ADDRSTRLEN) == NULL)
+				{
+					log_error("Failed to determine local network CIDR: %s",
+							  strerror(errno));
+					return false;
+				}
 
-				inet_ntop(AF_INET6, (void*) &address6->sin6_addr,
-						  address, INET6_ADDRSTRLEN);
+				if (inet_ntop(AF_INET6, (void*) &address6->sin6_addr,
+							  address, INET6_ADDRSTRLEN) == NULL)
+				{
+					log_error("Failed to determine local network CIDR: %s",
+							  strerror(errno));
+					return false;
+				}
 
 				for (i = 0; i < sizeof(struct in6_addr); i++)
 				{
@@ -185,7 +212,13 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 
 				prefix = countSetBitsv6(netmask6->sin6_addr.s6_addr);
 
-				inet_ntop(AF_INET6, &s_network, network, INET6_ADDRSTRLEN);
+				if (inet_ntop(AF_INET6, &s_network,
+							  network, INET6_ADDRSTRLEN) == NULL)
+				{
+					log_error("Failed to determine local network CIDR: %s",
+							  strerror(errno));
+					return false;
+				}
 
 				break;
 			}
@@ -259,13 +292,14 @@ countSetBitsv6(unsigned char *addr)
 
 
 /*
- * Fetches the IP address of the first non-loopback interface with an ip4 address.
+ * Fetches the IP address of the first non-loopback interface with an ip4
+ * address.
  */
 static bool
 fetchIPAddressFromInterfaceList(char *localIpAddress, int size)
 {
 	bool found = false;
-	struct ifaddrs *ifaddr = NULL, *ifa = NULL;
+	struct ifaddrs *ifaddrList = NULL, *ifaddr = NULL;
 
 	if (getifaddrs(&ifaddr) == -1)
 	{
@@ -274,20 +308,38 @@ fetchIPAddressFromInterfaceList(char *localIpAddress, int size)
 		return false;
 	}
 
-	for (ifa = ifaddr; ifa; ifa = ifa->ifa_next)
+	for (ifaddr = ifaddrList; ifaddr != NULL; ifaddr = ifaddr->ifa_next)
  	{
-		if (ifa->ifa_addr->sa_family == AF_INET && !(ifa->ifa_flags & IFF_LOOPBACK))
+		if (ifaddr->ifa_flags & IFF_LOOPBACK)
 		{
-			char buffer[INET_ADDRSTRLEN];
-			struct sockaddr_in *address4 = (struct sockaddr_in*) ifa->ifa_addr;
-			inet_ntop(AF_INET, (void*) &address4->sin_addr, buffer, INET_ADDRSTRLEN);
-			strlcpy(localIpAddress, buffer, size);
+			continue;
+		}
+
+		/*
+		 * We only support IPv4 here, also this function is only called in test
+		 * environment where we run in a docker container with a network
+		 * namespace in which we use only IPv4, so that's ok.
+		 */
+		if (ifaddr->ifa_addr->sa_family == AF_INET)
+		{
+			struct sockaddr_in *ip =
+				(struct sockaddr_in*) ifaddr->ifa_addr;
+
+			if (inet_ntop(AF_INET, (void*) &(ip->sin_addr),
+						  localIpAddress, size) == NULL)
+			{
+				/* skip that address, silently */
+				log_trace("Failed to determine local network CIDR: %s",
+						  strerror(errno));
+				continue;
+			}
+
 			found = true;
 			break;
 		}
 	}
 
-	freeifaddrs(ifaddr);
+	freeifaddrs(ifaddrList);
 
 	return found;
 }
