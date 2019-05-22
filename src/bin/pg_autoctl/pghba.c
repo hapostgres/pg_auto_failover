@@ -273,8 +273,8 @@ pghba_enable_lan_cidr(PGSQL *pgsql, HBADatabaseType databaseType,
 
 	if (!fetchLocalCIDR(ipAddr, cidr, BUFSIZE))
 	{
-		log_warn("Failed to determine network configuration, "
-				 "skipping HBA settings");
+		log_warn("Failed to determine network configuration for "
+				 "IP address \"%s\", skipping HBA settings", ipAddr);
 		return false;
 	}
 

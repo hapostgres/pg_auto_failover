@@ -130,8 +130,8 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 
     for (ifa = ifaddr; ifa; ifa = ifa->ifa_next)
     {
-		char netmask[INET6_ADDRSTRLEN];
-		char address[INET6_ADDRSTRLEN];
+		char netmask[INET6_ADDRSTRLEN] = { 0 };
+		char address[INET6_ADDRSTRLEN] = { 0 };
 
 		switch (ifa->ifa_addr->sa_family)
 		{
@@ -147,17 +147,19 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 				if (inet_ntop(AF_INET, (void*) &netmask4->sin_addr,
 							  netmask, INET_ADDRSTRLEN) == NULL)
 				{
-					log_error("Failed to determine local network CIDR: %s",
+					/* just skip that entry then */
+					log_trace("Failed to determine local network CIDR: %s",
 							  strerror(errno));
-					return false;
+					continue;
 				}
 
 				if (inet_ntop(AF_INET, (void*) &address4->sin_addr,
 							  address, INET_ADDRSTRLEN) == NULL)
 				{
-					log_error("Failed to determine local network CIDR: %s",
+					/* just skip that entry then */
+					log_trace("Failed to determine local network CIDR: %s",
 							  strerror(errno));
-					return false;
+					continue;
 				}
 
 
@@ -169,9 +171,10 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 				if (inet_ntop(AF_INET, (void*) &s_network,
 							  network, INET_ADDRSTRLEN) == NULL)
 				{
-					log_error("Failed to determine local network CIDR: %s",
+					/* just skip that entry then */
+					log_trace("Failed to determine local network CIDR: %s",
 							  strerror(errno));
-					return false;
+					continue;
 				}
 
 				break;
@@ -190,17 +193,19 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 				if (inet_ntop(AF_INET6, (void*) &netmask6->sin6_addr,
 							  netmask, INET6_ADDRSTRLEN) == NULL)
 				{
-					log_error("Failed to determine local network CIDR: %s",
+					/* just skip that entry then */
+					log_trace("Failed to determine local network CIDR: %s",
 							  strerror(errno));
-					return false;
+					continue;
 				}
 
 				if (inet_ntop(AF_INET6, (void*) &address6->sin6_addr,
 							  address, INET6_ADDRSTRLEN) == NULL)
 				{
-					log_error("Failed to determine local network CIDR: %s",
+					/* just skip that entry then */
+					log_trace("Failed to determine local network CIDR: %s",
 							  strerror(errno));
-					return false;
+					continue;
 				}
 
 				for (i = 0; i < sizeof(struct in6_addr); i++)
@@ -215,9 +220,10 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 				if (inet_ntop(AF_INET6, &s_network,
 							  network, INET6_ADDRSTRLEN) == NULL)
 				{
-					log_error("Failed to determine local network CIDR: %s",
+					/* just skip that entry then */
+					log_trace("Failed to determine local network CIDR: %s",
 							  strerror(errno));
-					return false;
+					continue;
 				}
 
 				break;

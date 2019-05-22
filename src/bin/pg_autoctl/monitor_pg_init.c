@@ -223,9 +223,13 @@ monitor_install(PostgresSetup pgSetupOption, bool checkSettings)
 	 * Now allow nodes on the same network to connect to pg_auto_failover
 	 * database.
 	 */
-	(void) pghba_enable_lan_cidr(&postgres.sqlClient, HBA_DATABASE_DBNAME,
-								 PG_AUTOCTL_MONITOR_DBNAME,
-								 PG_AUTOCTL_MONITOR_USERNAME, "trust", NULL);
+	if (!pghba_enable_lan_cidr(&postgres.sqlClient, HBA_DATABASE_DBNAME,
+							  PG_AUTOCTL_MONITOR_DBNAME,
+							  PG_AUTOCTL_MONITOR_USERNAME, "trust", NULL))
+	{
+		log_warn("Failed to grant connection to local network.");
+		return false;
+	}
 
 	/*
 	 * When installing the monitor on-top of an already running PostgreSQL, we

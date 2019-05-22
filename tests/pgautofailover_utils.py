@@ -193,7 +193,7 @@ class DataNode(PGNode):
 
         # don't pass --nodename to Postgres nodes in order to exercise the
         # automatic detection of the nodename.
-        create_command = [shutil.which('pg_autoctl'), 'create',
+        create_command = [shutil.which('pg_autoctl'), '-vvv', 'create',
                           self.role.command(),
                         '--pgdata', self.datadir,
                         '--pghost', pghost,
@@ -352,7 +352,8 @@ class MonitorNode(PGNode):
         """
         Initializes and runs the monitor process.
         """
-        init_command = [shutil.which('pg_autoctl'), 'create', self.role.command(),
+        init_command = [shutil.which('pg_autoctl'), '-vvv', 'create',
+                        self.role.command(),
                         '--pgdata', self.datadir,
                         '--pgport', str(self.port),
                         '--nodename', self.nodename]
