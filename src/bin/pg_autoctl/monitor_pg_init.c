@@ -41,12 +41,14 @@ GUC monitor_default_settings[] = {
 };
 
 
+static bool monitor_install(const char *nodename,
+							PostgresSetup pgSetupOption, bool checkSettings);
 static bool check_monitor_settings(PostgresSetup pgSetup);
 
 
 /*
- * monitor_pg_init initialises a pg_auto_failover monitor PostgreSQL cluster, either
- * from scratch using `pg_ctl initdb`, or creating a new database in an
+ * monitor_pg_init initialises a pg_auto_failover monitor PostgreSQL cluster,
+ * either from scratch using `pg_ctl initdb`, or creating a new database in an
  * existing cluster.
  */
 bool
@@ -78,7 +80,7 @@ monitor_pg_init(Monitor *monitor, MonitorConfig *config)
 					 "PostgreSQL instance at \"%s\" running on port %d",
 					 pgSetup.pgdata, existingPgSetup.pidFile.port);
 
-			if (!monitor_install(existingPgSetup, true))
+			if (!monitor_install(config->nodename, existingPgSetup, true))
 			{
 				log_fatal("Failed to install pg_auto_failover monitor, "
 						  "see above for details");
@@ -136,7 +138,7 @@ monitor_pg_init(Monitor *monitor, MonitorConfig *config)
 		return false;
 	}
 
-	if (!monitor_install(pgSetup, false))
+	if (!monitor_install(config->nodename, pgSetup, false))
 	{
 		return false;
 	}
@@ -159,7 +161,8 @@ monitor_pg_init(Monitor *monitor, MonitorConfig *config)
  *  - create extension pgautofailover;
  */
 bool
-monitor_install(PostgresSetup pgSetupOption, bool checkSettings)
+monitor_install(const char *nodename,
+				PostgresSetup pgSetupOption, bool checkSettings)
 {
 	PostgresSetup pgSetup = { 0 };
 	bool missingPgdataIsOk = false;
@@ -223,9 +226,11 @@ monitor_install(PostgresSetup pgSetupOption, bool checkSettings)
 	 * Now allow nodes on the same network to connect to pg_auto_failover
 	 * database.
 	 */
-	if (!pghba_enable_lan_cidr(&postgres.sqlClient, HBA_DATABASE_DBNAME,
-							  PG_AUTOCTL_MONITOR_DBNAME,
-							  PG_AUTOCTL_MONITOR_USERNAME, "trust", NULL))
+	if (!pghba_enable_lan_cidr(&postgres.sqlClient,
+							   HBA_DATABASE_DBNAME,
+							   PG_AUTOCTL_MONITOR_DBNAME,
+							   (char *)nodename,
+							   PG_AUTOCTL_MONITOR_USERNAME, "trust", NULL))
 	{
 		log_warn("Failed to grant connection to local network.");
 		return false;

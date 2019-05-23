@@ -16,6 +16,5 @@
 #include "monitor_config.h"
 
 bool monitor_pg_init(Monitor *monitor, MonitorConfig *config);
-bool monitor_install(PostgresSetup pgSetupOption, bool checkSettings);
 
 #endif /* MONITOR_PG_INIT_H */

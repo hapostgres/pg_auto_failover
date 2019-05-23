@@ -253,7 +253,9 @@ escape_hba_string(char *destination, const char *hbaString)
  */
 bool
 pghba_enable_lan_cidr(PGSQL *pgsql, HBADatabaseType databaseType,
-					  char *database, char *username,
+					  char *database,
+					  char *hostname,
+					  char *username,
 					  char *authenticationScheme,
 					  char *pgdata)
 {
@@ -261,13 +263,12 @@ pghba_enable_lan_cidr(PGSQL *pgsql, HBADatabaseType databaseType,
 	char ipAddr[BUFSIZE];
 	char cidr[BUFSIZE];
 
-	/* add our local network address to the HBA, if we can determine it */
-	if (!fetchLocalIPAddress(ipAddr, BUFSIZE,
-							 DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME,
-							 DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT))
+	/* Compute the CIDR notation for our hostname */
+	if (!findHostnameLocalAddress(hostname, ipAddr, BUFSIZE))
 	{
-		log_warn("Failed to determine network configuration, "
-				 "skipping HBA settings");
+		log_fatal("Failed to find IP address for hostname \"%s\", "
+				  "see above for details",
+				  hostname);
 		return false;
 	}
 
@@ -278,8 +279,9 @@ pghba_enable_lan_cidr(PGSQL *pgsql, HBADatabaseType databaseType,
 		return false;
 	}
 
-	log_debug("Local ip address: %s", ipAddr);
-	log_debug("CIDR address to open: %s", cidr);
+	log_debug("HBA: adding CIDR from hostname \"%s\"", hostname);
+	log_debug("HBA: local ip address: %s", ipAddr);
+	log_debug("HBA: CIDR address to open: %s", cidr);
 	log_info("Granting connection privileges on %s", cidr);
 
 	/* The caller gives pgdata when PostgreSQL is not yet running */

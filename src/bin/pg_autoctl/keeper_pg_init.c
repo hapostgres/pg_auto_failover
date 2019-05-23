@@ -421,8 +421,9 @@ reach_initial_state(Keeper *keeper)
 					 * to connect. The network is discovered automatically.
 					 */
 					(void) pghba_enable_lan_cidr(&keeper->postgres.sqlClient,
-												 HBA_DATABASE_ALL,
-												 NULL, NULL, "trust", NULL);
+												 HBA_DATABASE_ALL, NULL,
+												 keeper->config.nodename,
+												 NULL, "trust", NULL);
 				}
 			}
 			else
@@ -812,6 +813,7 @@ create_database_and_extension(Keeper *keeper)
 		(void) pghba_enable_lan_cidr(&initPostgres.sqlClient,
 									 HBA_DATABASE_DBNAME,
 									 pgSetup->dbname,
+									 config->nodename,
 									 pg_setup_get_username(pgSetup),
 									 "trust",
 									 NULL);

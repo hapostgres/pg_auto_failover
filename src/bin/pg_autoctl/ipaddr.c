@@ -418,7 +418,6 @@ findHostnameLocalAddress(const char *hostname, char *localIpAddress, int size)
 	 * devices, and for each IP address given by the look-up, check if we
 	 * have a corresponding local interface bound to the IP address.
 	 */
-
 	if (getifaddrs(&ifaddrList) == -1)
 	{
 		log_warn("Failed to get the list of local network inferfaces: %s",
@@ -435,15 +434,6 @@ findHostnameLocalAddress(const char *hostname, char *localIpAddress, int size)
 		 dns_addr != NULL;
 		 dns_addr = dns_addr->ai_next)
 	{
-		/*
-		 * Skip loopback addresses, we want to be able to connect to
-		 * hostname from other nodes.
-		 */
-		if ((dns_addr->ai_flags & IFF_LOOPBACK))
-		{
-			continue;
-		}
-
 		for (ifaddr = ifaddrList; ifaddr != NULL; ifaddr = ifaddr->ifa_next)
 		{
 			if (ifaddr->ifa_addr->sa_family == AF_INET
