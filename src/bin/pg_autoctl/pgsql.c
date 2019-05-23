@@ -1016,8 +1016,10 @@ pgsql_has_replica(PGSQL *pgsql, char *userName, bool *hasReplica)
  * whether the URL was successfully parsed.
  */
 bool
-hostname_from_uri(const char *pguri, char *hostname, int maxHostLength)
+hostname_from_uri(const char *pguri,
+				  char *hostname, int maxHostLength, int *port)
 {
+	int found = 0;
 	char *errmsg;
 	PQconninfoOption *conninfo, *option;
 
@@ -1048,8 +1050,27 @@ hostname_from_uri(const char *pguri, char *hostname, int maxHostLength)
 					return false;
 				}
 
-				break;
+				++found;
 			}
+		}
+
+		if (strcmp(option->keyword, "port") == 0)
+		{
+			if (option->val)
+			{
+				/* we expect a single port number in a monitor's URI */
+				*port = atoi(option->val);
+				++found;
+			}
+			else
+			{
+				*port = POSTGRES_PORT;
+			}
+		}
+
+		if (found == 2)
+		{
+			break;
 		}
 	}
 	PQconninfoFree(conninfo);

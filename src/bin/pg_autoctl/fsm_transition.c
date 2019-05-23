@@ -57,10 +57,13 @@ fsm_init_primary(Keeper *keeper)
 	bool inRecovery = false;
 	char *password = NULL;
 	char monitorHostname[_POSIX_HOST_NAME_MAX];
+	int monitorPort = 0;
 
 	log_info("Initialising postgres as a primary");
 
-	if (!hostname_from_uri(config->monitor_pguri, monitorHostname, _POSIX_HOST_NAME_MAX))
+	if (!hostname_from_uri(config->monitor_pguri,
+						   monitorHostname, _POSIX_HOST_NAME_MAX,
+						   &monitorPort))
 	{
 		/* developer error, this should never happen */
 		log_fatal("BUG: monitor_pguri should be validated before calling "

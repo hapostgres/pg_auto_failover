@@ -21,12 +21,18 @@ typedef enum HBADatabaseType
 } HBADatabaseType;
 
 
-bool pghba_ensure_host_rule_exists(char *hbaFilePath, HBADatabaseType, char *database,
-								   char *username, char *hostname,
-								   char *authenticationScheme);
+bool pghba_ensure_host_rule_exists(const char *hbaFilePath,
+								   HBADatabaseType,
+								   const char *database,
+								   const char *username,
+								   const char *hostname,
+								   const char *authenticationScheme);
+
 bool pghba_enable_lan_cidr(PGSQL *pgsql, HBADatabaseType databaseType,
-						   char *database, char *username,
-						   char *authenticationScheme,
-						   char *pgdata);
+						   const char *database,
+						   const char *hostname,
+						   const char *username,
+						   const char *authenticationScheme,
+						   const char *pgdata);
 
 #endif /* PGHBA_H */

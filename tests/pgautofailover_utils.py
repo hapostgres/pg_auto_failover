@@ -191,10 +191,11 @@ class DataNode(PGNode):
         if self.listen_flag:
             pghost = str(self.vnode.address)
 
-        create_command = [shutil.which('pg_autoctl'), 'create',
+        # don't pass --nodename to Postgres nodes in order to exercise the
+        # automatic detection of the nodename.
+        create_command = [shutil.which('pg_autoctl'), '-vvv', 'create',
                           self.role.command(),
                         '--pgdata', self.datadir,
-                        '--nodename', str(self.vnode.address),
                         '--pghost', pghost,
                         '--pgport', str(self.port),
                         '--pgctl', shutil.which('pg_ctl'),
@@ -351,7 +352,8 @@ class MonitorNode(PGNode):
         """
         Initializes and runs the monitor process.
         """
-        init_command = [shutil.which('pg_autoctl'), 'create', self.role.command(),
+        init_command = [shutil.which('pg_autoctl'), '-vvv', 'create',
+                        self.role.command(),
                         '--pgdata', self.datadir,
                         '--pgport', str(self.port),
                         '--nodename', self.nodename]

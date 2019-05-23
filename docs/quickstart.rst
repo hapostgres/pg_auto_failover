@@ -1,7 +1,7 @@
 .. _postgres_quickstart:
 
-High Availability Quick Start
-=============================
+pg_auto_failover Quick Start
+============================
 
 In this guide we’ll create a primary and secondary Postgres node and set
 up pg_auto_failover to replicate data between them. We’ll simulate failure in
@@ -52,8 +52,7 @@ distinctive port (6000):
 
    pg_autoctl create monitor   \
      --pgdata ./monitor     \
-     --pgport 6000          \
-     --nodename `hostname --fqdn`
+     --pgport 6000
 
 This command initializes a PostgreSQL cluster at the location pointed
 by the ``--pgdata`` option. When ``--pgdata`` is omitted, ``pg_autoctl``
@@ -84,7 +83,6 @@ we’ll store the primary node’s data files in a small temporary filesystem.
    pg_autoctl create postgres     \
      --pgdata /mnt/node_a/data \
      --pgport 6010             \
-     --nodename 127.0.0.1      \
      --pgctl /usr/pgsql-11/bin/pg_ctl \
      --monitor postgres://autoctl_node@127.0.0.1:6000/pg_auto_failover
 
@@ -117,7 +115,6 @@ created the primary:
    pg_autoctl create postgres  \
      --pgdata ./node_b      \
      --pgport 6011          \
-     --nodename 127.0.0.1   \
      --pgctl /usr/pgsql-11/bin/pg_ctl \
      --monitor postgres://autoctl_node@127.0.0.1:6000/pg_auto_failover
 

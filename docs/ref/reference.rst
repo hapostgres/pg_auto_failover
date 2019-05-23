@@ -69,6 +69,8 @@ used to find the Postgres connection URI string to use as the ``--monitor``
 option to the ``pg_autoctl create`` command for the other nodes of the
 formation.
 
+.. _pg_autoctl_create_monitor:
+
 pg_auto_failover Monitor
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -77,9 +79,9 @@ commands are dealing with the monitor:
 
   - ``pg_autoctl create monitor``
 
-     This command initializes a PostgreSQL cluster and installs the pg_auto_failover
-     extension so that it's possible to use the new instance to monitor
-     PostgreSQL services::
+     This command initializes a PostgreSQL cluster and installs the
+     `pgautofailover` extension so that it's possible to use the new
+     instance to monitor PostgreSQL services::
 
       $ pg_autoctl create monitor --help
       pg_autoctl create monitor: Initialize a pg_auto_failover monitor node
@@ -95,8 +97,28 @@ commands are dealing with the monitor:
      ``--pgctl`` option defaults to the first ``pg_ctl`` entry found in your
      `PATH`.
 
-     The ``--nodename`` option is mandatory and must be set to the hostname
-     that the other nodes of the cluster will use to access to the monitor.
+     The ``--nodename`` option allows setting the hostname that the other
+     nodes of the cluster will use to access to the monitor. When not
+     provided, a default value is computed by running the following
+     algorithm:
+
+       1. Open a connection to the 8.8.8.8:53 public service and looks the
+          TCP/IP client address that has been used to make that connection.
+
+       2. Do a reverse DNS lookup on this IP address to fetch a hostname for
+          our local machine.
+
+       3. If the reverse DNS lookup is successfull , then `pg_autoctl` does
+          with a forward DNS lookup of that hostname.
+
+     When the forward DNS lookup repsonse in step 3. is an IP address found
+     in one of our local network interfaces, then `pg_autoctl` uses the
+     hostname found in step 2. as the default `--nodename`. Otherwise it
+     uses the IP address found in step 1.
+
+     You may use the `--nodename` command line option to bypass the whole
+     DNS lookup based process and force the local node name to a fixed
+     value.
 
   - ``pg_autoctl run``
 
@@ -207,6 +229,8 @@ commands can be used, from any node in the setup.
     For details about the options to the command, see above in the ``pg_autoctl
     show events`` command.
 
+.. _pg_autoctl_create_postgres:
+
 pg_auto_failover Postgres Node Initialization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -254,8 +278,8 @@ corresponding to as many implementation strategies.
 
      This happens when ``--pgdata`` (or the environment variable ``PGDATA``)
      points to an non-existing or empty directory. Then the given
-     ``--nodename`` is registered to the pg_auto_failover ``--monitor`` as a member of
-     the ``--formation``.
+     ``--nodename`` is registered to the pg_auto_failover ``--monitor`` as a
+     member of the ``--formation``.
 
      The monitor answers to the registration call with a state to assign to
      the new member of the group, either *SINGLE* or *WAIT_STANDBY*. When
@@ -292,6 +316,10 @@ corresponding to as many implementation strategies.
 Currently, ``pg_autoctl create`` doesn't know how to initialize from an already
 running PostgreSQL standby node. In that situation, it is necessary to
 prepare a new secondary system from scratch.
+
+When `--nodename` is omitted, it is computed as above (see
+:ref:`_pg_autoctl_create_monitor`), with the difference that step 1 uses the
+monitor IP and port rather than the public service 8.8.8.8:53.
 
 .. _pg_autoctl_configuration:
 
@@ -492,3 +520,9 @@ commands, only available in debug environments::
       init     Initialize the standby server using pg_basebackup
       rewind   Rewind a demoted primary server using pg_rewind
       promote  Promote a standby server to become writable
+
+    pg_autoctl do show
+      ipaddr    Print this node's IP address information
+      cidr      Print this node's CIDR information
+      lookup    Print this node's DNS lookup information
+      nodename  Print this node's default nodename

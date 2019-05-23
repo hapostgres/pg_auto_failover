@@ -13,7 +13,21 @@
 
 #include <stdbool.h>
 
-bool fetchLocalIPAddress(char *localIpAddress, int size);
+
+typedef enum
+{
+	IPTYPE_V4, IPTYPE_V6, IPTYPE_NONE
+} IPType;
+
+
+IPType ip_address_type(const char *hostname);
+bool fetchLocalIPAddress(char *localIpAddress, int size,
+						 const char *serviceName, int servicePort);
 bool fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size);
+bool findHostnameLocalAddress(const char *hostname,
+							  char *localIpAddress, int size);
+bool findHostnameFromLocalIpAddress(char *localIpAddress,
+									char *hostname, int size);
+
 
 #endif /* __IPADDRH__ */
