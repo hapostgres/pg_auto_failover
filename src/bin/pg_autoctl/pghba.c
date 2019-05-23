@@ -28,7 +28,7 @@
 
 
 static int get_database_field(char *destination, HBADatabaseType databaseType,
-							  char *databaseName);
+							  const char *databaseName);
 static int convert_ip_to_cidr(char *destination, const char *host);
 static int escape_hba_string(char *destination, const char *hbaString);
 
@@ -39,9 +39,12 @@ static int escape_hba_string(char *destination, const char *hbaString);
  * scheme.
  */
 bool
-pghba_ensure_host_rule_exists(char *hbaFilePath, HBADatabaseType databaseType,
-							  char *database, char *username, char *host,
-							  char *authenticationScheme)
+pghba_ensure_host_rule_exists(const char *hbaFilePath,
+							  HBADatabaseType databaseType,
+							  const char *database,
+							  const char *username,
+							  const char *host,
+							  const char *authenticationScheme)
 {
 	char hbaLine[BUFSIZE];
 	char *hbaLineEnd = hbaLine;
@@ -65,7 +68,8 @@ pghba_ensure_host_rule_exists(char *hbaFilePath, HBADatabaseType databaseType,
 	hbaLineEnd += convert_ip_to_cidr(hbaLineEnd, host);
 	hbaLineEnd += sprintf(hbaLineEnd, " %s", authenticationScheme);
 
-	log_debug("Ensuring the HBA file \"%s\" contains the line: %s", hbaFilePath, hbaLine);
+	log_debug("Ensuring the HBA file \"%s\" contains the line: %s",
+			  hbaFilePath, hbaLine);
 
 	if (!read_file(hbaFilePath, &currentHbaContents, &currentHbaSize))
 	{
@@ -129,11 +133,12 @@ pghba_ensure_host_rule_exists(char *hbaFilePath, HBADatabaseType databaseType,
 
 /*
  * get_database_field writes the database field to destination according to the
- * databaseType. If the type is HBA_DATABASE_DBNAME then the databaseName is written
- * in quoted form.
+ * databaseType. If the type is HBA_DATABASE_DBNAME then the databaseName is
+ * written in quoted form.
  */
 static int
-get_database_field(char *destination, HBADatabaseType databaseType, char *databaseName)
+get_database_field(char *destination,
+				   HBADatabaseType databaseType, const char *databaseName)
 {
 	int fieldLength = 0;
 
@@ -253,11 +258,11 @@ escape_hba_string(char *destination, const char *hbaString)
  */
 bool
 pghba_enable_lan_cidr(PGSQL *pgsql, HBADatabaseType databaseType,
-					  char *database,
-					  char *hostname,
-					  char *username,
-					  char *authenticationScheme,
-					  char *pgdata)
+					  const char *database,
+					  const char *hostname,
+					  const char *username,
+					  const char *authenticationScheme,
+					  const char *pgdata)
 {
 	char hbaFilePath[MAXPGPATH];
 	char ipAddr[BUFSIZE];

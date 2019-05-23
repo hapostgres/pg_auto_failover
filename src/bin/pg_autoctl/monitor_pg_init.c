@@ -229,7 +229,7 @@ monitor_install(const char *nodename,
 	if (!pghba_enable_lan_cidr(&postgres.sqlClient,
 							   HBA_DATABASE_DBNAME,
 							   PG_AUTOCTL_MONITOR_DBNAME,
-							   (char *)nodename,
+							   nodename,
 							   PG_AUTOCTL_MONITOR_USERNAME, "trust", NULL))
 	{
 		log_warn("Failed to grant connection to local network.");
