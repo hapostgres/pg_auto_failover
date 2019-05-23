@@ -100,6 +100,7 @@ void exit_unless_role_is_keeper(KeeperConfig *kconfig);
 /* cli_create_drop_node.c */
 bool cli_create_config(Keeper *keeper, KeeperConfig *config);
 void cli_create_pg(Keeper *keeper, KeeperConfig *config);
+bool check_or_discover_nodename(KeeperConfig *config);
 
 
 
