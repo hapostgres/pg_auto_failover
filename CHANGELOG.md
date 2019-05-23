@@ -1,3 +1,8 @@
+### pg_auto_failover v1.0.2 (May 23, 2019) ###
+
+* Implement a default value for --nodename (#6, #16)
+* Code cleanup
+
 ### pg_auto_failover v1.0.1 (May 6, 2019) ###
 
 * Fix a problem where the Postgres service was not restarted when shutdown (#2)
