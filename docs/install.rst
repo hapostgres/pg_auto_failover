@@ -5,7 +5,9 @@ Installing pg_auto_failover
 
 We provide native system packages for pg_auto_failover on most popular Linux distributions.
 
-Use the steps below to install pg_auto_failover on PostgreSQL 11.
+Use the steps below to install pg_auto_failover on PostgreSQL 11. At the
+current time pg_auto_failover is compatible with both PostgreSQL 10 and
+PostgreSQL 11.
 
 Ubuntu or Debian
 ----------------

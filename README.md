@@ -23,6 +23,18 @@ pg_auto_failover consists of the following parts:
   - a PostgreSQL service to operate the pg_auto_failover monitor
   - a pg_auto_failover keeper to operate your PostgreSQL instances, see `pg_autoctl run`
 
+## Dependencies
+
+At runtime, pg_auto_failover depends on only Postgres. Both Postgres version
+10 and 11 are currently supported.
+
+At buildtime. pg_auto_failover depends on Postgres server development
+package like any other Postgres extensions (the server development package
+for Postgres 11 when using debian or Ubuntu is named
+`postgresql-server-dev-11`), and then `libssl-dev` and `libkrb5-dev` are
+needed to for the client side when building with all the `libpq`
+authentication options.
+
 ## Installing pg_auto_failover from packages
 
 Ubuntu or Debian:
@@ -53,11 +65,21 @@ sudo yum install -y pg-auto-failover10_11
 
 ## Building pg_auto_failover from source
 
-To build the project, just type `make`.
+To build the project, make sure you have installed the build-dependencies,
+then just type `make`. You can install the resulting binary using `make
+install`.
+
+Build dependencies example on debian for Postgres 11:
+
+~~~ bash
+$ sudo apt-get install postgresql-server-dev-11 libssl-dev libkrb5-dev
+~~~
+
+Then build pg_auto_failover from sources with the following instructions:
 
 ~~~ bash
 $ make
-$ make install
+$ sudo make install
 ~~~
 
 For this to work though, the PostgreSQL client (libpq) and server
@@ -231,6 +253,29 @@ is named *default* and the default group id is zero (0).
 
 It's possible to add other services to the same running monitor by using
 another formation.
+
+## Installing pg_auto_failover on-top of an existing Postgres setup
+
+The `pg_autoctl create postgres --pgdata ${PGDATA}` step can be used with an
+existing Postgres installation running at ${PGDATA}, only with the primary
+node.
+
+For enabling a secondary node, pg_auto_failover needs to control many
+parameters on the installation, and as a result doesn't know yet to make
+sure everything is set-up in a away that the failover as implemented in
+pg_auto_failover is compatible with any pre-existing Streaming Replication
+setup.
+
+So when `pg_autoctl create postgres` is used on an existing `${PGDATA}`
+where Postgres is running as a secondary node, then you have the following
+error message:
+
+~~~
+ERROR pg_autoctl doesn't know how to register an already existing standby server at the moment
+~~~
+
+We might male it possible at some future point to re-use an existing
+secondary server in a pg_auto_failover setup.
 
 ## Application and Connection Strings
 
