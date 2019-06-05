@@ -25,7 +25,9 @@
 #include "catalog/indexing.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_extension.h"
+#include "catalog/pg_type.h"
 #include "commands/sequence.h"
+#include "executor/spi.h"
 #include "lib/stringinfo.h"
 #include "nodes/pg_list.h"
 #include "utils/builtins.h"
@@ -35,6 +37,7 @@
 #include "utils/rel.h"
 #include "utils/relcache.h"
 
+bool EnableVersionChecks = true; /* version checks are enabled */
 
 /*
  * pgAutoFailoverRelationId returns the OID of a given relation in the
@@ -165,4 +168,103 @@ LockNodeGroup(char *formationId, int groupId, LOCKMODE lockMode)
 						 ADV_LOCKTAG_CLASS_AUTO_FAILOVER_NODE_GROUP);
 
 	(void) LockAcquire(&tag, lockMode, sessionLock, dontWait);
+}
+
+
+/*
+ * checkPgAutoFailoverVersion checks whether there is a version mismatch
+ * between the available version and the loaded version or between the
+ * installed version and the loaded version. Returns true if compatible, false
+ * otherwise.
+ *
+ * We need to be careful that the pgautofailover.so that is currently loaded in
+ * the Postgres backend is intended to work with the current extension version
+ * definition (schema and SQL definitions of C coded functions).
+ */
+bool
+checkPgAutoFailoverVersion()
+{
+	char *installedVersion = NULL;
+	char *availableVersion = NULL;
+
+	int spiStatus = 0;
+	const int argCount = 1;
+	Oid argTypes[] = { TEXTOID };
+	Datum argValues[] = { CStringGetTextDatum(AUTO_FAILOVER_EXTENSION_NAME) };
+
+	char *selectQuery =
+		"SELECT default_version, installed_version "
+		"FROM pg_catalog.pg_available_extensions WHERE name = $1;";
+
+	SPI_connect();
+
+	spiStatus = SPI_execute_with_args(selectQuery, argCount, argTypes, argValues,
+									  NULL, false, 1);
+	if (spiStatus != SPI_OK_SELECT)
+	{
+		elog(ERROR, "could not select from pg_catalog.pg_available_extensions");
+	}
+
+	if (SPI_processed != 1)
+	{
+		elog(ERROR, "expected a single entry for extension \"%s\"",
+			 AUTO_FAILOVER_EXTENSION_NAME);
+	}
+	else
+	{
+		TupleDesc tupleDescriptor = SPI_tuptable->tupdesc;
+		HeapTuple heapTuple = SPI_tuptable->vals[0];
+		bool defaultIsNull = false, installedIsNull = false;
+
+		Datum defaultVersionDatum =
+			heap_getattr(heapTuple, 1, tupleDescriptor, &defaultIsNull);
+
+		Datum installedVersionDatum =
+			heap_getattr(heapTuple, 2, tupleDescriptor, &installedIsNull);
+
+		if (!defaultIsNull)
+		{
+			availableVersion = TextDatumGetCString(defaultVersionDatum);
+		}
+
+		if (!installedIsNull)
+		{
+			installedVersion = TextDatumGetCString(installedVersionDatum);
+		}
+	}
+
+	SPI_finish();
+
+	if (strcmp(AUTO_FAILOVER_EXTENSION_VERSION, availableVersion) != 0)
+	{
+		ereport(ERROR,
+				(errmsg("loaded \"%s\" library version differs from latest "
+						"available extension version",
+						AUTO_FAILOVER_EXTENSION_NAME),
+				 errdetail("Loaded library requires %s, but the latest control "
+						   "file specifies %s.",
+						   AUTO_FAILOVER_EXTENSION_VERSION,
+						   availableVersion),
+				 errhint("Restart the database to load the latest version "
+						 "of the \"%s\" library.",
+						 AUTO_FAILOVER_EXTENSION_NAME)));
+		return false;
+	}
+
+	if (strcmp(AUTO_FAILOVER_EXTENSION_VERSION, installedVersion) != 0)
+	{
+		ereport(ERROR,
+				(errmsg("loaded \"%s\" library version differs from installed "
+						"extension version",
+						AUTO_FAILOVER_EXTENSION_NAME),
+				 errdetail("Loaded library requires %s, but the installed "
+						   "extension version is %s.",
+						   AUTO_FAILOVER_EXTENSION_VERSION,
+						   installedVersion),
+				 errhint("Run ALTER EXTENSION %s UPDATE and try again.",
+						 AUTO_FAILOVER_EXTENSION_NAME)));
+		return false;
+	}
+
+	return true;
 }

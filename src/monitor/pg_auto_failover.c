@@ -15,6 +15,7 @@
 /* these are internal headers */
 #include "health_check.h"
 #include "group_state_machine.h"
+#include "metadata.h"
 #include "version_compat.h"
 
 /* these are always necessary for a bgworker */
@@ -74,6 +75,11 @@ static void
 StartMonitorNode(void)
 {
 	BackgroundWorker worker;
+
+	DefineCustomBoolVariable("pgautofailover.enable_version_checks",
+							 "Enable extension version compatiblity checks",
+							 NULL, &EnableVersionChecks, true, PGC_SIGHUP,
+							 GUC_NO_SHOW_ALL, NULL, NULL, NULL);
 
 	DefineCustomBoolVariable("pgautofailover.enable_health_checks",
 							 "Enable background health checks",

@@ -98,6 +98,8 @@ register_node(PG_FUNCTION_ARGS)
 	Datum values[3];
 	bool isNulls[3];
 
+	checkPgAutoFailoverVersion();
+
 	currentNodeState.nodeId = -1;
 	currentNodeState.groupId = currentGroupId;
 	currentNodeState.replicationState =
@@ -256,6 +258,8 @@ node_active(PG_FUNCTION_ARGS)
 	HeapTuple resultTuple = NULL;
 	Datum values[3];
 	bool isNulls[3];
+
+	checkPgAutoFailoverVersion();
 
 	currentNodeState.nodeId = currentNodeId;
 	currentNodeState.groupId = currentGroupId;
@@ -484,6 +488,8 @@ get_primary(PG_FUNCTION_ARGS)
 	Datum values[2];
 	bool isNulls[2];
 
+	checkPgAutoFailoverVersion();
+
 	primaryNode = GetWritableNode(formationId, groupId);
 	if (primaryNode == NULL)
 	{
@@ -569,6 +575,8 @@ get_other_node(PG_FUNCTION_ARGS)
 	Datum values[2];
 	bool isNulls[2];
 
+	checkPgAutoFailoverVersion();
+
 	activeNode = GetAutoFailoverNode(nodeName, nodePort);
 	if (activeNode == NULL)
 	{
@@ -614,6 +622,8 @@ remove_node(PG_FUNCTION_ARGS)
 
 	AutoFailoverNode *currentNode = NULL;
 	AutoFailoverNode *otherNode = NULL;
+
+	checkPgAutoFailoverVersion();
 
 	currentNode = GetAutoFailoverNode(nodeName, nodePort);
 	if (currentNode == NULL)
@@ -679,6 +689,8 @@ perform_failover(PG_FUNCTION_ARGS)
 										   REPLICATION_STATE_CATCHINGUP);
 
 	char message[BUFSIZE];
+
+	checkPgAutoFailoverVersion();
 
 	LockFormation(formationId, ShareLock);
 	LockNodeGroup(formationId, groupId, ExclusiveLock);
@@ -783,6 +795,8 @@ start_maintenance(PG_FUNCTION_ARGS)
 										 REPLICATION_STATE_WAIT_PRIMARY);
 	List *secondaryStates = list_make2_int(REPLICATION_STATE_SECONDARY,
 										   REPLICATION_STATE_CATCHINGUP);
+
+	checkPgAutoFailoverVersion();
 
 	currentNode = GetAutoFailoverNode(nodeName, nodePort);
 	if (currentNode == NULL)
@@ -892,6 +906,8 @@ stop_maintenance(PG_FUNCTION_ARGS)
 	AutoFailoverNode *otherNode = NULL;
 
 	char message[BUFSIZE];
+
+	checkPgAutoFailoverVersion();
 
 	currentNode = GetAutoFailoverNode(nodeName, nodePort);
 	if (currentNode == NULL)

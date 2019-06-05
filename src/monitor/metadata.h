@@ -15,6 +15,7 @@
 
 #include "storage/lockdefs.h"
 
+#define AUTO_FAILOVER_EXTENSION_VERSION "1.0"
 #define AUTO_FAILOVER_EXTENSION_NAME "pgautofailover"
 #define AUTO_FAILOVER_SCHEMA_NAME "pgautofailover"
 #define AUTO_FAILOVER_FORMATION_TABLE "pgautofailover.formation"
@@ -34,6 +35,8 @@ typedef enum AutoFailoverHALocktagClass
 	ADV_LOCKTAG_CLASS_AUTO_FAILOVER_NODE_GROUP = 11
 } AutoFailoverHALocktagClass;
 
+/* GUC variable for version checks, true by default */
+extern bool EnableVersionChecks;
 
 /* public function declarations */
 extern Oid pgAutoFailoverRelationId(const char *relname);
@@ -41,3 +44,4 @@ extern Oid pgAutoFailoverSchemaId(void);
 extern Oid pgAutoFailoverExtensionOwner(void);
 extern void LockFormation(char *formationId, LOCKMODE lockMode);
 extern void LockNodeGroup(char *formationId, int groupId, LOCKMODE lockMode);
+extern bool checkPgAutoFailoverVersion(void);
