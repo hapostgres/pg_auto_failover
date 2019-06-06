@@ -84,7 +84,8 @@ bool monitor_get_notifications(Monitor *monitor);
 
 bool monitor_get_extension_version(Monitor *monitor,
 								   MonitorExtensionVersion *version);
-bool monitor_extension_update(Monitor *monitor, char *targetVersion);
-bool monitor_ensure_extension_version(Monitor *monitor);
+bool monitor_extension_update(Monitor *monitor, const char *targetVersion);
+bool monitor_ensure_extension_version(Monitor *monitor,
+									  MonitorExtensionVersion *version);
 
 #endif /* MONITOR_H */

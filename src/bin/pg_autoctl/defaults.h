@@ -21,6 +21,7 @@
 
 /* environment variable to use to make DEBUG facilities available */
 #define PG_AUTOCTL_DEBUG "PG_AUTOCTL_DEBUG"
+#define PG_AUTOCTL_EXTENSION_VERSION_VAR "PG_AUTOCTL_EXTENSION_VERSION"
 
 /* default values for the pg_autoctl settings */
 #define POSTGRES_PORT 5432

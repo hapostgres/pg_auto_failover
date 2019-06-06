@@ -1306,7 +1306,7 @@ parseExtensionVersion(void *ctx, PGresult *result)
  * monitor_extension_update executes ALTER EXTENSION ... UPDATE TO ...
  */
 bool
-monitor_extension_update(Monitor *monitor, char *targetVersion)
+monitor_extension_update(Monitor *monitor, const char *targetVersion)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 
@@ -1327,11 +1327,26 @@ monitor_extension_update(Monitor *monitor, char *targetVersion)
  * pgautofailover--1.2--1.1.sql).
  */
 bool
-monitor_ensure_extension_version(Monitor *monitor)
+monitor_ensure_extension_version(Monitor *monitor,
+								 MonitorExtensionVersion *version)
 {
-	MonitorExtensionVersion version = { 0 };
+	const char *extensionVersion = PG_AUTOCTL_EXTENSION_VERSION;
 
-	if (!monitor_get_extension_version(monitor, &version))
+	/* in test environement, we can export any target version we want */
+	if (getenv(PG_AUTOCTL_DEBUG) != NULL)
+	{
+		char *val = getenv(PG_AUTOCTL_EXTENSION_VERSION_VAR);
+
+		if (val != NULL)
+		{
+			extensionVersion = val;
+			log_debug("monitor_ensure_extension_version targets extension "
+					  "version \"%s\" - as per environment.",
+					  extensionVersion);
+		}
+	}
+
+	if (!monitor_get_extension_version(monitor, version))
 	{
 		log_fatal("Failed to check version compatibility with the monitor "
 				  "extension \"%s\", see above for details",
@@ -1339,7 +1354,7 @@ monitor_ensure_extension_version(Monitor *monitor)
 		return false;
 	}
 
-	if (strcmp(version.installedVersion, PG_AUTOCTL_EXTENSION_VERSION) != 0)
+	if (strcmp(version->installedVersion, extensionVersion) != 0)
 	{
 		Monitor dbOwnerMonitor = { 0 };
 
@@ -1347,8 +1362,8 @@ monitor_ensure_extension_version(Monitor *monitor)
 				 "version \"%s\" to be installed on the monitor, current "
 				 "version is \"%s\".",
 				 PG_AUTOCTL_MONITOR_EXTENSION_NAME,
-				 PG_AUTOCTL_EXTENSION_VERSION,
-				 version.installedVersion);
+				 extensionVersion,
+				 version->installedVersion);
 
 		/*
 		 * Ok, let's try to update the extension then.
@@ -1364,30 +1379,38 @@ monitor_ensure_extension_version(Monitor *monitor)
 					  "failed prepare a connection string to the "
 					  "monitor as the database owner",
 					  PG_AUTOCTL_MONITOR_EXTENSION_NAME,
-					  PG_AUTOCTL_EXTENSION_VERSION);
+					  extensionVersion);
 			return false;
 		}
 
 		if (!monitor_extension_update(&dbOwnerMonitor,
-									  PG_AUTOCTL_EXTENSION_VERSION))
+									  extensionVersion))
 		{
 			log_fatal("Failed to update extension \"%s\" to version \"%s\" "
 					  "on the monitor, see above for details",
 					  PG_AUTOCTL_MONITOR_EXTENSION_NAME,
-					  PG_AUTOCTL_EXTENSION_VERSION);
+					  extensionVersion);
+			return false;
+		}
+
+		if (!monitor_get_extension_version(monitor, version))
+		{
+			log_fatal("Failed to check version compatibility with the monitor "
+					  "extension \"%s\", see above for details",
+					  PG_AUTOCTL_MONITOR_EXTENSION_NAME);
 			return false;
 		}
 
 		log_info("Updated extension \"%s\" to version \"%s\"",
 				 PG_AUTOCTL_MONITOR_EXTENSION_NAME,
-				 PG_AUTOCTL_EXTENSION_VERSION);
+				 version->installedVersion);
 
 		return true;
 	}
 
 	/* just mention we checked, and it's ok */
 	log_info("The version of extenstion \"%s\" is \"%s\" on the monitor",
-			 PG_AUTOCTL_MONITOR_EXTENSION_NAME, version.installedVersion);
+			 PG_AUTOCTL_MONITOR_EXTENSION_NAME, version->installedVersion);
 
 	return true;
 }

@@ -89,6 +89,7 @@ class PGNode:
         self.username = username
         self.database = database
         self.role = role
+        self.pg_autoctl_run_proc = None
 
     def connection_string(self):
         """
@@ -97,6 +98,14 @@ class PGNode:
         """
         return ("postgres://%s@%s:%d/%s" % (self.username, self.vnode.address,
                                            self.port, self.database))
+
+    def run(self, env={}):
+        """
+        Runs "pg_autoctl run"
+        """
+        run_command = [shutil.which('pg_autoctl'), 'run',
+                          '--pgdata', self.datadir]
+        self.pg_autoctl_run_proc = self.vnode.run(run_command)
 
     def run_sql_query(self, query, *args):
         """
@@ -112,6 +121,13 @@ class PGNode:
             except psycopg2.ProgrammingError:
                 return None
 
+    def stop_pg_autoctl(self):
+        """
+        Kills the keeper by sending a SIGTERM to keeper's process group.
+        """
+        if self.pg_autoctl_run_proc:
+            os.killpg(os.getpgid(self.pg_autoctl_run_proc.pid), signal.SIGTERM)
+
     def stop_postgres(self):
         """
         Stops the postgres process by running:
@@ -123,7 +139,7 @@ class PGNode:
         out, err = stop_proc.communicate(timeout=COMMAND_TIMEOUT)
         if stop_proc.returncode > 0:
             print("stopping postgres for '%s' failed, out: %s\n, err: %s"
-                  %(out, err))
+                  %(self.vnode.address, out, err))
             return False
         elif stop_proc.returncode is None:
             print("stopping postgres for '%s' timed out")
@@ -170,6 +186,63 @@ class PGNode:
                   (self.datadir, timeout))
             return False
 
+    def fail(self):
+        """
+        Simulates a data node failure by terminating the keeper and stopping
+        postgres.
+        """
+        self.stop_pg_autoctl()
+        self.stop_postgres()
+
+    def destroy(self):
+        """
+        Cleans up processes and files created for this data node.
+        """
+        self.stop_pg_autoctl()
+        destroy_command = [shutil.which('pg_autoctl'), 'do', 'destroy',
+                            '--pgdata', self.datadir]
+        destroy_proc = self.vnode.run(destroy_command)
+        try:
+            wait_or_timeout_proc(destroy_proc,
+                                 name="pg_autoctl do destroy",
+                                 timeout=COMMAND_TIMEOUT)
+        except Exception as e:
+            print(str(e))
+        try:
+            os.remove(self.config_file_path())
+        except FileNotFoundError:
+            pass
+        try:
+            os.remove(self.state_file_path())
+        except FileNotFoundError:
+            pass
+
+
+    def config_file_path(self):
+        """
+        Returns the path of the config file for this data node.
+        """
+        # Config file is located at:
+        # ~/.config/pg_autoctl/${PGDATA}/pg_autoctl.cfg
+        home = os.getenv("HOME")
+        pgdata = os.path.abspath(self.datadir)[1:] # Remove the starting '/'
+        return os.path.join(home,
+                            ".config/pg_autoctl",
+                            pgdata,
+                            "pg_autoctl.cfg")
+
+    def state_file_path(self):
+        """
+        Returns the path of the state file for this data node.
+        """
+        # State file is located at:
+        # ~/.local/share/pg_autoctl/${PGDATA}/pg_autoctl.state
+        home = os.getenv("HOME")
+        pgdata = os.path.abspath(self.datadir)[1:] # Remove the starting '/'
+        return os.path.join(home,
+                            ".local/share/pg_autoctl",
+                            pgdata,
+                            "pg_autoctl.state")
 
 class DataNode(PGNode):
     def __init__(self, datadir, vnode, port, username, database, monitor,
@@ -179,7 +252,6 @@ class DataNode(PGNode):
         self.nodeid = nodeid
         self.group = group
         self.listen_flag = listen_flag
-        self.pg_autoctl_run_proc = None
         self.formation = formation
 
     def create(self):
@@ -211,37 +283,6 @@ class DataNode(PGNode):
         wait_or_timeout_proc(init_proc,
                              name="keeper init",
                              timeout=COMMAND_TIMEOUT)
-
-    def run(self):
-        """
-        Runs "pg_autoctl run"
-        """
-        run_command = [shutil.which('pg_autoctl'), 'run',
-                          '--pgdata', self.datadir]
-        self.pg_autoctl_run_proc = self.vnode.run(run_command)
-
-    def destroy(self):
-        """
-        Cleans up processes and files created for this data node.
-        """
-        self.stop_pg_autoctl()
-        destroy_command = [shutil.which('pg_autoctl'), 'do', 'destroy',
-                            '--pgdata', self.datadir]
-        destroy_proc = self.vnode.run(destroy_command)
-        try:
-            wait_or_timeout_proc(destroy_proc,
-                                 name="pg_autoctl do destroy",
-                                 timeout=COMMAND_TIMEOUT)
-        except Exception as e:
-            print(str(e))
-        try:
-            os.remove(self.config_file_path())
-        except FileNotFoundError:
-            pass
-        try:
-            os.remove(self.state_file_path())
-        except FileNotFoundError:
-            pass
 
     def wait_until_state(self, target_state, timeout=STATE_CHANGE_TIMEOUT):
         """
@@ -284,14 +325,6 @@ SELECT reportedstate
             return results[0][0]
         return results
 
-    def fail(self):
-        """
-        Simulates a data node failure by terminating the keeper and stopping
-        postgres.
-        """
-        self.stop_pg_autoctl()
-        self.stop_postgres()
-
     def drop(self):
         """
         Drops a pg_autoctl node from its formation
@@ -303,38 +336,6 @@ SELECT reportedstate
         drop_proc = self.vnode.run(drop_command)
         wait_or_timeout_proc(drop_proc, name="drop node", timeout=COMMAND_TIMEOUT)
 
-    def stop_pg_autoctl(self):
-        """
-        Kills the keeper by sending a SIGTERM to keeper's process group.
-        """
-        if self.pg_autoctl_run_proc:
-            os.killpg(os.getpgid(self.pg_autoctl_run_proc.pid), signal.SIGTERM)
-
-    def config_file_path(self):
-        """
-        Returns the path of the config file for this data node.
-        """
-        # Config file is located at:
-        # ~/.config/pg_autoctl/${PGDATA}/pg_autoctl.cfg
-        home = os.getenv("HOME")
-        pgdata = os.path.abspath(self.datadir)[1:] # Remove the starting '/'
-        return os.path.join(home,
-                            ".config/pg_autoctl",
-                            pgdata,
-                            "pg_autoctl.cfg")
-
-    def state_file_path(self):
-        """
-        Returns the path of the state file for this data node.
-        """
-        # State file is located at:
-        # ~/.local/share/pg_autoctl/${PGDATA}/pg_autoctl.state
-        home = os.getenv("HOME")
-        pgdata = os.path.abspath(self.datadir)[1:] # Remove the starting '/'
-        return os.path.join(home,
-                            ".local/share/pg_autoctl",
-                            pgdata,
-                            "pg_autoctl.state")
 
 class MonitorNode(PGNode):
     def __init__(self, datadir, vnode, port, nodename):
@@ -359,7 +360,7 @@ class MonitorNode(PGNode):
                         '--nodename', self.nodename]
         init_proc = self.vnode.run(init_command)
         wait_or_timeout_proc(init_proc,
-                             name="monitor init",
+                             name="create monitor",
                              timeout=COMMAND_TIMEOUT)
 
     def create_formation(self, formation_name,

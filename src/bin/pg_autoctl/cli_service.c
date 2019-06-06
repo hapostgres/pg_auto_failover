@@ -161,7 +161,9 @@ cli_monitor_run(int argc, char **argv)
 	char configFilePath[MAXPGPATH];
 	KeeperConfig kconfig = keeperOptions;
 	MonitorConfig mconfig = { 0 };
+
 	Monitor monitor = { 0 };
+	MonitorExtensionVersion version = { 0 };
 	char postgresUri[MAXCONNINFO];
 
 	PostgresSetup existingPgSetup = { 0 };
@@ -202,7 +204,7 @@ cli_monitor_run(int argc, char **argv)
 			 mconfig.pgSetup.pgdata, mconfig.pgSetup.pgport);
 
 	/* Check version compatibility */
-	if (!monitor_ensure_extension_version(&monitor))
+	if (!monitor_ensure_extension_version(&monitor, &version))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_MONITOR);
