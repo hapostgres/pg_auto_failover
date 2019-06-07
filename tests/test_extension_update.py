@@ -1,4 +1,5 @@
 import os
+import time
 
 import pgautofailover_utils as pgautofailover
 from nose.tools import *
@@ -19,12 +20,16 @@ def test_001_update_extension():
     os.environ["PG_AUTOCTL_DEBUG"] = '1'
     os.environ["PG_AUTOCTL_EXTENSION_VERSION"] = 'dummy'
     cluster.monitor.run()
+
+    # we need to allow some time for the pg_autctl run command to start and
+    # execute ALTER EXTENSION ... UPDATE TO ...
+    time.sleep(1)
+
     results = cluster.monitor.run_sql_query(
         """SELECT installed_version
              FROM pg_available_extensions
             WHERE name = 'pgautofailover'
         """)
-    print(results)
     assert results == [('dummy',)]
 
 
