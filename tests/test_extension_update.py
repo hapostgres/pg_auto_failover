@@ -11,6 +11,7 @@ def setup_module():
     cluster = pgautofailover.Cluster()
 
 def teardown_module():
+    cluster.monitor.stop_pg_autoctl()
     cluster.destroy()
 
 def test_000_create_monitor():
