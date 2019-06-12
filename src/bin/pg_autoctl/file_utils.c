@@ -10,6 +10,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#endif
+
 #include "postgres_fe.h"
 
 #include "file_utils.h"
@@ -408,6 +412,98 @@ unlink_file(const char *filename)
 			return false;
 		}
 	}
+
+	return true;
+}
+
+
+/*
+ * get_program_absolute_path returns the absolute path of the current program
+ * being executed. Note: the shell is responsible to set that in interactive
+ * environments, and when the pg_autoctl binary is in the PATH of the user,
+ * then argv[0] (here pg_autoctl_argv0) is just "pg_autoctl".
+ */
+bool
+get_program_absolute_path(char *program, int size)
+{
+#if defined(__APPLE__)
+	int actualSize = _NSGetExecutablePath(program, (uint32_t *) &size);
+
+	if (actualSize != 0)
+	{
+		log_error("Failed to get absolute path for the pg_autoctl program, "
+				  "absolute path requires %d bytes and we support paths up "
+				  "to %d bytes only", actualSize, size);
+		return false;
+	}
+#else
+	/*
+	 * On Linux and FreeBSD and Solaris, we can find a symbolic link to our
+	 * program and get the information with readlink. Of course the /proc entry
+	 * to read is not the same on both systems, so we try several things here.
+	 */
+	bool found = false;
+	char *procEntryCandidates[] = {
+		"/proc/self/exe",		/* Linux */
+		"/proc/curproc/file",	/* FreeBSD */
+		"/proc/self/path/a.out"	/* Solaris */
+	};
+	int procEntrySize = sizeof(procEntryCandidates) / sizeof(char *);
+	int procEntryIndex = 0;
+
+	for (procEntryIndex = 0; procEntryIndex < procEntrySize; procEntryIndex++)
+	{
+		if (readlink(procEntryCandidates[procEntryIndex], program, size) != -1)
+		{
+			found = true;
+		}
+		else
+		{
+			/* when the file does not exists, we try our next guess */
+			if (errno != ENOENT && errno != ENOTDIR)
+			{
+				log_error("Failed to get absolute path for the "
+						  "pg_autoctl program: %s", strerror(errno));
+				return false;
+			}
+		}
+	}
+
+	if (found)
+	{
+		return true;
+	}
+	else
+	{
+		/*
+		 * Now either return pg_autoctl_argv0 when that's an absolute filename,
+		 * or search for it in the PATH otherwise.
+		 */
+		char **pathEntries = NULL;
+		int n;
+
+		if (pg_autoctl_argv0[0] == '/')
+		{
+			strlcpy(program, pg_autoctl_argv0, size);
+			return true;
+		}
+
+		n = search_pathlist(getenv("PATH"), pg_autoctl_argv0, &pathEntries);
+
+		if (n < 1)
+		{
+			log_error("Failed to find \"%s\" in PATH environment");
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+		else
+		{
+			strlcpy(program, pathEntries[0], size);
+			search_pathlist_destroy_result(pathEntries);
+
+			return true;
+		}
+	}
+#endif
 
 	return true;
 }

@@ -346,7 +346,16 @@ write_ini_to_stream(FILE *stream, IniOption *optionList)
 
 				if (value)
 				{
-					fprintf(stream, "%s = %s\n", option->name, value);
+					bool quote = strchr(value, '=') != NULL;
+
+					if (quote)
+					{
+						fprintf(stream, "%s = \"%s\"\n", option->name, value);
+					}
+					else
+					{
+						fprintf(stream, "%s = %s\n", option->name, value);
+					}
 				}
 				else if (option->required)
 				{
@@ -364,7 +373,16 @@ write_ini_to_stream(FILE *stream, IniOption *optionList)
 
 				if (value[0] != '\0')
 				{
-					fprintf(stream, "%s = %s\n", option->name, value);
+					bool quote = strchr(value, '=') != NULL;
+
+					if (quote)
+					{
+						fprintf(stream, "%s = \"%s\"\n", option->name, value);
+					}
+					else
+					{
+						fprintf(stream, "%s = %s\n", option->name, value);
+					}
 				}
 				else if (option->required)
 				{

@@ -37,6 +37,7 @@ typedef struct ConfigFilePaths
 	char state[MAXPGPATH];  /* ~/.local/share/pg_autoctl/${PGDATA}/pg_autoctl.state */
 	char pid[MAXPGPATH];	/* /tmp/${PGDATA}/pg_autoctl.pid */
 	char init[MAXPGPATH];	/* /tmp/${PGDATA}/pg_autoctl.init */
+	char systemd[MAXPGPATH];	/* ~/.config/systemd/user/pgautofailover.service */
 } ConfigFilePaths;
 
 /*

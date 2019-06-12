@@ -209,6 +209,7 @@ CommandLine *do_subcommands[] = {
 	&do_primary_,
 	&do_standby_,
 	&do_show_commands,
+	&do_systemd_commands,
 	&do_discover,
 	&do_destroy,
 	NULL
