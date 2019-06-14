@@ -15,6 +15,7 @@
 #include <unistd.h>
 
 #include "postgres_fe.h"
+#include "pqexpbuffer.h"
 
 #include "defaults.h"
 #include "file_utils.h"
@@ -23,7 +24,6 @@
 #include "pgsql.h"
 #include "log.h"
 
-#define RUN_PROGRAM_IMPLEMENTATION
 #include "runprogram.h"
 
 

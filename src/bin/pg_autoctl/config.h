@@ -66,6 +66,7 @@ typedef enum
 
 bool build_xdg_path(char *dst, XDGResourceType xdgType,
 						   const char *pgdata, const char *name);
+bool normalize_filename(const char *filename, char *dst, int size);
 
 bool SetConfigFilePath(ConfigFilePaths *pathnames, const char *pgdata);
 bool SetStateFilePath(ConfigFilePaths *pathnames, const char *pgdata);

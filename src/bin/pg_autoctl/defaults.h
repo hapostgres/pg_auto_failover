@@ -53,6 +53,9 @@
 #define KEEPER_PID_FILENAME "pg_autoctl.pid"
 #define KEEPER_INIT_FILENAME "pg_autoctl.init"
 
+#define KEEPER_SYSTEMD_SERVICE "pgautofailover"
+#define KEEPER_SYSTEMD_FILENAME "pgautofailover.service"
+
 /* pg_auto_failover monitor related constants */
 #define PG_AUTOCTL_HEALTH_USERNAME "pgautofailover_monitor"
 #define PG_AUTOCTL_REPLICA_USERNAME "pgautofailover_replicator"
