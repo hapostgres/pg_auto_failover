@@ -16,6 +16,8 @@
 
 #include "postgres_fe.h"
 
+#include "cli_root.h"
+#include "defaults.h"
 #include "file_utils.h"
 #include "log.h"
 
@@ -456,6 +458,9 @@ get_program_absolute_path(char *program, int size)
 		if (readlink(procEntryCandidates[procEntryIndex], program, size) != -1)
 		{
 			found = true;
+			log_debug("Found absolute program \"%s\" in \"%s\"",
+					  program,
+					  procEntryCandidates[procEntryIndex]);
 		}
 		else
 		{
@@ -492,11 +497,14 @@ get_program_absolute_path(char *program, int size)
 
 		if (n < 1)
 		{
-			log_error("Failed to find \"%s\" in PATH environment");
+			log_error("Failed to find \"%s\" in PATH environment",
+					  pg_autoctl_argv0);
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 		else
 		{
+			log_debug("Found \"%s\" in PATH at \"%s\"",
+					  pg_autoctl_argv0, pathEntries[0]);
 			strlcpy(program, pathEntries[0], size);
 			search_pathlist_destroy_result(pathEntries);
 
