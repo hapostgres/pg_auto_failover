@@ -18,7 +18,7 @@ monitor:
 clean-monitor:
 	$(MAKE) -C src/monitor/ clean
 
-install-monitor:
+install-monitor: monitor
 	$(MAKE) -C src/monitor/ install
 
 check-monitor: install-monitor
@@ -30,7 +30,7 @@ bin:
 clean-bin:
 	$(MAKE) -C src/bin/ clean
 
-install-bin:
+install-bin: bin
 	$(MAKE) -C src/bin/ install
 
 test:
