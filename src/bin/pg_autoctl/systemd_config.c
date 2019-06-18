@@ -87,7 +87,7 @@ systemd_config_init(SystemdServiceConfig *config, const char *pgdata)
 	strlcpy(config->WorkingDirectory, config->pgSetup.pgdata, MAXPGPATH);
 
 	snprintf(config->EnvironmentPGDATA, BUFSIZE,
-			 "PGDATA=%s", config->pgSetup.pgdata);
+			 "\"PGDATA=%s\"", config->pgSetup.pgdata);
 
 	strlcpy(config->User, config->pgSetup.username, NAMEDATALEN);
 
@@ -104,38 +104,6 @@ systemd_config_init(SystemdServiceConfig *config, const char *pgdata)
 		log_error("Please review your setup options per above messages");
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
-}
-
-
-/*
- * keeper_config_write_file writes the current values in given KeeperConfig to
- * filename.
- */
-bool
-systemd_config_write_file(SystemdServiceConfig *config)
-{
-	const char *filePath = config->pathnames.systemd;
-	bool success = false;
-	FILE *fileStream = NULL;
-
-	log_trace("systemd_config_write_file \"%s\"", filePath);
-
-	fileStream = fopen(filePath, "w");
-	if (fileStream == NULL)
-	{
-		log_error("Failed to open file \"%s\": %s", filePath, strerror(errno));
-		return false;
-	}
-
-	success = systemd_config_write(fileStream, config);
-
-	if (fclose(fileStream) == EOF)
-	{
-		log_error("Failed to write file \"%s\"", filePath);
-		return false;
-	}
-
-	return success;
 }
 
 
