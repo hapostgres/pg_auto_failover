@@ -22,9 +22,6 @@ extern CommandLine do_monitor_commands;
 /* src/bin/pg_autoctl/cli_do_show.c */
 extern CommandLine do_show_commands;
 
-/* src/bin/pg_autoctl/cli_do_systemd.c */
-extern CommandLine do_systemd_commands;
-
 /* src/bin/pg_autoctl/cli_do_root.c */
 extern CommandLine do_destroy;
 

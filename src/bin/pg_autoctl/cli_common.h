@@ -85,6 +85,9 @@ extern CommandLine show_uri_command;
 extern CommandLine show_events_command;
 extern CommandLine show_state_command;
 
+/* cli_systemd.c */
+extern CommandLine systemd_cat_service_file_command;
+
 
 int cli_create_node_getopts(int argc, char **argv,
 							struct option *long_options,

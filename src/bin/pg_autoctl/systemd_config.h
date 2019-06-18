@@ -42,9 +42,4 @@ void systemd_config_init(SystemdServiceConfig *config, const char *pgdata);
 bool systemd_config_write_file(SystemdServiceConfig *config);
 bool systemd_config_write(FILE *stream, SystemdServiceConfig *config);
 
-bool systemd_enable_linger(void);
-bool systemd_disable_linger(void);
-bool systemd_user_daemon_reload(void);
-bool systemd_user_start_pgautofailover(void);
-
 #endif /* SYSTEMD_CONFIG_H */
