@@ -9,14 +9,13 @@ INCLUDES  = $(patsubst ${SRC_DIR}%.h,%.h,$(wildcard ${SRC_DIR}*.h))
 
 SRC   = $(patsubst ${SRC_DIR}%.c,%.c,$(wildcard ${SRC_DIR}*.c))
 OBJS  = $(patsubst %.c,%.o,$(SRC))
-OBJS += lib-log.o lib-commandline.o lib-runprogram.o
+OBJS += lib-log.o lib-commandline.o
 
 PG_CONFIG ?= pg_config
 BINDIR    ?= $(shell $(PG_CONFIG) --bindir)
 
 LOG_SRC         = $(wildcard ${SRC_DIR}../lib/log/src/log.*)
 COMMANDLINE_SRC = $(wildcard ${SRC_DIR}../lib/subcommands.c/commandline.*)
-RUNPROGRAM_SRC  = $(wildcard ${SRC_DIR}../lib/subcommands.c/runprogram.*)
 
 COMMON_LIBS  = -I${SRC_DIR}../lib/log/src/
 COMMON_LIBS += -I${SRC_DIR}../lib/subcommands.c/
@@ -46,9 +45,6 @@ lib-log.o: $(LOG_SRC)
 
 lib-commandline.o: $(COMMANDLINE_SRC)
 	$(CC) $(CFLAGS) -c -o $@ ${SRC_DIR}../lib/subcommands.c/commandline.c
-
-lib-runprogram.o: $(RUNPROGRAM_SRC)
-	$(CC) $(CFLAGS) -c -o $@ ${SRC_DIR}../lib/subcommands.c/runprogram.c
 
 clean:
 	rm -f $(OBJS) $(PG_AUTOCTL)
