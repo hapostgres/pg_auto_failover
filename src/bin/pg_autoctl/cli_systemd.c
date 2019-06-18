@@ -115,8 +115,9 @@ cli_systemd_cat_service_file(int argc, char **argv)
 
 	log_info("HINT: to complete a systemd integration, "
 			 "run the following commands:");
-	log_info("pg_autoctl -q show systemd | sudo tee %s", config.pathnames.systemd);
-	log_info("sudo systemctl deamon-reload");
+	log_info("pg_autoctl -q show systemd --pgdata %s | sudo tee %s",
+			 config.pgSetup.pgdata, config.pathnames.systemd);
+	log_info("sudo systemctl daemon-reload");
 	log_info("sudo systemctl start pgautofailover");
 
 	if (!systemd_config_write(stdout, &config))
