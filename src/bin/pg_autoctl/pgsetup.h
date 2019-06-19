@@ -107,6 +107,7 @@ typedef struct pg_setup
 	int pgport;                             /* PGPORT */
 	char listen_addresses[MAXPGPATH];       /* listen_addresses */
 	int proxyport;                          /* Proxy port */
+	char authMethod[NAMEDATALEN];           /* auth method, defaults to trust */
 	PostmasterStatus pm_status;				/* Postmaster status */
 	bool is_in_recovery;                    /* select pg_is_in_recovery() */
 	PostgresControlData control;            /* pg_controldata pgdata */
@@ -131,6 +132,7 @@ bool pg_setup_is_running(PostgresSetup *pgSetup);
 bool pg_setup_is_primary(PostgresSetup *pgSetup);
 bool pg_setup_is_ready(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok);
 char *pg_setup_get_username(PostgresSetup *pgSetup);
+char *pg_setup_get_auth_method(PostgresSetup *pgSetup);
 bool pg_setup_set_absolute_pgdata(PostgresSetup *pgSetup);
 
 PgInstanceKind nodeKindFromString(const char *nodeKind);

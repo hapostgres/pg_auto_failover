@@ -28,6 +28,7 @@
 #define POSTGRES_DEFAULT_LISTEN_ADDRESSES "*"
 #define DEFAULT_DATABASE_NAME "postgres"
 #define DEFAULT_USERNAME "postgres"
+#define DEFAULT_AUTH_METHOD "trust"
 #define REPLICATION_SLOT_NAME_DEFAULT "pgautofailover_standby"
 #define REPLICATION_PASSWORD_DEFAULT NULL
 #define FORMATION_DEFAULT "default"

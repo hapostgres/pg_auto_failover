@@ -60,6 +60,10 @@
 	make_strbuf_option("postgresql", "listen_addresses", "listen", \
 					   false, MAXPGPATH, config->pgSetup.listen_addresses)
 
+#define OPTION_POSTGRESQL_AUTH_METHOD(config) \
+	make_strbuf_option("postgresql", "auth_method", "auth", \
+					   false, MAXPGPATH, config->pgSetup.authMethod)
+
 
 #define SET_INI_OPTIONS_ARRAY(config) \
 	{ \
@@ -72,6 +76,7 @@
 		OPTION_POSTGRESQL_HOST(config), \
 		OPTION_POSTGRESQL_PORT(config), \
 		OPTION_POSTGRESQL_LISTEN_ADDRESSES(config), \
+		OPTION_POSTGRESQL_AUTH_METHOD(config), \
 		INI_OPTION_LAST \
 	}
 
@@ -311,6 +316,7 @@ monitor_config_log_settings(MonitorConfig config)
 	log_debug("postgresql.dbname: %s", config.pgSetup.dbname);
 	log_debug("postgresql.host: %s", config.pgSetup.pghost);
 	log_debug("postgresql.port: %d", config.pgSetup.pgport);
+	log_debug("postgresql.auth: %s", config.pgSetup.authMethod);
 }
 
 

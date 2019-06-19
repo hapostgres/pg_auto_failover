@@ -316,6 +316,17 @@ pg_setup_init(PostgresSetup *pgSetup,
 				POSTGRES_DEFAULT_LISTEN_ADDRESSES, MAXPGPATH);
 	}
 
+
+	/*
+	 * If --auth is given, then set our authMethod to this value
+	 * otherwise it remains empty
+	 */
+	if (!IS_EMPTY_STRING_BUFFER(options->authMethod))
+	{
+		strlcpy(pgSetup->authMethod,
+				options->authMethod, NAMEDATALEN);
+	}
+
 	/*
 	 * And we always double-check with PGDATA/postmaster.pid if we have it, and
 	 * we should have it in the normal/expected case.
@@ -832,6 +843,24 @@ pg_setup_get_username(PostgresSetup *pgSetup)
 	log_trace("username fallback to default: %s", DEFAULT_USERNAME);
 
 	return DEFAULT_USERNAME;
+}
+
+
+/*
+ * pg_setup_get_auth_method returns pgSetup->authMethod when it exists, otherwise it
+ * returns DEFAULT_AUTH_METHOD
+ */
+char *
+pg_setup_get_auth_method(PostgresSetup *pgSetup)
+{
+	if (!IS_EMPTY_STRING_BUFFER(pgSetup->authMethod))
+	{
+		return pgSetup->authMethod;
+	}
+
+	log_trace("auth method not configured, falling back to default value : %s", DEFAULT_AUTH_METHOD);
+
+	return DEFAULT_AUTH_METHOD;
 }
 
 
