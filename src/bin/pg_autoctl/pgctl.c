@@ -86,6 +86,8 @@ pg_controldata(PostgresSetup *pgSetup, bool missing_ok)
 	path_in_same_directory(pgSetup->pg_ctl, "pg_controldata", pg_controldata);
 	log_debug("%s %s", pg_controldata, pgSetup->pgdata);
 
+	/* we parse the output of pg_controldata, make sure it's as expected */
+	setenv("LANG", "C", 1);
 	prog = run_program(pg_controldata, pgSetup->pgdata, NULL);
 
 	if (prog.returnCode == 0)
