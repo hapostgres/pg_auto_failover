@@ -196,6 +196,11 @@ checkPgAutoFailoverVersion()
 		"SELECT default_version, installed_version "
 		"FROM pg_catalog.pg_available_extensions WHERE name = $1;";
 
+	if (!EnableVersionChecks)
+	{
+		return true;
+	}
+
 	SPI_connect();
 
 	spiStatus = SPI_execute_with_args(selectQuery, argCount, argTypes, argValues,
