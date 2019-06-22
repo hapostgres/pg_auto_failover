@@ -87,7 +87,7 @@ systemd_config_init(SystemdServiceConfig *config, const char *pgdata)
 	strlcpy(config->WorkingDirectory, config->pgSetup.pgdata, MAXPGPATH);
 
 	snprintf(config->EnvironmentPGDATA, BUFSIZE,
-			 "\"PGDATA=%s\"", config->pgSetup.pgdata);
+			 "\"PGDATA='%s'\"", config->pgSetup.pgdata);
 
 	strlcpy(config->User, config->pgSetup.username, NAMEDATALEN);
 
