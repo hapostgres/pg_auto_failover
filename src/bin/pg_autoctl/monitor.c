@@ -1252,7 +1252,7 @@ parseExtensionVersion(void *ctx, PGresult *result)
 		(MonitorExtensionVersionParseContext *) ctx;
 
 	char *value = NULL;
-	int length;
+	int length = -1;
 
 	/* we have rows: we accept only one */
 	if (PQntuples(result) != 1)

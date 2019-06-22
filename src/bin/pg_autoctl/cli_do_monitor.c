@@ -116,7 +116,9 @@ static CommandLine monitor_resume_node_command =
 
 static CommandLine monitor_version_command =
 	make_command("version",
-				 "Check and display monitor's extension version",
+				 "Check that monitor version is "
+				 PG_AUTOCTL_EXTENSION_VERSION
+				 "; alter extension update if not",
 				 " [ --pgdata ]",
 				 KEEPER_CLI_PGDATA_OPTION,
 				 keeper_cli_getopt_pgdata,
@@ -574,7 +576,10 @@ cli_monitor_resume_node(int argc, char **argv)
 
 
 /*
- * cli_monitor_version checks and displays the monitor extension version.
+ * cli_monitor_version ensures that the version of the monitor is the one that
+ * is expected by pg_autoctl too. When that's not the case, the command issues
+ * an ALTER EXTENSION ... UPDATE TO ... to ensure that the monitor is now
+ * running the expected version number.
  */
 static void
 cli_monitor_version(int argc, char **argv)
