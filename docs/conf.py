@@ -135,7 +135,7 @@ htmlhelp_basename = 'pg_auto_failoverdoc'
 # (source start file, target name, title,
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
-    (master_doc, 'pg_auto_failover.tex', 'pg_auto_failover Documentation',
+    (master_doc, 'pg_auto_failover.tex', 'pg\_auto\_failover Documentation',
      'Microsoft', 'manual'),
 ]
 

@@ -163,7 +163,8 @@ static bool keeper_config_init_nodekind(KeeperConfig *config);
  * function.
  */
 bool
-keeper_config_set_pathnames_from_pgdata(ConfigFilePaths *pathnames, const char *pgdata)
+keeper_config_set_pathnames_from_pgdata(ConfigFilePaths *pathnames,
+										const char *pgdata)
 {
 	if (IS_EMPTY_STRING_BUFFER(pgdata))
 	{

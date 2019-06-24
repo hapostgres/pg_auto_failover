@@ -16,6 +16,7 @@
 #include "keeper.h"
 #include "keeper_config.h"
 
+char pg_autoctl_argv0[MAXPGPATH];
 
 /*
  * Main entry point for the binary.
@@ -24,6 +25,12 @@ int
 main(int argc, char **argv)
 {
 	CommandLine command = root;
+
+	/*
+	 * Stash away the ARGV[0] used to run this program, we might need it to
+	 * fill in our systemd service unit configuration file later.
+	 */
+	strlcpy(pg_autoctl_argv0, argv[0], MAXPGPATH);
 
 	/*
 	 * When PG_AUTOCTL_DEBUG is set in the environement, provide the user
