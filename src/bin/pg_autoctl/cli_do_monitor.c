@@ -43,6 +43,7 @@ static void keeper_cli_monitor_register_node(int argc, char **argv);
 static void keeper_cli_monitor_node_active(int argc, char **argv);
 static void cli_monitor_pause_node(int argc, char **argv);
 static void cli_monitor_resume_node(int argc, char **argv);
+static void cli_monitor_version(int argc, char **argv);
 
 
 static CommandLine monitor_get_primary_command =
@@ -113,12 +114,23 @@ static CommandLine monitor_resume_node_command =
 				 keeper_cli_getopt_pgdata,
 				 cli_monitor_resume_node);
 
+static CommandLine monitor_version_command =
+	make_command("version",
+				 "Check that monitor version is "
+				 PG_AUTOCTL_EXTENSION_VERSION
+				 "; alter extension update if not",
+				 " [ --pgdata ]",
+				 KEEPER_CLI_PGDATA_OPTION,
+				 keeper_cli_getopt_pgdata,
+				 cli_monitor_version);
+
 static CommandLine *monitor_subcommands[] = {
 	&monitor_get_command,
 	&monitor_register_command,
 	&monitor_node_active_command,
 	&monitor_pause_node_command,
 	&monitor_resume_node_command,
+	&monitor_version_command,
 	NULL
 };
 
@@ -560,4 +572,34 @@ cli_monitor_resume_node(int argc, char **argv)
 
 	log_info("Node %s:%d will exit from maintenance state soon",
 			 keeper.config.nodename, keeper.config.pgSetup.pgport);
+}
+
+
+/*
+ * cli_monitor_version ensures that the version of the monitor is the one that
+ * is expected by pg_autoctl too. When that's not the case, the command issues
+ * an ALTER EXTENSION ... UPDATE TO ... to ensure that the monitor is now
+ * running the expected version number.
+ */
+static void
+cli_monitor_version(int argc, char **argv)
+{
+	KeeperConfig config = keeperOptions;
+	Monitor monitor = { 0 };
+	MonitorExtensionVersion version = { 0 };
+
+	if (!monitor_init_from_pgsetup(&monitor, &config.pgSetup))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	/* Check version compatibility */
+	if (!monitor_ensure_extension_version(&monitor, &version))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_MONITOR);
+	}
+
+	fprintf(stdout, "%s\n", version.installedVersion);
 }

@@ -33,12 +33,21 @@ typedef struct MonitorAssignedStateParseContext
 	bool parsedOK;
 } MonitorAssignedStateParseContext;
 
+typedef struct MonitorExtensionVersionParseContext
+{
+	MonitorExtensionVersion *version;
+	bool parsedOK;
+} MonitorExtensionVersionParseContext;
+
 static void parseNode(void *ctx, PGresult *result);
 static void parseNodeState(void *ctx, PGresult *result);
 static void printCurrentState(void *ctx, PGresult *result);
 static void printLastEvents(void *ctx, PGresult *result);
 static void parseCoordinatorNode(void *ctx, PGresult *result);
+static void parseExtensionVersion(void *ctx, PGresult *result);
 
+static bool prepare_connection_to_current_system_user(Monitor *source,
+													  Monitor *target);
 
 /*
  * monitor_init initialises a Monitor struct to connect to the given
@@ -1187,6 +1196,294 @@ monitor_get_notifications(Monitor *monitor)
 		PQfreemem(notify);
 		PQconsumeInput(connection);
 	}
+
+	return true;
+}
+
+
+/*
+ * monitor_get_extension_version gets the current extension version from the
+ * Monitor's Postgres catalog pg_available_extensions.
+ */
+bool
+monitor_get_extension_version(Monitor *monitor, MonitorExtensionVersion *version)
+{
+	MonitorExtensionVersionParseContext context = { version, false };
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT default_version, installed_version"
+		"  FROM pg_available_extensions WHERE name = $1";
+	int paramCount = 1;
+	Oid paramTypes[1] = { TEXTOID };
+	const char *paramValues[1];
+
+	paramValues[0] = PG_AUTOCTL_MONITOR_EXTENSION_NAME;
+
+	if (!pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes, paramValues,
+								   &context, &parseExtensionVersion))
+	{
+		log_error("Failed to get the current version for extension \"%s\", "
+				  "see previous lines for details.",
+				  PG_AUTOCTL_MONITOR_EXTENSION_NAME);
+		return false;
+	}
+
+	if (!context.parsedOK)
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/* disconnect from PostgreSQL now */
+	pgsql_finish(&monitor->pgsql);
+
+	return true;
+}
+
+
+/*
+ * parseExtensionVersion parses the resultset of a query on the Postgres
+ * pg_available_extension_versions catalogs.
+ */
+static void
+parseExtensionVersion(void *ctx, PGresult *result)
+{
+	MonitorExtensionVersionParseContext *context =
+		(MonitorExtensionVersionParseContext *) ctx;
+
+	char *value = NULL;
+	int length = -1;
+
+	/* we have rows: we accept only one */
+	if (PQntuples(result) != 1)
+	{
+		log_error("Query returned %d rows, expected 1", PQntuples(result));
+		context->parsedOK = false;
+		return;
+	}
+
+	if (PQnfields(result) != 2)
+	{
+		log_error("Query returned %d columns, expected 2", PQnfields(result));
+		context->parsedOK = false;
+		return;
+	}
+
+	if (PQgetisnull(result, 0, 0) || PQgetisnull(result, 0, 1))
+	{
+		log_error("default_version or installed_version for extension \"%s\" "
+				  "is NULL ", PG_AUTOCTL_MONITOR_EXTENSION_NAME);
+		context->parsedOK = false;
+		return;
+	}
+
+	value = PQgetvalue(result, 0, 0);
+ 	length = strlcpy(context->version->defaultVersion, value, BUFSIZE);
+	if (length >= BUFSIZE)
+	{
+		log_error("default_version \"%s\" returned by monitor is %d characters, "
+				  "the maximum supported by pg_autoctl is %d",
+				  value, length, BUFSIZE - 1);
+		context->parsedOK = false;
+		return;
+	}
+
+	value = PQgetvalue(result, 0, 1);
+ 	length = strlcpy(context->version->installedVersion, value, BUFSIZE);
+	if (length >= BUFSIZE)
+	{
+		log_error("installed_version \"%s\" returned by monitor is %d characters, "
+				  "the maximum supported by pg_autoctl is %d",
+				  value, length, BUFSIZE - 1);
+		context->parsedOK = false;
+		return;
+	}
+
+	context->parsedOK = true;
+}
+
+/*
+ * monitor_extension_update executes ALTER EXTENSION ... UPDATE TO ...
+ */
+bool
+monitor_extension_update(Monitor *monitor, const char *targetVersion)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+
+	return pgsql_alter_extension_update_to(pgsql,
+										   PG_AUTOCTL_MONITOR_EXTENSION_NAME,
+										   targetVersion);
+}
+
+
+/*
+ * monitor_ensure_extension_version checks that we are running a extension
+ * version on the monitor that we are compatible with in pg_autoctl. If that's
+ * not the case, we blindly try to update the extension version on the monitor
+ * to the target version we have in our default.h.
+ *
+ * NOTE: we don't check here if the update is an upgrade or a downgrade, we
+ * rely on the extension's update path to be free of downgrade paths (such as
+ * pgautofailover--1.2--1.1.sql).
+ */
+bool
+monitor_ensure_extension_version(Monitor *monitor,
+								 MonitorExtensionVersion *version)
+{
+	const char *extensionVersion = PG_AUTOCTL_EXTENSION_VERSION;
+
+	/* in test environement, we can export any target version we want */
+	if (getenv(PG_AUTOCTL_DEBUG) != NULL)
+	{
+		char *val = getenv(PG_AUTOCTL_EXTENSION_VERSION_VAR);
+
+		if (val != NULL)
+		{
+			extensionVersion = val;
+			log_debug("monitor_ensure_extension_version targets extension "
+					  "version \"%s\" - as per environment.",
+					  extensionVersion);
+		}
+	}
+
+	if (!monitor_get_extension_version(monitor, version))
+	{
+		log_fatal("Failed to check version compatibility with the monitor "
+				  "extension \"%s\", see above for details",
+				  PG_AUTOCTL_MONITOR_EXTENSION_NAME);
+		return false;
+	}
+
+	if (strcmp(version->installedVersion, extensionVersion) != 0)
+	{
+		Monitor dbOwnerMonitor = { 0 };
+
+		log_warn("This version of pg_autoctl requires the extension \"%s\" "
+				 "version \"%s\" to be installed on the monitor, current "
+				 "version is \"%s\".",
+				 PG_AUTOCTL_MONITOR_EXTENSION_NAME,
+				 extensionVersion,
+				 version->installedVersion);
+
+		/*
+		 * Ok, let's try to update the extension then.
+		 *
+		 * For that we need to connect as the owner of the database, which was
+		 * the current $USER at the time of the `pg_autoctl create monitor`
+		 * command.
+		 */
+		if (!prepare_connection_to_current_system_user(monitor,
+													   &dbOwnerMonitor))
+		{
+			log_error("Failed to update extension \"%s\" to version \"%s\": "
+					  "failed prepare a connection string to the "
+					  "monitor as the database owner",
+					  PG_AUTOCTL_MONITOR_EXTENSION_NAME,
+					  extensionVersion);
+			return false;
+		}
+
+		if (!monitor_extension_update(&dbOwnerMonitor,
+									  extensionVersion))
+		{
+			log_fatal("Failed to update extension \"%s\" to version \"%s\" "
+					  "on the monitor, see above for details",
+					  PG_AUTOCTL_MONITOR_EXTENSION_NAME,
+					  extensionVersion);
+			return false;
+		}
+
+		if (!monitor_get_extension_version(monitor, version))
+		{
+			log_fatal("Failed to check version compatibility with the monitor "
+					  "extension \"%s\", see above for details",
+					  PG_AUTOCTL_MONITOR_EXTENSION_NAME);
+			return false;
+		}
+
+		log_info("Updated extension \"%s\" to version \"%s\"",
+				 PG_AUTOCTL_MONITOR_EXTENSION_NAME,
+				 version->installedVersion);
+
+		return true;
+	}
+
+	/* just mention we checked, and it's ok */
+	log_info("The version of extenstion \"%s\" is \"%s\" on the monitor",
+			 PG_AUTOCTL_MONITOR_EXTENSION_NAME, version->installedVersion);
+
+	return true;
+}
+
+
+/*
+ * prepare_connection_to_current_system_user changes a given pguri to remove
+ * its "user" connection parameter, filling in the pre-allocated keywords and
+ * values string arrays.
+ *
+ * Postgres docs at the following address show 30 connection parameters, so the
+ * arrays should allocate 31 entries at least. The last one is going to be
+ * NULL.
+ *
+ *  https://www.postgresql.org/docs/current/libpq-connect.html
+ */
+static bool
+prepare_connection_to_current_system_user(Monitor *source, Monitor *target)
+{
+	const char *keywords[41] = { 0 };
+	const char *values[41] = { 0 };
+
+	char *errmsg;
+	PQconninfoOption *conninfo, *option;
+	int argCount = 0;
+
+	conninfo = PQconninfoParse(source->pgsql.connectionString, &errmsg);
+	if (conninfo == NULL)
+	{
+		log_error("Failed to parse pguri \"%s\": %s",
+				  source->pgsql.connectionString, errmsg);
+		PQfreemem(errmsg);
+		return false;
+	}
+
+	for (option = conninfo; option->keyword != NULL; option++)
+	{
+		if (strcmp(option->keyword, "user") == 0)
+		{
+			/* skip the user, $USER is what we want to use here */
+			continue;
+		}
+		else if (option->val)
+		{
+			if (argCount == 40)
+			{
+				log_error("Failed to parse Postgres URI options: "
+						  "pg_autoctl supports up to 40 options "
+						  "and we are parsing more than that.");
+				return false;
+			}
+			keywords[argCount] = option->keyword;
+			values[argCount] = option->val;
+			++argCount;
+		}
+	}
+	keywords[argCount] = NULL;
+	values[argCount] = NULL;
+
+	/* open the connection now, and check that everything is ok */
+	target->pgsql.connection = PQconnectdbParams(keywords, values, 0);
+
+	/* Check to see that the backend connection was successfully made */
+	if (PQstatus(target->pgsql.connection) != CONNECTION_OK)
+	{
+		log_error("Connection to database failed: %s",
+				  PQerrorMessage(target->pgsql.connection));
+		pgsql_finish(&(target->pgsql));
+		PQconninfoFree(conninfo);
+		return false;
+	}
+
+	PQconninfoFree(conninfo);
 
 	return true;
 }

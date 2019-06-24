@@ -140,6 +140,12 @@ cli_keeper_run(int argc, char **argv)
 		exit(EXIT_CODE_PGCTL);
 	}
 
+	if (!keeper_check_monitor_extension_version(&keeper))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_MONITOR);
+	}
+
 	keeper_service_run(&keeper, &pid);
 }
 
@@ -155,7 +161,9 @@ cli_monitor_run(int argc, char **argv)
 	char configFilePath[MAXPGPATH];
 	KeeperConfig kconfig = keeperOptions;
 	MonitorConfig mconfig = { 0 };
+
 	Monitor monitor = { 0 };
+	MonitorExtensionVersion version = { 0 };
 	char postgresUri[MAXCONNINFO];
 
 	PostgresSetup existingPgSetup = { 0 };
@@ -195,6 +203,14 @@ cli_monitor_run(int argc, char **argv)
 	log_info("PostgreSQL is running in \"%s\" on port %d",
 			 mconfig.pgSetup.pgdata, mconfig.pgSetup.pgport);
 
+	/* Check version compatibility */
+	if (!monitor_ensure_extension_version(&monitor, &version))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_MONITOR);
+	}
+
+	/* Now get the the Monitor URI to display it to the user, and move along */
 	if (monitor_config_get_postgres_uri(&mconfig, postgresUri, MAXCONNINFO))
 	{
 		log_info("pg_auto_failover monitor is ready at %s", postgresUri);
