@@ -480,6 +480,7 @@ commands, only available in debug environments::
       active    Call in the pg_auto_failover Node Active protocol
       pause     Pause pg_auto_failover on this node
       resume    Resume pg_auto_failover on this node
+      version   Check that monitor version is 1.0; alter extension update if not
 
     pg_autoctl do monitor get
       primary      Get the primary node from pg_auto_failover in given formation/group
