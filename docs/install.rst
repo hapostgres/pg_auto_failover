@@ -12,6 +12,15 @@ PostgreSQL 11.
 Ubuntu or Debian
 ----------------
 
+Quick install
+~~~~~~~~~~~~~
+
+The following installation method downloads a bash script that automates
+several steps. The full script is available for review at our `package cloud
+installation instructions`__ page.
+
+__ https://packagecloud.io/citusdata/community/install#bash
+  
 .. code-block:: bash
 
   # add the required packages to your system
@@ -23,8 +32,41 @@ Ubuntu or Debian
   # confirm installation
   /usr/bin/pg_autoctl --version
 
+Manual Installation
+~~~~~~~~~~~~~~~~~~~
+
+If you'd prefer to install your repo on your system manually, follow the
+instructions from `package cloud manual installation`__ page. This page will
+guide you with the specific details to achieve the 3 steps:
+
+__ https://packagecloud.io/citusdata/community/install#manual
+
+  1. install CitusData GnuPG key for its package repository
+  2. install a new apt source for CitusData packages
+  3. update your available package list
+
+Then when that's done, you can proceed with installing pg_auto_failover
+itself as in the previous case:
+
+.. code-block:: bash
+
+  # install pg_auto_failover
+  sudo apt-get install postgresql-11-auto-failover
+
+  # confirm installation
+  /usr/bin/pg_autoctl --version
+     
 Fedora, CentOS, or Red Hat
 --------------------------
+
+Quick install
+~~~~~~~~~~~~~
+
+The following installation method downloads a bash script that automates
+several steps. The full script is available for review at our `package cloud
+installation instructions page`__ url.
+
+__ https://packagecloud.io/citusdata/community/install#bash  
 
 .. code-block:: bash
 
@@ -36,6 +78,30 @@ Fedora, CentOS, or Red Hat
 
   # confirm installation
   /usr/pgsql-11/bin/pg_autoctl --version
+
+Manual installation
+~~~~~~~~~~~~~~~~~~~
+
+If you'd prefer to install your repo on your system manually, follow the
+instructions from `package cloud manual installation`__ page. This page will
+guide you with the specific details to achieve the 3 steps:
+
+  1. install the pygpgme yum-utils packages for your distribution
+  2. install a new RPM reposiroty for CitusData packages
+  3. update your local yum cache
+
+Then when that's done, you can proceed with installing pg_auto_failover
+itself as in the previous case:
+     
+.. code-block:: bash
+
+  # install pg_auto_failover
+  sudo yum install -y pg-auto-failover10_11
+
+  # confirm installation
+  /usr/pgsql-11/bin/pg_autoctl --version
+     
+__ https://packagecloud.io/citusdata/community/install#manual-rpm
 
 Installing a pgautofailover Systemd unit
 ----------------------------------------
