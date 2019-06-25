@@ -114,9 +114,10 @@ Here's a sample output from the command:
 
 .. code-block::
 
+   $ export PGDATA=/var/lib/postgresql/monitor
    $ pg_autoctl show systemd
    13:44:34 INFO  HINT: to complete a systemd integration, run the following commands:
-   13:44:34 INFO  pg_autoctl -q show systemd --pgdata /var/lib/postgresql/monitor | sudo tee /etc/systemd/system/pgautofailover.service
+   13:44:34 INFO  pg_autoctl -q show systemd --pgdata "/var/lib/postgresql/monitor" | sudo tee /etc/systemd/system/pgautofailover.service
    13:44:34 INFO  sudo systemctl daemon-reload
    13:44:34 INFO  sudo systemctl start pgautofailover
    [Unit]
@@ -124,7 +125,7 @@ Here's a sample output from the command:
    
    [Service]
    WorkingDirectory = /var/lib/postgresql/monitor
-   Environment = "PGDATA=/var/lib/postgresql/monitor"
+   Environment = 'PGDATA=/var/lib/postgresql/monitor'
    User = postgres
    ExecStart = /usr/lib/postgresql/10/bin/pg_autoctl run
    Restart = always
