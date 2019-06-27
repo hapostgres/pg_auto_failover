@@ -22,45 +22,77 @@ the monitor's role assignment policy.
 Operations
 ----------
 
-The main operations with pg_auto_failover are:
+It is possible to operate pg_auto_failover formations and groups directly
+from the monitor. All that is needed is an access to the monitor Postgres
+database as a client, such as ``psql``. It's also possible to add those
+management SQL function calls in your own ops application if you have one.
 
-  - maintenance of a secondary node
+For security reasons, the ``autoctl_node`` is not allowed to perform
+maintenance operations. This user is limited to what ``pg_autoctl`` needs.
+You can either create a specific user and authentication rule to expose for
+management, or edit the default HBA rules for the ``autoctl`` user. In the
+following examples we're directly connecting as the ``autoctl`` role.
 
-    It is possible to put a secondary node in any group in a MAINTENANCE
-    state, so that the Postgres server is not doing *synchronous
-    replication* anymore and can be taken down for maintenance purposes,
-    such as security kernel upgrades or the like.
+The main operations with pg_auto_failover are node maintenance and manual
+failover, also known as a controlled switchover.
 
-    The monitor exposes the following API to schedule maintenance operations
-    on a secondary node::
+Maintenance of a secondary node
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-      $ psql postgres://autoctl_node@monitor/pg_auto_failover
-      > select pgautofailover.start_maintenance('nodename', 5432);
-      > select pgautofailover.stop_maintenance('nodename', 5432);
+It is possible to put a secondary node in any group in a MAINTENANCE state,
+so that the Postgres server is not doing *synchronous replication* anymore
+and can be taken down for maintenance purposes, such as security kernel
+upgrades or the like.
 
-    When a standby node is in maintenance, the monitor sets the primary node
-    replication to WAIT_PRIMARY: in this role, the PostgreSQL streaming
-    replication is now asynchronous and the standby PostgreSQL server may be
-    stopped, rebooted, etc.
+The monitor exposes the following API to schedule maintenance operations on
+a secondary node::
 
-    pg_auto_failover does not provide support for primary server maintenance.
+  $ psql postgres://autoctl@monitor/pg_auto_failover
+  > select pgautofailover.start_maintenance('nodename', 5432);
+  > select pgautofailover.stop_maintenance('nodename', 5432);
 
-  - triggering a failover
+When a standby node is in maintenance, the monitor sets the primary node
+replication to WAIT_PRIMARY: in this role, the PostgreSQL streaming
+replication is now asynchronous and the standby PostgreSQL server may be
+stopped, rebooted, etc.
 
-    It is possible to trigger a failover manually with pg_auto_failover, by using
-    the SQL API provided by the monitor::
+pg_auto_failover does not provide support for primary server maintenance.
 
-      $ psql postgres://autoctl_node@monitor/pg_auto_failover
-      > select pgautofailover.perform_failover(formation_id => 'default', group_id => 0);
+Triggering a failover
+^^^^^^^^^^^^^^^^^^^^^
 
-    To call the function, you need to figure out the formation and group of
-    the group where the failover happens. The following commands when run on
-    a pg_auto_failover keeper node provide for the necessary information::
+It is possible to trigger a failover manually with pg_auto_failover, by
+using the SQL API provided by the monitor::
 
-      $ export PGDATA=...
-      $ pg_autoctl config get pg_autoctl.formation
-      $ pg_autoctl config get pg_autoctl.group
+  $ psql postgres://autoctl@monitor/pg_auto_failover
+  > select pgautofailover.perform_failover(formation_id => 'default', group_id => 0);
 
+To call the function, you need to figure out the formation and group of the
+group where the failover happens. The following commands when run on a
+pg_auto_failover keeper node provide for the necessary information::
+
+  $ export PGDATA=...
+  $ pg_autoctl config get pg_autoctl.formation
+  $ pg_autoctl config get pg_autoctl.group
+
+Implementing a controlled switchover
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+It is generally useful to distinguish a *controlled switchover* to a
+*failover*. In a controlled switchover situation it is possible to organise
+the sequence of events in a way to avoid data loss and lower downtime to a
+minimum.
+
+In the case of pg_auto_failover, because we use **synchronous replication**,
+we don't face data loss risks when triggering a manual failover. Moreover,
+our monitor knows the current primary health at the time when the failover
+is triggerred, and drives the failover accordingly.
+
+So to trigger a controlled switchover with pg_auto_failover you can use the
+same API as for a manual failover::
+
+  $ psql postgres://autoctl@monitor/pg_auto_failover
+  > select pgautofailover.perform_failover(formation_id => 'default', group_id => 0);
 
 Current state, last events
 --------------------------
