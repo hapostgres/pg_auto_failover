@@ -41,28 +41,28 @@ class Cluster:
         self.monitor = None
         self.datanodes = []
 
-    def create_monitor(self, datadir, port=5432, nodename=None, auth_method=None, password=None):
+    def create_monitor(self, datadir, port=5432, nodename=None, authMethod=None):
         """
         Initializes the monitor and returns an instance of MonitorNode.
         """
         if self.monitor is not None:
             raise Exception("Monitor has already been created.")
         vnode = self.vlan.create_node()
-        self.monitor = MonitorNode(datadir, vnode, port, nodename, auth_method, password)
+        self.monitor = MonitorNode(datadir, vnode, port, nodename, authMethod)
         self.monitor.create()
         return self.monitor
 
     # TODO group should auto sense for normal operations and passed to the
     # create cli as an argument when explicitly set by the test
     def create_datanode(self, datadir, port=5432, group=0,
-                        listen_flag=False, role=Role.Postgres, formation=None, auth_method=None, password=None):
+                        listen_flag=False, role=Role.Postgres, formation=None, authMethod=None):
         """
         Initializes a data node and returns an instance of DataNode. This will
         do the "keeper init" and "pg_autoctl run" commands.
         """
         vnode = self.vlan.create_node()
         nodeid = len(self.datanodes) + 1
-        datanode = DataNode(datadir, vnode, port, os.getenv("USER"), auth_method, password, "postgres",
+        datanode = DataNode(datadir, vnode, port, os.getenv("USER"), authMethod, "postgres",
                             self.monitor, nodeid, group, listen_flag,
                             role, formation)
         self.datanodes.append(datanode)
@@ -82,24 +82,26 @@ class PGNode:
     """
     Common stuff between MonitorNode and DataNode.
     """
-    def __init__(self, datadir, vnode, port, username, auth_method, password, database, role):
+    def __init__(self, datadir, vnode, port, username, authMethod, authenticatedUserCredentials, database, role):
         self.datadir = datadir
         self.vnode = vnode
         self.port = port
         self.username = username
-        self.password = password
-        self.auth_method = auth_method
+        self.authMethod = authMethod
         self.database = database
         self.role = role
         self.pg_autoctl_run_proc = None
+        self.authenticatedUsers = authenticatedUserCredentials
+            
 
     def connection_string(self):
         """
         Returns a connection string which can be used to connect to this postgres
         node.
         """
-        if (self.password is not None):
-            return ("postgres://%s:%s@%s:%d/%s" % (self.username, self.password, self.vnode.address,
+      
+        if (self.authMethod is not None and self.username in self.authenticatedUsers):
+            return ("postgres://%s:%s@%s:%d/%s" % (self.username, self.authenticatedUsers[self.username], self.vnode.address,
                     self.port, self.database))
         
         return ("postgres://%s@%s:%d/%s" % (self.username, self.vnode.address,
@@ -127,6 +129,18 @@ class PGNode:
             except psycopg2.ProgrammingError:
                 return None
 
+    def create_authenticated_users(self):
+        if self.authMethod is None:
+            return
+        for authenticatedUser in self.authenticatedUsers:
+            password = self.authenticatedUsers[authenticatedUser]
+            alter_user_set_passwd_command = 'alter user ' + authenticatedUser + ' with password \'' + password + '\''
+            passwd_command = [shutil.which('psql'), '-d', self.database, '-c', alter_user_set_passwd_command]
+            passwd_proc = self.vnode.run(passwd_command)
+            wait_or_timeout_proc(passwd_proc,
+                             name="monitor passwd",
+                             timeout=COMMAND_TIMEOUT)
+    
     def stop_pg_autoctl(self):
         """
         Kills the keeper by sending a SIGTERM to keeper's process group.
@@ -251,9 +265,9 @@ class PGNode:
                             "pg_autoctl.state")
 
 class DataNode(PGNode):
-    def __init__(self, datadir, vnode, port, username, auth_method, password, database, monitor,
+    def __init__(self, datadir, vnode, port, username, authMethod, database, monitor,
                  nodeid, group, listen_flag, role, formation):
-        super().__init__(datadir, vnode, port, username, auth_method, password, database, role)
+        super().__init__(datadir, vnode, port, username, authMethod, {"pgautofailover_monitor":"monitor_password"}, database, role)
         self.monitor = monitor
         self.nodeid = nodeid
         self.group = group
@@ -289,6 +303,10 @@ class DataNode(PGNode):
         wait_or_timeout_proc(init_proc,
                              name="keeper init",
                              timeout=COMMAND_TIMEOUT)
+
+        if (self.get_state() == 'primary'):
+            super().create_authenticated_users()
+
 
     def wait_until_state(self, target_state, timeout=STATE_CHANGE_TIMEOUT):
         """
@@ -370,9 +388,10 @@ SELECT reportedstate
 
 
 class MonitorNode(PGNode):
-    def __init__(self, datadir, vnode, port, nodename, auth_method, password):
+    def __init__(self, datadir, vnode, port, nodename, authMethod):
+           
         super().__init__(datadir, vnode, port,
-                         "autoctl_node", auth_method, password, "pg_auto_failover", Role.Monitor)
+                         "autoctl_node", authMethod, {'autoctl_node':'autoctl_node_password'}, "pg_auto_failover", Role.Monitor)
 
         # set the nodename, default to the ip address of the node
         if nodename:
@@ -391,20 +410,17 @@ class MonitorNode(PGNode):
                         '--pgport', str(self.port),
                         '--nodename', self.nodename]
         
-        if self.auth_method is not None:
-            init_command.extend(['--auth', self.auth_method])    
+        if self.authMethod is not None:
+            init_command.extend(['--auth', self.authMethod])    
         
         init_proc = self.vnode.run(init_command)
         wait_or_timeout_proc(init_proc,
                              name="create monitor",
                              timeout=COMMAND_TIMEOUT)
-        if self.password is not None:
-            alter_user_set_passwd_command = 'alter user ' + self.username + ' with password' + ' \'' + self.password + '\''
-            passwd_command = [shutil.which('psql'), '-d', self.database, '-c', alter_user_set_passwd_command]
-            passwd_proc = self.vnode.run(passwd_command)
-            wait_or_timeout_proc(passwd_proc,
-                             name="monitor passwd",
-                             timeout=COMMAND_TIMEOUT)
+        
+        if self.authMethod is not None:
+            super().create_authenticated_users()
+        
 
     def create_formation(self, formation_name,
                          kind="pgsql", secondary=None, dbname=None):
@@ -474,15 +490,6 @@ class MonitorNode(PGNode):
                              name="disable feature",
                              timeout=COMMAND_TIMEOUT)
 
-
-    def destroy(self):
-        """
-        Cleans up the processes and files created for the monitor.
-        """
-        # stop monitor
-        self.stop_postgres()
-        # remove monitor
-        shutil.rmtree(self.datadir, ignore_errors=True)
 
 
 def wait_or_timeout_proc(proc, name, timeout):
