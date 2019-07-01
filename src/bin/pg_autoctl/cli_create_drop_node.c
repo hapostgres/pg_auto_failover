@@ -8,6 +8,7 @@
  *
  */
 
+#include <arpa/inet.h>
 #include <errno.h>
 #include <inttypes.h>
 #include <getopt.h>
