@@ -325,6 +325,32 @@ SELECT reportedstate
             return results[0][0]
         return results
 
+    def enable_maintenance(self):
+        """
+        Enables maintenance on a pg_autoctl standby node
+
+        :return:
+        """
+        command = [shutil.which('pg_autoctl'), 'enable', 'maintenance',
+                   '--pgdata', self.datadir]
+        proc = self.vnode.run(command)
+        wait_or_timeout_proc(proc,
+                             name="enable maintenance",
+                             timeout=COMMAND_TIMEOUT)
+
+    def disable_maintenance(self):
+        """
+        Disables maintenance on a pg_autoctl standby node
+
+        :return:
+        """
+        command = [shutil.which('pg_autoctl'), 'disable', 'maintenance',
+                   '--pgdata', self.datadir]
+        proc = self.vnode.run(command)
+        wait_or_timeout_proc(proc,
+                             name="disable maintenance",
+                             timeout=COMMAND_TIMEOUT)
+
     def drop(self):
         """
         Drops a pg_autoctl node from its formation

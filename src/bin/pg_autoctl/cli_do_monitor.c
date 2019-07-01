@@ -27,7 +27,6 @@
 #include "cli_common.h"
 #include "commandline.h"
 #include "defaults.h"
-#include "fsm.h"
 #include "keeper_config.h"
 #include "keeper.h"
 #include "monitor.h"
@@ -41,8 +40,6 @@ static void keeper_cli_monitor_get_other_node(int argc, char **argv);
 static void keeper_cli_monitor_get_coordinator(int argc, char **argv);
 static void keeper_cli_monitor_register_node(int argc, char **argv);
 static void keeper_cli_monitor_node_active(int argc, char **argv);
-static void cli_monitor_pause_node(int argc, char **argv);
-static void cli_monitor_resume_node(int argc, char **argv);
 static void cli_monitor_version(int argc, char **argv);
 
 
@@ -98,22 +95,6 @@ static CommandLine monitor_node_active_command =
 				 keeper_cli_getopt_pgdata,
 				 keeper_cli_monitor_node_active);
 
-static CommandLine monitor_pause_node_command =
-	make_command("pause",
-				 "Pause pg_auto_failover on this node",
-				 " [ --pgdata ]",
-				 KEEPER_CLI_PGDATA_OPTION,
-				 keeper_cli_getopt_pgdata,
-				 cli_monitor_pause_node);
-
-static CommandLine monitor_resume_node_command =
-	make_command("resume",
-				 "Resume pg_auto_failover on this node",
-				 " [ --pgdata ]",
-				 KEEPER_CLI_PGDATA_OPTION,
-				 keeper_cli_getopt_pgdata,
-				 cli_monitor_resume_node);
-
 static CommandLine monitor_version_command =
 	make_command("version",
 				 "Check that monitor version is "
@@ -128,8 +109,6 @@ static CommandLine *monitor_subcommands[] = {
 	&monitor_get_command,
 	&monitor_register_command,
 	&monitor_node_active_command,
-	&monitor_pause_node_command,
-	&monitor_resume_node_command,
 	&monitor_version_command,
 	NULL
 };
@@ -445,133 +424,6 @@ keeper_cli_monitor_node_active(int argc, char **argv)
 			assignedState.nodeId,
 			assignedState.groupId,
 			NodeStateToString(assignedState.state));
-}
-
-
-/*
- * cli_monitor_pause_node calls the pgautofailover.start_maintenance() function
- * on the monitor for the local node.
- */
-static void
-cli_monitor_pause_node(int argc, char **argv)
-{
-	Keeper keeper = { 0 };
-	bool missing_pgdata_is_ok = true;
-	bool pg_is_not_running_is_ok = true;
-	pid_t pid;
-
-	keeper.config = keeperOptions;
-
-	(void) exit_unless_role_is_keeper(&(keeper.config));
-
-	keeper_config_read_file(&(keeper.config),
-							missing_pgdata_is_ok,
-							pg_is_not_running_is_ok);
-
-	if (!keeper_init(&keeper, &keeper.config))
-	{
-		log_fatal("Failed to initialise keeper, see above for details");
-		exit(EXIT_CODE_KEEPER);
-	}
-
-	if (!monitor_init(&(keeper.monitor), keeper.config.monitor_pguri))
-	{
-		log_fatal("Failed to initialize the monitor connection, "
-				  "see above for details.");
-		exit(EXIT_CODE_MONITOR);
-	}
-
-	if (!monitor_start_maintenance(&(keeper.monitor),
-								   keeper.config.nodename,
-								   keeper.config.pgSetup.pgport))
-	{
-		log_fatal("Failed to start maintenance from the monitor, "
-				  "see above for details");
-		exit(EXIT_CODE_MONITOR);
-	}
-
-	if (!read_pidfile(keeper.config.pathnames.pid, &pid))
-	{
-		log_error("Failed to read the keeper's PID file at \"%s\": "
-				  "is the keeper running?", keeper.config.pathnames.pid);
-		exit(EXIT_CODE_KEEPER);
-	}
-
-	log_warn("Signaling the keeper process %d with SIGHUP so that  "
-			 "it calls pgautofailover.node_active() immediately.",
-			 pid);
-
-	if (kill(pid, SIGHUP) != 0)
-	{
-		log_warn("Failed to send SIGHUP to the keeper's pid %d: %s",
-				  pid, strerror(errno));
-	}
-
-	log_info("Node %s:%d will reach maintenance state soon",
-			 keeper.config.nodename, keeper.config.pgSetup.pgport);
-}
-
-
-/*
- * cli_monitor_resume_node calls pgautofailver.stop_maintenance(name, port) on
- * the monitor.
- */
-static void
-cli_monitor_resume_node(int argc, char **argv)
-{
-	Keeper keeper = { 0 };
-	bool missing_pgdata_is_ok = true;
-	bool pg_is_not_running_is_ok = true;
-	pid_t pid;
-
-	keeper.config = keeperOptions;
-
-	(void) exit_unless_role_is_keeper(&(keeper.config));
-
-	keeper_config_read_file(&(keeper.config),
-							missing_pgdata_is_ok,
-							pg_is_not_running_is_ok);
-
-	if (!keeper_init(&keeper, &keeper.config))
-	{
-		log_fatal("Failed to initialise keeper, see above for details");
-		exit(EXIT_CODE_KEEPER);
-	}
-
-	if (!monitor_init(&(keeper.monitor), keeper.config.monitor_pguri))
-	{
-		log_fatal("Failed to initialize the monitor connection, "
-				  "see above for details.");
-		exit(EXIT_CODE_MONITOR);
-	}
-
-	if (!monitor_stop_maintenance(&(keeper.monitor),
-								  keeper.config.nodename,
-								  keeper.config.pgSetup.pgport))
-	{
-		log_fatal("Failed to stop maintenance from the monitor, "
-				  "see above for details");
-		exit(EXIT_CODE_MONITOR);
-	}
-
-	if (!read_pidfile(keeper.config.pathnames.pid, &pid))
-	{
-		log_error("Failed to read the keeper's PID file at \"%s\": "
-				  "is the keeper running?", keeper.config.pathnames.pid);
-		exit(EXIT_CODE_KEEPER);
-	}
-
-	log_warn("Signaling the keeper process %d with SIGHUP so that  "
-			 "it calls pgautofailover.node_active() immediately.", pid);
-
-	if (kill(pid, SIGHUP) != 0)
-	{
-		log_warn("Failed to send SIGHUP to the keeper's pid %d: %s",
-				  pid, strerror(errno));
-	}
-
-	log_info("Node %s:%d will exit from maintenance state soon",
-			 keeper.config.nodename, keeper.config.pgSetup.pgport);
 }
 
 
