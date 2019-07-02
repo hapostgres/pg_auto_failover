@@ -33,7 +33,7 @@ RUN PIPENV_PIPFILE=tests/Pipfile pipenv install --system --deploy
 
 COPY Makefile ./
 COPY ./src/ ./src
-RUN make clean && make install -j8
+RUN make -s clean && make -s install -j8
 
 COPY ./tests/ ./tests
 

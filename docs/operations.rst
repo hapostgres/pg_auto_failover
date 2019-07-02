@@ -51,6 +51,14 @@ a secondary node::
   > select pgautofailover.start_maintenance('nodename', 5432);
   > select pgautofailover.stop_maintenance('nodename', 5432);
 
+The command line tool ``pg_autoctl`` also exposes an API to schedule
+maintenance operations on the current node, which must be a secondary node
+at the moment when maintenance is requested::
+
+  $ pg_autoctl enable maintenance
+  ...
+  $ pg_autoctl disable maintenance
+
 When a standby node is in maintenance, the monitor sets the primary node
 replication to WAIT_PRIMARY: in this role, the PostgreSQL streaming
 replication is now asynchronous and the standby PostgreSQL server may be

@@ -47,39 +47,49 @@ def test_004_read_from_secondary():
 def test_005_writes_to_node2_fail():
     node2.run_sql_query("INSERT INTO t1 VALUES (3)")
 
-def test_006_fail_primary():
+def test_006_maintenance():
+    node2.enable_maintenance()
+    assert node2.wait_until_state(target_state="maintenance")
+    node2.stop_postgres()
+    node1.run_sql_query("INSERT INTO t1 VALUES (3)")
+    node2.disable_maintenance()
+    assert node2.wait_until_pg_is_running()
+    assert node2.wait_until_state(target_state="secondary")
+    assert node1.wait_until_state(target_state="primary")
+
+def test_007_fail_primary():
     node1.fail()
     assert node2.wait_until_state(target_state="wait_primary")
 
-def test_007_writes_to_node2_succeed():
-    node2.run_sql_query("INSERT INTO t1 VALUES (3)")
-    results = node2.run_sql_query("SELECT * FROM t1")
-    assert results == [(1,), (2,), (3,)]
+def test_008_writes_to_node2_succeed():
+    node2.run_sql_query("INSERT INTO t1 VALUES (4)")
+    results = node2.run_sql_query("SELECT * FROM t1 ORDER BY a")
+    assert results == [(1,), (2,), (3,), (4,)]
 
-def test_008_start_node1_again():
+def test_009_start_node1_again():
     node1.run()
     assert node2.wait_until_state(target_state="primary")
     assert node1.wait_until_state(target_state="secondary")
 
-def test_009_read_from_new_secondary():
-    results = node1.run_sql_query("SELECT * FROM t1")
-    assert results == [(1,), (2,), (3, )]
+def test_010_read_from_new_secondary():
+    results = node1.run_sql_query("SELECT * FROM t1 ORDER BY a")
+    assert results == [(1,), (2,), (3,), (4,)]
 
 @raises(Exception)
-def test_010_writes_to_node1_fail():
+def test_011_writes_to_node1_fail():
     node1.run_sql_query("INSERT INTO t1 VALUES (3)")
 
-def test_011_fail_secondary():
+def test_012_fail_secondary():
     node1.fail()
     assert node2.wait_until_state(target_state="wait_primary")
 
-def test_012_drop_secondary():
+def test_013_drop_secondary():
     node1.run()
     assert node1.wait_until_state(target_state="secondary")
     node1.drop()
     assert node2.wait_until_state(target_state="single")
 
-def test_013_add_new_secondary():
+def test_014_add_new_secondary():
     global node3
     node3 = cluster.create_datanode("/tmp/node3")
     node3.create()
@@ -87,6 +97,6 @@ def test_013_add_new_secondary():
     assert node3.wait_until_state(target_state="secondary")
     assert node2.wait_until_state(target_state="primary")
 
-def test_014_drop_primary():
+def test_015_drop_primary():
     node2.drop()
     assert node3.wait_until_state(target_state="single")
