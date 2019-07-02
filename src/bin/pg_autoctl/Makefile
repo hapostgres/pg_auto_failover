@@ -33,7 +33,8 @@ CFLAGS += $(COMMON_LIBS)
 
 LIBS  = -L $(shell $(PG_CONFIG) --libdir)
 LIBS += -L $(shell $(PG_CONFIG) --pkglibdir)
-LIBS += -lpq -lpgport -lpgcommon
+LIBS += $(shell $(PG_CONFIG) --libs)
+LIBS += -lpq
 
 all: $(PG_AUTOCTL) ;
 
