@@ -11,6 +11,12 @@ RUN apt-get update \
     libicu-dev \
     libkrb5-dev \
     libssl-dev \
+    libedit-dev \
+    libpam-dev \
+    zlib1g-dev \
+    libxml2-dev \
+    libxslt1-dev \
+    libselinux1-dev \
     make \
     openssl \
     pipenv \
