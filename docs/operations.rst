@@ -19,6 +19,16 @@ environment variable, and checks whether PostgreSQL is already running. If
 Postgres is detected, the new node is registered in SINGLE mode, bypassing
 the monitor's role assignment policy.
 
+Security
+--------
+Connections between monitor and data nodes use *trust* authentication by
+default. This lets accounts used by ``pg_auto_failover`` to connect to nodes
+without needing a password. Default behaviour could be changed using ``--auth``
+parameter when creating monitor or data Node. Any auth method supported by
+PostgreSQL could be used here. Please refer to
+https://www.postgresql.org/docs/current/auth-pg-hba-conf.html
+for available options.
+
 Operations
 ----------
 
