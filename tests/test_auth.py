@@ -5,7 +5,6 @@ import time
 cluster = None
 node1 = None
 node2 = None
-node3 = None
 
 def setup_module():
     global cluster
@@ -24,10 +23,6 @@ def test_001_init_primary():
     node1.create()
     node1.run()
     assert node1.wait_until_state(target_state="single")
-
-def test_001_stop_postgres():
-    node1.stop_postgres()
-    assert node1.wait_until_pg_is_running()
 
 def test_002_create_t1():
     node1.run_sql_query("CREATE TABLE t1(a int)")

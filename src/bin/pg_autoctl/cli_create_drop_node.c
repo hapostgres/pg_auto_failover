@@ -54,7 +54,8 @@ CommandLine create_monitor_command =
 				 "  --pgctl       path to pg_ctl\n" \
 				 "  --pgdata      path to data directory\n" \
 				 "  --pgport      PostgreSQL's port number\n" \
-				 "  --nodename    hostname by which postgres is reachable\n",
+				 "  --nodename    hostname by which postgres is reachable\n" \
+				 "  --auth        authentication method for connections from data nodes\n",
 				 cli_create_monitor_getopts,
 				 cli_create_monitor);
 
@@ -72,7 +73,7 @@ CommandLine create_postgres_command =
 				 "  --nodename    pg_auto_failover node\n"
 				 "  --formation   pg_auto_failover formation\n"
 				 "  --monitor     pg_auto_failover Monitor Postgres URL\n"
-				 "  --auth        pg_auto_failover authentication method"
+				 "  --auth        authentication method for connections from monitor\n"
 				 KEEPER_CLI_ALLOW_RM_PGDATA_OPTION,
 				 cli_create_postgres_getopts,
 				 cli_create_postgres);

@@ -100,7 +100,7 @@ class PGNode:
         node.
         """
       
-        if (self.authMethod is not None and self.username in self.authenticatedUsers):
+        if (self.authMethod and self.username in self.authenticatedUsers):
             return ("postgres://%s:%s@%s:%d/%s" % (self.username, self.authenticatedUsers[self.username], self.vnode.address,
                     self.port, self.database))
         
@@ -134,7 +134,7 @@ class PGNode:
             return
         for authenticatedUser in self.authenticatedUsers:
             password = self.authenticatedUsers[authenticatedUser]
-            alter_user_set_passwd_command = 'alter user ' + authenticatedUser + ' with password \'' + password + '\''
+            alter_user_set_passwd_command =  "alter user %s with password \'%s\'" % (authenticatedUser, password)
             passwd_command = [shutil.which('psql'), '-d', self.database, '-c', alter_user_set_passwd_command]
             passwd_proc = self.vnode.run(passwd_command)
             wait_or_timeout_proc(passwd_proc,
@@ -410,7 +410,7 @@ class MonitorNode(PGNode):
                         '--pgport', str(self.port),
                         '--nodename', self.nodename]
         
-        if self.authMethod is not None:
+        if self.authMethod:
             init_command.extend(['--auth', self.authMethod])    
         
         init_proc = self.vnode.run(init_command)
@@ -418,7 +418,7 @@ class MonitorNode(PGNode):
                              name="create monitor",
                              timeout=COMMAND_TIMEOUT)
         
-        if self.authMethod is not None:
+        if self.authMethod:
             super().create_authenticated_users()
         
 

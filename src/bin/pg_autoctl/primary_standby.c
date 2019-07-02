@@ -411,17 +411,12 @@ primary_add_standby_to_hba(LocalPostgresServer *postgres, char *standbyHostname,
 	PGSQL *pgsql = &(postgres->sqlClient);
 	PostgresSetup *postgresSetup = &(postgres->postgresSetup);
 	char hbaFilePath[MAXPGPATH];
-	char *authMethod = NULL;
+	char *authMethod =  "trust";
 
 	if (replicationPassword)
 	{
 		authMethod = pg_setup_get_auth_method(postgresSetup);
 	}
-	else
-	{
-		authMethod = "trust";
-	}
-
 
 	log_trace("primary_add_standby_to_hba");
 
