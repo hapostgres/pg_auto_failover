@@ -461,10 +461,12 @@ commands, only available in debug environments::
       state   Prints monitor's state of nodes in a given formation and group
 
     pg_autoctl enable
-      secondary  Enable secondary nodes on a formation
+      secondary    Enable secondary nodes on a formation
+      maintenance  Enable Postgres maintenance mode on this node
 
     pg_autoctl disable
-      secondary  Disable secondary nodes on a formation
+      secondary    Disable secondary nodes on a formation
+      maintenance  Disable Postgres maintenance mode on this node
 
     pg_autoctl do
     + monitor      Query a pg_auto_failover monitor
@@ -478,8 +480,6 @@ commands, only available in debug environments::
     + get       Get information from the monitor
       register  Register the current node with the monitor
       active    Call in the pg_auto_failover Node Active protocol
-      pause     Pause pg_auto_failover on this node
-      resume    Resume pg_auto_failover on this node
       version   Check that monitor version is 1.0; alter extension update if not
 
     pg_autoctl do monitor get
