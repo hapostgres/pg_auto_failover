@@ -123,8 +123,10 @@ commands are dealing with the monitor:
      
      The ``--auth`` option allows setting up authentication method to be used
      for connections from data nodes with ``autoctl_node`` user.
-     If this option to be used, please make sure password is manually set on
-     the monitor, and appropriate setting is added to `.pgpass` file on data node.      
+     If this option is used, please make sure password is manually set on
+     the monitor, and appropriate setting is added to `.pgpass` file on data node.
+     
+     See :ref:`pg_auto_failover_security` for notes on `.pgpass`
 
   - ``pg_autoctl run``
 
@@ -330,8 +332,10 @@ monitor IP and port rather than the public service 8.8.8.8:53.
 
 The ``--auth`` option allows setting up authentication method to be used when
 monitor node makes a connection to data node with `pgautofailover_monitor` user.
-If this option to be used, please make sure password is manually set on the data
+If this option is, please make sure password is manually set on the data
 node, and appropriate setting is added to `.pgpass` file on monitor node.
+
+See :ref:`pg_auto_failover_security` for notes on `.pgpass`
 
 .. _pg_autoctl_configuration:
 
