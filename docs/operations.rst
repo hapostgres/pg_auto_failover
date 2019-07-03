@@ -19,6 +19,32 @@ environment variable, and checks whether PostgreSQL is already running. If
 Postgres is detected, the new node is registered in SINGLE mode, bypassing
 the monitor's role assignment policy.
 
+.. _pg_auto_failover_security:
+
+Security
+--------
+Connections between monitor and data nodes use *trust* authentication by
+default. This lets accounts used by ``pg_auto_failover`` to connect to nodes
+without needing a password. Default behaviour could be changed using ``--auth``
+parameter when creating monitor or data Node. Any auth method supported by
+PostgreSQL could be used here. Please refer to `PostgreSQL pg_hba documentation`__
+for available options.
+
+__ https://www.postgresql.org/docs/current/auth-pg-hba-conf.html
+
+Security for following connections should be considered when setting up
+`.pgpass` file.
+  1. health check connection from monitor for `pgautofailover_monitor` user
+  2. connections for `pg_autoctl` command from data nodes to monitor for `autoctl_node` user
+  3. replication connections from secondary to primary data nodes for `replication` user.
+     Notice that primary and secondary nodes change during failover. Thus this setting
+     should be done on both primary and secondary nodes.
+  4. settings need to be updated after a new node is added.
+See `PostgreSQL documentation`__ on setting up `.pgpass` file.
+
+__ https://www.postgresql.org/docs/current/libpq-pgpass.html
+
+
 Operations
 ----------
 

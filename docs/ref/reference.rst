@@ -91,6 +91,7 @@ commands are dealing with the monitor:
         --pgdata      path to data directory
         --pgport      PostgreSQL's port number
         --nodename    hostname by which postgres is reachable
+        --auth        authentication method for connections from data nodes
 
      The ``--pgdata`` option is mandatory and default to the environment
      variable ``PGDATA``. The ``--pgport`` default value is 5432, and the
@@ -119,6 +120,13 @@ commands are dealing with the monitor:
      You may use the `--nodename` command line option to bypass the whole
      DNS lookup based process and force the local node name to a fixed
      value.
+     
+     The ``--auth`` option allows setting up authentication method to be used
+     for connections from data nodes with ``autoctl_node`` user.
+     If this option is used, please make sure password is manually set on
+     the monitor, and appropriate setting is added to `.pgpass` file on data node.
+     
+     See :ref:`pg_auto_failover_security` for notes on `.pgpass`
 
   - ``pg_autoctl run``
 
@@ -269,6 +277,7 @@ The other commands accept the same set of options.
     --nodename    pg_auto_failover node
     --formation   pg_auto_failover formation
     --monitor     pg_auto_failover Monitor Postgres URL
+    --auth        authentication method for connections from monitor
     --allow-removing-pgdata   Allow pg_autoctl to remove the database directory
 
 Three different modes of initialization are supported by this command,
@@ -320,6 +329,13 @@ prepare a new secondary system from scratch.
 When `--nodename` is omitted, it is computed as above (see
 :ref:`_pg_autoctl_create_monitor`), with the difference that step 1 uses the
 monitor IP and port rather than the public service 8.8.8.8:53.
+
+The ``--auth`` option allows setting up authentication method to be used when
+monitor node makes a connection to data node with `pgautofailover_monitor` user.
+If this option is, please make sure password is manually set on the data
+node, and appropriate setting is added to `.pgpass` file on monitor node.
+
+See :ref:`pg_auto_failover_security` for notes on `.pgpass`
 
 .. _pg_autoctl_configuration:
 

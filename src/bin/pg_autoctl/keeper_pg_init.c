@@ -423,7 +423,8 @@ reach_initial_state(Keeper *keeper)
 					(void) pghba_enable_lan_cidr(&keeper->postgres.sqlClient,
 												 HBA_DATABASE_ALL, NULL,
 												 keeper->config.nodename,
-												 NULL, "trust", NULL);
+												 NULL, DEFAULT_AUTH_METHOD, NULL);
+
 				}
 			}
 			else

@@ -40,6 +40,7 @@ bool allowRemovingPgdata = false;
  *		{ "listen", required_argument, NULL, 'l' },
  *		{ "proxyport", required_argument, NULL, 'y' },
  *		{ "username", required_argument, NULL, 'U' },
+		{ "auth", required_argument, NULL, 'A' },
  *		{ "dbname", required_argument, NULL, 'd' },
  *		{ "nodename", required_argument, NULL, 'n' },
  *		{ "formation", required_argument, NULL, 'f' },
@@ -149,6 +150,13 @@ cli_create_node_getopts(int argc, char **argv,
 				break;
 			}
 
+			case 'A':
+			{
+				/* { "auth", required_argument, NULL, 'A' }, */
+				strlcpy(LocalOptionConfig.pgSetup.authMethod, optarg, NAMEDATALEN);
+				log_trace("--auth %s", LocalOptionConfig.pgSetup.authMethod);
+				break;
+			}
 			case 'd':
 			{
 				/* { "dbname", required_argument, NULL, 'd' } */
