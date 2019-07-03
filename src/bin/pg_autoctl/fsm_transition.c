@@ -58,6 +58,7 @@ fsm_init_primary(Keeper *keeper)
 	char *password = NULL;
 	char monitorHostname[_POSIX_HOST_NAME_MAX];
 	int monitorPort = 0;
+	char *authMethod = NULL;
 
 	log_info("Initialising postgres as a primary");
 
@@ -99,10 +100,11 @@ fsm_init_primary(Keeper *keeper)
 	}
 
 	password = NULL;
+	authMethod = pg_setup_get_auth_method(&(config->pgSetup));
 
 	if (!primary_create_user_with_hba(postgres,
 									  PG_AUTOCTL_HEALTH_USERNAME, password,
-									  monitorHostname))
+									  monitorHostname, authMethod))
 	{
 		log_error("Failed to initialise postgres as primary because creating the "
 				  "database user that the pg_auto_failover monitor "

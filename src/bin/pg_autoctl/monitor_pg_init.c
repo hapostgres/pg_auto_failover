@@ -230,7 +230,9 @@ monitor_install(const char *nodename,
 							   HBA_DATABASE_DBNAME,
 							   PG_AUTOCTL_MONITOR_DBNAME,
 							   nodename,
-							   PG_AUTOCTL_MONITOR_USERNAME, "trust", NULL))
+							   PG_AUTOCTL_MONITOR_USERNAME,
+							   pg_setup_get_auth_method(&pgSetup),
+							   NULL))
 	{
 		log_warn("Failed to grant connection to local network.");
 		return false;

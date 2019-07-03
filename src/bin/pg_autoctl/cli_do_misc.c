@@ -186,7 +186,8 @@ keeper_cli_create_monitor_user(int argc, char **argv)
 
 	if (!primary_create_user_with_hba(&postgres,
 									  PG_AUTOCTL_HEALTH_USERNAME, password,
-									  monitorHostname))
+									  monitorHostname,
+									  pg_setup_get_auth_method(&(config.pgSetup))))
 	{
 		log_fatal("Failed to create the database user that the pg_auto_failover "
 				  " monitor uses for health checks, see above for details");

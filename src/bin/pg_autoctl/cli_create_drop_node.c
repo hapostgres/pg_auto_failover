@@ -54,7 +54,8 @@ CommandLine create_monitor_command =
 				 "  --pgctl       path to pg_ctl\n" \
 				 "  --pgdata      path to data directory\n" \
 				 "  --pgport      PostgreSQL's port number\n" \
-				 "  --nodename    hostname by which postgres is reachable\n",
+				 "  --nodename    hostname by which postgres is reachable\n" \
+				 "  --auth        authentication method for connections from data nodes\n",
 				 cli_create_monitor_getopts,
 				 cli_create_monitor);
 
@@ -72,6 +73,7 @@ CommandLine create_postgres_command =
 				 "  --nodename    pg_auto_failover node\n"
 				 "  --formation   pg_auto_failover formation\n"
 				 "  --monitor     pg_auto_failover Monitor Postgres URL\n"
+				 "  --auth        authentication method for connections from monitor\n"
 				 KEEPER_CLI_ALLOW_RM_PGDATA_OPTION,
 				 cli_create_postgres_getopts,
 				 cli_create_postgres);
@@ -195,6 +197,7 @@ cli_create_postgres_getopts(int argc, char **argv)
 		{ "pgport", required_argument, NULL, 'p' },
 		{ "listen", required_argument, NULL, 'l' },
 		{ "username", required_argument, NULL, 'U' },
+		{ "auth", required_argument, NULL, 'A' },
 		{ "dbname", required_argument, NULL, 'd' },
 		{ "nodename", required_argument, NULL, 'n' },
 		{ "formation", required_argument, NULL, 'f' },
@@ -206,7 +209,7 @@ cli_create_postgres_getopts(int argc, char **argv)
 
 	int optind =
 		cli_create_node_getopts(argc, argv,
-								long_options, "C:D:h:p:l:U:d:n:f:m:R",
+								long_options, "C:D:h:p:l:U:A:d:n:f:m:R",
 								&options);
 
 	/* publish our option parsing in the global variable */
@@ -262,6 +265,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 		{ "pgport", required_argument, NULL, 'p' },
 		{ "nodename", required_argument, NULL, 'n' },
 		{ "listen", required_argument, NULL, 'l' },
+		{ "auth", required_argument, NULL, 'A' },
 		{ "help", no_argument, NULL, 0 },
 		{ NULL, 0, NULL, 0 }
 	};
@@ -271,7 +275,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "C:D:p:",
+	while ((c = getopt_long(argc, argv, "C:D:p:A:",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -317,6 +321,12 @@ cli_create_monitor_getopts(int argc, char **argv)
 				break;
 			}
 
+			case 'A':
+			{
+				strlcpy(options.pgSetup.authMethod, optarg, NAMEDATALEN);
+				log_trace("--auth %s", options.pgSetup.authMethod);
+				break;
+			}
 			default:
 			{
 				/* getopt_long already wrote an error message */
