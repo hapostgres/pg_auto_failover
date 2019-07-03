@@ -238,6 +238,7 @@ keeper_cli_keeper_setup_getopts(int argc, char **argv)
 		{ "listen", required_argument, NULL, 'l' },
 		{ "proxyport", required_argument, NULL, 'y' },
 		{ "username", required_argument, NULL, 'U' },
+		{ "auth", required_argument, NULL, 'A' },
 		{ "dbname", required_argument, NULL, 'd' },
 		{ "nodename", required_argument, NULL, 'n' },
 		{ "formation", required_argument, NULL, 'f' },
@@ -250,7 +251,7 @@ keeper_cli_keeper_setup_getopts(int argc, char **argv)
 
 	int optind =
 		cli_create_node_getopts(argc, argv,
-								long_options, "C:D:h:p:l:y:U:d:n:f:g:m:R",
+								long_options, "C:D:h:p:l:y:U:A:d:n:f:g:m:R",
 								&options);
 
 	/* publish our option parsing in the global variable */

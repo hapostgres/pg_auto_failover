@@ -57,7 +57,7 @@ bool primary_enable_synchronous_replication(LocalPostgresServer *postgres);
 bool primary_disable_synchronous_replication(LocalPostgresServer *postgres);
 bool postgres_add_default_settings(LocalPostgresServer *postgres);
 bool primary_create_user_with_hba(LocalPostgresServer *postgres, char *userName,
-								  char *password, char *hostname);
+								  char *password, char *hostname, char *authMethod);
 bool primary_create_replication_user(LocalPostgresServer *postgres,
 									 char *replicationUser,
 									 char *replicationPassword);

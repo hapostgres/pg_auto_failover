@@ -333,7 +333,7 @@ postgres_add_default_settings(LocalPostgresServer *postgres)
  */
 bool
 primary_create_user_with_hba(LocalPostgresServer *postgres, char *userName,
-							 char *password, char *hostname)
+							 char *password, char *hostname, char *authMethod)
 {
 	PGSQL *pgsql = &(postgres->sqlClient);
 	bool login = true;
@@ -357,7 +357,7 @@ primary_create_user_with_hba(LocalPostgresServer *postgres, char *userName,
 	}
 
 	if (!pghba_ensure_host_rule_exists(hbaFilePath, HBA_DATABASE_ALL, NULL, userName,
-									   hostname, "trust"))
+									   hostname, authMethod))
 	{
 		log_error("Failed to set the pg_hba rule for user \"%s\"", userName);
 		return false;
@@ -411,7 +411,12 @@ primary_add_standby_to_hba(LocalPostgresServer *postgres, char *standbyHostname,
 	PGSQL *pgsql = &(postgres->sqlClient);
 	PostgresSetup *postgresSetup = &(postgres->postgresSetup);
 	char hbaFilePath[MAXPGPATH];
-	char* authMethod = replicationPassword ? "md5" : "trust";
+	char *authMethod =  "trust";
+
+	if (replicationPassword)
+	{
+		authMethod = pg_setup_get_auth_method(postgresSetup);
+	}
 
 	log_trace("primary_add_standby_to_hba");
 
