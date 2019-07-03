@@ -31,8 +31,8 @@ CFLAGS += -I $(shell $(PG_CONFIG) --cflags)
 CFLAGS += -Wformat
 CFLAGS += $(COMMON_LIBS)
 
-LIBS  = -L $(shell $(PG_CONFIG) --libdir)
-LIBS += -L $(shell $(PG_CONFIG) --pkglibdir)
+LIBS  = -L $(shell $(PG_CONFIG) --pkglibdir)
+LIBS += $(shell $(PG_CONFIG) --ldflags)
 LIBS += $(shell $(PG_CONFIG) --libs)
 LIBS += -lpq
 
