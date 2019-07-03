@@ -82,7 +82,7 @@ class PGNode:
     """
     Common stuff between MonitorNode and DataNode.
     """
-    def __init__(self, datadir, vnode, port, username, authMethod, authenticatedUserCredentials, database, role):
+    def __init__(self, datadir, vnode, port, username, authMethod, database, role):
         self.datadir = datadir
         self.vnode = vnode
         self.port = port
@@ -91,7 +91,7 @@ class PGNode:
         self.database = database
         self.role = role
         self.pg_autoctl_run_proc = None
-        self.authenticatedUsers = authenticatedUserCredentials
+        self.authenticatedUsers = {}
             
 
     def connection_string(self):
@@ -99,7 +99,6 @@ class PGNode:
         Returns a connection string which can be used to connect to this postgres
         node.
         """
-      
         if (self.authMethod and self.username in self.authenticatedUsers):
             return ("postgres://%s:%s@%s:%d/%s" % (self.username, self.authenticatedUsers[self.username], self.vnode.address,
                     self.port, self.database))
@@ -129,17 +128,17 @@ class PGNode:
             except psycopg2.ProgrammingError:
                 return None
 
-    def create_authenticated_users(self):
-        if self.authMethod is None:
-            return
-        for authenticatedUser in self.authenticatedUsers:
-            password = self.authenticatedUsers[authenticatedUser]
-            alter_user_set_passwd_command =  "alter user %s with password \'%s\'" % (authenticatedUser, password)
-            passwd_command = [shutil.which('psql'), '-d', self.database, '-c', alter_user_set_passwd_command]
-            passwd_proc = self.vnode.run(passwd_command)
-            wait_or_timeout_proc(passwd_proc,
-                             name="monitor passwd",
-                             timeout=COMMAND_TIMEOUT)
+    def set_user_password(self, username, password):
+        """
+        Sets user passwords on the PGNode
+        """
+        alter_user_set_passwd_command =  "alter user %s with password \'%s\'" % (username, password)
+        passwd_command = [shutil.which('psql'), '-d', self.database, '-c', alter_user_set_passwd_command]
+        passwd_proc = self.vnode.run(passwd_command)
+        wait_or_timeout_proc(passwd_proc,
+                         name="user passwd",
+                         timeout=COMMAND_TIMEOUT)
+        self.authenticatedUsers[username] = password
     
     def stop_pg_autoctl(self):
         """
@@ -267,7 +266,7 @@ class PGNode:
 class DataNode(PGNode):
     def __init__(self, datadir, vnode, port, username, authMethod, database, monitor,
                  nodeid, group, listen_flag, role, formation):
-        super().__init__(datadir, vnode, port, username, authMethod, {"pgautofailover_monitor":"monitor_password"}, database, role)
+        super().__init__(datadir, vnode, port, username, authMethod, database, role)
         self.monitor = monitor
         self.nodeid = nodeid
         self.group = group
@@ -303,9 +302,6 @@ class DataNode(PGNode):
         wait_or_timeout_proc(init_proc,
                              name="keeper init",
                              timeout=COMMAND_TIMEOUT)
-
-        if (self.get_state() == 'primary'):
-            super().create_authenticated_users()
 
 
     def wait_until_state(self, target_state, timeout=STATE_CHANGE_TIMEOUT):
@@ -391,7 +387,7 @@ class MonitorNode(PGNode):
     def __init__(self, datadir, vnode, port, nodename, authMethod):
            
         super().__init__(datadir, vnode, port,
-                         "autoctl_node", authMethod, {'autoctl_node':'autoctl_node_password'}, "pg_auto_failover", Role.Monitor)
+                         "autoctl_node", authMethod, "pg_auto_failover", Role.Monitor)
 
         # set the nodename, default to the ip address of the node
         if nodename:
@@ -417,10 +413,7 @@ class MonitorNode(PGNode):
         wait_or_timeout_proc(init_proc,
                              name="create monitor",
                              timeout=COMMAND_TIMEOUT)
-        
-        if self.authMethod:
-            super().create_authenticated_users()
-        
+      
 
     def create_formation(self, formation_name,
                          kind="pgsql", secondary=None, dbname=None):
