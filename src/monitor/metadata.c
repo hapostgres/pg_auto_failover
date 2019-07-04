@@ -191,6 +191,7 @@ checkPgAutoFailoverVersion()
 	const int argCount = 1;
 	Oid argTypes[] = { TEXTOID };
 	Datum argValues[] = { CStringGetTextDatum(AUTO_FAILOVER_EXTENSION_NAME) };
+	MemoryContext callerContext = CurrentMemoryContext;
 
 	char *selectQuery =
 		"SELECT default_version, installed_version "
@@ -220,6 +221,7 @@ checkPgAutoFailoverVersion()
 		TupleDesc tupleDescriptor = SPI_tuptable->tupdesc;
 		HeapTuple heapTuple = SPI_tuptable->vals[0];
 		bool defaultIsNull = false, installedIsNull = false;
+		MemoryContext spiContext = MemoryContextSwitchTo(callerContext);
 
 		Datum defaultVersionDatum =
 			heap_getattr(heapTuple, 1, tupleDescriptor, &defaultIsNull);
@@ -236,6 +238,8 @@ checkPgAutoFailoverVersion()
 		{
 			installedVersion = TextDatumGetCString(installedVersionDatum);
 		}
+
+		MemoryContextSwitchTo(spiContext);
 	}
 
 	SPI_finish();
