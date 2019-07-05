@@ -274,7 +274,7 @@ error message:
 ERROR pg_autoctl doesn't know how to register an already existing standby server at the moment
 ~~~
 
-We might male it possible at some future point to re-use an existing
+We might make it possible at some future point to re-use an existing
 secondary server in a pg_auto_failover setup.
 
 ## Application and Connection Strings
