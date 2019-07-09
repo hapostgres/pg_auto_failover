@@ -133,6 +133,19 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 		char netmask[INET6_ADDRSTRLEN] = { 0 };
 		char address[INET6_ADDRSTRLEN] = { 0 };
 
+		/*
+		 * Some interfaces might have an empty ifa_addr, such as when using the
+		 * PPTP protocol. With a NULL ifa_addr we can't inquire about the IP
+		 * address and its netmask to compute any CIDR notation, so we skip the
+		 * entry.
+		 */
+		if (ifa->ifa_addr == NULL)
+		{
+			log_debug("Skipping interface \"%s\" with NULL ifa_addr",
+					  ifa->ifa_name);
+			continue;
+		}
+
 		switch (ifa->ifa_addr->sa_family)
 		{
 			case AF_INET:
@@ -318,6 +331,20 @@ fetchIPAddressFromInterfaceList(char *localIpAddress, int size)
  	{
 		if (ifaddr->ifa_flags & IFF_LOOPBACK)
 		{
+			log_trace("Skipping loopback interface \"%s\"", ifaddr->ifa_name);
+			continue;
+		}
+
+		/*
+		 * Some interfaces might have an empty ifa_addr, such as when using the
+		 * PPTP protocol. With a NULL ifa_addr we can't inquire about the IP
+		 * address and its netmask to compute any CIDR notation, so we skip the
+		 * entry.
+		 */
+		if (ifaddr->ifa_addr == NULL)
+		{
+			log_debug("Skipping interface \"%s\" with NULL ifa_addr",
+					  ifaddr->ifa_name);
 			continue;
 		}
 
@@ -436,6 +463,19 @@ findHostnameLocalAddress(const char *hostname, char *localIpAddress, int size)
 	{
 		for (ifaddr = ifaddrList; ifaddr != NULL; ifaddr = ifaddr->ifa_next)
 		{
+			/*
+			 * Some interfaces might have an empty ifa_addr, such as when using
+			 * the PPTP protocol. With a NULL ifa_addr we can't inquire about
+			 * the IP address and its netmask to compute any CIDR notation, so
+			 * we skip the entry.
+			 */
+			if (ifaddr->ifa_addr == NULL)
+			{
+				log_debug("Skipping interface \"%s\" with NULL ifa_addr",
+						  ifaddr->ifa_name);
+				continue;
+			}
+
 			if (ifaddr->ifa_addr->sa_family == AF_INET
 				&& dns_addr->ai_family == AF_INET)
 			{
