@@ -471,6 +471,13 @@ fsm_rewind_or_init(Keeper *keeper)
 		}
 	}
 
+	if (!primary_drop_replication_slot(postgres, config->replication_slot_name))
+	{
+		log_error("Failed to drop replication slot \"%s\" used by the standby failed",
+				  config->replication_slot_name);
+		return false;
+	}
+
 	return true;
 }
 
