@@ -483,6 +483,17 @@ class MonitorNode(PGNode):
                              name="disable feature",
                              timeout=COMMAND_TIMEOUT)
 
+    def failover(self, formation='default', group=0):
+        """
+        performs manual failover for given formation and group id
+        """
+        failover_commmand_text = "select * from pgautofailover.perform_failover('%s', %s)" %(formation, group)
+        failover_command = [shutil.which('psql'), '-d', self.database, '-c', failover_commmand_text]
+        failover_proc = self.vnode.run(failover_command)
+        wait_or_timeout_proc(failover_proc,
+                         name="manual failover",
+                         timeout=COMMAND_TIMEOUT)
+
 
 
 def wait_or_timeout_proc(proc, name, timeout):
