@@ -306,8 +306,6 @@ static void
 cli_show_uri(int argc, char **argv)
 {
 	KeeperConfig config = keeperOptions;
-	Monitor monitor = { 0 };
-
 	if (!IS_EMPTY_STRING_BUFFER(config.formation))
 	{
 		(void) cli_show_formation_uri(argc, argv);

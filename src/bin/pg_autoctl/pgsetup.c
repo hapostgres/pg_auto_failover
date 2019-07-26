@@ -410,8 +410,6 @@ static bool
 get_pgpid(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 {
 	FILE *fp;
-	int lineno;
-	char line[BUFSIZE];
 	char pidfile[MAXPGPATH];
 	long pid = -1;
 

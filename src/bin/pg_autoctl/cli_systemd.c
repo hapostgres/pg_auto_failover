@@ -48,7 +48,7 @@ cli_systemd_getopt(int argc, char **argv)
 {
 	SystemdServiceConfig options = { 0 };
 
-	int c = 0, option_index = 0, errors = 0;
+	int c = 0, option_index = 0;
 
 	static struct option long_options[] = {
 		{ "pgdata", required_argument, NULL, 'D' },

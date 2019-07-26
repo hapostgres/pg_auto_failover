@@ -112,7 +112,6 @@ CommandLine root =
 int
 root_options(int argc, char **argv)
 {
-	int debugCount = 0;
 	int verboseCount = 0;
 
 	static struct option long_options[] = {

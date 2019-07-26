@@ -228,7 +228,6 @@ int
 keeper_cli_keeper_setup_getopts(int argc, char **argv)
 {
 	KeeperConfig options = { 0 };
-	int c, option_index, errors = 0;
 
 	static struct option long_options[] = {
 		{ "pgctl", required_argument, NULL, 'C' },

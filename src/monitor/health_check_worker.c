@@ -230,11 +230,11 @@ HealthCheckWorkerLauncherMain(Datum arg)
 	/* Make background worker recognisable in pg_stat_activity */
 	pgstat_report_appname("pg_auto_failover monitor launcher");
 
-	launcherContext = AllocSetContextCreateExtended(CurrentMemoryContext,
-													"Health Check Launcher Context",
-													ALLOCSET_DEFAULT_MINSIZE,
-													ALLOCSET_DEFAULT_INITSIZE,
-													ALLOCSET_DEFAULT_MAXSIZE);
+	launcherContext = AllocSetContextCreate(CurrentMemoryContext,
+											"Health Check Launcher Context",
+											ALLOCSET_DEFAULT_MINSIZE,
+											ALLOCSET_DEFAULT_INITSIZE,
+											ALLOCSET_DEFAULT_MAXSIZE);
 
 	MemoryContextSwitchTo(launcherContext);
 
@@ -352,7 +352,7 @@ BuildDatabaseList(void)
 {
 	List	   *databaseList = NIL;
 	Relation	pgDatabaseRelation;
-	HeapScanDesc scan;
+	TableScanDesc scan;
 	HeapTuple	dbTuple;
 	MemoryContext originalContext = CurrentMemoryContext;
 
@@ -360,7 +360,7 @@ BuildDatabaseList(void)
 
 	pgDatabaseRelation = heap_open(DatabaseRelationId, AccessShareLock);
 
-	scan = heap_beginscan_catalog(pgDatabaseRelation, 0, NULL);
+	scan = table_beginscan_catalog(pgDatabaseRelation, 0, NULL);
 
 	while (HeapTupleIsValid(dbTuple = heap_getnext(scan, ForwardScanDirection)))
 	{
@@ -449,11 +449,11 @@ HealthCheckWorkerMain(Datum arg)
 	 * Only process given database when the extension has been loaded.
 	 * Otherwise, happily quit.
 	 */
-	healthCheckContext = AllocSetContextCreateExtended(CurrentMemoryContext,
-													   "Health check context",
-													   ALLOCSET_DEFAULT_MINSIZE,
-													   ALLOCSET_DEFAULT_INITSIZE,
-													   ALLOCSET_DEFAULT_MAXSIZE);
+	healthCheckContext = AllocSetContextCreate(CurrentMemoryContext,
+											   "Health check context",
+											   ALLOCSET_DEFAULT_MINSIZE,
+											   ALLOCSET_DEFAULT_INITSIZE,
+											   ALLOCSET_DEFAULT_MAXSIZE);
 
 	MemoryContextSwitchTo(healthCheckContext);
 

@@ -16,6 +16,7 @@
 
 #include "metadata.h"
 #include "replication_state.h"
+#include "version_compat.h"
 
 #include "access/htup.h"
 #include "access/htup_details.h"

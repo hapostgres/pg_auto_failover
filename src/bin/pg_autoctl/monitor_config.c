@@ -445,7 +445,6 @@ monitor_config_set_setting(MonitorConfig *config,
 						   char *value)
 {
 	const char *filename = config->pathnames.config;
-	IniOption *option;
 	IniOption monitorOptions[] = SET_INI_OPTIONS_ARRAY(config);
 
 	if (ini_set_setting(filename, monitorOptions, path, value))
