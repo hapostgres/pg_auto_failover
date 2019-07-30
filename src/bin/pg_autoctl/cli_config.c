@@ -79,7 +79,6 @@ CommandLine config_commands =
 static void
 cli_config_check(int argc, char **argv)
 {
-	int errors = 0;
 	const bool missingPgdataIsOk = true;
 	const bool pgIsNotRunningIsOk = true;
 

@@ -57,7 +57,6 @@ monitor_pg_init(Monitor *monitor, MonitorConfig *config)
 	char configFilePath[MAXPGPATH];
 	char postgresUri[MAXCONNINFO];
 	PostgresSetup pgSetup = config->pgSetup;
-	bool postgresInstanceExists = pg_setup_pgdata_exists(&pgSetup);
 
 	if (directory_exists(pgSetup.pgdata))
 	{

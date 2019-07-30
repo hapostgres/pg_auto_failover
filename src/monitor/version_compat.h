@@ -14,7 +14,12 @@
 
 #include "postgres.h"
 
-#if (PG_VERSION_NUM >= 90600 && PG_VERSION_NUM < 110000)
+/* we only support PG10 and PG11, PG 12 is not supported yet*/
+#if (PG_VERSION_NUM < 100000 || PG_VERSION_NUM >= 120000)
+#error "Unknown or unsupported postgresql version"
+#endif
+
+#if (PG_VERSION_NUM < 110000)
 
 #include "postmaster/bgworker.h"
 #include "utils/memutils.h"
@@ -27,12 +32,24 @@
 #define BackgroundWorkerInitializeConnectionByOid(dboid, useroid, flags) \
 	BackgroundWorkerInitializeConnectionByOid(dboid, useroid)
 
-static inline MemoryContext
-AllocSetContextCreateExtended(MemoryContext parent, const char *name, Size minContextSize,
-							  Size initBlockSize, Size maxBlockSize)
+#endif
+
+#if (PG_VERSION_NUM < 120000)
+
+#define table_beginscan_catalog heap_beginscan_catalog
+#define TableScanDesc HeapScanDesc
+
+#endif
+
+#if (PG_VERSION_NUM >= 120000)
+
+#include "access/htup_details.h"
+#include "catalog/pg_database.h"
+
+static inline Oid HeapTupleGetOid(HeapTuple tuple)
 {
-	return AllocSetContextCreate(parent, name, minContextSize, initBlockSize,
-								 maxBlockSize);
+	Form_pg_database dbForm = (Form_pg_database) GETSTRUCT(tuple);
+	return dbForm->oid;
 }
 
 #endif

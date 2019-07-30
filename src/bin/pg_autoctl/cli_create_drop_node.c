@@ -398,9 +398,7 @@ cli_create_monitor(int argc, char **argv)
 {
 	Monitor monitor = { 0 };
 	MonitorConfig config = monitorOptions;
-	PostgresSetup pgSetup = config.pgSetup;
 	char connInfo[MAXCONNINFO];
-	char ipAddr[BUFSIZE];
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
 

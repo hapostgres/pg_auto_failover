@@ -584,8 +584,6 @@ findHostnameFromLocalIpAddress(char *localIpAddress, char *hostname, int size)
 	int ret = 0;
 	char hbuf[NI_MAXHOST];
 	struct addrinfo *lookup, *ai;
-	struct sockaddr_storage address;
-	socklen_t address_len;
 
 	/* parse ipv4 or ipv6 address using getaddrinfo() */
 	ret = getaddrinfo(localIpAddress, NULL, 0, &lookup);
