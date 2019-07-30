@@ -1,3 +1,13 @@
+### pg_auto_failover v1.0.3 (Jul 30, 2019) ###
+
+* Add support for systemd integration
+* Allow pg_auto_failover extension upgrade
+* Add enable/disable maintenance command in CLI
+* Add --auth option to configure authentication method
+* Fix crash when ip address can not be resolved in network interface (#40)
+* Fix replication slot being left open after a failover (#42)
+* Other minor fixes
+
 ### pg_auto_failover v1.0.2 (May 23, 2019) ###
 
 * Implement a default value for --nodename (#6, #16)
