@@ -289,7 +289,7 @@ monitor_node_active(Monitor *monitor,
 					char *formation, char *host, int port, int nodeId,
 					int groupId, NodeState currentState,
 					bool pgIsRunning,
-					uint64_t replicationLag, char *pgsrSyncState,
+					char *receivedLSN, char *pgsrSyncState,
 					MonitorAssignedState *assignedState)
 {
 	PGSQL *pgsql = &monitor->pgsql;
@@ -298,7 +298,7 @@ monitor_node_active(Monitor *monitor,
 		"$6::pgautofailover.replication_state, $7, $8, $9)";
 	int paramCount = 9;
 	Oid paramTypes[9] = { TEXTOID, TEXTOID, INT4OID, INT4OID,
-						  INT4OID, TEXTOID, BOOLOID, INT8OID, TEXTOID };
+						  INT4OID, TEXTOID, BOOLOID, LSNOID, TEXTOID };
 	const char *paramValues[9];
 	MonitorAssignedStateParseContext parseContext = { assignedState, false };
 	const char *nodeStateString = NodeStateToString(currentState);
@@ -310,8 +310,10 @@ monitor_node_active(Monitor *monitor,
 	paramValues[4] = intToString(groupId).strValue;
 	paramValues[5] = nodeStateString;
 	paramValues[6] = pgIsRunning ? "true" : "false";
-	paramValues[7] = intToString(replicationLag).strValue;
+	paramValues[7] = receivedLSN;
 	paramValues[8] = pgsrSyncState;
+
+	log_info("calling monitor node active with lsn %s", receivedLSN);
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
@@ -320,10 +322,10 @@ monitor_node_active(Monitor *monitor,
 		log_error("Failed to get node state for node %d (%s:%d) "
 				  "in group %d of formation \"%s\" with initial state "
 				  "\"%s\", replication state \"%s\", "
-				  "and replication lag %" PRId64 ", "
+				  "and latest received lsn \"%s\", "
 				  "see previous lines for details",
 				  nodeId, host, port, groupId, formation, nodeStateString,
-				  pgsrSyncState, replicationLag);
+				  pgsrSyncState, receivedLSN);
 		return false;
 	}
 
@@ -334,11 +336,11 @@ monitor_node_active(Monitor *monitor,
 	{
 		log_error("Failed to get node state for node %d (%s:%d) in group %d of formation "
 				  "\"%s\" with initial state \"%s\", replication state \"%s\","
-				  " and replication lag %" PRId64
+				  " and latest received lsn \"%s\""
 				  " because the monitor returned an unexpected result, "
 				  "see previous lines for details",
 				  nodeId, host, port, groupId, formation, nodeStateString,
-				  pgsrSyncState, replicationLag);
+				  pgsrSyncState, receivedLSN);
 		return false;
 	}
 

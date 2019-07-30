@@ -62,7 +62,7 @@ bool monitor_node_active(Monitor *monitor,
 						 char *formation, char *host, int port, int nodeId,
 						 int groupId, NodeState currentState,
 						 bool pgIsRunning,
-						 uint64_t replicationLag, char *pgsrSyncState,
+						 char *latestLSN, char *pgsrSyncState,
 						 MonitorAssignedState *assignedState);
 bool monitor_remove(Monitor *monitor, char *host, int port);
 bool monitor_print_state(Monitor *monitor, char *formation, int group);

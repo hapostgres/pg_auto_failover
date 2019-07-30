@@ -27,7 +27,7 @@ typedef struct LocalPostgresServer
 	PostgresSetup	postgresSetup;
 	bool			pgIsRunning;
 	char			pgsrSyncState[PGSR_SYNC_STATE_MAXLENGTH];
-	int64_t			walLag;
+	char            receivedLsn[NAMEDATALEN];
 	uint64_t		pgFirstStartFailureTs;
 	int				pgStartRetries;
 	PgInstanceKind	pgKind;

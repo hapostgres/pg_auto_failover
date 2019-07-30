@@ -280,13 +280,13 @@ keeper_fsm_step(Keeper *keeper)
 	log_info("Calling node_active for node %s/%d/%d with current state: "
 			 "PostgreSQL is running is %s, "
 			 "sync_state is \"%s\", "
-			 "WAL delta is %" PRId64 ".",
+			 "latest WAL LSN is %s.",
 			 config->formation,
 			 keeperState->current_node_id,
 			 keeperState->current_group,
 			 postgres->pgIsRunning ? "true" : "false",
 			 postgres->pgsrSyncState,
-			 postgres->walLag);
+			 postgres->receivedLsn);
 
 	if (!monitor_node_active(monitor,
 							 config->formation,
@@ -296,7 +296,7 @@ keeper_fsm_step(Keeper *keeper)
 							 keeperState->current_group,
 							 keeperState->current_role,
 							 postgres->pgIsRunning,
-							 postgres->walLag,
+							 postgres->receivedLsn,
 							 postgres->pgsrSyncState,
 							 &assignedState))
 	{

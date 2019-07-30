@@ -22,6 +22,7 @@
 #include "executor/spi.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
+#include "utils/pg_lsn.h"
 
 
 /*
@@ -65,7 +66,7 @@ NotifyStateChange(ReplicationState reportedState,
 				  const char *nodeName,
 				  int nodePort,
 				  SyncState pgsrSyncState,
-				  int64 xlogDelta,
+				  XLogRecPtr currentLSN,
 				  char *description)
 {
 	int64 eventid;
@@ -75,7 +76,7 @@ NotifyStateChange(ReplicationState reportedState,
 	 * Insert the event in our events table.
 	 */
 	eventid = InsertEvent(formationId, groupId, nodeId, nodeName, nodePort,
-						  reportedState, goalState, pgsrSyncState, xlogDelta,
+						  reportedState, goalState, pgsrSyncState, currentLSN,
 						  description);
 
 	/*
@@ -111,7 +112,7 @@ InsertEvent(const char *formationId, int groupId, int64 nodeId,
 			ReplicationState reportedState,
 			ReplicationState goalState,
 			SyncState pgsrSyncState,
-			int64 xlogDelta,
+			XLogRecPtr latestLSN,
 			char *description)
 {
 	Oid goalStateOid = ReplicationStateGetEnum(goalState);
@@ -127,7 +128,7 @@ InsertEvent(const char *formationId, int groupId, int64 nodeId,
 		replicationStateTypeOid, /* reportedstate */
 		replicationStateTypeOid, /* goalstate */
 		TEXTOID, /* pg_stat_replication.sync_state */
-		INT8OID, /* xlogdelta */
+		LSNOID, /* latestLSN */
 		TEXTOID	 /* description */
 	};
 
@@ -140,7 +141,7 @@ InsertEvent(const char *formationId, int groupId, int64 nodeId,
 		ObjectIdGetDatum(reportedStateOid),	/* reportedstate */
 		ObjectIdGetDatum(goalStateOid),		/* goalstate */
 		CStringGetTextDatum(SyncStateToString(pgsrSyncState)), /* sync_state */
-		Int64GetDatum(xlogDelta),			/* xlogDelta */
+		LSNGetDatum(latestLSN),				/* latestLSN */
 		CStringGetTextDatum(description)	/* description */
 	};
 
@@ -151,7 +152,7 @@ InsertEvent(const char *formationId, int groupId, int64 nodeId,
 	const char *insertQuery =
 		"INSERT INTO " AUTO_FAILOVER_EVENT_TABLE
 		"(formationid, nodeid, groupid, nodename, nodeport,"
-		" reportedstate, goalstate, reportedrepstate, waldelta, description) "
+		" reportedstate, goalstate, reportedrepstate, latestlsn, description) "
 		"VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING eventid";
 
 	SPI_connect();

@@ -1187,18 +1187,18 @@ typedef struct PgsrSyncAndWALContext
 {
 	bool		parsedOk;
 	char		syncState[PGSR_SYNC_STATE_MAXLENGTH];
-	uint64_t	walLag;
+	char        latestLSN[NAMEDATALEN];
 } PgsrSyncAndWALContext;
 
 bool
 pgsql_get_sync_state_and_wal_lag(PGSQL *pgsql, const char *slotName,
-								 char *pgsrSyncState, int64_t *walLag,
+								 char *pgsrSyncState, char *latestLSN,
 								 bool missing_ok)
 {
 	PgsrSyncAndWALContext context = { 0 };
 	char *sql =
 		"select sync_state, "
-		"pg_current_wal_lsn() - flush_lsn as wal_lag "
+		"pg_current_wal_lsn() "
 		"from pg_replication_slots slot join pg_stat_replication rep "
 		"on rep.pid = slot.active_pid "
 		"where slot_name = $1";
@@ -1223,7 +1223,7 @@ pgsql_get_sync_state_and_wal_lag(PGSQL *pgsql, const char *slotName,
 	}
 
 	strlcpy(pgsrSyncState, context.syncState, PGSR_SYNC_STATE_MAXLENGTH);
-	*walLag = context.walLag;
+	strlcpy(latestLSN, context.latestLSN, NAMEDATALEN);
 
 	return true;
 }
@@ -1231,7 +1231,7 @@ pgsql_get_sync_state_and_wal_lag(PGSQL *pgsql, const char *slotName,
 
 /*
  * parsePgsrSyncStateAndWAL parses the result from a PostgreSQL query fetching
- * two columns from pg_stat_replication: sync_state and wal lag.
+ * two columns from pg_stat_replication: sync_state and latestLsn.
  */
 static void
 parsePgsrSyncStateAndWAL(void *ctx, PGresult *result)
@@ -1253,21 +1253,31 @@ parsePgsrSyncStateAndWAL(void *ctx, PGresult *result)
 
 		case 1:
 		{
-			char *strWalLag = PQgetvalue(result, 0, 1);
+			strlcpy(context->latestLSN,
+					PQgetvalue(result, 0, 1),
+					NAMEDATALEN);
 
 			/* we trust our length and PostgreSQL results */
 			strlcpy(context->syncState,
 					PQgetvalue(result, 0, 0),
 					PGSR_SYNC_STATE_MAXLENGTH);
 
-			context->walLag = strtoull(strWalLag, NULL, 10);
 
-			if (context->walLag == 0 && errno != 0)
+#if 0
+			/* try to validate received lsn */
+			PG_TRY();
+			{
+				DatumGetLSN(DirectFunctionCall1Coll(pg_lsn_in, InvalidOid,
+														   CStringGetDatum(context->latestLSN)));
+			}
+			PG_CATCH();
 			{
 				context->parsedOk = false;
-				log_error("Failed to parse int64_t result \"%s\"", strWalLag);
+				log_error("Failed to parse received lsn \"%s\"", context->latestLSN);
+				context->latestLSN[0] = '\0';
 			}
-
+			PG_END_TRY();
+#endif
 			context->parsedOk = true;
 			return;
 		}
@@ -1279,20 +1289,27 @@ parsePgsrSyncStateAndWAL(void *ctx, PGresult *result)
 	}
 }
 
+
 /*
- * pgsql_get_wal_lag_from_standby queries a standby PostgreSQL server to get the
- * replication lag as seen from the pg_stat_wal_receiver system view.
+ * pgsql_get_received_lsn_from_standby queries a standby PostgreSQL server to get the
+ * received_lsn value from the pg_stat_wal_receiver system view.
+ *
+ * received_lsn is the latest lsn known to be received and flushed to the disk. It does
+ * not specify if it is applied or not. Caller should have allocated necessary memory
+ * for result value.
  */
 bool
-pgsql_get_wal_lag_from_standby(PGSQL *pgsql, int64_t *walLag)
+pgsql_get_received_lsn_from_standby(PGSQL *pgsql, char *received_lsn)
 {
 	SingleValueResultContext context;
 	char *sql =
-		"SELECT coalesce(latest_end_lsn - received_lsn, -1) "
+		"SELECT received_lsn"
 		"  FROM pg_stat_wal_receiver";
 
-	context.resultType = PGSQL_RESULT_BIGINT;
+	context.resultType = PGSQL_RESULT_STRING;
 	context.parsedOk = false;
+
+	log_info("pgsql_get_received_lsn_from_standby : running %s", sql);
 
 	pgsql_execute_with_params(pgsql, sql, 0, NULL, NULL,
 							  &context, &parseSingleValueResult);
@@ -1304,11 +1321,10 @@ pgsql_get_wal_lag_from_standby(PGSQL *pgsql, int64_t *walLag)
 		return false;
 	}
 
-	*walLag = context.bigint;
+	strlcpy(received_lsn, context.strVal, NAMEDATALEN);
 
 	return true;
 }
-
 
 /*
  * LISTEN/NOTIFY support.

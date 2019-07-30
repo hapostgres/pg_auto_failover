@@ -25,7 +25,7 @@ typedef struct AutoFailoverNodeState
 	int32				nodeId;
 	int32				groupId;
 	ReplicationState	replicationState;
-	int64				walDelta;
+	XLogRecPtr 			latestLSN;
 	SyncState			pgsrSyncState;
 	bool				pgIsRunning;
 } AutoFailoverNodeState;
