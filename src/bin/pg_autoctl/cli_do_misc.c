@@ -507,9 +507,27 @@ keeper_cli_destroy_keeper_node(Keeper *keeper, KeeperConfig *config)
 		/* keeper_remove uses log_info() to explain what's happening */
 		if (!keeper_remove(keeper, config))
 		{
-			log_fatal("Failed to remove local node from the pg_auto_failover "
+			log_error("Failed to remove local node from the pg_auto_failover "
 					  "monitor, see above for details");
-			exit(EXIT_CODE_INTERNAL_ERROR);
+
+			/* we still have to remove the state files now */
+			log_info("Removing local node state file: \"%s\"",
+					 config->pathnames.state);
+
+			if (!unlink_file(config->pathnames.state))
+			{
+				/* we already logged about errors */
+				exit(EXIT_CODE_BAD_STATE);
+			}
+
+			log_info("Removing local node init state file: \"%s\"",
+					 config->pathnames.init);
+
+			if (!unlink_file(config->pathnames.init))
+			{
+				/* we already logged about errors */
+				exit(EXIT_CODE_BAD_STATE);
+			}
 		}
 	}
 	else
