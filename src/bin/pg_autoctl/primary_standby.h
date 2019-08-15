@@ -33,15 +33,6 @@ typedef struct LocalPostgresServer
 	PgInstanceKind	pgKind;
 } LocalPostgresServer;
 
-typedef struct ReplicationSource
-{
-	NodeAddress primaryNode;
-	char *userName;
-	char *slotName;
-	char *password;
-	char *maximumBackupRate;
-} ReplicationSource;
-
 
 void local_postgres_init(LocalPostgresServer *postgres,
 						 PostgresSetup *postgresSetup);

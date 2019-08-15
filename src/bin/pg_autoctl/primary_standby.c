@@ -540,6 +540,8 @@ bool
 primary_rewind_to_standby(LocalPostgresServer *postgres,
 						  ReplicationSource *replicationSource)
 {
+	char configFilePath[MAXPGPATH];
+	PGSQL *pgsql = &(postgres->sqlClient);
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	NodeAddress *primaryNode = &(replicationSource->primaryNode);
 
@@ -547,13 +549,22 @@ primary_rewind_to_standby(LocalPostgresServer *postgres,
 	log_info("Rewinding PostgreSQL to follow new primary %s:%d",
 			 primaryNode->host, primaryNode->port);
 
+	/* get the path of the config file from the running database */
+	if (!pgsql_get_config_file_path(pgsql, configFilePath, MAXPGPATH))
+	{
+		log_error("Failed to get the postgresql.conf path from the "
+				  "local postgres server, see above for details");
+		return false;
+	}
+
 	if (!pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata))
 	{
 		log_error("Failed to stop postgres to do rewind");
 		return false;
 	}
 
-	if (!pg_rewind(pgSetup->pgdata, pgSetup->pg_ctl, primaryNode->host, primaryNode->port,
+	if (!pg_rewind(pgSetup->pgdata, pgSetup->pg_ctl,
+				   primaryNode->host, primaryNode->port,
 				   pgSetup->dbname, replicationSource->userName,
 				   replicationSource->password))
 	{
@@ -561,11 +572,12 @@ primary_rewind_to_standby(LocalPostgresServer *postgres,
 		return false;
 	}
 
-	if (!pg_write_recovery_conf(pgSetup->pgdata, primaryNode->host, primaryNode->port,
-								replicationSource->userName, replicationSource->password,
-								replicationSource->slotName))
+	if (!pg_setup_standby_mode(pgSetup->control.pg_control_version,
+							   configFilePath,
+							   pgSetup->pgdata,
+							   replicationSource))
 	{
-		log_error("Failed to write recovery.conf after rewind");
+		log_error("Failed to setup Postgres as a standby, after rewind");
 		return false;
 	}
 

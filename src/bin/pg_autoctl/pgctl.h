@@ -47,10 +47,12 @@ bool pg_ctl_stop(const char *pg_ctl, const char *pgdata);
 int pg_ctl_status(const char *pg_ctl, const char *pgdata, bool log_output);
 bool pg_ctl_restart(const char *pg_ctl, const char *pgdata);
 bool pg_ctl_promote(const char *pg_ctl, const char *pgdata);
-bool pg_write_recovery_conf(const char *pgdata, const char *primaryHost, int primaryPort,
-							const char *replicationUsername,
-							const char *replicationPassword,
-							const char *replicationSlotName);
+
+bool pg_setup_standby_mode(uint32_t pg_control_version,
+						   const char *configFilePath,
+						   const char *pgdata,
+						   ReplicationSource *replicationSource);
+
 bool pg_is_running(const char *pg_ctl, const char *pgdata);
 
 #endif /* PGCTL_H */
