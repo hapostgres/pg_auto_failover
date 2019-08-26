@@ -921,12 +921,12 @@ pg_setup_standby_mode(uint32_t pg_control_version,
 	char primaryConnInfo[MAXCONNINFO] = { 0 };
 
 	/* we ignore the length returned by prepare_primary_conninfo... */
-	int n = prepare_primary_conninfo(primaryConnInfo,
-									 MAXCONNINFO,
-									 primaryNode->host,
-									 primaryNode->port,
-									 replicationSource->userName,
-									 replicationSource->password);
+	(void) prepare_primary_conninfo(primaryConnInfo,
+									MAXCONNINFO,
+									primaryNode->host,
+									primaryNode->port,
+									replicationSource->userName,
+									replicationSource->password);
 
 	if (pg_control_version < 1200)
 	{
