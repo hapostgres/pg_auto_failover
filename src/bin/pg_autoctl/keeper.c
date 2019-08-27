@@ -741,13 +741,15 @@ keeper_register_and_init(Keeper *keeper,
  * local state file.
  */
 bool
-keeper_remove(Keeper *keeper, KeeperConfig *config)
+keeper_remove(Keeper *keeper, KeeperConfig *config, bool ignore_monitor_errors)
 {
+	int errors = 0;
+
 	/*
 	 * We don't require keeper_init() to have been done before calling
 	 * keeper_remove, because then we would fail to finish a remove that was
 	 * half-done only: keeper_init loads the state from the state file, which
-	 * might not been there anymore.
+	 * might not exists anymore.
 	 *
 	 * That said, we're going to require keeper->config to have been set the
 	 * usual way, so do that at least.
@@ -757,24 +759,6 @@ keeper_remove(Keeper *keeper, KeeperConfig *config)
 	if (!monitor_init(&(keeper->monitor), config->monitor_pguri))
 	{
 		return false;
-	}
-
-	/*
-	 * First, if we are dealing with a Citus Worker node, get the coordinator
-	 * address from the monitor and remove the local node from there, only when
-	 * we are in state SINGLE. In other states, either we are a primary and the
-	 * standby will then be promoted and call master_update_node() on the
-	 * coordinator, or we are a standby and we need to leave the metadata on
-	 * the coordinator as it is.
-	 */
-	if (file_exists(keeper->config.pathnames.state))
-	{
-		if (!keeper_load_state(keeper))
-		{
-			/* here it's a non-fatal error of course. */
-			log_warn("Failed to read existing state file \"%s\"",
-					 keeper->config.pathnames.state);
-		}
 	}
 
 	log_info("Removing local node from the pg_auto_failover monitor.");
@@ -790,7 +774,12 @@ keeper_remove(Keeper *keeper, KeeperConfig *config)
 						config->pgSetup.pgport))
 	{
 		/* we already logged about errors */
-		return false;
+		errors++;
+
+		if (!ignore_monitor_errors)
+		{
+			return false;
+		}
 	}
 
 	log_info("Removing local node state file: \"%s\"", config->pathnames.state);
@@ -798,7 +787,7 @@ keeper_remove(Keeper *keeper, KeeperConfig *config)
 	if (!unlink_file(config->pathnames.state))
 	{
 		/* we already logged about errors */
-		return false;
+		errors++;
 	}
 
 	log_info("Removing local node init state file: \"%s\"",
@@ -807,10 +796,10 @@ keeper_remove(Keeper *keeper, KeeperConfig *config)
 	if (!unlink_file(config->pathnames.init))
 	{
 		/* we already logged about errors */
-		return false;
+		errors++;
 	}
 
-	return true;
+	return errors == 0;
 }
 
 

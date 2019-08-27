@@ -132,6 +132,8 @@ keeper_pg_init(Keeper *keeper, KeeperConfig *config)
 
 		if (keeper->state.assigned_role != SINGLE_STATE)
 		{
+			bool ignore_monitor_errors = false;
+
 			log_error("There is already another postgres node, so the monitor "
 					  "wants us to be in state %s. However, that would involve "
 					  "removing the database directory.",
@@ -139,7 +141,7 @@ keeper_pg_init(Keeper *keeper, KeeperConfig *config)
 
 			log_warn("Removing the node from the monitor");
 
-			if (!keeper_remove(keeper, config))
+			if (!keeper_remove(keeper, config, ignore_monitor_errors))
 			{
 				log_fatal("Failed to remove the node from the monitor, run "
 						  "`pg_autoctl drop node` to manually remove "
