@@ -505,6 +505,7 @@ cli_drop_node(int argc, char **argv)
 	KeeperConfig config = keeperOptions;
 	bool missing_pgdata_is_ok = true;
 	bool pg_is_not_running_is_ok = true;
+	bool ignore_monitor_errors = false;
 	pid_t pid;
 
 	if (!keeper_config_read_file(&config,
@@ -515,7 +516,7 @@ cli_drop_node(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	if (!keeper_remove(&keeper, &config))
+	if (!keeper_remove(&keeper, &config, ignore_monitor_errors))
 	{
 		log_fatal("Failed to remove local node from the pg_auto_failover monitor, "
 				  "see above for details");

@@ -504,12 +504,15 @@ keeper_cli_destroy_keeper_node(Keeper *keeper, KeeperConfig *config)
 	/* only keeper_remove when we still have a state file around */
 	if (file_exists(config->pathnames.state))
 	{
+		bool ignore_monitor_errors = true;
+
 		/* keeper_remove uses log_info() to explain what's happening */
-		if (!keeper_remove(keeper, config))
+		if (!keeper_remove(keeper, config, ignore_monitor_errors))
 		{
 			log_fatal("Failed to remove local node from the pg_auto_failover "
 					  "monitor, see above for details");
-			exit(EXIT_CODE_INTERNAL_ERROR);
+
+			exit(EXIT_CODE_BAD_STATE);
 		}
 	}
 	else
