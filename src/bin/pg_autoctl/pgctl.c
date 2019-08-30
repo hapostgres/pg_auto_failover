@@ -39,9 +39,9 @@
 #define PROGRAM_NOT_RUNNING 3
 
 
-static char *get_current_GUC_value(GUC *settings,
-								   const char *name,
-								   PostgresSetup *pgSetup);
+static const char *get_current_GUC_value(const char *name, const char *value,
+										 PostgresSetup *pgSetup);
+
 static bool pg_include_config(const char *configFilePath,
 							  const char *configIncludeLine,
 							  const char *configIncludeRegex,
@@ -313,17 +313,41 @@ ensure_default_settings_file_exists(const char *configFilePath,
 	for (settingIndex = 0; settings[settingIndex].name != NULL; settingIndex++)
 	{
 		GUC *setting = &settings[settingIndex];
-		char *value = get_current_GUC_value(settings, setting->name, pgSetup);
+		const char *value =
+			get_current_GUC_value(setting->name, setting->value, pgSetup);
 
 		if (value != NULL)
 		{
-			appendPQExpBuffer(defaultConfContents, "%s = %s\n",
-							  setting->name,
-							  setting->value);
+			/*
+			 * At the moment our "needs quote" heuristic is pretty simple.
+			 * There's the one parameter within those that we hardcode from
+			 * pg_auto_failover that needs quoting, and that's
+			 * listen_addresses.
+			 *
+			 * The reason why POSTGRES_DEFAULT_LISTEN_ADDRESSES is not quoting
+			 * the value directly in the constant is that we are using that
+			 * value both in the configuration file and at the pg_ctl start
+			 * --options "-h *" command line.
+			 *
+			 * At the command line, using --options "-h '*'" would give:
+			 *    could not create listen socket for "'*'"
+			 */
+			if (strcmp(setting->name, "listen_addresses") == 0)
+			{
+				appendPQExpBuffer(defaultConfContents, "%s = '%s'\n",
+								  setting->name,
+								  value);
+			}
+			else
+			{
+				appendPQExpBuffer(defaultConfContents, "%s = %s\n",
+								  setting->name,
+								  value);
+			}
 		}
 		else
 		{
-			log_error("BUG: failed to find value for GUC setting \"%s\"",
+			log_error("BUG: GUC setting \"%s\" has a NULL value",
 					  setting->name);
 			return false;
 		}
@@ -365,8 +389,9 @@ ensure_default_settings_file_exists(const char *configFilePath,
 	}
 	else
 	{
-		log_debug("Configuration file \"%s\" doesn't exists yet, creating",
-				  configFilePath);
+		log_debug("Configuration file \"%s\" doesn't exists yet, "
+				  "creating with content:\n%s",
+				  configFilePath, defaultConfContents->data);
 	}
 
 	if (!write_file(defaultConfContents->data, defaultConfContents->len, configFilePath))
@@ -385,34 +410,22 @@ ensure_default_settings_file_exists(const char *configFilePath,
  * parameter; replacing it with values found in pgSetup for the Postgres
  * parameters "listen_addresses" and "port", allowing those to be dynamic.
  */
-static char *
-get_current_GUC_value(GUC *settings, const char *name, PostgresSetup *pgSetup)
+static const char *
+get_current_GUC_value(const char *name, const char *value, PostgresSetup *pgSetup)
 {
 	int settingIndex = 0;
 
 	/* replace placeholder values with actual pgSetup values */
-	for (settingIndex = 0; settings[settingIndex].name != NULL; settingIndex++)
+	if (strcmp(name, "listen_addresses") == 0)
 	{
-		GUC *setting = &settings[settingIndex];
-
-		if (strcmp(setting->name, name) == 0
-			&& strcmp(setting->name, "listen_addresses") == 0)
-		{
-			return pgSetup->listen_addresses;
-		}
-		else if (strcmp(setting->name, name) == 0
-				 && strcmp(setting->name, "port") == 0)
-		{
-			return intToString(pgSetup->pgport).strValue;
-		}
-		else if (strcmp(setting->name, name) ==  0)
-		{
-			return setting->value;
-		}
+		return pgSetup->listen_addresses;
+	}
+	else if (strcmp(name, "port") == 0)
+	{
+		return intToString(pgSetup->pgport).strValue;
 	}
 
-	/* keep compiler happy */
-	return NULL;
+	return value;
 }
 
 
@@ -1053,7 +1066,7 @@ prepare_primary_conninfo(char *primaryConnInfo, int primaryConnInfoSize,
 			make_conninfo_field_str(connInfoEnd, "password", replicationPassword);
 	}
 
-	return escape_recovery_conf_string(primaryConnInfoRaw, primaryConnInfo);
+	return escape_recovery_conf_string(primaryConnInfo, primaryConnInfoRaw);
 }
 
 
@@ -1102,7 +1115,7 @@ pg_write_standby_signal(const char *configFilePath,
 	path_in_same_directory(configFilePath, AUTOCTL_STANDBY_CONF_FILENAME,
 						   standbyConfigFilePath);
 
-	/* we pass NULL as pgSetup because we now it won't be used... */
+	/* we pass NULL as pgSetup because we know it won't be used... */
 	if (!ensure_default_settings_file_exists(standbyConfigFilePath,
 											 standby_settings,
 											 NULL))
@@ -1110,6 +1123,12 @@ pg_write_standby_signal(const char *configFilePath,
 		return false;
 	}
 
+	/*
+	 * We successfully created the standby.signal file, so Postgres will start
+	 * as a standby. If we fail to install the standby settings, then we return
+	 * false here and let the main loop try again. At least Postgres won't
+	 * start as a cloned single accepting writes.
+	 */
 	if (!pg_include_config(standbyConfigFilePath,
 						   AUTOCTL_SB_CONF_INCLUDE_LINE,
 						   AUTOCTL_SB_CONF_INCLUDE_REGEX,
