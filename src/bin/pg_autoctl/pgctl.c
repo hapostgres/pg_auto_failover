@@ -1088,6 +1088,7 @@ prepare_primary_conninfo(char *primaryConnInfo, int primaryConnInfoSize,
 	if (!escape_recovery_conf_string(escaped, BUFSIZE, primaryHost))
 	{
 		/* errors have already been logged. */
+		destroyPQExpBuffer(buffer);
 		return false;
 	}
 	appendPQExpBuffer(buffer, "host = %s", escaped);
@@ -1096,6 +1097,7 @@ prepare_primary_conninfo(char *primaryConnInfo, int primaryConnInfoSize,
 	if (!escape_recovery_conf_string(escaped, BUFSIZE, replicationUsername))
 	{
 		/* errors have already been logged. */
+		destroyPQExpBuffer(buffer);
 		return false;
 	}
 	appendPQExpBuffer(buffer, "user = %s", escaped);
@@ -1105,6 +1107,7 @@ prepare_primary_conninfo(char *primaryConnInfo, int primaryConnInfoSize,
 		if (!escape_recovery_conf_string(escaped, BUFSIZE, replicationPassword))
 		{
 			/* errors have already been logged. */
+			destroyPQExpBuffer(buffer);
 			return false;
 		}
 		appendPQExpBuffer(buffer, "password = %s", escaped);
