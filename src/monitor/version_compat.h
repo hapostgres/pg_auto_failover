@@ -14,8 +14,8 @@
 
 #include "postgres.h"
 
-/* we only support PG10 and PG11, PG 12 is not supported yet*/
-#if (PG_VERSION_NUM < 100000 || PG_VERSION_NUM >= 120000)
+/* we only support Postgres versions 10, 11, and 12. */
+#if (PG_VERSION_NUM < 100000 || PG_VERSION_NUM >= 130000)
 #error "Unknown or unsupported postgresql version"
 #endif
 

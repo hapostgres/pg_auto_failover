@@ -57,6 +57,16 @@ typedef struct NodeAddress
 	int port;
 } NodeAddress;
 
+typedef struct ReplicationSource
+{
+	NodeAddress primaryNode;
+	char *userName;
+	char *slotName;
+	char *password;
+	char *maximumBackupRate;
+} ReplicationSource;
+
+
 /*
  * Arrange a generic way to parse PostgreSQL result from a query. Most of the
  * queries we need here return a single row of a single column, so that's what

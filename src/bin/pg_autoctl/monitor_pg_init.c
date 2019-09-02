@@ -124,7 +124,7 @@ monitor_pg_init(Monitor *monitor, MonitorConfig *config)
 	if (!pg_add_auto_failover_default_settings(&pgSetup, configFilePath,
 											   monitor_default_settings))
 	{
-		log_error("Failed to add default settings to \"%s\".conf: couldn't "
+		log_error("Failed to add default settings to \"%s\": couldn't "
 				  "write the new postgresql.conf, see above for details",
 				  configFilePath);
 		return false;
