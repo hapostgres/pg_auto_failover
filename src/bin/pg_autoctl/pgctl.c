@@ -413,8 +413,6 @@ ensure_default_settings_file_exists(const char *configFilePath,
 static const char *
 get_current_GUC_value(const char *name, const char *value, PostgresSetup *pgSetup)
 {
-	int settingIndex = 0;
-
 	/* replace placeholder values with actual pgSetup values */
 	if (strcmp(name, "listen_addresses") == 0)
 	{
