@@ -1024,6 +1024,9 @@ pg_write_recovery_conf(const char *pgdata,
  *
  * The result is written to destination and the length of the result.
  */
+#define LOCAL_BOUND_CHECK \
+	{ if (destinationSize < escapedStringLength) {goto error;} }
+
 static bool
 escape_recovery_conf_string(char *destination, int destinationSize,
 							const char *recoveryConfString)
@@ -1035,10 +1038,7 @@ escape_recovery_conf_string(char *destination, int destinationSize,
 	/* we are going to add at least 3 chars: two quotes and a NUL character */
 	if (destinationSize < (length+3))
 	{
-		log_error("BUG: failed to escape recovery parameter value \"%s\" "
-				  "of %d bytes in a buffer of %d bytes",
-				  recoveryConfString, length, destinationSize);
-		return false;
+		goto error;
 	}
 
 	destination[escapedStringLength++] = '\'';
@@ -1047,26 +1047,26 @@ escape_recovery_conf_string(char *destination, int destinationSize,
 	{
 		char currentChar = recoveryConfString[charIndex];
 
-		if (destinationSize < (charIndex+1))
-		{
-			log_error("BUG: failed to escape recovery parameter value \"%s\" "
-					  "in a buffer of %d bytes, stopped at index %d",
-					  recoveryConfString, destinationSize, charIndex);
-			return false;
-		}
-
 		if (currentChar == '\'')
 		{
 			destination[escapedStringLength++] = '\'';
+			LOCAL_BOUND_CHECK;
 		}
 
 		destination[escapedStringLength++] = currentChar;
+		LOCAL_BOUND_CHECK;
 	}
 
 	destination[escapedStringLength++] = '\'';
 	destination[escapedStringLength] = '\0';
 
 	return true;
+
+error:
+	log_error("BUG: failed to escape recovery parameter value \"%s\" "
+			  "in a buffer of %d bytes, stopped at index %d",
+			  recoveryConfString, destinationSize, charIndex);
+	return false;
 }
 
 
