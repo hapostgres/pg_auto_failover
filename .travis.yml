@@ -1,5 +1,5 @@
 sudo: required
-dist: trusty
+dist: bionic
 language: c
 python:
   - "3.6"
@@ -16,13 +16,16 @@ matrix:
   include:
     - env: PGVERSION=10
     - env: PGVERSION=11
+    - env: PGVERSION=12
 before_install:
-  - git clone -b v0.7.9 --depth 1 https://github.com/citusdata/tools.git
+  - git clone -b v0.7.12 --depth 1 https://github.com/citusdata/tools.git
   - sudo make -C tools install
   - setup_apt
   - nuke_pg
+  - python --version
   - pyenv versions
-  - pyenv global 3.6
+  - pyenv install -s 3.6.7
+  - pyenv global 3.6.7
   - sudo apt-get install bridge-utils
   - sudo apt-get install python3-pip
   - sudo pip3 install --upgrade pip
