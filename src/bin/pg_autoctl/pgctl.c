@@ -15,6 +15,7 @@
 #include <unistd.h>
 
 #include "postgres_fe.h"
+#include "pqexpbuffer.h"
 
 #include "defaults.h"
 #include "file_utils.h"
@@ -50,13 +51,14 @@ static bool ensure_default_settings_file_exists(const char *configFilePath,
 												GUC *settings,
 												PostgresSetup *pgSetup);
 static void log_program_output(Program prog);
-static int escape_recovery_conf_string(char *destination,
-									   const char *recoveryConfString);
-static int prepare_primary_conninfo(char *primaryConnInfo,
-									int primaryConnInfoSize,
-									const char *primaryHost, int primaryPort,
-									const char *replicationUsername,
-									const char *replicationPassword);
+static bool escape_recovery_conf_string(char *destination,
+										int destinationSize,
+										const char *recoveryConfString);
+static bool prepare_primary_conninfo(char *primaryConnInfo,
+									 int primaryConnInfoSize,
+									 const char *primaryHost, int primaryPort,
+									 const char *replicationUsername,
+									 const char *replicationPassword);
 static bool pg_write_recovery_conf(const char *pgdata,
 								   const char *primaryConnInfo,
 								   const char *replicationSlotName);
@@ -932,12 +934,16 @@ pg_setup_standby_mode(uint32_t pg_control_version,
 	char primaryConnInfo[MAXCONNINFO] = { 0 };
 
 	/* we ignore the length returned by prepare_primary_conninfo... */
-	(void) prepare_primary_conninfo(primaryConnInfo,
-									MAXCONNINFO,
-									primaryNode->host,
-									primaryNode->port,
-									replicationSource->userName,
-									replicationSource->password);
+	if (!prepare_primary_conninfo(primaryConnInfo,
+								  MAXCONNINFO,
+								  primaryNode->host,
+								  primaryNode->port,
+								  replicationSource->userName,
+								  replicationSource->password))
+	{
+		/* errors have already been logged. */
+		return false;
+	}
 
 	if (pg_control_version < 1200)
 	{
@@ -975,96 +981,167 @@ pg_write_recovery_conf(const char *pgdata,
 					   const char *primaryConnInfo,
 					   const char *replicationSlotName)
 {
-	char recoveryConf[BUFSIZE] = { 0 };
-	char *recoveryConfEnd = recoveryConf;
 	char recoveryConfPath[MAXPGPATH];
-	int recoveryConfLength = 0;
+	PQExpBuffer content = NULL;
 
 	log_trace("pg_write_recovery_conf");
 
 	/* build the contents of recovery.conf */
-	recoveryConfEnd += sprintf(recoveryConfEnd, "standby_mode = 'on'");
-	recoveryConfEnd += sprintf(recoveryConfEnd,
-							   "\nprimary_conninfo = %s", primaryConnInfo);
-	recoveryConfEnd += sprintf(recoveryConfEnd,
-							   "\nprimary_slot_name = '%s'", replicationSlotName);
-	recoveryConfEnd += sprintf(recoveryConfEnd,
-							   "\nrecovery_target_timeline = 'latest'");
-	recoveryConfEnd += sprintf(recoveryConfEnd, "\n");
+	content = createPQExpBuffer();
+	appendPQExpBuffer(content, "standby_mode = 'on'");
+	appendPQExpBuffer(content, "\nprimary_conninfo = %s", primaryConnInfo);
+	appendPQExpBuffer(content, "\nprimary_slot_name = '%s'", replicationSlotName);
+	appendPQExpBuffer(content, "\nrecovery_target_timeline = 'latest'");
+	appendPQExpBuffer(content, "\n");
 
-	recoveryConfLength = recoveryConfEnd - recoveryConf;
+	/* memory allocation could have failed while building string */
+	if (PQExpBufferBroken(content))
+	{
+		log_error("Failed to allocate memory");
+		destroyPQExpBuffer(content);
+		return false;
+	}
 
 	join_path_components(recoveryConfPath, pgdata, "recovery.conf");
 
 	log_info("Writing recovery configuration to \"%s\"", recoveryConfPath);
 
-	if (!write_file(recoveryConf, recoveryConfLength, recoveryConfPath))
+	if (!write_file(content->data, content->len, recoveryConfPath))
 	{
 		/* write_file logs I/O error */
+		destroyPQExpBuffer(content);
 		return false;
 	}
 
+	destroyPQExpBuffer(content);
 	return true;
 }
 
 
 /*
- * escape_recovery_conf_string escapes a string that is used in a recovery.conf file
- * by converting single quotes into two single quotes.
+ * escape_recovery_conf_string escapes a string that is used in a recovery.conf
+ * file by converting single quotes into two single quotes.
  *
  * The result is written to destination and the length of the result.
  */
-static int
-escape_recovery_conf_string(char *destination, const char *recoveryConfString)
+static bool
+escape_recovery_conf_string(char *destination, int destinationSize,
+							const char *recoveryConfString)
 {
 	int charIndex = 0;
 	int length = strlen(recoveryConfString);
 	int escapedStringLength = 0;
+
+	/* we are going to add at least 3 chars: two quotes and a NUL character */
+	if (destinationSize < (length+3))
+	{
+		log_error("BUG: failed to escape recovery parameter value \"%s\" "
+				  "in a buffer of %d bytes",
+				  recoveryConfString, destinationSize);
+		return false;
+	}
 
 	destination[escapedStringLength++] = '\'';
 
 	for (charIndex = 0; charIndex < length; charIndex++)
 	{
 		char currentChar = recoveryConfString[charIndex];
+
 		if (currentChar == '\'')
 		{
 			destination[escapedStringLength++] = '\'';
+			if (destinationSize < escapedStringLength)
+			{
+				log_error(
+					"BUG: failed to escape recovery parameter value \"%s\" "
+					"in a buffer of %d bytes, stopped at index %d",
+					recoveryConfString, destinationSize, charIndex);
+				return false;
+			}
 		}
 
 		destination[escapedStringLength++] = currentChar;
+		if (destinationSize < escapedStringLength)
+		{
+			log_error("BUG: failed to escape recovery parameter value \"%s\" "
+					  "in a buffer of %d bytes, stopped at index %d",
+					  recoveryConfString, destinationSize, charIndex);
+			return false;
+		}
 	}
 
 	destination[escapedStringLength++] = '\'';
 	destination[escapedStringLength] = '\0';
 
-	return escapedStringLength;
+	return true;
 }
 
 
 /*
  * prepare_primary_conninfo
  */
-static int
+static bool
 prepare_primary_conninfo(char *primaryConnInfo, int primaryConnInfoSize,
 						 const char *primaryHost, int primaryPort,
 						 const char *replicationUsername,
 						 const char *replicationPassword)
 {
-	char primaryConnInfoRaw[MAXCONNINFO] = { 0 };
-	char *connInfoEnd = primaryConnInfoRaw;
+	int size = 0;
+	char escaped[BUFSIZE];
+	PQExpBuffer buffer = NULL;
 
- 	connInfoEnd += make_conninfo_field_str(connInfoEnd, "host", primaryHost);
-	connInfoEnd += make_conninfo_field_int(connInfoEnd, "port", primaryPort);
-	connInfoEnd +=
-		make_conninfo_field_str(connInfoEnd, "user", replicationUsername);
+	buffer = createPQExpBuffer();
+
+	if (!escape_recovery_conf_string(escaped, BUFSIZE, primaryHost))
+	{
+		/* errors have already been logged. */
+		destroyPQExpBuffer(buffer);
+		return false;
+	}
+	appendPQExpBuffer(buffer, "host = %s", escaped);
+	appendPQExpBuffer(buffer, "port = %d", primaryPort);
+
+	if (!escape_recovery_conf_string(escaped, BUFSIZE, replicationUsername))
+	{
+		/* errors have already been logged. */
+		destroyPQExpBuffer(buffer);
+		return false;
+	}
+	appendPQExpBuffer(buffer, "user = %s", escaped);
 
 	if (replicationPassword != NULL)
 	{
-		connInfoEnd +=
-			make_conninfo_field_str(connInfoEnd, "password", replicationPassword);
+		if (!escape_recovery_conf_string(escaped, BUFSIZE, replicationPassword))
+		{
+			/* errors have already been logged. */
+			destroyPQExpBuffer(buffer);
+			return false;
+		}
+		appendPQExpBuffer(buffer, "password = %s", escaped);
 	}
 
-	return escape_recovery_conf_string(primaryConnInfo, primaryConnInfoRaw);
+	/* memory allocation could have failed while building string */
+	if (PQExpBufferBroken(buffer))
+	{
+		log_error("Failed to allocate memory");
+		destroyPQExpBuffer(buffer);
+		return false;
+	}
+
+	/* now copy the buffer into primaryConnInfo for the caller */
+	size = snprintf(primaryConnInfo, primaryConnInfoSize, "%s", buffer->data);
+
+	if (size == -1 || size > primaryConnInfoSize)
+	{
+		log_error("BUG: the escaped primary_conninfo requires %d bytes and "
+				  "pg_auto_failover only support up to %d bytes",
+				  size, primaryConnInfoSize);
+		return false;
+	}
+
+	destroyPQExpBuffer(buffer);
+
+	return true;
 }
 
 
