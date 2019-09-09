@@ -131,6 +131,17 @@
 							&(config->postgresql_restart_failure_max_retries), \
 							POSTGRESQL_FAILS_TO_START_RETRIES)
 
+#define OPTION_HTTPD_LISTEN_ADDRESS(config)					   \
+	make_strbuf_option_default("httpd", "address", NULL,	   \
+							   false, MAXPGPATH,			   \
+							   config->httpd.listen_address,   \
+							   HTTPD_DEFAULT_LISTEN_ADDRESS)
+
+#define OPTION_HTTPD_PORT(config)									\
+	make_int_option_default("httpd", "port",						\
+							NULL, false, &(config->httpd.port),		\
+							HTTPD_DEFAULT_PORT)
+
 #define SET_INI_OPTIONS_ARRAY(config) \
 	{ \
 		OPTION_AUTOCTL_ROLE(config), \
@@ -156,12 +167,14 @@
 		OPTION_TIMEOUT_PREPARE_PROMOTION_WALRECEIVER(config), \
 		OPTION_TIMEOUT_POSTGRESQL_RESTART_FAILURE_TIMEOUT(config), \
 		OPTION_TIMEOUT_POSTGRESQL_RESTART_FAILURE_MAX_RETRIES(config), \
+		OPTION_HTTPD_LISTEN_ADDRESS(config), \
+		OPTION_HTTPD_PORT(config), \
 		INI_OPTION_LAST \
 	}
 
 static bool keeper_config_init_nodekind(KeeperConfig *config);
 static bool keeper_config_set_backup_directory(KeeperConfig *config);
-
+static bool keeper_config_init_httpd(KeeperConfig *config);
 
 /*
  * keeper_config_set_pathnames_from_pgdata sets the config pathnames from its
@@ -225,6 +238,8 @@ keeper_config_init(KeeperConfig *config,
 		log_error("Please review your setup options per above messages");
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
+
+	(void) keeper_config_init_httpd(config);
 
 	if (!pg_setup_init(&pgSetup,
 					   &(config->pgSetup),
@@ -340,6 +355,8 @@ keeper_config_pgsetup_init(KeeperConfig *config,
 						   bool pgIsNotRunningIsOk)
 {
 	PostgresSetup pgSetup = { 0 };
+
+	(void) keeper_config_init_httpd(config);
 
 	if (!pg_setup_init(&pgSetup,
 					   &config->pgSetup,
@@ -858,5 +875,27 @@ keeper_config_update_with_absolute_pgdata(KeeperConfig *config)
 			return false;
 		}
 	}
+	return true;
+}
+
+
+/*
+ * keeper_config_init_httpd ensures default httpd values when they have not
+ * been set previously.
+ */
+static bool
+keeper_config_init_httpd(KeeperConfig *config)
+{
+	if (IS_EMPTY_STRING_BUFFER(config->httpd.listen_address))
+	{
+		strlcpy(config->httpd.listen_address,
+				HTTPD_DEFAULT_LISTEN_ADDRESS, MAXPGPATH);
+	}
+
+	if (config->httpd.port == 0)
+	{
+		config->httpd.port = HTTPD_DEFAULT_PORT;
+	}
+
 	return true;
 }

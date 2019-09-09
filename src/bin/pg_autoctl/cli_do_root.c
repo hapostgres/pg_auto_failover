@@ -38,6 +38,14 @@ CommandLine do_destroy =
 				 keeper_cli_getopt_pgdata,
 				 keeper_cli_destroy_node);
 
+CommandLine do_httpd =
+	make_command("httpd",
+				 "start the embedded HTTPd server",
+				 " [ --pgdata ]",
+				 KEEPER_CLI_PGDATA_OPTION,
+				 keeper_cli_getopt_pgdata,
+				 keeper_cli_httpd_start);
+
 CommandLine do_primary_adduser_monitor =
 	make_command("monitor",
 				 "add a local user for queries from the monitor",
@@ -211,6 +219,7 @@ CommandLine *do_subcommands[] = {
 	&do_show_commands,
 	&do_discover,
 	&do_destroy,
+	&do_httpd,
 	NULL
 };
 

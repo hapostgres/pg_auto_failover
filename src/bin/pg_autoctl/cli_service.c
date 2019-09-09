@@ -19,6 +19,7 @@
 #include "commandline.h"
 #include "defaults.h"
 #include "fsm.h"
+#include "httpd.h"
 #include "keeper_config.h"
 #include "keeper.h"
 #include "monitor.h"
@@ -174,8 +175,13 @@ cli_keeper_run(int argc, char **argv)
 			exit(EXIT_CODE_MONITOR);
 		}
 
-		keeper_service_run(&keeper, &pid);
 	}
+
+	httpd_start_process(keeperOptions.pgSetup.pgdata,
+						keeper.config.httpd.listen_address,
+						keeper.config.httpd.port);
+
+	keeper_service_run(&keeper, &pid);
 }
 
 

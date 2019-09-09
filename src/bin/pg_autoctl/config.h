@@ -40,6 +40,13 @@ typedef struct ConfigFilePaths
 	char systemd[MAXPGPATH];	/* ~/.config/systemd/user/pgautofailover.service */
 } ConfigFilePaths;
 
+typedef struct httpd_config
+{
+	char listen_address[MAXPGPATH];
+	int port;
+	int max_connection;
+} HttpdConfig;
+
 /*
  * We implement XDG Base Directory Specification (in parts), and the following
  * XDGResourceType makes it possible to make some decisions in the generic
