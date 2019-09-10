@@ -571,7 +571,8 @@ keeper_cli_httpd_start(int argc, char **argv)
 									pgIsNotRunningIsOk,
 									monitorDisabledIsOk);
 
-			httpd_start(config.pgSetup.pgdata,
+			/* here we start the HTTP server in the foreground. */
+			httpd_start(keeperOptions.pgSetup.pgdata,
 						config.httpd.listen_address,
 						config.httpd.port);
 			break;

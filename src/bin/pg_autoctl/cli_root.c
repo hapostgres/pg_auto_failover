@@ -12,6 +12,8 @@
 #include "cli_root.h"
 #include "commandline.h"
 
+int logLevel = LOG_INFO;
+
 /* local bindings for all the commands */
 CommandLine help =
 	make_command("help", "print help message", "", "", NULL, keeper_cli_help);
@@ -148,17 +150,18 @@ root_options(int argc, char **argv)
 				switch (verboseCount)
 				{
 					case 1:
-						log_set_level(LOG_INFO);
+						logLevel = LOG_INFO;
 						break;
 
 					case 2:
-						log_set_level(LOG_DEBUG);
+						logLevel = LOG_DEBUG;
 						break;
 
 					default:
-						log_set_level(LOG_TRACE);
+						logLevel = LOG_TRACE;
 						break;
 				}
+				log_set_level(logLevel);
 				break;
 			}
 

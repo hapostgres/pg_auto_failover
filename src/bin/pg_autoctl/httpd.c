@@ -18,6 +18,7 @@
 #include "postgres_fe.h"
 #include "pqexpbuffer.h"
 
+#include "cli_root.h"
 #include "defaults.h"
 #include "httpd.h"
 #include "keeper.h"
@@ -28,6 +29,7 @@
 #define WBY_IMPLEMENTATION
 #define WBY_USE_FIXED_TYPES
 #define WBY_USE_ASSERT
+#define WBY_UINT_PTR size_t
 #include "web.h"
 
 #define MAX_WSCONN 8
@@ -44,11 +46,18 @@ static int httpd_dispatch(struct wby_con *connection, void *userdata);
 static void httpd_log(const char* text);
 static bool http_home(struct wby_con *connection, void *userdata);
 static bool http_version(struct wby_con *connection, void *userdata);
+static bool http_api_version(struct wby_con *connection, void *userdata);
 static bool http_state(struct wby_con *connection, void *userdata);
 static bool http_fsm_state(struct wby_con *connection, void *userdata);
 
 static bool keeper_fsm_as_json(KeeperConfig *config, char *buffer, int size);
 
+/* we don't support websocket but still needs the API in place for web.h */
+static int websocket_connect(struct wby_con *connection, void *userdata);
+static void websocket_connected(struct wby_con *connection, void *userdata);
+static int websocket_frame(struct wby_con *connection,
+						   const struct wby_frame *frame, void *userdata);
+static void websocket_closed(struct wby_con *connection, void *userdata);
 
 typedef struct routing_table
 {
@@ -57,10 +66,11 @@ typedef struct routing_table
 } HttpRoutingTable;
 
 HttpRoutingTable KeeperRoutingTable[] = {
-	{ "/",              http_home },
-	{ "/versions",      http_version },
-	{ "/1.0/state",     http_state },
-	{ "/1.0/fsm/state", http_fsm_state },
+	{ "/",                  http_home },
+	{ "/versions",          http_version },
+	{ "/api/version",       http_api_version },
+	{ "/api/1.0/state",     http_state },
+	{ "/api/1.0/fsm/state", http_fsm_state },
 	{ "", NULL }
 };
 
@@ -80,6 +90,7 @@ bool
 httpd_start_process(const char *pgdata, const char *listen_address, int port)
 {
 	pid_t pid;
+	int log_level = logLevel;
 
 	/* Flush stdio channels just before fork, to avoid double-output problems */
 	fflush(stdout);
@@ -107,8 +118,11 @@ httpd_start_process(const char *pgdata, const char *listen_address, int port)
 			int stdin = open(DEV_NULL, O_RDONLY);
 
 			dup2(stdin, STDIN_FILENO);
-
 			close(stdin);
+
+			/* reset log level to same as the parent process */
+			log_set_level(log_level);
+			log_warn("set log level to %d/%d", log_level, logLevel);
 
 			return httpd_start(pgdata, listen_address, port);
 		}
@@ -116,6 +130,7 @@ httpd_start_process(const char *pgdata, const char *listen_address, int port)
 		default:
 		{
 			/* fork succeeded, in parent */
+			log_warn("HTTP started [%d]", pid);
 			return true;
 		}
 	}
@@ -130,14 +145,13 @@ httpd_start(const char *pgdata, const char *listen_address, int port)
 {
 	HttpServerState state = { 0 };
     void *memory = NULL;
-    wby_size needed_memory = 0;
-    struct wby_server server;
-    struct wby_config config;
+    size_t needed_memory;
+    struct wby_server server = { 0 };
+    struct wby_config config = { 0 };
 
 	state.quit = false;
 	strlcpy(state.pgdata, pgdata, MAXPGPATH);
 
-    memset(&config, 0, sizeof config);
     config.userdata = &state;
     config.address = listen_address;
     config.port = port;
@@ -147,17 +161,33 @@ httpd_start(const char *pgdata, const char *listen_address, int port)
     config.log = httpd_log;
     config.dispatch = httpd_dispatch;
 
+	/* we don't use them, but the lib seems to require those being set anyway */
+    config.ws_connect = websocket_connect;
+    config.ws_connected = websocket_connected;
+    config.ws_frame = websocket_frame;
+    config.ws_closed = websocket_closed;
+
     wby_init(&server, &config, &needed_memory);
     memory = calloc(needed_memory, 1);
-    wby_start(&server, memory);
 
-	log_info("HTTP server started at http://%s:%d/",
-			 config.address, config.port);
+    if( wby_start(&server, memory) == -1)
+	{
+		/*
+		 * FIXME: edit ../lib/mmx/web.h to use log levels and proper error
+		 * message when it should be user visible, e.g.:
+		 *
+		 *  bind() failed: Address already in use
+		 */
+		log_error("Failed to start HTTP API server");
+		return false;
+	}
+
+	log_info(
+		"HTTP server started at http://%s:%d/", config.address, config.port);
 
 	while (!state.quit)
 	{
         wby_update(&server);
-		usleep(PG_AUTOCTL_HTTPD_SLEEP_TIME);
 	}
 
     wby_stop(&server);
@@ -210,6 +240,23 @@ http_home(struct wby_con *connection, void *userdata)
 {
 	wby_response_begin(connection, 200, 14, NULL, 0);
 	wby_write(connection, "Hello, world!\n", 14);
+	wby_response_end(connection);
+
+	return true;
+}
+
+
+/*
+ * http_api_version is the dispatch function for /api/version
+ */
+static bool
+http_api_version(struct wby_con *connection, void *userdata)
+{
+	char buffer[BUFSIZE];
+	int len = snprintf(buffer, BUFSIZE, "%s", HTTPD_CURRENT_API_VERSION);
+
+	wby_response_begin(connection, 200, len, NULL, 0);
+	wby_write(connection, buffer, len);
 	wby_response_end(connection);
 
 	return true;
@@ -404,4 +451,34 @@ keeper_fsm_as_json(KeeperConfig *config, char *json, int size)
 	destroyPQExpBuffer(buffer);
 
 	return true;
+}
+
+
+/*
+ * We don't support websockets at the moment.
+ */
+static int
+websocket_connect(struct wby_con *connection, void *userdata)
+{
+	return 1;
+}
+
+
+static void
+websocket_connected(struct wby_con *connection, void *userdata)
+{
+}
+
+
+static int
+websocket_frame(struct wby_con *connection,
+				const struct wby_frame *frame, void *userdata)
+{
+	return 0;
+}
+
+
+static void
+websocket_closed(struct wby_con *connection, void *userdata)
+{
 }

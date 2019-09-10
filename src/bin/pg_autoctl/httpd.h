@@ -18,7 +18,6 @@
 #define DEV_NULL "/dev/null"
 #endif
 
-
 bool httpd_start_process(const char *pgdata,
 						 const char *listen_address, int port);
 bool httpd_start(const char *pgdata, const char *listen_address, int port);
