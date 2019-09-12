@@ -1,3 +1,7 @@
+### pg_auto_failover v1.0.4 (Sep 5, 2019) ###
+
+* Add PG 12 support
+
 ### pg_auto_failover v1.0.3 (Jul 30, 2019) ###
 
 * Add support for systemd integration
