@@ -459,6 +459,117 @@ reach_initial_state(Keeper *keeper)
 
 
 /*
+ * keeper_init_maybe_initdb checks if the `pg_autoctl create` process needs to
+ * `pg_ctl initdb` a local PostgreSQL cluster, and register this information in
+ * the given boolean pointer pgInstanceIsOurs.
+ *
+ * It returns true when it's happy about what it did:
+ *
+ *  - Either initdb wasn't necessary and nothing was done
+ *  - Or initdb was necessary and was successfully done.
+ */
+static bool
+keeper_init_maybe_initdb(Keeper *keeper, bool *pgInstanceIsOurs)
+{
+	PostgresSetup pgSetup = keeper->config.pgSetup;
+	bool postgresInstanceExists = pg_setup_pgdata_exists(&pgSetup);
+
+	/*
+	 * When going from INIT to SINGLE, it is the responsibility of the
+	 * keeper_pg_init() function to `pg_ctl initdb` the local PostgreSQL
+	 * cluster before entering the FSM itself.
+	 *
+	 * In other cases, we don't have to initdb.
+	 */
+	if (!(keeper->state.current_role == INIT_STATE
+		  && keeper->state.assigned_role == SINGLE_STATE))
+	{
+		*pgInstanceIsOurs = false;
+		return true;
+	}
+
+	/*
+	 * We decide whether to initdb or not depending on the current state of the
+	 * PGDATA directory, and we decide whether we own the instance of not on
+	 * the state of PGDATA when we first did our `pg_autoctl create`
+	 * invocation, so as to be able to init several times until everything is
+	 * fixed.
+	 */
+	if (initState.pgInitState == PRE_INIT_STATE_EMPTY)
+	{
+		*pgInstanceIsOurs = true;
+	}
+
+	/*
+	 * We might have to `pg_ctl initdb`:
+	 */
+	if (!postgresInstanceExists)
+	{
+		if (!pg_ctl_initdb(pgSetup.pg_ctl, pgSetup.pgdata))
+		{
+			log_fatal("Failed to initialise a PostgreSQL instance at \"%s\""
+					  ", see above for details", pgSetup.pgdata);
+
+			return false;
+		}
+
+		/*
+		 * We managed to initdb, refresh our configuration file location with
+		 * the realpath(3) from pg_setup_update_config_with_absolute_pgdata:
+		 *  we might have been given a relative pathname.
+		 */
+		if (!keeper_config_update_with_absolute_pgdata(&(keeper->config)))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+	}
+
+	/*
+	 * Now, if we just initialized the cluster, we may restart it and create
+	 * databases and everything. If PostgreSQL is not running, we can consider
+	 * that we are allowed to start and restart it too, there won't be a
+	 * negative impact on the service.
+	 *
+	 * If Postgres is already running though, again, chicken out.
+	 */
+	if (! *pgInstanceIsOurs)
+	{
+		bool postgresIsRunning =
+			initState.pgInitState >= PRE_INIT_STATE_RUNNING;
+
+		if (postgresIsRunning)
+		{
+			log_error("PostgreSQL is already running at \"%s\", refusing to "
+					  "initialize a new cluster on-top of the current one.",
+					  pgSetup.pgdata);
+
+			return false;
+		}
+		else
+		{
+			*pgInstanceIsOurs = true;
+		}
+	}
+
+	/*
+	 * Now that we've checked that PostgreSQL is ours, we can finish the
+	 * install.
+	 */
+	if (*pgInstanceIsOurs)
+	{
+		if (!create_database_and_extension(keeper))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+	}
+
+	return true;
+}
+
+
+/*
  * wait_until_primary_is_ready calls monitor_node_active every second until the
  * monitor tells us that we can move from our current state
  * (WAIT_STANDBY_STATE) to CATCHINGUP_STATE, which only happens when the
