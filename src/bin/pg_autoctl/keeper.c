@@ -844,7 +844,7 @@ keeper_init_state_write(Keeper *keeper)
 	}
 	else
 	{
-		initState.pgInitState = PRE_INIT_STATE_EMTPY;
+		initState.pgInitState = PRE_INIT_STATE_EMPTY;
 	}
 
 	log_info("Writing keeper init state file at \"%s\"",
