@@ -312,6 +312,9 @@ ensure_default_settings_file_exists(const char *configFilePath,
 	{
 		GUC *setting = &settings[settingIndex];
 		/*
+		 * Settings for "listen_addresses" and "port" are replaced with the
+		 * respective values present in pgSetup allowing those to be dynamic.
+		 *
 		 * At the moment our "needs quote" heuristic is pretty simple.
 		 * There's the one parameter within those that we hardcode from
 		 * pg_auto_failover that needs quoting, and that's
