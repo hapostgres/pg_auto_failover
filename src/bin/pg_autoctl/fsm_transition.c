@@ -81,6 +81,10 @@ fsm_init_primary(Keeper *keeper)
 		return false;
 	}
 
+	pgInstanceIsOurs =
+		   initState.pgInitState == PRE_INIT_STATE_EMPTY
+		|| initState.pgInitState == PRE_INIT_STATE_EXISTS;
+
 	if (initState.pgInitState == PRE_INIT_STATE_EMPTY
 		&& !postgresInstanceExists)
 	{
@@ -102,25 +106,6 @@ fsm_init_primary(Keeper *keeper)
 			/* errors have already been logged */
 			return false;
 		}
-
-		if (!create_database_and_extension(keeper))
-		{
-			/* errors have already been logged */
-			return false;
-		}
-	}
-	else if (initState.pgInitState == PRE_INIT_STATE_EXISTS)
-	{
-		/*
-		 * The PostgreSQL instance exists (there's a PGDATA) when creating the
-		 * pg_autoctl node the first time, but was not running. We can restart
-		 * the instance without fear of disturbing the service.
-		 */
-		if (!create_database_and_extension(keeper))
-		{
-			/* errors have already been logged */
-			return false;
-		}
 	}
 	else if (initState.pgInitState >= PRE_INIT_STATE_RUNNING)
 	{
@@ -132,9 +117,29 @@ fsm_init_primary(Keeper *keeper)
 	}
 
 	/*
+<<<<<<< HEAD
 	 * When initState is PRE_INIT_STATE_RUNNING, double check that Postgres is
 	 * still running. After all the end-user could just stop Postgres and then
 	 * give the install to us. We ought to support that.
+=======
+	 * When the PostgreSQL instance either did not exist, or did exist but was
+	 * not running when creating the pg_autoctl node the first time, then we
+	 * can restart the instance without fear of disturbing the service.
+	 */
+	if (pgInstanceIsOurs)
+	{
+		/* creaste the target database and install our extension there */
+		if (!create_database_and_extension(keeper))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+	}
+
+	/*
+	 * We need to add the monitor host:port in the HBA settings for the node to
+	 * enable the health checks.
+>>>>>>> 8919df7... Move all the INIT to SINGLE initialisation code in the FSM transition.
 	 */
 	if (initState.pgInitState >= PRE_INIT_STATE_RUNNING)
 	{
