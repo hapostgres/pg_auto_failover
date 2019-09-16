@@ -40,10 +40,6 @@
 #define PROGRAM_NOT_RUNNING 3
 
 
-static bool get_current_GUC_value(const char *name, const char *value,
-								  PostgresSetup *pgSetup,
-								  PQExpBuffer valueBuffer);
-
 static bool pg_include_config(const char *configFilePath,
 							  const char *configIncludeLine,
 							  const char *configIncludeRegex,
@@ -307,8 +303,6 @@ ensure_default_settings_file_exists(const char *configFilePath,
 									PostgresSetup *pgSetup)
 {
 	PQExpBuffer defaultConfContents = createPQExpBuffer();
-	PQExpBuffer valueBuffer = createPQExpBuffer();
-
 	int settingIndex = 0;
 
 	appendPQExpBufferStr(defaultConfContents, "# Settings by pg_auto_failover\n");
@@ -317,53 +311,42 @@ ensure_default_settings_file_exists(const char *configFilePath,
 	for (settingIndex = 0; settings[settingIndex].name != NULL; settingIndex++)
 	{
 		GUC *setting = &settings[settingIndex];
-		bool valueFound = get_current_GUC_value(setting->name, setting->value,
-												pgSetup, valueBuffer);
-
-		if (valueFound)
+		/*
+		 * At the moment our "needs quote" heuristic is pretty simple.
+		 * There's the one parameter within those that we hardcode from
+		 * pg_auto_failover that needs quoting, and that's
+		 * listen_addresses.
+		 *
+		 * The reason why POSTGRES_DEFAULT_LISTEN_ADDRESSES is not quoting
+		 * the value directly in the constant is that we are using that
+		 * value both in the configuration file and at the pg_ctl start
+		 * --options "-h *" command line.
+		 *
+		 * At the command line, using --options "-h '*'" would give:
+		 *    could not create listen socket for "'*'"
+		 */
+		if (strcmp(setting->name, "listen_addresses") == 0)
 		{
-			/*
-			 * At the moment our "needs quote" heuristic is pretty simple.
-			 * There's the one parameter within those that we hardcode from
-			 * pg_auto_failover that needs quoting, and that's
-			 * listen_addresses.
-			 *
-			 * The reason why POSTGRES_DEFAULT_LISTEN_ADDRESSES is not quoting
-			 * the value directly in the constant is that we are using that
-			 * value both in the configuration file and at the pg_ctl start
-			 * --options "-h *" command line.
-			 *
-			 * At the command line, using --options "-h '*'" would give:
-			 *    could not create listen socket for "'*'"
-			 */
-			if (strcmp(setting->name, "listen_addresses") == 0)
-			{
-				appendPQExpBuffer(defaultConfContents, "%s = '%s'\n",
-								  setting->name,
-								  valueBuffer->data);
-			}
-			else
-			{
-				appendPQExpBuffer(defaultConfContents, "%s = %s\n",
-								  setting->name,
-								  valueBuffer->data);
-			}
-
+			appendPQExpBuffer(defaultConfContents, "%s = '%s'\n",
+							  setting->name,
+							  pgSetup->listen_addresses);
+		}
+		else if (strcmp(setting->name, "port") == 0)
+		{
+			appendPQExpBuffer(defaultConfContents, "%s = %d\n",
+					  setting->name,
+					  pgSetup->pgport);
+		}
+		else if (setting->value != NULL)
+		{
+			appendPQExpBuffer(defaultConfContents, "%s = %s\n",
+							  setting->name,
+							  setting->value);
 		}
 		else
 		{
-			/*
-			 * Buffer allocation error message is thrown inside
-			 * get_current_GUC_value function.
-			 */
-			if (!PQExpBufferBroken(valueBuffer))
-			{
-				log_error("BUG: GUC setting \"%s\" has a NULL value", setting->name);
-			}
-
-			destroyPQExpBuffer(valueBuffer);
+			log_error("BUG: GUC setting \"%s\" has a NULL value", setting->name);
 			destroyPQExpBuffer(defaultConfContents);
-
 			return false;
 		}
 	}
@@ -372,7 +355,6 @@ ensure_default_settings_file_exists(const char *configFilePath,
 	if (PQExpBufferBroken(defaultConfContents))
 	{
 		log_error("Failed to allocate memory");
-		destroyPQExpBuffer(valueBuffer);
 		destroyPQExpBuffer(defaultConfContents);
 		return false;
 	}
@@ -387,7 +369,6 @@ ensure_default_settings_file_exists(const char *configFilePath,
 		{
 			/* technically, we could still try writing, but this is pretty
 			 * suspicious */
-			destroyPQExpBuffer(valueBuffer);
 			destroyPQExpBuffer(defaultConfContents);
 			return false;
 		}
@@ -397,7 +378,6 @@ ensure_default_settings_file_exists(const char *configFilePath,
 			/* file is there and has the same contents, nothing to do */
 			log_debug("Default settings file \"%s\" exists", configFilePath);
 			free(currentDefaultConfContents);
-			destroyPQExpBuffer(valueBuffer);
 			destroyPQExpBuffer(defaultConfContents);
 			return true;
 		}
@@ -414,59 +394,13 @@ ensure_default_settings_file_exists(const char *configFilePath,
 
 	if (!write_file(defaultConfContents->data, defaultConfContents->len, configFilePath))
 	{
-		destroyPQExpBuffer(valueBuffer);
 		destroyPQExpBuffer(defaultConfContents);
 		return false;
 	}
 
-	destroyPQExpBuffer(valueBuffer);
 	destroyPQExpBuffer(defaultConfContents);
 
 	return true;
-}
-
-/*
- * get_current_GUC_value stores the he current GUC value as in the settings
- * parameter to provided dynamic valueBuffer. The functions replaces the
- * provided value with values found in pgSetup for the Postgres
- * parameters "listen_addresses" and "port", allowing those to be dynamic.
- *
- * Dynamic buffer is reset at each call.
- *
- * The function returns true on success, false otherwise.
- */
-bool
-get_current_GUC_value(const char *name, const char *value, PostgresSetup *pgSetup,
-					  PQExpBuffer valueBuffer)
-{
-	resetPQExpBuffer(valueBuffer);
-	enlargePQExpBuffer(valueBuffer, strlen(value));
-
-	/* replace placeholder values with actual pgSetup values */
-	if (strcmp(name, "listen_addresses") == 0)
-	{
-		appendPQExpBuffer(valueBuffer, "%s", pgSetup->listen_addresses);
-	}
-	else if (strcmp(name, "port") == 0)
-	{
-		appendPQExpBuffer(valueBuffer, "%d",  pgSetup->pgport);
-	}
-	else if (value != NULL)
-	{
-		appendPQExpBuffer(valueBuffer, "%s",  value);
-	}
-	else
-	{
-		return false;
-	}
-
-	if (PQExpBufferBroken(valueBuffer))
-	{
-		log_error("Failed to allocate memory while retrieving GUC setting");
-		return false;
-	}
-
-	return valueBuffer;
 }
 
 
