@@ -40,9 +40,6 @@
 #define PROGRAM_NOT_RUNNING 3
 
 
-static const char *get_current_GUC_value(const char *name, const char *value,
-										 PostgresSetup *pgSetup);
-
 static bool pg_include_config(const char *configFilePath,
 							  const char *configIncludeLine,
 							  const char *configIncludeRegex,
@@ -305,52 +302,54 @@ ensure_default_settings_file_exists(const char *configFilePath,
 									GUC *settings,
 									PostgresSetup *pgSetup)
 {
-	PQExpBuffer defaultConfContents = NULL;
+	PQExpBuffer defaultConfContents = createPQExpBuffer();
 	int settingIndex = 0;
 
-	defaultConfContents = createPQExpBuffer();
 	appendPQExpBufferStr(defaultConfContents, "# Settings by pg_auto_failover\n");
 
 	/* replace placeholder values with actual pgSetup values */
 	for (settingIndex = 0; settings[settingIndex].name != NULL; settingIndex++)
 	{
 		GUC *setting = &settings[settingIndex];
-		const char *value =
-			get_current_GUC_value(setting->name, setting->value, pgSetup);
-
-		if (value != NULL)
+		/*
+		 * Settings for "listen_addresses" and "port" are replaced with the
+		 * respective values present in pgSetup allowing those to be dynamic.
+		 *
+		 * At the moment our "needs quote" heuristic is pretty simple.
+		 * There's the one parameter within those that we hardcode from
+		 * pg_auto_failover that needs quoting, and that's
+		 * listen_addresses.
+		 *
+		 * The reason why POSTGRES_DEFAULT_LISTEN_ADDRESSES is not quoting
+		 * the value directly in the constant is that we are using that
+		 * value both in the configuration file and at the pg_ctl start
+		 * --options "-h *" command line.
+		 *
+		 * At the command line, using --options "-h '*'" would give:
+		 *    could not create listen socket for "'*'"
+		 */
+		if (strcmp(setting->name, "listen_addresses") == 0)
 		{
-			/*
-			 * At the moment our "needs quote" heuristic is pretty simple.
-			 * There's the one parameter within those that we hardcode from
-			 * pg_auto_failover that needs quoting, and that's
-			 * listen_addresses.
-			 *
-			 * The reason why POSTGRES_DEFAULT_LISTEN_ADDRESSES is not quoting
-			 * the value directly in the constant is that we are using that
-			 * value both in the configuration file and at the pg_ctl start
-			 * --options "-h *" command line.
-			 *
-			 * At the command line, using --options "-h '*'" would give:
-			 *    could not create listen socket for "'*'"
-			 */
-			if (strcmp(setting->name, "listen_addresses") == 0)
-			{
-				appendPQExpBuffer(defaultConfContents, "%s = '%s'\n",
-								  setting->name,
-								  value);
-			}
-			else
-			{
-				appendPQExpBuffer(defaultConfContents, "%s = %s\n",
-								  setting->name,
-								  value);
-			}
+			appendPQExpBuffer(defaultConfContents, "%s = '%s'\n",
+							  setting->name,
+							  pgSetup->listen_addresses);
+		}
+		else if (strcmp(setting->name, "port") == 0)
+		{
+			appendPQExpBuffer(defaultConfContents, "%s = %d\n",
+					  setting->name,
+					  pgSetup->pgport);
+		}
+		else if (setting->value != NULL)
+		{
+			appendPQExpBuffer(defaultConfContents, "%s = %s\n",
+							  setting->name,
+							  setting->value);
 		}
 		else
 		{
-			log_error("BUG: GUC setting \"%s\" has a NULL value",
-					  setting->name);
+			log_error("BUG: GUC setting \"%s\" has a NULL value", setting->name);
+			destroyPQExpBuffer(defaultConfContents);
 			return false;
 		}
 	}
@@ -405,27 +404,6 @@ ensure_default_settings_file_exists(const char *configFilePath,
 	destroyPQExpBuffer(defaultConfContents);
 
 	return true;
-}
-
-/*
- * get_current_GUC_value returns the current GUC value as in the settings
- * parameter; replacing it with values found in pgSetup for the Postgres
- * parameters "listen_addresses" and "port", allowing those to be dynamic.
- */
-static const char *
-get_current_GUC_value(const char *name, const char *value, PostgresSetup *pgSetup)
-{
-	/* replace placeholder values with actual pgSetup values */
-	if (strcmp(name, "listen_addresses") == 0)
-	{
-		return pgSetup->listen_addresses;
-	}
-	else if (strcmp(name, "port") == 0)
-	{
-		return intToString(pgSetup->pgport).strValue;
-	}
-
-	return value;
 }
 
 
