@@ -7,7 +7,10 @@
  *
  */
 
+#include <fnmatch.h>
 #include <inttypes.h>
+#include <libgen.h>
+#include <regex.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,6 +23,7 @@
 
 #include "cli_root.h"
 #include "defaults.h"
+#include "fsm.h"
 #include "httpd.h"
 #include "keeper.h"
 #include "log.h"
@@ -35,6 +39,7 @@
 
 #define MAX_WSCONN 8
 #define MAX_URL_SCRIPT_SIZE 512
+#define RE_MATCH_COUNT 10
 
 /*
  * The HTTP server routing table associate an URL script (/api/1.0/status) to a
@@ -42,14 +47,46 @@
  */
 typedef bool (*HttpDispatchFunction)(struct wby_con *connection, void *userdata);
 
-static int httpd_dispatch(struct wby_con *connection, void *userdata);
-
-static void httpd_log(const char* text);
 static bool http_home(struct wby_con *connection, void *userdata);
 static bool http_version(struct wby_con *connection, void *userdata);
 static bool http_api_version(struct wby_con *connection, void *userdata);
 static bool http_state(struct wby_con *connection, void *userdata);
 static bool http_fsm_state(struct wby_con *connection, void *userdata);
+static bool http_fsm_assign(struct wby_con *connection, void *userdata);
+
+
+typedef struct routing_table
+{
+	char script[MAX_URL_SCRIPT_SIZE];
+	HttpDispatchFunction dispatchFunction;
+} HttpRoutingTable;
+
+HttpRoutingTable KeeperRoutingTable[] = {
+	{ "/",                       http_home },
+	{ "/versions",               http_version },
+	{ "/api/version",            http_api_version },
+	{ "/api/1.0/state",          http_state },
+	{ "/api/1.0/fsm/state",      http_fsm_state },
+	{ "/api/1.0/fsm/assign/*",   http_fsm_assign },
+	{ "", NULL }
+};
+
+
+typedef struct server_state
+{
+    bool quit;
+	char pgdata[MAXPGPATH];
+} HttpServerState
+;
+
+static int httpd_dispatch(struct wby_con *connection, void *userdata);
+static bool httpd_route_match_query(const char *uri,
+									const char *script,
+									char **matches,
+									int matchesSize,
+									int *matchesCount);
+
+static void httpd_log(const char* text);
 
 static bool keeper_fsm_as_json(KeeperConfig *config, char *buffer, int size);
 
@@ -59,28 +96,6 @@ static void websocket_connected(struct wby_con *connection, void *userdata);
 static int websocket_frame(struct wby_con *connection,
 						   const struct wby_frame *frame, void *userdata);
 static void websocket_closed(struct wby_con *connection, void *userdata);
-
-typedef struct routing_table
-{
-	char script[MAX_URL_SCRIPT_SIZE];
-	HttpDispatchFunction dispatchFunction;
-} HttpRoutingTable;
-
-HttpRoutingTable KeeperRoutingTable[] = {
-	{ "/",                  http_home },
-	{ "/versions",          http_version },
-	{ "/api/version",       http_api_version },
-	{ "/api/1.0/state",     http_state },
-	{ "/api/1.0/fsm/state", http_fsm_state },
-	{ "", NULL }
-};
-
-
-typedef struct server_state
-{
-    bool quit;
-	char pgdata[MAXPGPATH];
-} HttpServerState;
 
 
 /*
@@ -220,21 +235,46 @@ static int
 httpd_dispatch(struct wby_con *connection, void *userdata)
 {
 	int routingIndex = 0;
-	HttpRoutingTable RoutingTableEntry = KeeperRoutingTable[0];
+	HttpRoutingTable routingTableEntry = KeeperRoutingTable[0];
 
-	while (RoutingTableEntry.dispatchFunction != NULL)
+	while (routingTableEntry.dispatchFunction != NULL)
 	{
-		if (strcmp(connection->request.uri, RoutingTableEntry.script) == 0)
+		int matchesCount;
+		char matches[RE_MATCH_COUNT][BUFSIZE] = { 0 };
+
+		if (httpd_route_match_query(connection->request.uri,
+									routingTableEntry.script,
+									(char **)matches,
+									RE_MATCH_COUNT,
+									&matchesCount))
 		{
-			log_debug("HTTP dispatch on \"%s\"", RoutingTableEntry.script);
-			return (*RoutingTableEntry.dispatchFunction)(connection, userdata);
+			log_warn("HTTP dispatch on \"%s\"", routingTableEntry.script);
+			return (*routingTableEntry.dispatchFunction)(connection, userdata);
 		}
 
-		RoutingTableEntry = KeeperRoutingTable[++routingIndex];
+		routingTableEntry = KeeperRoutingTable[++routingIndex];
 	}
 
 	/* 404 */
 	return 1;
+}
+
+
+/*
+ * httpd_route_match_query matches a given URI from the request to one routing
+ * table entry. When the query matches, we fill-in the given pre-allocated
+ * matches array with the groups matched in the query.
+ *
+ * The first entry of the groups is going to be the whole URI itself.
+ */
+static bool
+httpd_route_match_query(const char *uri,
+						const char *pattern,
+						char **matches,
+						int matchesSize,
+						int *matchesCount)
+{
+	return fnmatch(pattern, uri, FNM_PATHNAME) == 0;
 }
 
 
@@ -313,7 +353,7 @@ http_version(struct wby_con *connection, void *userdata)
 
 
 /*
- * http_keeper_state is the dispatch function for /1.0.fsm/state
+ * http_keeper_state is the dispatch function for /1.0/fsm/state
  */
 bool
 http_fsm_state(struct wby_con *connection, void *userdata)
@@ -363,7 +403,7 @@ http_fsm_state(struct wby_con *connection, void *userdata)
 		{
 			char message[BUFSIZE];
 			int len = snprintf(message, BUFSIZE,
-							   "Unrecognized configuration file \"%s\"",
+							   "Unrecognized configuration file \"%s\"\n",
 							   config.pathnames.config);
 
 			wby_response_begin(connection, 503, -1, NULL, 0);
@@ -371,6 +411,91 @@ http_fsm_state(struct wby_con *connection, void *userdata)
 			wby_response_end(connection);
 		}
 	}
+	return true;
+}
+
+
+/*
+ * http_keeper_assign is the dispatch function for /1.0/fsm/assign
+ */
+static bool
+http_fsm_assign(struct wby_con *connection, void *userdata)
+{
+    HttpServerState *state = (HttpServerState *) userdata;
+
+	char uri[BUFSIZE];
+	char *assignedStateString;
+	NodeState goalState;
+
+	Keeper keeper = { 0 };
+	pgAutoCtlNodeRole nodeRole;
+	KeeperConfig config = keeper.config;
+	KeeperStateData *keeperState = &(keeper.state);
+
+	bool missing_pgdata_is_ok = true;
+	bool pg_is_not_running_is_ok = true;
+
+	/* use basename to retrieve the last part of th URI, on a copy of it */
+	strlcpy(uri, connection->request.uri, BUFSIZE);
+	assignedStateString = basename(uri);
+	goalState = NodeStateFromString(assignedStateString);
+
+	if (!keeper_config_set_pathnames_from_pgdata(&config.pathnames,
+												 state->pgdata))
+	{
+		/* errors have already been logged */
+		wby_response_begin(connection, 503, 0, NULL, 0);
+		wby_response_end(connection);
+	}
+
+	nodeRole = ProbeConfigurationFileRole(config.pathnames.config);
+
+	if (nodeRole != PG_AUTOCTL_ROLE_KEEPER)
+	{
+		return false;
+	}
+
+	keeper_config_read_file(&config,
+							missing_pgdata_is_ok,
+							pg_is_not_running_is_ok);
+
+	if (!keeper_state_read(keeperState, config.pathnames.state))
+	{
+		return false;
+	}
+
+	keeperState->assigned_role = goalState;
+
+	if (!keeper_fsm_reach_assigned_state(&keeper))
+	{
+		char buffer[BUFSIZE];
+		int len = snprintf(buffer, BUFSIZE,
+						   "Failed to reach assign state \"%s\"\n",
+						   NodeStateToString(goalState));
+
+		wby_response_begin(connection, 501, strlen(buffer), NULL, 0);
+		wby_write(connection, buffer, len);
+		wby_response_end(connection);
+		return false;
+	}
+	else
+	{
+		char buffer[BUFSIZE];
+
+		if (keeper_fsm_as_json(&config, buffer, BUFSIZE))
+		{
+			wby_response_begin(connection, 200, strlen(buffer), NULL, 0);
+			wby_write(connection, buffer, strlen(buffer));
+			wby_response_end(connection);
+		}
+		else
+		{
+			wby_response_begin(connection, 501, strlen(buffer), NULL, 0);
+			wby_write(connection, buffer, strlen(buffer));
+			wby_response_end(connection);
+		}
+	}
+
 	return true;
 }
 
