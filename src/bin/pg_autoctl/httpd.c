@@ -23,6 +23,7 @@
 #include "httpd.h"
 #include "keeper.h"
 #include "log.h"
+#include "signals.h"
 #include "state.h"
 
 #define WBY_STATIC
@@ -188,6 +189,11 @@ httpd_start(const char *pgdata, const char *listen_address, int port)
 	while (!state.quit)
 	{
         wby_update(&server);
+
+		if (asked_to_stop || asked_to_stop_fast)
+		{
+			state.quit = true;
+		}
 	}
 
     wby_stop(&server);
