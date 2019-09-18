@@ -28,6 +28,7 @@ typedef struct Keeper
 
 
 bool keeper_init(Keeper *keeper, KeeperConfig *config);
+bool keeper_init_fsm(Keeper *keeper, KeeperConfig *config);
 bool keeper_register_and_init(Keeper *keeper, KeeperConfig *config,
 							  NodeState initialState);
 bool keeper_load_state(Keeper *keeper);
@@ -48,6 +49,7 @@ bool keeper_init_state_read(Keeper *keeper, KeeperStateInit *initState);
 
 /* loop.c */
 bool keeper_service_init(Keeper *keeper, pid_t *pid);
+bool keeper_service_stop(Keeper *keeper);
 bool keeper_service_run(Keeper *keeper, pid_t *start_pid);
 
 #endif /* KEEPER_H */

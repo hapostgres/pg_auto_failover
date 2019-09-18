@@ -285,14 +285,7 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 		}
 	}
 
-	log_info("pg_autoctl service stopping");
-
-	if (!remove_pidfile(config->pathnames.pid))
-	{
-		log_error("Failed to remove pidfile \"%s\"", config->pathnames.pid);
-	}
-
-	return true;
+	return keeper_service_stop(keeper);
 }
 
 
@@ -330,7 +323,7 @@ keeper_service_init(Keeper *keeper, pid_t *pid)
 	 * function cli_service_run calls into keeper_init(): we know that we could
 	 * read a keeper state file.
 	 */
-	if (file_exists(config->pathnames.init))
+	if (!config->monitorDisabled && file_exists(config->pathnames.init))
 	{
 		log_warn("The `pg_autoctl create` did not complete, completing now.");
 
@@ -350,6 +343,25 @@ keeper_service_init(Keeper *keeper, pid_t *pid)
 		return false;
 	}
 
+	return true;
+}
+
+
+/*
+ * keeper_service_stop stops the service and removes the pid file.
+ */
+bool
+keeper_service_stop(Keeper *keeper)
+{
+	KeeperConfig *config = &(keeper->config);
+
+	log_info("pg_autoctl service stopping");
+
+	if (!remove_pidfile(config->pathnames.pid))
+	{
+		log_error("Failed to remove pidfile \"%s\"", config->pathnames.pid);
+		return false;
+	}
 	return true;
 }
 

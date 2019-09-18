@@ -50,6 +50,7 @@ bool allowRemovingPgdata = false;
  *		{ "formation", required_argument, NULL, 'f' },
  *		{ "group", required_argument, NULL, 'g' },
  *		{ "monitor", required_argument, NULL, 'm' },
+ *		{ "disable-monitor", no_argument, NULL, 'M' },
  *		{ "allow-removing-pgdata", no_argument, NULL, 'R' },
  *		{ "version", no_argument, NULL, 'V' },
  *		{ "verbose", no_argument, NULL, 'v' },
@@ -72,6 +73,7 @@ cli_create_node_getopts(int argc, char **argv,
 	int verboseCount = 0;
 
 	/* force some non-zero default values */
+	LocalOptionConfig.monitorDisabled = false;
 	LocalOptionConfig.groupId = -1;
 	LocalOptionConfig.network_partition_timeout = -1;
 	LocalOptionConfig.prepare_promotion_catchup = -1;
@@ -222,6 +224,14 @@ cli_create_node_getopts(int argc, char **argv,
 				break;
 			}
 
+			case 'M':
+			{
+				/* { "disable-monitor", required_argument, NULL, 'M' }, */
+				LocalOptionConfig.monitorDisabled = true;
+				log_trace("--disable-monitor");
+				break;
+			}
+
 			case 'R':
 			{
 				/* { "allow-removing-pgdata", no_argument, NULL, 'R' } */
@@ -325,6 +335,34 @@ cli_create_node_getopts(int argc, char **argv,
 		}
 
 		strlcpy(LocalOptionConfig.pgSetup.pgdata, pgdata, MAXPGPATH);
+	}
+
+	/*
+	 * You can't both have a monitor a use --disable-monitor.
+	 */
+	if (!IS_EMPTY_STRING_BUFFER(LocalOptionConfig.monitor_pguri)
+		&& LocalOptionConfig.monitorDisabled)
+	{
+		log_fatal("Use either --monitor or --disable-monitor, not both.");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+	else if (IS_EMPTY_STRING_BUFFER(LocalOptionConfig.monitor_pguri)
+			 && !LocalOptionConfig.monitorDisabled)
+	{
+		log_fatal("Failed to set the monitor URI: "
+				  "use either --monitor postgresql://... or --disable-monitor");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+	else if (LocalOptionConfig.monitorDisabled)
+	{
+		/*
+		 * We must be able to restore this setup from the configuration file,
+		 * and for that we set the pg_autoctl.monitor URI in the file to the
+		 * "magic" value PG_AUTOCTL_DISABLED.
+		 */
+		strlcpy(LocalOptionConfig.monitor_pguri,
+				PG_AUTOCTL_MONITOR_DISABLED,
+				MAXCONNINFO);
 	}
 
 	if (errors > 0)
