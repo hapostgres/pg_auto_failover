@@ -156,10 +156,11 @@ cli_keeper_run(int argc, char **argv)
 
 	if (keeper.config.monitorDisabled)
 	{
-		/*
-		 * At the moment, we have nothing to do here. Later we might want to
-		 * open an HTTPd service and wait for API calls.
-		 */
+		/* TODO: start the HTTPd process under a supervisor */
+		httpd_start(keeperOptions.pgSetup.pgdata,
+					keeper.config.httpd.listen_address,
+					keeper.config.httpd.port);
+
 		(void) keeper_service_stop(&keeper);
 	}
 	else
@@ -175,13 +176,12 @@ cli_keeper_run(int argc, char **argv)
 			exit(EXIT_CODE_MONITOR);
 		}
 
+		httpd_start_process(keeperOptions.pgSetup.pgdata,
+							keeper.config.httpd.listen_address,
+							keeper.config.httpd.port);
+
+		keeper_service_run(&keeper, &pid);
 	}
-
-	httpd_start_process(keeperOptions.pgSetup.pgdata,
-						keeper.config.httpd.listen_address,
-						keeper.config.httpd.port);
-
-	keeper_service_run(&keeper, &pid);
 }
 
 
