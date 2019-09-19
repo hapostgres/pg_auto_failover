@@ -429,37 +429,37 @@ http_fsm_assign(struct wby_con *connection, void *userdata)
 
 	Keeper keeper = { 0 };
 	pgAutoCtlNodeRole nodeRole;
-	KeeperConfig config = keeper.config;
+	KeeperConfig *config = &(keeper.config);
 	KeeperStateData *keeperState = &(keeper.state);
 
 	bool missing_pgdata_is_ok = true;
 	bool pg_is_not_running_is_ok = true;
 
-	/* use basename to retrieve the last part of th URI, on a copy of it */
+	/* use basename to retrieve the last part of the URI, on a copy of it */
 	strlcpy(uri, connection->request.uri, BUFSIZE);
 	assignedStateString = basename(uri);
 	goalState = NodeStateFromString(assignedStateString);
 
-	if (!keeper_config_set_pathnames_from_pgdata(&config.pathnames,
+	if (!keeper_config_set_pathnames_from_pgdata(&(config->pathnames),
 												 state->pgdata))
 	{
-		/* errors have already been logged */
 		wby_response_begin(connection, 503, 0, NULL, 0);
 		wby_response_end(connection);
+		return false;
 	}
 
-	nodeRole = ProbeConfigurationFileRole(config.pathnames.config);
+	nodeRole = ProbeConfigurationFileRole(config->pathnames.config);
 
 	if (nodeRole != PG_AUTOCTL_ROLE_KEEPER)
 	{
 		return false;
 	}
 
-	keeper_config_read_file(&config,
+	keeper_config_read_file(config,
 							missing_pgdata_is_ok,
 							pg_is_not_running_is_ok);
 
-	if (!keeper_state_read(keeperState, config.pathnames.state))
+	if (!keeper_state_read(keeperState, config->pathnames.state))
 	{
 		return false;
 	}
@@ -482,7 +482,7 @@ http_fsm_assign(struct wby_con *connection, void *userdata)
 	{
 		char buffer[BUFSIZE];
 
-		if (keeper_fsm_as_json(&config, buffer, BUFSIZE))
+		if (keeper_fsm_as_json(config, buffer, BUFSIZE))
 		{
 			wby_response_begin(connection, 200, strlen(buffer), NULL, 0);
 			wby_write(connection, buffer, strlen(buffer));
