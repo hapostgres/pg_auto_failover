@@ -1,3 +1,8 @@
+### pg_auto_failover v1.0.5 (Sep 20, 2019) ###
+
+* Fix not being able to create monitor/postgres nodes on mac (#60)
+* Add man page entry (#61)
+
 ### pg_auto_failover v1.0.4 (Sep 5, 2019) ###
 
 * Add PG 12 support
