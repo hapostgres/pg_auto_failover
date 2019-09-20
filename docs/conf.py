@@ -158,7 +158,11 @@ latex_show_urls = 'footnote'
 # (source start file, name, description, authors, manual section).
 man_pages = [
     (master_doc, 'pg_auto_failover', 'pg_auto_failover Documentation',
-     [author], 1)
+     [author], 1),
+    ('ref/reference', 'pg_autoctl', 'pg_auto_failover agent',
+     [author], 1),
+    ('ref/configuration', 'pg_autoctl', 'pg_auto_failover Configuration',
+     [author], 5)
 ]
 
 
