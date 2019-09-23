@@ -832,29 +832,32 @@ keeper_remove(Keeper *keeper, KeeperConfig *config, bool ignore_monitor_errors)
 	 */
 	keeper->config = *config;
 
-	if (!monitor_init(&(keeper->monitor), config->monitor_pguri))
+	if (!config->monitorDisabled)
 	{
-		return false;
-	}
-
-	log_info("Removing local node from the pg_auto_failover monitor.");
-
-	/*
-	 * If the node was already removed from the monitor, then the
-	 * monitor_remove function is going to return true here. It means that we
-	 * can call `pg_autoctl drop node` again when we removed the node from the
-	 * monitor already, but failed to remove the state file.
-	 */
-	if (!monitor_remove(&(keeper->monitor),
-						config->nodename,
-						config->pgSetup.pgport))
-	{
-		/* we already logged about errors */
-		errors++;
-
-		if (!ignore_monitor_errors)
+		if (!monitor_init(&(keeper->monitor), config->monitor_pguri))
 		{
 			return false;
+		}
+
+		log_info("Removing local node from the pg_auto_failover monitor.");
+
+		/*
+		 * If the node was already removed from the monitor, then the
+		 * monitor_remove function is going to return true here. It means that
+		 * we can call `pg_autoctl drop node` again when we removed the node
+		 * from the monitor already, but failed to remove the state file.
+		 */
+		if (!monitor_remove(&(keeper->monitor),
+							config->nodename,
+							config->pgSetup.pgport))
+		{
+			/* we already logged about errors */
+			errors++;
+
+			if (!ignore_monitor_errors)
+			{
+				return false;
+			}
 		}
 	}
 
