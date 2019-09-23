@@ -128,13 +128,15 @@ fsm_init_primary(Keeper *keeper)
 	 */
 	if (pgInstanceIsOurs)
 	{
-		/* creaste the target database and install our extension there */
+		/* create the target database and install our extension there */
 		if (!create_database_and_extension(keeper))
 		{
 			/* errors have already been logged */
 			return false;
 		}
 	}
+
+	log_warn("FSM transition still running");
 
 	/*
 	 * We need to add the monitor host:port in the HBA settings for the node to

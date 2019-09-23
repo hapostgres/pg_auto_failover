@@ -432,8 +432,9 @@ http_fsm_assign(struct wby_con *connection, void *userdata)
 	KeeperConfig *config = &(keeper.config);
 	KeeperStateData *keeperState = &(keeper.state);
 
-	bool missing_pgdata_is_ok = true;
-	bool pg_is_not_running_is_ok = true;
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = true;
 
 	/* use basename to retrieve the last part of the URI, on a copy of it */
 	strlcpy(uri, connection->request.uri, BUFSIZE);
@@ -456,8 +457,9 @@ http_fsm_assign(struct wby_con *connection, void *userdata)
 	}
 
 	keeper_config_read_file(config,
-							missing_pgdata_is_ok,
-							pg_is_not_running_is_ok);
+							missingPgdataIsOk,
+							pgIsNotRunningIsOk,
+							monitorDisabledIsOk);
 
 	if (!keeper_state_read(keeperState, config->pathnames.state))
 	{
@@ -472,6 +474,8 @@ http_fsm_assign(struct wby_con *connection, void *userdata)
 		int len = snprintf(buffer, BUFSIZE,
 						   "Failed to reach assign state \"%s\"\n",
 						   NodeStateToString(goalState));
+
+		log_error("%s", buffer);
 
 		wby_response_begin(connection, 501, strlen(buffer), NULL, 0);
 		wby_write(connection, buffer, len);
