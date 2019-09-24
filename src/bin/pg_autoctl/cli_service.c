@@ -156,10 +156,13 @@ cli_keeper_run(int argc, char **argv)
 
 	if (keeper.config.monitorDisabled)
 	{
+		/* start the command pipe sub-process */
+		
+
 		/* TODO: start the HTTPd process under a supervisor */
-		httpd_start(keeperOptions.pgSetup.pgdata,
-					keeper.config.httpd.listen_address,
-					keeper.config.httpd.port);
+		httpd_start_process(keeperOptions.pgSetup.pgdata,
+							keeper.config.httpd.listen_address,
+							keeper.config.httpd.port);
 
 		(void) keeper_service_stop(&keeper);
 	}

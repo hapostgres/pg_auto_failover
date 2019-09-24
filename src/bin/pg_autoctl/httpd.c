@@ -146,7 +146,7 @@ httpd_start_process(const char *pgdata, const char *listen_address, int port)
 		default:
 		{
 			/* fork succeeded, in parent */
-			log_warn("HTTP started [%d]", pid);
+			log_warn("HTTP service started in subprocess %d", pid);
 			return true;
 		}
 	}
