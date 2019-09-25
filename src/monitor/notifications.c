@@ -84,7 +84,7 @@ NotifyStateChange(ReplicationState reportedState,
 	 * string in the message. Parsing is then easier on the receiving side too.
 	 */
 	sprintf(payload,
-			"S:%s:%s:%lu.%s:%d:%ld:%lu.%s:%d",
+			"S:%s:%s:%zu.%s:%d:%lld:%zu.%s:%d",
 			ReplicationStateGetName(reportedState),
 			ReplicationStateGetName(goalState),
 			strlen(formationId),
