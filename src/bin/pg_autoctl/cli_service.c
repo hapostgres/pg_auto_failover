@@ -21,9 +21,11 @@
 #include "fsm.h"
 #include "httpd.h"
 #include "keeper_config.h"
+#include "keeper_listener.h"
 #include "keeper.h"
 #include "monitor.h"
 #include "monitor_config.h"
+#include "service.h"
 #include "signals.h"
 
 static int stop_signal = SIGTERM;
@@ -154,36 +156,10 @@ cli_keeper_run(int argc, char **argv)
 		exit(EXIT_CODE_PGCTL);
 	}
 
-	if (keeper.config.monitorDisabled)
+	if (!service_start(&keeper))
 	{
-		/* start the command pipe sub-process */
-		
-
-		/* TODO: start the HTTPd process under a supervisor */
-		httpd_start_process(keeperOptions.pgSetup.pgdata,
-							keeper.config.httpd.listen_address,
-							keeper.config.httpd.port);
-
-		(void) keeper_service_stop(&keeper);
-	}
-	else
-	{
-		/*
-		 * Start with a monitor, so check everything is in order, then start
-		 * the HTTPd service, and finally the main monitor node_active protocol
-		 * loop.
-		 */
-		if (!keeper_check_monitor_extension_version(&keeper))
-		{
-			/* errors have already been logged */
-			exit(EXIT_CODE_MONITOR);
-		}
-
-		httpd_start_process(keeperOptions.pgSetup.pgdata,
-							keeper.config.httpd.listen_address,
-							keeper.config.httpd.port);
-
-		keeper_service_run(&keeper, &pid);
+		/* errors have already been logged */
+		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 }
 

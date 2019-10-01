@@ -671,12 +671,15 @@ monitor_init_from_pgsetup(Monitor *monitor, PostgresSetup *pgSetup)
 				return false;
 			}
 
-			if (!monitor_init(&(keeper.monitor), config.monitor_pguri))
+			if (!config.monitorDisabled)
 			{
-				return false;
-			}
+				if (!monitor_init(&(keeper.monitor), config.monitor_pguri))
+				{
+					return false;
+				}
 
-			*monitor = keeper.monitor;
+				*monitor = keeper.monitor;
+			}
 			break;
 		}
 

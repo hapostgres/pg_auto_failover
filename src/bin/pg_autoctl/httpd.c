@@ -26,6 +26,7 @@
 #include "fsm.h"
 #include "httpd.h"
 #include "keeper.h"
+#include "keeper_listener.h"
 #include "log.h"
 #include "signals.h"
 #include "state.h"
@@ -53,6 +54,7 @@ static bool http_api_version(struct wby_con *connection, void *userdata);
 static bool http_state(struct wby_con *connection, void *userdata);
 static bool http_fsm_state(struct wby_con *connection, void *userdata);
 static bool http_fsm_assign(struct wby_con *connection, void *userdata);
+static bool http_config_get(struct wby_con *connection, void *userdata);
 
 
 typedef struct routing_table
@@ -61,6 +63,26 @@ typedef struct routing_table
 	HttpDispatchFunction dispatchFunction;
 } HttpRoutingTable;
 
+/*
+ * TODO: implement a different routing table depending on whether the monitor
+ * is enabled (read-only + operations) or disabled (full control API).
+ *
+ * We can add the following operations to the API:
+ *  /api/1.0/enable/maintenance
+ *  /api/1.0/disable/maintenance
+ *  /api/1.0/node/drop
+ *  /api/1.0/config/get
+ *  /api/1.0/config/set
+ *  /api/1.0/config/reload
+ *
+ * We might also want to have a monitor specific API with
+ *  /api/1.0/monitor/uri
+ *  /api/1.0/monitor/events
+ *  /api/1.0/monitor/state
+ *  /api/1.0/formation/drop
+ *  /api/1.0/formation/enable/secondary
+ *  /api/1.0/formation/disable/secondary
+ */
 HttpRoutingTable KeeperRoutingTable[] = {
 	{ "/",                       http_home },
 	{ "/versions",               http_version },
@@ -68,6 +90,7 @@ HttpRoutingTable KeeperRoutingTable[] = {
 	{ "/api/1.0/state",          http_state },
 	{ "/api/1.0/fsm/state",      http_fsm_state },
 	{ "/api/1.0/fsm/assign/*",   http_fsm_assign },
+	{ "/api/1.0/config/get/*",   http_config_get },
 	{ "", NULL }
 };
 
@@ -103,7 +126,9 @@ static void websocket_closed(struct wby_con *connection, void *userdata);
  * to serve our HTTP based API to clients.
  */
 bool
-httpd_start_process(const char *pgdata, const char *listen_address, int port)
+httpd_start_process(const char *pgdata,
+					const char *listen_address, int port,
+					pid_t *httpdPid)
 {
 	pid_t pid;
 	int log_level = logLevel;
@@ -138,7 +163,7 @@ httpd_start_process(const char *pgdata, const char *listen_address, int port)
 
 			/* reset log level to same as the parent process */
 			log_set_level(log_level);
-			log_warn("set log level to %d/%d", log_level, logLevel);
+			log_debug("set log level to %d/%d", log_level, logLevel);
 
 			return httpd_start(pgdata, listen_address, port);
 		}
@@ -146,7 +171,8 @@ httpd_start_process(const char *pgdata, const char *listen_address, int port)
 		default:
 		{
 			/* fork succeeded, in parent */
-			log_warn("HTTP service started in subprocess %d", pid);
+			log_info("HTTP service started in subprocess %d", pid);
+			*httpdPid = pid;
 			return true;
 		}
 	}
@@ -248,7 +274,7 @@ httpd_dispatch(struct wby_con *connection, void *userdata)
 									RE_MATCH_COUNT,
 									&matchesCount))
 		{
-			log_warn("HTTP dispatch on \"%s\"", routingTableEntry.script);
+			log_info("GET \"%s\"", routingTableEntry.script);
 			return (*routingTableEntry.dispatchFunction)(connection, userdata);
 		}
 
@@ -347,6 +373,46 @@ http_version(struct wby_con *connection, void *userdata)
 	wby_write(connection, buffer, len);
 
 	wby_response_end(connection);
+
+	return true;
+}
+
+
+/*
+ * http_config_get is the dispatch function for /api/1.0/config/get
+ */
+static bool
+http_config_get(struct wby_con *connection, void *userdata)
+{
+    HttpServerState *state = (HttpServerState *) userdata;
+
+	char uri[BUFSIZE];
+	char *paramName = NULL;
+	char command[BUFSIZE];
+	char output[BUFSIZE];
+
+	/* use basename to retrieve the last part of the URI, on a copy of it */
+	strlcpy(uri, connection->request.uri, BUFSIZE);
+	paramName = basename(uri);
+
+	snprintf(command, BUFSIZE,
+			 "config get --pgdata %s %s", state->pgdata, paramName);
+
+	log_debug("http_config_get: %s", command);
+
+	if (keeper_listener_send_command(command, output, BUFSIZE))
+	{
+		int size = strlen(output);
+
+		wby_response_begin(connection, 200, size, NULL, 0);
+		wby_write(connection, output, size);
+		wby_response_end(connection);
+	}
+	else
+	{
+		wby_response_begin(connection, 404, 0, NULL, 0);
+		wby_response_end(connection);
+	}
 
 	return true;
 }

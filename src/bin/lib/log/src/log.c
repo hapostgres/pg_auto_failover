@@ -25,6 +25,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "log.h"
 
@@ -35,6 +36,7 @@ static struct {
   int level;
   int quiet;
   int useColors;
+  pid_t pid;
 } L;
 
 
@@ -116,8 +118,8 @@ void log_log(int level, const char *file, int line, const char *fmt, ...)
 
 	if (L.useColors)
 	{
-		fprintf(stderr, "%s %s%-5s\x1b[0m ", buf, level_colors[level],
-				level_names[level]);
+		fprintf(stderr, "%s [%d] %s%-5s\x1b[0m ", buf, getpid(),
+				level_colors[level], level_names[level]);
 
 		if (showLineNumber)
 		{
@@ -126,7 +128,7 @@ void log_log(int level, const char *file, int line, const char *fmt, ...)
 	}
 	else
 	{
-		fprintf(stderr, "%s %-5s ", buf, level_names[level]);
+		fprintf(stderr, "%s [%d] %-5s ", buf, getpid(), level_names[level]);
 
 		if (showLineNumber)
 		{

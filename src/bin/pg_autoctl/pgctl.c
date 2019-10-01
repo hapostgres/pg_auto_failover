@@ -1201,3 +1201,52 @@ pg_is_running(const char *pg_ctl, const char *pgdata)
 {
 	return pg_ctl_status(pg_ctl, pgdata, false) == 0;
 }
+
+
+/*
+ * pg_autoctl_run_subcommand runs a pg_autoctl command and return the stdout
+ * result as a string. This will mix logs and actual result.
+ */
+bool
+pg_autoctl_run_subcommand(int argc, char **argv, int *returnCode,
+						  char *result, int resultSize,
+						  char *logs, int logsSize)
+{
+	Program prog;
+	char command[BUFSIZE] = { 0 };
+	int commandSize;
+
+	/* we do not want to call setsid() when running this program. */
+	prog = initialize_program(argv, false);
+
+	/* log the exact command line we're using */
+	commandSize = snprintf_program_command_line(&prog, command, BUFSIZE);
+
+	if (commandSize >= BUFSIZE)
+	{
+		/* we only display the first BUFSIZE bytes of the real command */
+		log_debug("%s...", command);
+	}
+	else
+	{
+		log_debug("%s", command);
+	}
+
+	(void) execute_program(&prog);
+
+	*returnCode = prog.returnCode;
+
+	if (prog.returnCode != 0)
+	{
+		strlcpy(logs, prog.stderr, logsSize);
+		free_program(&prog);
+
+		return false;
+	}
+
+	strlcpy(result, prog.stdout, resultSize);
+	strlcpy(logs, prog.stderr, logsSize);
+	free_program(&prog);
+
+	return true;
+}
