@@ -32,9 +32,7 @@ We use https://github.com/vurtun/mmx implementation of an HTTP server in C,
 with some extra facilities such as JSON parsing. The library is licenced
 separately for the different files:
 
-  - json.h is public domain
-  - lexer.h is zlib licence, required by json.h
-  - sched.h is zlib licence
-  - vec.h is zlib licence
   - web.h is BSD licence
 
+We don't use the other files, so those have not been imported in this
+repository.
