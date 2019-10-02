@@ -21,10 +21,12 @@
 #include "postgres_fe.h"
 #include "pqexpbuffer.h"
 
+#include "httpd.h"
+#include "parson.h"
+
 #include "cli_root.h"
 #include "defaults.h"
 #include "fsm.h"
-#include "httpd.h"
 #include "keeper.h"
 #include "keeper_listener.h"
 #include "log.h"
@@ -110,16 +112,6 @@ static bool httpd_route_match_query(const char *uri,
 									int *matchesCount);
 
 static void httpd_log(const char* text);
-
-static bool keeper_fsm_as_json(KeeperConfig *config, char *buffer, int size);
-
-/* we don't support websocket but still needs the API in place for web.h */
-static int websocket_connect(struct wby_con *connection, void *userdata);
-static void websocket_connected(struct wby_con *connection, void *userdata);
-static int websocket_frame(struct wby_con *connection,
-						   const struct wby_frame *frame, void *userdata);
-static void websocket_closed(struct wby_con *connection, void *userdata);
-
 
 /*
  * keeper_webservice_run forks and starts a web service in the child process,
@@ -216,12 +208,6 @@ httpd_start(const char *pgdata, const char *listen_address, int port)
     config.io_buffer_size = 8192;
     config.log = httpd_log;
     config.dispatch = httpd_dispatch;
-
-	/* we don't use them, but the lib seems to require those being set anyway */
-    config.ws_connect = websocket_connect;
-    config.ws_connected = websocket_connected;
-    config.ws_frame = websocket_frame;
-    config.ws_closed = websocket_closed;
 
     wby_init(&server, &config, &needed_memory);
     memory = calloc(needed_memory, 1);
@@ -372,21 +358,28 @@ http_version(struct wby_con *connection, void *userdata)
 	char buffer[BUFSIZE];
 	int len;
 
-	wby_response_begin(connection, 200, -1, NULL, 0);
+    JSON_Value *js = json_value_init_object();
+    JSON_Object *root = json_value_get_object(js);
+    char *serialized_string = NULL;
 
-	len = snprintf(buffer, BUFSIZE, "pg_auto_failover %s\n",
-				   PG_AUTOCTL_VERSION);
-	wby_write(connection, buffer, len);
+    json_object_dotset_string(
+		root, "version.pg_auto_failover", PG_AUTOCTL_VERSION);
 
-	len = snprintf(buffer, BUFSIZE, "pgautofailover extension %s\n",
-				   PG_AUTOCTL_EXTENSION_VERSION);
-	wby_write(connection, buffer, len);
+    json_object_dotset_string(
+		root, "version.pgautofailover", PG_AUTOCTL_EXTENSION_VERSION);
 
-	len = snprintf(buffer, BUFSIZE, "pg_auto_failover web API %s\n",
-				   HTTPD_CURRENT_API_VERSION);
-	wby_write(connection, buffer, len);
+    json_object_dotset_string(
+		root, "version.api", HTTPD_CURRENT_API_VERSION);
 
+    serialized_string = json_serialize_to_string_pretty(js);
+	len = strlen(serialized_string);
+
+	wby_response_begin(connection, 200, len, NULL, 0);
+	wby_write(connection, serialized_string, len);
 	wby_response_end(connection);
+
+    json_free_serialized_string(serialized_string);
+    json_value_free(js);
 
 	return true;
 }
@@ -515,119 +508,4 @@ http_fsm_assign(struct wby_con *connection, void *userdata)
 	}
 
 	return true;
-}
-
-
-/*
- * keeper_fsm_as_json reads the FSM state on-disk then returns a JSON formatted
- * version of it.
- *
- * The embedded webserver state keeps PGDATA only, so that we need to read the
- * config and the state from scratch at each call. We could implement this
- * another way but then would have to implement some kind of cache
- * invalidation.
- */
-static bool
-keeper_fsm_as_json(KeeperConfig *config, char *json, int size)
-{
-	PQExpBuffer buffer = NULL;
-
-	Keeper keeper = { 0 };
-	KeeperStateData *keeperState = &(keeper.state);
-
-	bool missingPgdataIsOk = true;
-	bool pgIsNotRunningIsOk = true;
-	bool monitorDisabledIsOk = true;
-
-	if (!keeper_config_read_file(config,
-								 missingPgdataIsOk,
-								 pgIsNotRunningIsOk,
-								 monitorDisabledIsOk))
-	{
-		/* errors have already been logged */
-		return false;
-	}
-
-	if (!keeper_state_read(keeperState, config->pathnames.state))
-	{
-		snprintf(json, size, "Failed to read FSM state from \"%s\"",
-				 config->pathnames.state);
-		return false;
-	}
-
-	buffer = createPQExpBuffer();
-	if (buffer == NULL)
-	{
-		snprintf(json, size, "Failed to allocate memory");
-		return false;
-	}
-
-	appendPQExpBufferStr(buffer, "{\n");
-
-	appendPQExpBufferStr(buffer, "\"postgres\": {");
-	appendPQExpBuffer(buffer, "\"version\": %d,\n", keeperState->pg_version);
-	appendPQExpBuffer(buffer, "\"pg_control_version\": %u,\n",
-						 keeperState->pg_control_version);
-	appendPQExpBuffer(buffer, "\"system_identifier\": %" PRIu64 "\n",
-						 keeperState->system_identifier);
-	appendPQExpBufferStr(buffer, "},\n");
-
-	appendPQExpBufferStr(buffer, "\"fsm\": {\n");
-	appendPQExpBuffer(buffer, "\"current_role\": \"%s\",\n",
-					  NodeStateToString(keeperState->current_role));
-	appendPQExpBuffer(buffer, "\"assigned_role\": \"%s\"\n",
-					  NodeStateToString(keeperState->assigned_role));
-	appendPQExpBufferStr(buffer, "},\n");
-
-	appendPQExpBufferStr(buffer, "\"monitor\": {\n");
-	appendPQExpBuffer(buffer, "\"current_node_id\": %d,\n",
-					  keeperState->current_node_id);
-	appendPQExpBuffer(buffer, "\"current_groupd\": %d\n",
-					  keeperState->current_group);
-	appendPQExpBufferStr(buffer, "}\n");
-
-	appendPQExpBufferStr(buffer, "}\n");
-
-	/* memory allocation could have failed while building string */
-	if (PQExpBufferBroken(buffer))
-	{
-		snprintf(json, size,  "Failed to allocate memory");
-		destroyPQExpBuffer(buffer);
-		return false;
-	}
-
-	snprintf(json, size, "%s", buffer->data);
-	destroyPQExpBuffer(buffer);
-
-	return true;
-}
-
-
-/*
- * We don't support websockets at the moment.
- */
-static int
-websocket_connect(struct wby_con *connection, void *userdata)
-{
-	return 1;
-}
-
-
-static void
-websocket_connected(struct wby_con *connection, void *userdata)
-{
-}
-
-
-static int
-websocket_frame(struct wby_con *connection,
-				const struct wby_frame *frame, void *userdata)
-{
-	return 0;
-}
-
-
-static void
-websocket_closed(struct wby_con *connection, void *userdata)
-{
 }

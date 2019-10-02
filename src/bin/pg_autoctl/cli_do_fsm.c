@@ -14,6 +14,8 @@
 
 #include "postgres_fe.h"
 
+#include "parson.h"
+
 #include "cli_common.h"
 #include "commandline.h"
 #include "defaults.h"
