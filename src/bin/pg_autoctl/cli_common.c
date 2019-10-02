@@ -349,6 +349,15 @@ cli_create_node_getopts(int argc, char **argv,
 
 		strlcpy(LocalOptionConfig.pgSetup.pgdata, pgdata, MAXPGPATH);
 	}
+	else
+	{
+		/*
+		 * If --pgdata was used, set our PGDATA environment variable to this
+		 * value, for the benefits of our sub-process, which will then inherit
+		 * it.
+		 */
+		setenv("PGDATA", LocalOptionConfig.pgSetup.pgdata, 1);
+	}
 
 	/*
 	 * You can't both have a monitor a use --disable-monitor.
@@ -513,6 +522,15 @@ keeper_cli_getopt_pgdata(int argc, char **argv)
 		}
 
 		strlcpy(options.pgSetup.pgdata, pgdata, MAXPGPATH);
+	}
+	else
+	{
+		/*
+		 * If --pgdata was used, set our PGDATA environment variable to this
+		 * value, for the benefits of our sub-process, which will then inherit
+		 * it.
+		 */
+		setenv("PGDATA", options.pgSetup.pgdata, 1);
 	}
 
 	log_info("Managing PostgreSQL installation at \"%s\"",

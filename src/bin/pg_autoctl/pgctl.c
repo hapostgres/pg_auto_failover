@@ -1238,14 +1238,23 @@ pg_autoctl_run_subcommand(int argc, char **argv, int *returnCode,
 
 	if (prog.returnCode != 0)
 	{
-		strlcpy(logs, prog.stderr, logsSize);
+		if (prog.stderr != NULL)
+		{
+			strlcpy(logs, prog.stderr, logsSize);
+		}
 		free_program(&prog);
 
 		return false;
 	}
 
-	strlcpy(result, prog.stdout, resultSize);
-	strlcpy(logs, prog.stderr, logsSize);
+	if (prog.stdout != NULL)
+	{
+		strlcpy(result, prog.stdout, resultSize);
+	}
+	if (prog.stderr != NULL)
+	{
+		strlcpy(logs, prog.stderr, logsSize);
+	}
 	free_program(&prog);
 
 	return true;

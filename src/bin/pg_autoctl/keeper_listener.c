@@ -105,9 +105,23 @@ keeper_listener_start(const char *pgdata, pid_t *listenerPid)
 			/* we execute commands through the pg_autoctl do command line */
 			setenv(PG_AUTOCTL_DEBUG, "1", 1);
 
-			return keeper_listener_read_commands(
+			(void) keeper_listener_read_commands(
 				listenerCommandPipe.cmdPipe[0],
 				listenerCommandPipe.resPipe[1]);
+
+			/*
+			 * When the "main" function for the child process is over, it's the
+			 * end of our execution thread. Don't get back to the caller.
+			 */
+			if (asked_to_stop || asked_to_stop_fast)
+			{
+				exit(EXIT_CODE_QUIT);
+			}
+			else
+			{
+				log_error("BUG: keeper_listener_read_commands returned!");
+				exit(EXIT_CODE_INTERNAL_ERROR);
+			}
 		}
 
 		default:
@@ -299,6 +313,8 @@ keeper_listener_send_command(const char *command, char *output, int size)
 				break;
 		}
 	}
+
+	log_debug("%s:\n%s", command, commandLogs->data);
 
 	/* copy logs and results to the caller's allocated memory */
 	strlcpy(output, commandOutput->data, size);

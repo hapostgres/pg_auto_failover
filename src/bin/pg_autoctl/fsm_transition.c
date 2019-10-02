@@ -117,31 +117,9 @@ fsm_init_primary(Keeper *keeper)
 	}
 
 	/*
-<<<<<<< HEAD
 	 * When initState is PRE_INIT_STATE_RUNNING, double check that Postgres is
 	 * still running. After all the end-user could just stop Postgres and then
 	 * give the install to us. We ought to support that.
-=======
-	 * When the PostgreSQL instance either did not exist, or did exist but was
-	 * not running when creating the pg_autoctl node the first time, then we
-	 * can restart the instance without fear of disturbing the service.
-	 */
-	if (pgInstanceIsOurs)
-	{
-		/* create the target database and install our extension there */
-		if (!create_database_and_extension(keeper))
-		{
-			/* errors have already been logged */
-			return false;
-		}
-	}
-
-	log_warn("FSM transition still running");
-
-	/*
-	 * We need to add the monitor host:port in the HBA settings for the node to
-	 * enable the health checks.
->>>>>>> 8919df7... Move all the INIT to SINGLE initialisation code in the FSM transition.
 	 */
 	if (initState.pgInitState >= PRE_INIT_STATE_RUNNING)
 	{

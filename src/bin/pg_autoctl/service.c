@@ -97,6 +97,7 @@ service_start_with_monitor(Keeper *keeper)
 static bool
 service_start_without_monitor(Keeper *keeper)
 {
+	int countSubprocesses = 0;
 	pid_t listenerPid, httpdPid;
 
 	/* start the command pipe sub-process */
@@ -105,17 +106,24 @@ service_start_without_monitor(Keeper *keeper)
 		log_fatal("Failed to start the command listener process");
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
+	++countSubprocesses;
 
-	/* TODO: start the HTTPd process under a supervisor */
-	httpd_start_process(keeper->config.pgSetup.pgdata,
-						keeper->config.httpd.listen_address,
-						keeper->config.httpd.port,
-						&httpdPid);
+	/* start the HTTPd service in a sub-process */
+	if (!httpd_start_process(keeper->config.pgSetup.pgdata,
+							 keeper->config.httpd.listen_address,
+							 keeper->config.httpd.port,
+							 &httpdPid))
+	{
+		/* well terminate here, and signal the listener to do the same */
+		kill(listenerPid, SIGQUIT);
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+	++countSubprocesses;
 
 	log_debug("keeper subprocesses have started [%d,%d]", listenerPid, httpdPid);
 
-	/* wait until both process are done */
-	while (true)
+	/* wait until all subprocesses are done */
+	while (countSubprocesses > 0)
 	{
 		pid_t pid;
 		int status;
@@ -147,8 +155,11 @@ service_start_without_monitor(Keeper *keeper)
 			{
 				/*
 				 * We're using WNOHANG, 0 means there are no stopped or exited
-				 * children, it's all good.
+				 * children, it's all good. It's the expected case when
+				 * everything is running smoothly, so enjoy and sleep for
+				 * awhile.
 				 */
+				sleep(1);
 				break;
 			}
 
@@ -157,41 +168,42 @@ service_start_without_monitor(Keeper *keeper)
 				char *verb = WIFEXITED(status) ? "exited" : "failed";
 				int returnCode = WEXITSTATUS(status);
 
-				if (pid == listenerPid)
-				{
-					log_error("Keeper internal listener process %s [%d]",
-							  verb, returnCode);
+				/* one child process is no more */
+				--countSubprocesses;
 
-					if (!(asked_to_stop || asked_to_stop_fast))
-					{
-						kill(httpdPid, SIGQUIT);
-					}
-					return keeper_service_stop(keeper);
-				}
-				else if (pid == httpdPid)
+				if (returnCode != 0)
 				{
-					log_error("Keeper HTTPd process %s [%d]",
-							  verb, returnCode);
+					if (pid == listenerPid)
+					{
+						log_error("Keeper internal listener process %s [%d]",
+								  verb, returnCode);
 
-					if (!(asked_to_stop || asked_to_stop_fast))
-					{
-						kill(listenerPid, SIGQUIT);
+						if (!(asked_to_stop || asked_to_stop_fast))
+						{
+							kill(httpdPid, SIGQUIT);
+						}
 					}
-					return keeper_service_stop(keeper);
-				}
-				else
-				{
-					log_fatal("BUG: waitpid() returned an unknown PID: %d", pid);
+					else if (pid == httpdPid)
+					{
+						log_error("Keeper HTTPd process %s [%d]",
+								  verb, returnCode);
+
+						if (!(asked_to_stop || asked_to_stop_fast))
+						{
+							kill(listenerPid, SIGQUIT);
+						}
+					}
+					else
+					{
+						/* we certainly don't expect that! */
+						log_fatal("BUG: waitpid() returned an unknown PID: %d",
+								  pid);
+					}
 				}
 				return keeper_service_stop(keeper);
 			}
 		}
-
-		sleep(1);
 	}
-
-	/* wait until the listener has exited too */
-	log_warn("service_start_without_monitor: exit");
 
 	return keeper_service_stop(keeper);
 }

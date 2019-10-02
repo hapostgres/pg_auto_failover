@@ -165,7 +165,21 @@ httpd_start_process(const char *pgdata,
 			log_set_level(log_level);
 			log_debug("set log level to %d/%d", log_level, logLevel);
 
-			return httpd_start(pgdata, listen_address, port);
+			(void) httpd_start(pgdata, listen_address, port);
+
+			/*
+			 * When the "main" function for the child process is over, it's the
+			 * end of our execution thread. Don't get back to the caller.
+			 */
+			if (asked_to_stop || asked_to_stop_fast)
+			{
+				exit(EXIT_CODE_QUIT);
+			}
+			else
+			{
+				log_error("BUG: keeper_listener_read_commands returned!");
+				exit(EXIT_CODE_INTERNAL_ERROR);
+			}
 		}
 
 		default:
@@ -395,9 +409,7 @@ http_config_get(struct wby_con *connection, void *userdata)
 	strlcpy(uri, connection->request.uri, BUFSIZE);
 	paramName = basename(uri);
 
-	snprintf(command, BUFSIZE,
-			 "config get --pgdata %s %s", state->pgdata, paramName);
-
+	snprintf(command, BUFSIZE, "config get %s", paramName);
 	log_debug("http_config_get: %s", command);
 
 	if (keeper_listener_send_command(command, output, BUFSIZE))
@@ -426,57 +438,32 @@ http_fsm_state(struct wby_con *connection, void *userdata)
 {
     HttpServerState *state = (HttpServerState *) userdata;
 
-	KeeperConfig config = { 0 };
+	char uri[BUFSIZE];
+	char *paramName = NULL;
+	char command[BUFSIZE];
+	char output[BUFSIZE];
 
-	if (!keeper_config_set_pathnames_from_pgdata(&config.pathnames,
-												 state->pgdata))
+	/* use basename to retrieve the last part of the URI, on a copy of it */
+	strlcpy(uri, connection->request.uri, BUFSIZE);
+	paramName = basename(uri);
+
+	snprintf(command, BUFSIZE, "do fsm state");
+	log_debug("http_fsm_state: %s", command);
+
+	if (keeper_listener_send_command(command, output, BUFSIZE))
 	{
-		/* errors have already been logged */
-		wby_response_begin(connection, 503, 0, NULL, 0);
+		int size = strlen(output);
+
+		wby_response_begin(connection, 200, size, NULL, 0);
+		wby_write(connection, output, size);
+		wby_response_end(connection);
+	}
+	else
+	{
+		wby_response_begin(connection, 404, 0, NULL, 0);
 		wby_response_end(connection);
 	}
 
-	switch (ProbeConfigurationFileRole(config.pathnames.config))
-	{
-		case PG_AUTOCTL_ROLE_MONITOR:
-		{
-			wby_response_begin(connection, 503, -1, NULL, 0);
-			wby_write(connection, "Not yet implemented\n", 21);
-			wby_response_end(connection);
-			break;
-		}
-
-		case PG_AUTOCTL_ROLE_KEEPER:
-		{
-			char buffer[BUFSIZE];
-
-			if (keeper_fsm_as_json(&config, buffer, BUFSIZE))
-			{
-				wby_response_begin(connection, 200, strlen(buffer), NULL, 0);
-				wby_write(connection, buffer, strlen(buffer));
-				wby_response_end(connection);
-			}
-			else
-			{
-				wby_response_begin(connection, 501, strlen(buffer), NULL, 0);
-				wby_write(connection, buffer, strlen(buffer));
-				wby_response_end(connection);
-			}
-			break;
-		}
-
-		default:
-		{
-			char message[BUFSIZE];
-			int len = snprintf(message, BUFSIZE,
-							   "Unrecognized configuration file \"%s\"\n",
-							   config.pathnames.config);
-
-			wby_response_begin(connection, 503, -1, NULL, 0);
-			wby_write(connection, message, len);
-			wby_response_end(connection);
-		}
-	}
 	return true;
 }
 
@@ -502,68 +489,29 @@ http_fsm_assign(struct wby_con *connection, void *userdata)
 	bool pgIsNotRunningIsOk = true;
 	bool monitorDisabledIsOk = true;
 
+	char *goalStateString = NULL;
+	char command[BUFSIZE];
+	char output[BUFSIZE];
+
 	/* use basename to retrieve the last part of the URI, on a copy of it */
 	strlcpy(uri, connection->request.uri, BUFSIZE);
-	assignedStateString = basename(uri);
-	goalState = NodeStateFromString(assignedStateString);
+	goalStateString = basename(uri);
 
-	if (!keeper_config_set_pathnames_from_pgdata(&(config->pathnames),
-												 state->pgdata))
+	snprintf(command, BUFSIZE, "do fsm assign %s", goalStateString);
+	log_debug("http_fsm_assign: %s", command);
+
+	if (keeper_listener_send_command(command, output, BUFSIZE))
 	{
-		wby_response_begin(connection, 503, 0, NULL, 0);
+		int size = strlen(output);
+
+		wby_response_begin(connection, 200, size, NULL, 0);
+		wby_write(connection, output, size);
 		wby_response_end(connection);
-		return false;
-	}
-
-	nodeRole = ProbeConfigurationFileRole(config->pathnames.config);
-
-	if (nodeRole != PG_AUTOCTL_ROLE_KEEPER)
-	{
-		return false;
-	}
-
-	keeper_config_read_file(config,
-							missingPgdataIsOk,
-							pgIsNotRunningIsOk,
-							monitorDisabledIsOk);
-
-	if (!keeper_state_read(keeperState, config->pathnames.state))
-	{
-		return false;
-	}
-
-	keeperState->assigned_role = goalState;
-
-	if (!keeper_fsm_reach_assigned_state(&keeper))
-	{
-		char buffer[BUFSIZE];
-		int len = snprintf(buffer, BUFSIZE,
-						   "Failed to reach assign state \"%s\"\n",
-						   NodeStateToString(goalState));
-
-		log_error("%s", buffer);
-
-		wby_response_begin(connection, 501, strlen(buffer), NULL, 0);
-		wby_write(connection, buffer, len);
-		wby_response_end(connection);
-		return false;
 	}
 	else
 	{
-		char buffer[BUFSIZE];
-
-		if (keeper_fsm_as_json(config, buffer, BUFSIZE))
-		{
-			wby_response_begin(connection, 200, strlen(buffer), NULL, 0);
-			wby_write(connection, buffer, strlen(buffer));
-			wby_response_end(connection);
-		}
-		else
-		{
-			wby_response_begin(connection, 501, strlen(buffer), NULL, 0);
-			wby_write(connection, buffer, strlen(buffer));
-			wby_response_end(connection);
-		}
+		wby_response_begin(connection, 404, 0, NULL, 0);
+		wby_response_end(connection);
 	}
 
 	return true;
