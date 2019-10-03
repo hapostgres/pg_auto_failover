@@ -161,14 +161,14 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 				 "%s, "
 				 "PostgreSQL %s running, "
 				 "sync_state is \"%s\", "
-				 "received lsn is \"%s\".",
+				 "current lsn is \"%s\".",
 				 config->formation,
 				 keeperState->current_node_id,
 				 keeperState->current_group,
 				 NodeStateToString(keeperState->current_role),
 				 reportPgIsRunning ? "is" : "is not",
 				 postgres->pgsrSyncState,
-				 postgres->receivedLsn);
+				 postgres->currentLSN);
 
 		/*
 		 * Report the current state to the monitor and get the assigned state.
@@ -182,7 +182,7 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 								keeperState->current_group,
 								keeperState->current_role,
 								reportPgIsRunning,
-								postgres->receivedLsn,
+								postgres->currentLSN,
 								postgres->pgsrSyncState,
 								&assignedState);
 

@@ -289,7 +289,7 @@ monitor_node_active(Monitor *monitor,
 					char *formation, char *host, int port, int nodeId,
 					int groupId, NodeState currentState,
 					bool pgIsRunning,
-					char *receivedLSN, char *pgsrSyncState,
+					char *currentLSN, char *pgsrSyncState,
 					MonitorAssignedState *assignedState)
 {
 	PGSQL *pgsql = &monitor->pgsql;
@@ -310,10 +310,8 @@ monitor_node_active(Monitor *monitor,
 	paramValues[4] = intToString(groupId).strValue;
 	paramValues[5] = nodeStateString;
 	paramValues[6] = pgIsRunning ? "true" : "false";
-	paramValues[7] = receivedLSN;
+	paramValues[7] = currentLSN;
 	paramValues[8] = pgsrSyncState;
-
-	log_info("calling monitor node active with lsn %s", receivedLSN);
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
@@ -322,10 +320,10 @@ monitor_node_active(Monitor *monitor,
 		log_error("Failed to get node state for node %d (%s:%d) "
 				  "in group %d of formation \"%s\" with initial state "
 				  "\"%s\", replication state \"%s\", "
-				  "and latest received lsn \"%s\", "
+				  "and current lsn \"%s\", "
 				  "see previous lines for details",
 				  nodeId, host, port, groupId, formation, nodeStateString,
-				  pgsrSyncState, receivedLSN);
+				  pgsrSyncState, currentLSN);
 		return false;
 	}
 
@@ -336,11 +334,11 @@ monitor_node_active(Monitor *monitor,
 	{
 		log_error("Failed to get node state for node %d (%s:%d) in group %d of formation "
 				  "\"%s\" with initial state \"%s\", replication state \"%s\","
-				  " and latest received lsn \"%s\""
+				  " and current lsn \"%s\""
 				  " because the monitor returned an unexpected result, "
 				  "see previous lines for details",
 				  nodeId, host, port, groupId, formation, nodeStateString,
-				  pgsrSyncState, receivedLSN);
+				  pgsrSyncState, currentLSN);
 		return false;
 	}
 

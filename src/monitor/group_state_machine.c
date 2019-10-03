@@ -329,7 +329,7 @@ AssignGoalState(AutoFailoverNode *pgAutoFailoverNode,
 						  pgAutoFailoverNode->nodeName,
 						  pgAutoFailoverNode->nodePort,
 						  pgAutoFailoverNode->pgsrSyncState,
-						  pgAutoFailoverNode->currentLSN,
+						  pgAutoFailoverNode->reportedLSN,
 						  description);
 	}
 }
@@ -354,8 +354,8 @@ WalDifferenceWithin(AutoFailoverNode *secondaryNode,
 		return true;
 	}
 
-	secondaryLsn = secondaryNode->currentLSN;
-	otherNodeLsn = otherNode->currentLSN;
+	secondaryLsn = secondaryNode->reportedLSN;
+	otherNodeLsn = otherNode->reportedLSN;
 
 	if (secondaryLsn == 0 || otherNodeLsn == 0)
 	{

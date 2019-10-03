@@ -153,9 +153,9 @@ int make_conninfo_field_int(char *destination, const char *key, int value);
 bool validate_connection_string(const char *connectionString);
 
 bool pgsql_get_sync_state_and_wal_lag(PGSQL *pgsql, const char *slotName,
-									  char *pgsrSyncState, char *latestLSN,
+									  char *pgsrSyncState, char *currentLSN, int bufferLength,
 									  bool missing_ok);
-bool pgsql_get_received_lsn_from_standby(PGSQL *pgsql, char *received_lsn);
+bool pgsql_get_received_lsn_from_standby(PGSQL *pgsql, char *receivedLSN, int bufferLength);
 bool pgsql_listen(PGSQL *pgsql, char *channels[]);
 
 bool pgsql_alter_extension_update_to(PGSQL *pgsql,

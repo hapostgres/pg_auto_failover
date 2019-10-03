@@ -86,7 +86,7 @@ CREATE TABLE pgautofailover.node
     reportedpgisrunning  bool default true,
     reportedrepstate     text default 'async',
     reporttime           timestamptz not null default now(),
-    latestlsn            pg_lsn not null default '0/0',
+    reportedlsn          pg_lsn not null default '0/0',
     walreporttime        timestamptz not null default now(),
     health               integer not null default -1,
     healthchecktime      timestamptz not null default now(),
@@ -111,7 +111,7 @@ CREATE TABLE pgautofailover.event
     reportedstate    pgautofailover.replication_state not null,
     goalstate        pgautofailover.replication_state not null,
     reportedrepstate text,
-    latestlsn        pg_lsn not null default '0/0',
+    reportedlsn      pg_lsn not null default '0/0',
     description      text,
 
     PRIMARY KEY (eventid)
@@ -149,7 +149,7 @@ CREATE FUNCTION pgautofailover.node_active
     IN current_group_id       int default -1,
     IN current_group_role     pgautofailover.replication_state default 'init',
     IN current_pg_is_running  bool default true,
-    IN currentLSN			  pg_lsn default '0/0',
+    IN current_lsn			  pg_lsn default '0/0',
     IN current_rep_state      text default '',
    OUT assigned_node_id       int,
    OUT assigned_group_id      int,
@@ -271,7 +271,7 @@ with last_events as
   select eventid, eventtime, formationid,
          nodeid, groupid, nodename, nodeport,
          reportedstate, goalstate,
-         reportedrepstate, latestlsn, description
+         reportedrepstate, reportedlsn, description
     from pgautofailover.event
 order by eventid desc
    limit count
@@ -294,7 +294,7 @@ with last_events as
     select eventid, eventtime, formationid,
            nodeid, groupid, nodename, nodeport,
            reportedstate, goalstate,
-           reportedrepstate, latestlsn, description
+           reportedrepstate, reportedlsn, description
       from pgautofailover.event
      where formationid = formation_id
   order by eventid desc
@@ -319,7 +319,7 @@ with last_events as
     select eventid, eventtime, formationid,
            nodeid, groupid, nodename, nodeport,
            reportedstate, goalstate,
-           reportedrepstate, latestlsn, description
+           reportedrepstate, reportedlsn, description
       from pgautofailover.event
      where formationid = formation_id
        and groupid = group_id

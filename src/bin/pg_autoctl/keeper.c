@@ -6,9 +6,6 @@
  * Licensed under the PostgreSQL License.
  *
  */
-
-#include <postgres.h>
-
 #include <fcntl.h>
 #include <inttypes.h>
 #include <stdlib.h>
@@ -22,6 +19,7 @@
 #include "keeper_config.h"
 #include "pgsetup.h"
 #include "state.h"
+
 
 static bool keeper_get_replication_state(Keeper *keeper);
 
@@ -331,14 +329,14 @@ keeper_update_pg_state(Keeper *keeper)
 
 	bool pg_is_not_running_is_ok = true;
 
-	log_warn("Update local PostgreSQL state");
+	log_debug("Update local PostgreSQL state");
 
 	memcpy(pgSetup, &(config->pgSetup), sizeof(PostgresSetup));
 
 	/* reinitialize the replication state values each time we update */
 	postgres->pgIsRunning = false;
 	memset(postgres->pgsrSyncState, 0, PGSR_SYNC_STATE_MAXLENGTH);
-	strcpy(postgres->receivedLsn, "0/0");
+	strcpy(postgres->currentLSN, "0/0");
 
 	/*
 	 * In some states, it's ok to not have a PostgreSQL data directory at all.
@@ -481,7 +479,7 @@ keeper_update_pg_state(Keeper *keeper)
 	 * In some states, PostgreSQL isn't expected to be running, or not expected
 	 * to have a streaming replication to monitor at all.
 	 */
-	log_warn("keeperState->current_role = %s", NodeStateToString(keeperState->current_role));
+	log_debug("keeperState->current_role = %s", NodeStateToString(keeperState->current_role));
 	switch (keeperState->current_role)
 	{
 		case PRIMARY_STATE:
@@ -489,7 +487,6 @@ keeper_update_pg_state(Keeper *keeper)
 		case SECONDARY_STATE:
 		case CATCHINGUP_STATE:
 		{
-			log_warn("calling keeper_get_replication_state");
 			return postgres->pgIsRunning
 				&& keeper_get_replication_state(keeper);
 		}
@@ -592,14 +589,14 @@ keeper_get_replication_state(Keeper *keeper)
 				pgsql,
 				config->replication_slot_name,
 				postgres->pgsrSyncState,
-				postgres->receivedLsn,
+				postgres->currentLSN,
+				NAMEDATALEN,
 				missing_wallag_ok);
-		log_warn("latest received lsn = %s", postgres->receivedLsn);
+		log_warn("latest received lsn = %s", postgres->currentLSN);
 	}
 	else
 	{
-		success = pgsql_get_received_lsn_from_standby(pgsql, postgres->receivedLsn);
-		log_warn("latest received lsn = %s", postgres->receivedLsn);
+		success = pgsql_get_received_lsn_from_standby(pgsql, postgres->currentLSN, NAMEDATALEN);
 	}
 	pgsql_finish(pgsql);
 

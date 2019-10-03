@@ -129,7 +129,7 @@ TupleToAutoFailoverNode(TupleDesc tupleDescriptor, HeapTuple heapTuple)
 									   tupleDescriptor, &isNull);
 	Datum reportTime = heap_getattr(heapTuple, Anum_pgautofailover_node_reporttime,
 									tupleDescriptor, &isNull);
-	Datum latestLSN = heap_getattr(heapTuple, Anum_pgautofailover_node_latestLSN,
+	Datum reportedLSN = heap_getattr(heapTuple, Anum_pgautofailover_node_reportedLSN,
 								   tupleDescriptor, &isNull);
 	Datum walReportTime = heap_getattr(heapTuple,
 										Anum_pgautofailover_node_walreporttime,
@@ -158,7 +158,7 @@ TupleToAutoFailoverNode(TupleDesc tupleDescriptor, HeapTuple heapTuple)
 	pgAutoFailoverNode->pgsrSyncState =
 		SyncStateFromString(TextDatumGetCString(pgsrSyncState));
 	pgAutoFailoverNode->reportTime = DatumGetTimestampTz(reportTime);
-	pgAutoFailoverNode->currentLSN = DatumGetLSN(latestLSN);
+	pgAutoFailoverNode->reportedLSN = DatumGetLSN(reportedLSN);
 	pgAutoFailoverNode->walReportTime = DatumGetTimestampTz(walReportTime);
 	pgAutoFailoverNode->health = DatumGetInt32(health);
 	pgAutoFailoverNode->healthCheckTime = DatumGetTimestampTz(healthCheckTime);
@@ -424,7 +424,7 @@ void
 ReportAutoFailoverNodeState(char *nodeName, int nodePort,
 							ReplicationState reportedState,
 							bool pgIsRunning, SyncState pgSyncState,
-							XLogRecPtr latestLSN)
+							XLogRecPtr reportedLSN)
 {
 	Oid reportedStateOid = ReplicationStateGetEnum(reportedState);
 	Oid replicationStateTypeOid = ReplicationStateTypeOid();
@@ -433,7 +433,7 @@ ReportAutoFailoverNodeState(char *nodeName, int nodePort,
 		replicationStateTypeOid, /* reportedstate */
 		BOOLOID,				 /* pg_ctl status: is running */
 		TEXTOID,				 /* pg_stat_replication.sync_state */
-		LSNOID,				 	 /* latestlsn */
+		LSNOID,				 	 /* reportedlsn */
 		TEXTOID,				 /* nodename */
 		INT4OID					 /* nodeport */
 	};
@@ -442,7 +442,7 @@ ReportAutoFailoverNodeState(char *nodeName, int nodePort,
 		ObjectIdGetDatum(reportedStateOid),   /* reportedstate */
 		BoolGetDatum(pgIsRunning),			  /* pg_ctl status: is running */
 		CStringGetTextDatum(SyncStateToString(pgSyncState)), /* sync_state */
-		LSNGetDatum(latestLSN),			  	  /* latestlsn */
+		LSNGetDatum(reportedLSN),			  /* reportedlsn */
 		CStringGetTextDatum(nodeName),        /* nodename */
 		Int32GetDatum(nodePort)               /* nodeport */
 	};
@@ -453,7 +453,7 @@ ReportAutoFailoverNodeState(char *nodeName, int nodePort,
 		"UPDATE " AUTO_FAILOVER_NODE_TABLE
 		" SET reportedstate = $1, reporttime = now(), "
 		"reportedpgisrunning = $2, reportedrepstate = $3, "
-		"latestlsn = CASE $4 WHEN '0/0'::pg_lsn THEN latestlsn ELSE $4 END, "
+		"reportedlsn = CASE $4 WHEN '0/0'::pg_lsn THEN reportedlsn ELSE $4 END, "
 		"walreporttime = CASE $4 WHEN '0/0'::pg_lsn THEN walreporttime ELSE now() END, "
 		"statechangetime = now() WHERE nodename = $5 AND nodeport = $6";
 

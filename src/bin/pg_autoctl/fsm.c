@@ -286,7 +286,7 @@ keeper_fsm_step(Keeper *keeper)
 			 keeperState->current_group,
 			 postgres->pgIsRunning ? "true" : "false",
 			 postgres->pgsrSyncState,
-			 postgres->receivedLsn);
+			 postgres->currentLSN);
 
 	if (!monitor_node_active(monitor,
 							 config->formation,
@@ -296,7 +296,7 @@ keeper_fsm_step(Keeper *keeper)
 							 keeperState->current_group,
 							 keeperState->current_role,
 							 postgres->pgIsRunning,
-							 postgres->receivedLsn,
+							 postgres->currentLSN,
 							 postgres->pgsrSyncState,
 							 &assignedState))
 	{

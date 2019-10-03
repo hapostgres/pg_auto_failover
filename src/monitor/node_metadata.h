@@ -32,7 +32,7 @@
 #define Anum_pgautofailover_node_reportedpgisrunning 8
 #define Anum_pgautofailover_node_reportedrepstate 9
 #define Anum_pgautofailover_node_reporttime 10
-#define Anum_pgautofailover_node_latestLSN 11
+#define Anum_pgautofailover_node_reportedLSN 11
 #define Anum_pgautofailover_node_walreporttime 12
 #define Anum_pgautofailover_node_health 13
 #define Anum_pgautofailover_node_healthchecktime 14
@@ -66,7 +66,7 @@ typedef struct AutoFailoverNode
 	TimestampTz reportTime;
 	bool pgIsRunning;
 	SyncState pgsrSyncState;
-	XLogRecPtr currentLSN;
+	XLogRecPtr reportedLSN;
 	TimestampTz walReportTime;
 	NodeHealthState health;
 	TimestampTz healthCheckTime;
@@ -91,7 +91,7 @@ extern void ReportAutoFailoverNodeState(char *nodeName, int nodePort,
 										ReplicationState reportedState,
 										bool pgIsRunning,
 										SyncState pgSyncState,
-										XLogRecPtr latestLSN);
+										XLogRecPtr reportedLSN);
 extern void ReportAutoFailoverNodeHealth(char *nodeName, int nodePort,
 										 ReplicationState goalState,
 										 NodeHealthState health);

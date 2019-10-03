@@ -20,6 +20,10 @@
  * LocalPostgresServer represents a local postgres database cluster that
  * we can manage via a SQL connection and operations on the database
  * directory contained in the PostgresSetup.
+ *
+ * currentLSN value is kept as text for better portability. We do not
+ * perform any operation on the value after it was read from database.
+ * NAMEDATALEN is long enough for text representation of the LSN value.
  */
 typedef struct LocalPostgresServer
 {
@@ -27,7 +31,7 @@ typedef struct LocalPostgresServer
 	PostgresSetup	postgresSetup;
 	bool			pgIsRunning;
 	char			pgsrSyncState[PGSR_SYNC_STATE_MAXLENGTH];
-	char            receivedLsn[NAMEDATALEN];
+	char            currentLSN[NAMEDATALEN];
 	uint64_t		pgFirstStartFailureTs;
 	int				pgStartRetries;
 	PgInstanceKind	pgKind;

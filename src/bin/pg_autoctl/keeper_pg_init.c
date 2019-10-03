@@ -605,7 +605,7 @@ wait_until_primary_is_ready(Keeper *keeper,
 							MonitorAssignedState *assignedState)
 {
 	bool pgIsRunning = false;
-	char latestLSN[NAMEDATALEN] = "0/0";
+	char currrentLSN[NAMEDATALEN] = "0/0";
 	char *pgsrSyncState = "";
 	int errors = 0, tries = 0;
 	bool firstLoop = true;
@@ -629,7 +629,7 @@ wait_until_primary_is_ready(Keeper *keeper,
 								 keeper->state.current_group,
 								 keeper->state.current_role,
 								 pgIsRunning,
-								 latestLSN,
+								 currrentLSN,
 								 pgsrSyncState,
 								 assignedState))
 		{
@@ -927,7 +927,7 @@ keeper_pg_init_node_active(Keeper *keeper)
 							 keeper->state.current_group,
 							 keeper->state.current_role,
 							 ReportPgIsRunning(keeper),
-							 keeper->postgres.receivedLsn,
+							 keeper->postgres.currentLSN,
 							 keeper->postgres.pgsrSyncState,
 							 &assignedState))
 	{
