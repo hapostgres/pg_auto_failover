@@ -245,7 +245,7 @@ node_active(PG_FUNCTION_ARGS)
 	Oid currentReplicationStateOid = PG_GETARG_OID(5);
 
 	bool currentPgIsRunning = PG_GETARG_BOOL(6);
-	XLogRecPtr	latestLSN = PG_GETARG_LSN(7);
+	XLogRecPtr	currentLSN = PG_GETARG_LSN(7);
 	text *currentPgsrSyncStateText = PG_GETARG_TEXT_P(8);
 	char *currentPgsrSyncState = text_to_cstring(currentPgsrSyncStateText);
 
@@ -263,14 +263,14 @@ node_active(PG_FUNCTION_ARGS)
 	checkPgAutoFailoverVersion();
 
 	ereport(INFO, (errmsg("node_active is called with %s, %d, " UINT64_FORMAT ,
-						   nodeName, nodePort,  latestLSN)));
+						   nodeName, nodePort,  currentLSN)));
 
 
 	currentNodeState.nodeId = currentNodeId;
 	currentNodeState.groupId = currentGroupId;
 	currentNodeState.replicationState =
 		EnumGetReplicationState(currentReplicationStateOid);
-	currentNodeState.reportedLSN = latestLSN;
+	currentNodeState.reportedLSN = currentLSN;
 	currentNodeState.pgsrSyncState = SyncStateFromString(currentPgsrSyncState);
 	currentNodeState.pgIsRunning = currentPgIsRunning;
 

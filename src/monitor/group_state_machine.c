@@ -363,14 +363,7 @@ WalDifferenceWithin(AutoFailoverNode *secondaryNode,
 		return false;
 	}
 
-	if (secondaryLsn > otherNodeLsn)
-	{
-		walDifference = secondaryLsn - otherNodeLsn;
-	}
-	else
-	{
-		walDifference = otherNodeLsn - secondaryLsn;
-	}
+	walDifference = Abs(otherNodeLsn - secondaryLsn);
 
 	return walDifference <= delta;
 }
