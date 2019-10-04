@@ -111,9 +111,6 @@ def test_015_multiple_manual_failover_verify_replication_slot_removed():
    node3_replication_slots = node3.run_sql_query("select count(*) from pg_replication_slots")
    assert node3_replication_slots == [(1,)]
    
-   node2.fail()
-   node2.run()
-   
    monitor.failover()
    assert node2.wait_until_state(target_state="primary")
    assert node3.wait_until_state(target_state="secondary")
