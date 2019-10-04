@@ -1183,21 +1183,19 @@ validate_connection_string(const char *connectionString)
  * pgsql_get_sync_state_and_wal_lag queries a primary PostgreSQL server to get
  * both the current pg_stat_replication.sync_state value and replication lag.
  *
- * currentLSN is text representation of a 64 bit LSN value. NAMEDATALEN is
- * large enough contain the textual representation.
+ * currentLSN is text representation of a 64 bit LSN value.
  */
 typedef struct PgsrSyncAndWALContext
 {
 	bool		parsedOk;
 	char		syncState[PGSR_SYNC_STATE_MAXLENGTH];
-	char        currentLSN[NAMEDATALEN];
+	char        currentLSN[PG_LSN_MAXLENGTH];
 } PgsrSyncAndWALContext;
 
 bool
-pgsql_get_sync_state_and_wal_lag(PGSQL *pgsql, const char *slotName,
-								 char *pgsrSyncState, char *currentLSN,
-								 int bufferLength,
-								 bool missing_ok)
+pgsql_get_sync_state_and_current_lsn(PGSQL *pgsql, const char *slotName,
+								 	 char *pgsrSyncState, char *currentLSN,
+									 int maxLSNSize, bool missing_ok)
 {
 	PgsrSyncAndWALContext context = { 0 };
 	char *sql =
@@ -1227,7 +1225,7 @@ pgsql_get_sync_state_and_wal_lag(PGSQL *pgsql, const char *slotName,
 	}
 
 	strlcpy(pgsrSyncState, context.syncState, PGSR_SYNC_STATE_MAXLENGTH);
-	strlcpy(currentLSN, context.currentLSN, bufferLength-1);
+	strlcpy(currentLSN, context.currentLSN, maxLSNSize);
 
 	return true;
 }
@@ -1264,7 +1262,7 @@ parsePgsrSyncStateAndWAL(void *ctx, PGresult *result)
 
 			strlcpy(context->currentLSN,
 					PQgetvalue(result, 0, 1),
-					NAMEDATALEN);
+					PG_LSN_MAXLENGTH);
 
 			context->parsedOk = true;
 			return;
@@ -1289,14 +1287,16 @@ parsePgsrSyncStateAndWAL(void *ctx, PGresult *result)
  * We are collecting the latest WAL entry that is received successfully. It will be
  * eventually applied to the receiving database.  This information will later be
  * used by monitor to decide which secondary has the latest data.
+ *
+ * Once a WAL is received and stored, it would be replayed to ensure database state
+ * is current just before the promotion time. Therefore when we look from monitor side
+ * it is the same if the WAL is just received and stored, or already applied.
  */
 bool
-pgsql_get_received_lsn_from_standby(PGSQL *pgsql, char *receivedLSN, int bufferLength)
+pgsql_get_received_lsn_from_standby(PGSQL *pgsql, char *receivedLSN, int maxLSNSize)
 {
 	SingleValueResultContext context;
-	char *sql =
-		"SELECT received_lsn"
-		"  FROM pg_stat_wal_receiver";
+	char *sql = "SELECT received_lsn FROM pg_stat_wal_receiver";
 
 	context.resultType = PGSQL_RESULT_STRING;
 	context.parsedOk = false;
@@ -1313,7 +1313,7 @@ pgsql_get_received_lsn_from_standby(PGSQL *pgsql, char *receivedLSN, int bufferL
 		return false;
 	}
 
-	strlcpy(receivedLSN, context.strVal, bufferLength-1);
+	strlcpy(receivedLSN, context.strVal, maxLSNSize);
 
 	return true;
 }

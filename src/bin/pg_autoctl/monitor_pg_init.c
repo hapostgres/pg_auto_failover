@@ -32,13 +32,6 @@
  */
 GUC monitor_default_settings[] = {
 	{ "shared_preload_libraries", "'pgautofailover'" },
-	{ "log_destination", "stderr"},
-	{ "logging_collector", "on"},
-	{ "log_min_messages", "info"},
-	{ "log_connections", "on"},
-	{ "log_disconnections", "on"},
-	{ "log_lock_waits", "on"},
-	{ "log_min_duration_statement", "0"},
 	{ "listen_addresses", "'*'" },
 	{ "port", "5432" },
 #ifdef TEST

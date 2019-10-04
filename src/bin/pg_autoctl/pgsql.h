@@ -29,6 +29,16 @@
  */
 #define MAXCONNINFO 1024
 
+
+/*
+ * Maximum length of serialized pg_lsn value
+ * It is taken from postgres file pg_lsn.c.
+ * It defines MAXPG_LSNLEN to be 17 and
+ * allocates a buffer 1 byte larger. We
+ * went for 18 to make buffer allocation simpler.
+ */
+#define PG_LSN_MAXLENGTH 18
+
 /*
  * pg_stat_replication.sync_state is one if:
  *   sync, async, quorum, potential
@@ -152,10 +162,10 @@ int make_conninfo_field_str(char *destination, const char *key, const char *valu
 int make_conninfo_field_int(char *destination, const char *key, int value);
 bool validate_connection_string(const char *connectionString);
 
-bool pgsql_get_sync_state_and_wal_lag(PGSQL *pgsql, const char *slotName,
-									  char *pgsrSyncState, char *currentLSN, int bufferLength,
-									  bool missing_ok);
-bool pgsql_get_received_lsn_from_standby(PGSQL *pgsql, char *receivedLSN, int bufferLength);
+bool pgsql_get_sync_state_and_current_lsn(PGSQL *pgsql, const char *slotName,
+									  	  char *pgsrSyncState, char *currentLSN,
+										  int maxLSNSize, bool missing_ok);
+bool pgsql_get_received_lsn_from_standby(PGSQL *pgsql, char *receivedLSN, int maxLSNSize);
 bool pgsql_listen(PGSQL *pgsql, char *channels[]);
 
 bool pgsql_alter_extension_update_to(PGSQL *pgsql,

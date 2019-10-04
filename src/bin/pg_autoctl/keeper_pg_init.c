@@ -605,7 +605,7 @@ wait_until_primary_is_ready(Keeper *keeper,
 							MonitorAssignedState *assignedState)
 {
 	bool pgIsRunning = false;
-	char currrentLSN[NAMEDATALEN] = "0/0";
+	char currrentLSN[PG_LSN_MAXLENGTH] = "0/0";
 	char *pgsrSyncState = "";
 	int errors = 0, tries = 0;
 	bool firstLoop = true;

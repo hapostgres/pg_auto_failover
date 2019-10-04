@@ -457,8 +457,6 @@ ReportAutoFailoverNodeState(char *nodeName, int nodePort,
 		"walreporttime = CASE $4 WHEN '0/0'::pg_lsn THEN walreporttime ELSE now() END, "
 		"statechangetime = now() WHERE nodename = $5 AND nodeport = $6";
 
-	elog(INFO, "update query %s", updateQuery);
-
 	SPI_connect();
 
 	spiStatus = SPI_execute_with_args(updateQuery,

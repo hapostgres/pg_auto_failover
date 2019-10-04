@@ -479,7 +479,6 @@ keeper_update_pg_state(Keeper *keeper)
 	 * In some states, PostgreSQL isn't expected to be running, or not expected
 	 * to have a streaming replication to monitor at all.
 	 */
-	log_debug("keeperState->current_role = %s", NodeStateToString(keeperState->current_role));
 	switch (keeperState->current_role)
 	{
 		case PRIMARY_STATE:
@@ -567,8 +566,7 @@ keeper_get_replication_state(Keeper *keeper)
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
 	PGSQL *pgsql = &(postgres->sqlClient);
-	bool missing_wallag_ok =
-		keeperState->current_role == WAIT_PRIMARY_STATE;
+	bool missingStateOk = keeperState->current_role == WAIT_PRIMARY_STATE;
 
 	bool success = false;
 
@@ -585,18 +583,19 @@ keeper_get_replication_state(Keeper *keeper)
 	if (pg_setup_is_primary(pgSetup))
 	{
 		success =
-			pgsql_get_sync_state_and_wal_lag(
+			pgsql_get_sync_state_and_current_lsn(
 				pgsql,
 				config->replication_slot_name,
 				postgres->pgsrSyncState,
 				postgres->currentLSN,
-				NAMEDATALEN,
-				missing_wallag_ok);
+				PG_LSN_MAXLENGTH,
+				missingStateOk);
 		log_warn("latest received lsn = %s", postgres->currentLSN);
 	}
 	else
 	{
-		success = pgsql_get_received_lsn_from_standby(pgsql, postgres->currentLSN, NAMEDATALEN);
+		success = pgsql_get_received_lsn_from_standby(pgsql, postgres->currentLSN,
+													  PG_LSN_MAXLENGTH);
 	}
 	pgsql_finish(pgsql);
 

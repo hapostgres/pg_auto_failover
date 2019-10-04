@@ -23,7 +23,6 @@
  *
  * currentLSN value is kept as text for better portability. We do not
  * perform any operation on the value after it was read from database.
- * NAMEDATALEN is long enough for text representation of the LSN value.
  */
 typedef struct LocalPostgresServer
 {
@@ -31,7 +30,7 @@ typedef struct LocalPostgresServer
 	PostgresSetup	postgresSetup;
 	bool			pgIsRunning;
 	char			pgsrSyncState[PGSR_SYNC_STATE_MAXLENGTH];
-	char            currentLSN[NAMEDATALEN];
+	char            currentLSN[PG_LSN_MAXLENGTH];
 	uint64_t		pgFirstStartFailureTs;
 	int				pgStartRetries;
 	PgInstanceKind	pgKind;
