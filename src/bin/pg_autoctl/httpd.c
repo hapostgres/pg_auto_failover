@@ -61,6 +61,7 @@ static bool http_config_get(struct wby_con *connection, void *userdata);
 
 typedef struct routing_table
 {
+	char method[MAX_URL_SCRIPT_SIZE];
 	char script[MAX_URL_SCRIPT_SIZE];
 	HttpDispatchFunction dispatchFunction;
 } HttpRoutingTable;
@@ -86,14 +87,15 @@ typedef struct routing_table
  *  /api/1.0/formation/disable/secondary
  */
 HttpRoutingTable KeeperRoutingTable[] = {
-	{ "/",                       http_home },
-	{ "/versions",               http_version },
-	{ "/api/version",            http_api_version },
-	{ "/api/1.0/state",          http_state },
-	{ "/api/1.0/fsm/state",      http_fsm_state },
-	{ "/api/1.0/fsm/assign/*",   http_fsm_assign },
-	{ "/api/1.0/config/get/*",   http_config_get },
-	{ "", NULL }
+	{ "GET",  "/",                       http_home },
+	{ "GET",  "/versions",               http_version },
+	{ "GET",  "/api/version",            http_api_version },
+	{ "GET",  "/api/1.0/state",          http_state },
+	{ "GET",  "/api/1.0/fsm/state",      http_fsm_state },
+	{ "GET",  "/api/1.0/fsm/assign/*",   http_fsm_state },
+	{ "POST", "/api/1.0/fsm/assign/*",   http_fsm_assign },
+	{ "GET",  "/api/1.0/config/get/*",   http_config_get },
+	{ "", "", NULL }
 };
 
 
@@ -105,12 +107,8 @@ typedef struct server_state
 ;
 
 static int httpd_dispatch(struct wby_con *connection, void *userdata);
-static bool httpd_route_match_query(const char *uri,
-									const char *script,
-									char **matches,
-									int matchesSize,
-									int *matchesCount);
-
+static bool httpd_route_match_query(struct wby_con *connection,
+									HttpRoutingTable routingTableEntry);
 static void httpd_log(const char* text);
 
 /*
@@ -265,16 +263,12 @@ httpd_dispatch(struct wby_con *connection, void *userdata)
 
 	while (routingTableEntry.dispatchFunction != NULL)
 	{
-		int matchesCount;
-		char matches[RE_MATCH_COUNT][BUFSIZE] = { 0 };
-
-		if (httpd_route_match_query(connection->request.uri,
-									routingTableEntry.script,
-									(char **)matches,
-									RE_MATCH_COUNT,
-									&matchesCount))
+		if (httpd_route_match_query(connection, routingTableEntry))
 		{
-			log_info("GET \"%s\"", routingTableEntry.script);
+			log_info("%s \"%s\"",
+					 routingTableEntry.method,
+					 routingTableEntry.script);
+
 			return (*routingTableEntry.dispatchFunction)(connection, userdata);
 		}
 
@@ -294,13 +288,19 @@ httpd_dispatch(struct wby_con *connection, void *userdata)
  * The first entry of the groups is going to be the whole URI itself.
  */
 static bool
-httpd_route_match_query(const char *uri,
-						const char *pattern,
-						char **matches,
-						int matchesSize,
-						int *matchesCount)
+httpd_route_match_query(struct wby_con *connection,
+						HttpRoutingTable routingTableEntry)
 {
-	return fnmatch(pattern, uri, FNM_PATHNAME) == 0;
+	const char *uri = connection->request.uri;
+
+	/* first, HTTP method must match */
+	if (strcmp(connection->request.method, routingTableEntry.method) != 0)
+	{
+		return false;
+	}
+
+	/* then, match connection script to our routing pattern */
+	return fnmatch(routingTableEntry.script, uri, FNM_PATHNAME) == 0;
 }
 
 
