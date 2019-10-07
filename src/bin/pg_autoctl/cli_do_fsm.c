@@ -14,8 +14,6 @@
 
 #include "postgres_fe.h"
 
-#include "parson.h"
-
 #include "cli_common.h"
 #include "commandline.h"
 #include "defaults.h"
@@ -65,7 +63,7 @@ static CommandLine fsm_gv =
 static CommandLine fsm_assign =
 	make_command("assign",
 				 "Assign a new goal state to the keeper",
-				 " [ --pgdata ] <goal state>",
+				 " [ --pgdata ] <goal state> [<host> <port>]",
 				 KEEPER_CLI_PGDATA_OPTION,
 				 keeper_cli_getopt_pgdata,
 				 keeper_cli_fsm_assign);
@@ -153,16 +151,7 @@ keeper_cli_fsm_state(int argc, char **argv)
 	KeeperConfig config = keeperOptions;
 	bool missing_pgdata_is_ok = true;
 	bool pg_is_not_running_is_ok = true;
-
-    JSON_Value *js = json_value_init_object();
-    JSON_Value *jsPostgres = json_value_init_object();
-    JSON_Value *jsKeeperState = json_value_init_object();
-
-    JSON_Object *root = json_value_get_object(js);
-    JSON_Object *jsPostgresObject = json_value_get_object(jsPostgres);
-    JSON_Object *jsKeeperStateObject = json_value_get_object(jsKeeperState);
-
-    char *serialized_string = NULL;
+	char keeperStateJSON[BUFSIZE];
 
 	keeper_config_read_file(&config,
 							missing_pgdata_is_ok,
@@ -188,19 +177,12 @@ keeper_cli_fsm_state(int argc, char **argv)
 		exit(EXIT_CODE_BAD_STATE);
 	}
 
-	/* print our current PostgreSQL setup and Keeper's state */
-	pg_setup_as_json(&(keeper.postgres.postgresSetup), jsPostgresObject);
-	keeperStateAsJSON(&keeper.state, jsKeeperStateObject);
-
-    json_object_set_value(root, "postgres", jsPostgres);
-    json_object_set_value(root, "state", jsKeeperState);
-
-    serialized_string = json_serialize_to_string_pretty(js);
-
-	fprintf(stdout, "%s\n", serialized_string);
-
-    json_free_serialized_string(serialized_string);
-    json_value_free(js);
+	if (!keeper_state_as_json(&keeper, keeperStateJSON, BUFSIZE))
+	{
+		log_error("Failed to serialize internal keeper state to JSON");
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+	fprintf(stdout, "%s\n", keeperStateJSON);	
 }
 
 
@@ -252,26 +234,40 @@ keeper_cli_fsm_assign(int argc, char **argv)
 	KeeperConfig config = keeperOptions;
 	bool missing_pgdata_is_ok = true;
 	bool pg_is_not_running_is_ok = true;
-
-    JSON_Value *js = json_value_init_object();
-    JSON_Value *jsPostgres = json_value_init_object();
-    JSON_Value *jsKeeperState = json_value_init_object();
-
-    JSON_Object *root = json_value_get_object(js);
-    JSON_Object *jsPostgresObject = json_value_get_object(jsPostgres);
-    JSON_Object *jsKeeperStateObject = json_value_get_object(jsKeeperState);
-
-    char *serialized_string = NULL;
+	char keeperStateJSON[BUFSIZE];
 
 	keeper_config_read_file(&config,
 							missing_pgdata_is_ok,
 							pg_is_not_running_is_ok);
 
-	if (argc != 1)
+	switch (argc)
 	{
-		log_error("Missing argument: <goal state>");
-		commandline_help(stderr);
-		exit(EXIT_CODE_BAD_ARGS);
+		case 1:
+		{
+			/* all good, nothing special to do here. */
+			break;
+		}
+
+		case 3:
+		{
+			strlcpy(keeper.otherNode.host, argv[1], _POSIX_HOST_NAME_MAX);
+
+			keeper.otherNode.port = strtol(argv[2], NULL, 10);
+			if (keeper.otherNode.port == 0 && errno == EINVAL)
+			{
+				log_error(
+					"Failed to parse otherNode port number \"%s\"", argv[2]);
+				exit(EXIT_CODE_INTERNAL_ERROR);
+			}
+			break;
+		}
+
+		default:
+		{
+			log_error("USAGE: do fsm state <goal state> [<host> <port>]");
+			commandline_help(stderr);
+			exit(EXIT_CODE_BAD_ARGS);
+		}
 	}
 
 	/* now read keeper's state */
@@ -297,18 +293,12 @@ keeper_cli_fsm_assign(int argc, char **argv)
 		exit(EXIT_CODE_BAD_STATE);
 	}
 
-	pg_setup_as_json(&(keeper.postgres.postgresSetup), jsPostgresObject);
-	keeperStateAsJSON(&keeper.state, jsKeeperStateObject);
-
-    json_object_set_value(root, "postgres", jsPostgres);
-    json_object_set_value(root, "state", jsKeeperState);
-
-    serialized_string = json_serialize_to_string_pretty(js);
-
-	fprintf(stdout, "%s\n", serialized_string);
-
-    json_free_serialized_string(serialized_string);
-    json_value_free(js);
+	if (!keeper_state_as_json(&keeper, keeperStateJSON, BUFSIZE))
+	{
+		log_error("Failed to serialize internal keeper state to JSON");
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+	fprintf(stdout, "%s\n", keeperStateJSON);
 }
 
 

@@ -61,10 +61,6 @@ fsm_init_primary(Keeper *keeper)
 	LocalPostgresServer *postgres = &(keeper->postgres);
 	PGSQL *pgsql = &(postgres->sqlClient);
 	bool inRecovery = false;
-	char *password = NULL;
-	char monitorHostname[_POSIX_HOST_NAME_MAX];
-	int monitorPort = 0;
-	char *authMethod = NULL;
 
 	KeeperStateInit initState = { 0 };
 	PostgresSetup pgSetup = keeper->config.pgSetup;
@@ -136,23 +132,6 @@ fsm_init_primary(Keeper *keeper)
 	}
 
 	/*
-	 * We need to add the monitor host:port in the HBA settings for the node to
-	 * enable the health checks.
-	 */
-	if (!config->monitorDisabled)
-	{
-		if (!hostname_from_uri(config->monitor_pguri,
-							   monitorHostname, _POSIX_HOST_NAME_MAX,
-							   &monitorPort))
-		{
-			/* developer error, this should never happen */
-			log_fatal("BUG: monitor_pguri should be validated before calling "
-					  "fsm_init_primary");
-			return false;
-		}
-	}
-
-	/*
 	 * Now is the time to make sure Postgres is running, as our next steps to
 	 * prepare a SINGLE from INIT are depending on being able to connect to the
 	 * local Postgres service.
@@ -197,17 +176,39 @@ fsm_init_primary(Keeper *keeper)
 	 * Now add the role and HBA entries necessary for the monitor to run health
 	 * checks on the local Postgres node.
 	 */
-	password = NULL;
-	authMethod = pg_setup_get_auth_method(&(config->pgSetup));
-
-	if (!primary_create_user_with_hba(postgres,
-									  PG_AUTOCTL_HEALTH_USERNAME, password,
-									  monitorHostname, authMethod))
+	if (!config->monitorDisabled)
 	{
-		log_error("Failed to initialise postgres as primary because creating the "
-				  "database user that the pg_auto_failover monitor "
-				  "uses for health checks failed, see above for details");
-		return false;
+		char monitorHostname[_POSIX_HOST_NAME_MAX];
+		int monitorPort = 0;
+		char *password = NULL;
+		char *authMethod = NULL;
+
+		if (!hostname_from_uri(config->monitor_pguri,
+							   monitorHostname, _POSIX_HOST_NAME_MAX,
+							   &monitorPort))
+		{
+			/* developer error, this should never happen */
+			log_fatal("BUG: monitor_pguri should be validated before calling "
+					  "fsm_init_primary");
+			return false;
+		}
+
+		authMethod = pg_setup_get_auth_method(&(config->pgSetup));
+
+		/*
+		 * We need to add the monitor host:port in the HBA settings for the
+		 * node to enable the health checks.
+		 */
+		if (!primary_create_user_with_hba(postgres,
+										  PG_AUTOCTL_HEALTH_USERNAME, password,
+										  monitorHostname, authMethod))
+		{
+			log_error(
+				"Failed to initialise postgres as primary because "
+				"creating the database user that the pg_auto_failover monitor "
+				"uses for health checks failed, see above for details");
+			return false;
+		}
 	}
 
 	/*
@@ -381,26 +382,34 @@ prepare_replication(Keeper *keeper, bool other_node_missing_is_ok)
 	Monitor *monitor = &(keeper->monitor);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
-	NodeAddress otherNode = { 0 };
 
-	if (!monitor_get_other_node(monitor, config->nodename, pgSetup->pgport,
-								&otherNode))
+	/*
+	 * When using the monitor, now is the time to fetch the otherNode hostname
+	 * and port from it. When the monitor is disabled, it is expected that the
+	 * information has been already filled in keeper->otherNode; see
+	 * `keeper_cli_fsm_assign' for an example of that.
+	 */
+	if (!config->monitorDisabled)
 	{
-		if (other_node_missing_is_ok)
+		if (!monitor_get_other_node(monitor, config->nodename, pgSetup->pgport,
+									&(keeper->otherNode)))
 		{
-			log_debug("There's no other node for %s:%d",
-					  config->nodename, pgSetup->pgport);
+			if (other_node_missing_is_ok)
+			{
+				log_debug("There's no other node for %s:%d",
+						  config->nodename, pgSetup->pgport);
+			}
+			else
+			{
+				log_error("There's no other node for %s:%d",
+						  config->nodename, pgSetup->pgport);
+			}
+			return other_node_missing_is_ok;
 		}
-		else
-		{
-			log_error("There's no other node for %s:%d",
-					  config->nodename, pgSetup->pgport);
-		}
-		return other_node_missing_is_ok;
 	}
 
 	if (!primary_add_standby_to_hba(postgres,
-									otherNode.host,
+									keeper->otherNode.host,
 									config->replication_password))
 	{
 		log_error(
@@ -560,12 +569,23 @@ fsm_init_standby(Keeper *keeper)
 	int groupId = keeper->state.current_group;
 
 	/* get the primary node to follow */
-	if (!monitor_get_primary(monitor, config->formation, groupId,
-							 &replicationSource.primaryNode))
+	if (!config->monitorDisabled)
 	{
-		log_error("Failed to initialise standby because get the primary node "
-				  "from the monitor failed, see above for details");
-		return false;
+		if (!monitor_get_primary(monitor, config->formation, groupId,
+								 &replicationSource.primaryNode))
+		{
+			log_error("Failed to initialise standby because get the primary node "
+					  "from the monitor failed, see above for details");
+			return false;
+		}
+	}
+	else
+	{
+		/* copy information from keeper->otherNode into replicationSource */
+		strlcpy(replicationSource.primaryNode.host,
+				keeper->otherNode.host, _POSIX_HOST_NAME_MAX);
+
+		replicationSource.primaryNode.port = keeper->otherNode.port;
 	}
 
 	replicationSource.userName = PG_AUTOCTL_REPLICA_USERNAME;
@@ -599,12 +619,23 @@ fsm_rewind_or_init(Keeper *keeper)
 	int groupId = keeper->state.current_group;
 
 	/* get the primary node to follow */
-	if (!monitor_get_primary(monitor, config->formation, groupId,
-							 &replicationSource.primaryNode))
+	if (!config->monitorDisabled)
 	{
-		log_error("Failed to initialise standby because get the primary node "
-				  "from the monitor failed, see above for details");
-		return false;
+		if (!monitor_get_primary(monitor, config->formation, groupId,
+								 &replicationSource.primaryNode))
+		{
+			log_error("Failed to initialise standby because get the primary node "
+					  "from the monitor failed, see above for details");
+			return false;
+		}
+	}
+	else
+	{
+		/* copy information from keeper->otherNode into replicationSource */
+		strlcpy(replicationSource.primaryNode.host,
+				keeper->otherNode.host, _POSIX_HOST_NAME_MAX);
+
+		replicationSource.primaryNode.port = keeper->otherNode.port;
 	}
 
 	replicationSource.userName = PG_AUTOCTL_REPLICA_USERNAME;

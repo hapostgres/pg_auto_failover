@@ -24,6 +24,12 @@ typedef struct Keeper
 	LocalPostgresServer postgres;
 	KeeperStateData state;
 	Monitor monitor;
+
+	/*
+	 * When running without monitor, we need a place to stash the otherNode
+	 * information. This is necessary in some transitions.
+	 */
+	NodeAddress otherNode;
 } Keeper;
 
 
@@ -46,10 +52,13 @@ bool keeper_check_monitor_extension_version(Keeper *keeper);
 
 bool keeper_init_state_write(Keeper *keeper);
 bool keeper_init_state_read(Keeper *keeper, KeeperStateInit *initState);
+bool keeper_state_as_json(Keeper *keeper, char *json, int size);
+
 
 /* loop.c */
 bool keeper_service_init(Keeper *keeper, pid_t *pid);
 bool keeper_service_stop(Keeper *keeper);
 bool keeper_service_run(Keeper *keeper, pid_t *start_pid);
+bool read_pidfile(const char *pidfile, pid_t *pid);
 
 #endif /* KEEPER_H */

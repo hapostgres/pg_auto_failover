@@ -13,6 +13,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "parson.h"
 
 #include "file_utils.h"
 #include "keeper.h"
@@ -1010,4 +1011,40 @@ keeper_init_state_read(Keeper *keeper, KeeperStateInit *initState)
 			  "is broken or wrong version",
 			  filename);
 	return false;
+}
+
+
+/*
+ * keeper_state_as_json prepares the current keeper state as a JSON object and
+ * copy the string to the given pre-allocated memory area, of given size.
+ */
+bool
+keeper_state_as_json(Keeper *keeper, char *json, int size)
+{
+    JSON_Value *js = json_value_init_object();
+    JSON_Value *jsPostgres = json_value_init_object();
+    JSON_Value *jsKeeperState = json_value_init_object();
+
+    JSON_Object *root = json_value_get_object(js);
+    JSON_Object *jsPostgresObject = json_value_get_object(jsPostgres);
+    JSON_Object *jsKeeperStateObject = json_value_get_object(jsKeeperState);
+
+    char *serialized_string = NULL;
+	int len;
+
+	pg_setup_as_json(&(keeper->postgres.postgresSetup), jsPostgresObject);
+	keeperStateAsJSON(&(keeper->state), jsKeeperStateObject);
+
+    json_object_set_value(root, "postgres", jsPostgres);
+    json_object_set_value(root, "state", jsKeeperState);
+
+    serialized_string = json_serialize_to_string_pretty(js);
+
+	len = strlcpy(json, serialized_string, size);
+
+    json_free_serialized_string(serialized_string);
+    json_value_free(js);
+
+	/* strlcpy returns how many bytes where necessary */
+	return len < size;
 }
