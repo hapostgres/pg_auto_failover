@@ -14,6 +14,10 @@
 
 #include "keeper.h"
 
+bool service_init(Keeper *keeper, pid_t *pid);
+bool service_stop(Keeper *keeper);
 bool service_start(Keeper *keeper);
+
+bool read_pidfile(const char *pidfile, pid_t *pid);
 
 #endif /* SERVICE_H */

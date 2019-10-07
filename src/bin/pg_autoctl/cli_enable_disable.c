@@ -19,6 +19,7 @@
 #include "log.h"
 #include "monitor.h"
 #include "pgsetup.h"
+#include "service.h"
 
 
 static int cli_secondary_getopts(int argc, char **argv);

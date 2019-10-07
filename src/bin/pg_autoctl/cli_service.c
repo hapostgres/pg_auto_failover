@@ -135,7 +135,7 @@ cli_keeper_run(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	if (!keeper_service_init(&keeper, &pid))
+	if (!service_init(&keeper, &pid))
 	{
 		log_fatal("Failed to initialize pg_auto_failover service, "
 				  "see above for details");

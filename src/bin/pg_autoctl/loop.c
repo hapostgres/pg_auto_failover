@@ -23,6 +23,7 @@
 #include "monitor.h"
 #include "pgctl.h"
 #include "state.h"
+#include "service.h"
 #include "signals.h"
 
 
@@ -33,9 +34,63 @@ static bool in_network_partition(KeeperStateData *keeperState, uint64_t now,
 								 int networkPartitionTimeout);
 static void reload_configuration(Keeper *keeper);
 
-/* pid file creation and reading */
-static bool create_pidfile(const char *pidfile, pid_t pid);
-static bool remove_pidfile(const char *pidfile);
+
+/*
+ * keeper_start_node_active_process starts a sub-process that communicates with
+ * the monitor to implement the node_active protocol.
+ */
+bool
+keeper_start_node_active_process(Keeper *keeper, pid_t *nodeActivePid)
+{
+	/* the forked process' parent pid is our pid */
+	pid_t pid, ppid = getpid();
+
+	/* Flush stdio channels just before fork, to avoid double-output problems */
+	fflush(stdout);
+	fflush(stderr);
+
+	/* time to create the node_active sub-process */
+	pid = fork();
+
+	switch (pid)
+	{
+		case -1:
+		{
+			log_error("Failed to fork the node_active process");
+			return false;
+		}
+
+		case 0:
+		{
+			/* the PID file is created with our parent pid */
+			(void) keeper_service_run(keeper, ppid);
+
+			/*
+			 * When the "main" function for the child process is over, it's the
+			 * end of our execution thread. Don't get back to the caller.
+			 */
+			if (asked_to_stop || asked_to_stop_fast)
+			{
+				exit(EXIT_CODE_QUIT);
+			}
+			else
+			{
+				/* something went wrong (e.g. broken pipe) */
+				exit(EXIT_CODE_INTERNAL_ERROR);
+			}
+		}
+
+		default:
+		{
+			/* fork succeeded, in parent */
+			log_debug("pg_autoctl node_active protocol started in subprocess %d",
+					  pid);
+			*nodeActivePid = pid;
+			return true;
+		}
+	}
+}
+
 
 /*
  * keeper_fsm_run implements the main loop of the keeper, which periodically
@@ -45,7 +100,7 @@ static bool remove_pidfile(const char *pidfile);
  * keeper_fsm_run().
  */
 bool
-keeper_service_run(Keeper *keeper, pid_t *start_pid)
+keeper_service_run(Keeper *keeper, pid_t start_pid)
 {
 	KeeperConfig *config = &(keeper->config);
 	KeeperStateData *keeperState = &(keeper->state);
@@ -53,8 +108,9 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 	LocalPostgresServer *postgres = &(keeper->postgres);
 	bool doSleep = false;
 	bool couldContactMonitor = false;
-	pid_t pid = *start_pid, checkpid = 0;
+	pid_t checkpid = 0;
 	bool firstLoop = true;
+
 
 	log_debug("pg_autoctl service is starting");
 
@@ -105,11 +161,11 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 		 */
 		if (read_pidfile(config->pathnames.pid, &checkpid))
 		{
-			if (checkpid != pid)
+			if (checkpid != start_pid)
 			{
 				log_fatal("Our PID file \"%s\" now contains PID %d, "
 						  "instead of expected pid %d. Quitting.",
-						  config->pathnames.pid, checkpid, pid);
+						  config->pathnames.pid, checkpid, start_pid);
 
 				exit(EXIT_CODE_QUIT);
 			}
@@ -285,83 +341,6 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 		}
 	}
 
-	return keeper_service_stop(keeper);
-}
-
-
-/*
- * keeper_service_init initialises the bits and pieces that the keeper service
- * depend on:
- *
- *  - sets the signal handlers
- *  - check pidfile to see if the service is already running
- *  - creates the pidfile for our service
- *  - clean-up from previous execution
- */
-bool
-keeper_service_init(Keeper *keeper, pid_t *pid)
-{
-	KeeperConfig *config = &(keeper->config);
-
-	log_trace("keeper_service_init");
-
-	/* Establish a handler for signals. */
-	(void) set_signal_handlers();
-
-	/* Check that the keeper service is not already running */
-	if (read_pidfile(config->pathnames.pid, pid))
-	{
-		log_fatal("An instance of this keeper is already running with PID %d, "
-				  "as seen in pidfile \"%s\"",
-				  *pid, config->pathnames.pid);
-		return false;
-	}
-
-	/*
-	 * Check that the init is finished. This function is called from
-	 * cli_service_run when used in the CLI `pg_autoctl run`, and the
-	 * function cli_service_run calls into keeper_init(): we know that we could
-	 * read a keeper state file.
-	 */
-	if (!config->monitorDisabled && file_exists(config->pathnames.init))
-	{
-		log_warn("The `pg_autoctl create` did not complete, completing now.");
-
-		if (!keeper_pg_init_continue(keeper, config))
-		{
-			/* errors have already been logged. */
-			return false;
-		}
-	}
-
-	/* Ok, we're going to start. Time to create our PID file. */
-	*pid = getpid();
-
-	if (!create_pidfile(config->pathnames.pid, *pid))
-	{
-		log_fatal("Failed to write our PID to \"%s\"", config->pathnames.pid);
-		return false;
-	}
-
-	return true;
-}
-
-
-/*
- * keeper_service_stop stops the service and removes the pid file.
- */
-bool
-keeper_service_stop(Keeper *keeper)
-{
-	KeeperConfig *config = &(keeper->config);
-
-	log_info("pg_autoctl service stopping");
-
-	if (!remove_pidfile(config->pathnames.pid))
-	{
-		log_error("Failed to remove pidfile \"%s\"", config->pathnames.pid);
-		return false;
-	}
 	return true;
 }
 
@@ -493,103 +472,4 @@ reload_configuration(Keeper *keeper)
 
 	/* we're done reloading now. */
 	asked_to_reload = 0;
-}
-
-
-/*
- * create_pidfile writes our pid in a file.
- *
- * When running in a background loop, we need a pidFile to add a command line
- * tool that send signals to the process. The pidfile has a single line
- * containing our PID.
- */
-static bool
-create_pidfile(const char *pidfile, pid_t pid)
-{
-	char content[BUFSIZE];
-
-	log_trace("create_pidfile(%d): \"%s\"", pid, pidfile);
-
-	sprintf(content, "%d", pid);
-
-	return write_file(content, strlen(content), pidfile);
-}
-
-
-/*
- * read_pidfile read the keeper's pid from a file, and returns true when we
- * could read a PID that belongs to a currently running process.
- */
-bool
-read_pidfile(const char *pidfile, pid_t *pid)
-{
-	long fileSize = 0L;
-	char *fileContents = NULL;
-
-	if (!file_exists(pidfile))
-	{
-		return false;
-	}
-
-	if (!read_file(pidfile, &fileContents, &fileSize))
-	{
-		return false;
-	}
-
-	if (sscanf(fileContents, "%d", pid) == 1)
-	{
-		free(fileContents);
-
-		/* is it a stale file? */
-		if (kill(*pid, 0) == 0)
-		{
-			return true;
-		}
-		else
-		{
-			log_debug("Failed to signal pid %d: %s", *pid, strerror(errno));
-			*pid = 0;
-
-			log_info("Found a stale pidfile at \"%s\"", pidfile);
-			log_warn("Removing the stale pid file \"%s\"", pidfile);
-
-			/*
-			 * We must return false here, after having determined that the
-			 * pidfile belongs to a process that doesn't exist anymore. So we
-			 * remove the pidfile and don't take the return value into account
-			 * at this point.
-			 */
-			(void) remove_pidfile(pidfile);
-
-			return false;
-		}
-	}
-	else
-	{
-		free(fileContents);
-
-		log_debug("Failed to read the PID file \"%s\", removing it", pidfile);
-		(void) remove_pidfile(pidfile);
-
-		return false;
-	}
-
-	/* no warning, it's cool that the file doesn't exists. */
-	return false;
-}
-
-
-/*
- * remove_pidfile removes the keeper's pidfile.
- */
-static bool
-remove_pidfile(const char *pidfile)
-{
-	if (remove(pidfile) != 0)
-	{
-		log_error("Failed to remove keeper's pid file \"%s\": %s",
-				  pidfile, strerror(errno));
-		return false;
-	}
-	return true;
 }

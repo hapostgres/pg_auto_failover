@@ -31,6 +31,7 @@
 #include "monitor_pg_init.h"
 #include "pgctl.h"
 #include "primary_standby.h"
+#include "service.h"
 
 MonitorConfig monitorOptions;
 
@@ -186,20 +187,11 @@ cli_create_pg(Keeper *keeper, KeeperConfig *config)
 				exit(EXIT_CODE_KEEPER);
 			}
 
-			if (!keeper_service_init(keeper, &pid))
-			{
-				log_fatal("Failed to initialize pg_auto_failover service, "
-						  "see above for details");
-				exit(EXIT_CODE_KEEPER);
-			}
-
-			if (!keeper_check_monitor_extension_version(keeper))
+			if (!service_start(keeper))
 			{
 				/* errors have already been logged */
-				exit(EXIT_CODE_MONITOR);
+				exit(EXIT_CODE_INTERNAL_ERROR);
 			}
-
-			keeper_service_run(keeper, &pid);
 		}
 	}
 

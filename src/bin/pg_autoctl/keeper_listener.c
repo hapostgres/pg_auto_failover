@@ -53,6 +53,7 @@
 CommandPipe listenerCommandPipe = { 0 };
 
 static bool keeper_listener_read_commands(int cmdIn, int resOut);
+static bool keeper_listener_process_command(char *command, FILE *out);
 
 
 /*
@@ -119,7 +120,7 @@ keeper_listener_start(const char *pgdata, pid_t *listenerPid)
 			}
 			else
 			{
-				log_error("BUG: keeper_listener_read_commands returned!");
+				/* something went wrong (e.g. broken pipe) */
 				exit(EXIT_CODE_INTERNAL_ERROR);
 			}
 		}
@@ -157,6 +158,10 @@ keeper_listener_read_commands(int cmdIn, int resOut)
 	FILE *in = fdopen(cmdIn, "r");
 	FILE *out = fdopen(resOut, "w");
 
+	bool doneReading = false;
+	int countFdsReadyToRead, nfds; /* see man select(3) */
+	fd_set readFileDescriptorSet;
+
 	if (in == NULL || out == NULL)
 	{
 		log_error("Failed to open a file pointer for command pipe: %s",
@@ -166,54 +171,133 @@ keeper_listener_read_commands(int cmdIn, int resOut)
 
 	log_debug("Keeper listener started");
 
-	while ((command = fgets(buffer, BUFSIZE, in)) != NULL)
+	nfds = cmdIn + 1;			/* see man select(3) */
+
+	/*
+	 * We use SELECT on this single input pipe for its ability to get
+	 * interrupted by signals. If we were to call fgets() directly, we wouldn't
+	 * be able to react to SIGINT, SIGTERM, or SIGQUIT and others.
+	 */
+	while (!doneReading)
 	{
-		/* split the command string in CLI arguments array */
-		int argc = 0;
-		char *argv[12] = { 0 };
-		char *ptr = command, *previous = command;
+		FD_ZERO(&readFileDescriptorSet);
+		FD_SET(cmdIn, &readFileDescriptorSet);
 
-		int returnCode;
-		char logs[BUFSIZE] = { 0 };
-		char result[BUFSIZE] = { 0 };
+		countFdsReadyToRead =
+			select(nfds, &readFileDescriptorSet, NULL, NULL, NULL);
 
-		/* argv[0] should be our current running program */
-		argv[argc++] = pg_autoctl_argv0;
-
-		for (; *ptr != '\0'; ptr++)
+		if (countFdsReadyToRead == -1)
 		{
-			if (*ptr == ' ' || *ptr == '\n')
+			switch (errno)
 			{
-				char *next = ptr+1;
+				case EAGAIN:
+				case EINTR:
+				{
+					/* just loop again */
+					if (asked_to_stop || asked_to_stop_fast)
+					{
+						doneReading = true;
+					}
+					break;
+				}
 
-				*ptr = '\0';
-				argv[argc++] = previous;
-
-				/* prepare next round */
-				previous = next;
+				case EBADF:
+				case EINVAL:
+				case ENOMEM:
+				default:
+				{
+					/* that's unexpected, act as if doneReading */
+					log_error("Internal listener process pipe broken: %s",
+							  strerror(errno));
+					doneReading = true;
+					break;
+				}
 			}
 		}
-
-		/* run the subcommand in a subprogram */
-		if (!pg_autoctl_run_subcommand(argc, argv, &returnCode,
-									   result, BUFSIZE,
-									   logs, BUFSIZE))
+		else if (countFdsReadyToRead == 0)
 		{
-			/* FIXME: better error message is needed */
-			log_error("Failed to run subcommand, returned %d", returnCode);
-			if (strlen(logs) > 0)
+			/* integrate with signals */
+			if (asked_to_stop || asked_to_stop_fast)
 			{
-				log_error("%s", logs);
+				doneReading = true;
+			}
+			continue;
+		}
+		else
+		{
+			/*
+			 * If we receive NULL here (end of file), that means the pipe is
+			 * broken, we're done.
+			 */
+			if ((command = fgets(buffer, BUFSIZE, in)) == NULL)
+			{
+				log_warn("The listener subprocess reached end-of-file");
+				doneReading = true;
+			}
+			else
+			{
+				(void) keeper_listener_process_command(command, out);
 			}
 		}
-
-		fputs("output\n", out);
-		fputs(result, out);
-		fputs("\nlogs\n", out);
-		fputs(logs, out);
-		fputs("\nready\n", out);
-		fflush(out);
 	}
+
+	return true;
+}
+
+
+/*
+ * keeper_listener_process_command processes a command received on the internal
+ * PIPE. Such a command must be a `pg_autoctl` subcommand and is parsed as
+ * such.
+ */
+static bool
+keeper_listener_process_command(char *command, FILE *out)
+{
+	/* split the command string in CLI arguments array */
+	int argc = 0;
+	char *argv[12] = { 0 };
+	char *ptr = command, *previous = command;
+
+	int returnCode;
+	char logs[BUFSIZE] = { 0 };
+	char result[BUFSIZE] = { 0 };
+
+	/* argv[0] should be our current running program */
+	argv[argc++] = pg_autoctl_argv0;
+
+	for (; *ptr != '\0'; ptr++)
+	{
+		if (*ptr == ' ' || *ptr == '\n')
+		{
+			char *next = ptr+1;
+
+			*ptr = '\0';
+			argv[argc++] = previous;
+
+			/* prepare next round */
+			previous = next;
+		}
+	}
+
+	/* run the subcommand in a subprogram */
+	if (!pg_autoctl_run_subcommand(argc, argv, &returnCode,
+								   result, BUFSIZE,
+								   logs, BUFSIZE))
+	{
+		log_error("Failed to run subcommand, returned %d", returnCode);
+
+		if (strlen(logs) > 0)
+		{
+			log_error("%s", logs);
+		}
+	}
+
+	fputs("output\n", out);
+	fputs(result, out);
+	fputs("\nlogs\n", out);
+	fputs(logs, out);
+	fputs("\nready\n", out);
+	fflush(out);
 
 	return true;
 }

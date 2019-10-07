@@ -51,7 +51,7 @@
 typedef bool (*HttpDispatchFunction)(struct wby_con *connection, void *userdata);
 
 static bool http_home(struct wby_con *connection, void *userdata);
-static bool http_version(struct wby_con *connection, void *userdata);
+static bool http_versions(struct wby_con *connection, void *userdata);
 static bool http_api_version(struct wby_con *connection, void *userdata);
 static bool http_state(struct wby_con *connection, void *userdata);
 static bool http_fsm_state(struct wby_con *connection, void *userdata);
@@ -88,7 +88,7 @@ typedef struct routing_table
  */
 HttpRoutingTable KeeperRoutingTable[] = {
 	{ "GET",  "/",                       http_home },
-	{ "GET",  "/versions",               http_version },
+	{ "GET",  "/versions",               http_versions },
 	{ "GET",  "/api/version",            http_api_version },
 	{ "GET",  "/api/1.0/state",          http_state },
 	{ "GET",  "/api/1.0/fsm/state",      http_fsm_state },
@@ -110,6 +110,10 @@ static int httpd_dispatch(struct wby_con *connection, void *userdata);
 static bool httpd_route_match_query(struct wby_con *connection,
 									HttpRoutingTable routingTableEntry);
 static void httpd_log(const char* text);
+
+
+static bool parse_othernode_parameters(struct wby_con *connection,
+									   NodeAddress *otherNode);
 
 /*
  * keeper_webservice_run forks and starts a web service in the child process,
@@ -167,7 +171,7 @@ httpd_start_process(const char *pgdata,
 			}
 			else
 			{
-				log_error("BUG: keeper_listener_read_commands returned!");
+				/* something went wrong (e.g. broken pipe) */
 				exit(EXIT_CODE_INTERNAL_ERROR);
 			}
 		}
@@ -175,7 +179,7 @@ httpd_start_process(const char *pgdata,
 		default:
 		{
 			/* fork succeeded, in parent */
-			log_info("HTTP service started in subprocess %d", pid);
+			log_debug("HTTP service started in subprocess %d", pid);
 			*httpdPid = pid;
 			return true;
 		}
@@ -325,7 +329,7 @@ static bool
 http_api_version(struct wby_con *connection, void *userdata)
 {
 	char buffer[BUFSIZE];
-	int len = snprintf(buffer, BUFSIZE, "%s", HTTPD_CURRENT_API_VERSION);
+	int len = snprintf(buffer, BUFSIZE, "%s\n", HTTPD_CURRENT_API_VERSION);
 
 	wby_response_begin(connection, 200, len, NULL, 0);
 	wby_write(connection, buffer, len);
@@ -353,7 +357,7 @@ http_state(struct wby_con *connection, void *userdata)
  * extension.
  */
 static bool
-http_version(struct wby_con *connection, void *userdata)
+http_versions(struct wby_con *connection, void *userdata)
 {
 	char buffer[BUFSIZE];
 	int len;
@@ -485,12 +489,23 @@ http_fsm_assign(struct wby_con *connection, void *userdata)
 	char *goalStateString = NULL;
 	char command[BUFSIZE];
 	char output[BUFSIZE];
+	NodeAddress otherNode = { 0 };
+
+	/* parse the input as JSON */
+	if (!parse_othernode_parameters(connection, &otherNode))
+	{
+		log_error("Failed to parse JSON input parameters");
+		return false;
+	}
+
+	log_debug("otherNode: %s:%d", otherNode.host, otherNode.port);
 
 	/* use basename to retrieve the last part of the URI, on a copy of it */
 	strlcpy(uri, connection->request.uri, BUFSIZE);
 	goalStateString = basename(uri);
 
-	snprintf(command, BUFSIZE, "do fsm assign %s", goalStateString);
+	snprintf(command, BUFSIZE, "do fsm assign %s %s %d",
+			 goalStateString, otherNode.host, otherNode.port);
 	log_debug("http_fsm_assign: %s", command);
 
 	if (keeper_listener_send_command(command, output, BUFSIZE))
@@ -506,6 +521,57 @@ http_fsm_assign(struct wby_con *connection, void *userdata)
 		wby_response_begin(connection, 404, 0, NULL, 0);
 		wby_response_end(connection);
 	}
+
+	return true;
+}
+
+
+/*
+ * parse_othernode_parameters fills int the otherNode struct with the values
+ * parsed from the input JSON data that should look like:
+ *
+ * {"otherNode": {"host": "localhost", "port": 7655}}
+ */
+static bool
+parse_othernode_parameters(struct wby_con *connection, NodeAddress *otherNode)
+{
+	int contentLength = connection->request.content_length;
+	char input[BUFSIZE];
+
+	JSON_Value *jsParamsValue;
+	JSON_Object *jsParamsObject;
+	const char *ptr;
+
+	log_debug("parse_othernode_parameters: contentLength %d", contentLength);
+
+	/* parse POST data, expected as JSON input containing our parameters */
+	if (contentLength > BUFSIZE)
+	{
+		log_error("Received %d bytes of data, we only support up to %d",
+				  contentLength, BUFSIZE);
+		return false;
+	}
+
+	if (wby_read(connection, input, contentLength) != WBY_OK)
+	{
+		log_error("Failed to read %d bytes of content from the connection",
+				  contentLength);
+		return false;
+	}
+
+	jsParamsValue = json_parse_string(input);
+	jsParamsObject = json_value_get_object(jsParamsValue);
+
+	ptr = json_object_dotget_string(jsParamsObject, "otherNode.host");
+
+	if (ptr != NULL)
+	{
+		strlcpy(otherNode->host, ptr, _POSIX_HOST_NAME_MAX);
+	}
+	otherNode->port =
+		(int) json_object_dotget_number(jsParamsObject, "otherNode.port");
+
+    json_value_free(jsParamsValue);
 
 	return true;
 }

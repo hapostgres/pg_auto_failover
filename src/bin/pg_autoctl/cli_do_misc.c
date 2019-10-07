@@ -29,6 +29,7 @@
 #include "monitor_config.h"
 #include "pgctl.h"
 #include "primary_standby.h"
+#include "service.h"
 
 
 /*
