@@ -409,6 +409,10 @@ struct wby_buffer {
 
 WBY_INTERN void
 wby_dbg(wby_log_f log, const char *fmt, ...)
+	__attribute__((format(printf, 2, 3)));
+
+WBY_INTERN void
+wby_dbg(wby_log_f log, const char *fmt, ...)
 {
     char buffer[1024];
     va_list args;
@@ -1391,6 +1395,10 @@ wby_write(struct wby_con *conn, const void *ptr, wby_size len)
 
 WBY_INTERN int
 wby_printf(struct wby_con* conn, const char* fmt, ...)
+	__attribute__((format(printf, 2, 3)));
+
+WBY_INTERN int
+wby_printf(struct wby_con* conn, const char* fmt, ...)
 {
     int len;
     char buffer[1024];
@@ -1716,7 +1724,7 @@ wby_on_incoming(struct wby_server *srv)
     }
 
     /* OK, keep this connection */
-    wby_dbg(srv->config.log, "tagging connection %d as alive", connection_index);
+    wby_dbg(srv->config.log, "tagging connection %zu as alive", connection_index);
     connection->flags |= WBY_CON_FLAG_ALIVE;
     connection->socket = (wby_ptr)fd;
     return 0;
@@ -1785,7 +1793,7 @@ wby_update_connection(struct wby_server *srv, struct wby_connection* connection)
             long written = 0;
 
             written = send(WBY_SOCK(connection->socket), wby_continue_header + offset, (wby_size)left, 0);
-            wby_dbg(srv->config.log, "continue write: %d bytes", written);
+            wby_dbg(srv->config.log, "continue write: %ld bytes", written);
             if (written < 0) {
                 wby_dbg(srv->config.log, "failed to write 100-continue header");
                 connection->flags &= (unsigned short)~WBY_CON_FLAG_ALIVE;
@@ -1987,7 +1995,7 @@ wby_update(struct wby_server *srv)
             FD_ISSET(WBY_SOCK(conn->socket), &write_fds) ||
             conn->flags & WBY_CON_FLAG_FRESH_CONNECTION)
         {
-            wby_dbg(srv->config.log, "reading from connection %d", i);
+            wby_dbg(srv->config.log, "reading from connection %zu", i);
             wby_update_connection(srv, conn);
         }
     }
@@ -1997,7 +2005,7 @@ wby_update(struct wby_server *srv)
         struct wby_connection *connection = &srv->con[i];
         if (!(connection->flags & WBY_CON_FLAG_ALIVE)) {
             wby_size remain;
-            wby_dbg(srv->config.log, "closing connection %d (%08x)", i, connection->flags);
+            wby_dbg(srv->config.log, "closing connection %zu (%08x)", i, connection->flags);
             if (connection->flags & WBY_CON_FLAG_WEBSOCKET)
                 srv->config.ws_closed(&connection->public_data, srv->config.userdata);
             remain = srv->con_count - (wby_size)i - 1;
