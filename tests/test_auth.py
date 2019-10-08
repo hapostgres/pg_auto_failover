@@ -14,13 +14,13 @@ def teardown_module():
     cluster.destroy()
 
 def test_000_create_monitor():
-    monitor = cluster.create_monitor("/tmp/monitor", authMethod="md5")
+    monitor = cluster.create_monitor("/tmp/auth/monitor", authMethod="md5")
     monitor.wait_until_pg_is_running()
     monitor.set_user_password("autoctl_node", "autoctl_node_password")
 
 def test_001_init_primary():
     global node1
-    node1 = cluster.create_datanode("/tmp/node1", authMethod="md5")
+    node1 = cluster.create_datanode("/tmp/auth/node1", authMethod="md5")
     node1.create()
     node1.set_user_password("pgautofailover_monitor", "monitor_password")
     node1.run()

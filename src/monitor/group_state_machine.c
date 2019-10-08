@@ -329,7 +329,7 @@ AssignGoalState(AutoFailoverNode *pgAutoFailoverNode,
 						  pgAutoFailoverNode->nodeName,
 						  pgAutoFailoverNode->nodePort,
 						  pgAutoFailoverNode->pgsrSyncState,
-						  pgAutoFailoverNode->walDelta,
+						  pgAutoFailoverNode->reportedLSN,
 						  description);
 	}
 }
@@ -345,28 +345,25 @@ WalDifferenceWithin(AutoFailoverNode *secondaryNode,
 					AutoFailoverNode *otherNode, int64 delta)
 {
 	int64 walDifference = 0;
+	XLogRecPtr secondaryLsn = 0;
+	XLogRecPtr otherNodeLsn = 0;
 
-	if (otherNode == NULL)
+
+	if (secondaryNode == NULL || otherNode == NULL)
 	{
 		return true;
 	}
 
-	/* we want the delta which was reported most recently */
-	if (TimestampDifferenceExceeds(secondaryNode->walReportTime,
-								   otherNode->walReportTime, 0))
-	{
-		walDifference = otherNode->walDelta;
-	}
-	else
-	{
-		walDifference = secondaryNode->walDelta;
-	}
+	secondaryLsn = secondaryNode->reportedLSN;
+	otherNodeLsn = otherNode->reportedLSN;
 
-	if (walDifference == -1)
+	if (secondaryLsn == 0 || otherNodeLsn == 0)
 	{
 		/* we don't have any data yet */
 		return false;
 	}
+
+	walDifference = Abs(otherNodeLsn - secondaryLsn);
 
 	return walDifference <= delta;
 }
