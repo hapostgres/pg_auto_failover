@@ -262,10 +262,6 @@ node_active(PG_FUNCTION_ARGS)
 
 	checkPgAutoFailoverVersion();
 
-	ereport(INFO, (errmsg("node_active is called with %s, %d, " UINT64_FORMAT ,
-						   nodeName, nodePort,  currentLSN)));
-
-
 	currentNodeState.nodeId = currentNodeId;
 	currentNodeState.groupId = currentGroupId;
 	currentNodeState.replicationState =
@@ -273,9 +269,6 @@ node_active(PG_FUNCTION_ARGS)
 	currentNodeState.reportedLSN = currentLSN;
 	currentNodeState.pgsrSyncState = SyncStateFromString(currentPgsrSyncState);
 	currentNodeState.pgIsRunning = currentPgIsRunning;
-
-	ereport(INFO, (errmsg("before calling internal NodeActive with  %s, %d, " INT64_FORMAT ,
-						   nodeName, nodePort, currentNodeState.reportedLSN )));
 
 	assignedNodeState =
 		NodeActive(formationId, nodeName, nodePort, &currentNodeState);

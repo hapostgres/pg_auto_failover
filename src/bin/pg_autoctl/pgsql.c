@@ -1291,6 +1291,14 @@ parsePgsrSyncStateAndWAL(void *ctx, PGresult *result)
  * Once a WAL is received and stored, it would be replayed to ensure database state
  * is current just before the promotion time. Therefore when we look from monitor side
  * it is the same if the WAL is just received and stored, or already applied.
+ *
+ * Related PostgreSQL documentation at
+ * https://www.postgresql.org/docs/current/warm-standby.html#STANDBY-SERVER-OPERATION
+ * states that
+ *   Standby mode is exited and the server switches to normal operation when
+ *   pg_ctl promote is run or a trigger file is found (trigger_file). Before failover,
+ *   any WAL immediately available in the archive or in pg_wal will be restored,
+ *   but no attempt is made to connect to the master.
  */
 bool
 pgsql_get_received_lsn_from_standby(PGSQL *pgsql, char *receivedLSN, int maxLSNSize)
