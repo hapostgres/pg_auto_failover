@@ -156,9 +156,6 @@ service_start(Keeper *keeper)
 /*
  * service_start_with_monitor starts all the sub-processes needed when running
  * the keeper service with a monitor. That includes the main loop.
- *
- * TODO: check the signals situation and wait() for sub-processes in the parent
- * process.
  */
 static bool
 service_start_with_monitor(Keeper *keeper)
