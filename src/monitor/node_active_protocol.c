@@ -31,6 +31,7 @@
 #include "parser/parse_type.h"
 #include "storage/lockdefs.h"
 #include "utils/builtins.h"
+#include "utils/pg_lsn.h"
 #include "utils/syscache.h"
 
 
@@ -104,7 +105,7 @@ register_node(PG_FUNCTION_ARGS)
 	currentNodeState.groupId = currentGroupId;
 	currentNodeState.replicationState =
 		EnumGetReplicationState(currentReplicationStateOid);
-	currentNodeState.walDelta = -1;
+	currentNodeState.reportedLSN = 0;
 
 	LockFormation(formationId, ExclusiveLock);
 
@@ -244,7 +245,7 @@ node_active(PG_FUNCTION_ARGS)
 	Oid currentReplicationStateOid = PG_GETARG_OID(5);
 
 	bool currentPgIsRunning = PG_GETARG_BOOL(6);
-	int64 currentWalDelta = PG_GETARG_INT64(7);
+	XLogRecPtr	currentLSN = PG_GETARG_LSN(7);
 	text *currentPgsrSyncStateText = PG_GETARG_TEXT_P(8);
 	char *currentPgsrSyncState = text_to_cstring(currentPgsrSyncStateText);
 
@@ -265,7 +266,7 @@ node_active(PG_FUNCTION_ARGS)
 	currentNodeState.groupId = currentGroupId;
 	currentNodeState.replicationState =
 		EnumGetReplicationState(currentReplicationStateOid);
-	currentNodeState.walDelta = currentWalDelta;
+	currentNodeState.reportedLSN = currentLSN;
 	currentNodeState.pgsrSyncState = SyncStateFromString(currentPgsrSyncState);
 	currentNodeState.pgIsRunning = currentPgIsRunning;
 
@@ -352,7 +353,7 @@ NodeActive(char *formationId, char *nodeName, int32 nodePort,
 							  pgAutoFailoverNode->nodeName,
 							  pgAutoFailoverNode->nodePort,
 							  currentNodeState->pgsrSyncState,
-							  currentNodeState->walDelta,
+							  currentNodeState->reportedLSN,
 							  message);
 		}
 
@@ -365,7 +366,7 @@ NodeActive(char *formationId, char *nodeName, int32 nodePort,
 									currentNodeState->replicationState,
 									currentNodeState->pgIsRunning,
 									currentNodeState->pgsrSyncState,
-									currentNodeState->walDelta);
+									currentNodeState->reportedLSN);
 	}
 
 	LockNodeGroup(formationId, currentNodeState->groupId, ExclusiveLock);
@@ -752,7 +753,7 @@ perform_failover(PG_FUNCTION_ARGS)
 					  primaryNode->nodeName,
 					  primaryNode->nodePort,
 					  primaryNode->pgsrSyncState,
-					  primaryNode->walDelta,
+					  primaryNode->reportedLSN,
 					  message);
 
 	SetNodeGoalState(secondaryNode->nodeName, secondaryNode->nodePort,
@@ -766,7 +767,7 @@ perform_failover(PG_FUNCTION_ARGS)
 					  secondaryNode->nodeName,
 					  secondaryNode->nodePort,
 					  secondaryNode->pgsrSyncState,
-					  secondaryNode->walDelta,
+					  secondaryNode->reportedLSN,
 					  message);
 
 	PG_RETURN_VOID();
@@ -868,7 +869,7 @@ start_maintenance(PG_FUNCTION_ARGS)
 					  otherNode->nodeName,
 					  otherNode->nodePort,
 					  otherNode->pgsrSyncState,
-					  otherNode->walDelta,
+					  otherNode->reportedLSN,
 					  message);
 
 	SetNodeGoalState(currentNode->nodeName, currentNode->nodePort,
@@ -882,7 +883,7 @@ start_maintenance(PG_FUNCTION_ARGS)
 					  currentNode->nodeName,
 					  currentNode->nodePort,
 					  currentNode->pgsrSyncState,
-					  currentNode->walDelta,
+					  currentNode->reportedLSN,
 					  message);
 
 	PG_RETURN_BOOL(true);
@@ -963,7 +964,7 @@ stop_maintenance(PG_FUNCTION_ARGS)
 					  currentNode->nodeName,
 					  currentNode->nodePort,
 					  currentNode->pgsrSyncState,
-					  currentNode->walDelta,
+					  currentNode->reportedLSN,
 					  message);
 
 	PG_RETURN_BOOL(true);

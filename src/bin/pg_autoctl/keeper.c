@@ -336,7 +336,7 @@ keeper_update_pg_state(Keeper *keeper)
 	/* reinitialize the replication state values each time we update */
 	postgres->pgIsRunning = false;
 	memset(postgres->pgsrSyncState, 0, PGSR_SYNC_STATE_MAXLENGTH);
-	postgres->walLag = -1;
+	strcpy(postgres->currentLSN, "0/0");
 
 	/*
 	 * In some states, it's ok to not have a PostgreSQL data directory at all.
@@ -484,6 +484,7 @@ keeper_update_pg_state(Keeper *keeper)
 		case PRIMARY_STATE:
 		case WAIT_PRIMARY_STATE:
 		case SECONDARY_STATE:
+		case CATCHINGUP_STATE:
 		{
 			return postgres->pgIsRunning
 				&& keeper_get_replication_state(keeper);
@@ -565,8 +566,7 @@ keeper_get_replication_state(Keeper *keeper)
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
 	PGSQL *pgsql = &(postgres->sqlClient);
-	bool missing_wallag_ok =
-		keeperState->current_role == WAIT_PRIMARY_STATE;
+	bool missingStateOk = keeperState->current_role == WAIT_PRIMARY_STATE;
 
 	bool success = false;
 
@@ -583,17 +583,19 @@ keeper_get_replication_state(Keeper *keeper)
 	if (pg_setup_is_primary(pgSetup))
 	{
 		success =
-			pgsql_get_sync_state_and_wal_lag(
+			pgsql_get_sync_state_and_current_lsn(
 				pgsql,
 				config->replication_slot_name,
 				postgres->pgsrSyncState,
-				&(postgres->walLag),
-				missing_wallag_ok);
+				postgres->currentLSN,
+				PG_LSN_MAXLENGTH,
+				missingStateOk);
+		log_warn("latest received lsn = %s", postgres->currentLSN);
 	}
 	else
 	{
-		success =
-			pgsql_get_wal_lag_from_standby(pgsql, &(postgres->walLag));
+		success = pgsql_get_received_lsn_from_standby(pgsql, postgres->currentLSN,
+													  PG_LSN_MAXLENGTH);
 	}
 	pgsql_finish(pgsql);
 

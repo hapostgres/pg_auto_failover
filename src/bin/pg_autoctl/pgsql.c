@@ -1182,23 +1182,25 @@ validate_connection_string(const char *connectionString)
 /*
  * pgsql_get_sync_state_and_wal_lag queries a primary PostgreSQL server to get
  * both the current pg_stat_replication.sync_state value and replication lag.
+ *
+ * currentLSN is text representation of a 64 bit LSN value.
  */
 typedef struct PgsrSyncAndWALContext
 {
 	bool		parsedOk;
 	char		syncState[PGSR_SYNC_STATE_MAXLENGTH];
-	uint64_t	walLag;
+	char        currentLSN[PG_LSN_MAXLENGTH];
 } PgsrSyncAndWALContext;
 
 bool
-pgsql_get_sync_state_and_wal_lag(PGSQL *pgsql, const char *slotName,
-								 char *pgsrSyncState, int64_t *walLag,
-								 bool missing_ok)
+pgsql_get_sync_state_and_current_lsn(PGSQL *pgsql, const char *slotName,
+								 	 char *pgsrSyncState, char *currentLSN,
+									 int maxLSNSize, bool missing_ok)
 {
 	PgsrSyncAndWALContext context = { 0 };
 	char *sql =
 		"select sync_state, "
-		"pg_current_wal_lsn() - flush_lsn as wal_lag "
+		"pg_current_wal_lsn() "
 		"from pg_replication_slots slot join pg_stat_replication rep "
 		"on rep.pid = slot.active_pid "
 		"where slot_name = $1";
@@ -1223,7 +1225,7 @@ pgsql_get_sync_state_and_wal_lag(PGSQL *pgsql, const char *slotName,
 	}
 
 	strlcpy(pgsrSyncState, context.syncState, PGSR_SYNC_STATE_MAXLENGTH);
-	*walLag = context.walLag;
+	strlcpy(currentLSN, context.currentLSN, maxLSNSize);
 
 	return true;
 }
@@ -1231,7 +1233,7 @@ pgsql_get_sync_state_and_wal_lag(PGSQL *pgsql, const char *slotName,
 
 /*
  * parsePgsrSyncStateAndWAL parses the result from a PostgreSQL query fetching
- * two columns from pg_stat_replication: sync_state and wal lag.
+ * two columns from pg_stat_replication: sync_state and currentLSN.
  */
 static void
 parsePgsrSyncStateAndWAL(void *ctx, PGresult *result)
@@ -1253,20 +1255,14 @@ parsePgsrSyncStateAndWAL(void *ctx, PGresult *result)
 
 		case 1:
 		{
-			char *strWalLag = PQgetvalue(result, 0, 1);
-
 			/* we trust our length and PostgreSQL results */
 			strlcpy(context->syncState,
 					PQgetvalue(result, 0, 0),
 					PGSR_SYNC_STATE_MAXLENGTH);
 
-			context->walLag = strtoull(strWalLag, NULL, 10);
-
-			if (context->walLag == 0 && errno != 0)
-			{
-				context->parsedOk = false;
-				log_error("Failed to parse int64_t result \"%s\"", strWalLag);
-			}
+			strlcpy(context->currentLSN,
+					PQgetvalue(result, 0, 1),
+					PG_LSN_MAXLENGTH);
 
 			context->parsedOk = true;
 			return;
@@ -1279,20 +1275,41 @@ parsePgsrSyncStateAndWAL(void *ctx, PGresult *result)
 	}
 }
 
+
 /*
- * pgsql_get_wal_lag_from_standby queries a standby PostgreSQL server to get the
- * replication lag as seen from the pg_stat_wal_receiver system view.
+ * pgsql_get_received_lsn_from_standby queries a standby PostgreSQL server to get the
+ * received_lsn value from the pg_stat_wal_receiver system view.
+ *
+ * received_lsn is the latest lsn known to be received and flushed to the disk. It does
+ * not specify if it is applied or not. Caller should have allocated necessary memory
+ * for result value.
+ *
+ * We are collecting the latest WAL entry that is received successfully. It will be
+ * eventually applied to the receiving database.  This information will later be
+ * used by monitor to decide which secondary has the latest data.
+ *
+ * Once a WAL is received and stored, it would be replayed to ensure database state
+ * is current just before the promotion time. Therefore when we look from monitor side
+ * it is the same if the WAL is just received and stored, or already applied.
+ *
+ * Related PostgreSQL documentation at
+ * https://www.postgresql.org/docs/current/warm-standby.html#STANDBY-SERVER-OPERATION
+ * states that
+ *   Standby mode is exited and the server switches to normal operation when
+ *   pg_ctl promote is run or a trigger file is found (trigger_file). Before failover,
+ *   any WAL immediately available in the archive or in pg_wal will be restored,
+ *   but no attempt is made to connect to the master.
  */
 bool
-pgsql_get_wal_lag_from_standby(PGSQL *pgsql, int64_t *walLag)
+pgsql_get_received_lsn_from_standby(PGSQL *pgsql, char *receivedLSN, int maxLSNSize)
 {
 	SingleValueResultContext context;
-	char *sql =
-		"SELECT coalesce(latest_end_lsn - received_lsn, -1) "
-		"  FROM pg_stat_wal_receiver";
+	char *sql = "SELECT received_lsn FROM pg_stat_wal_receiver";
 
-	context.resultType = PGSQL_RESULT_BIGINT;
+	context.resultType = PGSQL_RESULT_STRING;
 	context.parsedOk = false;
+
+	log_trace("pgsql_get_received_lsn_from_standby : running %s", sql);
 
 	pgsql_execute_with_params(pgsql, sql, 0, NULL, NULL,
 							  &context, &parseSingleValueResult);
@@ -1304,11 +1321,10 @@ pgsql_get_wal_lag_from_standby(PGSQL *pgsql, int64_t *walLag)
 		return false;
 	}
 
-	*walLag = context.bigint;
+	strlcpy(receivedLSN, context.strVal, maxLSNSize);
 
 	return true;
 }
-
 
 /*
  * LISTEN/NOTIFY support.
