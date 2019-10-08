@@ -198,6 +198,7 @@ httpd_start(const char *pgdata, const char *listen_address, int port)
     size_t needed_memory;
     struct wby_server server = { 0 };
     struct wby_config config = { 0 };
+	uint64_t lastUpdate = time(NULL);
 
 	state.quit = false;
 	strlcpy(state.pgdata, pgdata, MAXPGPATH);
@@ -231,11 +232,26 @@ httpd_start(const char *pgdata, const char *listen_address, int port)
 
 	while (!state.quit)
 	{
+		uint64_t now = time(NULL);
+
         wby_update(&server);
 
 		if (asked_to_stop || asked_to_stop_fast)
 		{
 			state.quit = true;
+		}
+
+		if ((now - lastUpdate) >= PG_AUTOCTL_KEEPER_SLEEP_TIME)
+		{
+			char command[BUFSIZE];
+			char output[BUFSIZE];
+
+			/* ensure that things are as they should be. */
+			snprintf(command, BUFSIZE, "do fsm check");
+
+			keeper_listener_send_command(command, output, BUFSIZE);
+			log_debug("%s: %s", command, output);
+			lastUpdate = now;
 		}
 	}
 

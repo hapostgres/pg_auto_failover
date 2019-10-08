@@ -30,6 +30,7 @@ static void keeper_cli_fsm_list(int argc, char **argv);
 static void keeper_cli_fsm_gv(int argc, char **argv);
 static void keeper_cli_fsm_assign(int argc, char **argv);
 static void keeper_cli_fsm_step(int argc, char **argv);
+static void keeper_cli_fsm_check(int argc, char **argv);
 
 static CommandLine fsm_init =
 	make_command("init",
@@ -76,6 +77,14 @@ static CommandLine fsm_step =
 				 keeper_cli_getopt_pgdata,
 				 keeper_cli_fsm_step);
 
+static CommandLine fsm_check =
+	make_command("check",
+				 "Check that Postgres state matches the FSM expectations",
+				 " [ --pgdata ]",
+				 KEEPER_CLI_PGDATA_OPTION,
+				 keeper_cli_getopt_pgdata,
+				 keeper_cli_fsm_check);
+
 static CommandLine *fsm[] = {
 	&fsm_init,
 	&fsm_state,
@@ -83,6 +92,7 @@ static CommandLine *fsm[] = {
 	&fsm_gv,
 	&fsm_assign,
 	&fsm_step,
+	&fsm_check,
 	NULL
 };
 
@@ -147,8 +157,7 @@ keeper_cli_fsm_init(int argc, char **argv)
 
 
 /*
- * keeper_cli_fsm_init initializes the internal Keeper state, and writes it to
- * disk.
+ * keeper_cli_fsm_state outputs the current FSM state in JSON format.
  */
 static void
 keeper_cli_fsm_state(int argc, char **argv)
@@ -176,12 +185,7 @@ keeper_cli_fsm_state(int argc, char **argv)
 	}
 
 	/* check that the state matches with running PostgreSQL instance */
-	if (!keeper_update_pg_state(&keeper))
-	{
-		log_fatal("Failed to update the keeper's state from the local "
-				  "PostgreSQL instance, see above.");
-		exit(EXIT_CODE_BAD_STATE);
-	}
+	(void) keeper_update_pg_state(&keeper);
 
 	if (!keeper_store_state(&keeper))
 	{
@@ -383,4 +387,52 @@ keeper_cli_fsm_step(int argc, char **argv)
 	newRole = NodeStateToString(keeper.state.assigned_role);
 
 	fprintf(stdout, "%s ➜ %s\n", oldRole, newRole);
+}
+
+
+/*
+ * keeper_cli_fsm_check ensures that the current situation as expected given
+ * our current state, by calling into keeper_ensure_current_state().
+ */
+static void
+keeper_cli_fsm_check(int argc, char **argv)
+{
+	Keeper keeper = { 0 };
+	KeeperConfig config = keeperOptions;
+	bool missing_pgdata_is_ok = true;
+	bool pg_is_not_running_is_ok = true;
+	char keeperStateJSON[BUFSIZE];
+
+	keeper.config = keeperOptions;
+
+	keeper_config_read_file(&config,
+							missing_pgdata_is_ok,
+							pg_is_not_running_is_ok);
+
+	/* now read keeper's state */
+	if (!keeper_init(&keeper, &config))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (!pg_setup_init(&(keeper.postgres.postgresSetup),
+					   &(keeper.config.pgSetup), true, true))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_PGCTL);
+	}
+
+	(void) keeper_update_pg_state(&keeper);
+
+	if (!keeper_ensure_current_state(&keeper))
+	{
+		log_warn("pg_autoctl failed to ensure current state \"%s\": "
+				 "PostgreSQL %s running",
+				 NodeStateToString(keeper.state.current_role),
+				 keeper.postgres.pgIsRunning ? "is" : "is not");
+		exit(EXIT_CODE_BAD_STATE);
+	}
+
+	fprintf(stdout, "Ok\n");
 }
