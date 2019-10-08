@@ -1304,7 +1304,7 @@ bool
 pgsql_get_received_lsn_from_standby(PGSQL *pgsql, char *receivedLSN, int maxLSNSize)
 {
 	SingleValueResultContext context;
-	char *sql = "SELECT received_lsn FROM pg_stat_wal_receiver";
+	char *sql = "SELECT pg_last_wal_receive_lsn()";
 
 	context.resultType = PGSQL_RESULT_STRING;
 	context.parsedOk = false;
