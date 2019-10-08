@@ -360,6 +360,16 @@ cli_create_node_getopts(int argc, char **argv,
 	}
 
 	/*
+	 * We have a PGDATA setting, prepare our configuration pathnames from it.
+	 */
+	if (!keeper_config_set_pathnames_from_pgdata(
+			&(LocalOptionConfig.pathnames), LocalOptionConfig.pgSetup.pgdata))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	/*
 	 * You can't both have a monitor a use --disable-monitor.
 	 */
 	if (!IS_EMPTY_STRING_BUFFER(LocalOptionConfig.monitor_pguri)

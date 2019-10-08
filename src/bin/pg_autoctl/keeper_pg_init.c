@@ -82,6 +82,38 @@ keeper_pg_init(Keeper *keeper, KeeperConfig *config)
 static bool
 keeper_pg_init_fsm(Keeper *keeper, KeeperConfig *config)
 {
+	/*
+	 * If the init state file exists, we are in a situation where the `create`
+	 * command line is being used again, without the first transition having
+	 * happened
+	 *
+	 *  $ pg_autoctl create postgres --run
+	 *  $ pg_autoctl create postgres --run
+	 */
+	if (file_exists(config->pathnames.init))
+	{
+		return keeper_init(keeper, config);
+	}
+
+	if (file_exists(config->pathnames.state))
+	{
+		if (createAndRun)
+		{
+			log_warn("keeper init...");
+			if (!keeper_init(keeper, config))
+			{
+				return false;
+			}
+		}
+		else
+		{
+			log_fatal("The state file \"%s\" exists and "
+					  "there's no init in progress", config->pathnames.state);
+			log_info("HINT: use `pg_autoctl run` to start the service.");
+		}
+		return createAndRun;
+	}
+
 	return keeper_init_fsm(keeper, config);
 }
 
