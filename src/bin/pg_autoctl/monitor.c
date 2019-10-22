@@ -250,6 +250,9 @@ monitor_register_node(Monitor *monitor, char *formation, char *host, int port,
 	paramValues[4] = intToString(desiredGroupId).strValue;
 	paramValues[5] = nodeStateString;
 	paramValues[6] = nodeKindToString(kind);
+	paramValues[7] = intToString(candidatePriority).strValue;
+	paramValues[8] = quorum?"true":"false";
+
 
 	if (!pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes, paramValues,
 								   &parseContext, parseNodeState))
