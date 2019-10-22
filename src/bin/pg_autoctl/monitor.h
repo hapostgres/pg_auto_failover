@@ -26,6 +26,8 @@ typedef struct MonitorAssignedState
 	int nodeId;
 	int groupId;
 	NodeState state;
+	int candidatePriority;
+	bool replicationQuorum;
 } MonitorAssignedState;
 
 typedef struct StateNotification
@@ -56,7 +58,7 @@ bool monitor_get_coordinator(Monitor *monitor, char *formation,
 							 NodeAddress *node);
 bool monitor_register_node(Monitor *monitor, char *formation, char *host, int port,
 						   char *dbname, int desiredGroupId, NodeState initialSate,
-						   PgInstanceKind kind,
+						   PgInstanceKind kind, int candidatePriority, bool quorum,
 						   MonitorAssignedState *assignedState);
 bool monitor_node_active(Monitor *monitor,
 						 char *formation, char *host, int port, int nodeId,
@@ -64,13 +66,26 @@ bool monitor_node_active(Monitor *monitor,
 						 bool pgIsRunning,
 						 char *currentLSN, char *pgsrSyncState,
 						 MonitorAssignedState *assignedState);
+bool monitor_get_node_replication_settings(Monitor *monitor, int nodeid,
+										   NodeReplicationSettings *settings);
+bool monitor_set_node_candidate_priority(Monitor *monitor, int nodeid,
+										 char* nodeName, int nodePort,
+										 int candidatePriority);
+bool monitor_set_node_replication_quorum(Monitor *monitor, int nodeid,
+										 char* nodeName, int nodePort,
+										 bool replicationQuorum);
+bool monitor_get_formation_number_sync_standbys(Monitor *monitor, char *formation,
+												int *numberSyncStandbys);
+bool monitor_set_formation_number_sync_standbys(Monitor *monitor, char *formation,
+										   int numberSyncStandbys);
+
 bool monitor_remove(Monitor *monitor, char *host, int port);
 bool monitor_print_state(Monitor *monitor, char *formation, int group);
 bool monitor_print_last_events(Monitor *monitor,
 							   char *formation, int group, int count);
 
 bool monitor_create_formation(Monitor *monitor, char *formation, char *kind,
-							  char *dbname, bool ha);
+							  char *dbname, bool ha, int numberSyncStandbys);
 bool monitor_enable_secondary_for_formation(Monitor *monitor, const char *formation);
 bool monitor_disable_secondary_for_formation(Monitor *monitor, const char *formation);
 bool monitor_drop_formation(Monitor *monitor, char *formation);
@@ -87,5 +102,7 @@ bool monitor_get_extension_version(Monitor *monitor,
 bool monitor_extension_update(Monitor *monitor, const char *targetVersion);
 bool monitor_ensure_extension_version(Monitor *monitor,
 									  MonitorExtensionVersion *version);
+
+
 
 #endif /* MONITOR_H */

@@ -63,17 +63,19 @@ CommandLine create_postgres_command =
 	make_command("postgres",
 				 "Initialize a pg_auto_failover standalone postgres node",
 				 "",
-				 "  --pgctl       path to pg_ctl\n"
-				 "  --pgdata      path to data director\n"
-				 "  --pghost      PostgreSQL's hostname\n"
-				 "  --pgport      PostgreSQL's port number\n"
-				 "  --listen      PostgreSQL's listen_addresses\n"
-				 "  --username    PostgreSQL's username\n"
-				 "  --dbname      PostgreSQL's database name\n"
-				 "  --nodename    pg_auto_failover node\n"
-				 "  --formation   pg_auto_failover formation\n"
-				 "  --monitor     pg_auto_failover Monitor Postgres URL\n"
-				 "  --auth        authentication method for connections from monitor\n"
+				 "  --pgctl                       path to pg_ctl\n"
+				 "  --pgdata                      path to data director\n"
+				 "  --pghost                      PostgreSQL's hostname\n"
+				 "  --pgport                      PostgreSQL's port number\n"
+				 "  --listen                      PostgreSQL's listen_addresses\n"
+				 "  --username                    PostgreSQL's username\n"
+				 "  --dbname                      PostgreSQL's database name\n"
+				 "  --nodename                    pg_auto_failover node\n"
+				 "  --formation                   pg_auto_failover formation\n"
+				 "  --monitor                     pg_auto_failover Monitor Postgres URL\n"
+				 "  --auth                        authentication method for connections from monitor\n"
+				 "  --candidate-priority          priority of the node to be promoted to become primary\n"
+				 "  --replication-quorum          true if node participates in write quorum\n"
 				 KEEPER_CLI_ALLOW_RM_PGDATA_OPTION,
 				 cli_create_postgres_getopts,
 				 cli_create_postgres);
@@ -207,12 +209,14 @@ cli_create_postgres_getopts(int argc, char **argv)
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
  		{ "help", no_argument, NULL, 'h' },
+		{ "candidate-priority", required_argument, NULL, 'P'},
+		{ "replication-quorum", required_argument, NULL, 'r'},
 		{ NULL, 0, NULL, 0 }
 	};
 
 	int optind =
 		cli_create_node_getopts(argc, argv,
-								long_options, "C:D:H:p:l:U:A:d:n:f:m:RVvqh",
+								long_options, "C:D:H:p:l:U:A:d:n:f:m:RVvqhP:r:",
 								&options);
 
 	/* publish our option parsing in the global variable */

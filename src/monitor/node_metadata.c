@@ -66,7 +66,7 @@ AllAutoFailoverNodes(char *formationId)
 	uint32 rowNumber = 0;
 
 	const char *selectQuery =
-		"SELECT * FROM " AUTO_FAILOVER_NODE_TABLE " WHERE formationid = $1";
+			SELECT_ALL_FROM_AUTO_FAILOVER_NODE_TABLE " WHERE formationid = $1";
 
 	SPI_connect();
 
@@ -129,8 +129,6 @@ TupleToAutoFailoverNode(TupleDesc tupleDescriptor, HeapTuple heapTuple)
 									   tupleDescriptor, &isNull);
 	Datum reportTime = heap_getattr(heapTuple, Anum_pgautofailover_node_reporttime,
 									tupleDescriptor, &isNull);
-	Datum reportedLSN = heap_getattr(heapTuple, Anum_pgautofailover_node_reportedLSN,
-								   tupleDescriptor, &isNull);
 	Datum walReportTime = heap_getattr(heapTuple,
 										Anum_pgautofailover_node_walreporttime,
 										tupleDescriptor, &isNull);
@@ -141,6 +139,14 @@ TupleToAutoFailoverNode(TupleDesc tupleDescriptor, HeapTuple heapTuple)
 										 tupleDescriptor, &isNull);
 	Datum stateChangeTime = heap_getattr(heapTuple,
 										 Anum_pgautofailover_node_statechangetime,
+										 tupleDescriptor, &isNull);
+	Datum reportedLSN = heap_getattr(heapTuple, Anum_pgautofailover_node_reportedLSN,
+								   tupleDescriptor, &isNull);
+	Datum candidatePriority = heap_getattr(heapTuple,
+										 Anum_pgautofailover_node_candidate_priority,
+										 tupleDescriptor, &isNull);
+	Datum replicationQuorum = heap_getattr(heapTuple,
+										 Anum_pgautofailover_node_replication_quorum,
 										 tupleDescriptor, &isNull);
 
 	Oid goalStateOid = DatumGetObjectId(goalState);
@@ -158,11 +164,13 @@ TupleToAutoFailoverNode(TupleDesc tupleDescriptor, HeapTuple heapTuple)
 	pgAutoFailoverNode->pgsrSyncState =
 		SyncStateFromString(TextDatumGetCString(pgsrSyncState));
 	pgAutoFailoverNode->reportTime = DatumGetTimestampTz(reportTime);
-	pgAutoFailoverNode->reportedLSN = DatumGetLSN(reportedLSN);
 	pgAutoFailoverNode->walReportTime = DatumGetTimestampTz(walReportTime);
 	pgAutoFailoverNode->health = DatumGetInt32(health);
 	pgAutoFailoverNode->healthCheckTime = DatumGetTimestampTz(healthCheckTime);
 	pgAutoFailoverNode->stateChangeTime = DatumGetTimestampTz(stateChangeTime);
+	pgAutoFailoverNode->reportedLSN = DatumGetLSN(reportedLSN);
+	pgAutoFailoverNode->candidatePriority = DatumGetInt32(candidatePriority);
+	pgAutoFailoverNode->replicationQuorum = DatumGetBool(replicationQuorum);
 
 	return pgAutoFailoverNode;
 }
@@ -193,7 +201,7 @@ AutoFailoverNodeGroup(char *formationId, int groupId)
 	uint32 rowNumber = 0;
 
 	const char *selectQuery =
-		"SELECT * FROM " AUTO_FAILOVER_NODE_TABLE
+		SELECT_ALL_FROM_AUTO_FAILOVER_NODE_TABLE
 		" WHERE formationid = $1 AND groupid = $2";
 
 	SPI_connect();
@@ -246,7 +254,7 @@ GetAutoFailoverNode(char *nodeName, int nodePort)
 	int spiStatus = 0;
 
 	const char *selectQuery =
-		"SELECT * FROM " AUTO_FAILOVER_NODE_TABLE
+		SELECT_ALL_FROM_AUTO_FAILOVER_NODE_TABLE
 		" WHERE nodename = $1 AND nodeport = $2";
 
 	SPI_connect();
@@ -275,6 +283,60 @@ GetAutoFailoverNode(char *nodeName, int nodePort)
 	return pgAutoFailoverNode;
 }
 
+
+/*
+ * GetAutoFailoverNodeWithId returns a single AutoFailover
+ * identified by node id, node name and node port.
+ */
+AutoFailoverNode *
+GetAutoFailoverNodeWithId(int nodeid, char *nodeName, int nodePort)
+{
+	AutoFailoverNode *pgAutoFailoverNode = NULL;
+	MemoryContext callerContext = CurrentMemoryContext;
+
+	Oid argTypes[] = {
+		INT4OID, /* nodeport */
+		TEXTOID, /* nodename */
+		INT4OID  /* nodeport */
+	};
+
+	Datum argValues[] = {
+		Int32GetDatum(nodeid),         /* nodeid */
+		CStringGetTextDatum(nodeName), /* nodename */
+		Int32GetDatum(nodePort)        /* nodeport */
+	};
+	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
+	int spiStatus = 0;
+
+	const char *selectQuery =
+		SELECT_ALL_FROM_AUTO_FAILOVER_NODE_TABLE
+		" WHERE nodeid = $1 and nodename = $2 AND nodeport = $3";
+
+	SPI_connect();
+
+	spiStatus = SPI_execute_with_args(selectQuery, argCount, argTypes, argValues,
+									  NULL, false, 1);
+	if (spiStatus != SPI_OK_SELECT)
+	{
+		elog(ERROR, "could not select from " AUTO_FAILOVER_NODE_TABLE);
+	}
+
+	if (SPI_processed > 0)
+	{
+		MemoryContext spiContext = MemoryContextSwitchTo(callerContext);
+		pgAutoFailoverNode = TupleToAutoFailoverNode(SPI_tuptable->tupdesc,
+													 SPI_tuptable->vals[0]);
+		MemoryContextSwitchTo(spiContext);
+	}
+	else
+	{
+		pgAutoFailoverNode = NULL;
+	}
+
+	SPI_finish();
+
+	return pgAutoFailoverNode;
+}
 
 /*
  * OtherNodeInGroup returns the other node in a primary-secondary group, or
@@ -311,7 +373,9 @@ OtherNodeInGroup(AutoFailoverNode *pgAutoFailoverNode)
 int
 AddAutoFailoverNode(char *formationId, int groupId, char *nodeName, int nodePort,
 					ReplicationState goalState,
-					ReplicationState reportedState)
+					ReplicationState reportedState,
+					int candidatePriority,
+					bool replicationQuorum)
 {
 	Oid goalStateOid = ReplicationStateGetEnum(goalState);
 	Oid reportedStateOid = ReplicationStateGetEnum(reportedState);
@@ -323,16 +387,20 @@ AddAutoFailoverNode(char *formationId, int groupId, char *nodeName, int nodePort
 		TEXTOID, /* nodename */
 		INT4OID, /* nodeport */
 		replicationStateTypeOid, /* goalstate */
-		replicationStateTypeOid	 /* reportedstate */
+		replicationStateTypeOid, /* reportedstate */
+		INT4OID, /* candidate_priority */
+		BOOLOID  /* replication_quorum */
 	};
 
 	Datum argValues[] = {
-		CStringGetTextDatum(formationId),  /* formationid */
-		Int32GetDatum(groupId),			   /* groupid */
-		CStringGetTextDatum(nodeName),     /* nodename */
-		Int32GetDatum(nodePort),		   /* nodeport */
-		ObjectIdGetDatum(goalStateOid),	   /* goalstate */
-		ObjectIdGetDatum(reportedStateOid) /* reportedstate */
+		CStringGetTextDatum(formationId),   /* formationid */
+		Int32GetDatum(groupId),			    /* groupid */
+		CStringGetTextDatum(nodeName),      /* nodename */
+		Int32GetDatum(nodePort),		    /* nodeport */
+		ObjectIdGetDatum(goalStateOid),	    /* goalstate */
+		ObjectIdGetDatum(reportedStateOid), /* reportedstate */
+		Int32GetDatum(candidatePriority),   /* candidate_priority */
+		BoolGetDatum(replicationQuorum)	/* replication_quorum */
 	};
 
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
@@ -341,8 +409,8 @@ AddAutoFailoverNode(char *formationId, int groupId, char *nodeName, int nodePort
 
 	const char *insertQuery =
 		"INSERT INTO " AUTO_FAILOVER_NODE_TABLE
-		" (formationid, groupid, nodename, nodeport, goalstate, reportedstate)"
-		" VALUES ($1, $2, $3, $4, $5, $6) RETURNING nodeid";
+		" (formationid, groupid, nodename, nodeport, goalstate, reportedstate, candidatepriority, replicationquorum)"
+		" VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING nodeid";
 
 	SPI_connect();
 
@@ -521,6 +589,53 @@ ReportAutoFailoverNodeHealth(char *nodeName, int nodePort,
 	SPI_finish();
 }
 
+/*
+ * ReportAutoFailoverNodeReplicationSetting persists the replication properties of
+ * a node.
+ *
+ * We use SPI to automatically handle triggers, function calls, etc.
+ */
+void
+ReportAutoFailoverNodeReplicationSetting(int nodeid, char *nodeName, int nodePort,
+									 	 int candidatePriority,
+										 bool replicationQuorum)
+{
+	Oid argTypes[] = {
+		INT4OID,				 /* candidate_priority */
+		BOOLOID,				 /* repliation_quorum */
+		INT4OID,				 /* nodeid */
+		TEXTOID,				 /* nodename */
+		INT4OID					 /* nodeport */
+	};
+
+	Datum argValues[] = {
+		Int32GetDatum(candidatePriority),	  /* candidate_priority */
+		BoolGetDatum(replicationQuorum),	  /* replication_quorum */
+		Int32GetDatum(nodeid),				  /* nodeid */
+		CStringGetTextDatum(nodeName),        /* nodename */
+		Int32GetDatum(nodePort)               /* nodeport */
+	};
+	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
+	int spiStatus = 0;
+
+	const char *updateQuery =
+		"UPDATE " AUTO_FAILOVER_NODE_TABLE " SET "
+		"candidatepriority = $1, replicationquorum = $2 "
+		"WHERE nodeid = $3 and nodename = $4 AND nodeport = $5";
+
+	SPI_connect();
+
+	spiStatus = SPI_execute_with_args(updateQuery,
+									  argCount, argTypes, argValues,
+									  NULL, false, 0);
+
+	if (spiStatus != SPI_OK_UPDATE)
+	{
+		elog(ERROR, "could not update " AUTO_FAILOVER_NODE_TABLE);
+	}
+
+	SPI_finish();
+}
 
 /*
  * RemoveAutoFailoverNode removes a node from a AutoFailover formation.

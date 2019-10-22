@@ -382,6 +382,117 @@ SELECT reportedstate
         drop_proc = self.vnode.run(drop_command)
         wait_or_timeout_proc(drop_proc, name="drop node", timeout=COMMAND_TIMEOUT)
 
+    def set_candidate_priority(self, candidatePriority):
+        """
+            Sets candidate priority via pg_autoctl
+        """
+
+        set_command = [shutil.which('pg_autoctl'), 'set', 'node', '--pgdata', self.datadir,
+                        '--', 'candidate-priority', str(candidatePriority)]
+        set_proc = self.vnode.run(set_command)
+        out, err = set_proc.communicate(timeout=COMMAND_TIMEOUT)
+        if set_proc.returncode > 0:
+            print("unable set candidate priority for node '%s' out: %s\n, err: %s"
+                  %(self.vnode.address, out, err))
+            return False
+        elif set_proc.returncode is None:
+            print("set command timed out")
+            return False
+        return True
+
+    def get_candidate_priority(self):
+        """
+            Gets candidate priority via pg_autoctl
+        """
+
+        get_command = [shutil.which('pg_autoctl'), 'get', 'node', 'candidate-priority',
+                       '--pgdata', self.datadir]
+        get_proc = self.vnode.run(get_command)
+        out, err = get_proc.communicate(timeout=COMMAND_TIMEOUT)
+        if get_proc.returncode > 0:
+            print("unable get candidate priority for node '%s' out: %s\n, err: %s"
+                  %(self.vnode.address, out, err))
+            return -1
+        elif get_proc.returncode is None:
+            print("get command timed out")
+            return -1
+        return int(out)
+
+    def set_replication_quorum(self, replicationQuorum):
+        """
+            Sets replication quorum via pg_autoctl
+        """
+
+        set_command = [shutil.which('pg_autoctl'), 'set', 'node', '--pgdata', self.datadir,
+                        'replication-quorum', replicationQuorum]
+        set_proc = self.vnode.run(set_command)
+        out, err = set_proc.communicate(timeout=COMMAND_TIMEOUT)
+        if set_proc.returncode > 0:
+            print("unable set replication quorum for node '%s' out: %s\n, err: %s"
+                  %(self.vnode.address, out, err))
+            return False
+        elif set_proc.returncode is None:
+            print("set command timed out")
+            return False
+        return True
+
+    def get_replication_quorum(self):
+        """
+            Gets replication quorum via pg_autoctl
+        """
+
+        get_command = [shutil.which('pg_autoctl'), 'get', 'node', 'replication-quorum',
+                       '--pgdata', self.datadir]
+        get_proc = self.vnode.run(get_command)
+        out, err = get_proc.communicate(timeout=COMMAND_TIMEOUT)
+        if get_proc.returncode > 0:
+            print("unable get replication quorum for node '%s' out: %s\n, err: %s"
+                  %(self.vnode.address, out, err))
+            return -1
+        elif get_proc.returncode is None:
+            print("get command timed out")
+            return -1
+        value = out.strip()
+        
+        if (value not in ['true', 'false']):
+            raise Exception("Unknown replication quorum value %s" % value)
+        return value == "true"
+
+    def set_number_sync_standbys(self, numberSyncStandbys):
+        """
+            Sets number sync standbys via pg_autoctl
+        """
+
+        set_command = [shutil.which('pg_autoctl'), 'set', 'formation', '--pgdata', self.datadir,
+                        '--', 'number-sync-standbys', str(numberSyncStandbys)]
+        set_proc = self.vnode.run(set_command)
+        out, err = set_proc.communicate(timeout=COMMAND_TIMEOUT)
+        if set_proc.returncode > 0:
+            print("unable set number-sync-standbys for node '%s' out: %s\n, err: %s"
+                  %(self.vnode.address, out, err))
+            return False
+        elif set_proc.returncode is None:
+            print("set command timed out")
+            return False
+        return True
+
+    def get_number_sync_standbys(self):
+        """
+            Gets number sync standbys  via pg_autoctl
+        """
+
+        get_command = [shutil.which('pg_autoctl'), 'get', 'formation', 'number-sync-standbys',
+                       '--pgdata', self.datadir]
+        get_proc = self.vnode.run(get_command)
+        out, err = get_proc.communicate(timeout=COMMAND_TIMEOUT)
+        if get_proc.returncode > 0:
+            print("unable get number-sync-standbys for node '%s' out: %s\n, err: %s"
+                  %(self.vnode.address, out, err))
+            return -1
+        elif get_proc.returncode is None:
+            print("get command timed out")
+            return -1
+        return int(out)
 
 class MonitorNode(PGNode):
     def __init__(self, datadir, vnode, port, nodename, authMethod):

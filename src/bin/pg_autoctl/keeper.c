@@ -682,6 +682,8 @@ keeper_register_and_init(Keeper *keeper,
 							   config->groupId,
 							   initialState,
 							   config->pgSetup.pgKind,
+							   config->pgSetup.settings.candidatePriority,
+							   config->pgSetup.settings.replicationQuorum,
 							   &assignedState))
 	{
 		/* errors have already been logged, remove state file */

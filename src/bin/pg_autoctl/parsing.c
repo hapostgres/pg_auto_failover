@@ -29,6 +29,8 @@ static bool parse_controldata_field_uint64(const char *controlDataString,
 static int read_length_delimited_string_at(const char *ptr,
 										   char *buffer, int size);
 
+static bool parse_bool_with_len(const char *value, size_t len, bool *result);
+
 #define RE_MATCH_COUNT 10
 
 
@@ -315,4 +317,109 @@ read_length_delimited_string_at(const char *ptr, char *buffer, int size)
 
 	/* col - ptr is the length of the digits plus the separator  */
 	return (col - ptr) + len + 1;
+}
+
+
+/*
+ * Try to interpret value as boolean value.  Valid values are: true,
+ * false, yes, no, on, off, 1, 0; as well as unique prefixes thereof.
+ * If the string parses okay, return true, else false.
+ * If okay and result is not NULL, return the value in *result.
+ *
+ * Copied from PostgreSQL sources
+ * file : src/backend/utils/adt/bool.c
+ */
+static bool
+parse_bool_with_len(const char *value, size_t len, bool *result)
+{
+	switch (*value)
+	{
+		case 't':
+		case 'T':
+			if (pg_strncasecmp(value, "true", len) == 0)
+			{
+				if (result)
+					*result = true;
+				return true;
+			}
+			break;
+		case 'f':
+		case 'F':
+			if (pg_strncasecmp(value, "false", len) == 0)
+			{
+				if (result)
+					*result = false;
+				return true;
+			}
+			break;
+		case 'y':
+		case 'Y':
+			if (pg_strncasecmp(value, "yes", len) == 0)
+			{
+				if (result)
+					*result = true;
+				return true;
+			}
+			break;
+		case 'n':
+		case 'N':
+			if (pg_strncasecmp(value, "no", len) == 0)
+			{
+				if (result)
+					*result = false;
+				return true;
+			}
+			break;
+		case 'o':
+		case 'O':
+			/* 'o' is not unique enough */
+			if (pg_strncasecmp(value, "on", (len > 2 ? len : 2)) == 0)
+			{
+				if (result)
+					*result = true;
+				return true;
+			}
+			else if (pg_strncasecmp(value, "off", (len > 2 ? len : 2)) == 0)
+			{
+				if (result)
+					*result = false;
+				return true;
+			}
+			break;
+		case '1':
+			if (len == 1)
+			{
+				if (result)
+					*result = true;
+				return true;
+			}
+			break;
+		case '0':
+			if (len == 1)
+			{
+				if (result)
+					*result = false;
+				return true;
+			}
+			break;
+		default:
+			break;
+	}
+
+	if (result)
+		*result = false;		/* suppress compiler warning */
+	return false;
+}
+
+
+/*
+ * parse_bool parses boolean text value (true/false/on/off/yes/no/1/0) and
+ * puts the boolean value back in the result field if it is not NULL.
+ * The function returns true on successful parse, returns false if any parse
+ * error is encountered.
+ */
+bool
+parse_bool(const char *value, bool *result)
+{
+	return parse_bool_with_len(value, strlen(value), result);
 }

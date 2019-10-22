@@ -89,6 +89,15 @@ typedef enum PgInstanceKind
 #define PG_VERSION_STRING_MAX 12
 
 /*
+ * Monitor keeps a replication settings for each node.
+ */
+typedef struct NodeReplicationSettings
+{
+	int candidatePriority;				/* promotion candidate priority 0-100, 0 -> not a promotion candidate */
+	bool replicationQuorum;				/* true if participates in write quorum, false otherwise */
+} NodeReplicationSettings;
+
+/*
  * In the PostgresSetup structure, we use pghost either as socket directory
  * name or as a hostname. We could use MAXPGPATH rather than
  * _POSIX_HOST_NAME_MAX chars in that name, but then again the the hostname is
@@ -113,6 +122,7 @@ typedef struct pg_setup
 	PostgresControlData control;            /* pg_controldata pgdata */
 	PostgresPIDFile pidFile;                /* postmaster.pid information */
 	PgInstanceKind pgKind;					/* standalone/coordinator/worker */
+	NodeReplicationSettings settings; 		/* monitor side node replication settings */
 } PostgresSetup;
 
 #define IS_EMPTY_STRING_BUFFER(strbuf) (strbuf[0] == '\0')

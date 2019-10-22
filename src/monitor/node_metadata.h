@@ -20,7 +20,10 @@
 
 #define AUTO_FAILOVER_NODE_TABLE_NAME "node"
 
-/* column indexes for pgautofailover.node */
+/* column indexes for pgautofailover.node
+ * indices must match with the columns given
+ * in the following definition.
+ */
 #define Natts_pgautofailover_node 15
 #define Anum_pgautofailover_node_formationid 1
 #define Anum_pgautofailover_node_nodeid 2
@@ -32,12 +35,36 @@
 #define Anum_pgautofailover_node_reportedpgisrunning 8
 #define Anum_pgautofailover_node_reportedrepstate 9
 #define Anum_pgautofailover_node_reporttime 10
-#define Anum_pgautofailover_node_reportedLSN 11
-#define Anum_pgautofailover_node_walreporttime 12
-#define Anum_pgautofailover_node_health 13
-#define Anum_pgautofailover_node_healthchecktime 14
-#define Anum_pgautofailover_node_statechangetime 15
+#define Anum_pgautofailover_node_walreporttime 11
+#define Anum_pgautofailover_node_health 12
+#define Anum_pgautofailover_node_healthchecktime 13
+#define Anum_pgautofailover_node_statechangetime 14
+#define Anum_pgautofailover_node_reportedLSN 15
+#define Anum_pgautofailover_node_candidate_priority 16
+#define Anum_pgautofailover_node_replication_quorum 17
 
+#define AUTO_FAILOVER_NODE_TABLE_ALL_COLUMNS \
+    "formationid, "			\
+	"nodeid, "				\
+	"groupid, "				\
+	"nodename, "			\
+	"nodeport, "			\
+	"goalstate, "			\
+	"reportedstate, "		\
+	"reportedpgisrunning, "	\
+	"reportedrepstate, "	\
+	"reporttime, "			\
+	"walreporttime, "		\
+	"health, "				\
+	"healthchecktime, "		\
+	"statechangetime, "		\
+	"reportedlsn, "			\
+	"candidatepriority, "	\
+    "replicationquorum"
+
+
+#define SELECT_ALL_FROM_AUTO_FAILOVER_NODE_TABLE \
+	"SELECT " AUTO_FAILOVER_NODE_TABLE_ALL_COLUMNS " FROM " AUTO_FAILOVER_NODE_TABLE
 
 /* pg_stat_replication.sync_state: "sync", "async", "quorum", "potential" */
 typedef enum SyncState
@@ -66,11 +93,13 @@ typedef struct AutoFailoverNode
 	TimestampTz reportTime;
 	bool pgIsRunning;
 	SyncState pgsrSyncState;
-	XLogRecPtr reportedLSN;
 	TimestampTz walReportTime;
 	NodeHealthState health;
 	TimestampTz healthCheckTime;
 	TimestampTz stateChangeTime;
+	XLogRecPtr reportedLSN;
+	int candidatePriority;
+	bool replicationQuorum;
 } AutoFailoverNode;
 
 
@@ -78,13 +107,16 @@ typedef struct AutoFailoverNode
 extern List * AllAutoFailoverNodes(char *formationId);
 extern List * AutoFailoverNodeGroup(char *formationId, int groupId);
 extern AutoFailoverNode * GetAutoFailoverNode(char *nodeName, int nodePort);
+extern AutoFailoverNode * GetAutoFailoverNodeWithId(int nodeid, char *nodeName, int nodePort);
 extern AutoFailoverNode * OtherNodeInGroup(AutoFailoverNode *pgAutoFailoverNode);
 extern AutoFailoverNode * TupleToAutoFailoverNode(TupleDesc tupleDescriptor,
 												  HeapTuple heapTuple);
 extern int AddAutoFailoverNode(char *formationId, int groupId,
 							   char *nodeName, int nodePort,
 							   ReplicationState goalState,
-							   ReplicationState reportedState);
+							   ReplicationState reportedState,
+							   int candidatePriority,
+							   bool replicationQuorum);
 extern void SetNodeGoalState(char *nodeName, int nodePort,
 							 ReplicationState goalState);
 extern void ReportAutoFailoverNodeState(char *nodeName, int nodePort,
@@ -95,6 +127,11 @@ extern void ReportAutoFailoverNodeState(char *nodeName, int nodePort,
 extern void ReportAutoFailoverNodeHealth(char *nodeName, int nodePort,
 										 ReplicationState goalState,
 										 NodeHealthState health);
+extern void ReportAutoFailoverNodeReplicationSetting(int nodeid,
+													 char *nodeName,
+													 int nodePort,
+													 int candidatePriority,
+													 bool replicationQuorum);
 extern void RemoveAutoFailoverNode(char *nodeName, int nodePort);
 
 extern SyncState SyncStateFromString(const char *pgsrSyncState);
