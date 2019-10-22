@@ -403,11 +403,20 @@ keeper_cli_fsm_check(int argc, char **argv)
 	bool pg_is_not_running_is_ok = true;
 	char keeperStateJSON[BUFSIZE];
 
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = true;
+
 	keeper.config = keeperOptions;
 
-	keeper_config_read_file(&config,
-							missing_pgdata_is_ok,
-							pg_is_not_running_is_ok);
+	if (!keeper_config_read_file(&(keeper.config),
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
 
 	/* now read keeper's state */
 	if (!keeper_init(&keeper, &config))

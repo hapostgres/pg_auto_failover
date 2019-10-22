@@ -92,8 +92,7 @@ HttpRoutingTable KeeperRoutingTable[] = {
 	{ "GET",  "/api/version",            http_api_version },
 	{ "GET",  "/api/1.0/state",          http_state },
 	{ "GET",  "/api/1.0/fsm/state",      http_fsm_state },
-	{ "GET",  "/api/1.0/fsm/assign/*",   http_fsm_state },
-	{ "POST", "/api/1.0/fsm/assign/*",   http_fsm_assign },
+	{ "POST", "/api/1.0/fsm/assign",     http_fsm_assign },
 	{ "GET",  "/api/1.0/config/get/*",   http_config_get },
 	{ "", "", NULL }
 };
@@ -114,6 +113,8 @@ static void httpd_log(const char* text);
 
 static bool parse_othernode_parameters(struct wby_con *connection,
 									   NodeAddress *otherNode);
+static bool get_uri_param_value(struct wby_con *connection,
+								const char *param, char *value, int size);
 
 /*
  * keeper_webservice_run forks and starts a web service in the child process,
@@ -311,7 +312,8 @@ static bool
 httpd_route_match_query(struct wby_con *connection,
 						HttpRoutingTable routingTableEntry)
 {
-	const char *uri = connection->request.uri;
+	char script[BUFSIZE];
+	char *ptr;
 
 	/* first, HTTP method must match */
 	if (strcmp(connection->request.method, routingTableEntry.method) != 0)
@@ -319,8 +321,17 @@ httpd_route_match_query(struct wby_con *connection,
 		return false;
 	}
 
+	/* we're only interested in the script part of the URI */
+	strlcpy(script, connection->request.uri, BUFSIZE);
+
+	/* strip off the URI parameters now, if any */
+	if ((ptr = strchr(script, '?')) != NULL)
+	{
+		*ptr = '\0';
+	}
+
 	/* then, match connection script to our routing pattern */
-	return fnmatch(routingTableEntry.script, uri, FNM_PATHNAME) == 0;
+	return fnmatch(routingTableEntry.script, script, FNM_PATHNAME) == 0;
 }
 
 
@@ -489,23 +500,22 @@ http_fsm_assign(struct wby_con *connection, void *userdata)
 {
     HttpServerState *state = (HttpServerState *) userdata;
 
-	char uri[BUFSIZE];
-	char *assignedStateString;
-	NodeState goalState;
-
-	Keeper keeper = { 0 };
-	pgAutoCtlNodeRole nodeRole;
-	KeeperConfig *config = &(keeper.config);
-	KeeperStateData *keeperState = &(keeper.state);
-
-	bool missingPgdataIsOk = true;
-	bool pgIsNotRunningIsOk = true;
-	bool monitorDisabledIsOk = true;
-
-	char *goalStateString = NULL;
+	const char *goalStateParamName = "goalState";
+	char goalStateString[BUFSIZE];
 	char command[BUFSIZE];
 	char output[BUFSIZE];
 	NodeAddress otherNode = { 0 };
+
+	/* we expect a get parameter in the URI: goalState */
+	if (!get_uri_param_value(connection,
+							 goalStateParamName, goalStateString, BUFSIZE))
+	{
+		log_error("Failed to find parameter \"%s\" in URI \"%s\"",
+				  goalStateParamName, connection->request.uri);
+		return false;
+	}
+
+	log_debug("http_fsm_assign: \"%s\"", goalStateString);
 
 	/* parse the input as JSON */
 	if (!parse_othernode_parameters(connection, &otherNode))
@@ -515,10 +525,6 @@ http_fsm_assign(struct wby_con *connection, void *userdata)
 	}
 
 	log_debug("otherNode: %s:%d", otherNode.host, otherNode.port);
-
-	/* use basename to retrieve the last part of the URI, on a copy of it */
-	strlcpy(uri, connection->request.uri, BUFSIZE);
-	goalStateString = basename(uri);
 
 	snprintf(command, BUFSIZE, "do fsm assign %s %s %d",
 			 goalStateString, otherNode.host, otherNode.port);
@@ -590,4 +596,40 @@ parse_othernode_parameters(struct wby_con *connection, NodeAddress *otherNode)
     json_value_free(jsParamsValue);
 
 	return true;
+}
+
+
+/*
+ * get_uri_param_value returns the value of the given parameter name in the URI
+ * used by the client. In the following example URI:
+ *
+ *  htpp://localhost:8765/api/1.0/fsm/assign%3FgoalState%3Dsingle
+ *
+ * The value for the param "goalState" is "single".
+ */
+static bool
+get_uri_param_value(struct wby_con *connection,
+					const char *param, char *value, int size)
+{
+	char script[BUFSIZE];
+	char *ptr;
+
+	strlcpy(script, connection->request.uri, BUFSIZE);
+
+	if ((ptr = strchr(script, '?')) != NULL)
+	{
+		char *parameters = ++ptr;
+
+		if (wby_find_query_var(parameters, param, value, size) == -1)
+		{
+			log_error("Failed to find parameter \"%s\" in URI \"%s\"",
+					  param, connection->request.uri);
+			return false;
+		}
+
+		return true;
+	}
+
+	/* no parameters to seach for, so we didn't find the value */
+	return false;
 }
