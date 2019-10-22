@@ -113,6 +113,8 @@ typedef struct pg_setup
 	PostgresControlData control;            /* pg_controldata pgdata */
 	PostgresPIDFile pidFile;                /* postmaster.pid information */
 	PgInstanceKind pgKind;					/* standalone/coordinator/worker */
+	int candidate_priority;					/* promotion candidate priority 0-100, 0 -> not a promotion candidate */
+	int quorum;								/* 1 if participates in write quorum, 0 otherwise */
 } PostgresSetup;
 
 #define IS_EMPTY_STRING_BUFFER(strbuf) (strbuf[0] == '\0')

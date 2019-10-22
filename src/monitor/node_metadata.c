@@ -143,6 +143,14 @@ TupleToAutoFailoverNode(TupleDesc tupleDescriptor, HeapTuple heapTuple)
 										 Anum_pgautofailover_node_statechangetime,
 										 tupleDescriptor, &isNull);
 
+	Datum candidatePriority = heap_getattr(heapTuple,
+										 Anum_pgautofailover_node_candidate_priority,
+										 tupleDescriptor, &isNull);
+
+	Datum quorum = heap_getattr(heapTuple,
+										 Anum_pgautofailover_node_quorum,
+										 tupleDescriptor, &isNull);
+
 	Oid goalStateOid = DatumGetObjectId(goalState);
 	Oid reportedStateOid = DatumGetObjectId(reportedState);
 
@@ -163,6 +171,8 @@ TupleToAutoFailoverNode(TupleDesc tupleDescriptor, HeapTuple heapTuple)
 	pgAutoFailoverNode->health = DatumGetInt32(health);
 	pgAutoFailoverNode->healthCheckTime = DatumGetTimestampTz(healthCheckTime);
 	pgAutoFailoverNode->stateChangeTime = DatumGetTimestampTz(stateChangeTime);
+	pgAutoFailoverNode->candidatePriority = DatumGetInt32(candidatePriority);
+	pgAutoFailoverNode->quorum = DatumGetBool(quorum);
 
 	return pgAutoFailoverNode;
 }

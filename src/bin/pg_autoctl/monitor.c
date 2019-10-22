@@ -230,15 +230,16 @@ monitor_get_coordinator(Monitor *monitor, char *formation, NodeAddress *node)
 bool
 monitor_register_node(Monitor *monitor, char *formation, char *host, int port,
 					  char *dbname, int desiredGroupId, NodeState initialState,
-					  PgInstanceKind kind, MonitorAssignedState *assignedState)
+					  PgInstanceKind kind, int candidatePriority, bool quorum,
+					  MonitorAssignedState *assignedState)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
 		"SELECT * FROM pgautofailover.register_node($1, $2, $3, $4, $5, "
-		"$6::pgautofailover.replication_state, $7)";
-	int paramCount = 7;
-	Oid paramTypes[7] = { TEXTOID, TEXTOID, INT4OID, NAMEOID, INT4OID, TEXTOID, TEXTOID };
-	const char *paramValues[7];
+		"$6::pgautofailover.replication_state, $7, $8, $9)";
+	int paramCount = 9;
+	Oid paramTypes[9] = { TEXTOID, TEXTOID, INT4OID, NAMEOID, INT4OID, TEXTOID, TEXTOID, INT4OID, BOOLOID };
+	const char *paramValues[9];
 	MonitorAssignedStateParseContext parseContext = { assignedState, false };
 	const char *nodeStateString = NodeStateToString(initialState);
 

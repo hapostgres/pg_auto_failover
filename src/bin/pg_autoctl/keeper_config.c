@@ -127,6 +127,28 @@
 							&(config->postgresql_restart_failure_max_retries), \
 							POSTGRESQL_FAILS_TO_START_RETRIES)
 
+#define OPTION_FAILOVER_FORMATION_REPLICATION_QUORUM(config) \
+	make_int_option_default("failover", "replication_quorum", \
+							NULL, \
+							false, \
+							&(config->replication_quorum), \
+							FAILOVER_FORMATION_REPLICATION_QUORUM)
+
+#define OPTION_FAILOVER_NODE_CANDIDATE_PRIORITY(config) \
+	make_int_option_default("failover", "candidate_priority", \
+							NULL, \
+							false, \
+							&(config->pgSetup.candidate_priority), \
+							FAILOVER_NODE_CANDIDATE_PRIORITY)
+
+#define OPTION_FAILOVER_NODE_QUORUM(config) \
+	make_int_option_default("failover", "quorum", \
+							NULL, \
+							false, \
+							&(config->pgSetup.quorum), \
+							FAILOVER_NODE_QUORUM)
+
+
 #define SET_INI_OPTIONS_ARRAY(config) \
 	{ \
 		OPTION_AUTOCTL_ROLE(config), \
@@ -151,6 +173,9 @@
 		OPTION_TIMEOUT_PREPARE_PROMOTION_WALRECEIVER(config), \
 		OPTION_TIMEOUT_POSTGRESQL_RESTART_FAILURE_TIMEOUT(config), \
 		OPTION_TIMEOUT_POSTGRESQL_RESTART_FAILURE_MAX_RETRIES(config), \
+		OPTION_FAILOVER_FORMATION_REPLICATION_QUORUM(config), \
+		OPTION_FAILOVER_NODE_CANDIDATE_PRIORITY(config), \
+		OPTION_FAILOVER_NODE_QUORUM(config), \
 		INI_OPTION_LAST \
 	}
 

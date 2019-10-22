@@ -56,7 +56,7 @@ bool monitor_get_coordinator(Monitor *monitor, char *formation,
 							 NodeAddress *node);
 bool monitor_register_node(Monitor *monitor, char *formation, char *host, int port,
 						   char *dbname, int desiredGroupId, NodeState initialSate,
-						   PgInstanceKind kind,
+						   PgInstanceKind kind, int candidatePriority, bool quorum,
 						   MonitorAssignedState *assignedState);
 bool monitor_node_active(Monitor *monitor,
 						 char *formation, char *host, int port, int nodeId,

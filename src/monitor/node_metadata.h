@@ -37,6 +37,8 @@
 #define Anum_pgautofailover_node_health 13
 #define Anum_pgautofailover_node_healthchecktime 14
 #define Anum_pgautofailover_node_statechangetime 15
+#define Anum_pgautofailover_node_candidate_priority 16
+#define Anum_pgautofailover_node_quorum 17
 
 
 /* pg_stat_replication.sync_state: "sync", "async", "quorum", "potential" */
@@ -71,6 +73,8 @@ typedef struct AutoFailoverNode
 	NodeHealthState health;
 	TimestampTz healthCheckTime;
 	TimestampTz stateChangeTime;
+	int candidatePriority;
+	bool quorum;
 } AutoFailoverNode;
 
 

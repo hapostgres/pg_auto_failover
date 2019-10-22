@@ -248,6 +248,8 @@ node_active(PG_FUNCTION_ARGS)
 	XLogRecPtr	currentLSN = PG_GETARG_LSN(7);
 	text *currentPgsrSyncStateText = PG_GETARG_TEXT_P(8);
 	char *currentPgsrSyncState = text_to_cstring(currentPgsrSyncStateText);
+	int candidatePriority = PG_GETARG_INT32(9);
+	bool quorum = PG_GETARG_BOOL(10);
 
 	AutoFailoverNodeState currentNodeState = { 0 };
 	AutoFailoverNodeState *assignedNodeState = NULL;
@@ -269,6 +271,9 @@ node_active(PG_FUNCTION_ARGS)
 	currentNodeState.reportedLSN = currentLSN;
 	currentNodeState.pgsrSyncState = SyncStateFromString(currentPgsrSyncState);
 	currentNodeState.pgIsRunning = currentPgIsRunning;
+	currentNodeState.candidatePriority = candidatePriority;
+	currentNodeState.quorum = quorum;
+
 
 	assignedNodeState =
 		NodeActive(formationId, nodeName, nodePort, &currentNodeState);
