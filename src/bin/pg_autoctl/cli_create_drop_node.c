@@ -55,7 +55,8 @@ CommandLine create_monitor_command =
 				 "  --pgdata      path to data directory\n" \
 				 "  --pgport      PostgreSQL's port number\n" \
 				 "  --nodename    hostname by which postgres is reachable\n" \
-				 "  --auth        authentication method for connections from data nodes\n",
+				 "  --auth        authentication method for connections from data nodes\n"
+				 KEEPER_NO_PG_HBA,
 				 cli_create_monitor_getopts,
 				 cli_create_monitor);
 
@@ -74,7 +75,8 @@ CommandLine create_postgres_command =
 				 "  --formation   pg_auto_failover formation\n"
 				 "  --monitor     pg_auto_failover Monitor Postgres URL\n"
 				 "  --auth        authentication method for connections from monitor\n"
-				 KEEPER_CLI_ALLOW_RM_PGDATA_OPTION,
+				 KEEPER_CLI_ALLOW_RM_PGDATA_OPTION
+				 KEEPER_NO_PG_HBA,
 				 cli_create_postgres_getopts,
 				 cli_create_postgres);
 
@@ -203,13 +205,14 @@ cli_create_postgres_getopts(int argc, char **argv)
 		{ "formation", required_argument, NULL, 'f' },
 		{ "monitor", required_argument, NULL, 'm' },
 		{ "allow-removing-pgdata", no_argument, NULL, 'R' },
+		{ "no-pg-hba", no_argument, NULL, 'N' },
 		{ "help", no_argument, NULL, 0 },
 		{ NULL, 0, NULL, 0 }
 	};
 
 	int optind =
 		cli_create_node_getopts(argc, argv,
-								long_options, "C:D:h:p:l:U:A:d:n:f:m:R",
+								long_options, "C:D:h:p:l:U:A:d:n:f:m:R:N",
 								&options);
 
 	/* publish our option parsing in the global variable */
@@ -266,6 +269,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 		{ "nodename", required_argument, NULL, 'n' },
 		{ "listen", required_argument, NULL, 'l' },
 		{ "auth", required_argument, NULL, 'A' },
+		{ "no-pg-hba", no_argument, NULL, 'N' },
 		{ "help", no_argument, NULL, 0 },
 		{ NULL, 0, NULL, 0 }
 	};
@@ -275,7 +279,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "C:D:p:A:",
+	while ((c = getopt_long(argc, argv, "C:D:p:A:l:N:",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -327,6 +331,14 @@ cli_create_monitor_getopts(int argc, char **argv)
 				log_trace("--auth %s", options.pgSetup.authMethod);
 				break;
 			}
+
+			case 'N':
+			{
+				noPgHba = true;
+				log_trace("--no-pg-hba");
+				break;
+			}
+
 			default:
 			{
 				/* getopt_long already wrote an error message */

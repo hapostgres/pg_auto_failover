@@ -26,6 +26,7 @@
 /* handle command line options for our setup. */
 KeeperConfig keeperOptions;
 bool allowRemovingPgdata = false;
+bool noPgHba = false;
 
 
 /*
@@ -46,6 +47,7 @@ bool allowRemovingPgdata = false;
  *		{ "formation", required_argument, NULL, 'f' },
  *		{ "group", required_argument, NULL, 'g' },
  *		{ "monitor", required_argument, NULL, 'm' },
+ *		{ "no-pga-hba", no_argument, NULL, 'N' },
  *		{ "allow-removing-pgdata", no_argument, NULL, 'R' },
  *		{ "help", no_argument, NULL, 0 },
  *		{ NULL, 0, NULL, 0 }
@@ -206,6 +208,14 @@ cli_create_node_getopts(int argc, char **argv,
 				}
 				strlcpy(LocalOptionConfig.monitor_pguri, optarg, MAXCONNINFO);
 				log_trace("--monitor %s", LocalOptionConfig.monitor_pguri);
+				break;
+			}
+
+			case 'N':
+			{
+				/* { "no-pga-hba", no_argument, NULL, 'N' } */
+				noPgHba = true;
+				log_trace("--no-pg-hba");
 				break;
 			}
 

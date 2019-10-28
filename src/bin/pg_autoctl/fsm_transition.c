@@ -27,6 +27,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "cli_common.h"
 #include "defaults.h"
 #include "pgctl.h"
 #include "fsm.h"
@@ -102,14 +103,26 @@ fsm_init_primary(Keeper *keeper)
 	password = NULL;
 	authMethod = pg_setup_get_auth_method(&(config->pgSetup));
 
-	if (!primary_create_user_with_hba(postgres,
-									  PG_AUTOCTL_HEALTH_USERNAME, password,
-									  monitorHostname, authMethod))
-	{
-		log_error("Failed to initialise postgres as primary because creating the "
-				  "database user that the pg_auto_failover monitor "
-				  "uses for health checks failed, see above for details");
-		return false;
+	if (!noPgHba) {
+		if (!primary_create_user(postgres,
+								 PG_AUTOCTL_HEALTH_USERNAME, password,
+								 monitorHostname, authMethod))
+		{
+			log_error("Failed to initialise postgres as primary because creating the "
+					  "database user that the pg_auto_failover monitor "
+					  "uses for health checks failed, see above for details");
+			return false;
+		}
+	} else {
+		if (!primary_create_user_with_hba(postgres,
+										  PG_AUTOCTL_HEALTH_USERNAME, password,
+										  monitorHostname, authMethod))
+		{
+			log_error("Failed to initialise postgres as primary because creating the "
+					  "database user that the pg_auto_failover monitor "
+					  "uses for health checks failed, see above for details");
+			return false;
+		}
 	}
 
 	if (!primary_create_replication_user(postgres, PG_AUTOCTL_REPLICA_USERNAME,
@@ -248,15 +261,18 @@ prepare_replication(Keeper *keeper, bool other_node_missing_is_ok)
 		return other_node_missing_is_ok;
 	}
 
-	if (!primary_add_standby_to_hba(postgres,
-									otherNode.host,
-									config->replication_password))
+	if (!noPgHba)
 	{
-		log_error(
-			"Failed to grant access to the standby by adding relevant lines to "
-			"pg_hba.conf for the standby hostname and user, see above for "
-			"details");
-		return false;
+		if (!primary_add_standby_to_hba(postgres,
+										otherNode.host,
+										config->replication_password))
+		{
+			log_error(
+				"Failed to grant access to the standby by adding relevant lines to "
+				"pg_hba.conf for the standby hostname and user, see above for "
+				"details");
+			return false;
+		}
 	}
 
 	if (!primary_create_replication_slot(postgres, config->replication_slot_name))

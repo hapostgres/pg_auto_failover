@@ -414,7 +414,8 @@ reach_initial_state(Keeper *keeper)
 			 * existing PostgreSQL primary server instance, making sure that
 			 * the parameters are all set.
 			 */
-			if (pgInstanceIsOurs)
+			if (!noPgHba
+				&& pgInstanceIsOurs)
 			{
 				if (getenv("PG_REGRESS_SOCK_DIR") != NULL)
 				{
@@ -711,44 +712,47 @@ create_database_and_extension(Keeper *keeper)
 	/* we didn't start PostgreSQL yet, also we just ran initdb */
 	snprintf(hbaFilePath, MAXPGPATH, "%s/pg_hba.conf", pgSetup->pgdata);
 
-	/*
-	 * The Postgres URI given to the user by our facility is going to use
-	 * --dbname and --nodename, as per the following command:
-	 *
-	 *   $ pg_autoctl show uri --formation default
-	 *
-	 * We need to make it so that the user can actually use that connection
-	 * string with at least the --username used to create the database.
-	 */
-	if (!pghba_ensure_host_rule_exists(hbaFilePath,
-									   HBA_DATABASE_DBNAME,
-									   pgSetup->dbname,
-									   pg_setup_get_username(pgSetup),
-									   config->nodename,
-									   "trust"))
+	if (!noPgHba)
 	{
-		log_error("Failed to edit \"%s\" to grant connections to \"%s\", "
-				  "see above for details", hbaFilePath, config->nodename);
-		return false;
-	}
-
-	/*
-	 * In test environments using PG_REGRESS_SOCK_DIR="" to disable unix socket
-	 * directory, we have to connect to the address from pghost.
-	 */
-	if (pg_regress_sock_dir != NULL
-		&& strcmp(pg_regress_sock_dir, "") == 0)
-	{
-		log_info("Granting connection from \"%s\" in \"%s\"",
-				 pgSetup->pghost, hbaFilePath);
-
+		/*
+		* The Postgres URI given to the user by our facility is going to use
+		* --dbname and --nodename, as per the following command:
+		*
+		*   $ pg_autoctl show uri --formation default
+		*
+		* We need to make it so that the user can actually use that connection
+		* string with at least the --username used to create the database.
+		*/
 		if (!pghba_ensure_host_rule_exists(hbaFilePath,
-										   HBA_DATABASE_ALL, NULL, NULL,
-										   pgSetup->pghost, "trust"))
+										HBA_DATABASE_DBNAME,
+										pgSetup->dbname,
+										pg_setup_get_username(pgSetup),
+										config->nodename,
+										"trust"))
 		{
 			log_error("Failed to edit \"%s\" to grant connections to \"%s\", "
-					  "see above for details", hbaFilePath, pgSetup->pghost);
+					"see above for details", hbaFilePath, config->nodename);
 			return false;
+		}
+
+		/*
+		* In test environments using PG_REGRESS_SOCK_DIR="" to disable unix socket
+		* directory, we have to connect to the address from pghost.
+		*/
+		if (pg_regress_sock_dir != NULL
+			&& strcmp(pg_regress_sock_dir, "") == 0)
+		{
+			log_info("Granting connection from \"%s\" in \"%s\"",
+					pgSetup->pghost, hbaFilePath);
+
+			if (!pghba_ensure_host_rule_exists(hbaFilePath,
+											HBA_DATABASE_ALL, NULL, NULL,
+											pgSetup->pghost, "trust"))
+			{
+				log_error("Failed to edit \"%s\" to grant connections to \"%s\", "
+						"see above for details", hbaFilePath, pgSetup->pghost);
+				return false;
+			}
 		}
 	}
 
@@ -811,7 +815,8 @@ create_database_and_extension(Keeper *keeper)
 	 * Now allow nodes on the same network to connect to the coordinator, and
 	 * the coordinator to connect to its workers.
 	 */
-	if (IS_CITUS_INSTANCE_KIND(postgres->pgKind))
+	if (!noPgHba
+		&& IS_CITUS_INSTANCE_KIND(postgres->pgKind))
 	{
 		(void) pghba_enable_lan_cidr(&initPostgres.sqlClient,
 									 HBA_DATABASE_DBNAME,

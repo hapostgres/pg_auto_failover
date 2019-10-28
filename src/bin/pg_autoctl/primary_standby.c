@@ -328,6 +328,33 @@ postgres_add_default_settings(LocalPostgresServer *postgres)
 
 
 /*
+ * primary_create_user creates a user.
+ */
+bool
+primary_create_user(LocalPostgresServer *postgres, char *userName,
+					char *password, char *hostname, char *authMethod)
+{
+	PGSQL *pgsql = &(postgres->sqlClient);
+	bool login = true;
+	bool superuser = false;
+	bool replication = false;
+	char hbaFilePath[MAXPGPATH];
+
+	log_trace("primary_create_user");
+
+	if (!pgsql_create_user(pgsql, userName, password, login, superuser, replication))
+	{
+		log_error("Failed to create user \"%s\" on local postgres server", userName);
+		return false;
+	}
+
+	pgsql_finish(pgsql);
+
+	return true;
+}
+
+
+/*
  * primary_create_user_with_hba creates a user and updates pg_hba.conf
  * to allow the user to connect from the given hostname.
  */

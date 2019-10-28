@@ -92,6 +92,7 @@ commands are dealing with the monitor:
         --pgport      PostgreSQL's port number
         --nodename    hostname by which postgres is reachable
         --auth        authentication method for connections from data nodes
+        --no-pg-hba   Do not allow pg_autoctl to manage pg_hba.conf
 
      The ``--pgdata`` option is mandatory and default to the environment
      variable ``PGDATA``. The ``--pgport`` default value is 5432, and the
@@ -120,12 +121,12 @@ commands are dealing with the monitor:
      You may use the `--nodename` command line option to bypass the whole
      DNS lookup based process and force the local node name to a fixed
      value.
-     
+
      The ``--auth`` option allows setting up authentication method to be used
      for connections from data nodes with ``autoctl_node`` user.
      If this option is used, please make sure password is manually set on
      the monitor, and appropriate setting is added to `.pgpass` file on data node.
-     
+
      See :ref:`pg_auto_failover_security` for notes on `.pgpass`
 
   - ``pg_autoctl run``
@@ -279,6 +280,7 @@ The other commands accept the same set of options.
     --monitor     pg_auto_failover Monitor Postgres URL
     --auth        authentication method for connections from monitor
     --allow-removing-pgdata   Allow pg_autoctl to remove the database directory
+    --no-pg-hba   Do not allow pg_autoctl to manage pg_hba.conf
 
 Three different modes of initialization are supported by this command,
 corresponding to as many implementation strategies.
