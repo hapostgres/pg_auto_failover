@@ -17,6 +17,7 @@
 #include "postgres_fe.h"
 #include "pqexpbuffer.h"
 
+#include "cli_root.h"
 #include "defaults.h"
 #include "file_utils.h"
 #include "parsing.h"
@@ -1208,54 +1209,54 @@ pg_is_running(const char *pg_ctl, const char *pgdata)
  * result as a string. This will mix logs and actual result.
  */
 bool
-pg_autoctl_run_subcommand(int argc, char **argv, int *returnCode,
+pg_autoctl_run_subcommand(char *command, int *returnCode,
 						  char *result, int resultSize,
 						  char *logs, int logsSize)
 {
-	Program prog;
-	char command[BUFSIZE] = { 0 };
-	int commandSize;
+	Program prog = { 0 };
+
+	/* split the command string in CLI arguments array */
+	int argc = 0;
+	char *argv[12] = { 0 };
+	char *ptr = command, *previous = command;
+
+	/* argv[0] should be our currently running program */
+	argv[argc++] = pg_autoctl_argv0;
+
+	for (; *ptr != '\0'; ptr++)
+	{
+		if (*ptr == ' ' || *ptr == '\n')
+		{
+			char *next = ptr+1;
+
+			*ptr = '\0';
+			argv[argc++] = previous;
+
+			/* prepare next round */
+			previous = next;
+		}
+	}
 
 	/* we do not want to call setsid() when running this program. */
 	prog = initialize_program(argv, false);
-
-	/* log the exact command line we're using */
-	commandSize = snprintf_program_command_line(&prog, command, BUFSIZE);
-
-	if (commandSize >= BUFSIZE)
-	{
-		/* we only display the first BUFSIZE bytes of the real command */
-		log_debug("%s...", command);
-	}
-	else
-	{
-		log_debug("%s", command);
-	}
+	log_debug("%s", command);
 
 	(void) execute_program(&prog);
 
+	/* make return code and output (stdout, stderr) available to our caller */
 	*returnCode = prog.returnCode;
-
-	if (prog.returnCode != 0)
-	{
-		if (prog.stderr != NULL)
-		{
-			strlcpy(logs, prog.stderr, logsSize);
-		}
-		free_program(&prog);
-
-		return false;
-	}
 
 	if (prog.stdout != NULL)
 	{
 		strlcpy(result, prog.stdout, resultSize);
 	}
+
 	if (prog.stderr != NULL)
 	{
 		strlcpy(logs, prog.stderr, logsSize);
 	}
+
 	free_program(&prog);
 
-	return true;
+	return *returnCode == 0;
 }

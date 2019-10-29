@@ -153,7 +153,6 @@ static bool
 keeper_listener_read_commands(int cmdIn, int resOut)
 {
 	char buffer[BUFSIZE] = { 0 };
-	char *command = NULL;
 
 	FILE *in = fdopen(cmdIn, "r");
 	FILE *out = fdopen(resOut, "w");
@@ -225,6 +224,8 @@ keeper_listener_read_commands(int cmdIn, int resOut)
 		}
 		else
 		{
+			char *command = NULL;
+
 			/*
 			 * If we receive NULL here (end of file), that means the pipe is
 			 * broken, we're done.
@@ -253,34 +254,12 @@ keeper_listener_read_commands(int cmdIn, int resOut)
 static bool
 keeper_listener_process_command(char *command, FILE *out)
 {
-	/* split the command string in CLI arguments array */
-	int argc = 0;
-	char *argv[12] = { 0 };
-	char *ptr = command, *previous = command;
-
 	int returnCode;
 	char logs[BUFSIZE] = { 0 };
 	char result[BUFSIZE] = { 0 };
 
-	/* argv[0] should be our current running program */
-	argv[argc++] = pg_autoctl_argv0;
-
-	for (; *ptr != '\0'; ptr++)
-	{
-		if (*ptr == ' ' || *ptr == '\n')
-		{
-			char *next = ptr+1;
-
-			*ptr = '\0';
-			argv[argc++] = previous;
-
-			/* prepare next round */
-			previous = next;
-		}
-	}
-
-	/* run the subcommand in a subprogram */
-	if (!pg_autoctl_run_subcommand(argc, argv, &returnCode,
+	/* run the subcommand in a subprogram; fork(), exec(), pipe(), etc */
+	if (!pg_autoctl_run_subcommand(command, &returnCode,
 								   result, BUFSIZE,
 								   logs, BUFSIZE))
 	{
@@ -292,6 +271,7 @@ keeper_listener_process_command(char *command, FILE *out)
 		}
 	}
 
+	/* internal communication with the command sender pipe */
 	fputs("output\n", out);
 	fputs(result, out);
 	fputs("\nlogs\n", out);
@@ -398,7 +378,14 @@ keeper_listener_send_command(const char *command, char *output, int size)
 		}
 	}
 
-	log_debug("%s:\n%s", command, commandLogs->data);
+	if (commandLogs->len > 0)
+	{
+		log_debug("%s:\n%s", command, commandLogs->data);
+	}
+	else
+	{
+		log_debug("%s", command);
+	}
 
 	/* copy logs and results to the caller's allocated memory */
 	strlcpy(output, commandOutput->data, size);
