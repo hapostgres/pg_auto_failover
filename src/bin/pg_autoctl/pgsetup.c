@@ -351,6 +351,7 @@ pg_setup_init(PostgresSetup *pgSetup,
 		PGSQL pgsql = { 0 };
 		char connInfo[MAXCONNINFO];
 		char dbname[NAMEDATALEN];
+		char username[NAMEDATALEN];
 
 		/*
 		 * Sometimes `pg_ctl start` returns with success and Postgres is still
@@ -381,6 +382,9 @@ pg_setup_init(PostgresSetup *pgSetup,
 		strlcpy(dbname, pgSetup->dbname, NAMEDATALEN);
 		strlcpy(pgSetup->dbname, "template1", NAMEDATALEN);
 
+		strlcpy(username, pgSetup->username, NAMEDATALEN);
+		strlcpy(pgSetup->username, "", NAMEDATALEN);
+
 		/* initialise a SQL connection to the local postgres server */
 		pg_setup_get_local_connection_string(pgSetup, connInfo);
 		pgsql_init(&pgsql, connInfo, PGSQL_CONN_LOCAL);
@@ -410,6 +414,7 @@ pg_setup_init(PostgresSetup *pgSetup,
 		pgsql_finish(&pgsql);
 
 		strlcpy(pgSetup->dbname, dbname, NAMEDATALEN);
+		strlcpy(pgSetup->username, username, NAMEDATALEN);
 	}
 
 	if (errors > 0)
