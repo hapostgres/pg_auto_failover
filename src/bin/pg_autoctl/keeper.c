@@ -590,7 +590,6 @@ keeper_get_replication_state(Keeper *keeper)
 				postgres->currentLSN,
 				PG_LSN_MAXLENGTH,
 				missingStateOk);
-		log_warn("latest received lsn = %s", postgres->currentLSN);
 	}
 	else
 	{
