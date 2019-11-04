@@ -30,6 +30,14 @@
 #define DEV_NULL "/dev/null"
 #endif
 
+/* alpine linux defines stdout and stderr as macros, causing compile errors */
+#if defined(stdout)
+#undef stdout
+#endif
+#if defined(stderr)
+#undef stderr
+#endif
+
 #define MAX(a,b) (((a)>(b))?(a):(b))
 
 typedef struct
