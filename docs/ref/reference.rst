@@ -360,7 +360,7 @@ When initializing a pg_auto_failover keeper with ``--pgdata /data/pgsql``, then:
       monitor = postgres://autoctl_node@192.168.1.34:6000/pg_auto_failover
       formation = default
       group = 1
-      nodename = node1.db.local.tld
+      nodename = node1.db
 
       [postgresql]
       pgdata = /data/pgsql/
