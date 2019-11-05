@@ -93,6 +93,10 @@
 							   false, &config->maximum_backup_rate, \
 							   MAXIMUM_BACKUP_RATE)
 
+#define OPTION_REPLICATION_BACKUP_DIR(config) \
+	make_strbuf_option("replication", "backup_directory", NULL, \
+					   false, MAXPGPATH, config->backupDirectory)
+
 #define OPTION_TIMEOUT_NETWORK_PARTITION(config) \
 	make_int_option_default("timeout", "network_partition_timeout", \
 							NULL, false, \
@@ -146,6 +150,7 @@
 		OPTION_REPLICATION_PASSWORD(config), \
 		OPTION_REPLICATION_SLOT_NAME(config), \
 		OPTION_REPLICATION_MAXIMUM_BACKUP_RATE(config), \
+		OPTION_REPLICATION_BACKUP_DIR(config), \
 		OPTION_TIMEOUT_NETWORK_PARTITION(config), \
 		OPTION_TIMEOUT_PREPARE_PROMOTION_CATCHUP(config), \
 		OPTION_TIMEOUT_PREPARE_PROMOTION_WALRECEIVER(config), \
@@ -155,6 +160,7 @@
 	}
 
 static bool keeper_config_init_nodekind(KeeperConfig *config);
+static bool keeper_config_set_backup_directory(KeeperConfig *config);
 
 
 /*
@@ -234,6 +240,16 @@ keeper_config_init(KeeperConfig *config,
 	 * configuration file
 	 */
 	memcpy(&(config->pgSetup), &pgSetup, sizeof(PostgresSetup));
+
+	/*
+	 * Compute the backupDirectory from pgdata, or check the one given in the
+	 * configuration file already.
+	 */
+	if (!keeper_config_set_backup_directory(config))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
 
 	/* set our configuration and state file pathnames */
 	if (!SetConfigFilePath(&(config->pathnames), config->pgSetup.pgdata))
@@ -725,8 +741,60 @@ keeper_config_init_nodekind(KeeperConfig *config)
 
 
 /*
- * keeper_config_update_with_absolute_pgdata verifies that the pgdata path is an absolute one
- * If not, the config->pgSetup is updated and we rewrite the config file
+ * keeper_config_set_backup_directory sets the pg_basebackup target directory
+ * to ${PGDATA}/../backup/${nodename} by default. Adding the local nodename
+ * makes it possible to run several instances of Postgres and pg_autoctl on the
+ * same host, which is nice for development and testing scenarios.
+ */
+static bool
+keeper_config_set_backup_directory(KeeperConfig *config)
+{
+	char absoluteBackupDirectory[PATH_MAX];
+
+	/* create the temporary backup directory at $pgdata/../backup */
+	if (IS_EMPTY_STRING_BUFFER(config->backupDirectory))
+	{
+		char *pgdata = config->pgSetup.pgdata;
+		char subdirs[MAXPGPATH];
+
+		snprintf(subdirs, MAXPGPATH, "backup/%s", config->nodename);
+		path_in_same_directory(pgdata, subdirs, config->backupDirectory);
+	}
+
+	/*
+	 * The best way to make sure we are allowed to create the backup directory
+	 * is to just go ahead and create it now.
+	 */
+	log_debug("mkdir -p \"%s\"", config->backupDirectory);
+	if (!ensure_empty_dir(config->backupDirectory, 0700))
+	{
+		log_fatal("Failed to create the backup directory \"%s\", "
+				  "see above for details", config->backupDirectory);
+		return false;
+	}
+
+	/* Now get the realpath() of the directory we just created */
+	if (!realpath(config->backupDirectory, absoluteBackupDirectory))
+	{
+		/* non-fatal error, just keep the computed or given directory path */
+		log_warn("Failed to get the realpath of backup directory \"%s\": %s",
+				 config->backupDirectory, strerror(errno));
+		return true;
+	}
+
+	if (strcmp(config->backupDirectory, absoluteBackupDirectory) != 0)
+	{
+		strlcpy(config->backupDirectory, absoluteBackupDirectory, MAXPGPATH);
+	}
+
+	return true;
+}
+
+
+/*
+ * keeper_config_update_with_absolute_pgdata verifies that the pgdata path is
+ * an absolute one If not, the config->pgSetup is updated and we rewrite the
+ * config file
  */
 bool
 keeper_config_update_with_absolute_pgdata(KeeperConfig *config)
