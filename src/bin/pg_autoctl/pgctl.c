@@ -414,6 +414,7 @@ ensure_default_settings_file_exists(const char *configFilePath,
 bool
 pg_basebackup(const char *pgdata,
 			  const char *pg_ctl,
+			  const char *backupdir,
 			  const char *maximum_backup_rate,
 			  const char *replication_username,
 			  const char *replication_password,
@@ -423,11 +424,7 @@ pg_basebackup(const char *pgdata,
 	int returnCode;
 	Program program;
 	char primary_port_str[10];
-	char backupdir[MAXPGPATH];
 	char pg_basebackup[MAXPGPATH];
-
-	/* create the temporary backup directory at $pgdata/../backup */
-	path_in_same_directory(pgdata, "backup", backupdir);
 
 	log_debug("mkdir -p \"%s\"", backupdir);
 	if (!ensure_empty_dir(backupdir, 0700))
