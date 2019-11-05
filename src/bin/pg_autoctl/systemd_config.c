@@ -77,7 +77,6 @@ void
 systemd_config_init(SystemdServiceConfig *config, const char *pgdata)
 {
 	IniOption systemdOptions[] = SET_INI_OPTIONS_ARRAY(config);
-	char program[MAXPGPATH] = { 0 };
 
 	/* time to setup config->pathnames.systemd */
 	snprintf(config->pathnames.systemd, MAXPGPATH,
@@ -91,13 +90,7 @@ systemd_config_init(SystemdServiceConfig *config, const char *pgdata)
 
 	strlcpy(config->User, config->pgSetup.username, NAMEDATALEN);
 
-	if (!get_program_absolute_path(program, MAXPGPATH))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_INTERNAL_ERROR);
-	}
-
-	snprintf(config->ExecStart, BUFSIZE, "%s run", program);
+	snprintf(config->ExecStart, BUFSIZE, "%s run", pg_autoctl_program);
 
 	if (!ini_validate_options(systemdOptions))
 	{
