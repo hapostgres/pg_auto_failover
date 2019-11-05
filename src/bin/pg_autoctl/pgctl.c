@@ -1221,7 +1221,7 @@ pg_autoctl_run_subcommand(char *command, int *returnCode,
 	char *ptr = command, *previous = command;
 
 	/* argv[0] should be our currently running program */
-	argv[argc++] = pg_autoctl_argv0;
+	argv[argc++] = pg_autoctl_program;
 
 	for (; *ptr != '\0'; ptr++)
 	{
