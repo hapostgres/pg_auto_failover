@@ -116,7 +116,7 @@ An example configuration file looks like the following::
   monitor = postgres://autoctl_node@192.168.1.34:6000/pg_auto_failover
   formation = default
   group = 0
-  nodename = node1.db.local.tld
+  nodename = node1.db
   nodekind = standalone
   
   [postgresql]
@@ -129,6 +129,7 @@ An example configuration file looks like the following::
   [replication]
   slot = pgautofailover_standby
   maximum_backup_rate = 100M
+  backup_directory = /data/backup/node1.db
   
   [timeout]
   network_partition_timeout = 20
@@ -177,6 +178,18 @@ in PostgreSQL.
 When pg_auto_failover (re-)builds a standby node using the ``pg_basebackup``
 command, this parameter is given to ``pg_basebackup`` to throttle the
 network bandwidth used. Defaults to 100Mbps.
+
+**replication.backup_directory**
+
+When pg_auto_failover (re-)builds a standby node using the ``pg_basebackup``
+command, this parameter is the target directory where to copy the bits from
+the primary server. When the copy has been successful, then the directory is
+renamed to **postgresql.pgdata**.
+
+The default value is computed from ``${PGDATA}/../backup/${nodename}`` and
+can be set to any value of your preference. Remember that the directory
+renaming is an atomic operation only when both the source and the target of
+the copy are in the same filesystem, at least in Unix systems.
 
 **timeout**
 
