@@ -74,6 +74,7 @@ typedef struct ReplicationSource
 	char *slotName;
 	char *password;
 	char *maximumBackupRate;
+	char *backupDir;
 } ReplicationSource;
 
 

@@ -37,6 +37,7 @@ typedef struct KeeperConfig
 	char *replication_slot_name;
 	char *replication_password;
 	char *maximum_backup_rate;
+	char backupDirectory[MAXPGPATH];
 
 	/* pg_autoctl timeouts */
 	int network_partition_timeout;

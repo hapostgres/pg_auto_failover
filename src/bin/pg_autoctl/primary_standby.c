@@ -474,7 +474,7 @@ standby_init_database(LocalPostgresServer *postgres,
 	log_trace("standby_init_database");
 	log_info("Initialising PostgreSQL as a hot standby");
 
-	if (directory_exists(pgSetup->pgdata))
+	if (pg_setup_pgdata_exists(pgSetup))
 	{
 		log_info("Target directory exists: \"%s\", stopping PostgreSQL",
 				 pgSetup->pgdata);
@@ -494,6 +494,7 @@ standby_init_database(LocalPostgresServer *postgres,
 	 */
 	if (!pg_basebackup(pgSetup->pgdata,
 					   pgSetup->pg_ctl,
+					   replicationSource->backupDir,
 					   replicationSource->maximumBackupRate,
 					   replicationSource->userName,
 					   replicationSource->password,
