@@ -18,12 +18,12 @@ Unhealthy Nodes
 ---------------
 
 The pg_auto_failover monitor is responsible for running regular health-checks with
-every PostgreSQL node it manages. An health-check is successul when it is
+every PostgreSQL node it manages. A health-check is successul when it is
 able to connect to the PostgreSQL node using the PostgreSQL protocol
 (libpq), imitating the ``pg_isready`` command.
 
 How frequent those health checks are (20s by default), the PostgreSQL
-connection timeout in use (5s by default) and how many times to retry in
+connection timeout in use (5s by default), and how many times to retry in
 case of a failure before marking the node unhealthy (2 by default) are GUC
 variables that you can set on the Monitor node itself. Remember, the monitor
 is implemented as a PostgreSQL extension, so the setup is a set of
@@ -54,8 +54,8 @@ failure is observed:
     When the primary node is unhealthy, and only when the secondary node is
     itself in good health, then the primary node is asked to transition to
     the DRAINING state, and the attached secondary is asked to transition
-    the state PREPARE_PROMOTION. In this state, the secondary is asked to
-    catch-up with the WAL traffic from the primary, and then reports
+    to the state PREPARE_PROMOTION. In this state, the secondary is asked to
+    catch-up with the WAL traffic from the primary, and then report
     success.
 
     The monitor then continues orchestrating the promotion of the standby: it
@@ -98,15 +98,15 @@ PostgreSQL service:
   - Primary can't connect to Monitor
 
     Then it could be that either the primary is alone on its side of a
-    network split, or that the monitor has failed. The keeper decide
+    network split, or that the monitor has failed. The keeper decides
     depending on whether the secondary node is still connected to the
-    replication slot, and if we got a secondary, continues to serve
+    replication slot, and if we have a secondary, continues to serve
     PostgreSQL queries.
 
     Otherwise, when the secondary isn't connected, and after the
     NETWORK\_PARTITION\_TIMEOUT has elapsed, the primary considers it might
-    be alone in a network partition: that's a split brain situation and
-    there's but one way to prevent it. The primary stops, and report a new
+    be alone in a network partition: that's a potential split brain situation 
+    and with only one way to prevent it. The primary stops, and reports a new
     state of DEMOTE\_TIMEOUT.
 
     The network\_partition\_timeout can be setup in the keeper's
@@ -132,10 +132,10 @@ PostgreSQL service:
     state CATCHINGUP, which means it can't be promoted in case of primary
     failure.
 
-    As the monitor tracks the WAL delta in between the two servers, and they
+    As the monitor tracks the WAL delta between the two servers, and they
     both report it independently, the standby is eligible to promotion again
     as soon as it's caught-up with the primary again, and at this time it is
-    assigned the SECONDARY state, and the replication switches to be back to
+    assigned the SECONDARY state, and the replication will be switched back to
     synchronous.
 
 Failure handling and network partition detection
@@ -150,15 +150,15 @@ can still communicate and the monitor decides to promote the secondary since
 the primary is no longer responsive. Meanwhile, the primary is still
 up-and-running on the other side of the network partition. If a primary
 cannot communicate to the monitor it starts checking whether the secondary
-is still connected. In postgres, the secondary connection automatically
+is still connected. In PostgreSQL, the secondary connection automatically
 times out after 30 seconds. If last contact with the monitor and the last
 time a connection from the secondary was observed are both more than 30
 seconds in the past, the primary concludes it is on the losing side of a
 network partition and shuts itself down. It may be that the secondary and
 the monitor were actually down and the primary was the only node that was
-alive, but those situations cannot be distinguished. As with consensus
-algorithms, availability can only be correctly preserved if at least 2 out
-of 3 nodes are up.
+alive, but we currently do not have a way to distinguish such a situation. 
+As with consensus algorithms, availability can only be correctly preserved 
+if at least 2 out of 3 nodes are up.
 
 In asymmetric network partitions, the primary might still be able to talk to
 the secondary, while unable to talk to the monitor. During failover, the
