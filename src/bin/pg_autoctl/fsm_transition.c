@@ -421,6 +421,7 @@ fsm_init_standby(Keeper *keeper)
 	replicationSource.password = config->replication_password;
 	replicationSource.slotName = config->replication_slot_name;
 	replicationSource.maximumBackupRate = config->maximum_backup_rate;
+	replicationSource.backupDir = config->backupDirectory;
 
 	if (!standby_init_database(postgres, &replicationSource))
 	{
@@ -458,6 +459,7 @@ fsm_rewind_or_init(Keeper *keeper)
 	replicationSource.password = config->replication_password;
 	replicationSource.slotName = config->replication_slot_name;
 	replicationSource.maximumBackupRate = config->maximum_backup_rate;
+	replicationSource.backupDir = config->backupDirectory;
 
 	if (!primary_rewind_to_standby(postgres, &replicationSource))
 	{

@@ -329,6 +329,7 @@ keeper_cli_init_standby(int argc, char **argv)
 	replicationSource.password = config.replication_password;
 	replicationSource.slotName = config.replication_slot_name;
 	replicationSource.maximumBackupRate = MAXIMUM_BACKUP_RATE;
+	replicationSource.backupDir = config.backupDirectory;
 
 	if (!standby_init_database(&postgres, &replicationSource))
 	{

@@ -54,8 +54,9 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 	bool doSleep = false;
 	bool couldContactMonitor = false;
 	pid_t pid = *start_pid, checkpid = 0;
+	bool firstLoop = true;
 
-	log_info("pg_autoctl service is starting");
+	log_debug("pg_autoctl service is starting");
 
 	while (keepRunning)
 	{
@@ -156,19 +157,24 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 
 		reportPgIsRunning = ReportPgIsRunning(keeper);
 
-		/* a single line of logs every 5s whatever happens is nice to have */
-		log_info("Calling node_active for node %s/%d/%d with current state: "
-				 "%s, "
-				 "PostgreSQL %s running, "
-				 "sync_state is \"%s\", "
-				 "current lsn is \"%s\".",
-				 config->formation,
-				 keeperState->current_node_id,
-				 keeperState->current_group,
-				 NodeStateToString(keeperState->current_role),
-				 reportPgIsRunning ? "is" : "is not",
-				 postgres->pgsrSyncState,
-				 postgres->currentLSN);
+		/* We used to output that in INFO every 5s, which is too much chatter */
+		log_debug("Calling node_active for node %s/%d/%d with current state: "
+				  "%s, "
+				  "PostgreSQL %s running, "
+				  "sync_state is \"%s\", "
+				  "current lsn is \"%s\".",
+				  config->formation,
+				  keeperState->current_node_id,
+				  keeperState->current_group,
+				  NodeStateToString(keeperState->current_role),
+				  reportPgIsRunning ? "is" : "is not",
+				  postgres->pgsrSyncState,
+				  postgres->currentLSN);
+
+		if (firstLoop)
+		{
+			log_info("pg_autoctl service is running");
+		}
 
 		/*
 		 * Report the current state to the monitor and get the assigned state.
@@ -271,6 +277,11 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 		if (asked_to_stop || asked_to_stop_fast)
 		{
 			keepRunning = false;
+		}
+
+		if (firstLoop)
+		{
+			firstLoop = false;
 		}
 	}
 
