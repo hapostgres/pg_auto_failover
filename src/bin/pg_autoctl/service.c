@@ -161,9 +161,11 @@ service_start(Keeper *keeper)
 static bool
 service_start_with_monitor(Keeper *keeper)
 {
+	bool httpdRunChecks = false; /* the Node Active process is doing that */
 	int countSubprocesses = 0;
 	SubProcess pids[] = {
 		{ "Node Active", 0 },
+		{ "listener",    0 },
 		{ "HTTPd",       0 },
 		{ "", -1 }
 	};
@@ -181,13 +183,24 @@ service_start_with_monitor(Keeper *keeper)
 	}
 	++countSubprocesses;
 
+	/* start the command pipe sub-process */
+	if (!keeper_listener_start(keeper->config.pgSetup.pgdata, &(pids[1].pid)))
+	{
+		log_fatal("Failed to start the command listener process");
+		kill(pids[0].pid, SIGQUIT);
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+	++countSubprocesses;
+
 	if (!httpd_start_process(keeper->config.pgSetup.pgdata,
 							 keeper->config.httpd.listen_address,
 							 keeper->config.httpd.port,
-							 &pids[1].pid))
+							 httpdRunChecks, /* false */
+							 &pids[2].pid))
 	{
 		/* well terminate here, and signal the node_active process to quit */
 		kill(pids[0].pid, SIGQUIT);
+		kill(pids[1].pid, SIGQUIT);
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 	++countSubprocesses;
@@ -212,6 +225,7 @@ service_start_with_monitor(Keeper *keeper)
 static bool
 service_start_without_monitor(Keeper *keeper)
 {
+	bool httpdRunChecks = true; /* there's no Node Active process here */
 	int countSubprocesses = 0;
 	SubProcess pids[] = {
 		{ "listener", 0 },
@@ -234,6 +248,7 @@ service_start_without_monitor(Keeper *keeper)
 	if (!httpd_start_process(keeper->config.pgSetup.pgdata,
 							 keeper->config.httpd.listen_address,
 							 keeper->config.httpd.port,
+							 httpdRunChecks, /* true */
 							 &(pids[1].pid)))
 	{
 		/* well terminate here, and signal the listener to do the same */

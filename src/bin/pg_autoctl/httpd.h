@@ -20,7 +20,9 @@
 
 bool httpd_start_process(const char *pgdata,
 						 const char *listen_address, int port,
+						 bool runChecks,
 						 pid_t *httpdPid);
-bool httpd_start(const char *pgdata, const char *listen_address, int port);
+bool httpd_start(const char *pgdata, const char *listen_address, int port,
+				 bool runChecks);
 
 #endif	/* KEEPER_HTTPD_H */

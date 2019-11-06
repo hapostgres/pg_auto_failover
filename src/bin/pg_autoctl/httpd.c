@@ -123,6 +123,7 @@ static bool get_uri_param_value(struct wby_con *connection,
 bool
 httpd_start_process(const char *pgdata,
 					const char *listen_address, int port,
+					bool runChecks,
 					pid_t *httpdPid)
 {
 	pid_t pid;
@@ -160,7 +161,7 @@ httpd_start_process(const char *pgdata,
 			log_set_level(log_level);
 			log_debug("set log level to %d/%d", log_level, logLevel);
 
-			(void) httpd_start(pgdata, listen_address, port);
+			(void) httpd_start(pgdata, listen_address, port, runChecks);
 
 			/*
 			 * When the "main" function for the child process is over, it's the
@@ -192,7 +193,8 @@ httpd_start_process(const char *pgdata,
  * httpd_start starts our HTTP server.
  */
 bool
-httpd_start(const char *pgdata, const char *listen_address, int port)
+httpd_start(const char *pgdata,
+			const char *listen_address, int port, bool runChecks)
 {
 	HttpServerState state = { 0 };
     void *memory = NULL;
@@ -242,7 +244,7 @@ httpd_start(const char *pgdata, const char *listen_address, int port)
 			state.quit = true;
 		}
 
-		if ((now - lastUpdate) >= PG_AUTOCTL_KEEPER_SLEEP_TIME)
+		if (runChecks && ((now - lastUpdate) >= PG_AUTOCTL_KEEPER_SLEEP_TIME))
 		{
 			char command[BUFSIZE];
 			char output[BUFSIZE];
@@ -250,7 +252,11 @@ httpd_start(const char *pgdata, const char *listen_address, int port)
 			/* ensure that things are as they should be. */
 			snprintf(command, BUFSIZE, "do fsm check");
 
-			keeper_listener_send_command(command, output, BUFSIZE);
+			if (!keeper_listener_send_command(command, output, BUFSIZE))
+			{
+				log_error("Failed to send command \"%s\"", command);
+				exit(EXIT_CODE_INTERNAL_ERROR);
+			}
 			log_debug("%s: %s", command, output);
 			lastUpdate = now;
 		}
@@ -372,9 +378,29 @@ http_api_version(struct wby_con *connection, void *userdata)
 static bool
 http_state(struct wby_con *connection, void *userdata)
 {
-	wby_response_begin(connection, 200, 3, NULL, 0);
-	wby_write(connection, "Ok\n", 3);
-	wby_response_end(connection);
+    HttpServerState *state = (HttpServerState *) userdata;
+
+	char uri[BUFSIZE];
+	char *paramName = NULL;
+	char command[BUFSIZE];
+	char output[BUFSIZE];
+
+	snprintf(command, BUFSIZE, "show state --json");
+	log_debug("http_state: %s", command);
+
+	if (keeper_listener_send_command(command, output, BUFSIZE))
+	{
+		int size = strlen(output);
+
+		wby_response_begin(connection, 200, size, NULL, 0);
+		wby_write(connection, output, size);
+		wby_response_end(connection);
+	}
+	else
+	{
+		wby_response_begin(connection, 404, 0, NULL, 0);
+		wby_response_end(connection);
+	}
 
 	return true;
 }

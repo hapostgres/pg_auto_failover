@@ -567,6 +567,8 @@ keeper_cli_httpd_start(int argc, char **argv)
 
 		case PG_AUTOCTL_ROLE_KEEPER:
 		{
+			bool httpdRunChecks = true;
+
 			keeper_config_read_file(&config,
 									missingPgdataIsOk,
 									pgIsNotRunningIsOk,
@@ -575,7 +577,8 @@ keeper_cli_httpd_start(int argc, char **argv)
 			/* here we start the HTTP server in the foreground. */
 			httpd_start(keeperOptions.pgSetup.pgdata,
 						config.httpd.listen_address,
-						config.httpd.port);
+						config.httpd.port,
+						httpdRunChecks);
 			break;
 		}
 
