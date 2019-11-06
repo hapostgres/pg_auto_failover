@@ -86,14 +86,28 @@ typedef struct routing_table
  *  /api/1.0/formation/enable/secondary
  *  /api/1.0/formation/disable/secondary
  */
-HttpRoutingTable KeeperRoutingTable[] = {
-	{ "GET",  "/",                       http_home },
-	{ "GET",  "/versions",               http_versions },
-	{ "GET",  "/api/version",            http_api_version },
-	{ "GET",  "/api/1.0/state",          http_state },
-	{ "GET",  "/api/1.0/fsm/state",      http_fsm_state },
+
+#define HTTP_COMMON_ROUTING_TABLE								\
+	{ "GET",  "/",                       http_home },			\
+	{ "GET",  "/versions",               http_versions },		\
+	{ "GET",  "/api/version",            http_api_version },	\
+	{ "GET",  "/api/1.0/state",          http_state },			\
+	{ "GET",  "/api/1.0/fsm/state",      http_fsm_state },		\
+	{ "GET",  "/api/1.0/config/get/*",   http_config_get }
+
+HttpRoutingTable KeeperRoutingTableWithoutMonitor[] = {
+	HTTP_COMMON_ROUTING_TABLE,
 	{ "POST", "/api/1.0/fsm/assign",     http_fsm_assign },
-	{ "GET",  "/api/1.0/config/get/*",   http_config_get },
+	{ "", "", NULL }
+};
+
+HttpRoutingTable KeeperRoutingTableWithMonitor[] = {
+	HTTP_COMMON_ROUTING_TABLE,
+	{ "", "", NULL }
+};
+
+HttpRoutingTable MonitorRoutingTable[] = {
+	HTTP_COMMON_ROUTING_TABLE,
 	{ "", "", NULL }
 };
 
@@ -102,8 +116,8 @@ typedef struct server_state
 {
     bool quit;
 	char pgdata[MAXPGPATH];
-} HttpServerState
-;
+	HttpRoutingTable *routingTable;
+} HttpServerState;
 
 static int httpd_dispatch(struct wby_con *connection, void *userdata);
 static bool httpd_route_match_query(struct wby_con *connection,
@@ -122,8 +136,7 @@ static bool get_uri_param_value(struct wby_con *connection,
  */
 bool
 httpd_start_process(const char *pgdata,
-					const char *listen_address, int port,
-					bool runChecks,
+					const char *listen_address, int port, HTTPApi routingAPI,
 					pid_t *httpdPid)
 {
 	pid_t pid;
@@ -161,7 +174,7 @@ httpd_start_process(const char *pgdata,
 			log_set_level(log_level);
 			log_debug("set log level to %d/%d", log_level, logLevel);
 
-			(void) httpd_start(pgdata, listen_address, port, runChecks);
+			(void) httpd_start(pgdata, listen_address, port, routingAPI);
 
 			/*
 			 * When the "main" function for the child process is over, it's the
@@ -194,7 +207,7 @@ httpd_start_process(const char *pgdata,
  */
 bool
 httpd_start(const char *pgdata,
-			const char *listen_address, int port, bool runChecks)
+			const char *listen_address, int port, HTTPApi routingAPI)
 {
 	HttpServerState state = { 0 };
     void *memory = NULL;
@@ -205,6 +218,21 @@ httpd_start(const char *pgdata,
 
 	state.quit = false;
 	strlcpy(state.pgdata, pgdata, MAXPGPATH);
+
+	switch (routingAPI)
+	{
+		case HTTP_API_MONTOR:
+			state.routingTable = MonitorRoutingTable;
+			break;
+
+		case HTTP_API_KEEPER_NO_MONITOR:
+			state.routingTable = KeeperRoutingTableWithoutMonitor;
+			break;
+
+		case HTTP_API_KEEPER_WITH_MONITOR:
+			state.routingTable = KeeperRoutingTableWithMonitor;
+			break;
+	}
 
     config.userdata = &state;
     config.address = listen_address;
@@ -244,21 +272,29 @@ httpd_start(const char *pgdata,
 			state.quit = true;
 		}
 
-		if (runChecks && ((now - lastUpdate) >= PG_AUTOCTL_KEEPER_SLEEP_TIME))
+		/*
+		 * When we are running a keeper without a monitor, then we run checks
+		 * every 5s to make sure that Postgres is running when it's supposed to
+		 * be.
+		 */
+		if (routingAPI == HTTP_API_KEEPER_NO_MONITOR)
 		{
-			char command[BUFSIZE];
-			char output[BUFSIZE];
-
-			/* ensure that things are as they should be. */
-			snprintf(command, BUFSIZE, "do fsm check");
-
-			if (!keeper_listener_send_command(command, output, BUFSIZE))
+			if ((now - lastUpdate) >= PG_AUTOCTL_KEEPER_SLEEP_TIME)
 			{
-				log_error("Failed to send command \"%s\"", command);
-				exit(EXIT_CODE_INTERNAL_ERROR);
+				char command[BUFSIZE];
+				char output[BUFSIZE];
+
+				/* ensure that things are as they should be. */
+				snprintf(command, BUFSIZE, "do fsm check");
+
+				if (!keeper_listener_send_command(command, output, BUFSIZE))
+				{
+					log_error("Failed to send command \"%s\"", command);
+					exit(EXIT_CODE_INTERNAL_ERROR);
+				}
+				log_debug("%s: %s", command, output);
+				lastUpdate = now;
 			}
-			log_debug("%s: %s", command, output);
-			lastUpdate = now;
 		}
 	}
 
@@ -285,8 +321,10 @@ httpd_log(const char* text)
 static int
 httpd_dispatch(struct wby_con *connection, void *userdata)
 {
+    HttpServerState *state = (HttpServerState *) userdata;
 	int routingIndex = 0;
-	HttpRoutingTable routingTableEntry = KeeperRoutingTable[0];
+	HttpRoutingTable *routingTable = state->routingTable;
+	HttpRoutingTable routingTableEntry = routingTable[0];
 
 	while (routingTableEntry.dispatchFunction != NULL)
 	{
@@ -299,7 +337,7 @@ httpd_dispatch(struct wby_con *connection, void *userdata)
 			return (*routingTableEntry.dispatchFunction)(connection, userdata);
 		}
 
-		routingTableEntry = KeeperRoutingTable[++routingIndex];
+		routingTableEntry = routingTable[++routingIndex];
 	}
 
 	/* 404 */

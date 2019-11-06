@@ -578,7 +578,7 @@ keeper_cli_httpd_start(int argc, char **argv)
 			httpd_start(keeperOptions.pgSetup.pgdata,
 						config.httpd.listen_address,
 						config.httpd.port,
-						httpdRunChecks);
+						HTTP_API_KEEPER_NO_MONITOR);
 			break;
 		}
 

@@ -161,7 +161,6 @@ service_start(Keeper *keeper)
 static bool
 service_start_with_monitor(Keeper *keeper)
 {
-	bool httpdRunChecks = false; /* the Node Active process is doing that */
 	int countSubprocesses = 0;
 	SubProcess pids[] = {
 		{ "Node Active", 0 },
@@ -195,7 +194,7 @@ service_start_with_monitor(Keeper *keeper)
 	if (!httpd_start_process(keeper->config.pgSetup.pgdata,
 							 keeper->config.httpd.listen_address,
 							 keeper->config.httpd.port,
-							 httpdRunChecks, /* false */
+							 HTTP_API_KEEPER_WITH_MONITOR,
 							 &pids[2].pid))
 	{
 		/* well terminate here, and signal the node_active process to quit */
@@ -225,7 +224,6 @@ service_start_with_monitor(Keeper *keeper)
 static bool
 service_start_without_monitor(Keeper *keeper)
 {
-	bool httpdRunChecks = true; /* there's no Node Active process here */
 	int countSubprocesses = 0;
 	SubProcess pids[] = {
 		{ "listener", 0 },
@@ -248,7 +246,7 @@ service_start_without_monitor(Keeper *keeper)
 	if (!httpd_start_process(keeper->config.pgSetup.pgdata,
 							 keeper->config.httpd.listen_address,
 							 keeper->config.httpd.port,
-							 httpdRunChecks, /* true */
+							 HTTP_API_KEEPER_NO_MONITOR,
 							 &(pids[1].pid)))
 	{
 		/* well terminate here, and signal the listener to do the same */

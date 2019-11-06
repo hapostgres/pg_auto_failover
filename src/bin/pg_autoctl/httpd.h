@@ -18,11 +18,17 @@
 #define DEV_NULL "/dev/null"
 #endif
 
+typedef enum
+{
+	HTTP_API_MONTOR = 0,
+	HTTP_API_KEEPER_NO_MONITOR,
+	HTTP_API_KEEPER_WITH_MONITOR,
+} HTTPApi;
+
 bool httpd_start_process(const char *pgdata,
 						 const char *listen_address, int port,
-						 bool runChecks,
-						 pid_t *httpdPid);
+						 HTTPApi routingApi, pid_t *httpdPid);
 bool httpd_start(const char *pgdata, const char *listen_address, int port,
-				 bool runChecks);
+				 HTTPApi routingApi);
 
 #endif	/* KEEPER_HTTPD_H */
