@@ -179,32 +179,3 @@ root_options(int argc, char **argv)
 	}
 	return optind;
 }
-
-
-/*
- * Provide help.
- */
-void
-keeper_cli_help(int argc, char **argv)
-{
-	CommandLine command = root;
-
-	if (getenv(PG_AUTOCTL_DEBUG) != NULL)
-	{
-		command = root_with_debug;
-	}
-
-	(void) commandline_print_command_tree(&command, stdout);
-}
-
-
-/*
- * keeper_cli_print_version prints the pg_autoctl version and exits with
- * successful exit code of zero.
- */
-void
-keeper_cli_print_version(int argc, char **argv)
-{
-	fprintf(stdout, "pg_autoctl version %s\n", PG_AUTOCTL_VERSION);
-	exit(0);
-}

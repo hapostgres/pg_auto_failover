@@ -12,6 +12,7 @@
 #include <getopt.h>
 
 #include "cli_common.h"
+#include "cli_root.h"
 #include "commandline.h"
 #include "ipaddr.h"
 #include "keeper.h"
@@ -60,6 +61,7 @@ cli_create_node_getopts(int argc, char **argv,
 {
 	KeeperConfig LocalOptionConfig = { 0 };
 	int c, option_index, errors = 0;
+	int verboseCount = 0;
 
 	/* force some non-zero default values */
 	LocalOptionConfig.groupId = -1;
@@ -217,6 +219,39 @@ cli_create_node_getopts(int argc, char **argv,
 				break;
 			}
 
+			case 'V':
+			{
+				/* keeper_cli_print_version prints version and exits. */
+				keeper_cli_print_version(argc, argv);
+				break;
+			}
+
+			case 'v':
+			{
+				++verboseCount;
+				switch (verboseCount)
+				{
+					case 1:
+						log_set_level(LOG_INFO);
+						break;
+
+					case 2:
+						log_set_level(LOG_DEBUG);
+						break;
+
+					default:
+						log_set_level(LOG_TRACE);
+						break;
+				}
+				break;
+			}
+
+			case 'q':
+			{
+				log_set_level(LOG_ERROR);
+				break;
+			}
+
 			default:
 			{
 				/* getopt_long already wrote an error message */
@@ -266,11 +301,14 @@ int
 keeper_cli_getopt_pgdata(int argc, char **argv)
 {
 	KeeperConfig options = { 0 };
-	int c, option_index = 0;
+	int c, option_index = 0, errors = 0;
+	int verboseCount = 0;
 
 	static struct option long_options[] = {
 		{ "pgdata", required_argument, NULL, 'D' },
-		{ "help", no_argument, NULL, 'h' },
+		{ "version", no_argument, NULL, 'V' },
+		{ "verbose", no_argument, NULL, 'v' },
+		{ "quiet", no_argument, NULL, 'q' },
 		{ NULL, 0, NULL, 0 }
 	};
 	optind = 0;
@@ -285,7 +323,7 @@ keeper_cli_getopt_pgdata(int argc, char **argv)
 	 */
 	unsetenv("POSIXLY_CORRECT");
 
-	while ((c = getopt_long(argc, argv, "D:",
+	while ((c = getopt_long(argc, argv, "D:Vvq",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -296,7 +334,53 @@ keeper_cli_getopt_pgdata(int argc, char **argv)
 				log_trace("--pgdata %s", options.pgSetup.pgdata);
 				break;
 			}
+
+			case 'V':
+			{
+				/* keeper_cli_print_version prints version and exits. */
+				keeper_cli_print_version(argc, argv);
+				break;
+			}
+
+			case 'v':
+			{
+				++verboseCount;
+				switch (verboseCount)
+				{
+					case 1:
+						log_set_level(LOG_INFO);
+						break;
+
+					case 2:
+						log_set_level(LOG_DEBUG);
+						break;
+
+					default:
+						log_set_level(LOG_TRACE);
+						break;
+				}
+				break;
+			}
+
+			case 'q':
+			{
+				log_set_level(LOG_ERROR);
+				break;
+			}
+
+			default:
+			{
+				/* getopt_long already wrote an error message */
+				errors++;
+				break;
+			}
 		}
+	}
+
+	if (errors > 0)
+	{
+		commandline_help(stderr);
+		exit(EXIT_CODE_BAD_ARGS);
 	}
 
 	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
@@ -316,7 +400,8 @@ keeper_cli_getopt_pgdata(int argc, char **argv)
 	log_info("Managing PostgreSQL installation at \"%s\"",
 			 options.pgSetup.pgdata);
 
-	if (!keeper_config_set_pathnames_from_pgdata(&options.pathnames, options.pgSetup.pgdata))
+	if (!keeper_config_set_pathnames_from_pgdata(&options.pathnames,
+												 options.pgSetup.pgdata))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_ARGS);
@@ -522,4 +607,33 @@ exit_unless_role_is_keeper(KeeperConfig *kconfig)
 			exit(EXIT_CODE_BAD_CONFIG);
 		}
 	}
+}
+
+
+/*
+ * Provide help.
+ */
+void
+keeper_cli_help(int argc, char **argv)
+{
+	CommandLine command = root;
+
+	if (getenv(PG_AUTOCTL_DEBUG) != NULL)
+	{
+		command = root_with_debug;
+	}
+
+	(void) commandline_print_command_tree(&command, stdout);
+}
+
+
+/*
+ * keeper_cli_print_version prints the pg_autoctl version and exits with
+ * successful exit code of zero.
+ */
+void
+keeper_cli_print_version(int argc, char **argv)
+{
+	fprintf(stdout, "pg_autoctl version %s\n", PG_AUTOCTL_VERSION);
+	exit(0);
 }

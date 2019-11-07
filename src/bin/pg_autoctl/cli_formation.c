@@ -61,11 +61,14 @@ keeper_cli_formation_getopts(int argc, char **argv)
 {
 	FormationConfig options = { 0 };
 	int c = 0, option_index = 0, errors = 0;
+	int verboseCount = 0;
 
 	static struct option long_options[] = {
 		{ "pgdata", required_argument, NULL, 'D' },
 		{ "formation", required_argument, NULL, 'f' },
-		{ "help", no_argument, NULL, 'h' },
+		{ "version", no_argument, NULL, 'V' },
+		{ "verbose", no_argument, NULL, 'v' },
+		{ "quiet", no_argument, NULL, 'q' },
 		{ NULL, 0, NULL, 0 }
 	};
 
@@ -90,6 +93,39 @@ keeper_cli_formation_getopts(int argc, char **argv)
 				break;
 			}
 
+			case 'V':
+			{
+				/* keeper_cli_print_version prints version and exits. */
+				keeper_cli_print_version(argc, argv);
+				break;
+			}
+
+			case 'v':
+			{
+				++verboseCount;
+				switch (verboseCount)
+				{
+					case 1:
+						log_set_level(LOG_INFO);
+						break;
+
+					case 2:
+						log_set_level(LOG_DEBUG);
+						break;
+
+					default:
+						log_set_level(LOG_TRACE);
+						break;
+				}
+				break;
+			}
+
+			case 'q':
+			{
+				log_set_level(LOG_ERROR);
+				break;
+			}
+
 			default:
 			{
 				/* getopt_long already wrote an error message */
@@ -97,6 +133,12 @@ keeper_cli_formation_getopts(int argc, char **argv)
 				break;
 			}
 		}
+	}
+
+	if (errors > 0)
+	{
+		commandline_help(stderr);
+		exit(EXIT_CODE_BAD_ARGS);
 	}
 
 	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))

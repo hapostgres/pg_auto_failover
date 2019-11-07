@@ -244,7 +244,9 @@ keeper_cli_keeper_setup_getopts(int argc, char **argv)
 		{ "group", required_argument, NULL, 'g' },
 		{ "monitor", required_argument, NULL, 'm' },
 		{ "allow-removing-pgdata", no_argument, NULL, 'R' },
-		{ "help", no_argument, NULL, 0 },
+		{ "version", no_argument, NULL, 'V' },
+		{ "verbose", no_argument, NULL, 'v' },
+		{ "quiet", no_argument, NULL, 'q' },
 		{ NULL, 0, NULL, 0 }
 	};
 
@@ -260,7 +262,7 @@ keeper_cli_keeper_setup_getopts(int argc, char **argv)
 
 	int optind =
 		cli_create_node_getopts(argc, argv,
-								long_options, "C:D:h:p:l:y:U:A:d:n:f:g:m:R",
+								long_options, "C:D:h:p:l:y:U:A:d:n:f:g:m:RVvq",
 								&options);
 
 	/* publish our option parsing in the global variable */

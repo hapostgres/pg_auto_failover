@@ -33,8 +33,6 @@ extern CommandLine *root_subcommands_with_debug[];
 extern CommandLine root;
 extern CommandLine *root_subcommands[];
 
-void keeper_cli_help(int argc, char **argv);
-void keeper_cli_print_version(int argc, char **argv);
 int root_options(int argc, char **argv);
 
 

@@ -89,6 +89,9 @@ extern CommandLine show_state_command;
 extern CommandLine systemd_cat_service_file_command;
 
 
+void keeper_cli_help(int argc, char **argv);
+void keeper_cli_print_version(int argc, char **argv);
+
 int cli_create_node_getopts(int argc, char **argv,
 							struct option *long_options,
 							const char *optstring,
@@ -104,7 +107,5 @@ void exit_unless_role_is_keeper(KeeperConfig *kconfig);
 bool cli_create_config(Keeper *keeper, KeeperConfig *config);
 void cli_create_pg(Keeper *keeper, KeeperConfig *config);
 bool check_or_discover_nodename(KeeperConfig *config);
-
-
 
 #endif  /* CLI_COMMON_H */
