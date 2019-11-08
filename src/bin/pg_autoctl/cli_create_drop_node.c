@@ -193,7 +193,7 @@ cli_create_postgres_getopts(int argc, char **argv)
 	static struct option long_options[] = {
 		{ "pgctl", required_argument, NULL, 'C' },
 		{ "pgdata", required_argument, NULL, 'D' },
-		{ "pghost", required_argument, NULL, 'h' },
+		{ "pghost", required_argument, NULL, 'H' },
 		{ "pgport", required_argument, NULL, 'p' },
 		{ "listen", required_argument, NULL, 'l' },
 		{ "username", required_argument, NULL, 'U' },
@@ -206,12 +206,13 @@ cli_create_postgres_getopts(int argc, char **argv)
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
+ 		{ "help", no_argument, NULL, 'h' },
 		{ NULL, 0, NULL, 0 }
 	};
 
 	int optind =
 		cli_create_node_getopts(argc, argv,
-								long_options, "C:D:h:p:l:U:A:d:n:f:m:RVvq",
+								long_options, "C:D:h:p:l:U:A:d:n:f:m:RVvqh",
 								&options);
 
 	/* publish our option parsing in the global variable */
@@ -272,6 +273,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
+ 		{ "help", no_argument, NULL, 'h' },
 		{ NULL, 0, NULL, 0 }
 	};
 
@@ -280,7 +282,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "C:D:p:A:Vvq",
+	while ((c = getopt_long(argc, argv, "C:D:p:A:Vvqh",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -363,6 +365,13 @@ cli_create_monitor_getopts(int argc, char **argv)
 			case 'q':
 			{
 				log_set_level(LOG_ERROR);
+				break;
+			}
+
+			case 'h':
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_QUIT);
 				break;
 			}
 

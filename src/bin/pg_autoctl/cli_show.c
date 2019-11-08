@@ -90,6 +90,7 @@ cli_show_state_getopts(int argc, char **argv)
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
+		{ "help", no_argument, NULL, 'h' },
 		{ NULL, 0, NULL, 0 }
 	};
 
@@ -105,7 +106,7 @@ cli_show_state_getopts(int argc, char **argv)
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "D:f:g:n:Vvq",
+	while ((c = getopt_long(argc, argv, "D:f:g:n:Vvqh",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -183,6 +184,12 @@ cli_show_state_getopts(int argc, char **argv)
 				break;
 			}
 
+			case 'h':
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_QUIT);
+				break;
+			}
 
 			default:
 			{
@@ -293,6 +300,7 @@ cli_show_uri_getopts(int argc, char **argv)
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
+		{ "help", no_argument, NULL, 'h' },
 		{ NULL, 0, NULL, 0 }
 	};
 
@@ -306,7 +314,7 @@ cli_show_uri_getopts(int argc, char **argv)
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "D:f:Vvq",
+	while ((c = getopt_long(argc, argv, "D:f:Vvqh",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -355,6 +363,13 @@ cli_show_uri_getopts(int argc, char **argv)
 			case 'q':
 			{
 				log_set_level(LOG_ERROR);
+				break;
+			}
+
+			case 'h':
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_QUIT);
 				break;
 			}
 

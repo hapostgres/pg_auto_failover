@@ -232,7 +232,7 @@ keeper_cli_keeper_setup_getopts(int argc, char **argv)
 	static struct option long_options[] = {
 		{ "pgctl", required_argument, NULL, 'C' },
 		{ "pgdata", required_argument, NULL, 'D' },
-		{ "pghost", required_argument, NULL, 'h' },
+		{ "pghost", required_argument, NULL, 'H' },
 		{ "pgport", required_argument, NULL, 'p' },
 		{ "listen", required_argument, NULL, 'l' },
 		{ "proxyport", required_argument, NULL, 'y' },
@@ -247,6 +247,7 @@ keeper_cli_keeper_setup_getopts(int argc, char **argv)
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
+		{ "help", no_argument, NULL, 'h' },
 		{ NULL, 0, NULL, 0 }
 	};
 
@@ -262,7 +263,7 @@ keeper_cli_keeper_setup_getopts(int argc, char **argv)
 
 	int optind =
 		cli_create_node_getopts(argc, argv,
-								long_options, "C:D:h:p:l:y:U:A:d:n:f:g:m:RVvq",
+								long_options, "C:D:h:p:l:y:U:A:d:n:f:g:m:RVvqh",
 								&options);
 
 	/* publish our option parsing in the global variable */

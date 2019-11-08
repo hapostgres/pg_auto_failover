@@ -281,12 +281,13 @@ cli_getopt_pgdata_and_mode(int argc, char **argv)
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
+		{ "help", no_argument, NULL, 'h' },
 		{ NULL, 0, NULL, 0 }
 	};
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "D:fi",
+	while ((c = getopt_long(argc, argv, "D:fiVvqh",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -352,6 +353,13 @@ cli_getopt_pgdata_and_mode(int argc, char **argv)
 			case 'q':
 			{
 				log_set_level(LOG_ERROR);
+				break;
+			}
+
+			case 'h':
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_QUIT);
 				break;
 			}
 

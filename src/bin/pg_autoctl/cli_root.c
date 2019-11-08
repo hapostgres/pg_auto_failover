@@ -118,14 +118,15 @@ root_options(int argc, char **argv)
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
-		{ NULL, 0, NULL, 0 }
+		{ "help", no_argument, NULL, 'h' },
+	{ NULL, 0, NULL, 0 }
 	};
 
 	int c, option_index, errors = 0;
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "Vvq",
+	while ((c = getopt_long(argc, argv, "Vvqh",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -160,6 +161,13 @@ root_options(int argc, char **argv)
 			case 'q':
 			{
 				log_set_level(LOG_ERROR);
+				break;
+			}
+
+			case 'h':
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_QUIT);
 				break;
 			}
 

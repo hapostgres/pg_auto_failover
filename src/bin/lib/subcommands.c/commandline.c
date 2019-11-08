@@ -44,6 +44,8 @@ commandline_run(CommandLine *command, int argc, char **argv)
 		return;
 	}
 
+	current_command = command;
+
 	/* Otherwise let the command parse any options that occur here. */
 	if (command->getopt != NULL)
 	{
@@ -59,7 +61,6 @@ commandline_run(CommandLine *command, int argc, char **argv)
 
 	if (command->run != NULL)
 	{
-		current_command = command;
 		return command->run(argc, argv);
 	}
 	else if (argc == 0)

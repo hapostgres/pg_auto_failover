@@ -11,6 +11,8 @@
 #include <inttypes.h>
 #include <getopt.h>
 
+#include "commandline.h"
+
 #include "cli_common.h"
 #include "cli_root.h"
 #include "commandline.h"
@@ -36,19 +38,22 @@ bool allowRemovingPgdata = false;
  *	static struct option long_options[] = {
  *		{ "pgctl", required_argument, NULL, 'C' },
  *		{ "pgdata", required_argument, NULL, 'D' },
- *		{ "pghost", required_argument, NULL, 'h' },
+ *		{ "pghost", required_argument, NULL, 'H' },
  *		{ "pgport", required_argument, NULL, 'p' },
  *		{ "listen", required_argument, NULL, 'l' },
  *		{ "proxyport", required_argument, NULL, 'y' },
  *		{ "username", required_argument, NULL, 'U' },
-		{ "auth", required_argument, NULL, 'A' },
+ *		{ "auth", required_argument, NULL, 'A' },
  *		{ "dbname", required_argument, NULL, 'd' },
  *		{ "nodename", required_argument, NULL, 'n' },
  *		{ "formation", required_argument, NULL, 'f' },
  *		{ "group", required_argument, NULL, 'g' },
  *		{ "monitor", required_argument, NULL, 'm' },
  *		{ "allow-removing-pgdata", no_argument, NULL, 'R' },
- *		{ "help", no_argument, NULL, 0 },
+ *		{ "version", no_argument, NULL, 'V' },
+ *		{ "verbose", no_argument, NULL, 'v' },
+ *		{ "quiet", no_argument, NULL, 'q' },
+ *		{ "help", no_argument, NULL, 'h' },
  *		{ NULL, 0, NULL, 0 }
  *	};
  *
@@ -100,7 +105,7 @@ cli_create_node_getopts(int argc, char **argv,
 				break;
 			}
 
-			case 'h':
+			case 'H':
 			{
 				/* { "pghost", required_argument, NULL, 'h' } */
 				strlcpy(LocalOptionConfig.pgSetup.pghost, optarg, _POSIX_HOST_NAME_MAX);
@@ -252,6 +257,13 @@ cli_create_node_getopts(int argc, char **argv,
 				break;
 			}
 
+			case 'h':
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_QUIT);
+				break;
+			}
+
 			default:
 			{
 				/* getopt_long already wrote an error message */
@@ -309,6 +321,7 @@ keeper_cli_getopt_pgdata(int argc, char **argv)
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
+		{ "help", no_argument, NULL, 'h' },
 		{ NULL, 0, NULL, 0 }
 	};
 	optind = 0;
@@ -323,7 +336,7 @@ keeper_cli_getopt_pgdata(int argc, char **argv)
 	 */
 	unsetenv("POSIXLY_CORRECT");
 
-	while ((c = getopt_long(argc, argv, "D:Vvq",
+	while ((c = getopt_long(argc, argv, "D:Vvqh",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -365,6 +378,13 @@ keeper_cli_getopt_pgdata(int argc, char **argv)
 			case 'q':
 			{
 				log_set_level(LOG_ERROR);
+				break;
+			}
+
+			case 'h':
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_QUIT);
 				break;
 			}
 
