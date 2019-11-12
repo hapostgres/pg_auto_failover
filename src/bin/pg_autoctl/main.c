@@ -48,6 +48,10 @@ main(int argc, char **argv)
 	 *
 	 * GNU and modern getopt() implementation will reorder the command
 	 * arguments, making a mess of our nice subcommands facility.
+	 *
+	 * Note that we call unsetenv("POSIXLY_CORRECT"); before parsing options
+	 * for commands that are the final sub-command of their chain and when we
+	 * might mix options and arguments.
 	 */
 	setenv("POSIXLY_CORRECT", "1", 1);
 

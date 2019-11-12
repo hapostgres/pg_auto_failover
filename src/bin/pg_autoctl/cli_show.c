@@ -79,13 +79,18 @@ static int
 cli_show_state_getopts(int argc, char **argv)
 {
 	KeeperConfig options = { 0 };
-	int c, option_index = 0;
+	int c, option_index = 0, errors = 0;
+	int verboseCount = 0;
 
 	static struct option long_options[] = {
 		{ "pgdata", required_argument, NULL, 'D' },
 		{ "formation", required_argument, NULL, 'f' },
 		{ "group", required_argument, NULL, 'g' },
 		{ "count", required_argument, NULL, 'n' },
+		{ "version", no_argument, NULL, 'V' },
+		{ "verbose", no_argument, NULL, 'v' },
+		{ "quiet", no_argument, NULL, 'q' },
+		{ "help", no_argument, NULL, 'h' },
 		{ NULL, 0, NULL, 0 }
 	};
 
@@ -101,7 +106,7 @@ cli_show_state_getopts(int argc, char **argv)
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "D:f:g:n:",
+	while ((c = getopt_long(argc, argv, "D:f:g:n:Vvqh",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -145,7 +150,60 @@ cli_show_state_getopts(int argc, char **argv)
 				log_trace("--count %d", eventCount);
 				break;
 			}
+
+			case 'V':
+			{
+				/* keeper_cli_print_version prints version and exits. */
+				keeper_cli_print_version(argc, argv);
+				break;
+			}
+
+			case 'v':
+			{
+				++verboseCount;
+				switch (verboseCount)
+				{
+					case 1:
+						log_set_level(LOG_INFO);
+						break;
+
+					case 2:
+						log_set_level(LOG_DEBUG);
+						break;
+
+					default:
+						log_set_level(LOG_TRACE);
+						break;
+				}
+				break;
+			}
+
+			case 'q':
+			{
+				log_set_level(LOG_ERROR);
+				break;
+			}
+
+			case 'h':
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_QUIT);
+				break;
+			}
+
+			default:
+			{
+				/* getopt_long already wrote an error message */
+				errors++;
+				break;
+			}
 		}
+	}
+
+	if (errors > 0)
+	{
+		commandline_help(stderr);
+		exit(EXIT_CODE_BAD_ARGS);
 	}
 
 	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
@@ -234,10 +292,15 @@ cli_show_uri_getopts(int argc, char **argv)
 {
 	KeeperConfig options = { 0 };
 	int c, option_index = 0;
+	int verboseCount = 0;
 
 	static struct option long_options[] = {
 		{ "pgdata", required_argument, NULL, 'D' },
 		{ "formation", required_argument, NULL, 'f' },
+		{ "version", no_argument, NULL, 'V' },
+		{ "verbose", no_argument, NULL, 'v' },
+		{ "quiet", no_argument, NULL, 'q' },
+		{ "help", no_argument, NULL, 'h' },
 		{ NULL, 0, NULL, 0 }
 	};
 
@@ -251,7 +314,7 @@ cli_show_uri_getopts(int argc, char **argv)
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "D:f:m",
+	while ((c = getopt_long(argc, argv, "D:f:Vvqh",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -270,9 +333,50 @@ cli_show_uri_getopts(int argc, char **argv)
 				break;
 			}
 
+			case 'V':
+			{
+				/* keeper_cli_print_version prints version and exits. */
+				keeper_cli_print_version(argc, argv);
+				break;
+			}
+
+			case 'v':
+			{
+				++verboseCount;
+				switch (verboseCount)
+				{
+					case 1:
+						log_set_level(LOG_INFO);
+						break;
+
+					case 2:
+						log_set_level(LOG_DEBUG);
+						break;
+
+					default:
+						log_set_level(LOG_TRACE);
+						break;
+				}
+				break;
+			}
+
+			case 'q':
+			{
+				log_set_level(LOG_ERROR);
+				break;
+			}
+
+			case 'h':
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_QUIT);
+				break;
+			}
+
 			default:
 			{
 				log_error("Failed to parse command line, see above for details.");
+				commandline_help(stderr);
 				exit(EXIT_CODE_BAD_ARGS);
 				break;
 			}

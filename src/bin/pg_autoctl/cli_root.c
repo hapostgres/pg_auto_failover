@@ -118,14 +118,15 @@ root_options(int argc, char **argv)
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
-		{ NULL, 0, NULL, 0 }
+		{ "help", no_argument, NULL, 'h' },
+	{ NULL, 0, NULL, 0 }
 	};
 
 	int c, option_index, errors = 0;
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "Vvq",
+	while ((c = getopt_long(argc, argv, "Vvqh",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -163,6 +164,13 @@ root_options(int argc, char **argv)
 				break;
 			}
 
+			case 'h':
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_QUIT);
+				break;
+			}
+
 			default:
 			{
 				/* getopt_long already wrote an error message */
@@ -178,33 +186,4 @@ root_options(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 	return optind;
-}
-
-
-/*
- * Provide help.
- */
-void
-keeper_cli_help(int argc, char **argv)
-{
-	CommandLine command = root;
-
-	if (getenv(PG_AUTOCTL_DEBUG) != NULL)
-	{
-		command = root_with_debug;
-	}
-
-	(void) commandline_print_command_tree(&command, stdout);
-}
-
-
-/*
- * keeper_cli_print_version prints the pg_autoctl version and exits with
- * successful exit code of zero.
- */
-void
-keeper_cli_print_version(int argc, char **argv)
-{
-	fprintf(stdout, "pg_autoctl version %s\n", PG_AUTOCTL_VERSION);
-	exit(0);
 }
