@@ -66,7 +66,7 @@ local_postgres_init(LocalPostgresServer *postgres, PostgresSetup *pgSetup)
 	char connInfo[MAXCONNINFO];
 
 	pg_setup_get_local_connection_string(pgSetup, connInfo);
-	pgsql_init(&postgres->sqlClient, connInfo);
+	pgsql_init(&postgres->sqlClient, connInfo, PGSQL_CONN_LOCAL);
 
 	postgres->postgresSetup = *pgSetup;
 

@@ -467,7 +467,7 @@ keeper_update_pg_state(Keeper *keeper)
 		 * discovered.
 		 */
 		pg_setup_get_local_connection_string(pgSetup, connInfo);
-		pgsql_init(pgsql, connInfo);
+		pgsql_init(pgsql, connInfo, PGSQL_CONN_LOCAL);
 	}
 	else
 	{

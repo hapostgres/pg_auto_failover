@@ -6,6 +6,7 @@
  * Licensed under the PostgreSQL License.
  *
  */
+#include <unistd.h>
 
 #include "postgres_fe.h"
 #include "libpq-fe.h"
@@ -14,6 +15,7 @@
 #include "defaults.h"
 #include "log.h"
 #include "pgsql.h"
+#include "signals.h"
 
 
 #define ERRCODE_DUPLICATE_OBJECT "42710"
@@ -96,8 +98,9 @@ parseSingleValueResult(void *ctx, PGresult *result)
  * URL or connection string.
  */
 bool
-pgsql_init(PGSQL *pgsql, char *url)
+pgsql_init(PGSQL *pgsql, char *url, ConnectionType connectionType)
 {
+	pgsql->connectionType = connectionType;
 	pgsql->connection = NULL;
 
 	if (validate_connection_string(url))
@@ -151,9 +154,124 @@ pgsql_open_connection(PGSQL *pgsql)
 	/* Check to see that the backend connection was successfully made */
 	if (PQstatus(connection) != CONNECTION_OK)
 	{
-		log_error("Connection to database failed: %s", PQerrorMessage(connection));
-		pgsql_finish(pgsql);
-		return NULL;
+		/* We failed to connect to Postgres. When connecting to a local node,
+		 * we are going to handle the situation by probing the postmasted.pid
+		 * file. When connecting to a remove node (monitor or coordinator), we
+		 * want to implement a retry loop: it might be a transient failure,
+		 * such as when the remote node is not ready yet.
+		 */
+		switch (pgsql->connectionType)
+		{
+			case PGSQL_CONN_LOCAL:
+			{
+				log_error("Connection to database failed: %s",
+						  PQerrorMessage(connection));
+				pgsql_finish(pgsql);
+				return NULL;
+			}
+
+			case PGSQL_CONN_MONITOR:
+			case PGSQL_CONN_COORDINATOR:
+			{
+				/* implement a retry loop using PQping */
+				int attempts = 0;
+				bool retry = true;
+				bool connectionOk = false;
+				PGPing rv;
+
+				log_warn("Failed to connect to \"%s\", retrying until "
+						 "the server is ready", pgsql->connectionString);
+
+				while (retry)
+				{
+					++attempts;
+					switch (PQping(pgsql->connectionString))
+					{
+						case PQPING_OK:
+						{
+							log_debug("PQping OK after %d attempts", attempts);
+							retry = false;
+
+							/*
+							 * Ping is now ok, and connection is still NULL
+							 * because the first attempt to connect failed. Now
+							 * is a good time to establish the connection.
+							 *
+							 * PQping does not check authentication, so we
+							 * might still fail to connect to the server.
+							 */
+							connection = PQconnectdb(pgsql->connectionString);
+
+							if (PQstatus(connection) == CONNECTION_OK)
+							{
+								connectionOk = true;
+							}
+							else
+							{
+								log_error("Failed to connect after successful "
+										  "ping, please verify authentication "
+										  "and logs on the server at \"%s\"",
+										  pgsql->connectionString);
+							}
+							break;
+						}
+
+						case PQPING_REJECT:
+						{
+							log_error("Connection rejected: \"%s\"",
+									  pgsql->connectionString);
+							retry = false;
+							break;
+						}
+
+						case PQPING_NO_RESPONSE:
+						{
+							log_debug("PQping: no response after %d attempts",
+									  attempts);
+							retry = true;
+							break;
+						}
+
+						case PQPING_NO_ATTEMPT:
+						{
+							log_error("Failed to ping server \"%s\" because of "
+									  "client-side problems "
+									  "(no attempt were made)",
+									  pgsql->connectionString);
+							retry = false;
+							break;
+						}
+					}
+
+					if (asked_to_stop || asked_to_stop_fast)
+					{
+						retry = false;
+					}
+
+					if (retry)
+					{
+						sleep(PG_AUTOCTL_KEEPER_SLEEP_TIME);
+					}
+				}
+
+				if (!connectionOk)
+				{
+					log_error("Connection to database failed: %s",
+							  PQerrorMessage(connection));
+					pgsql_finish(pgsql);
+					return NULL;
+				}
+				break;
+			}
+
+			default:
+			{
+				/* should never happen */
+				log_error("BUG: unknown connection type %d",
+						  pgsql->connectionType);
+				return NULL;
+			}
+		}
 	}
 
 	pgsql->connection = connection;
