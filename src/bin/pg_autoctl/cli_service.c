@@ -272,17 +272,22 @@ cli_getopt_pgdata_and_mode(int argc, char **argv)
 {
 	KeeperConfig options = { 0 };
 	int c, option_index = 0;
+	int verboseCount = 0;
 
 	static struct option long_options[] = {
 		{ "pgdata", required_argument, NULL, 'D' },
 		{ "fast", no_argument, NULL, 'f' },
 		{ "immediate", no_argument, NULL, 'i' },
+		{ "version", no_argument, NULL, 'V' },
+		{ "verbose", no_argument, NULL, 'v' },
+		{ "quiet", no_argument, NULL, 'q' },
+		{ "help", no_argument, NULL, 'h' },
 		{ NULL, 0, NULL, 0 }
 	};
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "D:fi",
+	while ((c = getopt_long(argc, argv, "D:fiVvqh",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -315,6 +320,46 @@ cli_getopt_pgdata_and_mode(int argc, char **argv)
 					exit(EXIT_CODE_BAD_ARGS);
 				}
 				stop_signal = SIGQUIT;
+				break;
+			}
+
+			case 'V':
+			{
+				/* keeper_cli_print_version prints version and exits. */
+				keeper_cli_print_version(argc, argv);
+				break;
+			}
+
+			case 'v':
+			{
+				++verboseCount;
+				switch (verboseCount)
+				{
+					case 1:
+						log_set_level(LOG_INFO);
+						break;
+
+					case 2:
+						log_set_level(LOG_DEBUG);
+						break;
+
+					default:
+						log_set_level(LOG_TRACE);
+						break;
+				}
+				break;
+			}
+
+			case 'q':
+			{
+				log_set_level(LOG_ERROR);
+				break;
+			}
+
+			case 'h':
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_QUIT);
 				break;
 			}
 

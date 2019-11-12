@@ -193,7 +193,7 @@ cli_create_postgres_getopts(int argc, char **argv)
 	static struct option long_options[] = {
 		{ "pgctl", required_argument, NULL, 'C' },
 		{ "pgdata", required_argument, NULL, 'D' },
-		{ "pghost", required_argument, NULL, 'h' },
+		{ "pghost", required_argument, NULL, 'H' },
 		{ "pgport", required_argument, NULL, 'p' },
 		{ "listen", required_argument, NULL, 'l' },
 		{ "username", required_argument, NULL, 'U' },
@@ -203,13 +203,16 @@ cli_create_postgres_getopts(int argc, char **argv)
 		{ "formation", required_argument, NULL, 'f' },
 		{ "monitor", required_argument, NULL, 'm' },
 		{ "allow-removing-pgdata", no_argument, NULL, 'R' },
-		{ "help", no_argument, NULL, 0 },
+		{ "version", no_argument, NULL, 'V' },
+		{ "verbose", no_argument, NULL, 'v' },
+		{ "quiet", no_argument, NULL, 'q' },
+ 		{ "help", no_argument, NULL, 'h' },
 		{ NULL, 0, NULL, 0 }
 	};
 
 	int optind =
 		cli_create_node_getopts(argc, argv,
-								long_options, "C:D:h:p:l:U:A:d:n:f:m:R",
+								long_options, "C:D:H:p:l:U:A:d:n:f:m:RVvqh",
 								&options);
 
 	/* publish our option parsing in the global variable */
@@ -258,6 +261,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 {
 	MonitorConfig options = { 0 };
 	int c, option_index, errors = 0;
+	int verboseCount = 0;
 
 	static struct option long_options[] = {
 		{ "pgctl", required_argument, NULL, 'C' },
@@ -266,7 +270,10 @@ cli_create_monitor_getopts(int argc, char **argv)
 		{ "nodename", required_argument, NULL, 'n' },
 		{ "listen", required_argument, NULL, 'l' },
 		{ "auth", required_argument, NULL, 'A' },
-		{ "help", no_argument, NULL, 0 },
+		{ "version", no_argument, NULL, 'V' },
+		{ "verbose", no_argument, NULL, 'v' },
+		{ "quiet", no_argument, NULL, 'q' },
+ 		{ "help", no_argument, NULL, 'h' },
 		{ NULL, 0, NULL, 0 }
 	};
 
@@ -275,7 +282,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "C:D:p:A:",
+	while ((c = getopt_long(argc, argv, "C:D:p:A:Vvqh",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -327,6 +334,47 @@ cli_create_monitor_getopts(int argc, char **argv)
 				log_trace("--auth %s", options.pgSetup.authMethod);
 				break;
 			}
+
+			case 'V':
+			{
+				/* keeper_cli_print_version prints version and exits. */
+				keeper_cli_print_version(argc, argv);
+				break;
+			}
+
+			case 'v':
+			{
+				++verboseCount;
+				switch (verboseCount)
+				{
+					case 1:
+						log_set_level(LOG_INFO);
+						break;
+
+					case 2:
+						log_set_level(LOG_DEBUG);
+						break;
+
+					default:
+						log_set_level(LOG_TRACE);
+						break;
+				}
+				break;
+			}
+
+			case 'q':
+			{
+				log_set_level(LOG_ERROR);
+				break;
+			}
+
+			case 'h':
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_QUIT);
+				break;
+			}
+
 			default:
 			{
 				/* getopt_long already wrote an error message */
@@ -334,6 +382,12 @@ cli_create_monitor_getopts(int argc, char **argv)
 				break;
 			}
 		}
+	}
+
+	if (errors > 0)
+	{
+		commandline_help(stderr);
+		exit(EXIT_CODE_BAD_ARGS);
 	}
 
 	/*

@@ -87,27 +87,31 @@ CommandLine disable_commands =
 
 
 /*
- * cli_secondary_getopts parses command line options for the secondary feature, both
- * during enable and disable. Little verification is performed however the function will
- * error when no --pgdata or --formation are provided, existance of either are not
- * verified.
+ * cli_secondary_getopts parses command line options for the secondary feature,
+ * both during enable and disable. Little verification is performed however the
+ * function will error when no --pgdata or --formation are provided, existance
+ * of either are not verified.
  */
 static int
 cli_secondary_getopts(int argc, char **argv)
 {
 	KeeperConfig options = { 0 };
 	int c, option_index, errors = 0;
+	int verboseCount = 0;
 
 	static struct option long_options[] = {
-			{ "pgdata", required_argument, NULL, 'D' },
-			{ "formation", required_argument, NULL, 'f' },
-			{ "help", no_argument, NULL, 0 },
-			{ NULL, 0, NULL, 0 }
+		{ "pgdata", required_argument, NULL, 'D' },
+		{ "formation", required_argument, NULL, 'f' },
+		{ "version", no_argument, NULL, 'V' },
+		{ "verbose", no_argument, NULL, 'v' },
+		{ "quiet", no_argument, NULL, 'q' },
+		{ "help", no_argument, NULL, 'h' },
+		{ NULL, 0, NULL, 0 }
 	};
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "D:f:",
+	while ((c = getopt_long(argc, argv, "D:f:Vvqh",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -126,6 +130,46 @@ cli_secondary_getopts(int argc, char **argv)
 				break;
 			}
 
+			case 'V':
+			{
+				/* keeper_cli_print_version prints version and exits. */
+				keeper_cli_print_version(argc, argv);
+				break;
+			}
+
+			case 'v':
+			{
+				++verboseCount;
+				switch (verboseCount)
+				{
+					case 1:
+						log_set_level(LOG_INFO);
+						break;
+
+					case 2:
+						log_set_level(LOG_DEBUG);
+						break;
+
+					default:
+						log_set_level(LOG_TRACE);
+						break;
+				}
+				break;
+			}
+
+			case 'q':
+			{
+				log_set_level(LOG_ERROR);
+				break;
+			}
+
+			case 'h':
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_QUIT);
+				break;
+			}
+
 			default:
 			{
 				/* getopt_long already wrote an error message */
@@ -133,6 +177,12 @@ cli_secondary_getopts(int argc, char **argv)
 				break;
 			}
 		}
+	}
+
+	if (errors > 0)
+	{
+		commandline_help(stderr);
+		exit(EXIT_CODE_BAD_ARGS);
 	}
 
 	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))

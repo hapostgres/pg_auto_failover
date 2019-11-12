@@ -232,7 +232,7 @@ keeper_cli_keeper_setup_getopts(int argc, char **argv)
 	static struct option long_options[] = {
 		{ "pgctl", required_argument, NULL, 'C' },
 		{ "pgdata", required_argument, NULL, 'D' },
-		{ "pghost", required_argument, NULL, 'h' },
+		{ "pghost", required_argument, NULL, 'H' },
 		{ "pgport", required_argument, NULL, 'p' },
 		{ "listen", required_argument, NULL, 'l' },
 		{ "proxyport", required_argument, NULL, 'y' },
@@ -244,13 +244,26 @@ keeper_cli_keeper_setup_getopts(int argc, char **argv)
 		{ "group", required_argument, NULL, 'g' },
 		{ "monitor", required_argument, NULL, 'm' },
 		{ "allow-removing-pgdata", no_argument, NULL, 'R' },
-		{ "help", no_argument, NULL, 0 },
+		{ "version", no_argument, NULL, 'V' },
+		{ "verbose", no_argument, NULL, 'v' },
+		{ "quiet", no_argument, NULL, 'q' },
+		{ "help", no_argument, NULL, 'h' },
 		{ NULL, 0, NULL, 0 }
 	};
 
+	/*
+	 * The only command lines that are using keeper_cli_getopt_pgdata are
+	 * terminal ones: they don't accept subcommands. In that case our option
+	 * parsing can happen in any order and we don't need getopt_long to behave
+	 * in a POSIXLY_CORRECT way.
+	 *
+	 * The unsetenv() call allows getopt_long() to reorder arguments for us.
+	 */
+	unsetenv("POSIXLY_CORRECT");
+
 	int optind =
 		cli_create_node_getopts(argc, argv,
-								long_options, "C:D:h:p:l:y:U:A:d:n:f:g:m:R",
+								long_options, "C:D:H:p:l:y:U:A:d:n:f:g:m:RVvqh",
 								&options);
 
 	/* publish our option parsing in the global variable */
