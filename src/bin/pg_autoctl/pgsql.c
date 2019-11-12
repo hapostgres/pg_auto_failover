@@ -217,7 +217,6 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 	int attempts = 0;
 	bool retry = true;
 	bool connectionOk = false;
-	PGPing rv;
 	uint64_t startTime = time(NULL);
 
 	log_warn("Failed to connect to \"%s\", retrying until "
