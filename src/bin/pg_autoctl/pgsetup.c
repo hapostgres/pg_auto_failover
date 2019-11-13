@@ -379,7 +379,7 @@ pg_setup_init(PostgresSetup *pgSetup,
 
 		/* initialise a SQL connection to the local postgres server */
 		pg_setup_get_local_connection_string(pgSetup, connInfo);
-		pgsql_init(&pgsql, connInfo);
+		pgsql_init(&pgsql, connInfo, PGSQL_CONN_LOCAL);
 
 		if (!pgsql_is_in_recovery(&pgsql, &pgSetup->is_in_recovery))
 		{

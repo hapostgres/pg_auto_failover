@@ -211,7 +211,7 @@ monitor_install(const char *nodename,
 	/* now, connect to the newly created database to create our extension */
 	strlcpy(pgSetup.dbname, PG_AUTOCTL_MONITOR_DBNAME, NAMEDATALEN);
 	pg_setup_get_local_connection_string(&pgSetup, connInfo);
-	pgsql_init(&postgres.sqlClient, connInfo);
+	pgsql_init(&postgres.sqlClient, connInfo, PGSQL_CONN_LOCAL);
 
 	if (!pgsql_create_extension(&postgres.sqlClient,
 								PG_AUTOCTL_MONITOR_EXTENSION_NAME))
@@ -273,7 +273,7 @@ check_monitor_settings(PostgresSetup pgSetup)
 	bool settingsAreOk = false;
 
 	pg_setup_get_local_connection_string(&pgSetup, connInfo);
-	pgsql_init(&postgres.sqlClient, connInfo);
+	pgsql_init(&postgres.sqlClient, connInfo, PGSQL_CONN_LOCAL);
 
 	if (!pgsql_check_monitor_settings(&(postgres.sqlClient), &settingsAreOk))
 	{

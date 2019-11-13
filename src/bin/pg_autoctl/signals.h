@@ -11,6 +11,7 @@
 #define SIGNALS_H
 
 #include <inttypes.h>
+#include <signal.h>
 
 /* This flag controls termination of the main loop. */
 extern volatile sig_atomic_t asked_to_stop;		 /* SIGTERM */
