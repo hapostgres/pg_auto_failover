@@ -47,10 +47,18 @@
 
 
 /* abstract representation of a Postgres server that we can connect to */
+typedef enum
+{
+	PGSQL_CONN_LOCAL = 0,
+	PGSQL_CONN_MONITOR,
+	PGSQL_CONN_COORDINATOR
+} ConnectionType;
+
 typedef struct PGSQL
 {
-	char	connectionString[MAXCONNINFO];
-	PGconn *connection;
+	ConnectionType	connectionType;
+	char			connectionString[MAXCONNINFO];
+	PGconn		   *connection;
 } PGSQL;
 
 /* PostgreSQL ("Grand Unified Configuration") setting */
@@ -132,7 +140,7 @@ typedef struct SingleValueResultContext
 	"with ordinality ast(lib, n) where n = 1"				\
 	") as t(ok) "
 
-bool pgsql_init(PGSQL *pgsql, char *url);
+bool pgsql_init(PGSQL *pgsql, char *url, ConnectionType connectionType);
 void pgsql_finish(PGSQL *pgsql);
 void parseSingleValueResult(void *ctx, PGresult *result);
 bool pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,

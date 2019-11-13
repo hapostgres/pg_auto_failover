@@ -228,6 +228,7 @@ int
 keeper_cli_keeper_setup_getopts(int argc, char **argv)
 {
 	KeeperConfig options = { 0 };
+	int optind;
 
 	static struct option long_options[] = {
 		{ "pgctl", required_argument, NULL, 'C' },
@@ -261,10 +262,10 @@ keeper_cli_keeper_setup_getopts(int argc, char **argv)
 	 */
 	unsetenv("POSIXLY_CORRECT");
 
-	int optind =
-		cli_create_node_getopts(argc, argv,
-								long_options, "C:D:H:p:l:y:U:A:d:n:f:g:m:RVvqh",
-								&options);
+	optind = cli_create_node_getopts(argc, argv,
+									 long_options,
+									 "C:D:H:p:l:y:U:A:d:n:f:g:m:RVvqh",
+									 &options);
 
 	/* publish our option parsing in the global variable */
 	keeperOptions = options;
