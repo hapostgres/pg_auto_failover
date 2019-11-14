@@ -1,6 +1,5 @@
 import pgautofailover_utils as pgautofailover
 from nose.tools import *
-import time
 
 cluster = None
 node1 = None
@@ -34,7 +33,7 @@ def test_003_init_secondary():
     global node2
     node2 = cluster.create_datanode("/tmp/auth/node2", authMethod="md5")
     node2.create()
-    # no need to set passwords here because it will be inherited prom the primary
+    # no need to set passwords here because it will be inherited from the primary
     node2.run()
     assert node2.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")

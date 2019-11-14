@@ -177,8 +177,7 @@ monitor_config_init(MonitorConfig *config,
  * `pg_autoctl do destroy`.
  */
 bool
-monitor_config_init_from_pgsetup(Monitor *monitor,
-								 MonitorConfig *mconfig,
+monitor_config_init_from_pgsetup(MonitorConfig *mconfig,
 								 PostgresSetup *pgSetup,
 								 bool missingPgdataIsOk,
 								 bool pgIsNotRunningIsOk)

@@ -191,14 +191,12 @@ cli_monitor_run(int argc, char **argv)
 	MonitorConfig mconfig = { 0 };
 	Monitor monitor = { 0 };
 	MonitorExtensionVersion version = { 0 };
-	char postgresUri[MAXCONNINFO];
 	bool missingPgdataIsOk = false;
 	bool pgIsNotRunningIsOk = true;
 	char connInfo[MAXCONNINFO];
 	char *channels[] = { "log", "state", NULL };
 
-	if (!monitor_config_init_from_pgsetup(&monitor,
-										  &mconfig,
+	if (!monitor_config_init_from_pgsetup(&mconfig,
 										  &kconfig.pgSetup,
 										  missingPgdataIsOk,
 										  pgIsNotRunningIsOk))
@@ -210,37 +208,7 @@ cli_monitor_run(int argc, char **argv)
 	pg_setup_get_local_connection_string(&(mconfig.pgSetup), connInfo);
 	monitor_init(&monitor, connInfo);
 
-	if (!pg_is_running(mconfig.pgSetup.pg_ctl, mconfig.pgSetup.pgdata))
-	{
-		log_info("Postgres is not running, starting postgres");
-
-		if (!pg_ctl_start(mconfig.pgSetup.pg_ctl,
-						  mconfig.pgSetup.pgdata,
-						  mconfig.pgSetup.pgport,
-						  mconfig.pgSetup.listen_addresses))
-		{
-			log_error("Failed to start PostgreSQL, see above for details");
-			exit(EXIT_CODE_PGCTL);
-		}
-	}
-
-	log_info("PostgreSQL is running in \"%s\" on port %d",
-			 mconfig.pgSetup.pgdata, mconfig.pgSetup.pgport);
-
-	/* Check version compatibility */
-	if (!monitor_ensure_extension_version(&monitor, &version))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_MONITOR);
-	}
-
-	/* Now get the the Monitor URI to display it to the user, and move along */
-	if (monitor_config_get_postgres_uri(&mconfig, postgresUri, MAXCONNINFO))
-	{
-		log_info("pg_auto_failover monitor is ready at %s", postgresUri);
-	}
-
-	(void) monitor_listen_loop(&monitor);
+	(void) monitor_service_run(&monitor, &mconfig);
 }
 
 

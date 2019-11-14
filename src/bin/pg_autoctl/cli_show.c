@@ -541,8 +541,7 @@ cli_show_monitor_uri(int argc, char **argv)
 			bool pgIsNotRunningIsOk = true;
 			char connInfo[MAXCONNINFO];
 
-			if (!monitor_config_init_from_pgsetup(&monitor,
-												  &mconfig,
+			if (!monitor_config_init_from_pgsetup(&mconfig,
 												  &kconfig.pgSetup,
 												  missingPgdataIsOk,
 												  pgIsNotRunningIsOk))
