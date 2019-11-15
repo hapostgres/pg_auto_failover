@@ -453,6 +453,7 @@ keeper_update_pg_state(Keeper *keeper)
 	 */
 	if (pg_setup_is_ready(pgSetup, pg_is_not_running_is_ok))
 	{
+		bool updateConfig = false;
 		char connInfo[MAXCONNINFO];
 
 		if (pgSetup->pidFile.port != config->pgSetup.pgport)
@@ -512,12 +513,45 @@ keeper_update_pg_state(Keeper *keeper)
 			return false;
 		}
 
+		if (strcmp(pgSetup->pgConfigPath.conf,
+				   config->pgSetup.pgConfigPath.conf) != 0)
+		{
+			updateConfig = true;
+			log_warn("Postgres config_file has changed from \"%s\" to \"%s\"",
+					 config->pgSetup.pgConfigPath.conf,
+					 pgSetup->pgConfigPath.conf);
+
+			strlcpy(config->pgSetup.pgConfigPath.conf,
+					pgSetup->pgConfigPath.conf, MAXPGPATH);
+		}
+
 		if (!pgsql_get_hba_file_path(pgsql,
 									 pgSetup->pgConfigPath.hba, MAXPGPATH))
 		{
 			log_error("Failed to obtain the HBA file path from the local "
 					  "PostgreSQL server.");
 			return false;
+		}
+
+		if (strcmp(pgSetup->pgConfigPath.hba,
+				   config->pgSetup.pgConfigPath.hba) != 0)
+		{
+			updateConfig = true;
+			log_warn("Postgres hba_file has changed from \"%s\" to \"%s\"",
+					 config->pgSetup.pgConfigPath.conf,
+					 pgSetup->pgConfigPath.conf);
+
+			strlcpy(config->pgSetup.pgConfigPath.hba,
+					pgSetup->pgConfigPath.hba, MAXPGPATH);
+		}
+
+		if (updateConfig)
+		{
+			if (!keeper_config_write_file(config))
+			{
+				/* errors have already been logged */
+				return false;
+			}
 		}
 	}
 	else
