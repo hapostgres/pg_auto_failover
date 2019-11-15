@@ -296,7 +296,6 @@ primary_disable_synchronous_replication(LocalPostgresServer *postgres)
 bool
 postgres_add_default_settings(LocalPostgresServer *postgres)
 {
-	PGSQL *pgsql = &(postgres->sqlClient);
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	GUC *default_settings = postgres_default_settings;
 
@@ -369,7 +368,8 @@ primary_create_user_with_hba(LocalPostgresServer *postgres, char *userName,
  * to connect for replication.
  */
 bool
-primary_create_replication_user(LocalPostgresServer *postgres, char *replicationUsername,
+primary_create_replication_user(LocalPostgresServer *postgres,
+								char *replicationUsername,
 								char *replicationPassword)
 {
 	bool result = false;
@@ -522,7 +522,6 @@ bool
 primary_rewind_to_standby(LocalPostgresServer *postgres,
 						  ReplicationSource *replicationSource)
 {
-	PGSQL *pgsql = &(postgres->sqlClient);
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	NodeAddress *primaryNode = &(replicationSource->primaryNode);
 

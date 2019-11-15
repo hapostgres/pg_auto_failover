@@ -517,7 +517,7 @@ keeper_update_pg_state(Keeper *keeper)
 		{
 			log_error("Failed to obtain the HBA file path from the local "
 					  "PostgreSQL server.");
-			return false;;
+			return false;
 		}
 	}
 	else
