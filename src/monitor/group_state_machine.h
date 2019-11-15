@@ -28,6 +28,8 @@ typedef struct AutoFailoverNodeState
 	XLogRecPtr 			reportedLSN;
 	SyncState			pgsrSyncState;
 	bool				pgIsRunning;
+	int					candidatePriority;
+	bool				replicationQuorum;
 } AutoFailoverNodeState;
 
 

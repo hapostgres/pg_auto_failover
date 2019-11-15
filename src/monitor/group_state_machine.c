@@ -330,6 +330,8 @@ AssignGoalState(AutoFailoverNode *pgAutoFailoverNode,
 						  pgAutoFailoverNode->nodePort,
 						  pgAutoFailoverNode->pgsrSyncState,
 						  pgAutoFailoverNode->reportedLSN,
+						  pgAutoFailoverNode->candidatePriority,
+						  pgAutoFailoverNode->replicationQuorum,
 						  description);
 	}
 }

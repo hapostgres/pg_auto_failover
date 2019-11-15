@@ -67,6 +67,8 @@ NotifyStateChange(ReplicationState reportedState,
 				  int nodePort,
 				  SyncState pgsrSyncState,
 				  XLogRecPtr reportedLSN,
+				  int candidatePriority,
+				  bool replicationQuorum,
 				  char *description)
 {
 	int64 eventid;
@@ -77,7 +79,7 @@ NotifyStateChange(ReplicationState reportedState,
 	 */
 	eventid = InsertEvent(formationId, groupId, nodeId, nodeName, nodePort,
 						  reportedState, goalState, pgsrSyncState, reportedLSN,
-						  description);
+						  candidatePriority, replicationQuorum, description);
 
 	/*
 	 * Rather than try and escape dots and colon characters from the user
@@ -113,6 +115,8 @@ InsertEvent(const char *formationId, int groupId, int64 nodeId,
 			ReplicationState goalState,
 			SyncState pgsrSyncState,
 			XLogRecPtr reportedLSN,
+			int candidatePriority,
+			bool replicationQuorum,
 			char *description)
 {
 	Oid goalStateOid = ReplicationStateGetEnum(goalState);
@@ -129,7 +133,9 @@ InsertEvent(const char *formationId, int groupId, int64 nodeId,
 		replicationStateTypeOid, /* goalstate */
 		TEXTOID, /* pg_stat_replication.sync_state */
 		LSNOID,  /* reportedLSN */
-		TEXTOID	 /* description */
+		INT4OID, /* candidate_priority */
+		BOOLOID, /* replication_quorum */
+		TEXTOID  /* description */
 	};
 
 	Datum argValues[] = {
@@ -142,6 +148,8 @@ InsertEvent(const char *formationId, int groupId, int64 nodeId,
 		ObjectIdGetDatum(goalStateOid),		/* goalstate */
 		CStringGetTextDatum(SyncStateToString(pgsrSyncState)), /* sync_state */
 		LSNGetDatum(reportedLSN),			/* reportedLSN */
+		Int32GetDatum(candidatePriority),	/* candidate_priority */
+		BoolGetDatum(replicationQuorum), 	/* replication_quorum */
 		CStringGetTextDatum(description)	/* description */
 	};
 
@@ -152,8 +160,8 @@ InsertEvent(const char *formationId, int groupId, int64 nodeId,
 	const char *insertQuery =
 		"INSERT INTO " AUTO_FAILOVER_EVENT_TABLE
 		"(formationid, nodeid, groupid, nodename, nodeport,"
-		" reportedstate, goalstate, reportedrepstate, reportedlsn, description) "
-		"VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING eventid";
+		" reportedstate, goalstate, reportedrepstate, reportedlsn, candidatepriority, replicationquorum, description) "
+		"VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING eventid";
 
 	SPI_connect();
 

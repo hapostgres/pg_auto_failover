@@ -14,10 +14,10 @@
 #define PG_AUTOCTL_STATE_VERSION 1
 
 /* additional version information for printing version on CLI */
-#define PG_AUTOCTL_VERSION "1.0.5"
+#define PG_AUTOCTL_VERSION "1.1.0"
 
 /* version of the extension that we requite to talk to on the monitor */
-#define PG_AUTOCTL_EXTENSION_VERSION "1.0"
+#define PG_AUTOCTL_EXTENSION_VERSION "1.1"
 
 /* environment variable to use to make DEBUG facilities available */
 #define PG_AUTOCTL_DEBUG "PG_AUTOCTL_DEBUG"
@@ -50,6 +50,10 @@
 
 #define POSTGRESQL_FAILS_TO_START_TIMEOUT 20
 #define POSTGRESQL_FAILS_TO_START_RETRIES 3
+
+#define FAILOVER_FORMATION_NUMBER_SYNC_STANBYS 1
+#define FAILOVER_NODE_CANDIDATE_PRIORITY 100
+#define FAILOVER_NODE_REPLICATION_QUORUM true
 
 /* internal default for allocating strings  */
 #define BUFSIZE 1024

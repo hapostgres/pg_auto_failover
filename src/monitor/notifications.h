@@ -48,6 +48,8 @@ int64 NotifyStateChange(ReplicationState reportedState,
 						int nodePort,
 						SyncState pgsrSyncState,
 						XLogRecPtr reportedLSN,
+						int candidatePriority,
+						bool replicationQuorum,
 						char *description);
 
 int64 InsertEvent(const char *formationId, int groupId, int64 nodeId,
@@ -56,4 +58,6 @@ int64 InsertEvent(const char *formationId, int groupId, int64 nodeId,
 				  ReplicationState goalState,
 				  SyncState pgsrSyncState,
 				  XLogRecPtr reportedLSN,
+				  int candidatePriority,
+				  bool replicationQuorum,
 				  char *description);

@@ -35,7 +35,10 @@ PG_FUNCTION_INFO_V1(create_formation);
 PG_FUNCTION_INFO_V1(drop_formation);
 PG_FUNCTION_INFO_V1(enable_secondary);
 PG_FUNCTION_INFO_V1(disable_secondary);
+PG_FUNCTION_INFO_V1(set_formation_number_sync_standbys);
 
+bool SetFormationNumberSyncStandbys(const char *formationId, int numberSyncStanbys);
+Datum AutoFailoverFormationGetDatum(FunctionCallInfo fcinfo, AutoFailoverFormation *formation);
 
 /*
  * GetFormation returns an AutoFailoverFormation structure with the formationId
@@ -89,6 +92,9 @@ GetFormation(const char *formationId)
 		Datum opt_secondary =
 			heap_getattr(heapTuple, Anum_pgautofailover_formation_opt_secondary,
 						 tupleDescriptor, &isNull);
+		Datum number_sync_stanbys =
+				heap_getattr(heapTuple, Anum_pgautofailover_formation_number_sync_stanbys,
+							 tupleDescriptor, &isNull);
 
 		formation =
 			(AutoFailoverFormation *) palloc0(sizeof(AutoFailoverFormation));
@@ -97,6 +103,7 @@ GetFormation(const char *formationId)
 		formation->kind = FormationKindFromString(TextDatumGetCString(kind));
 		strlcpy(formation->dbname, NameStr(*DatumGetName(dbname)), NAMEDATALEN);
 		formation->opt_secondary = DatumGetBool(opt_secondary);
+		formation->number_sync_stanbys = DatumGetInt32(number_sync_stanbys);
 
 		MemoryContextSwitchTo(spiContext);
 	}
@@ -126,32 +133,14 @@ create_formation(PG_FUNCTION_ARGS)
 	FormationKind formationKind = FormationKindFromString(formationKindCString);
 	Name formationDBNameName = PG_GETARG_NAME(2);
 	bool formationOptionSecondary = PG_GETARG_BOOL(3);
-
-	TupleDesc resultDescriptor = NULL;
-	TypeFuncClass resultTypeClass = 0;
+	int  formationNumberSyncStanbys = PG_GETARG_INT32(4);
+	AutoFailoverFormation *formation = NULL;
 	Datum resultDatum = 0;
-	HeapTuple resultTuple = NULL;
-	Datum values[4];
-	bool isNulls[4];
 
-	AddFormation(formationId, formationKind, formationDBNameName, formationOptionSecondary);
+	AddFormation(formationId, formationKind, formationDBNameName, formationOptionSecondary, formationNumberSyncStanbys);
 
-	memset(values, 0, sizeof(values));
-	memset(isNulls, false, sizeof(isNulls));
-
-	values[0] = CStringGetTextDatum(formationId);
-	values[1] = CStringGetTextDatum(formationKindCString);
-	values[2] = NameGetDatum(formationDBNameName);
-	values[3] = BoolGetDatum(formationOptionSecondary);
-
-	resultTypeClass = get_call_result_type(fcinfo, NULL, &resultDescriptor);
-	if (resultTypeClass != TYPEFUNC_COMPOSITE)
-	{
-		ereport(ERROR, (errmsg("return type must be a row type")));
-	}
-
-	resultTuple = heap_form_tuple(resultDescriptor, values, isNulls);
-	resultDatum = HeapTupleGetDatum(resultTuple);
+	formation = GetFormation(formationId);
+	resultDatum = AutoFailoverFormationGetDatum(fcinfo, formation);
 
 	PG_RETURN_DATUM(resultDatum);
 }
@@ -218,20 +207,22 @@ disable_secondary(PG_FUNCTION_ARGS)
  */
 void
 AddFormation(const char *formationId,
-			 FormationKind kind, Name dbname, bool optionSecondary)
+			 FormationKind kind, Name dbname, bool optionSecondary, int numberSyncStanbys)
 {
 	Oid argTypes[] = {
 		TEXTOID, /* formationid */
 		TEXTOID, /* kind */
 		NAMEOID, /* dbname */
-		BOOLOID  /* opt_secondary */
+		BOOLOID, /* opt_secondary */
+		INT4OID  /* number_sync_stanbys */
 	};
 
 	Datum argValues[] = {
 		CStringGetTextDatum(formationId),				  /* formationid */
 		CStringGetTextDatum(FormationKindToString(kind)), /* kind */
 		NameGetDatum(dbname),                             /* dbname */
-		BoolGetDatum(optionSecondary)                     /* opt_secondary */
+		BoolGetDatum(optionSecondary),                    /* opt_secondary */
+		Int32GetDatum(numberSyncStanbys)				  /* number_sync_stanbys */
 	};
 
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
@@ -239,8 +230,8 @@ AddFormation(const char *formationId,
 
 	const char *insertQuery =
 		"INSERT INTO " AUTO_FAILOVER_FORMATION_TABLE
-		" (formationid, kind, dbname, opt_secondary)"
-		" VALUES ($1, $2, $3, $4)";
+		" (formationid, kind, dbname, opt_secondary, number_sync_stanbys)"
+		" VALUES ($1, $2, $3, $4, $5)";
 
 	SPI_connect();
 
@@ -249,7 +240,7 @@ AddFormation(const char *formationId,
 
 	if (spiStatus != SPI_OK_INSERT)
 	{
-		elog(ERROR, "could not insert into " AUTO_FAILOVER_NODE_TABLE);
+		elog(ERROR, "could not insert into " AUTO_FAILOVER_FORMATION_TABLE);
 	}
 
 	SPI_finish();
@@ -286,7 +277,7 @@ RemoveFormation(const char *formationId)
 
 	if (spiStatus != SPI_OK_DELETE)
 	{
-		elog(ERROR, "could not delete from " AUTO_FAILOVER_NODE_TABLE);
+		elog(ERROR, "could not delete from " AUTO_FAILOVER_FORMATION_TABLE);
 	}
 
 	if (SPI_processed == 0)
@@ -519,4 +510,117 @@ bool
 IsCitusFormation(AutoFailoverFormation *formation)
 {
 	return formation->kind == FORMATION_KIND_CITUS;
+}
+
+/*
+ * set_formation_number_sync_standbys sets number_sync_standbys property of a formation.
+ * The function returns true on success.
+ */
+Datum
+set_formation_number_sync_standbys(PG_FUNCTION_ARGS)
+{
+	text *formationIdText = PG_GETARG_TEXT_P(0);
+	char *formationId = text_to_cstring(formationIdText);
+	int number_sync_standbys = -1;
+	AutoFailoverFormation *formation = 	GetFormation(formationId);
+	bool success = false;
+
+	if (formation == NULL)
+	{
+		ereport(ERROR, (ERRCODE_INVALID_PARAMETER_VALUE,
+						errmsg("unknown formation \"%s\"", formationId)));
+	}
+
+
+	number_sync_standbys = PG_GETARG_INT32(1);
+
+	if (number_sync_standbys < 0)
+	{
+		ereport(ERROR, (ERRCODE_INVALID_PARAMETER_VALUE,
+						errmsg("invalid value for  number_sync_stanbys \"%d\" "
+							   "expected a non-negative integer", number_sync_standbys)));
+	}
+
+	success = SetFormationNumberSyncStandbys(formationId, number_sync_standbys);
+
+	PG_RETURN_BOOL(success);
+}
+
+
+/*
+ * SetFormationNumberSyncStandbys sets numberSyncStandbys property
+ * of a formation entry. Returns true if successfull.
+ */
+bool
+SetFormationNumberSyncStandbys(const char *formationId, int numberSyncStandbys)
+{
+	Oid argTypes[] = {
+			INT4OID, /* numberSyncStanbys */
+			TEXTOID	 /* formationId */
+	};
+
+	Datum argValues[] = {
+			Int32GetDatum(numberSyncStandbys), /* numberSyncStanbys */
+			CStringGetTextDatum(formationId)  /* formationId */
+	};
+	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
+	int spiStatus = 0;
+
+	const char *updateQuery =
+			"UPDATE " AUTO_FAILOVER_FORMATION_TABLE
+			" SET number_sync_standbys = $1"
+			" WHERE formationid = $2";
+
+	SPI_connect();
+
+	spiStatus = SPI_execute_with_args(updateQuery,
+									  argCount, argTypes, argValues,
+									  NULL, false, 0);
+	SPI_finish();
+
+	if (spiStatus != SPI_OK_UPDATE)
+	{
+		elog(ERROR, "could not update " AUTO_FAILOVER_FORMATION_TABLE);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * AutoFailoverFormationGetDatum prepares a Datum from given formation.
+ * Caller is expected to provide fcinfo structure that contains compatible
+ * call result type.
+ */
+Datum
+AutoFailoverFormationGetDatum(FunctionCallInfo fcinfo, AutoFailoverFormation *formation)
+{
+	Datum resultDatum = 0;
+	TupleDesc resultDescriptor = NULL;
+	TypeFuncClass resultTypeClass = 0;
+
+	HeapTuple resultTuple = NULL;
+	Datum values[5];
+	bool isNulls[5];
+
+	memset(values, 0, sizeof(values));
+	memset(isNulls, false, sizeof(isNulls));
+
+	values[0] = CStringGetTextDatum(formation->formationId);
+	values[1] = CStringGetTextDatum(FormationKindToString(formation->kind));
+	values[2] = CStringGetDatum(formation->dbname);
+	values[3] = BoolGetDatum(formation->opt_secondary);
+	values[4] = Int32GetDatum(formation->number_sync_stanbys);
+
+	resultTypeClass = get_call_result_type(fcinfo, NULL, &resultDescriptor);
+	if (resultTypeClass != TYPEFUNC_COMPOSITE)
+	{
+		ereport(ERROR, (errmsg("return type must be a row type")));
+	}
+
+	resultTuple = heap_form_tuple(resultDescriptor, values, isNulls);
+	resultDatum = HeapTupleGetDatum(resultTuple);
+
+	PG_RETURN_DATUM(resultDatum);
 }

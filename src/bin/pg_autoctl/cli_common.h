@@ -67,6 +67,10 @@ extern CommandLine create_monitor_command;
 extern CommandLine create_postgres_command;
 extern CommandLine drop_node_command;
 
+/* cli_get_set_properties.c */
+extern CommandLine get_command;
+extern CommandLine set_command;
+
 /* cli_enable_disable.c */
 extern CommandLine enable_commands;
 extern CommandLine disable_commands;

@@ -33,6 +33,13 @@ typedef struct MonitorAssignedStateParseContext
 	bool parsedOK;
 } MonitorAssignedStateParseContext;
 
+typedef struct NodeReplicationSettingsParseContext
+{
+	int candidatePriority;
+	bool replicationQuorum;
+	bool parsedOK;
+} NodeReplicationSettingsParseContext;
+
 typedef struct MonitorExtensionVersionParseContext
 {
 	MonitorExtensionVersion *version;
@@ -41,6 +48,7 @@ typedef struct MonitorExtensionVersionParseContext
 
 static void parseNode(void *ctx, PGresult *result);
 static void parseNodeState(void *ctx, PGresult *result);
+static void parseNodeReplicationSettings(void *ctx, PGresult *result);
 static void printCurrentState(void *ctx, PGresult *result);
 static void printLastEvents(void *ctx, PGresult *result);
 static void parseCoordinatorNode(void *ctx, PGresult *result);
@@ -230,15 +238,16 @@ monitor_get_coordinator(Monitor *monitor, char *formation, NodeAddress *node)
 bool
 monitor_register_node(Monitor *monitor, char *formation, char *host, int port,
 					  char *dbname, int desiredGroupId, NodeState initialState,
-					  PgInstanceKind kind, MonitorAssignedState *assignedState)
+					  PgInstanceKind kind, int candidatePriority, bool quorum,
+					  MonitorAssignedState *assignedState)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
 		"SELECT * FROM pgautofailover.register_node($1, $2, $3, $4, $5, "
-		"$6::pgautofailover.replication_state, $7)";
-	int paramCount = 7;
-	Oid paramTypes[7] = { TEXTOID, TEXTOID, INT4OID, NAMEOID, INT4OID, TEXTOID, TEXTOID };
-	const char *paramValues[7];
+		"$6::pgautofailover.replication_state, $7, $8, $9)";
+	int paramCount = 9;
+	Oid paramTypes[9] = { TEXTOID, TEXTOID, INT4OID, NAMEOID, INT4OID, TEXTOID, TEXTOID, INT4OID, BOOLOID };
+	const char *paramValues[9];
 	MonitorAssignedStateParseContext parseContext = { assignedState, false };
 	const char *nodeStateString = NodeStateToString(initialState);
 
@@ -249,6 +258,9 @@ monitor_register_node(Monitor *monitor, char *formation, char *host, int port,
 	paramValues[4] = intToString(desiredGroupId).strValue;
 	paramValues[5] = nodeStateString;
 	paramValues[6] = nodeKindToString(kind);
+	paramValues[7] = intToString(candidatePriority).strValue;
+	paramValues[8] = quorum ? "true" : "false";
+
 
 	if (!pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes, paramValues,
 								   &parseContext, parseNodeState))
@@ -343,6 +355,265 @@ monitor_node_active(Monitor *monitor,
 	}
 
 	return true;
+}
+
+
+/*
+ * monitor_set_node_candidate_priority updates the monitor on the changes
+ * in the node candidate priority.
+ */
+bool
+monitor_set_node_candidate_priority(Monitor *monitor, int nodeid, char* nodeName, int nodePort, int candidate_priority)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql = "SELECT pgautofailover.set_node_candidate_priority($1, $2, $3, $4)";
+	int paramCount = 4;
+	Oid paramTypes[4] = { INT4OID, TEXTOID, INT4OID, INT4OID};
+	const char *paramValues[4];
+	char *candidatePriorityText = intToString(candidate_priority).strValue;
+	bool success = true;
+
+	paramValues[0] = intToString(nodeid).strValue;
+	paramValues[1] = nodeName,
+	paramValues[2] = intToString(nodePort).strValue;
+	paramValues[3] = candidatePriorityText;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   NULL, NULL))
+	{
+		log_error("Failed to update node candidate priority on node %d"
+				  " for candidate_priority: \"%s\"",
+				  nodeid, candidatePriorityText);
+
+		success = false;
+	}
+
+	/* disconnect from monitor */
+	pgsql_finish(&monitor->pgsql);
+
+	return success;
+}
+
+
+/*
+ * monitor_set_node_replication_quorum updates the monitor on the changes
+ * in the node replication quorum.
+ */
+bool
+monitor_set_node_replication_quorum(Monitor *monitor, int nodeid,
+									char* nodeName, int nodePort,
+									bool replicationQuorum)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql = "SELECT pgautofailover.set_node_replication_quorum($1, $2, $3, $4)";
+	int paramCount = 4;
+	Oid paramTypes[4] = { INT4OID, TEXTOID, INT4OID, BOOLOID };
+	const char *paramValues[4];
+	char *replicationQuorumText = replicationQuorum ? "true" : "false";
+	bool success = true;
+
+	paramValues[0] = intToString(nodeid).strValue;
+	paramValues[1] = nodeName;
+	paramValues[2] = intToString(nodePort).strValue;
+	paramValues[3] = replicationQuorumText;
+
+	if (!pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes,
+								   paramValues, NULL, NULL))
+	{
+		log_error("Failed to update node replication quorum on node %d"
+				  " and replication_quorum: \"%s\"",
+				  nodeid, replicationQuorumText);
+
+		success = false;
+	}
+
+	/* disconnect from monitor */
+	pgsql_finish(&monitor->pgsql);
+
+	return success;
+}
+
+/*
+ * monitor_get_node_replication_settings retrieves replication settings
+ * from the monitor.
+ */
+bool
+monitor_get_node_replication_settings(Monitor *monitor, int nodeid,
+		 	 	 	 	 	 	 	  NodeReplicationSettings *settings)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql = "SELECT candidatepriority, replicationquorum FROM pgautofailover.node "
+		"WHERE nodeid = $1";
+	int paramCount = 1;
+	Oid paramTypes[1] = { INT4OID };
+	const char *paramValues[1];
+	NodeReplicationSettingsParseContext parseContext = {-1, false, false };
+
+	paramValues[0] = intToString(nodeid).strValue;
+
+	if (!pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes, paramValues,
+								   &parseContext, parseNodeReplicationSettings))
+	{
+		log_error("Failed to retrieve node settings for node \"%d\".", nodeid);
+		/* disconnect from monitor */
+		pgsql_finish(&monitor->pgsql);
+
+		return false;
+	}
+
+	/* disconnect from monitor */
+	pgsql_finish(&monitor->pgsql);
+
+	if (!parseContext.parsedOK)
+	{
+		return false;
+	}
+
+	settings->candidatePriority = parseContext.candidatePriority;
+	settings->replicationQuorum = parseContext.replicationQuorum;
+
+	return true;
+}
+
+
+/*
+ * parseNodeReplicationSettings parses nore replication settings
+ * from query output.
+ */
+static void
+parseNodeReplicationSettings(void *ctx, PGresult *result)
+{
+	NodeReplicationSettingsParseContext *context =
+		(NodeReplicationSettingsParseContext *) ctx;
+	char *value = NULL;
+	int errors = 0;
+
+	if (PQntuples(result) != 1)
+	{
+		log_error("Query returned %d rows, expected 1", PQntuples(result));
+		context->parsedOK = false;
+		return;
+	}
+
+	if (PQnfields(result) != 2)
+	{
+		log_error("Query returned %d columns, expected 2", PQnfields(result));
+		context->parsedOK = false;
+		return;
+	}
+
+	value = PQgetvalue(result, 0, 0);
+	if (sscanf(value, "%d", &context->candidatePriority) != 1)
+	{
+		log_error("Invalid failover candidate priority \"%s\" returned by monitor", value);
+		++errors;
+	}
+
+	value = PQgetvalue(result, 0, 1);
+	if (value == NULL || ( (*value != 't') && (*value != 'f')))
+	{
+		log_error("Invalid replication quorum \"%s\" returned by monitor", value);
+		++errors;
+	}
+	else
+	{
+		context->replicationQuorum = (*value) =='t';
+	}
+
+	if (errors > 0)
+	{
+		context->parsedOK = false;
+		return;
+	}
+
+	/* if we reach this line, then we're good. */
+	context->parsedOK = true;
+}
+
+
+/*
+ * monitor_get_formation_number_sync_standbys retrieves number-sync-stanbys
+ * property for formation from the monitor. The function returns true upon
+ * success.
+ */
+bool
+monitor_get_formation_number_sync_standbys(Monitor *monitor, char *formation,
+										   int *numberSyncStandbys)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql = "SELECT number_sync_standbys FROM pgautofailover.formation "
+		"WHERE formationid = $1";
+	int paramCount = 1;
+	Oid paramTypes[1] = { TEXTOID};
+	const char *paramValues[1];
+	SingleValueResultContext parseContext = {PGSQL_RESULT_INT, false};
+	paramValues[0] = formation;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &parseContext, parseSingleValueResult))
+	{
+		log_error("Failed to retrieve settings for formation \"%s\".", formation);
+
+		/* disconnect from monitor */
+		pgsql_finish(&monitor->pgsql);
+
+		return false;
+	}
+
+	/* disconnect from monitor */
+	pgsql_finish(&monitor->pgsql);
+
+	if (!parseContext.parsedOk)
+	{
+		return false;
+	}
+
+	*numberSyncStandbys = parseContext.intVal;
+
+	return true;
+}
+
+
+/*
+ * monitor_set_formation_number_sync_standbys sets number-sync-stanbys
+ * property for formation at the monitor. The function returns true upon
+ * success.
+ */
+bool
+monitor_set_formation_number_sync_standbys(Monitor *monitor, char *formation,
+										   int numberSyncStandbys)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql = "SELECT pgautofailover.set_formation_number_sync_standbys($1, $2)";
+	int paramCount = 2;
+	Oid paramTypes[2] = { TEXTOID, INT4OID};
+	const char *paramValues[2];
+	SingleValueResultContext parseContext = {PGSQL_RESULT_BOOL, false};
+	paramValues[0] = formation;
+	paramValues[1] = intToString(numberSyncStandbys).strValue;
+
+	if (!pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes, paramValues,
+								   &parseContext, parseSingleValueResult))
+	{
+		log_error("Failed to update number-sync-standbys for formation \"%s\".", formation);
+
+		/* disconnect from monitor */
+		pgsql_finish(&monitor->pgsql);
+
+		return false;
+	}
+
+	/* disconnect from monitor */
+	pgsql_finish(&monitor->pgsql);
+
+	if (!parseContext.parsedOk)
+	{
+		return false;
+	}
+
+	return parseContext.boolVal;
 }
 
 
@@ -467,9 +738,9 @@ parseNodeState(void *ctx, PGresult *result)
 		return;
 	}
 
-	if (PQnfields(result) != 3)
+	if (PQnfields(result) != 5)
 	{
-		log_error("Query returned %d columns, expected 3", PQnfields(result));
+		log_error("Query returned %d columns, expected 5", PQnfields(result));
 		context->parsedOK = false;
 		return;
 	}
@@ -495,6 +766,25 @@ parseNodeState(void *ctx, PGresult *result)
 		log_error("Invalid node state \"%s\" returned by monitor", value);
 		++errors;
 	}
+
+	value = PQgetvalue(result, 0, 3);
+	if (sscanf(value, "%d", &context->assignedState->candidatePriority) != 1)
+	{
+		log_error("Invalid failover candidate priority \"%s\" returned by monitor", value);
+		++errors;
+	}
+
+	value = PQgetvalue(result, 0, 4);
+	if (value == NULL || ( (*value != 't') && (*value != 'f')))
+	{
+		log_error("Invalid replication quorum \"%s\" returned by monitor", value);
+		++errors;
+	}
+	else
+	{
+		context->assignedState->replicationQuorum = (*value) =='t';
+	}
+
 
 	if (errors > 0)
 	{
@@ -587,9 +877,9 @@ printCurrentState(void *ctx, PGresult *result)
 	int maxNodeNameSize = 5;	/* strlen("Name") + 1, the header */
 	char *nameSeparatorHeader = NULL;
 
-	if (PQnfields(result) != 6)
+	if (PQnfields(result) != 8)
 	{
-		log_error("Query returned %d columns, expected 6", PQnfields(result));
+		log_error("Query returned %d columns, expected 8", PQnfields(result));
 		context->parsedOK = false;
 		return;
 	}
@@ -623,13 +913,15 @@ printCurrentState(void *ctx, PGresult *result)
 		}
 	}
 
-	fprintf(stdout, "%*s | %6s | %5s | %5s | %17s | %17s\n",
+	fprintf(stdout, "%*s | %6s | %5s | %5s | %17s | %17s | %8s | %6s\n",
 			maxNodeNameSize, "Name", "Port",
-			"Group", "Node", "Current State", "Assigned State");
+			"Group", "Node", "Current State", "Assigned State",
+			"Priority", "Quorum");
 
-	fprintf(stdout, "%*s-+-%6s-+-%5s-+-%5s-+-%17s-+-%17s\n",
+	fprintf(stdout, "%*s-+-%6s-+-%5s-+-%5s-+-%17s-+-%17s-+-%8s-+-%6s\n",
 			maxNodeNameSize, nameSeparatorHeader, "------",
-			"-----", "-----", "-----------------", "-----------------");
+			"-----", "-----", "-----------------", "-----------------",
+			"--------", "------");
 
 	free(nameSeparatorHeader);
 
@@ -641,10 +933,12 @@ printCurrentState(void *ctx, PGresult *result)
 		char *nodeId = PQgetvalue(result, currentTupleIndex, 3);
 		char *currentState = PQgetvalue(result, currentTupleIndex, 4);
 		char *goalState = PQgetvalue(result, currentTupleIndex, 5);
+		char *candidatePriority = PQgetvalue(result, currentTupleIndex, 6);
+		char *replicationQuorum = PQgetvalue(result, currentTupleIndex, 7);
 
-		fprintf(stdout, "%*s | %6s | %5s | %5s | %17s | %17s\n",
+		fprintf(stdout, "%*s | %6s | %5s | %5s | %17s | %17s | %8s | %6s\n",
 				maxNodeNameSize, nodename, nodeport,
-				groupId, nodeId, currentState, goalState);
+				groupId, nodeId, currentState, goalState, candidatePriority, replicationQuorum);
 	}
 	fprintf(stdout, "\n");
 
@@ -786,19 +1080,20 @@ printLastEvents(void *ctx, PGresult *result)
  */
 bool
 monitor_create_formation(Monitor *monitor, char *formation, char *kind, char *dbname,
-						 bool hasSecondary)
+						 bool hasSecondary, int numberSyncStandbys)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
-		"SELECT * FROM pgautofailover.create_formation($1, $2, $3, $4)";
-	int paramCount = 4;
-	Oid paramTypes[4] = { TEXTOID, TEXTOID, TEXTOID, BOOLOID };
-	const char *paramValues[4];
+		"SELECT * FROM pgautofailover.create_formation($1, $2, $3, $4, $5)";
+	int paramCount = 5;
+	Oid paramTypes[5] = { TEXTOID, TEXTOID, TEXTOID, BOOLOID, INT4OID };
+	const char *paramValues[5];
 
 	paramValues[0] = formation;
 	paramValues[1] = kind;
 	paramValues[2] = dbname;
 	paramValues[3] = hasSecondary ? "true" : "false";
+	paramValues[4] = intToString(numberSyncStandbys).strValue;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,

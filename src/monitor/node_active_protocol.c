@@ -60,6 +60,8 @@ PG_FUNCTION_INFO_V1(remove_node);
 PG_FUNCTION_INFO_V1(perform_failover);
 PG_FUNCTION_INFO_V1(start_maintenance);
 PG_FUNCTION_INFO_V1(stop_maintenance);
+PG_FUNCTION_INFO_V1(set_node_candidate_priority);
+PG_FUNCTION_INFO_V1(set_node_replication_quorum);
 
 /*
  * register_node adds a node to a given formation
@@ -86,6 +88,8 @@ register_node(PG_FUNCTION_ARGS)
 	char *nodeKind = text_to_cstring(nodeKindText);
 	FormationKind expectedFormationKind =
 		FormationKindFromNodeKindString(nodeKind);
+	int candidatePriority = PG_GETARG_INT32(7);
+	bool replicationQuorum = PG_GETARG_BOOL(8);
 
 	AutoFailoverFormation *formation = NULL;
 	AutoFailoverNode *pgAutoFailoverNode = NULL;
@@ -96,8 +100,8 @@ register_node(PG_FUNCTION_ARGS)
 	TypeFuncClass resultTypeClass = 0;
 	Datum resultDatum = 0;
 	HeapTuple resultTuple = NULL;
-	Datum values[3];
-	bool isNulls[3];
+	Datum values[5];
+	bool isNulls[5];
 
 	checkPgAutoFailoverVersion();
 
@@ -106,6 +110,8 @@ register_node(PG_FUNCTION_ARGS)
 	currentNodeState.replicationState =
 		EnumGetReplicationState(currentReplicationStateOid);
 	currentNodeState.reportedLSN = 0;
+	currentNodeState.candidatePriority = candidatePriority;
+	currentNodeState.replicationQuorum = replicationQuorum;
 
 	LockFormation(formationId, ExclusiveLock);
 
@@ -176,6 +182,8 @@ register_node(PG_FUNCTION_ARGS)
 	assignedNodeState->nodeId = pgAutoFailoverNode->nodeId;
 	assignedNodeState->groupId = pgAutoFailoverNode->groupId;
 	assignedNodeState->replicationState = pgAutoFailoverNode->goalState;
+	assignedNodeState->candidatePriority = pgAutoFailoverNode->candidatePriority;
+	assignedNodeState->replicationQuorum = pgAutoFailoverNode->replicationQuorum;
 
 	/*
 	 * Check that the state selected by the monitor matches the state required
@@ -212,6 +220,8 @@ register_node(PG_FUNCTION_ARGS)
 	values[1] = Int32GetDatum(assignedNodeState->groupId);
 	values[2] = ObjectIdGetDatum(
 		ReplicationStateGetEnum(pgAutoFailoverNode->goalState));
+	values[3] = Int32GetDatum(assignedNodeState->candidatePriority);
+	values[4] = BoolGetDatum(assignedNodeState->replicationQuorum);
 
 	resultTypeClass = get_call_result_type(fcinfo, NULL, &resultDescriptor);
 	if (resultTypeClass != TYPEFUNC_COMPOSITE)
@@ -257,8 +267,8 @@ node_active(PG_FUNCTION_ARGS)
 	TypeFuncClass resultTypeClass = 0;
 	Datum resultDatum = 0;
 	HeapTuple resultTuple = NULL;
-	Datum values[3];
-	bool isNulls[3];
+	Datum values[5];
+	bool isNulls[5];
 
 	checkPgAutoFailoverVersion();
 
@@ -269,7 +279,6 @@ node_active(PG_FUNCTION_ARGS)
 	currentNodeState.reportedLSN = currentLSN;
 	currentNodeState.pgsrSyncState = SyncStateFromString(currentPgsrSyncState);
 	currentNodeState.pgIsRunning = currentPgIsRunning;
-
 	assignedNodeState =
 		NodeActive(formationId, nodeName, nodePort, &currentNodeState);
 
@@ -282,6 +291,8 @@ node_active(PG_FUNCTION_ARGS)
 	values[0] = Int32GetDatum(assignedNodeState->nodeId);
 	values[1] = Int32GetDatum(assignedNodeState->groupId);
 	values[2] = ObjectIdGetDatum(newReplicationStateOid);
+	values[3] = Int32GetDatum(assignedNodeState->candidatePriority);
+	values[4] = BoolGetDatum(assignedNodeState->replicationQuorum);
 
 	resultTypeClass = get_call_result_type(fcinfo, NULL, &resultDescriptor);
 	if (resultTypeClass != TYPEFUNC_COMPOSITE)
@@ -354,6 +365,8 @@ NodeActive(char *formationId, char *nodeName, int32 nodePort,
 							  pgAutoFailoverNode->nodePort,
 							  currentNodeState->pgsrSyncState,
 							  currentNodeState->reportedLSN,
+							  pgAutoFailoverNode->candidatePriority,
+							  pgAutoFailoverNode->replicationQuorum,
 							  message);
 		}
 
@@ -380,6 +393,8 @@ NodeActive(char *formationId, char *nodeName, int32 nodePort,
 	assignedNodeState->nodeId = pgAutoFailoverNode->nodeId;
 	assignedNodeState->groupId = pgAutoFailoverNode->groupId;
 	assignedNodeState->replicationState = pgAutoFailoverNode->goalState;
+	assignedNodeState->candidatePriority = pgAutoFailoverNode->candidatePriority;
+	assignedNodeState->replicationQuorum = pgAutoFailoverNode->replicationQuorum;
 
 	return assignedNodeState;
 }
@@ -424,7 +439,8 @@ JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 	}
 
 	AddAutoFailoverNode(formation->formationId, groupId, nodeName, nodePort,
-						initialState, currentNodeState->replicationState);
+						initialState, currentNodeState->replicationState,
+						currentNodeState->candidatePriority, currentNodeState->replicationQuorum);
 
 	currentNodeState->groupId = groupId;
 }
@@ -754,6 +770,8 @@ perform_failover(PG_FUNCTION_ARGS)
 					  primaryNode->nodePort,
 					  primaryNode->pgsrSyncState,
 					  primaryNode->reportedLSN,
+					  primaryNode->candidatePriority,
+					  primaryNode->replicationQuorum,
 					  message);
 
 	SetNodeGoalState(secondaryNode->nodeName, secondaryNode->nodePort,
@@ -768,6 +786,8 @@ perform_failover(PG_FUNCTION_ARGS)
 					  secondaryNode->nodePort,
 					  secondaryNode->pgsrSyncState,
 					  secondaryNode->reportedLSN,
+					  secondaryNode->candidatePriority,
+					  secondaryNode->replicationQuorum,
 					  message);
 
 	PG_RETURN_VOID();
@@ -870,6 +890,8 @@ start_maintenance(PG_FUNCTION_ARGS)
 					  otherNode->nodePort,
 					  otherNode->pgsrSyncState,
 					  otherNode->reportedLSN,
+					  otherNode->candidatePriority,
+					  otherNode->replicationQuorum,
 					  message);
 
 	SetNodeGoalState(currentNode->nodeName, currentNode->nodePort,
@@ -884,6 +906,8 @@ start_maintenance(PG_FUNCTION_ARGS)
 					  currentNode->nodePort,
 					  currentNode->pgsrSyncState,
 					  currentNode->reportedLSN,
+					  currentNode->candidatePriority,
+					  currentNode->replicationQuorum,
 					  message);
 
 	PG_RETURN_BOOL(true);
@@ -965,6 +989,129 @@ stop_maintenance(PG_FUNCTION_ARGS)
 					  currentNode->nodePort,
 					  currentNode->pgsrSyncState,
 					  currentNode->reportedLSN,
+					  currentNode->candidatePriority,
+					  currentNode->replicationQuorum,
+					  message);
+
+	PG_RETURN_BOOL(true);
+}
+
+
+/*
+ * set_node_candidate_priority sets node candidate priority property
+ */
+Datum
+set_node_candidate_priority(PG_FUNCTION_ARGS)
+{
+	int32 nodeId = PG_GETARG_INT32(0);
+	text *nodeNameText = PG_GETARG_TEXT_P(1);
+	char *nodeName = text_to_cstring(nodeNameText);
+	int32 nodePort = PG_GETARG_INT32(2);
+	int candidatePriority = PG_GETARG_INT32(3);
+	AutoFailoverNode *currentNode = NULL;
+	char message[BUFSIZE];
+
+	checkPgAutoFailoverVersion();
+
+	currentNode = GetAutoFailoverNodeWithId(nodeId, nodeName, nodePort);
+
+	if (currentNode == NULL)
+	{
+		ereport(ERROR, (errmsg("node %d is not registered", nodeId)));
+	}
+
+	LockFormation(currentNode->formationId, ShareLock);
+	LockNodeGroup(currentNode->formationId, currentNode->groupId, ExclusiveLock);
+
+	if (candidatePriority < 0 || candidatePriority > 100)
+	{
+		ereport(ERROR, (ERRCODE_INVALID_PARAMETER_VALUE,
+						errmsg("invalid value for candidate_priority \"%d\" "
+							   "expected an integer value between 0 and 100", candidatePriority)));
+	}
+
+
+	currentNode->candidatePriority = candidatePriority;
+
+
+	ReportAutoFailoverNodeReplicationSetting(
+			currentNode->nodeId,
+			currentNode->nodeName,
+			currentNode->nodePort,
+			currentNode->candidatePriority,
+			currentNode->replicationQuorum);
+
+	LogAndNotifyMessage(
+		message, BUFSIZE,
+		"Updating candidatePriority.");
+
+	NotifyStateChange(currentNode->reportedState,
+					  currentNode->goalState,
+					  currentNode->formationId,
+					  currentNode->groupId,
+					  currentNode->nodeId,
+					  currentNode->nodeName,
+					  currentNode->nodePort,
+					  currentNode->pgsrSyncState,
+					  currentNode->reportedLSN,
+					  currentNode->candidatePriority,
+					  currentNode->replicationQuorum,
+					  message);
+
+	PG_RETURN_BOOL(true);
+}
+
+
+/*
+ * set_node_replication_quorum sets node replication quorum property
+ */
+Datum
+set_node_replication_quorum(PG_FUNCTION_ARGS)
+{
+	int32 nodeid = PG_GETARG_INT32(0);
+	text *nodeNameText = PG_GETARG_TEXT_P(1);
+	char *nodeName = text_to_cstring(nodeNameText);
+	int32 nodePort = PG_GETARG_INT32(2);
+	bool replicationQuorum = PG_GETARG_BOOL(3);
+	AutoFailoverNode *currentNode = NULL;
+	char message[BUFSIZE];
+
+	checkPgAutoFailoverVersion();
+
+	currentNode = GetAutoFailoverNodeWithId(nodeid, nodeName, nodePort);
+
+	if (currentNode == NULL)
+	{
+		ereport(ERROR, (errmsg("node %d is not registered", nodeid)));
+	}
+
+	LockFormation(currentNode->formationId, ShareLock);
+	LockNodeGroup(currentNode->formationId, currentNode->groupId, ExclusiveLock);
+
+	currentNode->replicationQuorum = replicationQuorum;
+
+
+	ReportAutoFailoverNodeReplicationSetting(currentNode->nodeId,
+			currentNode->nodeName,
+			currentNode->nodePort,
+			currentNode->candidatePriority,
+			currentNode->replicationQuorum);
+
+	LogAndNotifyMessage(
+		message, BUFSIZE,
+		"Updating replicationQuorum.");
+
+	NotifyStateChange(currentNode->reportedState,
+					  currentNode->goalState,
+					  currentNode->formationId,
+					  currentNode->groupId,
+					  currentNode->nodeId,
+					  currentNode->nodeName,
+					  currentNode->nodePort,
+					  currentNode->pgsrSyncState,
+					  currentNode->reportedLSN,
+					  currentNode->candidatePriority,
+					  currentNode->replicationQuorum,
 					  message);
 
 	PG_RETURN_BOOL(true);

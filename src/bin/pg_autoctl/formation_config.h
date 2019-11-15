@@ -20,6 +20,7 @@ typedef struct FormationConfig
 	char formationKind[NAMEDATALEN];
 	char dbname[NAMEDATALEN];
 	bool formationHasSecondary;
+	int  numberSyncStandbys;
 
 	/* PostgreSQL setup */
 	PostgresSetup pgSetup;

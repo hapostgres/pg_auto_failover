@@ -221,7 +221,7 @@ pg_setup_init(PostgresSetup *pgSetup,
 	}
 
 	/*
-	 * In test environement we might disable unix socket directories. In that
+	 * In test environment we might disable unix socket directories. In that
 	 * case, we need to have an host to connect to, accepting to connect
 	 * without host= in the connection string is not going to cut it.
 	 */
@@ -326,6 +326,8 @@ pg_setup_init(PostgresSetup *pgSetup,
 		strlcpy(pgSetup->authMethod,
 				options->authMethod, NAMEDATALEN);
 	}
+
+	pgSetup->settings = options->settings;
 
 	/*
 	 * And we always double-check with PGDATA/postmaster.pid if we have it, and

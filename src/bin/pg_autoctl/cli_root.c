@@ -73,6 +73,8 @@ CommandLine *root_subcommands_with_debug[] = {
 	&service_reload_command,
 	&help,
 	&version,
+	&get_command,
+	&set_command,
 	NULL
 };
 
@@ -95,6 +97,8 @@ CommandLine *root_subcommands[] = {
 	&service_reload_command,
 	&help,
 	&version,
+	&get_command,
+	&set_command,
 	NULL
 };
 

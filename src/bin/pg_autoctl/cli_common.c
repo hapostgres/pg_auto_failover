@@ -22,6 +22,7 @@
 #include "log.h"
 #include "monitor.h"
 #include "monitor_config.h"
+#include "parsing.h"
 #include "pgsetup.h"
 #include "pgsql.h"
 #include "state.h"
@@ -54,6 +55,8 @@ bool allowRemovingPgdata = false;
  *		{ "verbose", no_argument, NULL, 'v' },
  *		{ "quiet", no_argument, NULL, 'q' },
  *		{ "help", no_argument, NULL, 'h' },
+ *		{ "candidate-priority", required_argument, NULL, 'P'},
+ *		{ "replication-quorum", required_argument, NULL, 'r'},
  *		{ NULL, 0, NULL, 0 }
  *	};
  *
@@ -75,6 +78,9 @@ cli_create_node_getopts(int argc, char **argv,
 	LocalOptionConfig.prepare_promotion_walreceiver = -1;
 	LocalOptionConfig.postgresql_restart_failure_timeout = -1;
 	LocalOptionConfig.postgresql_restart_failure_max_retries = -1;
+	LocalOptionConfig.pgSetup.settings.candidatePriority = FAILOVER_NODE_CANDIDATE_PRIORITY;
+	LocalOptionConfig.pgSetup.settings.replicationQuorum = FAILOVER_NODE_REPLICATION_QUORUM;
+
 
 	optind = 0;
 
@@ -221,6 +227,37 @@ cli_create_node_getopts(int argc, char **argv,
 				/* { "allow-removing-pgdata", no_argument, NULL, 'R' } */
 				allowRemovingPgdata = true;
 				log_trace("--allow-removing-pgdata");
+				break;
+			}
+			case 'P':
+			{
+				/* { "candidate-priority", required_argument, NULL, 'P'} */
+				int candidatePriority = strtol(optarg, NULL, 10);
+				if (errno == EINVAL || candidatePriority < 0 || candidatePriority > 100)
+				{
+					log_fatal("--candidate-priority argument is not valid."
+							  " Valid values are integers from 0 to 100. ");
+					exit(EXIT_CODE_BAD_ARGS);
+				}
+
+				LocalOptionConfig.pgSetup.settings.candidatePriority = candidatePriority;
+				log_trace("--candidate-priority %d", candidatePriority);
+				break;
+			}
+			case 'r':
+			{
+				/* { "replication-quorum", required_argument, NULL, 'r'} */
+				bool replicationQuorum = false;
+
+				if (!parse_bool(optarg, &replicationQuorum))
+				{
+					log_fatal("--replication-quorum argument is not valid."
+							  " Valid values are \"true\" or \"false\".");
+					exit(EXIT_CODE_BAD_ARGS);
+				}
+
+				LocalOptionConfig.pgSetup.settings.replicationQuorum = replicationQuorum;
+				log_trace("--replication-quorum %s", boolToString(replicationQuorum));
 				break;
 			}
 

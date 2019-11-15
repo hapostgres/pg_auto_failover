@@ -249,6 +249,8 @@ keeper_cli_keeper_setup_getopts(int argc, char **argv)
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
 		{ "help", no_argument, NULL, 'h' },
+		{ "candidate-priority", required_argument, NULL, 'P'},
+		{ "replication-quorum", required_argument, NULL, 'r'},
 		{ NULL, 0, NULL, 0 }
 	};
 
@@ -263,8 +265,7 @@ keeper_cli_keeper_setup_getopts(int argc, char **argv)
 	unsetenv("POSIXLY_CORRECT");
 
 	optind = cli_create_node_getopts(argc, argv,
-									 long_options,
-									 "C:D:H:p:l:y:U:A:d:n:f:g:m:RVvqh",
+									 long_options, "C:D:H:p:l:y:U:A:d:n:f:g:m:RVvqhP:r:",
 									 &options);
 
 	/* publish our option parsing in the global variable */

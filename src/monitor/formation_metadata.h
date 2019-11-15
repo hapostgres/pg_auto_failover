@@ -26,6 +26,7 @@
 #define Anum_pgautofailover_formation_kind 2
 #define Anum_pgautofailover_formation_dbname 3
 #define Anum_pgautofailover_formation_opt_secondary 4
+#define Anum_pgautofailover_formation_number_sync_stanbys 5
 
 
 /* formation.kind: "pgsql" or "citus" */
@@ -47,13 +48,14 @@ typedef struct AutoFailoverFormation
 	FormationKind kind;
 	char dbname[NAMEDATALEN];
 	bool opt_secondary;
+	int number_sync_stanbys;
 } AutoFailoverFormation;
 
 
 /* public function declarations */
 extern AutoFailoverFormation *GetFormation(const char *formationId);
 extern void AddFormation(const char *formationId, FormationKind kind, Name dbname,
-							  bool optionSecondary);
+							  bool optionSecondary, int numberSyncStanbys);
 extern void RemoveFormation(const char *formationId);
 extern void SetFormationKind(const char *formationId, FormationKind kind);
 extern void SetFormationDBName(const char *formationId, const char *dbname);
