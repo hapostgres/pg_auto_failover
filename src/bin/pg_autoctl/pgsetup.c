@@ -416,6 +416,16 @@ pg_setup_init(PostgresSetup *pgSetup,
 		strlcpy(pgSetup->dbname, dbname, NAMEDATALEN);
 		strlcpy(pgSetup->username, username, NAMEDATALEN);
 	}
+	else
+	{
+		/*
+		 * When Postgres is not running, keep the configuration entries for the
+		 * config and hba files in the new structure: we have a cache for the
+		 * values.
+		 */
+		strlcpy(pgSetup->pgConfigPath.conf, options->pgConfigPath.conf, MAXPGPATH);
+		strlcpy(pgSetup->pgConfigPath.hba, options->pgConfigPath.hba, MAXPGPATH);
+	}
 
 	if (errors > 0)
 	{
@@ -592,8 +602,8 @@ void
 fprintf_pg_setup(FILE *stream, PostgresSetup *pgSetup)
 {
 	fprintf(stream, "pgdata:             %s\n", pgSetup->pgdata);
-	fprintf(stream, "postgresql.conf:    %s\n", pgSetup->pgConfigPath.conf);
-	fprintf(stream, "pg_hba.conf:        %s\n", pgSetup->pgConfigPath.hba);
+	fprintf(stream, "config_file:        %s\n", pgSetup->pgConfigPath.conf);
+	fprintf(stream, "hba_file:           %s\n", pgSetup->pgConfigPath.hba);
 	fprintf(stream, "pg_ctl:             %s\n", pgSetup->pg_ctl);
 	fprintf(stream, "pg_version:         %s\n", pgSetup->pg_version);
 	fprintf(stream, "pghost:             %s\n", pgSetup->pghost);

@@ -78,6 +78,14 @@
 	make_strbuf_option("postgresql", "listen_addresses", "listen", \
 					   false, MAXPGPATH, config->pgSetup.listen_addresses)
 
+#define OPTION_POSTGRESQL_CONFIG_FILE(config) \
+	make_strbuf_option("postgresql", "config_file", NULL, \
+					   false, MAXPGPATH, config->pgSetup.pgConfigPath.conf)
+
+#define OPTION_POSTGRESQL_HBA_FILE(config) \
+	make_strbuf_option("postgresql", "hba_file", NULL, \
+					   false, MAXPGPATH, config->pgSetup.pgConfigPath.hba)
+
 #define OPTION_REPLICATION_SLOT_NAME(config) \
 	make_string_option_default("replication", "slot", NULL, false, \
 							   &config->replication_slot_name, \
@@ -147,7 +155,9 @@
 		OPTION_POSTGRESQL_PORT(config), \
 		OPTION_POSTGRESQL_PROXY_PORT(config), \
 		OPTION_POSTGRESQL_LISTEN_ADDRESSES(config), \
-		OPTION_REPLICATION_PASSWORD(config), \
+		OPTION_POSTGRESQL_CONFIG_FILE(config), \
+		OPTION_POSTGRESQL_HBA_FILE(config), \
+		OPTION_REPLICATION_PASSWORD(config),		\
 		OPTION_REPLICATION_SLOT_NAME(config), \
 		OPTION_REPLICATION_MAXIMUM_BACKUP_RATE(config), \
 		OPTION_REPLICATION_BACKUP_DIR(config), \
@@ -374,6 +384,8 @@ keeper_config_log_settings(KeeperConfig config)
 	log_debug("postgresql.dbname: %s", config.pgSetup.dbname);
 	log_debug("postgresql.host: %s", config.pgSetup.pghost);
 	log_debug("postgresql.port: %d", config.pgSetup.pgport);
+	log_debug("postgresql.conf_file: %s", config.pgSetup.pgConfigPath.conf);
+	log_debug("postgresql.hba_file: %s", config.pgSetup.pgConfigPath.hba);
 
 	log_debug("replication.replication_slot_name: %s",
 			  config.replication_slot_name);

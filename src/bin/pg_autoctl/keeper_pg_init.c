@@ -595,6 +595,23 @@ create_database_and_extension(Keeper *keeper)
 	}
 
 	/*
+	 * Now that Postgres is running, the initPostgres.postgresSetup structure
+	 * has been updated with the config and hba file properties. Let's update
+	 * our configuration file with those entries.
+	 */
+	strlcpy(config->pgSetup.pgConfigPath.conf,
+			initPostgres.postgresSetup.pgConfigPath.conf, MAXPGPATH);
+
+	strlcpy(config->pgSetup.pgConfigPath.hba,
+			initPostgres.postgresSetup.pgConfigPath.hba, MAXPGPATH);
+
+	if (!keeper_config_write_file(config))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/*
 	 * If username was set in the setup and doesn't exist we need to create it.
 	 */
 	if (!IS_EMPTY_STRING_BUFFER(pgSetup->username))
