@@ -35,8 +35,8 @@ static int cli_show_state_getopts(int argc, char **argv);
 static void cli_show_state(int argc, char **argv);
 static void cli_show_events(int argc, char **argv);
 
-static int cli_show_files_getopts(int argc, char **argv);
-static void cli_show_files(int argc, char **argv);
+static int cli_show_file_getopts(int argc, char **argv);
+static void cli_show_file(int argc, char **argv);
 static bool fprint_file_contents(const char *filename);
 
 static int cli_show_uri_getopts(int argc, char **argv);
@@ -76,24 +76,37 @@ CommandLine show_state_command =
 				 cli_show_state);
 
 
-CommandLine show_files_command =
-	make_command("files",
+CommandLine show_file_command =
+	make_command("file",
 				 "List pg_autoctl internal files (config, state, pid)",
-				 " [ --pgdata ] [ --config | --state | --init | --pid ] ",
-				 "  --pgdata      path to data directory \n",
-				 cli_show_files_getopts,
-				 cli_show_files);
+				 " [ --pgdata --all --config | --state | --init | --pid --contents ]",
+				 "  --pgdata      path to data directory \n" \
+				 "  --all         show all pg_autoctl files \n" \
+				 "  --config      show pg_autoctl configuration file \n" \
+				 "  --state       show pg_autoctl state file \n" \
+				 "  --init        show pg_autoctl initialisation state file \n" \
+				 "  --pid         show pg_autoctl PID file \n" \
+				 "  --contents    show selected file contents \n",
+				 cli_show_file_getopts,
+				 cli_show_file);
 
-typedef struct ShowFilesOptions
+typedef enum
 {
-	bool showFileContent;
-	bool showConfig;
-	bool showState;
-	bool showInit;
-	bool showPid;
-} ShowFilesOptions;
+	SHOW_FILE_UNKNOWN = 0,		/* no option selected yet */
+	SHOW_FILE_ALL,				/* --all, or no option at all */
+	SHOW_FILE_CONFIG,
+	SHOW_FILE_STATE,
+	SHOW_FILE_INIT,
+	SHOW_FILE_PID
+} ShowFileSelection;
 
-static ShowFilesOptions showFilesOptions;
+typedef struct ShowFileOptions
+{
+	bool showFileContents;
+	ShowFileSelection selection;
+} ShowFileOptions;
+
+static ShowFileOptions showFileOptions;
 
 /*
  * keeper_cli_monitor_state_getopts parses the command line options for the
@@ -587,24 +600,25 @@ cli_show_monitor_uri(int argc, char **argv)
 
 
 /*
- * keeper_show_uri_getopts parses the command line options for the
- * command `pg_autoctl show uri`.
+ * cli_show_file_getopts parses the command line options for the
+ * command `pg_autoctl show file`.
  */
 static int
-cli_show_files_getopts(int argc, char **argv)
+cli_show_file_getopts(int argc, char **argv)
 {
 	KeeperConfig options = { 0 };
-	ShowFilesOptions fileOptions = { 0 };
+	ShowFileOptions fileOptions = { 0 };
 	int c, option_index = 0;
 	int verboseCount = 0;
-	int optionCount = 0;
 
 	static struct option long_options[] = {
 		{ "pgdata", required_argument, NULL, 'D' },
+		{ "all", no_argument, NULL, 'a' },
 		{ "config", no_argument, NULL, 'c' },
 		{ "state", no_argument, NULL, 's' },
 		{ "init", no_argument, NULL, 'i' },
 		{ "pid", no_argument, NULL, 'p' },
+		{ "contents", no_argument, NULL, 'C' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
@@ -626,54 +640,80 @@ cli_show_files_getopts(int argc, char **argv)
 				break;
 			}
 
+			case 'C':
+			{
+				fileOptions.showFileContents = true;
+
+				if (fileOptions.selection == SHOW_FILE_ALL)
+				{
+					log_warn("Ignoring option --content with --all");
+				}
+				break;
+			}
+
+			case 'a':
+			{
+				fileOptions.selection = SHOW_FILE_ALL;
+
+				if (fileOptions.showFileContents)
+				{
+					log_warn("Ignoring option --content with --all");
+				}
+				break;
+			}
+
 			case 'c':
 			{
-				if (++optionCount > 1)
+				if (fileOptions.selection != SHOW_FILE_UNKNOWN
+					&& fileOptions.selection != SHOW_FILE_CONFIG)
 				{
 					log_error(
 						"Please use only one of --config --state --init --pid");
 					commandline_help(stderr);
 				}
-				fileOptions.showConfig = true;
+				fileOptions.selection = SHOW_FILE_CONFIG;
 				log_trace("--config");
 				break;
 			}
 
 			case 's':
 			{
-				if (++optionCount > 1)
+				if (fileOptions.selection != SHOW_FILE_UNKNOWN
+					&& fileOptions.selection != SHOW_FILE_STATE)
 				{
 					log_error(
 						"Please use only one of --config --state --init --pid");
 					commandline_help(stderr);
 				}
-				fileOptions.showState = true;
+				fileOptions.selection = SHOW_FILE_STATE;
 				log_trace("--state");
 				break;
 			}
 
 			case 'i':
 			{
-				if (++optionCount > 1)
+				if (fileOptions.selection != SHOW_FILE_UNKNOWN
+					&& fileOptions.selection != SHOW_FILE_INIT)
 				{
 					log_error(
 						"Please use only one of --config --state --init --pid");
 					commandline_help(stderr);
 				}
-				fileOptions.showInit = true;
+				fileOptions.selection = SHOW_FILE_INIT;
 				log_trace("--init");
 				break;
 			}
 
 			case 'p':
 			{
-				if (++optionCount > 1)
+				if (fileOptions.selection != SHOW_FILE_UNKNOWN
+					&& fileOptions.selection != SHOW_FILE_PID)
 				{
 					log_error(
 						"Please use only one of --config --state --init --pid");
 					commandline_help(stderr);
 				}
-				fileOptions.showPid = true;
+				fileOptions.selection = SHOW_FILE_PID;
 				log_trace("--pid");
 				break;
 			}
@@ -695,12 +735,10 @@ cli_show_files_getopts(int argc, char **argv)
 						break;
 
 					case 2:
-						fileOptions.showFileContent = true;
 						log_set_level(LOG_DEBUG);
 						break;
 
 					default:
-						fileOptions.showFileContent = true;
 						log_set_level(LOG_TRACE);
 						break;
 				}
@@ -730,8 +768,14 @@ cli_show_files_getopts(int argc, char **argv)
 		}
 	}
 
+	/* default to --all when no option has been selected */
+	if (fileOptions.selection == SHOW_FILE_UNKNOWN)
+	{
+		fileOptions.selection = SHOW_FILE_ALL;
+	}
+
 	keeperOptions = options;
-	showFilesOptions = fileOptions;
+	showFileOptions = fileOptions;
 
 	return optind;
 }
@@ -741,9 +785,10 @@ cli_show_files_getopts(int argc, char **argv)
  * cli_show_files lists the files used by pg_autoctl.
  */
 static void
-cli_show_files(int argc, char **argv)
+cli_show_file(int argc, char **argv)
 {
 	KeeperConfig config = keeperOptions;
+	pgAutoCtlNodeRole role = PG_AUTOCTL_ROLE_UNKNOWN;
 
 	if (!keeper_config_set_pathnames_from_pgdata(&config.pathnames,
 												 config.pgSetup.pgdata))
@@ -752,102 +797,122 @@ cli_show_files(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	switch (ProbeConfigurationFileRole(config.pathnames.config))
+	role = ProbeConfigurationFileRole(config.pathnames.config);
+
+	switch (showFileOptions.selection)
 	{
-		case PG_AUTOCTL_ROLE_MONITOR:
+		case SHOW_FILE_ALL:
 		{
-			if (showFilesOptions.showConfig)
+			fprintf(stdout, "config: \"%s\"\n", config.pathnames.config);
+
+			if (role == PG_AUTOCTL_ROLE_KEEPER)
 			{
-				fprintf(stdout, "%s\n", config.pathnames.config);
+				fprintf(stdout, " state: \"%s\"\n", config.pathnames.state);
+				fprintf(stdout, "  init: \"%s\"\n", config.pathnames.init);
+				fprintf(stdout, "   pid: \"%s\"\n", config.pathnames.pid);
+			}
+			break;
+		}
+
+		case SHOW_FILE_CONFIG:
+		{
+			if (showFileOptions.showFileContents)
+			{
+				if (!fprint_file_contents(config.pathnames.config))
+				{
+					/* errors have already been logged */
+					exit(EXIT_CODE_BAD_CONFIG);
+				}
+			}
+			else
+			{
+				fprintf(stdout, "\"%s\"\n", config.pathnames.config);
+			}
+			break;
+		}
+
+		case SHOW_FILE_STATE:
+		{
+			if (role == PG_AUTOCTL_ROLE_MONITOR)
+			{
+				log_error("A monitor has not state file");
+				exit(EXIT_CODE_BAD_ARGS);
 			}
 
-			if (showFilesOptions.showState)
+			if (showFileOptions.showFileContents)
 			{
-				log_error("A monitor has no state file");
-			}
+				KeeperStateData keeperState = { 0 };
 
-			if (showFilesOptions.showInit)
-			{
-				log_error("A monitor has no init state file");
+				if (keeper_state_read(&keeperState, config.pathnames.state))
+				{
+					(void) print_keeper_state(&keeperState, stdout);
+				}
+				else
+				{
+					/* errors have already been logged */
+					exit(EXIT_CODE_BAD_STATE);
+				}
 			}
-
-			if (showFilesOptions.showPid)
+			else
 			{
-				log_error("A monitor has no pid file");
+				fprintf(stdout, "\"%s\"\n", config.pathnames.state);
 			}
 
 			break;
 		}
 
-		case PG_AUTOCTL_ROLE_KEEPER:
+		case SHOW_FILE_INIT:
 		{
-			if (showFilesOptions.showConfig)
+			if (role == PG_AUTOCTL_ROLE_MONITOR)
 			{
-				fprintf(stdout, "%s\n", config.pathnames.config);
-
-				if (showFilesOptions.showFileContent)
-				{
-					if (!fprint_file_contents(config.pathnames.config))
-					{
-						/* errors have already been logged */
-						exit(EXIT_CODE_BAD_CONFIG);
-					}
-				}
+				log_error("A monitor has not init state file");
+				exit(EXIT_CODE_BAD_ARGS);
 			}
 
-			if (showFilesOptions.showState)
+			if (showFileOptions.showFileContents)
 			{
-				fprintf(stdout, "%s\n", config.pathnames.state);
+				Keeper keeper = { 0 };
+				KeeperStateInit initState = { 0 };
 
-				if (showFilesOptions.showFileContent)
+				keeper.config = config;
+
+				if (keeper_init_state_read(&keeper, &initState))
 				{
-					KeeperStateData keeperState = { 0 };
-
-					if (keeper_state_read(&keeperState, config.pathnames.state))
-					{
-						(void) print_keeper_state(&keeperState, stdout);
-					}
-					else
-					{
-						/* errors have already been logged */
-						exit(EXIT_CODE_BAD_STATE);
-					}
-				}
-			}
-
-			if (showFilesOptions.showInit)
-			{
-				if (file_exists(config.pathnames.init))
-				{
-					fprintf(stdout, "%s\n", config.pathnames.init);
+					(void) print_keeper_init_state(&initState, stdout);
 				}
 				else
 				{
-					log_warn("This keeper does not have an init file at \"%s\"",
-							 config.pathnames.init);
+					/* errors have already been logged */
+					exit(EXIT_CODE_BAD_STATE);
 				}
 			}
-
-			if (showFilesOptions.showPid)
+			else
 			{
-				if (file_exists(config.pathnames.pid))
-				{
-					fprintf(stdout, "%s\n", config.pathnames.pid);
+				fprintf(stdout, "\"%s\"\n", config.pathnames.init);
+			}
 
-					if (showFilesOptions.showFileContent)
-					{
-						if (!fprint_file_contents(config.pathnames.pid))
-						{
-							/* errors have already been logged */
-							exit(EXIT_CODE_INTERNAL_ERROR);
-						}
-					}
-				}
-				else
+			break;
+		}
+
+		case SHOW_FILE_PID:
+		{
+			if (role == PG_AUTOCTL_ROLE_MONITOR)
+			{
+				log_error("A monitor has not init pidfile");
+				exit(EXIT_CODE_BAD_ARGS);
+			}
+
+			if (showFileOptions.showFileContents)
+			{
+				if (!fprint_file_contents(config.pathnames.pid))
 				{
-					log_warn("This keeper does not have a pid file at \"%s\"",
-							 config.pathnames.pid);
+					/* errors have already been logged */
+					exit(EXIT_CODE_INTERNAL_ERROR);
 				}
+			}
+			else
+			{
+				fprintf(stdout, "\"%s\"\n", config.pathnames.pid);
 			}
 
 			break;
@@ -864,8 +929,7 @@ cli_show_files(int argc, char **argv)
 
 
 /*
- * cli_show_maybe_fprint_file_contents prints the content of the given filename
- * to stdout when showFilesOptions.showFileContent is true.
+ * fprint_file_contents prints the content of the given filename to stdout.
  */
 static bool
 fprint_file_contents(const char *filename)

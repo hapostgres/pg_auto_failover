@@ -37,7 +37,7 @@ CommandLine *show_subcommands[] = {
 	&show_uri_command,
 	&show_events_command,
 	&show_state_command,
-	&show_files_command,
+	&show_file_command,
 	&systemd_cat_service_file_command,
 	NULL
 };
