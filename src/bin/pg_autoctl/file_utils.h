@@ -28,6 +28,6 @@ void path_in_same_directory(const char *basePath,
 int search_pathlist(const char *pathlist, const char *filename, char ***result);
 void search_pathlist_destroy_result(char **result);
 bool unlink_file(const char *filename);
-bool get_program_absolute_path(char *program, int size);
+bool set_program_absolute_path(char *program, int size);
 
 #endif /* FILE_UTILS_H */
