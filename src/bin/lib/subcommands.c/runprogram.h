@@ -224,6 +224,10 @@ execute_program(Program *prog)
 			{
 				prog->returnCode = -1;
 				prog->error = errno;
+
+				fprintf(stdout, "%s\n", strerror(errno));
+				fprintf(stderr, "%s\n", strerror(errno));
+				exit(EXIT_CODE_INTERNAL_ERROR);
 			}
 			return;
 		}
