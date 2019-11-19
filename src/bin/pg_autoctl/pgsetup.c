@@ -16,6 +16,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "parson.h"
+
 #include "defaults.h"
 #include "pgctl.h"
 #include "log.h"
@@ -584,6 +586,41 @@ fprintf_pg_setup(FILE *stream, PostgresSetup *pgSetup)
 	fflush(stream);
 }
 
+
+/*
+ * pg_setup_as_json copies in the given pre-allocated string the json
+ * representation of the pgSetup.
+ */
+bool
+pg_setup_as_json(PostgresSetup *pgSetup, JSON_Object *jsobj)
+{
+	char system_identifier[BUFSIZE];
+
+	json_object_set_string(jsobj, "pgdata", pgSetup->pgdata);
+	json_object_set_string(jsobj, "pg_ctl", pgSetup->pg_ctl);
+	json_object_set_string(jsobj, "version", pgSetup->pg_version);
+	json_object_set_string(jsobj, "host", pgSetup->pghost);
+	json_object_set_number(jsobj, "port", (double) pgSetup->pgport);
+	json_object_set_number(jsobj, "proxyport", (double) pgSetup->proxyport);
+	json_object_set_number(jsobj, "pid", (double) pgSetup->pidFile.pid);
+	json_object_set_boolean(jsobj, "in_recovery", pgSetup->is_in_recovery);
+
+	json_object_dotset_number(jsobj,
+							  "control.version",
+							  (double) pgSetup->control.pg_control_version);
+
+	json_object_dotset_number(jsobj,
+							  "control.catalog_version",
+							  (double) pgSetup->control.catalog_version_no);
+
+	snprintf(system_identifier, BUFSIZE, "%" PRIu64,
+			 pgSetup->control.system_identifier);
+	json_object_dotset_string(jsobj,
+							  "control.system_identifier",
+							  system_identifier);
+
+	return true;
+}
 
 /*
  * pg_setup_get_local_connection_string build a connecting string to connect

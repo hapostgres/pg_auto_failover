@@ -654,13 +654,6 @@ keeper_register_and_init(Keeper *keeper,
 	Monitor *monitor = &(keeper->monitor);
 	MonitorAssignedState assignedState = { 0 };
 
-	if (!monitor_init(monitor, config->monitor_pguri))
-	{
-		log_fatal("Failed to contact the monitor because its URL is invalid, "
-				  "see above for details");
-		return false;
-	}
-
 	/*
 	 * First try to create our state file. The keeper_state_create_file function
 	 * may fail if we have no permission to write to the state file directory
@@ -671,6 +664,12 @@ keeper_register_and_init(Keeper *keeper,
 	{
 		log_fatal("Failed to create a state file prior to registering the "
 				  "node with the monitor, see above for details");
+		return false;
+	}
+
+	/* now that we have a state on-disk, finish init of the keeper instance */
+	if (!keeper_init(keeper, config))
+	{
 		return false;
 	}
 
@@ -690,13 +689,9 @@ keeper_register_and_init(Keeper *keeper,
 		return false;
 	}
 
-	/* now that we have a state on-disk, finish init of the keeper instance */
-	if (!keeper_init(keeper, config))
-	{
-		return false;
-	}
-
 	/* initialize FSM state from monitor's answer */
+	log_info("Writing keeper state file at \"%s\"", config->pathnames.state);
+
 	if (!keeper_update_state(keeper,
 							 assignedState.nodeId,
 							 assignedState.groupId,

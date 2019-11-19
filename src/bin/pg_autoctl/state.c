@@ -18,6 +18,8 @@
 #include "postgres_fe.h"
 #include "libpq-fe.h"
 
+#include "parson.h"
+
 #include "defaults.h"
 #include "file_utils.h"
 #include "keeper_config.h"
@@ -286,6 +288,30 @@ print_keeper_state(KeeperStateData *keeperState, FILE *stream)
 	fflush(stream);
 }
 
+
+/*
+ * keeperStateAsJSON
+ */
+bool
+keeperStateAsJSON(KeeperStateData *keeperState, JSON_Object *jsobj)
+{
+	const char *current_role = NodeStateToString(keeperState->current_role);
+	const char *assigned_role = NodeStateToString(keeperState->assigned_role);
+
+	json_object_set_string(jsobj, "current_role", current_role);
+	json_object_set_string(jsobj, "assigned_role", assigned_role);
+
+	json_object_set_number(jsobj, "version",
+						   (double) keeperState->pg_autoctl_state_version);
+
+	json_object_set_number(jsobj, "groupId",
+						   (double) keeperState->current_group);
+
+	json_object_set_number(jsobj, "nodeId",
+						   (double) keeperState->current_node_id);
+
+	return true;
+}
 
 /*
  * NodeStateToString converts a NodeState ENUM value into a string for use in

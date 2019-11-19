@@ -271,9 +271,11 @@ monitor_register_node(Monitor *monitor, char *formation, char *host, int port,
 		return false;
 	}
 
-	log_info("Registered node %s:%d with id %d in formation \"%s\", group %d.",
+	log_info("Registered node %s:%d with id %d in formation \"%s\", "
+			 "group %d, state \"%s\"",
 			 host, port, assignedState->nodeId,
-			 formation, assignedState->groupId);
+			 formation, assignedState->groupId,
+			 NodeStateToString(assignedState->state));
 
 	return true;
 }

@@ -16,6 +16,7 @@
 
 #include "postgres_fe.h"
 
+#include "parson.h"
 
 /*
  * To be able to check if a minor upgrade should be scheduled, and to check for
@@ -125,6 +126,8 @@ bool pg_setup_init(PostgresSetup *pgSetup,
 bool read_pg_pidfile(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok);
 
 void fprintf_pg_setup(FILE *stream, PostgresSetup *pgSetup);
+bool pg_setup_as_json(PostgresSetup *pgSetup, JSON_Object *jsobj);
+
 bool pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 										  char *connectionString);
 bool pg_setup_pgdata_exists(PostgresSetup *pgSetup);
