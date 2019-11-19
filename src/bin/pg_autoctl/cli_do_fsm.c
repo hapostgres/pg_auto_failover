@@ -14,6 +14,8 @@
 
 #include "postgres_fe.h"
 
+#include "parson.h"
+
 #include "cli_common.h"
 #include "commandline.h"
 #include "defaults.h"
@@ -152,6 +154,16 @@ keeper_cli_fsm_state(int argc, char **argv)
 	bool missing_pgdata_is_ok = true;
 	bool pg_is_not_running_is_ok = true;
 
+    JSON_Value *js = json_value_init_object();
+    JSON_Value *jsPostgres = json_value_init_object();
+    JSON_Value *jsKeeperState = json_value_init_object();
+
+    JSON_Object *root = json_value_get_object(js);
+    JSON_Object *jsPostgresObject = json_value_get_object(jsPostgres);
+    JSON_Object *jsKeeperStateObject = json_value_get_object(jsKeeperState);
+
+    char *serialized_string = NULL;
+
 	keeper_config_read_file(&config,
 							missing_pgdata_is_ok,
 							pg_is_not_running_is_ok);
@@ -177,11 +189,18 @@ keeper_cli_fsm_state(int argc, char **argv)
 	}
 
 	/* print our current PostgreSQL setup and Keeper's state */
-	fprintf(stdout, "\nCurrent PostgreSQL state:\n");
-	fprintf_pg_setup(stdout, &(keeper.postgres.postgresSetup));
-	fprintf(stdout, "\nCurrent Keeper's state:\n");
-	print_keeper_state(&keeper.state, stdout);
-	fprintf(stdout, "\n");
+	pg_setup_as_json(&(keeper.postgres.postgresSetup), jsPostgresObject);
+	keeperStateAsJSON(&keeper.state, jsKeeperStateObject);
+
+    json_object_set_value(root, "postgres", jsPostgres);
+    json_object_set_value(root, "state", jsKeeperState);
+
+    serialized_string = json_serialize_to_string_pretty(js);
+
+	fprintf(stdout, "%s\n", serialized_string);
+
+    json_free_serialized_string(serialized_string);
+    json_value_free(js);
 }
 
 
@@ -234,6 +253,16 @@ keeper_cli_fsm_assign(int argc, char **argv)
 	bool missing_pgdata_is_ok = true;
 	bool pg_is_not_running_is_ok = true;
 
+    JSON_Value *js = json_value_init_object();
+    JSON_Value *jsPostgres = json_value_init_object();
+    JSON_Value *jsKeeperState = json_value_init_object();
+
+    JSON_Object *root = json_value_get_object(js);
+    JSON_Object *jsPostgresObject = json_value_get_object(jsPostgres);
+    JSON_Object *jsKeeperStateObject = json_value_get_object(jsKeeperState);
+
+    char *serialized_string = NULL;
+
 	keeper_config_read_file(&config,
 							missing_pgdata_is_ok,
 							pg_is_not_running_is_ok);
@@ -267,6 +296,19 @@ keeper_cli_fsm_assign(int argc, char **argv)
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_STATE);
 	}
+
+	pg_setup_as_json(&(keeper.postgres.postgresSetup), jsPostgresObject);
+	keeperStateAsJSON(&keeper.state, jsKeeperStateObject);
+
+    json_object_set_value(root, "postgres", jsPostgres);
+    json_object_set_value(root, "state", jsKeeperState);
+
+    serialized_string = json_serialize_to_string_pretty(js);
+
+	fprintf(stdout, "%s\n", serialized_string);
+
+    json_free_serialized_string(serialized_string);
+    json_value_free(js);
 }
 
 

@@ -10,6 +10,7 @@
 #ifndef STATE_H
 #define STATE_H
 
+#include "parson.h"
 
 #include "keeper_config.h"
 #include "pgctl.h"
@@ -124,6 +125,7 @@ bool keeper_state_write(KeeperStateData *keeperState, const char *filename);
 
 void log_keeper_state(KeeperStateData *keeperState);
 void print_keeper_state(KeeperStateData *keeperState, FILE *fp);
+bool keeperStateAsJSON(KeeperStateData *keeperState, JSON_Object *jsobj);
 
 char *PreInitPostgreInstanceStateToString(PreInitPostgreInstanceState pgInitState);
 
