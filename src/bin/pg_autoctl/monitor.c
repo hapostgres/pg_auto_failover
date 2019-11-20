@@ -951,6 +951,81 @@ printCurrentState(void *ctx, PGresult *result)
 
 
 /*
+ * monitor_get_state_as_json returns a single string that contains the JSON
+ * representation of the current state on the monitor.
+ */
+bool
+monitor_get_state_as_json(Monitor *monitor, char *formation, int group,
+						  char *json, int size)
+{
+	SingleValueResultContext context;
+	PGSQL *pgsql = &monitor->pgsql;
+	char *sql = NULL;
+	int paramCount = 0;
+	Oid paramTypes[2];
+	const char *paramValues[2];
+	IntString groupStr;
+
+	log_trace("monitor_get_state_as_json(%s, %d)", formation, group);
+
+	context.resultType = PGSQL_RESULT_STRING;
+	context.parsedOk = false;
+
+	switch (group)
+	{
+		case -1:
+		{
+			sql = "SELECT jsonb_pretty(jsonb_agg(row_to_json(state)))"
+				" FROM pgautofailover.current_state($1) as state";
+
+			paramCount = 1;
+			paramTypes[0] = TEXTOID;
+			paramValues[0] = formation;
+
+			break;
+		}
+
+		default:
+		{
+			sql = "SELECT jsonb_pretty(jsonb_agg(row_to_json(state)))"
+				"FROM pgautofailover.current_state($1,$2) as state";
+
+			groupStr = intToString(group);
+
+			paramCount = 2;
+			paramTypes[0] = TEXTOID;
+			paramValues[0] = formation;
+			paramTypes[1] = INT4OID;
+			paramValues[1] = groupStr.strValue;
+
+			break;
+		}
+	}
+
+	if (!pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes, paramValues,
+								   &context, &parseSingleValueResult))
+	{
+		log_error("Failed to retrieve current state from the monitor");
+		return false;
+	}
+
+	/* disconnect from PostgreSQL now */
+	pgsql_finish(&monitor->pgsql);
+
+	if (!context.parsedOk)
+	{
+		log_error("Failed to parse current state from the monitor");
+		log_error("%s", context.strVal);
+		return false;
+	}
+
+	strlcpy(json, context.strVal, size);
+
+	return true;
+}
+
+
+/*
  * monitor_print_last_events calls the function pgautofailover.last_events on the
  * monitor, and prints a line of output per event obtained.
  */

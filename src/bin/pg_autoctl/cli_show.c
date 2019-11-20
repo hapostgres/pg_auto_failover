@@ -29,6 +29,7 @@
 #include "state.h"
 
 static int eventCount = 10;
+static bool outputJSON = false;
 
 static int cli_show_state_getopts(int argc, char **argv);
 static void cli_show_state(int argc, char **argv);
@@ -65,7 +66,8 @@ CommandLine show_state_command =
 				 " [ --pgdata --formation --group ] ",
 				 "  --pgdata      path to data directory	 \n"		\
 				 "  --formation   formation to query, defaults to 'default' \n" \
-				 "  --group       group to query formation, defaults to all \n",
+				 "  --group       group to query formation, defaults to all \n" \
+				 "  --json        output data in the JSON format\n",
 				 cli_show_state_getopts,
 				 cli_show_state);
 
@@ -87,6 +89,7 @@ cli_show_state_getopts(int argc, char **argv)
 		{ "formation", required_argument, NULL, 'f' },
 		{ "group", required_argument, NULL, 'g' },
 		{ "count", required_argument, NULL, 'n' },
+		{ "json", no_argument, NULL, 'J' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
@@ -191,11 +194,17 @@ cli_show_state_getopts(int argc, char **argv)
 				break;
 			}
 
+			case 'J':
+			{
+				outputJSON = true;
+				log_trace("--json");
+				break;
+			}
+
 			default:
 			{
 				/* getopt_long already wrote an error message */
 				errors++;
-				break;
 			}
 		}
 	}
@@ -275,10 +284,26 @@ cli_show_state(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!monitor_print_state(&monitor, config.formation, config.groupId))
+	if (outputJSON)
 	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_MONITOR);
+		char json[BUFSIZE];
+
+		if (!monitor_get_state_as_json(&monitor,
+									   config.formation, config.groupId,
+									   json, BUFSIZE))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_MONITOR);
+		}
+		fprintf(stdout, "%s\n", json);
+	}
+	else
+	{
+		if (!monitor_print_state(&monitor, config.formation, config.groupId))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_MONITOR);
+		}
 	}
 }
 

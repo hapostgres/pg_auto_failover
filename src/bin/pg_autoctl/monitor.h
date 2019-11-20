@@ -83,6 +83,8 @@ bool monitor_remove(Monitor *monitor, char *host, int port);
 bool monitor_print_state(Monitor *monitor, char *formation, int group);
 bool monitor_print_last_events(Monitor *monitor,
 							   char *formation, int group, int count);
+bool monitor_get_state_as_json(Monitor *monitor, char *formation, int group,
+							   char *json, int size);
 
 bool monitor_create_formation(Monitor *monitor, char *formation, char *kind,
 							  char *dbname, bool ha, int numberSyncStandbys);
