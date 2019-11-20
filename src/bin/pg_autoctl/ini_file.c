@@ -53,13 +53,19 @@ read_ini_file(const char *filename, IniOption *optionList)
 
 		if (sectionIndex == INI_NOT_FOUND)
 		{
-			log_error("Failed to find section %s in \"%s\"",
-					  option->section, filename);
-			ini_destroy(ini);
-			return false;
+			if (option->required)
+			{
+				log_error("Failed to find section %s in \"%s\"",
+						  option->section, filename);
+				ini_destroy(ini);
+				return false;
+			}
+			optionIndex = INI_NOT_FOUND;
 		}
-
-		optionIndex = ini_find_property(ini, sectionIndex, option->name, 0);
+		else
+		{
+			optionIndex = ini_find_property(ini, sectionIndex, option->name, 0);
+		}
 
 		if (optionIndex == INI_NOT_FOUND)
 		{
