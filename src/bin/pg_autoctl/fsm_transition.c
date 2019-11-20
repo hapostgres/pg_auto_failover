@@ -577,7 +577,8 @@ fsm_init_standby(Keeper *keeper)
 		return false;
 	}
 
-	return true;
+	/* now, in case we have an init state file around, remove it */
+	return unlink_file(config->pathnames.init);
 }
 
 
