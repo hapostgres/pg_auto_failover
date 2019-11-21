@@ -9,7 +9,7 @@ jobs:
 
       - run:
           name: 'build and install'
-          command: make install
+          command: make -s && sudo make install
 
       - run:
           name: test if installed
