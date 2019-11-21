@@ -768,6 +768,27 @@ cli_show_file_getopts(int argc, char **argv)
 		}
 	}
 
+	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
+	{
+		char *pgdata = getenv("PGDATA");
+
+		if (pgdata == NULL)
+		{
+			log_fatal("Failed to get PGDATA either from the environment "
+					  "or from --pgdata");
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		strlcpy(options.pgSetup.pgdata, pgdata, MAXPGPATH);
+	}
+
+	if (!keeper_config_set_pathnames_from_pgdata(&options.pathnames,
+												 options.pgSetup.pgdata))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
 	/* default to --all when no option has been selected */
 	if (fileOptions.selection == SHOW_FILE_UNKNOWN)
 	{
@@ -789,13 +810,6 @@ cli_show_file(int argc, char **argv)
 {
 	KeeperConfig config = keeperOptions;
 	pgAutoCtlNodeRole role = PG_AUTOCTL_ROLE_UNKNOWN;
-
-	if (!keeper_config_set_pathnames_from_pgdata(&config.pathnames,
-												 config.pgSetup.pgdata))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_CONFIG);
-	}
 
 	role = ProbeConfigurationFileRole(config.pathnames.config);
 
