@@ -1,4 +1,4 @@
-version: 2
+version: 2.1
 jobs:
   build:
     docker:
@@ -8,9 +8,9 @@ jobs:
       - checkout
 
       - run:
-          name: Greeting
-          command: echo Hello, world 2
+          name: 'build and install'
+          command: make install
 
       - run:
-          name: Print the Current Time
-          command: date
+          name: test if installed
+          command: pg_autoctl --version
