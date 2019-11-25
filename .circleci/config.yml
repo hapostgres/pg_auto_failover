@@ -14,7 +14,7 @@ jobs:
       - run:
           name: test if installed
           command: pg_autoctl --version
-      -run:
+      - run:
           name: show python version
           command: which python && python --version
       - run:
