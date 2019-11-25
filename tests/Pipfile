@@ -11,4 +11,4 @@ psycopg2 = "==2.7.5"
 [dev-packages]
 
 [requires]
-python_version = "3.6"
+python_version = "3.7"
