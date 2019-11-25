@@ -14,9 +14,12 @@ jobs:
       - run:
           name: test if installed
           command: pg_autoctl --version
+      -run:
+          name: show python version
+          command: which python && python --version
       - run:
           name: prepare test
-          command: PIPENV_PIPFILE=tests/Pipfile pipenv install --system --deploy
+          command: PIPENV_PIPFILE=tests/Pipfile pipenv install --system --deploy -v
       - run:
           name: run tests
           command: make test
