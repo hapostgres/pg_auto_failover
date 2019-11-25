@@ -16,7 +16,11 @@ jobs:
           command: pg_autoctl --version
       - run:
           name: prepare test
-          command: PIPENV_PIPFILE=tests/Pipfile pipenv install --system --deploy
+          command: |
+           PIPENV_PIPFILE=tests/Pipfile pipenv install --system --deploy
+           pipenv --python 3.7
+           source $(pipenv --venv)/bin/activate
       - run:
           name: run tests
-          command: make test
+          command: | 
+            make test
