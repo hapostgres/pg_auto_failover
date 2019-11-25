@@ -257,10 +257,13 @@ fsm_init_primary(Keeper *keeper)
 			 * In test environements allow nodes from the same network to
 			 * connect. The network is discovered automatically.
 			 */
-			(void) pghba_enable_lan_cidr(&keeper->postgres.sqlClient,
+			char *hbaFilePath = keeper->postgres.postgresSetup.pgConfigPath.hba;
+
+			(void) pghba_enable_lan_cidr(hbaFilePath,
 										 HBA_DATABASE_ALL, NULL,
 										 keeper->config.nodename,
-										 NULL, DEFAULT_AUTH_METHOD, NULL);
+										 NULL, DEFAULT_AUTH_METHOD,
+										 &keeper->postgres.sqlClient);
 		}
 	}
 	else

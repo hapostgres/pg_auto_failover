@@ -28,11 +28,12 @@ bool pghba_ensure_host_rule_exists(const char *hbaFilePath,
 								   const char *hostname,
 								   const char *authenticationScheme);
 
-bool pghba_enable_lan_cidr(PGSQL *pgsql, HBADatabaseType databaseType,
+bool pghba_enable_lan_cidr(const char *hbaFilePath,
+						   HBADatabaseType databaseType,
 						   const char *database,
 						   const char *hostname,
 						   const char *username,
 						   const char *authenticationScheme,
-						   const char *pgdata);
+						   PGSQL *pgsql);
 
 #endif /* PGHBA_H */

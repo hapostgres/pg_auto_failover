@@ -257,14 +257,14 @@ escape_hba_string(char *destination, const char *hbaString)
  * all, it should be safe.
  */
 bool
-pghba_enable_lan_cidr(PGSQL *pgsql, HBADatabaseType databaseType,
+pghba_enable_lan_cidr(const char *hbaFilePath,
+					  HBADatabaseType databaseType,
 					  const char *database,
 					  const char *hostname,
 					  const char *username,
 					  const char *authenticationScheme,
-					  const char *pgdata)
+					  PGSQL *pgsql)
 {
-	char hbaFilePath[MAXPGPATH];
 	char ipAddr[BUFSIZE];
 	char cidr[BUFSIZE];
 
@@ -289,22 +289,6 @@ pghba_enable_lan_cidr(PGSQL *pgsql, HBADatabaseType databaseType,
 	log_debug("HBA: CIDR address to open: %s", cidr);
 	log_info("Granting connection privileges on %s", cidr);
 
-	/* The caller gives pgdata when PostgreSQL is not yet running */
-	if (pgdata == NULL)
-	{
-		if (!pgsql_get_hba_file_path(pgsql, hbaFilePath, MAXPGPATH))
-		{
-			/* unexpected */
-			log_error("Failed to obtain the HBA file path from the local "
-					  "PostgreSQL server.");
-			return false;
-		}
-	}
-	else
-	{
-		snprintf(hbaFilePath, MAXPGPATH, "%s/pg_hba.conf", pgdata);
-	}
-
 	if (!pghba_ensure_host_rule_exists(hbaFilePath, databaseType, database,
 									   username, cidr, authenticationScheme))
 	{
@@ -313,10 +297,7 @@ pghba_enable_lan_cidr(PGSQL *pgsql, HBADatabaseType databaseType,
 		return false;
 	}
 
-	/*
-	 * pgdata is given when PostgreSQL is not yet running, don't reload then...
-	 */
-	if (pgdata == NULL && !pgsql_reload_conf(pgsql))
+	if (!pgsql_reload_conf(pgsql))
 	{
 		log_error("Failed to reload PostgreSQL configuration for new HBA rule");
 		return false;

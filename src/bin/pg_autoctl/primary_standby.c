@@ -298,22 +298,9 @@ postgres_add_default_settings(LocalPostgresServer *postgres)
 {
 	PGSQL *pgsql = &(postgres->sqlClient);
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
-	char configFilePath[MAXPGPATH];
 	GUC *default_settings = postgres_default_settings;
 
 	log_trace("primary_add_default_postgres_settings");
-
-	/* get the path of the config file from the running database */
-	if (!pgsql_get_config_file_path(pgsql, configFilePath, MAXPGPATH))
-	{
-		log_error("Failed to add default settings to postgres.conf: couldn't get "
-				  "the postgresql.conf path from the local postgres server, see "
-				  "above for details");
-		return false;
-	}
-
-	/* in case of errors, pgsql_ functions finish the connection */
-	pgsql_finish(pgsql);
 
 	/* default settings are different when dealing with a Citus node */
 	if (IS_CITUS_INSTANCE_KIND(postgres->pgKind))
@@ -322,7 +309,7 @@ postgres_add_default_settings(LocalPostgresServer *postgres)
 	}
 
 	if (!pg_add_auto_failover_default_settings(pgSetup,
-											   configFilePath,
+											   pgSetup->pgConfigPath.conf,
 											   default_settings))
 	{
 		log_error("Failed to add default settings to postgres.conf: couldn't "
@@ -346,24 +333,19 @@ primary_create_user_with_hba(LocalPostgresServer *postgres, char *userName,
 	bool login = true;
 	bool superuser = false;
 	bool replication = false;
-	char hbaFilePath[MAXPGPATH];
 
 	log_trace("primary_create_user_with_hba");
 
-	if (!pgsql_create_user(pgsql, userName, password, login, superuser, replication))
+	if (!pgsql_create_user(pgsql, userName, password,
+						   login, superuser, replication))
 	{
-		log_error("Failed to create user \"%s\" on local postgres server", userName);
+		log_error("Failed to create user \"%s\" on local postgres server",
+				  userName);
 		return false;
 	}
 
-	if (!pgsql_get_hba_file_path(pgsql, hbaFilePath, MAXPGPATH))
-	{
-		log_error("Failed to set the pg_hba rule for user \"%s\": couldn't get "
-				  "hba_file from local postgres server", userName);
-		return false;
-	}
-
-	if (!pghba_ensure_host_rule_exists(hbaFilePath, HBA_DATABASE_ALL, NULL, userName,
+	if (!pghba_ensure_host_rule_exists(postgres->postgresSetup.pgConfigPath.hba,
+									   HBA_DATABASE_ALL, NULL, userName,
 									   hostname, authMethod))
 	{
 		log_error("Failed to set the pg_hba rule for user \"%s\"", userName);
@@ -417,7 +399,6 @@ primary_add_standby_to_hba(LocalPostgresServer *postgres, char *standbyHostname,
 {
 	PGSQL *pgsql = &(postgres->sqlClient);
 	PostgresSetup *postgresSetup = &(postgres->postgresSetup);
-	char hbaFilePath[MAXPGPATH];
 	char *authMethod =  "trust";
 
 	if (replicationPassword)
@@ -427,15 +408,7 @@ primary_add_standby_to_hba(LocalPostgresServer *postgres, char *standbyHostname,
 
 	log_trace("primary_add_standby_to_hba");
 
-	if (!pgsql_get_hba_file_path(pgsql, hbaFilePath, MAXPGPATH))
-	{
-		log_error("Failed to add the standby node to PostgreSQL HBA file: "
-				  "couldn't get the standby pg_hba file location from the local "
-				  "postgres server.");
-		return false;
-	}
-
-	if (!pghba_ensure_host_rule_exists(hbaFilePath,
+	if (!pghba_ensure_host_rule_exists(postgres->postgresSetup.pgConfigPath.hba,
 									   HBA_DATABASE_REPLICATION, NULL,
 									   PG_AUTOCTL_REPLICA_USERNAME,
 									   standbyHostname, authMethod))
@@ -445,7 +418,8 @@ primary_add_standby_to_hba(LocalPostgresServer *postgres, char *standbyHostname,
 		return false;
 	}
 
-	if (!pghba_ensure_host_rule_exists(hbaFilePath, HBA_DATABASE_DBNAME,
+	if (!pghba_ensure_host_rule_exists(postgres->postgresSetup.pgConfigPath.hba,
+									   HBA_DATABASE_DBNAME,
 									   postgresSetup->dbname,
 									   PG_AUTOCTL_REPLICA_USERNAME,
 									   standbyHostname, authMethod))
@@ -548,7 +522,6 @@ bool
 primary_rewind_to_standby(LocalPostgresServer *postgres,
 						  ReplicationSource *replicationSource)
 {
-	char configFilePath[MAXPGPATH];
 	PGSQL *pgsql = &(postgres->sqlClient);
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	NodeAddress *primaryNode = &(replicationSource->primaryNode);
@@ -556,14 +529,6 @@ primary_rewind_to_standby(LocalPostgresServer *postgres,
 	log_trace("primary_rewind_to_standby");
 	log_info("Rewinding PostgreSQL to follow new primary %s:%d",
 			 primaryNode->host, primaryNode->port);
-
-	/* get the path of the config file from the running database */
-	if (!pgsql_get_config_file_path(pgsql, configFilePath, MAXPGPATH))
-	{
-		log_error("Failed to get the postgresql.conf path from the "
-				  "local postgres server, see above for details");
-		return false;
-	}
 
 	if (!pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata))
 	{
@@ -581,7 +546,7 @@ primary_rewind_to_standby(LocalPostgresServer *postgres,
 	}
 
 	if (!pg_setup_standby_mode(pgSetup->control.pg_control_version,
-							   configFilePath,
+							   pgSetup->pgConfigPath.conf,
 							   pgSetup->pgdata,
 							   replicationSource))
 	{
