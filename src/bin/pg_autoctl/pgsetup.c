@@ -385,6 +385,22 @@ pg_setup_init(PostgresSetup *pgSetup,
 		pg_setup_get_local_connection_string(pgSetup, connInfo);
 		pgsql_init(&pgsql, connInfo, PGSQL_CONN_LOCAL);
 
+		if (!pgsql_get_config_file_path(&pgsql,
+										pgSetup->pgConfigPath.conf, MAXPGPATH))
+		{
+			log_error("Failed to get the postgresql.conf path from the "
+					  "local Postgres server, see above for details");
+			errors++;
+		}
+
+		if (!pgsql_get_hba_file_path(&pgsql,
+									 pgSetup->pgConfigPath.hba, MAXPGPATH))
+		{
+			log_error("Failed to obtain the HBA file path from the local "
+					  "PostgreSQL server.");
+			errors++;
+		}
+
 		if (!pgsql_is_in_recovery(&pgsql, &pgSetup->is_in_recovery))
 		{
 			/* we logged about it already */
@@ -571,6 +587,8 @@ void
 fprintf_pg_setup(FILE *stream, PostgresSetup *pgSetup)
 {
 	fprintf(stream, "pgdata:             %s\n", pgSetup->pgdata);
+	fprintf(stream, "postgresql.conf:    %s\n", pgSetup->pgConfigPath.conf);
+	fprintf(stream, "pg_hba.conf:        %s\n", pgSetup->pgConfigPath.hba);
 	fprintf(stream, "pg_ctl:             %s\n", pgSetup->pg_ctl);
 	fprintf(stream, "pg_version:         %s\n", pgSetup->pg_version);
 	fprintf(stream, "pghost:             %s\n", pgSetup->pghost);

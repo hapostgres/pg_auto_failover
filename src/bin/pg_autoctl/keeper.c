@@ -468,6 +468,29 @@ keeper_update_pg_state(Keeper *keeper)
 		 */
 		pg_setup_get_local_connection_string(pgSetup, connInfo);
 		pgsql_init(pgsql, connInfo, PGSQL_CONN_LOCAL);
+
+		/*
+		 * Update our cache of file path locations for Postgres configuration
+		 * files (including HBA), in case it's been moved to somewhere else.
+		 * This could happen when using the debian/ubuntu pg_createcluster
+		 * command on an already existing cluster, for instance.
+		 *
+		 */
+		if (!pgsql_get_config_file_path(pgsql,
+										pgSetup->pgConfigPath.conf, MAXPGPATH))
+		{
+			log_error("Failed to get the postgresql.conf path from the "
+					  "local Postgres server, see above for details");
+			return false;
+		}
+
+		if (!pgsql_get_hba_file_path(pgsql,
+									 pgSetup->pgConfigPath.hba, MAXPGPATH))
+		{
+			log_error("Failed to obtain the HBA file path from the local "
+					  "PostgreSQL server.");
+			return false;;
+		}
 	}
 	else
 	{

@@ -44,6 +44,17 @@ typedef struct pg_pidfile
 } PostgresPIDFile;
 
 /*
+ * PgConfigPath is a cache of the location of configuration and HBA files so
+ * that we can construct new files at the proper places and then edit those
+ * files to add include lines or new setup.
+ */
+typedef struct pg_config_path
+{
+	char conf[MAXPGPATH];
+	char hba[MAXPGPATH];
+} PgConfigPath;
+
+/*
  * From pidfile.h we also extract the Postmaster status, one of the following
  * values:
  */
@@ -124,6 +135,7 @@ typedef struct pg_setup
 	PostgresPIDFile pidFile;                /* postmaster.pid information */
 	PgInstanceKind pgKind;					/* standalone/coordinator/worker */
 	NodeReplicationSettings settings; 		/* monitor side node replication settings */
+	PgConfigPath pgConfigPath;				/* path to postgresql.conf etc */
 } PostgresSetup;
 
 #define IS_EMPTY_STRING_BUFFER(strbuf) (strbuf[0] == '\0')

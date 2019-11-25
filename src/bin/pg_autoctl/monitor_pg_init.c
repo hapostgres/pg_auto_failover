@@ -225,13 +225,13 @@ monitor_install(const char *nodename,
 	 * Now allow nodes on the same network to connect to pg_auto_failover
 	 * database.
 	 */
-	if (!pghba_enable_lan_cidr(&postgres.sqlClient,
+	if (!pghba_enable_lan_cidr(pgSetup.pgConfigPath.hba,
 							   HBA_DATABASE_DBNAME,
 							   PG_AUTOCTL_MONITOR_DBNAME,
 							   nodename,
 							   PG_AUTOCTL_MONITOR_USERNAME,
 							   pg_setup_get_auth_method(&pgSetup),
-							   NULL))
+							   &postgres.sqlClient))
 	{
 		log_warn("Failed to grant connection to local network.");
 		return false;
