@@ -992,6 +992,7 @@ keeper_init_state_discover(Keeper *keeper, KeeperStateInit *initState)
 	return true;
 }
 
+
 /*
  * keeper_init_state_read reads the information kept in the keeper init file.
  */

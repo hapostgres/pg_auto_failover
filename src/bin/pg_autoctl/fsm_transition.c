@@ -94,6 +94,7 @@ fsm_init_primary(Keeper *keeper)
 			return false;
 		}
 
+		/* did the user try again after having stopped Postgres maybe? */
 		if (initState.pgInitState < PRE_INIT_STATE_RUNNING)
 		{
 			log_info("PostgreSQL state has changed since registration time: %s",
