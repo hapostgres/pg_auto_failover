@@ -644,12 +644,15 @@ keeper_restart_postgres(Keeper *keeper)
 {
 	PostgresSetup *pgSetup = &(keeper->postgres.postgresSetup);
 
+	log_trace("keeper_restart_postgres");
+
 	if (!pg_ctl_restart(pgSetup->pg_ctl, pgSetup->pgdata))
 	{
 		log_error("Failed to restart PostgreSQL instance at \"%s\", "
 				  "see above for details.", pgSetup->pgdata);
 		return false;
 	}
+
 	if (!keeper_update_pg_state(keeper))
 	{
 		log_error("Failed to update the keeper's state from the local "

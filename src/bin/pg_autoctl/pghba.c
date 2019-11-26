@@ -297,6 +297,12 @@ pghba_enable_lan_cidr(const char *hbaFilePath,
 		return false;
 	}
 
+	if (pgsql == NULL)
+	{
+		log_error("BUG: pghba_enable_lan_cidr pgsql connection is NULL.");
+		return false;
+	}
+
 	if (!pgsql_reload_conf(pgsql))
 	{
 		log_error("Failed to reload PostgreSQL configuration for new HBA rule");

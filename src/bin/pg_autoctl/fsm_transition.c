@@ -245,28 +245,10 @@ fsm_init_primary(Keeper *keeper)
 	}
 
 	/*
-	 * What remains to be done is either opening the HBA for a test setup, or
-	 * when we are initializing pg_auto_failover on an existing PostgreSQL
-	 * primary server instance, making sure that the parameters are all set.
+	 * When we are initializing pg_auto_failover on an existing PostgreSQL
+	 * primary server instance, make sure that the parameters are all set.
 	 */
-	if (pgInstanceIsOurs)
-	{
-		if (getenv("PG_REGRESS_SOCK_DIR") != NULL)
-		{
-			/*
-			 * In test environements allow nodes from the same network to
-			 * connect. The network is discovered automatically.
-			 */
-			char *hbaFilePath = keeper->postgres.postgresSetup.pgConfigPath.hba;
-
-			(void) pghba_enable_lan_cidr(hbaFilePath,
-										 HBA_DATABASE_ALL, NULL,
-										 keeper->config.nodename,
-										 NULL, DEFAULT_AUTH_METHOD,
-										 &keeper->postgres.sqlClient);
-		}
-	}
-	else
+	if (!pgInstanceIsOurs)
 	{
 		/*
 		 * As we are registering a previsouly existing PostgreSQL

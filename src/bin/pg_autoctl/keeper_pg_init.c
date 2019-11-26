@@ -713,6 +713,28 @@ create_database_and_extension(Keeper *keeper)
 	}
 
 	/*
+	 * In test environements allow nodes from the same network to connect. The
+	 * network is discovered automatically.
+	 */
+	if (getenv("PG_REGRESS_SOCK_DIR") != NULL)
+	{
+		char *hbaFilePath = initPostgres.postgresSetup.pgConfigPath.hba;
+
+		if (!pghba_enable_lan_cidr(hbaFilePath,
+								   HBA_DATABASE_ALL,
+								   NULL,					/* database: all */
+								   keeper->config.nodename, /* hostname */
+								   NULL,					/* username: all */
+								   DEFAULT_AUTH_METHOD,
+								   &initPostgres.sqlClient))
+		{
+			log_fatal("Failed to grant connection privileges to "
+					  "local area network, see above for details");
+			return false;
+		}
+	}
+
+	/*
 	 * Now, maybe create the database (if "postgres", it already exists).
 	 *
 	 * We need to connect to an existing database here, such as "template1",
@@ -741,7 +763,6 @@ create_database_and_extension(Keeper *keeper)
 	 * free to restart it to make sure that the defaults we just installed are
 	 * actually in place.
 	 */
-
 	if (!keeper_restart_postgres(keeper))
 	{
 		log_fatal("Failed to restart PostgreSQL to enable pg_auto_failover "
