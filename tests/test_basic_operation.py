@@ -101,7 +101,8 @@ def test_014_add_new_secondary():
     assert node3.wait_until_state(target_state="secondary")
     assert node2.wait_until_state(target_state="primary")
 
-
+"""
+Disabling the test until the problem is fixed in CI
 def test_015_multiple_manual_failover_verify_replication_slot_removed():
    monitor.failover()
    assert node3.wait_until_state(target_state="primary")
@@ -118,6 +119,7 @@ def test_015_multiple_manual_failover_verify_replication_slot_removed():
    assert node2_replication_slots == [(1,)]
    node3_replication_slots = node3.run_sql_query("select count(*) from pg_replication_slots");
    assert node3_replication_slots == [(0,)]
+"""
                 
 def test_016_drop_primary():
    node2.drop()
