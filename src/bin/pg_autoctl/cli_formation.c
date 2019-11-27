@@ -200,7 +200,7 @@ keeper_cli_formation_create_getopts(int argc, char **argv)
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
 		{ "help", no_argument, NULL, 'h' },
-		{ "number-sync-stanbys", required_argument, NULL, 'n' },
+		{ "number-sync-standbys", required_argument, NULL, 'n' },
 		{ NULL, 0, NULL, 0 }
 	};
 
@@ -298,17 +298,17 @@ keeper_cli_formation_create_getopts(int argc, char **argv)
 
 			case 'n':
 			{
-				/* { "number-sync-stanbys", required_argument, NULL, 'n'} */
-				int numberSyncStanbys = strtol(optarg, NULL, 10);
+				/* { "number-sync-standbys", required_argument, NULL, 'n'} */
+				int numberSyncStandbys = strtol(optarg, NULL, 10);
 
-				if (errno == EINVAL|| numberSyncStanbys < 0)
+				if (errno == EINVAL|| numberSyncStandbys < 0)
 				{
-					log_fatal("--number-sync-stanbys argument is not valid."
+					log_fatal("--number-sync-standbys argument is not valid."
 							  " Use a non-negative integer value.");
 					exit(EXIT_CODE_BAD_ARGS);
 				}
-				options.numberSyncStandbys = numberSyncStanbys;
-				log_trace("--number-sync-stanbys %d", numberSyncStanbys);
+				options.numberSyncStandbys = numberSyncStandbys;
+				log_trace("--number-sync-standbys %d", numberSyncStandbys);
 				break;
 			}
 

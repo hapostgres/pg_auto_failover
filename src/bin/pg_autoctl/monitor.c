@@ -535,7 +535,7 @@ parseNodeReplicationSettings(void *ctx, PGresult *result)
 
 
 /*
- * monitor_get_formation_number_sync_standbys retrieves number-sync-stanbys
+ * monitor_get_formation_number_sync_standbys retrieves number-sync-standbys
  * property for formation from the monitor. The function returns true upon
  * success.
  */
@@ -579,7 +579,7 @@ monitor_get_formation_number_sync_standbys(Monitor *monitor, char *formation,
 
 
 /*
- * monitor_set_formation_number_sync_standbys sets number-sync-stanbys
+ * monitor_set_formation_number_sync_standbys sets number-sync-standbys
  * property for formation at the monitor. The function returns true upon
  * success.
  */
