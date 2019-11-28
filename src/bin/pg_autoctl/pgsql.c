@@ -127,7 +127,7 @@ pgsql_finish(PGSQL *pgsql)
 {
 	if (pgsql->connection != NULL)
 	{
-		log_debug("Disconnecting from \"%s\"", pgsql->connectionString);
+		log_trace("Disconnecting from \"%s\"", pgsql->connectionString);
 		PQfinish(pgsql->connection);
 		pgsql->connection = NULL;
 	}
@@ -149,7 +149,7 @@ pgsql_open_connection(PGSQL *pgsql)
 		return pgsql->connection;
 	}
 
-	log_debug("Connecting to \"%s\"", pgsql->connectionString);
+	log_trace("Connecting to \"%s\"", pgsql->connectionString);
 
 	/* Make a connection to the database */
 	connection = PQconnectdb(pgsql->connectionString);
@@ -376,7 +376,7 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 		return false;
 	}
 
-	log_debug("%s;", sql);
+	log_trace("%s;", sql);
 
 	if (paramCount > 0)
 	{
@@ -400,7 +400,7 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 			remainingBytes -= bytesWritten;
 			writePointer += bytesWritten;
 		}
-		log_debug("%s", debugParameters);
+		log_trace("%s", debugParameters);
 	}
 
 	result = PQexecParams(connection, sql,

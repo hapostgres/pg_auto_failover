@@ -110,7 +110,7 @@ keeper_state_write(KeeperStateData *keeperState, const char *filename)
 		return false;
 	}
 
-	log_debug("Writing current state to \"%s\"", tempFileName);
+	log_trace("Writing current state to \"%s\"", tempFileName);
 
 	/*
 	 * Comment kept as is from PostgreSQL source code, function
@@ -155,7 +155,7 @@ keeper_state_write(KeeperStateData *keeperState, const char *filename)
 
 	close(fd);
 
-	log_debug("rename \"%s\" to \"%s\"", tempFileName, filename);
+	log_trace("rename \"%s\" to \"%s\"", tempFileName, filename);
 
 	/* now remove the old state file, and replace it with the new one */
 	if (rename(tempFileName, filename) != 0)

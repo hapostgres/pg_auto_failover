@@ -107,7 +107,7 @@ pg_controldata(PostgresSetup *pgSetup, bool missing_ok)
 	}
 
 	path_in_same_directory(pgSetup->pg_ctl, "pg_controldata", pg_controldata_path);
-	log_debug("%s %s", pg_controldata_path, pgSetup->pgdata);
+	log_trace("%s %s", pg_controldata_path, pgSetup->pgdata);
 
 	/* We parse the output of pg_controldata, make sure it's as expected */
 	setenv("LANG", "C", 1);
