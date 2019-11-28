@@ -937,7 +937,7 @@ pg_setup_standby_mode(uint32_t pg_control_version,
 		/*
 		 * Starting in Postgres 12 we need to add our recovery configuration to
 		 * the main postgresql.conf file and create an empty standby.signal
-		 * file to trigger starting the server in stanby mode.
+		 * file to trigger starting the server in standby mode.
 		 */
 		return pg_write_standby_signal(configFilePath,
 									   pgdata,
