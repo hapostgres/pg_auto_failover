@@ -533,6 +533,14 @@ fsm_enable_sync_rep(Keeper *keeper)
 {
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
+	if (!ensure_local_postgres_is_running(postgres))
+	{
+		log_error("Failed to enable sync rep because the server "
+				  "was not running and could not be restarted, "
+				  "see above for details");
+		return false;
+	}
+
 	return primary_enable_synchronous_replication(postgres);
 }
 

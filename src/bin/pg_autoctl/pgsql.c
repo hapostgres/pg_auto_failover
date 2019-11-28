@@ -127,7 +127,8 @@ pgsql_finish(PGSQL *pgsql)
 {
 	if (pgsql->connection != NULL)
 	{
-		log_trace("Disconnecting from \"%s\"", pgsql->connectionString);
+		log_trace("Disconnecting from \"%s\" [%p]",
+				  pgsql->connectionString, pgsql->connection);
 		PQfinish(pgsql->connection);
 		pgsql->connection = NULL;
 	}
@@ -198,6 +199,8 @@ pgsql_open_connection(PGSQL *pgsql)
 	}
 
 	pgsql->connection = connection;
+
+	log_trace("Connected to \"%s\" [%p]", pgsql->connectionString, connection);
 
 	/* set the libpq notice receiver to integrate notifications as warnings. */
 	PQsetNoticeProcessor(connection, &pgAutoCtlDefaultNoticeProcessor, NULL);

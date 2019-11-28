@@ -541,7 +541,9 @@ keeper_update_pg_state(Keeper *keeper)
 
 	/*
 	 * In some states, PostgreSQL isn't expected to be running, or not expected
-	 * to have a streaming replication to monitor at all.
+	 * to have a streaming replication to monitor at all. When the streaming
+	 * replication is running as expected then postgres->pgsrSyncState is
+	 * filled in, otherwise it's an empty string.
 	 */
 	switch (keeperState->current_role)
 	{
@@ -570,6 +572,7 @@ keeper_update_pg_state(Keeper *keeper)
 
 		case SECONDARY_STATE:
 		case CATCHINGUP_STATE:
+		case WAIT_PRIMARY_STATE:
 		{
 			/* pg_stat_replication.sync_state is only available upstream */
 			return postgres->pgIsRunning
