@@ -182,7 +182,7 @@ keeper_cli_fsm_state(int argc, char **argv)
 		log_error("Failed to serialize internal keeper state to JSON");
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
-	fprintf(stdout, "%s\n", keeperStateJSON);	
+	fprintf(stdout, "%s\n", keeperStateJSON);
 }
 
 
@@ -235,6 +235,7 @@ keeper_cli_fsm_assign(int argc, char **argv)
 	bool missing_pgdata_is_ok = true;
 	bool pg_is_not_running_is_ok = true;
 	char keeperStateJSON[BUFSIZE];
+	NodeState goalState = NO_STATE;
 
 	keeper_config_read_file(&config,
 							missing_pgdata_is_ok,
@@ -244,12 +245,15 @@ keeper_cli_fsm_assign(int argc, char **argv)
 	{
 		case 1:
 		{
-			/* all good, nothing special to do here. */
+			goalState = NodeStateFromString(argv[0]);
 			break;
 		}
 
 		case 3:
 		{
+			goalState = NodeStateFromString(argv[0]);
+
+			/* now prepare host and port in keeper.otherNode */
 			strlcpy(keeper.otherNode.host, argv[1], _POSIX_HOST_NAME_MAX);
 
 			keeper.otherNode.port = strtol(argv[2], NULL, 10);
@@ -278,7 +282,7 @@ keeper_cli_fsm_assign(int argc, char **argv)
 	}
 
 	/* assign the new state */
-	keeper.state.assigned_role = NodeStateFromString(argv[0]);
+	keeper.state.assigned_role = goalState;
 
 	/* roll the state machine */
 	if (!keeper_fsm_reach_assigned_state(&keeper))
@@ -321,6 +325,14 @@ keeper_cli_fsm_step(int argc, char **argv)
 	keeper_config_read_file(&(keeper.config),
 							missing_pgdata_is_ok,
 							pg_is_not_running_is_ok);
+
+	if (keeper.config.monitorDisabled)
+	{
+		log_fatal("The command `pg_autoctl do fsm step` is meant to step as "
+				  "instructed by the monitor, and the monitor is disabled.");
+		log_info("HINT: see `pg_autoctl do fsm assign` instead");
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
 
 	if (!keeper_init(&keeper, &keeper.config))
 	{
