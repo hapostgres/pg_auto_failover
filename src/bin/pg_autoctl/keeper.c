@@ -486,10 +486,11 @@ keeper_update_pg_state(Keeper *keeper)
 		 * Also update our view of pg_is_in_recovery, the replication sync
 		 * state when we are a primary with a standby currently using our
 		 * replication slot, and our current LSN position.
-		 *
 		 */
 		if (!pgsql_get_postgres_metadata(pgsql,
 										 config->replication_slot_name,
+										 pgSetup->pgConfigPath.conf,
+										 pgSetup->pgConfigPath.hba,
 										 &pgSetup->is_in_recovery,
 										 postgres->pgsrSyncState,
 										 postgres->currentLSN))
@@ -498,21 +499,7 @@ keeper_update_pg_state(Keeper *keeper)
 			return false;
 		}
 
-		/*
-		 * Update our cache of file path locations for Postgres configuration
-		 * files (including HBA), in case it's been moved to somewhere else.
-		 * This could happen when using the debian/ubuntu pg_createcluster
-		 * command on an already existing cluster, for instance.
-		 *
-		 */
-		if (!pgsql_get_config_file_path(pgsql,
-										pgSetup->pgConfigPath.conf, MAXPGPATH))
-		{
-			log_error("Failed to get the postgresql.conf path from the "
-					  "local Postgres server, see above for details");
-			return false;
-		}
-
+		/* cache invalidation for config_file and hba_file */
 		if (strcmp(pgSetup->pgConfigPath.conf,
 				   config->pgSetup.pgConfigPath.conf) != 0)
 		{
@@ -523,14 +510,6 @@ keeper_update_pg_state(Keeper *keeper)
 
 			strlcpy(config->pgSetup.pgConfigPath.conf,
 					pgSetup->pgConfigPath.conf, MAXPGPATH);
-		}
-
-		if (!pgsql_get_hba_file_path(pgsql,
-									 pgSetup->pgConfigPath.hba, MAXPGPATH))
-		{
-			log_error("Failed to obtain the HBA file path from the local "
-					  "PostgreSQL server.");
-			return false;
 		}
 
 		if (strcmp(pgSetup->pgConfigPath.hba,

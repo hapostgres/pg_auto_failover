@@ -391,25 +391,19 @@ pg_setup_init(PostgresSetup *pgSetup,
 		pg_setup_get_local_connection_string(pgSetup, connInfo);
 		pgsql_init(&pgsql, connInfo, PGSQL_CONN_LOCAL);
 
-		if (!pgsql_get_config_file_path(&pgsql,
-										pgSetup->pgConfigPath.conf, MAXPGPATH))
+		/*
+		 * Re-use the function pgsql_get_postgres_metadata even though we don't
+		 * care about replication here. This still allows us to have in a
+		 * single query the 3 bits of metadata we need.
+		 */
+		if (!pgsql_get_postgres_metadata(&pgsql,
+										 REPLICATION_SLOT_NAME_DEFAULT,
+										 pgSetup->pgConfigPath.conf,
+										 pgSetup->pgConfigPath.hba,
+										 &pgSetup->is_in_recovery,
+										 NULL, NULL))
 		{
-			log_error("Failed to get the postgresql.conf path from the "
-					  "local Postgres server, see above for details");
-			errors++;
-		}
-
-		if (!pgsql_get_hba_file_path(&pgsql,
-									 pgSetup->pgConfigPath.hba, MAXPGPATH))
-		{
-			log_error("Failed to obtain the HBA file path from the local "
-					  "PostgreSQL server.");
-			errors++;
-		}
-
-		if (!pgsql_is_in_recovery(&pgsql, &pgSetup->is_in_recovery))
-		{
-			/* we logged about it already */
+			log_error("Failed to update the local Postgres metadata");
 			errors++;
 		}
 

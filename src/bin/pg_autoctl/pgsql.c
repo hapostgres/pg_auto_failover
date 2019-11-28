@@ -766,62 +766,6 @@ pgsql_reload_conf(PGSQL *pgsql)
 
 
 /*
- * pgsql_get_config_file_path gets the value of the config_file setting in
- * Postgres or returns false if a failure occurred. The value is copied to
- * the configFilePath pointer.
- */
-bool
-pgsql_get_config_file_path(PGSQL *pgsql, char *configFilePath, int maxPathLength)
-{
-	char *configValue = NULL;
-
-	if (!pgsql_get_current_setting(pgsql, "config_file", &configValue))
-	{
-		return false;
-	}
-
-	strlcpy(configFilePath, configValue, maxPathLength);
-	free(configValue);
-
-	return true;
-}
-
-
-/*
- * pgsql_get_hba_file_path gets the value of the hba_file setting in
- * Postgres or returns false if a failure occurred. The value is copied to
- * the hbaFilePath pointer.
- */
-bool
-pgsql_get_hba_file_path(PGSQL *pgsql, char *hbaFilePath, int maxPathLength)
-{
-	char *configValue = NULL;
-	int hbaFilePathLength = 0;
-
-	if (!pgsql_get_current_setting(pgsql, "hba_file", &configValue))
-	{
-		/* pgsql_get_current_setting logs a relevant error */
-		return false;
-	}
-
-	hbaFilePathLength = strlcpy(hbaFilePath, configValue, maxPathLength);
-
-	if (hbaFilePathLength >= maxPathLength)
-	{
-		log_error("The hba_file \"%s\" returned by postgres is %d characters, "
-				  "the maximum supported by pg_autoctl is %d characters",
-				  configValue, hbaFilePathLength, maxPathLength);
-		free(configValue);
-		return false;
-	}
-
-	free(configValue);
-
-	return true;
-}
-
-
-/*
  * pgsql_get_current_setting gets the value of a GUC in Postgres by running
  * SELECT current_setting($settingName), or returns false if a failure occurred.
  *
@@ -1361,6 +1305,7 @@ validate_connection_string(const char *connectionString)
  *  - sync_state from pg_stat_replication when a primary
  *  - current_lsn from the server
  *
+>>>>>>> 46577ea... Simplify the Postgres metadata fetching logic.
  * With those metadata we can then check our expectations and take decisions in
  * some cases. We can obtain all the metadata that we need easily enough in a
  * single SQL query, so that's what we do.
@@ -1368,6 +1313,8 @@ validate_connection_string(const char *connectionString)
 typedef struct PgMetadata
 {
 	bool	parsedOk;
+	char	config_file[MAXPGPATH];
+	char	hba_file[MAXPGPATH];
 	bool	pg_is_in_recovery;
 	char	syncState[PGSR_SYNC_STATE_MAXLENGTH];
 	char	currentLSN[PG_LSN_MAXLENGTH];
@@ -1376,6 +1323,7 @@ typedef struct PgMetadata
 
 bool
 pgsql_get_postgres_metadata(PGSQL *pgsql, const char *slotName,
+							char *config_file, char *hba_file,
 							bool *pg_is_in_recovery,
 							char *pgsrSyncState, char *currentLSN)
 {
@@ -1385,7 +1333,9 @@ pgsql_get_postgres_metadata(PGSQL *pgsql, const char *slotName,
 		 * Make it so that we still have the current WAL LSN even in the case
 		 * where there's no replication slot in use by any standby.
 		 */
-		"select pg_is_in_recovery(),"
+		"select current_setting('config_file') as conf,"
+		" current_setting('hba_file') as hba,"
+		" pg_is_in_recovery(),"
 		" coalesce(rep.sync_state, '') as sync_state,"
 		" case when pg_is_in_recovery()"
 		" then pg_last_wal_receive_lsn()"
@@ -1415,6 +1365,8 @@ pgsql_get_postgres_metadata(PGSQL *pgsql, const char *slotName,
 		return false;
 	}
 
+	strlcpy(config_file, context.config_file, MAXPGPATH);
+	strlcpy(hba_file, context.hba_file, MAXPGPATH);
 	*pg_is_in_recovery = context.pg_is_in_recovery;
 
 	/* the last two metadata items are opt-in */
@@ -1443,9 +1395,9 @@ parsePgMetadata(void *ctx, PGresult *result)
 {
 	PgMetadata *context = (PgMetadata *) ctx;
 
-	if (PQnfields(result) != 3)
+	if (PQnfields(result) != 5)
 	{
-		log_error("Query returned %d columns, expected 3", PQnfields(result));
+		log_error("Query returned %d columns, expected 5", PQnfields(result));
 		context->parsedOk = false;
 		return;
 	}
@@ -1459,9 +1411,14 @@ parsePgMetadata(void *ctx, PGresult *result)
 
 	context->pg_is_in_recovery = strcmp(PQgetvalue(result, 0, 0), "t") == 0;
 
-	if (!PQgetisnull(result, 0, 1))
+	strlcpy(context->config_file, PQgetvalue(result, 0, 0), MAXPGPATH);
+	strlcpy(context->hba_file, PQgetvalue(result, 0, 1), MAXPGPATH);
+
+	context->pg_is_in_recovery = strcmp(PQgetvalue(result, 0, 2), "t") == 0;
+
+	if (!PQgetisnull(result, 0, 3))
 	{
-		char *value = PQgetvalue(result, 0, 1);
+		char *value = PQgetvalue(result, 0, 3);
 
 		strlcpy(context->syncState, value, PGSR_SYNC_STATE_MAXLENGTH);
 	}
@@ -1470,9 +1427,9 @@ parsePgMetadata(void *ctx, PGresult *result)
 		context->syncState[0] = '\0';
 	}
 
-	if (!PQgetisnull(result, 0, 2))
+	if (!PQgetisnull(result, 0, 4))
 	{
-		char *value = PQgetvalue(result, 0, 2);
+		char *value = PQgetvalue(result, 0, 4);
 
 		strlcpy(context->currentLSN, value, PG_LSN_MAXLENGTH);
 	}
