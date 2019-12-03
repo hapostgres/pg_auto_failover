@@ -118,6 +118,13 @@ get_node_replication_settings(NodeReplicationSettings *settings)
 							missing_pgdata_is_ok,
 							pg_is_not_running_is_ok);
 
+	if (keeper.config.monitorDisabled)
+	{
+		log_error("This node has disabled monitor, "
+				  "pg_autoctl get and set commands are not available.");
+		return false;
+	}
+
 	if (!keeper_init(&keeper, &keeper.config))
 	{
 		log_fatal("Failed to initialize keeper, see above for details");
@@ -240,6 +247,13 @@ cli_set_node_property(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
+	if (keeper.config.monitorDisabled)
+	{
+		log_error("This node has disabled monitor, "
+				  "pg_autoctl get and set commands are not available.");
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
 	if (!keeper_init(&keeper, &keeper.config))
 	{
 		log_fatal("Failed to initialize keeper, see above for details");
@@ -269,7 +283,8 @@ cli_set_node_property(int argc, char **argv)
 					keeper.state.current_node_id, keeper.config.nodename,
 					keeper.config.pgSetup.pgport, candidatePriority))
 		{
-			log_error("Failed to set \"candidate-priority\" to \"%d\".", candidatePriority);
+			log_error("Failed to set \"candidate-priority\" to \"%d\".",
+					  candidatePriority);
 			exit(EXIT_CODE_MONITOR);
 		}
 
@@ -358,15 +373,25 @@ cli_set_formation_property(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
+	if (config.monitorDisabled)
+	{
+		log_error("This node has disabled monitor, "
+				  "pg_autoctl get and set commands are not available.");
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
 	if (!monitor_init_from_pgsetup(&monitor, &config.pgSetup))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!monitor_set_formation_number_sync_standbys(&monitor, config.formation, numberSyncStandbys))
+	if (!monitor_set_formation_number_sync_standbys(&monitor,
+													config.formation,
+													numberSyncStandbys))
 	{
-		log_error("Failed to set \"number-sync-standbys\" to \"%d\".", numberSyncStandbys);
+		log_error("Failed to set \"number-sync-standbys\" to \"%d\".",
+				  numberSyncStandbys);
 		exit(EXIT_CODE_MONITOR);
 	}
 
