@@ -208,7 +208,7 @@ keeper_config_set_pathnames_from_pgdata(ConfigFilePaths *pathnames,
  */
 void
 keeper_config_init(KeeperConfig *config,
-				   bool missing_pgdata_is_ok, bool pg_is_not_running_is_ok)
+				   bool missingPgdataIsOk, bool pgIsNotRunningIsOk)
 {
 	PostgresSetup pgSetup = { 0 };
 	IniOption keeperOptions[] = SET_INI_OPTIONS_ARRAY(config);
@@ -228,8 +228,8 @@ keeper_config_init(KeeperConfig *config,
 
 	if (!pg_setup_init(&pgSetup,
 					   &(config->pgSetup),
-					   missing_pgdata_is_ok,
-					   pg_is_not_running_is_ok))
+					   missingPgdataIsOk,
+					   pgIsNotRunningIsOk))
 	{
 		log_error("Please fix your PostgreSQL setup per above messages");
 		exit(EXIT_CODE_BAD_CONFIG);
@@ -272,19 +272,20 @@ keeper_config_init(KeeperConfig *config,
  */
 bool
 keeper_config_read_file(KeeperConfig *config,
-						bool missing_pgdata_is_ok,
-						bool pg_not_running_is_ok)
+						bool missingPgdataIsOk,
+						bool pgIsNotRunningIsOk,
+						bool monitorDisabledIsOk)
 {
 
-	if (!keeper_config_read_file_skip_pgsetup(config))
+	if (!keeper_config_read_file_skip_pgsetup(config, monitorDisabledIsOk))
 	{
 		/* errors have already been logged. */
 		return false;
 	}
 
 	return keeper_config_pgsetup_init(config,
-									  missing_pgdata_is_ok,
-									  pg_not_running_is_ok);
+									  missingPgdataIsOk,
+									  pgIsNotRunningIsOk);
 }
 
 
@@ -293,7 +294,8 @@ keeper_config_read_file(KeeperConfig *config,
  * with whatever values are read from given configuration filename.
  */
 bool
-keeper_config_read_file_skip_pgsetup(KeeperConfig *config)
+keeper_config_read_file_skip_pgsetup(KeeperConfig *config,
+									 bool monitorDisabledIsOk)
 {
 	const char *filename = config->pathnames.config;
 	IniOption keeperOptions[] = SET_INI_OPTIONS_ARRAY(config);
@@ -307,9 +309,15 @@ keeper_config_read_file_skip_pgsetup(KeeperConfig *config)
 	}
 
 	/* take care of the special value for disabled monitor setup */
-	if (strcmp(config->monitor_pguri, PG_AUTOCTL_MONITOR_DISABLED) == 0)
+	if (PG_AUTOCTL_MONITOR_IS_DISABLED(config))
 	{
 		config->monitorDisabled = true;
+
+		if (!monitorDisabledIsOk)
+		{
+			log_error("Monitor is disabled in the configuration");
+			return false;
+		}
 	}
 
 	if (!keeper_config_init_nodekind(config))
@@ -328,15 +336,15 @@ keeper_config_read_file_skip_pgsetup(KeeperConfig *config)
  */
 bool
 keeper_config_pgsetup_init(KeeperConfig *config,
-						   bool missing_pgdata_is_ok,
-						   bool pg_not_running_is_ok)
+						   bool missingPgdataIsOk,
+						   bool pgIsNotRunningIsOk)
 {
 	PostgresSetup pgSetup = { 0 };
 
 	if (!pg_setup_init(&pgSetup,
 					   &config->pgSetup,
-					   missing_pgdata_is_ok,
-					   pg_not_running_is_ok))
+					   missingPgdataIsOk,
+					   pgIsNotRunningIsOk))
 	{
 		return false;
 	}

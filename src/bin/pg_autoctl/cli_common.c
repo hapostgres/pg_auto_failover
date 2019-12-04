@@ -623,6 +623,9 @@ monitor_init_from_pgsetup(Monitor *monitor, PostgresSetup *pgSetup)
 			Keeper keeper;
 			bool missingPgdataIsOk = true;
 			bool pgIsNotRunningIsOk = true;
+			bool monitorDisabledIsOk = false;
+
+			log_trace("monitor_init_from_pgsetup: keeper");
 
 			/*
 			 * the dereference of pgSetup is safe as it only contains literals,
@@ -638,20 +641,16 @@ monitor_init_from_pgsetup(Monitor *monitor, PostgresSetup *pgSetup)
 			 */
 			if (!keeper_config_read_file(&config,
 										 missingPgdataIsOk,
-										 pgIsNotRunningIsOk))
+										 pgIsNotRunningIsOk,
+										 monitorDisabledIsOk))
 			{
 				/* errors have already been logged */
 				return false;
 			}
 
-			if (!config.monitorDisabled)
+			if (!monitor_init(&(keeper.monitor), config.monitor_pguri))
 			{
-				if (!monitor_init(&(keeper.monitor), config.monitor_pguri))
-				{
-					return false;
-				}
-
-				*monitor = keeper.monitor;
+				return false;
 			}
 
 			*monitor = keeper.monitor;

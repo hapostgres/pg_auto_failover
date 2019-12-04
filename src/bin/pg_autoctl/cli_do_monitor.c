@@ -127,15 +127,17 @@ static void
 keeper_cli_monitor_get_primary_node(int argc, char **argv)
 {
 	KeeperConfig config = keeperOptions;
-	bool missing_pgdata_is_ok = true;
-	bool pg_is_not_running_is_ok = true;
-
 	Monitor monitor = { 0 };
 	NodeAddress primaryNode;
 
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = false;
+
 	if (!keeper_config_read_file(&config,
-								 missing_pgdata_is_ok,
-								 pg_is_not_running_is_ok))
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
 	{
 		/* errors have already been logged. */
 		exit(EXIT_CODE_BAD_CONFIG);
@@ -180,9 +182,14 @@ keeper_cli_monitor_get_other_node(int argc, char **argv)
 	Monitor monitor = { 0 };
 	NodeAddress otherNode = { 0 };
 
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = false;
+
 	if (!keeper_config_read_file(&config,
-								 missing_pgdata_is_ok,
-								 pg_is_not_running_is_ok))
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
 	{
 		/* errors have already been logged. */
 		exit(EXIT_CODE_BAD_CONFIG);
@@ -221,15 +228,17 @@ static void
 keeper_cli_monitor_get_coordinator(int argc, char **argv)
 {
 	KeeperConfig config = keeperOptions;
-	bool missing_pgdata_is_ok = true;
-	bool pg_is_not_running_is_ok = true;
-
 	Monitor monitor = { 0 };
 	NodeAddress coordinatorNode = { 0 };
 
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = false;
+
 	if (!keeper_config_read_file(&config,
-								 missing_pgdata_is_ok,
-								 pg_is_not_running_is_ok))
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
 	{
 		/* errors have already been logged. */
 		exit(EXIT_CODE_BAD_CONFIG);
@@ -263,14 +272,19 @@ keeper_cli_monitor_get_coordinator(int argc, char **argv)
 }
 
 
+/*
+ * keeper_cli_monitor_register_node registers the current node to the monitor.
+ */
 static void
 keeper_cli_monitor_register_node(int argc, char **argv)
 {
 	NodeState initialState = NO_STATE;
 	Keeper keeper = { 0 };
 	KeeperConfig config = keeperOptions;
-	bool missing_pgdata_is_ok = true;
-	bool pg_is_not_running_is_ok = true;
+
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = false;
 
 	if (argc != 1)
 	{
@@ -299,38 +313,39 @@ keeper_cli_monitor_register_node(int argc, char **argv)
 
 		case INIT_STATE:
 		{
-			missing_pgdata_is_ok = true;
-			pg_is_not_running_is_ok = true;
+			missingPgdataIsOk = true;
+			pgIsNotRunningIsOk = true;
 			break;
 		}
 
 		case SINGLE_STATE:
 		{
-			missing_pgdata_is_ok = false;
-			pg_is_not_running_is_ok = true;
+			missingPgdataIsOk = false;
+			pgIsNotRunningIsOk = true;
 			break;
 		}
 
 		case WAIT_STANDBY_STATE:
 		{
-			missing_pgdata_is_ok = false;
-			pg_is_not_running_is_ok = false;
+			missingPgdataIsOk = false;
+			pgIsNotRunningIsOk = false;
 			break;
 		}
 
 		default:
 		{
 			/* let the monitor decide if the situation is supported or not */
-			missing_pgdata_is_ok = true;
-			pg_is_not_running_is_ok = true;
+			missingPgdataIsOk = true;
+			pgIsNotRunningIsOk = true;
 			break;
 		}
 	}
 
 	/* The processing of the --pgdata option has set keeperConfigFilePath. */
 	if (!keeper_config_read_file(&config,
-								 missing_pgdata_is_ok,
-								 pg_is_not_running_is_ok))
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
 	{
 		/* errors have already been logged. */
 		exit(EXIT_CODE_BAD_CONFIG);
@@ -363,15 +378,18 @@ keeper_cli_monitor_node_active(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
 	KeeperConfig config = keeperOptions;
-	bool missing_pgdata_is_ok = true;
-	bool pg_is_not_running_is_ok = true;
+
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = false;
 
 	MonitorAssignedState assignedState = { 0 };
 
 	/* The processing of the --pgdata option has set keeperConfigFilePath. */
 	if (!keeper_config_read_file(&config,
-								 missing_pgdata_is_ok,
-								 pg_is_not_running_is_ok))
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
 	{
 		/* errors have already been logged. */
 		exit(EXIT_CODE_BAD_CONFIG);

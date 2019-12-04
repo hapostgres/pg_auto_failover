@@ -278,17 +278,24 @@ static void
 cli_enable_maintenance(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
-	bool missing_pgdata_is_ok = true;
-	bool pg_is_not_running_is_ok = true;
 	pid_t pid;
+
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = false;
 
 	keeper.config = keeperOptions;
 
 	(void) exit_unless_role_is_keeper(&(keeper.config));
 
-	keeper_config_read_file(&(keeper.config),
-							missing_pgdata_is_ok,
-							pg_is_not_running_is_ok);
+	if (!keeper_config_read_file(&(keeper.config),
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
 
 	if (!keeper_init(&keeper, &keeper.config))
 	{
@@ -342,17 +349,24 @@ static void
 cli_disable_maintenance(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
-	bool missing_pgdata_is_ok = true;
-	bool pg_is_not_running_is_ok = true;
 	pid_t pid;
+
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = false;
 
 	keeper.config = keeperOptions;
 
 	(void) exit_unless_role_is_keeper(&(keeper.config));
 
-	keeper_config_read_file(&(keeper.config),
-							missing_pgdata_is_ok,
-							pg_is_not_running_is_ok);
+	if (!keeper_config_read_file(&(keeper.config),
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
 
 	if (!keeper_init(&keeper, &keeper.config))
 	{

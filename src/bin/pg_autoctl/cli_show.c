@@ -435,6 +435,7 @@ static void
 cli_show_uri(int argc, char **argv)
 {
 	KeeperConfig config = keeperOptions;
+
 	if (!IS_EMPTY_STRING_BUFFER(config.formation))
 	{
 		(void) cli_show_formation_uri(argc, argv);
@@ -468,7 +469,8 @@ cli_show_formation_uri(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!monitor_formation_uri(&monitor, config.formation, postgresUri, MAXCONNINFO) )
+	if (!monitor_formation_uri(&monitor,
+							   config.formation, postgresUri, MAXCONNINFO))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_MONITOR);
@@ -487,7 +489,8 @@ cli_show_monitor_uri(int argc, char **argv)
 {
 	KeeperConfig kconfig = keeperOptions;
 
-	if (!keeper_config_set_pathnames_from_pgdata(&kconfig.pathnames, kconfig.pgSetup.pgdata))
+	if (!keeper_config_set_pathnames_from_pgdata(&kconfig.pathnames,
+												 kconfig.pgSetup.pgdata))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_CONFIG);
@@ -499,15 +502,15 @@ cli_show_monitor_uri(int argc, char **argv)
 		{
 			Monitor monitor = { 0 };
 			MonitorConfig mconfig = { 0 };
-			bool missing_pgdata_is_ok = true;
-			bool pg_is_not_running_is_ok = true;
+			bool missingPgdataIsOk = true;
+			bool pgIsNotRunningIsOk = true;
 			char connInfo[MAXCONNINFO];
 
 			if (!monitor_config_init_from_pgsetup(&monitor,
 												  &mconfig,
 												  &kconfig.pgSetup,
-												  missing_pgdata_is_ok,
-												  pg_is_not_running_is_ok))
+												  missingPgdataIsOk,
+												  pgIsNotRunningIsOk))
 			{
 				/* errors have already been logged */
 				exit(EXIT_CODE_PGCTL);
@@ -535,6 +538,12 @@ cli_show_monitor_uri(int argc, char **argv)
 										  value,
 										  BUFSIZE))
 			{
+				/* take care of the special value for disabled monitor setup */
+				if (PG_AUTOCTL_MONITOR_IS_DISABLED((&kconfig)))
+				{
+					log_error("Monitor is disabled in the configuration");
+					exit(EXIT_CODE_BAD_CONFIG);
+				}
 				fprintf(stdout, "%s\n", value);
 			}
 			else

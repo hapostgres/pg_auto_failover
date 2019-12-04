@@ -102,12 +102,18 @@ keeper_cli_fsm_init(int argc, char **argv)
 	Keeper keeper = { 0 };
 	KeeperStateData keeperState = { 0 };
 	KeeperConfig config = keeperOptions;
-	bool missing_pgdata_is_ok = true;
-	bool pg_is_not_running_is_ok = true;
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = true;
 
-	keeper_config_read_file(&config,
-							missing_pgdata_is_ok,
-							pg_is_not_running_is_ok);
+	if (!keeper_config_read_file(&config,
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
 
 	log_info("Initializing an FSM state in \"%s\"", config.pathnames.state);
 
@@ -149,13 +155,19 @@ keeper_cli_fsm_state(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
 	KeeperConfig config = keeperOptions;
-	bool missing_pgdata_is_ok = true;
-	bool pg_is_not_running_is_ok = true;
 	char keeperStateJSON[BUFSIZE];
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = true;
 
-	keeper_config_read_file(&config,
-							missing_pgdata_is_ok,
-							pg_is_not_running_is_ok);
+	if (!keeper_config_read_file(&config,
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
 
 	if (!keeper_init(&keeper, &config))
 	{
@@ -193,14 +205,20 @@ static void
 keeper_cli_fsm_list(int argc, char **argv)
 {
 	KeeperStateData keeperState = { 0 };
-
 	KeeperConfig config = keeperOptions;
-	bool missing_pgdata_is_ok = true;
-	bool pg_is_not_running_is_ok = true;
 
-	keeper_config_read_file(&config,
-							missing_pgdata_is_ok,
-							pg_is_not_running_is_ok);
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = true;
+
+	if (!keeper_config_read_file(&config,
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
 
 	/* now read keeper's state */
 	if (!keeper_state_read(&keeperState, config.pathnames.state))
@@ -232,14 +250,21 @@ keeper_cli_fsm_assign(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
 	KeeperConfig config = keeperOptions;
-	bool missing_pgdata_is_ok = true;
-	bool pg_is_not_running_is_ok = true;
 	char keeperStateJSON[BUFSIZE];
 	NodeState goalState = NO_STATE;
 
-	keeper_config_read_file(&config,
-							missing_pgdata_is_ok,
-							pg_is_not_running_is_ok);
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = true;
+
+	if (!keeper_config_read_file(&config,
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
 
 	switch (argc)
 	{
@@ -315,16 +340,23 @@ static void
 keeper_cli_fsm_step(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
-	bool missing_pgdata_is_ok = true;
-	bool pg_is_not_running_is_ok = true;
 	const char *oldRole = NULL;
 	const char *newRole = NULL;
 
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = true;
+
 	keeper.config = keeperOptions;
 
-	keeper_config_read_file(&(keeper.config),
-							missing_pgdata_is_ok,
-							pg_is_not_running_is_ok);
+	if (!keeper_config_read_file(&(keeper.config),
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
 
 	if (keeper.config.monitorDisabled)
 	{

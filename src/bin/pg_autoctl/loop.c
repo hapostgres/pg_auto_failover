@@ -449,8 +449,10 @@ reload_configuration(Keeper *keeper)
 	if (file_exists(config->pathnames.config))
 	{
 		KeeperConfig newConfig = { 0 };
-		bool missing_pgdata_is_ok = true;
-		bool pg_is_not_running_is_ok = true;
+
+		bool missingPgdataIsOk = true;
+		bool pgIsNotRunningIsOk = true;
+		bool monitorDisabledIsOk = false;
 
 		/*
 		 * Set the same configuration and state file as the current config.
@@ -459,8 +461,9 @@ reload_configuration(Keeper *keeper)
 		strlcpy(newConfig.pathnames.state, config->pathnames.state, MAXPGPATH);
 
 		if (keeper_config_read_file(&newConfig,
-									missing_pgdata_is_ok,
-									pg_is_not_running_is_ok)
+									missingPgdataIsOk,
+									pgIsNotRunningIsOk,
+									monitorDisabledIsOk)
 			&& keeper_config_accept_new(config, &newConfig))
 		{
 			/*

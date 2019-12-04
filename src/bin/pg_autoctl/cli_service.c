@@ -108,9 +108,11 @@ static void
 cli_keeper_run(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
-	bool missing_pgdata_is_ok = true;
-	bool pg_is_not_running_is_ok = true;
 	pid_t pid = 0;
+
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = true;
 
 	keeper.config = keeperOptions;
 
@@ -123,7 +125,8 @@ cli_keeper_run(int argc, char **argv)
 	 * that loop, we need to install our signal handlers and pidfile prior to
 	 * getting there.
 	 */
-	if (!keeper_config_read_file_skip_pgsetup(&(keeper.config)))
+	if (!keeper_config_read_file_skip_pgsetup(&(keeper.config),
+											  monitorDisabledIsOk))
 	{
 		/* errors have already been logged. */
 		exit(EXIT_CODE_BAD_CONFIG);
@@ -137,8 +140,8 @@ cli_keeper_run(int argc, char **argv)
 	}
 
 	if (!keeper_config_pgsetup_init(&(keeper.config),
-									missing_pgdata_is_ok,
-									pg_is_not_running_is_ok))
+									missingPgdataIsOk,
+									pgIsNotRunningIsOk))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_CONFIG);
