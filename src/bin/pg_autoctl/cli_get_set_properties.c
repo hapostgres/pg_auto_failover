@@ -107,16 +107,20 @@ static bool
 get_node_replication_settings(NodeReplicationSettings *settings)
 {
 	Keeper keeper = { 0 };
-	bool missing_pgdata_is_ok = false;
+	bool missing_pgdata_is_ok = true;
 	bool pg_is_not_running_is_ok = true;
 
 	keeper.config = keeperOptions;
 
 	(void) exit_unless_role_is_keeper(&(keeper.config));
 
-	keeper_config_read_file(&(keeper.config),
-							missing_pgdata_is_ok,
-							pg_is_not_running_is_ok);
+	if (!keeper_config_read_file(&(keeper.config),
+								 missing_pgdata_is_ok,
+								 pg_is_not_running_is_ok))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
 
 	if (keeper.config.monitorDisabled)
 	{
@@ -189,7 +193,7 @@ cli_get_formation_number_sync_standbys(int argc, char **argv)
 {
 	KeeperConfig config = keeperOptions;
 	Monitor monitor = { 0 };
-	bool missing_pgdata_is_ok = false;
+	bool missing_pgdata_is_ok = true;
 	bool pg_is_not_running_is_ok = true;
 	int numberSyncStandbys = 0;
 
@@ -201,6 +205,13 @@ cli_get_formation_number_sync_standbys(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
+	if (config.monitorDisabled)
+	{
+		log_error("This node has disabled monitor, "
+				  "pg_autoctl get and set commands are not available.");
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
 	if (!monitor_init_from_pgsetup(&monitor, &config.pgSetup))
 	{
 		/* errors have already been logged */
@@ -208,7 +219,8 @@ cli_get_formation_number_sync_standbys(int argc, char **argv)
 	}
 
 	if (!monitor_get_formation_number_sync_standbys(&monitor,
-			config.formation, &numberSyncStandbys))
+													config.formation,
+													&numberSyncStandbys))
 	{
 		exit(EXIT_CODE_MONITOR);
 	}
@@ -225,7 +237,7 @@ static void
 cli_set_node_property(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
-	bool missing_pgdata_is_ok = false;
+	bool missing_pgdata_is_ok = true;
 	bool pg_is_not_running_is_ok = true;
 	char *name = NULL;
 	char *value = NULL;
@@ -331,7 +343,7 @@ cli_set_formation_property(int argc, char **argv)
 {
 	KeeperConfig config = keeperOptions;
 	Monitor monitor = { 0 };
-	bool missing_pgdata_is_ok = false;
+	bool missing_pgdata_is_ok = true;
 	bool pg_is_not_running_is_ok = true;
 	char *name = NULL;
 	char *value = NULL;
