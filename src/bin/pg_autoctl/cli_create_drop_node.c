@@ -63,19 +63,19 @@ CommandLine create_postgres_command =
 	make_command("postgres",
 				 "Initialize a pg_auto_failover standalone postgres node",
 				 "",
-				 "  --pgctl                       path to pg_ctl\n"
-				 "  --pgdata                      path to data director\n"
-				 "  --pghost                      PostgreSQL's hostname\n"
-				 "  --pgport                      PostgreSQL's port number\n"
-				 "  --listen                      PostgreSQL's listen_addresses\n"
-				 "  --username                    PostgreSQL's username\n"
-				 "  --dbname                      PostgreSQL's database name\n"
-				 "  --nodename                    pg_auto_failover node\n"
-				 "  --formation                   pg_auto_failover formation\n"
-				 "  --monitor                     pg_auto_failover Monitor Postgres URL\n"
-				 "  --auth                        authentication method for connections from monitor\n"
-				 "  --candidate-priority          priority of the node to be promoted to become primary\n"
-				 "  --replication-quorum          true if node participates in write quorum\n"
+				 "  --pgctl                 path to pg_ctl\n"
+				 "  --pgdata                path to data director\n"
+				 "  --pghost                PostgreSQL's hostname\n"
+				 "  --pgport                PostgreSQL's port number\n"
+				 "  --listen                PostgreSQL's listen_addresses\n"
+				 "  --username              PostgreSQL's username\n"
+				 "  --dbname                PostgreSQL's database name\n"
+				 "  --nodename              pg_auto_failover node\n"
+				 "  --formation             pg_auto_failover formation\n"
+				 "  --monitor               pg_auto_failover Monitor Postgres URL\n"
+				 "  --auth                  authentication method for connections from monitor\n"
+				 "  --candidate-priority    priority of the node to be promoted to become primary\n"
+				 "  --replication-quorum    true if node participates in write quorum\n"
 				 KEEPER_CLI_ALLOW_RM_PGDATA_OPTION,
 				 cli_create_postgres_getopts,
 				 cli_create_postgres);
@@ -98,8 +98,9 @@ CommandLine drop_node_command =
 bool
 cli_create_config(Keeper *keeper, KeeperConfig *config)
 {
-	bool missing_pgdata_is_ok = true;
-	bool pg_is_not_running_is_ok = true;
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = true;
 
 	/*
 	 * We support two modes of operations here:
@@ -118,8 +119,9 @@ cli_create_config(Keeper *keeper, KeeperConfig *config)
 		KeeperConfig options = *config;
 
 		if (!keeper_config_read_file(config,
-									 missing_pgdata_is_ok,
-									 pg_is_not_running_is_ok))
+									 missingPgdataIsOk,
+									 pgIsNotRunningIsOk,
+									 monitorDisabledIsOk))
 		{
 			log_fatal("Failed to read configuration file \"%s\"",
 					  config->pathnames.config);
@@ -139,8 +141,9 @@ cli_create_config(Keeper *keeper, KeeperConfig *config)
 	else
 	{
 		/* set our KeeperConfig from the command line options now. */
-		keeper_config_init(config,
-						   missing_pgdata_is_ok, pg_is_not_running_is_ok);
+		(void) keeper_config_init(config,
+								  missingPgdataIsOk,
+								  pgIsNotRunningIsOk);
 
 		/* and write our brand new setup to file */
 		if (!keeper_config_write_file(config))
@@ -204,6 +207,7 @@ cli_create_postgres_getopts(int argc, char **argv)
 		{ "nodename", required_argument, NULL, 'n' },
 		{ "formation", required_argument, NULL, 'f' },
 		{ "monitor", required_argument, NULL, 'm' },
+		{ "disable-monitor", no_argument, NULL, 'M' },
 		{ "allow-removing-pgdata", no_argument, NULL, 'R' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
@@ -216,7 +220,7 @@ cli_create_postgres_getopts(int argc, char **argv)
 
 	int optind =
 		cli_create_node_getopts(argc, argv,
-								long_options, "C:D:H:p:l:U:A:d:n:f:m:RVvqhP:r:",
+								long_options, "C:D:H:p:l:U:A:d:n:f:m:MRVvqhP:r:",
 								&options);
 
 	/* publish our option parsing in the global variable */
@@ -561,14 +565,16 @@ cli_drop_node(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
 	KeeperConfig config = keeperOptions;
-	bool missing_pgdata_is_ok = true;
-	bool pg_is_not_running_is_ok = true;
 	bool ignore_monitor_errors = false;
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = false;
 	pid_t pid;
 
 	if (!keeper_config_read_file(&config,
-								 missing_pgdata_is_ok,
-								 pg_is_not_running_is_ok))
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
 	{
 		/* errors have already been logged. */
 		exit(EXIT_CODE_BAD_CONFIG);
@@ -632,9 +638,21 @@ check_or_discover_nodename(KeeperConfig *config)
 		char monitorHostname[_POSIX_HOST_NAME_MAX];
 		int monitorPort = 0;
 
-		if (!hostname_from_uri(config->monitor_pguri,
-							   monitorHostname, _POSIX_HOST_NAME_MAX,
-							   &monitorPort))
+		/*
+		 * When --disable-monitor, use the defaults for ipAddr discovery, same
+		 * as when creating the monitor node itself.
+		 */
+		if (config->monitorDisabled)
+		{
+			strlcpy(monitorHostname,
+					DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME,
+					_POSIX_HOST_NAME_MAX);
+
+			monitorPort = DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT;
+		}
+		else if (!hostname_from_uri(config->monitor_pguri,
+									monitorHostname, _POSIX_HOST_NAME_MAX,
+									&monitorPort))
 		{
 			log_fatal("Failed to determine monitor hostname when parsing "
 					  "Postgres URI \"%s\"", config->monitor_pguri);

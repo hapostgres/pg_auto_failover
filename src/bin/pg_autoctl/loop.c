@@ -285,14 +285,7 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 		}
 	}
 
-	log_info("pg_autoctl service stopping");
-
-	if (!remove_pidfile(config->pathnames.pid))
-	{
-		log_error("Failed to remove pidfile \"%s\"", config->pathnames.pid);
-	}
-
-	return true;
+	return keeper_service_stop(keeper);
 }
 
 
@@ -330,7 +323,7 @@ keeper_service_init(Keeper *keeper, pid_t *pid)
 	 * function cli_service_run calls into keeper_init(): we know that we could
 	 * read a keeper state file.
 	 */
-	if (file_exists(config->pathnames.init))
+	if (!config->monitorDisabled && file_exists(config->pathnames.init))
 	{
 		log_warn("The `pg_autoctl create` did not complete, completing now.");
 
@@ -350,6 +343,25 @@ keeper_service_init(Keeper *keeper, pid_t *pid)
 		return false;
 	}
 
+	return true;
+}
+
+
+/*
+ * keeper_service_stop stops the service and removes the pid file.
+ */
+bool
+keeper_service_stop(Keeper *keeper)
+{
+	KeeperConfig *config = &(keeper->config);
+
+	log_info("pg_autoctl service stopping");
+
+	if (!remove_pidfile(config->pathnames.pid))
+	{
+		log_error("Failed to remove pidfile \"%s\"", config->pathnames.pid);
+		return false;
+	}
 	return true;
 }
 
@@ -437,8 +449,10 @@ reload_configuration(Keeper *keeper)
 	if (file_exists(config->pathnames.config))
 	{
 		KeeperConfig newConfig = { 0 };
-		bool missing_pgdata_is_ok = true;
-		bool pg_is_not_running_is_ok = true;
+
+		bool missingPgdataIsOk = true;
+		bool pgIsNotRunningIsOk = true;
+		bool monitorDisabledIsOk = false;
 
 		/*
 		 * Set the same configuration and state file as the current config.
@@ -447,8 +461,9 @@ reload_configuration(Keeper *keeper)
 		strlcpy(newConfig.pathnames.state, config->pathnames.state, MAXPGPATH);
 
 		if (keeper_config_read_file(&newConfig,
-									missing_pgdata_is_ok,
-									pg_is_not_running_is_ok)
+									missingPgdataIsOk,
+									pgIsNotRunningIsOk,
+									monitorDisabledIsOk)
 			&& keeper_config_accept_new(config, &newConfig))
 		{
 			/*

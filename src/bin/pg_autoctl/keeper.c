@@ -13,6 +13,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "parson.h"
 
 #include "file_utils.h"
 #include "keeper.h"
@@ -38,9 +39,12 @@ keeper_init(Keeper *keeper, KeeperConfig *config)
 
 	local_postgres_init(&keeper->postgres, pgSetup);
 
-	if (!monitor_init(&keeper->monitor, config->monitor_pguri))
+	if (!config->monitorDisabled)
 	{
-		return false;
+		if (!monitor_init(&keeper->monitor, config->monitor_pguri))
+		{
+			return false;
+		}
 	}
 
 	if (!keeper_load_state(keeper))
@@ -92,7 +96,10 @@ keeper_update_state(Keeper *keeper, int node_id, int group_id,
 	KeeperStateData *keeperState = &(keeper->state);
 	uint64_t now = time(NULL);
 
-	keeperState->last_monitor_contact = now;
+	if (update_last_monitor_contact)
+	{
+		keeperState->last_monitor_contact = now;
+	}
 	keeperState->current_node_id = node_id;
 	keeperState->current_group = group_id;
 	keeperState->assigned_role = state;
@@ -643,6 +650,78 @@ keeper_check_monitor_extension_version(Keeper *keeper)
 
 
 /*
+ * keeper_init_fsm initializes the keeper's local FSM and does nothing more.
+ *
+ * It's only intended to be used when we are not using a monitor, which means
+ * we're going to expose our FSM driving as an HTTP API, and sit there waiting
+ * for orders from another software.
+ *
+ * The function is modeled to look like keeper_register_and_init with the
+ * difference that we don't have a monitor to talk to.
+ */
+bool
+keeper_init_fsm(Keeper *keeper, KeeperConfig *config)
+{
+	/* fake the initial state provided at monitor registration time */
+	MonitorAssignedState assignedState = {
+		.nodeId = -1,
+		.groupId = -1,
+		.state = INIT_STATE
+	};
+
+	/*
+	 * First try to create our state file. The keeper_state_create_file function
+	 * may fail if we have no permission to write to the state file directory
+	 * or the disk is full. In that case, we stop before having registered the
+	 * local PostgreSQL node to the monitor.
+	 */
+	if (!keeper_state_create_file(config->pathnames.state))
+	{
+		log_fatal("Failed to create a state file prior to registering the "
+				  "node with the monitor, see above for details");
+		return false;
+	}
+
+	/* now that we have a state on-disk, finish init of the keeper instance */
+	if (!keeper_init(keeper, config))
+	{
+		return false;
+	}
+
+	/* initialize FSM state */
+	if (!keeper_update_state(keeper,
+							 assignedState.nodeId,
+							 assignedState.groupId,
+							 assignedState.state,
+							 false))
+	{
+		log_error("Failed to update keepers's state");
+
+		/*
+		 * Make sure we don't have a corrupted state file around, that could
+		 * prevent trying to init again and cause strange errors.
+		 */
+		unlink_file(config->pathnames.state);
+
+		return false;
+	}
+
+	/*
+	 * Leave a track record that we're ok to initialize in PGDATA, so that in
+	 * case of `pg_autoctl create` being interrupted, we may resume operations
+	 * and accept to work on already running PostgreSQL primary instances.
+	 */
+	if (!keeper_init_state_write(keeper))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
  * keeper_register_and_init registers the local node to the pg_auto_failover
  * Monitor in the given initialState, and then create the state on-disk with
  * the assigned goal from the Monitor.
@@ -754,29 +833,32 @@ keeper_remove(Keeper *keeper, KeeperConfig *config, bool ignore_monitor_errors)
 	 */
 	keeper->config = *config;
 
-	if (!monitor_init(&(keeper->monitor), config->monitor_pguri))
+	if (!config->monitorDisabled)
 	{
-		return false;
-	}
-
-	log_info("Removing local node from the pg_auto_failover monitor.");
-
-	/*
-	 * If the node was already removed from the monitor, then the
-	 * monitor_remove function is going to return true here. It means that we
-	 * can call `pg_autoctl drop node` again when we removed the node from the
-	 * monitor already, but failed to remove the state file.
-	 */
-	if (!monitor_remove(&(keeper->monitor),
-						config->nodename,
-						config->pgSetup.pgport))
-	{
-		/* we already logged about errors */
-		errors++;
-
-		if (!ignore_monitor_errors)
+		if (!monitor_init(&(keeper->monitor), config->monitor_pguri))
 		{
 			return false;
+		}
+
+		log_info("Removing local node from the pg_auto_failover monitor.");
+
+		/*
+		 * If the node was already removed from the monitor, then the
+		 * monitor_remove function is going to return true here. It means that
+		 * we can call `pg_autoctl drop node` again when we removed the node
+		 * from the monitor already, but failed to remove the state file.
+		 */
+		if (!monitor_remove(&(keeper->monitor),
+							config->nodename,
+							config->pgSetup.pgport))
+		{
+			/* we already logged about errors */
+			errors++;
+
+			if (!ignore_monitor_errors)
+			{
+				return false;
+			}
 		}
 	}
 
@@ -929,4 +1011,40 @@ keeper_init_state_read(Keeper *keeper, KeeperStateInit *initState)
 			  "is broken or wrong version",
 			  filename);
 	return false;
+}
+
+
+/*
+ * keeper_state_as_json prepares the current keeper state as a JSON object and
+ * copy the string to the given pre-allocated memory area, of given size.
+ */
+bool
+keeper_state_as_json(Keeper *keeper, char *json, int size)
+{
+    JSON_Value *js = json_value_init_object();
+    JSON_Value *jsPostgres = json_value_init_object();
+    JSON_Value *jsKeeperState = json_value_init_object();
+
+    JSON_Object *root = json_value_get_object(js);
+    JSON_Object *jsPostgresObject = json_value_get_object(jsPostgres);
+    JSON_Object *jsKeeperStateObject = json_value_get_object(jsKeeperState);
+
+    char *serialized_string = NULL;
+	int len;
+
+	pg_setup_as_json(&(keeper->postgres.postgresSetup), jsPostgresObject);
+	keeperStateAsJSON(&(keeper->state), jsKeeperStateObject);
+
+    json_object_set_value(root, "postgres", jsPostgres);
+    json_object_set_value(root, "state", jsKeeperState);
+
+    serialized_string = json_serialize_to_string_pretty(js);
+
+	len = strlcpy(json, serialized_string, size);
+
+    json_free_serialized_string(serialized_string);
+    json_value_free(js);
+
+	/* strlcpy returns how many bytes where necessary */
+	return len < size;
 }

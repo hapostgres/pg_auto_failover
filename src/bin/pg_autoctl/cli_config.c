@@ -81,10 +81,12 @@ cli_config_check(int argc, char **argv)
 {
 	const bool missingPgdataIsOk = true;
 	const bool pgIsNotRunningIsOk = true;
+	const bool monitorDisabledIsOk = true;
 
 	KeeperConfig config = keeperOptions;
 
-	if (!keeper_config_set_pathnames_from_pgdata(&config.pathnames, config.pgSetup.pgdata))
+	if (!keeper_config_set_pathnames_from_pgdata(&config.pathnames,
+												 config.pgSetup.pgdata))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_CONFIG);
@@ -120,7 +122,8 @@ cli_config_check(int argc, char **argv)
 		{
 			if (!keeper_config_read_file(&config,
 										 missingPgdataIsOk,
-										 pgIsNotRunningIsOk))
+										 pgIsNotRunningIsOk,
+										 monitorDisabledIsOk))
 			{
 				/* errors have already been logged */
 				exit(EXIT_CODE_BAD_CONFIG);
@@ -232,8 +235,9 @@ static void
 cli_keeper_config_get(int argc, char **argv)
 {
 	KeeperConfig config = keeperOptions;
-	bool missing_pgdata_is_ok = true;
-	bool pg_is_not_running_is_ok = true;
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = true;
 
 	switch (argc)
 	{
@@ -241,8 +245,9 @@ cli_keeper_config_get(int argc, char **argv)
 		{
 			/* no argument, write the config out */
 			if (!keeper_config_read_file(&config,
-										 missing_pgdata_is_ok,
-										 pg_is_not_running_is_ok))
+										 missingPgdataIsOk,
+										 pgIsNotRunningIsOk,
+										 monitorDisabledIsOk))
 			{
 				exit(EXIT_CODE_PGCTL);
 			}
