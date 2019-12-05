@@ -70,6 +70,7 @@ extern CommandLine config_commands;
 /* cli_create_drop_node.c */
 extern CommandLine create_monitor_command;
 extern CommandLine create_postgres_command;
+extern CommandLine create_standby_command;
 extern CommandLine drop_node_command;
 extern CommandLine destroy_command;
 
@@ -126,7 +127,7 @@ void exit_unless_role_is_keeper(KeeperConfig *kconfig);
 
 /* cli_create_drop_node.c */
 bool cli_create_config(Keeper *keeper, KeeperConfig *config);
-void cli_create_pg(Keeper *keeper, KeeperConfig *config);
+void cli_create_pg(Keeper *keeper, KeeperConfig *config, NodeState initNodeState);
 bool check_or_discover_nodename(KeeperConfig *config);
 
 #endif  /* CLI_COMMON_H */

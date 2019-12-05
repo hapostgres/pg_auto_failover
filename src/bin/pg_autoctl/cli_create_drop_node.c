@@ -31,6 +31,7 @@
 #include "monitor_pg_init.h"
 #include "pgctl.h"
 #include "primary_standby.h"
+#include "state.h"
 
 /*
  * Global variables that we're going to use to "communicate" in between getopts
@@ -41,6 +42,9 @@ static bool dropAndDestroy = false;
 
 static int cli_create_postgres_getopts(int argc, char **argv);
 static void cli_create_postgres(int argc, char **argv);
+
+static int cli_create_standby_getopts(int argc, char **argv);
+static void cli_create_standby(int argc, char **argv);
 
 static int cli_create_monitor_getopts(int argc, char **argv);
 static void cli_create_monitor(int argc, char **argv);
@@ -89,6 +93,28 @@ CommandLine create_postgres_command =
 				 KEEPER_CLI_ALLOW_RM_PGDATA_OPTION,
 				 cli_create_postgres_getopts,
 				 cli_create_postgres);
+
+CommandLine create_standby_command =
+	make_command("standby",
+				 "Initialize a pg_auto_failover standby postgres node",
+				 "",
+				 "  --pgctl               path to pg_ctl\n"
+				 "  --pgdata              path to data director\n"
+				 "  --pghost              PostgreSQL's hostname\n"
+				 "  --pgport              PostgreSQL's port number\n"
+				 "  --listen              PostgreSQL's listen_addresses\n"
+				 "  --username            PostgreSQL's username\n"
+				 "  --dbname              PostgreSQL's database name\n"
+				 "  --nodename            pg_auto_failover node\n"
+				 "  --formation           pg_auto_failover formation\n"
+				 "  --group               pg_auto_failover group\n"
+				 "  --monitor             pg_auto_failover Monitor Postgres URL\n"
+				 "  --auth                authentication method for connections from monitor\n"
+				 "  --candidate-priority  priority of the node to be promoted to become primary\n"
+				 "  --replication-quorum  true if node participates in write quorum\n"
+				 KEEPER_CLI_ALLOW_RM_PGDATA_OPTION,
+				 cli_create_standby_getopts,
+				 cli_create_standby);
 
 CommandLine drop_node_command =
 	make_command("node",
@@ -167,9 +193,9 @@ cli_create_config(Keeper *keeper, KeeperConfig *config)
  * handling.
  */
 void
-cli_create_pg(Keeper *keeper, KeeperConfig *config)
+cli_create_pg(Keeper *keeper, KeeperConfig *config, NodeState initNodeState)
 {
-	if (!keeper_pg_init(keeper, config))
+	if (!keeper_pg_init(keeper, config, initNodeState))
 	{
 		/* errors have been logged */
 		exit(EXIT_CODE_BAD_STATE);
@@ -291,7 +317,81 @@ cli_create_postgres(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	cli_create_pg(&keeper, &config);
+	cli_create_pg(&keeper, &config, NO_STATE);
+}
+
+
+/*
+ * cli_create_standby_getopts parses command line options and set the global
+ * variable keeperOptions from them, without doing any check.
+ */
+static int
+cli_create_standby_getopts(int argc, char **argv)
+{
+	KeeperConfig options = { 0 };
+
+	static struct option long_options[] = {
+		{ "pgctl", required_argument, NULL, 'C' },
+		{ "pgdata", required_argument, NULL, 'D' },
+		{ "pghost", required_argument, NULL, 'H' },
+		{ "pgport", required_argument, NULL, 'p' },
+		{ "listen", required_argument, NULL, 'l' },
+		{ "username", required_argument, NULL, 'U' },
+		{ "auth", required_argument, NULL, 'A' },
+		{ "dbname", required_argument, NULL, 'd' },
+		{ "nodename", required_argument, NULL, 'n' },
+		{ "formation", required_argument, NULL, 'f' },
+		{ "group", required_argument, NULL, 'g' },
+		{ "monitor", required_argument, NULL, 'm' },
+		{ "allow-removing-pgdata", no_argument, NULL, 'R' },
+		{ "version", no_argument, NULL, 'V' },
+		{ "verbose", no_argument, NULL, 'v' },
+		{ "quiet", no_argument, NULL, 'q' },
+ 		{ "help", no_argument, NULL, 'h' },
+		{ "candidate-priority", required_argument, NULL, 'P' },
+		{ "replication-quorum", required_argument, NULL, 'r' },
+		{ NULL, 0, NULL, 0 }
+	};
+
+	int optind =
+		cli_create_node_getopts(argc, argv, long_options,
+								"C:D:H:p:l:U:A:d:n:f:g:m:RVvqhP:r:Vvqh",
+								&options);
+
+	/* publish our option parsing in the global variable */
+	keeperOptions = options;
+
+	return optind;
+}
+
+
+/*
+ * cli_create_standby prepares a local PostgreSQL instance to be used as a
+ * standalone Postgres instance as a standby server.
+ */
+static void
+cli_create_standby(int argc, char **argv)
+{
+	Keeper keeper = { 0 };
+	KeeperConfig config = keeperOptions;
+
+	/* pg_autoctl create postgres: mark ourselves as a standalone node */
+	config.pgSetup.pgKind = NODE_KIND_STANDALONE;
+	strlcpy(config.nodeKind, "standalone", NAMEDATALEN);
+
+	if (!check_or_discover_nodename(&config))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (!cli_create_config(&keeper, &config))
+	{
+		log_error("Failed to initialize our configuration, see above.");
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	cli_create_pg(&keeper, &config, WAIT_STANDBY_STATE);
 }
 
 
