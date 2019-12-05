@@ -22,6 +22,9 @@ typedef struct KeeperConfig
 	/* in-memory configuration related variables */
 	ConfigFilePaths pathnames;
 
+	/* who's in charge? pg_auto_failover monitor, or HTTP API? */
+	bool monitorDisabled;		/* default is 0, which means enabled */
+
 	/* pg_autoctl setup */
 	char role[NAMEDATALEN];
 	char monitor_pguri[MAXCONNINFO];
@@ -47,15 +50,24 @@ typedef struct KeeperConfig
 	int postgresql_restart_failure_max_retries;
 } KeeperConfig;
 
+#define PG_AUTOCTL_MONITOR_IS_DISABLED(config) \
+	(strcmp(config->monitor_pguri, PG_AUTOCTL_MONITOR_DISABLED) == 0)
+
 bool keeper_config_set_pathnames_from_pgdata(ConfigFilePaths *pathnames,
 											 const char *pgdata);
 
 void keeper_config_init(KeeperConfig *config,
-						bool missing_pgdata_is_ok,
-						bool pg_is_not_running_is_ok);
+						bool missingPgdataIsOk,
+						bool pgIsNotRunningIsOk);
 bool keeper_config_read_file(KeeperConfig *config,
-							 bool missing_pgdata_is_ok,
-							 bool pg_not_running_is_ok);
+							 bool missingPgdataIsOk,
+							 bool pgIsNotRunningIsOk,
+							 bool monitorDisabledIsOk);
+bool keeper_config_read_file_skip_pgsetup(KeeperConfig *config,
+										  bool monitorDisabledIsOk);
+bool keeper_config_pgsetup_init(KeeperConfig *config,
+								bool missingPgdataIsOk,
+								bool pgIsNotRunningIsOk);
 bool keeper_config_write_file(KeeperConfig *config);
 bool keeper_config_write(FILE *stream, KeeperConfig *config);
 void keeper_config_log_settings(KeeperConfig config);

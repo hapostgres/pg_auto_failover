@@ -853,7 +853,7 @@ pg_ctl_restart(const char *pg_ctl, const char *pgdata)
 								  NULL);
 	int returnCode = program.returnCode;
 
-	log_debug("%s restart --pgdata %s --silient --wait --mode fast [%d]",
+	log_debug("%s restart --pgdata %s --silent --wait --mode fast [%d]",
 			  pg_ctl, pgdata, returnCode);
 
 	if (returnCode != 0)
