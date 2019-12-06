@@ -213,6 +213,8 @@ keeper_config_init(KeeperConfig *config,
 	PostgresSetup pgSetup = { 0 };
 	IniOption keeperOptions[] = SET_INI_OPTIONS_ARRAY(config);
 
+	log_trace("keeper_config_init");
+
 	if (!ini_validate_options(keeperOptions))
 	{
 		log_error("Please review your setup options per above messages");
@@ -341,6 +343,8 @@ keeper_config_pgsetup_init(KeeperConfig *config,
 {
 	PostgresSetup pgSetup = { 0 };
 
+	log_trace("keeper_config_pgsetup_init");
+
 	if (!pg_setup_init(&pgSetup,
 					   &config->pgSetup,
 					   missingPgdataIsOk,
@@ -462,6 +466,8 @@ keeper_config_set_setting(KeeperConfig *config,
 	const char *filename = config->pathnames.config;
 	IniOption keeperOptions[] = SET_INI_OPTIONS_ARRAY(config);
 
+	log_trace("keeper_config_set_setting");
+
 	if (ini_set_setting(filename, keeperOptions, path, value))
 	{
 		PostgresSetup pgSetup = { 0 };
@@ -497,6 +503,8 @@ keeper_config_merge_options(KeeperConfig *config, KeeperConfig *options)
 {
 	IniOption keeperConfigOptions[] = SET_INI_OPTIONS_ARRAY(config);
 	IniOption keeperOptionsOptions[] = SET_INI_OPTIONS_ARRAY(options);
+
+	log_trace("keeper_config_merge_options");
 
 	if (ini_merge(keeperConfigOptions, keeperOptionsOptions))
 	{
