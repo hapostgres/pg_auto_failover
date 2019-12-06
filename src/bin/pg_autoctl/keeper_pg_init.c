@@ -182,7 +182,7 @@ keeper_pg_init_and_register(Keeper *keeper, KeeperConfig *config,
 	if (!keeper_register_and_init(keeper, config, initNodeState))
 	{
 		log_error("Failed to register the existing local Postgres node "
-				  "\"%s:%d\" running at \"%s\""
+				  "\"%s:%d\" running at \"%s\" "
 				  "to the pg_auto_failover monitor at %s, "
 				  "see above for details",
 				  config->nodename, config->pgSetup.pgport,
