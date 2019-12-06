@@ -367,6 +367,7 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 {
 	PGconn *connection = NULL;
 	PGresult *result = NULL;
+	char debugParameters[BUFSIZE] = { 0 };
 
 	connection = pgsql_open_connection(pgsql);
 	if (connection == NULL)
@@ -375,11 +376,11 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 	}
 
 	log_debug("%s;", sql);
+
 	if (paramCount > 0)
 	{
 		int paramIndex = 0;
 		int remainingBytes = BUFSIZE;
-		char debugParameters[BUFSIZE] = { 0 };
 		char *writePointer = (char *) debugParameters;
 
 		for (paramIndex=0; paramIndex < paramCount; paramIndex++)
@@ -405,7 +406,38 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 						  paramCount, paramTypes, paramValues, NULL, NULL, 0);
 	if (!is_response_ok(result))
 	{
-		log_error("Failed to execute \"%s\": %s", sql, PQerrorMessage(connection));
+		char *message = PQerrorMessage(connection);
+		char *currentLine = message;
+		char *prefix =
+			pgsql->connectionType == PGSQL_CONN_MONITOR ? "Monitor" : "Postgres";
+
+		/*
+		 * PostgreSQL Error message might contain several lines. Log each of
+		 * them as a separate ERROR line here.
+		 */
+		do
+		{
+			char *newLinePtr = strchr(currentLine, '\n');
+
+			if (newLinePtr == NULL && strlen(currentLine) > 0)
+			{
+				log_error("%s %s", prefix, currentLine);
+				currentLine = NULL;
+			}
+			else
+			{
+				*newLinePtr = '\0';
+
+				log_error("%s %s", prefix, currentLine);
+
+				currentLine = ++newLinePtr;
+			}
+		}
+		while (currentLine != NULL && *currentLine != '\0');
+
+		log_error("SQL query: %s", sql);
+		log_error("SQL params: %s", debugParameters);
+
 		PQclear(result);
 		clear_results(connection);
 		pgsql_finish(pgsql);
