@@ -47,6 +47,13 @@
  */
 #define PGSR_SYNC_STATE_MAXLENGTH 10
 
+/*
+ * We receive a list of "other nodes" from the monitor, and we store that list
+ * in local memory. We pre-allocate the memory storage, and limit how many node
+ * addresses we can handle because of the pre-allocation strategy.
+ */
+#define NODE_ARRAY_MAX_COUNT 12
+
 
 /* abstract representation of a Postgres server that we can connect to */
 typedef enum
@@ -73,9 +80,16 @@ typedef struct GUC
 /* network address of a node in an HA group */
 typedef struct NodeAddress
 {
+	int nodeId;
 	char host[_POSIX_HOST_NAME_MAX];
 	int port;
 } NodeAddress;
+
+typedef struct NodeAddressArray
+{
+	int count;
+	NodeAddress nodes[NODE_ARRAY_MAX_COUNT];
+} NodeAddressArray;
 
 typedef struct ReplicationSource
 {

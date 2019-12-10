@@ -233,6 +233,62 @@ AutoFailoverNodeGroup(char *formationId, int groupId)
 
 
 /*
+ * AutoFailoverOtherNodesList returns a list of all the other nodes in the same
+ * formation and group as the given one.
+ */
+List *
+AutoFailoverOtherNodesList(AutoFailoverNode *pgAutoFailoverNode)
+{
+	ListCell *nodeCell = NULL;
+	List *groupNodeList =
+		AutoFailoverNodeGroup(pgAutoFailoverNode->formationId,
+							  pgAutoFailoverNode->groupId);
+	List *otherNodesList = NIL;
+
+	foreach(nodeCell, groupNodeList)
+	{
+		AutoFailoverNode *otherNode = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (otherNode->nodeId != pgAutoFailoverNode->nodeId)
+		{
+			otherNodesList = lappend(otherNodesList, otherNode);
+		}
+	}
+
+	return otherNodesList;
+}
+
+
+/*
+ * AutoFailoverOtherNodesList returns a list of all the other nodes in the same
+ * formation and group as the given one.
+ */
+List *
+AutoFailoverOtherNodesListInState(AutoFailoverNode *pgAutoFailoverNode,
+								  ReplicationState currentState)
+{
+	ListCell *nodeCell = NULL;
+	List *groupNodeList =
+		AutoFailoverNodeGroup(pgAutoFailoverNode->formationId,
+							  pgAutoFailoverNode->groupId);
+	List *otherNodesList = NIL;
+
+	foreach(nodeCell, groupNodeList)
+	{
+		AutoFailoverNode *otherNode = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (otherNode->nodeId != pgAutoFailoverNode->nodeId &&
+			IsCurrentState(otherNode, currentState))
+		{
+			otherNodesList = lappend(otherNodesList, otherNode);
+		}
+	}
+
+	return otherNodesList;
+}
+
+
+/*
  * GetAutoFailoverNode returns a single AutoFailover node by hostname and port.
  */
 AutoFailoverNode *
@@ -361,6 +417,33 @@ OtherNodeInGroup(AutoFailoverNode *pgAutoFailoverNode)
 	}
 
 	return NULL;
+}
+
+
+/*
+ * GetWritableNode returns the writable node in the specified group, if any.
+ */
+AutoFailoverNode *
+GetWritableNodeInGroup(char *formationId, int32 groupId)
+{
+	AutoFailoverNode *writableNode = NULL;
+	List *groupNodeList = NIL;
+	ListCell *nodeCell = NULL;
+
+	groupNodeList = AutoFailoverNodeGroup(formationId, groupId);
+
+	foreach(nodeCell, groupNodeList)
+	{
+		AutoFailoverNode *currentNode = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (CanTakeWritesInState(currentNode->reportedState))
+		{
+			writableNode = currentNode;
+			break;
+		}
+	}
+
+	return writableNode;
 }
 
 
@@ -755,4 +838,31 @@ IsCurrentState(AutoFailoverNode *pgAutoFailoverNode, ReplicationState state)
 	return pgAutoFailoverNode != NULL
 		&& pgAutoFailoverNode->goalState == pgAutoFailoverNode->reportedState
 		&& pgAutoFailoverNode->goalState == state;
+}
+
+
+/*
+ * CanTakeWritesInState returns whether a node can take writes when in
+ * the given state.
+ */
+bool
+CanTakeWritesInState(ReplicationState state)
+{
+	return state == REPLICATION_STATE_SINGLE ||
+		   state == REPLICATION_STATE_PRIMARY ||
+		   state == REPLICATION_STATE_WAIT_PRIMARY ||
+		   state == REPLICATION_STATE_JOIN_PRIMARY;
+}
+
+
+/*
+ * IsInPrimaryState returns true if the given node is known to have converged
+ * to a state that makes it the primary node in its group.
+ */
+bool
+IsInPrimaryState(AutoFailoverNode *pgAutoFailoverNode)
+{
+	return pgAutoFailoverNode != NULL
+		&& pgAutoFailoverNode->goalState == pgAutoFailoverNode->reportedState
+		&& CanTakeWritesInState(pgAutoFailoverNode->goalState);
 }

@@ -52,6 +52,9 @@
 #define COMMENT_PRIMARY_TO_WAIT_PRIMARY \
 	"Secondary became unhealthy"
 
+#define COMMENT_PRIMARY_TO_JOIN_PRIMARY \
+	"A new secondary became unhealthy"
+
 #define COMMENT_PRIMARY_TO_DRAINING \
 	"A failover occurred, stopping writes "
 
@@ -71,6 +74,9 @@
 	"Confirmed promotion with the monitor"
 
 #define COMMENT_WAIT_PRIMARY_TO_PRIMARY \
+	"A healthy secondary appeared"
+
+#define COMMENT_JOIN_PRIMARY_TO_PRIMARY \
 	"A healthy secondary appeared"
 
 #define COMMENT_DEMOTE_TO_PRIMARY \
@@ -143,10 +149,11 @@ KeeperFSMTransition KeeperFSM[] = {
 	 */
 
 	/*
-	 * other node was forcibly removed, now single
+	 * other node(s) was forcibly removed, now single
 	 */
 	{ PRIMARY_STATE, SINGLE_STATE, COMMENT_PRIMARY_TO_SINGLE, &fsm_disable_replication },
 	{ WAIT_PRIMARY_STATE, SINGLE_STATE, COMMENT_PRIMARY_TO_SINGLE, &fsm_disable_replication },
+	{ JOIN_PRIMARY_STATE, SINGLE_STATE, COMMENT_PRIMARY_TO_SINGLE, &fsm_disable_replication },
 
 	/*
 	 * failover occurred, primary -> draining/demoted
@@ -185,6 +192,7 @@ KeeperFSMTransition KeeperFSM[] = {
 	 * On the Primary, wait for a standby to be ready: WAIT_PRIMARY
 	 */
 	{ SINGLE_STATE, WAIT_PRIMARY_STATE, COMMENT_SINGLE_TO_WAIT_PRIMARY, &fsm_prepare_replication },
+	{ PRIMARY_STATE, JOIN_PRIMARY_STATE, COMMENT_PRIMARY_TO_JOIN_PRIMARY, &fsm_prepare_replication },
 	{ PRIMARY_STATE, WAIT_PRIMARY_STATE, COMMENT_PRIMARY_TO_WAIT_PRIMARY, &fsm_disable_sync_rep },
 	{ STOP_REPLICATION_STATE, WAIT_PRIMARY_STATE, COMMENT_STOP_REPLICATION_TO_WAIT_PRIMARY, &fsm_promote_standby_to_primary },
 
@@ -192,6 +200,7 @@ KeeperFSMTransition KeeperFSM[] = {
 	 * Situation is getting back to normal on the primary
 	 */
 	{ WAIT_PRIMARY_STATE, PRIMARY_STATE, COMMENT_WAIT_PRIMARY_TO_PRIMARY, &fsm_enable_sync_rep },
+	{ JOIN_PRIMARY_STATE, PRIMARY_STATE, COMMENT_JOIN_PRIMARY_TO_PRIMARY, NULL },
 	{ DEMOTE_TIMEOUT_STATE, PRIMARY_STATE, COMMENT_DEMOTE_TO_PRIMARY, &fsm_start_postgres },
 
 	/*

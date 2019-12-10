@@ -22,6 +22,7 @@
 #include <getopt.h>
 #include <signal.h>
 
+#include "parson.h"
 #include "postgres_fe.h"
 
 #include "cli_common.h"
@@ -186,6 +187,8 @@ cli_do_monitor_get_primary_node(int argc, char **argv)
 /*
  * cli_do_monitor_get_other_node contacts the pg_auto_failover monitor and
  * retrieves the "other node" information for given nodename and port.
+ *
+ * TODO: add a --json output, an array of NodeAddress objects.
  */
 static void
 cli_do_monitor_get_other_node(int argc, char **argv)
@@ -193,7 +196,10 @@ cli_do_monitor_get_other_node(int argc, char **argv)
 	KeeperConfig config = keeperOptions;
 
 	Monitor monitor = { 0 };
-	NodeAddress otherNode = { 0 };
+
+	/* arbitrary limit to 12 other nodes */
+	int nodeIndex = 0;
+	NodeAddressArray otherNodesArray;
 
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
@@ -215,10 +221,11 @@ cli_do_monitor_get_other_node(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	if (!monitor_get_other_node(&monitor,
-								config.nodename,
-								config.pgSetup.pgport,
-								&otherNode))
+	if (!monitor_get_other_nodes(&monitor,
+								 config.nodename,
+								 config.pgSetup.pgport,
+								 ANY_STATE,
+								 &otherNodesArray))
 	{
 		log_fatal("Failed to get the other node from the monitor, "
 				  "see above for details");
@@ -228,22 +235,36 @@ cli_do_monitor_get_other_node(int argc, char **argv)
 	/* output something easy to parse by another program */
 	if (outputJSON)
 	{
-		JSON_Value *js = json_value_init_object();
-		JSON_Object *root = json_value_get_object(js);
+		JSON_Value *js = json_value_init_array();
+		JSON_Array *jsArray = json_value_get_array(js);
 
-		json_object_set_string(root, "formation", config.formation);
-		json_object_set_number(root, "groupId", (double) config.groupId);
-		json_object_set_string(root, "host", otherNode.host);
-		json_object_set_number(root, "port", (double) otherNode.port);
+		for (nodeIndex = 0; nodeIndex < otherNodesArray.count; nodeIndex++)
+		{
+			NodeAddress otherNode = otherNodesArray.nodes[nodeIndex];
+			JSON_Value *jsNode = json_value_init_object();
+			JSON_Object *jsNodeObj = json_value_get_object(jsNode);
+
+			json_object_set_string(jsNodeObj, "formation", config.formation);
+			json_object_set_number(jsNodeObj, "groupId", (double) config.groupId);
+			json_object_set_string(jsNodeObj, "host", otherNode.host);
+			json_object_set_number(jsNodeObj, "port", (double) otherNode.port);
+
+			json_array_append_value(jsArray, jsNode);
+		}
 
 		(void) cli_pprint_json(js);
 	}
 	else
 	{
-		fprintf(stdout,
-				"%s/%d %s:%d\n",
-				config.formation, config.groupId,
-				otherNode.host, otherNode.port);
+		for (nodeIndex = 0; nodeIndex < otherNodesArray.count; nodeIndex++)
+		{
+			NodeAddress otherNode = otherNodesArray.nodes[nodeIndex];
+
+			fprintf(stdout,
+					"%s/%d/%d %s:%d\n",
+					config.formation, config.groupId,
+					otherNode.nodeId, otherNode.host, otherNode.port);
+		}
 	}
 }
 

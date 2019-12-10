@@ -33,7 +33,8 @@ CREATE TYPE pgautofailover.replication_state
     'prepare_promotion',
     'stop_replication',
     'wait_standby',
-    'maintenance'
+    'maintenance',
+    'join_primary'
  );
 
 CREATE TABLE pgautofailover.formation
@@ -188,10 +189,11 @@ grant execute on function
 
 CREATE FUNCTION pgautofailover.get_primary
  (
-    IN formation_id  text default 'default',
-    IN group_id      int default 0,
-   OUT primary_name  text,
-   OUT primary_port  int
+    IN formation_id      text default 'default',
+    IN group_id          int default 0,
+   OUT secondary_node_id int,
+   OUT primary_name      text,
+   OUT primary_port      int
  )
 RETURNS record LANGUAGE C STRICT SECURITY DEFINER
 AS 'MODULE_PATHNAME', $$get_primary$$;
@@ -202,20 +204,41 @@ comment on function pgautofailover.get_primary(text,int)
 grant execute on function pgautofailover.get_primary(text,int)
    to autoctl_node;
 
-CREATE FUNCTION pgautofailover.get_other_node
+CREATE FUNCTION pgautofailover.get_other_nodes
  (
-    IN node_name      text,
-    IN node_port      int,
-   OUT secondary_name text,
-   OUT secondary_port int
+    IN node_name         text,
+    IN node_port         int,
+   OUT secondary_node_id int,
+   OUT secondary_name    text,
+   OUT secondary_port    int
  )
-RETURNS record LANGUAGE C STRICT
-AS 'MODULE_PATHNAME', $$get_other_node$$;
+RETURNS SETOF record LANGUAGE C STRICT
+AS 'MODULE_PATHNAME', $$get_other_nodes$$;
 
-comment on function pgautofailover.get_other_node(text,int)
-        is 'get the other node in a group';
+comment on function pgautofailover.get_other_nodes(text,int)
+        is 'get the other nodes in a group';
 
-grant execute on function pgautofailover.get_other_node(text,int)
+grant execute on function pgautofailover.get_other_nodes(text,int)
+   to autoctl_node;
+
+CREATE FUNCTION pgautofailover.get_other_nodes
+ (
+    IN node_name         text,
+    IN node_port         int,
+    IN current_state     pgautofailover.replication_state,
+   OUT secondary_node_id int,
+   OUT secondary_name    text,
+   OUT secondary_port    int
+ )
+RETURNS SETOF record LANGUAGE C STRICT
+AS 'MODULE_PATHNAME', $$get_other_nodes$$;
+
+comment on function pgautofailover.get_other_nodes
+                    (text,int,pgautofailover.replication_state)
+        is 'get the other nodes in a group, filtering on current_state';
+
+grant execute on function pgautofailover.get_other_nodes
+                          (text,int,pgautofailover.replication_state)
    to autoctl_node;
 
 CREATE FUNCTION pgautofailover.get_coordinator

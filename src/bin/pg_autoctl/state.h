@@ -45,6 +45,7 @@ typedef enum
 	PREP_PROMOTION_STATE,
 	STOP_REPLICATION_STATE,
 	MAINTENANCE_STATE,
+	JOIN_PRIMARY_STATE,
 
 	/* Allow some wildcard-matching transitions (from ANY state to) */
 	ANY_STATE = 128

@@ -26,10 +26,10 @@ typedef struct Keeper
 	Monitor monitor;
 
 	/*
-	 * When running without monitor, we need a place to stash the otherNode
+	 * When running without monitor, we need a place to stash the otherNodes
 	 * information. This is necessary in some transitions.
 	 */
-	NodeAddress otherNode;
+	NodeAddressArray otherNodes;
 } Keeper;
 
 

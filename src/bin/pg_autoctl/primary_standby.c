@@ -202,18 +202,19 @@ primary_has_replica(LocalPostgresServer *postgres, char *userName, bool *hasStan
 
 
 /*
- * primary_create_replication_slot (re)creates a replication slot. The replication
- * slot will not have its LSN initialised until first use. The return value indicates
- * whether the operation was successful.
+ * primary_create_replication_slot (re)creates a replication slot. The
+ * replication slot will not have its LSN initialised until first use. The
+ * return value indicates whether the operation was successful.
  */
 bool
-primary_create_replication_slot(LocalPostgresServer *postgres, char *replicationSlotName)
+primary_create_replication_slot(LocalPostgresServer *postgres,
+								char *replicationSlotName)
 {
 	PGSQL *pgsql = &(postgres->sqlClient);
 	bool verbose = false;
 	bool result = false;
 
-	log_trace("primary_create_replication_slot");
+	log_trace("primary_create_replication_slot(%s)", replicationSlotName);
 
 	/*
 	 * Try dropping the replication slot in case it already exists and

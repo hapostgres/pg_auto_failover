@@ -785,7 +785,9 @@ keeper_register_and_init(Keeper *keeper,
 	}
 
 	/* also update the groupId in the configuration file. */
-	if (!keeper_config_set_groupId(&(keeper->config), assignedState.groupId))
+	if (!keeper_config_set_groupId_and_slot_name(&(keeper->config),
+												 assignedState.nodeId,
+												 assignedState.groupId))
 	{
 		log_error("Failed to update the configuration file with the groupId: %d",
 				  assignedState.groupId);

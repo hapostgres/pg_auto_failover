@@ -216,6 +216,11 @@ ReplicationStateGetName(ReplicationState replicationState)
 			return "maintenance";
 		}
 
+		case REPLICATION_STATE_JOIN_PRIMARY:
+		{
+			return "join_primary";
+		}
+
 		default:
 		{
 			ereport(ERROR, (errmsg("bug: unknown replication state")));

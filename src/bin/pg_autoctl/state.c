@@ -405,6 +405,11 @@ NodeStateToString(NodeState s)
 			return "maintenance";
 		}
 
+		case JOIN_PRIMARY_STATE:
+		{
+			return "join_primary";
+		}
+
 		case ANY_STATE:
 		{
 			return "#any state#";
@@ -479,6 +484,10 @@ NodeStateFromString(const char *str)
 	else if (strcmp(str, "maintenance") == 0)
 	{
 		return MAINTENANCE_STATE;
+	}
+	else if (strcmp(str, "join_primary") == 0)
+	{
+		return JOIN_PRIMARY_STATE;
 	}
 	else
 	{

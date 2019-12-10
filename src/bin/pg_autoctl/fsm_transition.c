@@ -404,6 +404,8 @@ prepare_replication(Keeper *keeper, bool other_node_missing_is_ok)
 	LocalPostgresServer *postgres = &(keeper->postgres);
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 
+	int nodeIndex = 0;
+
 	/*
 	 * When using the monitor, now is the time to fetch the otherNode hostname
 	 * and port from it. When the monitor is disabled, it is expected that the
@@ -412,8 +414,10 @@ prepare_replication(Keeper *keeper, bool other_node_missing_is_ok)
 	 */
 	if (!config->monitorDisabled)
 	{
-		if (!monitor_get_other_node(monitor, config->nodename, pgSetup->pgport,
-									&(keeper->otherNode)))
+		if (!monitor_get_other_nodes(monitor,
+									 config->nodename, pgSetup->pgport,
+									 WAIT_STANDBY_STATE,
+									 &(keeper->otherNodes)))
 		{
 			if (other_node_missing_is_ok)
 			{
@@ -429,23 +433,46 @@ prepare_replication(Keeper *keeper, bool other_node_missing_is_ok)
 		}
 	}
 
-	if (!primary_add_standby_to_hba(postgres,
-									keeper->otherNode.host,
-									config->replication_password))
+	/*
+	 * Should we fail somewhere in this loop, we return false and fail the
+	 * whole transition. The transition is going to be tried again, and we are
+	 * going to try and add HBA entries and create replication slots again.
+	 * Both operations succeed when their target entry already exists.
+	 *
+	 * Note that primary_create_replication_slot() is idempotent thanks to
+	 * first dropping the target replication slot, then creating it again. We
+	 * might want to avoid drop/create noise on those servers that we managed
+	 * to process in the previous loop.
+	 */
+	for (nodeIndex = 0; nodeIndex < keeper->otherNodes.count; nodeIndex++)
 	{
-		log_error(
-			"Failed to grant access to the standby by adding relevant lines to "
-			"pg_hba.conf for the standby hostname and user, see above for "
-			"details");
-		return false;
-	}
+		NodeAddress *otherNode = &(keeper->otherNodes.nodes[nodeIndex]);
+		char replicationSlotName[BUFSIZE] = { 0 };
 
-	if (!primary_create_replication_slot(postgres, config->replication_slot_name))
-	{
-		log_error(
-			"Failed to enable replication from the primary server because "
-			"creating the replication slot failed, see above for details");
-		return false;
+		log_info("Preparing replication for standby node %d (%s:%d)",
+				 otherNode->nodeId, otherNode->host, otherNode->port);
+
+		if (!primary_add_standby_to_hba(postgres,
+										otherNode->host,
+										config->replication_password))
+		{
+			log_error("Failed to grant access to the standby %d (%s:%d) "
+					  "by adding relevant lines to pg_hba.conf for the standby "
+					  "hostname and user, see above for details",
+					  otherNode->nodeId, otherNode->host, otherNode->port);
+			return false;
+		}
+
+		snprintf(replicationSlotName, BUFSIZE, "%s_%d",
+				 REPLICATION_SLOT_NAME_DEFAULT, otherNode->nodeId);
+
+		if (!primary_create_replication_slot(postgres, replicationSlotName))
+		{
+			log_error(
+				"Failed to enable replication from the primary server because "
+				"creating the replication slot failed, see above for details");
+			return false;
+		}
 	}
 
 	return true;
@@ -602,11 +629,11 @@ fsm_init_standby(Keeper *keeper)
 	}
 	else
 	{
-		/* copy information from keeper->otherNode into replicationSource */
+		/* copy information from keeper->otherNodes into replicationSource */
 		strlcpy(replicationSource.primaryNode.host,
-				keeper->otherNode.host, _POSIX_HOST_NAME_MAX);
+				keeper->otherNodes.nodes[0].host, _POSIX_HOST_NAME_MAX);
 
-		replicationSource.primaryNode.port = keeper->otherNode.port;
+		replicationSource.primaryNode.port = keeper->otherNodes.nodes[0].port;
 	}
 
 	replicationSource.userName = PG_AUTOCTL_REPLICA_USERNAME;
@@ -652,11 +679,11 @@ fsm_rewind_or_init(Keeper *keeper)
 	}
 	else
 	{
-		/* copy information from keeper->otherNode into replicationSource */
+		/* copy information from keeper->otherNodes into replicationSource */
 		strlcpy(replicationSource.primaryNode.host,
-				keeper->otherNode.host, _POSIX_HOST_NAME_MAX);
+				keeper->otherNodes.nodes[0].host, _POSIX_HOST_NAME_MAX);
 
-		replicationSource.primaryNode.port = keeper->otherNode.port;
+		replicationSource.primaryNode.port = keeper->otherNodes.nodes[0].port;
 	}
 
 	replicationSource.userName = PG_AUTOCTL_REPLICA_USERNAME;
@@ -679,8 +706,12 @@ fsm_rewind_or_init(Keeper *keeper)
 
 	if (!primary_drop_replication_slot(postgres, config->replication_slot_name))
 	{
-		log_error("Failed to drop replication slot \"%s\" used by the standby failed",
-				  config->replication_slot_name);
+		log_error("Failed to drop replication slot \"%s\" used by "
+				  "standby %d (%s:%d)",
+				  config->replication_slot_name,
+				  keeper->otherNodes.nodes[0].nodeId,
+				  keeper->otherNodes.nodes[0].host,
+				  keeper->otherNodes.nodes[0].port);
 		return false;
 	}
 
