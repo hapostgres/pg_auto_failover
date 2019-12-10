@@ -572,9 +572,7 @@ keeper_update_pg_state(Keeper *keeper)
 
 		case SECONDARY_STATE:
 		case CATCHINGUP_STATE:
-		case WAIT_PRIMARY_STATE:
 		{
-			/* pg_stat_replication.sync_state is only available upstream */
 			return postgres->pgIsRunning
 				&& !IS_EMPTY_STRING_BUFFER(postgres->currentLSN);
 		}
