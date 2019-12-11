@@ -119,9 +119,22 @@ typedef enum
 	PGSQL_RESULT_STRING
 } QueryResultType;
 
+/*
+ * As a way to communicate the SQL STATE when an error occurs, every
+ * pgsql_execute_with_params context structure must have the same first field,
+ * an array of 5 characters (plus '\0' at the end).
+ */
+#define SQLSTATE_LENGTH 6
+
+typedef struct AbstractResultContext
+{
+	char sqlstate[SQLSTATE_LENGTH];
+} AbstractResultContext;
+
 /* data structure for keeping a single-value query result */
 typedef struct SingleValueResultContext
 {
+	char sqlstate[SQLSTATE_LENGTH];
 	QueryResultType resultType;
 	bool parsedOk;
 	bool boolVal;

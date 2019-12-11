@@ -289,6 +289,31 @@ AutoFailoverOtherNodesListInState(AutoFailoverNode *pgAutoFailoverNode,
 
 
 /*
+ * FindFailoverNewStandbyNode returns the first node found in given list 
+ */
+AutoFailoverNode *
+FindFailoverNewStandbyNode(List *groupNodeList)
+{
+	ListCell *nodeCell = NULL;
+	AutoFailoverNode *standbyNode = NULL;
+
+	/* find the standby for errdetail */
+	foreach(nodeCell, groupNodeList)
+	{
+		AutoFailoverNode *otherNode = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (IsCurrentState(otherNode, REPLICATION_STATE_WAIT_STANDBY) ||
+			IsCurrentState(otherNode, REPLICATION_STATE_CATCHINGUP))
+		{
+			standbyNode = otherNode;
+		}
+	}
+
+	return standbyNode;
+}
+
+
+/*
  * GetAutoFailoverNode returns a single AutoFailover node by hostname and port.
  */
 AutoFailoverNode *
@@ -852,6 +877,22 @@ CanTakeWritesInState(ReplicationState state)
 		   state == REPLICATION_STATE_PRIMARY ||
 		   state == REPLICATION_STATE_WAIT_PRIMARY ||
 		   state == REPLICATION_STATE_JOIN_PRIMARY;
+}
+
+
+/*
+ * IsInWaitOrJoinState returns true when the given node is a primary node that
+ * is currently busy with registering a standby: it's then been assigned either
+ * WAIT_STANDBY or JOIN_STANDBY replication state.
+ */
+bool
+IsInWaitOrJoinState(AutoFailoverNode *node)
+{
+	return node != NULL
+		&& (node->reportedState == REPLICATION_STATE_WAIT_PRIMARY
+			|| node->goalState == REPLICATION_STATE_WAIT_PRIMARY
+			|| node->reportedState == REPLICATION_STATE_JOIN_PRIMARY
+			|| node->goalState == REPLICATION_STATE_JOIN_PRIMARY);
 }
 
 

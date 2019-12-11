@@ -452,7 +452,50 @@ JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 		/* target group already has a primary, any other node is a standby */
 		else if (formation->opt_secondary && list_length(groupNodeList) >= 1)
 		{
+			AutoFailoverNode *primaryNode = NULL;
+
 			initialState = REPLICATION_STATE_WAIT_STANDBY;
+
+			/*
+			 * We can only accept a single WAIT_STANDBY at a time, because of
+			 * the way the FSM works. When the primary reports a goalState of
+			 * WAIT_PRIMARY, we can advance the WAIT_STANDBY node to CATCHING
+			 * UP. The FSM protocol and decision making is per state, and we
+			 * wouldn't know which standby to advance if there were more than
+			 * one in state WAIT_STANDBY at any given time.
+			 *
+			 * As a consequence, if the primary node is already in WAIT_PRIMARY
+			 * or in JOIN_PRIMARY state, then we can't accept a new standby
+			 * yet. Only one new standby at a time.
+			 *
+			 * We detect the situation here and report error code 55006 so that
+			 * pg_autoctl knows to retry registering.
+			 */
+
+			primaryNode = GetWritableNodeInGroup(formation->formationId,
+												 currentNodeState->groupId);
+
+			if (IsInWaitOrJoinState(primaryNode))
+			{
+				AutoFailoverNode *standbyNode =
+					FindFailoverNewStandbyNode(groupNodeList);
+
+				Assert(standbyNode != NULL);
+
+				ereport(ERROR,
+						(errcode(ERRCODE_OBJECT_IN_USE),
+						 errmsg("primary node %s:%d is already in state %s",
+								primaryNode->nodeName, primaryNode->nodePort,
+								ReplicationStateGetName(primaryNode->goalState)),
+						 errdetail("Only one standby can be registered at a "
+								   "time in pg_auto_failover, and "
+								   "node %d (%s:%d) is currently being "
+								   "registered.",
+								   standbyNode->nodeId,
+								   standbyNode->nodeName,
+								   standbyNode->nodePort),
+						 errhint("Retry registering in a moment")));
+			}
 		}
 	}
 	else

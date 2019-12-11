@@ -9,7 +9,6 @@
 #include <inttypes.h>
 #include <limits.h>
 #include <sys/select.h>
-#include <time.h>
 #include <unistd.h>
 
 #include "defaults.h"
@@ -19,27 +18,32 @@
 #include "parsing.h"
 #include "pgsql.h"
 
+#define STR_ERRCODE_OBJECT_IN_USE "55006"
 
 typedef struct NodeAddressParseContext
 {
+	char sqlstate[SQLSTATE_LENGTH];
 	NodeAddress *node;
 	bool parsedOK;
 } NodeAddressParseContext;
 
 typedef struct NodeAddressArrayParseContext
 {
+	char sqlstate[SQLSTATE_LENGTH];
 	NodeAddressArray *nodesArray;
 	bool parsedOK;
 } NodeAddressArrayParseContext;
 
 typedef struct MonitorAssignedStateParseContext
 {
+	char sqlstate[SQLSTATE_LENGTH];
 	MonitorAssignedState *assignedState;
 	bool parsedOK;
 } MonitorAssignedStateParseContext;
 
 typedef struct NodeReplicationSettingsParseContext
 {
+	char sqlstate[SQLSTATE_LENGTH];
 	int candidatePriority;
 	bool replicationQuorum;
 	bool parsedOK;
@@ -47,6 +51,7 @@ typedef struct NodeReplicationSettingsParseContext
 
 typedef struct MonitorExtensionVersionParseContext
 {
+	char sqlstate[SQLSTATE_LENGTH];
 	MonitorExtensionVersion *version;
 	bool parsedOK;
 } MonitorExtensionVersionParseContext;
@@ -99,7 +104,7 @@ monitor_get_other_nodes(Monitor *monitor,
 	int paramCount = 2;
 	Oid paramTypes[3] = { TEXTOID, INT4OID, TEXTOID };
 	const char *paramValues[3] = { 0 };
-	NodeAddressArrayParseContext parseContext = { nodeArray, false };
+	NodeAddressArrayParseContext parseContext = { { 0 }, nodeArray, false };
 	IntString myPortString = intToString(myPort);
 
 	paramValues[0] = myHost;
@@ -148,7 +153,7 @@ monitor_get_primary(Monitor *monitor, char *formation, int groupId,
 	int paramCount = 2;
 	Oid paramTypes[2] = { TEXTOID, INT4OID };
 	const char *paramValues[2];
-	NodeAddressParseContext parseContext = { node, false };
+	NodeAddressParseContext parseContext = { { 0 }, node, false };
 	IntString groupIdString = intToString(groupId);
 
 	paramValues[0] = formation;
@@ -196,7 +201,7 @@ monitor_get_coordinator(Monitor *monitor, char *formation, NodeAddress *node)
 	int paramCount = 1;
 	Oid paramTypes[1] = { TEXTOID };
 	const char *paramValues[1];
-	NodeAddressParseContext parseContext = { node, false };
+	NodeAddressParseContext parseContext = { { 0 }, node, false };
 
 	paramValues[0] = formation;
 
@@ -273,7 +278,8 @@ monitor_register_node(Monitor *monitor, char *formation, char *host, int port,
 	Oid paramTypes[9] = { TEXTOID, TEXTOID, INT4OID, NAMEOID, INT4OID,
 						  TEXTOID, TEXTOID, INT4OID, BOOLOID };
 	const char *paramValues[9];
-	MonitorAssignedStateParseContext parseContext = { assignedState, false };
+	MonitorAssignedStateParseContext parseContext =
+		{ { 0 }, assignedState, false };
 	const char *nodeStateString = NodeStateToString(initialState);
 
 	paramValues[0] = formation;
@@ -287,9 +293,29 @@ monitor_register_node(Monitor *monitor, char *formation, char *host, int port,
 	paramValues[8] = quorum ? "true" : "false";
 
 
-	if (!pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes, paramValues,
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
 								   &parseContext, parseNodeState))
 	{
+		/* disconnect from PostgreSQL now */
+		pgsql_finish(&monitor->pgsql);
+
+		if (strcmp(parseContext.sqlstate, STR_ERRCODE_OBJECT_IN_USE) == 0)
+		{
+			log_warn("Failed to register node %s:%d in group %d of "
+					 "formation \"%s\" with initial state \"%s\" "
+					 "because the monitor is already registering another "
+					 "standby, retrying in %ds",
+					 host, port, desiredGroupId, formation, nodeStateString,
+					 PG_AUTOCTL_KEEPER_SLEEP_TIME);
+
+			sleep(PG_AUTOCTL_KEEPER_SLEEP_TIME);
+			return monitor_register_node(monitor, formation, host, port,
+										 dbname, desiredGroupId, initialState,
+										 kind, candidatePriority, quorum,
+										 assignedState);
+		}
+
 		log_error("Failed to register node %s:%d in group %d of formation \"%s\" "
 				  "with initial state \"%s\", see previous lines for details",
 				  host, port, desiredGroupId, formation, nodeStateString);
@@ -339,7 +365,8 @@ monitor_node_active(Monitor *monitor,
 	Oid paramTypes[9] = { TEXTOID, TEXTOID, INT4OID, INT4OID,
 						  INT4OID, TEXTOID, BOOLOID, LSNOID, TEXTOID };
 	const char *paramValues[9];
-	MonitorAssignedStateParseContext parseContext = { assignedState, false };
+	MonitorAssignedStateParseContext parseContext =
+		{ { 0 }, assignedState, false };
 	const char *nodeStateString = NodeStateToString(currentState);
 
 	paramValues[0] = formation;
@@ -480,7 +507,8 @@ monitor_get_node_replication_settings(Monitor *monitor, int nodeid,
 	int paramCount = 1;
 	Oid paramTypes[1] = { INT4OID };
 	const char *paramValues[1];
-	NodeReplicationSettingsParseContext parseContext = {-1, false, false };
+	NodeReplicationSettingsParseContext parseContext =
+		{ { 0 }, -1, false, false };
 
 	paramValues[0] = intToString(nodeid).strValue;
 
@@ -583,7 +611,7 @@ monitor_get_formation_number_sync_standbys(Monitor *monitor, char *formation,
 	int paramCount = 1;
 	Oid paramTypes[1] = { TEXTOID};
 	const char *paramValues[1];
-	SingleValueResultContext parseContext = {PGSQL_RESULT_INT, false};
+	SingleValueResultContext parseContext = { { 0 }, PGSQL_RESULT_INT, false };
 	paramValues[0] = formation;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
@@ -628,7 +656,7 @@ monitor_set_formation_number_sync_standbys(Monitor *monitor, char *formation,
 	int paramCount = 2;
 	Oid paramTypes[2] = { TEXTOID, INT4OID};
 	const char *paramValues[2];
-	SingleValueResultContext parseContext = {PGSQL_RESULT_BOOL, false};
+	SingleValueResultContext parseContext = { { 0 }, PGSQL_RESULT_BOOL, false };
 	paramValues[0] = formation;
 	paramValues[1] = intToString(numberSyncStandbys).strValue;
 
@@ -664,7 +692,7 @@ monitor_set_formation_number_sync_standbys(Monitor *monitor, char *formation,
 bool
 monitor_remove(Monitor *monitor, char *host, int port)
 {
-	SingleValueResultContext context;
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BOOL, false };
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql = "SELECT pgautofailover.remove_node($1, $2)";
 	int paramCount = 2;
@@ -673,9 +701,6 @@ monitor_remove(Monitor *monitor, char *host, int port)
 
 	paramValues[0] = host;
 	paramValues[1] = intToString(port).strValue;
-
-	context.resultType = PGSQL_RESULT_BOOL;
-	context.parsedOk = false;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
@@ -947,7 +972,7 @@ parseNodeState(void *ctx, PGresult *result)
 bool
 monitor_print_state(Monitor *monitor, char *formation, int group)
 {
-	MonitorAssignedStateParseContext context;
+	MonitorAssignedStateParseContext context = { 0 };
 	PGSQL *pgsql = &monitor->pgsql;
 	char *sql = NULL;
 	int paramCount = 0;
@@ -1100,7 +1125,7 @@ bool
 monitor_get_state_as_json(Monitor *monitor, char *formation, int group,
 						  char *json, int size)
 {
-	SingleValueResultContext context;
+	SingleValueResultContext context = { 0 };
 	PGSQL *pgsql = &monitor->pgsql;
 	char *sql = NULL;
 	int paramCount = 0;
@@ -1175,7 +1200,7 @@ monitor_get_state_as_json(Monitor *monitor, char *formation, int group,
 bool
 monitor_print_last_events(Monitor *monitor, char *formation, int group, int count)
 {
-	MonitorAssignedStateParseContext context;
+	MonitorAssignedStateParseContext context = { 0 };
 	PGSQL *pgsql = &monitor->pgsql;
 	char *sql = NULL;
 	int paramCount = 0;
@@ -1442,16 +1467,13 @@ bool
 monitor_formation_uri(Monitor *monitor, const char *formation,
 					  char *connectionString, size_t size)
 {
-	SingleValueResultContext context;
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_STRING, false };
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
 		"SELECT formation_uri FROM pgautofailover.formation_uri($1)";
 	int paramCount = 1;
 	Oid paramTypes[1] = { TEXTOID };
 	const char *paramValues[1];
-
-	context.resultType = PGSQL_RESULT_STRING;
-	context.parsedOk = false;
 
 	paramValues[0] = formation;
 
@@ -1561,7 +1583,7 @@ parseCoordinatorNode(void *ctx, PGresult *result)
 bool
 monitor_start_maintenance(Monitor *monitor, char *host, int port)
 {
-	SingleValueResultContext context;
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BOOL, false };
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql = "SELECT pgautofailover.start_maintenance($1, $2)";
 	int paramCount = 2;
@@ -1570,9 +1592,6 @@ monitor_start_maintenance(Monitor *monitor, char *host, int port)
 
 	paramValues[0] = host;
 	paramValues[1] = intToString(port).strValue;
-
-	context.resultType = PGSQL_RESULT_BOOL;
-	context.parsedOk = false;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
@@ -1605,7 +1624,7 @@ monitor_start_maintenance(Monitor *monitor, char *host, int port)
 bool
 monitor_stop_maintenance(Monitor *monitor, char *host, int port)
 {
-	SingleValueResultContext context;
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BOOL, false };
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql = "SELECT pgautofailover.stop_maintenance($1, $2)";
 	int paramCount = 2;
@@ -1614,9 +1633,6 @@ monitor_stop_maintenance(Monitor *monitor, char *host, int port)
 
 	paramValues[0] = host;
 	paramValues[1] = intToString(port).strValue;
-
-	context.resultType = PGSQL_RESULT_BOOL;
-	context.parsedOk = false;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
@@ -1730,7 +1746,7 @@ monitor_get_notifications(Monitor *monitor)
 bool
 monitor_get_extension_version(Monitor *monitor, MonitorExtensionVersion *version)
 {
-	MonitorExtensionVersionParseContext context = { version, false };
+	MonitorExtensionVersionParseContext context = { { 0 }, version, false };
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
 		"SELECT default_version, installed_version"
