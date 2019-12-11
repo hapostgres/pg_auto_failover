@@ -7,7 +7,9 @@
  *
  */
 
+#include <pwd.h>
 #include <stdbool.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #include "postgres_fe.h"
@@ -76,15 +78,29 @@
 void
 systemd_config_init(SystemdServiceConfig *config, const char *pgdata)
 {
+	struct passwd *pw;
+	char *user = pg_setup_get_username(&(config->pgSetup));
 	IniOption systemdOptions[] = SET_INI_OPTIONS_ARRAY(config);
 
 	/* time to setup config->pathnames.systemd */
 	snprintf(config->pathnames.systemd, MAXPGPATH,
 			 "/etc/systemd/system/%s", KEEPER_SYSTEMD_FILENAME);
 
-	/* adjust defaults to known values from the config */
-	strlcpy(config->WorkingDirectory, config->pgSetup.pgdata, MAXPGPATH);
+	/*
+	 * In its operations pg_autoctl might remove PGDATA and replace it with a
+	 * new directory, at pg_basebackup time. It turns out that systemd does not
+	 * like that, at all. Let's assign WorkingDirectory to a safe place, like
+	 * the HOME of the USER running the service.
+	 */
+	pw = getpwnam(user);
+	if (pw)
+	{
+		log_debug("username found in passwd: %s's HOME is \"%s\"",
+				  pw->pw_name, pw->pw_dir);
+		strlcpy(config->WorkingDirectory, pw->pw_dir, MAXPGPATH);
+	}
 
+	/* adjust defaults to known values from the config */
 	snprintf(config->EnvironmentPGDATA, BUFSIZE,
 			 "'PGDATA=%s'", config->pgSetup.pgdata);
 
