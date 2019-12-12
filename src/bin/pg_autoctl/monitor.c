@@ -120,7 +120,7 @@ monitor_get_other_nodes(Monitor *monitor,
 								   paramCount, paramTypes, paramValues,
 								   &parseContext, parseNodeArray))
 	{
-		log_error("Failed to get the secondary from the monitor while running "
+		log_error("Failed to get other nodes from the monitor while running "
 				  "\"%s\" with host %s and port %d", sql, myHost, myPort);
 		return false;
 	}
@@ -130,12 +130,76 @@ monitor_get_other_nodes(Monitor *monitor,
 
 	if (!parseContext.parsedOK)
 	{
-		log_error("Failed to get the secondary from the monitor while running "
+		log_error("Failed to get the other nodes from the monitor while running "
 				  "\"%s\" with host %s and port %d because it returned an "
 				  "unexpected result. See previous line for details.",
 				  sql, myHost, myPort);
 		return false;
 	}
+
+	return true;
+}
+
+
+/*
+ * monitor_get_other_node gets the hostname and port of the other node
+ * in the group.
+ */
+bool
+monitor_get_other_nodes_as_json(Monitor *monitor,
+								char *myHost, int myPort,
+								NodeState currentState,
+								char *json, int size)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_STRING, false };
+
+	const char *sql =
+		currentState == ANY_STATE
+		?
+		"SELECT jsonb_pretty(jsonb_agg(row_to_json(nodes)))"
+		" FROM pgautofailover.get_other_nodes($1, $2) as nodes"
+		:
+		"SELECT jsonb_pretty(jsonb_agg(row_to_json(nodes)))"
+		" FROM pgautofailover.get_other_nodes($1, $2, "
+		"$3::pgautofailover.replication_state) as nodes";
+
+	int paramCount = 2;
+	Oid paramTypes[3] = { TEXTOID, INT4OID, TEXTOID };
+	const char *paramValues[3] = { 0 };
+	IntString myPortString = intToString(myPort);
+
+	paramValues[0] = myHost;
+	paramValues[1] = myPortString.strValue;
+
+	if (currentState != ANY_STATE)
+	{
+		++paramCount;
+		paramValues[2] = NodeStateToString(currentState);
+	}
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &parseSingleValueResult))
+	{
+		log_error("Failed to get the other nodes from the monitor while running "
+				  "\"%s\" with host %s and port %d", sql, myHost, myPort);
+		return false;
+	}
+
+	/* disconnect from PostgreSQL now */
+	pgsql_finish(&monitor->pgsql);
+
+	if (!context.parsedOk)
+	{
+		log_error("Failed to get the other nodes from the monitor while running "
+				  "\"%s\" with host %s and port %d because it returned an "
+				  "unexpected result. See previous line for details.",
+				  sql, myHost, myPort);
+		return false;
+	}
+
+	strlcpy(json, context.strVal, size);
 
 	return true;
 }
@@ -183,8 +247,11 @@ monitor_get_primary(Monitor *monitor, char *formation, int groupId,
 		return false;
 	}
 
-	log_info("The primary node returned by the monitor is %s:%d, with id %d",
-			 node->host, node->port, node->nodeId);
+	/* The monitor function pgautofailover.get_primary only returns 3 fields */
+	node->isPrimary = true;
+
+	log_debug("The primary node returned by the monitor is %s:%d, with id %d",
+			  node->host, node->port, node->nodeId);
 
 	return true;
 }
@@ -811,6 +878,20 @@ parseNode(PGresult *result, int rowNumber, NodeAddress *node)
 		return false;
 	}
 
+	/*
+	 * pgautofailover.get_other_nodes also returns the LSN and is_primary bits
+	 * of information.
+	 */
+	if (PQnfields(result) == 5)
+	{
+		/* we trust Postgres pg_lsn data type to fit in our PG_LSN_MAXLENGTH */
+		value = PQgetvalue(result, rowNumber, 3);
+		strlcpy(node->lsn, value, PG_LSN_MAXLENGTH);
+
+		value = PQgetvalue(result, rowNumber, 4);
+		node->isPrimary = strcmp(value, "t") == 0;
+	}
+
 	return true;
 }
 
@@ -865,9 +946,10 @@ parseNodeArray(void *ctx, PGresult *result)
 		return;
 	}
 
-	if (PQnfields(result) != 3)
+	/* pgautofailover.get_other_nodes returns 5 columns */
+	if (PQnfields(result) != 5)
 	{
-		log_error("Query returned %d columns, expected 3", PQnfields(result));
+		log_error("Query returned %d columns, expected 5", PQnfields(result));
 		context->parsedOK = false;
 		return;
 	}
@@ -882,6 +964,68 @@ parseNodeArray(void *ctx, PGresult *result)
 	}
 
 	context->parsedOK = parsedOk;
+}
+
+
+/*
+ * printCurrentState loops over pgautofailover.current_state() results and prints
+ * them, one per line.
+ */
+void
+printNodeArray(NodeAddressArray *nodesArray)
+{
+	int nodesArrayIndex = 0;
+	int maxNodeNameSize = 5;	/* strlen("Name") + 1, the header */
+	char *nameSeparatorHeader = NULL;
+
+	/*
+	 * Dynamically adjust our display output to the length of the longer
+	 * nodename in the result set
+	 */
+	for(nodesArrayIndex=0; nodesArrayIndex<nodesArray->count; nodesArrayIndex++)
+	{
+		NodeAddress node = nodesArray->nodes[nodesArrayIndex];
+
+		if (strlen(node.host) > maxNodeNameSize)
+		{
+			maxNodeNameSize = strlen(node.host);
+		}
+	}
+
+	/* prepare a nice dynamic string of '-' as a header separator */
+	nameSeparatorHeader = (char *) malloc((maxNodeNameSize+1) * sizeof(char));
+
+	for(int i=0; i<=maxNodeNameSize; i++)
+	{
+		if (i<maxNodeNameSize)
+		{
+			nameSeparatorHeader[i] = '-';
+		}
+		else
+		{
+			nameSeparatorHeader[i] = '\0';
+		}
+	}
+
+	fprintf(stdout, "%3s | %*s | %6s | %18s | %8s\n",
+			"ID", maxNodeNameSize, "Host", "Port", "LSN", "Primary?");
+
+	fprintf(stdout, "%3s-+-%*s-+-%6s-+-%18s-+-%8s\n",
+			"---", maxNodeNameSize, nameSeparatorHeader, "------",
+			"------------------", "--------");
+
+	free(nameSeparatorHeader);
+
+	for(nodesArrayIndex=0; nodesArrayIndex<nodesArray->count; nodesArrayIndex++)
+	{
+		NodeAddress node = nodesArray->nodes[nodesArrayIndex];
+
+		fprintf(stdout, "%3d | %s | %6d | %18s | %8s\n",
+				node.nodeId, node.host, node.port, node.lsn,
+				node.isPrimary ? "yes" : "no");
+	}
+
+	fprintf(stdout, "\n");
 }
 
 
@@ -1011,7 +1155,8 @@ monitor_print_state(Monitor *monitor, char *formation, int group)
 		}
 	}
 
-	if (!pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes, paramValues,
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
 								   &context, &printCurrentState))
 	{
 		log_error("Failed to retrieve current state from the monitor");

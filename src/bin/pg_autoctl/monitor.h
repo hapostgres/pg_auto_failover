@@ -52,9 +52,15 @@ typedef struct MonitorExtensionVersion
 
 bool monitor_init(Monitor *monitor, char *url);
 void monitor_finish(Monitor *monitor);
+
 bool monitor_get_other_nodes(Monitor *monitor,
 							 char *myHost, int myPort, NodeState currentState,
 							 NodeAddressArray *nodeArray);
+bool monitor_get_other_nodes_as_json(Monitor *monitor,
+									 char *myHost, int myPort,
+									 NodeState currentState,
+									 char *json, int size);
+void printNodeArray(NodeAddressArray *nodesArray);
 
 bool monitor_get_primary(Monitor *monitor, char *formation, int groupId,
 						 NodeAddress *node);

@@ -80,9 +80,11 @@ typedef struct GUC
 /* network address of a node in an HA group */
 typedef struct NodeAddress
 {
-	int nodeId;
+	int  nodeId;
 	char host[_POSIX_HOST_NAME_MAX];
-	int port;
+	int  port;
+	char lsn[PG_LSN_MAXLENGTH];
+	bool isPrimary;
 } NodeAddress;
 
 typedef struct NodeAddressArray

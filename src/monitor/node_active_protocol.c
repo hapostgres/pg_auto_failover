@@ -693,8 +693,8 @@ get_other_nodes(PG_FUNCTION_ARGS)
 		TypeFuncClass resultTypeClass = 0;
 		Datum resultDatum = 0;
 		HeapTuple resultTuple = NULL;
-		Datum values[3];
-		bool isNulls[3];
+		Datum values[5];
+		bool isNulls[5];
 
 		AutoFailoverNode *otherNode =
 			(AutoFailoverNode *) linitial(fctx->otherNodesList);
@@ -705,6 +705,8 @@ get_other_nodes(PG_FUNCTION_ARGS)
 		values[0] = Int32GetDatum(otherNode->nodeId);
 		values[1] = CStringGetTextDatum(otherNode->nodeName);
 		values[2] = Int32GetDatum(otherNode->nodePort);
+		values[3] = LSNGetDatum(otherNode->reportedLSN);
+		values[4] = BoolGetDatum(IsInPrimaryState(otherNode));
 
 		resultTypeClass = get_call_result_type(fcinfo, NULL, &resultDescriptor);
 		if (resultTypeClass != TYPEFUNC_COMPOSITE)
@@ -1125,7 +1127,8 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 	{
 		ereport(ERROR, (ERRCODE_INVALID_PARAMETER_VALUE,
 						errmsg("invalid value for candidate_priority \"%d\" "
-							   "expected an integer value between 0 and 100", candidatePriority)));
+							   "expected an integer value between 0 and 100",
+							   candidatePriority)));
 	}
 
 

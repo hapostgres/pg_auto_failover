@@ -206,11 +206,13 @@ grant execute on function pgautofailover.get_primary(text,int)
 
 CREATE FUNCTION pgautofailover.get_other_nodes
  (
-    IN node_name         text,
-    IN node_port         int,
-   OUT secondary_node_id int,
-   OUT secondary_name    text,
-   OUT secondary_port    int
+    IN node_name        text,
+    IN node_port        int,
+   OUT node_id          int,
+   OUT node_name        text,
+   OUT node_port        int,
+   OUT node_lsn         pg_lsn,
+   OUT node_is_primary  bool
  )
 RETURNS SETOF record LANGUAGE C STRICT
 AS 'MODULE_PATHNAME', $$get_other_nodes$$;
@@ -223,12 +225,14 @@ grant execute on function pgautofailover.get_other_nodes(text,int)
 
 CREATE FUNCTION pgautofailover.get_other_nodes
  (
-    IN node_name         text,
-    IN node_port         int,
-    IN current_state     pgautofailover.replication_state,
-   OUT secondary_node_id int,
-   OUT secondary_name    text,
-   OUT secondary_port    int
+    IN node_name        text,
+    IN node_port        int,
+    IN current_state    pgautofailover.replication_state,
+   OUT node_id          int,
+   OUT node_name        text,
+   OUT node_port        int,
+   OUT node_lsn         pg_lsn,
+   OUT node_is_primary  bool
  )
 RETURNS SETOF record LANGUAGE C STRICT
 AS 'MODULE_PATHNAME', $$get_other_nodes$$;

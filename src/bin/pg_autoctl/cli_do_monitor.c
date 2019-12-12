@@ -37,7 +37,7 @@
 #include "state.h"
 
 static void cli_do_monitor_get_primary_node(int argc, char **argv);
-static void cli_do_monitor_get_other_node(int argc, char **argv);
+static void cli_do_monitor_get_other_nodes(int argc, char **argv);
 static void cli_do_monitor_get_coordinator(int argc, char **argv);
 static void cli_do_monitor_register_node(int argc, char **argv);
 static void cli_do_monitor_node_active(int argc, char **argv);
@@ -52,13 +52,13 @@ static CommandLine monitor_get_primary_command =
 				 cli_getopt_pgdata,
 				 cli_do_monitor_get_primary_node);
 
-static CommandLine monitor_get_other_node_command =
-	make_command("other",
-				 "Get the other node from the pg_auto_failover group of nodename/port",
+static CommandLine monitor_get_other_nodes_command =
+	make_command("others",
+				 "Get the other nodes from the pg_auto_failover group of nodename/port",
 				 CLI_PGDATA_USAGE,
 				 CLI_PGDATA_OPTION,
 				 cli_getopt_pgdata,
-				 cli_do_monitor_get_other_node);
+				 cli_do_monitor_get_other_nodes);
 
 static CommandLine monitor_get_coordinator_command =
 	make_command("coordinator",
@@ -70,7 +70,7 @@ static CommandLine monitor_get_coordinator_command =
 
 static CommandLine *monitor_get_commands[] = {
 	&monitor_get_primary_command,
-	&monitor_get_other_node_command,
+	&monitor_get_other_nodes_command,
 	&monitor_get_coordinator_command,
 	NULL
 };
@@ -185,13 +185,11 @@ cli_do_monitor_get_primary_node(int argc, char **argv)
 
 
 /*
- * cli_do_monitor_get_other_node contacts the pg_auto_failover monitor and
+ * cli_do_monitor_get_other_nodes contacts the pg_auto_failover monitor and
  * retrieves the "other node" information for given nodename and port.
- *
- * TODO: add a --json output, an array of NodeAddress objects.
  */
 static void
-cli_do_monitor_get_other_node(int argc, char **argv)
+cli_do_monitor_get_other_nodes(int argc, char **argv)
 {
 	KeeperConfig config = keeperOptions;
 
@@ -221,50 +219,36 @@ cli_do_monitor_get_other_node(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	if (!monitor_get_other_nodes(&monitor,
-								 config.nodename,
-								 config.pgSetup.pgport,
-								 ANY_STATE,
-								 &otherNodesArray))
-	{
-		log_fatal("Failed to get the other node from the monitor, "
-				  "see above for details");
-		exit(EXIT_CODE_MONITOR);
-	}
-
-	/* output something easy to parse by another program */
 	if (outputJSON)
 	{
-		JSON_Value *js = json_value_init_array();
-		JSON_Array *jsArray = json_value_get_array(js);
+		char json[BUFSIZE];
 
-		for (nodeIndex = 0; nodeIndex < otherNodesArray.count; nodeIndex++)
+		if (!monitor_get_other_nodes_as_json(&monitor,
+											 config.nodename,
+											 config.pgSetup.pgport,
+											 ANY_STATE,
+											 json, BUFSIZE))
 		{
-			NodeAddress otherNode = otherNodesArray.nodes[nodeIndex];
-			JSON_Value *jsNode = json_value_init_object();
-			JSON_Object *jsNodeObj = json_value_get_object(jsNode);
-
-			json_object_set_string(jsNodeObj, "formation", config.formation);
-			json_object_set_number(jsNodeObj, "groupId", (double) config.groupId);
-			json_object_set_string(jsNodeObj, "host", otherNode.host);
-			json_object_set_number(jsNodeObj, "port", (double) otherNode.port);
-
-			json_array_append_value(jsArray, jsNode);
+			log_fatal("Failed to get the other nodes from the monitor, "
+					  "see above for details");
+			exit(EXIT_CODE_MONITOR);
 		}
-
-		(void) cli_pprint_json(js);
+		fprintf(stdout, "%s\n", json);
 	}
 	else
 	{
-		for (nodeIndex = 0; nodeIndex < otherNodesArray.count; nodeIndex++)
+		if (!monitor_get_other_nodes(&monitor,
+									 config.nodename,
+									 config.pgSetup.pgport,
+									 ANY_STATE,
+									 &otherNodesArray))
 		{
-			NodeAddress otherNode = otherNodesArray.nodes[nodeIndex];
-
-			fprintf(stdout,
-					"%s/%d/%d %s:%d\n",
-					config.formation, config.groupId,
-					otherNode.nodeId, otherNode.host, otherNode.port);
+			log_fatal("Failed to get the other nodes from the monitor, "
+					  "see above for details");
+			exit(EXIT_CODE_MONITOR);
 		}
+
+		(void) printNodeArray(&otherNodesArray);
 	}
 }
 
