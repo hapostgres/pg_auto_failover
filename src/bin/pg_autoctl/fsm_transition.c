@@ -322,11 +322,11 @@ fsm_disable_replication(Keeper *keeper)
 		return false;
 	}
 
-	if (!primary_drop_replication_slot(postgres, config->replication_slot_name))
+	if (!primary_drop_replication_slots(postgres))
 	{
-		log_error("Failed to disable replication because dropping the replication "
-				  "slot \"%s\" used by the standby failed, see above for details",
-				  config->replication_slot_name);
+		log_error("Failed to disable replication because dropping replication "
+				  "slots used by the standby nodes failed, "
+				  "see above for details");
 		return false;
 	}
 

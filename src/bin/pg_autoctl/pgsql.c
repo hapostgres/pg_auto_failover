@@ -677,6 +677,25 @@ pgsql_set_synchronous_standby_names(PGSQL *pgsql,
 	return pgsql_alter_system_set(pgsql, setting);
 }
 
+/*
+ * pgsql_drop_replication_slots drops all the replication slots. If the verbose
+ * flag is false, then no info message will be logged.
+ */
+bool
+pgsql_drop_replication_slots(PGSQL *pgsql, bool verbose)
+{
+	char *sql =
+		"SELECT pg_drop_replication_slot(slot_name) "
+		"  FROM pg_replication_slots ";
+
+	if (verbose)
+	{
+		log_info("Drop all replication slots");
+	}
+
+	return pgsql_execute_with_params(pgsql, sql, 0, NULL, NULL, NULL, NULL);
+}
+
 
 /*
  * pgsql_enable_synchronous_replication enables synchronous replication
