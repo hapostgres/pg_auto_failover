@@ -698,6 +698,27 @@ pgsql_drop_replication_slots(PGSQL *pgsql, bool verbose)
 
 
 /*
+ * pgsql_replication_slot_advance advances the current confirmed position of
+ * the given replication slot up to the given LSN position.
+ */
+bool
+pgsql_replication_slot_advance(PGSQL *pgsql, const char *slotName, char *uptoLSN)
+{
+	char *sql =
+		"SELECT pg_replication_slot_advance($1, $2) "
+		"  FROM pg_replication_slots WHERE slot_name = $1 "
+		" union all "
+		"SELECT pg_create_physical_replication_slot($1, true) "
+		"limit 1" ;
+	Oid paramTypes[2] = { TEXTOID, LSNOID };
+	const char *paramValues[2] = { slotName, uptoLSN };
+
+	return pgsql_execute_with_params(pgsql, sql, 2, paramTypes, paramValues,
+									 NULL, NULL);
+}
+
+
+/*
  * pgsql_enable_synchronous_replication enables synchronous replication
  * in Postgres such that all writes block post-commit until they are
  * replicated.

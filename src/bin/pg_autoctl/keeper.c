@@ -19,6 +19,7 @@
 #include "keeper.h"
 #include "keeper_config.h"
 #include "pgsetup.h"
+#include "primary_standby.h"
 #include "state.h"
 
 
@@ -176,7 +177,7 @@ keeper_ensure_current_state(Keeper *keeper)
 	PostgresSetup *pgSetup = &(keeper->postgres.postgresSetup);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
-	log_debug("Ensure current state: %s",
+	log_debug("Ensuring current state: %s",
 			  NodeStateToString(keeperState->current_role));
 
 	switch (keeperState->current_role)
@@ -227,24 +228,14 @@ keeper_ensure_current_state(Keeper *keeper)
 		case PREP_PROMOTION_STATE:
 		case STOP_REPLICATION_STATE:
 		{
-			if (postgres->pgIsRunning)
+			if (!keeper_ensure_postgres_is_running(keeper))
 			{
-				return true;
-			}
-			else if (ensure_local_postgres_is_running(postgres))
-			{
-				log_warn("PostgreSQL was not running, restarted with pid %ld",
-						 pgSetup->pidFile.pid);
-				return true;
-			}
-			else
-			{
-				log_error("Failed to restart PostgreSQL, "
-						  "see PostgreSQL logs for instance at \"%s\".",
-						  pgSetup->pgdata);
+				/* errors have already been logged */
 				return false;
 			}
-			break;
+
+			/* now ensure progress is made on the replication slots */
+			return keeper_advance_replication_slots(keeper);
 		}
 
 		case DEMOTED_STATE:
@@ -651,6 +642,100 @@ keeper_restart_postgres(Keeper *keeper)
 		return false;
 	}
 	return true;
+}
+
+
+/*
+ * keeper_ensure_postgres_is_running ensures that Postgres is running.
+ */
+bool
+keeper_ensure_postgres_is_running(Keeper *keeper)
+{
+	PostgresSetup *pgSetup = &(keeper->postgres.postgresSetup);
+	LocalPostgresServer *postgres = &(keeper->postgres);
+
+	if (postgres->pgIsRunning)
+	{
+		return true;
+	}
+	else if (ensure_local_postgres_is_running(postgres))
+	{
+		log_warn("PostgreSQL was not running, restarted with pid %ld",
+				 pgSetup->pidFile.pid);
+		return true;
+	}
+	else
+	{
+		log_error("Failed to restart PostgreSQL, "
+				  "see PostgreSQL logs for instance at \"%s\".",
+				  pgSetup->pgdata);
+		return false;
+	}
+}
+
+
+/*
+ * keeper_advance_replication_slots loops over the other standby nodes and
+ * advance their replication slots up to the current LSN value known by the
+ * monitor.
+ */
+bool
+keeper_advance_replication_slots(Keeper *keeper)
+{
+	bool advancedAllSlots = true;
+	Monitor *monitor = &(keeper->monitor);
+	PostgresSetup *pgSetup = &(keeper->postgres.postgresSetup);
+	LocalPostgresServer *postgres = &(keeper->postgres);
+
+	char *host = keeper->config.nodename;
+	int port = pgSetup->pgport;
+
+	int nodeIndex = 0;
+
+	log_trace("keeper_advance_replication_slots");
+
+	if (!monitor_get_other_nodes(monitor, host, port,
+								 ANY_STATE, &(keeper->otherNodes)))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	for (nodeIndex = 0; nodeIndex < keeper->otherNodes.count; nodeIndex++)
+	{
+		NodeAddress *otherNode = &(keeper->otherNodes.nodes[nodeIndex]);
+		char replicationSlotName[BUFSIZE] = { 0 };
+
+		if (otherNode->isPrimary)
+		{
+			/*
+			 * On the primary the replication slots are kept uptodate by the
+			 * streaming replication protocol directly.
+			 */
+			log_debug("Skipping node %d (%s:%d) which is the current primary",
+					  otherNode->nodeId, otherNode->host, otherNode->port);
+			continue;
+		}
+
+		if (!postgres_sprintf_replicationSlotName(otherNode->nodeId,
+												  replicationSlotName, BUFSIZE))
+		{
+			/* that's highly unlikely... */
+			log_error("Failed to snprintf replication slot name for node %d",
+					  otherNode->nodeId);
+			return false;
+		}
+
+		if (!postgres_replication_slot_advance(postgres,
+											   replicationSlotName,
+											   otherNode->lsn))
+		{
+			/* errors have already been logged */
+			advancedAllSlots = false;
+		}
+	}
+
+	return advancedAllSlots;
 }
 
 

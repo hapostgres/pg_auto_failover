@@ -300,6 +300,27 @@ primary_drop_replication_slots(LocalPostgresServer *postgres)
 
 
 /*
+ * postgres_replication_slot_advance advances the current confirmed position of
+ * the given replication slot up to the given LSN position.
+ */
+bool
+postgres_replication_slot_advance(LocalPostgresServer *postgres,
+								  char *replicationSlotName,
+								  char *uptoLSN)
+{
+	bool result = false;
+	PGSQL *pgsql = &(postgres->sqlClient);
+
+	log_trace("primary_drop_replication_slots");
+
+	result = pgsql_replication_slot_advance(pgsql, replicationSlotName, uptoLSN);
+
+	pgsql_finish(pgsql);
+	return result;
+}
+
+
+/*
  * primary_enable_synchronous_replication enables synchronous replication
  * on a primary postgres node.
  */
