@@ -41,10 +41,17 @@ char *
 regexp_first_match(const char *string, const char *regex)
 {
 	regex_t compiledRegex;
-	int status = regcomp(&compiledRegex, regex, REG_EXTENDED | REG_NEWLINE);
+	int status = 0;
 
 	regmatch_t m[RE_MATCH_COUNT];
 	int matchStatus;
+
+	if (string == NULL)
+	{
+		return NULL;
+	}
+
+	status = regcomp(&compiledRegex, regex, REG_EXTENDED | REG_NEWLINE);
 
 	if (status != 0)
 	{

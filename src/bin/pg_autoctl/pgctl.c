@@ -97,8 +97,7 @@ pg_ctl_version(const char *pg_ctl_path)
 bool
 pg_controldata(PostgresSetup *pgSetup, bool missing_ok)
 {
-	bool success;
-	char pg_controldata[MAXPGPATH];
+	char pg_controldata_path[MAXPGPATH];
 	Program prog;
 
 	if (pgSetup->pgdata[0] == '\0' || pgSetup->pg_ctl[0] == '\0')
@@ -107,33 +106,47 @@ pg_controldata(PostgresSetup *pgSetup, bool missing_ok)
 		return false;
 	}
 
-	path_in_same_directory(pgSetup->pg_ctl, "pg_controldata", pg_controldata);
-	log_debug("%s %s", pg_controldata, pgSetup->pgdata);
+	path_in_same_directory(pgSetup->pg_ctl, "pg_controldata", pg_controldata_path);
+	log_debug("%s %s", pg_controldata_path, pgSetup->pgdata);
 
-	/* we parse the output of pg_controldata, make sure it's as expected */
+	/* We parse the output of pg_controldata, make sure it's as expected */
 	setenv("LANG", "C", 1);
-	prog = run_program(pg_controldata, pgSetup->pgdata, NULL);
+	prog = run_program(pg_controldata_path, pgSetup->pgdata, NULL);
 
 	if (prog.returnCode == 0)
 	{
-		success = parse_controldata(&pgSetup->control, prog.stdout);
+		if (prog.stdout == NULL)
+		{
+			/* happens sometimes, and I don't know why */
+			log_warn("Got empty output from `%s %s`, trying again in 1s",
+					 pg_controldata_path, pgSetup->pgdata);
+			sleep(1);
+
+			return pg_controldata(pgSetup, missing_ok);
+		}
+
+		if (!parse_controldata(&pgSetup->control, prog.stdout))
+		{
+			log_error("%s %s", pg_controldata_path, pgSetup->pgdata);
+			log_warn("Failed to parse pg_controldata output:\n%s", prog.stdout);
+			free_program(&prog);
+			return false;
+		}
+
+		free_program(&prog);
+		return true;
 	}
 	else
 	{
-		if (missing_ok)
+		if (!missing_ok)
 		{
-			success = true;
-		}
-		else
-		{
-			success = false;
 			log_error("Failed to run \"%s\" on \"%s\": %s",
-					  pg_controldata, pgSetup->pgdata, prog.stderr);
+					  pg_controldata_path, pgSetup->pgdata, prog.stderr);
 		}
-	}
-	free_program(&prog);
+		free_program(&prog);
 
-	return success;
+		return missing_ok;
+	}
 }
 
 
