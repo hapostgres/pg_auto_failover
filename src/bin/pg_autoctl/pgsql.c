@@ -35,6 +35,7 @@ static bool pgsql_get_current_setting(PGSQL *pgsql, char *settingName,
 									  char **currentValue);
 static int escape_conninfo_value(char *destination, const char *string);
 static void parsePgMetadata(void *ctx, PGresult *result);
+static void parseReplicationSlotMaintain(void *ctx, PGresult *result);
 
 
 /*
@@ -703,9 +704,20 @@ pgsql_drop_replication_slots(PGSQL *pgsql, bool verbose)
  * replication slot if it does not exists yet, and remove the slots that exist
  * in Postgres but are ommited in the given array of slots.
  */
+typedef struct ReplicationSlotMaintainContext
+{
+	char sqlstate[SQLSTATE_LENGTH];
+	char operation[NAMEDATALEN];
+	char slotName[BUFSIZE];
+	char lsn[PG_LSN_MAXLENGTH];
+	bool parsedOK;
+} ReplicationSlotMaintainContext;
+
+
 bool
 pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray)
 {
+	int bytes;
 	char sql[2*BUFSIZE] = { 0 };
 	char values[BUFSIZE] = { 0 };
 	char *sqlTemplate =
@@ -713,22 +725,32 @@ pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray)
 		" SELECT '" REPLICATION_SLOT_NAME_DEFAULT "_' || id, lsn"
 		"   FROM (values %s) as sb(id, lsn) "
 		"), \n"
-		"drop as ("
-		" SELECT pg_drop_replication_slot(slot_name) "
+		"dropped as ("
+		" SELECT slot_name, pg_drop_replication_slot(slot_name) "
 		"   FROM pg_replication_slots pgrs LEFT JOIN nodes USING(slot_name) "
 		"  WHERE nodes.slot_name IS NULL "
 		"), \n"
-		"advance as ("
-		"SELECT nodes.slot_name, end_lsn"
+		"advanced as ("
+		"SELECT a.slot_name, a.end_lsn"
 		"  FROM pg_replication_slots JOIN nodes USING(slot_name), "
-		"       LATERAL pg_replication_slot_advance(slot_name, lsn)"
+		"       LATERAL pg_replication_slot_advance(slot_name, lsn) a"
+		" WHERE nodes.lsn <> '0/0'"
+		"), \n"
+		"created as ("
+		"SELECT c.slot_name, c.lsn "
+		"  FROM nodes LEFT JOIN pg_replication_slots pgrs USING(slot_name), "
+		"       LATERAL pg_create_physical_replication_slot(slot_name, true) c"
+		" WHERE pgrs.slot_name IS NULL "
 		") \n"
-		"SELECT pg_create_physical_replication_slot(slot_name, true) "
-		"  FROM nodes LEFT JOIN pg_replication_slots pgrs USING(slot_name) "
-		" WHERE pgrs.slot_name IS NULL ";
+		"SELECT 'create', slot_name, lsn FROM created "
+		" union all "
+		"SELECT 'drop', slot_name, NULL::pg_lsn FROM dropped "
+		" union all "
+		"SELECT 'advance', slot_name, end_lsn FROM advanced ";
 
 	Oid paramTypes[NODE_ARRAY_MAX_COUNT*2] = { 0 };
 	const char *paramValues[NODE_ARRAY_MAX_COUNT*2] = { 0 };
+	ReplicationSlotMaintainContext context = { 0 };
 
 	int nodeIndex = 0;
 	int paramIndex = 0;
@@ -750,21 +772,69 @@ pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray)
 		paramTypes[paramIndex] = LSNOID;
 		paramValues[paramIndex++] = node->lsn;
 
-		valuesIndex = snprintf(values+valuesIndex, BUFSIZE-valuesIndex,
-							   "%s($%d, $%d%s)",
-							   valuesIndex == 0 ? "" : ",",
-							   /* we begin at $1 here: intentional off-by-one */
-							   paramIndex-1, paramIndex,
-							   /* cast only the first row */
-							   valuesIndex == 0 ? "::pg_lsn" : "");
+		valuesIndex += snprintf(values+valuesIndex, BUFSIZE-valuesIndex,
+								"%s($%d, $%d%s)",
+								valuesIndex == 0 ? "" : ",",
+								/* we begin at $1 here: intentional off-by-one */
+								paramIndex-1, paramIndex,
+								/* cast only the first row */
+								valuesIndex == 0 ? "::pg_lsn" : "");
+
+		if (valuesIndex > BUFSIZE)
+		{
+			/* shouldn't happen because we only support up to 12 nodes */
+			log_error("Failed to prepare the SQL query for "
+					  "pgsql_replication_slot_maintain");
+			return false;
+		}
 	}
 
 	/* add the computed ($1,$2), ... string to the query "template" */
-	snprintf(sql, 2*BUFSIZE, sqlTemplate, values);
+	bytes = snprintf(sql, 2*BUFSIZE, sqlTemplate, values);
+
+	if (bytes > 2*BUFSIZE)
+	{
+		/* shouldn't happen because we only support up to 12 nodes */
+		log_error("Failed to prepare the SQL query for "
+				  "pgsql_replication_slot_maintain");
+		return false;
+	}
 
 	return pgsql_execute_with_params(pgsql, sql,
 									 paramIndex, paramTypes, paramValues,
-									 NULL, NULL);
+									 &context,
+									 parseReplicationSlotMaintain);
+}
+
+
+/*
+ * parsePgMetadata parses the result from a PostgreSQL query fetching
+ * two columns from pg_stat_replication: sync_state and currentLSN.
+ */
+static void
+parseReplicationSlotMaintain(void *ctx, PGresult *result)
+{
+	int rowNumber = 0;
+	ReplicationSlotMaintainContext *context =
+		(ReplicationSlotMaintainContext *) ctx;
+
+	if (PQnfields(result) != 3)
+	{
+		log_error("Query returned %d columns, expected 3", PQnfields(result));
+		context->parsedOK = false;
+		return;
+	}
+
+	for(rowNumber = 0; rowNumber < PQntuples(result); rowNumber++)
+	{
+		log_debug("parseReplicationSlotMaintain: %s %s %s",
+				  PQgetvalue(result, rowNumber, 0),
+				  PQgetvalue(result, rowNumber, 1),
+				  PQgetisnull(result, rowNumber, 2)
+				  ? "" : PQgetvalue(result, rowNumber, 2));
+	}
+
+	context->parsedOK = true;
 }
 
 
@@ -1587,7 +1657,7 @@ pgsql_get_postgres_metadata(PGSQL *pgsql, const char *slotName,
 
 
 /*
- * parsePgsrSyncStateAndWAL parses the result from a PostgreSQL query fetching
+ * parsePgMetadata parses the result from a PostgreSQL query fetching
  * two columns from pg_stat_replication: sync_state and currentLSN.
  */
 static void
