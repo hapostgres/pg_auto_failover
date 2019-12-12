@@ -698,22 +698,72 @@ pgsql_drop_replication_slots(PGSQL *pgsql, bool verbose)
 
 
 /*
- * pgsql_replication_slot_advance advances the current confirmed position of
- * the given replication slot up to the given LSN position.
+ * pgsql_replication_slot_maintain advances the current confirmed position of
+ * the given replication slot up to the given LSN position, create the
+ * replication slot if it does not exists yet, and remove the slots that exist
+ * in Postgres but are ommited in the given array of slots.
  */
 bool
-pgsql_replication_slot_advance(PGSQL *pgsql, const char *slotName, char *uptoLSN)
+pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray)
 {
-	char *sql =
-		"SELECT pg_replication_slot_advance($1, $2) "
-		"  FROM pg_replication_slots WHERE slot_name = $1 "
-		" union all "
-		"SELECT pg_create_physical_replication_slot($1, true) "
-		"limit 1" ;
-	Oid paramTypes[2] = { TEXTOID, LSNOID };
-	const char *paramValues[2] = { slotName, uptoLSN };
+	char sql[2*BUFSIZE] = { 0 };
+	char values[BUFSIZE] = { 0 };
+	char *sqlTemplate =
+		"WITH nodes(slot_name, lsn) as ("
+		" SELECT '" REPLICATION_SLOT_NAME_DEFAULT "_' || id, lsn"
+		"   FROM (values %s) as sb(id, lsn) "
+		"), \n"
+		"drop as ("
+		" SELECT pg_drop_replication_slot(slot_name) "
+		"   FROM pg_replication_slots pgrs LEFT JOIN nodes USING(slot_name) "
+		"  WHERE nodes.slot_name IS NULL "
+		"), \n"
+		"advance as ("
+		"SELECT nodes.slot_name, end_lsn"
+		"  FROM pg_replication_slots JOIN nodes USING(slot_name), "
+		"       LATERAL pg_replication_slot_advance(slot_name, lsn)"
+		") \n"
+		"SELECT pg_create_physical_replication_slot(slot_name, true) "
+		"  FROM nodes LEFT JOIN pg_replication_slots pgrs USING(slot_name) "
+		" WHERE pgrs.slot_name IS NULL ";
 
-	return pgsql_execute_with_params(pgsql, sql, 2, paramTypes, paramValues,
+	Oid paramTypes[NODE_ARRAY_MAX_COUNT*2] = { 0 };
+	const char *paramValues[NODE_ARRAY_MAX_COUNT*2] = { 0 };
+
+	int nodeIndex = 0;
+	int paramIndex = 0;
+	int valuesIndex = 0;
+
+	for (nodeIndex = 0; nodeIndex < nodeArray->count; nodeIndex++)
+	{
+		NodeAddress *node = &(nodeArray->nodes[nodeIndex]);
+		IntString nodeIdString = intToString(node->nodeId);
+
+		if (node->isPrimary)
+		{
+			continue;
+		}
+
+		paramTypes[paramIndex] = INT4OID;
+		paramValues[paramIndex++] = strdup(nodeIdString.strValue);
+
+		paramTypes[paramIndex] = LSNOID;
+		paramValues[paramIndex++] = node->lsn;
+
+		valuesIndex = snprintf(values+valuesIndex, BUFSIZE-valuesIndex,
+							   "%s($%d, $%d%s)",
+							   valuesIndex == 0 ? "" : ",",
+							   /* we begin at $1 here: intentional off-by-one */
+							   paramIndex-1, paramIndex,
+							   /* cast only the first row */
+							   valuesIndex == 0 ? "::pg_lsn" : "");
+	}
+
+	/* add the computed ($1,$2), ... string to the query "template" */
+	snprintf(sql, 2*BUFSIZE, sqlTemplate, values);
+
+	return pgsql_execute_with_params(pgsql, sql,
+									 paramIndex, paramTypes, paramValues,
 									 NULL, NULL);
 }
 

@@ -304,16 +304,15 @@ primary_drop_replication_slots(LocalPostgresServer *postgres)
  * the given replication slot up to the given LSN position.
  */
 bool
-postgres_replication_slot_advance(LocalPostgresServer *postgres,
-								  char *replicationSlotName,
-								  char *uptoLSN)
+postgres_replication_slot_maintain(LocalPostgresServer *postgres,
+								   NodeAddressArray *nodeArray)
 {
 	bool result = false;
 	PGSQL *pgsql = &(postgres->sqlClient);
 
-	log_trace("primary_drop_replication_slots");
+	log_trace("postgres_replication_slot_maintain");
 
-	result = pgsql_replication_slot_advance(pgsql, replicationSlotName, uptoLSN);
+	result = pgsql_replication_slot_maintain(pgsql, nodeArray);
 
 	pgsql_finish(pgsql);
 	return result;

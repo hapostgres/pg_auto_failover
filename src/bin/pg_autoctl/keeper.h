@@ -45,7 +45,7 @@ bool keeper_start_postgres(Keeper *keeper);
 bool keeper_restart_postgres(Keeper *keeper);
 bool keeper_should_ensure_current_state_before_transition(Keeper *keeper);
 bool keeper_ensure_postgres_is_running(Keeper *keeper);
-bool keeper_advance_replication_slots(Keeper *keeper);
+bool keeper_maintain_replication_slots(Keeper *keeper);
 bool keeper_ensure_current_state(Keeper *keeper);
 bool keeper_update_pg_state(Keeper *keeper);
 bool ReportPgIsRunning(Keeper *keeper);

@@ -235,7 +235,7 @@ keeper_ensure_current_state(Keeper *keeper)
 			}
 
 			/* now ensure progress is made on the replication slots */
-			return keeper_advance_replication_slots(keeper);
+			return keeper_maintain_replication_slots(keeper);
 		}
 
 		case DEMOTED_STATE:
@@ -680,9 +680,8 @@ keeper_ensure_postgres_is_running(Keeper *keeper)
  * monitor.
  */
 bool
-keeper_advance_replication_slots(Keeper *keeper)
+keeper_maintain_replication_slots(Keeper *keeper)
 {
-	bool advancedAllSlots = true;
 	Monitor *monitor = &(keeper->monitor);
 	PostgresSetup *pgSetup = &(keeper->postgres.postgresSetup);
 	LocalPostgresServer *postgres = &(keeper->postgres);
@@ -690,9 +689,7 @@ keeper_advance_replication_slots(Keeper *keeper)
 	char *host = keeper->config.nodename;
 	int port = pgSetup->pgport;
 
-	int nodeIndex = 0;
-
-	log_trace("keeper_advance_replication_slots");
+	log_trace("keeper_maintain_replication_slots");
 
 	if (!monitor_get_other_nodes(monitor, host, port,
 								 ANY_STATE, &(keeper->otherNodes)))
@@ -701,41 +698,14 @@ keeper_advance_replication_slots(Keeper *keeper)
 		return false;
 	}
 
-	for (nodeIndex = 0; nodeIndex < keeper->otherNodes.count; nodeIndex++)
+	if (!postgres_replication_slot_maintain(postgres, &(keeper->otherNodes)))
 	{
-		NodeAddress *otherNode = &(keeper->otherNodes.nodes[nodeIndex]);
-		char replicationSlotName[BUFSIZE] = { 0 };
-
-		if (otherNode->isPrimary)
-		{
-			/*
-			 * On the primary the replication slots are kept uptodate by the
-			 * streaming replication protocol directly.
-			 */
-			log_debug("Skipping node %d (%s:%d) which is the current primary",
-					  otherNode->nodeId, otherNode->host, otherNode->port);
-			continue;
-		}
-
-		if (!postgres_sprintf_replicationSlotName(otherNode->nodeId,
-												  replicationSlotName, BUFSIZE))
-		{
-			/* that's highly unlikely... */
-			log_error("Failed to snprintf replication slot name for node %d",
-					  otherNode->nodeId);
-			return false;
-		}
-
-		if (!postgres_replication_slot_advance(postgres,
-											   replicationSlotName,
-											   otherNode->lsn))
-		{
-			/* errors have already been logged */
-			advancedAllSlots = false;
-		}
+		log_error("Failed to maintain replication slots on the local Postgres "
+				  "instance, see above for details");
+		return false;
 	}
 
-	return advancedAllSlots;
+	return true;
 }
 
 
