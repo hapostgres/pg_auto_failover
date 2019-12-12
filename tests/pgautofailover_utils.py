@@ -113,6 +113,7 @@ class PGNode:
         run_command = [shutil.which('pg_autoctl'), 'run',
                           '--pgdata', self.datadir]
         self.pg_autoctl_run_proc = self.vnode.run(run_command)
+        print("running ", str(self.pg_autoctl_run_proc.pid))
 
     def run_sql_query(self, query, *args):
         """
@@ -145,7 +146,9 @@ class PGNode:
         Kills the keeper by sending a SIGTERM to keeper's process group.
         """
         if self.pg_autoctl_run_proc:
+            print ("stopping pg_autoctl at ", str(self.pg_autoctl_run_proc.pid))
             os.killpg(os.getpgid(self.pg_autoctl_run_proc.pid), signal.SIGTERM)
+            self.pg_autoctl_run_proc = None
 
     def stop_postgres(self):
         """
@@ -273,7 +276,7 @@ class DataNode(PGNode):
         self.listen_flag = listen_flag
         self.formation = formation
 
-    def create(self):
+    def create(self, run=False):
         """
         Runs "pg_autoctl create"
         """
@@ -297,9 +300,20 @@ class DataNode(PGNode):
 
         if self.formation:
             create_command += ['--formation', self.formation]
+        
+        if run:
+            create_command += ['--run']
 
         init_proc = self.vnode.run(create_command)
-        wait_or_timeout_proc(init_proc,
+        
+        # when run is requested pg_autoctl does not terminate
+        # therefore we do not wait for process to complete
+        # we just record the process
+        if run:
+            self.pg_autoctl_run_proc = init_proc
+            print("created and run ", str(self.pg_autoctl_run_proc.pid))
+        else:
+            wait_or_timeout_proc(init_proc,
                              name="keeper init",
                              timeout=COMMAND_TIMEOUT)
 
@@ -507,7 +521,7 @@ class MonitorNode(PGNode):
             self.nodename = str(self.vnode.address)
 
 
-    def create(self):
+    def create(self, run = False):
         """
         Initializes and runs the monitor process.
         """
@@ -518,13 +532,22 @@ class MonitorNode(PGNode):
                         '--nodename', self.nodename]
         
         if self.authMethod:
-            init_command.extend(['--auth', self.authMethod])    
+            init_command.extend(['--auth', self.authMethod])
+        
+        if run:
+            init_command.extend(['--run'])
         
         init_proc = self.vnode.run(init_command)
-        wait_or_timeout_proc(init_proc,
+        
+        # when run is requested pg_autoctl does not terminate
+        # therefore we do not wait for process to complete
+        # we just record the process
+        if run:
+            self.pg_autoctl_run_proc = init_proc
+        else:
+            wait_or_timeout_proc(init_proc,
                              name="create monitor",
                              timeout=COMMAND_TIMEOUT)
-      
 
     def create_formation(self, formation_name,
                          kind="pgsql", secondary=None, dbname=None):

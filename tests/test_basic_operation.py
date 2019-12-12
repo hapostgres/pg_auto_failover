@@ -21,9 +21,10 @@ def test_000_create_monitor():
 def test_001_init_primary():
     global node1
     node1 = cluster.create_datanode("/tmp/basic/node1")
-    node1.create()
-    node1.run()
+    node1.create(run = True)
+    #node1.run()
     assert node1.wait_until_state(target_state="single")
+
 
 def test_001_stop_postgres():
     node1.stop_postgres()
@@ -36,8 +37,8 @@ def test_002_create_t1():
 def test_003_init_secondary():
     global node2
     node2 = cluster.create_datanode("/tmp/basic/node2")
-    node2.create()
-    node2.run()
+    node2.create(run = True)
+    #node2.run()
     assert node2.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")
 
@@ -82,7 +83,11 @@ def test_011_writes_to_node1_fail():
     node1.run_sql_query("INSERT INTO t1 VALUES (3)")
 
 def test_012_fail_secondary():
+    print ("Node 1 state " , node1.get_state())
+    print ("Node 2 state " , node2.get_state())
     node1.fail()
+    print ("Node 1 state " , node1.get_state())
+    print ("Node 2 state " , node2.get_state())
     assert node2.wait_until_state(target_state="wait_primary")
 
 def test_013_drop_secondary():
