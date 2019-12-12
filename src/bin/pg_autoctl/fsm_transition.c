@@ -334,7 +334,6 @@ fsm_init_primary(Keeper *keeper)
 bool
 fsm_disable_replication(Keeper *keeper)
 {
-	KeeperConfig *config = &(keeper->config);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
 	if (!primary_disable_synchronous_replication(postgres))

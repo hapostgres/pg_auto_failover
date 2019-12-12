@@ -693,23 +693,25 @@ pgsql_set_synchronous_standby_names(PGSQL *pgsql,
 	return pgsql_alter_system_set(pgsql, setting);
 }
 
+
 /*
- * pgsql_drop_replication_slots drops all the replication slots. If the verbose
- * flag is false, then no info message will be logged.
+ * pgsql_replication_slot_advance advances the current confirmed position of
+ * the given replication slot up to the given LSN position.
  */
 bool
-pgsql_drop_replication_slots(PGSQL *pgsql, bool verbose)
+pgsql_replication_slot_advance(PGSQL *pgsql, const char *slotName, char *uptoLSN)
 {
 	char *sql =
-		"SELECT pg_drop_replication_slot(slot_name) "
-		"  FROM pg_replication_slots ";
+		"SELECT pg_replication_slot_advance($1, $2) "
+		"  FROM pg_replication_slots WHERE slot_name = $1 "
+		" union all "
+		"SELECT pg_create_physical_replication_slot($1, true) "
+		"limit 1";
+	Oid paramTypes[2] = { TEXTOID, LSNOID };
+	const char *paramValues[2] = { slotName, uptoLSN };
 
-	if (verbose)
-	{
-		log_info("Drop all replication slots");
-	}
-
-	return pgsql_execute_with_params(pgsql, sql, 0, NULL, NULL, NULL, NULL);
+	return pgsql_execute_with_params(pgsql, sql, 2, paramTypes, paramValues,
+									 NULL, NULL);
 }
 
 

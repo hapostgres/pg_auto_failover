@@ -293,12 +293,11 @@ bool
 primary_drop_replication_slots(LocalPostgresServer *postgres)
 {
 	bool result = false;
-	bool verbose = true;
 	PGSQL *pgsql = &(postgres->sqlClient);
 
 	log_trace("primary_drop_replication_slots");
 
-	result = pgsql_drop_replication_slots(pgsql, verbose);
+	result = pgsql_drop_replication_slots(pgsql);
 
 	pgsql_finish(pgsql);
 	return result;
@@ -306,18 +305,20 @@ primary_drop_replication_slots(LocalPostgresServer *postgres)
 
 
 /*
- * primary_drop_replication_slots drops all the replication slots found. The
- * return value indicates whether the operation was successful.
+ * postgres_replication_slot_advance advances the current confirmed position of
+ * the given replication slot up to the given LSN position.
  */
 bool
-primary_drop_replication_slots(LocalPostgresServer *postgres)
+postgres_replication_slot_advance(LocalPostgresServer *postgres,
+								  char *replicationSlotName,
+								  char *uptoLSN)
 {
 	bool result = false;
 	PGSQL *pgsql = &(postgres->sqlClient);
 
 	log_trace("primary_drop_replication_slots");
 
-	result = pgsql_drop_replication_slots(pgsql);
+	result = pgsql_replication_slot_advance(pgsql, replicationSlotName, uptoLSN);
 
 	pgsql_finish(pgsql);
 	return result;
