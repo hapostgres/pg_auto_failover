@@ -714,6 +714,167 @@ typedef struct ReplicationSlotMaintainContext
 } ReplicationSlotMaintainContext;
 
 
+/*
+ * BuildNodesArrayValues build the SQL expression to use in a FROM clause to
+ * reprense the list of other standby nodes from the given nodeArray.
+ *
+ * Such a list looks either like:
+ *
+ *   VALUES(($1, $2::pg_lsn), ($3, $4))
+ *
+ * or for an empty set (when we're the only standby):
+ *
+ *   SELECT id, lsn
+ *     FROM (values (null::int, null::pg_lsn)) as t(id, lsn)
+ *    WHERE x is null
+ *
+ * We actually need to provide an empty set (0 rows) with columns of the
+ * expected data types so that we can join against the existing replication
+ * slots and drop them. If the set is empty, we drop all the slots.
+ *
+ * We return how many parameters we filled in paramTypes and paramValues from
+ * the nodeArray.
+ */
+static int
+BuildNodesArrayValues(NodeAddressArray *nodeArray,
+					  Oid *paramTypes, char **paramValues,
+					  char *values, int size)
+{
+	char buffer[BUFSIZE];
+	int nodeIndex = 0;
+	int paramIndex = 0;
+	int valuesIndex = 0;
+
+	/*
+	 * The nodeArray is obtained by a call to get_other_nodes() and is only
+	 * empty from a SINGLE node. Otherwise the primary is in the list of nodes.
+	 * As a result, we can't really skip the array when it's empty, because
+	 * that case and the case with only a single node are to be processed the
+	 * same.
+	 */
+	for (nodeIndex = 0; nodeIndex < nodeArray->count; nodeIndex++)
+	{
+		NodeAddress *node = &(nodeArray->nodes[nodeIndex]);
+		IntString nodeIdString = intToString(node->nodeId);
+
+		if (node->isPrimary)
+		{
+			continue;
+		}
+
+		paramTypes[paramIndex] = INT4OID;
+		paramValues[paramIndex++] = strdup(nodeIdString.strValue);
+
+		paramTypes[paramIndex] = LSNOID;
+		paramValues[paramIndex++] = node->lsn;
+
+		valuesIndex += snprintf(buffer+valuesIndex, BUFSIZE-valuesIndex,
+								"%s($%d, $%d%s)",
+								valuesIndex == 0 ? "" : ",",
+								/* we begin at $1 here: intentional off-by-one */
+								paramIndex-1, paramIndex,
+								/* cast only the first row */
+								valuesIndex == 0 ? "::pg_lsn" : "");
+
+		if (valuesIndex > BUFSIZE)
+		{
+			/* shouldn't happen because we only support up to 12 nodes */
+			log_error("Failed to prepare the SQL query for "
+					  "pgsql_replication_slot_maintain");
+			return false;
+		}
+	}
+
+	/* when we didn't find any node to process, return our empty set */
+	if (paramIndex == 0)
+	{
+		/* we know it fits, size is BUFSIZE or more */
+		sprintf(values,
+				"SELECT id, lsn "
+				"FROM (values (null::int, null::pg_lsn)) as t(id, lsn) "
+				"where id is not null");
+	}
+	else
+	{
+		int bytes = 0;
+
+		bytes = snprintf(values, size, "values %s", buffer);
+
+		if (bytes > size)
+		{
+			/* shouldn't happen because we only support up to 12 nodes */
+			log_error("Failed to prepare the SQL query for "
+					  "pgsql_replication_slot_maintain");
+			return false;
+		}
+	}
+	return paramIndex;
+}
+
+/*
+ * pgsql_replication_slot_drop_removed drop replication slots that belong to
+ * nodes that have been removed. We call that function on the primary, where
+ * the slots are maintained by the replication protocol.
+ *
+ * On the standby nodes, we advance the lots ourselves and use the other
+ * function pgsql_replication_slot_maintain which is complete (create, drop,
+ * advance).
+ */
+bool
+pgsql_replication_slot_drop_removed(PGSQL *pgsql, NodeAddressArray *nodeArray)
+{
+	int bytes;
+	char sql[2*BUFSIZE] = { 0 };
+	char values[BUFSIZE] = { 0 };
+	char *sqlTemplate =
+		/*
+		 * We could simplify the writing of this query, but we prefer that it
+		 * looks as much as possible like the query used in
+		 * pgsql_replication_slot_maintain() so that we can maintain both
+		 * easily.
+		 */
+		"WITH nodes(slot_name, lsn) as ("
+		" SELECT '" REPLICATION_SLOT_NAME_DEFAULT "_' || id, lsn"
+		"   FROM (%s) as sb(id, lsn) "
+		"), \n"
+		"dropped as ("
+		" SELECT slot_name, pg_drop_replication_slot(slot_name) "
+		"   FROM pg_replication_slots pgrs LEFT JOIN nodes USING(slot_name) "
+		"  WHERE nodes.slot_name IS NULL "
+		") \n"
+		"SELECT 'drop', slot_name, NULL::pg_lsn FROM dropped";
+
+	Oid paramTypes[NODE_ARRAY_MAX_COUNT*2] = { 0 };
+	const char *paramValues[NODE_ARRAY_MAX_COUNT*2] = { 0 };
+	ReplicationSlotMaintainContext context = { 0 };
+
+	int paramCount = BuildNodesArrayValues(nodeArray,
+										   paramTypes, (char **)paramValues,
+										   values, BUFSIZE);
+
+	/* add the computed ($1,$2), ... string to the query "template" */
+	bytes = snprintf(sql, 2*BUFSIZE, sqlTemplate, values);
+
+	if (bytes > 2*BUFSIZE)
+	{
+		/* shouldn't happen because we only support up to 12 nodes */
+		log_error("Failed to prepare the SQL query for "
+				  "pgsql_replication_slot_maintain");
+		return false;
+	}
+
+	return pgsql_execute_with_params(pgsql, sql,
+									 paramCount, paramTypes, paramValues,
+									 &context,
+									 parseReplicationSlotMaintain);
+}
+
+
+/*
+ * pgsql_replication_slot_maintain maintains replication slots that belong to
+ * other standby nodes. We call that function on the standby nodes, where the
+ * slots are maintained manually just in case we need them at failover.
+ */
 bool
 pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray)
 {
@@ -723,7 +884,7 @@ pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray)
 	char *sqlTemplate =
 		"WITH nodes(slot_name, lsn) as ("
 		" SELECT '" REPLICATION_SLOT_NAME_DEFAULT "_' || id, lsn"
-		"   FROM (values %s) as sb(id, lsn) "
+		"   FROM (%s) as sb(id, lsn) "
 		"), \n"
 		"dropped as ("
 		" SELECT slot_name, pg_drop_replication_slot(slot_name) "
@@ -752,42 +913,9 @@ pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray)
 	const char *paramValues[NODE_ARRAY_MAX_COUNT*2] = { 0 };
 	ReplicationSlotMaintainContext context = { 0 };
 
-	int nodeIndex = 0;
-	int paramIndex = 0;
-	int valuesIndex = 0;
-
-	for (nodeIndex = 0; nodeIndex < nodeArray->count; nodeIndex++)
-	{
-		NodeAddress *node = &(nodeArray->nodes[nodeIndex]);
-		IntString nodeIdString = intToString(node->nodeId);
-
-		if (node->isPrimary)
-		{
-			continue;
-		}
-
-		paramTypes[paramIndex] = INT4OID;
-		paramValues[paramIndex++] = strdup(nodeIdString.strValue);
-
-		paramTypes[paramIndex] = LSNOID;
-		paramValues[paramIndex++] = node->lsn;
-
-		valuesIndex += snprintf(values+valuesIndex, BUFSIZE-valuesIndex,
-								"%s($%d, $%d%s)",
-								valuesIndex == 0 ? "" : ",",
-								/* we begin at $1 here: intentional off-by-one */
-								paramIndex-1, paramIndex,
-								/* cast only the first row */
-								valuesIndex == 0 ? "::pg_lsn" : "");
-
-		if (valuesIndex > BUFSIZE)
-		{
-			/* shouldn't happen because we only support up to 12 nodes */
-			log_error("Failed to prepare the SQL query for "
-					  "pgsql_replication_slot_maintain");
-			return false;
-		}
-	}
+	int paramCount = BuildNodesArrayValues(nodeArray,
+										   paramTypes, (char **)paramValues,
+										   values, BUFSIZE);
 
 	/* add the computed ($1,$2), ... string to the query "template" */
 	bytes = snprintf(sql, 2*BUFSIZE, sqlTemplate, values);
@@ -801,7 +929,7 @@ pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray)
 	}
 
 	return pgsql_execute_with_params(pgsql, sql,
-									 paramIndex, paramTypes, paramValues,
+									 paramCount, paramTypes, paramValues,
 									 &context,
 									 parseReplicationSlotMaintain);
 }
@@ -827,11 +955,25 @@ parseReplicationSlotMaintain(void *ctx, PGresult *result)
 
 	for(rowNumber = 0; rowNumber < PQntuples(result); rowNumber++)
 	{
-		log_debug("parseReplicationSlotMaintain: %s %s %s",
-				  PQgetvalue(result, rowNumber, 0),
-				  PQgetvalue(result, rowNumber, 1),
-				  PQgetisnull(result, rowNumber, 2)
-				  ? "" : PQgetvalue(result, rowNumber, 2));
+		char *operation = PQgetvalue(result, rowNumber, 0);
+		char *slotName = PQgetvalue(result, rowNumber, 1);
+		char *lsn = PQgetisnull(result, rowNumber, 2) ? ""
+			: PQgetvalue(result, rowNumber, 2);
+
+		/* adding or removing another standby node is worthy of a log line */
+		if (strcmp(operation, "create") == 0)
+		{
+			log_info("Creating replication slot \"%s\"", slotName);
+		}
+		else if (strcmp(operation, "drop") == 0)
+		{
+			log_info("Dropping replication slot \"%s\"", slotName);
+		}
+		else
+		{
+			log_debug("parseReplicationSlotMaintain: %s %s %s",
+					  operation, slotName, lsn);
+		}
 	}
 
 	context->parsedOK = true;

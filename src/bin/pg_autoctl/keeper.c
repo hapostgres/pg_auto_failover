@@ -195,40 +195,46 @@ keeper_ensure_current_state(Keeper *keeper)
 		 */
 		case PRIMARY_STATE:
 		{
-			if (postgres->pgIsRunning)
+			if (!keeper_ensure_postgres_is_running(keeper, true))
 			{
-				/* reset PostgreSQL restart failures tracking */
-				postgres->pgFirstStartFailureTs = 0;
-				postgres->pgStartRetries = 0;
-
-				return true;
-			}
-			else if (ensure_local_postgres_is_running(postgres))
-			{
-				log_warn("PostgreSQL was not running, restarted with pid %ld",
-						 pgSetup->pidFile.pid);
-
-				return true;
-			}
-			else
-			{
-				log_warn("Failed to restart PostgreSQL, "
-						 "see PostgreSQL logs for instance at \"%s\".",
-						 pgSetup->pgdata);
-
+				/* errors have already been logged */
 				return false;
 			}
-			break;
+
+			/* when a standby has been removed, remove its replication slot */
+			return keeper_drop_replication_slots_for_removed_nodes(keeper);
 		}
 
 		case SINGLE_STATE:
-		case SECONDARY_STATE:
+		{
+			/* a single node does not need to maintain retries attempts */
+			if (!keeper_ensure_postgres_is_running(keeper, false))
+			{
+				/* errors have already been logged */
+				return false;
+			}
+
+			/* when a standby has been removed, remove its replication slot */
+			return keeper_drop_replication_slots_for_removed_nodes(keeper);
+		}
+
+		/*
+		 * In the following states, we don't want to maintain local replication
+		 * slots, either because we're a primary and the replication protocol
+		 * is taking care of that, or because we're in the middle of changing
+		 * the replication upstream node.
+		 */
 		case WAIT_PRIMARY_STATE:
-		case CATCHINGUP_STATE:
 		case PREP_PROMOTION_STATE:
 		case STOP_REPLICATION_STATE:
 		{
-			if (!keeper_ensure_postgres_is_running(keeper))
+			return keeper_ensure_postgres_is_running(keeper, false);
+		}
+
+		case SECONDARY_STATE:
+		case CATCHINGUP_STATE:
+		{
+			if (!keeper_ensure_postgres_is_running(keeper, false))
 			{
 				/* errors have already been logged */
 				return false;
@@ -649,13 +655,19 @@ keeper_restart_postgres(Keeper *keeper)
  * keeper_ensure_postgres_is_running ensures that Postgres is running.
  */
 bool
-keeper_ensure_postgres_is_running(Keeper *keeper)
+keeper_ensure_postgres_is_running(Keeper *keeper, bool updateRetries)
 {
 	PostgresSetup *pgSetup = &(keeper->postgres.postgresSetup);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
 	if (postgres->pgIsRunning)
 	{
+		if (updateRetries)
+		{
+			/* reset PostgreSQL restart failures tracking */
+			postgres->pgFirstStartFailureTs = 0;
+			postgres->pgStartRetries = 0;
+		}
 		return true;
 	}
 	else if (ensure_local_postgres_is_running(postgres))
@@ -671,6 +683,41 @@ keeper_ensure_postgres_is_running(Keeper *keeper)
 				  pgSetup->pgdata);
 		return false;
 	}
+}
+
+
+/*
+ * keeper_advance_replication_slots loops over the other standby nodes and
+ * advance their replication slots up to the current LSN value known by the
+ * monitor.
+ */
+bool
+keeper_drop_replication_slots_for_removed_nodes(Keeper *keeper)
+{
+	Monitor *monitor = &(keeper->monitor);
+	PostgresSetup *pgSetup = &(keeper->postgres.postgresSetup);
+	LocalPostgresServer *postgres = &(keeper->postgres);
+
+	char *host = keeper->config.nodename;
+	int port = pgSetup->pgport;
+
+	log_trace("keeper_drop_replication_slots_for_removed_nodes");
+
+	if (!monitor_get_other_nodes(monitor, host, port,
+								 ANY_STATE, &(keeper->otherNodes)))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	if (!postgres_replication_slot_drop_removed(postgres, &(keeper->otherNodes)))
+	{
+		log_error("Failed to maintain replication slots on the local Postgres "
+				  "instance, see above for details");
+		return false;
+	}
+
+	return true;
 }
 
 
