@@ -305,6 +305,26 @@ primary_drop_replication_slots(LocalPostgresServer *postgres)
 
 
 /*
+ * postgres_replication_slot_drop_removed drops the replication slots that
+ * belong to dropped nodes on a primary server.
+ */
+bool
+postgres_replication_slot_drop_removed(LocalPostgresServer *postgres,
+									   NodeAddressArray *nodeArray)
+{
+	bool result = false;
+	PGSQL *pgsql = &(postgres->sqlClient);
+
+	log_trace("postgres_replication_slot_drop_removed");
+
+	result = pgsql_replication_slot_drop_removed(pgsql, nodeArray);
+
+	pgsql_finish(pgsql);
+	return result;
+}
+
+
+/*
  * postgres_replication_slot_advance advances the current confirmed position of
  * the given replication slot up to the given LSN position.
  */
