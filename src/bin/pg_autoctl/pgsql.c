@@ -716,13 +716,13 @@ typedef struct ReplicationSlotMaintainContext
 
 /*
  * BuildNodesArrayValues build the SQL expression to use in a FROM clause to
- * reprense the list of other standby nodes from the given nodeArray.
+ * represent the list of other standby nodes from the given nodeArray.
  *
  * Such a list looks either like:
  *
- *   VALUES(($1, $2::pg_lsn), ($3, $4))
+ *   VALUES($1, $2::pg_lsn), ($3, $4)
  *
- * or for an empty set (when we're the only standby):
+ * or for an empty set (e.g. when we're the only standby):
  *
  *   SELECT id, lsn
  *     FROM (values (null::int, null::pg_lsn)) as t(id, lsn)
