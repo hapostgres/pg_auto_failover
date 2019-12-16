@@ -81,6 +81,26 @@ fsm_init_primary(Keeper *keeper)
 		return false;
 	}
 
+	/*
+	 * When initState is PRE_INIT_STATE_RUNNING, double check that Postgres is
+	 * still running. After all the end-user could just stop Postgres and then
+	 * give the install to us. We ought to support that.
+	 */
+	if (initState.pgInitState >= PRE_INIT_STATE_RUNNING)
+	{
+		if (!keeper_init_state_discover(keeper, &initState))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
+		if (initState.pgInitState < PRE_INIT_STATE_RUNNING)
+		{
+			log_info("PostgreSQL state has changed since registration time: %s",
+					 PreInitPostgreInstanceStateToString(initState.pgInitState));
+		}
+	}
+
 	pgInstanceIsOurs =
 		   initState.pgInitState == PRE_INIT_STATE_EMPTY
 		|| initState.pgInitState == PRE_INIT_STATE_EXISTS;
