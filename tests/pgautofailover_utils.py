@@ -145,10 +145,26 @@ class PGNode:
         """
         Kills the keeper by sending a SIGTERM to keeper's process group.
         """
-        if self.pg_autoctl_run_proc:
-            print ("stopping pg_autoctl at ", str(self.pg_autoctl_run_proc.pid))
-            os.killpg(os.getpgid(self.pg_autoctl_run_proc.pid), signal.SIGTERM)
-            self.pg_autoctl_run_proc = None
+        if self.pg_autoctl_run_proc and self.pg_autoctl_run_proc.pid:
+            print("Terminating pg_autoctl process for %s [%d]" % (self.datadir, self.pg_autoctl_run_proc.pid))
+            
+            try:
+                pgid = os.getpgid(self.pg_autoctl_run_proc.pid)
+                os.killpg(pgid, signal.SIGTERM)
+                
+                out, err = self.pg_autoctl_run_proc.communicate()
+                self.pg_autoctl_run_proc.wait()
+                self.pg_autoctl_run_proc.release()
+                
+                self.pg_autoctl_run_proc = None
+                
+                return out, err
+
+            except ProcessLookupError:
+                self.pg_autoctl_run_proc = None
+                print("no such process")
+        else:
+            print("nothing to stop")
 
     def stop_postgres(self):
         """
@@ -358,6 +374,26 @@ SELECT reportedstate
         else:
             return results[0][0]
         return results
+
+    def get_events(self):
+        """
+        Returns the current list of events from the monitor.
+        """
+        last_events_query = "select nodeid, nodename, " \
+            "reportedstate, goalstate, " \
+            "reportedrepstate, reportedlsn, description " \
+            "from pgautofailover.last_events('default', count => 20)"
+        return self.monitor.run_sql_query(last_events_query)
+
+
+    def get_events_str(self):
+        return "\n".join(
+            ["%s:%-14s %17s/%-17s %7s %10s %s" % ("id", "nodename",
+                                                  "state", "goal state",
+                                                  "repl st", "lsn", "event")]
+            +
+            ["%2d:%-14s %17s/%-17s %7s %10s %s" % (id, n, rs, gs, reps, lsn, desc)
+             for id, n, rs, gs, reps, lsn, desc in self.get_events()])
 
     def enable_maintenance(self):
         """
