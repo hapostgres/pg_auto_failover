@@ -53,7 +53,7 @@ bool keeper_check_monitor_extension_version(Keeper *keeper);
 bool keeper_init_state_write(Keeper *keeper);
 bool keeper_init_state_read(Keeper *keeper, KeeperStateInit *initState);
 bool keeper_state_as_json(Keeper *keeper, char *json, int size);
-
+bool keeper_init_state_discover(Keeper *keeper, KeeperStateInit *initState);
 
 /* loop.c */
 bool keeper_service_init(Keeper *keeper, pid_t *pid);

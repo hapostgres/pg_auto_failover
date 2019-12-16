@@ -898,35 +898,11 @@ keeper_init_state_write(Keeper *keeper)
 	int fd;
 	char buffer[PG_AUTOCTL_KEEPER_STATE_FILE_SIZE];
 	KeeperStateInit initState = { 0 };
-	PostgresSetup pgSetup = { 0 };
-	bool missingPgdataIsOk = true;
-	bool pgIsNotRunningIsOk = true;
 
-	initState.pg_autoctl_state_version = PG_AUTOCTL_STATE_VERSION;
-
-	if (!pg_setup_init(&pgSetup, &(keeper->config.pgSetup),
-					   missingPgdataIsOk, pgIsNotRunningIsOk))
+	if (!keeper_init_state_discover(keeper, &initState))
 	{
-		log_fatal("Failed to initialise the keeper init state, "
-				  "see above for details");
+		/* errors have already been logged */
 		return false;
-	}
-
-	if (pg_setup_is_running(&pgSetup) && pg_setup_is_primary(&pgSetup))
-	{
-		initState.pgInitState = PRE_INIT_STATE_PRIMARY;
-	}
-	else if (pg_setup_is_running(&pgSetup))
-	{
-		initState.pgInitState = PRE_INIT_STATE_RUNNING;
-	}
-	else if (pg_setup_pgdata_exists(&pgSetup))
-	{
-		initState.pgInitState = PRE_INIT_STATE_EXISTS;
-	}
-	else
-	{
-		initState.pgInitState = PRE_INIT_STATE_EMPTY;
 	}
 
 	log_info("Writing keeper init state file at \"%s\"",
@@ -969,6 +945,49 @@ keeper_init_state_write(Keeper *keeper)
 	}
 
 	close(fd);
+
+	return true;
+}
+
+
+/*
+ * keeper_init_state_discover discovers the current KeeperStateInit from the
+ * command line options, by checking everything we can about the possibly
+ * existing Postgres instance.
+ */
+bool
+keeper_init_state_discover(Keeper *keeper, KeeperStateInit *initState)
+{
+	PostgresSetup pgSetup = { 0 };
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+
+	initState->pg_autoctl_state_version = PG_AUTOCTL_STATE_VERSION;
+
+	if (!pg_setup_init(&pgSetup, &(keeper->config.pgSetup),
+					   missingPgdataIsOk, pgIsNotRunningIsOk))
+	{
+		log_fatal("Failed to initialise the keeper init state, "
+				  "see above for details");
+		return false;
+	}
+
+	if (pg_setup_is_running(&pgSetup) && pg_setup_is_primary(&pgSetup))
+	{
+		initState->pgInitState = PRE_INIT_STATE_PRIMARY;
+	}
+	else if (pg_setup_is_running(&pgSetup))
+	{
+		initState->pgInitState = PRE_INIT_STATE_RUNNING;
+	}
+	else if (pg_setup_pgdata_exists(&pgSetup))
+	{
+		initState->pgInitState = PRE_INIT_STATE_EXISTS;
+	}
+	else
+	{
+		initState->pgInitState = PRE_INIT_STATE_EMPTY;
+	}
 
 	return true;
 }
