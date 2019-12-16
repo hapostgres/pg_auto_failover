@@ -129,10 +129,20 @@ keeper_pg_init_and_register(Keeper *keeper, KeeperConfig *config)
 
 	if (file_exists(config->pathnames.state))
 	{
-		log_fatal("The state file \"%s\" exists and there's no init in progress",
-				  config->pathnames.state);
-		log_info("HINT: use `pg_autoctl run` to start the service.");
-		return false;
+		if (createAndRun)
+		{
+			if (!keeper_init(keeper, config))
+			{
+				return false;
+			}
+		}
+		else
+		{
+			log_fatal("The state file \"%s\" exists and "
+					  "there's no init in progress", config->pathnames.state);
+			log_info("HINT: use `pg_autoctl run` to start the service.");
+		}
+		return createAndRun;
 	}
 
 	if (postgresInstanceExists

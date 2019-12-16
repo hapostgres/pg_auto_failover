@@ -21,6 +21,7 @@
 extern MonitorConfig monitorOptions;
 extern KeeperConfig keeperOptions;
 extern bool allowRemovingPgdata;
+extern bool createAndRun;
 
 #define KEEPER_CLI_WORKER_SETUP_OPTIONS \
 	"  --pgctl       path to pg_ctl\n" \

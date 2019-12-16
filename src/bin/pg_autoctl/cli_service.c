@@ -240,30 +240,7 @@ cli_monitor_run(int argc, char **argv)
 		log_info("pg_auto_failover monitor is ready at %s", postgresUri);
 	}
 
-	log_info("Contacting the monitor to LISTEN to its events.");
- 	pgsql_listen(&(monitor.pgsql), channels);
-
-	/*
-	 * Main loop for notifications.
-	 */
-	for (;;)
-	{
-		if (!monitor_get_notifications(&monitor))
-		{
-			log_warn("Re-establishing connection. We might miss notifications.");
-			pgsql_finish(&(monitor.pgsql));
-
-			pgsql_listen(&(monitor.pgsql), channels);
-
-			/* skip sleeping */
-			continue;
-		}
-
-		sleep(PG_AUTOCTL_MONITOR_SLEEP_TIME);
-	}
-	pgsql_finish(&(monitor.pgsql));
-
-	return;
+	(void) monitor_listen_loop(&monitor);
 }
 
 
