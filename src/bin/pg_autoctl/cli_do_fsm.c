@@ -185,7 +185,12 @@ keeper_cli_fsm_state(int argc, char **argv)
 	}
 
 	/* check that the state matches with running PostgreSQL instance */
-	(void) keeper_update_pg_state(&keeper);
+	if (!keeper_update_pg_state(&keeper))
+	{
+		log_fatal("Failed to update the keeper's state from the local "
+				  "PostgreSQL instance, see above.");
+		exit(EXIT_CODE_BAD_STATE);
+	}
 
 	if (!keeper_store_state(&keeper))
 	{

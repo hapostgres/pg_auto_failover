@@ -22,12 +22,9 @@
  *      - pg_autoctl do fsm assign wait_primary
  *      - pg_autoctl enable maintenance
  *      - pg_autoctl disable maintenance
- *    - postgres -p 5432 -h localhost -k /tmp
  *
- *   We still want the `postgres` process to run as a chile of the main
- *   pg_autoctl service. When PostgreSQL is started by a listener command, this
- *   means we also need a communication/execution channel with the pg_autoctl
- *   parent process.
+ * PostgreSQL is still started with `pg_ctl start` which detaches the process
+ * from our process group.
  */
 
 #include <errno.h>

@@ -81,41 +81,6 @@ fsm_init_primary(Keeper *keeper)
 		return false;
 	}
 
-	pgInstanceIsOurs =
-		   initState.pgInitState == PRE_INIT_STATE_EMPTY
-		|| initState.pgInitState == PRE_INIT_STATE_EXISTS;
-
-	if (initState.pgInitState == PRE_INIT_STATE_EMPTY
-		&& !postgresInstanceExists)
-	{
-		if (!pg_ctl_initdb(pgSetup.pg_ctl, pgSetup.pgdata))
-		{
-			log_fatal("Failed to initialise a PostgreSQL instance at \"%s\""
-					  ", see above for details", pgSetup.pgdata);
-
-			return false;
-		}
-
-		/*
-		 * We managed to initdb, refresh our configuration file location with
-		 * the realpath(3) from pg_setup_update_config_with_absolute_pgdata:
-		 *  we might have been given a relative pathname.
-		 */
-		if (!keeper_config_update_with_absolute_pgdata(&(keeper->config)))
-		{
-			/* errors have already been logged */
-			return false;
-		}
-	}
-	else if (initState.pgInitState >= PRE_INIT_STATE_RUNNING)
-	{
-		log_error("PostgreSQL is already running at \"%s\", refusing to "
-				  "initialize a new cluster on-top of the current one.",
-				  pgSetup.pgdata);
-
-		return false;
-	}
-
 	/*
 	 * When initState is PRE_INIT_STATE_RUNNING, double check that Postgres is
 	 * still running. After all the end-user could just stop Postgres and then
