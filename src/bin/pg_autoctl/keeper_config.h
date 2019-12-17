@@ -32,6 +32,7 @@ typedef struct KeeperConfig
 	int groupId;
 	char nodename[_POSIX_HOST_NAME_MAX];
 	char nodeKind[NAMEDATALEN];
+	int exit_keeper_if_postgres_not_running;
 
 	/* PostgreSQL setup */
 	PostgresSetup pgSetup;

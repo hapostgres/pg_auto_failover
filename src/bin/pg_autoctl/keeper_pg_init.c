@@ -763,6 +763,7 @@ static bool
 keeper_pg_init_node_active(Keeper *keeper)
 {
 	MonitorAssignedState assignedState = { 0 };
+	bool stopKeeper = false;
 
 	/*
 	 * Save our local state before reporting it to the monitor. If we fail to
@@ -790,7 +791,7 @@ keeper_pg_init_node_active(Keeper *keeper)
 							 keeper->state.current_node_id,
 							 keeper->state.current_group,
 							 keeper->state.current_role,
-							 ReportPgIsRunning(keeper),
+							 ReportPgIsRunning(keeper, &stopKeeper),
 							 keeper->postgres.currentLSN,
 							 keeper->postgres.pgsrSyncState,
 							 &assignedState))

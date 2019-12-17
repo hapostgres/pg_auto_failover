@@ -65,6 +65,7 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 		bool transitionFailed = false;
 		bool reportPgIsRunning = false;
 		uint64_t now = time(NULL);
+		bool stopKeeper = false;
 
 		/*
 		 * Handle signals.
@@ -155,7 +156,7 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 
 		CHECK_FOR_FAST_SHUTDOWN;
 
-		reportPgIsRunning = ReportPgIsRunning(keeper);
+		reportPgIsRunning = ReportPgIsRunning(keeper, &stopKeeper);
 
 		/* We used to output that in INFO every 5s, which is too much chatter */
 		log_debug("Calling node_active for node %s/%d/%d with current state: "
@@ -282,6 +283,12 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 		if (firstLoop)
 		{
 			firstLoop = false;
+		}
+
+		if (stopKeeper)
+		{
+			log_warn("Keeper detected PostgreSQL can not be started, exiting");
+			keepRunning = false;
 		}
 	}
 

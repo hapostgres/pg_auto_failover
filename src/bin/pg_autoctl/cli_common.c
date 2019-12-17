@@ -61,6 +61,7 @@ bool createAndRun = false;
  *		{ "replication-quorum", required_argument, NULL, 'r'},
  *		{ "help", no_argument, NULL, 0 },
  *		{ "run", no_argument, NULL, 'x' },
+ *		{ "exit-if-postgres-is-not-running", no_argument, NULL, 'X' },
  *		{ NULL, 0, NULL, 0 }
  *	};
  *
@@ -85,6 +86,7 @@ cli_create_node_getopts(int argc, char **argv,
 	LocalOptionConfig.postgresql_restart_failure_max_retries = -1;
 	LocalOptionConfig.pgSetup.settings.candidatePriority = FAILOVER_NODE_CANDIDATE_PRIORITY;
 	LocalOptionConfig.pgSetup.settings.replicationQuorum = FAILOVER_NODE_REPLICATION_QUORUM;
+	LocalOptionConfig.exit_keeper_if_postgres_not_running = 0;
 
 
 	optind = 0;
@@ -321,6 +323,13 @@ cli_create_node_getopts(int argc, char **argv,
 				/* { "run", no_argument, NULL, 'x' }, */
 				createAndRun = true;
 				log_trace("--run");
+				break;
+			}
+
+			case 'X':
+			{
+				/* { "exit_keeper_when_postgres_is_not_running", no_argument, NULL, 'X' } */
+				LocalOptionConfig.exit_keeper_if_postgres_not_running = 1;
 				break;
 			}
 

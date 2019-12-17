@@ -44,6 +44,10 @@
 	make_strbuf_option("pg_autoctl", "nodekind", NULL, false, NAMEDATALEN, \
 					   config->nodeKind)
 
+#define OPTION_AUTOCTL_EXIT_IF_POSTGRES_NOT_RUNNING(config) \
+	make_int_option_default("pg_autoctl", "exit_if_postgres_not_running", NULL, false, \
+					&(config->exit_keeper_if_postgres_not_running), 0)
+
 #define OPTION_POSTGRESQL_PGDATA(config) \
 	make_strbuf_option("postgresql", "pgdata", "pgdata", true, MAXPGPATH, \
 					   config->pgSetup.pgdata)
@@ -139,6 +143,7 @@
 		OPTION_AUTOCTL_GROUPID(config), \
 		OPTION_AUTOCTL_NODENAME(config), \
 		OPTION_AUTOCTL_NODEKIND(config), \
+		OPTION_AUTOCTL_EXIT_IF_POSTGRES_NOT_RUNNING(config), \
 		OPTION_POSTGRESQL_PGDATA(config), \
 		OPTION_POSTGRESQL_PG_CTL(config), \
 		OPTION_POSTGRESQL_USERNAME(config), \
