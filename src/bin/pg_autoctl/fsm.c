@@ -124,6 +124,28 @@
 # define COMMENT_APPLY_SETTINGS_TO_PRIMARY \
 	"Back to primary state after having applied new pg_auto_failover settings"
 
+#define COMMENT_SECONDARY_TO_REPORT_LSN \
+	"Reporting the last write-ahead log location received"
+
+#define COMMENT_REPORT_LSN_TO_PREP_PROMOTION \
+	"Stop traffic to primary, " \
+	"wait for it to finish draining."
+
+#define COMMENT_REPORT_LSN_TO_WAIT_FORWARD \
+	"Preparing to fetch missing WAL bits from another standby before promotion"
+
+#define COMMENT_REPORT_LSN_TO_FAST_FORWARD \
+	"Fetching missing WAL bits from another standby before promotion"
+
+#define COMMENT_REPORT_LSN_TO_WAIT_CASCADE \
+	"Prepare replication for the failover candidate"
+
+#define COMMENT_REPORT_LSN_TO_CATCHINGUP \
+	"Switch replication to the new primary"
+
+#define COMMENT_WAIT_CASCADE_TO_CATCHINGUP \
+	"Switch replication to the new primary"
+
 /* *INDENT-OFF* */
 
 /*
@@ -265,6 +287,16 @@ KeeperFSMTransition KeeperFSM[] = {
 	 */
 	{ PRIMARY_STATE, APPLY_SETTINGS_STATE, COMMENT_PRIMARY_TO_APPLY_SETTINGS, &fsm_apply_settings },
 	{ APPLY_SETTINGS_STATE, PRIMARY_STATE, COMMENT_APPLY_SETTINGS_TO_PRIMARY, NULL },
+	/*
+	 * In case of multiple standbys, failover begins with reporting current LSN
+	 */
+	{ SECONDARY_STATE, REPORT_LSN_STATE, COMMENT_SECONDARY_TO_REPORT_LSN, &fsm_report_lsn },
+	{ REPORT_LSN_STATE, PREP_PROMOTION_STATE, COMMENT_REPORT_LSN_TO_PREP_PROMOTION, &fsm_prepare_standby_for_promotion },
+	{ REPORT_LSN_STATE, WAIT_FORWARD_STATE, COMMENT_REPORT_LSN_TO_WAIT_FORWARD, &fsm_wait_forward },
+	{ WAIT_FORWARD_STATE, FAST_FORWARD_STATE, COMMENT_REPORT_LSN_TO_FAST_FORWARD, &fsm_fast_forward },
+	{ REPORT_LSN_STATE, WAIT_CASCADE_STATE, COMMENT_REPORT_LSN_TO_WAIT_CASCADE, &fsm_prepare_cascade },
+	{ REPORT_LSN_STATE, CATCHINGUP_STATE, COMMENT_REPORT_LSN_TO_CATCHINGUP, &fsm_follow_new_primary },
+	{ WAIT_CASCADE_STATE, CATCHINGUP_STATE, COMMENT_WAIT_CASCADE_TO_CATCHINGUP, &fsm_follow_new_primary },
 
 	/*
 	 * This is the end, my friend.

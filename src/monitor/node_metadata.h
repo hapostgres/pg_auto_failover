@@ -83,23 +83,23 @@ typedef enum SyncState
  */
 typedef struct AutoFailoverNode
 {
-	char *formationId;
-	int nodeId;
-	int groupId;
-	char *nodeName;
-	int nodePort;
+	char            *formationId;
+	int              nodeId;
+	int              groupId;
+	char            *nodeName;
+	int              nodePort;
 	ReplicationState goalState;
 	ReplicationState reportedState;
-	TimestampTz reportTime;
-	bool pgIsRunning;
-	SyncState pgsrSyncState;
-	TimestampTz walReportTime;
-	NodeHealthState health;
-	TimestampTz healthCheckTime;
-	TimestampTz stateChangeTime;
-	XLogRecPtr reportedLSN;
-	int candidatePriority;
-	bool replicationQuorum;
+	TimestampTz      reportTime;
+	bool             pgIsRunning;
+	SyncState        pgsrSyncState;
+	TimestampTz      walReportTime;
+	NodeHealthState  health;
+	TimestampTz      healthCheckTime;
+	TimestampTz      stateChangeTime;
+	XLogRecPtr       reportedLSN;
+	int              candidatePriority;
+	bool             replicationQuorum;
 } AutoFailoverNode;
 
 
@@ -116,8 +116,10 @@ extern List *GroupListSyncStandbys(List *groupNodeList);
 extern bool AllNodesHaveSameCandidatePriority(List *groupNodeList);
 extern int CountStandbyCandidates(AutoFailoverNode *primaryNode,
 								  List *stateList);
+extern AutoFailoverNode * FindMostAdvancedStandby(List *groupNodeList);
 extern AutoFailoverNode * GetAutoFailoverNode(char *nodeName, int nodePort);
-extern AutoFailoverNode * GetAutoFailoverNodeWithId(int nodeid, char *nodeName, int nodePort);
+extern AutoFailoverNode * GetAutoFailoverNodeWithId(int nodeid,
+													char *nodeName, int nodePort);
 extern AutoFailoverNode * OtherNodeInGroup(AutoFailoverNode *pgAutoFailoverNode);
 extern AutoFailoverNode * GetWritableNodeInGroup(char *formationId, int32 groupId);
 extern AutoFailoverNode * TupleToAutoFailoverNode(TupleDesc tupleDescriptor,
@@ -151,5 +153,6 @@ extern bool IsCurrentState(AutoFailoverNode *pgAutoFailoverNode,
 						   ReplicationState state);
 extern bool CanTakeWritesInState(ReplicationState state);
 extern bool StateBelongsToPrimary(ReplicationState state);
+extern bool IsBeingPromoted(AutoFailoverNode *node);
 extern bool IsInWaitOrJoinState(AutoFailoverNode *node);
 extern bool IsInPrimaryState(AutoFailoverNode *pgAutoFailoverNode);

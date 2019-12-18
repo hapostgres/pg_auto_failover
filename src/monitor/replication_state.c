@@ -226,6 +226,21 @@ ReplicationStateGetName(ReplicationState replicationState)
 			return "apply_settings";
 		}
 
+		case REPLICATION_STATE_REPORT_LSN:
+		{
+			return "report_lsn";
+		}
+
+		case REPLICATION_STATE_FAST_FORWARD:
+		{
+			return "fast_forward";
+		}
+
+		case REPLICATION_STATE_WAIT_CASCADE:
+		{
+			return "wait_cascade";
+		}
+
 		default:
 		{
 			ereport(ERROR,

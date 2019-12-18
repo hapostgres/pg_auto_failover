@@ -35,7 +35,11 @@ CREATE TYPE pgautofailover.replication_state
     'wait_standby',
     'maintenance',
     'join_primary',
-    'apply_settings'
+    'apply_settings',
+    'report_lsn',
+    'fast_forward',
+    'wait_forward',
+    'wait_cascade'
  );
 
 CREATE TABLE pgautofailover.formation

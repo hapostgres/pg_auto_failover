@@ -37,6 +37,8 @@
 
 /* private function forward declarations */
 static bool ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode);
+static bool ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
+										   AutoFailoverNode *primaryNode);
 static void AssignGoalState(AutoFailoverNode *pgAutoFailoverNode,
 							ReplicationState state, char *description);
 static bool IsDrainTimeExpired(AutoFailoverNode *pgAutoFailoverNode);
@@ -87,6 +89,9 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 		return true;
 	}
 
+	List *otherNodesGroupList = NULL;
+	int otherNodesCount = 0;
+
 	/*
 	 * We separate out the FSM for the primary server, because that one needs
 	 * to loop over every other node to take decisions. That induces some
@@ -111,9 +116,13 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 						   ReplicationStateGetName(activeNode->goalState))));
 	}
 
-	if (IsUnhealthy(primaryNode))
+	otherNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
+	otherNodesCount = list_length(otherNodesGroupList);
+
+	if (IsUnhealthy(primaryNode) && otherNodesCount >= 1)
 	{
-		/* TODO: Multiple Stanby Failover Logic */
+		/* Multiple Standby failover is handled in its own function */
+		return ProceedGroupStateForMSFailover(activeNode, primaryNode);
 	}
 
 	/*
@@ -140,6 +149,8 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	}
 
 	/*
+	 * Remember that here we know we have a single standby node.
+	 *
 	 * when secondary caught up:
 	 *      catchingup -> secondary
 	 *  + wait_primary -> primary
@@ -170,9 +181,6 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	}
 
 	/*
-	 * TODO:
-	 *   Implement Multiple Standby failover logic.
-	 *
 	 * when primary fails:
 	 *   secondary -> prepare_promotion
 	 * +   primary -> draining
@@ -481,6 +489,312 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 		AssignGoalState(primaryNode, REPLICATION_STATE_PRIMARY, message);
 
 		return true;
+	}
+
+	return false;
+}
+
+
+/*
+ * ProceedGroupStateForMSFailover implements Group State Machine transition to
+ * orchestrate a failover when we have more than one standby.
+ *
+ * This function is supposed to be called when the following pre-conditions are
+ * met:
+ *
+ *  - the primary node is not healthy
+ *  - there's more than one standby node registered in the system
+ */
+static bool
+ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
+							   AutoFailoverNode *primaryNode)
+{
+	// AutoFailoverFormation *formation = GetFormation(activeNode->formationId);
+	List *standbyNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
+	AutoFailoverNode *candidateNode = NULL;
+	ListCell *nodeCell = NULL;
+
+	int candidateCount = 0;
+	int reportedLSNCount = 0;
+
+	/*
+	 * Done with the single standby code path, now we have several standby
+	 * nodes that might all be candidate for failover, or just some of them.
+	 * First, have them all report the most recent LSN they managed to receive.
+	 */
+	reportedLSNCount = 0;
+
+	foreach(nodeCell, standbyNodesGroupList)
+	{
+		AutoFailoverNode *otherNode = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (otherNode == NULL)
+		{
+			/* shouldn't happen */
+			ereport(ERROR, (errmsg("BUG: otherNode is NULL")));
+			continue;
+		}
+
+		/* we might have a failover ongoing already */
+		if (IsBeingPromoted(otherNode))
+		{
+			candidateNode = otherNode;
+			continue;
+		}
+
+		/*
+		 * Skip nodes that are not failover candidates (not in SECONDARY or
+		 * REPORT_LSN state).
+		 */
+		if (otherNode->reportedState != REPLICATION_STATE_SECONDARY
+			&& otherNode->reportedState != REPLICATION_STATE_REPORT_LSN)
+		{
+			continue;
+		}
+
+		/* count how many standby nodes have reached REPORT_LSN */
+		if (IsCurrentState(otherNode, REPLICATION_STATE_REPORT_LSN))
+		{
+			++candidateCount;
+			++reportedLSNCount;
+		}
+		else if (otherNode->goalState != REPLICATION_STATE_REPORT_LSN)
+		{
+			char message[BUFSIZE];
+
+			++candidateCount;
+
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of %s:%d to report_lsn "
+				"to find the failover candidate",
+				otherNode->nodeName, otherNode->nodePort);
+
+			AssignGoalState(otherNode, REPLICATION_STATE_REPORT_LSN, message);
+		}
+	}
+
+	/*
+	 * If we can failover, make sure the primary is being demoted before doing
+	 * anything else.
+	 */
+	if (candidateNode != NULL || candidateCount > 0)
+	{
+		/* shut down the primary, known unhealthy (see pre-conditions) */
+		if (IsInPrimaryState(primaryNode))
+		{
+			char message[BUFSIZE];
+
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state %s:%d to draining after it became unhealthy.",
+				primaryNode->nodeName, primaryNode->nodePort);
+
+			AssignGoalState(primaryNode, REPLICATION_STATE_DRAINING, message);
+		}
+	}
+
+	/*
+	 * If a failover is in progress, continue driving it.
+	 *
+	 * Here we have choosen a failover candidate, which is either being
+	 * promoted to being the new primary (when it already had all the most
+	 * recent WAL, or is done fetching them), or is fetching the most recent
+	 * WAL it's still missing from another standby node.
+	 */
+	if (candidateNode != NULL)
+	{
+		/*
+		 * Everyone reported their LSN, we found a candidate, and it has to
+		 * fast forward. First, the node with the most advanced LSN position
+		 * had to reach wait_cascade:
+		 */
+		if (IsCurrentState(activeNode, REPLICATION_STATE_WAIT_CASCADE) &&
+			IsCurrentState(candidateNode, REPLICATION_STATE_WAIT_FORWARD))
+		{
+			char message[BUFSIZE];
+
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of %s:%d to fast_forward "
+				"after %s:%d converged to wait_cascade.",
+				candidateNode->nodeName, candidateNode->nodePort,
+				activeNode->nodeName, activeNode->nodePort);
+
+			AssignGoalState(candidateNode,
+							REPLICATION_STATE_FAST_FORWARD, message);
+
+			return true;
+		}
+
+		/*
+		 * The candidate had to fast forward with the activeNode, grabbing WAL
+		 * bits that only this node had. Now that's done. The activeNode has to
+		 * follow the new primary that's being promoted.
+		 */
+		if (IsCurrentState(activeNode, REPLICATION_STATE_WAIT_CASCADE) &&
+			IsCurrentState(candidateNode, REPLICATION_STATE_STOP_REPLICATION))
+		{
+			char message[BUFSIZE];
+
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of %s:%d to catching_up "
+				"after %s:%d converged to stop_replication.",
+				activeNode->nodeName, activeNode->nodePort,
+				candidateNode->nodeName, candidateNode->nodePort);
+
+			AssignGoalState(activeNode, REPLICATION_STATE_CATCHINGUP, message);
+
+			return true;
+		}
+
+		/*
+		 * When the candidate is done fast forwarding the locally missing WAL
+		 * bits, it can be promoted.
+		 */
+		if (IsCurrentState(activeNode, REPLICATION_STATE_FAST_FORWARD))
+		{
+			char message[BUFSIZE];
+
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of %s:%d to prepare_promotion",
+				activeNode->nodeName, activeNode->nodePort);
+
+			AssignGoalState(activeNode,
+							REPLICATION_STATE_PREPARE_PROMOTION,
+							message);
+
+			return true;
+		}
+
+		/*
+		 * When the activeNode is "just" another standby, it's time to follow
+		 * the new primary as soon as our candidate reaches stop_replication.
+		 */
+		if (IsCurrentState(activeNode, REPLICATION_STATE_REPORT_LSN) &&
+			IsCurrentState(candidateNode, REPLICATION_STATE_STOP_REPLICATION))
+		{
+			char message[BUFSIZE];
+
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of %s:%d to catching_up "
+				"after %s:%d converged to stop_replication.",
+				activeNode->nodeName, activeNode->nodePort,
+				candidateNode->nodeName, candidateNode->nodePort);
+
+			AssignGoalState(activeNode, REPLICATION_STATE_CATCHINGUP, message);
+
+			return true;
+		}
+
+		/* when we have a candidate, we don't go through finding a candidate */
+		return false;
+	}
+
+	/*
+	 * We reach this code when we don't have an healthy primary anymore, it's
+	 * been demoted or is draining now. Most probably it's dead. We have
+	 * collected the last received LSN from all the standby nodes in SECONDARY
+	 * state, and now we need to select one of the failover candidates.
+	 *
+	 * The selection is based on candidatePriority. If the candidate with the
+	 * higher priority doesn't have the most recent LSN, we have it fetch the
+	 * missing WAL bits from one of the standby which did receive them.
+	 */
+	if (reportedLSNCount == candidateCount)
+	{
+		/* build the list of failover candidate nodes, ordered by priority */
+		List *candidateNodesGroupList =
+			GroupListCandidates(standbyNodesGroupList);
+
+		/* find the standby node that has the most advanced LSN */
+		AutoFailoverNode *mostAdvancedNode =
+			FindMostAdvancedStandby(standbyNodesGroupList);
+
+		AutoFailoverNode *selectedNode = NULL;
+
+		/*
+		 * Select the node to be promoted: we can pick any candidate with the
+		 * max priority, so we pick the one with the most recent LSN among
+		 * those of maxPriority.
+		 */
+		foreach(nodeCell, candidateNodesGroupList)
+		{
+			candidateNode = (AutoFailoverNode *) lfirst(nodeCell);
+
+			if (IsHealthy(candidateNode) &&
+				WalDifferenceWithin(candidateNode, primaryNode,
+									PromoteXlogThreshold))
+			{
+				int cPriority = candidateNode->candidatePriority;
+				XLogRecPtr cLSN = candidateNode->reportedLSN;
+
+				if (selectedNode == NULL)
+				{
+					selectedNode = candidateNode;
+				}
+				else if (cPriority == selectedNode->candidatePriority &&
+						 cLSN > selectedNode->reportedLSN)
+				{
+					selectedNode = candidateNode;
+				}
+				else if (cPriority < selectedNode->candidatePriority)
+				{
+					/*
+					 * Short circuit the loop, as we scan in decreasing
+					 * priority order.
+					 */
+					break;
+				}
+			}
+		}
+
+		/*
+		 * We might have selected a node to fail over to: start the failover.
+		 */
+		if (selectedNode != NULL)
+		{
+			char message[BUFSIZE];
+
+			/* do we have to fetch some missing WAL? */
+			if (selectedNode->reportedLSN == mostAdvancedNode->reportedLSN)
+			{
+				LogAndNotifyMessage(
+					message, BUFSIZE,
+					"Setting goal state of %s:%d to prepare_promotion "
+					"after %s:%d became unhealthy.",
+					selectedNode->nodeName, selectedNode->nodePort,
+					primaryNode->nodeName, primaryNode->nodePort);
+
+				AssignGoalState(selectedNode,
+								REPLICATION_STATE_PREPARE_PROMOTION,
+								message);
+
+				/* leave the other nodes in ReportLSN state for now */
+				return true;
+			}
+
+			/* so the candidate does not have the most recent WAL */
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of %s:%d to wait_forward "
+				"and goal state of %s:%d to wait_cascade "
+				"after %s:%d became unhealthy.",
+				selectedNode->nodeName, selectedNode->nodePort,
+				mostAdvancedNode->nodeName, mostAdvancedNode->nodePort,
+				primaryNode->nodeName, primaryNode->nodePort);
+
+			AssignGoalState(selectedNode,
+							REPLICATION_STATE_WAIT_FORWARD, message);
+
+			AssignGoalState(mostAdvancedNode,
+							REPLICATION_STATE_WAIT_CASCADE, message);
+
+			return true;
+		}
 	}
 
 	return false;

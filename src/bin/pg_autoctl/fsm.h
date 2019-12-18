@@ -59,6 +59,12 @@ bool fsm_stop_postgres(Keeper *keeper);
 bool fsm_start_maintenance_on_standby(Keeper *keeper);
 bool fsm_restart_standby(Keeper *keeper);
 
+bool fsm_report_lsn(Keeper *keeper);
+bool fsm_wait_forward(Keeper *keeper);
+bool fsm_fast_forward(Keeper *keeper);
+bool fsm_prepare_cascade(Keeper *keeper);
+bool fsm_follow_new_primary(Keeper *keeper);
+
 /*
  * Generic API to use the previous definitions.
  */

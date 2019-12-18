@@ -244,16 +244,23 @@ List *
 AutoFailoverOtherNodesList(AutoFailoverNode *pgAutoFailoverNode)
 {
 	ListCell *nodeCell = NULL;
-	List *groupNodeList =
-		AutoFailoverNodeGroup(pgAutoFailoverNode->formationId,
-							  pgAutoFailoverNode->groupId);
+	List *groupNodeList = NIL;
 	List *otherNodesList = NIL;
+
+	if (pgAutoFailoverNode == NULL)
+	{
+		return NIL;
+	}
+
+	groupNodeList = AutoFailoverNodeGroup(pgAutoFailoverNode->formationId,
+										  pgAutoFailoverNode->groupId);
 
 	foreach(nodeCell, groupNodeList)
 	{
 		AutoFailoverNode *otherNode = (AutoFailoverNode *) lfirst(nodeCell);
 
-		if (otherNode->nodeId != pgAutoFailoverNode->nodeId)
+		if (otherNode != NULL &&
+			otherNode->nodeId != pgAutoFailoverNode->nodeId)
 		{
 			otherNodesList = lappend(otherNodesList, otherNode);
 		}
@@ -328,7 +335,8 @@ GetPrimaryNodeInGroup(char *formationId, int32 groupId)
 
 
 /*
- * FindFailoverNewStandbyNode returns the first node found in given list
+ * FindFailoverNewStandbyNode returns the first node found in given list that
+ * is a new standby, so that we can process each standby one after the other.
  */
 AutoFailoverNode *
 FindFailoverNewStandbyNode(List *groupNodeList)
@@ -349,6 +357,32 @@ FindFailoverNewStandbyNode(List *groupNodeList)
 	}
 
 	return standbyNode;
+}
+
+
+/*
+ * FindMostAdvancedStandby returns the node in groupNodeList that has the most
+ * advanced LSN.
+ */
+AutoFailoverNode *
+FindMostAdvancedStandby(List *groupNodeList)
+{
+	ListCell *nodeCell = NULL;
+	AutoFailoverNode *mostAdvancedNode = NULL;
+
+	/* find the standby for errdetail */
+	foreach(nodeCell, groupNodeList)
+	{
+		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (mostAdvancedNode == NULL ||
+			mostAdvancedNode->reportedLSN < node->reportedLSN)
+		{
+			mostAdvancedNode = node;
+		}
+	}
+
+	return mostAdvancedNode;
 }
 
 
@@ -1038,6 +1072,28 @@ StateBelongsToPrimary(ReplicationState state)
 		|| state == REPLICATION_STATE_DRAINING
 		|| state == REPLICATION_STATE_DEMOTED
 		|| state == REPLICATION_STATE_DEMOTE_TIMEOUT;
+}
+
+
+/*
+ * IsBeingPromoted returns whether a standby node is going through the process
+ * of a promotion.
+ */
+bool
+IsBeingPromoted(AutoFailoverNode *node)
+{
+	return node != NULL
+		&& (node->reportedState == REPLICATION_STATE_WAIT_FORWARD
+			|| node->goalState == REPLICATION_STATE_WAIT_FORWARD
+
+			|| node->reportedState == REPLICATION_STATE_FAST_FORWARD
+			|| node->goalState == REPLICATION_STATE_FAST_FORWARD
+
+			|| node->reportedState == REPLICATION_STATE_PREPARE_PROMOTION
+			|| node->goalState == REPLICATION_STATE_PREPARE_PROMOTION
+
+			|| node->reportedState == REPLICATION_STATE_STOP_REPLICATION
+			|| node->goalState == REPLICATION_STATE_STOP_REPLICATION);
 }
 
 

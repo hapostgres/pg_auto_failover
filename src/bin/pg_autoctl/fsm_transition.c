@@ -911,3 +911,82 @@ fsm_promote_standby(Keeper *keeper)
 
 	return true;
 }
+
+
+/*
+ * When more than one secondary is available for failover we need to pick one.
+ * We want to pick the secondary that received the most WAL, so the monitor
+ * asks every secondary to report its current LSN position.
+ *
+ * secondary ➜ report_lsn
+ */
+bool
+fsm_report_lsn(Keeper *keeper)
+{
+	KeeperConfig *config = &(keeper->config);
+	PostgresSetup *pgSetup = &(config->pgSetup);
+	LocalPostgresServer *postgres = &(keeper->postgres);
+	PGSQL *pgsql = &(postgres->sqlClient);
+
+	/*
+	 * Fetch most recent metadata, that will be sent in the next node_active()
+	 * call.
+	 */
+	if (!pgsql_get_postgres_metadata(pgsql,
+									 config->replication_slot_name,
+									 &pgSetup->is_in_recovery,
+									 postgres->pgsrSyncState,
+									 postgres->currentLSN))
+	{
+		log_error("Failed to update the local Postgres metadata");
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * When the selected failover candidate does not have the latest received WAL,
+ * it fetches them from another standby. First, wait until this other standby
+ * with the WAL has added us to its HBA file (wait_cascade).
+ */
+bool
+fsm_wait_forward(Keeper *keeper)
+{
+	return true;
+}
+
+
+/*
+ * When the selected failover candidate does not have the latest received WAL,
+ * it fetches them from another standby.
+ */
+bool
+fsm_fast_forward(Keeper *keeper)
+{
+	return false;
+}
+
+
+/*
+ * When the selected failover candidate does not have the latest received WAL,
+ * it fetches them from another standby. This standby that has the latest WAL
+ * then goes in WAIT_CASCADE state to add the other node's HBA entries and
+ * such.
+ */
+bool
+fsm_prepare_cascade(Keeper *keeper)
+{
+	return false;
+}
+
+
+/*
+ *
+ */
+bool
+fsm_follow_new_primary(Keeper *keeper)
+{
+	return false;
+}

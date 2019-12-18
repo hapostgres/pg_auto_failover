@@ -524,15 +524,9 @@ keeper_update_pg_state(Keeper *keeper)
 		/*
 		 * Update our Postgres metadata now.
 		 *
-		 * First, update our cache of file path locations for Postgres
-		 * configuration files (including HBA), in case it's been moved to
-		 * somewhere else. This could happen when using the debian/ubuntu
-		 * pg_createcluster command on an already existing cluster, for
-		 * instance.
-		 *
-		 * Also update our view of pg_is_in_recovery, the replication sync
-		 * state when we are a primary with a standby currently using our
-		 * replication slot, and our current LSN position.
+		 * Update our view of pg_is_in_recovery, the replication sync state
+		 * when we are a primary with a standby currently using our replication
+		 * slot, and our current LSN position.
 		 *
 		 */
 		if (!pgsql_get_postgres_metadata(pgsql,
