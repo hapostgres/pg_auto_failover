@@ -235,7 +235,7 @@ keeper_ensure_current_state(Keeper *keeper)
  *   timeout.postgresql_restart_failure_max_retries (default 3 times)
  */
 bool
-ReportPgIsRunning(Keeper *keeper, bool *stopKeeper)
+ReportPgIsRunning(Keeper *keeper)
 {
 	KeeperStateData *keeperState = &(keeper->state);
 	KeeperConfig *config = &(keeper->config);
@@ -244,9 +244,8 @@ ReportPgIsRunning(Keeper *keeper, bool *stopKeeper)
 	int retries = config->postgresql_restart_failure_max_retries;
 	int timeout = config->postgresql_restart_failure_timeout;
 	uint64_t now = time(NULL);
-	*stopKeeper = false;
 
-	if (keeperState->current_role > PRIMARY_STATE)
+	if (keeperState->current_role != PRIMARY_STATE && keeperState->current_role != SINGLE_STATE)
 	{
 		/*
 		 * Only when in the PRIMARY_STATE is the monitor going to consider a
@@ -257,13 +256,12 @@ ReportPgIsRunning(Keeper *keeper, bool *stopKeeper)
 		 * that PostgreSQL is not running, for immediate decision making on the
 		 * monitor's side.
 		 */
-		*stopKeeper = !postgres->pgIsRunning;
 		return postgres->pgIsRunning;
 	}
 
 	/*
-	 * Now we know the current state is PRIMARY_STATE. If PostgreSQL is
-	 * running, then we simply report that, easy.
+	 * Now we know the current state is PRIMARY_STATE or SINGLE_STATE.
+	 * If PostgreSQL is running, then we simply report that, easy.
 	 */
 	if (postgres->pgIsRunning)
 	{
@@ -295,12 +293,6 @@ ReportPgIsRunning(Keeper *keeper, bool *stopKeeper)
 				  "the pg_auto_failover monitor.",
 				  postgres->pgStartRetries,
 				  now - postgres->pgFirstStartFailureTs);
-
-		if (keeper->config.exit_keeper_if_postgres_not_running)
-		{
-			*stopKeeper = true;
-		}
-
 		return false;
 	}
 	else

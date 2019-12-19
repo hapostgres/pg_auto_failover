@@ -45,7 +45,7 @@ bool keeper_start_postgres(Keeper *keeper);
 bool keeper_restart_postgres(Keeper *keeper);
 bool keeper_ensure_current_state(Keeper *keeper);
 bool keeper_update_pg_state(Keeper *keeper);
-bool ReportPgIsRunning(Keeper *keeper, bool *stopKeeper);
+bool ReportPgIsRunning(Keeper *keeper);
 bool keeper_remove(Keeper *keeper, KeeperConfig *config,
 				   bool ignore_monitor_errors);
 bool keeper_check_monitor_extension_version(Keeper *keeper);
