@@ -656,7 +656,9 @@ keeper_ensure_postgres_is_running(Keeper *keeper, bool updateRetries)
 		}
 		return true;
 	}
-	else if (ensure_local_postgres_is_running(postgres))
+	/* race condition? sometimes the funcall is happy and the pid 0 */
+	else if (ensure_local_postgres_is_running(postgres)
+			 && pgSetup->pidFile.pid > 0)
 	{
 		log_warn("PostgreSQL was not running, restarted with pid %ld",
 				 pgSetup->pidFile.pid);
