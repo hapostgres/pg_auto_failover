@@ -29,7 +29,6 @@ static SystemdServiceConfig systemdOptions;
 
 
 static int cli_systemd_getopt(int argc, char **argv);
-static void cli_systemd_enable_service(int argc, char **argv);
 static void cli_systemd_cat_service_file(int argc, char **argv);
 
 /* pg_autoctl show systemd, see cli_show.c */
