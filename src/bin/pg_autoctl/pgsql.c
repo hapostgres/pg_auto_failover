@@ -15,6 +15,7 @@
 
 #include "defaults.h"
 #include "log.h"
+#include "parsing.h"
 #include "pgsql.h"
 #include "signals.h"
 
@@ -406,8 +407,13 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 						  paramCount, paramTypes, paramValues, NULL, NULL, 0);
 	if (!is_response_ok(result))
 	{
+		char *sqlstate = PQresultErrorField(result, PG_DIAG_SQLSTATE);
+
 		char *message = PQerrorMessage(connection);
-		char *currentLine = message;
+		char *errorLines[BUFSIZE];
+		int lineCount = splitLines(message, errorLines, BUFSIZE);
+		int lineNumber = 0;
+
 		char *prefix =
 			pgsql->connectionType == PGSQL_CONN_MONITOR ? "Monitor" : "Postgres";
 
@@ -415,25 +421,10 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 		 * PostgreSQL Error message might contain several lines. Log each of
 		 * them as a separate ERROR line here.
 		 */
-		do
+		for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
 		{
-			char *newLinePtr = strchr(currentLine, '\n');
-
-			if (newLinePtr == NULL && strlen(currentLine) > 0)
-			{
-				log_error("%s %s", prefix, currentLine);
-				currentLine = NULL;
-			}
-			else
-			{
-				*newLinePtr = '\0';
-
-				log_error("%s %s", prefix, currentLine);
-
-				currentLine = ++newLinePtr;
-			}
+			log_error("%s %s", prefix, errorLines[lineNumber]);
 		}
-		while (currentLine != NULL && *currentLine != '\0');
 
 		log_error("SQL query: %s", sql);
 		log_error("SQL params: %s", debugParameters);
