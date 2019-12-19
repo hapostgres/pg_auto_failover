@@ -254,6 +254,8 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 				if (PQstatus(connection) == CONNECTION_OK)
 				{
 					connectionOk = true;
+					log_info("Successfully connected to \"%s\"",
+							 pgsql->connectionString);
 				}
 				else
 				{
