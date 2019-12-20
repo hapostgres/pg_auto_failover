@@ -53,7 +53,7 @@
 	"Secondary became unhealthy"
 
 #define COMMENT_PRIMARY_TO_JOIN_PRIMARY \
-	"A new secondary became unhealthy"
+	"A new secondary was added"
 
 #define COMMENT_PRIMARY_TO_DRAINING \
 	"A failover occurred, stopping writes "
@@ -140,7 +140,7 @@
 #define COMMENT_REPORT_LSN_TO_WAIT_CASCADE \
 	"Prepare replication for the failover candidate"
 
-#define COMMENT_REPORT_LSN_TO_CATCHINGUP \
+#define COMMENT_FOLLOW_NEW_PRIMARY \
 	"Switch replication to the new primary"
 
 #define COMMENT_WAIT_CASCADE_TO_CATCHINGUP \
@@ -295,8 +295,8 @@ KeeperFSMTransition KeeperFSM[] = {
 	{ REPORT_LSN_STATE, WAIT_FORWARD_STATE, COMMENT_REPORT_LSN_TO_WAIT_FORWARD, &fsm_wait_forward },
 	{ WAIT_FORWARD_STATE, FAST_FORWARD_STATE, COMMENT_REPORT_LSN_TO_FAST_FORWARD, &fsm_fast_forward },
 	{ REPORT_LSN_STATE, WAIT_CASCADE_STATE, COMMENT_REPORT_LSN_TO_WAIT_CASCADE, &fsm_prepare_cascade },
-	{ REPORT_LSN_STATE, CATCHINGUP_STATE, COMMENT_REPORT_LSN_TO_CATCHINGUP, &fsm_follow_new_primary },
-	{ WAIT_CASCADE_STATE, CATCHINGUP_STATE, COMMENT_WAIT_CASCADE_TO_CATCHINGUP, &fsm_follow_new_primary },
+	{ REPORT_LSN_STATE, SECONDARY_STATE, COMMENT_FOLLOW_NEW_PRIMARY, &fsm_follow_new_primary },
+	{ WAIT_CASCADE_STATE, SECONDARY_STATE, COMMENT_FOLLOW_NEW_PRIMARY, &fsm_follow_new_primary },
 
 	/*
 	 * This is the end, my friend.

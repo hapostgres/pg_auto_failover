@@ -398,6 +398,7 @@ keeper_update_pg_state(Keeper *keeper)
 		case NO_STATE:
 		case INIT_STATE:
 		case WAIT_STANDBY_STATE:
+		case DRAINING_STATE:
 		case DEMOTED_STATE:
 		case DEMOTE_TIMEOUT_STATE:
 		case STOP_REPLICATION_STATE:

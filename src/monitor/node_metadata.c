@@ -1093,7 +1093,10 @@ IsBeingPromoted(AutoFailoverNode *node)
 			|| node->goalState == REPLICATION_STATE_PREPARE_PROMOTION
 
 			|| node->reportedState == REPLICATION_STATE_STOP_REPLICATION
-			|| node->goalState == REPLICATION_STATE_STOP_REPLICATION);
+			|| node->goalState == REPLICATION_STATE_STOP_REPLICATION
+
+			|| node->reportedState == REPLICATION_STATE_WAIT_PRIMARY
+			|| node->goalState == REPLICATION_STATE_WAIT_PRIMARY);
 }
 
 

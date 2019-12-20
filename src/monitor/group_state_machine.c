@@ -116,7 +116,22 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	/* Multiple Standby failover is handled in its own function */
 	if (IsUnhealthy(primaryNode) && nodesCount > 2)
 	{
-		return ProceedGroupStateForMSFailover(activeNode, primaryNode);
+		/*
+		 * ProceedGroupStateForMSFailover chooses the failover candidate when
+		 * there's more than one standby node around, by applying the
+		 * candidatePriority and comparing the reportedLSN. The function also
+		 * orchestrate fetching the missing WAL from the failover candidate if
+		 * that's needed.
+		 *
+		 * When ProceedGroupStateForMSFailover returns true, it means it was
+		 * successfull in driving the failover to the next step, and we should
+		 * stop here. When it return false, it did nothing, and so we want to
+		 * apply the common orchestration code for a failover.
+		 */
+		if (ProceedGroupStateForMSFailover(activeNode, primaryNode))
+		{
+			return true;
+		}
 	}
 
 	/*
@@ -327,6 +342,28 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 		return true;
 	}
 
+	/*
+	 * when a new primary is ready:
+	 *  report_lsn -> catchingup
+	 */
+	if (IsCurrentState(activeNode, REPLICATION_STATE_REPORT_LSN) &&
+		IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY))
+	{
+		char message[BUFSIZE];
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of %s:%d to secondary after %s:%d converged "
+			"to primary.",
+			activeNode->nodeName, activeNode->nodePort,
+			primaryNode->nodeName, primaryNode->nodePort);
+
+		/* it's safe to rejoin as a secondary */
+		AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
+
+		return true;
+	}
+
 	return false;
 }
 
@@ -520,19 +557,22 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 
 	foreach(nodeCell, standbyNodesGroupList)
 	{
-		AutoFailoverNode *otherNode = (AutoFailoverNode *) lfirst(nodeCell);
+		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
 
-		if (otherNode == NULL)
+		if (node == NULL)
 		{
 			/* shouldn't happen */
-			ereport(ERROR, (errmsg("BUG: otherNode is NULL")));
+			ereport(ERROR, (errmsg("BUG: node is NULL")));
 			continue;
 		}
 
 		/* we might have a failover ongoing already */
-		if (IsBeingPromoted(otherNode))
+		if (IsBeingPromoted(node))
 		{
-			candidateNode = otherNode;
+			candidateNode = node;
+
+			elog(LOG, "Found candidate node %d (%s:%d)",
+				 node->nodeId, node->nodeName, node->nodePort);
 			continue;
 		}
 
@@ -540,19 +580,19 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 		 * Skip nodes that are not failover candidates (not in SECONDARY or
 		 * REPORT_LSN state).
 		 */
-		if (otherNode->reportedState != REPLICATION_STATE_SECONDARY
-			&& otherNode->reportedState != REPLICATION_STATE_REPORT_LSN)
+		if (node->reportedState != REPLICATION_STATE_SECONDARY
+			&& node->reportedState != REPLICATION_STATE_REPORT_LSN)
 		{
 			continue;
 		}
 
 		/* count how many standby nodes have reached REPORT_LSN */
-		if (IsCurrentState(otherNode, REPLICATION_STATE_REPORT_LSN))
+		if (IsCurrentState(node, REPLICATION_STATE_REPORT_LSN))
 		{
 			++candidateCount;
 			++reportedLSNCount;
 		}
-		else if (otherNode->goalState != REPLICATION_STATE_REPORT_LSN)
+		else if (node->goalState != REPLICATION_STATE_REPORT_LSN)
 		{
 			char message[BUFSIZE];
 
@@ -562,9 +602,9 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 				message, BUFSIZE,
 				"Setting goal state of %s:%d to report_lsn "
 				"to find the failover candidate",
-				otherNode->nodeName, otherNode->nodePort);
+				node->nodeName, node->nodePort);
 
-			AssignGoalState(otherNode, REPLICATION_STATE_REPORT_LSN, message);
+			AssignGoalState(node, REPLICATION_STATE_REPORT_LSN, message);
 		}
 	}
 
@@ -633,12 +673,12 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 
 			LogAndNotifyMessage(
 				message, BUFSIZE,
-				"Setting goal state of %s:%d to catching_up "
+				"Setting goal state of %s:%d to secondary "
 				"after %s:%d converged to stop_replication.",
 				activeNode->nodeName, activeNode->nodePort,
 				candidateNode->nodeName, candidateNode->nodePort);
 
-			AssignGoalState(activeNode, REPLICATION_STATE_CATCHINGUP, message);
+			AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
 
 			return true;
 		}
@@ -674,12 +714,12 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 
 			LogAndNotifyMessage(
 				message, BUFSIZE,
-				"Setting goal state of %s:%d to catching_up "
+				"Setting goal state of %s:%d to secondary "
 				"after %s:%d converged to stop_replication.",
 				activeNode->nodeName, activeNode->nodePort,
 				candidateNode->nodeName, candidateNode->nodePort);
 
-			AssignGoalState(activeNode, REPLICATION_STATE_CATCHINGUP, message);
+			AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
 
 			return true;
 		}

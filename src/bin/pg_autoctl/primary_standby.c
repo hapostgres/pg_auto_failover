@@ -811,3 +811,53 @@ check_postgresql_settings(LocalPostgresServer *postgres, bool *settings_are_ok)
 	pgsql_finish(pgsql);
 	return result;
 }
+
+
+/*
+ * standby_follow_new_primary rewrites the replication setup to follow the new
+ * primary after a failover.
+ */
+bool
+standby_follow_new_primary(LocalPostgresServer *postgres,
+						   ReplicationSource *replicationSource)
+{
+	char configFilePath[MAXPGPATH];
+	PGSQL *pgsql = &(postgres->sqlClient);
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+	NodeAddress *primaryNode = &(replicationSource->primaryNode);
+
+	log_info("Follow new primary %s:%d", primaryNode->host, primaryNode->port);
+
+	if (!ensure_local_postgres_is_running(postgres))
+	{
+		log_error("Failed to get the postgresql.conf path from the "
+				  "local postgres server: Postgres is not running.");
+		return false;
+	}
+
+	/* get the path of the config file from the running database */
+	if (!pgsql_get_config_file_path(pgsql, configFilePath, MAXPGPATH))
+	{
+		log_error("Failed to get the postgresql.conf path from the "
+				  "local postgres server, see above for details");
+		return false;
+	}
+
+	if (!pg_setup_standby_mode(pgSetup->control.pg_control_version,
+							   configFilePath,
+							   pgSetup->pgdata,
+							   replicationSource))
+	{
+		log_error("Failed to setup Postgres as a standby, after rewind");
+		return false;
+	}
+
+	if (!pg_ctl_restart(pgSetup->pg_ctl, pgSetup->pgdata))
+	{
+		log_error("Failed to restart Postgres after changing its "
+				  "primary conninfo, see above for details");
+		return false;
+	}
+
+	return true;
+}

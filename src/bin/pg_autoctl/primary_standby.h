@@ -71,6 +71,8 @@ bool standby_init_database(LocalPostgresServer *postgres,
 bool standby_promote(LocalPostgresServer *postgres);
 bool check_postgresql_settings(LocalPostgresServer *postgres,
 							   bool *settings_are_ok);
+bool standby_follow_new_primary(LocalPostgresServer *postgres,
+								ReplicationSource *replicationSource);
 
 
 #endif /* LOCAL_POSTGRES_H */

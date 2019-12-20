@@ -982,10 +982,45 @@ fsm_prepare_cascade(Keeper *keeper)
 
 
 /*
- *
+ * When the failover is done we need to follow the new primary. We should be
+ * able to do that directly, by changing our primary_conninfo, thanks to our
+ * candidate selection where we make it so that the failover candidate always
+ * has the most advanced LSN.
  */
 bool
 fsm_follow_new_primary(Keeper *keeper)
 {
-	return false;
+	KeeperConfig *config = &(keeper->config);
+	Monitor *monitor = &(keeper->monitor);
+	LocalPostgresServer *postgres = &(keeper->postgres);
+	ReplicationSource replicationSource = { 0 };
+	int groupId = keeper->state.current_group;
+
+	/* get the primary node to follow */
+	if (!monitor_get_primary(monitor, config->formation, groupId,
+							 &replicationSource.primaryNode))
+	{
+		log_error("Failed to get the primary node from the monitor, "
+				  "see above for details");
+		return false;
+	}
+
+	replicationSource.userName = PG_AUTOCTL_REPLICA_USERNAME;
+	replicationSource.password = config->replication_password;
+	replicationSource.slotName = config->replication_slot_name;
+	replicationSource.maximumBackupRate = config->maximum_backup_rate;
+	replicationSource.backupDir = config->backupDirectory;
+
+	if (!standby_follow_new_primary(postgres, &replicationSource))
+	{
+		log_error("Failed to change standby setup to follow new primary "
+				  "node %d at %s:%d, see above for details",
+				  replicationSource.primaryNode.nodeId,
+				  replicationSource.primaryNode.host,
+				  replicationSource.primaryNode.port);
+		return false;
+	}
+
+	/* now, in case we have an init state file around, remove it */
+	return unlink_file(config->pathnames.init);
 }
