@@ -52,6 +52,7 @@ static bool IsStateIn(ReplicationState state, List *allowedStates);
 /* SQL-callable function declarations */
 PG_FUNCTION_INFO_V1(register_node);
 PG_FUNCTION_INFO_V1(node_active);
+PG_FUNCTION_INFO_V1(get_nodes);
 PG_FUNCTION_INFO_V1(get_primary);
 PG_FUNCTION_INFO_V1(get_other_nodes);
 PG_FUNCTION_INFO_V1(remove_node);
@@ -606,10 +607,110 @@ get_primary(PG_FUNCTION_ARGS)
 }
 
 
-typedef struct get_other_nodes_fctx
+typedef struct get_nodes_fctx
 {
-	List *otherNodesList;
-} get_other_nodes_fctx;
+	List *nodesList;
+} get_nodes_fctx;
+
+/*
+ * get_other_node returns the other node in a group, if any.
+ */
+Datum
+get_nodes(PG_FUNCTION_ARGS)
+{
+	FuncCallContext *funcctx;
+	get_nodes_fctx *fctx;
+	MemoryContext oldcontext;
+
+	/* stuff done only on the first call of the function */
+	if (SRF_IS_FIRSTCALL())
+	{
+		text *formationIdText = PG_GETARG_TEXT_P(0);
+		char *formationId = text_to_cstring(formationIdText);
+
+		if (PG_ARGISNULL(0))
+		{
+			ereport(ERROR, (errmsg("formation_id must not be null")));
+		}
+
+		checkPgAutoFailoverVersion();
+
+		/* create a function context for cross-call persistence */
+		funcctx = SRF_FIRSTCALL_INIT();
+
+		/*
+		 * switch to memory context appropriate for multiple function calls
+		 */
+		oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+
+		/* allocate memory for user context */
+		fctx = (get_nodes_fctx *) palloc(sizeof(get_nodes_fctx));
+
+		/*
+		 * Use fctx to keep state from call to call. Seed current with the
+		 * original start value
+		 */
+		if (PG_ARGISNULL(1))
+		{
+			fctx->nodesList = AllAutoFailoverNodes(formationId);
+		}
+		else
+		{
+			int32 groupId = PG_GETARG_INT32(1);
+
+			fctx->nodesList = AutoFailoverNodeGroup(formationId, groupId);
+		}
+
+		funcctx->user_fctx = fctx;
+		MemoryContextSwitchTo(oldcontext);
+	}
+
+	/* stuff done on every call of the function */
+	funcctx = SRF_PERCALL_SETUP();
+
+	/*
+	 * get the saved state and use current as the result for this iteration
+	 */
+	fctx = funcctx->user_fctx;
+
+	if (fctx->nodesList != NIL)
+	{
+		TupleDesc resultDescriptor = NULL;
+		TypeFuncClass resultTypeClass = 0;
+		Datum resultDatum = 0;
+		HeapTuple resultTuple = NULL;
+		Datum values[5];
+		bool isNulls[5];
+
+		AutoFailoverNode *node = (AutoFailoverNode *) linitial(fctx->nodesList);
+
+		memset(values, 0, sizeof(values));
+		memset(isNulls, false, sizeof(isNulls));
+
+		values[0] = Int32GetDatum(node->nodeId);
+		values[1] = CStringGetTextDatum(node->nodeName);
+		values[2] = Int32GetDatum(node->nodePort);
+		values[3] = LSNGetDatum(node->reportedLSN);
+		values[4] = BoolGetDatum(CanTakeWritesInState(node->reportedState));
+
+		resultTypeClass = get_call_result_type(fcinfo, NULL, &resultDescriptor);
+		if (resultTypeClass != TYPEFUNC_COMPOSITE)
+		{
+			ereport(ERROR, (errmsg("return type must be a row type")));
+		}
+
+		resultTuple = heap_form_tuple(resultDescriptor, values, isNulls);
+		resultDatum = HeapTupleGetDatum(resultTuple);
+
+		/* prepare next SRF call */
+		fctx->nodesList = list_delete_first(fctx->nodesList);
+
+		SRF_RETURN_NEXT(funcctx, PointerGetDatum(resultDatum));
+	}
+
+	SRF_RETURN_DONE(funcctx);
+}
+
 
 /*
  * get_other_node returns the other node in a group, if any.
@@ -618,7 +719,7 @@ Datum
 get_other_nodes(PG_FUNCTION_ARGS)
 {
 	FuncCallContext *funcctx;
-	get_other_nodes_fctx *fctx;
+	get_nodes_fctx *fctx;
 	MemoryContext oldcontext;
 
 	/* stuff done only on the first call of the function */
@@ -641,7 +742,7 @@ get_other_nodes(PG_FUNCTION_ARGS)
 		oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
 		/* allocate memory for user context */
-		fctx = (get_other_nodes_fctx *) palloc(sizeof(get_other_nodes_fctx));
+		fctx = (get_nodes_fctx *) palloc(sizeof(get_nodes_fctx));
 
 		/*
 		 * Use fctx to keep state from call to call. Seed current with the
@@ -656,7 +757,7 @@ get_other_nodes(PG_FUNCTION_ARGS)
 
 		if (PG_NARGS() == 2)
 		{
-			fctx->otherNodesList = AutoFailoverOtherNodesList(activeNode);
+			fctx->nodesList = AutoFailoverOtherNodesList(activeNode);
 		}
 		else if (PG_NARGS() == 3)
 		{
@@ -664,7 +765,7 @@ get_other_nodes(PG_FUNCTION_ARGS)
 			ReplicationState currentState =
 				EnumGetReplicationState(currentReplicationStateOid);
 
-			fctx->otherNodesList =
+			fctx->nodesList =
 				AutoFailoverOtherNodesListInState(activeNode, currentState);
 		}
 		else
@@ -687,7 +788,7 @@ get_other_nodes(PG_FUNCTION_ARGS)
 	 */
 	fctx = funcctx->user_fctx;
 
-	if (fctx->otherNodesList != NIL)
+	if (fctx->nodesList != NIL)
 	{
 		TupleDesc resultDescriptor = NULL;
 		TypeFuncClass resultTypeClass = 0;
@@ -696,17 +797,16 @@ get_other_nodes(PG_FUNCTION_ARGS)
 		Datum values[5];
 		bool isNulls[5];
 
-		AutoFailoverNode *otherNode =
-			(AutoFailoverNode *) linitial(fctx->otherNodesList);
+		AutoFailoverNode *node = (AutoFailoverNode *) linitial(fctx->nodesList);
 
 		memset(values, 0, sizeof(values));
 		memset(isNulls, false, sizeof(isNulls));
 
-		values[0] = Int32GetDatum(otherNode->nodeId);
-		values[1] = CStringGetTextDatum(otherNode->nodeName);
-		values[2] = Int32GetDatum(otherNode->nodePort);
-		values[3] = LSNGetDatum(otherNode->reportedLSN);
-		values[4] = BoolGetDatum(IsInPrimaryState(otherNode));
+		values[0] = Int32GetDatum(node->nodeId);
+		values[1] = CStringGetTextDatum(node->nodeName);
+		values[2] = Int32GetDatum(node->nodePort);
+		values[3] = LSNGetDatum(node->reportedLSN);
+		values[4] = BoolGetDatum(CanTakeWritesInState(node->reportedState));
 
 		resultTypeClass = get_call_result_type(fcinfo, NULL, &resultDescriptor);
 		if (resultTypeClass != TYPEFUNC_COMPOSITE)
@@ -718,7 +818,7 @@ get_other_nodes(PG_FUNCTION_ARGS)
 		resultDatum = HeapTupleGetDatum(resultTuple);
 
 		/* prepare next SRF call */
-		fctx->otherNodesList = list_delete_first(fctx->otherNodesList);
+		fctx->nodesList = list_delete_first(fctx->nodesList);
 
 		SRF_RETURN_NEXT(funcctx, PointerGetDatum(resultDatum));
 	}

@@ -187,6 +187,25 @@ grant execute on function
                           pgautofailover.replication_state,bool,pg_lsn,text)
    to autoctl_node;
 
+CREATE FUNCTION pgautofailover.get_nodes
+ (
+    IN formation_id     text default 'default',
+    IN group_id         int default NULL,
+   OUT node_id          int,
+   OUT node_name        text,
+   OUT node_port        int,
+   OUT node_lsn         pg_lsn,
+   OUT node_is_primary  bool
+ )
+RETURNS SETOF record LANGUAGE C
+AS 'MODULE_PATHNAME', $$get_nodes$$;
+
+comment on function pgautofailover.get_nodes(text,int)
+        is 'get all the nodes in a group';
+
+grant execute on function pgautofailover.get_nodes(text,int)
+   to autoctl_node;
+
 CREATE FUNCTION pgautofailover.get_primary
  (
     IN formation_id      text default 'default',

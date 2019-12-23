@@ -91,6 +91,124 @@ monitor_init(Monitor *monitor, char *url)
  * in the group.
  */
 bool
+monitor_get_nodes(Monitor *monitor, char *formation, int groupId,
+				  NodeAddressArray *nodeArray)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		groupId == -1
+		? "SELECT * FROM pgautofailover.get_nodes($1)"
+		: "SELECT * FROM pgautofailover.get_nodes($1, $2)";
+	int paramCount = 1;
+	Oid paramTypes[2] = { TEXTOID, INT4OID };
+	const char *paramValues[2] = { 0 };
+	NodeAddressArrayParseContext parseContext = { { 0 }, nodeArray, false };
+
+	paramValues[0] = formation;
+
+	if (groupId > -1)
+	{
+		IntString myGroupIdString = intToString(groupId);
+
+		++paramCount;
+		paramValues[1] = myGroupIdString.strValue;
+	}
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &parseContext, parseNodeArray))
+	{
+		log_error("Failed to get other nodes from the monitor while running "
+				  "\"%s\" with formation %s and group %d",
+				  sql, formation, groupId);
+		return false;
+	}
+
+	/* disconnect from PostgreSQL now */
+	pgsql_finish(&monitor->pgsql);
+
+	if (!parseContext.parsedOK)
+	{
+		log_error("Failed to get the other nodes from the monitor while "
+				  "running \"%s\" with formation %s and group %d because "
+				  "it returned an unexpected result. "
+				  "See previous line for details.",
+				  sql, formation, groupId);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * monitor_get_other_node gets the hostname and port of the other node
+ * in the group.
+ */
+bool
+monitor_get_nodes_as_json(Monitor *monitor, char *formation, int groupId,
+						  char *json, int size)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_STRING, false };
+
+	const char *sql =
+		groupId == -1
+		?
+		"SELECT jsonb_pretty(jsonb_agg(row_to_json(nodes)))"
+		"  FROM pgautofailover.get_nodes($1) as nodes"
+		:
+		"SELECT jsonb_pretty(jsonb_agg(row_to_json(nodes)))"
+		"  FROM pgautofailover.get_nodes($1, $2) as nodes";
+
+	int paramCount = 1;
+	Oid paramTypes[2] = { TEXTOID, INT4OID };
+	const char *paramValues[2] = { 0 };
+
+	paramValues[0] = formation;
+
+	if (groupId > -1)
+	{
+		IntString myGroupIdString = intToString(groupId);
+
+		++paramCount;
+		paramValues[1] = myGroupIdString.strValue;
+	}
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &parseSingleValueResult))
+	{
+		log_error("Failed to get the nodes from the monitor while running "
+				  "\"%s\" with formation %s and group %d",
+				  sql, formation, groupId);
+		return false;
+	}
+
+	/* disconnect from PostgreSQL now */
+	pgsql_finish(&monitor->pgsql);
+
+	if (!context.parsedOk)
+	{
+		log_error("Failed to get the other nodes from the monitor while "
+				  "running \"%s\" with formation %s and group %d because "
+				  "it returned an unexpected result. "
+				  "See previous line for details.",
+				  sql, formation, groupId);
+		return false;
+	}
+
+	strlcpy(json, context.strVal, size);
+
+	return true;
+}
+
+
+/*
+ * monitor_get_other_node gets the hostname and port of the other node
+ * in the group.
+ */
+bool
 monitor_get_other_nodes(Monitor *monitor,
 						char *myHost, int myPort, NodeState currentState,
 						NodeAddressArray *nodeArray)
@@ -992,9 +1110,28 @@ printNodeArray(NodeAddressArray *nodesArray)
 		}
 	}
 
-	/* prepare a nice dynamic string of '-' as a header separator */
-	nameSeparatorHeader = (char *) malloc((maxNodeNameSize+1) * sizeof(char));
+	(void) printNodeHeader(maxNodeNameSize);
 
+	for(nodesArrayIndex=0; nodesArrayIndex<nodesArray->count; nodesArrayIndex++)
+	{
+		NodeAddress *node = &(nodesArray->nodes[nodesArrayIndex]);
+
+		printNodeEntry(node);
+	}
+
+	fprintf(stdout, "\n");
+}
+
+
+/*
+ * printNodeHeader pretty prints a header for a node list.
+ */
+void
+printNodeHeader(int maxNodeNameSize)
+{
+	char nameSeparatorHeader[BUFSIZE] = { 0 };
+
+	/* prepare a nice dynamic string of '-' as a header separator */
 	for(int i=0; i<=maxNodeNameSize; i++)
 	{
 		if (i<maxNodeNameSize)
@@ -1004,6 +1141,7 @@ printNodeArray(NodeAddressArray *nodesArray)
 		else
 		{
 			nameSeparatorHeader[i] = '\0';
+			break;
 		}
 	}
 
@@ -1013,19 +1151,18 @@ printNodeArray(NodeAddressArray *nodesArray)
 	fprintf(stdout, "%3s-+-%*s-+-%6s-+-%18s-+-%8s\n",
 			"---", maxNodeNameSize, nameSeparatorHeader, "------",
 			"------------------", "--------");
+}
 
-	free(nameSeparatorHeader);
 
-	for(nodesArrayIndex=0; nodesArrayIndex<nodesArray->count; nodesArrayIndex++)
-	{
-		NodeAddress node = nodesArray->nodes[nodesArrayIndex];
-
-		fprintf(stdout, "%3d | %s | %6d | %18s | %8s\n",
-				node.nodeId, node.host, node.port, node.lsn,
-				node.isPrimary ? "yes" : "no");
-	}
-
-	fprintf(stdout, "\n");
+/*
+ * printNodeEntry pretty prints a node.
+ */
+void
+printNodeEntry(NodeAddress *node)
+{
+	fprintf(stdout, "%3d | %s | %6d | %18s | %8s\n",
+			node->nodeId, node->host, node->port, node->lsn,
+			node->isPrimary ? "yes" : "no");
 }
 
 
