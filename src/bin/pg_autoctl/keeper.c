@@ -558,21 +558,48 @@ keeper_update_pg_state(Keeper *keeper)
 			 * least one entry with a non empty pg_stat_replication.sync_state
 			 * to report.
 			 */
-			return postgres->pgIsRunning
+			bool success = postgres->pgIsRunning
 				&& !IS_EMPTY_STRING_BUFFER(postgres->pgsrSyncState);
+
+			if (!success)
+			{
+				log_warn("Postgres is %s and we are in state %s, current best "
+						 "pg_stat_replication.sync_state is \"%s\"",
+						 postgres->pgIsRunning ? "running" : "not running",
+						 NodeStateToString(keeperState->current_role),
+						 postgres->pgsrSyncState);
+			}
+
+			return success;
 		}
 
 		case WAIT_PRIMARY_STATE:
 		{
 			/* We don't expect pg_stat_replication entries in WAIT_PRIMARY */
-			return postgres->pgIsRunning;
+			bool success = postgres->pgIsRunning;
+
+			if (!success)
+			{
+				log_warn("Postgres is %s and we are in state %s",
+						 postgres->pgIsRunning ? "running" : "not running",
+						 NodeStateToString(keeperState->current_role));
+			}
+			return success;
 		}
 
 		case SECONDARY_STATE:
 		case CATCHINGUP_STATE:
 		{
 			/* pg_stat_replication.sync_state is only available upstream */
-			return postgres->pgIsRunning;
+			bool success = postgres->pgIsRunning;
+
+			if (!success)
+			{
+				log_warn("Postgres is %s and we are in state %s",
+						 postgres->pgIsRunning ? "running" : "not running",
+						 NodeStateToString(keeperState->current_role));
+			}
+			return success;
 		}
 
 		default:

@@ -1765,8 +1765,12 @@ pgsql_get_postgres_metadata(PGSQL *pgsql, bool *pg_is_in_recovery,
 		" ) "
 		"as rep on true";
 
-	pgsql_execute_with_params(pgsql, sql, 0, NULL, NULL,
-							  &context, &parsePgMetadata);
+	if (!pgsql_execute_with_params(pgsql, sql, 0, NULL, NULL,
+								   &context, &parsePgMetadata))
+	{
+		/* errors have been logged already */
+		return false;
+	}
 
 	if (!context.parsedOk)
 	{
