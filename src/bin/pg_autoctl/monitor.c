@@ -111,8 +111,8 @@ monitor_get_nodes(Monitor *monitor, char *formation, int groupId,
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
 		groupId == -1
-		? "SELECT * FROM pgautofailover.get_nodes($1)"
-		: "SELECT * FROM pgautofailover.get_nodes($1, $2)";
+		? "SELECT * FROM pgautofailover.get_nodes($1) ORDER BY node_id"
+		: "SELECT * FROM pgautofailover.get_nodes($1, $2) ORDER BY node_id";
 	int paramCount = 1;
 	Oid paramTypes[2] = { TEXTOID, INT4OID };
 	const char *paramValues[2] = { 0 };
@@ -250,9 +250,9 @@ monitor_get_other_nodes(Monitor *monitor,
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
 		currentState == ANY_STATE
-		? "SELECT * FROM pgautofailover.get_other_nodes($1, $2)"
+		? "SELECT * FROM pgautofailover.get_other_nodes($1, $2) ORDER BY node_id"
 		: "SELECT * FROM pgautofailover.get_other_nodes($1, $2, "
-		"$3::pgautofailover.replication_state)";
+		"$3::pgautofailover.replication_state) ORDER BY node_id";
 	int paramCount = 2;
 	Oid paramTypes[3] = { TEXTOID, INT4OID, TEXTOID };
 	const char *paramValues[3] = { 0 };
@@ -1315,7 +1315,9 @@ monitor_print_state(Monitor *monitor, char *formation, int group)
 	{
 		case -1:
 		{
-			sql = "SELECT * FROM pgautofailover.current_state($1)";
+			sql =
+				"SELECT * FROM pgautofailover.current_state($1) "
+				"ORDER BY node_id";
 
 			paramCount = 1;
 			paramTypes[0] = TEXTOID;
@@ -1326,7 +1328,9 @@ monitor_print_state(Monitor *monitor, char *formation, int group)
 
 		default:
 		{
-			sql = "SELECT * FROM pgautofailover.current_state($1,$2)";
+			sql =
+				"SELECT * FROM pgautofailover.current_state($1,$2) "
+				"ORDER BY node_id";
 
 			groupStr = intToString(group);
 
