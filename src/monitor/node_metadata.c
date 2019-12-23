@@ -12,8 +12,9 @@
 
 #include "postgres.h"
 
-#include "miscadmin.h"
 #include "fmgr.h"
+#include "miscadmin.h"
+#include "nodes/pg_list.h"
 
 #include "health_check.h"
 #include "metadata.h"
