@@ -314,6 +314,18 @@ keeperStateAsJSON(KeeperStateData *keeperState, JSON_Object *jsobj)
 }
 
 /*
+ * print_keeper_init_state prints the given initilization state of the keeper
+ * to given FILE output (stdout, stderr, etc).
+ */
+void
+print_keeper_init_state(KeeperStateInit *initState, FILE *stream)
+{
+	fprintf(stream, "Postgres state at keeper init: %s\n",
+			PreInitPostgreInstanceStateToString(initState->pgInitState));
+	fflush(stream);
+}
+
+/*
  * NodeStateToString converts a NodeState ENUM value into a string for use in
  * user reporting.
  */

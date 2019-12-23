@@ -53,15 +53,19 @@ keeper::
       set    Set the value of a given pg_autoctl configuration variable
 
     pg_autoctl show
-      uri     Show the postgres uri to use to connect to pg_auto_failover nodes
-      events  Prints monitor's state of nodes in a given formation and group
-      state   Prints monitor's state of nodes in a given formation and group
+      uri      Show the postgres uri to use to connect to pg_auto_failover nodes
+      events   Prints monitor's state of nodes in a given formation and group
+      state    Prints monitor's state of nodes in a given formation and group
+      file     List pg_autoctl internal files (config, state, pid)
+      systemd  Print systemd service file for this node
 
     pg_autoctl enable
-      secondary  Enable secondary nodes on a formation
+      secondary    Enable secondary nodes on a formation
+      maintenance  Enable Postgres maintenance mode on this node
 
     pg_autoctl disable
-      secondary  Disable secondary nodes on a formation
+      secondary    Disable secondary nodes on a formation
+      maintenance  Disable Postgres maintenance mode on this node
 
 The first step consists of creating a pg_auto_failover monitor thanks to the command
 ``pg_autoctl create monitor``, and the command ``pg_autoctl show uri`` can then be
@@ -237,6 +241,50 @@ commands can be used, from any node in the setup.
     For details about the options to the command, see above in the ``pg_autoctl
     show events`` command.
 
+  - ``pg_autoctl show file``
+
+    This command outputs the configuration, state, initial state, and pid
+    files used by this instance. The files are placed in a path that follows
+    the `XDG Base Directory Specification
+    <https://standards.freedesktop.org/basedir-spec/basedir-spec-latest.html>`_
+    and in a way allows to find them when given only ``$PGDATA``, as in
+    PostgreSQL::
+
+      $ pg_autoctl show file --help
+      pg_autoctl show file: List pg_autoctl internal files (config, state, pid)
+      usage: pg_autoctl show file  [ --pgdata --all --config | --state | --init | --pid --contents ]
+      
+        --pgdata      path to data directory 
+        --all         show all pg_autoctl files 
+        --config      show pg_autoctl configuration file 
+        --state       show pg_autoctl state file 
+        --init        show pg_autoctl initialisation state file 
+        --pid         show pg_autoctl PID file 
+        --contents    show selected file contents
+
+    The command ``pg_auctoctl show file`` outputs a JSON object with the
+    single key ``config`` for a monitor, and with the four keys ``config``,
+    ``state``, ``init``, and ``pid`` for a keeper. When one of the options
+    with the same name is used, a single line containing only the file path
+    is printed.
+
+    Here's an example of the JSON output::
+      
+      $ pg_autoctl show file --pgdata /data/pgsql
+      {
+        "config": "/Users/dim/.config/pg_autoctl/data/pgsql/pg_autoctl.cfg",
+        "state": "/Users/dim/.local/share/pg_autoctl/data/pgsql/pg_autoctl.state",
+        "init": "/Users/dim/.local/share/pg_autoctl/data/pgsql/pg_autoctl.init",
+        "pid": "/private/tmp/pg_autoctl/data/pgsql/pg_autoctl.pid"
+      }
+    
+
+  - ``pg_autoctl show systemd``
+
+    This command outputs a configuration unit that is suitable for
+    registering ``pg_autoctl`` as a systemd service.
+          
+
 .. _pg_autoctl_create_postgres:
 
 pg_auto_failover Postgres Node Initialization
@@ -352,8 +400,14 @@ When initializing a pg_auto_failover keeper with ``--pgdata /data/pgsql``, then:
   - ``~/.config/pg_autoctl/data/pgsql/pg_autoctl.cfg``
 
     is the configuration file for the PostgreSQL instance located at
-    ``/data/pgsql``, written in the INI file format. Here's an example of
-    such a configuration file::
+    ``/data/pgsql``, written in the INI file format.
+
+    It is possible to get the location of the configuration file by using
+    the command ``pg_autoctl show file --config --pgdata /data/pgsql`` and
+    to output its content by using the command ``pg_autoctl show
+    file --config --content --pgdata /data/pgsql``.
+
+    Here's an example of such a configuration file::
 
       [pg_autoctl]
       role = keeper
@@ -390,6 +444,53 @@ When initializing a pg_auto_failover keeper with ``--pgdata /data/pgsql``, then:
     format. This file is not intended to be written by anything else than
     ``pg_autoctl`` itself. In case of state corruption, see the trouble
     shooting section of the documentation.
+
+    It is possible to get the location of the state file by using the
+    command ``pg_autoctl show file --state --pgdata /data/pgsql`` and to
+    output its content by using the command ``pg_autoctl show
+    file --state --content --pgdata /data/pgsql``. Here's an example of the
+    output when using that command::
+
+      $ pg_autoctl show file --state --content --pgdata /data/pgsql
+      Current Role:             secondary
+      Assigned Role:            secondary
+      Last Monitor Contact:     Mon Dec 23 13:31:23 2019
+      Last Secondary Contact:   0
+      pg_autoctl state version: 1
+      group:                    0
+      node id:                  1
+      nodes version:            0
+      PostgreSQL Version:       1100
+      PostgreSQL CatVersion:    201809051
+      PostgreSQL System Id:     6772497431723510412
+
+  - ``~/.local/share/pg_autoctl/data/pgsql/pg_autoctl.init``
+
+    is the initial state file for the pg_auto_failover keeper service taking
+    care of the PostgreSQL instance located at ``/data/pgsql``, written in
+    binary format. This file is not intended to be written by anything else
+    than ``pg_autoctl`` itself. In case of state corruption, see the trouble
+    shooting section of the documentation.
+
+    This initialization state file only exists during the initialization of
+    a pg_auto_failover node. In normal operations, this file does not
+    exists.
+
+    It is possible to get the location of the state file by using the
+    command ``pg_autoctl show file --init --pgdata /data/pgsql`` and to
+    output its content by using the command ``pg_autoctl show
+    file --init --content --pgdata /data/pgsql``.
+
+  - ``/tmp/pg_autoctl/data/pgsql/pg_autoctl.pid``
+
+    is the PID file for the ``pg_autoctl`` service, located in a temporary
+    directory by default, or in the ``XDG_RUNTIME_DIR`` directory when this
+    is setup.
+
+    The PID file contains a single line with the PID of the running
+    ``pg_autoctl`` process, and is supposed to only exists when the process
+    is running. Stale PID files are detected automatically by sending the
+    signal 0 to the PID.
 
 To output, edit and check entries of the configuration, the following
 commands are provided. Both commands need the `--pgdata` option or the
