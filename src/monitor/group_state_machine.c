@@ -163,9 +163,16 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 * when secondary caught up:
 	 *      catchingup -> secondary
 	 *  + wait_primary -> primary
+	 *
+	 * FIXME/REVIEW: when handling multi-standby nodes failover, we might be a
+	 * PRIMARY already when there's still a standby in CATCHINGUP and that is
+	 * otherwise running fine. So I (dim) have added the state PRIMARY to the
+	 * list here, though maybe that warrants another round of review of the
+	 * FSM.
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_CATCHINGUP) &&
-		(IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
+		(IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY) ||
+		 IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
 		 IsCurrentState(primaryNode, REPLICATION_STATE_JOIN_PRIMARY)) &&
 		IsHealthy(activeNode) &&
 		WalDifferenceWithin(activeNode, primaryNode, EnableSyncXlogThreshold))
