@@ -107,16 +107,30 @@ static bool
 get_node_replication_settings(NodeReplicationSettings *settings)
 {
 	Keeper keeper = { 0 };
-	bool missing_pgdata_is_ok = false;
-	bool pg_is_not_running_is_ok = true;
+
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = false;
 
 	keeper.config = keeperOptions;
 
 	(void) exit_unless_role_is_keeper(&(keeper.config));
 
-	keeper_config_read_file(&(keeper.config),
-							missing_pgdata_is_ok,
-							pg_is_not_running_is_ok);
+	if (!keeper_config_read_file(&(keeper.config),
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (keeper.config.monitorDisabled)
+	{
+		log_error("This node has disabled monitor, "
+				  "pg_autoctl get and set commands are not available.");
+		return false;
+	}
 
 	if (!keeper_init(&keeper, &keeper.config))
 	{
@@ -182,15 +196,25 @@ cli_get_formation_number_sync_standbys(int argc, char **argv)
 {
 	KeeperConfig config = keeperOptions;
 	Monitor monitor = { 0 };
-	bool missing_pgdata_is_ok = false;
-	bool pg_is_not_running_is_ok = true;
 	int numberSyncStandbys = 0;
 
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = false;
+
 	if (!keeper_config_read_file(&config,
-								 missing_pgdata_is_ok,
-								 pg_is_not_running_is_ok))
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
 	{
 		/* errors have already been logged. */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (config.monitorDisabled)
+	{
+		log_error("This node has disabled monitor, "
+				  "pg_autoctl get and set commands are not available.");
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
@@ -201,7 +225,8 @@ cli_get_formation_number_sync_standbys(int argc, char **argv)
 	}
 
 	if (!monitor_get_formation_number_sync_standbys(&monitor,
-			config.formation, &numberSyncStandbys))
+													config.formation,
+													&numberSyncStandbys))
 	{
 		exit(EXIT_CODE_MONITOR);
 	}
@@ -218,10 +243,12 @@ static void
 cli_set_node_property(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
-	bool missing_pgdata_is_ok = false;
-	bool pg_is_not_running_is_ok = true;
 	char *name = NULL;
 	char *value = NULL;
+
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = false;
 
 	keeper.config = keeperOptions;
 
@@ -233,10 +260,18 @@ cli_set_node_property(int argc, char **argv)
 	}
 
 	if (!keeper_config_read_file(&(keeper.config),
-								 missing_pgdata_is_ok,
-								 pg_is_not_running_is_ok))
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
 	{
 		/* errors have already been logged. */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (keeper.config.monitorDisabled)
+	{
+		log_error("This node has disabled monitor, "
+				  "pg_autoctl get and set commands are not available.");
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
@@ -269,7 +304,8 @@ cli_set_node_property(int argc, char **argv)
 					keeper.state.current_node_id, keeper.config.nodename,
 					keeper.config.pgSetup.pgport, candidatePriority))
 		{
-			log_error("Failed to set \"candidate-priority\" to \"%d\".", candidatePriority);
+			log_error("Failed to set \"candidate-priority\" to \"%d\".",
+					  candidatePriority);
 			exit(EXIT_CODE_MONITOR);
 		}
 
@@ -316,11 +352,13 @@ cli_set_formation_property(int argc, char **argv)
 {
 	KeeperConfig config = keeperOptions;
 	Monitor monitor = { 0 };
-	bool missing_pgdata_is_ok = false;
-	bool pg_is_not_running_is_ok = true;
 	char *name = NULL;
 	char *value = NULL;
 	int numberSyncStandbys = -1;
+
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = false;
 
 	if (argc != 2)
 	{
@@ -351,10 +389,18 @@ cli_set_formation_property(int argc, char **argv)
 	}
 
 	if (!keeper_config_read_file(&config,
-								 missing_pgdata_is_ok,
-								 pg_is_not_running_is_ok))
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
 	{
 		/* errors have already been logged. */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (config.monitorDisabled)
+	{
+		log_error("This node has disabled monitor, "
+				  "pg_autoctl get and set commands are not available.");
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
@@ -364,9 +410,12 @@ cli_set_formation_property(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!monitor_set_formation_number_sync_standbys(&monitor, config.formation, numberSyncStandbys))
+	if (!monitor_set_formation_number_sync_standbys(&monitor,
+													config.formation,
+													numberSyncStandbys))
 	{
-		log_error("Failed to set \"number-sync-standbys\" to \"%d\".", numberSyncStandbys);
+		log_error("Failed to set \"number-sync-standbys\" to \"%d\".",
+				  numberSyncStandbys);
 		exit(EXIT_CODE_MONITOR);
 	}
 
