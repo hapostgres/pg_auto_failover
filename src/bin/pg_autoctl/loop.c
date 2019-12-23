@@ -55,6 +55,8 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 	bool couldContactMonitor = false;
 	pid_t pid = *start_pid, checkpid = 0;
 	bool firstLoop = true;
+	bool warnedOnCurrentIteration = false;
+	bool warnedOnPreviousIteration = false;
 
 	log_debug("pg_autoctl service is starting");
 
@@ -160,8 +162,15 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 		 */
 		if (!keeper_update_pg_state(keeper))
 		{
+			warnedOnCurrentIteration = true;
 			log_warn("Failed to update the keeper's state from the local "
 					 "PostgreSQL instance.");
+		}
+		else if (warnedOnPreviousIteration)
+		{
+			log_info("Updated the keeper's state from the local "
+					 "PostgreSQL instance, which is %s",
+					 postgres->pgIsRunning ? "running" : "not running");
 		}
 
 		CHECK_FOR_FAST_SHUTDOWN;
@@ -226,6 +235,13 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 				if (!is_network_healthy(keeper))
 				{
 					keeperState->assigned_role = DEMOTE_TIMEOUT_STATE;
+
+					log_info("Network in not healthy, switching to state %s",
+							 NodeStateToString(keeperState->assigned_role));
+				}
+				else
+				{
+					log_info("Network is healthy");
 				}
 			}
 		}
@@ -261,7 +277,15 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 		{
 			if (!keeper_ensure_current_state(keeper))
 			{
+				warnedOnCurrentIteration = true;
 				log_warn("pg_autoctl failed to ensure current state \"%s\": "
+						 "PostgreSQL %s running",
+						 NodeStateToString(keeperState->current_role),
+						 postgres->pgIsRunning ? "is" : "is not");
+			}
+			else if (warnedOnPreviousIteration)
+			{
+				log_info("pg_autoctl managed to ensure current state \"%s\": "
 						 "PostgreSQL %s running",
 						 NodeStateToString(keeperState->current_role),
 						 postgres->pgIsRunning ? "is" : "is not");
@@ -293,6 +317,18 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 		if (firstLoop)
 		{
 			firstLoop = false;
+		}
+
+		/* advance the warnings "counters" */
+		if (warnedOnPreviousIteration)
+		{
+			warnedOnPreviousIteration = false;
+		}
+
+		if (warnedOnCurrentIteration)
+		{
+			warnedOnPreviousIteration = true;
+			warnedOnCurrentIteration = false;
 		}
 	}
 
