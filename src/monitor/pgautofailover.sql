@@ -590,10 +590,10 @@ grant execute on function
  
 CREATE FUNCTION pgautofailover.set_node_replication_quorum
  (
-    IN nodeid				int,
-	IN nodename             text,
-	IN nodeport             int,
-    IN replication_quorum	bool
+    IN nodeid             int,
+    IN nodename           text,
+    IN nodeport           int,
+    IN replication_quorum bool
  )
 RETURNS bool LANGUAGE C STRICT SECURITY DEFINER
 AS 'MODULE_PATHNAME', $$set_node_replication_quorum$$;
@@ -663,4 +663,3 @@ CREATE TRIGGER adjust_number_sync_standbys
             ON pgautofailover.node
            FOR EACH ROW
        EXECUTE PROCEDURE pgautofailover.adjust_number_sync_standbys();
-

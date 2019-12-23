@@ -835,13 +835,8 @@ standby_follow_new_primary(LocalPostgresServer *postgres,
 		return false;
 	}
 
-	/* get the path of the config file from the running database */
-	if (!pgsql_get_config_file_path(pgsql, configFilePath, MAXPGPATH))
-	{
-		log_error("Failed to get the postgresql.conf path from the "
-				  "local postgres server, see above for details");
-		return false;
-	}
+	/* configFilePath = $PGDATA/postgresql.conf */
+	join_path_components(configFilePath, pgSetup->pgdata, "postgresql.conf");
 
 	if (!pg_setup_standby_mode(pgSetup->control.pg_control_version,
 							   configFilePath,
