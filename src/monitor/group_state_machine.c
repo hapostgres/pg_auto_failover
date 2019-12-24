@@ -484,8 +484,7 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 								REPLICATION_STATE_CATCHINGUP, message);
 
 			}
-			else if (!otherNode->replicationQuorum
-					 || otherNode->candidatePriority == 0)
+			else if (otherNode->candidatePriority == 0)
 			{
 				/* also not a candidate */
 				--failoverCandidateCount;
