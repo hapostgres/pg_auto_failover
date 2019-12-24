@@ -84,7 +84,7 @@ grant execute on function pgautofailover.drop_formation(text) to autoctl_node;
 
 CREATE FUNCTION pgautofailover.set_formation_number_sync_standbys
  (
-    IN formation_id  		text,
+    IN formation_id         text,
     IN number_sync_standbys int
  )
 RETURNS bool LANGUAGE C STRICT SECURITY DEFINER
