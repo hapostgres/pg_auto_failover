@@ -441,7 +441,7 @@ keeper_cli_destroy_node(int argc, char **argv)
 			bool missingPgdataIsOk = true;
 			bool pgIsNotRunningIsOk = true;
 
-			if (!monitor_config_init_from_pgsetup(&monitor, &mconfig,
+			if (!monitor_config_init_from_pgsetup(&mconfig,
 												  &config.pgSetup,
 												  missingPgdataIsOk,
 												  pgIsNotRunningIsOk))

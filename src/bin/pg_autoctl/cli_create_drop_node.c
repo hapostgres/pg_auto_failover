@@ -588,7 +588,7 @@ cli_create_monitor(int argc, char **argv)
 
 	if (createAndRun)
 	{
-		(void) monitor_listen_loop(&monitor);
+		(void) monitor_service_run(&monitor, &config);
 	}
 }
 

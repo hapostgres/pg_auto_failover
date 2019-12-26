@@ -99,8 +99,7 @@ cli_config_check(int argc, char **argv)
 			Monitor monitor;
 			MonitorConfig mconfig = { 0 };
 
-			if (!monitor_config_init_from_pgsetup(&monitor,
-												  &mconfig,
+			if (!monitor_config_init_from_pgsetup(&mconfig,
 												  &config.pgSetup,
 												  missingPgdataIsOk,
 												  pgIsNotRunningIsOk))
@@ -307,8 +306,7 @@ cli_monitor_config_get(int argc, char **argv)
 	bool missing_pgdata_is_ok = true;
 	bool pg_is_not_running_is_ok = true;
 
-	if (!monitor_config_init_from_pgsetup(&monitor,
-										  &mconfig,
+	if (!monitor_config_init_from_pgsetup(&mconfig,
 										  &kconfig.pgSetup,
 										  missing_pgdata_is_ok,
 										  pg_is_not_running_is_ok))
@@ -470,8 +468,7 @@ cli_monitor_config_set(int argc, char **argv)
 		bool missing_pgdata_is_ok = true;
 		bool pg_is_not_running_is_ok = true;
 
-		if (!monitor_config_init_from_pgsetup(&monitor,
-											  &mconfig,
+		if (!monitor_config_init_from_pgsetup(&mconfig,
 											  &kconfig.pgSetup,
 											  missing_pgdata_is_ok,
 											  pg_is_not_running_is_ok))

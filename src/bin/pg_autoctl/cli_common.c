@@ -590,7 +590,7 @@ monitor_init_from_pgsetup(Monitor *monitor, PostgresSetup *pgSetup)
 			char connInfo[MAXCONNINFO];
 			MonitorConfig mconfig = { 0 };
 
-			(void) monitor_config_init_from_pgsetup(monitor, &mconfig, pgSetup,
+			(void) monitor_config_init_from_pgsetup(&mconfig, pgSetup,
 													missingPgdataIsOk,
 													pgIsNotRunningIsOk);
 
