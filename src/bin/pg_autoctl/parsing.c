@@ -433,9 +433,9 @@ parse_bool(const char *value, bool *result)
 
 
 /*
- * getNextErrorLine prepares a multi-line error message in a way that calling
- * code can loop around one line at a time and call log_error() or log_warn()
- * on individual lines.
+ * splitLines prepares a multi-line error message in a way that calling code
+ * can loop around one line at a time and call log_error() or log_warn() on
+ * individual lines.
  */
 int
 splitLines(char *errorMessage, char **linesArray, int size)
