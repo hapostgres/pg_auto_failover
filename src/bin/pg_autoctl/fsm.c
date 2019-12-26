@@ -263,18 +263,11 @@ keeper_fsm_step(Keeper *keeper)
 	 * as in the main loop: we continue with default WAL lag of -1 and an empty
 	 * string for pgsrSyncState.
 	 */
-	(void) keeper_update_pg_state(keeper);
-
-	/*
-	 * Now that we know if PostgreSQL is running or not, maybe restart it, or
-	 * maybe shut it down, depending on what the current state expects.
-	 */
-	if (!keeper_ensure_current_state(keeper))
+	if (!keeper_update_pg_state(keeper))
 	{
-		log_warn("pg_autoctl keeper failed to ensure current state \"%s\": "
-				 "PostgreSQL %s running",
-				 NodeStateToString(keeperState->current_role),
-				 postgres->pgIsRunning ? "is" : "is not");
+		log_error("Failed to update the keeper's state from the local "
+				  "PostgreSQL instance, see above for details.");
+		return false;
 	}
 
 	log_info("Calling node_active for node %s/%d/%d with current state: "
@@ -312,10 +305,27 @@ keeper_fsm_step(Keeper *keeper)
 	keeperState->assigned_role = assignedState.state;
 
 	/* roll the state machine forward */
-	if (!keeper_fsm_reach_assigned_state(keeper))
+	if (keeperState->assigned_role != keeperState->current_role)
 	{
-		/* errors have already been logged */
-		return false;
+		if (!keeper_fsm_reach_assigned_state(keeper))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+	}
+	else
+	{
+		/*
+		 * Now that we know if PostgreSQL is running or not, maybe restart it,
+		 * or maybe shut it down, depending on what the current state expects.
+		 */
+		if (!keeper_ensure_current_state(keeper))
+		{
+			log_warn("pg_autoctl keeper failed to ensure current state \"%s\": "
+					 "PostgreSQL %s running",
+					 NodeStateToString(keeperState->current_role),
+					 postgres->pgIsRunning ? "is" : "is not");
+		}
 	}
 
 	/* update state file */
