@@ -20,11 +20,11 @@ def test_000_create_monitor():
 def test_001_update_extension():
     os.environ["PG_AUTOCTL_DEBUG"] = '1'
     os.environ["PG_AUTOCTL_EXTENSION_VERSION"] = 'dummy'
+    cluster.monitor.stop_postgres()
+
     cluster.monitor.run()
 
-    # we need to allow some time for the pg_autctl run command to start and
-    # execute ALTER EXTENSION ... UPDATE TO ...
-    time.sleep(1)
+    cluster.monitor.wait_until_pg_is_running()
 
     results = cluster.monitor.run_sql_query(
         """SELECT installed_version
@@ -32,5 +32,3 @@ def test_001_update_extension():
             WHERE name = 'pgautofailover'
         """)
     assert results == [('dummy',)]
-
-

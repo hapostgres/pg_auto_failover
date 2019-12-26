@@ -37,8 +37,7 @@ bool monitor_config_set_pathnames_from_pgdata(MonitorConfig *config);
 void monitor_config_init(MonitorConfig *config,
 						 bool missing_pgdata_is_ok,
 						 bool pg_is_not_running_is_ok);
-bool monitor_config_init_from_pgsetup(Monitor *monitor,
-									  MonitorConfig *mconfig,
+bool monitor_config_init_from_pgsetup(MonitorConfig *mconfig,
 									  PostgresSetup *pgSetup,
 									  bool missingPgdataIsOk,
 									  bool pgIsNotRunningIsOk);
