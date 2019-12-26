@@ -34,7 +34,7 @@ install-bin: bin
 	$(MAKE) -C src/bin/ install
 
 test:
-	sudo -E env "PATH=${PATH}" USER=$(shell whoami) `which nosetests` --verbose --nocapture --where=tests
+	sudo -E env "PATH=${PATH}" USER=$(shell whoami) `which nosetests` --verbose --nocapture --stop --where=tests
 
 docs: $(FSM)
 	$(MAKE) -C docs html
