@@ -12,17 +12,12 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "postgres.h"
-#include "postgres_fe.h"
-#include "libpq-fe.h"
-
 #include "defaults.h"
 #include "log.h"
 #include "monitor.h"
 #include "monitor_config.h"
 #include "parsing.h"
 #include "pgsql.h"
-#include "catalog/pg_type.h"
 
 
 typedef struct NodeAddressParseContext

@@ -15,6 +15,7 @@
 
 #include "defaults.h"
 #include "log.h"
+#include "parsing.h"
 #include "pgsql.h"
 #include "signals.h"
 
@@ -254,6 +255,8 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 				if (PQstatus(connection) == CONNECTION_OK)
 				{
 					connectionOk = true;
+					log_info("Successfully connected to \"%s\"",
+							 pgsql->connectionString);
 				}
 				else
 				{
@@ -365,6 +368,7 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 {
 	PGconn *connection = NULL;
 	PGresult *result = NULL;
+	char debugParameters[BUFSIZE] = { 0 };
 
 	connection = pgsql_open_connection(pgsql);
 	if (connection == NULL)
@@ -373,11 +377,11 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 	}
 
 	log_debug("%s;", sql);
+
 	if (paramCount > 0)
 	{
 		int paramIndex = 0;
 		int remainingBytes = BUFSIZE;
-		char debugParameters[BUFSIZE] = { 0 };
 		char *writePointer = (char *) debugParameters;
 
 		for (paramIndex=0; paramIndex < paramCount; paramIndex++)
@@ -403,7 +407,28 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 						  paramCount, paramTypes, paramValues, NULL, NULL, 0);
 	if (!is_response_ok(result))
 	{
-		log_error("Failed to execute \"%s\": %s", sql, PQerrorMessage(connection));
+		char *sqlstate = PQresultErrorField(result, PG_DIAG_SQLSTATE);
+
+		char *message = PQerrorMessage(connection);
+		char *errorLines[BUFSIZE];
+		int lineCount = splitLines(message, errorLines, BUFSIZE);
+		int lineNumber = 0;
+
+		char *prefix =
+			pgsql->connectionType == PGSQL_CONN_MONITOR ? "Monitor" : "Postgres";
+
+		/*
+		 * PostgreSQL Error message might contain several lines. Log each of
+		 * them as a separate ERROR line here.
+		 */
+		for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
+		{
+			log_error("%s %s", prefix, errorLines[lineNumber]);
+		}
+
+		log_error("SQL query: %s", sql);
+		log_error("SQL params: %s", debugParameters);
+
 		PQclear(result);
 		clear_results(connection);
 		pgsql_finish(pgsql);

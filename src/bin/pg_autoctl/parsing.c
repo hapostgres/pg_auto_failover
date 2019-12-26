@@ -41,10 +41,17 @@ char *
 regexp_first_match(const char *string, const char *regex)
 {
 	regex_t compiledRegex;
-	int status = regcomp(&compiledRegex, regex, REG_EXTENDED | REG_NEWLINE);
+	int status = 0;
 
 	regmatch_t m[RE_MATCH_COUNT];
 	int matchStatus;
+
+	if (string == NULL)
+	{
+		return NULL;
+	}
+
+	status = regcomp(&compiledRegex, regex, REG_EXTENDED | REG_NEWLINE);
 
 	if (status != 0)
 	{
@@ -422,4 +429,39 @@ bool
 parse_bool(const char *value, bool *result)
 {
 	return parse_bool_with_len(value, strlen(value), result);
+}
+
+
+/*
+ * splitLines prepares a multi-line error message in a way that calling code
+ * can loop around one line at a time and call log_error() or log_warn() on
+ * individual lines.
+ */
+int
+splitLines(char *errorMessage, char **linesArray, int size)
+{
+	int lineNumber = 0;
+	char *currentLine = errorMessage;
+
+	do
+	{
+		char *newLinePtr = strchr(currentLine, '\n');
+
+		if (newLinePtr == NULL && strlen(currentLine) > 0)
+		{
+			linesArray[lineNumber++] = currentLine;
+			currentLine = NULL;
+		}
+		else
+		{
+			*newLinePtr = '\0';
+
+			linesArray[lineNumber++] = currentLine;
+
+			currentLine = ++newLinePtr;
+		}
+	}
+	while (currentLine != NULL && *currentLine != '\0');
+
+	return lineNumber;
 }
