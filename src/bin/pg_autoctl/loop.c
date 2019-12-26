@@ -147,11 +147,22 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 			continue;
 		}
 
+		if (firstLoop)
+		{
+			log_info("pg_autoctl service is running, "
+					 "current state is \"%s\"",
+					 NodeStateToString(keeperState->current_role));
+		}
+
 		/*
 		 * Check for any changes in the local PostgreSQL instance, and update
 		 * our in-memory values for the replication WAL lag and sync_state.
 		 */
-		keeper_update_pg_state(keeper);
+		if (!keeper_update_pg_state(keeper))
+		{
+			log_warn("Failed to update the keeper's state from the local "
+					 "PostgreSQL instance.");
+		}
 
 		CHECK_FOR_FAST_SHUTDOWN;
 
@@ -170,11 +181,6 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 				  reportPgIsRunning ? "is" : "is not",
 				  postgres->pgsrSyncState,
 				  postgres->currentLSN);
-
-		if (firstLoop)
-		{
-			log_info("pg_autoctl service is running");
-		}
 
 		/*
 		 * Report the current state to the monitor and get the assigned state.
@@ -196,6 +202,14 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 		{
 			keeperState->last_monitor_contact = now;
 			keeperState->assigned_role = assignedState.state;
+
+			if (keeperState->assigned_role != keeperState->current_role)
+			{
+				needStateChange = true;
+
+				log_info("Monitor assigned new state \"%s\"",
+						 NodeStateToString(keeperState->assigned_role));
+			}
 		}
 		else
 		{
@@ -233,7 +247,17 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 		 * because the other node has been promoted, which could happen if this
 		 * node was rebooting for a long enough time.
 		 */
-		if (couldContactMonitor)
+		if (needStateChange)
+		{
+			if (!keeper_fsm_reach_assigned_state(keeper))
+			{
+				log_error("Failed to transition to state \"%s\", retrying... ",
+						  NodeStateToString(keeperState->assigned_role));
+
+				transitionFailed = true;
+			}
+		}
+		else if (couldContactMonitor)
 		{
 			if (!keeper_ensure_current_state(keeper))
 			{
@@ -245,19 +269,6 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 		}
 
 		CHECK_FOR_FAST_SHUTDOWN;
-
-		if (keeperState->assigned_role != keeperState->current_role)
-		{
-			needStateChange = true;
-
-			if (!keeper_fsm_reach_assigned_state(keeper))
-			{
-				log_error("Failed to transition to state \"%s\", retrying... ",
-						  NodeStateToString(keeperState->assigned_role));
-
-				transitionFailed = true;
-			}
-		}
 
 		/*
 		 * Even if a transition failed, we still write the state file to update
