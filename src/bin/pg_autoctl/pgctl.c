@@ -1067,32 +1067,13 @@ prepare_primary_conninfo(char *primaryConnInfo, int primaryConnInfoSize,
 
 	buffer = createPQExpBuffer();
 
-	if (!escape_recovery_conf_string(escaped, BUFSIZE, primaryHost))
-	{
-		/* errors have already been logged. */
-		destroyPQExpBuffer(buffer);
-		return false;
-	}
-	appendPQExpBuffer(buffer, "host = %s", escaped);
-	appendPQExpBuffer(buffer, "port = %d", primaryPort);
-
-	if (!escape_recovery_conf_string(escaped, BUFSIZE, replicationUsername))
-	{
-		/* errors have already been logged. */
-		destroyPQExpBuffer(buffer);
-		return false;
-	}
-	appendPQExpBuffer(buffer, "user = %s", escaped);
+	appendPQExpBuffer(buffer, "host=%s", primaryHost);
+	appendPQExpBuffer(buffer, " port=%d", primaryPort);
+	appendPQExpBuffer(buffer, " user=%s", replicationUsername);
 
 	if (replicationPassword != NULL)
 	{
-		if (!escape_recovery_conf_string(escaped, BUFSIZE, replicationPassword))
-		{
-			/* errors have already been logged. */
-			destroyPQExpBuffer(buffer);
-			return false;
-		}
-		appendPQExpBuffer(buffer, "password = %s", escaped);
+		appendPQExpBuffer(buffer, " password=%s", replicationPassword);
 	}
 
 	/* memory allocation could have failed while building string */
@@ -1103,8 +1084,15 @@ prepare_primary_conninfo(char *primaryConnInfo, int primaryConnInfoSize,
 		return false;
 	}
 
+	if (!escape_recovery_conf_string(escaped, BUFSIZE, buffer->data))
+ 	{
+ 		/* errors have already been logged. */
+ 		destroyPQExpBuffer(buffer);
+ 		return false;
+ 	}
+
 	/* now copy the buffer into primaryConnInfo for the caller */
-	size = snprintf(primaryConnInfo, primaryConnInfoSize, "%s", buffer->data);
+	size = snprintf(primaryConnInfo, primaryConnInfoSize, "%s", escaped);
 
 	if (size == -1 || size > primaryConnInfoSize)
 	{
