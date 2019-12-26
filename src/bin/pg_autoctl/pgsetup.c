@@ -45,6 +45,7 @@ pg_setup_init(PostgresSetup *pgSetup,
 			  bool missing_pgdata_is_ok,
 			  bool pg_is_not_running_is_ok)
 {
+	bool pgIsReady = false;
 	int errors = 0;
 
 	/*
@@ -132,7 +133,7 @@ pg_setup_init(PostgresSetup *pgSetup,
 		else
 		{
 			log_debug("Found PostgreSQL system %" PRIu64 " at \"%s\", "
-														 "version %u, catalog version %u",
+					  "version %u, catalog version %u",
 					  pgSetup->control.system_identifier,
 					  pgSetup->pgdata,
 					  pgSetup->control.pg_control_version,
@@ -183,13 +184,12 @@ pg_setup_init(PostgresSetup *pgSetup,
 	 * Read the postmaster.pid file to find out pid, port and unix socket
 	 * directory of a running PostgreSQL instance.
 	 */
-	if (!pg_setup_is_ready(pgSetup, pg_is_not_running_is_ok))
+	pgIsReady = pg_setup_is_ready(pgSetup, pg_is_not_running_is_ok);
+
+	if (!pgIsReady && !pg_is_not_running_is_ok)
 	{
-		if (!pg_is_not_running_is_ok)
-		{
-			/* errors have already been logged */
-			errors++;
-		}
+		/* errors have already been logged */
+		errors++;
 	}
 
 	/*
@@ -344,7 +344,9 @@ pg_setup_init(PostgresSetup *pgSetup,
 	/*
 	 * If PostgreSQL is running, register if it's in recovery or not.
 	 */
-	if (pgSetup->control.pg_control_version > 0 && pgSetup->pidFile.port > 0)
+	if (pgSetup->control.pg_control_version > 0
+		&& pgSetup->pidFile.port > 0
+		&& pgSetup->pgport == pgSetup->pidFile.port)
 	{
 		PGSQL pgsql = { 0 };
 		char connInfo[MAXCONNINFO];
@@ -363,7 +365,7 @@ pg_setup_init(PostgresSetup *pgSetup,
 		 * ERROR Connection to database failed: FATAL: the database system is
 		 * starting up
 		 */
-		if (!pg_setup_is_ready(pgSetup, pg_is_not_running_is_ok))
+		if (!pgIsReady)
 		{
 			log_error("Failed to read Postgres pidfile, see above for details");
 			return false;

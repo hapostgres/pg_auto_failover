@@ -572,6 +572,8 @@ create_database_and_extension(Keeper *keeper)
 
 	char hbaFilePath[MAXPGPATH];
 
+	log_trace("create_database_and_extension");
+
 	/* we didn't start PostgreSQL yet, also we just ran initdb */
 	snprintf(hbaFilePath, MAXPGPATH, "%s/pg_hba.conf", pgSetup->pgdata);
 

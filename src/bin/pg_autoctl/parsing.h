@@ -35,4 +35,7 @@ IntString intToString(int64_t number);
 bool parse_state_notification_message(StateNotification *notification);
 
 
+int splitLines(char *errorMessage, char **linesArray, int size);
+
+
 #endif /* PARSING_H */

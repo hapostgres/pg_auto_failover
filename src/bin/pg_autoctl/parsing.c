@@ -39,10 +39,17 @@ char *
 regexp_first_match(const char *string, const char *regex)
 {
 	regex_t compiledRegex;
-	int status = regcomp(&compiledRegex, regex, REG_EXTENDED | REG_NEWLINE);
+	int status = 0;
 
 	regmatch_t m[RE_MATCH_COUNT];
 	int matchStatus;
+
+	if (string == NULL)
+	{
+		return NULL;
+	}
+
+	status = regcomp(&compiledRegex, regex, REG_EXTENDED | REG_NEWLINE);
 
 	if (status != 0)
 	{
@@ -315,4 +322,39 @@ read_length_delimited_string_at(const char *ptr, char *buffer, int size)
 
 	/* col - ptr is the length of the digits plus the separator  */
 	return (col - ptr) + len + 1;
+}
+
+
+/*
+ * splitLines prepares a multi-line error message in a way that calling code
+ * can loop around one line at a time and call log_error() or log_warn() on
+ * individual lines.
+ */
+int
+splitLines(char *errorMessage, char **linesArray, int size)
+{
+	int lineNumber = 0;
+	char *currentLine = errorMessage;
+
+	do
+	{
+		char *newLinePtr = strchr(currentLine, '\n');
+
+		if (newLinePtr == NULL && strlen(currentLine) > 0)
+		{
+			linesArray[lineNumber++] = currentLine;
+			currentLine = NULL;
+		}
+		else
+		{
+			*newLinePtr = '\0';
+
+			linesArray[lineNumber++] = currentLine;
+
+			currentLine = ++newLinePtr;
+		}
+	}
+	while (currentLine != NULL && *currentLine != '\0');
+
+	return lineNumber;
 }

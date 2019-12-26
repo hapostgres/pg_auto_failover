@@ -20,9 +20,11 @@
  * OID values from PostgreSQL src/include/catalog/pg_type.h
  */
 #define BOOLOID 16
+#define NAMEOID 19
 #define INT4OID 23
 #define INT8OID 20
 #define TEXTOID 25
+#define LSNOID 3220
 
 /*
  * Maximum connection info length as used in walreceiver.h

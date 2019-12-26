@@ -10,6 +10,7 @@
 #ifndef MONITOR_H
 #define MONITOR_H
 
+#include <stdbool.h>
 
 #include "pgsql.h"
 #include "monitor_config.h"

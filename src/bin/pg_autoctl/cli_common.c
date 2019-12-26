@@ -475,8 +475,8 @@ keeper_cli_getopt_pgdata(int argc, char **argv)
 		strlcpy(options.pgSetup.pgdata, pgdata, MAXPGPATH);
 	}
 
-	log_info("Managing PostgreSQL installation at \"%s\"",
-			 options.pgSetup.pgdata);
+	log_debug("Managing PostgreSQL installation at \"%s\"",
+			  options.pgSetup.pgdata);
 
 	if (!keeper_config_set_pathnames_from_pgdata(&options.pathnames,
 												 options.pgSetup.pgdata))
