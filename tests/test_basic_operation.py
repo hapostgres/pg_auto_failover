@@ -26,7 +26,6 @@ def test_001_init_primary():
     node1.run()
     assert node1.wait_until_state(target_state="single")
 
-
 def test_001_stop_postgres():
     node1.stop_postgres()
     assert node1.wait_until_pg_is_running()
@@ -93,7 +92,7 @@ def test_013_drop_secondary():
     node1.drop()
     assert not node1.pg_is_running()
     assert node2.wait_until_state(target_state="single")
-    
+
 
 def test_014_add_new_secondary():
     global node3
@@ -105,22 +104,23 @@ def test_014_add_new_secondary():
 
 
 def test_015_multiple_manual_failover_verify_replication_slot_removed():
-   monitor.failover()
-   assert node3.wait_until_state(target_state="primary")
-   assert node2.wait_until_state(target_state="secondary")
-   node2_replication_slots = node2.run_sql_query("select count(*) from pg_replication_slots")
-   assert node2_replication_slots == [(0,)]
-   node3_replication_slots = node3.run_sql_query("select count(*) from pg_replication_slots")
-   assert node3_replication_slots == [(1,)]
-   
-   monitor.failover()
-   assert node2.wait_until_state(target_state="primary")
-   assert node3.wait_until_state(target_state="secondary")
-   node2_replication_slots = node2.run_sql_query("select count(*) from pg_replication_slots");
-   assert node2_replication_slots == [(1,)]
-   node3_replication_slots = node3.run_sql_query("select count(*) from pg_replication_slots");
-   assert node3_replication_slots == [(0,)]
-                
+    count_repl_slots = "select count(*) from pg_replication_slots"
+    monitor.failover()
+    assert node3.wait_until_state(target_state="primary")
+    assert node2.wait_until_state(target_state="secondary")
+    node2_replication_slots = node2.run_sql_query(count_repl_slots)
+    assert node2_replication_slots == [(0,)]
+    node3_replication_slots = node3.run_sql_query(count_repl_slots)
+    assert node3_replication_slots == [(1,)]
+
+    monitor.failover()
+    assert node2.wait_until_state(target_state="primary")
+    assert node3.wait_until_state(target_state="secondary")
+    node2_replication_slots = node2.run_sql_query(count_repl_slots);
+    assert node2_replication_slots == [(1,)]
+    node3_replication_slots = node3.run_sql_query(count_repl_slots);
+    assert node3_replication_slots == [(0,)]
+
 def test_016_drop_primary():
    node2.drop()
    assert not node2.pg_is_running()
