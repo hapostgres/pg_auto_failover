@@ -21,6 +21,7 @@
 extern MonitorConfig monitorOptions;
 extern KeeperConfig keeperOptions;
 extern bool allowRemovingPgdata;
+extern bool createAndRun;
 
 #define KEEPER_CLI_WORKER_SETUP_OPTIONS \
 	"  --pgctl       path to pg_ctl\n" \
@@ -50,7 +51,7 @@ extern bool allowRemovingPgdata;
 	"  --monitor     pg_auto_failover Monitor Postgres URL\n" \
 
 #define KEEPER_CLI_ALLOW_RM_PGDATA_OPTION \
-	"  --allow-removing-pgdata   Allow pg_autoctl to remove the database directory\n"
+	"  --allow-removing-pgdata Allow pg_autoctl to remove the database directory\n"
 
 #define KEEPER_CLI_PGDATA_OPTION \
 	"  --pgdata      path to data directory\n" \
@@ -88,6 +89,7 @@ extern CommandLine service_reload_command;
 extern CommandLine show_uri_command;
 extern CommandLine show_events_command;
 extern CommandLine show_state_command;
+extern CommandLine show_file_command;
 
 /* cli_systemd.c */
 extern CommandLine systemd_cat_service_file_command;

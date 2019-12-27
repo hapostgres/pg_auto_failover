@@ -9,16 +9,15 @@
 #include <inttypes.h>
 #include <limits.h>
 #include <sys/select.h>
+#include <time.h>
+#include <unistd.h>
 
-#include "postgres.h"
-
-#include "postgres_fe.h"
-#include "libpq-fe.h"
+#include "defaults.h"
 #include "log.h"
 #include "monitor.h"
+#include "monitor_config.h"
 #include "parsing.h"
 #include "pgsql.h"
-#include "catalog/pg_type.h"
 
 
 typedef struct NodeAddressParseContext
@@ -535,7 +534,7 @@ parseNodeReplicationSettings(void *ctx, PGresult *result)
 
 
 /*
- * monitor_get_formation_number_sync_standbys retrieves number-sync-stanbys
+ * monitor_get_formation_number_sync_standbys retrieves number-sync-standbys
  * property for formation from the monitor. The function returns true upon
  * success.
  */
@@ -579,7 +578,7 @@ monitor_get_formation_number_sync_standbys(Monitor *monitor, char *formation,
 
 
 /*
- * monitor_set_formation_number_sync_standbys sets number-sync-stanbys
+ * monitor_set_formation_number_sync_standbys sets number-sync-standbys
  * property for formation at the monitor. The function returns true upon
  * success.
  */
@@ -1112,9 +1111,9 @@ printLastEvents(void *ctx, PGresult *result)
 
 	log_trace("printLastEvents: %d tuples", nTuples);
 
-	if (PQnfields(result) != 12)
+	if (PQnfields(result) != 14)
 	{
-		log_error("Query returned %d columns, expected 12", PQnfields(result));
+		log_error("Query returned %d columns, expected 14", PQnfields(result));
 		context->parsedOK = false;
 		return;
 	}
@@ -1134,7 +1133,7 @@ printLastEvents(void *ctx, PGresult *result)
 		char *nodeId = PQgetvalue(result, currentTupleIndex, 3);
 		char *currentState = PQgetvalue(result, currentTupleIndex, 7);
 		char *goalState = PQgetvalue(result, currentTupleIndex, 8);
-		char *description = PQgetvalue(result, currentTupleIndex, 11);
+		char *description = PQgetvalue(result, currentTupleIndex, 13);
 		char node[BUFSIZE];
 
 		/* for our grid alignment output it's best to have a single col here */
@@ -1858,4 +1857,105 @@ prepare_connection_to_current_system_user(Monitor *source, Monitor *target)
 	PQconninfoFree(conninfo);
 
 	return true;
+}
+
+
+/*
+ * ensure_monitor_pg_running checks if monitor is running, attempts to restart if it is not.
+ * The function verifies if the extension version is the same as expected.  It returns true
+ * if the monitor is up and running.
+ */
+bool
+ensure_monitor_pg_running(Monitor *monitor, struct MonitorConfig *mconfig)
+{
+	MonitorExtensionVersion version = { 0 };
+	char postgresUri[MAXCONNINFO];
+
+	if (!pg_is_running(mconfig->pgSetup.pg_ctl, mconfig->pgSetup.pgdata))
+	{
+		log_info("Postgres is not running, starting postgres");
+		pgsql_finish(&(monitor->pgsql));
+
+		if (!pg_ctl_start(mconfig->pgSetup.pg_ctl,
+						  mconfig->pgSetup.pgdata,
+						  mconfig->pgSetup.pgport,
+						  mconfig->pgSetup.listen_addresses))
+		{
+			log_error("Failed to start PostgreSQL, see above for details");
+			return false;
+		}
+
+		/*
+		 * Check version compatibility.
+		 *
+		 * The function terminates any existing connection during clenaup
+		 * therefore it is not called when PG is found to be running to not
+		 * to intervene pgsql_listen call.
+		 */
+		if (!monitor_ensure_extension_version(monitor, &version))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
+	}
+
+	return true;
+}
+
+
+/*
+ * monitor_service_run watches over monitor process, restarts if it is necessary,
+ * also loops over a LISTEN command that is notified at every
+ * change of state on the monitor, and prints the change on stdout.
+ */
+bool
+monitor_service_run(Monitor *monitor,  struct MonitorConfig *mconfig)
+{
+	char *channels[] = { "log", "state", NULL };
+	char postgresUri[MAXCONNINFO];
+
+	/* We exit the loop if we can't get monitor to be running during the start */
+	if (!ensure_monitor_pg_running(monitor, mconfig))
+	{
+		/* errors were already logged */
+		log_warn("Failed to ensure PostgreSQL is running, exiting the service");
+		return false;
+	}
+
+	/* Now get the the Monitor URI to display it to the user, and move along */
+	if (monitor_config_get_postgres_uri(mconfig, postgresUri, MAXCONNINFO))
+	{
+		log_info("pg_auto_failover monitor is ready at %s", postgresUri);
+	}
+
+	log_info("Contacting the monitor to LISTEN to its events.");
+	pgsql_listen(&(monitor->pgsql), channels);
+
+	/*
+	 * Main loop for notifications.
+	 */
+	for (;;)
+	{
+		if (!ensure_monitor_pg_running(monitor, mconfig))
+		{
+			log_warn("Failed to ensure PostgreSQL is running, retrying in %d seconds", PG_AUTOCTL_MONITOR_SLEEP_TIME);
+			sleep(PG_AUTOCTL_MONITOR_SLEEP_TIME);
+			continue;
+		}
+
+		if (!monitor_get_notifications(monitor))
+		{
+			log_warn("Re-establishing connection. We might miss notifications.");
+			pgsql_finish(&(monitor->pgsql));
+
+			pgsql_listen(&(monitor->pgsql), channels);
+
+			/* skip sleeping */
+			continue;
+		}
+
+		sleep(PG_AUTOCTL_MONITOR_SLEEP_TIME);
+	}
+	pgsql_finish(&(monitor->pgsql));
 }

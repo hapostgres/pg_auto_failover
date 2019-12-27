@@ -14,8 +14,6 @@
 
 #include "postgres_fe.h"
 
-#include "parson.h"
-
 #include "cli_common.h"
 #include "commandline.h"
 #include "defaults.h"
@@ -65,7 +63,7 @@ static CommandLine fsm_gv =
 static CommandLine fsm_assign =
 	make_command("assign",
 				 "Assign a new goal state to the keeper",
-				 " [ --pgdata ] <goal state>",
+				 " [ --pgdata ] <goal state> [<host> <port>]",
 				 KEEPER_CLI_PGDATA_OPTION,
 				 keeper_cli_getopt_pgdata,
 				 keeper_cli_fsm_assign);
@@ -104,12 +102,18 @@ keeper_cli_fsm_init(int argc, char **argv)
 	Keeper keeper = { 0 };
 	KeeperStateData keeperState = { 0 };
 	KeeperConfig config = keeperOptions;
-	bool missing_pgdata_is_ok = true;
-	bool pg_is_not_running_is_ok = true;
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = true;
 
-	keeper_config_read_file(&config,
-							missing_pgdata_is_ok,
-							pg_is_not_running_is_ok);
+	if (!keeper_config_read_file(&config,
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
 
 	log_info("Initializing an FSM state in \"%s\"", config.pathnames.state);
 
@@ -151,22 +155,19 @@ keeper_cli_fsm_state(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
 	KeeperConfig config = keeperOptions;
-	bool missing_pgdata_is_ok = true;
-	bool pg_is_not_running_is_ok = true;
+	char keeperStateJSON[BUFSIZE];
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = true;
 
-    JSON_Value *js = json_value_init_object();
-    JSON_Value *jsPostgres = json_value_init_object();
-    JSON_Value *jsKeeperState = json_value_init_object();
-
-    JSON_Object *root = json_value_get_object(js);
-    JSON_Object *jsPostgresObject = json_value_get_object(jsPostgres);
-    JSON_Object *jsKeeperStateObject = json_value_get_object(jsKeeperState);
-
-    char *serialized_string = NULL;
-
-	keeper_config_read_file(&config,
-							missing_pgdata_is_ok,
-							pg_is_not_running_is_ok);
+	if (!keeper_config_read_file(&config,
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
 
 	if (!keeper_init(&keeper, &config))
 	{
@@ -188,19 +189,12 @@ keeper_cli_fsm_state(int argc, char **argv)
 		exit(EXIT_CODE_BAD_STATE);
 	}
 
-	/* print our current PostgreSQL setup and Keeper's state */
-	pg_setup_as_json(&(keeper.postgres.postgresSetup), jsPostgresObject);
-	keeperStateAsJSON(&keeper.state, jsKeeperStateObject);
-
-    json_object_set_value(root, "postgres", jsPostgres);
-    json_object_set_value(root, "state", jsKeeperState);
-
-    serialized_string = json_serialize_to_string_pretty(js);
-
-	fprintf(stdout, "%s\n", serialized_string);
-
-    json_free_serialized_string(serialized_string);
-    json_value_free(js);
+	if (!keeper_state_as_json(&keeper, keeperStateJSON, BUFSIZE))
+	{
+		log_error("Failed to serialize internal keeper state to JSON");
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+	fprintf(stdout, "%s\n", keeperStateJSON);
 }
 
 
@@ -211,14 +205,20 @@ static void
 keeper_cli_fsm_list(int argc, char **argv)
 {
 	KeeperStateData keeperState = { 0 };
-
 	KeeperConfig config = keeperOptions;
-	bool missing_pgdata_is_ok = true;
-	bool pg_is_not_running_is_ok = true;
 
-	keeper_config_read_file(&config,
-							missing_pgdata_is_ok,
-							pg_is_not_running_is_ok);
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = true;
+
+	if (!keeper_config_read_file(&config,
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
 
 	/* now read keeper's state */
 	if (!keeper_state_read(&keeperState, config.pathnames.state))
@@ -250,28 +250,53 @@ keeper_cli_fsm_assign(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
 	KeeperConfig config = keeperOptions;
-	bool missing_pgdata_is_ok = true;
-	bool pg_is_not_running_is_ok = true;
+	char keeperStateJSON[BUFSIZE];
+	NodeState goalState = NO_STATE;
 
-    JSON_Value *js = json_value_init_object();
-    JSON_Value *jsPostgres = json_value_init_object();
-    JSON_Value *jsKeeperState = json_value_init_object();
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = true;
 
-    JSON_Object *root = json_value_get_object(js);
-    JSON_Object *jsPostgresObject = json_value_get_object(jsPostgres);
-    JSON_Object *jsKeeperStateObject = json_value_get_object(jsKeeperState);
-
-    char *serialized_string = NULL;
-
-	keeper_config_read_file(&config,
-							missing_pgdata_is_ok,
-							pg_is_not_running_is_ok);
-
-	if (argc != 1)
+	if (!keeper_config_read_file(&config,
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
 	{
-		log_error("Missing argument: <goal state>");
-		commandline_help(stderr);
-		exit(EXIT_CODE_BAD_ARGS);
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	switch (argc)
+	{
+		case 1:
+		{
+			goalState = NodeStateFromString(argv[0]);
+			break;
+		}
+
+		case 3:
+		{
+			goalState = NodeStateFromString(argv[0]);
+
+			/* now prepare host and port in keeper.otherNode */
+			strlcpy(keeper.otherNode.host, argv[1], _POSIX_HOST_NAME_MAX);
+
+			keeper.otherNode.port = strtol(argv[2], NULL, 10);
+			if (keeper.otherNode.port == 0 && errno == EINVAL)
+			{
+				log_error(
+					"Failed to parse otherNode port number \"%s\"", argv[2]);
+				exit(EXIT_CODE_INTERNAL_ERROR);
+			}
+			break;
+		}
+
+		default:
+		{
+			log_error("USAGE: do fsm state <goal state> [<host> <port>]");
+			commandline_help(stderr);
+			exit(EXIT_CODE_BAD_ARGS);
+		}
 	}
 
 	/* now read keeper's state */
@@ -282,7 +307,7 @@ keeper_cli_fsm_assign(int argc, char **argv)
 	}
 
 	/* assign the new state */
-	keeper.state.assigned_role = NodeStateFromString(argv[0]);
+	keeper.state.assigned_role = goalState;
 
 	/* roll the state machine */
 	if (!keeper_fsm_reach_assigned_state(&keeper))
@@ -297,18 +322,12 @@ keeper_cli_fsm_assign(int argc, char **argv)
 		exit(EXIT_CODE_BAD_STATE);
 	}
 
-	pg_setup_as_json(&(keeper.postgres.postgresSetup), jsPostgresObject);
-	keeperStateAsJSON(&keeper.state, jsKeeperStateObject);
-
-    json_object_set_value(root, "postgres", jsPostgres);
-    json_object_set_value(root, "state", jsKeeperState);
-
-    serialized_string = json_serialize_to_string_pretty(js);
-
-	fprintf(stdout, "%s\n", serialized_string);
-
-    json_free_serialized_string(serialized_string);
-    json_value_free(js);
+	if (!keeper_state_as_json(&keeper, keeperStateJSON, BUFSIZE))
+	{
+		log_error("Failed to serialize internal keeper state to JSON");
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+	fprintf(stdout, "%s\n", keeperStateJSON);
 }
 
 
@@ -321,16 +340,31 @@ static void
 keeper_cli_fsm_step(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
-	bool missing_pgdata_is_ok = true;
-	bool pg_is_not_running_is_ok = true;
 	const char *oldRole = NULL;
 	const char *newRole = NULL;
 
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = true;
+
 	keeper.config = keeperOptions;
 
-	keeper_config_read_file(&(keeper.config),
-							missing_pgdata_is_ok,
-							pg_is_not_running_is_ok);
+	if (!keeper_config_read_file(&(keeper.config),
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (keeper.config.monitorDisabled)
+	{
+		log_fatal("The command `pg_autoctl do fsm step` is meant to step as "
+				  "instructed by the monitor, and the monitor is disabled.");
+		log_info("HINT: see `pg_autoctl do fsm assign` instead");
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
 
 	if (!keeper_init(&keeper, &keeper.config))
 	{

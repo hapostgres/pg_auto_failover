@@ -55,6 +55,8 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 	bool couldContactMonitor = false;
 	pid_t pid = *start_pid, checkpid = 0;
 	bool firstLoop = true;
+	bool warnedOnCurrentIteration = false;
+	bool warnedOnPreviousIteration = false;
 
 	log_debug("pg_autoctl service is starting");
 
@@ -147,11 +149,29 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 			continue;
 		}
 
+		if (firstLoop)
+		{
+			log_info("pg_autoctl service is running, "
+					 "current state is \"%s\"",
+					 NodeStateToString(keeperState->current_role));
+		}
+
 		/*
 		 * Check for any changes in the local PostgreSQL instance, and update
 		 * our in-memory values for the replication WAL lag and sync_state.
 		 */
-		keeper_update_pg_state(keeper);
+		if (!keeper_update_pg_state(keeper))
+		{
+			warnedOnCurrentIteration = true;
+			log_warn("Failed to update the keeper's state from the local "
+					 "PostgreSQL instance.");
+		}
+		else if (warnedOnPreviousIteration)
+		{
+			log_info("Updated the keeper's state from the local "
+					 "PostgreSQL instance, which is %s",
+					 postgres->pgIsRunning ? "running" : "not running");
+		}
 
 		CHECK_FOR_FAST_SHUTDOWN;
 
@@ -170,11 +190,6 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 				  reportPgIsRunning ? "is" : "is not",
 				  postgres->pgsrSyncState,
 				  postgres->currentLSN);
-
-		if (firstLoop)
-		{
-			log_info("pg_autoctl service is running");
-		}
 
 		/*
 		 * Report the current state to the monitor and get the assigned state.
@@ -196,6 +211,14 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 		{
 			keeperState->last_monitor_contact = now;
 			keeperState->assigned_role = assignedState.state;
+
+			if (keeperState->assigned_role != keeperState->current_role)
+			{
+				needStateChange = true;
+
+				log_info("Monitor assigned new state \"%s\"",
+						 NodeStateToString(keeperState->assigned_role));
+			}
 		}
 		else
 		{
@@ -212,6 +235,13 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 				if (!is_network_healthy(keeper))
 				{
 					keeperState->assigned_role = DEMOTE_TIMEOUT_STATE;
+
+					log_info("Network in not healthy, switching to state %s",
+							 NodeStateToString(keeperState->assigned_role));
+				}
+				else
+				{
+					log_info("Network is healthy");
 				}
 			}
 		}
@@ -233,23 +263,8 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 		 * because the other node has been promoted, which could happen if this
 		 * node was rebooting for a long enough time.
 		 */
-		if (couldContactMonitor)
+		if (needStateChange)
 		{
-			if (!keeper_ensure_current_state(keeper))
-			{
-				log_warn("pg_autoctl failed to ensure current state \"%s\": "
-						 "PostgreSQL %s running",
-						 NodeStateToString(keeperState->current_role),
-						 postgres->pgIsRunning ? "is" : "is not");
-			}
-		}
-
-		CHECK_FOR_FAST_SHUTDOWN;
-
-		if (keeperState->assigned_role != keeperState->current_role)
-		{
-			needStateChange = true;
-
 			if (!keeper_fsm_reach_assigned_state(keeper))
 			{
 				log_error("Failed to transition to state \"%s\", retrying... ",
@@ -258,6 +273,26 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 				transitionFailed = true;
 			}
 		}
+		else if (couldContactMonitor)
+		{
+			if (!keeper_ensure_current_state(keeper))
+			{
+				warnedOnCurrentIteration = true;
+				log_warn("pg_autoctl failed to ensure current state \"%s\": "
+						 "PostgreSQL %s running",
+						 NodeStateToString(keeperState->current_role),
+						 postgres->pgIsRunning ? "is" : "is not");
+			}
+			else if (warnedOnPreviousIteration)
+			{
+				log_info("pg_autoctl managed to ensure current state \"%s\": "
+						 "PostgreSQL %s running",
+						 NodeStateToString(keeperState->current_role),
+						 postgres->pgIsRunning ? "is" : "is not");
+			}
+		}
+
+		CHECK_FOR_FAST_SHUTDOWN;
 
 		/*
 		 * Even if a transition failed, we still write the state file to update
@@ -283,16 +318,21 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 		{
 			firstLoop = false;
 		}
+
+		/* advance the warnings "counters" */
+		if (warnedOnPreviousIteration)
+		{
+			warnedOnPreviousIteration = false;
+		}
+
+		if (warnedOnCurrentIteration)
+		{
+			warnedOnPreviousIteration = true;
+			warnedOnCurrentIteration = false;
+		}
 	}
 
-	log_info("pg_autoctl service stopping");
-
-	if (!remove_pidfile(config->pathnames.pid))
-	{
-		log_error("Failed to remove pidfile \"%s\"", config->pathnames.pid);
-	}
-
-	return true;
+	return keeper_service_stop(keeper);
 }
 
 
@@ -330,7 +370,7 @@ keeper_service_init(Keeper *keeper, pid_t *pid)
 	 * function cli_service_run calls into keeper_init(): we know that we could
 	 * read a keeper state file.
 	 */
-	if (file_exists(config->pathnames.init))
+	if (!config->monitorDisabled && file_exists(config->pathnames.init))
 	{
 		log_warn("The `pg_autoctl create` did not complete, completing now.");
 
@@ -350,6 +390,25 @@ keeper_service_init(Keeper *keeper, pid_t *pid)
 		return false;
 	}
 
+	return true;
+}
+
+
+/*
+ * keeper_service_stop stops the service and removes the pid file.
+ */
+bool
+keeper_service_stop(Keeper *keeper)
+{
+	KeeperConfig *config = &(keeper->config);
+
+	log_info("pg_autoctl service stopping");
+
+	if (!remove_pidfile(config->pathnames.pid))
+	{
+		log_error("Failed to remove pidfile \"%s\"", config->pathnames.pid);
+		return false;
+	}
 	return true;
 }
 
@@ -437,8 +496,10 @@ reload_configuration(Keeper *keeper)
 	if (file_exists(config->pathnames.config))
 	{
 		KeeperConfig newConfig = { 0 };
-		bool missing_pgdata_is_ok = true;
-		bool pg_is_not_running_is_ok = true;
+
+		bool missingPgdataIsOk = true;
+		bool pgIsNotRunningIsOk = true;
+		bool monitorDisabledIsOk = false;
 
 		/*
 		 * Set the same configuration and state file as the current config.
@@ -447,8 +508,9 @@ reload_configuration(Keeper *keeper)
 		strlcpy(newConfig.pathnames.state, config->pathnames.state, MAXPGPATH);
 
 		if (keeper_config_read_file(&newConfig,
-									missing_pgdata_is_ok,
-									pg_is_not_running_is_ok)
+									missingPgdataIsOk,
+									pgIsNotRunningIsOk,
+									monitorDisabledIsOk)
 			&& keeper_config_accept_new(config, &newConfig))
 		{
 			/*

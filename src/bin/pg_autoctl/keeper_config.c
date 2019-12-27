@@ -24,7 +24,7 @@
 							   config->role, KEEPER_ROLE)
 
 #define OPTION_AUTOCTL_MONITOR(config) \
-	make_strbuf_option("pg_autoctl", "monitor", "monitor", true, MAXCONNINFO, \
+	make_strbuf_option("pg_autoctl", "monitor", "monitor", false, MAXCONNINFO, \
 					   config->monitor_pguri)
 
 #define OPTION_AUTOCTL_FORMATION(config) \
@@ -208,10 +208,12 @@ keeper_config_set_pathnames_from_pgdata(ConfigFilePaths *pathnames,
  */
 void
 keeper_config_init(KeeperConfig *config,
-				   bool missing_pgdata_is_ok, bool pg_is_not_running_is_ok)
+				   bool missingPgdataIsOk, bool pgIsNotRunningIsOk)
 {
 	PostgresSetup pgSetup = { 0 };
 	IniOption keeperOptions[] = SET_INI_OPTIONS_ARRAY(config);
+
+	log_trace("keeper_config_init");
 
 	if (!ini_validate_options(keeperOptions))
 	{
@@ -228,8 +230,8 @@ keeper_config_init(KeeperConfig *config,
 
 	if (!pg_setup_init(&pgSetup,
 					   &(config->pgSetup),
-					   missing_pgdata_is_ok,
-					   pg_is_not_running_is_ok))
+					   missingPgdataIsOk,
+					   pgIsNotRunningIsOk))
 	{
 		log_error("Please fix your PostgreSQL setup per above messages");
 		exit(EXIT_CODE_BAD_CONFIG);
@@ -272,11 +274,32 @@ keeper_config_init(KeeperConfig *config,
  */
 bool
 keeper_config_read_file(KeeperConfig *config,
-						bool missing_pgdata_is_ok,
-						bool pg_not_running_is_ok)
+						bool missingPgdataIsOk,
+						bool pgIsNotRunningIsOk,
+						bool monitorDisabledIsOk)
+{
+
+	if (!keeper_config_read_file_skip_pgsetup(config, monitorDisabledIsOk))
+	{
+		/* errors have already been logged. */
+		return false;
+	}
+
+	return keeper_config_pgsetup_init(config,
+									  missingPgdataIsOk,
+									  pgIsNotRunningIsOk);
+}
+
+
+/*
+ * keeper_config_read_file_skip_pgsetup overrides values in given KeeperConfig
+ * with whatever values are read from given configuration filename.
+ */
+bool
+keeper_config_read_file_skip_pgsetup(KeeperConfig *config,
+									 bool monitorDisabledIsOk)
 {
 	const char *filename = config->pathnames.config;
-	PostgresSetup pgSetup = { 0 };
 	IniOption keeperOptions[] = SET_INI_OPTIONS_ARRAY(config);
 
 	log_debug("Reading configuration from %s", filename);
@@ -287,16 +310,45 @@ keeper_config_read_file(KeeperConfig *config,
 		return false;
 	}
 
+	/* take care of the special value for disabled monitor setup */
+	if (PG_AUTOCTL_MONITOR_IS_DISABLED(config))
+	{
+		config->monitorDisabled = true;
+
+		if (!monitorDisabledIsOk)
+		{
+			log_error("Monitor is disabled in the configuration");
+			return false;
+		}
+	}
+
 	if (!keeper_config_init_nodekind(config))
 	{
 		/* errors have already been logged. */
 		return false;
 	}
 
+	return true;
+}
+
+
+/*
+ * keeper_config_read_file_skip_pgsetup overrides values in given KeeperConfig
+ * with whatever values are read from given configuration filename.
+ */
+bool
+keeper_config_pgsetup_init(KeeperConfig *config,
+						   bool missingPgdataIsOk,
+						   bool pgIsNotRunningIsOk)
+{
+	PostgresSetup pgSetup = { 0 };
+
+	log_trace("keeper_config_pgsetup_init");
+
 	if (!pg_setup_init(&pgSetup,
 					   &config->pgSetup,
-					   missing_pgdata_is_ok,
-					   pg_not_running_is_ok))
+					   missingPgdataIsOk,
+					   pgIsNotRunningIsOk))
 	{
 		return false;
 	}
@@ -414,6 +466,8 @@ keeper_config_set_setting(KeeperConfig *config,
 	const char *filename = config->pathnames.config;
 	IniOption keeperOptions[] = SET_INI_OPTIONS_ARRAY(config);
 
+	log_trace("keeper_config_set_setting");
+
 	if (ini_set_setting(filename, keeperOptions, path, value))
 	{
 		PostgresSetup pgSetup = { 0 };
@@ -449,6 +503,8 @@ keeper_config_merge_options(KeeperConfig *config, KeeperConfig *options)
 {
 	IniOption keeperConfigOptions[] = SET_INI_OPTIONS_ARRAY(config);
 	IniOption keeperOptionsOptions[] = SET_INI_OPTIONS_ARRAY(options);
+
+	log_trace("keeper_config_merge_options");
 
 	if (ini_merge(keeperConfigOptions, keeperOptionsOptions))
 	{

@@ -10,8 +10,10 @@
 #ifndef MONITOR_H
 #define MONITOR_H
 
+#include <stdbool.h>
 
 #include "pgsql.h"
+#include "monitor_config.h"
 #include "state.h"
 
 
@@ -104,7 +106,8 @@ bool monitor_get_extension_version(Monitor *monitor,
 bool monitor_extension_update(Monitor *monitor, const char *targetVersion);
 bool monitor_ensure_extension_version(Monitor *monitor,
 									  MonitorExtensionVersion *version);
-
+bool ensure_monitor_pg_running(Monitor *monitor, struct MonitorConfig *mconfig);
+bool monitor_service_run(Monitor *monitor, struct MonitorConfig *mconfig);
 
 
 #endif /* MONITOR_H */

@@ -15,6 +15,7 @@
 
 #include "defaults.h"
 #include "log.h"
+#include "parsing.h"
 #include "pgsql.h"
 #include "signals.h"
 
@@ -33,7 +34,7 @@ static bool pgsql_alter_system_set(PGSQL *pgsql, GUC setting);
 static bool pgsql_get_current_setting(PGSQL *pgsql, char *settingName,
 									  char **currentValue);
 static int escape_conninfo_value(char *destination, const char *string);
-static void parsePgsrSyncStateAndWAL(void *ctx, PGresult *result);
+static void parsePgMetadata(void *ctx, PGresult *result);
 
 
 /*
@@ -254,6 +255,8 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 				if (PQstatus(connection) == CONNECTION_OK)
 				{
 					connectionOk = true;
+					log_info("Successfully connected to \"%s\"",
+							 pgsql->connectionString);
 				}
 				else
 				{
@@ -365,6 +368,7 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 {
 	PGconn *connection = NULL;
 	PGresult *result = NULL;
+	char debugParameters[BUFSIZE] = { 0 };
 
 	connection = pgsql_open_connection(pgsql);
 	if (connection == NULL)
@@ -373,11 +377,11 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 	}
 
 	log_debug("%s;", sql);
+
 	if (paramCount > 0)
 	{
 		int paramIndex = 0;
 		int remainingBytes = BUFSIZE;
-		char debugParameters[BUFSIZE] = { 0 };
 		char *writePointer = (char *) debugParameters;
 
 		for (paramIndex=0; paramIndex < paramCount; paramIndex++)
@@ -403,7 +407,28 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 						  paramCount, paramTypes, paramValues, NULL, NULL, 0);
 	if (!is_response_ok(result))
 	{
-		log_error("Failed to execute \"%s\": %s", sql, PQerrorMessage(connection));
+		char *sqlstate = PQresultErrorField(result, PG_DIAG_SQLSTATE);
+
+		char *message = PQerrorMessage(connection);
+		char *errorLines[BUFSIZE];
+		int lineCount = splitLines(message, errorLines, BUFSIZE);
+		int lineNumber = 0;
+
+		char *prefix =
+			pgsql->connectionType == PGSQL_CONN_MONITOR ? "Monitor" : "Postgres";
+
+		/*
+		 * PostgreSQL Error message might contain several lines. Log each of
+		 * them as a separate ERROR line here.
+		 */
+		for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
+		{
+			log_error("%s %s", prefix, errorLines[lineNumber]);
+		}
+
+		log_error("SQL query: %s", sql);
+		log_error("SQL params: %s", debugParameters);
+
 		PQclear(result);
 		clear_results(connection);
 		pgsql_finish(pgsql);
@@ -582,8 +607,6 @@ pgsql_create_replication_slot(PGSQL *pgsql, const char *slotName)
 	char *sql = "SELECT pg_create_physical_replication_slot($1)";
 	const Oid paramTypes[1] = { TEXTOID };
 	const char *paramValues[1] = { slotName };
-
-	log_info("Create replication slot \"%s\"", slotName);
 
 	return pgsql_execute_with_params(pgsql, sql,
 									 1, paramTypes, paramValues, NULL, NULL);
@@ -1329,52 +1352,83 @@ validate_connection_string(const char *connectionString)
 
 
 /*
- * pgsql_get_sync_state_and_wal_lag queries a primary PostgreSQL server to get
- * both the current pg_stat_replication.sync_state value and replication lag.
+ * pgsql_get_postgres_metadata returns several bits of information that we need
+ * to take decisions in the rest of the code:
  *
- * currentLSN is text representation of a 64 bit LSN value.
+ *  - config_file path (cache invalidation in case it changed)
+ *  - hba_file path (cache invalidation in case it changed)
+ *  - pg_is_in_recovery (primary or standby, as expected?)
+ *  - sync_state from pg_stat_replication when a primary
+ *  - current_lsn from the server
+ *
+ * With those metadata we can then check our expectations and take decisions in
+ * some cases. We can obtain all the metadata that we need easily enough in a
+ * single SQL query, so that's what we do.
  */
-typedef struct PgsrSyncAndWALContext
+typedef struct PgMetadata
 {
-	bool		parsedOk;
-	char		syncState[PGSR_SYNC_STATE_MAXLENGTH];
-	char        currentLSN[PG_LSN_MAXLENGTH];
-} PgsrSyncAndWALContext;
+	bool	parsedOk;
+	bool	pg_is_in_recovery;
+	char	syncState[PGSR_SYNC_STATE_MAXLENGTH];
+	char	currentLSN[PG_LSN_MAXLENGTH];
+} PgMetadata;
+
 
 bool
-pgsql_get_sync_state_and_current_lsn(PGSQL *pgsql, const char *slotName,
-								 	 char *pgsrSyncState, char *currentLSN,
-									 int maxLSNSize, bool missing_ok)
+pgsql_get_postgres_metadata(PGSQL *pgsql, const char *slotName,
+							bool *pg_is_in_recovery,
+							char *pgsrSyncState, char *currentLSN)
 {
-	PgsrSyncAndWALContext context = { 0 };
+	PgMetadata context = { 0 };
 	char *sql =
-		"select sync_state, "
-		"pg_current_wal_lsn() "
-		"from pg_replication_slots slot join pg_stat_replication rep "
-		"on rep.pid = slot.active_pid "
-		"where slot_name = $1";
+		/*
+		 * Make it so that we still have the current WAL LSN even in the case
+		 * where there's no replication slot in use by any standby.
+		 */
+		"select pg_is_in_recovery(),"
+		" coalesce(rep.sync_state, '') as sync_state,"
+		" case when pg_is_in_recovery()"
+		" then pg_last_wal_receive_lsn()"
+		" else pg_current_wal_lsn()"
+        " end as current_lsn"
+		" from (values(1)) as dummy"
+		" full outer join"
+		" ("
+		" select sync_state"
+		" from pg_replication_slots slot"
+		" join pg_stat_replication rep"
+		" on rep.pid = slot.active_pid"
+        " where slot_name = $1"
+		" ) as rep"
+		" on true";
 
 	const Oid paramTypes[1] = { TEXTOID };
 	const char *paramValues[1] = { slotName };
 	int paramCount = 1;
 
 	pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes, paramValues,
-							  &context, &parsePgsrSyncStateAndWAL);
+							  &context, &parsePgMetadata);
 
 	if (!context.parsedOk)
 	{
-		if (!missing_ok)
-		{
-			log_error(
-				"PostgreSQL primary server has lost track of its standby: "
-				"pg_stat_replication reports no client using the slot \"%s\".",
-				slotName);
-		}
+		log_error("Failed to parse the Postgres metadata");
 		return false;
 	}
 
-	strlcpy(pgsrSyncState, context.syncState, PGSR_SYNC_STATE_MAXLENGTH);
-	strlcpy(currentLSN, context.currentLSN, maxLSNSize);
+	*pg_is_in_recovery = context.pg_is_in_recovery;
+
+	/* the last two metadata items are opt-in */
+	if (pgsrSyncState != NULL)
+	{
+		strlcpy(pgsrSyncState, context.syncState, PGSR_SYNC_STATE_MAXLENGTH);
+	}
+
+	if (currentLSN != NULL)
+	{
+		strlcpy(currentLSN, context.currentLSN, PG_LSN_MAXLENGTH);
+	}
+
+	pgsql_finish(pgsql);
 
 	return true;
 }
@@ -1385,95 +1439,51 @@ pgsql_get_sync_state_and_current_lsn(PGSQL *pgsql, const char *slotName,
  * two columns from pg_stat_replication: sync_state and currentLSN.
  */
 static void
-parsePgsrSyncStateAndWAL(void *ctx, PGresult *result)
+parsePgMetadata(void *ctx, PGresult *result)
 {
-	PgsrSyncAndWALContext *context = (PgsrSyncAndWALContext *) ctx;
+	PgMetadata *context = (PgMetadata *) ctx;
 
-	if (PQnfields(result) != 2)
+	if (PQnfields(result) != 3)
 	{
-		log_error("Query returned %d columns, expected 2", PQnfields(result));
+		log_error("Query returned %d columns, expected 3", PQnfields(result));
 		context->parsedOk = false;
 		return;
 	}
 
-	switch (PQntuples(result))
+	if (PQntuples(result) != 1)
 	{
-		case 0:
-			context->parsedOk = false;
-			return;
-
-		case 1:
-		{
-			/* we trust our length and PostgreSQL results */
-			strlcpy(context->syncState,
-					PQgetvalue(result, 0, 0),
-					PGSR_SYNC_STATE_MAXLENGTH);
-
-			strlcpy(context->currentLSN,
-					PQgetvalue(result, 0, 1),
-					PG_LSN_MAXLENGTH);
-
-			context->parsedOk = true;
-			return;
-		}
-
-		default:
-			context->parsedOk = false;
-			log_error("parsePgsrSyncStateAndWAL received more than 1 result");
-			return;
-	}
-}
-
-
-/*
- * pgsql_get_received_lsn_from_standby queries a standby PostgreSQL server to get the
- * received_lsn value from the pg_stat_wal_receiver system view.
- *
- * received_lsn is the latest lsn known to be received and flushed to the disk. It does
- * not specify if it is applied or not. Caller should have allocated necessary memory
- * for result value.
- *
- * We are collecting the latest WAL entry that is received successfully. It will be
- * eventually applied to the receiving database.  This information will later be
- * used by monitor to decide which secondary has the latest data.
- *
- * Once a WAL is received and stored, it would be replayed to ensure database state
- * is current just before the promotion time. Therefore when we look from monitor side
- * it is the same if the WAL is just received and stored, or already applied.
- *
- * Related PostgreSQL documentation at
- * https://www.postgresql.org/docs/current/warm-standby.html#STANDBY-SERVER-OPERATION
- * states that
- *   Standby mode is exited and the server switches to normal operation when
- *   pg_ctl promote is run or a trigger file is found (trigger_file). Before failover,
- *   any WAL immediately available in the archive or in pg_wal will be restored,
- *   but no attempt is made to connect to the master.
- */
-bool
-pgsql_get_received_lsn_from_standby(PGSQL *pgsql, char *receivedLSN, int maxLSNSize)
-{
-	SingleValueResultContext context;
-	char *sql = "SELECT pg_last_wal_receive_lsn()";
-
-	context.resultType = PGSQL_RESULT_STRING;
-	context.parsedOk = false;
-
-	log_trace("pgsql_get_received_lsn_from_standby : running %s", sql);
-
-	pgsql_execute_with_params(pgsql, sql, 0, NULL, NULL,
-							  &context, &parseSingleValueResult);
-
-	if (!context.parsedOk)
-	{
-		log_error("PostgreSQL cannot reach the primary server: "
-				  "the system view pg_stat_wal_receiver has no rows.");
-		return false;
+		log_error("Query returned %d rows, expected 1", PQntuples(result));
+		context->parsedOk = false;
+		return;
 	}
 
-	strlcpy(receivedLSN, context.strVal, maxLSNSize);
+	context->pg_is_in_recovery = strcmp(PQgetvalue(result, 0, 0), "t") == 0;
 
-	return true;
+	if (!PQgetisnull(result, 0, 1))
+	{
+		char *value = PQgetvalue(result, 0, 1);
+
+		strlcpy(context->syncState, value, PGSR_SYNC_STATE_MAXLENGTH);
+	}
+	else
+	{
+		context->syncState[0] = '\0';
+	}
+
+	if (!PQgetisnull(result, 0, 2))
+	{
+		char *value = PQgetvalue(result, 0, 2);
+
+		strlcpy(context->currentLSN, value, PG_LSN_MAXLENGTH);
+	}
+	else
+	{
+		context->currentLSN[0] = '\0';
+	}
+
+	context->parsedOk = true;
 }
+
 
 /*
  * LISTEN/NOTIFY support.

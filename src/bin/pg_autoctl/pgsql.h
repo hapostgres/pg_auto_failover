@@ -20,9 +20,11 @@
  * OID values from PostgreSQL src/include/catalog/pg_type.h
  */
 #define BOOLOID 16
+#define NAMEOID 19
 #define INT4OID 23
 #define INT8OID 20
 #define TEXTOID 25
+#define LSNOID 3220
 
 /*
  * Maximum connection info length as used in walreceiver.h
@@ -171,10 +173,10 @@ int make_conninfo_field_str(char *destination, const char *key, const char *valu
 int make_conninfo_field_int(char *destination, const char *key, int value);
 bool validate_connection_string(const char *connectionString);
 
-bool pgsql_get_sync_state_and_current_lsn(PGSQL *pgsql, const char *slotName,
-									  	  char *pgsrSyncState, char *currentLSN,
-										  int maxLSNSize, bool missing_ok);
-bool pgsql_get_received_lsn_from_standby(PGSQL *pgsql, char *receivedLSN, int maxLSNSize);
+bool pgsql_get_postgres_metadata(PGSQL *pgsql, const char *slotName,
+								 bool *pg_is_in_recovery,
+								 char *pgsrSyncState, char *currentLSN);
+
 bool pgsql_listen(PGSQL *pgsql, char *channels[]);
 
 bool pgsql_alter_extension_update_to(PGSQL *pgsql,

@@ -97,8 +97,7 @@ pg_ctl_version(const char *pg_ctl_path)
 bool
 pg_controldata(PostgresSetup *pgSetup, bool missing_ok)
 {
-	bool success;
-	char pg_controldata[MAXPGPATH];
+	char pg_controldata_path[MAXPGPATH];
 	Program prog;
 
 	if (pgSetup->pgdata[0] == '\0' || pgSetup->pg_ctl[0] == '\0')
@@ -107,33 +106,59 @@ pg_controldata(PostgresSetup *pgSetup, bool missing_ok)
 		return false;
 	}
 
-	path_in_same_directory(pgSetup->pg_ctl, "pg_controldata", pg_controldata);
-	log_debug("%s %s", pg_controldata, pgSetup->pgdata);
+	path_in_same_directory(pgSetup->pg_ctl, "pg_controldata", pg_controldata_path);
+	log_debug("%s %s", pg_controldata_path, pgSetup->pgdata);
 
-	/* we parse the output of pg_controldata, make sure it's as expected */
+	/* We parse the output of pg_controldata, make sure it's as expected */
 	setenv("LANG", "C", 1);
-	prog = run_program(pg_controldata, pgSetup->pgdata, NULL);
+	prog = run_program(pg_controldata_path, pgSetup->pgdata, NULL);
 
 	if (prog.returnCode == 0)
 	{
-		success = parse_controldata(&pgSetup->control, prog.stdout);
+		if (prog.stdout == NULL)
+		{
+			/* happens sometimes, and I don't know why */
+			log_warn("Got empty output from `%s %s`, trying again in 1s",
+					 pg_controldata_path, pgSetup->pgdata);
+			sleep(1);
+
+			return pg_controldata(pgSetup, missing_ok);
+		}
+
+		if (!parse_controldata(&pgSetup->control, prog.stdout))
+		{
+			log_error("%s %s", pg_controldata_path, pgSetup->pgdata);
+			log_warn("Failed to parse pg_controldata output:\n%s", prog.stdout);
+			free_program(&prog);
+			return false;
+		}
+
+		free_program(&prog);
+		return true;
 	}
 	else
 	{
-		if (missing_ok)
+		if (!missing_ok)
 		{
-			success = true;
-		}
-		else
-		{
-			success = false;
-			log_error("Failed to run \"%s\" on \"%s\": %s",
-					  pg_controldata, pgSetup->pgdata, prog.stderr);
-		}
-	}
-	free_program(&prog);
+			char *errorLines[BUFSIZE];
+			int lineCount = splitLines(prog.stderr, errorLines, BUFSIZE);
+			int lineNumber = 0;
 
-	return success;
+			for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
+			{
+				/*
+				 * pg_controldata typically errors out a single line prefixed
+				 * with the name of the binary.
+				 */
+				log_error("%s", errorLines[lineNumber]);
+			}
+			log_error("Failed to run \"%s\" on \"%s\", see above for details",
+					  pg_controldata_path, pgSetup->pgdata);
+		}
+		free_program(&prog);
+
+		return missing_ok;
+	}
 }
 
 
@@ -853,7 +878,7 @@ pg_ctl_restart(const char *pg_ctl, const char *pgdata)
 								  NULL);
 	int returnCode = program.returnCode;
 
-	log_debug("%s restart --pgdata %s --silient --wait --mode fast [%d]",
+	log_debug("%s restart --pgdata %s --silent --wait --mode fast [%d]",
 			  pg_ctl, pgdata, returnCode);
 
 	if (returnCode != 0)
@@ -937,7 +962,7 @@ pg_setup_standby_mode(uint32_t pg_control_version,
 		/*
 		 * Starting in Postgres 12 we need to add our recovery configuration to
 		 * the main postgresql.conf file and create an empty standby.signal
-		 * file to trigger starting the server in stanby mode.
+		 * file to trigger starting the server in standby mode.
 		 */
 		return pg_write_standby_signal(configFilePath,
 									   pgdata,
@@ -1067,32 +1092,13 @@ prepare_primary_conninfo(char *primaryConnInfo, int primaryConnInfoSize,
 
 	buffer = createPQExpBuffer();
 
-	if (!escape_recovery_conf_string(escaped, BUFSIZE, primaryHost))
-	{
-		/* errors have already been logged. */
-		destroyPQExpBuffer(buffer);
-		return false;
-	}
-	appendPQExpBuffer(buffer, "host = %s", escaped);
-	appendPQExpBuffer(buffer, "port = %d", primaryPort);
-
-	if (!escape_recovery_conf_string(escaped, BUFSIZE, replicationUsername))
-	{
-		/* errors have already been logged. */
-		destroyPQExpBuffer(buffer);
-		return false;
-	}
-	appendPQExpBuffer(buffer, "user = %s", escaped);
+	appendPQExpBuffer(buffer, "host=%s", primaryHost);
+	appendPQExpBuffer(buffer, " port=%d", primaryPort);
+	appendPQExpBuffer(buffer, " user=%s", replicationUsername);
 
 	if (replicationPassword != NULL)
 	{
-		if (!escape_recovery_conf_string(escaped, BUFSIZE, replicationPassword))
-		{
-			/* errors have already been logged. */
-			destroyPQExpBuffer(buffer);
-			return false;
-		}
-		appendPQExpBuffer(buffer, "password = %s", escaped);
+		appendPQExpBuffer(buffer, " password=%s", replicationPassword);
 	}
 
 	/* memory allocation could have failed while building string */
@@ -1103,8 +1109,15 @@ prepare_primary_conninfo(char *primaryConnInfo, int primaryConnInfoSize,
 		return false;
 	}
 
+	if (!escape_recovery_conf_string(escaped, BUFSIZE, buffer->data))
+ 	{
+ 		/* errors have already been logged. */
+ 		destroyPQExpBuffer(buffer);
+ 		return false;
+ 	}
+
 	/* now copy the buffer into primaryConnInfo for the caller */
-	size = snprintf(primaryConnInfo, primaryConnInfoSize, "%s", buffer->data);
+	size = snprintf(primaryConnInfo, primaryConnInfoSize, "%s", escaped);
 
 	if (size == -1 || size > primaryConnInfoSize)
 	{

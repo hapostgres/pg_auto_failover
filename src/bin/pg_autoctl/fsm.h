@@ -36,8 +36,6 @@ typedef struct KeeperFSMTransition
 /* src/bin/pg_autoctl/fsm.c */
 extern KeeperFSMTransition KeeperFSM[];
 
-bool read_pidfile(const char *pidfile, pid_t *pid);
-
 bool fsm_init_primary(Keeper *keeper);
 bool fsm_prepare_replication(Keeper *keeper);
 bool fsm_disable_replication(Keeper *keeper);

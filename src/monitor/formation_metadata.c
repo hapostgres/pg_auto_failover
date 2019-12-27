@@ -37,7 +37,7 @@ PG_FUNCTION_INFO_V1(enable_secondary);
 PG_FUNCTION_INFO_V1(disable_secondary);
 PG_FUNCTION_INFO_V1(set_formation_number_sync_standbys);
 
-bool SetFormationNumberSyncStandbys(const char *formationId, int numberSyncStanbys);
+bool SetFormationNumberSyncStandbys(const char *formationId, int numberSyncStandbys);
 Datum AutoFailoverFormationGetDatum(FunctionCallInfo fcinfo, AutoFailoverFormation *formation);
 
 /*
@@ -92,8 +92,8 @@ GetFormation(const char *formationId)
 		Datum opt_secondary =
 			heap_getattr(heapTuple, Anum_pgautofailover_formation_opt_secondary,
 						 tupleDescriptor, &isNull);
-		Datum number_sync_stanbys =
-				heap_getattr(heapTuple, Anum_pgautofailover_formation_number_sync_stanbys,
+		Datum number_sync_standbys =
+				heap_getattr(heapTuple, Anum_pgautofailover_formation_number_sync_standbys,
 							 tupleDescriptor, &isNull);
 
 		formation =
@@ -103,7 +103,7 @@ GetFormation(const char *formationId)
 		formation->kind = FormationKindFromString(TextDatumGetCString(kind));
 		strlcpy(formation->dbname, NameStr(*DatumGetName(dbname)), NAMEDATALEN);
 		formation->opt_secondary = DatumGetBool(opt_secondary);
-		formation->number_sync_stanbys = DatumGetInt32(number_sync_stanbys);
+		formation->number_sync_standbys = DatumGetInt32(number_sync_standbys);
 
 		MemoryContextSwitchTo(spiContext);
 	}
@@ -133,11 +133,11 @@ create_formation(PG_FUNCTION_ARGS)
 	FormationKind formationKind = FormationKindFromString(formationKindCString);
 	Name formationDBNameName = PG_GETARG_NAME(2);
 	bool formationOptionSecondary = PG_GETARG_BOOL(3);
-	int  formationNumberSyncStanbys = PG_GETARG_INT32(4);
+	int  formationNumberSyncStandbys = PG_GETARG_INT32(4);
 	AutoFailoverFormation *formation = NULL;
 	Datum resultDatum = 0;
 
-	AddFormation(formationId, formationKind, formationDBNameName, formationOptionSecondary, formationNumberSyncStanbys);
+	AddFormation(formationId, formationKind, formationDBNameName, formationOptionSecondary, formationNumberSyncStandbys);
 
 	formation = GetFormation(formationId);
 	resultDatum = AutoFailoverFormationGetDatum(fcinfo, formation);
@@ -207,14 +207,14 @@ disable_secondary(PG_FUNCTION_ARGS)
  */
 void
 AddFormation(const char *formationId,
-			 FormationKind kind, Name dbname, bool optionSecondary, int numberSyncStanbys)
+			 FormationKind kind, Name dbname, bool optionSecondary, int numberSyncStandbys)
 {
 	Oid argTypes[] = {
 		TEXTOID, /* formationid */
 		TEXTOID, /* kind */
 		NAMEOID, /* dbname */
 		BOOLOID, /* opt_secondary */
-		INT4OID  /* number_sync_stanbys */
+		INT4OID  /* number_sync_standbys */
 	};
 
 	Datum argValues[] = {
@@ -222,7 +222,7 @@ AddFormation(const char *formationId,
 		CStringGetTextDatum(FormationKindToString(kind)), /* kind */
 		NameGetDatum(dbname),                             /* dbname */
 		BoolGetDatum(optionSecondary),                    /* opt_secondary */
-		Int32GetDatum(numberSyncStanbys)				  /* number_sync_stanbys */
+		Int32GetDatum(numberSyncStandbys)				  /* number_sync_standbys */
 	};
 
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
@@ -230,7 +230,7 @@ AddFormation(const char *formationId,
 
 	const char *insertQuery =
 		"INSERT INTO " AUTO_FAILOVER_FORMATION_TABLE
-		" (formationid, kind, dbname, opt_secondary, number_sync_stanbys)"
+		" (formationid, kind, dbname, opt_secondary, number_sync_standbys)"
 		" VALUES ($1, $2, $3, $4, $5)";
 
 	SPI_connect();
@@ -537,7 +537,7 @@ set_formation_number_sync_standbys(PG_FUNCTION_ARGS)
 	if (number_sync_standbys < 0)
 	{
 		ereport(ERROR, (ERRCODE_INVALID_PARAMETER_VALUE,
-						errmsg("invalid value for  number_sync_stanbys \"%d\" "
+						errmsg("invalid value for  number_sync_standbys \"%d\" "
 							   "expected a non-negative integer", number_sync_standbys)));
 	}
 
@@ -555,12 +555,12 @@ bool
 SetFormationNumberSyncStandbys(const char *formationId, int numberSyncStandbys)
 {
 	Oid argTypes[] = {
-			INT4OID, /* numberSyncStanbys */
+			INT4OID, /* numberSyncStandbys */
 			TEXTOID	 /* formationId */
 	};
 
 	Datum argValues[] = {
-			Int32GetDatum(numberSyncStandbys), /* numberSyncStanbys */
+			Int32GetDatum(numberSyncStandbys), /* numberSyncStandbys */
 			CStringGetTextDatum(formationId)  /* formationId */
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
@@ -611,7 +611,7 @@ AutoFailoverFormationGetDatum(FunctionCallInfo fcinfo, AutoFailoverFormation *fo
 	values[1] = CStringGetTextDatum(FormationKindToString(formation->kind));
 	values[2] = CStringGetDatum(formation->dbname);
 	values[3] = BoolGetDatum(formation->opt_secondary);
-	values[4] = Int32GetDatum(formation->number_sync_stanbys);
+	values[4] = Int32GetDatum(formation->number_sync_standbys);
 
 	resultTypeClass = get_call_result_type(fcinfo, NULL, &resultDescriptor);
 	if (resultTypeClass != TYPEFUNC_COMPOSITE)

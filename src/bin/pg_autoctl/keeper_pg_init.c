@@ -41,17 +41,55 @@ bool keeperInitWarnings = false;
 
 static KeeperStateInit initState = { 0 };
 
+static bool keeper_pg_init_fsm(Keeper *keeper, KeeperConfig *config);
+static bool keeper_pg_init_and_register(Keeper *keeper, KeeperConfig *config);
 static bool reach_initial_state(Keeper *keeper);
-
 static bool wait_until_primary_is_ready(Keeper *config,
 										MonitorAssignedState *assignedState);
-
 static bool keeper_pg_init_node_active(Keeper *keeper);
 
+
 /*
- * keeper_pg_init initialises a pg_autoctl keeper and its local PostgreSQL
- * instance. Registering a PostgreSQL instance to the monitor is a 3 states
- * story:
+ * keeper_pg_init initializes a pg_autoctl keeper and its local PostgreSQL.
+ *
+ * Depending on whether we have a monitor or not in the config (see
+ * --without-monitor), then we call into keeper_pg_init_and_register or
+ * keeper_pg_init_fsm.
+ */
+bool
+keeper_pg_init(Keeper *keeper, KeeperConfig *config)
+{
+	log_trace("keeper_pg_init: monitor is %s",
+			  config->monitorDisabled ? "disabled" : "enabled" );
+
+	if (config->monitorDisabled)
+	{
+		return keeper_pg_init_fsm(keeper, config);
+	}
+	else
+	{
+		return keeper_pg_init_and_register(keeper, config);
+	}
+}
+
+
+/*
+ * keeper_pg_init_fsm initializes the keeper's local FSM and does nothing more.
+ * It's only intended to be used when we are not using a monitor, which means
+ * we're going to expose our FSM driving as an HTTP API, and sit there waiting
+ * for orders from another software.
+ */
+static bool
+keeper_pg_init_fsm(Keeper *keeper, KeeperConfig *config)
+{
+	return keeper_init_fsm(keeper, config);
+}
+
+
+/*
+ * keeper_pg_init_and_register initialises a pg_autoctl keeper and its local
+ * PostgreSQL instance. Registering a PostgreSQL instance to the monitor is a 3
+ * states story:
  *
  * - register as INIT, the monitor decides your role (primary or secondary),
  *   and the keeper only does that when the local PostgreSQL instance does not
@@ -69,8 +107,8 @@ static bool keeper_pg_init_node_active(Keeper *keeper);
  * the first loop when the keeper service starts. Once `pg_autoctl create` is
  * done, PostgreSQL is known to be running in the proper state.
  */
-bool
-keeper_pg_init(Keeper *keeper, KeeperConfig *config)
+static bool
+keeper_pg_init_and_register(Keeper *keeper, KeeperConfig *config)
 {
 	/*
 	 * The initial state we may register in depend on the current PostgreSQL
@@ -91,10 +129,20 @@ keeper_pg_init(Keeper *keeper, KeeperConfig *config)
 
 	if (file_exists(config->pathnames.state))
 	{
-		log_fatal("The state file \"%s\" exists and there's no init in progress",
-				  config->pathnames.state);
-		log_info("HINT: use `pg_autoctl run` to start the service.");
-		return false;
+		if (createAndRun)
+		{
+			if (!keeper_init(keeper, config))
+			{
+				return false;
+			}
+		}
+		else
+		{
+			log_fatal("The state file \"%s\" exists and "
+					  "there's no init in progress", config->pathnames.state);
+			log_info("HINT: use `pg_autoctl run` to start the service.");
+		}
+		return createAndRun;
 	}
 
 	if (postgresInstanceExists
@@ -523,6 +571,8 @@ create_database_and_extension(Keeper *keeper)
 	char *pg_regress_sock_dir = getenv("PG_REGRESS_SOCK_DIR");
 
 	char hbaFilePath[MAXPGPATH];
+
+	log_trace("create_database_and_extension");
 
 	/* we didn't start PostgreSQL yet, also we just ran initdb */
 	snprintf(hbaFilePath, MAXPGPATH, "%s/pg_hba.conf", pgSetup->pgdata);

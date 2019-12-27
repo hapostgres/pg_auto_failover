@@ -108,9 +108,11 @@ static void
 cli_keeper_run(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
-	bool missing_pgdata_is_ok = true;
-	bool pg_is_not_running_is_ok = true;
 	pid_t pid = 0;
+
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = true;
 
 	keeper.config = keeperOptions;
 
@@ -123,6 +125,13 @@ cli_keeper_run(int argc, char **argv)
 	 * that loop, we need to install our signal handlers and pidfile prior to
 	 * getting there.
 	 */
+	if (!keeper_config_read_file_skip_pgsetup(&(keeper.config),
+											  monitorDisabledIsOk))
+	{
+		/* errors have already been logged. */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
 	if (!keeper_service_init(&keeper, &pid))
 	{
 		log_fatal("Failed to initialize pg_auto_failover service, "
@@ -130,9 +139,13 @@ cli_keeper_run(int argc, char **argv)
 		exit(EXIT_CODE_KEEPER);
 	}
 
-	keeper_config_read_file(&(keeper.config),
-							missing_pgdata_is_ok,
-							pg_is_not_running_is_ok);
+	if (!keeper_config_pgsetup_init(&(keeper.config),
+									missingPgdataIsOk,
+									pgIsNotRunningIsOk))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
 
 	if (!keeper_init(&keeper, &keeper.config))
 	{
@@ -140,13 +153,29 @@ cli_keeper_run(int argc, char **argv)
 		exit(EXIT_CODE_PGCTL);
 	}
 
-	if (!keeper_check_monitor_extension_version(&keeper))
+	if (keeper.config.monitorDisabled)
 	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_MONITOR);
+		/*
+		 * At the moment, we have nothing to do here. Later we might want to
+		 * open an HTTPd service and wait for API calls.
+		 */
+		(void) keeper_service_stop(&keeper);
 	}
+	else
+	{
+		/*
+		 * Start with a monitor, so check everything is in order, then start
+		 * the HTTPd service, and finally the main monitor node_active protocol
+		 * loop.
+		 */
+		if (!keeper_check_monitor_extension_version(&keeper))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_MONITOR);
+		}
 
-	keeper_service_run(&keeper, &pid);
+		keeper_service_run(&keeper, &pid);
+	}
 }
 
 
@@ -162,14 +191,12 @@ cli_monitor_run(int argc, char **argv)
 	MonitorConfig mconfig = { 0 };
 	Monitor monitor = { 0 };
 	MonitorExtensionVersion version = { 0 };
-	char postgresUri[MAXCONNINFO];
 	bool missingPgdataIsOk = false;
 	bool pgIsNotRunningIsOk = true;
 	char connInfo[MAXCONNINFO];
 	char *channels[] = { "log", "state", NULL };
 
-	if (!monitor_config_init_from_pgsetup(&monitor,
-										  &mconfig,
+	if (!monitor_config_init_from_pgsetup(&mconfig,
 										  &kconfig.pgSetup,
 										  missingPgdataIsOk,
 										  pgIsNotRunningIsOk))
@@ -181,60 +208,7 @@ cli_monitor_run(int argc, char **argv)
 	pg_setup_get_local_connection_string(&(mconfig.pgSetup), connInfo);
 	monitor_init(&monitor, connInfo);
 
-	if (!pg_is_running(mconfig.pgSetup.pg_ctl, mconfig.pgSetup.pgdata))
-	{
-		log_info("Postgres is not running, starting postgres");
-
-		if (!pg_ctl_start(mconfig.pgSetup.pg_ctl,
-						  mconfig.pgSetup.pgdata,
-						  mconfig.pgSetup.pgport,
-						  mconfig.pgSetup.listen_addresses))
-		{
-			log_error("Failed to start PostgreSQL, see above for details");
-			exit(EXIT_CODE_PGCTL);
-		}
-	}
-
-	log_info("PostgreSQL is running in \"%s\" on port %d",
-			 mconfig.pgSetup.pgdata, mconfig.pgSetup.pgport);
-
-	/* Check version compatibility */
-	if (!monitor_ensure_extension_version(&monitor, &version))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_MONITOR);
-	}
-
-	/* Now get the the Monitor URI to display it to the user, and move along */
-	if (monitor_config_get_postgres_uri(&mconfig, postgresUri, MAXCONNINFO))
-	{
-		log_info("pg_auto_failover monitor is ready at %s", postgresUri);
-	}
-
-	log_info("Contacting the monitor to LISTEN to its events.");
- 	pgsql_listen(&(monitor.pgsql), channels);
-
-	/*
-	 * Main loop for notifications.
-	 */
-	for (;;)
-	{
-		if (!monitor_get_notifications(&monitor))
-		{
-			log_warn("Re-establishing connection. We might miss notifications.");
-			pgsql_finish(&(monitor.pgsql));
-
-			pgsql_listen(&(monitor.pgsql), channels);
-
-			/* skip sleeping */
-			continue;
-		}
-
-		sleep(PG_AUTOCTL_MONITOR_SLEEP_TIME);
-	}
-	pgsql_finish(&(monitor.pgsql));
-
-	return;
+	(void) monitor_service_run(&monitor, &mconfig);
 }
 
 

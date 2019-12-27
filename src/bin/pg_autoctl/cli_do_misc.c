@@ -425,10 +425,8 @@ keeper_cli_destroy_node(int argc, char **argv)
 	Keeper keeper = { 0 };
 	KeeperConfig config = keeperOptions;
 
-	bool missing_pgdata_is_ok = true;
-	bool pg_is_not_running_is_ok = true;
-
-	if (!keeper_config_set_pathnames_from_pgdata(&config.pathnames, config.pgSetup.pgdata))
+	if (!keeper_config_set_pathnames_from_pgdata(&config.pathnames,
+												 config.pgSetup.pgdata))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_ARGS);
@@ -443,7 +441,7 @@ keeper_cli_destroy_node(int argc, char **argv)
 			bool missingPgdataIsOk = true;
 			bool pgIsNotRunningIsOk = true;
 
-			if (!monitor_config_init_from_pgsetup(&monitor, &mconfig,
+			if (!monitor_config_init_from_pgsetup(&mconfig,
 												  &config.pgSetup,
 												  missingPgdataIsOk,
 												  pgIsNotRunningIsOk))
@@ -459,9 +457,18 @@ keeper_cli_destroy_node(int argc, char **argv)
 
 		case PG_AUTOCTL_ROLE_KEEPER:
 		{
-			keeper_config_read_file(&config,
-									missing_pgdata_is_ok,
-									pg_is_not_running_is_ok);
+			bool missingPgdataIsOk = true;
+			bool pgIsNotRunningIsOk = true;
+			bool monitorDisabledIsOk = true;
+
+			if (!keeper_config_read_file(&config,
+										 missingPgdataIsOk,
+										 pgIsNotRunningIsOk,
+										 monitorDisabledIsOk))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
 
 			keeper_cli_destroy_keeper_node(&keeper, &config);
 			break;

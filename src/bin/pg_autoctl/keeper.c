@@ -13,15 +13,13 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "parson.h"
 
 #include "file_utils.h"
 #include "keeper.h"
 #include "keeper_config.h"
 #include "pgsetup.h"
 #include "state.h"
-
-
-static bool keeper_get_replication_state(Keeper *keeper);
 
 
 /*
@@ -38,9 +36,12 @@ keeper_init(Keeper *keeper, KeeperConfig *config)
 
 	local_postgres_init(&keeper->postgres, pgSetup);
 
-	if (!monitor_init(&keeper->monitor, config->monitor_pguri))
+	if (!config->monitorDisabled)
 	{
-		return false;
+		if (!monitor_init(&keeper->monitor, config->monitor_pguri))
+		{
+			return false;
+		}
 	}
 
 	if (!keeper_load_state(keeper))
@@ -92,7 +93,10 @@ keeper_update_state(Keeper *keeper, int node_id, int group_id,
 	KeeperStateData *keeperState = &(keeper->state);
 	uint64_t now = time(NULL);
 
-	keeperState->last_monitor_contact = now;
+	if (update_last_monitor_contact)
+	{
+		keeperState->last_monitor_contact = now;
+	}
 	keeperState->current_node_id = node_id;
 	keeperState->current_group = group_id;
 	keeperState->assigned_role = state;
@@ -468,6 +472,30 @@ keeper_update_pg_state(Keeper *keeper)
 		 */
 		pg_setup_get_local_connection_string(pgSetup, connInfo);
 		pgsql_init(pgsql, connInfo, PGSQL_CONN_LOCAL);
+
+		/*
+		 * Update our Postgres metadata now.
+		 *
+		 * First, update our cache of file path locations for Postgres
+		 * configuration files (including HBA), in case it's been moved to
+		 * somewhere else. This could happen when using the debian/ubuntu
+		 * pg_createcluster command on an already existing cluster, for
+		 * instance.
+		 *
+		 * Also update our view of pg_is_in_recovery, the replication sync
+		 * state when we are a primary with a standby currently using our
+		 * replication slot, and our current LSN position.
+		 *
+		 */
+		if (!pgsql_get_postgres_metadata(pgsql,
+										 config->replication_slot_name,
+										 &pgSetup->is_in_recovery,
+										 postgres->pgsrSyncState,
+										 postgres->currentLSN))
+		{
+			log_error("Failed to update the local Postgres metadata");
+			return false;
+		}
 	}
 	else
 	{
@@ -481,19 +509,42 @@ keeper_update_pg_state(Keeper *keeper)
 	 */
 	switch (keeperState->current_role)
 	{
-		case PRIMARY_STATE:
 		case WAIT_PRIMARY_STATE:
+		{
+			/* we don't expect to have a streaming replica */
+			return postgres->pgIsRunning;
+		}
+
+		case PRIMARY_STATE:
+		{
+			/*
+			 * We expect to be able to read the current LSN, as always when
+			 * Postgres is running, and we also expect replication to be in
+			 * place when in PRIMARY state.
+			 *
+			 * On the primary, we use pg_stat_replication.sync_state to have an
+			 * idea of how the replication is going. The query we use in
+			 * pgsql_get_postgres_metadata should always return a non-empty
+			 * string when we are a PRIMARY and our standby is connected.
+			 */
+			return postgres->pgIsRunning
+				&& !IS_EMPTY_STRING_BUFFER(postgres->currentLSN)
+				&& !IS_EMPTY_STRING_BUFFER(postgres->pgsrSyncState);
+		}
+
 		case SECONDARY_STATE:
 		case CATCHINGUP_STATE:
 		{
+			/* pg_stat_replication.sync_state is only available upstream */
 			return postgres->pgIsRunning
-				&& keeper_get_replication_state(keeper);
+				&& !IS_EMPTY_STRING_BUFFER(postgres->currentLSN);
 		}
 
 		default:
 			/* we don't need to check replication state in those states */
 			break;
 	}
+
 	return true;
 }
 
@@ -553,56 +604,6 @@ keeper_restart_postgres(Keeper *keeper)
 
 
 /*
- * keeper_get_replication_state connects to the local PostgreSQL instance and
- * fetches replication related information: pg_stat_replication.sync_state and
- * WAL lag.
- */
-static bool
-keeper_get_replication_state(Keeper *keeper)
-{
-	KeeperStateData *keeperState = &(keeper->state);
-	KeeperConfig *config = &(keeper->config);
-	PostgresSetup *pgSetup = &(keeper->postgres.postgresSetup);
-	LocalPostgresServer *postgres = &(keeper->postgres);
-
-	PGSQL *pgsql = &(postgres->sqlClient);
-	bool missingStateOk = keeperState->current_role == WAIT_PRIMARY_STATE;
-
-	bool success = false;
-
-	/* figure out if we are in recovery or not */
-	if (!pgsql_is_in_recovery(pgsql, &pgSetup->is_in_recovery))
-	{
-		/*
-		 * errors have been logged already, probably failed to connect.
-		 */
-		pgsql_finish(pgsql);
-		return false;
-	}
-
-	if (pg_setup_is_primary(pgSetup))
-	{
-		success =
-			pgsql_get_sync_state_and_current_lsn(
-				pgsql,
-				config->replication_slot_name,
-				postgres->pgsrSyncState,
-				postgres->currentLSN,
-				PG_LSN_MAXLENGTH,
-				missingStateOk);
-	}
-	else
-	{
-		success = pgsql_get_received_lsn_from_standby(pgsql, postgres->currentLSN,
-													  PG_LSN_MAXLENGTH);
-	}
-	pgsql_finish(pgsql);
-
-	return success;
-}
-
-
-/*
  * keeper_check_monitor_extension_version checks that the monitor we connect to
  * has an extension version compatible with our expectations.
  */
@@ -636,6 +637,78 @@ keeper_check_monitor_extension_version(Keeper *keeper)
 	{
 		log_info("The version of extenstion \"%s\" is \"%s\" on the monitor",
 				 PG_AUTOCTL_MONITOR_EXTENSION_NAME, version.installedVersion);
+	}
+
+	return true;
+}
+
+
+/*
+ * keeper_init_fsm initializes the keeper's local FSM and does nothing more.
+ *
+ * It's only intended to be used when we are not using a monitor, which means
+ * we're going to expose our FSM driving as an HTTP API, and sit there waiting
+ * for orders from another software.
+ *
+ * The function is modeled to look like keeper_register_and_init with the
+ * difference that we don't have a monitor to talk to.
+ */
+bool
+keeper_init_fsm(Keeper *keeper, KeeperConfig *config)
+{
+	/* fake the initial state provided at monitor registration time */
+	MonitorAssignedState assignedState = {
+		.nodeId = -1,
+		.groupId = -1,
+		.state = INIT_STATE
+	};
+
+	/*
+	 * First try to create our state file. The keeper_state_create_file function
+	 * may fail if we have no permission to write to the state file directory
+	 * or the disk is full. In that case, we stop before having registered the
+	 * local PostgreSQL node to the monitor.
+	 */
+	if (!keeper_state_create_file(config->pathnames.state))
+	{
+		log_fatal("Failed to create a state file prior to registering the "
+				  "node with the monitor, see above for details");
+		return false;
+	}
+
+	/* now that we have a state on-disk, finish init of the keeper instance */
+	if (!keeper_init(keeper, config))
+	{
+		return false;
+	}
+
+	/* initialize FSM state */
+	if (!keeper_update_state(keeper,
+							 assignedState.nodeId,
+							 assignedState.groupId,
+							 assignedState.state,
+							 false))
+	{
+		log_error("Failed to update keepers's state");
+
+		/*
+		 * Make sure we don't have a corrupted state file around, that could
+		 * prevent trying to init again and cause strange errors.
+		 */
+		unlink_file(config->pathnames.state);
+
+		return false;
+	}
+
+	/*
+	 * Leave a track record that we're ok to initialize in PGDATA, so that in
+	 * case of `pg_autoctl create` being interrupted, we may resume operations
+	 * and accept to work on already running PostgreSQL primary instances.
+	 */
+	if (!keeper_init_state_write(keeper))
+	{
+		/* errors have already been logged */
+		return false;
 	}
 
 	return true;
@@ -754,29 +827,32 @@ keeper_remove(Keeper *keeper, KeeperConfig *config, bool ignore_monitor_errors)
 	 */
 	keeper->config = *config;
 
-	if (!monitor_init(&(keeper->monitor), config->monitor_pguri))
+	if (!config->monitorDisabled)
 	{
-		return false;
-	}
-
-	log_info("Removing local node from the pg_auto_failover monitor.");
-
-	/*
-	 * If the node was already removed from the monitor, then the
-	 * monitor_remove function is going to return true here. It means that we
-	 * can call `pg_autoctl drop node` again when we removed the node from the
-	 * monitor already, but failed to remove the state file.
-	 */
-	if (!monitor_remove(&(keeper->monitor),
-						config->nodename,
-						config->pgSetup.pgport))
-	{
-		/* we already logged about errors */
-		errors++;
-
-		if (!ignore_monitor_errors)
+		if (!monitor_init(&(keeper->monitor), config->monitor_pguri))
 		{
 			return false;
+		}
+
+		log_info("Removing local node from the pg_auto_failover monitor.");
+
+		/*
+		 * If the node was already removed from the monitor, then the
+		 * monitor_remove function is going to return true here. It means that
+		 * we can call `pg_autoctl drop node` again when we removed the node
+		 * from the monitor already, but failed to remove the state file.
+		 */
+		if (!monitor_remove(&(keeper->monitor),
+							config->nodename,
+							config->pgSetup.pgport))
+		{
+			/* we already logged about errors */
+			errors++;
+
+			if (!ignore_monitor_errors)
+			{
+				return false;
+			}
 		}
 	}
 
@@ -816,35 +892,11 @@ keeper_init_state_write(Keeper *keeper)
 	int fd;
 	char buffer[PG_AUTOCTL_KEEPER_STATE_FILE_SIZE];
 	KeeperStateInit initState = { 0 };
-	PostgresSetup pgSetup = { 0 };
-	bool missingPgdataIsOk = true;
-	bool pgIsNotRunningIsOk = true;
 
-	initState.pg_autoctl_state_version = PG_AUTOCTL_STATE_VERSION;
-
-	if (!pg_setup_init(&pgSetup, &(keeper->config.pgSetup),
-					   missingPgdataIsOk, pgIsNotRunningIsOk))
+	if (!keeper_init_state_discover(keeper, &initState))
 	{
-		log_fatal("Failed to initialise the keeper init state, "
-				  "see above for details");
+		/* errors have already been logged */
 		return false;
-	}
-
-	if (pg_setup_is_running(&pgSetup) && pg_setup_is_primary(&pgSetup))
-	{
-		initState.pgInitState = PRE_INIT_STATE_PRIMARY;
-	}
-	else if (pg_setup_is_running(&pgSetup))
-	{
-		initState.pgInitState = PRE_INIT_STATE_RUNNING;
-	}
-	else if (pg_setup_pgdata_exists(&pgSetup))
-	{
-		initState.pgInitState = PRE_INIT_STATE_EXISTS;
-	}
-	else
-	{
-		initState.pgInitState = PRE_INIT_STATE_EMPTY;
 	}
 
 	log_info("Writing keeper init state file at \"%s\"",
@@ -893,6 +945,49 @@ keeper_init_state_write(Keeper *keeper)
 
 
 /*
+ * keeper_init_state_discover discovers the current KeeperStateInit from the
+ * command line options, by checking everything we can about the possibly
+ * existing Postgres instance.
+ */
+bool
+keeper_init_state_discover(Keeper *keeper, KeeperStateInit *initState)
+{
+	PostgresSetup pgSetup = { 0 };
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+
+	initState->pg_autoctl_state_version = PG_AUTOCTL_STATE_VERSION;
+
+	if (!pg_setup_init(&pgSetup, &(keeper->config.pgSetup),
+					   missingPgdataIsOk, pgIsNotRunningIsOk))
+	{
+		log_fatal("Failed to initialise the keeper init state, "
+				  "see above for details");
+		return false;
+	}
+
+	if (pg_setup_is_running(&pgSetup) && pg_setup_is_primary(&pgSetup))
+	{
+		initState->pgInitState = PRE_INIT_STATE_PRIMARY;
+	}
+	else if (pg_setup_is_running(&pgSetup))
+	{
+		initState->pgInitState = PRE_INIT_STATE_RUNNING;
+	}
+	else if (pg_setup_pgdata_exists(&pgSetup))
+	{
+		initState->pgInitState = PRE_INIT_STATE_EXISTS;
+	}
+	else
+	{
+		initState->pgInitState = PRE_INIT_STATE_EMPTY;
+	}
+
+	return true;
+}
+
+
+/*
  * keeper_init_state_read reads the information kept in the keeper init file.
  */
 bool
@@ -929,4 +1024,40 @@ keeper_init_state_read(Keeper *keeper, KeeperStateInit *initState)
 			  "is broken or wrong version",
 			  filename);
 	return false;
+}
+
+
+/*
+ * keeper_state_as_json prepares the current keeper state as a JSON object and
+ * copy the string to the given pre-allocated memory area, of given size.
+ */
+bool
+keeper_state_as_json(Keeper *keeper, char *json, int size)
+{
+    JSON_Value *js = json_value_init_object();
+    JSON_Value *jsPostgres = json_value_init_object();
+    JSON_Value *jsKeeperState = json_value_init_object();
+
+    JSON_Object *root = json_value_get_object(js);
+    JSON_Object *jsPostgresObject = json_value_get_object(jsPostgres);
+    JSON_Object *jsKeeperStateObject = json_value_get_object(jsKeeperState);
+
+    char *serialized_string = NULL;
+	int len;
+
+	pg_setup_as_json(&(keeper->postgres.postgresSetup), jsPostgresObject);
+	keeperStateAsJSON(&(keeper->state), jsKeeperStateObject);
+
+    json_object_set_value(root, "postgres", jsPostgres);
+    json_object_set_value(root, "state", jsKeeperState);
+
+    serialized_string = json_serialize_to_string_pretty(js);
+
+	len = strlcpy(json, serialized_string, size);
+
+    json_free_serialized_string(serialized_string);
+    json_value_free(js);
+
+	/* strlcpy returns how many bytes where necessary */
+	return len < size;
 }
