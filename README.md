@@ -12,7 +12,7 @@ We set up one PostgreSQL server as a **monitor** node as well as a **primary** a
 
 The pg_auto_failover Monitor implements a state machine and relies on in-core
 PostgreSQL facilities to deliver HA. For example. when the **secondary** node
-is detected to be unavailable, or when its lag is too important, then the
+is detected to be unavailable, or when its lag is too much, then the
 Monitor removes it from the `synchronous_standby_names` setting on the
 **primary** node. Until the **secondary** is back to being monitored healthy,
 failover and switchover operations are not allowed, preventing data loss.
