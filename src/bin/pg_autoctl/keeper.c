@@ -22,9 +22,6 @@
 #include "state.h"
 
 
-static bool keeper_get_replication_state(Keeper *keeper);
-
-
 /*
  * keeper_init initialises the keeper logic according to the given keeper
  * configuration. It also reads the state file from disk. The state file
@@ -475,6 +472,30 @@ keeper_update_pg_state(Keeper *keeper)
 		 */
 		pg_setup_get_local_connection_string(pgSetup, connInfo);
 		pgsql_init(pgsql, connInfo, PGSQL_CONN_LOCAL);
+
+		/*
+		 * Update our Postgres metadata now.
+		 *
+		 * First, update our cache of file path locations for Postgres
+		 * configuration files (including HBA), in case it's been moved to
+		 * somewhere else. This could happen when using the debian/ubuntu
+		 * pg_createcluster command on an already existing cluster, for
+		 * instance.
+		 *
+		 * Also update our view of pg_is_in_recovery, the replication sync
+		 * state when we are a primary with a standby currently using our
+		 * replication slot, and our current LSN position.
+		 *
+		 */
+		if (!pgsql_get_postgres_metadata(pgsql,
+										 config->replication_slot_name,
+										 &pgSetup->is_in_recovery,
+										 postgres->pgsrSyncState,
+										 postgres->currentLSN))
+		{
+			log_error("Failed to update the local Postgres metadata");
+			return false;
+		}
 	}
 	else
 	{
@@ -488,19 +509,42 @@ keeper_update_pg_state(Keeper *keeper)
 	 */
 	switch (keeperState->current_role)
 	{
-		case PRIMARY_STATE:
 		case WAIT_PRIMARY_STATE:
+		{
+			/* we don't expect to have a streaming replica */
+			return postgres->pgIsRunning;
+		}
+
+		case PRIMARY_STATE:
+		{
+			/*
+			 * We expect to be able to read the current LSN, as always when
+			 * Postgres is running, and we also expect replication to be in
+			 * place when in PRIMARY state.
+			 *
+			 * On the primary, we use pg_stat_replication.sync_state to have an
+			 * idea of how the replication is going. The query we use in
+			 * pgsql_get_postgres_metadata should always return a non-empty
+			 * string when we are a PRIMARY and our standby is connected.
+			 */
+			return postgres->pgIsRunning
+				&& !IS_EMPTY_STRING_BUFFER(postgres->currentLSN)
+				&& !IS_EMPTY_STRING_BUFFER(postgres->pgsrSyncState);
+		}
+
 		case SECONDARY_STATE:
 		case CATCHINGUP_STATE:
 		{
+			/* pg_stat_replication.sync_state is only available upstream */
 			return postgres->pgIsRunning
-				&& keeper_get_replication_state(keeper);
+				&& !IS_EMPTY_STRING_BUFFER(postgres->currentLSN);
 		}
 
 		default:
 			/* we don't need to check replication state in those states */
 			break;
 	}
+
 	return true;
 }
 
@@ -556,56 +600,6 @@ keeper_restart_postgres(Keeper *keeper)
 		return false;
 	}
 	return true;
-}
-
-
-/*
- * keeper_get_replication_state connects to the local PostgreSQL instance and
- * fetches replication related information: pg_stat_replication.sync_state and
- * WAL lag.
- */
-static bool
-keeper_get_replication_state(Keeper *keeper)
-{
-	KeeperStateData *keeperState = &(keeper->state);
-	KeeperConfig *config = &(keeper->config);
-	PostgresSetup *pgSetup = &(keeper->postgres.postgresSetup);
-	LocalPostgresServer *postgres = &(keeper->postgres);
-
-	PGSQL *pgsql = &(postgres->sqlClient);
-	bool missingStateOk = keeperState->current_role == WAIT_PRIMARY_STATE;
-
-	bool success = false;
-
-	/* figure out if we are in recovery or not */
-	if (!pgsql_is_in_recovery(pgsql, &pgSetup->is_in_recovery))
-	{
-		/*
-		 * errors have been logged already, probably failed to connect.
-		 */
-		pgsql_finish(pgsql);
-		return false;
-	}
-
-	if (pg_setup_is_primary(pgSetup))
-	{
-		success =
-			pgsql_get_sync_state_and_current_lsn(
-				pgsql,
-				config->replication_slot_name,
-				postgres->pgsrSyncState,
-				postgres->currentLSN,
-				PG_LSN_MAXLENGTH,
-				missingStateOk);
-	}
-	else
-	{
-		success = pgsql_get_received_lsn_from_standby(pgsql, postgres->currentLSN,
-													  PG_LSN_MAXLENGTH);
-	}
-	pgsql_finish(pgsql);
-
-	return success;
 }
 
 
