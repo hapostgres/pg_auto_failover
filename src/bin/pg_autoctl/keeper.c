@@ -517,7 +517,16 @@ keeper_update_pg_state(Keeper *keeper)
 
 		case PRIMARY_STATE:
 		{
-			/* we expect replication to be in place */
+			/*
+			 * We expect to be able to read the current LSN, as always when
+			 * Postgres is running, and we also expect replication to be in
+			 * place when in PRIMARY state.
+			 *
+			 * On the primary, we use pg_stat_replication.sync_state to have an
+			 * idea of how the replication is going. The query we use in
+			 * pgsql_get_postgres_metadata should always return a non-empty
+			 * string when we are a PRIMARY and our standby is connected.
+			 */
 			return postgres->pgIsRunning
 				&& !IS_EMPTY_STRING_BUFFER(postgres->currentLSN)
 				&& !IS_EMPTY_STRING_BUFFER(postgres->pgsrSyncState);
