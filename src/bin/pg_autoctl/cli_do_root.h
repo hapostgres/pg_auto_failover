@@ -23,8 +23,6 @@ extern CommandLine do_monitor_commands;
 extern CommandLine do_show_commands;
 
 /* src/bin/pg_autoctl/cli_do_root.c */
-extern CommandLine do_destroy;
-
 extern CommandLine do_primary_adduser;
 extern CommandLine *do_primary_adduser_subcommands[];
 extern CommandLine do_primary_adduser_monitor;
@@ -61,11 +59,9 @@ extern CommandLine do_commands;
 extern CommandLine *do_subcommands[];
 
 int keeper_cli_keeper_setup_getopts(int argc, char **argv);
-void stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathnames,
-												PostgresSetup *pgSetup);
+
 
 /* src/bin/pg_autoctl/cli_do_misc.c */
-void keeper_cli_destroy_node(int argc, char **argv);
 void keeper_cli_create_replication_slot(int argc, char **argv);
 void keeper_cli_drop_replication_slot(int argc, char **argv);
 void keeper_cli_enable_synchronous_replication(int argc, char **argv);
@@ -78,9 +74,6 @@ void keeper_cli_add_standby_to_hba(int argc, char **argv);
 void keeper_cli_init_standby(int argc, char **argv);
 void keeper_cli_rewind_old_primary(int argc, char **argv);
 void keeper_cli_promote_standby(int argc, char **argv);
-
-void keeper_cli_destroy_keeper_node(Keeper *keeper,
-									KeeperConfig *config);
 
 
 #endif  /* CLI_DO_ROOT_H */

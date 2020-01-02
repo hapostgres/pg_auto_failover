@@ -229,9 +229,10 @@ class PGNode:
         """
         self.stop_pg_autoctl()
 
+
         try:
             destroy = PGAutoCtl(self.vnode, self.datadir)
-            destroy.execute("pg_autoctl do destroy", 'do', 'destroy')
+            destroy.execute("pg_autoctl do destroy", 'destroy')
         except Exception as e:
             print(str(e))
 

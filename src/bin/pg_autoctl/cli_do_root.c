@@ -30,14 +30,6 @@
 #include "primary_standby.h"
 
 
-CommandLine do_destroy =
-	make_command("destroy",
-				 "destroy a node, unregisters it, rm -rf PGDATA",
-				 " [ --pgdata ]",
-				 KEEPER_CLI_PGDATA_OPTION,
-				 keeper_cli_getopt_pgdata,
-				 keeper_cli_destroy_node);
-
 CommandLine do_primary_adduser_monitor =
 	make_command("monitor",
 				 "add a local user for queries from the monitor",
@@ -210,7 +202,6 @@ CommandLine *do_subcommands[] = {
 	&do_standby_,
 	&do_show_commands,
 	&do_discover,
-	&do_destroy,
 	NULL
 };
 
@@ -274,48 +265,3 @@ keeper_cli_keeper_setup_getopts(int argc, char **argv)
 	return optind;
 }
 
-
-/*
- * stop_postgres_and_remove_pgdata_and_config stops PostgreSQL and then removes
- * PGDATA, and then config and state files.
- */
-void
-stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathnames,
-										   PostgresSetup *pgSetup)
-{
-	log_info("Stopping PostgreSQL at \"%s\"", pgSetup->pgdata);
-
-	if (!pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata))
-	{
-		log_error("Failed to stop PostgreSQL at \"%s\"", pgSetup->pgdata);
-		exit(EXIT_CODE_PGCTL);
-	}
-
-	/*
-	 * Only try to rm -rf PGDATA if we managed to stop PostgreSQL.
-	 */
-	if (directory_exists(pgSetup->pgdata))
-	{
-		log_info("Removing \"%s\"", pgSetup->pgdata);
-
-		if (!rmtree(pgSetup->pgdata, true))
-		{
-			log_error("Failed to remove directory \"%s\": %s",
-					  pgSetup->pgdata, strerror(errno));
-			exit(EXIT_CODE_INTERNAL_ERROR);
-		}
-	}
-	else
-	{
-		log_info("Skipping removal of \"%s\": directory does not exists",
-				 pgSetup->pgdata);
-	}
-
-	log_info("Removing \"%s\"", pathnames->config);
-
-	if (!unlink_file(pathnames->config))
-	{
-		/* errors have already been logged. */
-		exit(EXIT_CODE_BAD_CONFIG);
-	}
-}
