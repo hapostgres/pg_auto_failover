@@ -51,16 +51,22 @@ def test_005_writes_to_node2_fail():
     node2.run_sql_query("INSERT INTO t1 VALUES (3)")
 
 def test_006_maintenance():
+    print()
+    print("Enabling maintenance on node2")
     node2.enable_maintenance()
     assert node2.wait_until_state(target_state="maintenance")
     node2.stop_postgres()
     node1.run_sql_query("INSERT INTO t1 VALUES (3)")
+
+    print("Disabling maintenance on node2")
     node2.disable_maintenance()
     assert node2.wait_until_pg_is_running()
     assert node2.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")
 
 def test_007_fail_primary():
+    print()
+    print("Injecting failure of node1")
     node1.fail()
     assert node2.wait_until_state(target_state="wait_primary")
 

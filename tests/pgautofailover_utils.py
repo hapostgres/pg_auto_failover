@@ -368,6 +368,13 @@ class DataNode(PGNode):
         else:
             print("%s didn't reach %s after %d attempts" %
                 (self.datadir, target_state, timeout))
+
+            events = self.get_events_str()
+            out, err = self.stop_pg_autoctl()
+            raise Exception("%s failed to reach %s after %d attempts: " \
+                            "\n%s\n%s\n%s" %
+                            (self.datadir, target_state, timeout,
+                             out, err, events))
             return False
 
     def get_state(self):
