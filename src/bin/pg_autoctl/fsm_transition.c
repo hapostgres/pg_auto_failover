@@ -38,7 +38,7 @@
 #include "primary_standby.h"
 #include "state.h"
 
-static bool prepare_replication(Keeper *keeper, bool other_node_missing_is_ok);
+static bool prepare_replication(Keeper *keeper, NodeState otherNodeState);
 
 
 /*
@@ -376,7 +376,6 @@ bool
 fsm_prepare_replication(Keeper *keeper)
 {
 	KeeperConfig *config = &(keeper->config);
-	bool other_node_missing_is_ok = false;
 
 	if (IS_EMPTY_STRING_BUFFER(config->nodename))
 	{
@@ -386,7 +385,7 @@ fsm_prepare_replication(Keeper *keeper)
 		return false;
 	}
 
-	return prepare_replication(keeper, other_node_missing_is_ok);
+	return prepare_replication(keeper, WAIT_STANDBY_STATE);
 }
 
 
@@ -397,7 +396,7 @@ fsm_prepare_replication(Keeper *keeper)
  * transition after all.
  */
 static bool
-prepare_replication(Keeper *keeper, bool other_node_missing_is_ok)
+prepare_replication(Keeper *keeper, NodeState otherNodeState)
 {
 	KeeperConfig *config = &(keeper->config);
 	Monitor *monitor = &(keeper->monitor);
@@ -414,22 +413,35 @@ prepare_replication(Keeper *keeper, bool other_node_missing_is_ok)
 	 */
 	if (!config->monitorDisabled)
 	{
-		if (!monitor_get_other_nodes(monitor,
-									 config->nodename, pgSetup->pgport,
-									 WAIT_STANDBY_STATE,
+		char *host = config->nodename;
+		int port = pgSetup->pgport;
+
+		if (!monitor_get_other_nodes(monitor, host, port,
+									 otherNodeState,
 									 &(keeper->otherNodes)))
 		{
-			if (other_node_missing_is_ok)
+			/* errors have already been logged */
+			return false;
+		}
+
+		if (keeper->otherNodes.count == 0)
+		{
+			if (otherNodeState == ANY_STATE)
 			{
-				log_debug("There's no other node for %s:%d",
-						  config->nodename, pgSetup->pgport);
+				log_warn("There's no other node for %s:%d", host, port);
 			}
 			else
 			{
-				log_error("There's no other node for %s:%d",
-						  config->nodename, pgSetup->pgport);
+				/*
+				 * Should we warn about it really? it might be a replication
+				 * setting change that will impact synchronous_standby_names
+				 * and that's all.
+				 */
+				log_warn("There's no other node in state \"%s\" "
+						 "for node %s:%d",
+						 NodeStateToString(otherNodeState),
+						 host, port);
 			}
-			return other_node_missing_is_ok;
 		}
 	}
 
@@ -463,8 +475,14 @@ prepare_replication(Keeper *keeper, bool other_node_missing_is_ok)
 			return false;
 		}
 
-		snprintf(replicationSlotName, BUFSIZE, "%s_%d",
-				 REPLICATION_SLOT_NAME_DEFAULT, otherNode->nodeId);
+		if (!postgres_sprintf_replicationSlotName(otherNode->nodeId,
+												  replicationSlotName, BUFSIZE))
+		{
+			/* that's highly unlikely... */
+			log_error("Failed to snprintf replication slot name for node %d",
+					  otherNode->nodeId);
+			return false;
+		}
 
 		if (!primary_create_replication_slot(postgres, replicationSlotName))
 		{
@@ -811,7 +829,7 @@ fsm_promote_standby(Keeper *keeper)
 	 * create a replication slot and add the other node to pg_hba.conf. These
 	 * steps are implemented in fsm_prepare_replication.
 	 */
-	if (!prepare_replication(keeper, other_node_missing_is_ok))
+	if (!prepare_replication(keeper, DEMOTE_TIMEOUT_STATE))
 	{
 		/* prepare_replication logs relevant errors */
 		return false;

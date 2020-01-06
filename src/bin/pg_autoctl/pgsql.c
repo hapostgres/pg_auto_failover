@@ -638,6 +638,20 @@ pgsql_drop_replication_slot(PGSQL *pgsql, const char *slotName, bool verbose)
 
 
 /*
+ * postgres_sprintf_replicationSlotName prints the replication Slot Name to use
+ * for given nodeId in the given slotName buffer of given size.
+ */
+bool
+postgres_sprintf_replicationSlotName(int nodeId, char *slotName, int size)
+{
+	int bytesWritten =
+		snprintf(slotName, size, "%s_%d", REPLICATION_SLOT_NAME_DEFAULT, nodeId);
+
+	return bytesWritten <= size;
+}
+
+
+/*
  * pgsql_enable_synchronous_replication enables synchronous replication
  * in Postgres such that all writes block post-commit until they are
  * replicated.

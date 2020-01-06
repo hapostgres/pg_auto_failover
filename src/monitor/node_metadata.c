@@ -269,17 +269,24 @@ AutoFailoverOtherNodesListInState(AutoFailoverNode *pgAutoFailoverNode,
 								  ReplicationState currentState)
 {
 	ListCell *nodeCell = NULL;
-	List *groupNodeList =
-		AutoFailoverNodeGroup(pgAutoFailoverNode->formationId,
-							  pgAutoFailoverNode->groupId);
+	List *groupNodeList = NIL;
 	List *otherNodesList = NIL;
+
+	if (pgAutoFailoverNode == NULL)
+	{
+		return NIL;
+	}
+
+	groupNodeList = AutoFailoverNodeGroup(pgAutoFailoverNode->formationId,
+										  pgAutoFailoverNode->groupId);
 
 	foreach(nodeCell, groupNodeList)
 	{
 		AutoFailoverNode *otherNode = (AutoFailoverNode *) lfirst(nodeCell);
 
-		if (otherNode->nodeId != pgAutoFailoverNode->nodeId &&
-			IsCurrentState(otherNode, currentState))
+		if (otherNode != NULL &&
+			otherNode->nodeId != pgAutoFailoverNode->nodeId &&
+			otherNode->goalState == currentState)
 		{
 			otherNodesList = lappend(otherNodesList, otherNode);
 		}
