@@ -297,6 +297,11 @@ To allow application servers to connect to the Postgres database, edit your
 file](https://www.postgresql.org/docs/current/auth-pg-hba-conf.html) chapter
 of the PostgreSQL documentation.
 
+## Documentation
+
+Please check out project [documentation](https://pg-auto-failover.readthedocs.io/en/latest/)
+for how to guides and troubleshooting information.
+
 ## Contributing
 
 This project welcomes contributions and suggestions. Most contributions require you to
