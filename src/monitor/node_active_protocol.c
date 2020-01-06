@@ -953,7 +953,7 @@ perform_failover(PG_FUNCTION_ARGS)
 
 	LogAndNotifyMessage(
 		message, BUFSIZE,
-		"Setting goal state of %s:%d to draining and %s:%d to"
+		"Setting goal state of %s:%d to draining and %s:%d to "
 		"prepare_promotion after a user-initiated failover.",
 		primaryNode->nodeName, primaryNode->nodePort,
 		secondaryNode->nodeName, secondaryNode->nodePort);
