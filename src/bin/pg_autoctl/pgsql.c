@@ -305,7 +305,7 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 		}
 	}
 
-	if (!connectionOk)
+	if (!connectionOk && connection != NULL)
 	{
 		log_error("Connection to database failed: %s",
 				  PQerrorMessage(connection));
