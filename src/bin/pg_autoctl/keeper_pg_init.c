@@ -86,6 +86,127 @@ keeper_pg_init_fsm(Keeper *keeper, KeeperConfig *config)
 }
 
 
+static bool
+keeper_ensure_pg_configuration_files_in_pgdata(KeeperConfig *config)
+{
+	/* check existence of postgresql.conf, pg_hba.conf, pg_ident.conf in pgdata dir */
+
+	char *pgdata = config->pgSetup.pgdata;
+	char hbaConfPath[MAXPGPATH];
+	char posgresqlConfPath[MAXPGPATH];
+	char versionFilePath[MAXPGPATH];
+	char *fileContents;
+	char versionString[MAXPGPATH];
+	long fileSize;
+	char installationPath[MAXPGPATH];
+	bool installationPathPresent = false;
+
+	/* read version file */
+
+
+	join_path_components(versionFilePath, pgdata, "PG_VERSION");
+
+	if (!read_file(versionFilePath, &fileContents, &fileSize))
+	{
+		return false;
+	}
+
+	if (fileSize > 0)
+	{
+		int scanResult = sscanf(fileContents, "%s", versionString);
+		if (scanResult == 0)
+		{
+			return false;
+		}
+
+		log_info("Version = %s", versionString);
+	}
+
+	free(fileContents);
+
+	join_path_components(installationPath, "/etc/postgresql", versionString);
+	join_path_components(installationPath, installationPath, "main");
+
+	log_warn("installation path : %s", installationPath);
+
+	/* true if we are working on debian/ubuntu installation */
+	installationPathPresent = directory_exists(installationPath);
+	if (!installationPathPresent)
+	{
+		log_error("installation path does not exist");
+		return true;
+	}
+
+	join_path_components(hbaConfPath, pgdata, "pg_hba.conf");
+
+	if(!file_exists(hbaConfPath))
+	{
+		char installationHbaConfPath[MAXPGPATH];
+
+		log_warn("hba file does not exist : %s, need to copy", hbaConfPath);
+		join_path_components(installationHbaConfPath, installationPath, "pg_hba.conf");
+
+		if (file_exists(installationHbaConfPath))
+		{
+			if (read_file(installationHbaConfPath, &fileContents, &fileSize))
+			{
+				write_file(fileContents, fileSize, hbaConfPath);
+				free(fileContents);
+			}
+			else
+			{
+				log_error("error reading %s", installationHbaConfPath);
+			}
+		}
+		else
+		{
+			log_error("could not file hba file at default path : %s",installationHbaConfPath);
+		}
+	}
+	else
+	{
+		log_warn("hba file exists : %s", hbaConfPath);
+	}
+
+
+	join_path_components(posgresqlConfPath, pgdata, "postgresql.conf");
+
+	if(!file_exists(posgresqlConfPath))
+	{
+		char installationPosgresqlConfPath[MAXPGPATH];
+
+
+		join_path_components(installationPosgresqlConfPath, posgresqlConfPath, "postgresql.conf");
+
+		log_warn("postgresql.conf file does not exist : %s, need to copy", posgresqlConfPath);
+
+		if (file_exists(installationPosgresqlConfPath))
+		{
+			if (read_file(installationPosgresqlConfPath, &fileContents, &fileSize))
+			{
+				write_file(fileContents, fileSize, posgresqlConfPath);
+				free(fileContents);
+			}
+			else
+			{
+				log_error("error reading %s", installationPosgresqlConfPath);
+			}
+		}
+		else
+		{
+			log_error("could not file postgresql.conf at default path : %s", installationPosgresqlConfPath);
+		}
+	}
+	else
+	{
+		log_warn("postgresql.conf file exists : %s", posgresqlConfPath);
+	}
+
+
+	return true;
+}
+
+
 /*
  * keeper_pg_init_and_register initialises a pg_autoctl keeper and its local
  * PostgreSQL instance. Registering a PostgreSQL instance to the monitor is a 3
@@ -117,6 +238,11 @@ keeper_pg_init_and_register(Keeper *keeper, KeeperConfig *config)
 	PostgresSetup pgSetup = config->pgSetup;
 	bool postgresInstanceExists = pg_setup_pgdata_exists(&pgSetup);
 	bool postgresInstanceIsPrimary = pg_setup_is_primary(&pgSetup);
+
+	if (postgresInstanceExists)
+	{
+		keeper_ensure_pg_configuration_files_in_pgdata(config);
+	}
 
 	/*
 	 * If we don't have a state file, we consider that we're initializing from
