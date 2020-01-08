@@ -154,7 +154,8 @@ class PGNode:
         """
         Kills the keeper by sending a SIGTERM to keeper's process group.
         """
-        return self.pg_autoctl.stop()
+        if self.pg_autoctl:
+            return self.pg_autoctl.stop()
 
     def stop_postgres(self):
         """
