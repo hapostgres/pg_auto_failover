@@ -126,7 +126,8 @@ class VirtualNode:
         an NSOpen object to control the process. NSOpen has the same API as
         subprocess.POpen.
         """
-        sudo_command = ['sudo', '-E', '-u', user, 'env', 'PATH=' + os.getenv("PATH")] + command
+        sudo_command = ['sudo', '-E', '-u', user,
+                        'env', 'PATH=' + os.getenv("PATH")] + command
         return NSPopen(self.namespace, sudo_command, stdin=subprocess.PIPE,
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                        universal_newlines=True, start_new_session=True)

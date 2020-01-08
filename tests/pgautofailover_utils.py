@@ -80,6 +80,7 @@ class Cluster:
             self.monitor.destroy()
         self.vlan.destroy()
 
+
 class PGNode:
     """
     Common stuff between MonitorNode and DataNode.
@@ -93,7 +94,7 @@ class PGNode:
         self.authMethod = authMethod
         self.database = database
         self.role = role
-        self.pg_autoctl_run_proc = None
+        self.pg_autoctl = None
         self.authenticatedUsers = {}
 
 
@@ -117,10 +118,8 @@ class PGNode:
         """
         Runs "pg_autoctl run"
         """
-        run_command = [shutil.which('pg_autoctl'), 'run',
-                          '--pgdata', self.datadir]
-        self.pg_autoctl_run_proc = self.vnode.run(run_command)
-        print("pg_autoctl run [%d]" % self.pg_autoctl_run_proc.pid)
+        self.pg_autoctl = PGAutoCtl(self.vnode, self.datadir)
+        self.pg_autoctl.run()
 
     def run_sql_query(self, query, *args):
         """
@@ -155,27 +154,7 @@ class PGNode:
         """
         Kills the keeper by sending a SIGTERM to keeper's process group.
         """
-        if self.pg_autoctl_run_proc and self.pg_autoctl_run_proc.pid:
-            print("Terminating pg_autoctl process for %s [%d]" %
-                  (self.datadir, self.pg_autoctl_run_proc.pid))
-
-            try:
-                pgid = os.getpgid(self.pg_autoctl_run_proc.pid)
-                os.killpg(pgid, signal.SIGTERM)
-
-                out, err = self.pg_autoctl_run_proc.communicate()
-                self.pg_autoctl_run_proc.wait()
-                self.pg_autoctl_run_proc.release()
-
-                self.pg_autoctl_run_proc = None
-
-                return out, err
-
-            except ProcessLookupError:
-                self.pg_autoctl_run_proc = None
-                print("no such process")
-        else:
-            print("nothing to stop")
+        return self.pg_autoctl.stop()
 
     def stop_postgres(self):
         """
@@ -293,6 +272,7 @@ class PGNode:
                             pgdata,
                             "pg_autoctl.state")
 
+
 class DataNode(PGNode):
     def __init__(self, datadir, vnode, port,
                  username, authMethod, database, monitor,
@@ -333,15 +313,14 @@ class DataNode(PGNode):
         if run:
             create_command += ['--run']
 
-        init_proc = self.vnode.run(create_command)
-
         # when run is requested pg_autoctl does not terminate
         # therefore we do not wait for process to complete
         # we just record the process
         if run:
-            self.pg_autoctl_run_proc = init_proc
-            print("pg_autoctl create --run [%d]" % self.pg_autoctl_run_proc.pid)
+            self.pg_autoctl = PGAutoCtl(self.vnode, self.datadir, create_command)
+            self.pg_autoctl.run()
         else:
+            init_proc = self.vnode.run(create_command)
             wait_or_timeout_proc(init_proc,
                                  name="pg_autoctl create",
                                  timeout=COMMAND_TIMEOUT)
@@ -354,7 +333,9 @@ class DataNode(PGNode):
         """
         prev_state = None
         for i in range(timeout):
-            time.sleep(1)
+            # ensure we read from the pg_autoctl process pipe
+            self.pg_autoctl.readmore(1)
+
             current_state = self.get_state()
 
             # only log the state if it has changed
@@ -365,6 +346,7 @@ class DataNode(PGNode):
             if current_state == target_state:
                 return True
             prev_state = current_state
+
         else:
             print("%s didn't reach %s after %d attempts" %
                 (self.datadir, target_state, timeout))
@@ -570,6 +552,7 @@ SELECT reportedstate
             return -1
         return int(out)
 
+
 class MonitorNode(PGNode):
     def __init__(self, datadir, vnode, port, nodename, authMethod):
 
@@ -600,14 +583,14 @@ class MonitorNode(PGNode):
         if run:
             init_command.extend(['--run'])
 
-        init_proc = self.vnode.run(init_command)
-
         # when run is requested pg_autoctl does not terminate
         # therefore we do not wait for process to complete
         # we just record the process
         if run:
-            self.pg_autoctl_run_proc = init_proc
+            self.pg_autoctl = PGAutoCtl(self.vnode, self.datadir, init_command)
+            self.pg_autoctl.run()
         else:
+            init_proc = self.vnode.run(init_command)
             wait_or_timeout_proc(init_proc,
                              name="create monitor",
                              timeout=COMMAND_TIMEOUT)
@@ -696,6 +679,75 @@ class MonitorNode(PGNode):
                          timeout=COMMAND_TIMEOUT)
 
 
+class PGAutoCtl():
+    def __init__(self, vnode, datadir, command=None):
+        self.vnode = vnode
+        self.datadir = datadir
+        self.run_proc = None
+        self.out = ""
+        self.err = ""
+
+        if command:
+            self.command = command
+        else:
+            self.command = [shutil.which('pg_autoctl'),
+                            'run',
+                            '--pgdata', self.datadir,
+                            '-vv']
+
+    def run(self):
+        """
+        Runs `pg_autoctl run`
+        """
+        self.run_proc = self.vnode.run(self.command)
+        print("pg_autoctl run [%d]" % self.run_proc.pid)
+
+    def stop(self):
+        """
+        Kills the keeper by sending a SIGTERM to keeper's process group.
+        """
+        if self.run_proc and self.run_proc.pid:
+            print("Terminating pg_autoctl process for %s [%d]" %
+                  (self.datadir, self.run_proc.pid))
+
+            try:
+                pgid = os.getpgid(self.run_proc.pid)
+                os.killpg(pgid, signal.SIGTERM)
+
+                self.communicate()
+                self.run_proc.wait()
+                self.run_proc.release()
+
+                self.run_proc = None
+
+                return self.out, self.err
+
+            except ProcessLookupError(e):
+                self.run_proc = None
+                print("Failed to terminate pg_autoctl for %s: %s" %
+                      (self.datadir, e))
+        else:
+            print("pg_autoctl process for %s is not running" % self.datadir)
+
+    def communicate(self):
+        """
+        Read all data from the Unix PIPE
+        """
+        self.out, self.err = self.run_proc.communicate()
+
+        return self.out, self.err
+
+    def readmore(self, secs=1):
+        """
+        Read available lines from the process for some given seconds
+        """
+        try:
+            self.out, self.err = self.run_proc.communicate(timeout=secs)
+        except subprocess.TimeoutExpired:
+            # all good, we'll comme back
+            pass
+
+        return self.out, self.err
 
 def wait_or_timeout_proc(proc, name, timeout):
     """
