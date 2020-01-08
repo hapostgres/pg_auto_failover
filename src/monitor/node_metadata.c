@@ -884,7 +884,8 @@ CanTakeWritesInState(ReplicationState state)
 	return state == REPLICATION_STATE_SINGLE ||
 		   state == REPLICATION_STATE_PRIMARY ||
 		   state == REPLICATION_STATE_WAIT_PRIMARY ||
-		   state == REPLICATION_STATE_JOIN_PRIMARY;
+		   state == REPLICATION_STATE_JOIN_PRIMARY ||
+		   state == REPLICATION_STATE_DEMOTE_TIMEOUT;
 }
 
 

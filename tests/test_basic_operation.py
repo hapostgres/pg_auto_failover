@@ -115,8 +115,8 @@ def test_015_multiple_manual_failover_verify_replication_slot_removed():
     print()
     print("Calling pgautofailover.failover() on the monitor")
     monitor.failover()
-    assert node3.wait_until_state(target_state="primary")
     assert node2.wait_until_state(target_state="secondary")
+    assert node3.wait_until_state(target_state="primary")
     node2_replication_slots = node2.run_sql_query(count_repl_slots)
     assert node2_replication_slots == [(0,)]
     node3_replication_slots = node3.run_sql_query(count_repl_slots)

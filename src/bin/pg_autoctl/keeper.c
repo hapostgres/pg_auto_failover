@@ -125,7 +125,7 @@ keeper_ensure_current_state(Keeper *keeper)
 	PostgresSetup *pgSetup = &(keeper->postgres.postgresSetup);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
-	log_trace("keeper_ensure_current_state: %s",
+	log_debug("Ensure current state: %s",
 			  NodeStateToString(keeperState->current_role));
 
 	switch (keeperState->current_role)
