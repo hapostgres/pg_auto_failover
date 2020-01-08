@@ -297,6 +297,34 @@ AutoFailoverOtherNodesListInState(AutoFailoverNode *pgAutoFailoverNode,
 
 
 /*
+ * GetPrimaryNodeInGroup returns the node in the group with a role that only a
+ * primary can have.
+ */
+AutoFailoverNode *
+GetPrimaryNodeInGroup(char *formationId, int32 groupId)
+{
+	AutoFailoverNode *primaryNode = NULL;
+	List *groupNodeList = NIL;
+	ListCell *nodeCell = NULL;
+
+	groupNodeList = AutoFailoverNodeGroup(formationId, groupId);
+
+	foreach(nodeCell, groupNodeList)
+	{
+		AutoFailoverNode *currentNode = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (StateBelongsToPrimary(currentNode->reportedState))
+		{
+			primaryNode = currentNode;
+			break;
+		}
+	}
+
+	return primaryNode;
+}
+
+
+/*
  * FindFailoverNewStandbyNode returns the first node found in given list 
  */
 AutoFailoverNode *
@@ -426,6 +454,7 @@ GetAutoFailoverNodeWithId(int nodeid, char *nodeName, int nodePort)
 
 	return pgAutoFailoverNode;
 }
+
 
 /*
  * OtherNodeInGroup returns the other node in a primary-secondary group, or
@@ -881,11 +910,24 @@ IsCurrentState(AutoFailoverNode *pgAutoFailoverNode, ReplicationState state)
 bool
 CanTakeWritesInState(ReplicationState state)
 {
-	return state == REPLICATION_STATE_SINGLE ||
-		   state == REPLICATION_STATE_PRIMARY ||
-		   state == REPLICATION_STATE_WAIT_PRIMARY ||
-		   state == REPLICATION_STATE_JOIN_PRIMARY ||
-		   state == REPLICATION_STATE_DEMOTE_TIMEOUT;
+	return state == REPLICATION_STATE_SINGLE
+		|| state == REPLICATION_STATE_PRIMARY
+		|| state == REPLICATION_STATE_WAIT_PRIMARY
+		|| state == REPLICATION_STATE_JOIN_PRIMARY;
+}
+
+
+/*
+ * StateBelongsToPrimary returns true when given state belongs to a primary
+ * node, either in a healthy state or even when in the middle of being demoted.
+ */
+bool
+StateBelongsToPrimary(ReplicationState state)
+{
+	return CanTakeWritesInState(state)
+		|| state == REPLICATION_STATE_DRAINING
+		|| state == REPLICATION_STATE_DEMOTED
+		|| state == REPLICATION_STATE_DEMOTE_TIMEOUT;
 }
 
 
