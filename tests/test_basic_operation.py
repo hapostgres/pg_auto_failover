@@ -111,6 +111,9 @@ def test_014_add_new_secondary():
 
 def test_015_multiple_manual_failover_verify_replication_slot_removed():
     count_repl_slots = "select count(*) from pg_replication_slots"
+
+    print()
+    print("Calling pgautofailover.failover() on the monitor")
     monitor.failover()
     assert node3.wait_until_state(target_state="primary")
     assert node2.wait_until_state(target_state="secondary")
@@ -119,6 +122,7 @@ def test_015_multiple_manual_failover_verify_replication_slot_removed():
     node3_replication_slots = node3.run_sql_query(count_repl_slots)
     assert node3_replication_slots == [(1,)]
 
+    print("Calling pgautofailover.failover() on the monitor")
     monitor.failover()
     assert node2.wait_until_state(target_state="primary")
     assert node3.wait_until_state(target_state="secondary")
@@ -128,9 +132,9 @@ def test_015_multiple_manual_failover_verify_replication_slot_removed():
     assert node3_replication_slots == [(0,)]
 
 def test_016_drop_primary():
-   node2.drop()
-   assert not node2.pg_is_running()
-   assert node3.wait_until_state(target_state="single")
+    node2.drop()
+    assert not node2.pg_is_running()
+    assert node3.wait_until_state(target_state="single")
 
 def test_017_stop_postgres_monitor():
     original_state = node3.get_state()

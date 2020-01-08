@@ -373,7 +373,8 @@ SELECT reportedstate
 """,
             self.nodeid, self.group)
         if len(results) == 0:
-            raise Exception("datanode not found at coordinator")
+            raise Exception("node %s in group %s not found on the monitor" %
+                            (self.nodeid, self.group))
         else:
             return results[0][0]
         return results
@@ -430,10 +431,13 @@ SELECT reportedstate
 
         :return:
         """
+        print("pg_autoctl drop node --pgdata %s" % self.datadir)
         drop_command = [shutil.which('pg_autoctl'), 'drop', 'node',
                        '--pgdata', self.datadir]
         drop_proc = self.vnode.run(drop_command)
-        wait_or_timeout_proc(drop_proc, name="drop node", timeout=COMMAND_TIMEOUT)
+        wait_or_timeout_proc(drop_proc,
+                             name="pg_autoctl drop",
+                             timeout=COMMAND_TIMEOUT)
 
     def set_candidate_priority(self, candidatePriority):
         """
@@ -679,6 +683,23 @@ class MonitorNode(PGNode):
                          name="manual failover",
                          timeout=COMMAND_TIMEOUT)
 
+
+    def print_state(self, formation="default"):
+        print("pg_autoctl show state --pgdata %s" % self.datadir)
+        command = [shutil.which('pg_autoctl'), 'show', 'state',
+                        '--pgdata', self.datadir,
+                        '--formation', formation]
+        proc = self.vnode.run(command)
+        out, err = proc.communicate(timeout=COMMAND_TIMEOUT)
+        if proc.returncode == 0:
+            print("%s" % out)
+        elif proc.returncode > 0:
+            print("failed to show state:\n%s\n%s\n" % (out, err))
+            return False
+        elif proc.returncode is None:
+            print("timeout: pg_autoctl show state")
+            return False
+        return True
 
 class PGAutoCtl():
     def __init__(self, vnode, datadir, command=None):
