@@ -47,7 +47,7 @@ def test_005_maintenance():
     node2.run()
     node2.disable_maintenance()
     assert node2.wait_until_pg_is_running()
-    assert node2.wait_until_pg_is_running()        
+    assert node2.wait_until_pg_is_running()
     assert node2.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")
 
@@ -56,8 +56,8 @@ def test_006_fail_primary():
     assert node2.wait_until_state(target_state="wait_primary", timeout=180)
 
 def test_007_start_node1_again():
-    print(node1.get_events_str())
-    node1.run()
+    print("\n%s" % node1.get_events_str())
+    node1.create(run = True)
     assert node2.wait_until_state(target_state="primary")
     assert node1.wait_until_state(target_state="secondary")
 
@@ -75,19 +75,3 @@ def test_010_drop_secondary():
     node1.drop()
     assert not node1.pg_is_running()
     assert node2.wait_until_state(target_state="single")
-    
-def test_011_add_new_secondary():
-    global node3
-    node3 = cluster.create_datanode("/tmp/basic/node3")
-    node3.create(run = True)
-    assert node3.wait_until_state(target_state="secondary")
-    assert node2.wait_until_state(target_state="primary")
-
-def test_012_multiple_manual_failover():
-   monitor.failover()
-   assert node3.wait_until_state(target_state="primary")
-   assert node2.wait_until_state(target_state="secondary")
-   
-   monitor.failover()
-   assert node2.wait_until_state(target_state="primary")
-   assert node3.wait_until_state(target_state="secondary")
