@@ -29,7 +29,7 @@ def test_002_candidate_priority():
 
     assert not node1.set_candidate_priority(-1)
     assert node1.get_candidate_priority() == 100
-    
+
     assert node1.set_candidate_priority(99)
     assert node1.get_candidate_priority() == 99
 
@@ -38,10 +38,10 @@ def test_003_replication_quorum():
 
     assert not node1.set_replication_quorum("wrong quorum")
     assert node1.get_replication_quorum()
-    
+
     assert node1.set_replication_quorum("false")
     assert not node1.get_replication_quorum()
-    
+
     assert node1.set_replication_quorum("true")
     assert node1.get_replication_quorum()
 
@@ -50,14 +50,12 @@ def test_004_number_sync_standbys():
 
     assert not node1.set_number_sync_standbys(-1)
     assert node1.get_number_sync_standbys() == 1
-    
+
     assert node1.set_number_sync_standbys(2)
     assert node1.get_number_sync_standbys() == 2
 
     assert node1.set_number_sync_standbys(0)
     assert node1.get_number_sync_standbys() == 0
-    
+
     assert node1.set_number_sync_standbys(1)
     assert node1.get_number_sync_standbys() == 1
-
-
