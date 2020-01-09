@@ -296,13 +296,12 @@ class DataNode(PGNode):
 
         # don't pass --nodename to Postgres nodes in order to exercise the
         # automatic detection of the nodename.
-        create_command = [shutil.which('pg_autoctl'), '-vvv', 'create',
-                          self.role.command(),
-                        '--pgdata', self.datadir,
-                        '--pghost', pghost,
-                        '--pgport', str(self.port),
-                        '--pgctl', shutil.which('pg_ctl'),
-                        '--monitor', self.monitor.connection_string()]
+        create_args = ['create', self.role.command(),
+                       '--pgdata', self.datadir,
+                       '--pghost', pghost,
+                       '--pgport', str(self.port),
+                       '--pgctl', shutil.which('pg_ctl'),
+                       '--monitor', self.monitor.connection_string()]
 
         if self.listen_flag:
             create_command += ['--listen', str(self.vnode.address)]
@@ -316,14 +315,11 @@ class DataNode(PGNode):
         # when run is requested pg_autoctl does not terminate
         # therefore we do not wait for process to complete
         # we just record the process
+        self.pg_autoctl = PGAutoCtl(self.vnode, self.datadir, create_args)
         if run:
-            self.pg_autoctl = PGAutoCtl(self.vnode, self.datadir, create_command)
             self.pg_autoctl.run()
         else:
-            init_proc = self.vnode.run(create_command)
-            wait_or_timeout_proc(init_proc,
-                                 name="pg_autoctl create",
-                                 timeout=COMMAND_TIMEOUT)
+            self.pg_autoctl.execute("pg_autoctl create")
 
 
     def wait_until_state(self, target_state, timeout=STATE_CHANGE_TIMEOUT):
@@ -522,11 +518,10 @@ class MonitorNode(PGNode):
         """
         Initializes and runs the monitor process.
         """
-        init_command = [shutil.which('pg_autoctl'), '-vvv', 'create',
-                        self.role.command(),
-                        '--pgdata', self.datadir,
-                        '--pgport', str(self.port),
-                        '--nodename', self.nodename]
+        create_args = ['create', self.role.command(), '-vv',
+                       '--pgdata', self.datadir,
+                       '--pgport', str(self.port),
+                       '--nodename', self.nodename]
 
         if self.authMethod:
             init_command.extend(['--auth', self.authMethod])
@@ -537,14 +532,11 @@ class MonitorNode(PGNode):
         # when run is requested pg_autoctl does not terminate
         # therefore we do not wait for process to complete
         # we just record the process
+        self.pg_autoctl = PGAutoCtl(self.vnode, self.datadir, create_args)
         if run:
-            self.pg_autoctl = PGAutoCtl(self.vnode, self.datadir, init_command)
             self.pg_autoctl.run()
         else:
-            init_proc = self.vnode.run(init_command)
-            wait_or_timeout_proc(init_proc,
-                             name="create monitor",
-                             timeout=COMMAND_TIMEOUT)
+            self.pg_autoctl.execute("create monitor")
 
     def create_formation(self, formation_name,
                          kind="pgsql", secondary=None, dbname=None):
@@ -627,49 +619,38 @@ class MonitorNode(PGNode):
 
 
 class PGAutoCtl():
-    def __init__(self, vnode, datadir, command=None):
+    def __init__(self, vnode, datadir, argv=None):
         self.vnode = vnode
         self.datadir = datadir
+
+        self.program = shutil.which('pg_autoctl')
+        self.command = None
+
         self.run_proc = None
         self.out = ""
         self.err = ""
 
-        if command:
-            self.command = command
-        else:
-            self.command = [shutil.which('pg_autoctl'),
-                            'run',
-                            '--pgdata', self.datadir,
-                            '-vv']
+        if argv:
+            self.command = [self.program] + argv
 
     def run(self):
         """
-        Runs `pg_autoctl run`
+        Runs our command in the background, returns immediately.
+
+        The command could be `pg_autoctl run`, or another command.
+        We could be given a full `pg_autoctl create postgres --run` command.
         """
+        if not self.command:
+            self.command = [self.program, 'run', '--pgdata', self.datadir, '-vv']
+
         self.run_proc = self.vnode.run(self.command)
         print("pg_autoctl run [%d]" % self.run_proc.pid)
 
     def execute(self, name, *args):
         """
-        Execute a single pg_autoctl command.
+        Execute a single pg_autoctl command, wait for its completion.
         """
-        pgdata = ['--pgdata', self.datadir ]
-        self.command = [shutil.which('pg_autoctl')]
-
-        # add pgdata in the command BEFORE any -- arguments
-        for arg in args:
-            if arg == '--':
-                self.command += pgdata
-            self.command += [arg]
-
-        # when no -- argument is used, append --pgdata option at the end
-        if '--pgdata' not in self.command:
-            self.command += pgdata
-
-        if False:
-            # that can be helpful to debug how we build the command line
-            print("%s" % " ".join(self.command))
-
+        self.set_command(*args)
         self.run_proc = self.vnode.run(self.command)
 
         try:
@@ -715,7 +696,7 @@ class PGAutoCtl():
 
                 return self.out, self.err
 
-            except ProcessLookupError(e):
+            except ProcessLookupError as e:
                 self.run_proc = None
                 print("Failed to terminate pg_autoctl for %s: %s" %
                       (self.datadir, e))
@@ -741,6 +722,29 @@ class PGAutoCtl():
             pass
 
         return self.out, self.err
+
+    def set_command(self, *args):
+        """
+        Build the process command line, or use the one given at init time.
+        """
+        if self.command:
+            return self.command
+
+        pgdata = ['--pgdata', self.datadir]
+        self.command = [self.program]
+
+        # add pgdata in the command BEFORE any -- arguments
+        for arg in args:
+            if arg == '--':
+                self.command += pgdata
+            self.command += [arg]
+
+        # when no -- argument is used, append --pgdata option at the end
+        if '--pgdata' not in self.command:
+            self.command += pgdata
+
+        return self.command
+
 
 def wait_or_timeout_proc(proc, name, timeout):
     """
