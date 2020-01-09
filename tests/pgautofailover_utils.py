@@ -55,14 +55,16 @@ class Cluster:
     # TODO group should auto sense for normal operations and passed to the
     # create cli as an argument when explicitly set by the test
     def create_datanode(self, datadir, port=5432, group=0,
-                        listen_flag=False, role=Role.Postgres, formation=None, authMethod=None):
+                        listen_flag=False, role=Role.Postgres,
+                        formation=None, authMethod=None):
         """
         Initializes a data node and returns an instance of DataNode. This will
         do the "keeper init" and "pg_autoctl run" commands.
         """
         vnode = self.vlan.create_node()
         nodeid = len(self.datanodes) + 1
-        datanode = DataNode(datadir, vnode, port, os.getenv("USER"), authMethod, "postgres",
+        datanode = DataNode(datadir, vnode, port,
+                            os.getenv("USER"), authMethod, "postgres",
                             self.monitor, nodeid, group, listen_flag,
                             role, formation)
         self.datanodes.append(datanode)
@@ -78,11 +80,13 @@ class Cluster:
             self.monitor.destroy()
         self.vlan.destroy()
 
+
 class PGNode:
     """
     Common stuff between MonitorNode and DataNode.
     """
-    def __init__(self, datadir, vnode, port, username, authMethod, database, role):
+    def __init__(self, datadir, vnode, port, username, authMethod,
+                 database, role):
         self.datadir = datadir
         self.vnode = vnode
         self.port = port
@@ -90,9 +94,9 @@ class PGNode:
         self.authMethod = authMethod
         self.database = database
         self.role = role
-        self.pg_autoctl_run_proc = None
+        self.pg_autoctl = None
         self.authenticatedUsers = {}
-            
+
 
     def connection_string(self):
         """
@@ -100,9 +104,13 @@ class PGNode:
         node.
         """
         if (self.authMethod and self.username in self.authenticatedUsers):
-            return ("postgres://%s:%s@%s:%d/%s" % (self.username, self.authenticatedUsers[self.username], self.vnode.address,
-                    self.port, self.database))
-        
+            return ("postgres://%s:%s@%s:%d/%s" %
+                    (self.username,
+                     self.authenticatedUsers[self.username],
+                     self.vnode.address,
+                     self.port,
+                     self.database))
+
         return ("postgres://%s@%s:%d/%s" % (self.username, self.vnode.address,
                                            self.port, self.database))
 
@@ -110,10 +118,8 @@ class PGNode:
         """
         Runs "pg_autoctl run"
         """
-        run_command = [shutil.which('pg_autoctl'), 'run',
-                          '--pgdata', self.datadir]
-        self.pg_autoctl_run_proc = self.vnode.run(run_command)
-        print("running ", str(self.pg_autoctl_run_proc.pid))
+        self.pg_autoctl = PGAutoCtl(self.vnode, self.datadir)
+        self.pg_autoctl.run()
 
     def run_sql_query(self, query, *args):
         """
@@ -133,38 +139,23 @@ class PGNode:
         """
         Sets user passwords on the PGNode
         """
-        alter_user_set_passwd_command =  "alter user %s with password \'%s\'" % (username, password)
-        passwd_command = [shutil.which('psql'), '-d', self.database, '-c', alter_user_set_passwd_command]
+        alter_user_set_passwd_command = \
+            "alter user %s with password \'%s\'" % (username, password)
+        passwd_command = [shutil.which('psql'),
+                          '-d', self.database,
+                          '-c', alter_user_set_passwd_command]
         passwd_proc = self.vnode.run(passwd_command)
         wait_or_timeout_proc(passwd_proc,
                          name="user passwd",
                          timeout=COMMAND_TIMEOUT)
         self.authenticatedUsers[username] = password
-    
+
     def stop_pg_autoctl(self):
         """
         Kills the keeper by sending a SIGTERM to keeper's process group.
         """
-        if self.pg_autoctl_run_proc and self.pg_autoctl_run_proc.pid:
-            print("Terminating pg_autoctl process for %s [%d]" % (self.datadir, self.pg_autoctl_run_proc.pid))
-            
-            try:
-                pgid = os.getpgid(self.pg_autoctl_run_proc.pid)
-                os.killpg(pgid, signal.SIGTERM)
-                
-                out, err = self.pg_autoctl_run_proc.communicate()
-                self.pg_autoctl_run_proc.wait()
-                self.pg_autoctl_run_proc.release()
-                
-                self.pg_autoctl_run_proc = None
-                
-                return out, err
-
-            except ProcessLookupError:
-                self.pg_autoctl_run_proc = None
-                print("no such process")
-        else:
-            print("nothing to stop")
+        if self.pg_autoctl:
+            return self.pg_autoctl.stop()
 
     def stop_postgres(self):
         """
@@ -237,19 +228,18 @@ class PGNode:
         Cleans up processes and files created for this data node.
         """
         self.stop_pg_autoctl()
-        destroy_command = [shutil.which('pg_autoctl'), 'do', 'destroy',
-                            '--pgdata', self.datadir]
-        destroy_proc = self.vnode.run(destroy_command)
+
         try:
-            wait_or_timeout_proc(destroy_proc,
-                                 name="pg_autoctl do destroy",
-                                 timeout=COMMAND_TIMEOUT)
+            destroy = PGAutoCtl(self.vnode, self.datadir)
+            destroy.execute("pg_autoctl do destroy", 'do', 'destroy')
         except Exception as e:
             print(str(e))
+
         try:
             os.remove(self.config_file_path())
         except FileNotFoundError:
             pass
+
         try:
             os.remove(self.state_file_path())
         except FileNotFoundError:
@@ -282,10 +272,13 @@ class PGNode:
                             pgdata,
                             "pg_autoctl.state")
 
+
 class DataNode(PGNode):
-    def __init__(self, datadir, vnode, port, username, authMethod, database, monitor,
+    def __init__(self, datadir, vnode, port,
+                 username, authMethod, database, monitor,
                  nodeid, group, listen_flag, role, formation):
-        super().__init__(datadir, vnode, port, username, authMethod, database, role)
+        super().__init__(datadir, vnode, port,
+                         username, authMethod, database, role)
         self.monitor = monitor
         self.nodeid = nodeid
         self.group = group
@@ -303,35 +296,30 @@ class DataNode(PGNode):
 
         # don't pass --nodename to Postgres nodes in order to exercise the
         # automatic detection of the nodename.
-        create_command = [shutil.which('pg_autoctl'), '-vvv', 'create',
-                          self.role.command(),
-                        '--pgdata', self.datadir,
-                        '--pghost', pghost,
-                        '--pgport', str(self.port),
-                        '--pgctl', shutil.which('pg_ctl'),
-                        '--monitor', self.monitor.connection_string()]
+        create_args = ['create', self.role.command(),
+                       '--pgdata', self.datadir,
+                       '--pghost', pghost,
+                       '--pgport', str(self.port),
+                       '--pgctl', shutil.which('pg_ctl'),
+                       '--monitor', self.monitor.connection_string()]
 
         if self.listen_flag:
-            create_command += ['--listen', str(self.vnode.address)]
+            create_args += ['--listen', str(self.vnode.address)]
 
         if self.formation:
-            create_command += ['--formation', self.formation]
-        
-        if run:
-            create_command += ['--run']
+            create_args += ['--formation', self.formation]
 
-        init_proc = self.vnode.run(create_command)
-        
+        if run:
+            create_args += ['--run']
+
         # when run is requested pg_autoctl does not terminate
         # therefore we do not wait for process to complete
         # we just record the process
+        self.pg_autoctl = PGAutoCtl(self.vnode, self.datadir, create_args)
         if run:
-            self.pg_autoctl_run_proc = init_proc
-            print("created and run ", str(self.pg_autoctl_run_proc.pid))
+            self.pg_autoctl.run()
         else:
-            wait_or_timeout_proc(init_proc,
-                             name="keeper init",
-                             timeout=COMMAND_TIMEOUT)
+            self.pg_autoctl.execute("pg_autoctl create")
 
 
     def wait_until_state(self, target_state, timeout=STATE_CHANGE_TIMEOUT):
@@ -341,7 +329,9 @@ class DataNode(PGNode):
         """
         prev_state = None
         for i in range(timeout):
-            time.sleep(1)
+            # ensure we read from the pg_autoctl process pipe
+            self.pg_autoctl.consume_output(1)
+
             current_state = self.get_state()
 
             # only log the state if it has changed
@@ -352,9 +342,17 @@ class DataNode(PGNode):
             if current_state == target_state:
                 return True
             prev_state = current_state
+
         else:
             print("%s didn't reach %s after %d attempts" %
                 (self.datadir, target_state, timeout))
+
+            events = self.get_events_str()
+            out, err = self.stop_pg_autoctl()
+            raise Exception("%s failed to reach %s after %d attempts: " \
+                            "\n%s\n%s\n%s" %
+                            (self.datadir, target_state, timeout,
+                             out, err, events))
             return False
 
     def get_state(self):
@@ -370,7 +368,8 @@ SELECT reportedstate
 """,
             self.nodeid, self.group)
         if len(results) == 0:
-            raise Exception("datanode not found at coordinator")
+            raise Exception("node %s in group %s not found on the monitor" %
+                            (self.nodeid, self.group))
         else:
             return results[0][0]
         return results
@@ -401,12 +400,8 @@ SELECT reportedstate
 
         :return:
         """
-        command = [shutil.which('pg_autoctl'), 'enable', 'maintenance',
-                   '--pgdata', self.datadir]
-        proc = self.vnode.run(command)
-        wait_or_timeout_proc(proc,
-                             name="enable maintenance",
-                             timeout=COMMAND_TIMEOUT)
+        command = PGAutoCtl(self.vnode, self.datadir)
+        command.execute("enable maintenance", 'enable', 'maintenance')
 
     def disable_maintenance(self):
         """
@@ -414,12 +409,8 @@ SELECT reportedstate
 
         :return:
         """
-        command = [shutil.which('pg_autoctl'), 'disable', 'maintenance',
-                   '--pgdata', self.datadir]
-        proc = self.vnode.run(command)
-        wait_or_timeout_proc(proc,
-                             name="disable maintenance",
-                             timeout=COMMAND_TIMEOUT)
+        command = PGAutoCtl(self.vnode, self.datadir)
+        command.execute("disable maintenance", 'disable', 'maintenance')
 
     def drop(self):
         """
@@ -427,128 +418,94 @@ SELECT reportedstate
 
         :return:
         """
-        drop_command = [shutil.which('pg_autoctl'), 'drop', 'node',
-                       '--pgdata', self.datadir]
-        drop_proc = self.vnode.run(drop_command)
-        wait_or_timeout_proc(drop_proc, name="drop node", timeout=COMMAND_TIMEOUT)
+        command = PGAutoCtl(self.vnode, self.datadir)
+        command.execute("drop node", 'drop', 'node')
+        return True
 
     def set_candidate_priority(self, candidatePriority):
         """
             Sets candidate priority via pg_autoctl
         """
-
-        set_command = [shutil.which('pg_autoctl'), 'set', 'node', '--pgdata', self.datadir,
-                        '--', 'candidate-priority', str(candidatePriority)]
-        set_proc = self.vnode.run(set_command)
-        out, err = set_proc.communicate(timeout=COMMAND_TIMEOUT)
-        if set_proc.returncode > 0:
-            print("unable set candidate priority for node '%s' out: %s\n, err: %s"
-                  %(self.vnode.address, out, err))
-            return False
-        elif set_proc.returncode is None:
-            print("set command timed out")
-            return False
+        command = PGAutoCtl(self.vnode, self.datadir)
+        try:
+            command.execute("set canditate priority", 'set', 'node',
+                            '--', 'candidate-priority', str(candidatePriority))
+        except Exception as e:
+            if command.run_proc.returncode == 1:
+                return False
+            raise e
         return True
 
     def get_candidate_priority(self):
         """
             Gets candidate priority via pg_autoctl
         """
-
-        get_command = [shutil.which('pg_autoctl'), 'get', 'node', 'candidate-priority',
-                       '--pgdata', self.datadir]
-        get_proc = self.vnode.run(get_command)
-        out, err = get_proc.communicate(timeout=COMMAND_TIMEOUT)
-        if get_proc.returncode > 0:
-            print("unable get candidate priority for node '%s' out: %s\n, err: %s"
-                  %(self.vnode.address, out, err))
-            return -1
-        elif get_proc.returncode is None:
-            print("get command timed out")
-            return -1
+        command = PGAutoCtl(self.vnode, self.datadir)
+        out, err = command.execute("get canditate priority",
+                                   'get', 'node', 'candidate-priority')
         return int(out)
 
     def set_replication_quorum(self, replicationQuorum):
         """
             Sets replication quorum via pg_autoctl
         """
-
-        set_command = [shutil.which('pg_autoctl'), 'set', 'node', '--pgdata', self.datadir,
-                        'replication-quorum', replicationQuorum]
-        set_proc = self.vnode.run(set_command)
-        out, err = set_proc.communicate(timeout=COMMAND_TIMEOUT)
-        if set_proc.returncode > 0:
-            print("unable set replication quorum for node '%s' out: %s\n, err: %s"
-                  %(self.vnode.address, out, err))
-            return False
-        elif set_proc.returncode is None:
-            print("set command timed out")
-            return False
+        command = PGAutoCtl(self.vnode, self.datadir)
+        try:
+            command.execute("set replication quorum", 'set', 'node',
+                            '--', 'replication-quorum', replicationQuorum)
+        except Exception as e:
+            if command.run_proc.returncode == 1:
+                return False
+            raise e
         return True
 
     def get_replication_quorum(self):
         """
             Gets replication quorum via pg_autoctl
         """
+        command = PGAutoCtl(self.vnode, self.datadir)
+        out, err = command.execute("get replication quorum",
+                                   'get', 'node', 'replication-quorum')
 
-        get_command = [shutil.which('pg_autoctl'), 'get', 'node', 'replication-quorum',
-                       '--pgdata', self.datadir]
-        get_proc = self.vnode.run(get_command)
-        out, err = get_proc.communicate(timeout=COMMAND_TIMEOUT)
-        if get_proc.returncode > 0:
-            print("unable get replication quorum for node '%s' out: %s\n, err: %s"
-                  %(self.vnode.address, out, err))
-            return -1
-        elif get_proc.returncode is None:
-            print("get command timed out")
-            return -1
         value = out.strip()
-        
+
         if (value not in ['true', 'false']):
             raise Exception("Unknown replication quorum value %s" % value)
+
         return value == "true"
 
     def set_number_sync_standbys(self, numberSyncStandbys):
         """
             Sets number sync standbys via pg_autoctl
         """
-
-        set_command = [shutil.which('pg_autoctl'), 'set', 'formation', '--pgdata', self.datadir,
-                        '--', 'number-sync-standbys', str(numberSyncStandbys)]
-        set_proc = self.vnode.run(set_command)
-        out, err = set_proc.communicate(timeout=COMMAND_TIMEOUT)
-        if set_proc.returncode > 0:
-            print("unable set number-sync-standbys for node '%s' out: %s\n, err: %s"
-                  %(self.vnode.address, out, err))
-            return False
-        elif set_proc.returncode is None:
-            print("set command timed out")
-            return False
+        command = PGAutoCtl(self.vnode, self.datadir)
+        try:
+            command.execute("set number sync standbys",
+                            'set', 'formation', '--',
+                            'number-sync-standbys', str(numberSyncStandbys))
+        except Exception as e:
+            if command.run_proc.returncode == 1:
+                return False
+            raise e
         return True
 
     def get_number_sync_standbys(self):
         """
             Gets number sync standbys  via pg_autoctl
         """
+        command = PGAutoCtl(self.vnode, self.datadir)
+        out, err = command.execute("get number sync standbys",
+                                   'get', 'formation', 'number-sync-standbys')
 
-        get_command = [shutil.which('pg_autoctl'), 'get', 'formation', 'number-sync-standbys',
-                       '--pgdata', self.datadir]
-        get_proc = self.vnode.run(get_command)
-        out, err = get_proc.communicate(timeout=COMMAND_TIMEOUT)
-        if get_proc.returncode > 0:
-            print("unable get number-sync-standbys for node '%s' out: %s\n, err: %s"
-                  %(self.vnode.address, out, err))
-            return -1
-        elif get_proc.returncode is None:
-            print("get command timed out")
-            return -1
         return int(out)
+
 
 class MonitorNode(PGNode):
     def __init__(self, datadir, vnode, port, nodename, authMethod):
-           
+
         super().__init__(datadir, vnode, port,
-                         "autoctl_node", authMethod, "pg_auto_failover", Role.Monitor)
+                         "autoctl_node", authMethod,
+                         "pg_auto_failover", Role.Monitor)
 
         # set the nodename, default to the ip address of the node
         if nodename:
@@ -561,29 +518,25 @@ class MonitorNode(PGNode):
         """
         Initializes and runs the monitor process.
         """
-        init_command = [shutil.which('pg_autoctl'), '-vvv', 'create',
-                        self.role.command(),
-                        '--pgdata', self.datadir,
-                        '--pgport', str(self.port),
-                        '--nodename', self.nodename]
-        
+        create_args = ['create', self.role.command(), '-vv',
+                       '--pgdata', self.datadir,
+                       '--pgport', str(self.port),
+                       '--nodename', self.nodename]
+
         if self.authMethod:
-            init_command.extend(['--auth', self.authMethod])
-        
+            create_args += ['--auth', self.authMethod]
+
         if run:
-            init_command.extend(['--run'])
-        
-        init_proc = self.vnode.run(init_command)
-        
+            create_args += ['--run']
+
         # when run is requested pg_autoctl does not terminate
         # therefore we do not wait for process to complete
         # we just record the process
+        self.pg_autoctl = PGAutoCtl(self.vnode, self.datadir, create_args)
         if run:
-            self.pg_autoctl_run_proc = init_proc
+            self.pg_autoctl.run()
         else:
-            wait_or_timeout_proc(init_proc,
-                             name="create monitor",
-                             timeout=COMMAND_TIMEOUT)
+            self.pg_autoctl.execute("create monitor")
 
     def create_formation(self, formation_name,
                          kind="pgsql", secondary=None, dbname=None):
@@ -625,16 +578,9 @@ class MonitorNode(PGNode):
         :param formation: name of the formation to enable the feature on
         :return: None
         """
-        enable_command = [shutil.which('pg_autoctl'), 'enable', feature.command(),
-                          '--pgdata', self.datadir,
-                          '--formation', formation]
-
-        print("enable_command:", enable_command)
-
-        enable_proc = self.vnode.run(enable_command)
-        wait_or_timeout_proc(enable_proc,
-                             name="enable feature",
-                             timeout=COMMAND_TIMEOUT)
+        command = PGAutoCtl(self.vnode, self.datadir)
+        command.execute("enable %s" % feature.command(),
+                        'enable', feature.command(), '--formation', formation)
 
     def disable(self, feature, formation='default'):
         """
@@ -644,26 +590,160 @@ class MonitorNode(PGNode):
         :param formation: name of the formation to disable the feature on
         :return: None
         """
-        disable_command = [shutil.which('pg_autoctl'), 'disable', feature.command(),
-                          '--pgdata', self.datadir,
-                          '--formation', formation]
-
-        disable_proc = self.vnode.run(disable_command)
-        wait_or_timeout_proc(disable_proc,
-                             name="disable feature",
-                             timeout=COMMAND_TIMEOUT)
+        command = PGAutoCtl(self.vnode, self.datadir)
+        command.execute("disable %s" % feature.command(),
+                        'disable', feature.command(), '--formation', formation)
 
     def failover(self, formation='default', group=0):
         """
         performs manual failover for given formation and group id
         """
-        failover_commmand_text = "select * from pgautofailover.perform_failover('%s', %s)" %(formation, group)
-        failover_command = [shutil.which('psql'), '-d', self.database, '-c', failover_commmand_text]
+        failover_commmand_text = \
+            "select * from pgautofailover.perform_failover('%s', %s)" % \
+            (formation, group)
+        failover_command = [shutil.which('psql'),
+                            '-d', self.database,
+                            '-c', failover_commmand_text]
         failover_proc = self.vnode.run(failover_command)
         wait_or_timeout_proc(failover_proc,
                          name="manual failover",
                          timeout=COMMAND_TIMEOUT)
 
+
+    def print_state(self, formation="default"):
+        print("pg_autoctl show state --pgdata %s" % self.datadir)
+
+        command = PGAutoCtl(self.vnode, self.datadir)
+        out, err = command.execute("show state", 'show', 'state')
+        print("%s" % out)
+
+
+class PGAutoCtl():
+    def __init__(self, vnode, datadir, argv=None):
+        self.vnode = vnode
+        self.datadir = datadir
+
+        self.program = shutil.which('pg_autoctl')
+        self.command = None
+
+        self.run_proc = None
+        self.out = ""
+        self.err = ""
+
+        if argv:
+            self.command = [self.program] + argv
+
+    def run(self):
+        """
+        Runs our command in the background, returns immediately.
+
+        The command could be `pg_autoctl run`, or another command.
+        We could be given a full `pg_autoctl create postgres --run` command.
+        """
+        if not self.command:
+            self.command = [self.program, 'run', '--pgdata', self.datadir, '-vv']
+
+        self.run_proc = self.vnode.run(self.command)
+        print("pg_autoctl run [%d]" % self.run_proc.pid)
+
+    def execute(self, name, *args):
+        """
+        Execute a single pg_autoctl command, wait for its completion.
+        """
+        self.set_command(*args)
+        self.run_proc = self.vnode.run(self.command)
+
+        try:
+            # wait until process is done, still applying COMMAND_TIMEOUT
+            self.communicate(timeout=COMMAND_TIMEOUT)
+
+            if self.run_proc.returncode > 0:
+                raise Exception("%s failed, out: %s\n, err: %s" %
+                                (name, self.out, self.err))
+            return self.out, self.err
+
+        except subprocess.TimeoutExpired:
+            # we already spent our allocated waiting time, just kill the process
+            self.run_proc.kill()
+            self.communicate()
+            self.run_proc.wait()
+            self.run_proc.release()
+
+            self.run_proc = None
+
+            raise Exception("%s timed out after %d seconds. out: %s\n, err: %s"%
+                            (name, COMMAND_TIMEOUT, out, err))
+
+        return self.out, self.err
+
+    def stop(self):
+        """
+        Kills the keeper by sending a SIGTERM to keeper's process group.
+        """
+        if self.run_proc and self.run_proc.pid:
+            print("Terminating pg_autoctl process for %s [%d]" %
+                  (self.datadir, self.run_proc.pid))
+
+            try:
+                pgid = os.getpgid(self.run_proc.pid)
+                os.killpg(pgid, signal.SIGTERM)
+
+                self.communicate()
+                self.run_proc.wait()
+                self.run_proc.release()
+
+                self.run_proc = None
+
+                return self.out, self.err
+
+            except ProcessLookupError as e:
+                self.run_proc = None
+                print("Failed to terminate pg_autoctl for %s: %s" %
+                      (self.datadir, e))
+        else:
+            print("pg_autoctl process for %s is not running" % self.datadir)
+
+    def communicate(self, timeout=COMMAND_TIMEOUT):
+        """
+        Read all data from the Unix PIPE
+        """
+        self.out, self.err = self.run_proc.communicate(timeout=timeout)
+
+        return self.out, self.err
+
+    def consume_output(self, secs=1):
+        """
+        Read available lines from the process for some given seconds
+        """
+        try:
+            self.out, self.err = self.run_proc.communicate(timeout=secs)
+        except subprocess.TimeoutExpired:
+            # all good, we'll comme back
+            pass
+
+        return self.out, self.err
+
+    def set_command(self, *args):
+        """
+        Build the process command line, or use the one given at init time.
+        """
+        if self.command:
+            return self.command
+
+        pgdata = ['--pgdata', self.datadir]
+        self.command = [self.program]
+
+        # add pgdata in the command BEFORE any -- arguments
+        for arg in args:
+            if arg == '--':
+                self.command += pgdata
+            self.command += [arg]
+
+        # when no -- argument is used, append --pgdata option at the end
+        if '--pgdata' not in self.command:
+            self.command += pgdata
+
+        return self.command
 
 
 def wait_or_timeout_proc(proc, name, timeout):
