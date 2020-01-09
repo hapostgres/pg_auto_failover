@@ -524,10 +524,10 @@ class MonitorNode(PGNode):
                        '--nodename', self.nodename]
 
         if self.authMethod:
-            init_command.extend(['--auth', self.authMethod])
+            create_args += ['--auth', self.authMethod]
 
         if run:
-            init_command.extend(['--run'])
+            create_args += ['--run']
 
         # when run is requested pg_autoctl does not terminate
         # therefore we do not wait for process to complete
