@@ -304,13 +304,13 @@ class DataNode(PGNode):
                        '--monitor', self.monitor.connection_string()]
 
         if self.listen_flag:
-            create_command += ['--listen', str(self.vnode.address)]
+            create_args += ['--listen', str(self.vnode.address)]
 
         if self.formation:
-            create_command += ['--formation', self.formation]
+            create_args += ['--formation', self.formation]
 
         if run:
-            create_command += ['--run']
+            create_args += ['--run']
 
         # when run is requested pg_autoctl does not terminate
         # therefore we do not wait for process to complete
