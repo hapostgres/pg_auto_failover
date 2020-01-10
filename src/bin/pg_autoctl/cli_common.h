@@ -67,6 +67,7 @@ extern CommandLine config_commands;
 extern CommandLine create_monitor_command;
 extern CommandLine create_postgres_command;
 extern CommandLine drop_node_command;
+extern CommandLine destroy_command;
 
 /* cli_enable_disable.c */
 extern CommandLine enable_commands;
@@ -109,5 +110,9 @@ void exit_unless_role_is_keeper(KeeperConfig *kconfig);
 bool cli_create_config(Keeper *keeper, KeeperConfig *config);
 void cli_create_pg(Keeper *keeper, KeeperConfig *config);
 bool check_or_discover_nodename(KeeperConfig *config);
-
+void keeper_cli_destroy_node(int argc, char **argv);
+void keeper_cli_destroy_keeper_node(Keeper *keeper,
+									KeeperConfig *config);
+void stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathnames,
+												PostgresSetup *pgSetup);
 #endif  /* CLI_COMMON_H */
