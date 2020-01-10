@@ -286,6 +286,7 @@ monitor_get_other_nodes_as_json(Monitor *monitor,
 	Oid paramTypes[3] = { TEXTOID, INT4OID, TEXTOID };
 	const char *paramValues[3] = { 0 };
 	IntString myPortString = intToString(myPort);
+	int resultSize = 0;
 
 	paramValues[0] = myHost;
 	paramValues[1] = myPortString.strValue;
@@ -317,7 +318,16 @@ monitor_get_other_nodes_as_json(Monitor *monitor,
 		return false;
 	}
 
-	strlcpy(json, context.strVal, size);
+	resultSize = strlcpy(json, context.strVal, size);
+	free(context.strVal);
+
+	if (resultSize >= size)
+	{
+		log_error("Failed to get the other nodes as JSON. A string of %d bytes "
+				  "would have been necessary and pg_autoctl only supports up to"
+				  "%d bytes", resultSize, size);
+		return false;
+	}
 
 	return true;
 }

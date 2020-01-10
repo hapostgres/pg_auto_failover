@@ -296,16 +296,24 @@ cli_do_fsm_assign(int argc, char **argv)
 
 			keeper.otherNodes.count = 1;
 
-			goalState = NodeStateFromString(argv[0]);
+			goalState = NodeStateFromString(argv[1]);
 
-			/* now prepare host and port in keeper.otherNodes */
-			strlcpy(otherNode->host, argv[1], _POSIX_HOST_NAME_MAX);
+			/* now prepare id, host, and port in keeper.otherNodes */
+			otherNode->nodeId = strtol(argv[2], NULL, 10);
+			if (otherNode->nodeId == 0 && errno == EINVAL)
+			{
+				log_error(
+					"Failed to parse otherNode id \"%s\"", argv[2]);
+				exit(EXIT_CODE_INTERNAL_ERROR);
+			}
 
-			otherNode->port = strtol(argv[2], NULL, 10);
+			strlcpy(otherNode->host, argv[3], _POSIX_HOST_NAME_MAX);
+
+			otherNode->port = strtol(argv[4], NULL, 10);
 			if (otherNode->port == 0 && errno == EINVAL)
 			{
 				log_error(
-					"Failed to parse otherNode port number \"%s\"", argv[2]);
+					"Failed to parse otherNode port number \"%s\"", argv[4]);
 				exit(EXIT_CODE_INTERNAL_ERROR);
 			}
 			break;
