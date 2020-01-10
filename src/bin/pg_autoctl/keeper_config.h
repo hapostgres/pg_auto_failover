@@ -70,6 +70,7 @@ bool keeper_config_pgsetup_init(KeeperConfig *config,
 								bool pgIsNotRunningIsOk);
 bool keeper_config_write_file(KeeperConfig *config);
 bool keeper_config_write(FILE *stream, KeeperConfig *config);
+bool keeper_config_to_json(JSON_Object *jsRoot, KeeperConfig *config);
 void keeper_config_log_settings(KeeperConfig config);
 
 bool keeper_config_get_setting(KeeperConfig *config,

@@ -1,3 +1,13 @@
+/*
+ * src/bin/pg_autoctl/cli_get_set_properties.c
+ *     Implementation of a CLI to get and set properties managed by the
+ *     pg_auto_failover monitor.
+ *
+ * Copyright (c) Microsoft Corporation. All rights reserved.
+ * Licensed under the PostgreSQL License.
+ *
+ */
+#include "parson.h"
 
 #include "cli_common.h"
 #include "parsing.h"
@@ -13,17 +23,17 @@ static void cli_set_formation_property(int arc, char **argv);
 CommandLine get_node_replication_quorum =
 	make_command("replication-quorum",
 				 "get replication-quorum property for a node from the pg_auto_failover monitor",
-				 " [ --pgdata ]",
-				 KEEPER_CLI_PGDATA_OPTION,
-				 keeper_cli_getopt_pgdata,
+				 CLI_PGDATA_USAGE,
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
 				 cli_get_node_replication_quorum);
 
 CommandLine get_node_candidate_priority =
 	make_command("candidate-priority",
 				 "get candidate property for a node from the pg_auto_failover monitor",
-				 " [ --pgdata ]",
-				 KEEPER_CLI_PGDATA_OPTION,
-				 keeper_cli_getopt_pgdata,
+				 CLI_PGDATA_USAGE,
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
 				 cli_get_node_candidate_priority);
 
 
@@ -42,9 +52,9 @@ CommandLine get_node_command =
 CommandLine get_formation_number_sync_standbys =
 	make_command("number-sync-standbys",
 				 "get number_sync_standbys for a formation from the pg_auto_failover monitor",
-				 " [ --pgdata ]",
-				 KEEPER_CLI_PGDATA_OPTION,
-				 keeper_cli_getopt_pgdata,
+				 CLI_PGDATA_USAGE,
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
 				 cli_get_formation_number_sync_standbys);
 
 static CommandLine *get_formation_subcommands[] = {
@@ -74,17 +84,17 @@ CommandLine get_commands =
 CommandLine set_node_command =
 	make_command("node",
 				 "set a property for a node at the pg_auto_failover monitor",
-				 " [ --pgdata ] { candidate-priority | replication-quorum } value",
-				 KEEPER_CLI_PGDATA_OPTION,
-				 keeper_cli_getopt_pgdata,
+				 CLI_PGDATA_USAGE "{ candidate-priority | replication-quorum } value",
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
 				 cli_set_node_property);
 
 CommandLine set_formation_command =
 	make_command("formation",
 				 "set a property for a formation the pg_auto_failover monitor",
-				 " [ --pgdata ] { number-sync-standbys }  value",
-				 KEEPER_CLI_PGDATA_OPTION,
-				 keeper_cli_getopt_pgdata,
+				 CLI_PGDATA_USAGE "{ number-sync-standbys }  value",
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
 				 cli_set_formation_property);
 
 static CommandLine *set_subcommands[] = {
@@ -164,7 +174,27 @@ cli_get_node_replication_quorum(int argc, char **argv)
 		exit(EXIT_CODE_MONITOR);
 	}
 
-	fprintf(stdout, "%s\n", boolToString(settings.replicationQuorum));
+	if (outputJSON)
+	{
+		char *serialized_string = NULL;
+		JSON_Value *js = json_value_init_object();
+		JSON_Object *jsObj = json_value_get_object(js);
+
+		json_object_set_boolean(jsObj,
+								"replication-quorum",
+								settings.replicationQuorum);
+
+		serialized_string = json_serialize_to_string_pretty(js);
+
+		fprintf(stdout, "%s\n", serialized_string);
+
+		json_free_serialized_string(serialized_string);
+		json_value_free(js);
+	}
+	else
+	{
+		fprintf(stdout, "%s\n", boolToString(settings.replicationQuorum));
+	}
 }
 
 
@@ -183,7 +213,27 @@ cli_get_node_candidate_priority(int argc, char **argv)
 		exit(EXIT_CODE_MONITOR);
 	}
 
-	fprintf(stdout, "%d\n", settings.candidatePriority);
+	if (outputJSON)
+	{
+		char *serialized_string = NULL;
+		JSON_Value *js = json_value_init_object();
+		JSON_Object *jsObj = json_value_get_object(js);
+
+		json_object_set_number(jsObj,
+								"candidate-priority",
+							   (double) settings.candidatePriority);
+
+		serialized_string = json_serialize_to_string_pretty(js);
+
+		fprintf(stdout, "%s\n", serialized_string);
+
+		json_free_serialized_string(serialized_string);
+		json_value_free(js);
+	}
+	else
+	{
+		fprintf(stdout, "%d\n", settings.candidatePriority);
+	}
 }
 
 
@@ -231,7 +281,27 @@ cli_get_formation_number_sync_standbys(int argc, char **argv)
 		exit(EXIT_CODE_MONITOR);
 	}
 
-	fprintf(stdout, "%d\n", numberSyncStandbys);
+	if (outputJSON)
+	{
+		char *serialized_string = NULL;
+		JSON_Value *js = json_value_init_object();
+		JSON_Object *jsObj = json_value_get_object(js);
+
+		json_object_set_number(jsObj,
+							   "number-sync-standbys",
+							   (double) numberSyncStandbys);
+
+		serialized_string = json_serialize_to_string_pretty(js);
+
+		fprintf(stdout, "%s\n", serialized_string);
+
+		json_free_serialized_string(serialized_string);
+		json_value_free(js);
+	}
+	else
+	{
+		fprintf(stdout, "%d\n", numberSyncStandbys);
+	}
 }
 
 
@@ -332,7 +402,27 @@ cli_set_node_property(int argc, char **argv)
 			exit(EXIT_CODE_MONITOR);
 		}
 
-		fprintf(stdout, "%s\n", boolToString(replicationQuorum));
+		if (outputJSON)
+		{
+			char *serialized_string = NULL;
+			JSON_Value *js = json_value_init_object();
+			JSON_Object *jsObj = json_value_get_object(js);
+
+			json_object_set_boolean(jsObj,
+									"replication-quorum",
+									replicationQuorum);
+
+			serialized_string = json_serialize_to_string_pretty(js);
+
+			fprintf(stdout, "%s\n", serialized_string);
+
+			json_free_serialized_string(serialized_string);
+			json_value_free(js);
+		}
+		else
+		{
+			fprintf(stdout, "%s\n", boolToString(replicationQuorum));
+		}
 	}
 	else
 	{
@@ -419,5 +509,25 @@ cli_set_formation_property(int argc, char **argv)
 		exit(EXIT_CODE_MONITOR);
 	}
 
-	fprintf(stdout, "%d\n", numberSyncStandbys);
+	if (outputJSON)
+	{
+		char *serialized_string = NULL;
+		JSON_Value *js = json_value_init_object();
+		JSON_Object *jsObj = json_value_get_object(js);
+
+		json_object_set_number(jsObj,
+							   "number-sync-standbys",
+							   (double) numberSyncStandbys);
+
+		serialized_string = json_serialize_to_string_pretty(js);
+
+		fprintf(stdout, "%s\n", serialized_string);
+
+		json_free_serialized_string(serialized_string);
+		json_value_free(js);
+	}
+	else
+	{
+		fprintf(stdout, "%d\n", numberSyncStandbys);
+	}
 }

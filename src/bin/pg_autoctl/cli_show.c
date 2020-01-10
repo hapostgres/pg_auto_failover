@@ -29,7 +29,6 @@
 #include "state.h"
 
 static int eventCount = 10;
-static bool outputJSON = false;
 
 static int cli_show_state_getopts(int argc, char **argv);
 static void cli_show_state(int argc, char **argv);

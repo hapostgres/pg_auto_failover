@@ -31,6 +31,7 @@
 KeeperConfig keeperOptions;
 bool allowRemovingPgdata = false;
 bool createAndRun = false;
+bool outputJSON = false;
 
 
 /*
@@ -408,7 +409,7 @@ cli_create_node_getopts(int argc, char **argv,
  * allows to determine where is our configuration file.
  */
 int
-keeper_cli_getopt_pgdata(int argc, char **argv)
+cli_getopt_pgdata(int argc, char **argv)
 {
 	KeeperConfig options = { 0 };
 	int c, option_index = 0, errors = 0;
@@ -416,6 +417,7 @@ keeper_cli_getopt_pgdata(int argc, char **argv)
 
 	static struct option long_options[] = {
 		{ "pgdata", required_argument, NULL, 'D' },
+		{ "json", no_argument, NULL, 'J' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
@@ -434,7 +436,7 @@ keeper_cli_getopt_pgdata(int argc, char **argv)
 	 */
 	unsetenv("POSIXLY_CORRECT");
 
-	while ((c = getopt_long(argc, argv, "D:Vvqh",
+	while ((c = getopt_long(argc, argv, "D:JVvqh",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -443,6 +445,13 @@ keeper_cli_getopt_pgdata(int argc, char **argv)
 			{
 				strlcpy(options.pgSetup.pgdata, optarg, MAXPGPATH);
 				log_trace("--pgdata %s", options.pgSetup.pgdata);
+				break;
+			}
+
+			case 'J':
+			{
+				outputJSON = true;
+				log_trace("--json");
 				break;
 			}
 

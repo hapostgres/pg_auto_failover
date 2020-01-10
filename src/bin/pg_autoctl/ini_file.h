@@ -13,6 +13,8 @@
 #include <stdbool.h>
 #include <stdio.h>
 
+#include "parson.h"
+
 #define INI_STRING_T 1          /* char *target */
 #define INI_STRBUF_T 2          /* char target[size] */
 #define INI_INT_T 3             /* int target */
@@ -89,6 +91,7 @@ bool ini_validate_options(IniOption *optionList);
 bool ini_set_option_value(IniOption *option, const char *value);
 bool ini_option_to_string(IniOption *option, char *dest, size_t size);
 bool write_ini_to_stream(FILE *stream, IniOption *optionList);
+bool ini_to_json(JSON_Object *jsRoot, IniOption *optionList);
 IniOption * lookup_ini_option(IniOption *optionList,
 							  const char *section, const char *name);
 IniOption * lookup_ini_path_value(IniOption *optionList, const char *path);

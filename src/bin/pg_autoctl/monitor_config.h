@@ -15,6 +15,7 @@
 
 #include "config.h"
 #include "pgctl.h"
+#include "parson.h"
 #include "pgsql.h"
 
 typedef struct MonitorConfig
@@ -46,6 +47,7 @@ bool monitor_config_read_file(MonitorConfig *config,
 							  bool pg_not_running_is_ok);
 bool monitor_config_write_file(MonitorConfig *config);
 bool monitor_config_write(FILE *stream, MonitorConfig *config);
+bool monitor_config_to_json(JSON_Object *jsRoot, MonitorConfig *config);
 void monitor_config_log_settings(MonitorConfig config);
 bool monitor_config_merge_options(MonitorConfig *config,
 								  MonitorConfig *options);

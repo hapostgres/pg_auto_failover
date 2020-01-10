@@ -49,17 +49,17 @@ static CommandLine disable_secondary_command =
 static CommandLine enable_maintenance_command =
 	make_command("maintenance",
 				 "Enable Postgres maintenance mode on this node",
-				 " [ --pgdata ]",
-				 KEEPER_CLI_PGDATA_OPTION,
-				 keeper_cli_getopt_pgdata,
+				 CLI_PGDATA_USAGE,
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
 				 cli_enable_maintenance);
 
 static CommandLine disable_maintenance_command =
 	make_command("maintenance",
 				 "Disable Postgres maintenance mode on this node",
-				 " [ --pgdata ]",
-				 KEEPER_CLI_PGDATA_OPTION,
-				 keeper_cli_getopt_pgdata,
+				 CLI_PGDATA_USAGE,
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
 				 cli_disable_maintenance);
 
 static CommandLine *enable_subcommands[] = {
@@ -233,8 +233,9 @@ cli_enable_secondary(int argc, char **argv)
 		exit(EXIT_CODE_MONITOR);
 	}
 
-	log_info("Enabled secondaries for formation \"%s\", make sure to add worker nodes "
-			 "to the formation to have secondaries ready for failover.",
+	log_info("Enabled secondaries for formation \"%s\", make sure to add "
+			 "worker nodes to the formation to have secondaries ready "
+			 "for failover.",
 			 config.formation);
 }
 
@@ -255,10 +256,11 @@ cli_disable_secondary(int argc, char **argv)
 	}
 
 	/*
-	 * disabling secondaries on a formation happens on the monitor. When the formation is
-	 * still operating with secondaries an error will be logged and the function will
-	 * return with a false value. As we will exit the successful info message below is
-	 * only printed if secondaries on the formation have been disabled successfully.
+	 * disabling secondaries on a formation happens on the monitor. When the
+	 * formation is still operating with secondaries an error will be logged
+	 * and the function will return with a false value. As we will exit the
+	 * successful info message below is only printed if secondaries on the
+	 * formation have been disabled successfully.
 	 */
 	if (!monitor_disable_secondary_for_formation(&monitor, config.formation))
 	{

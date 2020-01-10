@@ -38,25 +38,25 @@ static void cli_monitor_config_set(int argc, char **argv);
 static CommandLine config_check =
 	make_command("check",
 				 "Check pg_autoctl configuration",
-				 " [ --pgdata ]",
-				 KEEPER_CLI_PGDATA_OPTION,
-				 keeper_cli_getopt_pgdata,
+				 CLI_PGDATA_USAGE,
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
 				 cli_config_check);
 
 static CommandLine config_get =
 	make_command("get",
 				 "Get the value of a given pg_autoctl configuration variable",
-				 "[ section.option ]",
-				 KEEPER_CLI_PGDATA_OPTION,
-				 keeper_cli_getopt_pgdata,
+				 CLI_PGDATA_USAGE "[ section.option ]",
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
 				 cli_config_get);
 
 static CommandLine config_set =
 	make_command("set",
 				 "Set the value of a given pg_autoctl configuration variable",
-				 "section.option [ value ]",
-				 KEEPER_CLI_PGDATA_OPTION,
-				 keeper_cli_getopt_pgdata,
+				 CLI_PGDATA_USAGE "section.option [ value ]",
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
 				 cli_config_set);
 
 static CommandLine *config[] = {
@@ -110,9 +110,54 @@ cli_config_check(int argc, char **argv)
 
 			(void) cli_config_check_pgsetup(&(mconfig.pgSetup));
 
-			fprintf(stdout, "Current Configuration (includes pgSetup):\n");
-			monitor_config_write(stdout, &mconfig);
-			fprintf(stdout, "\n");
+			if (outputJSON)
+			{
+				JSON_Value *js = json_value_init_object();
+				JSON_Value *jsPostgres = json_value_init_object();
+				JSON_Value *jsMConfig = json_value_init_object();
+
+				JSON_Object *root = json_value_get_object(js);
+				JSON_Object *jsPostgresObj = json_value_get_object(jsPostgres);
+				JSON_Object *jsMConfigObj = json_value_get_object(jsMConfig);
+
+				char *serialized_string;
+				int len;
+
+				/* prepare both JSON objects */
+				if (!pg_setup_as_json(&(mconfig.pgSetup), jsPostgresObj))
+				{
+					/* can't happen */
+					exit(EXIT_CODE_INTERNAL_ERROR);
+				}
+
+				if (!monitor_config_to_json(jsMConfigObj, &mconfig))
+				{
+					log_fatal("Failed to serialize monitor configuration to JSON");
+					exit(EXIT_CODE_BAD_CONFIG);
+				}
+
+				/* concatenate JSON objects into a container object */
+				json_object_set_value(root, "postgres", jsPostgres);
+				json_object_set_value(root, "config", jsMConfig);
+
+				/* output our nice JSON object, pretty printed please */
+				serialized_string = json_serialize_to_string_pretty(js);
+				fprintf(stdout, "%s\n", serialized_string);
+
+				/* free intermediate memory */
+				json_free_serialized_string(serialized_string);
+				json_value_free(js);
+			}
+			else
+			{
+				fprintf(stdout, "Discovered PostgreSQL Setup:\n");
+				fprintf_pg_setup(stdout, &(mconfig.pgSetup));
+				fprintf(stdout, "\n");
+
+				fprintf(stdout, "Current Configuration (includes pgSetup):\n");
+				monitor_config_write(stdout, &mconfig);
+				fprintf(stdout, "\n");
+			}
 
 			break;
 		}
@@ -130,9 +175,54 @@ cli_config_check(int argc, char **argv)
 
 			(void) cli_config_check_pgsetup(&(config.pgSetup));
 
-			fprintf(stdout, "Current Configuration (includes pgSetup):\n");
-			keeper_config_write(stdout, &config);
-			fprintf(stdout, "\n");
+			if (outputJSON)
+			{
+				JSON_Value *js = json_value_init_object();
+				JSON_Value *jsPostgres = json_value_init_object();
+				JSON_Value *jsKConfig = json_value_init_object();
+
+				JSON_Object *root = json_value_get_object(js);
+				JSON_Object *jsPostgresObj = json_value_get_object(jsPostgres);
+				JSON_Object *jsKConfigObj = json_value_get_object(jsKConfig);
+
+				char *serialized_string;
+				int len;
+
+				/* prepare both JSON objects */
+				if (!pg_setup_as_json(&(config.pgSetup), jsPostgresObj))
+				{
+					/* can't happen */
+					exit(EXIT_CODE_INTERNAL_ERROR);
+				}
+
+				if (!keeper_config_to_json(jsKConfigObj, &config))
+				{
+					log_fatal("Failed to serialize monitor configuration to JSON");
+					exit(EXIT_CODE_BAD_CONFIG);
+				}
+
+				/* concatenate JSON objects into a container object */
+				json_object_set_value(root, "postgres", jsPostgres);
+				json_object_set_value(root, "config", jsKConfig);
+
+				/* output our nice JSON object, pretty printed please */
+				serialized_string = json_serialize_to_string_pretty(js);
+				fprintf(stdout, "%s\n", serialized_string);
+
+				/* free intermediate memory */
+				json_free_serialized_string(serialized_string);
+				json_value_free(js);
+			}
+			else
+			{
+				fprintf(stdout, "Discovered PostgreSQL Setup:\n");
+				fprintf_pg_setup(stdout, &(config.pgSetup));
+				fprintf(stdout, "\n");
+
+				fprintf(stdout, "Current Configuration (includes pgSetup):\n");
+				keeper_config_write(stdout, &config);
+				fprintf(stdout, "\n");
+			}
 
 			break;
 		}
@@ -180,10 +270,6 @@ cli_config_check_pgsetup(PostgresSetup *pgSetup)
 
 	/* TODO: check formation, group, nodename on the monitor */
 
-	fprintf(stdout, "Discovered PostgreSQL Setup:\n");
-	fprintf_pg_setup(stdout, pgSetup);
-	fprintf(stdout, "\n");
-
 	if (errors > 0)
 	{
 		exit(EXIT_CODE_BAD_CONFIG);
@@ -200,7 +286,8 @@ cli_config_get(int argc, char **argv)
 {
 	KeeperConfig config = keeperOptions;
 
-	if (!keeper_config_set_pathnames_from_pgdata(&config.pathnames, config.pgSetup.pgdata))
+	if (!keeper_config_set_pathnames_from_pgdata(&config.pathnames,
+												 config.pgSetup.pgdata))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_CONFIG);
@@ -252,8 +339,32 @@ cli_keeper_config_get(int argc, char **argv)
 			}
 			else
 			{
-				keeper_config_write(stdout, &config);
-				fprintf(stdout, "\n");
+				if (outputJSON)
+				{
+					JSON_Value *js = json_value_init_object();
+					JSON_Object *jsObj = json_value_get_object(js);
+
+					char *serialized_string;
+
+					if (!keeper_config_to_json(jsObj, &config))
+					{
+						log_fatal("Failed to serialize configuration to JSON");
+						exit(EXIT_CODE_BAD_CONFIG);
+					}
+
+					/* output our nice JSON object, pretty printed please */
+					serialized_string = json_serialize_to_string_pretty(js);
+					fprintf(stdout, "%s\n", serialized_string);
+
+					/* free intermediate memory */
+					json_free_serialized_string(serialized_string);
+					json_value_free(js);
+				}
+				else
+				{
+					keeper_config_write(stdout, &config);
+					fprintf(stdout, "\n");
+				}
 			}
 
 			keeper_config_destroy(&config);

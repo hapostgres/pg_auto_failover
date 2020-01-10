@@ -408,6 +408,20 @@ keeper_config_write(FILE *stream, KeeperConfig *config)
 
 
 /*
+ * keeper_config_to_json populates given jsRoot object with the INI
+ * configuration sections as JSON objects, and the options as keys to those
+ * objects.
+ */
+bool
+keeper_config_to_json(JSON_Object *jsRoot, KeeperConfig *config)
+{
+	IniOption keeperOptions[] = SET_INI_OPTIONS_ARRAY(config);
+
+	return ini_to_json(jsRoot, keeperOptions);
+}
+
+
+/*
  * keeper_config_log_settings outputs a DEBUG line per each config parameter in
  * the given KeeperConfig.
  */

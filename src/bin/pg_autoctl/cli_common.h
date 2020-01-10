@@ -22,6 +22,8 @@ extern MonitorConfig monitorOptions;
 extern KeeperConfig keeperOptions;
 extern bool allowRemovingPgdata;
 extern bool createAndRun;
+extern bool outputJSON;
+
 
 #define KEEPER_CLI_WORKER_SETUP_OPTIONS \
 	"  --pgctl       path to pg_ctl\n" \
@@ -53,8 +55,10 @@ extern bool createAndRun;
 #define KEEPER_CLI_ALLOW_RM_PGDATA_OPTION \
 	"  --allow-removing-pgdata Allow pg_autoctl to remove the database directory\n"
 
-#define KEEPER_CLI_PGDATA_OPTION \
+#define CLI_PGDATA_OPTION \
 	"  --pgdata      path to data directory\n" \
+
+#define CLI_PGDATA_USAGE " [ --pgdata ] [ --json ] "
 
 
 /* cli_do.c */
@@ -108,7 +112,7 @@ int cli_create_node_getopts(int argc, char **argv,
 							struct option *long_options,
 							const char *optstring,
 							KeeperConfig *options);
-int keeper_cli_getopt_pgdata(int argc, char **argv);
+int cli_getopt_pgdata(int argc, char **argv);
 void prepare_keeper_options(KeeperConfig *options);
 
 void set_first_pgctl(PostgresSetup *pgSetup);
