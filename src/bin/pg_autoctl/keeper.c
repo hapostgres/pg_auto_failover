@@ -125,7 +125,7 @@ keeper_ensure_current_state(Keeper *keeper)
 	PostgresSetup *pgSetup = &(keeper->postgres.postgresSetup);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
-	log_debug("keeper_ensure_current_state: %s",
+	log_debug("Ensuring current state: %s",
 			  NodeStateToString(keeperState->current_role));
 
 	switch (keeperState->current_role)
@@ -573,6 +573,7 @@ keeper_update_pg_state(Keeper *keeper)
 		case SECONDARY_STATE:
 		case CATCHINGUP_STATE:
 		{
+			/* pg_stat_replication.sync_state is only available upstream */
 			return postgres->pgIsRunning
 				&& !IS_EMPTY_STRING_BUFFER(postgres->currentLSN);
 		}

@@ -1308,7 +1308,6 @@ validate_connection_string(const char *connectionString)
  *  - sync_state from pg_stat_replication when a primary
  *  - current_lsn from the server
  *
->>>>>>> 46577ea... Simplify the Postgres metadata fetching logic.
  * With those metadata we can then check our expectations and take decisions in
  * some cases. We can obtain all the metadata that we need easily enough in a
  * single SQL query, so that's what we do.
