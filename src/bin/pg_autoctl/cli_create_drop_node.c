@@ -89,6 +89,13 @@ CommandLine drop_node_command =
 				 keeper_cli_getopt_pgdata,
 				 cli_drop_node);
 
+CommandLine destroy_command =
+	make_command("destroy",
+				 "destroy a node, unregisters it, rm -rf PGDATA",
+				 " [ --pgdata ]",
+				 KEEPER_CLI_PGDATA_OPTION,
+				 keeper_cli_getopt_pgdata,
+				 keeper_cli_destroy_node);
 
 /*
  * cli_create_config manages the whole set of configuration parameters that
@@ -632,6 +639,20 @@ cli_drop_node(int argc, char **argv)
 	log_info("Removed the keeper from the monitor and removed the state file "
 			 "from disk.");
 
+	log_warn("Configuration file \"%s\" has been preserved",
+			 config.pathnames.config);
+
+	if (directory_exists(config.pgSetup.pgdata))
+	{
+		log_warn("Postgres Data Directory \"%s\" has been preserved",
+				 config.pgSetup.pgdata);
+	}
+
+	log_info("drop node keeps your data and setup safe, you can still run "
+			 "Postgres or re-join the pg_auto_failover cluster later");
+	log_info("HINT: to completely remove your local Postgres instance and "
+			 "setup, consider the command \"pg_autoctl destroy\"");
+
 	/*
 	 * Now also stop Postgres and the keeper itself, keeper first.
 	 *
@@ -853,5 +874,173 @@ check_nodename(const char *nodename)
 					 "interfaces, automated pg_hba.conf setup might fail.",
 					 nodename);
 		}
+	}
+}
+
+/*
+ * keeper_cli_destroy_node cleans up our testing area:
+ *
+ *  - pgautofailover.remove_node() on the monitor
+ *  - remove the state file
+ *  - stops PostgreSQL
+ *  - rm -rf PGDATA
+ *
+ */
+void
+keeper_cli_destroy_node(int argc, char **argv)
+{
+	Keeper keeper = { 0 };
+	KeeperConfig config = keeperOptions;
+
+	if (!keeper_config_set_pathnames_from_pgdata(&config.pathnames,
+												 config.pgSetup.pgdata))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	switch (ProbeConfigurationFileRole(config.pathnames.config))
+	{
+		case PG_AUTOCTL_ROLE_MONITOR:
+		{
+			Monitor monitor = { 0 };
+			MonitorConfig mconfig = { 0 };
+			bool missingPgdataIsOk = true;
+			bool pgIsNotRunningIsOk = true;
+
+			if (!monitor_config_init_from_pgsetup(&mconfig,
+												  &config.pgSetup,
+												  missingPgdataIsOk,
+												  pgIsNotRunningIsOk))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
+
+			stop_postgres_and_remove_pgdata_and_config(&mconfig.pathnames,
+													   &mconfig.pgSetup);
+			break;
+		}
+
+		case PG_AUTOCTL_ROLE_KEEPER:
+		{
+			bool missingPgdataIsOk = true;
+			bool pgIsNotRunningIsOk = true;
+			bool monitorDisabledIsOk = true;
+
+			if (!keeper_config_read_file(&config,
+										 missingPgdataIsOk,
+										 pgIsNotRunningIsOk,
+										 monitorDisabledIsOk))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
+
+			keeper_cli_destroy_keeper_node(&keeper, &config);
+			break;
+		}
+
+		default:
+		{
+			log_fatal("Unrecognized configuration file \"%s\"",
+					  config.pathnames.config);
+			exit(EXIT_CODE_BAD_CONFIG);
+		}
+	}
+}
+
+
+/*
+ * keeper_cli_destroy_keeper_node destroys a keeper node.
+ */
+void
+keeper_cli_destroy_keeper_node(Keeper *keeper, KeeperConfig *config)
+{
+	/* maybe stop running keeper service first */
+	if (file_exists(config->pathnames.pid))
+	{
+		pid_t pid = 0;
+
+		if (read_pidfile(config->pathnames.pid, &pid))
+		{
+			log_info("An instance of this keeper is running with PID %d, "
+					 "stopping it.", pid);
+
+			if (kill(pid, SIGQUIT) != 0)
+			{
+				log_error("Failed to send SIGQUIT to the keeper's pid %d: %s",
+						  pid, strerror(errno));
+				exit(EXIT_CODE_INTERNAL_ERROR);
+			}
+		}
+	}
+
+	/* only keeper_remove when we still have a state file around */
+	if (file_exists(config->pathnames.state))
+	{
+		bool ignore_monitor_errors = true;
+
+		/* keeper_remove uses log_info() to explain what's happening */
+		if (!keeper_remove(keeper, config, ignore_monitor_errors))
+		{
+			log_fatal("Failed to remove local node from the pg_auto_failover "
+					  "monitor, see above for details");
+
+			exit(EXIT_CODE_BAD_STATE);
+		}
+	}
+	else
+	{
+		log_warn("State file \"%s\" does not exist, skipping keeper remove step",
+				 config->pathnames.state);
+	}
+
+	stop_postgres_and_remove_pgdata_and_config(&(config->pathnames),
+											   &(config->pgSetup));
+}
+
+/*
+ * stop_postgres_and_remove_pgdata_and_config stops PostgreSQL and then removes
+ * PGDATA, and then config and state files.
+ */
+void
+stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathnames,
+										   PostgresSetup *pgSetup)
+{
+	log_info("Stopping PostgreSQL at \"%s\"", pgSetup->pgdata);
+
+	if (!pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata))
+	{
+		log_error("Failed to stop PostgreSQL at \"%s\"", pgSetup->pgdata);
+		exit(EXIT_CODE_PGCTL);
+	}
+
+	/*
+	 * Only try to rm -rf PGDATA if we managed to stop PostgreSQL.
+	 */
+	if (directory_exists(pgSetup->pgdata))
+	{
+		log_info("Removing \"%s\"", pgSetup->pgdata);
+
+		if (!rmtree(pgSetup->pgdata, true))
+		{
+			log_error("Failed to remove directory \"%s\": %s",
+					  pgSetup->pgdata, strerror(errno));
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+	}
+	else
+	{
+		log_warn("Skipping removal of \"%s\": directory does not exists",
+				 pgSetup->pgdata);
+	}
+
+	log_info("Removing \"%s\"", pathnames->config);
+
+	if (!unlink_file(pathnames->config))
+	{
+		/* errors have already been logged. */
+		exit(EXIT_CODE_BAD_CONFIG);
 	}
 }
