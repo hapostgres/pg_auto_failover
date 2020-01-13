@@ -585,6 +585,8 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 		/*
 		 * Skip nodes that are not failover candidates (not in SECONDARY or
 		 * REPORT_LSN state).
+		 *
+		 * XXX: what about goalState instead? or in addition to?
 		 */
 		if (node->reportedState != REPLICATION_STATE_SECONDARY
 			&& node->reportedState != REPLICATION_STATE_REPORT_LSN)
