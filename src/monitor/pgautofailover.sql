@@ -249,6 +249,9 @@ AS 'MODULE_PATHNAME', $$remove_node$$;
 comment on function pgautofailover.remove_node(text,int)
         is 'remove a node from the monitor';
 
+grant execute on function pgautofailover.remove_node(text,int)
+   to autoctl_node;
+
 CREATE FUNCTION pgautofailover.perform_failover
  (
   formation_id text default 'default',
@@ -259,6 +262,9 @@ AS 'MODULE_PATHNAME', $$perform_failover$$;
 
 comment on function pgautofailover.perform_failover(text,int)
         is 'manually failover from the primary to the secondary';
+
+grant execute on function pgautofailover.perform_failover(text,int)
+   to autoctl_node;
 
 CREATE FUNCTION pgautofailover.start_maintenance
  (
@@ -271,6 +277,9 @@ AS 'MODULE_PATHNAME', $$start_maintenance$$;
 comment on function pgautofailover.start_maintenance(text,int)
         is 'set a node in maintenance state';
 
+grant execute on function pgautofailover.start_maintenance(text,int)
+   to autoctl_node;
+
 CREATE FUNCTION pgautofailover.stop_maintenance
  (
    node_name text,
@@ -282,6 +291,8 @@ AS 'MODULE_PATHNAME', $$stop_maintenance$$;
 comment on function pgautofailover.stop_maintenance(text,int)
         is 'set a node out of maintenance state';
 
+grant execute on function pgautofailover.stop_maintenance(text,int)
+   to autoctl_node;
 
 CREATE FUNCTION pgautofailover.last_events
  (
