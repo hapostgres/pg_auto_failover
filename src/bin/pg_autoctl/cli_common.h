@@ -109,6 +109,7 @@ int cli_create_node_getopts(int argc, char **argv,
 							const char *optstring,
 							KeeperConfig *options);
 int keeper_cli_getopt_pgdata(int argc, char **argv);
+void prepare_keeper_options(KeeperConfig *options);
 
 void set_first_pgctl(PostgresSetup *pgSetup);
 bool monitor_init_from_pgsetup(Monitor *monitor, PostgresSetup *pgSetup);

@@ -501,7 +501,24 @@ keeper_cli_getopt_pgdata(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
+	/* now that we have the command line parameters, prepare the options */
+	(void) prepare_keeper_options(&options);
+
+	/* publish our option parsing in the global variable */
+	keeperOptions = options;
+
+	return optind;
+}
+
+
+/*
+ * prepare_keeper_options finishes the preparation of the keeperOptions that
+ * hosts the command line options.
+ */
+void
+prepare_keeper_options(KeeperConfig *options)
+{
+	if (IS_EMPTY_STRING_BUFFER(options->pgSetup.pgdata))
 	{
 		char *pgdata = getenv("PGDATA");
 
@@ -512,14 +529,14 @@ keeper_cli_getopt_pgdata(int argc, char **argv)
 			exit(EXIT_CODE_BAD_ARGS);
 		}
 
-		strlcpy(options.pgSetup.pgdata, pgdata, MAXPGPATH);
+		strlcpy(options->pgSetup.pgdata, pgdata, MAXPGPATH);
 	}
 
 	log_debug("Managing PostgreSQL installation at \"%s\"",
-			  options.pgSetup.pgdata);
+			  options->pgSetup.pgdata);
 
-	if (!keeper_config_set_pathnames_from_pgdata(&options.pathnames,
-												 options.pgSetup.pgdata))
+	if (!keeper_config_set_pathnames_from_pgdata(&options->pathnames,
+												 options->pgSetup.pgdata))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_ARGS);
@@ -542,24 +559,19 @@ keeper_cli_getopt_pgdata(int argc, char **argv)
 	 * filename from the PGDATA value. So we're going to go a little out of our
 	 * way and be helpful to the user.
 	 */
-	if (!file_exists(options.pathnames.config))
+	if (!file_exists(options->pathnames.config))
 	{
 		log_fatal("Expected configuration file does not exists: \"%s\"",
-				  options.pathnames.config);
+				  options->pathnames.config);
 
-		if (!directory_exists(options.pgSetup.pgdata))
+		if (!directory_exists(options->pgSetup.pgdata))
 		{
 			log_warn("HINT: Check your PGDATA setting: \"%s\"",
-					 options.pgSetup.pgdata);
+					 options->pgSetup.pgdata);
 		}
 
 		exit(EXIT_CODE_BAD_ARGS);
 	}
-
-	/* publish our option parsing in the global variable */
-	keeperOptions = options;
-
-	return optind;
 }
 
 

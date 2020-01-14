@@ -47,10 +47,10 @@ static void cli_drop_node(int argc, char **argv);
 static bool discover_nodename(char *nodename, int size,
 							  const char *monitorHostname, int monitorPort);
 static void check_nodename(const char *nodename);
+
 static void stop_postgres_and_remove_pgdata_and_config(
 	ConfigFilePaths *pathnames,
 	PostgresSetup *pgSetup);
-
 
 CommandLine create_monitor_command =
 	make_command("monitor",
@@ -319,7 +319,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 	};
 
 	/* hard-coded defaults */
-	options.pgSetup.pgport = 5432;
+	options.pgSetup.pgport = pgsetup_get_pgport();
 
 	optind = 0;
 
@@ -616,7 +616,7 @@ cli_drop_node_getopts(int argc, char **argv)
 
 	static struct option long_options[] = {
 		{ "pgdata", required_argument, NULL, 'D' },
-		{ "destroy", required_argument, NULL, 'd' },
+		{ "destroy", no_argument, NULL, 'd' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
@@ -701,40 +701,8 @@ cli_drop_node_getopts(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
-	{
-		char *pgdata = getenv("PGDATA");
-
-		if (pgdata == NULL)
-		{
-			log_fatal("Failed to set PGDATA either from the environment "
-					  "or from --pgdata");
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-
-		strlcpy(options.pgSetup.pgdata, pgdata, MAXPGPATH);
-	}
-
-	log_debug("Managing PostgreSQL installation at \"%s\"",
-			  options.pgSetup.pgdata);
-
-	/*
-	 * We need a pre-existing configuration for the pg_autoctl node to drop and
-	 * maybe destroy.
-	 */
-	if (!file_exists(options.pathnames.config))
-	{
-		log_fatal("Expected configuration file does not exists: \"%s\"",
-				  options.pathnames.config);
-
-		if (!directory_exists(options.pgSetup.pgdata))
-		{
-			log_warn("HINT: Check your PGDATA setting: \"%s\"",
-					 options.pgSetup.pgdata);
-		}
-
-		exit(EXIT_CODE_BAD_ARGS);
-	}
+	/* now that we have the command line parameters, prepare the options */
+	(void) prepare_keeper_options(&options);
 
 	/* publish our option parsing in the global variable */
 	keeperOptions = options;
@@ -757,13 +725,73 @@ cli_drop_node(int argc, char **argv)
 	bool pgIsNotRunningIsOk = true;
 	bool monitorDisabledIsOk = false;
 
-	if (!keeper_config_read_file(&config,
-								 missingPgdataIsOk,
-								 pgIsNotRunningIsOk,
-								 monitorDisabledIsOk))
+	if (file_exists(config.pathnames.config))
 	{
-		/* errors have already been logged. */
-		exit(EXIT_CODE_BAD_CONFIG);
+		/*
+		 * We are going to need to use the right pg_ctl binary to control the
+		 * Postgres cluster: pg_ctl stop.
+		 */
+		switch (ProbeConfigurationFileRole(config.pathnames.config))
+		{
+			case PG_AUTOCTL_ROLE_MONITOR:
+			{
+				MonitorConfig mconfig = { 0 };
+
+				if (!monitor_config_init_from_pgsetup(&mconfig,
+													  &(config.pgSetup),
+													  missingPgdataIsOk,
+													  pgIsNotRunningIsOk))
+				{
+					/* errors have already been logged */
+					exit(EXIT_CODE_BAD_CONFIG);
+				}
+
+				/* expose the pgSetup in the given KeeperConfig */
+				memcpy(&(config.pgSetup),
+					   &(mconfig.pgSetup),
+					   sizeof(PostgresSetup));
+
+				/* somehow at this point we've lost our pathnames */
+				if (!keeper_config_set_pathnames_from_pgdata(
+						&(config.pathnames),
+						config.pgSetup.pgdata))
+				{
+					/* errors have already been logged */
+					exit(EXIT_CODE_BAD_ARGS);
+				}
+
+				break;
+			}
+
+			case PG_AUTOCTL_ROLE_KEEPER:
+			{
+				/* just read the keeper file in given KeeperConfig */
+				if (!keeper_config_read_file(&config,
+											 missingPgdataIsOk,
+											 pgIsNotRunningIsOk,
+											 monitorDisabledIsOk))
+				{
+					exit(EXIT_CODE_BAD_CONFIG);
+				}
+				break;
+			}
+
+			default:
+			{
+				log_fatal("Unrecognized configuration file \"%s\"",
+						  config.pathnames.config);
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
+		}
+
+		log_trace("Found pg_ctl at \"%s\" in config file \"%s\"",
+				  config.pgSetup.pg_ctl,
+				  config.pathnames.config);
+	}
+	else
+	{
+		/* all we really need now is pg_ctl */
+		set_first_pgctl(&(config.pgSetup));
 	}
 
 	/*
@@ -808,8 +836,8 @@ cli_drop_node(int argc, char **argv)
 	}
 	else
 	{
-		log_warn("State file \"%s\" does not exist, "
-				 "skipping node removal from the monitor",
+		log_warn("Skipping node removal from the monitor: "
+				 "state file \"%s\" does not exist",
 				 config.pathnames.state);
 	}
 
@@ -821,8 +849,8 @@ cli_drop_node(int argc, char **argv)
 	{
 		(void)
 			stop_postgres_and_remove_pgdata_and_config(
-				&(config.pathnames),
-				&(config.pgSetup));
+				&config.pathnames,
+				&config.pgSetup);
 	}
 	else
 	{
@@ -1067,6 +1095,7 @@ stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathnames,
 	if (!pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata))
 	{
 		log_error("Failed to stop PostgreSQL at \"%s\"", pgSetup->pgdata);
+		log_fatal("Skipping removal of directory \"%s\"", pgSetup->pgdata);
 		exit(EXIT_CODE_PGCTL);
 	}
 
