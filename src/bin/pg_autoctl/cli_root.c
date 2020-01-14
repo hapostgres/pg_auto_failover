@@ -58,6 +58,16 @@ CommandLine drop_commands =
 					 "Drop a pg_auto_failover node, or formation", NULL, NULL,
 					 NULL, drop_subcommands);
 
+CommandLine *perform_subcommands[] = {
+	&perform_failover_command,
+	&perform_switchover_command,
+	NULL,
+};
+
+CommandLine perform_commands =
+	make_command_set("perform", "Perform an action orchestrated by the monitor",
+					 NULL, NULL, NULL, perform_subcommands);
+
 /*
  * Binding them all into the top-level command:
  */
@@ -68,15 +78,15 @@ CommandLine *root_subcommands_with_debug[] = {
 	&show_commands,
 	&enable_commands,
 	&disable_commands,
+	&get_commands,
+	&set_commands,
+	&perform_commands,
 	&do_commands,
-	&destroy_command,
 	&service_run_command,
 	&service_stop_command,
 	&service_reload_command,
 	&help,
 	&version,
-	&get_command,
-	&set_command,
 	NULL
 };
 
@@ -94,14 +104,14 @@ CommandLine *root_subcommands[] = {
 	&show_commands,
 	&enable_commands,
 	&disable_commands,
-	&destroy_command,
+	&get_commands,
+	&set_commands,
+	&perform_commands,
 	&service_run_command,
 	&service_stop_command,
 	&service_reload_command,
 	&help,
 	&version,
-	&get_command,
-	&set_command,
 	NULL
 };
 

@@ -630,9 +630,13 @@ monitor_init_from_pgsetup(Monitor *monitor, PostgresSetup *pgSetup)
 			char connInfo[MAXCONNINFO];
 			MonitorConfig mconfig = { 0 };
 
-			(void) monitor_config_init_from_pgsetup(&mconfig, pgSetup,
-													missingPgdataIsOk,
-													pgIsNotRunningIsOk);
+			if (!monitor_config_init_from_pgsetup(&mconfig, pgSetup,
+												  missingPgdataIsOk,
+												  pgIsNotRunningIsOk))
+			{
+				/* errors have already been logged */
+				return false;
+			}
 
 			pg_setup_get_local_connection_string(&mconfig.pgSetup, connInfo);
 			monitor_init(monitor, connInfo);
