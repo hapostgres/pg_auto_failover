@@ -257,7 +257,7 @@ CREATE FUNCTION pgautofailover.perform_failover
   formation_id text default 'default',
   group_id     int  default 0
  )
-RETURNS void LANGUAGE C STRICT
+RETURNS void LANGUAGE C STRICT SECURITY DEFINER
 AS 'MODULE_PATHNAME', $$perform_failover$$;
 
 comment on function pgautofailover.perform_failover(text,int)
