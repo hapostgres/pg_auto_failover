@@ -687,7 +687,7 @@ class PGAutoCtl():
 
             try:
                 pgid = os.getpgid(self.run_proc.pid)
-                os.killpg(pgid, signal.SIGTERM)
+                os.killpg(pgid, signal.SIGQUIT)
 
                 self.communicate()
                 self.run_proc.wait()
