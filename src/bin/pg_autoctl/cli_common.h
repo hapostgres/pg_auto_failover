@@ -70,8 +70,8 @@ extern CommandLine drop_node_command;
 extern CommandLine destroy_command;
 
 /* cli_get_set_properties.c */
-extern CommandLine get_command;
-extern CommandLine set_command;
+extern CommandLine get_commands;
+extern CommandLine set_commands;
 
 /* cli_enable_disable.c */
 extern CommandLine enable_commands;
@@ -80,6 +80,11 @@ extern CommandLine disable_commands;
 /* cli_formation.c */
 extern CommandLine create_formation_command;
 extern CommandLine drop_formation_command;
+
+/* cli_perform.c */
+extern CommandLine perform_failover_command;
+extern CommandLine perform_switchover_command;
+
 
 /* cli_service.c */
 extern CommandLine service_run_command;
@@ -104,6 +109,7 @@ int cli_create_node_getopts(int argc, char **argv,
 							const char *optstring,
 							KeeperConfig *options);
 int keeper_cli_getopt_pgdata(int argc, char **argv);
+void prepare_keeper_options(KeeperConfig *options);
 
 void set_first_pgctl(PostgresSetup *pgSetup);
 bool monitor_init_from_pgsetup(Monitor *monitor, PostgresSetup *pgSetup);
@@ -114,9 +120,5 @@ void exit_unless_role_is_keeper(KeeperConfig *kconfig);
 bool cli_create_config(Keeper *keeper, KeeperConfig *config);
 void cli_create_pg(Keeper *keeper, KeeperConfig *config);
 bool check_or_discover_nodename(KeeperConfig *config);
-void keeper_cli_destroy_node(int argc, char **argv);
-void keeper_cli_destroy_keeper_node(Keeper *keeper,
-									KeeperConfig *config);
-void stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathnames,
-												PostgresSetup *pgSetup);
+
 #endif  /* CLI_COMMON_H */

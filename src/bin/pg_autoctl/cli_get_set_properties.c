@@ -64,10 +64,10 @@ static CommandLine *get_subcommands[] = {
 	NULL
 };
 
-CommandLine get_command =
+CommandLine get_commands =
 	make_command_set("get",
-					 "Get a pg_auto_failover node, or formation setting", NULL, NULL,
-					 NULL, get_subcommands);
+					 "Get a pg_auto_failover node, or formation setting",
+					 NULL, NULL, NULL, get_subcommands);
 
 /* set commands */
 
@@ -93,10 +93,10 @@ static CommandLine *set_subcommands[] = {
 	NULL
 };
 
-CommandLine set_command =
+CommandLine set_commands =
 	make_command_set("set",
-					 "Set a pg_auto_failover node, or formation setting", NULL, NULL,
-					 NULL, set_subcommands);
+					 "Set a pg_auto_failover node, or formation setting",
+					 NULL, NULL, NULL, set_subcommands);
 
 
 /*
