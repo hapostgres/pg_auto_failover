@@ -32,8 +32,12 @@
 #include "pgctl.h"
 #include "primary_standby.h"
 
+/*
+ * Global variables that we're going to use to "communicate" in between getopts
+ * functions and their command implementation. We can't pass parameters around.
+ */
 MonitorConfig monitorOptions;
-bool dropAndDestroy = false;
+static bool dropAndDestroy = false;
 
 static int cli_create_postgres_getopts(int argc, char **argv);
 static void cli_create_postgres(int argc, char **argv);
@@ -792,6 +796,9 @@ cli_drop_node(int argc, char **argv)
 	{
 		/* all we really need now is pg_ctl */
 		set_first_pgctl(&(config.pgSetup));
+		log_info("Configuration file \"%s\" does not exists, using %s",
+				 config.pathnames.config,
+				 config.pgSetup.pg_ctl);
 	}
 
 	/*
