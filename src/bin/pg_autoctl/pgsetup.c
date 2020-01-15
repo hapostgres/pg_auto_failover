@@ -265,29 +265,7 @@ pg_setup_init(PostgresSetup *pgSetup,
 			/*
 			 * no running cluster, what about using PGPORT then?
 			 */
-			char *pgport_env = getenv("PGPORT");
-			int pgport = 0;
-
-			if (pgport_env)
-			{
-				pgport = strtol(pgport_env, NULL, 10);
-
-				if (pgport > 0 && errno != EINVAL)
-				{
-					pgSetup->pgport = pgport;
-				}
-				else
-				{
-					pgSetup->pgport = POSTGRES_PORT;
-					log_warn("Failed to parse PGPORT value \"%s\", using %d",
-							 pgport_env, pgSetup->pgport);
-				}
-			}
-			else
-			{
-				/* no PGPORT, no running cluster, no --pgport, ok */
-				pgSetup->pgport = POSTGRES_PORT;
-			}
+			pgSetup->pgport = pgsetup_get_pgport();
 		}
 	}
 
@@ -1066,4 +1044,37 @@ pmStatusToString(PostmasterStatus pm_status)
 
 	/* keep compiler happy */
 	return "unknown";
+}
+
+
+/*
+ * pgsetup_get_pgport returns the port to use either from the PGPORT
+ * environment variable, or from our default hard-coded value of 5432.
+ */
+int
+pgsetup_get_pgport()
+{
+	char *pgport_env = getenv("PGPORT");
+	int pgport = 0;
+
+	if (pgport_env)
+	{
+		pgport = strtol(pgport_env, NULL, 10);
+
+		if (pgport > 0 && errno != EINVAL)
+		{
+			return pgport;
+		}
+		else
+		{
+			log_warn("Failed to parse PGPORT value \"%s\", using %d",
+					 pgport_env, POSTGRES_PORT);
+			return POSTGRES_PORT;
+		}
+	}
+	else
+	{
+		/* no PGPORT */
+		return POSTGRES_PORT;
+	}
 }

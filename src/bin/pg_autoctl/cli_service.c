@@ -346,28 +346,8 @@ cli_getopt_pgdata_and_mode(int argc, char **argv)
 		}
 	}
 
-	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
-	{
-		char *pgdata = getenv("PGDATA");
-
-		if (pgdata == NULL)
-		{
-			log_fatal("Failed to get PGDATA either from the environment "
-					  "or from --pgdata");
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-
-		strlcpy(options.pgSetup.pgdata, pgdata, MAXPGPATH);
-	}
-
-	log_info("Managing PostgreSQL installation at \"%s\"",
-			 options.pgSetup.pgdata);
-
-	if (!keeper_config_set_pathnames_from_pgdata(&options.pathnames, options.pgSetup.pgdata))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_ARGS);
-	}
+	/* now that we have the command line parameters, prepare the options */
+	(void) prepare_keeper_options(&options);
 
 	keeperOptions = options;
 

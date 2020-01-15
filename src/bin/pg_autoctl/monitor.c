@@ -396,6 +396,41 @@ monitor_remove(Monitor *monitor, char *host, int port)
 
 
 /*
+ * monitor_perform_failover calls the pgautofailover.monitor_perform_failover
+ * function on the monitor.
+ */
+bool
+monitor_perform_failover(Monitor *monitor, char *formation, int group)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql = "SELECT pgautofailover.perform_failover($1, $2)";
+	int paramCount = 2;
+	Oid paramTypes[2] = { TEXTOID, INT4OID };
+	const char *paramValues[2];
+
+	paramValues[0] = formation;
+	paramValues[1] = intToString(group).strValue;
+
+	/*
+	 * pgautofailover.perform_failover() returns VOID.
+	 */
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   NULL, NULL))
+	{
+		log_error("Failed to perform failover for formation %s and group %d",
+				  formation, group);
+		return false;
+	}
+
+	/* disconnect from PostgreSQL now */
+	pgsql_finish(&monitor->pgsql);
+
+	return true;
+}
+
+
+/*
  * parseNode parses a hostname and a port from the libpq result and writes
  * it to the NodeAddressParseContext pointed to by ctx.
  */

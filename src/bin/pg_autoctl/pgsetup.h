@@ -140,5 +140,6 @@ bool pg_setup_set_absolute_pgdata(PostgresSetup *pgSetup);
 
 PgInstanceKind nodeKindFromString(const char *nodeKind);
 char *nodeKindToString(PgInstanceKind kind);
+int pgsetup_get_pgport(void);
 
 #endif /* PGSETUP_H */

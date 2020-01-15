@@ -67,6 +67,8 @@ bool monitor_node_active(Monitor *monitor,
 						 char *currentLSN, char *pgsrSyncState,
 						 MonitorAssignedState *assignedState);
 bool monitor_remove(Monitor *monitor, char *host, int port);
+bool monitor_perform_failover(Monitor *monitor, char *formation, int group);
+
 bool monitor_print_state(Monitor *monitor, char *formation, int group);
 bool monitor_print_last_events(Monitor *monitor,
 							   char *formation, int group, int count);
