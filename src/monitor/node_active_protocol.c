@@ -923,14 +923,8 @@ perform_failover(PG_FUNCTION_ARGS)
 
 	List *groupNodeList = NULL;
 
-	AutoFailoverNode *firstNode = NULL;
-	AutoFailoverNode *secondNode = NULL;
-
 	AutoFailoverNode *primaryNode = NULL;
-	AutoFailoverNode *secondaryNode = NULL;
 
-	List *primaryStates = list_make2_int(REPLICATION_STATE_PRIMARY,
-										 REPLICATION_STATE_WAIT_PRIMARY);
 	List *secondaryStates = list_make2_int(REPLICATION_STATE_SECONDARY,
 										   REPLICATION_STATE_CATCHINGUP);
 
@@ -942,82 +936,224 @@ perform_failover(PG_FUNCTION_ARGS)
 	LockNodeGroup(formationId, groupId, ExclusiveLock);
 
 	groupNodeList = AutoFailoverNodeGroup(formationId, groupId);
-	if (list_length(groupNodeList) != 2)
+	if (list_length(groupNodeList) < 2)
 	{
-		ereport(ERROR, (errmsg("cannot fail over: group does not have 2 nodes")));
+		ereport(ERROR,
+				(errmsg("cannot fail over: group %d in formation %s "
+						"currently has %d node registered",
+						groupId, formationId, list_length(groupNodeList)),
+				 errdetail("At least 2 nodes are required "
+						   "to implement a failover")));
 	}
 
-	firstNode = linitial(groupNodeList);
-	secondNode = lsecond(groupNodeList);
+	/* get a current primary node that we can failover from (accepts writes) */
+	primaryNode = GetWritableNodeInGroup(formationId, groupId);
 
-	if (IsStateIn(firstNode->goalState, primaryStates) &&
-		IsStateIn(firstNode->reportedState, primaryStates))
+	if (primaryNode == NULL)
 	{
-		primaryNode = firstNode;
+		ereport(ERROR,
+				(errmsg("couldn't find the primary node in formation \"%s\", "
+						"group %d", formationId, groupId)));
 	}
-	else if (IsStateIn(secondNode->reportedState, primaryStates) &&
-			 IsStateIn(secondNode->goalState, primaryStates))
+
+	/*
+	 * When we have only two nodes, we can failover directly to the secondary
+	 * node, provided its current state allows for that.
+	 *
+	 * When we have more than two nodes, then we need to check that we have at
+	 * least one candidate for failover and intiate the REPORT_LSN dance to
+	 * make the failover happen.
+	 */
+	if (list_length(groupNodeList) == 2)
 	{
-		primaryNode = secondNode;
+		AutoFailoverNode *secondaryNode = NULL;
+		List *standbyNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
+
+		if (list_length(standbyNodesGroupList) != 1)
+		{
+			ereport(ERROR,
+					(errmsg("couldn't find the standby node in "
+							"formation \"%s\", group %d with primary node "
+							"%d (%s:%d)",
+							formationId, groupId,
+							primaryNode->nodeId,
+							primaryNode->nodeName,
+							primaryNode->nodePort)));
+		}
+
+		secondaryNode = linitial(standbyNodesGroupList);
+
+		if (!(IsStateIn(secondaryNode->reportedState, secondaryStates) &&
+			  IsStateIn(secondaryNode->goalState, secondaryStates)))
+		{
+			const char *secondaryState =
+				ReplicationStateGetName(secondaryNode->reportedState);
+
+			ereport(ERROR,
+					(errmsg("standby node %d (%s:%d) is in state \"%s\", which "
+							"prevents the node for being a failover candidate",
+							secondaryNode->nodeId,
+							secondaryNode->nodeName,
+							secondaryNode->nodePort,
+							secondaryState)));
+		}
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of %s:%d to draining and %s:%d to"
+			"prepare_promotion after a user-initiated failover.",
+			primaryNode->nodeName, primaryNode->nodePort,
+			secondaryNode->nodeName, secondaryNode->nodePort);
+
+		SetNodeGoalState(primaryNode->nodeName, primaryNode->nodePort,
+						 REPLICATION_STATE_DRAINING);
+
+		NotifyStateChange(primaryNode->reportedState,
+						  REPLICATION_STATE_DRAINING,
+						  primaryNode->formationId,
+						  primaryNode->groupId,
+						  primaryNode->nodeId,
+						  primaryNode->nodeName,
+						  primaryNode->nodePort,
+						  primaryNode->pgsrSyncState,
+						  primaryNode->reportedLSN,
+						  primaryNode->candidatePriority,
+						  primaryNode->replicationQuorum,
+						  message);
+
+		SetNodeGoalState(secondaryNode->nodeName, secondaryNode->nodePort,
+						 REPLICATION_STATE_PREPARE_PROMOTION);
+
+		NotifyStateChange(secondaryNode->reportedState,
+						  REPLICATION_STATE_PREPARE_PROMOTION,
+						  secondaryNode->formationId,
+						  secondaryNode->groupId,
+						  secondaryNode->nodeId,
+						  secondaryNode->nodeName,
+						  secondaryNode->nodePort,
+						  secondaryNode->pgsrSyncState,
+						  secondaryNode->reportedLSN,
+						  secondaryNode->candidatePriority,
+						  secondaryNode->replicationQuorum,
+						  message);
 	}
 	else
 	{
-		ereport(ERROR, (errmsg("cannot fail over: there is no primary node")));
+		List *standbyNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
+		ListCell *nodeCell = NULL;
+		int candidateCount = 0;
+
+		foreach(nodeCell, standbyNodesGroupList)
+		{
+			AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+			if (node == NULL)
+			{
+				/* shouldn't happen */
+				ereport(ERROR, (errmsg("BUG: node is NULL")));
+				continue;
+			}
+
+			/* if a promotion is already in progress, game over */
+			if (IsBeingPromoted(node))
+			{
+				ereport(ERROR,
+						(errmsg("node %d (%s:%d) is already being promoted",
+								node->nodeId,
+								node->nodeName,
+								node->nodePort)));
+			}
+
+			/* skip nodes if they are not a failover candidate */
+			if (!(IsStateIn(node->reportedState, secondaryStates) &&
+				  IsStateIn(node->goalState, secondaryStates)))
+			{
+				continue;
+			}
+
+			++candidateCount;
+		}
+
+		if (candidateCount == 0)
+		{
+			ereport(ERROR,
+					(errmsg("couldn't find a candidate node for failover "
+							" in formation \"%s\", group %d",
+							formationId, groupId)));
+		}
+
+		/* so we have at least one candidate, let's get started */
+		if (IsInPrimaryState(primaryNode))
+		{
+			char message[BUFSIZE];
+
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state %s:%d to draining "
+				"after a user-initiated failover.",
+				primaryNode->nodeName, primaryNode->nodePort);
+
+			SetNodeGoalState(primaryNode->nodeName, primaryNode->nodePort,
+							 REPLICATION_STATE_DRAINING);
+
+			NotifyStateChange(primaryNode->reportedState,
+							  REPLICATION_STATE_DRAINING,
+							  primaryNode->formationId,
+							  primaryNode->groupId,
+							  primaryNode->nodeId,
+							  primaryNode->nodeName,
+							  primaryNode->nodePort,
+							  primaryNode->pgsrSyncState,
+							  primaryNode->reportedLSN,
+							  primaryNode->candidatePriority,
+							  primaryNode->replicationQuorum,
+							  message);
+		}
+
+		foreach(nodeCell, standbyNodesGroupList)
+		{
+			AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+			char message[BUFSIZE];
+
+			if (node == NULL)
+			{
+				/* shouldn't happen */
+				ereport(ERROR, (errmsg("BUG: node is NULL")));
+				continue;
+			}
+
+			/* skip nodes if they are not a failover candidate */
+			if (!(IsStateIn(node->reportedState, secondaryStates) &&
+				  IsStateIn(node->goalState, secondaryStates)))
+			{
+				continue;
+			}
+
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of %s:%d to report_lsn "
+				"to find the failover candidate, "
+				"after a user-initiated failover",
+				node->nodeName, node->nodePort);
+
+
+			SetNodeGoalState(node->nodeName, node->nodePort,
+							 REPLICATION_STATE_REPORT_LSN);
+
+			NotifyStateChange(node->reportedState,
+							  REPLICATION_STATE_REPORT_LSN,
+							  node->formationId,
+							  node->groupId,
+							  node->nodeId,
+							  node->nodeName,
+							  node->nodePort,
+							  node->pgsrSyncState,
+							  node->reportedLSN,
+							  node->candidatePriority,
+							  node->replicationQuorum,
+							  message);
+		}
 	}
-
-	if (IsStateIn(firstNode->reportedState, secondaryStates) &&
-		IsStateIn(firstNode->goalState, secondaryStates))
-	{
-		secondaryNode = firstNode;
-	}
-	else if (IsStateIn(secondNode->reportedState, secondaryStates) &&
-			 IsStateIn(secondNode->goalState, secondaryStates))
-	{
-		secondaryNode = secondNode;
-	}
-	else
-	{
-		ereport(ERROR, (errmsg("cannot fail over: there is no secondary node")));
-	}
-
-	LogAndNotifyMessage(
-		message, BUFSIZE,
-		"Setting goal state of %s:%d to draining and %s:%d to "
-		"prepare_promotion after a user-initiated failover.",
-		primaryNode->nodeName, primaryNode->nodePort,
-		secondaryNode->nodeName, secondaryNode->nodePort);
-
-	SetNodeGoalState(primaryNode->nodeName, primaryNode->nodePort,
-					 REPLICATION_STATE_DRAINING);
-
-	NotifyStateChange(primaryNode->reportedState,
-					  REPLICATION_STATE_DRAINING,
-					  primaryNode->formationId,
-					  primaryNode->groupId,
-					  primaryNode->nodeId,
-					  primaryNode->nodeName,
-					  primaryNode->nodePort,
-					  primaryNode->pgsrSyncState,
-					  primaryNode->reportedLSN,
-					  primaryNode->candidatePriority,
-					  primaryNode->replicationQuorum,
-					  message);
-
-	SetNodeGoalState(secondaryNode->nodeName, secondaryNode->nodePort,
-					 REPLICATION_STATE_PREPARE_PROMOTION);
-
-	NotifyStateChange(secondaryNode->reportedState,
-					  REPLICATION_STATE_PREPARE_PROMOTION,
-					  secondaryNode->formationId,
-					  secondaryNode->groupId,
-					  secondaryNode->nodeId,
-					  secondaryNode->nodeName,
-					  secondaryNode->nodePort,
-					  secondaryNode->pgsrSyncState,
-					  secondaryNode->reportedLSN,
-					  secondaryNode->candidatePriority,
-					  secondaryNode->replicationQuorum,
-					  message);
 
 	PG_RETURN_VOID();
 }
