@@ -1036,18 +1036,16 @@ keeper_state_as_json(Keeper *keeper, char *json, int size)
     JSON_Value *jsPostgres = json_value_init_object();
     JSON_Value *jsKeeperState = json_value_init_object();
 
-    JSON_Object *root = json_value_get_object(js);
-    JSON_Object *jsPostgresObject = json_value_get_object(jsPostgres);
-    JSON_Object *jsKeeperStateObject = json_value_get_object(jsKeeperState);
+	JSON_Object *jsRoot = json_value_get_object(js);
 
     char *serialized_string = NULL;
 	int len;
 
-	pg_setup_as_json(&(keeper->postgres.postgresSetup), jsPostgresObject);
-	keeperStateAsJSON(&(keeper->state), jsKeeperStateObject);
+	pg_setup_as_json(&(keeper->postgres.postgresSetup), jsPostgres);
+	keeperStateAsJSON(&(keeper->state), jsKeeperState);
 
-    json_object_set_value(root, "postgres", jsPostgres);
-    json_object_set_value(root, "state", jsKeeperState);
+    json_object_set_value(jsRoot, "postgres", jsPostgres);
+    json_object_set_value(jsRoot, "state", jsKeeperState);
 
     serialized_string = json_serialize_to_string_pretty(js);
 

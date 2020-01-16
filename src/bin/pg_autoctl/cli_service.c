@@ -39,9 +39,9 @@ static void cli_service_stop(int argc, char **argv);
 CommandLine service_run_command =
 	make_command("run",
 				 "Run the pg_autoctl service (monitor or keeper)",
-				 " [ --pgdata ]",
-				 KEEPER_CLI_PGDATA_OPTION,
-				 keeper_cli_getopt_pgdata,
+				 CLI_PGDATA_USAGE,
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
 				 cli_service_run);
 
 CommandLine service_stop_command =
@@ -57,9 +57,9 @@ CommandLine service_stop_command =
 CommandLine service_reload_command =
 	make_command("reload",
 				 "signal the pg_autoctl for it to reload its configuration",
-				 " [ --pgdata ]",
-				 KEEPER_CLI_PGDATA_OPTION,
-				 keeper_cli_getopt_pgdata,
+				 CLI_PGDATA_USAGE,
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
 				 cli_service_reload);
 
 

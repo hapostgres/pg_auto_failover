@@ -25,7 +25,7 @@ COMMON_LIBS += -I${SRC_DIR}../lib/parson/
 
 CC = $(shell $(PG_CONFIG) --cc)
 
-CFLAGS = -std=c99 -D_GNU_SOURCE
+CFLAGS = -std=c99 -D_GNU_SOURCE -g
 CFLAGS += -I $(shell $(PG_CONFIG) --includedir)
 CFLAGS += -I $(shell $(PG_CONFIG) --includedir-server)
 CFLAGS += -I $(shell $(PG_CONFIG) --pkgincludedir)/internal

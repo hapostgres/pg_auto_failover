@@ -572,8 +572,9 @@ fprintf_pg_setup(FILE *stream, PostgresSetup *pgSetup)
  * representation of the pgSetup.
  */
 bool
-pg_setup_as_json(PostgresSetup *pgSetup, JSON_Object *jsobj)
+pg_setup_as_json(PostgresSetup *pgSetup, JSON_Value *js)
 {
+	JSON_Object *jsobj = json_value_get_object(js);
 	char system_identifier[BUFSIZE];
 
 	json_object_set_string(jsobj, "pgdata", pgSetup->pgdata);
