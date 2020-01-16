@@ -136,7 +136,7 @@ bool pg_setup_init(PostgresSetup *pgSetup,
 bool read_pg_pidfile(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok);
 
 void fprintf_pg_setup(FILE *stream, PostgresSetup *pgSetup);
-bool pg_setup_as_json(PostgresSetup *pgSetup, JSON_Object *jsobj);
+bool pg_setup_as_json(PostgresSetup *pgSetup, JSON_Value *js);
 
 bool pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 										  char *connectionString);

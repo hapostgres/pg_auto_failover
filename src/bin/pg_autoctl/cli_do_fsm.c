@@ -24,57 +24,57 @@
 #include "state.h"
 
 
-static void keeper_cli_fsm_init(int argc, char **argv);
-static void keeper_cli_fsm_state(int argc, char **argv);
-static void keeper_cli_fsm_list(int argc, char **argv);
-static void keeper_cli_fsm_gv(int argc, char **argv);
-static void keeper_cli_fsm_assign(int argc, char **argv);
-static void keeper_cli_fsm_step(int argc, char **argv);
+static void cli_do_fsm_init(int argc, char **argv);
+static void cli_do_fsm_state(int argc, char **argv);
+static void cli_do_fsm_list(int argc, char **argv);
+static void cli_do_fsm_gv(int argc, char **argv);
+static void cli_do_fsm_assign(int argc, char **argv);
+static void cli_do_fsm_step(int argc, char **argv);
 
 static CommandLine fsm_init =
 	make_command("init",
 				 "Initialize the keeper's state on-disk",
-				 " [ --pgdata ] ",
-				 KEEPER_CLI_PGDATA_OPTION,
-				 keeper_cli_getopt_pgdata,
-				 keeper_cli_fsm_init);
+				 CLI_PGDATA_USAGE,
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
+				 cli_do_fsm_init);
 
 static CommandLine fsm_state =
 	make_command("state",
 				 "Read the keeper's state from disk and display it",
-				 " [ --pgdata ] ",
-				 KEEPER_CLI_PGDATA_OPTION,
-				 keeper_cli_getopt_pgdata,
-				 keeper_cli_fsm_state);
+				 CLI_PGDATA_USAGE,
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
+				 cli_do_fsm_state);
 
 static CommandLine fsm_list =
 	make_command("list",
 				 "List reachable FSM states from current state",
-				 " [ --pgdata ] ",
-				 KEEPER_CLI_PGDATA_OPTION,
-				 keeper_cli_getopt_pgdata,
-				 keeper_cli_fsm_list);
+				 CLI_PGDATA_USAGE,
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
+				 cli_do_fsm_list);
 
 static CommandLine fsm_gv =
 	make_command("gv",
 				 "Output the FSM as a .gv program suitable for graphviz/dot",
-				 "", NULL, NULL, keeper_cli_fsm_gv);
+				 "", NULL, NULL, cli_do_fsm_gv);
 
 static CommandLine fsm_assign =
 	make_command("assign",
 				 "Assign a new goal state to the keeper",
-				 " [ --pgdata ] <goal state> [<host> <port>]",
-				 KEEPER_CLI_PGDATA_OPTION,
-				 keeper_cli_getopt_pgdata,
-				 keeper_cli_fsm_assign);
+				 CLI_PGDATA_USAGE "<goal state> [ <host> <port> ]",
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
+				 cli_do_fsm_assign);
 
 static CommandLine fsm_step =
 	make_command("step",
 				 "Make a state transition if instructed by the monitor",
-				 " [ --pgdata ]",
-				 KEEPER_CLI_PGDATA_OPTION,
-				 keeper_cli_getopt_pgdata,
-				 keeper_cli_fsm_step);
+				 CLI_PGDATA_USAGE,
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
+				 cli_do_fsm_step);
 
 static CommandLine *fsm[] = {
 	&fsm_init,
@@ -93,15 +93,18 @@ CommandLine do_fsm_commands =
 
 
 /*
- * keeper_cli_fsm_init initializes the internal Keeper state, and writes it to
+ * cli_do_fsm_init initializes the internal Keeper state, and writes it to
  * disk.
  */
 static void
-keeper_cli_fsm_init(int argc, char **argv)
+cli_do_fsm_init(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
 	KeeperStateData keeperState = { 0 };
 	KeeperConfig config = keeperOptions;
+
+	char keeperStateJSON[BUFSIZE];
+
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
 	bool monitorDisabledIsOk = true;
@@ -142,20 +145,27 @@ keeper_cli_fsm_init(int argc, char **argv)
 		exit(EXIT_CODE_BAD_STATE);
 	}
 
-	print_keeper_state(&keeperState, stdout);
+	if (!keeper_state_as_json(&keeper, keeperStateJSON, BUFSIZE))
+	{
+		log_error("Failed to serialize internal keeper state to JSON");
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+	fprintf(stdout, "%s\n", keeperStateJSON);
 }
 
 
 /*
- * keeper_cli_fsm_init initializes the internal Keeper state, and writes it to
+ * cli_do_fsm_init initializes the internal Keeper state, and writes it to
  * disk.
  */
 static void
-keeper_cli_fsm_state(int argc, char **argv)
+cli_do_fsm_state(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
 	KeeperConfig config = keeperOptions;
+
 	char keeperStateJSON[BUFSIZE];
+
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
 	bool monitorDisabledIsOk = true;
@@ -199,10 +209,10 @@ keeper_cli_fsm_state(int argc, char **argv)
 
 
 /*
- * keeper_cli_fsm_list lists reachable states from the current one.
+ * cli_do_fsm_list lists reachable states from the current one.
  */
 static void
-keeper_cli_fsm_list(int argc, char **argv)
+cli_do_fsm_list(int argc, char **argv)
 {
 	KeeperStateData keeperState = { 0 };
 	KeeperConfig config = keeperOptions;
@@ -227,26 +237,31 @@ keeper_cli_fsm_list(int argc, char **argv)
 		exit(EXIT_CODE_BAD_STATE);
 	}
 
+	if (outputJSON)
+	{
+		log_warn("This command does not support JSON output at the moment");
+	}
+
 	print_reachable_states(&keeperState);
 	fprintf(stdout, "\n");
 }
 
 
 /*
- * keeper_cli_fsm_gv outputs the FSM as a .gv program.
+ * cli_do_fsm_gv outputs the FSM as a .gv program.
  */
 static void
-keeper_cli_fsm_gv(int argc, char **argv)
+cli_do_fsm_gv(int argc, char **argv)
 {
 	print_fsm_for_graphviz();
 }
 
 
 /*
- * keeper_cli_fsm_assigns a reachable state from the current one.
+ * cli_do_fsm_assigns a reachable state from the current one.
  */
 static void
-keeper_cli_fsm_assign(int argc, char **argv)
+cli_do_fsm_assign(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
 	KeeperConfig config = keeperOptions;
@@ -332,12 +347,12 @@ keeper_cli_fsm_assign(int argc, char **argv)
 
 
 /*
- * keeper_cli_fsm_step gets the goal state from the monitor, makes
+ * cli_do_fsm_step gets the goal state from the monitor, makes
  * the necessary transition, and then reports the current state to
  * the monitor.
  */
 static void
-keeper_cli_fsm_step(int argc, char **argv)
+cli_do_fsm_step(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
 	const char *oldRole = NULL;
@@ -382,5 +397,9 @@ keeper_cli_fsm_step(int argc, char **argv)
 
 	newRole = NodeStateToString(keeper.state.assigned_role);
 
+	if (outputJSON)
+	{
+		log_warn("This command does not support JSON output at the moment");
+	}
 	fprintf(stdout, "%s ➜ %s\n", oldRole, newRole);
 }

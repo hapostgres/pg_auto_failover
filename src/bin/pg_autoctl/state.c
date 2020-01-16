@@ -293,8 +293,9 @@ print_keeper_state(KeeperStateData *keeperState, FILE *stream)
  * keeperStateAsJSON
  */
 bool
-keeperStateAsJSON(KeeperStateData *keeperState, JSON_Object *jsobj)
+keeperStateAsJSON(KeeperStateData *keeperState, JSON_Value *js)
 {
+	JSON_Object *jsobj = json_value_get_object(js);
 	const char *current_role = NodeStateToString(keeperState->current_role);
 	const char *assigned_role = NodeStateToString(keeperState->assigned_role);
 

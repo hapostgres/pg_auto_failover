@@ -13,6 +13,7 @@
 #include "ini_file.h"
 #include "log.h"
 #include "pgctl.h"
+#include "parson.h"
 #include "pgsetup.h"
 
 #define INI_IMPLEMENTATION
@@ -390,6 +391,101 @@ write_ini_to_stream(FILE *stream, IniOption *optionList)
 		}
 	}
 	fflush(stream);
+	return true;
+}
+
+
+/*
+ * ini_to_json populates the given JSON value with the contents of the INI
+ * file. Sections become JSON objects, options the keys to the section objects.
+ */
+bool
+ini_to_json(JSON_Object *jsRoot, IniOption *optionList)
+{
+	char *currentSection = NULL;
+	JSON_Value *currentSectionJs = NULL;
+	JSON_Object *currentSectionJsObj = NULL;
+	IniOption *option = NULL;
+
+	for (option = optionList; option->type != INI_END_T; option++)
+	{
+		/* we might need to open a new section */
+		if (!streq(currentSection, option->section))
+		{
+			if (currentSection != NULL)
+			{
+				json_object_set_value(jsRoot, currentSection, currentSectionJs);
+			}
+
+			currentSectionJs = json_value_init_object();
+			currentSectionJsObj = json_value_get_object(currentSectionJs);
+
+			currentSection = (char *) option->section;
+		}
+
+		switch (option->type)
+		{
+			case INI_INT_T:
+			{
+				json_object_set_number(currentSectionJsObj,
+									   option->name,
+									   (double) *(option->intValue));
+				break;
+			}
+
+			case INI_STRING_T:
+			{
+				char *value = *(option->strValue);
+
+				if (value)
+				{
+					json_object_set_string(currentSectionJsObj,
+										   option->name,
+										   value);
+				}
+				else if (option->required)
+				{
+					log_error("Option %s.%s is required but is not set",
+							  option->section, option->name);
+					return false;
+				}
+				break;
+			}
+
+			case INI_STRBUF_T:
+			{
+				/* here we have a string buffer, which is its own address */
+				char *value = (char *) option->strBufValue;
+
+				if (value[0] != '\0')
+				{
+					json_object_set_string(currentSectionJsObj,
+										   option->name,
+										   value);
+				}
+				else if (option->required)
+				{
+					log_error("Option %s.%s is required but is not set",
+							  option->section, option->name);
+					return false;
+				}
+				break;
+			}
+
+			default:
+			{
+				/* developper error, should never happen */
+				log_fatal("Unknown option type %d", option->type);
+				break;
+			}
+		}
+	}
+
+	if (currentSection != NULL)
+	{
+		json_object_set_value(jsRoot, currentSection, currentSectionJs);
+	}
+
 	return true;
 }
 
