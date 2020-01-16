@@ -125,7 +125,7 @@ bool keeper_state_write(KeeperStateData *keeperState, const char *filename);
 
 void log_keeper_state(KeeperStateData *keeperState);
 void print_keeper_state(KeeperStateData *keeperState, FILE *fp);
-bool keeperStateAsJSON(KeeperStateData *keeperState, JSON_Object *jsobj);
+bool keeperStateAsJSON(KeeperStateData *keeperState, JSON_Value *js);
 void print_keeper_init_state(KeeperStateInit *initState, FILE *stream);
 
 char *PreInitPostgreInstanceStateToString(PreInitPostgreInstanceState pgInitState);

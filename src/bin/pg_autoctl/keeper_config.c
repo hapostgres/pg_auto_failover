@@ -413,8 +413,9 @@ keeper_config_write(FILE *stream, KeeperConfig *config)
  * objects.
  */
 bool
-keeper_config_to_json(JSON_Object *jsRoot, KeeperConfig *config)
+keeper_config_to_json(KeeperConfig *config, JSON_Value *js)
 {
+	JSON_Object *jsRoot = json_value_get_object(js);
 	IniOption keeperOptions[] = SET_INI_OPTIONS_ARRAY(config);
 
 	return ini_to_json(jsRoot, keeperOptions);

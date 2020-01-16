@@ -107,6 +107,7 @@ extern CommandLine systemd_cat_service_file_command;
 
 void keeper_cli_help(int argc, char **argv);
 void keeper_cli_print_version(int argc, char **argv);
+void cli_pprint_json(JSON_Value *js);
 
 int cli_create_node_getopts(int argc, char **argv,
 							struct option *long_options,

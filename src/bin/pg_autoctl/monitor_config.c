@@ -307,8 +307,9 @@ monitor_config_write(FILE *stream, MonitorConfig *config)
  * objects.
  */
 bool
-monitor_config_to_json(JSON_Object *jsRoot, MonitorConfig *config)
+monitor_config_to_json(MonitorConfig *config, JSON_Value *js)
 {
+	JSON_Object *jsRoot = json_value_get_object(js);
 	IniOption monitorOptions[] = SET_INI_OPTIONS_ARRAY(config);
 
 	return ini_to_json(jsRoot, monitorOptions);

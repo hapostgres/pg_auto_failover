@@ -163,7 +163,6 @@ cli_do_monitor_get_primary_node(int argc, char **argv)
 	/* output something easy to parse by another program */
 	if (outputJSON)
 	{
-		char *serialized_string = NULL;
 		JSON_Value *js = json_value_init_object();
 		JSON_Object *root = json_value_get_object(js);
 
@@ -172,12 +171,7 @@ cli_do_monitor_get_primary_node(int argc, char **argv)
 		json_object_set_string(root, "host", primaryNode.host);
 		json_object_set_number(root, "port", (double) primaryNode.port);
 
-		serialized_string = json_serialize_to_string_pretty(js);
-
-		fprintf(stdout, "%s\n", serialized_string);
-
-		json_free_serialized_string(serialized_string);
-		json_value_free(js);
+		(void) cli_pprint_json(js);
 	}
 	else
 	{
@@ -234,7 +228,6 @@ cli_do_monitor_get_other_node(int argc, char **argv)
 	/* output something easy to parse by another program */
 	if (outputJSON)
 	{
-		char *serialized_string = NULL;
 		JSON_Value *js = json_value_init_object();
 		JSON_Object *root = json_value_get_object(js);
 
@@ -243,12 +236,7 @@ cli_do_monitor_get_other_node(int argc, char **argv)
 		json_object_set_string(root, "host", otherNode.host);
 		json_object_set_number(root, "port", (double) otherNode.port);
 
-		serialized_string = json_serialize_to_string_pretty(js);
-
-		fprintf(stdout, "%s\n", serialized_string);
-
-		json_free_serialized_string(serialized_string);
-		json_value_free(js);
+		(void) cli_pprint_json(js);
 	}
 	else
 	{
@@ -307,7 +295,6 @@ cli_do_monitor_get_coordinator(int argc, char **argv)
 	/* output something easy to parse by another program */
 	if (outputJSON)
 	{
-		char *serialized_string = NULL;
 		JSON_Value *js = json_value_init_object();
 		JSON_Object *root = json_value_get_object(js);
 
@@ -316,12 +303,7 @@ cli_do_monitor_get_coordinator(int argc, char **argv)
 		json_object_set_string(root, "host", coordinatorNode.host);
 		json_object_set_number(root, "port", (double) coordinatorNode.port);
 
-		serialized_string = json_serialize_to_string_pretty(js);
-
-		fprintf(stdout, "%s\n", serialized_string);
-
-		json_free_serialized_string(serialized_string);
-		json_value_free(js);
+		(void) cli_pprint_json(js);
 	}
 	else
 	{
@@ -419,7 +401,6 @@ cli_do_monitor_register_node(int argc, char **argv)
 	/* output something easy to parse by another program */
 	if (outputJSON)
 	{
-		char *serialized_string = NULL;
 		JSON_Value *js = json_value_init_object();
 		JSON_Object *root = json_value_get_object(js);
 
@@ -433,12 +414,7 @@ cli_do_monitor_register_node(int argc, char **argv)
 		json_object_set_string(root, "assigned_role",
 							   NodeStateToString(keeper.state.assigned_role));
 
-		serialized_string = json_serialize_to_string_pretty(js);
-
-		fprintf(stdout, "%s\n", serialized_string);
-
-		json_free_serialized_string(serialized_string);
-		json_value_free(js);
+		(void) cli_pprint_json(js);
 	}
 	else
 	{
@@ -521,7 +497,6 @@ cli_do_monitor_node_active(int argc, char **argv)
 	/* output something easy to parse by another program */
 	if (outputJSON)
 	{
-		char *serialized_string = NULL;
 		JSON_Value *js = json_value_init_object();
 		JSON_Object *root = json_value_get_object(js);
 
@@ -534,12 +509,7 @@ cli_do_monitor_node_active(int argc, char **argv)
 							   "assigned_role",
 							   NodeStateToString(assignedState.state));
 
-		serialized_string = json_serialize_to_string_pretty(js);
-
-		fprintf(stdout, "%s\n", serialized_string);
-
-		json_free_serialized_string(serialized_string);
-		json_value_free(js);
+		(void) cli_pprint_json(js);
 	}
 	else
 	{

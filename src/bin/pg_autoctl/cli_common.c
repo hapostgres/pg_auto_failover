@@ -784,3 +784,22 @@ keeper_cli_print_version(int argc, char **argv)
 	fprintf(stdout, "pg_autoctl version %s\n", PG_AUTOCTL_VERSION);
 	exit(0);
 }
+
+
+/*
+ * cli_pprint_json pretty prints the given JSON value to stdout and frees the
+ * JSON related memory.
+ */
+void
+cli_pprint_json(JSON_Value *js)
+{
+	char *serialized_string;
+
+	/* output our nice JSON object, pretty printed please */
+	serialized_string = json_serialize_to_string_pretty(js);
+	fprintf(stdout, "%s\n", serialized_string);
+
+	/* free intermediate memory */
+	json_free_serialized_string(serialized_string);
+	json_value_free(js);
+}

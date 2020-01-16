@@ -117,20 +117,15 @@ cli_config_check(int argc, char **argv)
 				JSON_Value *jsMConfig = json_value_init_object();
 
 				JSON_Object *root = json_value_get_object(js);
-				JSON_Object *jsPostgresObj = json_value_get_object(jsPostgres);
-				JSON_Object *jsMConfigObj = json_value_get_object(jsMConfig);
-
-				char *serialized_string;
-				int len;
 
 				/* prepare both JSON objects */
-				if (!pg_setup_as_json(&(mconfig.pgSetup), jsPostgresObj))
+				if (!pg_setup_as_json(&(mconfig.pgSetup), jsPostgres))
 				{
 					/* can't happen */
 					exit(EXIT_CODE_INTERNAL_ERROR);
 				}
 
-				if (!monitor_config_to_json(jsMConfigObj, &mconfig))
+				if (!monitor_config_to_json(&mconfig, jsMConfig))
 				{
 					log_fatal("Failed to serialize monitor configuration to JSON");
 					exit(EXIT_CODE_BAD_CONFIG);
@@ -140,13 +135,7 @@ cli_config_check(int argc, char **argv)
 				json_object_set_value(root, "postgres", jsPostgres);
 				json_object_set_value(root, "config", jsMConfig);
 
-				/* output our nice JSON object, pretty printed please */
-				serialized_string = json_serialize_to_string_pretty(js);
-				fprintf(stdout, "%s\n", serialized_string);
-
-				/* free intermediate memory */
-				json_free_serialized_string(serialized_string);
-				json_value_free(js);
+				(void) cli_pprint_json(js);
 			}
 			else
 			{
@@ -182,20 +171,15 @@ cli_config_check(int argc, char **argv)
 				JSON_Value *jsKConfig = json_value_init_object();
 
 				JSON_Object *root = json_value_get_object(js);
-				JSON_Object *jsPostgresObj = json_value_get_object(jsPostgres);
-				JSON_Object *jsKConfigObj = json_value_get_object(jsKConfig);
-
-				char *serialized_string;
-				int len;
 
 				/* prepare both JSON objects */
-				if (!pg_setup_as_json(&(config.pgSetup), jsPostgresObj))
+				if (!pg_setup_as_json(&(config.pgSetup), jsPostgres))
 				{
 					/* can't happen */
 					exit(EXIT_CODE_INTERNAL_ERROR);
 				}
 
-				if (!keeper_config_to_json(jsKConfigObj, &config))
+				if (!keeper_config_to_json(&config, jsKConfig))
 				{
 					log_fatal("Failed to serialize monitor configuration to JSON");
 					exit(EXIT_CODE_BAD_CONFIG);
@@ -205,13 +189,7 @@ cli_config_check(int argc, char **argv)
 				json_object_set_value(root, "postgres", jsPostgres);
 				json_object_set_value(root, "config", jsKConfig);
 
-				/* output our nice JSON object, pretty printed please */
-				serialized_string = json_serialize_to_string_pretty(js);
-				fprintf(stdout, "%s\n", serialized_string);
-
-				/* free intermediate memory */
-				json_free_serialized_string(serialized_string);
-				json_value_free(js);
+				(void) cli_pprint_json(js);
 			}
 			else
 			{
@@ -342,23 +320,14 @@ cli_keeper_config_get(int argc, char **argv)
 				if (outputJSON)
 				{
 					JSON_Value *js = json_value_init_object();
-					JSON_Object *jsObj = json_value_get_object(js);
 
-					char *serialized_string;
-
-					if (!keeper_config_to_json(jsObj, &config))
+					if (!keeper_config_to_json(&config, js))
 					{
 						log_fatal("Failed to serialize configuration to JSON");
 						exit(EXIT_CODE_BAD_CONFIG);
 					}
 
-					/* output our nice JSON object, pretty printed please */
-					serialized_string = json_serialize_to_string_pretty(js);
-					fprintf(stdout, "%s\n", serialized_string);
-
-					/* free intermediate memory */
-					json_free_serialized_string(serialized_string);
-					json_value_free(js);
+					(void) cli_pprint_json(js);
 				}
 				else
 				{
@@ -429,8 +398,23 @@ cli_monitor_config_get(int argc, char **argv)
 	{
 		case 0:
 		{
-			monitor_config_write(stdout, &mconfig);
-			fprintf(stdout, "\n");
+			if (outputJSON)
+			{
+				JSON_Value *js = json_value_init_object();
+
+				if (!monitor_config_to_json(&mconfig, js))
+				{
+					log_fatal("Failed to serialize configuration to JSON");
+					exit(EXIT_CODE_BAD_CONFIG);
+				}
+
+				(void) cli_pprint_json(js);
+			}
+			else
+			{
+				monitor_config_write(stdout, &mconfig);
+				fprintf(stdout, "\n");
+			}
 
 			keeper_config_destroy(&kconfig);
 			break;
@@ -478,7 +462,8 @@ cli_config_set(int argc, char **argv)
 {
 	KeeperConfig config = keeperOptions;
 
-	if (!keeper_config_set_pathnames_from_pgdata(&config.pathnames, config.pgSetup.pgdata))
+	if (!keeper_config_set_pathnames_from_pgdata(&config.pathnames,
+												 config.pgSetup.pgdata))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_CONFIG);

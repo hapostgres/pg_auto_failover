@@ -176,7 +176,6 @@ cli_get_node_replication_quorum(int argc, char **argv)
 
 	if (outputJSON)
 	{
-		char *serialized_string = NULL;
 		JSON_Value *js = json_value_init_object();
 		JSON_Object *jsObj = json_value_get_object(js);
 
@@ -184,12 +183,7 @@ cli_get_node_replication_quorum(int argc, char **argv)
 								"replication-quorum",
 								settings.replicationQuorum);
 
-		serialized_string = json_serialize_to_string_pretty(js);
-
-		fprintf(stdout, "%s\n", serialized_string);
-
-		json_free_serialized_string(serialized_string);
-		json_value_free(js);
+		(void) cli_pprint_json(js);
 	}
 	else
 	{
@@ -215,7 +209,6 @@ cli_get_node_candidate_priority(int argc, char **argv)
 
 	if (outputJSON)
 	{
-		char *serialized_string = NULL;
 		JSON_Value *js = json_value_init_object();
 		JSON_Object *jsObj = json_value_get_object(js);
 
@@ -223,12 +216,7 @@ cli_get_node_candidate_priority(int argc, char **argv)
 								"candidate-priority",
 							   (double) settings.candidatePriority);
 
-		serialized_string = json_serialize_to_string_pretty(js);
-
-		fprintf(stdout, "%s\n", serialized_string);
-
-		json_free_serialized_string(serialized_string);
-		json_value_free(js);
+		(void) cli_pprint_json(js);
 	}
 	else
 	{
@@ -283,7 +271,6 @@ cli_get_formation_number_sync_standbys(int argc, char **argv)
 
 	if (outputJSON)
 	{
-		char *serialized_string = NULL;
 		JSON_Value *js = json_value_init_object();
 		JSON_Object *jsObj = json_value_get_object(js);
 
@@ -291,12 +278,7 @@ cli_get_formation_number_sync_standbys(int argc, char **argv)
 							   "number-sync-standbys",
 							   (double) numberSyncStandbys);
 
-		serialized_string = json_serialize_to_string_pretty(js);
-
-		fprintf(stdout, "%s\n", serialized_string);
-
-		json_free_serialized_string(serialized_string);
-		json_value_free(js);
+		(void) cli_pprint_json(js);
 	}
 	else
 	{
@@ -404,7 +386,6 @@ cli_set_node_property(int argc, char **argv)
 
 		if (outputJSON)
 		{
-			char *serialized_string = NULL;
 			JSON_Value *js = json_value_init_object();
 			JSON_Object *jsObj = json_value_get_object(js);
 
@@ -412,12 +393,7 @@ cli_set_node_property(int argc, char **argv)
 									"replication-quorum",
 									replicationQuorum);
 
-			serialized_string = json_serialize_to_string_pretty(js);
-
-			fprintf(stdout, "%s\n", serialized_string);
-
-			json_free_serialized_string(serialized_string);
-			json_value_free(js);
+			(void) cli_pprint_json(js);
 		}
 		else
 		{
@@ -511,7 +487,6 @@ cli_set_formation_property(int argc, char **argv)
 
 	if (outputJSON)
 	{
-		char *serialized_string = NULL;
 		JSON_Value *js = json_value_init_object();
 		JSON_Object *jsObj = json_value_get_object(js);
 
@@ -519,12 +494,7 @@ cli_set_formation_property(int argc, char **argv)
 							   "number-sync-standbys",
 							   (double) numberSyncStandbys);
 
-		serialized_string = json_serialize_to_string_pretty(js);
-
-		fprintf(stdout, "%s\n", serialized_string);
-
-		json_free_serialized_string(serialized_string);
-		json_value_free(js);
+		(void) cli_pprint_json(js);
 	}
 	else
 	{
