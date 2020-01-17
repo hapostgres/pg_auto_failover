@@ -2,57 +2,45 @@
 -- Licensed under the PostgreSQL License.
 \x on
 select * from pgautofailover.register_node('default', 'localhost', 9876, 'postgres');
--[ RECORD 1 ]--------+-------
-assigned_node_id     | 1
-assigned_group_id    | 0
-assigned_group_state | single
+-[ RECORD 1 ]---------------+-------
+assigned_node_id            | 1
+assigned_group_id           | 0
+assigned_group_state        | single
+assigned_candidate_priority | 100
+assigned_replication_quorum | t
 
 select * from pgautofailover.register_node('default', 'localhost', 9877, 'postgres');
--[ RECORD 1 ]--------+-------------
-assigned_node_id     | 2
-assigned_group_id    | 0
-assigned_group_state | wait_standby
-
+ERROR:  ProceedGroupState couldn't find the primary node in formation "default", group 0
+DETAIL:  activeNode is localhost:9877 in state wait_standby
 select * from pgautofailover.node_active('default', 'localhost', 9876);
--[ RECORD 1 ]--------+-------
-assigned_node_id     | 1
-assigned_group_id    | 0
-assigned_group_state | single
+-[ RECORD 1 ]---------------+-------
+assigned_node_id            | 1
+assigned_group_id           | 0
+assigned_group_state        | single
+assigned_candidate_priority | 100
+assigned_replication_quorum | t
 
 select * from pgautofailover.node_active('default', 'localhost', 9877);
--[ RECORD 1 ]--------+-------------
-assigned_node_id     | 2
-assigned_group_id    | 0
-assigned_group_state | wait_standby
-
+ERROR:  node localhost:9877 is not registered
 table pgautofailover.formation;
--[ RECORD 1 ]-+---------
-formationid   | default
-kind          | pgsql
-dbname        | postgres
-opt_secondary | t
+-[ RECORD 1 ]--------+---------
+formationid          | default
+kind                 | pgsql
+dbname               | postgres
+opt_secondary        | t
+number_sync_standbys | 1
 
 -- dump the pgautofailover.node table, omitting the timely columns
 select formationid, nodeid, groupid, nodename, nodeport,
        goalstate, reportedstate, reportedpgisrunning, reportedrepstate
   from pgautofailover.node;
--[ RECORD 1 ]-------+-------------
+-[ RECORD 1 ]-------+----------
 formationid         | default
 nodeid              | 1
 groupid             | 0
 nodename            | localhost
 nodeport            | 9876
 goalstate           | single
-reportedstate       | init
-reportedpgisrunning | t
-reportedrepstate    | unknown
--[ RECORD 2 ]-------+-------------
-formationid         | default
-nodeid              | 2
-groupid             | 0
-nodename            | localhost
-nodeport            | 9877
-goalstate           | wait_standby
 reportedstate       | init
 reportedpgisrunning | t
 reportedrepstate    | unknown
@@ -66,38 +54,31 @@ ERROR:  group has no writable node right now
 select * from pgautofailover.get_primary('default', 0);
 ERROR:  group has no writable node right now
 select * from pgautofailover.get_other_node('localhost', 9876);
--[ RECORD 1 ]--+----------
-secondary_name | localhost
-secondary_port | 9877
-
+ERROR:  function pgautofailover.get_other_node(unknown, integer) does not exist
+LINE 1: select * from pgautofailover.get_other_node('localhost', 987...
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
 select pgautofailover.remove_node('localhost', 9876);
 -[ RECORD 1 ]--
 remove_node | t
 
 table pgautofailover.formation;
--[ RECORD 1 ]-+---------
-formationid   | default
-kind          | pgsql
-dbname        | postgres
-opt_secondary | t
+-[ RECORD 1 ]--------+---------
+formationid          | default
+kind                 | pgsql
+dbname               | postgres
+opt_secondary        | t
+number_sync_standbys | 1
 
 -- dump the pgautofailover.node table, omitting the timely columns
 select formationid, nodeid, groupid, nodename, nodeport,
        goalstate, reportedstate, reportedpgisrunning, reportedrepstate
   from pgautofailover.node;
--[ RECORD 1 ]-------+----------
-formationid         | default
-nodeid              | 2
-groupid             | 0
-nodename            | localhost
-nodeport            | 9877
-goalstate           | single
-reportedstate       | init
-reportedpgisrunning | t
-reportedrepstate    | unknown
+(0 rows)
 
 select * from pgautofailover.node_active('default', 'localhost', 9876);
 ERROR:  node localhost:9876 is not registered
 -- should fail as there's no primary at this point
 select pgautofailover.perform_failover();
-ERROR:  cannot fail over: group does not have 2 nodes
+ERROR:  cannot fail over: group 0 in formation default currently has 0 node registered
+DETAIL:  At least 2 nodes are required to implement a failover

@@ -54,6 +54,7 @@ PG_FUNCTION_INFO_V1(register_node);
 PG_FUNCTION_INFO_V1(node_active);
 PG_FUNCTION_INFO_V1(get_nodes);
 PG_FUNCTION_INFO_V1(get_primary);
+PG_FUNCTION_INFO_V1(get_other_node);
 PG_FUNCTION_INFO_V1(get_other_nodes);
 PG_FUNCTION_INFO_V1(remove_node);
 PG_FUNCTION_INFO_V1(perform_failover);
@@ -713,7 +714,20 @@ get_nodes(PG_FUNCTION_ARGS)
 
 
 /*
- * get_other_node returns the other node in a group, if any.
+ * get_other_node is not supported anymore, but we might want to be able to
+ * have the pgautofailover.so for 1.1 co-exists with the SQL definitions for
+ * 1.0 at least during an upgrade, or to test upgrades.
+ */
+Datum
+get_other_node(PG_FUNCTION_ARGS)
+{
+	ereport(ERROR,
+			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+			 errmsg("pgautofailover.get_other_node is no longer supported")));
+}
+
+/*
+ * get_other_nodes returns the other node in a group, if any.
  */
 Datum
 get_other_nodes(PG_FUNCTION_ARGS)
