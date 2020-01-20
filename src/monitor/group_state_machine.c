@@ -582,8 +582,6 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 	 * nodes that might all be candidate for failover, or just some of them.
 	 * First, have them all report the most recent LSN they managed to receive.
 	 */
-	reportedLSNCount = 0;
-
 	foreach(nodeCell, standbyNodesGroupList)
 	{
 		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
@@ -606,6 +604,20 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 		}
 
 		/*
+		 * Skip unhealthy nodes, they are not candidates and we don't want to
+		 * wait until they report their LSN. Same with nodes that we won't
+		 * consider candidates anyway because of their WAL lag (async case).
+		 */
+		if (!IsHealthy(node)
+			|| !WalDifferenceWithin(candidateNode,
+									primaryNode,
+									PromoteXlogThreshold))
+		{
+			/* do not increment candidateCount */
+			continue;
+		}
+
+		/*
 		 * Skip nodes that are not failover candidates (not in SECONDARY or
 		 * REPORT_LSN state).
 		 *
@@ -617,7 +629,7 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 			continue;
 		}
 
-		/* count how many standby nodes have reached REPORT_LSN */
+		/* count how many healthy standby nodes have reached REPORT_LSN */
 		if (IsCurrentState(node, REPLICATION_STATE_REPORT_LSN))
 		{
 			++candidateCount;
@@ -668,16 +680,34 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 	}
 
 	/*
+	 * Time to select a candidate?
+	 *
 	 * We reach this code when we don't have an healthy primary anymore, it's
-	 * been demoted or is draining now. Most probably it's dead. We have
-	 * collected the last received LSN from all the standby nodes in SECONDARY
-	 * state, and now we need to select one of the failover candidates.
+	 * been demoted or is draining now. Most probably it's dead.
 	 *
 	 * The selection is based on candidatePriority. If the candidate with the
 	 * higher priority doesn't have the most recent LSN, we have it fetch the
 	 * missing WAL bits from one of the standby which did receive them.
+	 *
+	 * Before we enter the selection process, we must have collected the last
+	 * received LSN from ALL the standby nodes that are considered as a
+	 * candidate (thanks to the FSM transition secondary -> report_lsn), and
+	 * now we need to select one of the failover candidates.
+	 *
+	 * We might fail to have reportedLSNCount == candidateCount in the
+	 * following cases:
+	 *
+	 * - the activeNode is the first to report its LSN, we didn't hear from the
+	 *   other nodes yet; in that case we want to wait until we hear from them,
+	 *   it is expected to happen within the next 5 seconds.
+	 *
+	 * - a standby that was counted as a candidate is not reporting; most
+	 *   probably it's not healthy anymore (or has been put to maintenance
+	 *   during the failover process), and the next call to node_active()
+	 *   should be able to account for that new global state and make progress:
+	 *   the now faulty standby will NOT be counted as candidate anymore.
 	 */
-	if (reportedLSNCount == candidateCount)
+	if (candidateCount > 0 && reportedLSNCount == candidateCount)
 	{
 		/* build the list of failover candidate nodes, ordered by priority */
 		List *candidateNodesGroupList =
@@ -771,7 +801,17 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 		}
 		else
 		{
-			/* should we maybe ereport() with an hint? */
+			/*
+			 * Log about the situation so that we have more information in
+			 * advanced cases; it's not expected that we need that information
+			 * as an event in the monitor table though.
+			 */
+			ereport(LOG,
+					(errmsg("we have received the LSN position of %d nodes, "
+							"we need to receive the position for %d nodes "
+							"before electing a candidate and proceeding with "
+							"the failover orchestration",
+							reportedLSNCount, candidateCount)));
 			return false;
 		}
 	}
