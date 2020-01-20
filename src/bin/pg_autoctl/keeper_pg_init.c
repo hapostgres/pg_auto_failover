@@ -100,6 +100,10 @@ keeper_ensure_pg_configuration_files_in_pgdata(KeeperConfig *config)
 	long fileSize;
 	char installationPath[MAXPGPATH];
 	bool installationPathPresent = false;
+	bool postgresqlConfExists = false;
+	char installationPosgresqlConfPath[MAXPGPATH];
+	char identConfPath[MAXPGPATH];
+
 
 	/* read version file */
 
@@ -108,6 +112,7 @@ keeper_ensure_pg_configuration_files_in_pgdata(KeeperConfig *config)
 
 	if (!read_file(versionFilePath, &fileContents, &fileSize))
 	{
+		log_error("Unable to read PG_VERSION from %s", versionFilePath);
 		return false;
 	}
 
@@ -116,7 +121,9 @@ keeper_ensure_pg_configuration_files_in_pgdata(KeeperConfig *config)
 		int scanResult = sscanf(fileContents, "%s", versionString);
 		if (scanResult == 0)
 		{
+			log_error("Unsupported PG_VERSION content");
 			return false;
+
 		}
 
 		log_info("Version = %s", versionString);
@@ -129,13 +136,65 @@ keeper_ensure_pg_configuration_files_in_pgdata(KeeperConfig *config)
 
 	log_warn("installation path : %s", installationPath);
 
+
+	/* check if postgresql.conf exists in pgdata. there is no separate check for pg_hba and pg_ident  */
+	join_path_components(posgresqlConfPath, pgdata, "postgresql.conf");
+
+	postgresqlConfExists = file_exists(posgresqlConfPath);
+
+	if (postgresqlConfExists)
+	{
+		return true;
+	}
+
+	/* check if pgdata is in default path. */
+	if (strstr(pgdata, "/var/lib/postgresql") != pgdata)
+	{
+		log_error("Cannot determine configuration file location for this instance");
+		return false;
+	}
+
+
 	/* true if we are working on debian/ubuntu installation */
 	installationPathPresent = directory_exists(installationPath);
 	if (!installationPathPresent)
 	{
-		log_error("installation path does not exist");
-		return true;
+		log_error("Cannot find configuration file directory");
+		return false;
 	}
+
+
+	{
+		char *postgresConfRelativePath = strstr(posgresqlConfPath, "postgresql");
+
+		join_path_components(installationPosgresqlConfPath, "/etc/", postgresConfRelativePath);
+
+		if (file_exists(installationPosgresqlConfPath))
+		{
+			if (read_file(installationPosgresqlConfPath, &fileContents, &fileSize))
+			{
+				int charCount = 0;
+				write_file(fileContents, fileSize, posgresqlConfPath);
+				charCount += sprintf(fileContents, "# DO NOT EDIT\n# Added by pg_autofailoover \n");
+				charCount += sprintf(fileContents, "hba_file = 'ConfigDir/pg_hba.conf'	# host-based authentication file added by pg_auto_failover\n");
+				charCount += sprintf(fileContents, "ident_file = 'ConfigDir/pg_ident.conf'	# ident configuration file file added by pg_auto_failover\n");
+				append_to_file(fileContents, charCount, posgresqlConfPath);
+
+				free(fileContents);
+			}
+			else
+			{
+				log_error("error reading %s", installationPosgresqlConfPath);
+				return false;
+			}
+		}
+		else
+		{
+			log_error("could not file postgresql.conf at default path : %s", installationPosgresqlConfPath);
+			return false;
+		}
+	}
+
 
 	join_path_components(hbaConfPath, pgdata, "pg_hba.conf");
 
@@ -156,50 +215,44 @@ keeper_ensure_pg_configuration_files_in_pgdata(KeeperConfig *config)
 			else
 			{
 				log_error("error reading %s", installationHbaConfPath);
+				return false;
 			}
 		}
 		else
 		{
 			log_error("could not file hba file at default path : %s",installationHbaConfPath);
+			return false;
 		}
 	}
-	else
+
+
+	join_path_components(identConfPath, pgdata, "pg_ident.conf");
+
+	if(!file_exists(identConfPath))
 	{
-		log_warn("hba file exists : %s", hbaConfPath);
-	}
+		char installationIdentConfPath[MAXPGPATH];
 
+		log_warn("pg_ident.conf does not exist : %s, need to copy", identConfPath);
+		join_path_components(installationIdentConfPath, installationPath, "pg_ident.conf");
 
-	join_path_components(posgresqlConfPath, pgdata, "postgresql.conf");
-
-	if(!file_exists(posgresqlConfPath))
-	{
-		char installationPosgresqlConfPath[MAXPGPATH];
-
-
-		join_path_components(installationPosgresqlConfPath, posgresqlConfPath, "postgresql.conf");
-
-		log_warn("postgresql.conf file does not exist : %s, need to copy", posgresqlConfPath);
-
-		if (file_exists(installationPosgresqlConfPath))
+		if (file_exists(installationIdentConfPath))
 		{
-			if (read_file(installationPosgresqlConfPath, &fileContents, &fileSize))
+			if (read_file(installationIdentConfPath, &fileContents, &fileSize))
 			{
-				write_file(fileContents, fileSize, posgresqlConfPath);
+				write_file(fileContents, fileSize, hbaConfPath);
 				free(fileContents);
 			}
 			else
 			{
-				log_error("error reading %s", installationPosgresqlConfPath);
+				log_error("error reading %s", identConfPath);
+				return false;
 			}
 		}
 		else
 		{
-			log_error("could not file postgresql.conf at default path : %s", installationPosgresqlConfPath);
+			log_error("could not file pg_ident.conf at default path : %s",installationIdentConfPath);
+			return false;
 		}
-	}
-	else
-	{
-		log_warn("postgresql.conf file exists : %s", posgresqlConfPath);
 	}
 
 
@@ -241,7 +294,11 @@ keeper_pg_init_and_register(Keeper *keeper, KeeperConfig *config)
 
 	if (postgresInstanceExists)
 	{
-		keeper_ensure_pg_configuration_files_in_pgdata(config);
+		if (!keeper_ensure_pg_configuration_files_in_pgdata(config))
+		{
+			log_fatal("Existing postgresql instance is not supported");
+			return false;
+		}
 	}
 
 	/*
