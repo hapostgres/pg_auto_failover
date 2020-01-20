@@ -99,6 +99,7 @@ extern CommandLine service_reload_command;
 extern CommandLine show_uri_command;
 extern CommandLine show_events_command;
 extern CommandLine show_state_command;
+extern CommandLine show_nodes_command;
 extern CommandLine show_file_command;
 
 /* cli_systemd.c */

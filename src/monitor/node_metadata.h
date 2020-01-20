@@ -106,9 +106,15 @@ typedef struct AutoFailoverNode
 /* public function declarations */
 extern List * AllAutoFailoverNodes(char *formationId);
 extern List * AutoFailoverNodeGroup(char *formationId, int groupId);
+extern List * AutoFailoverOtherNodesList(AutoFailoverNode *pgAutoFailoverNode);
+extern List * AutoFailoverOtherNodesListInState(
+	AutoFailoverNode *pgAutoFailoverNode, ReplicationState currentState);
+extern AutoFailoverNode * GetPrimaryNodeInGroup(char *formationId, int32 groupId);
+extern AutoFailoverNode * FindFailoverNewStandbyNode(List *groupNodeList);
 extern AutoFailoverNode * GetAutoFailoverNode(char *nodeName, int nodePort);
 extern AutoFailoverNode * GetAutoFailoverNodeWithId(int nodeid, char *nodeName, int nodePort);
 extern AutoFailoverNode * OtherNodeInGroup(AutoFailoverNode *pgAutoFailoverNode);
+extern AutoFailoverNode * GetWritableNodeInGroup(char *formationId, int32 groupId);
 extern AutoFailoverNode * TupleToAutoFailoverNode(TupleDesc tupleDescriptor,
 												  HeapTuple heapTuple);
 extern int AddAutoFailoverNode(char *formationId, int groupId,
@@ -138,3 +144,7 @@ extern SyncState SyncStateFromString(const char *pgsrSyncState);
 extern char *SyncStateToString(SyncState pgsrSyncState);
 extern bool IsCurrentState(AutoFailoverNode *pgAutoFailoverNode,
 						   ReplicationState state);
+extern bool CanTakeWritesInState(ReplicationState state);
+extern bool StateBelongsToPrimary(ReplicationState state);
+extern bool IsInWaitOrJoinState(AutoFailoverNode *node);
+extern bool IsInPrimaryState(AutoFailoverNode *pgAutoFailoverNode);

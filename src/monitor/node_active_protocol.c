@@ -46,16 +46,16 @@ static int AssignGroupId(AutoFailoverFormation *formation,
 						 char *nodeName, int nodePort,
 						 ReplicationState *initialState);
 
-static AutoFailoverNode * GetWritableNode(char *formationId, int32 groupId);
-static bool CanTakeWritesInState(ReplicationState state);
 static bool IsStateIn(ReplicationState state, List *allowedStates);
 
 
 /* SQL-callable function declarations */
 PG_FUNCTION_INFO_V1(register_node);
 PG_FUNCTION_INFO_V1(node_active);
+PG_FUNCTION_INFO_V1(get_nodes);
 PG_FUNCTION_INFO_V1(get_primary);
 PG_FUNCTION_INFO_V1(get_other_node);
+PG_FUNCTION_INFO_V1(get_other_nodes);
 PG_FUNCTION_INFO_V1(remove_node);
 PG_FUNCTION_INFO_V1(perform_failover);
 PG_FUNCTION_INFO_V1(start_maintenance);
@@ -411,6 +411,28 @@ JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 	int groupId = -1;
 	ReplicationState initialState = REPLICATION_STATE_UNKNOWN;
 
+	/* in a Postgres formation, we have a single groupId, and it's groupId 0 */
+	if (formation->kind == FORMATION_KIND_PGSQL)
+	{
+		/*
+		 * Register with groupId -1 to get one assigned by the monitor, or with
+		 * the groupId you know you want to join. In a Postgres (pgsql)
+		 * formation it's all down to groupId 0 anyway.
+		 */
+		if (currentNodeState->groupId > 0)
+		{
+			ereport(ERROR,
+					(errmsg("node %s:%d can not be registered in group %d "
+							"in formation \"%s\" of type pgsql",
+							nodeName, nodePort,
+							currentNodeState->groupId, formation->formationId),
+					 errdetail("in a pgsql formation, there can be only one "
+							   "group, with groupId 0")));
+		}
+		groupId = currentNodeState->groupId = 0;
+	}
+
+	/* a group number was asked for in the registration call */
 	if (currentNodeState->groupId >= 0)
 	{
 		List *groupNodeList = NIL;
@@ -419,28 +441,81 @@ JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 		groupId = currentNodeState->groupId;
 
 		groupNodeList = AutoFailoverNodeGroup(formation->formationId, groupId);
+
+		/*
+		 * Target group is empty: to make it simple to reason about the roles
+		 * in a group, we only ever accept a primary node first. Then, any
+		 * other node in the same group should be a standby. That's easy.
+		 */
 		if (list_length(groupNodeList) == 0)
 		{
 			initialState = REPLICATION_STATE_SINGLE;
 		}
-		else if (formation->opt_secondary && list_length(groupNodeList) == 1)
+		/* target group already has a primary, any other node is a standby */
+		else if (formation->opt_secondary && list_length(groupNodeList) >= 1)
 		{
+			AutoFailoverNode *primaryNode = NULL;
+
 			initialState = REPLICATION_STATE_WAIT_STANDBY;
-		}
-		else
-		{
-			ereport(ERROR, (errmsg("group %d already has %d members", groupId,
-								   list_length(groupNodeList))));
+
+			/*
+			 * We can only accept a single WAIT_STANDBY at a time, because of
+			 * the way the FSM works. When the primary reports a goalState of
+			 * WAIT_PRIMARY, we can advance the WAIT_STANDBY node to CATCHING
+			 * UP. The FSM protocol and decision making is per state, and we
+			 * wouldn't know which standby to advance if there were more than
+			 * one in state WAIT_STANDBY at any given time.
+			 *
+			 * As a consequence, if the primary node is already in WAIT_PRIMARY
+			 * or in JOIN_PRIMARY state, then we can't accept a new standby
+			 * yet. Only one new standby at a time.
+			 *
+			 * We detect the situation here and report error code 55006 so that
+			 * pg_autoctl knows to retry registering.
+			 */
+
+			primaryNode = GetWritableNodeInGroup(formation->formationId,
+												 currentNodeState->groupId);
+
+			if (IsInWaitOrJoinState(primaryNode))
+			{
+				AutoFailoverNode *standbyNode =
+					FindFailoverNewStandbyNode(groupNodeList);
+
+				Assert(standbyNode != NULL);
+
+				ereport(ERROR,
+						(errcode(ERRCODE_OBJECT_IN_USE),
+						 errmsg("primary node %s:%d is already in state %s",
+								primaryNode->nodeName, primaryNode->nodePort,
+								ReplicationStateGetName(primaryNode->goalState)),
+						 errdetail("Only one standby can be registered at a "
+								   "time in pg_auto_failover, and "
+								   "node %d (%s:%d) is currently being "
+								   "registered.",
+								   standbyNode->nodeId,
+								   standbyNode->nodeName,
+								   standbyNode->nodePort),
+						 errhint("Retry registering in a moment")));
+			}
 		}
 	}
 	else
 	{
+		/*
+		 * In a Citus formation, the register policy is to build a set of
+		 * workers with each a primary and a secondary, including the
+		 * coordinator.
+		 *
+		 * That's the policy implemented in AssignGroupId.
+		 */
 		groupId = AssignGroupId(formation, nodeName, nodePort, &initialState);
 	}
 
 	AddAutoFailoverNode(formation->formationId, groupId, nodeName, nodePort,
 						initialState, currentNodeState->replicationState,
-						currentNodeState->candidatePriority, currentNodeState->replicationQuorum);
+						currentNodeState->candidatePriority,
+						currentNodeState->replicationQuorum);
 
 	currentNodeState->groupId = groupId;
 }
@@ -502,12 +577,12 @@ get_primary(PG_FUNCTION_ARGS)
 	TypeFuncClass resultTypeClass = 0;
 	Datum resultDatum = 0;
 	HeapTuple resultTuple = NULL;
-	Datum values[2];
-	bool isNulls[2];
+	Datum values[3];
+	bool isNulls[3];
 
 	checkPgAutoFailoverVersion();
 
-	primaryNode = GetWritableNode(formationId, groupId);
+	primaryNode = GetWritableNodeInGroup(formationId, groupId);
 	if (primaryNode == NULL)
 	{
 		ereport(ERROR, (errmsg("group has no writable node right now")));
@@ -516,8 +591,9 @@ get_primary(PG_FUNCTION_ARGS)
 	memset(values, 0, sizeof(values));
 	memset(isNulls, false, sizeof(isNulls));
 
-	values[0] = CStringGetTextDatum(primaryNode->nodeName);
-	values[1] = Int32GetDatum(primaryNode->nodePort);
+	values[0] = Int32GetDatum(primaryNode->nodeId);
+	values[1] = CStringGetTextDatum(primaryNode->nodeName);
+	values[2] = Int32GetDatum(primaryNode->nodePort);
 
 	resultTypeClass = get_call_result_type(fcinfo, NULL, &resultDescriptor);
 	if (resultTypeClass != TYPEFUNC_COMPOSITE)
@@ -532,98 +608,236 @@ get_primary(PG_FUNCTION_ARGS)
 }
 
 
-/*
- * GetWritableNode returns the writable node in the specified group, if any.
- */
-static AutoFailoverNode *
-GetWritableNode(char *formationId, int32 groupId)
+typedef struct get_nodes_fctx
 {
-	AutoFailoverNode *writableNode = NULL;
-	List *groupNodeList = NIL;
-	ListCell *nodeCell = NULL;
-
-	groupNodeList = AutoFailoverNodeGroup(formationId, groupId);
-
-	foreach(nodeCell, groupNodeList)
-	{
-		AutoFailoverNode *currentNode = (AutoFailoverNode *) lfirst(nodeCell);
-
-		if (CanTakeWritesInState(currentNode->reportedState))
-		{
-			writableNode = currentNode;
-			break;
-		}
-	}
-
-	return writableNode;
-}
-
-
-/*
- * CanTakeWritesInState returns whether a node can take writes when in
- * the given state.
- */
-static bool
-CanTakeWritesInState(ReplicationState state)
-{
-	return state == REPLICATION_STATE_SINGLE ||
-		   state == REPLICATION_STATE_PRIMARY ||
-		   state == REPLICATION_STATE_WAIT_PRIMARY;
-}
-
+	List *nodesList;
+} get_nodes_fctx;
 
 /*
  * get_other_node returns the other node in a group, if any.
  */
 Datum
+get_nodes(PG_FUNCTION_ARGS)
+{
+	FuncCallContext *funcctx;
+	get_nodes_fctx *fctx;
+	MemoryContext oldcontext;
+
+	/* stuff done only on the first call of the function */
+	if (SRF_IS_FIRSTCALL())
+	{
+		text *formationIdText = PG_GETARG_TEXT_P(0);
+		char *formationId = text_to_cstring(formationIdText);
+
+		if (PG_ARGISNULL(0))
+		{
+			ereport(ERROR, (errmsg("formation_id must not be null")));
+		}
+
+		checkPgAutoFailoverVersion();
+
+		/* create a function context for cross-call persistence */
+		funcctx = SRF_FIRSTCALL_INIT();
+
+		/*
+		 * switch to memory context appropriate for multiple function calls
+		 */
+		oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+
+		/* allocate memory for user context */
+		fctx = (get_nodes_fctx *) palloc(sizeof(get_nodes_fctx));
+
+		/*
+		 * Use fctx to keep state from call to call. Seed current with the
+		 * original start value
+		 */
+		if (PG_ARGISNULL(1))
+		{
+			fctx->nodesList = AllAutoFailoverNodes(formationId);
+		}
+		else
+		{
+			int32 groupId = PG_GETARG_INT32(1);
+
+			fctx->nodesList = AutoFailoverNodeGroup(formationId, groupId);
+		}
+
+		funcctx->user_fctx = fctx;
+		MemoryContextSwitchTo(oldcontext);
+	}
+
+	/* stuff done on every call of the function */
+	funcctx = SRF_PERCALL_SETUP();
+
+	/*
+	 * get the saved state and use current as the result for this iteration
+	 */
+	fctx = funcctx->user_fctx;
+
+	if (fctx->nodesList != NIL)
+	{
+		TupleDesc resultDescriptor = NULL;
+		TypeFuncClass resultTypeClass = 0;
+		Datum resultDatum = 0;
+		HeapTuple resultTuple = NULL;
+		Datum values[5];
+		bool isNulls[5];
+
+		AutoFailoverNode *node = (AutoFailoverNode *) linitial(fctx->nodesList);
+
+		memset(values, 0, sizeof(values));
+		memset(isNulls, false, sizeof(isNulls));
+
+		values[0] = Int32GetDatum(node->nodeId);
+		values[1] = CStringGetTextDatum(node->nodeName);
+		values[2] = Int32GetDatum(node->nodePort);
+		values[3] = LSNGetDatum(node->reportedLSN);
+		values[4] = BoolGetDatum(CanTakeWritesInState(node->reportedState));
+
+		resultTypeClass = get_call_result_type(fcinfo, NULL, &resultDescriptor);
+		if (resultTypeClass != TYPEFUNC_COMPOSITE)
+		{
+			ereport(ERROR, (errmsg("return type must be a row type")));
+		}
+
+		resultTuple = heap_form_tuple(resultDescriptor, values, isNulls);
+		resultDatum = HeapTupleGetDatum(resultTuple);
+
+		/* prepare next SRF call */
+		fctx->nodesList = list_delete_first(fctx->nodesList);
+
+		SRF_RETURN_NEXT(funcctx, PointerGetDatum(resultDatum));
+	}
+
+	SRF_RETURN_DONE(funcctx);
+}
+
+
+/*
+ * get_other_node is not supported anymore, but we might want to be able to
+ * have the pgautofailover.so for 1.1 co-exists with the SQL definitions for
+ * 1.0 at least during an upgrade, or to test upgrades.
+ */
+Datum
 get_other_node(PG_FUNCTION_ARGS)
 {
-	text *nodeNameText = PG_GETARG_TEXT_P(0);
-	char *nodeName = text_to_cstring(nodeNameText);
-	int32 nodePort = PG_GETARG_INT32(1);
+	ereport(ERROR,
+			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+			 errmsg("pgautofailover.get_other_node is no longer supported")));
+}
 
-	AutoFailoverNode *activeNode = NULL;
-	AutoFailoverNode *otherNode = NULL;
+/*
+ * get_other_nodes returns the other node in a group, if any.
+ */
+Datum
+get_other_nodes(PG_FUNCTION_ARGS)
+{
+	FuncCallContext *funcctx;
+	get_nodes_fctx *fctx;
+	MemoryContext oldcontext;
 
-	TupleDesc resultDescriptor = NULL;
-	TypeFuncClass resultTypeClass = 0;
-	Datum resultDatum = 0;
-	HeapTuple resultTuple = NULL;
-	Datum values[2];
-	bool isNulls[2];
-
-	checkPgAutoFailoverVersion();
-
-	activeNode = GetAutoFailoverNode(nodeName, nodePort);
-	if (activeNode == NULL)
+	/* stuff done only on the first call of the function */
+	if (SRF_IS_FIRSTCALL())
 	{
-		ereport(ERROR,
-				(errmsg("node %s:%d is not registered", nodeName, nodePort)));
+		text *nodeNameText = PG_GETARG_TEXT_P(0);
+		char *nodeName = text_to_cstring(nodeNameText);
+		int32 nodePort = PG_GETARG_INT32(1);
+
+		AutoFailoverNode *activeNode = NULL;
+
+		checkPgAutoFailoverVersion();
+
+		/* create a function context for cross-call persistence */
+		funcctx = SRF_FIRSTCALL_INIT();
+
+		/*
+		 * switch to memory context appropriate for multiple function calls
+		 */
+		oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+
+		/* allocate memory for user context */
+		fctx = (get_nodes_fctx *) palloc(sizeof(get_nodes_fctx));
+
+		/*
+		 * Use fctx to keep state from call to call. Seed current with the
+		 * original start value
+		 */
+		activeNode = GetAutoFailoverNode(nodeName, nodePort);
+		if (activeNode == NULL)
+		{
+			ereport(ERROR,
+					(errmsg("node %s:%d is not registered", nodeName, nodePort)));
+		}
+
+		if (PG_NARGS() == 2)
+		{
+			fctx->nodesList = AutoFailoverOtherNodesList(activeNode);
+		}
+		else if (PG_NARGS() == 3)
+		{
+			Oid currentReplicationStateOid = PG_GETARG_OID(2);
+			ReplicationState currentState =
+				EnumGetReplicationState(currentReplicationStateOid);
+
+			fctx->nodesList =
+				AutoFailoverOtherNodesListInState(activeNode, currentState);
+		}
+		else
+		{
+			/* that's a bug in the SQL exposure of that function */
+			ereport(ERROR,
+					(errmsg("unsupported number of arguments (%d)",
+							PG_NARGS())));
+		}
+
+		funcctx->user_fctx = fctx;
+		MemoryContextSwitchTo(oldcontext);
 	}
 
-	otherNode = OtherNodeInGroup(activeNode);
-	if (otherNode == NULL)
+	/* stuff done on every call of the function */
+	funcctx = SRF_PERCALL_SETUP();
+
+	/*
+	 * get the saved state and use current as the result for this iteration
+	 */
+	fctx = funcctx->user_fctx;
+
+	if (fctx->nodesList != NIL)
 	{
-		ereport(ERROR,
-				(errmsg("node %s:%d is alone in the group", nodeName, nodePort)));
+		TupleDesc resultDescriptor = NULL;
+		TypeFuncClass resultTypeClass = 0;
+		Datum resultDatum = 0;
+		HeapTuple resultTuple = NULL;
+		Datum values[5];
+		bool isNulls[5];
+
+		AutoFailoverNode *node = (AutoFailoverNode *) linitial(fctx->nodesList);
+
+		memset(values, 0, sizeof(values));
+		memset(isNulls, false, sizeof(isNulls));
+
+		values[0] = Int32GetDatum(node->nodeId);
+		values[1] = CStringGetTextDatum(node->nodeName);
+		values[2] = Int32GetDatum(node->nodePort);
+		values[3] = LSNGetDatum(node->reportedLSN);
+		values[4] = BoolGetDatum(CanTakeWritesInState(node->reportedState));
+
+		resultTypeClass = get_call_result_type(fcinfo, NULL, &resultDescriptor);
+		if (resultTypeClass != TYPEFUNC_COMPOSITE)
+		{
+			ereport(ERROR, (errmsg("return type must be a row type")));
+		}
+
+		resultTuple = heap_form_tuple(resultDescriptor, values, isNulls);
+		resultDatum = HeapTupleGetDatum(resultTuple);
+
+		/* prepare next SRF call */
+		fctx->nodesList = list_delete_first(fctx->nodesList);
+
+		SRF_RETURN_NEXT(funcctx, PointerGetDatum(resultDatum));
 	}
 
-	memset(values, 0, sizeof(values));
-	memset(isNulls, false, sizeof(isNulls));
-
-	values[0] = CStringGetTextDatum(otherNode->nodeName);
-	values[1] = Int32GetDatum(otherNode->nodePort);
-
-	resultTypeClass = get_call_result_type(fcinfo, NULL, &resultDescriptor);
-	if (resultTypeClass != TYPEFUNC_COMPOSITE)
-	{
-		ereport(ERROR, (errmsg("return type must be a row type")));
-	}
-
-	resultTuple = heap_form_tuple(resultDescriptor, values, isNulls);
-	resultDatum = HeapTupleGetDatum(resultTuple);
-
-	PG_RETURN_DATUM(resultDatum);
+	SRF_RETURN_DONE(funcctx);
 }
 
 
@@ -753,7 +967,7 @@ perform_failover(PG_FUNCTION_ARGS)
 
 	LogAndNotifyMessage(
 		message, BUFSIZE,
-		"Setting goal state of %s:%d to draining and %s:%d to"
+		"Setting goal state of %s:%d to draining and %s:%d to "
 		"prepare_promotion after a user-initiated failover.",
 		primaryNode->nodeName, primaryNode->nodePort,
 		secondaryNode->nodeName, secondaryNode->nodePort);
@@ -1027,7 +1241,8 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 	{
 		ereport(ERROR, (ERRCODE_INVALID_PARAMETER_VALUE,
 						errmsg("invalid value for candidate_priority \"%d\" "
-							   "expected an integer value between 0 and 100", candidatePriority)));
+							   "expected an integer value between 0 and 100",
+							   candidatePriority)));
 	}
 
 

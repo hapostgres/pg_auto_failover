@@ -34,6 +34,9 @@ static int cli_show_state_getopts(int argc, char **argv);
 static void cli_show_state(int argc, char **argv);
 static void cli_show_events(int argc, char **argv);
 
+static int cli_show_nodes_getopts(int argc, char **argv);
+static void cli_show_nodes(int argc, char **argv);
+
 static int cli_show_file_getopts(int argc, char **argv);
 static void cli_show_file(int argc, char **argv);
 static bool fprint_file_contents(const char *filename);
@@ -74,6 +77,16 @@ CommandLine show_state_command =
 				 cli_show_state_getopts,
 				 cli_show_state);
 
+CommandLine show_nodes_command =
+	make_command("nodes",
+				 "Prints monitor nodes of nodes in a given formation and group",
+				 " [ --pgdata --formation --group ] ",
+				 "  --pgdata      path to data directory	 \n"		\
+				 "  --formation   formation to query, defaults to 'default' \n" \
+				 "  --group       group to query formation, defaults to all \n" \
+				 "  --json        output data in the JSON format\n",
+				 cli_show_nodes_getopts,
+				 cli_show_nodes);
 
 CommandLine show_file_command =
 	make_command("file",
@@ -106,6 +119,7 @@ typedef struct ShowFileOptions
 } ShowFileOptions;
 
 static ShowFileOptions showFileOptions;
+
 
 /*
  * keeper_cli_monitor_state_getopts parses the command line options for the
@@ -338,6 +352,208 @@ cli_show_state(int argc, char **argv)
 			/* errors have already been logged */
 			exit(EXIT_CODE_MONITOR);
 		}
+	}
+}
+
+
+/*
+ * cli_show_nodes_getopts parses the command line options for the
+ * command `pg_autoctl show nodes`.
+ */
+static int
+cli_show_nodes_getopts(int argc, char **argv)
+{
+	KeeperConfig options = { 0 };
+	int c, option_index = 0, errors = 0;
+	int verboseCount = 0;
+
+	static struct option long_options[] = {
+		{ "pgdata", required_argument, NULL, 'D' },
+		{ "formation", required_argument, NULL, 'f' },
+		{ "group", required_argument, NULL, 'g' },
+		{ "json", no_argument, NULL, 'J' },
+		{ "version", no_argument, NULL, 'V' },
+		{ "verbose", no_argument, NULL, 'v' },
+		{ "quiet", no_argument, NULL, 'q' },
+		{ "help", no_argument, NULL, 'h' },
+		{ NULL, 0, NULL, 0 }
+	};
+
+	/* set default values for our options, when we have some */
+	options.groupId = -1;
+	options.network_partition_timeout = -1;
+	options.prepare_promotion_catchup = -1;
+	options.prepare_promotion_walreceiver = -1;
+	options.postgresql_restart_failure_timeout = -1;
+	options.postgresql_restart_failure_max_retries = -1;
+
+	strlcpy(options.formation, "default", NAMEDATALEN);
+
+	optind = 0;
+
+	while ((c = getopt_long(argc, argv, "D:f:g:n:Vvqh",
+							long_options, &option_index)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(options.pgSetup.pgdata, optarg, MAXPGPATH);
+				log_trace("--pgdata %s", options.pgSetup.pgdata);
+				break;
+			}
+
+			case 'f':
+			{
+				strlcpy(options.formation, optarg, NAMEDATALEN);
+				log_trace("--formation %s", options.formation);
+				break;
+			}
+
+			case 'g':
+			{
+				int scanResult = sscanf(optarg, "%d", &options.groupId);
+				if (scanResult == 0)
+				{
+					log_fatal("--group argument is not a valid group ID: \"%s\"",
+							  optarg);
+					exit(EXIT_CODE_BAD_ARGS);
+				}
+				log_trace("--group %d", options.groupId);
+				break;
+			}
+
+			case 'V':
+			{
+				/* keeper_cli_print_version prints version and exits. */
+				keeper_cli_print_version(argc, argv);
+				break;
+			}
+
+			case 'v':
+			{
+				++verboseCount;
+				switch (verboseCount)
+				{
+					case 1:
+						log_set_level(LOG_INFO);
+						break;
+
+					case 2:
+						log_set_level(LOG_DEBUG);
+						break;
+
+					default:
+						log_set_level(LOG_TRACE);
+						break;
+				}
+				break;
+			}
+
+			case 'q':
+			{
+				log_set_level(LOG_ERROR);
+				break;
+			}
+
+			case 'h':
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_QUIT);
+				break;
+			}
+
+			case 'J':
+			{
+				outputJSON = true;
+				log_trace("--json");
+				break;
+			}
+
+			default:
+			{
+				/* getopt_long already wrote an error message */
+				errors++;
+			}
+		}
+	}
+
+	if (errors > 0)
+	{
+		commandline_help(stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
+	{
+		char *pgdata = getenv("PGDATA");
+
+		if (pgdata == NULL)
+		{
+			log_fatal("Failed to get PGDATA either from the environment "
+					  "or from --pgdata");
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		strlcpy(options.pgSetup.pgdata, pgdata, MAXPGPATH);
+	}
+
+	/*
+	 * pg_setup_init wants a single pg_ctl, and we don't use it here: pretend
+	 * we had a --pgctl option and processed it.
+	 */
+	set_first_pgctl(&(options.pgSetup));
+
+	keeperOptions = options;
+
+	return optind;
+}
+
+
+/*
+ * keeper_cli_monitor_print_state prints the current state of given formation
+ * and port from the monitor's point of view.
+ */
+static void
+cli_show_nodes(int argc, char **argv)
+{
+	NodeAddressArray nodesArray;
+	KeeperConfig config = keeperOptions;
+	Monitor monitor = { 0 };
+
+	if (!monitor_init_from_pgsetup(&monitor, &config.pgSetup))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (outputJSON)
+	{
+		char json[BUFSIZE];
+
+		if (!monitor_get_nodes_as_json(&monitor,
+									   config.formation,
+									   config.groupId,
+									   json, BUFSIZE))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_MONITOR);
+		}
+		fprintf(stdout, "%s\n", json);
+	}
+	else
+	{
+		if (!monitor_get_nodes(&monitor,
+							   config.formation,
+							   config.groupId,
+							   &nodesArray))
+		{
+			log_fatal("Failed to get the other nodes from the monitor, "
+					  "see above for details");
+			exit(EXIT_CODE_MONITOR);
+		}
+
+		(void) printNodeArray(&nodesArray);
 	}
 }
 

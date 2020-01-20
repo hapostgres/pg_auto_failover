@@ -22,6 +22,7 @@
 #include <getopt.h>
 #include <signal.h>
 
+#include "parson.h"
 #include "postgres_fe.h"
 
 #include "cli_common.h"
@@ -36,7 +37,7 @@
 #include "state.h"
 
 static void cli_do_monitor_get_primary_node(int argc, char **argv);
-static void cli_do_monitor_get_other_node(int argc, char **argv);
+static void cli_do_monitor_get_other_nodes(int argc, char **argv);
 static void cli_do_monitor_get_coordinator(int argc, char **argv);
 static void cli_do_monitor_register_node(int argc, char **argv);
 static void cli_do_monitor_node_active(int argc, char **argv);
@@ -51,13 +52,13 @@ static CommandLine monitor_get_primary_command =
 				 cli_getopt_pgdata,
 				 cli_do_monitor_get_primary_node);
 
-static CommandLine monitor_get_other_node_command =
-	make_command("other",
-				 "Get the other node from the pg_auto_failover group of nodename/port",
+static CommandLine monitor_get_other_nodes_command =
+	make_command("others",
+				 "Get the other nodes from the pg_auto_failover group of nodename/port",
 				 CLI_PGDATA_USAGE,
 				 CLI_PGDATA_OPTION,
 				 cli_getopt_pgdata,
-				 cli_do_monitor_get_other_node);
+				 cli_do_monitor_get_other_nodes);
 
 static CommandLine monitor_get_coordinator_command =
 	make_command("coordinator",
@@ -69,7 +70,7 @@ static CommandLine monitor_get_coordinator_command =
 
 static CommandLine *monitor_get_commands[] = {
 	&monitor_get_primary_command,
-	&monitor_get_other_node_command,
+	&monitor_get_other_nodes_command,
 	&monitor_get_coordinator_command,
 	NULL
 };
@@ -184,16 +185,19 @@ cli_do_monitor_get_primary_node(int argc, char **argv)
 
 
 /*
- * cli_do_monitor_get_other_node contacts the pg_auto_failover monitor and
+ * cli_do_monitor_get_other_nodes contacts the pg_auto_failover monitor and
  * retrieves the "other node" information for given nodename and port.
  */
 static void
-cli_do_monitor_get_other_node(int argc, char **argv)
+cli_do_monitor_get_other_nodes(int argc, char **argv)
 {
 	KeeperConfig config = keeperOptions;
 
 	Monitor monitor = { 0 };
-	NodeAddress otherNode = { 0 };
+
+	/* arbitrary limit to 12 other nodes */
+	int nodeIndex = 0;
+	NodeAddressArray otherNodesArray;
 
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
@@ -215,35 +219,36 @@ cli_do_monitor_get_other_node(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	if (!monitor_get_other_node(&monitor,
-								config.nodename,
-								config.pgSetup.pgport,
-								&otherNode))
-	{
-		log_fatal("Failed to get the other node from the monitor, "
-				  "see above for details");
-		exit(EXIT_CODE_MONITOR);
-	}
-
-	/* output something easy to parse by another program */
 	if (outputJSON)
 	{
-		JSON_Value *js = json_value_init_object();
-		JSON_Object *root = json_value_get_object(js);
+		char json[BUFSIZE];
 
-		json_object_set_string(root, "formation", config.formation);
-		json_object_set_number(root, "groupId", (double) config.groupId);
-		json_object_set_string(root, "host", otherNode.host);
-		json_object_set_number(root, "port", (double) otherNode.port);
-
-		(void) cli_pprint_json(js);
+		if (!monitor_get_other_nodes_as_json(&monitor,
+											 config.nodename,
+											 config.pgSetup.pgport,
+											 ANY_STATE,
+											 json, BUFSIZE))
+		{
+			log_fatal("Failed to get the other nodes from the monitor, "
+					  "see above for details");
+			exit(EXIT_CODE_MONITOR);
+		}
+		fprintf(stdout, "%s\n", json);
 	}
 	else
 	{
-		fprintf(stdout,
-				"%s/%d %s:%d\n",
-				config.formation, config.groupId,
-				otherNode.host, otherNode.port);
+		if (!monitor_get_other_nodes(&monitor,
+									 config.nodename,
+									 config.pgSetup.pgport,
+									 ANY_STATE,
+									 &otherNodesArray))
+		{
+			log_fatal("Failed to get the other nodes from the monitor, "
+					  "see above for details");
+			exit(EXIT_CODE_MONITOR);
+		}
+
+		(void) printNodeArray(&otherNodesArray);
 	}
 }
 

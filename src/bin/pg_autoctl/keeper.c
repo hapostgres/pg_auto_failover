@@ -125,7 +125,7 @@ keeper_ensure_current_state(Keeper *keeper)
 	PostgresSetup *pgSetup = &(keeper->postgres.postgresSetup);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
-	log_trace("keeper_ensure_current_state: %s",
+	log_debug("Ensure current state: %s",
 			  NodeStateToString(keeperState->current_role));
 
 	switch (keeperState->current_role)
@@ -785,7 +785,9 @@ keeper_register_and_init(Keeper *keeper,
 	}
 
 	/* also update the groupId in the configuration file. */
-	if (!keeper_config_set_groupId(&(keeper->config), assignedState.groupId))
+	if (!keeper_config_set_groupId_and_slot_name(&(keeper->config),
+												 assignedState.nodeId,
+												 assignedState.groupId))
 	{
 		log_error("Failed to update the configuration file with the groupId: %d",
 				  assignedState.groupId);

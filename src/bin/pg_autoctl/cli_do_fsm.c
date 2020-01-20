@@ -289,18 +289,31 @@ cli_do_fsm_assign(int argc, char **argv)
 			break;
 		}
 
-		case 3:
+		case 4:
 		{
-			goalState = NodeStateFromString(argv[0]);
+			/* we just accept a single standby at a time here */
+			NodeAddress *otherNode = &(keeper.otherNodes.nodes[0]);
 
-			/* now prepare host and port in keeper.otherNode */
-			strlcpy(keeper.otherNode.host, argv[1], _POSIX_HOST_NAME_MAX);
+			keeper.otherNodes.count = 1;
 
-			keeper.otherNode.port = strtol(argv[2], NULL, 10);
-			if (keeper.otherNode.port == 0 && errno == EINVAL)
+			goalState = NodeStateFromString(argv[1]);
+
+			/* now prepare id, host, and port in keeper.otherNodes */
+			otherNode->nodeId = strtol(argv[2], NULL, 10);
+			if (otherNode->nodeId == 0 && errno == EINVAL)
 			{
 				log_error(
-					"Failed to parse otherNode port number \"%s\"", argv[2]);
+					"Failed to parse otherNode id \"%s\"", argv[2]);
+				exit(EXIT_CODE_INTERNAL_ERROR);
+			}
+
+			strlcpy(otherNode->host, argv[3], _POSIX_HOST_NAME_MAX);
+
+			otherNode->port = strtol(argv[4], NULL, 10);
+			if (otherNode->port == 0 && errno == EINVAL)
+			{
+				log_error(
+					"Failed to parse otherNode port number \"%s\"", argv[4]);
 				exit(EXIT_CODE_INTERNAL_ERROR);
 			}
 			break;
@@ -308,7 +321,7 @@ cli_do_fsm_assign(int argc, char **argv)
 
 		default:
 		{
-			log_error("USAGE: do fsm state <goal state> [<host> <port>]");
+			log_error("USAGE: do fsm state <goal state> [<id> <host> <port>]");
 			commandline_help(stderr);
 			exit(EXIT_CODE_BAD_ARGS);
 		}

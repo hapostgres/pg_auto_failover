@@ -47,6 +47,13 @@
  */
 #define PGSR_SYNC_STATE_MAXLENGTH 10
 
+/*
+ * We receive a list of "other nodes" from the monitor, and we store that list
+ * in local memory. We pre-allocate the memory storage, and limit how many node
+ * addresses we can handle because of the pre-allocation strategy.
+ */
+#define NODE_ARRAY_MAX_COUNT 12
+
 
 /* abstract representation of a Postgres server that we can connect to */
 typedef enum
@@ -73,9 +80,18 @@ typedef struct GUC
 /* network address of a node in an HA group */
 typedef struct NodeAddress
 {
+	int  nodeId;
 	char host[_POSIX_HOST_NAME_MAX];
-	int port;
+	int  port;
+	char lsn[PG_LSN_MAXLENGTH];
+	bool isPrimary;
 } NodeAddress;
+
+typedef struct NodeAddressArray
+{
+	int count;
+	NodeAddress nodes[NODE_ARRAY_MAX_COUNT];
+} NodeAddressArray;
 
 typedef struct ReplicationSource
 {
@@ -105,9 +121,22 @@ typedef enum
 	PGSQL_RESULT_STRING
 } QueryResultType;
 
+/*
+ * As a way to communicate the SQL STATE when an error occurs, every
+ * pgsql_execute_with_params context structure must have the same first field,
+ * an array of 5 characters (plus '\0' at the end).
+ */
+#define SQLSTATE_LENGTH 6
+
+typedef struct AbstractResultContext
+{
+	char sqlstate[SQLSTATE_LENGTH];
+} AbstractResultContext;
+
 /* data structure for keeping a single-value query result */
 typedef struct SingleValueResultContext
 {
+	char sqlstate[SQLSTATE_LENGTH];
 	QueryResultType resultType;
 	bool parsedOk;
 	bool boolVal;
@@ -155,6 +184,7 @@ bool pgsql_is_in_recovery(PGSQL *pgsql, bool *is_in_recovery);
 bool pgsql_reload_conf(PGSQL *pgsql);
 bool pgsql_create_replication_slot(PGSQL *pgsql, const char *slotName);
 bool pgsql_drop_replication_slot(PGSQL *pgsql, const char *slotName, bool verbose);
+bool postgres_sprintf_replicationSlotName(int nodeId, char *slotName, int size);
 bool pgsql_enable_synchronous_replication(PGSQL *pgsql);
 bool pgsql_disable_synchronous_replication(PGSQL *pgsql);
 bool pgsql_set_default_transaction_mode_read_only(PGSQL *pgsql);

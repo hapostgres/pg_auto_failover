@@ -160,7 +160,7 @@
 	}
 
 static bool keeper_config_init_nodekind(KeeperConfig *config);
-static bool keeper_config_set_backup_directory(KeeperConfig *config);
+static bool keeper_config_set_backup_directory(KeeperConfig *config, int nodeId);
 
 
 /*
@@ -247,7 +247,7 @@ keeper_config_init(KeeperConfig *config,
 	 * Compute the backupDirectory from pgdata, or check the one given in the
 	 * configuration file already.
 	 */
-	if (!keeper_config_set_backup_directory(config))
+	if (!keeper_config_set_backup_directory(config, -1))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_CONFIG);
@@ -556,11 +556,23 @@ keeper_config_merge_options(KeeperConfig *config, KeeperConfig *options)
  * keeper_config_set_groupId sets the groupId in the configuration file.
  */
 bool
-keeper_config_set_groupId(KeeperConfig *config, int groupId)
+keeper_config_set_groupId_and_slot_name(KeeperConfig *config,
+										int nodeId, int groupId)
 {
 	IniOption *option;
 	IniOption keeperOptions[] = SET_INI_OPTIONS_ARRAY(config);
+	char buffer[BUFSIZE] = { 0 };
+	char *replicationSlotName = NULL;
 
+	snprintf(buffer, BUFSIZE, "%s_%d", REPLICATION_SLOT_NAME_DEFAULT, nodeId);
+	replicationSlotName = strdup(buffer);
+
+	config->groupId = groupId;
+	config->replication_slot_name = replicationSlotName;
+
+	/*
+	 * Fix the INI structure for the configuration file. First, groupId.
+	 */
 	option = lookup_ini_option(keeperOptions, "pg_autoctl", "group");
 
 	if (option == NULL)
@@ -571,6 +583,21 @@ keeper_config_set_groupId(KeeperConfig *config, int groupId)
 	}
 
 	*(option->intValue) = groupId;
+
+	/*
+	 * Fix the INI structure for the configuration file. Second,
+	 * replication_slot_name.
+	 */
+	option = lookup_ini_option(keeperOptions, "replication", "slot");
+
+	if (option == NULL)
+	{
+		log_error(
+			"BUG: keeper_config_set_groupId: lookup failed for replication.slot");
+		return false;
+	}
+
+	*(option->strValue) = replicationSlotName;
 
 	return keeper_config_write_file(config);
 }
@@ -816,20 +843,47 @@ keeper_config_init_nodekind(KeeperConfig *config)
  * to ${PGDATA}/../backup/${nodename} by default. Adding the local nodename
  * makes it possible to run several instances of Postgres and pg_autoctl on the
  * same host, which is nice for development and testing scenarios.
+ *
+ * That said, when testing and maybe in other situations, it is custom to have
+ * all the nodes sit on the same machine, and all be "localhost". To avoid any
+ * double-usage of the backup directory, as soon as we have a nodeId we use
+ * ${PGDATA/../backup/node_${nodeId} instead.
  */
 static bool
-keeper_config_set_backup_directory(KeeperConfig *config)
+keeper_config_set_backup_directory(KeeperConfig *config, int nodeId)
 {
+	char *pgdata = config->pgSetup.pgdata;
+	char subdirs[MAXPGPATH] = { 0 };
+	char backupDirectory[MAXPGPATH] = { 0 };
 	char absoluteBackupDirectory[PATH_MAX];
 
-	/* create the temporary backup directory at $pgdata/../backup */
-	if (IS_EMPTY_STRING_BUFFER(config->backupDirectory))
-	{
-		char *pgdata = config->pgSetup.pgdata;
-		char subdirs[MAXPGPATH];
+	/* build the default nodename based backup directory path */
+	snprintf(subdirs, MAXPGPATH, "backup/%s", config->nodename);
+	path_in_same_directory(pgdata, subdirs, backupDirectory);
 
-		snprintf(subdirs, MAXPGPATH, "backup/%s", config->nodename);
-		path_in_same_directory(pgdata, subdirs, config->backupDirectory);
+	/*
+	 * If the user didn't provide a backupDirectory and we're not registered
+	 * yet, just use the default value with the nodename. Don't even check it
+	 * now.
+	 */
+	if (IS_EMPTY_STRING_BUFFER(config->backupDirectory) && nodeId <= 0)
+	{
+		strlcpy(config->backupDirectory, backupDirectory, MAXPGPATH);
+		return true;
+	}
+
+	/* if we didn't have a backup directory yet, set one */
+	if (IS_EMPTY_STRING_BUFFER(config->backupDirectory)
+		|| strcmp(backupDirectory, config->backupDirectory) == 0)
+	{
+		/* we might be able to use the nodeId, better than the nodename */
+		if (nodeId > 0)
+		{
+			snprintf(subdirs, MAXPGPATH, "backup/node_%d", nodeId);
+			path_in_same_directory(pgdata, subdirs, backupDirectory);
+		}
+
+		strlcpy(config->backupDirectory, backupDirectory, MAXPGPATH);
 	}
 
 	/*

@@ -30,6 +30,7 @@
 #define DEFAULT_USERNAME "postgres"
 #define DEFAULT_AUTH_METHOD "trust"
 #define REPLICATION_SLOT_NAME_DEFAULT "pgautofailover_standby"
+#define REPLICATION_SLOT_NAME_PATTERN "^pgautofailover_standby_"
 #define REPLICATION_PASSWORD_DEFAULT NULL
 #define FORMATION_DEFAULT "default"
 #define GROUP_ID_DEFAULT 0

@@ -305,7 +305,7 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 		}
 	}
 
-	if (!connectionOk)
+	if (!connectionOk && connection != NULL)
 	{
 		log_error("Connection to database failed: %s",
 				  PQerrorMessage(connection));
@@ -429,9 +429,18 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 		log_error("SQL query: %s", sql);
 		log_error("SQL params: %s", debugParameters);
 
+		/* now stash away the SQL STATE if any */
+		if (context && sqlstate)
+		{
+			AbstractResultContext *ctx = (AbstractResultContext *) context;
+
+			strlcpy(ctx->sqlstate, sqlstate, SQLSTATE_LENGTH);
+		}
+
 		PQclear(result);
 		clear_results(connection);
 		pgsql_finish(pgsql);
+
 		return false;
 	}
 
@@ -499,11 +508,8 @@ clear_results(PGconn *connection)
 bool
 pgsql_is_in_recovery(PGSQL *pgsql, bool *is_in_recovery)
 {
-	SingleValueResultContext context;
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BOOL, false };
 	char *sql = "SELECT pg_is_in_recovery()";
-
-	context.resultType = PGSQL_RESULT_BOOL;
-	context.parsedOk = false;
 
 	if (!pgsql_execute_with_params(pgsql, sql, 0, NULL, NULL,
 								   &context, &parseSingleValueResult))
@@ -533,13 +539,10 @@ bool
 pgsql_check_postgresql_settings(PGSQL *pgsql, bool isCitusInstanceKind,
 								bool *settings_are_ok)
 {
-	SingleValueResultContext context;
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BOOL, false };
 	const char *sql =
 		isCitusInstanceKind ?
 		CHECK_CITUS_NODE_SETTINGS_SQL : CHECK_POSTGRESQL_NODE_SETTINGS_SQL;
-
-	context.resultType = PGSQL_RESULT_BOOL;
-	context.parsedOk = false;
 
 	if (!pgsql_execute_with_params(pgsql, sql, 0, NULL, NULL,
 								   &context, &parseSingleValueResult))
@@ -567,16 +570,13 @@ pgsql_check_postgresql_settings(PGSQL *pgsql, bool isCitusInstanceKind,
 bool
 pgsql_check_monitor_settings(PGSQL *pgsql, bool *settings_are_ok)
 {
-	SingleValueResultContext context;
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BOOL, false };
 	const char *sql =
 		"select exists(select 1 from "
 		"unnest("
 		"string_to_array(current_setting('shared_preload_libraries'), ','))"
 		" as t(name) "
 		"where trim(name) = 'pgautofailover');";
-
-	context.resultType = PGSQL_RESULT_BOOL;
-	context.parsedOk = false;
 
 	if (!pgsql_execute_with_params(pgsql, sql, 0, NULL, NULL,
 								   &context, &parseSingleValueResult))
@@ -634,6 +634,20 @@ pgsql_drop_replication_slot(PGSQL *pgsql, const char *slotName, bool verbose)
 
 	return pgsql_execute_with_params(pgsql, sql,
 									 1, paramTypes, paramValues, NULL, NULL);
+}
+
+
+/*
+ * postgres_sprintf_replicationSlotName prints the replication Slot Name to use
+ * for given nodeId in the given slotName buffer of given size.
+ */
+bool
+postgres_sprintf_replicationSlotName(int nodeId, char *slotName, int size)
+{
+	int bytesWritten =
+		snprintf(slotName, size, "%s_%d", REPLICATION_SLOT_NAME_DEFAULT, nodeId);
+
+	return bytesWritten <= size;
 }
 
 
@@ -1150,7 +1164,7 @@ pgsql_create_user(PGSQL *pgsql, const char *userName, const char *password,
 bool
 pgsql_has_replica(PGSQL *pgsql, char *userName, bool *hasReplica)
 {
-	SingleValueResultContext context;
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BOOL, false };
 
 	/*
 	 * Check whether there is an entry in pg_stat_replication, which means
@@ -1159,14 +1173,12 @@ pgsql_has_replica(PGSQL *pgsql, char *userName, bool *hasReplica)
 	 * postgres server, which is all we care about for the purpose of this
 	 * function.
 	 */
-	char *sql = "SELECT EXISTS (SELECT 1 FROM pg_stat_replication WHERE usename = $1)";
+	char *sql =
+		"SELECT EXISTS (SELECT 1 FROM pg_stat_replication WHERE usename = $1)";
 
 	const Oid paramTypes[1] = { TEXTOID };
 	const char *paramValues[1] = { userName };
 	int paramCount = 1;
-
-	context.resultType = PGSQL_RESULT_BOOL;
-	context.parsedOk = false;
 
 	pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes, paramValues,
 							  &context, &parseSingleValueResult);
@@ -1367,6 +1379,7 @@ validate_connection_string(const char *connectionString)
  */
 typedef struct PgMetadata
 {
+	char    sqlstate[6];
 	bool	parsedOk;
 	bool	pg_is_in_recovery;
 	char	syncState[PGSR_SYNC_STATE_MAXLENGTH];
@@ -1384,6 +1397,11 @@ pgsql_get_postgres_metadata(PGSQL *pgsql, const char *slotName,
 		/*
 		 * Make it so that we still have the current WAL LSN even in the case
 		 * where there's no replication slot in use by any standby.
+		 *
+		 * When on the primary, we might have multiple standby nodes connected.
+		 * We're good when at least one of them is either 'sync' or 'quorum'.
+		 * We don't check individual replication slots, we take the "best" one
+		 * and report that.
 		 */
 		"select pg_is_in_recovery(),"
 		" coalesce(rep.sync_state, '') as sync_state,"
@@ -1394,13 +1412,20 @@ pgsql_get_postgres_metadata(PGSQL *pgsql, const char *slotName,
 		" from (values(1)) as dummy"
 		" full outer join"
 		" ("
-		" select sync_state"
-		" from pg_replication_slots slot"
-		" join pg_stat_replication rep"
-		" on rep.pid = slot.active_pid"
-        " where slot_name = $1"
-		" ) as rep"
-		" on true";
+		"   select sync_state"
+		"     from pg_replication_slots slot"
+		"     join pg_stat_replication rep"
+		"       on rep.pid = slot.active_pid"
+		"   where slot_name ~ '" REPLICATION_SLOT_NAME_PATTERN "' "
+		"order by case sync_state "
+		"         when 'quorum' then 4 "
+		"         when 'sync' then 3 "
+		"         when 'potential' then 2 "
+		"         when 'async' then 1 "
+		"         else 0 end "
+		"    desc limit 1"
+		" ) "
+		"as rep on true";
 
 	const Oid paramTypes[1] = { TEXTOID };
 	const char *paramValues[1] = { slotName };
