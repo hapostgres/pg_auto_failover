@@ -847,6 +847,7 @@ fsm_start_maintenance_on_standby(Keeper *keeper)
 bool
 fsm_restart_standby(Keeper *keeper)
 {
+	/* FIXME: fsm_follow_new_primary ? */
 	return fsm_start_postgres(keeper);
 }
 
