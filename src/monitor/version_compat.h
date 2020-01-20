@@ -32,6 +32,11 @@
 #define BackgroundWorkerInitializeConnectionByOid(dboid, useroid, flags) \
 	BackgroundWorkerInitializeConnectionByOid(dboid, useroid)
 
+#include "nodes/pg_list.h"
+
+typedef int (*list_qsort_comparator) (const void *a, const void *b);
+extern List *list_qsort(const List *list, list_qsort_comparator cmp);
+
 #endif
 
 #if (PG_VERSION_NUM < 120000)
