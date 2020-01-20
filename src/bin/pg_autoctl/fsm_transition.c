@@ -451,10 +451,6 @@ prepare_replication(Keeper *keeper, NodeState otherNodeState)
 	 * going to try and add HBA entries and create replication slots again.
 	 * Both operations succeed when their target entry already exists.
 	 *
-	 * Note that primary_create_replication_slot() is idempotent thanks to
-	 * first dropping the target replication slot, then creating it again. We
-	 * might want to avoid drop/create noise on those servers that we managed
-	 * to process in the previous loop.
 	 */
 	for (nodeIndex = 0; nodeIndex < keeper->otherNodes.count; nodeIndex++)
 	{

@@ -240,15 +240,6 @@ primary_create_replication_slot(LocalPostgresServer *postgres,
 
 	log_trace("primary_create_replication_slot(%s)", replicationSlotName);
 
-	/*
-	 * Try dropping the replication slot in case it already exists and
-	 * is stuck at some arbitrary point in the timeline.
-	 *
-	 * We ignore failures because all we really care about is creating
-	 * the slot.
-	 */
-	pgsql_drop_replication_slot(pgsql, replicationSlotName, verbose);
-
 	result = pgsql_create_replication_slot(pgsql, replicationSlotName);
 
 	pgsql_finish(pgsql);
@@ -265,12 +256,11 @@ primary_drop_replication_slot(LocalPostgresServer *postgres,
 							  char *replicationSlotName)
 {
 	bool result = false;
-	bool verbose = true;
 	PGSQL *pgsql = &(postgres->sqlClient);
 
 	log_trace("primary_drop_replication_slot");
 
-	result = pgsql_drop_replication_slot(pgsql, replicationSlotName, verbose);
+	result = pgsql_drop_replication_slot(pgsql, replicationSlotName);
 
 	pgsql_finish(pgsql);
 	return result;
@@ -285,12 +275,11 @@ bool
 primary_drop_replication_slots(LocalPostgresServer *postgres)
 {
 	bool result = false;
-	bool verbose = true;
 	PGSQL *pgsql = &(postgres->sqlClient);
 
 	log_trace("primary_drop_replication_slots");
 
-	result = pgsql_drop_replication_slots(pgsql, verbose);
+	result = pgsql_drop_replication_slots(pgsql);
 
 	pgsql_finish(pgsql);
 	return result;

@@ -599,27 +599,30 @@ pgsql_check_monitor_settings(PGSQL *pgsql, bool *settings_are_ok)
 
 
 /*
- * pgsql_create_replication_slot tries to create a replication slot on
- * the database identified by a connection string.
+ * pgsql_create_replication_slot tries to create a replication slot on the
+ * database identified by a connection string. It's implemented as CREATE IF
+ * NOT EXISTS so that it's idempotent and can be retried easily.
  */
 bool
 pgsql_create_replication_slot(PGSQL *pgsql, const char *slotName)
 {
-	char *sql = "SELECT pg_create_physical_replication_slot($1)";
+	char *sql =
+		"SELECT pg_create_physical_replication_slot($1) "
+		" WHERE NOT EXISTS "
+		" (SELECT 1 FROM pg_replication_slots WHERE slot_name = $1)" ;
 	const Oid paramTypes[1] = { TEXTOID };
 	const char *paramValues[1] = { slotName };
 
-	return pgsql_execute_with_params(pgsql, sql,
-									 1, paramTypes, paramValues, NULL, NULL);
+	return pgsql_execute_with_params(pgsql, sql, 1, paramTypes, paramValues,
+									 NULL, NULL);
 }
 
 
 /*
- * pgsql_drop_replication_slot drops a given replication slot. If the verbose
- * flag is false, then no info message will be logged.
+ * pgsql_drop_replication_slot drops a given replication slot.
  */
 bool
-pgsql_drop_replication_slot(PGSQL *pgsql, const char *slotName, bool verbose)
+pgsql_drop_replication_slot(PGSQL *pgsql, const char *slotName)
 {
 	char *sql =
 		"SELECT pg_drop_replication_slot(slot_name) "
@@ -628,10 +631,7 @@ pgsql_drop_replication_slot(PGSQL *pgsql, const char *slotName, bool verbose)
 	Oid paramTypes[1] = { TEXTOID };
 	const char *paramValues[1] = { slotName };
 
-	if (verbose)
-	{
-		log_info("Drop replication slot \"%s\"", slotName);
-	}
+	log_info("Drop replication slot \"%s\"", slotName);
 
 	return pgsql_execute_with_params(pgsql, sql,
 									 1, paramTypes, paramValues, NULL, NULL);
@@ -679,20 +679,19 @@ pgsql_set_synchronous_standby_names(PGSQL *pgsql,
 }
 
 /*
- * pgsql_drop_replication_slots drops all the replication slots. If the verbose
- * flag is false, then no info message will be logged.
+ * pgsql_drop_replication_slots drops all the pg_auto_failover physical
+ * replication slots. (We might not own all those that exist on the server)
  */
 bool
-pgsql_drop_replication_slots(PGSQL *pgsql, bool verbose)
+pgsql_drop_replication_slots(PGSQL *pgsql)
 {
 	char *sql =
 		"SELECT pg_drop_replication_slot(slot_name) "
-		"  FROM pg_replication_slots ";
+		"  FROM pg_replication_slots "
+		" WHERE slot_name ~ '" REPLICATION_SLOT_NAME_PATTERN "' "
+		"   AND slot_type = 'physical'";
 
-	if (verbose)
-	{
-		log_info("Drop all replication slots");
-	}
+	log_info("Drop pg_auto_failover physical replication slots");
 
 	return pgsql_execute_with_params(pgsql, sql, 0, NULL, NULL, NULL, NULL);
 }
