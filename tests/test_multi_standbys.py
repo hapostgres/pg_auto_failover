@@ -99,3 +99,10 @@ def test_005_number_sync_standbys():
     assert node1.get_number_sync_standbys() == 1
     print("synchronous_standby_names = '%s'" %
           node1.get_synchronous_standby_names())
+
+def test_006_number_sync_standbys_trigger():
+    assert node1.set_number_sync_standbys(2)
+    assert node1.get_number_sync_standbys() == 2
+
+    node4.drop()
+    assert node1.get_number_sync_standbys() == 1
