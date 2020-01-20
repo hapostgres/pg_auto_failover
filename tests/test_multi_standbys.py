@@ -60,7 +60,12 @@ def test_004_add_three_standbys():
     node2.create()
     node2.run()
     assert node2.wait_until_state(target_state="secondary")
-    assert node1.wait_until_state(target_state="primary")
+
+    # refrain from waiting for the primary to be ready, to trigger a race
+    # condition that could segfault the monitor (if the code was less
+    # careful than it is now)
+
+    # assert node1.wait_until_state(target_state="primary")
 
     node3 = cluster.create_datanode("/tmp/multi_standby/node3")
     node3.create()

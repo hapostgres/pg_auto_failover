@@ -167,8 +167,9 @@ register_node(PG_FUNCTION_ARGS)
 		else
 		{
 			ereport(ERROR,
-					(errmsg("node %s:%d with dbname \"%s\" can not be registered in "
-							"formation \"%s\" which expects dbname \"%s\"",
+					(errmsg("node %s:%d with dbname \"%s\" can not be "
+							"registered in formation \"%s\" "
+							"which expects dbname \"%s\"",
 							nodeName, nodePort, expectedDBName,
 							formationId,
 							formation->dbname)));
@@ -179,6 +180,16 @@ register_node(PG_FUNCTION_ARGS)
 	LockNodeGroup(formationId, currentNodeState.groupId, ExclusiveLock);
 
 	pgAutoFailoverNode = GetAutoFailoverNode(nodeName, nodePort);
+
+	if (pgAutoFailoverNode == NULL)
+	{
+		/* that's a bug, really, maybe we could use an Assert() instead */
+		ereport(ERROR,
+				(errmsg("couldn't find the newly registered node %s:%d "
+						"in formation \"%s\", group %d",
+						nodeName, nodePort,
+						formationId, currentNodeState.groupId)));
+	}
 
 	assignedNodeState =
 		(AutoFailoverNodeState *) palloc0(sizeof(AutoFailoverNodeState));
@@ -488,31 +499,64 @@ JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 				 */
 				ereport(ERROR,
 						(errcode(ERRCODE_OBJECT_IN_USE),
-						 errmsg("primary node is still initializing"),
+						 errmsg("JoinAutoFailoverFormation couldn't find the "
+								" primary node in formation \"%s\", group %d",
+								formation->formationId,
+								currentNodeState->groupId),
 						 errhint("Retry registering in a moment")));
 			}
 
+			/*
+			 * We can only accept a single new standby at a time. Spend some
+			 * cycles on grabbing more information for a user-friendly report.
+			 */
 			if (IsInWaitOrJoinState(primaryNode))
 			{
+				const char *primaryState =
+					ReplicationStateGetName(primaryNode->goalState);
+
 				AutoFailoverNode *standbyNode =
 					FindFailoverNewStandbyNode(groupNodeList);
 
-				Assert(standbyNode != NULL);
-
-				ereport(ERROR,
-						(errcode(ERRCODE_OBJECT_IN_USE),
-						 errmsg("primary node %s:%d is already in state %s",
-								primaryNode->nodeName, primaryNode->nodePort,
-								ReplicationStateGetName(primaryNode->goalState)),
-						 errdetail("Only one standby can be registered at a "
-								   "time in pg_auto_failover, and "
-								   "node %d (%s:%d) is currently being "
-								   "registered.",
-								   standbyNode->nodeId,
-								   standbyNode->nodeName,
-								   standbyNode->nodePort),
-						 errhint("Retry registering in a moment")));
+				/* race condition: the standby might be SECONDARY already */
+				if (standbyNode != NULL)
+				{
+					ereport(ERROR,
+							(errcode(ERRCODE_OBJECT_IN_USE),
+							 errmsg("primary node %s:%d is already in state %s",
+									primaryNode->nodeName,
+									primaryNode->nodePort,
+									primaryState),
+							 errdetail("Only one standby can be registered "
+									   "at a time in pg_auto_failover, and "
+									   "node %d (%s:%d) is currently being "
+									   "registered.",
+									   standbyNode->nodeId,
+									   standbyNode->nodeName,
+									   standbyNode->nodePort),
+							 errhint("Retry registering in a moment")));
+				}
+				else
+				{
+					/* sadly we don't have details in that case */
+					ereport(ERROR,
+							(errcode(ERRCODE_OBJECT_IN_USE),
+							 errmsg("primary node %s:%d is already in state %s",
+									primaryNode->nodeName,
+									primaryNode->nodePort,
+									primaryState),
+							 errhint("Retry registering in a moment")));
+				}
 			}
+		}
+		else
+		{
+			ereport(ERROR,
+					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					 errmsg("can't register a new node in formation %s, "
+							"group %d, initial state %s",
+							formation->formationId, groupId,
+							ReplicationStateGetName(initialState))));
 		}
 	}
 	else
