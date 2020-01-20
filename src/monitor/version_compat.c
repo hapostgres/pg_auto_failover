@@ -19,6 +19,7 @@
 
 #include "postgres.h"
 #include "nodes/pg_list.h"
+#include "version_compat.h"
 
 /*
  * Sort a list using qsort. A sorted list is built but the cells of the
