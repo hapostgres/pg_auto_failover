@@ -39,6 +39,8 @@
 static bool ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode);
 static bool ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 										   AutoFailoverNode *primaryNode);
+static bool ProceedWithMSFailover(AutoFailoverNode *activeNode,
+								  AutoFailoverNode *candidateNode);
 static void AssignGoalState(AutoFailoverNode *pgAutoFailoverNode,
 							ReplicationState state, char *description);
 static bool IsDrainTimeExpired(AutoFailoverNode *pgAutoFailoverNode);
@@ -461,6 +463,8 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 	{
 		int failoverCandidateCount = otherNodesCount;
 		ListCell *nodeCell = NULL;
+		AutoFailoverFormation *formation =
+			GetFormation(primaryNode->formationId);
 
 		foreach(nodeCell, otherNodesGroupList)
 		{
@@ -490,8 +494,27 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 				--failoverCandidateCount;
 			}
 
-			/* disable synchronous replication to maintain availability */
-			if (failoverCandidateCount == 0)
+			/*
+			 * Disable synchronous replication to maintain availability.
+			 *
+			 * Note that we implement here a trade-off between availability (of
+			 * writes) against durability of the written data. In the case when
+			 * there's a single standby in the group, pg_auto_failover choice
+			 * is to maintain availability of the service, including writes.
+			 *
+			 * In the case when the user has setup a replication quorum of 2 or
+			 * more, then pg_auto_failover does not get in the way. You get
+			 * what you ask for, which is a strong guarantee on durability.
+			 *
+			 * To have number_sync_standbys == 2, you need to have at least 3
+			 * standby servers. To get to a point where writes are not possible
+			 * anymore, there needs to be a point in time where 2 of the 3
+			 * standby nodes are unavailable. In that case, pg_auto_failover
+			 * does not change the configured trade-offs. Writes are blocked
+			 * until one of the two defective standby nodes is available again.
+			 */
+			if (formation->number_sync_standbys == 1 &&
+				failoverCandidateCount < formation->number_sync_standbys)
 			{
 				char message[BUFSIZE];
 
@@ -638,102 +661,10 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 
 	/*
 	 * If a failover is in progress, continue driving it.
-	 *
-	 * Here we have choosen a failover candidate, which is either being
-	 * promoted to being the new primary (when it already had all the most
-	 * recent WAL, or is done fetching them), or is fetching the most recent
-	 * WAL it's still missing from another standby node.
 	 */
 	if (candidateNode != NULL)
 	{
-		/*
-		 * Everyone reported their LSN, we found a candidate, and it has to
-		 * fast forward. First, the node with the most advanced LSN position
-		 * had to reach wait_cascade:
-		 */
-		if (IsCurrentState(activeNode, REPLICATION_STATE_WAIT_CASCADE) &&
-			IsCurrentState(candidateNode, REPLICATION_STATE_WAIT_FORWARD))
-		{
-			char message[BUFSIZE];
-
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Setting goal state of %s:%d to fast_forward "
-				"after %s:%d converged to wait_cascade.",
-				candidateNode->nodeName, candidateNode->nodePort,
-				activeNode->nodeName, activeNode->nodePort);
-
-			AssignGoalState(candidateNode,
-							REPLICATION_STATE_FAST_FORWARD, message);
-
-			return true;
-		}
-
-		/*
-		 * The candidate had to fast forward with the activeNode, grabbing WAL
-		 * bits that only this node had. Now that's done. The activeNode has to
-		 * follow the new primary that's being promoted.
-		 */
-		if (IsCurrentState(activeNode, REPLICATION_STATE_WAIT_CASCADE) &&
-			IsCurrentState(candidateNode, REPLICATION_STATE_STOP_REPLICATION))
-		{
-			char message[BUFSIZE];
-
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Setting goal state of %s:%d to secondary "
-				"after %s:%d converged to stop_replication.",
-				activeNode->nodeName, activeNode->nodePort,
-				candidateNode->nodeName, candidateNode->nodePort);
-
-			AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
-
-			return true;
-		}
-
-		/*
-		 * When the candidate is done fast forwarding the locally missing WAL
-		 * bits, it can be promoted.
-		 */
-		if (IsCurrentState(activeNode, REPLICATION_STATE_FAST_FORWARD))
-		{
-			char message[BUFSIZE];
-
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Setting goal state of %s:%d to prepare_promotion",
-				activeNode->nodeName, activeNode->nodePort);
-
-			AssignGoalState(activeNode,
-							REPLICATION_STATE_PREPARE_PROMOTION,
-							message);
-
-			return true;
-		}
-
-		/*
-		 * When the activeNode is "just" another standby, it's time to follow
-		 * the new primary as soon as our candidate reaches stop_replication.
-		 */
-		if (IsCurrentState(activeNode, REPLICATION_STATE_REPORT_LSN) &&
-			IsCurrentState(candidateNode, REPLICATION_STATE_STOP_REPLICATION))
-		{
-			char message[BUFSIZE];
-
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Setting goal state of %s:%d to secondary "
-				"after %s:%d converged to stop_replication.",
-				activeNode->nodeName, activeNode->nodePort,
-				candidateNode->nodeName, candidateNode->nodePort);
-
-			AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
-
-			return true;
-		}
-
-		/* when we have a candidate, we don't go through finding a candidate */
-		return false;
+		return ProceedWithMSFailover(activeNode, candidateNode);
 	}
 
 	/*
@@ -845,6 +776,114 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 		}
 	}
 
+	return false;
+}
+
+
+/*
+ * ProceedWithMSFailover drives a failover forward when we already have a
+ * failover candidate. It might be the first time we just found/elected a
+ * candidate, or one subsequent call to node_active() when then failover is
+ * already being orchestrated.
+ *
+ * Here we have choosen a failover candidate, which is either being
+ * promoted to being the new primary (when it already had all the most
+ * recent WAL, or is done fetching them), or is fetching the most recent
+ * WAL it's still missing from another standby node.
+ */
+static bool
+ProceedWithMSFailover(AutoFailoverNode *activeNode,
+					  AutoFailoverNode *candidateNode)
+{
+	Assert(candidateNode != NULL);
+
+	/*
+	 * Everyone reported their LSN, we found a candidate, and it has to fast
+	 * forward. First, the node with the most advanced LSN position had to
+	 * reach wait_cascade:
+	 */
+	if (IsCurrentState(activeNode, REPLICATION_STATE_WAIT_CASCADE) &&
+		IsCurrentState(candidateNode, REPLICATION_STATE_WAIT_FORWARD))
+	{
+		char message[BUFSIZE];
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of %s:%d to fast_forward "
+			"after %s:%d converged to wait_cascade.",
+			candidateNode->nodeName, candidateNode->nodePort,
+			activeNode->nodeName, activeNode->nodePort);
+
+		AssignGoalState(candidateNode,
+						REPLICATION_STATE_FAST_FORWARD, message);
+
+		return true;
+	}
+
+	/*
+	 * The candidate had to fast forward with the activeNode, grabbing WAL bits
+	 * that only this node had. Now that's done. The activeNode has to follow
+	 * the new primary that's being promoted.
+	 */
+	if (IsCurrentState(activeNode, REPLICATION_STATE_WAIT_CASCADE) &&
+		IsCurrentState(candidateNode, REPLICATION_STATE_STOP_REPLICATION))
+	{
+		char message[BUFSIZE];
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of %s:%d to secondary "
+			"after %s:%d converged to stop_replication.",
+			activeNode->nodeName, activeNode->nodePort,
+			candidateNode->nodeName, candidateNode->nodePort);
+
+		AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
+
+		return true;
+	}
+
+	/*
+	 * When the candidate is done fast forwarding the locally missing WAL bits,
+	 * it can be promoted.
+	 */
+	if (IsCurrentState(activeNode, REPLICATION_STATE_FAST_FORWARD))
+	{
+		char message[BUFSIZE];
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of %s:%d to prepare_promotion",
+			activeNode->nodeName, activeNode->nodePort);
+
+		AssignGoalState(activeNode,
+						REPLICATION_STATE_PREPARE_PROMOTION,
+						message);
+
+		return true;
+	}
+
+	/*
+	 * When the activeNode is "just" another standby, it's time to follow the
+	 * new primary as soon as our candidate reaches stop_replication.
+	 */
+	if (IsCurrentState(activeNode, REPLICATION_STATE_REPORT_LSN) &&
+		IsCurrentState(candidateNode, REPLICATION_STATE_STOP_REPLICATION))
+	{
+		char message[BUFSIZE];
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of %s:%d to secondary "
+			"after %s:%d converged to stop_replication.",
+			activeNode->nodeName, activeNode->nodePort,
+			candidateNode->nodeName, candidateNode->nodePort);
+
+		AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
+
+		return true;
+	}
+
+	/* when we have a candidate, we don't go through finding a candidate */
 	return false;
 }
 
