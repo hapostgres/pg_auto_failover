@@ -175,9 +175,10 @@ keeper_ensure_pg_configuration_files_in_pgdata(KeeperConfig *config)
 			{
 				int charCount = 0;
 				write_file(fileContents, fileSize, posgresqlConfPath);
+				memset(fileContents, 0, fileSize);
 				charCount += sprintf(fileContents, "# DO NOT EDIT\n# Added by pg_autofailoover \n");
-				charCount += sprintf(fileContents, "hba_file = 'ConfigDir/pg_hba.conf'	# host-based authentication file added by pg_auto_failover\n");
-				charCount += sprintf(fileContents, "ident_file = 'ConfigDir/pg_ident.conf'	# ident configuration file file added by pg_auto_failover\n");
+				charCount += sprintf(fileContents + charCount, "hba_file = 'ConfigDir/pg_hba.conf'	# host-based authentication file added by pg_auto_failover\n");
+				charCount += sprintf(fileContents + charCount, "ident_file = 'ConfigDir/pg_ident.conf'	# ident configuration file file added by pg_auto_failover\n");
 				append_to_file(fileContents, charCount, posgresqlConfPath);
 
 				free(fileContents);
