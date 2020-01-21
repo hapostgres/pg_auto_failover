@@ -120,7 +120,6 @@ extern AutoFailoverNode * FindMostAdvancedStandby(List *groupNodeList);
 extern AutoFailoverNode * GetAutoFailoverNode(char *nodeName, int nodePort);
 extern AutoFailoverNode * GetAutoFailoverNodeWithId(int nodeid,
 													char *nodeName, int nodePort);
-extern AutoFailoverNode * OtherNodeInGroup(AutoFailoverNode *pgAutoFailoverNode);
 extern AutoFailoverNode * GetWritableNodeInGroup(char *formationId, int32 groupId);
 extern AutoFailoverNode * GetPrimaryNodeInGroup(char *formationId, int32 groupId);
 extern AutoFailoverNode * TupleToAutoFailoverNode(TupleDesc tupleDescriptor,
@@ -157,3 +156,4 @@ extern bool StateBelongsToPrimary(ReplicationState state);
 extern bool IsBeingPromoted(AutoFailoverNode *node);
 extern bool IsInWaitOrJoinState(AutoFailoverNode *node);
 extern bool IsInPrimaryState(AutoFailoverNode *pgAutoFailoverNode);
+extern bool IsStateIn(ReplicationState state, List *allowedStates);

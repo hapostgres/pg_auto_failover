@@ -47,8 +47,6 @@ static int AssignGroupId(AutoFailoverFormation *formation,
 						 char *nodeName, int nodePort,
 						 ReplicationState *initialState);
 
-static bool IsStateIn(ReplicationState state, List *allowedStates);
-
 
 /* SQL-callable function declarations */
 PG_FUNCTION_INFO_V1(register_node);
@@ -911,7 +909,9 @@ remove_node(PG_FUNCTION_ARGS)
 	int32 nodePort = PG_GETARG_INT32(1);
 
 	AutoFailoverNode *currentNode = NULL;
-	AutoFailoverNode *otherNode = NULL;
+
+	List *otherNodesGroupList = NIL;
+	ListCell *nodeCell = NULL;
 
 	checkPgAutoFailoverVersion();
 
@@ -923,35 +923,26 @@ remove_node(PG_FUNCTION_ARGS)
 
 	LockFormation(currentNode->formationId, ExclusiveLock);
 
-	otherNode = OtherNodeInGroup(currentNode);
+	otherNodesGroupList = AutoFailoverOtherNodesList(currentNode);
 
 	RemoveAutoFailoverNode(nodeName, nodePort);
 
-	if (otherNode != NULL)
+	/* review the FSM for every other node */
+	foreach(nodeCell, otherNodesGroupList)
 	{
-		ProceedGroupState(otherNode);
+		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (node == NULL)
+		{
+			/* shouldn't happen */
+			ereport(ERROR, (errmsg("BUG: node is NULL")));
+			continue;
+		}
+
+		ProceedGroupState(node);
 	}
 
 	PG_RETURN_BOOL(true);
-}
-
-
-/* returns true if state is equal to any of allowedStates */
-static bool
-IsStateIn(ReplicationState state, List *allowedStates)
-{
-	ListCell *cell = NULL;
-
-	foreach(cell, allowedStates)
-	{
-		ReplicationState allowedState = (ReplicationState) lfirst_int(cell);
-		if (state == allowedState)
-		{
-			return true;
-		}
-	}
-
-	return false;
 }
 
 
@@ -1085,38 +1076,8 @@ perform_failover(PG_FUNCTION_ARGS)
 	{
 		List *standbyNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
 		ListCell *nodeCell = NULL;
-		int candidateCount = 0;
-
-		foreach(nodeCell, standbyNodesGroupList)
-		{
-			AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
-
-			if (node == NULL)
-			{
-				/* shouldn't happen */
-				ereport(ERROR, (errmsg("BUG: node is NULL")));
-				continue;
-			}
-
-			/* if a promotion is already in progress, game over */
-			if (IsBeingPromoted(node))
-			{
-				ereport(ERROR,
-						(errmsg("node %d (%s:%d) is already being promoted",
-								node->nodeId,
-								node->nodeName,
-								node->nodePort)));
-			}
-
-			/* skip nodes if they are not a failover candidate */
-			if (!(IsStateIn(node->reportedState, secondaryStates) &&
-				  IsStateIn(node->goalState, secondaryStates)))
-			{
-				continue;
-			}
-
-			++candidateCount;
-		}
+		int candidateCount =
+			CountStandbyCandidates(primaryNode, secondaryStates);
 
 		if (candidateCount == 0)
 		{
@@ -1153,6 +1114,23 @@ perform_failover(PG_FUNCTION_ARGS)
 							  primaryNode->replicationQuorum,
 							  message);
 		}
+		else
+		{
+			const char *primaryReportedState =
+				ReplicationStateGetName(primaryNode->reportedState);
+
+			const char *primaryGoalState =
+				ReplicationStateGetName(primaryNode->goalState);
+
+			ereport(ERROR,
+					(errmsg("primary node %s:%d is assigned state %s and "
+							"last reported state %s, "
+							"we can't failover at the moment.",
+							primaryNode->nodeName,
+							primaryNode->nodePort,
+							primaryGoalState,
+							primaryReportedState)));
+		}
 
 		/*
 		 * Assign REPORT_LSN to every standby to trigger the failover.
@@ -1186,7 +1164,6 @@ perform_failover(PG_FUNCTION_ARGS)
 				"to find the failover candidate, "
 				"after a user-initiated failover",
 				node->nodeName, node->nodePort);
-
 
 			SetNodeGoalState(node->nodeName, node->nodePort,
 							 REPLICATION_STATE_REPORT_LSN);
@@ -1224,14 +1201,17 @@ start_maintenance(PG_FUNCTION_ARGS)
 	int32 nodePort = PG_GETARG_INT32(1);
 
 	AutoFailoverNode *currentNode = NULL;
-	AutoFailoverNode *otherNode = NULL;
+	AutoFailoverNode *primaryNode = NULL;
 
-	char message[BUFSIZE];
-
-	List *primaryStates = list_make2_int(REPLICATION_STATE_PRIMARY,
+	List *primaryStates = list_make3_int(REPLICATION_STATE_PRIMARY,
+										 REPLICATION_STATE_JOIN_PRIMARY,
 										 REPLICATION_STATE_WAIT_PRIMARY);
 	List *secondaryStates = list_make2_int(REPLICATION_STATE_SECONDARY,
 										   REPLICATION_STATE_CATCHINGUP);
+
+	int candidateCount = 0;
+
+	char message[BUFSIZE];
 
 	checkPgAutoFailoverVersion();
 
@@ -1244,15 +1224,9 @@ start_maintenance(PG_FUNCTION_ARGS)
 	LockFormation(currentNode->formationId, ShareLock);
 	LockNodeGroup(currentNode->formationId, currentNode->groupId, ExclusiveLock);
 
-	otherNode = OtherNodeInGroup(currentNode);
+	candidateCount = CountStandbyCandidates(primaryNode, secondaryStates);
 
-	if (otherNode == NULL)
-	{
-		ereport(ERROR,
-				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("cannot start maintenance: group does not have 2 nodes")));
-	}
-
+	/* check pre-conditions for the current node (secondary) */
 	if (currentNode->reportedState == REPLICATION_STATE_MAINTENANCE
 		|| currentNode->goalState == REPLICATION_STATE_MAINTENANCE)
 	{
@@ -1268,14 +1242,28 @@ start_maintenance(PG_FUNCTION_ARGS)
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("cannot start maintenance: current state for node %s:%d "
+				 errmsg("cannot start maintenance: "
+						"current state for node %s:%d "
 						"is \"%s\", expected either "
 						"\"secondary\" or \"catchingup\"",
 						currentNode->nodeName, currentNode->nodePort,
 						ReplicationStateGetName(currentNode->reportedState))));
 	}
 
-	if (!(IsStateIn(otherNode->goalState, primaryStates)
+	/* the primary needs to be in a stable state to allow for maintenance */
+	primaryNode =
+		GetWritableNodeInGroup(currentNode->formationId,
+							   currentNode->groupId);
+
+	if (primaryNode == NULL)
+	{
+		ereport(ERROR,
+				(errmsg("couldn't find the primary node in formation \"%s\", "
+						"group %d",
+						currentNode->formationId, currentNode->groupId)));
+	}
+
+	if (!(IsStateIn(primaryNode->goalState, primaryStates)
 		  && currentNode->reportedState == currentNode->goalState))
 	{
 		ereport(ERROR,
@@ -1283,33 +1271,46 @@ start_maintenance(PG_FUNCTION_ARGS)
 				 errmsg("cannot start maintenance: current state for node %s:%d "
 						"is \"%s\", expected one of "
 						"\"primary\",  \"wait_primary\", or \"join_primary\"",
-						otherNode->nodeName, otherNode->nodePort,
-						ReplicationStateGetName(otherNode->reportedState))));
+						primaryNode->nodeName, primaryNode->nodePort,
+						ReplicationStateGetName(primaryNode->goalState))));
 	}
 
-	LogAndNotifyMessage(
-		message, BUFSIZE,
-		"Setting goal state of %s:%d to wait_primary and %s:%d to"
-		"maintenance after a user-initiated start_maintenance call.",
-		otherNode->nodeName, otherNode->nodePort,
-		currentNode->nodeName, currentNode->nodePort);
+	/* primary -> wait_primary when we are losing our only candidate */
+	if (candidateCount == 1)
+	{
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of %s:%d to wait_primary and %s:%d to"
+			"maintenance after a user-initiated start_maintenance call.",
+			primaryNode->nodeName, primaryNode->nodePort,
+			currentNode->nodeName, currentNode->nodePort);
 
-	SetNodeGoalState(otherNode->nodeName, otherNode->nodePort,
-					 REPLICATION_STATE_WAIT_PRIMARY);
+		SetNodeGoalState(primaryNode->nodeName, primaryNode->nodePort,
+						 REPLICATION_STATE_WAIT_PRIMARY);
 
-	NotifyStateChange(otherNode->reportedState,
-					  REPLICATION_STATE_WAIT_PRIMARY,
-					  otherNode->formationId,
-					  otherNode->groupId,
-					  otherNode->nodeId,
-					  otherNode->nodeName,
-					  otherNode->nodePort,
-					  otherNode->pgsrSyncState,
-					  otherNode->reportedLSN,
-					  otherNode->candidatePriority,
-					  otherNode->replicationQuorum,
-					  message);
+		NotifyStateChange(primaryNode->reportedState,
+						  REPLICATION_STATE_WAIT_PRIMARY,
+						  primaryNode->formationId,
+						  primaryNode->groupId,
+						  primaryNode->nodeId,
+						  primaryNode->nodeName,
+						  primaryNode->nodePort,
+						  primaryNode->pgsrSyncState,
+						  primaryNode->reportedLSN,
+						  primaryNode->candidatePriority,
+						  primaryNode->replicationQuorum,
+						  message);
+	}
+	else
+	{
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of %s:%d to maintenance "
+			"after a user-initiated start_maintenance call.",
+			currentNode->nodeName, currentNode->nodePort);
+	}
 
+	/* switch to maintenance now */
 	SetNodeGoalState(currentNode->nodeName, currentNode->nodePort,
 					 REPLICATION_STATE_MAINTENANCE);
 
@@ -1344,7 +1345,7 @@ stop_maintenance(PG_FUNCTION_ARGS)
 	int32 nodePort = PG_GETARG_INT32(1);
 
 	AutoFailoverNode *currentNode = NULL;
-	AutoFailoverNode *otherNode = NULL;
+	AutoFailoverNode *primaryNode = NULL;
 
 	char message[BUFSIZE];
 
@@ -1359,15 +1360,6 @@ stop_maintenance(PG_FUNCTION_ARGS)
 	LockFormation(currentNode->formationId, ShareLock);
 	LockNodeGroup(currentNode->formationId, currentNode->groupId, ExclusiveLock);
 
-	otherNode = OtherNodeInGroup(currentNode);
-
-	if (otherNode == NULL)
-	{
-		ereport(ERROR,
-				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("cannot stop maintenance: group does not have 2 nodes")));
-	}
-
 	if (!IsCurrentState(currentNode, REPLICATION_STATE_MAINTENANCE))
 	{
 		ereport(ERROR,
@@ -1377,14 +1369,27 @@ stop_maintenance(PG_FUNCTION_ARGS)
 						currentNode->nodeName, currentNode->nodePort)));
 	}
 
-	if (!IsCurrentState(otherNode, REPLICATION_STATE_WAIT_PRIMARY))
+	primaryNode =
+		GetWritableNodeInGroup(currentNode->formationId,
+							   currentNode->groupId);
+
+	if (primaryNode == NULL)
+	{
+		ereport(ERROR,
+				(errmsg("couldn't find the primary node in formation \"%s\", "
+						"group %d",
+						currentNode->formationId, currentNode->groupId)));
+	}
+
+	if (!(IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
+		  IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY)))
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("cannot stop maintenance when current state for "
 						"node %s:%d is \"%s\"",
-						otherNode->nodeName, otherNode->nodePort,
-						ReplicationStateGetName(otherNode->goalState))));
+						primaryNode->nodeName, primaryNode->nodePort,
+						ReplicationStateGetName(primaryNode->goalState))));
 	}
 
 	LogAndNotifyMessage(

@@ -569,8 +569,11 @@ static bool
 ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 							   AutoFailoverNode *primaryNode)
 {
-	// AutoFailoverFormation *formation = GetFormation(activeNode->formationId);
+	List *secondaryStates = list_make2_int(REPLICATION_STATE_SECONDARY,
+										   REPLICATION_STATE_CATCHINGUP);
+
 	List *standbyNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
+
 	AutoFailoverNode *candidateNode = NULL;
 	ListCell *nodeCell = NULL;
 
@@ -607,21 +610,10 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 		 * Skip unhealthy nodes, they are not candidates and we don't want to
 		 * wait until they report their LSN.
 		 */
-		if (!IsHealthy(node))
+		if (IsUnhealthy(node) ||
+			IsCurrentState(node, REPLICATION_STATE_MAINTENANCE))
 		{
 			/* do not increment candidateCount */
-			continue;
-		}
-
-		/*
-		 * Skip nodes that are not failover candidates (not in SECONDARY or
-		 * REPORT_LSN state).
-		 *
-		 * XXX: what about goalState instead? or in addition to?
-		 */
-		if (node->reportedState != REPLICATION_STATE_SECONDARY
-			&& node->reportedState != REPLICATION_STATE_REPORT_LSN)
-		{
 			continue;
 		}
 
@@ -631,7 +623,12 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 			++candidateCount;
 			++reportedLSNCount;
 		}
-		else if (node->goalState != REPLICATION_STATE_REPORT_LSN)
+		/*
+		 * Nodes in SECONDARY or CATCHINGUP states are candidates due to report
+		 * their LSN
+		 */
+		else if ((IsStateIn(node->reportedState, secondaryStates) &&
+				  IsStateIn(node->goalState, secondaryStates)))
 		{
 			char message[BUFSIZE];
 
@@ -660,8 +657,9 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 
 			LogAndNotifyMessage(
 				message, BUFSIZE,
-				"Setting goal state %s:%d to draining after it became unhealthy.",
-				primaryNode->nodeName, primaryNode->nodePort);
+				"Setting goal state %s:%d to draining "
+				"after it became unhealthy. We count %d failover candidates",
+				primaryNode->nodeName, primaryNode->nodePort, candidateCount);
 
 			AssignGoalState(primaryNode, REPLICATION_STATE_DRAINING, message);
 		}
@@ -724,6 +722,7 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 		{
 			candidateNode = (AutoFailoverNode *) lfirst(nodeCell);
 
+			/* all the candidates are now in the REPORT_LSN state */
 			if (IsHealthy(candidateNode)
 				&& WalDifferenceWithin(candidateNode,
 									   primaryNode,
@@ -810,6 +809,16 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 							reportedLSNCount, candidateCount)));
 			return false;
 		}
+	}
+	else
+	{
+		char message[BUFSIZE];
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Test failed: candidateCount(%d) > 0 && "
+			"reportedLSNCount(%d) == candidateCount(%d)",
+			candidateCount, reportedLSNCount, candidateCount);
 	}
 
 	return false;

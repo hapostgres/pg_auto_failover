@@ -493,6 +493,53 @@ AllNodesHaveSameCandidatePriority(List *groupNodeList)
 
 
 /*
+ * CountStandbyCandidates returns how many standby nodes are currently eligible
+ * as failover candidates.
+ */
+int
+CountStandbyCandidates(AutoFailoverNode *primaryNode, List *stateList)
+{
+	List *standbyNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
+	ListCell *nodeCell = NULL;
+	int candidateCount = 0;
+
+	foreach(nodeCell, standbyNodesGroupList)
+	{
+		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (node == NULL)
+		{
+			/* shouldn't happen */
+			ereport(ERROR,
+					(errmsg("BUG in CountStandbyCandidates: node is NULL")));
+			continue;
+		}
+
+		/* if a promotion is already in progress, game over */
+		if (IsBeingPromoted(node))
+		{
+			ereport(ERROR,
+					(errmsg("node %d (%s:%d) is already being promoted",
+							node->nodeId,
+							node->nodeName,
+							node->nodePort)));
+		}
+
+		/* skip nodes if they are not a failover candidate */
+		if (!(IsStateIn(node->reportedState, stateList) &&
+			  IsStateIn(node->goalState, stateList)))
+		{
+			continue;
+		}
+
+		++candidateCount;
+	}
+
+	return candidateCount;
+}
+
+
+/*
  * GetAutoFailoverNode returns a single AutoFailover node by hostname and port.
  */
 AutoFailoverNode *
@@ -596,32 +643,6 @@ GetAutoFailoverNodeWithId(int nodeid, char *nodeName, int nodePort)
 	SPI_finish();
 
 	return pgAutoFailoverNode;
-}
-
-
-/*
- * OtherNodeInGroup returns the other node in a primary-secondary group, or
- * NULL if the group consists of 1 node.
- */
-AutoFailoverNode *
-OtherNodeInGroup(AutoFailoverNode *pgAutoFailoverNode)
-{
-	ListCell *nodeCell = NULL;
-	List *groupNodeList =
-		AutoFailoverNodeGroup(pgAutoFailoverNode->formationId,
-							  pgAutoFailoverNode->groupId);
-
-	foreach(nodeCell, groupNodeList)
-	{
-		AutoFailoverNode *otherNode = (AutoFailoverNode *) lfirst(nodeCell);
-
-		if (otherNode->nodeId != pgAutoFailoverNode->nodeId)
-		{
-			return otherNode;
-		}
-	}
-
-	return NULL;
 }
 
 
@@ -1126,4 +1147,23 @@ IsInPrimaryState(AutoFailoverNode *pgAutoFailoverNode)
 	return pgAutoFailoverNode != NULL
 		&& pgAutoFailoverNode->goalState == pgAutoFailoverNode->reportedState
 		&& CanTakeWritesInState(pgAutoFailoverNode->goalState);
+}
+
+
+/* returns true if state is equal to any of allowedStates */
+bool
+IsStateIn(ReplicationState state, List *allowedStates)
+{
+	ListCell *cell = NULL;
+
+	foreach(cell, allowedStates)
+	{
+		ReplicationState allowedState = (ReplicationState) lfirst_int(cell);
+		if (state == allowedState)
+		{
+			return true;
+		}
+	}
+
+	return false;
 }
