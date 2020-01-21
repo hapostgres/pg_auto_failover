@@ -98,8 +98,8 @@ keeper_ensure_pg_configuration_files_in_pgdata(KeeperConfig *config)
 	char *fileContents;
 	char versionString[MAXPGPATH];
 	long fileSize;
-	char installationPath[MAXPGPATH];
-	bool installationPathPresent = false;
+	char defaultConfigurationPath[MAXPGPATH];
+	bool configurationPathPresent = false;
 	bool postgresqlConfExists = false;
 	char installationPosgresqlConfPath[MAXPGPATH];
 	char identConfPath[MAXPGPATH];
@@ -131,10 +131,7 @@ keeper_ensure_pg_configuration_files_in_pgdata(KeeperConfig *config)
 
 	free(fileContents);
 
-	join_path_components(installationPath, "/etc/postgresql", versionString);
-	join_path_components(installationPath, installationPath, "main");
 
-	log_warn("installation path : %s", installationPath);
 
 
 	/* check if postgresql.conf exists in pgdata. there is no separate check for pg_hba and pg_ident  */
@@ -155,9 +152,12 @@ keeper_ensure_pg_configuration_files_in_pgdata(KeeperConfig *config)
 	}
 
 
+	join_path_components(defaultConfigurationPath, "/etc/postgresql", versionString);
+	log_warn("installation path : %s", defaultConfigurationPath);
+
 	/* true if we are working on debian/ubuntu installation */
-	installationPathPresent = directory_exists(installationPath);
-	if (!installationPathPresent)
+	configurationPathPresent = directory_exists(defaultConfigurationPath);
+	if (!configurationPathPresent)
 	{
 		log_error("Cannot find configuration file directory");
 		return false;
@@ -205,7 +205,7 @@ keeper_ensure_pg_configuration_files_in_pgdata(KeeperConfig *config)
 		char installationHbaConfPath[MAXPGPATH];
 
 		log_warn("hba file does not exist : %s, need to copy", hbaConfPath);
-		join_path_components(installationHbaConfPath, installationPath, "pg_hba.conf");
+		join_path_components(installationHbaConfPath, defaultConfigurationPath, "pg_hba.conf");
 
 		if (file_exists(installationHbaConfPath))
 		{
@@ -235,7 +235,7 @@ keeper_ensure_pg_configuration_files_in_pgdata(KeeperConfig *config)
 		char installationIdentConfPath[MAXPGPATH];
 
 		log_warn("pg_ident.conf does not exist : %s, need to copy", identConfPath);
-		join_path_components(installationIdentConfPath, installationPath, "pg_ident.conf");
+		join_path_components(installationIdentConfPath, defaultConfigurationPath, "pg_ident.conf");
 
 		if (file_exists(installationIdentConfPath))
 		{
