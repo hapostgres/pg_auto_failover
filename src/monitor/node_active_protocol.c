@@ -1154,6 +1154,13 @@ perform_failover(PG_FUNCTION_ARGS)
 							  message);
 		}
 
+		/*
+		 * Assign REPORT_LSN to every standby to trigger the failover.
+		 *
+		 * We don't have to pick a candidate now, the state machine is going to
+		 * kick-in and do that as soon as all the standby nodes have reported
+		 * their current LSN position.
+		 */
 		foreach(nodeCell, standbyNodesGroupList)
 		{
 			AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);

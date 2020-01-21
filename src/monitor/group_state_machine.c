@@ -605,13 +605,9 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 
 		/*
 		 * Skip unhealthy nodes, they are not candidates and we don't want to
-		 * wait until they report their LSN. Same with nodes that we won't
-		 * consider candidates anyway because of their WAL lag (async case).
+		 * wait until they report their LSN.
 		 */
-		if (!IsHealthy(node)
-			|| !WalDifferenceWithin(candidateNode,
-									primaryNode,
-									PromoteXlogThreshold))
+		if (!IsHealthy(node))
 		{
 			/* do not increment candidateCount */
 			continue;

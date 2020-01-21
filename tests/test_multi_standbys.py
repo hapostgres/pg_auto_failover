@@ -71,13 +71,11 @@ def test_004_add_three_standbys():
     node3.create()
     node3.run()
     assert node3.wait_until_state(target_state="secondary")
-    assert node1.wait_until_state(target_state="primary")
 
     node4 = cluster.create_datanode("/tmp/multi_standby/node4")
     node4.create()
     node4.run()
     assert node4.wait_until_state(target_state="secondary")
-    assert node1.wait_until_state(target_state="primary")
 
 def test_005_number_sync_standbys():
     print()
@@ -106,3 +104,29 @@ def test_006_number_sync_standbys_trigger():
 
     node4.drop()
     assert node1.get_number_sync_standbys() == 1
+
+def test_007_create_t1():
+    node1.run_sql_query("CREATE TABLE t1(a int)")
+    node1.run_sql_query("INSERT INTO t1 VALUES (1), (2)")
+
+def test_008_set_candidate_priorities():
+    # set priorities in a way that we know the candidate: node2
+    node1.set_candidate_priority(90) # current primary
+    node2.set_candidate_priority(90)
+    node3.set_candidate_priority(70)
+
+    # when we set candidate priority we go to join_primary then primary
+    assert node1.wait_until_state(target_state="primary")
+
+def test_009_failover():
+    print()
+    print("Calling pgautofailover.failover() on the monitor")
+    monitor.failover()
+    assert node2.wait_until_state(target_state="primary")
+    assert node3.wait_until_state(target_state="secondary")
+    assert node1.wait_until_state(target_state="secondary")
+
+def test_010_read_from_new_primary():
+    results = node2.run_sql_query("SELECT * FROM t1")
+    assert results == [(1,), (2,)]
+
