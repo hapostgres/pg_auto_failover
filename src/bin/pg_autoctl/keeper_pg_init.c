@@ -239,7 +239,14 @@ keeper_ensure_pg_configuration_files_in_pgdata(KeeperConfig *config)
 		{
 			if (read_file(installationIdentConfPath, &fileContents, &fileSize))
 			{
-				write_file(fileContents, fileSize, hbaConfPath);
+				if (write_file(fileContents, fileSize, hbaConfPath))
+				{
+					log_warn("write successful");
+				}
+				else
+				{
+					log_error("write failed");
+				}
 				free(fileContents);
 			}
 			else
