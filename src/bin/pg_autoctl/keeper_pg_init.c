@@ -48,6 +48,7 @@ static bool wait_until_primary_is_ready(Keeper *config,
 										MonitorAssignedState *assignedState);
 static bool keeper_pg_init_node_active(Keeper *keeper);
 
+static void disable_configuration_parameter_inplace(char *fileContents, long fileSize, char *parameterName);
 
 /*
  * keeper_pg_init initializes a pg_autoctl keeper and its local PostgreSQL.
@@ -95,15 +96,16 @@ keeper_ensure_pg_configuration_files_in_pgdata(KeeperConfig *config)
 	char hbaConfPath[MAXPGPATH];
 	char posgresqlConfPath[MAXPGPATH];
 	char versionFilePath[MAXPGPATH];
-	char *fileContents;
 	char versionString[MAXPGPATH];
-	long fileSize;
 	char defaultConfigurationPath[MAXPGPATH];
 	bool configurationPathPresent = false;
 	bool postgresqlConfExists = false;
-	char installationPosgresqlConfPath[MAXPGPATH];
+	char defaultPosgresqlConfPath[MAXPGPATH];
+	char defaultHbaConfPath[MAXPGPATH];
+	char defaultIdentConfPath[MAXPGPATH];
 	char identConfPath[MAXPGPATH];
-
+	char *fileContents;
+	long fileSize;
 
 	/* read version file */
 
@@ -132,8 +134,6 @@ keeper_ensure_pg_configuration_files_in_pgdata(KeeperConfig *config)
 	free(fileContents);
 
 
-
-
 	/* check if postgresql.conf exists in pgdata. there is no separate check for pg_hba and pg_ident  */
 	join_path_components(posgresqlConfPath, pgdata, "postgresql.conf");
 
@@ -152,8 +152,10 @@ keeper_ensure_pg_configuration_files_in_pgdata(KeeperConfig *config)
 	}
 
 
-	join_path_components(defaultConfigurationPath, "/etc/postgresql", versionString);
-	log_warn("installation path : %s", defaultConfigurationPath);
+	{
+		char *pgdataRelativePath = strstr(pgdata, "postgresql");
+		join_path_components(defaultConfigurationPath, "/etc", pgdataRelativePath);
+	}
 
 	/* true if we are working on debian/ubuntu installation */
 	configurationPathPresent = directory_exists(defaultConfigurationPath);
@@ -163,68 +165,35 @@ keeper_ensure_pg_configuration_files_in_pgdata(KeeperConfig *config)
 		return false;
 	}
 
+	join_path_components(defaultPosgresqlConfPath, defaultConfigurationPath, "postgresql.conf");
 
+
+	log_error("Moving %s to %s", defaultPosgresqlConfPath, posgresqlConfPath );
+	if (!move_file(defaultPosgresqlConfPath, posgresqlConfPath))
 	{
-		char *postgresConfRelativePath = strstr(posgresqlConfPath, "postgresql");
-
-		join_path_components(installationPosgresqlConfPath, "/etc/", postgresConfRelativePath);
-
-		if (file_exists(installationPosgresqlConfPath))
-		{
-			if (read_file(installationPosgresqlConfPath, &fileContents, &fileSize))
-			{
-				int charCount = 0;
-				write_file(fileContents, fileSize, posgresqlConfPath);
-				memset(fileContents, 0, fileSize);
-				charCount += sprintf(fileContents, "# DO NOT EDIT\n# hba_file and ident_file parameters are overriden by pg_auto_failover \n");
-				charCount += sprintf(fileContents + charCount, "hba_file = 'ConfigDir/pg_hba.conf'	# host-based authentication file added by pg_auto_failover\n");
-				charCount += sprintf(fileContents + charCount, "ident_file = 'ConfigDir/pg_ident.conf'	# ident configuration file file added by pg_auto_failover\n");
-				charCount += sprintf(fileContents, "# end of pg_auto_failover changes\n");
-				append_to_file(fileContents, charCount, posgresqlConfPath);
-
-				free(fileContents);
-			}
-			else
-			{
-				log_error("error reading %s", installationPosgresqlConfPath);
-				return false;
-			}
-		}
-		else
-		{
-			log_error("could not file postgresql.conf at default path : %s", installationPosgresqlConfPath);
-			return false;
-		}
+		return false;
 	}
+
+	/* edit postgresql.conf to disable settings */
+	read_file(posgresqlConfPath, &fileContents, &fileSize);
+	disable_configuration_parameter_inplace(fileContents, fileSize, "data_directory");
+	disable_configuration_parameter_inplace(fileContents, fileSize, "hba_file");
+	disable_configuration_parameter_inplace(fileContents, fileSize, "ident_file");
+	disable_configuration_parameter_inplace(fileContents, fileSize, "include_dir");
+	write_file(fileContents, fileSize, posgresqlConfPath);
+
+	free(fileContents);
 
 
 	join_path_components(hbaConfPath, pgdata, "pg_hba.conf");
 
 	if(!file_exists(hbaConfPath))
 	{
-		char installationHbaConfPath[MAXPGPATH];
 
 		log_warn("hba file does not exist : %s, need to copy", hbaConfPath);
-		join_path_components(installationHbaConfPath, defaultConfigurationPath, "pg_hba.conf");
+		join_path_components(defaultHbaConfPath, defaultConfigurationPath, "pg_hba.conf");
 
-		if (file_exists(installationHbaConfPath))
-		{
-			if (read_file(installationHbaConfPath, &fileContents, &fileSize))
-			{
-				write_file(fileContents, fileSize, hbaConfPath);
-				free(fileContents);
-			}
-			else
-			{
-				log_error("error reading %s", installationHbaConfPath);
-				return false;
-			}
-		}
-		else
-		{
-			log_error("could not file hba file at default path : %s",installationHbaConfPath);
-			return false;
-		}
+		move_file(defaultHbaConfPath, hbaConfPath);
 	}
 
 
@@ -232,42 +201,54 @@ keeper_ensure_pg_configuration_files_in_pgdata(KeeperConfig *config)
 
 	if(!file_exists(identConfPath))
 	{
-		char installationIdentConfPath[MAXPGPATH];
 
-		log_warn("pg_ident.conf does not exist : %s, need to copy", identConfPath);
-		join_path_components(installationIdentConfPath, defaultConfigurationPath, "pg_ident.conf");
+		log_warn("pg_ident.conf file does not exist : %s, need to copy", identConfPath);
+		join_path_components(defaultIdentConfPath, defaultConfigurationPath, "pg_ident.conf");
 
-		if (file_exists(installationIdentConfPath))
-		{
-			if (read_file(installationIdentConfPath, &fileContents, &fileSize))
-			{
-				if (write_file(fileContents, fileSize, identConfPath))
-				{
-					log_warn("write successful");
-				}
-				else
-				{
-					log_error("write failed");
-				}
-				free(fileContents);
-			}
-			else
-			{
-				log_error("error reading %s", identConfPath);
-				return false;
-			}
-		}
-		else
-		{
-			log_error("could not file pg_ident.conf at default path : %s",installationIdentConfPath);
-			return false;
-		}
+		move_file(defaultIdentConfPath, identConfPath);
 	}
 
+	/* disable auto start in default configuration */
+	{
+		char defaultStartConfPath[MAXPGPATH];
+		char newStartConfPath[MAXPGPATH];
+		char *newStartConfData = "disabled";
 
+		join_path_components(defaultStartConfPath, defaultConfigurationPath, "start.conf");
+		join_path_components(newStartConfPath, defaultConfigurationPath, "start.conf.orig");
+
+		read_file(defaultStartConfPath, &fileContents, &fileSize);
+		write_file(fileContents, fileSize, newStartConfPath);
+
+		write_file(newStartConfData, strlen(newStartConfData), defaultStartConfPath);
+
+	}
 	return true;
 }
 
+
+/*
+ * disable_configuration_parameter_inplace looks for a pattern
+ * [parameterName] = [parameter value] and puts # in front to disable the
+ * setting. Note that the function would change "port = 5432" to "#port= 5432".
+ * It will remove the space between parameter name and = to make room for #
+ * in the beginning in order to perform modification in place.
+ */
+static void disable_configuration_parameter_inplace(char *fileContents, long fileSize, char *parameterName)
+{
+	int offset = 0;
+	char *substring = NULL;
+	char searchString[MAXPGPATH];
+
+	snprintf(searchString, MAXPGPATH, "%s =", parameterName);
+
+	while ( (substring = strstr(fileContents + offset, searchString)) != NULL)
+	{
+		offset = substring - fileContents;
+		*substring = '#';
+		memcpy(substring+1, parameterName, strlen(parameterName));
+	}
+}
 
 /*
  * keeper_pg_init_and_register initialises a pg_autoctl keeper and its local

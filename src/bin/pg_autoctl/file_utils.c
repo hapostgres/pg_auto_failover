@@ -263,6 +263,102 @@ read_file(const char *filePath, char **contents, long *fileSize)
 
 
 /*
+ * move_file is a utility function to move a file from sourcePath to
+ * destinationPath. It behaves like mv system command. First attempts
+ * to move a file using rename. if it fails with EXDEV error copies
+ * the content of the file and removes the source file after setting
+ * owner and permission information on the new file.
+ */
+bool
+move_file(char* sourcePath, char* destinationPath)
+{
+	char *fileContents;
+	long fileSize;
+	struct stat sourceFileStat;
+	bool foundError = false;
+
+	if (strncmp(sourcePath, destinationPath, MAXPGPATH) == 0)
+	{
+		/* nothing to do */
+		return true;
+	}
+
+	if (!file_exists(sourcePath))
+	{
+		log_error("Can not move, source file '%s' does not exist.", sourcePath);
+		return false;
+	}
+
+	if (file_exists(destinationPath))
+	{
+		log_error("Can not move. Destination file '%s' already exists.", destinationPath);
+		return false;
+	}
+
+	/* first try atomic move operation */
+	if (rename(sourcePath, destinationPath) == 0)
+	{
+		return true;
+	}
+
+	/* rename fails with errno = EXDEV when moving file to a different file system */
+	if (errno != EXDEV)
+	{
+		int errorCode = errno;
+
+		log_error("File move failed with error %d", errorCode);
+		return false;
+	}
+
+
+	if (!read_file(sourcePath, &fileContents, &fileSize))
+	{
+		return false;
+	}
+
+	foundError = !write_file(fileContents, fileSize, destinationPath);
+
+	free(fileContents);
+
+	if (foundError)
+	{
+		return false;
+	}
+
+	/* set uid gid and mode */
+	if (stat(sourcePath, &sourceFileStat) != 0)
+	{
+		log_error("Unable to set ownership and file permissions");
+		foundError = true;
+	}
+	else
+	{
+		if (chown(destinationPath, sourceFileStat.st_uid, sourceFileStat.st_gid) != 0)
+		{
+			log_error("Unable to set user and group id for file '%s'", destinationPath);
+			foundError = true;
+		}
+		if (chmod(destinationPath, sourceFileStat.st_mode) != 0)
+		{
+			log_error("Unable to set file permissions for '%s'", destinationPath);
+			foundError = true;
+		}
+	}
+
+	if (foundError)
+	{
+		log_error("Canceling file move due to errors");
+		unlink_file(destinationPath);
+		return false;
+	}
+
+	unlink_file(sourcePath);
+
+	return true;
+}
+
+
+/*
  * path_in_same_directory constructs the path for a file with name fileName
  * that is in the same directory as basePath, which should be an absolute
  * path. The result is written to destinationPath, which should be at least
@@ -518,3 +614,6 @@ set_program_absolute_path(char *program, int size)
 
 	return true;
 }
+
+
+
