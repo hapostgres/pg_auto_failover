@@ -534,6 +534,10 @@ NodeStateFromString(const char *str)
 	{
 		return WAIT_CASCADE_STATE;
 	}
+	else if(strcmp(str, "apply_settings") == 0)
+	{
+		return APPLY_SETTINGS_STATE;
+	}
 	else
 	{
 		log_fatal("Failed to parse state string \"%s\"", str);

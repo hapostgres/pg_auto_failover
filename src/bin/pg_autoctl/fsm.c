@@ -146,6 +146,12 @@
 #define COMMENT_WAIT_CASCADE_TO_CATCHINGUP \
 	"Switch replication to the new primary"
 
+#define COMMENT_PRIMARY_TO_APPLY_SETTINGS \
+	"Apply new pg_auto_failover settings (synchronous_standby_names)"
+
+# define COMMENT_APPLY_SETTINGS_TO_PRIMARY \
+	"Back to primary state after having applied new pg_auto_failover settings"
+
 /* *INDENT-OFF* */
 
 /*
@@ -297,6 +303,15 @@ KeeperFSMTransition KeeperFSM[] = {
 	{ REPORT_LSN_STATE, WAIT_CASCADE_STATE, COMMENT_REPORT_LSN_TO_WAIT_CASCADE, &fsm_prepare_cascade },
 	{ REPORT_LSN_STATE, SECONDARY_STATE, COMMENT_FOLLOW_NEW_PRIMARY, &fsm_follow_new_primary },
 	{ WAIT_CASCADE_STATE, SECONDARY_STATE, COMMENT_FOLLOW_NEW_PRIMARY, &fsm_follow_new_primary },
+
+	/*
+	 * Applying new replication/cluster settings (per node replication quorum,
+	 * candidate priorities, or per formation number_sync_standbys) means we
+	 * have to fetch the new value for synchronous_standby_names from the
+	 * monitor.
+	 */
+	{ PRIMARY_STATE, APPLY_SETTINGS_STATE, COMMENT_PRIMARY_TO_APPLY_SETTINGS, &fsm_apply_settings },
+	{ APPLY_SETTINGS_STATE, PRIMARY_STATE, COMMENT_APPLY_SETTINGS_TO_PRIMARY, NULL },
 
 	/*
 	 * This is the end, my friend.

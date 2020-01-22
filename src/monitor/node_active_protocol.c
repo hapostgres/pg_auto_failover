@@ -1272,7 +1272,7 @@ start_maintenance(PG_FUNCTION_ARGS)
 						"is \"%s\", expected one of "
 						"\"primary\",  \"wait_primary\", or \"join_primary\"",
 						primaryNode->nodeName, primaryNode->nodePort,
-						ReplicationStateGetName(primaryNode->goalState))));
+						ReplicationStateGetName(primaryNode->reportedState))));
 	}
 
 	/* primary -> wait_primary when we are losing our only candidate */
@@ -1382,6 +1382,7 @@ stop_maintenance(PG_FUNCTION_ARGS)
 	}
 
 	if (!(IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
+		  IsCurrentState(primaryNode, REPLICATION_STATE_JOIN_PRIMARY) ||
 		  IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY)))
 	{
 		ereport(ERROR,
@@ -1389,7 +1390,7 @@ stop_maintenance(PG_FUNCTION_ARGS)
 				 errmsg("cannot stop maintenance when current state for "
 						"node %s:%d is \"%s\"",
 						primaryNode->nodeName, primaryNode->nodePort,
-						ReplicationStateGetName(primaryNode->goalState))));
+						ReplicationStateGetName(primaryNode->reportedState))));
 	}
 
 	LogAndNotifyMessage(

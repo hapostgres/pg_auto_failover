@@ -77,14 +77,20 @@ def test_004_add_three_standbys():
     node4.run()
     assert node4.wait_until_state(target_state="secondary")
 
+    # make sure we reached primary on node1 before next tests
+    assert node1.wait_until_state(target_state="primary")
+
 def test_005_number_sync_standbys():
     print()
     assert node1.get_number_sync_standbys() == 1
     assert not node1.set_number_sync_standbys(-1)
     assert node1.get_number_sync_standbys() == 1
 
-    assert not node1.set_number_sync_standbys(2)
-    assert node1.get_number_sync_standbys() == 1
+    print("set number_sync_standbys = 2")
+    assert node1.set_number_sync_standbys(2)
+    assert node1.get_number_sync_standbys() == 2
+    print("synchronous_standby_names = '%s'" %
+          node1.get_synchronous_standby_names())
 
     print("set number_sync_standbys = 0")
     assert node1.set_number_sync_standbys(0)
