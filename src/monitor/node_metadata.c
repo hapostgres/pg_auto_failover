@@ -325,7 +325,7 @@ GetPrimaryNodeInGroup(char *formationId, int32 groupId)
 
 
 /*
- * FindFailoverNewStandbyNode returns the first node found in given list 
+ * FindFailoverNewStandbyNode returns the first node found in given list
  */
 AutoFailoverNode *
 FindFailoverNewStandbyNode(List *groupNodeList)
@@ -346,6 +346,112 @@ FindFailoverNewStandbyNode(List *groupNodeList)
 	}
 
 	return standbyNode;
+}
+
+
+/*
+ * pgautofailover_node_candidate_priority_compare
+ *	  qsort comparator for sorting node lists by candidate priority
+ */
+static int
+pgautofailover_node_candidate_priority_compare(const void *a, const void *b)
+{
+	AutoFailoverNode *node1 = (AutoFailoverNode *) lfirst(*(ListCell **) a);
+	AutoFailoverNode *node2 = (AutoFailoverNode *) lfirst(*(ListCell **) b);
+
+	if (node1->candidatePriority > node2->candidatePriority)
+	{
+		return -1;
+	}
+
+	if (node1->candidatePriority < node2->candidatePriority)
+	{
+		return 1;
+	}
+
+	return 0;
+}
+
+
+/*
+ * GroupListCandidates returns a list of nodes in groupNodeList that are all
+ * candidates for failover (those with AutoFailoverNode.candidatePriority > 0),
+ * sorted by candidatePriority.
+ */
+List *
+GroupListCandidates(List *groupNodeList)
+{
+	ListCell *nodeCell = NULL;
+	List *candidateNodesList = NIL;
+	List *sortedNodeList =
+		list_qsort(groupNodeList,
+				   pgautofailover_node_candidate_priority_compare);
+
+	foreach(nodeCell, sortedNodeList)
+	{
+		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (node->candidatePriority > 0)
+		{
+			candidateNodesList = lappend(candidateNodesList, node);
+		}
+	}
+	list_free(sortedNodeList);
+
+	return candidateNodesList;
+}
+
+
+/*
+ * GroupListSyncStandbys returns a list of nodes in groupNodeList that are all
+ * candidates for failover (those with AutoFailoverNode.replicationQuorum set
+ * to true), sorted by candidatePriority.
+ */
+List *
+GroupListSyncStandbys(List *groupNodeList)
+{
+	ListCell *nodeCell = NULL;
+	List *syncStandbyNodesList = NIL;
+	List *sortedNodeList =
+		list_qsort(groupNodeList,
+				   pgautofailover_node_candidate_priority_compare);
+
+	foreach(nodeCell, sortedNodeList)
+	{
+		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (node->replicationQuorum)
+		{
+			syncStandbyNodesList = lappend(syncStandbyNodesList, node);
+		}
+	}
+	list_free(sortedNodeList);
+
+	return syncStandbyNodesList;
+}
+
+
+/*
+ * AllNodesHaveSameCandidatePriority returns true when all the nodes in the
+ * given list have the same candidate priority.
+ */
+bool
+AllNodesHaveSameCandidatePriority(List *groupNodeList)
+{
+	ListCell *nodeCell = NULL;
+	int candidatePriority =
+		((AutoFailoverNode *)linitial(groupNodeList))->candidatePriority;
+
+	foreach(nodeCell, groupNodeList)
+	{
+		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (node->candidatePriority != candidatePriority )
+		{
+			return false;
+		}
+	}
+	return true;
 }
 
 
@@ -913,7 +1019,8 @@ CanTakeWritesInState(ReplicationState state)
 	return state == REPLICATION_STATE_SINGLE
 		|| state == REPLICATION_STATE_PRIMARY
 		|| state == REPLICATION_STATE_WAIT_PRIMARY
-		|| state == REPLICATION_STATE_JOIN_PRIMARY;
+		|| state == REPLICATION_STATE_JOIN_PRIMARY
+		|| state == REPLICATION_STATE_APPLY_SETTINGS;
 }
 
 

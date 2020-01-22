@@ -111,6 +111,11 @@ extern List * AutoFailoverOtherNodesListInState(
 	AutoFailoverNode *pgAutoFailoverNode, ReplicationState currentState);
 extern AutoFailoverNode * GetPrimaryNodeInGroup(char *formationId, int32 groupId);
 extern AutoFailoverNode * FindFailoverNewStandbyNode(List *groupNodeList);
+extern List *GroupListCandidates(List *groupNodeList);
+extern List *GroupListSyncStandbys(List *groupNodeList);
+extern bool AllNodesHaveSameCandidatePriority(List *groupNodeList);
+extern int CountStandbyCandidates(AutoFailoverNode *primaryNode,
+								  List *stateList);
 extern AutoFailoverNode * GetAutoFailoverNode(char *nodeName, int nodePort);
 extern AutoFailoverNode * GetAutoFailoverNodeWithId(int nodeid, char *nodeName, int nodePort);
 extern AutoFailoverNode * OtherNodeInGroup(AutoFailoverNode *pgAutoFailoverNode);

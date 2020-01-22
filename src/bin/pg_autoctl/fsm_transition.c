@@ -591,9 +591,57 @@ fsm_promote_standby_to_primary(Keeper *keeper)
 bool
 fsm_enable_sync_rep(Keeper *keeper)
 {
+	/*
+	 * We need to fetch and apply the synchronous_standby_names setting value
+	 * from the monitor... and that's about it really.
+	 */
+	return fsm_apply_settings(keeper);
+}
+
+
+/*
+ * fsm_apply_settings is used when a pg_auto_failover setting has changed, such
+ * as number_sync_standbys or node priorities and replication quorum
+ * properties.
+ *
+ * So we have to fetch the current synchronous_standby_names setting value from
+ * the monitor and apply it (reload) to the current node.
+ */
+bool
+fsm_apply_settings(Keeper *keeper)
+{
+	Monitor *monitor = &(keeper->monitor);
+	KeeperConfig *config = &(keeper->config);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
-	return primary_enable_synchronous_replication(postgres);
+	char synchronous_standby_names[BUFSIZE] = { 0 };
+
+	/* get synchronous_standby_names value from the monitor */
+	if (!config->monitorDisabled)
+	{
+		if (!monitor_synchronous_standby_names(
+				monitor,
+				config->formation,
+				keeper->state.current_group,
+				synchronous_standby_names,
+				BUFSIZE))
+		{
+			log_error("Failed to enable synchronous replication because "
+					  "we failed to get the synchronous_standby_names value "
+					  "from the monitor, see above for details");
+			return false;
+		}
+	}
+	else
+	{
+		/* no monitor: use the generic value '*' */
+		strlcpy(synchronous_standby_names, "*", BUFSIZE);
+	}
+
+	return
+		primary_set_synchronous_standby_names(
+			postgres,
+			synchronous_standby_names);
 }
 
 

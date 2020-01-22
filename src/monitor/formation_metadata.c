@@ -18,6 +18,8 @@
 #include "health_check.h"
 #include "metadata.h"
 #include "formation_metadata.h"
+#include "node_metadata.h"
+#include "notifications.h"
 
 #include "access/htup_details.h"
 #include "access/xlogdefs.h"
@@ -513,17 +515,26 @@ IsCitusFormation(AutoFailoverFormation *formation)
 }
 
 /*
- * set_formation_number_sync_standbys sets number_sync_standbys property of a formation.
- * The function returns true on success.
+ * set_formation_number_sync_standbys sets number_sync_standbys property of a
+ * formation. The function returns true on success.
  */
 Datum
 set_formation_number_sync_standbys(PG_FUNCTION_ARGS)
 {
 	text *formationIdText = PG_GETARG_TEXT_P(0);
 	char *formationId = text_to_cstring(formationIdText);
-	int number_sync_standbys = -1;
+	int number_sync_standbys = PG_GETARG_INT32(1);
+
+	AutoFailoverNode *primaryNode = NULL;
 	AutoFailoverFormation *formation = 	GetFormation(formationId);
+
+	/* at the moment, only test with the number of standbys in group 0 */
+	int groupId = 0;
+	int standbyCount = 0;
+
 	bool success = false;
+
+	char message[BUFSIZE] = { 0 };
 
 	if (formation == NULL)
 	{
@@ -532,18 +543,136 @@ set_formation_number_sync_standbys(PG_FUNCTION_ARGS)
 	}
 
 
-	number_sync_standbys = PG_GETARG_INT32(1);
+	LockFormation(formationId, ExclusiveLock);
 
 	if (number_sync_standbys < 0)
 	{
-		ereport(ERROR, (ERRCODE_INVALID_PARAMETER_VALUE,
-						errmsg("invalid value for  number_sync_standbys \"%d\" "
-							   "expected a non-negative integer", number_sync_standbys)));
+		ereport(ERROR,
+				(ERRCODE_INVALID_PARAMETER_VALUE,
+				 errmsg("invalid value for number_sync_standbys: \"%d\"",
+						number_sync_standbys),
+				 errdetail("A non-negative integer is expected")));
 	}
 
+	primaryNode = GetPrimaryNodeInGroup(formation->formationId, groupId);
+
+	if (primaryNode == NULL)
+	{
+		ereport(ERROR,
+				(errmsg("Couldn't find the primary node in formation \"%s\", "
+						"group %d", formation->formationId, groupId)));
+	}
+
+	if (!IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY))
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("cannot set number_sync_standbys when current "
+						"goal state for primary node %d (%s:%d) is \"%s\", "
+						"and current reported state is \"%s\"",
+						primaryNode->nodeId,
+						primaryNode->nodeName,
+						primaryNode->nodePort,
+						ReplicationStateGetName(primaryNode->goalState),
+						ReplicationStateGetName(primaryNode->reportedState)),
+				 errdetail("The primary node so must be in state \"primary\" "
+						   "to be able to apply configuration changes to "
+						   "its synchronous_standby_names setting")));
+	}
+
+	/* set the formation property to see if that is a valid choice */
+	formation->number_sync_standbys = number_sync_standbys;
+
+	if (!FormationNumSyncStandbyIsValid(formation,
+										primaryNode,
+										groupId,
+										&standbyCount))
+	{
+		ereport(ERROR,
+				(ERRCODE_INVALID_PARAMETER_VALUE,
+				 errmsg("invalid value for number_sync_standbys: \"%d\"",
+						number_sync_standbys),
+				 errdetail("At least %d standby nodes are required, "
+						   "and only %d are currently participating in "
+						   "the replication quorum",
+						   number_sync_standbys + 1, standbyCount)));
+	}
+
+	/* SetFormationNumberSyncStandbys reports ERROR when returning false */
 	success = SetFormationNumberSyncStandbys(formationId, number_sync_standbys);
 
+	/* and now ask the primary to change its settings */
+	LogAndNotifyMessage(
+		message, BUFSIZE,
+		"Setting goal state of %s:%d to apply_settings "
+		"after updating number_sync_standbys to %d for formation %s.",
+		primaryNode->nodeName, primaryNode->nodePort,
+		formation->number_sync_standbys,
+		formation->formationId);
+
+	SetNodeGoalState(primaryNode->nodeName, primaryNode->nodePort,
+					 REPLICATION_STATE_APPLY_SETTINGS);
+
+	NotifyStateChange(primaryNode->reportedState,
+					  REPLICATION_STATE_APPLY_SETTINGS,
+					  primaryNode->formationId,
+					  primaryNode->groupId,
+					  primaryNode->nodeId,
+					  primaryNode->nodeName,
+					  primaryNode->nodePort,
+					  primaryNode->pgsrSyncState,
+					  primaryNode->reportedLSN,
+					  primaryNode->candidatePriority,
+					  primaryNode->replicationQuorum,
+					  message);
+
 	PG_RETURN_BOOL(success);
+}
+
+
+/*
+ * FormationNumSyncStandbyIsValid returns true if the current setting for
+ * number_sync_standbys on the given formation makes sense with the registered
+ * standbys.
+ */
+bool
+FormationNumSyncStandbyIsValid(AutoFailoverFormation *formation,
+							   AutoFailoverNode *primaryNode,
+							   int groupId,
+							   int *standbyCount)
+{
+	ListCell *nodeCell = NULL;
+	List *standbyNodesGroupList = NIL;
+	int count = 0;
+
+	standbyNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
+
+	foreach(nodeCell, standbyNodesGroupList)
+	{
+		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (node->replicationQuorum)
+		{
+			++count;
+		}
+	}
+
+	*standbyCount = count;
+
+	/*
+	 * number_sync_standbys = 1 is a special case in our FSM, because we have
+	 * special handling of a missing standby them
+	 *
+	 * For other values (N) of number_sync_standbys, we require N+1 known
+	 * standby nodes, so that you can lose a standby at any point in time and
+	 * still accept writes. That's the service availability trade-off and cost.
+	 */
+	if (formation->number_sync_standbys == 1)
+	{
+		return true;
+	}
+
+	return (formation->number_sync_standbys + 1) <= count;
 }
 
 

@@ -15,6 +15,7 @@
 #include "fmgr.h"
 #include "funcapi.h"
 #include "miscadmin.h"
+#include "access/xact.h"
 
 #include "formation_metadata.h"
 #include "group_state_machine.h"
@@ -62,6 +63,8 @@ PG_FUNCTION_INFO_V1(start_maintenance);
 PG_FUNCTION_INFO_V1(stop_maintenance);
 PG_FUNCTION_INFO_V1(set_node_candidate_priority);
 PG_FUNCTION_INFO_V1(set_node_replication_quorum);
+PG_FUNCTION_INFO_V1(synchronous_standby_names);
+
 
 /*
  * register_node adds a node to a given formation
@@ -1061,8 +1064,8 @@ start_maintenance(PG_FUNCTION_ARGS)
 						currentNode->nodeName, currentNode->nodePort)));
 	}
 
-	if (! (IsStateIn(currentNode->reportedState, secondaryStates)
-		   && currentNode->reportedState == currentNode->goalState))
+	if (!(IsStateIn(currentNode->reportedState, secondaryStates)
+		  && currentNode->reportedState == currentNode->goalState))
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -1070,7 +1073,7 @@ start_maintenance(PG_FUNCTION_ARGS)
 						"is \"%s\", expected either "
 						"\"secondary\" or \"catchingup\"",
 						currentNode->nodeName, currentNode->nodePort,
-						ReplicationStateGetName(currentNode->goalState))));
+						ReplicationStateGetName(currentNode->reportedState))));
 	}
 
 	if (!(IsStateIn(otherNode->goalState, primaryStates)
@@ -1079,10 +1082,10 @@ start_maintenance(PG_FUNCTION_ARGS)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("cannot start maintenance: current state for node %s:%d "
-						"is \"%s\", expected either "
-						"\"primary\" or \"wait_primary\"",
+						"is \"%s\", expected one of "
+						"\"primary\",  \"wait_primary\", or \"join_primary\"",
 						otherNode->nodeName, otherNode->nodePort,
-						ReplicationStateGetName(currentNode->goalState))));
+						ReplicationStateGetName(otherNode->reportedState))));
 	}
 
 	LogAndNotifyMessage(
@@ -1222,8 +1225,12 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 	char *nodeName = text_to_cstring(nodeNameText);
 	int32 nodePort = PG_GETARG_INT32(2);
 	int candidatePriority = PG_GETARG_INT32(3);
-	AutoFailoverNode *currentNode = NULL;
+
 	char message[BUFSIZE];
+
+	AutoFailoverNode *currentNode = NULL;
+	List *nodesGroupList = NIL;
+	int nodesCount = 0;
 
 	checkPgAutoFailoverVersion();
 
@@ -1237,6 +1244,10 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 	LockFormation(currentNode->formationId, ShareLock);
 	LockNodeGroup(currentNode->formationId, currentNode->groupId, ExclusiveLock);
 
+	nodesGroupList =
+		AutoFailoverNodeGroup(currentNode->formationId, currentNode->groupId);
+	nodesCount = list_length(nodesGroupList);
+	
 	if (candidatePriority < 0 || candidatePriority > 100)
 	{
 		ereport(ERROR, (ERRCODE_INVALID_PARAMETER_VALUE,
@@ -1245,9 +1256,7 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 							   candidatePriority)));
 	}
 
-
 	currentNode->candidatePriority = candidatePriority;
-
 
 	ReportAutoFailoverNodeReplicationSetting(
 			currentNode->nodeId,
@@ -1256,9 +1265,66 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 			currentNode->candidatePriority,
 			currentNode->replicationQuorum);
 
-	LogAndNotifyMessage(
-		message, BUFSIZE,
-		"Updating candidatePriority.");
+	if (nodesCount == 1)
+	{
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Updating candidate priority to %d for node %s:%d",
+			currentNode->candidatePriority,
+			currentNode->nodeName,
+			currentNode->nodePort);
+	}
+	else
+	{
+		AutoFailoverNode *primaryNode =
+			GetPrimaryNodeInGroup(currentNode->formationId,
+								  currentNode->groupId);
+
+		if (primaryNode == NULL)
+		{
+			ereport(ERROR,
+					(errmsg("couldn't find the primary node in "
+							"formation \"%s\", group %d",
+							currentNode->formationId, currentNode->groupId)));
+		}
+
+		if (!IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY))
+		{
+			ereport(ERROR,
+					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					 errmsg("cannot set candidate priority when current state "
+							"for primary node %s:%d is \"%s\"",
+							primaryNode->nodeName, primaryNode->nodePort,
+							ReplicationStateGetName(primaryNode->reportedState)),
+					 errdetail("The primary node so must be in state \"primary\" "
+							   "to be able to apply configuration changes to "
+							   "its synchronous_standby_names setting")));
+		}
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of %s:%d to apply_settings "
+			"after updating candidate priority to %d for node %s:%d.",
+			primaryNode->nodeName, primaryNode->nodePort,
+			currentNode->candidatePriority,
+			currentNode->nodeName, currentNode->nodePort);
+
+		SetNodeGoalState(primaryNode->nodeName, primaryNode->nodePort,
+						 REPLICATION_STATE_APPLY_SETTINGS);
+
+		NotifyStateChange(primaryNode->reportedState,
+						  REPLICATION_STATE_APPLY_SETTINGS,
+						  primaryNode->formationId,
+						  primaryNode->groupId,
+						  primaryNode->nodeId,
+						  primaryNode->nodeName,
+						  primaryNode->nodePort,
+						  primaryNode->pgsrSyncState,
+						  primaryNode->reportedLSN,
+						  primaryNode->candidatePriority,
+						  primaryNode->replicationQuorum,
+						  message);
+	}
 
 	NotifyStateChange(currentNode->reportedState,
 					  currentNode->goalState,
@@ -1288,8 +1354,12 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 	char *nodeName = text_to_cstring(nodeNameText);
 	int32 nodePort = PG_GETARG_INT32(2);
 	bool replicationQuorum = PG_GETARG_BOOL(3);
-	AutoFailoverNode *currentNode = NULL;
+
 	char message[BUFSIZE];
+
+	AutoFailoverNode *currentNode = NULL;
+	List *nodesGroupList = NIL;
+	int nodesCount = 0;
 
 	checkPgAutoFailoverVersion();
 
@@ -1303,8 +1373,11 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 	LockFormation(currentNode->formationId, ShareLock);
 	LockNodeGroup(currentNode->formationId, currentNode->groupId, ExclusiveLock);
 
-	currentNode->replicationQuorum = replicationQuorum;
+	nodesGroupList =
+		AutoFailoverNodeGroup(currentNode->formationId, currentNode->groupId);
+	nodesCount = list_length(nodesGroupList);
 
+	currentNode->replicationQuorum = replicationQuorum;
 
 	ReportAutoFailoverNodeReplicationSetting(currentNode->nodeId,
 			currentNode->nodeName,
@@ -1312,9 +1385,108 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 			currentNode->candidatePriority,
 			currentNode->replicationQuorum);
 
-	LogAndNotifyMessage(
-		message, BUFSIZE,
-		"Updating replicationQuorum.");
+	/* we need to see the result of that operation in the next query */
+	CommandCounterIncrement();
+
+	/* it's not always possible to opt-out from replication-quorum */
+	if (!currentNode->replicationQuorum)
+	{
+		AutoFailoverFormation *formation =
+			GetFormation(currentNode->formationId);
+
+		AutoFailoverNode *primaryNode =
+			GetPrimaryNodeInGroup(formation->formationId, currentNode->groupId);
+
+		int standbyCount = 0;
+
+		if (primaryNode == NULL)
+		{
+			/* maybe we could use an Assert() instead? */
+			ereport(ERROR,
+					(errmsg("Couldn't find the primary node in "
+							"formation \"%s\", group %d",
+							formation->formationId, currentNode->groupId)));
+		}
+
+		if (!FormationNumSyncStandbyIsValid(formation,
+										   primaryNode,
+										   currentNode->groupId,
+										   &standbyCount))
+		{
+			ereport(ERROR,
+					(ERRCODE_INVALID_PARAMETER_VALUE,
+					 errmsg("can't set replication quorum to false"),
+					 errdetail("At least %d standby nodes are required "
+							   "in formation %s with number_sync_standbys = %d, "
+							   "and only %d would be participating in "
+							   "the replication quorum",
+							   formation->number_sync_standbys + 1,
+							   formation->formationId,
+							   formation->number_sync_standbys,
+							   standbyCount)));
+		}
+	}
+
+	if (nodesCount == 1)
+	{
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Updating replicationQuorum to %s for node %s:%d",
+			currentNode->replicationQuorum ? "true" : "false",
+			currentNode->nodeName,
+			currentNode->nodePort);
+	}
+	else
+	{
+		AutoFailoverNode *primaryNode =
+			GetPrimaryNodeInGroup(currentNode->formationId,
+								  currentNode->groupId);
+
+		if (primaryNode == NULL)
+		{
+			ereport(ERROR,
+					(errmsg("couldn't find the primary node in "
+							"formation \"%s\", group %d",
+							currentNode->formationId, currentNode->groupId)));
+		}
+
+		if (!IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY))
+		{
+			ereport(ERROR,
+					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					 errmsg("cannot set replication quorum when current state "
+							"for primary node %s:%d is \"%s\"",
+							primaryNode->nodeName, primaryNode->nodePort,
+							ReplicationStateGetName(primaryNode->reportedState)),
+					 errdetail("The primary node so must be in state \"primary\" "
+							   "to be able to apply configuration changes to "
+							   "its synchronous_standby_names setting")));
+		}
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of %s:%d to apply_settings "
+			"after updating replication quorum to %s for node %s:%d.",
+			primaryNode->nodeName, primaryNode->nodePort,
+			currentNode->replicationQuorum ? "true" : "false",
+			currentNode->nodeName, currentNode->nodePort);
+
+		SetNodeGoalState(primaryNode->nodeName, primaryNode->nodePort,
+						 REPLICATION_STATE_APPLY_SETTINGS);
+
+		NotifyStateChange(primaryNode->reportedState,
+						  REPLICATION_STATE_APPLY_SETTINGS,
+						  primaryNode->formationId,
+						  primaryNode->groupId,
+						  primaryNode->nodeId,
+						  primaryNode->nodeName,
+						  primaryNode->nodePort,
+						  primaryNode->pgsrSyncState,
+						  primaryNode->reportedLSN,
+						  primaryNode->candidatePriority,
+						  primaryNode->replicationQuorum,
+						  message);
+	}
 
 	NotifyStateChange(currentNode->reportedState,
 					  currentNode->goalState,
@@ -1330,4 +1502,145 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 					  message);
 
 	PG_RETURN_BOOL(true);
+}
+
+
+/*
+ * synchronous_standby_names returns the synchronous_standby_names parameter
+ * value for a given Postgres service group in a given formation.
+ */
+Datum
+synchronous_standby_names(PG_FUNCTION_ARGS)
+{
+	text *formationIdText = PG_GETARG_TEXT_P(0);
+	char *formationId = text_to_cstring(formationIdText);
+
+	int32 groupId = PG_GETARG_INT32(1);
+
+	AutoFailoverFormation *formation = GetFormation(formationId);
+
+	AutoFailoverNode *primaryNode = NULL;
+	List *standbyNodesGroupList = NIL;
+
+	List *nodesGroupList = AutoFailoverNodeGroup(formationId, groupId);
+	int nodesCount = list_length(nodesGroupList);
+
+	checkPgAutoFailoverVersion();
+
+	/*
+	 * When there's no nodes registered yet, there's no pg_autoctl process that
+	 * needs the information anyway. Return NULL.
+	 */
+	if (nodesCount == 0)
+	{
+		PG_RETURN_NULL();
+	}
+
+	/* when we have a SINGLE node we disable synchronous replication */
+	if (nodesCount == 1)
+	{
+		PG_RETURN_TEXT_P(cstring_to_text(""));
+	}
+
+	/* when we have more than one node, fetch the primary */
+	primaryNode = GetPrimaryNodeInGroup(formationId, groupId);
+
+	if (primaryNode == NULL)
+	{
+		/* maybe we could use an Assert() instead? */
+		ereport(ERROR,
+				(errmsg("Couldn't find the primary node in formation \"%s\", "
+						"group %d", formationId, groupId)));
+	}
+
+	standbyNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
+
+	/*
+	 * Single standby case
+	 */
+	if (nodesCount == 2)
+	{
+		AutoFailoverNode *secondaryNode = linitial(standbyNodesGroupList);
+
+		if (secondaryNode != NULL
+			&& secondaryNode->replicationQuorum
+			&& IsCurrentState(secondaryNode, REPLICATION_STATE_SECONDARY))
+		{
+			/* enable synchronous replication */
+			PG_RETURN_TEXT_P(cstring_to_text("*"));
+		}
+		else
+		{
+			/* disable synchronous replication */
+			PG_RETURN_TEXT_P(cstring_to_text(""));
+		}
+	}
+
+	/*
+	 * General case now, we have multiple standbys each with a candidate
+	 * priority, and with replicationQuorum (bool: true or false).
+	 *
+	 *   - candidateNodesGroupList contains only nodes that have a
+	 *     candidatePriority greater than zero
+	 *
+	 *   - we skip nodes that have replicationQuorum set to false
+	 *
+	 *   - then we build synchronous_standby_names with one of the two
+	 *     following models:
+	 *
+	 *       ANY 1 (pgautofailover_standby_2, pgautofailover_standby_3)
+	 *       FIRST 1 (pgautofailover_standby_2, pgautofailover_standby_3)
+	 *
+	 *     We use ANY when all the standby nodes have the same
+	 *     candidatePriority, and we use FIRST otherwise.
+	 *
+	 *     The num_sync number is the formation number_sync_standbys property.
+	 */
+	{
+		List *syncStandbyNodesGroupList =
+			GroupListSyncStandbys(standbyNodesGroupList);
+
+		int count = list_length(syncStandbyNodesGroupList);
+
+		if (count == 0 || formation->number_sync_standbys == 0)
+		{
+			/*
+			 *  If no standby participates in the replication Quorum, we
+			 * disable synchronous replication.
+			 */
+			PG_RETURN_TEXT_P(cstring_to_text(""));
+		}
+		else
+		{
+			bool allTheSamePriority =
+				AllNodesHaveSameCandidatePriority(syncStandbyNodesGroupList);
+
+			StringInfo sbnames = makeStringInfo();
+			ListCell *nodeCell = NULL;
+			bool firstNode = true;
+
+			appendStringInfo(sbnames,
+							 "%s %d (",
+							 allTheSamePriority ? "ANY" : "FIRST",
+							 formation->number_sync_standbys);
+
+			foreach(nodeCell, syncStandbyNodesGroupList)
+			{
+				AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+				appendStringInfo(sbnames,
+								 "%spgautofailover_standby_%d",
+								 firstNode ? "" : ", ",
+								 node->nodeId);
+
+				if (firstNode)
+				{
+					firstNode = false;
+				}
+			}
+			appendStringInfoString(sbnames, ")");
+
+			PG_RETURN_TEXT_P(cstring_to_text(sbnames->data));
+		}
+	}
 }

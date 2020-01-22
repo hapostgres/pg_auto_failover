@@ -410,6 +410,11 @@ NodeStateToString(NodeState s)
 			return "join_primary";
 		}
 
+		case APPLY_SETTINGS_STATE:
+		{
+			return "apply_settings";
+		}
+
 		case ANY_STATE:
 		{
 			return "#any state#";
@@ -488,6 +493,10 @@ NodeStateFromString(const char *str)
 	else if (strcmp(str, "join_primary") == 0)
 	{
 		return JOIN_PRIMARY_STATE;
+	}
+	else if(strcmp(str, "apply_settings") == 0)
+	{
+		return APPLY_SETTINGS_STATE;
 	}
 	else
 	{

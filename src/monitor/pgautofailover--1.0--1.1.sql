@@ -5,7 +5,12 @@
 \echo Use "ALTER EXTENSION pgautofailover UPDATE TO 1.1" to load this file. \quit
 
 ALTER TYPE pgautofailover.replication_state
-       ADD VALUE IF NOT EXISTS 'join_primary'
+       ADD VALUE IF NOT EXISTS 'join_primary',
+       ADD VALUE IF NOT EXISTS 'report_lsn',
+       ADD VALUE IF NOT EXISTS 'fast_forward',
+       ADD VALUE IF NOT EXISTS 'wait_forward',
+       ADD VALUE IF NOT EXISTS 'wait_cascade',
+       ADD VALUE IF NOT EXISTS 'apply_settings';
 
 ALTER TABLE pgautofailover.formation
         ADD COLUMN  number_sync_standbys INT NOT NULL DEFAULT 1;

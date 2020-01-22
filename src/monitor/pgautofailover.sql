@@ -34,31 +34,32 @@ CREATE TYPE pgautofailover.replication_state
     'stop_replication',
     'wait_standby',
     'maintenance',
-    'join_primary'
+    'join_primary',
+    'apply_settings'
  );
 
 CREATE TABLE pgautofailover.formation
  (
-    formationid   			text NOT NULL DEFAULT 'default',
-    kind          			text NOT NULL DEFAULT 'pgsql',
-    dbname        			name NOT NULL DEFAULT 'postgres',
-    opt_secondary 			bool NOT NULL DEFAULT true,
-    number_sync_standbys	int  NOT NULL DEFAULT 1,
+    formationid          text NOT NULL DEFAULT 'default',
+    kind                 text NOT NULL DEFAULT 'pgsql',
+    dbname               name NOT NULL DEFAULT 'postgres',
+    opt_secondary        bool NOT NULL DEFAULT true,
+    number_sync_standbys int  NOT NULL DEFAULT 1,
     PRIMARY KEY   (formationid)
  );
 insert into pgautofailover.formation (formationid) values ('default');
 
 CREATE FUNCTION pgautofailover.create_formation
  (
-    IN formation_id  		text,
-    IN kind          		text,
-    IN dbname        		name,
-    IN opt_secondary 		bool,
+    IN formation_id         text,
+    IN kind                 text,
+    IN dbname               name,
+    IN opt_secondary        bool,
     IN number_sync_standbys int,
-   OUT formation_id  		text,
-   OUT kind          		text,
-   OUT dbname        		name,
-   OUT opt_secondary 		bool,
+   OUT formation_id         text,
+   OUT kind                 text,
+   OUT dbname               name,
+   OUT opt_secondary        bool,
    OUT number_sync_standbys int
  )
 RETURNS record LANGUAGE C STRICT SECURITY DEFINER
@@ -579,3 +580,63 @@ comment on function pgautofailover.set_node_replication_quorum(int, text, int, b
 grant execute on function
       pgautofailover.set_node_replication_quorum(int, text, int, bool)
    to autoctl_node;
+
+
+create function pgautofailover.synchronous_standby_names
+ (
+    IN formation_id text default 'default',
+    IN group_id     int default 0
+ )
+returns text language C strict
+AS 'MODULE_PATHNAME', $$synchronous_standby_names$$;
+
+comment on function pgautofailover.synchronous_standby_names(text, int)
+        is 'get the synchronous_standby_names setting for a given group';
+
+grant execute on function
+      pgautofailover.synchronous_standby_names(text, int)
+   to autoctl_node;
+
+
+CREATE OR REPLACE FUNCTION pgautofailover.adjust_number_sync_standbys()
+  RETURNS trigger
+  LANGUAGE 'plpgsql'
+AS $$
+declare
+  standby_count integer := null;
+  number_sync_standbys integer := null;
+begin
+   select count(*) - 1
+     into standby_count
+     from pgautofailover.node
+    where formationid = old.formationid;
+
+   select formation.number_sync_standbys
+     into number_sync_standbys
+     from pgautofailover.formation
+    where formation.formationid = old.formationid;
+
+  if number_sync_standbys > 1
+  then
+    -- we must have number_sync_standbys + 1 <= standby_count
+    if (number_sync_standbys + 1) > standby_count
+    then
+      update pgautofailover.formation
+         set number_sync_standbys = greatest(standby_count - 1, 1)
+       where formation.formationid = old.formationid;
+    end if;
+  end if;
+
+  return old;
+end
+$$;
+
+comment on function pgautofailover.adjust_number_sync_standbys()
+        is 'adjust formation number_sync_standbys when removing a node, if needed';
+
+CREATE TRIGGER adjust_number_sync_standbys
+         AFTER DELETE
+            ON pgautofailover.node
+           FOR EACH ROW
+       EXECUTE PROCEDURE pgautofailover.adjust_number_sync_standbys();
+

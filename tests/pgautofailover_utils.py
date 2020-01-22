@@ -444,7 +444,7 @@ SELECT reportedstate
         command = PGAutoCtl(self.vnode, self.datadir)
         try:
             command.execute("set canditate priority", 'set', 'node',
-                            '--', 'candidate-priority', str(candidatePriority))
+                            'candidate-priority', '--', str(candidatePriority))
         except Exception as e:
             if command.run_proc.returncode == 1:
                 return False
@@ -467,7 +467,7 @@ SELECT reportedstate
         command = PGAutoCtl(self.vnode, self.datadir)
         try:
             command.execute("set replication quorum", 'set', 'node',
-                            '--', 'replication-quorum', replicationQuorum)
+                            'replication-quorum', replicationQuorum)
         except Exception as e:
             if command.run_proc.returncode == 1:
                 return False
@@ -496,10 +496,11 @@ SELECT reportedstate
         command = PGAutoCtl(self.vnode, self.datadir)
         try:
             command.execute("set number sync standbys",
-                            'set', 'formation', '--',
+                            'set', 'formation',
                             'number-sync-standbys', str(numberSyncStandbys))
         except Exception as e:
-            if command.run_proc.returncode == 1:
+            # either caught as a BAD ARG (1) or by the monitor (6)
+            if command.run_proc.returncode in (1, 6):
                 return False
             raise e
         return True
@@ -513,6 +514,16 @@ SELECT reportedstate
                                    'get', 'formation', 'number-sync-standbys')
 
         return int(out)
+
+    def get_synchronous_standby_names(self):
+        """
+            Gets number sync standbys  via pg_autoctl
+        """
+        command = PGAutoCtl(self.vnode, self.datadir)
+        out, err = command.execute("get synchronous_standby_names",
+                                   'show', 'synchronous_standby_names')
+
+        return out.strip()
 
 
 class MonitorNode(PGNode):
@@ -680,14 +691,13 @@ class PGAutoCtl():
         except subprocess.TimeoutExpired:
             # we already spent our allocated waiting time, just kill the process
             self.run_proc.kill()
-            self.communicate()
             self.run_proc.wait()
             self.run_proc.release()
 
             self.run_proc = None
 
-            raise Exception("%s timed out after %d seconds. out: %s\n, err: %s"%
-                            (name, COMMAND_TIMEOUT, out, err))
+            raise Exception("%s timed out after %d seconds." %
+                            (name, COMMAND_TIMEOUT))
 
         return self.out, self.err
 

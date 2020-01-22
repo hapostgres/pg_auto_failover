@@ -464,6 +464,25 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 		return true;
 	}
 
+	/*
+	 * when a node has changed its replication settings:
+	 *     apply_settings ➜ primary
+	 */
+	if (IsCurrentState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS))
+	{
+		char message[BUFSIZE];
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of %s:%d to primary "
+			"after it applied replication properties change.",
+			primaryNode->nodeName, primaryNode->nodePort);
+
+		AssignGoalState(primaryNode, REPLICATION_STATE_PRIMARY, message);
+
+		return true;
+	}
+
 	return false;
 }
 

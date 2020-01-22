@@ -652,6 +652,33 @@ postgres_sprintf_replicationSlotName(int nodeId, char *slotName, int size)
 
 
 /*
+ * pgsql_set_synchronous_standby_names set synchronous_standby_names ton the
+ * local Postgres to the value computed on the pg_auto_failover monitor.
+ */
+bool
+pgsql_set_synchronous_standby_names(PGSQL *pgsql,
+									char *synchronous_standby_names)
+{
+	char quoted[BUFSIZE] = { 0 };
+	GUC setting = { "synchronous_standby_names", quoted };
+
+	log_info("Enabling synchronous replication");
+
+	if (snprintf(quoted, BUFSIZE, "'%s'", synchronous_standby_names) >= BUFSIZE)
+	{
+		log_error("Failed to apply the synchronous_standby_names value \"%s\": "
+				  "pg_autoctl supports values up to %d bytes and this one "
+				  "requires %lu bytes",
+				  synchronous_standby_names,
+				  BUFSIZE,
+				  strlen(synchronous_standby_names));
+	}
+
+	return pgsql_alter_system_set(pgsql, setting);
+}
+
+
+/*
  * pgsql_enable_synchronous_replication enables synchronous replication
  * in Postgres such that all writes block post-commit until they are
  * replicated.

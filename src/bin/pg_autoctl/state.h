@@ -46,6 +46,7 @@ typedef enum
 	STOP_REPLICATION_STATE,
 	MAINTENANCE_STATE,
 	JOIN_PRIMARY_STATE,
+	APPLY_SETTINGS_STATE,
 
 	/* Allow some wildcard-matching transitions (from ANY state to) */
 	ANY_STATE = 128

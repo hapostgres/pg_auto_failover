@@ -221,9 +221,16 @@ ReplicationStateGetName(ReplicationState replicationState)
 			return "join_primary";
 		}
 
+		case REPLICATION_STATE_APPLY_SETTINGS:
+		{
+			return "apply_settings";
+		}
+
 		default:
 		{
-			ereport(ERROR, (errmsg("bug: unknown replication state")));
+			ereport(ERROR,
+					(errmsg("bug: unknown replication state (%d)",
+							replicationState)));
 		}
 	}
 }

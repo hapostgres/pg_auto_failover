@@ -21,6 +21,13 @@ static void cli_set_node_replication_quorum(int argc, char **argv);
 static void cli_set_node_candidate_priority(int argc, char **argv);
 static void cli_set_formation_number_sync_standbys(int arc, char **argv);
 
+static bool set_node_candidate_priority(Keeper *keeper, int candidatePriority);
+static bool set_node_replication_quorum(Keeper *keeper, bool replicationQuorum);
+static bool set_formation_number_sync_standbys(Monitor *monitor,
+											   char *formation,
+											   int groupId,
+											   int numberSyncStandbys);
+
 CommandLine get_node_replication_quorum =
 	make_command("replication-quorum",
 				 "get replication-quorum property from the monitor",
@@ -81,7 +88,7 @@ CommandLine get_commands =
 					 NULL, NULL, NULL, get_subcommands);
 
 /* set commands */
-static CommandLine set_node_replication_quorum =
+static CommandLine set_node_replication_quorum_command =
 	make_command("replication-quorum",
 				 "set replication-quorum property on the monitor",
 				 CLI_PGDATA_USAGE "<true|false>",
@@ -89,7 +96,7 @@ static CommandLine set_node_replication_quorum =
 				 cli_getopt_pgdata,
 				 cli_set_node_replication_quorum);
 
-static CommandLine set_node_candidate_priority =
+static CommandLine set_node_candidate_priority_command =
 	make_command("candidate-priority",
 				 "set candidate property on the monitor",
 				 CLI_PGDATA_USAGE "<priority: 0..100>",
@@ -99,8 +106,8 @@ static CommandLine set_node_candidate_priority =
 
 
 static CommandLine *set_node_subcommands[] = {
-	&set_node_replication_quorum,
-	&set_node_candidate_priority,
+	&set_node_replication_quorum_command,
+	&set_node_candidate_priority_command,
 	NULL
 };
 
@@ -111,8 +118,8 @@ CommandLine set_node_command =
 					 set_node_subcommands);
 
 static CommandLine set_formation_number_sync_standby_command =
-	make_command("number_sync_standbys",
-				 "set number_sync_standbys for a formation on the monitor",
+	make_command("number-sync-standbys",
+				 "set number-sync-standbys for a formation on the monitor",
 				 CLI_PGDATA_USAGE "<number_sync_standbys>",
 				 CLI_PGDATA_OPTION,
 				 cli_getopt_pgdata,
@@ -335,6 +342,9 @@ cli_set_node_replication_quorum(int argc, char **argv)
 	bool pgIsNotRunningIsOk = true;
 	bool monitorDisabledIsOk = false;
 
+	char *channels[] = { "state", NULL };
+	char postgresUri[MAXCONNINFO];
+
 	keeper.config = keeperOptions;
 
 	if (argc != 1)
@@ -382,14 +392,9 @@ cli_set_node_replication_quorum(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!monitor_set_node_replication_quorum(&(keeper.monitor),
-											 keeper.state.current_node_id,
-											 keeper.config.nodename,
-											 keeper.config.pgSetup.pgport,
-											 replicationQuorum))
+	if (!set_node_replication_quorum(&keeper, replicationQuorum))
 	{
-		log_error("Failed to set \"replication-quorum\" to \"%s\".",
-				  boolToString(replicationQuorum));
+		/* errors have already been logged */
 		exit(EXIT_CODE_MONITOR);
 	}
 
@@ -474,14 +479,9 @@ cli_set_node_candidate_priority(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!monitor_set_node_candidate_priority(&(keeper.monitor),
-											 keeper.state.current_node_id,
-											 keeper.config.nodename,
-											 keeper.config.pgSetup.pgport,
-											 candidatePriority))
+	if (!set_node_candidate_priority(&keeper, candidatePriority))
 	{
-		log_error("Failed to set \"candidate-priority\" to \"%d\".",
-				  candidatePriority);
+		/* errors have already been logged */
 		exit(EXIT_CODE_MONITOR);
 	}
 
@@ -518,6 +518,10 @@ cli_set_formation_number_sync_standbys(int argc, char **argv)
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
 	bool monitorDisabledIsOk = false;
+
+	char *channels[] = { "state", NULL };
+
+	char synchronous_standby_names[BUFSIZE] = { 0 };
 
 	if (argc != 1)
 	{
@@ -558,13 +562,24 @@ cli_set_formation_number_sync_standbys(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!monitor_set_formation_number_sync_standbys(&monitor,
-													config.formation,
-													numberSyncStandbys))
+	if (!set_formation_number_sync_standbys(&monitor,
+											config.formation,
+											config.groupId,
+											numberSyncStandbys))
 	{
-		log_error("Failed to set \"number-sync-standbys\" to \"%d\".",
-				  numberSyncStandbys);
+		/* errors have already been logged */
 		exit(EXIT_CODE_MONITOR);
+	}
+
+	if (monitor_synchronous_standby_names(
+			&monitor,
+			config.formation,
+			config.groupId,
+			synchronous_standby_names,
+			BUFSIZE))
+	{
+		log_info("primary node has now set synchronous_standby_names = '%s'",
+				 synchronous_standby_names);
 	}
 
 	if (outputJSON)
@@ -576,10 +591,211 @@ cli_set_formation_number_sync_standbys(int argc, char **argv)
 							   "number-sync-standbys",
 							   (double) numberSyncStandbys);
 
+		if (!IS_EMPTY_STRING_BUFFER(synchronous_standby_names))
+		{
+			json_object_set_string(jsObj,
+								   "synchronous_standby_names",
+								   synchronous_standby_names);
+		}
+
 		(void) cli_pprint_json(js);
 	}
 	else
 	{
 		fprintf(stdout, "%d\n", numberSyncStandbys);
 	}
+}
+
+
+/*
+ * set_node_candidate_priority sets the candidate priority on the monitor, and
+ * if we have more than one node registered, waits until the primary has
+ * applied the settings.
+ */
+static bool
+set_node_candidate_priority(Keeper *keeper, int candidatePriority)
+{
+	KeeperConfig *config = &(keeper->config);
+	NodeAddressArray nodesArray = { 0 };
+
+	/*
+	 * There might be some race conditions here, but it's all to be
+	 * user-friendly so in the worst case we're going to be less friendly that
+	 * we could have.
+	 */
+	if (!monitor_get_nodes(&(keeper->monitor),
+						   config->formation,
+						   config->groupId,
+						   &nodesArray))
+	{
+		/* ignore the error, just don't wait in that case */
+		log_warn("Failed to get_nodes() on the monitor");
+	}
+
+	/* listen for state changes BEFORE we apply new settings */
+	if (nodesArray.count > 1)
+	{
+		char *channels[] = { "state", NULL };
+
+		if (!pgsql_listen(&(keeper->monitor.pgsql), channels))
+		{
+			log_error("Failed to listen to state changes from the monitor");
+			return false;
+		}
+	}
+
+	if (!monitor_set_node_candidate_priority(
+			&(keeper->monitor),
+			keeper->state.current_node_id,
+			config->nodename,
+			config->pgSetup.pgport,
+			candidatePriority))
+	{
+		log_error("Failed to set \"candidate-priority\" to \"%d\".",
+				  candidatePriority);
+		return false;
+	}
+
+	/* now wait until the primary actually applied the new setting */
+	if (nodesArray.count > 1)
+	{
+		if (!monitor_wait_until_primary_applied_settings(
+				&(keeper->monitor),
+				config->formation))
+		{
+			log_error("Failed to wait until the new setting has been applied");
+			return false;
+		}
+	}
+
+	return true;
+}
+
+
+/*
+ * set_node_replication_quorum sets the replication quorum on the monitor, and
+ * if we have more than one node registered, waits until the primary has
+ * applied the settings.
+ */
+static bool
+set_node_replication_quorum(Keeper *keeper, bool replicationQuorum)
+{
+	KeeperConfig *config = &(keeper->config);
+	NodeAddressArray nodesArray = { 0 };
+
+	/*
+	 * There might be some race conditions here, but it's all to be
+	 * user-friendly so in the worst case we're going to be less friendly that
+	 * we could have.
+	 */
+	if (!monitor_get_nodes(&(keeper->monitor),
+						   config->formation,
+						   config->groupId,
+						   &nodesArray))
+	{
+		/* ignore the error, just don't wait in that case */
+		log_warn("Failed to get_nodes() on the monitor");
+	}
+
+	/* listen for state changes BEFORE we apply new settings */
+	if (nodesArray.count > 1)
+	{
+		char *channels[] = { "state", NULL };
+
+		if (!pgsql_listen(&(keeper->monitor.pgsql), channels))
+		{
+			log_error("Failed to listen to state changes from the monitor");
+			return false;
+		}
+	}
+
+	if (!monitor_set_node_replication_quorum(
+			&(keeper->monitor),
+			keeper->state.current_node_id,
+			config->nodename,
+			config->pgSetup.pgport,
+			replicationQuorum))
+	{
+		log_error("Failed to set \"replication-quorum\" to \"%s\".",
+				  boolToString(replicationQuorum));
+		return false;
+	}
+
+	/* now wait until the primary actually applied the new setting */
+	if (nodesArray.count > 1)
+	{
+		if (!monitor_wait_until_primary_applied_settings(
+				&(keeper->monitor),
+				config->formation))
+		{
+			log_error("Failed to wait until the new setting has been applied");
+			return false;
+		}
+	}
+
+	return true;
+}
+
+
+/*
+ * set_node_replication_quorum sets the number_sync_standbys on the monitor,
+ * and if we have more than one node registered in the target formation, waits
+ * until the primary has applied the settings.
+ */
+static bool
+set_formation_number_sync_standbys(Monitor *monitor,
+								   char *formation,
+								   int groupId,
+								   int numberSyncStandbys)
+{
+	NodeAddressArray nodesArray = { 0 };
+
+	/*
+	 * There might be some race conditions here, but it's all to be
+	 * user-friendly so in the worst case we're going to be less friendly that
+	 * we could have.
+	 */
+	if (!monitor_get_nodes(monitor, formation, groupId, &nodesArray))
+	{
+		/* ignore the error, just don't wait in that case */
+		log_warn("Failed to get_nodes() on the monitor");
+	}
+
+	/* listen for state changes BEFORE we apply new settings */
+	if (nodesArray.count > 1)
+	{
+		char *channels[] = { "state", NULL };
+
+		if (!pgsql_listen(&(monitor->pgsql), channels))
+		{
+			log_error("Failed to listen to state changes from the monitor");
+			return false;
+		}
+	}
+
+	/* set the new number_sync_standbys value */
+	if (!monitor_set_formation_number_sync_standbys(
+			monitor,
+			formation,
+			numberSyncStandbys))
+	{
+		log_error("Failed to set \"number-sync-standbys\" to \"%d\".",
+				  numberSyncStandbys);
+		return false;
+	}
+
+
+	/* now wait until the primary actually applied the new setting */
+	if (nodesArray.count > 1)
+	{
+		if (!monitor_wait_until_primary_applied_settings(
+				monitor,
+				formation))
+		{
+			log_error("Failed to wait until the new setting has been applied");
+			return false;
+		}
+	}
+
+	return true;
 }
