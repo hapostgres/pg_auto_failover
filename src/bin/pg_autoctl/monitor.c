@@ -1939,9 +1939,6 @@ monitor_start_maintenance(Monitor *monitor, char *host, int port)
 		return false;
 	}
 
-	/* disconnect from PostgreSQL now */
-	pgsql_finish(&monitor->pgsql);
-
 	if (!context.parsedOk)
 	{
 		log_error("Failed to start_maintenance of node %s:%d from the monitor: "
@@ -1979,9 +1976,6 @@ monitor_stop_maintenance(Monitor *monitor, char *host, int port)
 				  host, port);
 		return false;
 	}
-
-	/* disconnect from PostgreSQL now */
-	pgsql_finish(&monitor->pgsql);
 
 	if (!context.parsedOk)
 	{
@@ -2215,6 +2209,107 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 
 	return applySettingsTransitionDone;
 }
+
+
+/*
+ * monitor_wait_until_node_reported_maintenance receives notifications and
+ * watches for the given node to have goalState and reportedState set to given
+ * state.
+ *
+ * If we lose the monitor connection while watching for the transition steps
+ * then we stop watching. It's a best effort attempt at having the CLI be
+ * useful for its user, the main one being the test suite.
+ */
+bool
+monitor_wait_until_node_reported_state(Monitor *monitor,
+									   int nodeId,
+									   NodeState state)
+{
+	PGconn *connection = monitor->pgsql.connection;
+	bool reachedMaintenance = false;
+
+	if (connection == NULL)
+	{
+ 		log_warn("Lost connection.");
+		return false;
+	}
+
+	while (!reachedMaintenance)
+	{
+		/* Sleep until something happens on the connection. */
+		int         sock;
+		fd_set      input_mask;
+		PGnotify   *notify;
+
+		sock = PQsocket(connection);
+
+		if (sock < 0)
+			return false;	/* shouldn't happen */
+
+		FD_ZERO(&input_mask);
+		FD_SET(sock, &input_mask);
+
+		if (select(sock + 1, &input_mask, NULL, NULL, NULL) < 0)
+		{
+			log_warn("select() failed: %s\n", strerror(errno));
+			return false;
+		}
+
+		/* Now check for input */
+		PQconsumeInput(connection);
+		while ((notify = PQnotifies(connection)) != NULL)
+		{
+			StateNotification notification = { 0 };
+
+			if (strcmp(notify->relname, "state") != 0)
+			{
+				log_warn("%s: %s", notify->relname, notify->extra);
+				continue;
+			}
+
+			log_debug("received \"%s\"", notify->extra);
+
+			/* the parsing scribbles on the message, make a copy now */
+			strlcpy(notification.message, notify->extra, BUFSIZE);
+
+			/* errors are logged by parse_state_notification_message */
+			if (!parse_state_notification_message(&notification))
+			{
+				log_warn("Failed to parse notification message \"%s\"",
+						 notify->extra);
+				continue;
+			}
+
+			/* filter notifications for our own formation */
+			if (notification.nodeId != nodeId)
+			{
+				continue;
+			}
+
+			if (notification.reportedState == state
+				&& notification.goalState == state)
+			{
+				reachedMaintenance = true;
+
+				log_debug("node %d (%s:%d) is now in state \"%s\"",
+						  notification.nodeId,
+						  notification.nodeName,
+						  notification.nodePort,
+						  NodeStateToString(state));
+			}
+
+			/* prepare next iteration */
+			PQfreemem(notify);
+			PQconsumeInput(connection);
+		}
+	}
+
+	/* disconnect from monitor */
+	pgsql_finish(&monitor->pgsql);
+
+	return reachedMaintenance;
+}
+
 
 /*
  * monitor_get_extension_version gets the current extension version from the

@@ -123,6 +123,9 @@ bool monitor_stop_maintenance(Monitor *monitor, char *host, int port);
 bool monitor_get_notifications(Monitor *monitor);
 bool monitor_wait_until_primary_applied_settings(Monitor *monitor,
 												 const char *formation);
+bool monitor_wait_until_node_reported_state(Monitor *monitor,
+											int nodeId,
+											NodeState state);
 
 bool monitor_get_extension_version(Monitor *monitor,
 								   MonitorExtensionVersion *version);
