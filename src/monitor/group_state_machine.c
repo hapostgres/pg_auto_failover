@@ -573,6 +573,7 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 										   REPLICATION_STATE_CATCHINGUP);
 
 	List *standbyNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
+	List *candidateNodesGroupList = NIL;
 
 	AutoFailoverNode *candidateNode = NULL;
 	ListCell *nodeCell = NULL;
@@ -583,7 +584,24 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 	/*
 	 * Done with the single standby code path, now we have several standby
 	 * nodes that might all be candidate for failover, or just some of them.
-	 * First, have them all report the most recent LSN they managed to receive.
+	 *
+	 * First, have all our candidates for failover report the most recent LSN
+	 * they managed to receive. We build the list of nodes that we consider as
+	 * failover candidates into candidateNodesGroupList.
+	 *
+	 * When every one of the nodes in that list has reported its LSN position,
+	 * then we select a node from the just built candidateNodesGroupList to
+	 * promote.
+	 *
+	 * It might well be that in this call to node_active() only a part of the
+	 * candidates have reported their LSN position yet. Then we refrain from
+	 * selecting any in this round, expecting a future call to node_active() to
+	 * be the kicker.
+	 *
+	 * This design also allows for nodes to concurrently be put to maintenance
+	 * or get unhealthy: then the next call to node_active() might build a
+	 * different candidateNodesGroupList in which every node has reported their
+	 * LSN position, allowing progress to be made.
 	 */
 	foreach(nodeCell, standbyNodesGroupList)
 	{
@@ -606,29 +624,28 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 			continue;
 		}
 
-		/*
-		 * Skip unhealthy nodes, they are not candidates and we don't want to
-		 * wait until they report their LSN.
-		 */
-		if (IsUnhealthy(node) ||
-			IsCurrentState(node, REPLICATION_STATE_MAINTENANCE))
-		{
-			/* do not increment candidateCount */
-			continue;
-		}
-
 		/* count how many healthy standby nodes have reached REPORT_LSN */
 		if (IsCurrentState(node, REPLICATION_STATE_REPORT_LSN))
 		{
 			++candidateCount;
 			++reportedLSNCount;
+
+			candidateNodesGroupList = lappend(candidateNodesGroupList, node);
+
+			continue;
 		}
+
 		/*
 		 * Nodes in SECONDARY or CATCHINGUP states are candidates due to report
-		 * their LSN
+		 * their LSN, unless they are known unhealthy, then we certainly don't
+		 * want to failover to them.
+		 *
+		 * Also, we discard nodes with a candidate priority of zero (0).
 		 */
-		else if ((IsStateIn(node->reportedState, secondaryStates) &&
-				  IsStateIn(node->goalState, secondaryStates)))
+		if (IsHealthy(node) &&
+			IsStateIn(node->reportedState, secondaryStates) &&
+			IsStateIn(node->goalState, secondaryStates) &&
+			node->candidatePriority > 0)
 		{
 			char message[BUFSIZE];
 
@@ -704,8 +721,8 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 	if (candidateCount > 0 && reportedLSNCount == candidateCount)
 	{
 		/* build the list of failover candidate nodes, ordered by priority */
-		List *candidateNodesGroupList =
-			GroupListCandidates(standbyNodesGroupList);
+		List *sortedCandidateNodesGroupList =
+			GroupListCandidates(candidateNodesGroupList);
 
 		/* find the standby node that has the most advanced LSN */
 		AutoFailoverNode *mostAdvancedNode =
@@ -715,30 +732,28 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 
 		/*
 		 * Select the node to be promoted: we can pick any candidate with the
-		 * max priority, so we pick the one with the most recent LSN among
-		 * those of maxPriority.
+		 * max priority, so we pick the one with the most advanced LSN among
+		 * those having max(candidate priority).
 		 */
-		foreach(nodeCell, candidateNodesGroupList)
+		foreach(nodeCell, sortedCandidateNodesGroupList)
 		{
-			candidateNode = (AutoFailoverNode *) lfirst(nodeCell);
+			AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
 
 			/* all the candidates are now in the REPORT_LSN state */
-			if (IsHealthy(candidateNode)
-				&& WalDifferenceWithin(candidateNode,
-									   primaryNode,
-									   PromoteXlogThreshold))
+			if (IsHealthy(node)
+				&& WalDifferenceWithin(node, primaryNode, PromoteXlogThreshold))
 			{
-				int cPriority = candidateNode->candidatePriority;
-				XLogRecPtr cLSN = candidateNode->reportedLSN;
+				int cPriority = node->candidatePriority;
+				XLogRecPtr cLSN = node->reportedLSN;
 
 				if (selectedNode == NULL)
 				{
-					selectedNode = candidateNode;
+					selectedNode = node;
 				}
 				else if (cPriority == selectedNode->candidatePriority
 						 && cLSN > selectedNode->reportedLSN)
 				{
-					selectedNode = candidateNode;
+					selectedNode = node;
 				}
 				else if (cPriority < selectedNode->candidatePriority)
 				{
@@ -797,16 +812,19 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 		else
 		{
 			/*
-			 * Log about the situation so that we have more information in
-			 * advanced cases; it's not expected that we need that information
-			 * as an event in the monitor table though.
+			 * Publish more information about the process in the monitor event
+			 * table. This is a quite complex mechanism here, and it should be
+			 * made as easy as possible to analyze and debug.
 			 */
-			ereport(LOG,
-					(errmsg("we have received the LSN position of %d nodes, "
-							"we need to receive the position for %d nodes "
-							"before electing a candidate and proceeding with "
-							"the failover orchestration",
-							reportedLSNCount, candidateCount)));
+			char message[BUFSIZE];
+
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"we have received the LSN position of %d nodes, "
+				"we need to receive the position for %d nodes "
+				"before electing a candidate and proceeding with "
+				"the failover orchestration",
+				reportedLSNCount, candidateCount);
 			return false;
 		}
 	}

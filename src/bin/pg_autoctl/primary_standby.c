@@ -836,6 +836,8 @@ standby_follow_new_primary(LocalPostgresServer *postgres,
 		return false;
 	}
 
+	log_info("Restarting Postgres at \%s\"", pgSetup->pgdata);
+
 	if (!pg_ctl_restart(pgSetup->pg_ctl, pgSetup->pgdata))
 	{
 		log_error("Failed to restart Postgres after changing its "

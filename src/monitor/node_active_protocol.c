@@ -1152,34 +1152,32 @@ perform_failover(PG_FUNCTION_ARGS)
 			}
 
 			/* skip nodes if they are not a failover candidate */
-			if (!(IsStateIn(node->reportedState, secondaryStates) &&
-				  IsStateIn(node->goalState, secondaryStates)))
+			if ((IsStateIn(node->reportedState, secondaryStates) &&
+				 IsStateIn(node->goalState, secondaryStates)))
 			{
-				continue;
+				LogAndNotifyMessage(
+					message, BUFSIZE,
+					"Setting goal state of %s:%d to report_lsn "
+					"to find the failover candidate, "
+					"after a user-initiated failover",
+					node->nodeName, node->nodePort);
+
+				SetNodeGoalState(node->nodeName, node->nodePort,
+								 REPLICATION_STATE_REPORT_LSN);
+
+				NotifyStateChange(node->reportedState,
+								  REPLICATION_STATE_REPORT_LSN,
+								  node->formationId,
+								  node->groupId,
+								  node->nodeId,
+								  node->nodeName,
+								  node->nodePort,
+								  node->pgsrSyncState,
+								  node->reportedLSN,
+								  node->candidatePriority,
+								  node->replicationQuorum,
+								  message);
 			}
-
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Setting goal state of %s:%d to report_lsn "
-				"to find the failover candidate, "
-				"after a user-initiated failover",
-				node->nodeName, node->nodePort);
-
-			SetNodeGoalState(node->nodeName, node->nodePort,
-							 REPLICATION_STATE_REPORT_LSN);
-
-			NotifyStateChange(node->reportedState,
-							  REPLICATION_STATE_REPORT_LSN,
-							  node->formationId,
-							  node->groupId,
-							  node->nodeId,
-							  node->nodeName,
-							  node->nodePort,
-							  node->pgsrSyncState,
-							  node->reportedLSN,
-							  node->candidatePriority,
-							  node->replicationQuorum,
-							  message);
 		}
 	}
 

@@ -847,8 +847,8 @@ fsm_start_maintenance_on_standby(Keeper *keeper)
 bool
 fsm_restart_standby(Keeper *keeper)
 {
-	/* FIXME: fsm_follow_new_primary ? */
-	return fsm_start_postgres(keeper);
+	/* the primary might have change during our maintenance period */
+	return fsm_follow_new_primary(keeper);
 }
 
 
@@ -981,7 +981,8 @@ fsm_prepare_cascade(Keeper *keeper)
  * When the failover is done we need to follow the new primary. We should be
  * able to do that directly, by changing our primary_conninfo, thanks to our
  * candidate selection where we make it so that the failover candidate always
- * has the most advanced LSN.
+ * has the most advanced LSN, and also thanks to our use of replication slots
+ * on every standby.
  */
 bool
 fsm_follow_new_primary(Keeper *keeper)
