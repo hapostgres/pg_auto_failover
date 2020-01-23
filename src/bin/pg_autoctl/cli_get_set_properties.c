@@ -17,12 +17,13 @@ static void cli_get_node_replication_quorum(int argc, char **argv);
 static void cli_get_node_candidate_priority(int argc, char **argv);
 static void cli_get_formation_number_sync_standbys(int argc, char **argv);
 
-static void cli_set_node_property(int arc, char **argv);
-static void cli_set_formation_property(int arc, char **argv);
+static void cli_set_node_replication_quorum(int argc, char **argv);
+static void cli_set_node_candidate_priority(int argc, char **argv);
+static void cli_set_formation_number_sync_standbys(int arc, char **argv);
 
 CommandLine get_node_replication_quorum =
 	make_command("replication-quorum",
-				 "get replication-quorum property for a node from the pg_auto_failover monitor",
+				 "get replication-quorum property from the monitor",
 				 CLI_PGDATA_USAGE,
 				 CLI_PGDATA_OPTION,
 				 cli_getopt_pgdata,
@@ -30,7 +31,7 @@ CommandLine get_node_replication_quorum =
 
 CommandLine get_node_candidate_priority =
 	make_command("candidate-priority",
-				 "get candidate property for a node from the pg_auto_failover monitor",
+				 "get candidate property from the monitor",
 				 CLI_PGDATA_USAGE,
 				 CLI_PGDATA_OPTION,
 				 cli_getopt_pgdata,
@@ -43,15 +44,15 @@ static CommandLine *get_node_subcommands[] = {
 	NULL
 };
 
-CommandLine get_node_command =
+static CommandLine get_node_command =
 	make_command_set("node",
 				 "get a node property from the pg_auto_failover monitor",
 				 NULL, NULL, NULL,
 				 get_node_subcommands);
 
-CommandLine get_formation_number_sync_standbys =
+static CommandLine get_formation_number_sync_standbys =
 	make_command("number-sync-standbys",
-				 "get number_sync_standbys for a formation from the pg_auto_failover monitor",
+				 "get number_sync_standbys for a formation from the monitor",
 				 CLI_PGDATA_USAGE,
 				 CLI_PGDATA_OPTION,
 				 cli_getopt_pgdata,
@@ -62,7 +63,7 @@ static CommandLine *get_formation_subcommands[] = {
 	NULL
 };
 
-CommandLine get_formation_command =
+static CommandLine get_formation_command =
 	make_command_set("formation",
 				 "get a formation property from the pg_auto_failover monitor",
 				 NULL, NULL, NULL,
@@ -80,22 +81,54 @@ CommandLine get_commands =
 					 NULL, NULL, NULL, get_subcommands);
 
 /* set commands */
+static CommandLine set_node_replication_quorum =
+	make_command("replication-quorum",
+				 "set replication-quorum property on the monitor",
+				 CLI_PGDATA_USAGE "<true|false>",
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
+				 cli_set_node_replication_quorum);
+
+static CommandLine set_node_candidate_priority =
+	make_command("candidate-priority",
+				 "set candidate property on the monitor",
+				 CLI_PGDATA_USAGE "<priority: 0..100>",
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
+				 cli_set_node_candidate_priority);
+
+
+static CommandLine *set_node_subcommands[] = {
+	&set_node_replication_quorum,
+	&set_node_candidate_priority,
+	NULL
+};
 
 CommandLine set_node_command =
-	make_command("node",
-				 "set a property for a node at the pg_auto_failover monitor",
-				 CLI_PGDATA_USAGE "{ candidate-priority | replication-quorum } value",
-				 CLI_PGDATA_OPTION,
-				 cli_getopt_pgdata,
-				 cli_set_node_property);
+	make_command_set("node",
+					 "set a node property on the monitor",
+					 NULL, NULL, NULL,
+					 set_node_subcommands);
 
-CommandLine set_formation_command =
-	make_command("formation",
-				 "set a property for a formation the pg_auto_failover monitor",
-				 CLI_PGDATA_USAGE "{ number-sync-standbys }  value",
+static CommandLine set_formation_number_sync_standby_command =
+	make_command("number_sync_standbys",
+				 "set number_sync_standbys for a formation on the monitor",
+				 CLI_PGDATA_USAGE "<number_sync_standbys>",
 				 CLI_PGDATA_OPTION,
 				 cli_getopt_pgdata,
-				 cli_set_formation_property);
+				 cli_set_formation_number_sync_standbys);
+
+static CommandLine *set_formation_subcommands[] = {
+	&set_formation_number_sync_standby_command,
+	NULL
+};
+
+static CommandLine set_formation_command =
+	make_command_set("formation",
+					 "set a formation property on the monitor",
+					 NULL, NULL, NULL,
+					 set_formation_subcommands);
+
 
 static CommandLine *set_subcommands[] = {
 	&set_node_command,
@@ -288,15 +321,15 @@ cli_get_formation_number_sync_standbys(int argc, char **argv)
 
 
 /*
- * cli_set_node_property sets a node property on the monitor
- * for to current keeper node
+ * cli_set_node_replication_quorum sets the replication quorum property on the
+ * monitor for current pg_autoctl node.
  */
 static void
-cli_set_node_property(int argc, char **argv)
+cli_set_node_replication_quorum(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
-	char *name = NULL;
-	char *value = NULL;
+
+	bool replicationQuorum = false;
 
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
@@ -304,9 +337,11 @@ cli_set_node_property(int argc, char **argv)
 
 	keeper.config = keeperOptions;
 
-	if (argc != 2)
+	if (argc != 1)
 	{
-		log_error("Expected 2 but found %d arguments", argc);
+		log_error("Failed to parse command line arguments: "
+				  "got %d when 1 is expected",
+				  argc);
 		commandline_help(stderr);
 		exit(EXIT_CODE_BAD_ARGS);
 	}
@@ -339,72 +374,131 @@ cli_set_node_property(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	name = argv[0];
-	value = argv[1];
-
-	if (strcmp(name, "candidate-priority") == 0)
+	if (!parse_bool(argv[0], &replicationQuorum))
 	{
-		int candidatePriority = strtol(value, NULL, 10);
-		if (errno == EINVAL || candidatePriority < 0 || candidatePriority > 100)
-		{
-			log_error("candidate-priority value %s is not valid."
-					  " Valid values are integers from 0 to 100. ", value);
-			exit(EXIT_CODE_BAD_ARGS);
-		}
+		log_error("replication-quorum value %s is not valid."
+				  " Valid values are \"true\" or \"false.", argv[0]);
 
-		if (!monitor_set_node_candidate_priority(&(keeper.monitor),
-					keeper.state.current_node_id, keeper.config.nodename,
-					keeper.config.pgSetup.pgport, candidatePriority))
-		{
-			log_error("Failed to set \"candidate-priority\" to \"%d\".",
-					  candidatePriority);
-			exit(EXIT_CODE_MONITOR);
-		}
-
-		fprintf(stdout, "%d\n", candidatePriority);
+		exit(EXIT_CODE_BAD_ARGS);
 	}
-	else if (strcmp(name, "replication-quorum") == 0)
+
+	if (!monitor_set_node_replication_quorum(&(keeper.monitor),
+											 keeper.state.current_node_id,
+											 keeper.config.nodename,
+											 keeper.config.pgSetup.pgport,
+											 replicationQuorum))
 	{
-		bool replicationQuorum = false;
+		log_error("Failed to set \"replication-quorum\" to \"%s\".",
+				  boolToString(replicationQuorum));
+		exit(EXIT_CODE_MONITOR);
+	}
 
-		if (!parse_bool(value, &replicationQuorum))
-		{
-			log_error("replication-quorum value %s is not valid."
-					  " Valid values are \"true\" or \"false.", value);
+	if (outputJSON)
+	{
+		JSON_Value *js = json_value_init_object();
+		JSON_Object *jsObj = json_value_get_object(js);
 
-			exit(EXIT_CODE_BAD_ARGS);
-		}
+		json_object_set_boolean(jsObj,
+								"replication-quorum",
+								replicationQuorum);
 
-		if (!monitor_set_node_replication_quorum(&(keeper.monitor),
-					keeper.state.current_node_id, keeper.config.nodename,
-					keeper.config.pgSetup.pgport, replicationQuorum))
-		{
-			log_error("Failed to set \"replication-quorum\" to \"%s\".",
-					  boolToString(replicationQuorum));
-			exit(EXIT_CODE_MONITOR);
-		}
-
-		if (outputJSON)
-		{
-			JSON_Value *js = json_value_init_object();
-			JSON_Object *jsObj = json_value_get_object(js);
-
-			json_object_set_boolean(jsObj,
-									"replication-quorum",
-									replicationQuorum);
-
-			(void) cli_pprint_json(js);
-		}
-		else
-		{
-			fprintf(stdout, "%s\n", boolToString(replicationQuorum));
-		}
+		(void) cli_pprint_json(js);
 	}
 	else
 	{
-		log_error("Unknown node property %s", name);
+		fprintf(stdout, "%s\n", boolToString(replicationQuorum));
+	}
+}
+
+
+/*
+ * cli_set_node_candidate_priority sets the candidate priority property on the
+ * monitor for current pg_autoctl node.
+ */
+static void
+cli_set_node_candidate_priority(int argc, char **argv)
+{
+	Keeper keeper = { 0 };
+
+	int candidatePriority = -1;
+
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = false;
+
+	keeper.config = keeperOptions;
+
+	if (argc != 1)
+	{
+		log_error("Failed to parse command line arguments: "
+				  "got %d when 1 is expected",
+				  argc);
 		commandline_help(stderr);
 		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (!keeper_config_read_file(&(keeper.config),
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
+	{
+		/* errors have already been logged. */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (keeper.config.monitorDisabled)
+	{
+		log_error("This node has disabled monitor, "
+				  "pg_autoctl get and set commands are not available.");
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (!keeper_init(&keeper, &keeper.config))
+	{
+		log_fatal("Failed to initialize keeper, see above for details");
+		exit(EXIT_CODE_KEEPER);
+	}
+
+	if (!monitor_init(&(keeper.monitor), keeper.config.monitor_pguri))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	candidatePriority = strtol(argv[0], NULL, 10);
+
+	if (errno == EINVAL || candidatePriority < 0 || candidatePriority > 100)
+	{
+		log_error("candidate-priority value %s is not valid."
+				  " Valid values are integers from 0 to 100. ", argv[0]);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (!monitor_set_node_candidate_priority(&(keeper.monitor),
+											 keeper.state.current_node_id,
+											 keeper.config.nodename,
+											 keeper.config.pgSetup.pgport,
+											 candidatePriority))
+	{
+		log_error("Failed to set \"candidate-priority\" to \"%d\".",
+				  candidatePriority);
+		exit(EXIT_CODE_MONITOR);
+	}
+
+	if (outputJSON)
+	{
+		JSON_Value *js = json_value_init_object();
+		JSON_Object *jsObj = json_value_get_object(js);
+
+		json_object_set_number(jsObj,
+							   "candidate-priority",
+							   (double) candidatePriority);
+
+		(void) cli_pprint_json(js);
+	}
+	else
+	{
+		fprintf(stdout, "%d\n", candidatePriority);
 	}
 }
 
@@ -414,43 +508,31 @@ cli_set_node_property(int argc, char **argv)
  * for a formation the current keeper node belongs to.
  */
 static void
-cli_set_formation_property(int argc, char **argv)
+cli_set_formation_number_sync_standbys(int argc, char **argv)
 {
 	KeeperConfig config = keeperOptions;
 	Monitor monitor = { 0 };
-	char *name = NULL;
-	char *value = NULL;
+
 	int numberSyncStandbys = -1;
 
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
 	bool monitorDisabledIsOk = false;
 
-	if (argc != 2)
+	if (argc != 1)
 	{
-		log_error("Expected 2 but found %d arguments", argc);
+		log_error("Failed to parse command line arguments: "
+				  "got %d when 1 is expected",
+				  argc);
 		commandline_help(stderr);
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	name = argv[0];
-	value = argv[1];
-
-	if (strcmp(name, "number-sync-standbys") == 0)
+	numberSyncStandbys = strtol(argv[0], NULL, 10);
+	if (errno == EINVAL || numberSyncStandbys < 0)
 	{
-		numberSyncStandbys = strtol(value, NULL, 10);
-		if (errno == EINVAL || numberSyncStandbys < 0)
-		{
-			log_error("number-sync-standbys value %s is not valid."
-					  " Expected a non-negative integer value. ", value);
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-
-	}
-	else
-	{
-		log_error("Unknown formation property %s", name);
-		commandline_help(stderr);
+		log_error("number-sync-standbys value %s is not valid."
+				  " Expected a non-negative integer value. ", argv[0]);
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
