@@ -1107,7 +1107,12 @@ prepare_primary_conninfo(char *primaryConnInfo,
 
 	buffer = createPQExpBuffer();
 
-	appendPQExpBuffer(buffer, "host=%s", primaryHost);
+	/* application_name shows up in pg_stat_replication on the primary */
+	appendPQExpBuffer(buffer,
+					  "application_name=pgautofailover_standby_%d",
+					  primaryNodeId);
+
+	appendPQExpBuffer(buffer, " host=%s", primaryHost);
 	appendPQExpBuffer(buffer, " port=%d", primaryPort);
 	appendPQExpBuffer(buffer, " user=%s", replicationUsername);
 
