@@ -47,7 +47,7 @@ bool noPgHba = false;
  *		{ "formation", required_argument, NULL, 'f' },
  *		{ "group", required_argument, NULL, 'g' },
  *		{ "monitor", required_argument, NULL, 'm' },
- *		{ "no-pga-hba", no_argument, NULL, 'N' },
+ *		{ "no-pg-hba", no_argument, NULL, 'N' },
  *		{ "allow-removing-pgdata", no_argument, NULL, 'R' },
  *		{ "help", no_argument, NULL, 0 },
  *		{ NULL, 0, NULL, 0 }
@@ -213,7 +213,7 @@ cli_create_node_getopts(int argc, char **argv,
 
 			case 'N':
 			{
-				/* { "no-pga-hba", no_argument, NULL, 'N' } */
+				/* { "no-pg-hba", no_argument, NULL, 'N' } */
 				noPgHba = true;
 				log_trace("--no-pg-hba");
 				break;
