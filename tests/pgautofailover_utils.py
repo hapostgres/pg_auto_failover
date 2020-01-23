@@ -337,11 +337,16 @@ class DataNode(PGNode):
 
             # only log the state if it has changed
             if current_state != prev_state:
-                print("state of %s is '%s', waiting for '%s' ..." %
-                    (self.datadir, current_state, target_state))
+                if current_state == target_state:
+                    print("state of %s is '%s', done waiting" %
+                          (self.datadir, current_state))
+                else:
+                    print("state of %s is '%s', waiting for '%s' ..." %
+                          (self.datadir, current_state, target_state))
 
             if current_state == target_state:
                 return True
+
             prev_state = current_state
 
         else:
