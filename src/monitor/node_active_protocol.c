@@ -1207,7 +1207,8 @@ start_maintenance(PG_FUNCTION_ARGS)
 	List *secondaryStates = list_make2_int(REPLICATION_STATE_SECONDARY,
 										   REPLICATION_STATE_CATCHINGUP);
 
-	int candidateCount = 0;
+	List *groupNodesList = NIL;
+	int nodesCount = 0;
 
 	char message[BUFSIZE];
 
@@ -1222,7 +1223,9 @@ start_maintenance(PG_FUNCTION_ARGS)
 	LockFormation(currentNode->formationId, ShareLock);
 	LockNodeGroup(currentNode->formationId, currentNode->groupId, ExclusiveLock);
 
-	candidateCount = CountStandbyCandidates(primaryNode, secondaryStates);
+	groupNodesList =
+		AutoFailoverNodeGroup(currentNode->formationId, currentNode->groupId);
+	nodesCount = list_length(groupNodesList);
 
 	/* check pre-conditions for the current node (secondary) */
 	if (currentNode->reportedState == REPLICATION_STATE_MAINTENANCE
@@ -1274,7 +1277,7 @@ start_maintenance(PG_FUNCTION_ARGS)
 	}
 
 	/* primary -> wait_primary when we are losing our only candidate */
-	if (candidateCount == 1)
+	if (nodesCount == 2)
 	{
 		LogAndNotifyMessage(
 			message, BUFSIZE,
