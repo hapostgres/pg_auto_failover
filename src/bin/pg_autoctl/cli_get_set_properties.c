@@ -19,10 +19,12 @@ static void cli_get_formation_number_sync_standbys(int argc, char **argv);
 
 static void cli_set_node_replication_quorum(int argc, char **argv);
 static void cli_set_node_candidate_priority(int argc, char **argv);
+static void cli_set_node_nodename(int argc, char **argv);
 static void cli_set_formation_number_sync_standbys(int arc, char **argv);
 
 static bool set_node_candidate_priority(Keeper *keeper, int candidatePriority);
 static bool set_node_replication_quorum(Keeper *keeper, bool replicationQuorum);
+static bool set_node_nodename(Keeper *keeper, const char *nodename);
 static bool set_formation_number_sync_standbys(Monitor *monitor,
 											   char *formation,
 											   int groupId,
@@ -104,10 +106,19 @@ static CommandLine set_node_candidate_priority_command =
 				 cli_getopt_pgdata,
 				 cli_set_node_candidate_priority);
 
+static CommandLine set_node_nodename_command =
+	make_command("nodename",
+				 "set nodename on the monitor",
+				 CLI_PGDATA_USAGE "<hostname|ipaddr>",
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
+				 cli_set_node_nodename);
+
 
 static CommandLine *set_node_subcommands[] = {
 	&set_node_replication_quorum_command,
 	&set_node_candidate_priority_command,
+	&set_node_nodename_command,
 	NULL
 };
 
@@ -504,6 +515,83 @@ cli_set_node_candidate_priority(int argc, char **argv)
 
 
 /*
+ * cli_set_node_nodename sets this pg_autoctl "nodename" on the monitor. That's
+ * the hostname that is used by every other node in the system to contact the
+ * local node, so it might as well be an IP address.
+ */
+static void
+cli_set_node_nodename(int argc, char **argv)
+{
+	Keeper keeper = { 0 };
+
+	int candidatePriority = -1;
+
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = false;
+
+	keeper.config = keeperOptions;
+
+	if (argc != 1)
+	{
+		log_error("Failed to parse command line arguments: "
+				  "got %d when 1 is expected",
+				  argc);
+		commandline_help(stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (!keeper_config_read_file(&(keeper.config),
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
+	{
+		/* errors have already been logged. */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (keeper.config.monitorDisabled)
+	{
+		log_error("This node has disabled monitor, "
+				  "pg_autoctl get and set commands are not available.");
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (!keeper_init(&keeper, &keeper.config))
+	{
+		log_fatal("Failed to initialize keeper, see above for details");
+		exit(EXIT_CODE_KEEPER);
+	}
+
+	if (!monitor_init(&(keeper.monitor), keeper.config.monitor_pguri))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (!set_node_nodename(&keeper, argv[0]))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_MONITOR);
+	}
+
+	if (outputJSON)
+	{
+		JSON_Value *js = json_value_init_object();
+		JSON_Object *jsObj = json_value_get_object(js);
+
+		json_object_set_string(jsObj, "nodename", argv[0]);
+
+		(void) cli_pprint_json(js);
+	}
+	else
+	{
+		fprintf(stdout, "%s\n", argv[0]);
+	}
+}
+
+
+/*
  * cli_set_formation_property sets a formation property on the monitor
  * for a formation the current keeper node belongs to.
  */
@@ -731,6 +819,45 @@ set_node_replication_quorum(Keeper *keeper, bool replicationQuorum)
 			log_error("Failed to wait until the new setting has been applied");
 			return false;
 		}
+	}
+
+	return true;
+}
+
+
+/*
+ * set_node_nodename sets a new nodename for the current pg_autoctl node on the
+ * monitor. This node might be in an environment where you might get a new IP
+ * at reboot, such as in Kubernetes.
+ */
+static bool
+set_node_nodename(Keeper *keeper, const char *nodename)
+{
+	KeeperStateData keeperState = { 0 };
+	int nodeId = -1;
+
+	if (!keeper_state_read(&keeperState, keeper->config.pathnames.state))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	nodeId = keeperState.current_node_id;
+
+	if (!monitor_set_nodename(&(keeper->monitor), nodeId, nodename))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	strlcpy(keeper->config.nodename, nodename, _POSIX_HOST_NAME_MAX);
+
+	if (!keeper_config_write_file(&(keeper->config)))
+	{
+		log_warn("This node nodename has been updated to \"%s\" on the monitor "
+				 "but could not be update in the local configuration file!",
+				 nodename);
+		return false;
 	}
 
 	return true;

@@ -138,6 +138,26 @@ CREATE TABLE pgautofailover.event
 
 GRANT SELECT ON ALL TABLES IN SCHEMA pgautofailover TO autoctl_node;
 
+CREATE FUNCTION pgautofailover.set_node_nodename
+ (
+    IN node_id   bigint,
+    IN node_name text,
+   OUT node_id   bigint,
+   OUT name      text,
+   OUT port      int
+ )
+RETURNS record LANGUAGE SQL STRICT SECURITY DEFINER
+AS $$
+      update pgautofailover.node
+         set nodename = node_name
+       where nodeid = node_id
+   returning nodeid, nodename, nodeport;
+$$;
+
+grant execute on function pgautofailover.set_node_nodename(bigint,text)
+   to autoctl_node;
+
+
 CREATE FUNCTION pgautofailover.register_node
  (
     IN formation_id         text,
@@ -211,7 +231,7 @@ CREATE FUNCTION pgautofailover.get_primary
  (
     IN formation_id      text default 'default',
     IN group_id          int default 0,
-   OUT secondary_node_id int,
+   OUT primary_node_id   int,
    OUT primary_name      text,
    OUT primary_port      int
  )

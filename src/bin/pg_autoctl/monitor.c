@@ -1847,6 +1847,51 @@ monitor_synchronous_standby_names(Monitor *monitor,
 
 
 /*
+ * monitor_set_nodename sets the nodename on the monitor, using a simple SQL
+ * update command.
+ */
+bool
+monitor_set_nodename(Monitor *monitor, int nodeId, const char *nodename)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql = "SELECT * FROM pgautofailover.set_node_nodename($1, $2)";
+	int paramCount = 2;
+	Oid paramTypes[2] = { INT8OID, TEXTOID };
+	const char *paramValues[2];
+
+	NodeAddress node = { 0 };
+	NodeAddressParseContext parseContext = { { 0 }, &node, false };
+
+	paramValues[0] = intToString(nodeId).strValue;
+	paramValues[1] = nodename;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &parseContext, parseNodeResult))
+	{
+		log_error("Failed to set_node_nodename of node %d from the monitor",
+				  nodeId);
+		return false;
+	}
+
+	/* disconnect from PostgreSQL now */
+	pgsql_finish(&monitor->pgsql);
+
+	if (!parseContext.parsedOK)
+	{
+		log_error(
+			"Failed to set node %d nodename to \"%s\" on the monitor "
+			"because it returned an unexpected result. "
+			"See previous line for details.",
+			nodeId, nodename);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
  * parseCoordinatorNode parses a hostname and a port from the libpq result and
  * writes it to the NodeAddressParseContext pointed to by ctx. This is about
  * the same as parseNode: the only difference is that an empty result set is

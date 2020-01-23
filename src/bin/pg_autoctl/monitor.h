@@ -117,6 +117,8 @@ bool monitor_synchronous_standby_names(Monitor *monitor,
 									   char *synchronous_standby_names,
 									   int size);
 
+bool monitor_set_nodename(Monitor *monitor, int nodeId, const char *nodename);
+
 bool monitor_start_maintenance(Monitor *monitor, char *host, int port);
 bool monitor_stop_maintenance(Monitor *monitor, char *host, int port);
 
