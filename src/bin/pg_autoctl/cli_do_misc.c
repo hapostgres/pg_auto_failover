@@ -255,7 +255,7 @@ keeper_cli_add_standby_to_hba(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!noPgHba)
+	if (!skipPgHba)
 	{
 		if (!primary_add_standby_to_hba(&postgres, standbyHostname, config.replication_password))
 		{

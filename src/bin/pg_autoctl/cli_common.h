@@ -21,7 +21,7 @@
 extern MonitorConfig monitorOptions;
 extern KeeperConfig keeperOptions;
 extern bool allowRemovingPgdata;
-extern bool noPgHba;
+extern bool skipPgHba;
 
 #define KEEPER_CLI_WORKER_SETUP_OPTIONS \
 	"  --pgctl       path to pg_ctl\n" \
@@ -57,7 +57,7 @@ extern bool noPgHba;
 	"  --pgdata      path to data directory\n" \
 
 #define KEEPER_NO_PG_HBA \
-	"  --no-pg-hba   Do not allow pg_autoctl to manage pg_hba.conf\n"
+	"  --skip-pg-hba   Do not allow pg_autoctl to manage pg_hba.conf\n"
 
 /* cli_do.c */
 extern CommandLine do_commands;

@@ -414,7 +414,7 @@ reach_initial_state(Keeper *keeper)
 			 * existing PostgreSQL primary server instance, making sure that
 			 * the parameters are all set.
 			 */
-			if (!noPgHba
+			if (!skipPgHba
 				&& pgInstanceIsOurs)
 			{
 				if (getenv("PG_REGRESS_SOCK_DIR") != NULL)
@@ -712,7 +712,7 @@ create_database_and_extension(Keeper *keeper)
 	/* we didn't start PostgreSQL yet, also we just ran initdb */
 	snprintf(hbaFilePath, MAXPGPATH, "%s/pg_hba.conf", pgSetup->pgdata);
 
-	if (!noPgHba)
+	if (!skipPgHba)
 	{
 		/*
 		* The Postgres URI given to the user by our facility is going to use
@@ -815,7 +815,7 @@ create_database_and_extension(Keeper *keeper)
 	 * Now allow nodes on the same network to connect to the coordinator, and
 	 * the coordinator to connect to its workers.
 	 */
-	if (!noPgHba
+	if (!skipPgHba
 		&& IS_CITUS_INSTANCE_KIND(postgres->pgKind))
 	{
 		(void) pghba_enable_lan_cidr(&initPostgres.sqlClient,

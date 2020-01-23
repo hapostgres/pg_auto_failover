@@ -26,7 +26,7 @@
 /* handle command line options for our setup. */
 KeeperConfig keeperOptions;
 bool allowRemovingPgdata = false;
-bool noPgHba = false;
+bool skipPgHba = false;
 
 
 /*
@@ -47,7 +47,7 @@ bool noPgHba = false;
  *		{ "formation", required_argument, NULL, 'f' },
  *		{ "group", required_argument, NULL, 'g' },
  *		{ "monitor", required_argument, NULL, 'm' },
- *		{ "no-pg-hba", no_argument, NULL, 'N' },
+ *		{ "skip-pg-hba", no_argument, NULL, 's' },
  *		{ "allow-removing-pgdata", no_argument, NULL, 'R' },
  *		{ "help", no_argument, NULL, 0 },
  *		{ NULL, 0, NULL, 0 }
@@ -211,14 +211,6 @@ cli_create_node_getopts(int argc, char **argv,
 				break;
 			}
 
-			case 'N':
-			{
-				/* { "no-pg-hba", no_argument, NULL, 'N' } */
-				noPgHba = true;
-				log_trace("--no-pg-hba");
-				break;
-			}
-
 			case 'R':
 			{
 				/* { "allow-removing-pgdata", no_argument, NULL, 'R' } */
@@ -226,6 +218,15 @@ cli_create_node_getopts(int argc, char **argv,
 				log_trace("--allow-removing-pgdata");
 				break;
 			}
+
+			case 's':
+			{
+				/* { "skip-pg-hba", no_argument, NULL, 'N' } */
+				skipPgHba = true;
+				log_trace("--skip-pg-hba");
+				break;
+			}
+
 
 			default:
 			{

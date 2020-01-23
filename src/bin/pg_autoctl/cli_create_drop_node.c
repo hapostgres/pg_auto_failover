@@ -332,10 +332,10 @@ cli_create_monitor_getopts(int argc, char **argv)
 				break;
 			}
 
-			case 'N':
+			case 's':
 			{
-				noPgHba = true;
-				log_trace("--no-pg-hba");
+				skipPgHba = true;
+				log_trace("--skip-pg-hba");
 				break;
 			}
 

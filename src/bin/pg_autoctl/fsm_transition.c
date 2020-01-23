@@ -103,7 +103,7 @@ fsm_init_primary(Keeper *keeper)
 	password = NULL;
 	authMethod = pg_setup_get_auth_method(&(config->pgSetup));
 
-	if (!noPgHba) {
+	if (!skipPgHba) {
 		if (!primary_create_user(postgres,
 								 PG_AUTOCTL_HEALTH_USERNAME, password,
 								 monitorHostname, authMethod))
@@ -261,7 +261,7 @@ prepare_replication(Keeper *keeper, bool other_node_missing_is_ok)
 		return other_node_missing_is_ok;
 	}
 
-	if (!noPgHba)
+	if (!skipPgHba)
 	{
 		if (!primary_add_standby_to_hba(postgres,
 										otherNode.host,
