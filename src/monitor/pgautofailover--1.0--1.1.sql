@@ -368,3 +368,63 @@ grant execute on function pgautofailover.stop_maintenance(text,int)
 
 ALTER FUNCTION pgautofailover.perform_failover(text,int)
       SECURITY DEFINER;
+
+
+create function pgautofailover.synchronous_standby_names
+ (
+    IN formation_id text default 'default',
+    IN group_id     int default 0
+ )
+returns text language C strict
+AS 'MODULE_PATHNAME', $$synchronous_standby_names$$;
+
+comment on function pgautofailover.synchronous_standby_names(text, int)
+        is 'get the synchronous_standby_names setting for a given group';
+
+grant execute on function
+      pgautofailover.synchronous_standby_names(text, int)
+   to autoctl_node;
+
+
+CREATE OR REPLACE FUNCTION pgautofailover.adjust_number_sync_standbys()
+  RETURNS trigger
+  LANGUAGE 'plpgsql'
+AS $$
+declare
+  standby_count integer := null;
+  number_sync_standbys integer := null;
+begin
+   select count(*) - 1
+     into standby_count
+     from pgautofailover.node
+    where formationid = old.formationid;
+
+   select formation.number_sync_standbys
+     into number_sync_standbys
+     from pgautofailover.formation
+    where formation.formationid = old.formationid;
+
+  if number_sync_standbys > 1
+  then
+    -- we must have number_sync_standbys + 1 <= standby_count
+    if (number_sync_standbys + 1) > standby_count
+    then
+      update pgautofailover.formation
+         set number_sync_standbys = greatest(standby_count - 1, 1)
+       where formation.formationid = old.formationid;
+    end if;
+  end if;
+
+  return old;
+end
+$$;
+
+comment on function pgautofailover.adjust_number_sync_standbys()
+        is 'adjust formation number_sync_standbys when removing a node, if needed';
+
+CREATE TRIGGER adjust_number_sync_standbys
+         AFTER DELETE
+            ON pgautofailover.node
+           FOR EACH ROW
+       EXECUTE PROCEDURE pgautofailover.adjust_number_sync_standbys();
+
