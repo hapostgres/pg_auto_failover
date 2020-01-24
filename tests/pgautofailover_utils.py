@@ -323,7 +323,8 @@ class DataNode(PGNode):
             self.pg_autoctl.execute("pg_autoctl create")
 
 
-    def wait_until_state(self, target_state, timeout=STATE_CHANGE_TIMEOUT):
+    def wait_until_state(self, target_state,
+                         timeout=STATE_CHANGE_TIMEOUT, sleep_time=1):
         """
         Waits until this data node reaches the target state, and then returns
         True. If this doesn't happen until "timeout" seconds, returns False.
@@ -331,17 +332,25 @@ class DataNode(PGNode):
         prev_state = None
         for i in range(timeout):
             # ensure we read from the pg_autoctl process pipe
-            self.pg_autoctl.consume_output(1)
+            if self.pg_autoctl and self.pg_autoctl.run_proc:
+                self.pg_autoctl.consume_output(sleep_time)
+            else:
+                time.sleep(sleep_time)
 
             current_state = self.get_state()
 
             # only log the state if it has changed
             if current_state != prev_state:
-                print("state of %s is '%s', waiting for '%s' ..." %
-                    (self.datadir, current_state, target_state))
+                if current_state == target_state:
+                    print("state of %s is '%s', done waiting" %
+                          (self.datadir, current_state))
+                else:
+                    print("state of %s is '%s', waiting for '%s' ..." %
+                          (self.datadir, current_state, target_state))
 
             if current_state == target_state:
                 return True
+
             prev_state = current_state
 
         else:
@@ -349,11 +358,16 @@ class DataNode(PGNode):
                 (self.datadir, target_state, timeout))
 
             events = self.get_events_str()
-            out, err = self.stop_pg_autoctl()
-            raise Exception("%s failed to reach %s after %d attempts: " \
-                            "\n%s\n%s\n%s" %
-                            (self.datadir, target_state, timeout,
-                             out, err, events))
+
+            if self.pg_autoctl and self.pg_autoctl.run_proc:
+                out, err = self.stop_pg_autoctl()
+                raise Exception("%s failed to reach %s after %d attempts: " \
+                                "\n%s\n%s\n%s" %
+                                (self.datadir, target_state, timeout,
+                                 out, err, events))
+            else:
+                raise Exception("%s failed to reach %s after %d attempts:\n%s" %
+                                (self.datadir, target_state, timeout, events))
             return False
 
     def get_state(self):

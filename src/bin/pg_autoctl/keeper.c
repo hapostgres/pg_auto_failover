@@ -114,6 +114,57 @@ keeper_update_state(Keeper *keeper, int node_id, int group_id,
 
 
 /*
+ * keeper_should_ensure_current_state returns true when pg_autoctl should
+ * ensure that Postgres is running, or not running, depending on the current
+ * FSM state, before calling the transition function to the next state.
+ *
+ * At the moment, the only cases when we DON'T want to ensure the current state
+ * are when either the current state or the goal state are one of the following:
+ *
+ *  - DRAINING
+ *  - DEMOTED
+ *  - DEMOTE TIMEOUT
+ *
+ * That's because we would then stop Postgres first when going from DEMOTED to
+ * SINGLE, or ensure Postgres is running when going from PRIMARY to DEMOTED.
+ * This last example is a split-brain hazard, too.
+ */
+bool
+keeper_should_ensure_current_state_before_transition(Keeper *keeper)
+{
+	KeeperStateData *keeperState = &(keeper->state);
+
+	if (keeperState->assigned_role == keeperState->current_role)
+	{
+		/* this function should not be called in that case */
+		log_debug("BUG: keeper_should_ensure_current_state_before_transition "
+				  "called with assigned role == current role == %s",
+				  NodeStateToString(keeperState->assigned_role));
+		return false;
+	}
+
+	if (keeperState->assigned_role == DEMOTED_STATE
+		|| keeperState->assigned_role == DEMOTE_TIMEOUT_STATE
+		|| keeperState->assigned_role == DEMOTED_STATE)
+	{
+		/* don't ensure Postgres is running before shutting it down */
+		return false;
+	}
+
+	if (keeperState->current_role == DEMOTED_STATE
+		|| keeperState->current_role == DEMOTE_TIMEOUT_STATE
+		|| keeperState->current_role == DEMOTED_STATE)
+	{
+		/* don't ensure Postgres is down before starting it again */
+		return false;
+	}
+
+	/* in all other cases, yes please ensure the current state */
+	return true;
+}
+
+
+/*
  * keeper_ensure_current_state ensures that the current keeper's state is met
  * with the current PostgreSQL status, at minimum that PostgreSQL is running
  * when it's expected to be, etc.
