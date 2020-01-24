@@ -49,7 +49,10 @@ def test_004_demoted():
     print("stopped pg_autoctl and postgres, now waiting for 30s")
     time.sleep(30)
     node1.run()
-    assert node1.wait_until_state(target_state="demoted")
+
+    # we might miss DEMOTE_TIMEOUT -> DEMOTED if we wait for a full second
+    # here
+    assert node1.wait_until_state(target_state="demoted", sleep_time=0.1)
 
     # ideally we should be able to check that we refrain from starting
     # postgres again before calling the transition function

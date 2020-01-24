@@ -323,7 +323,8 @@ class DataNode(PGNode):
             self.pg_autoctl.execute("pg_autoctl create")
 
 
-    def wait_until_state(self, target_state, timeout=STATE_CHANGE_TIMEOUT):
+    def wait_until_state(self, target_state,
+                         timeout=STATE_CHANGE_TIMEOUT, sleep_time=1):
         """
         Waits until this data node reaches the target state, and then returns
         True. If this doesn't happen until "timeout" seconds, returns False.
@@ -332,9 +333,9 @@ class DataNode(PGNode):
         for i in range(timeout):
             # ensure we read from the pg_autoctl process pipe
             if self.pg_autoctl and self.pg_autoctl.run_proc:
-                self.pg_autoctl.consume_output(1)
+                self.pg_autoctl.consume_output(sleep_time)
             else:
-                time.sleep(1)
+                time.sleep(sleep_time)
 
             current_state = self.get_state()
 
