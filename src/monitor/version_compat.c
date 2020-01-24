@@ -12,7 +12,7 @@
 #if (PG_VERSION_NUM < 110000)
 
 /*
- * The list_qsort API was introduced in Postgres 12:
+ * The list_qsort API was introduced in Postgres 11:
  *
  * https://git.postgresql.org/gitweb/?p=postgresql.git;a=commit;h=ab72716778128fb63d54ac256adf7fe6820a1185
  */
