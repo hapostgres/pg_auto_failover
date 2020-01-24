@@ -331,7 +331,10 @@ class DataNode(PGNode):
         prev_state = None
         for i in range(timeout):
             # ensure we read from the pg_autoctl process pipe
-            self.pg_autoctl.consume_output(1)
+            if self.pg_autoctl and self.pg_autoctl.run_proc:
+                self.pg_autoctl.consume_output(1)
+            else:
+                time.sleep(1)
 
             current_state = self.get_state()
 
@@ -354,11 +357,16 @@ class DataNode(PGNode):
                 (self.datadir, target_state, timeout))
 
             events = self.get_events_str()
-            out, err = self.stop_pg_autoctl()
-            raise Exception("%s failed to reach %s after %d attempts: " \
-                            "\n%s\n%s\n%s" %
-                            (self.datadir, target_state, timeout,
-                             out, err, events))
+
+            if self.pg_autoctl and self.pg_autoctl.run_proc:
+                out, err = self.stop_pg_autoctl()
+                raise Exception("%s failed to reach %s after %d attempts: " \
+                                "\n%s\n%s\n%s" %
+                                (self.datadir, target_state, timeout,
+                                 out, err, events))
+            else:
+                raise Exception("%s failed to reach %s after %d attempts:\n%s" %
+                                (self.datadir, target_state, timeout, events))
             return False
 
     def get_state(self):

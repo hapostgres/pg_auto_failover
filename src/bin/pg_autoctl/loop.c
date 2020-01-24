@@ -272,12 +272,22 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 			 * The transition function we call next might depend on our
 			 * assumption that Postgres is running in the current state.
 			 */
-			if (!keeper_ensure_current_state(keeper))
+			if (keeper_should_ensure_current_state_before_transition(keeper))
 			{
-				log_warn("pg_autoctl failed to ensure current state \"%s\": "
-						 "PostgreSQL %s running",
-						 NodeStateToString(keeperState->current_role),
-						 postgres->pgIsRunning ? "is" : "is not");
+				if (!keeper_ensure_current_state(keeper))
+				{
+					/*
+					 * We don't take care of the warnedOnCurrentIteration here
+					 * because the real thing that should happen is the
+					 * transition to the next state. That's what we keep track
+					 * of with "transitionFailed".
+					 */
+					log_warn(
+						"pg_autoctl failed to ensure current state \"%s\": "
+						"PostgreSQL %s running",
+						NodeStateToString(keeperState->current_role),
+						postgres->pgIsRunning ? "is" : "is not");
+				}
 			}
 
 			if (!keeper_fsm_reach_assigned_state(keeper))
