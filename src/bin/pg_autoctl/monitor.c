@@ -9,6 +9,7 @@
 #include <inttypes.h>
 #include <limits.h>
 #include <sys/select.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "defaults.h"
@@ -2059,6 +2060,12 @@ monitor_get_notifications(Monitor *monitor)
 		return false;
 	}
 
+	/*
+	 * It looks like we are violating modularity of the code, when we are
+	 * following Postgres documentation and examples:
+	 *
+	 * https://www.postgresql.org/docs/current/libpq-example.html#LIBPQ-EXAMPLE-2
+	 */
 	sock = PQsocket(connection);
 
 	if (sock < 0)
@@ -2133,8 +2140,10 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 											const char *formation)
 {
 	PGconn *connection = monitor->pgsql.connection;
-	bool		applySettingsTransitionInProgress = false;
-	bool		applySettingsTransitionDone = false;
+	bool applySettingsTransitionInProgress = false;
+	bool applySettingsTransitionDone = false;
+
+	uint64_t start = time(NULL);
 
 	if (connection == NULL)
 	{
@@ -2152,6 +2161,21 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 		fd_set      input_mask;
 		PGnotify   *notify;
 
+		uint64_t now = time(NULL);
+
+		if ((now - start) > PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT)
+		{
+			log_error("Failed to receive monitor's notifications that the "
+					  "settings have been applied");
+			break;
+		}
+
+		/*
+		 * It looks like we are violating modularity of the code, when we are
+		 * following Postgres documentation and examples:
+		 *
+		 * https://www.postgresql.org/docs/current/libpq-example.html#LIBPQ-EXAMPLE-2
+		 */
 		sock = PQsocket(connection);
 
 		if (sock < 0)
@@ -2171,6 +2195,14 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 		while ((notify = PQnotifies(connection)) != NULL)
 		{
 			StateNotification notification = { 0 };
+
+			uint64_t now = time(NULL);
+
+			if ((now - start) > PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT)
+			{
+				/* errors are handled in the main loop */
+				break;
+			}
 
 			if (strcmp(notify->relname, "state") != 0)
 			{
@@ -2273,6 +2305,8 @@ monitor_wait_until_node_reported_state(Monitor *monitor,
 	PGconn *connection = monitor->pgsql.connection;
 	bool reachedMaintenance = false;
 
+	uint64_t start = time(NULL);
+
 	if (connection == NULL)
 	{
  		log_warn("Lost connection.");
@@ -2286,6 +2320,21 @@ monitor_wait_until_node_reported_state(Monitor *monitor,
 		fd_set      input_mask;
 		PGnotify   *notify;
 
+		uint64_t now = time(NULL);
+
+		if ((now - start) > PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT)
+		{
+			log_error("Failed to receive monitor's notifications that the "
+					  "settings have been applied");
+			break;
+		}
+
+		/*
+		 * It looks like we are violating modularity of the code, when we are
+		 * following Postgres documentation and examples:
+		 *
+		 * https://www.postgresql.org/docs/current/libpq-example.html#LIBPQ-EXAMPLE-2
+		 */
 		sock = PQsocket(connection);
 
 		if (sock < 0)
@@ -2305,6 +2354,14 @@ monitor_wait_until_node_reported_state(Monitor *monitor,
 		while ((notify = PQnotifies(connection)) != NULL)
 		{
 			StateNotification notification = { 0 };
+
+			uint64_t now = time(NULL);
+
+			if ((now - start) > PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT)
+			{
+				/* errors are handled in the main loop */
+				break;
+			}
 
 			if (strcmp(notify->relname, "state") != 0)
 			{
