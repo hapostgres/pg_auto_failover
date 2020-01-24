@@ -43,6 +43,7 @@ bool keeper_update_state(Keeper *keeper, int node_id, int group_id, NodeState st
 						 bool update_last_monitor_contact);
 bool keeper_start_postgres(Keeper *keeper);
 bool keeper_restart_postgres(Keeper *keeper);
+bool keeper_should_ensure_current_state_before_transition(Keeper *keeper);
 bool keeper_ensure_current_state(Keeper *keeper);
 bool keeper_update_pg_state(Keeper *keeper);
 bool ReportPgIsRunning(Keeper *keeper);
