@@ -51,6 +51,7 @@ bool fsm_stop_replication(Keeper *keeper);
 
 bool fsm_enable_sync_rep(Keeper *keeper);
 bool fsm_disable_sync_rep(Keeper *keeper);
+bool fsm_apply_settings(Keeper *keeper);
 
 bool fsm_start_postgres(Keeper *keeper);
 bool fsm_stop_postgres(Keeper *keeper);

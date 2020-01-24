@@ -256,6 +256,28 @@ primary_drop_replication_slot(LocalPostgresServer *postgres, char *replicationSl
  * on a primary postgres node.
  */
 bool
+primary_set_synchronous_standby_names(LocalPostgresServer *postgres,
+									  char *synchronous_standby_names)
+{
+	bool result = false;
+	PGSQL *pgsql = &(postgres->sqlClient);
+
+	log_info("Setting synchronous_standby_names to '%s'",
+			 synchronous_standby_names);
+
+	result =
+		pgsql_set_synchronous_standby_names(pgsql, synchronous_standby_names);
+
+	pgsql_finish(pgsql);
+	return result;
+}
+
+
+/*
+ * primary_enable_synchronous_replication enables synchronous replication
+ * on a primary postgres node.
+ */
+bool
 primary_enable_synchronous_replication(LocalPostgresServer *postgres)
 {
 	bool result = false;

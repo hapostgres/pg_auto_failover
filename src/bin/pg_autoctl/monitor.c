@@ -9,6 +9,7 @@
 #include <inttypes.h>
 #include <limits.h>
 #include <sys/select.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "defaults.h"
@@ -641,9 +642,6 @@ monitor_set_node_candidate_priority(Monitor *monitor,
 		success = false;
 	}
 
-	/* disconnect from monitor */
-	pgsql_finish(&monitor->pgsql);
-
 	return success;
 }
 
@@ -680,9 +678,6 @@ monitor_set_node_replication_quorum(Monitor *monitor, int nodeid,
 
 		success = false;
 	}
-
-	/* disconnect from monitor */
-	pgsql_finish(&monitor->pgsql);
 
 	return success;
 }
@@ -867,9 +862,6 @@ monitor_set_formation_number_sync_standbys(Monitor *monitor, char *formation,
 
 		return false;
 	}
-
-	/* disconnect from monitor */
-	pgsql_finish(&monitor->pgsql);
 
 	if (!parseContext.parsedOk)
 	{
@@ -1802,6 +1794,105 @@ monitor_formation_uri(Monitor *monitor, const char *formation,
 
 
 /*
+ * monitor_synchronous_standby_names returns the value for the Postgres
+ * parameter "synchronous_standby_names" to use for a given group. The setting
+ * is computed on the monitor depending on the current values of the formation
+ * number_sync_standbys and each node's candidate priority and replication
+ * quorum properties.
+ */
+bool
+monitor_synchronous_standby_names(Monitor *monitor,
+								  char *formation, int groupId,
+								  char *synchronous_standby_names, int size)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_STRING, false };
+
+	const char *sql =
+		"select pgautofailover.synchronous_standby_names($1, $2)";
+
+	int paramCount = 2;
+	Oid paramTypes[2] = { TEXTOID, INT4OID };
+	const char *paramValues[2] = { 0 };
+	IntString myGroupIdString = intToString(groupId);
+
+	paramValues[0] = formation;
+	paramValues[1] = myGroupIdString.strValue;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &parseSingleValueResult))
+	{
+		log_error("Failed to get the synchronous_standby_names setting value "
+				  " from the monitor for formation %s and group %d",
+				  formation, groupId);
+		return false;
+	}
+
+	/* disconnect from PostgreSQL now */
+	pgsql_finish(&monitor->pgsql);
+
+	if (!context.parsedOk)
+	{
+		log_error("Failed to get the synchronous_standby_names setting value "
+				  " from the monitor for formation %s and group %d,"
+				  "see above for details",
+				  formation, groupId);
+		return false;
+	}
+
+	strlcpy(synchronous_standby_names, context.strVal, size);
+
+	return true;
+}
+
+
+/*
+ * monitor_set_nodename sets the nodename on the monitor, using a simple SQL
+ * update command.
+ */
+bool
+monitor_set_nodename(Monitor *monitor, int nodeId, const char *nodename)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql = "SELECT * FROM pgautofailover.set_node_nodename($1, $2)";
+	int paramCount = 2;
+	Oid paramTypes[2] = { INT8OID, TEXTOID };
+	const char *paramValues[2];
+
+	NodeAddress node = { 0 };
+	NodeAddressParseContext parseContext = { { 0 }, &node, false };
+
+	paramValues[0] = intToString(nodeId).strValue;
+	paramValues[1] = nodename;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &parseContext, parseNodeResult))
+	{
+		log_error("Failed to set_node_nodename of node %d from the monitor",
+				  nodeId);
+		return false;
+	}
+
+	/* disconnect from PostgreSQL now */
+	pgsql_finish(&monitor->pgsql);
+
+	if (!parseContext.parsedOK)
+	{
+		log_error(
+			"Failed to set node %d nodename to \"%s\" on the monitor "
+			"because it returned an unexpected result. "
+			"See previous line for details.",
+			nodeId, nodename);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
  * parseCoordinatorNode parses a hostname and a port from the libpq result and
  * writes it to the NodeAddressParseContext pointed to by ctx. This is about
  * the same as parseNode: the only difference is that an empty result set is
@@ -1894,9 +1985,6 @@ monitor_start_maintenance(Monitor *monitor, char *host, int port)
 		return false;
 	}
 
-	/* disconnect from PostgreSQL now */
-	pgsql_finish(&monitor->pgsql);
-
 	if (!context.parsedOk)
 	{
 		log_error("Failed to start_maintenance of node %s:%d from the monitor: "
@@ -1935,9 +2023,6 @@ monitor_stop_maintenance(Monitor *monitor, char *host, int port)
 		return false;
 	}
 
-	/* disconnect from PostgreSQL now */
-	pgsql_finish(&monitor->pgsql);
-
 	if (!context.parsedOk)
 	{
 		log_error("Failed to stop_maintenance of node %s:%d from the monitor: "
@@ -1975,6 +2060,12 @@ monitor_get_notifications(Monitor *monitor)
 		return false;
 	}
 
+	/*
+	 * It looks like we are violating modularity of the code, when we are
+	 * following Postgres documentation and examples:
+	 *
+	 * https://www.postgresql.org/docs/current/libpq-example.html#LIBPQ-EXAMPLE-2
+	 */
 	sock = PQsocket(connection);
 
 	if (sock < 0)
@@ -2028,6 +2119,297 @@ monitor_get_notifications(Monitor *monitor)
 	}
 
 	return true;
+}
+
+
+/*
+ * monitor_wait_until_primary_applied_settings receives notifications and
+ * watches for the following "apply_settings" set of transitions:
+ *
+ *  - primary/apply_settings
+ *  - apply_settings/apply_settings
+ *  - apply_settings/primary
+ *  - primary/primary
+ *
+ * If we lose the monitor connection while watching for the transition steps
+ * then we stop watching. It's a best effort attempt at having the CLI be
+ * useful for its user, the main one being the test suite.
+ */
+bool
+monitor_wait_until_primary_applied_settings(Monitor *monitor,
+											const char *formation)
+{
+	PGconn *connection = monitor->pgsql.connection;
+	bool applySettingsTransitionInProgress = false;
+	bool applySettingsTransitionDone = false;
+
+	uint64_t start = time(NULL);
+
+	if (connection == NULL)
+	{
+ 		log_warn("Lost connection.");
+		return false;
+	}
+
+	log_info("Waiting for the settings to have been applied to "
+			 "the monitor and primary node");
+
+	while (!applySettingsTransitionDone)
+	{
+		/* Sleep until something happens on the connection. */
+		int         sock;
+		fd_set      input_mask;
+		PGnotify   *notify;
+
+		uint64_t now = time(NULL);
+
+		if ((now - start) > PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT)
+		{
+			log_error("Failed to receive monitor's notifications that the "
+					  "settings have been applied");
+			break;
+		}
+
+		/*
+		 * It looks like we are violating modularity of the code, when we are
+		 * following Postgres documentation and examples:
+		 *
+		 * https://www.postgresql.org/docs/current/libpq-example.html#LIBPQ-EXAMPLE-2
+		 */
+		sock = PQsocket(connection);
+
+		if (sock < 0)
+			return false;	/* shouldn't happen */
+
+		FD_ZERO(&input_mask);
+		FD_SET(sock, &input_mask);
+
+		if (select(sock + 1, &input_mask, NULL, NULL, NULL) < 0)
+		{
+			log_warn("select() failed: %s\n", strerror(errno));
+			return false;
+		}
+
+		/* Now check for input */
+		PQconsumeInput(connection);
+		while ((notify = PQnotifies(connection)) != NULL)
+		{
+			StateNotification notification = { 0 };
+
+			uint64_t now = time(NULL);
+
+			if ((now - start) > PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT)
+			{
+				/* errors are handled in the main loop */
+				break;
+			}
+
+			if (strcmp(notify->relname, "state") != 0)
+			{
+				log_warn("%s: %s", notify->relname, notify->extra);
+				continue;
+			}
+
+			log_debug("received \"%s\"", notify->extra);
+
+			/* the parsing scribbles on the message, make a copy now */
+			strlcpy(notification.message, notify->extra, BUFSIZE);
+
+			/* errors are logged by parse_state_notification_message */
+			if (!parse_state_notification_message(&notification))
+			{
+				log_warn("Failed to parse notification message \"%s\"",
+						 notify->extra);
+				continue;
+			}
+
+			/* filter notifications for our own formation */
+			if (strcmp(notification.formationId, formation) != 0)
+			{
+				continue;
+			}
+
+			if (notification.reportedState == PRIMARY_STATE
+				&& notification.goalState == APPLY_SETTINGS_STATE)
+			{
+				applySettingsTransitionInProgress = true;
+
+				log_debug("step 1/4: primary node %d (%s:%d) is assigned \"%s\"",
+						  notification.nodeId,
+						  notification.nodeName,
+						  notification.nodePort,
+						  NodeStateToString(notification.goalState));
+			}
+			else if (notification.reportedState == APPLY_SETTINGS_STATE
+					 && notification.goalState == APPLY_SETTINGS_STATE)
+			{
+				applySettingsTransitionInProgress = true;
+
+				log_debug("step 2/4: primary node %d (%s:%d) reported \"%s\"",
+						  notification.nodeId,
+						  notification.nodeName,
+						  notification.nodePort,
+						  NodeStateToString(notification.reportedState));
+			}
+			else if (notification.reportedState == APPLY_SETTINGS_STATE
+					 && notification.goalState == PRIMARY_STATE)
+			{
+				applySettingsTransitionInProgress = true;
+
+				log_debug("step 3/4: primary node %d (%s:%d) is assigned \"%s\"",
+						  notification.nodeId,
+						  notification.nodeName,
+						  notification.nodePort,
+						  NodeStateToString(notification.goalState));
+			}
+			else if (applySettingsTransitionInProgress
+					 && notification.reportedState == PRIMARY_STATE
+					 && notification.goalState == PRIMARY_STATE)
+			{
+				applySettingsTransitionDone = true;
+
+				log_debug("step 4/4: primary node %d (%s:%d) reported \"%s\"",
+						  notification.nodeId,
+						  notification.nodeName,
+						  notification.nodePort,
+						  NodeStateToString(notification.reportedState));
+			}
+
+			/* prepare next iteration */
+			PQfreemem(notify);
+			PQconsumeInput(connection);
+		}
+	}
+
+	/* disconnect from monitor */
+	pgsql_finish(&monitor->pgsql);
+
+	return applySettingsTransitionDone;
+}
+
+
+/*
+ * monitor_wait_until_node_reported_maintenance receives notifications and
+ * watches for the given node to have goalState and reportedState set to given
+ * state.
+ *
+ * If we lose the monitor connection while watching for the transition steps
+ * then we stop watching. It's a best effort attempt at having the CLI be
+ * useful for its user, the main one being the test suite.
+ */
+bool
+monitor_wait_until_node_reported_state(Monitor *monitor,
+									   int nodeId,
+									   NodeState state)
+{
+	PGconn *connection = monitor->pgsql.connection;
+	bool reachedMaintenance = false;
+
+	uint64_t start = time(NULL);
+
+	if (connection == NULL)
+	{
+ 		log_warn("Lost connection.");
+		return false;
+	}
+
+	while (!reachedMaintenance)
+	{
+		/* Sleep until something happens on the connection. */
+		int         sock;
+		fd_set      input_mask;
+		PGnotify   *notify;
+
+		uint64_t now = time(NULL);
+
+		if ((now - start) > PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT)
+		{
+			log_error("Failed to receive monitor's notifications that the "
+					  "settings have been applied");
+			break;
+		}
+
+		/*
+		 * It looks like we are violating modularity of the code, when we are
+		 * following Postgres documentation and examples:
+		 *
+		 * https://www.postgresql.org/docs/current/libpq-example.html#LIBPQ-EXAMPLE-2
+		 */
+		sock = PQsocket(connection);
+
+		if (sock < 0)
+			return false;	/* shouldn't happen */
+
+		FD_ZERO(&input_mask);
+		FD_SET(sock, &input_mask);
+
+		if (select(sock + 1, &input_mask, NULL, NULL, NULL) < 0)
+		{
+			log_warn("select() failed: %s\n", strerror(errno));
+			return false;
+		}
+
+		/* Now check for input */
+		PQconsumeInput(connection);
+		while ((notify = PQnotifies(connection)) != NULL)
+		{
+			StateNotification notification = { 0 };
+
+			uint64_t now = time(NULL);
+
+			if ((now - start) > PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT)
+			{
+				/* errors are handled in the main loop */
+				break;
+			}
+
+			if (strcmp(notify->relname, "state") != 0)
+			{
+				log_warn("%s: %s", notify->relname, notify->extra);
+				continue;
+			}
+
+			log_debug("received \"%s\"", notify->extra);
+
+			/* the parsing scribbles on the message, make a copy now */
+			strlcpy(notification.message, notify->extra, BUFSIZE);
+
+			/* errors are logged by parse_state_notification_message */
+			if (!parse_state_notification_message(&notification))
+			{
+				log_warn("Failed to parse notification message \"%s\"",
+						 notify->extra);
+				continue;
+			}
+
+			/* filter notifications for our own formation */
+			if (notification.nodeId != nodeId)
+			{
+				continue;
+			}
+
+			if (notification.reportedState == state
+				&& notification.goalState == state)
+			{
+				reachedMaintenance = true;
+
+				log_debug("node %d (%s:%d) is now in state \"%s\"",
+						  notification.nodeId,
+						  notification.nodeName,
+						  notification.nodePort,
+						  NodeStateToString(state));
+			}
+
+			/* prepare next iteration */
+			PQfreemem(notify);
+			PQconsumeInput(connection);
+		}
+	}
+
+	/* disconnect from monitor */
+	pgsql_finish(&monitor->pgsql);
+
+	return reachedMaintenance;
 }
 
 
@@ -2399,7 +2781,9 @@ monitor_service_run(Monitor *monitor,  struct MonitorConfig *mconfig)
 	{
 		if (!ensure_monitor_pg_running(monitor, mconfig))
 		{
-			log_warn("Failed to ensure PostgreSQL is running, retrying in %d seconds", PG_AUTOCTL_MONITOR_SLEEP_TIME);
+			log_warn("Failed to ensure PostgreSQL is running, "
+					 "retrying in %d seconds",
+					 PG_AUTOCTL_MONITOR_SLEEP_TIME);
 			sleep(PG_AUTOCTL_MONITOR_SLEEP_TIME);
 			continue;
 		}

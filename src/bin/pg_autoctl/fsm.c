@@ -118,6 +118,12 @@
 	"Promoting a Citus Worker standby after having blocked writes " \
 	"from the coordinator."
 
+#define COMMENT_PRIMARY_TO_APPLY_SETTINGS \
+	"Apply new pg_auto_failover settings (synchronous_standby_names)"
+
+# define COMMENT_APPLY_SETTINGS_TO_PRIMARY \
+	"Back to primary state after having applied new pg_auto_failover settings"
+
 /* *INDENT-OFF* */
 
 /*
@@ -162,6 +168,14 @@ KeeperFSMTransition KeeperFSM[] = {
 	{ DRAINING_STATE, DEMOTED_STATE, COMMENT_DRAINING_TO_DEMOTED, &fsm_stop_postgres },
 	{ PRIMARY_STATE, DEMOTED_STATE, COMMENT_PRIMARY_TO_DEMOTED, &fsm_stop_postgres },
 	{ PRIMARY_STATE, DEMOTE_TIMEOUT_STATE, COMMENT_PRIMARY_TO_DEMOTED, &fsm_stop_postgres },
+
+	{ JOIN_PRIMARY_STATE, DRAINING_STATE, COMMENT_PRIMARY_TO_DRAINING, &fsm_stop_postgres },
+	{ JOIN_PRIMARY_STATE, DEMOTED_STATE, COMMENT_PRIMARY_TO_DEMOTED, &fsm_stop_postgres },
+	{ JOIN_PRIMARY_STATE, DEMOTE_TIMEOUT_STATE, COMMENT_PRIMARY_TO_DEMOTED, &fsm_stop_postgres },
+
+	{ APPLY_SETTINGS_STATE, DRAINING_STATE, COMMENT_PRIMARY_TO_DRAINING, &fsm_stop_postgres },
+	{ APPLY_SETTINGS_STATE, DEMOTED_STATE, COMMENT_PRIMARY_TO_DEMOTED, &fsm_stop_postgres },
+	{ APPLY_SETTINGS_STATE, DEMOTE_TIMEOUT_STATE, COMMENT_PRIMARY_TO_DEMOTED, &fsm_stop_postgres },	
 
 	/*
 	 * was demoted, need to be dead now.
@@ -242,6 +256,15 @@ KeeperFSMTransition KeeperFSM[] = {
 	{ SECONDARY_STATE, MAINTENANCE_STATE, COMMENT_SECONDARY_TO_MAINTENANCE, &fsm_start_maintenance_on_standby },
 	{ CATCHINGUP_STATE, MAINTENANCE_STATE, COMMENT_SECONDARY_TO_MAINTENANCE, &fsm_start_maintenance_on_standby },
 	{ MAINTENANCE_STATE, CATCHINGUP_STATE, COMMENT_MAINTENANCE_TO_CATCHINGUP, &fsm_restart_standby },
+
+	/*
+	 * Applying new replication/cluster settings (per node replication quorum,
+	 * candidate priorities, or per formation number_sync_standbys) means we
+	 * have to fetch the new value for synchronous_standby_names from the
+	 * monitor.
+	 */
+	{ PRIMARY_STATE, APPLY_SETTINGS_STATE, COMMENT_PRIMARY_TO_APPLY_SETTINGS, &fsm_apply_settings },
+	{ APPLY_SETTINGS_STATE, PRIMARY_STATE, COMMENT_APPLY_SETTINGS_TO_PRIMARY, NULL },
 
 	/*
 	 * This is the end, my friend.

@@ -286,6 +286,8 @@ cli_enable_maintenance(int argc, char **argv)
 	bool pgIsNotRunningIsOk = true;
 	bool monitorDisabledIsOk = false;
 
+	char *channels[] = { "state", NULL };
+
 	keeper.config = keeperOptions;
 
 	(void) exit_unless_role_is_keeper(&(keeper.config));
@@ -312,6 +314,12 @@ cli_enable_maintenance(int argc, char **argv)
 		exit(EXIT_CODE_MONITOR);
 	}
 
+	if (!pgsql_listen(&(keeper.monitor.pgsql), channels))
+	{
+		log_error("Failed to listen to state changes from the monitor");
+		exit(EXIT_CODE_MONITOR);
+	}
+
 	if (!monitor_start_maintenance(&(keeper.monitor),
 								   keeper.config.nodename,
 								   keeper.config.pgSetup.pgport))
@@ -321,25 +329,14 @@ cli_enable_maintenance(int argc, char **argv)
 		exit(EXIT_CODE_MONITOR);
 	}
 
-	if (!read_pidfile(keeper.config.pathnames.pid, &pid))
+	if (!monitor_wait_until_node_reported_state(
+			&(keeper.monitor),
+			keeper.state.current_node_id,
+			MAINTENANCE_STATE))
 	{
-		log_error("Failed to read the keeper's PID file at \"%s\": "
-				  "is the keeper running?", keeper.config.pathnames.pid);
-		exit(EXIT_CODE_KEEPER);
+		log_error("Failed to wait until the new setting has been applied");
+		exit(EXIT_CODE_MONITOR);
 	}
-
-	log_warn("Signaling the keeper process %d with SIGHUP so that  "
-			 "it calls pgautofailover.node_active() immediately.",
-			 pid);
-
-	if (kill(pid, SIGHUP) != 0)
-	{
-		log_warn("Failed to send SIGHUP to the keeper's pid %d: %s",
-				  pid, strerror(errno));
-	}
-
-	log_info("Node %s:%d will reach maintenance state soon",
-			 keeper.config.nodename, keeper.config.pgSetup.pgport);
 }
 
 
@@ -357,6 +354,8 @@ cli_disable_maintenance(int argc, char **argv)
 	bool pgIsNotRunningIsOk = true;
 	bool monitorDisabledIsOk = false;
 
+	char *channels[] = { "state", NULL };
+
 	keeper.config = keeperOptions;
 
 	(void) exit_unless_role_is_keeper(&(keeper.config));
@@ -383,6 +382,12 @@ cli_disable_maintenance(int argc, char **argv)
 		exit(EXIT_CODE_MONITOR);
 	}
 
+	if (!pgsql_listen(&(keeper.monitor.pgsql), channels))
+	{
+		log_error("Failed to listen to state changes from the monitor");
+		exit(EXIT_CODE_MONITOR);
+	}
+
 	if (!monitor_stop_maintenance(&(keeper.monitor),
 								  keeper.config.nodename,
 								  keeper.config.pgSetup.pgport))
@@ -392,22 +397,12 @@ cli_disable_maintenance(int argc, char **argv)
 		exit(EXIT_CODE_MONITOR);
 	}
 
-	if (!read_pidfile(keeper.config.pathnames.pid, &pid))
+	if (!monitor_wait_until_node_reported_state(
+			&(keeper.monitor),
+			keeper.state.current_node_id,
+			CATCHINGUP_STATE))
 	{
-		log_error("Failed to read the keeper's PID file at \"%s\": "
-				  "is the keeper running?", keeper.config.pathnames.pid);
-		exit(EXIT_CODE_KEEPER);
+		log_error("Failed to wait until the new setting has been applied");
+		exit(EXIT_CODE_MONITOR);
 	}
-
-	log_warn("Signaling the keeper process %d with SIGHUP so that  "
-			 "it calls pgautofailover.node_active() immediately.", pid);
-
-	if (kill(pid, SIGHUP) != 0)
-	{
-		log_warn("Failed to send SIGHUP to the keeper's pid %d: %s",
-				  pid, strerror(errno));
-	}
-
-	log_info("Node %s:%d will exit from maintenance state soon",
-			 keeper.config.nodename, keeper.config.pgSetup.pgport);
 }

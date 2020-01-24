@@ -112,11 +112,22 @@ bool monitor_disable_secondary_for_formation(Monitor *monitor, const char *forma
 bool monitor_drop_formation(Monitor *monitor, char *formation);
 bool monitor_formation_uri(Monitor *monitor, const char *formation,
 						   char *connectionString, size_t size);
+bool monitor_synchronous_standby_names(Monitor *monitor,
+									   char *formation, int groupId,
+									   char *synchronous_standby_names,
+									   int size);
+
+bool monitor_set_nodename(Monitor *monitor, int nodeId, const char *nodename);
 
 bool monitor_start_maintenance(Monitor *monitor, char *host, int port);
 bool monitor_stop_maintenance(Monitor *monitor, char *host, int port);
 
 bool monitor_get_notifications(Monitor *monitor);
+bool monitor_wait_until_primary_applied_settings(Monitor *monitor,
+												 const char *formation);
+bool monitor_wait_until_node_reported_state(Monitor *monitor,
+											int nodeId,
+											NodeState state);
 
 bool monitor_get_extension_version(Monitor *monitor,
 								   MonitorExtensionVersion *version);

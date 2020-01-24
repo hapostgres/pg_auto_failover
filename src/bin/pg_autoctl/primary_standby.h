@@ -47,6 +47,8 @@ bool primary_create_replication_slot(LocalPostgresServer *postgres,
 									 char *replicationSlotName);
 bool primary_drop_replication_slot(LocalPostgresServer *postgres,
 								   char *replicationSlotName);
+bool primary_set_synchronous_standby_names(LocalPostgresServer *postgres,
+										   char *synchronous_standby_names);
 bool primary_enable_synchronous_replication(LocalPostgresServer *postgres);
 bool primary_disable_synchronous_replication(LocalPostgresServer *postgres);
 bool postgres_add_default_settings(LocalPostgresServer *postgres);
