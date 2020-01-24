@@ -134,29 +134,33 @@ keeper_should_ensure_current_state_before_transition(Keeper *keeper)
 {
 	KeeperStateData *keeperState = &(keeper->state);
 
-	if (keeperState->assigned_role != keeperState->current_role)
+	if (keeperState->assigned_role == keeperState->current_role)
 	{
-		if (keeperState->assigned_role == DEMOTED_STATE
-			|| keeperState->assigned_role == DEMOTE_TIMEOUT_STATE
-			|| keeperState->assigned_role == DEMOTED_STATE)
-		{
-			/* don't ensure Postgres is running before shutting it down */
-			return false;
-		}
-
-		if (keeperState->current_role == DEMOTED_STATE
-			|| keeperState->current_role == DEMOTE_TIMEOUT_STATE
-			|| keeperState->current_role == DEMOTED_STATE)
-		{
-			/* don't ensure Postgres is down before starting it again */
-			return false;
-		}
-
-		/* in all other cases, yes please ensure the current state */
-		return true;
+		/* this function should not be called in that case */
+		log_debug("BUG: keeper_should_ensure_current_state_before_transition "
+				  "called with assigned role == current role == %s",
+				  NodeStateToString(keeperState->assigned_role));
+		return false;
 	}
 
-	return false;
+	if (keeperState->assigned_role == DEMOTED_STATE
+		|| keeperState->assigned_role == DEMOTE_TIMEOUT_STATE
+		|| keeperState->assigned_role == DEMOTED_STATE)
+	{
+		/* don't ensure Postgres is running before shutting it down */
+		return false;
+	}
+
+	if (keeperState->current_role == DEMOTED_STATE
+		|| keeperState->current_role == DEMOTE_TIMEOUT_STATE
+		|| keeperState->current_role == DEMOTED_STATE)
+	{
+		/* don't ensure Postgres is down before starting it again */
+		return false;
+	}
+
+	/* in all other cases, yes please ensure the current state */
+	return true;
 }
 
 
