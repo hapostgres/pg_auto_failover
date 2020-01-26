@@ -53,9 +53,10 @@ static void print_monitor_and_formation_uri(KeeperConfig *config,
 CommandLine show_uri_command =
 	make_command("uri",
 				 "Show the postgres uri to use to connect to pg_auto_failover nodes",
-				 " [ --pgdata --formation ] ",
-				 "  --pgdata      path to data directory\n"	\
-				 "  --formation   show the coordinator uri of given formation\n",
+				 " [ --pgdata --formation --json ] ",
+				 "  --pgdata      path to data directory\n"
+				 "  --formation   show the coordinator uri of given formation\n"
+				 "  --json        output data in the JSON format\n",
 				 cli_show_uri_getopts,
 				 cli_show_uri);
 
@@ -774,26 +775,25 @@ cli_show_all_uri(int argc, char **argv)
 				exit(EXIT_CODE_PGCTL);
 			}
 
-			if (!monitor_config_get_postgres_uri(&mconfig,
-												 connInfo,
-												 MAXCONNINFO))
-			{
-				log_fatal("Failed to get postgres connection string");
-				exit(EXIT_CODE_BAD_STATE);
-			}
+			pg_setup_get_local_connection_string(&(mconfig.pgSetup), connInfo);
+			monitor_init(&monitor, connInfo);
 
 			if (outputJSON)
 			{
-				JSON_Value *js = json_value_init_object();
-				JSON_Object *jsObj = json_value_get_object(js);
-
-				json_object_set_string(jsObj, "monitor", connInfo);
-
-				(void) cli_pprint_json(js);
+				if (!monitor_print_every_formation_uri_as_json(&monitor,
+															   stdout))
+				{
+					log_fatal("Failed to get the list of formation URIs");
+					exit(EXIT_CODE_MONITOR);
+				}
 			}
 			else
 			{
-				fprintf(stdout, "%s\n", connInfo);
+				if (!monitor_print_every_formation_uri(&monitor))
+				{
+					log_fatal("Failed to get the list of formation URIs");
+					exit(EXIT_CODE_MONITOR);
+				}
 			}
 
 			break;

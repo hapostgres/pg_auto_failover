@@ -50,6 +50,18 @@ typedef struct NodeReplicationSettingsParseContext
 	bool parsedOK;
 } NodeReplicationSettingsParseContext;
 
+/* either "monitor" or "formation" */
+#define CONNTYPE_LENGTH 10
+
+typedef struct FormationURIParseContext
+{
+	char sqlstate[SQLSTATE_LENGTH];
+	char connType[CONNTYPE_LENGTH];
+	char connName[BUFSIZE];
+	char connURI[BUFSIZE];
+	bool parsedOK;
+} FormationURIParseContext;
+
 typedef struct MonitorExtensionVersionParseContext
 {
 	char sqlstate[SQLSTATE_LENGTH];
@@ -64,6 +76,7 @@ static void parseNodeState(void *ctx, PGresult *result);
 static void parseNodeReplicationSettings(void *ctx, PGresult *result);
 static void printCurrentState(void *ctx, PGresult *result);
 static void printLastEvents(void *ctx, PGresult *result);
+static void printFormationURI(void *ctx, PGresult *result);
 static void parseCoordinatorNode(void *ctx, PGresult *result);
 static void parseExtensionVersion(void *ctx, PGresult *result);
 
@@ -1863,6 +1876,171 @@ monitor_formation_uri(Monitor *monitor, const char *formation,
 	pgsql_finish(&monitor->pgsql);
 
 	return true;
+}
+
+
+/*
+ * monitor_print_every_formation_uri prints a table of all our connection
+ * strings: first the monitor URI itself, and then one line per formation.
+ */
+bool
+monitor_print_every_formation_uri(Monitor *monitor)
+{
+	FormationURIParseContext context = { 0 };
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT 'monitor', 'monitor', $1 "
+		" UNION ALL "
+		"SELECT 'formation', formationid, formation_uri "
+		"  FROM pgautofailover.formation, "
+		"       pgautofailover.formation_uri(formation.formationid)";
+
+	int paramCount = 1;
+	Oid paramTypes[1] = { TEXTOID };
+	const char *paramValues[1];
+
+	paramValues[0] = monitor->pgsql.connectionString;
+
+	context.parsedOK = false;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &printFormationURI))
+	{
+		log_error("Failed to list the formation uri, "
+				  "see previous lines for details.");
+		return false;
+	}
+
+	if (!context.parsedOK)
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/* disconnect from PostgreSQL now */
+	pgsql_finish(&monitor->pgsql);
+
+	return true;
+}
+
+
+/*
+ * monitor_print_every_formation_uri_as_json prints all our connection strings
+ * in the JSON format: first the monitor URI itself, and then one line per
+ * formation.
+ */
+bool
+monitor_print_every_formation_uri_as_json(Monitor *monitor, FILE *stream)
+{
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_STRING, false };
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"WITH formation(type, name, uri) AS ( "
+		"SELECT 'monitor', 'monitor', $1 "
+		" UNION ALL "
+		"SELECT 'formation', formationid, formation_uri "
+		"  FROM pgautofailover.formation, "
+		"       pgautofailover.formation_uri(formation.formationid)"
+		") "
+		"SELECT jsonb_pretty(jsonb_agg(row_to_json(formation))) FROM formation";
+
+	int paramCount = 1;
+	Oid paramTypes[1] = { TEXTOID };
+	const char *paramValues[1];
+
+	paramValues[0] = monitor->pgsql.connectionString;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &parseSingleValueResult))
+	{
+		log_error("Failed to list the formation uri, "
+				  "see previous lines for details.");
+		return false;
+	}
+
+	if (!context.parsedOk)
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/* disconnect from PostgreSQL now */
+	pgsql_finish(&monitor->pgsql);
+
+	fprintf(stream, "%s\n", context.strVal);
+
+	return true;
+}
+
+
+/*
+ * printFormationURI loops over the results of the SQL query in
+ * monitor_print_every_formation_uri and outputs the result in table like
+ * format.
+ */
+static void
+printFormationURI(void *ctx, PGresult *result)
+{
+	FormationURIParseContext *context = (FormationURIParseContext *) ctx;
+	int currentTupleIndex = 0;
+	int nTuples = PQntuples(result);
+
+	int index = 0;
+	int maxFormationNameSize = 7;	/* "monitor" */
+	char formationNameSeparator[BUFSIZE] = { 0 };
+
+	log_trace("printFormationURI: %d tuples", nTuples);
+
+	if (PQnfields(result) != 3)
+	{
+		log_error("Query returned %d columns, expected 3", PQnfields(result));
+		context->parsedOK = false;
+		return;
+	}
+
+	/*
+	 * Dynamically adjust our display output to the length of the longer
+	 * nodename in the result set
+	 */
+	for(currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
+	{
+		int size = strlen(PQgetvalue(result, currentTupleIndex, 1));
+
+		if (size > maxFormationNameSize)
+		{
+			maxFormationNameSize = size;
+		}
+	}
+
+	/* create the visual separator for the formation name too */
+	for(index=0; index<maxFormationNameSize; index++)
+	{
+		formationNameSeparator[index] = '-';
+	}
+
+	fprintf(stdout, "%10s | %*s | %s\n",
+			"Type", maxFormationNameSize, "Name", "Connection String");
+	fprintf(stdout, "%10s-+-%*s-+-%s\n",
+			"----------",
+			maxFormationNameSize,
+			formationNameSeparator,
+			"------------------------------");
+
+	for(currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
+	{
+		char *type = PQgetvalue(result, currentTupleIndex, 0);
+		char *name = PQgetvalue(result, currentTupleIndex, 1);
+		char *URI = PQgetvalue(result, currentTupleIndex, 2);
+
+		fprintf(stdout, "%10s | %*s | %s\n", type, maxFormationNameSize, name, URI);
+	}
+	fprintf(stdout, "\n");
+
+	context->parsedOK = true;
+
+	return;
 }
 
 

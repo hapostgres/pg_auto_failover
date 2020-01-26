@@ -109,10 +109,16 @@ bool monitor_print_last_events_as_json(Monitor *monitor,
 									   int count,
 									   FILE *stream);
 
+bool monitor_print_every_formation_uri(Monitor *monitor);
+bool monitor_print_every_formation_uri_as_json(Monitor *monitor, FILE *stream);
+
 bool monitor_create_formation(Monitor *monitor, char *formation, char *kind,
 							  char *dbname, bool ha, int numberSyncStandbys);
-bool monitor_enable_secondary_for_formation(Monitor *monitor, const char *formation);
-bool monitor_disable_secondary_for_formation(Monitor *monitor, const char *formation);
+bool monitor_enable_secondary_for_formation(Monitor *monitor,
+											const char *formation);
+bool monitor_disable_secondary_for_formation(Monitor *monitor,
+											 const char *formation);
+
 bool monitor_drop_formation(Monitor *monitor, char *formation);
 bool monitor_formation_uri(Monitor *monitor, const char *formation,
 						   char *connectionString, size_t size);
