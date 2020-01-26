@@ -147,8 +147,8 @@ monitor_get_nodes(Monitor *monitor, char *formation, int groupId,
  * in the group.
  */
 bool
-monitor_get_nodes_as_json(Monitor *monitor, char *formation, int groupId,
-						  char *json, int size)
+monitor_print_nodes_as_json(Monitor *monitor, char *formation, int groupId,
+							FILE *stream)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_STRING, false };
@@ -199,7 +199,7 @@ monitor_get_nodes_as_json(Monitor *monitor, char *formation, int groupId,
 		return false;
 	}
 
-	strlcpy(json, context.strVal, size);
+	fprintf(stream, "%s\n", context.strVal);
 
 	return true;
 }
@@ -261,14 +261,14 @@ monitor_get_other_nodes(Monitor *monitor,
 
 
 /*
- * monitor_get_other_node gets the hostname and port of the other node
- * in the group.
+ * monitor_print_other_node_as_json gets the hostname and port of the other
+ * node in the group as a JSON string and prints it to given stream.
  */
 bool
-monitor_get_other_nodes_as_json(Monitor *monitor,
-								char *myHost, int myPort,
-								NodeState currentState,
-								char *json, int size)
+monitor_print_other_nodes_as_json(Monitor *monitor,
+								  char *myHost, int myPort,
+								  NodeState currentState,
+								  FILE *stream)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_STRING, false };
@@ -287,7 +287,6 @@ monitor_get_other_nodes_as_json(Monitor *monitor,
 	Oid paramTypes[3] = { TEXTOID, INT4OID, TEXTOID };
 	const char *paramValues[3] = { 0 };
 	IntString myPortString = intToString(myPort);
-	int resultSize = 0;
 
 	paramValues[0] = myHost;
 	paramValues[1] = myPortString.strValue;
@@ -319,16 +318,7 @@ monitor_get_other_nodes_as_json(Monitor *monitor,
 		return false;
 	}
 
-	resultSize = strlcpy(json, context.strVal, size);
-	free(context.strVal);
-
-	if (resultSize >= size)
-	{
-		log_error("Failed to get the other nodes as JSON. A string of %d bytes "
-				  "would have been necessary and pg_autoctl only supports up to"
-				  "%d bytes", resultSize, size);
-		return false;
-	}
+	fprintf(stream, "%s\n", context.strVal);
 
 	return true;
 }
@@ -1402,12 +1392,12 @@ printCurrentState(void *ctx, PGresult *result)
 
 
 /*
- * monitor_get_state_as_json returns a single string that contains the JSON
- * representation of the current state on the monitor.
+ * monitor_print_state_as_json prints to given stream a single string that
+ * contains the JSON representation of the current state on the monitor.
  */
 bool
-monitor_get_state_as_json(Monitor *monitor, char *formation, int group,
-						  char *json, int size)
+monitor_print_state_as_json(Monitor *monitor, char *formation, int group,
+							FILE *stream)
 {
 	SingleValueResultContext context = { 0 };
 	PGSQL *pgsql = &monitor->pgsql;
@@ -1471,7 +1461,7 @@ monitor_get_state_as_json(Monitor *monitor, char *formation, int group,
 		return false;
 	}
 
-	strlcpy(json, context.strVal, size);
+	fprintf(stream, "%s\n", context.strVal);
 
 	return true;
 }

@@ -1259,7 +1259,7 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 	nodesGroupList =
 		AutoFailoverNodeGroup(currentNode->formationId, currentNode->groupId);
 	nodesCount = list_length(nodesGroupList);
-	
+
 	if (candidatePriority < 0 || candidatePriority > 100)
 	{
 		ereport(ERROR, (ERRCODE_INVALID_PARAMETER_VALUE,

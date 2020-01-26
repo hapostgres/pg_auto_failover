@@ -223,17 +223,16 @@ cli_do_monitor_get_other_nodes(int argc, char **argv)
 	{
 		char json[BUFSIZE];
 
-		if (!monitor_get_other_nodes_as_json(&monitor,
-											 config.nodename,
-											 config.pgSetup.pgport,
-											 ANY_STATE,
-											 json, BUFSIZE))
+		if (!monitor_print_other_nodes_as_json(&monitor,
+											   config.nodename,
+											   config.pgSetup.pgport,
+											   ANY_STATE,
+											   stdout))
 		{
 			log_fatal("Failed to get the other nodes from the monitor, "
 					  "see above for details");
 			exit(EXIT_CODE_MONITOR);
 		}
-		fprintf(stdout, "%s\n", json);
 	}
 	else
 	{

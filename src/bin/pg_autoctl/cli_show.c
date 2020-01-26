@@ -330,14 +330,13 @@ cli_show_state(int argc, char **argv)
 	{
 		char json[BUFSIZE];
 
-		if (!monitor_get_state_as_json(&monitor,
-									   config.formation, config.groupId,
-									   json, BUFSIZE))
+		if (!monitor_print_state_as_json(&monitor,
+										 config.formation, config.groupId,
+										 stdout))
 		{
 			/* errors have already been logged */
 			exit(EXIT_CODE_MONITOR);
 		}
-		fprintf(stdout, "%s\n", json);
 	}
 	else
 	{
@@ -519,15 +518,14 @@ cli_show_nodes(int argc, char **argv)
 	{
 		char json[BUFSIZE];
 
-		if (!monitor_get_nodes_as_json(&monitor,
-									   config.formation,
-									   config.groupId,
-									   json, BUFSIZE))
+		if (!monitor_print_nodes_as_json(&monitor,
+										 config.formation,
+										 config.groupId,
+										 stdout))
 		{
 			/* errors have already been logged */
 			exit(EXIT_CODE_MONITOR);
 		}
-		fprintf(stdout, "%s\n", json);
 	}
 	else
 	{
