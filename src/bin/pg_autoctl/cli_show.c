@@ -299,13 +299,30 @@ cli_show_events(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!monitor_print_last_events(&monitor,
-								   config.formation,
-								   config.groupId,
-								   eventCount))
+	if (outputJSON)
 	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_MONITOR);
+		char json[BUFSIZE];
+
+		if (!monitor_print_last_events_as_json(&monitor,
+											   config.formation,
+											   config.groupId,
+											   eventCount,
+											   stdout))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_MONITOR);
+		}
+	}
+	else
+	{
+		if (!monitor_print_last_events(&monitor,
+									   config.formation,
+									   config.groupId,
+									   eventCount))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_MONITOR);
+		}
 	}
 }
 

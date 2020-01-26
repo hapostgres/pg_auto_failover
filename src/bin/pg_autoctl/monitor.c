@@ -1542,6 +1542,89 @@ monitor_print_last_events(Monitor *monitor, char *formation, int group, int coun
 
 
 /*
+ * monitor_print_last_events_as_json calls the function
+ * pgautofailover.last_events on the monitor, and prints the result as a JSON
+ * array to the given stream (stdout, typically).
+ */
+bool
+monitor_print_last_events_as_json(Monitor *monitor,
+								  char *formation, int group,
+								  int count,
+								  FILE *stream)
+{
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_STRING, false };
+	PGSQL *pgsql = &monitor->pgsql;
+	char *sql = NULL;
+	int paramCount = 0;
+	Oid paramTypes[3];
+	const char *paramValues[3];
+	IntString countStr;
+	IntString groupStr;
+
+	switch (group)
+	{
+		case -1:
+		{
+			sql = "SELECT jsonb_pretty(jsonb_agg(row_to_json(event)))"
+				" FROM pgautofailover.last_events($1, count => $2) as event";
+
+			countStr = intToString(count);
+
+			paramCount = 2;
+			paramTypes[0] = TEXTOID;
+			paramValues[0] = formation;
+			paramTypes[1] = INT4OID;
+			paramValues[1] = countStr.strValue;
+
+			break;
+		}
+
+		default:
+		{
+			sql = "SELECT jsonb_pretty(jsonb_agg(row_to_json(event)))"
+				" FROM * FROM pgautofailover.last_events($1,$2,$3) as event";
+
+			countStr = intToString(count);
+			groupStr = intToString(group);
+
+			paramCount = 3;
+			paramTypes[0] = TEXTOID;
+			paramValues[0] = formation;
+			paramTypes[1] = INT4OID;
+			paramValues[1] = groupStr.strValue;
+			paramTypes[2] = INT4OID;
+			paramValues[2] = countStr.strValue;
+
+			break;
+		}
+	}
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &parseSingleValueResult))
+	{
+		log_error("Failed to retrieve the last %d events from the monitor",
+				  count);
+		return false;
+	}
+
+	/* disconnect from PostgreSQL now */
+	pgsql_finish(&monitor->pgsql);
+
+	if (!context.parsedOk)
+	{
+		log_error("Failed to parse %d last events from the monitor", count);
+		log_error("%s", context.strVal);
+		return false;
+	}
+
+	fprintf(stream, "%s\n", context.strVal);
+
+	return true;
+}
+
+
+/*
  * printLastEcvents loops over pgautofailover.last_events() results and prints
  * them, one per line.
  */
