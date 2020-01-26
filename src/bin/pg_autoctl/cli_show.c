@@ -43,8 +43,12 @@ static bool fprint_file_contents(const char *filename);
 
 static int cli_show_uri_getopts(int argc, char **argv);
 static void cli_show_uri(int argc, char **argv);
-static void cli_show_monitor_uri(int argc, char **argv);
+static void cli_show_all_uri(int argc, char **argv);
 static void cli_show_formation_uri(int argc, char **argv);
+
+static void print_monitor_and_formation_uri(KeeperConfig *config,
+											Monitor *monitor,
+											FILE *stream);
 
 CommandLine show_uri_command =
 	make_command("uri",
@@ -575,6 +579,7 @@ cli_show_uri_getopts(int argc, char **argv)
 	static struct option long_options[] = {
 		{ "pgdata", required_argument, NULL, 'D' },
 		{ "formation", required_argument, NULL, 'f' },
+		{ "json", no_argument, NULL, 'J' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
@@ -651,6 +656,13 @@ cli_show_uri_getopts(int argc, char **argv)
 				break;
 			}
 
+			case 'J':
+			{
+				outputJSON = true;
+				log_trace("--json");
+				break;
+			}
+
 			default:
 			{
 				log_error("Failed to parse command line, see above for details.");
@@ -695,7 +707,7 @@ cli_show_uri(int argc, char **argv)
 	}
 	else
 	{
-		(void) cli_show_monitor_uri(argc, argv);
+		(void) cli_show_all_uri(argc, argv);
 	}
 }
 
@@ -722,14 +734,7 @@ cli_show_formation_uri(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!monitor_formation_uri(&monitor,
-							   config.formation, postgresUri, MAXCONNINFO))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_MONITOR);
-	}
-
-	fprintf(stdout, "%s\n", postgresUri);
+	(void) print_monitor_and_formation_uri(&config, &monitor, stdout);
 }
 
 
@@ -738,7 +743,7 @@ cli_show_formation_uri(int argc, char **argv)
  * monitor
  */
 static void
-cli_show_monitor_uri(int argc, char **argv)
+cli_show_all_uri(int argc, char **argv)
 {
 	KeeperConfig kconfig = keeperOptions;
 
@@ -776,33 +781,45 @@ cli_show_monitor_uri(int argc, char **argv)
 				exit(EXIT_CODE_BAD_STATE);
 			}
 
-			fprintf(stdout, "%s\n", connInfo);
+			if (outputJSON)
+			{
+				JSON_Value *js = json_value_init_object();
+				JSON_Object *jsObj = json_value_get_object(js);
+
+				json_object_set_string(jsObj, "monitor", connInfo);
+
+				(void) cli_pprint_json(js);
+			}
+			else
+			{
+				fprintf(stdout, "%s\n", connInfo);
+			}
 
 			break;
 		}
 
 		case PG_AUTOCTL_ROLE_KEEPER:
 		{
+			Monitor monitor = { 0 };
+			bool monitorDisabledIsOk = false;
 			char value[BUFSIZE];
 
-			if (keeper_config_get_setting(&kconfig,
-										  "pg_autoctl.monitor",
-										  value,
-										  BUFSIZE))
+			if (!keeper_config_read_file_skip_pgsetup(
+					&kconfig,
+					monitorDisabledIsOk))
 			{
-				/* take care of the special value for disabled monitor setup */
-				if (PG_AUTOCTL_MONITOR_IS_DISABLED((&kconfig)))
-				{
-					log_error("Monitor is disabled in the configuration");
-					exit(EXIT_CODE_BAD_CONFIG);
-				}
-				fprintf(stdout, "%s\n", value);
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_CONFIG);
 			}
-			else
+
+			if (!monitor_init(&monitor, kconfig.monitor_pguri))
 			{
-				log_error("Failed to lookup option pg_autoctl.monitor");
-				exit(EXIT_CODE_BAD_ARGS);
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_CONFIG);
 			}
+
+			(void) print_monitor_and_formation_uri(&kconfig, &monitor, stdout);
+
 			break;
 		}
 
@@ -812,6 +829,47 @@ cli_show_monitor_uri(int argc, char **argv)
 					  kconfig.pathnames.config);
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
+	}
+}
+
+
+/*
+ * print_monitor_and_formation_uri connects to given monitor to fetch the
+ * keeper configuration formation's URI, and prints it out on given stream. It
+ * is printed in JSON format when outputJSON is true (--json options).
+ */
+static void
+print_monitor_and_formation_uri(KeeperConfig *config,
+								Monitor *monitor,
+								FILE *stream)
+{
+	char postgresUri[MAXCONNINFO];
+
+	if (!monitor_formation_uri(monitor,
+							   config->formation,
+							   postgresUri,
+							   MAXCONNINFO))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_MONITOR);
+	}
+
+	if (outputJSON)
+	{
+		JSON_Value *js = json_value_init_object();
+		JSON_Object *jsObj = json_value_get_object(js);
+
+		json_object_set_string(jsObj,
+							   "monitor",
+							   monitor->pgsql.connectionString);
+
+		json_object_set_string(jsObj, config->formation, postgresUri);
+
+		(void) cli_pprint_json(js);
+	}
+	else
+	{
+		fprintf(stdout, "%s\n", postgresUri);
 	}
 }
 
