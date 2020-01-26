@@ -63,10 +63,11 @@ CommandLine show_events_command =
 	make_command("events",
 				 "Prints monitor's state of nodes in a given formation and group",
 				 " [ --pgdata --formation --group --count ] ",
-				 "  --pgdata      path to data directory	 \n"		\
-				 "  --formation   formation to query, defaults to 'default' \n" \
-				 "  --group       group to query formation, defaults to all \n" \
-				 "  --count       how many events to fetch, defaults to 10 \n",
+				 "  --pgdata      path to data directory	 \n"
+				 "  --formation   formation to query, defaults to 'default' \n"
+				 "  --group       group to query formation, defaults to all \n"
+				 "  --count       how many events to fetch, defaults to 10 \n"
+				 "  --json        output data in the JSON format\n",
 				 cli_show_state_getopts,
 				 cli_show_events);
 
@@ -74,9 +75,9 @@ CommandLine show_state_command =
 	make_command("state",
 				 "Prints monitor's state of nodes in a given formation and group",
 				 " [ --pgdata --formation --group ] ",
-				 "  --pgdata      path to data directory	 \n"		\
-				 "  --formation   formation to query, defaults to 'default' \n" \
-				 "  --group       group to query formation, defaults to all \n" \
+				 "  --pgdata      path to data directory	 \n"
+				 "  --formation   formation to query, defaults to 'default' \n"
+				 "  --group       group to query formation, defaults to all \n"
 				 "  --json        output data in the JSON format\n",
 				 cli_show_state_getopts,
 				 cli_show_state);
