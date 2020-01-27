@@ -1452,8 +1452,7 @@ printCurrentState(void *ctx, PGresult *result)
  * contains the JSON representation of the current state on the monitor.
  */
 bool
-monitor_print_state_as_json(Monitor *monitor, char *formation, int group,
-							FILE *stream)
+monitor_print_state_as_json(Monitor *monitor, char *formation, int group)
 {
 	SingleValueResultContext context = { 0 };
 	PGSQL *pgsql = &monitor->pgsql;
@@ -1517,7 +1516,7 @@ monitor_print_state_as_json(Monitor *monitor, char *formation, int group,
 		return false;
 	}
 
-	fprintf(stream, "%s\n", context.strVal);
+	fprintf(stdout, "%s\n", context.strVal);
 
 	return true;
 }

@@ -350,8 +350,7 @@ cli_show_state(int argc, char **argv)
 	if (outputJSON)
 	{
 		if (!monitor_print_state_as_json(&monitor,
-										 config.formation, config.groupId,
-										 stdout))
+										 config.formation, config.groupId))
 		{
 			/* errors have already been logged */
 			exit(EXIT_CODE_MONITOR);
