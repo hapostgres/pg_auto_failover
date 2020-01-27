@@ -221,8 +221,6 @@ cli_do_monitor_get_other_nodes(int argc, char **argv)
 
 	if (outputJSON)
 	{
-		char json[BUFSIZE];
-
 		if (!monitor_print_other_nodes_as_json(&monitor,
 											   config.nodename,
 											   config.pgSetup.pgport,
