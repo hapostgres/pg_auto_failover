@@ -476,9 +476,21 @@ JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 			 * We detect the situation here and report error code 55006 so that
 			 * pg_autoctl knows to retry registering.
 			 */
-
 			primaryNode = GetWritableNodeInGroup(formation->formationId,
 												 currentNodeState->groupId);
+
+			if (primaryNode == NULL)
+			{
+				/*
+				 * We have list_length(groupNodeList) >= 1 and yet we don't
+				 * have any node that is in a writable state: this means the
+				 * primary node was assigned SINGLE but did not report yet.
+				 */
+				ereport(ERROR,
+						(errcode(ERRCODE_OBJECT_IN_USE),
+						 errmsg("primary node is still initializing"),
+						 errhint("Retry registering in a moment")));
+			}
 
 			if (IsInWaitOrJoinState(primaryNode))
 			{
