@@ -58,15 +58,16 @@ void printNodeEntry(NodeAddress *node);
 
 bool monitor_get_nodes(Monitor *monitor, char *formation, int groupId,
 					   NodeAddressArray *nodeArray);
-bool monitor_get_nodes_as_json(Monitor *monitor, char *formation, int groupId,
-							   char *json, int size);
+bool monitor_print_nodes(Monitor *monitor, char *formation, int groupId);
+bool monitor_print_nodes_as_json(Monitor *monitor, char *formation, int groupId);
 bool monitor_get_other_nodes(Monitor *monitor,
 							 char *myHost, int myPort, NodeState currentState,
 							 NodeAddressArray *nodeArray);
-bool monitor_get_other_nodes_as_json(Monitor *monitor,
-									 char *myHost, int myPort,
-									 NodeState currentState,
-									 char *json, int size);
+bool monitor_print_other_nodes(Monitor *monitor,
+							   char *myHost, int myPort, NodeState currentState);
+bool monitor_print_other_nodes_as_json(Monitor *monitor,
+									   char *myHost, int myPort,
+									   NodeState currentState);
 void printNodeArray(NodeAddressArray *nodesArray);
 
 bool monitor_get_primary(Monitor *monitor, char *formation, int groupId,
@@ -102,13 +103,22 @@ bool monitor_perform_failover(Monitor *monitor, char *formation, int group);
 bool monitor_print_state(Monitor *monitor, char *formation, int group);
 bool monitor_print_last_events(Monitor *monitor,
 							   char *formation, int group, int count);
-bool monitor_get_state_as_json(Monitor *monitor, char *formation, int group,
-							   char *json, int size);
+bool monitor_print_state_as_json(Monitor *monitor, char *formation, int group);
+bool monitor_print_last_events_as_json(Monitor *monitor,
+									   char *formation, int group,
+									   int count,
+									   FILE *stream);
+
+bool monitor_print_every_formation_uri(Monitor *monitor);
+bool monitor_print_every_formation_uri_as_json(Monitor *monitor, FILE *stream);
 
 bool monitor_create_formation(Monitor *monitor, char *formation, char *kind,
 							  char *dbname, bool ha, int numberSyncStandbys);
-bool monitor_enable_secondary_for_formation(Monitor *monitor, const char *formation);
-bool monitor_disable_secondary_for_formation(Monitor *monitor, const char *formation);
+bool monitor_enable_secondary_for_formation(Monitor *monitor,
+											const char *formation);
+bool monitor_disable_secondary_for_formation(Monitor *monitor,
+											 const char *formation);
+
 bool monitor_drop_formation(Monitor *monitor, char *formation);
 bool monitor_formation_uri(Monitor *monitor, const char *formation,
 						   char *connectionString, size_t size);

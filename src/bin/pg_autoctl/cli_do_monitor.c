@@ -195,10 +195,6 @@ cli_do_monitor_get_other_nodes(int argc, char **argv)
 
 	Monitor monitor = { 0 };
 
-	/* arbitrary limit to 12 other nodes */
-	int nodeIndex = 0;
-	NodeAddressArray otherNodesArray;
-
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
 	bool monitorDisabledIsOk = false;
@@ -221,34 +217,27 @@ cli_do_monitor_get_other_nodes(int argc, char **argv)
 
 	if (outputJSON)
 	{
-		char json[BUFSIZE];
-
-		if (!monitor_get_other_nodes_as_json(&monitor,
-											 config.nodename,
-											 config.pgSetup.pgport,
-											 ANY_STATE,
-											 json, BUFSIZE))
+		if (!monitor_print_other_nodes_as_json(&monitor,
+											   config.nodename,
+											   config.pgSetup.pgport,
+											   ANY_STATE))
 		{
 			log_fatal("Failed to get the other nodes from the monitor, "
 					  "see above for details");
 			exit(EXIT_CODE_MONITOR);
 		}
-		fprintf(stdout, "%s\n", json);
 	}
 	else
 	{
-		if (!monitor_get_other_nodes(&monitor,
-									 config.nodename,
-									 config.pgSetup.pgport,
-									 ANY_STATE,
-									 &otherNodesArray))
+		if (!monitor_print_other_nodes(&monitor,
+									   config.nodename,
+									   config.pgSetup.pgport,
+									   ANY_STATE))
 		{
 			log_fatal("Failed to get the other nodes from the monitor, "
 					  "see above for details");
 			exit(EXIT_CODE_MONITOR);
 		}
-
-		(void) printNodeArray(&otherNodesArray);
 	}
 }
 

@@ -50,6 +50,18 @@ typedef struct NodeReplicationSettingsParseContext
 	bool parsedOK;
 } NodeReplicationSettingsParseContext;
 
+/* either "monitor" or "formation" */
+#define CONNTYPE_LENGTH 10
+
+typedef struct FormationURIParseContext
+{
+	char sqlstate[SQLSTATE_LENGTH];
+	char connType[CONNTYPE_LENGTH];
+	char connName[BUFSIZE];
+	char connURI[BUFSIZE];
+	bool parsedOK;
+} FormationURIParseContext;
+
 typedef struct MonitorExtensionVersionParseContext
 {
 	char sqlstate[SQLSTATE_LENGTH];
@@ -64,6 +76,7 @@ static void parseNodeState(void *ctx, PGresult *result);
 static void parseNodeReplicationSettings(void *ctx, PGresult *result);
 static void printCurrentState(void *ctx, PGresult *result);
 static void printLastEvents(void *ctx, PGresult *result);
+static void printFormationURI(void *ctx, PGresult *result);
 static void parseCoordinatorNode(void *ctx, PGresult *result);
 static void parseExtensionVersion(void *ctx, PGresult *result);
 
@@ -88,8 +101,8 @@ monitor_init(Monitor *monitor, char *url)
 
 
 /*
- * monitor_get_other_node gets the hostname and port of the other node
- * in the group.
+ * monitor_get_nodes gets the hostname and port of all the nodes in the given
+ * group.
  */
 bool
 monitor_get_nodes(Monitor *monitor, char *formation, int groupId,
@@ -143,12 +156,32 @@ monitor_get_nodes(Monitor *monitor, char *formation, int groupId,
 
 
 /*
- * monitor_get_other_node gets the hostname and port of the other node
- * in the group.
+ * monitor_print_nodes gets all the nodes in the given group and prints them
+ * out to stdout in a human-friendly tabular format.
  */
 bool
-monitor_get_nodes_as_json(Monitor *monitor, char *formation, int groupId,
-						  char *json, int size)
+monitor_print_nodes(Monitor *monitor, char *formation, int groupId)
+{
+	NodeAddressArray nodesArray;
+
+	if (!monitor_get_nodes(monitor, formation, groupId, &nodesArray))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	(void) printNodeArray(&nodesArray);
+
+	return true;
+}
+
+
+/*
+ * monitor_get_other_nodes_as_json gets the hostname and port of the other node
+ * in the group and prints them out in JSON format.
+ */
+bool
+monitor_print_nodes_as_json(Monitor *monitor, char *formation, int groupId)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_STRING, false };
@@ -199,15 +232,15 @@ monitor_get_nodes_as_json(Monitor *monitor, char *formation, int groupId,
 		return false;
 	}
 
-	strlcpy(json, context.strVal, size);
+	fprintf(stdout, "%s\n", context.strVal);
 
 	return true;
 }
 
 
 /*
- * monitor_get_other_node gets the hostname and port of the other node
- * in the group.
+ * monitor_get_other_nodes gets the hostname and port of the other node in the
+ * group.
  */
 bool
 monitor_get_other_nodes(Monitor *monitor,
@@ -261,14 +294,37 @@ monitor_get_other_nodes(Monitor *monitor,
 
 
 /*
- * monitor_get_other_node gets the hostname and port of the other node
- * in the group.
+ * monitor_print_other_nodes gets the other nodes from the monitor and then
+ * prints them to stdout in a human-friendly tabular format.
  */
 bool
-monitor_get_other_nodes_as_json(Monitor *monitor,
-								char *myHost, int myPort,
-								NodeState currentState,
-								char *json, int size)
+monitor_print_other_nodes(Monitor *monitor,
+						  char *myHost, int myPort, NodeState currentState)
+{
+	NodeAddressArray otherNodesArray;
+
+	if (!monitor_get_other_nodes(monitor,
+								 myHost, myPort, currentState,
+								 &otherNodesArray))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	(void) printNodeArray(&otherNodesArray);
+
+	return true;
+}
+
+
+/*
+ * monitor_print_other_node_as_json gets the hostname and port of the other
+ * node in the group as a JSON string and prints it to given stream.
+ */
+bool
+monitor_print_other_nodes_as_json(Monitor *monitor,
+								  char *myHost, int myPort,
+								  NodeState currentState)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_STRING, false };
@@ -287,7 +343,6 @@ monitor_get_other_nodes_as_json(Monitor *monitor,
 	Oid paramTypes[3] = { TEXTOID, INT4OID, TEXTOID };
 	const char *paramValues[3] = { 0 };
 	IntString myPortString = intToString(myPort);
-	int resultSize = 0;
 
 	paramValues[0] = myHost;
 	paramValues[1] = myPortString.strValue;
@@ -319,16 +374,7 @@ monitor_get_other_nodes_as_json(Monitor *monitor,
 		return false;
 	}
 
-	resultSize = strlcpy(json, context.strVal, size);
-	free(context.strVal);
-
-	if (resultSize >= size)
-	{
-		log_error("Failed to get the other nodes as JSON. A string of %d bytes "
-				  "would have been necessary and pg_autoctl only supports up to"
-				  "%d bytes", resultSize, size);
-		return false;
-	}
+	fprintf(stdout, "%s\n", context.strVal);
 
 	return true;
 }
@@ -1402,12 +1448,11 @@ printCurrentState(void *ctx, PGresult *result)
 
 
 /*
- * monitor_get_state_as_json returns a single string that contains the JSON
- * representation of the current state on the monitor.
+ * monitor_print_state_as_json prints to given stream a single string that
+ * contains the JSON representation of the current state on the monitor.
  */
 bool
-monitor_get_state_as_json(Monitor *monitor, char *formation, int group,
-						  char *json, int size)
+monitor_print_state_as_json(Monitor *monitor, char *formation, int group)
 {
 	SingleValueResultContext context = { 0 };
 	PGSQL *pgsql = &monitor->pgsql;
@@ -1471,7 +1516,7 @@ monitor_get_state_as_json(Monitor *monitor, char *formation, int group,
 		return false;
 	}
 
-	strlcpy(json, context.strVal, size);
+	fprintf(stdout, "%s\n", context.strVal);
 
 	return true;
 }
@@ -1546,6 +1591,89 @@ monitor_print_last_events(Monitor *monitor, char *formation, int group, int coun
 	{
 		return false;
 	}
+
+	return true;
+}
+
+
+/*
+ * monitor_print_last_events_as_json calls the function
+ * pgautofailover.last_events on the monitor, and prints the result as a JSON
+ * array to the given stream (stdout, typically).
+ */
+bool
+monitor_print_last_events_as_json(Monitor *monitor,
+								  char *formation, int group,
+								  int count,
+								  FILE *stream)
+{
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_STRING, false };
+	PGSQL *pgsql = &monitor->pgsql;
+	char *sql = NULL;
+	int paramCount = 0;
+	Oid paramTypes[3];
+	const char *paramValues[3];
+	IntString countStr;
+	IntString groupStr;
+
+	switch (group)
+	{
+		case -1:
+		{
+			sql = "SELECT jsonb_pretty(jsonb_agg(row_to_json(event)))"
+				" FROM pgautofailover.last_events($1, count => $2) as event";
+
+			countStr = intToString(count);
+
+			paramCount = 2;
+			paramTypes[0] = TEXTOID;
+			paramValues[0] = formation;
+			paramTypes[1] = INT4OID;
+			paramValues[1] = countStr.strValue;
+
+			break;
+		}
+
+		default:
+		{
+			sql = "SELECT jsonb_pretty(jsonb_agg(row_to_json(event)))"
+				" FROM * FROM pgautofailover.last_events($1,$2,$3) as event";
+
+			countStr = intToString(count);
+			groupStr = intToString(group);
+
+			paramCount = 3;
+			paramTypes[0] = TEXTOID;
+			paramValues[0] = formation;
+			paramTypes[1] = INT4OID;
+			paramValues[1] = groupStr.strValue;
+			paramTypes[2] = INT4OID;
+			paramValues[2] = countStr.strValue;
+
+			break;
+		}
+	}
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &parseSingleValueResult))
+	{
+		log_error("Failed to retrieve the last %d events from the monitor",
+				  count);
+		return false;
+	}
+
+	/* disconnect from PostgreSQL now */
+	pgsql_finish(&monitor->pgsql);
+
+	if (!context.parsedOk)
+	{
+		log_error("Failed to parse %d last events from the monitor", count);
+		log_error("%s", context.strVal);
+		return false;
+	}
+
+	fprintf(stream, "%s\n", context.strVal);
 
 	return true;
 }
@@ -1790,6 +1918,171 @@ monitor_formation_uri(Monitor *monitor, const char *formation,
 	pgsql_finish(&monitor->pgsql);
 
 	return true;
+}
+
+
+/*
+ * monitor_print_every_formation_uri prints a table of all our connection
+ * strings: first the monitor URI itself, and then one line per formation.
+ */
+bool
+monitor_print_every_formation_uri(Monitor *monitor)
+{
+	FormationURIParseContext context = { 0 };
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT 'monitor', 'monitor', $1 "
+		" UNION ALL "
+		"SELECT 'formation', formationid, formation_uri "
+		"  FROM pgautofailover.formation, "
+		"       pgautofailover.formation_uri(formation.formationid)";
+
+	int paramCount = 1;
+	Oid paramTypes[1] = { TEXTOID };
+	const char *paramValues[1];
+
+	paramValues[0] = monitor->pgsql.connectionString;
+
+	context.parsedOK = false;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &printFormationURI))
+	{
+		log_error("Failed to list the formation uri, "
+				  "see previous lines for details.");
+		return false;
+	}
+
+	if (!context.parsedOK)
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/* disconnect from PostgreSQL now */
+	pgsql_finish(&monitor->pgsql);
+
+	return true;
+}
+
+
+/*
+ * monitor_print_every_formation_uri_as_json prints all our connection strings
+ * in the JSON format: first the monitor URI itself, and then one line per
+ * formation.
+ */
+bool
+monitor_print_every_formation_uri_as_json(Monitor *monitor, FILE *stream)
+{
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_STRING, false };
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"WITH formation(type, name, uri) AS ( "
+		"SELECT 'monitor', 'monitor', $1 "
+		" UNION ALL "
+		"SELECT 'formation', formationid, formation_uri "
+		"  FROM pgautofailover.formation, "
+		"       pgautofailover.formation_uri(formation.formationid)"
+		") "
+		"SELECT jsonb_pretty(jsonb_agg(row_to_json(formation))) FROM formation";
+
+	int paramCount = 1;
+	Oid paramTypes[1] = { TEXTOID };
+	const char *paramValues[1];
+
+	paramValues[0] = monitor->pgsql.connectionString;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &parseSingleValueResult))
+	{
+		log_error("Failed to list the formation uri, "
+				  "see previous lines for details.");
+		return false;
+	}
+
+	if (!context.parsedOk)
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/* disconnect from PostgreSQL now */
+	pgsql_finish(&monitor->pgsql);
+
+	fprintf(stream, "%s\n", context.strVal);
+
+	return true;
+}
+
+
+/*
+ * printFormationURI loops over the results of the SQL query in
+ * monitor_print_every_formation_uri and outputs the result in table like
+ * format.
+ */
+static void
+printFormationURI(void *ctx, PGresult *result)
+{
+	FormationURIParseContext *context = (FormationURIParseContext *) ctx;
+	int currentTupleIndex = 0;
+	int nTuples = PQntuples(result);
+
+	int index = 0;
+	int maxFormationNameSize = 7;	/* "monitor" */
+	char formationNameSeparator[BUFSIZE] = { 0 };
+
+	log_trace("printFormationURI: %d tuples", nTuples);
+
+	if (PQnfields(result) != 3)
+	{
+		log_error("Query returned %d columns, expected 3", PQnfields(result));
+		context->parsedOK = false;
+		return;
+	}
+
+	/*
+	 * Dynamically adjust our display output to the length of the longer
+	 * nodename in the result set
+	 */
+	for(currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
+	{
+		int size = strlen(PQgetvalue(result, currentTupleIndex, 1));
+
+		if (size > maxFormationNameSize)
+		{
+			maxFormationNameSize = size;
+		}
+	}
+
+	/* create the visual separator for the formation name too */
+	for(index=0; index<maxFormationNameSize; index++)
+	{
+		formationNameSeparator[index] = '-';
+	}
+
+	fprintf(stdout, "%10s | %*s | %s\n",
+			"Type", maxFormationNameSize, "Name", "Connection String");
+	fprintf(stdout, "%10s-+-%*s-+-%s\n",
+			"----------",
+			maxFormationNameSize,
+			formationNameSeparator,
+			"------------------------------");
+
+	for(currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
+	{
+		char *type = PQgetvalue(result, currentTupleIndex, 0);
+		char *name = PQgetvalue(result, currentTupleIndex, 1);
+		char *URI = PQgetvalue(result, currentTupleIndex, 2);
+
+		fprintf(stdout, "%10s | %*s | %s\n", type, maxFormationNameSize, name, URI);
+	}
+	fprintf(stdout, "\n");
+
+	context->parsedOK = true;
+
+	return;
 }
 
 

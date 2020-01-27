@@ -43,15 +43,20 @@ static bool fprint_file_contents(const char *filename);
 
 static int cli_show_uri_getopts(int argc, char **argv);
 static void cli_show_uri(int argc, char **argv);
-static void cli_show_monitor_uri(int argc, char **argv);
+static void cli_show_all_uri(int argc, char **argv);
 static void cli_show_formation_uri(int argc, char **argv);
+
+static void print_monitor_and_formation_uri(KeeperConfig *config,
+											Monitor *monitor,
+											FILE *stream);
 
 CommandLine show_uri_command =
 	make_command("uri",
 				 "Show the postgres uri to use to connect to pg_auto_failover nodes",
-				 " [ --pgdata --formation ] ",
-				 "  --pgdata      path to data directory\n"	\
-				 "  --formation   show the coordinator uri of given formation\n",
+				 " [ --pgdata --formation --json ] ",
+				 "  --pgdata      path to data directory\n"
+				 "  --formation   show the coordinator uri of given formation\n"
+				 "  --json        output data in the JSON format\n",
 				 cli_show_uri_getopts,
 				 cli_show_uri);
 
@@ -59,10 +64,11 @@ CommandLine show_events_command =
 	make_command("events",
 				 "Prints monitor's state of nodes in a given formation and group",
 				 " [ --pgdata --formation --group --count ] ",
-				 "  --pgdata      path to data directory	 \n"		\
-				 "  --formation   formation to query, defaults to 'default' \n" \
-				 "  --group       group to query formation, defaults to all \n" \
-				 "  --count       how many events to fetch, defaults to 10 \n",
+				 "  --pgdata      path to data directory	 \n"
+				 "  --formation   formation to query, defaults to 'default' \n"
+				 "  --group       group to query formation, defaults to all \n"
+				 "  --count       how many events to fetch, defaults to 10 \n"
+				 "  --json        output data in the JSON format\n",
 				 cli_show_state_getopts,
 				 cli_show_events);
 
@@ -70,9 +76,9 @@ CommandLine show_state_command =
 	make_command("state",
 				 "Prints monitor's state of nodes in a given formation and group",
 				 " [ --pgdata --formation --group ] ",
-				 "  --pgdata      path to data directory	 \n"		\
-				 "  --formation   formation to query, defaults to 'default' \n" \
-				 "  --group       group to query formation, defaults to all \n" \
+				 "  --pgdata      path to data directory	 \n"
+				 "  --formation   formation to query, defaults to 'default' \n"
+				 "  --group       group to query formation, defaults to all \n"
 				 "  --json        output data in the JSON format\n",
 				 cli_show_state_getopts,
 				 cli_show_state);
@@ -299,13 +305,28 @@ cli_show_events(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!monitor_print_last_events(&monitor,
-								   config.formation,
-								   config.groupId,
-								   eventCount))
+	if (outputJSON)
 	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_MONITOR);
+		if (!monitor_print_last_events_as_json(&monitor,
+											   config.formation,
+											   config.groupId,
+											   eventCount,
+											   stdout))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_MONITOR);
+		}
+	}
+	else
+	{
+		if (!monitor_print_last_events(&monitor,
+									   config.formation,
+									   config.groupId,
+									   eventCount))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_MONITOR);
+		}
 	}
 }
 
@@ -328,16 +349,12 @@ cli_show_state(int argc, char **argv)
 
 	if (outputJSON)
 	{
-		char json[BUFSIZE];
-
-		if (!monitor_get_state_as_json(&monitor,
-									   config.formation, config.groupId,
-									   json, BUFSIZE))
+		if (!monitor_print_state_as_json(&monitor,
+										 config.formation, config.groupId))
 		{
 			/* errors have already been logged */
 			exit(EXIT_CODE_MONITOR);
 		}
-		fprintf(stdout, "%s\n", json);
 	}
 	else
 	{
@@ -505,7 +522,6 @@ cli_show_nodes_getopts(int argc, char **argv)
 static void
 cli_show_nodes(int argc, char **argv)
 {
-	NodeAddressArray nodesArray;
 	KeeperConfig config = keeperOptions;
 	Monitor monitor = { 0 };
 
@@ -517,31 +533,24 @@ cli_show_nodes(int argc, char **argv)
 
 	if (outputJSON)
 	{
-		char json[BUFSIZE];
-
-		if (!monitor_get_nodes_as_json(&monitor,
-									   config.formation,
-									   config.groupId,
-									   json, BUFSIZE))
+		if (!monitor_print_nodes_as_json(&monitor,
+										 config.formation,
+										 config.groupId))
 		{
 			/* errors have already been logged */
 			exit(EXIT_CODE_MONITOR);
 		}
-		fprintf(stdout, "%s\n", json);
 	}
 	else
 	{
-		if (!monitor_get_nodes(&monitor,
-							   config.formation,
-							   config.groupId,
-							   &nodesArray))
+		if (!monitor_print_nodes(&monitor,
+								 config.formation,
+								 config.groupId))
 		{
 			log_fatal("Failed to get the other nodes from the monitor, "
 					  "see above for details");
 			exit(EXIT_CODE_MONITOR);
 		}
-
-		(void) printNodeArray(&nodesArray);
 	}
 }
 
@@ -560,6 +569,7 @@ cli_show_uri_getopts(int argc, char **argv)
 	static struct option long_options[] = {
 		{ "pgdata", required_argument, NULL, 'D' },
 		{ "formation", required_argument, NULL, 'f' },
+		{ "json", no_argument, NULL, 'J' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
@@ -636,6 +646,13 @@ cli_show_uri_getopts(int argc, char **argv)
 				break;
 			}
 
+			case 'J':
+			{
+				outputJSON = true;
+				log_trace("--json");
+				break;
+			}
+
 			default:
 			{
 				log_error("Failed to parse command line, see above for details.");
@@ -680,7 +697,7 @@ cli_show_uri(int argc, char **argv)
 	}
 	else
 	{
-		(void) cli_show_monitor_uri(argc, argv);
+		(void) cli_show_all_uri(argc, argv);
 	}
 }
 
@@ -707,14 +724,7 @@ cli_show_formation_uri(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!monitor_formation_uri(&monitor,
-							   config.formation, postgresUri, MAXCONNINFO))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_MONITOR);
-	}
-
-	fprintf(stdout, "%s\n", postgresUri);
+	(void) print_monitor_and_formation_uri(&config, &monitor, stdout);
 }
 
 
@@ -723,7 +733,7 @@ cli_show_formation_uri(int argc, char **argv)
  * monitor
  */
 static void
-cli_show_monitor_uri(int argc, char **argv)
+cli_show_all_uri(int argc, char **argv)
 {
 	KeeperConfig kconfig = keeperOptions;
 
@@ -753,41 +763,52 @@ cli_show_monitor_uri(int argc, char **argv)
 				exit(EXIT_CODE_PGCTL);
 			}
 
-			if (!monitor_config_get_postgres_uri(&mconfig,
-												 connInfo,
-												 MAXCONNINFO))
-			{
-				log_fatal("Failed to get postgres connection string");
-				exit(EXIT_CODE_BAD_STATE);
-			}
+			pg_setup_get_local_connection_string(&(mconfig.pgSetup), connInfo);
+			monitor_init(&monitor, connInfo);
 
-			fprintf(stdout, "%s\n", connInfo);
+			if (outputJSON)
+			{
+				if (!monitor_print_every_formation_uri_as_json(&monitor,
+															   stdout))
+				{
+					log_fatal("Failed to get the list of formation URIs");
+					exit(EXIT_CODE_MONITOR);
+				}
+			}
+			else
+			{
+				if (!monitor_print_every_formation_uri(&monitor))
+				{
+					log_fatal("Failed to get the list of formation URIs");
+					exit(EXIT_CODE_MONITOR);
+				}
+			}
 
 			break;
 		}
 
 		case PG_AUTOCTL_ROLE_KEEPER:
 		{
+			Monitor monitor = { 0 };
+			bool monitorDisabledIsOk = false;
 			char value[BUFSIZE];
 
-			if (keeper_config_get_setting(&kconfig,
-										  "pg_autoctl.monitor",
-										  value,
-										  BUFSIZE))
+			if (!keeper_config_read_file_skip_pgsetup(
+					&kconfig,
+					monitorDisabledIsOk))
 			{
-				/* take care of the special value for disabled monitor setup */
-				if (PG_AUTOCTL_MONITOR_IS_DISABLED((&kconfig)))
-				{
-					log_error("Monitor is disabled in the configuration");
-					exit(EXIT_CODE_BAD_CONFIG);
-				}
-				fprintf(stdout, "%s\n", value);
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_CONFIG);
 			}
-			else
+
+			if (!monitor_init(&monitor, kconfig.monitor_pguri))
 			{
-				log_error("Failed to lookup option pg_autoctl.monitor");
-				exit(EXIT_CODE_BAD_ARGS);
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_CONFIG);
 			}
+
+			(void) print_monitor_and_formation_uri(&kconfig, &monitor, stdout);
+
 			break;
 		}
 
@@ -797,6 +818,47 @@ cli_show_monitor_uri(int argc, char **argv)
 					  kconfig.pathnames.config);
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
+	}
+}
+
+
+/*
+ * print_monitor_and_formation_uri connects to given monitor to fetch the
+ * keeper configuration formation's URI, and prints it out on given stream. It
+ * is printed in JSON format when outputJSON is true (--json options).
+ */
+static void
+print_monitor_and_formation_uri(KeeperConfig *config,
+								Monitor *monitor,
+								FILE *stream)
+{
+	char postgresUri[MAXCONNINFO];
+
+	if (!monitor_formation_uri(monitor,
+							   config->formation,
+							   postgresUri,
+							   MAXCONNINFO))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_MONITOR);
+	}
+
+	if (outputJSON)
+	{
+		JSON_Value *js = json_value_init_object();
+		JSON_Object *jsObj = json_value_get_object(js);
+
+		json_object_set_string(jsObj,
+							   "monitor",
+							   monitor->pgsql.connectionString);
+
+		json_object_set_string(jsObj, config->formation, postgresUri);
+
+		(void) cli_pprint_json(js);
+	}
+	else
+	{
+		fprintf(stdout, "%s\n", postgresUri);
 	}
 }
 
