@@ -527,7 +527,6 @@ cli_show_nodes_getopts(int argc, char **argv)
 static void
 cli_show_nodes(int argc, char **argv)
 {
-	NodeAddressArray nodesArray;
 	KeeperConfig config = keeperOptions;
 	Monitor monitor = { 0 };
 
@@ -543,8 +542,7 @@ cli_show_nodes(int argc, char **argv)
 
 		if (!monitor_print_nodes_as_json(&monitor,
 										 config.formation,
-										 config.groupId,
-										 stdout))
+										 config.groupId))
 		{
 			/* errors have already been logged */
 			exit(EXIT_CODE_MONITOR);
@@ -552,17 +550,14 @@ cli_show_nodes(int argc, char **argv)
 	}
 	else
 	{
-		if (!monitor_get_nodes(&monitor,
-							   config.formation,
-							   config.groupId,
-							   &nodesArray))
+		if (!monitor_print_nodes(&monitor,
+								 config.formation,
+								 config.groupId))
 		{
 			log_fatal("Failed to get the other nodes from the monitor, "
 					  "see above for details");
 			exit(EXIT_CODE_MONITOR);
 		}
-
-		(void) printNodeArray(&nodesArray);
 	}
 }
 

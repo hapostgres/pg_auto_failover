@@ -101,8 +101,8 @@ monitor_init(Monitor *monitor, char *url)
 
 
 /*
- * monitor_get_other_node gets the hostname and port of the other node
- * in the group.
+ * monitor_get_nodes gets the hostname and port of all the nodes in the given
+ * group.
  */
 bool
 monitor_get_nodes(Monitor *monitor, char *formation, int groupId,
@@ -156,12 +156,32 @@ monitor_get_nodes(Monitor *monitor, char *formation, int groupId,
 
 
 /*
- * monitor_get_other_node gets the hostname and port of the other node
- * in the group.
+ * monitor_print_nodes gets all the nodes in the given group and prints them
+ * out to stdout in a human-friendly tabular format.
  */
 bool
-monitor_print_nodes_as_json(Monitor *monitor, char *formation, int groupId,
-							FILE *stream)
+monitor_print_nodes(Monitor *monitor, char *formation, int groupId)
+{
+	NodeAddressArray nodesArray;
+
+	if (!monitor_get_nodes(monitor, formation, groupId, &nodesArray))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	(void) printNodeArray(&nodesArray);
+
+	return true;
+}
+
+
+/*
+ * monitor_get_other_nodes_as_json gets the hostname and port of the other node
+ * in the group and prints them out in JSON format.
+ */
+bool
+monitor_print_nodes_as_json(Monitor *monitor, char *formation, int groupId)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_STRING, false };
@@ -212,15 +232,15 @@ monitor_print_nodes_as_json(Monitor *monitor, char *formation, int groupId,
 		return false;
 	}
 
-	fprintf(stream, "%s\n", context.strVal);
+	fprintf(stdout, "%s\n", context.strVal);
 
 	return true;
 }
 
 
 /*
- * monitor_get_other_node gets the hostname and port of the other node
- * in the group.
+ * monitor_get_other_nodes gets the hostname and port of the other node in the
+ * group.
  */
 bool
 monitor_get_other_nodes(Monitor *monitor,
@@ -274,14 +294,37 @@ monitor_get_other_nodes(Monitor *monitor,
 
 
 /*
+ * monitor_print_other_nodes gets the other nodes from the monitor and then
+ * prints them to stdout in a human-friendly tabular format.
+ */
+bool
+monitor_print_other_nodes(Monitor *monitor,
+						  char *myHost, int myPort, NodeState currentState)
+{
+	NodeAddressArray otherNodesArray;
+
+	if (!monitor_get_other_nodes(monitor,
+								 myHost, myPort, currentState,
+								 &otherNodesArray))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	(void) printNodeArray(&otherNodesArray);
+
+	return true;
+}
+
+
+/*
  * monitor_print_other_node_as_json gets the hostname and port of the other
  * node in the group as a JSON string and prints it to given stream.
  */
 bool
 monitor_print_other_nodes_as_json(Monitor *monitor,
 								  char *myHost, int myPort,
-								  NodeState currentState,
-								  FILE *stream)
+								  NodeState currentState)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_STRING, false };
@@ -331,7 +374,7 @@ monitor_print_other_nodes_as_json(Monitor *monitor,
 		return false;
 	}
 
-	fprintf(stream, "%s\n", context.strVal);
+	fprintf(stdout, "%s\n", context.strVal);
 
 	return true;
 }
