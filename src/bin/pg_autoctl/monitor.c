@@ -2915,7 +2915,7 @@ monitor_ensure_extension_version(Monitor *monitor,
 	}
 
 	/* just mention we checked, and it's ok */
-	log_info("The version of extenstion \"%s\" is \"%s\" on the monitor",
+	log_info("The version of extension \"%s\" is \"%s\" on the monitor",
 			 PG_AUTOCTL_MONITOR_EXTENSION_NAME, version->installedVersion);
 
 	return true;
