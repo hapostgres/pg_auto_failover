@@ -277,12 +277,6 @@ cli_show_state_getopts(int argc, char **argv)
 		strlcpy(options.pgSetup.pgdata, pgdata, MAXPGPATH);
 	}
 
-	/*
-	 * pg_setup_init wants a single pg_ctl, and we don't use it here: pretend
-	 * we had a --pgctl option and processed it.
-	 */
-	set_first_pgctl(&(options.pgSetup));
-
 	keeperOptions = options;
 
 	return optind;
@@ -497,12 +491,6 @@ cli_show_nodes_getopts(int argc, char **argv)
 
 		strlcpy(options.pgSetup.pgdata, pgdata, MAXPGPATH);
 	}
-
-	/*
-	 * pg_setup_init wants a single pg_ctl, and we don't use it here: pretend
-	 * we had a --pgctl option and processed it.
-	 */
-	set_first_pgctl(&(options.pgSetup));
 
 	keeperOptions = options;
 
