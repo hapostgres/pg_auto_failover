@@ -307,8 +307,6 @@ cli_show_events(int argc, char **argv)
 
 	if (outputJSON)
 	{
-		char json[BUFSIZE];
-
 		if (!monitor_print_last_events_as_json(&monitor,
 											   config.formation,
 											   config.groupId,
@@ -351,8 +349,6 @@ cli_show_state(int argc, char **argv)
 
 	if (outputJSON)
 	{
-		char json[BUFSIZE];
-
 		if (!monitor_print_state_as_json(&monitor,
 										 config.formation, config.groupId,
 										 stdout))
@@ -538,8 +534,6 @@ cli_show_nodes(int argc, char **argv)
 
 	if (outputJSON)
 	{
-		char json[BUFSIZE];
-
 		if (!monitor_print_nodes_as_json(&monitor,
 										 config.formation,
 										 config.groupId))
