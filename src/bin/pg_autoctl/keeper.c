@@ -686,7 +686,7 @@ keeper_check_monitor_extension_version(Keeper *keeper)
 	}
 	else
 	{
-		log_info("The version of extenstion \"%s\" is \"%s\" on the monitor",
+		log_info("The version of extension \"%s\" is \"%s\" on the monitor",
 				 PG_AUTOCTL_MONITOR_EXTENSION_NAME, version.installedVersion);
 	}
 

@@ -311,7 +311,9 @@ pg_setup_init(PostgresSetup *pgSetup,
 	 * And we always double-check with PGDATA/postmaster.pid if we have it, and
 	 * we should have it in the normal/expected case.
 	 */
-	if (pgSetup->pidFile.pid > 0 && pgSetup->pgport != pgSetup->pidFile.port)
+	if (pgIsReady
+		&& pgSetup->pidFile.pid > 0
+		&& pgSetup->pgport != pgSetup->pidFile.port)
 	{
 		log_error("Given --pgport %d doesn't match PostgreSQL "
 				  "port %d from \"%s/postmaster.pid\"",
@@ -425,22 +427,35 @@ get_pgpid(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 
 	if (pid > 0)
 	{
-		pgSetup->pidFile.pid = pid;
-
-		if (kill(pgSetup->pidFile.pid, 0) != 0)
+		if (kill(pid, 0) == 0)
 		{
-			log_error("Failed to signal pid %ld, read from Postgres pid file.",
-					  pgSetup->pidFile.pid);
-			log_info("Is PostgreSQL at \"%s\" up and running?", pgSetup->pgdata);
+			pgSetup->pidFile.pid = pid;
+
+			log_trace("get_pgpid: %ld", pid);
+			return true;
+		}
+		else
+		{
+			if (!pg_is_not_running_is_ok)
+			{
+				log_warn("Read a stale pid in \"postmaster.pid\": %ld", pid);
+			}
+			else
+			{
+				log_debug("Read a stale pid in \"postmaster.pid\": %ld", pid);
+			}
 
 			return false;
 		}
-
-		return true;
 	}
-
-	return false;
+	else
+	{
+		/* that's more like a bug, really */
+		log_error("Invalid PID \"%ld\" read in \"postmaster.pid\"", pid);
+		return false;
+	}
 }
+
 
 /*
  * Read the PGDATA/postmaster.pid file to get the port number of the running
@@ -486,6 +501,10 @@ read_pg_pidfile(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 			{
 				log_error("Postgres pidfile contains pid %ld, "
 						  "which is not running", pgSetup->pidFile.pid);
+
+				/* well then reset the PID to our unknown value */
+				pgSetup->pidFile.pid = 0;
+
 				return false;
 			}
 		}
@@ -677,13 +696,14 @@ pg_setup_pgdata_exists(PostgresSetup *pgSetup)
 bool
 pg_setup_is_running(PostgresSetup *pgSetup)
 {
-	bool pg_is_not_running_is_ok = true;
+	bool pg_is_not_running_is_ok = false;
 
 	return pgSetup->pidFile.pid != 0
 		/* if we don't have the PID yet, try reading it now */
 		|| (get_pgpid(pgSetup, pg_is_not_running_is_ok)
 			&& pgSetup->pidFile.pid != 0);
 }
+
 
 /*
  * pg_setup_is_ready returns true when the postmaster.pid file has a "ready"
@@ -755,7 +775,17 @@ pg_setup_is_ready(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 			 * fail when the file isn't complete yet, in which case we're going
 			 * to retry.
 			 */
-			(void) read_pg_pidfile(pgSetup, pg_is_not_running_is_ok);
+			if (!read_pg_pidfile(pgSetup, pg_is_not_running_is_ok))
+			{
+				log_warn("Failed to read Postgres \"postmaster.pid\" file");
+				return false;
+			}
+
+			/* avoid an extra wait if that's possible */
+			if (pgSetup->pm_status == POSTMASTER_STATUS_READY)
+			{
+				break;
+			}
 
 			if (firstTime)
 			{
