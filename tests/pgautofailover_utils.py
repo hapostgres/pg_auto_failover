@@ -564,6 +564,41 @@ class MonitorNode(PGNode):
         else:
             self.pg_autoctl.execute("create monitor")
 
+    def run(self, env={}):
+        """
+        Runs "pg_autoctl run"
+        """
+        self.pg_autoctl = PGAutoCtl(self.vnode, self.datadir)
+        self.pg_autoctl.run(level='-v')
+
+    def destroy(self):
+        """
+        Cleans up processes and files created for this monitor node.
+        """
+        if self.pg_autoctl:
+            out, err = self.pg_autoctl.stop()
+
+            if out or err:
+                print()
+                print("Monitor logs:\n%s\n%s\n" % (out, err))
+
+        try:
+            destroy = PGAutoCtl(self.vnode, self.datadir)
+            destroy.execute("pg_autoctl node destroy",
+                            'drop', 'node', '--destroy')
+        except Exception as e:
+            print(str(e))
+
+        try:
+            os.remove(self.config_file_path())
+        except FileNotFoundError:
+            pass
+
+        try:
+            os.remove(self.state_file_path())
+        except FileNotFoundError:
+            pass
+
     def create_formation(self, formation_name,
                          kind="pgsql", secondary=None, dbname=None):
         """
@@ -725,8 +760,10 @@ class PGAutoCtl():
                 self.run_proc = None
                 print("Failed to terminate pg_autoctl for %s: %s" %
                       (self.datadir, e))
+                return None, None
         else:
             print("pg_autoctl process for %s is not running" % self.datadir)
+            return None, None
 
     def communicate(self, timeout=COMMAND_TIMEOUT):
         """
