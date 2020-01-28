@@ -264,34 +264,29 @@ read_file(const char *filePath, char **contents, long *fileSize)
 
 /*
  * move_file is a utility function to move a file from sourcePath to
- * destinationPath. It behaves like mv system command. First attempts
- * to move a file using rename. if it fails with EXDEV error copies
- * the content of the file and removes the source file after setting
- * owner and permission information on the new file.
+ * destinationPath. It behaves like mv system command. First attempts to move
+ * a file using rename. if it fails with EXDEV error, the function duplicates
+ * the source file with owner and permission information and removes it.
  */
 bool
 move_file(char* sourcePath, char* destinationPath)
 {
-	char *fileContents;
-	long fileSize;
-	struct stat sourceFileStat;
-	bool foundError = false;
-
 	if (strncmp(sourcePath, destinationPath, MAXPGPATH) == 0)
 	{
 		/* nothing to do */
+		log_warn("Source and destination are the same \"%s\", nothing to move.", sourcePath);
 		return true;
 	}
 
 	if (!file_exists(sourcePath))
 	{
-		log_error("Can not move, source file '%s' does not exist.", sourcePath);
+		log_error("Failed to move file, source file \"%s\" does not exist.", sourcePath);
 		return false;
 	}
 
 	if (file_exists(destinationPath))
 	{
-		log_error("Can not move. Destination file '%s' already exists.", destinationPath);
+		log_error("Failed to move file, destination file \"%s\" already exists.", destinationPath);
 		return false;
 	}
 
@@ -304,15 +299,43 @@ move_file(char* sourcePath, char* destinationPath)
 	/* rename fails with errno = EXDEV when moving file to a different file system */
 	if (errno != EXDEV)
 	{
-		int errorCode = errno;
-
-		log_error("File move failed with error %d", errorCode);
+		log_error("Failed to move file \"%s\" to \"%s\": %s", sourcePath, destinationPath, strerror(errno));
 		return false;
 	}
 
+	if (!duplicate_file(sourcePath, destinationPath))
+	{
+		/* specific error is already logged */
+		log_error("Canceling file move due to errors.");
+		return false;
+	}
+
+	/* everything is successful we can remove the file */
+	unlink_file(sourcePath);
+
+	return true;
+}
+
+
+/*
+ * duplicate_file is a utility function to duplicate a file from sourcePath to
+ * destinationPath. It reads the contents of the source file and writes to the
+ * destination file. It expects non-existing destination file and does not
+ * copy over if it exists. The function returns true on successful execution.
+ *
+ * Note: the function reads the whole file into memory before copying out.
+ */
+bool
+duplicate_file(char* sourcePath, char* destinationPath)
+{
+	char *fileContents;
+	long fileSize;
+	struct stat sourceFileStat;
+	bool foundError = false;
 
 	if (!read_file(sourcePath, &fileContents, &fileSize))
 	{
+		/* errors are logged */
 		return false;
 	}
 
@@ -322,37 +345,36 @@ move_file(char* sourcePath, char* destinationPath)
 
 	if (foundError)
 	{
+		/* errors are logged in write_file */
 		return false;
 	}
 
 	/* set uid gid and mode */
 	if (stat(sourcePath, &sourceFileStat) != 0)
 	{
-		log_error("Unable to set ownership and file permissions");
+		log_error("Failed to get ownership and file permissions on \"%s\"", sourcePath);
 		foundError = true;
 	}
 	else
 	{
 		if (chown(destinationPath, sourceFileStat.st_uid, sourceFileStat.st_gid) != 0)
 		{
-			log_error("Unable to set user and group id for file '%s'", destinationPath);
+			log_error("Failed to set user and group id on \"%s\"", destinationPath);
 			foundError = true;
 		}
 		if (chmod(destinationPath, sourceFileStat.st_mode) != 0)
 		{
-			log_error("Unable to set file permissions for '%s'", destinationPath);
+			log_error("Failed to set file permissions on \"%s\"", destinationPath);
 			foundError = true;
 		}
 	}
 
 	if (foundError)
 	{
-		log_error("Canceling file move due to errors");
+		/* errors are already logged */
 		unlink_file(destinationPath);
 		return false;
 	}
-
-	unlink_file(sourcePath);
 
 	return true;
 }
