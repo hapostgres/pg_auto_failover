@@ -322,14 +322,6 @@ fsm_disable_replication(Keeper *keeper)
 		return false;
 	}
 
-	if (!primary_drop_replication_slots(postgres))
-	{
-		log_error("Failed to disable replication because dropping replication "
-				  "slots used by the standby nodes failed, "
-				  "see above for details");
-		return false;
-	}
-
 	return true;
 }
 
@@ -806,17 +798,6 @@ fsm_rewind_or_init(Keeper *keeper)
 			log_error("Failed to become standby server, see above for details");
 			return false;
 		}
-	}
-
-	if (!primary_drop_replication_slot(postgres, config->replication_slot_name))
-	{
-		log_error("Failed to drop replication slot \"%s\" used by "
-				  "standby %d (%s:%d)",
-				  config->replication_slot_name,
-				  keeper->otherNodes.nodes[0].nodeId,
-				  keeper->otherNodes.nodes[0].host,
-				  keeper->otherNodes.nodes[0].port);
-		return false;
 	}
 
 	return true;
