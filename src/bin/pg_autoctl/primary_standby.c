@@ -817,13 +817,6 @@ standby_follow_new_primary(LocalPostgresServer *postgres,
 
 	log_info("Follow new primary %s:%d", primaryNode->host, primaryNode->port);
 
-	if (!ensure_local_postgres_is_running(postgres))
-	{
-		log_error("Failed to get the postgresql.conf path from the "
-				  "local postgres server: Postgres is not running.");
-		return false;
-	}
-
 	/* configFilePath = $PGDATA/postgresql.conf */
 	join_path_components(configFilePath, pgSetup->pgdata, "postgresql.conf");
 

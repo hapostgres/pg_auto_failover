@@ -1127,8 +1127,8 @@ pgsql_reset_primary_conninfo(PGSQL *pgsql)
 
 
 /*
- * pgsql_reload_conf causes open sessions to reload the PostgresSQL configuration
- * files.
+ * pgsql_reload_conf causes open sessions to reload the PostgresSQL
+ * configuration files.
  */
 bool
 pgsql_reload_conf(PGSQL *pgsql)
