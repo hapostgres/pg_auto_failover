@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #include "postgres_fe.h"
+#include "pqexpbuffer.h"
 
 #include "cli_common.h"
 #include "defaults.h"
@@ -48,8 +49,8 @@ static bool wait_until_primary_is_ready(Keeper *config,
 										MonitorAssignedState *assignedState);
 static bool keeper_pg_init_node_active(Keeper *keeper);
 
-static void disable_configuration_parameter_inplace(char *fileContents, long fileSize, char *parameterName);
-
+static bool disable_configuration_parameters(char *postgresqlConfPath);
+static void disableAutoStart(char *defaultConfigurationPath);
 /*
  * keeper_pg_init initializes a pg_autoctl keeper and its local PostgreSQL.
  *
@@ -87,16 +88,19 @@ keeper_pg_init_fsm(Keeper *keeper, KeeperConfig *config)
 }
 
 
+/*
+ * keeper_ensure_pg_configuration_files_in_pgdata checks if
+ * postgresql.conf, pg_hba.conf, pg_ident.conf files exist
+ * in $PGDATA, if not it tries to get them from default
+ * location and modifies paths inside copied postgresql.conf.
+ */
 static bool
 keeper_ensure_pg_configuration_files_in_pgdata(KeeperConfig *config)
 {
-	/* check existence of postgresql.conf, pg_hba.conf, pg_ident.conf in pgdata dir */
-
-	char *pgdata = config->pgSetup.pgdata;
+	char pgdata[MAXPGPATH];
 	char hbaConfPath[MAXPGPATH];
 	char posgresqlConfPath[MAXPGPATH];
-	char versionFilePath[MAXPGPATH];
-	char versionString[MAXPGPATH];
+	char *pgdataRelativePath = NULL;
 	char defaultConfigurationPath[MAXPGPATH];
 	bool configurationPathPresent = false;
 	bool postgresqlConfExists = false;
@@ -104,41 +108,12 @@ keeper_ensure_pg_configuration_files_in_pgdata(KeeperConfig *config)
 	char defaultHbaConfPath[MAXPGPATH];
 	char defaultIdentConfPath[MAXPGPATH];
 	char identConfPath[MAXPGPATH];
-	char *fileContents;
-	long fileSize;
 
-	/* read version file */
-
-
-	join_path_components(versionFilePath, pgdata, "PG_VERSION");
-
-	if (!read_file(versionFilePath, &fileContents, &fileSize))
-	{
-		log_error("Unable to read PG_VERSION from %s", versionFilePath);
-		return false;
-	}
-
-	if (fileSize > 0)
-	{
-		int scanResult = sscanf(fileContents, "%s", versionString);
-		if (scanResult == 0)
-		{
-			log_error("Unsupported PG_VERSION content");
-			return false;
-
-		}
-
-		log_info("Version = %s", versionString);
-	}
-
-	free(fileContents);
-
+	get_absolute_path(config->pgSetup.pgdata, pgdata, MAXPGPATH);
 
 	/* check if postgresql.conf exists in pgdata. there is no separate check for pg_hba and pg_ident  */
 	join_path_components(posgresqlConfPath, pgdata, "postgresql.conf");
-
 	postgresqlConfExists = file_exists(posgresqlConfPath);
-
 	if (postgresqlConfExists)
 	{
 		return true;
@@ -147,108 +122,163 @@ keeper_ensure_pg_configuration_files_in_pgdata(KeeperConfig *config)
 	/* check if pgdata is in default path. */
 	if (strstr(pgdata, "/var/lib/postgresql") != pgdata)
 	{
-		log_error("Cannot determine configuration file location for this instance");
+		log_error("Cannot determine configuration file location for this instance. pgdata = %s", pgdata);
 		return false;
 	}
 
-
-	{
-		char *pgdataRelativePath = strstr(pgdata, "postgresql");
-		join_path_components(defaultConfigurationPath, "/etc", pgdataRelativePath);
-	}
+	/*
+	 * We are trying to translate /var/lib/postgresql/PGVERSION/main to
+	 * /etc/postgresql/PG_VERSION/main.
+	 */
+	pgdataRelativePath = strstr(pgdata, "postgresql");
+	join_path_components(defaultConfigurationPath, "/etc", pgdataRelativePath);
 
 	/* true if we are working on debian/ubuntu installation */
 	configurationPathPresent = directory_exists(defaultConfigurationPath);
 	if (!configurationPathPresent)
 	{
-		log_error("Cannot find configuration file directory");
+		log_error("Cannot find configuration file directory \"%s\"", defaultConfigurationPath);
 		return false;
 	}
 
 	join_path_components(defaultPosgresqlConfPath, defaultConfigurationPath, "postgresql.conf");
-
-
-	log_error("Moving %s to %s", defaultPosgresqlConfPath, posgresqlConfPath );
 	if (!move_file(defaultPosgresqlConfPath, posgresqlConfPath))
 	{
+		/* errors are already logged */
 		return false;
 	}
 
 	/* edit postgresql.conf to disable settings */
-	read_file(posgresqlConfPath, &fileContents, &fileSize);
-	disable_configuration_parameter_inplace(fileContents, fileSize, "data_directory");
-	disable_configuration_parameter_inplace(fileContents, fileSize, "hba_file");
-	disable_configuration_parameter_inplace(fileContents, fileSize, "ident_file");
-	disable_configuration_parameter_inplace(fileContents, fileSize, "include_dir");
-	write_file(fileContents, fileSize, posgresqlConfPath);
-
-	free(fileContents);
-
+	disable_configuration_parameters(posgresqlConfPath);
 
 	join_path_components(hbaConfPath, pgdata, "pg_hba.conf");
-
 	if(!file_exists(hbaConfPath))
 	{
 
-		log_warn("hba file does not exist : %s, need to copy", hbaConfPath);
+		log_trace("hba file does not exist : %s, need to copy", hbaConfPath);
 		join_path_components(defaultHbaConfPath, defaultConfigurationPath, "pg_hba.conf");
 
 		move_file(defaultHbaConfPath, hbaConfPath);
 	}
 
-
 	join_path_components(identConfPath, pgdata, "pg_ident.conf");
-
 	if(!file_exists(identConfPath))
 	{
 
-		log_warn("pg_ident.conf file does not exist : %s, need to copy", identConfPath);
+		log_trace("pg_ident.conf file does not exist : %s, need to copy", identConfPath);
 		join_path_components(defaultIdentConfPath, defaultConfigurationPath, "pg_ident.conf");
 
 		move_file(defaultIdentConfPath, identConfPath);
 	}
 
 	/* disable auto start in default configuration */
-	{
-		char defaultStartConfPath[MAXPGPATH];
-		char newStartConfPath[MAXPGPATH];
-		char *newStartConfData = "disabled";
+	disableAutoStart(defaultConfigurationPath);
 
-		join_path_components(defaultStartConfPath, defaultConfigurationPath, "start.conf");
-		join_path_components(newStartConfPath, defaultConfigurationPath, "start.conf.orig");
-
-		read_file(defaultStartConfPath, &fileContents, &fileSize);
-		write_file(fileContents, fileSize, newStartConfPath);
-
-		write_file(newStartConfData, strlen(newStartConfData), defaultStartConfPath);
-
-	}
 	return true;
 }
 
 
 /*
- * disable_configuration_parameter_inplace looks for a pattern
- * [parameterName] = [parameter value] and puts # in front to disable the
- * setting. Note that the function would change "port = 5432" to "#port= 5432".
- * It will remove the space between parameter name and = to make room for #
- * in the beginning in order to perform modification in place.
+ * disable_configuration_parameters read postgresql.conf file and
+ * disables predefined configuration parameters inside.
  */
-static void disable_configuration_parameter_inplace(char *fileContents, long fileSize, char *parameterName)
+static bool
+disable_configuration_parameters(char *postgresqlConfPath)
 {
-	int offset = 0;
-	char *substring = NULL;
-	char searchString[MAXPGPATH];
+	FILE *fileStream = NULL;
+	PQExpBuffer newConfContents = NULL;
+	char lineBuffer[BUFSIZE];
+	/*
+	 * configuration parameters can appear in any order, and we
+	 * need to check for patterns for NAME = VALUE and NAME=VALUE
+	 */
+	char *targetVariables[] = {
+			"data_directory ", "data_directory =",
+			"hba_file ", "hba_file=",
+			"ident_file ", "ident_file=",
+			"include_dir ", "include_dir=",
+			NULL};
 
-	snprintf(searchString, MAXPGPATH, "%s =", parameterName);
-
-	while ( (substring = strstr(fileContents + offset, searchString)) != NULL)
+	/* open a file */
+	fileStream = fopen(postgresqlConfPath, "rb");
+	if (fileStream == NULL)
 	{
-		offset = substring - fileContents;
-		*substring = '#';
-		memcpy(substring+1, parameterName, strlen(parameterName));
+		log_error("Failed to open file \"%s\": %s", postgresqlConfPath, strerror(errno));
+		return false;
 	}
+
+	newConfContents = createPQExpBuffer();
+	if (newConfContents == NULL)
+	{
+		log_error("Failed to allocate memory");
+		return false;
+	}
+
+	/* read each line including terminating new line and process it*/
+	while (fgets(lineBuffer, BUFSIZE, fileStream) != NULL)
+	{
+		bool variableFound = false;
+		int targetIndex = 0;
+		char *targetVariable = targetVariables[0];
+
+		/* check if the line contains any of target variables */
+		while (targetVariable != NULL)
+		{
+			char *previousOffset = NULL;
+			char *candidateOffset = strstr(lineBuffer, targetVariable);
+			if (candidateOffset != NULL)
+			{
+				variableFound = true;
+				break;
+			}
+			targetVariable = targetVariables[++targetIndex];
+		}
+
+		/*
+		 * disable the line if any of target variables is found
+		 * and if it was not already disabled
+		 */
+		if (variableFound && lineBuffer[0] != '#')
+		{
+			appendPQExpBufferChar(newConfContents, '#');
+		}
+
+		/* copy rest of the line */
+		appendPQExpBufferStr(newConfContents, lineBuffer);
+	}
+
+	fclose(fileStream);
+
+	write_file(newConfContents->data, newConfContents->len, postgresqlConfPath);
+
+	destroyPQExpBuffer(newConfContents);
+
+	return true;
 }
+
+
+/* disableAutoStart disables auto start in default configuration */
+static void
+disableAutoStart(char *defaultConfigurationPath)
+{
+	char defaultStartConfPath[MAXPGPATH];
+	char newStartConfPath[MAXPGPATH];
+	char *newStartConfData = "disabled";
+	char *fileContents = NULL;
+	long fileSize = 0;
+
+	join_path_components(defaultStartConfPath, defaultConfigurationPath, "start.conf");
+	join_path_components(newStartConfPath, defaultConfigurationPath, "start.conf.orig");
+
+	if (read_file(defaultStartConfPath, &fileContents, &fileSize))
+	{
+		write_file(fileContents, fileSize, newStartConfPath);
+	}
+
+	write_file(newStartConfData, strlen(newStartConfData), defaultStartConfPath);
+
+}
+
 
 /*
  * keeper_pg_init_and_register initialises a pg_autoctl keeper and its local

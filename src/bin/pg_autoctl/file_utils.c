@@ -638,4 +638,33 @@ set_program_absolute_path(char *program, int size)
 }
 
 
+/*
+ * get_absolute_path gets absolute path using current working directory
+ * from provided source path. The function returns true on successful
+ * execution.
+ */
+bool
+get_absolute_path(char *sourcePath, char *absolutePath, int bufferSize)
+{
+	if (sourcePath[0] == '/')
+	{
+		strlcpy(absolutePath, sourcePath, bufferSize);
+	}
+	else
+	{
+		char currentWorkingDirectory[MAXPGPATH];
+
+		if (getcwd(currentWorkingDirectory, MAXPGPATH) == NULL)
+		{
+			log_error("Failed to get the current working directory: %s",
+					  strerror(errno));
+			return false;
+		}
+
+		join_path_components(absolutePath, currentWorkingDirectory, sourcePath);
+	}
+
+	return true;
+}
+
 
