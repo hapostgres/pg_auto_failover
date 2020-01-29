@@ -229,7 +229,6 @@ class PGNode:
         """
         self.stop_pg_autoctl()
 
-
         try:
             destroy = PGAutoCtl(self.vnode, self.datadir)
             destroy.execute("pg_autoctl do destroy", 'destroy')
@@ -272,6 +271,15 @@ class PGNode:
                             ".local/share/pg_autoctl",
                             pgdata,
                             "pg_autoctl.state")
+
+    def get_postgres_logs(self):
+        ldir = os.path.join(self.datadir, "log")
+        logs = []
+        for logfile in os.listdir(ldir):
+            logs += ["\n\n%s:\n" % logfile]
+            logs += open(os.path.join(ldir, logfile)).readlines()
+
+        return "".join(logs)
 
 
 class DataNode(PGNode):
@@ -358,13 +366,14 @@ class DataNode(PGNode):
                 (self.datadir, target_state, timeout))
 
             events = self.get_events_str()
+            pglogs = self.get_postgres_logs()
 
             if self.pg_autoctl and self.pg_autoctl.run_proc:
                 out, err = self.stop_pg_autoctl()
                 raise Exception("%s failed to reach %s after %d attempts: " \
-                                "\n%s\n%s\n%s" %
+                                "\n%s\n%s\n%s\n%s" %
                                 (self.datadir, target_state, timeout,
-                                 out, err, events))
+                                 out, err, events, pglogs))
             else:
                 raise Exception("%s failed to reach %s after %d attempts:\n%s" %
                                 (self.datadir, target_state, timeout, events))
@@ -524,6 +533,17 @@ SELECT reportedstate
                                    'show', 'synchronous_standby_names')
 
         return out.strip()
+
+    def list_replication_slot_names(self):
+        """
+            Returns a list of the replication slot names on the local Postgres.
+        """
+        query = "select slot_name from pg_replication_slots " \
+            + "where slot_name ~ '^pgautofailover_standby_' " \
+            + " and slot_type = 'physical'"
+
+        result = self.run_sql_query(query)
+        return [row[0] for row in result]
 
 
 class MonitorNode(PGNode):
