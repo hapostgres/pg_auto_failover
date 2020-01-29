@@ -160,10 +160,10 @@ class PGNode:
     def stop_postgres(self):
         """
         Stops the postgres process by running:
-          pg_ctl -D ${self.datadir} --wait --mode immediate stop
+          pg_ctl -D ${self.datadir} --wait --mode fast stop
         """
         stop_command = [shutil.which('pg_ctl'), '-D', self.datadir,
-                        '--wait', '--mode', 'immediate', 'stop']
+                        '--wait', '--mode', 'fast', 'stop']
         stop_proc = self.vnode.run(stop_command)
         out, err = stop_proc.communicate(timeout=COMMAND_TIMEOUT)
         if stop_proc.returncode > 0:
