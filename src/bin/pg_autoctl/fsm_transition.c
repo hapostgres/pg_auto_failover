@@ -1005,6 +1005,7 @@ fsm_follow_new_primary(Keeper *keeper)
 	replicationSource.userName = PG_AUTOCTL_REPLICA_USERNAME;
 	replicationSource.password = config->replication_password;
 	replicationSource.slotName = config->replication_slot_name;
+	replicationSource.applicationName = config->replication_slot_name;
 	replicationSource.maximumBackupRate = config->maximum_backup_rate;
 	replicationSource.backupDir = config->backupDirectory;
 
