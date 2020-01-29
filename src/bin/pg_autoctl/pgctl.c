@@ -1405,7 +1405,7 @@ pg_write_standby_signal(const char *configFilePath,
 	 */
 	join_path_components(signalFilePath, pgdata, "standby.signal");
 
-	log_info("Writing recovery configuration to \"%s\"", signalFilePath);
+	log_info("Creating the standby signal file at \"%s\"", signalFilePath);
 
 	if (!write_file("", 0, signalFilePath))
 	{
