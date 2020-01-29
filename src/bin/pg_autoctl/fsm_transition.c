@@ -343,14 +343,6 @@ fsm_disable_replication(Keeper *keeper)
 		return false;
 	}
 
-	if (!primary_drop_replication_slots(postgres))
-	{
-		log_error("Failed to disable replication because dropping replication "
-				  "slots used by the standby nodes failed, "
-				  "see above for details");
-		return false;
-	}
-
 	return true;
 }
 
@@ -760,7 +752,6 @@ fsm_rewind_or_init(Keeper *keeper)
 	int groupId = keeper->state.current_group;
 
 	char applicationName[BUFSIZE] = { 0 };
-	char standbySlotName[BUFSIZE] = { 0 };
 
 	/* get the primary node to follow */
 	if (!config->monitorDisabled)
@@ -809,29 +800,6 @@ fsm_rewind_or_init(Keeper *keeper)
 			log_error("Failed to become standby server, see above for details");
 			return false;
 		}
-	}
-
-	/* prepare the standby's replication slot name */
-	if (!postgres_sprintf_replicationSlotName(
-			keeper->otherNodes.nodes[0].nodeId,
-			standbySlotName,
-			sizeof(standbySlotName)))
-	{
-		/* that's highly unlikely... */
-		log_error("Failed to snprintf replication slot name for node %d",
-				  keeper->otherNodes.nodes[0].nodeId);
-		return false;
-	}
-
-	if (!primary_drop_replication_slot(postgres, standbySlotName))
-	{
-		log_error("Failed to drop replication slot \"%s\" used by "
-				  "standby %d (%s:%d)",
-				  standbySlotName,
-				  keeper->otherNodes.nodes[0].nodeId,
-				  keeper->otherNodes.nodes[0].host,
-				  keeper->otherNodes.nodes[0].port);
-		return false;
 	}
 
 	return true;
