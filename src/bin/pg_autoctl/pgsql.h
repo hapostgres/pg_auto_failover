@@ -193,7 +193,6 @@ bool pgsql_disable_synchronous_replication(PGSQL *pgsql);
 bool pgsql_set_default_transaction_mode_read_only(PGSQL *pgsql);
 bool pgsql_set_default_transaction_mode_read_write(PGSQL *pgsql);
 bool pgsql_checkpoint(PGSQL *pgsql);
-bool pgsql_get_config_file_path(PGSQL *pgsql, char *configFilePath, int maxPathLength);
 bool pgsql_get_hba_file_path(PGSQL *pgsql, char *hbaFilePath, int maxPathLength);
 bool pgsql_create_database(PGSQL *pgsql, const char *dbname, const char *owner);
 bool pgsql_create_extension(PGSQL *pgsql, const char *name);

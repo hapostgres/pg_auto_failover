@@ -352,14 +352,8 @@ postgres_add_default_settings(LocalPostgresServer *postgres)
 
 	log_trace("primary_add_default_postgres_settings");
 
-	/* get the path of the config file from the running database */
-	if (!pgsql_get_config_file_path(pgsql, configFilePath, MAXPGPATH))
-	{
-		log_error("Failed to add default settings to postgres.conf: couldn't get "
-				  "the postgresql.conf path from the local postgres server, see "
-				  "above for details");
-		return false;
-	}
+	/* configFilePath = $PGDATA/postgresql.conf */
+	join_path_components(configFilePath, pgSetup->pgdata, "postgresql.conf");
 
 	/* in case of errors, pgsql_ functions finish the connection */
 	pgsql_finish(pgsql);
@@ -607,13 +601,8 @@ primary_rewind_to_standby(LocalPostgresServer *postgres,
 	log_info("Rewinding PostgreSQL to follow new primary %s:%d",
 			 primaryNode->host, primaryNode->port);
 
-	/* get the path of the config file from the running database */
-	if (!pgsql_get_config_file_path(pgsql, configFilePath, MAXPGPATH))
-	{
-		log_error("Failed to get the postgresql.conf path from the "
-				  "local postgres server, see above for details");
-		return false;
-	}
+	/* configFilePath = $PGDATA/postgresql.conf */
+	join_path_components(configFilePath, pgSetup->pgdata, "postgresql.conf");
 
 	if (!pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata))
 	{

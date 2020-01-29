@@ -807,28 +807,6 @@ pgsql_reload_conf(PGSQL *pgsql)
 
 
 /*
- * pgsql_get_config_file_path gets the value of the config_file setting in
- * Postgres or returns false if a failure occurred. The value is copied to
- * the configFilePath pointer.
- */
-bool
-pgsql_get_config_file_path(PGSQL *pgsql, char *configFilePath, int maxPathLength)
-{
-	char *configValue = NULL;
-
-	if (!pgsql_get_current_setting(pgsql, "config_file", &configValue))
-	{
-		return false;
-	}
-
-	strlcpy(configFilePath, configValue, maxPathLength);
-	free(configValue);
-
-	return true;
-}
-
-
-/*
  * pgsql_get_hba_file_path gets the value of the hba_file setting in
  * Postgres or returns false if a failure occurred. The value is copied to
  * the hbaFilePath pointer.
