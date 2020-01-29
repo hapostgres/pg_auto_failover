@@ -41,8 +41,8 @@ typedef struct
 	int error;					/* save errno when something's gone wrong */
 	int returnCode;
 
-	char *stdout;
-	char *stderr;
+	char *_stdout;
+	char *_stderr;
 } Program;
 
 Program run_program(const char *program, ...);
@@ -72,8 +72,8 @@ run_program(const char *program, ...)
 	prog.returnCode = -1;
 	prog.error = 0;
 	prog.setsid = false;
-	prog.stdout = NULL;
-	prog.stderr = NULL;
+	prog._stdout = NULL;
+	prog._stderr = NULL;
 
 	prog.args = (char **) malloc(ARGS_INCREMENT * sizeof(char *));
 	prog.args[nb_args++] = prog.program;
@@ -119,8 +119,8 @@ initialize_program(char **args, bool setsid)
 	prog.returnCode = -1;
 	prog.error = 0;
 	prog.setsid = setsid;
-	prog.stdout = NULL;
-	prog.stderr = NULL;
+	prog._stdout = NULL;
+	prog._stderr = NULL;
 
 	for(argsIndex = 0; args[argsIndex] != NULL; argsIndex++)
 	{
@@ -256,14 +256,14 @@ free_program(Program *prog)
 	}
 	free(prog->args);
 
-	if (prog->stdout != NULL)
+	if (prog->_stdout != NULL)
 	{
-		free(prog->stdout);
+		free(prog->_stdout);
 	}
 
-	if (prog->stderr != NULL)
+	if (prog->_stderr != NULL)
 	{
-		free(prog->stderr);
+		free(prog->_stderr);
 	}
 
 	return;
@@ -375,12 +375,12 @@ read_from_pipes(Program *prog, pid_t childPid, int *outpipe, int *errpipe)
 
 	if (outbuf->len > 0)
 	{
-		prog->stdout = strndup(outbuf->data, outbuf->len);
+		prog->_stdout = strndup(outbuf->data, outbuf->len);
 	}
 
 	if (errbuf->len > 0)
 	{
-		prog->stderr = strndup(errbuf->data, errbuf->len);
+		prog->_stderr = strndup(errbuf->data, errbuf->len);
 	}
 
 	destroyPQExpBuffer(outbuf);
