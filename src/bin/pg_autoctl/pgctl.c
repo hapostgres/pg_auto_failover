@@ -1387,16 +1387,20 @@ pg_write_standby_signal(const char *configFilePath,
 						const char *primaryConnInfo,
 						const char *replicationSlotName)
 {
+	char quotedSlotName[BUFSIZE] = { 0 };
 	GUC standby_settings[] = {
 		{ "primary_conninfo", (char *) primaryConnInfo },
-		{ "primary_slot_name", (char *) replicationSlotName },
-		{ "recovery_target_timeline", "latest" },
+		{ "primary_slot_name", (char *) quotedSlotName },
+		{ "recovery_target_timeline", "'latest'" },
 		{ NULL, NULL }
 	};
 	char standbyConfigFilePath[MAXPGPATH];
 	char signalFilePath[MAXPGPATH];
 
 	log_trace("pg_write_standby_signal");
+
+	/* in-place edit quotedSlotName to its expected value  */
+	snprintf(quotedSlotName, BUFSIZE, "'%s'", replicationSlotName);
 
 	/*
 	 * First install the standby.signal file, so that if there's a problem
