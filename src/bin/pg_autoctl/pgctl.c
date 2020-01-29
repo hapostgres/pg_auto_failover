@@ -414,6 +414,7 @@ ensure_default_settings_file_exists(const char *configFilePath,
 		}
 
 		log_warn("Contents of \"%s\" have changed, overwriting", configFilePath);
+		log_debug("%s:\n%s", configFilePath, defaultConfContents->data);
 		free(currentDefaultConfContents);
 	}
 	else
@@ -423,7 +424,9 @@ ensure_default_settings_file_exists(const char *configFilePath,
 				  configFilePath, defaultConfContents->data);
 	}
 
-	if (!write_file(defaultConfContents->data, defaultConfContents->len, configFilePath))
+	if (!write_file(defaultConfContents->data,
+					defaultConfContents->len,
+					configFilePath))
 	{
 		destroyPQExpBuffer(defaultConfContents);
 		return false;
@@ -1195,7 +1198,7 @@ pg_write_standby_signal(const char *configFilePath,
 	 */
 	join_path_components(signalFilePath, pgdata, "standby.signal");
 
-	log_info("Writing recovery configuration to \"%s\"", signalFilePath);
+	log_info("Creating the standby signal file at \"%s\"", signalFilePath);
 
 	if (!write_file("", 0, signalFilePath))
 	{

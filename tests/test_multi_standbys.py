@@ -132,8 +132,8 @@ def test_009_failover():
     print()
     print("Calling pgautofailover.failover() on the monitor")
     monitor.failover()
-    assert node2.wait_until_state(target_state="primary")
     assert node3.wait_until_state(target_state="secondary")
+    assert node2.wait_until_state(target_state="primary")
     assert node1.wait_until_state(target_state="secondary")
 
 def test_010_read_from_nodes():

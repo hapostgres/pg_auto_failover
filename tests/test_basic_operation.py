@@ -108,8 +108,16 @@ def test_014_add_new_secondary():
     assert node3.wait_until_state(target_state="secondary")
     assert node2.wait_until_state(target_state="primary")
 
-
-def test_015_multiple_manual_failover_verify_replication_slot_removed():
+# In previous versions of pg_auto_failover we removed the replication slot
+# on the secondary after failover. Now, we instead maintain the replication
+# slot's replay_lsn thanks for the monitor tracking of the nodes' LSN
+# positions.
+#
+# So rather than checking that we want to zero replication slots after
+# replication, we check that we still have a replication slot for the other
+# node.
+#
+def test_015_multiple_manual_failover_twice():
     count_repl_slots = "select count(*) from pg_replication_slots"
 
     print()
@@ -118,7 +126,7 @@ def test_015_multiple_manual_failover_verify_replication_slot_removed():
     assert node2.wait_until_state(target_state="secondary")
     assert node3.wait_until_state(target_state="primary")
     node2_replication_slots = node2.run_sql_query(count_repl_slots)
-    assert node2_replication_slots == [(0,)]
+    assert node2_replication_slots == [(1,)]
     node3_replication_slots = node3.run_sql_query(count_repl_slots)
     assert node3_replication_slots == [(1,)]
 
@@ -129,7 +137,7 @@ def test_015_multiple_manual_failover_verify_replication_slot_removed():
     node2_replication_slots = node2.run_sql_query(count_repl_slots);
     assert node2_replication_slots == [(1,)]
     node3_replication_slots = node3.run_sql_query(count_repl_slots);
-    assert node3_replication_slots == [(0,)]
+    assert node3_replication_slots == [(1,)]
 
 def test_016_drop_primary():
     node2.drop()
