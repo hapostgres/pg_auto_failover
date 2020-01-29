@@ -132,7 +132,7 @@ def test_016_multiple_manual_failover_twice():
     assert node2_replication_slots == [(1,)]
 
     node3_replication_slots = node3.run_sql_query(count_repl_slots)
-    print("node3: %s" % node2_replication_slots)
+    print("node3: %s" % node3_replication_slots)
     assert node3_replication_slots == [(1,)]
 
     print("Calling pgautofailover.failover() on the monitor")
@@ -145,7 +145,7 @@ def test_016_multiple_manual_failover_twice():
     assert node2_replication_slots == [(1,)]
 
     node3_replication_slots = node3.run_sql_query(count_repl_slots);
-    print("node3: %s" % node2_replication_slots)
+    print("node3: %s" % node3_replication_slots)
     assert node3_replication_slots == [(1,)]
 
 def test_017_drop_primary():
