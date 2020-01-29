@@ -132,14 +132,14 @@ def test_009_failover():
     print()
     print("Calling pgautofailover.failover() on the monitor")
     monitor.failover()
-    assert node3.wait_until_state(target_state="secondary")
     assert node2.wait_until_state(target_state="primary")
+    assert node3.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="secondary")
 
 def test_010_read_from_nodes():
-    for n in [node1, node2, node3]:
-        results = n.run_sql_query("SELECT * FROM t1")
-        assert results == [(1,), (2,)]
+    assert node1.run_sql_query("SELECT * FROM t1") == [(1,), (2,)]
+    assert node2.run_sql_query("SELECT * FROM t1") == [(1,), (2,)]
+    assert node3.run_sql_query("SELECT * FROM t1") == [(1,), (2,)]
 
 def test_011_write_into_new_primary():
     node2.run_sql_query("INSERT INTO t1 VALUES (3), (4)")
