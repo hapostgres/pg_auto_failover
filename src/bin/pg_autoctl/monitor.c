@@ -189,10 +189,10 @@ monitor_print_nodes_as_json(Monitor *monitor, char *formation, int groupId)
 	const char *sql =
 		groupId == -1
 		?
-		"SELECT jsonb_pretty(jsonb_agg(row_to_json(nodes)))"
+		"SELECT jsonb_pretty(jsonb_agg(row_to_json(nodes) ORDER BY node_id))"
 		"  FROM pgautofailover.get_nodes($1) as nodes"
 		:
-		"SELECT jsonb_pretty(jsonb_agg(row_to_json(nodes)))"
+		"SELECT jsonb_pretty(jsonb_agg(row_to_json(nodes) ORDER BY node_id))"
 		"  FROM pgautofailover.get_nodes($1, $2) as nodes";
 
 	int paramCount = 1;
@@ -332,10 +332,10 @@ monitor_print_other_nodes_as_json(Monitor *monitor,
 	const char *sql =
 		currentState == ANY_STATE
 		?
-		"SELECT jsonb_pretty(jsonb_agg(row_to_json(nodes)))"
+		"SELECT jsonb_pretty(jsonb_agg(row_to_json(nodes) ORDER BY node_id))"
 		" FROM pgautofailover.get_other_nodes($1, $2) as nodes"
 		:
-		"SELECT jsonb_pretty(jsonb_agg(row_to_json(nodes)))"
+		"SELECT jsonb_pretty(jsonb_agg(row_to_json(nodes) ORDER BY node_id))"
 		" FROM pgautofailover.get_other_nodes($1, $2, "
 		"$3::pgautofailover.replication_state) as nodes";
 
