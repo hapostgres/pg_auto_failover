@@ -128,11 +128,13 @@ def test_016_multiple_manual_failover_twice():
     assert node3.wait_until_state(target_state="primary")
 
     node2_replication_slots = node2.run_sql_query(count_repl_slots)
-    print("node2: %s" % node2_replication_slots)
+    print("node2: %s %s" % (node2_replication_slots,
+                            node2.list_replication_slot_names()))
     assert node2_replication_slots == [(1,)]
 
     node3_replication_slots = node3.run_sql_query(count_repl_slots)
-    print("node3: %s" % node3_replication_slots)
+    print("node3: %s %s" % (node3_replication_slots,
+                            node3.list_replication_slot_names()))
     assert node3_replication_slots == [(1,)]
 
     print("Calling pgautofailover.failover() on the monitor")
@@ -141,11 +143,13 @@ def test_016_multiple_manual_failover_twice():
     assert node3.wait_until_state(target_state="secondary")
 
     node2_replication_slots = node2.run_sql_query(count_repl_slots);
-    print("node2: %s" % node2_replication_slots)
+    print("node2: %s %s" % (node2_replication_slots,
+                            node2.list_replication_slot_names()))
     assert node2_replication_slots == [(1,)]
 
     node3_replication_slots = node3.run_sql_query(count_repl_slots);
-    print("node3: %s" % node3_replication_slots)
+    print("node3: %s %s" % (node3_replication_slots,
+                            node3.list_replication_slot_names()))
     assert node3_replication_slots == [(1,)]
 
 def test_017_drop_primary():
