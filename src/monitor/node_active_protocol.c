@@ -362,13 +362,28 @@ NodeActive(char *formationId, char *nodeName, int32 nodePort,
 			 */
 			char message[BUFSIZE];
 
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Node %d (%s:%d) reported new state \"%s\"",
-				pgAutoFailoverNode->nodeId,
-				pgAutoFailoverNode->nodeName,
-				pgAutoFailoverNode->nodePort,
-				ReplicationStateGetName(currentNodeState->replicationState));
+			if (currentNodeState->replicationState == REPLICATION_STATE_REPORT_LSN)
+			{
+				LogAndNotifyMessage(
+					message, BUFSIZE,
+					"Node %d (%s:%d) reported new state \"%s\" with LSN %X/%X",
+					pgAutoFailoverNode->nodeId,
+					pgAutoFailoverNode->nodeName,
+					pgAutoFailoverNode->nodePort,
+					ReplicationStateGetName(currentNodeState->replicationState),
+					(uint32) (pgAutoFailoverNode->reportedLSN >> 32),
+					(uint32) pgAutoFailoverNode->reportedLSN);
+			}
+			else
+			{
+				LogAndNotifyMessage(
+					message, BUFSIZE,
+					"Node %d (%s:%d) reported new state \"%s\"",
+					pgAutoFailoverNode->nodeId,
+					pgAutoFailoverNode->nodeName,
+					pgAutoFailoverNode->nodePort,
+					ReplicationStateGetName(currentNodeState->replicationState));
+			}
 
 			NotifyStateChange(currentNodeState->replicationState,
 							  pgAutoFailoverNode->goalState,
@@ -1361,8 +1376,6 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 	int32 nodePort = PG_GETARG_INT32(2);
 	int candidatePriority = PG_GETARG_INT32(3);
 
-	char message[BUFSIZE];
-
 	AutoFailoverNode *currentNode = NULL;
 	List *nodesGroupList = NIL;
 	int nodesCount = 0;
@@ -1402,15 +1415,20 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 
 	if (nodesCount == 1)
 	{
+		char message[BUFSIZE];
+
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Updating candidate priority to %d for node %s:%d",
+			"Updating candidate priority to %d for node %d (%s:%d)",
 			currentNode->candidatePriority,
+			currentNode->nodeId,
 			currentNode->nodeName,
 			currentNode->nodePort);
 	}
 	else
 	{
+		char message[BUFSIZE];
+
 		AutoFailoverNode *primaryNode =
 			GetPrimaryNodeInGroup(currentNode->formationId,
 								  currentNode->groupId);
@@ -1428,8 +1446,10 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 			ereport(ERROR,
 					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 					 errmsg("cannot set candidate priority when current state "
-							"for primary node %s:%d is \"%s\"",
-							primaryNode->nodeName, primaryNode->nodePort,
+							"for primary node %d (%s:%d) is \"%s\"",
+							primaryNode->nodeId,
+							primaryNode->nodeName,
+							primaryNode->nodePort,
 							ReplicationStateGetName(primaryNode->reportedState)),
 					 errdetail("The primary node so must be in state \"primary\" "
 							   "to be able to apply configuration changes to "
@@ -1438,11 +1458,11 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of %s:%d to apply_settings "
-			"after updating candidate priority to %d for node %s:%d.",
-			primaryNode->nodeName, primaryNode->nodePort,
-			currentNode->candidatePriority,
-			currentNode->nodeName, currentNode->nodePort);
+			"Setting goal state of node %d (%s:%d) to apply_settings "
+			"after updating node %d (%s:%d) candidate priority to %d.",
+			primaryNode->nodeId, primaryNode->nodeName, primaryNode->nodePort,
+			currentNode->nodeId, currentNode->nodeName, currentNode->nodePort,
+			currentNode->candidatePriority);
 
 		SetNodeGoalState(primaryNode->nodeName, primaryNode->nodePort,
 						 REPLICATION_STATE_APPLY_SETTINGS);
@@ -1461,19 +1481,6 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 						  message);
 	}
 
-	NotifyStateChange(currentNode->reportedState,
-					  currentNode->goalState,
-					  currentNode->formationId,
-					  currentNode->groupId,
-					  currentNode->nodeId,
-					  currentNode->nodeName,
-					  currentNode->nodePort,
-					  currentNode->pgsrSyncState,
-					  currentNode->reportedLSN,
-					  currentNode->candidatePriority,
-					  currentNode->replicationQuorum,
-					  message);
-
 	PG_RETURN_BOOL(true);
 }
 
@@ -1489,8 +1496,6 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 	char *nodeName = text_to_cstring(nodeNameText);
 	int32 nodePort = PG_GETARG_INT32(2);
 	bool replicationQuorum = PG_GETARG_BOOL(3);
-
-	char message[BUFSIZE];
 
 	AutoFailoverNode *currentNode = NULL;
 	List *nodesGroupList = NIL;
@@ -1564,15 +1569,20 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 
 	if (nodesCount == 1)
 	{
+		char message[BUFSIZE];
+
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Updating replicationQuorum to %s for node %s:%d",
+			"Updating replicationQuorum to %s for  %d (%s:%d)",
 			currentNode->replicationQuorum ? "true" : "false",
+			currentNode->nodeId,
 			currentNode->nodeName,
 			currentNode->nodePort);
 	}
 	else
 	{
+		char message[BUFSIZE];
+
 		AutoFailoverNode *primaryNode =
 			GetPrimaryNodeInGroup(currentNode->formationId,
 								  currentNode->groupId);
@@ -1622,19 +1632,6 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 						  primaryNode->replicationQuorum,
 						  message);
 	}
-
-	NotifyStateChange(currentNode->reportedState,
-					  currentNode->goalState,
-					  currentNode->formationId,
-					  currentNode->groupId,
-					  currentNode->nodeId,
-					  currentNode->nodeName,
-					  currentNode->nodePort,
-					  currentNode->pgsrSyncState,
-					  currentNode->reportedLSN,
-					  currentNode->candidatePriority,
-					  currentNode->replicationQuorum,
-					  message);
 
 	PG_RETURN_BOOL(true);
 }
