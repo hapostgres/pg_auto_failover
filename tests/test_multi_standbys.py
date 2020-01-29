@@ -136,7 +136,49 @@ def test_009_failover():
     assert node3.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="secondary")
 
-def test_010_read_from_new_primary():
-    results = node2.run_sql_query("SELECT * FROM t1")
-    assert results == [(1,), (2,)]
+def test_010_read_from_nodes():
+    for n in [node1, node2, node3]:
+        results = n.run_sql_query("SELECT * FROM t1")
+        assert results == [(1,), (2,)]
 
+def test_011_write_into_new_primary():
+    node2.run_sql_query("INSERT INTO t1 VALUES (3), (4)")
+    results = node2.run_sql_query("SELECT * FROM t1")
+    assert results == [(1,), (2,), (3,), (4,)]
+
+    # generate more WAL trafic for replication
+    node2.run_sql_query("CHECKPOINT")
+
+def test_012_set_candidate_priorities():
+    # set priorities in a way that we know the candidate: node3
+    node1.set_candidate_priority(70)
+    node2.set_candidate_priority(90) # current primary
+    node3.set_candidate_priority(90)
+
+    # when we set candidate priority we go to join_primary then primary
+    print()
+    assert node2.wait_until_state(target_state="primary")
+
+def test_013_maintenance_and_failover():
+    print()
+    print("Enabling maintenance on node1")
+    node1.enable_maintenance()
+    assert node1.wait_until_state(target_state="maintenance")
+
+    # assigned and goal state must be the same
+    assert node2.wait_until_state(target_state="primary")
+
+    print("Calling pgautofailover.failover() on the monitor")
+    monitor.failover()
+    assert node3.wait_until_state(target_state="primary")
+    assert node2.wait_until_state(target_state="secondary")
+
+    print("Disabling maintenance on node1, should connect to the new primary")
+    node1.disable_maintenance()
+    assert node1.wait_until_state(target_state="secondary")
+    print("recovery.conf:\n%s" %
+          open("/tmp/multi_standby/node1/recovery.conf").read())
+
+def test_014_read_from_new_primary():
+    results = node3.run_sql_query("SELECT * FROM t1")
+    assert results == [(1,), (2,), (3,), (4,)]

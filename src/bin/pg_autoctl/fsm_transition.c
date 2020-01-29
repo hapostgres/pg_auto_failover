@@ -926,8 +926,21 @@ fsm_promote_standby(Keeper *keeper)
 	 * same steps we take when going from single to wait_primary, namely to
 	 * create a replication slot and add the other node to pg_hba.conf. These
 	 * steps are implemented in prepare_replication.
+	 *
+	 * The other secondaries, if any, are now in either REPORT_LSN or already
+	 * in JOIN_SECONDARY state, and we need to prepare for them to be able to
+	 * connect as replica to the new primary too.
+	 *
+	 * Then we also have the most advanced node which might be used to fetch
+	 * WAL bytes from before promotion, and this node is in state WAIT_CASCADE
+	 * and then being assigned SECONDARY directly.
+	 *
+	 * All those steps may happen at before, during, of after this transition.
+	 * At the end of the day we want every registered node in the formation to
+	 * be able to connect as a standby to the current primary, so prepare
+	 * replication for all of them.
 	 */
-	if (!prepare_replication(keeper, DEMOTE_TIMEOUT_STATE))
+	if (!prepare_replication(keeper, ANY_STATE))
 	{
 		/* prepare_replication logs relevant errors */
 		return false;
