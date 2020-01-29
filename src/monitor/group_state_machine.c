@@ -86,9 +86,9 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of %s:%d to single as there is no other "
-			"node.",
-			activeNode->nodeName, activeNode->nodePort);
+			"Setting goal state of node %d (%s:%d) to single "
+			"as there is no other node.",
+			activeNode->nodeId, activeNode->nodeName, activeNode->nodePort);
 
 		/* other node may have been removed */
 		AssignGoalState(activeNode, REPLICATION_STATE_SINGLE, message);
@@ -369,19 +369,24 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 	/*
 	 * when a new primary is ready:
-	 *  report_lsn -> secondary
+	 *  join_secondary -> secondary
+	 *
+	 * As there's no action to implement on the new selected primary for that
+	 * step, we can make progress as soon as we want to.
 	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_REPORT_LSN) &&
-		IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY))
+	if (IsCurrentState(activeNode, REPLICATION_STATE_JOIN_SECONDARY) &&
+		(IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY) ||
+		 IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY)))
 	{
 		char message[BUFSIZE];
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of %s:%d to secondary after %s:%d converged "
-			"to primary.",
-			activeNode->nodeName, activeNode->nodePort,
-			primaryNode->nodeName, primaryNode->nodePort);
+			"Setting goal state of node %d (%s:%d) to secondary "
+			"after node %d (%s:%d) converged to %s.",
+			activeNode->nodeId, activeNode->nodeName, activeNode->nodePort,
+			primaryNode->nodeId, primaryNode->nodeName, primaryNode->nodePort,
+			ReplicationStateGetName(primaryNode->reportedState));
 
 		/* it's safe to rejoin as a secondary */
 		AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
@@ -798,11 +803,15 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 
 				LogAndNotifyMessage(
 					message, BUFSIZE,
-					"Setting goal state of %s:%d to prepare_promotion "
-					"after %s:%d became unhealthy "
+					"Setting goal state of node %d (%s:%d) to prepare_promotion "
+					"after node %d (%s:%d) became unhealthy "
 					"and %d nodes reported their LSN position.",
-					selectedNode->nodeName, selectedNode->nodePort,
-					primaryNode->nodeName, primaryNode->nodePort,
+					selectedNode->nodeId,
+					selectedNode->nodeName,
+					selectedNode->nodePort,
+					primaryNode->nodeId,
+					primaryNode->nodeName,
+					primaryNode->nodePort,
 					reportedLSNCount);
 
 				AssignGoalState(selectedNode,
@@ -960,22 +969,28 @@ ProceedWithMSFailover(AutoFailoverNode *activeNode,
 	}
 
 	/*
-	 * When the activeNode is "just" another standby, it's time to follow the
-	 * new primary as soon as our candidate reaches stop_replication.
+	 * When the activeNode is "just" another standby which did REPORT LSN, we
+	 * stop replication as soon as possible, and later follow the new primary,
+	 * as soon as it's ready.
 	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_REPORT_LSN) &&
-		IsCurrentState(candidateNode, REPLICATION_STATE_STOP_REPLICATION))
+	if (IsCurrentState(activeNode, REPLICATION_STATE_REPORT_LSN)
+		&& (IsCurrentState(candidateNode, REPLICATION_STATE_PREPARE_PROMOTION)
+			|| IsCurrentState(candidateNode, REPLICATION_STATE_STOP_REPLICATION)))
 	{
 		char message[BUFSIZE];
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of %s:%d to secondary "
-			"after %s:%d converged to stop_replication.",
-			activeNode->nodeName, activeNode->nodePort,
-			candidateNode->nodeName, candidateNode->nodePort);
+			"Setting goal state of node %d (%s:%d) to join_secondary "
+			"after node %d (%s:%d) got selected as the failover candidate.",
+			activeNode->nodeId,
+			activeNode->nodeName,
+			activeNode->nodePort,
+			candidateNode->nodeId,
+			candidateNode->nodeName,
+			candidateNode->nodePort);
 
-		AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
+		AssignGoalState(activeNode, REPLICATION_STATE_JOIN_SECONDARY, message);
 
 		return true;
 	}

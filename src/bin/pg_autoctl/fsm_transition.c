@@ -667,6 +667,29 @@ fsm_stop_postgres(Keeper *keeper)
 
 
 /*
+ * fsm_stop_postgres is used when local node was demoted, need to be dead now.
+ */
+bool
+fsm_checkpoint_and_stop_postgres(Keeper *keeper)
+{
+	KeeperConfig *config = &(keeper->config);
+	PostgresSetup *pgSetup = &(config->pgSetup);
+	LocalPostgresServer *postgres = &(keeper->postgres);
+	PGSQL *pgsql = &(postgres->sqlClient);
+
+	log_info("Issue a CHECKPOINT; command before stopping Postgres");
+
+	if (!pgsql_checkpoint(pgsql))
+	{
+		log_error("Failed to checkpoint before stopping Postgres");
+		return false;
+	}
+
+	return pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata);
+}
+
+
+/*
  * fsm_init_standby is used when the primary is now ready to accept a standby,
  * we're the standby.
  */
@@ -829,13 +852,25 @@ fsm_prepare_standby_for_promotion(Keeper *keeper)
 
 
 /*
- * fsm_suspend_standby is used when putting the standby in maintenance mode
- * (kernel upgrades, change of hardware, etc). Maintenance means that the user
- * now is driving the service, refrain from doing anything ourselves.
+ * fsm_start_maintenance_on_standby is used when putting the standby in
+ * maintenance mode (kernel upgrades, change of hardware, etc). Maintenance
+ * means that the user now is driving the service, refrain from doing anything
+ * ourselves.
+ *
+ * Still, because it is a useful on a standby before stopping it, issue a
+ * CHECKPOINT.
  */
 bool
 fsm_start_maintenance_on_standby(Keeper *keeper)
 {
+	LocalPostgresServer *postgres = &(keeper->postgres);
+	PGSQL *pgsql = &(postgres->sqlClient);
+
+	if (!pgsql_checkpoint(pgsql))
+	{
+		log_warn("Failed to checkpoint before entering maintenance");
+	}
+
 	return true;
 }
 

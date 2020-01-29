@@ -435,6 +435,11 @@ NodeStateToString(NodeState s)
 			return "wait_cascade";
 		}
 
+		case JOIN_SECONDARY_STATE:
+		{
+			return "join_secondary";
+		}
+
 		case ANY_STATE:
 		{
 			return "#any state#";
@@ -537,6 +542,10 @@ NodeStateFromString(const char *str)
 	else if(strcmp(str, "apply_settings") == 0)
 	{
 		return APPLY_SETTINGS_STATE;
+	}
+	else if(strcmp(str, "join_secondary") == 0)
+	{
+		return JOIN_SECONDARY_STATE;
 	}
 	else
 	{

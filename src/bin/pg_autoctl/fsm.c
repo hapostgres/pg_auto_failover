@@ -149,8 +149,14 @@
 #define COMMENT_PRIMARY_TO_APPLY_SETTINGS \
 	"Apply new pg_auto_failover settings (synchronous_standby_names)"
 
-# define COMMENT_APPLY_SETTINGS_TO_PRIMARY \
+#define COMMENT_APPLY_SETTINGS_TO_PRIMARY \
 	"Back to primary state after having applied new pg_auto_failover settings"
+
+#define COMMENT_REPORT_LSN_TO_JOIN_SECONDARY \
+	"A failover candidate has been selected, stop replication"
+
+#define COMMENT_JOIN_SECONDARY_TO_SECONDARY \
+	"Failover is done, we have a new primary to follow"
 
 /* *INDENT-OFF* */
 
@@ -293,6 +299,7 @@ KeeperFSMTransition KeeperFSM[] = {
 	 */
 	{ PRIMARY_STATE, APPLY_SETTINGS_STATE, COMMENT_PRIMARY_TO_APPLY_SETTINGS, &fsm_apply_settings },
 	{ APPLY_SETTINGS_STATE, PRIMARY_STATE, COMMENT_APPLY_SETTINGS_TO_PRIMARY, NULL },
+
 	/*
 	 * In case of multiple standbys, failover begins with reporting current LSN
 	 */
@@ -301,8 +308,10 @@ KeeperFSMTransition KeeperFSM[] = {
 	{ REPORT_LSN_STATE, WAIT_FORWARD_STATE, COMMENT_REPORT_LSN_TO_WAIT_FORWARD, &fsm_wait_forward },
 	{ WAIT_FORWARD_STATE, FAST_FORWARD_STATE, COMMENT_REPORT_LSN_TO_FAST_FORWARD, &fsm_fast_forward },
 	{ REPORT_LSN_STATE, WAIT_CASCADE_STATE, COMMENT_REPORT_LSN_TO_WAIT_CASCADE, &fsm_prepare_cascade },
-	{ REPORT_LSN_STATE, SECONDARY_STATE, COMMENT_FOLLOW_NEW_PRIMARY, &fsm_follow_new_primary },
 	{ WAIT_CASCADE_STATE, SECONDARY_STATE, COMMENT_FOLLOW_NEW_PRIMARY, &fsm_follow_new_primary },
+
+	{ REPORT_LSN_STATE, JOIN_SECONDARY_STATE, COMMENT_REPORT_LSN_TO_JOIN_SECONDARY, &fsm_checkpoint_and_stop_postgres },
+	{ JOIN_SECONDARY_STATE, SECONDARY_STATE, COMMENT_JOIN_SECONDARY_TO_SECONDARY, &fsm_follow_new_primary },
 
 	/*
 	 * Applying new replication/cluster settings (per node replication quorum,

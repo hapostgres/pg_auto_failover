@@ -246,6 +246,11 @@ ReplicationStateGetName(ReplicationState replicationState)
 			return "wait_cascade";
 		}
 
+		case REPLICATION_STATE_JOIN_SECONDARY:
+		{
+			return "join_secondary";
+		}
+
 		default:
 		{
 			ereport(ERROR,

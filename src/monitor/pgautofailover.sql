@@ -39,7 +39,8 @@ CREATE TYPE pgautofailover.replication_state
     'report_lsn',
     'fast_forward',
     'wait_forward',
-    'wait_cascade'
+    'wait_cascade',
+    'join_secondary'
  );
 
 CREATE TABLE pgautofailover.formation
