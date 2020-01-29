@@ -1017,6 +1017,7 @@ pg_write_recovery_conf(const char *pgdata,
 	join_path_components(recoveryConfPath, pgdata, "recovery.conf");
 
 	log_info("Writing recovery configuration to \"%s\"", recoveryConfPath);
+	log_debug("%s:\n%s", recoveryConfPath, content->data);
 
 	if (!write_file(content->data, content->len, recoveryConfPath))
 	{
@@ -1108,10 +1109,7 @@ prepare_primary_conninfo(char *primaryConnInfo,
 	buffer = createPQExpBuffer();
 
 	/* application_name shows up in pg_stat_replication on the primary */
-	appendPQExpBuffer(buffer,
-					  "application_name=pgautofailover_standby_%d",
-					  primaryNodeId);
-
+	appendPQExpBuffer(buffer, "application_name=%s", applicationName);
 	appendPQExpBuffer(buffer, " host=%s", primaryHost);
 	appendPQExpBuffer(buffer, " port=%d", primaryPort);
 	appendPQExpBuffer(buffer, " user=%s", replicationUsername);
