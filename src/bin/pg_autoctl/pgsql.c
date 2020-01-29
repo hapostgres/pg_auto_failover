@@ -725,7 +725,7 @@ typedef struct ReplicationSlotMaintainContext
  *
  *   SELECT id, lsn
  *     FROM (values (null::int, null::pg_lsn)) as t(id, lsn)
- *    WHERE x is null
+ *    WHERE false
  *
  * We actually need to provide an empty set (0 rows) with columns of the
  * expected data types so that we can join against the existing replication
@@ -745,21 +745,14 @@ BuildNodesArrayValues(NodeAddressArray *nodeArray,
 	int valuesIndex = 0;
 
 	/*
-	 * The nodeArray is obtained by a call to get_other_nodes() and is only
-	 * empty from a SINGLE node. Otherwise the primary is in the list of nodes.
-	 * As a result, we can't really skip the array when it's empty, because
-	 * that case and the case with only a single node are to be processed the
-	 * same.
+	 * Build a SQL VALUES statement for every other node registered in the
+	 * system, so that we can maintain their LSN position locally on a standby
+	 * server.
 	 */
 	for (nodeIndex = 0; nodeIndex < nodeArray->count; nodeIndex++)
 	{
 		NodeAddress *node = &(nodeArray->nodes[nodeIndex]);
 		IntString nodeIdString = intToString(node->nodeId);
-
-		if (node->isPrimary)
-		{
-			continue;
-		}
 
 		paramTypes[paramIndex] = INT4OID;
 		paramValues[paramIndex++] = strdup(nodeIdString.strValue);
@@ -791,7 +784,7 @@ BuildNodesArrayValues(NodeAddressArray *nodeArray,
 		sprintf(values,
 				"SELECT id, lsn "
 				"FROM (values (null::int, null::pg_lsn)) as t(id, lsn) "
-				"where id is not null");
+				"where false");
 	}
 	else
 	{
