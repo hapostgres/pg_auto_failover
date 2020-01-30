@@ -599,46 +599,6 @@ pgsql_check_monitor_settings(PGSQL *pgsql, bool *settings_are_ok)
 
 
 /*
- * pgsql_create_replication_slot tries to create a replication slot on the
- * database identified by a connection string. It's implemented as CREATE IF
- * NOT EXISTS so that it's idempotent and can be retried easily.
- */
-bool
-pgsql_create_replication_slot(PGSQL *pgsql, const char *slotName)
-{
-	char *sql =
-		"SELECT pg_create_physical_replication_slot($1) "
-		" WHERE NOT EXISTS "
-		" (SELECT 1 FROM pg_replication_slots WHERE slot_name = $1)" ;
-	const Oid paramTypes[1] = { TEXTOID };
-	const char *paramValues[1] = { slotName };
-
-	return pgsql_execute_with_params(pgsql, sql, 1, paramTypes, paramValues,
-									 NULL, NULL);
-}
-
-
-/*
- * pgsql_drop_replication_slot drops a given replication slot.
- */
-bool
-pgsql_drop_replication_slot(PGSQL *pgsql, const char *slotName)
-{
-	char *sql =
-		"SELECT pg_drop_replication_slot(slot_name) "
-		"  FROM pg_replication_slots "
-		" WHERE slot_name = $1";
-	Oid paramTypes[1] = { TEXTOID };
-	const char *paramValues[1] = { slotName };
-
-	log_info("Drop replication slot \"%s\"", slotName);
-
-	return pgsql_execute_with_params(pgsql, sql,
-									 1, paramTypes, paramValues, NULL, NULL);
-}
-
-
-/*
  * postgres_sprintf_replicationSlotName prints the replication Slot Name to use
  * for given nodeId in the given slotName buffer of given size.
  */
@@ -678,6 +638,72 @@ pgsql_set_synchronous_standby_names(PGSQL *pgsql,
 	return pgsql_alter_system_set(pgsql, setting);
 }
 
+
+/*
+ * pgsql_replication_slot_maintain advances the current confirmed position of
+ * the given replication slot up to the given LSN position, create the
+ * replication slot if it does not exists yet, and remove the slots that exist
+ * in Postgres but are ommited in the given array of slots.
+ */
+typedef struct ReplicationSlotMaintainContext
+{
+	char sqlstate[SQLSTATE_LENGTH];
+	char operation[NAMEDATALEN];
+	char slotName[BUFSIZE];
+	char lsn[PG_LSN_MAXLENGTH];
+	bool parsedOK;
+} ReplicationSlotMaintainContext;
+
+
+/*
+ * pgsql_create_replication_slot tries to create a replication slot on the
+ * database identified by a connection string. It's implemented as CREATE IF
+ * NOT EXISTS so that it's idempotent and can be retried easily.
+ */
+bool
+pgsql_create_replication_slot(PGSQL *pgsql, const char *slotName)
+{
+	ReplicationSlotMaintainContext context = { 0 };
+	char *sql =
+		"SELECT 'create', slot_name, lsn "
+		"  FROM pg_create_physical_replication_slot($1) "
+		" WHERE NOT EXISTS "
+		" (SELECT 1 FROM pg_replication_slots WHERE slot_name = $1)" ;
+	const Oid paramTypes[1] = { TEXTOID };
+	const char *paramValues[1] = { slotName };
+
+	log_trace("pgsql_create_replication_slot");
+
+	/*
+	 * parseReplicationSlotMaintain will log_info() the replication slot
+	 * creation if it happens. When the slot already exists we return 0 row and
+	 * remain silent about it.
+	 */
+	return pgsql_execute_with_params(pgsql, sql, 1, paramTypes, paramValues,
+									 &context, parseReplicationSlotMaintain);
+}
+
+
+/*
+ * pgsql_drop_replication_slot drops a given replication slot.
+ */
+bool
+pgsql_drop_replication_slot(PGSQL *pgsql, const char *slotName)
+{
+	char *sql =
+		"SELECT pg_drop_replication_slot(slot_name) "
+		"  FROM pg_replication_slots "
+		" WHERE slot_name = $1";
+	Oid paramTypes[1] = { TEXTOID };
+	const char *paramValues[1] = { slotName };
+
+	log_info("Drop replication slot \"%s\"", slotName);
+
+	return pgsql_execute_with_params(pgsql, sql,
+									 1, paramTypes, paramValues, NULL, NULL);
+}
+
+
 /*
  * pgsql_drop_replication_slots drops all the pg_auto_failover physical
  * replication slots. (We might not own all those that exist on the server)
@@ -695,22 +721,6 @@ pgsql_drop_replication_slots(PGSQL *pgsql)
 
 	return pgsql_execute_with_params(pgsql, sql, 0, NULL, NULL, NULL, NULL);
 }
-
-
-/*
- * pgsql_replication_slot_maintain advances the current confirmed position of
- * the given replication slot up to the given LSN position, create the
- * replication slot if it does not exists yet, and remove the slots that exist
- * in Postgres but are ommited in the given array of slots.
- */
-typedef struct ReplicationSlotMaintainContext
-{
-	char sqlstate[SQLSTATE_LENGTH];
-	char operation[NAMEDATALEN];
-	char slotName[BUFSIZE];
-	char lsn[PG_LSN_MAXLENGTH];
-	bool parsedOK;
-} ReplicationSlotMaintainContext;
 
 
 /*
