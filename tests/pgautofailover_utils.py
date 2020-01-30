@@ -558,6 +558,30 @@ SELECT reportedstate
         result = self.run_sql_query(query)
         return [row[0] for row in result]
 
+    def has_needed_replication_slots(self):
+        """
+        Each node is expected to maintain a slot for each of the other nodes
+        the primary through streaming replication, the secondary(s) manually
+        through calls to pg_replication_slot_advance() on the local Postgres.
+        """
+        hostname = str(self.vnode.address)
+        other_nodes = self.monitor.get_other_nodes(hostname, self.port)
+        expected_slots = ['pgautofailover_standby_%s' % n[0] for n in other_nodes]
+        current_slots = self.list_replication_slot_names()
+
+        # just to make it easier to read through the print()ed list
+        expected_slots.sort()
+        current_slots.sort()
+
+        if set(expected_slots) == set(current_slots):
+            print("slots list on %s is %s, as expected" %
+                  (self.datadir, current_slots))
+        else:
+            print("slots list on %s is %s, expected %s" %
+                  (self.datadir, current_slots, expected_slots))
+
+        return set(expected_slots) == set(current_slots)
+
 
 class MonitorNode(PGNode):
     def __init__(self, datadir, vnode, port, nodename, authMethod):
@@ -710,6 +734,13 @@ class MonitorNode(PGNode):
         command = PGAutoCtl(self.vnode, self.datadir)
         out, err = command.execute("show state", 'show', 'state')
         print("%s" % out)
+
+    def get_other_nodes(self, host, port):
+        """
+        Returns the list of the other nodes in the same formation/group.
+        """
+        query = "select * from pgautofailover.get_other_nodes(%s, %s)"
+        return self.run_sql_query(query, host, port)
 
 
 class PGAutoCtl():
