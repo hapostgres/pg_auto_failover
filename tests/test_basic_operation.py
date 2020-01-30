@@ -117,39 +117,37 @@ def test_014_add_new_secondary():
 # replication, we check that we still have a replication slot for the other
 # node.
 #
-def test_015_multiple_manual_failover_twice():
-    count_repl_slots = "select count(*) from pg_replication_slots"
-
+def test_015_multiple_manual_failover_verify_replication_slots():
     print()
     print("Calling pgautofailover.failover() on the monitor")
     monitor.failover()
     assert node2.wait_until_state(target_state="secondary")
     assert node3.wait_until_state(target_state="primary")
 
-    node2_replication_slots = node2.run_sql_query(count_repl_slots)
-    print("node2: %s %s" % (node2_replication_slots,
-                            node2.list_replication_slot_names()))
-    assert node2_replication_slots == [(1,)]
+    # each node is expected to maintain a slot for each of the other nodes
+    # the primary through streaming replication, the secondary(s) manually
+    # through calls to pg_replication_slot_advance() on the local Postgres
+    node2_slots = node2.list_replication_slot_names()
+    print("node2: %s" % node2_slots)
+    assert len(node2_slots) == 1 and 'pgautofailover_standby_3' in node2_slots
 
-    node3_replication_slots = node3.run_sql_query(count_repl_slots)
-    print("node3: %s %s" % (node3_replication_slots,
-                            node3.list_replication_slot_names()))
-    assert node3_replication_slots == [(1,)]
+    node3_slots = node3.list_replication_slot_names()
+    print("node3: %s" % node3_slots)
+    assert len(node3_slots) == 1 and 'pgautofailover_standby_2' in node3_slots
 
     print("Calling pgautofailover.failover() on the monitor")
     monitor.failover()
     assert node2.wait_until_state(target_state="primary")
     assert node3.wait_until_state(target_state="secondary")
 
-    node2_replication_slots = node2.run_sql_query(count_repl_slots);
-    print("node2: %s %s" % (node2_replication_slots,
-                            node2.list_replication_slot_names()))
-    assert node2_replication_slots == [(1,)]
+    # check again that we have the expected slots around
+    node2_slots = node2.list_replication_slot_names()
+    print("node2: %s" % node2_slots)
+    assert len(node2_slots) == 1 and 'pgautofailover_standby_3' in node2_slots
 
-    node3_replication_slots = node3.run_sql_query(count_repl_slots);
-    print("node3: %s %s" % (node3_replication_slots,
-                            node3.list_replication_slot_names()))
-    assert node3_replication_slots == [(1,)]
+    node3_slots = node3.list_replication_slot_names()
+    print("node3: %s" % node3_slots)
+    assert len(node3_slots) == 1 and 'pgautofailover_standby_2' in node3_slots
 
 def test_016_drop_primary():
     node2.drop()
