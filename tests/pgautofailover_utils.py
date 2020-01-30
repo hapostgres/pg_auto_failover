@@ -274,8 +274,11 @@ class PGNode:
 
     def get_postgres_logs(self):
         ldir = os.path.join(self.datadir, "log")
+        logfiles = os.listdir(ldir)
+        logfiles.sort()
+
         logs = []
-        for logfile in os.listdir(ldir):
+        for logfile in logfiles:
             logs += ["\n\n%s:\n" % logfile]
             logs += open(os.path.join(ldir, logfile)).readlines()
 
