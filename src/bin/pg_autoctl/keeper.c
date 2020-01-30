@@ -232,7 +232,6 @@ keeper_ensure_current_state(Keeper *keeper)
 		}
 
 		case SECONDARY_STATE:
-		case CATCHINGUP_STATE:
 		{
 			if (!keeper_ensure_postgres_is_running(keeper, false))
 			{
@@ -242,6 +241,19 @@ keeper_ensure_current_state(Keeper *keeper)
 
 			/* now ensure progress is made on the replication slots */
 			return keeper_maintain_replication_slots(keeper);
+		}
+
+		/*
+		 * We don't maintain replication slots in CATCHINGUP state. We might
+		 * not be in a position to pg_replication_slot_advance() the slot to
+		 * the position required by the other standby nodes. Typically we would
+		 * get a Postgres error such as the following:
+		 *
+		 *   cannot advance replication slot to 0/5000060, minimum is 0/6000028
+		 */
+		case CATCHINGUP_STATE:
+		{
+			return keeper_ensure_postgres_is_running(keeper, false);
 		}
 
 		case DEMOTED_STATE:

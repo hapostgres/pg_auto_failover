@@ -805,6 +805,21 @@ fsm_rewind_or_init(Keeper *keeper)
 
 
 /*
+ * fsm_maintain_replication_slots is used when going from CATCHINGUP to
+ * SECONDARY, to create missing replication slots. We want to maintain a
+ * replication slot for each of the other nodes in the system, so that we make
+ * sure we have the WAL bytes around when a standby nodes has to follow a new
+ * primary, after failover.
+ */
+bool
+fsm_maintain_replication_slots(Keeper *keeper)
+{
+	return keeper_maintain_replication_slots(keeper);
+}
+
+
+
+/*
  * fsm_prepare_standby_for_promotion used when the standby is asked to prepare
  * its own promotion.
  *
