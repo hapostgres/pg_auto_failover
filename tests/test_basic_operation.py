@@ -42,6 +42,9 @@ def test_004_init_secondary():
     assert node2.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")
 
+    assert node1.has_needed_replication_slots()
+    assert node2.has_needed_replication_slots()
+
 def test_005_read_from_secondary():
     results = node2.run_sql_query("SELECT * FROM t1")
     assert results == [(1,), (2,)]
@@ -100,6 +103,8 @@ def test_014_drop_secondary():
     assert not node1.pg_is_running()
     assert node2.wait_until_state(target_state="single")
 
+    # replication slot list should be empty now
+    assert node2.has_needed_replication_slots()
 
 def test_015_add_new_secondary():
     global node3
@@ -108,6 +113,9 @@ def test_015_add_new_secondary():
     node3.run()
     assert node3.wait_until_state(target_state="secondary")
     assert node2.wait_until_state(target_state="primary")
+
+    assert node2.has_needed_replication_slots()
+    assert node3.has_needed_replication_slots()
 
 # In previous versions of pg_auto_failover we removed the replication slot
 # on the secondary after failover. Now, we instead maintain the replication
@@ -120,35 +128,22 @@ def test_015_add_new_secondary():
 #
 def test_016_multiple_manual_failover_verify_replication_slots():
     print()
+
     print("Calling pgautofailover.failover() on the monitor")
     monitor.failover()
     assert node2.wait_until_state(target_state="secondary")
     assert node3.wait_until_state(target_state="primary")
 
-    # each node is expected to maintain a slot for each of the other nodes
-    # the primary through streaming replication, the secondary(s) manually
-    # through calls to pg_replication_slot_advance() on the local Postgres
-    node2_slots = node2.list_replication_slot_names()
-    print("node2: %s" % node2_slots)
-    assert len(node2_slots) == 1 and 'pgautofailover_standby_3' in node2_slots
-
-    node3_slots = node3.list_replication_slot_names()
-    print("node3: %s" % node3_slots)
-    assert len(node3_slots) == 1 and 'pgautofailover_standby_2' in node3_slots
+    assert node2.has_needed_replication_slots()
+    assert node3.has_needed_replication_slots()
 
     print("Calling pgautofailover.failover() on the monitor")
     monitor.failover()
     assert node2.wait_until_state(target_state="primary")
     assert node3.wait_until_state(target_state="secondary")
 
-    # check again that we have the expected slots around
-    node2_slots = node2.list_replication_slot_names()
-    print("node2: %s" % node2_slots)
-    assert len(node2_slots) == 1 and 'pgautofailover_standby_3' in node2_slots
-
-    node3_slots = node3.list_replication_slot_names()
-    print("node3: %s" % node3_slots)
-    assert len(node3_slots) == 1 and 'pgautofailover_standby_2' in node3_slots
+    assert node2.has_needed_replication_slots()
+    assert node3.has_needed_replication_slots()
 
 def test_017_drop_primary():
     node2.drop()
