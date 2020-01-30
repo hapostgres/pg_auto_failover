@@ -1210,7 +1210,7 @@ pg_write_standby_signal(const char *configFilePath,
 	 * false here and let the main loop try again. At least Postgres won't
 	 * start as a cloned single accepting writes.
 	 */
-	if (!pg_include_config(standbyConfigFilePath,
+	if (!pg_include_config(configFilePath,
 						   AUTOCTL_SB_CONF_INCLUDE_LINE,
 						   AUTOCTL_SB_CONF_INCLUDE_REGEX,
 						   AUTOCTL_CONF_INCLUDE_COMMENT))
