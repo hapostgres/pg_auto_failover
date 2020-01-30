@@ -840,3 +840,94 @@ standby_follow_new_primary(LocalPostgresServer *postgres,
 
 	return true;
 }
+
+
+/*
+ * standby_fetch_missing_wal_and_promote sets up replication to fetch up to
+ * given recovery_target_lsn (inclusive) with a recovery_target_action set to
+ * 'promote' so that as soon as we get our WAL bytes we are promoted to being a
+ * primary.
+ */
+bool
+standby_fetch_missing_wal_and_promote(LocalPostgresServer *postgres,
+									  ReplicationSource *replicationSource)
+{
+	char configFilePath[MAXPGPATH];
+	PGSQL *pgsql = &(postgres->sqlClient);
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+	NodeAddress *upstreamNode = &(replicationSource->primaryNode);
+	bool inRecovery = false;
+
+	log_info("Fetching WAL from upstream node %d (%s:%d) up to LSN %s",
+			 upstreamNode->nodeId,
+			 upstreamNode->host,
+			 upstreamNode->port,
+			 replicationSource->targetLSN);
+
+	/* configFilePath = $PGDATA/postgresql.conf */
+	join_path_components(configFilePath, pgSetup->pgdata, "postgresql.conf");
+
+	if (!pg_setup_standby_mode(pgSetup->control.pg_control_version,
+							   configFilePath,
+							   pgSetup->pgdata,
+							   replicationSource))
+	{
+		log_error("Failed to setup Postgres as a standby, after rewind");
+		return false;
+	}
+
+	log_info("Restarting Postgres at \%s\"", pgSetup->pgdata);
+
+	if (!pg_ctl_restart(pgSetup->pg_ctl, pgSetup->pgdata))
+	{
+		log_error("Failed to restart Postgres after changing its "
+				  "primary conninfo, see above for details");
+		return false;
+	}
+
+	/*
+	 * Now loop until Postgres is out of recovery mode.
+	 */
+	if (!pgsql_get_postgres_metadata(pgsql,
+									 &pgSetup->is_in_recovery,
+									 postgres->pgsrSyncState,
+									 postgres->currentLSN))
+	{
+		log_error("Failed to determine whether postgres is in recovery mode");
+		return false;
+	}
+
+	while (inRecovery)
+	{
+		log_info("Waiting for postgres to promote, currently at LSN %s",
+				 postgres->currentLSN);
+		pg_usleep(AWAIT_PROMOTION_SLEEP_TIME_MS * 1000);
+
+		if (!pgsql_get_postgres_metadata(pgsql,
+										 &pgSetup->is_in_recovery,
+										 postgres->pgsrSyncState,
+										 postgres->currentLSN))
+		{
+			log_error("Failed to determine whether postgres is in recovery mode");
+			return false;
+		}
+	}
+
+	/*
+	 * It's necessary to do a checkpoint before allowing the old primary to
+	 * rewind, since there can be a race condition in which pg_rewind detects
+	 * no change in timeline in the pg_control file, but a checkpoint is
+	 * already in progress causing the timelines to diverge before replication
+	 * starts.
+	 */
+	if (!pgsql_checkpoint(pgsql))
+	{
+		log_error("Failed to checkpoint after promotion");
+		return false;
+	}
+
+	/* disconnect from PostgreSQL now */
+	pgsql_finish(pgsql);
+
+	return true;
+}

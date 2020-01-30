@@ -818,7 +818,6 @@ fsm_maintain_replication_slots(Keeper *keeper)
 }
 
 
-
 /*
  * fsm_prepare_standby_for_promotion used when the standby is asked to prepare
  * its own promotion.
@@ -987,24 +986,64 @@ fsm_report_lsn(Keeper *keeper)
 
 /*
  * When the selected failover candidate does not have the latest received WAL,
- * it fetches them from another standby. First, wait until this other standby
- * with the WAL has added us to its HBA file (wait_cascade).
- */
-bool
-fsm_wait_forward(Keeper *keeper)
-{
-	return true;
-}
-
-
-/*
- * When the selected failover candidate does not have the latest received WAL,
- * it fetches them from another standby.
+ * it fetches them from another standby, the one in WAIT_CASCADE state.
  */
 bool
 fsm_fast_forward(Keeper *keeper)
 {
-	return false;
+	KeeperConfig *config = &(keeper->config);
+	Monitor *monitor = &(keeper->monitor);
+	LocalPostgresServer *postgres = &(keeper->postgres);
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+
+	NodeAddress *upstreamNode = NULL;
+	ReplicationSource replicationSource = { 0 };
+
+	if (!config->monitorDisabled)
+	{
+		char *host = config->nodename;
+		int port = pgSetup->pgport;
+
+		if (!monitor_get_other_nodes(monitor, host, port,
+									 WAIT_CASCADE_STATE,
+									 &(keeper->otherNodes)))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
+		if (keeper->otherNodes.count != 1)
+		{
+			log_error("Failed to find a node in state \"fast_forward\" on "
+					  "the monitor, pgautofailover.get_other_nodes() "
+					  "returned %d node(s)",
+					  keeper->otherNodes.count);
+		}
+	}
+
+	/*
+	 * We expect a single FAST_FORWARD node in the system at any point.
+	 */
+	upstreamNode = &(keeper->otherNodes.nodes[0]);
+
+	/* copy upstream node over replicationSource.primaryNode */
+	replicationSource.primaryNode = keeper->otherNodes.nodes[0];
+
+	replicationSource.userName = PG_AUTOCTL_REPLICA_USERNAME;
+	replicationSource.password = config->replication_password;
+	replicationSource.slotName = config->replication_slot_name;
+	replicationSource.applicationName = config->replication_slot_name;
+	replicationSource.maximumBackupRate = config->maximum_backup_rate;
+	replicationSource.backupDir = config->backupDirectory;
+	replicationSource.targetLSN = upstreamNode->lsn;
+
+	if (!standby_fetch_missing_wal_and_promote(postgres, &replicationSource))
+	{
+		log_error("Failed to ");
+		return false;
+	}
+
+	return true;
 }
 
 
@@ -1013,11 +1052,65 @@ fsm_fast_forward(Keeper *keeper)
  * it fetches them from another standby. This standby that has the latest WAL
  * then goes in WAIT_CASCADE state to add the other node's HBA entries and
  * such.
+ *
+ * The selected failover node is in state WAIT_FORWARD and we need to open an
+ * HBA entry for it. We already have a replication slot ready.
  */
 bool
 fsm_prepare_cascade(Keeper *keeper)
 {
-	return false;
+	KeeperConfig *config = &(keeper->config);
+	Monitor *monitor = &(keeper->monitor);
+	LocalPostgresServer *postgres = &(keeper->postgres);
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+
+	NodeAddress *candidateNode = NULL;
+
+	if (!config->monitorDisabled)
+	{
+		char *host = config->nodename;
+		int port = pgSetup->pgport;
+
+		if (!monitor_get_other_nodes(monitor, host, port,
+									 WAIT_FORWARD_STATE,
+									 &(keeper->otherNodes)))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
+		if (keeper->otherNodes.count != 1)
+		{
+			log_error("Failed to find a node in state \"wait_forward\" on "
+					  "the monitor, pgautofailover.get_other_nodes() "
+					  "returned %d node(s)",
+					  keeper->otherNodes.count);
+		}
+	}
+
+	/*
+	 * We expect a single WAIT_FORWARD node in the system at any point, because
+	 * we can only have one failover candidate.
+	 */
+	candidateNode = &(keeper->otherNodes.nodes[0]);
+
+	log_info("Preparing cascading replication for failover target node %d (%s:%d)",
+			 candidateNode->nodeId, candidateNode->host, candidateNode->port);
+
+	if (!primary_add_standby_to_hba(postgres,
+									candidateNode->host,
+									config->replication_password))
+	{
+		log_error("Failed to grant access to the standby %d (%s:%d) "
+				  "by adding relevant lines to pg_hba.conf for the standby "
+				  "hostname and user, see above for details",
+				  candidateNode->nodeId,
+				  candidateNode->host,
+				  candidateNode->port);
+		return false;
+	}
+
+	return true;
 }
 
 

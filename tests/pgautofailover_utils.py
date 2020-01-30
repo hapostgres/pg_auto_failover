@@ -294,6 +294,18 @@ class PGNode:
 
         return "".join(logs)
 
+    def ifdown(self):
+        """
+        Bring the network interface down for this node
+        """
+        self.vnode.ifdown()
+
+    def ifup(self):
+        """
+        Bring the network interface up for this node
+        """
+        self.vnode.ifup()
+
 
 class DataNode(PGNode):
     def __init__(self, datadir, vnode, port,

@@ -61,11 +61,13 @@ static bool prepare_primary_conninfo(
 	const char *applicationName);
 static bool pg_write_recovery_conf(const char *pgdata,
 								   const char *primaryConnInfo,
-								   const char *replicationSlotName);
+								   const char *replicationSlotName,
+								   const char *replicationTargetLSN);
 static bool pg_write_standby_signal(const char *configFilePath,
 									const char *pgdata,
 									const char *primaryConnInfo,
-									const char *replicationSlotName);
+									const char *replicationSlotName,
+									const char *replicationTargetLSN);
 
 
 /*
@@ -984,7 +986,8 @@ pg_setup_standby_mode(uint32_t pg_control_version,
 		 */
 		return pg_write_recovery_conf(pgdata,
 									  primaryConnInfo,
-									  replicationSource->slotName);
+									  replicationSource->slotName,
+									  replicationSource->targetLSN);
 	}
 	else
 	{
@@ -996,7 +999,8 @@ pg_setup_standby_mode(uint32_t pg_control_version,
 		return pg_write_standby_signal(configFilePath,
 									   pgdata,
 									   primaryConnInfo,
-									   replicationSource->slotName);
+									   replicationSource->slotName,
+									   replicationSource->targetLSN);
 	}
 }
 
@@ -1008,7 +1012,8 @@ pg_setup_standby_mode(uint32_t pg_control_version,
 static bool
 pg_write_recovery_conf(const char *pgdata,
 					   const char *primaryConnInfo,
-					   const char *replicationSlotName)
+					   const char *replicationSlotName,
+					   const char *replicationTargetLSN)
 {
 	char recoveryConfPath[MAXPGPATH];
 	PQExpBuffer content = NULL;
@@ -1021,6 +1026,16 @@ pg_write_recovery_conf(const char *pgdata,
 	appendPQExpBuffer(content, "\nprimary_conninfo = %s", primaryConnInfo);
 	appendPQExpBuffer(content, "\nprimary_slot_name = '%s'", replicationSlotName);
 	appendPQExpBuffer(content, "\nrecovery_target_timeline = 'latest'");
+
+	if (replicationTargetLSN != NULL)
+	{
+		appendPQExpBuffer(content,
+						  "\nrecovery_target_lsn = '%s'",
+						  replicationTargetLSN);
+		appendPQExpBuffer(content, "\nrecovery_target_inclusive = 'true'");
+		appendPQExpBuffer(content, "\nrecovery_target_action = 'promote'");
+	}
+
 	appendPQExpBuffer(content, "\n");
 
 	/* memory allocation could have failed while building string */
@@ -1178,22 +1193,58 @@ static bool
 pg_write_standby_signal(const char *configFilePath,
 						const char *pgdata,
 						const char *primaryConnInfo,
-						const char *replicationSlotName)
+						const char *replicationSlotName,
+						const char *replicationTargetLSN)
 {
+	char quotedLSN[BUFSIZE] = { 0 };
 	char quotedSlotName[BUFSIZE] = { 0 };
+
 	GUC standby_settings[] = {
 		{ "primary_conninfo", (char *) primaryConnInfo },
 		{ "primary_slot_name", (char *) quotedSlotName },
 		{ "recovery_target_timeline", "'latest'"},
 		{ NULL, NULL }
 	};
+
+	GUC fetch_missing_wal_settings[] = {
+		{ "primary_conninfo", (char *) primaryConnInfo },
+		{ "primary_slot_name", (char *) quotedSlotName },
+		{ "recovery_target_timeline", "'latest'"},
+		{ "recovery_target_lsn", (char *) quotedLSN},
+		{ "recovery_target_inclusive", "'true'"},
+		{ "recovery_target_action", "'promote'"},
+		{ NULL, NULL }
+	};
+
+	/* either standby_settings or fetch_missing_wal_settings */
+	GUC *recovery_settings = NULL;
+
 	char standbyConfigFilePath[MAXPGPATH];
 	char signalFilePath[MAXPGPATH];
 
 	log_trace("pg_write_standby_signal");
 
-	/* in-place edit quotedSlotName to its expected value  */
+	/*
+	 * In-place edit quotedLSN and quotedSlotName to their expected value, and
+	 * pick either standby_settings or fetch_missing_wal_settings depending on
+	 * replicationTargetLSN being in use or not.
+	 *
+	 * When replicationTargetLSN is in use, we are in the middle of a failover
+	 * operation where the candidate node needs to be fetching some missing WAL
+	 * bytes from another standby node before it can get promoted.
+	 */
 	snprintf(quotedSlotName, BUFSIZE, "'%s'", replicationSlotName);
+
+	if (replicationTargetLSN != NULL)
+	{
+		snprintf(quotedLSN, BUFSIZE, "'%s'", replicationTargetLSN);
+
+		recovery_settings = fetch_missing_wal_settings;
+	}
+	else
+	{
+		recovery_settings = standby_settings;
+	}
 
 	/*
 	 * First install the standby.signal file, so that if there's a problem
@@ -1219,7 +1270,7 @@ pg_write_standby_signal(const char *configFilePath,
 
 	/* we pass NULL as pgSetup because we know it won't be used... */
 	if (!ensure_default_settings_file_exists(standbyConfigFilePath,
-											 standby_settings,
+											 recovery_settings,
 											 NULL))
 	{
 		return false;

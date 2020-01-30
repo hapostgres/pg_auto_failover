@@ -103,6 +103,7 @@ typedef struct ReplicationSource
 	char *maximumBackupRate;
 	char *backupDir;
 	char *applicationName;
+	char *targetLSN;
 } ReplicationSource;
 
 

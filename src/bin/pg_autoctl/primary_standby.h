@@ -75,6 +75,8 @@ bool check_postgresql_settings(LocalPostgresServer *postgres,
 							   bool *settings_are_ok);
 bool standby_follow_new_primary(LocalPostgresServer *postgres,
 								ReplicationSource *replicationSource);
+bool standby_fetch_missing_wal_and_promote(LocalPostgresServer *postgres,
+										   ReplicationSource *replicationSource);
 
 
 #endif /* LOCAL_POSTGRES_H */

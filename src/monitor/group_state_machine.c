@@ -684,6 +684,7 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 			continue;
 		}
 
+		/* skip unhealthy nodes to avoid having to wait for them to report */
 		if (IsUnhealthy(node))
 		{
 			elog(LOG,
@@ -713,14 +714,10 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 
 		/*
 		 * Nodes in SECONDARY or CATCHINGUP states are candidates due to report
-		 * their LSN, unless they are known unhealthy, then we certainly don't
-		 * want to failover to them.
-		 *
-		 * Also, we discard nodes with a candidate priority of zero (0).
+		 * their LSN.
 		 */
 		if (IsStateIn(node->reportedState, secondaryStates) &&
-			IsStateIn(node->goalState, secondaryStates) &&
-			node->candidatePriority > 0)
+			IsStateIn(node->goalState, secondaryStates))
 		{
 			char message[BUFSIZE];
 
@@ -734,7 +731,6 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 
 			AssignGoalState(node, REPLICATION_STATE_REPORT_LSN, message);
 		}
-
 	}
 
 	/* shut down the primary as soon as possible */
