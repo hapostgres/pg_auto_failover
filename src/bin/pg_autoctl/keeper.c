@@ -703,9 +703,10 @@ keeper_ensure_postgres_is_running(Keeper *keeper, bool updateRetries)
 
 
 /*
- * keeper_advance_replication_slots loops over the other standby nodes and
- * advance their replication slots up to the current LSN value known by the
- * monitor.
+ * keeper_drop_replication_slots_for_removed_nodes drops replication slots that
+ * we have on the local Postgres instance when the node is not registered on
+ * the monitor anymore (after a pgautofailover.remove_node() has been issued,
+ * maybe with the command `pg_autoctl drop node [ --destroy ]`).
  */
 bool
 keeper_drop_replication_slots_for_removed_nodes(Keeper *keeper)
@@ -753,6 +754,12 @@ keeper_maintain_replication_slots(Keeper *keeper)
 	int port = pgSetup->pgport;
 
 	log_trace("keeper_maintain_replication_slots");
+
+	if (pgSetup->control.pg_control_version < 1100)
+	{
+		/* Postgres 10 does not have pg_replication_slot_advance() */
+		return true;
+	}
 
 	if (!monitor_get_other_nodes(monitor, host, port,
 								 ANY_STATE, &(keeper->otherNodes)))
