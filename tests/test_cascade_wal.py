@@ -57,6 +57,8 @@ def test_003_set_candidate_priority():
     assert node3.set_candidate_priority(0)
     assert node3.get_candidate_priority() == 0
 
+    assert node1.wait_until_state(target_state="primary")
+
 def test_004_ifdown_node2():
     node2.ifdown()
 
@@ -69,7 +71,6 @@ def test_005_create_t1():
 def test_006_failover():
     print()
     print("Calling pgautofailover.failover() on the monitor")
-    assert node1.wait_until_state(target_state="primary")
     monitor.failover()
 
     # primary should get to draining, and the failover be stuck because we
