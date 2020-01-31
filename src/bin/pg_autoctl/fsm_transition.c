@@ -484,12 +484,6 @@ prepare_replication(Keeper *keeper, NodeState otherNodeState)
 			return false;
 		}
 
-		if (pgSetup->control.pg_control_version < 1100)
-		{
-			/* Postgres 10 does not have pg_replication_slot_advance() */
-			continue;
-		}
-
 		if (!postgres_sprintf_replicationSlotName(otherNode->nodeId,
 												  replicationSlotName, BUFSIZE))
 		{
