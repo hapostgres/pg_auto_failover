@@ -669,6 +669,12 @@ fsm_checkpoint_and_stop_postgres(Keeper *keeper)
 	LocalPostgresServer *postgres = &(keeper->postgres);
 	PGSQL *pgsql = &(postgres->sqlClient);
 
+	if (!pgsql_reset_primary_conninfo(pgsql))
+	{
+		log_error("Failed to RESET primary_conninfo");
+		return false;
+	}
+
 	log_info("Issue a CHECKPOINT; command before stopping Postgres");
 
 	if (!pgsql_checkpoint(pgsql))
@@ -677,6 +683,7 @@ fsm_checkpoint_and_stop_postgres(Keeper *keeper)
 		return false;
 	}
 
+	log_info("Stopping Postgres at \"%s\"", pgSetup->pgdata);
 	return pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata);
 }
 
