@@ -534,28 +534,9 @@ class DataNode(PGNode):
         else:
             self.pg_autoctl.execute("pg_autoctl create")
 
-    def destroy(self):
-        """
-        Cleans up processes and files created for this data node.
-        """
-        self.stop_pg_autoctl()
-
-        try:
-            destroy = PGAutoCtl(self.vnode, self.datadir)
-            destroy.execute("pg_autoctl drop node --destroy",
-                            'drop', 'node', '--destroy')
-        except Exception as e:
-            print(str(e))
-
-        try:
-            os.remove(self.config_file_path())
-        except FileNotFoundError:
-            pass
-
-        try:
-            os.remove(self.state_file_path())
-        except FileNotFoundError:
-            pass
+        # server_version_num is 110005 for 11.5
+        self.pgversion = int(self.run_sql_query("show server_version_num")[0][0])
+        self.pgmajor = self.pgversion / 10000
 
     def wait_until_state(self, target_state,
                          timeout=STATE_CHANGE_TIMEOUT, sleep_time=1, other_node=None):
@@ -786,7 +767,14 @@ SELECT reportedstate
         Each node is expected to maintain a slot for each of the other nodes
         the primary through streaming replication, the secondary(s) manually
         through calls to pg_replication_slot_advance() on the local Postgres.
+
+        Postgres 10 lacks the function pg_replication_slot_advance() so when
+        the local Postgres is version 10 we don't create any replication
+        slot on the standby servers.
         """
+        if self.pgmajor == 10:
+            return true
+
         hostname = str(self.vnode.address)
         other_nodes = self.monitor.get_other_nodes(hostname, self.port)
         expected_slots = ['pgautofailover_standby_%s' % n[0] for n in other_nodes]
