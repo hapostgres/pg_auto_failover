@@ -21,6 +21,7 @@
 #include "keeper_pg_init.h"
 #include "log.h"
 #include "monitor.h"
+#include "parsing.h"
 #include "pgctl.h"
 #include "pghba.h"
 #include "pgsetup.h"
@@ -104,23 +105,35 @@ keeper_ensure_pg_configuration_files_in_pgdata(KeeperConfig *config)
 	char defaultConfigurationPath[MAXPGPATH];
 	bool configurationPathPresent = false;
 	bool postgresqlConfExists = false;
+	bool pghbaConfExists = false;
+	bool pgidentConfExists = false;
 	char defaultPosgresqlConfPath[MAXPGPATH];
 	char defaultHbaConfPath[MAXPGPATH];
 	char defaultIdentConfPath[MAXPGPATH];
 	char identConfPath[MAXPGPATH];
-
+	const char *DEFAULT_DEBIAN_PGDATA_PATH="/var/lib/postgresql";
 	get_absolute_path(config->pgSetup.pgdata, pgdata, MAXPGPATH);
 
-	/* check if postgresql.conf exists in pgdata. there is no separate check for pg_hba and pg_ident  */
+	/* check if postgresql.conf, pg_hba and pg_ident exist in pgdata. */
+
 	join_path_components(posgresqlConfPath, pgdata, "postgresql.conf");
 	postgresqlConfExists = file_exists(posgresqlConfPath);
-	if (postgresqlConfExists)
+
+
+	join_path_components(hbaConfPath, pgdata, "pg_hba.conf");
+	pghbaConfExists = file_exists(hbaConfPath);
+
+	join_path_components(identConfPath, pgdata, "pg_ident.conf");
+	pgidentConfExists = file_exists(identConfPath);
+
+	if (postgresqlConfExists && pghbaConfExists && pgidentConfExists)
 	{
 		return true;
 	}
 
+	/* at least one configuration file is missing */
 	/* check if pgdata is in default path. */
-	if (strstr(pgdata, "/var/lib/postgresql") != pgdata)
+	if (strstr(pgdata, DEFAULT_DEBIAN_PGDATA_PATH) != pgdata)
 	{
 		log_error("Cannot determine configuration file location for this instance. pgdata = %s", pgdata);
 		return false;
@@ -148,31 +161,33 @@ keeper_ensure_pg_configuration_files_in_pgdata(KeeperConfig *config)
 		return false;
 	}
 
-	/* edit postgresql.conf to disable settings */
-	disable_configuration_parameters(posgresqlConfPath);
-
-	join_path_components(hbaConfPath, pgdata, "pg_hba.conf");
-	if(!file_exists(hbaConfPath))
+	/* edit postgresql.conf to disable settings if we have moved postgresql.conf*/
+	if (!postgresqlConfExists)
 	{
+		disable_configuration_parameters(posgresqlConfPath);
+	}
 
+	if (!pghbaConfExists)
+	{
 		log_trace("hba file does not exist : %s, need to copy", hbaConfPath);
 		join_path_components(defaultHbaConfPath, defaultConfigurationPath, "pg_hba.conf");
 
 		move_file(defaultHbaConfPath, hbaConfPath);
 	}
 
-	join_path_components(identConfPath, pgdata, "pg_ident.conf");
-	if(!file_exists(identConfPath))
+	if(!pgidentConfExists)
 	{
-
 		log_trace("pg_ident.conf file does not exist : %s, need to copy", identConfPath);
 		join_path_components(defaultIdentConfPath, defaultConfigurationPath, "pg_ident.conf");
 
 		move_file(defaultIdentConfPath, identConfPath);
 	}
 
-	/* disable auto start in default configuration */
-	disableAutoStart(defaultConfigurationPath);
+	/* disable auto start in default configuration if we moved postgresql.conf */
+	if (!postgresqlConfExists)
+	{
+		disableAutoStart(defaultConfigurationPath);
+	}
 
 	return true;
 }
@@ -192,12 +207,7 @@ disable_configuration_parameters(char *postgresqlConfPath)
 	 * configuration parameters can appear in any order, and we
 	 * need to check for patterns for NAME = VALUE and NAME=VALUE
 	 */
-	char *targetVariables[] = {
-			"data_directory ", "data_directory =",
-			"hba_file ", "hba_file=",
-			"ident_file ", "ident_file=",
-			"include_dir ", "include_dir=",
-			NULL};
+	char *targetVariableExpression = "(data_directory|hba_file|ident_file|include_dir)[ =]";
 
 	/* open a file */
 	fileStream = fopen(postgresqlConfPath, "rb");
@@ -218,20 +228,14 @@ disable_configuration_parameters(char *postgresqlConfPath)
 	while (fgets(lineBuffer, BUFSIZE, fileStream) != NULL)
 	{
 		bool variableFound = false;
-		int targetIndex = 0;
-		char *targetVariable = targetVariables[0];
+		char *matchedString = regexp_first_match(lineBuffer, targetVariableExpression);
 
 		/* check if the line contains any of target variables */
-		while (targetVariable != NULL)
+		if (matchedString != NULL)
 		{
-			char *previousOffset = NULL;
-			char *candidateOffset = strstr(lineBuffer, targetVariable);
-			if (candidateOffset != NULL)
-			{
-				variableFound = true;
-				break;
-			}
-			targetVariable = targetVariables[++targetIndex];
+			variableFound = true;
+			/* regexp_first_match uses malloc, result must be deallocated */
+			free(matchedString);
 		}
 
 		/*
