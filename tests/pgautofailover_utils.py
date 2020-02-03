@@ -438,7 +438,7 @@ class PGNode:
 
         # server_version_num is 110005 for 11.5
         self._pgversion = int(self.run_sql_query("show server_version_num")[0][0])
-        self._pgmajor = self._pgversion / 10000
+        self._pgmajor = int(self._pgversion / 10000)
 
         return self._pgversion
 
