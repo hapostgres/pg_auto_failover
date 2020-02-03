@@ -792,7 +792,10 @@ SELECT reportedstate
         slot on the standby servers.
         """
         if self.pgmajor() == 10:
-            return true
+            return True
+
+        print("has_needed_replication_slots: pgversion = %s, pgmajor = %s" %
+              (self.pgversion(), self.pgmajor()))
 
         hostname = str(self.vnode.address)
         other_nodes = self.monitor.get_other_nodes(hostname, self.port)
