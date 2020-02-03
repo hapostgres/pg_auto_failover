@@ -294,6 +294,17 @@ class PGNode:
 
         return "".join(logs)
 
+    def get_pgversion(self):
+        """
+        Query local Postgres for its version. Cache the result.
+        """
+        if self.pgversion:
+            return self.pgversion
+
+        # server_version_num is 110005 for 11.5
+        self.pgversion = int(self.run_sql_query("show server_version_num")[0][0])
+        self.pgmajor = self.pgversion / 10000
+
     def ifdown(self):
         """
         Bring the network interface down for this node
@@ -354,10 +365,6 @@ class DataNode(PGNode):
             self.pg_autoctl.run()
         else:
             self.pg_autoctl.execute("pg_autoctl create")
-
-        # server_version_num is 110005 for 11.5
-        self.pgversion = int(self.run_sql_query("show server_version_num")[0][0])
-        self.pgmajor = self.pgversion / 10000
 
     def wait_until_state(self, target_state,
                          timeout=STATE_CHANGE_TIMEOUT, sleep_time=1):
