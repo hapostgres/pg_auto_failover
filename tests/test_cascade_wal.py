@@ -83,8 +83,8 @@ def test_006_failover():
     # now we should be able to continue with the failover, but miss some WAL
     assert node2.wait_until_state(target_state="primary", timeout=120)
 
-    assert node3.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="secondary")
+    assert node3.wait_until_state(target_state="secondary")
 
     assert node1.has_needed_replication_slots()
     assert node2.has_needed_replication_slots()
