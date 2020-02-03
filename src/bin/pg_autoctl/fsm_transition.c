@@ -669,6 +669,7 @@ fsm_stop_postgres(Keeper *keeper)
 }
 
 
+
 /*
  * fsm_init_standby is used when the primary is now ready to accept a standby,
  * we're the standby.
