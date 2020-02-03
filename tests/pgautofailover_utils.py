@@ -157,6 +157,9 @@ class PGNode:
         self.sslServerKey = sslServerKey
         self.sslServerCert = sslServerCert
 
+        self._pgversion = None
+        self._pgmajor = None
+
     def connection_string(self):
         """
         Returns a connection string which can be used to connect to this postgres
@@ -426,16 +429,25 @@ class PGNode:
 
         return "".join(logs)
 
-    def get_pgversion(self):
+    def pgversion(self):
         """
         Query local Postgres for its version. Cache the result.
         """
-        if self.pgversion:
-            return self.pgversion
+        if self._pgversion:
+            return self._pgversion
 
         # server_version_num is 110005 for 11.5
-        self.pgversion = int(self.run_sql_query("show server_version_num")[0][0])
-        self.pgmajor = self.pgversion / 10000
+        self._pgversion = int(self.run_sql_query("show server_version_num")[0][0])
+        self._pgmajor = self._pgversion / 10000
+
+        return self._pgversion
+
+    def pgmajor(self):
+        if self._pgmajor:
+            return self._pgmajor
+
+        self.pgversion()
+        return self._pgmajor
 
     def ifdown(self):
         """
@@ -779,7 +791,7 @@ SELECT reportedstate
         the local Postgres is version 10 we don't create any replication
         slot on the standby servers.
         """
-        if self.pgmajor == 10:
+        if self.pgmajor() == 10:
             return true
 
         hostname = str(self.vnode.address)
