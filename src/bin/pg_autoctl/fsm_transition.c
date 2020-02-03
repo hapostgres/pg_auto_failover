@@ -669,10 +669,18 @@ fsm_checkpoint_and_stop_postgres(Keeper *keeper)
 	LocalPostgresServer *postgres = &(keeper->postgres);
 	PGSQL *pgsql = &(postgres->sqlClient);
 
-	if (!pgsql_reset_primary_conninfo(pgsql))
+	/*
+	 * Starting with Postgres 12, pg_basebackup sets the recovery configuration
+	 * parameters in the postgresql.auto.conf file. We need to make sure to
+	 * RESET this value so that our own configuration setting takes effect.
+	 */
+	if (pgSetup->control.pg_control_version >= 1200)
 	{
-		log_error("Failed to RESET primary_conninfo");
-		return false;
+		if (!pgsql_reset_primary_conninfo(pgsql))
+		{
+			log_error("Failed to RESET primary_conninfo");
+			return false;
+		}
 	}
 
 	log_info("Issue a CHECKPOINT; command before stopping Postgres");
