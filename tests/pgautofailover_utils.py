@@ -727,7 +727,7 @@ class PGAutoCtl():
         if argv:
             self.command = [self.program] + argv
 
-    def run(self):
+    def run(self, level='-vv'):
         """
         Runs our command in the background, returns immediately.
 
@@ -735,7 +735,7 @@ class PGAutoCtl():
         We could be given a full `pg_autoctl create postgres --run` command.
         """
         if not self.command:
-            self.command = [self.program, 'run', '--pgdata', self.datadir, '-vv']
+            self.command = [self.program, 'run', '--pgdata', self.datadir, level]
 
         self.run_proc = self.vnode.run(self.command)
         print("pg_autoctl run [%d]" % self.run_proc.pid)
