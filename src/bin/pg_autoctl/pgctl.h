@@ -60,7 +60,9 @@ bool pg_setup_standby_mode(uint32_t pg_control_version,
 
 bool pg_cleanup_standby_mode(uint32_t pg_control_version,
 							 const char *configFilePath,
-							 const char *pgdata);
+							 const char *pg_ctl,
+							 const char *pgdata,
+							 PGSQL *pgsql);
 
 bool pg_is_running(const char *pg_ctl, const char *pgdata);
 
