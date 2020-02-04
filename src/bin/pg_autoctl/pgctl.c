@@ -1033,7 +1033,7 @@ pg_write_recovery_conf(const char *pgdata,
 						  "\nrecovery_target_lsn = '%s'",
 						  replicationTargetLSN);
 		appendPQExpBuffer(content, "\nrecovery_target_inclusive = 'true'");
-		appendPQExpBuffer(content, "\nrecovery_target_action = 'promote'");
+		appendPQExpBuffer(content, "\nrecovery_target_action = 'pause'");
 	}
 
 	appendPQExpBuffer(content, "\n");
