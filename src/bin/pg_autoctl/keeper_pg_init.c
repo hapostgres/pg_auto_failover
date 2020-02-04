@@ -167,8 +167,8 @@ keeper_ensure_pg_configuration_files_in_pgdata(KeeperConfig *config)
 		if (move_file(pgConfigurationPaths.defaultPghbaConfPath,
 					  pgConfigurationPaths.pghbaConfPath))
 		{
-			(void) create_symbolic_link(pgConfigurationPaths.postgresConfPath,
-										pgConfigurationPaths.defaultPostgresConfPath);
+			(void) create_symbolic_link(pgConfigurationPaths.pghbaConfPath,
+										pgConfigurationPaths.defaultPghbaConfPath);
 		}
 	}
 
@@ -200,7 +200,6 @@ static bool
 determineConfigurationFileLocations(char *pgdata,  PGConfigurationPaths *pgConfigurationPaths)
 {
 	char *pgdataRelativePath = NULL;
-	char defaultConfigurationDirectory[MAXPGPATH];
 	const char *default_debian_pgdata_directory="/var/lib/postgresql";
 
 	join_path_components(pgConfigurationPaths->postgresConfPath, pgdata, "postgresql.conf");
@@ -239,18 +238,18 @@ determineConfigurationFileLocations(char *pgdata,  PGConfigurationPaths *pgConfi
 	 * /etc/postgresql/PG_VERSION/main.
 	 */
 	pgdataRelativePath = strstr(pgdata, "postgresql");
-	join_path_components(defaultConfigurationDirectory, "/etc", pgdataRelativePath);
+	join_path_components(pgConfigurationPaths->defaultConfigurationDirectory, "/etc", pgdataRelativePath);
 
 	/* true if we are working on debian/ubuntu installation */
-	if (!directory_exists(defaultConfigurationDirectory))
+	if (!directory_exists(pgConfigurationPaths->defaultConfigurationDirectory))
 	{
-		log_error("Failed to find debian PGDATA configuration directory \"%s\"", defaultConfigurationDirectory);
+		log_error("Failed to find debian PGDATA configuration directory \"%s\"", pgConfigurationPaths->defaultConfigurationDirectory);
 		return false;
 	}
 
-	join_path_components(pgConfigurationPaths->defaultPostgresConfPath, defaultConfigurationDirectory, "postgresql.conf");
-	join_path_components(pgConfigurationPaths->defaultPghbaConfPath, defaultConfigurationDirectory, "pg_hba.conf");
-	join_path_components(pgConfigurationPaths->defaultPgidentConfPath, defaultConfigurationDirectory, "pg_ident.conf");
+	join_path_components(pgConfigurationPaths->defaultPostgresConfPath, pgConfigurationPaths->defaultConfigurationDirectory, "postgresql.conf");
+	join_path_components(pgConfigurationPaths->defaultPghbaConfPath, pgConfigurationPaths->defaultConfigurationDirectory, "pg_hba.conf");
+	join_path_components(pgConfigurationPaths->defaultPgidentConfPath, pgConfigurationPaths->defaultConfigurationDirectory, "pg_ident.conf");
 
 	return true;
 }
