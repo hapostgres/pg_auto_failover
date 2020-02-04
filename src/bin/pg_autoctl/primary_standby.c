@@ -793,18 +793,15 @@ standby_promote(LocalPostgresServer *postgres)
 		return false;
 	}
 
-	/*
-	 * Starting with Postgres 12, pg_basebackup sets the recovery configuration
-	 * parameters in the postgresql.auto.conf file. We need to make sure to
-	 * RESET this value so that our own configuration setting takes effect.
-	 */
-	if (pgSetup->control.pg_control_version >= 1200)
+	/* cleanup our standby setup */
+	if (!pg_cleanup_standby_mode(pgSetup->control.pg_control_version,
+								 pgSetup->pg_ctl,
+								 pgSetup->pgdata,
+								 pgsql))
 	{
-		if (!pgsql_reset_primary_conninfo(pgsql))
-		{
-			log_error("Failed to RESET primary_conninfo");
-			return false;
-		}
+		log_error("Failed to clean-up Postgres replication settings, "
+				  "see above for details");
+		return false;
 	}
 
 	/* disconnect from PostgreSQL now */

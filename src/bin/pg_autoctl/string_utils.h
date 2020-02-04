@@ -36,4 +36,7 @@ bool stringToUInt32(const char *str, uint32_t *number);
 
 int splitLines(char *errorMessage, char **linesArray, int size);
 
+bool rewrite_file_skipping_lines_matching(const char *filename,
+										  const char *regex);
+
 #endif /* STRING_UTILS_h */

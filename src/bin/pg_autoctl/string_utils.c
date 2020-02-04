@@ -14,7 +14,13 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "postgres_fe.h"
+#include "pqexpbuffer.h"
+
+#include "defaults.h"
 #include "file_utils.h"
+#include "log.h"
+#include "parsing.h"
 #include "string_utils.h"
 
 /*
@@ -436,4 +442,66 @@ splitLines(char *errorMessage, char **linesArray, int size)
 	} while (currentLine != NULL && *currentLine != '\0' && lineNumber < size);
 
 	return lineNumber;
+}
+
+
+/*
+ * rewrite_file_skipping_lines_matching reads filename contents in memory and
+ * then write the same content to the filename again, but skipping lines that
+ * match with the given regex.
+ */
+bool
+rewrite_file_skipping_lines_matching(const char *filename, const char *regex)
+{
+	char *fileContents = NULL;
+	long fileSize = 0L;
+
+	char *fileLines[BUFSIZE];
+	int lineCount = 0;
+	int lineNumber = 0;
+
+	PQExpBuffer newFileContents = createPQExpBuffer();
+
+	if (newFileContents == NULL)
+	{
+		log_error("Failed to allocate memory");
+		return false;
+	}
+
+	if (!read_file(filename, &fileContents, &fileSize))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	log_debug("rewrite_file_skipping_lines_matching: %s", regex);
+	log_debug("rewrite_file_skipping_lines_matching: read \n%s", fileContents);
+
+	/* split the file contents in lines and filter them */
+	lineCount = splitLines(fileContents, fileLines, BUFSIZE);
+
+	for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
+	{
+		char *currentLine = fileLines[lineNumber];
+
+		/* copy lines that are NOT matching the regex */
+		if (regexp_first_match(currentLine, regex) == NULL)
+		{
+			appendPQExpBuffer(newFileContents, "%s\n", currentLine);
+		}
+	}
+
+	if (!write_file(newFileContents->data, newFileContents->len, filename))
+	{
+		/* errors have already been logged */
+		destroyPQExpBuffer(newFileContents);
+		return false;
+	}
+
+	log_debug("rewrite_file_skipping_lines_matching: wrote \n%s",
+			  newFileContents->data);
+
+	destroyPQExpBuffer(newFileContents);
+
+	return true;
 }

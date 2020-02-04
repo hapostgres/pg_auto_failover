@@ -1452,6 +1452,89 @@ pg_write_standby_signal(const char *configFilePath,
 
 
 /*
+ * pg_cleanup_standby_mode cleans-up the replication settings for the local
+ * instance of Postgres found at pgdata.
+ *
+ *  - remove either recovery.conf or standby.signal
+ *
+ *  - when using Postgres 12 also make postgresql-auto-failover-standby.conf an
+ *    empty file, so that we can still include it, but it has no effect.
+ */
+bool
+pg_cleanup_standby_mode(uint32_t pg_control_version,
+						const char *pg_ctl,
+						const char *pgdata,
+						PGSQL *pgsql)
+{
+	if (pg_control_version < 1200)
+	{
+		char recoveryConfPath[MAXPGPATH];
+
+		join_path_components(recoveryConfPath, pgdata, "recovery.conf");
+
+		if (!unlink_file(recoveryConfPath))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+	}
+	else
+	{
+		char standbyConfigFilePath[MAXPGPATH];
+		char signalFilePath[MAXPGPATH];
+
+		join_path_components(signalFilePath, pgdata, "standby.signal");
+		join_path_components(standbyConfigFilePath,
+							 pgdata,
+							 AUTOCTL_STANDBY_CONF_FILENAME);
+
+		if (!unlink_file(signalFilePath))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
+		/* empty out the standby configuration file */
+		if (!write_file("", 0, standbyConfigFilePath))
+		{
+			/* write_file logs I/O error */
+			return false;
+		}
+
+		/* clean-up the postgresql.auto.conf file */
+		if (pg_is_running(pg_ctl, pgdata))
+		{
+			if (!pgsql_reset_primary_conninfo(pgsql))
+			{
+				log_error("Failed to RESET primary_conninfo");
+				return false;
+			}
+		}
+		else
+		{
+			const char *autoConfFilename = "postgresql.auto.conf";
+			const char *paramsRegex = "^(primary_conninfo|primary_slot_name) = ";
+			char autoConfFilePath[MAXPGPATH];
+
+			join_path_components(autoConfFilePath, pgdata, autoConfFilename);
+
+			if (!rewrite_file_skipping_lines_matching(
+					autoConfFilePath,
+					paramsRegex))
+			{
+				log_error("Failed to edit postgresql.auto.conf to remove "
+						  "current settings for primary_conninfo and "
+						  "primary_slot_name, see above for details");
+				return false;
+			}
+		}
+	}
+
+	return true;
+}
+
+
+/*
  * pg_is_running returns true if PostgreSQL is running.
  */
 bool
