@@ -68,6 +68,10 @@ def test_005_create_t1():
         "INSERT INTO t1 SELECT x FROM generate_series(1, 100000) as gs(x)")
     node1.run_sql_query("CHECKPOINT")
 
+    lsn = node1.run_sql_query("select pg_current_wal_lsn()")[0][0]
+    print()
+    print("Current LSN on the primary: %s" % lsn)
+
 def test_006_failover():
     print()
     print("Calling pgautofailover.failover() on the monitor")
