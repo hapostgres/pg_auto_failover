@@ -77,6 +77,7 @@ bool standby_follow_new_primary(LocalPostgresServer *postgres,
 								ReplicationSource *replicationSource);
 bool standby_fetch_missing_wal_and_promote(LocalPostgresServer *postgres,
 										   ReplicationSource *replicationSource);
+bool standby_cleanup_and_restart_as_primary(LocalPostgresServer *postgres);
 
 
 #endif /* LOCAL_POSTGRES_H */

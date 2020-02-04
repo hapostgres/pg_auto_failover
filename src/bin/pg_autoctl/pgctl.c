@@ -1212,7 +1212,7 @@ pg_write_standby_signal(const char *configFilePath,
 		{ "recovery_target_timeline", "'latest'"},
 		{ "recovery_target_lsn", (char *) quotedLSN},
 		{ "recovery_target_inclusive", "'true'"},
-		{ "recovery_target_action", "'promote'"},
+		{ "recovery_target_action", "'pause'"},
 		{ NULL, NULL }
 	};
 
@@ -1290,6 +1290,59 @@ pg_write_standby_signal(const char *configFilePath,
 		log_error("Failed to prepare \"%s\" with standby settings",
 				  standbyConfigFilePath);
 		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * pg_cleanup_standby_mode cleans-up the replication settings for the local
+ * instance of Postgres found at pgdata.
+ *
+ *  - remove either recovery.conf or standby.signal
+ *
+ *  - when using Postgres 12 also make postgresql-auto-failover-standby.conf an
+ *    empty file, so that we can still include it, but it has no effect.
+ */
+bool
+pg_cleanup_standby_mode(uint32_t pg_control_version,
+						const char *configFilePath,
+						const char *pgdata)
+{
+	if (pg_control_version < 1200)
+	{
+		char recoveryConfPath[MAXPGPATH];
+
+		join_path_components(recoveryConfPath, pgdata, "recovery.conf");
+
+		if (!unlink_file(recoveryConfPath))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+	}
+	else
+	{
+		char standbyConfigFilePath[MAXPGPATH];
+		char signalFilePath[MAXPGPATH];
+
+		join_path_components(signalFilePath, pgdata, "standby.signal");
+		path_in_same_directory(configFilePath, AUTOCTL_STANDBY_CONF_FILENAME,
+							   standbyConfigFilePath);
+
+		if (!unlink_file(signalFilePath))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
+		/* empty out the standby configuration file */
+		if (!write_file("", 0, standbyConfigFilePath))
+		{
+			/* write_file logs I/O error */
+			return false;
+		}
 	}
 
 	return true;

@@ -12,6 +12,7 @@
 
 #include "file_utils.h"
 #include "log.h"
+#include "parsing.h"
 #include "pgctl.h"
 #include "pghba.h"
 #include "pgsql.h"
@@ -817,6 +818,20 @@ standby_follow_new_primary(LocalPostgresServer *postgres,
 
 	log_info("Follow new primary %s:%d", primaryNode->host, primaryNode->port);
 
+	/*
+	 * Starting with Postgres 12, pg_basebackup sets the recovery configuration
+	 * parameters in the postgresql.auto.conf file. We need to make sure to
+	 * RESET this value so that our own configuration setting takes effect.
+	 */
+	if (pgSetup->control.pg_control_version >= 1200)
+	{
+		if (!pgsql_reset_primary_conninfo(pgsql))
+		{
+			log_error("Failed to RESET primary_conninfo");
+			return false;
+		}
+	}
+
 	/* configFilePath = $PGDATA/postgresql.conf */
 	join_path_components(configFilePath, pgSetup->pgdata, "postgresql.conf");
 
@@ -864,6 +879,28 @@ standby_fetch_missing_wal_and_promote(LocalPostgresServer *postgres,
 			 upstreamNode->port,
 			 replicationSource->targetLSN);
 
+	/*
+	 * Starting with Postgres 12, pg_basebackup sets the recovery configuration
+	 * parameters in the postgresql.auto.conf file. We need to make sure to
+	 * RESET this value so that our own configuration setting takes effect.
+	 */
+	if (pgSetup->control.pg_control_version >= 1200)
+	{
+		if (!pgsql_reset_primary_conninfo(pgsql))
+		{
+			log_error("Failed to RESET primary_conninfo");
+			return false;
+		}
+	}
+
+	log_info("Stopping Postgres at \"%s\"", pgSetup->pgdata);
+
+	if (!pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata))
+	{
+		log_error("Failed to stop Postgres at \"%s\"", pgSetup->pgdata);
+		return false;
+	}
+
 	/* configFilePath = $PGDATA/postgresql.conf */
 	join_path_components(configFilePath, pgSetup->pgdata, "postgresql.conf");
 
@@ -878,7 +915,7 @@ standby_fetch_missing_wal_and_promote(LocalPostgresServer *postgres,
 
 	log_info("Restarting Postgres at \%s\"", pgSetup->pgdata);
 
-	if (!pg_ctl_restart(pgSetup->pg_ctl, pgSetup->pgdata))
+	if (!ensure_local_postgres_is_running(postgres))
 	{
 		log_error("Failed to restart Postgres after changing its "
 				  "primary conninfo, see above for details");
@@ -913,6 +950,34 @@ standby_fetch_missing_wal_and_promote(LocalPostgresServer *postgres,
 		}
 	}
 
+	/* check that we could replay up to the assigned target */
+	log_debug("Promotion is done, now at LSN %s", postgres->currentLSN);
+
+	if (strcmp(postgres->currentLSN, replicationSource->targetLSN) != 0)
+	{
+		uint64_t currentLSN = 0;
+		uint64_t targetLSN = 0;
+
+		if (!parseLSN(postgres->currentLSN, &currentLSN))
+		{
+			log_error("Failed to parse LSN \"%s\"", postgres->currentLSN);
+			return false;
+		}
+
+		if (!parseLSN(replicationSource->targetLSN, &targetLSN))
+		{
+			log_error("Failed to parse LSN \"%s\"", replicationSource->targetLSN);
+			return false;
+		}
+
+		if (currentLSN < targetLSN)
+		{
+			log_error("Failed to replay up to target LSN %s, reached LSN %s",
+					  replicationSource->targetLSN, postgres->currentLSN);
+			return false;
+		}
+	}
+
 	/*
 	 * It's necessary to do a checkpoint before allowing the old primary to
 	 * rewind, since there can be a race condition in which pg_rewind detects
@@ -928,6 +993,46 @@ standby_fetch_missing_wal_and_promote(LocalPostgresServer *postgres,
 
 	/* disconnect from PostgreSQL now */
 	pgsql_finish(pgsql);
+
+	return true;
+}
+
+
+/*
+ * standby_cleanup_and_restart_as_primary removes the setup for a standby
+ * server and restarts as a primary. It's typically called after
+ * standby_fetch_missing_wal_and_promote so we expect Postgres to be running as
+ * a standby and be "paused".
+ */
+bool
+standby_cleanup_and_restart_as_primary(LocalPostgresServer *postgres)
+{
+	char configFilePath[MAXPGPATH];
+	PGSQL *pgsql = &(postgres->sqlClient);
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+
+	log_info("Cleaning-up Postgres replication settings");
+
+	/* configFilePath = $PGDATA/postgresql.conf */
+	join_path_components(configFilePath, pgSetup->pgdata, "postgresql.conf");
+
+	if (!pg_cleanup_standby_mode(pgSetup->control.pg_control_version,
+								 configFilePath,
+								 pgSetup->pgdata))
+	{
+		log_error("Failed to clean-up Postgres replication settings, "
+				  "see above for details");
+		return false;
+	}
+
+	log_info("Restarting Postgres at \%s\"", pgSetup->pgdata);
+
+	if (!pg_ctl_restart(pgSetup->pg_ctl, pgSetup->pgdata))
+	{
+		log_error("Failed to restart Postgres after changing its "
+				  "primary conninfo, see above for details");
+		return false;
+	}
 
 	return true;
 }

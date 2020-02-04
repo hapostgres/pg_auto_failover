@@ -410,7 +410,8 @@ unlink_file(const char *filename)
 		/* if it didn't exist yet, good news! */
 		if (errno != ENOENT && errno != ENOTDIR)
 		{
-			log_error("Failed to remove stale state file at \"%s\"", filename);
+			log_error("Failed to remove file \"%s\": %s",
+					  filename, strerror(errno));
 			return false;
 		}
 	}

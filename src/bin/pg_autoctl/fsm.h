@@ -65,6 +65,7 @@ bool fsm_report_lsn(Keeper *keeper);
 bool fsm_fast_forward(Keeper *keeper);
 bool fsm_prepare_cascade(Keeper *keeper);
 bool fsm_follow_new_primary(Keeper *keeper);
+bool fsm_cleanup_and_resume_as_primary(Keeper *keeper);
 
 /*
  * Generic API to use the previous definitions.

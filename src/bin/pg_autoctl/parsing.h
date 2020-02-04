@@ -40,5 +40,7 @@ bool parse_bool(const char *value, bool *result);
 
 int splitLines(char *errorMessage, char **linesArray, int size);
 
+bool parseLSN(const char *lsn_string, uint64_t *lsn);
+
 
 #endif /* PARSING_H */

@@ -1054,7 +1054,34 @@ fsm_fast_forward(Keeper *keeper)
 
 	if (!standby_fetch_missing_wal_and_promote(postgres, &replicationSource))
 	{
-		log_error("Failed to ");
+		log_error("Failed to fetch WAL bytes from standby node %d (%s:%d), "
+				  "see above for details",
+				  replicationSource.primaryNode.nodeId,
+				  replicationSource.primaryNode.host,
+				  replicationSource.primaryNode.port);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * fsm_cleanup_and_resume_as_primary cleans-up the replication setting and
+ * start the local node as primary. It's called after a fast-forward operation.
+ */
+bool
+fsm_cleanup_and_resume_as_primary(Keeper *keeper)
+{
+	KeeperConfig *config = &(keeper->config);
+	Monitor *monitor = &(keeper->monitor);
+	LocalPostgresServer *postgres = &(keeper->postgres);
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+
+	if (!standby_cleanup_and_restart_as_primary(postgres))
+	{
+		log_error("Failed to cleanup replication settings and restart Postgres "
+				  "to continue as a primary, see above for details");
 		return false;
 	}
 
