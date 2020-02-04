@@ -164,10 +164,10 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of %s:%d to catchingup after %s:%d "
-			"converged to wait_primary.",
-			activeNode->nodeName, activeNode->nodePort,
-			primaryNode->nodeName, primaryNode->nodePort);
+			"Setting goal state of node %d (%s:%d) to catchingup "
+			"after node %d (%s:%d) converged to wait_primary.",
+			activeNode->nodeId, activeNode->nodeName, activeNode->nodePort,
+			primaryNode->nodeId, primaryNode->nodeName, primaryNode->nodePort);
 
 		/* start replication */
 		AssignGoalState(activeNode, REPLICATION_STATE_CATCHINGUP, message);
@@ -199,11 +199,11 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of %s:%d to primary and %s:%d to "
-			"secondary after %s:%d caught up.",
-			primaryNode->nodeName, primaryNode->nodePort,
-			activeNode->nodeName, activeNode->nodePort,
-			activeNode->nodeName, activeNode->nodePort);
+			"Setting goal state of node %d (%s:%d) to primary and "
+			"node %d (%s:%d) to secondary after node %d (%s:%d) caught up.",
+			primaryNode->nodeId, primaryNode->nodeName, primaryNode->nodePort,
+			activeNode->nodeId, activeNode->nodeName, activeNode->nodePort,
+			activeNode->nodeId, activeNode->nodeName, activeNode->nodePort);
 
 		/* node is ready for promotion */
 		AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
@@ -228,11 +228,12 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of %s:%d to draining and %s:%d to "
-			"prepare_promotion after %s:%d became unhealthy.",
-			primaryNode->nodeName, primaryNode->nodePort,
-			activeNode->nodeName, activeNode->nodePort,
-			primaryNode->nodeName, primaryNode->nodePort);
+			"Setting goal state of node %d (%s:%d) to draining "
+			"and node %d (%s:%d) to prepare_promotion "
+			"after node %d (%s:%d) became unhealthy.",
+			primaryNode->nodeId, primaryNode->nodeName, primaryNode->nodePort,
+			activeNode->nodeId, activeNode->nodeName, activeNode->nodePort,
+			primaryNode->nodeId, primaryNode->nodeName, primaryNode->nodePort);
 
 		/* keep reading until no more records are available */
 		AssignGoalState(activeNode, REPLICATION_STATE_PREPARE_PROMOTION, message);
@@ -254,10 +255,11 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of %s:%d to wait_primary and %s:%d to "
-			"demoted after the coordinator metadata was updated.",
-			activeNode->nodeName, activeNode->nodePort,
-			primaryNode->nodeName, primaryNode->nodePort);
+			"Setting goal state of node %d (%s:%d) to wait_primary "
+			"and node %d (%s:%d) to demoted "
+			"after the coordinator metadata was updated.",
+			activeNode->nodeId, activeNode->nodeName, activeNode->nodePort,
+			primaryNode->nodeId, primaryNode->nodeName, primaryNode->nodePort);
 
 		/* node is now taking writes */
 		AssignGoalState(activeNode, REPLICATION_STATE_WAIT_PRIMARY, message);
@@ -278,12 +280,12 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of %s:%d to demote_timeout and %s:%d to "
-			"stop_replication after %s:%d converged to "
-			"prepare_promotion.",
-			primaryNode->nodeName, primaryNode->nodePort,
-			activeNode->nodeName, activeNode->nodePort,
-			activeNode->nodeName, activeNode->nodePort);
+			"Setting goal state of node %d (%s:%d) to demote_timeout "
+			"and node %d (%s:%d) to stop_replication "
+			"after node %d (%s:%d) converged to prepare_promotion.",
+			primaryNode->nodeId, primaryNode->nodeName, primaryNode->nodePort,
+			activeNode->nodeId, activeNode->nodeName, activeNode->nodePort,
+			activeNode->nodeId, activeNode->nodeName, activeNode->nodePort);
 
 		/* perform promotion to stop replication */
 		AssignGoalState(activeNode, REPLICATION_STATE_STOP_REPLICATION, message);
@@ -306,10 +308,10 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of %s:%d to wait_primary and %s:%d to "
-			"demoted after the demote timeout expired.",
-			activeNode->nodeName, activeNode->nodePort,
-			primaryNode->nodeName, primaryNode->nodePort);
+			"Setting goal state of node %d (%s:%d) to wait_primary "
+			"and node %d (%s:%d) to demoted after the demote timeout expired.",
+			activeNode->nodeId, activeNode->nodeName, activeNode->nodePort,
+			primaryNode->nodeId, primaryNode->nodeName, primaryNode->nodePort);
 
 		/* node is now taking writes */
 		AssignGoalState(activeNode, REPLICATION_STATE_WAIT_PRIMARY, message);
@@ -331,10 +333,11 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of %s:%d to wait_primary and %s:%d to "
-			"demoted after the coordinator metadata was updated.",
-			activeNode->nodeName, activeNode->nodePort,
-			primaryNode->nodeName, primaryNode->nodePort);
+			"Setting goal state of node %d (%s:%d) to wait_primary "
+			"and %d (%s:%d) to demoted "
+			"after the coordinator metadata was updated.",
+			activeNode->nodeId, activeNode->nodeName, activeNode->nodePort,
+			primaryNode->nodeId, primaryNode->nodeName, primaryNode->nodePort);
 
 		/* node is now taking writes */
 		AssignGoalState(activeNode, REPLICATION_STATE_WAIT_PRIMARY, message);
@@ -356,10 +359,10 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of %s:%d to catchingup after it "
-			"converged to demotion and %s:%d converged to wait_primary.",
-			activeNode->nodeName, activeNode->nodePort,
-			primaryNode->nodeName, primaryNode->nodePort);
+			"Setting goal state of node %d (%s:%d) to catchingup after it "
+			"converged to demotion and node %d (%s:%d) converged to wait_primary.",
+			activeNode->nodeId, activeNode->nodeName, activeNode->nodePort,
+			primaryNode->nodeId, primaryNode->nodeName, primaryNode->nodePort);
 
 		/* it's safe to rejoin as a secondary */
 		AssignGoalState(activeNode, REPLICATION_STATE_CATCHINGUP, message);
@@ -425,9 +428,14 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 
 				LogAndNotifyMessage(
 					message, BUFSIZE,
-					"Setting goal state of %s:%d to wait_primary after %s:%d "
-					"joined.", primaryNode->nodeName, primaryNode->nodePort,
-					otherNode->nodeName, otherNode->nodePort);
+					"Setting goal state of %d (%s:%d) to wait_primary "
+					"after node %d (%s:%d) joined.",
+					primaryNode->nodeId,
+					primaryNode->nodeName,
+					primaryNode->nodePort,
+					otherNode->nodeId,
+					otherNode->nodeName,
+					otherNode->nodePort);
 
 				/* prepare replication slot and pg_hba.conf */
 				AssignGoalState(primaryNode,
@@ -457,9 +465,14 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 
 				LogAndNotifyMessage(
 					message, BUFSIZE,
-					"Setting goal state of %s:%d to join_primary after %s:%d "
-					"joined.", primaryNode->nodeName, primaryNode->nodePort,
-					otherNode->nodeName, otherNode->nodePort);
+					"Setting goal state of node %d (%s:%d) to join_primary "
+					"after node %d (%s:%d) joined.",
+					primaryNode->nodeId,
+					primaryNode->nodeName,
+					primaryNode->nodePort,
+					otherNode->nodeId,
+					otherNode->nodeName,
+					otherNode->nodePort);
 
 				/* prepare replication slot and pg_hba.conf */
 				AssignGoalState(primaryNode,
@@ -500,9 +513,9 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 
 				LogAndNotifyMessage(
 					message, BUFSIZE,
-					"Setting goal state of %s:%d to catchingup "
+					"Setting goal state of node %d (%s:%d) to catchingup "
 					"after it became unhealthy.",
-					otherNode->nodeName, otherNode->nodePort);
+					otherNode->nodeId, otherNode->nodeName, otherNode->nodePort);
 
 				/* other node is behind, no longer eligible for promotion */
 				AssignGoalState(otherNode,
@@ -541,9 +554,11 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 
 				LogAndNotifyMessage(
 					message, BUFSIZE,
-					"Setting goal state of %s:%d to wait_primary "
+					"Setting goal state of node %d (%s:%d) to wait_primary "
 					"now that none of the standbys are healthy anymore.",
-					primaryNode->nodeName, primaryNode->nodePort);
+					primaryNode->nodeId,
+					primaryNode->nodeName,
+					primaryNode->nodePort);
 
 				AssignGoalState(primaryNode,
 								REPLICATION_STATE_WAIT_PRIMARY, message);
@@ -563,9 +578,9 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of %s:%d to primary "
+			"Setting goal state of node %d (%s:%d) to primary "
 			"after it applied replication properties change.",
-			primaryNode->nodeName, primaryNode->nodePort);
+			primaryNode->nodeId, primaryNode->nodeName, primaryNode->nodePort);
 
 		AssignGoalState(primaryNode, REPLICATION_STATE_PRIMARY, message);
 
@@ -644,9 +659,12 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 
 			LogAndNotifyMessage(
 				message, BUFSIZE,
-				"Setting goal state %s:%d to draining "
+				"Setting goal state of node %d (%s:%d) to draining "
 				"after it became unhealthy. We count %d failover candidates",
-				primaryNode->nodeName, primaryNode->nodePort, candidateCount);
+				primaryNode->nodeId,
+				primaryNode->nodeName,
+				primaryNode->nodePort,
+				candidateCount);
 
 			AssignGoalState(primaryNode, REPLICATION_STATE_DRAINING, message);
 		}
@@ -725,9 +743,9 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 
 			LogAndNotifyMessage(
 				message, BUFSIZE,
-				"Setting goal state of %s:%d to report_lsn "
+				"Setting goal state of node %d (%s:%d) to report_lsn "
 				"to find the failover candidate",
-				node->nodeName, node->nodePort);
+				node->nodeId, node->nodeName, node->nodePort);
 
 			AssignGoalState(node, REPLICATION_STATE_REPORT_LSN, message);
 		}
@@ -743,9 +761,12 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 
 			LogAndNotifyMessage(
 				message, BUFSIZE,
-				"Setting goal state %s:%d to draining "
+				"Setting goal state of node %d (%s:%d) to draining "
 				"after it became unhealthy. We count %d failover candidates",
-				primaryNode->nodeName, primaryNode->nodePort, candidateCount);
+				primaryNode->nodeId,
+				primaryNode->nodeName,
+				primaryNode->nodePort,
+				candidateCount);
 
 			AssignGoalState(primaryNode, REPLICATION_STATE_DRAINING, message);
 		}
@@ -824,13 +845,19 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 
 				LogAndNotifyMessage(
 					message, BUFSIZE,
-					"Setting goal state of %s:%d to wait_forward "
-					"and goal state of %s:%d to wait_cascade "
-					"after %s:%d became unhealthy "
+					"Setting goal state of node %d (%s:%d) to wait_forward "
+					"and goal state of node %d (%s:%d) to wait_cascade "
+					"after node %d (%s:%d) became unhealthy "
 					"and %d nodes reported their LSN position.",
-					selectedNode->nodeName, selectedNode->nodePort,
-					mostAdvancedNode->nodeName, mostAdvancedNode->nodePort,
-					primaryNode->nodeName, primaryNode->nodePort,
+					selectedNode->nodeId,
+					selectedNode->nodeName,
+					selectedNode->nodePort,
+					mostAdvancedNode->nodeId,
+					mostAdvancedNode->nodeName,
+					mostAdvancedNode->nodePort,
+					primaryNode->nodeId,
+					primaryNode->nodeName,
+					primaryNode->nodePort,
 					reportedLSNCount);
 
 				AssignGoalState(selectedNode,
@@ -911,10 +938,14 @@ ProceedWithMSFailover(AutoFailoverNode *activeNode,
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of %s:%d to fast_forward "
-			"after %s:%d converged to wait_cascade.",
-			candidateNode->nodeName, candidateNode->nodePort,
-			activeNode->nodeName, activeNode->nodePort);
+			"Setting goal state of node %d (%s:%d) to fast_forward "
+			"after node %d (%s:%d) converged to wait_cascade.",
+			candidateNode->nodeId,
+			candidateNode->nodeName,
+			candidateNode->nodePort,
+			activeNode->nodeId,
+			activeNode->nodeName,
+			activeNode->nodePort);
 
 		AssignGoalState(candidateNode,
 						REPLICATION_STATE_FAST_FORWARD, message);
@@ -934,10 +965,14 @@ ProceedWithMSFailover(AutoFailoverNode *activeNode,
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of %s:%d to secondary "
-			"after %s:%d converged to stop_replication.",
-			activeNode->nodeName, activeNode->nodePort,
-			candidateNode->nodeName, candidateNode->nodePort);
+			"Setting goal state of node %d (%s:%d) to secondary "
+			"after node %d (%s:%d) converged to stop_replication.",
+			activeNode->nodeId,
+			activeNode->nodeName,
+			activeNode->nodePort,
+			candidateNode->nodeId,
+			candidateNode->nodeName,
+			candidateNode->nodePort);
 
 		AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
 
@@ -954,8 +989,8 @@ ProceedWithMSFailover(AutoFailoverNode *activeNode,
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of %s:%d to prepare_promotion",
-			activeNode->nodeName, activeNode->nodePort);
+			"Setting goal state of node %d (%s:%d) to prepare_promotion",
+			activeNode->nodeId, activeNode->nodeName, activeNode->nodePort);
 
 		AssignGoalState(activeNode,
 						REPLICATION_STATE_PREPARE_PROMOTION,
