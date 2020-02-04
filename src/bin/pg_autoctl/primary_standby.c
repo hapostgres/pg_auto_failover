@@ -642,7 +642,6 @@ bool
 primary_rewind_to_standby(LocalPostgresServer *postgres,
 						  ReplicationSource *replicationSource)
 {
-	char configFilePath[MAXPGPATH];
 	PGSQL *pgsql = &(postgres->sqlClient);
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	NodeAddress *primaryNode = &(replicationSource->primaryNode);
@@ -650,9 +649,6 @@ primary_rewind_to_standby(LocalPostgresServer *postgres,
 	log_trace("primary_rewind_to_standby");
 	log_info("Rewinding PostgreSQL to follow new primary %s:%d",
 			 primaryNode->host, primaryNode->port);
-
-	/* configFilePath = $PGDATA/postgresql.conf */
-	join_path_components(configFilePath, pgSetup->pgdata, "postgresql.conf");
 
 	if (!pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata))
 	{
@@ -670,7 +666,6 @@ primary_rewind_to_standby(LocalPostgresServer *postgres,
 	}
 
 	if (!pg_setup_standby_mode(pgSetup->control.pg_control_version,
-							   configFilePath,
 							   pgSetup->pgdata,
 							   replicationSource))
 	{
@@ -768,7 +763,6 @@ standby_promote(LocalPostgresServer *postgres)
 
 	/* cleanup our standby setup */
 	if (!pg_cleanup_standby_mode(pgSetup->control.pg_control_version,
-								 configFilePath,
 								 pgSetup->pg_ctl,
 								 pgSetup->pgdata,
 								 pgsql))
@@ -813,19 +807,14 @@ bool
 standby_follow_new_primary(LocalPostgresServer *postgres,
 						   ReplicationSource *replicationSource)
 {
-	char configFilePath[MAXPGPATH];
 	PGSQL *pgsql = &(postgres->sqlClient);
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	NodeAddress *primaryNode = &(replicationSource->primaryNode);
 
 	log_info("Follow new primary %s:%d", primaryNode->host, primaryNode->port);
 
-	/* configFilePath = $PGDATA/postgresql.conf */
-	join_path_components(configFilePath, pgSetup->pgdata, "postgresql.conf");
-
 	/* cleanup our existing standby setup, including postgresql.auto.conf */
 	if (!pg_cleanup_standby_mode(pgSetup->control.pg_control_version,
-								 configFilePath,
 								 pgSetup->pg_ctl,
 								 pgSetup->pgdata,
 								 pgsql))
@@ -836,7 +825,6 @@ standby_follow_new_primary(LocalPostgresServer *postgres,
 	}
 
 	if (!pg_setup_standby_mode(pgSetup->control.pg_control_version,
-							   configFilePath,
 							   pgSetup->pgdata,
 							   replicationSource))
 	{
@@ -867,7 +855,6 @@ bool
 standby_fetch_missing_wal_and_promote(LocalPostgresServer *postgres,
 									  ReplicationSource *replicationSource)
 {
-	char configFilePath[MAXPGPATH];
 	PGSQL *pgsql = &(postgres->sqlClient);
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	NodeAddress *upstreamNode = &(replicationSource->primaryNode);
@@ -881,7 +868,6 @@ standby_fetch_missing_wal_and_promote(LocalPostgresServer *postgres,
 
 	/* cleanup our existing standby setup, including postgresql.auto.conf */
 	if (!pg_cleanup_standby_mode(pgSetup->control.pg_control_version,
-								 configFilePath,
 								 pgSetup->pg_ctl,
 								 pgSetup->pgdata,
 								 pgsql))
@@ -899,11 +885,7 @@ standby_fetch_missing_wal_and_promote(LocalPostgresServer *postgres,
 		return false;
 	}
 
-	/* configFilePath = $PGDATA/postgresql.conf */
-	join_path_components(configFilePath, pgSetup->pgdata, "postgresql.conf");
-
 	if (!pg_setup_standby_mode(pgSetup->control.pg_control_version,
-							   configFilePath,
 							   pgSetup->pgdata,
 							   replicationSource))
 	{
@@ -1005,17 +987,12 @@ standby_fetch_missing_wal_and_promote(LocalPostgresServer *postgres,
 bool
 standby_cleanup_and_restart_as_primary(LocalPostgresServer *postgres)
 {
-	char configFilePath[MAXPGPATH];
 	PGSQL *pgsql = &(postgres->sqlClient);
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 
 	log_info("Cleaning-up Postgres replication settings");
 
-	/* configFilePath = $PGDATA/postgresql.conf */
-	join_path_components(configFilePath, pgSetup->pgdata, "postgresql.conf");
-
 	if (!pg_cleanup_standby_mode(pgSetup->control.pg_control_version,
-								 configFilePath,
 								 pgSetup->pg_ctl,
 								 pgSetup->pgdata,
 								 pgsql))

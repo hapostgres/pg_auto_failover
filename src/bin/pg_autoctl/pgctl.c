@@ -63,8 +63,7 @@ static bool pg_write_recovery_conf(const char *pgdata,
 								   const char *primaryConnInfo,
 								   const char *replicationSlotName,
 								   const char *replicationTargetLSN);
-static bool pg_write_standby_signal(const char *configFilePath,
-									const char *pgdata,
+static bool pg_write_standby_signal(const char *pgdata,
 									const char *primaryConnInfo,
 									const char *replicationSlotName,
 									const char *replicationTargetLSN);
@@ -955,7 +954,6 @@ pg_ctl_promote(const char *pg_ctl, const char *pgdata)
  */
 bool
 pg_setup_standby_mode(uint32_t pg_control_version,
-					  const char *configFilePath,
 					  const char *pgdata,
 					  ReplicationSource *replicationSource)
 {
@@ -996,8 +994,7 @@ pg_setup_standby_mode(uint32_t pg_control_version,
 		 * the main postgresql.conf file and create an empty standby.signal
 		 * file to trigger starting the server in standby mode.
 		 */
-		return pg_write_standby_signal(configFilePath,
-									   pgdata,
+		return pg_write_standby_signal(pgdata,
 									   primaryConnInfo,
 									   replicationSource->slotName,
 									   replicationSource->targetLSN);
@@ -1190,8 +1187,7 @@ prepare_primary_conninfo(char *primaryConnInfo,
  * configuration file.
  */
 static bool
-pg_write_standby_signal(const char *configFilePath,
-						const char *pgdata,
+pg_write_standby_signal(const char *pgdata,
 						const char *primaryConnInfo,
 						const char *replicationSlotName,
 						const char *replicationTargetLSN)
@@ -1219,10 +1215,18 @@ pg_write_standby_signal(const char *configFilePath,
 	/* either standby_settings or fetch_missing_wal_settings */
 	GUC *recovery_settings = NULL;
 
-	char standbyConfigFilePath[MAXPGPATH];
-	char signalFilePath[MAXPGPATH];
+	char standbyConfigFilePath[MAXPGPATH] = { 0 };
+	char signalFilePath[MAXPGPATH] = { 0 };
+	char configFilePath[MAXPGPATH] = { 0 };
 
 	log_trace("pg_write_standby_signal");
+
+	/* set our configuration file paths, all found in PGDATA */
+	join_path_components(signalFilePath, pgdata, "standby.signal");
+	join_path_components(configFilePath, pgdata, "postgresql.conf");
+	join_path_components(standbyConfigFilePath,
+						 pgdata,
+						 AUTOCTL_STANDBY_CONF_FILENAME);
 
 	/*
 	 * In-place edit quotedLSN and quotedSlotName to their expected value, and
@@ -1251,8 +1255,6 @@ pg_write_standby_signal(const char *configFilePath,
 	 * later and Postgres is started, it is started as a standby, with missing
 	 * configuration.
 	 */
-	join_path_components(signalFilePath, pgdata, "standby.signal");
-
 	log_info("Creating the standby signal file at \"%s\"", signalFilePath);
 
 	if (!write_file("", 0, signalFilePath))
@@ -1265,8 +1267,6 @@ pg_write_standby_signal(const char *configFilePath,
 	 * Now write the standby settings to postgresql-auto-failover-standby.conf
 	 * and include that file from postgresql.conf.
 	 */
-	path_in_same_directory(configFilePath, AUTOCTL_STANDBY_CONF_FILENAME,
-						   standbyConfigFilePath);
 
 	/* we pass NULL as pgSetup because we know it won't be used... */
 	if (!ensure_default_settings_file_exists(standbyConfigFilePath,
@@ -1307,7 +1307,6 @@ pg_write_standby_signal(const char *configFilePath,
  */
 bool
 pg_cleanup_standby_mode(uint32_t pg_control_version,
-						const char *configFilePath,
 						const char *pg_ctl,
 						const char *pgdata,
 						PGSQL *pgsql)
@@ -1330,8 +1329,9 @@ pg_cleanup_standby_mode(uint32_t pg_control_version,
 		char signalFilePath[MAXPGPATH];
 
 		join_path_components(signalFilePath, pgdata, "standby.signal");
-		path_in_same_directory(configFilePath, AUTOCTL_STANDBY_CONF_FILENAME,
-							   standbyConfigFilePath);
+		join_path_components(standbyConfigFilePath,
+							 pgdata,
+							 AUTOCTL_STANDBY_CONF_FILENAME);
 
 		if (!unlink_file(signalFilePath))
 		{
