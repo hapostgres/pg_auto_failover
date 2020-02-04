@@ -282,6 +282,16 @@ class PGNode:
             logs += ["\n\n%s:\n" % logfile]
             logs += open(os.path.join(ldir, logfile)).readlines()
 
+        # it's not really logs but we want to see that too
+        for inc in ["recovery.conf",
+                    "postgresql.auto.conf",
+                    "postgresql-auto-failover.conf",
+                    "postgresql-auto-failover-standby.conf"]:
+            conf = os.path.join(self.datadir, inc)
+            if os.path.isfile(conf):
+                logs += ["\n\n%s:\n" % conf]
+                logs += open(conf).readlines()
+
         return "".join(logs)
 
 
