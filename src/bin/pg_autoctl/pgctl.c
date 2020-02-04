@@ -51,11 +51,14 @@ static void log_program_output(Program prog);
 static bool escape_recovery_conf_string(char *destination,
 										int destinationSize,
 										const char *recoveryConfString);
-static bool prepare_primary_conninfo(char *primaryConnInfo,
-									 int primaryConnInfoSize,
-									 const char *primaryHost, int primaryPort,
-									 const char *replicationUsername,
-									 const char *replicationPassword);
+static bool prepare_primary_conninfo(
+	char *primaryConnInfo,
+	int primaryConnInfoSize,
+	int primaryNodeId,
+	const char *primaryHost, int primaryPort,
+	const char *replicationUsername,
+	const char *replicationPassword,
+	const char *applicationName);
 static bool pg_write_recovery_conf(const char *pgdata,
 								   const char *primaryConnInfo,
 								   const char *replicationSlotName);
@@ -444,7 +447,9 @@ pg_basebackup(const char *pgdata,
 			  const char *replication_username,
 			  const char *replication_password,
 			  const char *replication_slot_name,
-			  const char *primary_hostname, int primary_port)
+			  const char *primary_hostname,
+			  int primary_port,
+			  const char *application_name)
 {
 	int returnCode;
 	Program program;
@@ -461,16 +466,21 @@ pg_basebackup(const char *pgdata,
 	/* call pg_basebackup */
 	path_in_same_directory(pg_ctl, "pg_basebackup", pg_basebackup);
 	snprintf(primary_port_str, sizeof(primary_port_str), "%d", primary_port);
+
 	setenv("PGCONNECT_TIMEOUT", POSTGRES_CONNECT_TIMEOUT, 1);
+
 	if (replication_password != NULL)
 	{
 		setenv("PGPASSWORD", replication_password, 1);
 	}
+	setenv("PGAPPNAME", application_name, 1);
+
 	log_info("Running %s -w -h %s -p %d --pgdata %s -U %s --write-recovery-conf "
 			 "--max-rate %s --wal-method=stream --slot %s ...",
 			 pg_basebackup, primary_hostname, primary_port, backupdir,
 			 replication_username, maximum_backup_rate,
 			 replication_slot_name);
+
 	program = run_program(pg_basebackup,
 						  "-w",
 						  "-h", primary_hostname,
@@ -936,10 +946,12 @@ pg_setup_standby_mode(uint32_t pg_control_version,
 	/* we ignore the length returned by prepare_primary_conninfo... */
 	if (!prepare_primary_conninfo(primaryConnInfo,
 								  MAXCONNINFO,
+								  primaryNode->nodeId,
 								  primaryNode->host,
 								  primaryNode->port,
 								  replicationSource->userName,
-								  replicationSource->password))
+								  replicationSource->password,
+								  replicationSource->applicationName))
 	{
 		/* errors have already been logged. */
 		return false;
@@ -1081,10 +1093,13 @@ escape_recovery_conf_string(char *destination, int destinationSize,
  * prepare_primary_conninfo
  */
 static bool
-prepare_primary_conninfo(char *primaryConnInfo, int primaryConnInfoSize,
+prepare_primary_conninfo(char *primaryConnInfo,
+						 int primaryConnInfoSize,
+						 int primaryNodeId,
 						 const char *primaryHost, int primaryPort,
 						 const char *replicationUsername,
-						 const char *replicationPassword)
+						 const char *replicationPassword,
+						 const char *applicationName)
 {
 	int size = 0;
 	char escaped[BUFSIZE];

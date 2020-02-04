@@ -682,6 +682,8 @@ fsm_init_standby(Keeper *keeper)
 	ReplicationSource replicationSource = { 0 };
 	int groupId = keeper->state.current_group;
 
+	char applicationName[BUFSIZE] = { 0 };
+
 	/* get the primary node to follow */
 	if (!config->monitorDisabled)
 	{
@@ -707,6 +709,13 @@ fsm_init_standby(Keeper *keeper)
 	replicationSource.slotName = config->replication_slot_name;
 	replicationSource.maximumBackupRate = config->maximum_backup_rate;
 	replicationSource.backupDir = config->backupDirectory;
+
+	/* prepare our application_name */
+	snprintf(applicationName, BUFSIZE,
+			 "%s%d",
+			 REPLICATION_APPLICATION_NAME_PREFIX,
+			 keeper->state.current_node_id);
+	replicationSource.applicationName = applicationName;
 
 	if (!standby_init_database(postgres, &replicationSource))
 	{
@@ -731,6 +740,7 @@ fsm_rewind_or_init(Keeper *keeper)
 	LocalPostgresServer *postgres = &(keeper->postgres);
 	ReplicationSource replicationSource = { 0 };
 	int groupId = keeper->state.current_group;
+	char applicationName[BUFSIZE] = { 0 };
 
 	/* get the primary node to follow */
 	if (!config->monitorDisabled)
@@ -757,6 +767,13 @@ fsm_rewind_or_init(Keeper *keeper)
 	replicationSource.slotName = config->replication_slot_name;
 	replicationSource.maximumBackupRate = config->maximum_backup_rate;
 	replicationSource.backupDir = config->backupDirectory;
+
+	/* prepare our application_name */
+	snprintf(applicationName, BUFSIZE,
+			 "%s%d",
+			 REPLICATION_APPLICATION_NAME_PREFIX,
+			 keeper->state.current_node_id);
+	replicationSource.applicationName = applicationName;
 
 	if (!primary_rewind_to_standby(postgres, &replicationSource))
 	{
