@@ -22,6 +22,7 @@ bool append_to_file(char *data, long fileSize, const char *filePath);
 bool read_file(const char *filePath, char **contents, long *fileSize);
 bool move_file(char* sourcePath, char* destinationPath);
 bool duplicate_file(char* sourcePath, char* destinationPath);
+bool create_symbolic_link(char* sourcePath, char* targetPath);
 
 void path_in_same_directory(const char *basePath,
 							const char *fileName,
@@ -31,6 +32,5 @@ int search_pathlist(const char *pathlist, const char *filename, char ***result);
 void search_pathlist_destroy_result(char **result);
 bool unlink_file(const char *filename);
 bool set_program_absolute_path(char *program, int size);
-bool get_absolute_path(char *sourcePath, char *absolutePath, int bufferSize);
 
 #endif /* FILE_UTILS_H */

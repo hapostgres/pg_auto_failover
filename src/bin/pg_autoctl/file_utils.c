@@ -339,6 +339,12 @@ duplicate_file(char* sourcePath, char* destinationPath)
 		return false;
 	}
 
+	if (file_exists(destinationPath))
+	{
+		log_error("Failed to duplicate, destination file already exists : %s", destinationPath);
+		return false;
+	}
+
 	foundError = !write_file(fileContents, fileSize, destinationPath);
 
 	free(fileContents);
@@ -379,6 +385,18 @@ duplicate_file(char* sourcePath, char* destinationPath)
 	return true;
 }
 
+
+/* create_symbolic_link creates a symbolic link to source path */
+bool
+create_symbolic_link(char* sourcePath, char* targetPath)
+{
+	if (symlink(sourcePath, targetPath) != 0)
+	{
+		log_error("Failed to create symbolic link to %s : %s", sourcePath, strerror(errno));
+		return false;
+	}
+	return true;
+}
 
 /*
  * path_in_same_directory constructs the path for a file with name fileName
@@ -636,35 +654,3 @@ set_program_absolute_path(char *program, int size)
 
 	return true;
 }
-
-
-/*
- * get_absolute_path gets absolute path using current working directory
- * from provided source path. The function returns true on successful
- * execution.
- */
-bool
-get_absolute_path(char *sourcePath, char *absolutePath, int bufferSize)
-{
-	if (sourcePath[0] == '/')
-	{
-		strlcpy(absolutePath, sourcePath, bufferSize);
-	}
-	else
-	{
-		char currentWorkingDirectory[MAXPGPATH];
-
-		if (getcwd(currentWorkingDirectory, MAXPGPATH) == NULL)
-		{
-			log_error("Failed to get the current working directory: %s",
-					  strerror(errno));
-			return false;
-		}
-
-		join_path_components(absolutePath, currentWorkingDirectory, sourcePath);
-	}
-
-	return true;
-}
-
-

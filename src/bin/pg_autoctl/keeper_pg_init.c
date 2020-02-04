@@ -28,6 +28,26 @@
 #include "pgsql.h"
 #include "state.h"
 
+
+typedef struct PGConfigurationMetadata
+{
+	char postgresConfPath[MAXPGPATH];
+	char pghbaConfPath[MAXPGPATH];
+	char pgidentConfPath[MAXPGPATH];
+
+	bool postgresConfExists;
+	bool pghbaConfExists;
+	bool pgidentConfExists;
+
+	char defaultConfigurationDirectory[MAXPGPATH];
+
+	char defaultPostgresConfPath[MAXPGPATH];
+	char defaultPghbaConfPath[MAXPGPATH];
+	char defaultPgidentConfPath[MAXPGPATH];
+
+} PGConfigurationPaths ;
+
+
 /*
  * We keep track of the fact that we had non-fatal warnings during `pg_autoctl
  * keeper init`: in that case the init step is considered successful, yet users
@@ -49,8 +69,8 @@ static bool reach_initial_state(Keeper *keeper);
 static bool wait_until_primary_is_ready(Keeper *config,
 										MonitorAssignedState *assignedState);
 static bool keeper_pg_init_node_active(Keeper *keeper);
-
-static bool disable_configuration_parameters(char *postgresqlConfPath);
+static bool determineConfigurationFileLocations(char *pgdata,  PGConfigurationPaths *pgConfigurationPaths);
+static bool comment_configuration_parameters(char *postgresqlConfPath);
 static void disableAutoStart(char *defaultConfigurationPath);
 /*
  * keeper_pg_init initializes a pg_autoctl keeper and its local PostgreSQL.
@@ -98,44 +118,119 @@ keeper_pg_init_fsm(Keeper *keeper, KeeperConfig *config)
 static bool
 keeper_ensure_pg_configuration_files_in_pgdata(KeeperConfig *config)
 {
+	PGConfigurationPaths pgConfigurationPaths;
 	char pgdata[MAXPGPATH];
-	char hbaConfPath[MAXPGPATH];
-	char posgresqlConfPath[MAXPGPATH];
-	char *pgdataRelativePath = NULL;
-	char defaultConfigurationPath[MAXPGPATH];
-	bool configurationPathPresent = false;
-	bool postgresqlConfExists = false;
-	bool pghbaConfExists = false;
-	bool pgidentConfExists = false;
-	char defaultPosgresqlConfPath[MAXPGPATH];
-	char defaultHbaConfPath[MAXPGPATH];
-	char defaultIdentConfPath[MAXPGPATH];
-	char identConfPath[MAXPGPATH];
-	const char *DEFAULT_DEBIAN_PGDATA_PATH="/var/lib/postgresql";
-	get_absolute_path(config->pgSetup.pgdata, pgdata, MAXPGPATH);
+
+	if (!realpath(config->pgSetup.pgdata, pgdata))
+	{
+		log_fatal("Failed to determine full path for data directory.  \"%s\": %s",
+				  config->pgSetup.pgdata, strerror(errno));
+		return false;
+	}
+
+	if (!determineConfigurationFileLocations(pgdata, &pgConfigurationPaths))
+	{
+		/* specific error is already logged */
+		return false;
+	}
 
 	/* check if postgresql.conf, pg_hba and pg_ident exist in pgdata. */
+	if (pgConfigurationPaths.postgresConfExists &&
+		pgConfigurationPaths.pghbaConfExists &&
+		pgConfigurationPaths.pghbaConfExists)
+	{
+		return true;
+	}
 
-	join_path_components(posgresqlConfPath, pgdata, "postgresql.conf");
-	postgresqlConfExists = file_exists(posgresqlConfPath);
+	if (!pgConfigurationPaths.postgresConfExists)
+	{
+		if (!move_file(pgConfigurationPaths.defaultPostgresConfPath,
+					   pgConfigurationPaths.postgresConfPath))
+		{
+			/* errors are already logged */
+			return false;
+		}
+
+		/* edit postgresql.conf to disable settings if we have moved postgresql.conf*/
+		(void) comment_configuration_parameters(pgConfigurationPaths.postgresConfPath);
+
+		(void) create_symbolic_link(pgConfigurationPaths.postgresConfPath,
+									pgConfigurationPaths.defaultPostgresConfPath);
+		/* disable auto start in default configuration if we moved postgresql.conf */
+		disableAutoStart(pgConfigurationPaths.defaultConfigurationDirectory);
+	}
+
+	if (!pgConfigurationPaths.pghbaConfExists)
+	{
+		log_trace("hba file does not exist : %s, need to copy",
+				  pgConfigurationPaths.pghbaConfPath);
+		if (move_file(pgConfigurationPaths.defaultPghbaConfPath,
+					  pgConfigurationPaths.pghbaConfPath))
+		{
+			(void) create_symbolic_link(pgConfigurationPaths.postgresConfPath,
+										pgConfigurationPaths.defaultPostgresConfPath);
+		}
+	}
+
+	if(!pgConfigurationPaths.pgidentConfExists)
+	{
+		log_trace("pg_ident.conf file does not exist : %s, need to copy",
+				  pgConfigurationPaths.pgidentConfPath);
+		if (move_file(pgConfigurationPaths.defaultPgidentConfPath,
+				  	  pgConfigurationPaths.pgidentConfPath))
+		{
+			(void) create_symbolic_link(pgConfigurationPaths.pgidentConfPath,
+										pgConfigurationPaths.defaultPgidentConfPath);
+		}
+	}
+
+	return true;
+}
 
 
-	join_path_components(hbaConfPath, pgdata, "pg_hba.conf");
-	pghbaConfExists = file_exists(hbaConfPath);
+/*
+ * determineConfigurationFileLocations computes paths for postgres.conf,
+ * pg_hba.conf, and pg_ident.conf files from given PGDATA. It also
+ * determines if those file already exists on the expected locations.
+ * If it detects that some of them are missing, the function checks
+ * for a debian/ubuntu specific default configuration path and
+ * fills in paths to look for files.
+ */
+static bool
+determineConfigurationFileLocations(char *pgdata,  PGConfigurationPaths *pgConfigurationPaths)
+{
+	char *pgdataRelativePath = NULL;
+	char defaultConfigurationDirectory[MAXPGPATH];
+	const char *default_debian_pgdata_directory="/var/lib/postgresql";
 
-	join_path_components(identConfPath, pgdata, "pg_ident.conf");
-	pgidentConfExists = file_exists(identConfPath);
+	join_path_components(pgConfigurationPaths->postgresConfPath, pgdata, "postgresql.conf");
+	pgConfigurationPaths->postgresConfExists = file_exists(pgConfigurationPaths->postgresConfPath);
 
-	if (postgresqlConfExists && pghbaConfExists && pgidentConfExists)
+	join_path_components(pgConfigurationPaths->pghbaConfPath, pgdata, "pg_hba.conf");
+	pgConfigurationPaths->pghbaConfExists = file_exists(pgConfigurationPaths->pghbaConfPath);
+
+	join_path_components(pgConfigurationPaths->pgidentConfPath, pgdata, "pg_ident.conf");
+	pgConfigurationPaths->pgidentConfExists = file_exists(pgConfigurationPaths->pgidentConfPath);
+
+	/* reset default paths */
+	pgConfigurationPaths->defaultPostgresConfPath[0] = '\0';
+	pgConfigurationPaths->defaultPghbaConfPath[0] = '\0';
+	pgConfigurationPaths->defaultPgidentConfPath[0] = '\0';
+
+	/* if all files are present there is no need to fill in default configuration paths */
+	if (pgConfigurationPaths->postgresConfExists &&
+		pgConfigurationPaths->pghbaConfExists &&
+		pgConfigurationPaths->pgidentConfExists)
 	{
 		return true;
 	}
 
 	/* at least one configuration file is missing */
-	/* check if pgdata is in default path. */
-	if (strstr(pgdata, DEFAULT_DEBIAN_PGDATA_PATH) != pgdata)
+
+	/* check if pgdata is in default debian directory. */
+	if (strstr(pgdata, default_debian_pgdata_directory) != pgdata)
 	{
-		log_error("Cannot determine configuration file location for this instance. pgdata = %s", pgdata);
+		log_error("Failed to determine configuration file location for this instance. pgdata = %s", pgdata);
 		return false;
 	}
 
@@ -144,61 +239,29 @@ keeper_ensure_pg_configuration_files_in_pgdata(KeeperConfig *config)
 	 * /etc/postgresql/PG_VERSION/main.
 	 */
 	pgdataRelativePath = strstr(pgdata, "postgresql");
-	join_path_components(defaultConfigurationPath, "/etc", pgdataRelativePath);
+	join_path_components(defaultConfigurationDirectory, "/etc", pgdataRelativePath);
 
 	/* true if we are working on debian/ubuntu installation */
-	configurationPathPresent = directory_exists(defaultConfigurationPath);
-	if (!configurationPathPresent)
+	if (!directory_exists(defaultConfigurationDirectory))
 	{
-		log_error("Cannot find configuration file directory \"%s\"", defaultConfigurationPath);
+		log_error("Failed to find debian PGDATA configuration directory \"%s\"", defaultConfigurationDirectory);
 		return false;
 	}
 
-	join_path_components(defaultPosgresqlConfPath, defaultConfigurationPath, "postgresql.conf");
-	if (!move_file(defaultPosgresqlConfPath, posgresqlConfPath))
-	{
-		/* errors are already logged */
-		return false;
-	}
-
-	/* edit postgresql.conf to disable settings if we have moved postgresql.conf*/
-	if (!postgresqlConfExists)
-	{
-		disable_configuration_parameters(posgresqlConfPath);
-	}
-
-	if (!pghbaConfExists)
-	{
-		log_trace("hba file does not exist : %s, need to copy", hbaConfPath);
-		join_path_components(defaultHbaConfPath, defaultConfigurationPath, "pg_hba.conf");
-
-		move_file(defaultHbaConfPath, hbaConfPath);
-	}
-
-	if(!pgidentConfExists)
-	{
-		log_trace("pg_ident.conf file does not exist : %s, need to copy", identConfPath);
-		join_path_components(defaultIdentConfPath, defaultConfigurationPath, "pg_ident.conf");
-
-		move_file(defaultIdentConfPath, identConfPath);
-	}
-
-	/* disable auto start in default configuration if we moved postgresql.conf */
-	if (!postgresqlConfExists)
-	{
-		disableAutoStart(defaultConfigurationPath);
-	}
+	join_path_components(pgConfigurationPaths->defaultPostgresConfPath, defaultConfigurationDirectory, "postgresql.conf");
+	join_path_components(pgConfigurationPaths->defaultPghbaConfPath, defaultConfigurationDirectory, "pg_hba.conf");
+	join_path_components(pgConfigurationPaths->defaultPgidentConfPath, defaultConfigurationDirectory, "pg_ident.conf");
 
 	return true;
 }
 
 
 /*
- * disable_configuration_parameters read postgresql.conf file and
- * disables predefined configuration parameters inside.
+ * comment_configuration_parameters read postgresql.conf file and
+ * comments out predefined configuration parameters.
  */
 static bool
-disable_configuration_parameters(char *postgresqlConfPath)
+comment_configuration_parameters(char *postgresqlConfPath)
 {
 	FILE *fileStream = NULL;
 	PQExpBuffer newConfContents = NULL;
@@ -239,11 +302,12 @@ disable_configuration_parameters(char *postgresqlConfPath)
 		}
 
 		/*
-		 * disable the line if any of target variables is found
-		 * and if it was not already disabled
+		 * comment out the line if any of target variables is found
+		 * and if it was not already commented
 		 */
 		if (variableFound && lineBuffer[0] != '#')
 		{
+			appendPQExpBufferStr(newConfContents, "# edited by pg_auto_failover \n");
 			appendPQExpBufferChar(newConfContents, '#');
 		}
 
