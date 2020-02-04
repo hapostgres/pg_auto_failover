@@ -606,9 +606,6 @@ SELECT reportedstate
         if self.pgmajor() == 10:
             return True
 
-        print("has_needed_replication_slots: pgversion = %s, pgmajor = %s" %
-              (self.pgversion(), self.pgmajor()))
-
         hostname = str(self.vnode.address)
         other_nodes = self.monitor.get_other_nodes(hostname, self.port)
         expected_slots = ['pgautofailover_standby_%s' % n[0] for n in other_nodes]
