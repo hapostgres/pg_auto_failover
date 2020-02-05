@@ -1224,6 +1224,7 @@ IsHealthy(AutoFailoverNode *pgAutoFailoverNode)
 		&& pgAutoFailoverNode->pgIsRunning == true;
 }
 
+
 /*
  * IsUnhealthy returns whether the given node is unhealthy, meaning it failed
  * its last health check and has not reported for more than UnhealthyTimeoutMs,
@@ -1233,6 +1234,10 @@ static bool
 IsUnhealthy(AutoFailoverNode *pgAutoFailoverNode)
 {
 	TimestampTz now = GetCurrentTimestamp();
+	List *pgIsNotRunningStateList =
+		list_make3_int(REPLICATION_STATE_DRAINING,
+					   REPLICATION_STATE_DEMOTED,
+					   REPLICATION_STATE_DEMOTE_TIMEOUT);
 
 	if (pgAutoFailoverNode == NULL)
 	{
@@ -1262,7 +1267,8 @@ IsUnhealthy(AutoFailoverNode *pgAutoFailoverNode)
 	 * If the keeper reports that PostgreSQL is not running, then the node
 	 * isn't Healthy.
 	 */
-	if (!pgAutoFailoverNode->pgIsRunning)
+	if (!pgAutoFailoverNode->pgIsRunning
+		&& IsStateIn(pgAutoFailoverNode->goalState, pgIsNotRunningStateList))
 	{
 		return true;
 	}
