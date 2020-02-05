@@ -45,8 +45,6 @@ static void local_postgres_update_pg_failures_tracking(
 	{ "logging_collector", "on"},		\
 	{ "log_directory", "log"},			\
 	{ "log_min_messages", "info"},		\
-	{ "log_connections", "on"},			\
-	{ "log_disconnections", "on"},		\
 	{ "log_lock_waits", "on"},			\
 	{ "listen_addresses", "'*'" },		\
 	{ "port", "5432" }

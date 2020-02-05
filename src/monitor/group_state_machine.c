@@ -89,9 +89,6 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 		return true;
 	}
 
-	List *otherNodesGroupList = NULL;
-	int otherNodesCount = 0;
-
 	/*
 	 * We separate out the FSM for the primary server, because that one needs
 	 * to loop over every other node to take decisions. That induces some
@@ -116,12 +113,9 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 						   ReplicationStateGetName(activeNode->goalState))));
 	}
 
-	otherNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
-	otherNodesCount = list_length(otherNodesGroupList);
-
-	if (IsUnhealthy(primaryNode) && otherNodesCount >= 1)
+	/* Multiple Standby failover is handled in its own function */
+	if (IsUnhealthy(primaryNode) && nodesCount > 2)
 	{
-		/* Multiple Standby failover is handled in its own function */
 		return ProceedGroupStateForMSFailover(activeNode, primaryNode);
 	}
 

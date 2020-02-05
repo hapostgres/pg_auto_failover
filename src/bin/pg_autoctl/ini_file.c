@@ -216,6 +216,11 @@ ini_validate_options(IniOption *optionList)
 bool
 ini_set_option_value(IniOption *option, const char *value)
 {
+	if (option == NULL)
+	{
+		return false;
+	}
+
 	switch (option->type)
 	{
 		case INI_STRING_T:
@@ -644,6 +649,23 @@ ini_get_setting(const char *filename, IniOption *optionList,
 
 
 /*
+ * ini_set_option sets the INI value to the given value.
+ */
+bool
+ini_set_option(IniOption *optionList, const char *path, char *value)
+{
+	IniOption *option = lookup_ini_path_value(optionList, path);
+
+	if (option && ini_set_option_value(option, value))
+	{
+		return true;
+	}
+
+	return false;
+}
+
+
+/*
  * ini_set_setting sets the INI filename option identified by path to the given
  * value. optionList is used to know how to read the values in the file and
  * also contains the default values.
@@ -652,8 +674,6 @@ bool
 ini_set_setting(const char *filename, IniOption *optionList,
 				const char *path, char *value)
 {
-	IniOption *option = NULL;
-
 	log_debug("Reading configuration from %s", filename);
 
 	if (!read_ini_file(filename, optionList))
@@ -662,12 +682,5 @@ ini_set_setting(const char *filename, IniOption *optionList,
 		return false;
 	}
 
-	option = lookup_ini_path_value(optionList, path);
-
-	if (option && ini_set_option_value(option, value))
-	{
-		return true;
-	}
-
-	return false;
+	return ini_set_option(optionList, path, value);
 }

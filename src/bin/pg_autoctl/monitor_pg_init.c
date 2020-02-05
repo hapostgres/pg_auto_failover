@@ -39,6 +39,8 @@ GUC monitor_default_settings[] = {
 	{ "log_connections", "on"},			\
 	{ "log_disconnections", "on"},		\
 	{ "log_lock_waits", "on"},			\
+	{ "log_statement", "all"},			\
+	{ "cluster_name", "'pg_auto_failover monitor'"}, \
 	{ "listen_addresses", "'*'" },
 	{ "port", "5432" },
 #ifdef TEST

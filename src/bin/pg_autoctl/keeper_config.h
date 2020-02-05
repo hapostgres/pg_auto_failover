@@ -82,8 +82,7 @@ bool keeper_config_set_setting(KeeperConfig *config,
 							   char *value);
 
 bool keeper_config_merge_options(KeeperConfig *config, KeeperConfig *options);
-bool keeper_config_set_groupId_and_slot_name(KeeperConfig *config,
-											 int nodeId, int groupId);
+bool keeper_config_update(KeeperConfig *config, int nodeId, int groupId);
 void keeper_config_destroy(KeeperConfig *config);
 bool keeper_config_accept_new(KeeperConfig *config, KeeperConfig *newConfig);
 bool keeper_config_update_with_absolute_pgdata(KeeperConfig *config);

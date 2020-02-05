@@ -97,6 +97,8 @@ IniOption * lookup_ini_option(IniOption *optionList,
 IniOption * lookup_ini_path_value(IniOption *optionList, const char *path);
 bool ini_merge(IniOption *dstOptionList, IniOption *overrideOptionList);
 
+bool ini_set_option(IniOption *optionList, const char *path, char *value);
+
 bool ini_get_setting(const char *filename, IniOption *optionList,
 					 const char *path, char *value, size_t size);
 bool ini_set_setting(const char *filename, IniOption *optionList,

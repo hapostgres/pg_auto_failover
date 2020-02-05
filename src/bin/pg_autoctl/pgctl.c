@@ -98,7 +98,7 @@ pg_ctl_version(const char *pg_ctl_path)
  * Read some of the information from pg_controldata output.
  */
 bool
-pg_controldata(PostgresSetup *pgSetup, bool missing_ok)
+pg_controldata(PostgresSetup *pgSetup, bool verbose)
 {
 	char pg_controldata_path[MAXPGPATH];
 	Program prog;
@@ -125,7 +125,7 @@ pg_controldata(PostgresSetup *pgSetup, bool missing_ok)
 					 pg_controldata_path, pgSetup->pgdata);
 			sleep(1);
 
-			return pg_controldata(pgSetup, missing_ok);
+			return pg_controldata(pgSetup, verbose);
 		}
 
 		if (!parse_controldata(&pgSetup->control, prog.stdout))
@@ -141,7 +141,7 @@ pg_controldata(PostgresSetup *pgSetup, bool missing_ok)
 	}
 	else
 	{
-		if (!missing_ok)
+		if (verbose)
 		{
 			char *errorLines[BUFSIZE];
 			int lineCount = splitLines(prog.stderr, errorLines, BUFSIZE);
@@ -158,9 +158,9 @@ pg_controldata(PostgresSetup *pgSetup, bool missing_ok)
 			log_error("Failed to run \"%s\" on \"%s\", see above for details",
 					  pg_controldata_path, pgSetup->pgdata);
 		}
-		free_program(&prog);
 
-		return missing_ok;
+		free_program(&prog);
+		return false;
 	}
 }
 
@@ -590,18 +590,32 @@ log_program_output(Program prog)
 {
 	if (prog.stdout != NULL)
 	{
-		log_info("%s", prog.stdout);
+		char *outLines[BUFSIZE];
+		int lineCount = splitLines(prog.stdout, outLines, BUFSIZE);
+		int lineNumber = 0;
+
+		for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
+		{
+			log_info("%s", outLines[lineNumber]);
+		}
 	}
 
 	if (prog.stderr != NULL)
 	{
-		if (prog.returnCode == 0)
+		char *errorLines[BUFSIZE];
+		int lineCount = splitLines(prog.stderr, errorLines, BUFSIZE);
+		int lineNumber = 0;
+
+		for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
 		{
-			log_info("%s", prog.stderr);
-		}
-		else
-		{
-			log_error("%s", prog.stderr);
+			if (prog.returnCode == 0)
+			{
+				log_info("%s", errorLines[lineNumber]);
+			}
+			else
+			{
+				log_error("%s", prog.stderr);
+			}
 		}
 	}
 }

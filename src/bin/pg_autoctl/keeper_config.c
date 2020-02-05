@@ -17,6 +17,7 @@
 #include "keeper.h"
 #include "keeper_config.h"
 #include "log.h"
+#include "parsing.h"
 #include "pgctl.h"
 
 #define OPTION_AUTOCTL_ROLE(config) \
@@ -553,16 +554,17 @@ keeper_config_merge_options(KeeperConfig *config, KeeperConfig *options)
 
 
 /*
- * keeper_config_set_groupId sets the groupId in the configuration file.
+ * keeper_config_update updates the configuration of the keeper once we are
+ * registered and know our nodeId and group: then we can also set our
+ * replication slot name and our backup directory using the nodeId.
  */
 bool
-keeper_config_set_groupId_and_slot_name(KeeperConfig *config,
-										int nodeId, int groupId)
+keeper_config_update(KeeperConfig *config, int nodeId, int groupId)
 {
-	IniOption *option;
 	IniOption keeperOptions[] = SET_INI_OPTIONS_ARRAY(config);
 	char buffer[BUFSIZE] = { 0 };
 	char *replicationSlotName = NULL;
+	IntString groupIdString = intToString(groupId);
 
 	snprintf(buffer, BUFSIZE, "%s_%d", REPLICATION_SLOT_NAME_DEFAULT, nodeId);
 	replicationSlotName = strdup(buffer);
@@ -571,33 +573,17 @@ keeper_config_set_groupId_and_slot_name(KeeperConfig *config,
 	config->replication_slot_name = replicationSlotName;
 
 	/*
-	 * Fix the INI structure for the configuration file. First, groupId.
+	 * Compute the backupDirectory from pgdata, or check the one given in the
+	 * configuration file already.
 	 */
-	option = lookup_ini_option(keeperOptions, "pg_autoctl", "group");
-
-	if (option == NULL)
+	if (!keeper_config_set_backup_directory(config, nodeId))
 	{
-		log_error(
-			"BUG: keeper_config_set_groupId: lookup failed for pg_autoctl.group");
+		/* errors have already been logged */
 		return false;
 	}
 
-	*(option->intValue) = groupId;
-
-	/*
-	 * Fix the INI structure for the configuration file. Second,
-	 * replication_slot_name.
-	 */
-	option = lookup_ini_option(keeperOptions, "replication", "slot");
-
-	if (option == NULL)
-	{
-		log_error(
-			"BUG: keeper_config_set_groupId: lookup failed for replication.slot");
-		return false;
-	}
-
-	*(option->strValue) = replicationSlotName;
+	log_warn("keeper_config_update: backup directory = %s",
+			 config->backupDirectory);
 
 	return keeper_config_write_file(config);
 }

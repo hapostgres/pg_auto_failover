@@ -936,8 +936,8 @@ pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray)
 
 
 /*
- * parsePgMetadata parses the result from a PostgreSQL query fetching
- * two columns from pg_stat_replication: sync_state and currentLSN.
+ * parseReplicationSlotMaintain parses the result of the replication slot
+ * queries that return one line per slot maintained.
  */
 static void
 parseReplicationSlotMaintain(void *ctx, PGresult *result)
@@ -1727,8 +1727,7 @@ typedef struct PgMetadata
 
 
 bool
-pgsql_get_postgres_metadata(PGSQL *pgsql, const char *slotName,
-							bool *pg_is_in_recovery,
+pgsql_get_postgres_metadata(PGSQL *pgsql, bool *pg_is_in_recovery,
 							char *pgsrSyncState, char *currentLSN)
 {
 	PgMetadata context = { 0 };
@@ -1766,11 +1765,7 @@ pgsql_get_postgres_metadata(PGSQL *pgsql, const char *slotName,
 		" ) "
 		"as rep on true";
 
-	const Oid paramTypes[1] = { TEXTOID };
-	const char *paramValues[1] = { slotName };
-	int paramCount = 1;
-
-	pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes, paramValues,
+	pgsql_execute_with_params(pgsql, sql, 0, NULL, NULL,
 							  &context, &parsePgMetadata);
 
 	if (!context.parsedOk)

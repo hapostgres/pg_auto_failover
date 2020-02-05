@@ -193,6 +193,13 @@ keeper_pg_init_and_register(Keeper *keeper, KeeperConfig *config,
 	log_info("Successfully registered as \"%s\" to the monitor.",
 			 NodeStateToString(keeper->state.assigned_role));
 
+	/* initialize the keeper properly now that we're registered */
+	if (!keeper_init(keeper, config))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_KEEPER);
+	}
+
 	return reach_initial_state(keeper);
 }
 

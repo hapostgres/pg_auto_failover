@@ -869,7 +869,7 @@ bool
 fsm_promote_standby(Keeper *keeper)
 {
 	LocalPostgresServer *postgres = &(keeper->postgres);
-	bool other_node_missing_is_ok = true;
+	bool otherNodeMissingIsOk = true;
 
 	if (!ensure_local_postgres_is_running(postgres))
 	{
@@ -894,7 +894,7 @@ fsm_promote_standby(Keeper *keeper)
 	 * be able to open a replication connection. We therefore need to do the
 	 * same steps we take when going from single to wait_primary, namely to
 	 * create a replication slot and add the other node to pg_hba.conf. These
-	 * steps are implemented in fsm_prepare_replication.
+	 * steps are implemented in prepare_replication.
 	 */
 	if (!prepare_replication(keeper, DEMOTE_TIMEOUT_STATE))
 	{
@@ -933,7 +933,6 @@ fsm_report_lsn(Keeper *keeper)
 	 * call.
 	 */
 	if (!pgsql_get_postgres_metadata(pgsql,
-									 config->replication_slot_name,
 									 &pgSetup->is_in_recovery,
 									 postgres->pgsrSyncState,
 									 postgres->currentLSN))

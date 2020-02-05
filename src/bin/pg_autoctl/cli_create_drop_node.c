@@ -214,13 +214,6 @@ cli_create_pg(Keeper *keeper, KeeperConfig *config, NodeState initNodeState)
 		{
 			pid_t pid = 0;
 
-			/* now that keeper_pg_init is done, finish the keeper init */
-			if (!keeper_init(keeper, config))
-			{
-				/* errors have already been logged */
-				exit(EXIT_CODE_KEEPER);
-			}
-
 			if (!keeper_service_init(keeper, &pid))
 			{
 				log_fatal("Failed to initialize pg_auto_failover service, "

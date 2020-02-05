@@ -23,7 +23,7 @@
 #include "pgsetup.h"
 #include "pgsql.h"
 
-bool pg_controldata(PostgresSetup *pgSetup, bool missing_ok);
+bool pg_controldata(PostgresSetup *pgSetup, bool verbose);
 int config_find_pg_ctl(PostgresSetup *pgSetup);
 char * pg_ctl_version(const char *pg_ctl_path);
 

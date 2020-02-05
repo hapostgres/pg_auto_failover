@@ -114,13 +114,15 @@ pg_setup_init(PostgresSetup *pgSetup,
 	 */
 	if (errors == 0)
 	{
+		bool verbose = false;
+
 		if (!missing_pgdata_is_ok && !directory_exists(pgSetup->pgdata))
 		{
 			log_fatal("Database directory \"%s\" not found", pgSetup->pgdata);
 			return false;
 		}
 
-		pg_controldata(pgSetup, missing_pgdata_is_ok);
+		(void) pg_controldata(pgSetup, verbose);
 
 		if (pgSetup->control.pg_control_version == 0)
 		{

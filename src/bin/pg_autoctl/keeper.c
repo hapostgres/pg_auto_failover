@@ -402,8 +402,6 @@ keeper_update_pg_state(Keeper *keeper)
 		case DEMOTE_TIMEOUT_STATE:
 		case STOP_REPLICATION_STATE:
 		{
-			bool missing_ok = true;
-
 			/*
 			 * Given missing_ok, pg_controldata returns true even when the
 			 * directory doesn't exists, so we take care of that situation
@@ -411,7 +409,9 @@ keeper_update_pg_state(Keeper *keeper)
 			 */
 			if (directory_exists(config->pgSetup.pgdata))
 			{
-				if (!pg_controldata(pgSetup, missing_ok))
+				bool verbose = false;
+
+				if (!pg_controldata(pgSetup, verbose))
 				{
 					/*
 					 * In case of corrupted files in PGDATA, avoid spurious log
@@ -419,7 +419,7 @@ keeper_update_pg_state(Keeper *keeper)
 					 * already know that things are not fine, don't bother
 					 * checking system_identifier etc.
 					 */
-					return false;
+					return true;
 				}
 			}
 			else
@@ -432,9 +432,9 @@ keeper_update_pg_state(Keeper *keeper)
 
 		default:
 		{
-			bool missing_ok = false;
+			bool verbose = true;
 
-			if (!pg_controldata(pgSetup, missing_ok))
+			if (!pg_controldata(pgSetup, verbose))
 			{
 				/* If there's no PGDATA, just stop here: we have a problem */
 				return false;
@@ -530,7 +530,6 @@ keeper_update_pg_state(Keeper *keeper)
 		 *
 		 */
 		if (!pgsql_get_postgres_metadata(pgsql,
-										 config->replication_slot_name,
 										 &pgSetup->is_in_recovery,
 										 postgres->pgsrSyncState,
 										 postgres->currentLSN))
@@ -551,35 +550,28 @@ keeper_update_pg_state(Keeper *keeper)
 	 */
 	switch (keeperState->current_role)
 	{
-		case WAIT_PRIMARY_STATE:
-		{
-			/* we don't expect to have a streaming replica */
-			return postgres->pgIsRunning;
-		}
-
 		case PRIMARY_STATE:
 		{
 			/*
-			 * We expect to be able to read the current LSN, as always when
-			 * Postgres is running, and we also expect replication to be in
-			 * place when in PRIMARY state.
-			 *
-			 * On the primary, we use pg_stat_replication.sync_state to have an
-			 * idea of how the replication is going. The query we use in
-			 * pgsql_get_postgres_metadata should always return a non-empty
-			 * string when we are a PRIMARY and our standby is connected.
+			 * We expect replication to be in place, which means we have at
+			 * least one entry with a non empty pg_stat_replication.sync_state
+			 * to report.
 			 */
 			return postgres->pgIsRunning
-				&& !IS_EMPTY_STRING_BUFFER(postgres->currentLSN)
 				&& !IS_EMPTY_STRING_BUFFER(postgres->pgsrSyncState);
+		}
+
+		case WAIT_PRIMARY_STATE:
+		{
+			/* We don't expect pg_stat_replication entries in WAIT_PRIMARY */
+			return postgres->pgIsRunning;
 		}
 
 		case SECONDARY_STATE:
 		case CATCHINGUP_STATE:
 		{
 			/* pg_stat_replication.sync_state is only available upstream */
-			return postgres->pgIsRunning
-				&& !IS_EMPTY_STRING_BUFFER(postgres->currentLSN);
+			return postgres->pgIsRunning;
 		}
 
 		default:
@@ -932,9 +924,9 @@ keeper_register_and_init(Keeper *keeper,
 	}
 
 	/* also update the groupId in the configuration file. */
-	if (!keeper_config_set_groupId_and_slot_name(&(keeper->config),
-												 assignedState.nodeId,
-												 assignedState.groupId))
+	if (!keeper_config_update(config,
+							  assignedState.nodeId,
+							  assignedState.groupId))
 	{
 		log_error("Failed to update the configuration file with the groupId: %d",
 				  assignedState.groupId);
