@@ -329,14 +329,8 @@ postgres_add_default_settings(LocalPostgresServer *postgres)
 
 	log_trace("primary_add_default_postgres_settings");
 
-	/* get the path of the config file from the running database */
-	if (!pgsql_get_config_file_path(pgsql, configFilePath, MAXPGPATH))
-	{
-		log_error("Failed to add default settings to postgres.conf: couldn't get "
-				  "the postgresql.conf path from the local postgres server, see "
-				  "above for details");
-		return false;
-	}
+	/* configFilePath = $PGDATA/postgresql.conf */
+	join_path_components(configFilePath, pgSetup->pgdata, "postgresql.conf");
 
 	/* in case of errors, pgsql_ functions finish the connection */
 	pgsql_finish(pgsql);
@@ -533,7 +527,8 @@ standby_init_database(LocalPostgresServer *postgres,
 					   replicationSource->password,
 					   replicationSource->slotName,
 					   replicationSource->primaryNode.host,
-					   replicationSource->primaryNode.port))
+					   replicationSource->primaryNode.port,
+					   replicationSource->applicationName))
 	{
 		return false;
 	}
@@ -583,13 +578,8 @@ primary_rewind_to_standby(LocalPostgresServer *postgres,
 	log_info("Rewinding PostgreSQL to follow new primary %s:%d",
 			 primaryNode->host, primaryNode->port);
 
-	/* get the path of the config file from the running database */
-	if (!pgsql_get_config_file_path(pgsql, configFilePath, MAXPGPATH))
-	{
-		log_error("Failed to get the postgresql.conf path from the "
-				  "local postgres server, see above for details");
-		return false;
-	}
+	/* configFilePath = $PGDATA/postgresql.conf */
+	join_path_components(configFilePath, pgSetup->pgdata, "postgresql.conf");
 
 	if (!pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata))
 	{
@@ -660,6 +650,7 @@ standby_promote(LocalPostgresServer *postgres)
 
 		return true;
 	}
+
 	/* disconnect from PostgreSQL now */
 	pgsql_finish(pgsql);
 
@@ -671,36 +662,45 @@ standby_promote(LocalPostgresServer *postgres)
 		return false;
 	}
 
-	if (!pgsql_is_in_recovery(pgsql, &inRecovery))
-	{
-		log_error("Failed to determine whether postgres is in recovery mode after "
-				  "promotion");
-		return false;
-	}
-
-	while (inRecovery)
+	do
 	{
 		log_info("Waiting for postgres to promote");
 		pg_usleep(AWAIT_PROMOTION_SLEEP_TIME_MS * 1000);
 
 		if (!pgsql_is_in_recovery(pgsql, &inRecovery))
 		{
-			log_error("Failed to determine whether postgres is in recovery mode after "
-					  "promotion");
+			log_error("Failed to determine whether postgres is in "
+					  "recovery mode after promotion");
 			return false;
 		}
 	}
+	while (inRecovery);
 
 	/*
-	 * It's necessary to do a checkpoint before allowing the old primary to rewind,
-	 * since there can be a race condition in which pg_rewind detects no change in
-	 * timeline in the pg_control file, but a checkpoint is already in progress
-	 * causing the timelines to diverge before replication starts.
+	 * It's necessary to do a checkpoint before allowing the old primary to
+	 * rewind, since there can be a race condition in which pg_rewind detects
+	 * no change in timeline in the pg_control file, but a checkpoint is
+	 * already in progress causing the timelines to diverge before replication
+	 * starts.
 	 */
 	if (!pgsql_checkpoint(pgsql))
 	{
 		log_error("Failed to checkpoint after promotion");
 		return false;
+	}
+
+	/*
+	 * Starting with Postgres 12, pg_basebackup sets the recovery configuration
+	 * parameters in the postgresql.auto.conf file. We need to make sure to
+	 * RESET this value so that our own configuration setting takes effect.
+	 */
+	if (pgSetup->control.pg_control_version >= 1200)
+	{
+		if (!pgsql_reset_primary_conninfo(pgsql))
+		{
+			log_error("Failed to RESET primary_conninfo");
+			return false;
+		}
 	}
 
 	/* disconnect from PostgreSQL now */

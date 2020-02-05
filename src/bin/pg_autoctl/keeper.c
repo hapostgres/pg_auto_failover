@@ -143,7 +143,7 @@ keeper_should_ensure_current_state_before_transition(Keeper *keeper)
 		return false;
 	}
 
-	if (keeperState->assigned_role == DEMOTED_STATE
+	if (keeperState->assigned_role == DRAINING_STATE
 		|| keeperState->assigned_role == DEMOTE_TIMEOUT_STATE
 		|| keeperState->assigned_role == DEMOTED_STATE)
 	{
@@ -151,7 +151,7 @@ keeper_should_ensure_current_state_before_transition(Keeper *keeper)
 		return false;
 	}
 
-	if (keeperState->current_role == DEMOTED_STATE
+	if (keeperState->current_role == DRAINING_STATE
 		|| keeperState->current_role == DEMOTE_TIMEOUT_STATE
 		|| keeperState->current_role == DEMOTED_STATE)
 	{

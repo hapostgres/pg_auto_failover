@@ -95,6 +95,8 @@ extern CommandLine show_uri_command;
 extern CommandLine show_events_command;
 extern CommandLine show_state_command;
 extern CommandLine show_file_command;
+extern CommandLine show_sync_standby_names_command;
+extern CommandLine show_standby_names_command;
 
 /* cli_systemd.c */
 extern CommandLine systemd_cat_service_file_command;
