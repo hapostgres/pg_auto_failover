@@ -492,6 +492,7 @@ parseLSN(const char *lsn_string, uint64_t *lsn)
 		|| lsn_string[len1] != '/')
 	{
 		log_error("Failed to parse LSN value \"%s\"", lsn_string);
+		return false;
 	}
 
 	len2 = strspn(lsn_string + len1 + 1, "0123456789abcdefABCDEF");
@@ -501,6 +502,7 @@ parseLSN(const char *lsn_string, uint64_t *lsn)
 		|| lsn_string[len1 + 1 + len2] != '\0')
 	{
 		log_error("Failed to parse LSN value \"%s\"", lsn_string);
+		return false;
 	}
 
 	/* Decode result. */
