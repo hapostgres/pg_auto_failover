@@ -949,8 +949,9 @@ standby_fetch_missing_wal_and_promote(LocalPostgresServer *postgres,
 		}
 	}
 
-	/* check that we could replay up to the assigned target */
-	log_debug("Fast-forward is done, now at LSN %s", replayLSN);
+	/* done with fast-forwarding, keep the value for node_active() call */
+	strlcpy(postgres->currentLSN, replayLSN, PG_LSN_MAXLENGTH);
+	log_info("Fast-forward is done, now at LSN %s", postgres->currentLSN);
 
 	/*
 	 * It's necessary to do a checkpoint before allowing the old primary to

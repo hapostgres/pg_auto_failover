@@ -147,7 +147,8 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_REPORT_LSN)
 		|| IsCurrentState(activeNode, REPLICATION_STATE_WAIT_FORWARD)
-		|| IsCurrentState(activeNode, REPLICATION_STATE_FAST_FORWARD))
+		|| IsCurrentState(activeNode, REPLICATION_STATE_FAST_FORWARD)
+		|| IsCurrentState(activeNode, REPLICATION_STATE_WAIT_CASCADE))
 	{
 		return ProceedGroupStateForMSFailover(activeNode, primaryNode);
 	}
@@ -176,21 +177,12 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	}
 
 	/*
-	 * Remember that here we know we have a single standby node.
-	 *
 	 * when secondary caught up:
 	 *      catchingup -> secondary
 	 *  + wait_primary -> primary
-	 *
-	 * FIXME/REVIEW: when handling multi-standby nodes failover, we might be a
-	 * PRIMARY already when there's still a standby in CATCHINGUP and that is
-	 * otherwise running fine. So I (dim) have added the state PRIMARY to the
-	 * list here, though maybe that warrants another round of review of the
-	 * FSM.
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_CATCHINGUP) &&
-		(IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY) ||
-		 IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
+		(IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
 		 IsCurrentState(primaryNode, REPLICATION_STATE_JOIN_PRIMARY)) &&
 		IsHealthy(activeNode) &&
 		WalDifferenceWithin(activeNode, primaryNode, EnableSyncXlogThreshold))
@@ -353,6 +345,33 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 *  demoted -> catchingup
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_DEMOTED) &&
+		IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY))
+	{
+		char message[BUFSIZE];
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of node %d (%s:%d) to catchingup after it "
+			"converged to demotion and node %d (%s:%d) converged to primary.",
+			activeNode->nodeId, activeNode->nodeName, activeNode->nodePort,
+			primaryNode->nodeId, primaryNode->nodeName, primaryNode->nodePort);
+
+		/* it's safe to rejoin as a secondary */
+		AssignGoalState(activeNode, REPLICATION_STATE_CATCHINGUP, message);
+		AssignGoalState(primaryNode, REPLICATION_STATE_JOIN_PRIMARY, message);
+
+		return true;
+	}
+
+	/*
+	 * when a new primary is ready:
+	 *  demoted -> catchingup
+	 *
+	 * TODO: check that we can join a WAIT_PRIMARY node without having to wait
+	 * until it's done registering the new standby node. It might be that our
+	 * HBA entry is not there yet, but I think we're good.
+	 */
+	if (IsCurrentState(activeNode, REPLICATION_STATE_DEMOTED) &&
 		IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY))
 	{
 		char message[BUFSIZE];
@@ -378,18 +397,35 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 * step, we can make progress as soon as we want to.
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_JOIN_SECONDARY) &&
-		(IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY) ||
-		 IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY)))
+		IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY))
 	{
 		char message[BUFSIZE];
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
 			"Setting goal state of node %d (%s:%d) to secondary "
-			"after node %d (%s:%d) converged to %s.",
+			"and node %d (%s:%d) to primary after it converged to wait_primary.",
 			activeNode->nodeId, activeNode->nodeName, activeNode->nodePort,
-			primaryNode->nodeId, primaryNode->nodeName, primaryNode->nodePort,
-			ReplicationStateGetName(primaryNode->reportedState));
+			primaryNode->nodeId, primaryNode->nodeName, primaryNode->nodePort);
+
+		/* it's safe to rejoin as a secondary */
+		AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
+		AssignGoalState(primaryNode, REPLICATION_STATE_PRIMARY, message);
+
+		return true;
+	}
+
+	if (IsCurrentState(activeNode, REPLICATION_STATE_JOIN_SECONDARY) &&
+		IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY))
+	{
+		char message[BUFSIZE];
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of node %d (%s:%d) to secondary "
+			"after node %d (%s:%d) converged to primary.",
+			activeNode->nodeId, activeNode->nodeName, activeNode->nodePort,
+			primaryNode->nodeId, primaryNode->nodeName, primaryNode->nodePort);
 
 		/* it's safe to rejoin as a secondary */
 		AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
@@ -924,6 +960,13 @@ static bool
 ProceedWithMSFailover(AutoFailoverNode *activeNode,
 					  AutoFailoverNode *candidateNode)
 {
+	List *finishedCascading =
+		list_make5_int(REPLICATION_STATE_PREPARE_PROMOTION,
+					   REPLICATION_STATE_STOP_REPLICATION,
+					   REPLICATION_STATE_WAIT_PRIMARY,
+					   REPLICATION_STATE_PRIMARY,
+					   REPLICATION_STATE_JOIN_PRIMARY);
+
 	Assert(candidateNode != NULL);
 
 	/*
@@ -958,8 +1001,8 @@ ProceedWithMSFailover(AutoFailoverNode *activeNode,
 	 * that only this node had. Now that's done. The activeNode has to follow
 	 * the new primary that's being promoted.
 	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_WAIT_CASCADE) &&
-		IsCurrentState(candidateNode, REPLICATION_STATE_STOP_REPLICATION))
+	if (IsCurrentState(activeNode, REPLICATION_STATE_WAIT_CASCADE)
+		&& IsStateIn(candidateNode->goalState, finishedCascading))
 	{
 		char message[BUFSIZE];
 
@@ -974,7 +1017,7 @@ ProceedWithMSFailover(AutoFailoverNode *activeNode,
 			candidateNode->nodeName,
 			candidateNode->nodePort);
 
-		AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
+		AssignGoalState(activeNode, REPLICATION_STATE_JOIN_SECONDARY, message);
 
 		return true;
 	}

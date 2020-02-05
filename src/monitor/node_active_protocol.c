@@ -362,7 +362,12 @@ NodeActive(char *formationId, char *nodeName, int32 nodePort,
 			 */
 			char message[BUFSIZE];
 
-			if (currentNodeState->replicationState == REPLICATION_STATE_REPORT_LSN)
+			List *notifyLSNStates =
+				list_make3_int(REPLICATION_STATE_REPORT_LSN,
+							   REPLICATION_STATE_WAIT_FORWARD,
+							   REPLICATION_STATE_FAST_FORWARD);
+
+			if (IsStateIn(pgAutoFailoverNode->goalState, notifyLSNStates))
 			{
 				LogAndNotifyMessage(
 					message, BUFSIZE,
@@ -503,7 +508,7 @@ JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 			 * pg_autoctl knows to retry registering.
 			 */
 			primaryNode =
-				GetPrimaryOrDemotedNodeInGroup(
+				GetPrimaryNodeInGroup(
 					formation->formationId,
 					currentNodeState->groupId);
 
@@ -1675,7 +1680,7 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 	}
 
 	/* when we have more than one node, fetch the primary */
-	primaryNode = GetPrimaryOrDemotedNodeInGroup(formationId, groupId);
+	primaryNode = GetPrimaryNodeInGroup(formationId, groupId);
 
 	if (primaryNode == NULL)
 	{

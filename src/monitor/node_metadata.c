@@ -323,7 +323,7 @@ GetPrimaryNodeInGroup(char *formationId, int32 groupId)
 	{
 		AutoFailoverNode *currentNode = (AutoFailoverNode *) lfirst(nodeCell);
 
-		if (IsInPrimaryState(currentNode))
+		if (CanTakeWritesInState(currentNode->goalState))
 		{
 			writableNode = currentNode;
 			break;
@@ -337,6 +337,11 @@ GetPrimaryNodeInGroup(char *formationId, int32 groupId)
 /*
  * GetPrimaryNodeInGroup returns the node in the group with a role that only a
  * primary can have.
+ *
+ * When handling multiple standbys, it could be that one standby node gets
+ * demoted, triggering a failover with the other(s) standby nodes. Then the
+ * demoted node connects back to the monitor, and should be processed as a
+ * standby that re-joins the group, not as a primary being demoted.
  */
 AutoFailoverNode *
 GetPrimaryOrDemotedNodeInGroup(char *formationId, int32 groupId)
@@ -347,6 +352,23 @@ GetPrimaryOrDemotedNodeInGroup(char *formationId, int32 groupId)
 
 	groupNodeList = AutoFailoverNodeGroup(formationId, groupId);
 
+	foreach(nodeCell, groupNodeList)
+	{
+		AutoFailoverNode *currentNode = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (CanTakeWritesInState(currentNode->goalState))
+		{
+			primaryNode = currentNode;
+			break;
+		}
+	}
+
+	if (primaryNode != NULL)
+	{
+		return primaryNode;
+	}
+
+	/* maybe we have a primary that is draining or has been demoted? */
 	foreach(nodeCell, groupNodeList)
 	{
 		AutoFailoverNode *currentNode = (AutoFailoverNode *) lfirst(nodeCell);

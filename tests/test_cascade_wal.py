@@ -68,35 +68,33 @@ def test_005_create_t1():
     node1.run_sql_query("CHECKPOINT")
 
     lsn = node1.run_sql_query("select pg_current_wal_lsn()")[0][0]
-    print()
-    print("Current LSN on the primary: %s" % lsn)
-
+    print("%s " % lsn, end="", flush=True)
 
 def test_006_failover():
     print()
-    assert node1.wait_until_state(target_state="primary")
-    assert node3.wait_until_state(target_state="secondary")
-
-    print("Calling pgautofailover.failover() on the monitor")
-    monitor.failover()
-
-    # primary should get to draining, and the failover be stuck because we
-    # can't failover to node3 (candidate Priority is zero) and node2 is out
-    assert node1.wait_until_state(target_state="draining")
+    print("Injecting failure of node1")
+    node1.fail()
 
     # have node2 re-join the network and hopefully reconnect etc
+    print("Reconnecting node2 (ifconfig up)")
     node2.ifup()
 
     # now we should be able to continue with the failover, but miss some WAL
-    assert node2.wait_until_state(target_state="primary", timeout=120)
+    assert node2.wait_until_state(target_state="wait_primary", timeout=120)
+    assert node3.wait_until_state(target_state="secondary")
+    assert node2.wait_until_state(target_state="primary")
 
+def test_007_read_from_new_primary():
+    results = node2.run_sql_query("SELECT count(*) FROM t1")
+    assert results == [(100000,)]
+
+def test_008_start_node1_again():
+    node1.run()
     assert node1.wait_until_state(target_state="secondary")
+
+    assert node2.wait_until_state(target_state="primary")
     assert node3.wait_until_state(target_state="secondary")
 
     assert node1.has_needed_replication_slots()
     assert node2.has_needed_replication_slots()
     assert node3.has_needed_replication_slots()
-
-def test_007_read_from_new_primary():
-    results = node2.run_sql_query("SELECT count(*) FROM t1")
-    assert results == [(100000,)]

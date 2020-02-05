@@ -143,14 +143,14 @@
 #define COMMENT_FOLLOW_NEW_PRIMARY \
 	"Switch replication to the new primary"
 
-#define COMMENT_WAIT_CASCADE_TO_CATCHINGUP \
-	"Switch replication to the new primary"
-
 #define COMMENT_PRIMARY_TO_APPLY_SETTINGS \
 	"Apply new pg_auto_failover settings (synchronous_standby_names)"
 
 #define COMMENT_APPLY_SETTINGS_TO_PRIMARY \
 	"Back to primary state after having applied new pg_auto_failover settings"
+
+#define COMMENT_WAIT_CASCADE_TO_JOIN_SECONDARY \
+	"Switch replication to the new primary"
 
 #define COMMENT_REPORT_LSN_TO_JOIN_SECONDARY \
 	"A failover candidate has been selected, stop replication"
@@ -314,7 +314,7 @@ KeeperFSMTransition KeeperFSM[] = {
 	{ FAST_FORWARD_STATE, PREP_PROMOTION_STATE, COMMENT_FAST_FORWARD_TO_PREP_PROMOTION, &fsm_cleanup_and_resume_as_primary },
 
 	{ REPORT_LSN_STATE, WAIT_CASCADE_STATE, COMMENT_REPORT_LSN_TO_WAIT_CASCADE, &fsm_prepare_cascade },
-	{ WAIT_CASCADE_STATE, SECONDARY_STATE, COMMENT_FOLLOW_NEW_PRIMARY, &fsm_follow_new_primary },
+	{ WAIT_CASCADE_STATE, JOIN_SECONDARY_STATE, COMMENT_WAIT_CASCADE_TO_JOIN_SECONDARY, &fsm_checkpoint_and_stop_postgres },
 
 	{ REPORT_LSN_STATE, JOIN_SECONDARY_STATE, COMMENT_REPORT_LSN_TO_JOIN_SECONDARY, &fsm_checkpoint_and_stop_postgres },
 	{ JOIN_SECONDARY_STATE, SECONDARY_STATE, COMMENT_JOIN_SECONDARY_TO_SECONDARY, &fsm_follow_new_primary },
