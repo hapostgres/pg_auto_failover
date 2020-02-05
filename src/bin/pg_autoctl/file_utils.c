@@ -29,7 +29,7 @@
  * on the file system or false if it does not exists or in case of
  * error.
  */
-bool
+int
 file_exists(const char *filename)
 {
 	bool exists = access(filename, F_OK) != -1;
@@ -47,10 +47,10 @@ file_exists(const char *filename)
 			log_error("Failed to check if file \"%s\" exists: %s",
 					  filename, strerror(errno));
 		}
-		return false;
+		return 0;
 	}
 
-	return exists;
+	return 1;
 }
 
 
