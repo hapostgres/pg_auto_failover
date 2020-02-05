@@ -41,6 +41,11 @@ static bool ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 										   AutoFailoverNode *primaryNode);
 static bool ProceedWithMSFailover(AutoFailoverNode *activeNode,
 								  AutoFailoverNode *candidateNode);
+static AutoFailoverNode *SelectFailoverCandidateNode(
+	List *candidateNodesGroupList,
+	AutoFailoverNode *mostAdvancedNode,
+	AutoFailoverNode *primaryNode);
+
 static void AssignGoalState(AutoFailoverNode *pgAutoFailoverNode,
 							ReplicationState state, char *description);
 static bool IsDrainTimeExpired(AutoFailoverNode *pgAutoFailoverNode);
@@ -101,7 +106,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 		return ProceedGroupStateForPrimaryNode(activeNode);
 	}
 
-	primaryNode = GetPrimaryNodeInGroup(formationId, groupId);
+	primaryNode = GetPrimaryOrDemotedNodeInGroup(formationId, groupId);
 
 	if (primaryNode == NULL)
 	{
@@ -115,8 +120,8 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 						   ReplicationStateGetName(activeNode->goalState))));
 	}
 
-	/* Multiple Standby failover is handled in its own function */
-	if (IsUnhealthy(primaryNode) && nodesCount > 2)
+	/* Multiple Standby failover is handled in its own function. */
+	if (nodesCount > 2 && IsUnhealthy(primaryNode))
 	{
 		/*
 		 * ProceedGroupStateForMSFailover chooses the failover candidate when
@@ -134,6 +139,17 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 		{
 			return true;
 		}
+	}
+
+	/*
+	 * There are other cases when we want to continue an already started
+	 * failover.
+	 */
+	if (IsCurrentState(activeNode, REPLICATION_STATE_REPORT_LSN)
+		|| IsCurrentState(activeNode, REPLICATION_STATE_WAIT_FORWARD)
+		|| IsCurrentState(activeNode, REPLICATION_STATE_FAST_FORWARD))
+	{
+		return ProceedGroupStateForMSFailover(activeNode, primaryNode);
 	}
 
 	/*
@@ -353,7 +369,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 	/*
 	 * when a new primary is ready:
-	 *  report_lsn -> catchingup
+	 *  report_lsn -> secondary
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_REPORT_LSN) &&
 		IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY))
@@ -585,7 +601,56 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 	 * Done with the single standby code path, now we have several standby
 	 * nodes that might all be candidate for failover, or just some of them.
 	 *
-	 * First, have all our candidates for failover report the most recent LSN
+	 * The first order of business though is to determine if a failover is
+	 * currently happening, by looping over all the nodes in case one of them
+	 * has already been selected as the failover candidate.
+	 */
+	foreach(nodeCell, standbyNodesGroupList)
+	{
+		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (node == NULL)
+		{
+			/* shouldn't happen */
+			ereport(ERROR, (errmsg("BUG: node is NULL")));
+			continue;
+		}
+
+		/* we might have a failover ongoing already */
+		if (IsBeingPromoted(node))
+		{
+			candidateNode = node;
+
+			elog(LOG, "Found candidate node %d (%s:%d)",
+				 node->nodeId, node->nodeName, node->nodePort);
+			break;
+		}
+	}
+
+	/*
+	 * If a failover is in progress, continue driving it.
+	 */
+	if (candidateNode != NULL)
+	{
+		/* shut down the primary, known unhealthy (see pre-conditions) */
+		if (IsInPrimaryState(primaryNode))
+		{
+			char message[BUFSIZE];
+
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state %s:%d to draining "
+				"after it became unhealthy. We count %d failover candidates",
+				primaryNode->nodeName, primaryNode->nodePort, candidateCount);
+
+			AssignGoalState(primaryNode, REPLICATION_STATE_DRAINING, message);
+		}
+
+		return ProceedWithMSFailover(activeNode, candidateNode);
+	}
+
+	/*
+	 * Now, have all our candidates for failover report the most recent LSN
 	 * they managed to receive. We build the list of nodes that we consider as
 	 * failover candidates into candidateNodesGroupList.
 	 *
@@ -614,12 +679,10 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 			continue;
 		}
 
-		/* we might have a failover ongoing already */
-		if (IsBeingPromoted(node))
+		if (IsUnhealthy(node))
 		{
-			candidateNode = node;
-
-			elog(LOG, "Found candidate node %d (%s:%d)",
+			elog(LOG,
+				 "Skipping candidate node %d (%s:%d), which is unhealthy",
 				 node->nodeId, node->nodeName, node->nodePort);
 			continue;
 		}
@@ -635,6 +698,14 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 			continue;
 		}
 
+		/* if REPORT LSN is assigned and not reached yet, count that */
+		if (node->goalState == REPLICATION_STATE_REPORT_LSN)
+		{
+			++candidateCount;
+
+			continue;
+		}
+
 		/*
 		 * Nodes in SECONDARY or CATCHINGUP states are candidates due to report
 		 * their LSN, unless they are known unhealthy, then we certainly don't
@@ -642,8 +713,7 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 		 *
 		 * Also, we discard nodes with a candidate priority of zero (0).
 		 */
-		if (IsHealthy(node) &&
-			IsStateIn(node->reportedState, secondaryStates) &&
+		if (IsStateIn(node->reportedState, secondaryStates) &&
 			IsStateIn(node->goalState, secondaryStates) &&
 			node->candidatePriority > 0)
 		{
@@ -659,13 +729,11 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 
 			AssignGoalState(node, REPLICATION_STATE_REPORT_LSN, message);
 		}
+
 	}
 
-	/*
-	 * If we can failover, make sure the primary is being demoted before doing
-	 * anything else.
-	 */
-	if (candidateNode != NULL || candidateCount > 0)
+	/* shut down the primary as soon as possible */
+	if (candidateCount > 0)
 	{
 		/* shut down the primary, known unhealthy (see pre-conditions) */
 		if (IsInPrimaryState(primaryNode))
@@ -683,22 +751,10 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 	}
 
 	/*
-	 * If a failover is in progress, continue driving it.
-	 */
-	if (candidateNode != NULL)
-	{
-		return ProceedWithMSFailover(activeNode, candidateNode);
-	}
-
-	/*
 	 * Time to select a candidate?
 	 *
 	 * We reach this code when we don't have an healthy primary anymore, it's
 	 * been demoted or is draining now. Most probably it's dead.
-	 *
-	 * The selection is based on candidatePriority. If the candidate with the
-	 * higher priority doesn't have the most recent LSN, we have it fetch the
-	 * missing WAL bits from one of the standby which did receive them.
 	 *
 	 * Before we enter the selection process, we must have collected the last
 	 * received LSN from ALL the standby nodes that are considered as a
@@ -720,68 +776,34 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 	 */
 	if (candidateCount > 0 && reportedLSNCount == candidateCount)
 	{
-		/* build the list of failover candidate nodes, ordered by priority */
-		List *sortedCandidateNodesGroupList =
-			GroupListCandidates(candidateNodesGroupList);
-
 		/* find the standby node that has the most advanced LSN */
 		AutoFailoverNode *mostAdvancedNode =
 			FindMostAdvancedStandby(standbyNodesGroupList);
 
-		AutoFailoverNode *selectedNode = NULL;
-
-		/*
-		 * Select the node to be promoted: we can pick any candidate with the
-		 * max priority, so we pick the one with the most advanced LSN among
-		 * those having max(candidate priority).
-		 */
-		foreach(nodeCell, sortedCandidateNodesGroupList)
-		{
-			AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
-
-			/* all the candidates are now in the REPORT_LSN state */
-			if (IsHealthy(node)
-				&& WalDifferenceWithin(node, primaryNode, PromoteXlogThreshold))
-			{
-				int cPriority = node->candidatePriority;
-				XLogRecPtr cLSN = node->reportedLSN;
-
-				if (selectedNode == NULL)
-				{
-					selectedNode = node;
-				}
-				else if (cPriority == selectedNode->candidatePriority
-						 && cLSN > selectedNode->reportedLSN)
-				{
-					selectedNode = node;
-				}
-				else if (cPriority < selectedNode->candidatePriority)
-				{
-					/*
-					 * Short circuit the loop, as we scan in decreasing
-					 * priority order.
-					 */
-					break;
-				}
-			}
-		}
+		/* select a node to failover to */
+		AutoFailoverNode *selectedNode =
+			SelectFailoverCandidateNode(candidateNodesGroupList,
+										mostAdvancedNode,
+										primaryNode);
 
 		/*
 		 * We might have selected a node to fail over to: start the failover.
 		 */
 		if (selectedNode != NULL)
 		{
-			char message[BUFSIZE];
-
 			/* do we have to fetch some missing WAL? */
 			if (selectedNode->reportedLSN == mostAdvancedNode->reportedLSN)
 			{
+				char message[BUFSIZE];
+
 				LogAndNotifyMessage(
 					message, BUFSIZE,
 					"Setting goal state of %s:%d to prepare_promotion "
-					"after %s:%d became unhealthy.",
+					"after %s:%d became unhealthy "
+					"and %d nodes reported their LSN position.",
 					selectedNode->nodeName, selectedNode->nodePort,
-					primaryNode->nodeName, primaryNode->nodePort);
+					primaryNode->nodeName, primaryNode->nodePort,
+					reportedLSNCount);
 
 				AssignGoalState(selectedNode,
 								REPLICATION_STATE_PREPARE_PROMOTION,
@@ -790,25 +812,32 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 				/* leave the other nodes in ReportLSN state for now */
 				return true;
 			}
-
 			/* so the candidate does not have the most recent WAL */
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Setting goal state of %s:%d to wait_forward "
-				"and goal state of %s:%d to wait_cascade "
-				"after %s:%d became unhealthy.",
-				selectedNode->nodeName, selectedNode->nodePort,
-				mostAdvancedNode->nodeName, mostAdvancedNode->nodePort,
-				primaryNode->nodeName, primaryNode->nodePort);
+			else
+			{
+				char message[BUFSIZE];
 
-			AssignGoalState(selectedNode,
-							REPLICATION_STATE_WAIT_FORWARD, message);
+				LogAndNotifyMessage(
+					message, BUFSIZE,
+					"Setting goal state of %s:%d to wait_forward "
+					"and goal state of %s:%d to wait_cascade "
+					"after %s:%d became unhealthy "
+					"and %d nodes reported their LSN position.",
+					selectedNode->nodeName, selectedNode->nodePort,
+					mostAdvancedNode->nodeName, mostAdvancedNode->nodePort,
+					primaryNode->nodeName, primaryNode->nodePort,
+					reportedLSNCount);
 
-			AssignGoalState(mostAdvancedNode,
-							REPLICATION_STATE_WAIT_CASCADE, message);
+				AssignGoalState(selectedNode,
+								REPLICATION_STATE_WAIT_FORWARD, message);
 
-			return true;
+				AssignGoalState(mostAdvancedNode,
+								REPLICATION_STATE_WAIT_CASCADE, message);
+
+				return true;
+			}
 		}
+		/* we don't have a selected candidate for failover yet */
 		else
 		{
 			/*
@@ -820,23 +849,28 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 
 			LogAndNotifyMessage(
 				message, BUFSIZE,
-				"we have received the LSN position of %d nodes, "
-				"we need to receive the position for %d nodes "
-				"before electing a candidate and proceeding with "
-				"the failover orchestration",
-				reportedLSNCount, candidateCount);
+				"Failover still in progress after all %d candidate nodes "
+				"reported their LSN and we failed to select one of them; "
+				"activeNode is %d (%s:%d) and reported state \"%s\"",
+				reportedLSNCount,
+				activeNode->nodeId, activeNode->nodeName, activeNode->nodePort,
+				ReplicationStateGetName(activeNode->reportedState));
 			return false;
 		}
 	}
+	/* too early: not everybody reported REPORT_LSN yet */
 	else
 	{
 		char message[BUFSIZE];
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Test failed: candidateCount(%d) > 0 && "
-			"reportedLSNCount(%d) == candidateCount(%d)",
-			candidateCount, reportedLSNCount, candidateCount);
+			"Failover still in progress after %d nodes reported their LSN "
+			"among %d candidates that we are waiting for in total, "
+			"activeNode is %d (%s:%d) and reported state \"%s\"",
+			reportedLSNCount, candidateCount,
+			activeNode->nodeId, activeNode->nodeName, activeNode->nodePort,
+			ReplicationStateGetName(activeNode->reportedState));
 	}
 
 	return false;
@@ -948,6 +982,118 @@ ProceedWithMSFailover(AutoFailoverNode *activeNode,
 
 	/* when we have a candidate, we don't go through finding a candidate */
 	return false;
+}
+
+
+/*
+ * SelectFailoverCandidateNode returns the candidate to failover to when we
+ * have one already.
+ *
+ * The selection is based on candidatePriority. If the candidate with the
+ * higher priority doesn't have the most recent LSN, we have it fetch the
+ * missing WAL bits from one of the standby which did receive them.
+ *
+ * Before we enter the selection process, we must have collected the last
+ * received LSN from ALL the standby nodes that are considered as a candidate
+ * (thanks to the FSM transition secondary -> report_lsn), and now we need to
+ * select one of the failover candidates.
+ *
+ * As input we need two lists of node:
+ *
+ * - standbyNodesGroupList contains all the standby nodes known in this group,
+ *   even when they won't be a candidate for failover (because of a
+ *   candidatepriority of zero, or because they are not healthy at this time)
+ *
+ * - candidateNodesGroupList is a filtered list of standby that are known to be
+ *   a failover candidate from an earlier filtering process
+ */
+static AutoFailoverNode *
+SelectFailoverCandidateNode(List *candidateNodesGroupList,
+							AutoFailoverNode *mostAdvancedNode,
+							AutoFailoverNode *primaryNode)
+{
+	/* build the list of failover candidate nodes, ordered by priority */
+	List *sortedCandidateNodesGroupList =
+		GroupListCandidates(candidateNodesGroupList);
+
+	AutoFailoverNode *selectedNode = NULL;
+
+	ListCell *nodeCell = NULL;
+
+	/*
+	 * Select the node to be promoted: we can pick any candidate with the
+	 * max priority, so we pick the one with the most advanced LSN among
+	 * those having max(candidate priority).
+	 */
+	foreach(nodeCell, sortedCandidateNodesGroupList)
+	{
+		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+		/* all the candidates are now in the REPORT_LSN state */
+		if (IsUnhealthy(node))
+		{
+			char message[BUFSIZE];
+
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Not selecting failover candidate node %d (%s:%d) "
+				"because it is unhealthy",
+				node->nodeId, node->nodeName, node->nodePort);
+
+			continue;
+		}
+
+		else if (!WalDifferenceWithin(node, primaryNode, PromoteXlogThreshold))
+		{
+			char message[BUFSIZE];
+
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Not selecting failover candidate node %d (%s:%d) "
+				"with reported LSN %X/%X, which is more than "
+				"pgautofailover.enable_sync_wal_log_threshold (%d) behind "
+				"the primary node %d (%s:%d), which has reported %X/%X",
+				node->nodeId,
+				node->nodeName,
+				node->nodePort,
+				(uint32) (node->reportedLSN >> 32),
+				(uint32) node->reportedLSN,
+				PromoteXlogThreshold,
+				primaryNode->nodeId,
+				primaryNode->nodeName,
+				primaryNode->nodePort,
+				(uint32) (primaryNode->reportedLSN >> 32),
+				(uint32) primaryNode->reportedLSN);
+
+			continue;
+		}
+
+		else
+		{
+			int cPriority = node->candidatePriority;
+			XLogRecPtr cLSN = node->reportedLSN;
+
+			if (selectedNode == NULL)
+			{
+				selectedNode = node;
+			}
+			else if (cPriority == selectedNode->candidatePriority
+					 && cLSN > selectedNode->reportedLSN)
+			{
+				selectedNode = node;
+			}
+			else if (cPriority < selectedNode->candidatePriority)
+			{
+				/*
+				 * Short circuit the loop, as we scan in decreasing
+				 * priority order.
+				 */
+				break;
+			}
+		}
+	}
+
+	return selectedNode;
 }
 
 

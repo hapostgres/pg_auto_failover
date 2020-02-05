@@ -110,6 +110,8 @@ extern List * AutoFailoverOtherNodesList(AutoFailoverNode *pgAutoFailoverNode);
 extern List * AutoFailoverOtherNodesListInState(
 	AutoFailoverNode *pgAutoFailoverNode, ReplicationState currentState);
 extern AutoFailoverNode * GetPrimaryNodeInGroup(char *formationId, int32 groupId);
+extern AutoFailoverNode * GetPrimaryOrDemotedNodeInGroup(char *formationId,
+														 int32 groupId);
 extern AutoFailoverNode * FindFailoverNewStandbyNode(List *groupNodeList);
 extern List *GroupListCandidates(List *groupNodeList);
 extern List *GroupListSyncStandbys(List *groupNodeList);
@@ -120,8 +122,6 @@ extern AutoFailoverNode * FindMostAdvancedStandby(List *groupNodeList);
 extern AutoFailoverNode * GetAutoFailoverNode(char *nodeName, int nodePort);
 extern AutoFailoverNode * GetAutoFailoverNodeWithId(int nodeid,
 													char *nodeName, int nodePort);
-extern AutoFailoverNode * GetWritableNodeInGroup(char *formationId, int32 groupId);
-extern AutoFailoverNode * GetPrimaryNodeInGroup(char *formationId, int32 groupId);
 extern AutoFailoverNode * TupleToAutoFailoverNode(TupleDesc tupleDescriptor,
 												  HeapTuple heapTuple);
 extern int AddAutoFailoverNode(char *formationId, int groupId,

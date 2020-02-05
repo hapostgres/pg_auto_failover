@@ -231,7 +231,7 @@ class PGNode:
 
         try:
             destroy = PGAutoCtl(self.vnode, self.datadir)
-            destroy.execute("pg_autoctl do destroy", 'destroy')
+            destroy.execute("pg_autoctl destroy", 'drop', 'node', '--destroy')
         except Exception as e:
             print(str(e))
 
@@ -468,7 +468,7 @@ SELECT reportedstate
             command.execute("set canditate priority", 'set', 'node',
                             'candidate-priority', '--', str(candidatePriority))
         except Exception as e:
-            if command.run_proc.returncode == 1:
+            if command.run_proc and command.run_proc.returncode == 1:
                 return False
             raise e
         return True
@@ -651,8 +651,8 @@ class MonitorNode(PGNode):
         if dbname is not None:
             formation_command += ['--dbname', dbname]
 
-        # pass true or false to --enable-secondary or --disable-secondary, only when ha is
-        # actually set by the user
+        # pass true or false to --enable-secondary or --disable-secondary,
+        # only when ha is actually set by the user
         if secondary is not None:
             if secondary:
                 formation_command += ['--enable-secondary']

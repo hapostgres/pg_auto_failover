@@ -307,11 +307,39 @@ AutoFailoverOtherNodesListInState(AutoFailoverNode *pgAutoFailoverNode,
 
 
 /*
+ * GetPrimaryNodeInGroup returns the writable node in the specified group, if
+ * any.
+ */
+AutoFailoverNode *
+GetPrimaryNodeInGroup(char *formationId, int32 groupId)
+{
+	AutoFailoverNode *writableNode = NULL;
+	List *groupNodeList = NIL;
+	ListCell *nodeCell = NULL;
+
+	groupNodeList = AutoFailoverNodeGroup(formationId, groupId);
+
+	foreach(nodeCell, groupNodeList)
+	{
+		AutoFailoverNode *currentNode = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (IsInPrimaryState(currentNode))
+		{
+			writableNode = currentNode;
+			break;
+		}
+	}
+
+	return writableNode;
+}
+
+
+/*
  * GetPrimaryNodeInGroup returns the node in the group with a role that only a
  * primary can have.
  */
 AutoFailoverNode *
-GetPrimaryNodeInGroup(char *formationId, int32 groupId)
+GetPrimaryOrDemotedNodeInGroup(char *formationId, int32 groupId)
 {
 	AutoFailoverNode *primaryNode = NULL;
 	List *groupNodeList = NIL;
@@ -643,33 +671,6 @@ GetAutoFailoverNodeWithId(int nodeid, char *nodeName, int nodePort)
 	SPI_finish();
 
 	return pgAutoFailoverNode;
-}
-
-
-/*
- * GetWritableNode returns the writable node in the specified group, if any.
- */
-AutoFailoverNode *
-GetWritableNodeInGroup(char *formationId, int32 groupId)
-{
-	AutoFailoverNode *writableNode = NULL;
-	List *groupNodeList = NIL;
-	ListCell *nodeCell = NULL;
-
-	groupNodeList = AutoFailoverNodeGroup(formationId, groupId);
-
-	foreach(nodeCell, groupNodeList)
-	{
-		AutoFailoverNode *currentNode = (AutoFailoverNode *) lfirst(nodeCell);
-
-		if (CanTakeWritesInState(currentNode->reportedState))
-		{
-			writableNode = currentNode;
-			break;
-		}
-	}
-
-	return writableNode;
 }
 
 

@@ -20,6 +20,7 @@ def test_000_create_monitor():
     global monitor
     monitor = cluster.create_monitor("/tmp/multi_standby/monitor")
     monitor.wait_until_pg_is_running()
+    monitor.run()
 
 def test_001_init_primary():
     global node1
@@ -64,13 +65,13 @@ def test_004_add_three_standbys():
     # refrain from waiting for the primary to be ready, to trigger a race
     # condition that could segfault the monitor (if the code was less
     # careful than it is now)
-
     # assert node1.wait_until_state(target_state="primary")
 
     node3 = cluster.create_datanode("/tmp/multi_standby/node3")
     node3.create()
     node3.run()
     assert node3.wait_until_state(target_state="secondary")
+    assert node1.wait_until_state(target_state="primary")
 
     node4 = cluster.create_datanode("/tmp/multi_standby/node4")
     node4.create()
@@ -110,10 +111,12 @@ def test_006_number_sync_standbys_trigger():
 
     node4.drop()
     assert node1.get_number_sync_standbys() == 1
+    assert node1.wait_until_state(target_state="primary")
 
 def test_007_create_t1():
     node1.run_sql_query("CREATE TABLE t1(a int)")
     node1.run_sql_query("INSERT INTO t1 VALUES (1), (2)")
+    node1.run_sql_query("CHECKPOINT")
 
 def test_008_set_candidate_priorities():
     # set priorities in a way that we know the candidate: node2
@@ -122,6 +125,7 @@ def test_008_set_candidate_priorities():
     node3.set_candidate_priority(70)
 
     # when we set candidate priority we go to join_primary then primary
+    print()
     assert node1.wait_until_state(target_state="primary")
 
 def test_009_failover():
