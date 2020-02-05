@@ -870,7 +870,17 @@ standby_fetch_missing_wal_and_promote(LocalPostgresServer *postgres,
 	PGSQL *pgsql = &(postgres->sqlClient);
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	NodeAddress *upstreamNode = &(replicationSource->primaryNode);
-	bool inRecovery = false;
+
+	char replayLSN[PG_LSN_MAXLENGTH] = { 0 };
+	uint64_t currentLSN = 0;
+	uint64_t targetLSN = 0;
+
+	/* make it possible to compare the current and target LSN positions */
+	if (!parseLSN(replicationSource->targetLSN, &targetLSN) || targetLSN == 0)
+	{
+		log_error("Failed to parse LSN \"%s\"", replicationSource->targetLSN);
+		return false;
+	}
 
 	log_info("Fetching WAL from upstream node %d (%s:%d) up to LSN %s",
 			 upstreamNode->nodeId,
@@ -915,60 +925,32 @@ standby_fetch_missing_wal_and_promote(LocalPostgresServer *postgres,
 	}
 
 	/*
-	 * Now loop until Postgres is out of recovery mode.
+	 * Now loop until replay has reached our targetLSN.
 	 */
-	if (!pgsql_get_postgres_metadata(pgsql,
-									 &pgSetup->is_in_recovery,
-									 postgres->pgsrSyncState,
-									 postgres->currentLSN))
+	while (currentLSN < targetLSN)
 	{
-		log_error("Failed to determine whether postgres is in recovery mode");
-		return false;
-	}
-
-	while (inRecovery)
-	{
-		log_info("Waiting for postgres to promote, currently at LSN %s",
-				 postgres->currentLSN);
-		pg_usleep(AWAIT_PROMOTION_SLEEP_TIME_MS * 1000);
-
-		if (!pgsql_get_postgres_metadata(pgsql,
-										 &pgSetup->is_in_recovery,
-										 postgres->pgsrSyncState,
-										 postgres->currentLSN))
+		if (!pgsql_get_last_wal_replay_lsn(pgsql, replayLSN))
 		{
-			log_error("Failed to determine whether postgres is in recovery mode");
-			return false;
-		}
-	}
-
-	/* check that we could replay up to the assigned target */
-	log_debug("Promotion is done, now at LSN %s", postgres->currentLSN);
-
-	if (strcmp(postgres->currentLSN, replicationSource->targetLSN) != 0)
-	{
-		uint64_t currentLSN = 0;
-		uint64_t targetLSN = 0;
-
-		if (!parseLSN(postgres->currentLSN, &currentLSN))
-		{
-			log_error("Failed to parse LSN \"%s\"", postgres->currentLSN);
+			/* errors have already been logged */
 			return false;
 		}
 
-		if (!parseLSN(replicationSource->targetLSN, &targetLSN))
+		if (!parseLSN(replayLSN, &currentLSN))
 		{
-			log_error("Failed to parse LSN \"%s\"", replicationSource->targetLSN);
+			log_error("Failed to parse LSN \"%s\"", replayLSN);
 			return false;
 		}
 
 		if (currentLSN < targetLSN)
 		{
-			log_error("Failed to replay up to target LSN %s, reached LSN %s",
-					  replicationSource->targetLSN, postgres->currentLSN);
-			return false;
+			log_info("Postgres recovery is at LSN %s, waiting for LSN %s",
+					 replayLSN, replicationSource->targetLSN);
+			pg_usleep(AWAIT_PROMOTION_SLEEP_TIME_MS * 1000);
 		}
 	}
+
+	/* check that we could replay up to the assigned target */
+	log_debug("Fast-forward is done, now at LSN %s", replayLSN);
 
 	/*
 	 * It's necessary to do a checkpoint before allowing the old primary to

@@ -1849,6 +1849,38 @@ parsePgMetadata(void *ctx, PGresult *result)
 	context->parsedOk = true;
 }
 
+/*
+ * pgsql_get_last_wal_replay_lsn calls pg_last_wal_replay_lsn() and provides
+ * the result in the given pre-allocated char buffer.
+ *
+ * We reuse parsePgMetadata here even though we're not executing the same SQL
+ * query, we arrange for the result set to be compatible and map the internal
+ * context to the actual values being fetched.
+ */
+bool
+pgsql_get_last_wal_replay_lsn(PGSQL *pgsql, char *replayLSN)
+{
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_STRING, false };
+	char *sql = "SELECT pg_is_wal_replay_paused()";
+
+	if (!pgsql_execute_with_params(pgsql, sql, 0, NULL, NULL,
+								   &context, &parseSingleValueResult))
+	{
+		/* errors have been logged already */
+		return false;
+	}
+
+	if (!context.parsedOk)
+	{
+		log_error("Failed to get result from pg_last_wal_replay_lsn()");
+		return false;
+	}
+
+	strlcpy(replayLSN, context.strVal, PG_LSN_MAXLENGTH);
+
+	return true;
+}
+
 
 /*
  * LISTEN/NOTIFY support.
