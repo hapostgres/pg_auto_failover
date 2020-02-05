@@ -37,7 +37,9 @@ bool pg_basebackup(const char *pgdata,
 				   const char *replication_username,
 				   const char *replication_password,
 				   const char *replication_slot_name,
-				   const char *primary_hostname, int primary_port);
+				   const char *primary_hostname,
+				   int primary_port,
+				   const char *application_name);
 bool pg_rewind(const char *pgdata, const char *pg_ctl, const char *primaryHost,
 			   int primaryPort, const char *databaseName,
 			   const char *replicationUsername,

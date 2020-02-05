@@ -37,6 +37,8 @@ static void cli_show_events(int argc, char **argv);
 static int cli_show_nodes_getopts(int argc, char **argv);
 static void cli_show_nodes(int argc, char **argv);
 
+static void cli_show_standby_names(int argc, char **argv);
+
 static int cli_show_file_getopts(int argc, char **argv);
 static void cli_show_file(int argc, char **argv);
 static bool fprint_file_contents(const char *filename);
@@ -87,23 +89,45 @@ CommandLine show_nodes_command =
 	make_command("nodes",
 				 "Prints monitor nodes of nodes in a given formation and group",
 				 " [ --pgdata --formation --group ] ",
-				 "  --pgdata      path to data directory	 \n"		\
-				 "  --formation   formation to query, defaults to 'default' \n" \
-				 "  --group       group to query formation, defaults to all \n" \
+				 "  --pgdata      path to data directory	 \n"
+				 "  --formation   formation to query, defaults to 'default' \n"
+				 "  --group       group to query formation, defaults to all \n"
 				 "  --json        output data in the JSON format\n",
 				 cli_show_nodes_getopts,
 				 cli_show_nodes);
+
+CommandLine show_sync_standby_names_command =
+	make_command("synchronous_standby_names",
+				 "Prints synchronous_standby_names for a given group",
+				 " [ --pgdata ] --formation --group",
+				 "  --pgdata      path to data directory	 \n"
+				 "  --formation   formation to query, defaults to 'default'\n"
+				 "  --group       group to query formation, defaults to all\n"
+				 "  --json        output data in the JSON format\n",
+				 cli_show_nodes_getopts,
+				 cli_show_standby_names);
+
+CommandLine show_standby_names_command =
+	make_command("standby-names",
+				 "Prints synchronous_standby_names for a given group",
+				 " [ --pgdata ] --formation --group",
+				 "  --pgdata      path to data directory	 \n"
+				 "  --formation   formation to query, defaults to 'default'\n"
+				 "  --group       group to query formation, defaults to all\n"
+				 "  --json        output data in the JSON format\n",
+				 cli_show_nodes_getopts,
+				 cli_show_standby_names);
 
 CommandLine show_file_command =
 	make_command("file",
 				 "List pg_autoctl internal files (config, state, pid)",
 				 " [ --pgdata --all --config | --state | --init | --pid --contents ]",
-				 "  --pgdata      path to data directory \n" \
-				 "  --all         show all pg_autoctl files \n" \
-				 "  --config      show pg_autoctl configuration file \n" \
-				 "  --state       show pg_autoctl state file \n" \
-				 "  --init        show pg_autoctl initialisation state file \n" \
-				 "  --pid         show pg_autoctl PID file \n" \
+				 "  --pgdata      path to data directory \n"
+				 "  --all         show all pg_autoctl files \n"
+				 "  --config      show pg_autoctl configuration file \n"
+				 "  --state       show pg_autoctl state file \n"
+				 "  --init        show pg_autoctl initialisation state file \n"
+				 "  --pid         show pg_autoctl PID file \n"
 				 "  --contents    show selected file contents \n",
 				 cli_show_file_getopts,
 				 cli_show_file);
@@ -551,6 +575,59 @@ cli_show_nodes(int argc, char **argv)
 					  "see above for details");
 			exit(EXIT_CODE_MONITOR);
 		}
+	}
+}
+
+
+/*
+ * cli_show_standby_names prints the synchronous_standby_names setting value
+ * for a given group (in a known formation).
+ */
+static void
+cli_show_standby_names(int argc, char **argv)
+{
+	KeeperConfig config = keeperOptions;
+	Monitor monitor = { 0 };
+	char synchronous_standby_names[BUFSIZE] = { 0 };
+
+	/* change the default group when it's not been given on the command */
+	if (config.groupId == -1)
+	{
+		config.groupId = 0;
+	}
+
+	if (!monitor_init_from_pgsetup(&monitor, &config.pgSetup))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (!monitor_synchronous_standby_names(
+			&monitor,
+			config.formation,
+			config.groupId,
+			synchronous_standby_names,
+			BUFSIZE))
+	{
+		log_fatal("Failed to get the synchronous_standby_names setting value "
+				  " from the monitor, see above for details");
+		exit(EXIT_CODE_MONITOR);
+	}
+
+	if (outputJSON)
+	{
+		JSON_Value *js = json_value_init_object();
+		JSON_Object *jsObj = json_value_get_object(js);
+
+		json_object_set_string(jsObj,
+							   "synchronous_standby_names",
+							   synchronous_standby_names);
+
+		(void) cli_pprint_json(js);
+	}
+	else
+	{
+		(void) fprintf(stdout, "%s\n", synchronous_standby_names);
 	}
 }
 

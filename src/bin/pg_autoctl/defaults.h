@@ -32,6 +32,7 @@
 #define REPLICATION_SLOT_NAME_DEFAULT "pgautofailover_standby"
 #define REPLICATION_SLOT_NAME_PATTERN "^pgautofailover_standby_"
 #define REPLICATION_PASSWORD_DEFAULT NULL
+#define REPLICATION_APPLICATION_NAME_PREFIX "pgautofailover_standby_"
 #define FORMATION_DEFAULT "default"
 #define GROUP_ID_DEFAULT 0
 #define POSTGRES_CONNECT_TIMEOUT "5"

@@ -794,6 +794,38 @@ pgsql_alter_system_set(PGSQL *pgsql, GUC setting)
 
 
 /*
+ * pgsql_reset_primary_conninfo issues the following SQL commands:
+ *
+ *   ALTER SYSTEM RESET primary_conninfo;
+ *   ALTER SYSTEM RESET primary_slot_name;
+ *
+ * That's necessary to clean-up the replication settings that pg_basebackup
+ * puts in place in postgresql.auto.conf in Postgres 12. We don't reload the
+ * configuration after the RESET in that case, because Postgres 12 requires a
+ * restart to apply the new setting value anyway.
+ */
+bool
+pgsql_reset_primary_conninfo(PGSQL *pgsql)
+{
+	char *reset_primary_conninfo = "ALTER SYSTEM RESET primary_conninfo";
+	char *reset_primary_slot_name = "ALTER SYSTEM RESET primary_slot_name";
+
+	/* ALTER SYSTEM cannot run inside a transaction block */
+	if (!pgsql_execute(pgsql, reset_primary_conninfo))
+	{
+		return false;
+	}
+
+	if (!pgsql_execute(pgsql, reset_primary_slot_name))
+	{
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
  * pgsql_reload_conf causes open sessions to reload the PostgresSQL configuration
  * files.
  */
@@ -803,28 +835,6 @@ pgsql_reload_conf(PGSQL *pgsql)
 	char *sql = "SELECT pg_reload_conf()";
 
 	return pgsql_execute(pgsql, sql);
-}
-
-
-/*
- * pgsql_get_config_file_path gets the value of the config_file setting in
- * Postgres or returns false if a failure occurred. The value is copied to
- * the configFilePath pointer.
- */
-bool
-pgsql_get_config_file_path(PGSQL *pgsql, char *configFilePath, int maxPathLength)
-{
-	char *configValue = NULL;
-
-	if (!pgsql_get_current_setting(pgsql, "config_file", &configValue))
-	{
-		return false;
-	}
-
-	strlcpy(configFilePath, configValue, maxPathLength);
-	free(configValue);
-
-	return true;
 }
 
 

@@ -229,7 +229,6 @@ class PGNode:
         """
         self.stop_pg_autoctl()
 
-
         try:
             destroy = PGAutoCtl(self.vnode, self.datadir)
             destroy.execute("pg_autoctl do destroy", 'destroy')
@@ -272,6 +271,28 @@ class PGNode:
                             ".local/share/pg_autoctl",
                             pgdata,
                             "pg_autoctl.state")
+
+    def get_postgres_logs(self):
+        ldir = os.path.join(self.datadir, "log")
+        logfiles = os.listdir(ldir)
+        logfiles.sort()
+
+        logs = []
+        for logfile in logfiles:
+            logs += ["\n\n%s:\n" % logfile]
+            logs += open(os.path.join(ldir, logfile)).readlines()
+
+        # it's not really logs but we want to see that too
+        for inc in ["recovery.conf",
+                    "postgresql.auto.conf",
+                    "postgresql-auto-failover.conf",
+                    "postgresql-auto-failover-standby.conf"]:
+            conf = os.path.join(self.datadir, inc)
+            if os.path.isfile(conf):
+                logs += ["\n\n%s:\n" % conf]
+                logs += open(conf).readlines()
+
+        return "".join(logs)
 
 
 class DataNode(PGNode):
@@ -358,13 +379,14 @@ class DataNode(PGNode):
                 (self.datadir, target_state, timeout))
 
             events = self.get_events_str()
+            pglogs = self.get_postgres_logs()
 
             if self.pg_autoctl and self.pg_autoctl.run_proc:
                 out, err = self.stop_pg_autoctl()
                 raise Exception("%s failed to reach %s after %d attempts: " \
-                                "\n%s\n%s\n%s" %
+                                "\n%s\n%s\n%s\n%s" %
                                 (self.datadir, target_state, timeout,
-                                 out, err, events))
+                                 out, err, events, pglogs))
             else:
                 raise Exception("%s failed to reach %s after %d attempts:\n%s" %
                                 (self.datadir, target_state, timeout, events))
@@ -525,6 +547,17 @@ SELECT reportedstate
 
         return out.strip()
 
+    def list_replication_slot_names(self):
+        """
+            Returns a list of the replication slot names on the local Postgres.
+        """
+        query = "select slot_name from pg_replication_slots " \
+            + "where slot_name ~ '^pgautofailover_standby_' " \
+            + " and slot_type = 'physical'"
+
+        result = self.run_sql_query(query)
+        return [row[0] for row in result]
+
 
 class MonitorNode(PGNode):
     def __init__(self, datadir, vnode, port, nodename, authMethod):
@@ -563,6 +596,41 @@ class MonitorNode(PGNode):
             self.pg_autoctl.run()
         else:
             self.pg_autoctl.execute("create monitor")
+
+    def run(self, env={}):
+        """
+        Runs "pg_autoctl run"
+        """
+        self.pg_autoctl = PGAutoCtl(self.vnode, self.datadir)
+        self.pg_autoctl.run(level='-v')
+
+    def destroy(self):
+        """
+        Cleans up processes and files created for this monitor node.
+        """
+        if self.pg_autoctl:
+            out, err = self.pg_autoctl.stop()
+
+            if out or err:
+                print()
+                print("Monitor logs:\n%s\n%s\n" % (out, err))
+
+        try:
+            destroy = PGAutoCtl(self.vnode, self.datadir)
+            destroy.execute("pg_autoctl node destroy",
+                            'drop', 'node', '--destroy')
+        except Exception as e:
+            print(str(e))
+
+        try:
+            os.remove(self.config_file_path())
+        except FileNotFoundError:
+            pass
+
+        try:
+            os.remove(self.state_file_path())
+        except FileNotFoundError:
+            pass
 
     def create_formation(self, formation_name,
                          kind="pgsql", secondary=None, dbname=None):
@@ -659,7 +727,7 @@ class PGAutoCtl():
         if argv:
             self.command = [self.program] + argv
 
-    def run(self):
+    def run(self, level='-vv'):
         """
         Runs our command in the background, returns immediately.
 
@@ -667,7 +735,7 @@ class PGAutoCtl():
         We could be given a full `pg_autoctl create postgres --run` command.
         """
         if not self.command:
-            self.command = [self.program, 'run', '--pgdata', self.datadir, '-vv']
+            self.command = [self.program, 'run', '--pgdata', self.datadir, level]
 
         self.run_proc = self.vnode.run(self.command)
         print("pg_autoctl run [%d]" % self.run_proc.pid)
@@ -725,8 +793,10 @@ class PGAutoCtl():
                 self.run_proc = None
                 print("Failed to terminate pg_autoctl for %s: %s" %
                       (self.datadir, e))
+                return None, None
         else:
             print("pg_autoctl process for %s is not running" % self.datadir)
+            return None, None
 
     def communicate(self, timeout=COMMAND_TIMEOUT):
         """
