@@ -824,17 +824,29 @@ standby_follow_new_primary(LocalPostgresServer *postgres,
 		return false;
 	}
 
+	/* we might be back from maintenance and find Postgres is not running */
+	if (pg_is_running(pgSetup->pg_ctl, pgSetup->pgdata))
+	{
+		log_info("Stopping Postgres at \"%s\"", pgSetup->pgdata);
+
+		if (!pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata))
+		{
+			log_error("Failed to stop Postgres at \"%s\"", pgSetup->pgdata);
+			return false;
+		}
+	}
+
 	if (!pg_setup_standby_mode(pgSetup->control.pg_control_version,
 							   pgSetup->pgdata,
 							   replicationSource))
 	{
-		log_error("Failed to setup Postgres as a standby, after rewind");
+		log_error("Failed to setup Postgres as a standby");
 		return false;
 	}
 
 	log_info("Restarting Postgres at \%s\"", pgSetup->pgdata);
 
-	if (!pg_ctl_restart(pgSetup->pg_ctl, pgSetup->pgdata))
+	if (!ensure_local_postgres_is_running(postgres))
 	{
 		log_error("Failed to restart Postgres after changing its "
 				  "primary conninfo, see above for details");

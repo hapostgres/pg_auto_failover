@@ -46,6 +46,7 @@ def test_002_add_two_standbys():
     node3.run()
     assert node3.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")
+    assert node2.wait_until_state(target_state="secondary")
 
     assert node1.has_needed_replication_slots()
     assert node2.has_needed_replication_slots()
@@ -56,8 +57,6 @@ def test_003_set_candidate_priority():
 
     assert node3.set_candidate_priority(0)
     assert node3.get_candidate_priority() == 0
-
-    assert node1.wait_until_state(target_state="primary")
 
 def test_004_ifdown_node2():
     node2.ifdown()
@@ -72,8 +71,12 @@ def test_005_create_t1():
     print()
     print("Current LSN on the primary: %s" % lsn)
 
+
 def test_006_failover():
     print()
+    assert node1.wait_until_state(target_state="primary")
+    assert node3.wait_until_state(target_state="secondary")
+
     print("Calling pgautofailover.failover() on the monitor")
     monitor.failover()
 
