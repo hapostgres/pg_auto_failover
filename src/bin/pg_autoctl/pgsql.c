@@ -1861,7 +1861,7 @@ bool
 pgsql_get_last_wal_replay_lsn(PGSQL *pgsql, char *replayLSN)
 {
 	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_STRING, false };
-	char *sql = "SELECT pg_is_wal_replay_paused()";
+	char *sql = "SELECT pg_last_wal_replay_lsn()";
 
 	if (!pgsql_execute_with_params(pgsql, sql, 0, NULL, NULL,
 								   &context, &parseSingleValueResult))
