@@ -37,7 +37,6 @@ static void cli_show_events(int argc, char **argv);
 static int cli_show_nodes_getopts(int argc, char **argv);
 static void cli_show_nodes(int argc, char **argv);
 
-static int cli_show_standby_names_getopts(int argc, char **argv);
 static void cli_show_standby_names(int argc, char **argv);
 
 static int cli_show_file_getopts(int argc, char **argv);
@@ -90,33 +89,45 @@ CommandLine show_nodes_command =
 	make_command("nodes",
 				 "Prints monitor nodes of nodes in a given formation and group",
 				 " [ --pgdata --formation --group ] ",
-				 "  --pgdata      path to data directory	 \n"		\
-				 "  --formation   formation to query, defaults to 'default' \n" \
-				 "  --group       group to query formation, defaults to all \n" \
+				 "  --pgdata      path to data directory	 \n"
+				 "  --formation   formation to query, defaults to 'default' \n"
+				 "  --group       group to query formation, defaults to all \n"
 				 "  --json        output data in the JSON format\n",
 				 cli_show_nodes_getopts,
 				 cli_show_nodes);
 
-CommandLine show_standby_names_command =
+CommandLine show_sync_standby_names_command =
 	make_command("synchronous_standby_names",
 				 "Prints synchronous_standby_names for a given group",
 				 " [ --pgdata ] --formation --group",
-				 "  --pgdata      path to data directory	 \n"		\
-				 "  --formation   formation to query, defaults to 'default'\n" \
-				 "  --group       group to query formation, defaults to all\n",
-				 cli_show_standby_names_getopts,
+				 "  --pgdata      path to data directory	 \n"
+				 "  --formation   formation to query, defaults to 'default'\n"
+				 "  --group       group to query formation, defaults to all\n"
+				 "  --json        output data in the JSON format\n",
+				 cli_show_nodes_getopts,
+				 cli_show_standby_names);
+
+CommandLine show_standby_names_command =
+	make_command("standby-names",
+				 "Prints synchronous_standby_names for a given group",
+				 " [ --pgdata ] --formation --group",
+				 "  --pgdata      path to data directory	 \n"
+				 "  --formation   formation to query, defaults to 'default'\n"
+				 "  --group       group to query formation, defaults to all\n"
+				 "  --json        output data in the JSON format\n",
+				 cli_show_nodes_getopts,
 				 cli_show_standby_names);
 
 CommandLine show_file_command =
 	make_command("file",
 				 "List pg_autoctl internal files (config, state, pid)",
 				 " [ --pgdata --all --config | --state | --init | --pid --contents ]",
-				 "  --pgdata      path to data directory \n" \
-				 "  --all         show all pg_autoctl files \n" \
-				 "  --config      show pg_autoctl configuration file \n" \
-				 "  --state       show pg_autoctl state file \n" \
-				 "  --init        show pg_autoctl initialisation state file \n" \
-				 "  --pid         show pg_autoctl PID file \n" \
+				 "  --pgdata      path to data directory \n"
+				 "  --all         show all pg_autoctl files \n"
+				 "  --config      show pg_autoctl configuration file \n"
+				 "  --state       show pg_autoctl state file \n"
+				 "  --init        show pg_autoctl initialisation state file \n"
+				 "  --pid         show pg_autoctl PID file \n"
 				 "  --contents    show selected file contents \n",
 				 cli_show_file_getopts,
 				 cli_show_file);
@@ -569,151 +580,6 @@ cli_show_nodes(int argc, char **argv)
 
 
 /*
- * cli_show_nodes_getopts parses the command line options for the
- * command `pg_autoctl show nodes`.
- */
-static int
-cli_show_standby_names_getopts(int argc, char **argv)
-{
-	KeeperConfig options = { 0 };
-	int c, option_index = 0, errors = 0;
-	int verboseCount = 0;
-
-	static struct option long_options[] = {
-		{ "pgdata", required_argument, NULL, 'D' },
-		{ "formation", required_argument, NULL, 'f' },
-		{ "group", required_argument, NULL, 'g' },
-		{ "version", no_argument, NULL, 'V' },
-		{ "verbose", no_argument, NULL, 'v' },
-		{ "quiet", no_argument, NULL, 'q' },
-		{ "help", no_argument, NULL, 'h' },
-		{ NULL, 0, NULL, 0 }
-	};
-
-	/* set default values for our options, when we have some */
-	options.network_partition_timeout = -1;
-	options.prepare_promotion_catchup = -1;
-	options.prepare_promotion_walreceiver = -1;
-	options.postgresql_restart_failure_timeout = -1;
-	options.postgresql_restart_failure_max_retries = -1;
-
-	strlcpy(options.formation, "default", NAMEDATALEN);
-
-	optind = 0;
-
-	while ((c = getopt_long(argc, argv, "D:f:g:n:Vvqh",
-							long_options, &option_index)) != -1)
-	{
-		switch (c)
-		{
-			case 'D':
-			{
-				strlcpy(options.pgSetup.pgdata, optarg, MAXPGPATH);
-				log_trace("--pgdata %s", options.pgSetup.pgdata);
-				break;
-			}
-
-			case 'f':
-			{
-				strlcpy(options.formation, optarg, NAMEDATALEN);
-				log_trace("--formation %s", options.formation);
-				break;
-			}
-
-			case 'g':
-			{
-				int scanResult = sscanf(optarg, "%d", &options.groupId);
-				if (scanResult == 0)
-				{
-					log_fatal("--group argument is not a valid group ID: \"%s\"",
-							  optarg);
-					exit(EXIT_CODE_BAD_ARGS);
-				}
-				log_trace("--group %d", options.groupId);
-				break;
-			}
-
-			case 'V':
-			{
-				/* keeper_cli_print_version prints version and exits. */
-				keeper_cli_print_version(argc, argv);
-				break;
-			}
-
-			case 'v':
-			{
-				++verboseCount;
-				switch (verboseCount)
-				{
-					case 1:
-						log_set_level(LOG_INFO);
-						break;
-
-					case 2:
-						log_set_level(LOG_DEBUG);
-						break;
-
-					default:
-						log_set_level(LOG_TRACE);
-						break;
-				}
-				break;
-			}
-
-			case 'q':
-			{
-				log_set_level(LOG_ERROR);
-				break;
-			}
-
-			case 'h':
-			{
-				commandline_help(stderr);
-				exit(EXIT_CODE_QUIT);
-				break;
-			}
-
-			default:
-			{
-				/* getopt_long already wrote an error message */
-				errors++;
-			}
-		}
-	}
-
-	if (errors > 0)
-	{
-		commandline_help(stderr);
-		exit(EXIT_CODE_BAD_ARGS);
-	}
-
-	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
-	{
-		char *pgdata = getenv("PGDATA");
-
-		if (pgdata == NULL)
-		{
-			log_fatal("Failed to get PGDATA either from the environment "
-					  "or from --pgdata");
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-
-		strlcpy(options.pgSetup.pgdata, pgdata, MAXPGPATH);
-	}
-
-	/*
-	 * pg_setup_init wants a single pg_ctl, and we don't use it here: pretend
-	 * we had a --pgctl option and processed it.
-	 */
-	set_first_pgctl(&(options.pgSetup));
-
-	keeperOptions = options;
-
-	return optind;
-}
-
-
-/*
  * cli_show_standby_names prints the synchronous_standby_names setting value
  * for a given group (in a known formation).
  */
@@ -723,6 +589,12 @@ cli_show_standby_names(int argc, char **argv)
 	KeeperConfig config = keeperOptions;
 	Monitor monitor = { 0 };
 	char synchronous_standby_names[BUFSIZE] = { 0 };
+
+	/* change the default group when it's not been given on the command */
+	if (config.groupId == -1)
+	{
+		config.groupId = 0;
+	}
 
 	if (!monitor_init_from_pgsetup(&monitor, &config.pgSetup))
 	{
@@ -742,7 +614,21 @@ cli_show_standby_names(int argc, char **argv)
 		exit(EXIT_CODE_MONITOR);
 	}
 
-	(void) fprintf(stdout, "%s\n", synchronous_standby_names);
+	if (outputJSON)
+	{
+		JSON_Value *js = json_value_init_object();
+		JSON_Object *jsObj = json_value_get_object(js);
+
+		json_object_set_string(jsObj,
+							   "synchronous_standby_names",
+							   synchronous_standby_names);
+
+		(void) cli_pprint_json(js);
+	}
+	else
+	{
+		(void) fprintf(stdout, "%s\n", synchronous_standby_names);
+	}
 }
 
 
