@@ -696,7 +696,7 @@ pg_setup_pgdata_exists(PostgresSetup *pgSetup)
 bool
 pg_setup_is_running(PostgresSetup *pgSetup)
 {
-	bool pg_is_not_running_is_ok = false;
+	bool pg_is_not_running_is_ok = true;
 
 	return pgSetup->pidFile.pid != 0
 		/* if we don't have the PID yet, try reading it now */
