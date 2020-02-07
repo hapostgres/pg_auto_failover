@@ -674,8 +674,9 @@ set_program_absolute_path(char *program, int size)
 
 
 /*
- * normalize_filename returns the real path of a given filename, resolving
- * symlinks and pruning double-slashes and other weird constructs.
+ * normalize_filename returns the real path of a given filename that belongs to
+ * an existing file on-disk, resolving symlinks and pruning double-slashes and
+ * other weird constructs.
  */
 bool
 normalize_filename(const char *filename, char *dst, int size)

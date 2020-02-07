@@ -198,7 +198,7 @@ debian_find_postgres_configuration_files(PostgresSetup *pgSetup,
 
 
 /*
- * debian_init_postgres_config_files initialises the given PostgresConfigFiles
+ * debian_init_postgres_config_files initializes the given PostgresConfigFiles
  * structure with the location of existing files as found on-disk given a
  * Postgres configuration kind.
  */
@@ -481,7 +481,7 @@ expandDebianPatternsInDirectoryName(char *pathname,
 }
 
 /*
- * initPostgresConfigFiles initialises PostgresConfigFiles structure with our
+ * initPostgresConfigFiles initializes PostgresConfigFiles structure with our
  * filenames located in given directory pathname.
  */
 static void
