@@ -14,6 +14,7 @@
 
 #include "config.h"
 #include "defaults.h"
+#include "file_utils.h"
 #include "ini_file.h"
 #include "keeper.h"
 #include "keeper_config.h"
@@ -305,40 +306,4 @@ ProbeConfigurationFileRole(const char *filename)
 
 	/* can't happen: keep compiler happy */
 	return PG_AUTOCTL_ROLE_UNKNOWN;
-}
-
-
-/*
- * normalize_filename returns the real path of a given filename, resolving
- * symlinks and pruning double-slashes and other weird constructs.
- */
-bool
-normalize_filename(const char *filename, char *dst, int size)
-{
-	/* normalize the path to the configuration file, if it exists */
-	if (file_exists(filename))
-	{
-		char realPath[PATH_MAX];
-
-		if (realpath(filename, realPath) == NULL)
-		{
-			log_fatal("Failed to normalize file name \"%s\": %s",
-					  filename, strerror(errno));
-			return false;
-		}
-
-		if (strlcpy(dst, realPath, size) >= size)
-		{
-			log_fatal("Real path \"%s\" is %d bytes long, and pg_autoctl "
-					  "is limited to handling paths of %d bytes long, maximum",
-					  realPath, (int) strlen(realPath), size);
-			return false;
-		}
-	}
-	else
-	{
-		strlcpy(dst, filename, MAXPGPATH);
-	}
-
-	return true;
 }

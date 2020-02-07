@@ -7,6 +7,7 @@
  *
  */
 
+#include <limits.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -263,6 +264,157 @@ read_file(const char *filePath, char **contents, long *fileSize)
 
 
 /*
+ * move_file is a utility function to move a file from sourcePath to
+ * destinationPath. It behaves like mv system command. First attempts to move
+ * a file using rename. if it fails with EXDEV error, the function duplicates
+ * the source file with owner and permission information and removes it.
+ */
+bool
+move_file(char* sourcePath, char* destinationPath)
+{
+	if (strncmp(sourcePath, destinationPath, MAXPGPATH) == 0)
+	{
+		/* nothing to do */
+		log_warn("Source and destination are the same \"%s\", nothing to move.",
+				 sourcePath);
+		return true;
+	}
+
+	if (!file_exists(sourcePath))
+	{
+		log_error("Failed to move file, source file \"%s\" does not exist.",
+				  sourcePath);
+		return false;
+	}
+
+	if (file_exists(destinationPath))
+	{
+		log_error("Failed to move file, destination file \"%s\" already exists.",
+				  destinationPath);
+		return false;
+	}
+
+	/* first try atomic move operation */
+	if (rename(sourcePath, destinationPath) == 0)
+	{
+		return true;
+	}
+
+	/*
+	 * rename fails with errno = EXDEV when moving file to a different file
+	 * system.
+	 */
+	if (errno != EXDEV)
+	{
+		log_error("Failed to move file \"%s\" to \"%s\": %s",
+				  sourcePath, destinationPath, strerror(errno));
+		return false;
+	}
+
+	if (!duplicate_file(sourcePath, destinationPath))
+	{
+		/* specific error is already logged */
+		log_error("Canceling file move due to errors.");
+		return false;
+	}
+
+	/* everything is successful we can remove the file */
+	unlink_file(sourcePath);
+
+	return true;
+}
+
+
+/*
+ * duplicate_file is a utility function to duplicate a file from sourcePath to
+ * destinationPath. It reads the contents of the source file and writes to the
+ * destination file. It expects non-existing destination file and does not
+ * copy over if it exists. The function returns true on successful execution.
+ *
+ * Note: the function reads the whole file into memory before copying out.
+ */
+bool
+duplicate_file(char* sourcePath, char* destinationPath)
+{
+	char *fileContents;
+	long fileSize;
+	struct stat sourceFileStat;
+	bool foundError = false;
+
+	if (!read_file(sourcePath, &fileContents, &fileSize))
+	{
+		/* errors are logged */
+		return false;
+	}
+
+	if (file_exists(destinationPath))
+	{
+		log_error("Failed to duplicate, destination file already exists : %s",
+				  destinationPath);
+		return false;
+	}
+
+	foundError = !write_file(fileContents, fileSize, destinationPath);
+
+	free(fileContents);
+
+	if (foundError)
+	{
+		/* errors are logged in write_file */
+		return false;
+	}
+
+	/* set uid gid and mode */
+	if (stat(sourcePath, &sourceFileStat) != 0)
+	{
+		log_error("Failed to get ownership and file permissions on \"%s\"",
+				  sourcePath);
+		foundError = true;
+	}
+	else
+	{
+		if (chown(destinationPath, sourceFileStat.st_uid, sourceFileStat.st_gid) != 0)
+		{
+			log_error("Failed to set user and group id on \"%s\"",
+					  destinationPath);
+			foundError = true;
+		}
+		if (chmod(destinationPath, sourceFileStat.st_mode) != 0)
+		{
+			log_error("Failed to set file permissions on \"%s\"",
+					  destinationPath);
+			foundError = true;
+		}
+	}
+
+	if (foundError)
+	{
+		/* errors are already logged */
+		unlink_file(destinationPath);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * create_symbolic_link creates a symbolic link to source path.
+ */
+bool
+create_symbolic_link(char* sourcePath, char* targetPath)
+{
+	if (symlink(sourcePath, targetPath) != 0)
+	{
+		log_error("Failed to create symbolic link to \"%s\": %s",
+				  targetPath, strerror(errno));
+		return false;
+	}
+	return true;
+}
+
+
+/*
  * path_in_same_directory constructs the path for a file with name fileName
  * that is in the same directory as basePath, which should be an absolute
  * path. The result is written to destinationPath, which should be at least
@@ -410,7 +562,8 @@ unlink_file(const char *filename)
 		/* if it didn't exist yet, good news! */
 		if (errno != ENOENT && errno != ENOTDIR)
 		{
-			log_error("Failed to remove stale state file at \"%s\"", filename);
+			log_error("Failed to remove file \"%s\": %s",
+					  filename, strerror(errno));
 			return false;
 		}
 	}
@@ -515,6 +668,43 @@ set_program_absolute_path(char *program, int size)
 		}
 	}
 #endif
+
+	return true;
+}
+
+
+/*
+ * normalize_filename returns the real path of a given filename that belongs to
+ * an existing file on-disk, resolving symlinks and pruning double-slashes and
+ * other weird constructs.
+ */
+bool
+normalize_filename(const char *filename, char *dst, int size)
+{
+	/* normalize the path to the configuration file, if it exists */
+	if (file_exists(filename))
+	{
+		char realPath[PATH_MAX];
+
+		if (realpath(filename, realPath) == NULL)
+		{
+			log_fatal("Failed to normalize file name \"%s\": %s",
+					  filename, strerror(errno));
+			return false;
+		}
+
+		if (strlcpy(dst, realPath, size) >= size)
+		{
+			log_fatal("Real path \"%s\" is %d bytes long, and pg_autoctl "
+					  "is limited to handling paths of %d bytes long, maximum",
+					  realPath, (int) strlen(realPath), size);
+			return false;
+		}
+	}
+	else
+	{
+		strlcpy(dst, filename, MAXPGPATH);
+	}
 
 	return true;
 }

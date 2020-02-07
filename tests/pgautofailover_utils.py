@@ -10,6 +10,7 @@ from enum import Enum
 
 COMMAND_TIMEOUT = 60
 STATE_CHANGE_TIMEOUT = 90
+PGVERSION = os.getenv("PGVERSION", "11")
 
 class Role(Enum):
     Monitor = 1
@@ -69,6 +70,30 @@ class Cluster:
                             role, formation)
         self.datanodes.append(datanode)
         return datanode
+
+    def pg_createcluster(self, datadir, port=5432):
+        """
+        Initializes a postgresql node using pg_createcluster and returns
+        directory path.
+        """
+        vnode = self.vlan.create_node()
+        nodeid = len(self.datanodes) + 1
+
+        create_command = ["sudo", shutil.which('pg_createcluster'),
+                          "-U", os.getenv("USER"),
+                          PGVERSION, datadir, '-p', str(port)]
+
+        print("%s" % " ".join(create_command))
+
+        create_proc = vnode.run(create_command)
+        out, err = create_proc.communicate(timeout=COMMAND_TIMEOUT)
+        if create_proc.returncode > 0:
+            raise Exception("pg_createcluster failed, out: %s\n, err: %s" %
+                            (out, err))
+
+        abspath = os.path.join("/var/lib/postgresql/", PGVERSION, datadir)
+
+        return abspath
 
     def destroy(self):
         """

@@ -10,9 +10,8 @@
 #include <stdbool.h>
 #include <unistd.h>
 
-#include "postgres_fe.h"
-
 #include "cli_common.h"
+#include "debian.h"
 #include "defaults.h"
 #include "fsm.h"
 #include "keeper.h"
@@ -20,11 +19,13 @@
 #include "keeper_pg_init.h"
 #include "log.h"
 #include "monitor.h"
+#include "parsing.h"
 #include "pgctl.h"
 #include "pghba.h"
 #include "pgsetup.h"
 #include "pgsql.h"
 #include "state.h"
+
 
 /*
  * We keep track of the fact that we had non-fatal warnings during `pg_autoctl
@@ -47,8 +48,6 @@ static bool reach_initial_state(Keeper *keeper);
 static bool wait_until_primary_is_ready(Keeper *config,
 										MonitorAssignedState *assignedState);
 static bool keeper_pg_init_node_active(Keeper *keeper);
-
-
 /*
  * keeper_pg_init initializes a pg_autoctl keeper and its local PostgreSQL.
  *
@@ -117,6 +116,16 @@ keeper_pg_init_and_register(Keeper *keeper, KeeperConfig *config)
 	PostgresSetup pgSetup = config->pgSetup;
 	bool postgresInstanceExists = pg_setup_pgdata_exists(&pgSetup);
 	bool postgresInstanceIsPrimary = pg_setup_is_primary(&pgSetup);
+
+	if (postgresInstanceExists)
+	{
+		if (!keeper_ensure_pg_configuration_files_in_pgdata(config))
+		{
+			log_fatal("Failed to setup your Postgres instance "
+					  "the PostgreSQL way, see above for details");
+			return false;
+		}
+	}
 
 	/*
 	 * If we don't have a state file, we consider that we're initializing from
