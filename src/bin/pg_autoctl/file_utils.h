@@ -32,5 +32,6 @@ int search_pathlist(const char *pathlist, const char *filename, char ***result);
 void search_pathlist_destroy_result(char **result);
 bool unlink_file(const char *filename);
 bool set_program_absolute_path(char *program, int size);
+bool normalize_filename(const char *filename, char *dst, int size);
 
 #endif /* FILE_UTILS_H */

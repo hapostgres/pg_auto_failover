@@ -7,6 +7,7 @@
  *
  */
 
+#include <limits.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -274,19 +275,22 @@ move_file(char* sourcePath, char* destinationPath)
 	if (strncmp(sourcePath, destinationPath, MAXPGPATH) == 0)
 	{
 		/* nothing to do */
-		log_warn("Source and destination are the same \"%s\", nothing to move.", sourcePath);
+		log_warn("Source and destination are the same \"%s\", nothing to move.",
+				 sourcePath);
 		return true;
 	}
 
 	if (!file_exists(sourcePath))
 	{
-		log_error("Failed to move file, source file \"%s\" does not exist.", sourcePath);
+		log_error("Failed to move file, source file \"%s\" does not exist.",
+				  sourcePath);
 		return false;
 	}
 
 	if (file_exists(destinationPath))
 	{
-		log_error("Failed to move file, destination file \"%s\" already exists.", destinationPath);
+		log_error("Failed to move file, destination file \"%s\" already exists.",
+				  destinationPath);
 		return false;
 	}
 
@@ -296,10 +300,14 @@ move_file(char* sourcePath, char* destinationPath)
 		return true;
 	}
 
-	/* rename fails with errno = EXDEV when moving file to a different file system */
+	/*
+	 * rename fails with errno = EXDEV when moving file to a different file
+	 * system.
+	 */
 	if (errno != EXDEV)
 	{
-		log_error("Failed to move file \"%s\" to \"%s\": %s", sourcePath, destinationPath, strerror(errno));
+		log_error("Failed to move file \"%s\" to \"%s\": %s",
+				  sourcePath, destinationPath, strerror(errno));
 		return false;
 	}
 
@@ -341,7 +349,8 @@ duplicate_file(char* sourcePath, char* destinationPath)
 
 	if (file_exists(destinationPath))
 	{
-		log_error("Failed to duplicate, destination file already exists : %s", destinationPath);
+		log_error("Failed to duplicate, destination file already exists : %s",
+				  destinationPath);
 		return false;
 	}
 
@@ -358,19 +367,22 @@ duplicate_file(char* sourcePath, char* destinationPath)
 	/* set uid gid and mode */
 	if (stat(sourcePath, &sourceFileStat) != 0)
 	{
-		log_error("Failed to get ownership and file permissions on \"%s\"", sourcePath);
+		log_error("Failed to get ownership and file permissions on \"%s\"",
+				  sourcePath);
 		foundError = true;
 	}
 	else
 	{
 		if (chown(destinationPath, sourceFileStat.st_uid, sourceFileStat.st_gid) != 0)
 		{
-			log_error("Failed to set user and group id on \"%s\"", destinationPath);
+			log_error("Failed to set user and group id on \"%s\"",
+					  destinationPath);
 			foundError = true;
 		}
 		if (chmod(destinationPath, sourceFileStat.st_mode) != 0)
 		{
-			log_error("Failed to set file permissions on \"%s\"", destinationPath);
+			log_error("Failed to set file permissions on \"%s\"",
+					  destinationPath);
 			foundError = true;
 		}
 	}
@@ -386,17 +398,21 @@ duplicate_file(char* sourcePath, char* destinationPath)
 }
 
 
-/* create_symbolic_link creates a symbolic link to source path */
+/*
+ * create_symbolic_link creates a symbolic link to source path.
+ */
 bool
 create_symbolic_link(char* sourcePath, char* targetPath)
 {
 	if (symlink(sourcePath, targetPath) != 0)
 	{
-		log_error("Failed to create symbolic link to %s : %s", sourcePath, strerror(errno));
+		log_error("Failed to create symbolic link to \"%s\": %s",
+				  targetPath, strerror(errno));
 		return false;
 	}
 	return true;
 }
+
 
 /*
  * path_in_same_directory constructs the path for a file with name fileName
@@ -546,7 +562,8 @@ unlink_file(const char *filename)
 		/* if it didn't exist yet, good news! */
 		if (errno != ENOENT && errno != ENOTDIR)
 		{
-			log_error("Failed to remove stale state file at \"%s\"", filename);
+			log_error("Failed to remove file \"%s\": %s",
+					  filename, strerror(errno));
 			return false;
 		}
 	}
@@ -651,6 +668,42 @@ set_program_absolute_path(char *program, int size)
 		}
 	}
 #endif
+
+	return true;
+}
+
+
+/*
+ * normalize_filename returns the real path of a given filename, resolving
+ * symlinks and pruning double-slashes and other weird constructs.
+ */
+bool
+normalize_filename(const char *filename, char *dst, int size)
+{
+	/* normalize the path to the configuration file, if it exists */
+	if (file_exists(filename))
+	{
+		char realPath[PATH_MAX];
+
+		if (realpath(filename, realPath) == NULL)
+		{
+			log_fatal("Failed to normalize file name \"%s\": %s",
+					  filename, strerror(errno));
+			return false;
+		}
+
+		if (strlcpy(dst, realPath, size) >= size)
+		{
+			log_fatal("Real path \"%s\" is %d bytes long, and pg_autoctl "
+					  "is limited to handling paths of %d bytes long, maximum",
+					  realPath, (int) strlen(realPath), size);
+			return false;
+		}
+	}
+	else
+	{
+		strlcpy(dst, filename, MAXPGPATH);
+	}
 
 	return true;
 }
