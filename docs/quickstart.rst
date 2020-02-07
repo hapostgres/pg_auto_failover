@@ -113,12 +113,9 @@ Connect to each virtual machine and install pg_autoctl:
 
   # install pg_autoctl
   curl https://install.citusdata.com/community/deb.sh | sudo bash
+  sudo apt-get install -y postgresql-common
+  echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf
   sudo apt-get install -y postgresql-11-auto-failover
-
-  # Disable default postgres server instance; we'll manage it
-  # with pg_autoctl instead
-  sudo systemctl disable postgresql
-  sudo systemctl stop postgresql
 
 .. _quickstart_run_monitor:
 
@@ -134,14 +131,12 @@ own roles in the system.
 
    # on the monitor virtual machine
 
-
-   sudo su - postgres
-   export PATH="/usr/lib/postgresql/11/bin/:$PATH"
-
-   pg_autoctl create monitor   \
-     --auth trust              \
-     --ssl-self-signed         \
-     --pgdata ./monitor
+   sudo -i -u postgres \
+     pg_autoctl create monitor \
+       --auth trust \
+       --ssl-self-signed \
+       --pgdata monitor \
+       --pgctl  /usr/lib/postgresql/11/bin/pg_ctl
 
 This command initializes a PostgreSQL cluster at the location pointed
 by the ``--pgdata`` option. When ``--pgdata`` is omitted, ``pg_autoctl``
@@ -168,16 +163,14 @@ We’ll create the primary database using the ``pg_autoctl create`` subcommand.
 
    # on the node A virtual machine
 
-   sudo su - postgres
-   export PATH="/usr/lib/postgresql/11/bin/:$PATH"
-
-   pg_autoctl create postgres     \
-     --auth trust \
-     --ssl-self-signed \
-     --pgdata ha \
-     --pgctl `which pg_ctl` \
-     --nodename `hostname -I` \
-     --monitor 'postgres://autoctl_node@10.0.1.4/pg_auto_failover?sslmode=require'
+   sudo -i -u postgres \
+     pg_autoctl create postgres \
+       --auth trust \
+       --ssl-self-signed \
+       --pgdata ha \
+       --pgctl /usr/lib/postgresql/11/bin/pg_ctl \
+       --nodename `hostname -I` \
+       --monitor 'postgres://autoctl_node@10.0.1.4/pg_auto_failover?sslmode=require'
 
 Notice the user and database name in the monitor connection string -- these
 are what monitor init created. We also give it the path to pg_ctl so that the
@@ -197,7 +190,8 @@ operating even if the Postgres primary goes down:
 
    # run this on the node A virtual machine as well
 
-   pg_autoctl run --pgdata ha
+   sudo -i -u postgres \
+     pg_autoctl run --pgdata ha
 
 This will remain running in the terminal, outputting logs. Next connect to
 node B and do the same process.
@@ -206,18 +200,17 @@ node B and do the same process.
 
    # on the node B virtual machine
 
-   sudo su - postgres
-   export PATH="/usr/lib/postgresql/11/bin/:$PATH"
+   sudo -i -u postgres \
+     pg_autoctl create postgres \
+       --auth trust \
+       --ssl-self-signed \
+       --pgdata ha \
+       --pgctl /usr/lib/postgresql/11/bin/pg_ctl \
+       --nodename `hostname -I` \
+       --monitor 'postgres://autoctl_node@10.0.1.4/pg_auto_failover?sslmode=require'
 
-   pg_autoctl create postgres     \
-     --auth trust \
-     --ssl-self-signed \
-     --pgdata ha \
-     --pgctl `which pg_ctl` \
-     --nodename `hostname -I` \
-     --monitor 'postgres://autoctl_node@10.0.1.4/pg_auto_failover?sslmode=require'
-
-   pg_autoctl run --pgdata ha
+   sudo -i -u postgres \
+     pg_autoctl run --pgdata ha
 
 It discovers from the monitor that a primary exists, and then switches its own
 state to be a hot standby and begins streaming WAL contents from the primary.
@@ -232,10 +225,10 @@ states it has assigned them:
 
    # on the monitor virtual machine
 
-   sudo su - postgres
-   export PATH="/usr/lib/postgresql/11/bin/:$PATH"
+   sudo -i -u postgres \
+     pg_autoctl show state \
+       --pgdata monitor
 
-   pg_autoctl show state --pgdata ./monitor
        Name |   Port | Group |  Node |     Current State |    Assigned State
    ---------+--------+-------+-------+-------------------+------------------
    10.0.1.5 |   5432 |     0 |     1 |           primary |           primary
