@@ -66,12 +66,11 @@ security group and a subnet.
        --network-security-group ha-demo-nsg
 
 Finally add three virtual machines (ha-demo-a, ha-demo-b, and
-ha-demo-monitor). Note the public IP addresses that this command outputs for
-each.
+ha-demo-monitor).
 
 .. code-block:: bash
 
-   for node in monitor a b
+   for node in monitor a b app
    do
    az vm create \
        --resource-group ha-demo \
@@ -84,6 +83,14 @@ each.
        --admin-username ha-admin \
        --generate-ssh-keys
    done
+
+List and record the public IP addresses that this command outputs for each
+machine:
+
+.. code-block:: bash
+
+   az vm list-ip-addresses --ids \
+       $(az vm list -g ha-demo --query "[].id" -o tsv)
 
 .. _quickstart_install:
 
@@ -101,8 +108,8 @@ Connect to each virtual machine and install pg_autoctl:
 
 .. code-block:: bash
 
-  ##############################
-  # Run this on all three nodes:
+  ############################################
+  # Run this on the monitor, and nodes a and b
 
   # The az vm create command also creates ~/.ssh/id_rsa if
   # that key doesn't already exist, so we'll SSH with that
