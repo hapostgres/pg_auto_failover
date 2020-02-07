@@ -10,7 +10,7 @@ from enum import Enum
 
 COMMAND_TIMEOUT = 60
 STATE_CHANGE_TIMEOUT = 90
-PGVERSION = "11"
+PGVERSION = os.getenv("PGVERSION", "11")
 
 class Role(Enum):
     Monitor = 1
