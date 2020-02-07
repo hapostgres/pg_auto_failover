@@ -80,7 +80,11 @@ class Cluster:
         nodeid = len(self.datanodes) + 1
 
         create_command = ["sudo", shutil.which('pg_createcluster'),
-                          "-U", "docker", PGVERSION, datadir, '-p', str(port)]
+                          "-U", os.getenv("USER"),
+                          PGVERSION, datadir, '-p', str(port)]
+
+        print("%s" % " ".join(create_command))
+
         create_proc = vnode.run(create_command)
         out, err = create_proc.communicate(timeout=COMMAND_TIMEOUT)
         if create_proc.returncode > 0:

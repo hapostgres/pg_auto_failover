@@ -20,6 +20,8 @@ def test_000_create_monitor():
 
 def test_001_custom_single():
     global node1
+
+    print()
     node1_path = cluster.pg_createcluster("debian_node1", port=6001)
 
     postgres_conf_path = os.path.join(node1_path, "postgresql.conf");
@@ -28,7 +30,6 @@ def test_001_custom_single():
 
     node1 = cluster.create_datanode(node1_path, port=6001)
     node1.create(run=True)
-
     node1.wait_until_pg_is_running()
 
     # verify postgresql.conf is in data directory now
