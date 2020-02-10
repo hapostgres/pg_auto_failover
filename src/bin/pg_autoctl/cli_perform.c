@@ -40,6 +40,16 @@ CommandLine perform_switchover_command =
 				 cli_perform_failover_getopts,
 				 cli_perform_failover);
 
+CommandLine *perform_subcommands[] = {
+	&perform_failover_command,
+	&perform_switchover_command,
+	NULL,
+};
+
+CommandLine perform_commands =
+	make_command_set("perform", "Perform an action orchestrated by the monitor",
+					 NULL, NULL, NULL, perform_subcommands);
+
 
 /*
  * cli_perform_failover_getopts parses the command line options for the
