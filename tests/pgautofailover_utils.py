@@ -801,8 +801,8 @@ class PGAutoCtl():
 
             self.run_proc = None
 
-            raise Exception("%s timed out after %d seconds." %
-                            (name, COMMAND_TIMEOUT))
+            raise Exception("%s timed out after %d seconds. out: %s\n, err: %s"%
+                            (name, COMMAND_TIMEOUT, self.out, self.err))
 
         return self.out, self.err
 
