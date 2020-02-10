@@ -14,7 +14,7 @@ ALTER TABLE pgautofailover.event
        DROP COLUMN waldelta,
         ADD COLUMN reportedlsn pg_lsn NOT NULL DEFAULT '0/0';
 
-DROP FUNCTION pgautofailover.node_active(text,text,int,int,int, pgautofailover.replication_state,bool,bigint,text)
+DROP FUNCTION pgautofailover.node_active(text,text,int,int,int, pgautofailover.replication_state,bool,bigint,text);
 
 CREATE FUNCTION pgautofailover.node_active
  (
@@ -69,7 +69,7 @@ with last_events as
          nodeid, groupid, nodename, nodeport,
          reportedstate, goalstate,
          reportedrepstate, reportedlsn,
-         candidatepriority, replicationquorum, description
+         description
     from pgautofailover.event
 order by eventid desc
    limit count
@@ -90,7 +90,7 @@ with last_events as
            nodeid, groupid, nodename, nodeport,
            reportedstate, goalstate,
            reportedrepstate, reportedlsn,
-           candidatepriority, replicationquorum, description
+           description
       from pgautofailover.event
      where formationid = formation_id
   order by eventid desc
@@ -114,7 +114,7 @@ with last_events as
            nodeid, groupid, nodename, nodeport,
            reportedstate, goalstate,
            reportedrepstate, reportedlsn,
-           candidatepriority, replicationquorum, description
+           description
       from pgautofailover.event
      where formationid = formation_id
        and groupid = group_id
