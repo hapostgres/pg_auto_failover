@@ -257,10 +257,14 @@ fsm_init_primary(Keeper *keeper)
 			 * In test environements allow nodes from the same network to
 			 * connect. The network is discovered automatically.
 			 */
-			(void) pghba_enable_lan_cidr(&keeper->postgres.sqlClient,
-										 HBA_DATABASE_ALL, NULL,
-										 keeper->config.nodename,
-										 NULL, DEFAULT_AUTH_METHOD, NULL);
+			if (!pghba_enable_lan_cidr(&keeper->postgres.sqlClient,
+									   HBA_DATABASE_ALL, NULL,
+									   keeper->config.nodename,
+									   NULL, DEFAULT_AUTH_METHOD, NULL))
+			{
+				log_error("Failed to grant local network connections in HBA");
+				return false;
+			}
 		}
 	}
 	else
