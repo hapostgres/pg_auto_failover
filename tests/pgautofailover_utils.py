@@ -640,14 +640,13 @@ class PGAutoCtl():
         except subprocess.TimeoutExpired:
             # we already spent our allocated waiting time, just kill the process
             self.run_proc.kill()
-            self.communicate()
             self.run_proc.wait()
             self.run_proc.release()
 
             self.run_proc = None
 
             raise Exception("%s timed out after %d seconds. out: %s\n, err: %s"%
-                            (name, COMMAND_TIMEOUT, out, err))
+                            (name, COMMAND_TIMEOUT, self.out, self.err))
 
         return self.out, self.err
 
