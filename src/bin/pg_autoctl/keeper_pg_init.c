@@ -688,13 +688,17 @@ create_database_and_extension(Keeper *keeper)
 	 */
 	if (IS_CITUS_INSTANCE_KIND(postgres->pgKind))
 	{
-		(void) pghba_enable_lan_cidr(&initPostgres.sqlClient,
-									 HBA_DATABASE_DBNAME,
-									 pgSetup->dbname,
-									 config->nodename,
-									 pg_setup_get_username(pgSetup),
-									 "trust",
-									 NULL);
+		if (!pghba_enable_lan_cidr(&initPostgres.sqlClient,
+								   HBA_DATABASE_DBNAME,
+								   pgSetup->dbname,
+								   config->nodename,
+								   pg_setup_get_username(pgSetup),
+								   "trust",
+								   NULL))
+		{
+			log_error("Failed to grant local network connections in HBA");
+			return false;
+		}
 	}
 
 	/*
