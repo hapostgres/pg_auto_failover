@@ -5,14 +5,77 @@
 \echo Use "ALTER EXTENSION pgautofailover UPDATE TO 1.1" to load this file. \quit
 
 ALTER TABLE pgautofailover.node
-       DROP COLUMN waldelta,
-        ADD COLUMN reportedlsn pg_lsn NOT NULL DEFAULT '0/0',
-        ADD COLUMN candidatepriority INT NOT NULL DEFAULT 100,
-        ADD COLUMN replicationquorum BOOL NOT NULL DEFAULT true;
+	RENAME TO node_upgrade_old;
+
+CREATE TABLE pgautofailover.node
+ (
+    formationid          text not null default 'default',
+    nodeid               bigint not null DEFAULT nextval('pgautofailover.node_nodeid_seq'::regclass),
+    groupid              int not null,
+    nodename             text not null,
+    nodeport             integer not null,
+    goalstate            pgautofailover.replication_state not null default 'init',
+    reportedstate        pgautofailover.replication_state not null,
+    reportedpgisrunning  bool default true,
+    reportedrepstate     text default 'async',
+    reporttime           timestamptz not null default now(),
+    reportedlsn          pg_lsn not null default '0/0',
+    walreporttime        timestamptz not null default now(),
+    health               integer not null default -1,
+    healthchecktime      timestamptz not null default now(),
+    statechangetime      timestamptz not null default now(),
+
+    UNIQUE (nodename, nodeport),
+    PRIMARY KEY (nodeid),
+    FOREIGN KEY (formationid) REFERENCES pgautofailover.formation(formationid)
+ )
+ -- we expect few rows and lots of UPDATE, let's benefit from HOT
+ WITH (fillfactor = 25);
+
+ALTER SEQUENCE pgautofailover.node_nodeid_seq OWNED BY pgautofailover.node.nodeid;
+
+INSERT INTO pgautofailover.node (formationid, nodeid, groupid, nodename, nodeport, goalstate, reportedstate,
+		reportedpgisrunning, reportedrepstate, reporttime, walreporttime, health, healthchecktime, statechangetime)
+	SELECT formationid, nodeid, groupid, nodename, nodeport, goalstate, reportedstate,
+		reportedpgisrunning, reportedrepstate, reporttime, walreporttime, health, healthchecktime, statechangetime
+	FROM pgautofailover.node_upgrade_old;
 
 ALTER TABLE pgautofailover.event
-       DROP COLUMN waldelta,
-        ADD COLUMN reportedlsn pg_lsn NOT NULL DEFAULT '0/0';
+	RENAME TO event_upgrade_old;
+
+ALTER TABLE pgautofailover.event_upgrade_old	
+	ALTER COLUMN nodeid DROP NOT NULL,
+    ALTER COLUMN nodeid SET DEFAULT NULL;
+
+DROP SEQUENCE pgautofailover.event_nodeid_seq;
+
+CREATE TABLE pgautofailover.event
+ (
+    eventid          bigint not null DEFAULT nextval('pgautofailover.event_eventid_seq'::regclass),
+    eventtime        timestamptz not null default now(),
+    formationid      text not null,
+    nodeid           bigint not null,
+    groupid          int not null,
+    nodename         text not null,
+    nodeport         integer not null,
+    reportedstate    pgautofailover.replication_state not null,
+    goalstate        pgautofailover.replication_state not null,
+    reportedrepstate text,
+    reportedlsn      pg_lsn not null default '0/0',
+    description      text,
+
+    PRIMARY KEY (eventid)
+ );
+
+ALTER SEQUENCE pgautofailover.event_eventid_seq OWNED BY pgautofailover.event.eventid;
+
+INSERT INTO pgautofailover.event
+		(eventid, eventtime, formationid, nodeid, groupid, nodename, nodeport, reportedstate, goalstate, reportedrepstate, description)
+	SELECT eventid, eventtime, formationid, nodeid, groupid, nodename, nodeport, reportedstate, goalstate, reportedrepstate, description
+	FROM pgautofailover.event_upgrade_old;
+
+
+GRANT SELECT ON ALL TABLES IN SCHEMA pgautofailover TO autoctl_node;
 
 DROP FUNCTION pgautofailover.node_active(text,text,int,int,int, pgautofailover.replication_state,bool,bigint,text);
 
@@ -57,6 +120,8 @@ grant execute on function pgautofailover.stop_maintenance(text,int)
    to autoctl_node;
 
 
+DROP FUNCTION pgautofailover.last_events(integer);
+
 CREATE OR REPLACE FUNCTION pgautofailover.last_events
  (
   count int default 10
@@ -68,14 +133,15 @@ with last_events as
   select eventid, eventtime, formationid,
          nodeid, groupid, nodename, nodeport,
          reportedstate, goalstate,
-         reportedrepstate, reportedlsn,
-         description
+         reportedrepstate, reportedlsn, description
     from pgautofailover.event
 order by eventid desc
    limit count
 )
 select * from last_events order by eventtime, eventid;
 $$;
+
+DROP FUNCTION pgautofailover.last_events(text, integer);
 
 CREATE OR REPLACE FUNCTION pgautofailover.last_events
  (
@@ -89,8 +155,7 @@ with last_events as
     select eventid, eventtime, formationid,
            nodeid, groupid, nodename, nodeport,
            reportedstate, goalstate,
-           reportedrepstate, reportedlsn,
-           description
+           reportedrepstate, reportedlsn, description
       from pgautofailover.event
      where formationid = formation_id
   order by eventid desc
@@ -99,6 +164,8 @@ with last_events as
 select * from last_events order by eventtime, eventid;
 $$;
 
+
+DROP FUNCTION pgautofailover.last_events(text, integer, integer);
 
 CREATE OR REPLACE FUNCTION pgautofailover.last_events
  (
@@ -113,8 +180,7 @@ with last_events as
     select eventid, eventtime, formationid,
            nodeid, groupid, nodename, nodeport,
            reportedstate, goalstate,
-           reportedrepstate, reportedlsn,
-           description
+           reportedrepstate, reportedlsn, description
       from pgautofailover.event
      where formationid = formation_id
        and groupid = group_id
@@ -124,3 +190,5 @@ with last_events as
 select * from last_events order by eventtime, eventid;
 $$;
 
+DROP TABLE pgautofailover.node_upgrade_old;
+DROP TABLE pgautofailover.event_upgrade_old;

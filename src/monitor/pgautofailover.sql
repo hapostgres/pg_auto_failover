@@ -73,7 +73,6 @@ AS 'MODULE_PATHNAME', $$drop_formation$$;
 
 grant execute on function pgautofailover.drop_formation(text) to autoctl_node;
 
-
 CREATE TABLE pgautofailover.node
  (
     formationid          text not null default 'default',
@@ -104,7 +103,7 @@ CREATE TABLE pgautofailover.event
     eventid          bigserial not null,
     eventtime        timestamptz not null default now(),
     formationid      text not null,
-    nodeid           bigserial,
+    nodeid           bigint not null,
     groupid          int not null,
     nodename         text not null,
     nodeport         integer not null,
