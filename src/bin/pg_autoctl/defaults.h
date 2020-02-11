@@ -14,7 +14,7 @@
 #define PG_AUTOCTL_STATE_VERSION 1
 
 /* additional version information for printing version on CLI */
-#define PG_AUTOCTL_VERSION "1.1.0"
+#define PG_AUTOCTL_VERSION "1.0.6"
 
 /* version of the extension that we requite to talk to on the monitor */
 #define PG_AUTOCTL_EXTENSION_VERSION "1.1"
