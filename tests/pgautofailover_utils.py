@@ -95,7 +95,7 @@ class Cluster:
 
         chmod_command = ["sudo", shutil.which('install'),
                          '-d', '-o', os.getenv("USER"),
-                         "/var/lib/postgresql/11/backup"]
+                         "/var/lib/postgresql/%s/backup" % PGVERSION]
 
         print("%s" % " ".join(chmod_command))
 
