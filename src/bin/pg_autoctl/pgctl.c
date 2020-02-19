@@ -52,7 +52,6 @@ static bool escape_recovery_conf_string(char *destination,
 static bool prepare_primary_conninfo(
 	char *primaryConnInfo,
 	int primaryConnInfoSize,
-	int primaryNodeId,
 	const char *primaryHost, int primaryPort,
 	const char *replicationUsername,
 	const char *replicationPassword,
@@ -943,7 +942,6 @@ pg_setup_standby_mode(uint32_t pg_control_version,
 	/* we ignore the length returned by prepare_primary_conninfo... */
 	if (!prepare_primary_conninfo(primaryConnInfo,
 								  MAXCONNINFO,
-								  primaryNode->nodeId,
 								  primaryNode->host,
 								  primaryNode->port,
 								  replicationSource->userName,
@@ -971,7 +969,7 @@ pg_setup_standby_mode(uint32_t pg_control_version,
 		/*
 		 * Starting in Postgres 12 we need to add our recovery configuration to
 		 * the main postgresql.conf file and create an empty standby.signal
-		 * file to trigger starting the server in standby mode.
+		 * file to trigger starting the server in stanby mode.
 		 */
 		return pg_write_standby_signal(configFilePath,
 									   pgdata,
@@ -1093,7 +1091,6 @@ escape_recovery_conf_string(char *destination, int destinationSize,
 static bool
 prepare_primary_conninfo(char *primaryConnInfo,
 						 int primaryConnInfoSize,
-						 int primaryNodeId,
 						 const char *primaryHost, int primaryPort,
 						 const char *replicationUsername,
 						 const char *replicationPassword,

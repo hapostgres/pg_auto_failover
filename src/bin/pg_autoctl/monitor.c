@@ -1448,81 +1448,6 @@ printCurrentState(void *ctx, PGresult *result)
 
 
 /*
- * monitor_print_state_as_json prints to given stream a single string that
- * contains the JSON representation of the current state on the monitor.
- */
-bool
-monitor_print_state_as_json(Monitor *monitor, char *formation, int group)
-{
-	SingleValueResultContext context = { 0 };
-	PGSQL *pgsql = &monitor->pgsql;
-	char *sql = NULL;
-	int paramCount = 0;
-	Oid paramTypes[2];
-	const char *paramValues[2];
-	IntString groupStr;
-
-	log_trace("monitor_get_state_as_json(%s, %d)", formation, group);
-
-	context.resultType = PGSQL_RESULT_STRING;
-	context.parsedOk = false;
-
-	switch (group)
-	{
-		case -1:
-		{
-			sql = "SELECT jsonb_pretty(jsonb_agg(row_to_json(state)))"
-				" FROM pgautofailover.current_state($1) as state";
-
-			paramCount = 1;
-			paramTypes[0] = TEXTOID;
-			paramValues[0] = formation;
-
-			break;
-		}
-
-		default:
-		{
-			sql = "SELECT jsonb_pretty(jsonb_agg(row_to_json(state)))"
-				"FROM pgautofailover.current_state($1,$2) as state";
-
-			groupStr = intToString(group);
-
-			paramCount = 2;
-			paramTypes[0] = TEXTOID;
-			paramValues[0] = formation;
-			paramTypes[1] = INT4OID;
-			paramValues[1] = groupStr.strValue;
-
-			break;
-		}
-	}
-
-	if (!pgsql_execute_with_params(pgsql, sql,
-								   paramCount, paramTypes, paramValues,
-								   &context, &parseSingleValueResult))
-	{
-		log_error("Failed to retrieve current state from the monitor");
-		return false;
-	}
-
-	/* disconnect from PostgreSQL now */
-	pgsql_finish(&monitor->pgsql);
-
-	if (!context.parsedOk)
-	{
-		log_error("Failed to parse current state from the monitor");
-		log_error("%s", context.strVal);
-		return false;
-	}
-
-	fprintf(stdout, "%s\n", context.strVal);
-
-	return true;
-}
-
-
-/*
  * monitor_print_last_events calls the function pgautofailover.last_events on
  * the monitor, and prints a line of output per event obtained.
  */
@@ -1597,9 +1522,82 @@ monitor_print_last_events(Monitor *monitor, char *formation, int group, int coun
 
 
 /*
- * monitor_print_last_events_as_json calls the function
- * pgautofailover.last_events on the monitor, and prints the result as a JSON
- * array to the given stream (stdout, typically).
+ * monitor_print_state_as_json prints to given stream a single string that
+ * contains the JSON representation of the current state on the monitor.
+ */
+bool
+monitor_print_state_as_json(Monitor *monitor, char *formation, int group)
+{
+	SingleValueResultContext context;
+	PGSQL *pgsql = &monitor->pgsql;
+	char *sql = NULL;
+	int paramCount = 0;
+	Oid paramTypes[2];
+	const char *paramValues[2];
+	IntString groupStr;
+
+	log_trace("monitor_get_state_as_json(%s, %d)", formation, group);
+
+	context.resultType = PGSQL_RESULT_STRING;
+	context.parsedOk = false;
+
+	switch (group)
+	{
+		case -1:
+		{
+			sql = "SELECT jsonb_pretty(jsonb_agg(row_to_json(state)))"
+				" FROM pgautofailover.current_state($1) as state";
+
+			paramCount = 1;
+			paramTypes[0] = TEXTOID;
+			paramValues[0] = formation;
+
+			break;
+		}
+
+		default:
+		{
+			sql = "SELECT jsonb_pretty(jsonb_agg(row_to_json(state)))"
+				"FROM pgautofailover.current_state($1,$2) as state";
+
+			groupStr = intToString(group);
+
+			paramCount = 2;
+			paramTypes[0] = TEXTOID;
+			paramValues[0] = formation;
+			paramTypes[1] = INT4OID;
+			paramValues[1] = groupStr.strValue;
+
+			break;
+		}
+	}
+
+	if (!pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes, paramValues,
+								   &context, &parseSingleValueResult))
+	{
+		log_error("Failed to retrieve current state from the monitor");
+		return false;
+	}
+
+	/* disconnect from PostgreSQL now */
+	pgsql_finish(&monitor->pgsql);
+
+	if (!context.parsedOk)
+	{
+		log_error("Failed to parse current state from the monitor");
+		log_error("%s", context.strVal);
+		return false;
+	}
+
+	fprintf(stdout, "%s\n", context.strVal);
+
+	return true;
+}
+
+
+/*
+ * monitor_print_last_events calls the function pgautofailover.last_events on
+ * the monitor, and prints a line of output per event obtained.
  */
 bool
 monitor_print_last_events_as_json(Monitor *monitor,
@@ -1680,7 +1678,7 @@ monitor_print_last_events_as_json(Monitor *monitor,
 
 
 /*
- * printLastEcvents loops over pgautofailover.last_events() results and prints
+ * printLastEvents loops over pgautofailover.last_events() results and prints
  * them, one per line.
  */
 static void
@@ -1693,9 +1691,9 @@ printLastEvents(void *ctx, PGresult *result)
 
 	log_trace("printLastEvents: %d tuples", nTuples);
 
-	if (PQnfields(result) != 14)
+	if (PQnfields(result) != 7)
 	{
-		log_error("Query returned %d columns, expected 14", PQnfields(result));
+		log_error("Query returned %d columns, expected 7", PQnfields(result));
 		context->parsedOK = false;
 		return;
 	}
@@ -1709,13 +1707,13 @@ printLastEvents(void *ctx, PGresult *result)
 
 	for(currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
 	{
-		char *eventTime = PQgetvalue(result, currentTupleIndex, 1);
-		char *formation = PQgetvalue(result, currentTupleIndex, 2);
-		char *groupId = PQgetvalue(result, currentTupleIndex, 4);
-		char *nodeId = PQgetvalue(result, currentTupleIndex, 3);
-		char *currentState = PQgetvalue(result, currentTupleIndex, 7);
-		char *goalState = PQgetvalue(result, currentTupleIndex, 8);
-		char *description = PQgetvalue(result, currentTupleIndex, 13);
+		char *eventTime = PQgetvalue(result, currentTupleIndex, 0);
+		char *formation = PQgetvalue(result, currentTupleIndex, 1);
+		char *nodeId = PQgetvalue(result, currentTupleIndex, 2);
+		char *groupId = PQgetvalue(result, currentTupleIndex, 3);
+		char *currentState = PQgetvalue(result, currentTupleIndex, 4);
+		char *goalState = PQgetvalue(result, currentTupleIndex, 5);
+		char *description = PQgetvalue(result, currentTupleIndex, 6);
 		char node[BUFSIZE];
 
 		/* for our grid alignment output it's best to have a single col here */

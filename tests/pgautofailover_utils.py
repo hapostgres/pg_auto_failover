@@ -93,6 +93,18 @@ class Cluster:
 
         abspath = os.path.join("/var/lib/postgresql/", PGVERSION, datadir)
 
+        chmod_command = ["sudo", shutil.which('install'),
+                         '-d', '-o', os.getenv("USER"),
+                         "/var/lib/postgresql/%s/backup" % PGVERSION]
+
+        print("%s" % " ".join(chmod_command))
+
+        chmod_proc = vnode.run(chmod_command)
+        out, err = chmod_proc.communicate(timeout=COMMAND_TIMEOUT)
+        if chmod_proc.returncode > 0:
+            raise Exception("chmod failed, out: %s\n, err: %s" %
+                            (out, err))
+
         return abspath
 
     def destroy(self):
@@ -332,7 +344,7 @@ class DataNode(PGNode):
         self.listen_flag = listen_flag
         self.formation = formation
 
-    def create(self, run=False):
+    def create(self, run=False, level='-v'):
         """
         Runs "pg_autoctl create"
         """
@@ -343,7 +355,7 @@ class DataNode(PGNode):
 
         # don't pass --nodename to Postgres nodes in order to exercise the
         # automatic detection of the nodename.
-        create_args = ['create', self.role.command(),
+        create_args = ['create', self.role.command(), level,
                        '--pgdata', self.datadir,
                        '--pghost', pghost,
                        '--pgport', str(self.port),
@@ -789,8 +801,8 @@ class PGAutoCtl():
 
             self.run_proc = None
 
-            raise Exception("%s timed out after %d seconds." %
-                            (name, COMMAND_TIMEOUT))
+            raise Exception("%s timed out after %d seconds. out: %s\n, err: %s"%
+                            (name, COMMAND_TIMEOUT, self.out, self.err))
 
         return self.out, self.err
 

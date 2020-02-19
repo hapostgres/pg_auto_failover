@@ -186,7 +186,7 @@ cli_do_monitor_get_primary_node(int argc, char **argv)
 
 /*
  * cli_do_monitor_get_other_nodes contacts the pg_auto_failover monitor and
- * retrieves the "other node" information for given nodename and port.
+ * retrieves the list of "other nodes" for given nodename and port.
  */
 static void
 cli_do_monitor_get_other_nodes(int argc, char **argv)

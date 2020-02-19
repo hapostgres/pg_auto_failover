@@ -147,5 +147,4 @@ bool monitor_ensure_extension_version(Monitor *monitor,
 bool ensure_monitor_pg_running(Monitor *monitor, struct MonitorConfig *mconfig);
 bool monitor_service_run(Monitor *monitor, struct MonitorConfig *mconfig);
 
-
 #endif /* MONITOR_H */

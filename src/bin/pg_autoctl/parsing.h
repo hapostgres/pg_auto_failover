@@ -41,4 +41,7 @@ bool parse_bool(const char *value, bool *result);
 int splitLines(char *errorMessage, char **linesArray, int size);
 
 
+int splitLines(char *errorMessage, char **linesArray, int size);
+
+
 #endif /* PARSING_H */

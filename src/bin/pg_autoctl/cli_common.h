@@ -89,6 +89,8 @@ extern CommandLine drop_formation_command;
 extern CommandLine perform_failover_command;
 extern CommandLine perform_switchover_command;
 
+extern CommandLine *perform_subcommands[];
+extern CommandLine perform_commands;
 
 /* cli_service.c */
 extern CommandLine service_run_command;
@@ -128,5 +130,4 @@ void exit_unless_role_is_keeper(KeeperConfig *kconfig);
 bool cli_create_config(Keeper *keeper, KeeperConfig *config);
 void cli_create_pg(Keeper *keeper, KeeperConfig *config);
 bool check_or_discover_nodename(KeeperConfig *config);
-
 #endif  /* CLI_COMMON_H */
