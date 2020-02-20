@@ -1544,7 +1544,10 @@ monitor_print_last_events(Monitor *monitor, char *formation, int group, int coun
 	{
 		case -1:
 		{
-			sql = "SELECT * FROM pgautofailover.last_events($1, count => $2)";
+			sql =
+				"SELECT eventTime, formationid, nodeid, groupid, "
+				"       reportedstate, goalState, description "
+				"  FROM pgautofailover.last_events($1, count => $2)";
 
 			countStr = intToString(count);
 
@@ -1559,7 +1562,10 @@ monitor_print_last_events(Monitor *monitor, char *formation, int group, int coun
 
 		default:
 		{
-			sql = "SELECT * FROM pgautofailover.last_events($1,$2,$3)";
+			sql =
+				"SELECT eventTime, formationid, nodeid, groupid, "
+				"       reportedstate, goalState, description "
+				"  FROM pgautofailover.last_events($1,$2,$3)";
 
 			countStr = intToString(count);
 			groupStr = intToString(group);
@@ -1693,9 +1699,9 @@ printLastEvents(void *ctx, PGresult *result)
 
 	log_trace("printLastEvents: %d tuples", nTuples);
 
-	if (PQnfields(result) != 14)
+	if (PQnfields(result) != 7)
 	{
-		log_error("Query returned %d columns, expected 14", PQnfields(result));
+		log_error("Query returned %d columns, expected 7", PQnfields(result));
 		context->parsedOK = false;
 		return;
 	}
@@ -1709,13 +1715,13 @@ printLastEvents(void *ctx, PGresult *result)
 
 	for(currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
 	{
-		char *eventTime = PQgetvalue(result, currentTupleIndex, 1);
-		char *formation = PQgetvalue(result, currentTupleIndex, 2);
-		char *groupId = PQgetvalue(result, currentTupleIndex, 4);
-		char *nodeId = PQgetvalue(result, currentTupleIndex, 3);
-		char *currentState = PQgetvalue(result, currentTupleIndex, 7);
-		char *goalState = PQgetvalue(result, currentTupleIndex, 8);
-		char *description = PQgetvalue(result, currentTupleIndex, 13);
+		char *eventTime = PQgetvalue(result, currentTupleIndex, 0);
+		char *formation = PQgetvalue(result, currentTupleIndex, 1);
+		char *nodeId = PQgetvalue(result, currentTupleIndex, 2);
+		char *groupId = PQgetvalue(result, currentTupleIndex, 3);
+		char *currentState = PQgetvalue(result, currentTupleIndex, 4);
+		char *goalState = PQgetvalue(result, currentTupleIndex, 5);
+		char *description = PQgetvalue(result, currentTupleIndex, 6);
 		char node[BUFSIZE];
 
 		/* for our grid alignment output it's best to have a single col here */
