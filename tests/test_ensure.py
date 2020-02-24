@@ -21,9 +21,15 @@ def test_000_create_monitor():
 def test_001_init_primary():
     global node1
     node1 = cluster.create_datanode("/tmp/ensure/node1")
+    print()
+    print("create node1")
     node1.create()
+    print("stop postgres")
     node1.stop_postgres()
+    print("run node1")
     node1.run()
+    print("wait until Postgres is running")
+    node1.wait_until_pg_is_running()
     assert node1.wait_until_state(target_state="single")
 
 def test_002_create_t1():

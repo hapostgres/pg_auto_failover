@@ -90,6 +90,9 @@ extern CommandLine perform_failover_command;
 extern CommandLine perform_switchover_command;
 
 
+extern CommandLine *perform_subcommands[];
+extern CommandLine perform_commands;
+
 /* cli_service.c */
 extern CommandLine service_run_command;
 extern CommandLine service_stop_command;
