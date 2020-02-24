@@ -78,6 +78,10 @@
 	make_strbuf_option("postgresql", "listen_addresses", "listen", \
 					   false, MAXPGPATH, config->pgSetup.listen_addresses)
 
+#define OPTION_POSTGRESQL_AUTH_METHOD(config)				\
+	make_strbuf_option("postgresql", "auth_method", "auth", \
+					   false, MAXPGPATH, config->pgSetup.authMethod)
+
 #define OPTION_REPLICATION_SLOT_NAME(config) \
 	make_string_option_default("replication", "slot", NULL, false, \
 							   &config->replication_slot_name, \
@@ -147,6 +151,7 @@
 		OPTION_POSTGRESQL_PORT(config), \
 		OPTION_POSTGRESQL_PROXY_PORT(config), \
 		OPTION_POSTGRESQL_LISTEN_ADDRESSES(config), \
+		OPTION_POSTGRESQL_AUTH_METHOD(config), \
 		OPTION_REPLICATION_PASSWORD(config), \
 		OPTION_REPLICATION_SLOT_NAME(config), \
 		OPTION_REPLICATION_MAXIMUM_BACKUP_RATE(config), \
