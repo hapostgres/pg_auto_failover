@@ -2,12 +2,12 @@
 # Licensed under the PostgreSQL License.
 
 EXTENSION = pgautofailover
-EXTVERSION = 1.2
+EXTVERSION = 1.1
 
 SRC_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
 DATA_built = $(EXTENSION)--$(EXTVERSION).sql
-DATA = $(EXTENSION)--1.2.sql $(wildcard $(EXTENSION)--*--*.sql)
+DATA = $(EXTENSION)--1.0.sql $(wildcard $(EXTENSION)--*--*.sql)
 
 # compilation configuration
 MODULE_big = $(EXTENSION)
@@ -22,5 +22,5 @@ USE_PGXS = 1
 
 include $(PGXS)
 
-$(EXTENSION)--1.2.sql: $(EXTENSION).sql
+$(EXTENSION)--1.1.sql: $(EXTENSION).sql
 	cat $^ > $@
