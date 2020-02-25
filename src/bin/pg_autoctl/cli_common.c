@@ -46,6 +46,7 @@ bool outputJSON = false;
  *		{ "proxyport", required_argument, NULL, 'y' },
  *		{ "username", required_argument, NULL, 'U' },
  *		{ "auth", required_argument, NULL, 'A' },
+ *		{ "skip-pg-hba", required_argument, NULL, 'S' },
  *		{ "dbname", required_argument, NULL, 'd' },
  *		{ "nodename", required_argument, NULL, 'n' },
  *		{ "formation", required_argument, NULL, 'f' },
@@ -165,10 +166,33 @@ cli_create_node_getopts(int argc, char **argv,
 			case 'A':
 			{
 				/* { "auth", required_argument, NULL, 'A' }, */
+				if (!IS_EMPTY_STRING_BUFFER(LocalOptionConfig.pgSetup.authMethod))
+				{
+					errors++;
+					log_error("Please use either --auth or --skip-pg-hba");
+				}
+
 				strlcpy(LocalOptionConfig.pgSetup.authMethod, optarg, NAMEDATALEN);
 				log_trace("--auth %s", LocalOptionConfig.pgSetup.authMethod);
 				break;
 			}
+
+			case 'S':
+			{
+				/* { "skip-pg-hba", required_argument, NULL, 'S' }, */
+				if (!IS_EMPTY_STRING_BUFFER(LocalOptionConfig.pgSetup.authMethod))
+				{
+					errors++;
+					log_error("Please use either --auth or --skip-pg-hba");
+				}
+
+				strlcpy(LocalOptionConfig.pgSetup.authMethod,
+						SKIP_HBA_AUTH_METHOD,
+						NAMEDATALEN);
+				log_trace("--skip-pg-hba");
+				break;
+			}
+
 			case 'd':
 			{
 				/* { "dbname", required_argument, NULL, 'd' } */
