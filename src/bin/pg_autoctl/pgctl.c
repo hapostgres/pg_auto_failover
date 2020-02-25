@@ -138,23 +138,25 @@ pg_controldata(PostgresSetup *pgSetup, bool missing_ok)
 	}
 	else
 	{
-		if (!missing_ok)
-		{
-			char *errorLines[BUFSIZE];
-			int lineCount = splitLines(prog.stderr, errorLines, BUFSIZE);
-			int lineNumber = 0;
+		char *errorLines[BUFSIZE];
+		int lineCount = splitLines(prog.stderr, errorLines, BUFSIZE);
+		int lineNumber = 0;
 
-			for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
-			{
-				/*
-				 * pg_controldata typically errors out a single line prefixed
-				 * with the name of the binary.
-				 */
-				log_error("%s", errorLines[lineNumber]);
-			}
-			log_error("Failed to run \"%s\" on \"%s\", see above for details",
-					  pg_controldata_path, pgSetup->pgdata);
+		int logLevel = missing_ok ? LOG_DEBUG : LOG_ERROR;
+
+		for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
+		{
+			/*
+			 * pg_controldata typically errors out a single line prefixed
+			 * with the name of the binary.
+			 */
+			log_level(logLevel, "%s", errorLines[lineNumber]);
 		}
+
+		log_level(logLevel,
+				  "Failed to run \"%s\" on \"%s\", see above for details",
+				  pg_controldata_path, pgSetup->pgdata);
+
 		free_program(&prog);
 
 		return missing_ok;
