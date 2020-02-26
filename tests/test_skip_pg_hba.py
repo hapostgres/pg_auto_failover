@@ -22,7 +22,7 @@ def test_000_create_monitor():
     monitor.wait_until_pg_is_running()
 
     with open(os.path.join("/tmp/skip/monitor", "pg_hba.conf"), 'a') as hba:
-        hba.write("hostssl all all 172.27.1.0/24 trust\n")
+        hba.write("hostssl all all 172.27.1.0/24 cert\n")
 
     monitor.reload_postgres()
 
@@ -87,7 +87,7 @@ def test_000_create_monitor():
                           'env', 'PATH=' + os.getenv("PATH"),
                           "openssl", "req", "-new", "-nodes", "-text",
                           "-out", server_csr, "-keyout", server_key,
-                          "-subj", "/CN=pgautofailover"])
+                          "-subj", "/CN=monitor.pgautofailover.ca"])
     assert(p.wait() == 0)
 
     p = subprocess.Popen(["chmod", "og-rwx", server_key])
@@ -101,9 +101,33 @@ def test_000_create_monitor():
                           "-CAcreateserial", "-out", server_crt])
     assert(p.wait() == 0)
 
+    # now create and sign the CLIENT certificate
+    postgresql_csr = os.path.join(client_top_directory, "postgresql.csr")
+    postgresql_key = os.path.join(client_top_directory, "postgresql.key")
+    postgresql_crt = os.path.join(client_top_directory, "postgresql.crt")
+
+    p = subprocess.Popen(["sudo", "-E", '-u', os.getenv("USER"),
+                          'env', 'PATH=' + os.getenv("PATH"),
+                          "openssl", "req", "-new", "-nodes", "-text",
+                          "-out", postgresql_csr, "-keyout", postgresql_key,
+                          "-subj", "/CN=autoctl_node"])
+    assert(p.wait() == 0)
+
+    p = subprocess.Popen(["chmod", "og-rwx", postgresql_key])
+    assert(p.wait() == 0)
+
+    p = subprocess.Popen(["sudo", "-E", '-u', os.getenv("USER"),
+                          'env', 'PATH=' + os.getenv("PATH"),
+                          "openssl", "x509", "-req", "-in", postgresql_csr,
+                          "-text", "-days", "365",
+                          "-CA", root_crt, "-CAkey", root_key,
+                          "-CAcreateserial", "-out", postgresql_crt])
+    assert(p.wait() == 0)
+
     p = subprocess.run(["ls", "-ld",
                         client_top_directory,
                         root_crt, root_csr, root_key,
+                        postgresql_crt, postgresql_csr, postgresql_key,
                         server_crt, server_csr, server_key],
                        text=True,
                        capture_output=True)
@@ -115,7 +139,7 @@ def test_000_create_monitor():
     assert(p.wait() == 0)
 
     p = subprocess.Popen(["pg_conftool", "/tmp/skip/monitor/postgresql.conf",
-                          "set", "ssl_ca_file", server_crt])
+                          "set", "ssl_ca_file", root_crt])
     assert(p.wait() == 0)
 
     # reload the configuration changes to activate SSL settings
@@ -125,9 +149,19 @@ def test_000_create_monitor():
     subprocess.Popen(["ln", "-s", client_top_directory, "/root/.postgresql"])
     assert(p.wait() == 0)
 
+    # check the SSL settings
+    cmd = ["openssl", "s_client", "-starttls", "postgres",
+           "-connect", "172.27.1.2:5432", "-showcerts", "-CAfile", root_crt]
+    print(" ".join(cmd))
+    p = subprocess.run(["sudo", "-E", '-u', os.getenv("USER"),
+                        'env', 'PATH=' + os.getenv("PATH")] + cmd,
+                       input="",
+                       text=True,
+                       capture_output=True)
+    assert(p.returncode == 0)
+
     # print connection string
     print("monitor: %s" % monitor.connection_string())
-    #time.sleep(3600)
 
 def test_001_init_primary():
     global node1
