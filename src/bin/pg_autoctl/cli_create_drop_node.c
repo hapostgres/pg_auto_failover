@@ -489,6 +489,21 @@ cli_create_monitor_getopts(int argc, char **argv)
 		strlcpy(options.pgSetup.pgdata, pgdata, MAXPGPATH);
 	}
 
+	/*
+	 * We require the user to specify an authentication mechanism, or to use
+	 * ---skip-pg-hba. Our documentation tutorial will use --auth trust, and we
+	 * should make it obvious that this is not the right choice for production.
+	 */
+	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.authMethod))
+	{
+		log_fatal("Please use either --auth trust|md5|... or --skip-pg-hba");
+		log_info("pg_auto_failover can be set to edit Postgres HBA rules "
+				 "automatically when needed. For quick testing '--auth trust' "
+				 "makes it easy to get started, "
+				 "consider another authentication mechanism for production.");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
 	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pg_ctl))
 	{
 		set_first_pgctl(&(options.pgSetup));
