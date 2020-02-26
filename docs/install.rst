@@ -124,7 +124,7 @@ Here's a sample output from the command:
    Description = pg_auto_failover
    
    [Service]
-   WorkingDirectory = /var/lib/postgresql/monitor
+   WorkingDirectory = /var/lib/postgresql
    Environment = 'PGDATA=/var/lib/postgresql/monitor'
    User = postgres
    ExecStart = /usr/lib/postgresql/10/bin/pg_autoctl run
