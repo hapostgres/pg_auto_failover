@@ -18,7 +18,7 @@ def teardown_module():
 def test_000_create_monitor():
     monitor = cluster.create_monitor("/tmp/skip/monitor",
                                      authMethod="skip",
-                                     sslMode="require")
+                                     sslMode="verify-ca")
     monitor.wait_until_pg_is_running()
 
     with open(os.path.join("/tmp/skip/monitor", "pg_hba.conf"), 'a') as hba:
@@ -42,7 +42,7 @@ def test_000_create_monitor():
     # requesting the client's leaf certificate, libpq will send the
     # certificates stored in file ~/.postgresql/postgresql.crt in the user's
     # home directory
-    client_top_directory = os.path.join(os.getenv("HOME"), "postgresql")
+    client_top_directory = os.path.join(os.getenv("HOME"), ".postgresql")
 
     p = subprocess.Popen(["sudo", "-E", '-u', os.getenv("USER"),
                           'env', 'PATH=' + os.getenv("PATH"),
@@ -50,8 +50,8 @@ def test_000_create_monitor():
     assert(p.wait() == 0)
 
     root_csr = os.path.join(client_top_directory, "root.csr")
-    root_key = os.path.join(client_top_directory, "postgresql.key")
-    root_crt = os.path.join(client_top_directory, "postgresql.crt")
+    root_key = os.path.join(client_top_directory, "root.key")
+    root_crt = os.path.join(client_top_directory, "root.crt")
 
     # first create a certificate signing request (CSR) and a public/private
     # key file
@@ -60,7 +60,7 @@ def test_000_create_monitor():
                           'env', 'PATH=' + os.getenv("PATH"),
                           "openssl", "req", "-new", "-nodes", "-text",
                           "-out", root_csr, "-keyout", root_key,
-                          "-subj", "/CN=%s" % str(monitor.vnode.address)])
+                          "-subj", "/CN=root.pgautofailover.ca"])
     assert(p.wait() == 0)
 
     p = subprocess.Popen(["chmod", "og-rwx", root_key])
@@ -87,7 +87,7 @@ def test_000_create_monitor():
                           'env', 'PATH=' + os.getenv("PATH"),
                           "openssl", "req", "-new", "-nodes", "-text",
                           "-out", server_csr, "-keyout", server_key,
-                          "-subj", "/CN=%s" % str(monitor.vnode.address)])
+                          "-subj", "/CN=pgautofailover"])
     assert(p.wait() == 0)
 
     p = subprocess.Popen(["chmod", "og-rwx", server_key])
@@ -121,8 +121,13 @@ def test_000_create_monitor():
     # reload the configuration changes to activate SSL settings
     monitor.reload_postgres()
 
+    # the root user also needs the certificates, tests are connecting with it
+    subprocess.Popen(["ln", "-s", client_top_directory, "/root/.postgresql"])
+    assert(p.wait() == 0)
+
     # print connection string
     print("monitor: %s" % monitor.connection_string())
+    #time.sleep(3600)
 
 def test_001_init_primary():
     global node1
