@@ -42,14 +42,16 @@ class Cluster:
         self.monitor = None
         self.datanodes = []
 
-    def create_monitor(self, datadir, port=5432, nodename=None, authMethod=None):
+    def create_monitor(self, datadir, port=5432, nodename=None,
+                       authMethod=None, sslMode=None):
         """
         Initializes the monitor and returns an instance of MonitorNode.
         """
         if self.monitor is not None:
             raise Exception("Monitor has already been created.")
         vnode = self.vlan.create_node()
-        self.monitor = MonitorNode(datadir, vnode, port, nodename, authMethod)
+        self.monitor = MonitorNode(datadir, vnode, port, nodename,
+                                   authMethod, sslMode)
         self.monitor.create()
         return self.monitor
 
@@ -57,7 +59,7 @@ class Cluster:
     # create cli as an argument when explicitly set by the test
     def create_datanode(self, datadir, port=5432, group=0,
                         listen_flag=False, role=Role.Postgres,
-                        formation=None, authMethod=None):
+                        formation=None, authMethod=None, sslMode=None):
         """
         Initializes a data node and returns an instance of DataNode. This will
         do the "keeper init" and "pg_autoctl run" commands.
@@ -67,7 +69,7 @@ class Cluster:
         datanode = DataNode(datadir, vnode, port,
                             os.getenv("USER"), authMethod, "postgres",
                             self.monitor, nodeid, group, listen_flag,
-                            role, formation)
+                            role, formation, sslMode)
         self.datanodes.append(datanode)
         return datanode
 
@@ -123,17 +125,17 @@ class PGNode:
     Common stuff between MonitorNode and DataNode.
     """
     def __init__(self, datadir, vnode, port, username, authMethod,
-                 database, role):
+                 database, role, sslMode=None):
         self.datadir = datadir
         self.vnode = vnode
         self.port = port
         self.username = username
-        self.authMethod = authMethod
+        self.authMethod = authMethod or "trust"
         self.database = database
         self.role = role
         self.pg_autoctl = None
         self.authenticatedUsers = {}
-
+        self.sslMode = sslMode
 
     def connection_string(self):
         """
@@ -141,15 +143,25 @@ class PGNode:
         node.
         """
         if (self.authMethod and self.username in self.authenticatedUsers):
-            return ("postgres://%s:%s@%s:%d/%s" %
-                    (self.username,
-                     self.authenticatedUsers[self.username],
-                     self.vnode.address,
-                     self.port,
-                     self.database))
+            dsn = "postgres://%s:%s@%s:%d/%s" % \
+                (self.username,
+                 self.authenticatedUsers[self.username],
+                 self.vnode.address,
+                 self.port,
+                 self.database)
+        else:
+            dsn = "postgres://%s@%s:%d/%s" % \
+                (self.username,
+                 self.vnode.address,
+                 self.port,
+                 self.database)
 
-        return ("postgres://%s@%s:%d/%s" % (self.username, self.vnode.address,
-                                           self.port, self.database))
+        if self.sslMode:
+            # If a local CA is used, or even a self-signed certificate,
+            # using verify-ca often provides enough protection.
+            dsn += "?sslmode=%s" % self.sslMode
+
+        return dsn
 
     def run(self, env={}):
         """
@@ -209,6 +221,40 @@ class PGNode:
             return False
         elif stop_proc.returncode is None:
             print("stopping postgres for '%s' timed out")
+            return False
+        return True
+
+    def reload_postgres(self):
+        """
+        Reload the postgres configuration by running:
+          pg_ctl -D ${self.datadir} reload
+        """
+        reload_command = [shutil.which('pg_ctl'), '-D', self.datadir, 'reload']
+        reload_proc = self.vnode.run(reload_command)
+        out, err = reload_proc.communicate(timeout=COMMAND_TIMEOUT)
+        if reload_proc.returncode > 0:
+            print("reloading postgres for '%s' failed, out: %s\n, err: %s"
+                  %(self.vnode.address, out, err))
+            return False
+        elif reload_proc.returncode is None:
+            print("reloading postgres for '%s' timed out")
+            return False
+        return True
+
+    def restart_postgres(self):
+        """
+        Restart the postgres configuration by running:
+          pg_ctl -D ${self.datadir} restart
+        """
+        restart_command = [shutil.which('pg_ctl'), '-D', self.datadir, 'restart']
+        restart_proc = self.vnode.run(restart_command)
+        out, err = restart_proc.communicate(timeout=COMMAND_TIMEOUT)
+        if restart_proc.returncode > 0:
+            print("restarting postgres for '%s' failed, out: %s\n, err: %s"
+                  %(self.vnode.address, out, err))
+            return False
+        elif restart_proc.returncode is None:
+            print("restarting postgres for '%s' timed out")
             return False
         return True
 
@@ -314,7 +360,7 @@ class PGNode:
 class DataNode(PGNode):
     def __init__(self, datadir, vnode, port,
                  username, authMethod, database, monitor,
-                 nodeid, group, listen_flag, role, formation):
+                 nodeid, group, listen_flag, role, formation, sslMode=None):
         super().__init__(datadir, vnode, port,
                          username, authMethod, database, role)
         self.monitor = monitor
@@ -322,6 +368,7 @@ class DataNode(PGNode):
         self.group = group
         self.listen_flag = listen_flag
         self.formation = formation
+        self.sslMode = sslMode
 
     def create(self, run=False, level='-v'):
         """
@@ -339,6 +386,7 @@ class DataNode(PGNode):
                        '--pghost', pghost,
                        '--pgport', str(self.port),
                        '--pgctl', shutil.which('pg_ctl'),
+                       '--auth', self.authMethod,
                        '--monitor', self.monitor.connection_string()]
 
         if self.listen_flag:
@@ -476,11 +524,11 @@ SELECT reportedstate
 
 
 class MonitorNode(PGNode):
-    def __init__(self, datadir, vnode, port, nodename, authMethod):
+    def __init__(self, datadir, vnode, port, nodename, authMethod, sslMode):
 
         super().__init__(datadir, vnode, port,
                          "autoctl_node", authMethod,
-                         "pg_auto_failover", Role.Monitor)
+                         "pg_auto_failover", Role.Monitor, sslMode)
 
         # set the nodename, default to the ip address of the node
         if nodename:
@@ -496,10 +544,8 @@ class MonitorNode(PGNode):
         create_args = ['create', self.role.command(), '-vv',
                        '--pgdata', self.datadir,
                        '--pgport', str(self.port),
+                       '--auth', self.authMethod,
                        '--nodename', self.nodename]
-
-        if self.authMethod:
-            create_args += ['--auth', self.authMethod]
 
         if run:
             create_args += ['--run']
