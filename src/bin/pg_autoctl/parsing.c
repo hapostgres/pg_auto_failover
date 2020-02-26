@@ -155,7 +155,17 @@ parse_controldata_field_uint32(const char *controlDataString,
 	char regex[BUFSIZE];
 	char *match;
 
-	sprintf(regex, "^%s: *([0-9]+)$", fieldName);
+	/*
+	 * Explanation of IGNORE-BANNED:
+	 * snprintf is safe here, we never write beyond the buffer,
+	 * parameter fieldName is given internally, it would never
+	 * cause target string to exceed the buffer.
+	 */
+	if (snprintf(regex, BUFSIZE, "^%s: *([0-9]+)$", fieldName) >= BUFSIZE) /* IGNORE-BANNED */
+	{
+		return false;
+	}
+
 	match = regexp_first_match(controlDataString, regex);
 
 	if (match == NULL)
@@ -190,7 +200,17 @@ parse_controldata_field_uint64(const char *controlDataString,
 	char regex[BUFSIZE];
 	char *match;
 
-	sprintf(regex, "^%s: *([0-9]+)$", fieldName);
+	/*
+	 * Explanation of IGNORE-BANNED:
+	 * snprintf is safe here, we never write beyond the buffer,
+	 * parameter fieldName is given internally, it would never
+	 * cause target string to exceed the buffer.
+	 */
+	if (snprintf(regex, BUFSIZE, "^%s: *([0-9]+)$", fieldName) >= BUFSIZE) /* IGNORE-BANNED */
+	{
+		return false;
+	}
+
 	match = regexp_first_match(controlDataString, regex);
 
 	if (match == NULL)
@@ -222,7 +242,14 @@ intToString(int64_t number)
 	IntString intString;
 
 	intString.intValue = number;
-	sprintf(intString.strValue, "%" PRId64, number);
+
+	/*
+	 * Explanation of IGNORE-BANNED:
+	 * snprintf is safe here, we never write beyond the buffer,
+	 * INTSTRING_MAX_DIGITS is large enough to contain 64 bit
+	 * decimal number with minus sign.
+	 */
+	snprintf(intString.strValue, INTSTRING_MAX_DIGITS, "%" PRId64, number); /*  IGNORE-BANNED */
 
 	return intString;
 }

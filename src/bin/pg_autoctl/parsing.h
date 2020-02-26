@@ -15,12 +15,12 @@
 #include "monitor.h"
 #include "pgctl.h"
 
+/* maximum decimal int64 length with minus and NUL */
+#define INTSTRING_MAX_DIGITS 21
 typedef struct IntString
 {
 	int64_t intValue;
-
-	/* maximum decimal int64 length with minus and NUL */
-	char strValue[21];
+	char strValue[INTSTRING_MAX_DIGITS];
 } IntString;
 
 

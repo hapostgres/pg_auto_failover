@@ -10,6 +10,9 @@
 #include <arpa/inet.h>
 #include <errno.h>
 
+#include "postgres_fe.h"
+#include "pqexpbuffer.h"
+
 #include "ini_file.h"
 #include "log.h"
 #include "pgctl.h"
@@ -134,17 +137,17 @@ bool
 ini_validate_options(IniOption *optionList)
 {
 	IniOption *option;
+	PQExpBuffer optionName = createPQExpBuffer();
 
 	for (option = optionList; option->type != INI_END_T; option++)
 	{
-		int n;
-		char optionName[BUFSIZE];
+		resetPQExpBuffer(optionName);
 
-		n = sprintf(optionName, "%s.%s", option->section, option->name);
+		appendPQExpBuffer(optionName, "%s.%s", option->section, option->name);
 
 		if (option->optName)
 		{
-			sprintf(optionName + n, " (--%s)", option->optName);
+			appendPQExpBuffer(optionName, " (--%s)", option->optName);
 		}
 
 		switch (option->type)
@@ -159,7 +162,8 @@ ini_validate_options(IniOption *optionList)
 				if (option->required && *(option->intValue) == -1)
 				{
 					log_error("Option %s is required and has not been set",
-							  optionName);
+							  optionName->data);
+					destroyPQExpBuffer(optionName);
 					return false;
 				}
 				break;
@@ -174,8 +178,9 @@ ini_validate_options(IniOption *optionList)
 
 				if (option->required && *(option->strValue) == NULL)
 				{
-					log_error("Option %ss is required and has not been set",
-							  optionName);
+					log_error("Option %s is required and has not been set",
+							  optionName->data);
+					destroyPQExpBuffer(optionName);
 					return false;
 				}
 				break;
@@ -192,7 +197,8 @@ ini_validate_options(IniOption *optionList)
 				if (option->required && IS_EMPTY_STRING_BUFFER(option->strBufValue))
 				{
 					log_error("Option %s is required and has not been set",
-							  optionName);
+							  optionName->data);
+					destroyPQExpBuffer(optionName);
 					return false;
 				}
 				break;
@@ -202,9 +208,11 @@ ini_validate_options(IniOption *optionList)
 
 				/* should never happen, or it's a development bug */
 				log_fatal("Unknown option type %d", option->type);
+				destroyPQExpBuffer(optionName);
 				return false;
 		}
 	}
+	destroyPQExpBuffer(optionName);
 	return true;
 }
 
