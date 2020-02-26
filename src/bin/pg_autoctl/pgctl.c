@@ -588,18 +588,32 @@ log_program_output(Program prog)
 {
 	if (prog.stdout != NULL)
 	{
-		log_info("%s", prog.stdout);
+		char *outLines[BUFSIZE];
+		int lineCount = splitLines(prog.stdout, outLines, BUFSIZE);
+		int lineNumber = 0;
+
+		for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
+		{
+			log_info("%s", outLines[lineNumber]);
+		}
 	}
 
 	if (prog.stderr != NULL)
 	{
-		if (prog.returnCode == 0)
+		char *errorLines[BUFSIZE];
+		int lineCount = splitLines(prog.stderr, errorLines, BUFSIZE);
+		int lineNumber = 0;
+
+		for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
 		{
-			log_info("%s", prog.stderr);
-		}
-		else
-		{
-			log_error("%s", prog.stderr);
+			if (prog.returnCode == 0)
+			{
+				log_info("%s", errorLines[lineNumber]);
+			}
+			else
+			{
+				log_error("%s", prog.stderr);
+			}
 		}
 	}
 }
