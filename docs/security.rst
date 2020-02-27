@@ -54,14 +54,48 @@ the Postgres nodes to enable connections as seen above.
 Authentication with passwords
 -----------------------------
 
-  - use ``--auth scram-sha-256`` or ``--auth md5``
-  - then ``alter user autoctl_node set password ...``
-  - then set PGPASSWORD or edit ~/.pgpass
-  - ``pg_autoctl config set replication.password ...``
+To setup pg_auto_failover with password for connections, you can use one of
+the password based authentication methods supported by Postgres, such as
+``password`` or ``scram-sha-256``. We recommend the latter, as in the
+following example::
 
-See about this bootstrap problem for ``pg_autoctl create`` and the
-replication password needed for ``pg_basebackup``; which you can't set early
-enough at the moment.
+  $ pg_autoctl create monitor --auth scram-sha-256 ...
+
+The ``pg_autoctl`` does not set the password for you. The first step is to
+set the database user password in the monitor database thanks to the
+following command::
+
+  $ psql postgres://monitor.host/pg_auto_failover
+  > alter user autoctl_node password 'h4ckm3';
+
+Now that the monitor is ready with our password set for the ``autoctl_node``
+user, we can use the password in the monitor connection string used when
+creating Postgres nodes. 
+
+On the primary node, we can create the Postgres setup as usual, and then set
+our replication password, that we will use if we are demoted and then
+re-join as a standby::
+
+  $ pg_autoctl create postgres       \
+         --auth scram-sha-256        \
+         ...                         \
+         --monitor postgres://autoctl_node:h4ckm3@monitor.host/pg_auto_failover
+
+  $ pg_autoctl config set replication.password h4ckm3m0r3
+
+The second Postgres node is going to be initialized as a secondary and
+``pg_autoctl`` then calls ``pg_basebackup`` at create time. We need to have
+the replication password already set at this time, and we can achieve that
+the following way::
+
+  $ export PGPASSWORD=h4ckm3m0r3
+  $ pg_autoctl create postgres       \
+         --auth scram-sha-256        \
+         ...                         \
+         --monitor postgres://autoctl_node:h4ckm3@monitor.host/pg_auto_failover
+
+  $ pg_autoctl config set replication.password h4ckm3m0r3
+
 
 Encryption of network communications
 ------------------------------------
@@ -75,93 +109,27 @@ simple as a self-signed certificate, and ``pg_autoctl`` will create such a
 certificate for you when setup with ssl support and without other
 instruction::
 
-  $ pg_autoctl create monitor --ssl --auth trust|scram-sha-256 ...
-  $ pg_autoctl create postgres --ssl --auth trust|scram-sha-256 ...
-  $ pg_autoctl create postgres --ssl --auth trust|scram-sha-256 ...
+  $ pg_autoctl create monitor --ssl --auth scram-sha-256 ...
+  $ pg_autoctl create postgres --ssl --auth scram-sha-256 ...
+  $ pg_autoctl create postgres --ssl --auth scram-sha-256 ...
 
 In that example we setup SSL connections to encrypt the network traffic, and
 we still have to setup an authentication mechanism exactly as in the
-previous sections of this document.
+previous sections of this document. Here ``scram-sha-256`` has been
+selected, and the password will be sent over an encrypted channel.
 
-When using the ``--ssl`` option without providing any certificate, the
-following command is used by ``pg_autoctl`` to create a self-signed
-certificate, as per the Postgres documentation at the `Creating
-Certificates`__ page::
-
-  $ openssl req -new -x509 -days 365 -nodes -text -out server.crt \
-    -keyout server.key -subj "/CN=${nodename}"
+When using the ``--ssl`` option without providing any certificate,
+``pg_autoctl`` creates a self-signed certificate, as per the Postgres
+documentation at the `Creating Certificates`__ page.
 
 __ https://www.postgresql.org/docs/current/ssl-tcp.html#SSL-CERTIFICATE-CREATION
 
-Note that you do NOT have to type that command yourself.
-
 The certificate subject CN defaults to the ``--nodename`` parameter, which
 can be given explicitely or computed by ``pg_autoctl`` as either your
-hostname when you have proper DNS resolution, or your current IP address. It
-is possible to use the ``--ssl-subj`` option to set the certificate subject.
+hostname when you have proper DNS resolution, or your current IP address.
 
-Using SSL certificates for authentication
------------------------------------------
-
-Using a simple self-signed certificate as before does not allow for SSL
-based authentication. To enable SSL based authentication, we need to have a
-common root certificate (either self-signed or signed by a Certificate
-Authority), as per the following excerpt of the Postgres documentation:
-
-    To allow the client to verify the identity of the server, place a root
-    certificate on the client and a leaf certificate signed by the root
-    certificate on the server. To allow the server to verify the identity of
-    the client, place a root certificate on the server and a leaf
-    certificate signed by the root certificate on the client. One or more
-    intermediate certificates (usually stored with the leaf certificate) can
-    also be used to link the leaf certificate to the root certificate.
-
-To create a self-signed root certificate with pg_auto_failover, use the
-following command::
-
-  $ pg_autoctl create cert --root --ssl-subj ".." root.crt
-
-This command creates a self-signed certificate that can be used to sign both
-client and server certificates. The default value for the certificate
-subject is again ``"/CN=${nodename}"`` with nodename the same as the
-``--nodename`` option.
-
-On servers where you want to enable certificate based authentication you can
-then use that root certificate to sign the server certificate and install it
-as the Postgres ``ssl_ca_file``::
-
-  $ pg_autoctl create monitor --ssl --root root.crt ...
-  $ pg_autoctl create postgres --ssl --root root.crt ...
-  $ pg_autoctl create postgres --ssl --root root.crt ...
-
-The root certificate has to be installed on every node. It it used in the
-following cases:
-
-  - a client certificate is created for the user ``autoctl_node`` and used
-    by pg_autoctl when connecting to the monitor, this client certificate is
-    signed by the root certificate,
-
-  - a server certificate is created for the local Postgres node, signed by
-    the root certificate, to enable a chain of trust in between servers when
-    setting up streaming replication,
-
-  - a client certificate is created for the user
-    ``pgautofailover_replicator`` and used by the standby nodes in their
-    ``primary_conninfo`` connection string parameters ``sslcert`` and
-    ``sslkey``,
-
-  - the root certificate is used as the ``ssl_ca_file`` in every node
-    Postgres configuration.
-
-Given such a setting, the authentication used in the added HBA rules is
-``cert``: pg_auto_failover connections are authenticated thanks to the SSL
-certificates, without passwords.
-
-You can omit ``--auth cert``, and you may still use the ``--skip-pg-hba``
-option if you have other means to provision the HBA files on your systems.
-
-Using your own SSL certificates for authentication
---------------------------------------------------
+Using your own SSL certificates
+-------------------------------
 
 In many cases you will want to install certificates provided by your local
 security department and signed by a trusted Certificate Authority. In that
@@ -173,33 +141,97 @@ it handle the setup for you, including the creation of and signing of client
 certificates for the ``autoctl_node`` and ``pgautofailover_replication``
 users::
   
-  $ pg_autoctl create monitor --ssl --root root.crt --server-crt server.crt --server-key server.key ...
-  $ pg_autoctl create postgres --ssl --root root.crt --server-crt server.crt --server-key server.key ...
-  $ pg_autoctl create postgres  --ssl --root root.crt --server-crt server.crt --server-key server.key ...
+  $ pg_autoctl create monitor --ssl                    \
+                              --root root.crt          \
+                              --server-crt server.crt  \
+                              --server-key server.key  \
+                              ...
+  
+  $ pg_autoctl create postgres --ssl                    \
+                               --root root.crt          \
+                               --server-crt server.crt  \
+                               --server-key server.key  \
+                               ...
+                              
+  $ pg_autoctl create postgres --ssl                    \
+                               --root root.crt          \
+                               --server-crt server.crt  \
+                               --server-key server.key  \
+                               ...
 
-When using your own certificates, pg_auto_failover still creates client
-certificates for its users, signed with the given root certificate. On every
-Postgres node:
+SSL Certificates Authentication
+-------------------------------
 
-  - a client certificate is created for the user ``autoctl_node`` and used
-    by pg_autoctl when connecting to the monitor, this client certificate is
-    signed by the root certificate,
+Given those files, it is then possible to use certificate based
+authentication of client connections. For that, it is necessary to prepare
+client certificates signed by your root certificate private key and using
+the target user name as its CN, as per Postgres documentation for
+`Certificate Authentication`__:
 
-  - a client certificate is created for the user
-    ``pgautofailover_replicator`` and used by the standby nodes in their
-    ``primary_conninfo`` connection string parameters ``sslcert`` and
-    ``sslkey``,
+    The cn (Common Name) attribute of the certificate will be compared to
+    the requested database user name, and if they match the login will be
+    allowed
 
-  - the root certificate is used as the ``ssl_ca_file`` in every node
-    Postgres configuration.
+__ https://www.postgresql.org/docs/current/auth-cert.html
 
-Given such a setting, the authentication used in the added HBA rules is
-``cert``: pg_auto_failover connections are authenticated thanks to the SSL
-certificates, without passwords.
+For enabling the `cert` authentication method with pg_auto_failover, you
+need to prepare a client certificate for the user ``postgres`` and used by
+pg_autoctl when connecting to the monitor, to place in
+``~/.postgresql/postgresql.cert`` along with its key
+``~/.postgresql/postgresql.key``, in the home directory of the user that
+runs the pg_autoctl service (which defaults to ``postgres``).
 
-You can omit ``--auth cert``, and you may still use the ``--skip-pg-hba``
-option if you have other means to provision the HBA files on your systems.
-    
+Then you need to create a user name map as documented in Postgres page `User
+Name Maps`__ so that your certificate can be used to authenticate pg_autoctl
+users.
+
+__ https://www.postgresql.org/docs/current/auth-username-maps.html
+
+The ident map in ``pg_ident.conf`` on the pg_auto_failover monitor should
+then have the following entry, to allow ``postgres`` to connect as the
+``autoctl_node`` user for ``pg_autoctl`` operations::
+
+  # MAPNAME       SYSTEM-USERNAME         PG-USERNAME
+
+  # pg_autoctl runs as postgres and connects to the monitor autoctl_node user
+  pgautofailover   postgres               autoctl_node
+
+To enable streaming replication, the ``pg_ident.conf`` file on each Postgres
+node should now allow the ``postgres`` user in the client certificate to
+connect as the ``pgautofailover_replicator`` database user::
+  
+  # MAPNAME       SYSTEM-USERNAME         PG-USERNAME
+
+  # pg_autoctl runs as postgres and connects to the monitor autoctl_node user
+  pgautofailover  postgres                pgautofailover_replicator
+
+Given that user name map, you can then use the ``cert`` authentication
+method. As with the ``pg_ident.conf`` provisioning, it is best to now
+provision the HBA rules yourself, using the ``--skip-pg-hba`` option::
+
+  $ pg_autoctl create postgres --skip-pg-hba --ssl ---root ...
+
+The HBA rule will use the authentication method ``cert`` with a map option,
+and might then look like the following on the monitor::
+
+  # allow certificate based authentication to the monitor
+  hostssl pg_auto_failover autoctl_node 10.0.0.0/8 cert map=pgautofailover
+
+Then your pg_auto_failover nodes on the 10.0.0.0 network are allowed to
+connect to the monitor with the user ``autoctl_node`` used by
+``pg_autoctl``, assuming they have a valid and trusted client certificate.
+
+The HBA rule to use on the Postgres nodes to allow for Postgres streaming
+replication connections looks like the following::
+
+  # allow streaming replication for pg_auto_failover nodes
+  hostssl replication pgautofailover_replicator 10.0.0.0/8 cert map=pgautofailover
+
+Because the Postgres server runs as the ``postgres`` system user, the
+connection to the primary node can be made with SSL enabled and will then
+use the client certificates installed in the ``postgres`` home directory in
+``~/.postgresql/postgresql.{key,cert}`` locations.
+
 Postgres HBA provisioning
 -------------------------
 

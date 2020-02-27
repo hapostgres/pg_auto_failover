@@ -1,6 +1,8 @@
 import pgautofailover_utils as pgautofailover
 from nose.tools import *
 
+import os
+
 cluster = None
 node1 = None
 node2 = None
@@ -37,18 +39,9 @@ def test_003_init_secondary():
     global node2
     node2 = cluster.create_datanode("/tmp/auth/node2", authMethod="md5")
 
-    # we can't `pg_autoctl config set replication.password` before the local
-    # node is created, and creation fails because pg_basebackup now needs a
-    # password to connect to the primary...
-    try:
-        node2.create()
-    except Exception:
-        # pg_basebackup: could not connect to server: fe_sendauth: no
-        # password supplied
-        pass
-
-    node2.config_set("replication.password", "streaming_password")
+    os.putenv('PGPASSWORD', "streaming_password")
     node2.create()
+    node2.config_set("replication.password", "streaming_password")
 
     node2.run()
     assert node2.wait_until_state(target_state="secondary")
