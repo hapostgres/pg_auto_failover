@@ -188,17 +188,17 @@ execute_program(Program *prog)
 			/* fork succeeded, in child */
 
 			/*
-			 * We redirect /dev/null into _stdin rather than closing stdin,
+			 * We redirect /dev/null into stdIn rather than closing stdin,
 			 * because apparently closing it may cause undefined behavior if
 			 * any read was to happen.
 			 */
-			int _stdin = open(DEV_NULL, O_RDONLY);
+			int stdIn = open(DEV_NULL, O_RDONLY);
 
-			dup2(_stdin, STDIN_FILENO);
+			dup2(stdIn, STDIN_FILENO);
 			dup2(outpipe[1], STDOUT_FILENO);
 			dup2(errpipe[1], STDERR_FILENO);
 
-			close(_stdin);
+			close(stdIn);
 			close(outpipe[0]);
 			close(outpipe[1]);
 			close(errpipe[0]);
