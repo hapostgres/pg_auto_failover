@@ -96,6 +96,12 @@ the following way::
 
   $ pg_autoctl config set replication.password h4ckm3m0r3
 
+Note that you can use `The Password File`__ mechanism as discussed in the
+Postgres documentation in order to maintain your passwords in a separate
+file, not in your main pg_auto_failover configuration file. This also avoids
+using passwords in the environment and in command lines.
+
+__ https://www.postgresql.org/docs/current/libpq-pgpass.html  
 
 Encryption of network communications
 ------------------------------------
