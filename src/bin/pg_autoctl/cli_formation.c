@@ -164,12 +164,6 @@ keeper_cli_formation_getopts(int argc, char **argv)
 		strlcpy(options.pgSetup.pgdata, pgdata, MAXPGPATH);
 	}
 
-	/*
-	 * pg_setup_init wants a single pg_ctl, and we don't use it here: pretend
-	 * we had a --pgctl option and processed it.
-	 */
-	set_first_pgctl(&(options.pgSetup));
-
 	/* publish our option parsing in the global variable */
 	formationOptions = options;
 
@@ -349,12 +343,6 @@ keeper_cli_formation_create_getopts(int argc, char **argv)
 				  DEFAULT_DATABASE_NAME);
 		strlcpy(options.dbname, DEFAULT_DATABASE_NAME, NAMEDATALEN);
 	}
-
-	/*
-	 * pg_setup_init wants a single pg_ctl, and we don't use it here: pretend
-	 * we had a --pgctl option and processed it.
-	 */
-	set_first_pgctl(&(options.pgSetup));
 
 	/* publish our option parsing in the global variable */
 	formationOptions = options;
