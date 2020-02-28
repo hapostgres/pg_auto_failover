@@ -68,6 +68,18 @@ pghba_ensure_host_rule_exists(const char *hbaFilePath,
 	hbaLineEnd += convert_ip_to_cidr(hbaLineEnd, host);
 	hbaLineEnd += sprintf(hbaLineEnd, " %s", authenticationScheme);
 
+	/*
+	 * When the authentication method is "skip", the option --skip-pg-hba has
+	 * been used. In that case, we still WARN about the HBA rule that we need,
+	 * so that users can review their HBA settings and provisioning.
+	 */
+	if (SKIP_HBA(authenticationScheme))
+	{
+		log_warn("Skipping HBA edits (per --skip-pg-hba) for rule: %s",
+				 hbaLine);
+		return true;
+	}
+
 	log_debug("Ensuring the HBA file \"%s\" contains the line: %s",
 			  hbaFilePath, hbaLine);
 

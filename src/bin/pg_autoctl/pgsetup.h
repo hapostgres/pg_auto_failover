@@ -145,7 +145,13 @@ bool pg_setup_is_running(PostgresSetup *pgSetup);
 bool pg_setup_is_primary(PostgresSetup *pgSetup);
 bool pg_setup_is_ready(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok);
 char *pg_setup_get_username(PostgresSetup *pgSetup);
+
+#define SKIP_HBA(authMethod) \
+	(strncmp(authMethod, SKIP_HBA_AUTH_METHOD, strlen(SKIP_HBA_AUTH_METHOD)) == 0)
+
 char *pg_setup_get_auth_method(PostgresSetup *pgSetup);
+bool pg_setup_skip_hba_edits(PostgresSetup *pgSetup);
+
 bool pg_setup_set_absolute_pgdata(PostgresSetup *pgSetup);
 
 PgInstanceKind nodeKindFromString(const char *nodeKind);

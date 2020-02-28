@@ -393,9 +393,11 @@ primary_create_user_with_hba(LocalPostgresServer *postgres, char *userName,
 
 	log_trace("primary_create_user_with_hba");
 
-	if (!pgsql_create_user(pgsql, userName, password, login, superuser, replication))
+	if (!pgsql_create_user(pgsql, userName, password,
+						   login, superuser, replication))
 	{
-		log_error("Failed to create user \"%s\" on local postgres server", userName);
+		log_error("Failed to create user \"%s\" on local postgres server",
+				  userName);
 		return false;
 	}
 
@@ -406,8 +408,12 @@ primary_create_user_with_hba(LocalPostgresServer *postgres, char *userName,
 		return false;
 	}
 
-	if (!pghba_ensure_host_rule_exists(hbaFilePath, HBA_DATABASE_ALL, NULL, userName,
-									   hostname, authMethod))
+	if (!pghba_ensure_host_rule_exists(hbaFilePath,
+									   HBA_DATABASE_ALL,
+									   NULL,
+									   userName,
+									   hostname,
+									   authMethod))
 	{
 		log_error("Failed to set the pg_hba rule for user \"%s\"", userName);
 		return false;
@@ -430,7 +436,8 @@ primary_create_user_with_hba(LocalPostgresServer *postgres, char *userName,
  * to connect for replication.
  */
 bool
-primary_create_replication_user(LocalPostgresServer *postgres, char *replicationUsername,
+primary_create_replication_user(LocalPostgresServer *postgres,
+								char *replicationUsername,
 								char *replicationPassword)
 {
 	bool result = false;
@@ -455,17 +462,27 @@ primary_create_replication_user(LocalPostgresServer *postgres, char *replication
  * to pg_hba.conf on the primary.
  */
 bool
-primary_add_standby_to_hba(LocalPostgresServer *postgres, char *standbyHostname,
+primary_add_standby_to_hba(LocalPostgresServer *postgres,
+						   char *standbyHostname,
 						   const char *replicationPassword)
 {
 	PGSQL *pgsql = &(postgres->sqlClient);
 	PostgresSetup *postgresSetup = &(postgres->postgresSetup);
 	char hbaFilePath[MAXPGPATH];
-	char *authMethod =  "trust";
+	char *authMethod = pg_setup_get_auth_method(postgresSetup);
 
-	if (replicationPassword)
+	if (replicationPassword == NULL)
 	{
-		authMethod = pg_setup_get_auth_method(postgresSetup);
+		/* most authentication methods require a password */
+		if (strcmp(authMethod, "trust") != 0
+			|| strcmp(authMethod, SKIP_HBA_AUTH_METHOD) != 0)
+		{
+			log_warn("Granting replication connection for \"%s\" "
+					 "using authentication method \"%s\" although no "
+					 "replication password has been set",
+					 standbyHostname, authMethod);
+			log_info("HINT: see `pg_autoctl config get replication.password`");
+		}
 	}
 
 	log_trace("primary_add_standby_to_hba");

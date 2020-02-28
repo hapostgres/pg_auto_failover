@@ -895,8 +895,8 @@ pg_setup_get_username(PostgresSetup *pgSetup)
 
 
 /*
- * pg_setup_get_auth_method returns pgSetup->authMethod when it exists, otherwise it
- * returns DEFAULT_AUTH_METHOD
+ * pg_setup_get_auth_method returns pgSetup->authMethod when it exists,
+ * otherwise it returns DEFAULT_AUTH_METHOD
  */
 char *
 pg_setup_get_auth_method(PostgresSetup *pgSetup)
@@ -906,18 +906,31 @@ pg_setup_get_auth_method(PostgresSetup *pgSetup)
 		return pgSetup->authMethod;
 	}
 
-	log_trace("auth method not configured, falling back to default value : %s", DEFAULT_AUTH_METHOD);
+	log_trace("auth method not configured, falling back to default value : %s",
+			  DEFAULT_AUTH_METHOD);
 
 	return DEFAULT_AUTH_METHOD;
 }
 
 
 /*
- * pg_setup_set_absolute_pgdata uses realpath(3) to make sure that
- * we re using the absolute real pathname for PGDATA in our setup, so that
- * services will work correctly after keeper/monitor init, even when initializing in a
- * relative path and starting the service from elsewhere.
- * This function returns true if the pgdata path has been updated in the setup.
+ * pg_setup_skip_hba_edits returns true when the user had setup pg_autoctl to
+ * skip editing HBA entries.
+ */
+bool
+pg_setup_skip_hba_edits(PostgresSetup *pgSetup)
+{
+	return !IS_EMPTY_STRING_BUFFER(pgSetup->authMethod)
+		&& strcmp(pgSetup->authMethod, SKIP_HBA_AUTH_METHOD) == 0;
+}
+
+
+/*
+ * pg_setup_set_absolute_pgdata uses realpath(3) to make sure that we re using
+ * the absolute real pathname for PGDATA in our setup, so that services will
+ * work correctly after keeper/monitor init, even when initializing in a
+ * relative path and starting the service from elsewhere. This function returns
+ * true if the pgdata path has been updated in the setup.
  */
 bool
 pg_setup_set_absolute_pgdata(PostgresSetup *pgSetup)

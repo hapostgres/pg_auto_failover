@@ -47,6 +47,7 @@ bool outputJSON = false;
  *		{ "proxyport", required_argument, NULL, 'y' },
  *		{ "username", required_argument, NULL, 'U' },
  *		{ "auth", required_argument, NULL, 'A' },
+ *		{ "skip-pg-hba", required_argument, NULL, 'S' },
  *		{ "dbname", required_argument, NULL, 'd' },
  *		{ "nodename", required_argument, NULL, 'n' },
  *		{ "formation", required_argument, NULL, 'f' },
@@ -172,10 +173,33 @@ cli_create_node_getopts(int argc, char **argv,
 			case 'A':
 			{
 				/* { "auth", required_argument, NULL, 'A' }, */
+				if (!IS_EMPTY_STRING_BUFFER(LocalOptionConfig.pgSetup.authMethod))
+				{
+					errors++;
+					log_error("Please use either --auth or --skip-pg-hba");
+				}
+
 				strlcpy(LocalOptionConfig.pgSetup.authMethod, optarg, NAMEDATALEN);
 				log_trace("--auth %s", LocalOptionConfig.pgSetup.authMethod);
 				break;
 			}
+
+			case 'S':
+			{
+				/* { "skip-pg-hba", required_argument, NULL, 'S' }, */
+				if (!IS_EMPTY_STRING_BUFFER(LocalOptionConfig.pgSetup.authMethod))
+				{
+					errors++;
+					log_error("Please use either --auth or --skip-pg-hba");
+				}
+
+				strlcpy(LocalOptionConfig.pgSetup.authMethod,
+						SKIP_HBA_AUTH_METHOD,
+						NAMEDATALEN);
+				log_trace("--skip-pg-hba");
+				break;
+			}
+
 			case 'd':
 			{
 				/* { "dbname", required_argument, NULL, 'd' } */
@@ -349,6 +373,21 @@ cli_create_node_getopts(int argc, char **argv,
 		}
 
 		strlcpy(LocalOptionConfig.pgSetup.pgdata, pgdata, MAXPGPATH);
+	}
+
+	/*
+	 * We require the user to specify an authentication mechanism, or to use
+	 * ---skip-pg-hba. Our documentation tutorial will use --auth trust, and we
+	 * should make it obvious that this is not the right choice for production.
+	 */
+	if (IS_EMPTY_STRING_BUFFER(LocalOptionConfig.pgSetup.authMethod))
+	{
+		log_fatal("Please use either --auth trust|md5|... or --skip-pg-hba");
+		log_info("pg_auto_failover can be set to edit Postgres HBA rules "
+				 "automatically when needed. For quick testing '--auth trust' "
+				 "makes it easy to get started, "
+				 "consider another authentication mechanism for production.");
+		exit(EXIT_CODE_BAD_ARGS);
 	}
 
 	/*

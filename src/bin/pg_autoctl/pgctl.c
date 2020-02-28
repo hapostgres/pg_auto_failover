@@ -45,7 +45,7 @@ static bool pg_include_config(const char *configFilePath,
 static bool ensure_default_settings_file_exists(const char *configFilePath,
 												GUC *settings,
 												PostgresSetup *pgSetup);
-static void log_program_output(Program prog);
+static void log_program_output(Program prog, int outLogLevel, int errorLogLevel);
 static bool escape_recovery_conf_string(char *destination,
 										int destinationSize,
 										const char *recoveryConfString);
@@ -139,23 +139,14 @@ pg_controldata(PostgresSetup *pgSetup, bool missing_ok)
 	}
 	else
 	{
-		if (!missing_ok)
-		{
-			char *errorLines[BUFSIZE];
-			int lineCount = splitLines(prog.stdErr, errorLines, BUFSIZE);
-			int lineNumber = 0;
+		int errorLogLevel = missing_ok ? LOG_DEBUG : LOG_ERROR;
 
-			for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
-			{
-				/*
-				 * pg_controldata typically errors out a single line prefixed
-				 * with the name of the binary.
-				 */
-				log_error("%s", errorLines[lineNumber]);
-			}
-			log_error("Failed to run \"%s\" on \"%s\", see above for details",
-					  pg_controldata_path, pgSetup->pgdata);
-		}
+		(void) log_program_output(prog, LOG_INFO, errorLogLevel);
+
+		log_level(errorLogLevel,
+				  "Failed to run \"%s\" on \"%s\", see above for details",
+				  pg_controldata_path, pgSetup->pgdata);
+
 		free_program(&prog);
 
 		return missing_ok;
@@ -492,7 +483,7 @@ pg_basebackup(const char *pgdata,
 						  "--slot", replication_slot_name,
 						  NULL);
 
-	log_program_output(program);
+	(void) log_program_output(program, LOG_INFO, LOG_ERROR);
 	returnCode = program.returnCode;
 	free_program(&program);
 
@@ -567,7 +558,7 @@ pg_rewind(const char *pgdata, const char *pg_ctl, const char *primaryHost,
 						  "--progress",
 						  NULL);
 
-	log_program_output(program);
+	(void) log_program_output(program, LOG_INFO, LOG_ERROR);
 	returnCode = program.returnCode;
 	free_program(&program);
 
@@ -583,22 +574,29 @@ pg_rewind(const char *pgdata, const char *pg_ctl, const char *primaryHost,
 
 /* log_program_output logs the output of the given program. */
 static void
-log_program_output(Program prog)
+log_program_output(Program prog, int outLogLevel, int errorLogLevel)
 {
 	if (prog.stdOut != NULL)
 	{
-		log_info("%s", prog.stdOut);
+		char *outLines[BUFSIZE];
+		int lineCount = splitLines(prog.stdOut, outLines, BUFSIZE);
+		int lineNumber = 0;
+
+		for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
+		{
+			log_level(outLogLevel, "%s", outLines[lineNumber]);
+		}
 	}
 
 	if (prog.stdErr != NULL)
 	{
-		if (prog.returnCode == 0)
+		char *errorLines[BUFSIZE];
+		int lineCount = splitLines(prog.stdErr, errorLines, BUFSIZE);
+		int lineNumber = 0;
+
+		for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
 		{
-			log_info("%s", prog.stdErr);
-		}
-		else
-		{
-			log_error("%s", prog.stdErr);
+			log_level(errorLogLevel, "%s", errorLines[lineNumber]);
 		}
 	}
 }
@@ -622,7 +620,7 @@ pg_ctl_initdb(const char *pg_ctl, const char *pgdata)
 
 	if (returnCode != 0)
 	{
-		log_program_output(program);
+		(void) log_program_output(program, LOG_INFO, LOG_ERROR);
 	}
 	free_program(&program);
 
@@ -736,7 +734,7 @@ pg_ctl_start(const char *pg_ctl,
 
 			log_info("PostgreSQL is running. pg_ctl status returned %d",
 					 statusReturnCode);
-			log_program_output(statusProgram);
+			(void) log_program_output(statusProgram, LOG_INFO, LOG_ERROR);
 		}
 		else
 		{
@@ -835,11 +833,12 @@ pg_ctl_stop(const char *pg_ctl, const char *pgdata)
 		return true;
 	}
 
-	log_info("Stopping PostgreSQL server failed. pg_ctl status returned: %d", status);
+	log_info("Stopping PostgreSQL server failed. pg_ctl status returned: %d",
+			 status);
 
 	if (log_output)
 	{
-		log_program_output(program);
+		(void) log_program_output(program, LOG_INFO, LOG_ERROR);
 	}
 
 	free_program(&program);
@@ -862,7 +861,7 @@ pg_ctl_status(const char *pg_ctl, const char *pgdata, bool log_output)
 
 	if (log_output)
 	{
-		log_program_output(program);
+		(void) log_program_output(program, LOG_INFO, LOG_ERROR);
 	}
 
 	free_program(&program);
@@ -890,7 +889,7 @@ pg_ctl_restart(const char *pg_ctl, const char *pgdata)
 
 	if (returnCode != 0)
 	{
-		log_program_output(program);
+		(void) log_program_output(program, LOG_INFO, LOG_ERROR);
 	}
 	free_program(&program);
 

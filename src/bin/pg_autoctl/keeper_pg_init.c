@@ -600,7 +600,7 @@ create_database_and_extension(Keeper *keeper)
 									   pgSetup->dbname,
 									   pg_setup_get_username(pgSetup),
 									   config->nodename,
-									   "trust"))
+									   pg_setup_get_auth_method(pgSetup)))
 	{
 		log_error("Failed to edit \"%s\" to grant connections to \"%s\", "
 				  "see above for details", hbaFilePath, config->nodename);
@@ -617,9 +617,11 @@ create_database_and_extension(Keeper *keeper)
 		log_info("Granting connection from \"%s\" in \"%s\"",
 				 pgSetup->pghost, hbaFilePath);
 
+		/* Intended use is restricted to unit testing, hard-code "trust" here */
 		if (!pghba_ensure_host_rule_exists(hbaFilePath,
 										   HBA_DATABASE_ALL, NULL, NULL,
-										   pgSetup->pghost, "trust"))
+										   pgSetup->pghost,
+										   "trust"))
 		{
 			log_error("Failed to edit \"%s\" to grant connections to \"%s\", "
 					  "see above for details", hbaFilePath, pgSetup->pghost);
@@ -693,7 +695,7 @@ create_database_and_extension(Keeper *keeper)
 								   pgSetup->dbname,
 								   config->nodename,
 								   pg_setup_get_username(pgSetup),
-								   "trust",
+								   pg_setup_get_auth_method(pgSetup),
 								   NULL))
 		{
 			log_error("Failed to grant local network connections in HBA");

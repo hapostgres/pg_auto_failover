@@ -65,6 +65,7 @@ CommandLine create_monitor_command =
 				 "  --pgport      PostgreSQL's port number\n" \
 				 "  --nodename    hostname by which postgres is reachable\n" \
 				 "  --auth        authentication method for connections from data nodes\n"
+				 "  --skip-pg-hba skip editing pg_hba.conf rules\n"
 				 "  --run         create node then run pg_autoctl service\n",
 				 cli_create_monitor_getopts,
 				 cli_create_monitor);
@@ -84,6 +85,7 @@ CommandLine create_postgres_command =
 				 "  --formation             pg_auto_failover formation\n"
 				 "  --monitor               pg_auto_failover Monitor Postgres URL\n"
 				 "  --auth                  authentication method for connections from monitor\n"
+				 "  --skip-pg-hba           skip editing pg_hba.conf rules\n"
 				 "  --candidate-priority    priority of the node to be promoted to become primary\n"
 				 "  --replication-quorum    true if node participates in write quorum\n"
 				 KEEPER_CLI_ALLOW_RM_PGDATA_OPTION,
@@ -233,6 +235,7 @@ cli_create_postgres_getopts(int argc, char **argv)
 		{ "listen", required_argument, NULL, 'l' },
 		{ "username", required_argument, NULL, 'U' },
 		{ "auth", required_argument, NULL, 'A' },
+		{ "skip-pg-hba", no_argument, NULL, 'S' },
 		{ "dbname", required_argument, NULL, 'd' },
 		{ "nodename", required_argument, NULL, 'n' },
 		{ "formation", required_argument, NULL, 'f' },
@@ -252,7 +255,7 @@ cli_create_postgres_getopts(int argc, char **argv)
 
 	int optind =
 		cli_create_node_getopts(argc, argv, long_options,
-								"C:D:H:p:l:U:A:d:n:f:m:MRVvqhP:r:x",
+								"C:D:H:p:l:U:A:Sd:n:f:m:MRVvqhP:r:x",
 								&options);
 
 	/* publish our option parsing in the global variable */
@@ -313,6 +316,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 		{ "nodename", required_argument, NULL, 'n' },
 		{ "listen", required_argument, NULL, 'l' },
 		{ "auth", required_argument, NULL, 'A' },
+		{ "skip-pg-hba", no_argument, NULL, 'S' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
@@ -327,7 +331,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "C:D:p:n:l:A:Vvqhx",
+	while ((c = getopt_long(argc, argv, "C:D:p:n:l:A:SVvqhx",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -375,8 +379,29 @@ cli_create_monitor_getopts(int argc, char **argv)
 
 			case 'A':
 			{
+				if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.authMethod))
+				{
+					errors++;
+					log_error("Please use either --auth or --skip-pg-hba");
+				}
+
 				strlcpy(options.pgSetup.authMethod, optarg, NAMEDATALEN);
 				log_trace("--auth %s", options.pgSetup.authMethod);
+				break;
+			}
+
+			case 'S':
+			{
+				if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.authMethod))
+				{
+					errors++;
+					log_error("Please use either --auth or --skip-pg-hba");
+				}
+
+				strlcpy(options.pgSetup.authMethod,
+						SKIP_HBA_AUTH_METHOD,
+						NAMEDATALEN);
+				log_trace("--skip-pg-hba");
 				break;
 			}
 
@@ -467,6 +492,21 @@ cli_create_monitor_getopts(int argc, char **argv)
 		}
 
 		strlcpy(options.pgSetup.pgdata, pgdata, MAXPGPATH);
+	}
+
+	/*
+	 * We require the user to specify an authentication mechanism, or to use
+	 * ---skip-pg-hba. Our documentation tutorial will use --auth trust, and we
+	 * should make it obvious that this is not the right choice for production.
+	 */
+	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.authMethod))
+	{
+		log_fatal("Please use either --auth trust|md5|... or --skip-pg-hba");
+		log_info("pg_auto_failover can be set to edit Postgres HBA rules "
+				 "automatically when needed. For quick testing '--auth trust' "
+				 "makes it easy to get started, "
+				 "consider another authentication mechanism for production.");
+		exit(EXIT_CODE_BAD_ARGS);
 	}
 
 	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pg_ctl))
