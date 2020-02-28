@@ -60,13 +60,17 @@ CommandLine create_monitor_command =
 	make_command("monitor",
 				 "Initialize a pg_auto_failover monitor node",
 				 " [ --pgdata --pgport --pgctl --nodename ] ",
-				 "  --pgctl       path to pg_ctl\n" \
-				 "  --pgdata      path to data directory\n" \
-				 "  --pgport      PostgreSQL's port number\n" \
-				 "  --nodename    hostname by which postgres is reachable\n" \
+				 "  --pgctl       path to pg_ctl\n"
+				 "  --pgdata      path to data directory\n"
+				 "  --pgport      PostgreSQL's port number\n"
+				 "  --nodename    hostname by which postgres is reachable\n"
 				 "  --auth        authentication method for connections from data nodes\n"
 				 "  --skip-pg-hba skip editing pg_hba.conf rules\n"
-				 "  --run         create node then run pg_autoctl service\n",
+				 "  --run         create node then run pg_autoctl service\n"
+				 "  --ssl         activate ssl in Postgres configuration\n"
+				 "  --ssl-ca-file set the Postgres ssl_ca_file to that file path\n"
+				 "  --server-key  set the Postgres ssl_key_file to that file path\n"
+				 "  --server-crt  set the Postgres ssl_cert_file to that file path\n",
 				 cli_create_monitor_getopts,
 				 cli_create_monitor);
 
@@ -86,6 +90,11 @@ CommandLine create_postgres_command =
 				 "  --monitor     pg_auto_failover Monitor Postgres URL\n"
 				 "  --auth        authentication method for connections from monitor\n"
 				 "  --skip-pg-hba skip editing pg_hba.conf rules\n"
+				 "  --ssl         activate ssl in Postgres configuration\n" \
+				 "  --ssl-ca-file set the Postgres ssl_ca_file to that file path\n" \
+				 "  --ssl-mode    use that sslmode in connection strings\n" \
+				 "  --server-key  set the Postgres ssl_key_file to that file path\n" \
+				 "  --server-crt  set the Postgres ssl_cert_file to that file path\n"
 				 KEEPER_CLI_ALLOW_RM_PGDATA_OPTION,
 				 cli_create_postgres_getopts,
 				 cli_create_postgres);
@@ -245,12 +254,17 @@ cli_create_postgres_getopts(int argc, char **argv)
 		{ "quiet", no_argument, NULL, 'q' },
  		{ "help", no_argument, NULL, 'h' },
 		{ "run", no_argument, NULL, 'x' },
+		{ "ssl", no_argument, NULL, 's' },
+		{ "ssl-ca-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG },
+		{ "server-crt", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG },
+		{ "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG },
+		{ "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG },
 		{ NULL, 0, NULL, 0 }
 	};
 
 	int optind =
 		cli_create_node_getopts(argc, argv,
-								long_options, "C:D:H:p:l:U:A:Sd:n:f:m:MRVvqhx",
+								long_options, "C:D:H:p:l:U:A:Sd:n:f:m:MRVvqhxs",
 								&options);
 
 	/* publish our option parsing in the global variable */
@@ -301,7 +315,7 @@ static int
 cli_create_monitor_getopts(int argc, char **argv)
 {
 	MonitorConfig options = { 0 };
-	int c, option_index, errors = 0;
+	int c, option_index = 0, errors = 0;
 	int verboseCount = 0;
 
 	static struct option long_options[] = {
@@ -317,7 +331,10 @@ cli_create_monitor_getopts(int argc, char **argv)
 		{ "quiet", no_argument, NULL, 'q' },
  		{ "help", no_argument, NULL, 'h' },
 		{ "run", no_argument, NULL, 'x' },
-		{ "help", no_argument, NULL, 0 },
+		{ "ssl", no_argument, NULL, 's' },
+		{ "ssl-ca-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG },
+		{ "server-crt", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG },
+		{ "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG },
 		{ NULL, 0, NULL, 0 }
 	};
 
@@ -326,7 +343,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "C:D:p:n:l:A:SVvqhx",
+	while ((c = getopt_long(argc, argv, "C:D:p:n:l:A:SVvqhxs",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -448,6 +465,15 @@ cli_create_monitor_getopts(int argc, char **argv)
 				break;
 			}
 
+			case 0:
+			{
+				if (!cli_getopt_ssl_flags(&(options.pgSetup)))
+				{
+					errors++;
+				}
+				break;
+			}
+
 			default:
 			{
 				/* getopt_long already wrote an error message */
@@ -501,6 +527,16 @@ cli_create_monitor_getopts(int argc, char **argv)
 				 "automatically when needed. For quick testing '--auth trust' "
 				 "makes it easy to get started, "
 				 "consider another authentication mechanism for production.");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	/*
+	 * If we have --ssl, either we have a root ca file and a server.key and a
+	 * server.crt or none of them. Any other combo is a mistake.
+	 */
+	if (!pgsetup_validate_ssl_settings(&(options.pgSetup)))
+	{
+		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 

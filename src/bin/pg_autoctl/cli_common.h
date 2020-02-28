@@ -24,6 +24,12 @@ extern bool allowRemovingPgdata;
 extern bool createAndRun;
 extern bool outputJSON;
 
+#define SSL_CA_FILE_FLAG    1
+#define SSL_SERVER_CRT_FLAG 2
+#define SSL_SERVER_KEY_FLAG 3
+#define SSL_MODE_FLAG       4
+
+extern int ssl_flag;
 
 #define KEEPER_CLI_WORKER_SETUP_OPTIONS \
 	"  --pgctl       path to pg_ctl\n" \
@@ -38,6 +44,11 @@ extern bool outputJSON;
 	"  --formation   pg_auto_failover formation\n" \
 	"  --group       pg_auto_failover group Id\n" \
 	"  --monitor     pg_auto_failover Monitor Postgres URL\n" \
+	"  --ssl         activate ssl in Postgres configuration\n" \
+	"  --ssl-ca-file set the Postgres ssl_ca_file to that file path\n" \
+	"  --ssl-mode    use that sslmode in connection strings\n" \
+	"  --server-key  set the Postgres ssl_key_file to that file path\n" \
+	"  --server-crt  set the Postgres ssl_cert_file to that file path\n"
 
 #define KEEPER_CLI_NON_WORKER_SETUP_OPTIONS			 \
 	"  --pgctl       path to pg_ctl\n" \
@@ -51,6 +62,11 @@ extern bool outputJSON;
 	"  --formation   pg_auto_failover formation\n" \
 	"  --group       pg_auto_failover group Id\n" \
 	"  --monitor     pg_auto_failover Monitor Postgres URL\n" \
+	"  --ssl         activate ssl in Postgres configuration\n" \
+	"  --ssl-ca-file set the Postgres ssl_ca_file to that file path\n" \
+	"  --ssl-mode    use that sslmode in connection strings\n" \
+	"  --server-key  set the Postgres ssl_key_file to that file path\n" \
+	"  --server-crt  set the Postgres ssl_cert_file to that file path\n"
 
 #define KEEPER_CLI_ALLOW_RM_PGDATA_OPTION \
 	"  --allow-removing-pgdata Allow pg_autoctl to remove the database directory\n"
@@ -113,6 +129,7 @@ int cli_create_node_getopts(int argc, char **argv,
 							struct option *long_options,
 							const char *optstring,
 							KeeperConfig *options);
+bool cli_getopt_ssl_flags(PostgresSetup *pgSetup);
 int cli_getopt_pgdata(int argc, char **argv);
 void prepare_keeper_options(KeeperConfig *options);
 
@@ -128,4 +145,5 @@ bool check_or_discover_nodename(KeeperConfig *config);
 void keeper_cli_destroy_node(int argc, char **argv);
 void keeper_cli_destroy_keeper_node(Keeper *keeper,
 									KeeperConfig *config);
+
 #endif  /* CLI_COMMON_H */

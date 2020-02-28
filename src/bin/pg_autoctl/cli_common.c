@@ -31,7 +31,7 @@ KeeperConfig keeperOptions;
 bool allowRemovingPgdata = false;
 bool createAndRun = false;
 bool outputJSON = false;
-
+int ssl_flag = 0;
 
 /*
  * cli_create_node_getopts parses the CLI options for the pg_autoctl create
@@ -59,6 +59,11 @@ bool outputJSON = false;
  *		{ "quiet", no_argument, NULL, 'q' },
  *		{ "help", no_argument, NULL, 'h' },
  *		{ "run", no_argument, NULL, 'x' },
+ *      { "ssl", no_argument, NULL, 's' },
+ *      { "ssl-ca-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG },
+ *      { "server-crt", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG },
+ *      { "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG },
+ *      { "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG },
  *		{ NULL, 0, NULL, 0 }
  *	};
  *
@@ -70,7 +75,7 @@ cli_create_node_getopts(int argc, char **argv,
 						KeeperConfig *options)
 {
 	KeeperConfig LocalOptionConfig = { 0 };
-	int c, option_index, errors = 0;
+	int c, option_index = 0, errors = 0;
 	int verboseCount = 0;
 
 	/* force some non-zero default values */
@@ -309,6 +314,29 @@ cli_create_node_getopts(int argc, char **argv,
 				break;
 			}
 
+			case 's':
+			{
+				/* { "ssl", no_argument, NULL, 's' }, */
+				LocalOptionConfig.pgSetup.ssl.active = true;
+				log_trace("--ssl");
+				break;
+			}
+
+			/*
+			 * { "ssl-ca-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG }
+			 * { "server-crt", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG }
+			 * { "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG }
+			 * { "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG },
+			 */
+			case 0:
+			{
+				if (!cli_getopt_ssl_flags(&(LocalOptionConfig.pgSetup)))
+				{
+					errors++;
+				}
+				break;
+			}
+
 			default:
 			{
 				/* getopt_long already wrote an error message */
@@ -347,6 +375,16 @@ cli_create_node_getopts(int argc, char **argv,
 				 "automatically when needed. For quick testing '--auth trust' "
 				 "makes it easy to get started, "
 				 "consider another authentication mechanism for production.");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	/*
+	 * If we have --ssl, either we have a root ca file and a server.key and a
+	 * server.crt or none of them. Any other combo is a mistake.
+	 */
+	if (!pgsetup_validate_ssl_settings(&(LocalOptionConfig.pgSetup)))
+	{
+		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
@@ -399,6 +437,64 @@ cli_create_node_getopts(int argc, char **argv,
 
 	return optind;
 }
+
+
+/*
+ * cli_getopt_ssl_flags parses the SSL related options from the command line.
+ *
+ * { "ssl-ca-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG }
+ * { "server-crt", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG }
+ * { "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG }
+ * { "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG },
+ *
+ * As those options are not using any short option (one-char) variant, they all
+ * fall in the case 0, and we can process them thanks to the global variable
+ * ssl_flag, an int.
+ */
+bool
+cli_getopt_ssl_flags(PostgresSetup *pgSetup)
+{
+	switch (ssl_flag)
+	{
+		case SSL_CA_FILE_FLAG:
+		{
+			strlcpy(pgSetup->ssl.caFile, optarg, MAXPGPATH);
+			log_trace("--ssl-ca-file %s", optarg);
+			break;
+		}
+
+		case SSL_SERVER_CRT_FLAG:
+		{
+			strlcpy(pgSetup->ssl.serverCRT, optarg, MAXPGPATH);
+			log_trace("--server-crt %s", optarg);
+			break;
+		}
+
+		case SSL_SERVER_KEY_FLAG:
+		{
+			strlcpy(pgSetup->ssl.serverKey, optarg, MAXPGPATH);
+			log_trace("--server-key %s", optarg);
+			break;
+		}
+
+		case SSL_MODE_FLAG:
+		{
+			pgSetup->ssl.sslMode = pgsetup_parse_sslmode(optarg);
+
+			log_trace("--ssl-mode %s",
+					  pgsetup_sslmode_to_string(pgSetup->ssl.sslMode));
+			break;
+		}
+
+		default:
+		{
+			log_fatal("BUG: unknown ssl flag value: %d", ssl_flag);
+			return false;
+		}
+	}
+	return true;
+}
+
 
 
 /*

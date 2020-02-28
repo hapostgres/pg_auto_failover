@@ -148,23 +148,32 @@ certificates for the ``autoctl_node`` and ``pgautofailover_replication``
 users::
   
   $ pg_autoctl create monitor --ssl                    \
-                              --root root.crt          \
+                              --ssl-ca-file root.crt   \
                               --server-crt server.crt  \
                               --server-key server.key  \
+                              --ssl-mode validate-ca   \
                               ...
   
   $ pg_autoctl create postgres --ssl                    \
-                               --root root.crt          \
+                               --ssl-ca-file root.crt   \
                                --server-crt server.crt  \
                                --server-key server.key  \
+                               --ssl-mode validate-ca   \
                                ...
                               
   $ pg_autoctl create postgres --ssl                    \
-                               --root root.crt          \
+                               --ssl-ca-file root.crt   \
                                --server-crt server.crt  \
                                --server-key server.key  \
+                               --ssl-mode validate-ca   \
                                ...
 
+The option ``--ssl-mode`` can be used to force connection strings used by
+``pg_autoctl`` to contain your prefered ssl mode. It defaults to ``require``
+when SSL is used and to ``allow`` when ``--ssl`` is not used. Here, we set
+``--ssl-mode`` to ``validate-ca`` which requires SSL Certificates
+Authentication, covered next.
+                               
 SSL Certificates Authentication
 -------------------------------
 
@@ -215,7 +224,7 @@ Given that user name map, you can then use the ``cert`` authentication
 method. As with the ``pg_ident.conf`` provisioning, it is best to now
 provision the HBA rules yourself, using the ``--skip-pg-hba`` option::
 
-  $ pg_autoctl create postgres --skip-pg-hba --ssl ---root ...
+  $ pg_autoctl create postgres --skip-pg-hba --ssl --ssl-ca-file ...
 
 The HBA rule will use the authentication method ``cert`` with a map option,
 and might then look like the following on the monitor::

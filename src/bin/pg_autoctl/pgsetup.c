@@ -1122,3 +1122,194 @@ pgsetup_get_pgport()
 		return POSTGRES_PORT;
 	}
 }
+
+
+/*
+ * pgsetup_validate_ssl_settings returns true if our SSL settings are following
+ * one of the three following cases:
+ *
+ *  - ssl is not activated and no file has been provided
+ *  - ssl is activated and no file has been provided
+ *  - ssl is activated and all the files have been provided
+ *
+ * Otherwise it logs an error message and return false.
+ */
+bool
+pgsetup_validate_ssl_settings(PostgresSetup *pgSetup)
+{
+	log_trace("pgsetup_validate_ssl_settings");
+
+	if (!pgSetup->ssl.active)
+	{
+		bool valid = IS_EMPTY_STRING_BUFFER(pgSetup->ssl.caFile)
+			&& IS_EMPTY_STRING_BUFFER(pgSetup->ssl.serverCRT)
+			&& IS_EMPTY_STRING_BUFFER(pgSetup->ssl.serverKey);
+
+		/* in that case we want an sslMode of prefer at most */
+		if (pgSetup->ssl.sslMode > SSL_MODE_PREFER)
+		{
+			log_error("--ssl-mode \"%s\" requires --ssl",
+					  pgsetup_sslmode_to_string(pgSetup->ssl.sslMode));
+			return false;
+		}
+
+		if (!valid)
+		{
+			log_error("When --ssl is not used, none of the following "
+					  "ssl file options are allowed: "
+					  "--ssl-ca-file --server-crt --server-key");
+			return false;
+		}
+
+		if (pgSetup->ssl.sslMode == SSL_MODE_UNKNOWN)
+		{
+			/* install a default value for --ssl-mode */
+			pgSetup->ssl.sslMode = SSL_MODE_PREFER;
+			log_warn("Using default --ssl-mode \"%s\"",
+					 pgsetup_sslmode_to_string(pgSetup->ssl.sslMode));
+		}
+
+		return valid;
+	}
+	else
+	{
+		/* --ssl: ssl is active */
+		bool allFilesGiven = !IS_EMPTY_STRING_BUFFER(pgSetup->ssl.caFile)
+			&& !IS_EMPTY_STRING_BUFFER(pgSetup->ssl.serverCRT)
+			&& !IS_EMPTY_STRING_BUFFER(pgSetup->ssl.serverKey);
+
+		if (allFilesGiven)
+		{
+			/* when given all the files, check they exist */
+			if (!file_exists(pgSetup->ssl.caFile))
+			{
+				log_error("--ssl-ca-file file does not exist at \"%s\"",
+						  pgSetup->ssl.caFile);
+				return false;
+			}
+
+			if (!file_exists(pgSetup->ssl.serverCRT))
+			{
+				log_error("--server-crt file does not exist at \"%s\"",
+						  pgSetup->ssl.serverCRT);
+				return false;
+			}
+
+			if (!file_exists(pgSetup->ssl.serverKey))
+			{
+				log_error("--server-key file does not exist at \"%s\"",
+						  pgSetup->ssl.serverKey);
+				return false;
+			}
+
+			if (pgSetup->ssl.sslMode == SSL_MODE_UNKNOWN)
+			{
+				/* install a default value for --ssl-mode */
+				pgSetup->ssl.sslMode = SSL_MODE_REQUIRE;
+				log_warn("Using default --ssl-mode \"%s\", with client "
+						 " certificates you could upgrade to "
+						 "--ssl-mode verify-ca or verify-full",
+						 pgsetup_sslmode_to_string(pgSetup->ssl.sslMode));
+				log_info("See https://www.postgresql.org/docs/current/libpq-ssl.html for details");
+			}
+		}
+
+		if (IS_EMPTY_STRING_BUFFER(pgSetup->ssl.caFile)
+			&& IS_EMPTY_STRING_BUFFER(pgSetup->ssl.serverCRT)
+			&& IS_EMPTY_STRING_BUFFER(pgSetup->ssl.serverKey))
+		{
+			pgSetup->ssl.createSelfSignedCert = true;
+
+			/* XXX not sure about keeping that one */
+			log_info("Using --ssl without certificates: pg_autoctl will "
+					 " create self-signed certificates, allowing for "
+					 "encrypted network traffic");
+
+			/* in that case we want an sslMode of require at most */
+			if (pgSetup->ssl.sslMode > SSL_MODE_REQUIRE)
+			{
+				log_error("--ssl-mode \"%s\" is not compatible with "
+						  "self-signed certificates",
+						  pgsetup_sslmode_to_string(pgSetup->ssl.sslMode));
+				return false;
+			}
+
+			if (pgSetup->ssl.sslMode == SSL_MODE_UNKNOWN)
+			{
+				/* install a default value for --ssl-mode */
+				pgSetup->ssl.sslMode = SSL_MODE_REQUIRE;
+				log_warn("Using default --ssl-mode \"%s\"",
+						 pgsetup_sslmode_to_string(pgSetup->ssl.sslMode));
+			}
+
+			return true;
+		}
+	}
+
+	return false;
+}
+
+
+/*
+ * pg_setup_sslmode_to_string parses a string representing the sslmode into an
+ * internal enum value, so that we can easily compare values.
+ */
+SSLMode
+pgsetup_parse_sslmode(const char *sslMode)
+{
+	SSLMode enumArray[] = {	SSL_MODE_DISABLE,
+							SSL_MODE_ALLOW,
+							SSL_MODE_PREFER,
+							SSL_MODE_REQUIRE,
+							SSL_MODE_VERIFY_CA,
+							SSL_MODE_VERIFY_FULL };
+
+	char *sslModeArray[] = {"disable", "allow", "prefer", "require",
+							"verify-ca", "verify-full", NULL};
+
+	int sslModeArrayIndex = 0;
+
+	for (sslModeArrayIndex = 0;
+		 sslModeArray[sslModeArrayIndex] != NULL;
+		 sslModeArrayIndex++)
+	{
+		if (strcmp(sslMode, sslModeArray[sslModeArrayIndex]) == 0)
+		{
+			return enumArray[sslModeArrayIndex];
+		}
+	}
+
+	return SSL_MODE_UNKNOWN;
+}
+
+
+/*
+ * pgsetup_sslmode_to_string returns the string representation of the enum.
+ */
+char *
+pgsetup_sslmode_to_string(SSLMode sslMode)
+{
+	switch (sslMode)
+	{
+		case SSL_MODE_UNKNOWN:
+			return "unknown ssl mode";
+
+		case SSL_MODE_DISABLE:
+			return "disable";
+
+		case SSL_MODE_ALLOW:
+			return "allow";
+
+		case SSL_MODE_PREFER:
+			return "prefer";
+
+		case SSL_MODE_REQUIRE:
+			return "require";
+
+		case SSL_MODE_VERIFY_CA:
+			return "verify-ca";
+
+		case SSL_MODE_VERIFY_FULL:
+			return "verify-full";
+	}
+}
