@@ -287,6 +287,7 @@ ini_option_to_string(IniOption *option, char *dest, size_t size)
 	{
 		case INI_STRING_T:
 		{
+			/* option->strValue is a char **, both pointers could be NULL */
 			if (option->strValue == NULL || *(option->strValue) == NULL)
 			{
 				return false;

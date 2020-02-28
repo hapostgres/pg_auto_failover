@@ -541,7 +541,7 @@ keeper and monitor, use the following command::
 
   $ pg_autoctl drop node --help
   pg_autoctl drop node: Drop a node from the pg_auto_failover monitor
-  usage: pg_autoctl drop node  [ --pgdata ----destroy ]
+  usage: pg_autoctl drop node  [ --pgdata --destroy ]
 
     --pgdata      path to data directory
     --destroy     also destroy Postgres database

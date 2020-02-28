@@ -75,7 +75,8 @@ pghba_ensure_host_rule_exists(const char *hbaFilePath,
 	 */
 	if (SKIP_HBA(authenticationScheme))
 	{
-		log_warn("Skipping HBA edits for rule: %s", hbaLine);
+		log_warn("Skipping HBA edits (per --skip-pg-hba) for rule: %s",
+				 hbaLine);
 		return true;
 	}
 

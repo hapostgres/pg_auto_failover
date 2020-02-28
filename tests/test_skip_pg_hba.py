@@ -22,7 +22,7 @@ def test_000_create_monitor():
     monitor.wait_until_pg_is_running()
 
     with open(os.path.join("/tmp/skip/monitor", "pg_hba.conf"), 'a') as hba:
-        hba.write("hostssl all all 172.27.1.0/24 cert\n")
+        hba.write("hostssl all all %s cert\n" % cluster.networkSubnet)
 
     monitor.reload_postgres()
 
@@ -169,8 +169,8 @@ def test_001_init_primary():
     node1.create()
 
     with open(os.path.join("/tmp/skip/node1", "pg_hba.conf"), 'a') as hba:
-        hba.write("hostssl all all 172.27.1.0/24 trust\n")
-        hba.write("host replication all 172.27.1.0/24 trust\n")
+        hba.write("hostssl all all %s cert\n" % cluster.networkSubnet)
+        hba.write("host replication all %s trust\n" % cluster.networkSubnet)
 
     node1.reload_postgres()
 
@@ -187,8 +187,8 @@ def test_003_init_secondary():
     node2.create()
 
     with open(os.path.join("/tmp/skip/node1", "pg_hba.conf"), 'a') as hba:
-        hba.write("hostssl all all 172.27.1.0/24 trust\n")
-        hba.write("host replication all 172.27.1.0/24 trust\n")
+        hba.write("hostssl all all %s cert\n" % cluster.networkSubnet)
+        hba.write("host replication all %s trust\n" % cluster.networkSubnet)
 
     node2.reload_postgres()
 

@@ -38,6 +38,7 @@ class Cluster:
         os.environ["PG_REGRESS_SOCK_DIR"] = ''
         os.environ["PG_AUTOCTL_DEBUG"] = ''
         os.environ["PGHOST"] = 'localhost'
+        self.networkSubnet = networkSubnet
         self.vlan = network.VirtualLAN(networkNamePrefix, networkSubnet)
         self.monitor = None
         self.datanodes = []

@@ -268,6 +268,11 @@ cli_config_check_connections(PostgresSetup *pgSetup,
 	PGSQL pgsql = { 0 };
 	char connInfo[MAXCONNINFO] = { 0 };
 
+	bool settings_are_ok = false;
+
+	Monitor monitor = { 0 };
+	MonitorExtensionVersion version = { 0 };
+
 	pg_setup_get_local_connection_string(pgSetup, connInfo);
 	pgsql_init(&pgsql, connInfo, PGSQL_CONN_LOCAL);
 
@@ -280,64 +285,68 @@ cli_config_check_connections(PostgresSetup *pgSetup,
 	log_info("Connection to local Postgres ok, using \"%s\"", connInfo);
 
 	/*
-	 * Do not check settings on the monitor node itself.
+	 * Do not check settings on the monitor node itself. On the monitor, we
+	 * don't have a monitor_pguri in the config.
 	 */
-	if (monitor_pguri != NULL)
+	if (monitor_pguri == NULL)
 	{
-		bool settings_are_ok = false;
-
-		if (!pgsql_check_postgresql_settings(&pgsql, false, &settings_are_ok))
-		{
-			/* errors have already been logged */
-			exit(EXIT_CODE_PGSQL);
-		}
-
-		if (settings_are_ok)
-		{
-			log_info("Postgres configuration settings required "
-					 "for pg_auto_failover are ok");
-		}
-		else
-		{
-			log_warn("Failed to check required settings for pg_auto_failover, "
-					 "please review your Postgres configuration");
-		}
+		return;
 	}
 
-	/* on the monitor, we don't have a monitor_pguri in the config */
-	if (monitor_pguri != NULL)
+	/*
+	 * Check that the Postgres settings for pg_auto_failover are active in the
+	 * running Postgres instance.
+	 */
+	if (!pgsql_check_postgresql_settings(&pgsql, false, &settings_are_ok))
 	{
-		Monitor monitor = { 0 };
-		MonitorExtensionVersion version = { 0 };
+		/* errors have already been logged */
+		exit(EXIT_CODE_PGSQL);
+	}
 
-		if (!monitor_init(&monitor, (char *) monitor_pguri))
-		{
-			/* errors have already been logged */
-			exit(EXIT_CODE_MONITOR);
-		}
+	if (settings_are_ok)
+	{
+		log_info("Postgres configuration settings required "
+				 "for pg_auto_failover are ok");
+	}
+	else
+	{
+		log_warn("Failed to check required settings for pg_auto_failover, "
+				 "please review your Postgres configuration");
+	}
 
-		if (!monitor_get_extension_version(&monitor, &version))
-		{
-			log_fatal("Failed to check version compatibility with the monitor "
-					  "extension \"%s\", see above for details",
-					  PG_AUTOCTL_MONITOR_EXTENSION_NAME);
-			exit(EXIT_CODE_MONITOR);
-		}
+	/*
+	 * Now, on Postgres nodes, check that the monitor uri is valid and that we
+	 * can connect to the monitor just fine. This requires having setup the
+	 * Postgres HBA rules correctly, which is up to the user when using
+	 * --skip-pg-hba.
+	 */
+	if (!monitor_init(&monitor, (char *) monitor_pguri))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_MONITOR);
+	}
 
-		log_info("Connection to monitor ok, using \"%s\"", monitor_pguri);
+	if (!monitor_get_extension_version(&monitor, &version))
+	{
+		log_fatal("Failed to check version compatibility with the monitor "
+				  "extension \"%s\", see above for details",
+				  PG_AUTOCTL_MONITOR_EXTENSION_NAME);
+		exit(EXIT_CODE_MONITOR);
+	}
 
-		if (strcmp(version.installedVersion, PG_AUTOCTL_EXTENSION_VERSION) == 0)
-		{
-			log_info("Monitor is running version \"%s\", as expected",
-					 version.installedVersion);
-		}
-		else
-		{
-			log_info("Monitor is running version \"%s\" "
-					 "instead of expected version \"%s\"",
-					 version.installedVersion, PG_AUTOCTL_EXTENSION_VERSION);
-			log_warn("Please connect to the monitor node and restart pg_autoctl.");
-		}
+	log_info("Connection to monitor ok, using \"%s\"", monitor_pguri);
+
+	if (strcmp(version.installedVersion, PG_AUTOCTL_EXTENSION_VERSION) == 0)
+	{
+		log_info("Monitor is running version \"%s\", as expected",
+				 version.installedVersion);
+	}
+	else
+	{
+		log_info("Monitor is running version \"%s\" "
+				 "instead of expected version \"%s\"",
+				 version.installedVersion, PG_AUTOCTL_EXTENSION_VERSION);
+		log_warn("Please connect to the monitor node and restart pg_autoctl.");
 	}
 
 	/* TODO: check streaming replication connections */
