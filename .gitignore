@@ -43,3 +43,4 @@ lib*.pc
 pgautofailover--?.?.sql
 !pgautofailover--1.0.sql
 
+/compile_commands.json
