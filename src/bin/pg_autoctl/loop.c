@@ -582,7 +582,12 @@ create_pidfile(const char *pidfile, pid_t pid)
 
 	log_trace("create_pidfile(%d): \"%s\"", pid, pidfile);
 
-	sprintf(content, "%d", pid);
+	/*
+	 * Explanation of IGNORE-BANNED:
+	 * snprintf is safe to use here since we are printing 32 bit signed integer.
+	 * Buffer is a lot larger then necessary.
+	 */
+	snprintf(content, BUFSIZE, "%d", pid); /* IGNORE-BANNED */
 
 	return write_file(content, strlen(content), pidfile);
 }

@@ -866,7 +866,7 @@ monitor_init_from_pgsetup(Monitor *monitor, PostgresSetup *pgSetup)
 		{
 			bool missingPgdataIsOk = false;
 			bool pgIsNotRunningIsOk = false;
-			char connInfo[MAXCONNINFO];
+			PQExpBuffer connInfo = NULL;
 			MonitorConfig mconfig = { 0 };
 
 			if (!monitor_config_init_from_pgsetup(&mconfig, pgSetup,
@@ -877,8 +877,9 @@ monitor_init_from_pgsetup(Monitor *monitor, PostgresSetup *pgSetup)
 				return false;
 			}
 
-			pg_setup_get_local_connection_string(&mconfig.pgSetup, connInfo);
-			monitor_init(monitor, connInfo);
+			pg_setup_get_local_connection_string(&mconfig.pgSetup, &connInfo);
+			monitor_init(monitor, connInfo->data);
+			destroyPQExpBuffer(connInfo);
 
 			break;
 		}

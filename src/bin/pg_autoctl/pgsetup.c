@@ -341,7 +341,7 @@ pg_setup_init(PostgresSetup *pgSetup,
 		&& pgSetup->pgport == pgSetup->pidFile.port)
 	{
 		PGSQL pgsql = { 0 };
-		char connInfo[MAXCONNINFO];
+		PQExpBuffer connInfo = NULL;
 		char dbname[NAMEDATALEN];
 
 		/*
@@ -374,8 +374,9 @@ pg_setup_init(PostgresSetup *pgSetup,
 		strlcpy(pgSetup->dbname, "template1", NAMEDATALEN);
 
 		/* initialise a SQL connection to the local postgres server */
-		pg_setup_get_local_connection_string(pgSetup, connInfo);
-		pgsql_init(&pgsql, connInfo, PGSQL_CONN_LOCAL);
+		pg_setup_get_local_connection_string(pgSetup, &connInfo);
+		pgsql_init(&pgsql, connInfo->data, PGSQL_CONN_LOCAL);
+		destroyPQExpBuffer(connInfo);
 
 		if (!pgsql_is_in_recovery(&pgsql, &pgSetup->is_in_recovery))
 		{
@@ -636,18 +637,20 @@ pg_setup_as_json(PostgresSetup *pgSetup, JSON_Value *js)
 
 /*
  * pg_setup_get_local_connection_string build a connecting string to connect
- * to the local postgres server and writes it to connectionString, which should
- * be at least MAXCONNINFO in size.
+ * to the local postgres server and returns in connectionString.
+ * Caller is responsible for destroying the memory.
  */
 bool
 pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
-									 char *connectionString)
+									 PQExpBuffer *connectionString)
 {
 	char *pg_regress_sock_dir = getenv("PG_REGRESS_SOCK_DIR");
-	char *connStringEnd = connectionString;
+	PQExpBuffer connectionStringBuffer = createPQExpBuffer();
 
-	connStringEnd += sprintf(connStringEnd, "port=%d dbname=%s",
-							 pgSetup->pgport, pgSetup->dbname);
+	enlargePQExpBuffer(connectionStringBuffer, MAXCONNINFO);
+
+	appendPQExpBuffer(connectionStringBuffer, "port=%d dbname=%s",
+					  pgSetup->pgport, pgSetup->dbname);
 
 	/*
 	 * When PG_REGRESS_SOCK_DIR is set and empty, we force the connection
@@ -660,7 +663,7 @@ pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 		&& (IS_EMPTY_STRING_BUFFER(pgSetup->pghost)
 			|| pgSetup->pghost[0] == '/'))
 	{
-		connStringEnd += sprintf(connStringEnd, " host=localhost");
+		appendPQExpBuffer(connectionStringBuffer, " host=localhost");
 	}
 	else if (!IS_EMPTY_STRING_BUFFER(pgSetup->pghost))
 	{
@@ -678,14 +681,15 @@ pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 					 pg_regress_sock_dir,
 					 pgSetup->pghost);
 		}
-		connStringEnd += sprintf(connStringEnd, " host=%s", pgSetup->pghost);
+		appendPQExpBuffer(connectionStringBuffer, " host=%s", pgSetup->pghost);
 	}
 
 	if (!IS_EMPTY_STRING_BUFFER(pgSetup->username))
 	{
-		connStringEnd += sprintf(connStringEnd, " user=%s", pgSetup->username);
+		appendPQExpBuffer(connectionStringBuffer, " user=%s", pgSetup->username);
 	}
 
+	*connectionString = connectionStringBuffer;
 	return true;
 }
 

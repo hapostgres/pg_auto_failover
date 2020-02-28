@@ -504,7 +504,7 @@ keeper_update_pg_state(Keeper *keeper)
 	 */
 	if (pg_setup_is_ready(pgSetup, pg_is_not_running_is_ok))
 	{
-		char connInfo[MAXCONNINFO];
+		PQExpBuffer connInfo = NULL;
 
 		if (pgSetup->pidFile.port != config->pgSetup.pgport)
 		{
@@ -521,8 +521,10 @@ keeper_update_pg_state(Keeper *keeper)
 		 * Reinitialise connection string in case host changed or was first
 		 * discovered.
 		 */
-		pg_setup_get_local_connection_string(pgSetup, connInfo);
-		pgsql_init(pgsql, connInfo, PGSQL_CONN_LOCAL);
+		pg_setup_get_local_connection_string(pgSetup, &connInfo);
+		pgsql_init(pgsql, connInfo->data, PGSQL_CONN_LOCAL);
+
+		destroyPQExpBuffer(connInfo);
 
 		/*
 		 * Update our Postgres metadata now.

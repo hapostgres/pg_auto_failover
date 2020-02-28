@@ -653,7 +653,7 @@ cli_create_monitor(int argc, char **argv)
 {
 	Monitor monitor = { 0 };
 	MonitorConfig config = monitorOptions;
-	char connInfo[MAXCONNINFO];
+	PQExpBuffer connInfo = NULL;
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
 
@@ -734,8 +734,9 @@ cli_create_monitor(int argc, char **argv)
 		}
 	}
 
-	pg_setup_get_local_connection_string(&(config.pgSetup), connInfo);
-	monitor_init(&monitor, connInfo);
+	pg_setup_get_local_connection_string(&(config.pgSetup), &connInfo);
+	monitor_init(&monitor, connInfo->data);
+	destroyPQExpBuffer(connInfo);
 
 	/* Ok, now we know we have a configuration file, and it's been loaded. */
 	if (!monitor_pg_init(&monitor, &config))

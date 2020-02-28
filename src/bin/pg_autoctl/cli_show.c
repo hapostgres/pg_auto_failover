@@ -570,7 +570,7 @@ cli_show_all_uri(int argc, char **argv)
 				exit(EXIT_CODE_BAD_CONFIG);
 			}
 
-			monitor_init(&monitor, connInfo);
+ 	 	 	monitor_init(&monitor, connInfo);
 
 			if (outputJSON)
 			{

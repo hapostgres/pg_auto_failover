@@ -189,7 +189,7 @@ monitor_install(const char *nodename,
 	bool missingPgdataIsOk = false;
 	bool pgIsNotRunningIsOk = false;
 	LocalPostgresServer postgres = { 0 };
-	char connInfo[MAXCONNINFO];
+	PQExpBuffer connInfo = NULL;
 
 	/* We didn't create our target username/dbname yet */
 	strlcpy(pgSetupOption.username, "", NAMEDATALEN);
@@ -232,8 +232,9 @@ monitor_install(const char *nodename,
 
 	/* now, connect to the newly created database to create our extension */
 	strlcpy(pgSetup.dbname, PG_AUTOCTL_MONITOR_DBNAME, NAMEDATALEN);
-	pg_setup_get_local_connection_string(&pgSetup, connInfo);
-	pgsql_init(&postgres.sqlClient, connInfo, PGSQL_CONN_LOCAL);
+	pg_setup_get_local_connection_string(&pgSetup, &connInfo);
+	pgsql_init(&postgres.sqlClient, connInfo->data, PGSQL_CONN_LOCAL);
+	destroyPQExpBuffer(connInfo);
 
 	if (!pgsql_create_extension(&postgres.sqlClient,
 								PG_AUTOCTL_MONITOR_EXTENSION_NAME))
@@ -292,11 +293,12 @@ static bool
 check_monitor_settings(PostgresSetup pgSetup)
 {
 	LocalPostgresServer postgres = { 0 };
-	char connInfo[MAXCONNINFO];
+	PQExpBuffer connInfo = NULL;
 	bool settingsAreOk = false;
 
-	pg_setup_get_local_connection_string(&pgSetup, connInfo);
-	pgsql_init(&postgres.sqlClient, connInfo, PGSQL_CONN_LOCAL);
+	pg_setup_get_local_connection_string(&pgSetup, &connInfo);
+	pgsql_init(&postgres.sqlClient, connInfo->data, PGSQL_CONN_LOCAL);
+	destroyPQExpBuffer(connInfo);
 
 	if (!pgsql_check_monitor_settings(&(postgres.sqlClient), &settingsAreOk))
 	{

@@ -193,7 +193,7 @@ cli_monitor_run(int argc, char **argv)
 	MonitorExtensionVersion version = { 0 };
 	bool missingPgdataIsOk = false;
 	bool pgIsNotRunningIsOk = true;
-	char connInfo[MAXCONNINFO];
+	PQExpBuffer connInfo = NULL;
 	char *channels[] = { "log", "state", NULL };
 
 	if (!monitor_config_init_from_pgsetup(&mconfig,
@@ -205,8 +205,9 @@ cli_monitor_run(int argc, char **argv)
 		exit(EXIT_CODE_PGCTL);
 	}
 
-	pg_setup_get_local_connection_string(&(mconfig.pgSetup), connInfo);
-	monitor_init(&monitor, connInfo);
+	pg_setup_get_local_connection_string(&(mconfig.pgSetup), &connInfo);
+	monitor_init(&monitor, connInfo->data);
+	destroyPQExpBuffer(connInfo);
 
 	(void) monitor_service_run(&monitor, &mconfig);
 }
