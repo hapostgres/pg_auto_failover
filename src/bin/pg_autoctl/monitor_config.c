@@ -179,7 +179,7 @@ monitor_config_init(MonitorConfig *config,
 	 * Keep the whole set of values discovered in pg_setup_init from the
 	 * configuration file
 	 */
-	memcpy(&(config->pgSetup), &pgSetup, sizeof(PostgresSetup));
+	config->pgSetup = pgSetup;
 
 	/* set our configuration and state file pathnames */
 	if (!SetConfigFilePath(&(config->pathnames), config->pgSetup.pgdata))
@@ -287,7 +287,7 @@ monitor_config_read_file(MonitorConfig *config,
 	 * Keep the whole set of values discovered in pg_setup_init from the
 	 * configuration file
 	 */
-	memcpy(&(config->pgSetup), &pgSetup, sizeof(PostgresSetup));
+	config->pgSetup = pgSetup;
 
 	/* A part of the monitor's pgSetup is hard-coded. */
 	strlcpy(config->pgSetup.dbname, PG_AUTOCTL_MONITOR_DBNAME, NAMEDATALEN);
@@ -419,7 +419,7 @@ monitor_config_merge_options(MonitorConfig *config, MonitorConfig *options)
 		 * Keep the whole set of values discovered in pg_setup_init from the
 		 * configuration file
 		 */
-		memcpy(&(config->pgSetup), &pgSetup, sizeof(PostgresSetup));
+		config->pgSetup = pgSetup;
 
 		return monitor_config_write_file(config);
 	}

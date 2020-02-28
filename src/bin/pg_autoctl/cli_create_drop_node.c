@@ -926,6 +926,7 @@ cli_drop_node(int argc, char **argv)
 			if (IS_EMPTY_STRING_BUFFER(config.nodename)
 				|| config.pgSetup.pgport == 0)
 			{
+
 				log_fatal("To remove a node from the monitor, both the "
 						  "--nodename and --pgport options are required");
 				exit(EXIT_CODE_BAD_ARGS);
