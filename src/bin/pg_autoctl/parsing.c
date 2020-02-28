@@ -354,7 +354,7 @@ splitLines(char *errorMessage, char **linesArray, int size)
 			currentLine = ++newLinePtr;
 		}
 	}
-	while (currentLine != NULL && *currentLine != '\0');
+	while (currentLine != NULL && *currentLine != '\0' && lineNumber < size);
 
 	return lineNumber;
 }
