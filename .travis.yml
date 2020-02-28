@@ -24,8 +24,8 @@ before_install:
   - nuke_pg
   - python --version
   - pyenv versions
-  - pyenv install -s 3.6.9
-  - pyenv global 3.6.9
+  - pyenv install -s 3.6
+  - pyenv global 3.6
   - sudo apt-get install bridge-utils
   - sudo apt-get install python3-pip
   - sudo pip3 install --upgrade pip
