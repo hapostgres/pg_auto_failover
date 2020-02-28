@@ -85,7 +85,7 @@ pg_ctl_version(const char *pg_ctl_path)
 		return NULL;
 	}
 
-	version = parse_version_number(prog.stdout);
+	version = parse_version_number(prog.stdOut);
 	free_program(&prog);
 
 	return version;
@@ -116,7 +116,7 @@ pg_controldata(PostgresSetup *pgSetup, bool missing_ok)
 
 	if (prog.returnCode == 0)
 	{
-		if (prog.stdout == NULL)
+		if (prog.stdOut == NULL)
 		{
 			/* happens sometimes, and I don't know why */
 			log_warn("Got empty output from `%s %s`, trying again in 1s",
@@ -126,10 +126,10 @@ pg_controldata(PostgresSetup *pgSetup, bool missing_ok)
 			return pg_controldata(pgSetup, missing_ok);
 		}
 
-		if (!parse_controldata(&pgSetup->control, prog.stdout))
+		if (!parse_controldata(&pgSetup->control, prog.stdOut))
 		{
 			log_error("%s %s", pg_controldata_path, pgSetup->pgdata);
-			log_warn("Failed to parse pg_controldata output:\n%s", prog.stdout);
+			log_warn("Failed to parse pg_controldata output:\n%s", prog.stdOut);
 			free_program(&prog);
 			return false;
 		}
@@ -142,7 +142,7 @@ pg_controldata(PostgresSetup *pgSetup, bool missing_ok)
 		if (!missing_ok)
 		{
 			char *errorLines[BUFSIZE];
-			int lineCount = splitLines(prog.stderr, errorLines, BUFSIZE);
+			int lineCount = splitLines(prog.stdErr, errorLines, BUFSIZE);
 			int lineNumber = 0;
 
 			for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
@@ -585,20 +585,20 @@ pg_rewind(const char *pgdata, const char *pg_ctl, const char *primaryHost,
 static void
 log_program_output(Program prog)
 {
-	if (prog.stdout != NULL)
+	if (prog.stdOut != NULL)
 	{
-		log_info("%s", prog.stdout);
+		log_info("%s", prog.stdOut);
 	}
 
-	if (prog.stderr != NULL)
+	if (prog.stdErr != NULL)
 	{
 		if (prog.returnCode == 0)
 		{
-			log_info("%s", prog.stderr);
+			log_info("%s", prog.stdErr);
 		}
 		else
 		{
-			log_error("%s", prog.stderr);
+			log_error("%s", prog.stdErr);
 		}
 	}
 }
@@ -729,9 +729,9 @@ pg_ctl_start(const char *pg_ctl,
 			log_warn("Failed to start PostgreSQL. pg_ctl start returned: %d",
 					 program.returnCode);
 
-			if (program.stdout != NULL)
+			if (program.stdOut != NULL)
 			{
-				log_warn("%s", program.stdout);
+				log_warn("%s", program.stdOut);
 			}
 
 			log_info("PostgreSQL is running. pg_ctl status returned %d",
@@ -745,9 +745,9 @@ pg_ctl_start(const char *pg_ctl,
 			log_error("Failed to start PostgreSQL. pg_ctl start returned: %d",
 					  program.returnCode);
 
-			if (program.stdout)
+			if (program.stdOut)
 			{
-				log_error("%s", program.stdout);
+				log_error("%s", program.stdOut);
 			}
 		}
 
@@ -762,9 +762,9 @@ pg_ctl_start(const char *pg_ctl,
 	 * Now append the output from pg_ctl start (known to be all in stdout) to
 	 * the startup log file, as if by using pg_ctl --log option.
 	 */
-	if (program.stdout)
+	if (program.stdOut)
 	{
-		append_to_file(program.stdout, strlen(program.stdout), logfile);
+		append_to_file(program.stdOut, strlen(program.stdOut), logfile);
 	}
 
 	free_program(&program);
@@ -909,9 +909,9 @@ pg_ctl_promote(const char *pg_ctl, const char *pgdata)
 
 	log_debug("%s promote -D %s", pg_ctl, pgdata);
 
-	if (program.stderr != NULL)
+	if (program.stdErr != NULL)
 	{
-		log_error("%s", program.stderr);
+		log_error("%s", program.stdErr);
 	}
 
 	if (returnCode != 0)
