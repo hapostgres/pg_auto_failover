@@ -386,7 +386,7 @@ keeper_update_pg_state(Keeper *keeper)
 
 	log_debug("Update local PostgreSQL state");
 
-	memcpy(pgSetup, &(config->pgSetup), sizeof(PostgresSetup));
+	*pgSetup = config->pgSetup;
 
 	/* reinitialize the replication state values each time we update */
 	postgres->pgIsRunning = false;
@@ -1063,7 +1063,7 @@ keeper_init_state_read(Keeper *keeper, KeeperStateInit *initState)
 	if (fileSize >= sizeof(KeeperStateData)
 		&& pg_autoctl_state_version == PG_AUTOCTL_STATE_VERSION)
 	{
-		memcpy(initState, content, sizeof(KeeperStateInit));
+		*initState = *(KeeperStateInit*) content;
 		free(content);
 		return true;
 	}

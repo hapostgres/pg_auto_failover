@@ -57,7 +57,7 @@ keeper_state_read(KeeperStateData *keeperState, const char *filename)
 	if (fileSize >= sizeof(KeeperStateData)
 		&& keeper_state_is_readable(pg_autoctl_state_version))
 	{
-		memcpy(keeperState, content, sizeof(KeeperStateData));
+		*keeperState = *(KeeperStateData*) content;
 		free(content);
 		return true;
 	}
