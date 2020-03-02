@@ -439,7 +439,7 @@ expandDebianPatternsInDirectoryName(char *pathname,
 					 */
 					if ((pathnameIndex + versionSize) < pathnameSize)
 					{
-						memcpy(pathname+pathnameIndex, versionName, versionSize);
+						strlcpy(pathname+pathnameIndex, versionName, pathnameSize - pathnameIndex);
 						pathnameIndex += versionSize;
 					}
 					break;
@@ -456,7 +456,7 @@ expandDebianPatternsInDirectoryName(char *pathname,
 					 */
 					if ((pathnameIndex + clusterSize) < pathnameSize)
 					{
-						memcpy(pathname+pathnameIndex, clusterName, clusterSize);
+						strlcpy(pathname+pathnameIndex, clusterName, pathnameSize - pathnameIndex);
 						pathnameIndex += clusterSize;
 					}
 					break;
