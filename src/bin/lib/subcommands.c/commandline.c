@@ -263,8 +263,15 @@ commandline_add_breadcrumb(CommandLine *command, CommandLine *subcommand)
 	int breadcrumbLength = strlen(command_bc);
 	int subcommandLength = strlen(subcommand->name);
 
+	/* allocate enough memory for content + space + null termination */
 	breadcrumbLength += subcommandLength + 2;
 
 	subcommand->breadcrumb = (char *) malloc(breadcrumbLength * sizeof(char));
-	sprintf(subcommand->breadcrumb, "%s %s", command_bc, subcommand->name);
+
+	/*
+	 * Explanation of IGNORE-BANNED:
+	 * snprintf is safe to use here. We never write beyond the buffer.
+	 * We allocated storage to allow space and null termination.
+	 */
+	snprintf(subcommand->breadcrumb, breadcrumbLength, "%s %s", command_bc, subcommand->name); /* IGNORE-BANNED */
 }

@@ -391,7 +391,13 @@ keeper_update_pg_state(Keeper *keeper)
 	/* reinitialize the replication state values each time we update */
 	postgres->pgIsRunning = false;
 	memset(postgres->pgsrSyncState, 0, PGSR_SYNC_STATE_MAXLENGTH);
-	strcpy(postgres->currentLSN, "0/0");
+
+	/*
+	 * Explanation of IGNORE-BANNED:
+	 * snprintf is safe to use here. We never write beyond the buffer.
+	 * buffer is PG_LSN_MAXLENGTH (18) bytes long and we use 4 bytes total
+	 */
+	snprintf(postgres->currentLSN, PG_LSN_MAXLENGTH, "0/0"); /* IGNORE-BANNED */
 
 	/*
 	 * In some states, it's ok to not have a PostgreSQL data directory at all.

@@ -980,7 +980,16 @@ printLastEvents(void *ctx, PGresult *result)
 		char node[BUFSIZE];
 
 		/* for our grid alignment output it's best to have a single col here */
-		sprintf(node, "%s/%s", groupId, nodeId);
+
+		/*
+		 * Explanation of IGNORE-BANNED:
+		 * snprintf is safe to use here since we groupid and nodeid
+		 * are the serialized versions of bigint and int respectively.
+		 * Values are returned by our own UDF in the monitor. Allocated
+		 * buffer is large enough to have the information.
+		 * Buffer is a lot larger then necessary. We never write beyond the buffer.
+		 */
+		snprintf(node, BUFSIZE, "%s/%s", groupId, nodeId); /* IGNORE-BANNED */
 
 		fprintf(stdout, "%30s | %10s | %6s | %18s | %18s | %s\n",
 				eventTime, formation, node, currentState, goalState, description);

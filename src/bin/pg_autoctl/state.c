@@ -94,9 +94,24 @@ keeper_state_write(KeeperStateData *keeperState, const char *filename)
 	int fd;
 	char buffer[PG_AUTOCTL_KEEPER_STATE_FILE_SIZE];
 	char tempFileName[MAXPGPATH];
+	int newPathLength = -1;
+
 
 	/* we're going to write our contents to keeper.state.new first */
-	sprintf(tempFileName, "%s.new", filename);
+
+	/*
+	 * Explanation of IGNORE-BANNED:
+	 * snprintf is safe to use here. We never write beyond the buffer.
+	 * If the file path is longer than the available buffer,
+	 * we stop execution and report error.
+	 */
+	newPathLength = snprintf(tempFileName, MAXPGPATH, "%s.new", filename); /* IGNORE-BANNED */
+	if (newPathLength >= MAXPGPATH)
+	{
+		log_fatal("Failed to create keeper state file \"%s\" : "
+				  "filename is too long", filename);
+		return false;
+	}
 
 	/*
 	 * The keeper process might have been stopped in immediate shutdown mode
