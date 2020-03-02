@@ -1142,7 +1142,7 @@ pgsetup_validate_ssl_settings(PostgresSetup *pgSetup)
 	if (!pgSetup->ssl.active)
 	{
 		bool valid = IS_EMPTY_STRING_BUFFER(pgSetup->ssl.caFile)
-			&& IS_EMPTY_STRING_BUFFER(pgSetup->ssl.serverCRT)
+			&& IS_EMPTY_STRING_BUFFER(pgSetup->ssl.serverCert)
 			&& IS_EMPTY_STRING_BUFFER(pgSetup->ssl.serverKey);
 
 		/* in that case we want an sslMode of prefer at most */
@@ -1175,7 +1175,7 @@ pgsetup_validate_ssl_settings(PostgresSetup *pgSetup)
 	{
 		/* --ssl: ssl is active */
 		bool allFilesGiven = !IS_EMPTY_STRING_BUFFER(pgSetup->ssl.caFile)
-			&& !IS_EMPTY_STRING_BUFFER(pgSetup->ssl.serverCRT)
+			&& !IS_EMPTY_STRING_BUFFER(pgSetup->ssl.serverCert)
 			&& !IS_EMPTY_STRING_BUFFER(pgSetup->ssl.serverKey);
 
 		if (allFilesGiven)
@@ -1188,10 +1188,10 @@ pgsetup_validate_ssl_settings(PostgresSetup *pgSetup)
 				return false;
 			}
 
-			if (!file_exists(pgSetup->ssl.serverCRT))
+			if (!file_exists(pgSetup->ssl.serverCert))
 			{
 				log_error("--server-crt file does not exist at \"%s\"",
-						  pgSetup->ssl.serverCRT);
+						  pgSetup->ssl.serverCert);
 				return false;
 			}
 
@@ -1215,7 +1215,7 @@ pgsetup_validate_ssl_settings(PostgresSetup *pgSetup)
 		}
 
 		if (IS_EMPTY_STRING_BUFFER(pgSetup->ssl.caFile)
-			&& IS_EMPTY_STRING_BUFFER(pgSetup->ssl.serverCRT)
+			&& IS_EMPTY_STRING_BUFFER(pgSetup->ssl.serverCert)
 			&& IS_EMPTY_STRING_BUFFER(pgSetup->ssl.serverKey))
 		{
 			pgSetup->ssl.createSelfSignedCert = true;

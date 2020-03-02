@@ -317,7 +317,7 @@ cli_create_node_getopts(int argc, char **argv,
 			case 's':
 			{
 				/* { "ssl", no_argument, NULL, 's' }, */
-				LocalOptionConfig.pgSetup.ssl.active = true;
+				LocalOptionConfig.pgSetup.ssl.active = 1;
 				log_trace("--ssl");
 				break;
 			}
@@ -459,21 +459,28 @@ cli_getopt_ssl_flags(PostgresSetup *pgSetup)
 		case SSL_CA_FILE_FLAG:
 		{
 			strlcpy(pgSetup->ssl.caFile, optarg, MAXPGPATH);
-			log_trace("--ssl-ca-file %s", optarg);
+			log_trace("--ssl-ca-file %s", pgSetup->ssl.caFile);
+			break;
+		}
+
+		case SSL_CRL_FILE_FLAG:
+		{
+			strlcpy(pgSetup->ssl.crlFile, optarg, MAXPGPATH);
+			log_trace("--ssl-crl-file %s", pgSetup->ssl.crlFile);
 			break;
 		}
 
 		case SSL_SERVER_CRT_FLAG:
 		{
-			strlcpy(pgSetup->ssl.serverCRT, optarg, MAXPGPATH);
-			log_trace("--server-crt %s", optarg);
+			strlcpy(pgSetup->ssl.serverCert, optarg, MAXPGPATH);
+			log_trace("--server-cert %s", pgSetup->ssl.serverCert);
 			break;
 		}
 
 		case SSL_SERVER_KEY_FLAG:
 		{
 			strlcpy(pgSetup->ssl.serverKey, optarg, MAXPGPATH);
-			log_trace("--server-key %s", optarg);
+			log_trace("--server-key %s", pgSetup->ssl.serverKey);
 			break;
 		}
 

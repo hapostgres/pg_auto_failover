@@ -64,6 +64,26 @@
 	make_strbuf_option("postgresql", "auth_method", "auth", \
 					   false, MAXPGPATH, config->pgSetup.authMethod)
 
+#define OPTION_SSL_ACTIVE(config)							\
+	make_int_option_default("ssl", "active", NULL,			\
+							false, &(config->pgSetup.ssl.active), 0)
+
+#define OPTION_SSL_CA_FILE(config)								\
+	make_strbuf_option("ssl", "ca_file", "ssl-ca-file",			\
+					   false, MAXPGPATH, config->pgSetup.ssl.caFile)
+
+#define OPTION_SSL_CRL_FILE(config)								\
+	make_strbuf_option("ssl", "crl_file", "ssl-crl-file",		\
+					   false, MAXPGPATH, config->pgSetup.ssl.crlFile)
+
+#define OPTION_SSL_SERVER_CERT(config)							\
+	make_strbuf_option("ssl", "cert_file", "server-cert",		\
+					   false, MAXPGPATH, config->pgSetup.ssl.serverCert)
+
+#define OPTION_SSL_SERVER_KEY(config)								\
+	make_strbuf_option("ssl", "key_file", "server-key",				\
+					   false, MAXPGPATH, config->pgSetup.ssl.serverKey)
+
 
 #define SET_INI_OPTIONS_ARRAY(config) \
 	{ \
@@ -77,6 +97,11 @@
 		OPTION_POSTGRESQL_PORT(config), \
 		OPTION_POSTGRESQL_LISTEN_ADDRESSES(config), \
 		OPTION_POSTGRESQL_AUTH_METHOD(config), \
+		OPTION_SSL_ACTIVE(config), \
+		OPTION_SSL_CA_FILE(config), \
+		OPTION_SSL_CRL_FILE(config), \
+		OPTION_SSL_SERVER_CERT(config), \
+		OPTION_SSL_SERVER_KEY(config), \
 		INI_OPTION_LAST \
 	}
 

@@ -57,47 +57,52 @@ static void stop_postgres_and_remove_pgdata_and_config(
 	PostgresSetup *pgSetup);
 
 CommandLine create_monitor_command =
-	make_command("monitor",
-				 "Initialize a pg_auto_failover monitor node",
-				 " [ --pgdata --pgport --pgctl --nodename ] ",
-				 "  --pgctl       path to pg_ctl\n"
-				 "  --pgdata      path to data directory\n"
-				 "  --pgport      PostgreSQL's port number\n"
-				 "  --nodename    hostname by which postgres is reachable\n"
-				 "  --auth        authentication method for connections from data nodes\n"
-				 "  --skip-pg-hba skip editing pg_hba.conf rules\n"
-				 "  --run         create node then run pg_autoctl service\n"
-				 "  --ssl         activate ssl in Postgres configuration\n"
-				 "  --ssl-ca-file set the Postgres ssl_ca_file to that file path\n"
-				 "  --server-key  set the Postgres ssl_key_file to that file path\n"
-				 "  --server-crt  set the Postgres ssl_cert_file to that file path\n",
-				 cli_create_monitor_getopts,
-				 cli_create_monitor);
+	make_command(
+		"monitor",
+		"Initialize a pg_auto_failover monitor node",
+		" [ --pgdata --pgport --pgctl --nodename ] ",
+		"  --pgctl        path to pg_ctl\n"
+		"  --pgdata       path to data directory\n"
+		"  --pgport       PostgreSQL's port number\n"
+		"  --nodename     hostname by which postgres is reachable\n"
+		"  --auth         authentication method for connections from data nodes\n"
+		"  --skip-pg-hba  skip editing pg_hba.conf rules\n"
+		"  --run          create node then run pg_autoctl service\n"
+		"  --ssl          activate ssl in Postgres configuration\n"
+		"  --ssl-mode     use that sslmode in connection strings\n"
+		"  --ssl-ca-file  set the Postgres ssl_ca_file to that file path\n"
+		"  --ssl-crl-file set the Postgres ssl_crl_file to that file path\n"
+		"  --server-key   set the Postgres ssl_key_file to that file path\n"
+		"  --server-cert  set the Postgres ssl_cert_file to that file path\n",
+		cli_create_monitor_getopts,
+		cli_create_monitor);
 
 CommandLine create_postgres_command =
-	make_command("postgres",
-				 "Initialize a pg_auto_failover standalone postgres node",
-				 "",
-				 "  --pgctl       path to pg_ctl\n"
-				 "  --pgdata      path to data director\n"
-				 "  --pghost      PostgreSQL's hostname\n"
-				 "  --pgport      PostgreSQL's port number\n"
-				 "  --listen      PostgreSQL's listen_addresses\n"
-				 "  --username    PostgreSQL's username\n"
-				 "  --dbname      PostgreSQL's database name\n"
-				 "  --nodename    pg_auto_failover node\n"
-				 "  --formation   pg_auto_failover formation\n"
-				 "  --monitor     pg_auto_failover Monitor Postgres URL\n"
-				 "  --auth        authentication method for connections from monitor\n"
-				 "  --skip-pg-hba skip editing pg_hba.conf rules\n"
-				 "  --ssl         activate ssl in Postgres configuration\n" \
-				 "  --ssl-ca-file set the Postgres ssl_ca_file to that file path\n" \
-				 "  --ssl-mode    use that sslmode in connection strings\n" \
-				 "  --server-key  set the Postgres ssl_key_file to that file path\n" \
-				 "  --server-crt  set the Postgres ssl_cert_file to that file path\n"
-				 KEEPER_CLI_ALLOW_RM_PGDATA_OPTION,
-				 cli_create_postgres_getopts,
-				 cli_create_postgres);
+	make_command(
+		"postgres",
+		"Initialize a pg_auto_failover standalone postgres node",
+		"",
+		"  --pgctl       path to pg_ctl\n"
+		"  --pgdata      path to data director\n"
+		"  --pghost      PostgreSQL's hostname\n"
+		"  --pgport      PostgreSQL's port number\n"
+		"  --listen      PostgreSQL's listen_addresses\n"
+		"  --username    PostgreSQL's username\n"
+		"  --dbname      PostgreSQL's database name\n"
+		"  --nodename    pg_auto_failover node\n"
+		"  --formation   pg_auto_failover formation\n"
+		"  --monitor     pg_auto_failover Monitor Postgres URL\n"
+		"  --auth        authentication method for connections from monitor\n"
+		"  --skip-pg-hba skip editing pg_hba.conf rules\n"
+		"  --ssl          activate ssl in Postgres configuration\n"
+		"  --ssl-mode     use that sslmode in connection strings\n"
+		"  --ssl-ca-file  set the Postgres ssl_ca_file to that file path\n"
+		"  --ssl-crl-file set the Postgres ssl_crl_file to that file path\n"
+		"  --server-key   set the Postgres ssl_key_file to that file path\n"
+		"  --server-cert  set the Postgres ssl_cert_file to that file path\n"
+		KEEPER_CLI_ALLOW_RM_PGDATA_OPTION,
+		cli_create_postgres_getopts,
+		cli_create_postgres);
 
 CommandLine drop_node_command =
 	make_command("node",
@@ -255,10 +260,11 @@ cli_create_postgres_getopts(int argc, char **argv)
  		{ "help", no_argument, NULL, 'h' },
 		{ "run", no_argument, NULL, 'x' },
 		{ "ssl", no_argument, NULL, 's' },
-		{ "ssl-ca-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG },
-		{ "server-crt", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG },
-		{ "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG },
 		{ "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG },
+		{ "ssl-ca-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG },
+		{ "ssl-crl-file", required_argument, &ssl_flag, SSL_CRL_FILE_FLAG },
+		{ "server-cert", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG },
+		{ "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG },
 		{ NULL, 0, NULL, 0 }
 	};
 
@@ -332,8 +338,10 @@ cli_create_monitor_getopts(int argc, char **argv)
  		{ "help", no_argument, NULL, 'h' },
 		{ "run", no_argument, NULL, 'x' },
 		{ "ssl", no_argument, NULL, 's' },
+		{ "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG },
 		{ "ssl-ca-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG },
-		{ "server-crt", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG },
+		{ "ssl-crl-file", required_argument, &ssl_flag, SSL_CRL_FILE_FLAG },
+		{ "server-cert", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG },
 		{ "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG },
 		{ NULL, 0, NULL, 0 }
 	};
@@ -462,6 +470,14 @@ cli_create_monitor_getopts(int argc, char **argv)
 				/* { "run", no_argument, NULL, 'x' }, */
 				createAndRun = true;
 				log_trace("--run");
+				break;
+			}
+
+			case 's':
+			{
+				/* { "ssl", no_argument, NULL, 's' }, */
+				options.pgSetup.ssl.active = 1;
+				log_trace("--ssl");
 				break;
 			}
 

@@ -105,11 +105,12 @@ typedef enum
 
 typedef struct SSLFilePaths
 {
-	bool active;
+	int active;					/* INI support has int, does not have bool */
 	bool createSelfSignedCert;
 	SSLMode sslMode;
 	char caFile[MAXPGPATH];
-	char serverCRT[MAXPGPATH];
+	char crlFile[MAXPGPATH];
+	char serverCert[MAXPGPATH];
 	char serverKey[MAXPGPATH];
 } SSLFilePaths;
 
