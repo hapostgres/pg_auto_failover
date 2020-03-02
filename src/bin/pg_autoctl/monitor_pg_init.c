@@ -32,15 +32,20 @@
  */
 GUC monitor_default_settings[] = {
 	{ "shared_preload_libraries", "'pgautofailover'" },
-	{ "log_destination", "stderr"},		\
-	{ "logging_collector", "on"},		\
-	{ "log_directory", "log"},			\
-	{ "log_min_messages", "info"},		\
-	{ "log_connections", "on"},			\
-	{ "log_disconnections", "on"},		\
-	{ "log_lock_waits", "on"},			\
 	{ "listen_addresses", "'*'" },
 	{ "port", "5432" },
+	{ "log_destination", "stderr"},
+	{ "logging_collector", "on"},
+	{ "log_directory", "log"},
+	{ "log_min_messages", "info"},
+	{ "log_connections", "on"},
+	{ "log_disconnections", "on"},
+	{ "log_lock_waits", "on"},
+	{ "ssl", "off" },
+	{ "ssl_ca_file", "" },
+	{ "ssl_crl_file", "" },
+	{ "ssl_cert_file", "" },
+	{ "ssl_key_file", "" },
 #ifdef TEST
 	{ "unix_socket_directories", "''" },
 #endif

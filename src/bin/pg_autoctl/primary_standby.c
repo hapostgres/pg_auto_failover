@@ -30,7 +30,9 @@ static void local_postgres_update_pg_failures_tracking(
  * listen_addresses and port are placeholder values in this array and are
  * replaced with dynamic values from the setup when used.
  */
-#define DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER \
+#define DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER	\
+	{ "listen_addresses", "'*'" },		\
+	{ "port", "5432" },					\
 	{ "max_wal_senders", "4" },			\
 	{ "max_replication_slots", "4" },	\
 	{ "wal_level", "'replica'" },		\
@@ -48,8 +50,11 @@ static void local_postgres_update_pg_failures_tracking(
 	{ "log_connections", "on"},			\
 	{ "log_disconnections", "on"},		\
 	{ "log_lock_waits", "on"},			\
-	{ "listen_addresses", "'*'" },		\
-	{ "port", "5432" }
+	{ "ssl", "off" },					\
+	{ "ssl_ca_file", "" },				\
+	{ "ssl_crl_file", "" },				\
+	{ "ssl_cert_file", "" },			\
+	{ "ssl_key_file", "" }
 
 GUC postgres_default_settings[] = {
 	DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER,

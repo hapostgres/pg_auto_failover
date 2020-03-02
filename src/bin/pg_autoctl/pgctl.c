@@ -45,6 +45,10 @@ static bool pg_include_config(const char *configFilePath,
 static bool ensure_default_settings_file_exists(const char *configFilePath,
 												GUC *settings,
 												PostgresSetup *pgSetup);
+static bool prepare_guc_settings_from_pgsetup(const char *configFilePath,
+											  PQExpBuffer config,
+											  GUC *settings,
+											  PostgresSetup *pgSetup);
 static void log_program_output(Program prog, int outLogLevel, int errorLogLevel);
 static bool escape_recovery_conf_string(char *destination,
 										int destinationSize,
@@ -318,62 +322,13 @@ ensure_default_settings_file_exists(const char *configFilePath,
 									PostgresSetup *pgSetup)
 {
 	PQExpBuffer defaultConfContents = createPQExpBuffer();
-	int settingIndex = 0;
 
-	appendPQExpBufferStr(defaultConfContents, "# Settings by pg_auto_failover\n");
-
-	/* replace placeholder values with actual pgSetup values */
-	for (settingIndex = 0; settings[settingIndex].name != NULL; settingIndex++)
+	if (!prepare_guc_settings_from_pgsetup(configFilePath,
+										   defaultConfContents,
+										   settings,
+										   pgSetup))
 	{
-		GUC *setting = &settings[settingIndex];
-		/*
-		 * Settings for "listen_addresses" and "port" are replaced with the
-		 * respective values present in pgSetup allowing those to be dynamic.
-		 *
-		 * At the moment our "needs quote" heuristic is pretty simple.
-		 * There's the one parameter within those that we hardcode from
-		 * pg_auto_failover that needs quoting, and that's
-		 * listen_addresses.
-		 *
-		 * The reason why POSTGRES_DEFAULT_LISTEN_ADDRESSES is not quoting
-		 * the value directly in the constant is that we are using that
-		 * value both in the configuration file and at the pg_ctl start
-		 * --options "-h *" command line.
-		 *
-		 * At the command line, using --options "-h '*'" would give:
-		 *    could not create listen socket for "'*'"
-		 */
-		if (strcmp(setting->name, "listen_addresses") == 0)
-		{
-			appendPQExpBuffer(defaultConfContents, "%s = '%s'\n",
-							  setting->name,
-							  pgSetup->listen_addresses);
-		}
-		else if (strcmp(setting->name, "port") == 0)
-		{
-			appendPQExpBuffer(defaultConfContents, "%s = %d\n",
-					  setting->name,
-					  pgSetup->pgport);
-		}
-		else if (setting->value != NULL)
-		{
-			appendPQExpBuffer(defaultConfContents, "%s = %s\n",
-							  setting->name,
-							  setting->value);
-		}
-		else
-		{
-			log_error("BUG: GUC setting \"%s\" has a NULL value", setting->name);
-			destroyPQExpBuffer(defaultConfContents);
-			return false;
-		}
-	}
-
-	/* memory allocation could have failed while building string */
-	if (PQExpBufferBroken(defaultConfContents))
-	{
-		log_error("Failed to allocate memory");
-		destroyPQExpBuffer(defaultConfContents);
+		/* errors have already been logged */
 		return false;
 	}
 
@@ -410,13 +365,135 @@ ensure_default_settings_file_exists(const char *configFilePath,
 				  configFilePath, defaultConfContents->data);
 	}
 
-	if (!write_file(defaultConfContents->data, defaultConfContents->len, configFilePath))
+	if (!write_file(defaultConfContents->data,
+					defaultConfContents->len,
+					configFilePath))
 	{
 		destroyPQExpBuffer(defaultConfContents);
 		return false;
 	}
 
 	destroyPQExpBuffer(defaultConfContents);
+
+	return true;
+}
+
+
+/*
+ * prepare_guc_settings_from_pgsetup replaces some of the given GUC settings
+ * with dynamic values found in the pgSetup argument, and prepare them in the
+ * expected format for a postgresq.conf file in the given PQExpBuffer.
+ *
+ * While most of our settings are handle in a static way and thus known at
+ * compile time, some of them can be provided by our users, such as
+ * listen_addresses, port, and SSL related configuration parameters.
+ */
+
+#define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
+
+static bool
+prepare_guc_settings_from_pgsetup(const char *configFilePath,
+								  PQExpBuffer config,
+								  GUC *settings,
+								  PostgresSetup *pgSetup)
+{
+	int settingIndex = 0;
+
+	appendPQExpBufferStr(config, "# Settings by pg_auto_failover\n");
+
+	/* replace placeholder values with actual pgSetup values */
+	for (settingIndex = 0; settings[settingIndex].name != NULL; settingIndex++)
+	{
+		GUC *setting = &settings[settingIndex];
+		/*
+		 * Settings for "listen_addresses" and "port" are replaced with the
+		 * respective values present in pgSetup allowing those to be dynamic.
+		 *
+		 * At the moment our "needs quote" heuristic is pretty simple.
+		 * There's the one parameter within those that we hardcode from
+		 * pg_auto_failover that needs quoting, and that's
+		 * listen_addresses.
+		 *
+		 * The reason why POSTGRES_DEFAULT_LISTEN_ADDRESSES is not quoting
+		 * the value directly in the constant is that we are using that
+		 * value both in the configuration file and at the pg_ctl start
+		 * --options "-h *" command line.
+		 *
+		 * At the command line, using --options "-h '*'" would give:
+		 *    could not create listen socket for "'*'"
+		 */
+		if (streq(setting->name, "listen_addresses"))
+		{
+			appendPQExpBuffer(config, "%s = '%s'\n",
+							  setting->name,
+							  pgSetup->listen_addresses);
+		}
+		else if (streq(setting->name, "port"))
+		{
+			appendPQExpBuffer(config, "%s = %d\n",
+					  setting->name,
+					  pgSetup->pgport);
+		}
+		else if (streq(setting->name, "ssl"))
+		{
+			appendPQExpBuffer(config, "%s = %s\n",
+							  setting->name,
+							  pgSetup->ssl.active == 0 ? "off" : "on");
+		}
+		else if (streq(setting->name, "ssl_ca_file"))
+		{
+			if (!IS_EMPTY_STRING_BUFFER(pgSetup->ssl.caFile))
+			{
+				appendPQExpBuffer(config, "%s = '%s'\n",
+								  setting->name, pgSetup->ssl.caFile);
+			}
+		}
+		else if (streq(setting->name, "ssl_crl_file"))
+		{
+			if (!IS_EMPTY_STRING_BUFFER(pgSetup->ssl.crlFile))
+			{
+				appendPQExpBuffer(config, "%s = '%s'\n",
+								  setting->name, pgSetup->ssl.crlFile);
+			}
+		}
+		else if (streq(setting->name, "ssl_cert_file"))
+		{
+			if (!IS_EMPTY_STRING_BUFFER(pgSetup->ssl.serverCert))
+			{
+				appendPQExpBuffer(config, "%s = '%s'\n",
+								  setting->name, pgSetup->ssl.serverCert);
+			}
+		}
+		else if (streq(setting->name, "ssl_key_file"))
+		{
+			if (!IS_EMPTY_STRING_BUFFER(pgSetup->ssl.serverKey))
+			{
+				appendPQExpBuffer(config, "%s = '%s'\n",
+								  setting->name, pgSetup->ssl.serverKey);
+			}
+		}
+		else if (setting->value != NULL)
+		{
+			appendPQExpBuffer(config, "%s = %s\n",
+							  setting->name,
+							  setting->value);
+		}
+		else
+		{
+			log_error("BUG: GUC setting \"%s\" has a NULL value", setting->name);
+			destroyPQExpBuffer(config);
+			return false;
+		}
+	}
+
+	/* memory allocation could have failed while building string */
+	if (PQExpBufferBroken(config))
+	{
+		log_error("Failed to allocate memory while preparing config file \"%s\"",
+				  configFilePath);
+		destroyPQExpBuffer(config);
+		return false;
+	}
 
 	return true;
 }
