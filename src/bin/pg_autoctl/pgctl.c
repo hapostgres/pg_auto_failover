@@ -1279,8 +1279,7 @@ prepare_primary_conninfo(char *primaryConnInfo,
 		}
 
 		/* now copy the buffer into primaryConnInfo for the caller */
-		size = snprintf(primaryConnInfo, primaryConnInfoSize, "%s", escaped);
-
+		size = strlcpy(primaryConnInfo, escaped, primaryConnInfoSize);
 		if (size == -1 || size > primaryConnInfoSize)
 		{
 			log_error("BUG: the escaped primary_conninfo requires %d bytes and "

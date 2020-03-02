@@ -33,7 +33,7 @@ static bool clear_results(PGconn *connection);
 static bool pgsql_alter_system_set(PGSQL *pgsql, GUC setting);
 static bool pgsql_get_current_setting(PGSQL *pgsql, char *settingName,
 									  char **currentValue);
-static int escape_conninfo_value(char *destination, const char *string);
+static void escape_conninfo_value(PQExpBuffer destination, const char *string);
 static void parsePgMetadata(void *ctx, PGresult *result);
 
 
@@ -1263,34 +1263,25 @@ hostname_from_uri(const char *pguri,
 
 /*
  * make_conninfo_field_int writes a single connection string field to
- * connInfo and returns the number of characters written.
- *
- * It is the responsibility of the caller to ensure that the connInfo
- * is large enough to write the field.
+ * connInfo buffer.
  */
-int
-make_conninfo_field_int(char *connInfo, const char *key, int value)
+void
+make_conninfo_field_int(PQExpBuffer connInfo, const char *key, int value)
 {
-	return sprintf(connInfo, " %s=%d", key, value);
+	appendPQExpBuffer(connInfo, " %s=%d", key, value);
 }
 
 
 /*
  * make_conninfo_field_str writes a single connection string field to
- * connInfo with escaping and returns the number of characters written.
- *
- * It is the responsibility of the caller to ensure that the connInfo
- * is large enough to write the field.
+ * connInfo buffer with escaping.
  */
-int
-make_conninfo_field_str(char *connInfo, const char *key, const char *value)
+void
+make_conninfo_field_str(PQExpBuffer connInfo, const char *key, const char *value)
 {
-	char *connInfoEnd = connInfo;
 
-	connInfoEnd += sprintf(connInfoEnd, " %s=", key);
-	connInfoEnd += escape_conninfo_value(connInfoEnd, value);
-
-	return connInfoEnd - connInfo;
+	appendPQExpBuffer(connInfo,  " %s=", key);
+	escape_conninfo_value(connInfo, value);
 }
 
 
@@ -1298,32 +1289,28 @@ make_conninfo_field_str(char *connInfo, const char *key, const char *value)
  * escape_conninfo_value escapes a string that is used in a connection info
  * string by prefixing single quotes and backslashes with a backslash.
  *
- * The result is written to destination and the length of the result returned.
+ * The result is written to destination buffer.
  */
-static int
-escape_conninfo_value(char *destination, const char *string)
+static void
+escape_conninfo_value(PQExpBuffer destination, const char *string)
 {
 	int charIndex = 0;
 	int length = strlen(string);
-	int escapedStringLength = 0;
 
-	destination[escapedStringLength++] = '\'';
+	appendPQExpBufferChar(destination, '\'');
 
 	for (charIndex = 0; charIndex < length; charIndex++)
 	{
 		char currentChar = string[charIndex];
 		if (currentChar == '\'' || currentChar == '\\')
 		{
-			destination[escapedStringLength++] = '\\';
+			appendPQExpBufferChar(destination, '\\');
 		}
 
-		destination[escapedStringLength++] = currentChar;
+		appendPQExpBufferChar(destination, currentChar);
 	}
 
-	destination[escapedStringLength++] = '\'';
-	destination[escapedStringLength] = '\0';
-
-	return escapedStringLength;
+	appendPQExpBufferChar(destination, '\'');
 }
 
 
@@ -1528,7 +1515,12 @@ pgsql_listen(PGSQL *pgsql, char *channels[])
 			return false;
 		}
 
-		sprintf(sql, "LISTEN %s", channel);
+		/*
+		 * Explanation of IGNORE-BANNED:
+		 * channel names are internally generated, (log, state).
+		 * They are guaranteed to fit in the the buffer.
+		 */
+		snprintf(sql, BUFSIZE, "LISTEN %s", channel); /* IGNORE-BANNED */
 
 		PQfreemem(channel);
 
