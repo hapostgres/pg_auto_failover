@@ -159,8 +159,8 @@ fsm_init_primary(Keeper *keeper)
 	 */
 	if (!ensure_local_postgres_is_running(postgres))
 	{
-		log_error("Failed to initialise postgres as primary because starting postgres "
-				  "failed, see above for details");
+		log_error("Failed to initialise postgres as primary because "
+				  "starting postgres failed, see above for details");
 		return false;
 	}
 
@@ -185,11 +185,27 @@ fsm_init_primary(Keeper *keeper)
 	/*
 	 * We just created the local Postgres cluster, make sure it has our minimum
 	 * configuration deployed.
+	 *
+	 * When --ssl has been used without SSL certificates being given, now is
+	 * the time to build a self-signed certificate for the server. We place the
+	 * certificate and private key in $PGDATA/server.key and $PGDATA/server.crt
 	 */
+	if (pgSetup.ssl.createSelfSignedCert
+		&& (!file_exists(pgSetup.ssl.serverKey)
+			|| !file_exists(pgSetup.ssl.serverCert)))
+	{
+		if (!pg_create_self_signed_cert(&pgSetup, config->nodename))
+		{
+			log_error("Failed to create SSL self-signed certificate, "
+					  "see above for details");
+			return false;
+		}
+	}
+
 	if (!postgres_add_default_settings(postgres))
 	{
-		log_error("Failed to initialise postgres as primary because adding default "
-				  "settings failed, see above for details");
+		log_error("Failed to initialise postgres as primary because "
+				  "adding default settings failed, see above for details");
 		return false;
 	}
 
@@ -629,7 +645,7 @@ fsm_init_standby(Keeper *keeper)
 			 keeper->state.current_node_id);
 	replicationSource.applicationName = applicationName;
 
-	if (!standby_init_database(postgres, &replicationSource))
+	if (!standby_init_database(postgres, &replicationSource, config->nodename))
 	{
 		log_error("Failed initialise standby server, see above for details");
 		return false;
@@ -693,7 +709,9 @@ fsm_rewind_or_init(Keeper *keeper)
 		log_warn("Failed to rewind demoted primary to standby, "
 				 "trying pg_basebackup instead");
 
-		if (!standby_init_database(postgres, &replicationSource))
+		if (!standby_init_database(postgres,
+								   &replicationSource,
+								   config->nodename))
 		{
 			log_error("Failed to become standby server, see above for details");
 			return false;
@@ -702,7 +720,8 @@ fsm_rewind_or_init(Keeper *keeper)
 
 	if (!primary_drop_replication_slot(postgres, config->replication_slot_name))
 	{
-		log_error("Failed to drop replication slot \"%s\" used by the standby failed",
+		log_error("Failed to drop replication slot \"%s\", "
+				  "see above for details",
 				  config->replication_slot_name);
 		return false;
 	}

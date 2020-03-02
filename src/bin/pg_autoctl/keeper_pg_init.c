@@ -673,6 +673,21 @@ create_database_and_extension(Keeper *keeper)
 	}
 
 	/*
+	 * When --ssl has been used without SSL certificates being given, now is
+	 * the time to build a self-signed certificate for the server. We place the
+	 * certificate and private key in $PGDATA/server.key and $PGDATA/server.crt
+	 */
+	if (pgSetup->ssl.createSelfSignedCert)
+	{
+		if (!pg_create_self_signed_cert(pgSetup, config->nodename))
+		{
+			log_error("Failed to create SSL self-signed certificate, "
+					  "see above for details");
+			return false;
+		}
+	}
+
+	/*
 	 * Add pg_autoctl PostgreSQL settings, including Citus extension in
 	 * shared_preload_libraries when dealing with a Citus worker or coordinator
 	 * node.

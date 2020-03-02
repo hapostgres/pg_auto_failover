@@ -53,6 +53,17 @@ pg_setup_init(PostgresSetup *pgSetup,
 	 */
 	pgSetup->pgKind = options->pgKind;
 
+	/*
+	 * Make sure that we keep the SSL options too.
+	 */
+	pgSetup->ssl.active = options->ssl.active;
+	pgSetup->ssl.createSelfSignedCert = options->ssl.createSelfSignedCert;
+	pgSetup->ssl.sslMode = options->ssl.sslMode;
+	strlcpy(pgSetup->ssl.caFile, options->ssl.caFile, MAXPGPATH);
+	strlcpy(pgSetup->ssl.crlFile, options->ssl.crlFile, MAXPGPATH);
+	strlcpy(pgSetup->ssl.serverCert, options->ssl.serverCert, MAXPGPATH);
+	strlcpy(pgSetup->ssl.serverKey, options->ssl.serverKey, MAXPGPATH);
+
 	/* check or find pg_ctl */
 	if (options->pg_ctl[0] != '\0')
 	{
@@ -1139,7 +1150,7 @@ pgsetup_validate_ssl_settings(PostgresSetup *pgSetup)
 {
 	log_trace("pgsetup_validate_ssl_settings");
 
-	if (!pgSetup->ssl.active)
+	if (pgSetup->ssl.active == 0)
 	{
 		bool valid = IS_EMPTY_STRING_BUFFER(pgSetup->ssl.caFile)
 			&& IS_EMPTY_STRING_BUFFER(pgSetup->ssl.serverCert)
@@ -1210,7 +1221,9 @@ pgsetup_validate_ssl_settings(PostgresSetup *pgSetup)
 						 " certificates you could upgrade to "
 						 "--ssl-mode verify-ca or verify-full",
 						 pgsetup_sslmode_to_string(pgSetup->ssl.sslMode));
-				log_info("See https://www.postgresql.org/docs/current/libpq-ssl.html for details");
+				log_info(
+					"See https://www.postgresql.org/docs/current/libpq-ssl.html "
+					"for details");
 			}
 		}
 
@@ -1220,10 +1233,14 @@ pgsetup_validate_ssl_settings(PostgresSetup *pgSetup)
 		{
 			pgSetup->ssl.createSelfSignedCert = true;
 
-			/* XXX not sure about keeping that one */
 			log_info("Using --ssl without certificates: pg_autoctl will "
 					 " create self-signed certificates, allowing for "
 					 "encrypted network traffic");
+			log_warn("Self-signed certificates provide protection against "
+					 "eavesdropping; this setup does NOT protect against "
+					 "Man-In-The-Middle attacks nor Impersonation attacks. "
+					 "See https://www.postgresql.org/docs/current/libpq-ssl.html "
+					 "for details");
 
 			/* in that case we want an sslMode of require at most */
 			if (pgSetup->ssl.sslMode > SSL_MODE_REQUIRE)

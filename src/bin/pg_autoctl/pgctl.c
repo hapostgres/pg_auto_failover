@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #include "postgres_fe.h"
@@ -1300,4 +1301,108 @@ bool
 pg_is_running(const char *pg_ctl, const char *pgdata)
 {
 	return pg_ctl_status(pg_ctl, pgdata, false) == 0;
+}
+
+
+/*
+ * pg_create_self_signed_cert creates self-signed certificates for the local
+ * Postgres server and places the private key in $PGDATA/server.key and the
+ * public certificate in $PGDATA/server.cert
+ *
+ * We simply follow Postgres documentation at:
+ * https://www.postgresql.org/docs/current/ssl-tcp.html#SSL-CERTIFICATE-CREATION
+ *
+ * openssl req -new -x509 -days 365 -nodes -text -out server.crt \
+ *             -keyout server.key -subj "/CN=dbhost.yourdomain.com"
+ */
+bool
+pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *nodename)
+{
+	Program program;
+	char subject[BUFSIZE] = { 0 };
+	int size = 0;
+
+	char openssl[MAXPGPATH];
+	char **opensslSearchList = NULL;
+	int n = search_pathlist(getenv("PATH"), "openssl", &opensslSearchList);
+
+	if (n < 1)
+	{
+		log_error("Failed to find \"openssl\" command in your PATH");
+		return false;
+	}
+	else
+	{
+		strlcpy(openssl, opensslSearchList[0], MAXPGPATH);
+
+		search_pathlist_destroy_result(opensslSearchList);
+	}
+
+	size = snprintf(pgSetup->ssl.serverKey, MAXPGPATH,
+					"%s/server.key", pgSetup->pgdata);
+
+	if (size == -1 || size > MAXPGPATH)
+	{
+		log_error("BUG: the ssl server key file path requires %d bytes and "
+				  "pg_auto_failover only support up to %d bytes",
+				  size, MAXPGPATH);
+		return false;
+	}
+
+	size = snprintf(pgSetup->ssl.serverCert, MAXPGPATH,
+					"%s/server.crt", pgSetup->pgdata);
+
+	if (size == -1 || size > MAXPGPATH)
+	{
+		log_error("BUG: the ssl server key file path requires %d bytes and "
+				  "pg_auto_failover only support up to %d bytes",
+				  size, MAXPGPATH);
+		return false;
+	}
+
+	size = snprintf(subject, BUFSIZE, "/CN=%s", nodename);
+
+	if (size == -1 || size > BUFSIZE)
+	{
+		log_error("BUG: the ssl subject \"/CN=%s\" requires %d bytes and"
+				  "pg_auto_failover only support up to %d bytes",
+				  nodename, size, BUFSIZE);
+		return false;
+	}
+
+	log_info("Running %s req -new -x509 -days 365 -nodes -text "
+			 "-out %s -keyout %s -subj \"%s\"",
+			 openssl,
+			 pgSetup->ssl.serverCert,
+			 pgSetup->ssl.serverKey,
+			 subject);
+
+	program = run_program(openssl,
+						  "req", "-new", "-x509", "-days", "365",
+						  "-nodes", "-text",
+						  "-out", pgSetup->ssl.serverCert,
+						  "-keyout", pgSetup->ssl.serverKey,
+						  "-subj", subject,
+						  NULL);
+
+	if (program.returnCode != 0)
+	{
+		(void) log_program_output(program, LOG_INFO, LOG_ERROR);
+		log_error("openssl failed with return code: %d", program.returnCode);
+		free_program(&program);
+		return false;
+	}
+	free_program(&program);
+
+	/*
+	 * Then do: chmod og-rwx server.key
+	 */
+	if (chmod(pgSetup->ssl.serverKey, S_IRUSR | S_IWUSR) != 0)
+	{
+		log_error("Failed to chmod og-rwx \"%s\": %s",
+				  pgSetup->ssl.serverKey, strerror(errno));
+		return false;
+	}
+
+	return true;
 }

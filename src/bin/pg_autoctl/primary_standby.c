@@ -516,7 +516,8 @@ primary_add_standby_to_hba(LocalPostgresServer *postgres,
  */
 bool
 standby_init_database(LocalPostgresServer *postgres,
-					  ReplicationSource *replicationSource)
+					  ReplicationSource *replicationSource,
+					  const char *nodename)
 {
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 
@@ -531,7 +532,8 @@ standby_init_database(LocalPostgresServer *postgres,
 		/* try to stop PostgreSQL, stop here if that fails */
 		if (!pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata))
 		{
-			log_error("Failed to initialise a standby: the database directory exists "
+			log_error("Failed to initialise a standby: "
+					  "the database directory exists "
 					  "and postgres could not be stopped");
 			return false;
 		}
@@ -553,6 +555,25 @@ standby_init_database(LocalPostgresServer *postgres,
 					   replicationSource->applicationName))
 	{
 		return false;
+	}
+
+	/*
+	 * When --ssl has been used without SSL certificates being given, now is
+	 * the time to build a self-signed certificate for the server. We place the
+	 * certificate and private key in $PGDATA/server.key and $PGDATA/server.crt
+	 *
+	 * In particular we override the certificates that we might have fetched
+	 * from the primary as part of pg_basebackup: we're not a backup, we're a
+	 * standby node, we need our own certificate (even if self-signed).
+	 */
+	if (pgSetup->ssl.createSelfSignedCert)
+	{
+		if (!pg_create_self_signed_cert(pgSetup, nodename))
+		{
+			log_error("Failed to create SSL self-signed certificate, "
+					  "see above for details");
+			return false;
+		}
 	}
 
 	if (!ensure_local_postgres_is_running(postgres))
