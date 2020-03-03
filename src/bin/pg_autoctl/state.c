@@ -138,7 +138,17 @@ keeper_state_write(KeeperStateData *keeperState, const char *filename)
 	 * error than "couldn't read pg_control".
 	 */
 	memset(buffer, 0, PG_AUTOCTL_KEEPER_STATE_FILE_SIZE);
-	memcpy(buffer, keeperState, sizeof(KeeperStateData));
+
+	/*
+	 * Explanation of IGNORE-BANNED:
+	 * memcpy is safe to use here.
+	 * we have a static assert that sizeof(KeeperStateData) is always
+	 * less than the buffer length PG_AUTOCTL_KEEPER_STATE_FILE_SIZE.
+	 * also KeeperStateData is a plain struct that does not contain
+	 * any pointers in it. Necessary comment about not using pointers
+	 * is added to the struct definition.
+	 */
+	memcpy(buffer, keeperState, sizeof(KeeperStateData)); /* IGNORE-BANNED */
 
 	fd = open(tempFileName, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
 	if (fd < 0)
