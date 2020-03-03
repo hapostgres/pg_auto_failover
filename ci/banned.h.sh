@@ -12,7 +12,7 @@
 
 set -eu
 
-files=$(find src -iname '*.[ch]')
+files=$(find src -iname '*.[ch]' -not -path "src/bin/lib/*")
 
 # grep is allowed to fail, that means no banned matches are found
 set +e
