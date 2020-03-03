@@ -1176,8 +1176,6 @@ pgsetup_validate_ssl_settings(PostgresSetup *pgSetup)
 		{
 			/* install a default value for --ssl-mode */
 			pgSetup->ssl.sslMode = SSL_MODE_PREFER;
-			log_warn("Using default --ssl-mode \"%s\"",
-					 pgsetup_sslmode_to_string(pgSetup->ssl.sslMode));
 		}
 
 		return valid;
@@ -1255,8 +1253,6 @@ pgsetup_validate_ssl_settings(PostgresSetup *pgSetup)
 			{
 				/* install a default value for --ssl-mode */
 				pgSetup->ssl.sslMode = SSL_MODE_REQUIRE;
-				log_warn("Using default --ssl-mode \"%s\"",
-						 pgsetup_sslmode_to_string(pgSetup->ssl.sslMode));
 			}
 
 			return true;

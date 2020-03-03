@@ -23,6 +23,7 @@
 #include "parsing.h"
 #include "pgctl.h"
 #include "pgsql.h"
+#include "pgsetup.h"
 #include "log.h"
 
 #define RUN_PROGRAM_IMPLEMENTATION
@@ -60,7 +61,9 @@ static bool prepare_primary_conninfo(
 	const char *primaryHost, int primaryPort,
 	const char *replicationUsername,
 	const char *replicationPassword,
-	const char *applicationName);
+	const char *applicationName,
+	SSLMode sslMode,
+	bool escape);
 static bool pg_write_recovery_conf(const char *pgdata,
 								   const char *primaryConnInfo,
 								   const char *replicationSlotName);
@@ -507,22 +510,17 @@ prepare_guc_settings_from_pgsetup(const char *configFilePath,
 bool
 pg_basebackup(const char *pgdata,
 			  const char *pg_ctl,
-			  const char *backupdir,
-			  const char *maximum_backup_rate,
-			  const char *replication_username,
-			  const char *replication_password,
-			  const char *replication_slot_name,
-			  const char *primary_hostname,
-			  int primary_port,
-			  const char *application_name)
+			  ReplicationSource *replicationSource)
 {
 	int returnCode;
 	Program program;
-	char primary_port_str[10];
 	char pg_basebackup[MAXPGPATH];
 
-	log_debug("mkdir -p \"%s\"", backupdir);
-	if (!ensure_empty_dir(backupdir, 0700))
+	NodeAddress *primaryNode = &(replicationSource->primaryNode);
+	char primaryConnInfo[MAXCONNINFO] = { 0 };
+
+	log_debug("mkdir -p \"%s\"", replicationSource->backupDir);
+	if (!ensure_empty_dir(replicationSource->backupDir, 0700))
 	{
 		/* errors have already been logged. */
 		return false;
@@ -530,37 +528,55 @@ pg_basebackup(const char *pgdata,
 
 	/* call pg_basebackup */
 	path_in_same_directory(pg_ctl, "pg_basebackup", pg_basebackup);
-	snprintf(primary_port_str, sizeof(primary_port_str), "%d", primary_port);
 
 	setenv("PGCONNECT_TIMEOUT", POSTGRES_CONNECT_TIMEOUT, 1);
 
-	if (replication_password != NULL)
+	if (replicationSource->password != NULL)
 	{
-		setenv("PGPASSWORD", replication_password, 1);
+		setenv("PGPASSWORD", replicationSource->password, 1);
 	}
-	setenv("PGAPPNAME", application_name, 1);
+	setenv("PGAPPNAME", replicationSource->applicationName, 1);
 
-	log_info("Running %s -w -h %s -p %d --pgdata %s -U %s --write-recovery-conf "
+	/* we ignore the length returned by prepare_primary_conninfo... */
+	if (!prepare_primary_conninfo(primaryConnInfo,
+								  MAXCONNINFO,
+								  primaryNode->host,
+								  primaryNode->port,
+								  replicationSource->userName,
+								  NULL, /* no password here */
+								  replicationSource->applicationName,
+								  replicationSource->sslMode,
+								  false)) /* do not espace this one */
+	{
+		/* errors have already been logged. */
+		return false;
+	}
+
+	log_info("Running %s -w -d '%s' --pgdata %s -U %s --write-recovery-conf "
 			 "--max-rate %s --wal-method=stream --slot %s ...",
-			 pg_basebackup, primary_hostname, primary_port, backupdir,
-			 replication_username, maximum_backup_rate,
-			 replication_slot_name);
+			 pg_basebackup,
+			 primaryConnInfo,
+			 replicationSource->backupDir,
+			 replicationSource->userName,
+			 replicationSource->maximumBackupRate,
+			 replicationSource->slotName);
 
 	program = run_program(pg_basebackup,
 						  "-w",
-						  "-h", primary_hostname,
-						  "-p", primary_port_str,
-						  "--pgdata", backupdir,
-						  "-U", replication_username,
+						  "-d", primaryConnInfo,
+						  "--pgdata", replicationSource->backupDir,
+						  "-U", replicationSource->userName,
 						  "--verbose",
 						  "--progress",
 						  "--write-recovery-conf",
-						  "--max-rate", maximum_backup_rate,
+						  "--max-rate", replicationSource->maximumBackupRate,
 						  "--wal-method=stream",
-						  "--slot", replication_slot_name,
+						  "--slot", replicationSource->slotName,
 						  NULL);
 
-	(void) log_program_output(program, LOG_INFO, LOG_ERROR);
+	/* pg_basebackup uses stderr for all of its output */
+	(void) log_program_output(program, LOG_INFO, LOG_INFO);
+
 	returnCode = program.returnCode;
 	free_program(&program);
 
@@ -581,13 +597,13 @@ pg_basebackup(const char *pgdata,
 		}
 	}
 
-	log_debug("mv \"%s\" \"%s\"", backupdir, pgdata);
+	log_debug("mv \"%s\" \"%s\"", replicationSource->backupDir, pgdata);
 
-	if (rename(backupdir, pgdata) != 0)
+	if (rename(replicationSource->backupDir, pgdata) != 0)
 	{
 		log_error(
 			"Failed to install pg_basebackup dir " " \"%s\" in \"%s\": %s",
-			backupdir, pgdata, strerror(errno));
+			replicationSource->backupDir, pgdata, strerror(errno));
 		return false;
 	}
 
@@ -601,8 +617,12 @@ pg_basebackup(const char *pgdata,
  * connect to the node.
  */
 bool
-pg_rewind(const char *pgdata, const char *pg_ctl, const char *primaryHost,
-		  int primaryPort, const char *databaseName, const char *replicationUsername,
+pg_rewind(const char *pgdata,
+		  const char *pg_ctl,
+		  const char *primaryHost,
+		  int primaryPort,
+		  const char *databaseName,
+		  const char *replicationUsername,
 		  const char *replicationPassword)
 {
 	int returnCode;
@@ -1015,6 +1035,7 @@ pg_setup_standby_mode(uint32_t pg_control_version,
 {
 	NodeAddress *primaryNode = &(replicationSource->primaryNode);
 	char primaryConnInfo[MAXCONNINFO] = { 0 };
+	bool escape = true;
 
 	/* we ignore the length returned by prepare_primary_conninfo... */
 	if (!prepare_primary_conninfo(primaryConnInfo,
@@ -1023,7 +1044,9 @@ pg_setup_standby_mode(uint32_t pg_control_version,
 								  primaryNode->port,
 								  replicationSource->userName,
 								  replicationSource->password,
-								  replicationSource->applicationName))
+								  replicationSource->applicationName,
+								  replicationSource->sslMode,
+								  escape))
 	{
 		/* errors have already been logged. */
 		return false;
@@ -1168,10 +1191,13 @@ escape_recovery_conf_string(char *destination, int destinationSize,
 static bool
 prepare_primary_conninfo(char *primaryConnInfo,
 						 int primaryConnInfoSize,
-						 const char *primaryHost, int primaryPort,
+						 const char *primaryHost,
+						 int primaryPort,
 						 const char *replicationUsername,
 						 const char *replicationPassword,
-						 const char *applicationName)
+						 const char *applicationName,
+						 SSLMode sslMode,
+						 bool escape)
 {
 	int size = 0;
 	char escaped[BUFSIZE];
@@ -1190,6 +1216,13 @@ prepare_primary_conninfo(char *primaryConnInfo,
 		appendPQExpBuffer(buffer, " password=%s", replicationPassword);
 	}
 
+	if (sslMode != SSL_MODE_UNKNOWN)
+	{
+		appendPQExpBuffer(buffer,
+						  " sslmode=%s",
+						  pgsetup_sslmode_to_string(sslMode));
+	}
+
 	/* memory allocation could have failed while building string */
 	if (PQExpBufferBroken(buffer))
 	{
@@ -1198,22 +1231,29 @@ prepare_primary_conninfo(char *primaryConnInfo,
 		return false;
 	}
 
-	if (!escape_recovery_conf_string(escaped, BUFSIZE, buffer->data))
- 	{
- 		/* errors have already been logged. */
- 		destroyPQExpBuffer(buffer);
- 		return false;
- 	}
-
-	/* now copy the buffer into primaryConnInfo for the caller */
-	size = snprintf(primaryConnInfo, primaryConnInfoSize, "%s", escaped);
-
-	if (size == -1 || size > primaryConnInfoSize)
+	if (escape)
 	{
-		log_error("BUG: the escaped primary_conninfo requires %d bytes and "
-				  "pg_auto_failover only support up to %d bytes",
-				  size, primaryConnInfoSize);
-		return false;
+		if (!escape_recovery_conf_string(escaped, BUFSIZE, buffer->data))
+		{
+			/* errors have already been logged. */
+			destroyPQExpBuffer(buffer);
+			return false;
+		}
+
+		/* now copy the buffer into primaryConnInfo for the caller */
+		size = snprintf(primaryConnInfo, primaryConnInfoSize, "%s", escaped);
+
+		if (size == -1 || size > primaryConnInfoSize)
+		{
+			log_error("BUG: the escaped primary_conninfo requires %d bytes and "
+					  "pg_auto_failover only support up to %d bytes",
+					  size, primaryConnInfoSize);
+			return false;
+		}
+	}
+	else
+	{
+		strlcpy(primaryConnInfo, buffer->data, primaryConnInfoSize);
 	}
 
 	destroyPQExpBuffer(buffer);

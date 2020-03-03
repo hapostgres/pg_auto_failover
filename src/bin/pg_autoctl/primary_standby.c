@@ -543,16 +543,7 @@ standby_init_database(LocalPostgresServer *postgres,
 	 * Now, we know that pgdata either doesn't exists or belongs to a stopped
 	 * PostgreSQL instance. We can safely proceed with pg_basebackup.
 	 */
-	if (!pg_basebackup(pgSetup->pgdata,
-					   pgSetup->pg_ctl,
-					   replicationSource->backupDir,
-					   replicationSource->maximumBackupRate,
-					   replicationSource->userName,
-					   replicationSource->password,
-					   replicationSource->slotName,
-					   replicationSource->primaryNode.host,
-					   replicationSource->primaryNode.port,
-					   replicationSource->applicationName))
+	if (!pg_basebackup(pgSetup->pgdata, pgSetup->pg_ctl, replicationSource))
 	{
 		return false;
 	}

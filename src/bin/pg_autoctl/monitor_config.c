@@ -444,13 +444,28 @@ monitor_config_get_postgres_uri(MonitorConfig *config, char *connectionString,
 		strlcpy(host, config->pgSetup.listen_addresses, BUFSIZE);
 	}
 
-	connStringEnd += snprintf(connStringEnd,
-							  size - (connStringEnd - connectionString),
-							  "postgres://%s@%s:%d/%s",
-							  config->pgSetup.username,
-							  host,
-							  config->pgSetup.pgport,
-							  config->pgSetup.dbname);
+	if (config->pgSetup.ssl.sslMode >= SSL_MODE_PREFER)
+	{
+		char *sslmode = pgsetup_sslmode_to_string(config->pgSetup.ssl.sslMode);
+		connStringEnd += snprintf(connStringEnd,
+								  size - (connStringEnd - connectionString),
+								  "postgres://%s@%s:%d/%s?sslmode=%s",
+								  config->pgSetup.username,
+								  host,
+								  config->pgSetup.pgport,
+								  config->pgSetup.dbname,
+								  sslmode);
+	}
+	else
+	{
+		connStringEnd += snprintf(connStringEnd,
+								  size - (connStringEnd - connectionString),
+								  "postgres://%s@%s:%d/%s",
+								  config->pgSetup.username,
+								  host,
+								  config->pgSetup.pgport,
+								  config->pgSetup.dbname);
+	}
 
 	return true;
 }
