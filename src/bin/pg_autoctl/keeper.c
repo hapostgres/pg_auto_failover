@@ -956,7 +956,17 @@ keeper_init_state_write(Keeper *keeper)
 			  PreInitPostgreInstanceStateToString(initState.pgInitState));
 
 	memset(buffer, 0, PG_AUTOCTL_KEEPER_STATE_FILE_SIZE);
-	memcpy(buffer, &initState, sizeof(KeeperStateInit));
+
+	/*
+	 * Explanation of IGNORE-BANNED:
+	 * memcpy is safe to use here.
+	 * we have a static assert that sizeof(KeeperStateInit) is always
+	 * less than the buffer length PG_AUTOCTL_KEEPER_STATE_FILE_SIZE.
+	 * also KeeperStateData is a plain struct that does not contain
+	 * any pointers in it. Necessary comment about not using pointers
+	 * is added to the struct definition.
+	 */
+	memcpy(buffer, &initState, sizeof(KeeperStateInit)); /* IGNORE-BANNED */
 
 	fd = open(keeper->config.pathnames.init,
 			  O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
