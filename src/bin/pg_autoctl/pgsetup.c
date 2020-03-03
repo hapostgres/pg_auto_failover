@@ -59,6 +59,7 @@ pg_setup_init(PostgresSetup *pgSetup,
 	pgSetup->ssl.active = options->ssl.active;
 	pgSetup->ssl.createSelfSignedCert = options->ssl.createSelfSignedCert;
 	pgSetup->ssl.sslMode = options->ssl.sslMode;
+	strlcpy(pgSetup->ssl.sslModeStr, options->ssl.sslModeStr, SSL_MODE_STRLEN);
 	strlcpy(pgSetup->ssl.caFile, options->ssl.caFile, MAXPGPATH);
 	strlcpy(pgSetup->ssl.crlFile, options->ssl.crlFile, MAXPGPATH);
 	strlcpy(pgSetup->ssl.serverCert, options->ssl.serverCert, MAXPGPATH);
@@ -1139,124 +1140,127 @@ pgsetup_get_pgport()
  * pgsetup_validate_ssl_settings returns true if our SSL settings are following
  * one of the three following cases:
  *
- *  - ssl is not activated and no file has been provided
- *  - ssl is activated and no file has been provided
- *  - ssl is activated and all the files have been provided
+ *  - --no-ssl:          ssl is not activated and no file has been provided
+ *  - --ssl-self-signed: ssl is activated and no file has been provided
+ *  - --ssl-*-files:     ssl is activated and all the files have been provided
  *
  * Otherwise it logs an error message and return false.
  */
 bool
 pgsetup_validate_ssl_settings(PostgresSetup *pgSetup)
 {
+	SSLOptions *ssl = &(pgSetup->ssl);
+
 	log_trace("pgsetup_validate_ssl_settings");
 
-	if (pgSetup->ssl.active == 0)
+	/*
+	 * When using the full SSL options, we validate that the files exists where
+	 * given and set the default sslmode to verify-full.
+	 *
+	 *  --ssl-ca-file
+	 *  --ssl-crl-file
+	 *  --server-crt
+	 *  --server-key
+	 */
+	if (ssl->active && !ssl->createSelfSignedCert)
 	{
-		bool valid = IS_EMPTY_STRING_BUFFER(pgSetup->ssl.caFile)
-			&& IS_EMPTY_STRING_BUFFER(pgSetup->ssl.serverCert)
-			&& IS_EMPTY_STRING_BUFFER(pgSetup->ssl.serverKey);
+		/* we say allFilesGiven but we can do without the CRL file */
+		bool allFilesGiven = !IS_EMPTY_STRING_BUFFER(ssl->caFile)
+			&& !IS_EMPTY_STRING_BUFFER(ssl->serverCert)
+			&& !IS_EMPTY_STRING_BUFFER(ssl->serverKey);
 
+		if (!allFilesGiven)
+		{
+			log_error("Failed to setup SSL with user-provided certificates: "
+					  "options --ssl-ca-file --ssl-server-cert --ssl-server-key"
+					  "are required.");
+			return false;
+		}
+
+		/* when given all the files, check they exist */
+		if (!file_exists(ssl->caFile))
+		{
+			log_error("--ssl-ca-file file does not exist at \"%s\"",
+					  ssl->caFile);
+			return false;
+		}
+
+		if (!file_exists(ssl->crlFile))
+		{
+			log_error("--ssl-crl-file file does not exist at \"%s\"",
+					  ssl->crlFile);
+			return false;
+		}
+
+		if (!file_exists(ssl->serverCert))
+		{
+			log_error("--server-crt file does not exist at \"%s\"",
+					  ssl->serverCert);
+			return false;
+		}
+
+		if (!file_exists(ssl->serverKey))
+		{
+			log_error("--server-key file does not exist at \"%s\"",
+					  ssl->serverKey);
+			return false;
+		}
+
+		/* install a default value for --ssl-mode, use verify-full */
+		if (ssl->sslMode == SSL_MODE_UNKNOWN)
+		{
+			ssl->sslMode = SSL_MODE_VERIFY_FULL;
+			strlcpy(ssl->sslModeStr,
+					pgsetup_sslmode_to_string(ssl->sslMode), SSL_MODE_STRLEN);
+			log_info("Using default --ssl-mode \"%s\"", ssl->sslModeStr);
+		}
+
+		return true;
+	}
+
+	/*
+	 * When --ssl-self-signed is used, we default to using sslmode=require.
+	 * Setting higher than that are wrong, false sense of security.
+	 */
+	if (ssl->createSelfSignedCert)
+	{
 		/* in that case we want an sslMode of prefer at most */
-		if (pgSetup->ssl.sslMode > SSL_MODE_PREFER)
+		if (ssl->sslMode > SSL_MODE_PREFER)
 		{
-			log_error("--ssl-mode \"%s\" requires --ssl",
-					  pgsetup_sslmode_to_string(pgSetup->ssl.sslMode));
+			log_error("--ssl-mode \"%s\" is not compatible with self-signed "
+					  "certificates, please provide certificates signed by "
+					  "your trusted CA.",
+					  pgsetup_sslmode_to_string(ssl->sslMode));
+			log_info("See https://www.postgresql.org/docs/current/libpq-ssl.html"
+					 " for details");
 			return false;
 		}
 
-		if (!valid)
-		{
-			log_error("When --ssl is not used, none of the following "
-					  "ssl file options are allowed: "
-					  "--ssl-ca-file --server-crt --server-key");
-			return false;
-		}
-
-		if (pgSetup->ssl.sslMode == SSL_MODE_UNKNOWN)
+		if (ssl->sslMode == SSL_MODE_UNKNOWN)
 		{
 			/* install a default value for --ssl-mode */
-			pgSetup->ssl.sslMode = SSL_MODE_PREFER;
+			ssl->sslMode = SSL_MODE_REQUIRE;
+			strlcpy(ssl->sslModeStr,
+					pgsetup_sslmode_to_string(ssl->sslMode), SSL_MODE_STRLEN);
+			log_info("Using default --ssl-mode \"%s\"", ssl->sslModeStr);
 		}
 
-		return valid;
+		log_info("Using --ssl without certificates: pg_autoctl will "
+				 " create self-signed certificates, allowing for "
+				 "encrypted network traffic");
+		log_warn("Self-signed certificates provide protection against "
+				 "eavesdropping; this setup does NOT protect against "
+				 "Man-In-The-Middle attacks nor Impersonation attacks.");
+		log_warn("See https://www.postgresql.org/docs/current/libpq-ssl.html "
+				 "for details");
+
+		return true;
 	}
-	else
+
+	/* --no-ssl is ok */
+	if (ssl->active == 0)
 	{
-		/* --ssl: ssl is active */
-		bool allFilesGiven = !IS_EMPTY_STRING_BUFFER(pgSetup->ssl.caFile)
-			&& !IS_EMPTY_STRING_BUFFER(pgSetup->ssl.serverCert)
-			&& !IS_EMPTY_STRING_BUFFER(pgSetup->ssl.serverKey);
-
-		if (allFilesGiven)
-		{
-			/* when given all the files, check they exist */
-			if (!file_exists(pgSetup->ssl.caFile))
-			{
-				log_error("--ssl-ca-file file does not exist at \"%s\"",
-						  pgSetup->ssl.caFile);
-				return false;
-			}
-
-			if (!file_exists(pgSetup->ssl.serverCert))
-			{
-				log_error("--server-crt file does not exist at \"%s\"",
-						  pgSetup->ssl.serverCert);
-				return false;
-			}
-
-			if (!file_exists(pgSetup->ssl.serverKey))
-			{
-				log_error("--server-key file does not exist at \"%s\"",
-						  pgSetup->ssl.serverKey);
-				return false;
-			}
-
-			if (pgSetup->ssl.sslMode == SSL_MODE_UNKNOWN)
-			{
-				/* install a default value for --ssl-mode */
-				pgSetup->ssl.sslMode = SSL_MODE_REQUIRE;
-				log_warn("Using default --ssl-mode \"%s\", with client "
-						 " certificates you could upgrade to "
-						 "--ssl-mode verify-ca or verify-full",
-						 pgsetup_sslmode_to_string(pgSetup->ssl.sslMode));
-				log_info(
-					"See https://www.postgresql.org/docs/current/libpq-ssl.html "
-					"for details");
-			}
-		}
-
-		if (IS_EMPTY_STRING_BUFFER(pgSetup->ssl.caFile)
-			&& IS_EMPTY_STRING_BUFFER(pgSetup->ssl.serverCert)
-			&& IS_EMPTY_STRING_BUFFER(pgSetup->ssl.serverKey))
-		{
-			pgSetup->ssl.createSelfSignedCert = true;
-
-			log_info("Using --ssl without certificates: pg_autoctl will "
-					 " create self-signed certificates, allowing for "
-					 "encrypted network traffic");
-			log_warn("Self-signed certificates provide protection against "
-					 "eavesdropping; this setup does NOT protect against "
-					 "Man-In-The-Middle attacks nor Impersonation attacks. "
-					 "See https://www.postgresql.org/docs/current/libpq-ssl.html "
-					 "for details");
-
-			/* in that case we want an sslMode of require at most */
-			if (pgSetup->ssl.sslMode > SSL_MODE_REQUIRE)
-			{
-				log_error("--ssl-mode \"%s\" is not compatible with "
-						  "self-signed certificates",
-						  pgsetup_sslmode_to_string(pgSetup->ssl.sslMode));
-				return false;
-			}
-
-			if (pgSetup->ssl.sslMode == SSL_MODE_UNKNOWN)
-			{
-				/* install a default value for --ssl-mode */
-				pgSetup->ssl.sslMode = SSL_MODE_REQUIRE;
-			}
-
-			return true;
-		}
+		return true;
 	}
 
 	return false;

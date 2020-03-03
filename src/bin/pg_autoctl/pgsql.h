@@ -87,7 +87,7 @@ typedef struct ReplicationSource
 	char *maximumBackupRate;
 	char *backupDir;
 	char *applicationName;
-	SSLMode sslMode;
+	SSLOptions sslOptions;
 } ReplicationSource;
 
 

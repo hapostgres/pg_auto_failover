@@ -387,6 +387,7 @@ class DataNode(PGNode):
                        '--pghost', pghost,
                        '--pgport', str(self.port),
                        '--pgctl', shutil.which('pg_ctl'),
+                       '--no-ssl',
                        '--auth', self.authMethod,
                        '--monitor', self.monitor.connection_string()]
 
@@ -554,6 +555,7 @@ class MonitorNode(PGNode):
         create_args = ['create', self.role.command(), '-vv',
                        '--pgdata', self.datadir,
                        '--pgport', str(self.port),
+                       '--no-ssl',
                        '--auth', self.authMethod,
                        '--nodename', self.nodename]
 

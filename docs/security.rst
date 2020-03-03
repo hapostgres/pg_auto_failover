@@ -115,9 +115,18 @@ simple as a self-signed certificate, and ``pg_autoctl`` will create such a
 certificate for you when setup with ssl support and without other
 instruction::
 
-  $ pg_autoctl create monitor --ssl --auth scram-sha-256 ...
-  $ pg_autoctl create postgres --ssl --auth scram-sha-256 ...
-  $ pg_autoctl create postgres --ssl --auth scram-sha-256 ...
+  $ pg_autoctl create monitor --ssl-self-signed ...      \
+                              --auth scram-sha-256 ...   \
+                              --ssl-mode require         \
+                              ...
+
+  $ pg_autoctl create postgres --ssl-self-signed ...      \
+                               --auth scram-sha-256 ...   \
+                               ...
+
+  $ pg_autoctl create postgres --ssl-self-signed ...      \
+                               --auth scram-sha-256 ...   \
+                               ...
 
 In that example we setup SSL connections to encrypt the network traffic, and
 we still have to setup an authentication mechanism exactly as in the
@@ -147,25 +156,23 @@ it handle the setup for you, including the creation of and signing of client
 certificates for the ``autoctl_node`` and ``pgautofailover_replication``
 users::
   
-  $ pg_autoctl create monitor --ssl                    \
-                              --ssl-ca-file root.crt   \
+  $ pg_autoctl create monitor --ssl-ca-file root.crt   \
+                              --ssl-crl-file root.crl  \
                               --server-crt server.crt  \
                               --server-key server.key  \
-                              --ssl-mode validate-ca   \
+                              --ssl-mode validate-full \
                               ...
   
-  $ pg_autoctl create postgres --ssl                    \
-                               --ssl-ca-file root.crt   \
+  $ pg_autoctl create postgres --ssl-ca-file root.crt   \
                                --server-crt server.crt  \
                                --server-key server.key  \
-                               --ssl-mode validate-ca   \
+                               --ssl-mode validate-full \
                                ...
                               
-  $ pg_autoctl create postgres --ssl                    \
-                               --ssl-ca-file root.crt   \
+  $ pg_autoctl create postgres --ssl-ca-file root.crt   \
                                --server-crt server.crt  \
                                --server-key server.key  \
-                               --ssl-mode validate-ca   \
+                               --ssl-mode validate-full \
                                ...
 
 The option ``--ssl-mode`` can be used to force connection strings used by
@@ -173,7 +180,16 @@ The option ``--ssl-mode`` can be used to force connection strings used by
 when SSL is used and to ``allow`` when ``--ssl`` is not used. Here, we set
 ``--ssl-mode`` to ``validate-ca`` which requires SSL Certificates
 Authentication, covered next.
-                               
+
+The default ``--ssl-mode`` when providing your own certificates (signed by
+your trusted CA) is then ``verify-full``. This setup applies to the client
+connection where the server identity is going to be checked against the root
+certificate provided with ``--ssl-ca-file`` and the revocation list
+optionally provided with the ``--ssl-crl-file``. Both those files are used
+as the respective parameters ``sslrootcert`` and ``sslcrl`` in pg_autoctl
+connection strings to both the monitor and the streaming replication primary
+server.
+
 SSL Certificates Authentication
 -------------------------------
 

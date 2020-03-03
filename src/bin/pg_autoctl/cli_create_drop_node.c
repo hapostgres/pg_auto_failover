@@ -61,19 +61,14 @@ CommandLine create_monitor_command =
 		"monitor",
 		"Initialize a pg_auto_failover monitor node",
 		" [ --pgdata --pgport --pgctl --nodename ] ",
-		"  --pgctl        path to pg_ctl\n"
-		"  --pgdata       path to data directory\n"
-		"  --pgport       PostgreSQL's port number\n"
-		"  --nodename     hostname by which postgres is reachable\n"
-		"  --auth         authentication method for connections from data nodes\n"
-		"  --skip-pg-hba  skip editing pg_hba.conf rules\n"
-		"  --run          create node then run pg_autoctl service\n"
-		"  --ssl          activate ssl in Postgres configuration\n"
-		"  --ssl-mode     use that sslmode in connection strings\n"
-		"  --ssl-ca-file  set the Postgres ssl_ca_file to that file path\n"
-		"  --ssl-crl-file set the Postgres ssl_crl_file to that file path\n"
-		"  --server-key   set the Postgres ssl_key_file to that file path\n"
-		"  --server-cert  set the Postgres ssl_cert_file to that file path\n",
+		"  --pgctl           path to pg_ctl\n"
+		"  --pgdata          path to data directory\n"
+		"  --pgport          PostgreSQL's port number\n"
+		"  --nodename        hostname by which postgres is reachable\n"
+		"  --auth            authentication method for connections from data nodes\n"
+		"  --skip-pg-hba     skip editing pg_hba.conf rules\n"
+		"  --run             create node then run pg_autoctl service\n"
+		KEEPER_CLI_SSL_OPTIONS,
 		cli_create_monitor_getopts,
 		cli_create_monitor);
 
@@ -82,24 +77,19 @@ CommandLine create_postgres_command =
 		"postgres",
 		"Initialize a pg_auto_failover standalone postgres node",
 		"",
-		"  --pgctl       path to pg_ctl\n"
-		"  --pgdata      path to data director\n"
-		"  --pghost      PostgreSQL's hostname\n"
-		"  --pgport      PostgreSQL's port number\n"
-		"  --listen      PostgreSQL's listen_addresses\n"
-		"  --username    PostgreSQL's username\n"
-		"  --dbname      PostgreSQL's database name\n"
-		"  --nodename    pg_auto_failover node\n"
-		"  --formation   pg_auto_failover formation\n"
-		"  --monitor     pg_auto_failover Monitor Postgres URL\n"
-		"  --auth        authentication method for connections from monitor\n"
-		"  --skip-pg-hba skip editing pg_hba.conf rules\n"
-		"  --ssl          activate ssl in Postgres configuration\n"
-		"  --ssl-mode     use that sslmode in connection strings\n"
-		"  --ssl-ca-file  set the Postgres ssl_ca_file to that file path\n"
-		"  --ssl-crl-file set the Postgres ssl_crl_file to that file path\n"
-		"  --server-key   set the Postgres ssl_key_file to that file path\n"
-		"  --server-cert  set the Postgres ssl_cert_file to that file path\n"
+		"  --pgctl           path to pg_ctl\n"
+		"  --pgdata          path to data director\n"
+		"  --pghost          PostgreSQL's hostname\n"
+		"  --pgport          PostgreSQL's port number\n"
+		"  --listen          PostgreSQL's listen_addresses\n"
+		"  --username        PostgreSQL's username\n"
+		"  --dbname          PostgreSQL's database name\n"
+		"  --nodename        pg_auto_failover node\n"
+		"  --formation       pg_auto_failover formation\n"
+		"  --monitor         pg_auto_failover Monitor Postgres URL\n"
+		"  --auth            authentication method for connections from monitor\n"
+		"  --skip-pg-hba     skip editing pg_hba.conf rules\n"
+		KEEPER_CLI_SSL_OPTIONS
 		KEEPER_CLI_ALLOW_RM_PGDATA_OPTION,
 		cli_create_postgres_getopts,
 		cli_create_postgres);
@@ -259,7 +249,8 @@ cli_create_postgres_getopts(int argc, char **argv)
 		{ "quiet", no_argument, NULL, 'q' },
  		{ "help", no_argument, NULL, 'h' },
 		{ "run", no_argument, NULL, 'x' },
-		{ "ssl", no_argument, NULL, 's' },
+		{ "no-ssl", no_argument, NULL, 'N' },
+		{ "ssl-self-signed", no_argument, NULL, 's' },
 		{ "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG },
 		{ "ssl-ca-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG },
 		{ "ssl-crl-file", required_argument, &ssl_flag, SSL_CRL_FILE_FLAG },
@@ -323,6 +314,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 	MonitorConfig options = { 0 };
 	int c, option_index = 0, errors = 0;
 	int verboseCount = 0;
+	int sslOrNoSSLCount = 0;
 
 	static struct option long_options[] = {
 		{ "pgctl", required_argument, NULL, 'C' },
@@ -337,7 +329,8 @@ cli_create_monitor_getopts(int argc, char **argv)
 		{ "quiet", no_argument, NULL, 'q' },
  		{ "help", no_argument, NULL, 'h' },
 		{ "run", no_argument, NULL, 'x' },
-		{ "ssl", no_argument, NULL, 's' },
+		{ "no-ssl", no_argument, NULL, 'N' },
+		{ "ssl-self-signed", no_argument, NULL, 's' },
 		{ "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG },
 		{ "ssl-ca-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG },
 		{ "ssl-crl-file", required_argument, &ssl_flag, SSL_CRL_FILE_FLAG },
@@ -475,14 +468,61 @@ cli_create_monitor_getopts(int argc, char **argv)
 
 			case 's':
 			{
-				/* { "ssl", no_argument, NULL, 's' }, */
+				/* { "ssl-self-signed", no_argument, NULL, 's' }, */
+				if (sslOrNoSSLCount > 0)
+				{
+					errors++;
+					log_error("Using both --no-ssl and --ssl-self-signed "
+							  "is not supported");
+				}
+				++sslOrNoSSLCount;
+
 				options.pgSetup.ssl.active = 1;
-				log_trace("--ssl");
+				options.pgSetup.ssl.createSelfSignedCert = true;
+				log_trace("--ssl-self-signed");
 				break;
 			}
 
+			case 'N':
+			{
+				/* { "no-ssl", no_argument, NULL, 'N' }, */
+				if (sslOrNoSSLCount > 0)
+				{
+					errors++;
+					log_error("Using both --no-ssl and --ssl-self-signed "
+							  "is not supported");
+				}
+				++sslOrNoSSLCount;
+
+				options.pgSetup.ssl.active = 0;
+				options.pgSetup.ssl.createSelfSignedCert = false;
+				log_trace("--no-ssl");
+				break;
+			}
+
+			/*
+			 * { "ssl-ca-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG }
+			 * { "ssl-crl-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG }
+			 * { "server-crt", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG }
+			 * { "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG }
+			 * { "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG },
+			 */
 			case 0:
 			{
+				if (ssl_flag != SSL_MODE_FLAG)
+				{
+					if (sslOrNoSSLCount > 0)
+					{
+						errors++;
+						log_error("Using either --no-ssl or --ssl-self-signed "
+								  "with user-provided SSL certificates "
+								  "is not supported");
+					}
+					++sslOrNoSSLCount;
+
+					options.pgSetup.ssl.active = 1;
+				}
+
 				if (!cli_getopt_ssl_flags(&(options.pgSetup)))
 				{
 					errors++;
@@ -663,8 +703,7 @@ cli_create_monitor(int argc, char **argv)
 		}
 
 		/* set our MonitorConfig from the command line options now. */
-		monitor_config_init(&config,
-							missingPgdataIsOk, pgIsNotRunningIsOk);
+		(void) monitor_config_init(&config, missingPgdataIsOk, pgIsNotRunningIsOk);
 
 		/* and write our brand new setup to file */
 		if (!monitor_config_write_file(&config))
@@ -690,6 +729,15 @@ cli_create_monitor(int argc, char **argv)
 	if (createAndRun)
 	{
 		(void) monitor_service_run(&monitor, &config);
+	}
+	else
+	{
+		char postgresUri[MAXCONNINFO];
+
+		if (monitor_config_get_postgres_uri(&config, postgresUri, MAXCONNINFO))
+		{
+			log_info("pg_auto_failover monitor is ready at %s", postgresUri);
+		}
 	}
 }
 

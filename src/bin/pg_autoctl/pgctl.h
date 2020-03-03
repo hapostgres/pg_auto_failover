@@ -33,10 +33,9 @@ bool pg_add_auto_failover_default_settings(PostgresSetup *pgSetup,
 bool pg_basebackup(const char *pgdata,
 				   const char *pg_ctl,
 				   ReplicationSource *replicationSource);
-bool pg_rewind(const char *pgdata, const char *pg_ctl, const char *primaryHost,
-			   int primaryPort, const char *databaseName,
-			   const char *replicationUsername,
-			   const char *replicationPassword);
+bool pg_rewind(const char *pgdata,
+			   const char *pg_ctl,
+			   ReplicationSource *replicationSource);
 
 bool pg_ctl_initdb(const char *pg_ctl, const char *pgdata);
 bool pg_ctl_start(const char *pg_ctl,

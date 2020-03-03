@@ -86,6 +86,10 @@
 	make_int_option_default("ssl", "active", NULL,			\
 							false, &(config->pgSetup.ssl.active), 0)
 
+#define OPTION_SSL_MODE(config)										\
+	make_strbuf_option("ssl", "sslmode", "ssl-mode",				\
+					   false, SSL_MODE_STRLEN, config->pgSetup.ssl.sslModeStr)
+
 #define OPTION_SSL_CA_FILE(config)								\
 	make_strbuf_option("ssl", "ca_file", "ssl-ca-file",			\
 					   false, MAXPGPATH, config->pgSetup.ssl.caFile)
@@ -173,7 +177,8 @@
 		OPTION_POSTGRESQL_LISTEN_ADDRESSES(config), \
 		OPTION_POSTGRESQL_AUTH_METHOD(config), \
 		OPTION_SSL_ACTIVE(config), \
-		OPTION_SSL_CA_FILE(config), \
+		OPTION_SSL_MODE(config), \
+		OPTION_SSL_CA_FILE(config),	 \
 		OPTION_SSL_CRL_FILE(config), \
 		OPTION_SSL_SERVER_CERT(config), \
 		OPTION_SSL_SERVER_KEY(config), \
@@ -351,6 +356,10 @@ keeper_config_read_file_skip_pgsetup(KeeperConfig *config,
 			return false;
 		}
 	}
+
+	/* set the ENUM value for sslMode */
+	config->pgSetup.ssl.sslMode =
+		pgsetup_parse_sslmode(config->pgSetup.ssl.sslModeStr);
 
 	if (!keeper_config_init_nodekind(config))
 	{

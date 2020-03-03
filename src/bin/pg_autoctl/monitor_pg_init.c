@@ -67,7 +67,6 @@ bool
 monitor_pg_init(Monitor *monitor, MonitorConfig *config)
 {
 	char configFilePath[MAXPGPATH];
-	char postgresUri[MAXCONNINFO];
 	PostgresSetup pgSetup = config->pgSetup;
 
 	if (directory_exists(pgSetup.pgdata))
@@ -167,11 +166,6 @@ monitor_pg_init(Monitor *monitor, MonitorConfig *config)
 	if (!monitor_install(config->nodename, pgSetup, false))
 	{
 		return false;
-	}
-
-	if (monitor_config_get_postgres_uri(config, postgresUri, MAXCONNINFO))
-	{
-		log_info("pg_auto_failover monitor is ready at %s", postgresUri);
 	}
 
 	return true;

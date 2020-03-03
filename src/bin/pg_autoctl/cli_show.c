@@ -563,7 +563,12 @@ cli_show_all_uri(int argc, char **argv)
 				exit(EXIT_CODE_PGCTL);
 			}
 
-			pg_setup_get_local_connection_string(&(mconfig.pgSetup), connInfo);
+			if (!monitor_config_get_postgres_uri(&mconfig, connInfo, MAXCONNINFO))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
+
 			monitor_init(&monitor, connInfo);
 
 			if (outputJSON)

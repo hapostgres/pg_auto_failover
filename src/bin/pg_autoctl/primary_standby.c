@@ -621,10 +621,7 @@ primary_rewind_to_standby(LocalPostgresServer *postgres,
 		return false;
 	}
 
-	if (!pg_rewind(pgSetup->pgdata, pgSetup->pg_ctl,
-				   primaryNode->host, primaryNode->port,
-				   pgSetup->dbname, replicationSource->userName,
-				   replicationSource->password))
+	if (!pg_rewind(pgSetup->pgdata, pgSetup->pg_ctl, replicationSource))
 	{
 		log_error("Failed to rewind old data directory");
 		return false;

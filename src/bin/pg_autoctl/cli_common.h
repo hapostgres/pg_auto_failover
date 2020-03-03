@@ -32,44 +32,43 @@ extern bool outputJSON;
 
 extern int ssl_flag;
 
+#define KEEPER_CLI_SSL_OPTIONS \
+	"  --no-ssl          activate ssl in Postgres configuration\n" \
+	"  --ssl-self-signed activate ssl in Postgres configuration\n" \
+	"  --ssl-mode        use that sslmode in connection strings\n" \
+	"  --ssl-ca-file     set the Postgres ssl_ca_file to that file path\n" \
+	"  --ssl-crl-file    set the Postgres ssl_crl_file to that file path\n" \
+	"  --server-key      set the Postgres ssl_key_file to that file path\n" \
+	"  --server-cert     set the Postgres ssl_cert_file to that file path\n"
+
 #define KEEPER_CLI_WORKER_SETUP_OPTIONS \
-	"  --pgctl        path to pg_ctl\n" \
-	"  --pgdata       path to data director\n" \
-	"  --pghost       PostgreSQL's hostname\n" \
-	"  --pgport       PostgreSQL's port number\n" \
-	"  --listen       PostgreSQL's listen_addresses\n" \
-	"  --username     PostgreSQL's username\n" \
-	"  --dbname       PostgreSQL's database name\n" \
-	"  --proxyport    Proxy's port number\n" \
-	"  --nodename     pg_auto_failover node\n" \
-	"  --formation    pg_auto_failover formation\n" \
-	"  --group        pg_auto_failover group Id\n" \
-	"  --monitor      pg_auto_failover Monitor Postgres URL\n" \
-	"  --ssl          activate ssl in Postgres configuration\n" \
-	"  --ssl-mode     use that sslmode in connection strings\n" \
-	"  --ssl-ca-file  set the Postgres ssl_ca_file to that file path\n" \
-	"  --ssl-crl-file set the Postgres ssl_crl_file to that file path\n" \
-	"  --server-key   set the Postgres ssl_key_file to that file path\n" \
-	"  --server-cert  set the Postgres ssl_cert_file to that file path\n"
+	"  --pgctl           path to pg_ctl\n" \
+	"  --pgdata          path to data director\n" \
+	"  --pghost          PostgreSQL's hostname\n" \
+	"  --pgport          PostgreSQL's port number\n" \
+	"  --listen          PostgreSQL's listen_addresses\n" \
+	"  --username        PostgreSQL's username\n" \
+	"  --dbname          PostgreSQL's database name\n" \
+	"  --proxyport       Proxy's port number\n" \
+	"  --nodename        pg_auto_failover node\n" \
+	"  --formation       pg_auto_failover formation\n" \
+	"  --group           pg_auto_failover group Id\n" \
+	"  --monitor         pg_auto_failover Monitor Postgres URL\n" \
+	KEEPER_CLI_SSL_OPTIONS
 
 #define KEEPER_CLI_NON_WORKER_SETUP_OPTIONS			 \
-	"  --pgctl        path to pg_ctl\n" \
-	"  --pgdata       path to data director\n" \
-	"  --pghost       PostgreSQL's hostname\n" \
-	"  --pgport       PostgreSQL's port number\n" \
-	"  --listen       PostgreSQL's listen_addresses\n" \
-	"  --username     PostgreSQL's username\n" \
-	"  --dbname       PostgreSQL's database name\n" \
-	"  --nodename     pg_auto_failover node\n" \
-	"  --formation    pg_auto_failover formation\n" \
-	"  --group        pg_auto_failover group Id\n" \
-	"  --monitor      pg_auto_failover Monitor Postgres URL\n" \
-	"  --ssl          activate ssl in Postgres configuration\n" \
-	"  --ssl-mode     use that sslmode in connection strings\n"			\
-	"  --ssl-ca-file  set the Postgres ssl_ca_file to that file path\n" \
-	"  --ssl-crl-file set the Postgres ssl_crl_file to that file path\n" \
-	"  --server-key   set the Postgres ssl_key_file to that file path\n" \
-	"  --server-cert  set the Postgres ssl_cert_file to that file path\n"
+	"  --pgctl           path to pg_ctl\n" \
+	"  --pgdata          path to data director\n" \
+	"  --pghost          PostgreSQL's hostname\n" \
+	"  --pgport          PostgreSQL's port number\n" \
+	"  --listen          PostgreSQL's listen_addresses\n" \
+	"  --username        PostgreSQL's username\n" \
+	"  --dbname          PostgreSQL's database name\n" \
+	"  --nodename        pg_auto_failover node\n" \
+	"  --formation       pg_auto_failover formation\n" \
+	"  --group           pg_auto_failover group Id\n" \
+	"  --monitor         pg_auto_failover Monitor Postgres URL\n" \
+	KEEPER_CLI_SSL_OPTIONS
 
 #define KEEPER_CLI_ALLOW_RM_PGDATA_OPTION \
 	"  --allow-removing-pgdata Allow pg_autoctl to remove the database directory\n"

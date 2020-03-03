@@ -382,7 +382,7 @@ keeper_cli_rewind_old_primary(int argc, char **argv)
 	replicationSource.slotName = config.replication_slot_name;
 	replicationSource.applicationName = config.replication_slot_name;
 	replicationSource.maximumBackupRate = MAXIMUM_BACKUP_RATE;
-	replicationSource.sslMode = config.pgSetup.ssl.sslMode;
+	replicationSource.sslOptions = config.pgSetup.ssl;
 
 	if (!primary_rewind_to_standby(&postgres, &replicationSource))
 	{

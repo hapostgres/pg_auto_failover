@@ -637,7 +637,7 @@ fsm_init_standby(Keeper *keeper)
 	replicationSource.slotName = config->replication_slot_name;
 	replicationSource.maximumBackupRate = config->maximum_backup_rate;
 	replicationSource.backupDir = config->backupDirectory;
-	replicationSource.sslMode = config->pgSetup.ssl.sslMode;
+	replicationSource.sslOptions = config->pgSetup.ssl;
 
 	/* prepare our application_name */
 	snprintf(applicationName, BUFSIZE,
@@ -697,7 +697,7 @@ fsm_rewind_or_init(Keeper *keeper)
 	replicationSource.applicationName = config->replication_slot_name;
 	replicationSource.maximumBackupRate = config->maximum_backup_rate;
 	replicationSource.backupDir = config->backupDirectory;
-	replicationSource.sslMode = config->pgSetup.ssl.sslMode;
+	replicationSource.sslOptions = config->pgSetup.ssl;
 
 	/* prepare our application_name */
 	snprintf(applicationName, BUFSIZE,

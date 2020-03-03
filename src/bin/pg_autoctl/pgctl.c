@@ -60,9 +60,10 @@ static bool prepare_primary_conninfo(
 	int primaryConnInfoSize,
 	const char *primaryHost, int primaryPort,
 	const char *replicationUsername,
+	const char *dbname,
 	const char *replicationPassword,
 	const char *applicationName,
-	SSLMode sslMode,
+	SSLOptions sslOptions,
 	bool escape);
 static bool pg_write_recovery_conf(const char *pgdata,
 								   const char *primaryConnInfo,
@@ -543,10 +544,11 @@ pg_basebackup(const char *pgdata,
 								  primaryNode->host,
 								  primaryNode->port,
 								  replicationSource->userName,
+								  NULL, /* no database */
 								  NULL, /* no password here */
 								  replicationSource->applicationName,
-								  replicationSource->sslMode,
-								  false)) /* do not espace this one */
+								  replicationSource->sslOptions,
+								  false)) /* do not escape this one */
 	{
 		/* errors have already been logged. */
 		return false;
@@ -619,34 +621,43 @@ pg_basebackup(const char *pgdata,
 bool
 pg_rewind(const char *pgdata,
 		  const char *pg_ctl,
-		  const char *primaryHost,
-		  int primaryPort,
-		  const char *databaseName,
-		  const char *replicationUsername,
-		  const char *replicationPassword)
+		  ReplicationSource *replicationSource)
 {
 	int returnCode;
 	Program program;
-	char primaryConnInfo[MAXCONNINFO] = { 0 };
-	char *connInfoEnd = primaryConnInfo;
 	char pg_rewind[MAXPGPATH] = { 0 };
 
-	connInfoEnd += make_conninfo_field_str(connInfoEnd, "host", primaryHost);
-	connInfoEnd += make_conninfo_field_int(connInfoEnd, "port", primaryPort);
-	connInfoEnd += make_conninfo_field_str(connInfoEnd, "user", replicationUsername);
-	connInfoEnd += make_conninfo_field_str(connInfoEnd, "dbname", databaseName);
+	NodeAddress *primaryNode = &(replicationSource->primaryNode);
+	char primaryConnInfo[MAXCONNINFO] = { 0 };
 
 	/* call pg_rewind*/
 	path_in_same_directory(pg_ctl, "pg_rewind", pg_rewind);
 
 	setenv("PGCONNECT_TIMEOUT", POSTGRES_CONNECT_TIMEOUT, 1);
 
-	if (replicationPassword != NULL)
+	if (replicationSource->password != NULL)
 	{
-		setenv("PGPASSWORD", replicationPassword, 1);
+		setenv("PGPASSWORD", replicationSource->password, 1);
 	}
 
-	log_info("Running %s --target-pgdata \"%s\" --source-server \"%s\" --progress ...",
+	/* we ignore the length returned by prepare_primary_conninfo... */
+	if (!prepare_primary_conninfo(primaryConnInfo,
+								  MAXCONNINFO,
+								  primaryNode->host,
+								  primaryNode->port,
+								  replicationSource->userName,
+								  "postgres", /* pg_rewind needs a database */
+								  NULL,		  /* no password here */
+								  replicationSource->applicationName,
+								  replicationSource->sslOptions,
+								  false)) /* do not escape this one */
+	{
+		/* errors have already been logged. */
+		return false;
+	}
+
+	log_info("Running %s --target-pgdata \"%s\" "
+			 "--source-server \"%s\" --progress ...",
 			 pg_rewind, pgdata, primaryConnInfo);
 
 	program = run_program(pg_rewind,
@@ -655,7 +666,9 @@ pg_rewind(const char *pgdata,
 						  "--progress",
 						  NULL);
 
-	(void) log_program_output(program, LOG_INFO, LOG_ERROR);
+	/* pg_basebackup uses stderr for all of its output */
+	(void) log_program_output(program, LOG_INFO, LOG_INFO);
+
 	returnCode = program.returnCode;
 	free_program(&program);
 
@@ -1043,9 +1056,10 @@ pg_setup_standby_mode(uint32_t pg_control_version,
 								  primaryNode->host,
 								  primaryNode->port,
 								  replicationSource->userName,
+								  NULL, /* no database */
 								  replicationSource->password,
 								  replicationSource->applicationName,
-								  replicationSource->sslMode,
+								  replicationSource->sslOptions,
 								  escape))
 	{
 		/* errors have already been logged. */
@@ -1186,7 +1200,12 @@ escape_recovery_conf_string(char *destination, int destinationSize,
 
 
 /*
- * prepare_primary_conninfo
+ * prepare_primary_conninfo prepares a connection string to the primary server.
+ * The connection string may be used unquoted in a command line calling either
+ * pg_basebackup ro pg_rewind, or may be used quoted in the primary_conninfo
+ * setting for PostgreSQL.
+ *
+ * Also, pg_rewind needs a database to connect to.
  */
 static bool
 prepare_primary_conninfo(char *primaryConnInfo,
@@ -1194,9 +1213,10 @@ prepare_primary_conninfo(char *primaryConnInfo,
 						 const char *primaryHost,
 						 int primaryPort,
 						 const char *replicationUsername,
+						 const char *dbname,
 						 const char *replicationPassword,
 						 const char *applicationName,
-						 SSLMode sslMode,
+						 SSLOptions sslOptions,
 						 bool escape)
 {
 	int size = 0;
@@ -1211,16 +1231,26 @@ prepare_primary_conninfo(char *primaryConnInfo,
 	appendPQExpBuffer(buffer, " port=%d", primaryPort);
 	appendPQExpBuffer(buffer, " user=%s", replicationUsername);
 
+	if (dbname != NULL)
+	{
+		appendPQExpBuffer(buffer, " dbname=%s", dbname);
+	}
+
 	if (replicationPassword != NULL)
 	{
 		appendPQExpBuffer(buffer, " password=%s", replicationPassword);
 	}
 
-	if (sslMode != SSL_MODE_UNKNOWN)
+	if (sslOptions.sslMode != SSL_MODE_UNKNOWN)
 	{
-		appendPQExpBuffer(buffer,
-						  " sslmode=%s",
-						  pgsetup_sslmode_to_string(sslMode));
+		appendPQExpBuffer(buffer, " sslmode=%s",
+						  pgsetup_sslmode_to_string(sslOptions.sslMode));
+
+		if (sslOptions.sslMode >= SSL_MODE_VERIFY_CA)
+		{
+			appendPQExpBuffer(buffer, " sslrootcert=%s sslcrl=%s",
+							  sslOptions.caFile, sslOptions.crlFile);
+		}
 	}
 
 	/* memory allocation could have failed while building string */
@@ -1432,6 +1462,8 @@ pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *nodename)
 		free_program(&program);
 		return false;
 	}
+
+	(void) log_program_output(program, LOG_DEBUG, LOG_DEBUG);
 	free_program(&program);
 
 	/*
