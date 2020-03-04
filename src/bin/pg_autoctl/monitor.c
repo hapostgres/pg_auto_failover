@@ -1129,27 +1129,33 @@ monitor_drop_formation(Monitor *monitor, char *formation)
 
 
 /*
- * monitor_formation_uri calls the SQL API on the monitor that returns the connection
- * string that can be used by applications to connect to the formation.
+ * monitor_formation_uri calls the SQL API on the monitor that returns the
+ * connection string that can be used by applications to connect to the
+ * formation.
  */
 bool
-monitor_formation_uri(Monitor *monitor, const char *formation, char *connectionString,
+monitor_formation_uri(Monitor *monitor,
+					  const char *formation,
+					  const char *sslMode,
+					  char *connectionString,
 					  size_t size)
 {
 	SingleValueResultContext context;
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
-		"SELECT formation_uri FROM pgautofailover.formation_uri($1)";
-	int paramCount = 1;
-	Oid paramTypes[1] = { TEXTOID };
-	const char *paramValues[1];
+		"SELECT formation_uri FROM pgautofailover.formation_uri($1, $2)";
+	int paramCount = 2;
+	Oid paramTypes[2] = { TEXTOID, TEXTOID };
+	const char *paramValues[2];
 
 	context.resultType = PGSQL_RESULT_STRING;
 	context.parsedOk = false;
 
 	paramValues[0] = formation;
+	paramValues[1] = sslMode;
 
-	if (!pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes, paramValues,
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
 								   &context, &parseSingleValueResult))
 	{
 		log_error("Failed to list the formation uri for \"%s\", "
@@ -1185,7 +1191,7 @@ monitor_formation_uri(Monitor *monitor, const char *formation, char *connectionS
  * strings: first the monitor URI itself, and then one line per formation.
  */
 bool
-monitor_print_every_formation_uri(Monitor *monitor)
+monitor_print_every_formation_uri(Monitor *monitor, const char *sslMode)
 {
 	FormationURIParseContext context = { 0 };
 	PGSQL *pgsql = &monitor->pgsql;
@@ -1194,13 +1200,14 @@ monitor_print_every_formation_uri(Monitor *monitor)
 		" UNION ALL "
 		"SELECT 'formation', formationid, formation_uri "
 		"  FROM pgautofailover.formation, "
-		"       pgautofailover.formation_uri(formation.formationid)";
+		"       pgautofailover.formation_uri(formation.formationid, $2)";
 
-	int paramCount = 1;
-	Oid paramTypes[1] = { TEXTOID };
-	const char *paramValues[1];
+	int paramCount = 2;
+	Oid paramTypes[2] = { TEXTOID, TEXTOID };
+	const char *paramValues[2];
 
 	paramValues[0] = monitor->pgsql.connectionString;
+	paramValues[1] = sslMode;
 
 	context.parsedOK = false;
 
@@ -1232,7 +1239,9 @@ monitor_print_every_formation_uri(Monitor *monitor)
  * formation.
  */
 bool
-monitor_print_every_formation_uri_as_json(Monitor *monitor, FILE *stream)
+monitor_print_every_formation_uri_as_json(Monitor *monitor,
+										  const char *sslMode,
+										  FILE *stream)
 {
 	SingleValueResultContext context = { PGSQL_RESULT_STRING, false };
 	PGSQL *pgsql = &monitor->pgsql;
@@ -1242,15 +1251,16 @@ monitor_print_every_formation_uri_as_json(Monitor *monitor, FILE *stream)
 		" UNION ALL "
 		"SELECT 'formation', formationid, formation_uri "
 		"  FROM pgautofailover.formation, "
-		"       pgautofailover.formation_uri(formation.formationid)"
+		"       pgautofailover.formation_uri(formation.formationid, $2)"
 		") "
 		"SELECT jsonb_pretty(jsonb_agg(row_to_json(formation))) FROM formation";
 
-	int paramCount = 1;
-	Oid paramTypes[1] = { TEXTOID };
-	const char *paramValues[1];
+	int paramCount = 2;
+	Oid paramTypes[2] = { TEXTOID, TEXTOID };
+	const char *paramValues[2];
 
 	paramValues[0] = monitor->pgsql.connectionString;
+	paramValues[1] = sslMode;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
