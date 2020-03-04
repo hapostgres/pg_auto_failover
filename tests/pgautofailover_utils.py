@@ -44,7 +44,7 @@ class Cluster:
         self.datanodes = []
 
     def create_monitor(self, datadir, port=5432, nodename=None,
-                       authMethod=None, sslMode=None):
+                       authMethod=None, sslMode=None, sslSelfSigned=False):
         """
         Initializes the monitor and returns an instance of MonitorNode.
         """
@@ -52,7 +52,7 @@ class Cluster:
             raise Exception("Monitor has already been created.")
         vnode = self.vlan.create_node()
         self.monitor = MonitorNode(datadir, vnode, port, nodename,
-                                   authMethod, sslMode)
+                                   authMethod, sslMode, sslSelfSigned)
         self.monitor.create()
         return self.monitor
 
@@ -60,7 +60,8 @@ class Cluster:
     # create cli as an argument when explicitly set by the test
     def create_datanode(self, datadir, port=5432, group=0,
                         listen_flag=False, role=Role.Postgres,
-                        formation=None, authMethod=None, sslMode=None):
+                        formation=None, authMethod=None, sslMode=None,
+                        sslSelfSigned=False):
         """
         Initializes a data node and returns an instance of DataNode. This will
         do the "keeper init" and "pg_autoctl run" commands.
@@ -70,7 +71,7 @@ class Cluster:
         datanode = DataNode(datadir, vnode, port,
                             os.getenv("USER"), authMethod, "postgres",
                             self.monitor, nodeid, group, listen_flag,
-                            role, formation, sslMode)
+                            role, formation, sslMode, sslSelfSigned)
         self.datanodes.append(datanode)
         return datanode
 
@@ -126,7 +127,7 @@ class PGNode:
     Common stuff between MonitorNode and DataNode.
     """
     def __init__(self, datadir, vnode, port, username, authMethod,
-                 database, role, sslMode=None):
+                 database, role, sslMode=None, sslSelfSigned=False):
         self.datadir = datadir
         self.vnode = vnode
         self.port = port
@@ -137,6 +138,7 @@ class PGNode:
         self.pg_autoctl = None
         self.authenticatedUsers = {}
         self.sslMode = sslMode
+        self.sslSelfSigned = sslSelfSigned
 
     def connection_string(self):
         """
@@ -357,11 +359,41 @@ class PGNode:
                             pgdata,
                             "pg_autoctl.state")
 
+    def config_set(self, setting, value):
+        """
+        Set a configuration parameter to given value
+        """
+        command = PGAutoCtl(self.vnode, self.datadir)
+        command.execute("config set %s" % setting,
+                        'config', 'set', setting, value)
+        return True
+
+    def config_get(self, setting):
+        """
+        Set a configuration parameter to given value
+        """
+        command = PGAutoCtl(self.vnode, self.datadir)
+        out, err = command.execute("config get %s" % setting,
+                                   'config', 'get', setting)
+        return out[:-1]
+
+    def show_uri(self, json=False):
+        """
+        Runs pg_autoctl show uri
+        """
+        command = PGAutoCtl(self.vnode, self.datadir)
+        if json:
+            out, err = command.execute("show uri", 'show', 'uri', '--json')
+        else:
+            out, err = command.execute("show uri", 'show', 'uri')
+        return out
+
 
 class DataNode(PGNode):
     def __init__(self, datadir, vnode, port,
                  username, authMethod, database, monitor,
-                 nodeid, group, listen_flag, role, formation, sslMode=None):
+                 nodeid, group, listen_flag, role, formation,
+                 sslMode=None, sslSelfSigned=False):
         super().__init__(datadir, vnode, port,
                          username, authMethod, database, role)
         self.monitor = monitor
@@ -370,6 +402,7 @@ class DataNode(PGNode):
         self.listen_flag = listen_flag
         self.formation = formation
         self.sslMode = sslMode
+        self.sslSelfSigned = sslSelfSigned
 
     def create(self, run=False, level='-v'):
         """
@@ -387,9 +420,13 @@ class DataNode(PGNode):
                        '--pghost', pghost,
                        '--pgport', str(self.port),
                        '--pgctl', shutil.which('pg_ctl'),
-                       '--no-ssl',
                        '--auth', self.authMethod,
                        '--monitor', self.monitor.connection_string()]
+
+        if self.sslSelfSigned:
+            create_args += ['--ssl-self-signed']
+        else:
+            create_args += ['--no-ssl']
 
         if self.listen_flag:
             create_args += ['--listen', str(self.vnode.address)]
@@ -524,22 +561,15 @@ SELECT reportedstate
         command.execute("drop node", 'drop', 'node')
         return True
 
-    def config_set(self, setting, value):
-        """
-        Set a configuration parameter to given value
-        """
-        command = PGAutoCtl(self.vnode, self.datadir)
-        command.execute("config set %s" % setting,
-                        'config', 'set', setting, value)
-        return True
-
 
 class MonitorNode(PGNode):
-    def __init__(self, datadir, vnode, port, nodename, authMethod, sslMode):
+    def __init__(self, datadir, vnode, port, nodename, authMethod,
+                 sslMode, sslSelfSigned):
 
         super().__init__(datadir, vnode, port,
                          "autoctl_node", authMethod,
-                         "pg_auto_failover", Role.Monitor, sslMode)
+                         "pg_auto_failover", Role.Monitor,
+                         sslMode, sslSelfSigned)
 
         # set the nodename, default to the ip address of the node
         if nodename:
@@ -555,9 +585,13 @@ class MonitorNode(PGNode):
         create_args = ['create', self.role.command(), '-vv',
                        '--pgdata', self.datadir,
                        '--pgport', str(self.port),
-                       '--no-ssl',
                        '--auth', self.authMethod,
                        '--nodename', self.nodename]
+
+        if self.sslSelfSigned:
+            create_args += ['--ssl-self-signed']
+        else:
+            create_args += ['--no-ssl']
 
         if run:
             create_args += ['--run']
