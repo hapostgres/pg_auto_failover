@@ -1248,8 +1248,16 @@ prepare_primary_conninfo(char *primaryConnInfo,
 
 		if (sslOptions.sslMode >= SSL_MODE_VERIFY_CA)
 		{
-			appendPQExpBuffer(buffer, " sslrootcert=%s sslcrl=%s",
-							  sslOptions.caFile, sslOptions.crlFile);
+			/* ssl revocation list might not be provided, it's ok */
+			if (!IS_EMPTY_STRING_BUFFER(sslOptions.crlFile))
+			{
+				appendPQExpBuffer(buffer, " sslrootcert=%s sslcrl=%s",
+								  sslOptions.caFile, sslOptions.crlFile);
+			}
+			else
+			{
+				appendPQExpBuffer(buffer, " sslrootcert=%s", sslOptions.caFile);
+			}
 		}
 	}
 

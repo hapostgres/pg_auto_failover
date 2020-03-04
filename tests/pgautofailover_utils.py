@@ -44,7 +44,8 @@ class Cluster:
         self.datanodes = []
 
     def create_monitor(self, datadir, port=5432, nodename=None,
-                       authMethod=None, sslMode=None, sslSelfSigned=False):
+                       authMethod=None, sslMode=None, sslSelfSigned=False,
+                       sslCAFile=None, sslServerKey=None, sslServerCert=None):
         """
         Initializes the monitor and returns an instance of MonitorNode.
         """
@@ -52,7 +53,10 @@ class Cluster:
             raise Exception("Monitor has already been created.")
         vnode = self.vlan.create_node()
         self.monitor = MonitorNode(datadir, vnode, port, nodename,
-                                   authMethod, sslMode, sslSelfSigned)
+                                   authMethod, sslMode, sslSelfSigned,
+                                   sslCAFile=sslCAFile,
+                                   sslServerKey=sslServerKey,
+                                   sslServerCert=sslServerCert)
         self.monitor.create()
         return self.monitor
 
@@ -60,8 +64,9 @@ class Cluster:
     # create cli as an argument when explicitly set by the test
     def create_datanode(self, datadir, port=5432, group=0,
                         listen_flag=False, role=Role.Postgres,
-                        formation=None, authMethod=None, sslMode=None,
-                        sslSelfSigned=False):
+                        formation=None, authMethod=None,
+                        sslMode=None, sslSelfSigned=False,
+                        sslCAFile=None, sslServerKey=None, sslServerCert=None):
         """
         Initializes a data node and returns an instance of DataNode. This will
         do the "keeper init" and "pg_autoctl run" commands.
@@ -71,7 +76,10 @@ class Cluster:
         datanode = DataNode(datadir, vnode, port,
                             os.getenv("USER"), authMethod, "postgres",
                             self.monitor, nodeid, group, listen_flag,
-                            role, formation, sslMode, sslSelfSigned)
+                            role, formation, sslMode, sslSelfSigned,
+                            sslCAFile=sslCAFile,
+                            sslServerKey=sslServerKey,
+                            sslServerCert=sslServerCert)
         self.datanodes.append(datanode)
         return datanode
 
@@ -127,7 +135,8 @@ class PGNode:
     Common stuff between MonitorNode and DataNode.
     """
     def __init__(self, datadir, vnode, port, username, authMethod,
-                 database, role, sslMode=None, sslSelfSigned=False):
+                 database, role, sslMode=None, sslSelfSigned=False,
+                 sslCAFile=None, sslServerKey=None, sslServerCert=None):
         self.datadir = datadir
         self.vnode = vnode
         self.port = port
@@ -139,6 +148,9 @@ class PGNode:
         self.authenticatedUsers = {}
         self.sslMode = sslMode
         self.sslSelfSigned = sslSelfSigned
+        self.sslCAFile = sslCAFile
+        self.sslServerKey = sslServerKey
+        self.sslServerCert = sslServerCert
 
     def connection_string(self):
         """
@@ -393,16 +405,17 @@ class DataNode(PGNode):
     def __init__(self, datadir, vnode, port,
                  username, authMethod, database, monitor,
                  nodeid, group, listen_flag, role, formation,
-                 sslMode=None, sslSelfSigned=False):
+                 sslMode=None, sslSelfSigned=False,
+                 sslCAFile=None, sslServerKey=None, sslServerCert=None):
         super().__init__(datadir, vnode, port,
-                         username, authMethod, database, role)
+                         username, authMethod, database, role,
+                         sslMode, sslSelfSigned,
+                         sslCAFile, sslServerKey, sslServerCert)
         self.monitor = monitor
         self.nodeid = nodeid
         self.group = group
         self.listen_flag = listen_flag
         self.formation = formation
-        self.sslMode = sslMode
-        self.sslSelfSigned = sslSelfSigned
 
     def create(self, run=False, level='-v'):
         """
@@ -423,9 +436,22 @@ class DataNode(PGNode):
                        '--auth', self.authMethod,
                        '--monitor', self.monitor.connection_string()]
 
+        if self.sslMode:
+            create_args += ['--ssl-mode', self.sslMode]
+
         if self.sslSelfSigned:
             create_args += ['--ssl-self-signed']
-        else:
+
+        if self.sslCAFile:
+            create_args += ['--ssl-ca-file', self.sslCAFile]
+
+        if self.sslServerKey:
+            create_args += ['--server-key', self.sslServerKey]
+
+        if self.sslServerCert:
+            create_args += ['--server-cert', self.sslServerCert]
+
+        if not self.sslSelfSigned and not self.sslCAFile:
             create_args += ['--no-ssl']
 
         if self.listen_flag:
@@ -564,12 +590,14 @@ SELECT reportedstate
 
 class MonitorNode(PGNode):
     def __init__(self, datadir, vnode, port, nodename, authMethod,
-                 sslMode, sslSelfSigned):
+                 sslMode=None, sslSelfSigned=None,
+                 sslCAFile=None, sslServerKey=None, sslServerCert=None):
 
         super().__init__(datadir, vnode, port,
                          "autoctl_node", authMethod,
                          "pg_auto_failover", Role.Monitor,
-                         sslMode, sslSelfSigned)
+                         sslMode, sslSelfSigned,
+                         sslCAFile, sslServerKey, sslServerCert)
 
         # set the nodename, default to the ip address of the node
         if nodename:
@@ -588,9 +616,22 @@ class MonitorNode(PGNode):
                        '--auth', self.authMethod,
                        '--nodename', self.nodename]
 
+        if self.sslMode:
+            create_args += ['--ssl-mode', self.sslMode]
+
         if self.sslSelfSigned:
             create_args += ['--ssl-self-signed']
-        else:
+
+        if self.sslCAFile:
+            create_args += ['--ssl-ca-file', self.sslCAFile]
+
+        if self.sslServerKey:
+            create_args += ['--server-key', self.sslServerKey]
+
+        if self.sslServerCert:
+            create_args += ['--server-cert', self.sslServerCert]
+
+        if not self.sslSelfSigned and not self.sslCAFile:
             create_args += ['--no-ssl']
 
         if run:
@@ -599,6 +640,7 @@ class MonitorNode(PGNode):
         # when run is requested pg_autoctl does not terminate
         # therefore we do not wait for process to complete
         # we just record the process
+
         self.pg_autoctl = PGAutoCtl(self.vnode, self.datadir, create_args)
         if run:
             self.pg_autoctl.run()

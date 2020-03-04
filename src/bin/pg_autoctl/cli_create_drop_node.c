@@ -315,6 +315,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 	int c, option_index = 0, errors = 0;
 	int verboseCount = 0;
 	int sslOrNoSSLCount = 0;
+	bool sslUserCertificates = false;
 
 	static struct option long_options[] = {
 		{ "pgctl", required_argument, NULL, 'C' },
@@ -511,14 +512,25 @@ cli_create_monitor_getopts(int argc, char **argv)
 			{
 				if (ssl_flag != SSL_MODE_FLAG)
 				{
-					if (sslOrNoSSLCount > 0)
+					/* we have 4 options allowed to all reach this code */
+					if (!sslUserCertificates)
 					{
-						errors++;
-						log_error("Using either --no-ssl or --ssl-self-signed "
-								  "with user-provided SSL certificates "
-								  "is not supported");
+						/*
+						 * but we can't use any of those options together with
+						 * the --no-ssl or the --ssl-self-signed options
+						 */
+						if (sslOrNoSSLCount > 0)
+						{
+							errors++;
+							log_error(
+								"Using either --no-ssl or --ssl-self-signed "
+								"with user-provided SSL certificates "
+								"is not supported");
+						}
+
+						sslUserCertificates = true;
+						++sslOrNoSSLCount;
 					}
-					++sslOrNoSSLCount;
 
 					options.pgSetup.ssl.active = 1;
 				}

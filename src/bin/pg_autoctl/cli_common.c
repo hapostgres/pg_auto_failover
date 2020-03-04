@@ -79,6 +79,7 @@ cli_create_node_getopts(int argc, char **argv,
 	int c, option_index = 0, errors = 0;
 	int verboseCount = 0;
 	int sslOrNoSSLCount = 0;
+	bool sslUserCertificates = false;
 
 	/* force some non-zero default values */
 	LocalOptionConfig.monitorDisabled = false;
@@ -361,14 +362,25 @@ cli_create_node_getopts(int argc, char **argv,
 			{
 				if (ssl_flag != SSL_MODE_FLAG)
 				{
-					if (sslOrNoSSLCount > 0)
+					/* we have 4 options allowed to all reach this code */
+					if (!sslUserCertificates)
 					{
-						errors++;
-						log_error("Using either --no-ssl or --ssl-self-signed "
-								  "with user-provided SSL certificates "
-								  "is not supported");
+						/*
+						 * but we can't use any of those options together with
+						 * the --no-ssl or the --ssl-self-signed options
+						 */
+						if (sslOrNoSSLCount > 0)
+						{
+							errors++;
+							log_error(
+								"Using either --no-ssl or --ssl-self-signed "
+								"with user-provided SSL certificates "
+								"is not supported");
+						}
+
+						sslUserCertificates = true;
+						++sslOrNoSSLCount;
 					}
-					++sslOrNoSSLCount;
 
 					LocalOptionConfig.pgSetup.ssl.active = 1;
 				}
@@ -545,6 +557,12 @@ cli_getopt_ssl_flags(PostgresSetup *pgSetup)
 
 			log_trace("--ssl-mode %s",
 					  pgsetup_sslmode_to_string(pgSetup->ssl.sslMode));
+
+			if (pgSetup->ssl.sslMode == SSL_MODE_UNKNOWN)
+			{
+				log_fatal("Failed to parse ssl mode \"%s\"", optarg);
+				return false;
+			}
 			break;
 		}
 

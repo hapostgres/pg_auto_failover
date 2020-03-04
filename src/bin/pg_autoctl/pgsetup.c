@@ -1185,7 +1185,7 @@ pgsetup_validate_ssl_settings(PostgresSetup *pgSetup)
 			return false;
 		}
 
-		if (!file_exists(ssl->crlFile))
+		if (!IS_EMPTY_STRING_BUFFER(ssl->crlFile) && !file_exists(ssl->crlFile))
 		{
 			log_error("--ssl-crl-file file does not exist at \"%s\"",
 					  ssl->crlFile);
