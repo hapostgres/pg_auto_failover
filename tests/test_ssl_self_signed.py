@@ -1,6 +1,7 @@
 import pgautofailover_utils as pgautofailover
 from nose.tools import *
 
+import subprocess
 import os, os.path
 import json
 
@@ -24,6 +25,14 @@ def test_000_create_monitor():
 
     for f in ["server.key", "server.crt"]:
         assert(os.path.isfile(os.path.join("/tmp/ssl-self-signed/monitor", f)))
+
+    p = subprocess.run(["openssl", "ciphers", "-v",
+                        "TLSv1.2+HIGH:!aNULL:!eNULL"],
+                       text=True,
+                       capture_output=True)
+    print()
+    print("%s" % " ".join(p.args))
+    print("%s" % p.stdout)
 
 def test_001_init_primary():
     global node1
