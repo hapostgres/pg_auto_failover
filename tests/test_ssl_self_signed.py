@@ -45,6 +45,8 @@ def test_003_init_secondary():
                                     sslSelfSigned=True)
 
     node2.create()
+    assert node2.config_get("ssl.sslmode") == "require"
+
     node2.run()
     assert node2.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")
