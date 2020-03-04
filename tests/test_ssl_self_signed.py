@@ -25,11 +25,6 @@ def test_000_create_monitor():
     for f in ["server.key", "server.crt"]:
         assert(os.path.isfile(os.path.join("/tmp/ssl-self-signed/monitor", f)))
 
-    uri = json.loads(monitor.show_uri(json=True))[0]["uri"]
-
-    print()
-    print("Monitor URI: %s" % uri)
-
 def test_001_init_primary():
     global node1
     node1 = cluster.create_datanode("/tmp/ssl-self-signed/node1",
