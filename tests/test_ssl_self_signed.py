@@ -26,8 +26,7 @@ def test_000_create_monitor():
     for f in ["server.key", "server.crt"]:
         assert(os.path.isfile(os.path.join("/tmp/ssl-self-signed/monitor", f)))
 
-    p = subprocess.run(["openssl", "ciphers", "-v",
-                        "TLSv1.2+HIGH:!aNULL:!eNULL"],
+    p = subprocess.run(["openssl", "ciphers", "TLSv1.2+HIGH:!aNULL:!eNULL"],
                        text=True,
                        capture_output=True)
     print()

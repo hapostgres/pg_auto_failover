@@ -15,6 +15,20 @@ def setup_module():
 def teardown_module():
     cluster.destroy()
 
+    # remove client side setup for certificates too
+    client_top_directory = os.path.join(os.getenv("HOME"), ".postgresql")
+
+    p = subprocess.Popen(["sudo", "-E", '-u', os.getenv("USER"),
+                          'env', 'PATH=' + os.getenv("PATH"),
+                          "rm", "-rf", client_top_directory])
+    assert(p.wait() == 0)
+
+    # also remove certificates we created for the servers
+    p = subprocess.run(["sudo", "-E", '-u', os.getenv("USER"),
+                        'env', 'PATH=' + os.getenv("PATH"),
+                        "rm", "-rf", "/tmp/certs"])
+    assert(p.returncode == 0)
+
 def test_000_create_monitor():
     # create SSL certs and keys for this server
     #

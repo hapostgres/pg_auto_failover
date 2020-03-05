@@ -267,7 +267,10 @@ fsm_init_primary(Keeper *keeper)
 	 */
 	if (pgInstanceIsOurs)
 	{
-		if (getenv("PG_REGRESS_SOCK_DIR") != NULL)
+		char *pg_regress_sock_dir = getenv("PG_REGRESS_SOCK_DIR");
+
+		if (pg_regress_sock_dir != NULL
+			&& strcmp(pg_regress_sock_dir, "") == 0)
 		{
 			/*
 			 * In test environements allow nodes from the same network to
