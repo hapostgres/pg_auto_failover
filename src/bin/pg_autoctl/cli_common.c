@@ -447,6 +447,15 @@ cli_create_node_getopts(int argc, char **argv,
 	 *
 	 * We also need to either use the given sslMode or compute our default.
 	 */
+	if (sslOrNoSSLCount == 0)
+	{
+		log_fatal("Explicit SSL choice is required: please use either "
+				  "--no-ssl or --ssl-self-signed or provide your certificates "
+				  "using --ssl-ca-file, --ssl-crl-file, "
+				  "--server-key, and --server-crt");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
 	if (!pgsetup_validate_ssl_settings(&(LocalOptionConfig.pgSetup)))
 	{
 		/* errors have already been logged */

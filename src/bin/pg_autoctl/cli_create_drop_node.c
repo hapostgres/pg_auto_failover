@@ -602,6 +602,15 @@ cli_create_monitor_getopts(int argc, char **argv)
 	 * If we have --ssl, either we have a root ca file and a server.key and a
 	 * server.crt or none of them. Any other combo is a mistake.
 	 */
+	if (sslOrNoSSLCount == 0)
+	{
+		log_fatal("Explicit SSL choice is required: please use either "
+				  "--no-ssl or --ssl-self-signed or provide your certificates "
+				  "using --ssl-ca-file, --ssl-crl-file, "
+				  "--server-key, and --server-crt");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
 	if (!pgsetup_validate_ssl_settings(&(options.pgSetup)))
 	{
 		/* errors have already been logged */

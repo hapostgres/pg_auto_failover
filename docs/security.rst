@@ -111,9 +111,8 @@ communications, including authentication with passwords and the whole data
 set when streaming replication is used.
 
 To enable SSL on the server an SSL certificate is needed. It could be as
-simple as a self-signed certificate, and ``pg_autoctl`` will create such a
-certificate for you when setup with ssl support and without other
-instruction::
+simple as a self-signed certificate, and ``pg_autoctl`` creates such a
+certificate for you when using ``--ssl-self-signed`` command line option::
 
   $ pg_autoctl create monitor --ssl-self-signed ...      \
                               --auth scram-sha-256 ...   \
@@ -133,15 +132,21 @@ we still have to setup an authentication mechanism exactly as in the
 previous sections of this document. Here ``scram-sha-256`` has been
 selected, and the password will be sent over an encrypted channel.
 
-When using the ``--ssl`` option without providing any certificate,
-``pg_autoctl`` creates a self-signed certificate, as per the Postgres
-documentation at the `Creating Certificates`__ page.
+When using the ``--ssl-self-signed`` option, ``pg_autoctl`` creates a
+self-signed certificate, as per the Postgres documentation at the `Creating
+Certificates`__ page.
 
 __ https://www.postgresql.org/docs/current/ssl-tcp.html#SSL-CERTIFICATE-CREATION
 
 The certificate subject CN defaults to the ``--nodename`` parameter, which
 can be given explicitely or computed by ``pg_autoctl`` as either your
 hostname when you have proper DNS resolution, or your current IP address.
+
+Self-signed certificates provide protection against eavesdropping; this
+setup does NOT protect against Man-In-The-Middle attacks nor Impersonation
+attacks. See PostgreSQL documentation page `SSL Support`__ for details.
+
+__ https://www.postgresql.org/docs/current/libpq-ssl.html
 
 Using your own SSL certificates
 -------------------------------

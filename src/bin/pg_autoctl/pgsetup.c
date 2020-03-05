@@ -1224,8 +1224,8 @@ pgsetup_validate_ssl_settings(PostgresSetup *pgSetup)
 	 */
 	if (ssl->createSelfSignedCert)
 	{
-		/* in that case we want an sslMode of prefer at most */
-		if (ssl->sslMode > SSL_MODE_PREFER)
+		/* in that case we want an sslMode of require at most */
+		if (ssl->sslMode > SSL_MODE_REQUIRE)
 		{
 			log_error("--ssl-mode \"%s\" is not compatible with self-signed "
 					  "certificates, please provide certificates signed by "
@@ -1309,7 +1309,7 @@ pgsetup_sslmode_to_string(SSLMode sslMode)
 	switch (sslMode)
 	{
 		case SSL_MODE_UNKNOWN:
-			return "unknown ssl mode";
+			return "unknown";
 
 		case SSL_MODE_DISABLE:
 			return "disable";

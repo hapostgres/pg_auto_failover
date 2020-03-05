@@ -134,9 +134,9 @@ monitor_pg_init(Monitor *monitor, MonitorConfig *config)
 	join_path_components(configFilePath, pgSetup.pgdata, "postgresql.conf");
 
 	/*
-	 * When --ssl has been used without SSL certificates being given, now is
-	 * the time to build a self-signed certificate for the server. We place the
-	 * certificate and private key in $PGDATA/server.key and $PGDATA/server.crt
+	 * When --ssl-self-signed has been used, now is the time to build a
+	 * self-signed certificate for the server. We place the certificate and
+	 * private key in $PGDATA/server.key and $PGDATA/server.crt
 	 */
 	if (pgSetup.ssl.createSelfSignedCert)
 	{
