@@ -248,6 +248,7 @@ monitor_install(const char *nodename,
 	 * database.
 	 */
 	if (!pghba_enable_lan_cidr(&postgres.sqlClient,
+							   pgSetup.ssl.active,
 							   HBA_DATABASE_DBNAME,
 							   PG_AUTOCTL_MONITOR_DBNAME,
 							   nodename,

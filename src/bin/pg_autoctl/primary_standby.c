@@ -392,6 +392,7 @@ primary_create_user_with_hba(LocalPostgresServer *postgres, char *userName,
 	}
 
 	if (!pghba_ensure_host_rule_exists(hbaFilePath,
+									   postgres->postgresSetup.ssl.active,
 									   HBA_DATABASE_ALL,
 									   NULL,
 									   userName,
@@ -479,6 +480,7 @@ primary_add_standby_to_hba(LocalPostgresServer *postgres,
 	}
 
 	if (!pghba_ensure_host_rule_exists(hbaFilePath,
+									   postgresSetup->ssl.active,
 									   HBA_DATABASE_REPLICATION, NULL,
 									   PG_AUTOCTL_REPLICA_USERNAME,
 									   standbyHostname, authMethod))
@@ -488,7 +490,9 @@ primary_add_standby_to_hba(LocalPostgresServer *postgres,
 		return false;
 	}
 
-	if (!pghba_ensure_host_rule_exists(hbaFilePath, HBA_DATABASE_DBNAME,
+	if (!pghba_ensure_host_rule_exists(hbaFilePath,
+									   postgresSetup->ssl.active,
+									   HBA_DATABASE_DBNAME,
 									   postgresSetup->dbname,
 									   PG_AUTOCTL_REPLICA_USERNAME,
 									   standbyHostname, authMethod))

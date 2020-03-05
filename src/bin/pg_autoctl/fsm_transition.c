@@ -274,6 +274,7 @@ fsm_init_primary(Keeper *keeper)
 			 * connect. The network is discovered automatically.
 			 */
 			if (!pghba_enable_lan_cidr(&keeper->postgres.sqlClient,
+									   keeper->config.pgSetup.ssl.active,
 									   HBA_DATABASE_ALL, NULL,
 									   keeper->config.nodename,
 									   NULL, DEFAULT_AUTH_METHOD, NULL))

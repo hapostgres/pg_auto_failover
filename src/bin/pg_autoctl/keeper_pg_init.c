@@ -596,6 +596,7 @@ create_database_and_extension(Keeper *keeper)
 	 * string with at least the --username used to create the database.
 	 */
 	if (!pghba_ensure_host_rule_exists(hbaFilePath,
+									   pgSetup->ssl.active,
 									   HBA_DATABASE_DBNAME,
 									   pgSetup->dbname,
 									   pg_setup_get_username(pgSetup),
@@ -619,7 +620,10 @@ create_database_and_extension(Keeper *keeper)
 
 		/* Intended use is restricted to unit testing, hard-code "trust" here */
 		if (!pghba_ensure_host_rule_exists(hbaFilePath,
-										   HBA_DATABASE_ALL, NULL, NULL,
+										   pgSetup->ssl.active,
+										   HBA_DATABASE_ALL,
+										   NULL, /* all: no database name */
+										   NULL, /* no username, "all" */
 										   pgSetup->pghost,
 										   "trust"))
 		{
@@ -706,6 +710,7 @@ create_database_and_extension(Keeper *keeper)
 	if (IS_CITUS_INSTANCE_KIND(postgres->pgKind))
 	{
 		if (!pghba_enable_lan_cidr(&initPostgres.sqlClient,
+								   pgSetup->ssl.active,
 								   HBA_DATABASE_DBNAME,
 								   pgSetup->dbname,
 								   config->nodename,
