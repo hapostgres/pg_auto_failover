@@ -131,7 +131,6 @@ int cli_create_node_getopts(int argc, char **argv,
 							struct option *long_options,
 							const char *optstring,
 							KeeperConfig *options);
-bool cli_getopt_ssl_flags(PostgresSetup *pgSetup);
 int cli_getopt_pgdata(int argc, char **argv);
 void prepare_keeper_options(KeeperConfig *options);
 
@@ -147,5 +146,21 @@ bool check_or_discover_nodename(KeeperConfig *config);
 void keeper_cli_destroy_node(int argc, char **argv);
 void keeper_cli_destroy_keeper_node(Keeper *keeper,
 									KeeperConfig *config);
+
+/*
+ * Handling SSL options on the command line and their inter-compatibility is a
+ * little complex.
+ */
+typedef enum
+{
+	SSL_CLI_UNKNOWN = 0,
+	SSL_CLI_NO_SSL,
+	SSL_CLI_SELF_SIGNED,
+	SSL_CLI_USER_PROVIDED
+} SSLCommandLineOptions;
+
+bool cli_getopt_ssl_flags(int ssl_flag, char *optarg, PostgresSetup *pgSetup);
+bool cli_getopt_accept_ssl_options(SSLCommandLineOptions newSSLOption,
+								   SSLCommandLineOptions currentSSLOptions);
 
 #endif  /* CLI_COMMON_H */

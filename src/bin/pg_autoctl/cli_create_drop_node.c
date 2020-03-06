@@ -314,8 +314,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 	MonitorConfig options = { 0 };
 	int c, option_index = 0, errors = 0;
 	int verboseCount = 0;
-	int sslOrNoSSLCount = 0;
-	bool sslUserCertificates = false;
+	SSLCommandLineOptions sslCommandLineOptions = SSL_CLI_UNKNOWN;
 
 	static struct option long_options[] = {
 		{ "pgctl", required_argument, NULL, 'C' },
@@ -470,13 +469,13 @@ cli_create_monitor_getopts(int argc, char **argv)
 			case 's':
 			{
 				/* { "ssl-self-signed", no_argument, NULL, 's' }, */
-				if (sslOrNoSSLCount > 0)
+				if (!cli_getopt_accept_ssl_options(SSL_CLI_SELF_SIGNED,
+												  sslCommandLineOptions))
 				{
 					errors++;
-					log_error("Using both --no-ssl and --ssl-self-signed "
-							  "is not supported");
+					break;
 				}
-				++sslOrNoSSLCount;
+				sslCommandLineOptions = SSL_CLI_SELF_SIGNED;
 
 				options.pgSetup.ssl.active = 1;
 				options.pgSetup.ssl.createSelfSignedCert = true;
@@ -487,13 +486,13 @@ cli_create_monitor_getopts(int argc, char **argv)
 			case 'N':
 			{
 				/* { "no-ssl", no_argument, NULL, 'N' }, */
-				if (sslOrNoSSLCount > 0)
+				if (!cli_getopt_accept_ssl_options(SSL_CLI_NO_SSL,
+												  sslCommandLineOptions))
 				{
 					errors++;
-					log_error("Using both --no-ssl and --ssl-self-signed "
-							  "is not supported");
+					break;
 				}
-				++sslOrNoSSLCount;
+				sslCommandLineOptions = SSL_CLI_NO_SSL;
 
 				options.pgSetup.ssl.active = 0;
 				options.pgSetup.ssl.createSelfSignedCert = false;
@@ -512,30 +511,18 @@ cli_create_monitor_getopts(int argc, char **argv)
 			{
 				if (ssl_flag != SSL_MODE_FLAG)
 				{
-					/* we have 4 options allowed to all reach this code */
-					if (!sslUserCertificates)
+					if (!cli_getopt_accept_ssl_options(SSL_CLI_USER_PROVIDED,
+													   sslCommandLineOptions))
 					{
-						/*
-						 * but we can't use any of those options together with
-						 * the --no-ssl or the --ssl-self-signed options
-						 */
-						if (sslOrNoSSLCount > 0)
-						{
-							errors++;
-							log_error(
-								"Using either --no-ssl or --ssl-self-signed "
-								"with user-provided SSL certificates "
-								"is not supported");
-						}
-
-						sslUserCertificates = true;
-						++sslOrNoSSLCount;
+						errors++;
+						break;
 					}
 
+					sslCommandLineOptions = SSL_CLI_USER_PROVIDED;
 					options.pgSetup.ssl.active = 1;
 				}
 
-				if (!cli_getopt_ssl_flags(&(options.pgSetup)))
+				if (!cli_getopt_ssl_flags(ssl_flag, optarg, &(options.pgSetup)))
 				{
 					errors++;
 				}
@@ -602,7 +589,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 	 * If we have --ssl, either we have a root ca file and a server.key and a
 	 * server.crt or none of them. Any other combo is a mistake.
 	 */
-	if (sslOrNoSSLCount == 0)
+	if (sslCommandLineOptions == SSL_CLI_UNKNOWN)
 	{
 		log_fatal("Explicit SSL choice is required: please use either "
 				  "--no-ssl or --ssl-self-signed or provide your certificates "

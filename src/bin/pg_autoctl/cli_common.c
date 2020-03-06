@@ -78,8 +78,7 @@ cli_create_node_getopts(int argc, char **argv,
 	KeeperConfig LocalOptionConfig = { 0 };
 	int c, option_index = 0, errors = 0;
 	int verboseCount = 0;
-	int sslOrNoSSLCount = 0;
-	bool sslUserCertificates = false;
+	SSLCommandLineOptions sslCommandLineOptions = SSL_CLI_UNKNOWN;
 
 	/* force some non-zero default values */
 	LocalOptionConfig.monitorDisabled = false;
@@ -320,13 +319,13 @@ cli_create_node_getopts(int argc, char **argv,
 			case 's':
 			{
 				/* { "ssl-self-signed", no_argument, NULL, 's' }, */
-				if (sslOrNoSSLCount > 0)
+				if (!cli_getopt_accept_ssl_options(SSL_CLI_SELF_SIGNED,
+												  sslCommandLineOptions))
 				{
 					errors++;
-					log_error("Using both --no-ssl and --ssl-self-signed "
-							  "is not supported");
+					break;
 				}
-				++sslOrNoSSLCount;
+				sslCommandLineOptions = SSL_CLI_SELF_SIGNED;
 
 				LocalOptionConfig.pgSetup.ssl.active = 1;
 				LocalOptionConfig.pgSetup.ssl.createSelfSignedCert = true;
@@ -337,13 +336,13 @@ cli_create_node_getopts(int argc, char **argv,
 			case 'N':
 			{
 				/* { "no-ssl", no_argument, NULL, 'N' }, */
-				if (sslOrNoSSLCount > 0)
+				if (!cli_getopt_accept_ssl_options(SSL_CLI_NO_SSL,
+												  sslCommandLineOptions))
 				{
 					errors++;
-					log_error("Using both --no-ssl and --ssl-self-signed "
-							  "is not supported");
+					break;
 				}
-				++sslOrNoSSLCount;
+				sslCommandLineOptions = SSL_CLI_NO_SSL;
 
 				LocalOptionConfig.pgSetup.ssl.active = 0;
 				LocalOptionConfig.pgSetup.ssl.createSelfSignedCert = false;
@@ -362,30 +361,20 @@ cli_create_node_getopts(int argc, char **argv,
 			{
 				if (ssl_flag != SSL_MODE_FLAG)
 				{
-					/* we have 4 options allowed to all reach this code */
-					if (!sslUserCertificates)
+					if (!cli_getopt_accept_ssl_options(SSL_CLI_USER_PROVIDED,
+													   sslCommandLineOptions))
 					{
-						/*
-						 * but we can't use any of those options together with
-						 * the --no-ssl or the --ssl-self-signed options
-						 */
-						if (sslOrNoSSLCount > 0)
-						{
-							errors++;
-							log_error(
-								"Using either --no-ssl or --ssl-self-signed "
-								"with user-provided SSL certificates "
-								"is not supported");
-						}
-
-						sslUserCertificates = true;
-						++sslOrNoSSLCount;
+						errors++;
+						break;
 					}
 
+					sslCommandLineOptions = SSL_CLI_USER_PROVIDED;
 					LocalOptionConfig.pgSetup.ssl.active = 1;
 				}
 
-				if (!cli_getopt_ssl_flags(&(LocalOptionConfig.pgSetup)))
+				if (!cli_getopt_ssl_flags(ssl_flag,
+										  optarg,
+										  &(LocalOptionConfig.pgSetup)))
 				{
 					errors++;
 				}
@@ -447,7 +436,7 @@ cli_create_node_getopts(int argc, char **argv,
 	 *
 	 * We also need to either use the given sslMode or compute our default.
 	 */
-	if (sslOrNoSSLCount == 0)
+	if (sslCommandLineOptions == SSL_CLI_UNKNOWN)
 	{
 		log_fatal("Explicit SSL choice is required: please use either "
 				  "--no-ssl or --ssl-self-signed or provide your certificates "
@@ -514,6 +503,46 @@ cli_create_node_getopts(int argc, char **argv,
 
 
 /*
+ * cli_getopt_accept_ssl_options compute if we can accept the newSSLoption
+ * (such as --no-ssl or --ssl-ca-file) given the previous one we have already
+ * accepted.
+ */
+bool
+cli_getopt_accept_ssl_options(SSLCommandLineOptions newSSLOption,
+							  SSLCommandLineOptions currentSSLOptions)
+{
+	if (currentSSLOptions == SSL_CLI_UNKNOWN)
+	{
+		/* first SSL option being parsed */
+		return true;
+	}
+
+	if (currentSSLOptions != newSSLOption)
+	{
+		if (currentSSLOptions == SSL_CLI_USER_PROVIDED
+			|| newSSLOption == SSL_CLI_USER_PROVIDED)
+		{
+			log_error(
+				"Using either --no-ssl or --ssl-self-signed "
+				"with user-provided SSL certificates "
+				"is not supported");
+			return false;
+		}
+
+		/*
+		 * At this point we know that currentSSLOptions and newSSLOption are
+		 * different and none of them are SSL_CLI_USER_PROVIDED.
+		 */
+		log_error("Using both --no-ssl and --ssl-self-signed "
+				  "is not supported");
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
  * cli_getopt_ssl_flags parses the SSL related options from the command line.
  *
  * { "ssl-ca-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG }
@@ -527,7 +556,7 @@ cli_create_node_getopts(int argc, char **argv,
  * ssl_flag, an int.
  */
 bool
-cli_getopt_ssl_flags(PostgresSetup *pgSetup)
+cli_getopt_ssl_flags(int ssl_flag, char *optarg, PostgresSetup *pgSetup)
 {
 	switch (ssl_flag)
 	{
