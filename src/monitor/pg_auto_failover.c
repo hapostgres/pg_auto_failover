@@ -60,7 +60,10 @@ _PG_init(void)
 {
 	if (!process_shared_preload_libraries_in_progress)
 	{
-		return;
+		ereport(ERROR,
+				(errmsg("pgautofailover can only be loaded via shared_preload_libraries"),
+				 errhint("Add pgautofailover to shared_preload_libraries "
+						 "configuration variable in postgresql.conf.")));
 	}
 
 	StartMonitorNode();
