@@ -40,6 +40,7 @@ static int escape_hba_string(char *destination, const char *hbaString);
  */
 bool
 pghba_ensure_host_rule_exists(const char *hbaFilePath,
+							  bool ssl,
 							  HBADatabaseType databaseType,
 							  const char *database,
 							  const char *username,
@@ -53,7 +54,15 @@ pghba_ensure_host_rule_exists(const char *hbaFilePath,
 	char *includeLine = NULL;
 	PQExpBuffer newHbaContents = NULL;
 
-	hbaLineEnd += sprintf(hbaLineEnd, "host ");
+	if (ssl)
+	{
+		hbaLineEnd += sprintf(hbaLineEnd, "hostssl ");
+	}
+	else
+	{
+		hbaLineEnd += sprintf(hbaLineEnd, "host ");
+	}
+
 	hbaLineEnd += get_database_field(hbaLineEnd, databaseType, database);
 	hbaLineEnd += sprintf(hbaLineEnd, " ");
 	if (username)
@@ -269,7 +278,9 @@ escape_hba_string(char *destination, const char *hbaString)
  * all, it should be safe.
  */
 bool
-pghba_enable_lan_cidr(PGSQL *pgsql, HBADatabaseType databaseType,
+pghba_enable_lan_cidr(PGSQL *pgsql,
+					  bool ssl,
+					  HBADatabaseType databaseType,
 					  const char *database,
 					  const char *hostname,
 					  const char *username,
@@ -317,7 +328,7 @@ pghba_enable_lan_cidr(PGSQL *pgsql, HBADatabaseType databaseType,
 		snprintf(hbaFilePath, MAXPGPATH, "%s/pg_hba.conf", pgdata);
 	}
 
-	if (!pghba_ensure_host_rule_exists(hbaFilePath, databaseType, database,
+	if (!pghba_ensure_host_rule_exists(hbaFilePath, ssl, databaseType, database,
 									   username, cidr, authenticationScheme))
 	{
 		log_error("Failed to add the local network to PostgreSQL HBA file: "

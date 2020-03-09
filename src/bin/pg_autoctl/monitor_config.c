@@ -64,6 +64,30 @@
 	make_strbuf_option("postgresql", "auth_method", "auth", \
 					   false, MAXPGPATH, config->pgSetup.authMethod)
 
+#define OPTION_SSL_ACTIVE(config)							\
+	make_int_option_default("ssl", "active", NULL,			\
+							false, &(config->pgSetup.ssl.active), 0)
+
+#define OPTION_SSL_MODE(config)										\
+	make_strbuf_option("ssl", "sslmode", "ssl-mode",				\
+					   false, SSL_MODE_STRLEN, config->pgSetup.ssl.sslModeStr)
+
+#define OPTION_SSL_CA_FILE(config)								\
+	make_strbuf_option("ssl", "ca_file", "ssl-ca-file",			\
+					   false, MAXPGPATH, config->pgSetup.ssl.caFile)
+
+#define OPTION_SSL_CRL_FILE(config)								\
+	make_strbuf_option("ssl", "crl_file", "ssl-crl-file",		\
+					   false, MAXPGPATH, config->pgSetup.ssl.crlFile)
+
+#define OPTION_SSL_SERVER_CERT(config)							\
+	make_strbuf_option("ssl", "cert_file", "server-cert",		\
+					   false, MAXPGPATH, config->pgSetup.ssl.serverCert)
+
+#define OPTION_SSL_SERVER_KEY(config)								\
+	make_strbuf_option("ssl", "key_file", "server-key",				\
+					   false, MAXPGPATH, config->pgSetup.ssl.serverKey)
+
 
 #define SET_INI_OPTIONS_ARRAY(config) \
 	{ \
@@ -77,6 +101,12 @@
 		OPTION_POSTGRESQL_PORT(config), \
 		OPTION_POSTGRESQL_LISTEN_ADDRESSES(config), \
 		OPTION_POSTGRESQL_AUTH_METHOD(config), \
+		OPTION_SSL_MODE(config), \
+		OPTION_SSL_ACTIVE(config), \
+		OPTION_SSL_CA_FILE(config), \
+		OPTION_SSL_CRL_FILE(config), \
+		OPTION_SSL_SERVER_CERT(config), \
+		OPTION_SSL_SERVER_KEY(config), \
 		INI_OPTION_LAST \
 	}
 
@@ -182,17 +212,27 @@ monitor_config_init_from_pgsetup(MonitorConfig *mconfig,
 								 bool missingPgdataIsOk,
 								 bool pgIsNotRunningIsOk)
 {
+	PostgresSetup *MpgSetup = &(mconfig->pgSetup);
+
 	/* copy command line options over to the MonitorConfig structure */
-	strlcpy(mconfig->pgSetup.pgdata, pgSetup->pgdata, MAXPGPATH);
-	strlcpy(mconfig->pgSetup.pg_ctl, pgSetup->pg_ctl, MAXPGPATH);
-	strlcpy(mconfig->pgSetup.pg_version,
-			pgSetup->pg_version, PG_VERSION_STRING_MAX);
-	strlcpy(mconfig->pgSetup.pghost,
-			pgSetup->pghost, _POSIX_HOST_NAME_MAX);
-	strlcpy(mconfig->pgSetup.listen_addresses,
-			pgSetup->listen_addresses,
-			MAXPGPATH);
-	mconfig->pgSetup.pgport = pgSetup->pgport;
+	strlcpy(MpgSetup->pgdata, pgSetup->pgdata, MAXPGPATH);
+	strlcpy(MpgSetup->pg_ctl, pgSetup->pg_ctl, MAXPGPATH);
+	strlcpy(MpgSetup->pg_version, pgSetup->pg_version, PG_VERSION_STRING_MAX);
+	strlcpy(MpgSetup->pghost, pgSetup->pghost, _POSIX_HOST_NAME_MAX);
+	strlcpy(MpgSetup->listen_addresses, pgSetup->listen_addresses, MAXPGPATH);
+	MpgSetup->pgport = pgSetup->pgport;
+
+	/*
+	 * Make sure that we keep the SSL options too.
+	 */
+	MpgSetup->ssl.active = pgSetup->ssl.active;
+	MpgSetup->ssl.createSelfSignedCert = pgSetup->ssl.createSelfSignedCert;
+	MpgSetup->ssl.sslMode = pgSetup->ssl.sslMode;
+	strlcpy(MpgSetup->ssl.sslModeStr, pgSetup->ssl.sslModeStr, SSL_MODE_STRLEN);
+	strlcpy(MpgSetup->ssl.caFile, pgSetup->ssl.caFile, MAXPGPATH);
+	strlcpy(MpgSetup->ssl.crlFile, pgSetup->ssl.crlFile, MAXPGPATH);
+	strlcpy(MpgSetup->ssl.serverCert, pgSetup->ssl.serverCert, MAXPGPATH);
+	strlcpy(MpgSetup->ssl.serverKey, pgSetup->ssl.serverKey, MAXPGPATH);
 
 	if (!monitor_config_set_pathnames_from_pgdata(mconfig))
 	{
@@ -252,6 +292,10 @@ monitor_config_read_file(MonitorConfig *config,
 	/* A part of the monitor's pgSetup is hard-coded. */
 	strlcpy(config->pgSetup.dbname, PG_AUTOCTL_MONITOR_DBNAME, NAMEDATALEN);
 	strlcpy(config->pgSetup.username, PG_AUTOCTL_MONITOR_USERNAME, NAMEDATALEN);
+
+	/* set the ENUM value for sslMode */
+	config->pgSetup.ssl.sslMode =
+		pgsetup_parse_sslmode(config->pgSetup.ssl.sslModeStr);
 
 	return true;
 }
@@ -331,6 +375,13 @@ monitor_config_log_settings(MonitorConfig config)
 	log_debug("postgresql.host: %s", config.pgSetup.pghost);
 	log_debug("postgresql.port: %d", config.pgSetup.pgport);
 	log_debug("postgresql.auth: %s", config.pgSetup.authMethod);
+
+	log_debug("ssl.active: %d", config.pgSetup.ssl.active);
+	log_debug("ssl.sslMode: %s", config.pgSetup.ssl.sslModeStr);
+	log_debug("ssl.caFile: %s", config.pgSetup.ssl.caFile);
+	log_debug("ssl.crlFile: %s", config.pgSetup.ssl.crlFile);
+	log_debug("ssl.serverKey: %s", config.pgSetup.ssl.serverCert);
+	log_debug("ssl.serverCert: %s", config.pgSetup.ssl.serverKey);
 }
 
 
@@ -419,6 +470,12 @@ monitor_config_get_postgres_uri(MonitorConfig *config, char *connectionString,
 		strlcpy(host, config->pgSetup.listen_addresses, BUFSIZE);
 	}
 
+	/*
+	 * Finalize the connection string, with some variants depending on the
+	 * usage of SSL certificates. The full variant is with sslrootcert and
+	 * sslcrl connection parameters when using sslmode=verify-ca or
+	 * sslmode=verify-full.
+	 */
 	connStringEnd += snprintf(connStringEnd,
 							  size - (connStringEnd - connectionString),
 							  "postgres://%s@%s:%d/%s",
@@ -426,6 +483,37 @@ monitor_config_get_postgres_uri(MonitorConfig *config, char *connectionString,
 							  host,
 							  config->pgSetup.pgport,
 							  config->pgSetup.dbname);
+
+	if (config->pgSetup.ssl.sslMode >= SSL_MODE_PREFER)
+	{
+		char *sslmode = pgsetup_sslmode_to_string(config->pgSetup.ssl.sslMode);
+
+		connStringEnd += snprintf(connStringEnd,
+								  size - (connStringEnd - connectionString),
+								  "?sslmode=%s",
+								  sslmode);
+
+		if (config->pgSetup.ssl.sslMode >= SSL_MODE_VERIFY_CA)
+		{
+			if (IS_EMPTY_STRING_BUFFER(config->pgSetup.ssl.crlFile))
+			{
+				connStringEnd +=
+					snprintf(connStringEnd,
+							 size - (connStringEnd - connectionString),
+							 "&sslrootcert=%s",
+							 config->pgSetup.ssl.caFile);
+			}
+			else
+			{
+				connStringEnd +=
+					snprintf(connStringEnd,
+							 size - (connStringEnd - connectionString),
+							 "&sslrootcert=%s&sslcrl=%s",
+							 config->pgSetup.ssl.caFile,
+							 config->pgSetup.ssl.crlFile);
+			}
+		}
+	}
 
 	return true;
 }

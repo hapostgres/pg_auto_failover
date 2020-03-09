@@ -388,17 +388,19 @@ comment on function pgautofailover.current_state(text, int)
 
 CREATE FUNCTION pgautofailover.formation_uri
  (
-    IN formation_id         text DEFAULT 'default'
+    IN formation_id         text DEFAULT 'default',
+    IN sslmode              text DEFAULT 'prefer'
  )
 RETURNS text LANGUAGE SQL STRICT
 AS $$
     select case
            when string_agg(format('%s:%s', nodename, nodeport),',') is not null
-           then format('postgres://%s/%s?target_session_attrs=read-write',
+           then format('postgres://%s/%s?target_session_attrs=read-write&sslmode=%s',
                        string_agg(format('%s:%s', nodename, nodeport),','),
                        -- as we join formation on node we get the same dbname for all
                        -- entries, pick one.
-                       min(dbname)
+                       min(dbname),
+                       min(sslmode)
                       )
            end as uri
       from pgautofailover.node as node

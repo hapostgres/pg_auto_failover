@@ -30,26 +30,32 @@ static void local_postgres_update_pg_failures_tracking(
  * listen_addresses and port are placeholder values in this array and are
  * replaced with dynamic values from the setup when used.
  */
-#define DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER \
-	{ "max_wal_senders", "4" },			\
-	{ "max_replication_slots", "4" },	\
-	{ "wal_level", "'replica'" },		\
-	{ "wal_log_hints", "on" },			\
-	{ "wal_keep_segments", "64" },		\
-	{ "wal_sender_timeout", "'30s'" },	\
-	{ "hot_standby_feedback", "on" },	\
-	{ "hot_standby", "on" },			\
-	{ "synchronous_commit", "on" },		\
-	{ "logging_collector", "on" },		\
-	{ "log_destination", "stderr"},		\
-	{ "logging_collector", "on"},		\
-	{ "log_directory", "log"},			\
-	{ "log_min_messages", "info"},		\
-	{ "log_connections", "on"},			\
-	{ "log_disconnections", "on"},		\
-	{ "log_lock_waits", "on"},			\
-	{ "listen_addresses", "'*'" },		\
-	{ "port", "5432" }
+#define DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER		\
+	{ "listen_addresses", "'*'" },						\
+	{ "port", "5432" },									\
+	{ "max_wal_senders", "4" },							\
+	{ "max_replication_slots", "4" },					\
+	{ "wal_level", "'replica'" },						\
+	{ "wal_log_hints", "on" },							\
+	{ "wal_keep_segments", "64" },						\
+	{ "wal_sender_timeout", "'30s'" },					\
+	{ "hot_standby_feedback", "on" },					\
+	{ "hot_standby", "on" },							\
+	{ "synchronous_commit", "on" },						\
+	{ "logging_collector", "on" },						\
+	{ "log_destination", "stderr"},						\
+	{ "logging_collector", "on"},						\
+	{ "log_directory", "log"},							\
+	{ "log_min_messages", "info"},						\
+	{ "log_connections", "on"},							\
+	{ "log_disconnections", "on"},						\
+	{ "log_lock_waits", "on"},							\
+	{ "ssl", "off" },									\
+	{ "ssl_ca_file", "" },								\
+	{ "ssl_crl_file", "" },								\
+	{ "ssl_cert_file", "" },							\
+	{ "ssl_key_file", "" },								\
+	{ "ssl_ciphers", "'TLSv1.2+HIGH:!aNULL:!eNULL'" }
 
 GUC postgres_default_settings[] = {
 	DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER,
@@ -386,6 +392,7 @@ primary_create_user_with_hba(LocalPostgresServer *postgres, char *userName,
 	}
 
 	if (!pghba_ensure_host_rule_exists(hbaFilePath,
+									   postgres->postgresSetup.ssl.active,
 									   HBA_DATABASE_ALL,
 									   NULL,
 									   userName,
@@ -473,6 +480,7 @@ primary_add_standby_to_hba(LocalPostgresServer *postgres,
 	}
 
 	if (!pghba_ensure_host_rule_exists(hbaFilePath,
+									   postgresSetup->ssl.active,
 									   HBA_DATABASE_REPLICATION, NULL,
 									   PG_AUTOCTL_REPLICA_USERNAME,
 									   standbyHostname, authMethod))
@@ -482,7 +490,9 @@ primary_add_standby_to_hba(LocalPostgresServer *postgres,
 		return false;
 	}
 
-	if (!pghba_ensure_host_rule_exists(hbaFilePath, HBA_DATABASE_DBNAME,
+	if (!pghba_ensure_host_rule_exists(hbaFilePath,
+									   postgresSetup->ssl.active,
+									   HBA_DATABASE_DBNAME,
 									   postgresSetup->dbname,
 									   PG_AUTOCTL_REPLICA_USERNAME,
 									   standbyHostname, authMethod))
@@ -511,7 +521,8 @@ primary_add_standby_to_hba(LocalPostgresServer *postgres,
  */
 bool
 standby_init_database(LocalPostgresServer *postgres,
-					  ReplicationSource *replicationSource)
+					  ReplicationSource *replicationSource,
+					  const char *nodename)
 {
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 
@@ -526,7 +537,8 @@ standby_init_database(LocalPostgresServer *postgres,
 		/* try to stop PostgreSQL, stop here if that fails */
 		if (!pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata))
 		{
-			log_error("Failed to initialise a standby: the database directory exists "
+			log_error("Failed to initialise a standby: "
+					  "the database directory exists "
 					  "and postgres could not be stopped");
 			return false;
 		}
@@ -536,18 +548,28 @@ standby_init_database(LocalPostgresServer *postgres,
 	 * Now, we know that pgdata either doesn't exists or belongs to a stopped
 	 * PostgreSQL instance. We can safely proceed with pg_basebackup.
 	 */
-	if (!pg_basebackup(pgSetup->pgdata,
-					   pgSetup->pg_ctl,
-					   replicationSource->backupDir,
-					   replicationSource->maximumBackupRate,
-					   replicationSource->userName,
-					   replicationSource->password,
-					   replicationSource->slotName,
-					   replicationSource->primaryNode.host,
-					   replicationSource->primaryNode.port,
-					   replicationSource->applicationName))
+	if (!pg_basebackup(pgSetup->pgdata, pgSetup->pg_ctl, replicationSource))
 	{
 		return false;
+	}
+
+	/*
+	 * When --ssl has been used without SSL certificates being given, now is
+	 * the time to build a self-signed certificate for the server. We place the
+	 * certificate and private key in $PGDATA/server.key and $PGDATA/server.crt
+	 *
+	 * In particular we override the certificates that we might have fetched
+	 * from the primary as part of pg_basebackup: we're not a backup, we're a
+	 * standby node, we need our own certificate (even if self-signed).
+	 */
+	if (pgSetup->ssl.createSelfSignedCert)
+	{
+		if (!pg_create_self_signed_cert(pgSetup, nodename))
+		{
+			log_error("Failed to create SSL self-signed certificate, "
+					  "see above for details");
+			return false;
+		}
 	}
 
 	if (!ensure_local_postgres_is_running(postgres))
@@ -604,10 +626,7 @@ primary_rewind_to_standby(LocalPostgresServer *postgres,
 		return false;
 	}
 
-	if (!pg_rewind(pgSetup->pgdata, pgSetup->pg_ctl,
-				   primaryNode->host, primaryNode->port,
-				   pgSetup->dbname, replicationSource->userName,
-				   replicationSource->password))
+	if (!pg_rewind(pgSetup->pgdata, pgSetup->pg_ctl, replicationSource))
 	{
 		log_error("Failed to rewind old data directory");
 		return false;

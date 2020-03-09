@@ -82,6 +82,30 @@
 	make_strbuf_option("postgresql", "auth_method", "auth", \
 					   false, MAXPGPATH, config->pgSetup.authMethod)
 
+#define OPTION_SSL_ACTIVE(config)							\
+	make_int_option_default("ssl", "active", NULL,			\
+							false, &(config->pgSetup.ssl.active), 0)
+
+#define OPTION_SSL_MODE(config)										\
+	make_strbuf_option("ssl", "sslmode", "ssl-mode",				\
+					   false, SSL_MODE_STRLEN, config->pgSetup.ssl.sslModeStr)
+
+#define OPTION_SSL_CA_FILE(config)								\
+	make_strbuf_option("ssl", "ca_file", "ssl-ca-file",			\
+					   false, MAXPGPATH, config->pgSetup.ssl.caFile)
+
+#define OPTION_SSL_CRL_FILE(config)								\
+	make_strbuf_option("ssl", "crl_file", "ssl-crl-file",		\
+					   false, MAXPGPATH, config->pgSetup.ssl.crlFile)
+
+#define OPTION_SSL_SERVER_CERT(config)							\
+	make_strbuf_option("ssl", "cert_file", "server-cert",		\
+					   false, MAXPGPATH, config->pgSetup.ssl.serverCert)
+
+#define OPTION_SSL_SERVER_KEY(config)								\
+	make_strbuf_option("ssl", "key_file", "server-key",				\
+					   false, MAXPGPATH, config->pgSetup.ssl.serverKey)
+
 #define OPTION_REPLICATION_SLOT_NAME(config) \
 	make_string_option_default("replication", "slot", NULL, false, \
 							   &config->replication_slot_name, \
@@ -152,10 +176,16 @@
 		OPTION_POSTGRESQL_PROXY_PORT(config), \
 		OPTION_POSTGRESQL_LISTEN_ADDRESSES(config), \
 		OPTION_POSTGRESQL_AUTH_METHOD(config), \
-		OPTION_REPLICATION_PASSWORD(config), \
+		OPTION_SSL_ACTIVE(config), \
+		OPTION_SSL_MODE(config), \
+		OPTION_SSL_CA_FILE(config),	 \
+		OPTION_SSL_CRL_FILE(config), \
+		OPTION_SSL_SERVER_CERT(config), \
+		OPTION_SSL_SERVER_KEY(config), \
 		OPTION_REPLICATION_SLOT_NAME(config), \
 		OPTION_REPLICATION_MAXIMUM_BACKUP_RATE(config), \
 		OPTION_REPLICATION_BACKUP_DIR(config), \
+		OPTION_REPLICATION_PASSWORD(config), \
 		OPTION_TIMEOUT_NETWORK_PARTITION(config), \
 		OPTION_TIMEOUT_PREPARE_PROMOTION_CATCHUP(config), \
 		OPTION_TIMEOUT_PREPARE_PROMOTION_WALRECEIVER(config), \
@@ -326,6 +356,10 @@ keeper_config_read_file_skip_pgsetup(KeeperConfig *config,
 			return false;
 		}
 	}
+
+	/* set the ENUM value for sslMode */
+	config->pgSetup.ssl.sslMode =
+		pgsetup_parse_sslmode(config->pgSetup.ssl.sslModeStr);
 
 	if (!keeper_config_init_nodekind(config))
 	{

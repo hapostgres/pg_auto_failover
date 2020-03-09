@@ -31,7 +31,7 @@ KeeperConfig keeperOptions;
 bool allowRemovingPgdata = false;
 bool createAndRun = false;
 bool outputJSON = false;
-
+int ssl_flag = 0;
 
 /*
  * cli_create_node_getopts parses the CLI options for the pg_autoctl create
@@ -59,6 +59,12 @@ bool outputJSON = false;
  *		{ "quiet", no_argument, NULL, 'q' },
  *		{ "help", no_argument, NULL, 'h' },
  *		{ "run", no_argument, NULL, 'x' },
+ *      { "ssl-self-signed", no_argument, NULL, 's' },
+ *      { "no-ssl", no_argument, NULL, 'N' },
+ *      { "ssl-ca-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG },
+ *      { "server-crt", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG },
+ *      { "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG },
+ *      { "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG },
  *		{ NULL, 0, NULL, 0 }
  *	};
  *
@@ -70,8 +76,9 @@ cli_create_node_getopts(int argc, char **argv,
 						KeeperConfig *options)
 {
 	KeeperConfig LocalOptionConfig = { 0 };
-	int c, option_index, errors = 0;
+	int c, option_index = 0, errors = 0;
 	int verboseCount = 0;
+	SSLCommandLineOptions sslCommandLineOptions = SSL_CLI_UNKNOWN;
 
 	/* force some non-zero default values */
 	LocalOptionConfig.monitorDisabled = false;
@@ -309,6 +316,71 @@ cli_create_node_getopts(int argc, char **argv,
 				break;
 			}
 
+			case 's':
+			{
+				/* { "ssl-self-signed", no_argument, NULL, 's' }, */
+				if (!cli_getopt_accept_ssl_options(SSL_CLI_SELF_SIGNED,
+												  sslCommandLineOptions))
+				{
+					errors++;
+					break;
+				}
+				sslCommandLineOptions = SSL_CLI_SELF_SIGNED;
+
+				LocalOptionConfig.pgSetup.ssl.active = 1;
+				LocalOptionConfig.pgSetup.ssl.createSelfSignedCert = true;
+				log_trace("--ssl-self-signed");
+				break;
+			}
+
+			case 'N':
+			{
+				/* { "no-ssl", no_argument, NULL, 'N' }, */
+				if (!cli_getopt_accept_ssl_options(SSL_CLI_NO_SSL,
+												  sslCommandLineOptions))
+				{
+					errors++;
+					break;
+				}
+				sslCommandLineOptions = SSL_CLI_NO_SSL;
+
+				LocalOptionConfig.pgSetup.ssl.active = 0;
+				LocalOptionConfig.pgSetup.ssl.createSelfSignedCert = false;
+				log_trace("--no-ssl");
+				break;
+			}
+
+			/*
+			 * { "ssl-ca-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG }
+			 * { "ssl-crl-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG }
+			 * { "server-crt", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG }
+			 * { "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG }
+			 * { "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG },
+			 */
+			case 0:
+			{
+				if (ssl_flag != SSL_MODE_FLAG)
+				{
+					if (!cli_getopt_accept_ssl_options(SSL_CLI_USER_PROVIDED,
+													   sslCommandLineOptions))
+					{
+						errors++;
+						break;
+					}
+
+					sslCommandLineOptions = SSL_CLI_USER_PROVIDED;
+					LocalOptionConfig.pgSetup.ssl.active = 1;
+				}
+
+				if (!cli_getopt_ssl_flags(ssl_flag,
+										  optarg,
+										  &(LocalOptionConfig.pgSetup)))
+				{
+					errors++;
+				}
+				break;
+			}
+
 			default:
 			{
 				/* getopt_long already wrote an error message */
@@ -316,6 +388,12 @@ cli_create_node_getopts(int argc, char **argv,
 				break;
 			}
 		}
+	}
+
+	if (errors > 0)
+	{
+		commandline_help(stderr);
+		exit(EXIT_CODE_BAD_ARGS);
 	}
 
 	/*
@@ -347,6 +425,29 @@ cli_create_node_getopts(int argc, char **argv,
 				 "automatically when needed. For quick testing '--auth trust' "
 				 "makes it easy to get started, "
 				 "consider another authentication mechanism for production.");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	/*
+	 * If we have --ssl-self-signed, we don't want to have --ssl-ca-file and
+	 * others in use anywhere. If we have --no-ssl, same thing. If we have the
+	 * SSL files setup, we want to have neither --ssl-self-signed nor the other
+	 * SSL files specified.
+	 *
+	 * We also need to either use the given sslMode or compute our default.
+	 */
+	if (sslCommandLineOptions == SSL_CLI_UNKNOWN)
+	{
+		log_fatal("Explicit SSL choice is required: please use either "
+				  "--no-ssl or --ssl-self-signed or provide your certificates "
+				  "using --ssl-ca-file, --ssl-crl-file, "
+				  "--server-key, and --server-crt");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (!pgsetup_validate_ssl_settings(&(LocalOptionConfig.pgSetup)))
+	{
+		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
@@ -399,6 +500,119 @@ cli_create_node_getopts(int argc, char **argv,
 
 	return optind;
 }
+
+
+/*
+ * cli_getopt_accept_ssl_options compute if we can accept the newSSLoption
+ * (such as --no-ssl or --ssl-ca-file) given the previous one we have already
+ * accepted.
+ */
+bool
+cli_getopt_accept_ssl_options(SSLCommandLineOptions newSSLOption,
+							  SSLCommandLineOptions currentSSLOptions)
+{
+	if (currentSSLOptions == SSL_CLI_UNKNOWN)
+	{
+		/* first SSL option being parsed */
+		return true;
+	}
+
+	if (currentSSLOptions != newSSLOption)
+	{
+		if (currentSSLOptions == SSL_CLI_USER_PROVIDED
+			|| newSSLOption == SSL_CLI_USER_PROVIDED)
+		{
+			log_error(
+				"Using either --no-ssl or --ssl-self-signed "
+				"with user-provided SSL certificates "
+				"is not supported");
+			return false;
+		}
+
+		/*
+		 * At this point we know that currentSSLOptions and newSSLOption are
+		 * different and none of them are SSL_CLI_USER_PROVIDED.
+		 */
+		log_error("Using both --no-ssl and --ssl-self-signed "
+				  "is not supported");
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * cli_getopt_ssl_flags parses the SSL related options from the command line.
+ *
+ * { "ssl-ca-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG }
+ * { "ssl-crl-file", required_argument, &ssl_flag, SSL_CRL_FILE_FLAG }
+ * { "server-crt", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG }
+ * { "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG }
+ * { "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG },
+ *
+ * As those options are not using any short option (one-char) variant, they all
+ * fall in the case 0, and we can process them thanks to the global variable
+ * ssl_flag, an int.
+ */
+bool
+cli_getopt_ssl_flags(int ssl_flag, char *optarg, PostgresSetup *pgSetup)
+{
+	switch (ssl_flag)
+	{
+		case SSL_CA_FILE_FLAG:
+		{
+			strlcpy(pgSetup->ssl.caFile, optarg, MAXPGPATH);
+			log_trace("--ssl-ca-file %s", pgSetup->ssl.caFile);
+			break;
+		}
+
+		case SSL_CRL_FILE_FLAG:
+		{
+			strlcpy(pgSetup->ssl.crlFile, optarg, MAXPGPATH);
+			log_trace("--ssl-crl-file %s", pgSetup->ssl.crlFile);
+			break;
+		}
+
+		case SSL_SERVER_CRT_FLAG:
+		{
+			strlcpy(pgSetup->ssl.serverCert, optarg, MAXPGPATH);
+			log_trace("--server-cert %s", pgSetup->ssl.serverCert);
+			break;
+		}
+
+		case SSL_SERVER_KEY_FLAG:
+		{
+			strlcpy(pgSetup->ssl.serverKey, optarg, MAXPGPATH);
+			log_trace("--server-key %s", pgSetup->ssl.serverKey);
+			break;
+		}
+
+		case SSL_MODE_FLAG:
+		{
+			strlcpy(pgSetup->ssl.sslModeStr, optarg, SSL_MODE_STRLEN);
+			pgSetup->ssl.sslMode = pgsetup_parse_sslmode(optarg);
+
+			log_trace("--ssl-mode %s",
+					  pgsetup_sslmode_to_string(pgSetup->ssl.sslMode));
+
+			if (pgSetup->ssl.sslMode == SSL_MODE_UNKNOWN)
+			{
+				log_fatal("Failed to parse ssl mode \"%s\"", optarg);
+				return false;
+			}
+			break;
+		}
+
+		default:
+		{
+			log_fatal("BUG: unknown ssl flag value: %d", ssl_flag);
+			return false;
+		}
+	}
+	return true;
+}
+
 
 
 /*

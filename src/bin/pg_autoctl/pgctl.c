@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #include "postgres_fe.h"
@@ -22,6 +23,7 @@
 #include "parsing.h"
 #include "pgctl.h"
 #include "pgsql.h"
+#include "pgsetup.h"
 #include "log.h"
 
 #define RUN_PROGRAM_IMPLEMENTATION
@@ -45,6 +47,10 @@ static bool pg_include_config(const char *configFilePath,
 static bool ensure_default_settings_file_exists(const char *configFilePath,
 												GUC *settings,
 												PostgresSetup *pgSetup);
+static bool prepare_guc_settings_from_pgsetup(const char *configFilePath,
+											  PQExpBuffer config,
+											  GUC *settings,
+											  PostgresSetup *pgSetup);
 static void log_program_output(Program prog, int outLogLevel, int errorLogLevel);
 static bool escape_recovery_conf_string(char *destination,
 										int destinationSize,
@@ -54,8 +60,11 @@ static bool prepare_primary_conninfo(
 	int primaryConnInfoSize,
 	const char *primaryHost, int primaryPort,
 	const char *replicationUsername,
+	const char *dbname,
 	const char *replicationPassword,
-	const char *applicationName);
+	const char *applicationName,
+	SSLOptions sslOptions,
+	bool escape);
 static bool pg_write_recovery_conf(const char *pgdata,
 								   const char *primaryConnInfo,
 								   const char *replicationSlotName);
@@ -318,62 +327,13 @@ ensure_default_settings_file_exists(const char *configFilePath,
 									PostgresSetup *pgSetup)
 {
 	PQExpBuffer defaultConfContents = createPQExpBuffer();
-	int settingIndex = 0;
 
-	appendPQExpBufferStr(defaultConfContents, "# Settings by pg_auto_failover\n");
-
-	/* replace placeholder values with actual pgSetup values */
-	for (settingIndex = 0; settings[settingIndex].name != NULL; settingIndex++)
+	if (!prepare_guc_settings_from_pgsetup(configFilePath,
+										   defaultConfContents,
+										   settings,
+										   pgSetup))
 	{
-		GUC *setting = &settings[settingIndex];
-		/*
-		 * Settings for "listen_addresses" and "port" are replaced with the
-		 * respective values present in pgSetup allowing those to be dynamic.
-		 *
-		 * At the moment our "needs quote" heuristic is pretty simple.
-		 * There's the one parameter within those that we hardcode from
-		 * pg_auto_failover that needs quoting, and that's
-		 * listen_addresses.
-		 *
-		 * The reason why POSTGRES_DEFAULT_LISTEN_ADDRESSES is not quoting
-		 * the value directly in the constant is that we are using that
-		 * value both in the configuration file and at the pg_ctl start
-		 * --options "-h *" command line.
-		 *
-		 * At the command line, using --options "-h '*'" would give:
-		 *    could not create listen socket for "'*'"
-		 */
-		if (strcmp(setting->name, "listen_addresses") == 0)
-		{
-			appendPQExpBuffer(defaultConfContents, "%s = '%s'\n",
-							  setting->name,
-							  pgSetup->listen_addresses);
-		}
-		else if (strcmp(setting->name, "port") == 0)
-		{
-			appendPQExpBuffer(defaultConfContents, "%s = %d\n",
-					  setting->name,
-					  pgSetup->pgport);
-		}
-		else if (setting->value != NULL)
-		{
-			appendPQExpBuffer(defaultConfContents, "%s = %s\n",
-							  setting->name,
-							  setting->value);
-		}
-		else
-		{
-			log_error("BUG: GUC setting \"%s\" has a NULL value", setting->name);
-			destroyPQExpBuffer(defaultConfContents);
-			return false;
-		}
-	}
-
-	/* memory allocation could have failed while building string */
-	if (PQExpBufferBroken(defaultConfContents))
-	{
-		log_error("Failed to allocate memory");
-		destroyPQExpBuffer(defaultConfContents);
+		/* errors have already been logged */
 		return false;
 	}
 
@@ -410,7 +370,9 @@ ensure_default_settings_file_exists(const char *configFilePath,
 				  configFilePath, defaultConfContents->data);
 	}
 
-	if (!write_file(defaultConfContents->data, defaultConfContents->len, configFilePath))
+	if (!write_file(defaultConfContents->data,
+					defaultConfContents->len,
+					configFilePath))
 	{
 		destroyPQExpBuffer(defaultConfContents);
 		return false;
@@ -423,28 +385,143 @@ ensure_default_settings_file_exists(const char *configFilePath,
 
 
 /*
+ * prepare_guc_settings_from_pgsetup replaces some of the given GUC settings
+ * with dynamic values found in the pgSetup argument, and prepare them in the
+ * expected format for a postgresq.conf file in the given PQExpBuffer.
+ *
+ * While most of our settings are handle in a static way and thus known at
+ * compile time, some of them can be provided by our users, such as
+ * listen_addresses, port, and SSL related configuration parameters.
+ */
+
+#define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
+
+static bool
+prepare_guc_settings_from_pgsetup(const char *configFilePath,
+								  PQExpBuffer config,
+								  GUC *settings,
+								  PostgresSetup *pgSetup)
+{
+	int settingIndex = 0;
+
+	appendPQExpBufferStr(config, "# Settings by pg_auto_failover\n");
+
+	/* replace placeholder values with actual pgSetup values */
+	for (settingIndex = 0; settings[settingIndex].name != NULL; settingIndex++)
+	{
+		GUC *setting = &settings[settingIndex];
+		/*
+		 * Settings for "listen_addresses" and "port" are replaced with the
+		 * respective values present in pgSetup allowing those to be dynamic.
+		 *
+		 * At the moment our "needs quote" heuristic is pretty simple.
+		 * There's the one parameter within those that we hardcode from
+		 * pg_auto_failover that needs quoting, and that's
+		 * listen_addresses.
+		 *
+		 * The reason why POSTGRES_DEFAULT_LISTEN_ADDRESSES is not quoting
+		 * the value directly in the constant is that we are using that
+		 * value both in the configuration file and at the pg_ctl start
+		 * --options "-h *" command line.
+		 *
+		 * At the command line, using --options "-h '*'" would give:
+		 *    could not create listen socket for "'*'"
+		 */
+		if (streq(setting->name, "listen_addresses"))
+		{
+			appendPQExpBuffer(config, "%s = '%s'\n",
+							  setting->name,
+							  pgSetup->listen_addresses);
+		}
+		else if (streq(setting->name, "port"))
+		{
+			appendPQExpBuffer(config, "%s = %d\n",
+					  setting->name,
+					  pgSetup->pgport);
+		}
+		else if (streq(setting->name, "ssl"))
+		{
+			appendPQExpBuffer(config, "%s = %s\n",
+							  setting->name,
+							  pgSetup->ssl.active == 0 ? "off" : "on");
+		}
+		else if (streq(setting->name, "ssl_ca_file"))
+		{
+			if (!IS_EMPTY_STRING_BUFFER(pgSetup->ssl.caFile))
+			{
+				appendPQExpBuffer(config, "%s = '%s'\n",
+								  setting->name, pgSetup->ssl.caFile);
+			}
+		}
+		else if (streq(setting->name, "ssl_crl_file"))
+		{
+			if (!IS_EMPTY_STRING_BUFFER(pgSetup->ssl.crlFile))
+			{
+				appendPQExpBuffer(config, "%s = '%s'\n",
+								  setting->name, pgSetup->ssl.crlFile);
+			}
+		}
+		else if (streq(setting->name, "ssl_cert_file"))
+		{
+			if (!IS_EMPTY_STRING_BUFFER(pgSetup->ssl.serverCert))
+			{
+				appendPQExpBuffer(config, "%s = '%s'\n",
+								  setting->name, pgSetup->ssl.serverCert);
+			}
+		}
+		else if (streq(setting->name, "ssl_key_file"))
+		{
+			if (!IS_EMPTY_STRING_BUFFER(pgSetup->ssl.serverKey))
+			{
+				appendPQExpBuffer(config, "%s = '%s'\n",
+								  setting->name, pgSetup->ssl.serverKey);
+			}
+		}
+		else if (setting->value != NULL)
+		{
+			appendPQExpBuffer(config, "%s = %s\n",
+							  setting->name,
+							  setting->value);
+		}
+		else
+		{
+			log_error("BUG: GUC setting \"%s\" has a NULL value", setting->name);
+			destroyPQExpBuffer(config);
+			return false;
+		}
+	}
+
+	/* memory allocation could have failed while building string */
+	if (PQExpBufferBroken(config))
+	{
+		log_error("Failed to allocate memory while preparing config file \"%s\"",
+				  configFilePath);
+		destroyPQExpBuffer(config);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
  * Call pg_basebackup, using a temporary directory for the duration of the data
  * transfer.
  */
 bool
 pg_basebackup(const char *pgdata,
 			  const char *pg_ctl,
-			  const char *backupdir,
-			  const char *maximum_backup_rate,
-			  const char *replication_username,
-			  const char *replication_password,
-			  const char *replication_slot_name,
-			  const char *primary_hostname,
-			  int primary_port,
-			  const char *application_name)
+			  ReplicationSource *replicationSource)
 {
 	int returnCode;
 	Program program;
-	char primary_port_str[10];
 	char pg_basebackup[MAXPGPATH];
 
-	log_debug("mkdir -p \"%s\"", backupdir);
-	if (!ensure_empty_dir(backupdir, 0700))
+	NodeAddress *primaryNode = &(replicationSource->primaryNode);
+	char primaryConnInfo[MAXCONNINFO] = { 0 };
+
+	log_debug("mkdir -p \"%s\"", replicationSource->backupDir);
+	if (!ensure_empty_dir(replicationSource->backupDir, 0700))
 	{
 		/* errors have already been logged. */
 		return false;
@@ -452,37 +529,56 @@ pg_basebackup(const char *pgdata,
 
 	/* call pg_basebackup */
 	path_in_same_directory(pg_ctl, "pg_basebackup", pg_basebackup);
-	snprintf(primary_port_str, sizeof(primary_port_str), "%d", primary_port);
 
 	setenv("PGCONNECT_TIMEOUT", POSTGRES_CONNECT_TIMEOUT, 1);
 
-	if (replication_password != NULL)
+	if (replicationSource->password != NULL)
 	{
-		setenv("PGPASSWORD", replication_password, 1);
+		setenv("PGPASSWORD", replicationSource->password, 1);
 	}
-	setenv("PGAPPNAME", application_name, 1);
+	setenv("PGAPPNAME", replicationSource->applicationName, 1);
 
-	log_info("Running %s -w -h %s -p %d --pgdata %s -U %s --write-recovery-conf "
+	/* we ignore the length returned by prepare_primary_conninfo... */
+	if (!prepare_primary_conninfo(primaryConnInfo,
+								  MAXCONNINFO,
+								  primaryNode->host,
+								  primaryNode->port,
+								  replicationSource->userName,
+								  NULL, /* no database */
+								  NULL, /* no password here */
+								  replicationSource->applicationName,
+								  replicationSource->sslOptions,
+								  false)) /* do not escape this one */
+	{
+		/* errors have already been logged. */
+		return false;
+	}
+
+	log_info("Running %s -w -d '%s' --pgdata %s -U %s --write-recovery-conf "
 			 "--max-rate %s --wal-method=stream --slot %s ...",
-			 pg_basebackup, primary_hostname, primary_port, backupdir,
-			 replication_username, maximum_backup_rate,
-			 replication_slot_name);
+			 pg_basebackup,
+			 primaryConnInfo,
+			 replicationSource->backupDir,
+			 replicationSource->userName,
+			 replicationSource->maximumBackupRate,
+			 replicationSource->slotName);
 
 	program = run_program(pg_basebackup,
 						  "-w",
-						  "-h", primary_hostname,
-						  "-p", primary_port_str,
-						  "--pgdata", backupdir,
-						  "-U", replication_username,
+						  "-d", primaryConnInfo,
+						  "--pgdata", replicationSource->backupDir,
+						  "-U", replicationSource->userName,
 						  "--verbose",
 						  "--progress",
 						  "--write-recovery-conf",
-						  "--max-rate", maximum_backup_rate,
+						  "--max-rate", replicationSource->maximumBackupRate,
 						  "--wal-method=stream",
-						  "--slot", replication_slot_name,
+						  "--slot", replicationSource->slotName,
 						  NULL);
 
-	(void) log_program_output(program, LOG_INFO, LOG_ERROR);
+	/* pg_basebackup uses stderr for all of its output */
+	(void) log_program_output(program, LOG_INFO, LOG_INFO);
+
 	returnCode = program.returnCode;
 	free_program(&program);
 
@@ -503,13 +599,13 @@ pg_basebackup(const char *pgdata,
 		}
 	}
 
-	log_debug("mv \"%s\" \"%s\"", backupdir, pgdata);
+	log_debug("mv \"%s\" \"%s\"", replicationSource->backupDir, pgdata);
 
-	if (rename(backupdir, pgdata) != 0)
+	if (rename(replicationSource->backupDir, pgdata) != 0)
 	{
 		log_error(
 			"Failed to install pg_basebackup dir " " \"%s\" in \"%s\": %s",
-			backupdir, pgdata, strerror(errno));
+			replicationSource->backupDir, pgdata, strerror(errno));
 		return false;
 	}
 
@@ -523,32 +619,45 @@ pg_basebackup(const char *pgdata,
  * connect to the node.
  */
 bool
-pg_rewind(const char *pgdata, const char *pg_ctl, const char *primaryHost,
-		  int primaryPort, const char *databaseName, const char *replicationUsername,
-		  const char *replicationPassword)
+pg_rewind(const char *pgdata,
+		  const char *pg_ctl,
+		  ReplicationSource *replicationSource)
 {
 	int returnCode;
 	Program program;
-	char primaryConnInfo[MAXCONNINFO] = { 0 };
-	char *connInfoEnd = primaryConnInfo;
 	char pg_rewind[MAXPGPATH] = { 0 };
 
-	connInfoEnd += make_conninfo_field_str(connInfoEnd, "host", primaryHost);
-	connInfoEnd += make_conninfo_field_int(connInfoEnd, "port", primaryPort);
-	connInfoEnd += make_conninfo_field_str(connInfoEnd, "user", replicationUsername);
-	connInfoEnd += make_conninfo_field_str(connInfoEnd, "dbname", databaseName);
+	NodeAddress *primaryNode = &(replicationSource->primaryNode);
+	char primaryConnInfo[MAXCONNINFO] = { 0 };
 
 	/* call pg_rewind*/
 	path_in_same_directory(pg_ctl, "pg_rewind", pg_rewind);
 
 	setenv("PGCONNECT_TIMEOUT", POSTGRES_CONNECT_TIMEOUT, 1);
 
-	if (replicationPassword != NULL)
+	if (replicationSource->password != NULL)
 	{
-		setenv("PGPASSWORD", replicationPassword, 1);
+		setenv("PGPASSWORD", replicationSource->password, 1);
 	}
 
-	log_info("Running %s --target-pgdata \"%s\" --source-server \"%s\" --progress ...",
+	/* we ignore the length returned by prepare_primary_conninfo... */
+	if (!prepare_primary_conninfo(primaryConnInfo,
+								  MAXCONNINFO,
+								  primaryNode->host,
+								  primaryNode->port,
+								  replicationSource->userName,
+								  "postgres", /* pg_rewind needs a database */
+								  NULL,		  /* no password here */
+								  replicationSource->applicationName,
+								  replicationSource->sslOptions,
+								  false)) /* do not escape this one */
+	{
+		/* errors have already been logged. */
+		return false;
+	}
+
+	log_info("Running %s --target-pgdata \"%s\" "
+			 "--source-server \"%s\" --progress ...",
 			 pg_rewind, pgdata, primaryConnInfo);
 
 	program = run_program(pg_rewind,
@@ -557,7 +666,9 @@ pg_rewind(const char *pgdata, const char *pg_ctl, const char *primaryHost,
 						  "--progress",
 						  NULL);
 
-	(void) log_program_output(program, LOG_INFO, LOG_ERROR);
+	/* pg_basebackup uses stderr for all of its output */
+	(void) log_program_output(program, LOG_INFO, LOG_INFO);
+
 	returnCode = program.returnCode;
 	free_program(&program);
 
@@ -937,6 +1048,7 @@ pg_setup_standby_mode(uint32_t pg_control_version,
 {
 	NodeAddress *primaryNode = &(replicationSource->primaryNode);
 	char primaryConnInfo[MAXCONNINFO] = { 0 };
+	bool escape = true;
 
 	/* we ignore the length returned by prepare_primary_conninfo... */
 	if (!prepare_primary_conninfo(primaryConnInfo,
@@ -944,8 +1056,11 @@ pg_setup_standby_mode(uint32_t pg_control_version,
 								  primaryNode->host,
 								  primaryNode->port,
 								  replicationSource->userName,
+								  NULL, /* no database */
 								  replicationSource->password,
-								  replicationSource->applicationName))
+								  replicationSource->applicationName,
+								  replicationSource->sslOptions,
+								  escape))
 	{
 		/* errors have already been logged. */
 		return false;
@@ -1085,15 +1200,24 @@ escape_recovery_conf_string(char *destination, int destinationSize,
 
 
 /*
- * prepare_primary_conninfo
+ * prepare_primary_conninfo prepares a connection string to the primary server.
+ * The connection string may be used unquoted in a command line calling either
+ * pg_basebackup ro pg_rewind, or may be used quoted in the primary_conninfo
+ * setting for PostgreSQL.
+ *
+ * Also, pg_rewind needs a database to connect to.
  */
 static bool
 prepare_primary_conninfo(char *primaryConnInfo,
 						 int primaryConnInfoSize,
-						 const char *primaryHost, int primaryPort,
+						 const char *primaryHost,
+						 int primaryPort,
 						 const char *replicationUsername,
+						 const char *dbname,
 						 const char *replicationPassword,
-						 const char *applicationName)
+						 const char *applicationName,
+						 SSLOptions sslOptions,
+						 bool escape)
 {
 	int size = 0;
 	char escaped[BUFSIZE];
@@ -1107,9 +1231,34 @@ prepare_primary_conninfo(char *primaryConnInfo,
 	appendPQExpBuffer(buffer, " port=%d", primaryPort);
 	appendPQExpBuffer(buffer, " user=%s", replicationUsername);
 
+	if (dbname != NULL)
+	{
+		appendPQExpBuffer(buffer, " dbname=%s", dbname);
+	}
+
 	if (replicationPassword != NULL)
 	{
 		appendPQExpBuffer(buffer, " password=%s", replicationPassword);
+	}
+
+	if (sslOptions.sslMode != SSL_MODE_UNKNOWN)
+	{
+		appendPQExpBuffer(buffer, " sslmode=%s",
+						  pgsetup_sslmode_to_string(sslOptions.sslMode));
+
+		if (sslOptions.sslMode >= SSL_MODE_VERIFY_CA)
+		{
+			/* ssl revocation list might not be provided, it's ok */
+			if (!IS_EMPTY_STRING_BUFFER(sslOptions.crlFile))
+			{
+				appendPQExpBuffer(buffer, " sslrootcert=%s sslcrl=%s",
+								  sslOptions.caFile, sslOptions.crlFile);
+			}
+			else
+			{
+				appendPQExpBuffer(buffer, " sslrootcert=%s", sslOptions.caFile);
+			}
+		}
 	}
 
 	/* memory allocation could have failed while building string */
@@ -1120,22 +1269,29 @@ prepare_primary_conninfo(char *primaryConnInfo,
 		return false;
 	}
 
-	if (!escape_recovery_conf_string(escaped, BUFSIZE, buffer->data))
- 	{
- 		/* errors have already been logged. */
- 		destroyPQExpBuffer(buffer);
- 		return false;
- 	}
-
-	/* now copy the buffer into primaryConnInfo for the caller */
-	size = snprintf(primaryConnInfo, primaryConnInfoSize, "%s", escaped);
-
-	if (size == -1 || size > primaryConnInfoSize)
+	if (escape)
 	{
-		log_error("BUG: the escaped primary_conninfo requires %d bytes and "
-				  "pg_auto_failover only support up to %d bytes",
-				  size, primaryConnInfoSize);
-		return false;
+		if (!escape_recovery_conf_string(escaped, BUFSIZE, buffer->data))
+		{
+			/* errors have already been logged. */
+			destroyPQExpBuffer(buffer);
+			return false;
+		}
+
+		/* now copy the buffer into primaryConnInfo for the caller */
+		size = snprintf(primaryConnInfo, primaryConnInfoSize, "%s", escaped);
+
+		if (size == -1 || size > primaryConnInfoSize)
+		{
+			log_error("BUG: the escaped primary_conninfo requires %d bytes and "
+					  "pg_auto_failover only support up to %d bytes",
+					  size, primaryConnInfoSize);
+			return false;
+		}
+	}
+	else
+	{
+		strlcpy(primaryConnInfo, buffer->data, primaryConnInfoSize);
 	}
 
 	destroyPQExpBuffer(buffer);
@@ -1223,4 +1379,110 @@ bool
 pg_is_running(const char *pg_ctl, const char *pgdata)
 {
 	return pg_ctl_status(pg_ctl, pgdata, false) == 0;
+}
+
+
+/*
+ * pg_create_self_signed_cert creates self-signed certificates for the local
+ * Postgres server and places the private key in $PGDATA/server.key and the
+ * public certificate in $PGDATA/server.cert
+ *
+ * We simply follow Postgres documentation at:
+ * https://www.postgresql.org/docs/current/ssl-tcp.html#SSL-CERTIFICATE-CREATION
+ *
+ * openssl req -new -x509 -days 365 -nodes -text -out server.crt \
+ *             -keyout server.key -subj "/CN=dbhost.yourdomain.com"
+ */
+bool
+pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *nodename)
+{
+	Program program;
+	char subject[BUFSIZE] = { 0 };
+	int size = 0;
+
+	char openssl[MAXPGPATH];
+	char **opensslSearchList = NULL;
+	int n = search_pathlist(getenv("PATH"), "openssl", &opensslSearchList);
+
+	if (n < 1)
+	{
+		log_error("Failed to find \"openssl\" command in your PATH");
+		return false;
+	}
+	else
+	{
+		strlcpy(openssl, opensslSearchList[0], MAXPGPATH);
+
+		search_pathlist_destroy_result(opensslSearchList);
+	}
+
+	size = snprintf(pgSetup->ssl.serverKey, MAXPGPATH,
+					"%s/server.key", pgSetup->pgdata);
+
+	if (size == -1 || size > MAXPGPATH)
+	{
+		log_error("BUG: the ssl server key file path requires %d bytes and "
+				  "pg_auto_failover only support up to %d bytes",
+				  size, MAXPGPATH);
+		return false;
+	}
+
+	size = snprintf(pgSetup->ssl.serverCert, MAXPGPATH,
+					"%s/server.crt", pgSetup->pgdata);
+
+	if (size == -1 || size > MAXPGPATH)
+	{
+		log_error("BUG: the ssl server key file path requires %d bytes and "
+				  "pg_auto_failover only support up to %d bytes",
+				  size, MAXPGPATH);
+		return false;
+	}
+
+	size = snprintf(subject, BUFSIZE, "/CN=%s", nodename);
+
+	if (size == -1 || size > BUFSIZE)
+	{
+		log_error("BUG: the ssl subject \"/CN=%s\" requires %d bytes and"
+				  "pg_auto_failover only support up to %d bytes",
+				  nodename, size, BUFSIZE);
+		return false;
+	}
+
+	log_info("Running %s req -new -x509 -days 365 -nodes -text "
+			 "-out %s -keyout %s -subj \"%s\"",
+			 openssl,
+			 pgSetup->ssl.serverCert,
+			 pgSetup->ssl.serverKey,
+			 subject);
+
+	program = run_program(openssl,
+						  "req", "-new", "-x509", "-days", "365",
+						  "-nodes", "-text",
+						  "-out", pgSetup->ssl.serverCert,
+						  "-keyout", pgSetup->ssl.serverKey,
+						  "-subj", subject,
+						  NULL);
+
+	if (program.returnCode != 0)
+	{
+		(void) log_program_output(program, LOG_INFO, LOG_ERROR);
+		log_error("openssl failed with return code: %d", program.returnCode);
+		free_program(&program);
+		return false;
+	}
+
+	(void) log_program_output(program, LOG_DEBUG, LOG_DEBUG);
+	free_program(&program);
+
+	/*
+	 * Then do: chmod og-rwx server.key
+	 */
+	if (chmod(pgSetup->ssl.serverKey, S_IRUSR | S_IWUSR) != 0)
+	{
+		log_error("Failed to chmod og-rwx \"%s\": %s",
+				  pgSetup->ssl.serverKey, strerror(errno));
+		return false;
+	}
+
+	return true;
 }

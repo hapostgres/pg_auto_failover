@@ -90,6 +90,34 @@ typedef enum PgInstanceKind
 #define PG_VERSION_STRING_MAX 12
 
 /*
+ * pg_auto_failover also support SSL settings.
+ */
+typedef enum
+{
+	SSL_MODE_UNKNOWN = 0,
+	SSL_MODE_DISABLE,
+	SSL_MODE_ALLOW,
+	SSL_MODE_PREFER,
+	SSL_MODE_REQUIRE,
+	SSL_MODE_VERIFY_CA,
+	SSL_MODE_VERIFY_FULL
+} SSLMode;
+
+#define SSL_MODE_STRLEN 12		/* longuest is "verify-full" at 11 chars */
+
+typedef struct SSLOptions
+{
+	int active;					/* INI support has int, does not have bool */
+	bool createSelfSignedCert;
+	SSLMode sslMode;
+	char sslModeStr[SSL_MODE_STRLEN];
+	char caFile[MAXPGPATH];
+	char crlFile[MAXPGPATH];
+	char serverCert[MAXPGPATH];
+	char serverKey[MAXPGPATH];
+} SSLOptions;
+
+/*
  * In the PostgresSetup structure, we use pghost either as socket directory
  * name or as a hostname. We could use MAXPGPATH rather than
  * _POSIX_HOST_NAME_MAX chars in that name, but then again the the hostname is
@@ -114,6 +142,7 @@ typedef struct pg_setup
 	PostgresControlData control;            /* pg_controldata pgdata */
 	PostgresPIDFile pidFile;                /* postmaster.pid information */
 	PgInstanceKind pgKind;					/* standalone/coordinator/worker */
+	SSLOptions ssl;							/* ssl options */
 } PostgresSetup;
 
 #define IS_EMPTY_STRING_BUFFER(strbuf) (strbuf[0] == '\0')
@@ -147,5 +176,10 @@ bool pg_setup_set_absolute_pgdata(PostgresSetup *pgSetup);
 PgInstanceKind nodeKindFromString(const char *nodeKind);
 char *nodeKindToString(PgInstanceKind kind);
 int pgsetup_get_pgport(void);
+
+bool pgsetup_validate_ssl_settings(PostgresSetup *pgSetup);
+SSLMode pgsetup_parse_sslmode(const char *sslMode);
+char *pgsetup_sslmode_to_string(SSLMode sslMode);
+
 
 #endif /* PGSETUP_H */
