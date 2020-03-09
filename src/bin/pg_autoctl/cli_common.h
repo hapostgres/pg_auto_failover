@@ -89,6 +89,7 @@ extern CommandLine config_commands;
 extern CommandLine create_monitor_command;
 extern CommandLine create_postgres_command;
 extern CommandLine drop_node_command;
+extern CommandLine drop_monitor_command;
 extern CommandLine destroy_command;
 
 /* cli_enable_disable.c */
@@ -162,5 +163,6 @@ typedef enum
 bool cli_getopt_ssl_flags(int ssl_flag, char *optarg, PostgresSetup *pgSetup);
 bool cli_getopt_accept_ssl_options(SSLCommandLineOptions newSSLOption,
 								   SSLCommandLineOptions currentSSLOptions);
+void cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy);
 
 #endif  /* CLI_COMMON_H */
