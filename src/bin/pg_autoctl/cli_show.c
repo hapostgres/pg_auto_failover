@@ -754,6 +754,13 @@ cli_show_uri_getopts(int argc, char **argv)
 		strlcpy(options.pgSetup.pgdata, pgdata, MAXPGPATH);
 	}
 
+	if (!keeper_config_set_pathnames_from_pgdata(&(options.pathnames),
+												 options.pgSetup.pgdata))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
 	keeperOptions = options;
 
 	return optind;
@@ -787,18 +794,19 @@ cli_show_formation_uri(int argc, char **argv)
 {
 	KeeperConfig config = keeperOptions;
 	Monitor monitor = { 0 };
+	bool monitorDisabledIsOk = false;
 	char postgresUri[MAXCONNINFO];
 
-	/* when --formation is missing, use the default value */
-	if (IS_EMPTY_STRING_BUFFER(config.formation))
-	{
-		strlcpy(config.formation, FORMATION_DEFAULT, NAMEDATALEN);
-	}
-
-	if (!monitor_init_from_pgsetup(&monitor, &config.pgSetup))
+	if (!keeper_config_read_file_skip_pgsetup(&config, monitorDisabledIsOk))
 	{
 		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_ARGS);
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (!monitor_init(&monitor, config.monitor_pguri))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
 	(void) print_monitor_and_formation_uri(&config, &monitor, stdout);
@@ -813,13 +821,6 @@ static void
 cli_show_all_uri(int argc, char **argv)
 {
 	KeeperConfig kconfig = keeperOptions;
-
-	if (!keeper_config_set_pathnames_from_pgdata(&kconfig.pathnames,
-												 kconfig.pgSetup.pgdata))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_CONFIG);
-	}
 
 	switch (ProbeConfigurationFileRole(kconfig.pathnames.config))
 	{
@@ -840,12 +841,20 @@ cli_show_all_uri(int argc, char **argv)
 				exit(EXIT_CODE_PGCTL);
 			}
 
-			pg_setup_get_local_connection_string(&(mconfig.pgSetup), connInfo);
+			if (!monitor_config_get_postgres_uri(&mconfig, connInfo, MAXCONNINFO))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
+
 			monitor_init(&monitor, connInfo);
 
 			if (outputJSON)
 			{
+				const char *sslMode = mconfig.pgSetup.ssl.sslModeStr;
+
 				if (!monitor_print_every_formation_uri_as_json(&monitor,
+															   sslMode,
 															   stdout))
 				{
 					log_fatal("Failed to get the list of formation URIs");
@@ -854,7 +863,9 @@ cli_show_all_uri(int argc, char **argv)
 			}
 			else
 			{
-				if (!monitor_print_every_formation_uri(&monitor))
+				const char *sslMode = mconfig.pgSetup.ssl.sslModeStr;
+
+				if (!monitor_print_every_formation_uri(&monitor, sslMode))
 				{
 					log_fatal("Failed to get the list of formation URIs");
 					exit(EXIT_CODE_MONITOR);
@@ -868,7 +879,6 @@ cli_show_all_uri(int argc, char **argv)
 		{
 			Monitor monitor = { 0 };
 			bool monitorDisabledIsOk = false;
-			char value[BUFSIZE];
 
 			if (!keeper_config_read_file_skip_pgsetup(
 					&kconfig,
@@ -913,6 +923,7 @@ print_monitor_and_formation_uri(KeeperConfig *config,
 
 	if (!monitor_formation_uri(monitor,
 							   config->formation,
+							   config->pgSetup.ssl.sslModeStr,
 							   postgresUri,
 							   MAXCONNINFO))
 	{

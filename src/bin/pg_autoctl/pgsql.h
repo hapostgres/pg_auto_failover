@@ -15,6 +15,7 @@
 
 #include "libpq-fe.h"
 
+#include "pgsetup.h"
 
 /*
  * OID values from PostgreSQL src/include/catalog/pg_type.h
@@ -102,6 +103,7 @@ typedef struct ReplicationSource
 	char *maximumBackupRate;
 	char *backupDir;
 	char *applicationName;
+	SSLOptions sslOptions;
 } ReplicationSource;
 
 

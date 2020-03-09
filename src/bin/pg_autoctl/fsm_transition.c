@@ -159,8 +159,8 @@ fsm_init_primary(Keeper *keeper)
 	 */
 	if (!ensure_local_postgres_is_running(postgres))
 	{
-		log_error("Failed to initialise postgres as primary because starting postgres "
-				  "failed, see above for details");
+		log_error("Failed to initialise postgres as primary because "
+				  "starting postgres failed, see above for details");
 		return false;
 	}
 
@@ -185,11 +185,27 @@ fsm_init_primary(Keeper *keeper)
 	/*
 	 * We just created the local Postgres cluster, make sure it has our minimum
 	 * configuration deployed.
+	 *
+	 * When --ssl has been used without SSL certificates being given, now is
+	 * the time to build a self-signed certificate for the server. We place the
+	 * certificate and private key in $PGDATA/server.key and $PGDATA/server.crt
 	 */
+	if (pgSetup.ssl.createSelfSignedCert
+		&& (!file_exists(pgSetup.ssl.serverKey)
+			|| !file_exists(pgSetup.ssl.serverCert)))
+	{
+		if (!pg_create_self_signed_cert(&pgSetup, config->nodename))
+		{
+			log_error("Failed to create SSL self-signed certificate, "
+					  "see above for details");
+			return false;
+		}
+	}
+
 	if (!postgres_add_default_settings(postgres))
 	{
-		log_error("Failed to initialise postgres as primary because adding default "
-				  "settings failed, see above for details");
+		log_error("Failed to initialise postgres as primary because "
+				  "adding default settings failed, see above for details");
 		return false;
 	}
 
@@ -251,13 +267,17 @@ fsm_init_primary(Keeper *keeper)
 	 */
 	if (pgInstanceIsOurs)
 	{
-		if (getenv("PG_REGRESS_SOCK_DIR") != NULL)
+		char *pg_regress_sock_dir = getenv("PG_REGRESS_SOCK_DIR");
+
+		if (pg_regress_sock_dir != NULL
+			&& strcmp(pg_regress_sock_dir, "") == 0)
 		{
 			/*
 			 * In test environements allow nodes from the same network to
 			 * connect. The network is discovered automatically.
 			 */
 			if (!pghba_enable_lan_cidr(&keeper->postgres.sqlClient,
+									   keeper->config.pgSetup.ssl.active,
 									   HBA_DATABASE_ALL, NULL,
 									   keeper->config.nodename,
 									   NULL, DEFAULT_AUTH_METHOD, NULL))
@@ -714,6 +734,7 @@ fsm_init_standby(Keeper *keeper)
 	replicationSource.slotName = config->replication_slot_name;
 	replicationSource.maximumBackupRate = config->maximum_backup_rate;
 	replicationSource.backupDir = config->backupDirectory;
+	replicationSource.sslOptions = config->pgSetup.ssl;
 
 	/* prepare our application_name */
 	snprintf(applicationName, BUFSIZE,
@@ -722,7 +743,7 @@ fsm_init_standby(Keeper *keeper)
 			 keeper->state.current_node_id);
 	replicationSource.applicationName = applicationName;
 
-	if (!standby_init_database(postgres, &replicationSource))
+	if (!standby_init_database(postgres, &replicationSource, config->nodename))
 	{
 		log_error("Failed initialise standby server, see above for details");
 		return false;
@@ -773,6 +794,7 @@ fsm_rewind_or_init(Keeper *keeper)
 	replicationSource.applicationName = config->replication_slot_name;
 	replicationSource.maximumBackupRate = config->maximum_backup_rate;
 	replicationSource.backupDir = config->backupDirectory;
+	replicationSource.sslOptions = config->pgSetup.ssl;
 
 	/* prepare our application_name */
 	snprintf(applicationName, BUFSIZE,
@@ -786,7 +808,9 @@ fsm_rewind_or_init(Keeper *keeper)
 		log_warn("Failed to rewind demoted primary to standby, "
 				 "trying pg_basebackup instead");
 
-		if (!standby_init_database(postgres, &replicationSource))
+		if (!standby_init_database(postgres,
+								   &replicationSource,
+								   config->nodename))
 		{
 			log_error("Failed to become standby server, see above for details");
 			return false;

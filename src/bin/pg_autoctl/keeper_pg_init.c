@@ -596,6 +596,7 @@ create_database_and_extension(Keeper *keeper)
 	 * string with at least the --username used to create the database.
 	 */
 	if (!pghba_ensure_host_rule_exists(hbaFilePath,
+									   pgSetup->ssl.active,
 									   HBA_DATABASE_DBNAME,
 									   pgSetup->dbname,
 									   pg_setup_get_username(pgSetup),
@@ -619,7 +620,10 @@ create_database_and_extension(Keeper *keeper)
 
 		/* Intended use is restricted to unit testing, hard-code "trust" here */
 		if (!pghba_ensure_host_rule_exists(hbaFilePath,
-										   HBA_DATABASE_ALL, NULL, NULL,
+										   pgSetup->ssl.active,
+										   HBA_DATABASE_ALL,
+										   NULL, /* all: no database name */
+										   NULL, /* no username, "all" */
 										   pgSetup->pghost,
 										   "trust"))
 		{
@@ -673,6 +677,21 @@ create_database_and_extension(Keeper *keeper)
 	}
 
 	/*
+	 * When --ssl has been used without SSL certificates being given, now is
+	 * the time to build a self-signed certificate for the server. We place the
+	 * certificate and private key in $PGDATA/server.key and $PGDATA/server.crt
+	 */
+	if (pgSetup->ssl.createSelfSignedCert)
+	{
+		if (!pg_create_self_signed_cert(pgSetup, config->nodename))
+		{
+			log_error("Failed to create SSL self-signed certificate, "
+					  "see above for details");
+			return false;
+		}
+	}
+
+	/*
 	 * Add pg_autoctl PostgreSQL settings, including Citus extension in
 	 * shared_preload_libraries when dealing with a Citus worker or coordinator
 	 * node.
@@ -691,6 +710,7 @@ create_database_and_extension(Keeper *keeper)
 	if (IS_CITUS_INSTANCE_KIND(postgres->pgKind))
 	{
 		if (!pghba_enable_lan_cidr(&initPostgres.sqlClient,
+								   pgSetup->ssl.active,
 								   HBA_DATABASE_DBNAME,
 								   pgSetup->dbname,
 								   config->nodename,

@@ -331,11 +331,11 @@ keeper_cli_init_standby(int argc, char **argv)
 	replicationSource.maximumBackupRate = MAXIMUM_BACKUP_RATE;
 	replicationSource.backupDir = config.backupDirectory;
 
-	if (!standby_init_database(&postgres, &replicationSource))
+	if (!standby_init_database(&postgres, &replicationSource, config.nodename))
 	{
-		log_fatal("Failed to grant access to the standby by adding relevant lines to "
-				  "pg_hba.conf for the standby hostname and user, see above for "
-				  "details");
+		log_fatal("Failed to grant access to the standby by adding "
+				  "relevant lines to pg_hba.conf for the "
+				  "standby hostname and user, see above for details");
 		exit(EXIT_CODE_PGSQL);
 	}
 }
@@ -382,6 +382,7 @@ keeper_cli_rewind_old_primary(int argc, char **argv)
 	replicationSource.slotName = config.replication_slot_name;
 	replicationSource.applicationName = config.replication_slot_name;
 	replicationSource.maximumBackupRate = MAXIMUM_BACKUP_RATE;
+	replicationSource.sslOptions = config.pgSetup.ssl;
 
 	if (!primary_rewind_to_standby(&postgres, &replicationSource))
 	{
