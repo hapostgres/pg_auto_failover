@@ -51,6 +51,7 @@ CommandLine show_commands =
 					 NULL, show_subcommands);
 
 CommandLine *drop_subcommands[] = {
+	&drop_monitor_command,
 	&drop_node_command,
 	&drop_formation_command,
 	NULL
