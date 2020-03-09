@@ -261,7 +261,7 @@ cli_create_postgres_getopts(int argc, char **argv)
 
 	int optind =
 		cli_create_node_getopts(argc, argv,
-								long_options, "C:D:H:p:l:U:A:Sd:n:f:m:MRVvqhxs",
+								long_options, "C:D:H:p:l:U:A:Sd:n:f:m:MRVvqhxsN",
 								&options);
 
 	/* publish our option parsing in the global variable */
@@ -344,7 +344,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "C:D:p:n:l:A:SVvqhxs",
+	while ((c = getopt_long(argc, argv, "C:D:p:n:l:A:SVvqhxNs",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
