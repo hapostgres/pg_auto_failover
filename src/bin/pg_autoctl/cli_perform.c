@@ -11,6 +11,7 @@
 #include "cli_common.h"
 #include "commandline.h"
 #include "defaults.h"
+#include "env_utils.h"
 #include "ini_file.h"
 #include "keeper_config.h"
 #include "keeper.h"
@@ -173,16 +174,13 @@ cli_perform_failover_getopts(int argc, char **argv)
 
 	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 	{
-		char *pgdata = getenv("PGDATA");
-
-		if (pgdata == NULL)
+		int pgdatalen = get_env_variable("PGDATA", options.pgSetup.pgdata, MAXPGPATH);
+		if (pgdatalen == -1 || pgdatalen >= MAXPGPATH)
 		{
 			log_fatal("Failed to get PGDATA either from the environment "
 					  "or from --pgdata");
 			exit(EXIT_CODE_BAD_ARGS);
 		}
-
-		strlcpy(options.pgSetup.pgdata, pgdata, MAXPGPATH);
 	}
 
 	keeperOptions = options;

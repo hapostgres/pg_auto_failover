@@ -17,6 +17,7 @@
 #include "cli_common.h"
 #include "cli_root.h"
 #include "commandline.h"
+#include "env_utils.h"
 #include "ipaddr.h"
 #include "keeper.h"
 #include "keeper_config.h"
@@ -406,16 +407,13 @@ cli_create_node_getopts(int argc, char **argv,
 	 */
 	if (IS_EMPTY_STRING_BUFFER(LocalOptionConfig.pgSetup.pgdata))
 	{
-		char *pgdata = getenv("PGDATA");
-
-		if (pgdata == NULL)
+		int pgdatalen = get_env_variable("PGDATA", LocalOptionConfig.pgSetup.pgdata, MAXPGPATH);
+		if (pgdatalen == -1 || pgdatalen >= MAXPGPATH)
 		{
 			log_fatal("Failed to get PGDATA either from the environment "
 					  "or from --pgdata");
 			exit(EXIT_CODE_BAD_ARGS);
 		}
-
-		strlcpy(LocalOptionConfig.pgSetup.pgdata, pgdata, MAXPGPATH);
 	}
 
 	/*
@@ -747,16 +745,13 @@ prepare_keeper_options(KeeperConfig *options)
 {
 	if (IS_EMPTY_STRING_BUFFER(options->pgSetup.pgdata))
 	{
-		char *pgdata = getenv("PGDATA");
-
-		if (pgdata == NULL)
+		int pgdatalen = get_env_variable("PGDATA", options->pgSetup.pgdata, MAXPGPATH);
+		if (pgdatalen == -1 || pgdatalen >= MAXPGPATH)
 		{
 			log_fatal("Failed to get PGDATA either from the environment "
 					  "or from --pgdata");
 			exit(EXIT_CODE_BAD_ARGS);
 		}
-
-		strlcpy(options->pgSetup.pgdata, pgdata, MAXPGPATH);
 	}
 
 	log_debug("Managing PostgreSQL installation at \"%s\"",
@@ -809,7 +804,14 @@ void
 set_first_pgctl(PostgresSetup *pgSetup)
 {
 	char **pg_ctls = NULL;
-	int n = search_pathlist(getenv("PATH"), "pg_ctl", &pg_ctls);
+	const int MAXPATHSIZE = 10000;
+	char envPath[10000];
+	int n = 0;
+
+	if (get_env_variable("PATH", envPath, MAXPATHSIZE) > 0)
+	{
+		n = search_pathlist(envPath, "pg_ctl", &pg_ctls);
+	}
 
 	if (n < 1)
 	{
@@ -984,7 +986,7 @@ keeper_cli_help(int argc, char **argv)
 {
 	CommandLine command = root;
 
-	if (getenv(PG_AUTOCTL_DEBUG) != NULL)
+	if (get_env_variable(PG_AUTOCTL_DEBUG, NULL, 0) >= 0)
 	{
 		command = root_with_debug;
 	}

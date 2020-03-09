@@ -25,6 +25,7 @@
 
 #include "postgres_fe.h"
 
+#include "env_utils.h"
 #include "ipaddr.h"
 #include "log.h"
 
@@ -384,8 +385,7 @@ fetchIPAddressFromInterfaceList(char *localIpAddress, int size)
 static bool
 isTestEnv(void)
 {
-	const char *socketDir = getenv("PG_REGRESS_SOCK_DIR");
-	return socketDir != NULL && socketDir[0] == '\0';
+	return get_env_variable("PG_REGRESS_SOCK_DIR", NULL, 0) == 0;
 }
 
 

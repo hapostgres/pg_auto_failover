@@ -16,6 +16,7 @@
 #include "cli_common.h"
 #include "commandline.h"
 #include "defaults.h"
+#include "env_utils.h"
 #include "ipaddr.h"
 #include "keeper_config.h"
 #include "keeper.h"
@@ -256,16 +257,13 @@ cli_show_state_getopts(int argc, char **argv)
 
 	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 	{
-		char *pgdata = getenv("PGDATA");
-
-		if (pgdata == NULL)
+		int pgdatalen = get_env_variable("PGDATA", options.pgSetup.pgdata, MAXPGPATH);
+		if (pgdatalen == -1 || pgdatalen >= MAXPGPATH)
 		{
 			log_fatal("Failed to get PGDATA either from the environment "
 					  "or from --pgdata");
 			exit(EXIT_CODE_BAD_ARGS);
 		}
-
-		strlcpy(options.pgSetup.pgdata, pgdata, MAXPGPATH);
 	}
 
 	keeperOptions = options;
@@ -334,8 +332,6 @@ cli_show_state(int argc, char **argv)
 
 	if (outputJSON)
 	{
-		char json[BUFSIZE];
-
 		if (!monitor_print_state_as_json(&monitor,
 										 config.formation,
 										 config.groupId))
@@ -465,16 +461,13 @@ cli_show_uri_getopts(int argc, char **argv)
 
 	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 	{
-		char *pgdata = getenv("PGDATA");
-
-		if (pgdata == NULL)
+		int pgdatalen = get_env_variable("PGDATA", options.pgSetup.pgdata, MAXPGPATH);
+		if (pgdatalen == -1 || pgdatalen >= MAXPGPATH)
 		{
 			log_fatal("Failed to get PGDATA either from the environment "
 					  "or from --pgdata");
 			exit(EXIT_CODE_BAD_ARGS);
 		}
-
-		strlcpy(options.pgSetup.pgdata, pgdata, MAXPGPATH);
 	}
 
 	if (!keeper_config_set_pathnames_from_pgdata(&(options.pathnames),
@@ -518,7 +511,6 @@ cli_show_formation_uri(int argc, char **argv)
 	KeeperConfig config = keeperOptions;
 	Monitor monitor = { 0 };
 	bool monitorDisabledIsOk = false;
-	char postgresUri[MAXCONNINFO];
 
 	if (!keeper_config_read_file_skip_pgsetup(&config, monitorDisabledIsOk))
 	{
@@ -845,16 +837,13 @@ cli_show_file_getopts(int argc, char **argv)
 
 	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 	{
-		char *pgdata = getenv("PGDATA");
-
-		if (pgdata == NULL)
+		int pgdatalen = get_env_variable("PGDATA", options.pgSetup.pgdata, MAXPGPATH);
+		if (pgdatalen == -1 || pgdatalen >= MAXPGPATH)
 		{
 			log_fatal("Failed to get PGDATA either from the environment "
 					  "or from --pgdata");
 			exit(EXIT_CODE_BAD_ARGS);
 		}
-
-		strlcpy(options.pgSetup.pgdata, pgdata, MAXPGPATH);
 	}
 
 	if (!keeper_config_set_pathnames_from_pgdata(&options.pathnames,

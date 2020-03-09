@@ -19,6 +19,7 @@
 #include "pqexpbuffer.h"
 
 #include "defaults.h"
+#include "env_utils.h"
 #include "file_utils.h"
 #include "parsing.h"
 #include "pgctl.h"
@@ -172,7 +173,20 @@ int
 config_find_pg_ctl(PostgresSetup *pgSetup)
 {
 	char **pg_ctls = NULL;
-	int n = search_pathlist(getenv("PATH"), "pg_ctl", &pg_ctls);
+
+	/*
+	 * path variable could be arbitrarily large. We put an upper limit on 10K here.
+	 * In this case we only consider the part we can read
+	 */
+	const int MAXPATHSIZE = 10000;
+	char envPath[10000];
+	int envlength = get_env_variable("PATH", envPath, MAXPATHSIZE);
+	int n = 0;
+
+	if (envlength > 0)
+	{
+		n = search_pathlist(envPath, "pg_ctl", &pg_ctls);
+	}
 
 	pgSetup->pg_ctl[0] = '\0';
 	pgSetup->pg_version[0] = '\0';
@@ -758,6 +772,7 @@ pg_ctl_start(const char *pg_ctl,
 
 	char command[BUFSIZE];
 	int commandSize = 0;
+	char env_pg_regress_sock_dir[MAXPGPATH];
 
 	join_path_components(logfile, pgdata, "startup.log");
 	snprintf(pgport_option, sizeof(pgport_option), "\"-p %d\"", pgport);
@@ -777,12 +792,12 @@ pg_ctl_start(const char *pg_ctl,
 		args[argsIndex++] = (char *) listen_addresses_option;
 	}
 
-	if (getenv("PG_REGRESS_SOCK_DIR") != NULL)
+	if(get_env_variable("PG_REGRESS_SOCK_DIR", env_pg_regress_sock_dir, MAXPGPATH) > 0)
 	{
 		snprintf(option_unix_socket_directory,
 				 sizeof(option_unix_socket_directory),
 				 "\"-k \"%s\"\"",
-				 getenv("PG_REGRESS_SOCK_DIR"));
+				 env_pg_regress_sock_dir);
 
 		/* pg_ctl --options can be specified multiple times */
 		args[argsIndex++] = "--options";

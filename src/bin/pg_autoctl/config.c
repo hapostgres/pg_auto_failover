@@ -14,6 +14,7 @@
 
 #include "config.h"
 #include "defaults.h"
+#include "env_utils.h"
 #include "file_utils.h"
 #include "ini_file.h"
 #include "keeper.h"
@@ -34,10 +35,13 @@ build_xdg_path(char *dst,
 			   const char *name)
 {
 	char filename[MAXPGPATH];
-	char *home = getenv("HOME");
-	char *xdg_topdir;
+	char home[MAXPGPATH];
+	int homePathLength = 0;
+	char xdg_topdir[MAXPGPATH];
+	int xdg_topdir_length = 0;
 
-	if (home == NULL)
+	homePathLength = get_env_variable("HOME", home, MAXPGPATH);
+	if (homePathLength <= 0 || homePathLength >= MAXPGPATH)
 	{
 		log_fatal("Environment variable HOME is unset");
 		exit(EXIT_CODE_INTERNAL_ERROR);
@@ -47,24 +51,24 @@ build_xdg_path(char *dst,
 	{
 		case XDG_DATA:
 		{
-			xdg_topdir = getenv("XDG_DATA_HOME");
+			xdg_topdir_length = get_env_variable("XDG_DATA_HOME", xdg_topdir, MAXPGPATH);
 			break;
 		}
 
 		case XDG_CONFIG:
 		{
-			xdg_topdir = getenv("XDG_CONFIG_HOME");
+			xdg_topdir_length = get_env_variable("XDG_CONFIG_HOME", xdg_topdir, MAXPGPATH);
 			break;
 		}
 
 		case XDG_RUNTIME:
 		{
-			xdg_topdir = getenv("XDG_RUNTIME_DIR");
+			xdg_topdir_length = get_env_variable("XDG_RUNTIME_DIR", xdg_topdir, MAXPGPATH);
 
-			if (xdg_topdir == NULL || !directory_exists(xdg_topdir))
+			if (xdg_topdir_length <= 0 || !directory_exists(xdg_topdir))
 			{
 				/* then default to /tmp */
-				xdg_topdir = "/tmp";
+				strlcpy(xdg_topdir, "/tmp", MAXPGPATH);
 			}
 			break;
 		}
@@ -76,7 +80,7 @@ build_xdg_path(char *dst,
 			return false;
 	}
 
-	if (xdg_topdir != NULL)
+	if (xdg_topdir_length > 0)
 	{
 		/* use e.g. ${XDG_DATA_HOME}/pg_autoctl/<PGDATA>/pg_autoctl.state */
 		strlcpy(filename, xdg_topdir, MAXPGPATH);
