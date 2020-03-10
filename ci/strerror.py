@@ -23,6 +23,14 @@ import subprocess
 CSCOPE = "/usr/local/bin/cscope"
 CSCOPE_MODE_CALL_SITE = 3
 
+#
+# We accept to see calls to strerror() from within those funcalls, as in:
+#
+#   fprintf(stdout, "%s\n", strerror(errno));
+#   log_fatal("fsync error: %s", strerror(errno));
+#
+GRANTED_FUNCALLS = ["log_fatal", "log_error", "log_warn", "log_info",
+                    "log_debug", "log_trace", "fprintf"]
 
 class Match():
     def __init__(self, filename, fname, ln, code):
@@ -44,23 +52,18 @@ class Match():
         return p == 0
 
     def completeCode(self):
-        if self.parensAreBalanced():
-            return
-
         with open(self.filename, "r") as source:
             lines = source.readlines()
 
-            self.code = \
-                lines[self.ln -2][:-1].strip() + " " + \
-                lines[self.ln -1][:-1].strip()
+            currentLineNumber = self.ln - 2
+            currentLine = lines[currentLineNumber][:-1].strip()
 
-            if not self.parensAreBalanced():
-                # try a third line, that's the most we have now
-                self.code = lines[self.ln -3][:-1].strip() + " " + self.code
+            while not re.search("([;{}]$)|\*/$", currentLine):
+                if currentLine != "":
+                    self.code = currentLine + " " + self.code
 
-                if not self.parensAreBalanced():
-                    raise Exception("Failed to complete code at %s:%d: %s" %
-                                    (self.filename, self.ln, self.code))
+                currentLineNumber = currentLineNumber - 1
+                currentLine = lines[currentLineNumber][:-1].strip()
 
     def __str__(self):
         return "%s %s %s" % (self.filename, self.ln, self.code)
@@ -87,7 +90,7 @@ class CScope():
                     filename,
                     func,
                     int(line),
-                    " ".join(rest)))
+                    " ".join(rest).strip()))
 
         return self.matchList
 
@@ -96,9 +99,9 @@ if __name__ == '__main__':
     cscope = CScope()
 
     for match in cscope.CallSites("strerror"):
-        if re.search("^.*=[^=]", match.code):
+        if not re.search("^(%s)[(]" % "|".join(GRANTED_FUNCALLS), match.code):
             # this also makes the script exit with non-zero code
-            raise Exception("Found an assignment in: %s" % match)
+            raise Exception("Found an banned call to strerror at %s" % match)
 
         else:
             print("✓ %s" % match)
