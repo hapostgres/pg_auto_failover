@@ -41,8 +41,8 @@ typedef struct
 	int error;					/* save errno when something's gone wrong */
 	int returnCode;
 
-	char *stdout;
-	char *stderr;
+	char *stdOut;
+	char *stdErr;
 } Program;
 
 Program run_program(const char *program, ...);
@@ -56,7 +56,7 @@ static size_t read_into_buf(int filedes, PQExpBuffer buffer);
 
 
 /*
- * Run a program using fork() and exec(), get the stdout and stderr output from
+ * Run a program using fork() and exec(), get the stdOut and stdErr output from
  * the run and then return a Program struct instance with the result of running
  * the program.
  */
@@ -72,8 +72,8 @@ run_program(const char *program, ...)
 	prog.returnCode = -1;
 	prog.error = 0;
 	prog.setsid = false;
-	prog.stdout = NULL;
-	prog.stderr = NULL;
+	prog.stdOut = NULL;
+	prog.stdErr = NULL;
 
 	prog.args = (char **) malloc(ARGS_INCREMENT * sizeof(char *));
 	prog.args[nb_args++] = prog.program;
@@ -119,8 +119,8 @@ initialize_program(char **args, bool setsid)
 	prog.returnCode = -1;
 	prog.error = 0;
 	prog.setsid = setsid;
-	prog.stdout = NULL;
-	prog.stderr = NULL;
+	prog.stdOut = NULL;
+	prog.stdErr = NULL;
 
 	for(argsIndex = 0; args[argsIndex] != NULL; argsIndex++)
 	{
@@ -188,17 +188,17 @@ execute_program(Program *prog)
 			/* fork succeeded, in child */
 
 			/*
-			 * We redirect /dev/null into stdin rather than closing stdin,
+			 * We redirect /dev/null into stdIn rather than closing stdin,
 			 * because apparently closing it may cause undefined behavior if
 			 * any read was to happen.
 			 */
-			int stdin = open(DEV_NULL, O_RDONLY);
+			int stdIn = open(DEV_NULL, O_RDONLY);
 
-			dup2(stdin, STDIN_FILENO);
+			dup2(stdIn, STDIN_FILENO);
 			dup2(outpipe[1], STDOUT_FILENO);
 			dup2(errpipe[1], STDERR_FILENO);
 
-			close(stdin);
+			close(stdIn);
 			close(outpipe[0]);
 			close(outpipe[1]);
 			close(errpipe[0]);
@@ -256,14 +256,14 @@ free_program(Program *prog)
 	}
 	free(prog->args);
 
-	if (prog->stdout != NULL)
+	if (prog->stdOut != NULL)
 	{
-		free(prog->stdout);
+		free(prog->stdOut);
 	}
 
-	if (prog->stderr != NULL)
+	if (prog->stdErr != NULL)
 	{
-		free(prog->stderr);
+		free(prog->stdErr);
 	}
 
 	return;
@@ -272,7 +272,7 @@ free_program(Program *prog)
 
 /*
  * read_from_pipes reads the output from the child process and sets the Program
- * slots stdout and stderr with the accumulated output we read.
+ * slots stdOut and stdErr with the accumulated output we read.
  */
 static void
 read_from_pipes(Program *prog, pid_t childPid, int *outpipe, int *errpipe)
@@ -366,7 +366,7 @@ read_from_pipes(Program *prog, pid_t childPid, int *outpipe, int *errpipe)
 	}
 
 	/*
-	 * Now we're done reading from both STDOUT and STDERR of the child
+	 * Now we're done reading from both stdOut and stdErr of the child
 	 * process, so close the file descriptors and prepare the char *
 	 * strings output in our Program structure.
 	 */
@@ -375,12 +375,12 @@ read_from_pipes(Program *prog, pid_t childPid, int *outpipe, int *errpipe)
 
 	if (outbuf->len > 0)
 	{
-		prog->stdout = strndup(outbuf->data, outbuf->len);
+		prog->stdOut = strndup(outbuf->data, outbuf->len);
 	}
 
 	if (errbuf->len > 0)
 	{
-		prog->stderr = strndup(errbuf->data, errbuf->len);
+		prog->stdErr = strndup(errbuf->data, errbuf->len);
 	}
 
 	destroyPQExpBuffer(outbuf);
