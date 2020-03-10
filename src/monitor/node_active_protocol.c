@@ -170,6 +170,14 @@ register_node(PG_FUNCTION_ARGS)
 	LockNodeGroup(formationId, currentNodeState.groupId, ExclusiveLock);
 
 	pgAutoFailoverNode = GetAutoFailoverNode(nodeName, nodePort);
+	if (pgAutoFailoverNode == NULL) {
+		ereport(ERROR,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+				 errmsg("node %s:%d with dbname \"%s\" could not be registered in "
+						"formation \"%s\", could not get matching node",
+						nodeName, nodePort, expectedDBName,
+						formationId)));
+	}
 
 	assignedNodeState =
 		(AutoFailoverNodeState *) palloc0(sizeof(AutoFailoverNodeState));
