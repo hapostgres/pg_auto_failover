@@ -77,7 +77,7 @@ LoadNodeHealthList(void)
 
 		oldContext = MemoryContextSwitchTo(upperContext);
 
-		for (uint32 rowNumber = 0; rowNumber < SPI_processed; rowNumber++)
+		for (uint64 rowNumber = 0; rowNumber < SPI_processed; rowNumber++)
 		{
 			HeapTuple heapTuple = SPI_tuptable->vals[rowNumber];
 			NodeHealth *nodeHealth = TupleToNodeHealth(heapTuple, SPI_tuptable->tupdesc);
