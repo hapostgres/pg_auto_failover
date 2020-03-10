@@ -107,11 +107,11 @@ CommandLine drop_monitor_command =
 CommandLine drop_node_command =
 	make_command("node",
 				 "Drop a node from the pg_auto_failover monitor",
-				 "[ --pgdata --destroy --nodename --nodeport ]",
+				 "[ --pgdata --destroy --nodename --pgport ]",
 				 "  --pgdata      path to data directory\n"
 				 "  --destroy     also destroy Postgres database\n"
 				 "  --nodename    nodename to remove from the monitor\n"
-				 "  --nodeport    Postgres port of the node to remove",
+				 "  --pgport      Postgres port of the node to remove",
 				 cli_drop_node_getopts,
 				 cli_drop_node);
 
@@ -935,14 +935,14 @@ cli_drop_node(int argc, char **argv)
 		case PG_AUTOCTL_ROLE_MONITOR:
 		{
 			/*
-			 * Now check --nodename and --nodeport and remove the entry on the
+			 * Now check --nodename and --pgport and remove the entry on the
 			 * monitor.
 			 */
 			if (IS_EMPTY_STRING_BUFFER(config.nodename)
 				|| config.pgSetup.pgport == 0)
 			{
 				log_fatal("To remove a node from the monitor, both the "
-						  "--nodename and --nodeport options are required");
+						  "--nodename and --pgport options are required");
 				exit(EXIT_CODE_BAD_ARGS);
 			}
 
@@ -1069,7 +1069,7 @@ cli_drop_monitor(int argc, char **argv)
 
 /*
  * cli_drop_node_from_monitor calls pgautofailover.remove_node() on the
- * monitor for the given --nodename and --nodeport.
+ * monitor for the given --nodename and --pgport.
  */
 static void
 cli_drop_node_from_monitor(KeeperConfig *config, const char *nodename, int port)
