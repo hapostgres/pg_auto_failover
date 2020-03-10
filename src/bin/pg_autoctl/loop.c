@@ -613,7 +613,8 @@ read_pidfile(const char *pidfile, pid_t *pid)
 		return false;
 	}
 
-	if (sscanf(fileContents, "%d", pid) == 1)
+	*pid = strtol(fileContents, NULL, 10);
+	if (errno != 0)
 	{
 		free(fileContents);
 

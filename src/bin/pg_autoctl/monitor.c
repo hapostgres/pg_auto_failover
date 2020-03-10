@@ -526,14 +526,18 @@ parseNodeState(void *ctx, PGresult *result)
 	}
 
 	value = PQgetvalue(result, 0, 0);
-	if (sscanf(value, "%d", &context->assignedState->nodeId) != 1)
+	context->assignedState->nodeId = strtol(value, NULL, 10);
+
+	if (errno != 0)
 	{
 		log_error("Invalid node ID \"%s\" returned by monitor", value);
 		++errors;
 	}
 
 	value = PQgetvalue(result, 0, 1);
-	if (sscanf(value, "%d", &context->assignedState->groupId) != 1)
+	context->assignedState->groupId = strtol(value, NULL, 10);
+
+	if (errno != 0)
 	{
 		log_error("Invalid group ID \"%s\" returned by monitor", value);
 		++errors;

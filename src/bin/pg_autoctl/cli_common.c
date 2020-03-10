@@ -233,8 +233,8 @@ cli_create_node_getopts(int argc, char **argv,
 			case 'g':
 			{
 				/* { "group", required_argument, NULL, 'g' } */
-				int scanResult = sscanf(optarg, "%d", &LocalOptionConfig.groupId);
-				if (scanResult == 0)
+				LocalOptionConfig.groupId = strtol(optarg, NULL, 10);
+				if (errno != 0)
 				{
 					log_fatal("--group argument is not a valid group ID: \"%s\"",
 							  optarg);

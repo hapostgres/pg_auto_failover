@@ -382,13 +382,14 @@ pg_setup_init(PostgresSetup *pgSetup,
 static bool
 get_pgpid(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 {
-	FILE *fp;
 	char pidfile[MAXPGPATH];
 	long pid = -1;
+	char *fileContent = NULL;
+	long fileSize = -1;
 
 	join_path_components(pidfile, pgSetup->pgdata, "postmaster.pid");
 
-	if ((fp = fopen(pidfile, "r")) == NULL)
+	if (!read_file(pidfile, &fileContent, &fileSize))
 	{
 		if (!pg_is_not_running_is_ok)
 		{
@@ -396,23 +397,22 @@ get_pgpid(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 					  pidfile, strerror(errno));
 			log_info("Is PostgreSQL at \"%s\" up and running?", pgSetup->pgdata);
 		}
+
 		return false;
 	}
 
-	if (fscanf(fp, "%ld", &pid) != 1)
+	pid = strtol(fileContent, NULL, 10);
+
+	if (fileSize == 0)
 	{
-		/* Is the file empty? */
-		if (ftell(fp) == 0 && feof(fp))
-		{
-			log_warn("The PID file \"%s\" is empty\n", pidfile);
-		}
-		else
-		{
-			log_warn("Invalid data in PID file \"%s\"\n", pidfile);
-		}
+		log_warn("The PID file \"%s\" is empty\n", pidfile);
+	}
+	else if (errno != 0)
+	{
+		log_warn("Invalid data in PID file \"%s\"\n", pidfile);
 	}
 
- 	fclose(fp);
+	free(fileContent);
 
 	if (pid > 0)
 	{
@@ -484,7 +484,13 @@ read_pg_pidfile(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 
 		if (lineno == LOCK_FILE_LINE_PID)
 		{
-			sscanf(line, "%ld", &pgSetup->pidFile.pid);
+			pgSetup->pidFile.pid = strtol(line, NULL, 10);
+			if (errno != 0)
+			{
+				log_error("Postgres pidfile does not contain a valid pid");
+
+				return false;
+			}
 
 			if (kill(pgSetup->pidFile.pid, 0) != 0)
 			{
@@ -500,7 +506,7 @@ read_pg_pidfile(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 
 		if (lineno == LOCK_FILE_LINE_PORT)
 		{
-			sscanf(line, "%hu", &pgSetup->pidFile.port);
+			pgSetup->pidFile.port = strtoul(line, NULL, 10);
 		}
 
 		if (lineno == LOCK_FILE_LINE_SOCKET_DIR)

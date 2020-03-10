@@ -378,8 +378,8 @@ cli_create_monitor_getopts(int argc, char **argv)
 
 			case 'p':
 			{
-				int scanResult = sscanf(optarg, "%d", &(options.pgSetup.pgport));
-				if (scanResult == 0)
+				options.pgSetup.pgport = strtoul(optarg, NULL, 10);
+				if (errno != 0 || options.pgSetup.pgport == 0)
 				{
 					log_fatal("--pgport argument is a valid port number: \"%s\"",
 							  optarg);

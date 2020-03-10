@@ -319,7 +319,8 @@ keeper_cli_init_standby(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (sscanf(argv[1], "%d", &replicationSource.primaryNode.port) == 0)
+	replicationSource.primaryNode.port = strtoul(argv[1], NULL, 10);
+	if (errno != 0 || replicationSource.primaryNode.port == 0)
 	{
 		log_fatal("Argument is not a valid port number: \"%s\"", argv[1]);
 		exit(EXIT_CODE_BAD_ARGS);
@@ -371,7 +372,8 @@ keeper_cli_rewind_old_primary(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (sscanf(argv[1], "%d", &replicationSource.primaryNode.port) == 0)
+	replicationSource.primaryNode.port = strtoul(argv[1], NULL, 10);
+	if (errno != 0 || replicationSource.primaryNode.port == 0)
 	{
 		log_fatal("Argument is not a valid port number: \"%s\"", argv[1]);
 		exit(EXIT_CODE_BAD_ARGS);

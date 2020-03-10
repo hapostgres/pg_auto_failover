@@ -107,8 +107,8 @@ cli_perform_failover_getopts(int argc, char **argv)
 
 			case 'g':
 			{
-				int scanResult = sscanf(optarg, "%d", &options.groupId);
-				if (scanResult == 0)
+				options.groupId = strtol(optarg, NULL, 10);
+				if (errno  != 0)
 				{
 					log_fatal("--group argument is not a valid group ID: \"%s\"",
 							  optarg);
