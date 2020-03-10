@@ -782,7 +782,7 @@ cli_drop_node_getopts(int argc, char **argv)
 		{ "pgdata", required_argument, NULL, 'D' },
 		{ "destroy", no_argument, NULL, 'd' },
 		{ "nodename", required_argument, NULL, 'n' },
-		{ "nodeport", required_argument, NULL, 'p' },
+		{ "pgport", required_argument, NULL, 'p' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
@@ -885,7 +885,7 @@ cli_drop_node_getopts(int argc, char **argv)
 		&& (!IS_EMPTY_STRING_BUFFER(options.nodename)
 			|| options.pgSetup.pgport != 0))
 	{
-		log_error("Please use either --nodename and --nodeport or ---destroy");
+		log_error("Please use either --nodename and --pgport or ---destroy");
 		log_info("Destroying a node is not supported from a distance");
 		exit(EXIT_CODE_BAD_ARGS);
 	}
@@ -1038,9 +1038,7 @@ cli_drop_monitor(int argc, char **argv)
 			}
 
 			/* expose the pgSetup in the given KeeperConfig */
-			memcpy(&(config.pgSetup),
-				   &(mconfig.pgSetup),
-				   sizeof(PostgresSetup));
+			config.pgSetup = mconfig.pgSetup;
 
 			/* somehow at this point we've lost our pathnames */
 			if (!keeper_config_set_pathnames_from_pgdata(
