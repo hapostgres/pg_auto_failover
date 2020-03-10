@@ -41,16 +41,6 @@ class Match():
 
         self.completeCode()
 
-    def parensAreBalanced(self):
-        p = 0
-        for c in self.code:
-            if c == '(':
-                p += 1
-            elif c == ')':
-                p -= 1
-
-        return p == 0
-
     def completeCode(self):
         with open(self.filename, "r") as source:
             lines = source.readlines()
