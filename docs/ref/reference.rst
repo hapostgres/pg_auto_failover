@@ -45,6 +45,7 @@ keeper::
       formation    Create a new formation on the pg_auto_failover monitor
 
     pg_autoctl drop
+      monitor    Drop the pg_auto_failover monitor
       node       Drop a node from the pg_auto_failover monitor
       formation  Drop a formation on the pg_auto_failover monitor
 
@@ -539,16 +540,24 @@ Removing a node from the pg_auto_failover monitor
 To clean-up an installation and remove a PostgreSQL instance from pg_auto_failover
 keeper and monitor, use the following command::
 
-  $ pg_autoctl drop node --help
-  pg_autoctl drop node: Drop a node from the pg_auto_failover monitor
-  usage: pg_autoctl drop node  [ --pgdata --destroy ]
-
-    --pgdata      path to data directory
-    --destroy     also destroy Postgres database
+    $ pg_autoctl drop node --help
+    pg_autoctl drop node: Drop a node from the pg_auto_failover monitor
+    usage: pg_autoctl drop node [ --pgdata --destroy --nodename --nodeport ]
+    
+      --pgdata      path to data directory
+      --destroy     also destroy Postgres database
+      --nodename    nodename to remove from the monitor
+      --nodeport    Postgres port of the node to remove
 
 The ``pg_autoctl drop node`` connects to the monitor and removes the
 nodename from it, then removes the local pg_auto_failover keeper state file. The
 configuration file is not removed.
+
+It is possible to run the ``pg_autoctl drop node`` command either from the
+node itself and then the ``--destroy`` option is available to wipe out
+everything, including configuration files and PGDATA; or to run the command
+from the monitor and then use the ``--nodename`` and ``--nodeport`` options
+to target a (presumably dead) node to remove from the monitor registration.
 
 .. _pg_autoctl_maintenance:
 
