@@ -415,7 +415,7 @@ keeper_config_write_file(KeeperConfig *config)
 
 	log_trace("keeper_config_write_file \"%s\"", filePath);
 
-	fileStream = fopen(filePath, "w");
+	fileStream = fopen_with_umask(filePath, "w", O_WRONLY | O_CREAT, 0644);
 	if (fileStream == NULL)
 	{
 		log_error("Failed to open file \"%s\": %s", filePath, strerror(errno));
