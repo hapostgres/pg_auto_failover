@@ -125,7 +125,9 @@ ensure_empty_dir(const char *dirname, int mode)
  * sure files are not accidentally created with umask 777 if the user has it
  * configured in a weird way.
  */
-FILE * fopen_with_umask(const char *filePath, const char* modes, int flags, mode_t umask) {
+FILE *
+fopen_with_umask(const char *filePath, const char* modes, int flags, mode_t umask)
+{
 	int fileDescriptor = open(filePath, O_WRONLY | O_CREAT, umask);
 	if (fileDescriptor == -1)
 	{

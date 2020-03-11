@@ -62,7 +62,8 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 {
 	AutoFailoverNode *otherNode = NULL;
 	AutoFailoverFormation *formation = GetFormation(activeNode->formationId);
-	if (formation == NULL) {
+	if (formation == NULL)
+	{
 		ereport(ERROR, (errmsg("Formation for %s could not be found", activeNode->formationId)));
 	}
 

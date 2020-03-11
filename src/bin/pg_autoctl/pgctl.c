@@ -181,8 +181,9 @@ config_find_pg_ctl(PostgresSetup *pgSetup)
 	{
 		char *program = pg_ctls[0];
 		char *version = pg_ctl_version(program);
-		if (version == NULL) {
-			log_fatal("Found %s, but failed to get version", program);
+		if (version == NULL)
+		{
+			log_fatal("Failed to get version info from %s --version", program);
 			return 0;
 		}
 
@@ -203,8 +204,9 @@ config_find_pg_ctl(PostgresSetup *pgSetup)
 		{
 			char *program = pg_ctls[i];
 			char *version = pg_ctl_version(program);
-			if (version == NULL) {
-				log_warn("Found %s, but failed to get version", program);
+			if (version == NULL)
+			{
+				log_warn("Failed to get version info from %s --version", program);
 				continue;
 			}
 

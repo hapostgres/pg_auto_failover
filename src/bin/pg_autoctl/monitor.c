@@ -661,8 +661,9 @@ printCurrentState(void *ctx, PGresult *result)
 	/* prepare a nice dynamic string of '-' as a header separator */
 	nameSeparatorHeader = (char *) malloc((maxNodeNameSize+1) * sizeof(char));
 
-	if (nameSeparatorHeader == NULL) {
-		log_error("could not allocate");
+	if (nameSeparatorHeader == NULL)
+	{
+		log_error("Failed to allocate memory, probably because it's all used");
 		context->parsedOK = false;
 		return;
 	}
