@@ -124,16 +124,27 @@ ensure_empty_dir(const char *dirname, int mode)
  * advantage of it is that it allows specifying a umask of the file. This makes
  * sure files are not accidentally created with umask 777 if the user has it
  * configured in a weird way.
+ *
+ * This function returns NULL when opening the file fails. So this should be
+ * handled. It will log an error in this case though, so that's not necessary
+ * at the callsite.
  */
 FILE *
 fopen_with_umask(const char *filePath, const char* modes, int flags, mode_t umask)
 {
 	int fileDescriptor = open(filePath, O_WRONLY | O_CREAT, umask);
-	if (fileDescriptor == -1)
+	FILE *fileStream = NULL;
+	if (fileDescriptor != -1)
 	{
-		return NULL;
+		fileStream = fdopen(fileDescriptor, modes);
+		if (fileStream == NULL) {
+			close(fileDescriptor);
+		}
 	}
-	return fdopen(fileDescriptor, modes);
+	if (fileStream == NULL) {
+		log_error("Failed to open file \"%s\": %s", filePath, strerror(errno));
+	}
+	return fileStream;
 }
 
 
@@ -149,7 +160,6 @@ write_file(char *data, long fileSize, const char *filePath)
 	FILE *fileStream = fopen_with_umask(filePath, "wb", O_WRONLY | O_CREAT, 0644);
 	if (fileStream == NULL)
 	{
-		log_error("Failed to open file \"%s\": %s", filePath, strerror(errno));
 		return false;
 	}
 
@@ -181,7 +191,6 @@ append_to_file(char *data, long fileSize, const char *filePath)
 	FILE *fileStream = fopen_with_umask(filePath, "ab", O_APPEND | O_CREAT, 0644);
 	if (fileStream == NULL)
 	{
-		log_error("Failed to open file \"%s\": %s", filePath, strerror(errno));
 		return false;
 	}
 
