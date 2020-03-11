@@ -31,6 +31,8 @@
  * src/port/snprintf.c
  */
 
+#ifndef USE_REPL_SNPRINTF
+
 #include "c.h"
 #include "snprintf.h"
 
@@ -1491,3 +1493,5 @@ trailing_pad(int padlen, PrintfTarget *target)
 	if (padlen < 0)
 		dopr_outchmulti(' ', -padlen, target);
 }
+
+#endif	/* USE_REPL_SNPRINTF */

@@ -13,6 +13,8 @@
 #ifndef PG_SNPRINTF_H
 #define PG_SNPRINTF_H
 
+#ifndef USE_REPL_SNPRINTF
+
 int	pg_vsnprintf(char *str, size_t count, const char *fmt, va_list args);
 int	pg_snprintf(char *str, size_t count, const char *fmt,...)
  	__attribute__((format(printf, 3, 4)));
@@ -37,5 +39,7 @@ extern char *pg_strerror(int errnum);
 extern char *pg_strerror_r(int errnum, char *buf, size_t buflen);
 #define strerror_r pg_strerror_r
 #define PG_STRERROR_R_BUFLEN 256	/* Recommended buffer size for strerror_r */
+
+#endif	/* USE_REPL_SNPRINTF */
 
 #endif	/* PG_SNPRINTF_H */

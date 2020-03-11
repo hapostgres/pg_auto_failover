@@ -16,6 +16,8 @@
 
 #include "snprintf.h"
 
+#ifndef USE_REPL_SNPRINTF
+
 /*
  * Within this file, "strerror" means the platform's function not pg_strerror,
  * and likewise for "strerror_r"
@@ -322,3 +324,5 @@ win32_socket_strerror(int errnum, char *buf, size_t buflen)
 }
 
 #endif							/* WIN32 */
+
+#endif	/* USE_REPL_SNPRINTF */
