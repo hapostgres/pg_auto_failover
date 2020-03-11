@@ -93,7 +93,7 @@ regexp_first_match(const char *string, const char *regex)
 		char *result = (char *) malloc(length * sizeof(char));
 		if (result == NULL)
 		{
-			log_error("Failed to allocate memory, probably because it's all full");
+			log_error("Failed to allocate memory, probably because it's all used");
 			return NULL;
 		}
 
