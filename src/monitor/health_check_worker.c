@@ -326,10 +326,9 @@ StartHealthCheckWorker(DatabaseListEntry *db)
 	worker.bgw_restart_time = BGW_NEVER_RESTART;
 	worker.bgw_main_arg = ObjectIdGetDatum(db->dboid);
 	worker.bgw_notify_pid = MyProcPid;
-	snprintf(worker.bgw_library_name, BGW_MAXLEN, "pgautofailover");
-	snprintf(worker.bgw_function_name, BGW_MAXLEN, "HealthCheckWorkerMain");
-	snprintf(worker.bgw_name, BGW_MAXLEN,
-			 "pg_auto_failover monitor worker");
+	strlcpy(worker.bgw_library_name, "pgautofailover", BGW_MAXLEN);
+	strlcpy(worker.bgw_function_name, "HealthCheckWorkerMain", BGW_MAXLEN);
+	strlcpy(worker.bgw_name, "pg_auto_failover monitor worker", BGW_MAXLEN);
 
 	if (!RegisterDynamicBackgroundWorker(&worker, &handle))
 	{
@@ -794,9 +793,19 @@ ManageHealthCheck(HealthCheck *healthCheck, struct timeval currentTime)
 			PGconn *connection = NULL;
 			ConnStatusType connStatus = CONNECTION_BAD;
 			char connInfoString[MAX_CONN_INFO_SIZE];
+			char nodeName[MAX_CONN_INFO_SIZE] = { 0 };
 
-			snprintf(connInfoString, MAX_CONN_INFO_SIZE, CONN_INFO_TEMPLATE,
-					 nodeHealth->nodeName, nodeHealth->nodePort, HealthCheckTimeout);
+			if (nodeHealth->nodeName != NULL)
+			{
+				strlcpy(nodeName, nodeHealth->nodeName, MAX_CONN_INFO_SIZE);
+			}
+
+			/*
+			 * Explanation of IGNORE-BANNED:
+			 * usage is safe here because string parameter can not be null.
+			 */
+			snprintf(connInfoString, MAX_CONN_INFO_SIZE, CONN_INFO_TEMPLATE, /* IGNORE-BANNED */
+					nodeName, nodeHealth->nodePort, HealthCheckTimeout);
 
 			connection = PQconnectStart(connInfoString);
 			PQsetnonblocking(connection, true);

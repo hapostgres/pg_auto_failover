@@ -436,8 +436,21 @@ bool
 monitor_config_get_postgres_uri(MonitorConfig *config, char *connectionString,
 		size_t size)
 {
-	char *connStringEnd = connectionString;
 	char host[BUFSIZE];
+	PQExpBuffer buffer = NULL;
+	bool success = false;
+
+	if (!IS_EMPTY_STRING_BUFFER(config->pgSetup.username))
+	{
+		log_warn("Failed to get postgres uri : Username is not provided");
+		return false;
+	}
+
+	if (!IS_EMPTY_STRING_BUFFER(config->pgSetup.dbname))
+	{
+		log_warn("Failed to get postgres uri : Database name is not provided");
+		return false;
+	}
 
 	if (!IS_EMPTY_STRING_BUFFER(config->nodename))
 	{
@@ -448,7 +461,7 @@ monitor_config_get_postgres_uri(MonitorConfig *config, char *connectionString,
 					   POSTGRES_DEFAULT_LISTEN_ADDRESSES) == 0)
 	{
 		/*
-		 * We ouput the monitor connection string using the LAN ip of the
+		 * We output the monitor connection string using the LAN ip of the
 		 * current machine (e.g. 192.168.1.1), which is the most probable IP
 		 * address that the other members of the pg_auto_failover cluster will
 		 * have to use to register and communicate with the monitor.
@@ -470,52 +483,62 @@ monitor_config_get_postgres_uri(MonitorConfig *config, char *connectionString,
 		strlcpy(host, config->pgSetup.listen_addresses, BUFSIZE);
 	}
 
+
+	buffer = createPQExpBuffer();
+
 	/*
 	 * Finalize the connection string, with some variants depending on the
 	 * usage of SSL certificates. The full variant is with sslrootcert and
 	 * sslcrl connection parameters when using sslmode=verify-ca or
 	 * sslmode=verify-full.
 	 */
-	connStringEnd += snprintf(connStringEnd,
-							  size - (connStringEnd - connectionString),
-							  "postgres://%s@%s:%d/%s",
-							  config->pgSetup.username,
-							  host,
-							  config->pgSetup.pgport,
-							  config->pgSetup.dbname);
+	appendPQExpBuffer(buffer,
+					  "postgres://%s@%s:%d/%s",
+					  config->pgSetup.username,
+					  host,
+					  config->pgSetup.pgport,
+					  config->pgSetup.dbname);
 
 	if (config->pgSetup.ssl.sslMode >= SSL_MODE_PREFER)
 	{
 		char *sslmode = pgsetup_sslmode_to_string(config->pgSetup.ssl.sslMode);
 
-		connStringEnd += snprintf(connStringEnd,
-								  size - (connStringEnd - connectionString),
-								  "?sslmode=%s",
-								  sslmode);
+		appendPQExpBuffer(buffer, "?sslmode=%s", sslmode);
 
 		if (config->pgSetup.ssl.sslMode >= SSL_MODE_VERIFY_CA)
 		{
 			if (IS_EMPTY_STRING_BUFFER(config->pgSetup.ssl.crlFile))
 			{
-				connStringEnd +=
-					snprintf(connStringEnd,
-							 size - (connStringEnd - connectionString),
-							 "&sslrootcert=%s",
-							 config->pgSetup.ssl.caFile);
+				appendPQExpBuffer(buffer,
+								  "&sslrootcert=%s",
+								  config->pgSetup.ssl.caFile);
 			}
 			else
 			{
-				connStringEnd +=
-					snprintf(connStringEnd,
-							 size - (connStringEnd - connectionString),
-							 "&sslrootcert=%s&sslcrl=%s",
-							 config->pgSetup.ssl.caFile,
-							 config->pgSetup.ssl.crlFile);
+				appendPQExpBuffer(buffer,
+							 	  "&sslrootcert=%s&sslcrl=%s",
+								  config->pgSetup.ssl.caFile,
+								  config->pgSetup.ssl.crlFile);
 			}
 		}
 	}
 
-	return true;
+	if (PQExpBufferBroken(buffer))
+	{
+		log_warn("Failed to create connection string: Memory allocation error");
+	}
+	else
+	{
+		success = strlcpy(connectionString, buffer->data, size) < size;
+		if (!success)
+		{
+			log_warn("Provided buffer is shorter than the connection string");
+		}
+	}
+
+	destroyPQExpBuffer(buffer);
+
+	return success;
 }
 
 

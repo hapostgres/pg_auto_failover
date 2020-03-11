@@ -95,7 +95,7 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 
     if (ipAddr != NULL)
     {
-        snprintf(localIpAddress, size, "%s", buffer);
+    	strlcpy(localIpAddress, buffer, size);
     }
     else
     {
@@ -121,6 +121,13 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 	struct ifaddrs *ifaddr, *ifa;
 	int prefix = 0;
 	bool found = false;
+
+	/* make sure buffer is large enough to contain netmask + '/' + <integer 0..32> */
+	if (size < (INET6_ADDRSTRLEN + 1 + 4))
+	{
+		log_warn("Failed to fetch CIDR: provided buffer is not large enough to store the data");
+		return false;
+	}
 
 	if (getifaddrs(&ifaddr) == -1)
 	{
@@ -260,7 +267,13 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 		return false;
 	}
 
-	snprintf(localCIDR, size, "%s/%d", network, prefix);
+	/*
+	 * Explanation of IGNORE-BANNED:
+	 * outbuffer size is checked before to make sure it has
+	 * enough capacity to contain the data.
+	 * string parameter is stack array thus never null.
+	 */
+	snprintf(localCIDR, size, "%s/%d", network, prefix); /* IGNORE-BANNED */
 
 	return true;
 }
@@ -607,7 +620,7 @@ findHostnameFromLocalIpAddress(char *localIpAddress, char *hostname, int size)
 			return false;
 		}
 
-		snprintf(hostname, size, "%s", hbuf);
+		strlcpy(hostname, hbuf, size);
 
 		/* stop at the first hostname found */
 		break;

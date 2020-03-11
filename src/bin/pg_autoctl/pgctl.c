@@ -770,12 +770,15 @@ pg_ctl_start(const char *pg_ctl,
 	char *args[12];
 	int argsIndex = 0;
 
-	char command[BUFSIZE];
-	int commandSize = 0;
 	char env_pg_regress_sock_dir[MAXPGPATH];
 
 	join_path_components(logfile, pgdata, "startup.log");
-	snprintf(pgport_option, sizeof(pgport_option), "\"-p %d\"", pgport);
+	/*
+	 * Explanation of IGNORE-BANNED:
+	 * usage is safe here because we are using a buffer large enough
+	 * to contain the formatted string.
+	 */
+	snprintf(pgport_option, sizeof(pgport_option), "\"-p %d\"", pgport); /* IGNORE-BANNED */
 
 	args[argsIndex++] = (char *) pg_ctl;
 	args[argsIndex++] = "--pgdata";
@@ -785,7 +788,13 @@ pg_ctl_start(const char *pg_ctl,
 
 	if (!IS_EMPTY_STRING_BUFFER(listen_addresses))
 	{
-		snprintf(listen_addresses_option, sizeof(listen_addresses_option),
+		/*
+		 * Explanation of IGNORE-BANNED:
+		 * usage is safe here because we are using a buffer large enough
+		 * to contain the formatted string and string parameter can not
+		 * be null.
+		 */
+		snprintf(listen_addresses_option, sizeof(listen_addresses_option), /* IGNORE-BANNED */
 				 "\"-h %s\"", listen_addresses);
 
 		args[argsIndex++] = "--options";
@@ -794,7 +803,13 @@ pg_ctl_start(const char *pg_ctl,
 
 	if(get_env_variable("PG_REGRESS_SOCK_DIR", env_pg_regress_sock_dir, MAXPGPATH) > 0)
 	{
-		snprintf(option_unix_socket_directory,
+		/*
+		 * Explanation of IGNORE-BANNED:
+		 * usage is safe here because we are using a buffer large enough
+		 * to contain the formatted string and string parameter can not
+		 * be null.
+		 */
+		snprintf(option_unix_socket_directory, /* IGNORE-BANNED */
 				 sizeof(option_unix_socket_directory),
 				 "\"-k \"%s\"\"",
 				 env_pg_regress_sock_dir);
@@ -812,17 +827,7 @@ pg_ctl_start(const char *pg_ctl,
 	program = initialize_program(args, true);
 
 	/* log the exact command line we're using */
-	commandSize = snprintf_program_command_line(&program, command, BUFSIZE);
-
-	if (commandSize >= BUFSIZE)
-	{
-		/* we only display the first BUFSIZE bytes of the real command */
-		log_info("%s...", command);
-	}
-	else
-	{
-		log_info("%s", command);
-	}
+	log_program_command_line(&program);
 
 	(void) execute_program(&program);
 
@@ -1300,6 +1305,7 @@ prepare_primary_conninfo(char *primaryConnInfo,
 			log_error("BUG: the escaped primary_conninfo requires %d bytes and "
 					  "pg_auto_failover only support up to %d bytes",
 					  size, primaryConnInfoSize);
+			destroyPQExpBuffer(buffer);
 			return false;
 		}
 	}

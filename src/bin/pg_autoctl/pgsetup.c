@@ -20,6 +20,7 @@
 
 #include "defaults.h"
 #include "env_utils.h"
+#include "parsing.h"
 #include "pgctl.h"
 #include "log.h"
 #include "signals.h"
@@ -589,7 +590,7 @@ bool
 pg_setup_as_json(PostgresSetup *pgSetup, JSON_Value *js)
 {
 	JSON_Object *jsobj = json_value_get_object(js);
-	char system_identifier[BUFSIZE];
+	IntString system_identifier;
 
 	json_object_set_string(jsobj, "pgdata", pgSetup->pgdata);
 	json_object_set_string(jsobj, "pg_ctl", pgSetup->pg_ctl);
@@ -608,11 +609,10 @@ pg_setup_as_json(PostgresSetup *pgSetup, JSON_Value *js)
 							  "control.catalog_version",
 							  (double) pgSetup->control.catalog_version_no);
 
-	snprintf(system_identifier, BUFSIZE, "%" PRIu64,
-			 pgSetup->control.system_identifier);
+	system_identifier = intToString(pgSetup->control.system_identifier);
 	json_object_dotset_string(jsobj,
 							  "control.system_identifier",
-							  system_identifier);
+							  system_identifier.strValue);
 
 	return true;
 }

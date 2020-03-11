@@ -368,7 +368,7 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 {
 	PGconn *connection = NULL;
 	PGresult *result = NULL;
-	char debugParameters[BUFSIZE] = { 0 };
+	PQExpBuffer debugParameters = NULL;
 
 	connection = pgsql_open_connection(pgsql);
 	if (connection == NULL)
@@ -376,31 +376,27 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 		return false;
 	}
 
+	debugParameters = createPQExpBuffer();
+
 	log_debug("%s;", sql);
 
 	if (paramCount > 0)
 	{
 		int paramIndex = 0;
-		int remainingBytes = BUFSIZE;
-		char *writePointer = (char *) debugParameters;
 
 		for (paramIndex=0; paramIndex < paramCount; paramIndex++)
 		{
-			int bytesWritten = 0;
 			const char *value = paramValues[paramIndex];
 
 			if (paramIndex > 0)
 			{
-				bytesWritten = snprintf(writePointer, remainingBytes, ", ");
-				remainingBytes -= bytesWritten;
-				writePointer += bytesWritten;
+				appendPQExpBufferStr(debugParameters, ", ");
 			}
 
-			bytesWritten = snprintf(writePointer, remainingBytes, "'%s'", value);
-			remainingBytes -= bytesWritten;
-			writePointer += bytesWritten;
+			appendPQExpBuffer(debugParameters, "'%s'", value);
 		}
-		log_debug("%s", debugParameters);
+
+		log_debug("%s", debugParameters->data);
 	}
 
 	result = PQexecParams(connection, sql,
@@ -427,11 +423,13 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 		}
 
 		log_error("SQL query: %s", sql);
-		log_error("SQL params: %s", debugParameters);
+		log_error("SQL params: %s", debugParameters->data);
 
 		PQclear(result);
 		clear_results(connection);
 		pgsql_finish(pgsql);
+		destroyPQExpBuffer(debugParameters);
+
 		return false;
 	}
 
@@ -442,6 +440,7 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 
 	PQclear(result);
 	clear_results(connection);
+	destroyPQExpBuffer(debugParameters);
 
 	return true;
 }
@@ -734,11 +733,15 @@ pgsql_checkpoint(PGSQL *pgsql)
 static bool
 pgsql_alter_system_set(PGSQL *pgsql, GUC setting)
 {
-	char command[1024];
+	PQExpBuffer command = createPQExpBuffer();
+	bool success = false;
 
-	snprintf(command, 1024, "ALTER SYSTEM SET %s TO %s", setting.name, setting.value);
+	appendPQExpBuffer(command, "ALTER SYSTEM SET %s TO %s", setting.name, setting.value);
 
-	if (!pgsql_execute(pgsql, command))
+	success = pgsql_execute(pgsql, command->data);
+	destroyPQExpBuffer(command);
+
+	if (!success)
 	{
 		return false;
 	}
@@ -873,7 +876,7 @@ pgsql_get_current_setting(PGSQL *pgsql, char *settingName, char **currentValue)
 bool
 pgsql_create_database(PGSQL *pgsql, const char *dbname, const char *owner)
 {
-	char command[BUFSIZE];
+	PQExpBuffer command = NULL;
 	char *escapedDBName, *escapedOwner;
 	PGconn *connection = NULL;
 	PGresult *result = NULL;
@@ -908,17 +911,20 @@ pgsql_create_database(PGSQL *pgsql, const char *dbname, const char *owner)
 	}
 
 	/* now build the SQL command */
-	snprintf(command, BUFSIZE,
-			 "CREATE DATABASE %s WITH OWNER %s",
-			 escapedDBName,
-			 escapedOwner);
+	command = createPQExpBuffer();
+	appendPQExpBuffer(command,
+			"CREATE DATABASE %s WITH OWNER %s",
+			escapedDBName,
+			escapedOwner);
 
-	log_debug("Running command on Postgres: %s;", command);
+	log_debug("Running command on Postgres: %s;", command->data);
 
 	PQfreemem(escapedDBName);
 	PQfreemem(escapedOwner);
 
-	result = PQexec(connection, command);
+	result = PQexec(connection, command->data);
+
+	destroyPQExpBuffer(command);
 
 	if (!is_response_ok(result))
 	{
@@ -981,8 +987,16 @@ pgsql_create_extension(PGSQL *pgsql, const char *name)
 	}
 
 	/* now build the SQL command */
-	snprintf(command, BUFSIZE, "CREATE EXTENSION %s", escapedIdentifier);
+	/*
+	 * Explanation of IGNORE-BANNED:
+	 * extension name is escaped properly.
+	 * Allowed values for extension name is pgautofailover and citus.
+	 * Command is guaranteed to fit into buffer.
+	 */
+	snprintf(command, BUFSIZE, "CREATE EXTENSION %s", escapedIdentifier); /* IGNORE-BANNED */
+
 	PQfreemem(escapedIdentifier);
+
 	log_debug("Running command on Postgres: %s;", command);
 
 	result = PQexec(connection, command);
@@ -1553,7 +1567,7 @@ pgsql_alter_extension_update_to(PGSQL *pgsql,
 {
 	int n = 0;
 	char command[BUFSIZE];
-	char *escapedIdentifier, *escapedVersion;
+	char *escapedExtName, *escapedVersion;
 	PGconn *connection = NULL;
 	PGresult *result = NULL;
 
@@ -1566,8 +1580,8 @@ pgsql_alter_extension_update_to(PGSQL *pgsql,
 	}
 
 	/* escape the extname */
-	escapedIdentifier = PQescapeIdentifier(connection, extname, strlen(extname));
-	if (escapedIdentifier == NULL)
+	escapedExtName = PQescapeIdentifier(connection, extname, strlen(extname));
+	if (escapedExtName == NULL)
 	{
 		log_error("Failed to update extension \"%s\": %s", extname,
 				  PQerrorMessage(connection));
@@ -1577,7 +1591,7 @@ pgsql_alter_extension_update_to(PGSQL *pgsql,
 
 	/* escape the version */
 	escapedVersion = PQescapeIdentifier(connection, version, strlen(version));
-	if (escapedIdentifier == NULL)
+	if (escapedVersion == NULL)
 	{
 		log_error("Failed to update extension \"%s\" to version \"%s\": %s",
 				  extname, version,
@@ -1587,8 +1601,17 @@ pgsql_alter_extension_update_to(PGSQL *pgsql,
 	}
 
 	/* now build the SQL command */
-	n = snprintf(command, BUFSIZE, "ALTER EXTENSION %s UPDATE TO %s",
-				 escapedIdentifier, escapedVersion);
+	/*
+	 * Explanation of IGNORE-BANNED:
+	 * extension name and version are escaped properly.
+	 * If the command is larger than buffer, we log the error
+	 * and exit from the function.
+	 */
+	n = snprintf(command, BUFSIZE, "ALTER EXTENSION %s UPDATE TO %s", /* IGNORE-BANNED */
+				 escapedExtName, escapedVersion);
+
+	PQfreemem(escapedExtName);
+	PQfreemem(escapedVersion);
 
 	if (n >= BUFSIZE)
 	{
@@ -1596,10 +1619,8 @@ pgsql_alter_extension_update_to(PGSQL *pgsql,
 				  "a SQL string of %d bytes is needed to "
 				  "update the \"%s\" extension.",
 				  BUFSIZE, n, extname);
+		return false;
 	}
-
-	PQfreemem(escapedIdentifier);
-	PQfreemem(escapedVersion);
 
 	log_debug("Running command on Postgres: %s;", command);
 

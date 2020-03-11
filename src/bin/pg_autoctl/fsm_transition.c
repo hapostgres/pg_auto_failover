@@ -642,7 +642,13 @@ fsm_init_standby(Keeper *keeper)
 	replicationSource.sslOptions = config->pgSetup.ssl;
 
 	/* prepare our application_name */
-	snprintf(applicationName, BUFSIZE,
+	/*
+	 * Explanation of IGNORE-BANNED:
+	 * usage is safe because we
+	 * - buffer is guaranteed to be big enough
+	 * - string parameter is fixed string (not null)
+	 */
+	snprintf(applicationName, BUFSIZE, /* IGNORE-BANNED */
 			 "%s%d",
 			 REPLICATION_APPLICATION_NAME_PREFIX,
 			 keeper->state.current_node_id);
@@ -702,7 +708,13 @@ fsm_rewind_or_init(Keeper *keeper)
 	replicationSource.sslOptions = config->pgSetup.ssl;
 
 	/* prepare our application_name */
-	snprintf(applicationName, BUFSIZE,
+	/*
+	 * Explanation of IGNORE-BANNED:
+	 * usage is safe because we
+	 * - buffer is guaranteed to be big enough
+	 * - string parameter is fixed string (not null)
+	 */
+	snprintf(applicationName, BUFSIZE, /* IGNORE-BANNED */
 			 "%s%d",
 			 REPLICATION_APPLICATION_NAME_PREFIX,
 			 keeper->state.current_node_id);

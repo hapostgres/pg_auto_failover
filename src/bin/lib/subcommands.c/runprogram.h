@@ -49,7 +49,7 @@ Program run_program(const char *program, ...);
 Program initialize_program(char **args, bool setsid);
 void execute_program(Program *prog);
 void free_program(Program *prog);
-int snprintf_program_command_line(Program *prog, char *buffer, int size);
+void log_program_command_line(Program *prog);
 static void read_from_pipes(Program *prog,
 							pid_t childPid, int *outpipe, int *errpipe);
 static size_t read_into_buf(int filedes, PQExpBuffer buffer);
@@ -424,33 +424,25 @@ read_into_buf(int filedes, PQExpBuffer buffer)
 
 
 /*
- * Writes the full command line of the given program into the given
- * pre-allocated buffer of given size, and returns how many bytes would have
- * been written in the buffer if it was large enough, like snprintf would do.
+ * Logs the full command line of the given program.
  */
-int
-snprintf_program_command_line(Program *prog, char *buffer, int size)
+void
+log_program_command_line(Program *prog)
 {
-	char *currentPtr = buffer;
-	int index, remainingBytes = BUFSIZE;
+	int index = -1;
+	PQExpBuffer buffer = NULL;
 
-	if (prog->args[0] == NULL)
-	{
-		return 0;
-	}
+	buffer = createPQExpBuffer();
 
 	for (index=0; prog->args[index] != NULL; index++)
 	{
-		int n = snprintf(currentPtr, remainingBytes, " %s", prog->args[index]);
-
-		if (n >= remainingBytes)
-		{
-			return BUFSIZE - remainingBytes + n;
-		}
-		currentPtr += n;
-		remainingBytes -= n;
+		appendPQExpBuffer(buffer,"%s ", prog->args[index]);
 	}
-	return BUFSIZE - remainingBytes;
+
+	log_info("%s", buffer->data);
+
+	destroyPQExpBuffer(buffer);
+
 }
 
 #endif	/* RUN_PROGRAM_IMPLEMENTATION */

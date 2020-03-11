@@ -81,10 +81,11 @@ systemd_config_init(SystemdServiceConfig *config, const char *pgdata)
 	struct passwd *pw;
 	char *user = pg_setup_get_username(&(config->pgSetup));
 	IniOption systemdOptions[] = SET_INI_OPTIONS_ARRAY(config);
-
+	int copied = 0;
 	/* time to setup config->pathnames.systemd */
-	snprintf(config->pathnames.systemd, MAXPGPATH,
-			 "/etc/systemd/system/%s", KEEPER_SYSTEMD_FILENAME);
+	join_path_components(config->pathnames.systemd,
+						 "/etc/systemd/system/",
+						 KEEPER_SYSTEMD_FILENAME);
 
 	/*
 	 * In its operations pg_autoctl might remove PGDATA and replace it with a
@@ -101,12 +102,15 @@ systemd_config_init(SystemdServiceConfig *config, const char *pgdata)
 	}
 
 	/* adjust defaults to known values from the config */
-	snprintf(config->EnvironmentPGDATA, BUFSIZE,
-			 "'PGDATA=%s'", config->pgSetup.pgdata);
+	/* set config->EnvironmentPGDATA to " 'PGDATA=<config->pgSetup.pgdata>' " */
+	copied = strlcpy(config->EnvironmentPGDATA, "'PGDATA=", BUFSIZE);
+	copied += strlcpy(config->EnvironmentPGDATA + copied, config->pgSetup.pgdata, BUFSIZE - copied);
+	strlcpy(config->EnvironmentPGDATA, "'", BUFSIZE - copied);
 
 	strlcpy(config->User, config->pgSetup.username, NAMEDATALEN);
 
-	snprintf(config->ExecStart, BUFSIZE, "%s run", pg_autoctl_program);
+	copied = strlcpy(config->ExecStart, pg_autoctl_program, BUFSIZE);
+	strlcpy(config->ExecStart + copied, " run", BUFSIZE - copied);
 
 	if (!ini_validate_options(systemdOptions))
 	{

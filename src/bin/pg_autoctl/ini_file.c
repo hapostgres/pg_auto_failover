@@ -16,6 +16,7 @@
 #include "ini_file.h"
 #include "log.h"
 #include "pgctl.h"
+#include "parsing.h"
 #include "parson.h"
 #include "pgsetup.h"
 
@@ -313,7 +314,8 @@ ini_option_to_string(IniOption *option, char *dest, size_t size)
 
 		case INI_INT_T:
 		{
-			snprintf(dest, size, "%d", *(option->intValue));
+			IntString str = intToString(*(option->intValue));
+			strlcpy(dest, str.strValue, size);
 			return true;
 		}
 

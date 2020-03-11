@@ -147,9 +147,9 @@ StartMonitorNode(void)
 	worker.bgw_restart_time = 1;
 	worker.bgw_main_arg = Int32GetDatum(0);
 	worker.bgw_notify_pid = 0;
-	snprintf(worker.bgw_library_name, BGW_MAXLEN, "pgautofailover");
-	snprintf(worker.bgw_name, BGW_MAXLEN, "pg_auto_failover monitor");
-	snprintf(worker.bgw_function_name, BGW_MAXLEN, "HealthCheckWorkerLauncherMain");
+	strlcpy(worker.bgw_library_name, "pgautofailover", BGW_MAXLEN);
+	strlcpy(worker.bgw_name, "pg_auto_failover monitor", BGW_MAXLEN);
+	strlcpy(worker.bgw_function_name, "HealthCheckWorkerLauncherMain", BGW_MAXLEN);
 
 	RegisterBackgroundWorker(&worker);
 }

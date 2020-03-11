@@ -866,7 +866,7 @@ keeper_config_set_backup_directory(KeeperConfig *config)
 		char *pgdata = config->pgSetup.pgdata;
 		char subdirs[MAXPGPATH];
 
-		snprintf(subdirs, MAXPGPATH, "backup/%s", config->nodename);
+		join_path_components(subdirs, "backup", config->nodename);
 		path_in_same_directory(pgdata, subdirs, config->backupDirectory);
 	}
 
