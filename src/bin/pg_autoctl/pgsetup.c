@@ -1111,13 +1111,14 @@ int
 pgsetup_get_pgport()
 {
 	char *pgport_env = getenv("PGPORT");
-	int pgport = 0;
+	long pgport = 0;
 
 	if (pgport_env)
 	{
+		errno = 0;
 		pgport = strtol(pgport_env, NULL, 10);
 
-		if (pgport > 0 && errno != EINVAL)
+		if (pgport > 0 && pgport < INT_MAX && errno == 0)
 		{
 			return pgport;
 		}
