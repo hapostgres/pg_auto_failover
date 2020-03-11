@@ -98,7 +98,6 @@ cli_config_check(int argc, char **argv)
 	{
 		case PG_AUTOCTL_ROLE_MONITOR:
 		{
-			Monitor monitor;
 			MonitorConfig mconfig = { 0 };
 
 			if (!monitor_config_init_from_pgsetup(&mconfig,
@@ -478,7 +477,6 @@ cli_keeper_config_get(int argc, char **argv)
 static void
 cli_monitor_config_get(int argc, char **argv)
 {
-	Monitor monitor = { 0 };
 	MonitorConfig mconfig = { 0 };
 	KeeperConfig kconfig = keeperOptions;
 	bool missing_pgdata_is_ok = true;
@@ -657,7 +655,6 @@ cli_monitor_config_set(int argc, char **argv)
 	{
 		/* we print out the value that we parsed, as a double-check */
 		char value[BUFSIZE];
-		Monitor monitor = { 0 };
 		MonitorConfig mconfig = { 0 };
 		bool missing_pgdata_is_ok = true;
 		bool pg_is_not_running_is_ok = true;

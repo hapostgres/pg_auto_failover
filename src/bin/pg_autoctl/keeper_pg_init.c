@@ -346,7 +346,6 @@ static bool
 reach_initial_state(Keeper *keeper)
 {
 	KeeperConfig config = keeper->config;
-	bool pgInstanceIsOurs = false;
 
 	log_trace("reach_initial_state: %s to %s",
 			  NodeStateToString(keeper->state.current_role),

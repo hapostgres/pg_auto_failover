@@ -190,11 +190,9 @@ cli_monitor_run(int argc, char **argv)
 	KeeperConfig kconfig = keeperOptions;
 	MonitorConfig mconfig = { 0 };
 	Monitor monitor = { 0 };
-	MonitorExtensionVersion version = { 0 };
 	bool missingPgdataIsOk = false;
 	bool pgIsNotRunningIsOk = true;
 	char connInfo[MAXCONNINFO];
-	char *channels[] = { "log", "state", NULL };
 
 	if (!monitor_config_init_from_pgsetup(&mconfig,
 										  &kconfig.pgSetup,
