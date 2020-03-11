@@ -775,7 +775,7 @@ static int
 cli_drop_node_getopts(int argc, char **argv)
 {
 	KeeperConfig options = { 0 };
-	int c, option_index, errors = 0;
+	int c, option_index = 0;
 	int verboseCount = 0;
 
 	static struct option long_options[] = {
@@ -887,12 +887,6 @@ cli_drop_node_getopts(int argc, char **argv)
 	{
 		log_error("Please use either --nodename and --pgport or ---destroy");
 		log_info("Destroying a node is not supported from a distance");
-		exit(EXIT_CODE_BAD_ARGS);
-	}
-
-	if (errors > 0)
-	{
-		commandline_help(stderr);
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
