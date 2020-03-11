@@ -998,7 +998,6 @@ cli_drop_monitor(int argc, char **argv)
 
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
-	bool monitorDisabledIsOk = false;
 
 	/*
 	 * The configuration file is the last bit we remove, so we don't have to

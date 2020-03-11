@@ -3025,7 +3025,6 @@ bool
 ensure_monitor_pg_running(Monitor *monitor, struct MonitorConfig *mconfig)
 {
 	MonitorExtensionVersion version = { 0 };
-	char postgresUri[MAXCONNINFO];
 
 	if (!pg_is_running(mconfig->pgSetup.pg_ctl, mconfig->pgSetup.pgdata))
 	{

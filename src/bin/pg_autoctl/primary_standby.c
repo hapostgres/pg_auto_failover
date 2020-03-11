@@ -632,7 +632,6 @@ primary_rewind_to_standby(LocalPostgresServer *postgres,
 						  ReplicationSource *replicationSource)
 {
 	char configFilePath[MAXPGPATH];
-	PGSQL *pgsql = &(postgres->sqlClient);
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	NodeAddress *primaryNode = &(replicationSource->primaryNode);
 
