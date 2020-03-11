@@ -87,8 +87,9 @@ pg_ctl_version(const char *pg_ctl_path)
 
 	if (prog.returnCode != 0)
 	{
-		log_error("Failed to run \"pg_ctl --version\" using program \"%s\": %s",
-				  pg_ctl_path, strerror(prog.error));
+		errno = prog.error;
+		log_error("Failed to run \"pg_ctl --version\" using program \"%s\": %m",
+				  pg_ctl_path);
 		free_program(&prog);
 		return NULL;
 	}
