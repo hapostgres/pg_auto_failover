@@ -307,12 +307,23 @@ parse_state_notification_message(StateNotification *notification)
 	/* read the groupId and nodeId */
 	col = strchr(ptr, FIELD_SEP);
 	*col = '\0';
-	notification->groupId = atoi(ptr);
+	notification->groupId = strtol(ptr, NULL, 10);
+	if (errno != 0)
+	{
+		log_warn("Failed to parse group id \"%s\"", ptr);
+		return false;
+	}
 	ptr = ++col;
 
 	col = strchr(ptr, FIELD_SEP);
 	*col = '\0';
-	notification->nodeId = atoi(ptr);
+	notification->nodeId = strtol(ptr, NULL, 10);
+	if (errno != 0)
+	{
+		log_warn("Failed to parse node id \"%s\"", ptr);
+		return false;
+	}
+
 	ptr = ++col;
 
 	/* read the nodeName, then move past it */
@@ -321,7 +332,12 @@ parse_state_notification_message(StateNotification *notification)
 										   NAMEDATALEN);
 
 	/* read the nodePort */
-	notification->nodePort = atoi(ptr);
+	notification->nodePort = strtol(ptr, NULL, 10);
+	if (errno != 0)
+	{
+		log_warn("Failed to parse nodePort \"%s\"", ptr);
+		return false;
+	}
 
 	return true;
 }
@@ -339,7 +355,7 @@ read_length_delimited_string_at(const char *ptr, char *buffer, int size)
 
 	col = strchr(ptr, STRLEN_SEP);
 	*col = '\0';
-	len = atoi(ptr);
+	len = strtol(ptr, NULL, 10);
 
 	if (len < size)
 	{

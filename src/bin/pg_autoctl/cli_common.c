@@ -826,6 +826,7 @@ set_first_pgctl(PostgresSetup *pgSetup)
 		if (version == NULL)
 		{
 			/* errors have been logged in pg_ctl_version */
+			search_pathlist_destroy_result(pg_ctls);
 			exit(EXIT_CODE_PGCTL);
 		}
 

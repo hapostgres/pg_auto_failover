@@ -1419,10 +1419,24 @@ pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *nodename)
 	Program program;
 	char subject[BUFSIZE] = { 0 };
 	int size = 0;
+	const int MAXPATHSIZE = 10000;
+	char envPath[10000];
 
 	char openssl[MAXPGPATH];
 	char **opensslSearchList = NULL;
-	int n = search_pathlist(getenv("PATH"), "openssl", &opensslSearchList);
+	int n = 0;
+
+
+	if (nodename)
+	{
+		log_error("Failed to create certificate: Node name can not be empty");
+		return false;
+	}
+	
+	if (get_env_variable("PATH", envPath, MAXPATHSIZE) > 0)
+	{
+		n = search_pathlist(envPath, "openssl", &opensslSearchList);
+	}
 
 	if (n < 1)
 	{
@@ -1436,29 +1450,15 @@ pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *nodename)
 		search_pathlist_destroy_result(opensslSearchList);
 	}
 
-	size = snprintf(pgSetup->ssl.serverKey, MAXPGPATH,
-					"%s/server.key", pgSetup->pgdata);
+	join_path_components(pgSetup->ssl.serverKey, pgSetup->pgdata, "server.key");
+	join_path_components(pgSetup->ssl.serverCert, pgSetup->pgdata, "server.crt");
 
-	if (size == -1 || size > MAXPGPATH)
-	{
-		log_error("BUG: the ssl server key file path requires %d bytes and "
-				  "pg_auto_failover only support up to %d bytes",
-				  size, MAXPGPATH);
-		return false;
-	}
-
-	size = snprintf(pgSetup->ssl.serverCert, MAXPGPATH,
-					"%s/server.crt", pgSetup->pgdata);
-
-	if (size == -1 || size > MAXPGPATH)
-	{
-		log_error("BUG: the ssl server key file path requires %d bytes and "
-				  "pg_auto_failover only support up to %d bytes",
-				  size, MAXPGPATH);
-		return false;
-	}
-
-	size = snprintf(subject, BUFSIZE, "/CN=%s", nodename);
+	/*
+	 * Explanation of IGNORE-BANNED:
+	 * - nodename is checked to see if it is NULL
+	 * - out buffer is guaranteed to be large enough
+	 */
+	size = snprintf(subject, BUFSIZE, "/CN=%s", nodename); /* IGNORE-BANNED */
 
 	if (size == -1 || size > BUFSIZE)
 	{
