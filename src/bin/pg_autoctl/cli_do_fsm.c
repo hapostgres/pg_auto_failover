@@ -100,7 +100,6 @@ static void
 cli_do_fsm_init(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
-	KeeperStateData keeperState = { 0 };
 	KeeperConfig config = keeperOptions;
 
 	char keeperStateJSON[BUFSIZE];

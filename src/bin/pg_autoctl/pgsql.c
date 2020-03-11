@@ -403,8 +403,6 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 						  paramCount, paramTypes, paramValues, NULL, NULL, 0);
 	if (!is_response_ok(result))
 	{
-		char *sqlstate = PQresultErrorField(result, PG_DIAG_SQLSTATE);
-
 		char *message = PQerrorMessage(connection);
 		char *errorLines[BUFSIZE];
 		int lineCount = splitLines(message, errorLines, BUFSIZE);
