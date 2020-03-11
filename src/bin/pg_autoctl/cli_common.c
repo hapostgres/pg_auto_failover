@@ -494,12 +494,6 @@ cli_create_node_getopts(int argc, char **argv,
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (errors > 0)
-	{
-		commandline_help(stderr);
-		exit(EXIT_CODE_BAD_ARGS);
-	}
-
 	/* publish our option parsing now */
 	memcpy(options, &LocalOptionConfig, sizeof(KeeperConfig));
 
