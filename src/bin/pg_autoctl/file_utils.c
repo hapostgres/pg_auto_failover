@@ -19,6 +19,7 @@
 
 #include "cli_root.h"
 #include "defaults.h"
+#include "env_utils.h"
 #include "file_utils.h"
 #include "log.h"
 
