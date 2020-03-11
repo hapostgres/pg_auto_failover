@@ -379,8 +379,6 @@ NodeActive(char *formationId, char *nodeName, int32 nodePort,
 
 	LockNodeGroup(formationId, currentNodeState->groupId, ExclusiveLock);
 
-	pgAutoFailoverNode = GetAutoFailoverNode(nodeName, nodePort);
-
 	ProceedGroupState(pgAutoFailoverNode);
 
 	assignedNodeState =
