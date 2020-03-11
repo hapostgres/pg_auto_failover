@@ -415,8 +415,7 @@ get_pgpid(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 	{
 		if (!pg_is_not_running_is_ok)
 		{
-			log_error("Failed to open file \"%s\": %s",
-					  pidfile, strerror(errno));
+			log_error("Failed to open file \"%s\": %m", pidfile);
 			log_info("Is PostgreSQL at \"%s\" up and running?", pgSetup->pgdata);
 		}
 		return false;
@@ -487,8 +486,7 @@ read_pg_pidfile(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 	{
 		if (!pg_is_not_running_is_ok)
 		{
-			log_error("Failed to open file \"%s\": %s",
-					  pidfile, strerror(errno));
+			log_error("Failed to open file \"%s\": %m", pidfile);
 			log_info("Is PostgreSQL at \"%s\" up and running?", pgSetup->pgdata);
 		}
 		return false;
@@ -954,8 +952,8 @@ pg_setup_set_absolute_pgdata(PostgresSetup *pgSetup)
 	if (!realpath(pgSetup->pgdata, absolutePgdata))
 	{
 		/* unexpected error, but not fatal, just don't overwrite the config. */
-		log_warn("Failed to get the realpath of given pgdata \"%s\": %s",
-				 pgSetup->pgdata, strerror(errno));
+		log_warn("Failed to get the realpath of given pgdata \"%s\": %m",
+				 pgSetup->pgdata);
 		return false;
 	}
 

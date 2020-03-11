@@ -128,8 +128,8 @@ keeper_state_write(KeeperStateData *keeperState, const char *filename)
 	fd = open(tempFileName, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
 	if (fd < 0)
 	{
-		log_fatal("Failed to create keeper state file \"%s\": %s",
-				  tempFileName, strerror(errno));
+		log_fatal("Failed to create keeper state file \"%s\": %m",
+				  tempFileName);
 		return false;
 	}
 
@@ -142,14 +142,13 @@ keeper_state_write(KeeperStateData *keeperState, const char *filename)
 		{
 			errno = ENOSPC;
 		}
-		log_fatal("Failed to write keeper state file \"%s\": %s",
-				  tempFileName, strerror(errno));
+		log_fatal("Failed to write keeper state file \"%s\": %m", tempFileName);
 		return false;
 	}
 
 	if (fsync(fd) != 0)
 	{
-		log_fatal("fsync error: %s", strerror(errno));
+		log_fatal("fsync error: %m");
 		return false;
 	}
 
@@ -160,8 +159,8 @@ keeper_state_write(KeeperStateData *keeperState, const char *filename)
 	/* now remove the old state file, and replace it with the new one */
 	if (rename(tempFileName, filename) != 0)
 	{
-		log_fatal("Failed to rename \"%s\" to \"%s\": %s",
-				  tempFileName, filename, strerror(errno));
+		log_fatal("Failed to rename \"%s\" to \"%s\": %m",
+				  tempFileName, filename);
 		return false;
 	}
 
@@ -508,8 +507,8 @@ epoch_to_string(uint64_t seconds)
 
 		if (str == NULL)
 		{
-			log_error("Failed to convert epoch %" PRIu64 " to string: %s",
-					  seconds, strerror(errno));
+			log_error("Failed to convert epoch %" PRIu64 " to string: %m",
+					  seconds);
 			return NULL;
 		}
 		str[strlen(str) - 1] = '\0';

@@ -172,7 +172,7 @@ parse_controldata_field_uint32(const char *controlDataString,
 
 	if (*dest == 0 && errno == EINVAL)
 	{
-		log_error("Failed to parse number \"%s\": %s", match, strerror(errno));
+		log_error("Failed to parse number \"%s\": %m", match);
 		free(match);
 		return false;
 	}
@@ -207,7 +207,7 @@ parse_controldata_field_uint64(const char *controlDataString,
 
 	if (*dest == 0 && errno == EINVAL)
 	{
-		log_error("Failed to parse number \"%s\": %s", match, strerror(errno));
+		log_error("Failed to parse number \"%s\": %m", match);
 		free(match);
 		return false;
 	}

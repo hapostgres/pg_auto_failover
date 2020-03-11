@@ -56,7 +56,7 @@ fetchLocalIPAddress(char *localIpAddress, int size,
     //Socket could not be created
     if (sock < 0)
     {
-        log_warn("Failed to create a socket: %s", strerror(errno));
+        log_warn("Failed to create a socket: %m");
         return false;
     }
 
@@ -78,7 +78,7 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 		}
 		else
 		{
-			log_warn("Failed to connect: %s", strerror(errno));
+			log_warn("Failed to connect: %m");
 			return false;
 		}
     }
@@ -86,7 +86,7 @@ fetchLocalIPAddress(char *localIpAddress, int size,
     err = getsockname(sock, (struct sockaddr*) &name, &namelen);
     if (err < 0)
     {
-        log_warn("Failed to get IP address from socket: %s", strerror(errno));
+        log_warn("Failed to get IP address from socket: %m");
         return false;
     }
 
@@ -98,7 +98,7 @@ fetchLocalIPAddress(char *localIpAddress, int size,
     }
     else
     {
-		log_warn("Failed to determine local ip address: %s", strerror(errno));
+		log_warn("Failed to determine local ip address: %m");
     }
     close(sock);
 
@@ -123,8 +123,7 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 
 	if (getifaddrs(&ifaddr) == -1)
 	{
-		log_warn("Failed to get the list of local network inferfaces: %s",
-				  strerror(errno));
+		log_warn("Failed to get the list of local network inferfaces: %m");
 		return false;
 	}
 
@@ -161,8 +160,7 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 							  netmask, INET_ADDRSTRLEN) == NULL)
 				{
 					/* just skip that entry then */
-					log_trace("Failed to determine local network CIDR: %s",
-							  strerror(errno));
+					log_trace("Failed to determine local network CIDR: %m");
 					continue;
 				}
 
@@ -170,8 +168,7 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 							  address, INET_ADDRSTRLEN) == NULL)
 				{
 					/* just skip that entry then */
-					log_trace("Failed to determine local network CIDR: %s",
-							  strerror(errno));
+					log_trace("Failed to determine local network CIDR: %m");
 					continue;
 				}
 
@@ -185,8 +182,7 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 							  network, INET_ADDRSTRLEN) == NULL)
 				{
 					/* just skip that entry then */
-					log_trace("Failed to determine local network CIDR: %s",
-							  strerror(errno));
+					log_trace("Failed to determine local network CIDR: %m");
 					continue;
 				}
 
@@ -207,8 +203,7 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 							  netmask, INET6_ADDRSTRLEN) == NULL)
 				{
 					/* just skip that entry then */
-					log_trace("Failed to determine local network CIDR: %s",
-							  strerror(errno));
+					log_trace("Failed to determine local network CIDR: %m");
 					continue;
 				}
 
@@ -216,8 +211,7 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 							  address, INET6_ADDRSTRLEN) == NULL)
 				{
 					/* just skip that entry then */
-					log_trace("Failed to determine local network CIDR: %s",
-							  strerror(errno));
+					log_trace("Failed to determine local network CIDR: %m");
 					continue;
 				}
 
@@ -234,8 +228,7 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 							  network, INET6_ADDRSTRLEN) == NULL)
 				{
 					/* just skip that entry then */
-					log_trace("Failed to determine local network CIDR: %s",
-							  strerror(errno));
+					log_trace("Failed to determine local network CIDR: %m");
 					continue;
 				}
 
@@ -322,8 +315,7 @@ fetchIPAddressFromInterfaceList(char *localIpAddress, int size)
 
 	if (getifaddrs(&ifaddr) == -1)
 	{
-		log_error("Failed to get the list of local network inferfaces: %s",
-				  strerror(errno));
+		log_error("Failed to get the list of local network inferfaces: %m");
 		return false;
 	}
 
@@ -362,8 +354,7 @@ fetchIPAddressFromInterfaceList(char *localIpAddress, int size)
 						  localIpAddress, size) == NULL)
 			{
 				/* skip that address, silently */
-				log_trace("Failed to determine local network CIDR: %s",
-						  strerror(errno));
+				log_trace("Failed to determine local network CIDR: %m");
 				continue;
 			}
 
@@ -447,8 +438,7 @@ findHostnameLocalAddress(const char *hostname, char *localIpAddress, int size)
 	 */
 	if (getifaddrs(&ifaddrList) == -1)
 	{
-		log_warn("Failed to get the list of local network inferfaces: %s",
-				 strerror(errno));
+		log_warn("Failed to get the list of local network inferfaces: %m");
 		return false;
 	}
 
@@ -496,8 +486,7 @@ findHostnameLocalAddress(const char *hostname, char *localIpAddress, int size)
 								  localIpAddress,
 								  size) == NULL)
 					{
-						log_warn("Failed to determine local ip address: %s",
-								 strerror(errno));
+						log_warn("Failed to determine local ip address: %m");
 						return false;
 					}
 
@@ -525,8 +514,7 @@ findHostnameLocalAddress(const char *hostname, char *localIpAddress, int size)
 								  size) == NULL)
 					{
 						/* check size >= INET6_ADDRSTRLEN */
-						log_warn("Failed to determine local ip address: %s",
-								 strerror(errno));
+						log_warn("Failed to determine local ip address: %m");
 						return false;
 					}
 

@@ -1045,8 +1045,8 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 
 			if (kill(pid, SIGQUIT) != 0)
 			{
-				log_error("Failed to send SIGQUIT to the keeper's pid %d: %s",
-						  pid, strerror(errno));
+				log_error(
+					"Failed to send SIGQUIT to the keeper's pid %d: %m", pid);
 				exit(EXIT_CODE_INTERNAL_ERROR);
 			}
 		}
@@ -1154,8 +1154,7 @@ stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathnames,
 
 		if (!rmtree(pgSetup->pgdata, true))
 		{
-			log_error("Failed to remove directory \"%s\": %s",
-					  pgSetup->pgdata, strerror(errno));
+			log_error("Failed to remove directory \"%s\": %m", pgSetup->pgdata);
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 	}

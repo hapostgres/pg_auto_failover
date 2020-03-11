@@ -887,8 +887,8 @@ keeper_config_set_backup_directory(KeeperConfig *config)
 	if (!realpath(config->backupDirectory, absoluteBackupDirectory))
 	{
 		/* non-fatal error, just keep the computed or given directory path */
-		log_warn("Failed to get the realpath of backup directory \"%s\": %s",
-				 config->backupDirectory, strerror(errno));
+		log_warn("Failed to get the realpath of backup directory \"%s\": %m",
+				 config->backupDirectory);
 		return true;
 	}
 

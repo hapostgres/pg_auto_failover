@@ -613,8 +613,7 @@ pg_basebackup(const char *pgdata,
 	{
 		if (!rmtree(pgdata, true))
 		{
-			log_error("Failed to remove directory \"%s\": %s",
-					  pgdata, strerror(errno));
+			log_error("Failed to remove directory \"%s\": %m", pgdata);
 			return false;
 		}
 	}
@@ -624,8 +623,8 @@ pg_basebackup(const char *pgdata,
 	if (rename(replicationSource->backupDir, pgdata) != 0)
 	{
 		log_error(
-			"Failed to install pg_basebackup dir " " \"%s\" in \"%s\": %s",
-			replicationSource->backupDir, pgdata, strerror(errno));
+			"Failed to install pg_basebackup dir " " \"%s\" in \"%s\": %m",
+			replicationSource->backupDir, pgdata);
 		return false;
 	}
 
@@ -1499,8 +1498,7 @@ pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *nodename)
 	 */
 	if (chmod(pgSetup->ssl.serverKey, S_IRUSR | S_IWUSR) != 0)
 	{
-		log_error("Failed to chmod og-rwx \"%s\": %s",
-				  pgSetup->ssl.serverKey, strerror(errno));
+		log_error("Failed to chmod og-rwx \"%s\": %m", pgSetup->ssl.serverKey);
 		return false;
 	}
 

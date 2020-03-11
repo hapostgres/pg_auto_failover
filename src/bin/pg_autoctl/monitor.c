@@ -1553,7 +1553,7 @@ monitor_get_notifications(Monitor *monitor)
 
 	if (select(sock + 1, &input_mask, NULL, NULL, NULL) < 0)
 	{
-		log_warn("select() failed: %s\n", strerror(errno));
+		log_warn("select() failed: %m");
 		return false;
 	}
 

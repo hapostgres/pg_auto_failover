@@ -619,7 +619,7 @@ read_pidfile(const char *pidfile, pid_t *pid)
 		}
 		else
 		{
-			log_debug("Failed to signal pid %d: %s", *pid, strerror(errno));
+			log_debug("Failed to signal pid %d: %m", *pid);
 			*pid = 0;
 
 			log_info("Found a stale pidfile at \"%s\"", pidfile);
@@ -659,8 +659,7 @@ remove_pidfile(const char *pidfile)
 {
 	if (remove(pidfile) != 0)
 	{
-		log_error("Failed to remove keeper's pid file \"%s\": %s",
-				  pidfile, strerror(errno));
+		log_error("Failed to remove keeper's pid file \"%s\": %m", pidfile);
 		return false;
 	}
 	return true;

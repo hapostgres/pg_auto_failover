@@ -962,8 +962,8 @@ keeper_init_state_write(Keeper *keeper)
 			  O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
 	if (fd < 0)
 	{
-		log_fatal("Failed to create keeper init state file \"%s\": %s",
-				  keeper->config.pathnames.init, strerror(errno));
+		log_fatal("Failed to create keeper init state file \"%s\": %m",
+				  keeper->config.pathnames.init);
 		return false;
 	}
 
@@ -976,14 +976,14 @@ keeper_init_state_write(Keeper *keeper)
 		{
 			errno = ENOSPC;
 		}
-		log_fatal("Failed to write keeper state file \"%s\": %s",
-				  keeper->config.pathnames.init, strerror(errno));
+		log_fatal("Failed to write keeper state file \"%s\": %m",
+				  keeper->config.pathnames.init);
 		return false;
 	}
 
 	if (fsync(fd) != 0)
 	{
-		log_fatal("fsync error: %s", strerror(errno));
+		log_fatal("fsync error: %m");
 		return false;
 	}
 
