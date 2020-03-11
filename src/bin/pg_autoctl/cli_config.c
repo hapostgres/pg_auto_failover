@@ -266,7 +266,7 @@ cli_config_check_connections(PostgresSetup *pgSetup,
 							 const char *monitor_pguri)
 {
 	PGSQL pgsql = { 0 };
-	char connInfo[MAXCONNINFO] = { 0 };
+	PQExpBuffer connInfo = createPQExpBuffer();
 
 	bool settings_are_ok = false;
 
@@ -274,15 +274,18 @@ cli_config_check_connections(PostgresSetup *pgSetup,
 	MonitorExtensionVersion version = { 0 };
 
 	pg_setup_get_local_connection_string(pgSetup, connInfo);
-	pgsql_init(&pgsql, connInfo, PGSQL_CONN_LOCAL);
+	pgsql_init(&pgsql, connInfo->data, PGSQL_CONN_LOCAL);
 
 	if (!pgsql_is_in_recovery(&pgsql, &pgSetup->is_in_recovery))
 	{
 		/* errors have already been logged */
+		destroyPQExpBuffer(connInfo);
 		exit(EXIT_CODE_PGSQL);
 	}
 
-	log_info("Connection to local Postgres ok, using \"%s\"", connInfo);
+	log_info("Connection to local Postgres ok, using \"%s\"", connInfo->data);
+
+	destroyPQExpBuffer(connInfo);
 
 	/*
 	 * Do not check settings on the monitor node itself. On the monitor, we

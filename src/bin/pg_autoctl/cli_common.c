@@ -878,8 +878,9 @@ monitor_init_from_pgsetup(Monitor *monitor, PostgresSetup *pgSetup)
 				/* errors have already been logged */
 				return false;
 			}
-
-			pg_setup_get_local_connection_string(&mconfig.pgSetup, &connInfo);
+			
+			connInfo = createPQExpBuffer();
+			pg_setup_get_local_connection_string(&mconfig.pgSetup, connInfo);
 			monitor_init(monitor, connInfo->data);
 			destroyPQExpBuffer(connInfo);
 

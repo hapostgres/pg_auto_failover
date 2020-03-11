@@ -732,7 +732,8 @@ cli_create_monitor(int argc, char **argv)
 		}
 	}
 
-	pg_setup_get_local_connection_string(&(config.pgSetup), &connInfo);
+	connInfo = createPQExpBuffer();
+	pg_setup_get_local_connection_string(&(config.pgSetup), connInfo);
 	monitor_init(&monitor, connInfo->data);
 	destroyPQExpBuffer(connInfo);
 
@@ -999,7 +1000,6 @@ cli_drop_monitor(int argc, char **argv)
 
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
-	bool monitorDisabledIsOk = false;
 
 	/*
 	 * The configuration file is the last bit we remove, so we don't have to
@@ -1076,7 +1076,7 @@ cli_drop_node_from_monitor(KeeperConfig *config, const char *nodename, int port)
 {
 	Monitor monitor = { 0 };
 	MonitorConfig mconfig = { 0 };
-	char connInfo[MAXCONNINFO] = { 0 };
+	PQExpBuffer connInfo = NULL;
 
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
@@ -1091,11 +1091,14 @@ cli_drop_node_from_monitor(KeeperConfig *config, const char *nodename, int port)
 	}
 
 	/* expose the pgSetup in the given KeeperConfig */
-	memcpy(&(config->pgSetup), &(mconfig.pgSetup), sizeof(PostgresSetup));
+	config->pgSetup = mconfig.pgSetup;
+
+	connInfo = createPQExpBuffer();
 
 	/* prepare to connect to the monitor, locally */
 	pg_setup_get_local_connection_string(&(mconfig.pgSetup), connInfo);
-	monitor_init(&monitor, connInfo);
+	monitor_init(&monitor, connInfo->data);
+	destroyPQExpBuffer(connInfo);
 
 	if (!monitor_remove(&monitor, (char *) nodename, port))
 	{

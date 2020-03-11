@@ -527,7 +527,8 @@ keeper_update_pg_state(Keeper *keeper)
 		 * Reinitialise connection string in case host changed or was first
 		 * discovered.
 		 */
-		pg_setup_get_local_connection_string(pgSetup, &connInfo);
+		connInfo = createPQExpBuffer();
+		pg_setup_get_local_connection_string(pgSetup, connInfo);
 		pgsql_init(pgsql, connInfo->data, PGSQL_CONN_LOCAL);
 
 		destroyPQExpBuffer(connInfo);

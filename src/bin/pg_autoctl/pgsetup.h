@@ -159,7 +159,7 @@ void fprintf_pg_setup(FILE *stream, PostgresSetup *pgSetup);
 bool pg_setup_as_json(PostgresSetup *pgSetup, JSON_Value *js);
 
 bool pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
-										  PQExpBuffer *connectionString);
+										  PQExpBuffer connectionString);
 bool pg_setup_pgdata_exists(PostgresSetup *pgSetup);
 bool pg_setup_is_running(PostgresSetup *pgSetup);
 bool pg_setup_is_primary(PostgresSetup *pgSetup);

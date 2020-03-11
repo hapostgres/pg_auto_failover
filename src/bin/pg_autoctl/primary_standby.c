@@ -76,9 +76,9 @@ GUC citus_default_settings[] = {
 void
 local_postgres_init(LocalPostgresServer *postgres, PostgresSetup *pgSetup)
 {
-	PQExpBuffer connInfo = NULL;
+	PQExpBuffer connInfo = createPQExpBuffer();
 
-	pg_setup_get_local_connection_string(pgSetup, &connInfo);
+	pg_setup_get_local_connection_string(pgSetup, connInfo);
 	pgsql_init(&postgres->sqlClient, connInfo->data, PGSQL_CONN_LOCAL);
 	destroyPQExpBuffer(connInfo);
 

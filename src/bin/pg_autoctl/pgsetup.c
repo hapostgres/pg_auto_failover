@@ -350,8 +350,9 @@ pg_setup_init(PostgresSetup *pgSetup,
 		strlcpy(dbname, pgSetup->dbname, NAMEDATALEN);
 		strlcpy(pgSetup->dbname, "template1", NAMEDATALEN);
 
+		connInfo = createPQExpBuffer();
 		/* initialise a SQL connection to the local postgres server */
-		pg_setup_get_local_connection_string(pgSetup, &connInfo);
+		pg_setup_get_local_connection_string(pgSetup, connInfo);
 		pgsql_init(&pgsql, connInfo->data, PGSQL_CONN_LOCAL);
 		destroyPQExpBuffer(connInfo);
 
@@ -619,20 +620,18 @@ pg_setup_as_json(PostgresSetup *pgSetup, JSON_Value *js)
 
 /*
  * pg_setup_get_local_connection_string build a connecting string to connect
- * to the local postgres server and returns in connectionString.
- * Caller is responsible for destroying the memory.
+ * to the local postgres server.
  */
 bool
 pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
-									 PQExpBuffer *connectionString)
+									 PQExpBuffer connectionString)
 {
 	char pg_regress_sock_dir[MAXPGPATH];
 	int  pg_regress_sock_dir_len = get_env_variable("PG_REGRESS_SOCK_DIR", pg_regress_sock_dir, MAXPGPATH);
-	PQExpBuffer connectionStringBuffer = createPQExpBuffer();
 
-	enlargePQExpBuffer(connectionStringBuffer, MAXCONNINFO);
+	enlargePQExpBuffer(connectionString, MAXCONNINFO);
 
-	appendPQExpBuffer(connectionStringBuffer, "port=%d dbname=%s",
+	appendPQExpBuffer(connectionString, "port=%d dbname=%s",
 					  pgSetup->pgport, pgSetup->dbname);
 
 	/*
@@ -645,7 +644,7 @@ pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 		&& (IS_EMPTY_STRING_BUFFER(pgSetup->pghost)
 			|| pgSetup->pghost[0] == '/'))
 	{
-		appendPQExpBuffer(connectionStringBuffer, " host=localhost");
+		appendPQExpBuffer(connectionString, " host=localhost");
 	}
 	else if (!IS_EMPTY_STRING_BUFFER(pgSetup->pghost))
 	{
@@ -662,15 +661,14 @@ pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 					 pg_regress_sock_dir,
 					 pgSetup->pghost);
 		}
-		appendPQExpBuffer(connectionStringBuffer, " host=%s", pgSetup->pghost);
+		appendPQExpBuffer(connectionString, " host=%s", pgSetup->pghost);
 	}
 
 	if (!IS_EMPTY_STRING_BUFFER(pgSetup->username))
 	{
-		appendPQExpBuffer(connectionStringBuffer, " user=%s", pgSetup->username);
+		appendPQExpBuffer(connectionString, " user=%s", pgSetup->username);
 	}
 
-	*connectionString = connectionStringBuffer;
 	return true;
 }
 

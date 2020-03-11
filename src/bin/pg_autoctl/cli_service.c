@@ -205,7 +205,8 @@ cli_monitor_run(int argc, char **argv)
 		exit(EXIT_CODE_PGCTL);
 	}
 
-	pg_setup_get_local_connection_string(&(mconfig.pgSetup), &connInfo);
+	connInfo = createPQExpBuffer();
+	pg_setup_get_local_connection_string(&(mconfig.pgSetup), connInfo);
 	monitor_init(&monitor, connInfo->data);
 	destroyPQExpBuffer(connInfo);
 
