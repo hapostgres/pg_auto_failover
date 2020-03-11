@@ -579,21 +579,21 @@ read_pg_pidfile(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 void
 fprintf_pg_setup(FILE *stream, PostgresSetup *pgSetup)
 {
-	fprintf(stream, "pgdata:             %s\n", pgSetup->pgdata);
-	fprintf(stream, "pg_ctl:             %s\n", pgSetup->pg_ctl);
-	fprintf(stream, "pg_version:         %s\n", pgSetup->pg_version);
-	fprintf(stream, "pghost:             %s\n", pgSetup->pghost);
-	fprintf(stream, "pgport:             %d\n", pgSetup->pgport);
-	fprintf(stream, "proxyport:          %d\n", pgSetup->proxyport);
-	fprintf(stream, "pid:                %ld\n", pgSetup->pidFile.pid);
-	fprintf(stream, "is in recovery:     %s\n",
-			pgSetup->is_in_recovery ? "yes" : "no");
-	fprintf(stream, "Control Version:    %u\n",
-			pgSetup->control.pg_control_version);
-	fprintf(stream, "Catalog Version:    %u\n",
-			pgSetup->control.catalog_version_no);
-	fprintf(stream, "System Identifier:  %" PRIu64 "\n",
-			pgSetup->control.system_identifier);
+	pgaf_fprintf(stream, "pgdata:             %s\n", pgSetup->pgdata);
+	pgaf_fprintf(stream, "pg_ctl:             %s\n", pgSetup->pg_ctl);
+	pgaf_fprintf(stream, "pg_version:         %s\n", pgSetup->pg_version);
+	pgaf_fprintf(stream, "pghost:             %s\n", pgSetup->pghost);
+	pgaf_fprintf(stream, "pgport:             %d\n", pgSetup->pgport);
+	pgaf_fprintf(stream, "proxyport:          %d\n", pgSetup->proxyport);
+	pgaf_fprintf(stream, "pid:                %ld\n", pgSetup->pidFile.pid);
+	pgaf_fprintf(stream, "is in recovery:     %s\n",
+				 pgSetup->is_in_recovery ? "yes" : "no");
+	pgaf_fprintf(stream, "Control Version:    %u\n",
+				 pgSetup->control.pg_control_version);
+	pgaf_fprintf(stream, "Catalog Version:    %u\n",
+				 pgSetup->control.catalog_version_no);
+	pgaf_fprintf(stream, "System Identifier:  %" PRIu64 "\n",
+				 pgSetup->control.system_identifier);
 	fflush(stream);
 }
 

@@ -437,21 +437,21 @@ print_reachable_states(KeeperStateData *keeperState)
 		{
 			if (!header)
 			{
-				fprintf(stdout,
-						"%20s | %20s | %s\n",
-						"Current", "Reachable", "Comment");
-				fprintf(stdout,
-						"%20s-+-%20s-+-%s\n",
-						"--------------------",
-						"--------------------",
-						"--------------------");
+				pgaf_fprintf(stdout,
+							 "%20s | %20s | %s\n",
+							 "Current", "Reachable", "Comment");
+				pgaf_fprintf(stdout,
+							 "%20s-+-%20s-+-%s\n",
+							 "--------------------",
+							 "--------------------",
+							 "--------------------");
 				header = true;
 			}
-			fprintf(stdout,
-					"%20s | %20s | %s\n",
-					NodeStateToString(transition.current),
-					NodeStateToString(transition.assigned),
-					transition.comment);
+			pgaf_fprintf(stdout,
+						 "%20s | %20s | %s\n",
+						 NodeStateToString(transition.current),
+						 NodeStateToString(transition.assigned),
+						 transition.comment);
 		}
 		transition = KeeperFSM[++transitionIndex];
 	}
@@ -470,23 +470,24 @@ print_fsm_for_graphviz()
 	KeeperFSMTransition transition = KeeperFSM[0];
 	int transitionIndex = 0;
 
-	fprintf(stdout,
-			"digraph finite_state_machine\n"
-			"{\n"
-			"    size=\"12\"\n"
-			"    ratio=\"fill\"\n"
-			"    node [shape = doubleoctagon, style=filled, color=\"bisque1\"]; init primary secondary; \n"
-			"    node [shape = octagon, style=filled color=\"bisque3\"]; \n");
+	pgaf_fprintf(
+		stdout,
+		"digraph finite_state_machine\n"
+		"{\n"
+		"    size=\"12\"\n"
+		"    ratio=\"fill\"\n"
+		"    node [shape = doubleoctagon, style=filled, color=\"bisque1\"]; init primary secondary; \n"
+		"    node [shape = octagon, style=filled color=\"bisque3\"]; \n");
 
 	while (transition.current != NO_STATE)
 	{
-		fprintf(stdout,
-				"    %s -> %s [ label = \"%s\" ];\n",
-				NodeStateToString(transition.current),
-				NodeStateToString(transition.assigned),
-				transition.comment);
+		pgaf_fprintf(stdout,
+					 "    %s -> %s [ label = \"%s\" ];\n",
+					 NodeStateToString(transition.current),
+					 NodeStateToString(transition.assigned),
+					 transition.comment);
 
 		transition = KeeperFSM[++transitionIndex];
 	}
-	fprintf(stdout, "}\n");
+	pgaf_fprintf(stdout, "}\n");
 }

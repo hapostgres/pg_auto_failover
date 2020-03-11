@@ -669,7 +669,7 @@ print_monitor_and_formation_uri(KeeperConfig *config,
 	}
 	else
 	{
-		fprintf(stdout, "%s\n", postgresUri);
+		pgaf_fprintf(stdout, "%s\n", postgresUri);
 	}
 }
 
@@ -907,7 +907,7 @@ cli_show_file(int argc, char **argv)
 
 			serialized_string = json_serialize_to_string_pretty(js);
 
-			fprintf(stdout, "%s\n", serialized_string);
+			pgaf_fprintf(stdout, "%s\n", serialized_string);
 
 			json_free_serialized_string(serialized_string);
 			json_value_free(js);
@@ -927,7 +927,7 @@ cli_show_file(int argc, char **argv)
 			}
 			else
 			{
-				fprintf(stdout, "%s\n", config.pathnames.config);
+				pgaf_fprintf(stdout, "%s\n", config.pathnames.config);
 			}
 			break;
 		}
@@ -956,7 +956,7 @@ cli_show_file(int argc, char **argv)
 			}
 			else
 			{
-				fprintf(stdout, "%s\n", config.pathnames.state);
+				pgaf_fprintf(stdout, "%s\n", config.pathnames.state);
 			}
 
 			break;
@@ -989,7 +989,7 @@ cli_show_file(int argc, char **argv)
 			}
 			else
 			{
-				fprintf(stdout, "%s\n", config.pathnames.init);
+				pgaf_fprintf(stdout, "%s\n", config.pathnames.init);
 			}
 
 			break;
@@ -1013,7 +1013,7 @@ cli_show_file(int argc, char **argv)
 			}
 			else
 			{
-				fprintf(stdout, "%s\n", config.pathnames.pid);
+				pgaf_fprintf(stdout, "%s\n", config.pathnames.pid);
 			}
 
 			break;
@@ -1040,7 +1040,7 @@ fprint_file_contents(const char *filename)
 
 	if (read_file(filename, &contents, &size))
 	{
-		fprintf(stdout, "%s\n", contents);
+		pgaf_fprintf(stdout, "%s\n", contents);
 		return true;
 	}
 	else

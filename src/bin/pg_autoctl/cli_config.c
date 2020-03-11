@@ -430,7 +430,7 @@ cli_keeper_config_get(int argc, char **argv)
 				else
 				{
 					keeper_config_write(stdout, &config);
-					fprintf(stdout, "\n");
+					pgaf_fprintf(stdout, "\n");
 				}
 			}
 
@@ -449,7 +449,7 @@ cli_keeper_config_get(int argc, char **argv)
 										  value,
 										  BUFSIZE))
 			{
-				fprintf(stdout, "%s\n", value);
+				pgaf_fprintf(stdout, "%s\n", value);
 			}
 			else
 			{
@@ -511,7 +511,7 @@ cli_monitor_config_get(int argc, char **argv)
 			else
 			{
 				monitor_config_write(stdout, &mconfig);
-				fprintf(stdout, "\n");
+				pgaf_fprintf(stdout, "\n");
 			}
 
 			keeper_config_destroy(&kconfig);
@@ -529,7 +529,7 @@ cli_monitor_config_get(int argc, char **argv)
 										  value,
 										  BUFSIZE))
 			{
-				fprintf(stdout, "%s\n", value);
+				pgaf_fprintf(stdout, "%s\n", value);
 			}
 			else
 			{
@@ -627,7 +627,7 @@ cli_keeper_config_set(int argc, char **argv)
 									  value,
 									  BUFSIZE))
 		{
-			fprintf(stdout, "%s\n", value);
+			pgaf_fprintf(stdout, "%s\n", value);
 		}
 		else
 		{
@@ -690,7 +690,7 @@ cli_monitor_config_set(int argc, char **argv)
 									   value,
 									   BUFSIZE))
 		{
-			fprintf(stdout, "%s\n", value);
+			pgaf_fprintf(stdout, "%s\n", value);
 		}
 		else
 		{

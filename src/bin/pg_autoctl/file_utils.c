@@ -17,6 +17,8 @@
 
 #include "postgres_fe.h"
 
+#include "snprintf.h"
+
 #include "cli_root.h"
 #include "defaults.h"
 #include "file_utils.h"
@@ -735,4 +737,30 @@ normalize_filename(const char *filename, char *dst, int size)
 	}
 
 	return true;
+}
+
+
+/*
+ * pgaf_fprintf is a secured down version of pg_fprintf
+ *
+ * Additional security checks are:
+ *  - make sure stream is not null
+ *  - make sure fmt is not null
+ *  - rely on pg_fprintf Assert() that %s arguments are not null
+ */
+int
+pgaf_fprintf(FILE *stream, const char *fmt, ...)
+{
+	int			len;
+	va_list		args;
+
+	if (stream == NULL || fmt == NULL)
+	{
+		return -1;
+	}
+
+	va_start(args, fmt);
+	len = pg_vfprintf(stream, fmt, args);
+	va_end(args);
+	return len;
 }

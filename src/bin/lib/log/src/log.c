@@ -99,6 +99,11 @@ void log_log(int level, const char *file, int line, const char *fmt, ...)
     return;
   }
 
+  if (fmt == NULL)
+  {
+	  return;
+  }
+
   /* Acquire lock */
   lock();
 
