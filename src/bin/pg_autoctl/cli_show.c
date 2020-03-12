@@ -334,8 +334,6 @@ cli_show_state(int argc, char **argv)
 
 	if (outputJSON)
 	{
-		char json[BUFSIZE];
-
 		if (!monitor_print_state_as_json(&monitor,
 										 config.formation,
 										 config.groupId))
@@ -518,7 +516,6 @@ cli_show_formation_uri(int argc, char **argv)
 	KeeperConfig config = keeperOptions;
 	Monitor monitor = { 0 };
 	bool monitorDisabledIsOk = false;
-	char postgresUri[MAXCONNINFO];
 
 	if (!keeper_config_read_file_skip_pgsetup(&config, monitorDisabledIsOk))
 	{

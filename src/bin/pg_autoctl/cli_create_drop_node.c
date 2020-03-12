@@ -770,7 +770,7 @@ static int
 cli_drop_node_getopts(int argc, char **argv)
 {
 	KeeperConfig options = { 0 };
-	int c, option_index, errors = 0;
+	int c, option_index = 0;
 	int verboseCount = 0;
 
 	static struct option long_options[] = {
@@ -885,12 +885,6 @@ cli_drop_node_getopts(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (errors > 0)
-	{
-		commandline_help(stderr);
-		exit(EXIT_CODE_BAD_ARGS);
-	}
-
 	/* now that we have the command line parameters, prepare the options */
 	(void) prepare_keeper_options(&options);
 
@@ -999,7 +993,6 @@ cli_drop_monitor(int argc, char **argv)
 
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
-	bool monitorDisabledIsOk = false;
 
 	/*
 	 * The configuration file is the last bit we remove, so we don't have to

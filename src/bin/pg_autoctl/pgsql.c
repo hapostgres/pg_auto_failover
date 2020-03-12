@@ -852,6 +852,7 @@ pgsql_get_current_setting(PGSQL *pgsql, char *settingName, char **currentValue)
 	if (!pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes, paramValues,
 								   &context, &parseSingleValueResult))
 	{
+		/* errors have already been logged */
 		return false;
 	}
 
@@ -1178,8 +1179,12 @@ pgsql_has_replica(PGSQL *pgsql, char *userName, bool *hasReplica)
 	context.resultType = PGSQL_RESULT_BOOL;
 	context.parsedOk = false;
 
-	pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes, paramValues,
-							  &context, &parseSingleValueResult);
+	if (!pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes, paramValues,
+								   &context, &parseSingleValueResult))
+	{
+		/* errors have already been logged */
+		return false;
+	}
 
 	if (!context.parsedOk)
 	{
@@ -1416,8 +1421,12 @@ pgsql_get_postgres_metadata(PGSQL *pgsql, const char *slotName,
 	const char *paramValues[1] = { slotName };
 	int paramCount = 1;
 
-	pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes, paramValues,
-							  &context, &parsePgMetadata);
+	if (!pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes, paramValues,
+								   &context, &parsePgMetadata))
+	{
+		/* errors have already been logged */
+		return false;
+	}
 
 	if (!context.parsedOk)
 	{
