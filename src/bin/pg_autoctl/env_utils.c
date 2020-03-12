@@ -22,8 +22,9 @@
  * Function returns the length of the environment variable.
  *
  * Return values
- * - (-1) if variable is not found
- * - (0) if variable is found but no value is set
+ * - GETENV_ERROR (-2)  : incorrect variable name is provided
+ * - GETENV_NOT_FOUND (-1) : variable is not found
+ * - GETENV_EMPTY (0)  : variable is found but no value is set
  * - (1+) length of the environment variable
  *
  * The function returns the length of the variable even, not the copied
@@ -34,12 +35,11 @@ int
 get_env_variable(const char *name, char *result, int maxLength)
 {
 	char *envvalue = NULL;
-	int valueLength = 0;
 
 	if (name == NULL || strlen(name) == 0)
 	{
 		log_error("Failed to get environment setting. NULL or empty variable name is provided");
-		return -1;
+		GETENV_ERROR;
 	}
 
 	/*
@@ -51,18 +51,12 @@ get_env_variable(const char *name, char *result, int maxLength)
 
 	if (envvalue == NULL)
 	{
-		return -1;
-	}
-
-	valueLength = (int) strlen(envvalue);
-	if (valueLength == 0)
-	{
-		return 0;
+		return GETENV_NOT_FOUND;
 	}
 
 	if (result == NULL)
 	{
-		return valueLength;
+		return strlen(envvalue);;
 	}
 
 	return strlcpy(result, envvalue, maxLength);
