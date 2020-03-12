@@ -134,15 +134,17 @@ fopen_with_umask(const char *filePath, const char* modes, int flags, mode_t umas
 {
 	int fileDescriptor = open(filePath, O_WRONLY | O_CREAT, umask);
 	FILE *fileStream = NULL;
-	if (fileDescriptor != -1)
+	if (fileDescriptor == -1)
 	{
-		fileStream = fdopen(fileDescriptor, modes);
-		if (fileStream == NULL) {
-			close(fileDescriptor);
-		}
-	}
-	if (fileStream == NULL) {
 		log_error("Failed to open file \"%s\": %s", filePath, strerror(errno));
+		return NULL;
+	}
+
+	fileStream = fdopen(fileDescriptor, modes);
+	if (fileStream == NULL)
+	{
+		log_error("Failed to open file \"%s\": %s", filePath, strerror(errno));
+		close(fileDescriptor);
 	}
 	return fileStream;
 }
@@ -160,6 +162,7 @@ write_file(char *data, long fileSize, const char *filePath)
 	FILE *fileStream = fopen_with_umask(filePath, "wb", O_WRONLY | O_CREAT, 0644);
 	if (fileStream == NULL)
 	{
+		/* errors have already been logged */
 		return false;
 	}
 
@@ -191,6 +194,7 @@ append_to_file(char *data, long fileSize, const char *filePath)
 	FILE *fileStream = fopen_with_umask(filePath, "ab", O_APPEND | O_CREAT, 0644);
 	if (fileStream == NULL)
 	{
+		/* errors have already been logged */
 		return false;
 	}
 

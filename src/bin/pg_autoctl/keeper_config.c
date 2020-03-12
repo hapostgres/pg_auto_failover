@@ -418,6 +418,7 @@ keeper_config_write_file(KeeperConfig *config)
 	fileStream = fopen_with_umask(filePath, "w", O_WRONLY | O_CREAT, 0644);
 	if (fileStream == NULL)
 	{
+		/* errors have already been logged */
 		return false;
 	}
 
