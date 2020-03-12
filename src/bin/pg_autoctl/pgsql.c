@@ -1505,7 +1505,7 @@ pgsql_listen(PGSQL *pgsql, char *channels[])
 			return false;
 		}
 
-		sprintf(sql, "LISTEN %s", channel);
+		sformat(sql, BUFSIZE, "LISTEN %s", channel);
 
 		PQfreemem(channel);
 
