@@ -63,11 +63,19 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 {
 	char *formationId = activeNode->formationId;
 	int groupId = activeNode->groupId;
-	AutoFailoverFormation *formation = GetFormation(formationId);
 
+	AutoFailoverFormation *formation = GetFormation(formationId);
 	AutoFailoverNode *primaryNode = NULL;
+
 	List *nodesGroupList = AutoFailoverNodeGroup(formationId, groupId);
 	int nodesCount = list_length(nodesGroupList);
+
+	if (formation == NULL)
+	{
+		ereport(ERROR,
+				(errmsg("Formation for %s could not be found",
+						activeNode->formationId)));
+	}
 
 	/* when there's no other node anymore, not even one */
 	if (nodesCount == 1

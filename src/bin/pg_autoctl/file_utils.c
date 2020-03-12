@@ -120,6 +120,37 @@ ensure_empty_dir(const char *dirname, int mode)
 
 
 /*
+ * fopen_with_umask is a version of fopen that gives more control. The main
+ * advantage of it is that it allows specifying a umask of the file. This makes
+ * sure files are not accidentally created with umask 777 if the user has it
+ * configured in a weird way.
+ *
+ * This function returns NULL when opening the file fails. So this should be
+ * handled. It will log an error in this case though, so that's not necessary
+ * at the callsite.
+ */
+FILE *
+fopen_with_umask(const char *filePath, const char* modes, int flags, mode_t umask)
+{
+	int fileDescriptor = open(filePath, O_WRONLY | O_CREAT, umask);
+	FILE *fileStream = NULL;
+	if (fileDescriptor == -1)
+	{
+		log_error("Failed to open file \"%s\": %s", filePath, strerror(errno));
+		return NULL;
+	}
+
+	fileStream = fdopen(fileDescriptor, modes);
+	if (fileStream == NULL)
+	{
+		log_error("Failed to open file \"%s\": %s", filePath, strerror(errno));
+		close(fileDescriptor);
+	}
+	return fileStream;
+}
+
+
+/*
  * write_file writes the given data to the file given by filePath using
  * our logging library to report errors. If succesful, the function returns
  * true.
@@ -127,12 +158,11 @@ ensure_empty_dir(const char *dirname, int mode)
 bool
 write_file(char *data, long fileSize, const char *filePath)
 {
-	FILE *fileStream = NULL;
 
-	fileStream = fopen(filePath, "wb");
+	FILE *fileStream = fopen_with_umask(filePath, "wb", O_WRONLY | O_CREAT, 0644);
 	if (fileStream == NULL)
 	{
-		log_error("Failed to open file \"%s\": %s", filePath, strerror(errno));
+		/* errors have already been logged */
 		return false;
 	}
 
@@ -161,12 +191,10 @@ write_file(char *data, long fileSize, const char *filePath)
 bool
 append_to_file(char *data, long fileSize, const char *filePath)
 {
-	FILE *fileStream = NULL;
-
-	fileStream = fopen(filePath, "ab");
+	FILE *fileStream = fopen_with_umask(filePath, "ab", O_APPEND | O_CREAT, 0644);
 	if (fileStream == NULL)
 	{
-		log_error("Failed to open file \"%s\": %s", filePath, strerror(errno));
+		/* errors have already been logged */
 		return false;
 	}
 

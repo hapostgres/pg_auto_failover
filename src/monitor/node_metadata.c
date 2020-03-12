@@ -67,7 +67,7 @@ AllAutoFailoverNodes(char *formationId)
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
 	int spiStatus = 0;
-	uint32 rowNumber = 0;
+	uint64 rowNumber = 0;
 
 	const char *selectQuery =
 			SELECT_ALL_FROM_AUTO_FAILOVER_NODE_TABLE " WHERE formationid = $1";
@@ -202,7 +202,7 @@ AutoFailoverNodeGroup(char *formationId, int groupId)
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
 	int spiStatus = 0;
-	uint32 rowNumber = 0;
+	uint64 rowNumber = 0;
 
 	const char *selectQuery =
 		SELECT_ALL_FROM_AUTO_FAILOVER_NODE_TABLE

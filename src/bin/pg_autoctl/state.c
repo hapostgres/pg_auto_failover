@@ -423,7 +423,6 @@ NodeStateToString(NodeState s)
 		default:
 			return "Unknown State";
 	}
-	return NULL;
 }
 
 
