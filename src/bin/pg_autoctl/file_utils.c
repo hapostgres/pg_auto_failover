@@ -764,3 +764,24 @@ fformat(FILE *stream, const char *fmt, ...)
 	va_end(args);
 	return len;
 }
+
+
+/*
+ * sformat is a secured down version of pg_snprintf
+ */
+int
+sformat(char *str, size_t count, const char *fmt, ...)
+{
+	int			len;
+	va_list		args;
+
+	if (str == NULL || fmt == NULL)
+	{
+		return -1;
+	}
+
+	va_start(args, fmt);
+	len = pg_vsnprintf(str, count, fmt, args);
+	va_end(args);
+	return len;
+}

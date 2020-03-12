@@ -623,8 +623,8 @@ pg_setup_as_json(PostgresSetup *pgSetup, JSON_Value *js)
 							  "control.catalog_version",
 							  (double) pgSetup->control.catalog_version_no);
 
-	snprintf(system_identifier, BUFSIZE, "%" PRIu64,
-			 pgSetup->control.system_identifier);
+	sformat(system_identifier, BUFSIZE, "%" PRIu64,
+			pgSetup->control.system_identifier);
 	json_object_dotset_string(jsobj,
 							  "control.system_identifier",
 							  system_identifier);

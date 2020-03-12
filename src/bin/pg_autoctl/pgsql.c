@@ -391,12 +391,12 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 
 			if (paramIndex > 0)
 			{
-				bytesWritten = snprintf(writePointer, remainingBytes, ", ");
+				bytesWritten = sformat(writePointer, remainingBytes, ", ");
 				remainingBytes -= bytesWritten;
 				writePointer += bytesWritten;
 			}
 
-			bytesWritten = snprintf(writePointer, remainingBytes, "'%s'", value);
+			bytesWritten = sformat(writePointer, remainingBytes, "'%s'", value);
 			remainingBytes -= bytesWritten;
 			writePointer += bytesWritten;
 		}
@@ -736,7 +736,8 @@ pgsql_alter_system_set(PGSQL *pgsql, GUC setting)
 {
 	char command[1024];
 
-	snprintf(command, 1024, "ALTER SYSTEM SET %s TO %s", setting.name, setting.value);
+	sformat(command, 1024,
+			"ALTER SYSTEM SET %s TO %s", setting.name, setting.value);
 
 	if (!pgsql_execute(pgsql, command))
 	{
@@ -909,10 +910,10 @@ pgsql_create_database(PGSQL *pgsql, const char *dbname, const char *owner)
 	}
 
 	/* now build the SQL command */
-	snprintf(command, BUFSIZE,
-			 "CREATE DATABASE %s WITH OWNER %s",
-			 escapedDBName,
-			 escapedOwner);
+	sformat(command, BUFSIZE,
+			"CREATE DATABASE %s WITH OWNER %s",
+			escapedDBName,
+			escapedOwner);
 
 	log_debug("Running command on Postgres: %s;", command);
 
@@ -982,7 +983,7 @@ pgsql_create_extension(PGSQL *pgsql, const char *name)
 	}
 
 	/* now build the SQL command */
-	snprintf(command, BUFSIZE, "CREATE EXTENSION %s", escapedIdentifier);
+	sformat(command, BUFSIZE, "CREATE EXTENSION %s", escapedIdentifier);
 	PQfreemem(escapedIdentifier);
 	log_debug("Running command on Postgres: %s;", command);
 
@@ -1604,8 +1605,8 @@ pgsql_alter_extension_update_to(PGSQL *pgsql,
 	}
 
 	/* now build the SQL command */
-	n = snprintf(command, BUFSIZE, "ALTER EXTENSION %s UPDATE TO %s",
-				 escapedIdentifier, escapedVersion);
+	n = sformat(command, BUFSIZE, "ALTER EXTENSION %s UPDATE TO %s",
+				escapedIdentifier, escapedVersion);
 
 	if (n >= BUFSIZE)
 	{

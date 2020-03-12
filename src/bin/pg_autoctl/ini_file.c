@@ -304,7 +304,7 @@ ini_option_to_string(IniOption *option, char *dest, size_t size)
 
 		case INI_INT_T:
 		{
-			snprintf(dest, size, "%d", *(option->intValue));
+			sformat(dest, size, "%d", *(option->intValue));
 			return true;
 		}
 

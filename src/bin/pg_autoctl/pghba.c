@@ -325,7 +325,7 @@ pghba_enable_lan_cidr(PGSQL *pgsql,
 	}
 	else
 	{
-		snprintf(hbaFilePath, MAXPGPATH, "%s/pg_hba.conf", pgdata);
+		sformat(hbaFilePath, MAXPGPATH, "%s/pg_hba.conf", pgdata);
 	}
 
 	if (!pghba_ensure_host_rule_exists(hbaFilePath, ssl, databaseType, database,
