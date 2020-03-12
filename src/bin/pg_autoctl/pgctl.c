@@ -801,7 +801,7 @@ pg_ctl_start(const char *pg_ctl,
 		args[argsIndex++] = (char *) listen_addresses_option;
 	}
 
-	if(get_env_variable("PG_REGRESS_SOCK_DIR", env_pg_regress_sock_dir, MAXPGPATH) > 0)
+	if(get_env_variable("PG_REGRESS_SOCK_DIR", env_pg_regress_sock_dir, MAXPGPATH) >= 0)
 	{
 		/*
 		 * Explanation of IGNORE-BANNED:
