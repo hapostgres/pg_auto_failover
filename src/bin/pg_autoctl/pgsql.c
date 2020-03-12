@@ -1268,39 +1268,6 @@ hostname_from_uri(const char *pguri,
 
 
 /*
- * make_conninfo_field_int writes a single connection string field to
- * connInfo and returns the number of characters written.
- *
- * It is the responsibility of the caller to ensure that the connInfo
- * is large enough to write the field.
- */
-int
-make_conninfo_field_int(char *connInfo, const char *key, int value)
-{
-	return sprintf(connInfo, " %s=%d", key, value);
-}
-
-
-/*
- * make_conninfo_field_str writes a single connection string field to
- * connInfo with escaping and returns the number of characters written.
- *
- * It is the responsibility of the caller to ensure that the connInfo
- * is large enough to write the field.
- */
-int
-make_conninfo_field_str(char *connInfo, const char *key, const char *value)
-{
-	char *connInfoEnd = connInfo;
-
-	connInfoEnd += sprintf(connInfoEnd, " %s=", key);
-	connInfoEnd += escape_conninfo_value(connInfoEnd, value);
-
-	return connInfoEnd - connInfo;
-}
-
-
-/*
  * escape_conninfo_value escapes a string that is used in a connection info
  * string by prefixing single quotes and backslashes with a backslash.
  *
