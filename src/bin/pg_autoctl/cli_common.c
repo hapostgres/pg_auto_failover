@@ -1082,9 +1082,9 @@ keeper_cli_print_version(int argc, char **argv)
 	}
 	else
 	{
-		pgaf_fprintf(stdout, "pg_autoctl version %s\n", PG_AUTOCTL_VERSION);
-		pgaf_fprintf(stdout, "compiled with %s\n", PG_VERSION_STR);
-		pgaf_fprintf(stdout, "compatible with Postgres 10, 11, and 12\n");
+		fformat(stdout, "pg_autoctl version %s\n", PG_AUTOCTL_VERSION);
+		fformat(stdout, "compiled with %s\n", PG_VERSION_STR);
+		fformat(stdout, "compatible with Postgres 10, 11, and 12\n");
 	}
 
 	exit(0);
@@ -1102,7 +1102,7 @@ cli_pprint_json(JSON_Value *js)
 
 	/* output our nice JSON object, pretty printed please */
 	serialized_string = json_serialize_to_string_pretty(js);
-	pgaf_fprintf(stdout, "%s\n", serialized_string);
+	fformat(stdout, "%s\n", serialized_string);
 
 	/* free intermediate memory */
 	json_free_serialized_string(serialized_string);

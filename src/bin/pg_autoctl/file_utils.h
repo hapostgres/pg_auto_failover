@@ -38,7 +38,7 @@ bool unlink_file(const char *filename);
 bool set_program_absolute_path(char *program, int size);
 bool normalize_filename(const char *filename, char *dst, int size);
 
-int pgaf_fprintf(FILE *stream, const char *fmt, ...)
+int fformat(FILE *stream, const char *fmt, ...)
  	__attribute__((format(printf, 2, 3)));
 
 #endif /* FILE_UTILS_H */

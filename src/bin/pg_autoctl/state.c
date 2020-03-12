@@ -252,39 +252,39 @@ print_keeper_state(KeeperStateData *keeperState, FILE *stream)
 	/*
 	 * First, the roles.
 	 */
-	pgaf_fprintf(stream, "Current Role:             %s\n", current_role);
-	pgaf_fprintf(stream, "Assigned Role:            %s\n", assigned_role);
+	fformat(stream, "Current Role:             %s\n", current_role);
+	fformat(stream, "Assigned Role:            %s\n", assigned_role);
 
 	/*
 	 * Now, other nodes situation, are we in a network partition.
 	 */
-	pgaf_fprintf(stream, "Last Monitor Contact:     %s\n",
-				 epoch_to_string(keeperState->last_monitor_contact));
+	fformat(stream, "Last Monitor Contact:     %s\n",
+			epoch_to_string(keeperState->last_monitor_contact));
 
-	pgaf_fprintf(stream, "Last Secondary Contact:   %s\n",
-				 epoch_to_string(keeperState->last_secondary_contact));
+	fformat(stream, "Last Secondary Contact:   %s\n",
+			epoch_to_string(keeperState->last_secondary_contact));
 
 	/*
 	 * pg_autoctl information.
 	 */
-	pgaf_fprintf(stream, "pg_autoctl state version: %d\n",
-				 keeperState->pg_autoctl_state_version);
-	pgaf_fprintf(stream, "group:                    %d\n",
-				 keeperState->current_group);
-	pgaf_fprintf(stream, "node id:                  %d\n",
-				 keeperState->current_node_id);
-	pgaf_fprintf(stream, "nodes version:            %" PRIu64 "\n",
-				 keeperState->current_nodes_version);
+	fformat(stream, "pg_autoctl state version: %d\n",
+			keeperState->pg_autoctl_state_version);
+	fformat(stream, "group:                    %d\n",
+			keeperState->current_group);
+	fformat(stream, "node id:                  %d\n",
+			keeperState->current_node_id);
+	fformat(stream, "nodes version:            %" PRIu64 "\n",
+			keeperState->current_nodes_version);
 
 	/*
 	 * PostgreSQL bits.
 	 */
-	pgaf_fprintf(stream, "PostgreSQL Version:       %u\n",
-				 keeperState->pg_control_version);
-	pgaf_fprintf(stream, "PostgreSQL CatVersion:    %u\n",
-				 keeperState->catalog_version_no);
-	pgaf_fprintf(stream, "PostgreSQL System Id:     %" PRIu64 "\n",
-				 keeperState->system_identifier);
+	fformat(stream, "PostgreSQL Version:       %u\n",
+			keeperState->pg_control_version);
+	fformat(stream, "PostgreSQL CatVersion:    %u\n",
+			keeperState->catalog_version_no);
+	fformat(stream, "PostgreSQL System Id:     %" PRIu64 "\n",
+			keeperState->system_identifier);
 
 	fflush(stream);
 }
@@ -322,7 +322,7 @@ keeperStateAsJSON(KeeperStateData *keeperState, JSON_Value *js)
 void
 print_keeper_init_state(KeeperStateInit *initState, FILE *stream)
 {
-	pgaf_fprintf(stream, "Postgres state at keeper init: %s\n",
+	fformat(stream, "Postgres state at keeper init: %s\n",
 				 PreInitPostgreInstanceStateToString(initState->pgInitState));
 	fflush(stream);
 }

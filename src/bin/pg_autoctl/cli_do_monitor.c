@@ -175,10 +175,10 @@ cli_do_monitor_get_primary_node(int argc, char **argv)
 	}
 	else
 	{
-		pgaf_fprintf(stdout,
-					 "%s/%d %s:%d\n",
-					 config.formation, config.groupId,
-					 primaryNode.host, primaryNode.port);
+		fformat(stdout,
+				"%s/%d %s:%d\n",
+				config.formation, config.groupId,
+				primaryNode.host, primaryNode.port);
 	}
 }
 
@@ -240,10 +240,10 @@ cli_do_monitor_get_other_node(int argc, char **argv)
 	}
 	else
 	{
-		pgaf_fprintf(stdout,
-					 "%s/%d %s:%d\n",
-					 config.formation, config.groupId,
-					 otherNode.host, otherNode.port);
+		fformat(stdout,
+				"%s/%d %s:%d\n",
+				config.formation, config.groupId,
+				otherNode.host, otherNode.port);
 	}
 }
 
@@ -288,8 +288,7 @@ cli_do_monitor_get_coordinator(int argc, char **argv)
 
 	if (IS_EMPTY_STRING_BUFFER(coordinatorNode.host))
 	{
-		pgaf_fprintf(stdout,
-					 "%s has no coordinator ready yet\n", config.formation);
+		fformat(stdout, "%s has no coordinator ready yet\n", config.formation);
 		exit(EXIT_CODE_QUIT);
 	}
 
@@ -308,11 +307,11 @@ cli_do_monitor_get_coordinator(int argc, char **argv)
 	}
 	else
 	{
-		pgaf_fprintf(stdout,
-					 "%s %s:%d\n",
-					 config.formation,
-					 coordinatorNode.host,
-					 coordinatorNode.port);
+		fformat(stdout,
+				"%s %s:%d\n",
+				config.formation,
+				coordinatorNode.host,
+				coordinatorNode.port);
 	}
 }
 
@@ -421,15 +420,15 @@ cli_do_monitor_register_node(int argc, char **argv)
 	}
 	else
 	{
-		pgaf_fprintf(stdout,
-					 "%s/%d %s:%d %d:%d %s\n",
-					 config.formation,
-					 config.groupId,
-					 config.nodename,
-					 config.pgSetup.pgport,
-					 keeper.state.current_node_id,
-					 keeper.state.current_group,
-					 NodeStateToString(keeper.state.assigned_role));
+		fformat(stdout,
+				"%s/%d %s:%d %d:%d %s\n",
+				config.formation,
+				config.groupId,
+				config.nodename,
+				config.pgSetup.pgport,
+				keeper.state.current_node_id,
+				keeper.state.current_group,
+				NodeStateToString(keeper.state.assigned_role));
 	}
 }
 
@@ -516,15 +515,15 @@ cli_do_monitor_node_active(int argc, char **argv)
 	}
 	else
 	{
-		pgaf_fprintf(stdout,
-					 "%s/%d %s:%d %d:%d %s\n",
-					 config.formation,
-					 config.groupId,
-					 config.nodename,
-					 config.pgSetup.pgport,
-					 assignedState.nodeId,
-					 assignedState.groupId,
-					 NodeStateToString(assignedState.state));
+		fformat(stdout,
+				"%s/%d %s:%d %d:%d %s\n",
+				config.formation,
+				config.groupId,
+				config.nodename,
+				config.pgSetup.pgport,
+				assignedState.nodeId,
+				assignedState.groupId,
+				NodeStateToString(assignedState.state));
 	}
 }
 
@@ -559,5 +558,5 @@ cli_do_monitor_version(int argc, char **argv)
 	{
 		log_warn("This command does not support JSON output at the moment");
 	}
-	pgaf_fprintf(stdout, "%s\n", version.installedVersion);
+	fformat(stdout, "%s\n", version.installedVersion);
 }

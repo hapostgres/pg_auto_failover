@@ -741,7 +741,7 @@ normalize_filename(const char *filename, char *dst, int size)
 
 
 /*
- * pgaf_fprintf is a secured down version of pg_fprintf
+ * fformat is a secured down version of pg_fprintf:
  *
  * Additional security checks are:
  *  - make sure stream is not null
@@ -749,7 +749,7 @@ normalize_filename(const char *filename, char *dst, int size)
  *  - rely on pg_fprintf Assert() that %s arguments are not null
  */
 int
-pgaf_fprintf(FILE *stream, const char *fmt, ...)
+fformat(FILE *stream, const char *fmt, ...)
 {
 	int			len;
 	va_list		args;

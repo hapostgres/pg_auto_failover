@@ -437,21 +437,19 @@ print_reachable_states(KeeperStateData *keeperState)
 		{
 			if (!header)
 			{
-				pgaf_fprintf(stdout,
-							 "%20s | %20s | %s\n",
-							 "Current", "Reachable", "Comment");
-				pgaf_fprintf(stdout,
-							 "%20s-+-%20s-+-%s\n",
-							 "--------------------",
-							 "--------------------",
-							 "--------------------");
+				fformat(stdout, "%20s | %20s | %s\n",
+						"Current", "Reachable", "Comment");
+				fformat(stdout, "%20s-+-%20s-+-%s\n",
+						"--------------------",
+						"--------------------",
+						"--------------------");
 				header = true;
 			}
-			pgaf_fprintf(stdout,
-						 "%20s | %20s | %s\n",
-						 NodeStateToString(transition.current),
-						 NodeStateToString(transition.assigned),
-						 transition.comment);
+			fformat(stdout,
+					"%20s | %20s | %s\n",
+					NodeStateToString(transition.current),
+					NodeStateToString(transition.assigned),
+					transition.comment);
 		}
 		transition = KeeperFSM[++transitionIndex];
 	}
@@ -470,7 +468,7 @@ print_fsm_for_graphviz()
 	KeeperFSMTransition transition = KeeperFSM[0];
 	int transitionIndex = 0;
 
-	pgaf_fprintf(
+	fformat(
 		stdout,
 		"digraph finite_state_machine\n"
 		"{\n"
@@ -481,13 +479,13 @@ print_fsm_for_graphviz()
 
 	while (transition.current != NO_STATE)
 	{
-		pgaf_fprintf(stdout,
-					 "    %s -> %s [ label = \"%s\" ];\n",
-					 NodeStateToString(transition.current),
-					 NodeStateToString(transition.assigned),
-					 transition.comment);
+		fformat(stdout,
+				"    %s -> %s [ label = \"%s\" ];\n",
+				NodeStateToString(transition.current),
+				NodeStateToString(transition.assigned),
+				transition.comment);
 
 		transition = KeeperFSM[++transitionIndex];
 	}
-	pgaf_fprintf(stdout, "}\n");
+	fformat(stdout, "}\n");
 }
