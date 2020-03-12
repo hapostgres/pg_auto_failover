@@ -257,12 +257,7 @@ cli_show_state_getopts(int argc, char **argv)
 
 	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 	{
-		if (!get_env_pgdata(options.pgSetup.pgdata, MAXPGPATH))
-		{
-			log_fatal("Failed to get PGDATA either from the environment "
-					  "or from --pgdata");
-			exit(EXIT_CODE_BAD_ARGS);
-		}
+		get_env_pgdata_or_exit(options.pgSetup.pgdata);
 	}
 
 	keeperOptions = options;
@@ -460,12 +455,7 @@ cli_show_uri_getopts(int argc, char **argv)
 
 	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 	{
-		if (!get_env_pgdata(options.pgSetup.pgdata, MAXPGPATH))
-		{
-			log_fatal("Failed to get PGDATA either from the environment "
-					  "or from --pgdata");
-			exit(EXIT_CODE_BAD_ARGS);
-		}
+		get_env_pgdata_or_exit(options.pgSetup.pgdata);
 	}
 
 	if (!keeper_config_set_pathnames_from_pgdata(&(options.pathnames),
@@ -835,12 +825,7 @@ cli_show_file_getopts(int argc, char **argv)
 
 	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 	{
-		if (!get_env_pgdata(options.pgSetup.pgdata, MAXPGPATH))
-		{
-			log_fatal("Failed to get PGDATA either from the environment "
-					  "or from --pgdata");
-			exit(EXIT_CODE_BAD_ARGS);
-		}
+		get_env_pgdata_or_exit(options.pgSetup.pgdata);
 	}
 
 	if (!keeper_config_set_pathnames_from_pgdata(&options.pathnames,

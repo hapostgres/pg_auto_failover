@@ -57,6 +57,7 @@
 
 /* internal default for allocating strings  */
 #define BUFSIZE 1024
+#define MAXPATHSIZE 50000
 
 #define AWAIT_PROMOTION_SLEEP_TIME_MS 1000
 

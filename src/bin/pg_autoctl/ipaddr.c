@@ -34,7 +34,6 @@ static unsigned int countSetBitsv6(unsigned char *addr);
 static bool ipv4eq(struct sockaddr_in *a, struct sockaddr_in *b);
 static bool ipv6eq(struct sockaddr_in6 *a, struct sockaddr_in6 *b);
 static bool fetchIPAddressFromInterfaceList(char *localIpAddress, int size);
-static bool isTestEnv(void);
 
 /*
  * Connect in UDP to a known DNS server on the external network, and grab our
@@ -69,7 +68,7 @@ fetchLocalIPAddress(char *localIpAddress, int size,
     err = connect(sock, (const struct sockaddr*) &serv, sizeof(serv));
     if (err < 0)
     {
-		if (isTestEnv())
+		if (env_empty("PG_REGRESS_SOCK_DIR"))
 		{
 			/*
 			 * In test environment, in case of no internet access, just use the
@@ -367,16 +366,6 @@ fetchIPAddressFromInterfaceList(char *localIpAddress, int size)
 	freeifaddrs(ifaddrList);
 
 	return found;
-}
-
-
-/*
- * Returns whether we are running inside the test environment.
- */
-static bool
-isTestEnv(void)
-{
-	return get_env_variable("PG_REGRESS_SOCK_DIR", NULL, 0) == 0;
 }
 
 

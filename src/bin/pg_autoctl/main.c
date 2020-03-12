@@ -32,7 +32,7 @@ main(int argc, char **argv)
 	 * When PG_AUTOCTL_DEBUG is set in the environment, provide the user
 	 * commands available to debug a pg_autoctl instance.
 	 */
-	if (get_env_variable(PG_AUTOCTL_DEBUG, NULL, 0) >= 0)
+	if (env_exists(PG_AUTOCTL_DEBUG))
 	{
 		command = root_with_debug;
 	}

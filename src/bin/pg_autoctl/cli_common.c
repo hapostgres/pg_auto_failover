@@ -407,12 +407,7 @@ cli_create_node_getopts(int argc, char **argv,
 	 */
 	if (IS_EMPTY_STRING_BUFFER(LocalOptionConfig.pgSetup.pgdata))
 	{
-		if (!get_env_pgdata(LocalOptionConfig.pgSetup.pgdata, MAXPGPATH))
-		{
-			log_fatal("Failed to get PGDATA either from the environment "
-					  "or from --pgdata");
-			exit(EXIT_CODE_BAD_ARGS);
-		}
+		get_env_pgdata_or_exit(LocalOptionConfig.pgSetup.pgdata);
 	}
 
 	/*
@@ -744,12 +739,7 @@ prepare_keeper_options(KeeperConfig *options)
 {
 	if (IS_EMPTY_STRING_BUFFER(options->pgSetup.pgdata))
 	{
-		if (!get_env_pgdata(options->pgSetup.pgdata, MAXPGPATH))
-		{
-			log_fatal("Failed to get PGDATA either from the environment "
-					  "or from --pgdata");
-			exit(EXIT_CODE_BAD_ARGS);
-		}
+		get_env_pgdata_or_exit(options->pgSetup.pgdata);
 	}
 
 	log_debug("Managing PostgreSQL installation at \"%s\"",
@@ -802,14 +792,7 @@ void
 set_first_pgctl(PostgresSetup *pgSetup)
 {
 	char **pg_ctls = NULL;
-	const int MAXPATHSIZE = 10000;
-	char envPath[10000];
-	int n = 0;
-
-	if (get_env_variable("PATH", envPath, MAXPATHSIZE) > 0)
-	{
-		n = search_pathlist(envPath, "pg_ctl", &pg_ctls);
-	}
+	int n = search_path("pg_ctl", &pg_ctls);
 
 	if (n < 1)
 	{
@@ -831,7 +814,7 @@ set_first_pgctl(PostgresSetup *pgSetup)
 		strlcpy(pgSetup->pg_version, version, PG_VERSION_STRING_MAX);
 
 		free(version);
-		search_pathlist_destroy_result(pg_ctls);
+		search_path_destroy_result(pg_ctls);
 	}
 }
 
@@ -983,7 +966,7 @@ keeper_cli_help(int argc, char **argv)
 {
 	CommandLine command = root;
 
-	if (get_env_variable(PG_AUTOCTL_DEBUG, NULL, 0) >= 0)
+	if (env_exists(PG_AUTOCTL_DEBUG))
 	{
 		command = root_with_debug;
 	}

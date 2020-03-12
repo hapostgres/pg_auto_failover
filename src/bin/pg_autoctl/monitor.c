@@ -1731,18 +1731,18 @@ monitor_ensure_extension_version(Monitor *monitor,
 	char envExtensionVersion[MAXPGPATH];
 
 	/* in test environment, we can export any target version we want */
-	if (get_env_variable(PG_AUTOCTL_DEBUG, NULL, 0) >= 0L)
+	if (env_exists(PG_AUTOCTL_DEBUG) && env_exists(PG_AUTOCTL_EXTENSION_VERSION_VAR))
 	{
-		int varLength = get_env_variable(PG_AUTOCTL_EXTENSION_VERSION_VAR,
-										 envExtensionVersion,
-										 MAXPGPATH);
-		if (varLength >= 0)
+		if (!get_env_copy(PG_AUTOCTL_EXTENSION_VERSION_VAR, envExtensionVersion,
+						  MAXPGPATH))
 		{
-			extensionVersion = envExtensionVersion;
-			log_debug("monitor_ensure_extension_version targets extension "
-					  "version \"%s\" - as per environment.",
-					  extensionVersion);
+			/* errors have already been logged */
+			return false;
 		}
+		extensionVersion = envExtensionVersion;
+		log_debug("monitor_ensure_extension_version targets extension "
+				  "version \"%s\" - as per environment.",
+				  extensionVersion);
 	}
 
 	if (!monitor_get_extension_version(monitor, version))

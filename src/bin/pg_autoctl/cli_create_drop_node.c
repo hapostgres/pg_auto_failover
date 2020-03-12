@@ -571,12 +571,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 	 */
 	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 	{
-		if (!get_env_pgdata(options.pgSetup.pgdata, MAXPGPATH))
-		{
-			log_fatal("Failed to set PGDATA either from the environment "
-					  "or from --pgdata");
-			exit(EXIT_CODE_BAD_ARGS);
-		}
+		get_env_pgdata_or_exit(options.pgSetup.pgdata);
 	}
 
 	/*

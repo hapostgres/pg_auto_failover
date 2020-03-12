@@ -32,8 +32,8 @@ void path_in_same_directory(const char *basePath,
 							const char *fileName,
 							char *destinationPath);
 
-int search_pathlist(const char *pathlist, const char *filename, char ***result);
-void search_pathlist_destroy_result(char **result);
+int search_path(const char *filename, char ***result);
+void search_path_destroy_result(char **result);
 bool unlink_file(const char *filename);
 bool set_program_absolute_path(char *program, int size);
 bool normalize_filename(const char *filename, char *dst, int size);

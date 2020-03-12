@@ -37,13 +37,13 @@ build_xdg_path(char *dst,
 	char filename[MAXPGPATH];
 	char home[MAXPGPATH];
 	int homePathLength = 0;
+	char fallback[MAXPGPATH];
 	char xdg_topdir[MAXPGPATH];
 	int xdg_topdir_length = 0;
+	char *envVarName;
 
-	homePathLength = get_env_variable("HOME", home, MAXPGPATH);
-	if (homePathLength <= 0 || homePathLength >= MAXPGPATH)
+	if (!get_env_copy("HOME", home, MAXPGPATH))
 	{
-		log_fatal("Environment variable HOME is unset");
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
@@ -51,25 +51,22 @@ build_xdg_path(char *dst,
 	{
 		case XDG_DATA:
 		{
-			xdg_topdir_length = get_env_variable("XDG_DATA_HOME", xdg_topdir, MAXPGPATH);
+			join_path_components(fallback, home, ".local/share");
+			envVarName = "XDG_DATA_HOME";
 			break;
 		}
 
 		case XDG_CONFIG:
 		{
-			xdg_topdir_length = get_env_variable("XDG_CONFIG_HOME", xdg_topdir, MAXPGPATH);
+			join_path_components(fallback, home, ".config");
+			envVarName = "XDG_CONFIG_HOME";
 			break;
 		}
 
 		case XDG_RUNTIME:
 		{
-			xdg_topdir_length = get_env_variable("XDG_RUNTIME_DIR", xdg_topdir, MAXPGPATH);
-
-			if (xdg_topdir_length <= 0  || !directory_exists(xdg_topdir))
-			{
-				/* then default to /tmp */
-				xdg_topdir_length = strlcpy(xdg_topdir, "/tmp", MAXPGPATH);
-			}
+			strlcpy(fallback, "/tmp", MAXPGPATH);
+			envVarName = "XDG_RUNTIME_DIR";
 			break;
 		}
 
@@ -80,36 +77,13 @@ build_xdg_path(char *dst,
 			return false;
 	}
 
-	if (xdg_topdir_length >= 0)
-	{
-		/* use e.g. ${XDG_DATA_HOME}/pg_autoctl/<PGDATA>/pg_autoctl.state */
-		strlcpy(filename, xdg_topdir, MAXPGPATH);
+	if (!get_env_copy_with_fallback(envVarName, xdg_topdir, MAXPGPATH, fallback)) {
+		/* errors have already been logged */
+		return false;
 	}
-	else
-	{
-		/* use e.g. ${HOME}/.local/share/pg_autoctl/<PGDATA>/pg_autoctl.state */
-		strlcpy(filename, home, MAXPGPATH);
 
-		switch (xdgType)
-		{
-			case XDG_DATA:
-			{
-				join_path_components(filename, filename, ".local/share");
-				break;
-			}
-
-			case XDG_CONFIG:
-			{
-				join_path_components(filename, filename, ".config");
-				break;
-			}
-
-			default:
-
-				/* can not happen given previous switch */
-				log_error("No support for XDG Resource Type %d", xdgType);
-				return false;
-		}
+	if (xdgType == XDG_RUNTIME && !directory_exists(xdg_topdir)) {
+		xdg_topdir_length = strlcpy(xdg_topdir, "/tmp", MAXPGPATH);
 	}
 
 	join_path_components(filename, filename, "pg_autoctl");

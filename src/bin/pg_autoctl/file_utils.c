@@ -470,26 +470,30 @@ path_in_same_directory(const char *basePath, const char *fileName,
 
 
 /*
- * Searches all the directories in the ':' separated pathlist for
+ * Searches all the directories in the PATH environment variable for
  * the given filename. Returns number of occurrences, and allocates
  * and returns the path for each of the occurrences in the given result
  * pointer.
  *
  * If the result size is 0, then *result is set to NULL.
  *
- * The caller should free the result by calling search_pathlist_destroy_result().
+ * The caller should free the result by calling search_path_destroy_result().
  */
 int
-search_pathlist(const char *pathlist, const char *filename, char ***result)
+search_path(const char *filename, char ***result)
 {
 	char *stringSpace = NULL;
 	char *path = NULL;
 	int pathListLength = 0;
 	int resultSize = 0;
 	int pathIndex = 0;
-
 	/* Create a copy of pathlist, because we modify it here. */
-	char *pathlist_copy = strdup(pathlist);
+	char pathlist[MAXPATHSIZE];
+	if (!get_env_copy("PATH", pathlist, MAXPATHSIZE))
+	{
+		return 0;
+	}
+
 
 	for (pathIndex = 0; pathlist[pathIndex] != '\0'; pathIndex++)
 	{
@@ -502,7 +506,6 @@ search_pathlist(const char *pathlist, const char *filename, char ***result)
 	if (pathListLength == 0)
 	{
 		*result = NULL;
-		free(pathlist_copy);
 		return 0;
 	}
 
@@ -512,7 +515,7 @@ search_pathlist(const char *pathlist, const char *filename, char ***result)
 	/* allocate memory to store the strings */
 	stringSpace = malloc(pathListLength * MAXPGPATH);
 
-	path = pathlist_copy;
+	path = pathlist;
 
 	while (path != NULL)
 	{
@@ -562,16 +565,15 @@ search_pathlist(const char *pathlist, const char *filename, char ***result)
 		*result = NULL;
 	}
 
-	free(pathlist_copy);
 
 	return resultSize;
 }
 
 /*
- * Frees the space allocated by search_pathlist().
+ * Frees the space allocated by search_path().
  */
 void
-search_pathlist_destroy_result(char **result)
+search_path_destroy_result(char **result)
 {
 	if (result != NULL)
 	{
@@ -673,8 +675,6 @@ set_program_absolute_path(char *program, int size)
 		 */
 		char **pathEntries = NULL;
 		int n;
-		const int MAXPATHSIZE = 10000;
-		char envPath[10000];
 
 		if (pg_autoctl_argv0[0] == '/')
 		{
@@ -682,10 +682,7 @@ set_program_absolute_path(char *program, int size)
 			return true;
 		}
 
-		if (get_env_variable("PATH", envPath, MAXPATHSIZE) > 0)
-		{
-			n = search_pathlist(envPath, pg_autoctl_argv0, &pathEntries);
-		}
+		n = search_path(pg_autoctl_argv0, &pathEntries);
 
 		if (n < 1)
 		{
@@ -698,7 +695,7 @@ set_program_absolute_path(char *program, int size)
 			log_debug("Found \"%s\" in PATH at \"%s\"",
 					  pg_autoctl_argv0, pathEntries[0]);
 			strlcpy(program, pathEntries[0], size);
-			search_pathlist_destroy_result(pathEntries);
+			search_path_destroy_result(pathEntries);
 
 			return true;
 		}

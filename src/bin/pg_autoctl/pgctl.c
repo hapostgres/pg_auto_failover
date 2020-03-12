@@ -178,15 +178,7 @@ config_find_pg_ctl(PostgresSetup *pgSetup)
 	 * path variable could be arbitrarily large. We put an upper limit on 10K here.
 	 * In this case we only consider the part we can read
 	 */
-	const int MAXPATHSIZE = 10000;
-	char envPath[10000];
-	int envlength = get_env_variable("PATH", envPath, MAXPATHSIZE);
-	int n = 0;
-
-	if (envlength > 0)
-	{
-		n = search_pathlist(envPath, "pg_ctl", &pg_ctls);
-	}
+	int n = search_path("pg_ctl", &pg_ctls);
 
 	pgSetup->pg_ctl[0] = '\0';
 	pgSetup->pg_version[0] = '\0';
@@ -239,7 +231,7 @@ config_find_pg_ctl(PostgresSetup *pgSetup)
 		}
 	}
 
-	search_pathlist_destroy_result(pg_ctls);
+	search_path_destroy_result(pg_ctls);
 
 	return n;
 }
@@ -813,11 +805,11 @@ pg_ctl_start(const char *pg_ctl,
 		args[argsIndex++] = (char *) listen_addresses_option;
 	}
 
-	env_pg_regress_sock_dir_len = get_env_variable("PG_REGRESS_SOCK_DIR",
-												   env_pg_regress_sock_dir,
-												   MAXPGPATH);
-	if(env_pg_regress_sock_dir_len >= 0)
-	{
+	if (env_exists("PG_REGRESS_SOCK_DIR")) {
+		if (!get_env_copy("PG_REGRESS_SOCK_DIR", env_pg_regress_sock_dir, MAXPGPATH)) {
+			/* errors have already been logged */
+			return false;
+		}
 		snprintf(option_unix_socket_directory,
 				 sizeof(option_unix_socket_directory),
 				 "\"-k \"%s\"\"",
@@ -1438,18 +1430,9 @@ pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *nodename)
 	Program program;
 	char subject[BUFSIZE] = { 0 };
 	int size = 0;
-	const int MAXPATHSIZE = 10000;
-	char envPath[10000];
-	int n = 0;
-
 	char openssl[MAXPGPATH];
 	char **opensslSearchList = NULL;
-
-	if (get_env_variable("PATH", envPath, MAXPATHSIZE) > 0)
-	{
-		n = search_pathlist(envPath, "openssl", &opensslSearchList);
-	}
-
+	int n = search_path("openssl", &opensslSearchList);
 	if (n < 1)
 	{
 		log_error("Failed to find \"openssl\" command in your PATH");
@@ -1459,7 +1442,7 @@ pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *nodename)
 	{
 		strlcpy(openssl, opensslSearchList[0], MAXPGPATH);
 
-		search_pathlist_destroy_result(opensslSearchList);
+		search_path_destroy_result(opensslSearchList);
 	}
 
 	size = snprintf(pgSetup->ssl.serverKey, MAXPGPATH,

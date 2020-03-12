@@ -107,9 +107,10 @@ pg_setup_init(PostgresSetup *pgSetup,
 	}
 	else
 	{
-		if (!get_env_pgdata(pgSetup->pgdata, MAXPGPATH))
+		if (!get_env_pgdata(pgSetup->pgdata))
 		{
-			log_error("PGDATA is unset in environment, please provide --pgdata");
+			log_error("Failed to set PGDATA either from the environment "
+					  "or from --pgdata");
 			errors++;
 		}
 	}
@@ -155,7 +156,11 @@ pg_setup_init(PostgresSetup *pgSetup,
 	}
 	else
 	{
-		(void) get_env_variable("PGUSER", pgSetup->username, NAMEDATALEN);
+		if (!get_env_copy_with_fallback("PGUSER", pgSetup->username, NAMEDATALEN, ""))
+		{
+			/* errors have already been logged */
+			return false;
+		}
 	}
 
 	/* check or find dbname */
@@ -170,9 +175,11 @@ pg_setup_init(PostgresSetup *pgSetup,
 		 * there. Otherwise we attempt to connect without a database name, and
 		 * the default will use the username here instead.
 		 */
-		if (get_env_variable("PGDATABASE", pgSetup->dbname, NAMEDATALEN) < 0)
+		if (!get_env_copy_with_fallback("PGDATABASE", pgSetup->dbname, NAMEDATALEN,
+										DEFAULT_DATABASE_NAME))
 		{
-			strlcpy(pgSetup->dbname, DEFAULT_DATABASE_NAME, NAMEDATALEN);
+			/* errors have already been logged */
+			return false;
 		}
 	}
 
@@ -209,7 +216,12 @@ pg_setup_init(PostgresSetup *pgSetup,
 			 * We can (at least try to) connect without host= in the connection
 			 * string, so missing PGHOST and --pghost isn't an error.
 			 */
-			(void) get_env_variable("PGHOST", pgSetup->pghost, _POSIX_HOST_NAME_MAX);
+			if (!get_env_copy_with_fallback("PGHOST", pgSetup->pghost,
+											_POSIX_HOST_NAME_MAX, ""))
+			{
+				/* errors have already been logged */
+				return false;
+			}
 
 		}
 	}
@@ -221,7 +233,7 @@ pg_setup_init(PostgresSetup *pgSetup,
 	 */
 	if (IS_EMPTY_STRING_BUFFER(pgSetup->pghost))
 	{
-		if (get_env_variable("PG_REGRESS_SOCK_DIR", NULL, 0) == 0)
+		if (env_empty("PG_REGRESS_SOCK_DIR"))
 		{
 			log_error("PG_REGRESS_SOCK_DIR is set to \"\" to disable unix "
 					  "socket directories, now --pghost is mandatory, "
@@ -619,21 +631,24 @@ pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 									 char *connectionString)
 {
 	char pg_regress_sock_dir[MAXPGPATH];
-	int  pg_regress_sock_dir_len = get_env_variable("PG_REGRESS_SOCK_DIR",
-													pg_regress_sock_dir,
-													MAXPGPATH);
 	char *connStringEnd = connectionString;
 
 	connStringEnd += sprintf(connStringEnd, "port=%d dbname=%s",
 							 pgSetup->pgport, pgSetup->dbname);
 
+	bool pg_regress_sock_dir_exists = env_exists("PG_REGRESS_SOCK_DIR");
+	if (pg_regress_sock_dir_exists &&
+			!get_env_copy("PG_REGRESS_SOCK_DIR", pg_regress_sock_dir, MAXPGPATH)) {
+		/* errors have already been logged */
+		return false;
+	}
 	/*
 	 * When PG_REGRESS_SOCK_DIR is set and empty, we force the connection
 	 * string to use "localhost" (TCP/IP hostname for IP 127.0.0.1 or ::1,
 	 * usually), even when the configuration setup is using a unix directory
 	 * setting.
 	 */
-	if (pg_regress_sock_dir_len == 0
+	if (pg_regress_sock_dir_exists && strlen(pg_regress_sock_dir) == 0
 		&& (IS_EMPTY_STRING_BUFFER(pgSetup->pghost)
 			|| pgSetup->pghost[0] == '/'))
 	{
@@ -641,7 +656,7 @@ pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 	}
 	else if (!IS_EMPTY_STRING_BUFFER(pgSetup->pghost))
 	{
-		if (pg_regress_sock_dir_len > 0
+		if (pg_regress_sock_dir_exists && strlen(pg_regress_sock_dir) > 0
 			&& strcmp(pgSetup->pghost, pg_regress_sock_dir) != 0)
 		{
 			/*
@@ -867,7 +882,7 @@ pg_setup_get_username(PostgresSetup *pgSetup)
 
 
 	/* fallback on USER from env if the user cannot be found in passwd */
-	if (get_env_variable("USER", userEnv, NAMEDATALEN) >= 0 )
+	if (get_env_copy("USER", userEnv, NAMEDATALEN))
 	{
 		log_trace("username found in USER environment variable: %s", userEnv);
 		return strdup(userEnv);
@@ -1088,7 +1103,7 @@ pgsetup_get_pgport()
 	char pgport_env[NAMEDATALEN];
 	long pgport = 0;
 
-	if (get_env_variable("PGPORT", pgport_env, NAMEDATALEN) >= 0)
+	if (get_env_copy("PGPORT", pgport_env, NAMEDATALEN))
 	{
 		errno = 0;
 		pgport = strtol(pgport_env, NULL, 10);

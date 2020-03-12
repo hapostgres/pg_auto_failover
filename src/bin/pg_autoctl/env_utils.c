@@ -10,36 +10,77 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "defaults.h"
 #include "env_utils.h"
 #include "log.h"
 
 /*
- * get_env_variable checks for the environment variable and copies
- * its value into provided buffer if the buffer is not null.
- *
- * Function returns the length of the environment variable.
- *
- * Return values
- *  - GETENV_ERROR_INVALID_NAME : incorrect variable name is provided
- *  - GETENV_ERROR_BUFFER_SIZE  : buffer is not large enough
- *  - GETENV_ERROR_NOT_FOUND    : variable is not found
- *  - GETENV_EMPTY              : variable is found but no value is set
- *  - (1+)                      : length of the environment variable
- *
- * The function returns the length of the variable even, not the copied
- * size. Therefore caller is responsible to compare the returned length
- * with the provided buffer size in case buffer is not large enough.
+ * env_empty returns true if the passed environment variable is the empty
+ * string. It returns false when the environment variable is not set.
  */
-int
-get_env_variable(const char *name, char *result, int maxLength)
-{
+bool
+env_empty(const char *name) {
 	char *envvalue = NULL;
-	int actualLength = -1;
+	if (name == NULL || strlen(name) == 0)
+	{
+		log_error("Failed to get environment setting. NULL or empty variable name is provided");
+		return false;
+	}
+
+	/*
+	 * Explanation of IGNORE-BANNED
+	 * getenv is safe here because we never provide null argument,
+	 * and only check the value it's length.
+	 */
+	envvalue = getenv(name); /* IGNORE-BANNED */
+	return envvalue != NULL && strlen(envvalue) == 0;
+
+}
+
+/*
+ * env_exists returns true if the passed environment variable exists in the
+ * environment, otherwise it returns false.
+ */
+bool
+env_exists(const char *name) {
+	if (name == NULL || strlen(name) == 0)
+	{
+		log_error("Failed to get environment setting. NULL or empty variable name is provided");
+		return false;
+	}
+
+	/*
+	 * Explanation of IGNORE-BANNED
+	 * getenv is safe here because we never provide null argument,
+	 * and only check if it returns NULL.
+	 */
+	return getenv(name) != NULL; /* IGNORE-BANNED */
+
+}
+
+/*
+ * get_env_copy_with_fallback copies the environment variable with "name" into
+ * the result buffer. It returns false when it fails. If the environment
+ * variable is not set the fallback string will be written in the buffer.
+ * Except when fallback is NULL, in that case an error is returned.
+ */
+bool
+get_env_copy_with_fallback(const char *name, char *result, int maxLength,
+						   const char* fallback)
+{
+	const char *envvalue = NULL;
+	size_t actualLength = 0;
 
 	if (name == NULL || strlen(name) == 0)
 	{
 		log_error("Failed to get environment setting. NULL or empty variable name is provided");
-		return GETENV_ERROR_INVALID_NAME;
+		return false;
+	}
+
+	if (result == NULL)
+	{
+		log_error("Failed to get environment setting. Tried to store in NULL pointer");
+		return false;
 	}
 
 	/*
@@ -48,26 +89,35 @@ get_env_variable(const char *name, char *result, int maxLength)
 	 * and copy out the result immediately.
 	 */
 	envvalue = getenv(name); /* IGNORE-BANNED */
-
-	actualLength = strlen(envvalue);
 	if (envvalue == NULL)
 	{
-		return GETENV_ERROR_NOT_FOUND;
+		envvalue = fallback;
+		if (envvalue == NULL) {
+			log_error("Failed to get %s environment setting. It was not set", name);
+			return false;
+		}
 	}
 
-	if (result == NULL)
-	{
-		return actualLength;
-	}
+	actualLength = strlcpy(result, envvalue, maxLength);
 
-	*result = '\0';
-
+	/* uses >= to make sure the nullbyte fits */
 	if (actualLength >= maxLength)
 	{
-		return GETENV_ERROR_BUFFER_SIZE;
+		log_error("Failed to load %s environment setting. It was larger than the maximum of %d bytes", name, maxLength);
+		return false;
 	}
+	return true;
 
-	return strlcpy(result, envvalue, maxLength);
+}
+
+/*
+ * get_env_copy copies the environmennt variable with "name" into tho result
+ * buffer. It returns false when it fails. The environment variable not
+ * existing is also considered a failure.
+ */
+bool get_env_copy(const char *name, char *result, int maxLength)
+{
+	return get_env_copy_with_fallback(name, result, maxLength, NULL);
 }
 
 
@@ -80,7 +130,23 @@ get_env_variable(const char *name, char *result, int maxLength)
  * the provided buffer
  */
 bool
-get_env_pgdata(char *pgdata, int size)
+get_env_pgdata(char *pgdata)
 {
-	return get_env_variable("PGDATA", pgdata, size) > 0;
+	return get_env_copy("PGDATA", pgdata, MAXPGPATH) > 0;
+}
+
+/*
+ * get_env_pgdata_or_exit does the same as get_env_pgdata. Instead of
+ * returning false in case of error it exits the process and shows a FATAL log
+ * message.
+ */
+void
+get_env_pgdata_or_exit(char *pgdata)
+{
+	if (get_env_pgdata(pgdata)) {
+		return;
+	}
+	log_fatal("Failed to set PGDATA either from the environment "
+			  "or from --pgdata");
+	exit(EXIT_CODE_BAD_ARGS);
 }

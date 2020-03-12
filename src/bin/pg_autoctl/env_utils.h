@@ -12,11 +12,11 @@
 
 #include "postgres_fe.h"
 
-#define GETENV_ERROR_INVALID_NAME -3
-#define GETENV_ERROR_BUFFER_SIZE -2
-#define GETENV_ERROR_NOT_FOUND -1
-#define GETENV_EMPTY 0
-
-int get_env_variable(const char *name, char *outbuffer, int maxLength);
-bool get_env_pgdata(char *pgdata, int size);
+bool env_exists(const char *name);
+bool env_empty(const char *name);
+bool get_env_copy(const char *name, char *outbuffer, int maxLength);
+bool get_env_copy_with_fallback(const char *name, char *result, int maxLength,
+								const char* fallback);
+bool get_env_pgdata(char *pgdata);
+void get_env_pgdata_or_exit(char *pgdata);
 #endif /* ENV_UTILS_H */
