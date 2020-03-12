@@ -18,6 +18,7 @@
 #include "cli_common.h"
 #include "cli_do_root.h"
 #include "commandline.h"
+#include "env_utils.h"
 #include "config.h"
 #include "defaults.h"
 #include "file_utils.h"
@@ -130,16 +131,13 @@ cli_systemd_getopt(int argc, char **argv)
 
 	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 	{
-		char *pgdata = getenv("PGDATA");
-
-		if (pgdata == NULL)
+		int pgdatalen = get_env_variable("PGDATA", options.pgSetup.pgdata, MAXPGPATH);
+		if (pgdatalen <= 0|| pgdatalen >= MAXPGPATH)
 		{
 			log_fatal("Failed to set PGDATA either from the environment "
 					  "or from --pgdata");
 			exit(EXIT_CODE_BAD_ARGS);
 		}
-
-		strlcpy(options.pgSetup.pgdata, pgdata, MAXPGPATH);
 	}
 
 	if (!keeper_config_set_pathnames_from_pgdata(&options.pathnames,

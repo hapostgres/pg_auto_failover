@@ -28,6 +28,7 @@
 #include <unistd.h>
 
 #include "defaults.h"
+#include "env_utils.h"
 #include "pgctl.h"
 #include "fsm.h"
 #include "keeper.h"
@@ -267,10 +268,7 @@ fsm_init_primary(Keeper *keeper)
 	 */
 	if (pgInstanceIsOurs)
 	{
-		char *pg_regress_sock_dir = getenv("PG_REGRESS_SOCK_DIR");
-
-		if (pg_regress_sock_dir != NULL
-			&& strcmp(pg_regress_sock_dir, "") == 0)
+		if (get_env_variable("PG_REGRESS_SOCK_DIR", NULL, 0) == 0)
 		{
 			/*
 			 * In test environements allow nodes from the same network to

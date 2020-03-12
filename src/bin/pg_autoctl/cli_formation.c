@@ -15,6 +15,7 @@
 #include "cli_common.h"
 #include "commandline.h"
 #include "defaults.h"
+#include "env_utils.h"
 #include "formation_config.h"
 #include "log.h"
 #include "pgsetup.h"
@@ -151,16 +152,13 @@ keeper_cli_formation_getopts(int argc, char **argv)
 
 	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 	{
-		char *pgdata = getenv("PGDATA");
-
-		if (pgdata == NULL)
+		int pgdatalen = get_env_variable("PGDATA", options.pgSetup.pgdata, MAXPGPATH);
+		if (pgdatalen <= 0 || pgdatalen >= MAXPGPATH)
 		{
 			log_fatal("Failed to get PGDATA either from the environment "
 					  "or from --pgdata");
 			exit(EXIT_CODE_BAD_ARGS);
 		}
-
-		strlcpy(options.pgSetup.pgdata, pgdata, MAXPGPATH);
 	}
 
 	/* publish our option parsing in the global variable */
@@ -299,16 +297,14 @@ keeper_cli_formation_create_getopts(int argc, char **argv)
 
 	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 	{
-		char *pgdata = getenv("PGDATA");
-
-		if (pgdata == NULL)
+		int pgdatalen = get_env_variable("PGDATA", options.pgSetup.pgdata, MAXPGPATH);
+		if (pgdatalen <= 0 || pgdatalen >= MAXPGPATH)
 		{
 			log_fatal("Failed to set PGDATA either from the environment "
 					  "or from --pgdata");
 			exit(EXIT_CODE_BAD_ARGS);
 		}
 
-		strlcpy(options.pgSetup.pgdata, pgdata, MAXPGPATH);
 	}
 
 	if (IS_EMPTY_STRING_BUFFER(options.formation)

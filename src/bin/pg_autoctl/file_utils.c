@@ -21,6 +21,7 @@
 
 #include "cli_root.h"
 #include "defaults.h"
+#include "env_utils.h"
 #include "file_utils.h"
 #include "log.h"
 
@@ -672,6 +673,8 @@ set_program_absolute_path(char *program, int size)
 		 */
 		char **pathEntries = NULL;
 		int n;
+		const int MAXPATHSIZE = 10000;
+		char envPath[10000];
 
 		if (pg_autoctl_argv0[0] == '/')
 		{
@@ -679,7 +682,10 @@ set_program_absolute_path(char *program, int size)
 			return true;
 		}
 
-		n = search_pathlist(getenv("PATH"), pg_autoctl_argv0, &pathEntries);
+		if (get_env_variable("PATH", envPath, MAXPATHSIZE) > 0)
+		{
+			n = search_pathlist(envPath, pg_autoctl_argv0, &pathEntries);
+		}
 
 		if (n < 1)
 		{
