@@ -152,8 +152,7 @@ keeper_cli_formation_getopts(int argc, char **argv)
 
 	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 	{
-		int pgdatalen = get_env_variable("PGDATA", options.pgSetup.pgdata, MAXPGPATH);
-		if (pgdatalen <= 0 || pgdatalen >= MAXPGPATH)
+		if (!get_env_pgdata(options.pgSetup.pgdata, MAXPGPATH))
 		{
 			log_fatal("Failed to get PGDATA either from the environment "
 					  "or from --pgdata");
@@ -297,8 +296,7 @@ keeper_cli_formation_create_getopts(int argc, char **argv)
 
 	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 	{
-		int pgdatalen = get_env_variable("PGDATA", options.pgSetup.pgdata, MAXPGPATH);
-		if (pgdatalen <= 0 || pgdatalen >= MAXPGPATH)
+		if (!get_env_pgdata(options.pgSetup.pgdata, MAXPGPATH))
 		{
 			log_fatal("Failed to set PGDATA either from the environment "
 					  "or from --pgdata");

@@ -107,7 +107,7 @@ pg_setup_init(PostgresSetup *pgSetup,
 	}
 	else
 	{
-		if (get_env_variable("PGDATA", pgSetup->pgdata, MAXPGPATH) < 0)
+		if (!get_env_pgdata(pgSetup->pgdata, MAXPGPATH))
 		{
 			log_error("PGDATA is unset in environment, please provide --pgdata");
 			errors++;

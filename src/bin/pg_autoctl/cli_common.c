@@ -407,8 +407,7 @@ cli_create_node_getopts(int argc, char **argv,
 	 */
 	if (IS_EMPTY_STRING_BUFFER(LocalOptionConfig.pgSetup.pgdata))
 	{
-		int pgdatalen = get_env_variable("PGDATA", LocalOptionConfig.pgSetup.pgdata, MAXPGPATH);
-		if (pgdatalen <= 0 || pgdatalen >= MAXPGPATH)
+		if (!get_env_pgdata(LocalOptionConfig.pgSetup.pgdata, MAXPGPATH))
 		{
 			log_fatal("Failed to get PGDATA either from the environment "
 					  "or from --pgdata");
@@ -745,8 +744,7 @@ prepare_keeper_options(KeeperConfig *options)
 {
 	if (IS_EMPTY_STRING_BUFFER(options->pgSetup.pgdata))
 	{
-		int pgdatalen = get_env_variable("PGDATA", options->pgSetup.pgdata, MAXPGPATH);
-		if (pgdatalen <= 0 || pgdatalen >= MAXPGPATH)
+		if (!get_env_pgdata(options->pgSetup.pgdata, MAXPGPATH))
 		{
 			log_fatal("Failed to get PGDATA either from the environment "
 					  "or from --pgdata");
