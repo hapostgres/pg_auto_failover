@@ -31,9 +31,10 @@
  * src/port/snprintf.c
  */
 
+#include "postgres_fe.h"
+
 #ifndef USE_REPL_SNPRINTF
 
-#include "c.h"
 #include "snprintf.h"
 
 #include <math.h>

@@ -13,6 +13,8 @@
 #ifndef PG_SNPRINTF_H
 #define PG_SNPRINTF_H
 
+#include "postgres_fe.h"
+
 #ifndef USE_REPL_SNPRINTF
 
 int	pg_vsnprintf(char *str, size_t count, const char *fmt, va_list args);
