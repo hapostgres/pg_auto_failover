@@ -130,8 +130,7 @@ build_xdg_path(char *dst,
 
 		if (getcwd(currentWorkingDirectory, MAXPGPATH) == NULL)
 		{
-			log_error("Failed to get the current working directory: %s",
-					  strerror(errno));
+			log_error("Failed to get the current working directory: %m");
 			return false;
 		}
 
@@ -145,8 +144,7 @@ build_xdg_path(char *dst,
 	/* mkdir -p the target directory */
 	if (pg_mkdir_p(filename, 0755) == -1)
 	{
-		log_error("Failed to create state directory \"%s\": %s",
-				  filename, strerror(errno));
+		log_error("Failed to create state directory \"%s\": %m", filename);
 		return false;
 	}
 

@@ -338,17 +338,18 @@ write_ini_to_stream(FILE *stream, IniOption *optionList)
 		{
 			if (currentSection != NULL)
 			{
-				fprintf(stream, "\n");
+				fformat(stream, "\n");
 			}
 			currentSection = (char *) option->section;
-			fprintf(stream, "[%s]\n", currentSection);
+			fformat(stream, "[%s]\n", currentSection);
 		}
 
 		switch (option->type)
 		{
 			case INI_INT_T:
 			{
-				fprintf(stream, "%s = %d\n", option->name, *(option->intValue));
+				fformat(stream, "%s = %d\n",
+							 option->name, *(option->intValue));
 				break;
 			}
 
@@ -358,7 +359,7 @@ write_ini_to_stream(FILE *stream, IniOption *optionList)
 
 				if (value)
 				{
-					fprintf(stream, "%s = %s\n", option->name, value);
+					fformat(stream, "%s = %s\n", option->name, value);
 				}
 				else if (option->required)
 				{
@@ -376,7 +377,7 @@ write_ini_to_stream(FILE *stream, IniOption *optionList)
 
 				if (value[0] != '\0')
 				{
-					fprintf(stream, "%s = %s\n", option->name, value);
+					fformat(stream, "%s = %s\n", option->name, value);
 				}
 				else if (option->required)
 				{
