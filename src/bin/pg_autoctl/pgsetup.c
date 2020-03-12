@@ -437,7 +437,7 @@ get_pgpid(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 
  	fclose(fp);
 
-	if (pid > 0)
+	if (pid > 0 && pid <= INT_MAX)
 	{
 		if (kill(pid, 0) == 0)
 		{
@@ -1111,13 +1111,14 @@ int
 pgsetup_get_pgport()
 {
 	char *pgport_env = getenv("PGPORT");
-	int pgport = 0;
+	long pgport = 0;
 
 	if (pgport_env)
 	{
+		errno = 0;
 		pgport = strtol(pgport_env, NULL, 10);
 
-		if (pgport > 0 && errno != EINVAL)
+		if (pgport > 0 && pgport < INT_MAX && errno == 0)
 		{
 			return pgport;
 		}

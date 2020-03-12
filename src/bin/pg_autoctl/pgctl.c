@@ -181,6 +181,11 @@ config_find_pg_ctl(PostgresSetup *pgSetup)
 	{
 		char *program = pg_ctls[0];
 		char *version = pg_ctl_version(program);
+		if (version == NULL)
+		{
+			log_fatal("Failed to get version info from %s --version", program);
+			return 0;
+		}
 
 		log_info("Found pg_ctl for PostgreSQL %s at %s", version, program);
 
@@ -199,6 +204,21 @@ config_find_pg_ctl(PostgresSetup *pgSetup)
 		{
 			char *program = pg_ctls[i];
 			char *version = pg_ctl_version(program);
+			if (version == NULL)
+			{
+				/*
+				 * Because of this it's possible that there's now only a single
+				 * working version of pg_ctl found in PATH. If that's the case
+				 * we will still not use that by default, since the users
+				 * intention is unclear. They might have wanted to use the
+				 * version of pg_ctl that we could not parse the version string
+				 * for. So we warn and continue, the user should make their
+				 * intention clear by using the --pg_ctl option (or changing
+				 * PATH).
+				 */
+				log_warn("Failed to get version info from %s --version", program);
+				continue;
+			}
 
 			log_info("Found %s for pg version %s", program, version);
 			free(version);
