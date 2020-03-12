@@ -16,6 +16,7 @@
 #include "keeper.h"
 #include "monitor.h"
 #include "monitor_config.h"
+#include "string_utils.h"
 
 static int cli_perform_failover_getopts(int argc, char **argv);
 static void cli_perform_failover(int argc, char **argv);
@@ -106,8 +107,7 @@ cli_perform_failover_getopts(int argc, char **argv)
 
 			case 'g':
 			{
-				int scanResult = sscanf(optarg, "%d", &options.groupId);
-				if (scanResult == 0)
+				if (!stringToInt(optarg, &options.groupId))
 				{
 					log_fatal("--group argument is not a valid group ID: \"%s\"",
 							  optarg);

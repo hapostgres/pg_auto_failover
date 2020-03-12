@@ -10,13 +10,13 @@
 #include <arpa/inet.h>
 #include <errno.h>
 
+#include "ini.h"
 #include "ini_file.h"
 #include "log.h"
 #include "pgctl.h"
 #include "parson.h"
 #include "pgsetup.h"
-
-#include "ini.h"
+#include "string_utils.h"
 
 /*
  * Load a configuration file in the INI format.
@@ -252,9 +252,9 @@ ini_set_option_value(IniOption *option, const char *value)
 		{
 			if (value)
 			{
-				int nb = strtol(value, NULL, 10);
+				int nb;
 
-				if (nb == 0 && errno == EINVAL)
+				if (!stringToInt(value, &nb))
 				{
 					log_error("Failed to parse %s.%s's value \"%s\" as a number",
 							  option->section, option->name, value);

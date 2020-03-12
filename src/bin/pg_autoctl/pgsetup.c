@@ -25,6 +25,7 @@
 #include "pgctl.h"
 #include "log.h"
 #include "signals.h"
+#include "string_utils.h"
 
 
 static bool get_pgpid(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok);
@@ -497,6 +498,8 @@ read_pg_pidfile(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 
 	for (lineno = 1; lineno <= LOCK_FILE_LINE_PM_STATUS; lineno++)
 	{
+		int lineLength = -1;
+
 		if (fgets(line, sizeof(line), fp) == NULL)
 		{
 			/* don't use strerror(errno) here, errno is not set by fgets */
@@ -506,9 +509,26 @@ read_pg_pidfile(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 			return false;
 		}
 
+		lineLength = strlen(line);
+
+		/* chomp the ending Newline (\n) */
+		if (lineLength > 0)
+		{
+			line[lineLength - 1] = '\0';
+			lineLength = strlen(line);
+		}
+
 		if (lineno == LOCK_FILE_LINE_PID)
 		{
-			sscanf(line, "%ld", &pgSetup->pidFile.pid);
+			int pid = 0;
+			if (!stringToInt(line, &pid))
+			{
+				log_error("Postgres pidfile does not contain a valid pid %s", line);
+
+				return false;
+			}
+
+			pgSetup->pidFile.pid = pid;
 
 			if (kill(pgSetup->pidFile.pid, 0) != 0)
 			{
@@ -524,19 +544,14 @@ read_pg_pidfile(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 
 		if (lineno == LOCK_FILE_LINE_PORT)
 		{
-			sscanf(line, "%hu", &pgSetup->pidFile.port);
+			stringToUShort(line, &pgSetup->pidFile.port);
 		}
 
 		if (lineno == LOCK_FILE_LINE_SOCKET_DIR)
 		{
-			int lineLength = strlen(line);
-			if (lineLength > 1)
+			if (lineLength > 0)
 			{
-				int n;
-
-				/* chomp the ending Newline (\n) */
-				line[lineLength - 1] = '\0';
-				n = strlcpy(pgSetup->pghost, line, _POSIX_HOST_NAME_MAX);
+				int n = strlcpy(pgSetup->pghost, line, _POSIX_HOST_NAME_MAX);
 
 				if (n >= _POSIX_HOST_NAME_MAX)
 				{
@@ -552,11 +567,8 @@ read_pg_pidfile(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 
 		if (lineno == LOCK_FILE_LINE_PM_STATUS)
 		{
-			int lineLength = strlen(line);
-			if (lineLength > 1)
+			if (lineLength > 0)
 			{
-				line[lineLength -1] = '\0';
-
 				pgSetup->pm_status = pmStatusFromString(line);
 			}
 		}
@@ -1134,14 +1146,11 @@ int
 pgsetup_get_pgport()
 {
 	char *pgport_env = getenv("PGPORT");
-	long pgport = 0;
+	int pgport = 0;
 
 	if (pgport_env)
 	{
-		errno = 0;
-		pgport = strtol(pgport_env, NULL, 10);
-
-		if (pgport > 0 && pgport < INT_MAX && errno == 0)
+		if (stringToInt(pgport_env, &pgport) && pgport > 0)
 		{
 			return pgport;
 		}

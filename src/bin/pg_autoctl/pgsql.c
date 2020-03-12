@@ -18,6 +18,7 @@
 #include "parsing.h"
 #include "pgsql.h"
 #include "signals.h"
+#include "string_utils.h"
 
 
 #define ERRCODE_DUPLICATE_OBJECT "42710"
@@ -62,9 +63,7 @@ parseSingleValueResult(void *ctx, PGresult *result)
 
 			case PGSQL_RESULT_INT:
 			{
-				context->intVal = strtod(value, NULL);
-
-				if (context->intVal == 0 && errno != 0)
+				if (!stringToInt(value, &context->intVal))
 				{
 					context->parsedOk = false;
 					log_error("Failed to parse int result \"%s\"", value);
@@ -75,14 +74,13 @@ parseSingleValueResult(void *ctx, PGresult *result)
 
 			case PGSQL_RESULT_BIGINT:
 			{
-				context->bigint = strtoull(value, NULL, 10);
-
-				if (context->bigint == 0 && errno != 0)
+				if (!stringToUInt64(value, &context->bigint))
 				{
 					context->parsedOk = false;
 					log_error("Failed to parse uint64_t result \"%s\"", value);
 				}
 				context->parsedOk = true;
+				break;
 			}
 
 			case PGSQL_RESULT_STRING:
@@ -1247,7 +1245,7 @@ hostname_from_uri(const char *pguri,
 			if (option->val)
 			{
 				/* we expect a single port number in a monitor's URI */
-				*port = atoi(option->val);
+				stringToInt(option->val, port);
 				++found;
 			}
 			else

@@ -31,6 +31,7 @@
 #include "monitor_pg_init.h"
 #include "pgctl.h"
 #include "primary_standby.h"
+#include "string_utils.h"
 
 /*
  * Global variables that we're going to use to "communicate" in between getopts
@@ -377,8 +378,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 
 			case 'p':
 			{
-				int scanResult = sscanf(optarg, "%d", &(options.pgSetup.pgport));
-				if (scanResult == 0)
+				if (!stringToInt(optarg, &options.pgSetup.pgport))
 				{
 					log_fatal("--pgport argument is a valid port number: \"%s\"",
 							  optarg);
@@ -815,8 +815,7 @@ cli_drop_node_getopts(int argc, char **argv)
 
 			case 'p':
 			{
-				int scanResult = sscanf(optarg, "%d", &(options.pgSetup.pgport));
-				if (scanResult == 0)
+				if (!stringToInt(optarg, &options.pgSetup.pgport))
 				{
 					log_fatal("--pgport argument is a valid port number: \"%s\"",
 							  optarg);
