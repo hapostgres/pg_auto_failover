@@ -31,6 +31,9 @@ bool parse_controldata(PostgresControlData *pgControlData,
 					   const char *control_data_string);
 
 IntString intToString(int64_t number);
+int64_t stringToInt(const char *str, bool *error);
+uint64_t stringToUInt(const char *str, bool *error);
+double stringToDouble(const char *str, bool *error);
 
 bool parse_state_notification_message(StateNotification *notification);
 

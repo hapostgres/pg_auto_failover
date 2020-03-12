@@ -20,6 +20,7 @@
 #include "fsm.h"
 #include "keeper_config.h"
 #include "keeper.h"
+#include "parsing.h"
 #include "pgctl.h"
 #include "state.h"
 
@@ -290,13 +291,15 @@ cli_do_fsm_assign(int argc, char **argv)
 
 		case 3:
 		{
+			bool error = false;
+
 			goalState = NodeStateFromString(argv[0]);
 
 			/* now prepare host and port in keeper.otherNode */
 			strlcpy(keeper.otherNode.host, argv[1], _POSIX_HOST_NAME_MAX);
 
-			keeper.otherNode.port = strtol(argv[2], NULL, 10);
-			if (keeper.otherNode.port == 0 && errno == EINVAL)
+			keeper.otherNode.port = stringToInt(argv[2], &error);
+			if (keeper.otherNode.port == 0 || error)
 			{
 				log_error(
 					"Failed to parse otherNode port number \"%s\"", argv[2]);

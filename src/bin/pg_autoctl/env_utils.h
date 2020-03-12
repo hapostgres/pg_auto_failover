@@ -10,6 +10,6 @@
 #ifndef ENV_UTILS_H
 #define ENV_UTILS_H
 
-size_t get_env_variable(const char *name, char *outbuffer, int maxLength);
+int get_env_variable(const char *name, char *outbuffer, int maxLength);
 
 #endif /* ENV_UTILS_H */

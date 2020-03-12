@@ -24,6 +24,7 @@
 #include "log.h"
 #include "monitor.h"
 #include "monitor_config.h"
+#include "parsing.h"
 #include "pgsetup.h"
 #include "pgsql.h"
 #include "state.h"
@@ -84,6 +85,7 @@ cli_create_node_getopts(int argc, char **argv,
 	KeeperConfig LocalOptionConfig = { 0 };
 	int c, option_index = 0, errors = 0;
 	int verboseCount = 0;
+	bool error;
 	SSLCommandLineOptions sslCommandLineOptions = SSL_CLI_UNKNOWN;
 
 	/* force some non-zero default values */
@@ -135,8 +137,8 @@ cli_create_node_getopts(int argc, char **argv,
 			case 'p':
 			{
 				/* { "pgport", required_argument, NULL, 'p' } */
-				LocalOptionConfig.pgSetup.pgport = strtol(optarg, NULL, 10);
-				if (LocalOptionConfig.pgSetup.pgport == 0 && errno == EINVAL)
+				LocalOptionConfig.pgSetup.pgport = stringToInt(optarg, &error);
+				if (LocalOptionConfig.pgSetup.pgport == 0 && error)
 				{
 					log_error("Failed to parse --pgport number \"%s\"",
 							  optarg);
@@ -157,8 +159,8 @@ cli_create_node_getopts(int argc, char **argv,
 			case 'y':
 			{
 				/* { "proxyport", required_argument, NULL,'y' } */
-				LocalOptionConfig.pgSetup.proxyport = strtol(optarg, NULL, 10);
-				if (LocalOptionConfig.pgSetup.proxyport == 0 && errno == EINVAL)
+				LocalOptionConfig.pgSetup.proxyport = stringToInt(optarg, &error);
+				if (LocalOptionConfig.pgSetup.proxyport == 0 && error)
 				{
 					log_error("Failed to parse --proxyport number \"%s\"",
 							  optarg);
@@ -233,8 +235,8 @@ cli_create_node_getopts(int argc, char **argv,
 			case 'g':
 			{
 				/* { "group", required_argument, NULL, 'g' } */
-				LocalOptionConfig.groupId = strtol(optarg, NULL, 10);
-				if (errno != 0)
+				LocalOptionConfig.groupId = stringToInt(optarg, &error);
+				if (error)
 				{
 					log_fatal("--group argument is not a valid group ID: \"%s\"",
 							  optarg);

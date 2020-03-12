@@ -23,6 +23,7 @@
 #include "monitor_config.h"
 #include "monitor_pg_init.h"
 #include "monitor.h"
+#include "parsing.h"
 #include "pgctl.h"
 #include "pghba.h"
 #include "pgsetup.h"
@@ -152,6 +153,8 @@ cli_show_state_getopts(int argc, char **argv)
 	while ((c = getopt_long(argc, argv, "D:f:g:n:Vvqh",
 							long_options, &option_index)) != -1)
 	{
+		bool error = false;
+
 		switch (c)
 		{
 			case 'D':
@@ -170,8 +173,8 @@ cli_show_state_getopts(int argc, char **argv)
 
 			case 'g':
 			{
-				options.groupId = strtol(optarg, NULL, 10);
-				if (errno != 0)
+				options.groupId = stringToInt(optarg, &error);
+				if (error)
 				{
 					log_fatal("--group argument is not a valid group ID: \"%s\"",
 							  optarg);
@@ -183,8 +186,8 @@ cli_show_state_getopts(int argc, char **argv)
 
 			case 'n':
 			{
-				eventCount = strtol(optarg, NULL, 10);
-				if (errno != 0)
+				eventCount = stringToInt(optarg, &error);
+				if (error)
 				{
 					log_fatal("--count argument is not a valid count: \"%s\"",
 							  optarg);

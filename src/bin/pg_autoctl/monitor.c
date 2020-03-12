@@ -489,7 +489,7 @@ parseNode(void *ctx, PGresult *result)
 	}
 
 	value = PQgetvalue(result, 0, 1);
-	context->node->port = strtol(value, NULL, 0);
+	context->node->port = stringToInt(value, NULL);
 	if (context->node->port == 0)
 	{
 		log_error("Invalid port number \"%s\" returned by monitor", value);
@@ -510,6 +510,7 @@ parseNodeState(void *ctx, PGresult *result)
 	MonitorAssignedStateParseContext *context = (MonitorAssignedStateParseContext *) ctx;
 	char *value = NULL;
 	int errors = 0;
+	bool error = false;
 
 	if (PQntuples(result) != 1)
 	{
@@ -526,18 +527,18 @@ parseNodeState(void *ctx, PGresult *result)
 	}
 
 	value = PQgetvalue(result, 0, 0);
-	context->assignedState->nodeId = strtol(value, NULL, 10);
+	context->assignedState->nodeId = stringToInt(value, &error);
 
-	if (errno != 0)
+	if (error)
 	{
 		log_error("Invalid node ID \"%s\" returned by monitor", value);
 		++errors;
 	}
 
 	value = PQgetvalue(result, 0, 1);
-	context->assignedState->groupId = strtol(value, NULL, 10);
+	context->assignedState->groupId = stringToInt(value, &error);
 
-	if (errno != 0)
+	if (error)
 	{
 		log_error("Invalid group ID \"%s\" returned by monitor", value);
 		++errors;
@@ -1424,7 +1425,7 @@ parseCoordinatorNode(void *ctx, PGresult *result)
 	}
 
 	value = PQgetvalue(result, 0, 1);
-	context->node->port = strtol(value, NULL, 0);
+	context->node->port = stringToInt(value, NULL);
 	if (context->node->port == 0)
 	{
 		log_error("Invalid port number \"%s\" returned by monitor", value);

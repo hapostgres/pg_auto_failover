@@ -440,13 +440,13 @@ monitor_config_get_postgres_uri(MonitorConfig *config, char *connectionString,
 	PQExpBuffer buffer = NULL;
 	bool success = false;
 
-	if (!IS_EMPTY_STRING_BUFFER(config->pgSetup.username))
+	if (IS_EMPTY_STRING_BUFFER(config->pgSetup.username))
 	{
 		log_warn("Failed to get postgres uri : Username is not provided");
 		return false;
 	}
 
-	if (!IS_EMPTY_STRING_BUFFER(config->pgSetup.dbname))
+	if (IS_EMPTY_STRING_BUFFER(config->pgSetup.dbname))
 	{
 		log_warn("Failed to get postgres uri : Database name is not provided");
 		return false;

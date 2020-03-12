@@ -50,6 +50,7 @@ parseSingleValueResult(void *ctx, PGresult *result)
 	if (PQntuples(result) == 1)
 	{
 		char *value = PQgetvalue(result, 0, 0);
+		bool error = false;
 
 		switch (context->resultType)
 		{
@@ -62,9 +63,9 @@ parseSingleValueResult(void *ctx, PGresult *result)
 
 			case PGSQL_RESULT_INT:
 			{
-				context->intVal = strtod(value, NULL);
+				context->intVal = stringToInt(value, &error);
 
-				if (context->intVal == 0 && errno != 0)
+				if (error)
 				{
 					context->parsedOk = false;
 					log_error("Failed to parse int result \"%s\"", value);
@@ -75,14 +76,15 @@ parseSingleValueResult(void *ctx, PGresult *result)
 
 			case PGSQL_RESULT_BIGINT:
 			{
-				context->bigint = strtoull(value, NULL, 10);
+				context->bigint = stringToUInt(value, &error);
 
-				if (context->bigint == 0 && errno != 0)
+				if (error)
 				{
 					context->parsedOk = false;
 					log_error("Failed to parse uint64_t result \"%s\"", value);
 				}
 				context->parsedOk = true;
+				break;
 			}
 
 			case PGSQL_RESULT_STRING:
@@ -1253,7 +1255,7 @@ hostname_from_uri(const char *pguri,
 			if (option->val)
 			{
 				/* we expect a single port number in a monitor's URI */
-				*port = strtol(option->val, NULL, 10);
+				*port = stringToInt(option->val, NULL);
 				++found;
 			}
 			else

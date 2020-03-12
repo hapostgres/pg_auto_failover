@@ -403,15 +403,22 @@ get_pgpid(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 		return false;
 	}
 
-	pid = strtol(fileContent, NULL, 10);
-
 	if (fileSize == 0)
 	{
 		log_warn("The PID file \"%s\" is empty\n", pidfile);
 	}
-	else if (errno != 0)
+	else
 	{
-		log_warn("Invalid data in PID file \"%s\"\n", pidfile);
+		bool error = false;
+		char *pidFileLines[1];
+
+		splitLines(fileContent, pidFileLines, 1);
+		pid = stringToInt(pidFileLines[0], &error);
+		if (error)
+		{
+			log_warn("Invalid data in PID file \"%s\"\n", pidfile);
+
+		}
 	}
 
 	free(fileContent);
@@ -475,6 +482,8 @@ read_pg_pidfile(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 
 	for (lineno = 1; lineno <= LOCK_FILE_LINE_PM_STATUS; lineno++)
 	{
+		int lineLength = -1;
+
 		if (fgets(line, sizeof(line), fp) == NULL)
 		{
 			/* don't use strerror(errno) here, errno is not set by fgets */
@@ -484,12 +493,23 @@ read_pg_pidfile(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 			return false;
 		}
 
+		lineLength = strlen(line);
+
+		/* chomp the ending Newline (\n) */
+		if (lineLength > 0)
+		{
+			line[lineLength - 1] = '\0';
+			lineLength = strlen(line);
+		}
+
 		if (lineno == LOCK_FILE_LINE_PID)
 		{
-			pgSetup->pidFile.pid = strtol(line, NULL, 10);
-			if (errno != 0)
+			bool error = false;
+
+			pgSetup->pidFile.pid = stringToInt(line, &error);
+			if (error)
 			{
-				log_error("Postgres pidfile does not contain a valid pid");
+				log_error("Postgres pidfile does not contain a valid pid %s", line);
 
 				return false;
 			}
@@ -508,19 +528,15 @@ read_pg_pidfile(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 
 		if (lineno == LOCK_FILE_LINE_PORT)
 		{
-			pgSetup->pidFile.port = strtoul(line, NULL, 10);
+			pgSetup->pidFile.port = stringToUInt(line, NULL);
 		}
 
 		if (lineno == LOCK_FILE_LINE_SOCKET_DIR)
 		{
-			int lineLength = strlen(line);
-			if (lineLength > 1)
-			{
-				int n;
 
-				/* chomp the ending Newline (\n) */
-				line[lineLength - 1] = '\0';
-				n = strlcpy(pgSetup->pghost, line, _POSIX_HOST_NAME_MAX);
+			if (lineLength > 0)
+			{
+				int n = strlcpy(pgSetup->pghost, line, _POSIX_HOST_NAME_MAX);
 
 				if (n >= _POSIX_HOST_NAME_MAX)
 				{
@@ -536,11 +552,8 @@ read_pg_pidfile(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 
 		if (lineno == LOCK_FILE_LINE_PM_STATUS)
 		{
-			int lineLength = strlen(line);
-			if (lineLength > 1)
+			if (lineLength >  0)
 			{
-				line[lineLength -1] = '\0';
-
 				pgSetup->pm_status = pmStatusFromString(line);
 			}
 		}
@@ -1095,11 +1108,12 @@ pgsetup_get_pgport()
 	char pgport_env[NAMEDATALEN];
 	int pgport = 0;
 
-	if (get_env_variable("PGPORT", pgport_env, NAMEDATALEN) >= 0)
+	if (get_env_variable("PGPORT", pgport_env, NAMEDATALEN) > 0)
 	{
-		pgport = strtol(pgport_env, NULL, 10);
+		bool error = false;
 
-		if (pgport > 0 && errno != EINVAL)
+		pgport = stringToInt(pgport_env, &error);
+		if (!error)
 		{
 			return pgport;
 		}

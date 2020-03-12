@@ -21,6 +21,7 @@
 #include "keeper_pg_init.h"
 #include "log.h"
 #include "monitor.h"
+#include "parsing.h"
 #include "pgctl.h"
 #include "state.h"
 #include "signals.h"
@@ -602,6 +603,8 @@ read_pidfile(const char *pidfile, pid_t *pid)
 {
 	long fileSize = 0L;
 	char *fileContents = NULL;
+	char *fileLines[1];
+	bool error = false;
 
 	if (!file_exists(pidfile))
 	{
@@ -613,8 +616,9 @@ read_pidfile(const char *pidfile, pid_t *pid)
 		return false;
 	}
 
-	*pid = strtol(fileContents, NULL, 10);
-	if (errno != 0)
+	splitLines(fileContents, fileLines, 1);
+	*pid = stringToInt(fileLines[0], &error);
+	if (error)
 	{
 		free(fileContents);
 

@@ -30,6 +30,7 @@
 #include "monitor.h"
 #include "monitor_config.h"
 #include "monitor_pg_init.h"
+#include "parsing.h"
 #include "pgctl.h"
 #include "primary_standby.h"
 
@@ -378,10 +379,11 @@ cli_create_monitor_getopts(int argc, char **argv)
 
 			case 'p':
 			{
-				options.pgSetup.pgport = strtoul(optarg, NULL, 10);
-				if (errno != 0 || options.pgSetup.pgport == 0)
+				bool error = false;
+				options.pgSetup.pgport = stringToInt(optarg, &error);
+				if (error || options.pgSetup.pgport == 0)
 				{
-					log_fatal("--pgport argument is a valid port number: \"%s\"",
+					log_fatal("--pgport argument is not a valid port number: \"%s\"",
 							  optarg);
 					exit(EXIT_CODE_BAD_ARGS);
 				}

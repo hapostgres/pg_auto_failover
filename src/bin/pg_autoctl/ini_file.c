@@ -262,9 +262,10 @@ ini_set_option_value(IniOption *option, const char *value)
 		{
 			if (value)
 			{
-				int nb = strtol(value, NULL, 10);
+				bool error = false;
+				int nb = stringToInt(value, &error);
 
-				if (nb == 0 && errno == EINVAL)
+				if (error)
 				{
 					log_error("Failed to parse %s.%s's value \"%s\" as a number",
 							  option->section, option->name, value);

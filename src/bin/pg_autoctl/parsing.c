@@ -154,6 +154,7 @@ parse_controldata_field_uint32(const char *controlDataString,
 {
 	char regex[BUFSIZE];
 	char *match;
+	bool error = false;
 
 	/*
 	 * Explanation of IGNORE-BANNED:
@@ -173,9 +174,9 @@ parse_controldata_field_uint32(const char *controlDataString,
 		return false;
 	}
 
-	*dest = strtol(match, NULL, 10);
+	*dest = stringToInt(match, &error);
 
-	if (*dest == 0 && errno == EINVAL)
+	if (error)
 	{
 		log_error("Failed to parse number \"%s\": %s", match, strerror(errno));
 		free(match);
@@ -199,6 +200,7 @@ parse_controldata_field_uint64(const char *controlDataString,
 {
 	char regex[BUFSIZE];
 	char *match;
+	bool error = false;
 
 	/*
 	 * Explanation of IGNORE-BANNED:
@@ -218,9 +220,9 @@ parse_controldata_field_uint64(const char *controlDataString,
 		return false;
 	}
 
-	*dest = strtoll(match, NULL, 10);
+	*dest = stringToInt(match, &error);
 
-	if (*dest == 0 && errno == EINVAL)
+	if (error)
 	{
 		log_error("Failed to parse number \"%s\": %s", match, strerror(errno));
 		free(match);
@@ -254,6 +256,104 @@ intToString(int64_t number)
 	return intString;
 }
 
+int64_t
+stringToInt(const char *str, bool *error)
+{
+	char *endptr;
+	bool foundError = false;
+	int64_t number;
+
+	errno = 0;
+	number = strtoll(str, &endptr, 10);
+
+	if (str == endptr)
+	{
+		foundError = true;
+	}
+	else if (errno == ERANGE && number == LONG_MIN)
+	{
+		foundError = true;
+	}
+	else if (errno == ERANGE && number == LONG_MAX)
+	{
+		foundError = true;
+	}
+	else if (errno == EINVAL)
+	{
+		foundError = true;
+	}
+	else if (errno != 0 && number == 0)
+	{
+		foundError = true;
+	}
+	else if (errno == 0 && str && *endptr != '\0')
+	{
+		foundError = true;
+	}
+
+	if (error)
+	{
+		*error = foundError;
+	}
+
+	return number;
+}
+
+uint64_t
+stringToUInt(const char *str, bool *error)
+{
+	char *endptr;
+	uint64_t number;
+	bool foundError = false;
+
+	errno = 0;
+	number = strtoull(str, &endptr, 10);
+
+	if (str == endptr)
+	{
+		foundError = true;
+	}
+	else if (errno != 0)
+	{
+		foundError = true;
+	}
+
+	if (error)
+	{
+		*error = foundError;
+	}
+
+	return number;
+}
+
+double
+stringToDouble(const char *str, bool *error)
+{
+	char *endptr;
+	double number;
+	bool foundError = false;
+
+	errno = 0;
+	number = strtod(str, &endptr);
+
+	if (str == endptr)
+	{
+		foundError = true;
+	}
+	else if (errno != 0)
+	{
+		foundError = true;
+	}
+
+	if (error)
+	{
+		*error = foundError;
+	}
+
+	return number;
+}
+
+
 
 /*
  * Parse a State message from the monitor.
@@ -273,6 +373,7 @@ parse_state_notification_message(StateNotification *notification)
 {
 	char *ptr = (char *) notification->message;
 	char *col = NULL;
+	bool error = false;
 
 	/* 10 is the amount of character S, colons (:) and dots (.) */
 	if (ptr == NULL || strlen(ptr) < 10 || *ptr != 'S')
@@ -307,8 +408,8 @@ parse_state_notification_message(StateNotification *notification)
 	/* read the groupId and nodeId */
 	col = strchr(ptr, FIELD_SEP);
 	*col = '\0';
-	notification->groupId = strtol(ptr, NULL, 10);
-	if (errno != 0)
+	notification->groupId = stringToInt(ptr, &error);
+	if (error)
 	{
 		log_warn("Failed to parse group id \"%s\"", ptr);
 		return false;
@@ -317,8 +418,8 @@ parse_state_notification_message(StateNotification *notification)
 
 	col = strchr(ptr, FIELD_SEP);
 	*col = '\0';
-	notification->nodeId = strtol(ptr, NULL, 10);
-	if (errno != 0)
+	notification->nodeId = stringToInt(ptr, &error);
+	if (error)
 	{
 		log_warn("Failed to parse node id \"%s\"", ptr);
 		return false;
@@ -332,8 +433,8 @@ parse_state_notification_message(StateNotification *notification)
 										   NAMEDATALEN);
 
 	/* read the nodePort */
-	notification->nodePort = strtol(ptr, NULL, 10);
-	if (errno != 0)
+	notification->nodePort = stringToInt(ptr, &error);
+	if (error)
 	{
 		log_warn("Failed to parse nodePort \"%s\"", ptr);
 		return false;
@@ -355,7 +456,7 @@ read_length_delimited_string_at(const char *ptr, char *buffer, int size)
 
 	col = strchr(ptr, STRLEN_SEP);
 	*col = '\0';
-	len = strtol(ptr, NULL, 10);
+	len = stringToInt(ptr, NULL);
 
 	if (len < size)
 	{

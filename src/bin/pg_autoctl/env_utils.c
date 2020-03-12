@@ -10,10 +10,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "postgres_fe.h"
+
 #include "env_utils.h"
 #include "log.h"
 
-/* get_env_variable checks for the environment variable and copies
+/*
+ * get_env_variable checks for the environment variable and copies
  * its value into provided buffer if the buffer is not null.
  *
  * Function returns the length of the environment variable.
@@ -27,7 +30,8 @@
  * size. Therefore caller is responsible to compare the returned length
  * with the provided buffer size in case buffer is not large enough.
  */
-size_t get_env_variable(const char *name, char *result, int maxLength)
+int
+get_env_variable(const char *name, char *result, int maxLength)
 {
 	char *envvalue = NULL;
 	int valueLength = 0;

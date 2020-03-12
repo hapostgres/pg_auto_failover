@@ -68,7 +68,7 @@ build_xdg_path(char *dst,
 			if (xdg_topdir_length <= 0 || !directory_exists(xdg_topdir))
 			{
 				/* then default to /tmp */
-				strlcpy(xdg_topdir, "/tmp", MAXPGPATH);
+				xdg_topdir_length = strlcpy(xdg_topdir, "/tmp", MAXPGPATH);
 			}
 			break;
 		}
