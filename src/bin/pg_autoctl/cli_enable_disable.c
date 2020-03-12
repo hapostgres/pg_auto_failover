@@ -334,8 +334,7 @@ cli_enable_maintenance(int argc, char **argv)
 
 	if (kill(pid, SIGHUP) != 0)
 	{
-		log_warn("Failed to send SIGHUP to the keeper's pid %d: %s",
-				  pid, strerror(errno));
+		log_warn("Failed to send SIGHUP to the keeper's pid %d: %m", pid);
 	}
 
 	log_info("Node %s:%d will reach maintenance state soon",
@@ -404,8 +403,7 @@ cli_disable_maintenance(int argc, char **argv)
 
 	if (kill(pid, SIGHUP) != 0)
 	{
-		log_warn("Failed to send SIGHUP to the keeper's pid %d: %s",
-				  pid, strerror(errno));
+		log_warn("Failed to send SIGHUP to the keeper's pid %d: %m", pid);
 	}
 
 	log_info("Node %s:%d will exit from maintenance state soon",

@@ -281,7 +281,7 @@ keeper_cli_discover_pg_setup(int argc, char **argv)
 
 	if (!IS_EMPTY_STRING_BUFFER(keeperOptions.nodename))
 	{
-		fprintf(stdout, "Node Name:          %s\n", keeperOptions.nodename);
+		fformat(stdout, "Node Name:          %s\n", keeperOptions.nodename);
 	}
 
 	fprintf_pg_setup(stdout, &pgSetup);

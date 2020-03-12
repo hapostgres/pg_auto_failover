@@ -415,8 +415,7 @@ get_pgpid(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 	{
 		if (!pg_is_not_running_is_ok)
 		{
-			log_error("Failed to open file \"%s\": %s",
-					  pidfile, strerror(errno));
+			log_error("Failed to open file \"%s\": %m", pidfile);
 			log_info("Is PostgreSQL at \"%s\" up and running?", pgSetup->pgdata);
 		}
 		return false;
@@ -487,8 +486,7 @@ read_pg_pidfile(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 	{
 		if (!pg_is_not_running_is_ok)
 		{
-			log_error("Failed to open file \"%s\": %s",
-					  pidfile, strerror(errno));
+			log_error("Failed to open file \"%s\": %m", pidfile);
 			log_info("Is PostgreSQL at \"%s\" up and running?", pgSetup->pgdata);
 		}
 		return false;
@@ -579,21 +577,21 @@ read_pg_pidfile(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 void
 fprintf_pg_setup(FILE *stream, PostgresSetup *pgSetup)
 {
-	fprintf(stream, "pgdata:             %s\n", pgSetup->pgdata);
-	fprintf(stream, "pg_ctl:             %s\n", pgSetup->pg_ctl);
-	fprintf(stream, "pg_version:         %s\n", pgSetup->pg_version);
-	fprintf(stream, "pghost:             %s\n", pgSetup->pghost);
-	fprintf(stream, "pgport:             %d\n", pgSetup->pgport);
-	fprintf(stream, "proxyport:          %d\n", pgSetup->proxyport);
-	fprintf(stream, "pid:                %ld\n", pgSetup->pidFile.pid);
-	fprintf(stream, "is in recovery:     %s\n",
+	fformat(stream, "pgdata:             %s\n", pgSetup->pgdata);
+	fformat(stream, "pg_ctl:             %s\n", pgSetup->pg_ctl);
+	fformat(stream, "pg_version:         %s\n", pgSetup->pg_version);
+	fformat(stream, "pghost:             %s\n", pgSetup->pghost);
+	fformat(stream, "pgport:             %d\n", pgSetup->pgport);
+	fformat(stream, "proxyport:          %d\n", pgSetup->proxyport);
+	fformat(stream, "pid:                %ld\n", pgSetup->pidFile.pid);
+	fformat(stream, "is in recovery:     %s\n",
 			pgSetup->is_in_recovery ? "yes" : "no");
-	fprintf(stream, "Control Version:    %u\n",
+	fformat(stream, "Control Version:    %u\n",
 			pgSetup->control.pg_control_version);
-	fprintf(stream, "Catalog Version:    %u\n",
-			pgSetup->control.catalog_version_no);
-	fprintf(stream, "System Identifier:  %" PRIu64 "\n",
-			pgSetup->control.system_identifier);
+	fformat(stream, "Catalog Version:    %u\n",
+				 pgSetup->control.catalog_version_no);
+	fformat(stream, "System Identifier:  %" PRIu64 "\n",
+				 pgSetup->control.system_identifier);
 	fflush(stream);
 }
 
@@ -954,8 +952,8 @@ pg_setup_set_absolute_pgdata(PostgresSetup *pgSetup)
 	if (!realpath(pgSetup->pgdata, absolutePgdata))
 	{
 		/* unexpected error, but not fatal, just don't overwrite the config. */
-		log_warn("Failed to get the realpath of given pgdata \"%s\": %s",
-				 pgSetup->pgdata, strerror(errno));
+		log_warn("Failed to get the realpath of given pgdata \"%s\": %m",
+				 pgSetup->pgdata);
 		return false;
 	}
 

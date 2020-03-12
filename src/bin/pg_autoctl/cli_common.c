@@ -626,6 +626,7 @@ cli_getopt_pgdata(int argc, char **argv)
 	KeeperConfig options = { 0 };
 	int c, option_index = 0, errors = 0;
 	int verboseCount = 0;
+	bool printVersion = false;
 
 	static struct option long_options[] = {
 		{ "pgdata", required_argument, NULL, 'D' },
@@ -670,7 +671,7 @@ cli_getopt_pgdata(int argc, char **argv)
 			case 'V':
 			{
 				/* keeper_cli_print_version prints version and exits. */
-				keeper_cli_print_version(argc, argv);
+				printVersion = true;
 				break;
 			}
 
@@ -720,6 +721,11 @@ cli_getopt_pgdata(int argc, char **argv)
 	{
 		commandline_help(stderr);
 		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (printVersion)
+	{
+		keeper_cli_print_version(argc, argv);
 	}
 
 	/* now that we have the command line parameters, prepare the options */
@@ -987,13 +993,94 @@ keeper_cli_help(int argc, char **argv)
 
 
 /*
+ * cli_print_version_getopts parses the CLI options for the pg_autoctl version
+ * command, which are the usual suspects.
+ */
+int
+cli_print_version_getopts(int argc, char **argv)
+{
+	int c, option_index = 0, errors = 0;
+
+	static struct option long_options[] = {
+		{ "json", no_argument, NULL, 'J' },
+		{ "version", no_argument, NULL, 'V' },
+		{ "verbose", no_argument, NULL, 'v' },
+		{ "quiet", no_argument, NULL, 'q' },
+		{ "help", no_argument, NULL, 'h' },
+		{ NULL, 0, NULL, 0 }
+	};
+	optind = 0;
+
+	/*
+	 * The only command lines that are using keeper_cli_getopt_pgdata are
+	 * terminal ones: they don't accept subcommands. In that case our option
+	 * parsing can happen in any order and we don't need getopt_long to behave
+	 * in a POSIXLY_CORRECT way.
+	 *
+	 * The unsetenv() call allows getopt_long() to reorder arguments for us.
+	 */
+	unsetenv("POSIXLY_CORRECT");
+
+	while ((c = getopt_long(argc, argv, "JVvqh",
+							long_options, &option_index)) != -1)
+	{
+		switch (c)
+		{
+			case 'J':
+			{
+				outputJSON = true;
+				log_trace("--json");
+				break;
+			}
+
+			case 'h':
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_QUIT);
+				break;
+			}
+
+			default:
+			{
+				/*
+				 * Ignore errors, ignore most of the things, just print the
+				 * version and exit(0)
+				 */
+				break;
+			}
+		}
+	}
+	return optind;
+}
+
+
+/*
  * keeper_cli_print_version prints the pg_autoctl version and exits with
  * successful exit code of zero.
  */
 void
 keeper_cli_print_version(int argc, char **argv)
 {
-	fprintf(stdout, "pg_autoctl version %s\n", PG_AUTOCTL_VERSION);
+	if (outputJSON)
+	{
+		JSON_Value *js = json_value_init_object();
+		JSON_Object *root = json_value_get_object(js);
+
+		json_object_set_string(root, "pg_autoctl", PG_AUTOCTL_VERSION);
+		json_object_set_string(root, "pg_major", PG_MAJORVERSION);
+		json_object_set_string(root, "pg_version", PG_VERSION);
+		json_object_set_string(root, "pg_version_str", PG_VERSION_STR);
+		json_object_set_number(root, "pg_version_num", (double )PG_VERSION_NUM);
+
+		(void) cli_pprint_json(js);
+	}
+	else
+	{
+		fformat(stdout, "pg_autoctl version %s\n", PG_AUTOCTL_VERSION);
+		fformat(stdout, "compiled with %s\n", PG_VERSION_STR);
+		fformat(stdout, "compatible with Postgres 10, 11, and 12\n");
+	}
+
 	exit(0);
 }
 
@@ -1009,7 +1096,7 @@ cli_pprint_json(JSON_Value *js)
 
 	/* output our nice JSON object, pretty printed please */
 	serialized_string = json_serialize_to_string_pretty(js);
-	fprintf(stdout, "%s\n", serialized_string);
+	fformat(stdout, "%s\n", serialized_string);
 
 	/* free intermediate memory */
 	json_free_serialized_string(serialized_string);
@@ -1039,8 +1126,8 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 
 			if (kill(pid, SIGQUIT) != 0)
 			{
-				log_error("Failed to send SIGQUIT to the keeper's pid %d: %s",
-						  pid, strerror(errno));
+				log_error(
+					"Failed to send SIGQUIT to the keeper's pid %d: %m", pid);
 				exit(EXIT_CODE_INTERNAL_ERROR);
 			}
 		}
@@ -1148,8 +1235,7 @@ stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathnames,
 
 		if (!rmtree(pgSetup->pgdata, true))
 		{
-			log_error("Failed to remove directory \"%s\": %s",
-					  pgSetup->pgdata, strerror(errno));
+			log_error("Failed to remove directory \"%s\": %m", pgSetup->pgdata);
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 	}

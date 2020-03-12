@@ -128,8 +128,8 @@ keeper_state_write(KeeperStateData *keeperState, const char *filename)
 	fd = open(tempFileName, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
 	if (fd < 0)
 	{
-		log_fatal("Failed to create keeper state file \"%s\": %s",
-				  tempFileName, strerror(errno));
+		log_fatal("Failed to create keeper state file \"%s\": %m",
+				  tempFileName);
 		return false;
 	}
 
@@ -142,14 +142,13 @@ keeper_state_write(KeeperStateData *keeperState, const char *filename)
 		{
 			errno = ENOSPC;
 		}
-		log_fatal("Failed to write keeper state file \"%s\": %s",
-				  tempFileName, strerror(errno));
+		log_fatal("Failed to write keeper state file \"%s\": %m", tempFileName);
 		return false;
 	}
 
 	if (fsync(fd) != 0)
 	{
-		log_fatal("fsync error: %s", strerror(errno));
+		log_fatal("fsync error: %m");
 		return false;
 	}
 
@@ -160,8 +159,8 @@ keeper_state_write(KeeperStateData *keeperState, const char *filename)
 	/* now remove the old state file, and replace it with the new one */
 	if (rename(tempFileName, filename) != 0)
 	{
-		log_fatal("Failed to rename \"%s\" to \"%s\": %s",
-				  tempFileName, filename, strerror(errno));
+		log_fatal("Failed to rename \"%s\" to \"%s\": %m",
+				  tempFileName, filename);
 		return false;
 	}
 
@@ -253,36 +252,38 @@ print_keeper_state(KeeperStateData *keeperState, FILE *stream)
 	/*
 	 * First, the roles.
 	 */
-	fprintf(stream, "Current Role:             %s\n", current_role);
-	fprintf(stream, "Assigned Role:            %s\n", assigned_role);
+	fformat(stream, "Current Role:             %s\n", current_role);
+	fformat(stream, "Assigned Role:            %s\n", assigned_role);
 
 	/*
 	 * Now, other nodes situation, are we in a network partition.
 	 */
-	fprintf(stream, "Last Monitor Contact:     %s\n",
+	fformat(stream, "Last Monitor Contact:     %s\n",
 			epoch_to_string(keeperState->last_monitor_contact));
 
-	fprintf(stream, "Last Secondary Contact:   %s\n",
+	fformat(stream, "Last Secondary Contact:   %s\n",
 			epoch_to_string(keeperState->last_secondary_contact));
 
 	/*
 	 * pg_autoctl information.
 	 */
-	fprintf(stream, "pg_autoctl state version: %d\n",
+	fformat(stream, "pg_autoctl state version: %d\n",
 			keeperState->pg_autoctl_state_version);
-	fprintf(stream, "group:                    %d\n", keeperState->current_group);
-	fprintf(stream, "node id:                  %d\n", keeperState->current_node_id);
-	fprintf(stream, "nodes version:            %" PRIu64 "\n",
+	fformat(stream, "group:                    %d\n",
+			keeperState->current_group);
+	fformat(stream, "node id:                  %d\n",
+			keeperState->current_node_id);
+	fformat(stream, "nodes version:            %" PRIu64 "\n",
 			keeperState->current_nodes_version);
 
 	/*
 	 * PostgreSQL bits.
 	 */
-	fprintf(stream, "PostgreSQL Version:       %u\n",
+	fformat(stream, "PostgreSQL Version:       %u\n",
 			keeperState->pg_control_version);
-	fprintf(stream, "PostgreSQL CatVersion:    %u\n",
+	fformat(stream, "PostgreSQL CatVersion:    %u\n",
 			keeperState->catalog_version_no);
-	fprintf(stream, "PostgreSQL System Id:     %" PRIu64 "\n",
+	fformat(stream, "PostgreSQL System Id:     %" PRIu64 "\n",
 			keeperState->system_identifier);
 
 	fflush(stream);
@@ -321,8 +322,8 @@ keeperStateAsJSON(KeeperStateData *keeperState, JSON_Value *js)
 void
 print_keeper_init_state(KeeperStateInit *initState, FILE *stream)
 {
-	fprintf(stream, "Postgres state at keeper init: %s\n",
-			PreInitPostgreInstanceStateToString(initState->pgInitState));
+	fformat(stream, "Postgres state at keeper init: %s\n",
+				 PreInitPostgreInstanceStateToString(initState->pgInitState));
 	fflush(stream);
 }
 
@@ -506,8 +507,8 @@ epoch_to_string(uint64_t seconds)
 
 		if (str == NULL)
 		{
-			log_error("Failed to convert epoch %" PRIu64 " to string: %s",
-					  seconds, strerror(errno));
+			log_error("Failed to convert epoch %" PRIu64 " to string: %m",
+					  seconds);
 			return NULL;
 		}
 		str[strlen(str) - 1] = '\0';

@@ -175,7 +175,7 @@ cli_do_monitor_get_primary_node(int argc, char **argv)
 	}
 	else
 	{
-		fprintf(stdout,
+		fformat(stdout,
 				"%s/%d %s:%d\n",
 				config.formation, config.groupId,
 				primaryNode.host, primaryNode.port);
@@ -240,7 +240,7 @@ cli_do_monitor_get_other_node(int argc, char **argv)
 	}
 	else
 	{
-		fprintf(stdout,
+		fformat(stdout,
 				"%s/%d %s:%d\n",
 				config.formation, config.groupId,
 				otherNode.host, otherNode.port);
@@ -288,7 +288,7 @@ cli_do_monitor_get_coordinator(int argc, char **argv)
 
 	if (IS_EMPTY_STRING_BUFFER(coordinatorNode.host))
 	{
-		fprintf(stdout, "%s has no coordinator ready yet\n", config.formation);
+		fformat(stdout, "%s has no coordinator ready yet\n", config.formation);
 		exit(EXIT_CODE_QUIT);
 	}
 
@@ -307,9 +307,11 @@ cli_do_monitor_get_coordinator(int argc, char **argv)
 	}
 	else
 	{
-		fprintf(stdout,
+		fformat(stdout,
 				"%s %s:%d\n",
-				config.formation, coordinatorNode.host, coordinatorNode.port);
+				config.formation,
+				coordinatorNode.host,
+				coordinatorNode.port);
 	}
 }
 
@@ -418,7 +420,7 @@ cli_do_monitor_register_node(int argc, char **argv)
 	}
 	else
 	{
-		fprintf(stdout,
+		fformat(stdout,
 				"%s/%d %s:%d %d:%d %s\n",
 				config.formation,
 				config.groupId,
@@ -513,7 +515,7 @@ cli_do_monitor_node_active(int argc, char **argv)
 	}
 	else
 	{
-		fprintf(stdout,
+		fformat(stdout,
 				"%s/%d %s:%d %d:%d %s\n",
 				config.formation,
 				config.groupId,
@@ -556,5 +558,5 @@ cli_do_monitor_version(int argc, char **argv)
 	{
 		log_warn("This command does not support JSON output at the moment");
 	}
-	fprintf(stdout, "%s\n", version.installedVersion);
+	fformat(stdout, "%s\n", version.installedVersion);
 }

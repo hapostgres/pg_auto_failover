@@ -609,8 +609,7 @@ comment_out_configuration_parameters(const char *srcConfPath,
 	fileStream = fopen(srcConfPath, "rb");
 	if (fileStream == NULL)
 	{
-		log_error("Failed to open file \"%s\": %s",
-				  srcConfPath, strerror(errno));
+		log_error("Failed to open file \"%s\": %m", srcConfPath);
 		return false;
 	}
 
@@ -688,8 +687,8 @@ disableAutoStart(PostgresConfigFiles *pgConfigFiles)
 
 	if (rename(startConfPath, copyStartConfPath) != 0)
 	{
-		log_error("Failed to rename debian auto start setup to \"%s\": %s",
-				  copyStartConfPath, strerror(errno));
+		log_error("Failed to rename debian auto start setup to \"%s\": %m",
+				  copyStartConfPath);
 
 		return false;
 	}

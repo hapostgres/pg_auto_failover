@@ -149,7 +149,7 @@ cli_do_fsm_init(int argc, char **argv)
 		log_error("Failed to serialize internal keeper state to JSON");
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
-	fprintf(stdout, "%s\n", keeperStateJSON);
+	fformat(stdout, "%s\n", keeperStateJSON);
 }
 
 
@@ -203,7 +203,7 @@ cli_do_fsm_state(int argc, char **argv)
 		log_error("Failed to serialize internal keeper state to JSON");
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
-	fprintf(stdout, "%s\n", keeperStateJSON);
+	fformat(stdout, "%s\n", keeperStateJSON);
 }
 
 
@@ -242,7 +242,7 @@ cli_do_fsm_list(int argc, char **argv)
 	}
 
 	print_reachable_states(&keeperState);
-	fprintf(stdout, "\n");
+	fformat(stdout, "\n");
 }
 
 
@@ -341,7 +341,7 @@ cli_do_fsm_assign(int argc, char **argv)
 		log_error("Failed to serialize internal keeper state to JSON");
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
-	fprintf(stdout, "%s\n", keeperStateJSON);
+	fformat(stdout, "%s\n", keeperStateJSON);
 }
 
 
@@ -400,5 +400,5 @@ cli_do_fsm_step(int argc, char **argv)
 	{
 		log_warn("This command does not support JSON output at the moment");
 	}
-	fprintf(stdout, "%s ➜ %s\n", oldRole, newRole);
+	fformat(stdout, "%s ➜ %s\n", oldRole, newRole);
 }

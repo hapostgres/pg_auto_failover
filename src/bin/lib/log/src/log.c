@@ -26,6 +26,8 @@
 #include <string.h>
 #include <time.h>
 
+#include "snprintf.h"
+
 #include "log.h"
 
 static struct {
@@ -99,6 +101,11 @@ void log_log(int level, const char *file, int line, const char *fmt, ...)
     return;
   }
 
+  if (fmt == NULL)
+  {
+	  return;
+  }
+
   /* Acquire lock */
   lock();
 
@@ -116,28 +123,28 @@ void log_log(int level, const char *file, int line, const char *fmt, ...)
 
 	if (L.useColors)
 	{
-		fprintf(stderr, "%s %s%-5s\x1b[0m ", buf, level_colors[level],
-				level_names[level]);
+		pg_fprintf(stderr, "%s %s%-5s\x1b[0m ", buf, level_colors[level],
+				   level_names[level]);
 
 		if (showLineNumber)
 		{
-			fprintf(stderr, "\x1b[90m%s:%d:\x1b[0m ", file, line);
+			pg_fprintf(stderr, "\x1b[90m%s:%d:\x1b[0m ", file, line);
 		}
 	}
 	else
 	{
-		fprintf(stderr, "%s %-5s ", buf, level_names[level]);
+		pg_fprintf(stderr, "%s %-5s ", buf, level_names[level]);
 
 		if (showLineNumber)
 		{
-			fprintf(stderr, "%s:%d ", file, line);
+			pg_fprintf(stderr, "%s:%d ", file, line);
 		}
 	}
 
     va_start(args, fmt);
-    vfprintf(stderr, fmt, args);
+    pg_vfprintf(stderr, fmt, args);
     va_end(args);
-    fprintf(stderr, "\n");
+    pg_fprintf(stderr, "\n");
   }
 
   /* Log to file */
@@ -145,11 +152,11 @@ void log_log(int level, const char *file, int line, const char *fmt, ...)
     va_list args;
     char buf[32];
     buf[strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", lt)] = '\0';
-    fprintf(L.fp, "%s %-5s %s:%d: ", buf, level_names[level], file, line);
+    pg_fprintf(L.fp, "%s %-5s %s:%d: ", buf, level_names[level], file, line);
     va_start(args, fmt);
-    vfprintf(L.fp, fmt, args);
+    pg_vfprintf(L.fp, fmt, args);
     va_end(args);
-    fprintf(L.fp, "\n");
+    pg_fprintf(L.fp, "\n");
   }
 
   /* Release lock */

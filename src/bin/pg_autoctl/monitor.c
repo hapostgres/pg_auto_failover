@@ -680,11 +680,11 @@ printCurrentState(void *ctx, PGresult *result)
 		}
 	}
 
-	fprintf(stdout, "%*s | %6s | %5s | %5s | %17s | %17s\n",
+	fformat(stdout, "%*s | %6s | %5s | %5s | %17s | %17s\n",
 			maxNodeNameSize, "Name", "Port",
 			"Group", "Node", "Current State", "Assigned State");
 
-	fprintf(stdout, "%*s-+-%6s-+-%5s-+-%5s-+-%17s-+-%17s\n",
+	fformat(stdout, "%*s-+-%6s-+-%5s-+-%5s-+-%17s-+-%17s\n",
 			maxNodeNameSize, nameSeparatorHeader, "------",
 			"-----", "-----", "-----------------", "-----------------");
 
@@ -699,11 +699,11 @@ printCurrentState(void *ctx, PGresult *result)
 		char *currentState = PQgetvalue(result, currentTupleIndex, 4);
 		char *goalState = PQgetvalue(result, currentTupleIndex, 5);
 
-		fprintf(stdout, "%*s | %6s | %5s | %5s | %17s | %17s\n",
+		fformat(stdout, "%*s | %6s | %5s | %5s | %17s | %17s\n",
 				maxNodeNameSize, nodename, nodeport,
 				groupId, nodeId, currentState, goalState);
 	}
-	fprintf(stdout, "\n");
+	fformat(stdout, "\n");
 
 	context->parsedOK = true;
 
@@ -779,7 +779,7 @@ monitor_print_state_as_json(Monitor *monitor, char *formation, int group)
 		return false;
 	}
 
-	fprintf(stdout, "%s\n", context.strVal);
+	fformat(stdout, "%s\n", context.strVal);
 
 	return true;
 }
@@ -941,7 +941,7 @@ monitor_print_last_events_as_json(Monitor *monitor,
 		return false;
 	}
 
-	fprintf(stream, "%s\n", context.strVal);
+	fformat(stream, "%s\n", context.strVal);
 
 	return true;
 }
@@ -968,12 +968,13 @@ printLastEvents(void *ctx, PGresult *result)
 		return;
 	}
 
-	fprintf(stdout, "%30s | %10s | %6s | %18s | %18s | %s\n",
+	fformat(stdout, "%30s | %10s | %6s | %18s | %18s | %s\n",
 			"Event Time", "Formation", "Node",
 			"Current State", "Assigned State", "Comment");
-	fprintf(stdout, "%30s-+-%10s-+-%6s-+-%18s-+-%18s-+-%10s\n",
+	fformat(stdout, "%30s-+-%10s-+-%6s-+-%18s-+-%18s-+-%10s\n",
 			"------------------------------", "----------",
-			"------", "------------------", "------------------", "----------");
+			"------", "------------------",
+			"------------------", "----------");
 
 	for(currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
 	{
@@ -989,10 +990,11 @@ printLastEvents(void *ctx, PGresult *result)
 		/* for our grid alignment output it's best to have a single col here */
 		sprintf(node, "%s/%s", groupId, nodeId);
 
-		fprintf(stdout, "%30s | %10s | %6s | %18s | %18s | %s\n",
-				eventTime, formation, node, currentState, goalState, description);
+		fformat(stdout, "%30s | %10s | %6s | %18s | %18s | %s\n",
+				eventTime, formation, node,
+				currentState, goalState, description);
 	}
-	fprintf(stdout, "\n");
+	fformat(stdout, "\n");
 
 	context->parsedOK = true;
 
@@ -1287,7 +1289,7 @@ monitor_print_every_formation_uri_as_json(Monitor *monitor,
 	/* disconnect from PostgreSQL now */
 	pgsql_finish(&monitor->pgsql);
 
-	fprintf(stream, "%s\n", context.strVal);
+	fformat(stream, "%s\n", context.strVal);
 
 	return true;
 }
@@ -1338,12 +1340,10 @@ printFormationURI(void *ctx, PGresult *result)
 		formationNameSeparator[index] = '-';
 	}
 
-	fprintf(stdout, "%10s | %*s | %s\n",
+	fformat(stdout, "%10s | %*s | %s\n",
 			"Type", maxFormationNameSize, "Name", "Connection String");
-	fprintf(stdout, "%10s-+-%*s-+-%s\n",
-			"----------",
-			maxFormationNameSize,
-			formationNameSeparator,
+	fformat(stdout, "%10s-+-%*s-+-%s\n",
+			"----------", maxFormationNameSize, formationNameSeparator,
 			"------------------------------");
 
 	for(currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
@@ -1352,9 +1352,10 @@ printFormationURI(void *ctx, PGresult *result)
 		char *name = PQgetvalue(result, currentTupleIndex, 1);
 		char *URI = PQgetvalue(result, currentTupleIndex, 2);
 
-		fprintf(stdout, "%10s | %*s | %s\n", type, maxFormationNameSize, name, URI);
+		fformat(stdout, "%10s | %*s | %s\n",
+				type, maxFormationNameSize, name, URI);
 	}
-	fprintf(stdout, "\n");
+	fformat(stdout, "\n");
 
 	context->parsedOK = true;
 
@@ -1550,7 +1551,7 @@ monitor_get_notifications(Monitor *monitor)
 
 	if (select(sock + 1, &input_mask, NULL, NULL, NULL) < 0)
 	{
-		log_warn("select() failed: %s\n", strerror(errno));
+		log_warn("select() failed: %m");
 		return false;
 	}
 

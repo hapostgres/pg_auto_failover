@@ -125,6 +125,7 @@ extern CommandLine systemd_cat_service_file_command;
 
 
 void keeper_cli_help(int argc, char **argv);
+int cli_print_version_getopts(int argc, char **argv);
 void keeper_cli_print_version(int argc, char **argv);
 void cli_pprint_json(JSON_Value *js);
 

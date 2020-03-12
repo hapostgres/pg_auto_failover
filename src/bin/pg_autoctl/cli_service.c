@@ -227,8 +227,7 @@ cli_service_reload(int argc, char **argv)
 	{
 		if (kill(pid, SIGHUP) != 0)
 		{
-			log_error("Failed to send SIGHUP to the keeper's pid %d: %s",
-					  pid, strerror(errno));
+			log_error("Failed to send SIGHUP to the keeper's pid %d: %m", pid);
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 	}
@@ -370,8 +369,8 @@ cli_service_stop(int argc, char **argv)
 	{
 		if (kill(pid, stop_signal) != 0)
 		{
-			log_error("Failed to send %s to the keeper's pid %d: %s",
-					  strsignal(stop_signal), pid, strerror(errno));
+			log_error("Failed to send %s to the keeper's pid %d: %m",
+					  strsignal(stop_signal), pid);
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 	}
