@@ -19,6 +19,7 @@
 #include "pqexpbuffer.h"
 
 #include "defaults.h"
+#include "env_utils.h"
 #include "file_utils.h"
 #include "log.h"
 #include "parsing.h"
@@ -174,7 +175,7 @@ int
 config_find_pg_ctl(PostgresSetup *pgSetup)
 {
 	char **pg_ctls = NULL;
-	int n = search_pathlist(getenv("PATH"), "pg_ctl", &pg_ctls);
+	int n = search_path("pg_ctl", &pg_ctls);
 
 	pgSetup->pg_ctl[0] = '\0';
 	pgSetup->pg_version[0] = '\0';
@@ -227,7 +228,7 @@ config_find_pg_ctl(PostgresSetup *pgSetup)
 		}
 	}
 
-	search_pathlist_destroy_result(pg_ctls);
+	search_path_destroy_result(pg_ctls);
 
 	return n;
 }
@@ -777,6 +778,8 @@ pg_ctl_start(const char *pg_ctl,
 	char *args[12];
 	int argsIndex = 0;
 
+	char env_pg_regress_sock_dir[MAXPGPATH];
+
 	char command[BUFSIZE];
 	int commandSize = 0;
 
@@ -798,12 +801,18 @@ pg_ctl_start(const char *pg_ctl,
 		args[argsIndex++] = (char *) listen_addresses_option;
 	}
 
-	if (getenv("PG_REGRESS_SOCK_DIR") != NULL)
+	if (env_exists("PG_REGRESS_SOCK_DIR"))
 	{
+		if (!get_env_copy("PG_REGRESS_SOCK_DIR", env_pg_regress_sock_dir,
+						  MAXPGPATH))
+		{
+			/* errors have already been logged */
+			return false;
+		}
 		sformat(option_unix_socket_directory,
 				sizeof(option_unix_socket_directory),
 				"\"-k \"%s\"\"",
-				getenv("PG_REGRESS_SOCK_DIR"));
+				env_pg_regress_sock_dir);
 
 		/* pg_ctl --options can be specified multiple times */
 		args[argsIndex++] = "--options";
@@ -1420,21 +1429,11 @@ pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *nodename)
 	Program program;
 	char subject[BUFSIZE] = { 0 };
 	int size = 0;
-
 	char openssl[MAXPGPATH];
-	char **opensslSearchList = NULL;
-	int n = search_pathlist(getenv("PATH"), "openssl", &opensslSearchList);
-
-	if (n < 1)
+	if (!search_path_first("openssl", openssl))
 	{
-		log_error("Failed to find \"openssl\" command in your PATH");
+		/* errors have already been logged */
 		return false;
-	}
-	else
-	{
-		strlcpy(openssl, opensslSearchList[0], MAXPGPATH);
-
-		search_pathlist_destroy_result(opensslSearchList);
 	}
 
 	size = sformat(pgSetup->ssl.serverKey, MAXPGPATH,

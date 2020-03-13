@@ -13,6 +13,7 @@
 #include "cli_common.h"
 #include "debian.h"
 #include "defaults.h"
+#include "env_utils.h"
 #include "fsm.h"
 #include "keeper.h"
 #include "keeper_config.h"
@@ -575,9 +576,6 @@ create_database_and_extension(Keeper *keeper)
 	PostgresSetup initPgSetup = { 0 };
 	bool missingPgdataIsOk = false;
 	bool pgIsNotRunningIsOk = true;
-
-	char *pg_regress_sock_dir = getenv("PG_REGRESS_SOCK_DIR");
-
 	char hbaFilePath[MAXPGPATH];
 
 	log_trace("create_database_and_extension");
@@ -611,8 +609,7 @@ create_database_and_extension(Keeper *keeper)
 	 * In test environments using PG_REGRESS_SOCK_DIR="" to disable unix socket
 	 * directory, we have to connect to the address from pghost.
 	 */
-	if (pg_regress_sock_dir != NULL
-		&& strcmp(pg_regress_sock_dir, "") == 0)
+	if (env_found_empty("PG_REGRESS_SOCK_DIR"))
 	{
 		log_info("Granting connection from \"%s\" in \"%s\"",
 				 pgSetup->pghost, hbaFilePath);
