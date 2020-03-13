@@ -16,10 +16,12 @@
 
 /*
  * env_empty returns true if the passed environment variable is the empty
- * string. It returns false when the environment variable is not set.
+ * string. It returns false when the environment variable is not set or if it
+ * set but is something else than the empty string.
  */
 bool
-env_empty(const char *name) {
+env_empty(const char *name)
+{
 	char *envvalue = NULL;
 	if (name == NULL || strlen(name) == 0)
 	{
@@ -37,12 +39,14 @@ env_empty(const char *name) {
 
 }
 
+
 /*
  * env_exists returns true if the passed environment variable exists in the
  * environment, otherwise it returns false.
  */
 bool
-env_exists(const char *name) {
+env_exists(const char *name)
+{
 	if (name == NULL || strlen(name) == 0)
 	{
 		log_error("Failed to get environment setting. NULL or empty variable name is provided");
@@ -55,8 +59,8 @@ env_exists(const char *name) {
 	 * and only check if it returns NULL.
 	 */
 	return getenv(name) != NULL; /* IGNORE-BANNED */
-
 }
+
 
 /*
  * get_env_copy_with_fallback copies the environment variable with "name" into
@@ -92,7 +96,8 @@ get_env_copy_with_fallback(const char *name, char *result, int maxLength,
 	if (envvalue == NULL)
 	{
 		envvalue = fallback;
-		if (envvalue == NULL) {
+		if (envvalue == NULL)
+		{
 			log_error("Failed to get %s environment setting. It was not set", name);
 			return false;
 		}
@@ -103,7 +108,9 @@ get_env_copy_with_fallback(const char *name, char *result, int maxLength,
 	/* uses >= to make sure the nullbyte fits */
 	if (actualLength >= maxLength)
 	{
-		log_error("Failed to load %s environment setting. It was larger than the maximum of %d bytes", name, maxLength);
+		log_error("Failed to copy value stored in %s environment setting, "
+				  "which is %ld long. pg_autoctl only supports %d bytes for "
+				  "this environment setting", name, actualLength, maxLength-1);
 		return false;
 	}
 	return true;
@@ -143,7 +150,8 @@ get_env_pgdata(char *pgdata)
 void
 get_env_pgdata_or_exit(char *pgdata)
 {
-	if (get_env_pgdata(pgdata)) {
+	if (get_env_pgdata(pgdata))
+	{
 		return;
 	}
 	log_fatal("Failed to set PGDATA either from the environment "

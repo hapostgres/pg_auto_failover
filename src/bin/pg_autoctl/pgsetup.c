@@ -632,11 +632,11 @@ pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 {
 	char pg_regress_sock_dir[MAXPGPATH];
 	char *connStringEnd = connectionString;
+	bool pg_regress_sock_dir_exists = env_exists("PG_REGRESS_SOCK_DIR");
 
 	connStringEnd += sprintf(connStringEnd, "port=%d dbname=%s",
 							 pgSetup->pgport, pgSetup->dbname);
 
-	bool pg_regress_sock_dir_exists = env_exists("PG_REGRESS_SOCK_DIR");
 	if (pg_regress_sock_dir_exists &&
 			!get_env_copy("PG_REGRESS_SOCK_DIR", pg_regress_sock_dir, MAXPGPATH)) {
 		/* errors have already been logged */
@@ -648,7 +648,7 @@ pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 	 * usually), even when the configuration setup is using a unix directory
 	 * setting.
 	 */
-	if (pg_regress_sock_dir_exists && strlen(pg_regress_sock_dir) == 0
+	if (env_empty("PG_REGRESS_SOCK_DIR")
 		&& (IS_EMPTY_STRING_BUFFER(pgSetup->pghost)
 			|| pgSetup->pghost[0] == '/'))
 	{

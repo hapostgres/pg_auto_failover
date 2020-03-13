@@ -782,7 +782,6 @@ pg_ctl_start(const char *pg_ctl,
 	int argsIndex = 0;
 
 	char env_pg_regress_sock_dir[MAXPGPATH];
-	int env_pg_regress_sock_dir_len = 0;
 
 	char command[BUFSIZE];
 	int commandSize = 0;
