@@ -656,7 +656,6 @@ pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 									 char *connectionString)
 {
 	char pg_regress_sock_dir[MAXPGPATH];
-	char *connStringEnd = connectionString;
 	bool pg_regress_sock_dir_exists = env_exists("PG_REGRESS_SOCK_DIR");
 	PQExpBuffer connStringBuffer = createPQExpBuffer();
 
@@ -1347,7 +1346,6 @@ pgsetup_sslmode_to_string(SSLMode sslMode)
 	{
 		case SSL_MODE_UNKNOWN:
 			return "unknown";
-
 		case SSL_MODE_DISABLE:
 			return "disable";
 
@@ -1366,4 +1364,8 @@ pgsetup_sslmode_to_string(SSLMode sslMode)
 		case SSL_MODE_VERIFY_FULL:
 			return "verify-full";
 	}
+
+	/* This is a huge bug */
+	log_error("BUG: some unknown SSL_MODE enum value was encountered");
+	return "unknown";
 }
