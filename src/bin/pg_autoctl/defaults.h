@@ -101,14 +101,11 @@
 
 
 /*
- * This opens file write only and creates if it doesn't exist. It does this
- * using exclusive access to the file.
+ * This opens file write only and creates if it doesn't exist.
  */
-#define FOPEN_FLAGS_W O_WRONLY | O_CREAT | O_EXCL
+#define FOPEN_FLAGS_W O_WRONLY | O_CREAT
 /*
- * This opens the file in append mode and creates it if it doesn't exist. It
- * doesn't take exclusive access to the file, since normally multiple processes
- * should be able to append to the same file at the same time.
+ * This opens the file in append mode and creates it if it doesn't exist.
  */
 #define FOPEN_FLAGS_A O_APPEND | O_CREAT
 
