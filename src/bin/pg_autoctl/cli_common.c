@@ -17,6 +17,7 @@
 #include "cli_common.h"
 #include "cli_root.h"
 #include "commandline.h"
+#include "env_utils.h"
 #include "ipaddr.h"
 #include "keeper.h"
 #include "keeper_config.h"
@@ -406,16 +407,7 @@ cli_create_node_getopts(int argc, char **argv,
 	 */
 	if (IS_EMPTY_STRING_BUFFER(LocalOptionConfig.pgSetup.pgdata))
 	{
-		char *pgdata = getenv("PGDATA");
-
-		if (pgdata == NULL)
-		{
-			log_fatal("Failed to get PGDATA either from the environment "
-					  "or from --pgdata");
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-
-		strlcpy(LocalOptionConfig.pgSetup.pgdata, pgdata, MAXPGPATH);
+		get_env_pgdata_or_exit(LocalOptionConfig.pgSetup.pgdata);
 	}
 
 	/*
@@ -747,16 +739,7 @@ prepare_keeper_options(KeeperConfig *options)
 {
 	if (IS_EMPTY_STRING_BUFFER(options->pgSetup.pgdata))
 	{
-		char *pgdata = getenv("PGDATA");
-
-		if (pgdata == NULL)
-		{
-			log_fatal("Failed to get PGDATA either from the environment "
-					  "or from --pgdata");
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-
-		strlcpy(options->pgSetup.pgdata, pgdata, MAXPGPATH);
+		get_env_pgdata_or_exit(options->pgSetup.pgdata);
 	}
 
 	log_debug("Managing PostgreSQL installation at \"%s\"",
@@ -808,31 +791,23 @@ prepare_keeper_options(KeeperConfig *options)
 void
 set_first_pgctl(PostgresSetup *pgSetup)
 {
-	char **pg_ctls = NULL;
-	int n = search_pathlist(getenv("PATH"), "pg_ctl", &pg_ctls);
-
-	if (n < 1)
+	char *version = NULL;
+	if (!search_path_first("pg_ctl", pgSetup->pg_ctl))
 	{
-		log_fatal("Failed to find a pg_ctl command in your PATH");
+		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_ARGS);
 	}
-	else
+	version = pg_ctl_version(pgSetup->pg_ctl);
+
+	if (version == NULL)
 	{
-		char *program = pg_ctls[0];
-		char *version = pg_ctl_version(program);
-
-		if (version == NULL)
-		{
-			/* errors have been logged in pg_ctl_version */
-			exit(EXIT_CODE_PGCTL);
-		}
-
-		strlcpy(pgSetup->pg_ctl, program, MAXPGPATH);
-		strlcpy(pgSetup->pg_version, version, PG_VERSION_STRING_MAX);
-
-		free(version);
-		search_pathlist_destroy_result(pg_ctls);
+		/* errors have been logged in pg_ctl_version */
+		exit(EXIT_CODE_PGCTL);
 	}
+
+	strlcpy(pgSetup->pg_version, version, PG_VERSION_STRING_MAX);
+
+	free(version);
 }
 
 
@@ -983,7 +958,7 @@ keeper_cli_help(int argc, char **argv)
 {
 	CommandLine command = root;
 
-	if (getenv(PG_AUTOCTL_DEBUG) != NULL)
+	if (env_exists(PG_AUTOCTL_DEBUG))
 	{
 		command = root_with_debug;
 	}
