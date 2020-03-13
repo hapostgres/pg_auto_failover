@@ -32,7 +32,7 @@ void path_in_same_directory(const char *basePath,
 							const char *fileName,
 							char *destinationPath);
 
-bool search_path_one(const char *filename, char *result);
+bool search_path_first(const char *filename, char *result);
 int search_path(const char *filename, char ***result);
 void search_path_destroy_result(char **result);
 bool unlink_file(const char *filename);

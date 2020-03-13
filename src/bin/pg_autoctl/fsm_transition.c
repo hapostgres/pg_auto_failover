@@ -268,7 +268,7 @@ fsm_init_primary(Keeper *keeper)
 	 */
 	if (pgInstanceIsOurs)
 	{
-		if (env_empty("PG_REGRESS_SOCK_DIR"))
+		if (env_found_empty("PG_REGRESS_SOCK_DIR"))
 		{
 			/*
 			 * In test environements allow nodes from the same network to

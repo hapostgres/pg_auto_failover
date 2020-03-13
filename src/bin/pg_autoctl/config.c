@@ -38,10 +38,11 @@ build_xdg_path(char *dst,
 	char home[MAXPGPATH];
 	char fallback[MAXPGPATH];
 	char xdg_topdir[MAXPGPATH];
-	char *envVarName;
+	char *envVarName = NULL;
 
 	if (!get_env_copy("HOME", home, MAXPGPATH))
 	{
+		/* errors have already been logged */
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
@@ -75,12 +76,14 @@ build_xdg_path(char *dst,
 			return false;
 	}
 
-	if (!get_env_copy_with_fallback(envVarName, xdg_topdir, MAXPGPATH, fallback)) {
+	if (!get_env_copy_with_fallback(envVarName, xdg_topdir, MAXPGPATH, fallback))
+	{
 		/* errors have already been logged */
 		return false;
 	}
 
-	if (xdgType == XDG_RUNTIME && !directory_exists(xdg_topdir)) {
+	if (xdgType == XDG_RUNTIME && !directory_exists(xdg_topdir))
+	{
 		strlcpy(xdg_topdir, "/tmp", MAXPGPATH);
 	}
 

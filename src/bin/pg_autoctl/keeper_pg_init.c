@@ -609,7 +609,7 @@ create_database_and_extension(Keeper *keeper)
 	 * In test environments using PG_REGRESS_SOCK_DIR="" to disable unix socket
 	 * directory, we have to connect to the address from pghost.
 	 */
-	if (env_empty("PG_REGRESS_SOCK_DIR"))
+	if (env_found_empty("PG_REGRESS_SOCK_DIR"))
 	{
 		log_info("Granting connection from \"%s\" in \"%s\"",
 				 pgSetup->pghost, hbaFilePath);

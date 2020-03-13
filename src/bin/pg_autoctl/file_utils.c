@@ -470,13 +470,13 @@ path_in_same_directory(const char *basePath, const char *fileName,
 
 
 /*
- * search_path_one copies the first entry found in PATH to result. result
+ * search_path_first copies the first entry found in PATH to result. result
  * should be a buffer of (at least) MAXPGPATH size.
  * The function returns false and logs an error when it cannot find the command
  * in PATH.
  */
 bool
-search_path_one(const char *filename, char *result)
+search_path_first(const char *filename, char *result)
 {
 	char **paths = NULL;
 	int n = search_path(filename, &paths);

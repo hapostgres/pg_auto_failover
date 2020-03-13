@@ -57,6 +57,13 @@
 
 /* internal default for allocating strings  */
 #define BUFSIZE 1024
+
+/*
+ * 50kB seems enough to store the PATH environment variable if you have more,
+ * simply set PATH to something smaller.
+ * The limit on linux for environment variables is 128kB:
+ * https://unix.stackexchange.com/questions/336934
+ */
 #define MAXPATHSIZE 50000
 
 #define AWAIT_PROMOTION_SLEEP_TIME_MS 1000

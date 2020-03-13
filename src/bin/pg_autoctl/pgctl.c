@@ -174,10 +174,6 @@ int
 config_find_pg_ctl(PostgresSetup *pgSetup)
 {
 	char **pg_ctls = NULL;
-	/*
-	 * path variable could be arbitrarily large. We put an upper limit on 10K here.
-	 * In this case we only consider the part we can read
-	 */
 	int n = search_path("pg_ctl", &pg_ctls);
 
 	pgSetup->pg_ctl[0] = '\0';
@@ -804,8 +800,11 @@ pg_ctl_start(const char *pg_ctl,
 		args[argsIndex++] = (char *) listen_addresses_option;
 	}
 
-	if (env_exists("PG_REGRESS_SOCK_DIR")) {
-		if (!get_env_copy("PG_REGRESS_SOCK_DIR", env_pg_regress_sock_dir, MAXPGPATH)) {
+	if (env_exists("PG_REGRESS_SOCK_DIR"))
+	{
+		if (!get_env_copy("PG_REGRESS_SOCK_DIR", env_pg_regress_sock_dir,
+						  MAXPGPATH))
+		{
 			/* errors have already been logged */
 			return false;
 		}
@@ -1430,7 +1429,7 @@ pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *nodename)
 	char subject[BUFSIZE] = { 0 };
 	int size = 0;
 	char openssl[MAXPGPATH];
-	if (!search_path_one("openssl", openssl))
+	if (!search_path_first("openssl", openssl))
 	{
 		/* errors have already been logged */
 		return false;

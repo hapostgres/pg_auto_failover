@@ -159,6 +159,11 @@ pg_setup_init(PostgresSetup *pgSetup,
 	}
 	else
 	{
+		/*
+		 * If a PGUSER environment variable is defined, take the value from
+		 * there. Otherwise we attempt to connect without username. In that
+		 * case the username will be determined based on the current user.
+		 */
 		if (!get_env_copy_with_fallback("PGUSER", pgSetup->username, NAMEDATALEN, ""))
 		{
 			/* errors have already been logged */
@@ -236,7 +241,7 @@ pg_setup_init(PostgresSetup *pgSetup,
 	 */
 	if (IS_EMPTY_STRING_BUFFER(pgSetup->pghost))
 	{
-		if (env_empty("PG_REGRESS_SOCK_DIR"))
+		if (env_found_empty("PG_REGRESS_SOCK_DIR"))
 		{
 			log_error("PG_REGRESS_SOCK_DIR is set to \"\" to disable unix "
 					  "socket directories, now --pghost is mandatory, "
@@ -648,7 +653,8 @@ pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 					  pgSetup->pgport, pgSetup->dbname);
 
 	if (pg_regress_sock_dir_exists &&
-			!get_env_copy("PG_REGRESS_SOCK_DIR", pg_regress_sock_dir, MAXPGPATH)) {
+			!get_env_copy("PG_REGRESS_SOCK_DIR", pg_regress_sock_dir, MAXPGPATH))
+	{
 		/* errors have already been logged */
 		return false;
 	}
@@ -658,7 +664,7 @@ pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 	 * usually), even when the configuration setup is using a unix directory
 	 * setting.
 	 */
-	if (env_empty("PG_REGRESS_SOCK_DIR")
+	if (env_found_empty("PG_REGRESS_SOCK_DIR")
 		&& (IS_EMPTY_STRING_BUFFER(pgSetup->pghost)
 			|| pgSetup->pghost[0] == '/'))
 	{

@@ -16,12 +16,12 @@
 
 
 /*
- * env_empty returns true if the passed environment variable is the empty
+ * env_found_empty returns true if the passed environment variable is the empty
  * string. It returns false when the environment variable is not set or if it
  * set but is something else than the empty string.
  */
 bool
-env_empty(const char *name)
+env_found_empty(const char *name)
 {
 	char *envvalue = NULL;
 	if (name == NULL || strlen(name) == 0)
@@ -99,7 +99,8 @@ get_env_copy_with_fallback(const char *name, char *result, int maxLength,
 		envvalue = fallback;
 		if (envvalue == NULL)
 		{
-			log_error("Failed to get %s environment setting. It was not set", name);
+			log_error("Failed to get value for environment variable '%s', "
+					  "which is unset", name);
 			return false;
 		}
 	}

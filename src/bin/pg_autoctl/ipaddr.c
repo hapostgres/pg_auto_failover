@@ -69,7 +69,7 @@ fetchLocalIPAddress(char *localIpAddress, int size,
     err = connect(sock, (const struct sockaddr*) &serv, sizeof(serv));
     if (err < 0)
     {
-		if (env_empty("PG_REGRESS_SOCK_DIR"))
+		if (env_found_empty("PG_REGRESS_SOCK_DIR"))
 		{
 			/*
 			 * In test environment, in case of no internet access, just use the
