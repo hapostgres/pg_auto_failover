@@ -135,7 +135,7 @@ _Static_assert (sizeof(KeeperStateInit) < PG_AUTOCTL_KEEPER_STATE_FILE_SIZE, "si
 
 const char * NodeStateToString(NodeState s);
 NodeState NodeStateFromString(const char *str);
-const char * epoch_to_string(uint64_t seconds);
+const char * epoch_to_string(uint64_t seconds, char *buffer);
 
 void keeper_state_init(KeeperStateData *keeperState);
 bool keeper_state_create_file(const char *filename);

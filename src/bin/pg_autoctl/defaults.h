@@ -73,6 +73,10 @@
  */
 #define MAXPATHSIZE 50000
 
+
+/* buffersize that is needed for results of ctime_r */
+#define MAXCTIMESIZE 26
+
 #define AWAIT_PROMOTION_SLEEP_TIME_MS 1000
 
 #define KEEPER_CONFIGURATION_FILENAME "pg_autoctl.cfg"

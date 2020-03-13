@@ -224,6 +224,7 @@ log_keeper_state(KeeperStateData *keeperState)
 {
 	const char *current_role = NodeStateToString(keeperState->current_role);
 	const char *assigned_role = NodeStateToString(keeperState->assigned_role);
+	char timestring[MAXCTIMESIZE];
 
 	log_trace("state.pg_control_version: %u", keeperState->pg_control_version);
 	log_trace("state.system_identifier: %" PRIu64, keeperState->system_identifier);
@@ -237,10 +238,10 @@ log_keeper_state(KeeperStateData *keeperState)
 	log_trace("state.assigned_role: %s", assigned_role);
 
 	log_trace("state.last_monitor_contact: %s",
-			  epoch_to_string(keeperState->last_monitor_contact));
+			  epoch_to_string(keeperState->last_monitor_contact, timestring));
 
 	log_trace("state.last_secondary_contact: %s",
-			  epoch_to_string(keeperState->last_secondary_contact));
+			  epoch_to_string(keeperState->last_secondary_contact, timestring));
 
 	log_trace("state.xlog_lag : %" PRId64, keeperState->xlog_lag);
 
@@ -258,6 +259,7 @@ print_keeper_state(KeeperStateData *keeperState, FILE *stream)
 {
 	const char *current_role = NodeStateToString(keeperState->current_role);
 	const char *assigned_role = NodeStateToString(keeperState->assigned_role);
+	char timestring[MAXCTIMESIZE];
 
 	/*
 	 * First, the roles.
@@ -269,10 +271,10 @@ print_keeper_state(KeeperStateData *keeperState, FILE *stream)
 	 * Now, other nodes situation, are we in a network partition.
 	 */
 	fformat(stream, "Last Monitor Contact:     %s\n",
-			epoch_to_string(keeperState->last_monitor_contact));
+			epoch_to_string(keeperState->last_monitor_contact, timestring));
 
 	fformat(stream, "Last Secondary Contact:   %s\n",
-			epoch_to_string(keeperState->last_secondary_contact));
+			epoch_to_string(keeperState->last_secondary_contact, timestring));
 
 	/*
 	 * pg_autoctl information.
@@ -520,29 +522,36 @@ NodeStateFromString(const char *str)
 /*
  * epoch_to_string converts a number of seconds from epoch into a date time
  * string.
+ *
+ * This string is stored in buffer. On error NULL is returned else the buffer
+ * is returned. The buffer should (at least) be MAXCTIMESIZE large.
  */
 const char *
-epoch_to_string(uint64_t seconds)
+epoch_to_string(uint64_t seconds, char *buffer)
 {
-	if (seconds > 0)
+	char *result = NULL;
+	if (seconds <= 0)
+	{
+		strlcpy(buffer, "0", MAXCTIMESIZE);
+		return buffer;
+	}
+	result = ctime_r((time_t *) &seconds, buffer);
+
+	if (result == NULL)
+	{
+		log_error("Failed to convert epoch %" PRIu64 " to string: %m",
+				  seconds);
+		return NULL;
+	}
+	if (strlen(result) != 0 && result[strlen(result) - 1] == '\n')
 	{
 		/*
-		 * ctime() returns a string that ends with \n, which we don't want.
-		 * Replace it with a null string terminator, even if that means we lose
-		 * a precious byte of memory here..
+		 * ctime_r normally returns a string that ends with \n, which we don't
+		 * want. We strip it by replacing it with a null string terminator.
 		 */
-		char *str = ctime((time_t *) &seconds);
-
-		if (str == NULL)
-		{
-			log_error("Failed to convert epoch %" PRIu64 " to string: %m",
-					  seconds);
-			return NULL;
-		}
-		str[strlen(str) - 1] = '\0';
-		return str;
+		result[strlen(result) - 1] = '\0';
 	}
-	return "0";
+	return buffer;
 }
 
 /*
