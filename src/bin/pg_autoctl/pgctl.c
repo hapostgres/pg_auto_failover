@@ -1430,18 +1430,10 @@ pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *nodename)
 	char subject[BUFSIZE] = { 0 };
 	int size = 0;
 	char openssl[MAXPGPATH];
-	char **opensslSearchList = NULL;
-	int n = search_path("openssl", &opensslSearchList);
-	if (n < 1)
+	if (!search_path_one("openssl", openssl)) {
 	{
-		log_error("Failed to find \"openssl\" command in your PATH");
+		/* errors have already been logged */
 		return false;
-	}
-	else
-	{
-		strlcpy(openssl, opensslSearchList[0], MAXPGPATH);
-
-		search_path_destroy_result(opensslSearchList);
 	}
 
 	size = snprintf(pgSetup->ssl.serverKey, MAXPGPATH,

@@ -791,31 +791,22 @@ prepare_keeper_options(KeeperConfig *options)
 void
 set_first_pgctl(PostgresSetup *pgSetup)
 {
-	char **pg_ctls = NULL;
-	int n = search_path("pg_ctl", &pg_ctls);
-
-	if (n < 1)
-	{
-		log_fatal("Failed to find a pg_ctl command in your PATH");
+	char *version = NULL;
+	if (!search_path_one("pg_ctl", pgSetup->pg_ctl)) {
+		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_ARGS);
 	}
-	else
+	version = pg_ctl_version(pgSetup->pg_ctl);
+
+	if (version == NULL)
 	{
-		char *program = pg_ctls[0];
-		char *version = pg_ctl_version(program);
-
-		if (version == NULL)
-		{
-			/* errors have been logged in pg_ctl_version */
-			exit(EXIT_CODE_PGCTL);
-		}
-
-		strlcpy(pgSetup->pg_ctl, program, MAXPGPATH);
-		strlcpy(pgSetup->pg_version, version, PG_VERSION_STRING_MAX);
-
-		free(version);
-		search_path_destroy_result(pg_ctls);
+		/* errors have been logged in pg_ctl_version */
+		exit(EXIT_CODE_PGCTL);
 	}
+
+	strlcpy(pgSetup->pg_version, version, PG_VERSION_STRING_MAX);
+
+	free(version);
 }
 
 

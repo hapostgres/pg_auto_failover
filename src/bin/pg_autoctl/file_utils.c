@@ -470,6 +470,26 @@ path_in_same_directory(const char *basePath, const char *fileName,
 
 
 /*
+ * search_path_one copies the first entry found in PATH to result. result
+ * should be a buffer of (at least) MAXPGPATH size.
+ * The function returns false and logs an error when it cannot find the command
+ * in PATH.
+ */
+bool
+search_path_one(const char *filename, char *result)
+{
+	char **paths = NULL;
+	int n = search_path(filename, &paths);
+	if (n < 1) {
+		log_error("Failed to find %s command in your PATH", filename);
+		return false;
+	}
+	strlcpy(result, paths[0], MAXPGPATH);
+	search_path_destroy_result(paths);
+	return true;
+}
+
+/*
  * Searches all the directories in the PATH environment variable for
  * the given filename. Returns number of occurrences, and allocates
  * and returns the path for each of the occurrences in the given result
