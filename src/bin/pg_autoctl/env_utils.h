@@ -12,6 +12,7 @@
 
 #include "postgres_fe.h"
 
+bool env_found_empty(const char *name);
 bool env_exists(const char *name);
 bool env_empty(const char *name);
 bool get_env_copy(const char *name, char *outbuffer, int maxLength);
