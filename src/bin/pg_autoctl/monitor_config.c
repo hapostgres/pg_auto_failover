@@ -476,41 +476,41 @@ monitor_config_get_postgres_uri(MonitorConfig *config, char *connectionString,
 	 * sslcrl connection parameters when using sslmode=verify-ca or
 	 * sslmode=verify-full.
 	 */
-	connStringEnd += snprintf(connStringEnd,
-							  size - (connStringEnd - connectionString),
-							  "postgres://%s@%s:%d/%s",
-							  config->pgSetup.username,
-							  host,
-							  config->pgSetup.pgport,
-							  config->pgSetup.dbname);
+	connStringEnd += sformat(connStringEnd,
+							 size - (connStringEnd - connectionString),
+							 "postgres://%s@%s:%d/%s",
+							 config->pgSetup.username,
+							 host,
+							 config->pgSetup.pgport,
+							 config->pgSetup.dbname);
 
 	if (config->pgSetup.ssl.sslMode >= SSL_MODE_PREFER)
 	{
 		char *sslmode = pgsetup_sslmode_to_string(config->pgSetup.ssl.sslMode);
 
-		connStringEnd += snprintf(connStringEnd,
-								  size - (connStringEnd - connectionString),
-								  "?sslmode=%s",
-								  sslmode);
+		connStringEnd += sformat(connStringEnd,
+								 size - (connStringEnd - connectionString),
+								 "?sslmode=%s",
+								 sslmode);
 
 		if (config->pgSetup.ssl.sslMode >= SSL_MODE_VERIFY_CA)
 		{
 			if (IS_EMPTY_STRING_BUFFER(config->pgSetup.ssl.crlFile))
 			{
 				connStringEnd +=
-					snprintf(connStringEnd,
-							 size - (connStringEnd - connectionString),
-							 "&sslrootcert=%s",
-							 config->pgSetup.ssl.caFile);
+					sformat(connStringEnd,
+							size - (connStringEnd - connectionString),
+							"&sslrootcert=%s",
+							config->pgSetup.ssl.caFile);
 			}
 			else
 			{
 				connStringEnd +=
-					snprintf(connStringEnd,
-							 size - (connStringEnd - connectionString),
-							 "&sslrootcert=%s&sslcrl=%s",
-							 config->pgSetup.ssl.caFile,
-							 config->pgSetup.ssl.crlFile);
+					sformat(connStringEnd,
+							size - (connStringEnd - connectionString),
+							"&sslrootcert=%s&sslcrl=%s",
+							config->pgSetup.ssl.caFile,
+							config->pgSetup.ssl.crlFile);
 			}
 		}
 	}

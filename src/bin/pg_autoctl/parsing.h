@@ -15,12 +15,14 @@
 #include "monitor.h"
 #include "pgctl.h"
 
+/* maximum decimal int64 length with minus and NUL */
+#define INT_STRING_STR_SIZE 21
+
 typedef struct IntString
 {
 	int64_t intValue;
 
-	/* maximum decimal int64 length with minus and NUL */
-	char strValue[21];
+	char strValue[INT_STRING_STR_SIZE];
 } IntString;
 
 

@@ -918,7 +918,7 @@ keeper_config_set_backup_directory(KeeperConfig *config, int nodeId)
 		/* we might be able to use the nodeId, better than the nodename */
 		if (nodeId > 0)
 		{
-			snprintf(subdirs, MAXPGPATH, "backup/node_%d", nodeId);
+			sformat(subdirs, MAXPGPATH, "backup/node_%d", nodeId);
 			path_in_same_directory(pgdata, subdirs, backupDirectory);
 		}
 

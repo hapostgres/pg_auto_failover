@@ -582,7 +582,7 @@ create_pidfile(const char *pidfile, pid_t pid)
 
 	log_trace("create_pidfile(%d): \"%s\"", pid, pidfile);
 
-	sprintf(content, "%d", pid);
+	sformat(content, BUFSIZE, "%d", pid);
 
 	return write_file(content, strlen(content), pidfile);
 }
