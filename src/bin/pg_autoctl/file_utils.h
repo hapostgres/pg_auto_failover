@@ -21,6 +21,7 @@ bool file_exists(const char *filename);
 bool directory_exists(const char *path);
 bool ensure_empty_dir(const char *dirname, int mode);
 FILE * fopen_with_umask(const char *filePath, const char* modes, int flags, mode_t umask);
+FILE * fopen_read_only(const char *filePath);
 bool write_file(char *data, long fileSize, const char *filePath);
 bool append_to_file(char *data, long fileSize, const char *filePath);
 bool read_file(const char *filePath, char **contents, long *fileSize);

@@ -411,7 +411,7 @@ get_pgpid(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 
 	join_path_components(pidfile, pgSetup->pgdata, "postmaster.pid");
 
-	if ((fp = fopen(pidfile, "r")) == NULL)
+	if ((fp = fopen_read_only(pidfile)) == NULL)
 	{
 		if (!pg_is_not_running_is_ok)
 		{
@@ -482,7 +482,7 @@ read_pg_pidfile(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 
 	join_path_components(pidfile, pgSetup->pgdata, "postmaster.pid");
 
-	if ((fp = fopen(pidfile, "r")) == NULL)
+	if ((fp = fopen_read_only(pidfile)) == NULL)
 	{
 		if (!pg_is_not_running_is_ok)
 		{

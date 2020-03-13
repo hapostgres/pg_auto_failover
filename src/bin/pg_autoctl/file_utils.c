@@ -153,6 +153,21 @@ fopen_with_umask(const char *filePath, const char* modes, int flags, mode_t umas
 
 
 /*
+ * fopen_read_only opens the file as a read only stream.
+ */
+FILE *
+fopen_read_only(const char *filePath)
+{
+	/*
+	 * Explanation of IGNORE-BANNED
+	 * fopen is safe here because we open the file in read only mode. So no
+	 * exclusive access is needed.
+	 */
+	return fopen(filePath, "rb"); /* IGNORE-BANNED */
+}
+
+
+/*
  * write_file writes the given data to the file given by filePath using
  * our logging library to report errors. If succesful, the function returns
  * true.
@@ -232,7 +247,7 @@ read_file(const char *filePath, char **contents, long *fileSize)
 	FILE *fileStream = NULL;
 
 	/* open a file */
-	fileStream = fopen(filePath, "rb");
+	fileStream = fopen_read_only(filePath);
 	if (fileStream == NULL)
 	{
 		log_error("Failed to open file \"%s\": %s", filePath, strerror(errno));
