@@ -96,7 +96,7 @@ keeper_state_write(KeeperStateData *keeperState, const char *filename)
 	char tempFileName[MAXPGPATH];
 
 	/* we're going to write our contents to keeper.state.new first */
-	sprintf(tempFileName, "%s.new", filename);
+	sformat(tempFileName, MAXPGPATH, "%s.new", filename);
 
 	/*
 	 * The keeper process might have been stopped in immediate shutdown mode

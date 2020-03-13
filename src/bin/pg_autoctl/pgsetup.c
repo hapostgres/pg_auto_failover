@@ -18,6 +18,9 @@
 
 #include "parson.h"
 
+#include "postgres_fe.h"
+#include "pqexpbuffer.h"
+
 #include "defaults.h"
 #include "env_utils.h"
 #include "pgctl.h"
@@ -612,8 +615,8 @@ pg_setup_as_json(PostgresSetup *pgSetup, JSON_Value *js)
 							  "control.catalog_version",
 							  (double) pgSetup->control.catalog_version_no);
 
-	snprintf(system_identifier, BUFSIZE, "%" PRIu64,
-			 pgSetup->control.system_identifier);
+	sformat(system_identifier, BUFSIZE, "%" PRIu64,
+			pgSetup->control.system_identifier);
 	json_object_dotset_string(jsobj,
 							  "control.system_identifier",
 							  system_identifier);
@@ -633,9 +636,16 @@ pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 	char pg_regress_sock_dir[MAXPGPATH];
 	char *connStringEnd = connectionString;
 	bool pg_regress_sock_dir_exists = env_exists("PG_REGRESS_SOCK_DIR");
+	PQExpBuffer connStringBuffer = createPQExpBuffer();
 
-	connStringEnd += sprintf(connStringEnd, "port=%d dbname=%s",
-							 pgSetup->pgport, pgSetup->dbname);
+	if (connStringBuffer == NULL)
+	{
+		log_error("Failed to allocate memory");
+		return false;
+	}
+
+	appendPQExpBuffer(connStringBuffer, "port=%d dbname=%s",
+					  pgSetup->pgport, pgSetup->dbname);
 
 	if (pg_regress_sock_dir_exists &&
 			!get_env_copy("PG_REGRESS_SOCK_DIR", pg_regress_sock_dir, MAXPGPATH)) {
@@ -652,7 +662,7 @@ pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 		&& (IS_EMPTY_STRING_BUFFER(pgSetup->pghost)
 			|| pgSetup->pghost[0] == '/'))
 	{
-		connStringEnd += sprintf(connStringEnd, " host=localhost");
+		appendPQExpBufferStr(connStringBuffer, " host=localhost");
 	}
 	else if (!IS_EMPTY_STRING_BUFFER(pgSetup->pghost))
 	{
@@ -669,12 +679,28 @@ pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 					 pg_regress_sock_dir,
 					 pgSetup->pghost);
 		}
-		connStringEnd += sprintf(connStringEnd, " host=%s", pgSetup->pghost);
+		appendPQExpBuffer(connStringBuffer, " host=%s", pgSetup->pghost);
 	}
 
 	if (!IS_EMPTY_STRING_BUFFER(pgSetup->username))
 	{
-		connStringEnd += sprintf(connStringEnd, " user=%s", pgSetup->username);
+		appendPQExpBuffer(connStringBuffer, " user=%s", pgSetup->username);
+	}
+
+	if (PQExpBufferBroken(connStringBuffer))
+	{
+		log_error("Failed to allocate memory");
+		destroyPQExpBuffer(connStringBuffer);
+		return false;
+	}
+
+	if (strlcpy(connectionString,
+				connStringBuffer->data, MAXCONNINFO) >= MAXCONNINFO)
+	{
+		log_error("Failed to copy connection string \"%s\" which is %lu bytes "
+				  "long, pg_autoctl only supports connection strings up to "
+				  " %d bytes",
+				  connStringBuffer->data, connStringBuffer->len, MAXCONNINFO);
 	}
 
 	return true;

@@ -139,11 +139,11 @@ ini_validate_options(IniOption *optionList)
 		int n;
 		char optionName[BUFSIZE];
 
-		n = sprintf(optionName, "%s.%s", option->section, option->name);
+		n = sformat(optionName, BUFSIZE, "%s.%s", option->section, option->name);
 
 		if (option->optName)
 		{
-			sprintf(optionName + n, " (--%s)", option->optName);
+			sformat(optionName + n, BUFSIZE - n, " (--%s)", option->optName);
 		}
 
 		switch (option->type)
@@ -304,7 +304,7 @@ ini_option_to_string(IniOption *option, char *dest, size_t size)
 
 		case INI_INT_T:
 		{
-			snprintf(dest, size, "%d", *(option->intValue));
+			sformat(dest, size, "%d", *(option->intValue));
 			return true;
 		}
 

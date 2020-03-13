@@ -391,12 +391,12 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 
 			if (paramIndex > 0)
 			{
-				bytesWritten = snprintf(writePointer, remainingBytes, ", ");
+				bytesWritten = sformat(writePointer, remainingBytes, ", ");
 				remainingBytes -= bytesWritten;
 				writePointer += bytesWritten;
 			}
 
-			bytesWritten = snprintf(writePointer, remainingBytes, "'%s'", value);
+			bytesWritten = sformat(writePointer, remainingBytes, "'%s'", value);
 			remainingBytes -= bytesWritten;
 			writePointer += bytesWritten;
 		}
@@ -736,7 +736,8 @@ pgsql_alter_system_set(PGSQL *pgsql, GUC setting)
 {
 	char command[1024];
 
-	snprintf(command, 1024, "ALTER SYSTEM SET %s TO %s", setting.name, setting.value);
+	sformat(command, 1024,
+			"ALTER SYSTEM SET %s TO %s", setting.name, setting.value);
 
 	if (!pgsql_execute(pgsql, command))
 	{
@@ -909,10 +910,10 @@ pgsql_create_database(PGSQL *pgsql, const char *dbname, const char *owner)
 	}
 
 	/* now build the SQL command */
-	snprintf(command, BUFSIZE,
-			 "CREATE DATABASE %s WITH OWNER %s",
-			 escapedDBName,
-			 escapedOwner);
+	sformat(command, BUFSIZE,
+			"CREATE DATABASE %s WITH OWNER %s",
+			escapedDBName,
+			escapedOwner);
 
 	log_debug("Running command on Postgres: %s;", command);
 
@@ -982,7 +983,7 @@ pgsql_create_extension(PGSQL *pgsql, const char *name)
 	}
 
 	/* now build the SQL command */
-	snprintf(command, BUFSIZE, "CREATE EXTENSION %s", escapedIdentifier);
+	sformat(command, BUFSIZE, "CREATE EXTENSION %s", escapedIdentifier);
 	PQfreemem(escapedIdentifier);
 	log_debug("Running command on Postgres: %s;", command);
 
@@ -1267,39 +1268,6 @@ hostname_from_uri(const char *pguri,
 
 
 /*
- * make_conninfo_field_int writes a single connection string field to
- * connInfo and returns the number of characters written.
- *
- * It is the responsibility of the caller to ensure that the connInfo
- * is large enough to write the field.
- */
-int
-make_conninfo_field_int(char *connInfo, const char *key, int value)
-{
-	return sprintf(connInfo, " %s=%d", key, value);
-}
-
-
-/*
- * make_conninfo_field_str writes a single connection string field to
- * connInfo with escaping and returns the number of characters written.
- *
- * It is the responsibility of the caller to ensure that the connInfo
- * is large enough to write the field.
- */
-int
-make_conninfo_field_str(char *connInfo, const char *key, const char *value)
-{
-	char *connInfoEnd = connInfo;
-
-	connInfoEnd += sprintf(connInfoEnd, " %s=", key);
-	connInfoEnd += escape_conninfo_value(connInfoEnd, value);
-
-	return connInfoEnd - connInfo;
-}
-
-
-/*
  * escape_conninfo_value escapes a string that is used in a connection info
  * string by prefixing single quotes and backslashes with a backslash.
  *
@@ -1537,7 +1505,7 @@ pgsql_listen(PGSQL *pgsql, char *channels[])
 			return false;
 		}
 
-		sprintf(sql, "LISTEN %s", channel);
+		sformat(sql, BUFSIZE, "LISTEN %s", channel);
 
 		PQfreemem(channel);
 
@@ -1604,8 +1572,8 @@ pgsql_alter_extension_update_to(PGSQL *pgsql,
 	}
 
 	/* now build the SQL command */
-	n = snprintf(command, BUFSIZE, "ALTER EXTENSION %s UPDATE TO %s",
-				 escapedIdentifier, escapedVersion);
+	n = sformat(command, BUFSIZE, "ALTER EXTENSION %s UPDATE TO %s",
+				escapedIdentifier, escapedVersion);
 
 	if (n >= BUFSIZE)
 	{
