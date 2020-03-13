@@ -780,7 +780,7 @@ pg_ctl_start(const char *pg_ctl,
 	int commandSize = 0;
 
 	join_path_components(logfile, pgdata, "startup.log");
-	snprintf(pgport_option, sizeof(pgport_option), "\"-p %d\"", pgport);
+	sformat(pgport_option, sizeof(pgport_option), "\"-p %d\"", pgport);
 
 	args[argsIndex++] = (char *) pg_ctl;
 	args[argsIndex++] = "--pgdata";
@@ -790,8 +790,8 @@ pg_ctl_start(const char *pg_ctl,
 
 	if (!IS_EMPTY_STRING_BUFFER(listen_addresses))
 	{
-		snprintf(listen_addresses_option, sizeof(listen_addresses_option),
-				 "\"-h %s\"", listen_addresses);
+		sformat(listen_addresses_option, sizeof(listen_addresses_option),
+				"\"-h %s\"", listen_addresses);
 
 		args[argsIndex++] = "--options";
 		args[argsIndex++] = (char *) listen_addresses_option;
@@ -799,10 +799,10 @@ pg_ctl_start(const char *pg_ctl,
 
 	if (getenv("PG_REGRESS_SOCK_DIR") != NULL)
 	{
-		snprintf(option_unix_socket_directory,
-				 sizeof(option_unix_socket_directory),
-				 "\"-k \"%s\"\"",
-				 getenv("PG_REGRESS_SOCK_DIR"));
+		sformat(option_unix_socket_directory,
+				sizeof(option_unix_socket_directory),
+				"\"-k \"%s\"\"",
+				getenv("PG_REGRESS_SOCK_DIR"));
 
 		/* pg_ctl --options can be specified multiple times */
 		args[argsIndex++] = "--options";
@@ -1299,7 +1299,7 @@ prepare_primary_conninfo(char *primaryConnInfo,
 		}
 
 		/* now copy the buffer into primaryConnInfo for the caller */
-		size = snprintf(primaryConnInfo, primaryConnInfoSize, "%s", escaped);
+		size = sformat(primaryConnInfo, primaryConnInfoSize, "%s", escaped);
 
 		if (size == -1 || size > primaryConnInfoSize)
 		{
@@ -1436,7 +1436,7 @@ pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *nodename)
 		search_pathlist_destroy_result(opensslSearchList);
 	}
 
-	size = snprintf(pgSetup->ssl.serverKey, MAXPGPATH,
+	size = sformat(pgSetup->ssl.serverKey, MAXPGPATH,
 					"%s/server.key", pgSetup->pgdata);
 
 	if (size == -1 || size > MAXPGPATH)
@@ -1447,7 +1447,7 @@ pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *nodename)
 		return false;
 	}
 
-	size = snprintf(pgSetup->ssl.serverCert, MAXPGPATH,
+	size = sformat(pgSetup->ssl.serverCert, MAXPGPATH,
 					"%s/server.crt", pgSetup->pgdata);
 
 	if (size == -1 || size > MAXPGPATH)
@@ -1458,7 +1458,7 @@ pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *nodename)
 		return false;
 	}
 
-	size = snprintf(subject, BUFSIZE, "/CN=%s", nodename);
+	size = sformat(subject, BUFSIZE, "/CN=%s", nodename);
 
 	if (size == -1 || size > BUFSIZE)
 	{

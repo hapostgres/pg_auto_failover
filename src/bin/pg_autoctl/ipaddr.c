@@ -25,6 +25,7 @@
 
 #include "postgres_fe.h"
 
+#include "file_utils.h"
 #include "ipaddr.h"
 #include "log.h"
 
@@ -94,7 +95,7 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 
     if (ipAddr != NULL)
     {
-        snprintf(localIpAddress, size, "%s", buffer);
+        sformat(localIpAddress, size, "%s", buffer);
     }
     else
     {
@@ -252,7 +253,7 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 		return false;
 	}
 
-	snprintf(localCIDR, size, "%s/%d", network, prefix);
+	sformat(localCIDR, size, "%s/%d", network, prefix);
 
 	return true;
 }
@@ -595,7 +596,7 @@ findHostnameFromLocalIpAddress(char *localIpAddress, char *hostname, int size)
 			return false;
 		}
 
-		snprintf(hostname, size, "%s", hbuf);
+		sformat(hostname, size, "%s", hbuf);
 
 		/* stop at the first hostname found */
 		break;

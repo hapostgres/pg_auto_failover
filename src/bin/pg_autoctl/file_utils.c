@@ -756,11 +756,42 @@ fformat(FILE *stream, const char *fmt, ...)
 
 	if (stream == NULL || fmt == NULL)
 	{
+		log_error("BUG: fformat is called with a NULL target or format string");
 		return -1;
 	}
 
 	va_start(args, fmt);
 	len = pg_vfprintf(stream, fmt, args);
 	va_end(args);
+	return len;
+}
+
+
+/*
+ * sformat is a secured down version of pg_snprintf
+ */
+int
+sformat(char *str, size_t count, const char *fmt, ...)
+{
+	int			len;
+	va_list		args;
+
+	if (str == NULL || fmt == NULL)
+	{
+		log_error("BUG: sformat is called with a NULL target or format string");
+		return -1;
+	}
+
+	va_start(args, fmt);
+	len = pg_vsnprintf(str, count, fmt, args);
+	va_end(args);
+
+	if (len >= count)
+	{
+		log_error("BUG: sformat needs %d bytes to expend format string \"%s\", "
+				  "and a target string of %lu bytes only has been given.",
+				  len, fmt, count);
+	}
+
 	return len;
 }

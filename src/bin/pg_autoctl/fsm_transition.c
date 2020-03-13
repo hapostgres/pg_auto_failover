@@ -644,10 +644,10 @@ fsm_init_standby(Keeper *keeper)
 	replicationSource.sslOptions = config->pgSetup.ssl;
 
 	/* prepare our application_name */
-	snprintf(applicationName, BUFSIZE,
-			 "%s%d",
-			 REPLICATION_APPLICATION_NAME_PREFIX,
-			 keeper->state.current_node_id);
+	sformat(applicationName, BUFSIZE,
+			"%s%d",
+			REPLICATION_APPLICATION_NAME_PREFIX,
+			keeper->state.current_node_id);
 	replicationSource.applicationName = applicationName;
 
 	if (!standby_init_database(postgres, &replicationSource, config->nodename))
@@ -704,10 +704,10 @@ fsm_rewind_or_init(Keeper *keeper)
 	replicationSource.sslOptions = config->pgSetup.ssl;
 
 	/* prepare our application_name */
-	snprintf(applicationName, BUFSIZE,
-			 "%s%d",
-			 REPLICATION_APPLICATION_NAME_PREFIX,
-			 keeper->state.current_node_id);
+	sformat(applicationName, BUFSIZE,
+			"%s%d",
+			REPLICATION_APPLICATION_NAME_PREFIX,
+			keeper->state.current_node_id);
 	replicationSource.applicationName = applicationName;
 
 	if (!primary_rewind_to_standby(postgres, &replicationSource))
