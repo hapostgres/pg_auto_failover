@@ -391,7 +391,7 @@ keeper_update_pg_state(Keeper *keeper)
 	/* reinitialize the replication state values each time we update */
 	postgres->pgIsRunning = false;
 	memset(postgres->pgsrSyncState, 0, PGSR_SYNC_STATE_MAXLENGTH);
-	strcpy(postgres->currentLSN, "0/0");
+	strlcpy(postgres->currentLSN, "0/0", sizeof(postgres->currentLSN));
 
 	/*
 	 * In some states, it's ok to not have a PostgreSQL data directory at all.
