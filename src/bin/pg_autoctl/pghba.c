@@ -76,7 +76,8 @@ pghba_ensure_host_rule_exists(const char *hbaFilePath,
 	if (username)
 	{
 		char escapedUsername[BUFSIZE] = { 0 };
-		int fieldLength = escape_hba_string(escapedUsername, username);
+
+		(void) escape_hba_string(escapedUsername, username);
 
 		appendPQExpBufferStr(hbaLineBuffer, escapedUsername);
 		appendPQExpBufferStr(hbaLineBuffer, " ");
@@ -201,9 +202,8 @@ append_database_field(PQExpBuffer destination,
 		{
 			/* Postgres database names are NAMEDATALEN (64), BUFSIZE is 1024 */
 			char escapedDatabaseName[BUFSIZE] = { 0 };
-			int fieldLength =
-				escape_hba_string(escapedDatabaseName, databaseName);
 
+			(void) escape_hba_string(escapedDatabaseName, databaseName);
 			appendPQExpBufferStr(destination, escapedDatabaseName);
 			break;
 		}

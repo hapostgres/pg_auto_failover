@@ -33,7 +33,7 @@ CFLAGS += -I $(shell $(PG_CONFIG) --includedir-server)
 CFLAGS += -I $(shell $(PG_CONFIG) --pkgincludedir)/internal
 CFLAGS += -I $(shell $(PG_CONFIG) --cflags)
 CFLAGS += -Wformat
-CFLAGS += -Wall
+CFLAGS += -Wall -Wno-missing-braces
 CFLAGS += $(COMMON_LIBS)
 
 LIBS  = -L $(shell $(PG_CONFIG) --pkglibdir)
