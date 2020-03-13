@@ -72,7 +72,7 @@ NotifyStateChange(ReplicationState reportedState,
 				  char *description)
 {
 	int64 eventid;
-	char payload[BUFSIZE];
+	StringInfo payload = makeStringInfo();
 
 	/*
 	 * Insert the event in our events table.
@@ -86,20 +86,22 @@ NotifyStateChange(ReplicationState reportedState,
 	 * provided strings formationId and nodeName, we include the length of the
 	 * string in the message. Parsing is then easier on the receiving side too.
 	 */
-	sprintf(payload,
-			"S:%s:%s:%lu.%s:%d:%ld:%lu.%s:%d",
-			ReplicationStateGetName(reportedState),
-			ReplicationStateGetName(goalState),
-			strlen(formationId),
-			formationId,
-			groupId,
-			nodeId,
-			strlen(nodeName),
-			nodeName,
-			nodePort);
+	appendStringInfo(payload,
+					 "S:%s:%s:%lu.%s:%d:%ld:%lu.%s:%d",
+					 ReplicationStateGetName(reportedState),
+					 ReplicationStateGetName(goalState),
+					 strlen(formationId),
+					 formationId,
+					 groupId,
+					 nodeId,
+					 strlen(nodeName),
+					 nodeName,
+					 nodePort);
 
-	Async_Notify(CHANNEL_STATE, payload);
+	Async_Notify(CHANNEL_STATE, payload->data);
 
+	pfree(payload->data);
+	pfree(payload);
 	return eventid;
 }
 
