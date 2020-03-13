@@ -926,7 +926,6 @@ cli_drop_node(int argc, char **argv)
 			if (IS_EMPTY_STRING_BUFFER(config.nodename)
 				|| config.pgSetup.pgport == 0)
 			{
-
 				log_fatal("To remove a node from the monitor, both the "
 						  "--nodename and --pgport options are required");
 				exit(EXIT_CODE_BAD_ARGS);
@@ -1076,7 +1075,7 @@ cli_drop_node_from_monitor(KeeperConfig *config, const char *nodename, int port)
 	}
 
 	/* expose the pgSetup in the given KeeperConfig */
-	memcpy(&(config->pgSetup), &(mconfig.pgSetup), sizeof(PostgresSetup));
+	config->pgSetup = mconfig.pgSetup;
 
 	/* prepare to connect to the monitor, locally */
 	pg_setup_get_local_connection_string(&(mconfig.pgSetup), connInfo);
