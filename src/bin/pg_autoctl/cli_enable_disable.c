@@ -14,6 +14,7 @@
 
 #include "cli_common.h"
 #include "commandline.h"
+#include "env_utils.h"
 #include "fsm.h"
 #include "keeper_config.h"
 #include "log.h"
@@ -187,16 +188,7 @@ cli_secondary_getopts(int argc, char **argv)
 
 	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 	{
-		char *pgdata = getenv("PGDATA");
-
-		if (pgdata == NULL)
-		{
-			log_fatal("Failed to set PGDATA either from the environment "
-					  "or from --pgdata");
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-
-		strlcpy(options.pgSetup.pgdata, pgdata, MAXPGPATH);
+		get_env_pgdata_or_exit(options.pgSetup.pgdata);
 	}
 
 	if (IS_EMPTY_STRING_BUFFER(options.formation))

@@ -22,6 +22,7 @@
 #include "pqexpbuffer.h"
 
 #include "defaults.h"
+#include "env_utils.h"
 #include "pgctl.h"
 #include "log.h"
 #include "signals.h"
@@ -109,15 +110,10 @@ pg_setup_init(PostgresSetup *pgSetup,
 	}
 	else
 	{
-		char *pgdata = getenv("PGDATA");
-
-		if (pgdata)
+		if (!get_env_pgdata(pgSetup->pgdata))
 		{
-			strlcpy(pgSetup->pgdata, pgdata, MAXPGPATH);
-		}
-		else
-		{
-			log_error("PGDATA is unset in environment, please provide --pgdata");
+			log_error("Failed to set PGDATA either from the environment "
+					  "or from --pgdata");
 			errors++;
 		}
 	}
@@ -163,11 +159,15 @@ pg_setup_init(PostgresSetup *pgSetup,
 	}
 	else
 	{
-		char *pguser = getenv("PGUSER");
-
-		if (pguser)
+		/*
+		 * If a PGUSER environment variable is defined, take the value from
+		 * there. Otherwise we attempt to connect without username. In that
+		 * case the username will be determined based on the current user.
+		 */
+		if (!get_env_copy_with_fallback("PGUSER", pgSetup->username, NAMEDATALEN, ""))
 		{
-			strlcpy(pgSetup->username, pguser, NAMEDATALEN);
+			/* errors have already been logged */
+			return false;
 		}
 	}
 
@@ -178,20 +178,16 @@ pg_setup_init(PostgresSetup *pgSetup,
 	}
 	else
 	{
-		char *pgdatabase = getenv("PGDATABASE");
-
 		/*
 		 * If a PGDATABASE environment variable is defined, take the value from
 		 * there. Otherwise we attempt to connect without a database name, and
 		 * the default will use the username here instead.
 		 */
-		if (pgdatabase != NULL)
+		if (!get_env_copy_with_fallback("PGDATABASE", pgSetup->dbname, NAMEDATALEN,
+										DEFAULT_DATABASE_NAME))
 		{
-			strlcpy(pgSetup->dbname, pgdatabase, NAMEDATALEN);
-		}
-		else
-		{
-			strlcpy(pgSetup->dbname, DEFAULT_DATABASE_NAME, NAMEDATALEN);
+			/* errors have already been logged */
+			return false;
 		}
 	}
 
@@ -224,16 +220,17 @@ pg_setup_init(PostgresSetup *pgSetup,
 		/* read_pg_pidfile might already have set pghost for us */
 		if (pgSetup->pghost[0] == '\0')
 		{
-			char *pghost = getenv("PGHOST");
-
 			/*
 			 * We can (at least try to) connect without host= in the connection
 			 * string, so missing PGHOST and --pghost isn't an error.
 			 */
-			if (pghost)
+			if (!get_env_copy_with_fallback("PGHOST", pgSetup->pghost,
+											_POSIX_HOST_NAME_MAX, ""))
 			{
-				strlcpy(pgSetup->pghost, pghost, _POSIX_HOST_NAME_MAX);
+				/* errors have already been logged */
+				return false;
 			}
+
 		}
 	}
 
@@ -244,10 +241,7 @@ pg_setup_init(PostgresSetup *pgSetup,
 	 */
 	if (IS_EMPTY_STRING_BUFFER(pgSetup->pghost))
 	{
-		char *pg_regress_sock_dir = getenv("PG_REGRESS_SOCK_DIR");
-
-		if (pg_regress_sock_dir != NULL
-			&& strcmp(pg_regress_sock_dir, "") == 0)
+		if (env_found_empty("PG_REGRESS_SOCK_DIR"))
 		{
 			log_error("PG_REGRESS_SOCK_DIR is set to \"\" to disable unix "
 					  "socket directories, now --pghost is mandatory, "
@@ -646,7 +640,9 @@ bool
 pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 									 char *connectionString)
 {
-	char *pg_regress_sock_dir = getenv("PG_REGRESS_SOCK_DIR");
+	char pg_regress_sock_dir[MAXPGPATH];
+	char *connStringEnd = connectionString;
+	bool pg_regress_sock_dir_exists = env_exists("PG_REGRESS_SOCK_DIR");
 	PQExpBuffer connStringBuffer = createPQExpBuffer();
 
 	if (connStringBuffer == NULL)
@@ -658,14 +654,19 @@ pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 	appendPQExpBuffer(connStringBuffer, "port=%d dbname=%s",
 					  pgSetup->pgport, pgSetup->dbname);
 
+	if (pg_regress_sock_dir_exists &&
+			!get_env_copy("PG_REGRESS_SOCK_DIR", pg_regress_sock_dir, MAXPGPATH))
+	{
+		/* errors have already been logged */
+		return false;
+	}
 	/*
 	 * When PG_REGRESS_SOCK_DIR is set and empty, we force the connection
 	 * string to use "localhost" (TCP/IP hostname for IP 127.0.0.1 or ::1,
 	 * usually), even when the configuration setup is using a unix directory
 	 * setting.
 	 */
-	if (pg_regress_sock_dir != NULL
-		&& strcmp(pg_regress_sock_dir, "") == 0
+	if (env_found_empty("PG_REGRESS_SOCK_DIR")
 		&& (IS_EMPTY_STRING_BUFFER(pgSetup->pghost)
 			|| pgSetup->pghost[0] == '/'))
 	{
@@ -673,12 +674,11 @@ pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 	}
 	else if (!IS_EMPTY_STRING_BUFFER(pgSetup->pghost))
 	{
-		if (pg_regress_sock_dir != NULL
-			&& strcmp(pg_regress_sock_dir, "") != 0
+		if (pg_regress_sock_dir_exists && strlen(pg_regress_sock_dir) > 0
 			&& strcmp(pgSetup->pghost, pg_regress_sock_dir) != 0)
 		{
 			/*
-			 * It might turn out ok (stray environement), but in case of
+			 * It might turn out ok (stray environment), but in case of
 			 * connection error, this warning should be useful to debug the
 			 * situation.
 			 */
@@ -894,7 +894,7 @@ pg_setup_get_username(PostgresSetup *pgSetup)
 {
 	uid_t uid;
 	struct passwd *pw;
-	char *userEnv;
+	char userEnv[NAMEDATALEN];
 
 	/* use a configured username if provided */
 	if (!IS_EMPTY_STRING_BUFFER(pgSetup->username))
@@ -916,8 +916,7 @@ pg_setup_get_username(PostgresSetup *pgSetup)
 
 
 	/* fallback on USER from env if the user cannot be found in passwd */
-	userEnv = getenv("USER");
-	if (userEnv != NULL)
+	if (get_env_copy("USER", userEnv, NAMEDATALEN))
 	{
 		log_trace("username found in USER environment variable: %s", userEnv);
 		return strdup(userEnv);
@@ -1135,10 +1134,10 @@ pmStatusToString(PostmasterStatus pm_status)
 int
 pgsetup_get_pgport()
 {
-	char *pgport_env = getenv("PGPORT");
+	char pgport_env[NAMEDATALEN];
 	long pgport = 0;
 
-	if (pgport_env)
+	if (get_env_copy("PGPORT", pgport_env, NAMEDATALEN))
 	{
 		errno = 0;
 		pgport = strtol(pgport_env, NULL, 10);

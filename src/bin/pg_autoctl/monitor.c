@@ -13,6 +13,7 @@
 #include <unistd.h>
 
 #include "defaults.h"
+#include "env_utils.h"
 #include "log.h"
 #include "monitor.h"
 #include "monitor_config.h"
@@ -2859,19 +2860,21 @@ monitor_ensure_extension_version(Monitor *monitor,
 								 MonitorExtensionVersion *version)
 {
 	const char *extensionVersion = PG_AUTOCTL_EXTENSION_VERSION;
+	char envExtensionVersion[MAXPGPATH];
 
-	/* in test environement, we can export any target version we want */
-	if (getenv(PG_AUTOCTL_DEBUG) != NULL)
+	/* in test environment, we can export any target version we want */
+	if (env_exists(PG_AUTOCTL_DEBUG) && env_exists(PG_AUTOCTL_EXTENSION_VERSION_VAR))
 	{
-		char *val = getenv(PG_AUTOCTL_EXTENSION_VERSION_VAR);
-
-		if (val != NULL)
+		if (!get_env_copy(PG_AUTOCTL_EXTENSION_VERSION_VAR, envExtensionVersion,
+						  MAXPGPATH))
 		{
-			extensionVersion = val;
-			log_debug("monitor_ensure_extension_version targets extension "
-					  "version \"%s\" - as per environment.",
-					  extensionVersion);
+			/* errors have already been logged */
+			return false;
 		}
+		extensionVersion = envExtensionVersion;
+		log_debug("monitor_ensure_extension_version targets extension "
+				  "version \"%s\" - as per environment.",
+				  extensionVersion);
 	}
 
 	if (!monitor_get_extension_version(monitor, version))
