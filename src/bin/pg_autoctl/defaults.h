@@ -108,4 +108,13 @@
 #define EXIT_CODE_INTERNAL_ERROR 12
 
 
+/*
+ * This opens file write only and creates if it doesn't exist.
+ */
+#define FOPEN_FLAGS_W O_WRONLY | O_CREAT
+/*
+ * This opens the file in append mode and creates it if it doesn't exist.
+ */
+#define FOPEN_FLAGS_A O_APPEND | O_CREAT
+
 #endif /* DEFAULTS_H */
