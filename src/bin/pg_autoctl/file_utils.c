@@ -134,7 +134,7 @@ ensure_empty_dir(const char *dirname, int mode)
 FILE *
 fopen_with_umask(const char *filePath, const char* modes, int flags, mode_t umask)
 {
-	int fileDescriptor = open(filePath, O_WRONLY | O_CREAT, umask);
+	int fileDescriptor = open(filePath, flags, umask);
 	FILE *fileStream = NULL;
 	if (fileDescriptor == -1)
 	{
