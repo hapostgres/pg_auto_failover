@@ -27,6 +27,7 @@
 #include "pgsetup.h"
 #include "pgsql.h"
 #include "state.h"
+#include "string_utils.h"
 
 /* handle command line options for our setup. */
 KeeperConfig keeperOptions;
@@ -135,8 +136,7 @@ cli_create_node_getopts(int argc, char **argv,
 			case 'p':
 			{
 				/* { "pgport", required_argument, NULL, 'p' } */
-				LocalOptionConfig.pgSetup.pgport = strtol(optarg, NULL, 10);
-				if (LocalOptionConfig.pgSetup.pgport == 0 && errno == EINVAL)
+				if (!stringToInt(optarg, &LocalOptionConfig.pgSetup.pgport))
 				{
 					log_error("Failed to parse --pgport number \"%s\"",
 							  optarg);
@@ -157,8 +157,7 @@ cli_create_node_getopts(int argc, char **argv,
 			case 'y':
 			{
 				/* { "proxyport", required_argument, NULL,'y' } */
-				LocalOptionConfig.pgSetup.proxyport = strtol(optarg, NULL, 10);
-				if (LocalOptionConfig.pgSetup.proxyport == 0 && errno == EINVAL)
+				if (!stringToInt(optarg, &LocalOptionConfig.pgSetup.proxyport))
 				{
 					log_error("Failed to parse --proxyport number \"%s\"",
 							  optarg);
@@ -233,8 +232,7 @@ cli_create_node_getopts(int argc, char **argv,
 			case 'g':
 			{
 				/* { "group", required_argument, NULL, 'g' } */
-				int scanResult = sscanf(optarg, "%d", &LocalOptionConfig.groupId);
-				if (scanResult == 0)
+				if (!stringToInt(optarg, &LocalOptionConfig.groupId))
 				{
 					log_fatal("--group argument is not a valid group ID: \"%s\"",
 							  optarg);

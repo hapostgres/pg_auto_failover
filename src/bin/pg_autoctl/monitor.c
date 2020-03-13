@@ -19,6 +19,7 @@
 #include "monitor_config.h"
 #include "parsing.h"
 #include "pgsql.h"
+#include "string_utils.h"
 
 
 typedef struct NodeAddressParseContext
@@ -489,8 +490,8 @@ parseNode(void *ctx, PGresult *result)
 	}
 
 	value = PQgetvalue(result, 0, 1);
-	context->node->port = strtol(value, NULL, 0);
-	if (context->node->port == 0)
+
+	if (!stringToInt(value, &context->node->port) || context->node->port == 0)
 	{
 		log_error("Invalid port number \"%s\" returned by monitor", value);
 		context->parsedOK = false;
@@ -526,14 +527,16 @@ parseNodeState(void *ctx, PGresult *result)
 	}
 
 	value = PQgetvalue(result, 0, 0);
-	if (sscanf(value, "%d", &context->assignedState->nodeId) != 1)
+
+	if (!stringToInt(value, &context->assignedState->nodeId))
 	{
 		log_error("Invalid node ID \"%s\" returned by monitor", value);
 		++errors;
 	}
 
 	value = PQgetvalue(result, 0, 1);
-	if (sscanf(value, "%d", &context->assignedState->groupId) != 1)
+
+	if (!stringToInt(value, &context->assignedState->groupId))
 	{
 		log_error("Invalid group ID \"%s\" returned by monitor", value);
 		++errors;
@@ -1419,8 +1422,7 @@ parseCoordinatorNode(void *ctx, PGresult *result)
 	}
 
 	value = PQgetvalue(result, 0, 1);
-	context->node->port = strtol(value, NULL, 0);
-	if (context->node->port == 0)
+	if (!stringToInt(value, &context->node->port) || context->node->port == 0)
 	{
 		log_error("Invalid port number \"%s\" returned by monitor", value);
 		context->parsedOK = false;
