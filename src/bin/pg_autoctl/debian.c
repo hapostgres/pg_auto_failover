@@ -176,7 +176,7 @@ debian_find_postgres_configuration_files(PostgresSetup *pgSetup,
 										  PG_CONFIG_TYPE_POSTGRES))
 	{
 		/* so we're dealing with a "normal" Postgres installation */
-		memcpy(pgConfigFiles, &postgresConfFiles, sizeof(PostgresConfigFiles));
+		*pgConfigFiles = postgresConfFiles;
 
 		return true;
 	}
@@ -187,7 +187,7 @@ debian_find_postgres_configuration_files(PostgresSetup *pgSetup,
 										  PG_CONFIG_TYPE_DEBIAN))
 	{
 		/* so we're dealing with a "normal" Postgres installation */
-		memcpy(pgConfigFiles, &debianConfFiles, sizeof(PostgresConfigFiles));
+		*pgConfigFiles = debianConfFiles;
 
 		return true;
 	}
@@ -439,7 +439,7 @@ expandDebianPatternsInDirectoryName(char *pathname,
 					 */
 					if ((pathnameIndex + versionSize) < pathnameSize)
 					{
-						memcpy(pathname+pathnameIndex, versionName, versionSize);
+						strlcpy(pathname+pathnameIndex, versionName, pathnameSize - pathnameIndex);
 						pathnameIndex += versionSize;
 					}
 					break;
@@ -456,7 +456,7 @@ expandDebianPatternsInDirectoryName(char *pathname,
 					 */
 					if ((pathnameIndex + clusterSize) < pathnameSize)
 					{
-						memcpy(pathname+pathnameIndex, clusterName, clusterSize);
+						strlcpy(pathname+pathnameIndex, clusterName, pathnameSize - pathnameIndex);
 						pathnameIndex += clusterSize;
 					}
 					break;

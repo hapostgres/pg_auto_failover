@@ -525,7 +525,7 @@ cli_create_node_getopts(int argc, char **argv,
 	}
 
 	/* publish our option parsing now */
-	memcpy(options, &LocalOptionConfig, sizeof(KeeperConfig));
+	*options = LocalOptionConfig;
 
 	return optind;
 }
