@@ -1430,7 +1430,7 @@ pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *nodename)
 	char subject[BUFSIZE] = { 0 };
 	int size = 0;
 	char openssl[MAXPGPATH];
-	if (!search_path_one("openssl", openssl)) {
+	if (!search_path_one("openssl", openssl))
 	{
 		/* errors have already been logged */
 		return false;

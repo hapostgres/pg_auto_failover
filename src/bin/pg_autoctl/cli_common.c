@@ -792,7 +792,8 @@ void
 set_first_pgctl(PostgresSetup *pgSetup)
 {
 	char *version = NULL;
-	if (!search_path_one("pg_ctl", pgSetup->pg_ctl)) {
+	if (!search_path_one("pg_ctl", pgSetup->pg_ctl))
+	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_ARGS);
 	}

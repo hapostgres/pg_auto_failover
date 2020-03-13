@@ -480,7 +480,8 @@ search_path_one(const char *filename, char *result)
 {
 	char **paths = NULL;
 	int n = search_path(filename, &paths);
-	if (n < 1) {
+	if (n < 1)
+	{
 		log_error("Failed to find %s command in your PATH", filename);
 		return false;
 	}
