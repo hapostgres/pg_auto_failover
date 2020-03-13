@@ -10,6 +10,7 @@
 #ifndef STATE_H
 #define STATE_H
 
+#include <assert.h>
 #include "parson.h"
 
 #include "keeper_config.h"
@@ -73,6 +74,12 @@ typedef enum
  *  - last_secondary_contact
  *  - xlog_location                    note: should we keep that?
  *  - keeper_is_paused
+ *
+ *  Note: The struct is serialized/serialiazed to/from state file. Therefore
+ *  keeping the memory layout the same is important. Please
+ *  - do not change the order of fields
+ *  - do not add a new field in between, always add to the end
+ *  - do not use any pointers
  */
 typedef struct
 {
@@ -98,6 +105,7 @@ typedef struct
 	int keeper_is_paused;
 } KeeperStateData;
 
+_Static_assert (sizeof(KeeperStateData) < PG_AUTOCTL_KEEPER_STATE_FILE_SIZE, "size of KeeperStateData is larger than expected. please review PG_AUTOCTL_KEEPER_STATE_FILE_SIZE");
 
 typedef enum
 {
@@ -108,11 +116,20 @@ typedef enum
 	PRE_INIT_STATE_PRIMARY
 } PreInitPostgreInstanceState;
 
+/*
+ *  Note: The struct is serialized/serialiazed to/from state file. Therefore
+ *  keeping the memory layout the same is important. Please
+ *  - do not change the order of fields
+ *  - do not add a new field in between, always add to the end
+ *  - do not use any pointers
+ */
 typedef struct
 {
 	int pg_autoctl_state_version;
 	PreInitPostgreInstanceState pgInitState;
 } KeeperStateInit;
+
+_Static_assert (sizeof(KeeperStateInit) < PG_AUTOCTL_KEEPER_STATE_FILE_SIZE, "size of KeeperStateInit is larger than expected. please review PG_AUTOCTL_KEEPER_STATE_FILE_SIZE");
 
 const char * NodeStateToString(NodeState s);
 NodeState NodeStateFromString(const char *str);

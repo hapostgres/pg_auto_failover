@@ -276,7 +276,7 @@ keeper_config_init(KeeperConfig *config,
 	 * Keep the whole set of values discovered in pg_setup_init from the
 	 * configuration file
 	 */
-	memcpy(&(config->pgSetup), &pgSetup, sizeof(PostgresSetup));
+	config->pgSetup = pgSetup;
 
 	/*
 	 * Compute the backupDirectory from pgdata, or check the one given in the
@@ -313,7 +313,6 @@ keeper_config_read_file(KeeperConfig *config,
 						bool pgIsNotRunningIsOk,
 						bool monitorDisabledIsOk)
 {
-
 	if (!keeper_config_read_file_skip_pgsetup(config, monitorDisabledIsOk))
 	{
 		/* errors have already been logged. */
@@ -396,7 +395,7 @@ keeper_config_pgsetup_init(KeeperConfig *config,
 	 * Keep the whole set of values discovered in pg_setup_init from the
 	 * configuration file
 	 */
-	memcpy(&(config->pgSetup), &pgSetup, sizeof(PostgresSetup));
+	config->pgSetup = pgSetup;
 
 	return true;
 }
@@ -538,7 +537,7 @@ keeper_config_set_setting(KeeperConfig *config,
 						  missing_pgdata_is_ok,
 						  pg_is_not_running_is_ok))
 		{
-			memcpy(&(config->pgSetup), &pgSetup, sizeof(PostgresSetup));
+			config->pgSetup = pgSetup;
 			return true;
 		}
 	}
@@ -583,7 +582,7 @@ keeper_config_merge_options(KeeperConfig *config, KeeperConfig *options)
 		 * Keep the whole set of values discovered in pg_setup_init from the
 		 * configuration file
 		 */
-		memcpy(&(config->pgSetup), &pgSetup, sizeof(PostgresSetup));
+		config->pgSetup = pgSetup;
 
 		return keeper_config_write_file(config);
 	}

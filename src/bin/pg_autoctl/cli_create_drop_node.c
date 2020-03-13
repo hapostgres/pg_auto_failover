@@ -1075,7 +1075,7 @@ cli_drop_node_from_monitor(KeeperConfig *config, const char *nodename, int port)
 	}
 
 	/* expose the pgSetup in the given KeeperConfig */
-	memcpy(&(config->pgSetup), &(mconfig.pgSetup), sizeof(PostgresSetup));
+	config->pgSetup = mconfig.pgSetup;
 
 	/* prepare to connect to the monitor, locally */
 	pg_setup_get_local_connection_string(&(mconfig.pgSetup), connInfo);
