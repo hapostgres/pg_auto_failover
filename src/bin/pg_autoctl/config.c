@@ -36,10 +36,8 @@ build_xdg_path(char *dst,
 {
 	char filename[MAXPGPATH];
 	char home[MAXPGPATH];
-	int homePathLength = 0;
 	char fallback[MAXPGPATH];
 	char xdg_topdir[MAXPGPATH];
-	int xdg_topdir_length = 0;
 	char *envVarName;
 
 	if (!get_env_copy("HOME", home, MAXPGPATH))
@@ -83,10 +81,10 @@ build_xdg_path(char *dst,
 	}
 
 	if (xdgType == XDG_RUNTIME && !directory_exists(xdg_topdir)) {
-		xdg_topdir_length = strlcpy(xdg_topdir, "/tmp", MAXPGPATH);
+		strlcpy(xdg_topdir, "/tmp", MAXPGPATH);
 	}
 
-	join_path_components(filename, filename, "pg_autoctl");
+	join_path_components(filename, xdg_topdir, "pg_autoctl");
 
 	if (pgdata[0] == '/')
 	{
