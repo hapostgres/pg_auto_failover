@@ -544,7 +544,12 @@ read_pg_pidfile(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 
 		if (lineno == LOCK_FILE_LINE_PORT)
 		{
-			stringToUShort(line, &pgSetup->pidFile.port);
+			if (!stringToUShort(line, &pgSetup->pidFile.port))
+			{
+				log_error("Postgres pidfile does not contain a valid port %s", line);
+
+				return false;
+			}
 		}
 
 		if (lineno == LOCK_FILE_LINE_SOCKET_DIR)

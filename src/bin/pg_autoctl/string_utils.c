@@ -42,8 +42,12 @@ bool
 stringToInt(const char *str, int *number)
 {
 	char *endptr;
-	bool success = true;
 	long long int n;
+
+	if (str == NULL)
+	{
+		return false;
+	}
 
 	if (number == NULL)
 	{
@@ -56,27 +60,24 @@ stringToInt(const char *str, int *number)
 
 	if (str == endptr)
 	{
-		success = false;
+		return false;
 	}
 	else if (errno != 0)
 	{
-		success = false;
+		return false;
 	}
-	else if (errno == 0 && str && *endptr != '\0')
+	else if (*endptr != '\0')
 	{
-		success = false;
+		return false;
 	}
 	else if (n < INT_MIN || n > INT_MAX)
 	{
-		success = false;
+		return false;
 	}
 
-	if (success)
-	{
-		*number = n;
-	}
+	*number = n;
 
-	return success;
+	return true;
 }
 
 
@@ -88,8 +89,12 @@ bool
 stringToInt64(const char *str, int64_t *number)
 {
 	char *endptr;
-	bool success = true;
 	long long int n;
+
+	if (str == NULL)
+	{
+		return false;
+	}
 
 	if (number == NULL)
 	{
@@ -102,27 +107,24 @@ stringToInt64(const char *str, int64_t *number)
 
 	if (str == endptr)
 	{
-		success = false;
+		return false;
 	}
 	else if (errno != 0)
 	{
-		success = false;
+		return false;
 	}
-	else if (errno == 0 && str && *endptr != '\0')
+	else if (*endptr != '\0')
 	{
-		success = false;
+		return false;
 	}
 	else if (n < INT64_MIN || n > INT64_MAX)
 	{
-		success = false;
+		return false;
 	}
 
-	if (success)
-	{
-		*number = n;
-	}
+	*number = n;
 
-	return success;
+	return true;
 }
 
 
@@ -134,8 +136,12 @@ bool
 stringToUInt(const char *str, unsigned int *number)
 {
 	char *endptr;
-	bool success = true;
 	unsigned long long n = 0;
+
+	if (str == NULL)
+	{
+		return false;
+	}
 
 	if (number == NULL)
 	{
@@ -147,27 +153,24 @@ stringToUInt(const char *str, unsigned int *number)
 
 	if (str == endptr)
 	{
-		success = false;
+		return false;
 	}
 	else if (errno != 0)
 	{
-		success = false;
+		return false;
 	}
-	else if (errno == 0 && str && *endptr != '\0')
+	else if (*endptr != '\0')
 	{
-		success = false;
+		return false;
 	}
 	else if (n > UINT_MAX)
 	{
-		success = false;
+		return false;
 	}
 
-	if (success)
-	{
-		*number = n;
-	}
+	*number = n;
 
-	return success;
+	return true;
 }
 
 
@@ -179,8 +182,12 @@ bool
 stringToUInt64(const char *str, uint64_t *number)
 {
 	char *endptr;
-	bool success = true;
 	unsigned long long n = 0;
+
+	if (str == NULL)
+	{
+		return false;
+	}
 
 	if (number == NULL)
 	{
@@ -192,27 +199,24 @@ stringToUInt64(const char *str, uint64_t *number)
 
 	if (str == endptr)
 	{
-		success = false;
+		return false;
 	}
 	else if (errno != 0)
 	{
-		success = false;
+		return false;
 	}
-	else if (errno == 0 && str && *endptr != '\0')
+	else if (*endptr != '\0')
 	{
-		success = false;
+		return false;
 	}
 	else if (n > UINT64_MAX)
 	{
-		success = false;
+		return false;
 	}
 
-	if (success)
-	{
-		*number = n;
-	}
+	*number = n;
 
-	return success;
+	return true;
 }
 
 
@@ -224,8 +228,12 @@ bool
 stringToShort(const char *str, short *number)
 {
 	char *endptr;
-	bool success = true;
 	long long int n;
+
+	if (str == NULL)
+	{
+		return false;
+	}
 
 	if (number == NULL)
 	{
@@ -238,27 +246,24 @@ stringToShort(const char *str, short *number)
 
 	if (str == endptr)
 	{
-		success = false;
+		return false;
 	}
 	else if (errno != 0)
 	{
-		success = false;
+		return false;
 	}
-	else if (errno == 0 && str && *endptr != '\0')
+	else if (*endptr != '\0')
 	{
-		success = false;
+		return false;
 	}
 	else if (n < SHRT_MIN || n > SHRT_MAX)
 	{
-		success = false;
+		return false;
 	}
 
-	if (success)
-	{
-		*number = n;
-	}
+	*number = n;
 
-	return success;
+	return true;
 }
 
 
@@ -270,8 +275,12 @@ bool
 stringToUShort(const char *str, unsigned short *number)
 {
 	char *endptr;
-	bool success = true;
 	unsigned long long n = 0;
+
+	if (str == NULL)
+	{
+		return false;
+	}
 
 	if (number == NULL)
 	{
@@ -283,27 +292,24 @@ stringToUShort(const char *str, unsigned short *number)
 
 	if (str == endptr)
 	{
-		success = false;
+		return false;
 	}
 	else if (errno != 0)
 	{
-		success = false;
+		return false;
 	}
-	else if (errno == 0 && str && *endptr != '\0')
+	else if (*endptr != '\0')
 	{
-		success = false;
+		return false;
 	}
 	else if (n > USHRT_MAX)
 	{
-		success = false;
+		return false;
 	}
 
-	if (success)
-	{
-		*number = n;
-	}
+	*number = n;
 
-	return success;
+	return true;
 }
 
 
@@ -315,8 +321,12 @@ bool
 stringToInt32(const char *str, int32_t *number)
 {
 	char *endptr;
-	bool success = true;
 	long long int n;
+
+	if (str == NULL)
+	{
+		return false;
+	}
 
 	if (number == NULL)
 	{
@@ -329,27 +339,24 @@ stringToInt32(const char *str, int32_t *number)
 
 	if (str == endptr)
 	{
-		success = false;
+		return false;
 	}
 	else if (errno != 0)
 	{
-		success = false;
+		return false;
 	}
-	else if (errno == 0 && str && *endptr != '\0')
+	else if (*endptr != '\0')
 	{
-		success = false;
+		return false;
 	}
 	else if (n < INT32_MIN || n > INT32_MAX)
 	{
-		success = false;
+		return false;
 	}
 
-	if (success)
-	{
-		*number = n;
-	}
+	*number = n;
 
-	return success;
+	return true;
 }
 
 
@@ -361,8 +368,12 @@ bool
 stringToUInt32(const char *str, uint32_t *number)
 {
 	char *endptr;
-	bool success = true;
 	unsigned long long n = 0;
+
+	if (str == NULL)
+	{
+		return false;
+	}
 
 	if (number == NULL)
 	{
@@ -374,27 +385,24 @@ stringToUInt32(const char *str, uint32_t *number)
 
 	if (str == endptr)
 	{
-		success = false;
+		return false;
 	}
 	else if (errno != 0)
 	{
-		success = false;
+		return false;
 	}
-	else if (errno == 0 && str && *endptr != '\0')
+	else if (*endptr != '\0')
 	{
-		success = false;
+		return false;
 	}
 	else if (n > UINT32_MAX)
 	{
-		success = false;
+		return false;
 	}
 
-	if (success)
-	{
-		*number = n;
-	}
+	*number = n;
 
-	return success;
+	return true;
 }
 
 

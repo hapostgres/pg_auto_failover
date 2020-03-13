@@ -1245,7 +1245,13 @@ hostname_from_uri(const char *pguri,
 			if (option->val)
 			{
 				/* we expect a single port number in a monitor's URI */
-				stringToInt(option->val, port);
+				if (!stringToInt(option->val, port))
+				{
+					log_error("Failed to parse port number : %s", option->val);
+
+					PQconninfoFree(conninfo);
+					return false;
+				}
 				++found;
 			}
 			else
