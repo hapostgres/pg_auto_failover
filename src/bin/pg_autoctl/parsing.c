@@ -16,7 +16,7 @@
 
 #include "log.h"
 #include "parsing.h"
-
+#include "string_utils.h"
 
 static bool parse_controldata_field_uint32(const char *controlDataString,
 										   const char *fieldName,
@@ -170,9 +170,7 @@ parse_controldata_field_uint32(const char *controlDataString,
 		return false;
 	}
 
-	*dest = strtol(match, NULL, 10);
-
-	if (*dest == 0 && errno == EINVAL)
+	if (!stringToUInt32(match, dest))
 	{
 		log_error("Failed to parse number \"%s\": %m", match);
 		free(match);
@@ -205,9 +203,7 @@ parse_controldata_field_uint64(const char *controlDataString,
 		return false;
 	}
 
-	*dest = strtoll(match, NULL, 10);
-
-	if (*dest == 0 && errno == EINVAL)
+	if (!stringToUInt64(match, dest))
 	{
 		log_error("Failed to parse number \"%s\": %m", match);
 		free(match);
@@ -216,22 +212,6 @@ parse_controldata_field_uint64(const char *controlDataString,
 
 	free(match);
 	return true;
-}
-
-
-/*
- * intToString converts an int to an IntString, which contains a decimal string
- * representation of the integer.
- */
-IntString
-intToString(int64_t number)
-{
-	IntString intString;
-
-	intString.intValue = number;
-	sformat(intString.strValue, INT_STRING_STR_SIZE, "%" PRId64, number);
-
-	return intString;
 }
 
 
@@ -287,12 +267,21 @@ parse_state_notification_message(StateNotification *notification)
 	/* read the groupId and nodeId */
 	col = strchr(ptr, FIELD_SEP);
 	*col = '\0';
-	notification->groupId = atoi(ptr);
+	if (!stringToInt(ptr, &notification->groupId))
+	{
+		log_warn("Failed to parse group id \"%s\"", ptr);
+		return false;
+	}
 	ptr = ++col;
 
 	col = strchr(ptr, FIELD_SEP);
 	*col = '\0';
-	notification->nodeId = atoi(ptr);
+
+	if (!stringToInt(ptr, &notification->nodeId))
+	{
+		log_warn("Failed to parse node id \"%s\"", ptr);
+		return false;
+	}
 	ptr = ++col;
 
 	/* read the nodeName, then move past it */
@@ -301,7 +290,11 @@ parse_state_notification_message(StateNotification *notification)
 										   NAMEDATALEN);
 
 	/* read the nodePort */
-	notification->nodePort = atoi(ptr);
+	if (!stringToInt(ptr, &notification->nodePort))
+	{
+		log_warn("Failed to parse node port id \"%s\"", ptr);
+		return false;
+	}
 
 	return true;
 }
@@ -319,7 +312,7 @@ read_length_delimited_string_at(const char *ptr, char *buffer, int size)
 
 	col = strchr(ptr, STRLEN_SEP);
 	*col = '\0';
-	len = atoi(ptr);
+	len = stringToInt(ptr, NULL);
 
 	if (len < size)
 	{

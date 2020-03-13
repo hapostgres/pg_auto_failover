@@ -28,6 +28,7 @@
 #include "pgsetup.h"
 #include "pgsql.h"
 #include "state.h"
+#include "string_utils.h"
 
 static int eventCount = 10;
 
@@ -209,8 +210,7 @@ cli_show_state_getopts(int argc, char **argv)
 
 			case 'g':
 			{
-				int scanResult = sscanf(optarg, "%d", &options.groupId);
-				if (scanResult == 0)
+				if (!stringToInt(optarg, &options.groupId))
 				{
 					log_fatal("--group argument is not a valid group ID: \"%s\"",
 							  optarg);
@@ -222,8 +222,7 @@ cli_show_state_getopts(int argc, char **argv)
 
 			case 'n':
 			{
-				int scanResult = sscanf(optarg, "%d", &eventCount);
-				if (scanResult == 0)
+				if (!stringToInt(optarg, &eventCount))
 				{
 					log_fatal("--count argument is not a valid count: \"%s\"",
 							  optarg);

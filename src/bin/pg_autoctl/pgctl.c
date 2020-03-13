@@ -21,11 +21,12 @@
 #include "defaults.h"
 #include "env_utils.h"
 #include "file_utils.h"
+#include "log.h"
 #include "parsing.h"
 #include "pgctl.h"
 #include "pgsql.h"
 #include "pgsetup.h"
-#include "log.h"
+#include "string_utils.h"
 
 #define RUN_PROGRAM_IMPLEMENTATION
 #include "runprogram.h"

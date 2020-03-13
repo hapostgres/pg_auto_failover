@@ -24,6 +24,7 @@
 #include "pgctl.h"
 #include "state.h"
 #include "signals.h"
+#include "string_utils.h"
 
 
 static bool keepRunning = true;
@@ -597,6 +598,9 @@ read_pidfile(const char *pidfile, pid_t *pid)
 {
 	long fileSize = 0L;
 	char *fileContents = NULL;
+	char *fileLines[1];
+	bool error = false;
+	int pidnum = 0;
 
 	if (!file_exists(pidfile))
 	{
@@ -608,10 +612,15 @@ read_pidfile(const char *pidfile, pid_t *pid)
 		return false;
 	}
 
-	if (sscanf(fileContents, "%d", pid) == 1)
-	{
-		free(fileContents);
+	splitLines(fileContents, fileLines, 1);
+	stringToInt(fileLines[0], &pidnum);
 
+	*pid = pidnum;
+
+	free(fileContents);
+
+	if (!error)
+	{
 		/* is it a stale file? */
 		if (kill(*pid, 0) == 0)
 		{
@@ -638,8 +647,6 @@ read_pidfile(const char *pidfile, pid_t *pid)
 	}
 	else
 	{
-		free(fileContents);
-
 		log_debug("Failed to read the PID file \"%s\", removing it", pidfile);
 		(void) remove_pidfile(pidfile);
 

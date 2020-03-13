@@ -28,6 +28,7 @@
 #include "monitor_config.h"
 #include "pgctl.h"
 #include "primary_standby.h"
+#include "string_utils.h"
 
 
 /*
@@ -297,7 +298,6 @@ keeper_cli_init_standby(int argc, char **argv)
 	KeeperConfig config = keeperOptions;
 	LocalPostgresServer postgres = { 0 };
 	ReplicationSource replicationSource = { 0 };
-
 	int hostLength = 0;
 
 	if (argc != 2)
@@ -319,7 +319,7 @@ keeper_cli_init_standby(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (sscanf(argv[1], "%d", &replicationSource.primaryNode.port) == 0)
+	if (!stringToInt(argv[1], &replicationSource.primaryNode.port))
 	{
 		log_fatal("Argument is not a valid port number: \"%s\"", argv[1]);
 		exit(EXIT_CODE_BAD_ARGS);
@@ -371,7 +371,7 @@ keeper_cli_rewind_old_primary(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (sscanf(argv[1], "%d", &replicationSource.primaryNode.port) == 0)
+	if (!stringToInt(argv[1], &replicationSource.primaryNode.port))
 	{
 		log_fatal("Argument is not a valid port number: \"%s\"", argv[1]);
 		exit(EXIT_CODE_BAD_ARGS);
