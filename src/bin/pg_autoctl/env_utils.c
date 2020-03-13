@@ -14,6 +14,7 @@
 #include "env_utils.h"
 #include "log.h"
 
+
 /*
  * env_empty returns true if the passed environment variable is the empty
  * string. It returns false when the environment variable is not set or if it
@@ -117,6 +118,7 @@ get_env_copy_with_fallback(const char *name, char *result, int maxLength,
 
 }
 
+
 /*
  * get_env_copy copies the environmennt variable with "name" into tho result
  * buffer. It returns false when it fails. The environment variable not
@@ -141,6 +143,7 @@ get_env_pgdata(char *pgdata)
 {
 	return get_env_copy("PGDATA", pgdata, MAXPGPATH) > 0;
 }
+
 
 /*
  * get_env_pgdata_or_exit does the same as get_env_pgdata. Instead of
