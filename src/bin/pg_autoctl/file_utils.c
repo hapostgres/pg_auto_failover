@@ -161,7 +161,7 @@ bool
 write_file(char *data, long fileSize, const char *filePath)
 {
 
-	FILE *fileStream = fopen_with_umask(filePath, "wb", O_WRONLY | O_CREAT, 0644);
+	FILE *fileStream = fopen_with_umask(filePath, "wb", O_WRONLY | O_CREAT | O_EXCL, 0644);
 	if (fileStream == NULL)
 	{
 		/* errors have already been logged */
@@ -193,7 +193,7 @@ write_file(char *data, long fileSize, const char *filePath)
 bool
 append_to_file(char *data, long fileSize, const char *filePath)
 {
-	FILE *fileStream = fopen_with_umask(filePath, "ab", O_APPEND | O_CREAT, 0644);
+	FILE *fileStream = fopen_with_umask(filePath, "ab", O_APPEND | O_CREAT | O_EXCL, 0644);
 	if (fileStream == NULL)
 	{
 		/* errors have already been logged */
