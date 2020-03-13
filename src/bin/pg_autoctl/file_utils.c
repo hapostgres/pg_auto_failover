@@ -46,8 +46,7 @@ file_exists(const char *filename)
 		 */
 		if (errno != ENOENT && errno != ENOTDIR)
 		{
-			log_error("Failed to check if file \"%s\" exists: %s",
-					  filename, strerror(errno));
+			log_error("Failed to check if file \"%s\" exists: %m", filename);
 		}
 		return false;
 	}
@@ -73,7 +72,7 @@ directory_exists(const char *path)
 
 	if (stat(path, &info) != 0)
 	{
-		log_error("Failed to stat \"%s\": %s\n", path, strerror(errno));
+		log_error("Failed to stat \"%s\": %m\n", path);
 		return false;
 	}
 
@@ -97,8 +96,7 @@ ensure_empty_dir(const char *dirname, int mode)
 	{
 		if (!rmtree(dirname, true))
 		{
-			log_error("Failed to remove directory \"%s\": %s",
-					  dirname, strerror(errno));
+			log_error("Failed to remove directory \"%s\": %m", dirname);
 			return false;
 		}
 	}
@@ -113,8 +111,7 @@ ensure_empty_dir(const char *dirname, int mode)
 
 	if (pg_mkdir_p(dirname_copy, mode) == -1)
 	{
-		log_error("Failed to ensure empty directory \"%s\": %s",
-				  dirname, strerror(errno));
+		log_error("Failed to ensure empty directory \"%s\": %m", dirname);
 		return false;
 	}
 
@@ -139,14 +136,14 @@ fopen_with_umask(const char *filePath, const char* modes, int flags, mode_t umas
 	FILE *fileStream = NULL;
 	if (fileDescriptor == -1)
 	{
-		log_error("Failed to open file \"%s\": %s", filePath, strerror(errno));
+		log_error("Failed to open file \"%s\": %m", filePath);
 		return NULL;
 	}
 
 	fileStream = fdopen(fileDescriptor, modes);
 	if (fileStream == NULL)
 	{
-		log_error("Failed to open file \"%s\": %s", filePath, strerror(errno));
+		log_error("Failed to open file \"%s\": %m", filePath);
 		close(fileDescriptor);
 	}
 	return fileStream;
@@ -186,7 +183,7 @@ write_file(char *data, long fileSize, const char *filePath)
 
 	if (fwrite(data, sizeof(char), fileSize, fileStream) < fileSize)
 	{
-		log_error("Failed to write file \"%s\": %s", filePath, strerror(errno));
+		log_error("Failed to write file \"%s\": %m", filePath);
 		fclose(fileStream);
 		return false;
 	}
@@ -218,7 +215,7 @@ append_to_file(char *data, long fileSize, const char *filePath)
 
 	if (fwrite(data, sizeof(char), fileSize, fileStream) < fileSize)
 	{
-		log_error("Failed to write file \"%s\": %s", filePath, strerror(errno));
+		log_error("Failed to write file \"%s\": %m", filePath);
 		fclose(fileStream);
 		return false;
 	}
@@ -251,14 +248,14 @@ read_file(const char *filePath, char **contents, long *fileSize)
 	fileStream = fopen_read_only(filePath);
 	if (fileStream == NULL)
 	{
-		log_error("Failed to open file \"%s\": %s", filePath, strerror(errno));
+		log_error("Failed to open file \"%s\": %m", filePath);
 		return false;
 	}
 
 	/* get the file size */
 	if (fseek(fileStream, 0, SEEK_END) != 0)
 	{
-		log_error("Failed to read file \"%s\": %s", filePath, strerror(errno));
+		log_error("Failed to read file \"%s\": %m", filePath);
 		fclose(fileStream);
 		return false;
 	}
@@ -266,14 +263,14 @@ read_file(const char *filePath, char **contents, long *fileSize)
 	*fileSize = ftell(fileStream);
 	if (*fileSize < 0)
 	{
-		log_error("Failed to read file \"%s\": %s", filePath, strerror(errno));
+		log_error("Failed to read file \"%s\": %m", filePath);
 		fclose(fileStream);
 		return false;
 	}
 
 	if (fseek(fileStream, 0, SEEK_SET) != 0)
 	{
-		log_error("Failed to read file \"%s\": %s", filePath, strerror(errno));
+		log_error("Failed to read file \"%s\": %m", filePath);
 		fclose(fileStream);
 		return false;
 	}
@@ -289,7 +286,7 @@ read_file(const char *filePath, char **contents, long *fileSize)
 
 	if (fread(data, sizeof(char), *fileSize, fileStream) < *fileSize)
 	{
-		log_error("Failed to read file \"%s\": %s", filePath, strerror(errno));
+		log_error("Failed to read file \"%s\": %m", filePath);
 		fclose(fileStream);
 		free(data);
 		return false;
@@ -352,8 +349,8 @@ move_file(char* sourcePath, char* destinationPath)
 	 */
 	if (errno != EXDEV)
 	{
-		log_error("Failed to move file \"%s\" to \"%s\": %s",
-				  sourcePath, destinationPath, strerror(errno));
+		log_error("Failed to move file \"%s\" to \"%s\": %m",
+				  sourcePath, destinationPath);
 		return false;
 	}
 
@@ -452,8 +449,7 @@ create_symbolic_link(char* sourcePath, char* targetPath)
 {
 	if (symlink(sourcePath, targetPath) != 0)
 	{
-		log_error("Failed to create symbolic link to \"%s\": %s",
-				  targetPath, strerror(errno));
+		log_error("Failed to create symbolic link to \"%s\": %m", targetPath);
 		return false;
 	}
 	return true;
@@ -631,8 +627,7 @@ unlink_file(const char *filename)
 		/* if it didn't exist yet, good news! */
 		if (errno != ENOENT && errno != ENOTDIR)
 		{
-			log_error("Failed to remove file \"%s\": %s",
-					  filename, strerror(errno));
+			log_error("Failed to remove file \"%s\": %m", filename);
 			return false;
 		}
 	}
@@ -693,7 +688,7 @@ set_program_absolute_path(char *program, int size)
 			if (errno != ENOENT && errno != ENOTDIR)
 			{
 				log_error("Failed to get absolute path for the "
-						  "pg_autoctl program: %s", strerror(errno));
+						  "pg_autoctl program: %m");
 				return false;
 			}
 		}
@@ -757,8 +752,7 @@ normalize_filename(const char *filename, char *dst, int size)
 
 		if (realpath(filename, realPath) == NULL)
 		{
-			log_fatal("Failed to normalize file name \"%s\": %s",
-					  filename, strerror(errno));
+			log_fatal("Failed to normalize file name \"%s\": %m", filename);
 			return false;
 		}
 
