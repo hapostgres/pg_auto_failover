@@ -498,7 +498,7 @@ read_pg_pidfile(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 
 		if (fgets(line, sizeof(line), fp) == NULL)
 		{
-			/* don't use strerror(errno) here, errno is not set by fgets */
+			/* don't use %m to print errno here, errno is not set by fgets */
 			log_error("Failed to read line %d from file \"%s\"",
 					  lineno, pidfile);
 			fclose(fp);
