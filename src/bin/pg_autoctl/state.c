@@ -501,17 +501,12 @@ NodeStateFromString(const char *str)
 const char *
 epoch_to_string(uint64_t seconds, char *buffer)
 {
-	char * result;
+	char *result = NULL;
 	if (seconds <= 0)
 	{
 		strlcpy(buffer, "0", MAXCTIMESIZE);
 		return buffer;
 	}
-	/*
-	 * ctime_r returns a string that ends with \n, which we don't want.
-	 * Replace it with a null string terminator, even if that means we lose
-	 * a precious byte of memory here..
-	 */
 	result = ctime_r((time_t *) &seconds, buffer);
 
 	if (result == NULL)
@@ -520,7 +515,14 @@ epoch_to_string(uint64_t seconds, char *buffer)
 				  seconds);
 		return NULL;
 	}
-	result[strlen(result) - 1] = '\0';
+	if (strlen(result) != 0 && result[strlen(result) - 1] == '\n')
+	{
+		/*
+		 * ctime_r normally returns a string that ends with \n, which we don't
+		 * want. We strip it by replacing it with a null string terminator.
+		 */
+		result[strlen(result) - 1] = '\0';
+	}
 	return buffer;
 }
 
