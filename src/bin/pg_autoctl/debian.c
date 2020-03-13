@@ -606,7 +606,7 @@ comment_out_configuration_parameters(const char *srcConfPath,
 		"(data_directory|hba_file|ident_file|include_dir)( *)=";
 
 	/* open a file */
-	fileStream = fopen(srcConfPath, "rb");
+	fileStream = fopen_read_only(srcConfPath);
 	if (fileStream == NULL)
 	{
 		log_error("Failed to open file \"%s\": %m", srcConfPath);

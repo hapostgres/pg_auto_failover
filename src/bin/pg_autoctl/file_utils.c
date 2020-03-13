@@ -135,7 +135,7 @@ ensure_empty_dir(const char *dirname, int mode)
 FILE *
 fopen_with_umask(const char *filePath, const char* modes, int flags, mode_t umask)
 {
-	int fileDescriptor = open(filePath, O_WRONLY | O_CREAT, umask);
+	int fileDescriptor = open(filePath, flags, umask);
 	FILE *fileStream = NULL;
 	if (fileDescriptor == -1)
 	{
@@ -154,6 +154,21 @@ fopen_with_umask(const char *filePath, const char* modes, int flags, mode_t umas
 
 
 /*
+ * fopen_read_only opens the file as a read only stream.
+ */
+FILE *
+fopen_read_only(const char *filePath)
+{
+	/*
+	 * Explanation of IGNORE-BANNED
+	 * fopen is safe here because we open the file in read only mode. So no
+	 * exclusive access is needed.
+	 */
+	return fopen(filePath, "rb"); /* IGNORE-BANNED */
+}
+
+
+/*
  * write_file writes the given data to the file given by filePath using
  * our logging library to report errors. If succesful, the function returns
  * true.
@@ -162,7 +177,7 @@ bool
 write_file(char *data, long fileSize, const char *filePath)
 {
 
-	FILE *fileStream = fopen_with_umask(filePath, "wb", O_WRONLY | O_CREAT, 0644);
+	FILE *fileStream = fopen_with_umask(filePath, "wb", FOPEN_FLAGS_W, 0644);
 	if (fileStream == NULL)
 	{
 		/* errors have already been logged */
@@ -194,7 +209,7 @@ write_file(char *data, long fileSize, const char *filePath)
 bool
 append_to_file(char *data, long fileSize, const char *filePath)
 {
-	FILE *fileStream = fopen_with_umask(filePath, "ab", O_APPEND | O_CREAT, 0644);
+	FILE *fileStream = fopen_with_umask(filePath, "ab", FOPEN_FLAGS_A, 0644);
 	if (fileStream == NULL)
 	{
 		/* errors have already been logged */
@@ -233,7 +248,7 @@ read_file(const char *filePath, char **contents, long *fileSize)
 	FILE *fileStream = NULL;
 
 	/* open a file */
-	fileStream = fopen(filePath, "rb");
+	fileStream = fopen_read_only(filePath);
 	if (fileStream == NULL)
 	{
 		log_error("Failed to open file \"%s\": %s", filePath, strerror(errno));
