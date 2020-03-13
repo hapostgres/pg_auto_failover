@@ -314,7 +314,7 @@ monitor_config_write_file(MonitorConfig *config)
 
 	log_trace("monitor_config_write_file \"%s\"", filePath);
 
-	fileStream = fopen_with_umask(filePath, "w", O_WRONLY | O_CREAT | O_EXCL, 0644);
+	fileStream = fopen_with_umask(filePath, "w", FOPEN_FLAGS_W, 0644);
 	if (fileStream == NULL)
 	{
 		/* errors have already been logged */

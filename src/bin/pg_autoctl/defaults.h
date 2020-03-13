@@ -100,4 +100,16 @@
 #define EXIT_CODE_INTERNAL_ERROR 12
 
 
+/*
+ * This opens file write only and creates if it doesn't exist. It does this
+ * using exclusive access to the file.
+ */
+#define FOPEN_FLAGS_W O_WRONLY | O_CREAT | O_EXCL
+/*
+ * This opens the file in append mode and creates it if it doesn't exist. It
+ * doesn't take exclusive access to the file, since normally multiple processes
+ * should be able to append to the same file at the same time.
+ */
+#define FOPEN_FLAGS_A O_APPEND | O_CREAT
+
 #endif /* DEFAULTS_H */
