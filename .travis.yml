@@ -39,6 +39,6 @@ install:
   - pg_config
   - PATH=`pg_config --bindir`:$PATH which pg_ctl
 script:
-  - make
+  - make -j5 CFLAGS=-Werror
   - sudo make install
   - PATH=`pg_config --bindir`:$PATH make test

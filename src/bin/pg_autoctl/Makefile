@@ -27,14 +27,16 @@ COMMON_LIBS += -I${SRC_DIR}../lib/parson/
 
 CC = $(shell $(PG_CONFIG) --cc)
 
-CFLAGS = -std=c99 -D_GNU_SOURCE -g
-CFLAGS += -I $(shell $(PG_CONFIG) --includedir)
-CFLAGS += -I $(shell $(PG_CONFIG) --includedir-server)
-CFLAGS += -I $(shell $(PG_CONFIG) --pkgincludedir)/internal
-CFLAGS += -I $(shell $(PG_CONFIG) --cflags)
-CFLAGS += -Wformat
-CFLAGS += -Wall
-CFLAGS += $(COMMON_LIBS)
+DEFAULT_CFLAGS = -std=c99 -D_GNU_SOURCE -g
+DEFAULT_CFLAGS += -I $(shell $(PG_CONFIG) --includedir)
+DEFAULT_CFLAGS += -I $(shell $(PG_CONFIG) --includedir-server)
+DEFAULT_CFLAGS += -I $(shell $(PG_CONFIG) --pkgincludedir)/internal
+DEFAULT_CFLAGS += -I $(shell $(PG_CONFIG) --cflags)
+DEFAULT_CFLAGS += -Wformat
+DEFAULT_CFLAGS += -Wall
+DEFAULT_CFLAGS += $(COMMON_LIBS)
+
+override CFLAGS := $(DEFAULT_CFLAGS) $(CFLAGS)
 
 LIBS  = -L $(shell $(PG_CONFIG) --pkglibdir)
 LIBS += $(shell $(PG_CONFIG) --ldflags)
