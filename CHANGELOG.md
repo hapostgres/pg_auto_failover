@@ -1,3 +1,11 @@
+### pg_auto_failover v1.2 (March 17, 2020) ###
+
+* Feature implement an option to skip editing of HBA rules by pg_autoctl (#169)
+* Feature implement support for SSL connections (#171)
+* Feature implement pg_autoctl drop monitor and drop node --nodename --nodeport (#179)
+* Fix error out when the pgautofailover is not in shared_preload_libraries
+* Fixes for warnings found in static ananlysis
+
 ### pg_auto_failover v1.0.6 (Feb 13, 2020) ###
 
 * Fix permissions missing in monitor database #94 via $141
