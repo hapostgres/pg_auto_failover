@@ -36,7 +36,13 @@ LogAndNotifyMessage(char *message, size_t size, const char *fmt, ...)
 	va_list args;
 
 	va_start(args, fmt);
-	n = vsnprintf(message, size-2, fmt, args);
+	/*
+	 * Explanation of IGNORE-BANNED
+	 * Arguments are always non-null and we
+	 * do not write before the allocated buffer.
+	 *
+	 */
+	n = vsnprintf(message, size-2, fmt, args); /* IGNORE-BANNED */
 	va_end(args);
 
 	if (n < 0)
