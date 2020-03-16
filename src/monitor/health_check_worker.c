@@ -795,12 +795,12 @@ ManageHealthCheck(HealthCheck *healthCheck, struct timeval currentTime)
 		{
 			PGconn *connection = NULL;
 			ConnStatusType connStatus = CONNECTION_BAD;
-			char connInfoString[MAX_CONN_INFO_SIZE];
+			StringInfo connInfoString = makeStringInfo();
 
-			snprintf(connInfoString, MAX_CONN_INFO_SIZE, CONN_INFO_TEMPLATE,
+			appendStringInfo(connInfoString, CONN_INFO_TEMPLATE,
 					 nodeHealth->nodeName, nodeHealth->nodePort, HealthCheckTimeout);
 
-			connection = PQconnectStart(connInfoString);
+			connection = PQconnectStart(connInfoString->data);
 			PQsetnonblocking(connection, true);
 
 			connStatus = PQstatus(connection);
@@ -830,6 +830,9 @@ ManageHealthCheck(HealthCheck *healthCheck, struct timeval currentTime)
 			}
 
 			healthCheck->numTries++;
+
+			pfree(connInfoString->data);
+			pfree(connInfoString);
 
 			break;
 		}

@@ -403,13 +403,15 @@ pg_setup_init(PostgresSetup *pgSetup,
 static bool
 get_pgpid(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 {
-	FILE *fp;
+	char *contents = NULL;
+	long fileSize = 0;
 	char pidfile[MAXPGPATH];
-	long pid = -1;
+	char *lines[1];
+	int pid = -1;
 
 	join_path_components(pidfile, pgSetup->pgdata, "postmaster.pid");
 
-	if ((fp = fopen_read_only(pidfile)) == NULL)
+	if (!read_file(pidfile, &contents, &fileSize))
 	{
 		if (!pg_is_not_running_is_ok)
 		{
@@ -419,20 +421,15 @@ get_pgpid(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 		return false;
 	}
 
-	if (fscanf(fp, "%ld", &pid) != 1)
+	if (fileSize == 0)
 	{
-		/* Is the file empty? */
-		if (ftell(fp) == 0 && feof(fp))
-		{
-			log_warn("The PID file \"%s\" is empty\n", pidfile);
-		}
-		else
-		{
-			log_warn("Invalid data in PID file \"%s\"\n", pidfile);
-		}
+		log_warn("The PID file \"%s\" is empty\n", pidfile);
 	}
-
- 	fclose(fp);
+	else if (splitLines(contents, lines, 1) != 1 ||
+			 !stringToInt(lines[0], &pid))
+	{
+		log_warn("Invalid data in PID file \"%s\"\n", pidfile);
+	}
 
 	if (pid > 0 && pid <= INT_MAX)
 	{
@@ -440,18 +437,18 @@ get_pgpid(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 		{
 			pgSetup->pidFile.pid = pid;
 
-			log_trace("get_pgpid: %ld", pid);
+			log_trace("get_pgpid: %d", pid);
 			return true;
 		}
 		else
 		{
 			if (!pg_is_not_running_is_ok)
 			{
-				log_warn("Read a stale pid in \"postmaster.pid\": %ld", pid);
+				log_warn("Read a stale pid in \"postmaster.pid\": %d", pid);
 			}
 			else
 			{
-				log_debug("Read a stale pid in \"postmaster.pid\": %ld", pid);
+				log_debug("Read a stale pid in \"postmaster.pid\": %d", pid);
 			}
 
 			return false;
@@ -460,7 +457,7 @@ get_pgpid(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 	else
 	{
 		/* that's more like a bug, really */
-		log_error("Invalid PID \"%ld\" read in \"postmaster.pid\"", pid);
+		log_error("Invalid PID \"%d\" read in \"postmaster.pid\"", pid);
 		return false;
 	}
 }
