@@ -972,7 +972,7 @@ keeper_cli_help(int argc, char **argv)
 int
 cli_print_version_getopts(int argc, char **argv)
 {
-	int c, option_index = 0, errors = 0;
+	int c, option_index = 0;
 
 	static struct option long_options[] = {
 		{ "json", no_argument, NULL, 'J' },

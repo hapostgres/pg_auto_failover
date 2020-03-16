@@ -34,7 +34,6 @@ static bool clear_results(PGconn *connection);
 static bool pgsql_alter_system_set(PGSQL *pgsql, GUC setting);
 static bool pgsql_get_current_setting(PGSQL *pgsql, char *settingName,
 									  char **currentValue);
-static int escape_conninfo_value(char *destination, const char *string);
 static void parsePgMetadata(void *ctx, PGresult *result);
 
 
@@ -405,8 +404,6 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 						  paramCount, paramTypes, paramValues, NULL, NULL, 0);
 	if (!is_response_ok(result))
 	{
-		char *sqlstate = PQresultErrorField(result, PG_DIAG_SQLSTATE);
-
 		char *message = PQerrorMessage(connection);
 		char *errorLines[BUFSIZE];
 		int lineCount = splitLines(message, errorLines, BUFSIZE);
@@ -1268,39 +1265,6 @@ hostname_from_uri(const char *pguri,
 	PQconninfoFree(conninfo);
 
 	return true;
-}
-
-
-/*
- * escape_conninfo_value escapes a string that is used in a connection info
- * string by prefixing single quotes and backslashes with a backslash.
- *
- * The result is written to destination and the length of the result returned.
- */
-static int
-escape_conninfo_value(char *destination, const char *string)
-{
-	int charIndex = 0;
-	int length = strlen(string);
-	int escapedStringLength = 0;
-
-	destination[escapedStringLength++] = '\'';
-
-	for (charIndex = 0; charIndex < length; charIndex++)
-	{
-		char currentChar = string[charIndex];
-		if (currentChar == '\'' || currentChar == '\\')
-		{
-			destination[escapedStringLength++] = '\\';
-		}
-
-		destination[escapedStringLength++] = currentChar;
-	}
-
-	destination[escapedStringLength++] = '\'';
-	destination[escapedStringLength] = '\0';
-
-	return escapedStringLength;
 }
 
 

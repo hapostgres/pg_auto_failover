@@ -143,6 +143,10 @@ keeper_ensure_pg_configuration_files_in_pgdata(KeeperConfig *config)
 			return false;
 		}
 	}
+
+	/* This is a huge bug */
+	log_error("BUG: some unknown PG_CONFIG enum value was encountered");
+	return false;
 }
 
 
@@ -218,7 +222,6 @@ debian_init_postgres_config_files(PostgresSetup *pgSetup,
 					  "called with UNKNOWN conf kind");
 			return false;
 		}
-
 		case PG_CONFIG_TYPE_POSTGRES:
 		{
 			initPostgresConfigFiles(pgdata, pgConfigFiles,
@@ -274,6 +277,10 @@ debian_init_postgres_config_files(PostgresSetup *pgSetup,
 			}
 		}
 	}
+
+	/* This is a huge bug */
+	log_error("BUG: some unknown PG_CONFIG enum value was encountered");
+	return false;
 }
 
 
