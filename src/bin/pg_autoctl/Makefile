@@ -34,6 +34,8 @@ DEFAULT_CFLAGS += -I $(shell $(PG_CONFIG) --pkgincludedir)/internal
 DEFAULT_CFLAGS += -I $(shell $(PG_CONFIG) --cflags)
 DEFAULT_CFLAGS += -Wformat
 DEFAULT_CFLAGS += -Wall
+# Needed for OSX
+DEFAULT_CFLAGS += -Wno-missing-braces
 DEFAULT_CFLAGS += $(COMMON_LIBS)
 
 override CFLAGS := $(DEFAULT_CFLAGS) $(CFLAGS)
