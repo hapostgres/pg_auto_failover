@@ -119,6 +119,6 @@
 /*
  * This opens the file in append mode and creates it if it doesn't exist.
  */
-#define FOPEN_FLAGS_A O_APPEND | O_CREAT
+#define FOPEN_FLAGS_A O_APPEND | O_RDWR | O_CREAT
 
 #endif /* DEFAULTS_H */
