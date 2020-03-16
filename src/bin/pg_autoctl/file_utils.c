@@ -173,8 +173,8 @@ fopen_read_only(const char *filePath)
 bool
 write_file(char *data, long fileSize, const char *filePath)
 {
-
 	FILE *fileStream = fopen_with_umask(filePath, "wb", FOPEN_FLAGS_W, 0644);
+
 	if (fileStream == NULL)
 	{
 		/* errors have already been logged */
@@ -207,6 +207,7 @@ bool
 append_to_file(char *data, long fileSize, const char *filePath)
 {
 	FILE *fileStream = fopen_with_umask(filePath, "ab", FOPEN_FLAGS_A, 0644);
+
 	if (fileStream == NULL)
 	{
 		/* errors have already been logged */

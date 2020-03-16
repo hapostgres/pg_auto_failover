@@ -1153,7 +1153,7 @@ pgsetup_get_pgport()
 	char pgport_env[NAMEDATALEN];
 	int pgport = 0;
 
-	if (get_env_copy("PGPORT", pgport_env, NAMEDATALEN))
+	if (env_exists("PGPORT") && get_env_copy("PGPORT", pgport_env, NAMEDATALEN))
 	{
 		if (stringToInt(pgport_env, &pgport) && pgport > 0)
 		{
