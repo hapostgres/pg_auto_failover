@@ -578,11 +578,10 @@ monitor_config_set_setting(MonitorConfig *config,
 bool
 monitor_config_update_with_absolute_pgdata(MonitorConfig *config)
 {
-	PostgresSetup pgSetup = config->pgSetup;
+	PostgresSetup *pgSetup = &(config->pgSetup);
 
-	if (pg_setup_set_absolute_pgdata(&pgSetup))
+	if (pg_setup_set_absolute_pgdata(pgSetup))
 	{
-		strlcpy(config->pgSetup.pgdata, pgSetup.pgdata, MAXPGPATH);
 		if (!monitor_config_write_file(config))
 		{
 			/* errors have already been logged */

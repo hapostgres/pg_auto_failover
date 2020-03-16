@@ -495,23 +495,73 @@ cli_show_uri(int argc, char **argv)
 static void
 cli_show_formation_uri(int argc, char **argv)
 {
-	KeeperConfig config = keeperOptions;
-	Monitor monitor = { 0 };
-	bool monitorDisabledIsOk = false;
+	KeeperConfig kconfig = keeperOptions;
 
-	if (!keeper_config_read_file_skip_pgsetup(&config, monitorDisabledIsOk))
+	switch (ProbeConfigurationFileRole(kconfig.pathnames.config))
 	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_CONFIG);
-	}
+		case PG_AUTOCTL_ROLE_MONITOR:
+		{
+			Monitor monitor = { 0 };
+			MonitorConfig mconfig = { 0 };
 
-	if (!monitor_init(&monitor, config.monitor_pguri))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_CONFIG);
-	}
+			bool missingPgdataIsOk = true;
+			bool pgIsNotRunningIsOk = true;
+			char connInfo[MAXCONNINFO];
 
-	(void) print_monitor_and_formation_uri(&config, &monitor, stdout);
+			if (!monitor_config_init_from_pgsetup(&mconfig,
+												  &kconfig.pgSetup,
+												  missingPgdataIsOk,
+												  pgIsNotRunningIsOk))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_PGCTL);
+			}
+
+			if (!monitor_config_get_postgres_uri(&mconfig, connInfo, MAXCONNINFO))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
+
+			if (!monitor_init(&monitor, connInfo))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
+
+			(void) print_monitor_and_formation_uri(&kconfig, &monitor, stdout);
+			break;
+		}
+
+		case PG_AUTOCTL_ROLE_KEEPER:
+		{
+			Monitor monitor = { 0 };
+			bool monitorDisabledIsOk = false;
+
+			if (!keeper_config_read_file_skip_pgsetup(&kconfig,
+													  monitorDisabledIsOk))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
+
+			if (!monitor_init(&monitor, kconfig.monitor_pguri))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
+
+			(void) print_monitor_and_formation_uri(&kconfig, &monitor, stdout);
+			break;
+		}
+
+		default:
+		{
+			log_fatal("Unrecognized configuration file \"%s\"",
+					  kconfig.pathnames.config);
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+	}
 }
 
 
