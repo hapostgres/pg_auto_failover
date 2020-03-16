@@ -52,6 +52,7 @@ distinctive port (6000):
 
    pg_autoctl create monitor   \
      --auth trust              \
+     --ssl-self-signed         \
      --pgdata ./monitor        \
      --pgport 6000
 
@@ -90,10 +91,11 @@ we’ll store the primary node’s data files in a small temporary filesystem.
    # initialize on that disk
    pg_autoctl create postgres         \
      --auth trust                     \
+     --ssl-self-signed                \
      --pgdata /mnt/node_a/data        \
      --pgport 6010                    \
      --pgctl /usr/pgsql-11/bin/pg_ctl \
-     --monitor postgres://autoctl_node@127.0.0.1:6000/pg_auto_failover
+     --monitor postgres://autoctl_node@127.0.0.1:6000/pg_auto_failover?sslmode=require
 
 It creates the database in "/mnt/node_a/data" using the port and node
 specified. Notice the user and database name in the monitor connection
@@ -123,10 +125,11 @@ created the primary:
 
    pg_autoctl create postgres         \
      --auth trust                     \
+     --ssl-self-signed                \
      --pgdata ./node_b                \
      --pgport 6011                    \
      --pgctl /usr/pgsql-11/bin/pg_ctl \
-     --monitor postgres://autoctl_node@127.0.0.1:6000/pg_auto_failover
+     --monitor postgres://autoctl_node@127.0.0.1:6000/pg_auto_failover?sslmode=require
 
    pg_autoctl run --pgdata ./node_b
 
@@ -215,7 +218,7 @@ To discover the url to use in our case, the following command can be used:
 
 .. code-block:: bash
 
-   pg_autoctl show uri --formation default --pgdata ./monitor
+   pg_autoctl show uri --pgdata ./monitor
    
 
             Type |    Name | Connection String
@@ -229,7 +232,7 @@ writes:
 .. code-block:: bash
 
    psql \
-     'postgres://127.0.0.1:6010,127.0.0.1:6011/?target_session_attrs=read-write'
+     'postgres://localhost:6010,localhost:6011/postgres?target_session_attrs=read-write&sslmode=require'
 
 When nodes A and B were both running, psql would connect to node A
 because B would be read-only. However now that A is offline and B is
