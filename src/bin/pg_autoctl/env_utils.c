@@ -26,7 +26,8 @@ env_found_empty(const char *name)
 	char *envvalue = NULL;
 	if (name == NULL || strlen(name) == 0)
 	{
-		log_error("Failed to get environment setting. NULL or empty variable name is provided");
+		log_error("Failed to get environment setting. "
+				  "NULL or empty variable name is provided");
 		return false;
 	}
 
@@ -50,7 +51,8 @@ env_exists(const char *name)
 {
 	if (name == NULL || strlen(name) == 0)
 	{
-		log_error("Failed to get environment setting. NULL or empty variable name is provided");
+		log_error("Failed to get environment setting. "
+				  "NULL or empty variable name is provided");
 		return false;
 	}
 
@@ -78,13 +80,15 @@ get_env_copy_with_fallback(const char *name, char *result, int maxLength,
 
 	if (name == NULL || strlen(name) == 0)
 	{
-		log_error("Failed to get environment setting. NULL or empty variable name is provided");
+		log_error("Failed to get environment setting. "
+				  "NULL or empty variable name is provided");
 		return false;
 	}
 
 	if (result == NULL)
 	{
-		log_error("Failed to get environment setting. Tried to store in NULL pointer");
+		log_error("Failed to get environment setting. "
+				  "Tried to store in NULL pointer");
 		return false;
 	}
 
