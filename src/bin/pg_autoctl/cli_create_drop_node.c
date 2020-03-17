@@ -595,15 +595,17 @@ cli_create_monitor_getopts(int argc, char **argv)
 	}
 
 	/*
-	 * If we have --ssl, either we have a root ca file and a server.key and a
-	 * server.crt or none of them. Any other combo is a mistake.
+	 * If any --ssl-* option is provided, either we have a root ca file and a
+	 * server.key and a server.crt or none of them. Any other combo is a
+	 * mistake.
 	 */
 	if (sslCommandLineOptions == SSL_CLI_UNKNOWN)
 	{
 		log_fatal("Explicit SSL choice is required: please use either "
-				  "--no-ssl or --ssl-self-signed or provide your certificates "
+				  "--ssl-self-signed or provide your certificates "
 				  "using --ssl-ca-file, --ssl-crl-file, "
-				  "--server-key, and --server-crt");
+				  "--server-key, and --server-crt (or use --no-ssl if you "
+				  "are very sure that you do not want encrypted traffic)");
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 

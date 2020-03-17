@@ -50,7 +50,7 @@ To enable a “trust” security model with pg_auto_failover, use the
 
 When using ``--auth trust`` pg_autoctl adds new HBA rules in the monitor and
 the Postgres nodes to enable connections as seen above.
-  
+
 Authentication with passwords
 -----------------------------
 
@@ -70,7 +70,7 @@ following command::
 
 Now that the monitor is ready with our password set for the ``autoctl_node``
 user, we can use the password in the monitor connection string used when
-creating Postgres nodes. 
+creating Postgres nodes.
 
 On the primary node, we can create the Postgres setup as usual, and then set
 our replication password, that we will use if we are demoted and then
@@ -101,7 +101,7 @@ Postgres documentation in order to maintain your passwords in a separate
 file, not in your main pg_auto_failover configuration file. This also avoids
 using passwords in the environment and in command lines.
 
-__ https://www.postgresql.org/docs/current/libpq-pgpass.html  
+__ https://www.postgresql.org/docs/current/libpq-pgpass.html
 
 Encryption of network communications
 ------------------------------------
@@ -160,20 +160,20 @@ It is still possible to give the certificates to pg_auto_failover and have
 it handle the setup for you, including the creation of and signing of client
 certificates for the ``autoctl_node`` and ``pgautofailover_replication``
 users::
-  
+
   $ pg_autoctl create monitor --ssl-ca-file root.crt   \
                               --ssl-crl-file root.crl  \
                               --server-crt server.crt  \
                               --server-key server.key  \
                               --ssl-mode validate-full \
                               ...
-  
+
   $ pg_autoctl create postgres --ssl-ca-file root.crt   \
                                --server-crt server.crt  \
                                --server-key server.key  \
                                --ssl-mode validate-full \
                                ...
-                              
+
   $ pg_autoctl create postgres --ssl-ca-file root.crt   \
                                --server-crt server.crt  \
                                --server-key server.key  \
@@ -182,8 +182,8 @@ users::
 
 The option ``--ssl-mode`` can be used to force connection strings used by
 ``pg_autoctl`` to contain your prefered ssl mode. It defaults to ``require``
-when SSL is used and to ``allow`` when ``--ssl`` is not used. Here, we set
-``--ssl-mode`` to ``validate-ca`` which requires SSL Certificates
+when using ``--ssl-self-signed`` and to ``allow`` when ``--no-ssl`` is used.
+Here, we set ``--ssl-mode`` to ``validate-ca`` which requires SSL Certificates
 Authentication, covered next.
 
 The default ``--ssl-mode`` when providing your own certificates (signed by
@@ -235,7 +235,7 @@ then have the following entry, to allow ``postgres`` to connect as the
 To enable streaming replication, the ``pg_ident.conf`` file on each Postgres
 node should now allow the ``postgres`` user in the client certificate to
 connect as the ``pgautofailover_replicator`` database user::
-  
+
   # MAPNAME       SYSTEM-USERNAME         PG-USERNAME
 
   # pg_autoctl runs as postgres and connects to the monitor autoctl_node user
@@ -245,7 +245,7 @@ Given that user name map, you can then use the ``cert`` authentication
 method. As with the ``pg_ident.conf`` provisioning, it is best to now
 provision the HBA rules yourself, using the ``--skip-pg-hba`` option::
 
-  $ pg_autoctl create postgres --skip-pg-hba --ssl --ssl-ca-file ...
+  $ pg_autoctl create postgres --skip-pg-hba --ssl-ca-file ...
 
 The HBA rule will use the authentication method ``cert`` with a map option,
 and might then look like the following on the monitor::

@@ -577,9 +577,9 @@ standby_init_database(LocalPostgresServer *postgres,
 	}
 
 	/*
-	 * When --ssl has been used without SSL certificates being given, now is
-	 * the time to build a self-signed certificate for the server. We place the
-	 * certificate and private key in $PGDATA/server.key and $PGDATA/server.crt
+	 * When --ssl-self-signed has been used, now is the time to build a
+	 * self-signed certificate for the server. We place the certificate and
+	 * private key in $PGDATA/server.key and $PGDATA/server.crt
 	 *
 	 * In particular we override the certificates that we might have fetched
 	 * from the primary as part of pg_basebackup: we're not a backup, we're a

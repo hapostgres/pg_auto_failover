@@ -474,9 +474,10 @@ cli_create_node_getopts(int argc, char **argv,
 	if (sslCommandLineOptions == SSL_CLI_UNKNOWN)
 	{
 		log_fatal("Explicit SSL choice is required: please use either "
-				  "--no-ssl or --ssl-self-signed or provide your certificates "
+				  "--ssl-self-signed or provide your certificates "
 				  "using --ssl-ca-file, --ssl-crl-file, "
-				  "--server-key, and --server-crt");
+				  "--server-key, and --server-crt (or use --no-ssl if you "
+				  "are very sure that you do not want encrypted traffic)");
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 

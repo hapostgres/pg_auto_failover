@@ -33,11 +33,11 @@ extern bool outputJSON;
 extern int ssl_flag;
 
 #define KEEPER_CLI_SSL_OPTIONS \
-	"  --no-ssl          activate ssl in Postgres configuration\n" \
-	"  --ssl-self-signed activate ssl in Postgres configuration\n" \
+	"  --ssl-self-signed setup network encryption using self signed certificates (does NOT protect against MITM)\n" \
 	"  --ssl-mode        use that sslmode in connection strings\n" \
 	"  --ssl-ca-file     set the Postgres ssl_ca_file to that file path\n" \
 	"  --ssl-crl-file    set the Postgres ssl_crl_file to that file path\n" \
+	"  --no-ssl          don't enable network encryption (NOT recommended, prefer --ssl-self-signed)\n" \
 	"  --server-key      set the Postgres ssl_key_file to that file path\n" \
 	"  --server-cert     set the Postgres ssl_cert_file to that file path\n"
 

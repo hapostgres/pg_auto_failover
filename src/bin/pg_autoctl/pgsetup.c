@@ -1280,7 +1280,7 @@ pgsetup_validate_ssl_settings(PostgresSetup *pgSetup)
 			log_info("Using default --ssl-mode \"%s\"", ssl->sslModeStr);
 		}
 
-		log_info("Using --ssl without certificates: pg_autoctl will "
+		log_info("Using --ssl-self-signed: pg_autoctl will "
 				 " create self-signed certificates, allowing for "
 				 "encrypted network traffic");
 		log_warn("Self-signed certificates provide protection against "
@@ -1295,6 +1295,12 @@ pgsetup_validate_ssl_settings(PostgresSetup *pgSetup)
 	/* --no-ssl is ok */
 	if (ssl->active == 0)
 	{
+		log_warn("No encryption is used for network traffic! This allows an "
+				 "attacker on the network to read all replication data.");
+		log_warn("Using --ssl-self-signed instead of --no-ssl is recommend to "
+				 "achieve more security with the same ease of deployment.");
+		log_warn("See https://www.postgresql.org/docs/current/libpq-ssl.html "
+				 "for details on how to improve");
 		return true;
 	}
 
