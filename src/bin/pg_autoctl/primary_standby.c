@@ -63,7 +63,7 @@ GUC postgres_default_settings[] = {
 
 GUC citus_default_settings[] = {
 	DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER,
-	{ "shared_preload_libraries", "citus" },
+	{ "shared_preload_libraries", "'citus'" },
 	{ NULL, NULL }
 };
 
