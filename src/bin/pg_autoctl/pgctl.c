@@ -67,6 +67,8 @@ static bool prepare_primary_conninfo(
 	const char *applicationName,
 	SSLOptions sslOptions,
 	bool escape);
+static bool prepare_conninfo_sslmode(PQExpBuffer buffer, SSLOptions sslOptions);
+
 static bool pg_write_recovery_conf(const char *pgdata,
 								   const char *primaryConnInfo,
 								   const char *replicationSlotName);
@@ -499,6 +501,19 @@ prepare_guc_settings_from_pgsetup(const char *configFilePath,
 				appendPQExpBuffer(config, "%s = '%s'\n",
 								  setting->name, pgSetup->ssl.serverKey);
 			}
+		}
+		else if (streq(setting->name, "citus.node_conninfo"))
+		{
+			appendPQExpBuffer(config, "%s = '", setting->name);
+
+			/* add sslmode, sslrootcert, and sslcrl if needed */
+			if (!prepare_conninfo_sslmode(config, pgSetup->ssl))
+			{
+				/* errors have already been logged */
+				return false;
+			}
+
+			appendPQExpBufferStr(config, "'\n");
 		}
 		else if (setting->value != NULL)
 		{
@@ -1271,24 +1286,11 @@ prepare_primary_conninfo(char *primaryConnInfo,
 		appendPQExpBuffer(buffer, " password=%s", replicationPassword);
 	}
 
-	if (sslOptions.sslMode != SSL_MODE_UNKNOWN)
+	appendPQExpBufferStr(buffer, " ");
+	if (!prepare_conninfo_sslmode(buffer, sslOptions))
 	{
-		appendPQExpBuffer(buffer, " sslmode=%s",
-						  pgsetup_sslmode_to_string(sslOptions.sslMode));
-
-		if (sslOptions.sslMode >= SSL_MODE_VERIFY_CA)
-		{
-			/* ssl revocation list might not be provided, it's ok */
-			if (!IS_EMPTY_STRING_BUFFER(sslOptions.crlFile))
-			{
-				appendPQExpBuffer(buffer, " sslrootcert=%s sslcrl=%s",
-								  sslOptions.caFile, sslOptions.crlFile);
-			}
-			else
-			{
-				appendPQExpBuffer(buffer, " sslrootcert=%s", sslOptions.caFile);
-			}
-		}
+		/* errors have already been logged */
+		return false;
 	}
 
 	/* memory allocation could have failed while building string */
@@ -1325,6 +1327,49 @@ prepare_primary_conninfo(char *primaryConnInfo,
 	}
 
 	destroyPQExpBuffer(buffer);
+
+	return true;
+}
+
+
+/*
+ * prepare_conninfo_sslmode adds the sslmode setting to the buffer, which is
+ * used as a connection string.
+ */
+static bool
+prepare_conninfo_sslmode(PQExpBuffer buffer, SSLOptions sslOptions)
+{
+	if (sslOptions.active)
+	{
+		if (sslOptions.sslMode == SSL_MODE_UNKNOWN)
+		{
+			/* that's a bug really */
+			log_error("SSL is active in the configuration, "
+					  "but sslmode is unknown");
+			return false;
+		}
+
+		appendPQExpBuffer(buffer, "sslmode=%s",
+						  pgsetup_sslmode_to_string(sslOptions.sslMode));
+
+		if (sslOptions.sslMode >= SSL_MODE_VERIFY_CA)
+		{
+			/* ssl revocation list might not be provided, it's ok */
+			if (!IS_EMPTY_STRING_BUFFER(sslOptions.crlFile))
+			{
+				appendPQExpBuffer(buffer, " sslrootcert=%s sslcrl=%s",
+								  sslOptions.caFile, sslOptions.crlFile);
+			}
+			else
+			{
+				appendPQExpBuffer(buffer, " sslrootcert=%s", sslOptions.caFile);
+			}
+		}
+	}
+	else
+	{
+		appendPQExpBuffer(buffer, "sslmode=disable");
+	}
 
 	return true;
 }
