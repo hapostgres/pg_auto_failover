@@ -10,9 +10,9 @@ to the secondary.
 
 For illustration, we'll run our databases on virtual machines in the Azure
 platform, but the techniques here are relevant to any cloud provider or
-on-premise network. We'll use three virtual machines: a primary database, a
-secondary database, and a monitor which watches the other nodes’ health,
-manages global state, and assigns nodes their roles.
+on-premise network. We'll use four virtual machines: a primary database, a
+secondary database, a monitor, and an "application.' The monitor watches the
+other nodes’ health, manages global state, and assigns nodes their roles.
 
 .. _quickstart_network:
 
@@ -65,8 +65,9 @@ security group and a subnet.
        --address-prefixes 10.0.1.0/24 \
        --network-security-group ha-demo-nsg
 
-Finally add three virtual machines (ha-demo-a, ha-demo-b, and
-ha-demo-monitor).
+Finally add four virtual machines (ha-demo-a, ha-demo-b, ha-demo-monitor, and
+ha-demo-app). For speed we background the ``az vm create`` processes and run
+them in parallel:
 
 .. code-block:: bash
 
@@ -79,10 +80,11 @@ ha-demo-monitor).
        --subnet ha-demo-subnet \
        --nsg ha-demo-nsg \
        --public-ip-address ha-demo-${node}-ip \
-       --image UbuntuLTS \
+       --image debian \
        --admin-username ha-admin \
-       --generate-ssh-keys
+       --generate-ssh-keys &
    done
+   wait
 
 List and record the public IP addresses that this command outputs for each
 machine:
@@ -97,7 +99,7 @@ machine:
 Install the "pg_autoctl" executable
 -----------------------------------
 
-This guide uses Ubuntu Linux, but similar steps will work on other
+This guide uses Debian Linux, but similar steps will work on other
 distributions. All that differs are the packages and paths. See :ref:`install`.
 
 pg_auto_failover is distributed as a single binary with subcommands to
@@ -122,7 +124,7 @@ Connect to each virtual machine and install pg_autoctl:
   curl https://install.citusdata.com/community/deb.sh | sudo bash
   sudo apt-get install -y postgresql-common
   echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf
-  sudo apt-get install -y postgresql-11-auto-failover
+  sudo apt-get install -y postgresql-11-auto-failover-1.2
 
 .. _quickstart_run_monitor:
 
@@ -141,7 +143,7 @@ own roles in the system.
    sudo -i -u postgres \
      pg_autoctl create monitor \
        --auth trust \
-       --ssl-self-signed \
+       --no-ssl \
        --pgdata monitor \
        --pgctl  /usr/lib/postgresql/11/bin/pg_ctl
 
@@ -172,12 +174,12 @@ We’ll create the primary database using the ``pg_autoctl create`` subcommand.
 
    sudo -i -u postgres \
      pg_autoctl create postgres \
-       --auth trust \
-       --ssl-self-signed \
        --pgdata ha \
+       --auth trust \
+       --no-ssl \
        --pgctl /usr/lib/postgresql/11/bin/pg_ctl \
        --nodename `hostname -I` \
-       --monitor 'postgres://autoctl_node@10.0.1.4/pg_auto_failover?sslmode=require'
+       --monitor postgres://autoctl_node@ha-demo-monitor/pg_auto_failover
 
 Notice the user and database name in the monitor connection string -- these
 are what monitor init created. We also give it the path to pg_ctl so that the
@@ -209,12 +211,12 @@ node B and do the same process.
 
    sudo -i -u postgres \
      pg_autoctl create postgres \
-       --auth trust \
-       --ssl-self-signed \
        --pgdata ha \
+       --auth trust \
+       --no-ssl \
        --pgctl /usr/lib/postgresql/11/bin/pg_ctl \
        --nodename `hostname -I` \
-       --monitor 'postgres://autoctl_node@10.0.1.4/pg_auto_failover?sslmode=require'
+       --monitor postgres://autoctl_node@ha-demo-monitor/pg_auto_failover
 
    sudo -i -u postgres \
      pg_autoctl run --pgdata ha
@@ -236,10 +238,10 @@ states it has assigned them:
      pg_autoctl show state \
        --pgdata monitor
 
-       Name |   Port | Group |  Node |     Current State |    Assigned State
-   ---------+--------+-------+-------+-------------------+------------------
-   10.0.1.5 |   5432 |     0 |     1 |           primary |           primary
-   10.0.1.6 |   5432 |     0 |     2 |         secondary |         secondary
+                              Name |   Port | Group |  Node |     Current State |    Assigned State
+   --------------------------------+--------+-------+-------+-------------------+------------------
+   ha-demo-a.internal.cloudapp.net |   5432 |     0 |     1 |           primary |           primary
+   ha-demo-b.internal.cloudapp.net |   5432 |     0 |     2 |         secondary |         secondary
 
 This looks good. We can add data to the primary, and watch it get
 reflected in the secondary.
