@@ -1144,7 +1144,6 @@ printNodeArray(NodeAddressArray *nodesArray)
 {
 	int nodesArrayIndex = 0;
 	int maxNodeNameSize = 5;	/* strlen("Name") + 1, the header */
-	char *nameSeparatorHeader = NULL;
 
 	/*
 	 * Dynamically adjust our display output to the length of the longer

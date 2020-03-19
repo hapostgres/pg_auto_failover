@@ -327,29 +327,6 @@ class PGNode:
         self.stop_pg_autoctl()
         self.stop_postgres()
 
-    def destroy(self):
-        """
-        Cleans up processes and files created for this data node.
-        """
-        self.stop_pg_autoctl()
-
-        try:
-            destroy = PGAutoCtl(self.vnode, self.datadir)
-            destroy.execute("pg_autoctl do destroy", 'destroy')
-        except Exception as e:
-            print(str(e))
-
-        try:
-            os.remove(self.config_file_path())
-        except FileNotFoundError:
-            pass
-
-        try:
-            os.remove(self.state_file_path())
-        except FileNotFoundError:
-            pass
-
-
     def config_file_path(self):
         """
         Returns the path of the config file for this data node.
@@ -506,6 +483,28 @@ class DataNode(PGNode):
         else:
             self.pg_autoctl.execute("pg_autoctl create")
 
+    def destroy(self):
+        """
+        Cleans up processes and files created for this data node.
+        """
+        self.stop_pg_autoctl()
+
+        try:
+            destroy = PGAutoCtl(self.vnode, self.datadir)
+            destroy.execute("pg_autoctl drop node --destroy",
+                            'drop', 'node', '--destroy')
+        except Exception as e:
+            print(str(e))
+
+        try:
+            os.remove(self.config_file_path())
+        except FileNotFoundError:
+            pass
+
+        try:
+            os.remove(self.state_file_path())
+        except FileNotFoundError:
+            pass
 
     def wait_until_state(self, target_state,
                          timeout=STATE_CHANGE_TIMEOUT, sleep_time=1):
@@ -811,7 +810,7 @@ class MonitorNode(PGNode):
         try:
             destroy = PGAutoCtl(self.vnode, self.datadir)
             destroy.execute("pg_autoctl node destroy",
-                            'drop', 'node', '--destroy')
+                            'drop', 'monitor', '--destroy')
         except Exception as e:
             print(str(e))
 

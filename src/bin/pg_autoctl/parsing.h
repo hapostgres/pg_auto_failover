@@ -27,7 +27,4 @@ bool parse_bool(const char *value, bool *result);
 
 #define boolToString(value) (value)?"true":"false"
 
-int splitLines(char *errorMessage, char **linesArray, int size);
-
-
 #endif /* PARSING_H */

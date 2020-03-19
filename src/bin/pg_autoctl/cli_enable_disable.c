@@ -272,7 +272,6 @@ static void
 cli_enable_maintenance(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
-	pid_t pid;
 
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
@@ -340,7 +339,6 @@ static void
 cli_disable_maintenance(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
-	pid_t pid;
 
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;

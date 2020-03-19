@@ -895,7 +895,6 @@ bool
 fsm_promote_standby(Keeper *keeper)
 {
 	LocalPostgresServer *postgres = &(keeper->postgres);
-	bool other_node_missing_is_ok = true;
 
 	if (!ensure_local_postgres_is_running(postgres))
 	{
