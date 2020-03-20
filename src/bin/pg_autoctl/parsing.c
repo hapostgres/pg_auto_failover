@@ -312,7 +312,13 @@ read_length_delimited_string_at(const char *ptr, char *buffer, int size)
 
 	col = strchr(ptr, STRLEN_SEP);
 	*col = '\0';
-	len = stringToInt(ptr, NULL);
+	if (!stringToInt(ptr, &len))
+	{
+		/* that's a BUG really */
+		log_error("Failed to read length of string in notitication message: %s",
+				  ptr);
+		return 0;
+	}
 
 	if (len < size)
 	{
