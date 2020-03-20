@@ -344,7 +344,7 @@ fsm_disable_replication(Keeper *keeper)
 		return false;
 	}
 
-	if (!primary_drop_replication_slot(postgres, config->replication_slot_name))
+	if (!primary_drop_replication_slots(postgres))
 	{
 		log_error("Failed to disable replication because dropping the replication "
 				  "slot \"%s\" used by the standby failed, see above for details",
@@ -762,9 +762,12 @@ fsm_rewind_or_init(Keeper *keeper)
 	KeeperConfig *config = &(keeper->config);
 	Monitor *monitor = &(keeper->monitor);
 	LocalPostgresServer *postgres = &(keeper->postgres);
+
 	ReplicationSource replicationSource = { 0 };
 	int groupId = keeper->state.current_group;
+
 	char applicationName[BUFSIZE] = { 0 };
+	char standbySlotName[BUFSIZE] = { 0 };
 
 	/* get the primary node to follow */
 	if (!config->monitorDisabled)
@@ -815,11 +818,23 @@ fsm_rewind_or_init(Keeper *keeper)
 		}
 	}
 
-	if (!primary_drop_replication_slot(postgres, config->replication_slot_name))
+	/* prepare the standby's replication slot name */
+	if (!postgres_sprintf_replicationSlotName(
+			keeper->otherNodes.nodes[0].nodeId,
+			standbySlotName,
+			sizeof(standbySlotName)))
+	{
+		/* that's highly unlikely... */
+		log_error("Failed to snprintf replication slot name for node %d",
+				  keeper->otherNodes.nodes[0].nodeId);
+		return false;
+	}
+
+	if (!primary_drop_replication_slot(postgres, standbySlotName))
 	{
 		log_error("Failed to drop replication slot \"%s\" used by "
 				  "standby %d (%s:%d)",
-				  config->replication_slot_name,
+				  standbySlotName,
 				  keeper->otherNodes.nodes[0].nodeId,
 				  keeper->otherNodes.nodes[0].host,
 				  keeper->otherNodes.nodes[0].port);

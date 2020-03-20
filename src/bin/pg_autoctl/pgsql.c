@@ -634,6 +634,25 @@ pgsql_drop_replication_slot(PGSQL *pgsql, const char *slotName, bool verbose)
 
 
 /*
+ * pgsql_drop_replication_slots drops all the pg_auto_failover physical
+ * replication slots. (We might not own all those that exist on the server)
+ */
+bool
+pgsql_drop_replication_slots(PGSQL *pgsql)
+{
+	char *sql =
+		"SELECT pg_drop_replication_slot(slot_name) "
+		"  FROM pg_replication_slots "
+		" WHERE slot_name ~ '" REPLICATION_SLOT_NAME_PATTERN "' "
+		"   AND slot_type = 'physical'";
+
+	log_info("Drop pg_auto_failover physical replication slots");
+
+	return pgsql_execute_with_params(pgsql, sql, 0, NULL, NULL, NULL, NULL);
+}
+
+
+/*
  * postgres_sprintf_replicationSlotName prints the replication Slot Name to use
  * for given nodeId in the given slotName buffer of given size.
  */
@@ -641,7 +660,7 @@ bool
 postgres_sprintf_replicationSlotName(int nodeId, char *slotName, int size)
 {
 	int bytesWritten =
-		snprintf(slotName, size, "%s_%d", REPLICATION_SLOT_NAME_DEFAULT, nodeId);
+		sformat(slotName, size, "%s_%d", REPLICATION_SLOT_NAME_DEFAULT, nodeId);
 
 	return bytesWritten <= size;
 }
