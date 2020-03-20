@@ -295,8 +295,10 @@ class PGNode:
             # happy with "ready".
             pidfile = os.path.join(self.datadir, 'postmaster.pid')
             with open(pidfile, "r") as p:
-                pg_status = p.readlines()[7]
-            return pg_status.startswith("ready")
+                pidlines = p.readlines()
+                if len(pidlines) >= 7:
+                    pg_status = pidlines[7]
+                    return pg_status.startswith("ready")
         elif status_proc.returncode > 0:
             # ignore `pg_ctl status` output, silently try again till timeout
             return False
