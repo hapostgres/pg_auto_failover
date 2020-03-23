@@ -30,8 +30,10 @@
 #include "monitor.h"
 #include "monitor_config.h"
 #include "monitor_pg_init.h"
+#include "monitor_service.h"
 #include "pgctl.h"
 #include "primary_standby.h"
+#include "service.h"
 #include "string_utils.h"
 
 /*
@@ -228,7 +230,7 @@ cli_create_pg(Keeper *keeper, KeeperConfig *config)
 				exit(EXIT_CODE_MONITOR);
 			}
 
-			keeper_service_run(keeper, &pid);
+			(void) keeper_node_active_loop(keeper, pid);
 		}
 	}
 
@@ -753,7 +755,16 @@ cli_create_monitor(int argc, char **argv)
 
 	if (createAndRun)
 	{
-		(void) monitor_service_run(&monitor, &config);
+		pid_t pid = 0;
+
+		if (!monitor_service_init(&config, &pid))
+		{
+			log_fatal("Failed to initialize pg_auto_failover service, "
+					  "see above for details");
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+
+		(void) monitor_service_run(&monitor, &config, pid);
 	}
 	else
 	{

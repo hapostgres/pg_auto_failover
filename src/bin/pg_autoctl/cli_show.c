@@ -1196,8 +1196,9 @@ cli_show_file(int argc, char **argv)
 			{
 				json_object_set_string(root, "state", config.pathnames.state);
 				json_object_set_string(root, "init", config.pathnames.init);
-				json_object_set_string(root, "pid", config.pathnames.pid);
 			}
+
+			json_object_set_string(root, "pid", config.pathnames.pid);
 
 			serialized_string = json_serialize_to_string_pretty(js);
 
@@ -1291,12 +1292,6 @@ cli_show_file(int argc, char **argv)
 
 		case SHOW_FILE_PID:
 		{
-			if (role == PG_AUTOCTL_ROLE_MONITOR)
-			{
-				log_error("A monitor has not init pidfile");
-				exit(EXIT_CODE_BAD_ARGS);
-			}
-
 			if (showFileOptions.showFileContents)
 			{
 				if (!fprint_file_contents(config.pathnames.pid))
