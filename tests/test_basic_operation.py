@@ -53,6 +53,7 @@ def test_005_writes_to_node2_fail():
 def test_006_maintenance():
     print()
     print("Enabling maintenance on node2")
+    assert node1.wait_until_state(target_state="primary")
     node2.enable_maintenance()
     assert node2.wait_until_state(target_state="maintenance")
     node2.stop_postgres()

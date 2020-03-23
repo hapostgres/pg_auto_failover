@@ -26,6 +26,8 @@
 
 static void cli_config_check(int argc, char **argv);
 static void cli_config_check_pgsetup(PostgresSetup *pgSetup);
+static void cli_config_check_connections(PostgresSetup *pgSetup,
+										 const char *monitor_pguri);
 
 static void cli_config_get(int argc, char **argv);
 static void cli_keeper_config_get(int argc, char **argv);
@@ -96,7 +98,6 @@ cli_config_check(int argc, char **argv)
 	{
 		case PG_AUTOCTL_ROLE_MONITOR:
 		{
-			Monitor monitor;
 			MonitorConfig mconfig = { 0 };
 
 			if (!monitor_config_init_from_pgsetup(&mconfig,
@@ -109,6 +110,7 @@ cli_config_check(int argc, char **argv)
 			}
 
 			(void) cli_config_check_pgsetup(&(mconfig.pgSetup));
+			(void) cli_config_check_connections(&(mconfig.pgSetup), NULL);
 
 			if (outputJSON)
 			{
@@ -139,13 +141,7 @@ cli_config_check(int argc, char **argv)
 			}
 			else
 			{
-				fprintf(stdout, "Discovered PostgreSQL Setup:\n");
 				fprintf_pg_setup(stdout, &(mconfig.pgSetup));
-				fprintf(stdout, "\n");
-
-				fprintf(stdout, "Current Configuration (includes pgSetup):\n");
-				monitor_config_write(stdout, &mconfig);
-				fprintf(stdout, "\n");
 			}
 
 			break;
@@ -163,6 +159,9 @@ cli_config_check(int argc, char **argv)
 			}
 
 			(void) cli_config_check_pgsetup(&(config.pgSetup));
+			(void) cli_config_check_connections(
+				&(config.pgSetup),
+				config.monitorDisabled ? NULL : config.monitor_pguri);
 
 			if (outputJSON)
 			{
@@ -193,13 +192,7 @@ cli_config_check(int argc, char **argv)
 			}
 			else
 			{
-				fprintf(stdout, "Discovered PostgreSQL Setup:\n");
 				fprintf_pg_setup(stdout, &(config.pgSetup));
-				fprintf(stdout, "\n");
-
-				fprintf(stdout, "Current Configuration (includes pgSetup):\n");
-				keeper_config_write(stdout, &config);
-				fprintf(stdout, "\n");
 			}
 
 			break;
@@ -252,6 +245,110 @@ cli_config_check_pgsetup(PostgresSetup *pgSetup)
 	{
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
+
+	log_info("Postgres setup for PGDATA \"%s\" is ok, "
+			 "running with PID %d and port %ld",
+			 pgSetup->pgdata, pgSetup->pidFile.port, pgSetup->pidFile.pid);
+}
+
+
+/*
+ * cli_config_check_connections checks that the following three connections are
+ * possible:
+ *
+ *  1. connection to the local Postgres server
+ *  2. connection to the Postgres monitor
+ *  3. streaming replication connection string
+ */
+static void
+cli_config_check_connections(PostgresSetup *pgSetup,
+							 const char *monitor_pguri)
+{
+	PGSQL pgsql = { 0 };
+	char connInfo[MAXCONNINFO] = { 0 };
+
+	bool settings_are_ok = false;
+
+	Monitor monitor = { 0 };
+	MonitorExtensionVersion version = { 0 };
+
+	pg_setup_get_local_connection_string(pgSetup, connInfo);
+	pgsql_init(&pgsql, connInfo, PGSQL_CONN_LOCAL);
+
+	if (!pgsql_is_in_recovery(&pgsql, &pgSetup->is_in_recovery))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_PGSQL);
+	}
+
+	log_info("Connection to local Postgres ok, using \"%s\"", connInfo);
+
+	/*
+	 * Do not check settings on the monitor node itself. On the monitor, we
+	 * don't have a monitor_pguri in the config.
+	 */
+	if (monitor_pguri == NULL)
+	{
+		return;
+	}
+
+	/*
+	 * Check that the Postgres settings for pg_auto_failover are active in the
+	 * running Postgres instance.
+	 */
+	if (!pgsql_check_postgresql_settings(&pgsql, false, &settings_are_ok))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_PGSQL);
+	}
+
+	if (settings_are_ok)
+	{
+		log_info("Postgres configuration settings required "
+				 "for pg_auto_failover are ok");
+	}
+	else
+	{
+		log_warn("Failed to check required settings for pg_auto_failover, "
+				 "please review your Postgres configuration");
+	}
+
+	/*
+	 * Now, on Postgres nodes, check that the monitor uri is valid and that we
+	 * can connect to the monitor just fine. This requires having setup the
+	 * Postgres HBA rules correctly, which is up to the user when using
+	 * --skip-pg-hba.
+	 */
+	if (!monitor_init(&monitor, (char *) monitor_pguri))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_MONITOR);
+	}
+
+	if (!monitor_get_extension_version(&monitor, &version))
+	{
+		log_fatal("Failed to check version compatibility with the monitor "
+				  "extension \"%s\", see above for details",
+				  PG_AUTOCTL_MONITOR_EXTENSION_NAME);
+		exit(EXIT_CODE_MONITOR);
+	}
+
+	log_info("Connection to monitor ok, using \"%s\"", monitor_pguri);
+
+	if (strcmp(version.installedVersion, PG_AUTOCTL_EXTENSION_VERSION) == 0)
+	{
+		log_info("Monitor is running version \"%s\", as expected",
+				 version.installedVersion);
+	}
+	else
+	{
+		log_info("Monitor is running version \"%s\" "
+				 "instead of expected version \"%s\"",
+				 version.installedVersion, PG_AUTOCTL_EXTENSION_VERSION);
+		log_warn("Please connect to the monitor node and restart pg_autoctl.");
+	}
+
+	/* TODO: check streaming replication connections */
 }
 
 
@@ -332,7 +429,7 @@ cli_keeper_config_get(int argc, char **argv)
 				else
 				{
 					keeper_config_write(stdout, &config);
-					fprintf(stdout, "\n");
+					fformat(stdout, "\n");
 				}
 			}
 
@@ -351,7 +448,7 @@ cli_keeper_config_get(int argc, char **argv)
 										  value,
 										  BUFSIZE))
 			{
-				fprintf(stdout, "%s\n", value);
+				fformat(stdout, "%s\n", value);
 			}
 			else
 			{
@@ -380,7 +477,6 @@ cli_keeper_config_get(int argc, char **argv)
 static void
 cli_monitor_config_get(int argc, char **argv)
 {
-	Monitor monitor = { 0 };
 	MonitorConfig mconfig = { 0 };
 	KeeperConfig kconfig = keeperOptions;
 	bool missing_pgdata_is_ok = true;
@@ -413,7 +509,7 @@ cli_monitor_config_get(int argc, char **argv)
 			else
 			{
 				monitor_config_write(stdout, &mconfig);
-				fprintf(stdout, "\n");
+				fformat(stdout, "\n");
 			}
 
 			keeper_config_destroy(&kconfig);
@@ -431,7 +527,7 @@ cli_monitor_config_get(int argc, char **argv)
 										  value,
 										  BUFSIZE))
 			{
-				fprintf(stdout, "%s\n", value);
+				fformat(stdout, "%s\n", value);
 			}
 			else
 			{
@@ -529,7 +625,7 @@ cli_keeper_config_set(int argc, char **argv)
 									  value,
 									  BUFSIZE))
 		{
-			fprintf(stdout, "%s\n", value);
+			fformat(stdout, "%s\n", value);
 		}
 		else
 		{
@@ -559,7 +655,6 @@ cli_monitor_config_set(int argc, char **argv)
 	{
 		/* we print out the value that we parsed, as a double-check */
 		char value[BUFSIZE];
-		Monitor monitor = { 0 };
 		MonitorConfig mconfig = { 0 };
 		bool missing_pgdata_is_ok = true;
 		bool pg_is_not_running_is_ok = true;
@@ -592,7 +687,7 @@ cli_monitor_config_set(int argc, char **argv)
 									   value,
 									   BUFSIZE))
 		{
-			fprintf(stdout, "%s\n", value);
+			fformat(stdout, "%s\n", value);
 		}
 		else
 		{

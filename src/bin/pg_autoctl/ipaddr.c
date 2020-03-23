@@ -25,6 +25,8 @@
 
 #include "postgres_fe.h"
 
+#include "env_utils.h"
+#include "file_utils.h"
 #include "ipaddr.h"
 #include "log.h"
 
@@ -33,7 +35,6 @@ static unsigned int countSetBitsv6(unsigned char *addr);
 static bool ipv4eq(struct sockaddr_in *a, struct sockaddr_in *b);
 static bool ipv6eq(struct sockaddr_in6 *a, struct sockaddr_in6 *b);
 static bool fetchIPAddressFromInterfaceList(char *localIpAddress, int size);
-static bool isTestEnv(void);
 
 /*
  * Connect in UDP to a known DNS server on the external network, and grab our
@@ -56,7 +57,7 @@ fetchLocalIPAddress(char *localIpAddress, int size,
     //Socket could not be created
     if (sock < 0)
     {
-        log_warn("Failed to create a socket: %s", strerror(errno));
+        log_warn("Failed to create a socket: %m");
         return false;
     }
 
@@ -68,7 +69,7 @@ fetchLocalIPAddress(char *localIpAddress, int size,
     err = connect(sock, (const struct sockaddr*) &serv, sizeof(serv));
     if (err < 0)
     {
-		if (isTestEnv())
+		if (env_found_empty("PG_REGRESS_SOCK_DIR"))
 		{
 			/*
 			 * In test environment, in case of no internet access, just use the
@@ -78,7 +79,7 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 		}
 		else
 		{
-			log_warn("Failed to connect: %s", strerror(errno));
+			log_warn("Failed to connect: %m");
 			return false;
 		}
     }
@@ -86,7 +87,7 @@ fetchLocalIPAddress(char *localIpAddress, int size,
     err = getsockname(sock, (struct sockaddr*) &name, &namelen);
     if (err < 0)
     {
-        log_warn("Failed to get IP address from socket: %s", strerror(errno));
+        log_warn("Failed to get IP address from socket: %m");
         return false;
     }
 
@@ -94,11 +95,11 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 
     if (ipAddr != NULL)
     {
-        snprintf(localIpAddress, size, "%s", buffer);
+        sformat(localIpAddress, size, "%s", buffer);
     }
     else
     {
-		log_warn("Failed to determine local ip address: %s", strerror(errno));
+		log_warn("Failed to determine local ip address: %m");
     }
     close(sock);
 
@@ -123,8 +124,7 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 
 	if (getifaddrs(&ifaddr) == -1)
 	{
-		log_warn("Failed to get the list of local network inferfaces: %s",
-				  strerror(errno));
+		log_warn("Failed to get the list of local network inferfaces: %m");
 		return false;
 	}
 
@@ -161,8 +161,7 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 							  netmask, INET_ADDRSTRLEN) == NULL)
 				{
 					/* just skip that entry then */
-					log_trace("Failed to determine local network CIDR: %s",
-							  strerror(errno));
+					log_trace("Failed to determine local network CIDR: %m");
 					continue;
 				}
 
@@ -170,8 +169,7 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 							  address, INET_ADDRSTRLEN) == NULL)
 				{
 					/* just skip that entry then */
-					log_trace("Failed to determine local network CIDR: %s",
-							  strerror(errno));
+					log_trace("Failed to determine local network CIDR: %m");
 					continue;
 				}
 
@@ -185,8 +183,7 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 							  network, INET_ADDRSTRLEN) == NULL)
 				{
 					/* just skip that entry then */
-					log_trace("Failed to determine local network CIDR: %s",
-							  strerror(errno));
+					log_trace("Failed to determine local network CIDR: %m");
 					continue;
 				}
 
@@ -207,8 +204,7 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 							  netmask, INET6_ADDRSTRLEN) == NULL)
 				{
 					/* just skip that entry then */
-					log_trace("Failed to determine local network CIDR: %s",
-							  strerror(errno));
+					log_trace("Failed to determine local network CIDR: %m");
 					continue;
 				}
 
@@ -216,8 +212,7 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 							  address, INET6_ADDRSTRLEN) == NULL)
 				{
 					/* just skip that entry then */
-					log_trace("Failed to determine local network CIDR: %s",
-							  strerror(errno));
+					log_trace("Failed to determine local network CIDR: %m");
 					continue;
 				}
 
@@ -234,8 +229,7 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 							  network, INET6_ADDRSTRLEN) == NULL)
 				{
 					/* just skip that entry then */
-					log_trace("Failed to determine local network CIDR: %s",
-							  strerror(errno));
+					log_trace("Failed to determine local network CIDR: %m");
 					continue;
 				}
 
@@ -259,7 +253,7 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 		return false;
 	}
 
-	snprintf(localCIDR, size, "%s/%d", network, prefix);
+	sformat(localCIDR, size, "%s/%d", network, prefix);
 
 	return true;
 }
@@ -322,8 +316,7 @@ fetchIPAddressFromInterfaceList(char *localIpAddress, int size)
 
 	if (getifaddrs(&ifaddr) == -1)
 	{
-		log_error("Failed to get the list of local network inferfaces: %s",
-				  strerror(errno));
+		log_error("Failed to get the list of local network inferfaces: %m");
 		return false;
 	}
 
@@ -362,8 +355,7 @@ fetchIPAddressFromInterfaceList(char *localIpAddress, int size)
 						  localIpAddress, size) == NULL)
 			{
 				/* skip that address, silently */
-				log_trace("Failed to determine local network CIDR: %s",
-						  strerror(errno));
+				log_trace("Failed to determine local network CIDR: %m");
 				continue;
 			}
 
@@ -375,17 +367,6 @@ fetchIPAddressFromInterfaceList(char *localIpAddress, int size)
 	freeifaddrs(ifaddrList);
 
 	return found;
-}
-
-
-/*
- * Returns whether we are running inside the test environment.
- */
-static bool
-isTestEnv(void)
-{
-	const char *socketDir = getenv("PG_REGRESS_SOCK_DIR");
-	return socketDir != NULL && socketDir[0] == '\0';
 }
 
 
@@ -447,8 +428,7 @@ findHostnameLocalAddress(const char *hostname, char *localIpAddress, int size)
 	 */
 	if (getifaddrs(&ifaddrList) == -1)
 	{
-		log_warn("Failed to get the list of local network inferfaces: %s",
-				 strerror(errno));
+		log_warn("Failed to get the list of local network inferfaces: %m");
 		return false;
 	}
 
@@ -496,8 +476,7 @@ findHostnameLocalAddress(const char *hostname, char *localIpAddress, int size)
 								  localIpAddress,
 								  size) == NULL)
 					{
-						log_warn("Failed to determine local ip address: %s",
-								 strerror(errno));
+						log_warn("Failed to determine local ip address: %m");
 						return false;
 					}
 
@@ -525,8 +504,7 @@ findHostnameLocalAddress(const char *hostname, char *localIpAddress, int size)
 								  size) == NULL)
 					{
 						/* check size >= INET6_ADDRSTRLEN */
-						log_warn("Failed to determine local ip address: %s",
-								 strerror(errno));
+						log_warn("Failed to determine local ip address: %m");
 						return false;
 					}
 
@@ -607,7 +585,7 @@ findHostnameFromLocalIpAddress(char *localIpAddress, char *hostname, int size)
 			return false;
 		}
 
-		snprintf(hostname, size, "%s", hbuf);
+		sformat(hostname, size, "%s", hbuf);
 
 		/* stop at the first hostname found */
 		break;

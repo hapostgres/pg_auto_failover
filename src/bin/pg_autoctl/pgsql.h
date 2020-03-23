@@ -15,6 +15,7 @@
 
 #include "libpq-fe.h"
 
+#include "pgsetup.h"
 
 /*
  * OID values from PostgreSQL src/include/catalog/pg_type.h
@@ -102,6 +103,7 @@ typedef struct ReplicationSource
 	char *maximumBackupRate;
 	char *backupDir;
 	char *applicationName;
+	SSLOptions sslOptions;
 } ReplicationSource;
 
 
@@ -185,6 +187,7 @@ bool pgsql_is_in_recovery(PGSQL *pgsql, bool *is_in_recovery);
 bool pgsql_reload_conf(PGSQL *pgsql);
 bool pgsql_create_replication_slot(PGSQL *pgsql, const char *slotName);
 bool pgsql_drop_replication_slot(PGSQL *pgsql, const char *slotName, bool verbose);
+bool pgsql_drop_replication_slots(PGSQL *pgsql);
 bool postgres_sprintf_replicationSlotName(int nodeId, char *slotName, int size);
 bool pgsql_set_synchronous_standby_names(PGSQL *pgsql,
 										 char *synchronous_standby_names);
@@ -201,8 +204,6 @@ bool pgsql_create_user(PGSQL *pgsql, const char *userName, const char *password,
 bool pgsql_has_replica(PGSQL *pgsql, char *userName, bool *hasReplica);
 bool hostname_from_uri(const char *pguri,
 					   char *hostname, int maxHostLength, int *port);
-int make_conninfo_field_str(char *destination, const char *key, const char *value);
-int make_conninfo_field_int(char *destination, const char *key, int value);
 bool validate_connection_string(const char *connectionString);
 bool pgsql_reset_primary_conninfo(PGSQL *pgsql);
 

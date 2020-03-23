@@ -13,11 +13,13 @@
 #include <unistd.h>
 
 #include "defaults.h"
+#include "env_utils.h"
 #include "log.h"
 #include "monitor.h"
 #include "monitor_config.h"
 #include "parsing.h"
 #include "pgsql.h"
+#include "string_utils.h"
 
 #define STR_ERRCODE_OBJECT_IN_USE "55006"
 
@@ -1037,8 +1039,8 @@ parseNode(PGresult *result, int rowNumber, NodeAddress *node)
 	}
 
 	value = PQgetvalue(result, rowNumber, 2);
-	node->port = strtol(value, NULL, 0);
-	if (node->port == 0)
+
+	if (!stringToInt(value, &node->port) || node->port == 0)
 	{
 		log_error("Invalid port number \"%s\" returned by monitor", value);
 		return false;
@@ -1142,7 +1144,6 @@ printNodeArray(NodeAddressArray *nodesArray)
 {
 	int nodesArrayIndex = 0;
 	int maxNodeNameSize = 5;	/* strlen("Name") + 1, the header */
-	char *nameSeparatorHeader = NULL;
 
 	/*
 	 * Dynamically adjust our display output to the length of the longer
@@ -1241,14 +1242,16 @@ parseNodeState(void *ctx, PGresult *result)
 	}
 
 	value = PQgetvalue(result, 0, 0);
-	if (sscanf(value, "%d", &context->assignedState->nodeId) != 1)
+
+	if (!stringToInt(value, &context->assignedState->nodeId))
 	{
 		log_error("Invalid node ID \"%s\" returned by monitor", value);
 		++errors;
 	}
 
 	value = PQgetvalue(result, 0, 1);
-	if (sscanf(value, "%d", &context->assignedState->groupId) != 1)
+
+	if (!stringToInt(value, &context->assignedState->groupId))
 	{
 		log_error("Invalid group ID \"%s\" returned by monitor", value);
 		++errors;
@@ -1399,6 +1402,13 @@ printCurrentState(void *ctx, PGresult *result)
 	/* prepare a nice dynamic string of '-' as a header separator */
 	nameSeparatorHeader = (char *) malloc((maxNodeNameSize+1) * sizeof(char));
 
+	if (nameSeparatorHeader == NULL)
+	{
+		log_error("Failed to allocate memory, probably because it's all used");
+		context->parsedOK = false;
+		return;
+	}
+
 	for(int i=0; i<=maxNodeNameSize; i++)
 	{
 		if (i<maxNodeNameSize)
@@ -1411,12 +1421,12 @@ printCurrentState(void *ctx, PGresult *result)
 		}
 	}
 
-	fprintf(stdout, "%*s | %6s | %5s | %5s | %17s | %17s | %8s | %6s\n",
+	fformat(stdout, "%*s | %6s | %5s | %5s | %17s | %17s | %8s | %6s\n",
 			maxNodeNameSize, "Name", "Port",
 			"Group", "Node", "Current State", "Assigned State",
 			"Priority", "Quorum");
 
-	fprintf(stdout, "%*s-+-%6s-+-%5s-+-%5s-+-%17s-+-%17s-+-%8s-+-%6s\n",
+	fformat(stdout, "%*s-+-%6s-+-%5s-+-%5s-+-%17s-+-%17s-+-%8s-+-%6s\n",
 			maxNodeNameSize, nameSeparatorHeader, "------",
 			"-----", "-----", "-----------------", "-----------------",
 			"--------", "------");
@@ -1434,12 +1444,12 @@ printCurrentState(void *ctx, PGresult *result)
 		char *candidatePriority = PQgetvalue(result, currentTupleIndex, 6);
 		char *replicationQuorum = PQgetvalue(result, currentTupleIndex, 7);
 
-		fprintf(stdout, "%*s | %6s | %5s | %5s | %17s | %17s | %8s | %6s\n",
+		fformat(stdout, "%*s | %6s | %5s | %5s | %17s | %17s | %8s | %6s\n",
 				maxNodeNameSize, nodename, nodeport,
 				groupId, nodeId, currentState, goalState,
 				candidatePriority, replicationQuorum);
 	}
-	fprintf(stdout, "\n");
+	fformat(stdout, "\n");
 
 	context->parsedOK = true;
 
@@ -1516,7 +1526,7 @@ monitor_print_state_as_json(Monitor *monitor, char *formation, int group)
 		return false;
 	}
 
-	fprintf(stdout, "%s\n", context.strVal);
+	fformat(stdout, "%s\n", context.strVal);
 
 	return true;
 }
@@ -1679,7 +1689,7 @@ monitor_print_last_events_as_json(Monitor *monitor,
 		return false;
 	}
 
-	fprintf(stream, "%s\n", context.strVal);
+	fformat(stream, "%s\n", context.strVal);
 
 	return true;
 }
@@ -1706,12 +1716,13 @@ printLastEvents(void *ctx, PGresult *result)
 		return;
 	}
 
-	fprintf(stdout, "%30s | %10s | %6s | %18s | %18s | %s\n",
+	fformat(stdout, "%30s | %10s | %6s | %18s | %18s | %s\n",
 			"Event Time", "Formation", "Node",
 			"Current State", "Assigned State", "Comment");
-	fprintf(stdout, "%30s-+-%10s-+-%6s-+-%18s-+-%18s-+-%10s\n",
+	fformat(stdout, "%30s-+-%10s-+-%6s-+-%18s-+-%18s-+-%10s\n",
 			"------------------------------", "----------",
-			"------", "------------------", "------------------", "----------");
+			"------", "------------------",
+			"------------------", "----------");
 
 	for(currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
 	{
@@ -1725,12 +1736,13 @@ printLastEvents(void *ctx, PGresult *result)
 		char node[BUFSIZE];
 
 		/* for our grid alignment output it's best to have a single col here */
-		sprintf(node, "%s/%s", groupId, nodeId);
+		sformat(node, BUFSIZE, "%s/%s", groupId, nodeId);
 
-		fprintf(stdout, "%30s | %10s | %6s | %18s | %18s | %s\n",
-				eventTime, formation, node, currentState, goalState, description);
+		fformat(stdout, "%30s | %10s | %6s | %18s | %18s | %s\n",
+				eventTime, formation, node,
+				currentState, goalState, description);
 	}
-	fprintf(stdout, "\n");
+	fformat(stdout, "\n");
 
 	context->parsedOK = true;
 
@@ -1882,18 +1894,22 @@ monitor_drop_formation(Monitor *monitor, char *formation)
  * formation.
  */
 bool
-monitor_formation_uri(Monitor *monitor, const char *formation,
-					  char *connectionString, size_t size)
+monitor_formation_uri(Monitor *monitor,
+					  const char *formation,
+					  const char *sslMode,
+					  char *connectionString,
+					  size_t size)
 {
 	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_STRING, false };
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
-		"SELECT formation_uri FROM pgautofailover.formation_uri($1)";
-	int paramCount = 1;
-	Oid paramTypes[1] = { TEXTOID };
-	const char *paramValues[1];
+		"SELECT formation_uri FROM pgautofailover.formation_uri($1, $2)";
+	int paramCount = 2;
+	Oid paramTypes[2] = { TEXTOID, TEXTOID };
+	const char *paramValues[2];
 
 	paramValues[0] = formation;
+	paramValues[1] = sslMode;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
@@ -1932,7 +1948,7 @@ monitor_formation_uri(Monitor *monitor, const char *formation,
  * strings: first the monitor URI itself, and then one line per formation.
  */
 bool
-monitor_print_every_formation_uri(Monitor *monitor)
+monitor_print_every_formation_uri(Monitor *monitor, const char *sslMode)
 {
 	FormationURIParseContext context = { 0 };
 	PGSQL *pgsql = &monitor->pgsql;
@@ -1941,13 +1957,14 @@ monitor_print_every_formation_uri(Monitor *monitor)
 		" UNION ALL "
 		"SELECT 'formation', formationid, formation_uri "
 		"  FROM pgautofailover.formation, "
-		"       pgautofailover.formation_uri(formation.formationid)";
+		"       pgautofailover.formation_uri(formation.formationid, $2)";
 
-	int paramCount = 1;
-	Oid paramTypes[1] = { TEXTOID };
-	const char *paramValues[1];
+	int paramCount = 2;
+	Oid paramTypes[2] = { TEXTOID, TEXTOID };
+	const char *paramValues[2];
 
 	paramValues[0] = monitor->pgsql.connectionString;
+	paramValues[1] = sslMode;
 
 	context.parsedOK = false;
 
@@ -1979,7 +1996,9 @@ monitor_print_every_formation_uri(Monitor *monitor)
  * formation.
  */
 bool
-monitor_print_every_formation_uri_as_json(Monitor *monitor, FILE *stream)
+monitor_print_every_formation_uri_as_json(Monitor *monitor,
+										  const char *sslMode,
+										  FILE *stream)
 {
 	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_STRING, false };
 	PGSQL *pgsql = &monitor->pgsql;
@@ -1989,15 +2008,16 @@ monitor_print_every_formation_uri_as_json(Monitor *monitor, FILE *stream)
 		" UNION ALL "
 		"SELECT 'formation', formationid, formation_uri "
 		"  FROM pgautofailover.formation, "
-		"       pgautofailover.formation_uri(formation.formationid)"
+		"       pgautofailover.formation_uri(formation.formationid, $2)"
 		") "
 		"SELECT jsonb_pretty(jsonb_agg(row_to_json(formation))) FROM formation";
 
-	int paramCount = 1;
-	Oid paramTypes[1] = { TEXTOID };
-	const char *paramValues[1];
+	int paramCount = 2;
+	Oid paramTypes[2] = { TEXTOID, TEXTOID };
+	const char *paramValues[2];
 
 	paramValues[0] = monitor->pgsql.connectionString;
+	paramValues[1] = sslMode;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
@@ -2017,7 +2037,7 @@ monitor_print_every_formation_uri_as_json(Monitor *monitor, FILE *stream)
 	/* disconnect from PostgreSQL now */
 	pgsql_finish(&monitor->pgsql);
 
-	fprintf(stream, "%s\n", context.strVal);
+	fformat(stream, "%s\n", context.strVal);
 
 	return true;
 }
@@ -2068,12 +2088,10 @@ printFormationURI(void *ctx, PGresult *result)
 		formationNameSeparator[index] = '-';
 	}
 
-	fprintf(stdout, "%10s | %*s | %s\n",
+	fformat(stdout, "%10s | %*s | %s\n",
 			"Type", maxFormationNameSize, "Name", "Connection String");
-	fprintf(stdout, "%10s-+-%*s-+-%s\n",
-			"----------",
-			maxFormationNameSize,
-			formationNameSeparator,
+	fformat(stdout, "%10s-+-%*s-+-%s\n",
+			"----------", maxFormationNameSize, formationNameSeparator,
 			"------------------------------");
 
 	for(currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
@@ -2082,9 +2100,10 @@ printFormationURI(void *ctx, PGresult *result)
 		char *name = PQgetvalue(result, currentTupleIndex, 1);
 		char *URI = PQgetvalue(result, currentTupleIndex, 2);
 
-		fprintf(stdout, "%10s | %*s | %s\n", type, maxFormationNameSize, name, URI);
+		fformat(stdout, "%10s | %*s | %s\n",
+				type, maxFormationNameSize, name, URI);
 	}
-	fprintf(stdout, "\n");
+	fformat(stdout, "\n");
 
 	context->parsedOK = true;
 
@@ -2246,8 +2265,7 @@ parseCoordinatorNode(void *ctx, PGresult *result)
 	}
 
 	value = PQgetvalue(result, 0, 1);
-	context->node->port = strtol(value, NULL, 0);
-	if (context->node->port == 0)
+	if (!stringToInt(value, &context->node->port) || context->node->port == 0)
 	{
 		log_error("Invalid port number \"%s\" returned by monitor", value);
 		context->parsedOK = false;
@@ -2375,7 +2393,7 @@ monitor_get_notifications(Monitor *monitor)
 
 	if (select(sock + 1, &input_mask, NULL, NULL, NULL) < 0)
 	{
-		log_warn("select() failed: %s\n", strerror(errno));
+		log_warn("select() failed: %m");
 		return false;
 	}
 
@@ -2843,19 +2861,21 @@ monitor_ensure_extension_version(Monitor *monitor,
 								 MonitorExtensionVersion *version)
 {
 	const char *extensionVersion = PG_AUTOCTL_EXTENSION_VERSION;
+	char envExtensionVersion[MAXPGPATH];
 
-	/* in test environement, we can export any target version we want */
-	if (getenv(PG_AUTOCTL_DEBUG) != NULL)
+	/* in test environment, we can export any target version we want */
+	if (env_exists(PG_AUTOCTL_DEBUG) && env_exists(PG_AUTOCTL_EXTENSION_VERSION_VAR))
 	{
-		char *val = getenv(PG_AUTOCTL_EXTENSION_VERSION_VAR);
-
-		if (val != NULL)
+		if (!get_env_copy(PG_AUTOCTL_EXTENSION_VERSION_VAR, envExtensionVersion,
+						  MAXPGPATH))
 		{
-			extensionVersion = val;
-			log_debug("monitor_ensure_extension_version targets extension "
-					  "version \"%s\" - as per environment.",
-					  extensionVersion);
+			/* errors have already been logged */
+			return false;
 		}
+		extensionVersion = envExtensionVersion;
+		log_debug("monitor_ensure_extension_version targets extension "
+				  "version \"%s\" - as per environment.",
+				  extensionVersion);
 	}
 
 	if (!monitor_get_extension_version(monitor, version))
@@ -3010,7 +3030,6 @@ bool
 ensure_monitor_pg_running(Monitor *monitor, struct MonitorConfig *mconfig)
 {
 	MonitorExtensionVersion version = { 0 };
-	char postgresUri[MAXCONNINFO];
 
 	if (!pg_is_running(mconfig->pgSetup.pg_ctl, mconfig->pgSetup.pgdata))
 	{

@@ -143,6 +143,10 @@ keeper_ensure_pg_configuration_files_in_pgdata(KeeperConfig *config)
 			return false;
 		}
 	}
+
+	/* This is a huge bug */
+	log_error("BUG: some unknown PG_CONFIG enum value was encountered");
+	return false;
 }
 
 
@@ -176,7 +180,7 @@ debian_find_postgres_configuration_files(PostgresSetup *pgSetup,
 										  PG_CONFIG_TYPE_POSTGRES))
 	{
 		/* so we're dealing with a "normal" Postgres installation */
-		memcpy(pgConfigFiles, &postgresConfFiles, sizeof(PostgresConfigFiles));
+		*pgConfigFiles = postgresConfFiles;
 
 		return true;
 	}
@@ -187,7 +191,7 @@ debian_find_postgres_configuration_files(PostgresSetup *pgSetup,
 										  PG_CONFIG_TYPE_DEBIAN))
 	{
 		/* so we're dealing with a "normal" Postgres installation */
-		memcpy(pgConfigFiles, &debianConfFiles, sizeof(PostgresConfigFiles));
+		*pgConfigFiles = debianConfFiles;
 
 		return true;
 	}
@@ -218,7 +222,6 @@ debian_init_postgres_config_files(PostgresSetup *pgSetup,
 					  "called with UNKNOWN conf kind");
 			return false;
 		}
-
 		case PG_CONFIG_TYPE_POSTGRES:
 		{
 			initPostgresConfigFiles(pgdata, pgConfigFiles,
@@ -274,6 +277,10 @@ debian_init_postgres_config_files(PostgresSetup *pgSetup,
 			}
 		}
 	}
+
+	/* This is a huge bug */
+	log_error("BUG: some unknown PG_CONFIG enum value was encountered");
+	return false;
 }
 
 
@@ -439,7 +446,7 @@ expandDebianPatternsInDirectoryName(char *pathname,
 					 */
 					if ((pathnameIndex + versionSize) < pathnameSize)
 					{
-						memcpy(pathname+pathnameIndex, versionName, versionSize);
+						strlcpy(pathname+pathnameIndex, versionName, pathnameSize - pathnameIndex);
 						pathnameIndex += versionSize;
 					}
 					break;
@@ -456,7 +463,7 @@ expandDebianPatternsInDirectoryName(char *pathname,
 					 */
 					if ((pathnameIndex + clusterSize) < pathnameSize)
 					{
-						memcpy(pathname+pathnameIndex, clusterName, clusterSize);
+						strlcpy(pathname+pathnameIndex, clusterName, pathnameSize - pathnameIndex);
 						pathnameIndex += clusterSize;
 					}
 					break;
@@ -606,11 +613,10 @@ comment_out_configuration_parameters(const char *srcConfPath,
 		"(data_directory|hba_file|ident_file|include_dir)( *)=";
 
 	/* open a file */
-	fileStream = fopen(srcConfPath, "rb");
+	fileStream = fopen_read_only(srcConfPath);
 	if (fileStream == NULL)
 	{
-		log_error("Failed to open file \"%s\": %s",
-				  srcConfPath, strerror(errno));
+		log_error("Failed to open file \"%s\": %m", srcConfPath);
 		return false;
 	}
 
@@ -688,8 +694,8 @@ disableAutoStart(PostgresConfigFiles *pgConfigFiles)
 
 	if (rename(startConfPath, copyStartConfPath) != 0)
 	{
-		log_error("Failed to rename debian auto start setup to \"%s\": %s",
-				  copyStartConfPath, strerror(errno));
+		log_error("Failed to rename debian auto start setup to \"%s\": %m",
+				  copyStartConfPath);
 
 		return false;
 	}

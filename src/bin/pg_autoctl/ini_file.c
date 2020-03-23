@@ -10,14 +10,13 @@
 #include <arpa/inet.h>
 #include <errno.h>
 
+#include "ini.h"
 #include "ini_file.h"
 #include "log.h"
 #include "pgctl.h"
 #include "parson.h"
 #include "pgsetup.h"
-
-#define INI_IMPLEMENTATION
-#include "ini.h"
+#include "string_utils.h"
 
 /*
  * Load a configuration file in the INI format.
@@ -140,11 +139,11 @@ ini_validate_options(IniOption *optionList)
 		int n;
 		char optionName[BUFSIZE];
 
-		n = sprintf(optionName, "%s.%s", option->section, option->name);
+		n = sformat(optionName, BUFSIZE, "%s.%s", option->section, option->name);
 
 		if (option->optName)
 		{
-			sprintf(optionName + n, " (--%s)", option->optName);
+			sformat(optionName + n, BUFSIZE - n, " (--%s)", option->optName);
 		}
 
 		switch (option->type)
@@ -253,9 +252,9 @@ ini_set_option_value(IniOption *option, const char *value)
 		{
 			if (value)
 			{
-				int nb = strtol(value, NULL, 10);
+				int nb;
 
-				if (nb == 0 && errno == EINVAL)
+				if (!stringToInt(value, &nb))
 				{
 					log_error("Failed to parse %s.%s's value \"%s\" as a number",
 							  option->section, option->name, value);
@@ -287,6 +286,12 @@ ini_option_to_string(IniOption *option, char *dest, size_t size)
 	{
 		case INI_STRING_T:
 		{
+			/* option->strValue is a char **, both pointers could be NULL */
+			if (option->strValue == NULL || *(option->strValue) == NULL)
+			{
+				return false;
+			}
+
 			strlcpy(dest, *(option->strValue), size);
 			return true;
 		}
@@ -299,7 +304,7 @@ ini_option_to_string(IniOption *option, char *dest, size_t size)
 
 		case INI_INT_T:
 		{
-			snprintf(dest, size, "%d", *(option->intValue));
+			sformat(dest, size, "%d", *(option->intValue));
 			return true;
 		}
 
@@ -333,17 +338,18 @@ write_ini_to_stream(FILE *stream, IniOption *optionList)
 		{
 			if (currentSection != NULL)
 			{
-				fprintf(stream, "\n");
+				fformat(stream, "\n");
 			}
 			currentSection = (char *) option->section;
-			fprintf(stream, "[%s]\n", currentSection);
+			fformat(stream, "[%s]\n", currentSection);
 		}
 
 		switch (option->type)
 		{
 			case INI_INT_T:
 			{
-				fprintf(stream, "%s = %d\n", option->name, *(option->intValue));
+				fformat(stream, "%s = %d\n",
+							 option->name, *(option->intValue));
 				break;
 			}
 
@@ -353,7 +359,7 @@ write_ini_to_stream(FILE *stream, IniOption *optionList)
 
 				if (value)
 				{
-					fprintf(stream, "%s = %s\n", option->name, value);
+					fformat(stream, "%s = %s\n", option->name, value);
 				}
 				else if (option->required)
 				{
@@ -371,7 +377,7 @@ write_ini_to_stream(FILE *stream, IniOption *optionList)
 
 				if (value[0] != '\0')
 				{
-					fprintf(stream, "%s = %s\n", option->name, value);
+					fformat(stream, "%s = %s\n", option->name, value);
 				}
 				else if (option->required)
 				{

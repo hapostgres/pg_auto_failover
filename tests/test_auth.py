@@ -1,6 +1,8 @@
 import pgautofailover_utils as pgautofailover
 from nose.tools import *
 
+import os
+
 cluster = None
 node1 = None
 node2 = None
@@ -21,7 +23,11 @@ def test_001_init_primary():
     global node1
     node1 = cluster.create_datanode("/tmp/auth/node1", authMethod="md5")
     node1.create()
+
     node1.set_user_password("pgautofailover_monitor", "monitor_password")
+    node1.set_user_password("pgautofailover_replicator", "streaming_password")
+    node1.config_set("replication.password", "streaming_password")
+
     node1.run()
     assert node1.wait_until_state(target_state="single")
 
@@ -32,8 +38,18 @@ def test_002_create_t1():
 def test_003_init_secondary():
     global node2
     node2 = cluster.create_datanode("/tmp/auth/node2", authMethod="md5")
+
+    os.putenv('PGPASSWORD', "streaming_password")
     node2.create()
-    # no need to set passwords here because it will be inherited from the primary
+    node2.config_set("replication.password", "streaming_password")
+
     node2.run()
     assert node2.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")
+
+def test_004_failover():
+    print()
+    print("Calling pgautofailover.failover() on the monitor")
+    cluster.monitor.failover()
+    assert node2.wait_until_state(target_state="primary")
+    assert node1.wait_until_state(target_state="secondary")

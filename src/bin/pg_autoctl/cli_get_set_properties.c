@@ -353,9 +353,6 @@ cli_set_node_replication_quorum(int argc, char **argv)
 	bool pgIsNotRunningIsOk = true;
 	bool monitorDisabledIsOk = false;
 
-	char *channels[] = { "state", NULL };
-	char postgresUri[MAXCONNINFO];
-
 	keeper.config = keeperOptions;
 
 	if (argc != 1)
@@ -524,8 +521,6 @@ cli_set_node_nodename(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
 
-	int candidatePriority = -1;
-
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
 	bool monitorDisabledIsOk = false;
@@ -606,8 +601,6 @@ cli_set_formation_number_sync_standbys(int argc, char **argv)
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
 	bool monitorDisabledIsOk = false;
-
-	char *channels[] = { "state", NULL };
 
 	char synchronous_standby_names[BUFSIZE] = { 0 };
 

@@ -18,6 +18,7 @@
 #include "parsing.h"
 #include "pgsql.h"
 #include "signals.h"
+#include "string_utils.h"
 
 
 #define ERRCODE_DUPLICATE_OBJECT "42710"
@@ -33,7 +34,6 @@ static bool clear_results(PGconn *connection);
 static bool pgsql_alter_system_set(PGSQL *pgsql, GUC setting);
 static bool pgsql_get_current_setting(PGSQL *pgsql, char *settingName,
 									  char **currentValue);
-static int escape_conninfo_value(char *destination, const char *string);
 static void parsePgMetadata(void *ctx, PGresult *result);
 
 
@@ -62,9 +62,7 @@ parseSingleValueResult(void *ctx, PGresult *result)
 
 			case PGSQL_RESULT_INT:
 			{
-				context->intVal = strtod(value, NULL);
-
-				if (context->intVal == 0 && errno != 0)
+				if (!stringToInt(value, &context->intVal))
 				{
 					context->parsedOk = false;
 					log_error("Failed to parse int result \"%s\"", value);
@@ -75,14 +73,13 @@ parseSingleValueResult(void *ctx, PGresult *result)
 
 			case PGSQL_RESULT_BIGINT:
 			{
-				context->bigint = strtoull(value, NULL, 10);
-
-				if (context->bigint == 0 && errno != 0)
+				if (!stringToUInt64(value, &context->bigint))
 				{
 					context->parsedOk = false;
 					log_error("Failed to parse uint64_t result \"%s\"", value);
 				}
 				context->parsedOk = true;
+				break;
 			}
 
 			case PGSQL_RESULT_STRING:
@@ -391,12 +388,12 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 
 			if (paramIndex > 0)
 			{
-				bytesWritten = snprintf(writePointer, remainingBytes, ", ");
+				bytesWritten = sformat(writePointer, remainingBytes, ", ");
 				remainingBytes -= bytesWritten;
 				writePointer += bytesWritten;
 			}
 
-			bytesWritten = snprintf(writePointer, remainingBytes, "'%s'", value);
+			bytesWritten = sformat(writePointer, remainingBytes, "'%s'", value);
 			remainingBytes -= bytesWritten;
 			writePointer += bytesWritten;
 		}
@@ -408,7 +405,6 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 	if (!is_response_ok(result))
 	{
 		char *sqlstate = PQresultErrorField(result, PG_DIAG_SQLSTATE);
-
 		char *message = PQerrorMessage(connection);
 		char *errorLines[BUFSIZE];
 		int lineCount = splitLines(message, errorLines, BUFSIZE);
@@ -638,6 +634,25 @@ pgsql_drop_replication_slot(PGSQL *pgsql, const char *slotName, bool verbose)
 
 
 /*
+ * pgsql_drop_replication_slots drops all the pg_auto_failover physical
+ * replication slots. (We might not own all those that exist on the server)
+ */
+bool
+pgsql_drop_replication_slots(PGSQL *pgsql)
+{
+	char *sql =
+		"SELECT pg_drop_replication_slot(slot_name) "
+		"  FROM pg_replication_slots "
+		" WHERE slot_name ~ '" REPLICATION_SLOT_NAME_PATTERN "' "
+		"   AND slot_type = 'physical'";
+
+	log_info("Drop pg_auto_failover physical replication slots");
+
+	return pgsql_execute_with_params(pgsql, sql, 0, NULL, NULL, NULL, NULL);
+}
+
+
+/*
  * postgres_sprintf_replicationSlotName prints the replication Slot Name to use
  * for given nodeId in the given slotName buffer of given size.
  */
@@ -645,7 +660,7 @@ bool
 postgres_sprintf_replicationSlotName(int nodeId, char *slotName, int size)
 {
 	int bytesWritten =
-		snprintf(slotName, size, "%s_%d", REPLICATION_SLOT_NAME_DEFAULT, nodeId);
+		sformat(slotName, size, "%s_%d", REPLICATION_SLOT_NAME_DEFAULT, nodeId);
 
 	return bytesWritten <= size;
 }
@@ -777,7 +792,8 @@ pgsql_alter_system_set(PGSQL *pgsql, GUC setting)
 {
 	char command[1024];
 
-	snprintf(command, 1024, "ALTER SYSTEM SET %s TO %s", setting.name, setting.value);
+	sformat(command, 1024,
+			"ALTER SYSTEM SET %s TO %s", setting.name, setting.value);
 
 	if (!pgsql_execute(pgsql, command))
 	{
@@ -893,6 +909,7 @@ pgsql_get_current_setting(PGSQL *pgsql, char *settingName, char **currentValue)
 	if (!pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes, paramValues,
 								   &context, &parseSingleValueResult))
 	{
+		/* errors have already been logged */
 		return false;
 	}
 
@@ -949,10 +966,10 @@ pgsql_create_database(PGSQL *pgsql, const char *dbname, const char *owner)
 	}
 
 	/* now build the SQL command */
-	snprintf(command, BUFSIZE,
-			 "CREATE DATABASE %s WITH OWNER %s",
-			 escapedDBName,
-			 escapedOwner);
+	sformat(command, BUFSIZE,
+			"CREATE DATABASE %s WITH OWNER %s",
+			escapedDBName,
+			escapedOwner);
 
 	log_debug("Running command on Postgres: %s;", command);
 
@@ -1022,7 +1039,7 @@ pgsql_create_extension(PGSQL *pgsql, const char *name)
 	}
 
 	/* now build the SQL command */
-	snprintf(command, BUFSIZE, "CREATE EXTENSION %s", escapedIdentifier);
+	sformat(command, BUFSIZE, "CREATE EXTENSION %s", escapedIdentifier);
 	PQfreemem(escapedIdentifier);
 	log_debug("Running command on Postgres: %s;", command);
 
@@ -1217,8 +1234,12 @@ pgsql_has_replica(PGSQL *pgsql, char *userName, bool *hasReplica)
 	const char *paramValues[1] = { userName };
 	int paramCount = 1;
 
-	pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes, paramValues,
-							  &context, &parseSingleValueResult);
+	if (!pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes, paramValues,
+								   &context, &parseSingleValueResult))
+	{
+		/* errors have already been logged */
+		return false;
+	}
 
 	if (!context.parsedOk)
 	{
@@ -1280,7 +1301,13 @@ hostname_from_uri(const char *pguri,
 			if (option->val)
 			{
 				/* we expect a single port number in a monitor's URI */
-				*port = atoi(option->val);
+				if (!stringToInt(option->val, port))
+				{
+					log_error("Failed to parse port number : %s", option->val);
+
+					PQconninfoFree(conninfo);
+					return false;
+				}
 				++found;
 			}
 			else
@@ -1297,72 +1324,6 @@ hostname_from_uri(const char *pguri,
 	PQconninfoFree(conninfo);
 
 	return true;
-}
-
-
-/*
- * make_conninfo_field_int writes a single connection string field to
- * connInfo and returns the number of characters written.
- *
- * It is the responsibility of the caller to ensure that the connInfo
- * is large enough to write the field.
- */
-int
-make_conninfo_field_int(char *connInfo, const char *key, int value)
-{
-	return sprintf(connInfo, " %s=%d", key, value);
-}
-
-
-/*
- * make_conninfo_field_str writes a single connection string field to
- * connInfo with escaping and returns the number of characters written.
- *
- * It is the responsibility of the caller to ensure that the connInfo
- * is large enough to write the field.
- */
-int
-make_conninfo_field_str(char *connInfo, const char *key, const char *value)
-{
-	char *connInfoEnd = connInfo;
-
-	connInfoEnd += sprintf(connInfoEnd, " %s=", key);
-	connInfoEnd += escape_conninfo_value(connInfoEnd, value);
-
-	return connInfoEnd - connInfo;
-}
-
-
-/*
- * escape_conninfo_value escapes a string that is used in a connection info
- * string by prefixing single quotes and backslashes with a backslash.
- *
- * The result is written to destination and the length of the result returned.
- */
-static int
-escape_conninfo_value(char *destination, const char *string)
-{
-	int charIndex = 0;
-	int length = strlen(string);
-	int escapedStringLength = 0;
-
-	destination[escapedStringLength++] = '\'';
-
-	for (charIndex = 0; charIndex < length; charIndex++)
-	{
-		char currentChar = string[charIndex];
-		if (currentChar == '\'' || currentChar == '\\')
-		{
-			destination[escapedStringLength++] = '\\';
-		}
-
-		destination[escapedStringLength++] = currentChar;
-	}
-
-	destination[escapedStringLength++] = '\'';
-	destination[escapedStringLength] = '\0';
-
-	return escapedStringLength;
 }
 
 
@@ -1468,8 +1429,12 @@ pgsql_get_postgres_metadata(PGSQL *pgsql, const char *slotName,
 	const char *paramValues[1] = { slotName };
 	int paramCount = 1;
 
-	pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes, paramValues,
-							  &context, &parsePgMetadata);
+	if (!pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes, paramValues,
+								   &context, &parsePgMetadata))
+	{
+		/* errors have already been logged */
+		return false;
+	}
 
 	if (!context.parsedOk)
 	{
@@ -1580,7 +1545,7 @@ pgsql_listen(PGSQL *pgsql, char *channels[])
 			return false;
 		}
 
-		sprintf(sql, "LISTEN %s", channel);
+		sformat(sql, BUFSIZE, "LISTEN %s", channel);
 
 		PQfreemem(channel);
 
@@ -1647,8 +1612,8 @@ pgsql_alter_extension_update_to(PGSQL *pgsql,
 	}
 
 	/* now build the SQL command */
-	n = snprintf(command, BUFSIZE, "ALTER EXTENSION %s UPDATE TO %s",
-				 escapedIdentifier, escapedVersion);
+	n = sformat(command, BUFSIZE, "ALTER EXTENSION %s UPDATE TO %s",
+				escapedIdentifier, escapedVersion);
 
 	if (n >= BUFSIZE)
 	{

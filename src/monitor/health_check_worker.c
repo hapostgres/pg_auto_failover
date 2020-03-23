@@ -326,10 +326,12 @@ StartHealthCheckWorker(DatabaseListEntry *db)
 	worker.bgw_restart_time = BGW_NEVER_RESTART;
 	worker.bgw_main_arg = ObjectIdGetDatum(db->dboid);
 	worker.bgw_notify_pid = MyProcPid;
-	snprintf(worker.bgw_library_name, BGW_MAXLEN, "pgautofailover");
-	snprintf(worker.bgw_function_name, BGW_MAXLEN, "HealthCheckWorkerMain");
-	snprintf(worker.bgw_name, BGW_MAXLEN,
-			 "pg_auto_failover monitor worker");
+	strlcpy(worker.bgw_library_name, "pgautofailover",
+			sizeof(worker.bgw_library_name));
+	strlcpy(worker.bgw_function_name, "HealthCheckWorkerMain",
+			sizeof(worker.bgw_function_name));
+	strlcpy(worker.bgw_name, "pg_auto_failover monitor worker",
+			sizeof(worker.bgw_name));
 
 	if (!RegisterDynamicBackgroundWorker(&worker, &handle))
 	{
@@ -793,12 +795,12 @@ ManageHealthCheck(HealthCheck *healthCheck, struct timeval currentTime)
 		{
 			PGconn *connection = NULL;
 			ConnStatusType connStatus = CONNECTION_BAD;
-			char connInfoString[MAX_CONN_INFO_SIZE];
+			StringInfo connInfoString = makeStringInfo();
 
-			snprintf(connInfoString, MAX_CONN_INFO_SIZE, CONN_INFO_TEMPLATE,
+			appendStringInfo(connInfoString, CONN_INFO_TEMPLATE,
 					 nodeHealth->nodeName, nodeHealth->nodePort, HealthCheckTimeout);
 
-			connection = PQconnectStart(connInfoString);
+			connection = PQconnectStart(connInfoString->data);
 			PQsetnonblocking(connection, true);
 
 			connStatus = PQstatus(connection);
@@ -828,6 +830,9 @@ ManageHealthCheck(HealthCheck *healthCheck, struct timeval currentTime)
 			}
 
 			healthCheck->numTries++;
+
+			pfree(connInfoString->data);
+			pfree(connInfoString);
 
 			break;
 		}

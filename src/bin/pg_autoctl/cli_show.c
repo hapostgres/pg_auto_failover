@@ -16,6 +16,7 @@
 #include "cli_common.h"
 #include "commandline.h"
 #include "defaults.h"
+#include "env_utils.h"
 #include "ipaddr.h"
 #include "keeper_config.h"
 #include "keeper.h"
@@ -27,6 +28,7 @@
 #include "pgsetup.h"
 #include "pgsql.h"
 #include "state.h"
+#include "string_utils.h"
 
 static int eventCount = 10;
 
@@ -208,8 +210,7 @@ cli_show_state_getopts(int argc, char **argv)
 
 			case 'g':
 			{
-				int scanResult = sscanf(optarg, "%d", &options.groupId);
-				if (scanResult == 0)
+				if (!stringToInt(optarg, &options.groupId))
 				{
 					log_fatal("--group argument is not a valid group ID: \"%s\"",
 							  optarg);
@@ -221,8 +222,7 @@ cli_show_state_getopts(int argc, char **argv)
 
 			case 'n':
 			{
-				int scanResult = sscanf(optarg, "%d", &eventCount);
-				if (scanResult == 0)
+				if (!stringToInt(optarg, &eventCount))
 				{
 					log_fatal("--count argument is not a valid count: \"%s\"",
 							  optarg);
@@ -295,16 +295,7 @@ cli_show_state_getopts(int argc, char **argv)
 
 	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 	{
-		char *pgdata = getenv("PGDATA");
-
-		if (pgdata == NULL)
-		{
-			log_fatal("Failed to get PGDATA either from the environment "
-					  "or from --pgdata");
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-
-		strlcpy(options.pgSetup.pgdata, pgdata, MAXPGPATH);
+		get_env_pgdata_or_exit(options.pgSetup.pgdata);
 	}
 
 	keeperOptions = options;
@@ -742,16 +733,14 @@ cli_show_uri_getopts(int argc, char **argv)
 
 	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 	{
-		char *pgdata = getenv("PGDATA");
+		get_env_pgdata_or_exit(options.pgSetup.pgdata);
+	}
 
-		if (pgdata == NULL)
-		{
-			log_fatal("Failed to get PGDATA either from the environment "
-					  "or from --pgdata");
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-
-		strlcpy(options.pgSetup.pgdata, pgdata, MAXPGPATH);
+	if (!keeper_config_set_pathnames_from_pgdata(&(options.pathnames),
+												 options.pgSetup.pgdata))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
 	keeperOptions = options;
@@ -785,23 +774,73 @@ cli_show_uri(int argc, char **argv)
 static void
 cli_show_formation_uri(int argc, char **argv)
 {
-	KeeperConfig config = keeperOptions;
-	Monitor monitor = { 0 };
-	char postgresUri[MAXCONNINFO];
+	KeeperConfig kconfig = keeperOptions;
 
-	/* when --formation is missing, use the default value */
-	if (IS_EMPTY_STRING_BUFFER(config.formation))
+	switch (ProbeConfigurationFileRole(kconfig.pathnames.config))
 	{
-		strlcpy(config.formation, FORMATION_DEFAULT, NAMEDATALEN);
-	}
+		case PG_AUTOCTL_ROLE_MONITOR:
+		{
+			Monitor monitor = { 0 };
+			MonitorConfig mconfig = { 0 };
 
-	if (!monitor_init_from_pgsetup(&monitor, &config.pgSetup))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_ARGS);
-	}
+			bool missingPgdataIsOk = true;
+			bool pgIsNotRunningIsOk = true;
+			char connInfo[MAXCONNINFO];
 
-	(void) print_monitor_and_formation_uri(&config, &monitor, stdout);
+			if (!monitor_config_init_from_pgsetup(&mconfig,
+												  &kconfig.pgSetup,
+												  missingPgdataIsOk,
+												  pgIsNotRunningIsOk))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_PGCTL);
+			}
+
+			if (!monitor_config_get_postgres_uri(&mconfig, connInfo, MAXCONNINFO))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
+
+			if (!monitor_init(&monitor, connInfo))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
+
+			(void) print_monitor_and_formation_uri(&kconfig, &monitor, stdout);
+			break;
+		}
+
+		case PG_AUTOCTL_ROLE_KEEPER:
+		{
+			Monitor monitor = { 0 };
+			bool monitorDisabledIsOk = false;
+
+			if (!keeper_config_read_file_skip_pgsetup(&kconfig,
+													  monitorDisabledIsOk))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
+
+			if (!monitor_init(&monitor, kconfig.monitor_pguri))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
+
+			(void) print_monitor_and_formation_uri(&kconfig, &monitor, stdout);
+			break;
+		}
+
+		default:
+		{
+			log_fatal("Unrecognized configuration file \"%s\"",
+					  kconfig.pathnames.config);
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+	}
 }
 
 
@@ -813,13 +852,6 @@ static void
 cli_show_all_uri(int argc, char **argv)
 {
 	KeeperConfig kconfig = keeperOptions;
-
-	if (!keeper_config_set_pathnames_from_pgdata(&kconfig.pathnames,
-												 kconfig.pgSetup.pgdata))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_CONFIG);
-	}
 
 	switch (ProbeConfigurationFileRole(kconfig.pathnames.config))
 	{
@@ -840,12 +872,20 @@ cli_show_all_uri(int argc, char **argv)
 				exit(EXIT_CODE_PGCTL);
 			}
 
-			pg_setup_get_local_connection_string(&(mconfig.pgSetup), connInfo);
+			if (!monitor_config_get_postgres_uri(&mconfig, connInfo, MAXCONNINFO))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
+
 			monitor_init(&monitor, connInfo);
 
 			if (outputJSON)
 			{
+				const char *sslMode = mconfig.pgSetup.ssl.sslModeStr;
+
 				if (!monitor_print_every_formation_uri_as_json(&monitor,
+															   sslMode,
 															   stdout))
 				{
 					log_fatal("Failed to get the list of formation URIs");
@@ -854,7 +894,9 @@ cli_show_all_uri(int argc, char **argv)
 			}
 			else
 			{
-				if (!monitor_print_every_formation_uri(&monitor))
+				const char *sslMode = mconfig.pgSetup.ssl.sslModeStr;
+
+				if (!monitor_print_every_formation_uri(&monitor, sslMode))
 				{
 					log_fatal("Failed to get the list of formation URIs");
 					exit(EXIT_CODE_MONITOR);
@@ -868,7 +910,6 @@ cli_show_all_uri(int argc, char **argv)
 		{
 			Monitor monitor = { 0 };
 			bool monitorDisabledIsOk = false;
-			char value[BUFSIZE];
 
 			if (!keeper_config_read_file_skip_pgsetup(
 					&kconfig,
@@ -913,6 +954,7 @@ print_monitor_and_formation_uri(KeeperConfig *config,
 
 	if (!monitor_formation_uri(monitor,
 							   config->formation,
+							   config->pgSetup.ssl.sslModeStr,
 							   postgresUri,
 							   MAXCONNINFO))
 	{
@@ -935,7 +977,7 @@ print_monitor_and_formation_uri(KeeperConfig *config,
 	}
 	else
 	{
-		fprintf(stdout, "%s\n", postgresUri);
+		fformat(stdout, "%s\n", postgresUri);
 	}
 }
 
@@ -1111,16 +1153,7 @@ cli_show_file_getopts(int argc, char **argv)
 
 	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 	{
-		char *pgdata = getenv("PGDATA");
-
-		if (pgdata == NULL)
-		{
-			log_fatal("Failed to get PGDATA either from the environment "
-					  "or from --pgdata");
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-
-		strlcpy(options.pgSetup.pgdata, pgdata, MAXPGPATH);
+		get_env_pgdata_or_exit(options.pgSetup.pgdata);
 	}
 
 	if (!keeper_config_set_pathnames_from_pgdata(&options.pathnames,
@@ -1173,7 +1206,7 @@ cli_show_file(int argc, char **argv)
 
 			serialized_string = json_serialize_to_string_pretty(js);
 
-			fprintf(stdout, "%s\n", serialized_string);
+			fformat(stdout, "%s\n", serialized_string);
 
 			json_free_serialized_string(serialized_string);
 			json_value_free(js);
@@ -1193,7 +1226,7 @@ cli_show_file(int argc, char **argv)
 			}
 			else
 			{
-				fprintf(stdout, "%s\n", config.pathnames.config);
+				fformat(stdout, "%s\n", config.pathnames.config);
 			}
 			break;
 		}
@@ -1222,7 +1255,7 @@ cli_show_file(int argc, char **argv)
 			}
 			else
 			{
-				fprintf(stdout, "%s\n", config.pathnames.state);
+				fformat(stdout, "%s\n", config.pathnames.state);
 			}
 
 			break;
@@ -1255,7 +1288,7 @@ cli_show_file(int argc, char **argv)
 			}
 			else
 			{
-				fprintf(stdout, "%s\n", config.pathnames.init);
+				fformat(stdout, "%s\n", config.pathnames.init);
 			}
 
 			break;
@@ -1279,7 +1312,7 @@ cli_show_file(int argc, char **argv)
 			}
 			else
 			{
-				fprintf(stdout, "%s\n", config.pathnames.pid);
+				fformat(stdout, "%s\n", config.pathnames.pid);
 			}
 
 			break;
@@ -1306,7 +1339,7 @@ fprint_file_contents(const char *filename)
 
 	if (read_file(filename, &contents, &size))
 	{
-		fprintf(stdout, "%s\n", contents);
+		fformat(stdout, "%s\n", contents);
 		return true;
 	}
 	else
