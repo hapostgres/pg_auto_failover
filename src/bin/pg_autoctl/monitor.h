@@ -17,10 +17,11 @@
 #include "state.h"
 
 
-/* interface to the monitor */
+/* the monitor manages a postgres server running the pgautofailover extension */
 typedef struct Monitor
 {
 	PGSQL pgsql;
+	MonitorConfig config;
 } Monitor;
 
 typedef struct MonitorAssignedState
@@ -51,6 +52,7 @@ typedef struct MonitorExtensionVersion
 } MonitorExtensionVersion;
 
 bool monitor_init(Monitor *monitor, char *url);
+bool monitor_local_init(Monitor *monitor);
 void monitor_finish(Monitor *monitor);
 
 void printNodeHeader(int maxNodeNameSize);

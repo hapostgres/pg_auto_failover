@@ -413,7 +413,8 @@ get_pgpid(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 
 	join_path_components(pidfile, pgSetup->pgdata, "postmaster.pid");
 
-	if (!read_file(pidfile, &contents, &fileSize))
+	if (!file_exists(pidfile)
+		|| !read_file(pidfile, &contents, &fileSize))
 	{
 		if (!pg_is_not_running_is_ok)
 		{
@@ -525,7 +526,7 @@ read_pg_pidfile(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 
 			if (kill(pgSetup->pidFile.pid, 0) != 0)
 			{
-				log_error("Postgres pidfile contains pid %ld, "
+				log_error("Postgres pidfile contains pid %d, "
 						  "which is not running", pgSetup->pidFile.pid);
 
 				/* well then reset the PID to our unknown value */
@@ -573,7 +574,7 @@ read_pg_pidfile(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 	}
  	fclose(fp);
 
-	log_trace("read_pg_pidfile: pid %ld, port %d, host %s, status \"%s\"",
+	log_trace("read_pg_pidfile: pid %d, port %d, host %s, status \"%s\"",
 			  pgSetup->pidFile.pid,
 			  pgSetup->pidFile.port,
 			  pgSetup->pghost,
@@ -596,7 +597,7 @@ fprintf_pg_setup(FILE *stream, PostgresSetup *pgSetup)
 	fformat(stream, "pghost:             %s\n", pgSetup->pghost);
 	fformat(stream, "pgport:             %d\n", pgSetup->pgport);
 	fformat(stream, "proxyport:          %d\n", pgSetup->proxyport);
-	fformat(stream, "pid:                %ld\n", pgSetup->pidFile.pid);
+	fformat(stream, "pid:                %d\n", pgSetup->pidFile.pid);
 	fformat(stream, "is in recovery:     %s\n",
 			pgSetup->is_in_recovery ? "yes" : "no");
 	fformat(stream, "Control Version:    %u\n",

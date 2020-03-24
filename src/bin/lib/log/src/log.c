@@ -25,6 +25,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "snprintf.h"
 
@@ -123,7 +124,10 @@ void log_log(int level, const char *file, int line, const char *fmt, ...)
 
 	if (L.useColors)
 	{
-		pg_fprintf(stderr, "%s %s%-5s\x1b[0m ", buf, level_colors[level],
+		pg_fprintf(stderr, "%s %d %s%-5s\x1b[0m ",
+				   buf,
+				   getpid(),
+				   level_colors[level],
 				   level_names[level]);
 
 		if (showLineNumber)
@@ -133,7 +137,7 @@ void log_log(int level, const char *file, int line, const char *fmt, ...)
 	}
 	else
 	{
-		pg_fprintf(stderr, "%s %-5s ", buf, level_names[level]);
+		pg_fprintf(stderr, "%s %d %-5s ", buf, getpid(), level_names[level]);
 
 		if (showLineNumber)
 		{
@@ -152,7 +156,8 @@ void log_log(int level, const char *file, int line, const char *fmt, ...)
     va_list args;
     char buf[32];
     buf[strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", lt)] = '\0';
-    pg_fprintf(L.fp, "%s %-5s %s:%d: ", buf, level_names[level], file, line);
+    pg_fprintf(L.fp, "%s %d %-5s %s:%d: ",
+			   buf, getpid(), level_names[level], file, line);
     va_start(args, fmt);
     pg_vfprintf(L.fp, fmt, args);
     va_end(args);

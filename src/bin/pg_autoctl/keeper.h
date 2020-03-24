@@ -56,8 +56,4 @@ bool keeper_init_state_read(Keeper *keeper, KeeperStateInit *initState);
 bool keeper_state_as_json(Keeper *keeper, char *json, int size);
 bool keeper_init_state_discover(Keeper *keeper, KeeperStateInit *initState);
 
-/* loop.c */
-bool keeper_start_node_active_process(Keeper *keeper, pid_t *nodeActivePid);
-bool keeper_node_active_loop(Keeper *keeper, pid_t start_pid);
-
 #endif /* KEEPER_H */

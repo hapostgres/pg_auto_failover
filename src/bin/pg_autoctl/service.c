@@ -27,34 +27,200 @@
 #include "signals.h"
 #include "string_utils.h"
 
+static bool service_init(const char *pidfile, pid_t *pid);
+
+static bool service_supervisor(
+	pid_t start_pid,
+	Service services[],
+	int serviceCount,
+	const char *pidfile);
+
+static bool service_find_subprocess(
+	Service services[],
+	int serviceCount,
+	pid_t pid,
+	Service **result);
+
+static void service_quit_other_subprocesses(
+	pid_t pid,
+	Service services[],
+	int serviceCount);
+
 
 /*
- * monitor_service_init initialises a PID file for the monitor process.
+ * service_start starts given services as sub-processes and then supervise
+ * them.
  */
 bool
-monitor_service_init(MonitorConfig *config, pid_t *pid)
+service_start(Service services[], int serviceCount, const char *pidfile)
 {
-	log_trace("monitor_service_init");
+	pid_t start_pid = 0;
+	int serviceIndex = 0;
 
-	/* Establish a handler for signals. */
-	(void) set_signal_handlers();
-
-	/* Check that the keeper service is not already running */
-	if (read_pidfile(config->pathnames.pid, pid))
+	/*
+	 * Create our PID file, or quit now if another pg_autoctl instance is
+	 * runnning.
+	 */
+	if (!service_init(pidfile, &start_pid))
 	{
-		log_fatal("An instance of this keeper is already running with PID %d, "
-				  "as seen in pidfile \"%s\"",
-				  *pid, config->pathnames.pid);
+		log_fatal("Failed to setup pg_autoctl pidfile and signal handlers");
 		return false;
 	}
 
-	/* Ok, we're going to start. Time to create our PID file. */
-	*pid = getpid();
-
-	if (!create_pidfile(config->pathnames.pid, *pid))
+	/*
+	 * Start all the given services, in order.
+	 *
+	 * If we fail to start one of the given services, then we SIGQUIT the
+	 * services we managed to start before, in reverse order of starting-up,
+	 * and stop here.
+	 */
+	for (serviceIndex=0; serviceIndex < serviceCount; serviceIndex++)
 	{
-		log_fatal("Failed to write our PID to \"%s\"", config->pathnames.pid);
-		return false;
+		Service *service = &(services[serviceIndex]);
+		bool started = false;
+
+		log_info("Starting pg_autoctl %s service", service->name);
+
+		started = (*service->startFunction)(service->context, &(service->pid));
+
+		if (!started)
+		{
+			/* SIGQUIT the processes that started successfully */
+			int idx = 0;
+
+			log_error("Failed to start service %s, "
+					  "stopping already started services and pg_autoctl",
+					  service->name);
+
+			for (idx = serviceIndex-1; idx > 0; idx--)
+			{
+				if (kill(services[idx].pid, SIGQUIT) != 0)
+				{
+					log_error("Failed to send SIGQUIT to service %s with pid %d",
+							  services[idx].name, services[idx].pid);
+				}
+			}
+
+			/* we return false always, even if service_stop is successful */
+			(void) service_stop(pidfile);
+
+			return false;
+		}
+	}
+
+	/* now supervise sub-processes and implement retry strategy */
+	if (!service_supervisor(start_pid, services, serviceCount, pidfile))
+	{
+		log_fatal("Something went wrong in sub-process supervision, "
+				  "stopping now. See above for details.");
+	}
+
+	return service_stop(pidfile);
+}
+
+
+/*
+ * service_supervisor calls waitpid() in a loop until the sub processes that
+ * implement our main activities have stopped, and then it cleans-up the PID
+ * file.
+ */
+static bool
+service_supervisor(pid_t start_pid,
+				   Service services[],
+				   int serviceCount,
+				   const char *pidfile)
+{
+	int subprocessCount = serviceCount;
+
+	/* wait until all subprocesses are done */
+	while (subprocessCount > 0)
+	{
+		pid_t pid;
+		int status;
+
+		/* Check that we still own our PID file, or quit now */
+		(void) check_pidfile(pidfile, start_pid);
+
+		/* ignore errors */
+		pid = waitpid(-1, &status, WNOHANG);
+
+		switch (pid)
+		{
+			case -1:
+			{
+				if (errno == ECHILD)
+				{
+					/* no more childrens */
+					if (asked_to_stop || asked_to_stop_fast)
+					{
+						/* off we go */
+						log_info("Internal subprocesses are done, stopping");
+						return true;
+					}
+				}
+				else
+				{
+					log_fatal("Oops, waitpid() failed with: %s",
+							  strerror(errno));
+					return false;
+				}
+			}
+
+			case 0:
+			{
+				/*
+				 * We're using WNOHANG, 0 means there are no stopped or exited
+				 * children, it's all good. It's the expected case when
+				 * everything is running smoothly, so enjoy and sleep for
+				 * awhile.
+				 */
+				sleep(1);
+				break;
+			}
+
+			default:
+			{
+				char *verb = WIFEXITED(status) ? "exited" : "failed";
+				int returnCode = WEXITSTATUS(status);
+				Service *dead = NULL;
+
+				if (!service_find_subprocess(services, serviceCount, pid, &dead))
+				{
+					log_error("Unknown subprocess died with pid %d", pid);
+					break;
+				}
+
+				/* one child process is no more */
+				--subprocessCount;
+
+				if (returnCode == 0)
+				{
+					log_info("Stopped pg_autoctl service %s", dead->name);
+				}
+				else
+				{
+					/* TODO: implement a maxRetry/maxTime restart strategy */
+					bool restarted = false;
+
+					log_error("Subprocess %s %s with exit status %d",
+							  dead->name, verb, returnCode);
+
+					restarted =
+						(*dead->startFunction)(dead->context, &(dead->pid));
+
+					if (!restarted)
+					{
+						log_fatal("Failed to restart service %s", dead->name);
+
+						(void) service_quit_other_subprocesses(dead->pid,
+															   services,
+															   serviceCount);
+					}
+				}
+
+				break;
+			}
+		}
 	}
 
 	return true;
@@ -62,56 +228,88 @@ monitor_service_init(MonitorConfig *config, pid_t *pid)
 
 
 /*
- * keeper_service_init initialises the bits and pieces that the keeper service
- * depend on:
- *
- *  - sets the signal handlers
- *  - check pidfile to see if the service is already running
- *  - creates the pidfile for our service
- *  - clean-up from previous execution
+ * service_get_pid_name loops over the SubProcess array to find given pid and
+ * return its entry in the array.
  */
-bool
-keeper_service_init(Keeper *keeper, pid_t *pid)
+static bool
+service_find_subprocess(Service services[],
+						int serviceCount,
+						pid_t pid,
+						Service **result)
 {
-	KeeperConfig *config = &(keeper->config);
+	int serviceIndex = 0;
 
-	log_trace("keeper_service_init");
+	for (serviceIndex=0; serviceIndex < serviceCount; serviceIndex++)
+	{
+		if (pid == services[serviceIndex].pid)
+		{
+			*result = &(services[serviceIndex]);
+			return true;
+		}
+	}
+
+	return false;
+}
+
+
+/*
+ * service_quit_other_subprocesses sends the QUIT signal to other known
+ * sub-processes when on of does is reported dead.
+ */
+static void
+service_quit_other_subprocesses(pid_t pid, Service services[], int serviceCount)
+{
+	int serviceIndex = 0;
+
+	/*
+	 * In case of unexpected stop (bug), we stop the other processes too.
+	 * Someone might then notice (such as systemd) and restart the whole
+	 * thing again.
+	 */
+	if (!(asked_to_stop || asked_to_stop_fast))
+	{
+		for (serviceIndex=0; serviceIndex < serviceCount; serviceIndex++)
+		{
+			Service target = services[serviceIndex];
+
+			if (pid != target.pid)
+			{
+				if (kill(target.pid, SIGQUIT) != 0)
+				{
+					log_error("Failed to send SIGQUIT to service %s with pid %d",
+							  target.name, target.pid);
+				}
+			}
+		}
+	}
+}
+
+
+/*
+ * service_init initializes our PID file and sets our signal handlers.
+ */
+static bool
+service_init(const char *pidfile, pid_t *pid)
+{
+	log_trace("service_init");
 
 	/* Establish a handler for signals. */
 	(void) set_signal_handlers();
 
 	/* Check that the keeper service is not already running */
-	if (read_pidfile(config->pathnames.pid, pid))
+	if (read_pidfile(pidfile, pid))
 	{
-		log_fatal("An instance of this keeper is already running with PID %d, "
-				  "as seen in pidfile \"%s\"",
-				  *pid, config->pathnames.pid);
+		log_fatal("An instance of pg_autoctl is already running with PID %d, "
+				  "as seen in pidfile \"%s\"", *pid, pidfile);
 		return false;
-	}
-
-	/*
-	 * Check that the init is finished. This function is called from
-	 * cli_service_run when used in the CLI `pg_autoctl run`, and the
-	 * function cli_service_run calls into keeper_init(): we know that we could
-	 * read a keeper state file.
-	 */
-	if (!config->monitorDisabled && file_exists(config->pathnames.init))
-	{
-		log_warn("The `pg_autoctl create` did not complete, completing now.");
-
-		if (!keeper_pg_init_continue(keeper, config))
-		{
-			/* errors have already been logged. */
-			return false;
-		}
 	}
 
 	/* Ok, we're going to start. Time to create our PID file. */
 	*pid = getpid();
 
-	if (!create_pidfile(config->pathnames.pid, *pid))
+	if (!create_pidfile(pidfile, *pid))
 	{
-		log_fatal("Failed to write our PID to \"%s\"", config->pathnames.pid);
+		log_fatal("Failed to write our PID to \"%s\"", pidfile);
 		return false;
 	}
 
@@ -123,13 +321,13 @@ keeper_service_init(Keeper *keeper, pid_t *pid)
  * service_stop stops the service and removes the pid file.
  */
 bool
-service_stop(ConfigFilePaths *pathnames)
+service_stop(const char *pidfile)
 {
-	log_info("pg_autoctl service stopping");
+	log_info("Stop pg_autoctl");
 
-	if (!remove_pidfile(pathnames->pid))
+	if (!remove_pidfile(pidfile))
 	{
-		log_error("Failed to remove pidfile \"%s\"", pathnames->pid);
+		log_error("Failed to remove pidfile \"%s\"", pidfile);
 		return false;
 	}
 	return true;

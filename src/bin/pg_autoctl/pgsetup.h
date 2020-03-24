@@ -39,7 +39,7 @@ typedef struct pg_control_data
  */
 typedef struct pg_pidfile
 {
-	long pid;
+	pid_t pid;
 	unsigned short port;
 } PostgresPIDFile;
 

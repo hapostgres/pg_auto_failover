@@ -204,7 +204,7 @@ keeper_ensure_current_state(Keeper *keeper)
 			}
 			else if (ensure_local_postgres_is_running(postgres))
 			{
-				log_warn("PostgreSQL was not running, restarted with pid %ld",
+				log_warn("PostgreSQL was not running, restarted with pid %d",
 						 pgSetup->pidFile.pid);
 
 				return true;
@@ -233,7 +233,7 @@ keeper_ensure_current_state(Keeper *keeper)
 			}
 			else if (ensure_local_postgres_is_running(postgres))
 			{
-				log_warn("PostgreSQL was not running, restarted with pid %ld",
+				log_warn("PostgreSQL was not running, restarted with pid %d",
 						 pgSetup->pidFile.pid);
 				return true;
 			}

@@ -30,10 +30,11 @@
 #include "monitor.h"
 #include "monitor_config.h"
 #include "monitor_pg_init.h"
-#include "monitor_service.h"
 #include "pgctl.h"
 #include "primary_standby.h"
 #include "service.h"
+#include "service_keeper.h"
+#include "service_monitor.h"
 #include "string_utils.h"
 
 /*
@@ -653,31 +654,32 @@ static void
 cli_create_monitor(int argc, char **argv)
 {
 	Monitor monitor = { 0 };
-	MonitorConfig config = monitorOptions;
-	char connInfo[MAXCONNINFO];
+	MonitorConfig *config = &(monitor.config);
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
+
+	monitor.config = monitorOptions;
 
 	/*
 	 * We support two modes of operations here:
 	 *   - configuration exists already, we need PGDATA
 	 *   - configuration doesn't exist already, we need PGDATA, and more
 	 */
-	if (!monitor_config_set_pathnames_from_pgdata(&config))
+	if (!monitor_config_set_pathnames_from_pgdata(config))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (file_exists(config.pathnames.config))
+	if (file_exists(config->pathnames.config))
 	{
-		MonitorConfig options = config;
+		MonitorConfig options = monitor.config;
 
-		if (!monitor_config_read_file(&config,
+		if (!monitor_config_read_file(config,
 									  missingPgdataIsOk, pgIsNotRunningIsOk))
 		{
 			log_fatal("Failed to read configuration file \"%s\"",
-					  config.pathnames.config);
+					  config->pathnames.config);
 			exit(EXIT_CODE_BAD_CONFIG);
 		}
 
@@ -685,7 +687,7 @@ cli_create_monitor(int argc, char **argv)
 		 * Now that we have loaded the configuration file, apply the command
 		 * line options on top of it, giving them priority over the config.
 		 */
-		if (!monitor_config_merge_options(&config, &options))
+		if (!monitor_config_merge_options(config, &options))
 		{
 			/* errors have been logged already */
 			exit(EXIT_CODE_BAD_CONFIG);
@@ -694,9 +696,9 @@ cli_create_monitor(int argc, char **argv)
 	else
 	{
 		/* Take care of the --nodename */
-		if (IS_EMPTY_STRING_BUFFER(config.nodename))
+		if (IS_EMPTY_STRING_BUFFER(config->nodename))
 		{
-			if (!discover_nodename((char *) (&config.nodename),
+			if (!discover_nodename((char *) (config->nodename),
 								   _POSIX_HOST_NAME_MAX ,
 								   DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME,
 								   DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT))
@@ -720,14 +722,14 @@ cli_create_monitor(int argc, char **argv)
 			 * checks, so we only WARN when finding something that might be
 			 * fishy, and proceed with the setup of the local node anyway.
 			 */
-			(void) check_nodename(config.nodename);
+			(void) check_nodename(config->nodename);
 		}
 
 		/* set our MonitorConfig from the command line options now. */
-		(void) monitor_config_init(&config, missingPgdataIsOk, pgIsNotRunningIsOk);
+		(void) monitor_config_init(config, missingPgdataIsOk, pgIsNotRunningIsOk);
 
 		/* and write our brand new setup to file */
-		if (!monitor_config_write_file(&config))
+		if (!monitor_config_write_file(config))
 		{
 			log_fatal("Failed to write the monitor's configuration file, "
 					  "see above");
@@ -735,11 +737,15 @@ cli_create_monitor(int argc, char **argv)
 		}
 	}
 
-	pg_setup_get_local_connection_string(&(config.pgSetup), connInfo);
-	monitor_init(&monitor, connInfo);
+	/* Initialize our local connection to the monitor */
+	if (!monitor_local_init(&monitor))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_MONITOR);
+	}
 
 	/* Ok, now we know we have a configuration file, and it's been loaded. */
-	if (!monitor_pg_init(&monitor, &config))
+	if (!monitor_pg_init(&monitor))
 	{
 		/* errors have been logged */
 		exit(EXIT_CODE_BAD_STATE);
@@ -749,22 +755,18 @@ cli_create_monitor(int argc, char **argv)
 
 	if (createAndRun)
 	{
-		pid_t pid = 0;
-
-		if (!monitor_service_init(&config, &pid))
+		if (!start_monitor(&monitor))
 		{
-			log_fatal("Failed to initialize pg_auto_failover service, "
+			log_fatal("Failed to start pg_autoctl monitor service, "
 					  "see above for details");
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
-
-		(void) monitor_service_run(&monitor, &config, pid);
 	}
 	else
 	{
-		char postgresUri[MAXCONNINFO];
+		char postgresUri[MAXCONNINFO] = { 0 };
 
-		if (monitor_config_get_postgres_uri(&config, postgresUri, MAXCONNINFO))
+		if (monitor_config_get_postgres_uri(config, postgresUri, MAXCONNINFO))
 		{
 			log_info("pg_auto_failover monitor is ready at %s", postgresUri);
 		}

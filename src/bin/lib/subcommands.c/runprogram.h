@@ -41,6 +41,11 @@ typedef struct
 	int error;					/* save errno when something's gone wrong */
 	int returnCode;
 
+	bool capture;				/* do we capture output, or redirect it? */
+
+	int stdOutFd;				/* redirect stdout to file descriptor */
+	int stdErrFd;				/* redirect stderr to file descriptor */
+
 	char *stdOut;
 	char *stdErr;
 } Program;
@@ -53,6 +58,7 @@ int snprintf_program_command_line(Program *prog, char *buffer, int size);
 static void read_from_pipes(Program *prog,
 							pid_t childPid, int *outpipe, int *errpipe);
 static size_t read_into_buf(int filedes, PQExpBuffer buffer);
+static void waitprogram(Program *prog, pid_t childPid);
 
 
 /*
@@ -72,6 +78,9 @@ run_program(const char *program, ...)
 	prog.returnCode = -1;
 	prog.error = 0;
 	prog.setsid = false;
+	prog.capture = true;
+	prog.stdOutFd = -1;
+	prog.stdErrFd = -1;
 	prog.stdOut = NULL;
 	prog.stdErr = NULL;
 
@@ -119,6 +128,12 @@ initialize_program(char **args, bool setsid)
 	prog.returnCode = -1;
 	prog.error = 0;
 	prog.setsid = setsid;
+
+	/* this could be changed by the caller before calling execute_program */
+	prog.capture = true;
+	prog.stdOutFd = -1;
+	prog.stdErrFd = -1;
+
 	prog.stdOut = NULL;
 	prog.stdErr = NULL;
 
@@ -156,19 +171,22 @@ execute_program(Program *prog)
 	fflush(stdout);
 	fflush(stderr);
 
-	/* create the pipe now */
-	if (pipe(outpipe) < 0)
+	/* create the output capture pipes now */
+	if (prog->capture)
 	{
-		prog->returnCode = -1;
-		prog->error = errno;
-		return;
-	}
+		if (pipe(outpipe) < 0)
+		{
+			prog->returnCode = -1;
+			prog->error = errno;
+			return;
+		}
 
-	if (pipe(errpipe) < 0)
-	{
-		prog->returnCode = -1;
-		prog->error = errno;
-		return;
+		if (pipe(errpipe) < 0)
+		{
+			prog->returnCode = -1;
+			prog->error = errno;
+			return;
+		}
 	}
 
 	pid = fork();
@@ -195,14 +213,27 @@ execute_program(Program *prog)
 			int stdIn = open(DEV_NULL, O_RDONLY);
 
 			dup2(stdIn, STDIN_FILENO);
-			dup2(outpipe[1], STDOUT_FILENO);
-			dup2(errpipe[1], STDERR_FILENO);
-
 			close(stdIn);
-			close(outpipe[0]);
-			close(outpipe[1]);
-			close(errpipe[0]);
-			close(errpipe[1]);
+
+			/*
+			 * Prepare either for capture the output in pipes, or redirect to
+			 * the given open file descriptors.
+			 */
+			if (prog->capture)
+			{
+				dup2(outpipe[1], STDOUT_FILENO);
+				dup2(errpipe[1], STDERR_FILENO);
+
+				close(outpipe[0]);
+				close(outpipe[1]);
+				close(errpipe[0]);
+				close(errpipe[1]);
+			}
+			else
+			{
+				dup2(prog->stdOutFd, STDOUT_FILENO);
+				dup2(prog->stdErrFd, STDERR_FILENO);
+			}
 
 			/*
 			 * When asked to do so, before creating the child process, we call
@@ -235,7 +266,14 @@ execute_program(Program *prog)
 		default:
 		{
 			/* fork succeeded, in parent */
-			read_from_pipes(prog, pid, outpipe, errpipe);
+			if (prog->capture)
+			{
+				read_from_pipes(prog, pid, outpipe, errpipe);
+			}
+			else
+			{
+				(void) waitprogram(prog, pid);
+			}
 			return;
 		}
 	}
@@ -278,7 +316,6 @@ static void
 read_from_pipes(Program *prog, pid_t childPid, int *outpipe, int *errpipe)
 {
 	bool doneReading = false;
-	int status;
 	int countFdsReadyToRead, nfds; /* see man select(3) */
 	fd_set readFileDescriptorSet;
 	ssize_t bytes_out = BUFSIZE, bytes_err = BUFSIZE;
@@ -386,9 +423,21 @@ read_from_pipes(Program *prog, pid_t childPid, int *outpipe, int *errpipe)
 	destroyPQExpBuffer(outbuf);
 	destroyPQExpBuffer(errbuf);
 
-	/*
-	 * Now, wait until the child process is done.
-	 */
+	/* now, wait until the child process is done. */
+	(void) waitprogram(prog, childPid);
+
+	return;
+}
+
+
+/*
+ * Wait until our Program is done.
+ */
+static void
+waitprogram(Program *prog, pid_t childPid)
+{
+	int status;
+
 	do
 	{
 		if (waitpid(childPid, &status, WUNTRACED) == -1)
@@ -401,10 +450,7 @@ read_from_pipes(Program *prog, pid_t childPid, int *outpipe, int *errpipe)
 	while (!WIFEXITED(status) && !WIFSIGNALED(status));
 
 	prog->returnCode = WEXITSTATUS(status);
-
-	return;
 }
-
 
 /*
  * Read from a file descriptor and directly appends to our buffer string.

@@ -12,6 +12,8 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "postgres_fe.h"		/* pqsignal, portable sigaction wrapper */
+
 #include "defaults.h"
 #include "log.h"
 #include "signals.h"
@@ -30,10 +32,10 @@ void
 set_signal_handlers()
 {
 	/* Establish a handler for signals. */
-	signal (SIGHUP, catch_reload);
-	signal (SIGINT, catch_int);
-	signal (SIGTERM, catch_term);
-	signal (SIGQUIT, catch_quit);
+	pqsignal(SIGHUP, catch_reload);
+	pqsignal(SIGINT, catch_int);
+	pqsignal(SIGTERM, catch_term);
+	pqsignal(SIGQUIT, catch_quit);
 }
 
 /*

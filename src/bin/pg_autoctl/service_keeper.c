@@ -24,6 +24,7 @@
 #include "pgctl.h"
 #include "state.h"
 #include "service.h"
+#include "service_keeper.h"
 #include "signals.h"
 #include "string_utils.h"
 
@@ -34,6 +35,25 @@ static bool is_network_healthy(Keeper *keeper);
 static bool in_network_partition(KeeperStateData *keeperState, uint64_t now,
 								 int networkPartitionTimeout);
 static void reload_configuration(Keeper *keeper);
+
+
+/*
+ * keeper_service_start starts the keeper processes: the node_active main loop
+ * and depending on the current state the Postgres instance.
+ */
+bool
+keep_service_start(Keeper *keeper)
+{
+	pid_t pid = getpid();
+	pid_t postgresPid = 0;
+	pid_t nodeActivePid = 0;
+
+	(void) pid;
+	(void) postgresPid;
+	(void) nodeActivePid;
+
+	return false;
+}
 
 
 /*
@@ -378,7 +398,7 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		}
 	}
 
-	return service_stop(&(keeper->config.pathnames));
+	return service_stop(keeper->config.pathnames.pid);
 }
 
 
@@ -509,4 +529,62 @@ reload_configuration(Keeper *keeper)
 
 	/* we're done reloading now. */
 	asked_to_reload = 0;
+}
+
+
+/*
+ * keeper_service_init initialises the bits and pieces that the keeper service
+ * depend on:
+ *
+ *  - sets the signal handlers
+ *  - check pidfile to see if the service is already running
+ *  - creates the pidfile for our service
+ *  - clean-up from previous execution
+ */
+bool
+keeper_service_init(Keeper *keeper, pid_t *pid)
+{
+	KeeperConfig *config = &(keeper->config);
+
+	log_trace("keeper_service_init");
+
+	/* Establish a handler for signals. */
+	(void) set_signal_handlers();
+
+	/* Check that the keeper service is not already running */
+	if (read_pidfile(config->pathnames.pid, pid))
+	{
+		log_fatal("An instance of this keeper is already running with PID %d, "
+				  "as seen in pidfile \"%s\"",
+				  *pid, config->pathnames.pid);
+		return false;
+	}
+
+	/*
+	 * Check that the init is finished. This function is called from
+	 * cli_service_run when used in the CLI `pg_autoctl run`, and the
+	 * function cli_service_run calls into keeper_init(): we know that we could
+	 * read a keeper state file.
+	 */
+	if (!config->monitorDisabled && file_exists(config->pathnames.init))
+	{
+		log_warn("The `pg_autoctl create` did not complete, completing now.");
+
+		if (!keeper_pg_init_continue(keeper, config))
+		{
+			/* errors have already been logged. */
+			return false;
+		}
+	}
+
+	/* Ok, we're going to start. Time to create our PID file. */
+	*pid = getpid();
+
+	if (!create_pidfile(config->pathnames.pid, *pid))
+	{
+		log_fatal("Failed to write our PID to \"%s\"", config->pathnames.pid);
+		return false;
+	}
+
+	return true;
 }

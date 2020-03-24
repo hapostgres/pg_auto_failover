@@ -65,8 +65,9 @@ static bool check_monitor_settings(PostgresSetup pgSetup);
  * existing cluster.
  */
 bool
-monitor_pg_init(Monitor *monitor, MonitorConfig *config)
+monitor_pg_init(Monitor *monitor)
 {
+	MonitorConfig *config = &(monitor->config);
 	char configFilePath[MAXPGPATH];
 	PostgresSetup *pgSetup = &(config->pgSetup);
 

@@ -23,8 +23,9 @@
 #include "keeper.h"
 #include "monitor.h"
 #include "monitor_config.h"
-#include "monitor_service.h"
 #include "service.h"
+#include "service_keeper.h"
+#include "service_monitor.h"
 #include "signals.h"
 
 static int stop_signal = SIGTERM;
@@ -161,7 +162,7 @@ cli_keeper_run(int argc, char **argv)
 		 * At the moment, we have nothing to do here. Later we might want to
 		 * open an HTTPd service and wait for API calls.
 		 */
-		(void) service_stop(&(keeper.config.pathnames));
+		/* (void) service_stop(keeper.config.pathnames.pid); */
 	}
 	else
 	{
@@ -186,15 +187,12 @@ static void
 cli_monitor_run(int argc, char **argv)
 {
 	KeeperConfig options = keeperOptions;
-	MonitorConfig mconfig = { 0 };
 	Monitor monitor = { 0 };
 	bool missingPgdataIsOk = false;
 	bool pgIsNotRunningIsOk = true;
-	char connInfo[MAXCONNINFO];
-	pid_t pid = 0;
 
 	/* Prepare MonitorConfig from the CLI options fed in options */
-	if (!monitor_config_init_from_pgsetup(&mconfig,
+	if (!monitor_config_init_from_pgsetup(&(monitor.config),
 										  &options.pgSetup,
 										  missingPgdataIsOk,
 										  pgIsNotRunningIsOk))
@@ -203,18 +201,20 @@ cli_monitor_run(int argc, char **argv)
 		exit(EXIT_CODE_PGCTL);
 	}
 
-	if (!monitor_service_init(&mconfig, &pid))
+	/* Initialize our local connection to the monitor */
+	if (!monitor_local_init(&monitor))
 	{
-		log_fatal("Failed to initialize pg_auto_failover service, "
-				  "see above for details");
-		exit(EXIT_CODE_KEEPER);
+		/* errors have already been logged */
+		exit(EXIT_CODE_MONITOR);
 	}
 
-	/* Initialize our local connection to the monitor */
-	pg_setup_get_local_connection_string(&(mconfig.pgSetup), connInfo);
-	monitor_init(&monitor, connInfo);
-
-	(void) monitor_service_run(&monitor, &mconfig, pid);
+	/* Start the monitor service */
+	if (!start_monitor(&monitor))
+	{
+		log_fatal("Failed to start pg_autoctl monitor service, "
+				  "see above for details");
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
 }
 
 

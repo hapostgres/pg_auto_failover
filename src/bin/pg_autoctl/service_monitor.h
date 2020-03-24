@@ -15,14 +15,8 @@
 #include "pgsql.h"
 #include "monitor_config.h"
 
-bool monitor_start_listen_process(Monitor *monitor,
-								  MonitorConfig *mconfig,
-								  pid_t *listenPid);
-
-bool ensure_monitor_pg_running(Monitor *monitor, MonitorConfig *mconfig);
-
-bool monitor_service_run(Monitor *monitor,
-						 MonitorConfig *mconfig,
-						 pid_t start_pid);
+bool start_monitor(Monitor *monitor);
+bool service_monitor_start(void *context, pid_t *pid);
+bool monitor_service_run(Monitor *monitor);
 
 #endif /* MONITOR_SERVICE_H */

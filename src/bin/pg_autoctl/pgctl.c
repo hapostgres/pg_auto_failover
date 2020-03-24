@@ -912,6 +912,97 @@ pg_ctl_start(const char *pg_ctl,
 
 
 /*
+ * pg_ctl_postmaster runs the "postmaster" command-line in the current process,
+ * with the same options as we would use in pg_ctl_start. pg_ctl_postmaster
+ * does not fork a Postgres process in the background, we keep the control over
+ * the postmaster process. Think exec() rather then fork().
+ */
+bool
+pg_ctl_postgres(const char *pg_ctl, const char *pgdata, int pgport,
+				char *listen_addresses)
+{
+	Program program;
+	char postgres[MAXPGPATH];
+	char logfile[MAXPGPATH];
+	int logFileDescriptor = -1;
+
+	char *args[12];
+	int argsIndex = 0;
+
+	char env_pg_regress_sock_dir[MAXPGPATH];
+
+	char command[BUFSIZE];
+	int commandSize = 0;
+
+	/* call postgres directly */
+	path_in_same_directory(pg_ctl, "postgres", postgres);
+
+	/* prepare startup.log file in PGDATA */
+	join_path_components(logfile, pgdata, "startup.log");
+
+	args[argsIndex++] = (char *) postgres;
+	args[argsIndex++] = "-D";
+	args[argsIndex++] = (char *) pgdata;
+	args[argsIndex++] = "-p";
+	args[argsIndex++] = (char *) intToString(pgport).strValue;
+
+	if (!IS_EMPTY_STRING_BUFFER(listen_addresses))
+	{
+		args[argsIndex++] = "-h";
+		args[argsIndex++] = (char *) listen_addresses;
+	}
+
+	if (env_exists("PG_REGRESS_SOCK_DIR"))
+	{
+		if (!get_env_copy("PG_REGRESS_SOCK_DIR", env_pg_regress_sock_dir,
+						  MAXPGPATH))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
+		/* pg_ctl --options can be specified multiple times */
+		args[argsIndex++] = "-k";
+		args[argsIndex++] = (char *) env_pg_regress_sock_dir;
+	}
+
+	args[argsIndex] = NULL;
+
+	/* we do not want to call setsid() when running this program. */
+	program = initialize_program(args, false);
+
+	/* we want to redirect the output to logfile */
+	logFileDescriptor = open(logfile, FOPEN_FLAGS_A, 0644);
+
+	if (logFileDescriptor == -1)
+	{
+		log_error("Failed to open file \"%s\": %m", logfile);
+	}
+
+	program.capture = false;	/* redirect output, don't capture */
+	program.stdOutFd = logFileDescriptor;
+	program.stdErrFd = logFileDescriptor;
+
+	/* log the exact command line we're using */
+	commandSize = snprintf_program_command_line(&program, command, BUFSIZE);
+
+	if (commandSize >= BUFSIZE)
+	{
+		/* we only display the first BUFSIZE bytes of the real command */
+		log_info("%s...", command);
+	}
+	else
+	{
+		log_info("%s", command);
+	}
+
+	(void) execute_program(&program);
+
+	return program.returnCode == 0;
+}
+
+
+/*
  * pg_ctl_stop tries to stop a PostgreSQL server by running a "pg_ctl stop"
  * command. If the server was stopped successfully, or if the server is not
  * running at all, it returns true.

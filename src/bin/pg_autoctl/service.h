@@ -17,10 +17,19 @@
 #include "monitor.h"
 #include "monitor_config.h"
 
-bool monitor_service_init(MonitorConfig *config, pid_t *pid);
-bool keeper_service_init(Keeper *keeper, pid_t *pid);
+typedef bool (*ServiceStartFunction)(void *context, pid_t *pid);
 
-bool service_stop(ConfigFilePaths *pathnames);
+typedef struct Service
+{
+	char name[NAMEDATALEN];				/* Service name for the user */
+	pid_t pid;							/* Service PID */
+	ServiceStartFunction startFunction; /* how to re-start the service */
+	void *context;			   /* Service Context (Monitor or Keeper struct) */
+} Service;
+
+bool service_start(Service services[], int serviceCount, const char *pidfile);
+
+bool service_stop(const char *pidfile);
 
 bool create_pidfile(const char *pidfile, pid_t pid);
 bool read_pidfile(const char *pidfile, pid_t *pid);
