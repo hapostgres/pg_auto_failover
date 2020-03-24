@@ -17,6 +17,7 @@
 
 bool start_monitor(Monitor *monitor);
 bool service_monitor_start(void *context, pid_t *pid);
+bool service_monitor_stop(void *context);
 bool monitor_service_run(Monitor *monitor);
 
 #endif /* MONITOR_SERVICE_H */

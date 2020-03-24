@@ -46,7 +46,7 @@ catch_reload(int sig)
 {
 	asked_to_reload = 1;
 	log_warn("Received signal %s", strsignal(sig));
-	signal(sig, catch_reload);
+	pqsignal(sig, catch_reload);
 }
 
 
@@ -58,7 +58,7 @@ catch_int(int sig)
 {
 	asked_to_stop_fast = 1;
 	log_warn("Fast shutdown: received signal %s", strsignal(sig));
-	signal(sig, catch_int);
+	pqsignal(sig, catch_int);
 }
 
 
@@ -70,7 +70,7 @@ catch_term(int sig)
 {
 	asked_to_stop = 1;
 	log_warn("Smart shutdown: received signal %s", strsignal(sig));
-	signal(sig, catch_term);
+	pqsignal(sig, catch_term);
 }
 
 

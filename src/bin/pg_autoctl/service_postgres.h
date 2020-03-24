@@ -16,5 +16,6 @@
 #include "keeper_config.h"
 
 bool service_postgres_start(void *context, pid_t *pid);
+bool service_postgres_stop(void *context);
 
 #endif /* POSTGRES_SERVICE_H */

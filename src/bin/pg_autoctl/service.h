@@ -17,13 +17,36 @@
 #include "monitor.h"
 #include "monitor_config.h"
 
+/*
+ * When a process exits normally (exit code status 0), we shut down all the
+ * other processes by calling their stopFunction.
+ *
+ * When say `postgres` exits cleanly, we need to decide if we're happy with the
+ * situation (we asked for it) or not (something happened, please restart
+ * Postgres).
+ */
+extern bool shutdownSequenceInProgress;
+
+/*
+ * start and stop function used in the struct Service.
+ *
+ * start functions get passed a context that is manually provided in the
+ * structure, typically a Monitor struct pointer for the monitor service and a
+ * Keeper struct pointer for a keeper service.
+ *
+ * stop functions get passed a context that is a pointer to the Service struct
+ * definition of the service being asked to stop, and we use a void * data type
+ * here to break out of a mutual recursive definition.
+ */
 typedef bool (*ServiceStartFunction)(void *context, pid_t *pid);
+typedef bool (*ServiceStopFunction)(void *context);
 
 typedef struct Service
 {
 	char name[NAMEDATALEN];				/* Service name for the user */
 	pid_t pid;							/* Service PID */
-	ServiceStartFunction startFunction; /* how to re-start the service */
+	ServiceStartFunction startFunction;	/* how to re-start the service */
+	ServiceStopFunction stopFunction;	/* how to stop the service */
 	void *context;			   /* Service Context (Monitor or Keeper struct) */
 } Service;
 

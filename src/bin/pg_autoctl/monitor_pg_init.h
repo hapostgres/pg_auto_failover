@@ -16,5 +16,6 @@
 #include "monitor_config.h"
 
 bool monitor_pg_init(Monitor *monitor);
+bool monitor_pg_init_finish(Monitor *monitor);
 
 #endif /* MONITOR_PG_INIT_H */

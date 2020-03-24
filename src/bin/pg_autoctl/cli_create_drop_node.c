@@ -751,25 +751,10 @@ cli_create_monitor(int argc, char **argv)
 		exit(EXIT_CODE_BAD_STATE);
 	}
 
-	log_info("Monitor has been succesfully initialized.");
-
-	if (createAndRun)
+	if (!monitor_pg_init_finish(&monitor))
 	{
-		if (!start_monitor(&monitor))
-		{
-			log_fatal("Failed to start pg_autoctl monitor service, "
-					  "see above for details");
-			exit(EXIT_CODE_INTERNAL_ERROR);
-		}
-	}
-	else
-	{
-		char postgresUri[MAXCONNINFO] = { 0 };
-
-		if (monitor_config_get_postgres_uri(config, postgresUri, MAXCONNINFO))
-		{
-			log_info("pg_auto_failover monitor is ready at %s", postgresUri);
-		}
+		/* errors have been logged */
+		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 }
 

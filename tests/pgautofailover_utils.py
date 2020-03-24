@@ -750,7 +750,7 @@ class MonitorNode(PGNode):
             self.nodename = str(self.vnode.address)
 
 
-    def create(self, run = False):
+    def create(self, run=False):
         """
         Initializes and runs the monitor process.
         """

@@ -35,13 +35,25 @@ start_monitor(Monitor *monitor)
 	PostgresSetup *pgSetup = &config->pgSetup;
 
 	Service subprocesses[] = {
-		{ "postgres", 0, &service_postgres_start, (void *) pgSetup },
-		{ "listener", 0, &service_monitor_start, (void *) monitor }
+		{
+			"postgres",
+			0,
+			&service_postgres_start,
+			&service_postgres_stop,
+			(void *) pgSetup
+		},
+		{
+			"listener",
+			0,
+			&service_monitor_start,
+			&service_monitor_stop,
+			(void *) monitor
+		}
 	};
 
 	int subprocessesCount = sizeof(subprocesses) / sizeof(subprocesses[0]);
 
-	if(!service_start(subprocesses, subprocessesCount, config->pathnames.pid))
+	if (!service_start(subprocesses, subprocessesCount, config->pathnames.pid))
 	{
 		/* errors have already been logged */
 		return false;
@@ -51,11 +63,6 @@ start_monitor(Monitor *monitor)
 	return true;
 }
 
-/* XXX TODO
- *
- * - refactor the keeper service
- * - implement postgres supervision with the keeper state
- */
 
 /*
  * service_monitor_start starts a sub-process that listens to the monitor
@@ -86,7 +93,6 @@ service_monitor_start(void *context, pid_t *pid)
 		{
 			/* fork succeeded, in child */
 			(void) set_ps_title("listener");
-
 			(void) monitor_service_run(monitor);
 
 			/*
@@ -163,5 +169,23 @@ monitor_service_run(Monitor *monitor)
 
 	pgsql_finish(&(monitor->pgsql));
 
+	return true;
+}
+
+
+/*
+ * service_monitor_stop stops the pg_autoctl monitor listener service.
+ */
+bool
+service_monitor_stop(void *context)
+{
+	Service *service = (Service *) context;
+
+	if (kill(service->pid, SIGQUIT) != 0)
+	{
+		log_error("Failed to send SIGQUIT to pid %d for service %s",
+				  service->pid, service->name);
+		return false;
+	}
 	return true;
 }

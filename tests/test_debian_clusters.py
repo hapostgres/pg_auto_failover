@@ -16,6 +16,7 @@ def teardown_module():
 def test_000_create_monitor():
     global monitor
     monitor = cluster.create_monitor("/tmp/debian/monitor")
+    monitor.run()
     monitor.wait_until_pg_is_running()
 
 def test_001_custom_single():

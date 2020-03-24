@@ -26,6 +26,7 @@
 #include "pgctl.h"
 #include "pgsql.h"
 #include "pgsetup.h"
+#include "signals.h"
 #include "string_utils.h"
 
 #define RUN_PROGRAM_IMPLEMENTATION
@@ -1015,7 +1016,7 @@ pg_ctl_stop(const char *pg_ctl, const char *pgdata)
 	bool pgdata_exists = false;
 	const bool log_output = true;
 
-	log_debug("%s --pgdata %s --wait stop --mode fast", pg_ctl, pgdata);
+	log_info("%s --pgdata %s --wait stop --mode fast", pg_ctl, pgdata);
 
 	program = run_program(pg_ctl,
 						  "--pgdata", pgdata,

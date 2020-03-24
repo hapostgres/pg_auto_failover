@@ -28,6 +28,8 @@
 #include "signals.h"
 #include "string_utils.h"
 
+bool shutdownSequenceInProgress = false;
+
 static bool service_init(const char *pidfile, pid_t *pid);
 
 static bool service_supervisor(
@@ -42,7 +44,7 @@ static bool service_find_subprocess(
 	pid_t pid,
 	Service **result);
 
-static void service_quit_other_subprocesses(
+static void service_stop_other_subprocesses(
 	pid_t pid,
 	Service services[],
 	int serviceCount);
@@ -86,6 +88,7 @@ service_start(Service services[], int serviceCount, const char *pidfile)
 
 		if (!started)
 		{
+			/* TODO: implement a retry strategy with maxRetries/maxTime */
 			/* SIGQUIT the processes that started successfully */
 			int idx = 0;
 
@@ -196,15 +199,28 @@ service_supervisor(pid_t start_pid,
 
 				if (returnCode == 0)
 				{
-					log_info("Stopped pg_autoctl service %s", dead->name);
+					log_info("pg_autoctl service %s has finished, "
+							 "it was running with pid %d.",
+							 dead->name, dead->pid);
+
+					if (!shutdownSequenceInProgress)
+					{
+						shutdownSequenceInProgress = true;
+
+						(void) service_stop_other_subprocesses(dead->pid,
+															   services,
+															   serviceCount);
+					}
 				}
 				else
 				{
 					/* TODO: implement a maxRetry/maxTime restart strategy */
 					bool restarted = false;
 
-					log_error("Subprocess %s %s with exit status %d",
+					log_error("pg_autoctl service %s %s with exit status %d",
 							  dead->name, verb, returnCode);
+
+					log_info("Restarting pg_autoctl service %s", dead->name);
 
 					restarted =
 						(*dead->startFunction)(dead->context, &(dead->pid));
@@ -213,10 +229,13 @@ service_supervisor(pid_t start_pid,
 					{
 						log_fatal("Failed to restart service %s", dead->name);
 
-						(void) service_quit_other_subprocesses(dead->pid,
+						(void) service_stop_other_subprocesses(dead->pid,
 															   services,
 															   serviceCount);
 					}
+
+					/* one child process has joined */
+					++subprocessCount;
 				}
 
 				break;
@@ -254,11 +273,11 @@ service_find_subprocess(Service services[],
 
 
 /*
- * service_quit_other_subprocesses sends the QUIT signal to other known
+ * service_stop_other_subprocesses sends the QUIT signal to other known
  * sub-processes when on of does is reported dead.
  */
 static void
-service_quit_other_subprocesses(pid_t pid, Service services[], int serviceCount)
+service_stop_other_subprocesses(pid_t pid, Service services[], int serviceCount)
 {
 	int serviceIndex = 0;
 
@@ -271,15 +290,11 @@ service_quit_other_subprocesses(pid_t pid, Service services[], int serviceCount)
 	{
 		for (serviceIndex=0; serviceIndex < serviceCount; serviceIndex++)
 		{
-			Service target = services[serviceIndex];
+			Service *target = &(services[serviceIndex]);
 
-			if (pid != target.pid)
+			if (target->pid != pid)
 			{
-				if (kill(target.pid, SIGQUIT) != 0)
-				{
-					log_error("Failed to send SIGQUIT to service %s with pid %d",
-							  target.name, target.pid);
-				}
+				(void) (*target->stopFunction)((void *) target);
 			}
 		}
 	}

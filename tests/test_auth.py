@@ -16,6 +16,7 @@ def teardown_module():
 
 def test_000_create_monitor():
     monitor = cluster.create_monitor("/tmp/auth/monitor", authMethod="md5")
+    monitor.run()
     monitor.wait_until_pg_is_running()
     monitor.set_user_password("autoctl_node", "autoctl_node_password")
 

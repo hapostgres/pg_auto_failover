@@ -53,26 +53,26 @@ service_postgres_start(void *context, pid_t *pid)
 		{
 			(void) set_ps_title("postgres");
 
-			if (!pg_ctl_postgres(pgSetup->pg_ctl,
-								 pgSetup->pgdata,
-								 pgSetup->pgport,
-								 pgSetup->listen_addresses))
-			{
-				log_error("pg_ctl_postgres failure");
-				exit(EXIT_CODE_PGSQL);
-			}
-
 			/*
-			 * When the "main" function for the child process is over, it's the
-			 * end of our execution thread. Don't get back to the caller.
+			 * We don't use
 			 */
-			if (asked_to_stop || asked_to_stop_fast)
+			(void) pg_ctl_postgres(pgSetup->pg_ctl,
+								   pgSetup->pgdata,
+								   pgSetup->pgport,
+								   pgSetup->listen_addresses);
+
+			if (shutdownSequenceInProgress
+				|| asked_to_stop
+				|| asked_to_stop_fast)
 			{
 				exit(EXIT_CODE_QUIT);
 			}
 			else
 			{
-				/* something went wrong (e.g. broken pipe) */
+				/*
+				 * Postgres was stopped by someone else, maybe an admin doing
+				 * pg_ctl stop to test our software, or maybe something else.
+				 */
 				exit(EXIT_CODE_INTERNAL_ERROR);
 			}
 		}
@@ -131,4 +131,25 @@ service_postgres_start(void *context, pid_t *pid)
 			return true;
 		}
 	}
+}
+
+
+/*
+ * service_postgres_stop stops the postgres service, using pg_ctl stop.
+ */
+bool
+service_postgres_stop(void *context)
+{
+	Service *service = (Service *) context;
+	PostgresSetup *pgSetup = (PostgresSetup *) service->context;
+
+	log_info("Stopping pg_autoctl postgres service");
+
+	if (!pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata))
+	{
+		log_error("Failed to stop Postgres, see above for details");
+		return false;
+	}
+
+	return true;
 }

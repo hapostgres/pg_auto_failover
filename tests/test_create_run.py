@@ -16,7 +16,7 @@ def teardown_module():
 
 def test_000_create_monitor():
     global monitor
-    monitor = cluster.create_monitor("/tmp/create-run/monitor")
+    monitor = cluster.create_monitor("/tmp/create-run/monitor", run=True)
 
 def test_001_init_primary():
     global node1

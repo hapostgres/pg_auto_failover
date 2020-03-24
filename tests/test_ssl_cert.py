@@ -155,6 +155,7 @@ def test_000_create_monitor():
                                      sslCAFile=root_crt,
                                      sslServerKey=server_key,
                                      sslServerCert=server_crt)
+    monitor.run()
     monitor.wait_until_pg_is_running()
 
     with open(os.path.join("/tmp/cert/monitor", "pg_hba.conf"), 'a') as hba:

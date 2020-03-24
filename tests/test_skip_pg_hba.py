@@ -17,6 +17,7 @@ def teardown_module():
 
 def test_000_create_monitor():
     monitor = cluster.create_monitor("/tmp/skip/monitor", authMethod="skip")
+    monitor.run()
     monitor.wait_until_pg_is_running()
 
     with open(os.path.join("/tmp/skip/monitor", "pg_hba.conf"), 'a') as hba:

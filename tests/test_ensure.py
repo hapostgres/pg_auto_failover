@@ -16,6 +16,7 @@ def teardown_module():
 
 def test_000_create_monitor():
     monitor = cluster.create_monitor("/tmp/ensure/monitor")
+    monitor.run()
     monitor.wait_until_pg_is_running()
 
 def test_001_init_primary():

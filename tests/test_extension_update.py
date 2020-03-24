@@ -20,10 +20,8 @@ def test_000_create_monitor():
 def test_001_update_extension():
     os.environ["PG_AUTOCTL_DEBUG"] = '1'
     os.environ["PG_AUTOCTL_EXTENSION_VERSION"] = 'dummy'
-    cluster.monitor.stop_postgres()
 
     cluster.monitor.run()
-
     cluster.monitor.wait_until_pg_is_running()
 
     results = cluster.monitor.run_sql_query(

@@ -19,7 +19,7 @@ def teardown_module():
 def test_000_create_monitor():
     monitor = cluster.create_monitor("/tmp/ssl-self-signed/monitor",
                                      sslSelfSigned=True)
-
+    monitor.run()
     assert monitor.config_get("ssl.sslmode") == "require"
     monitor.wait_until_pg_is_running()
 

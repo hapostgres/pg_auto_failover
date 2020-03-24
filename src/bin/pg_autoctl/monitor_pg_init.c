@@ -24,6 +24,10 @@
 #include "pgsetup.h"
 #include "pgsql.h"
 #include "primary_standby.h"
+#include "service.h"
+#include "service_monitor.h"
+#include "service_postgres.h"
+#include "signals.h"
 
 
 /*
@@ -54,6 +58,7 @@ GUC monitor_default_settings[] = {
 };
 
 
+static bool service_monitor_init_start(void *context, pid_t *pid);
 static bool monitor_install(const char *nodename,
 							PostgresSetup pgSetupOption, bool checkSettings);
 static bool check_monitor_settings(PostgresSetup pgSetup);
@@ -158,21 +163,144 @@ monitor_pg_init(Monitor *monitor)
 		return false;
 	}
 
-	if (!pg_ctl_start(pgSetup->pg_ctl,
-					  pgSetup->pgdata,
-					  pgSetup->pgport,
-					  pgSetup->listen_addresses))
-	{
-		log_error("Failed to start postgres, see above");
-		return false;
-	}
-
-	if (!monitor_install(config->nodename, *pgSetup, false))
-	{
-		return false;
-	}
-
 	return true;
+}
+
+
+/*
+ * monitor_pg_finish_init starts the Postgres instance that we need running to
+ * finish our installation, and finished the installation of the pgautofailover
+ * monitor extension in the Postgres instance.
+ */
+bool
+monitor_pg_init_finish(Monitor *monitor)
+{
+	MonitorConfig *config = &monitor->config;
+	PostgresSetup *pgSetup = &config->pgSetup;
+
+	Service subprocesses[] = {
+		{
+			"postgres",
+			0,
+			&service_postgres_start,
+			&service_postgres_stop,
+			(void *) pgSetup
+		},
+		{
+			"installer",
+			0,
+			&service_monitor_init_start,
+			&service_monitor_stop,
+			(void *) monitor
+		}
+	};
+
+	int subprocessesCount = sizeof(subprocesses) / sizeof(subprocesses[0]);
+
+	/* We didn't create our target username/dbname yet */
+	strlcpy(pgSetup->username, "", NAMEDATALEN);
+	strlcpy(pgSetup->dbname, "", NAMEDATALEN);
+
+	if (!service_start(subprocesses, subprocessesCount, config->pathnames.pid))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/* we only get there when the supervisor exited successfully (SIGTERM) */
+	return true;
+}
+
+
+/*
+ * service_monitor_init_start is a subprocess that finishes the installation of
+ * the monitor extension for pgautofailover.
+ */
+static bool
+service_monitor_init_start(void *context, pid_t *pid)
+{
+	Monitor *monitor = (Monitor *) context;
+	MonitorConfig *config = &monitor->config;
+	PostgresSetup *pgSetup = &config->pgSetup;
+
+	pid_t fpid;
+
+	/* Flush stdio channels just before fork, to avoid double-output problems */
+	fflush(stdout);
+	fflush(stderr);
+
+	/* time to create the node_active sub-process */
+	fpid = fork();
+
+	switch (fpid)
+	{
+		case -1:
+		{
+			log_error("Failed to fork the monitor install process");
+			return false;
+		}
+
+		case 0:
+		{
+			/* finish the install */
+			bool missingPgdataIsOk = false;
+			bool postgresNotRunningIsOk = false;
+
+			(void) set_ps_title("installer");
+
+			if (!monitor_install(config->nodename, *pgSetup, false))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_INTERNAL_ERROR);
+			}
+
+			log_info("Monitor has been succesfully initialized.");
+
+			if (createAndRun)
+			{
+				(void) set_ps_title("listener");
+
+				/* reset pgSetup username, dbname, and Postgres information */
+				if (!monitor_config_read_file(config,
+											  missingPgdataIsOk,
+											  postgresNotRunningIsOk))
+				{
+					log_fatal("Failed to read configuration file \"%s\"",
+							  config->pathnames.config);
+					exit(EXIT_CODE_BAD_CONFIG);
+				}
+
+				(void) monitor_service_run(monitor);
+			}
+			else
+			{
+				exit(EXIT_CODE_QUIT);
+			}
+
+			/*
+			 * When the "main" function for the child process is over, it's the
+			 * end of our execution thread. Don't get back to the caller.
+			 */
+			if (asked_to_stop || asked_to_stop_fast)
+			{
+				exit(EXIT_CODE_QUIT);
+			}
+			else
+			{
+				/* something went wrong (e.g. broken pipe) */
+				exit(EXIT_CODE_INTERNAL_ERROR);
+			}
+		}
+
+		default:
+		{
+			/* fork succeeded, in parent */
+			log_debug("pg_autoctl installer process started in subprocess %d",
+					  fpid);
+			*pid = fpid;
+			return true;
+		}
+	}
 }
 
 
