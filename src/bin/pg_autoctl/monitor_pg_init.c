@@ -93,34 +93,22 @@ monitor_pg_init(Monitor *monitor)
 
 		if (pg_setup_is_running(&existingPgSetup))
 		{
-			log_info("Installing pg_auto_failover monitor in existing "
-					 "PostgreSQL instance at \"%s\" running on port %d",
-					 pgSetup->pgdata, existingPgSetup.pidFile.port);
+			log_error("Installing pg_auto_failover monitor in existing "
+					  "PostgreSQL instance at \"%s\" running on port %d "
+					  "is not supported.",
+					  pgSetup->pgdata, existingPgSetup.pidFile.port);
 
-			if (!monitor_install(config->nodename, existingPgSetup, true))
-			{
-				log_fatal("Failed to install pg_auto_failover monitor, "
-						  "see above for details");
-				return false;
-			}
-
-			/* and we're done now! */
-			return true;
-		}
-
-		if (pg_setup_pgdata_exists(&existingPgSetup))
-		{
-			log_fatal("PGDATA directory \"%s\" already exists, skipping",
-					  pgSetup->pgdata);
 			return false;
 		}
 	}
-
-	if (!pg_ctl_initdb(pgSetup->pg_ctl, pgSetup->pgdata))
+	else
 	{
-		log_fatal("Failed to initialise a PostgreSQL instance at \"%s\", "
-				  "see above for details", pgSetup->pgdata);
-		return false;
+		if (!pg_ctl_initdb(pgSetup->pg_ctl, pgSetup->pgdata))
+		{
+			log_fatal("Failed to initialise a PostgreSQL instance at \"%s\", "
+					  "see above for details", pgSetup->pgdata);
+			return false;
+		}
 	}
 
 	/*
