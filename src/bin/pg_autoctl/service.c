@@ -49,6 +49,8 @@ static void service_stop_other_subprocesses(
 	Service services[],
 	int serviceCount);
 
+static bool service_signal_process_group(int signal);
+
 
 /*
  * service_start starts given services as sub-processes and then supervise
@@ -135,6 +137,7 @@ service_supervisor(pid_t start_pid,
 				   const char *pidfile)
 {
 	int subprocessCount = serviceCount;
+	int stoppingLoopCounter = 0;
 
 	/* wait until all subprocesses are done */
 	while (subprocessCount > 0)
@@ -178,7 +181,52 @@ service_supervisor(pid_t start_pid,
 				 * everything is running smoothly, so enjoy and sleep for
 				 * awhile.
 				 */
-				sleep(1);
+				if (asked_to_stop || asked_to_stop_fast)
+				{
+					++stoppingLoopCounter;
+
+					if (stoppingLoopCounter == 1)
+					{
+						log_info("Waiting for subprocesses to terminate.");
+					}
+					/*
+					 * If we've been waiting for quite a while for
+					 * sub-processes to terminate, it might be because a signal
+					 * was sent to only the process leader, such as when doing
+					 * `pkill pg_autoctl`, rather than to the process group,
+					 * such as when using killpg(2) or `pg_autoctl stop`.
+					 *
+					 * In that case let's signal all our process group
+					 * ourselves and see what happens next.
+					 */
+					else if (stoppingLoopCounter == 50)
+					{
+						log_info("pg_autoctl services are still running, "
+								 "signaling them with SIGTERM.");
+
+						if (!service_signal_process_group(SIGTERM))
+						{
+							log_warn(
+								"Still waiting for subprocesses to terminate.");
+						}
+					}
+					/*
+					 * Wow it's been a very long time now...
+					 */
+					else if (stoppingLoopCounter > 0
+							 && stoppingLoopCounter % 100 == 0)
+					{
+						log_info("pg_autoctl services are still running, "
+								 "signaling them with SIGINT.");
+
+						if (!service_signal_process_group(SIGINT))
+						{
+							log_warn(
+								"Still waiting for subprocesses to terminate.");
+						}
+					}
+				}
+				pg_usleep(100 * 1000); /* 100 ms */
 				break;
 			}
 
@@ -298,6 +346,38 @@ service_stop_other_subprocesses(pid_t pid, Service services[], int serviceCount)
 			}
 		}
 	}
+}
+
+
+/*
+ * service_signal_process_group sends a signal (SIGQUIT) to our own process
+ * group, which we are the leader of.
+ *
+ * That's used when we have received a signal already (asked_to_stop ||
+ * asked_to_stop_fast) and our sub-processes are still running after a while.
+ * It suggest that only the leader process was signaled rather than all the
+ * group.
+ */
+static bool
+service_signal_process_group(int signal)
+{
+	pid_t pid = getpid();
+	pid_t pgrp = getpgid(pid);
+
+	if (pgrp == -1)
+	{
+		log_fatal("Failed to get the process group id of pid %d: %m", pid);
+		return false;
+	}
+
+	if (killpg(pgrp, signal) != 0)
+	{
+		log_error("Failed to send %s to the keeper's pid %d: %m",
+				  strsignal(signal), pgrp);
+		return false;
+	}
+
+	return true;
 }
 
 

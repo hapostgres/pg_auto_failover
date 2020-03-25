@@ -11,6 +11,7 @@
 #include <inttypes.h>
 #include <getopt.h>
 #include <signal.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #include "postgres_fe.h"
@@ -373,10 +374,22 @@ cli_service_stop(int argc, char **argv)
 
 	if (read_pidfile(keeper.config.pathnames.pid, &pid))
 	{
-		if (kill(pid, stop_signal) != 0)
+		/* signal the process group, not just the leader process */
+		pid_t pgrp = getpgid(pid);
+
+		if (pgrp == -1)
+		{
+			log_fatal("Failed to get the process group id of pid %d: %m", pid);
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+
+		log_debug("pg_autoctl is running with pid %d and process group %d",
+				  pid, pgrp);
+
+		if (killpg(pgrp, stop_signal) != 0)
 		{
 			log_error("Failed to send %s to the keeper's pid %d: %m",
-					  strsignal(stop_signal), pid);
+					  strsignal(stop_signal), pgrp);
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 	}
