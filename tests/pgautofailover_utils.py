@@ -43,7 +43,7 @@ class Cluster:
         self.monitor = None
         self.datanodes = []
 
-    def create_monitor(self, datadir, port=5432, nodename=None,
+    def create_monitor(self, datadir, port=5432, nodename=None, level='-v',
                        authMethod=None, sslMode=None, sslSelfSigned=False,
                        sslCAFile=None, sslServerKey=None, sslServerCert=None):
         """
@@ -57,7 +57,7 @@ class Cluster:
                                    sslCAFile=sslCAFile,
                                    sslServerKey=sslServerKey,
                                    sslServerCert=sslServerCert)
-        self.monitor.create()
+        self.monitor.create(level=level)
         return self.monitor
 
     # TODO group should auto sense for normal operations and passed to the
@@ -184,12 +184,12 @@ class PGNode:
 
         return dsn
 
-    def run(self, env={}):
+    def run(self, env={}, level='-v'):
         """
         Runs "pg_autoctl run"
         """
         self.pg_autoctl = PGAutoCtl(self.vnode, self.datadir)
-        self.pg_autoctl.run()
+        self.pg_autoctl.run(level=level)
 
     def run_sql_query(self, query, *args):
         """
@@ -750,11 +750,11 @@ class MonitorNode(PGNode):
             self.nodename = str(self.vnode.address)
 
 
-    def create(self, run=False):
+    def create(self, run=False, level='-vv'):
         """
         Initializes and runs the monitor process.
         """
-        create_args = ['create', self.role.command(), '-vv',
+        create_args = ['create', self.role.command(), level,
                        '--pgdata', self.datadir,
                        '--pgport', str(self.port),
                        '--auth', self.authMethod,
@@ -791,12 +791,12 @@ class MonitorNode(PGNode):
         else:
             self.pg_autoctl.execute("create monitor")
 
-    def run(self, env={}):
+    def run(self, env={}, level='-v'):
         """
         Runs "pg_autoctl run"
         """
         self.pg_autoctl = PGAutoCtl(self.vnode, self.datadir)
-        self.pg_autoctl.run(level='-v')
+        self.pg_autoctl.run(level=level)
 
     def destroy(self):
         """

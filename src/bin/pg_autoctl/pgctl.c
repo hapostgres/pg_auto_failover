@@ -749,7 +749,7 @@ pg_ctl_initdb(const char *pg_ctl, const char *pgdata)
 	int returnCode = program.returnCode;
 
 	log_info("Initialising a PostgreSQL cluster at \"%s\"", pgdata);
-	log_debug("%s initdb -s -D %s [%d]", pg_ctl, pgdata, returnCode);
+	log_info("%s initdb -s -D %s [%d]", pg_ctl, pgdata, returnCode);
 
 	if (returnCode != 0)
 	{

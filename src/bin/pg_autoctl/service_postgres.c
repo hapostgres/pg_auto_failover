@@ -145,6 +145,13 @@ service_postgres_stop(void *context)
 
 	log_info("Stopping pg_autoctl postgres service");
 
+	if (kill(service->pid, SIGTERM) != 0)
+	{
+		log_error("Failed to send SIGTERM to pid %d for service %s",
+				  service->pid, service->name);
+		return false;
+	}
+
 	if (!pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata))
 	{
 		log_error("Failed to stop Postgres, see above for details");
