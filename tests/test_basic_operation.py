@@ -17,7 +17,7 @@ def teardown_module():
 def test_000_create_monitor():
     global monitor
     monitor = cluster.create_monitor("/tmp/basic/monitor")
-    monitor.run()
+    monitor.run(loglevel=pgautofailover.LogLevel.DEBUG)
 
 def test_001_init_primary():
     global node1

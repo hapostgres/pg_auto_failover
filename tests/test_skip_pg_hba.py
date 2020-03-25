@@ -47,9 +47,8 @@ def test_001_init_primary():
 
     # we need to give the nodename here, because our method to find it
     # automatically will fail in the test environment
-    node1 = cluster.create_datanode(node1_path,
-                                    authMethod="skip")
-    node1.create(level='-vvv')
+    node1 = cluster.create_datanode(node1_path, authMethod="skip")
+    node1.create(loglevel=pgautofailover.LogLevel.TRACE)
 
     #
     # Check that we didn't edit the HBA file, thanks to --skip-pg-hba, here
@@ -61,7 +60,7 @@ def test_001_init_primary():
                        text=True,
                        capture_output=True)
 
-    print("diff %s" % " ".join(p.args))
+    print("%s" % " ".join(p.args))
 
     if p.returncode != 0:
         print("%s" % p.stdout)

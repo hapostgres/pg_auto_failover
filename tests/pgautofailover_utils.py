@@ -27,6 +27,22 @@ class Feature(Enum):
     def command(self):
         return self.name.lower()
 
+class LogLevel(Enum):
+    TRACE = 1
+    DEBUG = 2
+    INFO = 3
+    WARN = 4
+    ERROR = 5
+    FATAL = 6
+
+    def __str__(self):
+        if self.value == LogLevel.TRACE:
+            return "-vvv"
+        elif self.value == LogLevel.DEBUG:
+            return "-vv"
+        else:
+            return "-v"
+
 class Cluster:
     # Docker uses 172.17.0.0/16 by default, so we use 172.27.1.0/24 to not
     # conflict with that.
@@ -43,7 +59,8 @@ class Cluster:
         self.monitor = None
         self.datanodes = []
 
-    def create_monitor(self, datadir, port=5432, nodename=None, level='-v',
+    def create_monitor(self, datadir, port=5432, nodename=None,
+                       loglevel=LogLevel.INFO,
                        authMethod=None, sslMode=None, sslSelfSigned=False,
                        sslCAFile=None, sslServerKey=None, sslServerCert=None):
         """
@@ -57,7 +74,7 @@ class Cluster:
                                    sslCAFile=sslCAFile,
                                    sslServerKey=sslServerKey,
                                    sslServerCert=sslServerCert)
-        self.monitor.create(level=level)
+        self.monitor.create(loglevel=loglevel)
         return self.monitor
 
     # TODO group should auto sense for normal operations and passed to the
@@ -184,12 +201,12 @@ class PGNode:
 
         return dsn
 
-    def run(self, env={}, level='-v'):
+    def run(self, env={}, loglevel=LogLevel.INFO):
         """
         Runs "pg_autoctl run"
         """
         self.pg_autoctl = PGAutoCtl(self.vnode, self.datadir)
-        self.pg_autoctl.run(level=level)
+        self.pg_autoctl.run(loglevel=loglevel)
 
     def run_sql_query(self, query, *args):
         """
@@ -391,8 +408,8 @@ class PGNode:
         Set a configuration parameter to given value
         """
         command = PGAutoCtl(self.vnode, self.datadir)
-        out, err = command.execute("config get %s" % setting,
-                                   'config', 'get', setting)
+        out, err, ret = command.execute("config get %s" % setting,
+                                        'config', 'get', setting)
         return out[:-1]
 
     def show_uri(self, json=False):
@@ -401,9 +418,9 @@ class PGNode:
         """
         command = PGAutoCtl(self.vnode, self.datadir)
         if json:
-            out, err = command.execute("show uri", 'show', 'uri', '--json')
+            out, err, ret = command.execute("show uri", 'show', 'uri', '--json')
         else:
-            out, err = command.execute("show uri", 'show', 'uri')
+            out, err, ret = command.execute("show uri", 'show', 'uri')
         return out
 
 
@@ -426,7 +443,7 @@ class DataNode(PGNode):
         self.listen_flag = listen_flag
         self.formation = formation
 
-    def create(self, run=False, level='-v'):
+    def create(self, run=False, loglevel=LogLevel.INFO):
         """
         Runs "pg_autoctl create"
         """
@@ -441,7 +458,7 @@ class DataNode(PGNode):
 
         # don't pass --nodename to Postgres nodes in order to exercise the
         # automatic detection of the nodename.
-        create_args = ['create', self.role.command(), level,
+        create_args = ['create', self.role.command(), str(loglevel),
                        '--pgdata', self.datadir,
                        '--pghost', pghost,
                        '--pgport', str(self.port),
@@ -480,6 +497,10 @@ class DataNode(PGNode):
         # therefore we do not wait for process to complete
         # we just record the process
         self.pg_autoctl = PGAutoCtl(self.vnode, self.datadir, create_args)
+
+        if loglevel == LogLevel.TRACE:
+            print("%s" % " ".join(self.pg_autoctl.command))
+
         if run:
             self.pg_autoctl.run()
         else:
@@ -750,11 +771,11 @@ class MonitorNode(PGNode):
             self.nodename = str(self.vnode.address)
 
 
-    def create(self, run=False, level='-vv'):
+    def create(self, run=False, loglevel=LogLevel.DEBUG):
         """
         Initializes and runs the monitor process.
         """
-        create_args = ['create', self.role.command(), level,
+        create_args = ['create', self.role.command(), str(loglevel),
                        '--pgdata', self.datadir,
                        '--pgport', str(self.port),
                        '--auth', self.authMethod,
@@ -791,21 +812,21 @@ class MonitorNode(PGNode):
         else:
             self.pg_autoctl.execute("create monitor")
 
-    def run(self, env={}, level='-v'):
+    def run(self, env={}, loglevel=LogLevel.INFO):
         """
         Runs "pg_autoctl run"
         """
         self.pg_autoctl = PGAutoCtl(self.vnode, self.datadir)
-        self.pg_autoctl.run(level=level)
+        self.pg_autoctl.run(loglevel=loglevel)
 
     def destroy(self):
         """
         Cleans up processes and files created for this monitor node.
         """
         if self.pg_autoctl:
-            out, err = self.pg_autoctl.stop()
+            out, err, returncode = self.pg_autoctl.stop()
 
-            if out or err:
+            if returncode > 0 and (out or err):
                 print()
                 print("Monitor logs:\n%s\n%s\n" % (out, err))
 
@@ -902,7 +923,7 @@ class MonitorNode(PGNode):
         print("pg_autoctl show state --pgdata %s" % self.datadir)
 
         command = PGAutoCtl(self.vnode, self.datadir)
-        out, err = command.execute("show state", 'show', 'state')
+        out, err, returncode = command.execute("show state", 'show', 'state')
         print("%s" % out)
 
 
@@ -921,7 +942,7 @@ class PGAutoCtl():
         if argv:
             self.command = [self.program] + argv
 
-    def run(self, level='-vv'):
+    def run(self, loglevel=LogLevel.DEBUG):
         """
         Runs our command in the background, returns immediately.
 
@@ -929,7 +950,8 @@ class PGAutoCtl():
         We could be given a full `pg_autoctl create postgres --run` command.
         """
         if not self.command:
-            self.command = [self.program, 'run', '--pgdata', self.datadir, level]
+            self.command = \
+                [self.program, 'run', '--pgdata', self.datadir, str(loglevel)]
 
         self.run_proc = self.vnode.run(self.command)
         print("pg_autoctl run [%d]" % self.run_proc.pid)
@@ -951,7 +973,8 @@ class PGAutoCtl():
                                  " ".join(self.command),
                                  self.out,
                                  self.err))
-            return self.out, self.err
+
+            return self.out, self.err, self.run_proc.returncode
 
         except subprocess.TimeoutExpired:
             # we already spent our allocated waiting time, just kill the process
@@ -968,7 +991,7 @@ class PGAutoCtl():
                              self.out,
                              self.err))
 
-        return self.out, self.err
+        return self.out, self.err, self.run_proc.returncode
 
     def stop(self):
         """
@@ -984,20 +1007,21 @@ class PGAutoCtl():
 
                 self.communicate()
                 self.run_proc.wait()
+                returncode = self.run_proc.returncode
                 self.run_proc.release()
 
                 self.run_proc = None
 
-                return self.out, self.err
+                return self.out, self.err, returncode
 
             except ProcessLookupError as e:
                 self.run_proc = None
                 print("Failed to terminate pg_autoctl for %s: %s" %
                       (self.datadir, e))
-                return None, None
+                return None, None, 0
         else:
             print("pg_autoctl process for %s is not running" % self.datadir)
-            return None, None
+            return None, None, 0
 
     def communicate(self, timeout=COMMAND_TIMEOUT):
         """

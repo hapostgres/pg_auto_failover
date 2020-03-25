@@ -223,7 +223,7 @@ def test_001_init_primary():
                                     sslCAFile=root_crt,
                                     sslServerKey=server_key,
                                     sslServerCert=server_crt)
-    node1.create(level='-vv')
+    node1.create(loglevel=pgautofailover.LogLevel.DEBUG)
 
     with open(os.path.join("/tmp/cert/node1", "pg_hba.conf"), 'a') as hba:
         # node1.run_sql_query will need
@@ -291,7 +291,7 @@ def test_003_init_secondary():
                                     sslCAFile=root_crt,
                                     sslServerKey=server_key,
                                     sslServerCert=server_crt)
-    node2.create(level='-vv')
+    node2.create(loglevel=pgautofailover.LogLevel.DEBUG)
 
     with open(os.path.join("/tmp/cert/node2", "pg_hba.conf"), 'a') as hba:
         hba.write("hostssl all all %s cert\n" % cluster.networkSubnet)
