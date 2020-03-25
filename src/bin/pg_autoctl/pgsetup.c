@@ -496,11 +496,22 @@ read_pg_pidfile(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 
 		if (fgets(line, sizeof(line), fp) == NULL)
 		{
-			/* don't use %m to print errno here, errno is not set by fgets */
-			log_error("Failed to read line %d from file \"%s\"",
-					  lineno, pidfile);
-			fclose(fp);
-			return false;
+			/* later lines are added during start-up, will appear later */
+			if (lineno > LOCK_FILE_LINE_PORT)
+			{
+				/* that's retry-able */
+				fclose(fp);
+				pg_usleep(250 * 1000); /* sleep for 250ms */
+				return read_pg_pidfile(pgSetup, pg_is_not_running_is_ok);
+			}
+			else
+			{
+				/* don't use %m to print errno, errno is not set by fgets */
+				log_error("Failed to read line %d from file \"%s\"",
+						  lineno, pidfile);
+				fclose(fp);
+				return false;
+			}
 		}
 
 		lineLength = strlen(line);
