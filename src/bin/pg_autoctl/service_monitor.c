@@ -131,6 +131,7 @@ bool
 monitor_service_run(Monitor *monitor)
 {
 	MonitorConfig *mconfig = &monitor->config;
+	MonitorExtensionVersion version = { 0 };
 	char *channels[] = { "log", "state", NULL };
 	char postgresUri[MAXCONNINFO];
 
@@ -138,6 +139,13 @@ monitor_service_run(Monitor *monitor)
 	if (monitor_config_get_postgres_uri(mconfig, postgresUri, MAXCONNINFO))
 	{
 		log_info("pg_auto_failover monitor is ready at %s", postgresUri);
+	}
+
+	/* Check version compatibility. */
+	if (!monitor_ensure_extension_version(monitor, &version))
+	{
+		/* errors have already been logged */
+		return false;
 	}
 
 	log_info("Contacting the monitor to LISTEN to its events.");
@@ -157,6 +165,13 @@ monitor_service_run(Monitor *monitor)
 		{
 			log_warn("Re-establishing connection. We might miss notifications.");
 			pgsql_finish(&(monitor->pgsql));
+
+			/* Check version compatibility. */
+			if (!monitor_ensure_extension_version(monitor, &version))
+			{
+				/* errors have already been logged */
+				return false;
+			}
 
 			pgsql_listen(&(monitor->pgsql), channels);
 

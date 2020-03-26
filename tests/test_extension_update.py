@@ -21,7 +21,7 @@ def test_001_update_extension():
     os.environ["PG_AUTOCTL_DEBUG"] = '1'
     os.environ["PG_AUTOCTL_EXTENSION_VERSION"] = 'dummy'
 
-    cluster.monitor.run()
+    cluster.monitor.run(loglevel=pgautofailover.LogLevel.TRACE)
     cluster.monitor.wait_until_pg_is_running()
 
     results = cluster.monitor.run_sql_query(
@@ -29,4 +29,10 @@ def test_001_update_extension():
              FROM pg_available_extensions
             WHERE name = 'pgautofailover'
         """)
-    assert results == [('dummy',)]
+    version = results[0][0]
+
+    if version != 'dummy':
+        out, err, ret = cluster.monitor.pg_autoctl.stop()
+        print("Monitor exit code %d:\n\n%s\n%s" % (ret, out, err))
+
+    assert version == 'dummy'
