@@ -13,7 +13,7 @@ def teardown_module():
     cluster.destroy()
 
 def test_000_create_monitor():
-    cluster.create_monitor("/tmp/listen/monitor")
+    monitor = cluster.create_monitor("/tmp/listen/monitor")
     monitor.run()
 
 def test_001_init_primary():
