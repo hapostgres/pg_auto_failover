@@ -497,12 +497,8 @@ class DataNode(PGNode):
         # therefore we do not wait for process to complete
         # we just record the process
         self.pg_autoctl = PGAutoCtl(self.vnode, self.datadir, create_args)
-
-        if loglevel == LogLevel.TRACE:
-            print("%s" % " ".join(self.pg_autoctl.command))
-
         if run:
-            self.pg_autoctl.run()
+            self.pg_autoctl.run(loglevel=loglevel)
         else:
             self.pg_autoctl.execute("pg_autoctl create")
 
@@ -808,7 +804,7 @@ class MonitorNode(PGNode):
 
         self.pg_autoctl = PGAutoCtl(self.vnode, self.datadir, create_args)
         if run:
-            self.pg_autoctl.run()
+            self.pg_autoctl.run(loglevel=loglevel)
         else:
             self.pg_autoctl.execute("create monitor")
 
@@ -952,6 +948,9 @@ class PGAutoCtl():
         if not self.command:
             self.command = \
                 [self.program, 'run', '--pgdata', self.datadir, str(loglevel)]
+
+        if loglevel == LogLevel.TRACE:
+            print("%s" % " ".join(self.command))
 
         self.run_proc = self.vnode.run(self.command)
         print("pg_autoctl run [%d]" % self.run_proc.pid)

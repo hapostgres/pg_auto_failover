@@ -1,6 +1,9 @@
 import pgautofailover_utils as pgautofailover
 from nose.tools import *
 
+import time
+import os, os.path, subprocess, signal
+
 cluster = None
 monitor = None
 node1 = None
@@ -14,10 +17,45 @@ def setup_module():
 def teardown_module():
     cluster.destroy()
 
-def test_000_create_monitor():
+def test_000a_create_monitor():
     global monitor
     monitor = cluster.create_monitor("/tmp/basic/monitor")
-    monitor.run(loglevel=pgautofailover.LogLevel.DEBUG)
+    monitor.run(loglevel=pgautofailover.LogLevel.TRACE)
+
+    # to make sure the process is running we consume some of its output
+    monitor.pg_autoctl.consume_output()
+    if monitor.pg_autoctl.out or monitor.pg_autoctl.err:
+        print("%s\n%s\n" % (monitor.pg_autoctl.out, monitor.pg_autoctl.err))
+
+    assert(os.path.isfile("/tmp/basic/monitor/postmaster.pid"))
+    p = subprocess.run(["head", "-1", "/tmp/basic/monitor/postmaster.pid"],
+                       text=True,
+                       capture_output=True)
+    print("postgres is running with pid %s" % p.stdout[:-1])
+    assert(p.returncode == 0)
+
+def test_000b_stop_postgres_monitor():
+    #time.sleep(3600)
+
+    p = subprocess.run(["head", "-1", "/tmp/basic/monitor/postmaster.pid"],
+                       text=True,
+                       capture_output=True)
+    pgpid = int(p.stdout[:-1])
+    print("postgres is running with pid %d" % pgpid)
+    assert(p.returncode == 0)
+
+    # the pg_ctl stop command has a timeout issue, replacing it with a kill
+    #monitor.stop_postgres()
+    os.kill(pgpid, signal.SIGQUIT)
+
+    monitor.wait_until_pg_is_running()
+
+    assert(os.path.isfile("/tmp/basic/monitor/postmaster.pid"))
+    p = subprocess.run(["head", "-1", "/tmp/basic/monitor/postmaster.pid"],
+                       text=True,
+                       capture_output=True)
+    print("postgres is running with pid %s" % p.stdout[:-1])
+    assert(p.returncode == 0)
 
 def test_001_init_primary():
     global node1
@@ -136,9 +174,3 @@ def test_016_drop_primary():
     node2.drop()
     assert not node2.pg_is_running()
     assert node3.wait_until_state(target_state="single")
-
-def test_017_stop_postgres_monitor():
-    original_state = node3.get_state()
-    monitor.stop_postgres()
-    monitor.wait_until_pg_is_running()
-    assert node3.wait_until_state(target_state=original_state)
