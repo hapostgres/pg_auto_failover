@@ -1269,7 +1269,7 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 
 	if (candidatePriority < 0 || candidatePriority > 100)
 	{
-		ereport(ERROR, (ERRCODE_INVALID_PARAMETER_VALUE,
+		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 						errmsg("invalid value for candidate_priority \"%d\" "
 							   "expected an integer value between 0 and 100",
 							   candidatePriority)));
@@ -1433,7 +1433,7 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 										   &standbyCount))
 		{
 			ereport(ERROR,
-					(ERRCODE_INVALID_PARAMETER_VALUE,
+					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 					 errmsg("can't set replication quorum to false"),
 					 errdetail("At least %d standby nodes are required "
 							   "in formation %s with number_sync_standbys = %d, "
