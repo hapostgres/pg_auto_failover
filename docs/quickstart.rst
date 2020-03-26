@@ -71,6 +71,18 @@ them in parallel:
 
 .. code-block:: bash
 
+   # allow VMs to resolve each other via internal DNS
+   az network private-dns zone create \
+       --resource-group ha-demo \
+       --name ha-demo.local
+   az network private-dns link vnet create \
+       --name ha-demo-zone-link \
+       --resource-group ha-demo \
+       --virtual-network ha-demo-net \
+       --zone-name ha-demo.local \
+       --registration-enabled true
+
+   # create VMs in parallel
    for node in monitor a b app
    do
    az vm create \
@@ -106,25 +118,24 @@ pg_auto_failover is distributed as a single binary with subcommands to
 initialize and manage a replicated PostgreSQL service. We’ll install the
 binary with the operating system package manager.
 
-Connect to each virtual machine and install pg_autoctl:
+Now we'll connect to the monitor, node A, and node B in parallel and install
+pg_autoctl:
 
 .. code-block:: bash
 
-  ############################################
-  # Run this on the monitor, and nodes a and b
-
-  # The az vm create command also creates ~/.ssh/id_rsa if
-  # that key doesn't already exist, so we'll SSH with that
-  #
-  # Note: substitute the actual IP for "public-ip"
-
-  ssh -i ~/.ssh/id_rsa ha-admin@public-ip
-
-  # install pg_autoctl
-  curl https://install.citusdata.com/community/deb.sh | sudo bash
-  sudo apt-get install -y postgresql-common
-  echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf
-  sudo apt-get install -y postgresql-11-auto-failover-1.2
+  for node in monitor a b
+  do
+  az vm run-command invoke \
+     --resource-group ha-demo \
+     --name ha-demo-${node} \
+     --command-id RunShellScript \
+     --scripts \
+        "curl https://install.citusdata.com/community/deb.sh | sudo bash" \
+        "sudo apt-get install -q -y postgresql-common" \
+        "echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf" \
+        "sudo apt-get install -q -y postgresql-11-auto-failover-1.2" &
+  done
+  wait
 
 .. _quickstart_run_monitor:
 
@@ -139,13 +150,18 @@ own roles in the system.
 .. code-block:: bash
 
    # on the monitor virtual machine
-
-   sudo -i -u postgres \
-     pg_autoctl create monitor \
-       --auth trust \
-       --no-ssl \
-       --pgdata monitor \
-       --pgctl  /usr/lib/postgresql/11/bin/pg_ctl
+   az vm run-command invoke \
+      --resource-group ha-demo \
+      --name ha-demo-monitor \
+      --command-id RunShellScript \
+      --scripts "$(cat <<CMD
+         sudo -i -u postgres \
+           pg_autoctl create monitor \
+             --auth trust \
+             --no-ssl \
+             --pgdata monitor \
+             --pgctl  /usr/lib/postgresql/11/bin/pg_ctl
+   CMD)"
 
 This command initializes a PostgreSQL cluster at the location pointed
 by the ``--pgdata`` option. When ``--pgdata`` is omitted, ``pg_autoctl``
@@ -171,15 +187,20 @@ We’ll create the primary database using the ``pg_autoctl create`` subcommand.
 .. code-block:: bash
 
    # on the node A virtual machine
-
-   sudo -i -u postgres \
-     pg_autoctl create postgres \
-       --pgdata ha \
-       --auth trust \
-       --no-ssl \
-       --pgctl /usr/lib/postgresql/11/bin/pg_ctl \
-       --nodename `hostname -I` \
-       --monitor postgres://autoctl_node@ha-demo-monitor/pg_auto_failover
+   az vm run-command invoke \
+      --resource-group ha-demo \
+      --name ha-demo-a \
+      --command-id RunShellScript \
+      --scripts "$(cat <<CMD
+         sudo -i -u postgres \
+           pg_autoctl create postgres \
+             --pgdata ha \
+             --auth trust \
+             --no-ssl \
+             --nodename ha-demo-a \
+             --pgctl /usr/lib/postgresql/11/bin/pg_ctl \
+             --monitor postgres://autoctl_node@ha-demo-monitor/pg_auto_failover
+   CMD)"
 
 Notice the user and database name in the monitor connection string -- these
 are what monitor init created. We also give it the path to pg_ctl so that the
