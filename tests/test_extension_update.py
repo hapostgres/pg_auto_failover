@@ -14,6 +14,8 @@ def teardown_module():
     cluster.monitor.stop_pg_autoctl()
     cluster.destroy()
 
+    del os.environ["PG_AUTOCTL_EXTENSION_VERSION"]
+
 def test_000_create_monitor():
     cluster.create_monitor("/tmp/update/monitor")
 

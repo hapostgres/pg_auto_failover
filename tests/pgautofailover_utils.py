@@ -659,8 +659,8 @@ SELECT reportedstate
             Gets candidate priority via pg_autoctl
         """
         command = PGAutoCtl(self.vnode, self.datadir)
-        out, err = command.execute("get canditate priority",
-                                   'get', 'node', 'candidate-priority')
+        out, err, ret = command.execute("get canditate priority",
+                                        'get', 'node', 'candidate-priority')
         return int(out)
 
     def set_replication_quorum(self, replicationQuorum):
@@ -682,8 +682,8 @@ SELECT reportedstate
             Gets replication quorum via pg_autoctl
         """
         command = PGAutoCtl(self.vnode, self.datadir)
-        out, err = command.execute("get replication quorum",
-                                   'get', 'node', 'replication-quorum')
+        out, err, ret = command.execute("get replication quorum",
+                                        'get', 'node', 'replication-quorum')
 
         value = out.strip()
 
@@ -713,8 +713,9 @@ SELECT reportedstate
             Gets number sync standbys  via pg_autoctl
         """
         command = PGAutoCtl(self.vnode, self.datadir)
-        out, err = command.execute("get number sync standbys",
-                                   'get', 'formation', 'number-sync-standbys')
+        out, err, ret = \
+            command.execute("get number sync standbys",
+                            'get', 'formation', 'number-sync-standbys')
 
         return int(out)
 
@@ -723,8 +724,8 @@ SELECT reportedstate
             Gets number sync standbys  via pg_autoctl
         """
         command = PGAutoCtl(self.vnode, self.datadir)
-        out, err = command.execute("get synchronous_standby_names",
-                                   'show', 'synchronous_standby_names')
+        out, err, ret = command.execute("get synchronous_standby_names",
+                                        'show', 'synchronous_standby_names')
 
         return out.strip()
 
