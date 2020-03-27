@@ -43,8 +43,6 @@ security group and a subnet.
        --resource-group ha-demo \
        --name ha-demo-nsg
 
-   export MY_IP=`dig +short myip.opendns.com @resolver1.opendns.com`
-
    az network nsg rule create \
        --resource-group ha-demo \
        --nsg-name ha-demo-nsg \
@@ -53,7 +51,7 @@ security group and a subnet.
        --protocol Tcp \
        --direction Inbound \
        --priority 100 \
-       --source-address-prefixes $MY_IP 10.0.1.0/24 \
+       --source-address-prefixes `curl ifconfig.me` 10.0.1.0/24 \
        --source-port-range "*" \
        --destination-address-prefix "*" \
        --destination-port-ranges 22 5432
@@ -98,13 +96,17 @@ them in parallel:
    done
    wait
 
-List and record the public IP addresses that this command outputs for each
-machine:
+To make it easier to SSH into these VMs in future steps, let's make a shell
+function to retrieve their IP addresses:
 
 .. code-block:: bash
 
-   az vm list-ip-addresses --ids \
-       $(az vm list -g ha-demo --query "[].id" -o tsv)
+  # run this in your local shell as well
+
+  vm_ip () {
+    az vm list-ip-addresses -g ha-demo -n ha-demo-$1 -o tsv \
+      --query '[] [] .virtualMachine.network.publicIpAddresses[0].ipAddress'
+  }
 
 .. _quickstart_install:
 
@@ -118,12 +120,12 @@ pg_auto_failover is distributed as a single binary with subcommands to
 initialize and manage a replicated PostgreSQL service. We’ll install the
 binary with the operating system package manager.
 
-Now we'll connect to the monitor, node A, and node B in parallel and install
-pg_autoctl:
+Now we'll install the pg_autofailover package on all nodes. It will help us run
+and observe PostgreSQL with the ``pg_autoctl`` command.
 
 .. code-block:: bash
 
-  for node in monitor a b
+  for node in monitor a b app
   do
   az vm run-command invoke \
      --resource-group ha-demo \
@@ -133,7 +135,8 @@ pg_autoctl:
         "curl https://install.citusdata.com/community/deb.sh | sudo bash" \
         "sudo apt-get install -q -y postgresql-common" \
         "echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf" \
-        "sudo apt-get install -q -y postgresql-11-auto-failover-1.2" &
+        "sudo apt-get install -q -y postgresql-11-auto-failover-1.2" \
+        "sudo usermod -a -G postgres ha-admin" &
   done
   wait
 
@@ -150,18 +153,13 @@ own roles in the system.
 .. code-block:: bash
 
    # on the monitor virtual machine
-   az vm run-command invoke \
-      --resource-group ha-demo \
-      --name ha-demo-monitor \
-      --command-id RunShellScript \
-      --scripts "$(cat <<CMD
-         sudo -i -u postgres \
-           pg_autoctl create monitor \
-             --auth trust \
-             --no-ssl \
-             --pgdata monitor \
-             --pgctl  /usr/lib/postgresql/11/bin/pg_ctl
-   CMD)"
+
+   ssh -l ha-admin `vm_ip monitor` -- \
+     pg_autoctl create monitor \
+       --auth trust \
+       --no-ssl \
+       --pgdata monitor \
+       --pgctl  /usr/lib/postgresql/11/bin/pg_ctl
 
 This command initializes a PostgreSQL cluster at the location pointed
 by the ``--pgdata`` option. When ``--pgdata`` is omitted, ``pg_autoctl``
@@ -186,21 +184,14 @@ We’ll create the primary database using the ``pg_autoctl create`` subcommand.
 
 .. code-block:: bash
 
-   # on the node A virtual machine
-   az vm run-command invoke \
-      --resource-group ha-demo \
-      --name ha-demo-a \
-      --command-id RunShellScript \
-      --scripts "$(cat <<CMD
-         sudo -i -u postgres \
-           pg_autoctl create postgres \
-             --pgdata ha \
-             --auth trust \
-             --no-ssl \
-             --nodename ha-demo-a \
-             --pgctl /usr/lib/postgresql/11/bin/pg_ctl \
-             --monitor postgres://autoctl_node@ha-demo-monitor/pg_auto_failover
-   CMD)"
+   ssh -l ha-admin `vm_ip a` -- \
+     pg_autoctl create postgres \
+       --pgdata ha \
+       --auth trust \
+       --no-ssl \
+       --nodename ha-demo-a \
+       --pgctl /usr/lib/postgresql/11/bin/pg_ctl \
+       --monitor postgres://autoctl_node@ha-demo-monitor/pg_auto_failover
 
 Notice the user and database name in the monitor connection string -- these
 are what monitor init created. We also give it the path to pg_ctl so that the
@@ -214,33 +205,39 @@ observations and then adjusts its state, in this case from "init" to "single."
 
 At this point the monitor and primary nodes are created and running. Next we
 need to run the keeper. It’s an independent process so that it can continue
-operating even if the Postgres primary goes down:
+operating even if the Postgres primary goes down. We'll install it as a service
+with systemd so that it will resume if the VM restarts.
 
 .. code-block:: bash
 
-   # run this on the node A virtual machine as well
-
-   sudo -i -u postgres \
-     pg_autoctl run --pgdata ha
+   ssh -l ha-admin `vm_ip a` << CMD
+     pg_autoctl -q show systemd --pgdata ha | \
+       sudo tee /etc/systemd/system/pgautofailover.service
+     sudo systemctl daemon-reload
+     sudo systemctl start pgautofailover
+   CMD
 
 This will remain running in the terminal, outputting logs. Next connect to
 node B and do the same process.
 
 .. code-block:: bash
 
-   # on the node B virtual machine
-
-   sudo -i -u postgres \
+   ssh -l ha-admin `vm_ip b` -- \
      pg_autoctl create postgres \
        --pgdata ha \
        --auth trust \
        --no-ssl \
+       --nodename ha-demo-b \
        --pgctl /usr/lib/postgresql/11/bin/pg_ctl \
        --nodename `hostname -I` \
        --monitor postgres://autoctl_node@ha-demo-monitor/pg_auto_failover
 
-   sudo -i -u postgres \
-     pg_autoctl run --pgdata ha
+   ssh -l ha-admin `vm_ip b` << CMD
+     pg_autoctl -q show systemd --pgdata ha | \
+       sudo tee /etc/systemd/system/pgautofailover.service
+     sudo systemctl daemon-reload
+     sudo systemctl start pgautofailover
+   CMD
 
 It discovers from the monitor that a primary exists, and then switches its own
 state to be a hot standby and begins streaming WAL contents from the primary.
