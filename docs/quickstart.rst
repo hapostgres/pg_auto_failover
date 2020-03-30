@@ -157,7 +157,7 @@ own roles in the system.
    ssh -l ha-admin `vm_ip monitor` -- \
      pg_autoctl create monitor \
        --auth trust \
-       --no-ssl \
+       --ssl-self-signed \
        --pgdata monitor \
        --pgctl  /usr/lib/postgresql/11/bin/pg_ctl
 
@@ -188,10 +188,12 @@ We’ll create the primary database using the ``pg_autoctl create`` subcommand.
      pg_autoctl create postgres \
        --pgdata ha \
        --auth trust \
-       --no-ssl \
-       --nodename ha-demo-a \
+       --ssl-self-signed \
+       --username ha-admin \
+       --dbname appdb \
+       --nodename ha-demo-a.internal.cloudapp.net \
        --pgctl /usr/lib/postgresql/11/bin/pg_ctl \
-       --monitor postgres://autoctl_node@ha-demo-monitor/pg_auto_failover
+       --monitor postgres://autoctl_node@ha-demo-monitor.internal.cloudapp.net/pg_auto_failover?sslmode=require
 
 Notice the user and database name in the monitor connection string -- these
 are what monitor init created. We also give it the path to pg_ctl so that the
@@ -211,11 +213,21 @@ with systemd so that it will resume if the VM restarts.
 .. code-block:: bash
 
    ssh -l ha-admin `vm_ip a` << CMD
-     pg_autoctl -q show systemd --pgdata ha | \
+     pg_autoctl -q show systemd --pgdata ~ha-admin/ha | \
        sudo tee /etc/systemd/system/pgautofailover.service
      sudo systemctl daemon-reload
      sudo systemctl start pgautofailover
    CMD
+
+   ssh -l ha-admin `vm_ip a` << CMD
+     sudo -i -u postgres \
+       pg_autoctl -q show systemd --pgdata ~ha-admin/ha > pgautofailover.service
+     sudo mv pgautofailover.service /etc/systemd/system
+     sudo systemctl daemon-reload
+     sudo systemctl enable pgautofailover
+     sudo systemctl start pgautofailover
+   CMD
+
 
 This will remain running in the terminal, outputting logs. Next connect to
 node B and do the same process.
@@ -226,16 +238,20 @@ node B and do the same process.
      pg_autoctl create postgres \
        --pgdata ha \
        --auth trust \
-       --no-ssl \
-       --nodename ha-demo-b \
+       --ssl-self-signed \
+       --username ha-admin \
+       --dbname appdb \
+       --nodename ha-demo-b.internal.cloudapp.net \
        --pgctl /usr/lib/postgresql/11/bin/pg_ctl \
        --nodename `hostname -I` \
        --monitor postgres://autoctl_node@ha-demo-monitor/pg_auto_failover
 
    ssh -l ha-admin `vm_ip b` << CMD
-     pg_autoctl -q show systemd --pgdata ha | \
-       sudo tee /etc/systemd/system/pgautofailover.service
+     sudo -i -u postgres \
+       pg_autoctl -q show systemd --pgdata ~ha-admin/ha > pgautofailover.service
+     sudo mv pgautofailover.service /etc/systemd/system
      sudo systemctl daemon-reload
+     sudo systemctl enable pgautofailover
      sudo systemctl start pgautofailover
    CMD
 
