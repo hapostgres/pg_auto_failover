@@ -60,4 +60,4 @@ bool monitor_config_set_setting(MonitorConfig *config,
 								const char *path, char *value);
 
 bool monitor_config_update_with_absolute_pgdata(MonitorConfig *config);
-#endif	/*  MONITOR_CONFIG_H */
+#endif  /*  MONITOR_CONFIG_H */

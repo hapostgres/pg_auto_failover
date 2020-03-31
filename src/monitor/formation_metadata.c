@@ -40,7 +40,8 @@ PG_FUNCTION_INFO_V1(disable_secondary);
 PG_FUNCTION_INFO_V1(set_formation_number_sync_standbys);
 
 bool SetFormationNumberSyncStandbys(const char *formationId, int numberSyncStandbys);
-Datum AutoFailoverFormationGetDatum(FunctionCallInfo fcinfo, AutoFailoverFormation *formation);
+Datum AutoFailoverFormationGetDatum(FunctionCallInfo fcinfo,
+									AutoFailoverFormation *formation);
 
 /*
  * GetFormation returns an AutoFailoverFormation structure with the formationId
@@ -85,7 +86,7 @@ GetFormation(const char *formationId)
 		Datum formationId =
 			heap_getattr(heapTuple, Anum_pgautofailover_formation_formationid,
 						 tupleDescriptor, &isNull);
- 		Datum kind =
+		Datum kind =
 			heap_getattr(heapTuple, Anum_pgautofailover_formation_kind,
 						 tupleDescriptor, &isNull);
 		Datum dbname =
@@ -95,8 +96,8 @@ GetFormation(const char *formationId)
 			heap_getattr(heapTuple, Anum_pgautofailover_formation_opt_secondary,
 						 tupleDescriptor, &isNull);
 		Datum number_sync_standbys =
-				heap_getattr(heapTuple, Anum_pgautofailover_formation_number_sync_standbys,
-							 tupleDescriptor, &isNull);
+			heap_getattr(heapTuple, Anum_pgautofailover_formation_number_sync_standbys,
+						 tupleDescriptor, &isNull);
 
 		formation =
 			(AutoFailoverFormation *) palloc0(sizeof(AutoFailoverFormation));
@@ -135,11 +136,12 @@ create_formation(PG_FUNCTION_ARGS)
 	FormationKind formationKind = FormationKindFromString(formationKindCString);
 	Name formationDBNameName = PG_GETARG_NAME(2);
 	bool formationOptionSecondary = PG_GETARG_BOOL(3);
-	int  formationNumberSyncStandbys = PG_GETARG_INT32(4);
+	int formationNumberSyncStandbys = PG_GETARG_INT32(4);
 	AutoFailoverFormation *formation = NULL;
 	Datum resultDatum = 0;
 
-	AddFormation(formationId, formationKind, formationDBNameName, formationOptionSecondary, formationNumberSyncStandbys);
+	AddFormation(formationId, formationKind, formationDBNameName,
+				 formationOptionSecondary, formationNumberSyncStandbys);
 
 	formation = GetFormation(formationId);
 	resultDatum = AutoFailoverFormationGetDatum(fcinfo, formation);
@@ -163,6 +165,7 @@ drop_formation(PG_FUNCTION_ARGS)
 
 	PG_RETURN_VOID();
 }
+
 
 /*
  * enable_secondary enables secondaries to be added to a formation. This is
@@ -209,7 +212,8 @@ disable_secondary(PG_FUNCTION_ARGS)
  */
 void
 AddFormation(const char *formationId,
-			 FormationKind kind, Name dbname, bool optionSecondary, int numberSyncStandbys)
+			 FormationKind kind, Name dbname, bool optionSecondary, int
+			 numberSyncStandbys)
 {
 	Oid argTypes[] = {
 		TEXTOID, /* formationid */
@@ -220,11 +224,11 @@ AddFormation(const char *formationId,
 	};
 
 	Datum argValues[] = {
-		CStringGetTextDatum(formationId),				  /* formationid */
+		CStringGetTextDatum(formationId),                 /* formationid */
 		CStringGetTextDatum(FormationKindToString(kind)), /* kind */
 		NameGetDatum(dbname),                             /* dbname */
 		BoolGetDatum(optionSecondary),                    /* opt_secondary */
-		Int32GetDatum(numberSyncStandbys)				  /* number_sync_standbys */
+		Int32GetDatum(numberSyncStandbys)                 /* number_sync_standbys */
 	};
 
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
@@ -306,12 +310,12 @@ SetFormationKind(const char *formationId, FormationKind kind)
 {
 	Oid argTypes[] = {
 		TEXTOID, /* formationKind */
-		TEXTOID	 /* formationId */
+		TEXTOID  /* formationId */
 	};
 
 	Datum argValues[] = {
 		CStringGetTextDatum(FormationKindToString(kind)), /* formationKind */
-		CStringGetTextDatum(formationId)				  /* formationId */
+		CStringGetTextDatum(formationId)                  /* formationId */
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
 	int spiStatus = 0;
@@ -334,6 +338,7 @@ SetFormationKind(const char *formationId, FormationKind kind)
 	SPI_finish();
 }
 
+
 /*
  * SetFormationDBName updates the formation dbname to be the one given.
  */
@@ -341,13 +346,13 @@ void
 SetFormationDBName(const char *formationId, const char *dbname)
 {
 	Oid argTypes[] = {
-			TEXTOID, /* dbname */
-			TEXTOID	 /* formationId */
+		TEXTOID,     /* dbname */
+		TEXTOID      /* formationId */
 	};
 
 	Datum argValues[] = {
-			CStringGetTextDatum(dbname),     /* dbname */
-			CStringGetTextDatum(formationId) /* formationId */
+		CStringGetTextDatum(dbname),         /* dbname */
+		CStringGetTextDatum(formationId)     /* formationId */
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
 	int spiStatus = 0;
@@ -382,21 +387,21 @@ void
 SetFormationOptSecondary(const char *formationId, bool optSecondary)
 {
 	Oid argTypes[] = {
-			BOOLOID, /* opt_secondary */
-			TEXTOID	 /* formationId */
+		BOOLOID,     /* opt_secondary */
+		TEXTOID      /* formationId */
 	};
 
 	Datum argValues[] = {
-			BoolGetDatum(optSecondary),      /* opt_secondary */
-			CStringGetTextDatum(formationId) /* formationId */
+		BoolGetDatum(optSecondary),          /* opt_secondary */
+		CStringGetTextDatum(formationId)     /* formationId */
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
 	int spiStatus = 0;
 
 	const char *updateQuery =
-			"UPDATE " AUTO_FAILOVER_FORMATION_TABLE
-			" SET opt_secondary = $1"
-			" WHERE formationid = $2";
+		"UPDATE " AUTO_FAILOVER_FORMATION_TABLE
+		" SET opt_secondary = $1"
+		" WHERE formationid = $2";
 
 	SPI_connect();
 
@@ -419,14 +424,16 @@ SetFormationOptSecondary(const char *formationId, bool optSecondary)
 FormationKind
 FormationKindFromString(const char *kind)
 {
-	FormationKind kindArray[] = { FORMATION_KIND_UNKNOWN,
-								  FORMATION_KIND_UNKNOWN,
-								  FORMATION_KIND_PGSQL,
-								  FORMATION_KIND_CITUS };
-	char *kindList[] = {"", "unknown", "pgsql", "citus", NULL };
+	FormationKind kindArray[] = {
+		FORMATION_KIND_UNKNOWN,
+		FORMATION_KIND_UNKNOWN,
+		FORMATION_KIND_PGSQL,
+		FORMATION_KIND_CITUS
+	};
+	char *kindList[] = { "", "unknown", "pgsql", "citus", NULL };
 
 
-	for(int listIndex = 0; kindList[listIndex] != NULL; listIndex++)
+	for (int listIndex = 0; kindList[listIndex] != NULL; listIndex++)
 	{
 		char *candidate = kindList[listIndex];
 
@@ -453,13 +460,19 @@ FormationKindToString(FormationKind kind)
 	switch (kind)
 	{
 		case FORMATION_KIND_UNKNOWN:
+		{
 			return "unknown";
+		}
 
 		case FORMATION_KIND_PGSQL:
+		{
 			return "pgsql";
+		}
 
 		case FORMATION_KIND_CITUS:
+		{
 			return "citus";
+		}
 
 		default:
 			ereport(ERROR, (ERRCODE_INVALID_PARAMETER_VALUE,
@@ -478,16 +491,18 @@ FormationKindToString(FormationKind kind)
 FormationKind
 FormationKindFromNodeKindString(const char *nodeKind)
 {
-	FormationKind kindArray[] = { FORMATION_KIND_UNKNOWN,
-								  FORMATION_KIND_UNKNOWN,
-								  FORMATION_KIND_PGSQL,
-								  FORMATION_KIND_CITUS,
-								  FORMATION_KIND_CITUS };
+	FormationKind kindArray[] = {
+		FORMATION_KIND_UNKNOWN,
+		FORMATION_KIND_UNKNOWN,
+		FORMATION_KIND_PGSQL,
+		FORMATION_KIND_CITUS,
+		FORMATION_KIND_CITUS
+	};
 	char *kindList[] = {
 		"", "unknown", "standalone", "coordinator", "worker", NULL
 	};
 
-	for(int listIndex = 0; kindList[listIndex] != NULL; listIndex++)
+	for (int listIndex = 0; kindList[listIndex] != NULL; listIndex++)
 	{
 		char *candidate = kindList[listIndex];
 
@@ -514,6 +529,7 @@ IsCitusFormation(AutoFailoverFormation *formation)
 	return formation->kind == FORMATION_KIND_CITUS;
 }
 
+
 /*
  * set_formation_number_sync_standbys sets number_sync_standbys property of a
  * formation. The function returns true on success.
@@ -526,7 +542,7 @@ set_formation_number_sync_standbys(PG_FUNCTION_ARGS)
 	int number_sync_standbys = PG_GETARG_INT32(1);
 
 	AutoFailoverNode *primaryNode = NULL;
-	AutoFailoverFormation *formation = 	GetFormation(formationId);
+	AutoFailoverFormation *formation = GetFormation(formationId);
 
 	/* at the moment, only test with the number of standbys in group 0 */
 	int groupId = 0;
@@ -684,21 +700,21 @@ bool
 SetFormationNumberSyncStandbys(const char *formationId, int numberSyncStandbys)
 {
 	Oid argTypes[] = {
-			INT4OID, /* numberSyncStandbys */
-			TEXTOID	 /* formationId */
+		INT4OID,     /* numberSyncStandbys */
+		TEXTOID      /* formationId */
 	};
 
 	Datum argValues[] = {
-			Int32GetDatum(numberSyncStandbys), /* numberSyncStandbys */
-			CStringGetTextDatum(formationId)  /* formationId */
+		Int32GetDatum(numberSyncStandbys),     /* numberSyncStandbys */
+		CStringGetTextDatum(formationId)      /* formationId */
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
 	int spiStatus = 0;
 
 	const char *updateQuery =
-			"UPDATE " AUTO_FAILOVER_FORMATION_TABLE
-			" SET number_sync_standbys = $1"
-			" WHERE formationid = $2";
+		"UPDATE " AUTO_FAILOVER_FORMATION_TABLE
+		" SET number_sync_standbys = $1"
+		" WHERE formationid = $2";
 
 	SPI_connect();
 

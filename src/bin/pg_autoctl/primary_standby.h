@@ -26,14 +26,14 @@
  */
 typedef struct LocalPostgresServer
 {
-	PGSQL			sqlClient;
-	PostgresSetup	postgresSetup;
-	bool			pgIsRunning;
-	char			pgsrSyncState[PGSR_SYNC_STATE_MAXLENGTH];
-	char            currentLSN[PG_LSN_MAXLENGTH];
-	uint64_t		pgFirstStartFailureTs;
-	int				pgStartRetries;
-	PgInstanceKind	pgKind;
+	PGSQL sqlClient;
+	PostgresSetup postgresSetup;
+	bool pgIsRunning;
+	char pgsrSyncState[PGSR_SYNC_STATE_MAXLENGTH];
+	char currentLSN[PG_LSN_MAXLENGTH];
+	uint64_t pgFirstStartFailureTs;
+	int pgStartRetries;
+	PgInstanceKind pgKind;
 } LocalPostgresServer;
 
 

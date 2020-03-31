@@ -254,7 +254,7 @@ monitor_get_other_nodes(Monitor *monitor,
 		currentState == ANY_STATE
 		? "SELECT * FROM pgautofailover.get_other_nodes($1, $2)"
 		: "SELECT * FROM pgautofailover.get_other_nodes($1, $2, "
-		"$3::pgautofailover.replication_state)";
+		  "$3::pgautofailover.replication_state)";
 	int paramCount = 2;
 	Oid paramTypes[3] = { TEXTOID, INT4OID, TEXTOID };
 	const char *paramValues[3] = { 0 };
@@ -519,11 +519,13 @@ monitor_register_node(Monitor *monitor, char *formation, char *host, int port,
 		"SELECT * FROM pgautofailover.register_node($1, $2, $3, $4, $5, "
 		"$6::pgautofailover.replication_state, $7, $8, $9)";
 	int paramCount = 9;
-	Oid paramTypes[9] = { TEXTOID, TEXTOID, INT4OID, NAMEOID, INT4OID,
-						  TEXTOID, TEXTOID, INT4OID, BOOLOID };
+	Oid paramTypes[9] = {
+		TEXTOID, TEXTOID, INT4OID, NAMEOID, INT4OID,
+		TEXTOID, TEXTOID, INT4OID, BOOLOID
+	};
 	const char *paramValues[9];
 	MonitorAssignedStateParseContext parseContext =
-		{ { 0 }, assignedState, false };
+	{ { 0 }, assignedState, false };
 	const char *nodeStateString = NodeStateToString(initialState);
 
 	paramValues[0] = formation;
@@ -606,11 +608,13 @@ monitor_node_active(Monitor *monitor,
 		"SELECT * FROM pgautofailover.node_active($1, $2, $3, $4, $5, "
 		"$6::pgautofailover.replication_state, $7, $8, $9)";
 	int paramCount = 9;
-	Oid paramTypes[9] = { TEXTOID, TEXTOID, INT4OID, INT4OID,
-						  INT4OID, TEXTOID, BOOLOID, LSNOID, TEXTOID };
+	Oid paramTypes[9] = {
+		TEXTOID, TEXTOID, INT4OID, INT4OID,
+		INT4OID, TEXTOID, BOOLOID, LSNOID, TEXTOID
+	};
 	const char *paramValues[9];
 	MonitorAssignedStateParseContext parseContext =
-		{ { 0 }, assignedState, false };
+	{ { 0 }, assignedState, false };
 	const char *nodeStateString = NodeStateToString(currentState);
 
 	paramValues[0] = formation;
@@ -662,14 +666,14 @@ monitor_node_active(Monitor *monitor,
  */
 bool
 monitor_set_node_candidate_priority(Monitor *monitor,
-									int nodeid, char* nodeName, int nodePort,
+									int nodeid, char *nodeName, int nodePort,
 									int candidate_priority)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
 		"SELECT pgautofailover.set_node_candidate_priority($1, $2, $3, $4)";
 	int paramCount = 4;
-	Oid paramTypes[4] = { INT4OID, TEXTOID, INT4OID, INT4OID};
+	Oid paramTypes[4] = { INT4OID, TEXTOID, INT4OID, INT4OID };
 	const char *paramValues[4];
 	char *candidatePriorityText = intToString(candidate_priority).strValue;
 	bool success = true;
@@ -700,7 +704,7 @@ monitor_set_node_candidate_priority(Monitor *monitor,
  */
 bool
 monitor_set_node_replication_quorum(Monitor *monitor, int nodeid,
-									char* nodeName, int nodePort,
+									char *nodeName, int nodePort,
 									bool replicationQuorum)
 {
 	PGSQL *pgsql = &monitor->pgsql;
@@ -730,13 +734,14 @@ monitor_set_node_replication_quorum(Monitor *monitor, int nodeid,
 	return success;
 }
 
+
 /*
  * monitor_get_node_replication_settings retrieves replication settings
  * from the monitor.
  */
 bool
 monitor_get_node_replication_settings(Monitor *monitor, int nodeid,
-		 	 	 	 	 	 	 	  NodeReplicationSettings *settings)
+									  NodeReplicationSettings *settings)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
@@ -746,7 +751,7 @@ monitor_get_node_replication_settings(Monitor *monitor, int nodeid,
 	Oid paramTypes[1] = { INT4OID };
 	const char *paramValues[1];
 	NodeReplicationSettingsParseContext parseContext =
-		{ { 0 }, -1, false, false };
+	{ { 0 }, -1, false, false };
 
 	paramValues[0] = intToString(nodeid).strValue;
 
@@ -755,6 +760,7 @@ monitor_get_node_replication_settings(Monitor *monitor, int nodeid,
 								   &parseContext, parseNodeReplicationSettings))
 	{
 		log_error("Failed to retrieve node settings for node \"%d\".", nodeid);
+
 		/* disconnect from monitor */
 		pgsql_finish(&monitor->pgsql);
 
@@ -811,7 +817,7 @@ parseNodeReplicationSettings(void *ctx, PGresult *result)
 	}
 
 	value = PQgetvalue(result, 0, 1);
-	if (value == NULL || ( (*value != 't') && (*value != 'f')))
+	if (value == NULL || ((*value != 't') && (*value != 'f')))
 	{
 		log_error("Invalid replication quorum \"%s\" "
 				  "returned by monitor", value);
@@ -819,7 +825,7 @@ parseNodeReplicationSettings(void *ctx, PGresult *result)
 	}
 	else
 	{
-		context->replicationQuorum = (*value) =='t';
+		context->replicationQuorum = (*value) == 't';
 	}
 
 	if (errors > 0)
@@ -847,7 +853,7 @@ monitor_get_formation_number_sync_standbys(Monitor *monitor, char *formation,
 		"SELECT number_sync_standbys FROM pgautofailover.formation "
 		"WHERE formationid = $1";
 	int paramCount = 1;
-	Oid paramTypes[1] = { TEXTOID};
+	Oid paramTypes[1] = { TEXTOID };
 	const char *paramValues[1];
 	SingleValueResultContext parseContext = { { 0 }, PGSQL_RESULT_INT, false };
 	paramValues[0] = formation;
@@ -892,7 +898,7 @@ monitor_set_formation_number_sync_standbys(Monitor *monitor, char *formation,
 	const char *sql =
 		"SELECT pgautofailover.set_formation_number_sync_standbys($1, $2)";
 	int paramCount = 2;
-	Oid paramTypes[2] = { TEXTOID, INT4OID};
+	Oid paramTypes[2] = { TEXTOID, INT4OID };
 	const char *paramValues[2];
 	SingleValueResultContext parseContext = { { 0 }, PGSQL_RESULT_BOOL, false };
 	paramValues[0] = formation;
@@ -1012,9 +1018,9 @@ parseNode(PGresult *result, int rowNumber, NodeAddress *node)
 	char *value = NULL;
 	int hostLength = 0;
 
-	if (PQgetisnull(result, rowNumber, 0)
-		|| PQgetisnull(result, rowNumber, 1)
-		|| PQgetisnull(result, rowNumber, 2))
+	if (PQgetisnull(result, rowNumber, 0) ||
+		PQgetisnull(result, rowNumber, 1) ||
+		PQgetisnull(result, rowNumber, 2))
 	{
 		log_error("NodeId, hostname or port returned by monitor is NULL");
 		return false;
@@ -1124,7 +1130,7 @@ parseNodeArray(void *ctx, PGresult *result)
 
 	context->nodesArray->count = PQntuples(result);
 
-	for (rowNumber=0; rowNumber < PQntuples(result); rowNumber++)
+	for (rowNumber = 0; rowNumber < PQntuples(result); rowNumber++)
 	{
 		NodeAddress *node = &(context->nodesArray->nodes[rowNumber]);
 
@@ -1143,13 +1149,13 @@ void
 printNodeArray(NodeAddressArray *nodesArray)
 {
 	int nodesArrayIndex = 0;
-	int maxNodeNameSize = 5;	/* strlen("Name") + 1, the header */
+	int maxNodeNameSize = 5;    /* strlen("Name") + 1, the header */
 
 	/*
 	 * Dynamically adjust our display output to the length of the longer
 	 * nodename in the result set
 	 */
-	for(nodesArrayIndex=0; nodesArrayIndex<nodesArray->count; nodesArrayIndex++)
+	for (nodesArrayIndex = 0; nodesArrayIndex < nodesArray->count; nodesArrayIndex++)
 	{
 		NodeAddress node = nodesArray->nodes[nodesArrayIndex];
 
@@ -1161,7 +1167,7 @@ printNodeArray(NodeAddressArray *nodesArray)
 
 	(void) printNodeHeader(maxNodeNameSize);
 
-	for(nodesArrayIndex=0; nodesArrayIndex<nodesArray->count; nodesArrayIndex++)
+	for (nodesArrayIndex = 0; nodesArrayIndex < nodesArray->count; nodesArrayIndex++)
 	{
 		NodeAddress *node = &(nodesArray->nodes[nodesArrayIndex]);
 
@@ -1181,9 +1187,9 @@ printNodeHeader(int maxNodeNameSize)
 	char nameSeparatorHeader[BUFSIZE] = { 0 };
 
 	/* prepare a nice dynamic string of '-' as a header separator */
-	for(int i=0; i<=maxNodeNameSize; i++)
+	for (int i = 0; i <= maxNodeNameSize; i++)
 	{
-		if (i<maxNodeNameSize)
+		if (i < maxNodeNameSize)
 		{
 			nameSeparatorHeader[i] = '-';
 		}
@@ -1274,7 +1280,7 @@ parseNodeState(void *ctx, PGresult *result)
 	}
 
 	value = PQgetvalue(result, 0, 4);
-	if (value == NULL || ( (*value != 't') && (*value != 'f')))
+	if (value == NULL || ((*value != 't') && (*value != 'f')))
 	{
 		log_error("Invalid replication quorum \"%s\" "
 				  "returned by monitor", value);
@@ -1282,7 +1288,7 @@ parseNodeState(void *ctx, PGresult *result)
 	}
 	else
 	{
-		context->assignedState->replicationQuorum = (*value) =='t';
+		context->assignedState->replicationQuorum = (*value) == 't';
 	}
 
 
@@ -1375,7 +1381,7 @@ printCurrentState(void *ctx, PGresult *result)
 		(MonitorAssignedStateParseContext *) ctx;
 	int currentTupleIndex = 0;
 	int nTuples = PQntuples(result);
-	int maxNodeNameSize = 5;	/* strlen("Name") + 1, the header */
+	int maxNodeNameSize = 5;    /* strlen("Name") + 1, the header */
 	char *nameSeparatorHeader = NULL;
 
 	if (PQnfields(result) != 8)
@@ -1389,7 +1395,7 @@ printCurrentState(void *ctx, PGresult *result)
 	 * Dynamically adjust our display output to the length of the longer
 	 * nodename in the result set
 	 */
-	for(currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
+	for (currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
 	{
 		char *nodename = PQgetvalue(result, currentTupleIndex, 0);
 
@@ -1400,7 +1406,7 @@ printCurrentState(void *ctx, PGresult *result)
 	}
 
 	/* prepare a nice dynamic string of '-' as a header separator */
-	nameSeparatorHeader = (char *) malloc((maxNodeNameSize+1) * sizeof(char));
+	nameSeparatorHeader = (char *) malloc((maxNodeNameSize + 1) * sizeof(char));
 
 	if (nameSeparatorHeader == NULL)
 	{
@@ -1409,9 +1415,9 @@ printCurrentState(void *ctx, PGresult *result)
 		return;
 	}
 
-	for(int i=0; i<=maxNodeNameSize; i++)
+	for (int i = 0; i <= maxNodeNameSize; i++)
 	{
-		if (i<maxNodeNameSize)
+		if (i < maxNodeNameSize)
 		{
 			nameSeparatorHeader[i] = '-';
 		}
@@ -1433,7 +1439,7 @@ printCurrentState(void *ctx, PGresult *result)
 
 	free(nameSeparatorHeader);
 
-	for(currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
+	for (currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
 	{
 		char *nodename = PQgetvalue(result, currentTupleIndex, 0);
 		char *nodeport = PQgetvalue(result, currentTupleIndex, 1);
@@ -1452,8 +1458,6 @@ printCurrentState(void *ctx, PGresult *result)
 	fformat(stdout, "\n");
 
 	context->parsedOK = true;
-
-	return;
 }
 
 
@@ -1482,7 +1486,7 @@ monitor_print_state_as_json(Monitor *monitor, char *formation, int group)
 		case -1:
 		{
 			sql = "SELECT jsonb_pretty(jsonb_agg(row_to_json(state)))"
-				" FROM pgautofailover.current_state($1) as state";
+				  " FROM pgautofailover.current_state($1) as state";
 
 			paramCount = 1;
 			paramTypes[0] = TEXTOID;
@@ -1494,7 +1498,7 @@ monitor_print_state_as_json(Monitor *monitor, char *formation, int group)
 		default:
 		{
 			sql = "SELECT jsonb_pretty(jsonb_agg(row_to_json(state)))"
-				"FROM pgautofailover.current_state($1,$2) as state";
+				  "FROM pgautofailover.current_state($1,$2) as state";
 
 			groupStr = intToString(group);
 
@@ -1637,7 +1641,7 @@ monitor_print_last_events_as_json(Monitor *monitor,
 		case -1:
 		{
 			sql = "SELECT jsonb_pretty(jsonb_agg(row_to_json(event)))"
-				" FROM pgautofailover.last_events($1, count => $2) as event";
+				  " FROM pgautofailover.last_events($1, count => $2) as event";
 
 			countStr = intToString(count);
 
@@ -1653,7 +1657,7 @@ monitor_print_last_events_as_json(Monitor *monitor,
 		default:
 		{
 			sql = "SELECT jsonb_pretty(jsonb_agg(row_to_json(event)))"
-				" FROM * FROM pgautofailover.last_events($1,$2,$3) as event";
+				  " FROM * FROM pgautofailover.last_events($1,$2,$3) as event";
 
 			countStr = intToString(count);
 			groupStr = intToString(group);
@@ -1724,7 +1728,7 @@ printLastEvents(void *ctx, PGresult *result)
 			"------", "------------------",
 			"------------------", "----------");
 
-	for(currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
+	for (currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
 	{
 		char *eventTime = PQgetvalue(result, currentTupleIndex, 0);
 		char *formation = PQgetvalue(result, currentTupleIndex, 1);
@@ -1745,8 +1749,6 @@ printLastEvents(void *ctx, PGresult *result)
 	fformat(stdout, "\n");
 
 	context->parsedOK = true;
-
-	return;
 }
 
 
@@ -2056,7 +2058,7 @@ printFormationURI(void *ctx, PGresult *result)
 	int nTuples = PQntuples(result);
 
 	int index = 0;
-	int maxFormationNameSize = 7;	/* "monitor" */
+	int maxFormationNameSize = 7;   /* "monitor" */
 	char formationNameSeparator[BUFSIZE] = { 0 };
 
 	log_trace("printFormationURI: %d tuples", nTuples);
@@ -2072,7 +2074,7 @@ printFormationURI(void *ctx, PGresult *result)
 	 * Dynamically adjust our display output to the length of the longer
 	 * nodename in the result set
 	 */
-	for(currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
+	for (currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
 	{
 		int size = strlen(PQgetvalue(result, currentTupleIndex, 1));
 
@@ -2083,7 +2085,7 @@ printFormationURI(void *ctx, PGresult *result)
 	}
 
 	/* create the visual separator for the formation name too */
-	for(index=0; index<maxFormationNameSize; index++)
+	for (index = 0; index < maxFormationNameSize; index++)
 	{
 		formationNameSeparator[index] = '-';
 	}
@@ -2094,7 +2096,7 @@ printFormationURI(void *ctx, PGresult *result)
 			"----------", maxFormationNameSize, formationNameSeparator,
 			"------------------------------");
 
-	for(currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
+	for (currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
 	{
 		char *type = PQgetvalue(result, currentTupleIndex, 0);
 		char *name = PQgetvalue(result, currentTupleIndex, 1);
@@ -2106,8 +2108,6 @@ printFormationURI(void *ctx, PGresult *result)
 	fformat(stdout, "\n");
 
 	context->parsedOK = true;
-
-	return;
 }
 
 
@@ -2367,13 +2367,13 @@ bool
 monitor_get_notifications(Monitor *monitor)
 {
 	PGconn *connection = monitor->pgsql.connection;
-    PGnotify   *notify;
-	int         sock;
-	fd_set      input_mask;
+	PGnotify *notify;
+	int sock;
+	fd_set input_mask;
 
 	if (connection == NULL)
 	{
- 		log_warn("Lost connection.");
+		log_warn("Lost connection.");
 		return false;
 	}
 
@@ -2386,8 +2386,9 @@ monitor_get_notifications(Monitor *monitor)
 	sock = PQsocket(connection);
 
 	if (sock < 0)
-		return false;	/* shouldn't happen */
-
+	{
+		return false;   /* shouldn't happen */
+	}
 	FD_ZERO(&input_mask);
 	FD_SET(sock, &input_mask);
 
@@ -2464,7 +2465,7 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 
 	if (connection == NULL)
 	{
- 		log_warn("Lost connection.");
+		log_warn("Lost connection.");
 		return false;
 	}
 
@@ -2474,9 +2475,9 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 	while (!applySettingsTransitionDone)
 	{
 		/* Sleep until something happens on the connection. */
-		int         sock;
-		fd_set      input_mask;
-		PGnotify   *notify;
+		int sock;
+		fd_set input_mask;
+		PGnotify *notify;
 
 		uint64_t now = time(NULL);
 
@@ -2496,8 +2497,9 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 		sock = PQsocket(connection);
 
 		if (sock < 0)
-			return false;	/* shouldn't happen */
-
+		{
+			return false;   /* shouldn't happen */
+		}
 		FD_ZERO(&input_mask);
 		FD_SET(sock, &input_mask);
 
@@ -2546,8 +2548,8 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 				continue;
 			}
 
-			if (notification.reportedState == PRIMARY_STATE
-				&& notification.goalState == APPLY_SETTINGS_STATE)
+			if (notification.reportedState == PRIMARY_STATE &&
+				notification.goalState == APPLY_SETTINGS_STATE)
 			{
 				applySettingsTransitionInProgress = true;
 
@@ -2557,8 +2559,8 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 						  notification.nodePort,
 						  NodeStateToString(notification.goalState));
 			}
-			else if (notification.reportedState == APPLY_SETTINGS_STATE
-					 && notification.goalState == APPLY_SETTINGS_STATE)
+			else if (notification.reportedState == APPLY_SETTINGS_STATE &&
+					 notification.goalState == APPLY_SETTINGS_STATE)
 			{
 				applySettingsTransitionInProgress = true;
 
@@ -2568,8 +2570,8 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 						  notification.nodePort,
 						  NodeStateToString(notification.reportedState));
 			}
-			else if (notification.reportedState == APPLY_SETTINGS_STATE
-					 && notification.goalState == PRIMARY_STATE)
+			else if (notification.reportedState == APPLY_SETTINGS_STATE &&
+					 notification.goalState == PRIMARY_STATE)
 			{
 				applySettingsTransitionInProgress = true;
 
@@ -2579,9 +2581,9 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 						  notification.nodePort,
 						  NodeStateToString(notification.goalState));
 			}
-			else if (applySettingsTransitionInProgress
-					 && notification.reportedState == PRIMARY_STATE
-					 && notification.goalState == PRIMARY_STATE)
+			else if (applySettingsTransitionInProgress &&
+					 notification.reportedState == PRIMARY_STATE &&
+					 notification.goalState == PRIMARY_STATE)
 			{
 				applySettingsTransitionDone = true;
 
@@ -2626,16 +2628,16 @@ monitor_wait_until_node_reported_state(Monitor *monitor,
 
 	if (connection == NULL)
 	{
- 		log_warn("Lost connection.");
+		log_warn("Lost connection.");
 		return false;
 	}
 
 	while (!reachedMaintenance)
 	{
 		/* Sleep until something happens on the connection. */
-		int         sock;
-		fd_set      input_mask;
-		PGnotify   *notify;
+		int sock;
+		fd_set input_mask;
+		PGnotify *notify;
 
 		uint64_t now = time(NULL);
 
@@ -2655,8 +2657,9 @@ monitor_wait_until_node_reported_state(Monitor *monitor,
 		sock = PQsocket(connection);
 
 		if (sock < 0)
-			return false;	/* shouldn't happen */
-
+		{
+			return false;   /* shouldn't happen */
+		}
 		FD_ZERO(&input_mask);
 		FD_SET(sock, &input_mask);
 
@@ -2705,8 +2708,8 @@ monitor_wait_until_node_reported_state(Monitor *monitor,
 				continue;
 			}
 
-			if (notification.reportedState == state
-				&& notification.goalState == state)
+			if (notification.reportedState == state &&
+				notification.goalState == state)
 			{
 				reachedMaintenance = true;
 
@@ -2808,7 +2811,7 @@ parseExtensionVersion(void *ctx, PGresult *result)
 	}
 
 	value = PQgetvalue(result, 0, 0);
- 	length = strlcpy(context->version->defaultVersion, value, BUFSIZE);
+	length = strlcpy(context->version->defaultVersion, value, BUFSIZE);
 	if (length >= BUFSIZE)
 	{
 		log_error("default_version \"%s\" returned by monitor is %d characters, "
@@ -2819,7 +2822,7 @@ parseExtensionVersion(void *ctx, PGresult *result)
 	}
 
 	value = PQgetvalue(result, 0, 1);
- 	length = strlcpy(context->version->installedVersion, value, BUFSIZE);
+	length = strlcpy(context->version->installedVersion, value, BUFSIZE);
 	if (length >= BUFSIZE)
 	{
 		log_error("installed_version \"%s\" returned by monitor is %d characters, "
@@ -2831,6 +2834,7 @@ parseExtensionVersion(void *ctx, PGresult *result)
 
 	context->parsedOK = true;
 }
+
 
 /*
  * monitor_extension_update executes ALTER EXTENSION ... UPDATE TO ...
@@ -3057,7 +3061,6 @@ ensure_monitor_pg_running(Monitor *monitor, struct MonitorConfig *mconfig)
 			/* errors have already been logged */
 			return false;
 		}
-
 	}
 
 	return true;
@@ -3070,7 +3073,7 @@ ensure_monitor_pg_running(Monitor *monitor, struct MonitorConfig *mconfig)
  * change of state on the monitor, and prints the change on stdout.
  */
 bool
-monitor_service_run(Monitor *monitor,  struct MonitorConfig *mconfig)
+monitor_service_run(Monitor *monitor, struct MonitorConfig *mconfig)
 {
 	char *channels[] = { "log", "state", NULL };
 	char postgresUri[MAXCONNINFO];

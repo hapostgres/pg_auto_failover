@@ -104,11 +104,11 @@ fsm_init_primary(Keeper *keeper)
 	}
 
 	pgInstanceIsOurs =
-		   initState.pgInitState == PRE_INIT_STATE_EMPTY
-		|| initState.pgInitState == PRE_INIT_STATE_EXISTS;
+		initState.pgInitState == PRE_INIT_STATE_EMPTY ||
+		initState.pgInitState == PRE_INIT_STATE_EXISTS;
 
-	if (initState.pgInitState == PRE_INIT_STATE_EMPTY
-		&& !postgresInstanceExists)
+	if (initState.pgInitState == PRE_INIT_STATE_EMPTY &&
+		!postgresInstanceExists)
 	{
 		if (!pg_ctl_initdb(pgSetup.pg_ctl, pgSetup.pgdata))
 		{
@@ -191,9 +191,9 @@ fsm_init_primary(Keeper *keeper)
 	 * self-signed certificate for the server. We place the certificate and
 	 * private key in $PGDATA/server.key and $PGDATA/server.crt
 	 */
-	if (pgSetup.ssl.createSelfSignedCert
-		&& (!file_exists(pgSetup.ssl.serverKey)
-			|| !file_exists(pgSetup.ssl.serverCert)))
+	if (pgSetup.ssl.createSelfSignedCert &&
+		(!file_exists(pgSetup.ssl.serverKey) ||
+		 !file_exists(pgSetup.ssl.serverCert)))
 	{
 		if (!pg_create_self_signed_cert(&pgSetup, config->nodename))
 		{
@@ -660,10 +660,9 @@ fsm_apply_settings(Keeper *keeper)
 		strlcpy(synchronous_standby_names, "*", BUFSIZE);
 	}
 
-	return
-		primary_set_synchronous_standby_names(
-			postgres,
-			synchronous_standby_names);
+	return primary_set_synchronous_standby_names(
+		postgres,
+		synchronous_standby_names);
 }
 
 
@@ -689,7 +688,6 @@ fsm_stop_postgres(Keeper *keeper)
 
 	return pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata);
 }
-
 
 
 /*

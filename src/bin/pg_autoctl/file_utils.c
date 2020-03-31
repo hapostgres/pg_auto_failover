@@ -130,7 +130,7 @@ ensure_empty_dir(const char *dirname, int mode)
  * at the callsite.
  */
 FILE *
-fopen_with_umask(const char *filePath, const char* modes, int flags, mode_t umask)
+fopen_with_umask(const char *filePath, const char *modes, int flags, mode_t umask)
 {
 	int fileDescriptor = open(filePath, flags, umask);
 	FILE *fileStream = NULL;
@@ -314,7 +314,7 @@ read_file(const char *filePath, char **contents, long *fileSize)
  * the source file with owner and permission information and removes it.
  */
 bool
-move_file(char* sourcePath, char* destinationPath)
+move_file(char *sourcePath, char *destinationPath)
 {
 	if (strncmp(sourcePath, destinationPath, MAXPGPATH) == 0)
 	{
@@ -378,7 +378,7 @@ move_file(char* sourcePath, char* destinationPath)
  * Note: the function reads the whole file into memory before copying out.
  */
 bool
-duplicate_file(char* sourcePath, char* destinationPath)
+duplicate_file(char *sourcePath, char *destinationPath)
 {
 	char *fileContents;
 	long fileSize;
@@ -446,7 +446,7 @@ duplicate_file(char* sourcePath, char* destinationPath)
  * create_symbolic_link creates a symbolic link to source path.
  */
 bool
-create_symbolic_link(char* sourcePath, char* targetPath)
+create_symbolic_link(char *sourcePath, char *targetPath)
 {
 	if (symlink(sourcePath, targetPath) != 0)
 	{
@@ -502,6 +502,7 @@ search_path_first(const char *filename, char *result)
 	return true;
 }
 
+
 /*
  * Searches all the directories in the PATH environment variable for
  * the given filename. Returns number of occurrences, and allocates
@@ -520,6 +521,7 @@ search_path(const char *filename, char ***result)
 	int pathListLength = 0;
 	int resultSize = 0;
 	int pathIndex = 0;
+
 	/* Create a copy of pathlist, because we modify it here. */
 	char pathlist[MAXPATHSIZE];
 	if (!get_env_copy("PATH", pathlist, MAXPATHSIZE))
@@ -570,7 +572,7 @@ search_path(const char *filename, char ***result)
 			bool duplicated = false;
 			strlcpy(destinationString, candidate, MAXPGPATH);
 
-			for (int i=0; i<resultSize; i++)
+			for (int i = 0; i < resultSize; i++)
 			{
 				if (strcmp((*result)[i], destinationString) == 0)
 				{
@@ -601,6 +603,7 @@ search_path(const char *filename, char ***result)
 
 	return resultSize;
 }
+
 
 /*
  * Frees the space allocated by search_path().
@@ -660,6 +663,7 @@ set_program_absolute_path(char *program, int size)
 	log_debug("Found absolute program: \"%s\"", program);
 
 #else
+
 	/*
 	 * On Linux and FreeBSD and Solaris, we can find a symbolic link to our
 	 * program and get the information with readlink. Of course the /proc entry
@@ -667,9 +671,9 @@ set_program_absolute_path(char *program, int size)
 	 */
 	bool found = false;
 	char *procEntryCandidates[] = {
-		"/proc/self/exe",		/* Linux */
-		"/proc/curproc/file",	/* FreeBSD */
-		"/proc/self/path/a.out"	/* Solaris */
+		"/proc/self/exe",       /* Linux */
+		"/proc/curproc/file",   /* FreeBSD */
+		"/proc/self/path/a.out" /* Solaris */
 	};
 	int procEntrySize = sizeof(procEntryCandidates) / sizeof(char *);
 	int procEntryIndex = 0;
@@ -785,8 +789,8 @@ normalize_filename(const char *filename, char *dst, int size)
 int
 fformat(FILE *stream, const char *fmt, ...)
 {
-	int			len;
-	va_list		args;
+	int len;
+	va_list args;
 
 	if (stream == NULL || fmt == NULL)
 	{
@@ -807,8 +811,8 @@ fformat(FILE *stream, const char *fmt, ...)
 int
 sformat(char *str, size_t count, const char *fmt, ...)
 {
-	int			len;
-	va_list		args;
+	int len;
+	va_list args;
 
 	if (str == NULL || fmt == NULL)
 	{

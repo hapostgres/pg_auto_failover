@@ -256,7 +256,8 @@ keeper_cli_add_standby_to_hba(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!primary_add_standby_to_hba(&postgres, standbyHostname, config.replication_password))
+	if (!primary_add_standby_to_hba(&postgres, standbyHostname,
+									config.replication_password))
 	{
 		log_fatal("Failed to grant access to the standby by adding relevant lines to "
 				  "pg_hba.conf for the standby hostname and user, see above for "
@@ -410,6 +411,3 @@ keeper_cli_promote_standby(int argc, char **argv)
 		exit(EXIT_CODE_PGSQL);
 	}
 }
-
-
-
