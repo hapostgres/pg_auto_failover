@@ -31,6 +31,7 @@
 #include "keeper_config.h"
 #include "keeper.h"
 #include "monitor.h"
+#include "parsing.h"
 #include "pgctl.h"
 #include "pgsetup.h"
 #include "pgsql.h"
@@ -42,6 +43,7 @@ static void cli_do_monitor_get_coordinator(int argc, char **argv);
 static void cli_do_monitor_register_node(int argc, char **argv);
 static void cli_do_monitor_node_active(int argc, char **argv);
 static void cli_do_monitor_version(int argc, char **argv);
+static void cli_do_monitor_parse_notification(int argc, char **argv);
 
 
 static CommandLine monitor_get_primary_command =
@@ -106,11 +108,20 @@ static CommandLine monitor_version_command =
 				 cli_getopt_pgdata,
 				 cli_do_monitor_version);
 
+static CommandLine monitor_parse_notification_command =
+	make_command("parse-notification",
+				 "parse a raw notification message",
+				 " <notification> ",
+				 "",
+				 NULL,
+				 cli_do_monitor_parse_notification);
+
 static CommandLine *monitor_subcommands[] = {
 	&monitor_get_command,
 	&monitor_register_command,
 	&monitor_node_active_command,
 	&monitor_version_command,
+	&monitor_parse_notification_command,
 	NULL
 };
 
@@ -176,7 +187,7 @@ cli_do_monitor_get_primary_node(int argc, char **argv)
 	}
 	else
 	{
-		fprintf(stdout,
+		fformat(stdout,
 				"%s/%d %s:%d\n",
 				config.formation, config.groupId,
 				primaryNode.host, primaryNode.port);
@@ -282,7 +293,7 @@ cli_do_monitor_get_coordinator(int argc, char **argv)
 
 	if (IS_EMPTY_STRING_BUFFER(coordinatorNode.host))
 	{
-		fprintf(stdout, "%s has no coordinator ready yet\n", config.formation);
+		fformat(stdout, "%s has no coordinator ready yet\n", config.formation);
 		exit(EXIT_CODE_QUIT);
 	}
 
@@ -301,9 +312,11 @@ cli_do_monitor_get_coordinator(int argc, char **argv)
 	}
 	else
 	{
-		fprintf(stdout,
+		fformat(stdout,
 				"%s %s:%d\n",
-				config.formation, coordinatorNode.host, coordinatorNode.port);
+				config.formation,
+				coordinatorNode.host,
+				coordinatorNode.port);
 	}
 }
 
@@ -412,7 +425,7 @@ cli_do_monitor_register_node(int argc, char **argv)
 	}
 	else
 	{
-		fprintf(stdout,
+		fformat(stdout,
 				"%s/%d %s:%d %d:%d %s\n",
 				config.formation,
 				config.groupId,
@@ -507,7 +520,7 @@ cli_do_monitor_node_active(int argc, char **argv)
 	}
 	else
 	{
-		fprintf(stdout,
+		fformat(stdout,
 				"%s/%d %s:%d %d:%d %s\n",
 				config.formation,
 				config.groupId,
@@ -550,5 +563,50 @@ cli_do_monitor_version(int argc, char **argv)
 	{
 		log_warn("This command does not support JSON output at the moment");
 	}
-	fprintf(stdout, "%s\n", version.installedVersion);
+	fformat(stdout, "%s\n", version.installedVersion);
+}
+
+
+/*
+ * cli_do_monitor_parse_notification parses a raw notification message as given
+ * by the monitor LISTEN/NOTIFY protocol on the state channel, such as:
+ *
+ *   "S:wait_primary:wait_primary:7.default:0:1:9.localhost:4001"
+ */
+static void
+cli_do_monitor_parse_notification(int argc, char **argv)
+{
+	StateNotification notification = { 0 };
+	JSON_Value *js = json_value_init_object();
+	JSON_Object *root = json_value_get_object(js);
+
+	if (argc != 1)
+	{
+		commandline_print_usage(&monitor_parse_notification_command, stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	/* the parsing scribbles on the message, make a copy now */
+	strlcpy(notification.message, argv[0], BUFSIZE);
+
+	/* errors are logged by parse_state_notification_message */
+	if (parse_state_notification_message(&notification))
+	{
+		log_info("New state for %s:%d in formation \"%s\": %s/%s",
+				 notification.nodeName,
+				 notification.nodePort,
+				 notification.formationId,
+				 NodeStateToString(notification.reportedState),
+				 NodeStateToString(notification.goalState));
+	}
+
+	json_object_set_string(root, "nodename", notification.nodeName);
+	json_object_set_number(root, "nodeport", (double) notification.nodePort);
+	json_object_set_string(root, "formationid", notification.formationId);
+	json_object_set_string(root, "reportedState",
+						   NodeStateToString(notification.reportedState));
+	json_object_set_string(root, "goalState",
+						   NodeStateToString(notification.goalState));
+
+	(void) cli_pprint_json(js);
 }

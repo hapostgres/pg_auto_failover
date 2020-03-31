@@ -18,7 +18,8 @@ CommandLine help =
 
 CommandLine version =
 	make_command("version", "print pg_autoctl version", "", "",
-				 NULL, keeper_cli_print_version);
+				 cli_print_version_getopts,
+				 keeper_cli_print_version);
 
 /* non-local to be able to patch it from other files */
 CommandLine *create_subcommands[] = {
@@ -51,6 +52,7 @@ CommandLine show_commands =
 					 NULL, show_subcommands);
 
 CommandLine *drop_subcommands[] = {
+	&drop_monitor_command,
 	&drop_node_command,
 	&drop_formation_command,
 	NULL
@@ -123,10 +125,12 @@ int
 root_options(int argc, char **argv)
 {
 	int verboseCount = 0;
+	bool printVersion = false;
 
 	static struct option long_options[] = {
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
+		{ "json", no_argument, NULL, 'J' },
 		{ "quiet", no_argument, NULL, 'q' },
 		{ "help", no_argument, NULL, 'h' },
 	{ NULL, 0, NULL, 0 }
@@ -136,15 +140,21 @@ root_options(int argc, char **argv)
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "Vvqh",
+	while ((c = getopt_long(argc, argv, "JVvqh",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
 		{
+			case 'J':
+			{
+				outputJSON = true;
+				log_trace("--json");
+				break;
+			}
+
 			case 'V':
 			{
-				/* keeper_cli_print_version prints version and exits. */
-				keeper_cli_print_version(argc, argv);
+				printVersion = true;
 				break;
 			}
 
@@ -195,5 +205,11 @@ root_options(int argc, char **argv)
 		commandline_help(stderr);
 		exit(EXIT_CODE_BAD_ARGS);
 	}
+
+	if (printVersion)
+	{
+		keeper_cli_print_version(argc, argv);
+	}
+
 	return optind;
 }

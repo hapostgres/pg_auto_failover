@@ -22,6 +22,7 @@
 #include "keeper.h"
 #include "pgctl.h"
 #include "state.h"
+#include "string_utils.h"
 
 
 static void cli_do_fsm_init(int argc, char **argv);
@@ -100,7 +101,6 @@ static void
 cli_do_fsm_init(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
-	KeeperStateData keeperState = { 0 };
 	KeeperConfig config = keeperOptions;
 
 	char keeperStateJSON[BUFSIZE];
@@ -150,7 +150,7 @@ cli_do_fsm_init(int argc, char **argv)
 		log_error("Failed to serialize internal keeper state to JSON");
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
-	fprintf(stdout, "%s\n", keeperStateJSON);
+	fformat(stdout, "%s\n", keeperStateJSON);
 }
 
 
@@ -204,7 +204,7 @@ cli_do_fsm_state(int argc, char **argv)
 		log_error("Failed to serialize internal keeper state to JSON");
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
-	fprintf(stdout, "%s\n", keeperStateJSON);
+	fformat(stdout, "%s\n", keeperStateJSON);
 }
 
 
@@ -243,7 +243,7 @@ cli_do_fsm_list(int argc, char **argv)
 	}
 
 	print_reachable_states(&keeperState);
-	fprintf(stdout, "\n");
+	fformat(stdout, "\n");
 }
 
 
@@ -299,18 +299,15 @@ cli_do_fsm_assign(int argc, char **argv)
 			goalState = NodeStateFromString(argv[1]);
 
 			/* now prepare id, host, and port in keeper.otherNodes */
-			otherNode->nodeId = strtol(argv[2], NULL, 10);
-			if (otherNode->nodeId == 0 && errno == EINVAL)
+			if (!stringToInt(argv[2], &otherNode->nodeId))
 			{
-				log_error(
-					"Failed to parse otherNode id \"%s\"", argv[2]);
+				log_error("Failed to parse otherNode id \"%s\"", argv[2]);
 				exit(EXIT_CODE_INTERNAL_ERROR);
 			}
 
 			strlcpy(otherNode->host, argv[3], _POSIX_HOST_NAME_MAX);
 
-			otherNode->port = strtol(argv[4], NULL, 10);
-			if (otherNode->port == 0 && errno == EINVAL)
+			if (!stringToInt(argv[4], &otherNode->port))
 			{
 				log_error(
 					"Failed to parse otherNode port number \"%s\"", argv[4]);
@@ -355,7 +352,7 @@ cli_do_fsm_assign(int argc, char **argv)
 		log_error("Failed to serialize internal keeper state to JSON");
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
-	fprintf(stdout, "%s\n", keeperStateJSON);
+	fformat(stdout, "%s\n", keeperStateJSON);
 }
 
 
@@ -414,5 +411,5 @@ cli_do_fsm_step(int argc, char **argv)
 	{
 		log_warn("This command does not support JSON output at the moment");
 	}
-	fprintf(stdout, "%s ➜ %s\n", oldRole, newRole);
+	fformat(stdout, "%s ➜ %s\n", oldRole, newRole);
 }

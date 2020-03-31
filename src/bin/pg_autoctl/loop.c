@@ -24,6 +24,7 @@
 #include "pgctl.h"
 #include "state.h"
 #include "signals.h"
+#include "string_utils.h"
 
 
 static bool keepRunning = true;
@@ -582,7 +583,7 @@ create_pidfile(const char *pidfile, pid_t pid)
 
 	log_trace("create_pidfile(%d): \"%s\"", pid, pidfile);
 
-	sprintf(content, "%d", pid);
+	sformat(content, BUFSIZE, "%d", pid);
 
 	return write_file(content, strlen(content), pidfile);
 }
@@ -597,6 +598,9 @@ read_pidfile(const char *pidfile, pid_t *pid)
 {
 	long fileSize = 0L;
 	char *fileContents = NULL;
+	char *fileLines[1];
+	bool error = false;
+	int pidnum = 0;
 
 	if (!file_exists(pidfile))
 	{
@@ -608,10 +612,15 @@ read_pidfile(const char *pidfile, pid_t *pid)
 		return false;
 	}
 
-	if (sscanf(fileContents, "%d", pid) == 1)
-	{
-		free(fileContents);
+	splitLines(fileContents, fileLines, 1);
+	stringToInt(fileLines[0], &pidnum);
 
+	*pid = pidnum;
+
+	free(fileContents);
+
+	if (!error)
+	{
 		/* is it a stale file? */
 		if (kill(*pid, 0) == 0)
 		{
@@ -619,7 +628,7 @@ read_pidfile(const char *pidfile, pid_t *pid)
 		}
 		else
 		{
-			log_debug("Failed to signal pid %d: %s", *pid, strerror(errno));
+			log_debug("Failed to signal pid %d: %m", *pid);
 			*pid = 0;
 
 			log_info("Found a stale pidfile at \"%s\"", pidfile);
@@ -638,8 +647,6 @@ read_pidfile(const char *pidfile, pid_t *pid)
 	}
 	else
 	{
-		free(fileContents);
-
 		log_debug("Failed to read the PID file \"%s\", removing it", pidfile);
 		(void) remove_pidfile(pidfile);
 
@@ -659,8 +666,7 @@ remove_pidfile(const char *pidfile)
 {
 	if (remove(pidfile) != 0)
 	{
-		log_error("Failed to remove keeper's pid file \"%s\": %s",
-				  pidfile, strerror(errno));
+		log_error("Failed to remove keeper's pid file \"%s\": %m", pidfile);
 		return false;
 	}
 	return true;

@@ -32,6 +32,7 @@ keeper::
     + show      Show pg_auto_failover information
     + enable    Enable a feature on a formation
     + disable   Disable a feature on a formation
+    + perform  Perform an action orchestrated by the monitor      
       run       Run the pg_autoctl service (monitor or keeper)
       stop      signal the pg_autoctl service for it to stop
       reload    signal the pg_autoctl for it to reload its configuration
@@ -44,6 +45,7 @@ keeper::
       formation    Create a new formation on the pg_auto_failover monitor
 
     pg_autoctl drop
+      monitor    Drop the pg_auto_failover monitor
       node       Drop a node from the pg_auto_failover monitor
       formation  Drop a formation on the pg_auto_failover monitor
 
@@ -67,11 +69,16 @@ keeper::
       secondary    Disable secondary nodes on a formation
       maintenance  Disable Postgres maintenance mode on this node
 
-The first step consists of creating a pg_auto_failover monitor thanks to the command
-``pg_autoctl create monitor``, and the command ``pg_autoctl show uri`` can then be
-used to find the Postgres connection URI string to use as the ``--monitor``
-option to the ``pg_autoctl create`` command for the other nodes of the
-formation.
+    pg_autoctl perform
+      failover    Perform a failover for given formation and group
+      switchover  Perform a switchover for given formation and group
+      
+
+The first step consists of creating a pg_auto_failover monitor thanks to the
+command ``pg_autoctl create monitor``, and the command ``pg_autoctl show
+uri`` can then be used to find the Postgres connection URI string to use as
+the ``--monitor`` option to the ``pg_autoctl create`` command for the other
+nodes of the formation.
 
 .. _pg_autoctl_create_monitor:
 
@@ -96,6 +103,8 @@ commands are dealing with the monitor:
         --pgport      PostgreSQL's port number
         --nodename    hostname by which postgres is reachable
         --auth        authentication method for connections from data nodes
+        --skip-pg-hba skip editing pg_hba.conf rules
+        --run         create node then run pg_autoctl service
 
      The ``--pgdata`` option is mandatory and default to the environment
      variable ``PGDATA``. The ``--pgport`` default value is 5432, and the
@@ -125,10 +134,14 @@ commands are dealing with the monitor:
      DNS lookup based process and force the local node name to a fixed
      value.
      
-     The ``--auth`` option allows setting up authentication method to be used
-     for connections from data nodes with ``autoctl_node`` user.
-     If this option is used, please make sure password is manually set on
-     the monitor, and appropriate setting is added to `.pgpass` file on data node.
+     The ``--auth`` option allows setting up authentication method to be
+     used for connections from data nodes with ``autoctl_node`` user. When
+     testing pg_auto_failover for the first time using ``--auth trust``
+     makes things easier. When getting production ready, review your options
+     here and choose at least ``--auth scram-sha-256`` and make sure
+     password is manually set on the monitor, and appropriate setting is
+     added to `.pgpass` file on data node. You could also use some of the
+     advanced Postgres authentication mechanism such as SSL certificates.
      
      See :ref:`pg_auto_failover_security` for notes on `.pgpass`
 
@@ -180,8 +193,8 @@ commands are dealing with the monitor:
 pg_autoctl show command
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-To discover current information about a pg_auto_failover setup, the ``pg_autoctl show``
-commands can be used, from any node in the setup.
+To discover current information about a pg_auto_failover setup, the
+``pg_autoctl show`` commands can be used, from any node in the setup.
 
   - ``pg_autoctl show uri``
 
@@ -326,7 +339,8 @@ The other commands accept the same set of options.
     --formation   pg_auto_failover formation
     --monitor     pg_auto_failover Monitor Postgres URL
     --auth        authentication method for connections from monitor
-    --allow-removing-pgdata   Allow pg_autoctl to remove the database directory
+    --skip-pg-hba skip editing pg_hba.conf rules
+    --allow-removing-pgdata Allow pg_autoctl to remove the database directory
 
 Three different modes of initialization are supported by this command,
 corresponding to as many implementation strategies.
@@ -378,10 +392,13 @@ When `--nodename` is omitted, it is computed as above (see
 :ref:`_pg_autoctl_create_monitor`), with the difference that step 1 uses the
 monitor IP and port rather than the public service 8.8.8.8:53.
 
-The ``--auth`` option allows setting up authentication method to be used when
-monitor node makes a connection to data node with `pgautofailover_monitor` user.
-If this option is, please make sure password is manually set on the data
-node, and appropriate setting is added to `.pgpass` file on monitor node.
+The ``--auth`` option allows setting up authentication method to be used
+when monitor node makes a connection to data node with
+`pgautofailover_monitor` user. As with the ``pg_autoctl create monitor``
+command, you could use ``--auth trust`` when playing with pg_auto_failover
+at first and consider something production grade later. Also, consider using
+``--skip-pg-hba`` if you already have your own provisioning tools with a
+security compliance process.
 
 See :ref:`pg_auto_failover_security` for notes on `.pgpass`
 
@@ -523,25 +540,34 @@ Removing a node from the pg_auto_failover monitor
 To clean-up an installation and remove a PostgreSQL instance from pg_auto_failover
 keeper and monitor, use the following command::
 
-  $ pg_autoctl drop node --help
-  pg_autoctl drop node: Drop a node from the pg_auto_failover monitor
-  usage: pg_autoctl drop node  [ --pgdata ]
-
-    --pgdata      path to data directory
+    $ pg_autoctl drop node --help
+    pg_autoctl drop node: Drop a node from the pg_auto_failover monitor
+    usage: pg_autoctl drop node [ --pgdata --destroy --nodename --nodeport ]
+    
+      --pgdata      path to data directory
+      --destroy     also destroy Postgres database
+      --nodename    nodename to remove from the monitor
+      --nodeport    Postgres port of the node to remove
 
 The ``pg_autoctl drop node`` connects to the monitor and removes the
 nodename from it, then removes the local pg_auto_failover keeper state file. The
 configuration file is not removed.
+
+It is possible to run the ``pg_autoctl drop node`` command either from the
+node itself and then the ``--destroy`` option is available to wipe out
+everything, including configuration files and PGDATA; or to run the command
+from the monitor and then use the ``--nodename`` and ``--nodeport`` options
+to target a (presumably dead) node to remove from the monitor registration.
 
 .. _pg_autoctl_maintenance:
 
 pg_autoctl do
 -------------
 
-When testing pg_auto_failover, it is helpful to be able to play with the local nodes
-using the same lower-level API as used by the pg_auto_failover Finite State Machine
-transitions. The low-level API is made available through the following
-commands, only available in debug environments::
+When testing pg_auto_failover, it is helpful to be able to play with the
+local nodes using the same lower-level API as used by the pg_auto_failover
+Finite State Machine transitions. The low-level API is made available
+through the following commands, only available in debug environments::
 
   $ PG_AUTOCTL_DEBUG=1 pg_autoctl help
     pg_autoctl
@@ -591,7 +617,6 @@ commands, only available in debug environments::
     + primary      Manage a PostgreSQL primary server
     + standby      Manage a PostgreSQL standby server
       discover     Discover local PostgreSQL instance, if any
-      destroy      destroy a node, unregisters it, rm -rf PGDATA
 
     pg_autoctl do monitor
     + get       Get information from the monitor

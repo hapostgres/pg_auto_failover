@@ -24,8 +24,8 @@ before_install:
   - nuke_pg
   - python --version
   - pyenv versions
-  - pyenv install -s 3.7.6
-  - pyenv global 3.7.6
+  - pyenv install -s 3.7
+  - pyenv global 3.7
   - sudo apt-get install bridge-utils
   - sudo apt-get install python3-pip
   - sudo pip3 install --upgrade pip
@@ -39,6 +39,6 @@ install:
   - pg_config
   - PATH=`pg_config --bindir`:$PATH which pg_ctl
 script:
-  - make
+  - make -j5 CFLAGS=-Werror
   - sudo make install
   - PATH=`pg_config --bindir`:$PATH make test

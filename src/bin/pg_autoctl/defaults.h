@@ -14,10 +14,10 @@
 #define PG_AUTOCTL_STATE_VERSION 1
 
 /* additional version information for printing version on CLI */
-#define PG_AUTOCTL_VERSION "1.0.6"
+#define PG_AUTOCTL_VERSION "1.2"
 
 /* version of the extension that we requite to talk to on the monitor */
-#define PG_AUTOCTL_EXTENSION_VERSION "1.1"
+#define PG_AUTOCTL_EXTENSION_VERSION "1.2"
 
 /* environment variable to use to make DEBUG facilities available */
 #define PG_AUTOCTL_DEBUG "PG_AUTOCTL_DEBUG"
@@ -29,6 +29,7 @@
 #define DEFAULT_DATABASE_NAME "postgres"
 #define DEFAULT_USERNAME "postgres"
 #define DEFAULT_AUTH_METHOD "trust"
+#define SKIP_HBA_AUTH_METHOD "skip"
 #define REPLICATION_SLOT_NAME_DEFAULT "pgautofailover_standby"
 #define REPLICATION_SLOT_NAME_PATTERN "^pgautofailover_standby_"
 #define REPLICATION_PASSWORD_DEFAULT NULL
@@ -63,6 +64,18 @@
 
 /* internal default for allocating strings  */
 #define BUFSIZE 1024
+
+/*
+ * 50kB seems enough to store the PATH environment variable if you have more,
+ * simply set PATH to something smaller.
+ * The limit on linux for environment variables is 128kB:
+ * https://unix.stackexchange.com/questions/336934
+ */
+#define MAXPATHSIZE 50000
+
+
+/* buffersize that is needed for results of ctime_r */
+#define MAXCTIMESIZE 26
 
 #define AWAIT_PROMOTION_SLEEP_TIME_MS 1000
 
@@ -105,5 +118,14 @@
 #define EXIT_CODE_KEEPER 8
 #define EXIT_CODE_INTERNAL_ERROR 12
 
+
+/*
+ * This opens file write only and creates if it doesn't exist.
+ */
+#define FOPEN_FLAGS_W O_WRONLY | O_TRUNC | O_CREAT
+/*
+ * This opens the file in append mode and creates it if it doesn't exist.
+ */
+#define FOPEN_FLAGS_A O_APPEND | O_RDWR | O_CREAT
 
 #endif /* DEFAULTS_H */

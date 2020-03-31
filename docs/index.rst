@@ -15,6 +15,7 @@ Welcome to pg_auto_failover's documentation!
    architecture
    fault-tolerance
    install
+   security
    ref/reference
    ref/configuration
    operations

@@ -16,7 +16,7 @@
 
 #include "log.h"
 #include "parsing.h"
-
+#include "string_utils.h"
 
 static bool parse_controldata_field_uint32(const char *controlDataString,
 										   const char *fieldName,
@@ -93,6 +93,11 @@ regexp_first_match(const char *string, const char *regex)
 		int finish = m[1].rm_eo;
 		int length = finish - start + 1;
 		char *result = (char *) malloc(length * sizeof(char));
+		if (result == NULL)
+		{
+			log_error("Failed to allocate memory, probably because it's all used");
+			return NULL;
+		}
 
 		strlcpy(result, string + start, length);
 
@@ -157,7 +162,7 @@ parse_controldata_field_uint32(const char *controlDataString,
 	char regex[BUFSIZE];
 	char *match;
 
-	sprintf(regex, "^%s: *([0-9]+)$", fieldName);
+	sformat(regex, BUFSIZE, "^%s: *([0-9]+)$", fieldName);
 	match = regexp_first_match(controlDataString, regex);
 
 	if (match == NULL)
@@ -165,11 +170,9 @@ parse_controldata_field_uint32(const char *controlDataString,
 		return false;
 	}
 
-	*dest = strtol(match, NULL, 10);
-
-	if (*dest == 0 && errno == EINVAL)
+	if (!stringToUInt32(match, dest))
 	{
-		log_error("Failed to parse number \"%s\": %s", match, strerror(errno));
+		log_error("Failed to parse number \"%s\": %m", match);
 		free(match);
 		return false;
 	}
@@ -192,7 +195,7 @@ parse_controldata_field_uint64(const char *controlDataString,
 	char regex[BUFSIZE];
 	char *match;
 
-	sprintf(regex, "^%s: *([0-9]+)$", fieldName);
+	sformat(regex, BUFSIZE, "^%s: *([0-9]+)$", fieldName);
 	match = regexp_first_match(controlDataString, regex);
 
 	if (match == NULL)
@@ -200,33 +203,15 @@ parse_controldata_field_uint64(const char *controlDataString,
 		return false;
 	}
 
-	*dest = strtoll(match, NULL, 10);
-
-	if (*dest == 0 && errno == EINVAL)
+	if (!stringToUInt64(match, dest))
 	{
-		log_error("Failed to parse number \"%s\": %s", match, strerror(errno));
+		log_error("Failed to parse number \"%s\": %m", match);
 		free(match);
 		return false;
 	}
 
 	free(match);
 	return true;
-}
-
-
-/*
- * intToString converts an int to an IntString, which contains a decimal string
- * representation of the integer.
- */
-IntString
-intToString(int64_t number)
-{
-	IntString intString;
-
-	intString.intValue = number;
-	sprintf(intString.strValue, "%" PRId64, number);
-
-	return intString;
 }
 
 
@@ -282,12 +267,21 @@ parse_state_notification_message(StateNotification *notification)
 	/* read the groupId and nodeId */
 	col = strchr(ptr, FIELD_SEP);
 	*col = '\0';
-	notification->groupId = atoi(ptr);
+	if (!stringToInt(ptr, &notification->groupId))
+	{
+		log_warn("Failed to parse group id \"%s\"", ptr);
+		return false;
+	}
 	ptr = ++col;
 
 	col = strchr(ptr, FIELD_SEP);
 	*col = '\0';
-	notification->nodeId = atoi(ptr);
+
+	if (!stringToInt(ptr, &notification->nodeId))
+	{
+		log_warn("Failed to parse node id \"%s\"", ptr);
+		return false;
+	}
 	ptr = ++col;
 
 	/* read the nodeName, then move past it */
@@ -296,7 +290,11 @@ parse_state_notification_message(StateNotification *notification)
 										   NAMEDATALEN);
 
 	/* read the nodePort */
-	notification->nodePort = atoi(ptr);
+	if (!stringToInt(ptr, &notification->nodePort))
+	{
+		log_warn("Failed to parse node port id \"%s\"", ptr);
+		return false;
+	}
 
 	return true;
 }
@@ -314,7 +312,13 @@ read_length_delimited_string_at(const char *ptr, char *buffer, int size)
 
 	col = strchr(ptr, STRLEN_SEP);
 	*col = '\0';
-	len = atoi(ptr);
+	if (!stringToInt(ptr, &len))
+	{
+		/* that's a BUG really */
+		log_error("Failed to read length of string in notitication message: %s",
+				  ptr);
+		return 0;
+	}
 
 	if (len < size)
 	{
@@ -429,39 +433,4 @@ bool
 parse_bool(const char *value, bool *result)
 {
 	return parse_bool_with_len(value, strlen(value), result);
-}
-
-
-/*
- * splitLines prepares a multi-line error message in a way that calling code
- * can loop around one line at a time and call log_error() or log_warn() on
- * individual lines.
- */
-int
-splitLines(char *errorMessage, char **linesArray, int size)
-{
-	int lineNumber = 0;
-	char *currentLine = errorMessage;
-
-	do
-	{
-		char *newLinePtr = strchr(currentLine, '\n');
-
-		if (newLinePtr == NULL && strlen(currentLine) > 0)
-		{
-			linesArray[lineNumber++] = currentLine;
-			currentLine = NULL;
-		}
-		else
-		{
-			*newLinePtr = '\0';
-
-			linesArray[lineNumber++] = currentLine;
-
-			currentLine = ++newLinePtr;
-		}
-	}
-	while (currentLine != NULL && *currentLine != '\0');
-
-	return lineNumber;
 }

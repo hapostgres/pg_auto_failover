@@ -11,11 +11,13 @@
 #include "cli_common.h"
 #include "commandline.h"
 #include "defaults.h"
+#include "env_utils.h"
 #include "ini_file.h"
 #include "keeper_config.h"
 #include "keeper.h"
 #include "monitor.h"
 #include "monitor_config.h"
+#include "string_utils.h"
 
 static int cli_perform_failover_getopts(int argc, char **argv);
 static void cli_perform_failover(int argc, char **argv);
@@ -106,8 +108,7 @@ cli_perform_failover_getopts(int argc, char **argv)
 
 			case 'g':
 			{
-				int scanResult = sscanf(optarg, "%d", &options.groupId);
-				if (scanResult == 0)
+				if (!stringToInt(optarg, &options.groupId))
 				{
 					log_fatal("--group argument is not a valid group ID: \"%s\"",
 							  optarg);
@@ -173,23 +174,8 @@ cli_perform_failover_getopts(int argc, char **argv)
 
 	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 	{
-		char *pgdata = getenv("PGDATA");
-
-		if (pgdata == NULL)
-		{
-			log_fatal("Failed to get PGDATA either from the environment "
-					  "or from --pgdata");
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-
-		strlcpy(options.pgSetup.pgdata, pgdata, MAXPGPATH);
+		get_env_pgdata_or_exit(options.pgSetup.pgdata);
 	}
-
-	/*
-	 * pg_setup_init wants a single pg_ctl, and we don't use it here: pretend
-	 * we had a --pgctl option and processed it.
-	 */
-	set_first_pgctl(&(options.pgSetup));
 
 	keeperOptions = options;
 

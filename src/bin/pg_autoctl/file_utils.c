@@ -17,8 +17,11 @@
 
 #include "postgres_fe.h"
 
+#include "snprintf.h"
+
 #include "cli_root.h"
 #include "defaults.h"
+#include "env_utils.h"
 #include "file_utils.h"
 #include "log.h"
 
@@ -43,8 +46,7 @@ file_exists(const char *filename)
 		 */
 		if (errno != ENOENT && errno != ENOTDIR)
 		{
-			log_error("Failed to check if file \"%s\" exists: %s",
-					  filename, strerror(errno));
+			log_error("Failed to check if file \"%s\" exists: %m", filename);
 		}
 		return false;
 	}
@@ -70,7 +72,7 @@ directory_exists(const char *path)
 
 	if (stat(path, &info) != 0)
 	{
-		log_error("Failed to stat \"%s\": %s\n", path, strerror(errno));
+		log_error("Failed to stat \"%s\": %m\n", path);
 		return false;
 	}
 
@@ -94,8 +96,7 @@ ensure_empty_dir(const char *dirname, int mode)
 	{
 		if (!rmtree(dirname, true))
 		{
-			log_error("Failed to remove directory \"%s\": %s",
-					  dirname, strerror(errno));
+			log_error("Failed to remove directory \"%s\": %m", dirname);
 			return false;
 		}
 	}
@@ -110,12 +111,57 @@ ensure_empty_dir(const char *dirname, int mode)
 
 	if (pg_mkdir_p(dirname_copy, mode) == -1)
 	{
-		log_error("Failed to ensure empty directory \"%s\": %s",
-				  dirname, strerror(errno));
+		log_error("Failed to ensure empty directory \"%s\": %m", dirname);
 		return false;
 	}
 
 	return true;
+}
+
+
+/*
+ * fopen_with_umask is a version of fopen that gives more control. The main
+ * advantage of it is that it allows specifying a umask of the file. This makes
+ * sure files are not accidentally created with umask 777 if the user has it
+ * configured in a weird way.
+ *
+ * This function returns NULL when opening the file fails. So this should be
+ * handled. It will log an error in this case though, so that's not necessary
+ * at the callsite.
+ */
+FILE *
+fopen_with_umask(const char *filePath, const char* modes, int flags, mode_t umask)
+{
+	int fileDescriptor = open(filePath, flags, umask);
+	FILE *fileStream = NULL;
+	if (fileDescriptor == -1)
+	{
+		log_error("Failed to open file \"%s\": %m", filePath);
+		return NULL;
+	}
+
+	fileStream = fdopen(fileDescriptor, modes);
+	if (fileStream == NULL)
+	{
+		log_error("Failed to open file \"%s\": %m", filePath);
+		close(fileDescriptor);
+	}
+	return fileStream;
+}
+
+
+/*
+ * fopen_read_only opens the file as a read only stream.
+ */
+FILE *
+fopen_read_only(const char *filePath)
+{
+	/*
+	 * Explanation of IGNORE-BANNED
+	 * fopen is safe here because we open the file in read only mode. So no
+	 * exclusive access is needed.
+	 */
+	return fopen(filePath, "rb"); /* IGNORE-BANNED */
 }
 
 
@@ -127,18 +173,17 @@ ensure_empty_dir(const char *dirname, int mode)
 bool
 write_file(char *data, long fileSize, const char *filePath)
 {
-	FILE *fileStream = NULL;
+	FILE *fileStream = fopen_with_umask(filePath, "wb", FOPEN_FLAGS_W, 0644);
 
-	fileStream = fopen(filePath, "wb");
 	if (fileStream == NULL)
 	{
-		log_error("Failed to open file \"%s\": %s", filePath, strerror(errno));
+		/* errors have already been logged */
 		return false;
 	}
 
 	if (fwrite(data, sizeof(char), fileSize, fileStream) < fileSize)
 	{
-		log_error("Failed to write file \"%s\": %s", filePath, strerror(errno));
+		log_error("Failed to write file \"%s\": %m", filePath);
 		fclose(fileStream);
 		return false;
 	}
@@ -161,18 +206,17 @@ write_file(char *data, long fileSize, const char *filePath)
 bool
 append_to_file(char *data, long fileSize, const char *filePath)
 {
-	FILE *fileStream = NULL;
+	FILE *fileStream = fopen_with_umask(filePath, "ab", FOPEN_FLAGS_A, 0644);
 
-	fileStream = fopen(filePath, "ab");
 	if (fileStream == NULL)
 	{
-		log_error("Failed to open file \"%s\": %s", filePath, strerror(errno));
+		/* errors have already been logged */
 		return false;
 	}
 
 	if (fwrite(data, sizeof(char), fileSize, fileStream) < fileSize)
 	{
-		log_error("Failed to write file \"%s\": %s", filePath, strerror(errno));
+		log_error("Failed to write file \"%s\": %m", filePath);
 		fclose(fileStream);
 		return false;
 	}
@@ -202,17 +246,17 @@ read_file(const char *filePath, char **contents, long *fileSize)
 	FILE *fileStream = NULL;
 
 	/* open a file */
-	fileStream = fopen(filePath, "rb");
+	fileStream = fopen_read_only(filePath);
 	if (fileStream == NULL)
 	{
-		log_error("Failed to open file \"%s\": %s", filePath, strerror(errno));
+		log_error("Failed to open file \"%s\": %m", filePath);
 		return false;
 	}
 
 	/* get the file size */
 	if (fseek(fileStream, 0, SEEK_END) != 0)
 	{
-		log_error("Failed to read file \"%s\": %s", filePath, strerror(errno));
+		log_error("Failed to read file \"%s\": %m", filePath);
 		fclose(fileStream);
 		return false;
 	}
@@ -220,14 +264,14 @@ read_file(const char *filePath, char **contents, long *fileSize)
 	*fileSize = ftell(fileStream);
 	if (*fileSize < 0)
 	{
-		log_error("Failed to read file \"%s\": %s", filePath, strerror(errno));
+		log_error("Failed to read file \"%s\": %m", filePath);
 		fclose(fileStream);
 		return false;
 	}
 
 	if (fseek(fileStream, 0, SEEK_SET) != 0)
 	{
-		log_error("Failed to read file \"%s\": %s", filePath, strerror(errno));
+		log_error("Failed to read file \"%s\": %m", filePath);
 		fclose(fileStream);
 		return false;
 	}
@@ -243,7 +287,7 @@ read_file(const char *filePath, char **contents, long *fileSize)
 
 	if (fread(data, sizeof(char), *fileSize, fileStream) < *fileSize)
 	{
-		log_error("Failed to read file \"%s\": %s", filePath, strerror(errno));
+		log_error("Failed to read file \"%s\": %m", filePath);
 		fclose(fileStream);
 		free(data);
 		return false;
@@ -306,8 +350,8 @@ move_file(char* sourcePath, char* destinationPath)
 	 */
 	if (errno != EXDEV)
 	{
-		log_error("Failed to move file \"%s\" to \"%s\": %s",
-				  sourcePath, destinationPath, strerror(errno));
+		log_error("Failed to move file \"%s\" to \"%s\": %m",
+				  sourcePath, destinationPath);
 		return false;
 	}
 
@@ -406,8 +450,7 @@ create_symbolic_link(char* sourcePath, char* targetPath)
 {
 	if (symlink(sourcePath, targetPath) != 0)
 	{
-		log_error("Failed to create symbolic link to \"%s\": %s",
-				  targetPath, strerror(errno));
+		log_error("Failed to create symbolic link to \"%s\": %m", targetPath);
 		return false;
 	}
 	return true;
@@ -439,26 +482,51 @@ path_in_same_directory(const char *basePath, const char *fileName,
 
 
 /*
- * Searches all the directories in the ':' separated pathlist for
+ * search_path_first copies the first entry found in PATH to result. result
+ * should be a buffer of (at least) MAXPGPATH size.
+ * The function returns false and logs an error when it cannot find the command
+ * in PATH.
+ */
+bool
+search_path_first(const char *filename, char *result)
+{
+	char **paths = NULL;
+	int n = search_path(filename, &paths);
+	if (n < 1)
+	{
+		log_error("Failed to find %s command in your PATH", filename);
+		return false;
+	}
+	strlcpy(result, paths[0], MAXPGPATH);
+	search_path_destroy_result(paths);
+	return true;
+}
+
+/*
+ * Searches all the directories in the PATH environment variable for
  * the given filename. Returns number of occurrences, and allocates
  * and returns the path for each of the occurrences in the given result
  * pointer.
  *
  * If the result size is 0, then *result is set to NULL.
  *
- * The caller should free the result by calling search_pathlist_destroy_result().
+ * The caller should free the result by calling search_path_destroy_result().
  */
 int
-search_pathlist(const char *pathlist, const char *filename, char ***result)
+search_path(const char *filename, char ***result)
 {
 	char *stringSpace = NULL;
 	char *path = NULL;
 	int pathListLength = 0;
 	int resultSize = 0;
 	int pathIndex = 0;
-
 	/* Create a copy of pathlist, because we modify it here. */
-	char *pathlist_copy = strdup(pathlist);
+	char pathlist[MAXPATHSIZE];
+	if (!get_env_copy("PATH", pathlist, MAXPATHSIZE))
+	{
+		return 0;
+	}
+
 
 	for (pathIndex = 0; pathlist[pathIndex] != '\0'; pathIndex++)
 	{
@@ -471,7 +539,6 @@ search_pathlist(const char *pathlist, const char *filename, char ***result)
 	if (pathListLength == 0)
 	{
 		*result = NULL;
-		free(pathlist_copy);
 		return 0;
 	}
 
@@ -481,7 +548,7 @@ search_pathlist(const char *pathlist, const char *filename, char ***result)
 	/* allocate memory to store the strings */
 	stringSpace = malloc(pathListLength * MAXPGPATH);
 
-	path = pathlist_copy;
+	path = pathlist;
 
 	while (path != NULL)
 	{
@@ -531,16 +598,15 @@ search_pathlist(const char *pathlist, const char *filename, char ***result)
 		*result = NULL;
 	}
 
-	free(pathlist_copy);
 
 	return resultSize;
 }
 
 /*
- * Frees the space allocated by search_pathlist().
+ * Frees the space allocated by search_path().
  */
 void
-search_pathlist_destroy_result(char **result)
+search_path_destroy_result(char **result)
 {
 	if (result != NULL)
 	{
@@ -562,8 +628,7 @@ unlink_file(const char *filename)
 		/* if it didn't exist yet, good news! */
 		if (errno != ENOENT && errno != ENOTDIR)
 		{
-			log_error("Failed to remove file \"%s\": %s",
-					  filename, strerror(errno));
+			log_error("Failed to remove file \"%s\": %m", filename);
 			return false;
 		}
 	}
@@ -624,7 +689,7 @@ set_program_absolute_path(char *program, int size)
 			if (errno != ENOENT && errno != ENOTDIR)
 			{
 				log_error("Failed to get absolute path for the "
-						  "pg_autoctl program: %s", strerror(errno));
+						  "pg_autoctl program: %m");
 				return false;
 			}
 		}
@@ -649,7 +714,7 @@ set_program_absolute_path(char *program, int size)
 			return true;
 		}
 
-		n = search_pathlist(getenv("PATH"), pg_autoctl_argv0, &pathEntries);
+		n = search_path(pg_autoctl_argv0, &pathEntries);
 
 		if (n < 1)
 		{
@@ -662,7 +727,7 @@ set_program_absolute_path(char *program, int size)
 			log_debug("Found \"%s\" in PATH at \"%s\"",
 					  pg_autoctl_argv0, pathEntries[0]);
 			strlcpy(program, pathEntries[0], size);
-			search_pathlist_destroy_result(pathEntries);
+			search_path_destroy_result(pathEntries);
 
 			return true;
 		}
@@ -688,8 +753,7 @@ normalize_filename(const char *filename, char *dst, int size)
 
 		if (realpath(filename, realPath) == NULL)
 		{
-			log_fatal("Failed to normalize file name \"%s\": %s",
-					  filename, strerror(errno));
+			log_fatal("Failed to normalize file name \"%s\": %m", filename);
 			return false;
 		}
 
@@ -707,4 +771,61 @@ normalize_filename(const char *filename, char *dst, int size)
 	}
 
 	return true;
+}
+
+
+/*
+ * fformat is a secured down version of pg_fprintf:
+ *
+ * Additional security checks are:
+ *  - make sure stream is not null
+ *  - make sure fmt is not null
+ *  - rely on pg_fprintf Assert() that %s arguments are not null
+ */
+int
+fformat(FILE *stream, const char *fmt, ...)
+{
+	int			len;
+	va_list		args;
+
+	if (stream == NULL || fmt == NULL)
+	{
+		log_error("BUG: fformat is called with a NULL target or format string");
+		return -1;
+	}
+
+	va_start(args, fmt);
+	len = pg_vfprintf(stream, fmt, args);
+	va_end(args);
+	return len;
+}
+
+
+/*
+ * sformat is a secured down version of pg_snprintf
+ */
+int
+sformat(char *str, size_t count, const char *fmt, ...)
+{
+	int			len;
+	va_list		args;
+
+	if (str == NULL || fmt == NULL)
+	{
+		log_error("BUG: sformat is called with a NULL target or format string");
+		return -1;
+	}
+
+	va_start(args, fmt);
+	len = pg_vsnprintf(str, count, fmt, args);
+	va_end(args);
+
+	if (len >= count)
+	{
+		log_error("BUG: sformat needs %d bytes to expend format string \"%s\", "
+				  "and a target string of %lu bytes only has been given.",
+				  len, fmt, count);
+	}
+
+	return len;
 }

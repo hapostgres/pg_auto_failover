@@ -386,12 +386,12 @@ keeper_update_pg_state(Keeper *keeper)
 
 	log_debug("Update local PostgreSQL state");
 
-	memcpy(pgSetup, &(config->pgSetup), sizeof(PostgresSetup));
+	*pgSetup = config->pgSetup;
 
 	/* reinitialize the replication state values each time we update */
 	postgres->pgIsRunning = false;
 	memset(postgres->pgsrSyncState, 0, PGSR_SYNC_STATE_MAXLENGTH);
-	strcpy(postgres->currentLSN, "0/0");
+	strlcpy(postgres->currentLSN, "0/0", sizeof(postgres->currentLSN));
 
 	/*
 	 * In some states, it's ok to not have a PostgreSQL data directory at all.
@@ -960,14 +960,24 @@ keeper_init_state_write(Keeper *keeper)
 			  PreInitPostgreInstanceStateToString(initState.pgInitState));
 
 	memset(buffer, 0, PG_AUTOCTL_KEEPER_STATE_FILE_SIZE);
-	memcpy(buffer, &initState, sizeof(KeeperStateInit));
+
+	/*
+	 * Explanation of IGNORE-BANNED:
+	 * memcpy is safe to use here.
+	 * we have a static assert that sizeof(KeeperStateInit) is always
+	 * less than the buffer length PG_AUTOCTL_KEEPER_STATE_FILE_SIZE.
+	 * also KeeperStateData is a plain struct that does not contain
+	 * any pointers in it. Necessary comment about not using pointers
+	 * is added to the struct definition.
+	 */
+	memcpy(buffer, &initState, sizeof(KeeperStateInit)); /* IGNORE-BANNED */
 
 	fd = open(keeper->config.pathnames.init,
 			  O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
 	if (fd < 0)
 	{
-		log_fatal("Failed to create keeper init state file \"%s\": %s",
-				  keeper->config.pathnames.init, strerror(errno));
+		log_fatal("Failed to create keeper init state file \"%s\": %m",
+				  keeper->config.pathnames.init);
 		return false;
 	}
 
@@ -980,14 +990,14 @@ keeper_init_state_write(Keeper *keeper)
 		{
 			errno = ENOSPC;
 		}
-		log_fatal("Failed to write keeper state file \"%s\": %s",
-				  keeper->config.pathnames.init, strerror(errno));
+		log_fatal("Failed to write keeper state file \"%s\": %m",
+				  keeper->config.pathnames.init);
 		return false;
 	}
 
 	if (fsync(fd) != 0)
 	{
-		log_fatal("fsync error: %s", strerror(errno));
+		log_fatal("fsync error: %m");
 		return false;
 	}
 
@@ -1065,7 +1075,7 @@ keeper_init_state_read(Keeper *keeper, KeeperStateInit *initState)
 	if (fileSize >= sizeof(KeeperStateData)
 		&& pg_autoctl_state_version == PG_AUTOCTL_STATE_VERSION)
 	{
-		memcpy(initState, content, sizeof(KeeperStateInit));
+		*initState = *(KeeperStateInit*) content;
 		free(content);
 		return true;
 	}

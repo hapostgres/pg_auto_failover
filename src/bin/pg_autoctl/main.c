@@ -13,6 +13,7 @@
 #include "postgres_fe.h"
 
 #include "cli_root.h"
+#include "env_utils.h"
 #include "keeper.h"
 #include "keeper_config.h"
 
@@ -28,10 +29,10 @@ main(int argc, char **argv)
 	CommandLine command = root;
 
 	/*
-	 * When PG_AUTOCTL_DEBUG is set in the environement, provide the user
+	 * When PG_AUTOCTL_DEBUG is set in the environment, provide the user
 	 * commands available to debug a pg_autoctl instance.
 	 */
-	if (getenv(PG_AUTOCTL_DEBUG) != NULL)
+	if (env_exists(PG_AUTOCTL_DEBUG))
 	{
 		command = root_with_debug;
 	}

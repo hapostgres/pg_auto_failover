@@ -32,15 +32,21 @@
  */
 GUC monitor_default_settings[] = {
 	{ "shared_preload_libraries", "'pgautofailover'" },
-	{ "log_destination", "stderr"},		\
-	{ "logging_collector", "on"},		\
-	{ "log_directory", "log"},			\
-	{ "log_min_messages", "info"},		\
-	{ "log_connections", "on"},			\
-	{ "log_disconnections", "on"},		\
-	{ "log_lock_waits", "on"},			\
 	{ "listen_addresses", "'*'" },
 	{ "port", "5432" },
+	{ "log_destination", "stderr"},
+	{ "logging_collector", "on"},
+	{ "log_directory", "log"},
+	{ "log_min_messages", "info"},
+	{ "log_connections", "on"},
+	{ "log_disconnections", "on"},
+	{ "log_lock_waits", "on"},
+	{ "ssl", "off" },
+	{ "ssl_ca_file", "" },
+	{ "ssl_crl_file", "" },
+	{ "ssl_cert_file", "" },
+	{ "ssl_key_file", "" },
+	{ "ssl_ciphers", "'TLSv1.2+HIGH:!aNULL:!eNULL'" },
 #ifdef TEST
 	{ "unix_socket_directories", "''" },
 #endif
@@ -62,16 +68,15 @@ bool
 monitor_pg_init(Monitor *monitor, MonitorConfig *config)
 {
 	char configFilePath[MAXPGPATH];
-	char postgresUri[MAXCONNINFO];
-	PostgresSetup pgSetup = config->pgSetup;
+	PostgresSetup *pgSetup = &(config->pgSetup);
 
-	if (directory_exists(pgSetup.pgdata))
+	if (directory_exists(pgSetup->pgdata))
 	{
 		PostgresSetup existingPgSetup = { 0 };
 		bool missing_pgdata_is_ok = true;
 		bool pg_is_not_running_is_ok = true;
 
-		if (!pg_setup_init(&existingPgSetup, &pgSetup,
+		if (!pg_setup_init(&existingPgSetup, pgSetup,
 						   missing_pgdata_is_ok,
 						   pg_is_not_running_is_ok))
 		{
@@ -84,7 +89,7 @@ monitor_pg_init(Monitor *monitor, MonitorConfig *config)
 		{
 			log_info("Installing pg_auto_failover monitor in existing "
 					 "PostgreSQL instance at \"%s\" running on port %d",
-					 pgSetup.pgdata, existingPgSetup.pidFile.port);
+					 pgSetup->pgdata, existingPgSetup.pidFile.port);
 
 			if (!monitor_install(config->nodename, existingPgSetup, true))
 			{
@@ -100,15 +105,15 @@ monitor_pg_init(Monitor *monitor, MonitorConfig *config)
 		if (pg_setup_pgdata_exists(&existingPgSetup))
 		{
 			log_fatal("PGDATA directory \"%s\" already exists, skipping",
-					  pgSetup.pgdata);
+					  pgSetup->pgdata);
 			return false;
 		}
 	}
 
-	if (!pg_ctl_initdb(pgSetup.pg_ctl, pgSetup.pgdata))
+	if (!pg_ctl_initdb(pgSetup->pg_ctl, pgSetup->pgdata))
 	{
 		log_fatal("Failed to initialise a PostgreSQL instance at \"%s\", "
-				  "see above for details", pgSetup.pgdata);
+				  "see above for details", pgSetup->pgdata);
 		return false;
 	}
 
@@ -126,9 +131,24 @@ monitor_pg_init(Monitor *monitor, MonitorConfig *config)
 	 * We just did the initdb ourselves, so we know where the configuration
 	 * file is to be found Also, we didn't start PostgreSQL yet.
 	 */
-	join_path_components(configFilePath, pgSetup.pgdata, "postgresql.conf");
+	join_path_components(configFilePath, pgSetup->pgdata, "postgresql.conf");
 
-	if (!pg_add_auto_failover_default_settings(&pgSetup, configFilePath,
+	/*
+	 * When --ssl-self-signed has been used, now is the time to build a
+	 * self-signed certificate for the server. We place the certificate and
+	 * private key in $PGDATA/server.key and $PGDATA/server.crt
+	 */
+	if (pgSetup->ssl.createSelfSignedCert)
+	{
+		if (!pg_create_self_signed_cert(pgSetup, config->nodename))
+		{
+			log_error("Failed to create SSL self-signed certificate, "
+					  "see above for details");
+			return false;
+		}
+	}
+
+	if (!pg_add_auto_failover_default_settings(pgSetup, configFilePath,
 											   monitor_default_settings))
 	{
 		log_error("Failed to add default settings to \"%s\": couldn't "
@@ -137,21 +157,18 @@ monitor_pg_init(Monitor *monitor, MonitorConfig *config)
 		return false;
 	}
 
-	if (!pg_ctl_start(pgSetup.pg_ctl,
-					  pgSetup.pgdata, pgSetup.pgport, pgSetup.listen_addresses))
+	if (!pg_ctl_start(pgSetup->pg_ctl,
+					  pgSetup->pgdata,
+					  pgSetup->pgport,
+					  pgSetup->listen_addresses))
 	{
 		log_error("Failed to start postgres, see above");
 		return false;
 	}
 
-	if (!monitor_install(config->nodename, pgSetup, false))
+	if (!monitor_install(config->nodename, *pgSetup, false))
 	{
 		return false;
-	}
-
-	if (monitor_config_get_postgres_uri(config, postgresUri, MAXCONNINFO))
-	{
-		log_info("pg_auto_failover monitor is ready at %s", postgresUri);
 	}
 
 	return true;
@@ -233,6 +250,7 @@ monitor_install(const char *nodename,
 	 * database.
 	 */
 	if (!pghba_enable_lan_cidr(&postgres.sqlClient,
+							   pgSetup.ssl.active,
 							   HBA_DATABASE_DBNAME,
 							   PG_AUTOCTL_MONITOR_DBNAME,
 							   nodename,
