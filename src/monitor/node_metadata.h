@@ -44,23 +44,23 @@
 #define Anum_pgautofailover_node_replication_quorum 17
 
 #define AUTO_FAILOVER_NODE_TABLE_ALL_COLUMNS \
-    "formationid, "			\
-	"nodeid, "				\
-	"groupid, "				\
-	"nodename, "			\
-	"nodeport, "			\
-	"goalstate, "			\
-	"reportedstate, "		\
-	"reportedpgisrunning, "	\
-	"reportedrepstate, "	\
-	"reporttime, "			\
-	"walreporttime, "		\
-	"health, "				\
-	"healthchecktime, "		\
-	"statechangetime, "		\
-	"reportedlsn, "			\
-	"candidatepriority, "	\
-    "replicationquorum"
+	"formationid, " \
+	"nodeid, " \
+	"groupid, " \
+	"nodename, " \
+	"nodeport, " \
+	"goalstate, " \
+	"reportedstate, " \
+	"reportedpgisrunning, " \
+	"reportedrepstate, " \
+	"reporttime, " \
+	"walreporttime, " \
+	"health, " \
+	"healthchecktime, " \
+	"statechangetime, " \
+	"reportedlsn, " \
+	"candidatepriority, " \
+	"replicationquorum"
 
 
 #define SELECT_ALL_FROM_AUTO_FAILOVER_NODE_TABLE \
@@ -107,17 +107,18 @@ typedef struct AutoFailoverNode
 extern List * AllAutoFailoverNodes(char *formationId);
 extern List * AutoFailoverNodeGroup(char *formationId, int groupId);
 extern List * AutoFailoverOtherNodesList(AutoFailoverNode *pgAutoFailoverNode);
-extern List * AutoFailoverOtherNodesListInState(
-	AutoFailoverNode *pgAutoFailoverNode, ReplicationState currentState);
+extern List * AutoFailoverOtherNodesListInState(AutoFailoverNode *pgAutoFailoverNode,
+												ReplicationState currentState);
 extern AutoFailoverNode * GetPrimaryNodeInGroup(char *formationId, int32 groupId);
 extern AutoFailoverNode * FindFailoverNewStandbyNode(List *groupNodeList);
-extern List *GroupListCandidates(List *groupNodeList);
-extern List *GroupListSyncStandbys(List *groupNodeList);
+extern List * GroupListCandidates(List *groupNodeList);
+extern List * GroupListSyncStandbys(List *groupNodeList);
 extern bool AllNodesHaveSameCandidatePriority(List *groupNodeList);
 extern int CountStandbyCandidates(AutoFailoverNode *primaryNode,
 								  List *stateList);
 extern AutoFailoverNode * GetAutoFailoverNode(char *nodeName, int nodePort);
-extern AutoFailoverNode * GetAutoFailoverNodeWithId(int nodeid, char *nodeName, int nodePort);
+extern AutoFailoverNode * GetAutoFailoverNodeWithId(int nodeid, char *nodeName, int
+													nodePort);
 extern AutoFailoverNode * OtherNodeInGroup(AutoFailoverNode *pgAutoFailoverNode);
 extern AutoFailoverNode * GetWritableNodeInGroup(char *formationId, int32 groupId);
 extern AutoFailoverNode * TupleToAutoFailoverNode(TupleDesc tupleDescriptor,
@@ -146,7 +147,7 @@ extern void ReportAutoFailoverNodeReplicationSetting(int nodeid,
 extern void RemoveAutoFailoverNode(char *nodeName, int nodePort);
 
 extern SyncState SyncStateFromString(const char *pgsrSyncState);
-extern char *SyncStateToString(SyncState pgsrSyncState);
+extern char * SyncStateToString(SyncState pgsrSyncState);
 extern bool IsCurrentState(AutoFailoverNode *pgAutoFailoverNode,
 						   ReplicationState state);
 extern bool CanTakeWritesInState(ReplicationState state);

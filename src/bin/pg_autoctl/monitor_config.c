@@ -64,28 +64,28 @@
 	make_strbuf_option("postgresql", "auth_method", "auth", \
 					   false, MAXPGPATH, config->pgSetup.authMethod)
 
-#define OPTION_SSL_ACTIVE(config)							\
-	make_int_option_default("ssl", "active", NULL,			\
+#define OPTION_SSL_ACTIVE(config) \
+	make_int_option_default("ssl", "active", NULL, \
 							false, &(config->pgSetup.ssl.active), 0)
 
-#define OPTION_SSL_MODE(config)										\
-	make_strbuf_option("ssl", "sslmode", "ssl-mode",				\
+#define OPTION_SSL_MODE(config) \
+	make_strbuf_option("ssl", "sslmode", "ssl-mode", \
 					   false, SSL_MODE_STRLEN, config->pgSetup.ssl.sslModeStr)
 
-#define OPTION_SSL_CA_FILE(config)								\
-	make_strbuf_option("ssl", "ca_file", "ssl-ca-file",			\
+#define OPTION_SSL_CA_FILE(config) \
+	make_strbuf_option("ssl", "ca_file", "ssl-ca-file", \
 					   false, MAXPGPATH, config->pgSetup.ssl.caFile)
 
-#define OPTION_SSL_CRL_FILE(config)								\
-	make_strbuf_option("ssl", "crl_file", "ssl-crl-file",		\
+#define OPTION_SSL_CRL_FILE(config) \
+	make_strbuf_option("ssl", "crl_file", "ssl-crl-file", \
 					   false, MAXPGPATH, config->pgSetup.ssl.crlFile)
 
-#define OPTION_SSL_SERVER_CERT(config)							\
-	make_strbuf_option("ssl", "cert_file", "server-cert",		\
+#define OPTION_SSL_SERVER_CERT(config) \
+	make_strbuf_option("ssl", "cert_file", "server-cert", \
 					   false, MAXPGPATH, config->pgSetup.ssl.serverCert)
 
-#define OPTION_SSL_SERVER_KEY(config)								\
-	make_strbuf_option("ssl", "key_file", "server-key",				\
+#define OPTION_SSL_SERVER_KEY(config) \
+	make_strbuf_option("ssl", "key_file", "server-key", \
 					   false, MAXPGPATH, config->pgSetup.ssl.serverKey)
 
 
@@ -251,7 +251,6 @@ monitor_config_init_from_pgsetup(MonitorConfig *mconfig,
 
 	return true;
 }
-
 
 
 /*
@@ -434,7 +433,7 @@ monitor_config_merge_options(MonitorConfig *config, MonitorConfig *options)
  */
 bool
 monitor_config_get_postgres_uri(MonitorConfig *config, char *connectionString,
-		size_t size)
+								size_t size)
 {
 	char *connStringEnd = connectionString;
 	char host[BUFSIZE];
@@ -443,9 +442,9 @@ monitor_config_get_postgres_uri(MonitorConfig *config, char *connectionString,
 	{
 		strlcpy(host, config->nodename, BUFSIZE);
 	}
-	else if (IS_EMPTY_STRING_BUFFER(config->pgSetup.listen_addresses)
-			 || strcmp(config->pgSetup.listen_addresses,
-					   POSTGRES_DEFAULT_LISTEN_ADDRESSES) == 0)
+	else if (IS_EMPTY_STRING_BUFFER(config->pgSetup.listen_addresses) ||
+			 strcmp(config->pgSetup.listen_addresses,
+					POSTGRES_DEFAULT_LISTEN_ADDRESSES) == 0)
 	{
 		/*
 		 * We ouput the monitor connection string using the LAN ip of the

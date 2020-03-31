@@ -66,9 +66,9 @@ typedef enum
 
 typedef struct PGSQL
 {
-	ConnectionType	connectionType;
-	char			connectionString[MAXCONNINFO];
-	PGconn		   *connection;
+	ConnectionType connectionType;
+	char connectionString[MAXCONNINFO];
+	PGconn *connection;
 } PGSQL;
 
 /* PostgreSQL ("Grand Unified Configuration") setting */
@@ -81,9 +81,9 @@ typedef struct GUC
 /* network address of a node in an HA group */
 typedef struct NodeAddress
 {
-	int  nodeId;
+	int nodeId;
 	char host[_POSIX_HOST_NAME_MAX];
-	int  port;
+	int port;
 	char lsn[PG_LSN_MAXLENGTH];
 	bool isPrimary;
 } NodeAddress;
@@ -149,29 +149,29 @@ typedef struct SingleValueResultContext
 } SingleValueResultContext;
 
 
-#define CHECK__SETTINGS_SQL											\
-	"select bool_and(ok) "											\
-	"from ("														\
-	"select current_setting('max_wal_senders')::int >= 4"			\
-	" union all "													\
-	"select current_setting('max_replication_slots')::int >= 4"		\
-	" union all "													\
-	"select current_setting('wal_level') in ('replica', 'logical')"	\
-	" union all "													\
+#define CHECK__SETTINGS_SQL \
+	"select bool_and(ok) " \
+	"from (" \
+	"select current_setting('max_wal_senders')::int >= 4" \
+	" union all " \
+	"select current_setting('max_replication_slots')::int >= 4" \
+	" union all " \
+	"select current_setting('wal_level') in ('replica', 'logical')" \
+	" union all " \
 	"select current_setting('wal_log_hints') = 'on'"
 
 #define CHECK_POSTGRESQL_NODE_SETTINGS_SQL \
-	CHECK__SETTINGS_SQL					   \
+	CHECK__SETTINGS_SQL \
 	") as t(ok) "
 
-#define CHECK_CITUS_NODE_SETTINGS_SQL						\
-	CHECK__SETTINGS_SQL										\
-	" union all "											\
-	"select lib = 'citus' "									\
-	"from unnest(string_to_array("							\
-	"current_setting('shared_preload_libraries'), ',') "	\
-	" || array['not citus']) "								\
-	"with ordinality ast(lib, n) where n = 1"				\
+#define CHECK_CITUS_NODE_SETTINGS_SQL \
+	CHECK__SETTINGS_SQL \
+	" union all " \
+	"select lib = 'citus' " \
+	"from unnest(string_to_array(" \
+	"current_setting('shared_preload_libraries'), ',') " \
+	" || array['not citus']) " \
+	"with ordinality ast(lib, n) where n = 1" \
 	") as t(ok) "
 
 bool pgsql_init(PGSQL *pgsql, char *url, ConnectionType connectionType);

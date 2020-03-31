@@ -25,6 +25,6 @@ bool parse_state_notification_message(StateNotification *notification);
 
 bool parse_bool(const char *value, bool *result);
 
-#define boolToString(value) (value)?"true":"false"
+#define boolToString(value) (value) ? "true" : "false"
 
 #endif /* PARSING_H */

@@ -35,7 +35,6 @@ typedef struct SystemdServiceConfig
 
 	/* PostgreSQL setup */
 	PostgresSetup pgSetup;
-
 } SystemdServiceConfig;
 
 void systemd_config_init(SystemdServiceConfig *config, const char *pgdata);

@@ -44,31 +44,31 @@ bool
 fetchLocalIPAddress(char *localIpAddress, int size,
 					const char *serviceName, int servicePort)
 {
-    char buffer[INET_ADDRSTRLEN];
+	char buffer[INET_ADDRSTRLEN];
 	const char *ipAddr;
-    struct sockaddr_in name;
-    socklen_t namelen = sizeof(name);
-    int err = -1;
+	struct sockaddr_in name;
+	socklen_t namelen = sizeof(name);
+	int err = -1;
 
-    struct sockaddr_in serv;
+	struct sockaddr_in serv;
 
-    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+	int sock = socket(AF_INET, SOCK_DGRAM, 0);
 
-    //Socket could not be created
-    if (sock < 0)
-    {
-        log_warn("Failed to create a socket: %m");
-        return false;
-    }
+	/*Socket could not be created */
+	if (sock < 0)
+	{
+		log_warn("Failed to create a socket: %m");
+		return false;
+	}
 
-    memset(&serv, 0, sizeof(serv));
-    serv.sin_family = AF_INET;
-    serv.sin_addr.s_addr = inet_addr(serviceName);
-    serv.sin_port = htons(servicePort);
+	memset(&serv, 0, sizeof(serv));
+	serv.sin_family = AF_INET;
+	serv.sin_addr.s_addr = inet_addr(serviceName);
+	serv.sin_port = htons(servicePort);
 
-    err = connect(sock, (const struct sockaddr*) &serv, sizeof(serv));
-    if (err < 0)
-    {
+	err = connect(sock, (const struct sockaddr *) &serv, sizeof(serv));
+	if (err < 0)
+	{
 		if (env_found_empty("PG_REGRESS_SOCK_DIR"))
 		{
 			/*
@@ -82,28 +82,28 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 			log_warn("Failed to connect: %m");
 			return false;
 		}
-    }
+	}
 
-    err = getsockname(sock, (struct sockaddr*) &name, &namelen);
-    if (err < 0)
-    {
-        log_warn("Failed to get IP address from socket: %m");
-        return false;
-    }
+	err = getsockname(sock, (struct sockaddr *) &name, &namelen);
+	if (err < 0)
+	{
+		log_warn("Failed to get IP address from socket: %m");
+		return false;
+	}
 
-    ipAddr = inet_ntop(AF_INET, &name.sin_addr, buffer, INET_ADDRSTRLEN);
+	ipAddr = inet_ntop(AF_INET, &name.sin_addr, buffer, INET_ADDRSTRLEN);
 
-    if (ipAddr != NULL)
-    {
-        sformat(localIpAddress, size, "%s", buffer);
-    }
-    else
-    {
+	if (ipAddr != NULL)
+	{
+		sformat(localIpAddress, size, "%s", buffer);
+	}
+	else
+	{
 		log_warn("Failed to determine local ip address: %m");
-    }
-    close(sock);
+	}
+	close(sock);
 
-    return ipAddr != NULL;
+	return ipAddr != NULL;
 }
 
 
@@ -128,8 +128,8 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 		return false;
 	}
 
-    for (ifa = ifaddr; ifa; ifa = ifa->ifa_next)
-    {
+	for (ifa = ifaddr; ifa; ifa = ifa->ifa_next)
+	{
 		char netmask[INET6_ADDRSTRLEN] = { 0 };
 		char address[INET6_ADDRSTRLEN] = { 0 };
 
@@ -150,14 +150,14 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 		{
 			case AF_INET:
 			{
-				struct sockaddr_in *netmask4
-					= (struct sockaddr_in *) ifa->ifa_netmask;
-				struct sockaddr_in *address4
-					= (struct sockaddr_in*) ifa->ifa_addr;
+				struct sockaddr_in *netmask4 =
+					(struct sockaddr_in *) ifa->ifa_netmask;
+				struct sockaddr_in *address4 =
+					(struct sockaddr_in *) ifa->ifa_addr;
 
 				struct in_addr s_network;
 
-				if (inet_ntop(AF_INET, (void*) &netmask4->sin_addr,
+				if (inet_ntop(AF_INET, (void *) &netmask4->sin_addr,
 							  netmask, INET_ADDRSTRLEN) == NULL)
 				{
 					/* just skip that entry then */
@@ -165,7 +165,7 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 					continue;
 				}
 
-				if (inet_ntop(AF_INET, (void*) &address4->sin_addr,
+				if (inet_ntop(AF_INET, (void *) &address4->sin_addr,
 							  address, INET_ADDRSTRLEN) == NULL)
 				{
 					/* just skip that entry then */
@@ -179,7 +179,7 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 
 				prefix = countSetBits(netmask4->sin_addr.s_addr);
 
-				if (inet_ntop(AF_INET, (void*) &s_network,
+				if (inet_ntop(AF_INET, (void *) &s_network,
 							  network, INET_ADDRSTRLEN) == NULL)
 				{
 					/* just skip that entry then */
@@ -193,14 +193,14 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 			case AF_INET6:
 			{
 				int i = 0;
-				struct sockaddr_in6 *netmask6
-					= (struct sockaddr_in6 *) ifa->ifa_netmask;
-				struct sockaddr_in6 *address6
-					= (struct sockaddr_in6 *) ifa->ifa_addr;
+				struct sockaddr_in6 *netmask6 =
+					(struct sockaddr_in6 *) ifa->ifa_netmask;
+				struct sockaddr_in6 *address6 =
+					(struct sockaddr_in6 *) ifa->ifa_addr;
 
 				struct in6_addr s_network;
 
-				if (inet_ntop(AF_INET6, (void*) &netmask6->sin6_addr,
+				if (inet_ntop(AF_INET6, (void *) &netmask6->sin6_addr,
 							  netmask, INET6_ADDRSTRLEN) == NULL)
 				{
 					/* just skip that entry then */
@@ -208,7 +208,7 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 					continue;
 				}
 
-				if (inet_ntop(AF_INET6, (void*) &address6->sin6_addr,
+				if (inet_ntop(AF_INET6, (void *) &address6->sin6_addr,
 							  address, INET6_ADDRSTRLEN) == NULL)
 				{
 					/* just skip that entry then */
@@ -219,8 +219,8 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 				for (i = 0; i < sizeof(struct in6_addr); i++)
 				{
 					s_network.s6_addr[i] =
-						address6->sin6_addr.s6_addr[i]
-						& netmask6->sin6_addr.s6_addr[i];
+						address6->sin6_addr.s6_addr[i] &
+						netmask6->sin6_addr.s6_addr[i];
 				}
 
 				prefix = countSetBitsv6(netmask6->sin6_addr.s6_addr);
@@ -289,7 +289,7 @@ countSetBitsv6(unsigned char *addr)
 	int i = 0;
 	unsigned int count = 0;
 
-	for(i=0; i<16; i++)
+	for (i = 0; i < 16; i++)
 	{
 		unsigned char n = addr[i];
 
@@ -321,7 +321,7 @@ fetchIPAddressFromInterfaceList(char *localIpAddress, int size)
 	}
 
 	for (ifaddr = ifaddrList; ifaddr != NULL; ifaddr = ifaddr->ifa_next)
- 	{
+	{
 		if (ifaddr->ifa_flags & IFF_LOOPBACK)
 		{
 			log_trace("Skipping loopback interface \"%s\"", ifaddr->ifa_name);
@@ -349,9 +349,9 @@ fetchIPAddressFromInterfaceList(char *localIpAddress, int size)
 		if (ifaddr->ifa_addr->sa_family == AF_INET)
 		{
 			struct sockaddr_in *ip =
-				(struct sockaddr_in*) ifaddr->ifa_addr;
+				(struct sockaddr_in *) ifaddr->ifa_addr;
 
-			if (inet_ntop(AF_INET, (void*) &(ip->sin_addr),
+			if (inet_ntop(AF_INET, (void *) &(ip->sin_addr),
 						  localIpAddress, size) == NULL)
 			{
 				/* skip that address, silently */
@@ -386,7 +386,7 @@ ipv4eq(struct sockaddr_in *a, struct sockaddr_in *b)
 static bool
 ipv6eq(struct sockaddr_in6 *a, struct sockaddr_in6 *b)
 {
-	int			i;
+	int i;
 
 	for (i = 0; i < 16; i++)
 	{
@@ -456,8 +456,8 @@ findHostnameLocalAddress(const char *hostname, char *localIpAddress, int size)
 				continue;
 			}
 
-			if (ifaddr->ifa_addr->sa_family == AF_INET
-				&& dns_addr->ai_family == AF_INET)
+			if (ifaddr->ifa_addr->sa_family == AF_INET &&
+				dns_addr->ai_family == AF_INET)
 			{
 				struct sockaddr_in *ip =
 					(struct sockaddr_in *) ifaddr->ifa_addr;
@@ -483,8 +483,8 @@ findHostnameLocalAddress(const char *hostname, char *localIpAddress, int size)
 					return true;
 				}
 			}
-			else if (ifaddr->ifa_addr->sa_family == AF_INET6
-					 && dns_addr->ai_family == AF_INET6)
+			else if (ifaddr->ifa_addr->sa_family == AF_INET6 &&
+					 dns_addr->ai_family == AF_INET6)
 			{
 				struct sockaddr_in6 *ip =
 					(struct sockaddr_in6 *) ifaddr->ifa_addr;
@@ -581,7 +581,7 @@ findHostnameFromLocalIpAddress(char *localIpAddress, char *hostname, int size)
 		if (ret != 0)
 		{
 			log_warn("Failed to resolve hostname from address \"%s\": %s",
-					  localIpAddress, gai_strerror(ret));
+					 localIpAddress, gai_strerror(ret));
 			return false;
 		}
 

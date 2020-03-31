@@ -143,17 +143,17 @@ keeper_should_ensure_current_state_before_transition(Keeper *keeper)
 		return false;
 	}
 
-	if (keeperState->assigned_role == DRAINING_STATE
-		|| keeperState->assigned_role == DEMOTE_TIMEOUT_STATE
-		|| keeperState->assigned_role == DEMOTED_STATE)
+	if (keeperState->assigned_role == DRAINING_STATE ||
+		keeperState->assigned_role == DEMOTE_TIMEOUT_STATE ||
+		keeperState->assigned_role == DEMOTED_STATE)
 	{
 		/* don't ensure Postgres is running before shutting it down */
 		return false;
 	}
 
-	if (keeperState->current_role == DRAINING_STATE
-		|| keeperState->current_role == DEMOTE_TIMEOUT_STATE
-		|| keeperState->current_role == DEMOTED_STATE)
+	if (keeperState->current_role == DRAINING_STATE ||
+		keeperState->current_role == DEMOTE_TIMEOUT_STATE ||
+		keeperState->current_role == DEMOTED_STATE)
 	{
 		/* don't ensure Postgres is down before starting it again */
 		return false;
@@ -264,6 +264,7 @@ keeper_ensure_current_state(Keeper *keeper)
 
 		case MAINTENANCE_STATE:
 		default:
+
 			/* nothing to be done here */
 			return true;
 	}
@@ -327,8 +328,8 @@ ReportPgIsRunning(Keeper *keeper)
 
 		return postgres->pgIsRunning;
 	}
-	else if ((now - postgres->pgFirstStartFailureTs) > timeout
-		|| postgres->pgStartRetries >= retries)
+	else if ((now - postgres->pgFirstStartFailureTs) > timeout ||
+			 postgres->pgStartRetries >= retries)
 	{
 		/*
 		 * If we fail to restart PostgreSQL 3 times in a row within the last 20
@@ -338,7 +339,7 @@ ReportPgIsRunning(Keeper *keeper)
 		 */
 		log_error("Failed to restart PostgreSQL %d times in the "
 				  "last %" PRIu64 "s, reporting PostgreSQL not running to "
-				  "the pg_auto_failover monitor.",
+								  "the pg_auto_failover monitor.",
 				  postgres->pgStartRetries,
 				  now - postgres->pgFirstStartFailureTs);
 
@@ -360,6 +361,7 @@ ReportPgIsRunning(Keeper *keeper)
 
 	/* we never reach this point. */
 }
+
 
 /*
  * keeper_update_pg_state updates our internal reflection of the PostgreSQL
@@ -461,7 +463,7 @@ keeper_update_pg_state(Keeper *keeper)
 			 * what we are doing anymore.
 			 */
 			log_error("Unknown PostgreSQL system identifier: %" PRIu64 ", "
-					  "expected %" PRIu64,
+																	   "expected %" PRIu64,
 					  pgSetup->control.system_identifier,
 					  keeperState->system_identifier);
 			return false;
@@ -578,22 +580,24 @@ keeper_update_pg_state(Keeper *keeper)
 			 * pgsql_get_postgres_metadata should always return a non-empty
 			 * string when we are a PRIMARY and our standby is connected.
 			 */
-			return postgres->pgIsRunning
-				&& !IS_EMPTY_STRING_BUFFER(postgres->currentLSN)
-				&& !IS_EMPTY_STRING_BUFFER(postgres->pgsrSyncState);
+			return postgres->pgIsRunning &&
+				   !IS_EMPTY_STRING_BUFFER(postgres->currentLSN) &&
+				   !IS_EMPTY_STRING_BUFFER(postgres->pgsrSyncState);
 		}
 
 		case SECONDARY_STATE:
 		case CATCHINGUP_STATE:
 		{
 			/* pg_stat_replication.sync_state is only available upstream */
-			return postgres->pgIsRunning
-				&& !IS_EMPTY_STRING_BUFFER(postgres->currentLSN);
+			return postgres->pgIsRunning &&
+				   !IS_EMPTY_STRING_BUFFER(postgres->currentLSN);
 		}
 
 		default:
+		{
 			/* we don't need to check replication state in those states */
 			break;
+		}
 	}
 
 	return true;
@@ -1072,10 +1076,10 @@ keeper_init_state_read(Keeper *keeper, KeeperStateInit *initState)
 	pg_autoctl_state_version =
 		((KeeperStateInit *) content)->pg_autoctl_state_version;
 
-	if (fileSize >= sizeof(KeeperStateData)
-		&& pg_autoctl_state_version == PG_AUTOCTL_STATE_VERSION)
+	if (fileSize >= sizeof(KeeperStateData) &&
+		pg_autoctl_state_version == PG_AUTOCTL_STATE_VERSION)
 	{
-		*initState = *(KeeperStateInit*) content;
+		*initState = *(KeeperStateInit *) content;
 		free(content);
 		return true;
 	}
@@ -1097,27 +1101,27 @@ keeper_init_state_read(Keeper *keeper, KeeperStateInit *initState)
 bool
 keeper_state_as_json(Keeper *keeper, char *json, int size)
 {
-    JSON_Value *js = json_value_init_object();
-    JSON_Value *jsPostgres = json_value_init_object();
-    JSON_Value *jsKeeperState = json_value_init_object();
+	JSON_Value *js = json_value_init_object();
+	JSON_Value *jsPostgres = json_value_init_object();
+	JSON_Value *jsKeeperState = json_value_init_object();
 
 	JSON_Object *jsRoot = json_value_get_object(js);
 
-    char *serialized_string = NULL;
+	char *serialized_string = NULL;
 	int len;
 
 	pg_setup_as_json(&(keeper->postgres.postgresSetup), jsPostgres);
 	keeperStateAsJSON(&(keeper->state), jsKeeperState);
 
-    json_object_set_value(jsRoot, "postgres", jsPostgres);
-    json_object_set_value(jsRoot, "state", jsKeeperState);
+	json_object_set_value(jsRoot, "postgres", jsPostgres);
+	json_object_set_value(jsRoot, "state", jsKeeperState);
 
-    serialized_string = json_serialize_to_string_pretty(js);
+	serialized_string = json_serialize_to_string_pretty(js);
 
 	len = strlcpy(json, serialized_string, size);
 
-    json_free_serialized_string(serialized_string);
-    json_value_free(js);
+	json_free_serialized_string(serialized_string);
+	json_value_free(js);
 
 	/* strlcpy returns how many bytes where necessary */
 	return len < size;

@@ -136,8 +136,8 @@ CommandLine show_file_command =
 
 typedef enum
 {
-	SHOW_FILE_UNKNOWN = 0,		/* no option selected yet */
-	SHOW_FILE_ALL,				/* --all, or no option at all */
+	SHOW_FILE_UNKNOWN = 0,      /* no option selected yet */
+	SHOW_FILE_ALL,              /* --all, or no option at all */
 	SHOW_FILE_CONFIG,
 	SHOW_FILE_STATE,
 	SHOW_FILE_INIT,
@@ -245,16 +245,22 @@ cli_show_state_getopts(int argc, char **argv)
 				switch (verboseCount)
 				{
 					case 1:
+					{
 						log_set_level(LOG_INFO);
 						break;
+					}
 
 					case 2:
+					{
 						log_set_level(LOG_DEBUG);
 						break;
+					}
 
 					default:
+					{
 						log_set_level(LOG_TRACE);
 						break;
+					}
 				}
 				break;
 			}
@@ -462,16 +468,22 @@ cli_show_nodes_getopts(int argc, char **argv)
 				switch (verboseCount)
 				{
 					case 1:
+					{
 						log_set_level(LOG_INFO);
 						break;
+					}
 
 					case 2:
+					{
 						log_set_level(LOG_DEBUG);
 						break;
+					}
 
 					default:
+					{
 						log_set_level(LOG_TRACE);
 						break;
+					}
 				}
 				break;
 			}
@@ -687,16 +699,22 @@ cli_show_uri_getopts(int argc, char **argv)
 				switch (verboseCount)
 				{
 					case 1:
+					{
 						log_set_level(LOG_INFO);
 						break;
+					}
 
 					case 2:
+					{
 						log_set_level(LOG_DEBUG);
 						break;
+					}
 
 					default:
+					{
 						log_set_level(LOG_TRACE);
 						break;
+					}
 				}
 				break;
 			}
@@ -1047,8 +1065,8 @@ cli_show_file_getopts(int argc, char **argv)
 
 			case 'c':
 			{
-				if (fileOptions.selection != SHOW_FILE_UNKNOWN
-					&& fileOptions.selection != SHOW_FILE_CONFIG)
+				if (fileOptions.selection != SHOW_FILE_UNKNOWN &&
+					fileOptions.selection != SHOW_FILE_CONFIG)
 				{
 					log_error(
 						"Please use only one of --config --state --init --pid");
@@ -1061,8 +1079,8 @@ cli_show_file_getopts(int argc, char **argv)
 
 			case 's':
 			{
-				if (fileOptions.selection != SHOW_FILE_UNKNOWN
-					&& fileOptions.selection != SHOW_FILE_STATE)
+				if (fileOptions.selection != SHOW_FILE_UNKNOWN &&
+					fileOptions.selection != SHOW_FILE_STATE)
 				{
 					log_error(
 						"Please use only one of --config --state --init --pid");
@@ -1075,8 +1093,8 @@ cli_show_file_getopts(int argc, char **argv)
 
 			case 'i':
 			{
-				if (fileOptions.selection != SHOW_FILE_UNKNOWN
-					&& fileOptions.selection != SHOW_FILE_INIT)
+				if (fileOptions.selection != SHOW_FILE_UNKNOWN &&
+					fileOptions.selection != SHOW_FILE_INIT)
 				{
 					log_error(
 						"Please use only one of --config --state --init --pid");
@@ -1089,8 +1107,8 @@ cli_show_file_getopts(int argc, char **argv)
 
 			case 'p':
 			{
-				if (fileOptions.selection != SHOW_FILE_UNKNOWN
-					&& fileOptions.selection != SHOW_FILE_PID)
+				if (fileOptions.selection != SHOW_FILE_UNKNOWN &&
+					fileOptions.selection != SHOW_FILE_PID)
 				{
 					log_error(
 						"Please use only one of --config --state --init --pid");
@@ -1114,16 +1132,22 @@ cli_show_file_getopts(int argc, char **argv)
 				switch (verboseCount)
 				{
 					case 1:
+					{
 						log_set_level(LOG_INFO);
 						break;
+					}
 
 					case 2:
+					{
 						log_set_level(LOG_DEBUG);
 						break;
+					}
 
 					default:
+					{
 						log_set_level(LOG_TRACE);
 						break;
+					}
 				}
 				break;
 			}
