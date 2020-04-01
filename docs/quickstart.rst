@@ -247,53 +247,141 @@ Next connect to node B and do the same process. We'll do both steps at once:
 It discovers from the monitor that a primary exists, and then switches its own
 state to be a hot standby and begins streaming WAL contents from the primary.
 
+Node communication
+------------------
+
+For convenience, pg_autoctl modifies each node's ``pg_hba.conf`` file to allow
+the nodes to connect to one another. For instance, pg_autoctl added the
+following lines to node A:
+
+.. code-block:: ini
+
+   # automatically added to node A
+
+   host "appdb" "ha-admin" ha-demo-a.internal.cloudapp.net trust
+   host all "pgautofailover_monitor" ha-demo-monitor.internal.cloudapp.net trust
+   host replication "pgautofailover_replicator" ha-demo-b.internal.cloudapp.net trust
+   host "appdb" "pgautofailover_replicator" ha-demo-b.internal.cloudapp.net trust
+   host replication "pgautofailover_replicator" ha-demo-a.internal.cloudapp.net trust
+   host "appdb" "pgautofailover_replicator" ha-demo-a.internal.cloudapp.net trust
+
+For ``pg_hba.conf`` on the monitor node pg_autoctl inspects the local network
+and makes its best guess about the subnet to allow. In our case it guessed
+correctly:
+
+.. code-block:: ini
+
+   # automatically added to the monitor
+
+   host "pg_auto_failover" "autoctl_node" 10.0.1.0/24 trust
+
+If worker nodes have more ad-hoc addresses and are not in the same subnet, it's
+better to disable pg_autoctl's automatic modification of pg_hba using the
+``--skip-pg-hba`` command line option during creation. You will then need to
+edit the hba file by hand. Another reason for manual edits would be to use
+special authentication methods.
+
 Watch the replication
 ---------------------
 
 First let’s verify that the monitor knows about our nodes, and see what
 states it has assigned them:
 
-.. code-block:: text
+.. code-block::
 
-   # on the monitor virtual machine
-
-   sudo -i -u postgres \
-     pg_autoctl show state \
-       --pgdata monitor
+   ssh -l ha-admin `vm_ip monitor` pg_autoctl show state --pgdata monitor
 
                               Name |   Port | Group |  Node |     Current State |    Assigned State
    --------------------------------+--------+-------+-------+-------------------+------------------
    ha-demo-a.internal.cloudapp.net |   5432 |     0 |     1 |           primary |           primary
    ha-demo-b.internal.cloudapp.net |   5432 |     0 |     2 |         secondary |         secondary
 
-This looks good. We can add data to the primary, and watch it get
-reflected in the secondary.
+
+This looks good. We can add data to the primary, and later see it appear in the
+secondary. We'll connect to the database from inside our "app" virtual machine,
+using a connection string obtained from the monitor. First we'll get the
+connection string and store it in a local environment variable:
 
 .. code-block:: bash
 
-   # on your local machine
+   APP_DB_URI=$( \
+     ssh -l ha-admin `vm_ip monitor` \
+       pg_autoctl show uri --formation default --pgdata monitor \
+   )
 
-   # add data to primary
-   psql TODO -p 6010 \
-     -c 'create table foo as select generate_series(1,1000000) bar;'
+The connection string contains both our nodes, comma separated, and includes
+the url parameter ``?target_session_attrs=read-write`` telling psql that we
+want to connect to whichever of these servers supports reads *and* writes.
+That will be the primary server.
 
-   # query secondary
-   psql TODO -p 6011 -c 'select count(*) from foo;'
-     count
-   ---------
-    1000000
+.. code-block:: bash
+
+   # connect to database via psql on the app vm
+   ssh -l ha-admin -t `vm_ip app` psql "\"$APP_DB_URI\""
+
+Within psql:
+
+.. code-block:: psql
+
+   -- create a table with a million rows
+   CREATE TABLE foo AS SELECT generate_series(1,1000000) bar;
+   \q
 
 Cause a failover
 ----------------
 
-This plot is too boring, time to introduce a problem. We’ll turn off the
-primary and watch the secondary get promoted.
+Now that we've added data to node A, let's switch which is considered
+the primary and which the secondary. After the switch we'll connect again
+and query the data, this time from node B.
+
+.. code-block:: bash
+
+   # initiate failover to node B
+   ssh -l ha-admin -t `vm_ip monitor` \
+     pg_autoctl perform switchover --pgdata monitor
+
+   # watch the progress
+   watch -d \
+     ssh -l ha-admin `vm_ip monitor` pg_autoctl show state --pgdata monitor
+
+   # press CTRL-C to stop watching
+
+Once node B is marked "primary" (or "wait_primary") we can connect and verify
+that the data is still present:
+
+.. code-block:: bash
+
+   # connect to database via psql on the app vm
+   ssh -l ha-admin -t `vm_ip app` psql "\"$APP_DB_URI\""
+
+Within psql:
+
+.. code-block:: psql
+
+   SELECT count(*) FROM foo;
+   \q
+
+It shows
+
+.. code-block::
+
+    count
+  ---------
+   1000000
+
+Cause a node failure
+--------------------
+
+This plot is too boring, time to introduce a problem. We’ll turn off VM for
+node B (currently the primary after our previous failover) and watch node A
+get promoted.
 
 In one terminal let’s keep an eye on events:
 
 .. code-block:: bash
 
-   watch pg_autoctl show events --pgdata ./monitor
+   watch -d \
+     ssh -l ha-admin `vm_ip monitor` pg_autoctl show state --pgdata monitor
 
 In another terminal we’ll turn off the virtual server.
 
@@ -301,71 +389,53 @@ In another terminal we’ll turn off the virtual server.
 
    az vm stop \
      --resource-group ha-demo \
-     --name ha-demo-a
+     --name ha-demo-b
 
-After a number of failed attempts to talk to node A, the monitor determines
+After a number of failed attempts to talk to node B, the monitor determines
 the node is unhealthy and puts it into the "demoted" state.  The monitor
-promotes node B to be the new primary.
+promotes node A to be the new primary.
 
 .. code-block:: bash
 
-   TODO
-   pg_autoctl show state --pgdata ./monitor
-        Name |   Port | Group |  Node |     Current State |    Assigned State
-   ----------+--------+-------+-------+-------------------+------------------
-   127.0.0.1 |   6010 |     0 |     1 |           demoted |        catchingup
-   127.0.0.1 |   6011 |     0 |     2 |      wait_primary |      wait_primary
+   .
+                              Name |   Port | Group |  Node |     Current State |    Assigned State
+   --------------------------------+--------+-------+-------+-------------------+------------------
+   ha-demo-a.internal.cloudapp.net |   5432 |     0 |     7 |      wait_primary |      wait_primary
+   ha-demo-b.internal.cloudapp.net |   5432 |     0 |     8 |           demoted |        catchingup
 
+Node A cannot be considered in full "primary" state since there is no secondary
+present, but it can still serve client requests. It is marked as "wait_primary"
+until a secondary appears, to indicate that it's running without a backup.
 
-Node B cannot be considered in full "primary" state since there is no
-secondary present. It is marked as "wait_primary" until a secondary
-appears.
-
-A client, whether a web server or just psql, can list multiple
-hosts in its PostgreSQL connection string, and use the parameter
-``target_session_attrs`` to add rules about which server to choose.
-
-To discover the url to use in our case, the following command can be used:
+Let's add some data while B is offline.
 
 .. code-block:: bash
 
-   pg_autoctl show uri --pgdata ./monitor
+   # notice how $APP_DB_URI continues to work no matter which node
+   # is serving as primary
+   ssh -l ha-admin -t `vm_ip app` psql "\"$APP_DB_URI\""
 
+Within psql:
 
-            Type |    Name | Connection String
-   -----------+---------+-------------------------------
-      monitor | monitor | port=6000 dbname=pg_auto_failover host=/tmp user=autoctl_node
-    formation | default | postgres://127.0.0.1:6010,127.0.0.1:6011/?target_session_attrs=read-write
+.. code-block:: psql
 
-Here we ask to connect to either node A or B -- whichever supports reads and
-writes:
+   INSERT INTO foo SELECT generate_series(1000001, 2000000);
+   \q
 
-.. code-block:: bash
-
-   psql \
-     'postgres://localhost:6010,localhost:6011/postgres?target_session_attrs=read-write&sslmode=require'
-
-When nodes A and B were both running, psql would connect to node A
-because B would be read-only. However now that A is offline and B is
-writeable, psql will connect to B. We can insert more data:
-
-.. code-block:: sql
-
-   -- on the prompt from the psql command above:
-   insert into foo select generate_series(1000001, 2000000);
-
-Resurrect node A
+Resurrect node B
 ----------------
 
-Let’s increase the disk space for node A, so it's able to run again.
+Run this command to bring node B back online:
 
 .. code-block:: bash
 
-   rm /mnt/node_a/bigfile
+   az vm start \
+     --resource-group ha-demo \
+     --name ha-demo-b
 
-Now the next time the keeper retries, it brings the node back. Node A
-goes through the state "catchingup" while it updates its data to match
-B. Once that's done, A becomes a secondary, and B is now a full primary.
+Now the next time the keeper retries its health check, it brings the node back.
+Node B goes through the state "catchingup" while it updates its data to match
+A. Once that's done, B becomes a secondary, and A is now a full primary again.
 
 .. code-block:: bash
 
@@ -376,12 +446,24 @@ B. Once that's done, A becomes a secondary, and B is now a full primary.
    127.0.0.1 |   6011 |     0 |     2 |           primary |           primary
 
 
-What's more, if we connect directly to node A and run a query we can see
-it contains the rows we inserted while it was down.
+What's more, if we connect directly to the database again, all two million rows
+are still present.
 
 .. code-block:: bash
 
-  psql -p 6010 -c 'select count(*) from foo;'
+   ssh -l ha-admin -t `vm_ip app` psql "\"$APP_DB_URI\""
+
+Within psql:
+
+.. code-block:: psql
+
+   SELECT count(*) FROM foo;
+   \q
+
+It shows
+
+.. code-block::
+
     count
   ---------
    2000000
