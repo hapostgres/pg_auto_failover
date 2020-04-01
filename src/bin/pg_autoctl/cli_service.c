@@ -112,10 +112,6 @@ static void
 cli_keeper_run(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
-	pid_t pid = 0;
-
-	bool missingPgdataIsOk = true;
-	bool pgIsNotRunningIsOk = true;
 	bool monitorDisabledIsOk = true;
 
 	keeper.config = keeperOptions;
@@ -128,6 +124,9 @@ cli_keeper_run(int argc, char **argv)
 	 * In order to make it possible to interrupt the pg_autctl service while in
 	 * that loop, we need to install our signal handlers and pidfile prior to
 	 * getting there.
+	 *
+	 * So here only read the configuration file, refrain from discovering the
+	 * actual Postgres service status.
 	 */
 	if (!keeper_config_read_file_skip_pgsetup(&(keeper.config),
 											  monitorDisabledIsOk))
@@ -136,45 +135,11 @@ cli_keeper_run(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	if (!keeper_service_init(&keeper, &pid))
+	if (!start_keeper(&keeper))
 	{
-		log_fatal("Failed to initialize pg_auto_failover service, "
+		log_fatal("Failed to start pg_autoctl keeper service, "
 				  "see above for details");
-		exit(EXIT_CODE_KEEPER);
-	}
-
-	if (!keeper_config_pgsetup_init(&(keeper.config),
-									missingPgdataIsOk,
-									pgIsNotRunningIsOk))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_CONFIG);
-	}
-
-	if (!keeper_init(&keeper, &keeper.config))
-	{
-		log_fatal("Failed to initialise keeper, see above for details");
-		exit(EXIT_CODE_PGCTL);
-	}
-
-	if (keeper.config.monitorDisabled)
-	{
-		/*
-		 * At the moment, we have nothing to do here. Later we might want to
-		 * open an HTTPd service and wait for API calls.
-		 */
-		/* (void) service_stop(keeper.config.pathnames.pid); */
-	}
-	else
-	{
-		/* Start with a monitor: implement the node active loop */
-		if (!keeper_check_monitor_extension_version(&keeper))
-		{
-			/* errors have already been logged */
-			exit(EXIT_CODE_MONITOR);
-		}
-
-		(void) keeper_node_active_loop(&keeper, pid);
+		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 }
 
@@ -188,6 +153,7 @@ static void
 cli_monitor_run(int argc, char **argv)
 {
 	KeeperConfig options = keeperOptions;
+
 	Monitor monitor = { 0 };
 	bool missingPgdataIsOk = false;
 	bool pgIsNotRunningIsOk = true;
@@ -200,13 +166,6 @@ cli_monitor_run(int argc, char **argv)
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_PGCTL);
-	}
-
-	/* Initialize our local connection to the monitor */
-	if (!monitor_local_init(&monitor))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_MONITOR);
 	}
 
 	/* Start the monitor service */

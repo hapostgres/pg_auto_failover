@@ -63,7 +63,7 @@ fsm_init_primary(Keeper *keeper)
 	PGSQL *pgsql = &(postgres->sqlClient);
 	bool inRecovery = false;
 
-	KeeperStateInit initState = { 0 };
+	KeeperStateInit *initState = &(keeper->initState);
 	PostgresSetup pgSetup = keeper->config.pgSetup;
 	bool postgresInstanceExists = pg_setup_pgdata_exists(&pgSetup);
 	bool pgInstanceIsOurs = false;
@@ -74,7 +74,7 @@ fsm_init_primary(Keeper *keeper)
 	 * When initialializing the local node on-top of an empty (or non-existing)
 	 * PGDATA directory, now is the time to `pg_ctl initdb`.
 	 */
-	if (!keeper_init_state_read(keeper, &initState))
+	if (!keeper_init_state_read(keeper))
 	{
 		log_error("Failed to read init state file \"%s\", which is required "
 				  "for the transition from INIT to SINGLE.",
@@ -87,27 +87,30 @@ fsm_init_primary(Keeper *keeper)
 	 * still running. After all the end-user could just stop Postgres and then
 	 * give the install to us. We ought to support that.
 	 */
-	if (initState.pgInitState >= PRE_INIT_STATE_RUNNING)
+	if (initState->pgInitState >= PRE_INIT_STATE_RUNNING)
 	{
-		if (!keeper_init_state_discover(keeper, &initState))
+		if (!keeper_init_state_discover(keeper))
 		{
 			/* errors have already been logged */
 			return false;
 		}
 
 		/* did the user try again after having stopped Postgres maybe? */
-		if (initState.pgInitState < PRE_INIT_STATE_RUNNING)
+		if (initState->pgInitState < PRE_INIT_STATE_RUNNING)
 		{
+			char *preInitStateString =
+				PreInitPostgreInstanceStateToString(initState->pgInitState);
+
 			log_info("PostgreSQL state has changed since registration time: %s",
-					 PreInitPostgreInstanceStateToString(initState.pgInitState));
+					 preInitStateString);
 		}
 	}
 
 	pgInstanceIsOurs =
-		   initState.pgInitState == PRE_INIT_STATE_EMPTY
-		|| initState.pgInitState == PRE_INIT_STATE_EXISTS;
+		   initState->pgInitState == PRE_INIT_STATE_EMPTY
+		|| initState->pgInitState == PRE_INIT_STATE_EXISTS;
 
-	if (initState.pgInitState == PRE_INIT_STATE_EMPTY
+	if (initState->pgInitState == PRE_INIT_STATE_EMPTY
 		&& !postgresInstanceExists)
 	{
 		if (!pg_ctl_initdb(pgSetup.pg_ctl, pgSetup.pgdata))
@@ -129,7 +132,7 @@ fsm_init_primary(Keeper *keeper)
 			return false;
 		}
 	}
-	else if (initState.pgInitState >= PRE_INIT_STATE_RUNNING)
+	else if (initState->pgInitState >= PRE_INIT_STATE_RUNNING)
 	{
 		log_error("PostgreSQL is already running at \"%s\", refusing to "
 				  "initialize a new cluster on-top of the current one.",
@@ -157,7 +160,17 @@ fsm_init_primary(Keeper *keeper)
 	 * Now is the time to make sure Postgres is running, as our next steps to
 	 * prepare a SINGLE from INIT are depending on being able to connect to the
 	 * local Postgres service.
+	 *
+	 * To signal that the Postgres sub-process should now get started, we go to
+	 * phase two of the init process.
 	 */
+	if (!keeper_init_state_update(keeper, INIT_STAGE_2))
+	{
+		log_error("Failed to update our init state file, "
+				  "see above for details");
+		return false;
+	}
+
 	if (!ensure_local_postgres_is_running(postgres))
 	{
 		log_error("Failed to initialise postgres as primary because "
@@ -373,8 +386,12 @@ fsm_disable_replication(Keeper *keeper)
 bool
 fsm_resume_as_primary(Keeper *keeper)
 {
-	if (!keeper_start_postgres(keeper))
+	LocalPostgresServer *postgres = &(keeper->postgres);
+
+	if (!ensure_local_postgres_is_running(postgres))
 	{
+		log_error("Failed to promote postgres because the server could not "
+				  "be started before promotion, see above for details");
 		return false;
 	}
 
@@ -674,7 +691,16 @@ fsm_apply_settings(Keeper *keeper)
 bool
 fsm_start_postgres(Keeper *keeper)
 {
-	return keeper_start_postgres(keeper);
+	LocalPostgresServer *postgres = &(keeper->postgres);
+
+	if (!ensure_local_postgres_is_running(postgres))
+	{
+		log_error("Failed to promote postgres because the server could not "
+				  "be started before promotion, see above for details");
+		return false;
+	}
+
+	return true;
 }
 
 

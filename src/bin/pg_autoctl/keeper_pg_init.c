@@ -25,6 +25,10 @@
 #include "pghba.h"
 #include "pgsetup.h"
 #include "pgsql.h"
+#include "service.h"
+#include "service_keeper.h"
+#include "service_postgres.h"
+#include "signals.h"
 #include "state.h"
 
 
@@ -43,8 +47,12 @@ bool keeperInitWarnings = false;
 
 static KeeperStateInit initState = { 0 };
 
-static bool keeper_pg_init_fsm(Keeper *keeper, KeeperConfig *config);
-static bool keeper_pg_init_and_register(Keeper *keeper, KeeperConfig *config);
+static bool keeper_pg_init_start(Keeper *keeper);
+static bool service_keeper_init_start(void *context, pid_t *pid);
+static bool service_keeper_init_stop(void *context);
+
+static bool keeper_pg_init_fsm(Keeper *keeper);
+static bool keeper_pg_init_and_register(Keeper *keeper);
 static bool reach_initial_state(Keeper *keeper);
 static bool wait_until_primary_is_ready(Keeper *config,
 										MonitorAssignedState *assignedState);
@@ -57,18 +65,20 @@ static bool keeper_pg_init_node_active(Keeper *keeper);
  * keeper_pg_init_fsm.
  */
 bool
-keeper_pg_init(Keeper *keeper, KeeperConfig *config)
+keeper_pg_init(Keeper *keeper)
 {
+	KeeperConfig *config = &(keeper->config);
+
 	log_trace("keeper_pg_init: monitor is %s",
 			  config->monitorDisabled ? "disabled" : "enabled" );
 
 	if (config->monitorDisabled)
 	{
-		return keeper_pg_init_fsm(keeper, config);
+		return keeper_pg_init_fsm(keeper);
 	}
 	else
 	{
-		return keeper_pg_init_and_register(keeper, config);
+		return keeper_pg_init_start(keeper);
 	}
 }
 
@@ -80,9 +90,154 @@ keeper_pg_init(Keeper *keeper, KeeperConfig *config)
  * for orders from another software.
  */
 static bool
-keeper_pg_init_fsm(Keeper *keeper, KeeperConfig *config)
+keeper_pg_init_fsm(Keeper *keeper)
 {
-	return keeper_init_fsm(keeper, config);
+	return keeper_init_fsm(keeper);
+}
+
+
+/*
+ * keeper_pg_init_start defines and start services needed during the keeper
+ * initialisation when doing `pg_autoctl create postgres`. We already need to
+ * have our Postgres service supervisor sub-process started and ready to start
+ * postgres when reaching initialization stage 2.
+ */
+static bool
+keeper_pg_init_start(Keeper *keeper)
+{
+	const char *pidfile = keeper->config.pathnames.pid;
+
+	Service subprocesses[] = {
+		{
+			"postgres fsm",
+			0,
+			&service_postgres_fsm_start,
+			&service_postgres_fsm_stop,
+			(void *) keeper
+		},
+		{
+			"keeper init",
+			0,
+			&service_keeper_init_start,
+			&service_keeper_init_stop,
+			(void *) keeper
+		}
+	};
+
+	int subprocessesCount = sizeof(subprocesses) / sizeof(subprocesses[0]);
+
+	if (!service_start(subprocesses, subprocessesCount, pidfile))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/* we only get there when the supervisor exited successfully (SIGTERM) */
+	return true;
+}
+
+
+/*
+ * service_keeper_init_start is a subprocess that runs the installation of the
+ * pg_autoctl keeper and its Postgres service, including initdb or
+ * pg_basebackup.
+ */
+static bool
+service_keeper_init_start(void *context, pid_t *pid)
+{
+	Keeper *keeper = (Keeper *) context;
+	KeeperConfig *config = &(keeper->config);
+
+	pid_t fpid = -1;
+	pid_t ppid = getpid();
+
+	/* Flush stdio channels just before fork, to avoid double-output problems */
+	fflush(stdout);
+	fflush(stderr);
+
+	/* time to create the node_active sub-process */
+	fpid = fork();
+
+	switch (fpid)
+	{
+		case -1:
+		{
+			log_error("Failed to fork the keeper init process");
+			return false;
+		}
+
+		case 0:
+		{
+			(void) set_ps_title("keeper init");
+
+			if (!keeper_pg_init_and_register(keeper))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_QUIT);
+			}
+
+			log_info("%s has been succesfully initialized.", config->role);
+
+			if (createAndRun)
+			{
+				(void) set_ps_title("node active");
+
+				if (!service_keeper_node_active_init(keeper))
+				{
+					log_fatal("Failed to initialise the node active service, "
+							  "see above for details");
+					exit(EXIT_CODE_INTERNAL_ERROR);
+				}
+
+				(void) keeper_node_active_loop(keeper, ppid);
+			}
+			else
+			{
+				exit(EXIT_CODE_QUIT);
+			}
+
+			/*
+			 * When the "main" function for the child process is over, it's the
+			 * end of our execution thread. Don't get back to the caller.
+			 */
+			if (asked_to_stop || asked_to_stop_fast)
+			{
+				exit(EXIT_CODE_QUIT);
+			}
+			else
+			{
+				/* something went wrong (e.g. broken pipe) */
+				exit(EXIT_CODE_INTERNAL_ERROR);
+			}
+		}
+
+		default:
+		{
+			/* fork succeeded, in parent */
+			log_debug("pg_autoctl init process started in subprocess %d",
+					  fpid);
+			*pid = fpid;
+			return true;
+		}
+	}
+}
+
+
+/*
+ * service_keeper_init_stop stops the postgres service, using pg_ctl stop.
+ */
+static bool
+service_keeper_init_stop(void *context)
+{
+	Service *service = (Service *) context;
+
+	if (kill(service->pid, SIGQUIT) != 0)
+	{
+		log_error("Failed to send SIGQUIT to pid %d for service %s",
+				  service->pid, service->name);
+		return false;
+	}
+	return true;
 }
 
 
@@ -108,12 +263,13 @@ keeper_pg_init_fsm(Keeper *keeper, KeeperConfig *config)
  * done, PostgreSQL is known to be running in the proper state.
  */
 static bool
-keeper_pg_init_and_register(Keeper *keeper, KeeperConfig *config)
+keeper_pg_init_and_register(Keeper *keeper)
 {
 	/*
 	 * The initial state we may register in depend on the current PostgreSQL
 	 * instance that might exist or not at PGDATA.
 	 */
+	KeeperConfig *config = &(keeper->config);
 	PostgresSetup pgSetup = config->pgSetup;
 	bool postgresInstanceExists = pg_setup_pgdata_exists(&pgSetup);
 	bool postgresInstanceIsPrimary = pg_setup_is_primary(&pgSetup);
@@ -134,19 +290,12 @@ keeper_pg_init_and_register(Keeper *keeper, KeeperConfig *config)
 	 */
 	if (file_exists(config->pathnames.init))
 	{
-		return keeper_pg_init_continue(keeper, config);
+		return keeper_pg_init_continue(keeper);
 	}
 
 	if (file_exists(config->pathnames.state))
 	{
-		if (createAndRun)
-		{
-			if (!keeper_init(keeper, config))
-			{
-				return false;
-			}
-		}
-		else
+		if (!createAndRun)
 		{
 			log_fatal("The state file \"%s\" exists and "
 					  "there's no init in progress", config->pathnames.state);
@@ -177,7 +326,7 @@ keeper_pg_init_and_register(Keeper *keeper, KeeperConfig *config)
 		 * revert the situation by removing ourselves from the monitor and
 		 * removing the state file.
 		 */
-		if (!keeper_register_and_init(keeper, config, INIT_STATE))
+		if (!keeper_register_and_init(keeper, INIT_STATE))
 		{
 			/* monitor_register_node logs relevant errors */
 			return false;
@@ -223,7 +372,7 @@ keeper_pg_init_and_register(Keeper *keeper, KeeperConfig *config)
 		 * we register in INIT_STATE and let the monitor decide.
 		 */
 
-		if (!keeper_register_and_init(keeper, config, INIT_STATE))
+		if (!keeper_register_and_init(keeper, INIT_STATE))
 		{
 			/* monitor_register_node logs relevant errors */
 			return false;
@@ -254,7 +403,7 @@ keeper_pg_init_and_register(Keeper *keeper, KeeperConfig *config)
 		 * So our strategy is to ask the monitor to pick a state for us and
 		 * then implement whatever was decided.
 		 */
-		if (!keeper_register_and_init(keeper, config, INIT_STATE))
+		if (!keeper_register_and_init(keeper, INIT_STATE))
 		{
 			log_error("Failed to register the existing local Postgres node "
 					  "\"%s:%d\" running at \"%s\""
@@ -280,6 +429,7 @@ keeper_pg_init_and_register(Keeper *keeper, KeeperConfig *config)
 	return false;
 }
 
+
 /*
  * keeper_pg_init_continue attempts to continue a `pg_autoctl create` that
  * failed through in the middle. A particular case of interest is trying to
@@ -292,15 +442,17 @@ keeper_pg_init_and_register(Keeper *keeper, KeeperConfig *config)
  * registered to the monitor: that's when we create the init file.
  */
 bool
-keeper_pg_init_continue(Keeper *keeper, KeeperConfig *config)
+keeper_pg_init_continue(Keeper *keeper)
 {
+	KeeperConfig *config = &(keeper->config);
+
 	if (!keeper_init(keeper, config))
 	{
 		/* errors have already been logged */
 		return false;
 	}
 
-	if (!keeper_init_state_read(keeper, &initState))
+	if (!keeper_init_state_read(keeper))
 	{
 		log_fatal("Failed to restart from previous keeper init attempt");
 		log_info("HINT: use `pg_autoctl drop node` to retry in a clean state");
@@ -674,8 +826,16 @@ create_database_and_extension(Keeper *keeper)
 
 	/*
 	 * Now start the database, we need to create our dbname and maybe the Citus
-	 * Extension too.
+	 * Extension too. To signal that the Postgres sub-process should now get
+	 * started, we go to phase two of the init process.
 	 */
+	if (!keeper_init_state_update(keeper, INIT_STAGE_2))
+	{
+		log_error("Failed to update our init state file, "
+				  "see above for details");
+		return false;
+	}
+
 	if (!ensure_local_postgres_is_running(&initPostgres))
 	{
 		log_error("Failed to start PostgreSQL, see above for details");

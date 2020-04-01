@@ -400,7 +400,7 @@ cli_do_monitor_register_node(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	if (!keeper_register_and_init(&keeper, &config, initialState))
+	if (!keeper_register_and_init(&keeper, initialState))
 	{
 		exit(EXIT_CODE_BAD_STATE);
 	}

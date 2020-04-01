@@ -145,69 +145,22 @@ ensure_local_postgres_is_running(LocalPostgresServer *postgres)
 
 	if (!pg_is_running(pgSetup->pg_ctl, pgSetup->pgdata))
 	{
-		log_info("Postgres is not running, starting postgres");
+		int timeout = 10;		/* wait for Postgres for 10s */
+		bool pgIsRunning = false;
 
-		if (!pg_ctl_start(pgSetup->pg_ctl,
-						  pgSetup->pgdata,
-						  pgSetup->pgport,
-						  pgSetup->listen_addresses))
+		if (!pg_setup_wait_until_is_ready(pgSetup, timeout, LOG_DEBUG))
 		{
-			/* errors have already been logged */
-			bool pgIsRunning = false;
+			pgIsRunning = false;
 			local_postgres_update_pg_failures_tracking(postgres, pgIsRunning);
 			return false;
 		}
-		else
-		{
-			/* we expect postgres to be running now */
-			PostgresSetup newPgSetup = { 0 };
-			bool missingPgdataIsOk = false;
-			bool postgresNotRunningIsOk = false;
-			bool pgIsRunning = false;
 
-			/*
-			 * We know that pg_ctl start --wait was successfull. Still Postgres
-			 * might not have updated its postmaster.pid file yet. Have a
-			 * couple attempts at
-			 */
-			int maxAttempts = 5;
-			int attempts = 0;
+		/* update connection string for connection to postgres */
+		local_postgres_init(postgres, pgSetup);
 
-			for (attempts = 0; attempts < maxAttempts; attempts++)
-			{
-				bool pgIsRunning = pg_setup_is_running(pgSetup);
-
-				log_trace("waiting for pg_setup_is_running() [%s], attempt %d/%d",
-						  pgIsRunning ? "true" : "false",
-						  attempts+1,
-						  maxAttempts);
-
-				if (pgIsRunning)
-				{
-					break;
-				}
-
-				/* wait for 100 ms and try again */
-				pg_usleep(100 * 1000);
-			}
-
-			/* update settings from running database */
-			if (!pg_setup_init(&newPgSetup, pgSetup, missingPgdataIsOk,
-							   postgresNotRunningIsOk))
-			{
-				/* errors have already been logged */
-				pgIsRunning = false;
-				local_postgres_update_pg_failures_tracking(postgres, pgIsRunning);
-				return false;
-			}
-
-			/* update connection string for connection to postgres */
-			local_postgres_init(postgres, &newPgSetup);
-
-			/* update PostgreSQL restart failure tracking */
-			pgIsRunning = true;
-			local_postgres_update_pg_failures_tracking(postgres, pgIsRunning);
-		}
+		/* update PostgreSQL restart failure tracking */
+		pgIsRunning = true;
+		local_postgres_update_pg_failures_tracking(postgres, pgIsRunning);
 	}
 
 	return true;

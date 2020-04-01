@@ -28,8 +28,6 @@
 #include "signals.h"
 #include "string_utils.h"
 
-bool shutdownSequenceInProgress = false;
-
 static bool service_init(const char *pidfile, pid_t *pid);
 
 static bool service_supervisor(
@@ -84,11 +82,16 @@ service_start(Service services[], int serviceCount, const char *pidfile)
 		Service *service = &(services[serviceIndex]);
 		bool started = false;
 
-		log_info("Starting pg_autoctl %s service", service->name);
+		log_debug("Starting pg_autoctl %s service", service->name);
 
 		started = (*service->startFunction)(service->context, &(service->pid));
 
-		if (!started)
+		if (started)
+		{
+			log_info("Started pg_autoctl %s service with pid %d",
+					 service->name, service->pid);
+		}
+		else
 		{
 			/* TODO: implement a retry strategy with maxRetries/maxTime */
 			/* SIGQUIT the processes that started successfully */
@@ -138,6 +141,7 @@ service_supervisor(pid_t start_pid,
 {
 	int subprocessCount = serviceCount;
 	int stoppingLoopCounter = 0;
+	bool shutdownSequenceInProgress = false;
 
 	/* wait until all subprocesses are done */
 	while (subprocessCount > 0)

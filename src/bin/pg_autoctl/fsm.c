@@ -137,13 +137,13 @@
  */
 KeeperFSMTransition KeeperFSM[] = {
 	/*
-	 * CURRENT_STATE,   ASSIGNED_STATE,  COMMENT,  TRANSTION_FUNCTION
+	 * CURRENT_STATE,   ASSIGNED_STATE,  COMMENT,  PGSTATUS, TRANSTION_FUNCTION
 	 */
 
 	/*
 	 * Started as a single, no nothing
 	 */
-	{ INIT_STATE, SINGLE_STATE, COMMENT_INIT_TO_SINGLE, &fsm_init_primary },
+	{ INIT_STATE, SINGLE_STATE, COMMENT_INIT_TO_SINGLE, PGSTATUS_INIT, &fsm_init_primary },
 
 
 	/*
@@ -157,105 +157,105 @@ KeeperFSMTransition KeeperFSM[] = {
 	/*
 	 * other node(s) was forcibly removed, now single
 	 */
-	{ PRIMARY_STATE, SINGLE_STATE, COMMENT_PRIMARY_TO_SINGLE, &fsm_disable_replication },
-	{ WAIT_PRIMARY_STATE, SINGLE_STATE, COMMENT_PRIMARY_TO_SINGLE, &fsm_disable_replication },
-	{ JOIN_PRIMARY_STATE, SINGLE_STATE, COMMENT_PRIMARY_TO_SINGLE, &fsm_disable_replication },
+	{ PRIMARY_STATE, SINGLE_STATE, COMMENT_PRIMARY_TO_SINGLE, PGSTATUS_RUNNING, &fsm_disable_replication },
+	{ WAIT_PRIMARY_STATE, SINGLE_STATE, COMMENT_PRIMARY_TO_SINGLE, PGSTATUS_RUNNING, &fsm_disable_replication },
+	{ JOIN_PRIMARY_STATE, SINGLE_STATE, COMMENT_PRIMARY_TO_SINGLE, PGSTATUS_RUNNING, &fsm_disable_replication },
 
 	/*
 	 * failover occurred, primary -> draining/demoted
 	 */
-	{ PRIMARY_STATE, DRAINING_STATE, COMMENT_PRIMARY_TO_DRAINING, &fsm_stop_postgres },
-	{ DRAINING_STATE, DEMOTED_STATE, COMMENT_DRAINING_TO_DEMOTED, &fsm_stop_postgres },
-	{ PRIMARY_STATE, DEMOTED_STATE, COMMENT_PRIMARY_TO_DEMOTED, &fsm_stop_postgres },
-	{ PRIMARY_STATE, DEMOTE_TIMEOUT_STATE, COMMENT_PRIMARY_TO_DEMOTED, &fsm_stop_postgres },
+	{ PRIMARY_STATE, DRAINING_STATE, COMMENT_PRIMARY_TO_DRAINING, PGSTATUS_STOPPED, &fsm_stop_postgres },
+	{ DRAINING_STATE, DEMOTED_STATE, COMMENT_DRAINING_TO_DEMOTED, PGSTATUS_STOPPED, &fsm_stop_postgres },
+	{ PRIMARY_STATE, DEMOTED_STATE, COMMENT_PRIMARY_TO_DEMOTED, PGSTATUS_STOPPED, &fsm_stop_postgres },
+	{ PRIMARY_STATE, DEMOTE_TIMEOUT_STATE, COMMENT_PRIMARY_TO_DEMOTED, PGSTATUS_STOPPED, &fsm_stop_postgres },
 
-	{ JOIN_PRIMARY_STATE, DRAINING_STATE, COMMENT_PRIMARY_TO_DRAINING, &fsm_stop_postgres },
-	{ JOIN_PRIMARY_STATE, DEMOTED_STATE, COMMENT_PRIMARY_TO_DEMOTED, &fsm_stop_postgres },
-	{ JOIN_PRIMARY_STATE, DEMOTE_TIMEOUT_STATE, COMMENT_PRIMARY_TO_DEMOTED, &fsm_stop_postgres },
+	{ JOIN_PRIMARY_STATE, DRAINING_STATE, COMMENT_PRIMARY_TO_DRAINING, PGSTATUS_STOPPED, &fsm_stop_postgres },
+	{ JOIN_PRIMARY_STATE, DEMOTED_STATE, COMMENT_PRIMARY_TO_DEMOTED, PGSTATUS_STOPPED, &fsm_stop_postgres },
+	{ JOIN_PRIMARY_STATE, DEMOTE_TIMEOUT_STATE, COMMENT_PRIMARY_TO_DEMOTED, PGSTATUS_STOPPED, &fsm_stop_postgres },
 
-	{ APPLY_SETTINGS_STATE, DRAINING_STATE, COMMENT_PRIMARY_TO_DRAINING, &fsm_stop_postgres },
-	{ APPLY_SETTINGS_STATE, DEMOTED_STATE, COMMENT_PRIMARY_TO_DEMOTED, &fsm_stop_postgres },
-	{ APPLY_SETTINGS_STATE, DEMOTE_TIMEOUT_STATE, COMMENT_PRIMARY_TO_DEMOTED, &fsm_stop_postgres },	
+	{ APPLY_SETTINGS_STATE, DRAINING_STATE, COMMENT_PRIMARY_TO_DRAINING, PGSTATUS_STOPPED, &fsm_stop_postgres },
+	{ APPLY_SETTINGS_STATE, DEMOTED_STATE, COMMENT_PRIMARY_TO_DEMOTED, PGSTATUS_STOPPED, &fsm_stop_postgres },
+	{ APPLY_SETTINGS_STATE, DEMOTE_TIMEOUT_STATE, COMMENT_PRIMARY_TO_DEMOTED, PGSTATUS_STOPPED, &fsm_stop_postgres },
 
 	/*
 	 * was demoted, need to be dead now.
 	 */
-	{ DRAINING_STATE, DEMOTE_TIMEOUT_STATE, COMMENT_DRAINING_TO_DEMOTE_TIMEOUT, &fsm_stop_postgres },
-	{ DEMOTE_TIMEOUT_STATE, DEMOTED_STATE, COMMENT_DEMOTE_TIMEOUT_TO_DEMOTED,  &fsm_stop_postgres},
+	{ DRAINING_STATE, DEMOTE_TIMEOUT_STATE, COMMENT_DRAINING_TO_DEMOTE_TIMEOUT, PGSTATUS_STOPPED, &fsm_stop_postgres },
+	{ DEMOTE_TIMEOUT_STATE, DEMOTED_STATE, COMMENT_DEMOTE_TIMEOUT_TO_DEMOTED,  PGSTATUS_STOPPED, &fsm_stop_postgres},
 
 	/*
 	 * was demoted after a failure, but standby was forcibly removed
 	 */
-	{ DEMOTED_STATE, SINGLE_STATE, COMMENT_DEMOTED_TO_SINGLE, &fsm_resume_as_primary },
-	{ DEMOTE_TIMEOUT_STATE, SINGLE_STATE, COMMENT_DEMOTED_TO_SINGLE, &fsm_resume_as_primary },
-	{ DRAINING_STATE, SINGLE_STATE, COMMENT_DEMOTED_TO_SINGLE, &fsm_resume_as_primary },
+	{ DEMOTED_STATE, SINGLE_STATE, COMMENT_DEMOTED_TO_SINGLE, PGSTATUS_RUNNING, &fsm_resume_as_primary },
+	{ DEMOTE_TIMEOUT_STATE, SINGLE_STATE, COMMENT_DEMOTED_TO_SINGLE, PGSTATUS_RUNNING, &fsm_resume_as_primary },
+	{ DRAINING_STATE, SINGLE_STATE, COMMENT_DEMOTED_TO_SINGLE, PGSTATUS_RUNNING, &fsm_resume_as_primary },
 
 	/*
 	 * primary was forcibly removed
 	 */
-	{ SECONDARY_STATE, SINGLE_STATE, COMMENT_LOST_PRIMARY, &fsm_promote_standby },
-	{ CATCHINGUP_STATE, SINGLE_STATE, COMMENT_LOST_PRIMARY, &fsm_promote_standby },
-	{ PREP_PROMOTION_STATE, SINGLE_STATE, COMMENT_LOST_PRIMARY, &fsm_promote_standby },
+	{ SECONDARY_STATE, SINGLE_STATE, COMMENT_LOST_PRIMARY, PGSTATUS_RUNNING, &fsm_promote_standby },
+	{ CATCHINGUP_STATE, SINGLE_STATE, COMMENT_LOST_PRIMARY, PGSTATUS_RUNNING, &fsm_promote_standby },
+	{ PREP_PROMOTION_STATE, SINGLE_STATE, COMMENT_LOST_PRIMARY, PGSTATUS_RUNNING, &fsm_promote_standby },
 
 	/*
 	 * went down to force the primary to time out, but then it was removed
 	 */
-	{ STOP_REPLICATION_STATE, SINGLE_STATE, COMMENT_REPLICATION_TO_SINGLE, &fsm_promote_standby },
+	{ STOP_REPLICATION_STATE, SINGLE_STATE, COMMENT_REPLICATION_TO_SINGLE, PGSTATUS_RUNNING, &fsm_promote_standby },
 
 	/*
 	 * On the Primary, wait for a standby to be ready: WAIT_PRIMARY
 	 */
-	{ SINGLE_STATE, WAIT_PRIMARY_STATE, COMMENT_SINGLE_TO_WAIT_PRIMARY, &fsm_prepare_replication },
-	{ PRIMARY_STATE, JOIN_PRIMARY_STATE, COMMENT_PRIMARY_TO_JOIN_PRIMARY, &fsm_prepare_replication },
-	{ PRIMARY_STATE, WAIT_PRIMARY_STATE, COMMENT_PRIMARY_TO_WAIT_PRIMARY, &fsm_disable_sync_rep },
-	{ STOP_REPLICATION_STATE, WAIT_PRIMARY_STATE, COMMENT_STOP_REPLICATION_TO_WAIT_PRIMARY, &fsm_promote_standby_to_primary },
+	{ SINGLE_STATE, WAIT_PRIMARY_STATE, COMMENT_SINGLE_TO_WAIT_PRIMARY, PGSTATUS_RUNNING, &fsm_prepare_replication },
+	{ PRIMARY_STATE, JOIN_PRIMARY_STATE, COMMENT_PRIMARY_TO_JOIN_PRIMARY, PGSTATUS_RUNNING, &fsm_prepare_replication },
+	{ PRIMARY_STATE, WAIT_PRIMARY_STATE, COMMENT_PRIMARY_TO_WAIT_PRIMARY, PGSTATUS_RUNNING, &fsm_disable_sync_rep },
+	{ STOP_REPLICATION_STATE, WAIT_PRIMARY_STATE, COMMENT_STOP_REPLICATION_TO_WAIT_PRIMARY, PGSTATUS_RUNNING, &fsm_promote_standby_to_primary },
 
 	/*
 	 * Situation is getting back to normal on the primary
 	 */
-	{ WAIT_PRIMARY_STATE, PRIMARY_STATE, COMMENT_WAIT_PRIMARY_TO_PRIMARY, &fsm_enable_sync_rep },
-	{ JOIN_PRIMARY_STATE, PRIMARY_STATE, COMMENT_JOIN_PRIMARY_TO_PRIMARY, NULL },
-	{ DEMOTE_TIMEOUT_STATE, PRIMARY_STATE, COMMENT_DEMOTE_TO_PRIMARY, &fsm_start_postgres },
+	{ WAIT_PRIMARY_STATE, PRIMARY_STATE, COMMENT_WAIT_PRIMARY_TO_PRIMARY, PGSTATUS_RUNNING, &fsm_enable_sync_rep },
+	{ JOIN_PRIMARY_STATE, PRIMARY_STATE, COMMENT_JOIN_PRIMARY_TO_PRIMARY, PGSTATUS_RUNNING, NULL },
+	{ DEMOTE_TIMEOUT_STATE, PRIMARY_STATE, COMMENT_DEMOTE_TO_PRIMARY, PGSTATUS_RUNNING, &fsm_start_postgres },
 
 	/*
 	 * The primary is now ready to accept a standby, we're the standby
 	 */
-	{ WAIT_STANDBY_STATE, CATCHINGUP_STATE, COMMENT_WAIT_STANDBY_TO_CATCHINGUP, &fsm_init_standby },
-	{ DEMOTED_STATE, CATCHINGUP_STATE, COMMENT_DEMOTED_TO_CATCHINGUP, &fsm_rewind_or_init },
-	{ SECONDARY_STATE, CATCHINGUP_STATE, COMMENT_SECONDARY_TO_CATCHINGUP, NULL },
+	{ WAIT_STANDBY_STATE, CATCHINGUP_STATE, COMMENT_WAIT_STANDBY_TO_CATCHINGUP, PGSTATUS_RUNNING, &fsm_init_standby },
+	{ DEMOTED_STATE, CATCHINGUP_STATE, COMMENT_DEMOTED_TO_CATCHINGUP, PGSTATUS_RUNNING, &fsm_rewind_or_init },
+	{ SECONDARY_STATE, CATCHINGUP_STATE, COMMENT_SECONDARY_TO_CATCHINGUP, PGSTATUS_RUNNING, NULL },
 
 	/*
 	 * We're asked to be a standby.
 	 */
-	{ CATCHINGUP_STATE, SECONDARY_STATE, COMMENT_CATCHINGUP_TO_SECONDARY, NULL },
+	{ CATCHINGUP_STATE, SECONDARY_STATE, COMMENT_CATCHINGUP_TO_SECONDARY, PGSTATUS_RUNNING, NULL },
 
 	/*
 	 * The standby is asked to prepare its own promotion
 	 */
-	{ SECONDARY_STATE, PREP_PROMOTION_STATE, COMMENT_SECONDARY_TO_PREP_PROMOTION, &fsm_prepare_standby_for_promotion },
-	{ CATCHINGUP_STATE, PREP_PROMOTION_STATE, COMMENT_SECONDARY_TO_PREP_PROMOTION, &fsm_prepare_standby_for_promotion },
+	{ SECONDARY_STATE, PREP_PROMOTION_STATE, COMMENT_SECONDARY_TO_PREP_PROMOTION, PGSTATUS_RUNNING, &fsm_prepare_standby_for_promotion },
+	{ CATCHINGUP_STATE, PREP_PROMOTION_STATE, COMMENT_SECONDARY_TO_PREP_PROMOTION, PGSTATUS_RUNNING, &fsm_prepare_standby_for_promotion },
 
 	/*
-	 * Forcefully stop replication by stopping the server.
+	 * Forcefully stop replication by promoting and staying in read-only mode
 	 */
-	{ PREP_PROMOTION_STATE, STOP_REPLICATION_STATE, COMMENT_PROMOTION_TO_STOP_REPLICATION, &fsm_stop_replication },
+	{ PREP_PROMOTION_STATE, STOP_REPLICATION_STATE, COMMENT_PROMOTION_TO_STOP_REPLICATION, PGSTATUS_RUNNING, &fsm_stop_replication },
 
 	/*
 	 * finish the promotion
 	 */
-	{ PREP_PROMOTION_STATE, WAIT_PRIMARY_STATE, COMMENT_BLOCKED_WRITES, &fsm_promote_standby },
+	{ PREP_PROMOTION_STATE, WAIT_PRIMARY_STATE, COMMENT_BLOCKED_WRITES, PGSTATUS_RUNNING, &fsm_promote_standby },
 
 	/*
 	 * Just wait until primary is ready
 	 */
-	{ INIT_STATE, WAIT_STANDBY_STATE, COMMENT_INIT_TO_WAIT_STANDBY, NULL },
+	{ INIT_STATE, WAIT_STANDBY_STATE, COMMENT_INIT_TO_WAIT_STANDBY, PGSTATUS_RUNNING, NULL },
 
 	/*
 	 * In case of maintenance of the standby server, we stop PostgreSQL.
 	 */
-	{ SECONDARY_STATE, MAINTENANCE_STATE, COMMENT_SECONDARY_TO_MAINTENANCE, &fsm_start_maintenance_on_standby },
-	{ CATCHINGUP_STATE, MAINTENANCE_STATE, COMMENT_SECONDARY_TO_MAINTENANCE, &fsm_start_maintenance_on_standby },
-	{ MAINTENANCE_STATE, CATCHINGUP_STATE, COMMENT_MAINTENANCE_TO_CATCHINGUP, &fsm_restart_standby },
+	{ SECONDARY_STATE, MAINTENANCE_STATE, COMMENT_SECONDARY_TO_MAINTENANCE, PGSTATUS_RUNNING, &fsm_start_maintenance_on_standby },
+	{ CATCHINGUP_STATE, MAINTENANCE_STATE, COMMENT_SECONDARY_TO_MAINTENANCE, PGSTATUS_RUNNING, &fsm_start_maintenance_on_standby },
+	{ MAINTENANCE_STATE, CATCHINGUP_STATE, COMMENT_MAINTENANCE_TO_CATCHINGUP, PGSTATUS_RUNNING, &fsm_restart_standby },
 
 	/*
 	 * Applying new replication/cluster settings (per node replication quorum,
@@ -263,13 +263,13 @@ KeeperFSMTransition KeeperFSM[] = {
 	 * have to fetch the new value for synchronous_standby_names from the
 	 * monitor.
 	 */
-	{ PRIMARY_STATE, APPLY_SETTINGS_STATE, COMMENT_PRIMARY_TO_APPLY_SETTINGS, &fsm_apply_settings },
-	{ APPLY_SETTINGS_STATE, PRIMARY_STATE, COMMENT_APPLY_SETTINGS_TO_PRIMARY, NULL },
+	{ PRIMARY_STATE, APPLY_SETTINGS_STATE, COMMENT_PRIMARY_TO_APPLY_SETTINGS, PGSTATUS_RUNNING, &fsm_apply_settings },
+	{ APPLY_SETTINGS_STATE, PRIMARY_STATE, COMMENT_APPLY_SETTINGS_TO_PRIMARY, PGSTATUS_RUNNING, NULL },
 
 	/*
 	 * This is the end, my friend.
 	 */
-	{ NO_STATE, NO_STATE, NULL, NULL },
+	{ NO_STATE, NO_STATE, NULL, PGSTATUS_UNKNOWN, NULL },
 };
 
 
@@ -343,20 +343,6 @@ keeper_fsm_step(Keeper *keeper)
 		{
 			/* errors have already been logged */
 			return false;
-		}
-	}
-	else
-	{
-		/*
-		 * Now that we know if PostgreSQL is running or not, maybe restart it,
-		 * or maybe shut it down, depending on what the current state expects.
-		 */
-		if (!keeper_ensure_current_state(keeper))
-		{
-			log_warn("pg_autoctl keeper failed to ensure current state \"%s\": "
-					 "PostgreSQL %s running",
-					 NodeStateToString(keeperState->current_role),
-					 postgres->pgIsRunning ? "is" : "is not");
 		}
 	}
 
@@ -446,6 +432,37 @@ keeper_fsm_reach_assigned_state(Keeper *keeper)
 			  NodeStateToString(keeperState->current_role));
 
 	return false;
+}
+
+
+/*
+ * keeper_fsm_get_pgstatus returns the current expected Postgres service status
+ * from the KeeperFSM and the keeper state.
+ */
+ExpectedPostgresStatus
+keeper_fsm_get_pgstatus(Keeper *keeper)
+{
+	int transitionIndex = 0;
+	KeeperStateData *keeperState = &(keeper->state);
+	KeeperFSMTransition transition = KeeperFSM[0];
+
+	if (keeperState->current_role == keeperState->assigned_role)
+	{
+		/* that's not in the KeeperFSM which only has data about transitions */
+		return PGSTATUS_UNKNOWN;
+	}
+
+	while (transition.current != NO_STATE)
+	{
+		if (state_matches(transition.current, keeperState->current_role) &&
+			state_matches(transition.assigned, keeperState->assigned_role))
+		{
+			return transition.pgStatus;
+		}
+		transition = KeeperFSM[++transitionIndex];
+	}
+
+	return PGSTATUS_UNKNOWN;
 }
 
 

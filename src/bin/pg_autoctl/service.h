@@ -18,16 +18,6 @@
 #include "monitor_config.h"
 
 /*
- * When a process exits normally (exit code status 0), we shut down all the
- * other processes by calling their stopFunction.
- *
- * When say `postgres` exits cleanly, we need to decide if we're happy with the
- * situation (we asked for it) or not (something happened, please restart
- * Postgres).
- */
-extern bool shutdownSequenceInProgress;
-
-/*
  * start and stop function used in the struct Service.
  *
  * start functions get passed a context that is manually provided in the

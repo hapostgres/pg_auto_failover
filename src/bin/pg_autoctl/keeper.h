@@ -30,30 +30,31 @@ typedef struct Keeper
 	 * information. This is necessary in some transitions.
 	 */
 	NodeAddressArray otherNodes;
+
+	/* Only useful during the initialization of the Keeper */
+	KeeperStateInit initState;
 } Keeper;
 
 
 bool keeper_init(Keeper *keeper, KeeperConfig *config);
-bool keeper_init_fsm(Keeper *keeper, KeeperConfig *config);
-bool keeper_register_and_init(Keeper *keeper, KeeperConfig *config,
-							  NodeState initialState);
+bool keeper_init_fsm(Keeper *keeper);
+bool keeper_register_and_init(Keeper *keeper, NodeState initialState);
 bool keeper_load_state(Keeper *keeper);
 bool keeper_store_state(Keeper *keeper);
-bool keeper_update_state(Keeper *keeper, int node_id, int group_id, NodeState state,
+bool keeper_update_state(Keeper *keeper,
+						 int node_id, int group_id,
+						 NodeState state,
 						 bool update_last_monitor_contact);
-bool keeper_start_postgres(Keeper *keeper);
-bool keeper_restart_postgres(Keeper *keeper);
-bool keeper_should_ensure_current_state_before_transition(Keeper *keeper);
-bool keeper_ensure_current_state(Keeper *keeper);
 bool keeper_update_pg_state(Keeper *keeper);
 bool ReportPgIsRunning(Keeper *keeper);
 bool keeper_remove(Keeper *keeper, KeeperConfig *config,
 				   bool ignore_monitor_errors);
 bool keeper_check_monitor_extension_version(Keeper *keeper);
 
-bool keeper_init_state_write(Keeper *keeper);
-bool keeper_init_state_read(Keeper *keeper, KeeperStateInit *initState);
+bool keeper_init_state_create(Keeper *keeper);
+bool keeper_init_state_update(Keeper *keeper, InitStage initStage);
+bool keeper_init_state_read(Keeper *keeper);
 bool keeper_state_as_json(Keeper *keeper, char *json, int size);
-bool keeper_init_state_discover(Keeper *keeper, KeeperStateInit *initState);
+bool keeper_init_state_discover(Keeper *keeper);
 
 #endif /* KEEPER_H */

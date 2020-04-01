@@ -15,9 +15,12 @@
 #include "pgsql.h"
 #include "keeper_config.h"
 
-bool keep_service_start(Keeper *keeper);
+bool start_keeper(Keeper *keeper);
+bool service_keeper_start(void *context, pid_t *pid);
+bool service_keeper_stop(void *context);
+
 bool keeper_start_node_active_process(Keeper *keeper, pid_t *nodeActivePid);
 bool keeper_node_active_loop(Keeper *keeper, pid_t start_pid);
-bool keeper_service_init(Keeper *keeper, pid_t *pid);
+bool service_keeper_node_active_init(Keeper *keeper);
 
 #endif /* KEEPER_SERVICE_H */

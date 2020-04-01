@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "parson.h"
@@ -882,6 +883,86 @@ pg_setup_is_ready(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 	}
 
 	return pgSetup->pm_status == POSTMASTER_STATUS_READY;
+}
+
+
+/*
+ * pg_setup_wait_until_is_ready loops over pg_setup_is_running() and returns
+ * when Postgres is ready. The loop tries every 100ms up to the given timeout,
+ * given in seconds.
+ */
+bool
+pg_setup_wait_until_is_ready(PostgresSetup *pgSetup, int timeout, int logLevel)
+{
+	uint64_t startTime = time(NULL);
+	int attempts = 0;
+
+	pid_t previousPostgresPid = pgSetup->pidFile.pid;
+	bool pgIsRunning = false;
+
+	bool missingPgdataIsOk = false;
+	bool postgresNotRunningIsOk = true;
+
+	log_trace("pg_setup_wait_until_is_ready");
+
+	for (attempts = 1; !pgIsRunning; attempts++)
+	{
+		uint64_t now = time(NULL);
+
+		pgIsRunning = get_pgpid(pgSetup, postgresNotRunningIsOk)
+			&& pgSetup->pidFile.pid != 0 ;
+
+		log_trace("pg_setup_wait_until_is_ready(): postgres %s, "
+				  "pid %d (was %d), after %ds and %d attempt(s)",
+				  pgIsRunning ? "is running" : "is not running",
+				  pgSetup->pidFile.pid,
+				  previousPostgresPid,
+				  (int) (now - startTime),
+				  attempts);
+
+		if (pgIsRunning && previousPostgresPid == pgSetup->pidFile.pid)
+		{
+			log_trace("pg_setup_wait_until_is_ready returns true");
+			return true;
+		}
+
+		/* we're done if we reach the timeout */
+		if ((now - startTime) >= timeout)
+		{
+			break;
+		}
+
+		/* wait for 100 ms and try again */
+		pg_usleep(100 * 1000);
+	}
+
+	/* update settings from running database */
+	if (previousPostgresPid != pgSetup->pidFile.pid)
+	{
+		/*
+		 * Update our pgSetup view of Postgres once we have made sure it's
+		 * running.
+		 */
+		PostgresSetup newPgSetup = { 0 };
+
+		if (!pg_setup_init(&newPgSetup,
+						   pgSetup,
+						   missingPgdataIsOk,
+						   postgresNotRunningIsOk))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
+		*pgSetup = newPgSetup;
+
+		log_level(logLevel,
+				  "Postgres is now serving PGDATA \"%s\" on port %d with pid %d",
+				  pgSetup->pgdata, pgSetup->pgport, pgSetup->pidFile.pid);
+	}
+
+	return true;
+
 }
 
 

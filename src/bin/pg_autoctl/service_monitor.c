@@ -31,8 +31,8 @@
 bool
 start_monitor(Monitor *monitor)
 {
-	MonitorConfig *config = &monitor->config;
-	PostgresSetup *pgSetup = &config->pgSetup;
+	MonitorConfig *config = &(monitor->config);
+	PostgresSetup *pgSetup = &(config->pgSetup);
 
 	Service subprocesses[] = {
 		{
@@ -134,6 +134,13 @@ monitor_service_run(Monitor *monitor)
 	MonitorExtensionVersion version = { 0 };
 	char *channels[] = { "log", "state", NULL };
 	char postgresUri[MAXCONNINFO];
+
+	/* Initialize our local connection to the monitor */
+	if (!monitor_local_init(monitor))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_MONITOR);
+	}
 
 	/* Now get the the Monitor URI to display it to the user, and move along */
 	if (monitor_config_get_postgres_uri(mconfig, postgresUri, MAXCONNINFO))

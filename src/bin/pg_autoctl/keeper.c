@@ -22,6 +22,9 @@
 #include "state.h"
 
 
+static bool keeper_init_state_write(Keeper *keeper);
+
+
 /*
  * keeper_init initialises the keeper logic according to the given keeper
  * configuration. It also reads the state file from disk. The state file
@@ -110,166 +113,6 @@ keeper_update_state(Keeper *keeper, int node_id, int group_id,
 	log_keeper_state(keeperState);
 
 	return true;
-}
-
-
-/*
- * keeper_should_ensure_current_state returns true when pg_autoctl should
- * ensure that Postgres is running, or not running, depending on the current
- * FSM state, before calling the transition function to the next state.
- *
- * At the moment, the only cases when we DON'T want to ensure the current state
- * are when either the current state or the goal state are one of the following:
- *
- *  - DRAINING
- *  - DEMOTED
- *  - DEMOTE TIMEOUT
- *
- * That's because we would then stop Postgres first when going from DEMOTED to
- * SINGLE, or ensure Postgres is running when going from PRIMARY to DEMOTED.
- * This last example is a split-brain hazard, too.
- */
-bool
-keeper_should_ensure_current_state_before_transition(Keeper *keeper)
-{
-	KeeperStateData *keeperState = &(keeper->state);
-
-	if (keeperState->assigned_role == keeperState->current_role)
-	{
-		/* this function should not be called in that case */
-		log_debug("BUG: keeper_should_ensure_current_state_before_transition "
-				  "called with assigned role == current role == %s",
-				  NodeStateToString(keeperState->assigned_role));
-		return false;
-	}
-
-	if (keeperState->assigned_role == DRAINING_STATE
-		|| keeperState->assigned_role == DEMOTE_TIMEOUT_STATE
-		|| keeperState->assigned_role == DEMOTED_STATE)
-	{
-		/* don't ensure Postgres is running before shutting it down */
-		return false;
-	}
-
-	if (keeperState->current_role == DRAINING_STATE
-		|| keeperState->current_role == DEMOTE_TIMEOUT_STATE
-		|| keeperState->current_role == DEMOTED_STATE)
-	{
-		/* don't ensure Postgres is down before starting it again */
-		return false;
-	}
-
-	/* in all other cases, yes please ensure the current state */
-	return true;
-}
-
-
-/*
- * keeper_ensure_current_state ensures that the current keeper's state is met
- * with the current PostgreSQL status, at minimum that PostgreSQL is running
- * when it's expected to be, etc.
- */
-bool
-keeper_ensure_current_state(Keeper *keeper)
-{
-	KeeperStateData *keeperState = &(keeper->state);
-	PostgresSetup *pgSetup = &(keeper->postgres.postgresSetup);
-	LocalPostgresServer *postgres = &(keeper->postgres);
-
-	log_debug("Ensure current state: %s",
-			  NodeStateToString(keeperState->current_role));
-
-	switch (keeperState->current_role)
-	{
-		/*
-		 * When in primary state, publishing that PostgreSQL is down might
-		 * trigger a failover. This is the best solution only when we tried
-		 * everything else. So first, retry starting PostgreSQL a couple more
-		 * times.
-		 *
-		 * See configuration parameters:
-		 *
-		 *   timeout.postgresql_fails_to_start_timeout (default 20s)
-		 *   timeout.postgresql_fails_to_start_retries (default 3 times)
-		 */
-		case PRIMARY_STATE:
-		{
-			if (postgres->pgIsRunning)
-			{
-				/* reset PostgreSQL restart failures tracking */
-				postgres->pgFirstStartFailureTs = 0;
-				postgres->pgStartRetries = 0;
-
-				return true;
-			}
-			else if (ensure_local_postgres_is_running(postgres))
-			{
-				log_warn("PostgreSQL was not running, restarted with pid %d",
-						 pgSetup->pidFile.pid);
-
-				return true;
-			}
-			else
-			{
-				log_warn("Failed to restart PostgreSQL, "
-						 "see PostgreSQL logs for instance at \"%s\".",
-						 pgSetup->pgdata);
-
-				return false;
-			}
-			break;
-		}
-
-		case SINGLE_STATE:
-		case SECONDARY_STATE:
-		case WAIT_PRIMARY_STATE:
-		case CATCHINGUP_STATE:
-		case PREP_PROMOTION_STATE:
-		case STOP_REPLICATION_STATE:
-		{
-			if (postgres->pgIsRunning)
-			{
-				return true;
-			}
-			else if (ensure_local_postgres_is_running(postgres))
-			{
-				log_warn("PostgreSQL was not running, restarted with pid %d",
-						 pgSetup->pidFile.pid);
-				return true;
-			}
-			else
-			{
-				log_error("Failed to restart PostgreSQL, "
-						  "see PostgreSQL logs for instance at \"%s\".",
-						  pgSetup->pgdata);
-				return false;
-			}
-			break;
-		}
-
-		case DEMOTED_STATE:
-		case DEMOTE_TIMEOUT_STATE:
-		case DRAINING_STATE:
-		{
-			if (postgres->pgIsRunning)
-			{
-				log_warn("PostgreSQL is running while in state \"%s\", "
-						 "stopping PostgreSQL.",
-						 NodeStateToString(keeperState->current_role));
-
-				return pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata);
-			}
-			return true;
-		}
-
-		case MAINTENANCE_STATE:
-		default:
-			/* nothing to be done here */
-			return true;
-	}
-
-	/* should never happen */
-	return false;
 }
 
 
@@ -601,60 +444,6 @@ keeper_update_pg_state(Keeper *keeper)
 
 
 /*
- * keeper_start_postgres calls pg_ctl_start and then update our local
- * PostgreSQL instance setup and connection string to reflect the new reality.
- */
-bool
-keeper_start_postgres(Keeper *keeper)
-{
-	PostgresSetup *pgSetup = &(keeper->config.pgSetup);
-
-	if (!pg_ctl_start(pgSetup->pg_ctl,
-					  pgSetup->pgdata,
-					  pgSetup->pgport,
-					  pgSetup->listen_addresses))
-	{
-		log_error("Failed to start PostgreSQL at \"%s\" on port %d, "
-				  "see above for details.",
-				  pgSetup->pgdata, pgSetup->pgport);
-		return false;
-	}
-	if (!keeper_update_pg_state(keeper))
-	{
-		log_error("Failed to update the keeper's state from the local "
-				  "PostgreSQL instance, see above for details.");
-		return false;
-	}
-	return true;
-}
-
-
-/*
- * keeper_restart_postgres calls pg_ctl_restart and then update our local
- * PostgreSQL instance setup and connection string to reflect the new reality.
- */
-bool
-keeper_restart_postgres(Keeper *keeper)
-{
-	PostgresSetup *pgSetup = &(keeper->postgres.postgresSetup);
-
-	if (!pg_ctl_restart(pgSetup->pg_ctl, pgSetup->pgdata))
-	{
-		log_error("Failed to restart PostgreSQL instance at \"%s\", "
-				  "see above for details.", pgSetup->pgdata);
-		return false;
-	}
-	if (!keeper_update_pg_state(keeper))
-	{
-		log_error("Failed to update the keeper's state from the local "
-				  "PostgreSQL instance, see above for details.");
-		return false;
-	}
-	return true;
-}
-
-
-/*
  * keeper_check_monitor_extension_version checks that the monitor we connect to
  * has an extension version compatible with our expectations.
  */
@@ -705,8 +494,10 @@ keeper_check_monitor_extension_version(Keeper *keeper)
  * difference that we don't have a monitor to talk to.
  */
 bool
-keeper_init_fsm(Keeper *keeper, KeeperConfig *config)
+keeper_init_fsm(Keeper *keeper)
 {
+	KeeperConfig *config = &(keeper->config);
+
 	/* fake the initial state provided at monitor registration time */
 	MonitorAssignedState assignedState = {
 		.nodeId = -1,
@@ -756,7 +547,7 @@ keeper_init_fsm(Keeper *keeper, KeeperConfig *config)
 	 * case of `pg_autoctl create` being interrupted, we may resume operations
 	 * and accept to work on already running PostgreSQL primary instances.
 	 */
-	if (!keeper_init_state_write(keeper))
+	if (!keeper_init_state_create(keeper))
 	{
 		/* errors have already been logged */
 		return false;
@@ -772,9 +563,9 @@ keeper_init_fsm(Keeper *keeper, KeeperConfig *config)
  * the assigned goal from the Monitor.
  */
 bool
-keeper_register_and_init(Keeper *keeper,
-						 KeeperConfig *config, NodeState initialState)
+keeper_register_and_init(Keeper *keeper, NodeState initialState)
 {
+	KeeperConfig *config = &(keeper->config);
 	Monitor *monitor = &(keeper->monitor);
 	MonitorAssignedState assignedState = { 0 };
 
@@ -850,7 +641,7 @@ keeper_register_and_init(Keeper *keeper,
 	 * case of `pg_autoctl create` being interrupted, we may resume operations
 	 * and accept to work on already running PostgreSQL primary instances.
 	 */
-	if (!keeper_init_state_write(keeper))
+	if (!keeper_init_state_create(keeper))
 	{
 		/* errors have already been logged */
 		return false;
@@ -940,13 +731,13 @@ keeper_remove(Keeper *keeper, KeeperConfig *config, bool ignore_monitor_errors)
  * running cluster, etc).
  */
 bool
-keeper_init_state_write(Keeper *keeper)
+keeper_init_state_create(Keeper *keeper)
 {
-	int fd;
-	char buffer[PG_AUTOCTL_KEEPER_STATE_FILE_SIZE];
-	KeeperStateInit initState = { 0 };
+	KeeperStateInit *initState = &(keeper->initState);
 
-	if (!keeper_init_state_discover(keeper, &initState))
+	initState->initStage = INIT_STAGE_1;
+
+	if (!keeper_init_state_discover(keeper))
 	{
 		/* errors have already been logged */
 		return false;
@@ -954,10 +745,67 @@ keeper_init_state_write(Keeper *keeper)
 
 	log_info("Writing keeper init state file at \"%s\"",
 			 keeper->config.pathnames.init);
-	log_debug("keeper_init_state_write: version = %d",
-			  initState.pg_autoctl_state_version);
-	log_debug("keeper_init_state_write: pgInitState = %s",
-			  PreInitPostgreInstanceStateToString(initState.pgInitState));
+	log_debug("keeper_init_state_create: version = %d",
+			  initState->pg_autoctl_state_version);
+	log_debug("keeper_init_state_create: pgInitState = %s",
+			  PreInitPostgreInstanceStateToString(initState->pgInitState));
+
+	return keeper_init_state_write(keeper);
+}
+
+
+/*
+ * keeper_init_state_update updates our pg_autoctl init file to the given
+ * stage.
+ */
+bool
+keeper_init_state_update(Keeper *keeper, InitStage initStage)
+{
+	char tempFileName[MAXPGPATH] = { 0 };
+	char *filename = keeper->config.pathnames.init;
+	InitStage previousStage = keeper->initState.initStage;
+
+	if (keeper->initState.initStage == initStage)
+	{
+		log_debug("keeper_init_state_update: keeper is already at stage %d",
+				  keeper->initState.initStage);
+		return true;
+	}
+
+	keeper->initState.initStage = initStage;
+
+	log_info("Updating keeper init state file to stage %d at \"%s\"",
+			 keeper->initState.initStage, keeper->config.pathnames.init);
+
+	/* backup our current init file into init.1 (for stage 1) */
+	sformat(tempFileName, MAXPGPATH, "%s.%d", filename, previousStage);
+
+	if (rename(filename, tempFileName) != 0)
+	{
+		log_fatal("Failed to rename \"%s\" to \"%s\": %m",
+				  filename, tempFileName);
+		return false;
+	}
+
+	if (!keeper_init_state_write(keeper))
+	{
+		return false;
+	}
+
+	/* we don't need the previous stage init file around anymore */
+	return unlink_file(tempFileName);
+}
+
+
+/*
+ * keeper_init_state_write writes our pg_autoctl.init file.
+ */
+static bool
+keeper_init_state_write(Keeper *keeper)
+{
+	int fd;
+	char buffer[PG_AUTOCTL_KEEPER_STATE_FILE_SIZE] = { 0 };
+	KeeperStateInit *initState = &(keeper->initState);
 
 	memset(buffer, 0, PG_AUTOCTL_KEEPER_STATE_FILE_SIZE);
 
@@ -970,7 +818,7 @@ keeper_init_state_write(Keeper *keeper)
 	 * any pointers in it. Necessary comment about not using pointers
 	 * is added to the struct definition.
 	 */
-	memcpy(buffer, &initState, sizeof(KeeperStateInit)); /* IGNORE-BANNED */
+	memcpy(buffer, initState, sizeof(KeeperStateInit)); /* IGNORE-BANNED */
 
 	fd = open(keeper->config.pathnames.init,
 			  O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
@@ -1013,8 +861,9 @@ keeper_init_state_write(Keeper *keeper)
  * existing Postgres instance.
  */
 bool
-keeper_init_state_discover(Keeper *keeper, KeeperStateInit *initState)
+keeper_init_state_discover(Keeper *keeper)
 {
+	KeeperStateInit *initState = &(keeper->initState);
 	PostgresSetup pgSetup = { 0 };
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
@@ -1054,7 +903,7 @@ keeper_init_state_discover(Keeper *keeper, KeeperStateInit *initState)
  * keeper_init_state_read reads the information kept in the keeper init file.
  */
 bool
-keeper_init_state_read(Keeper *keeper, KeeperStateInit *initState)
+keeper_init_state_read(Keeper *keeper)
 {
 	char *filename = keeper->config.pathnames.init;
 	char *content = NULL;
@@ -1072,10 +921,10 @@ keeper_init_state_read(Keeper *keeper, KeeperStateInit *initState)
 	pg_autoctl_state_version =
 		((KeeperStateInit *) content)->pg_autoctl_state_version;
 
-	if (fileSize >= sizeof(KeeperStateData)
+	if (fileSize >= sizeof(KeeperStateInit)
 		&& pg_autoctl_state_version == PG_AUTOCTL_STATE_VERSION)
 	{
-		*initState = *(KeeperStateInit*) content;
+		keeper->initState = *(KeeperStateInit*) content;
 		free(content);
 		return true;
 	}
@@ -1084,8 +933,8 @@ keeper_init_state_read(Keeper *keeper, KeeperStateInit *initState)
 
 	/* Looks like it's a mess. */
 	log_error("Keeper init state file \"%s\" exists but "
-			  "is broken or wrong version",
-			  filename);
+			  "is broken or wrong version (%d)",
+			  filename, pg_autoctl_state_version);
 	return false;
 }
 

@@ -190,9 +190,9 @@ cli_create_config(Keeper *keeper, KeeperConfig *config)
  * handling.
  */
 void
-cli_create_pg(Keeper *keeper, KeeperConfig *config)
+cli_create_pg(Keeper *keeper)
 {
-	if (!keeper_pg_init(keeper, config))
+	if (!keeper_pg_init(keeper))
 	{
 		/* errors have been logged */
 		exit(EXIT_CODE_BAD_STATE);
@@ -209,33 +209,14 @@ cli_create_pg(Keeper *keeper, KeeperConfig *config)
 
 		if (createAndRun)
 		{
-			pid_t pid = 0;
-
-			/* now that keeper_pg_init is done, finish the keeper init */
-			if (!keeper_init(keeper, config))
+			if (!start_keeper(keeper))
 			{
-				/* errors have already been logged */
-				exit(EXIT_CODE_KEEPER);
-			}
-
-			if (!keeper_service_init(keeper, &pid))
-			{
-				log_fatal("Failed to initialize pg_auto_failover service, "
+				log_fatal("Failed to start pg_autoctl keeper service, "
 						  "see above for details");
-				exit(EXIT_CODE_KEEPER);
+				exit(EXIT_CODE_INTERNAL_ERROR);
 			}
-
-			if (!keeper_check_monitor_extension_version(keeper))
-			{
-				/* errors have already been logged */
-				exit(EXIT_CODE_MONITOR);
-			}
-
-			(void) keeper_node_active_loop(keeper, pid);
 		}
 	}
-
-	keeper_config_destroy(config);
 }
 
 
@@ -301,28 +282,30 @@ static void
 cli_create_postgres(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
-	KeeperConfig config = keeperOptions;
+	KeeperConfig *config = &(keeper.config);
 
-	if (!file_exists(config.pathnames.config))
+	keeper.config = keeperOptions;
+
+	if (!file_exists(keeper.config.pathnames.config))
 	{
 		/* pg_autoctl create postgres: mark ourselves as a standalone node */
-		config.pgSetup.pgKind = NODE_KIND_STANDALONE;
-		strlcpy(config.nodeKind, "standalone", NAMEDATALEN);
+		keeper.config.pgSetup.pgKind = NODE_KIND_STANDALONE;
+		strlcpy(keeper.config.nodeKind, "standalone", NAMEDATALEN);
 
-		if (!check_or_discover_nodename(&config))
+		if (!check_or_discover_nodename(config))
 		{
 			/* errors have already been logged */
 			exit(EXIT_CODE_BAD_ARGS);
 		}
 	}
 
-	if (!cli_create_config(&keeper, &config))
+	if (!cli_create_config(&keeper, config))
 	{
 		log_error("Failed to initialize our configuration, see above.");
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	cli_create_pg(&keeper, &config);
+	cli_create_pg(&keeper);
 }
 
 
@@ -637,43 +620,20 @@ cli_create_monitor_getopts(int argc, char **argv)
 
 
 /*
- * Initialize the PostgreSQL instance that we're using for the Monitor:
- *
- *  - pg_ctl initdb
- *  - add postgresql-citus.conf to postgresql.conf
- *  - pg_ctl start
- *  - create user autoctl with createdb login;
- *  - create database pg_auto_failover with owner autoctl;
- *  - create extension pgautofailover;
- *
- * When this function is called (from monitor_config_init at the CLI level), we
- * know that PGDATA has been initdb already, and that's about it.
- *
+ * cli_create_monitor_config takes care of the monitor configuration, either
+ * creating it from scratch or merging the pg_autoctl create monitor command
+ * line arguments and options with the pre-existing configuration file (for
+ * when people change their mind or fix an error in the previous command).
  */
-static void
-cli_create_monitor(int argc, char **argv)
+static bool
+cli_create_monitor_config(Monitor *monitor, MonitorConfig *config)
 {
-	Monitor monitor = { 0 };
-	MonitorConfig *config = &(monitor.config);
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
 
-	monitor.config = monitorOptions;
-
-	/*
-	 * We support two modes of operations here:
-	 *   - configuration exists already, we need PGDATA
-	 *   - configuration doesn't exist already, we need PGDATA, and more
-	 */
-	if (!monitor_config_set_pathnames_from_pgdata(config))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_ARGS);
-	}
-
 	if (file_exists(config->pathnames.config))
 	{
-		MonitorConfig options = monitor.config;
+		MonitorConfig options = monitor->config;
 
 		if (!monitor_config_read_file(config,
 									  missingPgdataIsOk, pgIsNotRunningIsOk))
@@ -735,6 +695,49 @@ cli_create_monitor(int argc, char **argv)
 					  "see above");
 			exit(EXIT_CODE_BAD_CONFIG);
 		}
+	}
+
+	return true;
+}
+
+
+/*
+ * Initialize the PostgreSQL instance that we're using for the Monitor:
+ *
+ *  - pg_ctl initdb
+ *  - add postgresql-citus.conf to postgresql.conf
+ *  - pg_ctl start
+ *  - create user autoctl with createdb login;
+ *  - create database pg_auto_failover with owner autoctl;
+ *  - create extension pgautofailover;
+ *
+ * When this function is called (from monitor_config_init at the CLI level), we
+ * know that PGDATA has been initdb already, and that's about it.
+ *
+ */
+static void
+cli_create_monitor(int argc, char **argv)
+{
+	Monitor monitor = { 0 };
+	MonitorConfig *config = &(monitor.config);
+
+	monitor.config = monitorOptions;
+
+	if (!cli_create_monitor_config(&monitor, config))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	/*
+	 * We support two modes of operations here:
+	 *   - configuration exists already, we need PGDATA
+	 *   - configuration doesn't exist already, we need PGDATA, and more
+	 */
+	if (!monitor_config_set_pathnames_from_pgdata(config))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
 	}
 
 	/* Initialize our local connection to the monitor */

@@ -25,6 +25,7 @@
 #include "state.h"
 #include "service.h"
 #include "service_keeper.h"
+#include "service_postgres.h"
 #include "signals.h"
 #include "string_utils.h"
 
@@ -42,17 +43,37 @@ static void reload_configuration(Keeper *keeper);
  * and depending on the current state the Postgres instance.
  */
 bool
-keep_service_start(Keeper *keeper)
+start_keeper(Keeper *keeper)
 {
-	pid_t pid = getpid();
-	pid_t postgresPid = 0;
-	pid_t nodeActivePid = 0;
+	const char *pidfile = keeper->config.pathnames.pid;
 
-	(void) pid;
-	(void) postgresPid;
-	(void) nodeActivePid;
+	Service subprocesses[] = {
+		{
+			"postgres fsm",
+			0,
+			&service_postgres_fsm_start,
+			&service_postgres_stop,
+			(void *) keeper
+		},
+		{
+			"node active",
+			0,
+			&service_keeper_start,
+			&service_keeper_stop,
+			(void *) keeper
+		}
+	};
 
-	return false;
+	int subprocessesCount = sizeof(subprocesses) / sizeof(subprocesses[0]);
+
+	if (!service_start(subprocesses, subprocessesCount, pidfile))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/* we only get there when the supervisor exited successfully (SIGTERM) */
+	return true;
 }
 
 
@@ -61,19 +82,20 @@ keep_service_start(Keeper *keeper)
  * the monitor to implement the node_active protocol.
  */
 bool
-keeper_start_node_active_process(Keeper *keeper, pid_t *nodeActivePid)
+service_keeper_start(void *context, pid_t *pid)
 {
-	/* the forked process' parent pid is our pid */
-	pid_t pid, ppid = getpid();
+	Keeper *keeper = (Keeper *) context;
+	pid_t fpid;
+	pid_t ppid = getpid();
 
 	/* Flush stdio channels just before fork, to avoid double-output problems */
 	fflush(stdout);
 	fflush(stderr);
 
 	/* time to create the node_active sub-process */
-	pid = fork();
+	fpid = fork();
 
-	switch (pid)
+	switch (fpid)
 	{
 		case -1:
 		{
@@ -83,7 +105,15 @@ keeper_start_node_active_process(Keeper *keeper, pid_t *nodeActivePid)
 
 		case 0:
 		{
-			/* the PID file is created with our parent pid */
+			/* fork succeeded, in child */
+			(void) set_ps_title("node active");
+
+			if (!service_keeper_node_active_init(keeper))
+			{
+				log_fatal("Failed to initialise the node active service, "
+						  "see above for details");
+				exit(EXIT_CODE_INTERNAL_ERROR);
+			}
 			(void) keeper_node_active_loop(keeper, ppid);
 
 			/*
@@ -104,12 +134,30 @@ keeper_start_node_active_process(Keeper *keeper, pid_t *nodeActivePid)
 		default:
 		{
 			/* fork succeeded, in parent */
-			log_debug("pg_autoctl node_active protocol started in subprocess %d",
-					  pid);
-			*nodeActivePid = pid;
+			log_debug("pg_autoctl node_active process started in subprocess %d",
+					  fpid);
+			*pid = fpid;
 			return true;
 		}
 	}
+}
+
+
+/*
+ * service_keeper_stop stops the pg_autoctl keeper node active service.
+ */
+bool
+service_keeper_stop(void *context)
+{
+	Service *service = (Service *) context;
+
+	if (kill(service->pid, SIGQUIT) != 0)
+	{
+		log_error("Failed to send SIGQUIT to pid %d for service %s",
+				  service->pid, service->name);
+		return false;
+	}
+	return true;
 }
 
 
@@ -306,31 +354,6 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		 */
 		if (needStateChange)
 		{
-			/*
-			 * First, ensure the current state (make sure Postgres is running
-			 * if it should, or Postgres is stopped if it should not run).
-			 *
-			 * The transition function we call next might depend on our
-			 * assumption that Postgres is running in the current state.
-			 */
-			if (keeper_should_ensure_current_state_before_transition(keeper))
-			{
-				if (!keeper_ensure_current_state(keeper))
-				{
-					/*
-					 * We don't take care of the warnedOnCurrentIteration here
-					 * because the real thing that should happen is the
-					 * transition to the next state. That's what we keep track
-					 * of with "transitionFailed".
-					 */
-					log_warn(
-						"pg_autoctl failed to ensure current state \"%s\": "
-						"PostgreSQL %s running",
-						NodeStateToString(keeperState->current_role),
-						postgres->pgIsRunning ? "is" : "is not");
-				}
-			}
-
 			if (!keeper_fsm_reach_assigned_state(keeper))
 			{
 				log_error("Failed to transition to state \"%s\", retrying... ",
@@ -341,15 +364,7 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		}
 		else if (couldContactMonitor)
 		{
-			if (!keeper_ensure_current_state(keeper))
-			{
-				warnedOnCurrentIteration = true;
-				log_warn("pg_autoctl failed to ensure current state \"%s\": "
-						 "PostgreSQL %s running",
-						 NodeStateToString(keeperState->current_role),
-						 postgres->pgIsRunning ? "is" : "is not");
-			}
-			else if (warnedOnPreviousIteration)
+			if (warnedOnPreviousIteration)
 			{
 				log_info("pg_autoctl managed to ensure current state \"%s\": "
 						 "PostgreSQL %s running",
@@ -533,31 +548,24 @@ reload_configuration(Keeper *keeper)
 
 
 /*
- * keeper_service_init initialises the bits and pieces that the keeper service
- * depend on:
- *
- *  - sets the signal handlers
- *  - check pidfile to see if the service is already running
- *  - creates the pidfile for our service
- *  - clean-up from previous execution
+ * service_keeper_init initialises our keeper structure.
  */
 bool
-keeper_service_init(Keeper *keeper, pid_t *pid)
+service_keeper_node_active_init(Keeper *keeper)
 {
 	KeeperConfig *config = &(keeper->config);
 
-	log_trace("keeper_service_init");
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = false;
 
-	/* Establish a handler for signals. */
-	(void) set_signal_handlers();
-
-	/* Check that the keeper service is not already running */
-	if (read_pidfile(config->pathnames.pid, pid))
+	if (!keeper_config_read_file(config,
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
 	{
-		log_fatal("An instance of this keeper is already running with PID %d, "
-				  "as seen in pidfile \"%s\"",
-				  *pid, config->pathnames.pid);
-		return false;
+		/* errors have already been logged. */
+		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
 	/*
@@ -570,20 +578,36 @@ keeper_service_init(Keeper *keeper, pid_t *pid)
 	{
 		log_warn("The `pg_autoctl create` did not complete, completing now.");
 
-		if (!keeper_pg_init_continue(keeper, config))
+		if (!keeper_pg_init_continue(keeper))
 		{
 			/* errors have already been logged. */
 			return false;
 		}
 	}
 
-	/* Ok, we're going to start. Time to create our PID file. */
-	*pid = getpid();
-
-	if (!create_pidfile(config->pathnames.pid, *pid))
+	if (!keeper_init(keeper, config))
 	{
-		log_fatal("Failed to write our PID to \"%s\"", config->pathnames.pid);
-		return false;
+		log_fatal("Failed to initialise keeper, see above for details");
+		exit(EXIT_CODE_PGCTL);
+	}
+
+	if (config->monitorDisabled)
+	{
+		/*
+		 * At the moment, we have nothing to do here. Later we might want to
+		 * open an HTTPd service and wait for API calls.
+		 */
+		log_fatal("--disable-monitor disables pg_autoctl servives");
+		exit(EXIT_CODE_MONITOR);
+	}
+	else
+	{
+		/* Start with a monitor: implement the node active loop */
+		if (!keeper_check_monitor_extension_version(keeper))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_MONITOR);
+		}
 	}
 
 	return true;

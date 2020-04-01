@@ -327,6 +327,7 @@ keeperStateAsJSON(KeeperStateData *keeperState, JSON_Value *js)
 	return true;
 }
 
+
 /*
  * print_keeper_init_state prints the given initilization state of the keeper
  * to given FILE output (stdout, stderr, etc).
@@ -334,8 +335,11 @@ keeperStateAsJSON(KeeperStateData *keeperState, JSON_Value *js)
 void
 print_keeper_init_state(KeeperStateInit *initState, FILE *stream)
 {
-	fformat(stream, "Postgres state at keeper init: %s\n",
-				 PreInitPostgreInstanceStateToString(initState->pgInitState));
+	fformat(stream,
+			"Postgres state at keeper init: %s\n",
+			PreInitPostgreInstanceStateToString(initState->pgInitState));
+	fformat(stream,
+			"pg_autoctl initialization stage: %d\n", initState->initStage);
 	fflush(stream);
 }
 
@@ -553,6 +557,7 @@ epoch_to_string(uint64_t seconds, char *buffer)
 	}
 	return buffer;
 }
+
 
 /*
  * PreInitPostgreInstanceStateToString returns the string that represents the

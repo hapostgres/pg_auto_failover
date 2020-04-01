@@ -107,8 +107,22 @@ typedef struct
 	int keeper_is_paused;
 } KeeperStateData;
 
-_Static_assert (sizeof(KeeperStateData) < PG_AUTOCTL_KEEPER_STATE_FILE_SIZE, "size of KeeperStateData is larger than expected. please review PG_AUTOCTL_KEEPER_STATE_FILE_SIZE");
+_Static_assert (sizeof(KeeperStateData) < PG_AUTOCTL_KEEPER_STATE_FILE_SIZE,
+				"Size of KeeperStateData is larger than expected. "
+				"Please review PG_AUTOCTL_KEEPER_STATE_FILE_SIZE");
 
+/*
+ * The init file contains the status of the target Postgres instance when the
+ * pg_autoctl create command ran the first time. We need to be able to make
+ * init time decision again if we're interrupted half-way and later want to
+ * proceed. The instruction for the user to proceed in that case is to run the
+ * pg_autoctl create command again.
+ *
+ * We also update the init file with the current stage of the initialisation
+ * process. This allows communication to happen between the init process and
+ * the Postgres FSM supervisor process. The Postgres FSM supervisors knows it
+ * must start Postgres when reaching init stage 2.
+ */
 typedef enum
 {
 	PRE_INIT_STATE_UNKNOWN = 0,
@@ -117,6 +131,13 @@ typedef enum
 	PRE_INIT_STATE_RUNNING,
 	PRE_INIT_STATE_PRIMARY
 } PreInitPostgreInstanceState;
+
+typedef enum
+{
+	INIT_STAGE_UNKNOW = 0,
+	INIT_STAGE_1,			  /* we don't have a Postgres instance yet */
+	INIT_STAGE_2			  /* our Postgres instance should be running now */
+} InitStage;
 
 /*
  *  Note: The struct is serialized/serialiazed to/from state file. Therefore
@@ -129,9 +150,12 @@ typedef struct
 {
 	int pg_autoctl_state_version;
 	PreInitPostgreInstanceState pgInitState;
+	InitStage initStage;
 } KeeperStateInit;
 
-_Static_assert (sizeof(KeeperStateInit) < PG_AUTOCTL_KEEPER_STATE_FILE_SIZE, "size of KeeperStateInit is larger than expected. please review PG_AUTOCTL_KEEPER_STATE_FILE_SIZE");
+_Static_assert (sizeof(KeeperStateInit) < PG_AUTOCTL_KEEPER_STATE_FILE_SIZE,
+				"Size of KeeperStateInit is larger than expected. "
+				"Please review PG_AUTOCTL_KEEPER_STATE_FILE_SIZE");
 
 const char * NodeStateToString(NodeState s);
 NodeState NodeStateFromString(const char *str);
@@ -145,8 +169,8 @@ bool keeper_state_write(KeeperStateData *keeperState, const char *filename);
 void log_keeper_state(KeeperStateData *keeperState);
 void print_keeper_state(KeeperStateData *keeperState, FILE *fp);
 bool keeperStateAsJSON(KeeperStateData *keeperState, JSON_Value *js);
-void print_keeper_init_state(KeeperStateInit *initState, FILE *stream);
 
+void print_keeper_init_state(KeeperStateInit *initState, FILE *stream);
 char *PreInitPostgreInstanceStateToString(PreInitPostgreInstanceState pgInitState);
 
 #endif /* STATE_H */
