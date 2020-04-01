@@ -11,7 +11,7 @@ to the secondary.
 For illustration, we'll run our databases on virtual machines in the Azure
 platform, but the techniques here are relevant to any cloud provider or
 on-premise network. We'll use four virtual machines: a primary database, a
-secondary database, a monitor, and an "application.' The monitor watches the
+secondary database, a monitor, and an "application." The monitor watches the
 other nodes’ health, manages global state, and assigns nodes their roles.
 
 .. _quickstart_network:
@@ -116,12 +116,10 @@ Install the "pg_autoctl" executable
 This guide uses Debian Linux, but similar steps will work on other
 distributions. All that differs are the packages and paths. See :ref:`install`.
 
-pg_auto_failover is distributed as a single binary with subcommands to
-initialize and manage a replicated PostgreSQL service. We’ll install the
-binary with the operating system package manager.
-
-Now we'll install the pg_autofailover package on all nodes. It will help us run
-and observe PostgreSQL with the ``pg_autoctl`` command.
+The pg_auto_failover system is distributed as a single ``pg_autoctl`` binary
+with subcommands to initialize and manage a replicated PostgreSQL service.
+We’ll install the binary with the operating system package manager on all
+nodes. It will help us run and observe PostgreSQL.
 
 .. code-block:: bash
 
@@ -159,7 +157,7 @@ own roles in the system.
        --auth trust \
        --ssl-self-signed \
        --pgdata monitor \
-       --pgctl  /usr/lib/postgresql/11/bin/pg_ctl
+       --pgctl /usr/lib/postgresql/11/bin/pg_ctl
 
 This command initializes a PostgreSQL cluster at the location pointed
 by the ``--pgdata`` option. When ``--pgdata`` is omitted, ``pg_autoctl``
@@ -213,13 +211,6 @@ with systemd so that it will resume if the VM restarts.
 .. code-block:: bash
 
    ssh -l ha-admin `vm_ip a` << CMD
-     pg_autoctl -q show systemd --pgdata ~ha-admin/ha | \
-       sudo tee /etc/systemd/system/pgautofailover.service
-     sudo systemctl daemon-reload
-     sudo systemctl start pgautofailover
-   CMD
-
-   ssh -l ha-admin `vm_ip a` << CMD
      sudo -i -u postgres \
        pg_autoctl -q show systemd --pgdata ~ha-admin/ha > pgautofailover.service
      sudo mv pgautofailover.service /etc/systemd/system
@@ -228,9 +219,7 @@ with systemd so that it will resume if the VM restarts.
      sudo systemctl start pgautofailover
    CMD
 
-
-This will remain running in the terminal, outputting logs. Next connect to
-node B and do the same process.
+Next connect to node B and do the same process. We'll do both steps at once:
 
 .. code-block:: bash
 
