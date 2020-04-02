@@ -740,15 +740,6 @@ SELECT reportedstate
         result = self.run_sql_query(query)
         return [row[0] for row in result]
 
-    def config_set(self, setting, value):
-        """
-        Set a configuration parameter to given value
-        """
-        command = PGAutoCtl(self.vnode, self.datadir)
-        command.execute("config set %s" % setting,
-                        'config', 'set', setting, value)
-        return True
-
 
 class MonitorNode(PGNode):
     def __init__(self, datadir, vnode, port, nodename, authMethod,
