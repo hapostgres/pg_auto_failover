@@ -34,13 +34,32 @@ CommandLine create_commands =
 					 "Create a pg_auto_failover node, or formation", NULL, NULL,
 					 NULL, create_subcommands);
 
-CommandLine *show_subcommands[] = {
+CommandLine *show_subcommands_with_debug[] = {
 	&show_uri_command,
 	&show_events_command,
 	&show_state_command,
 	&show_nodes_command,
 	&show_sync_standby_names_command,
 	&show_standby_names_command,
+	&show_file_command,
+	&systemd_cat_service_file_command,
+	NULL
+};
+
+CommandLine show_commands_with_debug =
+	make_command_set("show",
+					 "Show pg_auto_failover information", NULL, NULL,
+					 NULL, show_subcommands_with_debug);
+
+CommandLine *show_subcommands[] = {
+	&show_uri_command,
+	&show_events_command,
+	&show_state_command,
+
+	/* disactivated features waiting for multiple standby release */
+	/* &show_nodes_command, */
+	/* &show_sync_standby_names_command, */
+	/* &show_standby_names_command, */
 	&show_file_command,
 	&systemd_cat_service_file_command,
 	NULL
@@ -70,7 +89,7 @@ CommandLine *root_subcommands_with_debug[] = {
 	&create_commands,
 	&drop_commands,
 	&config_commands,
-	&show_commands,
+	&show_commands_with_debug,
 	&enable_commands,
 	&disable_commands,
 	&get_commands,
@@ -99,8 +118,10 @@ CommandLine *root_subcommands[] = {
 	&show_commands,
 	&enable_commands,
 	&disable_commands,
-	&get_commands,
-	&set_commands,
+
+	/* disactivated features waiting for multiple standby release */
+	/* &get_commands, */
+	/* &set_commands, */
 	&perform_commands,
 	&service_run_command,
 	&service_stop_command,
