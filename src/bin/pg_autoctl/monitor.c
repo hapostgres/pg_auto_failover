@@ -1409,6 +1409,8 @@ printCurrentState(void *ctx, PGresult *result)
 	int maxNodeNameSize = 5;    /* strlen("Name") + 1, the header */
 	char *nameSeparatorHeader = NULL;
 
+	bool pg_autoctl_debug = env_exists(PG_AUTOCTL_DEBUG);
+
 	if (PQnfields(result) != 8)
 	{
 		log_error("Query returned %d columns, expected 8", PQnfields(result));
@@ -1452,16 +1454,28 @@ printCurrentState(void *ctx, PGresult *result)
 		}
 	}
 
-	fformat(stdout, "%*s | %6s | %5s | %5s | %17s | %17s | %8s | %6s\n",
-			maxNodeNameSize, "Name", "Port",
-			"Group", "Node", "Current State", "Assigned State",
-			"Priority", "Quorum");
+	if (pg_autoctl_debug)
+	{
+		fformat(stdout, "%*s | %6s | %5s | %5s | %17s | %17s | %8s | %6s\n",
+				maxNodeNameSize, "Name", "Port",
+				"Group", "Node", "Current State", "Assigned State",
+				"Priority", "Quorum");
 
-	fformat(stdout, "%*s-+-%6s-+-%5s-+-%5s-+-%17s-+-%17s-+-%8s-+-%6s\n",
-			maxNodeNameSize, nameSeparatorHeader, "------",
-			"-----", "-----", "-----------------", "-----------------",
-			"--------", "------");
+		fformat(stdout, "%*s-+-%6s-+-%5s-+-%5s-+-%17s-+-%17s-+-%8s-+-%6s\n",
+				maxNodeNameSize, nameSeparatorHeader, "------",
+				"-----", "-----", "-----------------", "-----------------",
+				"--------", "------");
+	}
+	else
+	{
+		fformat(stdout, "%*s | %6s | %5s | %5s | %17s | %17s\n",
+				maxNodeNameSize, "Name", "Port",
+				"Group", "Node", "Current State", "Assigned State");
 
+		fformat(stdout, "%*s-+-%6s-+-%5s-+-%5s-+-%17s-+-%17s\n",
+				maxNodeNameSize, nameSeparatorHeader, "------",
+				"-----", "-----", "-----------------", "-----------------");
+	}
 	free(nameSeparatorHeader);
 
 	for (currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
@@ -1475,10 +1489,19 @@ printCurrentState(void *ctx, PGresult *result)
 		char *candidatePriority = PQgetvalue(result, currentTupleIndex, 6);
 		char *replicationQuorum = PQgetvalue(result, currentTupleIndex, 7);
 
-		fformat(stdout, "%*s | %6s | %5s | %5s | %17s | %17s | %8s | %6s\n",
-				maxNodeNameSize, nodename, nodeport,
-				groupId, nodeId, currentState, goalState,
-				candidatePriority, replicationQuorum);
+		if (pg_autoctl_debug)
+		{
+			fformat(stdout, "%*s | %6s | %5s | %5s | %17s | %17s | %8s | %6s\n",
+					maxNodeNameSize, nodename, nodeport,
+					groupId, nodeId, currentState, goalState,
+					candidatePriority, replicationQuorum);
+		}
+		else
+		{
+			fformat(stdout, "%*s | %6s | %5s | %5s | %17s | %17s\n",
+					maxNodeNameSize, nodename, nodeport,
+					groupId, nodeId, currentState, goalState);
+		}
 	}
 	fformat(stdout, "\n");
 

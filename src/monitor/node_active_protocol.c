@@ -462,7 +462,7 @@ JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 		}
 
 		/* target group already has a primary, any other node is a standby */
-		else if (formation->opt_secondary && list_length(groupNodeList) >= 1)
+		else if (formation->opt_secondary && list_length(groupNodeList) == 1)
 		{
 			AutoFailoverNode *primaryNode = NULL;
 
@@ -520,6 +520,11 @@ JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 								   standbyNode->nodePort),
 						 errhint("Retry registering in a moment")));
 			}
+		}
+		else
+		{
+			ereport(ERROR, (errmsg("group %d already has %d members", groupId,
+								   list_length(groupNodeList))));
 		}
 	}
 	else
