@@ -296,7 +296,7 @@ class PGNode:
             pidfile = os.path.join(self.datadir, 'postmaster.pid')
             with open(pidfile, "r") as p:
                 pidlines = p.readlines()
-                if len(pidlines) >= 7:
+                if len(pidlines) > 7:
                     pg_status = pidlines[7]
                     return pg_status.startswith("ready")
         elif status_proc.returncode > 0:
