@@ -33,11 +33,11 @@ typedef bool (*ServiceStopFunction)(void *context);
 
 typedef struct Service
 {
-	char name[NAMEDATALEN];				/* Service name for the user */
-	pid_t pid;							/* Service PID */
-	ServiceStartFunction startFunction;	/* how to re-start the service */
-	ServiceStopFunction stopFunction;	/* how to stop the service */
-	void *context;			   /* Service Context (Monitor or Keeper struct) */
+	char name[NAMEDATALEN];             /* Service name for the user */
+	pid_t pid;                          /* Service PID */
+	ServiceStartFunction startFunction; /* how to re-start the service */
+	ServiceStopFunction stopFunction;   /* how to stop the service */
+	void *context;             /* Service Context (Monitor or Keeper struct) */
 } Service;
 
 bool service_start(Service services[], int serviceCount, const char *pidfile);

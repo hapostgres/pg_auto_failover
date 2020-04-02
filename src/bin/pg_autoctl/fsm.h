@@ -32,10 +32,10 @@ typedef bool (*ReachAssignedStateFunction)(Keeper *keeper);
  */
 typedef enum
 {
-	PGSTATUS_UNKNOWN = 0,		/* please do nothing */
-	PGSTATUS_INIT,				/* see init stage in init state file */
-	PGSTATUS_STOPPED,			/* ensure Postgres is NOT running */
-	PGSTATUS_RUNNING			/* Postgres should be running now */
+	PGSTATUS_UNKNOWN = 0,       /* please do nothing */
+	PGSTATUS_INIT,              /* see init stage in init state file */
+	PGSTATUS_STOPPED,           /* ensure Postgres is NOT running */
+	PGSTATUS_RUNNING            /* Postgres should be running now */
 } ExpectedPostgresStatus;
 
 /* defines a possible transition in the FSM */

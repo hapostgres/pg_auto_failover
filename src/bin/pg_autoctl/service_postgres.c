@@ -86,7 +86,7 @@ service_postgres_start(void *context, pid_t *pid)
 
 		default:
 		{
-			int timeout = 10;	/* wait for Postgres for 10s */
+			int timeout = 10;   /* wait for Postgres for 10s */
 			int logLevel = ++countPostgresStart == 1 ? LOG_INFO : LOG_DEBUG;
 
 			log_debug("pg_autoctl started postgres in subprocess %d", fpid);
@@ -276,8 +276,8 @@ service_postgres_fsm_loop(Keeper *keeper)
 				continue;
 			}
 
-			if (keeper->initState.initStage != currentInitStage
-				&& keeper->initState.initStage == INIT_STAGE_2)
+			if (keeper->initState.initStage != currentInitStage &&
+				keeper->initState.initStage == INIT_STAGE_2)
 			{
 				currentInitStage = keeper->initState.initStage;
 
@@ -308,7 +308,7 @@ service_postgres_fsm_loop(Keeper *keeper)
 			}
 		}
 
-		pg_usleep(100 * 1000);	/* 100ms */
+		pg_usleep(100 * 1000);  /* 100ms */
 	}
 }
 
@@ -492,5 +492,4 @@ ensure_postgres_status_running(Keeper *keeper, Service *postgres)
 		return false;
 	}
 	return true;
-
 }

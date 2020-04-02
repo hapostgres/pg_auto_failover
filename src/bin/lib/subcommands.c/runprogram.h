@@ -21,8 +21,8 @@
 
 #include "pqexpbuffer.h"
 
-#define BUFSIZE			1024
-#define ARGS_INCREMENT	12
+#define BUFSIZE 1024
+#define ARGS_INCREMENT 12
 
 #if defined(WIN32) && !defined(__CYGWIN__)
 #define DEV_NULL "NUL"
@@ -30,21 +30,21 @@
 #define DEV_NULL "/dev/null"
 #endif
 
-#define MAX(a,b) (((a)>(b))?(a):(b))
+#define MAX(a, b) (((a) > (b)) ? (a) : (b))
 
 typedef struct
 {
 	char *program;
 	char **args;
-	bool setsid;				/* shall we call setsid() ? */
+	bool setsid;                /* shall we call setsid() ? */
 
-	int error;					/* save errno when something's gone wrong */
+	int error;                  /* save errno when something's gone wrong */
 	int returnCode;
 
-	bool capture;				/* do we capture output, or redirect it? */
+	bool capture;               /* do we capture output, or redirect it? */
 
-	int stdOutFd;				/* redirect stdout to file descriptor */
-	int stdErrFd;				/* redirect stderr to file descriptor */
+	int stdOutFd;               /* redirect stdout to file descriptor */
+	int stdErrFd;               /* redirect stderr to file descriptor */
 
 	char *stdOut;
 	char *stdErr;
@@ -92,9 +92,9 @@ run_program(const char *program, ...)
 	{
 		if (nb_args % ARGS_INCREMENT == 0)
 		{
-			char **newargs = (char **) malloc((ARGS_INCREMENT
-											   * (nb_args / ARGS_INCREMENT +1))
-											  * sizeof(char *));
+			char **newargs = (char **) malloc((ARGS_INCREMENT *
+											   (nb_args / ARGS_INCREMENT + 1)) *
+											  sizeof(char *));
 			for (int i = 0; i < nb_args; i++)
 			{
 				newargs[i] = prog.args[i];
@@ -137,7 +137,7 @@ initialize_program(char **args, bool setsid)
 	prog.stdOut = NULL;
 	prog.stdErr = NULL;
 
-	for(argsIndex = 0; args[argsIndex] != NULL; argsIndex++)
+	for (argsIndex = 0; args[argsIndex] != NULL; argsIndex++)
 	{
 		++nb_args;
 	}
@@ -146,7 +146,7 @@ initialize_program(char **args, bool setsid)
 	prog.args = (char **) malloc(++nb_args * sizeof(char *));
 	memset(prog.args, 0, nb_args * sizeof(char *));
 
-	for(argsIndex = 0; args[argsIndex] != NULL; argsIndex++)
+	for (argsIndex = 0; args[argsIndex] != NULL; argsIndex++)
 	{
 		prog.args[argsIndex] = strdup(args[argsIndex]);
 	}
@@ -154,6 +154,7 @@ initialize_program(char **args, bool setsid)
 
 	return prog;
 }
+
 
 /*
  * Run given program with its args, by doing the fork()/exec() dance, and also
@@ -164,8 +165,8 @@ void
 execute_program(Program *prog)
 {
 	pid_t pid;
-	int outpipe[2] = {0,0};
-	int errpipe[2] = {0,0};
+	int outpipe[2] = { 0, 0 };
+	int errpipe[2] = { 0, 0 };
 
 	/* Flush stdio channels just before fork, to avoid double-output problems */
 	fflush(stdout);
@@ -277,7 +278,6 @@ execute_program(Program *prog)
 			return;
 		}
 	}
-	return;
 }
 
 
@@ -303,8 +303,6 @@ free_program(Program *prog)
 	{
 		free(prog->stdErr);
 	}
-
-	return;
 }
 
 
@@ -357,18 +355,22 @@ read_from_pipes(Program *prog, pid_t childPid, int *outpipe, int *errpipe)
 			{
 				case EAGAIN:
 				case EINTR:
+				{
 					/* just loop again */
 					break;
+				}
 
 				case EBADF:
 				case EINVAL:
 				case ENOMEM:
 				default:
+				{
 					/* that's unexpected, act as if doneReading */
 					log_error("Failed to read from command \"%s\": %s",
 							  prog->program, strerror(errno));
 					doneReading = true;
 					break;
+				}
 			}
 		}
 		else if (countFdsReadyToRead == 0)
@@ -425,8 +427,6 @@ read_from_pipes(Program *prog, pid_t childPid, int *outpipe, int *errpipe)
 
 	/* now, wait until the child process is done. */
 	(void) waitprogram(prog, childPid);
-
-	return;
 }
 
 
@@ -438,19 +438,18 @@ waitprogram(Program *prog, pid_t childPid)
 {
 	int status;
 
-	do
-	{
+	do {
 		if (waitpid(childPid, &status, WUNTRACED) == -1)
 		{
 			prog->returnCode = -1;
 			prog->error = errno;
 			return;
 		}
-	}
-	while (!WIFEXITED(status) && !WIFSIGNALED(status));
+	} while (!WIFEXITED(status) && !WIFSIGNALED(status));
 
 	prog->returnCode = WEXITSTATUS(status);
 }
+
 
 /*
  * Read from a file descriptor and directly appends to our buffer string.
@@ -485,7 +484,7 @@ snprintf_program_command_line(Program *prog, char *buffer, int size)
 		return 0;
 	}
 
-	for (index=0; prog->args[index] != NULL; index++)
+	for (index = 0; prog->args[index] != NULL; index++)
 	{
 		int n = snprintf(currentPtr, remainingBytes, " %s", prog->args[index]);
 
@@ -499,4 +498,5 @@ snprintf_program_command_line(Program *prog, char *buffer, int size)
 	return BUFSIZE - remainingBytes;
 }
 
-#endif	/* RUN_PROGRAM_IMPLEMENTATION */
+
+#endif  /* RUN_PROGRAM_IMPLEMENTATION */

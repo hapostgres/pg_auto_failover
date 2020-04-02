@@ -847,8 +847,8 @@ void
 init_ps_buffer(int argc, char **argv)
 {
 #if defined(__linux__) || defined(__darwin__)
-	char	   *end_of_area = NULL;
-	int			i;
+	char *end_of_area = NULL;
+	int i;
 
 	/*
 	 * check for contiguous argv strings
@@ -856,10 +856,12 @@ init_ps_buffer(int argc, char **argv)
 	for (i = 0; i < argc; i++)
 	{
 		if (i == 0 || end_of_area + 1 == argv[i])
+		{
 			end_of_area = argv[i] + strlen(argv[i]);
+		}
 	}
 
-	if (end_of_area == NULL)	/* probably can't happen? */
+	if (end_of_area == NULL)    /* probably can't happen? */
 	{
 		ps_buffer = NULL;
 		ps_buffer_size = 0;

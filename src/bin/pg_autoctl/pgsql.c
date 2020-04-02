@@ -130,6 +130,7 @@ pgsql_finish(PGSQL *pgsql)
 	}
 }
 
+
 /*
  * pgsql_open_connection opens a PostgreSQL connection, given a PGSQL client
  * instance. If a connection is already open in the client (it's not NULL),
@@ -410,7 +411,7 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 		int remainingBytes = BUFSIZE;
 		char *writePointer = (char *) debugParameters;
 
-		for (paramIndex=0; paramIndex < paramCount; paramIndex++)
+		for (paramIndex = 0; paramIndex < paramCount; paramIndex++)
 		{
 			int bytesWritten = 0;
 			const char *value = paramValues[paramIndex];
@@ -673,7 +674,7 @@ pgsql_drop_replication_slots(PGSQL *pgsql)
 		"SELECT pg_drop_replication_slot(slot_name) "
 		"  FROM pg_replication_slots "
 		" WHERE slot_name ~ '" REPLICATION_SLOT_NAME_PATTERN "' "
-		"   AND slot_type = 'physical'";
+															 "   AND slot_type = 'physical'";
 
 	log_info("Drop pg_auto_failover physical replication slots");
 
@@ -1406,11 +1407,11 @@ validate_connection_string(const char *connectionString)
  */
 typedef struct PgMetadata
 {
-	char    sqlstate[6];
-	bool	parsedOk;
-	bool	pg_is_in_recovery;
-	char	syncState[PGSR_SYNC_STATE_MAXLENGTH];
-	char	currentLSN[PG_LSN_MAXLENGTH];
+	char sqlstate[6];
+	bool parsedOk;
+	bool pg_is_in_recovery;
+	char syncState[PGSR_SYNC_STATE_MAXLENGTH];
+	char currentLSN[PG_LSN_MAXLENGTH];
 } PgMetadata;
 
 
@@ -1421,6 +1422,7 @@ pgsql_get_postgres_metadata(PGSQL *pgsql, const char *slotName,
 {
 	PgMetadata context = { 0 };
 	char *sql =
+
 		/*
 		 * Make it so that we still have the current WAL LSN even in the case
 		 * where there's no replication slot in use by any standby.
@@ -1435,7 +1437,7 @@ pgsql_get_postgres_metadata(PGSQL *pgsql, const char *slotName,
 		" case when pg_is_in_recovery()"
 		" then pg_last_wal_receive_lsn()"
 		" else pg_current_wal_lsn()"
-        " end as current_lsn"
+		" end as current_lsn"
 		" from (values(1)) as dummy"
 		" full outer join"
 		" ("
@@ -1444,15 +1446,15 @@ pgsql_get_postgres_metadata(PGSQL *pgsql, const char *slotName,
 		"     join pg_stat_replication rep"
 		"       on rep.pid = slot.active_pid"
 		"   where slot_name ~ '" REPLICATION_SLOT_NAME_PATTERN "' "
-		"order by case sync_state "
-		"         when 'quorum' then 4 "
-		"         when 'sync' then 3 "
-		"         when 'potential' then 2 "
-		"         when 'async' then 1 "
-		"         else 0 end "
-		"    desc limit 1"
-		" ) "
-		"as rep on true";
+															   "order by case sync_state "
+															   "         when 'quorum' then 4 "
+															   "         when 'sync' then 3 "
+															   "         when 'potential' then 2 "
+															   "         when 'async' then 1 "
+															   "         else 0 end "
+															   "    desc limit 1"
+															   " ) "
+															   "as rep on true";
 
 	const Oid paramTypes[1] = { TEXTOID };
 	const char *paramValues[1] = { slotName };

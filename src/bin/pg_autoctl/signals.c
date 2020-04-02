@@ -12,16 +12,16 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "postgres_fe.h"		/* pqsignal, portable sigaction wrapper */
+#include "postgres_fe.h"        /* pqsignal, portable sigaction wrapper */
 
 #include "defaults.h"
 #include "log.h"
 #include "signals.h"
 
 /* This flag controls termination of the main loop. */
-volatile sig_atomic_t asked_to_stop = 0;	  /* SIGTERM */
+volatile sig_atomic_t asked_to_stop = 0;      /* SIGTERM */
 volatile sig_atomic_t asked_to_stop_fast = 0; /* SIGINT */
-volatile sig_atomic_t asked_to_reload = 0;	  /* SIGHUP */
+volatile sig_atomic_t asked_to_reload = 0;    /* SIGHUP */
 
 
 /*
@@ -37,6 +37,7 @@ set_signal_handlers()
 	pqsignal(SIGTERM, catch_term);
 	pqsignal(SIGQUIT, catch_quit);
 }
+
 
 /*
  * catch_reload receives the SIGHUP signal.

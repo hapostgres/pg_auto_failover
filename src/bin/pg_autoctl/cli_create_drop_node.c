@@ -247,9 +247,9 @@ cli_create_postgres_getopts(int argc, char **argv)
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
- 		{ "help", no_argument, NULL, 'h' },
-		{ "candidate-priority", required_argument, NULL, 'P'},
-		{ "replication-quorum", required_argument, NULL, 'r'},
+		{ "help", no_argument, NULL, 'h' },
+		{ "candidate-priority", required_argument, NULL, 'P' },
+		{ "replication-quorum", required_argument, NULL, 'r' },
 		{ "run", no_argument, NULL, 'x' },
 		{ "help", no_argument, NULL, 0 },
 		{ "no-ssl", no_argument, NULL, 'N' },
@@ -332,7 +332,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
- 		{ "help", no_argument, NULL, 'h' },
+		{ "help", no_argument, NULL, 'h' },
 		{ "run", no_argument, NULL, 'x' },
 		{ "no-ssl", no_argument, NULL, 'N' },
 		{ "ssl-self-signed", no_argument, NULL, 's' },
@@ -435,16 +435,22 @@ cli_create_monitor_getopts(int argc, char **argv)
 				switch (verboseCount)
 				{
 					case 1:
+					{
 						log_set_level(LOG_INFO);
 						break;
+					}
 
 					case 2:
+					{
 						log_set_level(LOG_DEBUG);
 						break;
+					}
 
 					default:
+					{
 						log_set_level(LOG_TRACE);
 						break;
+					}
 				}
 				break;
 			}
@@ -474,7 +480,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 			{
 				/* { "ssl-self-signed", no_argument, NULL, 's' }, */
 				if (!cli_getopt_accept_ssl_options(SSL_CLI_SELF_SIGNED,
-												  sslCommandLineOptions))
+												   sslCommandLineOptions))
 				{
 					errors++;
 					break;
@@ -491,7 +497,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 			{
 				/* { "no-ssl", no_argument, NULL, 'N' }, */
 				if (!cli_getopt_accept_ssl_options(SSL_CLI_NO_SSL,
-												  sslCommandLineOptions))
+												   sslCommandLineOptions))
 				{
 					errors++;
 					break;
@@ -659,7 +665,7 @@ cli_create_monitor_config(Monitor *monitor, MonitorConfig *config)
 		if (IS_EMPTY_STRING_BUFFER(config->nodename))
 		{
 			if (!discover_nodename((char *) (config->nodename),
-								   _POSIX_HOST_NAME_MAX ,
+								   _POSIX_HOST_NAME_MAX,
 								   DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME,
 								   DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT))
 			{
@@ -781,7 +787,7 @@ cli_drop_node_getopts(int argc, char **argv)
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
- 		{ "help", no_argument, NULL, 'h' },
+		{ "help", no_argument, NULL, 'h' },
 		{ NULL, 0, NULL, 0 }
 	};
 
@@ -838,16 +844,22 @@ cli_drop_node_getopts(int argc, char **argv)
 				switch (verboseCount)
 				{
 					case 1:
+					{
 						log_set_level(LOG_INFO);
 						break;
+					}
 
 					case 2:
+					{
 						log_set_level(LOG_DEBUG);
 						break;
+					}
 
 					default:
+					{
 						log_set_level(LOG_TRACE);
 						break;
+					}
 				}
 				break;
 			}
@@ -875,9 +887,9 @@ cli_drop_node_getopts(int argc, char **argv)
 		}
 	}
 
-	if (dropAndDestroy
-		&& (!IS_EMPTY_STRING_BUFFER(options.nodename)
-			|| options.pgSetup.pgport != 0))
+	if (dropAndDestroy &&
+		(!IS_EMPTY_STRING_BUFFER(options.nodename) ||
+		 options.pgSetup.pgport != 0))
 	{
 		log_error("Please use either --nodename and --pgport or ---destroy");
 		log_info("Destroying a node is not supported from a distance");
@@ -931,8 +943,8 @@ cli_drop_node(int argc, char **argv)
 			 * Now check --nodename and --pgport and remove the entry on the
 			 * monitor.
 			 */
-			if (IS_EMPTY_STRING_BUFFER(config.nodename)
-				|| config.pgSetup.pgport == 0)
+			if (IS_EMPTY_STRING_BUFFER(config.nodename) ||
+				config.pgSetup.pgport == 0)
 			{
 				log_fatal("To remove a node from the monitor, both the "
 						  "--nodename and --pgport options are required");
@@ -948,8 +960,8 @@ cli_drop_node(int argc, char **argv)
 
 		case PG_AUTOCTL_ROLE_KEEPER:
 		{
-			if (!IS_EMPTY_STRING_BUFFER(config.nodename)
-				|| config.pgSetup.pgport != 0)
+			if (!IS_EMPTY_STRING_BUFFER(config.nodename) ||
+				config.pgSetup.pgport != 0)
 			{
 				log_fatal("Only dropping the local node is supported");
 				log_info("To drop another node, please use this command "

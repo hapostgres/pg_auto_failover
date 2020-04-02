@@ -107,9 +107,9 @@ typedef struct
 	int keeper_is_paused;
 } KeeperStateData;
 
-_Static_assert (sizeof(KeeperStateData) < PG_AUTOCTL_KEEPER_STATE_FILE_SIZE,
-				"Size of KeeperStateData is larger than expected. "
-				"Please review PG_AUTOCTL_KEEPER_STATE_FILE_SIZE");
+_Static_assert(sizeof(KeeperStateData) < PG_AUTOCTL_KEEPER_STATE_FILE_SIZE,
+			   "Size of KeeperStateData is larger than expected. "
+			   "Please review PG_AUTOCTL_KEEPER_STATE_FILE_SIZE");
 
 /*
  * The init file contains the status of the target Postgres instance when the
@@ -135,8 +135,8 @@ typedef enum
 typedef enum
 {
 	INIT_STAGE_UNKNOW = 0,
-	INIT_STAGE_1,			  /* we don't have a Postgres instance yet */
-	INIT_STAGE_2			  /* our Postgres instance should be running now */
+	INIT_STAGE_1,             /* we don't have a Postgres instance yet */
+	INIT_STAGE_2              /* our Postgres instance should be running now */
 } InitStage;
 
 /*
@@ -153,9 +153,9 @@ typedef struct
 	InitStage initStage;
 } KeeperStateInit;
 
-_Static_assert (sizeof(KeeperStateInit) < PG_AUTOCTL_KEEPER_STATE_FILE_SIZE,
-				"Size of KeeperStateInit is larger than expected. "
-				"Please review PG_AUTOCTL_KEEPER_STATE_FILE_SIZE");
+_Static_assert(sizeof(KeeperStateInit) < PG_AUTOCTL_KEEPER_STATE_FILE_SIZE,
+			   "Size of KeeperStateInit is larger than expected. "
+			   "Please review PG_AUTOCTL_KEEPER_STATE_FILE_SIZE");
 
 const char * NodeStateToString(NodeState s);
 NodeState NodeStateFromString(const char *str);
@@ -171,6 +171,6 @@ void print_keeper_state(KeeperStateData *keeperState, FILE *fp);
 bool keeperStateAsJSON(KeeperStateData *keeperState, JSON_Value *js);
 
 void print_keeper_init_state(KeeperStateInit *initState, FILE *stream);
-char *PreInitPostgreInstanceStateToString(PreInitPostgreInstanceState pgInitState);
+char * PreInitPostgreInstanceStateToString(PreInitPostgreInstanceState pgInitState);
 
 #endif /* STATE_H */

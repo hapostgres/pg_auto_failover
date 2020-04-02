@@ -866,9 +866,9 @@ create_database_and_extension(Keeper *keeper)
 	if (!IS_EMPTY_STRING_BUFFER(pgSetup->username))
 	{
 		if (!pgsql_create_user(&initPostgres.sqlClient, pgSetup->username,
-							   /* password, login, superuser, replication */
-							   NULL, true, true, false))
 
+		                       /* password, login, superuser, replication */
+							   NULL, true, true, false))
 		{
 			log_fatal("Failed to create role \"%s\""
 					  ", see above for details", pgSetup->username);

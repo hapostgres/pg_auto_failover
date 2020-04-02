@@ -30,22 +30,19 @@
 
 static bool service_init(const char *pidfile, pid_t *pid);
 
-static bool service_supervisor(
-	pid_t start_pid,
-	Service services[],
-	int serviceCount,
-	const char *pidfile);
+static bool service_supervisor(pid_t start_pid,
+							   Service services[],
+							   int serviceCount,
+							   const char *pidfile);
 
-static bool service_find_subprocess(
-	Service services[],
-	int serviceCount,
-	pid_t pid,
-	Service **result);
+static bool service_find_subprocess(Service services[],
+									int serviceCount,
+									pid_t pid,
+									Service **result);
 
-static void service_stop_other_subprocesses(
-	pid_t pid,
-	Service services[],
-	int serviceCount);
+static void service_stop_other_subprocesses(pid_t pid,
+											Service services[],
+											int serviceCount);
 
 static bool service_signal_process_group(int signal);
 
@@ -77,7 +74,7 @@ service_start(Service services[], int serviceCount, const char *pidfile)
 	 * services we managed to start before, in reverse order of starting-up,
 	 * and stop here.
 	 */
-	for (serviceIndex=0; serviceIndex < serviceCount; serviceIndex++)
+	for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
 	{
 		Service *service = &(services[serviceIndex]);
 		bool started = false;
@@ -101,7 +98,7 @@ service_start(Service services[], int serviceCount, const char *pidfile)
 					  "stopping already started services and pg_autoctl",
 					  service->name);
 
-			for (idx = serviceIndex-1; idx > 0; idx--)
+			for (idx = serviceIndex - 1; idx > 0; idx--)
 			{
 				if (kill(services[idx].pid, SIGQUIT) != 0)
 				{
@@ -193,6 +190,7 @@ service_supervisor(pid_t start_pid,
 					{
 						log_info("Waiting for subprocesses to terminate.");
 					}
+
 					/*
 					 * If we've been waiting for quite a while for
 					 * sub-processes to terminate, it might be because a signal
@@ -214,11 +212,12 @@ service_supervisor(pid_t start_pid,
 								"Still waiting for subprocesses to terminate.");
 						}
 					}
+
 					/*
 					 * Wow it's been a very long time now...
 					 */
-					else if (stoppingLoopCounter > 0
-							 && stoppingLoopCounter % 100 == 0)
+					else if (stoppingLoopCounter > 0 &&
+							 stoppingLoopCounter % 100 == 0)
 					{
 						log_info("pg_autoctl services are still running, "
 								 "signaling them with SIGINT.");
@@ -311,7 +310,7 @@ service_find_subprocess(Service services[],
 {
 	int serviceIndex = 0;
 
-	for (serviceIndex=0; serviceIndex < serviceCount; serviceIndex++)
+	for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
 	{
 		if (pid == services[serviceIndex].pid)
 		{
@@ -340,7 +339,7 @@ service_stop_other_subprocesses(pid_t pid, Service services[], int serviceCount)
 	 */
 	if (!(asked_to_stop || asked_to_stop_fast))
 	{
-		for (serviceIndex=0; serviceIndex < serviceCount; serviceIndex++)
+		for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
 		{
 			Service *target = &(services[serviceIndex]);
 
@@ -579,5 +578,4 @@ check_pidfile(const char *pidfile, pid_t start_pid)
 		log_fatal("PID file not found at \"%s\", quitting.", pidfile);
 		exit(EXIT_CODE_QUIT);
 	}
-
 }

@@ -176,7 +176,7 @@ bool pg_setup_is_ready(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok);
 bool pg_setup_wait_until_is_ready(PostgresSetup *pgSetup,
 								  int timeout, int logLevel);
 
-char *pg_setup_get_username(PostgresSetup *pgSetup);
+char * pg_setup_get_username(PostgresSetup *pgSetup);
 
 #define SKIP_HBA(authMethod) \
 	(strncmp(authMethod, SKIP_HBA_AUTH_METHOD, strlen(SKIP_HBA_AUTH_METHOD)) == 0)

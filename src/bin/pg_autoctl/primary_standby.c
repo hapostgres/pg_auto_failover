@@ -18,9 +18,8 @@
 #include "primary_standby.h"
 
 
-static void local_postgres_update_pg_failures_tracking(
-	LocalPostgresServer *postgres,
-	bool pgIsRunning);
+static void local_postgres_update_pg_failures_tracking(LocalPostgresServer *postgres,
+													   bool pgIsRunning);
 
 /*
  * Default settings for postgres databases managed by pg_auto_failover.
@@ -30,31 +29,31 @@ static void local_postgres_update_pg_failures_tracking(
  * listen_addresses and port are placeholder values in this array and are
  * replaced with dynamic values from the setup when used.
  */
-#define DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER		\
-	{ "listen_addresses", "'*'" },						\
-	{ "port", "5432" },									\
-	{ "max_wal_senders", "4" },							\
-	{ "max_replication_slots", "4" },					\
-	{ "wal_level", "'replica'" },						\
-	{ "wal_log_hints", "on" },							\
-	{ "wal_keep_segments", "64" },						\
-	{ "wal_sender_timeout", "'30s'" },					\
-	{ "hot_standby_feedback", "on" },					\
-	{ "hot_standby", "on" },							\
-	{ "synchronous_commit", "on" },						\
-	{ "logging_collector", "on" },						\
-	{ "log_destination", "stderr"},						\
-	{ "logging_collector", "on"},						\
-	{ "log_directory", "log"},							\
-	{ "log_min_messages", "info"},						\
-	{ "log_connections", "on"},							\
-	{ "log_disconnections", "on"},						\
-	{ "log_lock_waits", "on"},							\
-	{ "ssl", "off" },									\
-	{ "ssl_ca_file", "" },								\
-	{ "ssl_crl_file", "" },								\
-	{ "ssl_cert_file", "" },							\
-	{ "ssl_key_file", "" },								\
+#define DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER \
+	{ "listen_addresses", "'*'" }, \
+	{ "port", "5432" }, \
+	{ "max_wal_senders", "4" }, \
+	{ "max_replication_slots", "4" }, \
+	{ "wal_level", "'replica'" }, \
+	{ "wal_log_hints", "on" }, \
+	{ "wal_keep_segments", "64" }, \
+	{ "wal_sender_timeout", "'30s'" }, \
+	{ "hot_standby_feedback", "on" }, \
+	{ "hot_standby", "on" }, \
+	{ "synchronous_commit", "on" }, \
+	{ "logging_collector", "on" }, \
+	{ "log_destination", "stderr" }, \
+	{ "logging_collector", "on" }, \
+	{ "log_directory", "log" }, \
+	{ "log_min_messages", "info" }, \
+	{ "log_connections", "on" }, \
+	{ "log_disconnections", "on" }, \
+	{ "log_lock_waits", "on" }, \
+	{ "ssl", "off" }, \
+	{ "ssl_ca_file", "" }, \
+	{ "ssl_crl_file", "" }, \
+	{ "ssl_cert_file", "" }, \
+	{ "ssl_key_file", "" }, \
 	{ "ssl_ciphers", "'TLSv1.2+HIGH:!aNULL:!eNULL'" }
 
 GUC postgres_default_settings[] = {
@@ -100,7 +99,6 @@ static void
 local_postgres_update_pg_failures_tracking(LocalPostgresServer *postgres,
 										   bool pgIsRunning)
 {
-
 	if (pgIsRunning)
 	{
 		/* reset PostgreSQL restart failures tracking */
@@ -120,6 +118,7 @@ local_postgres_update_pg_failures_tracking(LocalPostgresServer *postgres,
 		++postgres->pgStartRetries;
 	}
 }
+
 
 /*
  * local_postgres_finish closes our connection to the local PostgreSQL
@@ -145,7 +144,7 @@ ensure_local_postgres_is_running(LocalPostgresServer *postgres)
 
 	if (!pg_is_running(pgSetup->pg_ctl, pgSetup->pgdata))
 	{
-		int timeout = 10;		/* wait for Postgres for 10s */
+		int timeout = 10;       /* wait for Postgres for 10s */
 		bool pgIsRunning = false;
 
 		if (!pg_setup_wait_until_is_ready(pgSetup, timeout, LOG_DEBUG))
@@ -454,8 +453,8 @@ primary_add_standby_to_hba(LocalPostgresServer *postgres,
 	if (replicationPassword == NULL)
 	{
 		/* most authentication methods require a password */
-		if (strcmp(authMethod, "trust") != 0
-			|| strcmp(authMethod, SKIP_HBA_AUTH_METHOD) != 0)
+		if (strcmp(authMethod, "trust") != 0 ||
+			strcmp(authMethod, SKIP_HBA_AUTH_METHOD) != 0)
 		{
 			log_warn("Granting replication connection for \"%s\" "
 					 "using authentication method \"%s\" although no "
@@ -693,8 +692,7 @@ standby_promote(LocalPostgresServer *postgres)
 		return false;
 	}
 
-	do
-	{
+	do {
 		log_info("Waiting for postgres to promote");
 		pg_usleep(AWAIT_PROMOTION_SLEEP_TIME_MS * 1000);
 
@@ -704,8 +702,7 @@ standby_promote(LocalPostgresServer *postgres)
 					  "recovery mode after promotion");
 			return false;
 		}
-	}
-	while (inRecovery);
+	} while (inRecovery);
 
 	/*
 	 * It's necessary to do a checkpoint before allowing the old primary to

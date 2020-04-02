@@ -54,10 +54,10 @@ keeper_state_read(KeeperStateData *keeperState, const char *filename)
 	pg_autoctl_state_version =
 		((KeeperStateData *) content)->pg_autoctl_state_version;
 
-	if (fileSize >= sizeof(KeeperStateData)
-		&& keeper_state_is_readable(pg_autoctl_state_version))
+	if (fileSize >= sizeof(KeeperStateData) &&
+		keeper_state_is_readable(pg_autoctl_state_version))
 	{
-		*keeperState = *(KeeperStateData*) content;
+		*keeperState = *(KeeperStateData *) content;
 		free(content);
 		return true;
 	}
@@ -78,10 +78,11 @@ keeper_state_read(KeeperStateData *keeperState, const char *filename)
 static bool
 keeper_state_is_readable(int pg_autoctl_state_version)
 {
-	return pg_autoctl_state_version == PG_AUTOCTL_STATE_VERSION
-		|| (pg_autoctl_state_version == 1
-			&& PG_AUTOCTL_STATE_VERSION == 2);
+	return pg_autoctl_state_version == PG_AUTOCTL_STATE_VERSION ||
+		   (pg_autoctl_state_version == 1 &&
+			PG_AUTOCTL_STATE_VERSION == 2);
 }
+
 
 /*
  * The KeeperState data structure contains only direct values (int, long), not
@@ -228,7 +229,8 @@ log_keeper_state(KeeperStateData *keeperState)
 
 	log_trace("state.pg_control_version: %u", keeperState->pg_control_version);
 	log_trace("state.system_identifier: %" PRIu64, keeperState->system_identifier);
-	log_trace("state.pg_autoctl_state_version: %d", keeperState->pg_autoctl_state_version);
+	log_trace("state.pg_autoctl_state_version: %d",
+			  keeperState->pg_autoctl_state_version);
 	log_trace("state.current_node_id: %d", keeperState->current_node_id);
 	log_trace("state.current_group: %d", keeperState->current_group);
 	log_trace("state.current_nodes_version: %" PRIu64,
@@ -342,6 +344,7 @@ print_keeper_init_state(KeeperStateInit *initState, FILE *stream)
 			"pg_autoctl initialization stage: %d\n", initState->initStage);
 	fflush(stream);
 }
+
 
 /*
  * NodeStateToString converts a NodeState ENUM value into a string for use in
@@ -510,7 +513,7 @@ NodeStateFromString(const char *str)
 	{
 		return JOIN_PRIMARY_STATE;
 	}
-	else if(strcmp(str, "apply_settings") == 0)
+	else if (strcmp(str, "apply_settings") == 0)
 	{
 		return APPLY_SETTINGS_STATE;
 	}
@@ -569,16 +572,24 @@ PreInitPostgreInstanceStateToString(PreInitPostgreInstanceState pgInitState)
 	switch (pgInitState)
 	{
 		case PRE_INIT_STATE_EMPTY:
+		{
 			return "PGDATA does not exists";
+		}
 
 		case PRE_INIT_STATE_EXISTS:
+		{
 			return "PGDATA exists";
+		}
 
 		case PRE_INIT_STATE_RUNNING:
+		{
 			return "PostgreSQL is running";
+		}
 
 		case PRE_INIT_STATE_PRIMARY:
+		{
 			return "PostgreSQL is running and a primary server";
+		}
 
 		default:
 			return "unknown";

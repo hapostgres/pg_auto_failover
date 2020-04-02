@@ -413,8 +413,8 @@ get_pgpid(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 
 	join_path_components(pidfile, pgSetup->pgdata, "postmaster.pid");
 
-	if (!file_exists(pidfile)
-		|| !read_file(pidfile, &contents, &fileSize))
+	if (!file_exists(pidfile) ||
+		!read_file(pidfile, &contents, &fileSize))
 	{
 		if (!pg_is_not_running_is_ok)
 		{
@@ -911,8 +911,8 @@ pg_setup_wait_until_is_ready(PostgresSetup *pgSetup, int timeout, int logLevel)
 	{
 		uint64_t now = time(NULL);
 
-		pgIsRunning = get_pgpid(pgSetup, postgresNotRunningIsOk)
-			&& pgSetup->pidFile.pid != 0 ;
+		pgIsRunning = get_pgpid(pgSetup, postgresNotRunningIsOk) &&
+					  pgSetup->pidFile.pid != 0;
 
 		log_trace("pg_setup_wait_until_is_ready(): postgres %s, "
 				  "pid %d (was %d), after %ds and %d attempt(s)",
@@ -964,7 +964,6 @@ pg_setup_wait_until_is_ready(PostgresSetup *pgSetup, int timeout, int logLevel)
 	}
 
 	return true;
-
 }
 
 

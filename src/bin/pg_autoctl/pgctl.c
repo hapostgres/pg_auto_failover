@@ -980,7 +980,7 @@ pg_ctl_postgres(const char *pg_ctl, const char *pgdata, int pgport,
 		log_error("Failed to open file \"%s\": %m", logfile);
 	}
 
-	program.capture = false;	/* redirect output, don't capture */
+	program.capture = false;    /* redirect output, don't capture */
 	program.stdOutFd = logFileDescriptor;
 	program.stdErrFd = logFileDescriptor;
 
