@@ -367,6 +367,7 @@ ensure_postgres_status(Keeper *keeper, Service *postgres)
 		{
 			case NO_STATE:
 			case INIT_STATE:
+			case MAINTENANCE_STATE:
 			{
 				/* do nothing */
 				return true;
