@@ -24,11 +24,11 @@ extern bool allowRemovingPgdata;
 extern bool createAndRun;
 extern bool outputJSON;
 
-#define SSL_CA_FILE_FLAG    1	/* root public certificate */
-#define SSL_CRL_FILE_FLAG   2	/* certificates revocation list */
-#define SSL_SERVER_CRT_FLAG 3	/* server.key (private key) */
-#define SSL_SERVER_KEY_FLAG 4	/* server.crt (public certificate) */
-#define SSL_MODE_FLAG       5	/* client side sslmode for connection strings */
+#define SSL_CA_FILE_FLAG 1      /* root public certificate */
+#define SSL_CRL_FILE_FLAG 2     /* certificates revocation list */
+#define SSL_SERVER_CRT_FLAG 3   /* server.key (private key) */
+#define SSL_SERVER_KEY_FLAG 4   /* server.crt (public certificate) */
+#define SSL_MODE_FLAG 5         /* client side sslmode for connection strings */
 
 extern int ssl_flag;
 
@@ -56,7 +56,7 @@ extern int ssl_flag;
 	"  --monitor         pg_auto_failover Monitor Postgres URL\n" \
 	KEEPER_CLI_SSL_OPTIONS
 
-#define KEEPER_CLI_NON_WORKER_SETUP_OPTIONS			 \
+#define KEEPER_CLI_NON_WORKER_SETUP_OPTIONS \
 	"  --pgctl           path to pg_ctl\n" \
 	"  --pgdata          path to data director\n" \
 	"  --pghost          PostgreSQL's hostname\n" \

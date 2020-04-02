@@ -36,13 +36,14 @@ LogAndNotifyMessage(char *message, size_t size, const char *fmt, ...)
 	va_list args;
 
 	va_start(args, fmt);
+
 	/*
 	 * Explanation of IGNORE-BANNED
 	 * Arguments are always non-null and we
 	 * do not write before the allocated buffer.
 	 *
 	 */
-	n = vsnprintf(message, size-2, fmt, args); /* IGNORE-BANNED */
+	n = vsnprintf(message, size - 2, fmt, args); /* IGNORE-BANNED */
 	va_end(args);
 
 	if (n < 0)
@@ -53,8 +54,6 @@ LogAndNotifyMessage(char *message, size_t size, const char *fmt, ...)
 
 	ereport(LOG, (errmsg("%s", message)));
 	Async_Notify(CHANNEL_LOG, message);
-
-	return;
 }
 
 
@@ -147,18 +146,18 @@ InsertEvent(const char *formationId, int groupId, int64 nodeId,
 	};
 
 	Datum argValues[] = {
-		CStringGetTextDatum(formationId),	/* formationid */
-		Int64GetDatum(nodeId),				/* nodeid */
-		Int32GetDatum(groupId),				/* groupid */
-		CStringGetTextDatum(nodeName),		/* nodename */
-		Int32GetDatum(nodePort),			/* nodeport */
-		ObjectIdGetDatum(reportedStateOid),	/* reportedstate */
-		ObjectIdGetDatum(goalStateOid),		/* goalstate */
+		CStringGetTextDatum(formationId),   /* formationid */
+		Int64GetDatum(nodeId),              /* nodeid */
+		Int32GetDatum(groupId),             /* groupid */
+		CStringGetTextDatum(nodeName),      /* nodename */
+		Int32GetDatum(nodePort),            /* nodeport */
+		ObjectIdGetDatum(reportedStateOid), /* reportedstate */
+		ObjectIdGetDatum(goalStateOid),     /* goalstate */
 		CStringGetTextDatum(SyncStateToString(pgsrSyncState)), /* sync_state */
-		LSNGetDatum(reportedLSN),			/* reportedLSN */
-		Int32GetDatum(candidatePriority),	/* candidate_priority */
-		BoolGetDatum(replicationQuorum), 	/* replication_quorum */
-		CStringGetTextDatum(description)	/* description */
+		LSNGetDatum(reportedLSN),           /* reportedLSN */
+		Int32GetDatum(candidatePriority),   /* candidate_priority */
+		BoolGetDatum(replicationQuorum),    /* replication_quorum */
+		CStringGetTextDatum(description)    /* description */
 	};
 
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);

@@ -29,34 +29,39 @@
 List *
 list_qsort(const List *list, list_qsort_comparator cmp)
 {
- 	ListCell   *cell;
- 	int			i;
- 	int			len = list_length(list);
- 	ListCell  **list_arr;
- 	List	   *new_list;
+	ListCell *cell;
+	int i;
+	int len = list_length(list);
+	ListCell **list_arr;
+	List *new_list;
 
- 	if (len == 0)
- 		return NIL;
+	if (len == 0)
+	{
+		return NIL;
+	}
 
- 	i = 0;
- 	list_arr = palloc(sizeof(ListCell *) * len);
- 	foreach(cell, list)
- 		list_arr[i++] = cell;
+	i = 0;
+	list_arr = palloc(sizeof(ListCell *) * len);
+	foreach(cell, list)
+	list_arr[i++] = cell;
 
- 	qsort(list_arr, len, sizeof(ListCell *), cmp);
+	qsort(list_arr, len, sizeof(ListCell *), cmp);
 
- 	new_list = (List *) palloc(sizeof(List));
- 	new_list->type = list->type;
- 	new_list->length = len;
- 	new_list->head = list_arr[0];
- 	new_list->tail = list_arr[len - 1];
+	new_list = (List *) palloc(sizeof(List));
+	new_list->type = list->type;
+	new_list->length = len;
+	new_list->head = list_arr[0];
+	new_list->tail = list_arr[len - 1];
 
- 	for (i = 0; i < len - 1; i++)
- 		list_arr[i]->next = list_arr[i + 1];
+	for (i = 0; i < len - 1; i++)
+	{
+		list_arr[i]->next = list_arr[i + 1];
+	}
 
- 	list_arr[len - 1]->next = NULL;
- 	pfree(list_arr);
- 	return new_list;
+	list_arr[len - 1]->next = NULL;
+	pfree(list_arr);
+	return new_list;
 }
+
 
 #endif

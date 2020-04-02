@@ -50,6 +50,9 @@ test:
 		--stop					\
 		${TEST_ARGUMENT}
 
+indent:
+	citus_indent
+
 docs: $(FSM)
 	$(MAKE) -C docs html
 

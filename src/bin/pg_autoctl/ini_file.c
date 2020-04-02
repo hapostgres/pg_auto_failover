@@ -349,7 +349,7 @@ write_ini_to_stream(FILE *stream, IniOption *optionList)
 			case INI_INT_T:
 			{
 				fformat(stream, "%s = %d\n",
-							 option->name, *(option->intValue));
+						option->name, *(option->intValue));
 				break;
 			}
 

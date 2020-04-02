@@ -58,7 +58,7 @@ static CommandLine do_show_nodename_command =
 				 NULL, cli_show_nodename);
 
 CommandLine *do_show_subcommands[] = {
- 	&do_show_ipaddr_command,
+	&do_show_ipaddr_command,
 	&do_show_cidr_command,
 	&do_show_lookup_command,
 	&do_show_nodename_command,
@@ -69,7 +69,6 @@ CommandLine do_show_commands =
 	make_command_set("show",
 					 "Show some debug level information", NULL, NULL,
 					 NULL, do_show_subcommands);
-
 
 
 /*
@@ -176,6 +175,7 @@ cli_show_lookup(int argc, char **argv)
 		{
 			log_fatal("Failed to check nodename \"%s\", see above for details",
 					  hostname);
+
 			/* keep ipAddr and show exit failure */
 			fformat(stdout, "%s\n", ipAddr);
 

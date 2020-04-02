@@ -38,7 +38,6 @@ env_found_empty(const char *name)
 	 */
 	envvalue = getenv(name); /* IGNORE-BANNED */
 	return envvalue != NULL && strlen(envvalue) == 0;
-
 }
 
 
@@ -73,7 +72,7 @@ env_exists(const char *name)
  */
 bool
 get_env_copy_with_fallback(const char *name, char *result, int maxLength,
-						   const char* fallback)
+						   const char *fallback)
 {
 	const char *envvalue = NULL;
 	size_t actualLength = 0;
@@ -116,11 +115,10 @@ get_env_copy_with_fallback(const char *name, char *result, int maxLength,
 	{
 		log_error("Failed to copy value stored in %s environment setting, "
 				  "which is %ld long. pg_autoctl only supports %d bytes for "
-				  "this environment setting", name, actualLength, maxLength-1);
+				  "this environment setting", name, actualLength, maxLength - 1);
 		return false;
 	}
 	return true;
-
 }
 
 
@@ -129,7 +127,8 @@ get_env_copy_with_fallback(const char *name, char *result, int maxLength,
  * buffer. It returns false when it fails. The environment variable not
  * existing is also considered a failure.
  */
-bool get_env_copy(const char *name, char *result, int maxLength)
+bool
+get_env_copy(const char *name, char *result, int maxLength)
 {
 	return get_env_copy_with_fallback(name, result, maxLength, NULL);
 }

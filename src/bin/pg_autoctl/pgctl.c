@@ -58,16 +58,15 @@ static void log_program_output(Program prog, int outLogLevel, int errorLogLevel)
 static bool escape_recovery_conf_string(char *destination,
 										int destinationSize,
 										const char *recoveryConfString);
-static bool prepare_primary_conninfo(
-	char *primaryConnInfo,
-	int primaryConnInfoSize,
-	const char *primaryHost, int primaryPort,
-	const char *replicationUsername,
-	const char *dbname,
-	const char *replicationPassword,
-	const char *applicationName,
-	SSLOptions sslOptions,
-	bool escape);
+static bool prepare_primary_conninfo(char *primaryConnInfo,
+									 int primaryConnInfoSize,
+									 const char *primaryHost, int primaryPort,
+									 const char *replicationUsername,
+									 const char *dbname,
+									 const char *replicationPassword,
+									 const char *applicationName,
+									 SSLOptions sslOptions,
+									 bool escape);
 static bool pg_write_recovery_conf(const char *pgdata,
 								   const char *primaryConnInfo,
 								   const char *replicationSlotName);
@@ -292,7 +291,7 @@ pg_include_config(const char *configFilePath,
 	/* find the include 'postgresql-auto-failover.conf' line */
 	includeLine = strstr(currentConfContents, configIncludeLine);
 
-	if (includeLine != NULL && (includeLine ==  currentConfContents ||
+	if (includeLine != NULL && (includeLine == currentConfContents ||
 								includeLine[-1] == '\n'))
 	{
 		log_debug("%s found in \"%s\"", configIncludeLine, configFilePath);
@@ -434,6 +433,7 @@ prepare_guc_settings_from_pgsetup(const char *configFilePath,
 	for (settingIndex = 0; settings[settingIndex].name != NULL; settingIndex++)
 	{
 		GUC *setting = &settings[settingIndex];
+
 		/*
 		 * Settings for "listen_addresses" and "port" are replaced with the
 		 * respective values present in pgSetup allowing those to be dynamic.
@@ -460,8 +460,8 @@ prepare_guc_settings_from_pgsetup(const char *configFilePath,
 		else if (streq(setting->name, "port"))
 		{
 			appendPQExpBuffer(config, "%s = %d\n",
-					  setting->name,
-					  pgSetup->pgport);
+							  setting->name,
+							  pgSetup->pgport);
 		}
 		else if (streq(setting->name, "ssl"))
 		{
@@ -670,7 +670,7 @@ pg_rewind(const char *pgdata,
 								  primaryNode->port,
 								  replicationSource->userName,
 								  "postgres", /* pg_rewind needs a database */
-								  NULL,		  /* no password here */
+								  NULL,       /* no password here */
 								  replicationSource->applicationName,
 								  replicationSource->sslOptions,
 								  false)) /* do not escape this one */
@@ -1277,7 +1277,7 @@ escape_recovery_conf_string(char *destination, int destinationSize,
 	int escapedStringLength = 0;
 
 	/* we are going to add at least 3 chars: two quotes and a NUL character */
-	if (destinationSize < (length+3))
+	if (destinationSize < (length + 3))
 	{
 		log_error("BUG: failed to escape recovery parameter value \"%s\" "
 				  "in a buffer of %d bytes",
@@ -1435,9 +1435,9 @@ pg_write_standby_signal(const char *configFilePath,
 						const char *replicationSlotName)
 {
 	GUC standby_settings[] = {
-		{ "primary_conninfo", (char  *)primaryConnInfo },
-		{ "primary_slot_name", (char  *) replicationSlotName},
-		{ "recovery_target_timeline", "latest"},
+		{ "primary_conninfo", (char *) primaryConnInfo },
+		{ "primary_slot_name", (char *) replicationSlotName },
+		{ "recovery_target_timeline", "latest" },
 		{ NULL, NULL }
 	};
 	char standbyConfigFilePath[MAXPGPATH];
@@ -1529,7 +1529,7 @@ pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *nodename)
 	}
 
 	size = sformat(pgSetup->ssl.serverKey, MAXPGPATH,
-					"%s/server.key", pgSetup->pgdata);
+				   "%s/server.key", pgSetup->pgdata);
 
 	if (size == -1 || size > MAXPGPATH)
 	{
@@ -1540,7 +1540,7 @@ pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *nodename)
 	}
 
 	size = sformat(pgSetup->ssl.serverCert, MAXPGPATH,
-					"%s/server.crt", pgSetup->pgdata);
+				   "%s/server.crt", pgSetup->pgdata);
 
 	if (size == -1 || size > MAXPGPATH)
 	{

@@ -133,7 +133,7 @@ root_options(int argc, char **argv)
 		{ "json", no_argument, NULL, 'J' },
 		{ "quiet", no_argument, NULL, 'q' },
 		{ "help", no_argument, NULL, 'h' },
-	{ NULL, 0, NULL, 0 }
+		{ NULL, 0, NULL, 0 }
 	};
 
 	int c, option_index, errors = 0;
@@ -164,16 +164,22 @@ root_options(int argc, char **argv)
 				switch (verboseCount)
 				{
 					case 1:
+					{
 						log_set_level(LOG_INFO);
 						break;
+					}
 
 					case 2:
+					{
 						log_set_level(LOG_DEBUG);
 						break;
+					}
 
 					default:
+					{
 						log_set_level(LOG_TRACE);
 						break;
+					}
 				}
 				break;
 			}

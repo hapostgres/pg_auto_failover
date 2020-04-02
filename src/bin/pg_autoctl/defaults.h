@@ -107,7 +107,7 @@
 /*
  * Error codes returned to the shell in case something goes wrong.
  */
-#define EXIT_CODE_QUIT 0		/* it's ok, we were asked politely */
+#define EXIT_CODE_QUIT 0        /* it's ok, we were asked politely */
 #define EXIT_CODE_BAD_ARGS 1
 #define EXIT_CODE_BAD_CONFIG 2
 #define EXIT_CODE_BAD_STATE 3
@@ -123,6 +123,7 @@
  * This opens file write only and creates if it doesn't exist.
  */
 #define FOPEN_FLAGS_W O_WRONLY | O_TRUNC | O_CREAT
+
 /*
  * This opens the file in append mode and creates it if it doesn't exist.
  */

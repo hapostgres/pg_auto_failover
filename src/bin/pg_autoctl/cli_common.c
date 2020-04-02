@@ -38,9 +38,8 @@ bool createAndRun = false;
 bool outputJSON = false;
 int ssl_flag = 0;
 
-static void stop_postgres_and_remove_pgdata_and_config(
-	ConfigFilePaths *pathnames,
-	PostgresSetup *pgSetup);
+static void stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathnames,
+													   PostgresSetup *pgSetup);
 
 /*
  * cli_create_node_getopts parses the CLI options for the pg_autoctl create
@@ -100,8 +99,10 @@ cli_create_node_getopts(int argc, char **argv,
 	LocalOptionConfig.prepare_promotion_walreceiver = -1;
 	LocalOptionConfig.postgresql_restart_failure_timeout = -1;
 	LocalOptionConfig.postgresql_restart_failure_max_retries = -1;
-	LocalOptionConfig.pgSetup.settings.candidatePriority = FAILOVER_NODE_CANDIDATE_PRIORITY;
-	LocalOptionConfig.pgSetup.settings.replicationQuorum = FAILOVER_NODE_REPLICATION_QUORUM;
+	LocalOptionConfig.pgSetup.settings.candidatePriority =
+		FAILOVER_NODE_CANDIDATE_PRIORITY;
+	LocalOptionConfig.pgSetup.settings.replicationQuorum =
+		FAILOVER_NODE_REPLICATION_QUORUM;
 
 
 	optind = 0;
@@ -326,16 +327,22 @@ cli_create_node_getopts(int argc, char **argv,
 				switch (verboseCount)
 				{
 					case 1:
+					{
 						log_set_level(LOG_INFO);
 						break;
+					}
 
 					case 2:
+					{
 						log_set_level(LOG_DEBUG);
 						break;
+					}
 
 					default:
+					{
 						log_set_level(LOG_TRACE);
 						break;
+					}
 				}
 				break;
 			}
@@ -365,7 +372,7 @@ cli_create_node_getopts(int argc, char **argv,
 			{
 				/* { "ssl-self-signed", no_argument, NULL, 's' }, */
 				if (!cli_getopt_accept_ssl_options(SSL_CLI_SELF_SIGNED,
-												  sslCommandLineOptions))
+												   sslCommandLineOptions))
 				{
 					errors++;
 					break;
@@ -382,7 +389,7 @@ cli_create_node_getopts(int argc, char **argv,
 			{
 				/* { "no-ssl", no_argument, NULL, 'N' }, */
 				if (!cli_getopt_accept_ssl_options(SSL_CLI_NO_SSL,
-												  sslCommandLineOptions))
+												   sslCommandLineOptions))
 				{
 					errors++;
 					break;
@@ -491,14 +498,14 @@ cli_create_node_getopts(int argc, char **argv,
 	/*
 	 * You can't both have a monitor a use --disable-monitor.
 	 */
-	if (!IS_EMPTY_STRING_BUFFER(LocalOptionConfig.monitor_pguri)
-		&& LocalOptionConfig.monitorDisabled)
+	if (!IS_EMPTY_STRING_BUFFER(LocalOptionConfig.monitor_pguri) &&
+		LocalOptionConfig.monitorDisabled)
 	{
 		log_fatal("Use either --monitor or --disable-monitor, not both.");
 		exit(EXIT_CODE_BAD_ARGS);
 	}
-	else if (IS_EMPTY_STRING_BUFFER(LocalOptionConfig.monitor_pguri)
-			 && !LocalOptionConfig.monitorDisabled)
+	else if (IS_EMPTY_STRING_BUFFER(LocalOptionConfig.monitor_pguri) &&
+			 !LocalOptionConfig.monitorDisabled)
 	{
 		log_fatal("Failed to set the monitor URI: "
 				  "use either --monitor postgresql://... or --disable-monitor");
@@ -550,8 +557,8 @@ cli_getopt_accept_ssl_options(SSLCommandLineOptions newSSLOption,
 
 	if (currentSSLOptions != newSSLOption)
 	{
-		if (currentSSLOptions == SSL_CLI_USER_PROVIDED
-			|| newSSLOption == SSL_CLI_USER_PROVIDED)
+		if (currentSSLOptions == SSL_CLI_USER_PROVIDED ||
+			newSSLOption == SSL_CLI_USER_PROVIDED)
 		{
 			log_error(
 				"Using either --no-ssl or --ssl-self-signed "
@@ -645,7 +652,6 @@ cli_getopt_ssl_flags(int ssl_flag, char *optarg, PostgresSetup *pgSetup)
 }
 
 
-
 /*
  * keeper_cli_getopt_pgdata gets the PGDATA options or environment variable,
  * either of those must be set for all of pg_autoctl's commands. This parameter
@@ -713,16 +719,22 @@ cli_getopt_pgdata(int argc, char **argv)
 				switch (verboseCount)
 				{
 					case 1:
+					{
 						log_set_level(LOG_INFO);
 						break;
+					}
 
 					case 2:
+					{
 						log_set_level(LOG_DEBUG);
 						break;
+					}
 
 					default:
+					{
 						log_set_level(LOG_TRACE);
 						break;
+					}
 				}
 				break;
 			}
@@ -1085,7 +1097,7 @@ keeper_cli_print_version(int argc, char **argv)
 		json_object_set_string(root, "pg_major", PG_MAJORVERSION);
 		json_object_set_string(root, "pg_version", PG_VERSION);
 		json_object_set_string(root, "pg_version_str", PG_VERSION_STR);
-		json_object_set_number(root, "pg_version_num", (double )PG_VERSION_NUM);
+		json_object_set_number(root, "pg_version_num", (double) PG_VERSION_NUM);
 
 		(void) cli_pprint_json(js);
 	}
@@ -1181,9 +1193,9 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 	if (dropAndDestroy)
 	{
 		(void)
-			stop_postgres_and_remove_pgdata_and_config(
-				&config->pathnames,
-				&config->pgSetup);
+		stop_postgres_and_remove_pgdata_and_config(
+			&config->pathnames,
+			&config->pgSetup);
 	}
 	else
 	{
@@ -1206,7 +1218,7 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 		 * fresh environment.
 		 */
 		log_warn("Configuration file \"%s\" has been preserved",
-			 config->pathnames.config);
+				 config->pathnames.config);
 
 		if (directory_exists(config->pgSetup.pgdata))
 		{

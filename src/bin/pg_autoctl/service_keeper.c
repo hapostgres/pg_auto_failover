@@ -462,7 +462,7 @@ is_network_healthy(Keeper *keeper)
 	}
 
 	log_info("Failed to contact the monitor or standby in %" PRIu64 " seconds, "
-			 "at %d seconds we shut down PostgreSQL to prevent split brain issues",
+																	"at %d seconds we shut down PostgreSQL to prevent split brain issues",
 			 keeperState->last_monitor_contact - now, networkPartitionTimeout);
 
 	return false;
@@ -514,8 +514,8 @@ reload_configuration(Keeper *keeper)
 		if (keeper_config_read_file(&newConfig,
 									missingPgdataIsOk,
 									pgIsNotRunningIsOk,
-									monitorDisabledIsOk)
-			&& keeper_config_accept_new(config, &newConfig))
+									monitorDisabledIsOk) &&
+			keeper_config_accept_new(config, &newConfig))
 		{
 			/*
 			 * The keeper->config changed, not the keeper->postgres, but the

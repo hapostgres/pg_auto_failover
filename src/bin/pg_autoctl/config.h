@@ -35,9 +35,9 @@ typedef struct ConfigFilePaths
 {
 	char config[MAXPGPATH]; /* ~/.config/pg_autoctl/${PGDATA}/pg_autoctl.cfg */
 	char state[MAXPGPATH];  /* ~/.local/share/pg_autoctl/${PGDATA}/pg_autoctl.state */
-	char pid[MAXPGPATH];	/* /tmp/${PGDATA}/pg_autoctl.pid */
-	char init[MAXPGPATH];	/* /tmp/${PGDATA}/pg_autoctl.init */
-	char systemd[MAXPGPATH];	/* ~/.config/systemd/user/pgautofailover.service */
+	char pid[MAXPGPATH];    /* /tmp/${PGDATA}/pg_autoctl.pid */
+	char init[MAXPGPATH];   /* /tmp/${PGDATA}/pg_autoctl.init */
+	char systemd[MAXPGPATH];    /* ~/.config/systemd/user/pgautofailover.service */
 } ConfigFilePaths;
 
 /*
@@ -65,7 +65,7 @@ typedef enum
 
 
 bool build_xdg_path(char *dst, XDGResourceType xdgType,
-						   const char *pgdata, const char *name);
+					const char *pgdata, const char *name);
 
 bool SetConfigFilePath(ConfigFilePaths *pathnames, const char *pgdata);
 bool SetStateFilePath(ConfigFilePaths *pathnames, const char *pgdata);
