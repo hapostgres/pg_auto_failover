@@ -1,7 +1,6 @@
 import pgautofailover_utils as pgautofailover
 from nose.tools import *
 
-import time
 import os, os.path, subprocess, signal
 
 cluster = None
@@ -35,8 +34,6 @@ def test_000a_create_monitor():
     assert(p.returncode == 0)
 
 def test_000b_stop_postgres_monitor():
-    #time.sleep(3600)
-
     p = subprocess.run(["head", "-1", "/tmp/basic/monitor/postmaster.pid"],
                        text=True,
                        capture_output=True)
@@ -44,7 +41,8 @@ def test_000b_stop_postgres_monitor():
     print("postgres is running with pid %d" % pgpid)
     assert(p.returncode == 0)
 
-    # the pg_ctl stop command has a timeout issue, replacing it with a kill
+    # the pg_ctl stop command can't finish because pg_autoctl restart
+    #Postgres too fast
     #monitor.stop_postgres()
     os.kill(pgpid, signal.SIGQUIT)
 

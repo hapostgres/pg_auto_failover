@@ -313,7 +313,7 @@ class PGNode:
             pidfile = os.path.join(self.datadir, 'postmaster.pid')
             with open(pidfile, "r") as p:
                 pidlines = p.readlines()
-                if len(pidlines) >= 7:
+                if len(pidlines) > 7:
                     pg_status = pidlines[7]
                     return pg_status.startswith("ready")
         elif status_proc.returncode > 0:
@@ -563,7 +563,7 @@ class DataNode(PGNode):
             pglogs = self.get_postgres_logs()
 
             if self.pg_autoctl and self.pg_autoctl.run_proc:
-                out, err = self.stop_pg_autoctl()
+                out, err, ret = self.stop_pg_autoctl()
                 raise Exception("%s failed to reach %s after %d attempts: " \
                                 "\n%s\n%s\n%s\n%s" %
                                 (self.datadir, target_state, timeout,
