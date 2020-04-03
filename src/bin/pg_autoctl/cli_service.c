@@ -83,12 +83,16 @@ cli_service_run(int argc, char **argv)
 	switch (ProbeConfigurationFileRole(config.pathnames.config))
 	{
 		case PG_AUTOCTL_ROLE_MONITOR:
+		{
 			(void) cli_monitor_run(argc, argv);
 			break;
+		}
 
 		case PG_AUTOCTL_ROLE_KEEPER:
+		{
 			(void) cli_keeper_run(argc, argv);
 			break;
+		}
 
 		default:
 		{
@@ -190,11 +194,9 @@ cli_monitor_run(int argc, char **argv)
 	KeeperConfig kconfig = keeperOptions;
 	MonitorConfig mconfig = { 0 };
 	Monitor monitor = { 0 };
-	MonitorExtensionVersion version = { 0 };
 	bool missingPgdataIsOk = false;
 	bool pgIsNotRunningIsOk = true;
 	char connInfo[MAXCONNINFO];
-	char *channels[] = { "log", "state", NULL };
 
 	if (!monitor_config_init_from_pgsetup(&mconfig,
 										  &kconfig.pgSetup,
@@ -229,8 +231,7 @@ cli_service_reload(int argc, char **argv)
 	{
 		if (kill(pid, SIGHUP) != 0)
 		{
-			log_error("Failed to send SIGHUP to the keeper's pid %d: %s",
-					  pid, strerror(errno));
+			log_error("Failed to send SIGHUP to the keeper's pid %d: %m", pid);
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 	}
@@ -310,16 +311,22 @@ cli_getopt_pgdata_and_mode(int argc, char **argv)
 				switch (verboseCount)
 				{
 					case 1:
+					{
 						log_set_level(LOG_INFO);
 						break;
+					}
 
 					case 2:
+					{
 						log_set_level(LOG_DEBUG);
 						break;
+					}
 
 					default:
+					{
 						log_set_level(LOG_TRACE);
 						break;
+					}
 				}
 				break;
 			}
@@ -372,8 +379,8 @@ cli_service_stop(int argc, char **argv)
 	{
 		if (kill(pid, stop_signal) != 0)
 		{
-			log_error("Failed to send %s to the keeper's pid %d: %s",
-					  strsignal(stop_signal), pid, strerror(errno));
+			log_error("Failed to send %s to the keeper's pid %d: %m",
+					  strsignal(stop_signal), pid);
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 	}

@@ -10,12 +10,14 @@
 #include <errno.h>
 #include <inttypes.h>
 #include <getopt.h>
+#include <signal.h>
 
 #include "commandline.h"
 
 #include "cli_common.h"
 #include "cli_root.h"
 #include "commandline.h"
+#include "env_utils.h"
 #include "ipaddr.h"
 #include "keeper.h"
 #include "keeper_config.h"
@@ -26,13 +28,17 @@
 #include "pgsetup.h"
 #include "pgsql.h"
 #include "state.h"
+#include "string_utils.h"
 
 /* handle command line options for our setup. */
 KeeperConfig keeperOptions;
 bool allowRemovingPgdata = false;
 bool createAndRun = false;
 bool outputJSON = false;
+int ssl_flag = 0;
 
+static void stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathnames,
+													   PostgresSetup *pgSetup);
 
 /*
  * cli_create_node_getopts parses the CLI options for the pg_autoctl create
@@ -47,6 +53,7 @@ bool outputJSON = false;
  *		{ "proxyport", required_argument, NULL, 'y' },
  *		{ "username", required_argument, NULL, 'U' },
  *		{ "auth", required_argument, NULL, 'A' },
+ *		{ "skip-pg-hba", required_argument, NULL, 'S' },
  *		{ "dbname", required_argument, NULL, 'd' },
  *		{ "nodename", required_argument, NULL, 'n' },
  *		{ "formation", required_argument, NULL, 'f' },
@@ -62,6 +69,12 @@ bool outputJSON = false;
  *		{ "replication-quorum", required_argument, NULL, 'r'},
  *		{ "help", no_argument, NULL, 0 },
  *		{ "run", no_argument, NULL, 'x' },
+ *      { "ssl-self-signed", no_argument, NULL, 's' },
+ *      { "no-ssl", no_argument, NULL, 'N' },
+ *      { "ssl-ca-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG },
+ *      { "server-crt", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG },
+ *      { "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG },
+ *      { "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG },
  *		{ NULL, 0, NULL, 0 }
  *	};
  *
@@ -73,8 +86,9 @@ cli_create_node_getopts(int argc, char **argv,
 						KeeperConfig *options)
 {
 	KeeperConfig LocalOptionConfig = { 0 };
-	int c, option_index, errors = 0;
+	int c, option_index = 0, errors = 0;
 	int verboseCount = 0;
+	SSLCommandLineOptions sslCommandLineOptions = SSL_CLI_UNKNOWN;
 
 	/* force some non-zero default values */
 	LocalOptionConfig.monitorDisabled = false;
@@ -84,8 +98,10 @@ cli_create_node_getopts(int argc, char **argv,
 	LocalOptionConfig.prepare_promotion_walreceiver = -1;
 	LocalOptionConfig.postgresql_restart_failure_timeout = -1;
 	LocalOptionConfig.postgresql_restart_failure_max_retries = -1;
-	LocalOptionConfig.pgSetup.settings.candidatePriority = FAILOVER_NODE_CANDIDATE_PRIORITY;
-	LocalOptionConfig.pgSetup.settings.replicationQuorum = FAILOVER_NODE_REPLICATION_QUORUM;
+	LocalOptionConfig.pgSetup.settings.candidatePriority =
+		FAILOVER_NODE_CANDIDATE_PRIORITY;
+	LocalOptionConfig.pgSetup.settings.replicationQuorum =
+		FAILOVER_NODE_REPLICATION_QUORUM;
 
 
 	optind = 0;
@@ -128,8 +144,7 @@ cli_create_node_getopts(int argc, char **argv,
 			case 'p':
 			{
 				/* { "pgport", required_argument, NULL, 'p' } */
-				LocalOptionConfig.pgSetup.pgport = strtol(optarg, NULL, 10);
-				if (LocalOptionConfig.pgSetup.pgport == 0 && errno == EINVAL)
+				if (!stringToInt(optarg, &LocalOptionConfig.pgSetup.pgport))
 				{
 					log_error("Failed to parse --pgport number \"%s\"",
 							  optarg);
@@ -150,8 +165,7 @@ cli_create_node_getopts(int argc, char **argv,
 			case 'y':
 			{
 				/* { "proxyport", required_argument, NULL,'y' } */
-				LocalOptionConfig.pgSetup.proxyport = strtol(optarg, NULL, 10);
-				if (LocalOptionConfig.pgSetup.proxyport == 0 && errno == EINVAL)
+				if (!stringToInt(optarg, &LocalOptionConfig.pgSetup.proxyport))
 				{
 					log_error("Failed to parse --proxyport number \"%s\"",
 							  optarg);
@@ -172,10 +186,33 @@ cli_create_node_getopts(int argc, char **argv,
 			case 'A':
 			{
 				/* { "auth", required_argument, NULL, 'A' }, */
+				if (!IS_EMPTY_STRING_BUFFER(LocalOptionConfig.pgSetup.authMethod))
+				{
+					errors++;
+					log_error("Please use either --auth or --skip-pg-hba");
+				}
+
 				strlcpy(LocalOptionConfig.pgSetup.authMethod, optarg, NAMEDATALEN);
 				log_trace("--auth %s", LocalOptionConfig.pgSetup.authMethod);
 				break;
 			}
+
+			case 'S':
+			{
+				/* { "skip-pg-hba", required_argument, NULL, 'S' }, */
+				if (!IS_EMPTY_STRING_BUFFER(LocalOptionConfig.pgSetup.authMethod))
+				{
+					errors++;
+					log_error("Please use either --auth or --skip-pg-hba");
+				}
+
+				strlcpy(LocalOptionConfig.pgSetup.authMethod,
+						SKIP_HBA_AUTH_METHOD,
+						NAMEDATALEN);
+				log_trace("--skip-pg-hba");
+				break;
+			}
+
 			case 'd':
 			{
 				/* { "dbname", required_argument, NULL, 'd' } */
@@ -203,8 +240,7 @@ cli_create_node_getopts(int argc, char **argv,
 			case 'g':
 			{
 				/* { "group", required_argument, NULL, 'g' } */
-				int scanResult = sscanf(optarg, "%d", &LocalOptionConfig.groupId);
-				if (scanResult == 0)
+				if (!stringToInt(optarg, &LocalOptionConfig.groupId))
 				{
 					log_fatal("--group argument is not a valid group ID: \"%s\"",
 							  optarg);
@@ -290,16 +326,22 @@ cli_create_node_getopts(int argc, char **argv,
 				switch (verboseCount)
 				{
 					case 1:
+					{
 						log_set_level(LOG_INFO);
 						break;
+					}
 
 					case 2:
+					{
 						log_set_level(LOG_DEBUG);
 						break;
+					}
 
 					default:
+					{
 						log_set_level(LOG_TRACE);
 						break;
+					}
 				}
 				break;
 			}
@@ -325,6 +367,71 @@ cli_create_node_getopts(int argc, char **argv,
 				break;
 			}
 
+			case 's':
+			{
+				/* { "ssl-self-signed", no_argument, NULL, 's' }, */
+				if (!cli_getopt_accept_ssl_options(SSL_CLI_SELF_SIGNED,
+												   sslCommandLineOptions))
+				{
+					errors++;
+					break;
+				}
+				sslCommandLineOptions = SSL_CLI_SELF_SIGNED;
+
+				LocalOptionConfig.pgSetup.ssl.active = 1;
+				LocalOptionConfig.pgSetup.ssl.createSelfSignedCert = true;
+				log_trace("--ssl-self-signed");
+				break;
+			}
+
+			case 'N':
+			{
+				/* { "no-ssl", no_argument, NULL, 'N' }, */
+				if (!cli_getopt_accept_ssl_options(SSL_CLI_NO_SSL,
+												   sslCommandLineOptions))
+				{
+					errors++;
+					break;
+				}
+				sslCommandLineOptions = SSL_CLI_NO_SSL;
+
+				LocalOptionConfig.pgSetup.ssl.active = 0;
+				LocalOptionConfig.pgSetup.ssl.createSelfSignedCert = false;
+				log_trace("--no-ssl");
+				break;
+			}
+
+			/*
+			 * { "ssl-ca-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG }
+			 * { "ssl-crl-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG }
+			 * { "server-crt", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG }
+			 * { "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG }
+			 * { "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG },
+			 */
+			case 0:
+			{
+				if (ssl_flag != SSL_MODE_FLAG)
+				{
+					if (!cli_getopt_accept_ssl_options(SSL_CLI_USER_PROVIDED,
+													   sslCommandLineOptions))
+					{
+						errors++;
+						break;
+					}
+
+					sslCommandLineOptions = SSL_CLI_USER_PROVIDED;
+					LocalOptionConfig.pgSetup.ssl.active = 1;
+				}
+
+				if (!cli_getopt_ssl_flags(ssl_flag,
+										  optarg,
+										  &(LocalOptionConfig.pgSetup)))
+				{
+					errors++;
+				}
+				break;
+			}
+
 			default:
 			{
 				/* getopt_long already wrote an error message */
@@ -334,34 +441,70 @@ cli_create_node_getopts(int argc, char **argv,
 		}
 	}
 
+	if (errors > 0)
+	{
+		commandline_help(stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
 	/*
 	 * Now, all commands need PGDATA validation.
 	 */
 	if (IS_EMPTY_STRING_BUFFER(LocalOptionConfig.pgSetup.pgdata))
 	{
-		char *pgdata = getenv("PGDATA");
+		get_env_pgdata_or_exit(LocalOptionConfig.pgSetup.pgdata);
+	}
 
-		if (pgdata == NULL)
-		{
-			log_fatal("Failed to get PGDATA either from the environment "
-					  "or from --pgdata");
-			exit(EXIT_CODE_BAD_ARGS);
-		}
+	/*
+	 * We require the user to specify an authentication mechanism, or to use
+	 * ---skip-pg-hba. Our documentation tutorial will use --auth trust, and we
+	 * should make it obvious that this is not the right choice for production.
+	 */
+	if (IS_EMPTY_STRING_BUFFER(LocalOptionConfig.pgSetup.authMethod))
+	{
+		log_fatal("Please use either --auth trust|md5|... or --skip-pg-hba");
+		log_info("pg_auto_failover can be set to edit Postgres HBA rules "
+				 "automatically when needed. For quick testing '--auth trust' "
+				 "makes it easy to get started, "
+				 "consider another authentication mechanism for production.");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
 
-		strlcpy(LocalOptionConfig.pgSetup.pgdata, pgdata, MAXPGPATH);
+	/*
+	 * If we have --ssl-self-signed, we don't want to have --ssl-ca-file and
+	 * others in use anywhere. If we have --no-ssl, same thing. If we have the
+	 * SSL files setup, we want to have neither --ssl-self-signed nor the other
+	 * SSL files specified.
+	 *
+	 * We also need to either use the given sslMode or compute our default.
+	 */
+	if (sslCommandLineOptions == SSL_CLI_UNKNOWN)
+	{
+		log_fatal("Explicit SSL choice is required: please use either "
+				  "--ssl-self-signed or provide your certificates "
+				  "using --ssl-ca-file, --ssl-crl-file, "
+				  "--server-key, and --server-crt (or use --no-ssl if you "
+				  "are very sure that you do not want encrypted traffic)");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (!pgsetup_validate_ssl_settings(&(LocalOptionConfig.pgSetup)))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
 	}
 
 	/*
 	 * You can't both have a monitor a use --disable-monitor.
 	 */
-	if (!IS_EMPTY_STRING_BUFFER(LocalOptionConfig.monitor_pguri)
-		&& LocalOptionConfig.monitorDisabled)
+	if (!IS_EMPTY_STRING_BUFFER(LocalOptionConfig.monitor_pguri) &&
+		LocalOptionConfig.monitorDisabled)
 	{
 		log_fatal("Use either --monitor or --disable-monitor, not both.");
 		exit(EXIT_CODE_BAD_ARGS);
 	}
-	else if (IS_EMPTY_STRING_BUFFER(LocalOptionConfig.monitor_pguri)
-			 && !LocalOptionConfig.monitorDisabled)
+	else if (IS_EMPTY_STRING_BUFFER(LocalOptionConfig.monitor_pguri) &&
+			 !LocalOptionConfig.monitorDisabled)
 	{
 		log_fatal("Failed to set the monitor URI: "
 				  "use either --monitor postgresql://... or --disable-monitor");
@@ -389,16 +532,122 @@ cli_create_node_getopts(int argc, char **argv,
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (errors > 0)
-	{
-		commandline_help(stderr);
-		exit(EXIT_CODE_BAD_ARGS);
-	}
-
 	/* publish our option parsing now */
-	memcpy(options, &LocalOptionConfig, sizeof(KeeperConfig));
+	*options = LocalOptionConfig;
 
 	return optind;
+}
+
+
+/*
+ * cli_getopt_accept_ssl_options compute if we can accept the newSSLoption
+ * (such as --no-ssl or --ssl-ca-file) given the previous one we have already
+ * accepted.
+ */
+bool
+cli_getopt_accept_ssl_options(SSLCommandLineOptions newSSLOption,
+							  SSLCommandLineOptions currentSSLOptions)
+{
+	if (currentSSLOptions == SSL_CLI_UNKNOWN)
+	{
+		/* first SSL option being parsed */
+		return true;
+	}
+
+	if (currentSSLOptions != newSSLOption)
+	{
+		if (currentSSLOptions == SSL_CLI_USER_PROVIDED ||
+			newSSLOption == SSL_CLI_USER_PROVIDED)
+		{
+			log_error(
+				"Using either --no-ssl or --ssl-self-signed "
+				"with user-provided SSL certificates "
+				"is not supported");
+			return false;
+		}
+
+		/*
+		 * At this point we know that currentSSLOptions and newSSLOption are
+		 * different and none of them are SSL_CLI_USER_PROVIDED.
+		 */
+		log_error("Using both --no-ssl and --ssl-self-signed "
+				  "is not supported");
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * cli_getopt_ssl_flags parses the SSL related options from the command line.
+ *
+ * { "ssl-ca-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG }
+ * { "ssl-crl-file", required_argument, &ssl_flag, SSL_CRL_FILE_FLAG }
+ * { "server-crt", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG }
+ * { "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG }
+ * { "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG },
+ *
+ * As those options are not using any short option (one-char) variant, they all
+ * fall in the case 0, and we can process them thanks to the global variable
+ * ssl_flag, an int.
+ */
+bool
+cli_getopt_ssl_flags(int ssl_flag, char *optarg, PostgresSetup *pgSetup)
+{
+	switch (ssl_flag)
+	{
+		case SSL_CA_FILE_FLAG:
+		{
+			strlcpy(pgSetup->ssl.caFile, optarg, MAXPGPATH);
+			log_trace("--ssl-ca-file %s", pgSetup->ssl.caFile);
+			break;
+		}
+
+		case SSL_CRL_FILE_FLAG:
+		{
+			strlcpy(pgSetup->ssl.crlFile, optarg, MAXPGPATH);
+			log_trace("--ssl-crl-file %s", pgSetup->ssl.crlFile);
+			break;
+		}
+
+		case SSL_SERVER_CRT_FLAG:
+		{
+			strlcpy(pgSetup->ssl.serverCert, optarg, MAXPGPATH);
+			log_trace("--server-cert %s", pgSetup->ssl.serverCert);
+			break;
+		}
+
+		case SSL_SERVER_KEY_FLAG:
+		{
+			strlcpy(pgSetup->ssl.serverKey, optarg, MAXPGPATH);
+			log_trace("--server-key %s", pgSetup->ssl.serverKey);
+			break;
+		}
+
+		case SSL_MODE_FLAG:
+		{
+			strlcpy(pgSetup->ssl.sslModeStr, optarg, SSL_MODE_STRLEN);
+			pgSetup->ssl.sslMode = pgsetup_parse_sslmode(optarg);
+
+			log_trace("--ssl-mode %s",
+					  pgsetup_sslmode_to_string(pgSetup->ssl.sslMode));
+
+			if (pgSetup->ssl.sslMode == SSL_MODE_UNKNOWN)
+			{
+				log_fatal("Failed to parse ssl mode \"%s\"", optarg);
+				return false;
+			}
+			break;
+		}
+
+		default:
+		{
+			log_fatal("BUG: unknown ssl flag value: %d", ssl_flag);
+			return false;
+		}
+	}
+	return true;
 }
 
 
@@ -414,6 +663,7 @@ cli_getopt_pgdata(int argc, char **argv)
 	KeeperConfig options = { 0 };
 	int c, option_index = 0, errors = 0;
 	int verboseCount = 0;
+	bool printVersion = false;
 
 	static struct option long_options[] = {
 		{ "pgdata", required_argument, NULL, 'D' },
@@ -458,7 +708,7 @@ cli_getopt_pgdata(int argc, char **argv)
 			case 'V':
 			{
 				/* keeper_cli_print_version prints version and exits. */
-				keeper_cli_print_version(argc, argv);
+				printVersion = true;
 				break;
 			}
 
@@ -468,16 +718,22 @@ cli_getopt_pgdata(int argc, char **argv)
 				switch (verboseCount)
 				{
 					case 1:
+					{
 						log_set_level(LOG_INFO);
 						break;
+					}
 
 					case 2:
+					{
 						log_set_level(LOG_DEBUG);
 						break;
+					}
 
 					default:
+					{
 						log_set_level(LOG_TRACE);
 						break;
+					}
 				}
 				break;
 			}
@@ -510,6 +766,11 @@ cli_getopt_pgdata(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
+	if (printVersion)
+	{
+		keeper_cli_print_version(argc, argv);
+	}
+
 	/* now that we have the command line parameters, prepare the options */
 	(void) prepare_keeper_options(&options);
 
@@ -529,16 +790,7 @@ prepare_keeper_options(KeeperConfig *options)
 {
 	if (IS_EMPTY_STRING_BUFFER(options->pgSetup.pgdata))
 	{
-		char *pgdata = getenv("PGDATA");
-
-		if (pgdata == NULL)
-		{
-			log_fatal("Failed to get PGDATA either from the environment "
-					  "or from --pgdata");
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-
-		strlcpy(options->pgSetup.pgdata, pgdata, MAXPGPATH);
+		get_env_pgdata_or_exit(options->pgSetup.pgdata);
 	}
 
 	log_debug("Managing PostgreSQL installation at \"%s\"",
@@ -590,31 +842,23 @@ prepare_keeper_options(KeeperConfig *options)
 void
 set_first_pgctl(PostgresSetup *pgSetup)
 {
-	char **pg_ctls = NULL;
-	int n = search_pathlist(getenv("PATH"), "pg_ctl", &pg_ctls);
-
-	if (n < 1)
+	char *version = NULL;
+	if (!search_path_first("pg_ctl", pgSetup->pg_ctl))
 	{
-		log_fatal("Failed to find a pg_ctl command in your PATH");
+		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_ARGS);
 	}
-	else
+	version = pg_ctl_version(pgSetup->pg_ctl);
+
+	if (version == NULL)
 	{
-		char *program = pg_ctls[0];
-		char *version = pg_ctl_version(program);
-
-		if (version == NULL)
-		{
-			/* errors have been logged in pg_ctl_version */
-			exit(EXIT_CODE_PGCTL);
-		}
-
-		strlcpy(pgSetup->pg_ctl, program, MAXPGPATH);
-		strlcpy(pgSetup->pg_version, version, PG_VERSION_STRING_MAX);
-
-		free(version);
-		search_pathlist_destroy_result(pg_ctls);
+		/* errors have been logged in pg_ctl_version */
+		exit(EXIT_CODE_PGCTL);
 	}
+
+	strlcpy(pgSetup->pg_version, version, PG_VERSION_STRING_MAX);
+
+	free(version);
 }
 
 
@@ -765,12 +1009,74 @@ keeper_cli_help(int argc, char **argv)
 {
 	CommandLine command = root;
 
-	if (getenv(PG_AUTOCTL_DEBUG) != NULL)
+	if (env_exists(PG_AUTOCTL_DEBUG))
 	{
 		command = root_with_debug;
 	}
 
 	(void) commandline_print_command_tree(&command, stdout);
+}
+
+
+/*
+ * cli_print_version_getopts parses the CLI options for the pg_autoctl version
+ * command, which are the usual suspects.
+ */
+int
+cli_print_version_getopts(int argc, char **argv)
+{
+	int c, option_index = 0;
+
+	static struct option long_options[] = {
+		{ "json", no_argument, NULL, 'J' },
+		{ "version", no_argument, NULL, 'V' },
+		{ "verbose", no_argument, NULL, 'v' },
+		{ "quiet", no_argument, NULL, 'q' },
+		{ "help", no_argument, NULL, 'h' },
+		{ NULL, 0, NULL, 0 }
+	};
+	optind = 0;
+
+	/*
+	 * The only command lines that are using keeper_cli_getopt_pgdata are
+	 * terminal ones: they don't accept subcommands. In that case our option
+	 * parsing can happen in any order and we don't need getopt_long to behave
+	 * in a POSIXLY_CORRECT way.
+	 *
+	 * The unsetenv() call allows getopt_long() to reorder arguments for us.
+	 */
+	unsetenv("POSIXLY_CORRECT");
+
+	while ((c = getopt_long(argc, argv, "JVvqh",
+							long_options, &option_index)) != -1)
+	{
+		switch (c)
+		{
+			case 'J':
+			{
+				outputJSON = true;
+				log_trace("--json");
+				break;
+			}
+
+			case 'h':
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_QUIT);
+				break;
+			}
+
+			default:
+			{
+				/*
+				 * Ignore errors, ignore most of the things, just print the
+				 * version and exit(0)
+				 */
+				break;
+			}
+		}
+	}
+	return optind;
 }
 
 
@@ -781,7 +1087,26 @@ keeper_cli_help(int argc, char **argv)
 void
 keeper_cli_print_version(int argc, char **argv)
 {
-	fprintf(stdout, "pg_autoctl version %s\n", PG_AUTOCTL_VERSION);
+	if (outputJSON)
+	{
+		JSON_Value *js = json_value_init_object();
+		JSON_Object *root = json_value_get_object(js);
+
+		json_object_set_string(root, "pg_autoctl", PG_AUTOCTL_VERSION);
+		json_object_set_string(root, "pg_major", PG_MAJORVERSION);
+		json_object_set_string(root, "pg_version", PG_VERSION);
+		json_object_set_string(root, "pg_version_str", PG_VERSION_STR);
+		json_object_set_number(root, "pg_version_num", (double) PG_VERSION_NUM);
+
+		(void) cli_pprint_json(js);
+	}
+	else
+	{
+		fformat(stdout, "pg_autoctl version %s\n", PG_AUTOCTL_VERSION);
+		fformat(stdout, "compiled with %s\n", PG_VERSION_STR);
+		fformat(stdout, "compatible with Postgres 10, 11, and 12\n");
+	}
+
 	exit(0);
 }
 
@@ -797,9 +1122,160 @@ cli_pprint_json(JSON_Value *js)
 
 	/* output our nice JSON object, pretty printed please */
 	serialized_string = json_serialize_to_string_pretty(js);
-	fprintf(stdout, "%s\n", serialized_string);
+	fformat(stdout, "%s\n", serialized_string);
 
 	/* free intermediate memory */
 	json_free_serialized_string(serialized_string);
 	json_value_free(js);
+}
+
+
+/*
+ * cli_drop_local_node drops the local Postgres node.
+ */
+void
+cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
+{
+	Keeper keeper = { 0 };
+
+	/*
+	 * Now also stop the pg_autoctl process.
+	 */
+	if (file_exists(config->pathnames.pid))
+	{
+		pid_t pid = 0;
+
+		if (read_pidfile(config->pathnames.pid, &pid))
+		{
+			log_info("An instance of this keeper is running with PID %d, "
+					 "stopping it.", pid);
+
+			if (kill(pid, SIGQUIT) != 0)
+			{
+				log_error(
+					"Failed to send SIGQUIT to the keeper's pid %d: %m", pid);
+				exit(EXIT_CODE_INTERNAL_ERROR);
+			}
+		}
+	}
+
+	/* only keeper_remove when we still have a state file around */
+	if (file_exists(config->pathnames.state))
+	{
+		bool ignoreMonitorErrors = true;
+
+		/* keeper_remove uses log_info() to explain what's happening */
+		if (!keeper_remove(&keeper, config, ignoreMonitorErrors))
+		{
+			log_fatal("Failed to remove local node from the pg_auto_failover "
+					  "monitor, see above for details");
+
+			exit(EXIT_CODE_BAD_STATE);
+		}
+
+		log_info("Removed pg_autoctl node at \"%s\" from the monitor and "
+				 "removed the state file \"%s\"",
+				 config->pgSetup.pgdata,
+				 config->pathnames.state);
+	}
+	else
+	{
+		log_warn("Skipping node removal from the monitor: "
+				 "state file \"%s\" does not exist",
+				 config->pathnames.state);
+	}
+
+	/*
+	 * Either --destroy the whole Postgres cluster and configuraiton, or leave
+	 * enough behind us that it's possible to re-join a formation later.
+	 */
+	if (dropAndDestroy)
+	{
+		(void)
+		stop_postgres_and_remove_pgdata_and_config(
+			&config->pathnames,
+			&config->pgSetup);
+	}
+	else
+	{
+		/*
+		 * We need to stop Postgres now, otherwise we won't be able to drop the
+		 * replication slot on the other node, because it's still active.
+		 */
+		log_info("Stopping PostgreSQL at \"%s\"", config->pgSetup.pgdata);
+
+		if (!pg_ctl_stop(config->pgSetup.pg_ctl, config->pgSetup.pgdata))
+		{
+			log_error("Failed to stop PostgreSQL at \"%s\"",
+					  config->pgSetup.pgdata);
+			exit(EXIT_CODE_PGCTL);
+		}
+
+		/*
+		 * Now give the whole picture to the user, who might have missed our
+		 * --destroy option and might want to use it now to start again with a
+		 * fresh environment.
+		 */
+		log_warn("Configuration file \"%s\" has been preserved",
+				 config->pathnames.config);
+
+		if (directory_exists(config->pgSetup.pgdata))
+		{
+			log_warn("Postgres Data Directory \"%s\" has been preserved",
+					 config->pgSetup.pgdata);
+		}
+
+		log_info("drop node keeps your data and setup safe, you can still run "
+				 "Postgres or re-join the pg_auto_failover cluster later");
+		log_info("HINT: to completely remove your local Postgres instance and "
+				 "setup, consider `pg_autoctl drop node --destroy`");
+	}
+
+	keeper_config_destroy(config);
+}
+
+
+/*
+ * stop_postgres_and_remove_pgdata_and_config stops PostgreSQL and then removes
+ * PGDATA, and then config and state files.
+ */
+static void
+stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathnames,
+										   PostgresSetup *pgSetup)
+{
+	log_info("Stopping PostgreSQL at \"%s\"", pgSetup->pgdata);
+
+	if (!pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata))
+	{
+		log_error("Failed to stop PostgreSQL at \"%s\"", pgSetup->pgdata);
+		log_fatal("Skipping removal of directory \"%s\"", pgSetup->pgdata);
+		exit(EXIT_CODE_PGCTL);
+	}
+
+	/*
+	 * Only try to rm -rf PGDATA if we managed to stop PostgreSQL.
+	 */
+	if (directory_exists(pgSetup->pgdata))
+	{
+		log_info("Removing \"%s\"", pgSetup->pgdata);
+
+		if (!rmtree(pgSetup->pgdata, true))
+		{
+			log_error("Failed to remove directory \"%s\": %m", pgSetup->pgdata);
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+	}
+	else
+	{
+		log_warn("Skipping removal of \"%s\": directory does not exists",
+				 pgSetup->pgdata);
+	}
+
+	log_info("Removing \"%s\"", pathnames->config);
+
+	if (!unlink_file(pathnames->config))
+	{
+		/* errors have already been logged. */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
 }

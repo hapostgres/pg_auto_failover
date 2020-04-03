@@ -58,7 +58,7 @@ static CommandLine do_show_nodename_command =
 				 NULL, cli_show_nodename);
 
 CommandLine *do_show_subcommands[] = {
- 	&do_show_ipaddr_command,
+	&do_show_ipaddr_command,
 	&do_show_cidr_command,
 	&do_show_lookup_command,
 	&do_show_nodename_command,
@@ -69,7 +69,6 @@ CommandLine do_show_commands =
 	make_command_set("show",
 					 "Show some debug level information", NULL, NULL,
 					 NULL, do_show_subcommands);
-
 
 
 /*
@@ -89,7 +88,7 @@ cli_show_ipaddr(int argc, char **argv)
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
-	fprintf(stdout, "%s\n", ipAddr);
+	fformat(stdout, "%s\n", ipAddr);
 }
 
 
@@ -118,7 +117,7 @@ cli_show_cidr(int argc, char **argv)
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
-	fprintf(stdout, "%s\n", cidr);
+	fformat(stdout, "%s\n", cidr);
 }
 
 
@@ -153,7 +152,7 @@ cli_show_lookup(int argc, char **argv)
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 
-		fprintf(stdout, "%s: %s\n", nodename, localIpAddress);
+		fformat(stdout, "%s: %s\n", nodename, localIpAddress);
 	}
 	else
 	{
@@ -167,7 +166,7 @@ cli_show_lookup(int argc, char **argv)
 											hostname, _POSIX_HOST_NAME_MAX))
 		{
 			/* errors already logged, keep the ipAddr, show exit failure */
-			fprintf(stdout, "%s\n", ipAddr);
+			fformat(stdout, "%s\n", ipAddr);
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 
@@ -176,13 +175,14 @@ cli_show_lookup(int argc, char **argv)
 		{
 			log_fatal("Failed to check nodename \"%s\", see above for details",
 					  hostname);
+
 			/* keep ipAddr and show exit failure */
-			fprintf(stdout, "%s\n", ipAddr);
+			fformat(stdout, "%s\n", ipAddr);
 
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 
-		fprintf(stdout, "%s: %s\n", localIpAddress, hostname);
+		fformat(stdout, "%s: %s\n", localIpAddress, hostname);
 	}
 }
 
@@ -212,7 +212,7 @@ cli_show_nodename(int argc, char **argv)
 	if (!findHostnameFromLocalIpAddress(ipAddr, hostname, _POSIX_HOST_NAME_MAX))
 	{
 		/* the nodename is going to be the ipAddr in that case */
-		fprintf(stdout, "%s\n", ipAddr);
+		fformat(stdout, "%s\n", ipAddr);
 
 		/* still indicate it was a failure */
 		exit(EXIT_CODE_INTERNAL_ERROR);
@@ -223,12 +223,12 @@ cli_show_nodename(int argc, char **argv)
 	if (!findHostnameLocalAddress(hostname, localIpAddress, BUFSIZE))
 	{
 		/* the nodename is going to be the ipAddr in that case */
-		fprintf(stdout, "%s\n", ipAddr);
+		fformat(stdout, "%s\n", ipAddr);
 
 		/* still indicate it was a failure */
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 	log_debug("cli_show_nodename: ip %s", localIpAddress);
 
-	fprintf(stdout, "%s\n", hostname);
+	fformat(stdout, "%s\n", hostname);
 }

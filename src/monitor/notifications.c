@@ -36,7 +36,14 @@ LogAndNotifyMessage(char *message, size_t size, const char *fmt, ...)
 	va_list args;
 
 	va_start(args, fmt);
-	n = vsnprintf(message, size-2, fmt, args);
+
+	/*
+	 * Explanation of IGNORE-BANNED
+	 * Arguments are always non-null and we
+	 * do not write before the allocated buffer.
+	 *
+	 */
+	n = vsnprintf(message, size - 2, fmt, args); /* IGNORE-BANNED */
 	va_end(args);
 
 	if (n < 0)
@@ -47,8 +54,6 @@ LogAndNotifyMessage(char *message, size_t size, const char *fmt, ...)
 
 	ereport(LOG, (errmsg("%s", message)));
 	Async_Notify(CHANNEL_LOG, message);
-
-	return;
 }
 
 
@@ -72,7 +77,7 @@ NotifyStateChange(ReplicationState reportedState,
 				  char *description)
 {
 	int64 eventid;
-	char payload[BUFSIZE];
+	StringInfo payload = makeStringInfo();
 
 	/*
 	 * Insert the event in our events table.
@@ -86,20 +91,22 @@ NotifyStateChange(ReplicationState reportedState,
 	 * provided strings formationId and nodeName, we include the length of the
 	 * string in the message. Parsing is then easier on the receiving side too.
 	 */
-	sprintf(payload,
-			"S:%s:%s:%lu.%s:%d:%ld:%lu.%s:%d",
-			ReplicationStateGetName(reportedState),
-			ReplicationStateGetName(goalState),
-			strlen(formationId),
-			formationId,
-			groupId,
-			nodeId,
-			strlen(nodeName),
-			nodeName,
-			nodePort);
+	appendStringInfo(payload,
+					 "S:%s:%s:%lu.%s:%d:%ld:%lu.%s:%d",
+					 ReplicationStateGetName(reportedState),
+					 ReplicationStateGetName(goalState),
+					 strlen(formationId),
+					 formationId,
+					 groupId,
+					 nodeId,
+					 strlen(nodeName),
+					 nodeName,
+					 nodePort);
 
-	Async_Notify(CHANNEL_STATE, payload);
+	Async_Notify(CHANNEL_STATE, payload->data);
 
+	pfree(payload->data);
+	pfree(payload);
 	return eventid;
 }
 
@@ -139,18 +146,18 @@ InsertEvent(const char *formationId, int groupId, int64 nodeId,
 	};
 
 	Datum argValues[] = {
-		CStringGetTextDatum(formationId),	/* formationid */
-		Int64GetDatum(nodeId),				/* nodeid */
-		Int32GetDatum(groupId),				/* groupid */
-		CStringGetTextDatum(nodeName),		/* nodename */
-		Int32GetDatum(nodePort),			/* nodeport */
-		ObjectIdGetDatum(reportedStateOid),	/* reportedstate */
-		ObjectIdGetDatum(goalStateOid),		/* goalstate */
+		CStringGetTextDatum(formationId),   /* formationid */
+		Int64GetDatum(nodeId),              /* nodeid */
+		Int32GetDatum(groupId),             /* groupid */
+		CStringGetTextDatum(nodeName),      /* nodename */
+		Int32GetDatum(nodePort),            /* nodeport */
+		ObjectIdGetDatum(reportedStateOid), /* reportedstate */
+		ObjectIdGetDatum(goalStateOid),     /* goalstate */
 		CStringGetTextDatum(SyncStateToString(pgsrSyncState)), /* sync_state */
-		LSNGetDatum(reportedLSN),			/* reportedLSN */
-		Int32GetDatum(candidatePriority),	/* candidate_priority */
-		BoolGetDatum(replicationQuorum), 	/* replication_quorum */
-		CStringGetTextDatum(description)	/* description */
+		LSNGetDatum(reportedLSN),           /* reportedLSN */
+		Int32GetDatum(candidatePriority),   /* candidate_priority */
+		BoolGetDatum(replicationQuorum),    /* replication_quorum */
+		CStringGetTextDatum(description)    /* description */
 	};
 
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);

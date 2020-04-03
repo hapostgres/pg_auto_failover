@@ -28,6 +28,7 @@
 #include <unistd.h>
 
 #include "defaults.h"
+#include "env_utils.h"
 #include "pgctl.h"
 #include "fsm.h"
 #include "keeper.h"
@@ -103,11 +104,11 @@ fsm_init_primary(Keeper *keeper)
 	}
 
 	pgInstanceIsOurs =
-		   initState.pgInitState == PRE_INIT_STATE_EMPTY
-		|| initState.pgInitState == PRE_INIT_STATE_EXISTS;
+		initState.pgInitState == PRE_INIT_STATE_EMPTY ||
+		initState.pgInitState == PRE_INIT_STATE_EXISTS;
 
-	if (initState.pgInitState == PRE_INIT_STATE_EMPTY
-		&& !postgresInstanceExists)
+	if (initState.pgInitState == PRE_INIT_STATE_EMPTY &&
+		!postgresInstanceExists)
 	{
 		if (!pg_ctl_initdb(pgSetup.pg_ctl, pgSetup.pgdata))
 		{
@@ -159,8 +160,8 @@ fsm_init_primary(Keeper *keeper)
 	 */
 	if (!ensure_local_postgres_is_running(postgres))
 	{
-		log_error("Failed to initialise postgres as primary because starting postgres "
-				  "failed, see above for details");
+		log_error("Failed to initialise postgres as primary because "
+				  "starting postgres failed, see above for details");
 		return false;
 	}
 
@@ -185,11 +186,27 @@ fsm_init_primary(Keeper *keeper)
 	/*
 	 * We just created the local Postgres cluster, make sure it has our minimum
 	 * configuration deployed.
+	 *
+	 * When --ssl-self-signed has been used, now is the time to build a
+	 * self-signed certificate for the server. We place the certificate and
+	 * private key in $PGDATA/server.key and $PGDATA/server.crt
 	 */
+	if (pgSetup.ssl.createSelfSignedCert &&
+		(!file_exists(pgSetup.ssl.serverKey) ||
+		 !file_exists(pgSetup.ssl.serverCert)))
+	{
+		if (!pg_create_self_signed_cert(&pgSetup, config->nodename))
+		{
+			log_error("Failed to create SSL self-signed certificate, "
+					  "see above for details");
+			return false;
+		}
+	}
+
 	if (!postgres_add_default_settings(postgres))
 	{
-		log_error("Failed to initialise postgres as primary because adding default "
-				  "settings failed, see above for details");
+		log_error("Failed to initialise postgres as primary because "
+				  "adding default settings failed, see above for details");
 		return false;
 	}
 
@@ -251,16 +268,21 @@ fsm_init_primary(Keeper *keeper)
 	 */
 	if (pgInstanceIsOurs)
 	{
-		if (getenv("PG_REGRESS_SOCK_DIR") != NULL)
+		if (env_found_empty("PG_REGRESS_SOCK_DIR"))
 		{
 			/*
 			 * In test environements allow nodes from the same network to
 			 * connect. The network is discovered automatically.
 			 */
-			(void) pghba_enable_lan_cidr(&keeper->postgres.sqlClient,
-										 HBA_DATABASE_ALL, NULL,
-										 keeper->config.nodename,
-										 NULL, DEFAULT_AUTH_METHOD, NULL);
+			if (!pghba_enable_lan_cidr(&keeper->postgres.sqlClient,
+									   keeper->config.pgSetup.ssl.active,
+									   HBA_DATABASE_ALL, NULL,
+									   keeper->config.nodename,
+									   NULL, DEFAULT_AUTH_METHOD, NULL))
+			{
+				log_error("Failed to grant local network connections in HBA");
+				return false;
+			}
 		}
 	}
 	else
@@ -319,6 +341,14 @@ fsm_disable_replication(Keeper *keeper)
 	{
 		log_error("Failed to disable replication because disabling synchronous "
 				  "failed, see above for details");
+		return false;
+	}
+
+	if (!primary_drop_replication_slots(postgres))
+	{
+		log_error("Failed to disable replication because dropping the replication "
+				  "slot \"%s\" used by the standby failed, see above for details",
+				  config->replication_slot_name);
 		return false;
 	}
 
@@ -626,10 +656,9 @@ fsm_apply_settings(Keeper *keeper)
 		strlcpy(synchronous_standby_names, "*", BUFSIZE);
 	}
 
-	return
-		primary_set_synchronous_standby_names(
-			postgres,
-			synchronous_standby_names);
+	return primary_set_synchronous_standby_names(
+		postgres,
+		synchronous_standby_names);
 }
 
 
@@ -655,7 +684,6 @@ fsm_stop_postgres(Keeper *keeper)
 
 	return pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata);
 }
-
 
 
 /*
@@ -736,15 +764,16 @@ fsm_init_standby(Keeper *keeper)
 	replicationSource.slotName = config->replication_slot_name;
 	replicationSource.maximumBackupRate = config->maximum_backup_rate;
 	replicationSource.backupDir = config->backupDirectory;
+	replicationSource.sslOptions = config->pgSetup.ssl;
 
 	/* prepare our application_name */
-	snprintf(applicationName, BUFSIZE,
-			 "%s%d",
-			 REPLICATION_APPLICATION_NAME_PREFIX,
-			 keeper->state.current_node_id);
+	sformat(applicationName, BUFSIZE,
+			"%s%d",
+			REPLICATION_APPLICATION_NAME_PREFIX,
+			keeper->state.current_node_id);
 	replicationSource.applicationName = applicationName;
 
-	if (!standby_init_database(postgres, &replicationSource))
+	if (!standby_init_database(postgres, &replicationSource, config->nodename))
 	{
 		log_error("Failed initialise standby server, see above for details");
 		return false;
@@ -765,9 +794,12 @@ fsm_rewind_or_init(Keeper *keeper)
 	KeeperConfig *config = &(keeper->config);
 	Monitor *monitor = &(keeper->monitor);
 	LocalPostgresServer *postgres = &(keeper->postgres);
+
 	ReplicationSource replicationSource = { 0 };
 	int groupId = keeper->state.current_group;
+
 	char applicationName[BUFSIZE] = { 0 };
+	char standbySlotName[BUFSIZE] = { 0 };
 
 	/* get the primary node to follow */
 	if (!config->monitorDisabled)
@@ -795,12 +827,13 @@ fsm_rewind_or_init(Keeper *keeper)
 	replicationSource.applicationName = config->replication_slot_name;
 	replicationSource.maximumBackupRate = config->maximum_backup_rate;
 	replicationSource.backupDir = config->backupDirectory;
+	replicationSource.sslOptions = config->pgSetup.ssl;
 
 	/* prepare our application_name */
-	snprintf(applicationName, BUFSIZE,
-			 "%s%d",
-			 REPLICATION_APPLICATION_NAME_PREFIX,
-			 keeper->state.current_node_id);
+	sformat(applicationName, BUFSIZE,
+			"%s%d",
+			REPLICATION_APPLICATION_NAME_PREFIX,
+			keeper->state.current_node_id);
 	replicationSource.applicationName = applicationName;
 
 	if (!primary_rewind_to_standby(postgres, &replicationSource))
@@ -808,11 +841,36 @@ fsm_rewind_or_init(Keeper *keeper)
 		log_warn("Failed to rewind demoted primary to standby, "
 				 "trying pg_basebackup instead");
 
-		if (!standby_init_database(postgres, &replicationSource))
+		if (!standby_init_database(postgres,
+								   &replicationSource,
+								   config->nodename))
 		{
 			log_error("Failed to become standby server, see above for details");
 			return false;
 		}
+	}
+
+	/* prepare the standby's replication slot name */
+	if (!postgres_sprintf_replicationSlotName(
+			keeper->otherNodes.nodes[0].nodeId,
+			standbySlotName,
+			sizeof(standbySlotName)))
+	{
+		/* that's highly unlikely... */
+		log_error("Failed to snprintf replication slot name for node %d",
+				  keeper->otherNodes.nodes[0].nodeId);
+		return false;
+	}
+
+	if (!primary_drop_replication_slot(postgres, standbySlotName))
+	{
+		log_error("Failed to drop replication slot \"%s\" used by "
+				  "standby %d (%s:%d)",
+				  standbySlotName,
+				  keeper->otherNodes.nodes[0].nodeId,
+				  keeper->otherNodes.nodes[0].host,
+				  keeper->otherNodes.nodes[0].port);
+		return false;
 	}
 
 	return true;
@@ -1073,10 +1131,7 @@ fsm_fast_forward(Keeper *keeper)
 bool
 fsm_cleanup_and_resume_as_primary(Keeper *keeper)
 {
-	KeeperConfig *config = &(keeper->config);
-	Monitor *monitor = &(keeper->monitor);
 	LocalPostgresServer *postgres = &(keeper->postgres);
-	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 
 	if (!standby_cleanup_and_restart_as_primary(postgres))
 	{

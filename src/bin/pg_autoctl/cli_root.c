@@ -18,7 +18,8 @@ CommandLine help =
 
 CommandLine version =
 	make_command("version", "print pg_autoctl version", "", "",
-				 NULL, keeper_cli_print_version);
+				 cli_print_version_getopts,
+				 keeper_cli_print_version);
 
 /* non-local to be able to patch it from other files */
 CommandLine *create_subcommands[] = {
@@ -34,7 +35,7 @@ CommandLine create_commands =
 					 "Create a pg_auto_failover node, or formation", NULL, NULL,
 					 NULL, create_subcommands);
 
-CommandLine *show_subcommands[] = {
+CommandLine *show_subcommands_with_debug[] = {
 	&show_uri_command,
 	&show_events_command,
 	&show_state_command,
@@ -46,12 +47,32 @@ CommandLine *show_subcommands[] = {
 	NULL
 };
 
+CommandLine show_commands_with_debug =
+	make_command_set("show",
+					 "Show pg_auto_failover information", NULL, NULL,
+					 NULL, show_subcommands_with_debug);
+
+CommandLine *show_subcommands[] = {
+	&show_uri_command,
+	&show_events_command,
+	&show_state_command,
+
+	/* disactivated features waiting for multiple standby release */
+	/* &show_nodes_command, */
+	/* &show_sync_standby_names_command, */
+	/* &show_standby_names_command, */
+	&show_file_command,
+	&systemd_cat_service_file_command,
+	NULL
+};
+
 CommandLine show_commands =
 	make_command_set("show",
 					 "Show pg_auto_failover information", NULL, NULL,
 					 NULL, show_subcommands);
 
 CommandLine *drop_subcommands[] = {
+	&drop_monitor_command,
 	&drop_node_command,
 	&drop_formation_command,
 	NULL
@@ -62,16 +83,6 @@ CommandLine drop_commands =
 					 "Drop a pg_auto_failover node, or formation", NULL, NULL,
 					 NULL, drop_subcommands);
 
-CommandLine *perform_subcommands[] = {
-	&perform_failover_command,
-	&perform_switchover_command,
-	NULL,
-};
-
-CommandLine perform_commands =
-	make_command_set("perform", "Perform an action orchestrated by the monitor",
-					 NULL, NULL, NULL, perform_subcommands);
-
 /*
  * Binding them all into the top-level command:
  */
@@ -79,7 +90,7 @@ CommandLine *root_subcommands_with_debug[] = {
 	&create_commands,
 	&drop_commands,
 	&config_commands,
-	&show_commands,
+	&show_commands_with_debug,
 	&enable_commands,
 	&disable_commands,
 	&get_commands,
@@ -108,8 +119,10 @@ CommandLine *root_subcommands[] = {
 	&show_commands,
 	&enable_commands,
 	&disable_commands,
-	&get_commands,
-	&set_commands,
+
+	/* disactivated features waiting for multiple standby release */
+	/* &get_commands, */
+	/* &set_commands, */
 	&perform_commands,
 	&service_run_command,
 	&service_stop_command,
@@ -134,28 +147,36 @@ int
 root_options(int argc, char **argv)
 {
 	int verboseCount = 0;
+	bool printVersion = false;
 
 	static struct option long_options[] = {
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
+		{ "json", no_argument, NULL, 'J' },
 		{ "quiet", no_argument, NULL, 'q' },
 		{ "help", no_argument, NULL, 'h' },
-	{ NULL, 0, NULL, 0 }
+		{ NULL, 0, NULL, 0 }
 	};
 
 	int c, option_index, errors = 0;
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "Vvqh",
+	while ((c = getopt_long(argc, argv, "JVvqh",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
 		{
+			case 'J':
+			{
+				outputJSON = true;
+				log_trace("--json");
+				break;
+			}
+
 			case 'V':
 			{
-				/* keeper_cli_print_version prints version and exits. */
-				keeper_cli_print_version(argc, argv);
+				printVersion = true;
 				break;
 			}
 
@@ -165,16 +186,22 @@ root_options(int argc, char **argv)
 				switch (verboseCount)
 				{
 					case 1:
+					{
 						log_set_level(LOG_INFO);
 						break;
+					}
 
 					case 2:
+					{
 						log_set_level(LOG_DEBUG);
 						break;
+					}
 
 					default:
+					{
 						log_set_level(LOG_TRACE);
 						break;
+					}
 				}
 				break;
 			}
@@ -206,5 +233,11 @@ root_options(int argc, char **argv)
 		commandline_help(stderr);
 		exit(EXIT_CODE_BAD_ARGS);
 	}
+
+	if (printVersion)
+	{
+		keeper_cli_print_version(argc, argv);
+	}
+
 	return optind;
 }

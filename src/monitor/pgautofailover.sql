@@ -107,11 +107,11 @@ CREATE TABLE pgautofailover.node
     reportedpgisrunning  bool default true,
     reportedrepstate     text default 'async',
     reporttime           timestamptz not null default now(),
+    reportedlsn          pg_lsn not null default '0/0',
     walreporttime        timestamptz not null default now(),
     health               integer not null default -1,
     healthchecktime      timestamptz not null default now(),
     statechangetime      timestamptz not null default now(),
-    reportedlsn          pg_lsn not null default '0/0',
     candidatepriority	 int not null default 100,
     replicationquorum	 bool not null default true,
 
@@ -127,10 +127,10 @@ CREATE TABLE pgautofailover.event
     eventid           bigserial not null,
     eventtime         timestamptz not null default now(),
     formationid       text not null,
-    nodeid            bigserial,
+    nodeid            bigint not null,
     groupid           int not null,
     nodename          text not null,
-    nodeport          int not null,
+    nodeport          integer not null,
     reportedstate     pgautofailover.replication_state not null,
     goalstate         pgautofailover.replication_state not null,
     reportedrepstate  text,
@@ -138,6 +138,7 @@ CREATE TABLE pgautofailover.event
     candidatepriority int,
     replicationquorum bool,
     description       text,
+
     PRIMARY KEY (eventid)
  );
 
@@ -490,17 +491,19 @@ comment on function pgautofailover.current_state(text, int)
 
 CREATE FUNCTION pgautofailover.formation_uri
  (
-    IN formation_id         text DEFAULT 'default'
+    IN formation_id         text DEFAULT 'default',
+    IN sslmode              text DEFAULT 'prefer'
  )
 RETURNS text LANGUAGE SQL STRICT
 AS $$
     select case
            when string_agg(format('%s:%s', nodename, nodeport),',') is not null
-           then format('postgres://%s/%s?target_session_attrs=read-write',
+           then format('postgres://%s/%s?target_session_attrs=read-write&sslmode=%s',
                        string_agg(format('%s:%s', nodename, nodeport),','),
                        -- as we join formation on node we get the same dbname for all
                        -- entries, pick one.
-                       min(dbname)
+                       min(dbname),
+                       min(sslmode)
                       )
            end as uri
       from pgautofailover.node as node

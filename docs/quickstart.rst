@@ -51,7 +51,9 @@ distinctive port (6000):
    export PATH="/usr/pgsql-11/bin:$PATH"
 
    pg_autoctl create monitor   \
-     --pgdata ./monitor     \
+     --auth trust              \
+     --ssl-self-signed         \
+     --pgdata ./monitor        \
      --pgport 6000
 
 This command initializes a PostgreSQL cluster at the location pointed
@@ -61,8 +63,15 @@ instance had already existing in the destination directory, this command
 would have configured it to serve as a monitor.
 
 In our case, ``pg_autoctl create monitor`` creates a database called
-``pg_auto_failover``, installs the ``pgautofailover`` Postgres extension, and grants access
-to a new ``autoctl_node`` user.
+``pg_auto_failover``, installs the ``pgautofailover`` Postgres extension,
+and grants access to a new ``autoctl_node`` user.
+
+In the Quick Start we use `--auth trust` to avoid complex security settings.
+The Postgres `trust authentication method
+https://www.postgresql.org/docs/current/auth-trust.html`_ is not considered
+a reasonable choice for production environments. Consider either using the
+`--skip-pg-hba` option or `--auth scram-sha-256` and then setting up
+passwords yourself.
 
 Bring up the nodes
 ------------------
@@ -80,11 +89,13 @@ we’ll store the primary node’s data files in a small temporary filesystem.
    sudo chown postgres -R /mnt/node_a
 
    # initialize on that disk
-   pg_autoctl create postgres     \
-     --pgdata /mnt/node_a/data \
-     --pgport 6010             \
+   pg_autoctl create postgres         \
+     --auth trust                     \
+     --ssl-self-signed                \
+     --pgdata /mnt/node_a/data        \
+     --pgport 6010                    \
      --pgctl /usr/pgsql-11/bin/pg_ctl \
-     --monitor postgres://autoctl_node@127.0.0.1:6000/pg_auto_failover
+     --monitor postgres://autoctl_node@127.0.0.1:6000/pg_auto_failover?sslmode=require
 
 It creates the database in "/mnt/node_a/data" using the port and node
 specified. Notice the user and database name in the monitor connection
@@ -112,11 +123,13 @@ created the primary:
 
 .. code-block:: bash
 
-   pg_autoctl create postgres  \
-     --pgdata ./node_b      \
-     --pgport 6011          \
+   pg_autoctl create postgres         \
+     --auth trust                     \
+     --ssl-self-signed                \
+     --pgdata ./node_b                \
+     --pgport 6011                    \
      --pgctl /usr/pgsql-11/bin/pg_ctl \
-     --monitor postgres://autoctl_node@127.0.0.1:6000/pg_auto_failover
+     --monitor postgres://autoctl_node@127.0.0.1:6000/pg_auto_failover?sslmode=require
 
    pg_autoctl run --pgdata ./node_b
 
@@ -205,8 +218,13 @@ To discover the url to use in our case, the following command can be used:
 
 .. code-block:: bash
 
-   pg_autoctl show uri --formation default --pgdata ./monitor
-   postgres://127.0.0.1:6010,127.0.0.1:6011/?target_session_attrs=read-write
+   pg_autoctl show uri --pgdata ./monitor
+   
+
+            Type |    Name | Connection String
+   -----------+---------+-------------------------------
+      monitor | monitor | port=6000 dbname=pg_auto_failover host=/tmp user=autoctl_node
+    formation | default | postgres://127.0.0.1:6010,127.0.0.1:6011/?target_session_attrs=read-write
 
 Here we ask to connect to either node A or B -- whichever supports reads and
 writes:
@@ -214,7 +232,7 @@ writes:
 .. code-block:: bash
 
    psql \
-     'postgres://127.0.0.1:6010,127.0.0.1:6011/?target_session_attrs=read-write'
+     'postgres://localhost:6010,localhost:6011/postgres?target_session_attrs=read-write&sslmode=require'
 
 When nodes A and B were both running, psql would connect to node A
 because B would be read-only. However now that A is offline and B is

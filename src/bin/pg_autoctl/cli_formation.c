@@ -15,6 +15,7 @@
 #include "cli_common.h"
 #include "commandline.h"
 #include "defaults.h"
+#include "env_utils.h"
 #include "formation_config.h"
 #include "log.h"
 #include "pgsetup.h"
@@ -108,16 +109,22 @@ keeper_cli_formation_getopts(int argc, char **argv)
 				switch (verboseCount)
 				{
 					case 1:
+					{
 						log_set_level(LOG_INFO);
 						break;
+					}
 
 					case 2:
+					{
 						log_set_level(LOG_DEBUG);
 						break;
+					}
 
 					default:
+					{
 						log_set_level(LOG_TRACE);
 						break;
+					}
 				}
 				break;
 			}
@@ -152,23 +159,8 @@ keeper_cli_formation_getopts(int argc, char **argv)
 
 	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 	{
-		char *pgdata = getenv("PGDATA");
-
-		if (pgdata == NULL)
-		{
-			log_fatal("Failed to get PGDATA either from the environment "
-					  "or from --pgdata");
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-
-		strlcpy(options.pgSetup.pgdata, pgdata, MAXPGPATH);
+		get_env_pgdata_or_exit(options.pgSetup.pgdata);
 	}
-
-	/*
-	 * pg_setup_init wants a single pg_ctl, and we don't use it here: pretend
-	 * we had a --pgctl option and processed it.
-	 */
-	set_first_pgctl(&(options.pgSetup));
 
 	/* publish our option parsing in the global variable */
 	formationOptions = options;
@@ -269,16 +261,22 @@ keeper_cli_formation_create_getopts(int argc, char **argv)
 				switch (verboseCount)
 				{
 					case 1:
+					{
 						log_set_level(LOG_INFO);
 						break;
+					}
 
 					case 2:
+					{
 						log_set_level(LOG_DEBUG);
 						break;
+					}
 
 					default:
+					{
 						log_set_level(LOG_TRACE);
 						break;
+					}
 				}
 				break;
 			}
@@ -301,7 +299,7 @@ keeper_cli_formation_create_getopts(int argc, char **argv)
 				/* { "number-sync-standbys", required_argument, NULL, 'n'} */
 				int numberSyncStandbys = strtol(optarg, NULL, 10);
 
-				if (errno == EINVAL|| numberSyncStandbys < 0)
+				if (errno == EINVAL || numberSyncStandbys < 0)
 				{
 					log_fatal("--number-sync-standbys argument is not valid."
 							  " Use a non-negative integer value.");
@@ -323,20 +321,11 @@ keeper_cli_formation_create_getopts(int argc, char **argv)
 
 	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 	{
-		char *pgdata = getenv("PGDATA");
-
-		if (pgdata == NULL)
-		{
-			log_fatal("Failed to set PGDATA either from the environment "
-					  "or from --pgdata");
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-
-		strlcpy(options.pgSetup.pgdata, pgdata, MAXPGPATH);
+		get_env_pgdata_or_exit(options.pgSetup.pgdata);
 	}
 
-	if (IS_EMPTY_STRING_BUFFER(options.formation)
-		|| IS_EMPTY_STRING_BUFFER(options.formationKind))
+	if (IS_EMPTY_STRING_BUFFER(options.formation) ||
+		IS_EMPTY_STRING_BUFFER(options.formationKind))
 	{
 		log_error("Options --formation and --kind are mandatory");
 		exit(EXIT_CODE_BAD_ARGS);
@@ -349,12 +338,6 @@ keeper_cli_formation_create_getopts(int argc, char **argv)
 				  DEFAULT_DATABASE_NAME);
 		strlcpy(options.dbname, DEFAULT_DATABASE_NAME, NAMEDATALEN);
 	}
-
-	/*
-	 * pg_setup_init wants a single pg_ctl, and we don't use it here: pretend
-	 * we had a --pgctl option and processed it.
-	 */
-	set_first_pgctl(&(options.pgSetup));
 
 	/* publish our option parsing in the global variable */
 	formationOptions = options;
@@ -391,7 +374,8 @@ keeper_cli_formation_create(int argc, char **argv)
 	}
 
 	log_info("Created formation \"%s\" of kind \"%s\" on the monitor, with secondary %s.",
-			 config.formation, config.formationKind, config.formationHasSecondary ? "enabled" : "disabled");
+			 config.formation, config.formationKind, config.formationHasSecondary ?
+			 "enabled" : "disabled");
 }
 
 

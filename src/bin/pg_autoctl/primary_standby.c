@@ -19,9 +19,8 @@
 #include "primary_standby.h"
 
 
-static void local_postgres_update_pg_failures_tracking(
-	LocalPostgresServer *postgres,
-	bool pgIsRunning);
+static void local_postgres_update_pg_failures_tracking(LocalPostgresServer *postgres,
+													   bool pgIsRunning);
 
 /*
  * Default settings for postgres databases managed by pg_auto_failover.
@@ -32,23 +31,31 @@ static void local_postgres_update_pg_failures_tracking(
  * replaced with dynamic values from the setup when used.
  */
 #define DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER \
-	{ "max_wal_senders", "4" },			\
-	{ "max_replication_slots", "4" },	\
-	{ "wal_level", "'replica'" },		\
-	{ "wal_log_hints", "on" },			\
-	{ "wal_keep_segments", "64" },		\
-	{ "wal_sender_timeout", "'30s'" },	\
-	{ "hot_standby_feedback", "on" },	\
-	{ "hot_standby", "on" },			\
-	{ "synchronous_commit", "on" },		\
-	{ "logging_collector", "on" },		\
-	{ "log_destination", "stderr"},		\
-	{ "logging_collector", "on"},		\
-	{ "log_directory", "log"},			\
-	{ "log_min_messages", "info"},		\
-	{ "log_lock_waits", "on"},			\
-	{ "listen_addresses", "'*'" },		\
-	{ "port", "5432" }
+	{ "listen_addresses", "'*'" }, \
+	{ "port", "5432" }, \
+	{ "max_wal_senders", "4" }, \
+	{ "max_replication_slots", "4" }, \
+	{ "wal_level", "'replica'" }, \
+	{ "wal_log_hints", "on" }, \
+	{ "wal_keep_segments", "64" }, \
+	{ "wal_sender_timeout", "'30s'" }, \
+	{ "hot_standby_feedback", "on" }, \
+	{ "hot_standby", "on" }, \
+	{ "synchronous_commit", "on" }, \
+	{ "logging_collector", "on" }, \
+	{ "log_destination", "stderr" }, \
+	{ "logging_collector", "on" }, \
+	{ "log_directory", "log" }, \
+	{ "log_min_messages", "info" }, \
+	{ "log_connections", "on" }, \
+	{ "log_disconnections", "on" }, \
+	{ "log_lock_waits", "on" }, \
+	{ "ssl", "off" }, \
+	{ "ssl_ca_file", "" }, \
+	{ "ssl_crl_file", "" }, \
+	{ "ssl_cert_file", "" }, \
+	{ "ssl_key_file", "" }, \
+	{ "ssl_ciphers", "'TLSv1.2+HIGH:!aNULL:!eNULL'" }
 
 GUC postgres_default_settings[] = {
 	DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER,
@@ -93,7 +100,6 @@ static void
 local_postgres_update_pg_failures_tracking(LocalPostgresServer *postgres,
 										   bool pgIsRunning)
 {
-
 	if (pgIsRunning)
 	{
 		/* reset PostgreSQL restart failures tracking */
@@ -113,6 +119,7 @@ local_postgres_update_pg_failures_tracking(LocalPostgresServer *postgres,
 		++postgres->pgStartRetries;
 	}
 }
+
 
 /*
  * local_postgres_finish closes our connection to the local PostgreSQL
@@ -172,7 +179,7 @@ ensure_local_postgres_is_running(LocalPostgresServer *postgres)
 
 				log_trace("waiting for pg_setup_is_running() [%s], attempt %d/%d",
 						  pgIsRunning ? "true" : "false",
-						  attempts+1,
+						  attempts + 1,
 						  maxAttempts);
 
 				if (pgIsRunning)
@@ -236,7 +243,6 @@ primary_create_replication_slot(LocalPostgresServer *postgres,
 								char *replicationSlotName)
 {
 	PGSQL *pgsql = &(postgres->sqlClient);
-	bool verbose = false;
 	bool result = false;
 
 	log_trace("primary_create_replication_slot(%s)", replicationSlotName);
@@ -443,9 +449,11 @@ primary_create_user_with_hba(LocalPostgresServer *postgres, char *userName,
 
 	log_trace("primary_create_user_with_hba");
 
-	if (!pgsql_create_user(pgsql, userName, password, login, superuser, replication))
+	if (!pgsql_create_user(pgsql, userName, password,
+						   login, superuser, replication))
 	{
-		log_error("Failed to create user \"%s\" on local postgres server", userName);
+		log_error("Failed to create user \"%s\" on local postgres server",
+				  userName);
 		return false;
 	}
 
@@ -456,8 +464,13 @@ primary_create_user_with_hba(LocalPostgresServer *postgres, char *userName,
 		return false;
 	}
 
-	if (!pghba_ensure_host_rule_exists(hbaFilePath, HBA_DATABASE_ALL, NULL, userName,
-									   hostname, authMethod))
+	if (!pghba_ensure_host_rule_exists(hbaFilePath,
+									   postgres->postgresSetup.ssl.active,
+									   HBA_DATABASE_ALL,
+									   NULL,
+									   userName,
+									   hostname,
+									   authMethod))
 	{
 		log_error("Failed to set the pg_hba rule for user \"%s\"", userName);
 		return false;
@@ -480,7 +493,8 @@ primary_create_user_with_hba(LocalPostgresServer *postgres, char *userName,
  * to connect for replication.
  */
 bool
-primary_create_replication_user(LocalPostgresServer *postgres, char *replicationUsername,
+primary_create_replication_user(LocalPostgresServer *postgres,
+								char *replicationUsername,
 								char *replicationPassword)
 {
 	bool result = false;
@@ -505,17 +519,27 @@ primary_create_replication_user(LocalPostgresServer *postgres, char *replication
  * to pg_hba.conf on the primary.
  */
 bool
-primary_add_standby_to_hba(LocalPostgresServer *postgres, char *standbyHostname,
+primary_add_standby_to_hba(LocalPostgresServer *postgres,
+						   char *standbyHostname,
 						   const char *replicationPassword)
 {
 	PGSQL *pgsql = &(postgres->sqlClient);
 	PostgresSetup *postgresSetup = &(postgres->postgresSetup);
 	char hbaFilePath[MAXPGPATH];
-	char *authMethod =  "trust";
+	char *authMethod = pg_setup_get_auth_method(postgresSetup);
 
-	if (replicationPassword)
+	if (replicationPassword == NULL)
 	{
-		authMethod = pg_setup_get_auth_method(postgresSetup);
+		/* most authentication methods require a password */
+		if (strcmp(authMethod, "trust") != 0 ||
+			strcmp(authMethod, SKIP_HBA_AUTH_METHOD) != 0)
+		{
+			log_warn("Granting replication connection for \"%s\" "
+					 "using authentication method \"%s\" although no "
+					 "replication password has been set",
+					 standbyHostname, authMethod);
+			log_info("HINT: see `pg_autoctl config get replication.password`");
+		}
 	}
 
 	log_trace("primary_add_standby_to_hba");
@@ -529,6 +553,7 @@ primary_add_standby_to_hba(LocalPostgresServer *postgres, char *standbyHostname,
 	}
 
 	if (!pghba_ensure_host_rule_exists(hbaFilePath,
+									   postgresSetup->ssl.active,
 									   HBA_DATABASE_REPLICATION, NULL,
 									   PG_AUTOCTL_REPLICA_USERNAME,
 									   standbyHostname, authMethod))
@@ -538,7 +563,9 @@ primary_add_standby_to_hba(LocalPostgresServer *postgres, char *standbyHostname,
 		return false;
 	}
 
-	if (!pghba_ensure_host_rule_exists(hbaFilePath, HBA_DATABASE_DBNAME,
+	if (!pghba_ensure_host_rule_exists(hbaFilePath,
+									   postgresSetup->ssl.active,
+									   HBA_DATABASE_DBNAME,
 									   postgresSetup->dbname,
 									   PG_AUTOCTL_REPLICA_USERNAME,
 									   standbyHostname, authMethod))
@@ -567,7 +594,8 @@ primary_add_standby_to_hba(LocalPostgresServer *postgres, char *standbyHostname,
  */
 bool
 standby_init_database(LocalPostgresServer *postgres,
-					  ReplicationSource *replicationSource)
+					  ReplicationSource *replicationSource,
+					  const char *nodename)
 {
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 
@@ -582,7 +610,8 @@ standby_init_database(LocalPostgresServer *postgres,
 		/* try to stop PostgreSQL, stop here if that fails */
 		if (!pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata))
 		{
-			log_error("Failed to initialise a standby: the database directory exists "
+			log_error("Failed to initialise a standby: "
+					  "the database directory exists "
 					  "and postgres could not be stopped");
 			return false;
 		}
@@ -592,18 +621,28 @@ standby_init_database(LocalPostgresServer *postgres,
 	 * Now, we know that pgdata either doesn't exists or belongs to a stopped
 	 * PostgreSQL instance. We can safely proceed with pg_basebackup.
 	 */
-	if (!pg_basebackup(pgSetup->pgdata,
-					   pgSetup->pg_ctl,
-					   replicationSource->backupDir,
-					   replicationSource->maximumBackupRate,
-					   replicationSource->userName,
-					   replicationSource->password,
-					   replicationSource->slotName,
-					   replicationSource->primaryNode.host,
-					   replicationSource->primaryNode.port,
-					   replicationSource->applicationName))
+	if (!pg_basebackup(pgSetup->pgdata, pgSetup->pg_ctl, replicationSource))
 	{
 		return false;
+	}
+
+	/*
+	 * When --ssl-self-signed has been used, now is the time to build a
+	 * self-signed certificate for the server. We place the certificate and
+	 * private key in $PGDATA/server.key and $PGDATA/server.crt
+	 *
+	 * In particular we override the certificates that we might have fetched
+	 * from the primary as part of pg_basebackup: we're not a backup, we're a
+	 * standby node, we need our own certificate (even if self-signed).
+	 */
+	if (pgSetup->ssl.createSelfSignedCert)
+	{
+		if (!pg_create_self_signed_cert(pgSetup, nodename))
+		{
+			log_error("Failed to create SSL self-signed certificate, "
+					  "see above for details");
+			return false;
+		}
 	}
 
 	if (!ensure_local_postgres_is_running(postgres))
@@ -642,7 +681,6 @@ bool
 primary_rewind_to_standby(LocalPostgresServer *postgres,
 						  ReplicationSource *replicationSource)
 {
-	PGSQL *pgsql = &(postgres->sqlClient);
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	NodeAddress *primaryNode = &(replicationSource->primaryNode);
 
@@ -656,10 +694,7 @@ primary_rewind_to_standby(LocalPostgresServer *postgres,
 		return false;
 	}
 
-	if (!pg_rewind(pgSetup->pgdata, pgSetup->pg_ctl,
-				   primaryNode->host, primaryNode->port,
-				   pgSetup->dbname, replicationSource->userName,
-				   replicationSource->password))
+	if (!pg_rewind(pgSetup->pgdata, pgSetup->pg_ctl, replicationSource))
 	{
 		log_error("Failed to rewind old data directory");
 		return false;
@@ -731,8 +766,7 @@ standby_promote(LocalPostgresServer *postgres)
 		return false;
 	}
 
-	do
-	{
+	do {
 		log_info("Waiting for postgres to promote");
 		pg_usleep(AWAIT_PROMOTION_SLEEP_TIME_MS * 1000);
 
@@ -742,8 +776,7 @@ standby_promote(LocalPostgresServer *postgres)
 					  "recovery mode after promotion");
 			return false;
 		}
-	}
-	while (inRecovery);
+	} while (inRecovery);
 
 	/*
 	 * It's necessary to do a checkpoint before allowing the old primary to

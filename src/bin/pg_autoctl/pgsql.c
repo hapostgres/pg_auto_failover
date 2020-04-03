@@ -18,6 +18,7 @@
 #include "parsing.h"
 #include "pgsql.h"
 #include "signals.h"
+#include "string_utils.h"
 
 
 #define ERRCODE_DUPLICATE_OBJECT "42710"
@@ -33,7 +34,6 @@ static bool clear_results(PGconn *connection);
 static bool pgsql_alter_system_set(PGSQL *pgsql, GUC setting);
 static bool pgsql_get_current_setting(PGSQL *pgsql, char *settingName,
 									  char **currentValue);
-static int escape_conninfo_value(char *destination, const char *string);
 static void parsePgMetadata(void *ctx, PGresult *result);
 static void parseReplicationSlotMaintain(void *ctx, PGresult *result);
 
@@ -63,9 +63,7 @@ parseSingleValueResult(void *ctx, PGresult *result)
 
 			case PGSQL_RESULT_INT:
 			{
-				context->intVal = strtod(value, NULL);
-
-				if (context->intVal == 0 && errno != 0)
+				if (!stringToInt(value, &context->intVal))
 				{
 					context->parsedOk = false;
 					log_error("Failed to parse int result \"%s\"", value);
@@ -76,14 +74,13 @@ parseSingleValueResult(void *ctx, PGresult *result)
 
 			case PGSQL_RESULT_BIGINT:
 			{
-				context->bigint = strtoull(value, NULL, 10);
-
-				if (context->bigint == 0 && errno != 0)
+				if (!stringToUInt64(value, &context->bigint))
 				{
 					context->parsedOk = false;
 					log_error("Failed to parse uint64_t result \"%s\"", value);
 				}
 				context->parsedOk = true;
+				break;
 			}
 
 			case PGSQL_RESULT_STRING:
@@ -133,6 +130,7 @@ pgsql_finish(PGSQL *pgsql)
 		pgsql->connection = NULL;
 	}
 }
+
 
 /*
  * pgsql_open_connection opens a PostgreSQL connection, given a PGSQL client
@@ -326,7 +324,7 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 static void
 pgAutoCtlDefaultNoticeProcessor(void *arg, const char *message)
 {
-    log_warn("%s", message);
+	log_warn("%s", message);
 }
 
 
@@ -337,7 +335,7 @@ pgAutoCtlDefaultNoticeProcessor(void *arg, const char *message)
 static void
 pgAutoCtlDebugNoticeProcessor(void *arg, const char *message)
 {
-    log_debug("%s", message);
+	log_debug("%s", message);
 }
 
 
@@ -385,19 +383,19 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 		int remainingBytes = BUFSIZE;
 		char *writePointer = (char *) debugParameters;
 
-		for (paramIndex=0; paramIndex < paramCount; paramIndex++)
+		for (paramIndex = 0; paramIndex < paramCount; paramIndex++)
 		{
 			int bytesWritten = 0;
 			const char *value = paramValues[paramIndex];
 
 			if (paramIndex > 0)
 			{
-				bytesWritten = snprintf(writePointer, remainingBytes, ", ");
+				bytesWritten = sformat(writePointer, remainingBytes, ", ");
 				remainingBytes -= bytesWritten;
 				writePointer += bytesWritten;
 			}
 
-			bytesWritten = snprintf(writePointer, remainingBytes, "'%s'", value);
+			bytesWritten = sformat(writePointer, remainingBytes, "'%s'", value);
 			remainingBytes -= bytesWritten;
 			writePointer += bytesWritten;
 		}
@@ -409,7 +407,6 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 	if (!is_response_ok(result))
 	{
 		char *sqlstate = PQresultErrorField(result, PG_DIAG_SQLSTATE);
-
 		char *message = PQerrorMessage(connection);
 		char *errorLines[BUFSIZE];
 		int lineCount = splitLines(message, errorLines, BUFSIZE);
@@ -606,7 +603,7 @@ bool
 postgres_sprintf_replicationSlotName(int nodeId, char *slotName, int size)
 {
 	int bytesWritten =
-		snprintf(slotName, size, "%s_%d", REPLICATION_SLOT_NAME_DEFAULT, nodeId);
+		sformat(slotName, size, "%s_%d", REPLICATION_SLOT_NAME_DEFAULT, nodeId);
 
 	return bytesWritten <= size;
 }
@@ -668,7 +665,7 @@ pgsql_create_replication_slot(PGSQL *pgsql, const char *slotName)
 		"SELECT 'create', slot_name, lsn "
 		"  FROM pg_create_physical_replication_slot($1) "
 		" WHERE NOT EXISTS "
-		" (SELECT 1 FROM pg_replication_slots WHERE slot_name = $1)" ;
+		" (SELECT 1 FROM pg_replication_slots WHERE slot_name = $1)";
 	const Oid paramTypes[1] = { TEXTOID };
 	const char *paramValues[1] = { slotName };
 
@@ -715,7 +712,7 @@ pgsql_drop_replication_slots(PGSQL *pgsql)
 		"SELECT pg_drop_replication_slot(slot_name) "
 		"  FROM pg_replication_slots "
 		" WHERE slot_name ~ '" REPLICATION_SLOT_NAME_PATTERN "' "
-		"   AND slot_type = 'physical'";
+															 "   AND slot_type = 'physical'";
 
 	log_info("Drop pg_auto_failover physical replication slots");
 
@@ -770,12 +767,14 @@ BuildNodesArrayValues(NodeAddressArray *nodeArray,
 		paramTypes[paramIndex] = LSNOID;
 		paramValues[paramIndex++] = node->lsn;
 
-		valuesIndex += snprintf(buffer+valuesIndex, BUFSIZE-valuesIndex,
+		valuesIndex += snprintf(buffer + valuesIndex, BUFSIZE - valuesIndex,
 								"%s($%d, $%d%s)",
 								valuesIndex == 0 ? "" : ",",
-								/* we begin at $1 here: intentional off-by-one */
-								paramIndex-1, paramIndex,
-								/* cast only the first row */
+
+		                        /* we begin at $1 here: intentional off-by-one */
+								paramIndex - 1, paramIndex,
+
+		                        /* cast only the first row */
 								valuesIndex == 0 ? "::pg_lsn" : "");
 
 		if (valuesIndex > BUFSIZE)
@@ -813,6 +812,7 @@ BuildNodesArrayValues(NodeAddressArray *nodeArray,
 	return paramIndex;
 }
 
+
 /*
  * pgsql_replication_slot_drop_removed drop replication slots that belong to
  * nodes that have been removed. We call that function on the primary, where
@@ -826,9 +826,10 @@ bool
 pgsql_replication_slot_drop_removed(PGSQL *pgsql, NodeAddressArray *nodeArray)
 {
 	int bytes;
-	char sql[2*BUFSIZE] = { 0 };
+	char sql[2 * BUFSIZE] = { 0 };
 	char values[BUFSIZE] = { 0 };
 	char *sqlTemplate =
+
 		/*
 		 * We could simplify the writing of this query, but we prefer that it
 		 * looks as much as possible like the query used in
@@ -837,27 +838,27 @@ pgsql_replication_slot_drop_removed(PGSQL *pgsql, NodeAddressArray *nodeArray)
 		 */
 		"WITH nodes(slot_name, lsn) as ("
 		" SELECT '" REPLICATION_SLOT_NAME_DEFAULT "_' || id, lsn"
-		"   FROM (%s) as sb(id, lsn) "
-		"), \n"
-		"dropped as ("
-		" SELECT slot_name, pg_drop_replication_slot(slot_name) "
-		"   FROM pg_replication_slots pgrs LEFT JOIN nodes USING(slot_name) "
-		"  WHERE nodes.slot_name IS NULL "
-		") \n"
-		"SELECT 'drop', slot_name, NULL::pg_lsn FROM dropped";
+												  "   FROM (%s) as sb(id, lsn) "
+												  "), \n"
+												  "dropped as ("
+												  " SELECT slot_name, pg_drop_replication_slot(slot_name) "
+												  "   FROM pg_replication_slots pgrs LEFT JOIN nodes USING(slot_name) "
+												  "  WHERE nodes.slot_name IS NULL "
+												  ") \n"
+												  "SELECT 'drop', slot_name, NULL::pg_lsn FROM dropped";
 
-	Oid paramTypes[NODE_ARRAY_MAX_COUNT*2] = { 0 };
-	const char *paramValues[NODE_ARRAY_MAX_COUNT*2] = { 0 };
+	Oid paramTypes[NODE_ARRAY_MAX_COUNT * 2] = { 0 };
+	const char *paramValues[NODE_ARRAY_MAX_COUNT * 2] = { 0 };
 	ReplicationSlotMaintainContext context = { 0 };
 
 	int paramCount = BuildNodesArrayValues(nodeArray,
-										   paramTypes, (char **)paramValues,
+										   paramTypes, (char **) paramValues,
 										   values, BUFSIZE);
 
 	/* add the computed ($1,$2), ... string to the query "template" */
-	bytes = snprintf(sql, 2*BUFSIZE, sqlTemplate, values);
+	bytes = snprintf(sql, 2 * BUFSIZE, sqlTemplate, values);
 
-	if (bytes > 2*BUFSIZE)
+	if (bytes > 2 * BUFSIZE)
 	{
 		/* shouldn't happen because we only support up to 12 nodes */
 		log_error("Failed to prepare the SQL query for "
@@ -881,48 +882,48 @@ bool
 pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray)
 {
 	int bytes;
-	char sql[2*BUFSIZE] = { 0 };
+	char sql[2 * BUFSIZE] = { 0 };
 	char values[BUFSIZE] = { 0 };
 	char *sqlTemplate =
 		"WITH nodes(slot_name, lsn) as ("
 		" SELECT '" REPLICATION_SLOT_NAME_DEFAULT "_' || id, lsn"
-		"   FROM (%s) as sb(id, lsn) "
-		"), \n"
-		"dropped as ("
-		" SELECT slot_name, pg_drop_replication_slot(slot_name) "
-		"   FROM pg_replication_slots pgrs LEFT JOIN nodes USING(slot_name) "
-		"  WHERE nodes.slot_name IS NULL "
-		"), \n"
-		"advanced as ("
-		"SELECT a.slot_name, a.end_lsn"
-		"  FROM pg_replication_slots JOIN nodes USING(slot_name), "
-		"       LATERAL pg_replication_slot_advance(slot_name, lsn) a"
-		" WHERE nodes.lsn <> '0/0'"
-		"), \n"
-		"created as ("
-		"SELECT c.slot_name, c.lsn "
-		"  FROM nodes LEFT JOIN pg_replication_slots pgrs USING(slot_name), "
-		"       LATERAL pg_create_physical_replication_slot(slot_name, true) c"
-		" WHERE pgrs.slot_name IS NULL "
-		") \n"
-		"SELECT 'create', slot_name, lsn FROM created "
-		" union all "
-		"SELECT 'drop', slot_name, NULL::pg_lsn FROM dropped "
-		" union all "
-		"SELECT 'advance', slot_name, end_lsn FROM advanced ";
+												  "   FROM (%s) as sb(id, lsn) "
+												  "), \n"
+												  "dropped as ("
+												  " SELECT slot_name, pg_drop_replication_slot(slot_name) "
+												  "   FROM pg_replication_slots pgrs LEFT JOIN nodes USING(slot_name) "
+												  "  WHERE nodes.slot_name IS NULL "
+												  "), \n"
+												  "advanced as ("
+												  "SELECT a.slot_name, a.end_lsn"
+												  "  FROM pg_replication_slots JOIN nodes USING(slot_name), "
+												  "       LATERAL pg_replication_slot_advance(slot_name, lsn) a"
+												  " WHERE nodes.lsn <> '0/0'"
+												  "), \n"
+												  "created as ("
+												  "SELECT c.slot_name, c.lsn "
+												  "  FROM nodes LEFT JOIN pg_replication_slots pgrs USING(slot_name), "
+												  "       LATERAL pg_create_physical_replication_slot(slot_name, true) c"
+												  " WHERE pgrs.slot_name IS NULL "
+												  ") \n"
+												  "SELECT 'create', slot_name, lsn FROM created "
+												  " union all "
+												  "SELECT 'drop', slot_name, NULL::pg_lsn FROM dropped "
+												  " union all "
+												  "SELECT 'advance', slot_name, end_lsn FROM advanced ";
 
-	Oid paramTypes[NODE_ARRAY_MAX_COUNT*2] = { 0 };
-	const char *paramValues[NODE_ARRAY_MAX_COUNT*2] = { 0 };
+	Oid paramTypes[NODE_ARRAY_MAX_COUNT * 2] = { 0 };
+	const char *paramValues[NODE_ARRAY_MAX_COUNT * 2] = { 0 };
 	ReplicationSlotMaintainContext context = { 0 };
 
 	int paramCount = BuildNodesArrayValues(nodeArray,
-										   paramTypes, (char **)paramValues,
+										   paramTypes, (char **) paramValues,
 										   values, BUFSIZE);
 
 	/* add the computed ($1,$2), ... string to the query "template" */
-	bytes = snprintf(sql, 2*BUFSIZE, sqlTemplate, values);
+	bytes = snprintf(sql, 2 * BUFSIZE, sqlTemplate, values);
 
-	if (bytes > 2*BUFSIZE)
+	if (bytes > 2 * BUFSIZE)
 	{
 		/* shouldn't happen because we only support up to 12 nodes */
 		log_error("Failed to prepare the SQL query for "
@@ -955,12 +956,12 @@ parseReplicationSlotMaintain(void *ctx, PGresult *result)
 		return;
 	}
 
-	for(rowNumber = 0; rowNumber < PQntuples(result); rowNumber++)
+	for (rowNumber = 0; rowNumber < PQntuples(result); rowNumber++)
 	{
 		char *operation = PQgetvalue(result, rowNumber, 0);
 		char *slotName = PQgetvalue(result, rowNumber, 1);
 		char *lsn = PQgetisnull(result, rowNumber, 2) ? ""
-			: PQgetvalue(result, rowNumber, 2);
+					: PQgetvalue(result, rowNumber, 2);
 
 		/* adding or removing another standby node is worthy of a log line */
 		if (strcmp(operation, "create") == 0)
@@ -1081,7 +1082,8 @@ pgsql_alter_system_set(PGSQL *pgsql, GUC setting)
 {
 	char command[1024];
 
-	snprintf(command, 1024, "ALTER SYSTEM SET %s TO %s", setting.name, setting.value);
+	sformat(command, 1024,
+			"ALTER SYSTEM SET %s TO %s", setting.name, setting.value);
 
 	if (!pgsql_execute(pgsql, command))
 	{
@@ -1197,6 +1199,7 @@ pgsql_get_current_setting(PGSQL *pgsql, char *settingName, char **currentValue)
 	if (!pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes, paramValues,
 								   &context, &parseSingleValueResult))
 	{
+		/* errors have already been logged */
 		return false;
 	}
 
@@ -1253,10 +1256,10 @@ pgsql_create_database(PGSQL *pgsql, const char *dbname, const char *owner)
 	}
 
 	/* now build the SQL command */
-	snprintf(command, BUFSIZE,
-			 "CREATE DATABASE %s WITH OWNER %s",
-			 escapedDBName,
-			 escapedOwner);
+	sformat(command, BUFSIZE,
+			"CREATE DATABASE %s WITH OWNER %s",
+			escapedDBName,
+			escapedOwner);
 
 	log_debug("Running command on Postgres: %s;", command);
 
@@ -1326,7 +1329,7 @@ pgsql_create_extension(PGSQL *pgsql, const char *name)
 	}
 
 	/* now build the SQL command */
-	snprintf(command, BUFSIZE, "CREATE EXTENSION %s", escapedIdentifier);
+	sformat(command, BUFSIZE, "CREATE EXTENSION %s", escapedIdentifier);
 	PQfreemem(escapedIdentifier);
 	log_debug("Running command on Postgres: %s;", command);
 
@@ -1521,8 +1524,12 @@ pgsql_has_replica(PGSQL *pgsql, char *userName, bool *hasReplica)
 	const char *paramValues[1] = { userName };
 	int paramCount = 1;
 
-	pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes, paramValues,
-							  &context, &parseSingleValueResult);
+	if (!pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes, paramValues,
+								   &context, &parseSingleValueResult))
+	{
+		/* errors have already been logged */
+		return false;
+	}
 
 	if (!context.parsedOk)
 	{
@@ -1584,7 +1591,13 @@ hostname_from_uri(const char *pguri,
 			if (option->val)
 			{
 				/* we expect a single port number in a monitor's URI */
-				*port = atoi(option->val);
+				if (!stringToInt(option->val, port))
+				{
+					log_error("Failed to parse port number : %s", option->val);
+
+					PQconninfoFree(conninfo);
+					return false;
+				}
 				++found;
 			}
 			else
@@ -1601,72 +1614,6 @@ hostname_from_uri(const char *pguri,
 	PQconninfoFree(conninfo);
 
 	return true;
-}
-
-
-/*
- * make_conninfo_field_int writes a single connection string field to
- * connInfo and returns the number of characters written.
- *
- * It is the responsibility of the caller to ensure that the connInfo
- * is large enough to write the field.
- */
-int
-make_conninfo_field_int(char *connInfo, const char *key, int value)
-{
-	return sprintf(connInfo, " %s=%d", key, value);
-}
-
-
-/*
- * make_conninfo_field_str writes a single connection string field to
- * connInfo with escaping and returns the number of characters written.
- *
- * It is the responsibility of the caller to ensure that the connInfo
- * is large enough to write the field.
- */
-int
-make_conninfo_field_str(char *connInfo, const char *key, const char *value)
-{
-	char *connInfoEnd = connInfo;
-
-	connInfoEnd += sprintf(connInfoEnd, " %s=", key);
-	connInfoEnd += escape_conninfo_value(connInfoEnd, value);
-
-	return connInfoEnd - connInfo;
-}
-
-
-/*
- * escape_conninfo_value escapes a string that is used in a connection info
- * string by prefixing single quotes and backslashes with a backslash.
- *
- * The result is written to destination and the length of the result returned.
- */
-static int
-escape_conninfo_value(char *destination, const char *string)
-{
-	int charIndex = 0;
-	int length = strlen(string);
-	int escapedStringLength = 0;
-
-	destination[escapedStringLength++] = '\'';
-
-	for (charIndex = 0; charIndex < length; charIndex++)
-	{
-		char currentChar = string[charIndex];
-		if (currentChar == '\'' || currentChar == '\\')
-		{
-			destination[escapedStringLength++] = '\\';
-		}
-
-		destination[escapedStringLength++] = currentChar;
-	}
-
-	destination[escapedStringLength++] = '\'';
-	destination[escapedStringLength] = '\0';
-
-	return escapedStringLength;
 }
 
 
@@ -1720,11 +1667,11 @@ validate_connection_string(const char *connectionString)
  */
 typedef struct PgMetadata
 {
-	char    sqlstate[6];
-	bool	parsedOk;
-	bool	pg_is_in_recovery;
-	char	syncState[PGSR_SYNC_STATE_MAXLENGTH];
-	char	currentLSN[PG_LSN_MAXLENGTH];
+	char sqlstate[6];
+	bool parsedOk;
+	bool pg_is_in_recovery;
+	char syncState[PGSR_SYNC_STATE_MAXLENGTH];
+	char currentLSN[PG_LSN_MAXLENGTH];
 } PgMetadata;
 
 
@@ -1734,6 +1681,7 @@ pgsql_get_postgres_metadata(PGSQL *pgsql, bool *pg_is_in_recovery,
 {
 	PgMetadata context = { 0 };
 	char *sql =
+
 		/*
 		 * Make it so that we still have the current WAL LSN even in the case
 		 * where there's no replication slot in use by any standby.
@@ -1748,7 +1696,7 @@ pgsql_get_postgres_metadata(PGSQL *pgsql, bool *pg_is_in_recovery,
 		" case when pg_is_in_recovery()"
 		" then pg_last_wal_receive_lsn()"
 		" else pg_current_wal_lsn()"
-        " end as current_lsn"
+		" end as current_lsn"
 		" from (values(1)) as dummy"
 		" full outer join"
 		" ("
@@ -1757,15 +1705,15 @@ pgsql_get_postgres_metadata(PGSQL *pgsql, bool *pg_is_in_recovery,
 		"     join pg_stat_replication rep"
 		"       on rep.pid = slot.active_pid"
 		"   where slot_name ~ '" REPLICATION_SLOT_NAME_PATTERN "' "
-		"order by case sync_state "
-		"         when 'quorum' then 4 "
-		"         when 'sync' then 3 "
-		"         when 'potential' then 2 "
-		"         when 'async' then 1 "
-		"         else 0 end "
-		"    desc limit 1"
-		" ) "
-		"as rep on true";
+															   "order by case sync_state "
+															   "         when 'quorum' then 4 "
+															   "         when 'sync' then 3 "
+															   "         when 'potential' then 2 "
+															   "         when 'async' then 1 "
+															   "         else 0 end "
+															   "    desc limit 1"
+															   " ) "
+															   "as rep on true";
 
 	if (!pgsql_execute_with_params(pgsql, sql, 0, NULL, NULL,
 								   &context, &parsePgMetadata))
@@ -1849,6 +1797,7 @@ parsePgMetadata(void *ctx, PGresult *result)
 	context->parsedOk = true;
 }
 
+
 /*
  * pgsql_get_last_wal_replay_lsn calls pg_last_wal_replay_lsn() and provides
  * the result in the given pre-allocated char buffer.
@@ -1915,7 +1864,7 @@ pgsql_listen(PGSQL *pgsql, char *channels[])
 			return false;
 		}
 
-		sprintf(sql, "LISTEN %s", channel);
+		sformat(sql, BUFSIZE, "LISTEN %s", channel);
 
 		PQfreemem(channel);
 
@@ -1982,8 +1931,8 @@ pgsql_alter_extension_update_to(PGSQL *pgsql,
 	}
 
 	/* now build the SQL command */
-	n = snprintf(command, BUFSIZE, "ALTER EXTENSION %s UPDATE TO %s",
-				 escapedIdentifier, escapedVersion);
+	n = sformat(command, BUFSIZE, "ALTER EXTENSION %s UPDATE TO %s",
+				escapedIdentifier, escapedVersion);
 
 	if (n >= BUFSIZE)
 	{

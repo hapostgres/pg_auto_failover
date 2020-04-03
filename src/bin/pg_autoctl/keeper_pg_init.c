@@ -11,21 +11,23 @@
 #include <stdbool.h>
 #include <unistd.h>
 
-#include "postgres_fe.h"
-
 #include "cli_common.h"
+#include "debian.h"
 #include "defaults.h"
+#include "env_utils.h"
 #include "fsm.h"
 #include "keeper.h"
 #include "keeper_config.h"
 #include "keeper_pg_init.h"
 #include "log.h"
 #include "monitor.h"
+#include "parsing.h"
 #include "pgctl.h"
 #include "pghba.h"
 #include "pgsetup.h"
 #include "pgsql.h"
 #include "state.h"
+
 
 /*
  * We keep track of the fact that we had non-fatal warnings during `pg_autoctl
@@ -48,15 +50,14 @@ static bool keeper_pg_init_and_register(Keeper *keeper,
 										KeeperConfig *config,
 										NodeState initNodeState);
 
-static bool keeper_pg_init_check_initial_state(
-	Keeper *keeper, KeeperConfig *config,
-	NodeState initialNodeStateCandidate, NodeState *initialNodeState);
+static bool keeper_pg_init_check_initial_state(Keeper *keeper, KeeperConfig *config,
+											   NodeState initialNodeStateCandidate,
+											   NodeState *initialNodeState);
 
 static bool reach_initial_state(Keeper *keeper);
 static bool wait_until_primary_is_ready(Keeper *config,
 										MonitorAssignedState *assignedState);
 static bool keeper_pg_init_node_active(Keeper *keeper);
-
 
 /*
  * keeper_pg_init initializes a pg_autoctl keeper and its local PostgreSQL.
@@ -69,7 +70,7 @@ bool
 keeper_pg_init(Keeper *keeper, KeeperConfig *config, NodeState initNodeState)
 {
 	log_trace("keeper_pg_init: monitor is %s",
-			  config->monitorDisabled ? "disabled" : "enabled" );
+			  config->monitorDisabled ? "disabled" : "enabled");
 
 	if (config->monitorDisabled)
 	{
@@ -239,8 +240,8 @@ keeper_pg_init_check_initial_state(Keeper *keeper, KeeperConfig *config,
 	 * there's an already existing Postgres instance either, so that's the same
 	 * situation.
 	 */
-	if (!postgresInstanceExists
-		|| (postgresInstanceIsPrimary && allowRemovingPgdata))
+	if (!postgresInstanceExists ||
+		(postgresInstanceIsPrimary && allowRemovingPgdata))
 	{
 		/* we can be initialize whatever the monitor needs */
 		switch (initialNodeStateCandidate)
@@ -266,6 +267,7 @@ keeper_pg_init_check_initial_state(Keeper *keeper, KeeperConfig *config,
 			}
 		}
 	}
+
 	/*
 	 * Now, if there's a Postgres instance around and it's a running primary
 	 * instance, then all we can implement for the monitor is a SINGLE_STATE
@@ -309,6 +311,7 @@ keeper_pg_init_check_initial_state(Keeper *keeper, KeeperConfig *config,
 			}
 		}
 	}
+
 	/*
 	 * If there's a local Postgres instance and it's not a primary, it means
 	 * that pg_is_in_recovery and we could connect: it's a standby. We have not
@@ -375,9 +378,9 @@ keeper_pg_init_continue(Keeper *keeper, KeeperConfig *config)
 	 * If we have an init file and the state file looks good, then the
 	 * operation that failed was removing the init state file.
 	 */
-	if (keeper->state.current_role == keeper->state.assigned_role
-		&& (keeper->state.current_role == SINGLE_STATE
-			|| keeper->state.current_role == CATCHINGUP_STATE))
+	if (keeper->state.current_role == keeper->state.assigned_role &&
+		(keeper->state.current_role == SINGLE_STATE ||
+		 keeper->state.current_role == CATCHINGUP_STATE))
 	{
 		return unlink_file(config->pathnames.init);
 	}
@@ -402,7 +405,6 @@ static bool
 reach_initial_state(Keeper *keeper)
 {
 	KeeperConfig config = keeper->config;
-	bool pgInstanceIsOurs = false;
 
 	log_trace("reach_initial_state: %s to %s",
 			  NodeStateToString(keeper->state.current_role),
@@ -426,7 +428,6 @@ reach_initial_state(Keeper *keeper)
 	 */
 	switch (keeper->state.assigned_role)
 	{
-
 		case CATCHINGUP_STATE:
 		{
 			/*
@@ -502,6 +503,7 @@ reach_initial_state(Keeper *keeper)
 		}
 
 		default:
+
 			/* we don't support any other state at initialization time */
 			log_error("reach_initial_state: don't know how to read state %s",
 					  NodeStateToString(keeper->state.assigned_role));
@@ -632,15 +634,12 @@ create_database_and_extension(Keeper *keeper)
 	PostgresSetup initPgSetup = { 0 };
 	bool missingPgdataIsOk = false;
 	bool pgIsNotRunningIsOk = true;
-
-	char *pg_regress_sock_dir = getenv("PG_REGRESS_SOCK_DIR");
-
 	char hbaFilePath[MAXPGPATH];
 
 	log_trace("create_database_and_extension");
 
 	/* we didn't start PostgreSQL yet, also we just ran initdb */
-	snprintf(hbaFilePath, MAXPGPATH, "%s/pg_hba.conf", pgSetup->pgdata);
+	sformat(hbaFilePath, MAXPGPATH, "%s/pg_hba.conf", pgSetup->pgdata);
 
 	/*
 	 * The Postgres URI given to the user by our facility is going to use
@@ -652,11 +651,12 @@ create_database_and_extension(Keeper *keeper)
 	 * string with at least the --username used to create the database.
 	 */
 	if (!pghba_ensure_host_rule_exists(hbaFilePath,
+									   pgSetup->ssl.active,
 									   HBA_DATABASE_DBNAME,
 									   pgSetup->dbname,
 									   pg_setup_get_username(pgSetup),
 									   config->nodename,
-									   "trust"))
+									   pg_setup_get_auth_method(pgSetup)))
 	{
 		log_error("Failed to edit \"%s\" to grant connections to \"%s\", "
 				  "see above for details", hbaFilePath, config->nodename);
@@ -667,15 +667,19 @@ create_database_and_extension(Keeper *keeper)
 	 * In test environments using PG_REGRESS_SOCK_DIR="" to disable unix socket
 	 * directory, we have to connect to the address from pghost.
 	 */
-	if (pg_regress_sock_dir != NULL
-		&& strcmp(pg_regress_sock_dir, "") == 0)
+	if (env_found_empty("PG_REGRESS_SOCK_DIR"))
 	{
 		log_info("Granting connection from \"%s\" in \"%s\"",
 				 pgSetup->pghost, hbaFilePath);
 
+		/* Intended use is restricted to unit testing, hard-code "trust" here */
 		if (!pghba_ensure_host_rule_exists(hbaFilePath,
-										   HBA_DATABASE_ALL, NULL, NULL,
-										   pgSetup->pghost, "trust"))
+										   pgSetup->ssl.active,
+										   HBA_DATABASE_ALL,
+										   NULL, /* all: no database name */
+										   NULL, /* no username, "all" */
+										   pgSetup->pghost,
+										   "trust"))
 		{
 			log_error("Failed to edit \"%s\" to grant connections to \"%s\", "
 					  "see above for details", hbaFilePath, pgSetup->pghost);
@@ -715,13 +719,28 @@ create_database_and_extension(Keeper *keeper)
 	if (!IS_EMPTY_STRING_BUFFER(pgSetup->username))
 	{
 		if (!pgsql_create_user(&initPostgres.sqlClient, pgSetup->username,
-							   /* password, login, superuser, replication */
-							   NULL, true, true, false))
 
+		                       /* password, login, superuser, replication */
+							   NULL, true, true, false))
 		{
 			log_fatal("Failed to create role \"%s\""
 					  ", see above for details", pgSetup->username);
 
+			return false;
+		}
+	}
+
+	/*
+	 * When --ssl-self-signed has been used, now is the time to build a
+	 * self-signed certificate for the server. We place the certificate and
+	 * private key in $PGDATA/server.key and $PGDATA/server.crt
+	 */
+	if (pgSetup->ssl.createSelfSignedCert)
+	{
+		if (!pg_create_self_signed_cert(pgSetup, config->nodename))
+		{
+			log_error("Failed to create SSL self-signed certificate, "
+					  "see above for details");
 			return false;
 		}
 	}
@@ -744,13 +763,18 @@ create_database_and_extension(Keeper *keeper)
 	 */
 	if (IS_CITUS_INSTANCE_KIND(postgres->pgKind))
 	{
-		(void) pghba_enable_lan_cidr(&initPostgres.sqlClient,
-									 HBA_DATABASE_DBNAME,
-									 pgSetup->dbname,
-									 config->nodename,
-									 pg_setup_get_username(pgSetup),
-									 "trust",
-									 NULL);
+		if (!pghba_enable_lan_cidr(&initPostgres.sqlClient,
+								   pgSetup->ssl.active,
+								   HBA_DATABASE_DBNAME,
+								   pgSetup->dbname,
+								   config->nodename,
+								   pg_setup_get_username(pgSetup),
+								   pg_setup_get_auth_method(pgSetup),
+								   NULL))
+		{
+			log_error("Failed to grant local network connections in HBA");
+			return false;
+		}
 	}
 
 	/*
@@ -771,7 +795,6 @@ create_database_and_extension(Keeper *keeper)
 					  pgSetup->dbname, pgSetup->username);
 			return false;
 		}
-
 	}
 
 	/* close the "template1" connection now */

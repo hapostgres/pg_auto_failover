@@ -35,7 +35,7 @@
 #include "nodes/pg_list.h"
 
 typedef int (*list_qsort_comparator) (const void *a, const void *b);
-extern List *list_qsort(const List *list, list_qsort_comparator cmp);
+extern List * list_qsort(const List *list, list_qsort_comparator cmp);
 
 #endif
 
@@ -51,11 +51,13 @@ extern List *list_qsort(const List *list, list_qsort_comparator cmp);
 #include "access/htup_details.h"
 #include "catalog/pg_database.h"
 
-static inline Oid HeapTupleGetOid(HeapTuple tuple)
+static inline Oid
+HeapTupleGetOid(HeapTuple tuple)
 {
 	Form_pg_database dbForm = (Form_pg_database) GETSTRUCT(tuple);
 	return dbForm->oid;
 }
+
 
 #endif
 

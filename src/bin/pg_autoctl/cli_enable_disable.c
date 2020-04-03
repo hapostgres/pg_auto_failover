@@ -14,6 +14,7 @@
 
 #include "cli_common.h"
 #include "commandline.h"
+#include "env_utils.h"
 #include "fsm.h"
 #include "keeper_config.h"
 #include "log.h"
@@ -143,16 +144,22 @@ cli_secondary_getopts(int argc, char **argv)
 				switch (verboseCount)
 				{
 					case 1:
+					{
 						log_set_level(LOG_INFO);
 						break;
+					}
 
 					case 2:
+					{
 						log_set_level(LOG_DEBUG);
 						break;
+					}
 
 					default:
+					{
 						log_set_level(LOG_TRACE);
 						break;
+					}
 				}
 				break;
 			}
@@ -187,16 +194,7 @@ cli_secondary_getopts(int argc, char **argv)
 
 	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 	{
-		char *pgdata = getenv("PGDATA");
-
-		if (pgdata == NULL)
-		{
-			log_fatal("Failed to set PGDATA either from the environment "
-					  "or from --pgdata");
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-
-		strlcpy(options.pgSetup.pgdata, pgdata, MAXPGPATH);
+		get_env_pgdata_or_exit(options.pgSetup.pgdata);
 	}
 
 	if (IS_EMPTY_STRING_BUFFER(options.formation))
@@ -280,7 +278,6 @@ static void
 cli_enable_maintenance(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
-	pid_t pid;
 
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
@@ -348,7 +345,6 @@ static void
 cli_disable_maintenance(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
-	pid_t pid;
 
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;

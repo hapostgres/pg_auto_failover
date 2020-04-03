@@ -11,11 +11,13 @@
 #include "cli_common.h"
 #include "commandline.h"
 #include "defaults.h"
+#include "env_utils.h"
 #include "ini_file.h"
 #include "keeper_config.h"
 #include "keeper.h"
 #include "monitor.h"
 #include "monitor_config.h"
+#include "string_utils.h"
 
 static int cli_perform_failover_getopts(int argc, char **argv);
 static void cli_perform_failover(int argc, char **argv);
@@ -24,7 +26,7 @@ CommandLine perform_failover_command =
 	make_command("failover",
 				 "Perform a failover for given formation and group",
 				 " [ --pgdata --formation --group ] ",
-				 "  --pgdata      path to data directory	 \n"		\
+				 "  --pgdata      path to data directory	 \n" \
 				 "  --formation   formation to target, defaults to 'default' \n" \
 				 "  --group       group to target, defaults to 0 \n",
 				 cli_perform_failover_getopts,
@@ -34,11 +36,21 @@ CommandLine perform_switchover_command =
 	make_command("switchover",
 				 "Perform a switchover for given formation and group",
 				 " [ --pgdata --formation --group ] ",
-				 "  --pgdata      path to data directory	 \n"		\
+				 "  --pgdata      path to data directory	 \n" \
 				 "  --formation   formation to target, defaults to 'default' \n" \
 				 "  --group       group to target, defaults to 0 \n",
 				 cli_perform_failover_getopts,
 				 cli_perform_failover);
+
+CommandLine *perform_subcommands[] = {
+	&perform_failover_command,
+	&perform_switchover_command,
+	NULL,
+};
+
+CommandLine perform_commands =
+	make_command_set("perform", "Perform an action orchestrated by the monitor",
+					 NULL, NULL, NULL, perform_subcommands);
 
 
 /*
@@ -96,8 +108,7 @@ cli_perform_failover_getopts(int argc, char **argv)
 
 			case 'g':
 			{
-				int scanResult = sscanf(optarg, "%d", &options.groupId);
-				if (scanResult == 0)
+				if (!stringToInt(optarg, &options.groupId))
 				{
 					log_fatal("--group argument is not a valid group ID: \"%s\"",
 							  optarg);
@@ -120,16 +131,22 @@ cli_perform_failover_getopts(int argc, char **argv)
 				switch (verboseCount)
 				{
 					case 1:
+					{
 						log_set_level(LOG_INFO);
 						break;
+					}
 
 					case 2:
+					{
 						log_set_level(LOG_DEBUG);
 						break;
+					}
 
 					default:
+					{
 						log_set_level(LOG_TRACE);
 						break;
+					}
 				}
 				break;
 			}
@@ -163,23 +180,8 @@ cli_perform_failover_getopts(int argc, char **argv)
 
 	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 	{
-		char *pgdata = getenv("PGDATA");
-
-		if (pgdata == NULL)
-		{
-			log_fatal("Failed to get PGDATA either from the environment "
-					  "or from --pgdata");
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-
-		strlcpy(options.pgSetup.pgdata, pgdata, MAXPGPATH);
+		get_env_pgdata_or_exit(options.pgSetup.pgdata);
 	}
-
-	/*
-	 * pg_setup_init wants a single pg_ctl, and we don't use it here: pretend
-	 * we had a --pgctl option and processed it.
-	 */
-	set_first_pgctl(&(options.pgSetup));
 
 	keeperOptions = options;
 

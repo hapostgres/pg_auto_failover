@@ -23,7 +23,7 @@ typedef struct KeeperConfig
 	ConfigFilePaths pathnames;
 
 	/* who's in charge? pg_auto_failover monitor, or HTTP API? */
-	bool monitorDisabled;		/* default is 0, which means enabled */
+	bool monitorDisabled;       /* default is 0, which means enabled */
 
 	/* pg_autoctl setup */
 	char role[NAMEDATALEN];

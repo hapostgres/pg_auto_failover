@@ -19,6 +19,7 @@
 
 #include "cli_common.h"
 #include "commandline.h"
+#include "env_utils.h"
 #include "defaults.h"
 #include "fsm.h"
 #include "ini_file.h"
@@ -31,7 +32,7 @@
 #include "monitor_pg_init.h"
 #include "pgctl.h"
 #include "primary_standby.h"
-#include "state.h"
+#include "string_utils.h"
 
 /*
  * Global variables that we're going to use to "communicate" in between getopts
@@ -51,48 +52,64 @@ static void cli_create_monitor(int argc, char **argv);
 
 static int cli_drop_node_getopts(int argc, char **argv);
 static void cli_drop_node(int argc, char **argv);
+static void cli_drop_monitor(int argc, char **argv);
+
+static void cli_drop_node_from_monitor(KeeperConfig *config,
+									   const char *nodename,
+									   int port);
 
 static bool discover_nodename(char *nodename, int size,
 							  const char *monitorHostname, int monitorPort);
 static void check_nodename(const char *nodename);
 
-static void stop_postgres_and_remove_pgdata_and_config(
-	ConfigFilePaths *pathnames,
-	PostgresSetup *pgSetup);
-
 CommandLine create_monitor_command =
-	make_command("monitor",
-				 "Initialize a pg_auto_failover monitor node",
-				 " [ --pgdata --pgport --pgctl --nodename ] ",
-				 "  --pgctl       path to pg_ctl\n" \
-				 "  --pgdata      path to data directory\n" \
-				 "  --pgport      PostgreSQL's port number\n" \
-				 "  --nodename    hostname by which postgres is reachable\n" \
-				 "  --auth        authentication method for connections from data nodes\n"
-				 "  --run         create node then run pg_autoctl service\n",
-				 cli_create_monitor_getopts,
-				 cli_create_monitor);
+	make_command(
+		"monitor",
+		"Initialize a pg_auto_failover monitor node",
+		" [ --pgdata --pgport --pgctl --nodename ] ",
+		"  --pgctl           path to pg_ctl\n"
+		"  --pgdata          path to data directory\n"
+		"  --pgport          PostgreSQL's port number\n"
+		"  --nodename        hostname by which postgres is reachable\n"
+		"  --auth            authentication method for connections from data nodes\n"
+		"  --skip-pg-hba     skip editing pg_hba.conf rules\n"
+		"  --run             create node then run pg_autoctl service\n"
+		KEEPER_CLI_SSL_OPTIONS,
+		cli_create_monitor_getopts,
+		cli_create_monitor);
 
 CommandLine create_postgres_command =
-	make_command("postgres",
-				 "Initialize a pg_auto_failover standalone postgres node",
-				 "",
-				 "  --pgctl                 path to pg_ctl\n"
-				 "  --pgdata                path to data director\n"
-				 "  --pghost                PostgreSQL's hostname\n"
-				 "  --pgport                PostgreSQL's port number\n"
-				 "  --listen                PostgreSQL's listen_addresses\n"
-				 "  --username              PostgreSQL's username\n"
-				 "  --dbname                PostgreSQL's database name\n"
-				 "  --nodename              pg_auto_failover node\n"
-				 "  --formation             pg_auto_failover formation\n"
-				 "  --monitor               pg_auto_failover Monitor Postgres URL\n"
-				 "  --auth                  authentication method for connections from monitor\n"
-				 "  --candidate-priority    priority of the node to be promoted to become primary\n"
-				 "  --replication-quorum    true if node participates in write quorum\n"
-				 KEEPER_CLI_ALLOW_RM_PGDATA_OPTION,
-				 cli_create_postgres_getopts,
-				 cli_create_postgres);
+	make_command(
+		"postgres",
+		"Initialize a pg_auto_failover standalone postgres node",
+		"",
+		"  --pgctl           path to pg_ctl\n"
+		"  --pgdata          path to data director\n"
+		"  --pghost          PostgreSQL's hostname\n"
+		"  --pgport          PostgreSQL's port number\n"
+		"  --listen          PostgreSQL's listen_addresses\n"
+		"  --username        PostgreSQL's username\n"
+		"  --dbname          PostgreSQL's database name\n"
+		"  --nodename        pg_auto_failover node\n"
+		"  --formation       pg_auto_failover formation\n"
+		"  --monitor         pg_auto_failover Monitor Postgres URL\n"
+		"  --auth            authentication method for connections from monitor\n"
+		"  --skip-pg-hba     skip editing pg_hba.conf rules\n"
+		"  --candidate-priority    priority of the node to be promoted to become primary\n"
+		"  --replication-quorum    true if node participates in write quorum\n"
+		KEEPER_CLI_SSL_OPTIONS
+		KEEPER_CLI_ALLOW_RM_PGDATA_OPTION,
+		cli_create_postgres_getopts,
+		cli_create_postgres);
+
+CommandLine drop_monitor_command =
+	make_command("monitor",
+				 "Drop the pg_auto_failover monitor",
+				 "[ --pgdata --destroy ]",
+				 "  --pgdata      path to data directory\n"
+				 "  --destroy     also destroy Postgres database\n",
+				 cli_drop_node_getopts,
+				 cli_drop_monitor);
 
 CommandLine create_standby_command =
 	make_command("standby",
@@ -119,9 +136,11 @@ CommandLine create_standby_command =
 CommandLine drop_node_command =
 	make_command("node",
 				 "Drop a node from the pg_auto_failover monitor",
-				 "[ --pgdata --destroy ]",
-				 "  --pgdata      path to data directory\n" \
-				 "  --destroy     also destroy Postgres database",
+				 "[ --pgdata --destroy --nodename --pgport ]",
+				 "  --pgdata      path to data directory\n"
+				 "  --destroy     also destroy Postgres database\n"
+				 "  --nodename    nodename to remove from the monitor\n"
+				 "  --pgport      Postgres port of the node to remove",
 				 cli_drop_node_getopts,
 				 cli_drop_node);
 
@@ -252,6 +271,7 @@ cli_create_postgres_getopts(int argc, char **argv)
 		{ "listen", required_argument, NULL, 'l' },
 		{ "username", required_argument, NULL, 'U' },
 		{ "auth", required_argument, NULL, 'A' },
+		{ "skip-pg-hba", no_argument, NULL, 'S' },
 		{ "dbname", required_argument, NULL, 'd' },
 		{ "nodename", required_argument, NULL, 'n' },
 		{ "formation", required_argument, NULL, 'f' },
@@ -261,17 +281,24 @@ cli_create_postgres_getopts(int argc, char **argv)
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
- 		{ "help", no_argument, NULL, 'h' },
-		{ "candidate-priority", required_argument, NULL, 'P'},
-		{ "replication-quorum", required_argument, NULL, 'r'},
+		{ "help", no_argument, NULL, 'h' },
+		{ "candidate-priority", required_argument, NULL, 'P' },
+		{ "replication-quorum", required_argument, NULL, 'r' },
 		{ "run", no_argument, NULL, 'x' },
 		{ "help", no_argument, NULL, 0 },
+		{ "no-ssl", no_argument, NULL, 'N' },
+		{ "ssl-self-signed", no_argument, NULL, 's' },
+		{ "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG },
+		{ "ssl-ca-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG },
+		{ "ssl-crl-file", required_argument, &ssl_flag, SSL_CRL_FILE_FLAG },
+		{ "server-cert", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG },
+		{ "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG },
 		{ NULL, 0, NULL, 0 }
 	};
 
 	int optind =
 		cli_create_node_getopts(argc, argv, long_options,
-								"C:D:H:p:l:U:A:d:n:f:m:MRVvqhP:r:x",
+								"C:D:H:p:l:U:A:Sd:n:f:m:MRVvqhP:r:xsN",
 								&options);
 
 	/* publish our option parsing in the global variable */
@@ -340,7 +367,7 @@ cli_create_standby_getopts(int argc, char **argv)
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
- 		{ "help", no_argument, NULL, 'h' },
+		{ "help", no_argument, NULL, 'h' },
 		{ "candidate-priority", required_argument, NULL, 'P' },
 		{ "replication-quorum", required_argument, NULL, 'r' },
 		{ NULL, 0, NULL, 0 }
@@ -396,8 +423,9 @@ static int
 cli_create_monitor_getopts(int argc, char **argv)
 {
 	MonitorConfig options = { 0 };
-	int c, option_index, errors = 0;
+	int c, option_index = 0, errors = 0;
 	int verboseCount = 0;
+	SSLCommandLineOptions sslCommandLineOptions = SSL_CLI_UNKNOWN;
 
 	static struct option long_options[] = {
 		{ "pgctl", required_argument, NULL, 'C' },
@@ -406,12 +434,19 @@ cli_create_monitor_getopts(int argc, char **argv)
 		{ "nodename", required_argument, NULL, 'n' },
 		{ "listen", required_argument, NULL, 'l' },
 		{ "auth", required_argument, NULL, 'A' },
+		{ "skip-pg-hba", no_argument, NULL, 'S' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
- 		{ "help", no_argument, NULL, 'h' },
+		{ "help", no_argument, NULL, 'h' },
 		{ "run", no_argument, NULL, 'x' },
-		{ "help", no_argument, NULL, 0 },
+		{ "no-ssl", no_argument, NULL, 'N' },
+		{ "ssl-self-signed", no_argument, NULL, 's' },
+		{ "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG },
+		{ "ssl-ca-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG },
+		{ "ssl-crl-file", required_argument, &ssl_flag, SSL_CRL_FILE_FLAG },
+		{ "server-cert", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG },
+		{ "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG },
 		{ NULL, 0, NULL, 0 }
 	};
 
@@ -420,7 +455,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "C:D:p:n:l:A:Vvqhx",
+	while ((c = getopt_long(argc, argv, "C:D:p:n:l:A:SVvqhxNs",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -441,8 +476,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 
 			case 'p':
 			{
-				int scanResult = sscanf(optarg, "%d", &(options.pgSetup.pgport));
-				if (scanResult == 0)
+				if (!stringToInt(optarg, &options.pgSetup.pgport))
 				{
 					log_fatal("--pgport argument is a valid port number: \"%s\"",
 							  optarg);
@@ -468,8 +502,29 @@ cli_create_monitor_getopts(int argc, char **argv)
 
 			case 'A':
 			{
+				if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.authMethod))
+				{
+					errors++;
+					log_error("Please use either --auth or --skip-pg-hba");
+				}
+
 				strlcpy(options.pgSetup.authMethod, optarg, NAMEDATALEN);
 				log_trace("--auth %s", options.pgSetup.authMethod);
+				break;
+			}
+
+			case 'S':
+			{
+				if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.authMethod))
+				{
+					errors++;
+					log_error("Please use either --auth or --skip-pg-hba");
+				}
+
+				strlcpy(options.pgSetup.authMethod,
+						SKIP_HBA_AUTH_METHOD,
+						NAMEDATALEN);
+				log_trace("--skip-pg-hba");
 				break;
 			}
 
@@ -486,16 +541,22 @@ cli_create_monitor_getopts(int argc, char **argv)
 				switch (verboseCount)
 				{
 					case 1:
+					{
 						log_set_level(LOG_INFO);
 						break;
+					}
 
 					case 2:
+					{
 						log_set_level(LOG_DEBUG);
 						break;
+					}
 
 					default:
+					{
 						log_set_level(LOG_TRACE);
 						break;
+					}
 				}
 				break;
 			}
@@ -518,6 +579,69 @@ cli_create_monitor_getopts(int argc, char **argv)
 				/* { "run", no_argument, NULL, 'x' }, */
 				createAndRun = true;
 				log_trace("--run");
+				break;
+			}
+
+			case 's':
+			{
+				/* { "ssl-self-signed", no_argument, NULL, 's' }, */
+				if (!cli_getopt_accept_ssl_options(SSL_CLI_SELF_SIGNED,
+												   sslCommandLineOptions))
+				{
+					errors++;
+					break;
+				}
+				sslCommandLineOptions = SSL_CLI_SELF_SIGNED;
+
+				options.pgSetup.ssl.active = 1;
+				options.pgSetup.ssl.createSelfSignedCert = true;
+				log_trace("--ssl-self-signed");
+				break;
+			}
+
+			case 'N':
+			{
+				/* { "no-ssl", no_argument, NULL, 'N' }, */
+				if (!cli_getopt_accept_ssl_options(SSL_CLI_NO_SSL,
+												   sslCommandLineOptions))
+				{
+					errors++;
+					break;
+				}
+				sslCommandLineOptions = SSL_CLI_NO_SSL;
+
+				options.pgSetup.ssl.active = 0;
+				options.pgSetup.ssl.createSelfSignedCert = false;
+				log_trace("--no-ssl");
+				break;
+			}
+
+			/*
+			 * { "ssl-ca-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG }
+			 * { "ssl-crl-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG }
+			 * { "server-crt", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG }
+			 * { "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG }
+			 * { "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG },
+			 */
+			case 0:
+			{
+				if (ssl_flag != SSL_MODE_FLAG)
+				{
+					if (!cli_getopt_accept_ssl_options(SSL_CLI_USER_PROVIDED,
+													   sslCommandLineOptions))
+					{
+						errors++;
+						break;
+					}
+
+					sslCommandLineOptions = SSL_CLI_USER_PROVIDED;
+					options.pgSetup.ssl.active = 1;
+				}
+
+				if (!cli_getopt_ssl_flags(ssl_flag, optarg, &(options.pgSetup)))
+				{
+					errors++;
+				}
 				break;
 			}
 
@@ -550,16 +674,43 @@ cli_create_monitor_getopts(int argc, char **argv)
 	 */
 	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 	{
-		char *pgdata = getenv("PGDATA");
+		get_env_pgdata_or_exit(options.pgSetup.pgdata);
+	}
 
-		if (pgdata == NULL)
-		{
-			log_fatal("Failed to set PGDATA either from the environment "
-					  "or from --pgdata");
-			exit(EXIT_CODE_BAD_ARGS);
-		}
+	/*
+	 * We require the user to specify an authentication mechanism, or to use
+	 * ---skip-pg-hba. Our documentation tutorial will use --auth trust, and we
+	 * should make it obvious that this is not the right choice for production.
+	 */
+	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.authMethod))
+	{
+		log_fatal("Please use either --auth trust|md5|... or --skip-pg-hba");
+		log_info("pg_auto_failover can be set to edit Postgres HBA rules "
+				 "automatically when needed. For quick testing '--auth trust' "
+				 "makes it easy to get started, "
+				 "consider another authentication mechanism for production.");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
 
-		strlcpy(options.pgSetup.pgdata, pgdata, MAXPGPATH);
+	/*
+	 * If any --ssl-* option is provided, either we have a root ca file and a
+	 * server.key and a server.crt or none of them. Any other combo is a
+	 * mistake.
+	 */
+	if (sslCommandLineOptions == SSL_CLI_UNKNOWN)
+	{
+		log_fatal("Explicit SSL choice is required: please use either "
+				  "--ssl-self-signed or provide your certificates "
+				  "using --ssl-ca-file, --ssl-crl-file, "
+				  "--server-key, and --server-crt (or use --no-ssl if you "
+				  "are very sure that you do not want encrypted traffic)");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (!pgsetup_validate_ssl_settings(&(options.pgSetup)))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
 	}
 
 	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pg_ctl))
@@ -642,7 +793,7 @@ cli_create_monitor(int argc, char **argv)
 		if (IS_EMPTY_STRING_BUFFER(config.nodename))
 		{
 			if (!discover_nodename((char *) (&config.nodename),
-								   _POSIX_HOST_NAME_MAX ,
+								   _POSIX_HOST_NAME_MAX,
 								   DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME,
 								   DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT))
 			{
@@ -669,8 +820,7 @@ cli_create_monitor(int argc, char **argv)
 		}
 
 		/* set our MonitorConfig from the command line options now. */
-		monitor_config_init(&config,
-							missingPgdataIsOk, pgIsNotRunningIsOk);
+		(void) monitor_config_init(&config, missingPgdataIsOk, pgIsNotRunningIsOk);
 
 		/* and write our brand new setup to file */
 		if (!monitor_config_write_file(&config))
@@ -697,6 +847,15 @@ cli_create_monitor(int argc, char **argv)
 	{
 		(void) monitor_service_run(&monitor, &config);
 	}
+	else
+	{
+		char postgresUri[MAXCONNINFO];
+
+		if (monitor_config_get_postgres_uri(&config, postgresUri, MAXCONNINFO))
+		{
+			log_info("pg_auto_failover monitor is ready at %s", postgresUri);
+		}
+	}
 }
 
 
@@ -708,22 +867,24 @@ static int
 cli_drop_node_getopts(int argc, char **argv)
 {
 	KeeperConfig options = { 0 };
-	int c, option_index, errors = 0;
+	int c, option_index = 0;
 	int verboseCount = 0;
 
 	static struct option long_options[] = {
 		{ "pgdata", required_argument, NULL, 'D' },
 		{ "destroy", no_argument, NULL, 'd' },
+		{ "nodename", required_argument, NULL, 'n' },
+		{ "pgport", required_argument, NULL, 'p' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
- 		{ "help", no_argument, NULL, 'h' },
+		{ "help", no_argument, NULL, 'h' },
 		{ NULL, 0, NULL, 0 }
 	};
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "D:dVvqh",
+	while ((c = getopt_long(argc, argv, "D:dn:p:Vvqh",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -742,6 +903,25 @@ cli_drop_node_getopts(int argc, char **argv)
 				break;
 			}
 
+			case 'n':
+			{
+				strlcpy(options.nodename, optarg, _POSIX_HOST_NAME_MAX);
+				log_trace("--nodename %s", options.nodename);
+				break;
+			}
+
+			case 'p':
+			{
+				if (!stringToInt(optarg, &options.pgSetup.pgport))
+				{
+					log_fatal("--pgport argument is a valid port number: \"%s\"",
+							  optarg);
+					exit(EXIT_CODE_BAD_ARGS);
+				}
+				log_trace("--pgport %d", options.pgSetup.pgport);
+				break;
+			}
+
 			case 'V':
 			{
 				/* keeper_cli_print_version prints version and exits. */
@@ -755,16 +935,22 @@ cli_drop_node_getopts(int argc, char **argv)
 				switch (verboseCount)
 				{
 					case 1:
+					{
 						log_set_level(LOG_INFO);
 						break;
+					}
 
 					case 2:
+					{
 						log_set_level(LOG_DEBUG);
 						break;
+					}
 
 					default:
+					{
 						log_set_level(LOG_TRACE);
 						break;
+					}
 				}
 				break;
 			}
@@ -792,9 +978,12 @@ cli_drop_node_getopts(int argc, char **argv)
 		}
 	}
 
-	if (errors > 0)
+	if (dropAndDestroy &&
+		(!IS_EMPTY_STRING_BUFFER(options.nodename) ||
+		 options.pgSetup.pgport != 0))
 	{
-		commandline_help(stderr);
+		log_error("Please use either --nodename and --pgport or ---destroy");
+		log_info("Destroying a node is not supported from a distance");
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
@@ -815,179 +1004,199 @@ cli_drop_node_getopts(int argc, char **argv)
 static void
 cli_drop_node(int argc, char **argv)
 {
-	Keeper keeper = { 0 };
 	KeeperConfig config = keeperOptions;
 
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
 	bool monitorDisabledIsOk = false;
 
-	if (file_exists(config.pathnames.config))
+	/*
+	 * The configuration file is the last bit we remove, so we don't have to
+	 * implement "continue from previous failed attempt" when the configuration
+	 * file does not exists.
+	 */
+	if (!file_exists(config.pathnames.config))
 	{
-		/*
-		 * We are going to need to use the right pg_ctl binary to control the
-		 * Postgres cluster: pg_ctl stop.
-		 */
-		switch (ProbeConfigurationFileRole(config.pathnames.config))
+		log_error("Failed to find expected configuration file \"%s\"",
+				  config.pathnames.config);
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	/*
+	 * We are going to need to use the right pg_ctl binary to control the
+	 * Postgres cluster: pg_ctl stop.
+	 */
+	switch (ProbeConfigurationFileRole(config.pathnames.config))
+	{
+		case PG_AUTOCTL_ROLE_MONITOR:
 		{
-			case PG_AUTOCTL_ROLE_MONITOR:
+			/*
+			 * Now check --nodename and --pgport and remove the entry on the
+			 * monitor.
+			 */
+			if (IS_EMPTY_STRING_BUFFER(config.nodename) ||
+				config.pgSetup.pgport == 0)
 			{
-				MonitorConfig mconfig = { 0 };
-
-				if (!monitor_config_init_from_pgsetup(&mconfig,
-													  &(config.pgSetup),
-													  missingPgdataIsOk,
-													  pgIsNotRunningIsOk))
-				{
-					/* errors have already been logged */
-					exit(EXIT_CODE_BAD_CONFIG);
-				}
-
-				/* expose the pgSetup in the given KeeperConfig */
-				memcpy(&(config.pgSetup),
-					   &(mconfig.pgSetup),
-					   sizeof(PostgresSetup));
-
-				/* somehow at this point we've lost our pathnames */
-				if (!keeper_config_set_pathnames_from_pgdata(
-						&(config.pathnames),
-						config.pgSetup.pgdata))
-				{
-					/* errors have already been logged */
-					exit(EXIT_CODE_BAD_ARGS);
-				}
-
-				break;
+				log_fatal("To remove a node from the monitor, both the "
+						  "--nodename and --pgport options are required");
+				exit(EXIT_CODE_BAD_ARGS);
 			}
 
-			case PG_AUTOCTL_ROLE_KEEPER:
+			/* pg_autoctl drop node on the monitor drops another node */
+			(void) cli_drop_node_from_monitor(&config,
+											  config.nodename,
+											  config.pgSetup.pgport);
+			return;
+		}
+
+		case PG_AUTOCTL_ROLE_KEEPER:
+		{
+			if (!IS_EMPTY_STRING_BUFFER(config.nodename) ||
+				config.pgSetup.pgport != 0)
 			{
-				/* just read the keeper file in given KeeperConfig */
-				if (!keeper_config_read_file(&config,
-											 missingPgdataIsOk,
-											 pgIsNotRunningIsOk,
-											 monitorDisabledIsOk))
-				{
-					exit(EXIT_CODE_BAD_CONFIG);
-				}
-				break;
+				log_fatal("Only dropping the local node is supported");
+				log_info("To drop another node, please use this command "
+						 "from the monitor itself.");
+				exit(EXIT_CODE_BAD_ARGS);
 			}
 
-			default:
+			/* just read the keeper file in given KeeperConfig */
+			if (!keeper_config_read_file(&config,
+										 missingPgdataIsOk,
+										 pgIsNotRunningIsOk,
+										 monitorDisabledIsOk))
 			{
-				log_fatal("Unrecognized configuration file \"%s\"",
-						  config.pathnames.config);
 				exit(EXIT_CODE_BAD_CONFIG);
 			}
+
+			/* drop the node and maybe destroy its PGDATA entirely. */
+			(void) cli_drop_local_node(&config, dropAndDestroy);
+
+			return;
 		}
 
-		log_trace("Found pg_ctl at \"%s\" in config file \"%s\"",
-				  config.pgSetup.pg_ctl,
+		default:
+		{
+			log_fatal("Unrecognized configuration file \"%s\"",
+					  config.pathnames.config);
+			exit(EXIT_CODE_BAD_CONFIG);
+		}
+	}
+}
+
+
+/*
+ * cli_drop_monitor removes the local monitor node.
+ */
+static void
+cli_drop_monitor(int argc, char **argv)
+{
+	KeeperConfig config = keeperOptions;
+
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+
+	/*
+	 * The configuration file is the last bit we remove, so we don't have to
+	 * implement "continue from previous failed attempt" when the configuration
+	 * file does not exists.
+	 */
+	if (!file_exists(config.pathnames.config))
+	{
+		log_error("Failed to find expected configuration file \"%s\"",
 				  config.pathnames.config);
-	}
-	else
-	{
-		/* all we really need now is pg_ctl */
-		set_first_pgctl(&(config.pgSetup));
-		log_info("Configuration file \"%s\" does not exists, using %s",
-				 config.pathnames.config,
-				 config.pgSetup.pg_ctl);
+		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
 	/*
-	 * Now also stop the pg_autoctl process.
+	 * We are going to need to use the right pg_ctl binary to control the
+	 * Postgres cluster: pg_ctl stop.
 	 */
-	if (file_exists(config.pathnames.pid))
+	switch (ProbeConfigurationFileRole(config.pathnames.config))
 	{
-		pid_t pid = 0;
-
-		if (read_pidfile(config.pathnames.pid, &pid))
+		case PG_AUTOCTL_ROLE_MONITOR:
 		{
-			log_info("An instance of this keeper is running with PID %d, "
-					 "stopping it.", pid);
+			MonitorConfig mconfig = { 0 };
 
-			if (kill(pid, SIGQUIT) != 0)
+			if (!monitor_config_init_from_pgsetup(&mconfig,
+												  &(config.pgSetup),
+												  missingPgdataIsOk,
+												  pgIsNotRunningIsOk))
 			{
-				log_error("Failed to send SIGQUIT to the keeper's pid %d: %s",
-						  pid, strerror(errno));
-				exit(EXIT_CODE_INTERNAL_ERROR);
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_CONFIG);
 			}
+
+			/* expose the pgSetup in the given KeeperConfig */
+			config.pgSetup = mconfig.pgSetup;
+
+			/* somehow at this point we've lost our pathnames */
+			if (!keeper_config_set_pathnames_from_pgdata(
+					&(config.pathnames),
+					config.pgSetup.pgdata))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_ARGS);
+			}
+
+			/* drop the node and maybe destroy its PGDATA entirely. */
+			(void) cli_drop_local_node(&config, dropAndDestroy);
+			return;
 		}
-	}
 
-	/* only keeper_remove when we still have a state file around */
-	if (file_exists(config.pathnames.state))
-	{
-		bool ignoreMonitorErrors = true;
-
-		/* keeper_remove uses log_info() to explain what's happening */
-		if (!keeper_remove(&keeper, &config, ignoreMonitorErrors))
+		case PG_AUTOCTL_ROLE_KEEPER:
 		{
-			log_fatal("Failed to remove local node from the pg_auto_failover "
-					  "monitor, see above for details");
+			log_fatal("Local node is not a monitor");
+			exit(EXIT_CODE_BAD_CONFIG);
 
-			exit(EXIT_CODE_BAD_STATE);
+			break;
 		}
 
-		log_info("Removed pg_autoctl node at \"%s\" from the monitor and "
-				 "removed the state file \"%s\"",
-				 config.pgSetup.pgdata,
-				 config.pathnames.state);
-	}
-	else
-	{
-		log_warn("Skipping node removal from the monitor: "
-				 "state file \"%s\" does not exist",
-				 config.pathnames.state);
-	}
-
-	/*
-	 * Either --destroy the whole Postgres cluster and configuraiton, or leave
-	 * enough behind us that it's possible to re-join a formation later.
-	 */
-	if (dropAndDestroy)
-	{
-		(void)
-			stop_postgres_and_remove_pgdata_and_config(
-				&config.pathnames,
-				&config.pgSetup);
-	}
-	else
-	{
-		/*
-		 * We need to stop Postgres now, otherwise we won't be able to drop the
-		 * replication slot on the other node, because it's still active.
-		 */
-		log_info("Stopping PostgreSQL at \"%s\"", config.pgSetup.pgdata);
-
-		if (!pg_ctl_stop(config.pgSetup.pg_ctl, config.pgSetup.pgdata))
+		default:
 		{
-			log_error("Failed to stop PostgreSQL at \"%s\"",
-					  config.pgSetup.pgdata);
-			exit(EXIT_CODE_PGCTL);
+			log_fatal("Unrecognized configuration file \"%s\"",
+					  config.pathnames.config);
+			exit(EXIT_CODE_BAD_CONFIG);
 		}
+	}
+}
 
-		/*
-		 * Now give the whole picture to the user, who might have missed our
-		 * --destroy option and might want to use it now to start again with a
-		 * fresh environment.
-		 */
-		log_warn("Configuration file \"%s\" has been preserved",
-			 config.pathnames.config);
 
-		if (directory_exists(config.pgSetup.pgdata))
-		{
-			log_warn("Postgres Data Directory \"%s\" has been preserved",
-					 config.pgSetup.pgdata);
-		}
+/*
+ * cli_drop_node_from_monitor calls pgautofailover.remove_node() on the
+ * monitor for the given --nodename and --pgport.
+ */
+static void
+cli_drop_node_from_monitor(KeeperConfig *config, const char *nodename, int port)
+{
+	Monitor monitor = { 0 };
+	MonitorConfig mconfig = { 0 };
+	char connInfo[MAXCONNINFO] = { 0 };
 
-		log_info("drop node keeps your data and setup safe, you can still run "
-				 "Postgres or re-join the pg_auto_failover cluster later");
-		log_info("HINT: to completely remove your local Postgres instance and "
-				 "setup, consider `pg_autoctl drop node --destroy`");
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+
+	if (!monitor_config_init_from_pgsetup(&mconfig,
+										  &(config->pgSetup),
+										  missingPgdataIsOk,
+										  pgIsNotRunningIsOk))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	keeper_config_destroy(&config);
+	/* expose the pgSetup in the given KeeperConfig */
+	config->pgSetup = mconfig.pgSetup;
+
+	/* prepare to connect to the monitor, locally */
+	pg_setup_get_local_connection_string(&(mconfig.pgSetup), connInfo);
+	monitor_init(&monitor, connInfo);
+
+	if (!monitor_remove(&monitor, (char *) nodename, port))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_MONITOR);
+	}
 }
 
 
@@ -1178,52 +1387,5 @@ check_nodename(const char *nodename)
 					 "interfaces, automated pg_hba.conf setup might fail.",
 					 nodename);
 		}
-	}
-}
-
-
-/*
- * stop_postgres_and_remove_pgdata_and_config stops PostgreSQL and then removes
- * PGDATA, and then config and state files.
- */
-static void
-stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathnames,
-										   PostgresSetup *pgSetup)
-{
-	log_info("Stopping PostgreSQL at \"%s\"", pgSetup->pgdata);
-
-	if (!pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata))
-	{
-		log_error("Failed to stop PostgreSQL at \"%s\"", pgSetup->pgdata);
-		log_fatal("Skipping removal of directory \"%s\"", pgSetup->pgdata);
-		exit(EXIT_CODE_PGCTL);
-	}
-
-	/*
-	 * Only try to rm -rf PGDATA if we managed to stop PostgreSQL.
-	 */
-	if (directory_exists(pgSetup->pgdata))
-	{
-		log_info("Removing \"%s\"", pgSetup->pgdata);
-
-		if (!rmtree(pgSetup->pgdata, true))
-		{
-			log_error("Failed to remove directory \"%s\": %s",
-					  pgSetup->pgdata, strerror(errno));
-			exit(EXIT_CODE_INTERNAL_ERROR);
-		}
-	}
-	else
-	{
-		log_warn("Skipping removal of \"%s\": directory does not exists",
-				 pgSetup->pgdata);
-	}
-
-	log_info("Removing \"%s\"", pathnames->config);
-
-	if (!unlink_file(pathnames->config))
-	{
-		/* errors have already been logged. */
-		exit(EXIT_CODE_BAD_CONFIG);
 	}
 }

@@ -17,9 +17,9 @@
 #include "signals.h"
 
 /* This flag controls termination of the main loop. */
-volatile sig_atomic_t asked_to_stop = 0;	  /* SIGTERM */
+volatile sig_atomic_t asked_to_stop = 0;      /* SIGTERM */
 volatile sig_atomic_t asked_to_stop_fast = 0; /* SIGINT */
-volatile sig_atomic_t asked_to_reload = 0;	  /* SIGHUP */
+volatile sig_atomic_t asked_to_reload = 0;    /* SIGHUP */
 
 
 /*
@@ -30,11 +30,12 @@ void
 set_signal_handlers()
 {
 	/* Establish a handler for signals. */
-	signal (SIGHUP, catch_reload);
-	signal (SIGINT, catch_int);
-	signal (SIGTERM, catch_term);
-	signal (SIGQUIT, catch_quit);
+	signal(SIGHUP, catch_reload);
+	signal(SIGINT, catch_int);
+	signal(SIGTERM, catch_term);
+	signal(SIGQUIT, catch_quit);
 }
+
 
 /*
  * catch_reload receives the SIGHUP signal.

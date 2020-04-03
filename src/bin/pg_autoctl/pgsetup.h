@@ -82,8 +82,8 @@ typedef enum PgInstanceKind
 } PgInstanceKind;
 
 
-#define IS_CITUS_INSTANCE_KIND(x)				\
-	(x == NODE_KIND_CITUS_COORDINATOR			\
+#define IS_CITUS_INSTANCE_KIND(x) \
+	(x == NODE_KIND_CITUS_COORDINATOR \
 	 || x == NODE_KIND_CITUS_WORKER)
 
 
@@ -94,9 +94,37 @@ typedef enum PgInstanceKind
  */
 typedef struct NodeReplicationSettings
 {
-	int candidatePriority;				/* promotion candidate priority 0-100, 0 -> not a promotion candidate */
-	bool replicationQuorum;				/* true if participates in write quorum, false otherwise */
+	int candidatePriority;      /* promotion candidate priority */
+	bool replicationQuorum;     /* true if participates in write quorum */
 } NodeReplicationSettings;
+
+/*
+ * pg_auto_failover also support SSL settings.
+ */
+typedef enum
+{
+	SSL_MODE_UNKNOWN = 0,
+	SSL_MODE_DISABLE,
+	SSL_MODE_ALLOW,
+	SSL_MODE_PREFER,
+	SSL_MODE_REQUIRE,
+	SSL_MODE_VERIFY_CA,
+	SSL_MODE_VERIFY_FULL
+} SSLMode;
+
+#define SSL_MODE_STRLEN 12      /* longuest is "verify-full" at 11 chars */
+
+typedef struct SSLOptions
+{
+	int active;                 /* INI support has int, does not have bool */
+	bool createSelfSignedCert;
+	SSLMode sslMode;
+	char sslModeStr[SSL_MODE_STRLEN];
+	char caFile[MAXPGPATH];
+	char crlFile[MAXPGPATH];
+	char serverCert[MAXPGPATH];
+	char serverKey[MAXPGPATH];
+} SSLOptions;
 
 /*
  * In the PostgresSetup structure, we use pghost either as socket directory
@@ -118,12 +146,13 @@ typedef struct pg_setup
 	char listen_addresses[MAXPGPATH];       /* listen_addresses */
 	int proxyport;                          /* Proxy port */
 	char authMethod[NAMEDATALEN];           /* auth method, defaults to trust */
-	PostmasterStatus pm_status;				/* Postmaster status */
+	PostmasterStatus pm_status;             /* Postmaster status */
 	bool is_in_recovery;                    /* select pg_is_in_recovery() */
 	PostgresControlData control;            /* pg_controldata pgdata */
 	PostgresPIDFile pidFile;                /* postmaster.pid information */
-	PgInstanceKind pgKind;					/* standalone/coordinator/worker */
-	NodeReplicationSettings settings; 		/* monitor side node replication settings */
+	PgInstanceKind pgKind;                  /* standalone/coordinator/worker */
+	NodeReplicationSettings settings;       /* node replication settings */
+	SSLOptions ssl;                         /* ssl options */
 } PostgresSetup;
 
 #define IS_EMPTY_STRING_BUFFER(strbuf) (strbuf[0] == '\0')
@@ -144,12 +173,23 @@ bool pg_setup_pgdata_exists(PostgresSetup *pgSetup);
 bool pg_setup_is_running(PostgresSetup *pgSetup);
 bool pg_setup_is_primary(PostgresSetup *pgSetup);
 bool pg_setup_is_ready(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok);
-char *pg_setup_get_username(PostgresSetup *pgSetup);
-char *pg_setup_get_auth_method(PostgresSetup *pgSetup);
+char * pg_setup_get_username(PostgresSetup *pgSetup);
+
+#define SKIP_HBA(authMethod) \
+	(strncmp(authMethod, SKIP_HBA_AUTH_METHOD, strlen(SKIP_HBA_AUTH_METHOD)) == 0)
+
+char * pg_setup_get_auth_method(PostgresSetup *pgSetup);
+bool pg_setup_skip_hba_edits(PostgresSetup *pgSetup);
+
 bool pg_setup_set_absolute_pgdata(PostgresSetup *pgSetup);
 
 PgInstanceKind nodeKindFromString(const char *nodeKind);
-char *nodeKindToString(PgInstanceKind kind);
+char * nodeKindToString(PgInstanceKind kind);
 int pgsetup_get_pgport(void);
+
+bool pgsetup_validate_ssl_settings(PostgresSetup *pgSetup);
+SSLMode pgsetup_parse_sslmode(const char *sslMode);
+char * pgsetup_sslmode_to_string(SSLMode sslMode);
+
 
 #endif /* PGSETUP_H */

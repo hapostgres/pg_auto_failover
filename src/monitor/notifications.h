@@ -31,12 +31,13 @@
  *   the chatter without having to actually have the privileges to tail the
  *   PostgreSQL server logs.
  */
-#define CHANNEL_STATE		"state"
-#define CHANNEL_LOG			"log"
-#define BUFSIZE				8192
+#define CHANNEL_STATE "state"
+#define CHANNEL_LOG "log"
+#define BUFSIZE 8192
 
 
-void LogAndNotifyMessage(char *message, size_t size, const char *fmt, ...) __attribute__((format(printf, 3, 4)));
+void LogAndNotifyMessage(char *message, size_t size, const char *fmt, ...) __attribute__(
+	(format(printf, 3, 4)));
 
 
 int64 NotifyStateChange(ReplicationState reportedState,

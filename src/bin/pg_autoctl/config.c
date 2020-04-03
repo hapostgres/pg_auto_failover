@@ -14,6 +14,8 @@
 
 #include "config.h"
 #include "defaults.h"
+#include "env_utils.h"
+#include "file_utils.h"
 #include "ini_file.h"
 #include "keeper.h"
 #include "keeper_config.h"
@@ -33,12 +35,14 @@ build_xdg_path(char *dst,
 			   const char *name)
 {
 	char filename[MAXPGPATH];
-	char *home = getenv("HOME");
-	char *xdg_topdir;
+	char home[MAXPGPATH];
+	char fallback[MAXPGPATH];
+	char xdg_topdir[MAXPGPATH];
+	char *envVarName = NULL;
 
-	if (home == NULL)
+	if (!get_env_copy("HOME", home, MAXPGPATH))
 	{
-		log_fatal("Environment variable HOME is unset");
+		/* errors have already been logged */
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
@@ -46,25 +50,22 @@ build_xdg_path(char *dst,
 	{
 		case XDG_DATA:
 		{
-			xdg_topdir = getenv("XDG_DATA_HOME");
+			join_path_components(fallback, home, ".local/share");
+			envVarName = "XDG_DATA_HOME";
 			break;
 		}
 
 		case XDG_CONFIG:
 		{
-			xdg_topdir = getenv("XDG_CONFIG_HOME");
+			join_path_components(fallback, home, ".config");
+			envVarName = "XDG_CONFIG_HOME";
 			break;
 		}
 
 		case XDG_RUNTIME:
 		{
-			xdg_topdir = getenv("XDG_RUNTIME_DIR");
-
-			if (xdg_topdir == NULL || !directory_exists(xdg_topdir))
-			{
-				/* then default to /tmp */
-				xdg_topdir = "/tmp";
-			}
+			strlcpy(fallback, "/tmp", MAXPGPATH);
+			envVarName = "XDG_RUNTIME_DIR";
 			break;
 		}
 
@@ -75,39 +76,18 @@ build_xdg_path(char *dst,
 			return false;
 	}
 
-	if (xdg_topdir != NULL)
+	if (!get_env_copy_with_fallback(envVarName, xdg_topdir, MAXPGPATH, fallback))
 	{
-		/* use e.g. ${XDG_DATA_HOME}/pg_autoctl/<PGDATA>/pg_autoctl.state */
-		strlcpy(filename, xdg_topdir, MAXPGPATH);
-	}
-	else
-	{
-		/* use e.g. ${HOME}/.local/share/pg_autoctl/<PGDATA>/pg_autoctl.state */
-		strlcpy(filename, home, MAXPGPATH);
-
-		switch (xdgType)
-		{
-			case XDG_DATA:
-			{
-				join_path_components(filename, filename, ".local/share");
-				break;
-			}
-
-			case XDG_CONFIG:
-			{
-				join_path_components(filename, filename, ".config");
-				break;
-			}
-
-			default:
-
-				/* can not happen given previous switch */
-				log_error("No support for XDG Resource Type %d", xdgType);
-				return false;
-		}
+		/* errors have already been logged */
+		return false;
 	}
 
-	join_path_components(filename, filename, "pg_autoctl");
+	if (xdgType == XDG_RUNTIME && !directory_exists(xdg_topdir))
+	{
+		strlcpy(xdg_topdir, "/tmp", MAXPGPATH);
+	}
+
+	join_path_components(filename, xdg_topdir, "pg_autoctl");
 
 	if (pgdata[0] == '/')
 	{
@@ -129,8 +109,7 @@ build_xdg_path(char *dst,
 
 		if (getcwd(currentWorkingDirectory, MAXPGPATH) == NULL)
 		{
-			log_error("Failed to get the current working directory: %s",
-					  strerror(errno));
+			log_error("Failed to get the current working directory: %m");
 			return false;
 		}
 
@@ -144,8 +123,7 @@ build_xdg_path(char *dst,
 	/* mkdir -p the target directory */
 	if (pg_mkdir_p(filename, 0755) == -1)
 	{
-		log_error("Failed to create state directory \"%s\": %s",
-				  filename, strerror(errno));
+		log_error("Failed to create state directory \"%s\": %m", filename);
 		return false;
 	}
 
@@ -305,40 +283,4 @@ ProbeConfigurationFileRole(const char *filename)
 
 	/* can't happen: keep compiler happy */
 	return PG_AUTOCTL_ROLE_UNKNOWN;
-}
-
-
-/*
- * normalize_filename returns the real path of a given filename, resolving
- * symlinks and pruning double-slashes and other weird constructs.
- */
-bool
-normalize_filename(const char *filename, char *dst, int size)
-{
-	/* normalize the path to the configuration file, if it exists */
-	if (file_exists(filename))
-	{
-		char realPath[PATH_MAX];
-
-		if (realpath(filename, realPath) == NULL)
-		{
-			log_fatal("Failed to normalize file name \"%s\": %s",
-					  filename, strerror(errno));
-			return false;
-		}
-
-		if (strlcpy(dst, realPath, size) >= size)
-		{
-			log_fatal("Real path \"%s\" is %d bytes long, and pg_autoctl "
-					  "is limited to handling paths of %d bytes long, maximum",
-					  realPath, (int) strlen(realPath), size);
-			return false;
-		}
-	}
-	else
-	{
-		strlcpy(dst, filename, MAXPGPATH);
-	}
-
-	return true;
 }

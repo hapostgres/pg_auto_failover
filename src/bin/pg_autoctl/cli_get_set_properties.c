@@ -55,9 +55,9 @@ static CommandLine *get_node_subcommands[] = {
 
 static CommandLine get_node_command =
 	make_command_set("node",
-				 "get a node property from the pg_auto_failover monitor",
-				 NULL, NULL, NULL,
-				 get_node_subcommands);
+					 "get a node property from the pg_auto_failover monitor",
+					 NULL, NULL, NULL,
+					 get_node_subcommands);
 
 static CommandLine get_formation_number_sync_standbys =
 	make_command("number-sync-standbys",
@@ -74,9 +74,9 @@ static CommandLine *get_formation_subcommands[] = {
 
 static CommandLine get_formation_command =
 	make_command_set("formation",
-				 "get a formation property from the pg_auto_failover monitor",
-				 NULL, NULL, NULL,
-				 get_formation_subcommands);
+					 "get a formation property from the pg_auto_failover monitor",
+					 NULL, NULL, NULL,
+					 get_formation_subcommands);
 
 static CommandLine *get_subcommands[] = {
 	&get_node_command,
@@ -206,7 +206,7 @@ get_node_replication_settings(NodeReplicationSettings *settings)
 	}
 
 	return monitor_get_node_replication_settings(&(keeper.monitor),
-			keeper.state.current_node_id, settings);
+												 keeper.state.current_node_id, settings);
 }
 
 
@@ -217,7 +217,7 @@ get_node_replication_settings(NodeReplicationSettings *settings)
 static void
 cli_get_node_replication_quorum(int argc, char **argv)
 {
-	NodeReplicationSettings settings = { 0, false};
+	NodeReplicationSettings settings = { 0, false };
 
 	if (!get_node_replication_settings(&settings))
 	{
@@ -250,7 +250,7 @@ cli_get_node_replication_quorum(int argc, char **argv)
 static void
 cli_get_node_candidate_priority(int argc, char **argv)
 {
-	NodeReplicationSettings settings = { 0, false};
+	NodeReplicationSettings settings = { 0, false };
 
 	if (!get_node_replication_settings(&settings))
 	{
@@ -264,7 +264,7 @@ cli_get_node_candidate_priority(int argc, char **argv)
 		JSON_Object *jsObj = json_value_get_object(js);
 
 		json_object_set_number(jsObj,
-								"candidate-priority",
+							   "candidate-priority",
 							   (double) settings.candidatePriority);
 
 		(void) cli_pprint_json(js);
@@ -352,9 +352,6 @@ cli_set_node_replication_quorum(int argc, char **argv)
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
 	bool monitorDisabledIsOk = false;
-
-	char *channels[] = { "state", NULL };
-	char postgresUri[MAXCONNINFO];
 
 	keeper.config = keeperOptions;
 
@@ -524,8 +521,6 @@ cli_set_node_nodename(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
 
-	int candidatePriority = -1;
-
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
 	bool monitorDisabledIsOk = false;
@@ -606,8 +601,6 @@ cli_set_formation_number_sync_standbys(int argc, char **argv)
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
 	bool monitorDisabledIsOk = false;
-
-	char *channels[] = { "state", NULL };
 
 	char synchronous_standby_names[BUFSIZE] = { 0 };
 

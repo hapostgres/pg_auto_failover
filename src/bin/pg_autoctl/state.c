@@ -54,10 +54,10 @@ keeper_state_read(KeeperStateData *keeperState, const char *filename)
 	pg_autoctl_state_version =
 		((KeeperStateData *) content)->pg_autoctl_state_version;
 
-	if (fileSize >= sizeof(KeeperStateData)
-		&& keeper_state_is_readable(pg_autoctl_state_version))
+	if (fileSize >= sizeof(KeeperStateData) &&
+		keeper_state_is_readable(pg_autoctl_state_version))
 	{
-		memcpy(keeperState, content, sizeof(KeeperStateData));
+		*keeperState = *(KeeperStateData *) content;
 		free(content);
 		return true;
 	}
@@ -78,10 +78,11 @@ keeper_state_read(KeeperStateData *keeperState, const char *filename)
 static bool
 keeper_state_is_readable(int pg_autoctl_state_version)
 {
-	return pg_autoctl_state_version == PG_AUTOCTL_STATE_VERSION
-		|| (pg_autoctl_state_version == 1
-			&& PG_AUTOCTL_STATE_VERSION == 2);
+	return pg_autoctl_state_version == PG_AUTOCTL_STATE_VERSION ||
+		   (pg_autoctl_state_version == 1 &&
+			PG_AUTOCTL_STATE_VERSION == 2);
 }
+
 
 /*
  * The KeeperState data structure contains only direct values (int, long), not
@@ -96,7 +97,7 @@ keeper_state_write(KeeperStateData *keeperState, const char *filename)
 	char tempFileName[MAXPGPATH];
 
 	/* we're going to write our contents to keeper.state.new first */
-	sprintf(tempFileName, "%s.new", filename);
+	sformat(tempFileName, MAXPGPATH, "%s.new", filename);
 
 	/*
 	 * The keeper process might have been stopped in immediate shutdown mode
@@ -123,13 +124,23 @@ keeper_state_write(KeeperStateData *keeperState, const char *filename)
 	 * error than "couldn't read pg_control".
 	 */
 	memset(buffer, 0, PG_AUTOCTL_KEEPER_STATE_FILE_SIZE);
-	memcpy(buffer, keeperState, sizeof(KeeperStateData));
+
+	/*
+	 * Explanation of IGNORE-BANNED:
+	 * memcpy is safe to use here.
+	 * we have a static assert that sizeof(KeeperStateData) is always
+	 * less than the buffer length PG_AUTOCTL_KEEPER_STATE_FILE_SIZE.
+	 * also KeeperStateData is a plain struct that does not contain
+	 * any pointers in it. Necessary comment about not using pointers
+	 * is added to the struct definition.
+	 */
+	memcpy(buffer, keeperState, sizeof(KeeperStateData)); /* IGNORE-BANNED */
 
 	fd = open(tempFileName, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
 	if (fd < 0)
 	{
-		log_fatal("Failed to create keeper state file \"%s\": %s",
-				  tempFileName, strerror(errno));
+		log_fatal("Failed to create keeper state file \"%s\": %m",
+				  tempFileName);
 		return false;
 	}
 
@@ -142,14 +153,13 @@ keeper_state_write(KeeperStateData *keeperState, const char *filename)
 		{
 			errno = ENOSPC;
 		}
-		log_fatal("Failed to write keeper state file \"%s\": %s",
-				  tempFileName, strerror(errno));
+		log_fatal("Failed to write keeper state file \"%s\": %m", tempFileName);
 		return false;
 	}
 
 	if (fsync(fd) != 0)
 	{
-		log_fatal("fsync error: %s", strerror(errno));
+		log_fatal("fsync error: %m");
 		return false;
 	}
 
@@ -160,8 +170,8 @@ keeper_state_write(KeeperStateData *keeperState, const char *filename)
 	/* now remove the old state file, and replace it with the new one */
 	if (rename(tempFileName, filename) != 0)
 	{
-		log_fatal("Failed to rename \"%s\" to \"%s\": %s",
-				  tempFileName, filename, strerror(errno));
+		log_fatal("Failed to rename \"%s\" to \"%s\": %m",
+				  tempFileName, filename);
 		return false;
 	}
 
@@ -215,10 +225,12 @@ log_keeper_state(KeeperStateData *keeperState)
 {
 	const char *current_role = NodeStateToString(keeperState->current_role);
 	const char *assigned_role = NodeStateToString(keeperState->assigned_role);
+	char timestring[MAXCTIMESIZE];
 
 	log_trace("state.pg_control_version: %u", keeperState->pg_control_version);
 	log_trace("state.system_identifier: %" PRIu64, keeperState->system_identifier);
-	log_trace("state.pg_autoctl_state_version: %d", keeperState->pg_autoctl_state_version);
+	log_trace("state.pg_autoctl_state_version: %d",
+			  keeperState->pg_autoctl_state_version);
 	log_trace("state.current_node_id: %d", keeperState->current_node_id);
 	log_trace("state.current_group: %d", keeperState->current_group);
 	log_trace("state.current_nodes_version: %" PRIu64,
@@ -228,10 +240,10 @@ log_keeper_state(KeeperStateData *keeperState)
 	log_trace("state.assigned_role: %s", assigned_role);
 
 	log_trace("state.last_monitor_contact: %s",
-			  epoch_to_string(keeperState->last_monitor_contact));
+			  epoch_to_string(keeperState->last_monitor_contact, timestring));
 
 	log_trace("state.last_secondary_contact: %s",
-			  epoch_to_string(keeperState->last_secondary_contact));
+			  epoch_to_string(keeperState->last_secondary_contact, timestring));
 
 	log_trace("state.xlog_lag : %" PRId64, keeperState->xlog_lag);
 
@@ -249,40 +261,43 @@ print_keeper_state(KeeperStateData *keeperState, FILE *stream)
 {
 	const char *current_role = NodeStateToString(keeperState->current_role);
 	const char *assigned_role = NodeStateToString(keeperState->assigned_role);
+	char timestring[MAXCTIMESIZE];
 
 	/*
 	 * First, the roles.
 	 */
-	fprintf(stream, "Current Role:             %s\n", current_role);
-	fprintf(stream, "Assigned Role:            %s\n", assigned_role);
+	fformat(stream, "Current Role:             %s\n", current_role);
+	fformat(stream, "Assigned Role:            %s\n", assigned_role);
 
 	/*
 	 * Now, other nodes situation, are we in a network partition.
 	 */
-	fprintf(stream, "Last Monitor Contact:     %s\n",
-			epoch_to_string(keeperState->last_monitor_contact));
+	fformat(stream, "Last Monitor Contact:     %s\n",
+			epoch_to_string(keeperState->last_monitor_contact, timestring));
 
-	fprintf(stream, "Last Secondary Contact:   %s\n",
-			epoch_to_string(keeperState->last_secondary_contact));
+	fformat(stream, "Last Secondary Contact:   %s\n",
+			epoch_to_string(keeperState->last_secondary_contact, timestring));
 
 	/*
 	 * pg_autoctl information.
 	 */
-	fprintf(stream, "pg_autoctl state version: %d\n",
+	fformat(stream, "pg_autoctl state version: %d\n",
 			keeperState->pg_autoctl_state_version);
-	fprintf(stream, "group:                    %d\n", keeperState->current_group);
-	fprintf(stream, "node id:                  %d\n", keeperState->current_node_id);
-	fprintf(stream, "nodes version:            %" PRIu64 "\n",
+	fformat(stream, "group:                    %d\n",
+			keeperState->current_group);
+	fformat(stream, "node id:                  %d\n",
+			keeperState->current_node_id);
+	fformat(stream, "nodes version:            %" PRIu64 "\n",
 			keeperState->current_nodes_version);
 
 	/*
 	 * PostgreSQL bits.
 	 */
-	fprintf(stream, "PostgreSQL Version:       %u\n",
+	fformat(stream, "PostgreSQL Version:       %u\n",
 			keeperState->pg_control_version);
-	fprintf(stream, "PostgreSQL CatVersion:    %u\n",
+	fformat(stream, "PostgreSQL CatVersion:    %u\n",
 			keeperState->catalog_version_no);
-	fprintf(stream, "PostgreSQL System Id:     %" PRIu64 "\n",
+	fformat(stream, "PostgreSQL System Id:     %" PRIu64 "\n",
 			keeperState->system_identifier);
 
 	fflush(stream);
@@ -314,6 +329,7 @@ keeperStateAsJSON(KeeperStateData *keeperState, JSON_Value *js)
 	return true;
 }
 
+
 /*
  * print_keeper_init_state prints the given initilization state of the keeper
  * to given FILE output (stdout, stderr, etc).
@@ -321,10 +337,11 @@ keeperStateAsJSON(KeeperStateData *keeperState, JSON_Value *js)
 void
 print_keeper_init_state(KeeperStateInit *initState, FILE *stream)
 {
-	fprintf(stream, "Postgres state at keeper init: %s\n",
+	fformat(stream, "Postgres state at keeper init: %s\n",
 			PreInitPostgreInstanceStateToString(initState->pgInitState));
 	fflush(stream);
 }
+
 
 /*
  * NodeStateToString converts a NodeState ENUM value into a string for use in
@@ -448,7 +465,6 @@ NodeStateToString(NodeState s)
 		default:
 			return "Unknown State";
 	}
-	return NULL;
 }
 
 
@@ -519,31 +535,31 @@ NodeStateFromString(const char *str)
 	{
 		return JOIN_PRIMARY_STATE;
 	}
-	else if(strcmp(str, "apply_settings") == 0)
+	else if (strcmp(str, "apply_settings") == 0)
 	{
 		return APPLY_SETTINGS_STATE;
 	}
-	else if(strcmp(str, "report_lsn") == 0)
+	else if (strcmp(str, "report_lsn") == 0)
 	{
 		return REPORT_LSN_STATE;
 	}
-	else if(strcmp(str, "fast_forward") == 0)
+	else if (strcmp(str, "fast_forward") == 0)
 	{
 		return FAST_FORWARD_STATE;
 	}
-	else if(strcmp(str, "wait_forward") == 0)
+	else if (strcmp(str, "wait_forward") == 0)
 	{
 		return WAIT_FORWARD_STATE;
 	}
-	else if(strcmp(str, "wait_cascade") == 0)
+	else if (strcmp(str, "wait_cascade") == 0)
 	{
 		return WAIT_CASCADE_STATE;
 	}
-	else if(strcmp(str, "apply_settings") == 0)
+	else if (strcmp(str, "apply_settings") == 0)
 	{
 		return APPLY_SETTINGS_STATE;
 	}
-	else if(strcmp(str, "join_secondary") == 0)
+	else if (strcmp(str, "join_secondary") == 0)
 	{
 		return JOIN_SECONDARY_STATE;
 	}
@@ -559,30 +575,38 @@ NodeStateFromString(const char *str)
 /*
  * epoch_to_string converts a number of seconds from epoch into a date time
  * string.
+ *
+ * This string is stored in buffer. On error NULL is returned else the buffer
+ * is returned. The buffer should (at least) be MAXCTIMESIZE large.
  */
 const char *
-epoch_to_string(uint64_t seconds)
+epoch_to_string(uint64_t seconds, char *buffer)
 {
-	if (seconds > 0)
+	char *result = NULL;
+	if (seconds <= 0)
+	{
+		strlcpy(buffer, "0", MAXCTIMESIZE);
+		return buffer;
+	}
+	result = ctime_r((time_t *) &seconds, buffer);
+
+	if (result == NULL)
+	{
+		log_error("Failed to convert epoch %" PRIu64 " to string: %m",
+				  seconds);
+		return NULL;
+	}
+	if (strlen(result) != 0 && result[strlen(result) - 1] == '\n')
 	{
 		/*
-		 * ctime() returns a string that ends with \n, which we don't want.
-		 * Replace it with a null string terminator, even if that means we lose
-		 * a precious byte of memory here..
+		 * ctime_r normally returns a string that ends with \n, which we don't
+		 * want. We strip it by replacing it with a null string terminator.
 		 */
-		char *str = ctime((time_t *) &seconds);
-
-		if (str == NULL)
-		{
-			log_error("Failed to convert epoch %" PRIu64 " to string: %s",
-					  seconds, strerror(errno));
-			return NULL;
-		}
-		str[strlen(str) - 1] = '\0';
-		return str;
+		result[strlen(result) - 1] = '\0';
 	}
-	return "0";
+	return buffer;
 }
+
 
 /*
  * PreInitPostgreInstanceStateToString returns the string that represents the
@@ -594,16 +618,24 @@ PreInitPostgreInstanceStateToString(PreInitPostgreInstanceState pgInitState)
 	switch (pgInitState)
 	{
 		case PRE_INIT_STATE_EMPTY:
+		{
 			return "PGDATA does not exists";
+		}
 
 		case PRE_INIT_STATE_EXISTS:
+		{
 			return "PGDATA exists";
+		}
 
 		case PRE_INIT_STATE_RUNNING:
+		{
 			return "PostgreSQL is running";
+		}
 
 		case PRE_INIT_STATE_PRIMARY:
+		{
 			return "PostgreSQL is running and a primary server";
+		}
 
 		default:
 			return "unknown";

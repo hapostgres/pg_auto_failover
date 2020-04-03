@@ -1,3 +1,30 @@
+### pg_auto_failover v1.2 (March 17, 2020) ###
+
+* Feature implement an option (--skip-pg-hba) to skip editing of HBA rules by pg_autoctl (#169)
+* Feature implement support for SSL connections (--ssl-mode)  (#171)
+* Feature implement pg_autoctl drop monitor and drop node --nodename --nodeport (#179)
+* Feature implement SSL support with self-signed certificates
+* Feature make --auth option mandatory when creating nodes
+* Fix error out when the pgautofailover is not in shared_preload_libraries
+* Fixes for warnings found in static analysis
+
+### pg_auto_failover v1.0.6 (Feb 13, 2020) ###
+
+* Fix permissions missing in monitor database #94 via $141
+* Fix creating a secondary server in an already existing directory. (#96)
+* Fix unable to get --pgdata value in pg_autoctl get config command #99
+* Fix registering a pre-existing Postgres cluster to the monitor #111
+* Fix demoted primary cannot catchup, wrong working directory? #129
+* Fix review main loop chatter, make it less verbose by default. (#97)
+* Fix refrain from using PGDATA as the systemd service WorkingDirectory. (#123)
+* Fix behaviour with stale postmaster pid (#152)
+* Feature add perform destroy command, and -destroy option to drop node command #141
+* Feature support debian/ubuntu style PostgreSQLclusters #135
+* Feature add files option to show command
+* Feature add --run option to create commmand #110
+* Feature add --json option to all commands for json output #106
+* Feature report current LSN of Postgres nodes rather than WAL lag. (#53)
+
 ### pg_auto_failover v1.0.5 (Sep 20, 2019) ###
 
 * Fix not being able to create monitor/postgres nodes on mac (#60)

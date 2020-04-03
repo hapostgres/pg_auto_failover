@@ -28,6 +28,7 @@
 #include "monitor_config.h"
 #include "pgctl.h"
 #include "primary_standby.h"
+#include "string_utils.h"
 
 
 /*
@@ -255,7 +256,8 @@ keeper_cli_add_standby_to_hba(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!primary_add_standby_to_hba(&postgres, standbyHostname, config.replication_password))
+	if (!primary_add_standby_to_hba(&postgres, standbyHostname,
+									config.replication_password))
 	{
 		log_fatal("Failed to grant access to the standby by adding relevant lines to "
 				  "pg_hba.conf for the standby hostname and user, see above for "
@@ -281,7 +283,7 @@ keeper_cli_discover_pg_setup(int argc, char **argv)
 
 	if (!IS_EMPTY_STRING_BUFFER(keeperOptions.nodename))
 	{
-		fprintf(stdout, "Node Name:          %s\n", keeperOptions.nodename);
+		fformat(stdout, "Node Name:          %s\n", keeperOptions.nodename);
 	}
 
 	fprintf_pg_setup(stdout, &pgSetup);
@@ -297,7 +299,6 @@ keeper_cli_init_standby(int argc, char **argv)
 	KeeperConfig config = keeperOptions;
 	LocalPostgresServer postgres = { 0 };
 	ReplicationSource replicationSource = { 0 };
-
 	int hostLength = 0;
 
 	if (argc != 2)
@@ -319,7 +320,7 @@ keeper_cli_init_standby(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (sscanf(argv[1], "%d", &replicationSource.primaryNode.port) == 0)
+	if (!stringToInt(argv[1], &replicationSource.primaryNode.port))
 	{
 		log_fatal("Argument is not a valid port number: \"%s\"", argv[1]);
 		exit(EXIT_CODE_BAD_ARGS);
@@ -331,11 +332,11 @@ keeper_cli_init_standby(int argc, char **argv)
 	replicationSource.maximumBackupRate = MAXIMUM_BACKUP_RATE;
 	replicationSource.backupDir = config.backupDirectory;
 
-	if (!standby_init_database(&postgres, &replicationSource))
+	if (!standby_init_database(&postgres, &replicationSource, config.nodename))
 	{
-		log_fatal("Failed to grant access to the standby by adding relevant lines to "
-				  "pg_hba.conf for the standby hostname and user, see above for "
-				  "details");
+		log_fatal("Failed to grant access to the standby by adding "
+				  "relevant lines to pg_hba.conf for the "
+				  "standby hostname and user, see above for details");
 		exit(EXIT_CODE_PGSQL);
 	}
 }
@@ -371,7 +372,7 @@ keeper_cli_rewind_old_primary(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (sscanf(argv[1], "%d", &replicationSource.primaryNode.port) == 0)
+	if (!stringToInt(argv[1], &replicationSource.primaryNode.port))
 	{
 		log_fatal("Argument is not a valid port number: \"%s\"", argv[1]);
 		exit(EXIT_CODE_BAD_ARGS);
@@ -382,6 +383,7 @@ keeper_cli_rewind_old_primary(int argc, char **argv)
 	replicationSource.slotName = config.replication_slot_name;
 	replicationSource.applicationName = config.replication_slot_name;
 	replicationSource.maximumBackupRate = MAXIMUM_BACKUP_RATE;
+	replicationSource.sslOptions = config.pgSetup.ssl;
 
 	if (!primary_rewind_to_standby(&postgres, &replicationSource))
 	{
@@ -409,6 +411,3 @@ keeper_cli_promote_standby(int argc, char **argv)
 		exit(EXIT_CODE_PGSQL);
 	}
 }
-
-
-

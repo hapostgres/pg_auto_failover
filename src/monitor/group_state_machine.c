@@ -41,10 +41,9 @@ static bool ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 										   AutoFailoverNode *primaryNode);
 static bool ProceedWithMSFailover(AutoFailoverNode *activeNode,
 								  AutoFailoverNode *candidateNode);
-static AutoFailoverNode *SelectFailoverCandidateNode(
-	List *candidateNodesGroupList,
-	AutoFailoverNode *mostAdvancedNode,
-	AutoFailoverNode *primaryNode);
+static AutoFailoverNode * SelectFailoverCandidateNode(List *candidateNodesGroupList,
+													  AutoFailoverNode *mostAdvancedNode,
+													  AutoFailoverNode *primaryNode);
 
 static void AssignGoalState(AutoFailoverNode *pgAutoFailoverNode,
 							ReplicationState state, char *description);
@@ -72,15 +71,23 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 {
 	char *formationId = activeNode->formationId;
 	int groupId = activeNode->groupId;
-	AutoFailoverFormation *formation = GetFormation(formationId);
 
+	AutoFailoverFormation *formation = GetFormation(formationId);
 	AutoFailoverNode *primaryNode = NULL;
+
 	List *nodesGroupList = AutoFailoverNodeGroup(formationId, groupId);
 	int nodesCount = list_length(nodesGroupList);
 
+	if (formation == NULL)
+	{
+		ereport(ERROR,
+				(errmsg("Formation for %s could not be found",
+						activeNode->formationId)));
+	}
+
 	/* when there's no other node anymore, not even one */
-	if (nodesCount == 1
-		&& !IsCurrentState(activeNode, REPLICATION_STATE_SINGLE))
+	if (nodesCount == 1 &&
+		!IsCurrentState(activeNode, REPLICATION_STATE_SINGLE))
 	{
 		char message[BUFSIZE];
 
@@ -145,10 +152,10 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 * There are other cases when we want to continue an already started
 	 * failover.
 	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_REPORT_LSN)
-		|| IsCurrentState(activeNode, REPLICATION_STATE_WAIT_FORWARD)
-		|| IsCurrentState(activeNode, REPLICATION_STATE_FAST_FORWARD)
-		|| IsCurrentState(activeNode, REPLICATION_STATE_WAIT_CASCADE))
+	if (IsCurrentState(activeNode, REPLICATION_STATE_REPORT_LSN) ||
+		IsCurrentState(activeNode, REPLICATION_STATE_WAIT_FORWARD) ||
+		IsCurrentState(activeNode, REPLICATION_STATE_FAST_FORWARD) ||
+		IsCurrentState(activeNode, REPLICATION_STATE_WAIT_CASCADE))
 	{
 		return ProceedGroupStateForMSFailover(activeNode, primaryNode);
 	}
@@ -556,7 +563,6 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 				/* other node is behind, no longer eligible for promotion */
 				AssignGoalState(otherNode,
 								REPLICATION_STATE_CATCHINGUP, message);
-
 			}
 			else if (otherNode->candidatePriority == 0)
 			{
@@ -874,6 +880,7 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 				/* leave the other nodes in ReportLSN state for now */
 				return true;
 			}
+
 			/* so the candidate does not have the most recent WAL */
 			else
 			{
@@ -905,6 +912,7 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 				return true;
 			}
 		}
+
 		/* we don't have a selected candidate for failover yet */
 		else
 		{
@@ -926,6 +934,7 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 			return false;
 		}
 	}
+
 	/* too early: not everybody reported REPORT_LSN yet */
 	else
 	{
@@ -1001,8 +1010,8 @@ ProceedWithMSFailover(AutoFailoverNode *activeNode,
 	 * that only this node had. Now that's done. The activeNode has to follow
 	 * the new primary that's being promoted.
 	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_WAIT_CASCADE)
-		&& IsStateIn(candidateNode->goalState, finishedCascading))
+	if (IsCurrentState(activeNode, REPLICATION_STATE_WAIT_CASCADE) &&
+		IsStateIn(candidateNode->goalState, finishedCascading))
 	{
 		char message[BUFSIZE];
 
@@ -1047,9 +1056,9 @@ ProceedWithMSFailover(AutoFailoverNode *activeNode,
 	 * stop replication as soon as possible, and later follow the new primary,
 	 * as soon as it's ready.
 	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_REPORT_LSN)
-		&& (IsCurrentState(candidateNode, REPLICATION_STATE_PREPARE_PROMOTION)
-			|| IsCurrentState(candidateNode, REPLICATION_STATE_STOP_REPLICATION)))
+	if (IsCurrentState(activeNode, REPLICATION_STATE_REPORT_LSN) &&
+		(IsCurrentState(candidateNode, REPLICATION_STATE_PREPARE_PROMOTION) ||
+		 IsCurrentState(candidateNode, REPLICATION_STATE_STOP_REPLICATION)))
 	{
 		char message[BUFSIZE];
 
@@ -1131,7 +1140,6 @@ SelectFailoverCandidateNode(List *candidateNodesGroupList,
 
 			continue;
 		}
-
 		else if (!WalDifferenceWithin(node, primaryNode, PromoteXlogThreshold))
 		{
 			char message[BUFSIZE];
@@ -1156,7 +1164,6 @@ SelectFailoverCandidateNode(List *candidateNodesGroupList,
 
 			continue;
 		}
-
 		else
 		{
 			int cPriority = node->candidatePriority;
@@ -1166,8 +1173,8 @@ SelectFailoverCandidateNode(List *candidateNodesGroupList,
 			{
 				selectedNode = node;
 			}
-			else if (cPriority == selectedNode->candidatePriority
-					 && cLSN > selectedNode->reportedLSN)
+			else if (cPriority == selectedNode->candidatePriority &&
+					 cLSN > selectedNode->reportedLSN)
 			{
 				selectedNode = node;
 			}
@@ -1263,8 +1270,8 @@ IsHealthy(AutoFailoverNode *pgAutoFailoverNode)
 		return false;
 	}
 
-	return pgAutoFailoverNode->health == NODE_HEALTH_GOOD
-		&& pgAutoFailoverNode->pgIsRunning == true;
+	return pgAutoFailoverNode->health == NODE_HEALTH_GOOD &&
+		   pgAutoFailoverNode->pgIsRunning == true;
 }
 
 
@@ -1310,8 +1317,8 @@ IsUnhealthy(AutoFailoverNode *pgAutoFailoverNode)
 	 * If the keeper reports that PostgreSQL is not running, then the node
 	 * isn't Healthy.
 	 */
-	if (!pgAutoFailoverNode->pgIsRunning
-		&& IsStateIn(pgAutoFailoverNode->goalState, pgIsNotRunningStateList))
+	if (!pgAutoFailoverNode->pgIsRunning &&
+		IsStateIn(pgAutoFailoverNode->goalState, pgIsNotRunningStateList))
 	{
 		return true;
 	}
@@ -1331,8 +1338,8 @@ IsDrainTimeExpired(AutoFailoverNode *pgAutoFailoverNode)
 	bool drainTimeExpired = false;
 	TimestampTz now = 0;
 
-	if (pgAutoFailoverNode == NULL
-		|| pgAutoFailoverNode->goalState != REPLICATION_STATE_DEMOTE_TIMEOUT)
+	if (pgAutoFailoverNode == NULL ||
+		pgAutoFailoverNode->goalState != REPLICATION_STATE_DEMOTE_TIMEOUT)
 	{
 		return false;
 	}

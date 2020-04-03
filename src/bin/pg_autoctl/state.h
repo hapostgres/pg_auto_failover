@@ -10,6 +10,7 @@
 #ifndef STATE_H
 #define STATE_H
 
+#include <assert.h>
 #include "parson.h"
 
 #include "keeper_config.h"
@@ -80,6 +81,12 @@ typedef enum
  *  - last_secondary_contact
  *  - xlog_location                    note: should we keep that?
  *  - keeper_is_paused
+ *
+ *  Note: The struct is serialized/serialiazed to/from state file. Therefore
+ *  keeping the memory layout the same is important. Please
+ *  - do not change the order of fields
+ *  - do not add a new field in between, always add to the end
+ *  - do not use any pointers
  */
 typedef struct
 {
@@ -105,6 +112,8 @@ typedef struct
 	int keeper_is_paused;
 } KeeperStateData;
 
+_Static_assert(sizeof(KeeperStateData) < PG_AUTOCTL_KEEPER_STATE_FILE_SIZE,
+			   "size of KeeperStateData is larger than expected. please review PG_AUTOCTL_KEEPER_STATE_FILE_SIZE");
 
 typedef enum
 {
@@ -115,15 +124,25 @@ typedef enum
 	PRE_INIT_STATE_PRIMARY
 } PreInitPostgreInstanceState;
 
+/*
+ *  Note: The struct is serialized/serialiazed to/from state file. Therefore
+ *  keeping the memory layout the same is important. Please
+ *  - do not change the order of fields
+ *  - do not add a new field in between, always add to the end
+ *  - do not use any pointers
+ */
 typedef struct
 {
 	int pg_autoctl_state_version;
 	PreInitPostgreInstanceState pgInitState;
 } KeeperStateInit;
 
+_Static_assert(sizeof(KeeperStateInit) < PG_AUTOCTL_KEEPER_STATE_FILE_SIZE,
+			   "size of KeeperStateInit is larger than expected. please review PG_AUTOCTL_KEEPER_STATE_FILE_SIZE");
+
 const char * NodeStateToString(NodeState s);
 NodeState NodeStateFromString(const char *str);
-const char * epoch_to_string(uint64_t seconds);
+const char * epoch_to_string(uint64_t seconds, char *buffer);
 
 void keeper_state_init(KeeperStateData *keeperState);
 bool keeper_state_create_file(const char *filename);
@@ -135,6 +154,6 @@ void print_keeper_state(KeeperStateData *keeperState, FILE *fp);
 bool keeperStateAsJSON(KeeperStateData *keeperState, JSON_Value *js);
 void print_keeper_init_state(KeeperStateInit *initState, FILE *stream);
 
-char *PreInitPostgreInstanceStateToString(PreInitPostgreInstanceState pgInitState);
+char * PreInitPostgreInstanceStateToString(PreInitPostgreInstanceState pgInitState);
 
 #endif /* STATE_H */

@@ -32,18 +32,10 @@ bool pg_add_auto_failover_default_settings(PostgresSetup *pgSetup,
 										   GUC *settings);
 bool pg_basebackup(const char *pgdata,
 				   const char *pg_ctl,
-				   const char *backupdir,
-				   const char *maximum_backup_rate,
-				   const char *replication_username,
-				   const char *replication_password,
-				   const char *replication_slot_name,
-				   const char *primary_hostname,
-				   int primary_port,
-				   const char *application_name);
-bool pg_rewind(const char *pgdata, const char *pg_ctl, const char *primaryHost,
-			   int primaryPort, const char *databaseName,
-			   const char *replicationUsername,
-			   const char *replicationPassword);
+				   ReplicationSource *replicationSource);
+bool pg_rewind(const char *pgdata,
+			   const char *pg_ctl,
+			   ReplicationSource *replicationSource);
 
 bool pg_ctl_initdb(const char *pg_ctl, const char *pgdata);
 bool pg_ctl_start(const char *pg_ctl,
@@ -63,5 +55,6 @@ bool pg_cleanup_standby_mode(uint32_t pg_control_version,
 							 PGSQL *pgsql);
 
 bool pg_is_running(const char *pg_ctl, const char *pgdata);
+bool pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *nodename);
 
 #endif /* PGCTL_H */

@@ -84,9 +84,9 @@ typedef struct HealthCheckHelperControlData
 	 * looking up (shared mode) or inserting (exclusive mode) per-database
 	 * data in HealthCheckWorkerDBHash.
 	 */
-	int				trancheId;
-	char		   *lockTrancheName;
-	LWLock			lock;
+	int trancheId;
+	char *lockTrancheName;
+	LWLock lock;
 } HealthCheckHelperControlData;
 
 /*
@@ -95,15 +95,15 @@ typedef struct HealthCheckHelperControlData
 typedef struct HealthCheckHelperDatabase
 {
 	/* hash key: database to run on */
-	Oid			dboid;
-	pid_t		workerPid;
+	Oid dboid;
+	pid_t workerPid;
 	bool isActive;
 } HealthCheckHelperDatabase;
 
 typedef struct DatabaseListEntry
 {
-	Oid		dboid;
-	char   *dbname;
+	Oid dboid;
+	char *dbname;
 } DatabaseListEntry;
 
 
@@ -116,12 +116,11 @@ static HealthCheckHelperControlData *HealthCheckHelperControl = NULL;
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
 
 
-
 /* private function declarations */
 static void pg_auto_failover_monitor_sigterm(SIGNAL_ARGS);
 static void pg_auto_failover_monitor_sighup(SIGNAL_ARGS);
 static BackgroundWorkerHandle * StartHealthCheckWorker(DatabaseListEntry *db);
-static List *BuildDatabaseList(void);
+static List * BuildDatabaseList(void);
 static bool pgAutoFailoverExtensionExists(void);
 static List * CreateHealthChecks(List *nodeHealthList);
 static HealthCheck * CreateHealthCheck(NodeHealth *nodeHealth);
@@ -134,7 +133,6 @@ static struct timeval AddTimeMillis(struct timeval base, uint32 additionalMs);
 static void LatchWait(long timeoutMs);
 static size_t HealthCheckWorkerShmemSize(void);
 static void HealthCheckWorkerShmemInit(void);
-
 
 
 /* flags set by signal handlers */
@@ -240,8 +238,8 @@ HealthCheckWorkerLauncherMain(Datum arg)
 
 	while (!got_sigterm)
 	{
-		List	   *databaseList;
-		ListCell   *databaseListCell;
+		List *databaseList;
+		ListCell *databaseListCell;
 
 		databaseList = BuildDatabaseList();
 
@@ -326,16 +324,19 @@ StartHealthCheckWorker(DatabaseListEntry *db)
 	worker.bgw_restart_time = BGW_NEVER_RESTART;
 	worker.bgw_main_arg = ObjectIdGetDatum(db->dboid);
 	worker.bgw_notify_pid = MyProcPid;
-	snprintf(worker.bgw_library_name, BGW_MAXLEN, "pgautofailover");
-	snprintf(worker.bgw_function_name, BGW_MAXLEN, "HealthCheckWorkerMain");
-	snprintf(worker.bgw_name, BGW_MAXLEN,
-			 "pg_auto_failover monitor worker");
+	strlcpy(worker.bgw_library_name, "pgautofailover",
+			sizeof(worker.bgw_library_name));
+	strlcpy(worker.bgw_function_name, "HealthCheckWorkerMain",
+			sizeof(worker.bgw_function_name));
+	strlcpy(worker.bgw_name, "pg_auto_failover monitor worker",
+			sizeof(worker.bgw_name));
 
 	if (!RegisterDynamicBackgroundWorker(&worker, &handle))
 	{
 		ereport(LOG,
-				(errmsg("failed to start worker for pg_auto_failover health checks in \"%s\"",
-						db->dbname)));
+				(errmsg(
+					 "failed to start worker for pg_auto_failover health checks in \"%s\"",
+					 db->dbname)));
 		return NULL;
 	}
 
@@ -350,10 +351,10 @@ StartHealthCheckWorker(DatabaseListEntry *db)
 static List *
 BuildDatabaseList(void)
 {
-	List	   *databaseList = NIL;
-	Relation	pgDatabaseRelation;
+	List *databaseList = NIL;
+	Relation pgDatabaseRelation;
 	TableScanDesc scan;
-	HeapTuple	dbTuple;
+	HeapTuple dbTuple;
 	MemoryContext originalContext = CurrentMemoryContext;
 
 	StartTransactionCommand();
@@ -412,8 +413,8 @@ HealthCheckWorkerMain(Datum arg)
 	LWLockAcquire(&HealthCheckHelperControl->lock, LW_SHARED);
 
 	myDbData = (HealthCheckHelperDatabase *)
-		hash_search(HealthCheckWorkerDBHash,
-					(void *) &dboid, HASH_FIND, NULL);
+			   hash_search(HealthCheckWorkerDBHash,
+						   (void *) &dboid, HASH_FIND, NULL);
 
 	if (!myDbData)
 	{
@@ -793,12 +794,13 @@ ManageHealthCheck(HealthCheck *healthCheck, struct timeval currentTime)
 		{
 			PGconn *connection = NULL;
 			ConnStatusType connStatus = CONNECTION_BAD;
-			char connInfoString[MAX_CONN_INFO_SIZE];
+			StringInfo connInfoString = makeStringInfo();
 
-			snprintf(connInfoString, MAX_CONN_INFO_SIZE, CONN_INFO_TEMPLATE,
-					 nodeHealth->nodeName, nodeHealth->nodePort, HealthCheckTimeout);
+			appendStringInfo(connInfoString, CONN_INFO_TEMPLATE,
+							 nodeHealth->nodeName, nodeHealth->nodePort,
+							 HealthCheckTimeout);
 
-			connection = PQconnectStart(connInfoString);
+			connection = PQconnectStart(connInfoString->data);
 			PQsetnonblocking(connection, true);
 
 			connStatus = PQstatus(connection);
@@ -828,6 +830,9 @@ ManageHealthCheck(HealthCheck *healthCheck, struct timeval currentTime)
 			}
 
 			healthCheck->numTries++;
+
+			pfree(connInfoString->data);
+			pfree(connInfoString);
 
 			break;
 		}
@@ -1103,8 +1108,8 @@ StopHealthCheckWorker(Oid databaseId)
 	LWLockAcquire(&HealthCheckHelperControl->lock, LW_EXCLUSIVE);
 
 	dbData = (HealthCheckHelperDatabase *)
-		hash_search(HealthCheckWorkerDBHash,
-					&databaseId, HASH_REMOVE, &found);
+			 hash_search(HealthCheckWorkerDBHash,
+						 &databaseId, HASH_REMOVE, &found);
 
 	if (found)
 	{

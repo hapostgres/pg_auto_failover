@@ -240,8 +240,8 @@ keeper_cli_keeper_setup_getopts(int argc, char **argv)
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
 		{ "help", no_argument, NULL, 'h' },
-		{ "candidate-priority", required_argument, NULL, 'P'},
-		{ "replication-quorum", required_argument, NULL, 'r'},
+		{ "candidate-priority", required_argument, NULL, 'P' },
+		{ "replication-quorum", required_argument, NULL, 'r' },
 		{ NULL, 0, NULL, 0 }
 	};
 
@@ -264,4 +264,3 @@ keeper_cli_keeper_setup_getopts(int argc, char **argv)
 
 	return optind;
 }
-

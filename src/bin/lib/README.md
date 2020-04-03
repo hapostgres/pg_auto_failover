@@ -26,3 +26,8 @@ We utilize the "ini.h" ini-file reader from https://github.com/mattiasgustavsson
 The parson librairy at https://github.com/kgabis/parson is a single C file
 and MIT licenced. It allows parsing from and serializing to JSON.
 
+## pg
+
+We vendor-in some code from the Postgres project at
+https://git.postgresql.org/gitweb/?p=postgresql.git;a=summary. This code is
+licenced under The PostgreSQL Licence, a derivative of the BSD licence.
