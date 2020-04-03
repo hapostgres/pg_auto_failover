@@ -48,7 +48,7 @@ GUC monitor_default_settings[] = {
 	{ "ssl_crl_file", "" },
 	{ "ssl_cert_file", "" },
 	{ "ssl_key_file", "" },
-	{ "ssl_ciphers", "'TLSv1.2+HIGH:!aNULL:!eNULL'" },
+	{ "ssl_ciphers", "'" DEFAULT_SSL_CIPHERS "'" },
 #ifdef TEST
 	{ "unix_socket_directories", "''" },
 #endif

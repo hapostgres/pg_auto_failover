@@ -55,7 +55,7 @@ static void local_postgres_update_pg_failures_tracking(LocalPostgresServer *post
 	{ "ssl_crl_file", "" }, \
 	{ "ssl_cert_file", "" }, \
 	{ "ssl_key_file", "" }, \
-	{ "ssl_ciphers", "'TLSv1.2+HIGH:!aNULL:!eNULL'" }
+	{ "ssl_ciphers", "'" DEFAULT_SSL_CIPHERS "'" }
 
 GUC postgres_default_settings[] = {
 	DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER,
@@ -64,7 +64,8 @@ GUC postgres_default_settings[] = {
 
 GUC citus_default_settings[] = {
 	DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER,
-	{ "shared_preload_libraries", "citus" },
+	{ "shared_preload_libraries", "'citus'" },
+	{ "citus.node_conninfo", "'sslmode=prefer'" },
 	{ NULL, NULL }
 };
 
