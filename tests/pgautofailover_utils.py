@@ -558,33 +558,32 @@ class DataNode(PGNode):
 
             prev_state = current_state
 
-        else:
-            print("%s didn't reach %s after %d attempts" %
-                  (self.datadir, target_state, timeout))
+        print("%s didn't reach %s after %d attempts" %
+              (self.datadir, target_state, timeout))
 
-            error_msg = (f"{self.datadir} failed to reach {target_state} "
-                         f"after {timeout} attempts\n")
-            events = self.get_events_str()
-            error_msg += f"MONITOR EVENTS:\n{events}\n"
+        error_msg = (f"{self.datadir} failed to reach {target_state} "
+                     f"after {timeout} attempts\n")
+        events = self.get_events_str()
+        error_msg += f"MONITOR EVENTS:\n{events}\n"
 
-            if self.running():
-                out, err = self.stop_pg_autoctl()
-                error_msg += f"STDOUT OF PG_AUTOCTL FOR MAIN NODE:\n{out}\n"
-                error_msg += f"STDERR OF PG_AUTOCTL FOR MAIN NODE:\n{err}\n"
+        if self.running():
+            out, err = self.stop_pg_autoctl()
+            error_msg += f"STDOUT OF PG_AUTOCTL FOR MAIN NODE:\n{out}\n"
+            error_msg += f"STDERR OF PG_AUTOCTL FOR MAIN NODE:\n{err}\n"
 
-            pglogs = self.get_postgres_logs()
-            error_msg += f"POSTGRES LOGS FOR MAIN NODE:\n{pglogs}\n"
+        pglogs = self.get_postgres_logs()
+        error_msg += f"POSTGRES LOGS FOR MAIN NODE:\n{pglogs}\n"
 
-            if other_node:
-                if other_node.running():
-                    out, err = other_node.stop_pg_autoctl()
-                    error_msg += f"STDOUT OF PG_AUTOCTL FOR OTHER NODE:\n{out}\n"
-                    error_msg += f"STDERR OF PG_AUTOCTL FOR OTHER NODE:\n{err}\n"
+        if other_node:
+            if other_node.running():
+                out, err = other_node.stop_pg_autoctl()
+                error_msg += f"STDOUT OF PG_AUTOCTL FOR OTHER NODE:\n{out}\n"
+                error_msg += f"STDERR OF PG_AUTOCTL FOR OTHER NODE:\n{err}\n"
 
-                pglogs = other_node.get_postgres_logs()
-                error_msg += f"POSTGRES LOGS FOR OTHER NODE:\n{pglogs}\n"
+            pglogs = other_node.get_postgres_logs()
+            error_msg += f"POSTGRES LOGS FOR OTHER NODE:\n{pglogs}\n"
 
-            raise Exception(error_msg)
+        raise Exception(error_msg)
 
     def get_state(self):
         """
