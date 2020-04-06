@@ -222,6 +222,12 @@ class PGNode:
             except psycopg2.ProgrammingError:
                 return None
 
+    def pg_config_get(self, setting):
+        """
+        Returns the current value of the given postgres setting"
+        """
+        return self.run_sql_query(f"SHOW {setting}")[0][0]
+
     def set_user_password(self, username, password):
         """
         Sets user passwords on the PGNode
