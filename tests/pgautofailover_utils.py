@@ -208,6 +208,28 @@ class PGNode:
         self.pg_autoctl = PGAutoCtl(self.vnode, self.datadir)
         self.pg_autoctl.run(loglevel=loglevel)
 
+    def running(self):
+        return self.pg_autoctl and self.pg_autoctl.run_proc
+
+    def flush_output(self):
+        """
+        Flushes the output of pg_autoctl if it's running to be sure that it
+        does not get stuck, because of a filled up pipe.
+        """
+        if self.running():
+            self.pg_autoctl.consume_output(0.001)
+
+    def sleep(self, secs):
+        """
+        Sleep for the specfied amount of seconds but meanwile consume output of
+        the pg_autoctl process to make sure it does not lock up.
+        """
+        if self.running():
+            self.pg_autoctl.consume_output(secs)
+        else:
+            time.sleep(secs)
+
+
     def run_sql_query(self, query, *args):
         """
         Runs the given sql query with the given arguments in this postgres node
@@ -253,12 +275,12 @@ class PGNode:
     def stop_postgres(self):
         """
         Stops the postgres process by running:
-          pg_ctl -D ${self.datadir} --wait --mode immediate stop
+          pg_ctl -D ${self.datadir} --wait --mode fast stop
         """
         stop_command = [shutil.which('pg_ctl'), '-D', self.datadir,
-                        '--wait', '--mode', 'immediate', 'stop']
+                        '--wait', '--mode', 'fast', 'stop']
         stop_proc = self.vnode.run(stop_command)
-        out, err = stop_proc.communicate(timeout=COMMAND_TIMEOUT)
+        out, err = stop_proc.communicate(timeout=10)
         if stop_proc.returncode > 0:
             print("stopping postgres for '%s' failed, out: %s\n, err: %s"
                   %(self.vnode.address, out, err))
@@ -532,18 +554,18 @@ class DataNode(PGNode):
             pass
 
     def wait_until_state(self, target_state,
-                         timeout=STATE_CHANGE_TIMEOUT, sleep_time=1):
+                         timeout=STATE_CHANGE_TIMEOUT, sleep_time=1, other_node=None):
         """
         Waits until this data node reaches the target state, and then returns
         True. If this doesn't happen until "timeout" seconds, returns False.
         """
         prev_state = None
         for i in range(timeout):
-            # ensure we read from the pg_autoctl process pipe
-            if self.pg_autoctl and self.pg_autoctl.run_proc:
-                self.pg_autoctl.consume_output(sleep_time)
+            if other_node:
+                other_node.sleep(sleep_time / 2)
+                self.sleep(sleep_time / 2)
             else:
-                time.sleep(sleep_time)
+                self.sleep(sleep_time)
 
             current_state = self.get_state()
 
@@ -561,23 +583,32 @@ class DataNode(PGNode):
 
             prev_state = current_state
 
-        else:
-            print("%s didn't reach %s after %d attempts" %
-                (self.datadir, target_state, timeout))
+        print("%s didn't reach %s after %d attempts" %
+              (self.datadir, target_state, timeout))
 
-            events = self.get_events_str()
-            pglogs = self.get_postgres_logs()
+        error_msg = (f"{self.datadir} failed to reach {target_state} "
+                     f"after {timeout} attempts\n")
+        events = self.get_events_str()
+        error_msg += f"MONITOR EVENTS:\n{events}\n"
 
-            if self.pg_autoctl and self.pg_autoctl.run_proc:
-                out, err, ret = self.stop_pg_autoctl()
-                raise Exception("%s failed to reach %s after %d attempts: " \
-                                "\n%s\n%s\n%s\n%s" %
-                                (self.datadir, target_state, timeout,
-                                 out, err, events, pglogs))
-            else:
-                raise Exception("%s failed to reach %s after %d attempts:\n%s" %
-                                (self.datadir, target_state, timeout, events))
-            return False
+        if self.running():
+            out, err = self.stop_pg_autoctl()
+            error_msg += f"STDOUT OF PG_AUTOCTL FOR MAIN NODE:\n{out}\n"
+            error_msg += f"STDERR OF PG_AUTOCTL FOR MAIN NODE:\n{err}\n"
+
+        pglogs = self.get_postgres_logs()
+        error_msg += f"POSTGRES LOGS FOR MAIN NODE:\n{pglogs}\n"
+
+        if other_node:
+            if other_node.running():
+                out, err = other_node.stop_pg_autoctl()
+                error_msg += f"STDOUT OF PG_AUTOCTL FOR OTHER NODE:\n{out}\n"
+                error_msg += f"STDERR OF PG_AUTOCTL FOR OTHER NODE:\n{err}\n"
+
+            pglogs = other_node.get_postgres_logs()
+            error_msg += f"POSTGRES LOGS FOR OTHER NODE:\n{pglogs}\n"
+
+        raise Exception(error_msg)
 
     def get_state(self):
         """
@@ -1028,7 +1059,7 @@ class PGAutoCtl():
 
         return self.out, self.err
 
-    def consume_output(self, secs=1):
+    def consume_output(self, secs):
         """
         Read available lines from the process for some given seconds
         """

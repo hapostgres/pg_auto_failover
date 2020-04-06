@@ -3,9 +3,9 @@
 
 PG_AUTOCTL = ./pg_autoctl
 
-DEPDIR = .deps
-
 SRC_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+
+DEPDIR = $(SRC_DIR)/.deps
 
 INCLUDES  = $(patsubst ${SRC_DIR}%.h,%.h,$(wildcard ${SRC_DIR}*.h))
 
@@ -85,6 +85,7 @@ lib-parson.o: $(PARSON_SRC)
 
 clean:
 	rm -f $(OBJS) $(PG_AUTOCTL)
+	rm -rf $(DEPDIR)
 
 install: $(PG_AUTOCTL)
 	install -d $(DESTDIR)$(BINDIR)

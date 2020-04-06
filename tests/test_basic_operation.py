@@ -62,15 +62,15 @@ def test_001_init_primary():
     node1.run()
     assert node1.wait_until_state(target_state="single")
 
-def test_001_stop_postgres():
+def test_002_stop_postgres():
     node1.stop_postgres()
     assert node1.wait_until_pg_is_running()
 
-def test_002_create_t1():
+def test_003_create_t1():
     node1.run_sql_query("CREATE TABLE t1(a int)")
     node1.run_sql_query("INSERT INTO t1 VALUES (1), (2)")
 
-def test_003_init_secondary():
+def test_004_init_secondary():
     global node2
     node2 = cluster.create_datanode("/tmp/basic/node2")
     node2.create()
@@ -78,15 +78,15 @@ def test_003_init_secondary():
     assert node2.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")
 
-def test_004_read_from_secondary():
+def test_005_read_from_secondary():
     results = node2.run_sql_query("SELECT * FROM t1")
     assert results == [(1,), (2,)]
 
 @raises(Exception)
-def test_005_writes_to_node2_fail():
+def test_006_writes_to_node2_fail():
     node2.run_sql_query("INSERT INTO t1 VALUES (3)")
 
-def test_006_maintenance():
+def test_007_maintenance():
     print()
     print("Enabling maintenance on node2")
     assert node1.wait_until_state(target_state="primary")
@@ -101,35 +101,35 @@ def test_006_maintenance():
     assert node2.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")
 
-def test_007_fail_primary():
+def test_008_fail_primary():
     print()
     print("Injecting failure of node1")
     node1.fail()
     assert node2.wait_until_state(target_state="wait_primary")
 
-def test_008_writes_to_node2_succeed():
+def test_009_writes_to_node2_succeed():
     node2.run_sql_query("INSERT INTO t1 VALUES (4)")
     results = node2.run_sql_query("SELECT * FROM t1 ORDER BY a")
     assert results == [(1,), (2,), (3,), (4,)]
 
-def test_009_start_node1_again():
+def test_010_start_node1_again():
     node1.run()
     assert node2.wait_until_state(target_state="primary")
     assert node1.wait_until_state(target_state="secondary")
 
-def test_010_read_from_new_secondary():
+def test_011_read_from_new_secondary():
     results = node1.run_sql_query("SELECT * FROM t1 ORDER BY a")
     assert results == [(1,), (2,), (3,), (4,)]
 
 @raises(Exception)
-def test_011_writes_to_node1_fail():
+def test_012_writes_to_node1_fail():
     node1.run_sql_query("INSERT INTO t1 VALUES (3)")
 
-def test_012_fail_secondary():
+def test_013_fail_secondary():
     node1.fail()
     assert node2.wait_until_state(target_state="wait_primary")
 
-def test_013_drop_secondary():
+def test_014_drop_secondary():
     node1.run()
     assert node1.wait_until_state(target_state="secondary")
     node1.drop()
@@ -137,7 +137,7 @@ def test_013_drop_secondary():
     assert node2.wait_until_state(target_state="single")
 
 
-def test_014_add_new_secondary():
+def test_015_add_new_secondary():
     global node3
     node3 = cluster.create_datanode("/tmp/basic/node3")
     node3.create()
@@ -146,7 +146,7 @@ def test_014_add_new_secondary():
     assert node2.wait_until_state(target_state="primary")
 
 
-def test_015_multiple_manual_failover_verify_replication_slot_removed():
+def test_016_multiple_manual_failover_verify_replication_slot_removed():
     count_repl_slots = "select count(*) from pg_replication_slots"
 
     print()
@@ -168,7 +168,7 @@ def test_015_multiple_manual_failover_verify_replication_slot_removed():
     node3_replication_slots = node3.run_sql_query(count_repl_slots);
     assert node3_replication_slots == [(0,)]
 
-def test_016_drop_primary():
+def test_017_drop_primary():
     node2.drop()
     assert not node2.pg_is_running()
     assert node3.wait_until_state(target_state="single")
