@@ -3,6 +3,8 @@
 
 PG_AUTOCTL = ./pg_autoctl
 
+DEPDIR = .deps
+
 SRC_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
 INCLUDES  = $(patsubst ${SRC_DIR}%.h,%.h,$(wildcard ${SRC_DIR}*.h))
@@ -34,6 +36,10 @@ DEFAULT_CFLAGS += -I $(shell $(PG_CONFIG) --pkgincludedir)/internal
 DEFAULT_CFLAGS += -I $(shell $(PG_CONFIG) --cflags)
 DEFAULT_CFLAGS += -Wformat
 DEFAULT_CFLAGS += -Wall
+DEFAULT_CFLAGS += -Werror=implicit-int
+DEFAULT_CFLAGS += -Werror=implicit-function-declaration
+DEFAULT_CFLAGS += -Werror=return-type
+
 # Needed for OSX
 DEFAULT_CFLAGS += -Wno-missing-braces
 DEFAULT_CFLAGS += $(COMMON_LIBS)
@@ -47,23 +53,35 @@ LIBS += -lpq
 
 all: $(PG_AUTOCTL) ;
 
+# Based on Postgres Makefile for automatic dependency generation
+# https://github.com/postgres/postgres/blob/1933ae629e7b706c6c23673a381e778819db307d/src/Makefile.global.in#L890-L924
+%.o : %.c
+	@if test ! -d $(DEPDIR); then mkdir -p $(DEPDIR); fi
+	$(CC) $(CFLAGS) -c -MMD -MP -MF$(DEPDIR)/$(*F).Po -o $@ $<
+
+Po_files := $(wildcard $(DEPDIR)/*.Po)
+ifneq (,$(Po_files))
+include $(Po_files)
+endif
+
+
 $(PG_AUTOCTL): $(OBJS) $(INCLUDES)
 	$(CC) $(CFLAGS) $(OBJS) $(LDFLAGS) $(LIBS) -o $@
 
 lib-snprintf.o: $(PG_SNPRINTF)
-	$(CC) $(CFLAGS) -c -o $@ ${SRC_DIR}../lib/pg/snprintf.c
+	$(CC) $(CFLAGS) -c -MMD -MP -MF$(DEPDIR)/$(*F).Po -MT$@ -o $@ ${SRC_DIR}../lib/pg/snprintf.c
 
 lib-strerror.o: $(PG_SNPRINTF)
-	$(CC) $(CFLAGS) -c -o $@ ${SRC_DIR}../lib/pg/strerror.c
+	$(CC) $(CFLAGS) -c -MMD -MP -MF$(DEPDIR)/$(*F).Po -MT$@ -o $@ ${SRC_DIR}../lib/pg/strerror.c
 
 lib-log.o: $(LOG_SRC)
-	$(CC) $(CFLAGS) -c -o $@ ${SRC_DIR}../lib/log/src/log.c
+	$(CC) $(CFLAGS) -c -MMD -MP -MF$(DEPDIR)/$(*F).Po -MT$@ -o $@ ${SRC_DIR}../lib/log/src/log.c
 
 lib-commandline.o: $(COMMANDLINE_SRC)
-	$(CC) $(CFLAGS) -c -o $@ ${SRC_DIR}../lib/subcommands.c/commandline.c
+	$(CC) $(CFLAGS) -c -MMD -MP -MF$(DEPDIR)/$(*F).Po -MT$@ -o $@ ${SRC_DIR}../lib/subcommands.c/commandline.c
 
 lib-parson.o: $(PARSON_SRC)
-	$(CC) $(CFLAGS) -c -o $@ ${SRC_DIR}../lib/parson/parson.c
+	$(CC) $(CFLAGS) -c -MMD -MP -MF$(DEPDIR)/$(*F).Po -MT$@ -o $@ ${SRC_DIR}../lib/parson/parson.c
 
 clean:
 	rm -f $(OBJS) $(PG_AUTOCTL)
@@ -71,5 +89,7 @@ clean:
 install: $(PG_AUTOCTL)
 	install -d $(DESTDIR)$(BINDIR)
 	install -m 0755 $(PG_AUTOCTL) $(DESTDIR)$(BINDIR)
+
+
 
 .PHONY: all monitor clean
