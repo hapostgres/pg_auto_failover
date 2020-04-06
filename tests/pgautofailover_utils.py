@@ -194,6 +194,14 @@ class PGNode:
     def running(self):
         return self.pg_autoctl and self.pg_autoctl.run_proc
 
+    def flush_output(self):
+        """
+        Flushes the output of pg_autoctl if it's running to be sure that it
+        does not get stuck, because of a filled up pipe.
+        """
+        if self.running():
+            self.pg_autoctl.consume_output(0.001)
+
     def sleep(self, secs):
         """
         Sleep for the specfied amount of seconds but meanwile consume output of
@@ -250,12 +258,12 @@ class PGNode:
     def stop_postgres(self):
         """
         Stops the postgres process by running:
-          pg_ctl -D ${self.datadir} --wait --mode immediate stop
+          pg_ctl -D ${self.datadir} --wait --mode fast stop
         """
         stop_command = [shutil.which('pg_ctl'), '-D', self.datadir,
-                        '--wait', '--mode', 'immediate', 'stop']
+                        '--wait', '--mode', 'fast', 'stop']
         stop_proc = self.vnode.run(stop_command)
-        out, err = stop_proc.communicate(timeout=COMMAND_TIMEOUT)
+        out, err = stop_proc.communicate(timeout=10)
         if stop_proc.returncode > 0:
             print("stopping postgres for '%s' failed, out: %s\n, err: %s"
                   %(self.vnode.address, out, err))
