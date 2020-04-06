@@ -554,7 +554,9 @@ class DataNode(PGNode):
             pass
 
     def wait_until_state(self, target_state,
-                         timeout=STATE_CHANGE_TIMEOUT, sleep_time=1, other_node=None):
+                         timeout=STATE_CHANGE_TIMEOUT,
+                         sleep_time=1,
+                         other_node=None):
         """
         Waits until this data node reaches the target state, and then returns
         True. If this doesn't happen until "timeout" seconds, returns False.
@@ -592,7 +594,7 @@ class DataNode(PGNode):
         error_msg += f"MONITOR EVENTS:\n{events}\n"
 
         if self.running():
-            out, err = self.stop_pg_autoctl()
+            out, err, ret = self.stop_pg_autoctl()
             error_msg += f"STDOUT OF PG_AUTOCTL FOR MAIN NODE:\n{out}\n"
             error_msg += f"STDERR OF PG_AUTOCTL FOR MAIN NODE:\n{err}\n"
 
@@ -601,7 +603,7 @@ class DataNode(PGNode):
 
         if other_node:
             if other_node.running():
-                out, err = other_node.stop_pg_autoctl()
+                out, err, ret = other_node.stop_pg_autoctl()
                 error_msg += f"STDOUT OF PG_AUTOCTL FOR OTHER NODE:\n{out}\n"
                 error_msg += f"STDERR OF PG_AUTOCTL FOR OTHER NODE:\n{err}\n"
 

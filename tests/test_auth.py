@@ -53,5 +53,13 @@ def test_004_failover():
     print()
     print("Calling pgautofailover.failover() on the monitor")
     cluster.monitor.failover()
-    assert node2.wait_until_state(target_state="primary")
-    assert node1.wait_until_state(target_state="secondary")
+
+    assert node2.wait_until_state(target_state="primary",
+                                  timeout=900,
+                                  sleep_time=0.1,
+                                  other_node=node1)
+
+    assert node1.wait_until_state(target_state="secondary",
+                                  timeout=900,
+                                  sleep_time=0.1,
+                                  other_node=node2)

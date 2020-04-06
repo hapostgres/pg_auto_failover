@@ -22,7 +22,7 @@ def test_000a_create_monitor():
     monitor.run(loglevel=pgautofailover.LogLevel.TRACE)
 
     # to make sure the process is running we consume some of its output
-    monitor.pg_autoctl.consume_output()
+    monitor.pg_autoctl.consume_output(0.1)
     if monitor.pg_autoctl.out or monitor.pg_autoctl.err:
         print("%s\n%s\n" % (monitor.pg_autoctl.out, monitor.pg_autoctl.err))
 
