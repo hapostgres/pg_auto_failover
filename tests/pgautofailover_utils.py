@@ -191,6 +191,20 @@ class PGNode:
         self.pg_autoctl = PGAutoCtl(self.vnode, self.datadir)
         self.pg_autoctl.run()
 
+    def running(self):
+        return self.pg_autoctl and self.pg_autoctl.run_proc
+
+    def sleep(self, secs):
+        """
+        Sleep for the specfied amount of seconds but meanwile consume output of
+        the pg_autoctl process to make sure it does not lock up.
+        """
+        if self.running():
+            self.pg_autoctl.consume_output(secs)
+        else:
+            time.sleep(secs)
+
+
     def run_sql_query(self, query, *args):
         """
         Runs the given sql query with the given arguments in this postgres node
@@ -515,18 +529,18 @@ class DataNode(PGNode):
             pass
 
     def wait_until_state(self, target_state,
-                         timeout=STATE_CHANGE_TIMEOUT, sleep_time=1):
+                         timeout=STATE_CHANGE_TIMEOUT, sleep_time=1, other_node=None):
         """
         Waits until this data node reaches the target state, and then returns
         True. If this doesn't happen until "timeout" seconds, returns False.
         """
         prev_state = None
         for i in range(timeout):
-            # ensure we read from the pg_autoctl process pipe
-            if self.pg_autoctl and self.pg_autoctl.run_proc:
-                self.pg_autoctl.consume_output(sleep_time)
+            if other_node:
+                other_node.sleep(sleep_time / 2)
+                self.sleep(sleep_time / 2)
             else:
-                time.sleep(sleep_time)
+                self.sleep(sleep_time)
 
             current_state = self.get_state()
 
@@ -550,13 +564,22 @@ class DataNode(PGNode):
 
             events = self.get_events_str()
             pglogs = self.get_postgres_logs()
+            if other_node:
+                other_pglogs = other_node.get_postgres_logs()
+            else:
+                other_pglogs = ""
 
-            if self.pg_autoctl and self.pg_autoctl.run_proc:
+            if self.running():
                 out, err = self.stop_pg_autoctl()
+                if other_node and other_node.running():
+                    other_out, other_err = other_node.stop_pg_autoctl()
+                else:
+                    other_out, other_err = "", ""
+
                 raise Exception("%s failed to reach %s after %d attempts: " \
-                                "\n%s\n%s\n%s\n%s" %
+                                "\n%s\n%s\n%s\n%s\n%s\n%s\n%s" %
                                 (self.datadir, target_state, timeout,
-                                 out, err, events, pglogs))
+                                 out, err, events, pglogs, other_out, other_err, other_pglogs))
             else:
                 raise Exception("%s failed to reach %s after %d attempts:\n%s" %
                                 (self.datadir, target_state, timeout, events))
@@ -1013,7 +1036,7 @@ class PGAutoCtl():
 
         return self.out, self.err
 
-    def consume_output(self, secs=1):
+    def consume_output(self, secs):
         """
         Read available lines from the process for some given seconds
         """
