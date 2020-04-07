@@ -1693,8 +1693,9 @@ pgsql_get_postgres_metadata(PGSQL *pgsql, const char *slotName,
 							char *pgsrSyncState, char *currentLSN)
 {
 	PgMetadata context = { 0 };
-	char *sql =
 
+	/* *INDENT-OFF* */
+	char *sql =
 		/*
 		 * Make it so that we still have the current WAL LSN even in the case
 		 * where there's no replication slot in use by any standby.
@@ -1718,21 +1719,23 @@ pgsql_get_postgres_metadata(PGSQL *pgsql, const char *slotName,
 		"     join pg_stat_replication rep"
 		"       on rep.pid = slot.active_pid"
 		"   where slot_name ~ '" REPLICATION_SLOT_NAME_PATTERN "' "
-															   "order by case sync_state "
-															   "         when 'quorum' then 4 "
-															   "         when 'sync' then 3 "
-															   "         when 'potential' then 2 "
-															   "         when 'async' then 1 "
-															   "         else 0 end "
-															   "    desc limit 1"
-															   " ) "
-															   "as rep on true";
+		"order by case sync_state "
+		"         when 'quorum' then 4 "
+		"         when 'sync' then 3 "
+		"         when 'potential' then 2 "
+		"         when 'async' then 1 "
+		"         else 0 end "
+		"    desc limit 1"
+		" ) "
+		"as rep on true";
+	/* *INDENT-ON* */
 
 	const Oid paramTypes[1] = { TEXTOID };
 	const char *paramValues[1] = { slotName };
 	int paramCount = 1;
 
-	if (!pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes, paramValues,
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
 								   &context, &parsePgMetadata))
 	{
 		/* errors have already been logged */
