@@ -602,7 +602,7 @@ keeper_config_set_groupId_and_slot_name(KeeperConfig *config,
 	char buffer[BUFSIZE] = { 0 };
 	char *replicationSlotName = NULL;
 
-	snprintf(buffer, BUFSIZE, "%s_%d", REPLICATION_SLOT_NAME_DEFAULT, nodeId);
+	sformat(buffer, BUFSIZE, "%s_%d", REPLICATION_SLOT_NAME_DEFAULT, nodeId);
 	replicationSlotName = strdup(buffer);
 
 	config->groupId = groupId;
@@ -893,7 +893,7 @@ keeper_config_set_backup_directory(KeeperConfig *config, int nodeId)
 	char absoluteBackupDirectory[PATH_MAX];
 
 	/* build the default nodename based backup directory path */
-	snprintf(subdirs, MAXPGPATH, "backup/%s", config->nodename);
+	sformat(subdirs, MAXPGPATH, "backup/%s", config->nodename);
 	path_in_same_directory(pgdata, subdirs, backupDirectory);
 
 	/*

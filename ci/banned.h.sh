@@ -12,7 +12,7 @@
 
 set -eu
 
-files=$(find src -iname '*.[ch]' -not -path "src/bin/lib/*")
+files=$(find src -iname '*.[ch]' -type f | git check-attr --stdin citus-style | grep -v ': unset$' | sed 's/: citus-style: set$//')
 
 # grep is allowed to fail, that means no banned matches are found
 set +e
