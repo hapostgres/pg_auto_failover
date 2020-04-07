@@ -28,7 +28,8 @@ intToString(int64_t number)
 
 	intString.intValue = number;
 
-	sformat(intString.strValue, INTSTRING_MAX_DIGITS, "%" PRId64, number);
+	(void) sformat(intString.strValue, INTSTRING_MAX_DIGITS, "integer", "%" PRId64,
+				   number);
 
 	return intString;
 }

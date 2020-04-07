@@ -808,8 +808,8 @@ fformat(FILE *stream, const char *fmt, ...)
 /*
  * sformat is a secured down version of pg_snprintf
  */
-int
-sformat(char *str, size_t count, const char *fmt, ...)
+bool
+sformat(char *str, size_t count, const char *result_name, const char *fmt, ...)
 {
 	int len;
 	va_list args;
@@ -817,7 +817,7 @@ sformat(char *str, size_t count, const char *fmt, ...)
 	if (str == NULL || fmt == NULL)
 	{
 		log_error("BUG: sformat is called with a NULL target or format string");
-		return -1;
+		return false;
 	}
 
 	va_start(args, fmt);
@@ -826,10 +826,11 @@ sformat(char *str, size_t count, const char *fmt, ...)
 
 	if (len >= count)
 	{
-		log_error("BUG: sformat needs %d bytes to expend format string \"%s\", "
-				  "and a target string of %lu bytes only has been given.",
-				  len, fmt, count);
+		log_error("BUG: the %s requires %d bytes to expand format string \"%s\", "
+				  "and pg_auto_failover only supports up to %lu bytes.",
+				  result_name, len, fmt, count);
+		return false;
 	}
 
-	return len;
+	return true;
 }

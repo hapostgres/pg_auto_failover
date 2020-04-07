@@ -162,7 +162,8 @@ parse_controldata_field_uint32(const char *controlDataString,
 	char regex[BUFSIZE];
 	char *match;
 
-	sformat(regex, BUFSIZE, "^%s: *([0-9]+)$", fieldName);
+	sformat_fail(regex, BUFSIZE, "controldata uint32 parsing regex", "^%s: *([0-9]+)$",
+				 fieldName);
 	match = regexp_first_match(controlDataString, regex);
 
 	if (match == NULL)
@@ -195,7 +196,8 @@ parse_controldata_field_uint64(const char *controlDataString,
 	char regex[BUFSIZE];
 	char *match;
 
-	sformat(regex, BUFSIZE, "^%s: *([0-9]+)$", fieldName);
+	sformat_fail(regex, BUFSIZE, "controldata uint64 parsing regex", "^%s: *([0-9]+)$",
+				 fieldName);
 	match = regexp_first_match(controlDataString, regex);
 
 	if (match == NULL)

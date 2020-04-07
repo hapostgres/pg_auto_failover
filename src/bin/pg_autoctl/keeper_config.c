@@ -602,7 +602,11 @@ keeper_config_set_groupId_and_slot_name(KeeperConfig *config,
 	char buffer[BUFSIZE] = { 0 };
 	char *replicationSlotName = NULL;
 
-	sformat(buffer, BUFSIZE, "%s_%d", REPLICATION_SLOT_NAME_DEFAULT, nodeId);
+	if (!postgres_sprintf_replicationSlotName(nodeId, buffer, BUFSIZE))
+	{
+		/* we already logged about it */
+		return false;
+	}
 	replicationSlotName = strdup(buffer);
 
 	config->groupId = groupId;
@@ -893,7 +897,7 @@ keeper_config_set_backup_directory(KeeperConfig *config, int nodeId)
 	char absoluteBackupDirectory[PATH_MAX];
 
 	/* build the default nodename based backup directory path */
-	sformat(subdirs, MAXPGPATH, "backup/%s", config->nodename);
+	sformat_fail(subdirs, MAXPGPATH, "backup path", "backup/%s", config->nodename);
 	path_in_same_directory(pgdata, subdirs, backupDirectory);
 
 	/*
@@ -914,7 +918,7 @@ keeper_config_set_backup_directory(KeeperConfig *config, int nodeId)
 		/* we might be able to use the nodeId, better than the nodename */
 		if (nodeId > 0)
 		{
-			sformat(subdirs, MAXPGPATH, "backup/node_%d", nodeId);
+			sformat_fail(subdirs, MAXPGPATH, "backup path", "backup/node_%d", nodeId);
 			path_in_same_directory(pgdata, subdirs, backupDirectory);
 		}
 

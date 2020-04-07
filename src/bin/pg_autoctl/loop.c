@@ -583,7 +583,7 @@ create_pidfile(const char *pidfile, pid_t pid)
 
 	log_trace("create_pidfile(%d): \"%s\"", pid, pidfile);
 
-	sformat(content, BUFSIZE, "%d", pid);
+	sformat_fail(content, BUFSIZE, "PID value", "%d", pid);
 
 	return write_file(content, strlen(content), pidfile);
 }

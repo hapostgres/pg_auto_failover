@@ -386,15 +386,16 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 		{
 			int bytesWritten = 0;
 			const char *value = paramValues[paramIndex];
+			char *maybeComma = "";
 
 			if (paramIndex > 0)
 			{
-				bytesWritten = sformat(writePointer, remainingBytes, ", ");
-				remainingBytes -= bytesWritten;
-				writePointer += bytesWritten;
+				maybeComma = ", ";
 			}
 
-			bytesWritten = sformat(writePointer, remainingBytes, "'%s'", value);
+			sformat_fail(writePointer, remainingBytes, "command parameter", "%s'%s'",
+						 maybeComma, value);
+			bytesWritten = strlen(writePointer);
 			remainingBytes -= bytesWritten;
 			writePointer += bytesWritten;
 		}
@@ -660,10 +661,8 @@ pgsql_drop_replication_slots(PGSQL *pgsql)
 bool
 postgres_sprintf_replicationSlotName(int nodeId, char *slotName, int size)
 {
-	int bytesWritten =
-		sformat(slotName, size, "%s_%d", REPLICATION_SLOT_NAME_DEFAULT, nodeId);
-
-	return bytesWritten <= size;
+	return sformat(slotName, size, "replication_slot_name", "%s_%d",
+				   REPLICATION_SLOT_NAME_DEFAULT, nodeId);
 }
 
 
@@ -680,15 +679,8 @@ pgsql_set_synchronous_standby_names(PGSQL *pgsql,
 
 	log_info("Enabling synchronous replication");
 
-	if (sformat(quoted, BUFSIZE, "'%s'", synchronous_standby_names) >= BUFSIZE)
-	{
-		log_error("Failed to apply the synchronous_standby_names value \"%s\": "
-				  "pg_autoctl supports values up to %d bytes and this one "
-				  "requires %lu bytes",
-				  synchronous_standby_names,
-				  BUFSIZE,
-				  strlen(synchronous_standby_names));
-	}
+	sformat_fail(quoted, BUFSIZE, "synchronous_standby_names value", "'%s'",
+				 synchronous_standby_names)
 
 	return pgsql_alter_system_set(pgsql, setting);
 }
@@ -793,8 +785,8 @@ pgsql_alter_system_set(PGSQL *pgsql, GUC setting)
 {
 	char command[1024];
 
-	sformat(command, 1024,
-			"ALTER SYSTEM SET %s TO %s", setting.name, setting.value);
+	sformat_fail(command, 1024, "alter system set command",
+				 "ALTER SYSTEM SET %s TO %s", setting.name, setting.value);
 
 	if (!pgsql_execute(pgsql, command))
 	{
@@ -967,10 +959,10 @@ pgsql_create_database(PGSQL *pgsql, const char *dbname, const char *owner)
 	}
 
 	/* now build the SQL command */
-	sformat(command, BUFSIZE,
-			"CREATE DATABASE %s WITH OWNER %s",
-			escapedDBName,
-			escapedOwner);
+	sformat_fail(command, BUFSIZE, "create database command",
+				 "CREATE DATABASE %s WITH OWNER %s",
+				 escapedDBName,
+				 escapedOwner);
 
 	log_debug("Running command on Postgres: %s;", command);
 
@@ -1040,7 +1032,8 @@ pgsql_create_extension(PGSQL *pgsql, const char *name)
 	}
 
 	/* now build the SQL command */
-	sformat(command, BUFSIZE, "CREATE EXTENSION %s", escapedIdentifier);
+	sformat_fail(command, BUFSIZE, "create extension command", "CREATE EXTENSION %s",
+				 escapedIdentifier);
 	PQfreemem(escapedIdentifier);
 	log_debug("Running command on Postgres: %s;", command);
 
@@ -1547,7 +1540,7 @@ pgsql_listen(PGSQL *pgsql, char *channels[])
 			return false;
 		}
 
-		sformat(sql, BUFSIZE, "LISTEN %s", channel);
+		sformat_fail(sql, BUFSIZE, "listen command", "LISTEN %s", channel);
 
 		PQfreemem(channel);
 
@@ -1578,7 +1571,6 @@ bool
 pgsql_alter_extension_update_to(PGSQL *pgsql,
 								const char *extname, const char *version)
 {
-	int n = 0;
 	char command[BUFSIZE];
 	char *escapedIdentifier, *escapedVersion;
 	PGconn *connection = NULL;
@@ -1614,17 +1606,9 @@ pgsql_alter_extension_update_to(PGSQL *pgsql,
 	}
 
 	/* now build the SQL command */
-	n = sformat(command, BUFSIZE, "ALTER EXTENSION %s UPDATE TO %s",
-				escapedIdentifier, escapedVersion);
-
-	if (n >= BUFSIZE)
-	{
-		log_error("BUG: pg_autoctl only supports SQL string up to %d bytes, "
-				  "a SQL string of %d bytes is needed to "
-				  "update the \"%s\" extension.",
-				  BUFSIZE, n, extname);
-	}
-
+	sformat_fail(command, BUFSIZE, "update extension command",
+				 "ALTER EXTENSION %s UPDATE TO %s",
+				 escapedIdentifier, escapedVersion);
 	PQfreemem(escapedIdentifier);
 	PQfreemem(escapedVersion);
 

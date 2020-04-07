@@ -475,41 +475,45 @@ monitor_config_get_postgres_uri(MonitorConfig *config, char *connectionString,
 	 * sslcrl connection parameters when using sslmode=verify-ca or
 	 * sslmode=verify-full.
 	 */
-	connStringEnd += sformat(connStringEnd,
-							 size - (connStringEnd - connectionString),
-							 "postgres://%s@%s:%d/%s",
-							 config->pgSetup.username,
-							 host,
-							 config->pgSetup.pgport,
-							 config->pgSetup.dbname);
+	sformat_fail(connStringEnd,
+				 size - (connStringEnd - connectionString),
+				 "monitor connection string",
+				 "postgres://%s@%s:%d/%s",
+				 config->pgSetup.username,
+				 host,
+				 config->pgSetup.pgport,
+				 config->pgSetup.dbname);
+	connStringEnd += strlen(connStringEnd);
 
 	if (config->pgSetup.ssl.sslMode >= SSL_MODE_PREFER)
 	{
 		char *sslmode = pgsetup_sslmode_to_string(config->pgSetup.ssl.sslMode);
 
-		connStringEnd += sformat(connStringEnd,
-								 size - (connStringEnd - connectionString),
-								 "?sslmode=%s",
-								 sslmode);
+		sformat_fail(connStringEnd,
+					 size - (connStringEnd - connectionString),
+					 "monitor sslmode option",
+					 "?sslmode=%s",
+					 sslmode);
+		connStringEnd += strlen(connStringEnd);
 
 		if (config->pgSetup.ssl.sslMode >= SSL_MODE_VERIFY_CA)
 		{
-			if (IS_EMPTY_STRING_BUFFER(config->pgSetup.ssl.crlFile))
+			sformat_fail(connStringEnd,
+						 size - (connStringEnd - connectionString),
+						 "monitor sslrootcert option",
+						 "&sslrootcert=%s",
+						 config->pgSetup.ssl.caFile);
+			connStringEnd += strlen(connStringEnd);
+
+			if (!IS_EMPTY_STRING_BUFFER(config->pgSetup.ssl.crlFile))
 			{
-				connStringEnd +=
-					sformat(connStringEnd,
-							size - (connStringEnd - connectionString),
-							"&sslrootcert=%s",
-							config->pgSetup.ssl.caFile);
-			}
-			else
-			{
-				connStringEnd +=
-					sformat(connStringEnd,
-							size - (connStringEnd - connectionString),
-							"&sslrootcert=%s&sslcrl=%s",
-							config->pgSetup.ssl.caFile,
-							config->pgSetup.ssl.crlFile);
+				sformat_fail(connStringEnd,
+							 size - (connStringEnd - connectionString),
+							 "monitor sslcrl option",
+							 "&sslrootcert=%s&sslcrl=%s",
+							 config->pgSetup.ssl.caFile,
+							 config->pgSetup.ssl.crlFile);
+				connStringEnd += strlen(connStringEnd);
 			}
 		}
 	}

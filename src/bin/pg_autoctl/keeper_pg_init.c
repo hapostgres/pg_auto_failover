@@ -583,7 +583,8 @@ create_database_and_extension(Keeper *keeper)
 	log_trace("create_database_and_extension");
 
 	/* we didn't start PostgreSQL yet, also we just ran initdb */
-	sformat(hbaFilePath, MAXPGPATH, "%s/pg_hba.conf", pgSetup->pgdata);
+	sformat_fail(hbaFilePath, MAXPGPATH, "pg_hba.conf path", "%s/pg_hba.conf",
+				 pgSetup->pgdata);
 
 	/*
 	 * The Postgres URI given to the user by our facility is going to use

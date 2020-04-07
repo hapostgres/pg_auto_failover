@@ -799,7 +799,8 @@ pg_ctl_start(const char *pg_ctl,
 	int commandSize = 0;
 
 	join_path_components(logfile, pgdata, "startup.log");
-	sformat(pgport_option, sizeof(pgport_option), "\"-p %d\"", pgport);
+	sformat_fail(pgport_option, sizeof(pgport_option), "pg_ctl port option", "\"-p %d\"",
+				 pgport);
 
 	args[argsIndex++] = (char *) pg_ctl;
 	args[argsIndex++] = "--pgdata";
@@ -809,8 +810,9 @@ pg_ctl_start(const char *pg_ctl,
 
 	if (!IS_EMPTY_STRING_BUFFER(listen_addresses))
 	{
-		sformat(listen_addresses_option, sizeof(listen_addresses_option),
-				"\"-h %s\"", listen_addresses);
+		sformat_fail(listen_addresses_option, sizeof(listen_addresses_option),
+					 "pg_ctl listen adress option",
+					 "\"-h %s\"", listen_addresses);
 
 		args[argsIndex++] = "--options";
 		args[argsIndex++] = (char *) listen_addresses_option;
@@ -824,10 +826,11 @@ pg_ctl_start(const char *pg_ctl,
 			/* errors have already been logged */
 			return false;
 		}
-		sformat(option_unix_socket_directory,
-				sizeof(option_unix_socket_directory),
-				"\"-k \"%s\"\"",
-				env_pg_regress_sock_dir);
+		sformat_fail(option_unix_socket_directory,
+					 sizeof(option_unix_socket_directory),
+					 "pg_ctl unix socket directory option",
+					 "\"-k \"%s\"\"",
+					 env_pg_regress_sock_dir);
 
 		/* pg_ctl --options can be specified multiple times */
 		args[argsIndex++] = "--options";
@@ -1264,7 +1267,6 @@ prepare_primary_conninfo(char *primaryConnInfo,
 						 SSLOptions sslOptions,
 						 bool escape)
 {
-	int size = 0;
 	char escaped[BUFSIZE];
 	PQExpBuffer buffer = NULL;
 
@@ -1311,15 +1313,9 @@ prepare_primary_conninfo(char *primaryConnInfo,
 		}
 
 		/* now copy the buffer into primaryConnInfo for the caller */
-		size = sformat(primaryConnInfo, primaryConnInfoSize, "%s", escaped);
-
-		if (size == -1 || size > primaryConnInfoSize)
-		{
-			log_error("BUG: the escaped primary_conninfo requires %d bytes and "
-					  "pg_auto_failover only support up to %d bytes",
-					  size, primaryConnInfoSize);
-			return false;
-		}
+		sformat_fail(primaryConnInfo, primaryConnInfoSize, "escaped primary_conninfo",
+					 "%s",
+					 escaped);
 	}
 	else
 	{
@@ -1481,8 +1477,11 @@ pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *nodename)
 		return false;
 	}
 
-	size = sformat(pgSetup->ssl.serverKey, MAXPGPATH,
-				   "%s/server.key", pgSetup->pgdata);
+	sformat_fail(pgSetup->ssl.serverKey, MAXPGPATH, "ssl server key file path",
+				 "%s/server.key", pgSetup->pgdata);
+
+	sformat_fail(pgSetup->ssl.serverCert, MAXPGPATH, "ssl server cert file",
+				 "%s/server.crt", pgSetup->pgdata);
 
 	if (size == -1 || size > MAXPGPATH)
 	{
@@ -1492,26 +1491,7 @@ pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *nodename)
 		return false;
 	}
 
-	size = sformat(pgSetup->ssl.serverCert, MAXPGPATH,
-				   "%s/server.crt", pgSetup->pgdata);
-
-	if (size == -1 || size > MAXPGPATH)
-	{
-		log_error("BUG: the ssl server key file path requires %d bytes and "
-				  "pg_auto_failover only support up to %d bytes",
-				  size, MAXPGPATH);
-		return false;
-	}
-
-	size = sformat(subject, BUFSIZE, "/CN=%s", nodename);
-
-	if (size == -1 || size > BUFSIZE)
-	{
-		log_error("BUG: the ssl subject \"/CN=%s\" requires %d bytes and"
-				  "pg_auto_failover only support up to %d bytes",
-				  nodename, size, BUFSIZE);
-		return false;
-	}
+	sformat_fail(subject, BUFSIZE, "ssl subject", "/CN=%s", nodename);
 
 	log_info("Running %s req -new -x509 -days 365 -nodes -text "
 			 "-out %s -keyout %s -subj \"%s\"",

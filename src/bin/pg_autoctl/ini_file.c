@@ -139,11 +139,14 @@ ini_validate_options(IniOption *optionList)
 		int n;
 		char optionName[BUFSIZE];
 
-		n = sformat(optionName, BUFSIZE, "%s.%s", option->section, option->name);
+		sformat_fail(optionName, BUFSIZE, "ini option name", "%s.%s", option->section,
+					 option->name);
+		n = strlen(optionName);
 
 		if (option->optName)
 		{
-			sformat(optionName + n, BUFSIZE - n, " (--%s)", option->optName);
+			sformat_fail(optionName + n, BUFSIZE - n, "ini commandline option name",
+						 " (--%s)", option->optName);
 		}
 
 		switch (option->type)
@@ -304,8 +307,8 @@ ini_option_to_string(IniOption *option, char *dest, size_t size)
 
 		case INI_INT_T:
 		{
-			sformat(dest, size, "%d", *(option->intValue));
-			return true;
+			return sformat(dest, size, "ini stringified option", "%d",
+						   *(option->intValue));
 		}
 
 		default:
