@@ -444,8 +444,7 @@ cli_show_nodes_getopts(int argc, char **argv)
 
 			case 'g':
 			{
-				int scanResult = sscanf(optarg, "%d", &options.groupId);
-				if (scanResult == 0)
+				if (!stringToInt(optarg, &options.groupId))
 				{
 					log_fatal("--group argument is not a valid group ID: \"%s\"",
 							  optarg);
@@ -524,16 +523,7 @@ cli_show_nodes_getopts(int argc, char **argv)
 
 	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 	{
-		char *pgdata = getenv("PGDATA");
-
-		if (pgdata == NULL)
-		{
-			log_fatal("Failed to get PGDATA either from the environment "
-					  "or from --pgdata");
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-
-		strlcpy(options.pgSetup.pgdata, pgdata, MAXPGPATH);
+		get_env_pgdata_or_exit(options.pgSetup.pgdata);
 	}
 
 	keeperOptions = options;
@@ -630,7 +620,7 @@ cli_show_standby_names(int argc, char **argv)
 	}
 	else
 	{
-		(void) fprintf(stdout, "%s\n", synchronous_standby_names);
+		(void) fformat(stdout, "%s\n", synchronous_standby_names);
 	}
 }
 

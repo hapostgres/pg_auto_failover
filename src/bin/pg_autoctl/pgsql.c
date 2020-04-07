@@ -709,7 +709,7 @@ pgsql_set_synchronous_standby_names(PGSQL *pgsql,
 
 	log_info("Enabling synchronous replication");
 
-	if (snprintf(quoted, BUFSIZE, "'%s'", synchronous_standby_names) >= BUFSIZE)
+	if (sformat(quoted, BUFSIZE, "'%s'", synchronous_standby_names) >= BUFSIZE)
 	{
 		log_error("Failed to apply the synchronous_standby_names value \"%s\": "
 				  "pg_autoctl supports values up to %d bytes and this one "

@@ -259,7 +259,7 @@ monitor_print_nodes_as_json(Monitor *monitor, char *formation, int groupId)
 		return false;
 	}
 
-	fprintf(stdout, "%s\n", context.strVal);
+	fformat(stdout, "%s\n", context.strVal);
 
 	return true;
 }
@@ -401,7 +401,7 @@ monitor_print_other_nodes_as_json(Monitor *monitor,
 		return false;
 	}
 
-	fprintf(stdout, "%s\n", context.strVal);
+	fformat(stdout, "%s\n", context.strVal);
 
 	return true;
 }
@@ -834,7 +834,7 @@ parseNodeReplicationSettings(void *ctx, PGresult *result)
 	}
 
 	value = PQgetvalue(result, 0, 0);
-	if (sscanf(value, "%d", &context->candidatePriority) != 1)
+	if (!stringToInt(value, &context->candidatePriority))
 	{
 		log_error("Invalid failover candidate priority \"%s\" "
 				  "returned by monitor", value);
@@ -1199,7 +1199,7 @@ printNodeArray(NodeAddressArray *nodesArray)
 		printNodeEntry(node);
 	}
 
-	fprintf(stdout, "\n");
+	fformat(stdout, "\n");
 }
 
 
@@ -1225,10 +1225,10 @@ printNodeHeader(int maxNodeNameSize)
 		}
 	}
 
-	fprintf(stdout, "%3s | %*s | %6s | %18s | %8s\n",
+	fformat(stdout, "%3s | %*s | %6s | %18s | %8s\n",
 			"ID", maxNodeNameSize, "Host", "Port", "LSN", "Primary?");
 
-	fprintf(stdout, "%3s-+-%*s-+-%6s-+-%18s-+-%8s\n",
+	fformat(stdout, "%3s-+-%*s-+-%6s-+-%18s-+-%8s\n",
 			"---", maxNodeNameSize, nameSeparatorHeader, "------",
 			"------------------", "--------");
 }
@@ -1240,7 +1240,7 @@ printNodeHeader(int maxNodeNameSize)
 void
 printNodeEntry(NodeAddress *node)
 {
-	fprintf(stdout, "%3d | %s | %6d | %18s | %8s\n",
+	fformat(stdout, "%3d | %s | %6d | %18s | %8s\n",
 			node->nodeId, node->host, node->port, node->lsn,
 			node->isPrimary ? "yes" : "no");
 }
@@ -1297,7 +1297,7 @@ parseNodeState(void *ctx, PGresult *result)
 	}
 
 	value = PQgetvalue(result, 0, 3);
-	if (sscanf(value, "%d", &context->assignedState->candidatePriority) != 1)
+	if (!stringToInt(value, &context->assignedState->candidatePriority))
 	{
 		log_error("Invalid failover candidate priority \"%s\" "
 				  "returned by monitor", value);
@@ -2560,7 +2560,7 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 
 		if (select(sock + 1, &input_mask, NULL, NULL, NULL) < 0)
 		{
-			log_warn("select() failed: %s\n", strerror(errno));
+			log_warn("select() failed: %m");
 			return false;
 		}
 
@@ -2720,7 +2720,7 @@ monitor_wait_until_node_reported_state(Monitor *monitor,
 
 		if (select(sock + 1, &input_mask, NULL, NULL, NULL) < 0)
 		{
-			log_warn("select() failed: %s\n", strerror(errno));
+			log_warn("select() failed: %m");
 			return false;
 		}
 
