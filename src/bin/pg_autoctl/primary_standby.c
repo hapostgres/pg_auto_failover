@@ -525,13 +525,13 @@ primary_add_standby_to_hba(LocalPostgresServer *postgres,
 {
 	PGSQL *pgsql = &(postgres->sqlClient);
 	PostgresSetup *postgresSetup = &(postgres->postgresSetup);
-	char hbaFilePath[MAXPGPATH];
+	char hbaFilePath[MAXPGPATH] = { 0 };
 	char *authMethod = pg_setup_get_auth_method(postgresSetup);
 
 	if (replicationPassword == NULL)
 	{
 		/* most authentication methods require a password */
-		if (strcmp(authMethod, "trust") != 0 ||
+		if (strcmp(authMethod, "trust") != 0 &&
 			strcmp(authMethod, SKIP_HBA_AUTH_METHOD) != 0)
 		{
 			log_warn("Granting replication connection for \"%s\" "
@@ -544,13 +544,7 @@ primary_add_standby_to_hba(LocalPostgresServer *postgres,
 
 	log_trace("primary_add_standby_to_hba");
 
-	if (!pgsql_get_hba_file_path(pgsql, hbaFilePath, MAXPGPATH))
-	{
-		log_error("Failed to add the standby node to PostgreSQL HBA file: "
-				  "couldn't get the standby pg_hba file location from the local "
-				  "postgres server.");
-		return false;
-	}
+	sformat(hbaFilePath, MAXPGPATH, "%s/pg_hba.conf", postgresSetup->pgdata);
 
 	if (!pghba_ensure_host_rule_exists(hbaFilePath,
 									   postgresSetup->ssl.active,
