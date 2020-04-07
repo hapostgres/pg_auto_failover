@@ -131,16 +131,16 @@ def test_016_multiple_manual_failover_verify_replication_slots():
 
     print("Calling pgautofailover.failover() on the monitor")
     monitor.failover()
-    assert node2.wait_until_state(target_state="secondary")
-    assert node3.wait_until_state(target_state="primary")
+    assert node2.wait_until_state(target_state="secondary", other_node=node3)
+    assert node3.wait_until_state(target_state="primary", other_node=node2)
 
     assert node2.has_needed_replication_slots()
     assert node3.has_needed_replication_slots()
 
     print("Calling pgautofailover.failover() on the monitor")
     monitor.failover()
-    assert node2.wait_until_state(target_state="primary")
-    assert node3.wait_until_state(target_state="secondary")
+    assert node2.wait_until_state(target_state="primary", other_node=node3)
+    assert node3.wait_until_state(target_state="secondary", other_node=node2)
 
     assert node2.has_needed_replication_slots()
     assert node3.has_needed_replication_slots()

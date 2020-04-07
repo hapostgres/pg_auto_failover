@@ -596,7 +596,9 @@ class DataNode(PGNode):
             pass
 
     def wait_until_state(self, target_state,
-                         timeout=STATE_CHANGE_TIMEOUT, sleep_time=1, other_node=None):
+                         timeout=STATE_CHANGE_TIMEOUT,
+                         sleep_time=1,
+                         other_node=None):
         """
         Waits until this data node reaches the target state, and then returns
         True. If this doesn't happen until "timeout" seconds, returns False.
