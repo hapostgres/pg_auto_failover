@@ -774,10 +774,10 @@ BuildNodesArrayValues(NodeAddressArray *nodeArray,
 							   "%s($%d, $%d%s)",
 							   valuesIndex == 0 ? "" : ",",
 
-							   /* we begin at $1 here: intentional off-by-one */
-							   idParamIndex+1, lsnParamIndex+1,
+		                       /* we begin at $1 here: intentional off-by-one */
+							   idParamIndex + 1, lsnParamIndex + 1,
 
-							   /* cast only the first row */
+		                       /* cast only the first row */
 							   valuesIndex == 0 ? "::pg_lsn" : "");
 
 		if (valuesIndex > BUFSIZE)
