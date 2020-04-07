@@ -592,8 +592,8 @@ pg_basebackup(const char *pgdata,
 		return false;
 	}
 
-	log_info("Running %s -w -d '%s' --pgdata %s -U %s --write-recovery-conf "
-			 "--max-rate %s --wal-method=stream --slot %s ...",
+	log_info(" %s -w -d '%s' --pgdata %s -U %s --write-recovery-conf "
+			 "--max-rate %s --wal-method=stream --slot %s",
 			 pg_basebackup,
 			 primaryConnInfo,
 			 replicationSource->backupDir,
@@ -693,8 +693,7 @@ pg_rewind(const char *pgdata,
 		return false;
 	}
 
-	log_info("Running %s --target-pgdata \"%s\" "
-			 "--source-server \"%s\" --progress ...",
+	log_info(" %s --target-pgdata \"%s\" --source-server \"%s\" --progress",
 			 pg_rewind, pgdata, primaryConnInfo);
 
 	program = run_program(pg_rewind,
@@ -1600,7 +1599,7 @@ pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *nodename)
 		return false;
 	}
 
-	log_info("Running %s req -new -x509 -days 365 -nodes -text "
+	log_info(" %s req -new -x509 -days 365 -nodes -text "
 			 "-out %s -keyout %s -subj \"%s\"",
 			 openssl,
 			 pgSetup->ssl.serverCert,
