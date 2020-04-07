@@ -820,7 +820,6 @@ fsm_maintain_replication_slots(Keeper *keeper)
 }
 
 
-
 /*
  * fsm_prepare_standby_for_promotion used when the standby is asked to prepare
  * its own promotion.

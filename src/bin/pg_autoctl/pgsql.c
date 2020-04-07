@@ -610,7 +610,7 @@ postgres_sprintf_replicationSlotName(int nodeId, char *slotName, int size)
 
 
 /*
- * pgsql_set_synchronous_standby_names set synchronous_standby_names ton the
+ * pgsql_set_synchronous_standby_names set synchronous_standby_names on the
  * local Postgres to the value computed on the pg_auto_failover monitor.
  */
 bool
@@ -761,18 +761,21 @@ BuildNodesArrayValues(NodeAddressArray *nodeArray,
 		NodeAddress *node = &(nodeArray->nodes[nodeIndex]);
 		IntString nodeIdString = intToString(node->nodeId);
 
-		paramTypes[paramIndex] = INT4OID;
-		paramValues[paramIndex++] = strdup(nodeIdString.strValue);
+		int idParamIndex = paramIndex;
+		int lsnParamIndex = paramIndex + 1;
 
-		paramTypes[paramIndex] = LSNOID;
-		paramValues[paramIndex++] = node->lsn;
+		paramTypes[idParamIndex] = INT4OID;
+		paramValues[idParamIndex] = strdup(nodeIdString.strValue);
+
+		paramTypes[lsnParamIndex] = LSNOID;
+		paramValues[lsnParamIndex] = node->lsn;
 
 		valuesIndex += snprintf(buffer + valuesIndex, BUFSIZE - valuesIndex,
 								"%s($%d, $%d%s)",
 								valuesIndex == 0 ? "" : ",",
 
 		                        /* we begin at $1 here: intentional off-by-one */
-								paramIndex - 1, paramIndex,
+								idParamIndex+1, lsnParamIndex+1,
 
 		                        /* cast only the first row */
 								valuesIndex == 0 ? "::pg_lsn" : "");
@@ -784,6 +787,9 @@ BuildNodesArrayValues(NodeAddressArray *nodeArray,
 					  "pgsql_replication_slot_maintain");
 			return false;
 		}
+
+		/* prepare next round */
+		paramIndex += 2;
 	}
 
 	/* when we didn't find any node to process, return our empty set */
@@ -818,7 +824,7 @@ BuildNodesArrayValues(NodeAddressArray *nodeArray,
  * nodes that have been removed. We call that function on the primary, where
  * the slots are maintained by the replication protocol.
  *
- * On the standby nodes, we advance the lots ourselves and use the other
+ * On the standby nodes, we advance the slots ourselves and use the other
  * function pgsql_replication_slot_maintain which is complete (create, drop,
  * advance).
  */
@@ -828,8 +834,9 @@ pgsql_replication_slot_drop_removed(PGSQL *pgsql, NodeAddressArray *nodeArray)
 	int bytes;
 	char sql[2 * BUFSIZE] = { 0 };
 	char values[BUFSIZE] = { 0 };
-	char *sqlTemplate =
 
+	/* *INDENT-OFF* */
+	char *sqlTemplate =
 		/*
 		 * We could simplify the writing of this query, but we prefer that it
 		 * looks as much as possible like the query used in
@@ -838,14 +845,15 @@ pgsql_replication_slot_drop_removed(PGSQL *pgsql, NodeAddressArray *nodeArray)
 		 */
 		"WITH nodes(slot_name, lsn) as ("
 		" SELECT '" REPLICATION_SLOT_NAME_DEFAULT "_' || id, lsn"
-												  "   FROM (%s) as sb(id, lsn) "
-												  "), \n"
-												  "dropped as ("
-												  " SELECT slot_name, pg_drop_replication_slot(slot_name) "
-												  "   FROM pg_replication_slots pgrs LEFT JOIN nodes USING(slot_name) "
-												  "  WHERE nodes.slot_name IS NULL "
-												  ") \n"
-												  "SELECT 'drop', slot_name, NULL::pg_lsn FROM dropped";
+		"   FROM (%s) as sb(id, lsn) "
+		"), \n"
+		"dropped as ("
+		" SELECT slot_name, pg_drop_replication_slot(slot_name) "
+		"   FROM pg_replication_slots pgrs LEFT JOIN nodes USING(slot_name) "
+		"  WHERE nodes.slot_name IS NULL "
+		") \n"
+		"SELECT 'drop', slot_name, NULL::pg_lsn FROM dropped";
+	/* *INDENT-ON* */
 
 	Oid paramTypes[NODE_ARRAY_MAX_COUNT * 2] = { 0 };
 	const char *paramValues[NODE_ARRAY_MAX_COUNT * 2] = { 0 };
@@ -884,33 +892,36 @@ pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray)
 	int bytes;
 	char sql[2 * BUFSIZE] = { 0 };
 	char values[BUFSIZE] = { 0 };
+
+	/* *INDENT-OFF* */
 	char *sqlTemplate =
 		"WITH nodes(slot_name, lsn) as ("
 		" SELECT '" REPLICATION_SLOT_NAME_DEFAULT "_' || id, lsn"
-												  "   FROM (%s) as sb(id, lsn) "
-												  "), \n"
-												  "dropped as ("
-												  " SELECT slot_name, pg_drop_replication_slot(slot_name) "
-												  "   FROM pg_replication_slots pgrs LEFT JOIN nodes USING(slot_name) "
-												  "  WHERE nodes.slot_name IS NULL "
-												  "), \n"
-												  "advanced as ("
-												  "SELECT a.slot_name, a.end_lsn"
-												  "  FROM pg_replication_slots JOIN nodes USING(slot_name), "
-												  "       LATERAL pg_replication_slot_advance(slot_name, lsn) a"
-												  " WHERE nodes.lsn <> '0/0'"
-												  "), \n"
-												  "created as ("
-												  "SELECT c.slot_name, c.lsn "
-												  "  FROM nodes LEFT JOIN pg_replication_slots pgrs USING(slot_name), "
-												  "       LATERAL pg_create_physical_replication_slot(slot_name, true) c"
-												  " WHERE pgrs.slot_name IS NULL "
-												  ") \n"
-												  "SELECT 'create', slot_name, lsn FROM created "
-												  " union all "
-												  "SELECT 'drop', slot_name, NULL::pg_lsn FROM dropped "
-												  " union all "
-												  "SELECT 'advance', slot_name, end_lsn FROM advanced ";
+		"   FROM (%s) as sb(id, lsn) "
+		"), \n"
+		"dropped as ("
+		" SELECT slot_name, pg_drop_replication_slot(slot_name) "
+		"   FROM pg_replication_slots pgrs LEFT JOIN nodes USING(slot_name) "
+		"  WHERE nodes.slot_name IS NULL "
+		"), \n"
+		"advanced as ("
+		"SELECT a.slot_name, a.end_lsn"
+		"  FROM pg_replication_slots JOIN nodes USING(slot_name), "
+		"       LATERAL pg_replication_slot_advance(slot_name, lsn) a"
+		" WHERE nodes.lsn <> '0/0'"
+		"), \n"
+		"created as ("
+		"SELECT c.slot_name, c.lsn "
+		"  FROM nodes LEFT JOIN pg_replication_slots pgrs USING(slot_name), "
+		"       LATERAL pg_create_physical_replication_slot(slot_name, true) c"
+		" WHERE pgrs.slot_name IS NULL "
+		") \n"
+		"SELECT 'create', slot_name, lsn FROM created "
+		" union all "
+		"SELECT 'drop', slot_name, NULL::pg_lsn FROM dropped "
+		" union all "
+		"SELECT 'advance', slot_name, end_lsn FROM advanced ";
+	/* *INDENT-ON* */
 
 	Oid paramTypes[NODE_ARRAY_MAX_COUNT * 2] = { 0 };
 	const char *paramValues[NODE_ARRAY_MAX_COUNT * 2] = { 0 };
@@ -958,6 +969,7 @@ parseReplicationSlotMaintain(void *ctx, PGresult *result)
 
 	for (rowNumber = 0; rowNumber < PQntuples(result); rowNumber++)
 	{
+		/* operation and slotName can't be NULL given how the SQL is built */
 		char *operation = PQgetvalue(result, rowNumber, 0);
 		char *slotName = PQgetvalue(result, rowNumber, 1);
 		char *lsn = PQgetisnull(result, rowNumber, 2) ? ""
