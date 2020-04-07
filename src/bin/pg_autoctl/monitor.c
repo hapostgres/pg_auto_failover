@@ -1763,7 +1763,7 @@ printLastEvents(void *ctx, PGresult *result)
 		char node[BUFSIZE];
 
 		/* for our grid alignment output it's best to have a single col here */
-		sformat(node, BUFSIZE, "%s/%s", groupId, nodeId);
+		(void) sformat(node, BUFSIZE, "groupid and nodeid", "%s/%s", groupId, nodeId);
 
 		fformat(stdout, "%30s | %10s | %6s | %18s | %18s | %s\n",
 				eventTime, formation, node,

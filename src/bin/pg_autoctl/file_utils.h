@@ -43,7 +43,19 @@ bool normalize_filename(const char *filename, char *dst, int size);
 int fformat(FILE *stream, const char *fmt, ...)
 __attribute__((format(printf, 2, 3)));
 
-int sformat(char *str, size_t count, const char *fmt, ...)
-__attribute__((format(printf, 3, 4)));
+bool sformat(char *str, size_t count, const char *result_name, const char *fmt, ...)
+__attribute__((format(printf, 4, 5)));
+
+#define sformat_fail(str, count, result_name, fmt, ...) \
+	if (!sformat(str, count, result_name, fmt, __VA_ARGS__)) { \
+		log_debug("lineinfo for string formatting failure"); \
+		return false; \
+	}
+
+#define sformat_exit(str, count, result_name, fmt, ...) \
+	if (!sformat(str, count, result_name, fmt, __VA_ARGS__)) { \
+		log_debug("lineinfo for string formatting failure"); \
+		exit(EXIT_CODE_BAD_CONFIG); \
+	}
 
 #endif /* FILE_UTILS_H */

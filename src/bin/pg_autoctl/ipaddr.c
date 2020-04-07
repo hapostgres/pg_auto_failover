@@ -95,7 +95,7 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 
 	if (ipAddr != NULL)
 	{
-		sformat(localIpAddress, size, "%s", buffer);
+		sformat_fail(localIpAddress, size, "local ip address", "%s", buffer);
 	}
 	else
 	{
@@ -253,7 +253,7 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 		return false;
 	}
 
-	sformat(localCIDR, size, "%s/%d", network, prefix);
+	sformat_fail(localCIDR, size, "local CIDR", "%s/%d", network, prefix);
 
 	return true;
 }
@@ -585,7 +585,7 @@ findHostnameFromLocalIpAddress(char *localIpAddress, char *hostname, int size)
 			return false;
 		}
 
-		sformat(hostname, size, "%s", hbuf);
+		sformat_fail(hostname, size, "hostname", "%s", hbuf);
 
 		/* stop at the first hostname found */
 		break;
