@@ -1400,7 +1400,7 @@ pg_write_standby_signal(const char *configFilePath,
 	log_trace("pg_write_standby_signal");
 
 	/* in-place edit quotedSlotName to its expected value  */
-	snprintf(quotedSlotName, BUFSIZE, "'%s'", replicationSlotName);
+	sformat(quotedSlotName, sizeof(quotedSlotName), "'%s'", replicationSlotName);
 
 	/*
 	 * First install the standby.signal file, so that if there's a problem

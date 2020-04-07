@@ -770,15 +770,15 @@ BuildNodesArrayValues(NodeAddressArray *nodeArray,
 		paramTypes[lsnParamIndex] = LSNOID;
 		paramValues[lsnParamIndex] = node->lsn;
 
-		valuesIndex += snprintf(buffer + valuesIndex, BUFSIZE - valuesIndex,
-								"%s($%d, $%d%s)",
-								valuesIndex == 0 ? "" : ",",
+		valuesIndex += sformat(buffer + valuesIndex, BUFSIZE - valuesIndex,
+							   "%s($%d, $%d%s)",
+							   valuesIndex == 0 ? "" : ",",
 
-		                        /* we begin at $1 here: intentional off-by-one */
-								idParamIndex+1, lsnParamIndex+1,
+							   /* we begin at $1 here: intentional off-by-one */
+							   idParamIndex+1, lsnParamIndex+1,
 
-		                        /* cast only the first row */
-								valuesIndex == 0 ? "::pg_lsn" : "");
+							   /* cast only the first row */
+							   valuesIndex == 0 ? "::pg_lsn" : "");
 
 		if (valuesIndex > BUFSIZE)
 		{
@@ -796,7 +796,7 @@ BuildNodesArrayValues(NodeAddressArray *nodeArray,
 	if (paramIndex == 0)
 	{
 		/* we know it fits, size is BUFSIZE or more */
-		sprintf(values,
+		sformat(values, size,
 				"SELECT id, lsn "
 				"FROM (values (null::int, null::pg_lsn)) as t(id, lsn) "
 				"where false");
@@ -805,7 +805,7 @@ BuildNodesArrayValues(NodeAddressArray *nodeArray,
 	{
 		int bytes = 0;
 
-		bytes = snprintf(values, size, "values %s", buffer);
+		bytes = sformat(values, size, "values %s", buffer);
 
 		if (bytes > size)
 		{
@@ -864,7 +864,7 @@ pgsql_replication_slot_drop_removed(PGSQL *pgsql, NodeAddressArray *nodeArray)
 										   values, BUFSIZE);
 
 	/* add the computed ($1,$2), ... string to the query "template" */
-	bytes = snprintf(sql, 2 * BUFSIZE, sqlTemplate, values);
+	bytes = sformat(sql, 2 * BUFSIZE, sqlTemplate, values);
 
 	if (bytes > 2 * BUFSIZE)
 	{
@@ -932,7 +932,7 @@ pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray)
 										   values, BUFSIZE);
 
 	/* add the computed ($1,$2), ... string to the query "template" */
-	bytes = snprintf(sql, 2 * BUFSIZE, sqlTemplate, values);
+	bytes = sformat(sql, 2 * BUFSIZE, sqlTemplate, values);
 
 	if (bytes > 2 * BUFSIZE)
 	{
