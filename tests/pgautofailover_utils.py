@@ -6,6 +6,7 @@ import time
 import network
 import psycopg2
 import subprocess
+import datetime as dt
 from enum import Enum
 
 COMMAND_TIMEOUT = 60
@@ -260,10 +261,29 @@ class PGNode:
         Stops the postgres process by running:
           pg_ctl -D ${self.datadir} --wait --mode fast stop
         """
-        stop_command = [shutil.which('pg_ctl'), '-D', self.datadir,
-                        '--wait', '--mode', 'fast', 'stop']
-        stop_proc = self.vnode.run(stop_command)
-        out, err = stop_proc.communicate(timeout=10)
+        # pg_ctl stop is racey when another process is trying to start postgres
+        # again in the background. It will not finish in that case. pg_autoctl
+        # does this, so we try stopping postgres a couple of times. This way we
+        # make sure the race does not impact our tests.
+        #
+        # The race can be easily reproduced by in one shell doing:
+        #    while true; do pg_ctl --pgdata monitor/ start; done
+        # And in another:
+        #    pg_ctl --pgdata monitor --wait --mode fast stop
+        # The second command will not finish, since the first restarts postgres
+        # before the second finds out it has been killed.
+
+        for i in range(60):
+            stop_command = [shutil.which('pg_ctl'), '-D', self.datadir,
+                            '--wait', '--mode', 'fast', 'stop']
+            stop_proc = self.vnode.run(stop_command)
+            try:
+                out, err = stop_proc.communicate(timeout=1)
+                break
+            except subprocess.TimeoutExpired:
+                pass
+        else:
+            raise Exception("Postgres could not be stopped after 60 attempts")
         if stop_proc.returncode > 0:
             print("stopping postgres for '%s' failed, out: %s\n, err: %s"
                   %(self.vnode.address, out, err))
@@ -338,14 +358,15 @@ class PGNode:
         """
         Waits until the underlying Postgres process is running.
         """
-        for i in range(timeout):
+        wait_until = dt.datetime.now() + dt.timedelta(seconds=timeout)
+        while wait_until > dt.datetime.now():
             time.sleep(1)
 
             if self.pg_is_running():
                 return True
 
         else:
-            print("Postgres is still not running in %s after %d attempts" %
+            print("Postgres is still not running in %s after %d seconds" %
                   (self.datadir, timeout))
             return False
 
@@ -543,7 +564,8 @@ class DataNode(PGNode):
         True. If this doesn't happen until "timeout" seconds, returns False.
         """
         prev_state = None
-        for i in range(timeout):
+        wait_until = dt.datetime.now() + dt.timedelta(seconds=timeout)
+        while wait_until > dt.datetime.now():
             if other_node:
                 other_node.sleep(sleep_time / 2)
                 self.sleep(sleep_time / 2)
@@ -566,11 +588,11 @@ class DataNode(PGNode):
 
             prev_state = current_state
 
-        print("%s didn't reach %s after %d attempts" %
+        print("%s didn't reach %s after %d seconds" %
               (self.datadir, target_state, timeout))
 
         error_msg = (f"{self.datadir} failed to reach {target_state} "
-                     f"after {timeout} attempts\n")
+                     f"after {timeout} seconds\n")
         events = self.get_events_str()
         error_msg += f"MONITOR EVENTS:\n{events}\n"
 
