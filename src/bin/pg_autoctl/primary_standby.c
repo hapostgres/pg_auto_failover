@@ -21,6 +21,9 @@
 static void local_postgres_update_pg_failures_tracking(LocalPostgresServer *postgres,
 													   bool pgIsRunning);
 
+static bool local_postgres_update(LocalPostgresServer *postgres,
+								  bool postgresNotRunningIsOk);
+
 /*
  * Default settings for postgres databases managed by pg_auto_failover.
  * These settings primarily ensure that streaming replication is
@@ -129,6 +132,27 @@ void
 local_postgres_finish(LocalPostgresServer *postgres)
 {
 	pgsql_finish(&postgres->sqlClient);
+}
+
+
+static bool
+local_postgres_update(LocalPostgresServer *postgres, bool postgresNotRunningIsOk)
+{
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+	PostgresSetup newPgSetup = { 0 };
+	bool missingPgdataIsOk = false;
+
+	if (!pg_setup_init(&newPgSetup, pgSetup,
+					   missingPgdataIsOk,
+					   postgresNotRunningIsOk))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	(void) local_postgres_init(postgres, &newPgSetup);
+
+	return true;
 }
 
 
@@ -592,6 +616,7 @@ standby_init_database(LocalPostgresServer *postgres,
 					  const char *nodename)
 {
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+	char configFilePath[MAXPGPATH] = { 0 };
 
 	log_trace("standby_init_database");
 	log_info("Initialising PostgreSQL as a hot standby");
@@ -615,8 +640,31 @@ standby_init_database(LocalPostgresServer *postgres,
 	 * Now, we know that pgdata either doesn't exists or belongs to a stopped
 	 * PostgreSQL instance. We can safely proceed with pg_basebackup.
 	 */
-	if (!pg_basebackup(pgSetup->pgdata, pgSetup->pg_ctl, replicationSource))
+	if (!pg_basebackup(pgSetup->pgdata,
+					   pgSetup->pg_ctl,
+					   replicationSource))
 	{
+		return false;
+	}
+
+	/* configFilePath = $PGDATA/postgresql.conf */
+	join_path_components(configFilePath, pgSetup->pgdata, "postgresql.conf");
+
+	/* we have a new PGDATA, update our pgSetup information */
+	if (!local_postgres_update(postgres, true))
+	{
+		log_error("Failed to setup Postgres as a standby after pg_basebackup, "
+				  "see above for details");
+		return false;
+	}
+
+	/* now setup the replication configuration (primary_conninfo etc) */
+	if (!pg_setup_standby_mode(pgSetup->control.pg_control_version,
+							   configFilePath,
+							   pgSetup->pgdata,
+							   replicationSource))
+	{
+		log_error("Failed to setup Postgres as a standby after pg_basebackup");
 		return false;
 	}
 

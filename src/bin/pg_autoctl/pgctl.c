@@ -592,7 +592,7 @@ pg_basebackup(const char *pgdata,
 		return false;
 	}
 
-	log_info(" %s -w -d '%s' --pgdata %s -U %s --write-recovery-conf "
+	log_info(" %s -w -d '%s' --pgdata %s -U %s "
 			 "--max-rate %s --wal-method=stream --slot %s",
 			 pg_basebackup,
 			 primaryConnInfo,
@@ -608,7 +608,6 @@ pg_basebackup(const char *pgdata,
 						  "-U", replicationSource->userName,
 						  "--verbose",
 						  "--progress",
-						  "--write-recovery-conf",
 						  "--max-rate", replicationSource->maximumBackupRate,
 						  "--wal-method=stream",
 						  "--slot", replicationSource->slotName,
@@ -1110,6 +1109,14 @@ pg_setup_standby_mode(uint32_t pg_control_version,
 		return false;
 	}
 
+	if (pg_control_version < 1000)
+	{
+		log_fatal("pg_auto_failover does not support PostgreSQL before "
+				  "Postgres 10, we have pg_control version numer %d from "
+				  "pg_controldata \"%s\"",
+				  pg_control_version, pgdata);
+		return false;
+	}
 	if (pg_control_version < 1200)
 	{
 		/*
@@ -1408,7 +1415,12 @@ pg_write_standby_signal(const char *configFilePath,
 	 */
 	join_path_components(signalFilePath, pgdata, "standby.signal");
 
-	log_info("Creating the standby signal file at \"%s\"", signalFilePath);
+	path_in_same_directory(configFilePath, AUTOCTL_STANDBY_CONF_FILENAME,
+						   standbyConfigFilePath);
+
+	log_info("Creating the standby signal file at \"%s\", "
+			 "and replication setup at \"%s\"",
+			 signalFilePath, standbyConfigFilePath);
 
 	if (!write_file("", 0, signalFilePath))
 	{
@@ -1419,11 +1431,9 @@ pg_write_standby_signal(const char *configFilePath,
 	/*
 	 * Now write the standby settings to postgresql-auto-failover-standby.conf
 	 * and include that file from postgresql.conf.
+	 *
+	 * we pass NULL as pgSetup because we know it won't be used...
 	 */
-	path_in_same_directory(configFilePath, AUTOCTL_STANDBY_CONF_FILENAME,
-						   standbyConfigFilePath);
-
-	/* we pass NULL as pgSetup because we know it won't be used... */
 	if (!ensure_default_settings_file_exists(standbyConfigFilePath,
 											 standby_settings,
 											 NULL))
@@ -1498,34 +1508,6 @@ pg_cleanup_standby_mode(uint32_t pg_control_version,
 		{
 			/* write_file logs I/O error */
 			return false;
-		}
-
-		/* clean-up the postgresql.auto.conf file */
-		if (pg_is_running(pg_ctl, pgdata))
-		{
-			if (!pgsql_reset_primary_conninfo(pgsql))
-			{
-				log_error("Failed to RESET primary_conninfo");
-				return false;
-			}
-		}
-		else
-		{
-			const char *autoConfFilename = "postgresql.auto.conf";
-			const char *paramsRegex = "^(primary_conninfo|primary_slot_name) = ";
-			char autoConfFilePath[MAXPGPATH];
-
-			join_path_components(autoConfFilePath, pgdata, autoConfFilename);
-
-			if (!rewrite_file_skipping_lines_matching(
-					autoConfFilePath,
-					paramsRegex))
-			{
-				log_error("Failed to edit postgresql.auto.conf to remove "
-						  "current settings for primary_conninfo and "
-						  "primary_slot_name, see above for details");
-				return false;
-			}
 		}
 	}
 
