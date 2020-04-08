@@ -260,10 +260,19 @@ class PGNode:
         Stops the postgres process by running:
           pg_ctl -D ${self.datadir} --wait --mode fast stop
         """
-        stop_command = [shutil.which('pg_ctl'), '-D', self.datadir,
-                        '--wait', '--mode', 'fast', 'stop']
-        stop_proc = self.vnode.run(stop_command)
-        out, err = stop_proc.communicate(timeout=10)
+        for i in range(60):
+            stop_command = [shutil.which('pg_ctl'), '-D', self.datadir,
+                            '--wait', '--mode', 'fast', 'stop']
+            stop_proc = self.vnode.run(stop_command)
+            try:
+                out, err = stop_proc.communicate(timeout=1)
+                break
+            except subprocess.TimeoutExpired:
+                # Sometimes pg_autoctl will restart postgres before pg_ctl
+                # notices that it's killed.
+                pass
+        else:
+            raise Exception("Postgres could not be stopped after 60 attempts")
         if stop_proc.returncode > 0:
             print("stopping postgres for '%s' failed, out: %s\n, err: %s"
                   %(self.vnode.address, out, err))
