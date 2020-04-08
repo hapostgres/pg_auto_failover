@@ -678,7 +678,7 @@ SELECT reportedstate
         """
         Returns the current list of events from the monitor.
         """
-        last_events_query = "select nodeid, nodename, " \
+        last_events_query = "select eventtime, nodeid, nodename, " \
             "reportedstate, goalstate, " \
             "reportedrepstate, reportedlsn, description " \
             "from pgautofailover.last_events('default', count => 20)"
@@ -687,12 +687,12 @@ SELECT reportedstate
 
     def get_events_str(self):
         return "\n".join(
-            ["%s:%-14s %17s/%-17s %7s %10s %s" % ("id", "nodename",
-                                                  "state", "goal state",
-                                                  "repl st", "lsn", "event")]
+            ["%s %25s:%-14s %17s/%-17s %7s %10s %s" % ("eventtime", "id", "nodename",
+                                                       "state", "goal state",
+                                                       "repl st", "lsn", "event")]
             +
-            ["%2d:%-14s %17s/%-17s %7s %10s %s" % (id, n, rs, gs, reps, lsn, desc)
-             for id, n, rs, gs, reps, lsn, desc in self.get_events()])
+            ["%s %2d:%-14s %17s/%-17s %7s %10s %s" % result
+             for result in self.get_events()])
 
     def enable_maintenance(self):
         """
