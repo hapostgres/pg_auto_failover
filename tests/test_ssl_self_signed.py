@@ -80,10 +80,8 @@ def test_003_init_secondary():
     assert node2.wait_until_state(target_state="secondary", other_node=node1)
     assert node1.wait_until_state(target_state="primary", other_node=node2)
 
-    # TODO: Uncomment when we fix the bug that secondary has the same cert/key
-    # path as primary
-    # check_ssl_files(node1)
-    check_ssl_ciphers(node1)
+    check_ssl_files(node2)
+    check_ssl_ciphers(node2)
 
 
 def test_004_failover():
