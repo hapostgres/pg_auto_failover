@@ -743,24 +743,10 @@ set_program_absolute_path(char *program, int size)
 
 
 /*
- * normalize_filename_inplace returns the real path of a given filename that
- * belongs to an existing file on-disk, resolving symlinks and pruning
- * double-slashes and other weird constructs. It stores it back in filename,
- * which is assumed to be a buffer of size MAXPGPATH.
- */
-bool
-normalize_filename_inplace(char *filename)
-{
-	char oldFilename[MAXPGPATH];
-	strlcpy(oldFilename, filename, MAXPGPATH);
-	return normalize_filename(oldFilename, filename, MAXPGPATH);
-}
-
-
-/*
  * normalize_filename returns the real path of a given filename that belongs to
  * an existing file on-disk, resolving symlinks and pruning double-slashes and
- * other weird constructs.
+ * other weird constructs. filename and dst are allowed to point to the same
+ * adress.
  */
 bool
 normalize_filename(const char *filename, char *dst, int size)

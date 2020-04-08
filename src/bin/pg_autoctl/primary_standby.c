@@ -599,7 +599,7 @@ standby_init_database(LocalPostgresServer *postgres,
 	/*
 	 * Now that we now that pgdata exists, lets normalize the path.
 	 */
-	if (!normalize_filename_inplace(pgSetup->pgdata))
+	if (!normalize_filename(pgSetup->pgdata, pgSetup->pgdata, MAXPGPATH))
 	{
 		return false;
 	}
