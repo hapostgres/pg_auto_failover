@@ -349,16 +349,11 @@ That will be the primary server.
 
 .. code-block:: bash
 
-   # connect to database via psql on the app vm
-   ssh -l ha-admin -t `vm_ip app` psql "\"$APP_DB_URI\""
-
-Within psql:
-
-.. code-block:: psql
-
-   -- create a table with a million rows
-   CREATE TABLE foo AS SELECT generate_series(1,1000000) bar;
-   \q
+   # connect to database via psql on the app vm and
+   # create a table with a million rows
+   ssh -l ha-admin -t `vm_ip app` -- \
+     psql "\"$APP_DB_URI\"" \
+       -c "\"CREATE TABLE foo AS SELECT generate_series(1,1000000) bar;\""
 
 Cause a failover
 ----------------
@@ -385,14 +380,9 @@ that the data is still present:
 .. code-block:: bash
 
    # connect to database via psql on the app vm
-   ssh -l ha-admin -t `vm_ip app` psql "\"$APP_DB_URI\""
-
-Within psql:
-
-.. code-block:: psql
-
-   SELECT count(*) FROM foo;
-   \q
+   ssh -l ha-admin -t `vm_ip app` -- \
+     psql "\"$APP_DB_URI\"" \
+       -c "\"SELECT count(*) FROM foo;\""
 
 It shows
 
@@ -446,14 +436,9 @@ Let's add some data while B is offline.
 
    # notice how $APP_DB_URI continues to work no matter which node
    # is serving as primary
-   ssh -l ha-admin -t `vm_ip app` psql "\"$APP_DB_URI\""
-
-Within psql:
-
-.. code-block:: psql
-
-   INSERT INTO foo SELECT generate_series(1000001, 2000000);
-   \q
+   ssh -l ha-admin -t `vm_ip app` -- \
+     psql "\"$APP_DB_URI\"" \
+       -c "\"INSERT INTO foo SELECT generate_series(1000001, 2000000);\""
 
 Resurrect node B
 ----------------
@@ -484,14 +469,9 @@ are still present.
 
 .. code-block:: bash
 
-   ssh -l ha-admin -t `vm_ip app` psql "\"$APP_DB_URI\""
-
-Within psql:
-
-.. code-block:: psql
-
-   SELECT count(*) FROM foo;
-   \q
+   ssh -l ha-admin -t `vm_ip app` -- \
+     psql "\"$APP_DB_URI\"" \
+       -c "\"SELECT count(*) FROM foo;\""
 
 It shows
 
