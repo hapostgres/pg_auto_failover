@@ -6,6 +6,7 @@ import time
 import network
 import psycopg2
 import subprocess
+import datetime as dt
 from enum import Enum
 
 COMMAND_TIMEOUT = 60
@@ -347,14 +348,15 @@ class PGNode:
         """
         Waits until the underlying Postgres process is running.
         """
-        for i in range(timeout):
+        wait_until = dt.datetime.now() + dt.timedelta(seconds=timeout)
+        while wait_until > dt.datetime.now():
             time.sleep(1)
 
             if self.pg_is_running():
                 return True
 
         else:
-            print("Postgres is still not running in %s after %d attempts" %
+            print("Postgres is still not running in %s after %d seconds" %
                   (self.datadir, timeout))
             return False
 
@@ -552,7 +554,8 @@ class DataNode(PGNode):
         True. If this doesn't happen until "timeout" seconds, returns False.
         """
         prev_state = None
-        for i in range(timeout):
+        wait_until = dt.datetime.now() + dt.timedelta(seconds=timeout)
+        while wait_until > dt.datetime.now():
             if other_node:
                 other_node.sleep(sleep_time / 2)
                 self.sleep(sleep_time / 2)
@@ -575,11 +578,11 @@ class DataNode(PGNode):
 
             prev_state = current_state
 
-        print("%s didn't reach %s after %d attempts" %
+        print("%s didn't reach %s after %d seconds" %
               (self.datadir, target_state, timeout))
 
         error_msg = (f"{self.datadir} failed to reach {target_state} "
-                     f"after {timeout} attempts\n")
+                     f"after {timeout} seconds\n")
         events = self.get_events_str()
         error_msg += f"MONITOR EVENTS:\n{events}\n"
 
