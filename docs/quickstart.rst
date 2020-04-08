@@ -423,8 +423,8 @@ promotes node A to be the new primary.
    .
                               Name |   Port | Group |  Node |     Current State |    Assigned State
    --------------------------------+--------+-------+-------+-------------------+------------------
-   ha-demo-a.internal.cloudapp.net |   5432 |     0 |     7 |      wait_primary |      wait_primary
-   ha-demo-b.internal.cloudapp.net |   5432 |     0 |     8 |           demoted |        catchingup
+   ha-demo-a.internal.cloudapp.net |   5432 |     0 |     1 |      wait_primary |      wait_primary
+   ha-demo-b.internal.cloudapp.net |   5432 |     0 |     2 |           demoted |        catchingup
 
 Node A cannot be considered in full "primary" state since there is no secondary
 present, but it can still serve client requests. It is marked as "wait_primary"
@@ -457,12 +457,11 @@ A. Once that's done, B becomes a secondary, and A is now a full primary again.
 
 .. code-block:: bash
 
-   pg_autoctl show state --pgdata ./monitor
-        Name |   Port | Group |  Node |     Current State |    Assigned State
-   ----------+--------+-------+-------+-------------------+------------------
-   127.0.0.1 |   6010 |     0 |     1 |         secondary |         secondary
-   127.0.0.1 |   6011 |     0 |     2 |           primary |           primary
-
+   .
+                              Name |   Port | Group |  Node |     Current State |    Assigned State
+   --------------------------------+--------+-------+-------+-------------------+------------------
+   ha-demo-a.internal.cloudapp.net |   5432 |     0 |     1 |           primary |           primary
+   ha-demo-b.internal.cloudapp.net |   5432 |     0 |     2 |         secondary |         secondary
 
 What's more, if we connect directly to the database again, all two million rows
 are still present.
