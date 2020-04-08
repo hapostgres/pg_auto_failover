@@ -111,8 +111,8 @@ def test_015_add_new_secondary():
     node3 = cluster.create_datanode("/tmp/basic/node3")
     node3.create()
     node3.run()
-    assert node3.wait_until_state(target_state="secondary")
-    assert node2.wait_until_state(target_state="primary")
+    assert node3.wait_until_state(target_state="secondary", other_node=node2)
+    assert node2.wait_until_state(target_state="primary", other_node=node3)
 
     assert node2.has_needed_replication_slots()
     assert node3.has_needed_replication_slots()
