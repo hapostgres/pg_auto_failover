@@ -597,6 +597,14 @@ standby_init_database(LocalPostgresServer *postgres,
 	}
 
 	/*
+	 * Now that we now that pgdata exists, lets normalize the path.
+	 */
+	if (!normalize_filename_inplace(pgSetup->pgdata))
+	{
+		return false;
+	}
+
+	/*
 	 * When --ssl-self-signed has been used, now is the time to build a
 	 * self-signed certificate for the server. We place the certificate and
 	 * private key in $PGDATA/server.key and $PGDATA/server.crt
@@ -615,22 +623,11 @@ standby_init_database(LocalPostgresServer *postgres,
 		}
 	}
 
-	if (!ensure_local_postgres_is_running(postgres))
-	{
-		return false;
-	}
-
-	log_info("PostgreSQL started on port %d", pgSetup->pgport);
-
 	/*
 	 * We might have local edits to implement to the PostgreSQL
-	 * configuration, such as a specific listen_addresses.
-	 *
-	 * Because pg_auto_failover always enforce the listen_addresses and port
-	 * settings in pg_ctl_start, we don't actually have to restart PostgreSQL
-	 * after having applied the settings here. The reason for doing the effort
-	 * is to make the situation cleaner in case an operator was to manually
-	 * start/restart PostgreSQL.
+	 * configuration, such as a specific listen_addresses or different TLS
+	 * key and cert locations. By changing this before starting postgres these
+	 * new settings will automatically be applied.
 	 */
 	if (!postgres_add_default_settings(postgres))
 	{
@@ -638,6 +635,13 @@ standby_init_database(LocalPostgresServer *postgres,
 				  "see above for details.");
 		return false;
 	}
+
+	if (!ensure_local_postgres_is_running(postgres))
+	{
+		return false;
+	}
+
+	log_info("PostgreSQL started on port %d", pgSetup->pgport);
 
 	return true;
 }
