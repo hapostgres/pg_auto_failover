@@ -18,6 +18,7 @@
 bool start_keeper(Keeper *keeper);
 bool service_keeper_start(void *context, pid_t *pid);
 bool service_keeper_stop(void *context);
+void service_keeper_runprogram(Keeper *keeper);
 
 bool keeper_start_node_active_process(Keeper *keeper, pid_t *nodeActivePid);
 bool keeper_node_active_loop(Keeper *keeper, pid_t start_pid);

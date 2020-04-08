@@ -21,4 +21,7 @@ bool service_postgres_stop(void *context);
 bool service_postgres_fsm_start(void *context, pid_t *pid);
 bool service_postgres_fsm_stop(void *context);
 
+void service_postgres_fsm_loop(Keeper *keeper);
+void service_postgres_fsm_runprogram(Keeper *keeper);
+
 #endif /* POSTGRES_SERVICE_H */

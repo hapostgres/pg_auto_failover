@@ -29,7 +29,6 @@
 #include "service_postgres.h"
 #include "signals.h"
 
-
 /*
  * Default settings for PostgreSQL instance when running the pg_auto_failover
  * monitor.
@@ -231,9 +230,6 @@ service_monitor_init_start(void *context, pid_t *pid)
 		case 0:
 		{
 			/* finish the install */
-			bool missingPgdataIsOk = false;
-			bool postgresNotRunningIsOk = false;
-
 			(void) set_ps_title("installer");
 
 			if (!monitor_install(config->nodename, *pgSetup, false))
@@ -246,19 +242,7 @@ service_monitor_init_start(void *context, pid_t *pid)
 
 			if (createAndRun)
 			{
-				(void) set_ps_title("listener");
-
-				/* reset pgSetup username, dbname, and Postgres information */
-				if (!monitor_config_read_file(config,
-											  missingPgdataIsOk,
-											  postgresNotRunningIsOk))
-				{
-					log_fatal("Failed to read configuration file \"%s\"",
-							  config->pathnames.config);
-					exit(EXIT_CODE_BAD_CONFIG);
-				}
-
-				(void) monitor_service_run(monitor);
+				(void) service_monitor_runprogram(monitor);
 			}
 			else
 			{

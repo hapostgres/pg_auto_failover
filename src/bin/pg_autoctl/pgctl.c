@@ -855,7 +855,7 @@ pg_ctl_start(const char *pg_ctl,
 		log_info("%s", command);
 	}
 
-	(void) execute_program(&program);
+	(void) execute_subprogram(&program);
 
 	if (program.returnCode != 0)
 	{

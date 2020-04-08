@@ -150,7 +150,6 @@ service_keeper_init_start(void *context, pid_t *pid)
 	KeeperConfig *config = &(keeper->config);
 
 	pid_t fpid = -1;
-	pid_t ppid = getpid();
 
 	/* Flush stdio channels just before fork, to avoid double-output problems */
 	fflush(stdout);
@@ -181,16 +180,8 @@ service_keeper_init_start(void *context, pid_t *pid)
 
 			if (createAndRun)
 			{
-				(void) set_ps_title("node active");
-
-				if (!service_keeper_node_active_init(keeper))
-				{
-					log_fatal("Failed to initialise the node active service, "
-							  "see above for details");
-					exit(EXIT_CODE_INTERNAL_ERROR);
-				}
-
-				(void) keeper_node_active_loop(keeper, ppid);
+				log_info("service_keeper_start EXEC service node-active");
+				(void) service_keeper_runprogram(keeper);
 			}
 			else
 			{

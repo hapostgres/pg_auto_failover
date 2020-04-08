@@ -201,6 +201,7 @@ CommandLine *do_subcommands[] = {
 	&do_primary_,
 	&do_standby_,
 	&do_show_commands,
+	&do_service_commands,
 	&do_discover,
 	NULL
 };

@@ -6,9 +6,6 @@
  *
  */
 
-#ifdef RUN_PROGRAM_IMPLEMENTATION
-#undef RUN_PROGRAM_IMPLEMENTATION
-
 #include <fcntl.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -52,14 +49,18 @@ typedef struct
 
 Program run_program(const char *program, ...);
 Program initialize_program(char **args, bool setsid);
+void execute_subprogram(Program *prog);
 void execute_program(Program *prog);
 void free_program(Program *prog);
 int snprintf_program_command_line(Program *prog, char *buffer, int size);
+
+#ifdef RUN_PROGRAM_IMPLEMENTATION
+#undef RUN_PROGRAM_IMPLEMENTATION
+
 static void read_from_pipes(Program *prog,
 							pid_t childPid, int *outpipe, int *errpipe);
 static size_t read_into_buf(int filedes, PQExpBuffer buffer);
 static void waitprogram(Program *prog, pid_t childPid);
-
 
 /*
  * Run a program using fork() and exec(), get the stdOut and stdErr output from
@@ -108,7 +109,7 @@ run_program(const char *program, ...)
 	va_end(args);
 	prog.args[nb_args] = NULL;
 
-	execute_program(&prog);
+	execute_subprogram(&prog);
 
 	return prog;
 }
@@ -159,10 +160,10 @@ initialize_program(char **args, bool setsid)
 /*
  * Run given program with its args, by doing the fork()/exec() dance, and also
  * capture the subprocess output by installing pipes. We accimulate the output
- * into an SDS data structure (Simple Dynamic Strings library).
+ * into a PQExpBuffer when prog->capture is true.
  */
 void
-execute_program(Program *prog)
+execute_subprogram(Program *prog)
 {
 	pid_t pid;
 	int outpipe[2] = { 0, 0 };
@@ -278,6 +279,65 @@ execute_program(Program *prog)
 			return;
 		}
 	}
+}
+
+
+/*
+ * Run given program with its args, by using exec().
+ */
+void
+execute_program(Program *prog)
+{
+	/*
+	 * We redirect /dev/null into stdIn rather than closing stdin, because
+	 * apparently closing it may cause undefined behavior if any read was to
+	 * happen.
+	 */
+	int stdIn = open(DEV_NULL, O_RDONLY);
+
+	if (prog->capture)
+	{
+		fprintf(stderr, "BUG: can't execute_program and capture the output");
+		return;
+	}
+
+	/* Flush stdio channels just before fork, to avoid double-output problems */
+	fflush(stdout);
+	fflush(stderr);
+
+	dup2(stdIn, STDIN_FILENO);
+	close(stdIn);
+
+	dup2(prog->stdOutFd, STDOUT_FILENO);
+	dup2(prog->stdErrFd, STDERR_FILENO);
+
+	/*
+	 * When asked to do so, before creating the child process, we call
+	 * setsid() to create our own session group and detach from the
+	 * terminal. That's useful when starting a service in the
+	 * background.
+	 */
+	if (prog->setsid)
+	{
+		if (setsid() == -1)
+		{
+			prog->returnCode = -1;
+			prog->error = errno;
+			return;
+		}
+	}
+
+	if (execv(prog->program, prog->args) == -1)
+	{
+		prog->returnCode = -1;
+		prog->error = errno;
+
+		fprintf(stdout, "%s\n", strerror(errno));
+		fprintf(stderr, "%s\n", strerror(errno));
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	/* now the parent should waitpid() and may use waitprogram() */
 }
 
 

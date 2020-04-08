@@ -41,7 +41,7 @@
  * Global variables that we're going to use to "communicate" in between getopts
  * functions and their command implementation. We can't pass parameters around.
  */
-MonitorConfig monitorOptions;
+MonitorConfig monitorOptions = { 0 };
 static bool dropAndDestroy = false;
 
 static int cli_create_postgres_getopts(int argc, char **argv);

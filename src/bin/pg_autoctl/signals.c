@@ -32,6 +32,7 @@ void
 set_signal_handlers()
 {
 	/* Establish a handler for signals. */
+	log_trace("set_signal_handlers");
 	pqsignal(SIGHUP, catch_reload);
 	pqsignal(SIGINT, catch_int);
 	pqsignal(SIGTERM, catch_term);

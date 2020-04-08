@@ -13,6 +13,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "cli_common.h"
+#include "cli_root.h"
 #include "defaults.h"
 #include "log.h"
 #include "monitor.h"
@@ -23,6 +25,7 @@
 #include "signals.h"
 #include "string_utils.h"
 
+#include "runprogram.h"
 
 /*
  * monitor_service_start starts the monitor processes: the Postgres instance
@@ -92,8 +95,7 @@ service_monitor_start(void *context, pid_t *pid)
 		case 0:
 		{
 			/* fork succeeded, in child */
-			(void) set_ps_title("listener");
-			(void) monitor_service_run(monitor);
+			(void) service_monitor_runprogram(monitor);
 
 			/*
 			 * When the "main" function for the child process is over, it's the
@@ -119,6 +121,61 @@ service_monitor_start(void *context, pid_t *pid)
 			return true;
 		}
 	}
+}
+
+
+/*
+ * service_monitor_runprogram runs the node_active protocol service:
+ *
+ *   $ pg_autoctl do service monitor --pgdata ...
+ */
+void
+service_monitor_runprogram(Monitor *monitor)
+{
+	Program program;
+
+	char *args[12];
+	int argsIndex = 0;
+
+	char command[BUFSIZE];
+	int commandSize = 0;
+
+	/*
+	 * use --pgdata option rather than the config.
+	 *
+	 * On macOS when using /tmp, the file path is then redirected to being
+	 * /private/tmp when using realpath(2) as we do in normalize_filename(). So
+	 * for that case to be supported, we explicitely re-use whatever PGDATA or
+	 * --pgdata was parsed from the main command line to start our sub-process.
+	 */
+	char *pgdata =
+		IS_EMPTY_STRING_BUFFER(monitorOptions.pgSetup.pgdata)
+		? keeperOptions.pgSetup.pgdata
+		: monitorOptions.pgSetup.pgdata;
+
+	setenv(PG_AUTOCTL_DEBUG, "1", 1);
+
+	args[argsIndex++] = (char *) pg_autoctl_program;
+	args[argsIndex++] = "do";
+	args[argsIndex++] = "service";
+	args[argsIndex++] = "monitor";
+	args[argsIndex++] = "--pgdata";
+	args[argsIndex++] = pgdata;
+	args[argsIndex] = NULL;
+
+	/* we do not want to call setsid() when running this program. */
+	program = initialize_program(args, false);
+
+	program.capture = false;    /* redirect output, don't capture */
+	program.stdOutFd = STDOUT_FILENO;
+	program.stdErrFd = STDERR_FILENO;
+
+	/* log the exact command line we're using */
+	commandSize = snprintf_program_command_line(&program, command, BUFSIZE);
+
+	log_info("%s", command);
+
+	(void) execute_program(&program);
 }
 
 

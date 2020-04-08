@@ -13,6 +13,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "cli_root.h"
 #include "defaults.h"
 #include "fsm.h"
 #include "log.h"
@@ -25,9 +26,9 @@
 #include "state.h"
 #include "string_utils.h"
 
-static int countPostgresStart = 0;
+#include "runprogram.h"
 
-static void service_postgres_fsm_loop(Keeper *keeper);
+static int countPostgresStart = 0;
 
 static bool ensure_postgres_status(Keeper *keeper, Service *postgres);
 static bool ensure_postgres_status_stopped(Keeper *keeper, Service *postgres);
@@ -156,8 +157,7 @@ service_postgres_fsm_start(void *context, pid_t *pid)
 
 		case 0:
 		{
-			(void) set_ps_title("postgres fsm");
-			(void) service_postgres_fsm_loop(keeper);
+			(void) service_postgres_fsm_runprogram(keeper);
 		}
 
 		default:
@@ -203,12 +203,54 @@ service_postgres_fsm_stop(void *context)
 
 
 /*
+ * service_postgres_fsm_runprogram runs the node_active protocol service:
+ *
+ *   $ pg_autoctl do service postgres --pgdata ...
+ */
+void
+service_postgres_fsm_runprogram(Keeper *keeper)
+{
+	Program program;
+
+	char *args[12];
+	int argsIndex = 0;
+
+	char command[BUFSIZE];
+	int commandSize = 0;
+
+	setenv(PG_AUTOCTL_DEBUG, "1", 1);
+
+	args[argsIndex++] = (char *) pg_autoctl_program;
+	args[argsIndex++] = "do";
+	args[argsIndex++] = "service";
+	args[argsIndex++] = "postgres";
+	args[argsIndex++] = "--pgdata";
+	args[argsIndex++] = (char *) keeper->config.pgSetup.pgdata;
+	args[argsIndex] = NULL;
+
+	/* we do not want to call setsid() when running this program. */
+	program = initialize_program(args, false);
+
+	program.capture = false;    /* redirect output, don't capture */
+	program.stdOutFd = STDOUT_FILENO;
+	program.stdErrFd = STDERR_FILENO;
+
+	/* log the exact command line we're using */
+	commandSize = snprintf_program_command_line(&program, command, BUFSIZE);
+
+	log_info("%s", command);
+
+	(void) execute_program(&program);
+}
+
+
+/*
  * service_postgres_fsm_loop loops over the current FSM state file and ensure
  * that Postgres is running when that's expected, or that Postgres is not
  * running when in a state where we should maintain Postgres down to avoid
  * split-brain situations.
  */
-static void
+void
 service_postgres_fsm_loop(Keeper *keeper)
 {
 	KeeperConfig *config = &(keeper->config);
