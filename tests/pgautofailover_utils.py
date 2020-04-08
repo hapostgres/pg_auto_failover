@@ -261,6 +261,10 @@ class PGNode:
         Stops the postgres process by running:
           pg_ctl -D ${self.datadir} --wait --mode fast stop
         """
+        # pg_ctl stop is racey when another process is trying to start postgres
+        # again in the background. It will not finish in that case. pg_autoctl
+        # does this, so we try stopping postgres a couple of times. This way we
+        # make sure the race does not impact our tests.
         for i in range(60):
             stop_command = [shutil.which('pg_ctl'), '-D', self.datadir,
                             '--wait', '--mode', 'fast', 'stop']
@@ -269,8 +273,6 @@ class PGNode:
                 out, err = stop_proc.communicate(timeout=1)
                 break
             except subprocess.TimeoutExpired:
-                # Sometimes pg_autoctl will restart postgres before pg_ctl
-                # notices that it's killed.
                 pass
         else:
             raise Exception("Postgres could not be stopped after 60 attempts")
