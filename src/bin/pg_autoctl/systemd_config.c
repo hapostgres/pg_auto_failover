@@ -104,8 +104,10 @@ systemd_config_init(SystemdServiceConfig *config, const char *pgdata)
 	sformat(config->EnvironmentPGDATA, BUFSIZE,
 			"'PGDATA=%s'", config->pgSetup.pgdata);
 
-	strlcpy(config->User, config->pgSetup.username, NAMEDATALEN);
+	/* adjust the user to the current system user */
+	strlcpy(config->User, user, NAMEDATALEN);
 
+	/* adjust the program to the current full path of argv[0] */
 	sformat(config->ExecStart, BUFSIZE, "%s run", pg_autoctl_program);
 
 	if (!ini_validate_options(systemdOptions))
