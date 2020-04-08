@@ -2,7 +2,7 @@ import os
 import time
 
 import pgautofailover_utils as pgautofailover
-from nose.tools import *
+from nose.tools import eq_
 
 cluster = None
 
@@ -31,4 +31,4 @@ def test_001_update_extension():
              FROM pg_available_extensions
             WHERE name = 'pgautofailover'
         """)
-    assert results == [('dummy',)]
+    eq_(results, [('dummy',)])

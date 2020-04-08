@@ -56,10 +56,7 @@ def test_004_demoted():
     node2.sleep(30)
     node1.run()
 
-    # we might miss DEMOTE_TIMEOUT -> DEMOTED if we wait for a full second
-    # here
-    assert node1.wait_until_state(
-        target_state="demoted", sleep_time=0.1, other_node=node2)
+    assert node1.wait_until_state(target_state="demoted", other_node=node2)
 
     # ideally we should be able to check that we refrain from starting
     # postgres again before calling the transition function

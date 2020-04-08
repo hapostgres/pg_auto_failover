@@ -362,16 +362,16 @@ class PGNode:
         Waits until the underlying Postgres process is running.
         """
         wait_until = dt.datetime.now() + dt.timedelta(seconds=timeout)
+        time.sleep(1)
         while wait_until > dt.datetime.now():
+            if self.pg_is_running():
+                time.sleep(1)
+                return True
             time.sleep(1)
 
-            if self.pg_is_running():
-                return True
-
-        else:
-            print("Postgres is still not running in %s after %d seconds" %
-                  (self.datadir, timeout))
-            return False
+        print("Postgres is still not running in %s after %d seconds" %
+              (self.datadir, timeout))
+        return False
 
     def fail(self):
         """
@@ -597,7 +597,7 @@ class DataNode(PGNode):
 
     def wait_until_state(self, target_state,
                          timeout=STATE_CHANGE_TIMEOUT,
-                         sleep_time=1,
+                         sleep_time=0.1,
                          other_node=None):
         """
         Waits until this data node reaches the target state, and then returns
