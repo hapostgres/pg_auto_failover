@@ -63,13 +63,10 @@ security group and a subnet.
        --address-prefixes 10.0.1.0/24 \
        --network-security-group ha-demo-nsg
 
-Finally add four virtual machines (ha-demo-a, ha-demo-b, ha-demo-monitor, and
-ha-demo-app). For speed we background the ``az vm create`` processes and run
-them in parallel:
+Allow VMs to resolve each other via internal DNS:
 
 .. code-block:: bash
 
-   # allow VMs to resolve each other via internal DNS
    az network private-dns zone create \
        --resource-group ha-demo \
        --name ha-demo.local
@@ -79,6 +76,12 @@ them in parallel:
        --virtual-network ha-demo-net \
        --zone-name ha-demo.local \
        --registration-enabled true
+
+Finally add four virtual machines (ha-demo-a, ha-demo-b, ha-demo-monitor, and
+ha-demo-app). For speed we background the ``az vm create`` processes and run
+them in parallel:
+
+.. code-block:: bash
 
    # create VMs in parallel
    for node in monitor a b app
@@ -107,6 +110,36 @@ function to retrieve their IP addresses:
     az vm list-ip-addresses -g ha-demo -n ha-demo-$1 -o tsv \
       --query '[] [] .virtualMachine.network.publicIpAddresses[0].ipAddress'
   }
+
+Let's review what we created so far.
+
+.. code-block:: bash
+
+  az resource list --output table --query \
+    "[?resourceGroup=='ha-demo-dim'].{ name: name, flavor: kind, resourceType: type, region: location }"
+
+This shows the following resources:
+
+::
+
+    Name                             ResourceType                                           Region
+    -------------------------------  -----------------------------------------------------  --------
+    ha-demo-a                        Microsoft.Compute/virtualMachines                      eastus
+    ha-demo-app                      Microsoft.Compute/virtualMachines                      eastus
+    ha-demo-b                        Microsoft.Compute/virtualMachines                      eastus
+    ha-demo-monitor                  Microsoft.Compute/virtualMachines                      eastus
+    ha-demo-appVMNic                 Microsoft.Network/networkInterfaces                    eastus
+    ha-demo-aVMNic                   Microsoft.Network/networkInterfaces                    eastus
+    ha-demo-bVMNic                   Microsoft.Network/networkInterfaces                    eastus
+    ha-demo-monitorVMNic             Microsoft.Network/networkInterfaces                    eastus
+    ha-demo-nsg                      Microsoft.Network/networkSecurityGroups                eastus
+    ha-demo.local                    Microsoft.Network/privateDnsZones                      global
+    ha-demo.local/ha-demo-zone-link  Microsoft.Network/privateDnsZones/virtualNetworkLinks  global
+    ha-demo-a-ip                     Microsoft.Network/publicIPAddresses                    eastus
+    ha-demo-app-ip                   Microsoft.Network/publicIPAddresses                    eastus
+    ha-demo-b-ip                     Microsoft.Network/publicIPAddresses                    eastus
+    ha-demo-monitor-ip               Microsoft.Network/publicIPAddresses                    eastus
+    ha-demo-net                      Microsoft.Network/virtualNetworks                      eastus
 
 .. _quickstart_install:
 
