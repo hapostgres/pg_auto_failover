@@ -265,6 +265,14 @@ class PGNode:
         # again in the background. It will not finish in that case. pg_autoctl
         # does this, so we try stopping postgres a couple of times. This way we
         # make sure the race does not impact our tests.
+        #
+        # The race can be easily reproduced by in one shell doing:
+        #    while true; do pg_ctl --pgdata monitor/ start; done
+        # And in another:
+        #    pg_ctl --pgdata monitor --wait --mode fast stop
+        # The second command will not finish, since the first restarts postgres
+        # before the second finds out it has been killed.
+
         for i in range(60):
             stop_command = [shutil.which('pg_ctl'), '-D', self.datadir,
                             '--wait', '--mode', 'fast', 'stop']
