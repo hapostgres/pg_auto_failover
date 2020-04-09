@@ -156,21 +156,6 @@ fsm_init_primary(Keeper *keeper)
 		}
 	}
 
-	/*
-	 * Now is the time to make sure Postgres is running, as our next steps to
-	 * prepare a SINGLE from INIT are depending on being able to connect to the
-	 * local Postgres service.
-	 *
-	 * To signal that the Postgres sub-process should now get started, we go to
-	 * phase two of the init process.
-	 */
-	if (!keeper_init_state_update(keeper, INIT_STAGE_2))
-	{
-		log_error("Failed to update our init state file, "
-				  "see above for details");
-		return false;
-	}
-
 	if (!ensure_local_postgres_is_running(postgres))
 	{
 		log_error("Failed to initialise postgres as primary because "

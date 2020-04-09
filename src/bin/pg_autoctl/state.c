@@ -340,8 +340,6 @@ print_keeper_init_state(KeeperStateInit *initState, FILE *stream)
 	fformat(stream,
 			"Postgres state at keeper init: %s\n",
 			PreInitPostgreInstanceStateToString(initState->pgInitState));
-	fformat(stream,
-			"pg_autoctl initialization stage: %d\n", initState->initStage);
 	fflush(stream);
 }
 

@@ -738,8 +738,6 @@ keeper_init_state_create(Keeper *keeper)
 {
 	KeeperStateInit *initState = &(keeper->initState);
 
-	initState->initStage = INIT_STAGE_1;
-
 	if (!keeper_init_state_discover(keeper))
 	{
 		/* errors have already been logged */
@@ -754,49 +752,6 @@ keeper_init_state_create(Keeper *keeper)
 			  PreInitPostgreInstanceStateToString(initState->pgInitState));
 
 	return keeper_init_state_write(keeper);
-}
-
-
-/*
- * keeper_init_state_update updates our pg_autoctl init file to the given
- * stage.
- */
-bool
-keeper_init_state_update(Keeper *keeper, InitStage initStage)
-{
-	char tempFileName[MAXPGPATH] = { 0 };
-	char *filename = keeper->config.pathnames.init;
-	InitStage previousStage = keeper->initState.initStage;
-
-	if (keeper->initState.initStage == initStage)
-	{
-		log_debug("keeper_init_state_update: keeper is already at stage %d",
-				  keeper->initState.initStage);
-		return true;
-	}
-
-	keeper->initState.initStage = initStage;
-
-	log_info("Updating keeper init state file to stage %d at \"%s\"",
-			 keeper->initState.initStage, keeper->config.pathnames.init);
-
-	/* backup our current init file into init.1 (for stage 1) */
-	sformat(tempFileName, MAXPGPATH, "%s.%d", filename, previousStage);
-
-	if (rename(filename, tempFileName) != 0)
-	{
-		log_fatal("Failed to rename \"%s\" to \"%s\": %m",
-				  filename, tempFileName);
-		return false;
-	}
-
-	if (!keeper_init_state_write(keeper))
-	{
-		return false;
-	}
-
-	/* we don't need the previous stage init file around anymore */
-	return unlink_file(tempFileName);
 }
 
 

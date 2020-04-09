@@ -132,13 +132,6 @@ typedef enum
 	PRE_INIT_STATE_PRIMARY
 } PreInitPostgreInstanceState;
 
-typedef enum
-{
-	INIT_STAGE_UNKNOW = 0,
-	INIT_STAGE_1,             /* we don't have a Postgres instance yet */
-	INIT_STAGE_2              /* our Postgres instance should be running now */
-} InitStage;
-
 /*
  *  Note: The struct is serialized/serialiazed to/from state file. Therefore
  *  keeping the memory layout the same is important. Please
@@ -150,7 +143,6 @@ typedef struct
 {
 	int pg_autoctl_state_version;
 	PreInitPostgreInstanceState pgInitState;
-	InitStage initStage;
 } KeeperStateInit;
 
 _Static_assert(sizeof(KeeperStateInit) < PG_AUTOCTL_KEEPER_STATE_FILE_SIZE,

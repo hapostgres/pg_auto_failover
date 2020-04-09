@@ -264,7 +264,6 @@ service_postgres_fsm_loop(Keeper *keeper)
 		(void *) pgSetup
 	};
 
-	InitStage currentInitStage = INIT_STAGE_UNKNOW;
 	bool monitorDisabledIsOk = false;
 
 	/*
@@ -289,7 +288,6 @@ service_postgres_fsm_loop(Keeper *keeper)
 			exit(EXIT_CODE_BAD_CONFIG);
 		}
 	}
-	currentInitStage = keeper->initState.initStage;
 
 	for (;;)
 	{
@@ -316,21 +314,6 @@ service_postgres_fsm_loop(Keeper *keeper)
 			{
 				/* errors have already been logged, will try again */
 				continue;
-			}
-
-			if (keeper->initState.initStage != currentInitStage &&
-				keeper->initState.initStage == INIT_STAGE_2)
-			{
-				currentInitStage = keeper->initState.initStage;
-
-				log_info("pg_autoctl init has reached stage %d, "
-						 "starting Postgres", currentInitStage);
-
-				if (!service_postgres_start(postgres.context, &(postgres.pid)))
-				{
-					log_warn("Will try again in 100ms");
-					continue;
-				}
 			}
 		}
 		else if (file_exists(config->pathnames.state))
@@ -447,11 +430,6 @@ ensure_postgres_status(Keeper *keeper, Service *postgres)
 					log_error("Failed to read expected Postgres service status, "
 							  "see above for details");
 					return false;
-				}
-
-				if (keeper->initState.initStage == INIT_STAGE_2)
-				{
-					return ensure_postgres_status_running(keeper, postgres);
 				}
 			}
 

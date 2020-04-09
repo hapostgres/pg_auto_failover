@@ -833,18 +833,6 @@ create_database_and_extension(Keeper *keeper)
 		}
 	}
 
-	/*
-	 * Now start the database, we need to create our dbname and maybe the Citus
-	 * Extension too. To signal that the Postgres sub-process should now get
-	 * started, we go to phase two of the init process.
-	 */
-	if (!keeper_init_state_update(keeper, INIT_STAGE_2))
-	{
-		log_error("Failed to update our init state file, "
-				  "see above for details");
-		return false;
-	}
-
 	if (!ensure_local_postgres_is_running(&initPostgres))
 	{
 		log_error("Failed to start PostgreSQL, see above for details");
