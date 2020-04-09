@@ -51,9 +51,6 @@ bool keeper_remove(Keeper *keeper, KeeperConfig *config,
 				   bool ignore_monitor_errors);
 bool keeper_check_monitor_extension_version(Keeper *keeper);
 
-bool keeper_init_state_create(Keeper *keeper);
-bool keeper_init_state_read(Keeper *keeper);
 bool keeper_state_as_json(Keeper *keeper, char *json, int size);
-bool keeper_init_state_discover(Keeper *keeper);
 
 #endif /* KEEPER_H */

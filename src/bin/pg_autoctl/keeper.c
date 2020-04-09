@@ -22,9 +22,6 @@
 #include "state.h"
 
 
-static bool keeper_init_state_write(Keeper *keeper);
-
-
 /*
  * keeper_init initialises the keeper logic according to the given keeper
  * configuration. It also reads the state file from disk. The state file
@@ -500,6 +497,7 @@ bool
 keeper_init_fsm(Keeper *keeper)
 {
 	KeeperConfig *config = &(keeper->config);
+	PostgresSetup *pgSetup = &(config->pgSetup);
 
 	/* fake the initial state provided at monitor registration time */
 	MonitorAssignedState assignedState = {
@@ -550,7 +548,9 @@ keeper_init_fsm(Keeper *keeper)
 	 * case of `pg_autoctl create` being interrupted, we may resume operations
 	 * and accept to work on already running PostgreSQL primary instances.
 	 */
-	if (!keeper_init_state_create(keeper))
+	if (!keeper_init_state_create(&(keeper->initState),
+								  pgSetup,
+								  config->pathnames.init))
 	{
 		/* errors have already been logged */
 		return false;
@@ -569,6 +569,8 @@ bool
 keeper_register_and_init(Keeper *keeper, NodeState initialState)
 {
 	KeeperConfig *config = &(keeper->config);
+	PostgresSetup *pgSetup = &(config->pgSetup);
+	KeeperStateInit *initState = &(keeper->initState);
 	Monitor *monitor = &(keeper->monitor);
 	MonitorAssignedState assignedState = { 0 };
 
@@ -644,7 +646,9 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 	 * case of `pg_autoctl create` being interrupted, we may resume operations
 	 * and accept to work on already running PostgreSQL primary instances.
 	 */
-	if (!keeper_init_state_create(keeper))
+	if (!keeper_init_state_create(initState,
+								  pgSetup,
+								  keeper->config.pathnames.init))
 	{
 		/* errors have already been logged */
 		return false;
@@ -721,179 +725,6 @@ keeper_remove(Keeper *keeper, KeeperConfig *config, bool ignore_monitor_errors)
 	}
 
 	return errors == 0;
-}
-
-
-/*
- * keeper_init_state_write create our pg_autoctl.init file.
- *
- * This file is created when entering keeper init and deleted only when the
- * init has been successful. This allows the code to take smarter decisions and
- * decipher in between a previous init having failed halfway through or
- * initializing from scratch in conditions not supported (pre-existing and
- * running cluster, etc).
- */
-bool
-keeper_init_state_create(Keeper *keeper)
-{
-	KeeperStateInit *initState = &(keeper->initState);
-
-	if (!keeper_init_state_discover(keeper))
-	{
-		/* errors have already been logged */
-		return false;
-	}
-
-	log_info("Writing keeper init state file at \"%s\"",
-			 keeper->config.pathnames.init);
-	log_debug("keeper_init_state_create: version = %d",
-			  initState->pg_autoctl_state_version);
-	log_debug("keeper_init_state_create: pgInitState = %s",
-			  PreInitPostgreInstanceStateToString(initState->pgInitState));
-
-	return keeper_init_state_write(keeper);
-}
-
-
-/*
- * keeper_init_state_write writes our pg_autoctl.init file.
- */
-static bool
-keeper_init_state_write(Keeper *keeper)
-{
-	int fd;
-	char buffer[PG_AUTOCTL_KEEPER_STATE_FILE_SIZE] = { 0 };
-	KeeperStateInit *initState = &(keeper->initState);
-
-	memset(buffer, 0, PG_AUTOCTL_KEEPER_STATE_FILE_SIZE);
-
-	/*
-	 * Explanation of IGNORE-BANNED:
-	 * memcpy is safe to use here.
-	 * we have a static assert that sizeof(KeeperStateInit) is always
-	 * less than the buffer length PG_AUTOCTL_KEEPER_STATE_FILE_SIZE.
-	 * also KeeperStateData is a plain struct that does not contain
-	 * any pointers in it. Necessary comment about not using pointers
-	 * is added to the struct definition.
-	 */
-	memcpy(buffer, initState, sizeof(KeeperStateInit)); /* IGNORE-BANNED */
-
-	fd = open(keeper->config.pathnames.init,
-			  O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
-	if (fd < 0)
-	{
-		log_fatal("Failed to create keeper init state file \"%s\": %m",
-				  keeper->config.pathnames.init);
-		return false;
-	}
-
-	errno = 0;
-	if (write(fd, buffer, PG_AUTOCTL_KEEPER_STATE_FILE_SIZE) !=
-		PG_AUTOCTL_KEEPER_STATE_FILE_SIZE)
-	{
-		/* if write didn't set errno, assume problem is no disk space */
-		if (errno == 0)
-		{
-			errno = ENOSPC;
-		}
-		log_fatal("Failed to write keeper state file \"%s\": %m",
-				  keeper->config.pathnames.init);
-		return false;
-	}
-
-	if (fsync(fd) != 0)
-	{
-		log_fatal("fsync error: %m");
-		return false;
-	}
-
-	close(fd);
-
-	return true;
-}
-
-
-/*
- * keeper_init_state_discover discovers the current KeeperStateInit from the
- * command line options, by checking everything we can about the possibly
- * existing Postgres instance.
- */
-bool
-keeper_init_state_discover(Keeper *keeper)
-{
-	KeeperStateInit *initState = &(keeper->initState);
-	PostgresSetup pgSetup = { 0 };
-	bool missingPgdataIsOk = true;
-	bool pgIsNotRunningIsOk = true;
-
-	initState->pg_autoctl_state_version = PG_AUTOCTL_STATE_VERSION;
-
-	if (!pg_setup_init(&pgSetup, &(keeper->config.pgSetup),
-					   missingPgdataIsOk, pgIsNotRunningIsOk))
-	{
-		log_fatal("Failed to initialise the keeper init state, "
-				  "see above for details");
-		return false;
-	}
-
-	if (pg_setup_is_running(&pgSetup) && pg_setup_is_primary(&pgSetup))
-	{
-		initState->pgInitState = PRE_INIT_STATE_PRIMARY;
-	}
-	else if (pg_setup_is_running(&pgSetup))
-	{
-		initState->pgInitState = PRE_INIT_STATE_RUNNING;
-	}
-	else if (pg_setup_pgdata_exists(&pgSetup))
-	{
-		initState->pgInitState = PRE_INIT_STATE_EXISTS;
-	}
-	else
-	{
-		initState->pgInitState = PRE_INIT_STATE_EMPTY;
-	}
-
-	return true;
-}
-
-
-/*
- * keeper_init_state_read reads the information kept in the keeper init file.
- */
-bool
-keeper_init_state_read(Keeper *keeper)
-{
-	char *filename = keeper->config.pathnames.init;
-	char *content = NULL;
-	long fileSize;
-	int pg_autoctl_state_version = 0;
-
-	log_debug("Reading current init state from \"%s\"", filename);
-
-	if (!read_file(filename, &content, &fileSize))
-	{
-		log_error("Failed to read Keeper state from file \"%s\"", filename);
-		return false;
-	}
-
-	pg_autoctl_state_version =
-		((KeeperStateInit *) content)->pg_autoctl_state_version;
-
-	if (fileSize >= sizeof(KeeperStateInit) &&
-		pg_autoctl_state_version == PG_AUTOCTL_STATE_VERSION)
-	{
-		keeper->initState = *(KeeperStateInit *) content;
-		free(content);
-		return true;
-	}
-
-	free(content);
-
-	/* Looks like it's a mess. */
-	log_error("Keeper init state file \"%s\" exists but "
-			  "is broken or wrong version (%d)",
-			  filename, pg_autoctl_state_version);
-	return false;
 }
 
 

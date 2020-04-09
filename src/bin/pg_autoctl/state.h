@@ -165,4 +165,12 @@ bool keeperStateAsJSON(KeeperStateData *keeperState, JSON_Value *js);
 void print_keeper_init_state(KeeperStateInit *initState, FILE *stream);
 char * PreInitPostgreInstanceStateToString(PreInitPostgreInstanceState pgInitState);
 
+bool keeper_init_state_create(KeeperStateInit *initState,
+							  PostgresSetup *pgSetup,
+							  const char *filename);
+bool keeper_init_state_read(KeeperStateInit *initState, const char *filename);
+bool keeper_init_state_discover(KeeperStateInit *initState,
+								PostgresSetup *pgSetup,
+								const char *filename);
+
 #endif /* STATE_H */

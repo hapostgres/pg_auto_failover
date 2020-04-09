@@ -45,8 +45,6 @@
  */
 bool keeperInitWarnings = false;
 
-static KeeperStateInit initState = { 0 };
-
 static bool keeper_pg_init_start(Keeper *keeper);
 static bool service_keeper_init_start(void *context, pid_t *pid);
 static bool service_keeper_init_stop(void *context);
@@ -436,6 +434,7 @@ keeper_pg_init_and_register(Keeper *keeper)
 bool
 keeper_pg_init_continue(Keeper *keeper)
 {
+	KeeperStateInit *initState = &(keeper->initState);
 	KeeperConfig *config = &(keeper->config);
 
 	if (!keeper_init(keeper, config))
@@ -444,7 +443,7 @@ keeper_pg_init_continue(Keeper *keeper)
 		return false;
 	}
 
-	if (!keeper_init_state_read(keeper))
+	if (!keeper_init_state_read(initState, config->pathnames.init))
 	{
 		log_fatal("Failed to restart from previous keeper init attempt");
 		log_info("HINT: use `pg_autoctl drop node` to retry in a clean state");
@@ -453,7 +452,7 @@ keeper_pg_init_continue(Keeper *keeper)
 
 	log_info("Continuing from a previous `pg_autoctl create` failed attempt");
 	log_info("PostgreSQL state at registration time was: %s",
-			 PreInitPostgreInstanceStateToString(initState.pgInitState));
+			 PreInitPostgreInstanceStateToString(initState->pgInitState));
 
 	/*
 	 * TODO: verify the information in the state file against the information

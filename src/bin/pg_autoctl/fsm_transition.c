@@ -60,12 +60,12 @@ fsm_init_primary(Keeper *keeper)
 {
 	KeeperConfig *config = &(keeper->config);
 	LocalPostgresServer *postgres = &(keeper->postgres);
+	KeeperStateInit *initState = &(keeper->initState);
 	PGSQL *pgsql = &(postgres->sqlClient);
 	bool inRecovery = false;
 
-	KeeperStateInit *initState = &(keeper->initState);
-	PostgresSetup pgSetup = keeper->config.pgSetup;
-	bool postgresInstanceExists = pg_setup_pgdata_exists(&pgSetup);
+	PostgresSetup *pgSetup = &(keeper->config.pgSetup);
+	bool postgresInstanceExists = pg_setup_pgdata_exists(pgSetup);
 	bool pgInstanceIsOurs = false;
 
 	log_info("Initialising postgres as a primary");
@@ -74,7 +74,7 @@ fsm_init_primary(Keeper *keeper)
 	 * When initialializing the local node on-top of an empty (or non-existing)
 	 * PGDATA directory, now is the time to `pg_ctl initdb`.
 	 */
-	if (!keeper_init_state_read(keeper))
+	if (!keeper_init_state_read(initState, config->pathnames.init))
 	{
 		log_error("Failed to read init state file \"%s\", which is required "
 				  "for the transition from INIT to SINGLE.",
@@ -89,7 +89,9 @@ fsm_init_primary(Keeper *keeper)
 	 */
 	if (initState->pgInitState >= PRE_INIT_STATE_RUNNING)
 	{
-		if (!keeper_init_state_discover(keeper))
+		if (!keeper_init_state_discover(initState,
+										pgSetup,
+										keeper->config.pathnames.init))
 		{
 			/* errors have already been logged */
 			return false;
@@ -113,10 +115,10 @@ fsm_init_primary(Keeper *keeper)
 	if (initState->pgInitState == PRE_INIT_STATE_EMPTY &&
 		!postgresInstanceExists)
 	{
-		if (!pg_ctl_initdb(pgSetup.pg_ctl, pgSetup.pgdata))
+		if (!pg_ctl_initdb(pgSetup->pg_ctl, pgSetup->pgdata))
 		{
 			log_fatal("Failed to initialise a PostgreSQL instance at \"%s\""
-					  ", see above for details", pgSetup.pgdata);
+					  ", see above for details", pgSetup->pgdata);
 
 			return false;
 		}
@@ -136,7 +138,7 @@ fsm_init_primary(Keeper *keeper)
 	{
 		log_error("PostgreSQL is already running at \"%s\", refusing to "
 				  "initialize a new cluster on-top of the current one.",
-				  pgSetup.pgdata);
+				  pgSetup->pgdata);
 
 		return false;
 	}
@@ -189,11 +191,11 @@ fsm_init_primary(Keeper *keeper)
 	 * self-signed certificate for the server. We place the certificate and
 	 * private key in $PGDATA/server.key and $PGDATA/server.crt
 	 */
-	if (pgSetup.ssl.createSelfSignedCert &&
-		(!file_exists(pgSetup.ssl.serverKey) ||
-		 !file_exists(pgSetup.ssl.serverCert)))
+	if (pgSetup->ssl.createSelfSignedCert &&
+		(!file_exists(pgSetup->ssl.serverKey) ||
+		 !file_exists(pgSetup->ssl.serverCert)))
 	{
-		if (!pg_create_self_signed_cert(&pgSetup, config->nodename))
+		if (!pg_create_self_signed_cert(pgSetup, config->nodename))
 		{
 			log_error("Failed to create SSL self-signed certificate, "
 					  "see above for details");

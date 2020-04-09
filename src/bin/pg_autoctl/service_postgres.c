@@ -255,6 +255,7 @@ service_postgres_fsm_loop(Keeper *keeper)
 {
 	KeeperConfig *config = &(keeper->config);
 	PostgresSetup *pgSetup = &(config->pgSetup);
+	KeeperStateInit *initState = &(keeper->initState);
 
 	Service postgres = {
 		"postgres",
@@ -281,7 +282,7 @@ service_postgres_fsm_loop(Keeper *keeper)
 	 */
 	if (file_exists(keeper->config.pathnames.init))
 	{
-		if (!keeper_init_state_read(keeper))
+		if (!keeper_init_state_read(initState, config->pathnames.init))
 		{
 			log_fatal("Failed to start our Postgres FSM loop, "
 					  "see above for details");
@@ -310,7 +311,7 @@ service_postgres_fsm_loop(Keeper *keeper)
 		 */
 		if (file_exists(config->pathnames.init))
 		{
-			if (!keeper_init_state_read(keeper))
+			if (!keeper_init_state_read(initState, config->pathnames.init))
 			{
 				/* errors have already been logged, will try again */
 				continue;
@@ -366,6 +367,8 @@ static bool
 ensure_postgres_status(Keeper *keeper, Service *postgres)
 {
 	KeeperStateData *keeperState = &(keeper->state);
+	KeeperStateInit *initState = &(keeper->initState);
+	KeeperConfig *config = &(keeper->config);
 
 	log_debug("Ensure postgres status(%s,%s)",
 			  NodeStateToString(keeperState->current_role),
@@ -425,7 +428,7 @@ ensure_postgres_status(Keeper *keeper, Service *postgres)
 
 			case PGSTATUS_INIT:
 			{
-				if (!keeper_init_state_read(keeper))
+				if (!keeper_init_state_read(initState, config->pathnames.init))
 				{
 					log_error("Failed to read expected Postgres service status, "
 							  "see above for details");
