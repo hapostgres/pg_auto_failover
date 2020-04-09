@@ -50,17 +50,14 @@ class Cluster:
         """
         Initializes the monitor and returns an instance of MonitorNode.
         """
-        print("create_monitor()")
         if self.monitor is not None:
             raise Exception("Monitor has already been created.")
         vnode = self.vlan.create_node()
-        print("MonitorNode()")
         self.monitor = MonitorNode(datadir, vnode, port, nodename,
                                    authMethod, sslMode, sslSelfSigned,
                                    sslCAFile=sslCAFile,
                                    sslServerKey=sslServerKey,
                                    sslServerCert=sslServerCert)
-        print("self.monitor.create()")
         self.monitor.create()
         return self.monitor
 
@@ -912,7 +909,6 @@ class MonitorNode(PGNode):
         """
         Initializes and runs the monitor process.
         """
-        print("PGNODE.create()")
         create_args = ['create', self.role.command(), '-vv',
                        '--pgdata', self.datadir,
                        '--pgport', str(self.port),
@@ -944,13 +940,10 @@ class MonitorNode(PGNode):
         # therefore we do not wait for process to complete
         # we just record the process
 
-        print("PGAutoCtl()")
         self.pg_autoctl = PGAutoCtl(self, create_args)
         if run:
-            print("self.pg_autoctl.run()")
             self.pg_autoctl.run()
         else:
-            print("self.pg_autoctl.execute('monitor')")
             self.pg_autoctl.execute("create monitor")
 
     def run(self, env={}):

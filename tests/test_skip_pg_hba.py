@@ -7,7 +7,6 @@ import os, os.path, time, shutil
 cluster = None
 node1 = None
 node2 = None
-node1_path = ""
 
 def setup_module():
     global cluster
@@ -28,12 +27,11 @@ def test_000_create_monitor():
 
     monitor.reload_postgres()
 
-def test_001a_init_primary():
+def test_001_init_primary():
     global node1
     global node1_path
 
     print()
-    time.sleep(1)
     node1_path = cluster.pg_createcluster("node1")
 
     # make a copy of the debian's HBA file
@@ -48,24 +46,13 @@ def test_001a_init_primary():
                           "mkdir", "-p", "/tmp/socks/node1"])
     assert(p.wait(timeout=pgautofailover.COMMAND_TIMEOUT) == 0)
 
-def test_001b_init_primary():
-    global node1
-    global node1_path
-
     os.environ["PG_REGRESS_SOCK_DIR"] = "/tmp/socks/node1"
 
     # we need to give the nodename here, because our method to find it
     # automatically will fail in the test environment
     node1 = cluster.create_datanode(node1_path,
                                     authMethod="skip")
-def test_001c_init_primary():
-    global node1
-    global node1_path
     node1.create(level='-vvv')
-
-def test_001d_init_primary():
-    global node1
-    global node1_path
 
     #
     # Check that we didn't edit the HBA file, thanks to --skip-pg-hba, here
@@ -84,10 +71,6 @@ def test_001d_init_primary():
 
     assert(p.returncode == 0)
 
-def test_001e_init_primary():
-    global node1
-    global node1_path
-
     with open(os.path.join(node1_path, "pg_hba.conf"), 'a') as hba:
         # node1.run_sql_query will need
         # host "172.27.1.1", user "docker", database "postgres"
@@ -97,14 +80,7 @@ def test_001e_init_primary():
 
     node1.reload_postgres()
 
-def test_001f_init_primary():
-    global node1
-    global node1_path
     node1.run()
-
-def test_001g_init_primary():
-    global node1
-    global node1_path
     assert node1.wait_until_state(target_state="single")
 
 def test_002_create_t1():
