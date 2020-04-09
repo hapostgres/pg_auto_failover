@@ -348,7 +348,7 @@ keeper_pg_init_continue(Keeper *keeper, KeeperConfig *config)
 static bool
 reach_initial_state(Keeper *keeper)
 {
-	KeeperConfig config = keeper->config;
+	KeeperConfig *config = &(keeper->config);
 
 	log_trace("reach_initial_state: %s to %s",
 			  NodeStateToString(keeper->state.current_role),
@@ -465,7 +465,7 @@ reach_initial_state(Keeper *keeper)
 	}
 
 	/* everything went fine, get rid of the init state file */
-	return unlink_file(config.pathnames.init);
+	return unlink_file(config->pathnames.init);
 }
 
 

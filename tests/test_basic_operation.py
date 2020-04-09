@@ -42,6 +42,9 @@ def test_004_init_secondary():
     assert node2.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")
 
+    assert node1.has_needed_replication_slots()
+    assert node2.has_needed_replication_slots()
+
 def test_005_read_from_secondary():
     results = node2.run_sql_query("SELECT * FROM t1")
     assert results == [(1,), (2,)]
@@ -100,6 +103,8 @@ def test_014_drop_secondary():
     assert not node1.pg_is_running()
     assert node2.wait_until_state(target_state="single")
 
+    # replication slot list should be empty now
+    assert node2.has_needed_replication_slots()
 
 def test_015_add_new_secondary():
     global node3
@@ -109,28 +114,36 @@ def test_015_add_new_secondary():
     assert node3.wait_until_state(target_state="secondary")
     assert node2.wait_until_state(target_state="primary")
 
+    assert node2.has_needed_replication_slots()
+    assert node3.has_needed_replication_slots()
 
-def test_016_multiple_manual_failover_verify_replication_slot_removed():
-    count_repl_slots = "select count(*) from pg_replication_slots"
-
+# In previous versions of pg_auto_failover we removed the replication slot
+# on the secondary after failover. Now, we instead maintain the replication
+# slot's replay_lsn thanks for the monitor tracking of the nodes' LSN
+# positions.
+#
+# So rather than checking that we want to zero replication slots after
+# replication, we check that we still have a replication slot for the other
+# node.
+#
+def test_016_multiple_manual_failover_verify_replication_slots():
     print()
-    print("Calling pgautofailover.failover() on the monitor")
-    monitor.failover()
-    assert node2.wait_until_state(target_state="secondary")
-    assert node3.wait_until_state(target_state="primary")
-    node2_replication_slots = node2.run_sql_query(count_repl_slots)
-    assert node2_replication_slots == [(0,)]
-    node3_replication_slots = node3.run_sql_query(count_repl_slots)
-    assert node3_replication_slots == [(1,)]
 
     print("Calling pgautofailover.failover() on the monitor")
     monitor.failover()
-    assert node2.wait_until_state(target_state="primary")
-    assert node3.wait_until_state(target_state="secondary")
-    node2_replication_slots = node2.run_sql_query(count_repl_slots);
-    assert node2_replication_slots == [(1,)]
-    node3_replication_slots = node3.run_sql_query(count_repl_slots);
-    assert node3_replication_slots == [(0,)]
+    assert node2.wait_until_state(target_state="secondary", other_node=node3)
+    assert node3.wait_until_state(target_state="primary", other_node=node2)
+
+    assert node2.has_needed_replication_slots()
+    assert node3.has_needed_replication_slots()
+
+    print("Calling pgautofailover.failover() on the monitor")
+    monitor.failover()
+    assert node2.wait_until_state(target_state="primary", other_node=node3)
+    assert node3.wait_until_state(target_state="secondary", other_node=node2)
+
+    assert node2.has_needed_replication_slots()
+    assert node3.has_needed_replication_slots()
 
 def test_017_drop_primary():
     node2.drop()
