@@ -64,9 +64,13 @@ class VirtualLAN:
         Creates a VirtualNode which can access/be accessed from other nodes in
         the virtual network.
         """
+        print("create_node()")
         namespace = "%s-%s" % (self.namePrefix, len(self.nodes))
+        print("get next available host")
         address = next(self.availableHosts)
+        print("create virtual node")
         node = VirtualNode(namespace, address, self.prefixLen)
+        print("add interface to bridge")
         self._add_interface_to_bridge(self.bridgeName, node.vethPeer)
         self.nodes.append(node)
         return node
