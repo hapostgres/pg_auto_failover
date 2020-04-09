@@ -347,11 +347,16 @@ class PGNode:
             # the "starting" status is not good enough for us, we're only
             # happy with "ready".
             pidfile = os.path.join(self.datadir, 'postmaster.pid')
-            with open(pidfile, "r") as p:
-                pidlines = p.readlines()
-                if len(pidlines) > 7:
-                    pg_status = pidlines[7]
-                    return pg_status.startswith("ready")
+            try:
+                with open(pidfile, "r") as p:
+                    pidlines = p.readlines()
+                    if len(pidlines) > 7:
+                        pg_status = pidlines[7]
+                        return pg_status.startswith("ready")
+            except FileNotFoundError:
+                # It's possible that the pidfile or pgdata does not exist yet.
+                # Obviously postgres is not running in that case
+                return False
         elif status_proc.returncode > 0:
             # ignore `pg_ctl status` output, silently try again till timeout
             return False
