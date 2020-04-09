@@ -48,7 +48,7 @@ def test_005_maintenance():
     print("calling node2.run()")
     node2.run()
     print("disable_maintenance")
-    node2.disable_maintenance()
+    node2.disable_maintenance(other_node=node1)
     assert node2.wait_until_pg_is_running(timeout=20)
     assert node2.wait_until_state(target_state="secondary", other_node=node1)
     assert node1.wait_until_state(target_state="primary", other_node=node2)

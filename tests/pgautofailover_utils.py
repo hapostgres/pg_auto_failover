@@ -498,6 +498,29 @@ class PGNode:
             out, err = command.execute("show uri", 'show', 'uri')
         return out
 
+    def detailed_exception(self, error_msg, other_node=None):
+        events = self.get_events_str()
+        error_msg += f"MONITOR EVENTS:\n{events}\n"
+
+        if self.running():
+            out, err = self.stop_pg_autoctl()
+            error_msg += f"STDOUT OF PG_AUTOCTL FOR MAIN NODE:\n{out}\n"
+            error_msg += f"STDERR OF PG_AUTOCTL FOR MAIN NODE:\n{err}\n"
+
+        pglogs = self.get_postgres_logs()
+        error_msg += f"POSTGRES LOGS FOR MAIN NODE:\n{pglogs}\n"
+
+        if other_node:
+            if other_node.running():
+                out, err = other_node.stop_pg_autoctl()
+                error_msg += f"STDOUT OF PG_AUTOCTL FOR OTHER NODE:\n{out}\n"
+                error_msg += f"STDERR OF PG_AUTOCTL FOR OTHER NODE:\n{err}\n"
+
+            pglogs = other_node.get_postgres_logs()
+            error_msg += f"POSTGRES LOGS FOR OTHER NODE:\n{pglogs}\n"
+        return Exception(error_msg)
+
+
 
 class DataNode(PGNode):
     def __init__(self, datadir, vnode, port,
@@ -636,30 +659,9 @@ class DataNode(PGNode):
 
         print("%s didn't reach %s after %d seconds" %
               (self.datadir, target_state, timeout))
-
         error_msg = (f"{self.datadir} failed to reach {target_state} "
                      f"after {timeout} seconds\n")
-        events = self.get_events_str()
-        error_msg += f"MONITOR EVENTS:\n{events}\n"
-
-        if self.running():
-            out, err = self.stop_pg_autoctl()
-            error_msg += f"STDOUT OF PG_AUTOCTL FOR MAIN NODE:\n{out}\n"
-            error_msg += f"STDERR OF PG_AUTOCTL FOR MAIN NODE:\n{err}\n"
-
-        pglogs = self.get_postgres_logs()
-        error_msg += f"POSTGRES LOGS FOR MAIN NODE:\n{pglogs}\n"
-
-        if other_node:
-            if other_node.running():
-                out, err = other_node.stop_pg_autoctl()
-                error_msg += f"STDOUT OF PG_AUTOCTL FOR OTHER NODE:\n{out}\n"
-                error_msg += f"STDERR OF PG_AUTOCTL FOR OTHER NODE:\n{err}\n"
-
-            pglogs = other_node.get_postgres_logs()
-            error_msg += f"POSTGRES LOGS FOR OTHER NODE:\n{pglogs}\n"
-
-        raise Exception(error_msg)
+        raise self.detailed_exception(error_msg)
 
     def get_state(self):
         """
@@ -709,7 +711,7 @@ SELECT reportedstate
         command = PGAutoCtl(self.vnode, self.datadir)
         command.execute("enable maintenance", 'enable', 'maintenance')
 
-    def disable_maintenance(self):
+    def disable_maintenance(self, other_node=None):
         """
         Disables maintenance on a pg_autoctl standby node
 
@@ -718,7 +720,8 @@ SELECT reportedstate
         # TODO: find out why this sleep is needed
         time.sleep(1)
         command = PGAutoCtl(self.vnode, self.datadir)
-        command.execute("disable maintenance", 'disable', 'maintenance', timeout=10)
+        command.execute("disable maintenance", 'disable', 'maintenance',
+                        timeout=10, other_node=other_node)
 
     def drop(self):
         """
@@ -929,6 +932,7 @@ class MonitorNode(PGNode):
         """
         self.pg_autoctl = PGAutoCtl(self.vnode, self.datadir)
         self.pg_autoctl.run(level='-v')
+        time.sleep(5)
 
     def destroy(self):
         """
@@ -1045,9 +1049,10 @@ class MonitorNode(PGNode):
 
 
 class PGAutoCtl():
-    def __init__(self, vnode, datadir, argv=None):
-        self.vnode = vnode
-        self.datadir = datadir
+    def __init__(self, pgnode, argv=None):
+        self.vnode = pgnode.vnode
+        self.datadir = pgnode.datadir
+        self.pgnode = pgnode
 
         self.program = shutil.which('pg_autoctl')
         self.command = None
@@ -1074,7 +1079,7 @@ class PGAutoCtl():
         self.run_proc = self.vnode.run_unmanaged(self.command)
         print("pg_autoctl run [%d]" % self.run_proc.pid)
 
-    def execute(self, name, *args):
+    def execute(self, name, *args, timeout=COMMAND_TIMEOUT, other_node=None):
         """
         Execute a single pg_autoctl command, wait for its completion.
         """
@@ -1082,19 +1087,17 @@ class PGAutoCtl():
         with self.vnode.run(self.command) as proc:
             try:
                 # wait until process is done, still applying COMMAND_TIMEOUT
-                out, err = proc.communicate(timeout=COMMAND_TIMEOUT)
+                out, err = proc.communicate(timeout=timeout)
             except subprocess.TimeoutExpired:
                 # we already spent our allocated waiting time, just kill the process
                 proc.kill()
                 proc.wait()
 
-                raise Exception("%s timed out after %d seconds.\n%s\n%s\n%s" %
-                                (name,
-                                 COMMAND_TIMEOUT,
-                                 " ".join(self.command),
-                                 self.out,
-                                 self.err))
-
+                raise self.detailed_exception(
+                    "%s timed out after %d seconds.\n%s\n%s\n%s" %
+                    (name, timeout, " ".join(self.command), self.out, self.err),
+                    other_node=other_node
+                )
             if proc.returncode > 0:
                 raise Exception("%s failed\n%s\n%s\n%s" %
                                 (name,
