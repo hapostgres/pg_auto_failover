@@ -46,7 +46,6 @@ bool pg_ctl_restart(const char *pg_ctl, const char *pgdata);
 bool pg_ctl_promote(const char *pg_ctl, const char *pgdata);
 
 bool pg_setup_standby_mode(uint32_t pg_control_version,
-						   const char *configFilePath,
 						   const char *pgdata,
 						   ReplicationSource *replicationSource);
 

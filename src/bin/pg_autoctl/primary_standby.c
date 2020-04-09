@@ -629,7 +629,6 @@ standby_init_database(LocalPostgresServer *postgres,
 					  const char *nodename)
 {
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
-	char configFilePath[MAXPGPATH] = { 0 };
 
 	log_trace("standby_init_database");
 	log_info("Initialising PostgreSQL as a hot standby");
@@ -660,9 +659,6 @@ standby_init_database(LocalPostgresServer *postgres,
 		return false;
 	}
 
-	/* configFilePath = $PGDATA/postgresql.conf */
-	join_path_components(configFilePath, pgSetup->pgdata, "postgresql.conf");
-
 	/* we have a new PGDATA, update our pgSetup information */
 	if (!local_postgres_update(postgres, true))
 	{
@@ -673,7 +669,6 @@ standby_init_database(LocalPostgresServer *postgres,
 
 	/* now setup the replication configuration (primary_conninfo etc) */
 	if (!pg_setup_standby_mode(pgSetup->control.pg_control_version,
-							   configFilePath,
 							   pgSetup->pgdata,
 							   replicationSource))
 	{
@@ -732,16 +727,12 @@ bool
 primary_rewind_to_standby(LocalPostgresServer *postgres,
 						  ReplicationSource *replicationSource)
 {
-	char configFilePath[MAXPGPATH];
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	NodeAddress *primaryNode = &(replicationSource->primaryNode);
 
 	log_trace("primary_rewind_to_standby");
 	log_info("Rewinding PostgreSQL to follow new primary %s:%d",
 			 primaryNode->host, primaryNode->port);
-
-	/* configFilePath = $PGDATA/postgresql.conf */
-	join_path_components(configFilePath, pgSetup->pgdata, "postgresql.conf");
 
 	if (!pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata))
 	{
@@ -756,7 +747,6 @@ primary_rewind_to_standby(LocalPostgresServer *postgres,
 	}
 
 	if (!pg_setup_standby_mode(pgSetup->control.pg_control_version,
-							   configFilePath,
 							   pgSetup->pgdata,
 							   replicationSource))
 	{

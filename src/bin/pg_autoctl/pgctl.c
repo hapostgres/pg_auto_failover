@@ -71,8 +71,7 @@ static bool prepare_conninfo_sslmode(PQExpBuffer buffer, SSLOptions sslOptions);
 static bool pg_write_recovery_conf(const char *pgdata,
 								   const char *primaryConnInfo,
 								   const char *replicationSlotName);
-static bool pg_write_standby_signal(const char *configFilePath,
-									const char *pgdata,
+static bool pg_write_standby_signal(const char *pgdata,
 									const char *primaryConnInfo,
 									const char *replicationSlotName);
 
@@ -1085,7 +1084,6 @@ pg_ctl_promote(const char *pg_ctl, const char *pgdata)
  */
 bool
 pg_setup_standby_mode(uint32_t pg_control_version,
-					  const char *configFilePath,
 					  const char *pgdata,
 					  ReplicationSource *replicationSource)
 {
@@ -1136,8 +1134,7 @@ pg_setup_standby_mode(uint32_t pg_control_version,
 		 * the main postgresql.conf file and create an empty standby.signal
 		 * file to trigger starting the server in standby mode.
 		 */
-		return pg_write_standby_signal(configFilePath,
-									   pgdata,
+		return pg_write_standby_signal(pgdata,
 									   primaryConnInfo,
 									   replicationSource->slotName);
 	}
@@ -1388,11 +1385,11 @@ prepare_conninfo_sslmode(PQExpBuffer buffer, SSLOptions sslOptions)
  * configuration file.
  */
 static bool
-pg_write_standby_signal(const char *configFilePath,
-						const char *pgdata,
+pg_write_standby_signal(const char *pgdata,
 						const char *primaryConnInfo,
 						const char *replicationSlotName)
 {
+	char configFilePath[MAXPGPATH] = { 0 };
 	char quotedSlotName[BUFSIZE] = { 0 };
 	GUC standby_settings[] = {
 		{ "primary_conninfo", (char *) primaryConnInfo },
@@ -1407,6 +1404,9 @@ pg_write_standby_signal(const char *configFilePath,
 
 	/* in-place edit quotedSlotName to its expected value  */
 	sformat(quotedSlotName, sizeof(quotedSlotName), "'%s'", replicationSlotName);
+
+	/* configFilePath = $PGDATA/postgresql.conf */
+	join_path_components(configFilePath, pgdata, "postgresql.conf");
 
 	/*
 	 * First install the standby.signal file, so that if there's a problem
