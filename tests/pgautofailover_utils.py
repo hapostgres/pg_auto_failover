@@ -766,7 +766,7 @@ SELECT reportedstate
             command.execute("set canditate priority", 'set', 'node',
                             'candidate-priority', '--', str(candidatePriority))
         except Exception as e:
-            if command.run_proc.returncode == 1:
+            if command.last_returncode == 1:
                 return False
             raise e
         return True
@@ -789,7 +789,7 @@ SELECT reportedstate
             command.execute("set replication quorum", 'set', 'node',
                             'replication-quorum', replicationQuorum)
         except Exception as e:
-            if command.run_proc.returncode == 1:
+            if command.last_returncode == 1:
                 return False
             raise e
         return True
@@ -820,7 +820,7 @@ SELECT reportedstate
                             'number-sync-standbys', str(numberSyncStandbys))
         except Exception as e:
             # either caught as a BAD ARG (1) or by the monitor (6)
-            if command.run_proc.returncode in (1, 6):
+            if command.last_returncode in (1, 6):
                 return False
             raise e
         return True
@@ -1086,6 +1086,7 @@ class PGAutoCtl():
         self.command = None
 
         self.run_proc = None
+        self.last_returncode = None
         self.out = ""
         self.err = ""
 
@@ -1123,6 +1124,7 @@ class PGAutoCtl():
                 except subprocess.TimeoutExpired:
                     continue
 
+                self.last_returncode = proc.returncode
                 if proc.returncode > 0:
                     raise Exception("%s failed\n%s\n%s\n%s" %
                                     (name,
