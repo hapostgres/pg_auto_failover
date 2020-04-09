@@ -352,16 +352,20 @@ class PGNode:
                     pidlines = p.readlines()
                     if len(pidlines) > 7:
                         pg_status = pidlines[7]
+                        status_proc.release()
                         return pg_status.startswith("ready")
             except FileNotFoundError:
                 # It's possible that the pidfile or pgdata does not exist yet.
                 # Obviously postgres is not running in that case
+                status_proc.release()
                 return False
         elif status_proc.returncode > 0:
             # ignore `pg_ctl status` output, silently try again till timeout
+            status_proc.release()
             return False
         elif status_proc.returncode is None:
             print("pg_ctl status timed out after %ds" % timeout)
+            status_proc.release()
             return False
 
     def wait_until_pg_is_running(self, timeout=STATE_CHANGE_TIMEOUT):
