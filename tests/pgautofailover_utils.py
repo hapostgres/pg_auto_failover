@@ -134,7 +134,6 @@ class Cluster:
         if self.monitor:
             self.monitor.destroy()
         self.vlan.destroy()
-        time.sleep(5)
 
 
 class PGNode:
@@ -960,7 +959,6 @@ class MonitorNode(PGNode):
         """
         self.pg_autoctl = PGAutoCtl(self)
         self.pg_autoctl.run(level='-v')
-        time.sleep(5)
 
     def destroy(self):
         """
