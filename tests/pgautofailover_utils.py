@@ -193,7 +193,7 @@ class PGNode:
         """
         Runs "pg_autoctl run"
         """
-        self.pg_autoctl = PGAutoCtl(self.vnode, self.datadir)
+        self.pg_autoctl = PGAutoCtl(self)
         self.pg_autoctl.run()
         self.wait_until_pg_is_running()
 
@@ -386,6 +386,7 @@ class PGNode:
         self.stop_pg_autoctl()
         self.stop_postgres()
 
+
     def config_file_path(self):
         """
         Returns the path of the config file for this data node.
@@ -458,7 +459,7 @@ class PGNode:
         """
         Set a configuration parameter to given value
         """
-        command = PGAutoCtl(self.vnode, self.datadir)
+        command = PGAutoCtl(self)
         command.execute("config set %s" % setting,
                         'config', 'set', setting, value)
         return True
@@ -473,7 +474,7 @@ class PGNode:
         """
         Set a configuration parameter to given value
         """
-        command = PGAutoCtl(self.vnode, self.datadir)
+        command = PGAutoCtl(self)
         command.execute("config set %s" % setting,
                         'config', 'set', setting, value)
         return True
@@ -482,7 +483,7 @@ class PGNode:
         """
         Set a configuration parameter to given value
         """
-        command = PGAutoCtl(self.vnode, self.datadir)
+        command = PGAutoCtl(self)
         out, err = command.execute("config get %s" % setting,
                                    'config', 'get', setting)
         return out[:-1]
@@ -491,7 +492,7 @@ class PGNode:
         """
         Runs pg_autoctl show uri
         """
-        command = PGAutoCtl(self.vnode, self.datadir)
+        command = PGAutoCtl(self)
         if json:
             out, err = command.execute("show uri", 'show', 'uri', '--json')
         else:
@@ -594,7 +595,7 @@ class DataNode(PGNode):
         # when run is requested pg_autoctl does not terminate
         # therefore we do not wait for process to complete
         # we just record the process
-        self.pg_autoctl = PGAutoCtl(self.vnode, self.datadir, create_args)
+        self.pg_autoctl = PGAutoCtl(self, create_args)
         if run:
             self.pg_autoctl.run()
             self.wait_until_pg_is_running()
@@ -608,7 +609,7 @@ class DataNode(PGNode):
         self.stop_pg_autoctl()
 
         try:
-            destroy = PGAutoCtl(self.vnode, self.datadir)
+            destroy = PGAutoCtl(self)
             destroy.execute("pg_autoctl drop node --destroy",
                             'drop', 'node', '--destroy')
         except Exception as e:
@@ -708,7 +709,7 @@ SELECT reportedstate
 
         :return:
         """
-        command = PGAutoCtl(self.vnode, self.datadir)
+        command = PGAutoCtl(self)
         command.execute("enable maintenance", 'enable', 'maintenance')
 
     def disable_maintenance(self, other_node=None):
@@ -717,9 +718,7 @@ SELECT reportedstate
 
         :return:
         """
-        # TODO: find out why this sleep is needed
-        time.sleep(1)
-        command = PGAutoCtl(self.vnode, self.datadir)
+        command = PGAutoCtl(self)
         command.execute("disable maintenance", 'disable', 'maintenance',
                         timeout=10, other_node=other_node)
 
@@ -729,7 +728,7 @@ SELECT reportedstate
 
         :return:
         """
-        command = PGAutoCtl(self.vnode, self.datadir)
+        command = PGAutoCtl(self)
         command.execute("drop node", 'drop', 'node')
         return True
 
@@ -737,7 +736,7 @@ SELECT reportedstate
         """
             Sets candidate priority via pg_autoctl
         """
-        command = PGAutoCtl(self.vnode, self.datadir)
+        command = PGAutoCtl(self)
         try:
             command.execute("set canditate priority", 'set', 'node',
                             'candidate-priority', '--', str(candidatePriority))
@@ -751,7 +750,7 @@ SELECT reportedstate
         """
             Gets candidate priority via pg_autoctl
         """
-        command = PGAutoCtl(self.vnode, self.datadir)
+        command = PGAutoCtl(self)
         out, err = command.execute("get canditate priority",
                                    'get', 'node', 'candidate-priority')
         return int(out)
@@ -760,7 +759,7 @@ SELECT reportedstate
         """
             Sets replication quorum via pg_autoctl
         """
-        command = PGAutoCtl(self.vnode, self.datadir)
+        command = PGAutoCtl(self)
         try:
             command.execute("set replication quorum", 'set', 'node',
                             'replication-quorum', replicationQuorum)
@@ -774,7 +773,7 @@ SELECT reportedstate
         """
             Gets replication quorum via pg_autoctl
         """
-        command = PGAutoCtl(self.vnode, self.datadir)
+        command = PGAutoCtl(self)
         out, err = command.execute("get replication quorum",
                                    'get', 'node', 'replication-quorum')
 
@@ -789,7 +788,7 @@ SELECT reportedstate
         """
             Sets number sync standbys via pg_autoctl
         """
-        command = PGAutoCtl(self.vnode, self.datadir)
+        command = PGAutoCtl(self)
         try:
             command.execute("set number sync standbys",
                             'set', 'formation',
@@ -805,7 +804,7 @@ SELECT reportedstate
         """
             Gets number sync standbys  via pg_autoctl
         """
-        command = PGAutoCtl(self.vnode, self.datadir)
+        command = PGAutoCtl(self)
         out, err = command.execute("get number sync standbys",
                                    'get', 'formation', 'number-sync-standbys')
 
@@ -815,7 +814,7 @@ SELECT reportedstate
         """
             Gets number sync standbys  via pg_autoctl
         """
-        command = PGAutoCtl(self.vnode, self.datadir)
+        command = PGAutoCtl(self)
         out, err = command.execute("get synchronous_standby_names",
                                    'show', 'synchronous_standby_names')
 
@@ -920,7 +919,7 @@ class MonitorNode(PGNode):
         # therefore we do not wait for process to complete
         # we just record the process
 
-        self.pg_autoctl = PGAutoCtl(self.vnode, self.datadir, create_args)
+        self.pg_autoctl = PGAutoCtl(self, create_args)
         if run:
             self.pg_autoctl.run()
         else:
@@ -930,7 +929,7 @@ class MonitorNode(PGNode):
         """
         Runs "pg_autoctl run"
         """
-        self.pg_autoctl = PGAutoCtl(self.vnode, self.datadir)
+        self.pg_autoctl = PGAutoCtl(self)
         self.pg_autoctl.run(level='-v')
         time.sleep(5)
 
@@ -946,7 +945,7 @@ class MonitorNode(PGNode):
                 print("Monitor logs:\n%s\n%s\n" % (out, err))
 
         try:
-            destroy = PGAutoCtl(self.vnode, self.datadir)
+            destroy = PGAutoCtl(self)
             destroy.execute("pg_autoctl node destroy",
                             'drop', 'monitor', '--destroy')
         except Exception as e:
@@ -1002,7 +1001,7 @@ class MonitorNode(PGNode):
         :param formation: name of the formation to enable the feature on
         :return: None
         """
-        command = PGAutoCtl(self.vnode, self.datadir)
+        command = PGAutoCtl(self)
         command.execute("enable %s" % feature.command(),
                         'enable', feature.command(), '--formation', formation)
 
@@ -1014,7 +1013,7 @@ class MonitorNode(PGNode):
         :param formation: name of the formation to disable the feature on
         :return: None
         """
-        command = PGAutoCtl(self.vnode, self.datadir)
+        command = PGAutoCtl(self)
         command.execute("disable %s" % feature.command(),
                         'disable', feature.command(), '--formation', formation)
 
@@ -1036,7 +1035,7 @@ class MonitorNode(PGNode):
     def print_state(self, formation="default"):
         print("pg_autoctl show state --pgdata %s" % self.datadir)
 
-        command = PGAutoCtl(self.vnode, self.datadir)
+        command = PGAutoCtl(self)
         out, err = command.execute("show state", 'show', 'state')
         print("%s" % out)
 
@@ -1085,25 +1084,32 @@ class PGAutoCtl():
         """
         self.set_command(*args)
         with self.vnode.run(self.command) as proc:
-            try:
-                # wait until process is done, still applying COMMAND_TIMEOUT
-                out, err = proc.communicate(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                # we already spent our allocated waiting time, just kill the process
-                proc.kill()
-                proc.wait()
+            for i in range(COMMAND_TIMEOUT):
+                self.pgnode.flush_output()
+                if other_node:
+                    other_node.flush_output()
+                try:
+                    # wait until process is done, still applying COMMAND_TIMEOUT
+                    out, err = proc.communicate(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    continue
 
-                raise self.detailed_exception(
-                    "%s timed out after %d seconds.\n%s\n%s\n%s" %
-                    (name, timeout, " ".join(self.command), self.out, self.err),
-                    other_node=other_node
-                )
-            if proc.returncode > 0:
-                raise Exception("%s failed\n%s\n%s\n%s" %
-                                (name,
-                                 " ".join(self.command),
-                                 out, err))
-            return out, err
+                if proc.returncode > 0:
+                    raise Exception("%s failed\n%s\n%s\n%s" %
+                                    (name,
+                                     " ".join(self.command),
+                                     out, err))
+                return out, err
+
+            # we already spent our allocated waiting time, just kill the process
+            proc.kill()
+            proc.wait()
+
+            raise self.pgnode.detailed_exception(
+                "%s timed out after %d seconds.\n%s\n" %
+                (name, timeout, " ".join(self.command)),
+                other_node=other_node
+            )
 
     def stop(self):
         """
