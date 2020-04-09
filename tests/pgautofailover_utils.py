@@ -93,7 +93,6 @@ class Cluster:
         directory path.
         """
         vnode = self.vlan.create_node()
-        nodeid = len(self.datanodes) + 1
 
         create_command = ["sudo", shutil.which('pg_createcluster'),
                           "-U", os.getenv("USER"),
@@ -101,11 +100,11 @@ class Cluster:
 
         print("%s" % " ".join(create_command))
 
-        create_proc = vnode.run(create_command)
-        out, err = create_proc.communicate(timeout=COMMAND_TIMEOUT)
-        if create_proc.returncode > 0:
-            raise Exception("pg_createcluster failed, out: %s\n, err: %s" %
-                            (out, err))
+        with vnode.run(create_command) as create_proc:
+            out, err = create_proc.communicate(timeout=COMMAND_TIMEOUT)
+            if create_proc.returncode > 0:
+                raise Exception("pg_createcluster failed, out: %s\n, err: %s" %
+                                (out, err))
 
         abspath = os.path.join("/var/lib/postgresql/", PGVERSION, datadir)
 
@@ -115,11 +114,11 @@ class Cluster:
 
         print("%s" % " ".join(chmod_command))
 
-        chmod_proc = vnode.run(chmod_command)
-        out, err = chmod_proc.communicate(timeout=COMMAND_TIMEOUT)
-        if chmod_proc.returncode > 0:
-            raise Exception("chmod failed, out: %s\n, err: %s" %
-                            (out, err))
+        with vnode.run(chmod_command) as chmod_proc:
+            out, err = chmod_proc.communicate(timeout=COMMAND_TIMEOUT)
+            if chmod_proc.returncode > 0:
+                raise Exception("chmod failed, out: %s\n, err: %s" %
+                                (out, err))
 
         return abspath
 
@@ -293,7 +292,6 @@ class PGNode:
                         return False
                     return True
             except subprocess.TimeoutExpired:
-                stop_proc.release()
                 pass
         else:
             raise Exception("Postgres could not be stopped after 60 attempts")
