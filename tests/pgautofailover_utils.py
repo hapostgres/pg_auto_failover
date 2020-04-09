@@ -362,12 +362,10 @@ class PGNode:
         Waits until the underlying Postgres process is running.
         """
         wait_until = dt.datetime.now() + dt.timedelta(seconds=timeout)
-        time.sleep(1)
         while wait_until > dt.datetime.now():
-            if self.pg_is_running():
-                time.sleep(1)
-                return True
             time.sleep(1)
+            if self.pg_is_running():
+                return True
 
         print("Postgres is still not running in %s after %d seconds" %
               (self.datadir, timeout))
