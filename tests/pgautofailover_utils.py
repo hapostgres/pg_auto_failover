@@ -718,7 +718,7 @@ SELECT reportedstate
         # TODO: find out why this sleep is needed
         time.sleep(1)
         command = PGAutoCtl(self.vnode, self.datadir)
-        command.execute("disable maintenance", 'disable', 'maintenance')
+        command.execute("disable maintenance", 'disable', 'maintenance', timeout=10)
 
     def drop(self):
         """
