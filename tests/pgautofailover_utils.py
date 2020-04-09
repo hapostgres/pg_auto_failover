@@ -193,8 +193,6 @@ class PGNode:
         """
         self.pg_autoctl = PGAutoCtl(self)
         self.pg_autoctl.run()
-        if wait_for_pg:
-            assert self.wait_until_pg_is_running(timeout=20)
 
     def running(self):
         return self.pg_autoctl and self.pg_autoctl.run_proc
