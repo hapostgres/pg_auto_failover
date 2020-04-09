@@ -1067,6 +1067,8 @@ class PGAutoCtl():
         if not self.command:
             self.command = [self.program, 'run', '--pgdata', self.datadir, level]
 
+        if self.run_proc:
+            self.run_proc.release()
         self.run_proc = self.vnode.run_unmanaged(self.command)
         print("pg_autoctl run [%d]" % self.run_proc.pid)
 
@@ -1075,36 +1077,28 @@ class PGAutoCtl():
         Execute a single pg_autoctl command, wait for its completion.
         """
         self.set_command(*args)
-        self.run_proc = self.vnode.run_unmanaged(self.command)
+        with self.vnode.run(self.command) as proc:
+            try:
+                # wait until process is done, still applying COMMAND_TIMEOUT
+                out, err = proc.communicate(timeout=COMMAND_TIMEOUT)
+            except subprocess.TimeoutExpired:
+                # we already spent our allocated waiting time, just kill the process
+                proc.kill()
+                proc.wait()
 
-        try:
-            # wait until process is done, still applying COMMAND_TIMEOUT
-            self.communicate(timeout=COMMAND_TIMEOUT)
-
-            if self.run_proc.returncode > 0:
-                raise Exception("%s failed\n%s\n%s\n%s" %
+                raise Exception("%s timed out after %d seconds.\n%s\n%s\n%s" %
                                 (name,
+                                 COMMAND_TIMEOUT,
                                  " ".join(self.command),
                                  self.out,
                                  self.err))
-            return self.out, self.err
 
-        except subprocess.TimeoutExpired:
-            # we already spent our allocated waiting time, just kill the process
-            self.run_proc.kill()
-            self.run_proc.wait()
-            self.run_proc.release()
-
-            self.run_proc = None
-
-            raise Exception("%s timed out after %d seconds.\n%s\n%s\n%s"%
-                            (name,
-                             COMMAND_TIMEOUT,
-                             " ".join(self.command),
-                             self.out,
-                             self.err))
-
-        return self.out, self.err
+            if proc.returncode > 0:
+                raise Exception("%s failed\n%s\n%s\n%s" %
+                                (name,
+                                 " ".join(self.command),
+                                 out, err))
+            return out, err
 
     def stop(self):
         """
