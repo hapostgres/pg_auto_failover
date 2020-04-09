@@ -248,10 +248,10 @@ class PGNode:
         passwd_command = [shutil.which('psql'),
                           '-d', self.database,
                           '-c', alter_user_set_passwd_command]
-        passwd_proc = self.vnode.run(passwd_command)
-        wait_or_timeout_proc(passwd_proc,
-                         name="user passwd",
-                         timeout=COMMAND_TIMEOUT)
+        with self.vnode.run(passwd_command) as passwd_proc:
+            wait_or_timeout_proc(passwd_proc,
+                                 name="user passwd",
+                                 timeout=COMMAND_TIMEOUT)
         self.authenticatedUsers[username] = password
 
     def stop_pg_autoctl(self):
@@ -281,22 +281,22 @@ class PGNode:
         for i in range(60):
             stop_command = [shutil.which('pg_ctl'), '-D', self.datadir,
                             '--wait', '--mode', 'fast', 'stop']
-            stop_proc = self.vnode.run(stop_command)
             try:
-                out, err = stop_proc.communicate(timeout=1)
-                break
+                with self.vnode.run(stop_command) as stop_proc:
+                    out, err = stop_proc.communicate(timeout=1)
+                    if stop_proc.returncode > 0:
+                        print("stopping postgres for '%s' failed, out: %s\n, err: %s"
+                              % (self.vnode.address, out, err))
+                        return False
+                    elif stop_proc.returncode is None:
+                        print("stopping postgres for '%s' timed out")
+                        return False
+                    return True
             except subprocess.TimeoutExpired:
+                stop_proc.release()
                 pass
         else:
             raise Exception("Postgres could not be stopped after 60 attempts")
-        if stop_proc.returncode > 0:
-            print("stopping postgres for '%s' failed, out: %s\n, err: %s"
-                  %(self.vnode.address, out, err))
-            return False
-        elif stop_proc.returncode is None:
-            print("stopping postgres for '%s' timed out")
-            return False
-        return True
 
     def reload_postgres(self):
         """
@@ -304,16 +304,16 @@ class PGNode:
           pg_ctl -D ${self.datadir} reload
         """
         reload_command = [shutil.which('pg_ctl'), '-D', self.datadir, 'reload']
-        reload_proc = self.vnode.run(reload_command)
-        out, err = reload_proc.communicate(timeout=COMMAND_TIMEOUT)
-        if reload_proc.returncode > 0:
-            print("reloading postgres for '%s' failed, out: %s\n, err: %s"
-                  %(self.vnode.address, out, err))
-            return False
-        elif reload_proc.returncode is None:
-            print("reloading postgres for '%s' timed out")
-            return False
-        return True
+        with self.vnode.run(reload_command) as reload_proc:
+            out, err = reload_proc.communicate(timeout=COMMAND_TIMEOUT)
+            if reload_proc.returncode > 0:
+                print("reloading postgres for '%s' failed, out: %s\n, err: %s"
+                      % (self.vnode.address, out, err))
+                return False
+            elif reload_proc.returncode is None:
+                print("reloading postgres for '%s' timed out")
+                return False
+            return True
 
     def restart_postgres(self):
         """
@@ -321,52 +321,48 @@ class PGNode:
           pg_ctl -D ${self.datadir} restart
         """
         restart_command = [shutil.which('pg_ctl'), '-D', self.datadir, 'restart']
-        restart_proc = self.vnode.run(restart_command)
-        out, err = restart_proc.communicate(timeout=COMMAND_TIMEOUT)
-        if restart_proc.returncode > 0:
-            print("restarting postgres for '%s' failed, out: %s\n, err: %s"
-                  %(self.vnode.address, out, err))
-            return False
-        elif restart_proc.returncode is None:
-            print("restarting postgres for '%s' timed out")
-            return False
-        return True
+        with self.vnode.run(restart_command) as restart_proc:
+            out, err = restart_proc.communicate(timeout=COMMAND_TIMEOUT)
+            if restart_proc.returncode > 0:
+                print("restarting postgres for '%s' failed, out: %s\n, err: %s"
+                      % (self.vnode.address, out, err))
+                return False
+            elif restart_proc.returncode is None:
+                print("restarting postgres for '%s' timed out")
+                return False
+            return True
 
     def pg_is_running(self, timeout=COMMAND_TIMEOUT):
         """
         Returns true when Postgres is running. We use pg_ctl status.
         """
         status_command = [shutil.which('pg_ctl'), '-D', self.datadir, 'status']
-        status_proc = self.vnode.run(status_command)
-        out, err = status_proc.communicate(timeout=timeout)
-        if status_proc.returncode == 0:
-            # pg_ctl status is happy to report 0 (Postgres is running) even
-            # when it's still "starting" and thus not ready for queries.
-            #
-            # because our tests need to be able to send queries to Postgres,
-            # the "starting" status is not good enough for us, we're only
-            # happy with "ready".
-            pidfile = os.path.join(self.datadir, 'postmaster.pid')
-            try:
-                with open(pidfile, "r") as p:
-                    pidlines = p.readlines()
-                    if len(pidlines) > 7:
-                        pg_status = pidlines[7]
-                        status_proc.release()
-                        return pg_status.startswith("ready")
-            except FileNotFoundError:
-                # It's possible that the pidfile or pgdata does not exist yet.
-                # Obviously postgres is not running in that case
-                status_proc.release()
+        with self.vnode.run(status_command) as status_proc:
+            out, err = status_proc.communicate(timeout=timeout)
+            if status_proc.returncode == 0:
+                # pg_ctl status is happy to report 0 (Postgres is running) even
+                # when it's still "starting" and thus not ready for queries.
+                #
+                # because our tests need to be able to send queries to Postgres,
+                # the "starting" status is not good enough for us, we're only
+                # happy with "ready".
+                pidfile = os.path.join(self.datadir, 'postmaster.pid')
+                try:
+                    with open(pidfile, "r") as p:
+                        pidlines = p.readlines()
+                        if len(pidlines) > 7:
+                            pg_status = pidlines[7]
+                            return pg_status.startswith("ready")
+                except FileNotFoundError:
+                    # It's possible that the pidfile or pgdata does not exist yet.
+                    # Obviously postgres is not running in that case
+                    return False
+            elif status_proc.returncode > 0:
+                # ignore `pg_ctl status` output, silently try again till timeout
                 return False
-        elif status_proc.returncode > 0:
-            # ignore `pg_ctl status` output, silently try again till timeout
-            status_proc.release()
-            return False
-        elif status_proc.returncode is None:
-            print("pg_ctl status timed out after %ds" % timeout)
-            status_proc.release()
-            return False
+            elif status_proc.returncode is None:
+                print("pg_ctl status timed out after %ds" % timeout)
+                return False
 
     def wait_until_pg_is_running(self, timeout=STATE_CHANGE_TIMEOUT):
         """
@@ -987,10 +983,10 @@ class MonitorNode(PGNode):
             else:
                 formation_command += ['--disable-secondary']
 
-        formation_proc = self.vnode.run(formation_command)
-        wait_or_timeout_proc(formation_proc,
-                             name="create formation",
-                             timeout=COMMAND_TIMEOUT)
+        with self.vnode.run(formation_command) as formation_proc:
+            wait_or_timeout_proc(formation_proc,
+                                 name="create formation",
+                                 timeout=COMMAND_TIMEOUT)
 
     def enable(self, feature, formation='default'):
         """
@@ -1026,11 +1022,10 @@ class MonitorNode(PGNode):
         failover_command = [shutil.which('psql'),
                             '-d', self.database,
                             '-c', failover_commmand_text]
-        failover_proc = self.vnode.run(failover_command)
-        wait_or_timeout_proc(failover_proc,
-                         name="manual failover",
-                         timeout=COMMAND_TIMEOUT)
-
+        with self.vnode.run(failover_command) as failover_proc:
+            wait_or_timeout_proc(failover_proc,
+                                 name="manual failover",
+                                 timeout=COMMAND_TIMEOUT)
 
     def print_state(self, formation="default"):
         print("pg_autoctl show state --pgdata %s" % self.datadir)
@@ -1072,7 +1067,7 @@ class PGAutoCtl():
         if not self.command:
             self.command = [self.program, 'run', '--pgdata', self.datadir, level]
 
-        self.run_proc = self.vnode.run(self.command)
+        self.run_proc = self.vnode.run_unmanaged(self.command)
         print("pg_autoctl run [%d]" % self.run_proc.pid)
 
     def execute(self, name, *args):
@@ -1080,7 +1075,7 @@ class PGAutoCtl():
         Execute a single pg_autoctl command, wait for its completion.
         """
         self.set_command(*args)
-        self.run_proc = self.vnode.run(self.command)
+        self.run_proc = self.vnode.run_unmanaged(self.command)
 
         try:
             # wait until process is done, still applying COMMAND_TIMEOUT
