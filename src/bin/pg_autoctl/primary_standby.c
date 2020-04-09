@@ -135,6 +135,11 @@ local_postgres_finish(LocalPostgresServer *postgres)
 }
 
 
+/*
+ * local_postgres_update updates the LocalPostgresServer pgSetup information
+ * with what we discover from the newly created Postgres instance. Typically
+ * used just after a pg_basebackup.
+ */
 static bool
 local_postgres_update(LocalPostgresServer *postgres, bool postgresNotRunningIsOk)
 {
@@ -147,6 +152,14 @@ local_postgres_update(LocalPostgresServer *postgres, bool postgresNotRunningIsOk
 					   postgresNotRunningIsOk))
 	{
 		/* errors have already been logged */
+		return false;
+	}
+
+	/*
+	 * Now that we now that pgdata exists, lets normalize the path.
+	 */
+	if (!normalize_filename(pgSetup->pgdata, pgSetup->pgdata, MAXPGPATH))
+	{
 		return false;
 	}
 
@@ -653,8 +666,8 @@ standby_init_database(LocalPostgresServer *postgres,
 	/* we have a new PGDATA, update our pgSetup information */
 	if (!local_postgres_update(postgres, true))
 	{
-		log_error("Failed to setup Postgres as a standby after pg_basebackup, "
-				  "see above for details");
+		log_error("Failed to update our internal Postgres representation "
+				  "after pg_basebackup, see above for details");
 		return false;
 	}
 
@@ -665,14 +678,6 @@ standby_init_database(LocalPostgresServer *postgres,
 							   replicationSource))
 	{
 		log_error("Failed to setup Postgres as a standby after pg_basebackup");
-		return false;
-	}
-
-	/*
-	 * Now that we now that pgdata exists, lets normalize the path.
-	 */
-	if (!normalize_filename(pgSetup->pgdata, pgSetup->pgdata, MAXPGPATH))
-	{
 		return false;
 	}
 

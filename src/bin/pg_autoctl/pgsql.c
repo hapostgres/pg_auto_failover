@@ -708,11 +708,13 @@ pgsql_drop_replication_slot(PGSQL *pgsql, const char *slotName)
 bool
 pgsql_drop_replication_slots(PGSQL *pgsql)
 {
+	/* *INDENT-OFF* */
 	char *sql =
 		"SELECT pg_drop_replication_slot(slot_name) "
 		"  FROM pg_replication_slots "
 		" WHERE slot_name ~ '" REPLICATION_SLOT_NAME_PATTERN "' "
-															 "   AND slot_type = 'physical'";
+		"   AND slot_type = 'physical'";
+	/* *INDENT-ON* */
 
 	log_info("Drop pg_auto_failover physical replication slots");
 
@@ -882,9 +884,10 @@ pgsql_replication_slot_drop_removed(PGSQL *pgsql, NodeAddressArray *nodeArray)
 
 
 /*
- * pgsql_replication_slot_maintain maintains replication slots that belong to
- * other standby nodes. We call that function on the standby nodes, where the
- * slots are maintained manually just in case we need them at failover.
+ * pgsql_replication_slot_maintain creates, dropts, and advance replication
+ * slots that belong to other standby nodes. We call that function on the
+ * standby nodes, where the slots are maintained manually just in case we need
+ * them at failover.
  */
 bool
 pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray)
@@ -950,8 +953,8 @@ pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray)
 
 
 /*
- * parsePgMetadata parses the result from a PostgreSQL query fetching
- * two columns from pg_stat_replication: sync_state and currentLSN.
+ * parseReplicationSlotMaintain parses the result from a PostgreSQL query
+ * fetching two columns from pg_stat_replication: sync_state and currentLSN.
  */
 static void
 parseReplicationSlotMaintain(void *ctx, PGresult *result)
@@ -1020,7 +1023,9 @@ pgsql_disable_synchronous_replication(PGSQL *pgsql)
 {
 	GUC setting = { "synchronous_standby_names", "''" };
 	char *cancelBlockedStatementsCommand =
-		"SELECT pg_cancel_backend(pid) FROM pg_stat_activity WHERE wait_event = 'SyncRep'";
+		"SELECT pg_cancel_backend(pid) "
+		"  FROM pg_stat_activity "
+		" WHERE wait_event = 'SyncRep'";
 
 	log_info("Disabling synchronous replication");
 
