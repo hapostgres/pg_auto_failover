@@ -44,9 +44,9 @@ def test_005_maintenance():
     assert node2.wait_until_state(target_state="maintenance", other_node=node1)
     node2.fail()
     node1.run_sql_query("INSERT INTO t1 VALUES (3)")
-    node2.run()
+    node2.run(wait_for_pg=False)
     node2.disable_maintenance(other_node=node1)
-    assert node2.wait_until_pg_is_running(timeout=20)
+    assert node2.wait_until_pg_is_running()
     assert node2.wait_until_state(target_state="secondary", other_node=node1)
     assert node1.wait_until_state(target_state="primary", other_node=node2)
 

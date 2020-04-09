@@ -204,7 +204,7 @@ class VirtualNode:
         """
         try:
             netns.remove(name)
-        except:
+        except Exception:
             # Namespace doesn't exist. Return silently.
             pass
 

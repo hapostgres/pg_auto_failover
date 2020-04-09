@@ -191,13 +191,14 @@ class PGNode:
 
         return dsn
 
-    def run(self, env={}):
+    def run(self, env={}, wait_for_pg=True):
         """
         Runs "pg_autoctl run"
         """
         self.pg_autoctl = PGAutoCtl(self)
         self.pg_autoctl.run()
-        self.wait_until_pg_is_running()
+        if wait_for_pg:
+            assert self.wait_until_pg_is_running(timeout=20)
 
     def running(self):
         return self.pg_autoctl and self.pg_autoctl.run_proc
@@ -499,6 +500,29 @@ class PGNode:
         else:
             out, err = command.execute("show uri", 'show', 'uri')
         return out
+
+    def detailed_message(self, error_msg, other_node=None):
+        events = self.get_events_str()
+        error_msg += f"MONITOR EVENTS:\n{events}\n"
+
+        if self.running():
+            out, err = self.stop_pg_autoctl()
+            error_msg += f"STDOUT OF PG_AUTOCTL FOR MAIN NODE:\n{out}\n"
+            error_msg += f"STDERR OF PG_AUTOCTL FOR MAIN NODE:\n{err}\n"
+
+        pglogs = self.get_postgres_logs()
+        error_msg += f"POSTGRES LOGS FOR MAIN NODE:\n{pglogs}\n"
+
+        if other_node:
+            if other_node.running():
+                out, err = other_node.stop_pg_autoctl()
+                error_msg += f"STDOUT OF PG_AUTOCTL FOR OTHER NODE:\n{out}\n"
+                error_msg += f"STDERR OF PG_AUTOCTL FOR OTHER NODE:\n{err}\n"
+
+            pglogs = other_node.get_postgres_logs()
+            error_msg += f"POSTGRES LOGS FOR OTHER NODE:\n{pglogs}\n"
+        return error_msg
+
 
     def detailed_exception(self, error_msg, other_node=None):
         events = self.get_events_str()
