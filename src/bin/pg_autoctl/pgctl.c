@@ -41,9 +41,6 @@
 #define AUTOCTL_STANDBY_CONF_FILENAME "postgresql-auto-failover-standby.conf"
 #define AUTOCTL_SB_CONF_INCLUDE_LINE "include '" AUTOCTL_STANDBY_CONF_FILENAME "'"
 
-#define PROGRAM_NOT_RUNNING 3
-
-
 static bool pg_include_config(const char *configFilePath,
 							  const char *configIncludeLine,
 							  const char *configIncludeComment);
@@ -111,7 +108,8 @@ pg_ctl_version(const char *pg_ctl_path)
 bool
 pg_controldata(PostgresSetup *pgSetup, bool missing_ok)
 {
-	char pg_controldata_path[MAXPGPATH];
+	char globalControlPath[MAXPGPATH] = { 0 };
+	char pg_controldata_path[MAXPGPATH] = { 0 };
 	Program prog;
 
 	if (pgSetup->pgdata[0] == '\0' || pgSetup->pg_ctl[0] == '\0')
@@ -120,6 +118,20 @@ pg_controldata(PostgresSetup *pgSetup, bool missing_ok)
 		return false;
 	}
 
+	/* globalControlFilePath = $PGDATA/global/pg_control */
+	join_path_components(globalControlPath, pgSetup->pgdata, "global/pg_control");
+
+	/*
+	 * Refrain from doing too many pg_controldata checks, only proceed when the
+	 * PGDATA/global/pg_control file exists on-disk: that's the first check
+	 * that pg_controldata does anyway.
+	 */
+	if (!file_exists(globalControlPath))
+	{
+		return false;
+	}
+
+	/* now find the pg_controldata binary */
 	path_in_same_directory(pgSetup->pg_ctl, "pg_controldata", pg_controldata_path);
 	log_debug("%s %s", pg_controldata_path, pgSetup->pgdata);
 
@@ -760,19 +772,36 @@ log_program_output(Program prog, int outLogLevel, int errorLogLevel)
 bool
 pg_ctl_initdb(const char *pg_ctl, const char *pgdata)
 {
-	Program program = run_program(pg_ctl, "initdb", "-s", "-D", pgdata, NULL);
-	int returnCode = program.returnCode;
+	Program program;
+	bool success = false;
 
+	/* initdb takes time, so log about the operation BEFORE doing it */
 	log_info("Initialising a PostgreSQL cluster at \"%s\"", pgdata);
-	log_info("%s initdb -s -D %s [%d]", pg_ctl, pgdata, returnCode);
 
-	if (returnCode != 0)
+	program = run_program(pg_ctl, "initdb",
+						  "--silent",
+						  "--pgdata", pgdata,
+						  "-o", "'--auth=trust'", /* avoid warning message */
+						  NULL);
+	log_info("%s initdb -s -D %s", pg_ctl, pgdata);
+
+	success = program.returnCode == 0;
+
+	if (program.returnCode != 0)
 	{
 		(void) log_program_output(program, LOG_INFO, LOG_ERROR);
+		log_fatal("Failed to initialize Postgres cluster at \"%s\", "
+				  "see above for details",
+				  pgdata);
+	}
+	else
+	{
+		/* we might still have important information to read there */
+		(void) log_program_output(program, LOG_INFO, LOG_WARN);
 	}
 	free_program(&program);
 
-	return returnCode == 0;
+	return success;
 }
 
 
@@ -1073,7 +1102,7 @@ pg_ctl_stop(const char *pg_ctl, const char *pgdata)
 	 */
 
 	status = pg_ctl_status(pg_ctl, pgdata, log_output);
-	if (status == PROGRAM_NOT_RUNNING)
+	if (status == PG_CTL_STATUS_NOT_RUNNING)
 	{
 		log_info("pg_ctl stop failed, but PostgreSQL is not running anyway");
 		free_program(&program);

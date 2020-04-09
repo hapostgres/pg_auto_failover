@@ -114,6 +114,167 @@ keeper_update_state(Keeper *keeper, int node_id, int group_id,
 
 
 /*
+ * keeper_should_ensure_current_state returns true when pg_autoctl should
+ * ensure that Postgres is running, or not running, depending on the current
+ * FSM state, before calling the transition function to the next state.
+ *
+ * At the moment, the only cases when we DON'T want to ensure the current state
+ * are when either the current state or the goal state are one of the following:
+ *
+ *  - DRAINING
+ *  - DEMOTED
+ *  - DEMOTE TIMEOUT
+ *
+ * That's because we would then stop Postgres first when going from DEMOTED to
+ * SINGLE, or ensure Postgres is running when going from PRIMARY to DEMOTED.
+ * This last example is a split-brain hazard, too.
+ */
+bool
+keeper_should_ensure_current_state_before_transition(Keeper *keeper)
+{
+	KeeperStateData *keeperState = &(keeper->state);
+
+	if (keeperState->assigned_role == keeperState->current_role)
+	{
+		/* this function should not be called in that case */
+		log_debug("BUG: keeper_should_ensure_current_state_before_transition "
+				  "called with assigned role == current role == %s",
+				  NodeStateToString(keeperState->assigned_role));
+		return false;
+	}
+
+	if (keeperState->assigned_role == DRAINING_STATE ||
+		keeperState->assigned_role == DEMOTE_TIMEOUT_STATE ||
+		keeperState->assigned_role == DEMOTED_STATE)
+	{
+		/* don't ensure Postgres is running before shutting it down */
+		return false;
+	}
+
+	if (keeperState->current_role == DRAINING_STATE ||
+		keeperState->current_role == DEMOTE_TIMEOUT_STATE ||
+		keeperState->current_role == DEMOTED_STATE)
+	{
+		/* don't ensure Postgres is down before starting it again */
+		return false;
+	}
+
+	/* in all other cases, yes please ensure the current state */
+	return true;
+}
+
+
+/*
+ * keeper_ensure_current_state ensures that the current keeper's state is met
+ * with the current PostgreSQL status, at minimum that PostgreSQL is running
+ * when it's expected to be, etc.
+ */
+bool
+keeper_ensure_current_state(Keeper *keeper)
+{
+	KeeperStateData *keeperState = &(keeper->state);
+	PostgresSetup *pgSetup = &(keeper->postgres.postgresSetup);
+	LocalPostgresServer *postgres = &(keeper->postgres);
+
+	log_debug("Ensure current state: %s",
+			  NodeStateToString(keeperState->current_role));
+
+	switch (keeperState->current_role)
+	{
+		/*
+		 * When in primary state, publishing that PostgreSQL is down might
+		 * trigger a failover. This is the best solution only when we tried
+		 * everything else. So first, retry starting PostgreSQL a couple more
+		 * times.
+		 *
+		 * See configuration parameters:
+		 *
+		 *   timeout.postgresql_fails_to_start_timeout (default 20s)
+		 *   timeout.postgresql_fails_to_start_retries (default 3 times)
+		 */
+		case PRIMARY_STATE:
+		{
+			if (postgres->pgIsRunning)
+			{
+				/* reset PostgreSQL restart failures tracking */
+				postgres->pgFirstStartFailureTs = 0;
+				postgres->pgStartRetries = 0;
+
+				return true;
+			}
+			else if (ensure_local_postgres_is_running(postgres))
+			{
+				log_warn("PostgreSQL was not running, restarted with pid %d",
+						 pgSetup->pidFile.pid);
+
+				return true;
+			}
+			else
+			{
+				log_warn("Failed to restart PostgreSQL, "
+						 "see PostgreSQL logs for instance at \"%s\".",
+						 pgSetup->pgdata);
+
+				return false;
+			}
+			break;
+		}
+
+		case SINGLE_STATE:
+		case SECONDARY_STATE:
+		case WAIT_PRIMARY_STATE:
+		case CATCHINGUP_STATE:
+		case PREP_PROMOTION_STATE:
+		case STOP_REPLICATION_STATE:
+		{
+			if (postgres->pgIsRunning)
+			{
+				return true;
+			}
+			else if (ensure_local_postgres_is_running(postgres))
+			{
+				log_warn("PostgreSQL was not running, restarted with pid %d",
+						 pgSetup->pidFile.pid);
+				return true;
+			}
+			else
+			{
+				log_error("Failed to restart PostgreSQL, "
+						  "see PostgreSQL logs for instance at \"%s\".",
+						  pgSetup->pgdata);
+				return false;
+			}
+			break;
+		}
+
+		case DEMOTED_STATE:
+		case DEMOTE_TIMEOUT_STATE:
+		case DRAINING_STATE:
+		{
+			if (postgres->pgIsRunning)
+			{
+				log_warn("PostgreSQL is running while in state \"%s\", "
+						 "stopping PostgreSQL.",
+						 NodeStateToString(keeperState->current_role));
+
+				return ensure_local_postgres_is_stopped(postgres);
+			}
+			return true;
+		}
+
+		case MAINTENANCE_STATE:
+		default:
+
+			/* nothing to be done here */
+			return true;
+	}
+
+	/* should never happen */
+	return false;
+}
+
+
+/*
  * reportPgIsRunning returns the boolean that we should use to report
  * pgIsRunning to the monitor. When the local PostgreSQL isn't running, we
  * continue reporting that it is for some time, depending on the following

@@ -150,7 +150,6 @@ service_keeper_runprogram(Keeper *keeper)
 	int argsIndex = 0;
 
 	char command[BUFSIZE];
-	int commandSize = 0;
 
 	/*
 	 * use --pgdata option rather than the config.
@@ -180,7 +179,7 @@ service_keeper_runprogram(Keeper *keeper)
 	program.stdErrFd = STDERR_FILENO;
 
 	/* log the exact command line we're using */
-	commandSize = snprintf_program_command_line(&program, command, BUFSIZE);
+	(void) snprintf_program_command_line(&program, command, BUFSIZE);
 
 	log_info("%s", command);
 
@@ -216,8 +215,10 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 {
 	KeeperConfig *config = &(keeper->config);
 	KeeperStateData *keeperState = &(keeper->state);
+
 	Monitor *monitor = &(keeper->monitor);
 	LocalPostgresServer *postgres = &(keeper->postgres);
+
 	bool doSleep = false;
 	bool couldContactMonitor = false;
 	bool firstLoop = true;
@@ -399,6 +400,31 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		 */
 		if (needStateChange)
 		{
+			/*
+			 * First, ensure the current state (make sure Postgres is running
+			 * if it should, or Postgres is stopped if it should not run).
+			 *
+			 * The transition function we call next might depend on our
+			 * assumption that Postgres is running in the current state.
+			 */
+			if (keeper_should_ensure_current_state_before_transition(keeper))
+			{
+				if (!keeper_ensure_current_state(keeper))
+				{
+					/*
+					 * We don't take care of the warnedOnCurrentIteration here
+					 * because the real thing that should happen is the
+					 * transition to the next state. That's what we keep track
+					 * of with "transitionFailed".
+					 */
+					log_warn(
+						"pg_autoctl failed to ensure current state \"%s\": "
+						"PostgreSQL %s running",
+						NodeStateToString(keeperState->current_role),
+						postgres->pgIsRunning ? "is" : "is not");
+				}
+			}
+
 			if (!keeper_fsm_reach_assigned_state(keeper))
 			{
 				log_error("Failed to transition to state \"%s\", retrying... ",
@@ -409,7 +435,15 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		}
 		else if (couldContactMonitor)
 		{
-			if (warnedOnPreviousIteration)
+			if (!keeper_ensure_current_state(keeper))
+			{
+				warnedOnCurrentIteration = true;
+				log_warn("pg_autoctl failed to ensure current state \"%s\": "
+						 "PostgreSQL %s running",
+						 NodeStateToString(keeperState->current_role),
+						 postgres->pgIsRunning ? "is" : "is not");
+			}
+			else if (warnedOnPreviousIteration)
 			{
 				log_info("pg_autoctl managed to ensure current state \"%s\": "
 						 "PostgreSQL %s running",

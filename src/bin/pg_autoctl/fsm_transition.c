@@ -158,6 +158,9 @@ fsm_init_primary(Keeper *keeper)
 		}
 	}
 
+	/* update our file PATH according to the now existing PGDATA */
+	(void) local_postgres_init(postgres, pgSetup);
+
 	if (!ensure_local_postgres_is_running(postgres))
 	{
 		log_error("Failed to initialise postgres as primary because "

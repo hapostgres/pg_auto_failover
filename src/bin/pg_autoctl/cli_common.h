@@ -170,4 +170,6 @@ bool cli_getopt_accept_ssl_options(SSLCommandLineOptions newSSLOption,
 								   SSLCommandLineOptions currentSSLOptions);
 void cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy);
 
+char * logLevelToString(int logLevel);
+
 #endif  /* CLI_COMMON_H */

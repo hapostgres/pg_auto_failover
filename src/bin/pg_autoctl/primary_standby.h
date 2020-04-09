@@ -16,6 +16,15 @@
 #include "pgsql.h"
 #include "pgsetup.h"
 
+
+/* Communication device between node-active and postgres processes */
+typedef struct LocalExpectedPostgresStatus
+{
+	char pgStatusPath[MAXPGPATH];
+	KeeperStatePostgres state;
+} LocalExpectedPostgresStatus;
+
+
 /*
  * LocalPostgresServer represents a local postgres database cluster that
  * we can manage via a SQL connection and operations on the database
@@ -34,13 +43,19 @@ typedef struct LocalPostgresServer
 	uint64_t pgFirstStartFailureTs;
 	int pgStartRetries;
 	PgInstanceKind pgKind;
+	LocalExpectedPostgresStatus expectedPgStatus;
 } LocalPostgresServer;
 
 
 void local_postgres_init(LocalPostgresServer *postgres,
 						 PostgresSetup *postgresSetup);
 void local_postgres_finish(LocalPostgresServer *postgres);
+void local_postgres_update_pg_failures_tracking(LocalPostgresServer *postgres,
+												bool pgIsRunning);
+
 bool ensure_local_postgres_is_running(LocalPostgresServer *postgres);
+bool ensure_local_postgres_is_stopped(LocalPostgresServer *postgres);
+
 bool primary_has_replica(LocalPostgresServer *postgres, char *userName,
 						 bool *hasStandby);
 bool primary_create_replication_slot(LocalPostgresServer *postgres,

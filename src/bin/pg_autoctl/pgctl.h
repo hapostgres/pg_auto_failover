@@ -23,6 +23,8 @@
 #include "pgsetup.h"
 #include "pgsql.h"
 
+#define PG_CTL_STATUS_NOT_RUNNING 3
+
 bool pg_controldata(PostgresSetup *pgSetup, bool missing_ok);
 int config_find_pg_ctl(PostgresSetup *pgSetup);
 char * pg_ctl_version(const char *pg_ctl_path);

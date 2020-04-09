@@ -959,11 +959,10 @@ keeper_config_set_backup_directory(KeeperConfig *config, int nodeId)
 bool
 keeper_config_update_with_absolute_pgdata(KeeperConfig *config)
 {
-	PostgresSetup pgSetup = config->pgSetup;
+	PostgresSetup *pgSetup = &(config->pgSetup);
 
-	if (pg_setup_set_absolute_pgdata(&pgSetup))
+	if (pg_setup_set_absolute_pgdata(pgSetup))
 	{
-		strlcpy(config->pgSetup.pgdata, pgSetup.pgdata, MAXPGPATH);
 		if (!keeper_config_write_file(config))
 		{
 			/* errors have already been logged */

@@ -149,6 +149,41 @@ _Static_assert(sizeof(KeeperStateInit) < PG_AUTOCTL_KEEPER_STATE_FILE_SIZE,
 			   "Size of KeeperStateInit is larger than expected. "
 			   "Please review PG_AUTOCTL_KEEPER_STATE_FILE_SIZE");
 
+
+/*
+ * pg_autoctl manages Postgres as a child process. The FSM loop runs in the
+ * node-active sub-process, and that's where decisions are made depending on
+ * the current state and transition whether Postgres should be running or not.
+ *
+ * The communication between the node-active process and the Postgres
+ * start/stop controller process is done by means of the Postgres state file,
+ * which is basically a boolean. That said, we want to make sure we read the
+ * file content correctly, so 0 is unknown.
+ */
+typedef enum
+{
+	PG_EXPECTED_STATUS_UNKNOWN = 0,
+	PG_EXPECTED_STATUS_STOPPED,
+	PG_EXPECTED_STATUS_RUNNING
+} ExpectedPostgresStatus;
+
+/*
+ *  Note: This struct is serialized/serialiazed to/from state file. Therefore
+ *  keeping the memory layout the same is important. Please
+ *  - do not change the order of fields
+ *  - do not add a new field in between, always add to the end
+ *  - do not use any pointers
+ */
+typedef struct
+{
+	int pg_autoctl_state_version;
+	ExpectedPostgresStatus pgExpectedStatus;
+} KeeperStatePostgres;
+
+_Static_assert(sizeof(KeeperStatePostgres) < PG_AUTOCTL_KEEPER_STATE_FILE_SIZE,
+			   "Size of KeeperStatePostgres is larger than expected. "
+			   "Please review PG_AUTOCTL_KEEPER_STATE_FILE_SIZE");
+
 const char * NodeStateToString(NodeState s);
 NodeState NodeStateFromString(const char *str);
 const char * epoch_to_string(uint64_t seconds, char *buffer);
@@ -172,5 +207,13 @@ bool keeper_init_state_read(KeeperStateInit *initState, const char *filename);
 bool keeper_init_state_discover(KeeperStateInit *initState,
 								PostgresSetup *pgSetup,
 								const char *filename);
+
+char * ExpectedPostgresStatusToString(ExpectedPostgresStatus pgExpectedStatus);
+
+bool keeper_postgres_state_update(KeeperStatePostgres *pgStatus,
+								  const char *filename);
+bool keeper_postgres_state_read(KeeperStatePostgres *pgStatus,
+								const char *filename);
+
 
 #endif /* STATE_H */

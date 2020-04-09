@@ -13,6 +13,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "cli_common.h"
 #include "cli_root.h"
 #include "defaults.h"
 #include "fsm.h"
@@ -20,6 +21,7 @@
 #include "monitor.h"
 #include "monitor_config.h"
 #include "pgsetup.h"
+#include "primary_standby.h"
 #include "service.h"
 #include "service_postgres.h"
 #include "signals.h"
@@ -216,7 +218,6 @@ service_postgres_fsm_runprogram(Keeper *keeper)
 	int argsIndex = 0;
 
 	char command[BUFSIZE];
-	int commandSize = 0;
 
 	setenv(PG_AUTOCTL_DEBUG, "1", 1);
 
@@ -226,6 +227,7 @@ service_postgres_fsm_runprogram(Keeper *keeper)
 	args[argsIndex++] = "postgres";
 	args[argsIndex++] = "--pgdata";
 	args[argsIndex++] = (char *) keeper->config.pgSetup.pgdata;
+	args[argsIndex++] = logLevelToString(log_get_level());
 	args[argsIndex] = NULL;
 
 	/* we do not want to call setsid() when running this program. */
@@ -236,7 +238,7 @@ service_postgres_fsm_runprogram(Keeper *keeper)
 	program.stdErrFd = STDERR_FILENO;
 
 	/* log the exact command line we're using */
-	commandSize = snprintf_program_command_line(&program, command, BUFSIZE);
+	(void) snprintf_program_command_line(&program, command, BUFSIZE);
 
 	log_info("%s", command);
 
@@ -255,9 +257,10 @@ service_postgres_fsm_loop(Keeper *keeper)
 {
 	KeeperConfig *config = &(keeper->config);
 	PostgresSetup *pgSetup = &(config->pgSetup);
-	KeeperStateInit *initState = &(keeper->initState);
+	LocalPostgresServer *postgres = &(keeper->postgres);
+	LocalExpectedPostgresStatus *pgStatus = &(postgres->expectedPgStatus);
 
-	Service postgres = {
+	Service postgresService = {
 		"postgres",
 		-1,
 		&service_postgres_start,
@@ -265,29 +268,28 @@ service_postgres_fsm_loop(Keeper *keeper)
 		(void *) pgSetup
 	};
 
-	bool monitorDisabledIsOk = false;
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = true;
+
+	bool pgStatusPathIsReady = false;
 
 	/*
 	 * Initialize our keeper struct instance with values from the setup.
 	 */
-	if (!keeper_config_read_file_skip_pgsetup(config, monitorDisabledIsOk))
+	if (!keeper_config_read_file(config,
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
 	{
-		/* errors have already been logged. */
+		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	/*
-	 * Keep track of the current init stage so that we don't start Postgres at
-	 * every loop iteration, but only the first time we reach INIT_STAGE_2.
-	 */
-	if (file_exists(keeper->config.pathnames.init))
+	if (!keeper_init(keeper, config))
 	{
-		if (!keeper_init_state_read(initState, config->pathnames.init))
-		{
-			log_fatal("Failed to start our Postgres FSM loop, "
-					  "see above for details");
-			exit(EXIT_CODE_BAD_CONFIG);
-		}
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
 	for (;;)
@@ -296,6 +298,49 @@ service_postgres_fsm_loop(Keeper *keeper)
 		if (asked_to_stop || asked_to_stop_fast)
 		{
 			exit(EXIT_CODE_QUIT);
+		}
+
+		if (pg_setup_pgdata_exists(pgSetup))
+		{
+			/*
+			 * If we have a PGDATA directory, now is a good time to initialize
+			 * our LocalPostgresServer structure and its file paths to point at
+			 * the right place: we need to normalize PGDATA to its realpath
+			 * location.
+			 */
+			if (!pgStatusPathIsReady)
+			{
+				(void) local_postgres_init(postgres, pgSetup);
+
+				pgStatusPathIsReady = true;
+
+				log_trace("Reading current postgres expected status from \"%s\"",
+						  pgStatus->pgStatusPath);
+			}
+		}
+		else
+		{
+			/*
+			 * If PGDATA doesn't exists yet, we didn't have a chance to
+			 * normalize its filename and we might be reading the wrong file
+			 * for the Postgres expected status. So we first check if our
+			 * pgSetup reflects an existing on-disk instance and if not, update
+			 * it until it does.
+			 *
+			 * The keeper init process is reponsible for running pg_ctl initdb.
+			 */
+			PostgresSetup newPgSetup = { 0 };
+			bool missingPgdataIsOk = true;
+			bool postgresNotRunningIsOk = true;
+
+			if (pg_setup_init(&newPgSetup,
+							  pgSetup,
+							  missingPgdataIsOk,
+							  postgresNotRunningIsOk))
+			{
+				*pgSetup = newPgSetup;
+			}
+			continue;
 		}
 
 		/*
@@ -309,27 +354,21 @@ service_postgres_fsm_loop(Keeper *keeper)
 		 * Adding to that, during the `pg_autoctl create postgres` phase we
 		 * also need to start Postgres and sometimes even restart it.
 		 */
-		if (file_exists(config->pathnames.init))
+		if (pgStatusPathIsReady && file_exists(pgStatus->pgStatusPath))
 		{
-			if (!keeper_init_state_read(initState, config->pathnames.init))
-			{
-				/* errors have already been logged, will try again */
-				continue;
-			}
-		}
-		else if (file_exists(config->pathnames.state))
-		{
-			if (!keeper_load_state(keeper))
+			if (!keeper_postgres_state_read(&(pgStatus->state),
+											pgStatus->pgStatusPath))
 			{
 				/* errors have already been logged, will try again */
 				continue;
 			}
 
-			if (!ensure_postgres_status(keeper, &postgres))
+			if (!ensure_postgres_status(keeper, &postgresService))
 			{
 				/* TODO: review the error message, make sure startup.log is
 				 * logged in case of failure to start Postgres
 				 */
+				pgStatusPathIsReady = false;
 				log_warn("Will try again in 100ms");
 			}
 		}
@@ -366,89 +405,28 @@ service_postgres_fsm_loop(Keeper *keeper)
 static bool
 ensure_postgres_status(Keeper *keeper, Service *postgres)
 {
-	KeeperStateData *keeperState = &(keeper->state);
-	KeeperStateInit *initState = &(keeper->initState);
-	KeeperConfig *config = &(keeper->config);
+	KeeperStatePostgres *pgStatus = &(keeper->postgres.expectedPgStatus.state);
 
-	log_debug("Ensure postgres status(%s,%s)",
-			  NodeStateToString(keeperState->current_role),
-			  NodeStateToString(keeperState->assigned_role));
-
-	/*
-	 * The KeeperFSM instructs us of the expected Postgres status in case of a
-	 * transition. We still need to have make a decision when the assigned and
-	 * current roles are the same and no transition is needed, which is most of
-	 * the time.
-	 *
-	 * We have 3 states where we don't want Postgres to be running, in order to
-	 * avoid split-brains on the (old) primary instance: draining, demoted, and
-	 * demoted_timeout. In all the other cases, we want Postgres to be running.
-	 *
-	 * During the initialisation procedure (pg_autoctl create postgres) we have
-	 * two stages. In INIT_STAGE_1 we're not ready to run Postgres yet (we
-	 * didn't initdb nor created our setup). In INIT_STAGE_2 Postgres is
-	 * expected to be running.
-	 */
-	if (keeperState->current_role == keeperState->assigned_role)
+	switch (pgStatus->pgExpectedStatus)
 	{
-		switch (keeperState->assigned_role)
+		case PG_EXPECTED_STATUS_UNKNOWN:
 		{
-			case NO_STATE:
-			case INIT_STATE:
-			case MAINTENANCE_STATE:
-			{
-				/* do nothing */
-				return true;
-			}
-
-			case DRAINING_STATE:
-			case DEMOTED_STATE:
-			case DEMOTE_TIMEOUT_STATE:
-			{
-				return ensure_postgres_status_stopped(keeper, postgres);
-			}
-
-			default:
-			{
-				return ensure_postgres_status_running(keeper, postgres);
-			}
+			/* do nothing */
+			return true;
 		}
-	}
-	else
-	{
-		ExpectedPostgresStatus pgStatus = keeper_fsm_get_pgstatus(keeper);
 
-		switch (pgStatus)
+		case PG_EXPECTED_STATUS_STOPPED:
 		{
-			case PGSTATUS_UNKNOWN:
-			{
-				log_debug("Expected Postgres status is unknown");
-				return true;
-			}
+			return ensure_postgres_status_stopped(keeper, postgres);
+		}
 
-			case PGSTATUS_INIT:
-			{
-				if (!keeper_init_state_read(initState, config->pathnames.init))
-				{
-					log_error("Failed to read expected Postgres service status, "
-							  "see above for details");
-					return false;
-				}
-			}
-
-			case PGSTATUS_STOPPED:
-			{
-				return ensure_postgres_status_stopped(keeper, postgres);
-			}
-
-			case PGSTATUS_RUNNING:
-			{
-				return ensure_postgres_status_running(keeper, postgres);
-			}
+		case PG_EXPECTED_STATUS_RUNNING:
+		{
+			return ensure_postgres_status_running(keeper, postgres);
 		}
 	}
 
-	/* should never happen */
+	/* make compiler happy */
 	return false;
 }
 
@@ -488,9 +466,6 @@ ensure_postgres_status_running(Keeper *keeper, Service *postgres)
 	/* we might still be starting-up */
 	bool pgIsNotRunningIsOk = true;
 	bool pgIsRunning = pg_setup_is_ready(pgSetup, pgIsNotRunningIsOk);
-
-	log_trace("ensure_postgres_status_running: %s",
-			  pgIsRunning ? "pg is running" : "pg is not running");
 
 	if (pgIsRunning)
 	{

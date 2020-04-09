@@ -138,7 +138,6 @@ service_monitor_runprogram(Monitor *monitor)
 	int argsIndex = 0;
 
 	char command[BUFSIZE];
-	int commandSize = 0;
 
 	/*
 	 * use --pgdata option rather than the config.
@@ -171,7 +170,7 @@ service_monitor_runprogram(Monitor *monitor)
 	program.stdErrFd = STDERR_FILENO;
 
 	/* log the exact command line we're using */
-	commandSize = snprintf_program_command_line(&program, command, BUFSIZE);
+	(void) snprintf_program_command_line(&program, command, BUFSIZE);
 
 	log_info("%s", command);
 

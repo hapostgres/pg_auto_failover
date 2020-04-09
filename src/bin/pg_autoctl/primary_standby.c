@@ -10,16 +10,16 @@
 
 #include "postgres_fe.h"
 
+#include "config.h"
 #include "file_utils.h"
+#include "keeper.h"
 #include "log.h"
 #include "pgctl.h"
 #include "pghba.h"
 #include "pgsql.h"
 #include "primary_standby.h"
+#include "state.h"
 
-
-static void local_postgres_update_pg_failures_tracking(LocalPostgresServer *postgres,
-													   bool pgIsRunning);
 
 /*
  * Default settings for postgres databases managed by pg_auto_failover.
@@ -89,6 +89,18 @@ local_postgres_init(LocalPostgresServer *postgres, PostgresSetup *pgSetup)
 
 	/* set the local instance kind from the configuration. */
 	postgres->pgKind = pgSetup->pgKind;
+
+	/* initialize our Postgres state file path */
+	if (!build_xdg_path(postgres->expectedPgStatus.pgStatusPath,
+						XDG_DATA,
+						pgSetup->pgdata,
+						KEEPER_POSTGRES_STATE_FILENAME))
+	{
+		/* highly unexpected */
+		log_error("Failed to build pg_autoctl postgres state file pathname, "
+				  "see above.");
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
 }
 
 
@@ -96,7 +108,7 @@ local_postgres_init(LocalPostgresServer *postgres, PostgresSetup *pgSetup)
  * local_postgres_UpdatePgFailuresTracking updates our tracking of PostgreSQL
  * restart failures.
  */
-static void
+void
 local_postgres_update_pg_failures_tracking(LocalPostgresServer *postgres,
 										   bool pgIsRunning)
 {
@@ -133,37 +145,79 @@ local_postgres_finish(LocalPostgresServer *postgres)
 
 
 /*
- * ensure_local_postgres_is_running starts postgres if it is not already
- * running and updates the setup such that we can connect to it.
+ * keeper_ensure_postgres_is_running updates our keeper Postgres expected
+ * status file and waits until the dedicated postgres controller process has
+ * implemented the new expected state.
  */
 bool
 ensure_local_postgres_is_running(LocalPostgresServer *postgres)
 {
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+	LocalExpectedPostgresStatus *pgStatus = &(postgres->expectedPgStatus);
 
-	log_trace("ensure_local_postgres_is_running");
+	int timeout = 10;       /* wait for Postgres for 10s */
+	bool pgIsRunning = pg_is_running(pgSetup->pg_ctl, pgSetup->pgdata);
 
-	if (!pg_is_running(pgSetup->pg_ctl, pgSetup->pgdata))
+	log_trace("ensure_local_postgres_is_running: Postgres %s in \"%s\"",
+			  pgIsRunning ? "is running" : "is not running", pgSetup->pgdata);
+
+	/* update our data structure in-memory, then on-disk */
+	pgStatus->state.pgExpectedStatus = PG_EXPECTED_STATUS_RUNNING;
+
+	if (!keeper_postgres_state_update(&(pgStatus->state), pgStatus->pgStatusPath))
 	{
-		int timeout = 10;       /* wait for Postgres for 10s */
-		bool pgIsRunning = false;
-
-		if (!pg_setup_wait_until_is_ready(pgSetup, timeout, LOG_DEBUG))
-		{
-			pgIsRunning = false;
-			local_postgres_update_pg_failures_tracking(postgres, pgIsRunning);
-			return false;
-		}
-
-		/* update connection string for connection to postgres */
-		local_postgres_init(postgres, pgSetup);
-
-		/* update PostgreSQL restart failure tracking */
-		pgIsRunning = true;
-		local_postgres_update_pg_failures_tracking(postgres, pgIsRunning);
+		/* errors have already been logged */
+		return false;
 	}
 
-	return true;
+	if (!pgIsRunning)
+	{
+		/* main logging is done in the Postgres controller sub-process */
+		pgIsRunning = pg_setup_wait_until_is_ready(pgSetup, timeout, LOG_DEBUG);
+
+		/* update connection string for connection to postgres */
+		(void)
+		local_postgres_update_pg_failures_tracking(postgres, pgIsRunning);
+
+		if (pgIsRunning)
+		{
+			/* update pgSetup cache with new Postgres pid and all */
+			local_postgres_init(postgres, pgSetup);
+
+			log_debug("keeper_ensure_postgres_is_running: Postgres is running "
+					  "with pid %d", pgSetup->pidFile.pid);
+		}
+	}
+
+	return pgIsRunning;
+}
+
+
+/*
+ * keeper_ensure_postgres_is_running updates our keeper Postgres expected
+ * status file and waits until the dedicated postgres controller process has
+ * implemented the new expected state.
+ */
+bool
+ensure_local_postgres_is_stopped(LocalPostgresServer *postgres)
+{
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+	LocalExpectedPostgresStatus *pgStatus = &(postgres->expectedPgStatus);
+
+	int timeout = 10;       /* wait for Postgres for 10s */
+
+	log_trace("keeper_ensure_postgres_is_stopped");
+
+	/* update our data structure in-memory, then on-disk */
+	pgStatus->state.pgExpectedStatus = PG_EXPECTED_STATUS_STOPPED;
+
+	if (!keeper_postgres_state_update(&(pgStatus->state), pgStatus->pgStatusPath))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	return pg_setup_wait_until_is_stopped(pgSetup, timeout, LOG_DEBUG);
 }
 
 

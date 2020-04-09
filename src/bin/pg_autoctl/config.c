@@ -173,7 +173,6 @@ SetConfigFilePath(ConfigFilePaths *pathnames, const char *pgdata)
  * using the XDG Base Directory Specification for a data file. Per specs at:
  *
  *   https://standards.freedesktop.org/basedir-spec/basedir-spec-latest.html
- *
  */
 bool
 SetStateFilePath(ConfigFilePaths *pathnames, const char *pgdata)
@@ -198,7 +197,7 @@ SetStateFilePath(ConfigFilePaths *pathnames, const char *pgdata)
 		if (!build_xdg_path(pathnames->init,
 							XDG_DATA,
 							pgdata,
-							KEEPER_INIT_FILENAME))
+							KEEPER_INIT_STATE_FILENAME))
 		{
 			log_error("Failed to build pg_autoctl init state file pathname, "
 					  "see above.");

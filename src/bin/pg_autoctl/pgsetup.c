@@ -30,7 +30,7 @@
 #include "string_utils.h"
 
 
-static bool get_pgpid(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok);
+static bool get_pgpid(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk);
 static PostmasterStatus pmStatusFromString(const char *postmasterStatus);
 static char * pmStatusToString(PostmasterStatus pm_status);
 
@@ -71,37 +71,51 @@ pg_setup_init(PostgresSetup *pgSetup,
 	strlcpy(pgSetup->ssl.serverCert, options->ssl.serverCert, MAXPGPATH);
 	strlcpy(pgSetup->ssl.serverKey, options->ssl.serverKey, MAXPGPATH);
 
-	/* check or find pg_ctl */
-	if (options->pg_ctl[0] != '\0')
+	/* check or find pg_ctl, unless we already have it */
+	if (IS_EMPTY_STRING_BUFFER(pgSetup->pg_ctl) ||
+		IS_EMPTY_STRING_BUFFER(pgSetup->pg_version))
 	{
-		char *version = pg_ctl_version(options->pg_ctl);
-
-		if (version == NULL)
+		if (!IS_EMPTY_STRING_BUFFER(options->pg_ctl))
 		{
-			/* we already logged about it */
-			return false;
+			/* copy over pg_ctl and pg_version */
+			strlcpy(pgSetup->pg_ctl, options->pg_ctl, MAXPGPATH);
+			strlcpy(pgSetup->pg_version, options->pg_version,
+					PG_VERSION_STRING_MAX);
+
+			/* we might not have fetched the version yet */
+			if (IS_EMPTY_STRING_BUFFER(pgSetup->pg_version))
+			{
+				char *version = pg_ctl_version(options->pg_ctl);
+
+				if (version == NULL)
+				{
+					/* we already logged about it */
+					return false;
+				}
+
+				/* also cache the version in options */
+				strlcpy(options->pg_version, version, PG_VERSION_STRING_MAX);
+				strlcpy(pgSetup->pg_version, version, PG_VERSION_STRING_MAX);
+				free(version);
+
+				log_debug("pg_setup_init: %s version %s",
+						  pgSetup->pg_ctl, pgSetup->pg_version);
+			}
 		}
-
-		strlcpy(pgSetup->pg_ctl, options->pg_ctl, MAXPGPATH);
-		strlcpy(pgSetup->pg_version, version, PG_VERSION_STRING_MAX);
-		free(version);
-
-		log_debug("pg_setup_init: %s version %s",
-				  pgSetup->pg_ctl, pgSetup->pg_version);
-	}
-	else
-	{
-		int count_of_pg_ctl = config_find_pg_ctl(pgSetup);
-
-		if (count_of_pg_ctl != 1)
+		else
 		{
-			/* config_find_pg_ctl already logged errors */
-			errors++;
-		}
+			int count_of_pg_ctl = config_find_pg_ctl(pgSetup);
 
-		if (count_of_pg_ctl > 1)
-		{
-			log_error("Found several pg_ctl in PATH, please provide --pgctl");
+			if (count_of_pg_ctl != 1)
+			{
+				/* config_find_pg_ctl already logged errors */
+				errors++;
+			}
+
+			if (count_of_pg_ctl > 1)
+			{
+				log_error("Found several pg_ctl in PATH, please provide --pgctl");
+			}
 		}
 	}
 
@@ -145,6 +159,13 @@ pg_setup_init(PostgresSetup *pgSetup,
 		}
 		else
 		{
+			/* get the real path of PGDATA now */
+			if (!normalize_filename(pgSetup->pgdata, pgSetup->pgdata, MAXPGPATH))
+			{
+				/* errors have already been logged */
+				return false;
+			}
+
 			log_debug("Found PostgreSQL system %" PRIu64 " at \"%s\", "
 														 "version %u, catalog version %u",
 					  pgSetup->control.system_identifier,
@@ -359,7 +380,11 @@ pg_setup_init(PostgresSetup *pgSetup,
 		 */
 		if (!pgIsReady)
 		{
-			log_error("Failed to read Postgres pidfile, see above for details");
+			if (!pg_is_not_running_is_ok)
+			{
+				log_error("Failed to read Postgres pidfile, "
+						  "see above for details");
+			}
 			return false;
 		}
 
@@ -403,7 +428,7 @@ pg_setup_init(PostgresSetup *pgSetup,
  * Read the first line of the PGDATA/postmaster.pid file to get Postgres PID.
  */
 static bool
-get_pgpid(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
+get_pgpid(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk)
 {
 	char *contents = NULL;
 	long fileSize = 0;
@@ -415,7 +440,7 @@ get_pgpid(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 
 	if (!file_exists(pidfile))
 	{
-		if (!pg_is_not_running_is_ok)
+		if (!pgIsNotRunningIsOk)
 		{
 			log_error("Failed get postmaster pid, file \"%s\" does not exists",
 					  pidfile);
@@ -425,7 +450,7 @@ get_pgpid(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 
 	if (!read_file(pidfile, &contents, &fileSize))
 	{
-		if (!pg_is_not_running_is_ok)
+		if (!pgIsNotRunningIsOk)
 		{
 			log_error("Failed to open file \"%s\": %m", pidfile);
 			log_info("Is PostgreSQL at \"%s\" up and running?", pgSetup->pgdata);
@@ -443,18 +468,29 @@ get_pgpid(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 		log_warn("Invalid data in PID file \"%s\"\n", pidfile);
 	}
 
-	if (pid > 0 && pid <= INT_MAX)
+	/* postmaster PID (or negative of a standalone backend's PID) */
+	if (pid < 0)
+	{
+		int standalonePid = -1 * pid;
+
+		if (kill(standalonePid, 0) == 0)
+		{
+			pgSetup->pidFile.pid = pid;
+			return true;
+		}
+		log_debug("Read a stale standalone pid in \"postmaster.pid\": %d", pid);
+		return false;
+	}
+	else if (pid > 0 && pid <= INT_MAX)
 	{
 		if (kill(pid, 0) == 0)
 		{
 			pgSetup->pidFile.pid = pid;
-
-			log_trace("get_pgpid: %d", pid);
 			return true;
 		}
 		else
 		{
-			if (!pg_is_not_running_is_ok)
+			if (!pgIsNotRunningIsOk)
 			{
 				log_warn("Read a stale pid in \"postmaster.pid\": %d", pid);
 			}
@@ -480,7 +516,7 @@ get_pgpid(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
  * server we're asked to keep highly available.
  */
 bool
-read_pg_pidfile(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
+read_pg_pidfile(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk, int maxRetries)
 {
 	FILE *fp;
 	int lineno;
@@ -491,7 +527,20 @@ read_pg_pidfile(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 
 	if ((fp = fopen_read_only(pidfile)) == NULL)
 	{
-		if (!pg_is_not_running_is_ok)
+		/*
+		 * Maybe we're attempting to read the file during Postgres start-up
+		 * phase and we just got where the file is replaced, when going from
+		 * standalone backend to full service.
+		 */
+		if (maxRetries > 0)
+		{
+			log_trace("read_pg_pidfile: \"%s\" does not exists [%d]",
+					  pidfile, maxRetries);
+			pg_usleep(250 * 1000); /* wait for 250ms and try again */
+			return read_pg_pidfile(pgSetup, pgIsNotRunningIsOk, maxRetries - 1);
+		}
+
+		if (!pgIsNotRunningIsOk)
 		{
 			log_error("Failed to open file \"%s\": %m", pidfile);
 			log_info("Is PostgreSQL at \"%s\" up and running?", pgSetup->pgdata);
@@ -510,8 +559,19 @@ read_pg_pidfile(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 			{
 				/* that's retry-able */
 				fclose(fp);
+
+				if (maxRetries == 0)
+				{
+					/* partial read is ok, pgSetup keeps track */
+					return true;
+				}
+
 				pg_usleep(250 * 1000); /* sleep for 250ms */
-				return read_pg_pidfile(pgSetup, pg_is_not_running_is_ok);
+				log_trace("read_pg_pidfile: fgets is NULL for lineno %d, retry %d",
+						  lineno, maxRetries);
+				return read_pg_pidfile(pgSetup,
+									   pgIsNotRunningIsOk,
+									   maxRetries - 1);
 			}
 			else
 			{
@@ -537,12 +597,13 @@ read_pg_pidfile(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 			int pid = 0;
 			if (!stringToInt(line, &pid))
 			{
-				log_error("Postgres pidfile does not contain a valid pid %s", line);
+				log_error("Postgres pidfile does not contain a valid pid %s",
+						  line);
 
 				return false;
 			}
 
-			pgSetup->pidFile.pid = pid;
+			pgSetup->pidFile.pid = abs(pid);
 
 			if (kill(pgSetup->pidFile.pid, 0) != 0)
 			{
@@ -554,13 +615,20 @@ read_pg_pidfile(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 
 				return false;
 			}
+
+			if (pid < 0)
+			{
+				/* standalone backend during the start-up process */
+				break;
+			}
 		}
 
 		if (lineno == LOCK_FILE_LINE_PORT)
 		{
 			if (!stringToUShort(line, &pgSetup->pidFile.port))
 			{
-				log_error("Postgres pidfile does not contain a valid port %s", line);
+				log_error("Postgres pidfile does not contain a valid port %s",
+						  line);
 
 				return false;
 			}
@@ -769,13 +837,13 @@ pg_setup_pgdata_exists(PostgresSetup *pgSetup)
 bool
 pg_setup_is_running(PostgresSetup *pgSetup)
 {
-	bool pg_is_not_running_is_ok = true;
+	bool pgIsNotRunningIsOk = true;
 
 	return pgSetup->pidFile.pid != 0
 
 	       /* if we don't have the PID yet, try reading it now */
-		   || (get_pgpid(pgSetup, pg_is_not_running_is_ok) &&
-			   pgSetup->pidFile.pid != 0);
+		   || (get_pgpid(pgSetup, pgIsNotRunningIsOk) &&
+			   pgSetup->pidFile.pid > 0);
 }
 
 
@@ -784,10 +852,8 @@ pg_setup_is_running(PostgresSetup *pgSetup)
  * status in it, which we parse in pgSetup->pm_status.
  */
 bool
-pg_setup_is_ready(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
+pg_setup_is_ready(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk)
 {
-	log_trace("pg_setup_is_ready");
-
 	if (pgSetup->control.pg_control_version > 0)
 	{
 		bool firstTime = true;
@@ -817,10 +883,9 @@ pg_setup_is_ready(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 		 */
 		while (pgSetup->pm_status != POSTMASTER_STATUS_READY)
 		{
-			log_trace("pg_setup_is_ready: %s",
-					  pmStatusToString(pgSetup->pm_status));
+			int maxRetries = 5;
 
-			if (!get_pgpid(pgSetup, pg_is_not_running_is_ok))
+			if (!get_pgpid(pgSetup, pgIsNotRunningIsOk))
 			{
 				/*
 				 * We failed to read the Postgres pid file, and infinite
@@ -829,7 +894,7 @@ pg_setup_is_ready(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 				 * systemd or the like) so that they may log a transient
 				 * failure and try again.
 				 */
-				if (!pg_is_not_running_is_ok)
+				if (!pgIsNotRunningIsOk)
 				{
 					log_error("Failed to get Postgres pid, "
 							  "see above for details");
@@ -844,12 +909,23 @@ pg_setup_is_ready(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 			}
 
 			/*
+			 * When starting up we might read the postmaster.pid file too
+			 * early, when Postgres is still in its "standalone backend" phase.
+			 * Let's give it 250ms before trying again then.
+			 */
+			if (pgSetup->pidFile.pid < 0)
+			{
+				pg_usleep(250 * 1000);
+				continue;
+			}
+
+			/*
 			 * Here, we know that Postgres is running, and we even have its
 			 * PID. Time to try and read the rest of the PID file. This might
 			 * fail when the file isn't complete yet, in which case we're going
 			 * to retry.
 			 */
-			if (!read_pg_pidfile(pgSetup, pg_is_not_running_is_ok))
+			if (!read_pg_pidfile(pgSetup, pgIsNotRunningIsOk, maxRetries))
 			{
 				log_warn("Failed to read Postgres \"postmaster.pid\" file");
 				return false;
@@ -923,17 +999,21 @@ pg_setup_wait_until_is_ready(PostgresSetup *pgSetup, int timeout, int logLevel)
 		pgIsRunning = get_pgpid(pgSetup, postgresNotRunningIsOk) &&
 					  pgSetup->pidFile.pid != 0;
 
-		log_trace("pg_setup_wait_until_is_ready(): postgres %s, "
-				  "pid %d (was %d), after %ds and %d attempt(s)",
-				  pgIsRunning ? "is running" : "is not running",
-				  pgSetup->pidFile.pid,
-				  previousPostgresPid,
-				  (int) (now - startTime),
-				  attempts);
+		/* let's not be THAT verbose about it */
+		if ((attempts - 1) % 10 == 0)
+		{
+			log_trace("pg_setup_wait_until_is_ready(): postgres %s, "
+					  "pid %d (was %d), after %ds and %d attempt(s)",
+					  pgIsRunning ? "is running" : "is not running",
+					  pgSetup->pidFile.pid,
+					  previousPostgresPid,
+					  (int) (now - startTime),
+					  attempts);
+		}
 
 		if (pgIsRunning && previousPostgresPid == pgSetup->pidFile.pid)
 		{
-			log_trace("pg_setup_wait_until_is_ready returns true");
+			log_debug("pg_setup_wait_until_is_ready returns true");
 			return true;
 		}
 
@@ -972,7 +1052,83 @@ pg_setup_wait_until_is_ready(PostgresSetup *pgSetup, int timeout, int logLevel)
 				  pgSetup->pgdata, pgSetup->pgport, pgSetup->pidFile.pid);
 	}
 
-	return true;
+	return pgIsRunning;
+}
+
+
+/*
+ * pg_setup_wait_until_is_stopped loops over pg_ctl_status() and returns when
+ * Postgres is stopped. The loop tries every 100ms up to the given timeout,
+ * given in seconds.
+ */
+bool
+pg_setup_wait_until_is_stopped(PostgresSetup *pgSetup, int timeout, int logLevel)
+{
+	uint64_t startTime = time(NULL);
+	int attempts = 0;
+	int status = -1;
+
+	pid_t previousPostgresPid = pgSetup->pidFile.pid;
+
+	bool missingPgdataIsOk = false;
+	bool postgresNotRunningIsOk = true;
+
+	for (attempts = 1; status != PG_CTL_STATUS_NOT_RUNNING; attempts++)
+	{
+		uint64_t now = time(NULL);
+
+		/* we don't log the output for pg_ctl_status here */
+		status = pg_ctl_status(pgSetup->pg_ctl, pgSetup->pgdata, false);
+
+		log_trace("keeper_update_postgres_expected_status(): "
+				  "pg_ctl status is %d (we expect %d: not running), "
+				  "after %ds and %d attempt(s)",
+				  status,
+				  PG_CTL_STATUS_NOT_RUNNING,
+				  (int) (now - startTime),
+				  attempts);
+
+		if (status == PG_CTL_STATUS_NOT_RUNNING)
+		{
+			return true;
+		}
+
+		/* we're done if we reach the timeout */
+		if ((now - startTime) >= timeout)
+		{
+			break;
+		}
+
+		/* wait for 100 ms and try again */
+		pg_usleep(100 * 1000);
+	}
+
+	/* update settings from running database */
+	if (previousPostgresPid != pgSetup->pidFile.pid)
+	{
+		/*
+		 * Update our pgSetup view of Postgres once we have made sure it's
+		 * running.
+		 */
+		PostgresSetup newPgSetup = { 0 };
+
+		if (!pg_setup_init(&newPgSetup,
+						   pgSetup,
+						   missingPgdataIsOk,
+						   postgresNotRunningIsOk))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
+		*pgSetup = newPgSetup;
+
+		log_level(logLevel,
+				  "Postgres is now stopped for PGDATA \"%s\"",
+				  pgSetup->pgdata);
+	}
+
+	return status == PG_CTL_STATUS_NOT_RUNNING;
 }
 
 
@@ -1086,32 +1242,7 @@ pg_setup_skip_hba_edits(PostgresSetup *pgSetup)
 bool
 pg_setup_set_absolute_pgdata(PostgresSetup *pgSetup)
 {
-	char absolutePgdata[PATH_MAX];
-
-	/*
-	 * We managed to initdb, refresh our configuration file location with
-	 * the realpath(3): we might have been given a relative pathname.
-	 */
-	if (!realpath(pgSetup->pgdata, absolutePgdata))
-	{
-		/* unexpected error, but not fatal, just don't overwrite the config. */
-		log_warn("Failed to get the realpath of given pgdata \"%s\": %m",
-				 pgSetup->pgdata);
-		return false;
-	}
-
-	if (strcmp(pgSetup->pgdata, absolutePgdata) != 0)
-	{
-		/* use the absolute path now that it exists. */
-		strlcpy(pgSetup->pgdata, absolutePgdata, MAXPGPATH);
-
-		log_info("Now using absolute pgdata value \"%s\" in the configuration",
-				 pgSetup->pgdata);
-
-		return true;
-	}
-
-	return false;
+	return normalize_filename(pgSetup->pgdata, pgSetup->pgdata, MAXPGPATH);
 }
 
 
@@ -1193,9 +1324,6 @@ nodeKindToString(PgInstanceKind kind)
 static PostmasterStatus
 pmStatusFromString(const char *postmasterStatus)
 {
-	log_trace("pmStatusFromString: postmaster status is \"%s\"",
-			  postmasterStatus);
-
 	if (strcmp(postmasterStatus, PM_STATUS_STARTING) == 0)
 	{
 		return POSTMASTER_STATUS_STARTING;

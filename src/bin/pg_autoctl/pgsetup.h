@@ -162,7 +162,9 @@ bool pg_setup_init(PostgresSetup *pgSetup,
 				   bool missing_pgdata_is_ok,
 				   bool pg_is_not_running_is_ok);
 
-bool read_pg_pidfile(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok);
+bool read_pg_pidfile(PostgresSetup *pgSetup,
+					 bool pgIsNotRunningIsOk,
+					 int maxRetries);
 
 void fprintf_pg_setup(FILE *stream, PostgresSetup *pgSetup);
 bool pg_setup_as_json(PostgresSetup *pgSetup, JSON_Value *js);
@@ -175,6 +177,8 @@ bool pg_setup_is_primary(PostgresSetup *pgSetup);
 bool pg_setup_is_ready(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok);
 bool pg_setup_wait_until_is_ready(PostgresSetup *pgSetup,
 								  int timeout, int logLevel);
+bool pg_setup_wait_until_is_stopped(PostgresSetup *pgSetup,
+									int timeout, int logLevel);
 
 char * pg_setup_get_username(PostgresSetup *pgSetup);
 
