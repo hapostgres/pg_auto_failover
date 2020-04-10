@@ -169,6 +169,7 @@ service_keeper_runprogram(Keeper *keeper)
 	args[argsIndex++] = "node-active";
 	args[argsIndex++] = "--pgdata";
 	args[argsIndex++] = pgdata;
+	args[argsIndex++] = logLevelToString(log_get_level());
 	args[argsIndex] = NULL;
 
 	/* we do not want to call setsid() when running this program. */

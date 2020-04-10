@@ -122,6 +122,16 @@ service_postgres_ctl_runprogram(Keeper *keeper)
 
 	char command[BUFSIZE];
 
+	/*
+	 * use --pgdata option rather than the config.
+	 *
+	 * On macOS when using /tmp, the file path is then redirected to being
+	 * /private/tmp when using realpath(2) as we do in normalize_filename(). So
+	 * for that case to be supported, we explicitely re-use whatever PGDATA or
+	 * --pgdata was parsed from the main command line to start our sub-process.
+	 */
+	char *pgdata = keeperOptions.pgSetup.pgdata;
+
 	setenv(PG_AUTOCTL_DEBUG, "1", 1);
 
 	args[argsIndex++] = (char *) pg_autoctl_program;
@@ -129,7 +139,7 @@ service_postgres_ctl_runprogram(Keeper *keeper)
 	args[argsIndex++] = "service";
 	args[argsIndex++] = "postgres";
 	args[argsIndex++] = "--pgdata";
-	args[argsIndex++] = (char *) keeper->config.pgSetup.pgdata;
+	args[argsIndex++] = pgdata;
 	args[argsIndex++] = logLevelToString(log_get_level());
 	args[argsIndex] = NULL;
 
