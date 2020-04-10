@@ -27,7 +27,7 @@
 #include "state.h"
 #include "service.h"
 #include "service_keeper.h"
-#include "service_postgres.h"
+#include "service_postgres_ctl.h"
 #include "signals.h"
 #include "string_utils.h"
 
@@ -52,10 +52,10 @@ start_keeper(Keeper *keeper)
 
 	Service subprocesses[] = {
 		{
-			"postgres fsm",
+			"postgres ctl",
 			0,
-			&service_postgres_fsm_start,
-			&service_postgres_stop,
+			&service_postgres_ctl_start,
+			&service_postgres_ctl_stop,
 			(void *) keeper
 		},
 		{

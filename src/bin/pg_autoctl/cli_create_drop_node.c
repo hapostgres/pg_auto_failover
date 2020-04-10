@@ -35,6 +35,7 @@
 #include "service.h"
 #include "service_keeper.h"
 #include "service_monitor.h"
+#include "service_monitor_init.h"
 #include "string_utils.h"
 
 /*
@@ -760,7 +761,7 @@ cli_create_monitor(int argc, char **argv)
 		exit(EXIT_CODE_BAD_STATE);
 	}
 
-	if (!monitor_pg_init_finish(&monitor))
+	if (!service_monitor_init(&monitor))
 	{
 		/* errors have been logged */
 		exit(EXIT_CODE_INTERNAL_ERROR);

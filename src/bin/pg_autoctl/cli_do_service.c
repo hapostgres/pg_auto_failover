@@ -19,7 +19,6 @@
 #include "cli_common.h"
 #include "commandline.h"
 #include "defaults.h"
-#include "fsm.h"
 #include "keeper_config.h"
 #include "keeper.h"
 #include "monitor.h"
@@ -27,7 +26,7 @@
 #include "service.h"
 #include "service_keeper.h"
 #include "service_monitor.h"
-#include "service_postgres.h"
+#include "service_postgres_ctl.h"
 #include "signals.h"
 
 static void cli_do_service_postgres(int argc, char **argv);
@@ -105,7 +104,7 @@ cli_do_service_postgres(int argc, char **argv)
 	/* display a user-friendly process name */
 	(void) set_ps_title("pg_autoctl: start/stop postgres");
 
-	(void) service_postgres_fsm_loop(&keeper);
+	(void) service_postgres_ctl_loop(&keeper);
 }
 
 
