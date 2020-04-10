@@ -294,11 +294,62 @@ service_postgres_fsm_loop(Keeper *keeper)
 
 	for (;;)
 	{
+		pid_t pid;
+		int status;
+
 		/* that's expected the shutdown sequence from the supervisor */
 		if (asked_to_stop || asked_to_stop_fast)
 		{
 			exit(EXIT_CODE_QUIT);
 		}
+
+		/*
+		 * This postgres controller process is running Postgres as a child
+		 * process and thus is responsible for calling waitpid() from time to
+		 * time.
+		 */
+		pid = waitpid(-1, &status, WNOHANG);
+
+		switch (pid)
+		{
+			case -1:
+			{
+				/* if our PostgresService stopped, just continue */
+				if (errno != ECHILD)
+				{
+					log_error("Oops, waitpid() failed with: %s",
+							  strerror(errno));
+				}
+				break;
+			}
+
+			case 0:
+			{
+				/*
+				 * We're using WNOHANG, 0 means there are no stopped or exited
+				 * children, it's all good. It's the expected case when
+				 * everything is running smoothly, so enjoy and sleep for
+				 * awhile.
+				 */
+				break;
+			}
+
+			default:
+			{
+				if (pid != postgresService.pid)
+				{
+					/* that's quite strange, but we log and continue */
+					log_error("BUG: pg_autoctl waitpid() returned %d", pid);
+				}
+
+				/*
+				 * Postgres is not running anymore, the rest of the code will
+				 * handle that situation, just continue.
+				 */
+				break;
+			}
+		}
+
 
 		if (pg_setup_pgdata_exists(pgSetup))
 		{
