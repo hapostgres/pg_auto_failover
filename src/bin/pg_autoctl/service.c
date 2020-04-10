@@ -1,6 +1,6 @@
 /*
  * src/bin/pg_autoctl/service.c
- *   Utilities to start/stop the pg_autoctl service.
+ *   Supervisor for services run in sub-processes.
  *
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
@@ -27,6 +27,9 @@
 #include "service.h"
 #include "signals.h"
 #include "string_utils.h"
+
+#define SUPERVISOR_SERVICE_MAX_RETRY 5
+#define SUPERVISOR_SERVICE_MAX_TIME 10  /* in seconds */
 
 static bool service_init(const char *pidfile, pid_t *pid);
 
@@ -85,13 +88,14 @@ service_start(Service services[], int serviceCount, const char *pidfile)
 
 		if (started)
 		{
+			service->retries = 0;
+			service->startTime = time(NULL);
+
 			log_info("Started pg_autoctl %s service with pid %d",
 					 service->name, service->pid);
 		}
 		else
 		{
-			/* TODO: implement a retry strategy with maxRetries/maxTime */
-			/* SIGQUIT the processes that started successfully */
 			int idx = 0;
 
 			log_error("Failed to start service %s, "
@@ -238,6 +242,7 @@ service_supervisor(pid_t start_pid,
 				char *verb = WIFEXITED(status) ? "exited" : "failed";
 				int returnCode = WEXITSTATUS(status);
 				Service *dead = NULL;
+				uint64_t now = time(NULL);
 
 				if (!service_find_subprocess(services, serviceCount, pid, &dead))
 				{
@@ -263,15 +268,39 @@ service_supervisor(pid_t start_pid,
 															   serviceCount);
 					}
 				}
+				else if (dead->retries >= SUPERVISOR_SERVICE_MAX_RETRY ||
+						 (now - dead->startTime) >= SUPERVISOR_SERVICE_MAX_TIME)
+				{
+					log_error("pg_autoctl service %s %s with exit status %d",
+							  dead->name, verb, returnCode);
+
+					log_fatal("pg_autoctl service %s has already been "
+							  "restarted %d times in the last %d seconds, "
+							  "stopping now",
+							  dead->name,
+							  dead->retries,
+							  (int) (now - dead->startTime));
+
+					shutdownSequenceInProgress = true;
+					(void) service_stop_other_subprocesses(dead->pid,
+														   services,
+														   serviceCount);
+				}
 				else
 				{
-					/* TODO: implement a maxRetry/maxTime restart strategy */
 					bool restarted = false;
 
 					log_error("pg_autoctl service %s %s with exit status %d",
 							  dead->name, verb, returnCode);
 
-					log_info("Restarting pg_autoctl service %s", dead->name);
+					dead->retries += 1;
+
+					log_info("Restarting pg_autoctl service %s, "
+							 "retrying (%d time%s in %d seconds)",
+							 dead->name,
+							 dead->retries,
+							 dead->retries == 1 ? "" : "s",
+							 (int) (now - dead->startTime));
 
 					restarted =
 						(*dead->startFunction)(dead->context, &(dead->pid));

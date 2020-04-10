@@ -111,16 +111,23 @@ service_keeper_init_start(void *context, pid_t *pid)
 				exit(EXIT_CODE_QUIT);
 			}
 
-			log_info("%s has been succesfully initialized.", config->role);
-
-			if (createAndRun)
+			if (keeperInitWarnings)
 			{
-				log_info("service_keeper_start EXEC service node-active");
-				(void) service_keeper_runprogram(keeper);
+				log_info("Keeper has been successfully initialized, "
+						 "please fix above warnings to complete installation.");
 			}
 			else
 			{
-				exit(EXIT_CODE_QUIT);
+				log_info("%s has been successfully initialized.", config->role);
+
+				if (createAndRun)
+				{
+					(void) service_keeper_runprogram(keeper);
+				}
+				else
+				{
+					exit(EXIT_CODE_QUIT);
+				}
 			}
 
 			/*

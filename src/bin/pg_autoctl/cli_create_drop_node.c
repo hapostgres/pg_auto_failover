@@ -198,26 +198,6 @@ cli_create_pg(Keeper *keeper)
 		/* errors have been logged */
 		exit(EXIT_CODE_BAD_STATE);
 	}
-
-	if (keeperInitWarnings)
-	{
-		log_info("Keeper has been succesfully initialized, "
-				 "please fix above warnings to complete installation.");
-	}
-	else
-	{
-		log_info("Keeper has been succesfully initialized.");
-
-		if (createAndRun)
-		{
-			if (!start_keeper(keeper))
-			{
-				log_fatal("Failed to start pg_autoctl keeper service, "
-						  "see above for details");
-				exit(EXIT_CODE_INTERNAL_ERROR);
-			}
-		}
-	}
 }
 
 

@@ -38,6 +38,8 @@ typedef struct Service
 	ServiceStartFunction startFunction; /* how to re-start the service */
 	ServiceStopFunction stopFunction;   /* how to stop the service */
 	void *context;             /* Service Context (Monitor or Keeper struct) */
+	int retries;
+	uint64_t startTime;
 } Service;
 
 bool service_start(Service services[], int serviceCount, const char *pidfile);

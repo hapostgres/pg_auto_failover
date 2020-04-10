@@ -116,7 +116,7 @@ service_monitor_init_start(void *context, pid_t *pid)
 				exit(EXIT_CODE_INTERNAL_ERROR);
 			}
 
-			log_info("Monitor has been succesfully initialized.");
+			log_info("Monitor has been successfully initialized.");
 
 			if (createAndRun)
 			{
