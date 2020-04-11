@@ -1,8 +1,6 @@
 import pgautofailover_utils as pgautofailover
 from nose.tools import *
 
-import os, os.path, subprocess, signal
-
 cluster = None
 monitor = None
 node1 = None
@@ -16,44 +14,10 @@ def setup_module():
 def teardown_module():
     cluster.destroy()
 
-def test_000a_create_monitor():
+def test_000_create_monitor():
     global monitor
     monitor = cluster.create_monitor("/tmp/basic/monitor")
-    monitor.run(loglevel=pgautofailover.LogLevel.TRACE)
-
-    # to make sure the process is running we consume some of its output
-    monitor.pg_autoctl.consume_output(0.1)
-    if monitor.pg_autoctl.out or monitor.pg_autoctl.err:
-        print("%s\n%s\n" % (monitor.pg_autoctl.out, monitor.pg_autoctl.err))
-
-    assert(os.path.isfile("/tmp/basic/monitor/postmaster.pid"))
-    p = subprocess.run(["head", "-1", "/tmp/basic/monitor/postmaster.pid"],
-                       text=True,
-                       capture_output=True)
-    print("postgres is running with pid %s" % p.stdout[:-1])
-    assert(p.returncode == 0)
-
-def test_000b_stop_postgres_monitor():
-    p = subprocess.run(["head", "-1", "/tmp/basic/monitor/postmaster.pid"],
-                       text=True,
-                       capture_output=True)
-    pgpid = int(p.stdout[:-1])
-    print("postgres is running with pid %d" % pgpid)
-    assert(p.returncode == 0)
-
-    # the pg_ctl stop command can't finish because pg_autoctl restart
-    #Postgres too fast
-    #monitor.stop_postgres()
-    os.kill(pgpid, signal.SIGQUIT)
-
-    monitor.wait_until_pg_is_running()
-
-    assert(os.path.isfile("/tmp/basic/monitor/postmaster.pid"))
-    p = subprocess.run(["head", "-1", "/tmp/basic/monitor/postmaster.pid"],
-                       text=True,
-                       capture_output=True)
-    print("postgres is running with pid %s" % p.stdout[:-1])
-    assert(p.returncode == 0)
+    monitor.run()
 
 def test_001_init_primary():
     global node1
@@ -77,6 +41,9 @@ def test_004_init_secondary():
     node2.run()
     assert node2.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")
+
+    assert node1.has_needed_replication_slots()
+    assert node2.has_needed_replication_slots()
 
 def test_005_read_from_secondary():
     results = node2.run_sql_query("SELECT * FROM t1")
@@ -136,39 +103,55 @@ def test_014_drop_secondary():
     assert not node1.pg_is_running()
     assert node2.wait_until_state(target_state="single")
 
+    # replication slot list should be empty now
+    assert node2.has_needed_replication_slots()
 
 def test_015_add_new_secondary():
     global node3
     node3 = cluster.create_datanode("/tmp/basic/node3")
     node3.create()
     node3.run()
-    assert node3.wait_until_state(target_state="secondary")
-    assert node2.wait_until_state(target_state="primary")
+    assert node3.wait_until_state(target_state="secondary", other_node=node2)
+    assert node2.wait_until_state(target_state="primary", other_node=node3)
 
+    assert node2.has_needed_replication_slots()
+    assert node3.has_needed_replication_slots()
 
-def test_016_multiple_manual_failover_verify_replication_slot_removed():
-    count_repl_slots = "select count(*) from pg_replication_slots"
-
+# In previous versions of pg_auto_failover we removed the replication slot
+# on the secondary after failover. Now, we instead maintain the replication
+# slot's replay_lsn thanks for the monitor tracking of the nodes' LSN
+# positions.
+#
+# So rather than checking that we want to zero replication slots after
+# replication, we check that we still have a replication slot for the other
+# node.
+#
+def test_016_multiple_manual_failover_verify_replication_slots():
     print()
+
     print("Calling pgautofailover.failover() on the monitor")
     monitor.failover()
     assert node2.wait_until_state(target_state="secondary", other_node=node3)
     assert node3.wait_until_state(target_state="primary", other_node=node2)
-    node2_replication_slots = node2.run_sql_query(count_repl_slots)
-    assert node2_replication_slots == [(0,)]
-    node3_replication_slots = node3.run_sql_query(count_repl_slots)
-    assert node3_replication_slots == [(1,)]
+
+    assert node2.has_needed_replication_slots()
+    assert node3.has_needed_replication_slots()
 
     print("Calling pgautofailover.failover() on the monitor")
     monitor.failover()
     assert node2.wait_until_state(target_state="primary", other_node=node3)
     assert node3.wait_until_state(target_state="secondary", other_node=node2)
-    node2_replication_slots = node2.run_sql_query(count_repl_slots);
-    assert node2_replication_slots == [(1,)]
-    node3_replication_slots = node3.run_sql_query(count_repl_slots);
-    assert node3_replication_slots == [(0,)]
+
+    assert node2.has_needed_replication_slots()
+    assert node3.has_needed_replication_slots()
 
 def test_017_drop_primary():
     node2.drop()
     assert not node2.pg_is_running()
     assert node3.wait_until_state(target_state="single")
+
+def test_018_stop_postgres_monitor():
+    original_state = node3.get_state()
+    monitor.stop_postgres()
+    monitor.wait_until_pg_is_running()
+    assert node3.wait_until_state(target_state=original_state)

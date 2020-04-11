@@ -227,7 +227,7 @@ KeeperFSMTransition KeeperFSM[] = {
 	/*
 	 * We're asked to be a standby.
 	 */
-	{ CATCHINGUP_STATE, SECONDARY_STATE, COMMENT_CATCHINGUP_TO_SECONDARY, NULL },
+	{ CATCHINGUP_STATE, SECONDARY_STATE, COMMENT_CATCHINGUP_TO_SECONDARY, &fsm_maintain_replication_slots },
 
 	/*
 	 * The standby is asked to prepare its own promotion

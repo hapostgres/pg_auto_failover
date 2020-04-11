@@ -32,7 +32,6 @@
 
 static bool get_pgpid(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk);
 static PostmasterStatus pmStatusFromString(const char *postmasterStatus);
-static char * pmStatusToString(PostmasterStatus pm_status);
 
 
 /*
@@ -384,8 +383,8 @@ pg_setup_init(PostgresSetup *pgSetup,
 			{
 				log_error("Failed to read Postgres pidfile, "
 						  "see above for details");
+				return false;
 			}
-			return false;
 		}
 
 		/*
@@ -395,22 +394,25 @@ pg_setup_init(PostgresSetup *pgSetup,
 		 * might not have been created yet at this point: for instance, in case
 		 * of problems during the `pg_autoctl create` command.
 		 */
-		strlcpy(dbname, pgSetup->dbname, NAMEDATALEN);
-		strlcpy(pgSetup->dbname, "template1", NAMEDATALEN);
-
-		/* initialise a SQL connection to the local postgres server */
-		pg_setup_get_local_connection_string(pgSetup, connInfo);
-		pgsql_init(&pgsql, connInfo, PGSQL_CONN_LOCAL);
-
-		if (!pgsql_is_in_recovery(&pgsql, &pgSetup->is_in_recovery))
+		if (pgIsReady)
 		{
-			/* we logged about it already */
-			errors++;
+			strlcpy(dbname, pgSetup->dbname, NAMEDATALEN);
+			strlcpy(pgSetup->dbname, "template1", NAMEDATALEN);
+
+			/* initialise a SQL connection to the local postgres server */
+			pg_setup_get_local_connection_string(pgSetup, connInfo);
+			pgsql_init(&pgsql, connInfo, PGSQL_CONN_LOCAL);
+
+			if (!pgsql_is_in_recovery(&pgsql, &pgSetup->is_in_recovery))
+			{
+				/* we logged about it already */
+				errors++;
+			}
+
+			pgsql_finish(&pgsql);
+
+			strlcpy(pgSetup->dbname, dbname, NAMEDATALEN);
 		}
-
-		pgsql_finish(&pgsql);
-
-		strlcpy(pgSetup->dbname, dbname, NAMEDATALEN);
 	}
 
 	if (errors > 0)
@@ -694,6 +696,8 @@ fprintf_pg_setup(FILE *stream, PostgresSetup *pgSetup)
 			pgSetup->control.catalog_version_no);
 	fformat(stream, "System Identifier:  %" PRIu64 "\n",
 			pgSetup->control.system_identifier);
+	fformat(stream, "Postmaster status:  %s\n",
+			pmStatusToString(pgSetup->pm_status));
 	fflush(stream);
 }
 
@@ -731,6 +735,9 @@ pg_setup_as_json(PostgresSetup *pgSetup, JSON_Value *js)
 							  "control.system_identifier",
 							  system_identifier);
 
+	json_object_dotset_string(jsobj,
+							  "postmaster.status",
+							  pmStatusToString(pgSetup->pm_status));
 	return true;
 }
 
@@ -854,119 +861,104 @@ pg_setup_is_running(PostgresSetup *pgSetup)
 bool
 pg_setup_is_ready(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk)
 {
-	if (pgSetup->control.pg_control_version > 0)
+	char globalControlPath[MAXPGPATH] = { 0 };
+
+	/* globalControlFilePath = $PGDATA/global/pg_control */
+	join_path_components(globalControlPath, pgSetup->pgdata, "global/pg_control");
+
+	if (!file_exists(globalControlPath))
 	{
-		bool firstTime = true;
-		int warnings = 0;
+		return false;
+	}
 
-		/*
-		 * Invalidate in-memory Postmaster status cache.
-		 *
-		 * This makes sure we enter the main loop and attempt to read the
-		 * postmaster.pid file at least once: if Postgres was stopped, then the
-		 * file that we've read previously might not exists any-more.
-		 */
-		pgSetup->pm_status = POSTMASTER_STATUS_UNKNOWN;
+	/*
+	 * Invalidate in-memory Postmaster status cache.
+	 *
+	 * This makes sure we enter the main loop and attempt to read the
+	 * postmaster.pid file at least once: if Postgres was stopped, then the
+	 * file that we've read previously might not exists any-more.
+	 */
+	pgSetup->pm_status = POSTMASTER_STATUS_UNKNOWN;
 
-		/*
-		 * Sometimes `pg_ctl start` returns with success and Postgres is still
-		 * in crash recovery replaying WAL files, in the "starting" state
-		 * rather than the "ready" state.
-		 *
-		 * In that case, we wait until Postgres is ready for connections. The
-		 * whole pg_autoctl code is expecting to be able to connect to
-		 * Postgres, so there's no point in returning now and having the next
-		 * connection attempt fail with something like the following:
-		 *
-		 * ERROR Connection to database failed: FATAL: the database system is
-		 * starting up
-		 */
-		while (pgSetup->pm_status != POSTMASTER_STATUS_READY)
+	/*
+	 * Sometimes `pg_ctl start` returns with success and Postgres is still
+	 * in crash recovery replaying WAL files, in the "starting" state
+	 * rather than the "ready" state.
+	 *
+	 * In that case, we wait until Postgres is ready for connections. The
+	 * whole pg_autoctl code is expecting to be able to connect to
+	 * Postgres, so there's no point in returning now and having the next
+	 * connection attempt fail with something like the following:
+	 *
+	 * ERROR Connection to database failed: FATAL: the database system is
+	 * starting up
+	 */
+	while (pgSetup->pm_status != POSTMASTER_STATUS_READY)
+	{
+		int maxRetries = 5;
+
+		if (!get_pgpid(pgSetup, pgIsNotRunningIsOk))
 		{
-			int maxRetries = 5;
-
-			if (!get_pgpid(pgSetup, pgIsNotRunningIsOk))
+			/*
+			 * We failed to read the Postgres pid file, and infinite
+			 * looping might not help here anymore. Better give control
+			 * back to the launching process (might be init scripts,
+			 * systemd or the like) so that they may log a transient
+			 * failure and try again.
+			 */
+			if (!pgIsNotRunningIsOk)
 			{
-				/*
-				 * We failed to read the Postgres pid file, and infinite
-				 * looping might not help here anymore. Better give control
-				 * back to the launching process (might be init scripts,
-				 * systemd or the like) so that they may log a transient
-				 * failure and try again.
-				 */
-				if (!pgIsNotRunningIsOk)
-				{
-					log_error("Failed to get Postgres pid, "
-							  "see above for details");
-				}
-
-				/*
-				 * we failed to get Postgres pid from the first line of its pid
-				 * file, so we consider that Postgres is not running, thus not
-				 * ready.
-				 */
-				return false;
+				log_error("Failed to get Postgres pid, "
+						  "see above for details");
 			}
 
 			/*
-			 * When starting up we might read the postmaster.pid file too
-			 * early, when Postgres is still in its "standalone backend" phase.
-			 * Let's give it 250ms before trying again then.
+			 * we failed to get Postgres pid from the first line of its pid
+			 * file, so we consider that Postgres is not running, thus not
+			 * ready.
 			 */
-			if (pgSetup->pidFile.pid < 0)
-			{
-				pg_usleep(250 * 1000);
-				continue;
-			}
-
-			/*
-			 * Here, we know that Postgres is running, and we even have its
-			 * PID. Time to try and read the rest of the PID file. This might
-			 * fail when the file isn't complete yet, in which case we're going
-			 * to retry.
-			 */
-			if (!read_pg_pidfile(pgSetup, pgIsNotRunningIsOk, maxRetries))
-			{
-				log_warn("Failed to read Postgres \"postmaster.pid\" file");
-				return false;
-			}
-
-			/* avoid an extra wait if that's possible */
-			if (pgSetup->pm_status == POSTMASTER_STATUS_READY)
-			{
-				break;
-			}
-
-			if (firstTime)
-			{
-				firstTime = false;
-			}
-			else
-			{
-				warnings++;
-				log_warn("Postgres is not ready for connections: "
-						 "postmaster status is \"%s\", retrying in %ds.",
-						 pmStatusToString(pgSetup->pm_status),
-						 PG_AUTOCTL_KEEPER_SLEEP_TIME);
-
-				sleep(PG_AUTOCTL_KEEPER_SLEEP_TIME);
-			}
-
-			if (asked_to_stop == 1 || asked_to_stop_fast == 1)
-			{
-				log_info("pg_autoctl service stopping");
-				exit(EXIT_CODE_QUIT);
-			}
+			return false;
 		}
 
 		/*
-		 * If we did warn the user, let them know that we're back to a normal
-		 * situation (when that's the case).
+		 * When starting up we might read the postmaster.pid file too
+		 * early, when Postgres is still in its "standalone backend" phase.
+		 * Let's give it 250ms before trying again then.
 		 */
-		if (warnings > 0 && pgSetup->pm_status == POSTMASTER_STATUS_READY)
+		if (pgSetup->pidFile.pid < 0)
 		{
-			log_info("Postgres is ready");
+			pg_usleep(250 * 1000);
+			continue;
 		}
+
+		/*
+		 * Here, we know that Postgres is running, and we even have its
+		 * PID. Time to try and read the rest of the PID file. This might
+		 * fail when the file isn't complete yet, in which case we're going
+		 * to retry.
+		 */
+		if (!read_pg_pidfile(pgSetup, pgIsNotRunningIsOk, maxRetries))
+		{
+			log_warn("Failed to read Postgres \"postmaster.pid\" file");
+			return false;
+		}
+
+		/* avoid an extra wait if that's possible */
+		if (pgSetup->pm_status == POSTMASTER_STATUS_READY)
+		{
+			break;
+		}
+
+		log_debug("postmaster status is \"%s\", retrying in %ds.",
+				  pmStatusToString(pgSetup->pm_status),
+				  PG_AUTOCTL_KEEPER_SLEEP_TIME);
+
+		pg_usleep(PG_AUTOCTL_KEEPER_SLEEP_TIME * 1000 * 1000);
+	}
+
+	if (pgSetup->pm_status != POSTMASTER_STATUS_UNKNOWN)
+	{
+		log_trace("pg_setup_is_ready: %s", pmStatusToString(pgSetup->pm_status));
 	}
 
 	return pgSetup->pm_status == POSTMASTER_STATUS_READY;
@@ -986,6 +978,7 @@ pg_setup_wait_until_is_ready(PostgresSetup *pgSetup, int timeout, int logLevel)
 
 	pid_t previousPostgresPid = pgSetup->pidFile.pid;
 	bool pgIsRunning = false;
+	bool pgIsReady = false;
 
 	bool missingPgdataIsOk = false;
 	bool postgresNotRunningIsOk = true;
@@ -996,8 +989,11 @@ pg_setup_wait_until_is_ready(PostgresSetup *pgSetup, int timeout, int logLevel)
 	{
 		uint64_t now = time(NULL);
 
+		/* sleep 100 ms in between postmaster.pid probes */
+		pg_usleep(100 * 1000);
+
 		pgIsRunning = get_pgpid(pgSetup, postgresNotRunningIsOk) &&
-					  pgSetup->pidFile.pid != 0;
+					  pgSetup->pidFile.pid > 0;
 
 		/* let's not be THAT verbose about it */
 		if ((attempts - 1) % 10 == 0)
@@ -1011,24 +1007,18 @@ pg_setup_wait_until_is_ready(PostgresSetup *pgSetup, int timeout, int logLevel)
 					  attempts);
 		}
 
-		if (pgIsRunning && previousPostgresPid == pgSetup->pidFile.pid)
-		{
-			log_debug("pg_setup_wait_until_is_ready returns true");
-			return true;
-		}
-
 		/* we're done if we reach the timeout */
 		if ((now - startTime) >= timeout)
 		{
 			break;
 		}
-
-		/* wait for 100 ms and try again */
-		pg_usleep(100 * 1000);
 	}
 
-	/* update settings from running database */
-	if (previousPostgresPid != pgSetup->pidFile.pid)
+	/*
+	 * Now update our pgSetup from the running database, including versions and
+	 * all we can discover.
+	 */
+	if (pgIsRunning && previousPostgresPid != pgSetup->pidFile.pid)
 	{
 		/*
 		 * Update our pgSetup view of Postgres once we have made sure it's
@@ -1042,17 +1032,69 @@ pg_setup_wait_until_is_ready(PostgresSetup *pgSetup, int timeout, int logLevel)
 						   postgresNotRunningIsOk))
 		{
 			/* errors have already been logged */
+			log_error("pg_setup_wait_until_is_ready: pg_setup_init is false");
 			return false;
 		}
 
 		*pgSetup = newPgSetup;
 
-		log_level(logLevel,
-				  "Postgres is now serving PGDATA \"%s\" on port %d with pid %d",
-				  pgSetup->pgdata, pgSetup->pgport, pgSetup->pidFile.pid);
+
+		/* avoid an extra pg_setup_is_ready call if we're all good already */
+		pgIsReady = pgSetup->pm_status == POSTMASTER_STATUS_READY;
 	}
 
-	return pgIsRunning;
+	/*
+	 * Ok so we have a postmaster.pid file with a pid > 0 (not a standalone
+	 * backend, the service has started). Postgres might still be "starting"
+	 * rather than "ready" though, so let's continue our attempts and make sure
+	 * that Postgres is ready.
+	 */
+	for (; !pgIsReady; attempts++)
+	{
+		uint64_t now = time(NULL);
+
+		pgIsReady = pg_setup_is_ready(pgSetup, postgresNotRunningIsOk);
+
+		/* let's not be THAT verbose about it */
+		if ((attempts - 1) % 10 == 0)
+		{
+			log_trace("pg_setup_wait_until_is_ready(): pgstatus is %s, "
+					  "pid %d (was %d), after %ds and %d attempt(s)",
+					  pmStatusToString(pgSetup->pm_status),
+					  pgSetup->pidFile.pid,
+					  previousPostgresPid,
+					  (int) (now - startTime),
+					  attempts);
+		}
+
+		/* we're done if we reach the timeout */
+		if ((now - startTime) >= timeout)
+		{
+			break;
+		}
+
+		/* sleep 100 ms in between postmaster.pid probes */
+		pg_usleep(100 * 1000);
+	}
+
+	if (!pgIsReady)
+	{
+		/* offer more diagnostic information to the user */
+		postgresNotRunningIsOk = false;
+		pgIsReady = pg_setup_is_ready(pgSetup, postgresNotRunningIsOk);
+
+		log_trace("pg_setup_wait_until_is_ready returns %s [%s]",
+				  pgIsReady ? "true" : "false",
+				  pmStatusToString(pgSetup->pm_status));
+
+		return pgIsReady;
+	}
+
+	/* here we know that pgIsReady is true */
+	log_level(logLevel,
+			  "Postgres is now serving PGDATA \"%s\" on port %d with pid %d",
+			  pgSetup->pgdata, pgSetup->pgport, pgSetup->pidFile.pid);
+	return true;
 }
 
 
@@ -1076,6 +1118,15 @@ pg_setup_wait_until_is_stopped(PostgresSetup *pgSetup, int timeout, int logLevel
 	for (attempts = 1; status != PG_CTL_STATUS_NOT_RUNNING; attempts++)
 	{
 		uint64_t now = time(NULL);
+
+		/*
+		 * If we don't have a postmaster.pid consider that Postgres is not
+		 * running.
+		 */
+		if (!get_pgpid(pgSetup, postgresNotRunningIsOk))
+		{
+			return true;
+		}
 
 		/* we don't log the output for pg_ctl_status here */
 		status = pg_ctl_status(pgSetup->pg_ctl, pgSetup->pgdata, false);
@@ -1354,7 +1405,7 @@ pmStatusFromString(const char *postmasterStatus)
  * blank-padded to always be the same length, and then the warning messages
  * including "ready " look buggy in a way.
  */
-static char *
+char *
 pmStatusToString(PostmasterStatus pm_status)
 {
 	switch (pm_status)

@@ -179,6 +179,7 @@ bool pg_setup_wait_until_is_ready(PostgresSetup *pgSetup,
 								  int timeout, int logLevel);
 bool pg_setup_wait_until_is_stopped(PostgresSetup *pgSetup,
 									int timeout, int logLevel);
+char * pmStatusToString(PostmasterStatus pm_status);
 
 char * pg_setup_get_username(PostgresSetup *pgSetup);
 

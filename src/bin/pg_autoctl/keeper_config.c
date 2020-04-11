@@ -597,8 +597,6 @@ bool
 keeper_config_set_groupId_and_slot_name(KeeperConfig *config,
 										int nodeId, int groupId)
 {
-	IniOption *option;
-	IniOption keeperOptions[] = SET_INI_OPTIONS_ARRAY(config);
 	char buffer[BUFSIZE] = { 0 };
 	char *replicationSlotName = NULL;
 
@@ -607,35 +605,6 @@ keeper_config_set_groupId_and_slot_name(KeeperConfig *config,
 
 	config->groupId = groupId;
 	config->replication_slot_name = replicationSlotName;
-
-	/*
-	 * Fix the INI structure for the configuration file. First, groupId.
-	 */
-	option = lookup_ini_option(keeperOptions, "pg_autoctl", "group");
-
-	if (option == NULL)
-	{
-		log_error(
-			"BUG: keeper_config_set_groupId: lookup failed for pg_autoctl.group");
-		return false;
-	}
-
-	*(option->intValue) = groupId;
-
-	/*
-	 * Fix the INI structure for the configuration file. Second,
-	 * replication_slot_name.
-	 */
-	option = lookup_ini_option(keeperOptions, "replication", "slot");
-
-	if (option == NULL)
-	{
-		log_error(
-			"BUG: keeper_config_set_groupId: lookup failed for replication.slot");
-		return false;
-	}
-
-	*(option->strValue) = replicationSlotName;
 
 	return keeper_config_write_file(config);
 }

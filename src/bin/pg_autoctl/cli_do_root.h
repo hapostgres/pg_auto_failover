@@ -56,7 +56,9 @@ extern CommandLine do_standby_init;
 extern CommandLine do_standby_rewind;
 extern CommandLine do_standby_promote;
 
-extern CommandLine do_discover;
+extern CommandLine do_pgsetup_discover;
+extern CommandLine do_pgsetup_ready;
+extern CommandLine do_pgsetup_wait_until_ready;
 
 extern CommandLine do_commands;
 extern CommandLine *do_subcommands[];
@@ -69,7 +71,11 @@ void keeper_cli_create_replication_slot(int argc, char **argv);
 void keeper_cli_drop_replication_slot(int argc, char **argv);
 void keeper_cli_enable_synchronous_replication(int argc, char **argv);
 void keeper_cli_disable_synchronous_replication(int argc, char **argv);
-void keeper_cli_discover_pg_setup(int argc, char **argv);
+
+void keeper_cli_pgsetup_discover(int argc, char **argv);
+void keeper_cli_pgsetup_is_ready(int argc, char **argv);
+void keeper_cli_pgsetup_wait_until_ready(int argc, char **argv);
+
 void keeper_cli_add_default_settings(int argc, char **argv);
 void keeper_cli_create_monitor_user(int argc, char **argv);
 void keeper_cli_create_replication_user(int argc, char **argv);

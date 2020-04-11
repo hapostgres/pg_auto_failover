@@ -210,6 +210,12 @@ bool keeper_init_state_discover(KeeperStateInit *initState,
 
 char * ExpectedPostgresStatusToString(ExpectedPostgresStatus pgExpectedStatus);
 
+bool keeper_set_postgres_state_unknown(KeeperStatePostgres *pgStatus,
+									   const char *filename);
+bool keeper_set_postgres_state_running(KeeperStatePostgres *pgStatus,
+									   const char *filename);
+bool keeper_set_postgres_state_stopped(KeeperStatePostgres *pgStatus,
+									   const char *filename);
 bool keeper_postgres_state_update(KeeperStatePostgres *pgStatus,
 								  const char *filename);
 bool keeper_postgres_state_read(KeeperStatePostgres *pgStatus,

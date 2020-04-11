@@ -14,7 +14,13 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "postgres_fe.h"
+#include "pqexpbuffer.h"
+
+#include "defaults.h"
 #include "file_utils.h"
+#include "log.h"
+#include "parsing.h"
 #include "string_utils.h"
 
 /*

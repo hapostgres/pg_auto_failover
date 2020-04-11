@@ -6,6 +6,7 @@ import time
 import network
 import psycopg2
 import subprocess
+import datetime as dt
 from enum import Enum
 
 COMMAND_TIMEOUT = 60
@@ -173,6 +174,9 @@ class PGNode:
         self.sslServerKey = sslServerKey
         self.sslServerCert = sslServerCert
 
+        self._pgversion = None
+        self._pgmajor = None
+
     def connection_string(self):
         """
         Returns a connection string which can be used to connect to this postgres
@@ -277,10 +281,29 @@ class PGNode:
         Stops the postgres process by running:
           pg_ctl -D ${self.datadir} --wait --mode fast stop
         """
-        stop_command = [shutil.which('pg_ctl'), '-D', self.datadir,
-                        '--wait', '--mode', 'fast', 'stop']
-        stop_proc = self.vnode.run(stop_command)
-        out, err = stop_proc.communicate(timeout=10)
+        # pg_ctl stop is racey when another process is trying to start postgres
+        # again in the background. It will not finish in that case. pg_autoctl
+        # does this, so we try stopping postgres a couple of times. This way we
+        # make sure the race does not impact our tests.
+        #
+        # The race can be easily reproduced by in one shell doing:
+        #    while true; do pg_ctl --pgdata monitor/ start; done
+        # And in another:
+        #    pg_ctl --pgdata monitor --wait --mode fast stop
+        # The second command will not finish, since the first restarts postgres
+        # before the second finds out it has been killed.
+
+        for i in range(60):
+            stop_command = [shutil.which('pg_ctl'), '-D', self.datadir,
+                            '--wait', '--mode', 'fast', 'stop']
+            stop_proc = self.vnode.run(stop_command)
+            try:
+                out, err = stop_proc.communicate(timeout=1)
+                break
+            except subprocess.TimeoutExpired:
+                pass
+        else:
+            raise Exception("Postgres could not be stopped after 60 attempts")
         if stop_proc.returncode > 0:
             print("stopping postgres for '%s' failed, out: %s\n, err: %s"
                   %(self.vnode.address, out, err))
@@ -355,16 +378,15 @@ class PGNode:
         """
         Waits until the underlying Postgres process is running.
         """
-        for i in range(timeout):
+        wait_until = dt.datetime.now() + dt.timedelta(seconds=timeout)
+        while wait_until > dt.datetime.now():
             time.sleep(1)
-
             if self.pg_is_running():
                 return True
 
-        else:
-            print("Postgres is still not running in %s after %d attempts" %
-                  (self.datadir, timeout))
-            return False
+        print("Postgres is still not running in %s after %d seconds" %
+              (self.datadir, timeout))
+        return False
 
     def fail(self):
         """
@@ -421,6 +443,41 @@ class PGNode:
                 logs += open(conf).readlines()
 
         return "".join(logs)
+
+    def pgversion(self):
+        """
+        Query local Postgres for its version. Cache the result.
+        """
+        if self._pgversion:
+            return self._pgversion
+
+        # server_version_num is 110005 for 11.5
+        self._pgversion = int(self.run_sql_query("show server_version_num")[0][0])
+        self._pgmajor = self._pgversion // 10000
+
+        return self._pgversion
+
+    def pgmajor(self):
+        if self._pgmajor:
+            return self._pgmajor
+
+        self.pgversion()
+        return self._pgmajor
+
+    def ifdown(self):
+        """
+        Set a configuration parameter to given value
+        """
+        command = PGAutoCtl(self.vnode, self.datadir)
+        command.execute("config set %s" % setting,
+                        'config', 'set', setting, value)
+        return True
+
+    def ifup(self):
+        """
+        Bring the network interface up for this node
+        """
+        self.vnode.ifup()
 
     def config_set(self, setting, value):
         """
@@ -555,14 +612,15 @@ class DataNode(PGNode):
 
     def wait_until_state(self, target_state,
                          timeout=STATE_CHANGE_TIMEOUT,
-                         sleep_time=1,
+                         sleep_time=0.1,
                          other_node=None):
         """
         Waits until this data node reaches the target state, and then returns
         True. If this doesn't happen until "timeout" seconds, returns False.
         """
         prev_state = None
-        for i in range(timeout):
+        wait_until = dt.datetime.now() + dt.timedelta(seconds=timeout)
+        while wait_until > dt.datetime.now():
             if other_node:
                 other_node.sleep(sleep_time / 2)
                 self.sleep(sleep_time / 2)
@@ -585,11 +643,11 @@ class DataNode(PGNode):
 
             prev_state = current_state
 
-        print("%s didn't reach %s after %d attempts" %
+        print("%s didn't reach %s after %d seconds" %
               (self.datadir, target_state, timeout))
 
         error_msg = (f"{self.datadir} failed to reach {target_state} "
-                     f"after {timeout} attempts\n")
+                     f"after {timeout} seconds\n")
         events = self.get_events_str()
         error_msg += f"MONITOR EVENTS:\n{events}\n"
 
@@ -635,7 +693,7 @@ SELECT reportedstate
         """
         Returns the current list of events from the monitor.
         """
-        last_events_query = "select nodeid, nodename, " \
+        last_events_query = "select eventtime, nodeid, nodename, " \
             "reportedstate, goalstate, " \
             "reportedrepstate, reportedlsn, description " \
             "from pgautofailover.last_events('default', count => 20)"
@@ -644,12 +702,12 @@ SELECT reportedstate
 
     def get_events_str(self):
         return "\n".join(
-            ["%s:%-14s %17s/%-17s %7s %10s %s" % ("id", "nodename",
-                                                  "state", "goal state",
-                                                  "repl st", "lsn", "event")]
+            ["%s %25s:%-14s %17s/%-17s %7s %10s %s" % ("eventtime", "id", "nodename",
+                                                       "state", "goal state",
+                                                       "repl st", "lsn", "event")]
             +
-            ["%2d:%-14s %17s/%-17s %7s %10s %s" % (id, n, rs, gs, reps, lsn, desc)
-             for id, n, rs, gs, reps, lsn, desc in self.get_events()])
+            ["%s %2d:%-14s %17s/%-17s %7s %10s %s" % result
+             for result in self.get_events()])
 
     def enable_maintenance(self):
         """
@@ -778,6 +836,40 @@ SELECT reportedstate
 
         result = self.run_sql_query(query)
         return [row[0] for row in result]
+
+    def has_needed_replication_slots(self):
+        """
+        Each node is expected to maintain a slot for each of the other nodes
+        the primary through streaming replication, the secondary(s) manually
+        through calls to pg_replication_slot_advance() on the local Postgres.
+
+        Postgres 10 lacks the function pg_replication_slot_advance() so when
+        the local Postgres is version 10 we don't create any replication
+        slot on the standby servers.
+        """
+        if self.pgmajor() == 10:
+            return True
+
+        print("has_needed_replication_slots: pgversion = %s, pgmajor = %s" %
+              (self.pgversion(), self.pgmajor()))
+
+        hostname = str(self.vnode.address)
+        other_nodes = self.monitor.get_other_nodes(hostname, self.port)
+        expected_slots = ['pgautofailover_standby_%s' % n[0] for n in other_nodes]
+        current_slots = self.list_replication_slot_names()
+
+        # just to make it easier to read through the print()ed list
+        expected_slots.sort()
+        current_slots.sort()
+
+        if set(expected_slots) == set(current_slots):
+            print("slots list on %s is %s, as expected" %
+                  (self.datadir, current_slots))
+        else:
+            print("slots list on %s is %s, expected %s" %
+                  (self.datadir, current_slots, expected_slots))
+
+        return set(expected_slots) == set(current_slots)
 
 
 class MonitorNode(PGNode):
@@ -952,6 +1044,13 @@ class MonitorNode(PGNode):
         command = PGAutoCtl(self.vnode, self.datadir)
         out, err, returncode = command.execute("show state", 'show', 'state')
         print("%s" % out)
+
+    def get_other_nodes(self, host, port):
+        """
+        Returns the list of the other nodes in the same formation/group.
+        """
+        query = "select * from pgautofailover.get_other_nodes(%s, %s)"
+        return self.run_sql_query(query, host, port)
 
 
 class PGAutoCtl():

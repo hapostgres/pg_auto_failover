@@ -32,6 +32,9 @@ char * pg_ctl_version(const char *pg_ctl_path);
 bool pg_add_auto_failover_default_settings(PostgresSetup *pgSetup,
 										   char *configFilePath,
 										   GUC *settings);
+
+bool pg_auto_failover_default_settings_file_exists(PostgresSetup *pgSetup);
+
 bool pg_basebackup(const char *pgdata,
 				   const char *pg_ctl,
 				   ReplicationSource *replicationSource);
@@ -50,9 +53,13 @@ bool pg_ctl_restart(const char *pg_ctl, const char *pgdata);
 bool pg_ctl_promote(const char *pg_ctl, const char *pgdata);
 
 bool pg_setup_standby_mode(uint32_t pg_control_version,
-						   const char *configFilePath,
 						   const char *pgdata,
 						   ReplicationSource *replicationSource);
+
+bool pg_cleanup_standby_mode(uint32_t pg_control_version,
+							 const char *pg_ctl,
+							 const char *pgdata,
+							 PGSQL *pgsql);
 
 bool pg_is_running(const char *pg_ctl, const char *pgdata);
 bool pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *nodename);

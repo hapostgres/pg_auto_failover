@@ -350,11 +350,17 @@ keeper_pg_init_continue(Keeper *keeper)
 static bool
 reach_initial_state(Keeper *keeper)
 {
-	KeeperConfig config = keeper->config;
+	KeeperConfig *config = &(keeper->config);
+	PostgresSetup *pgSetup = &(config->pgSetup);
+	LocalPostgresServer *postgres = &(keeper->postgres);
 
 	log_trace("reach_initial_state: %s to %s",
 			  NodeStateToString(keeper->state.current_role),
 			  NodeStateToString(keeper->state.assigned_role));
+
+
+	/* initialize our local Postgres instance representation */
+	(void) local_postgres_init(postgres, pgSetup);
 
 	/*
 	 * To move from current_role to assigned_role, we call in the FSM.
@@ -467,7 +473,7 @@ reach_initial_state(Keeper *keeper)
 	}
 
 	/* everything went fine, get rid of the init state file */
-	return unlink_file(config.pathnames.init);
+	return unlink_file(config->pathnames.init);
 }
 
 
@@ -669,6 +675,7 @@ create_database_and_extension(Keeper *keeper)
 		if (!pgsql_create_user(&initPostgres.sqlClient, pgSetup->username,
 
 		                       /* password, login, superuser, replication */
+
 							   NULL, true, true, false))
 		{
 			log_fatal("Failed to create role \"%s\""

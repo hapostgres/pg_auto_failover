@@ -69,8 +69,7 @@ static bool prepare_conninfo_sslmode(PQExpBuffer buffer, SSLOptions sslOptions);
 static bool pg_write_recovery_conf(const char *pgdata,
 								   const char *primaryConnInfo,
 								   const char *replicationSlotName);
-static bool pg_write_standby_signal(const char *configFilePath,
-									const char *pgdata,
+static bool pg_write_standby_signal(const char *pgdata,
 									const char *primaryConnInfo,
 									const char *replicationSlotName);
 
@@ -279,6 +278,37 @@ pg_add_auto_failover_default_settings(PostgresSetup *pgSetup,
 	return pg_include_config(configFilePath,
 							 AUTOCTL_CONF_INCLUDE_LINE,
 							 AUTOCTL_CONF_INCLUDE_COMMENT);
+}
+
+
+/*
+ * pg_auto_failover_default_settings_file_exists returns true when our expected
+ * postgresql-auto-failover.conf file exists in PGDATA.
+ */
+bool
+pg_auto_failover_default_settings_file_exists(PostgresSetup *pgSetup)
+{
+	char pgAutoFailoverDefaultsConfigPath[MAXPGPATH] = { 0 };
+	char *contents = NULL;
+	long size = 0L;
+
+	join_path_components(pgAutoFailoverDefaultsConfigPath,
+						 pgSetup->pgdata,
+						 AUTOCTL_DEFAULTS_CONF_FILENAME);
+
+
+	/* make sure the file exists and is not empty (race conditions) */
+	if (!file_exists(pgAutoFailoverDefaultsConfigPath))
+	{
+		return false;
+	}
+
+	if (!read_file(pgAutoFailoverDefaultsConfigPath, &contents, &size))
+	{
+		return false;
+	}
+
+	return contents > 0;
 }
 
 
@@ -605,8 +635,8 @@ pg_basebackup(const char *pgdata,
 		return false;
 	}
 
-	log_info("Running %s -w -d '%s' --pgdata %s -U %s --write-recovery-conf "
-			 "--max-rate %s --wal-method=stream --slot %s ...",
+	log_info(" %s -w -d '%s' --pgdata %s -U %s "
+			 "--max-rate %s --wal-method=stream --slot %s",
 			 pg_basebackup,
 			 primaryConnInfo,
 			 replicationSource->backupDir,
@@ -621,7 +651,6 @@ pg_basebackup(const char *pgdata,
 						  "-U", replicationSource->userName,
 						  "--verbose",
 						  "--progress",
-						  "--write-recovery-conf",
 						  "--max-rate", replicationSource->maximumBackupRate,
 						  "--wal-method=stream",
 						  "--slot", replicationSource->slotName,
@@ -706,8 +735,7 @@ pg_rewind(const char *pgdata,
 		return false;
 	}
 
-	log_info("Running %s --target-pgdata \"%s\" "
-			 "--source-server \"%s\" --progress ...",
+	log_info(" %s --target-pgdata \"%s\" --source-server \"%s\" --progress",
 			 pg_rewind, pgdata, primaryConnInfo);
 
 	program = run_program(pg_rewind,
@@ -1017,7 +1045,7 @@ pg_ctl_postgres(const char *pg_ctl, const char *pgdata, int pgport,
 	program = initialize_program(args, false);
 
 	/* we want to redirect the output to logfile */
-	logFileDescriptor = open(logfile, FOPEN_FLAGS_A, 0644);
+	logFileDescriptor = open(logfile, FOPEN_FLAGS_W, 0644);
 
 	if (logFileDescriptor == -1)
 	{
@@ -1208,7 +1236,6 @@ pg_ctl_promote(const char *pg_ctl, const char *pgdata)
  */
 bool
 pg_setup_standby_mode(uint32_t pg_control_version,
-					  const char *configFilePath,
 					  const char *pgdata,
 					  ReplicationSource *replicationSource)
 {
@@ -1232,6 +1259,14 @@ pg_setup_standby_mode(uint32_t pg_control_version,
 		return false;
 	}
 
+	if (pg_control_version < 1000)
+	{
+		log_fatal("pg_auto_failover does not support PostgreSQL before "
+				  "Postgres 10, we have pg_control version numer %d from "
+				  "pg_controldata \"%s\"",
+				  pg_control_version, pgdata);
+		return false;
+	}
 	if (pg_control_version < 1200)
 	{
 		/*
@@ -1251,8 +1286,7 @@ pg_setup_standby_mode(uint32_t pg_control_version,
 		 * the main postgresql.conf file and create an empty standby.signal
 		 * file to trigger starting the server in standby mode.
 		 */
-		return pg_write_standby_signal(configFilePath,
-									   pgdata,
+		return pg_write_standby_signal(pgdata,
 									   primaryConnInfo,
 									   replicationSource->slotName);
 	}
@@ -1503,21 +1537,28 @@ prepare_conninfo_sslmode(PQExpBuffer buffer, SSLOptions sslOptions)
  * configuration file.
  */
 static bool
-pg_write_standby_signal(const char *configFilePath,
-						const char *pgdata,
+pg_write_standby_signal(const char *pgdata,
 						const char *primaryConnInfo,
 						const char *replicationSlotName)
 {
+	char configFilePath[MAXPGPATH] = { 0 };
+	char quotedSlotName[BUFSIZE] = { 0 };
 	GUC standby_settings[] = {
 		{ "primary_conninfo", (char *) primaryConnInfo },
-		{ "primary_slot_name", (char *) replicationSlotName },
-		{ "recovery_target_timeline", "latest" },
+		{ "primary_slot_name", (char *) quotedSlotName },
+		{ "recovery_target_timeline", "'latest'" },
 		{ NULL, NULL }
 	};
 	char standbyConfigFilePath[MAXPGPATH];
 	char signalFilePath[MAXPGPATH];
 
 	log_trace("pg_write_standby_signal");
+
+	/* in-place edit quotedSlotName to its expected value  */
+	sformat(quotedSlotName, sizeof(quotedSlotName), "'%s'", replicationSlotName);
+
+	/* configFilePath = $PGDATA/postgresql.conf */
+	join_path_components(configFilePath, pgdata, "postgresql.conf");
 
 	/*
 	 * First install the standby.signal file, so that if there's a problem
@@ -1526,7 +1567,12 @@ pg_write_standby_signal(const char *configFilePath,
 	 */
 	join_path_components(signalFilePath, pgdata, "standby.signal");
 
-	log_info("Writing recovery configuration to \"%s\"", signalFilePath);
+	path_in_same_directory(configFilePath, AUTOCTL_STANDBY_CONF_FILENAME,
+						   standbyConfigFilePath);
+
+	log_info("Creating the standby signal file at \"%s\", "
+			 "and replication setup at \"%s\"",
+			 signalFilePath, standbyConfigFilePath);
 
 	if (!write_file("", 0, signalFilePath))
 	{
@@ -1537,11 +1583,9 @@ pg_write_standby_signal(const char *configFilePath,
 	/*
 	 * Now write the standby settings to postgresql-auto-failover-standby.conf
 	 * and include that file from postgresql.conf.
+	 *
+	 * we pass NULL as pgSetup because we know it won't be used...
 	 */
-	path_in_same_directory(configFilePath, AUTOCTL_STANDBY_CONF_FILENAME,
-						   standbyConfigFilePath);
-
-	/* we pass NULL as pgSetup because we know it won't be used... */
 	if (!ensure_default_settings_file_exists(standbyConfigFilePath,
 											 standby_settings,
 											 NULL))
@@ -1562,6 +1606,61 @@ pg_write_standby_signal(const char *configFilePath,
 		log_error("Failed to prepare \"%s\" with standby settings",
 				  standbyConfigFilePath);
 		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * pg_cleanup_standby_mode cleans-up the replication settings for the local
+ * instance of Postgres found at pgdata.
+ *
+ *  - remove either recovery.conf or standby.signal
+ *
+ *  - when using Postgres 12 also make postgresql-auto-failover-standby.conf an
+ *    empty file, so that we can still include it, but it has no effect.
+ */
+bool
+pg_cleanup_standby_mode(uint32_t pg_control_version,
+						const char *pg_ctl,
+						const char *pgdata,
+						PGSQL *pgsql)
+{
+	if (pg_control_version < 1200)
+	{
+		char recoveryConfPath[MAXPGPATH];
+
+		join_path_components(recoveryConfPath, pgdata, "recovery.conf");
+
+		if (!unlink_file(recoveryConfPath))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+	}
+	else
+	{
+		char standbyConfigFilePath[MAXPGPATH];
+		char signalFilePath[MAXPGPATH];
+
+		join_path_components(signalFilePath, pgdata, "standby.signal");
+		join_path_components(standbyConfigFilePath,
+							 pgdata,
+							 AUTOCTL_STANDBY_CONF_FILENAME);
+
+		if (!unlink_file(signalFilePath))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
+		/* empty out the standby configuration file */
+		if (!write_file("", 0, standbyConfigFilePath))
+		{
+			/* write_file logs I/O error */
+			return false;
+		}
 	}
 
 	return true;
@@ -1634,7 +1733,7 @@ pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *nodename)
 		return false;
 	}
 
-	log_info("Running %s req -new -x509 -days 365 -nodes -text "
+	log_info(" %s req -new -x509 -days 365 -nodes -text "
 			 "-out %s -keyout %s -subj \"%s\"",
 			 openssl,
 			 pgSetup->ssl.serverCert,

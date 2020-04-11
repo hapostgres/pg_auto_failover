@@ -169,9 +169,10 @@ void
 service_postgres_ctl_loop(Keeper *keeper)
 {
 	KeeperConfig *config = &(keeper->config);
-	PostgresSetup *pgSetup = &(config->pgSetup);
 	LocalPostgresServer *postgres = &(keeper->postgres);
-	LocalExpectedPostgresStatus *pgStatus = &(postgres->expectedPgStatus);
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+	LocalExpectedPostgresStatus *localStatus = &(postgres->expectedPgStatus);
+	KeeperStatePostgres *pgStatus = &(keeper->postgres.expectedPgStatus.state);
 
 	Service postgresService = {
 		"postgres",
@@ -204,6 +205,9 @@ service_postgres_ctl_loop(Keeper *keeper)
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
+
+	/* make sure to initialize the expected Postgres status to unknown */
+	pgStatus->pgExpectedStatus = PG_EXPECTED_STATUS_UNKNOWN;
 
 	for (;;)
 	{
@@ -251,8 +255,9 @@ service_postgres_ctl_loop(Keeper *keeper)
 			{
 				if (pid != postgresService.pid)
 				{
-					/* that's quite strange, but we log and continue */
-					log_error("BUG: pg_autoctl waitpid() returned %d", pid);
+					/* might be one of our pg_controldata... */
+					char *verb = WIFEXITED(status) ? "exited" : "failed";
+					log_debug("waitpid(): process %d has %s", pid, verb);
 				}
 
 				/*
@@ -262,7 +267,6 @@ service_postgres_ctl_loop(Keeper *keeper)
 				break;
 			}
 		}
-
 
 		if (pg_setup_pgdata_exists(pgSetup))
 		{
@@ -274,15 +278,24 @@ service_postgres_ctl_loop(Keeper *keeper)
 			 */
 			if (!pgStatusPathIsReady)
 			{
-				(void) local_postgres_init(postgres, pgSetup);
+				/* initialize our Postgres state file path */
+				if (!local_postgres_set_status_path(postgres, false))
+				{
+					/* highly unexpected */
+					log_error("Failed to build postgres state file pathname, "
+							  "see above for details.");
+
+					/* maybe next round will have better luck? */
+					continue;
+				}
 
 				pgStatusPathIsReady = true;
 
 				log_trace("Reading current postgres expected status from \"%s\"",
-						  pgStatus->pgStatusPath);
+						  localStatus->pgStatusPath);
 			}
 		}
-		else
+		else if (!pgStatusPathIsReady)
 		{
 			/*
 			 * If PGDATA doesn't exists yet, we didn't have a chance to
@@ -292,6 +305,11 @@ service_postgres_ctl_loop(Keeper *keeper)
 			 * it until it does.
 			 *
 			 * The keeper init process is reponsible for running pg_ctl initdb.
+			 *
+			 * Given that we have two processes working concurrently and
+			 * deciding at the same time what's next, we need to be cautious
+			 * about race conditions. We add extra checks around existence of
+			 * files to make sure we don't get started too early.
 			 */
 			PostgresSetup newPgSetup = { 0 };
 			bool missingPgdataIsOk = true;
@@ -300,9 +318,14 @@ service_postgres_ctl_loop(Keeper *keeper)
 			if (pg_setup_init(&newPgSetup,
 							  pgSetup,
 							  missingPgdataIsOk,
-							  postgresNotRunningIsOk))
+							  postgresNotRunningIsOk) &&
+				pg_setup_pgdata_exists(&newPgSetup) &&
+				pg_auto_failover_default_settings_file_exists(&newPgSetup))
 			{
 				*pgSetup = newPgSetup;
+
+				log_warn("service_postgres_ctl_loop: %s", newPgSetup.pgdata);
+				log_warn("service_postgres_ctl_loop: %s", pgSetup->pgdata);
 			}
 			continue;
 		}
@@ -318,14 +341,19 @@ service_postgres_ctl_loop(Keeper *keeper)
 		 * Adding to that, during the `pg_autoctl create postgres` phase we
 		 * also need to start Postgres and sometimes even restart it.
 		 */
-		if (pgStatusPathIsReady && file_exists(pgStatus->pgStatusPath))
+		if (pgStatusPathIsReady && file_exists(localStatus->pgStatusPath))
 		{
-			if (!keeper_postgres_state_read(&(pgStatus->state),
-											pgStatus->pgStatusPath))
+			const char *filename = localStatus->pgStatusPath;
+
+			if (!keeper_postgres_state_read(pgStatus, filename))
 			{
 				/* errors have already been logged, will try again */
 				continue;
 			}
+
+			log_trace("service_postgres_ctl_loop: %s in %s",
+					  ExpectedPostgresStatusToString(pgStatus->pgExpectedStatus),
+					  filename);
 
 			if (!ensure_postgres_status(keeper, &postgresService))
 			{
@@ -370,6 +398,9 @@ static bool
 ensure_postgres_status(Keeper *keeper, Service *postgres)
 {
 	KeeperStatePostgres *pgStatus = &(keeper->postgres.expectedPgStatus.state);
+
+	log_trace("ensure_postgres_status: %s",
+			  ExpectedPostgresStatusToString(pgStatus->pgExpectedStatus));
 
 	switch (pgStatus->pgExpectedStatus)
 	{
@@ -430,6 +461,9 @@ ensure_postgres_status_running(Keeper *keeper, Service *postgres)
 	/* we might still be starting-up */
 	bool pgIsNotRunningIsOk = true;
 	bool pgIsRunning = pg_setup_is_ready(pgSetup, pgIsNotRunningIsOk);
+
+	log_trace("ensure_postgres_status_running: %s",
+			  pgIsRunning ? "running" : "not running");
 
 	if (pgIsRunning)
 	{

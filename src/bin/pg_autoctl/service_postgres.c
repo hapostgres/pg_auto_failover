@@ -61,6 +61,8 @@ service_postgres_start(void *context, pid_t *pid)
 		{
 			(void) set_ps_title("postgres");
 
+			log_trace("service_postgres_start: EXEC postgres");
+
 			/* exec the postgres binary directly, as a sub-process */
 			(void) pg_ctl_postgres(pgSetup->pg_ctl,
 								   pgSetup->pgdata,

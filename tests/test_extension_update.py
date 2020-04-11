@@ -2,7 +2,7 @@ import os
 import time
 
 import pgautofailover_utils as pgautofailover
-from nose.tools import *
+from nose.tools import eq_
 
 cluster = None
 

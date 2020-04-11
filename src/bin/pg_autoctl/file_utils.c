@@ -174,6 +174,7 @@ bool
 write_file(char *data, long fileSize, const char *filePath)
 {
 	FILE *fileStream = fopen_with_umask(filePath, "wb", FOPEN_FLAGS_W, 0644);
+	int fileDescriptor = fileno(fileStream);
 
 	if (fileStream == NULL)
 	{
@@ -185,6 +186,13 @@ write_file(char *data, long fileSize, const char *filePath)
 	{
 		log_error("Failed to write file \"%s\": %m", filePath);
 		fclose(fileStream);
+		return false;
+	}
+
+	if (fsync(fileDescriptor) != 0)
+	{
+		log_error("Failed to fsync file \"%s\": %m", filePath);
+		(void) close(fileDescriptor);
 		return false;
 	}
 
@@ -745,7 +753,8 @@ set_program_absolute_path(char *program, int size)
 /*
  * normalize_filename returns the real path of a given filename that belongs to
  * an existing file on-disk, resolving symlinks and pruning double-slashes and
- * other weird constructs.
+ * other weird constructs. filename and dst are allowed to point to the same
+ * adress.
  */
 bool
 normalize_filename(const char *filename, char *dst, int size)

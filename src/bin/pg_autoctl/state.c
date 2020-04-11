@@ -803,6 +803,48 @@ ExpectedPostgresStatusToString(ExpectedPostgresStatus pgExpectedStatus)
 
 
 /*
+ * keeper_set_postgres_state_unknown updates the Postgres expected status file
+ * to unknown.
+ */
+bool
+keeper_set_postgres_state_unknown(KeeperStatePostgres *pgStatus,
+								  const char *filename)
+{
+	pgStatus->pgExpectedStatus = PG_EXPECTED_STATUS_UNKNOWN;
+
+	return keeper_postgres_state_update(pgStatus, filename);
+}
+
+
+/*
+ * keeper_set_postgres_state_running updates the Postgres expected status file
+ * to running.
+ */
+bool
+keeper_set_postgres_state_running(KeeperStatePostgres *pgStatus,
+								  const char *filename)
+{
+	pgStatus->pgExpectedStatus = PG_EXPECTED_STATUS_RUNNING;
+
+	return keeper_postgres_state_update(pgStatus, filename);
+}
+
+
+/*
+ * keeper_set_postgres_state_stopped updates the Postgres expected status file
+ * to stopped.
+ */
+bool
+keeper_set_postgres_state_stopped(KeeperStatePostgres *pgStatus,
+								  const char *filename)
+{
+	pgStatus->pgExpectedStatus = PG_EXPECTED_STATUS_STOPPED;
+
+	return keeper_postgres_state_update(pgStatus, filename);
+}
+
+
+/*
  * keeper_postgres_state_create creates our pg_autoctl.pg file.
  */
 bool
@@ -831,6 +873,10 @@ keeper_postgres_state_write(KeeperStatePostgres *pgStatus,
 	int fd;
 	char buffer[PG_AUTOCTL_KEEPER_STATE_FILE_SIZE] = { 0 };
 
+	log_trace("keeper_postgres_state_write %s in %s",
+			  ExpectedPostgresStatusToString(pgStatus->pgExpectedStatus),
+			  filename);
+
 	memset(buffer, 0, PG_AUTOCTL_KEEPER_STATE_FILE_SIZE);
 
 	/*
@@ -844,11 +890,12 @@ keeper_postgres_state_write(KeeperStatePostgres *pgStatus,
 	 */
 	memcpy(buffer, pgStatus, sizeof(KeeperStatePostgres)); /* IGNORE-BANNED */
 
-	fd = open(filename, O_RDWR | O_TRUNC | O_EXCL, S_IRUSR | S_IWUSR);
+	fd = open(filename, O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
 	if (fd < 0)
 	{
-		log_fatal("Failed to create keeper init state file \"%s\": %m",
-				  filename);
+		log_fatal(
+			"Failed to create keeper postgres expected status file \"%s\": %m",
+			filename);
 		return false;
 	}
 
