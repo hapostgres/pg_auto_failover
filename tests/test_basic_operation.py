@@ -14,10 +14,14 @@ def setup_module():
 def teardown_module():
     cluster.destroy()
 
-def test_000_create_monitor():
+def test_000a_create_monitor():
     global monitor
     monitor = cluster.create_monitor("/tmp/basic/monitor")
     monitor.run()
+
+def test_000b_stop_postgres_monitor():
+    monitor.stop_postgres()
+    monitor.wait_until_pg_is_running()
 
 def test_001_init_primary():
     global node1
@@ -149,9 +153,3 @@ def test_017_drop_primary():
     node2.drop()
     assert not node2.pg_is_running()
     assert node3.wait_until_state(target_state="single")
-
-def test_018_stop_postgres_monitor():
-    original_state = node3.get_state()
-    monitor.stop_postgres()
-    monitor.wait_until_pg_is_running()
-    assert node3.wait_until_state(target_state=original_state)
