@@ -211,10 +211,19 @@ CommandLine do_pgsetup_wait_until_ready =
 				 keeper_cli_keeper_setup_getopts,
 				 keeper_cli_pgsetup_wait_until_ready);
 
+CommandLine do_pgsetup_startup_logs =
+	make_command("logs",
+				 "Outputs the Postgres startup logs",
+				 "[option ...]",
+				 KEEPER_CLI_WORKER_SETUP_OPTIONS,
+				 keeper_cli_keeper_setup_getopts,
+				 keeper_cli_pgsetup_startup_logs);
+
 CommandLine *do_pg[] = {
 	&do_pgsetup_discover,
 	&do_pgsetup_is_ready,
 	&do_pgsetup_wait_until_ready,
+	&do_pgsetup_startup_logs,
 	NULL
 };
 

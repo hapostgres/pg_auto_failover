@@ -352,6 +352,28 @@ keeper_cli_pgsetup_wait_until_ready(int argc, char **argv)
 
 
 /*
+ * keeper_cli_pgsetup_startup_logs logs the Postgre startup logs.
+ */
+void
+keeper_cli_pgsetup_startup_logs(int argc, char **argv)
+{
+	PostgresSetup pgSetup = { 0 };
+
+	if (!pg_setup_init(&pgSetup, &keeperOptions.pgSetup, true, true))
+	{
+		exit(EXIT_CODE_PGCTL);
+	}
+
+	log_debug("Initialized pgSetup, now calling pg_setup_wait_until_is_ready()");
+
+	if (!pg_log_startup(pgSetup.pgdata, LOG_INFO))
+	{
+		exit(EXIT_CODE_PGCTL);
+	}
+}
+
+
+/*
  * keeper_cli_init_standby initializes a standby
  */
 void

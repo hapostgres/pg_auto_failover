@@ -87,6 +87,7 @@ service_postgres_start(void *context, pid_t *pid)
 		{
 			int timeout = 10;   /* wait for Postgres for 10s */
 			int logLevel = ++countPostgresStart == 1 ? LOG_INFO : LOG_DEBUG;
+			bool pgIsReady = false;
 
 			log_debug("pg_autoctl started postgres in subprocess %d", fpid);
 			*pid = fpid;
@@ -94,7 +95,22 @@ service_postgres_start(void *context, pid_t *pid)
 			/* we're starting postgres, reset the cached value for the pid */
 			pgSetup->pidFile.pid = 0;
 
-			return pg_setup_wait_until_is_ready(pgSetup, timeout, logLevel);
+			pgIsReady =
+				pg_setup_wait_until_is_ready(pgSetup, timeout, logLevel);
+
+			/*
+			 * If Postgres failed to start the least we can do is log the
+			 * "startup.log" file prominently to the user now.
+			 */
+			if (!pgIsReady)
+			{
+				(void) pg_log_startup(pgSetup->pgdata, LOG_ERROR);
+			}
+			else
+			{
+				(void) pg_log_startup(pgSetup->pgdata, LOG_DEBUG);
+			}
+			return pgIsReady;
 		}
 	}
 }

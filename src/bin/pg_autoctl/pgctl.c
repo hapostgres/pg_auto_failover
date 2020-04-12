@@ -8,6 +8,7 @@
  *
  */
 
+#include <dirent.h>
 #include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
@@ -203,7 +204,7 @@ config_find_pg_ctl(PostgresSetup *pgSetup)
 			return 0;
 		}
 
-		log_info("Found pg_ctl for PostgreSQL %s at %s", version, program);
+		log_debug("Found pg_ctl for PostgreSQL %s at %s", version, program);
 
 		strlcpy(pgSetup->pg_ctl, program, MAXPGPATH);
 		strlcpy(pgSetup->pg_version, version, PG_VERSION_STRING_MAX);
@@ -1072,6 +1073,148 @@ pg_ctl_postgres(const char *pg_ctl, const char *pgdata, int pgport,
 	(void) execute_program(&program);
 
 	return program.returnCode == 0;
+}
+
+
+/*
+ * pg_log_startup logs the PGDATA/startup.log file contents so that our users
+ * have enough information about why Postgres failed to start when that
+ * happens.
+ */
+bool
+pg_log_startup(const char *pgdata, int logLevel)
+{
+	char pgLogDirPath[MAXPGPATH] = { 0 };
+
+	char pgStartupPath[MAXPGPATH] = { 0 };
+	char *fileContents;
+	long fileSize;
+
+	/* prepare startup.log file in PGDATA */
+	join_path_components(pgStartupPath, pgdata, "startup.log");
+
+	if (read_file(pgStartupPath, &fileContents, &fileSize) && fileSize > 0)
+	{
+		char *lines[BUFSIZE];
+		int lineCount = splitLines(fileContents, lines, BUFSIZE);
+		int lineNumber = 0;
+
+		log_warn("Postgres logs from \"%s\":", pgStartupPath);
+
+		for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
+		{
+			log_level(logLevel, "%s", lines[lineNumber]);
+		}
+	}
+
+	/*
+	 * Add in the most recent Postgres log file if it's been created after the
+	 * startup.log file, it might contain very useful information, such as a
+	 * FATAL line(s).
+	 *
+	 * Given that we setup Postgres to use the logging_collector, we expect
+	 * there to be a single Postgres log file in the "log" directory that was
+	 * created later than the "startup.log" file, and we expect the file to be
+	 * rather short.
+	 *
+	 * Also we setup log_directory to be "log" so that's where we are looking
+	 * into.
+	 */
+
+	/* prepare PGDATA/log directory path */
+	join_path_components(pgLogDirPath, pgdata, "log");
+
+	if (directory_exists(pgLogDirPath))
+	{
+		struct stat pgStartupStat;
+
+		DIR *logDir = NULL;
+		struct dirent *logFileDirEntry = NULL;
+
+		/* get the time of last modification of the startup.log file */
+		if (lstat(pgStartupPath, &pgStartupStat) != 0)
+		{
+			log_error("Failed to get file information for \"%s\": %m",
+					  pgStartupPath);
+			return false;
+		}
+
+		/* open and scan through the Postgres log directory */
+		logDir = opendir(pgLogDirPath);
+
+		if (logDir == NULL)
+		{
+			log_error("Failed to open Postgres log directory \"%s\": %m",
+					  pgLogDirPath);
+			return false;
+		}
+
+		while ((logFileDirEntry = readdir(logDir)) != NULL)
+		{
+			char pgLogFilePath[MAXPGPATH] = { 0 };
+			struct stat pgLogFileStat;
+
+			/* our logFiles are regular files, skip . and .. and others */
+			if (logFileDirEntry->d_type != DT_REG)
+			{
+				continue;
+			}
+
+			/* build the absolute file path for the logfile */
+			join_path_components(pgLogFilePath,
+								 pgLogDirPath,
+								 logFileDirEntry->d_name);
+
+			/* get the file information for the current logFile */
+			if (lstat(pgLogFilePath, &pgLogFileStat) != 0)
+			{
+				log_error("Failed to get file information for \"%s\": %m",
+						  pgLogFilePath);
+				return false;
+			}
+
+			/*
+			 * Compare modification times and only add to our logs the content
+			 * from the Postgres log file that was created after the
+			 * startup.log file.
+			 */
+			if (pgLogFileStat.st_mtimespec.tv_sec >= pgStartupStat.st_mtimespec.tv_sec)
+			{
+				char *fileContents;
+				long fileSize;
+
+				log_warn("Postgres logs from \"%s\":", pgLogFilePath);
+
+				if (read_file(pgLogFilePath, &fileContents, &fileSize) &&
+					fileSize > 0)
+				{
+					char *lines[BUFSIZE];
+					int lineCount = splitLines(fileContents, lines, BUFSIZE);
+					int lineNumber = 0;
+
+					for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
+					{
+						if (strstr(lines[lineNumber], "FATAL") != NULL)
+						{
+							log_fatal("%s", lines[lineNumber]);
+						}
+						else if (strstr(lines[lineNumber], "ERROR") != NULL)
+						{
+							log_error("%s", lines[lineNumber]);
+						}
+						else
+						{
+							log_level(logLevel, "%s", lines[lineNumber]);
+						}
+					}
+				}
+			}
+		}
+
+		closedir(logDir);
+	}
+
+	return true;
 }
 
 

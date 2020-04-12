@@ -323,9 +323,6 @@ service_postgres_ctl_loop(Keeper *keeper)
 				pg_auto_failover_default_settings_file_exists(&newPgSetup))
 			{
 				*pgSetup = newPgSetup;
-
-				log_warn("service_postgres_ctl_loop: %s", newPgSetup.pgdata);
-				log_warn("service_postgres_ctl_loop: %s", pgSetup->pgdata);
 			}
 			continue;
 		}
