@@ -1127,6 +1127,7 @@ pg_log_startup(const char *pgdata, int logLevel)
 	if (directory_exists(pgLogDirPath))
 	{
 		struct stat pgStartupStat;
+		int64_t pgStartupMtime = 0;
 
 		DIR *logDir = NULL;
 		struct dirent *logFileDirEntry = NULL;
@@ -1138,6 +1139,7 @@ pg_log_startup(const char *pgdata, int logLevel)
 					  pgStartupPath);
 			return false;
 		}
+		pgStartupMtime = ST_MTIME_S(pgStartupStat);
 
 		/* open and scan through the Postgres log directory */
 		logDir = opendir(pgLogDirPath);
@@ -1153,6 +1155,7 @@ pg_log_startup(const char *pgdata, int logLevel)
 		{
 			char pgLogFilePath[MAXPGPATH] = { 0 };
 			struct stat pgLogFileStat;
+			int64_t pgLogFileMtime = 0;
 
 			/* our logFiles are regular files, skip . and .. and others */
 			if (logFileDirEntry->d_type != DT_REG)
@@ -1172,13 +1175,14 @@ pg_log_startup(const char *pgdata, int logLevel)
 						  pgLogFilePath);
 				return false;
 			}
+			pgLogFileMtime = ST_MTIME_S(pgLogFileStat);
 
 			/*
 			 * Compare modification times and only add to our logs the content
 			 * from the Postgres log file that was created after the
 			 * startup.log file.
 			 */
-			if (pgLogFileStat.st_mtimespec.tv_sec >= pgStartupStat.st_mtimespec.tv_sec)
+			if (pgLogFileMtime >= pgStartupMtime)
 			{
 				char *fileContents;
 				long fileSize;
