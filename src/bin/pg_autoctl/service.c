@@ -172,8 +172,7 @@ service_supervisor(pid_t start_pid,
 				}
 				else
 				{
-					log_fatal("Oops, waitpid() failed with: %s",
-							  strerror(errno));
+					log_fatal("Failed to call waitpid(): %m");
 					return false;
 				}
 			}

@@ -234,8 +234,7 @@ service_postgres_ctl_loop(Keeper *keeper)
 				/* if our PostgresService stopped, just continue */
 				if (errno != ECHILD)
 				{
-					log_error("Oops, waitpid() failed with: %s",
-							  strerror(errno));
+					log_error("Failed to call waitpid(): %m");
 				}
 				break;
 			}
