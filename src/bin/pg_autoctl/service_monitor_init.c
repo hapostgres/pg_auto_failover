@@ -25,7 +25,7 @@
 #include "service.h"
 #include "service_monitor.h"
 #include "service_monitor_init.h"
-#include "service_postgres.h"
+#include "service_postgres_ctl.h"
 #include "signals.h"
 #include "string_utils.h"
 
@@ -42,14 +42,15 @@ service_monitor_init(Monitor *monitor)
 {
 	MonitorConfig *config = &monitor->config;
 	PostgresSetup *pgSetup = &config->pgSetup;
+	LocalPostgresServer postgres = { 0 };
 
 	Service subprocesses[] = {
 		{
-			"postgres",
+			"postgres ctl",
 			0,
-			&service_postgres_start,
-			&service_postgres_stop,
-			(void *) pgSetup
+			&service_postgres_ctl_start,
+			&service_postgres_ctl_stop,
+			(void *) &postgres
 		},
 		{
 			"installer",
@@ -65,6 +66,9 @@ service_monitor_init(Monitor *monitor)
 	/* We didn't create our target username/dbname yet */
 	strlcpy(pgSetup->username, "", NAMEDATALEN);
 	strlcpy(pgSetup->dbname, "", NAMEDATALEN);
+
+	/* initialize our local Postgres instance representation */
+	(void) local_postgres_init(&postgres, pgSetup);
 
 	if (!service_start(subprocesses, subprocessesCount, config->pathnames.pid))
 	{

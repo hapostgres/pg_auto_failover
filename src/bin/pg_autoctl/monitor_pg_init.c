@@ -166,7 +166,7 @@ monitor_install(const char *nodename,
 {
 	PostgresSetup pgSetup = { 0 };
 	bool missingPgdataIsOk = false;
-	bool pgIsNotRunningIsOk = false;
+	bool pgIsNotRunningIsOk = true;
 	LocalPostgresServer postgres = { 0 };
 	char connInfo[MAXCONNINFO];
 
@@ -186,7 +186,14 @@ monitor_install(const char *nodename,
 		exit(EXIT_CODE_PGCTL);
 	}
 
-	local_postgres_init(&postgres, &pgSetup);
+	(void) local_postgres_init(&postgres, &pgSetup);
+
+	if (!ensure_local_postgres_is_running(&postgres))
+	{
+		log_error("Failed to install pg_auto_failover in the the monitor's "
+				  "Postgres database, see above for details");
+		return false;
+	}
 
 	if (!pgsql_create_user(&postgres.sqlClient, PG_AUTOCTL_MONITOR_DBOWNER,
 

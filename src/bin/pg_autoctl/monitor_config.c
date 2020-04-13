@@ -181,19 +181,6 @@ monitor_config_init(MonitorConfig *config,
 	 */
 	config->pgSetup = pgSetup;
 
-	/* set our configuration and state file pathnames */
-	if (!SetConfigFilePath(&(config->pathnames), config->pgSetup.pgdata))
-	{
-		log_error("Failed to initialize monitor's config, see above");
-		exit(EXIT_CODE_BAD_CONFIG);
-	}
-
-	if (!SetStateFilePath(&(config->pathnames), config->pgSetup.pgdata))
-	{
-		log_error("Failed to initialize monitor's config, see above");
-		exit(EXIT_CODE_BAD_CONFIG);
-	}
-
 	/* A part of the monitor's pgSetup is hard-coded. */
 	strlcpy(config->pgSetup.dbname, PG_AUTOCTL_MONITOR_DBNAME, NAMEDATALEN);
 	strlcpy(config->pgSetup.username, PG_AUTOCTL_MONITOR_USERNAME, NAMEDATALEN);

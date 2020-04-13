@@ -17,7 +17,7 @@
 
 bool service_postgres_ctl_start(void *context, pid_t *pid);
 bool service_postgres_ctl_stop(void *context);
-void service_postgres_ctl_loop(Keeper *keeper);
-void service_postgres_ctl_runprogram(Keeper *keeper);
+void service_postgres_ctl_runprogram(void);
+void service_postgres_ctl_loop(LocalPostgresServer *postgres);
 
 #endif /* SERVICE_POSTGRES_CTL_H */

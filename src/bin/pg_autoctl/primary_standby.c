@@ -253,7 +253,7 @@ ensure_local_postgres_is_running(LocalPostgresServer *postgres)
 			/* update pgSetup cache with new Postgres pid and all */
 			local_postgres_init(postgres, pgSetup);
 
-			log_debug("keeper_ensure_postgres_is_running: Postgres is running "
+			log_debug("ensure_local_postgres_is_running: Postgres is running "
 					  "with pid %d", pgSetup->pidFile.pid);
 		}
 		else

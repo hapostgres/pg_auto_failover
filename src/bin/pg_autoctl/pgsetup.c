@@ -360,10 +360,6 @@ pg_setup_init(PostgresSetup *pgSetup,
 		pgSetup->pidFile.port > 0 &&
 		pgSetup->pgport == pgSetup->pidFile.port)
 	{
-		PGSQL pgsql = { 0 };
-		char connInfo[MAXCONNINFO];
-		char dbname[NAMEDATALEN];
-
 		/*
 		 * Sometimes `pg_ctl start` returns with success and Postgres is still
 		 * in crash recovery replaying WAL files, in the "starting" state
@@ -385,33 +381,6 @@ pg_setup_init(PostgresSetup *pgSetup,
 						  "see above for details");
 				return false;
 			}
-		}
-
-		/*
-		 * Postgres is running, is it in recovery?
-		 *
-		 * We're going to connect to "template1", because our target database
-		 * might not have been created yet at this point: for instance, in case
-		 * of problems during the `pg_autoctl create` command.
-		 */
-		if (pgIsReady)
-		{
-			strlcpy(dbname, pgSetup->dbname, NAMEDATALEN);
-			strlcpy(pgSetup->dbname, "template1", NAMEDATALEN);
-
-			/* initialise a SQL connection to the local postgres server */
-			pg_setup_get_local_connection_string(pgSetup, connInfo);
-			pgsql_init(&pgsql, connInfo, PGSQL_CONN_LOCAL);
-
-			if (!pgsql_is_in_recovery(&pgsql, &pgSetup->is_in_recovery))
-			{
-				/* we logged about it already */
-				errors++;
-			}
-
-			pgsql_finish(&pgsql);
-
-			strlcpy(pgSetup->dbname, dbname, NAMEDATALEN);
 		}
 	}
 

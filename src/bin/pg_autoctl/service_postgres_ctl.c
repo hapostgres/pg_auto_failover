@@ -32,9 +32,14 @@
 
 static bool shutdownSequenceInProgress = false;
 
-static bool ensure_postgres_status(Keeper *keeper, Service *postgres);
-static bool ensure_postgres_status_stopped(Keeper *keeper, Service *postgres);
-static bool ensure_postgres_status_running(Keeper *keeper, Service *postgres);
+static bool ensure_postgres_status(LocalPostgresServer *postgres,
+								   Service *service);
+
+static bool ensure_postgres_status_stopped(LocalPostgresServer *postgres,
+										   Service *service);
+
+static bool ensure_postgres_status_running(LocalPostgresServer *postgres,
+										   Service *service);
 
 
 /*
@@ -44,7 +49,6 @@ static bool ensure_postgres_status_running(Keeper *keeper, Service *postgres);
 bool
 service_postgres_ctl_start(void *context, pid_t *pid)
 {
-	Keeper *keeper = (Keeper *) context;
 	pid_t fpid;
 
 	/* Flush stdio channels just before fork, to avoid double-output problems */
@@ -64,7 +68,7 @@ service_postgres_ctl_start(void *context, pid_t *pid)
 
 		case 0:
 		{
-			(void) service_postgres_ctl_runprogram(keeper);
+			(void) service_postgres_ctl_runprogram();
 		}
 
 		default:
@@ -107,7 +111,7 @@ service_postgres_ctl_stop(void *context)
  *   $ pg_autoctl do service postgres --pgdata ...
  */
 void
-service_postgres_ctl_runprogram(Keeper *keeper)
+service_postgres_ctl_runprogram()
 {
 	Program program;
 
@@ -123,8 +127,22 @@ service_postgres_ctl_runprogram(Keeper *keeper)
 	 * /private/tmp when using realpath(2) as we do in normalize_filename(). So
 	 * for that case to be supported, we explicitely re-use whatever PGDATA or
 	 * --pgdata was parsed from the main command line to start our sub-process.
+	 *
+	 * The pg_autoctl postgres controller is used both in the monitor context
+	 * and in the keeper context; which means it gets started from one of the
+	 * following top-level commands:
+	 *
+	 *  - pg_autoctl create monitor
+	 *  - pg_autoctl create postgres
+	 *  - pg_autoctl run
+	 *
+	 * The monitor specific commands set monitorOptions, the generic and keeper
+	 * specific commands set keeperOptions.
 	 */
-	char *pgdata = keeperOptions.pgSetup.pgdata;
+	char *pgdata =
+		IS_EMPTY_STRING_BUFFER(monitorOptions.pgSetup.pgdata)
+		? keeperOptions.pgSetup.pgdata
+		: monitorOptions.pgSetup.pgdata;
 
 	setenv(PG_AUTOCTL_DEBUG, "1", 1);
 
@@ -160,13 +178,11 @@ service_postgres_ctl_runprogram(Keeper *keeper)
  * split-brain situations.
  */
 void
-service_postgres_ctl_loop(Keeper *keeper)
+service_postgres_ctl_loop(LocalPostgresServer *postgres)
 {
-	KeeperConfig *config = &(keeper->config);
-	LocalPostgresServer *postgres = &(keeper->postgres);
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	LocalExpectedPostgresStatus *localStatus = &(postgres->expectedPgStatus);
-	KeeperStatePostgres *pgStatus = &(keeper->postgres.expectedPgStatus.state);
+	KeeperStatePostgres *pgStatus = &(localStatus->state);
 
 	Service postgresService = {
 		"postgres",
@@ -176,29 +192,7 @@ service_postgres_ctl_loop(Keeper *keeper)
 		(void *) pgSetup
 	};
 
-	bool missingPgdataIsOk = true;
-	bool pgIsNotRunningIsOk = true;
-	bool monitorDisabledIsOk = true;
-
 	bool pgStatusPathIsReady = false;
-
-	/*
-	 * Initialize our keeper struct instance with values from the setup.
-	 */
-	if (!keeper_config_read_file(config,
-								 missingPgdataIsOk,
-								 pgIsNotRunningIsOk,
-								 monitorDisabledIsOk))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_CONFIG);
-	}
-
-	if (!keeper_init(keeper, config))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_CONFIG);
-	}
 
 	/* make sure to initialize the expected Postgres status to unknown */
 	pgStatus->pgExpectedStatus = PG_EXPECTED_STATUS_UNKNOWN;
@@ -213,7 +207,7 @@ service_postgres_ctl_loop(Keeper *keeper)
 		{
 			shutdownSequenceInProgress = true;
 
-			if (!ensure_postgres_status_stopped(keeper, &postgresService))
+			if (!ensure_postgres_status_stopped(postgres, &postgresService))
 			{
 				log_error("Failed to stop Postgres, see above for details");
 				pg_usleep(100 * 1000);  /* 100ms */
@@ -353,7 +347,7 @@ service_postgres_ctl_loop(Keeper *keeper)
 					  ExpectedPostgresStatusToString(pgStatus->pgExpectedStatus),
 					  filename);
 
-			if (!ensure_postgres_status(keeper, &postgresService))
+			if (!ensure_postgres_status(postgres, &postgresService))
 			{
 				pgStatusPathIsReady = false;
 			}
@@ -389,9 +383,9 @@ service_postgres_ctl_loop(Keeper *keeper)
  *   was never "just the transition functions" that said.
  */
 static bool
-ensure_postgres_status(Keeper *keeper, Service *postgres)
+ensure_postgres_status(LocalPostgresServer *postgres, Service *service)
 {
-	KeeperStatePostgres *pgStatus = &(keeper->postgres.expectedPgStatus.state);
+	KeeperStatePostgres *pgStatus = &(postgres->expectedPgStatus.state);
 
 	log_trace("ensure_postgres_status: %s",
 			  ExpectedPostgresStatusToString(pgStatus->pgExpectedStatus));
@@ -406,12 +400,12 @@ ensure_postgres_status(Keeper *keeper, Service *postgres)
 
 		case PG_EXPECTED_STATUS_STOPPED:
 		{
-			return ensure_postgres_status_stopped(keeper, postgres);
+			return ensure_postgres_status_stopped(postgres, service);
 		}
 
 		case PG_EXPECTED_STATUS_RUNNING:
 		{
-			return ensure_postgres_status_running(keeper, postgres);
+			return ensure_postgres_status_running(postgres, service);
 		}
 	}
 
@@ -424,29 +418,19 @@ ensure_postgres_status(Keeper *keeper, Service *postgres)
  * ensure_postgres_status_stopped ensures that Postgres is stopped.
  */
 static bool
-ensure_postgres_status_stopped(Keeper *keeper, Service *postgres)
+ensure_postgres_status_stopped(LocalPostgresServer *postgres, Service *service)
 {
-	PostgresSetup *pgSetup = &(keeper->config.pgSetup);
-	KeeperStateData *keeperState = &(keeper->state);
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 
 	bool pgIsNotRunningIsOk = true;
 	bool pgIsRunning = pg_setup_is_ready(pgSetup, pgIsNotRunningIsOk);
 
 	if (pgIsRunning)
 	{
-		if (shutdownSequenceInProgress)
-		{
-			/* service_postgres_stop() logs about stopping Postgres */
-			log_debug("pg_autoctl: stop postgres (pid %d)", postgres->pid);
-		}
-		else
-		{
-			log_warn("PostgreSQL is running while in state \"%s\", "
-					 "stopping PostgreSQL.",
-					 NodeStateToString(keeperState->current_role));
-		}
+		/* service_postgres_stop() logs about stopping Postgres */
+		log_debug("pg_autoctl: stop postgres (pid %d)", service->pid);
 
-		return service_postgres_stop((void *) postgres);
+		return service_postgres_stop((void *) service);
 	}
 	return true;
 }
@@ -456,9 +440,9 @@ ensure_postgres_status_stopped(Keeper *keeper, Service *postgres)
  * ensure_postgres_status_running ensures that Postgres is running.
  */
 static bool
-ensure_postgres_status_running(Keeper *keeper, Service *postgres)
+ensure_postgres_status_running(LocalPostgresServer *postgres, Service *service)
 {
-	PostgresSetup *pgSetup = &(keeper->config.pgSetup);
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 
 	/* we might still be starting-up */
 	bool pgIsNotRunningIsOk = true;
@@ -472,7 +456,7 @@ ensure_postgres_status_running(Keeper *keeper, Service *postgres)
 		return true;
 	}
 
-	if (service_postgres_start(postgres->context, &(postgres->pid)))
+	if (service_postgres_start(service->context, &(service->pid)))
 	{
 		if (countPostgresStart > 1)
 		{

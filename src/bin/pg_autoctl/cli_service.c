@@ -116,28 +116,28 @@ static void
 cli_keeper_run(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
+	KeeperConfig *config = &(keeper.config);
+	PostgresSetup *pgSetup = &(keeper.config.pgSetup);
+	LocalPostgresServer *postgres = &(keeper.postgres);
+
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
 	bool monitorDisabledIsOk = true;
 
 	keeper.config = keeperOptions;
 
-	/*
-	 * keeper_config_read_file() calls into pg_setup_init() which uses
-	 * pg_setup_is_ready(), and this function might loop until Postgres is
-	 * ready, as per its name.
-	 *
-	 * In order to make it possible to interrupt the pg_autctl service while in
-	 * that loop, we need to install our signal handlers and pidfile prior to
-	 * getting there.
-	 *
-	 * So here only read the configuration file, refrain from discovering the
-	 * actual Postgres service status.
-	 */
-	if (!keeper_config_read_file_skip_pgsetup(&(keeper.config),
-											  monitorDisabledIsOk))
+	/* initialize our pgSetup and LocalPostgresServer instances */
+	if (!keeper_config_read_file(config,
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
 	{
 		/* errors have already been logged. */
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
+
+	/* initialize our local Postgres instance representation */
+	(void) local_postgres_init(postgres, pgSetup);
 
 	if (!start_keeper(&keeper))
 	{

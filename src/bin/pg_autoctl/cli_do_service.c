@@ -76,37 +76,79 @@ CommandLine do_service_commands =
 static void
 cli_do_service_postgres(int argc, char **argv)
 {
-	Keeper keeper = { 0 };
-	KeeperConfig config = keeperOptions;
-
-	bool missingPgdataIsOk = true;
-	bool pgIsNotRunningIsOk = true;
-	bool monitorDisabledIsOk = true;
+	KeeperConfig kconfig = keeperOptions;
+	LocalPostgresServer postgres = { 0 };
 
 	bool exitOnQuit = true;
 
 	/* Establish a handler for signals. */
 	(void) set_signal_handlers(exitOnQuit);
 
-	if (!keeper_config_read_file(&config,
-								 missingPgdataIsOk,
-								 pgIsNotRunningIsOk,
-								 monitorDisabledIsOk))
+
+	if (!keeper_config_set_pathnames_from_pgdata(&(kconfig.pathnames),
+												 kconfig.pgSetup.pgdata))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	if (!keeper_init(&keeper, &config))
+	switch (ProbeConfigurationFileRole(kconfig.pathnames.config))
 	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_CONFIG);
+		case PG_AUTOCTL_ROLE_MONITOR:
+		{
+			MonitorConfig mconfig = { 0 };
+
+			bool missingPgdataIsOk = true;
+			bool pgIsNotRunningIsOk = true;
+
+			if (!monitor_config_init_from_pgsetup(&mconfig,
+												  &kconfig.pgSetup,
+												  missingPgdataIsOk,
+												  pgIsNotRunningIsOk))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_PGCTL);
+			}
+
+			/* copy the pgSetup from the config to the Local Postgres instance */
+			postgres.postgresSetup = mconfig.pgSetup;
+
+			break;
+		}
+
+		case PG_AUTOCTL_ROLE_KEEPER:
+		{
+			bool missingPgdataIsOk = true;
+			bool pgIsNotRunningIsOk = true;
+			bool monitorDisabledIsOk = true;
+
+			if (!keeper_config_read_file(&kconfig,
+										 missingPgdataIsOk,
+										 pgIsNotRunningIsOk,
+										 monitorDisabledIsOk))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
+
+			/* copy the pgSetup from the config to the Local Postgres instance */
+			postgres.postgresSetup = kconfig.pgSetup;
+
+			break;
+		}
+
+		default:
+		{
+			log_fatal("Unrecognized configuration file \"%s\"",
+					  kconfig.pathnames.config);
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
 	}
 
 	/* display a user-friendly process name */
 	(void) set_ps_title("pg_autoctl: start/stop postgres");
 
-	(void) service_postgres_ctl_loop(&keeper);
+	(void) service_postgres_ctl_loop(&postgres);
 }
 
 

@@ -710,12 +710,6 @@ cli_create_monitor(int argc, char **argv)
 
 	monitor.config = monitorOptions;
 
-	if (!cli_create_monitor_config(&monitor, config))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_CONFIG);
-	}
-
 	/*
 	 * We support two modes of operations here:
 	 *   - configuration exists already, we need PGDATA
@@ -725,6 +719,12 @@ cli_create_monitor(int argc, char **argv)
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (!cli_create_monitor_config(&monitor, config))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
 	/* Initialize our local connection to the monitor */

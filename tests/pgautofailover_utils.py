@@ -353,7 +353,7 @@ class PGNode:
         """
         command = PGAutoCtl(self.vnode, self.datadir)
         out, err, ret = command.execute("pgsetup ready",
-                                        'do', 'pgsetup', 'ready')
+                                        'do', 'pgsetup', 'ready', '-vvv')
         return ret == 0
 
     def wait_until_pg_is_running(self, timeout=STATE_CHANGE_TIMEOUT):
@@ -362,7 +362,7 @@ class PGNode:
         """
         command = PGAutoCtl(self.vnode, self.datadir)
         out, err, ret = command.execute("pgsetup ready",
-                                        'do', 'pgsetup', 'wait')
+                                        'do', 'pgsetup', 'wait', '-vvv')
         return ret == 0
 
     def fail(self):
@@ -908,7 +908,7 @@ class MonitorNode(PGNode):
         else:
             self.pg_autoctl.execute("create monitor")
 
-    def run(self, env={}, loglevel=LogLevel.INFO):
+    def run(self, loglevel=LogLevel.INFO):
         """
         Runs "pg_autoctl run"
         """

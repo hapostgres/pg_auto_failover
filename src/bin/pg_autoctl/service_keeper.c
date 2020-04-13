@@ -48,6 +48,7 @@ static void reload_configuration(Keeper *keeper);
 bool
 start_keeper(Keeper *keeper)
 {
+	LocalPostgresServer *postgres = &(keeper->postgres);
 	const char *pidfile = keeper->config.pathnames.pid;
 
 	Service subprocesses[] = {
@@ -56,7 +57,7 @@ start_keeper(Keeper *keeper)
 			0,
 			&service_postgres_ctl_start,
 			&service_postgres_ctl_stop,
-			(void *) keeper
+			(void *) postgres
 		},
 		{
 			"node active",

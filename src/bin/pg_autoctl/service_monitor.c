@@ -21,7 +21,7 @@
 #include "monitor_config.h"
 #include "service.h"
 #include "service_monitor.h"
-#include "service_postgres.h"
+#include "service_postgres_ctl.h"
 #include "signals.h"
 #include "string_utils.h"
 
@@ -36,14 +36,15 @@ start_monitor(Monitor *monitor)
 {
 	MonitorConfig *config = &(monitor->config);
 	PostgresSetup *pgSetup = &(config->pgSetup);
+	LocalPostgresServer postgres = { 0 };
 
 	Service subprocesses[] = {
 		{
-			"postgres",
+			"postgres ctl",
 			0,
-			&service_postgres_start,
-			&service_postgres_stop,
-			(void *) pgSetup
+			&service_postgres_ctl_start,
+			&service_postgres_ctl_stop,
+			(void *) &postgres
 		},
 		{
 			"listener",
@@ -55,6 +56,9 @@ start_monitor(Monitor *monitor)
 	};
 
 	int subprocessesCount = sizeof(subprocesses) / sizeof(subprocesses[0]);
+
+	/* initialize our local Postgres instance representation */
+	(void) local_postgres_init(&postgres, pgSetup);
 
 	if (!service_start(subprocesses, subprocessesCount, config->pathnames.pid))
 	{
@@ -146,6 +150,15 @@ service_monitor_runprogram(Monitor *monitor)
 	 * /private/tmp when using realpath(2) as we do in normalize_filename(). So
 	 * for that case to be supported, we explicitely re-use whatever PGDATA or
 	 * --pgdata was parsed from the main command line to start our sub-process.
+	 *
+	 * The pg_autoctl monitor listener can get started from one of the
+	 * following top-level commands:
+	 *
+	 *  - pg_autoctl create monitor --run
+	 *  - pg_autoctl run
+	 *
+	 * The monitor specific commands set monitorOptions, the generic command
+	 * set keeperOptions.
 	 */
 	char *pgdata =
 		IS_EMPTY_STRING_BUFFER(monitorOptions.pgSetup.pgdata)
@@ -187,10 +200,12 @@ service_monitor_runprogram(Monitor *monitor)
 bool
 monitor_service_run(Monitor *monitor)
 {
-	MonitorConfig *mconfig = &monitor->config;
+	MonitorConfig *mconfig = &(monitor->config);
 	MonitorExtensionVersion version = { 0 };
 	char *channels[] = { "log", "state", NULL };
 	char postgresUri[MAXCONNINFO];
+
+	LocalPostgresServer postgres = { 0 };
 
 	/* Initialize our local connection to the monitor */
 	if (!monitor_local_init(monitor))
@@ -203,6 +218,15 @@ monitor_service_run(Monitor *monitor)
 	if (monitor_config_get_postgres_uri(mconfig, postgresUri, MAXCONNINFO))
 	{
 		log_info("pg_auto_failover monitor is ready at %s", postgresUri);
+	}
+
+	(void) local_postgres_init(&postgres, &(monitor->config.pgSetup));
+
+	if (!ensure_local_postgres_is_running(&postgres))
+	{
+		log_error("Failed to ensure Postgres is running, "
+				  "see above for details.");
+		return false;
 	}
 
 	/* Check version compatibility. */
@@ -230,6 +254,14 @@ monitor_service_run(Monitor *monitor)
 			log_warn("Re-establishing connection. We might miss notifications.");
 			pgsql_finish(&(monitor->pgsql));
 
+			/* We got disconnected, ensure that Postgres is running again */
+			if (!ensure_local_postgres_is_running(&postgres))
+			{
+				log_error("Failed to ensure Postgres is running, "
+						  "see above for details.");
+				return false;
+			}
+
 			/* Check version compatibility. */
 			if (!monitor_ensure_extension_version(monitor, &version))
 			{
@@ -237,6 +269,7 @@ monitor_service_run(Monitor *monitor)
 				return false;
 			}
 
+			/* Get back to our infinite LISTEN loop */
 			pgsql_listen(&(monitor->pgsql), channels);
 
 			/* skip sleeping */

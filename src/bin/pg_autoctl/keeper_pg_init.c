@@ -358,7 +358,6 @@ reach_initial_state(Keeper *keeper)
 			  NodeStateToString(keeper->state.current_role),
 			  NodeStateToString(keeper->state.assigned_role));
 
-
 	/* initialize our local Postgres instance representation */
 	(void) local_postgres_init(postgres, pgSetup);
 
