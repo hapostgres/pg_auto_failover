@@ -1090,6 +1090,9 @@ pg_log_startup(const char *pgdata, int logLevel)
 	char *fileContents;
 	long fileSize;
 
+	/* logLevel to use when introducing which file path logs come from */
+	int pathLogLevel = logLevel <= LOG_DEBUG ? LOG_DEBUG : LOG_WARN;
+
 	/* prepare startup.log file in PGDATA */
 	join_path_components(pgStartupPath, pgdata, "startup.log");
 
@@ -1099,7 +1102,7 @@ pg_log_startup(const char *pgdata, int logLevel)
 		int lineCount = splitLines(fileContents, lines, BUFSIZE);
 		int lineNumber = 0;
 
-		log_warn("Postgres logs from \"%s\":", pgStartupPath);
+		log_level(pathLogLevel, "Postgres logs from \"%s\":", pgStartupPath);
 
 		for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
 		{
@@ -1187,7 +1190,8 @@ pg_log_startup(const char *pgdata, int logLevel)
 				char *fileContents;
 				long fileSize;
 
-				log_warn("Postgres logs from \"%s\":", pgLogFilePath);
+				log_level(pathLogLevel,
+						  "Postgres logs from \"%s\":", pgLogFilePath);
 
 				if (read_file(pgLogFilePath, &fileContents, &fileSize) &&
 					fileSize > 0)

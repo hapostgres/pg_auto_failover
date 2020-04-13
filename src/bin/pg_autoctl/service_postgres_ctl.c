@@ -477,8 +477,7 @@ ensure_postgres_status_running(Keeper *keeper, Service *postgres)
 	}
 	else
 	{
-		log_warn("Failed to restart PostgreSQL, "
-				 "see PostgreSQL logs for instance at \"%s\".",
+		log_warn("Failed to start Postgres instance at \"%s\"",
 				 pgSetup->pgdata);
 
 		return false;
