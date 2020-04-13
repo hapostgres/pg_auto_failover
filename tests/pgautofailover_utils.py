@@ -351,42 +351,19 @@ class PGNode:
         """
         Returns true when Postgres is running. We use pg_ctl status.
         """
-        status_command = [shutil.which('pg_ctl'), '-D', self.datadir, 'status']
-        status_proc = self.vnode.run(status_command)
-        out, err = status_proc.communicate(timeout=timeout)
-        if status_proc.returncode == 0:
-            # pg_ctl status is happy to report 0 (Postgres is running) even
-            # when it's still "starting" and thus not ready for queries.
-            #
-            # because our tests need to be able to send queries to Postgres,
-            # the "starting" status is not good enough for us, we're only
-            # happy with "ready".
-            pidfile = os.path.join(self.datadir, 'postmaster.pid')
-            with open(pidfile, "r") as p:
-                pidlines = p.readlines()
-                if len(pidlines) > 7:
-                    pg_status = pidlines[7]
-                    return pg_status.startswith("ready")
-        elif status_proc.returncode > 0:
-            # ignore `pg_ctl status` output, silently try again till timeout
-            return False
-        elif status_proc.returncode is None:
-            print("pg_ctl status timed out after %ds" % timeout)
-            return False
+        command = PGAutoCtl(self.vnode, self.datadir)
+        out, err, ret = command.execute("pgsetup ready",
+                                        'do', 'pgsetup', 'ready')
+        return ret == 0
 
     def wait_until_pg_is_running(self, timeout=STATE_CHANGE_TIMEOUT):
         """
         Waits until the underlying Postgres process is running.
         """
-        wait_until = dt.datetime.now() + dt.timedelta(seconds=timeout)
-        while wait_until > dt.datetime.now():
-            time.sleep(1)
-            if self.pg_is_running():
-                return True
-
-        print("Postgres is still not running in %s after %d seconds" %
-              (self.datadir, timeout))
-        return False
+        command = PGAutoCtl(self.vnode, self.datadir)
+        out, err, ret = command.execute("pgsetup ready",
+                                        'do', 'pgsetup', 'wait')
+        return ret == 0
 
     def fail(self):
         """
