@@ -447,10 +447,11 @@ service_signal_process_group(int signal)
 static bool
 service_init(const char *pidfile, pid_t *pid)
 {
+	bool exitOnQuit = false;
 	log_trace("service_init");
 
 	/* Establish a handler for signals. */
-	(void) set_signal_handlers();
+	(void) set_signal_handlers(exitOnQuit);
 
 	/* Check that the keeper service is not already running */
 	if (read_pidfile(pidfile, pid))

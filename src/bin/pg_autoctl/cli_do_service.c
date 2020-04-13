@@ -83,8 +83,10 @@ cli_do_service_postgres(int argc, char **argv)
 	bool pgIsNotRunningIsOk = true;
 	bool monitorDisabledIsOk = true;
 
+	bool exitOnQuit = true;
+
 	/* Establish a handler for signals. */
-	(void) set_signal_handlers();
+	(void) set_signal_handlers(exitOnQuit);
 
 	if (!keeper_config_read_file(&config,
 								 missingPgdataIsOk,
@@ -118,10 +120,12 @@ cli_do_service_node_active(int argc, char **argv)
 
 	pid_t ppid = getppid();
 
+	bool exitOnQuit = true;
+
 	keeper.config = keeperOptions;
 
 	/* Establish a handler for signals. */
-	(void) set_signal_handlers();
+	(void) set_signal_handlers(exitOnQuit);
 
 	if (!service_keeper_node_active_init(&keeper))
 	{
@@ -149,8 +153,10 @@ cli_do_service_monitor(int argc, char **argv)
 	bool missingPgdataIsOk = false;
 	bool pgIsNotRunningIsOk = true;
 
+	bool exitOnQuit = true;
+
 	/* Establish a handler for signals. */
-	(void) set_signal_handlers();
+	(void) set_signal_handlers(exitOnQuit);
 
 	/* Prepare MonitorConfig from the CLI options fed in options */
 	if (!monitor_config_init_from_pgsetup(&(monitor.config),

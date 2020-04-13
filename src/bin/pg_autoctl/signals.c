@@ -23,20 +23,28 @@ volatile sig_atomic_t asked_to_stop = 0;      /* SIGTERM */
 volatile sig_atomic_t asked_to_stop_fast = 0; /* SIGINT */
 volatile sig_atomic_t asked_to_reload = 0;    /* SIGHUP */
 
-
 /*
  * set_signal_handlers sets our signal handlers for the 4 signals that we
  * specifically handle in pg_autoctl.
  */
 void
-set_signal_handlers()
+set_signal_handlers(bool exitOnQuit)
 {
 	/* Establish a handler for signals. */
-	log_trace("set_signal_handlers");
+	log_trace("set_signal_handlers%s", exitOnQuit ? " (exit on quit)" : "");
+
 	pqsignal(SIGHUP, catch_reload);
 	pqsignal(SIGINT, catch_int);
 	pqsignal(SIGTERM, catch_term);
-	pqsignal(SIGQUIT, catch_quit);
+
+	if (exitOnQuit)
+	{
+		pqsignal(SIGQUIT, catch_quit);
+	}
+	else
+	{
+		pqsignal(SIGQUIT, catch_int);
+	}
 }
 
 

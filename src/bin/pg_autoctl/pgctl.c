@@ -1312,7 +1312,8 @@ pg_ctl_status(const char *pg_ctl, const char *pgdata, bool log_output)
 	Program program = run_program(pg_ctl, "status", "-D", pgdata, NULL);
 	int returnCode = program.returnCode;
 
-	log_debug("%s status -D %s [%d]", pg_ctl, pgdata, returnCode);
+	log_level(log_output ? LOG_INFO : LOG_DEBUG,
+			  "%s status -D %s [%d]", pg_ctl, pgdata, returnCode);
 
 	if (log_output)
 	{

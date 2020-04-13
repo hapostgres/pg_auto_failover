@@ -1256,13 +1256,19 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 	}
 	else
 	{
-		/*
-		 * We need to stop Postgres now, otherwise we won't be able to drop the
-		 * replication slot on the other node, because it's still active.
-		 */
-		log_info("Stopping PostgreSQL at \"%s\"", config->pgSetup.pgdata);
+		int timeout = 10;
 
-		if (!pg_ctl_stop(config->pgSetup.pg_ctl, config->pgSetup.pgdata))
+		/*
+		 * We need to ensure that Postgres has been stopped now, otherwise we
+		 * won't be able to drop the replication slot on the other node,
+		 * because it's still active.
+		 */
+		log_info("Wait until PostgreSQL is stopped at \"%s\"",
+				 config->pgSetup.pgdata);
+
+		if (!pg_setup_wait_until_is_stopped(&(config->pgSetup),
+											timeout,
+											LOG_INFO))
 		{
 			log_error("Failed to stop PostgreSQL at \"%s\"",
 					  config->pgSetup.pgdata);
@@ -1301,14 +1307,21 @@ static void
 stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathnames,
 										   PostgresSetup *pgSetup)
 {
-	log_info("Stopping PostgreSQL at \"%s\"", pgSetup->pgdata);
+	int timeout = 10;
 
-	if (!pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata))
+	/*
+	 * We need to ensure that Postgres has been stopped now, otherwise we
+	 * won't be able to drop the replication slot on the other node,
+	 * because it's still active.
+	 */
+	log_info("Wait until PostgreSQL is stopped at \"%s\"", pgSetup->pgdata);
+
+	if (!pg_setup_wait_until_is_stopped(pgSetup, timeout, LOG_INFO))
 	{
 		log_error("Failed to stop PostgreSQL at \"%s\"", pgSetup->pgdata);
-		log_fatal("Skipping removal of directory \"%s\"", pgSetup->pgdata);
 		exit(EXIT_CODE_PGCTL);
 	}
+
 
 	/*
 	 * Only try to rm -rf PGDATA if we managed to stop PostgreSQL.
