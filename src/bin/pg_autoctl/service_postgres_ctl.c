@@ -355,11 +355,7 @@ service_postgres_ctl_loop(Keeper *keeper)
 
 			if (!ensure_postgres_status(keeper, &postgresService))
 			{
-				/* TODO: review the error message, make sure startup.log is
-				 * logged in case of failure to start Postgres
-				 */
 				pgStatusPathIsReady = false;
-				log_warn("Will try again in 100ms");
 			}
 		}
 
