@@ -30,6 +30,8 @@
 
 #include "runprogram.h"
 
+static bool shutdownSequenceInProgress = false;
+
 static bool ensure_postgres_status(Keeper *keeper, Service *postgres);
 static bool ensure_postgres_status_stopped(Keeper *keeper, Service *postgres);
 static bool ensure_postgres_status_running(Keeper *keeper, Service *postgres);
@@ -85,21 +87,13 @@ bool
 service_postgres_ctl_stop(void *context)
 {
 	Service *service = (Service *) context;
-	Keeper *keeper = (Keeper *) service->context;
-	PostgresSetup *pgSetup = &(keeper->config.pgSetup);
 
-	log_info("Stopping pg_autoctl postgres ctl supervisor service");
+	log_info("Stopping pg_autoctl: start/stop postgres service");
 
 	if (kill(service->pid, SIGTERM) != 0)
 	{
 		log_error("Failed to send SIGTERM to pid %d for service %s",
 				  service->pid, service->name);
-		return false;
-	}
-
-	if (!pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata))
-	{
-		log_error("Failed to stop Postgres, see above for details");
 		return false;
 	}
 
@@ -217,6 +211,14 @@ service_postgres_ctl_loop(Keeper *keeper)
 		/* that's expected the shutdown sequence from the supervisor */
 		if (asked_to_stop || asked_to_stop_fast)
 		{
+			shutdownSequenceInProgress = true;
+
+			if (!ensure_postgres_status_stopped(keeper, &postgresService))
+			{
+				log_error("Failed to stop Postgres, see above for details");
+				pg_usleep(100 * 1000);  /* 100ms */
+				continue;
+			}
 			exit(EXIT_CODE_QUIT);
 		}
 
@@ -436,9 +438,17 @@ ensure_postgres_status_stopped(Keeper *keeper, Service *postgres)
 
 	if (pgIsRunning)
 	{
-		log_warn("PostgreSQL is running while in state \"%s\", "
-				 "stopping PostgreSQL.",
-				 NodeStateToString(keeperState->current_role));
+		if (shutdownSequenceInProgress)
+		{
+			/* service_postgres_stop() logs about stopping Postgres */
+			log_debug("pg_autoctl: stop postgres (pid %d)", postgres->pid);
+		}
+		else
+		{
+			log_warn("PostgreSQL is running while in state \"%s\", "
+					 "stopping PostgreSQL.",
+					 NodeStateToString(keeperState->current_role));
+		}
 
 		return service_postgres_stop((void *) postgres);
 	}

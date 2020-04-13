@@ -43,6 +43,8 @@ static bool service_find_subprocess(Service services[],
 									pid_t pid,
 									Service **result);
 
+static void service_stop_subprocesses(Service services[], int serviceCount);
+
 static void service_stop_other_subprocesses(pid_t pid,
 											Service services[],
 											int serviceCount);
@@ -187,6 +189,15 @@ service_supervisor(pid_t start_pid,
 				 */
 				if (asked_to_stop || asked_to_stop_fast)
 				{
+					/*
+					 * Stop all the services.
+					 */
+					if (stoppingLoopCounter == 0)
+					{
+						(void) service_stop_subprocesses(services,
+														 subprocessCount);
+					}
+
 					++stoppingLoopCounter;
 
 					if (stoppingLoopCounter == 1)
@@ -352,6 +363,24 @@ service_find_subprocess(Service services[],
 
 
 /*
+ * service_stop_subprocesses calls the stopFunction for all the registered
+ * services to initiate the shutdown sequence.
+ */
+static void
+service_stop_subprocesses(Service services[], int serviceCount)
+{
+	int serviceIndex = 0;
+
+	for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
+	{
+		Service *target = &(services[serviceIndex]);
+
+		(void) (*target->stopFunction)((void *) target);
+	}
+}
+
+
+/*
  * service_stop_other_subprocesses sends the QUIT signal to other known
  * sub-processes when on of does is reported dead.
  */
@@ -386,7 +415,7 @@ service_stop_other_subprocesses(pid_t pid, Service services[], int serviceCount)
  *
  * That's used when we have received a signal already (asked_to_stop ||
  * asked_to_stop_fast) and our sub-processes are still running after a while.
- * It suggest that only the leader process was signaled rather than all the
+ * It suggests that only the leader process was signaled rather than all the
  * group.
  */
 static bool

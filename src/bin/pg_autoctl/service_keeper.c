@@ -169,8 +169,7 @@ service_keeper_runprogram(Keeper *keeper)
 	args[argsIndex++] = "node-active";
 	args[argsIndex++] = "--pgdata";
 	args[argsIndex++] = pgdata;
-
-	/* args[argsIndex++] = logLevelToString(log_get_level()); */
+	args[argsIndex++] = logLevelToString(log_get_level());
 	args[argsIndex] = NULL;
 
 	/* we do not want to call setsid() when running this program. */
@@ -494,7 +493,7 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		}
 	}
 
-	return service_stop(keeper->config.pathnames.pid);
+	return true;
 }
 
 
