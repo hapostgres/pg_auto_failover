@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "bb98f687d4d359a36c120b9eb21c15c28fd36a17fa11318c724fa88fe2d9eff4"
+            "sha256": "681562b562f0e261a2e8583764a35ef9366c840d63146013417df0650eff83d6"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -63,10 +63,10 @@
         },
         "pyroute2": {
             "hashes": [
-                "sha256:05e959f1a89d715158b91fe83b67946a4441e5e098cc225f4df78a3765ac4af2"
+                "sha256:79f7b4286be773c46914df0201dabaf92717a9c06e341e0c420603b2dd31c6bf"
             ],
             "index": "pypi",
-            "version": "==0.5.11"
+            "version": "==0.5.3"
         }
     },
     "develop": {}
