@@ -568,7 +568,7 @@ class DataNode(PGNode):
         if run:
             self.pg_autoctl.run(loglevel=loglevel)
         else:
-            self.pg_autoctl.execute("pg_autoctl create")
+            return self.pg_autoctl.execute("pg_autoctl create")
 
     def destroy(self):
         """

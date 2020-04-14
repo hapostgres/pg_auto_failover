@@ -18,12 +18,14 @@ def test_000_create_monitor():
     global monitor
     monitor = cluster.create_monitor("/tmp/create-run/monitor")
     monitor.run()
+    monitor.wait_until_pg_is_running()
 
 def test_001_init_primary():
     global node1
     node1 = cluster.create_datanode("/tmp/create-run/node1")
-    node1.create(run = True)
+    node1.create(run=True)
     assert node1.wait_until_state(target_state="single")
+    node1.wait_until_pg_is_running()
 
 def test_002_create_t1():
     node1.run_sql_query("CREATE TABLE t1(a int)")
@@ -32,9 +34,9 @@ def test_002_create_t1():
 def test_003_init_secondary():
     global node2
     node2 = cluster.create_datanode("/tmp/create-run/node2")
-    node2.create(run = True)
-    assert node2.wait_until_state(target_state="secondary")
-    assert node1.wait_until_state(target_state="primary")
+    node2.create(run=True)
+    assert node2.wait_until_state(target_state="secondary", other_node=node1)
+    assert node1.wait_until_state(target_state="primary", other_node=node2)
 
 def test_004_read_from_secondary():
     results = node2.run_sql_query("SELECT * FROM t1")
@@ -48,9 +50,9 @@ def test_005_maintenance():
     node2.run()
     node2.disable_maintenance()
     assert node2.wait_until_pg_is_running()
-    assert node2.wait_until_pg_is_running()
-    assert node2.wait_until_state(target_state="secondary")
-    assert node1.wait_until_state(target_state="primary")
+    assert node1.wait_until_pg_is_running()
+    assert node2.wait_until_state(target_state="secondary", other_node=node1)
+    assert node1.wait_until_state(target_state="primary", other_node=node2)
 
 def test_006_fail_primary():
     node1.fail()
@@ -59,10 +61,11 @@ def test_006_fail_primary():
 def test_007_start_node1_again():
     print("\n%s" % node1.get_events_str())
     node1.create(run = True)
-    assert node2.wait_until_state(target_state="primary")
-    assert node1.wait_until_state(target_state="secondary")
+    assert node2.wait_until_state(target_state="primary", other_node=node1)
+    assert node1.wait_until_state(target_state="secondary", other_node=node2)
 
 def test_008_read_from_new_secondary():
+    node1.wait_until_pg_is_running()
     results = node1.run_sql_query("SELECT * FROM t1 ORDER BY a")
     assert results == [(1,), (2,), (3,)]
 

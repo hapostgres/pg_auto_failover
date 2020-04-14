@@ -61,7 +61,7 @@ def test_001_init_primary():
     assert node1.wait_until_state(target_state="single")
     check_ssl_files(node1)
     check_ssl_ciphers(node1)
-
+    node1.wait_until_pg_is_running()
 
 def test_002_create_t1():
     node1.run_sql_query("CREATE TABLE t1(a int)")
