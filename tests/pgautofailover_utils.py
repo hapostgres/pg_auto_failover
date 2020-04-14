@@ -188,7 +188,7 @@ class PGNode:
 
         return dsn
 
-    def run(self, env={}, wait_for_pg=True):
+    def run(self, env={}):
         """
         Runs "pg_autoctl run"
         """
