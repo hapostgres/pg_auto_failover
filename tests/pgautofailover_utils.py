@@ -494,7 +494,7 @@ class PGNode:
             out, err = command.execute("show uri", 'show', 'uri')
         return out
 
-    def detailed_message(self, error_msg, other_node=None):
+    def detailed_error_message(self, error_msg, other_node=None):
         events = self.get_events_str()
         error_msg += f"MONITOR EVENTS:\n{events}\n"
 
@@ -515,29 +515,6 @@ class PGNode:
             pglogs = other_node.get_postgres_logs()
             error_msg += f"POSTGRES LOGS FOR OTHER NODE:\n{pglogs}\n"
         return error_msg
-
-
-    def detailed_exception(self, error_msg, other_node=None):
-        events = self.get_events_str()
-        error_msg += f"MONITOR EVENTS:\n{events}\n"
-
-        if self.running():
-            out, err = self.stop_pg_autoctl()
-            error_msg += f"STDOUT OF PG_AUTOCTL FOR MAIN NODE:\n{out}\n"
-            error_msg += f"STDERR OF PG_AUTOCTL FOR MAIN NODE:\n{err}\n"
-
-        pglogs = self.get_postgres_logs()
-        error_msg += f"POSTGRES LOGS FOR MAIN NODE:\n{pglogs}\n"
-
-        if other_node:
-            if other_node.running():
-                out, err = other_node.stop_pg_autoctl()
-                error_msg += f"STDOUT OF PG_AUTOCTL FOR OTHER NODE:\n{out}\n"
-                error_msg += f"STDERR OF PG_AUTOCTL FOR OTHER NODE:\n{err}\n"
-
-            pglogs = other_node.get_postgres_logs()
-            error_msg += f"POSTGRES LOGS FOR OTHER NODE:\n{pglogs}\n"
-        return Exception(error_msg)
 
 
 
@@ -680,7 +657,7 @@ class DataNode(PGNode):
               (self.datadir, target_state, timeout))
         error_msg = (f"{self.datadir} failed to reach {target_state} "
                      f"after {timeout} seconds\n")
-        raise self.detailed_exception(error_msg)
+        raise Exception(self.detailed_error_message(error_msg, other_node=other_node))
 
     def get_state(self):
         """
@@ -1118,11 +1095,11 @@ class PGAutoCtl():
                                      out, err))
                 return out, err
 
-            raise self.pgnode.detailed_exception(
-                "%s timed out after %d seconds.\n%s\n" %
-                (name, timeout, " ".join(self.command)),
-                other_node=other_node
-            )
+            string_command = " ".join(self.command)
+            raise Exception(self.pgnode.detailed_error_message(
+                f"{name} timed out after {timeout} seconds.\n{string_command}\n",
+                other_node=other_node,
+            ))
 
     def stop(self):
         """
