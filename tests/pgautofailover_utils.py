@@ -1121,10 +1121,6 @@ class PGAutoCtl():
                                      out, err))
                 return out, err
 
-            # we already spent our allocated waiting time, just kill the process
-            proc.kill()
-            proc.wait()
-
             raise self.pgnode.detailed_exception(
                 "%s timed out after %d seconds.\n%s\n" %
                 (name, timeout, " ".join(self.command)),
