@@ -1,6 +1,4 @@
 import pgautofailover_utils as pgautofailover
-from nose.tools import *
-import time
 import os.path
 
 cluster = None

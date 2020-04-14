@@ -1,5 +1,4 @@
 import pgautofailover_utils as pgautofailover
-from nose.tools import *
 
 import subprocess
 import os, os.path, time, shutil
@@ -41,7 +40,7 @@ def test_001_init_primary():
     p = subprocess.Popen(["sudo", "-E", '-u', os.getenv("USER"),
                           'env', 'PATH=' + os.getenv("PATH"),
                           "mkdir", "-p", "/tmp/socks/node1"])
-    assert(p.wait() == 0)
+    assert(p.wait(timeout=pgautofailover.COMMAND_TIMEOUT) == 0)
 
     os.environ["PG_REGRESS_SOCK_DIR"] = "/tmp/socks/node1"
 
