@@ -15,12 +15,16 @@ BRIDGE_NF_CALL_IPTABLES = "/proc/sys/net/bridge/bridge-nf-call-iptables"
 
 @contextmanager
 def managed_nspopen(*args, **kwds):
-    # Code to acquire resource, e.g.:
     proc = NSPopen(*args, **kwds)
     try:
         yield proc
     finally:
-        # Code to release resource, e.g.:
+        if proc.poll() is None:
+            # send SIGKILL to the process and wait for it to die if it's still
+            # running
+            proc.kill()
+            proc.communicate()
+        # release proxy process resourecs
         proc.release()
 
 
