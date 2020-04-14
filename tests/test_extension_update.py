@@ -26,6 +26,9 @@ def test_001_update_extension():
 
     cluster.monitor.wait_until_pg_is_running()
 
+    # Wait until extension is installed
+    time.sleep(1)
+
     results = cluster.monitor.run_sql_query(
         """SELECT installed_version
              FROM pg_available_extensions

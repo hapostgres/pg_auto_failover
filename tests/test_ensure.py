@@ -55,6 +55,8 @@ def test_004_demoted():
     print("stopped pg_autoctl and postgres, now waiting for 30s")
     node2.sleep(30)
     node1.run()
+    # We must not wait for PG to run, since otherwise we might miss the demoted
+    # state
 
     assert node1.wait_until_state(target_state="demoted", other_node=node2)
 
