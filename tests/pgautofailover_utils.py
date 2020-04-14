@@ -10,6 +10,7 @@ import datetime as dt
 from enum import Enum
 
 COMMAND_TIMEOUT = network.COMMAND_TIMEOUT
+POLLING_INTERVAL = 0.1
 STATE_CHANGE_TIMEOUT = 90
 PGVERSION = os.getenv("PGVERSION", "11")
 
@@ -366,7 +367,7 @@ class PGNode:
         while wait_until > dt.datetime.now():
             if self.pg_is_running():
                 return True
-            time.sleep(0.1)
+            time.sleep(POLLING_INTERVAL)
 
         print("Postgres is still not running in %s after %d seconds" %
               (self.datadir, timeout))
@@ -644,7 +645,7 @@ class DataNode(PGNode):
 
     def wait_until_state(self, target_state,
                          timeout=STATE_CHANGE_TIMEOUT,
-                         sleep_time=0.1,
+                         sleep_time=POLLING_INTERVAL,
                          other_node=None):
         """
         Waits until this data node reaches the target state, and then returns
