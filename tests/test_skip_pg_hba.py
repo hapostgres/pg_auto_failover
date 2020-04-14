@@ -1,5 +1,4 @@
 import pgautofailover_utils as pgautofailover
-from nose.tools import *
 
 import subprocess
 import os, os.path, time, shutil
@@ -19,9 +18,6 @@ def test_000_create_monitor():
     monitor = cluster.create_monitor("/tmp/skip/monitor", authMethod="skip")
     monitor.wait_until_pg_is_running()
 
-    # Wait a little bit more to make sure the test passes
-    time.sleep(1)
-
     with open(os.path.join("/tmp/skip/monitor", "pg_hba.conf"), 'a') as hba:
         hba.write("host all all %s trust\n" % cluster.networkSubnet)
 
@@ -29,7 +25,6 @@ def test_000_create_monitor():
 
 def test_001_init_primary():
     global node1
-    global node1_path
 
     print()
     node1_path = cluster.pg_createcluster("node1")
