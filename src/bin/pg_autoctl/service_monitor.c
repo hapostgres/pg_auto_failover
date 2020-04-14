@@ -60,14 +60,7 @@ start_monitor(Monitor *monitor)
 	/* initialize our local Postgres instance representation */
 	(void) local_postgres_init(&postgres, pgSetup);
 
-	if (!service_start(subprocesses, subprocessesCount, config->pathnames.pid))
-	{
-		/* errors have already been logged */
-		return false;
-	}
-
-	/* we only get there when the supervisor exited successfully (SIGTERM) */
-	return true;
+	return service_start(subprocesses, subprocessesCount, config->pathnames.pid);
 }
 
 
@@ -98,22 +91,12 @@ service_monitor_start(void *context, pid_t *pid)
 
 		case 0:
 		{
-			/* fork succeeded, in child */
+			/* here we call execv() so we never get back */
 			(void) service_monitor_runprogram(monitor);
 
-			/*
-			 * When the "main" function for the child process is over, it's the
-			 * end of our execution thread. Don't get back to the caller.
-			 */
-			if (asked_to_stop || asked_to_stop_fast)
-			{
-				exit(EXIT_CODE_QUIT);
-			}
-			else
-			{
-				/* something went wrong (e.g. broken pipe) */
-				exit(EXIT_CODE_INTERNAL_ERROR);
-			}
+			/* unexpected */
+			log_fatal("BUG: returned from service_keeper_runprogram()");
+			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 
 		default:

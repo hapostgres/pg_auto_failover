@@ -63,24 +63,15 @@ service_postgres_start(void *context, pid_t *pid)
 
 			log_trace("service_postgres_start: EXEC postgres");
 
-			/* exec the postgres binary directly, as a sub-process */
+			/* execv() the postgres binary directly, as a sub-process */
 			(void) pg_ctl_postgres(pgSetup->pg_ctl,
 								   pgSetup->pgdata,
 								   pgSetup->pgport,
 								   pgSetup->listen_addresses);
 
-			if (asked_to_stop || asked_to_stop_fast)
-			{
-				exit(EXIT_CODE_QUIT);
-			}
-			else
-			{
-				/*
-				 * Postgres was stopped by someone else, maybe an admin doing
-				 * pg_ctl stop to test our software, or maybe something else.
-				 */
-				exit(EXIT_CODE_INTERNAL_ERROR);
-			}
+			/* unexpected */
+			log_fatal("BUG: returned from service_keeper_runprogram()");
+			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 
 		default:

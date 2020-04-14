@@ -124,25 +124,16 @@ service_monitor_init_start(void *context, pid_t *pid)
 
 			if (createAndRun)
 			{
+				/* here we call execv() so we never get back */
 				(void) service_monitor_runprogram(monitor);
-			}
-			else
-			{
-				exit(EXIT_CODE_QUIT);
-			}
 
-			/*
-			 * When the "main" function for the child process is over, it's the
-			 * end of our execution thread. Don't get back to the caller.
-			 */
-			if (asked_to_stop || asked_to_stop_fast)
-			{
-				exit(EXIT_CODE_QUIT);
+				/* unexpected */
+				log_fatal("BUG: returned from service_keeper_runprogram()");
+				exit(EXIT_CODE_INTERNAL_ERROR);
 			}
 			else
 			{
-				/* something went wrong (e.g. broken pipe) */
-				exit(EXIT_CODE_INTERNAL_ERROR);
+				exit(EXIT_CODE_QUIT);
 			}
 		}
 

@@ -40,6 +40,7 @@ typedef struct Service
 	void *context;             /* Service Context (Monitor or Keeper struct) */
 	int retries;
 	uint64_t startTime;
+	uint64_t stopTime;
 } Service;
 
 bool service_start(Service services[], int serviceCount, const char *pidfile);

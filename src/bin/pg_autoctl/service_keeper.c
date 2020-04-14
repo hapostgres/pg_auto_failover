@@ -70,14 +70,7 @@ start_keeper(Keeper *keeper)
 
 	int subprocessesCount = sizeof(subprocesses) / sizeof(subprocesses[0]);
 
-	if (!service_start(subprocesses, subprocessesCount, pidfile))
-	{
-		/* errors have already been logged */
-		return false;
-	}
-
-	/* we only get there when the supervisor exited successfully (SIGTERM) */
-	return true;
+	return service_start(subprocesses, subprocessesCount, pidfile);
 }
 
 
@@ -108,21 +101,12 @@ service_keeper_start(void *context, pid_t *pid)
 
 		case 0:
 		{
+			/* here we call execv() so we never get back */
 			(void) service_keeper_runprogram(keeper);
 
-			/*
-			 * When the "main" function for the child process is over, it's the
-			 * end of our execution thread. Don't get back to the caller.
-			 */
-			if (asked_to_stop || asked_to_stop_fast)
-			{
-				exit(EXIT_CODE_QUIT);
-			}
-			else
-			{
-				/* something went wrong (e.g. broken pipe) */
-				exit(EXIT_CODE_INTERNAL_ERROR);
-			}
+			/* unexpected */
+			log_fatal("BUG: returned from service_keeper_runprogram()");
+			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 
 		default:

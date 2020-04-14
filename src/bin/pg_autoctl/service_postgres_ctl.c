@@ -68,7 +68,12 @@ service_postgres_ctl_start(void *context, pid_t *pid)
 
 		case 0:
 		{
+			/* here we call execv() so we never get back */
 			(void) service_postgres_ctl_runprogram();
+
+			/* unexpected */
+			log_fatal("BUG: returned from service_keeper_runprogram()");
+			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 
 		default:

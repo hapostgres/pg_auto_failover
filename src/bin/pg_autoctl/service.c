@@ -28,8 +28,37 @@
 #include "signals.h"
 #include "string_utils.h"
 
+/*
+ * Supervisor restart strategy.
+ *
+ * The idea is to restart processes that have failed, so that we can stay
+ * available without external intervention. Sometimes though if the
+ * configuration is wrong or the data directory damaged beyond repair or for
+ * some reasons, the service can't be restarted.
+ *
+ * There is no magic or heuristic that can help us decide if a failure is
+ * transient or permanent, so we implement the simple thing: we restart our
+ * dead service up to 5 times in a row, and spend up to 10 seconds or retrying,
+ * and stop as soon as one of those conditions is reached.
+ *
+ * This strategy is inspired by http://erlang.org/doc/man/supervisor.html and
+ * http://erlang.org/doc/design_principles/sup_princ.html#maximum-restart-intensity
+ *
+ *    If more than MaxR number of restarts occur in the last MaxT seconds, the
+ *    supervisor terminates all the child processes and then itself. The
+ *    termination reason for the supervisor itself in that case will be
+ *    shutdown.
+ *
+ * SUPERVISOR_SERVICE_MAX_RETRY is MaxR, SUPERVISOR_SERVICE_MAX_TIME is MaxT.
+ *
+ * SUPERVISOR_SERVICE_RUNNING_TIME is the time we allow before considering that
+ * a restart has been successfull, because we implement async process start: we
+ * know that the process has started (fork() succeeds), only to know later that
+ * it failed (waitpid() reports a non-zero exit status).
+ */
 #define SUPERVISOR_SERVICE_MAX_RETRY 5
-#define SUPERVISOR_SERVICE_MAX_TIME 10  /* in seconds */
+#define SUPERVISOR_SERVICE_MAX_TIME 10     /* in seconds */
+#define SUPERVISOR_SERVICE_RUNNING_TIME 60 /* in seconds */
 
 static bool service_init(const char *pidfile, pid_t *pid);
 
@@ -42,6 +71,9 @@ static bool service_find_subprocess(Service services[],
 									int serviceCount,
 									pid_t pid,
 									Service **result);
+
+static void service_reset_subprocesses_restart_counters(Service services[],
+														int serviceCount);
 
 static void service_stop_subprocesses(Service services[], int serviceCount);
 
@@ -61,6 +93,7 @@ service_start(Service services[], int serviceCount, const char *pidfile)
 {
 	pid_t start_pid = 0;
 	int serviceIndex = 0;
+	bool success = true;
 
 	/*
 	 * Create our PID file, or quit now if another pg_autoctl instance is
@@ -125,9 +158,10 @@ service_start(Service services[], int serviceCount, const char *pidfile)
 	{
 		log_fatal("Something went wrong in sub-process supervision, "
 				  "stopping now. See above for details.");
+		success = false;
 	}
 
-	return service_stop(pidfile);
+	return service_stop(pidfile) && success;
 }
 
 
@@ -145,6 +179,7 @@ service_supervisor(pid_t start_pid,
 	int subprocessCount = serviceCount;
 	int stoppingLoopCounter = 0;
 	bool shutdownSequenceInProgress = false;
+	bool cleanExit = false;
 
 	/* wait until all subprocesses are done */
 	while (subprocessCount > 0)
@@ -189,6 +224,8 @@ service_supervisor(pid_t start_pid,
 				 */
 				if (asked_to_stop || asked_to_stop_fast)
 				{
+					cleanExit = true;
+
 					/*
 					 * Stop all the services.
 					 */
@@ -243,7 +280,18 @@ service_supervisor(pid_t start_pid,
 						}
 					}
 				}
-				pg_usleep(100 * 1000); /* 100 ms */
+
+				/*
+				 * No stopped or exited children, not asked to stopped.
+				 * Everything is good. Time to check if we should reset some
+				 * retries counters.
+				 */
+				else
+				{
+					(void) service_reset_subprocesses_restart_counters(
+						services,
+						serviceCount);
+				}
 				break;
 			}
 
@@ -254,6 +302,7 @@ service_supervisor(pid_t start_pid,
 				Service *dead = NULL;
 				uint64_t now = time(NULL);
 
+				/* map the dead child pid to the known dead internal service */
 				if (!service_find_subprocess(services, serviceCount, pid, &dead))
 				{
 					log_error("Unknown subprocess died with pid %d", pid);
@@ -263,12 +312,32 @@ service_supervisor(pid_t start_pid,
 				/* one child process is no more */
 				--subprocessCount;
 
+				/*
+				 * One child process has terminated at least once now. Time to
+				 * update our restart strategy counters.
+				 */
+				if (dead->stopTime == 0)
+				{
+					dead->stopTime = now;
+				}
+
+				/*
+				 * One child process has terminated. If it terminated and
+				 * returned 0 as its exit status, then we consider that our job
+				 * is done here and cleanly exit.
+				 *
+				 * Before we exit though, we need to stop the other running
+				 * services.
+				 */
 				if (returnCode == 0)
 				{
+					cleanExit = true;
+
 					log_info("pg_autoctl service %s has finished, "
 							 "it was running with pid %d.",
 							 dead->name, dead->pid);
 
+					/* only stop other services once */
 					if (!shutdownSequenceInProgress)
 					{
 						shutdownSequenceInProgress = true;
@@ -278,8 +347,16 @@ service_supervisor(pid_t start_pid,
 															   serviceCount);
 					}
 				}
+
+				/*
+				 * One chile process has terminated, with an erroneous exit
+				 * status, and we've already tried and restarted the process 5
+				 * times or tried for more than 20s. Time to give control back
+				 * to the operator, or maybe systemd, or maybe a container
+				 * orchestration facility.
+				 */
 				else if (dead->retries >= SUPERVISOR_SERVICE_MAX_RETRY ||
-						 (now - dead->startTime) >= SUPERVISOR_SERVICE_MAX_TIME)
+						 (now - dead->stopTime) >= SUPERVISOR_SERVICE_MAX_TIME)
 				{
 					log_error("pg_autoctl service %s %s with exit status %d",
 							  dead->name, verb, returnCode);
@@ -291,11 +368,20 @@ service_supervisor(pid_t start_pid,
 							  dead->retries,
 							  (int) (now - dead->startTime));
 
+					/* avoid calling the stopFunction again and again */
 					shutdownSequenceInProgress = true;
 					(void) service_stop_other_subprocesses(dead->pid,
 														   services,
 														   serviceCount);
 				}
+
+				/*
+				 * One child process has terminated, and with an erroneous exit
+				 * status. We're concerned, of course. We'd rather ensure our
+				 * services are fine, so we're applying our restart strategy:
+				 * try to restart the service up to 5 times or 20s, whichever
+				 * comes first.
+				 */
 				else
 				{
 					bool restarted = false;
@@ -303,6 +389,12 @@ service_supervisor(pid_t start_pid,
 					log_error("pg_autoctl service %s %s with exit status %d",
 							  dead->name, verb, returnCode);
 
+					/*
+					 * Update our restart strategy counters. Well only the
+					 * count of retries, we want to keep our stopTime as it is
+					 * so as to know that we've been trying to restart 4 times
+					 * in 10s. It's not 10s each time, it's 10s total.
+					 */
 					dead->retries += 1;
 
 					log_info("Restarting pg_autoctl service %s, "
@@ -310,12 +402,19 @@ service_supervisor(pid_t start_pid,
 							 dead->name,
 							 dead->retries,
 							 dead->retries == 1 ? "" : "s",
-							 (int) (now - dead->startTime));
+							 (int) (now - dead->stopTime));
 
 					restarted =
 						(*dead->startFunction)(dead->context, &(dead->pid));
 
-					if (!restarted)
+					if (restarted)
+					{
+						/* one child process has joined */
+						++subprocessCount;
+
+						dead->startTime = now;
+					}
+					else
 					{
 						log_fatal("Failed to restart service %s", dead->name);
 
@@ -323,17 +422,18 @@ service_supervisor(pid_t start_pid,
 															   services,
 															   serviceCount);
 					}
-
-					/* one child process has joined */
-					++subprocessCount;
 				}
 
 				break;
 			}
 		}
+
+		/* avoid buzy looping on waitpid(WNOHANG) */
+		pg_usleep(100 * 1000); /* 100 ms */
 	}
 
-	return true;
+	/* we track in the main loop if it's a cleanExit or not */
+	return cleanExit;
 }
 
 
@@ -359,6 +459,34 @@ service_find_subprocess(Service services[],
 	}
 
 	return false;
+}
+
+
+/*
+ * service_reset_subprocesses_restart_counters loops over known services and
+ * reset the retries count and stopTime of services that have been known
+ * running for more than a minute (SUPERVISOR_SERVICE_RUNNING_TIME is 60s).
+ */
+static void
+service_reset_subprocesses_restart_counters(Service services[],
+											int serviceCount)
+{
+	uint64_t now = time(NULL);
+	int serviceIndex = 0;
+
+	for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
+	{
+		Service *target = &(services[serviceIndex]);
+
+		if (target->stopTime > 0)
+		{
+			if ((now - target->startTime) > SUPERVISOR_SERVICE_RUNNING_TIME)
+			{
+				target->retries = 0;
+				target->stopTime = 0;
+			}
+		}
+	}
 }
 
 
