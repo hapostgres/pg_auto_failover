@@ -9,7 +9,7 @@ import subprocess
 import datetime as dt
 from enum import Enum
 
-COMMAND_TIMEOUT = 60
+COMMAND_TIMEOUT = network.COMMAND_TIMEOUT
 STATE_CHANGE_TIMEOUT = 90
 PGVERSION = os.getenv("PGVERSION", "11")
 
@@ -215,7 +215,6 @@ class PGNode:
         else:
             time.sleep(secs)
 
-
     def run_sql_query(self, query, *args):
         """
         Runs the given sql query with the given arguments in this postgres node
@@ -245,10 +244,9 @@ class PGNode:
         passwd_command = [shutil.which('psql'),
                           '-d', self.database,
                           '-c', alter_user_set_passwd_command]
-        with self.vnode.run(passwd_command) as passwd_proc:
-            wait_or_timeout_proc(passwd_proc,
-                                 name="user passwd",
-                                 timeout=COMMAND_TIMEOUT)
+        self.vnode.wait_or_timeout_command(passwd_command,
+                                           name="user passwd",
+                                           timeout=COMMAND_TIMEOUT)
         self.authenticatedUsers[username] = password
 
     def stop_pg_autoctl(self):
@@ -1006,10 +1004,9 @@ class MonitorNode(PGNode):
             else:
                 formation_command += ['--disable-secondary']
 
-        with self.vnode.run(formation_command) as formation_proc:
-            wait_or_timeout_proc(formation_proc,
-                                 name="create formation",
-                                 timeout=COMMAND_TIMEOUT)
+        self.vnode.wait_or_timeout_command(formation_command,
+                                           name="create formation",
+                                           timeout=COMMAND_TIMEOUT)
 
     def enable(self, feature, formation='default'):
         """
@@ -1045,10 +1042,9 @@ class MonitorNode(PGNode):
         failover_command = [shutil.which('psql'),
                             '-d', self.database,
                             '-c', failover_commmand_text]
-        with self.vnode.run(failover_command) as failover_proc:
-            wait_or_timeout_proc(failover_proc,
-                                 name="manual failover",
-                                 timeout=COMMAND_TIMEOUT)
+        self.vnode.wait_or_timeout_command(failover_command,
+                                           name="manual failover",
+                                           timeout=COMMAND_TIMEOUT)
 
     def print_state(self, formation="default"):
         print("pg_autoctl show state --pgdata %s" % self.datadir)
@@ -1197,20 +1193,3 @@ class PGAutoCtl():
             self.command += pgdata
 
         return self.command
-
-
-def wait_or_timeout_proc(proc, name, timeout):
-    """
-    Waits for command to exit successfully. If it exits with error or it timeouts,
-    raises an execption with stdout and stderr streams of the process.
-    """
-    try:
-        out, err = proc.communicate(timeout=COMMAND_TIMEOUT)
-        if proc.returncode > 0:
-            raise Exception("%s failed, out: %s\n, err: %s" % (name, out, err))
-        return out, err
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        out, err = proc.communicate()
-        raise Exception("%s timed out after %d seconds. out: %s\n, err: %s" \
-                        % (name, timeout, out, err))
