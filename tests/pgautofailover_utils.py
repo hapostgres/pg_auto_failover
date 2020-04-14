@@ -101,11 +101,7 @@ class Cluster:
 
         print("%s" % " ".join(create_command))
 
-        with vnode.run(create_command) as create_proc:
-            out, err = create_proc.communicate(timeout=COMMAND_TIMEOUT)
-            if create_proc.returncode > 0:
-                raise Exception("pg_createcluster failed, out: %s\n, err: %s" %
-                                (out, err))
+        vnode.run_and_wait(create_command, "pg_createcluster")
 
         abspath = os.path.join("/var/lib/postgresql/", PGVERSION, datadir)
 
@@ -114,12 +110,7 @@ class Cluster:
                          "/var/lib/postgresql/%s/backup" % PGVERSION]
 
         print("%s" % " ".join(chmod_command))
-
-        with vnode.run(chmod_command) as chmod_proc:
-            out, err = chmod_proc.communicate(timeout=COMMAND_TIMEOUT)
-            if chmod_proc.returncode > 0:
-                raise Exception("chmod failed, out: %s\n, err: %s" %
-                                (out, err))
+        vnode.run_and_wait(chmod_command, "chmod")
 
         return abspath
 
