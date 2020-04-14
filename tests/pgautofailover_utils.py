@@ -352,9 +352,15 @@ class PGNode:
         Returns true when Postgres is running. We use pg_ctl status.
         """
         command = PGAutoCtl(self.vnode, self.datadir)
-        out, err, ret = command.execute("pgsetup ready",
-                                        'do', 'pgsetup', 'ready', '-vvv')
-        return ret == 0
+
+        try:
+            command.execute("pgsetup ready", 'do', 'pgsetup', 'ready', '-vvv')
+        except Exception as e:
+            # pg_autoctl uses EXIT_CODE_PGSQL when Postgres is not ready
+            if command.run_proc.returncode == 4:
+                return False
+            raise e
+        return True
 
     def wait_until_pg_is_running(self, timeout=STATE_CHANGE_TIMEOUT):
         """
