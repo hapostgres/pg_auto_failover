@@ -151,23 +151,6 @@ class VirtualNode:
                                stderr=subprocess.PIPE, universal_newlines=True,
                                start_new_session=True)
 
-    def wait_or_timeout_command(self, command, name, timeout):
-        """
-        Waits for command to exit successfully. If it exits with error or it timeouts,
-        raises an execption with stdout and stderr streams of the process.
-        """
-        with self.run(command) as proc:
-            try:
-                out, err = proc.communicate(timeout=COMMAND_TIMEOUT)
-                if proc.returncode > 0:
-                    raise Exception("%s failed, out: %s\n, err: %s" % (name, out, err))
-                return out, err
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                out, err = proc.communicate()
-                raise Exception("%s timed out after %d seconds. out: %s\n, err: %s" \
-                                % (name, timeout, out, err))
-
     def run_unmanaged(self, command, user=os.getenv("USER")):
         """
         Executes a command under the given user from this virtual node. Returns
@@ -183,6 +166,22 @@ class VirtualNode:
                        stderr=subprocess.PIPE, universal_newlines=True,
                        start_new_session=True)
 
+    def run_and_wait(self, command, name, timeout=COMMAND_TIMEOUT):
+        """
+        Waits for command to exit successfully. If it exits with error or it timeouts,
+        raises an execption with stdout and stderr streams of the process.
+        """
+        with self.run(command) as proc:
+            try:
+                out, err = proc.communicate(timeout=timeout)
+                if proc.returncode > 0:
+                    raise Exception("%s failed, out: %s\n, err: %s" % (name, out, err))
+                return out, err
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                out, err = proc.communicate()
+                raise Exception("%s timed out after %d seconds. out: %s\n, err: %s" \
+                                % (name, timeout, out, err))
 
     def _add_namespace(self, name, address, netmaskLength):
         """

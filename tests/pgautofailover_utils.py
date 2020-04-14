@@ -245,9 +245,7 @@ class PGNode:
         passwd_command = [shutil.which('psql'),
                           '-d', self.database,
                           '-c', alter_user_set_passwd_command]
-        self.vnode.wait_or_timeout_command(passwd_command,
-                                           name="user passwd",
-                                           timeout=COMMAND_TIMEOUT)
+        self.vnode.run_and_wait(passwd_command, name="user passwd")
         self.authenticatedUsers[username] = password
 
     def stop_pg_autoctl(self):
@@ -982,9 +980,7 @@ class MonitorNode(PGNode):
             else:
                 formation_command += ['--disable-secondary']
 
-        self.vnode.wait_or_timeout_command(formation_command,
-                                           name="create formation",
-                                           timeout=COMMAND_TIMEOUT)
+        self.vnode.run_and_wait(formation_command, name="create formation")
 
     def enable(self, feature, formation='default'):
         """
@@ -1020,9 +1016,7 @@ class MonitorNode(PGNode):
         failover_command = [shutil.which('psql'),
                             '-d', self.database,
                             '-c', failover_commmand_text]
-        self.vnode.wait_or_timeout_command(failover_command,
-                                           name="manual failover",
-                                           timeout=COMMAND_TIMEOUT)
+        self.vnode.run_and_wait(failover_command, name="manual failover")
 
     def print_state(self, formation="default"):
         print("pg_autoctl show state --pgdata %s" % self.datadir)
