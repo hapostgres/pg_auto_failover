@@ -116,6 +116,7 @@ extern CommandLine perform_commands;
 extern CommandLine service_run_command;
 extern CommandLine service_stop_command;
 extern CommandLine service_reload_command;
+extern CommandLine service_status_command;
 
 /* cli_show.c */
 extern CommandLine show_uri_command;
@@ -178,5 +179,7 @@ bool cli_getopt_accept_ssl_options(SSLCommandLineOptions newSSLOption,
 void cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy);
 
 char * logLevelToString(int logLevel);
+
+bool cli_common_pgsetup_init(ConfigFilePaths *pathnames, PostgresSetup *pgSetup);
 
 #endif  /* CLI_COMMON_H */

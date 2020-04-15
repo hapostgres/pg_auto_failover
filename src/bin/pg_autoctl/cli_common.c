@@ -1388,3 +1388,79 @@ logLevelToString(int logLevel)
 
 	return "";
 }
+
+
+/*
+ * cli_plop prepares a pgSetup instance from either a keeper or a monitor
+ * configuration file.
+ */
+bool
+cli_common_pgsetup_init(ConfigFilePaths *pathnames, PostgresSetup *pgSetup)
+{
+	KeeperConfig kconfig = keeperOptions;
+
+	if (!keeper_config_set_pathnames_from_pgdata(&(kconfig.pathnames),
+												 kconfig.pgSetup.pgdata))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/* copy the pathnames over to the caller */
+	*pathnames = kconfig.pathnames;
+
+	switch (ProbeConfigurationFileRole(kconfig.pathnames.config))
+	{
+		case PG_AUTOCTL_ROLE_MONITOR:
+		{
+			MonitorConfig mconfig = { 0 };
+
+			bool missingPgdataIsOk = true;
+			bool pgIsNotRunningIsOk = true;
+
+			if (!monitor_config_init_from_pgsetup(&mconfig,
+												  &kconfig.pgSetup,
+												  missingPgdataIsOk,
+												  pgIsNotRunningIsOk))
+			{
+				/* errors have already been logged */
+				return false;
+			}
+
+			/* copy the pgSetup from the config to the Local Postgres instance */
+			*pgSetup = mconfig.pgSetup;
+
+			break;
+		}
+
+		case PG_AUTOCTL_ROLE_KEEPER:
+		{
+			bool missingPgdataIsOk = true;
+			bool pgIsNotRunningIsOk = true;
+			bool monitorDisabledIsOk = true;
+
+			if (!keeper_config_read_file(&kconfig,
+										 missingPgdataIsOk,
+										 pgIsNotRunningIsOk,
+										 monitorDisabledIsOk))
+			{
+				/* errors have already been logged */
+				return false;
+			}
+
+			/* copy the pgSetup from the config to the Local Postgres instance */
+			*pgSetup = kconfig.pgSetup;
+
+			break;
+		}
+
+		default:
+		{
+			log_fatal("Unrecognized configuration file \"%s\"",
+					  kconfig.pathnames.config);
+			return false;
+		}
+	}
+
+	return true;
+}

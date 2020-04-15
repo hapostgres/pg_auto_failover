@@ -37,8 +37,9 @@ static void cli_monitor_run(int argc, char **argv);
 
 static int cli_getopt_pgdata_and_mode(int argc, char **argv);
 
-static void cli_service_reload(int argc, char **argv);
 static void cli_service_stop(int argc, char **argv);
+static void cli_service_reload(int argc, char **argv);
+static void cli_service_status(int argc, char **argv);
 
 CommandLine service_run_command =
 	make_command("run",
@@ -65,6 +66,14 @@ CommandLine service_reload_command =
 				 CLI_PGDATA_OPTION,
 				 cli_getopt_pgdata,
 				 cli_service_reload);
+
+CommandLine service_status_command =
+	make_command("status",
+				 "Display the current status of the pg_autoctl service",
+				 CLI_PGDATA_USAGE,
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
+				 cli_service_status);
 
 
 /*
@@ -193,13 +202,11 @@ cli_service_reload(int argc, char **argv)
 
 	keeper.config = keeperOptions;
 
-	(void) exit_unless_role_is_keeper(&(keeper.config));
-
 	if (read_pidfile(keeper.config.pathnames.pid, &pid))
 	{
 		if (kill(pid, SIGHUP) != 0)
 		{
-			log_error("Failed to send SIGHUP to the keeper's pid %d: %m", pid);
+			log_error("Failed to send SIGHUP to pg_autoctl pid %d: %m", pid);
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 	}
@@ -345,7 +352,7 @@ cli_service_stop(int argc, char **argv)
 	{
 		if (kill(pid, stop_signal) != 0)
 		{
-			log_error("Failed to send %s to the pg_autoctl pid %d: %m",
+			log_error("Failed to send %s to pg_autoctl pid %d: %m",
 					  strsignal(stop_signal), pid);
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
@@ -355,4 +362,90 @@ cli_service_stop(int argc, char **argv)
 		log_fatal("Failed to read the keeper's PID at \"%s\"",
 				  keeper.config.pathnames.pid);
 	}
+}
+
+
+/*
+ * cli_service_status displays the status of the pg_autoctl service and the
+ * Postgres service.
+ */
+static void
+cli_service_status(int argc, char **argv)
+{
+	pid_t pid = 0;
+	Keeper keeper = { 0 };
+	PostgresSetup *pgSetup = &(keeper.config.pgSetup);
+	ConfigFilePaths *pathnames = &(keeper.config.pathnames);
+
+	keeper.config = keeperOptions;
+
+	if (!cli_common_pgsetup_init(pathnames, pgSetup))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (!file_exists(pathnames->pid))
+	{
+		log_info("pg_autoctl pid file \"%s\" does not exists", pathnames->pid);
+
+		if (pg_setup_is_running(pgSetup))
+		{
+			log_fatal("Postgres is running at \"%s\" with pid %d",
+					  pgSetup->pgdata, pgSetup->pidFile.pid);
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+	}
+
+	/* ok now we have a pidfile for pg_autoctl */
+	if (read_pidfile(pathnames->pid, &pid))
+	{
+		if (kill(pid, 0) != 0)
+		{
+			log_error("pg_autoctl pid file contains stale pid %d", pid);
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+	}
+
+	/* and now we know pg_autoctl is running */
+	log_info("pg_autoctl is running with pid %d", pid);
+
+	/* add a word about the Postgres service itself */
+	if (pg_setup_is_ready(pgSetup, false))
+	{
+		log_info("Postgres is serving PGDATA \"%s\" on port %d with pid %d",
+				 pgSetup->pgdata, pgSetup->pgport, pgSetup->pidFile.pid);
+	}
+	else
+	{
+		exit(EXIT_CODE_PGCTL);
+	}
+
+	if (outputJSON)
+	{
+		JSON_Value *js = json_value_init_object();
+		JSON_Value *jsPostgres = json_value_init_object();
+
+		JSON_Value *jsPGAutoCtl = json_value_init_object();
+		JSON_Object *jsobj = json_value_get_object(jsPGAutoCtl);
+
+		JSON_Object *root = json_value_get_object(js);
+
+		/* prepare both JSON objects */
+		json_object_set_number(jsobj, "pid", (double) pid);
+
+		if (!pg_setup_as_json(pgSetup, jsPostgres))
+		{
+			/* can't happen */
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+
+		/* concatenate JSON objects into a container object */
+		json_object_set_value(root, "postgres", jsPostgres);
+		json_object_set_value(root, "pg_autoctl", jsPGAutoCtl);
+
+		(void) cli_pprint_json(js);
+	}
+
+	exit(EXIT_CODE_QUIT);
 }
