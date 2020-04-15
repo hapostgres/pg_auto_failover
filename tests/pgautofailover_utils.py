@@ -7,6 +7,7 @@ import network
 import psycopg2
 import subprocess
 import datetime as dt
+import json
 from enum import Enum
 
 COMMAND_TIMEOUT = network.COMMAND_TIMEOUT
@@ -202,6 +203,17 @@ class PGNode:
         """
         self.pg_autoctl = PGAutoCtl(self)
         self.pg_autoctl.run(loglevel=loglevel)
+
+    def status(self):
+        command = PGAutoCtl(self)
+        out, err, ret = command.execute("status", 'status', '--json')
+        js = json.loads(out)
+        print(
+            "pg_autoctl is running with pid %s and postgres is %s with pid %s" %
+            (js['pg_autoctl']['pid'],
+             js['postgres']['postmaster']['status'],
+             js['postgres']['pid']))
+        return ret == 0
 
     def running(self):
         return self.pg_autoctl and self.pg_autoctl.run_proc

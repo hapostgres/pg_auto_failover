@@ -29,11 +29,11 @@ def teardown_module():
 
 
 def check_ssl_files(node):
-    for setting, f in [("ssl_key_file", "server.key"), ("ssl_cert_file", "server.crt")]:
+    for setting, f in [("ssl_key_file", "server.key"),
+                       ("ssl_cert_file", "server.crt")]:
         file_path = os.path.join(node.datadir, f)
         assert os.path.isfile(file_path)
         eq_(node.pg_config_get(setting), file_path)
-
 
 def check_ssl_ciphers(node):
     eq_(node.pg_config_get("ssl_ciphers"), expected_ciphers)
@@ -45,6 +45,8 @@ def test_000_create_monitor():
     monitor.run()
     assert monitor.config_get("ssl.sslmode") == "require"
     monitor.wait_until_pg_is_running()
+    monitor.status()
+    #print("%s" % monitor.run_sql_query("select version()"))
     check_ssl_files(monitor)
     # TODO: Uncomment when there can be super user access to the monitor
     # check_ssl_ciphers(node1)
@@ -59,6 +61,7 @@ def test_001_init_primary():
 
     node1.run()
     assert node1.wait_until_state(target_state="single")
+    node1.wait_until_pg_is_running()
     check_ssl_files(node1)
     check_ssl_ciphers(node1)
     node1.wait_until_pg_is_running()
@@ -80,6 +83,7 @@ def test_003_init_secondary():
     assert node2.wait_until_state(target_state="secondary", other_node=node1)
     assert node1.wait_until_state(target_state="primary", other_node=node2)
 
+    node2.wait_until_pg_is_running()
     check_ssl_files(node2)
     check_ssl_ciphers(node2)
 
