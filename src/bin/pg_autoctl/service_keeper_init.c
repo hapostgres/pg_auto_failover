@@ -49,6 +49,7 @@ service_keeper_init(Keeper *keeper)
 			0,
 			&service_postgres_ctl_start,
 			&service_postgres_ctl_stop,
+			&service_postgres_ctl_reload,
 			(void *) keeper
 		},
 		{
@@ -56,6 +57,7 @@ service_keeper_init(Keeper *keeper)
 			0,
 			&service_keeper_init_start,
 			&service_keeper_init_stop,
+			&service_keeper_reload,
 			(void *) keeper
 		}
 	};

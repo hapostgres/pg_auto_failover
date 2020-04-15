@@ -58,7 +58,7 @@
  */
 #define SUPERVISOR_SERVICE_MAX_RETRY 5
 #define SUPERVISOR_SERVICE_MAX_TIME 10     /* in seconds */
-#define SUPERVISOR_SERVICE_RUNNING_TIME 60 /* in seconds */
+#define SUPERVISOR_SERVICE_RUNNING_TIME 15 /* in seconds */
 
 static bool service_init(const char *pidfile, pid_t *pid);
 
@@ -189,6 +189,24 @@ service_supervisor(pid_t start_pid,
 
 		/* Check that we still own our PID file, or quit now */
 		(void) check_pidfile(pidfile, start_pid);
+
+		/* If necessary, now is a good time to reload services */
+		if (asked_to_reload)
+		{
+			int serviceIndex = 0;
+
+			for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
+			{
+				Service *service = &(services[serviceIndex]);
+
+				log_debug("Reloading pg_autoctl %s service", service->name);
+
+				(void) (*service->reloadFunction)(service);
+			}
+
+			/* reset our signal handling facility */
+			asked_to_reload = 0;
+		}
 
 		/* ignore errors */
 		pid = waitpid(-1, &status, WNOHANG);
@@ -349,7 +367,7 @@ service_supervisor(pid_t start_pid,
 				}
 
 				/*
-				 * One chile process has terminated, with an erroneous exit
+				 * One child process has terminated, with an erroneous exit
 				 * status, and we've already tried and restarted the process 5
 				 * times or tried for more than 20s. Time to give control back
 				 * to the operator, or maybe systemd, or maybe a container
@@ -386,23 +404,31 @@ service_supervisor(pid_t start_pid,
 				{
 					bool restarted = false;
 
-					log_error("pg_autoctl service %s %s with exit status %d",
-							  dead->name, verb, returnCode);
-
 					/*
 					 * Update our restart strategy counters. Well only the
 					 * count of retries, we want to keep our stopTime as it is
 					 * so as to know that we've been trying to restart 4 times
 					 * in 10s. It's not 10s each time, it's 10s total.
+					 *
+					 * Some services when asked to reload implement an "online
+					 * restart": the supervisor is expected to restart the
+					 * service from the (maybe new) on-disk program.
 					 */
-					dead->retries += 1;
+					if (returnCode != EXIT_CODE_RELOAD)
+					{
+						log_error(
+							"pg_autoctl service %s %s with exit status %d",
+							dead->name, verb, returnCode);
 
-					log_info("Restarting pg_autoctl service %s, "
-							 "retrying (%d time%s in %d seconds)",
-							 dead->name,
-							 dead->retries,
-							 dead->retries == 1 ? "" : "s",
-							 (int) (now - dead->stopTime));
+						dead->retries += 1;
+
+						log_info("Restarting pg_autoctl service %s, "
+								 "retrying (%d time%s in %d seconds)",
+								 dead->name,
+								 dead->retries,
+								 dead->retries == 1 ? "" : "s",
+								 (int) (now - dead->stopTime));
+					}
 
 					restarted =
 						(*dead->startFunction)(dead->context, &(dead->pid));

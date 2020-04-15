@@ -27,9 +27,13 @@
  * stop functions get passed a context that is a pointer to the Service struct
  * definition of the service being asked to stop, and we use a void * data type
  * here to break out of a mutual recursive definition.
+ *
+ * reload functions get passed a context that is a pointer to the Service
+ * struct definition of the service being asked to stop.
  */
 typedef bool (*ServiceStartFunction)(void *context, pid_t *pid);
 typedef bool (*ServiceStopFunction)(void *context);
+typedef void (*ServiceReloadFunction)(void *context);
 
 typedef struct Service
 {
@@ -37,6 +41,7 @@ typedef struct Service
 	pid_t pid;                          /* Service PID */
 	ServiceStartFunction startFunction; /* how to re-start the service */
 	ServiceStopFunction stopFunction;   /* how to stop the service */
+	ServiceReloadFunction reloadFunction; /* how to reload the service */
 	void *context;             /* Service Context (Monitor or Keeper struct) */
 	int retries;
 	uint64_t startTime;

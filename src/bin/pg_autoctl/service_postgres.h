@@ -19,5 +19,6 @@ extern int countPostgresStart;
 
 bool service_postgres_start(void *context, pid_t *pid);
 bool service_postgres_stop(void *context);
+void service_postgres_reload(void *context);
 
 #endif /* SERVICE_POSTGRES_H */

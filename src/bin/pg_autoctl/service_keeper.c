@@ -38,7 +38,6 @@ static bool keepRunning = true;
 static bool is_network_healthy(Keeper *keeper);
 static bool in_network_partition(KeeperStateData *keeperState, uint64_t now,
 								 int networkPartitionTimeout);
-static void reload_configuration(Keeper *keeper);
 
 
 /*
@@ -57,6 +56,7 @@ start_keeper(Keeper *keeper)
 			0,
 			&service_postgres_ctl_start,
 			&service_postgres_ctl_stop,
+			&service_postgres_ctl_reload,
 			(void *) postgres
 		},
 		{
@@ -64,6 +64,7 @@ start_keeper(Keeper *keeper)
 			0,
 			&service_keeper_start,
 			&service_keeper_stop,
+			&service_keeper_reload,
 			(void *) keeper
 		}
 	};
@@ -95,7 +96,7 @@ service_keeper_start(void *context, pid_t *pid)
 	{
 		case -1:
 		{
-			log_error("Failed to fork the node_active process");
+			log_error("Failed to fork the node-active process");
 			return false;
 		}
 
@@ -112,7 +113,7 @@ service_keeper_start(void *context, pid_t *pid)
 		default:
 		{
 			/* fork succeeded, in parent */
-			log_debug("pg_autoctl node_active process started in subprocess %d",
+			log_debug("pg_autoctl node-active process started in subprocess %d",
 					  fpid);
 			*pid = fpid;
 			return true;
@@ -232,14 +233,21 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		 * signaled to us and from where we can immediately exit whatever we're
 		 * doing. It's important to avoid e.g. leaving state.new files behind.
 		 */
-		if (asked_to_reload)
-		{
-			(void) reload_configuration(keeper);
-		}
-
 		if (asked_to_stop)
 		{
 			break;
+		}
+
+		/*
+		 * When asked to reload (SIGHUP) we just quit, and the supervisor is
+		 * going to restart us. It does that by using exec(3), which means it's
+		 * a kind of an "online" restart: the process is started from the
+		 * binary on disk, which might be a new version of pg_autoctl (with bug
+		 * fixes or other improvements).
+		 */
+		if (asked_to_reload)
+		{
+			exit(EXIT_CODE_RELOAD);
 		}
 
 		if (doSleep)
@@ -483,6 +491,25 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 
 
 /*
+ * service_postgres_ctl_reload sends a SIGHUP to the controller process.
+ */
+void
+service_keeper_reload(void *context)
+{
+	Service *service = (Service *) context;
+
+	log_info("Reloading pg_autoctl node-active service [%d]", service->pid);
+
+	if (kill(service->pid, SIGHUP) != 0)
+	{
+		log_error(
+			"Failed to send SIGHUP to pg_autoctl node-active pid %d: %m",
+			service->pid);
+	}
+}
+
+
+/*
  * is_network_healthy returns false if the keeper appears to be in a
  * network partition, which it assumes to be the case if it cannot
  * communicate with neither the monitor, nor the secondary for at least
@@ -550,65 +577,6 @@ in_network_partition(KeeperStateData *keeperState, uint64_t now,
 		   keeperState->last_secondary_contact > 0 &&
 		   networkPartitionTimeout < monitor_contact_lag &&
 		   networkPartitionTimeout < secondary_contact_lag;
-}
-
-
-/*
- * reload_configuration reads the supposedly new configuration file and
- * integrates accepted new values into the current setup.
- */
-static void
-reload_configuration(Keeper *keeper)
-{
-	KeeperConfig *config = &(keeper->config);
-
-	if (file_exists(config->pathnames.config))
-	{
-		KeeperConfig newConfig = { 0 };
-
-		bool missingPgdataIsOk = true;
-		bool pgIsNotRunningIsOk = true;
-		bool monitorDisabledIsOk = false;
-
-		/*
-		 * Set the same configuration and state file as the current config.
-		 */
-		strlcpy(newConfig.pathnames.config, config->pathnames.config, MAXPGPATH);
-		strlcpy(newConfig.pathnames.state, config->pathnames.state, MAXPGPATH);
-
-		if (keeper_config_read_file(&newConfig,
-									missingPgdataIsOk,
-									pgIsNotRunningIsOk,
-									monitorDisabledIsOk) &&
-			keeper_config_accept_new(config, &newConfig))
-		{
-			/*
-			 * The keeper->config changed, not the keeper->postgres, but the
-			 * main loop takes care of updating it at each loop anyway, so we
-			 * don't have to take care of that now.
-			 */
-			log_info("Reloaded the new configuration from \"%s\"",
-					 config->pathnames.config);
-		}
-		else
-		{
-			log_warn("Failed to read configuration file \"%s\", "
-					 "continuing with the same configuration.",
-					 config->pathnames.config);
-		}
-
-		/* we're done the the newConfig now */
-		keeper_config_destroy(&newConfig);
-	}
-	else
-	{
-		log_warn("Configuration file \"%s\" does not exists, "
-				 "continuing with the same configuration.",
-				 config->pathnames.config);
-	}
-
-	/* we're done reloading now. */
-	asked_to_reload = 0;
 }
 
 

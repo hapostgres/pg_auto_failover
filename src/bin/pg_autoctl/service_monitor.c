@@ -44,6 +44,7 @@ start_monitor(Monitor *monitor)
 			0,
 			&service_postgres_ctl_start,
 			&service_postgres_ctl_stop,
+			&service_postgres_ctl_reload,
 			(void *) &postgres
 		},
 		{
@@ -51,6 +52,7 @@ start_monitor(Monitor *monitor)
 			0,
 			&service_monitor_start,
 			&service_monitor_stop,
+			&service_monitor_reload,
 			(void *) monitor
 		}
 	};
@@ -227,6 +229,12 @@ monitor_service_run(Monitor *monitor)
 	 */
 	for (;;)
 	{
+		/* we quit on reload, the supervisor is going to restart us */
+		if (asked_to_reload)
+		{
+			exit(EXIT_CODE_RELOAD);
+		}
+
 		if (asked_to_stop || asked_to_stop_fast)
 		{
 			break;
@@ -283,4 +291,23 @@ service_monitor_stop(void *context)
 		return false;
 	}
 	return true;
+}
+
+
+/*
+ * service_postgres_ctl_reload sends a SIGHUP to the controller process.
+ */
+void
+service_monitor_reload(void *context)
+{
+	Service *service = (Service *) context;
+
+	log_info("Reloading pg_autoctl monitor listener service [%d]", service->pid);
+
+	if (kill(service->pid, SIGHUP) != 0)
+	{
+		log_error(
+			"Failed to send SIGHUP to pg_autoctl monitor listener pid %d: %m",
+			service->pid);
+	}
 }

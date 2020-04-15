@@ -194,6 +194,7 @@ service_postgres_ctl_loop(LocalPostgresServer *postgres)
 		-1,
 		&service_postgres_start,
 		&service_postgres_stop,
+		&service_postgres_reload,
 		(void *) pgSetup
 	};
 
@@ -206,6 +207,14 @@ service_postgres_ctl_loop(LocalPostgresServer *postgres)
 	{
 		pid_t pid;
 		int status;
+
+		/* we might have to reload, pass the signal down */
+		if (asked_to_reload)
+		{
+			(void) service_postgres_reload((void *) &postgresService);
+
+			asked_to_reload = 0;
+		}
 
 		/* that's expected the shutdown sequence from the supervisor */
 		if (asked_to_stop || asked_to_stop_fast)
@@ -359,6 +368,26 @@ service_postgres_ctl_loop(LocalPostgresServer *postgres)
 		}
 
 		pg_usleep(100 * 1000);  /* 100ms */
+	}
+}
+
+
+/*
+ * service_postgres_ctl_reload sends a SIGHUP to the controller process.
+ */
+void
+service_postgres_ctl_reload(void *context)
+{
+	Service *service = (Service *) context;
+
+	log_info("Reloading pg_autoctl postgres controller service [%d]",
+			 service->pid);
+
+	if (kill(service->pid, SIGHUP) != 0)
+	{
+		log_error(
+			"Failed to send SIGHUP to pg_autoctl postgres controller pid %d: %m",
+			service->pid);
 	}
 }
 

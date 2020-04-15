@@ -55,7 +55,6 @@ void
 catch_reload(int sig)
 {
 	asked_to_reload = 1;
-	log_warn("Received signal %s", strsignal(sig));
 	pqsignal(sig, catch_reload);
 }
 

@@ -126,3 +126,20 @@ service_postgres_stop(void *context)
 
 	return true;
 }
+
+
+/*
+ * service_postgres_reload signal Postgres with a SIGHUP
+ */
+void
+service_postgres_reload(void *context)
+{
+	Service *service = (Service *) context;
+
+	log_info("Reloading pg_autoctl postgres service [%d]", service->pid);
+
+	if (kill(service->pid, SIGHUP) != 0)
+	{
+		log_error("Failed to send SIGHUP to Postgres pid %d: %m", service->pid);
+	}
+}

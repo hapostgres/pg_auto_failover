@@ -50,6 +50,7 @@ service_monitor_init(Monitor *monitor)
 			0,
 			&service_postgres_ctl_start,
 			&service_postgres_ctl_stop,
+			&service_postgres_ctl_reload,
 			(void *) &postgres
 		},
 		{
@@ -57,6 +58,7 @@ service_monitor_init(Monitor *monitor)
 			0,
 			&service_monitor_init_start,
 			&service_monitor_stop,
+			&service_monitor_reload,
 			(void *) monitor
 		}
 	};
