@@ -343,9 +343,7 @@ class PGNode:
             command.execute("pgsetup ready", 'do', 'pgsetup', 'ready', '-vvv')
         except Exception as e:
             # pg_autoctl uses EXIT_CODE_PGSQL when Postgres is not ready
-            if command.run_proc.returncode == 4:
-                return False
-            raise e
+            return False
         return True
 
     def wait_until_pg_is_running(self, timeout=STATE_CHANGE_TIMEOUT):
