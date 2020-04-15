@@ -35,7 +35,7 @@ def test_001_custom_single():
 
     monitor.print_state()
 
-    node1.destroy()
+    node1.drop()
 
     # node is stuck in init state, destroy won't remove it from monitor
     # force remove from monitor

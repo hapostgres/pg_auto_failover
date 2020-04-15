@@ -457,7 +457,7 @@ class PGNode:
         """
         Set a configuration parameter to given value
         """
-        command = PGAutoCtl(self.vnode, self.datadir)
+        command = PGAutoCtl(self)
         out, err, ret = command.execute("config get %s" % setting,
                                         'config', 'get', setting)
         return out[:-1]
