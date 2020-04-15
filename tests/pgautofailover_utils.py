@@ -357,12 +357,9 @@ class PGNode:
 
     def fail(self):
         """
-        Simulates a data node failure by terminating the keeper and stopping
-        postgres.
+        Simulates a data node failure by terminating pg_autoctl process.
         """
         self.stop_pg_autoctl()
-        self.stop_postgres()
-
 
     def config_file_path(self):
         """
