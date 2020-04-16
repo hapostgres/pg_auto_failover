@@ -280,3 +280,50 @@ If you have your own HBA provisioning solution, you can include the rules
 needed for pg_auto_failover and then use the ``--skip-pg-hba`` option to the
 ``pg_autoctl create`` commands.
 
+
+Enable SSL connections on an existing setup
+-------------------------------------------
+
+Whether you upgrade pg_auto_failover from a previous version that did not
+have support for the SSL features, or when you started with ``--no-ssl`` and
+later change your mind, it is possible with pg_auto_failover to add SSL
+settings on system that has already been setup without explicit SSL support.
+
+In this section we detail how to upgrade to SSL settings.
+
+Installing Self-Signed certificates on-top of an already existing
+pg_auto_failover setup is done with one of the following pg_autoctl command
+variants, depending if you want self-signed certificates or fully verified
+ssl certificates::
+
+  $ pg_autoctl enable ssl --ssl-self-signed --ssl-mode required
+
+  $ pg_autoctl enable ssl --ssl-ca-file root.crt   \
+                          --ssl-crl-file root.crl  \
+                          --server-crt server.crt  \
+                          --server-key server.key  \
+                          --ssl-mode validate-full
+
+The ``pg_autoctl enable ssl`` command edits the
+``postgresql-auto-failover.conf`` Postgres configuration file to match the
+command line arguments given and enable SSL as instructed, and then updates
+the pg_autoctl configuration.
+
+The HBA settings are not edited, irrespective of the ``--skip-pg-hba`` that
+has been used at creation time. That's because the ``host`` records match
+either SSL or non-SSL connection attempts in Postgres HBA file, so the
+pre-existing setup will continue to work. To enhance the SSL setup, you can
+manually edit the HBA files and change the existing lines from ``host`` to
+``hostssl``.
+
+When updating a node's SSL setup, we connect to the monitor and check if the
+SSL setup has been made there. When that's the case, the monitor URI in the
+pg_autoctl configuration file is not edited for you, because it might be
+using complex local connection options. Please take time to edit your
+connection string to the monitor using::
+
+  $ pg_autoctl config set pg_autoctl.monitor
+
+Before that, you can verify your current configuration with::
+
+  $ pg_autoctl config get pg_autoctl.monitor

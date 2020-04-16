@@ -29,6 +29,14 @@ static void cli_disable_secondary(int argc, char **argv);
 static void cli_enable_maintenance(int argc, char **argv);
 static void cli_disable_maintenance(int argc, char **argv);
 
+static int cli_ssl_getopts(int argc, char **argv);
+static void cli_enable_ssl(int argc, char **argv);
+
+static bool update_ssl_configuration(LocalPostgresServer *postgres,
+									 const char *nodename);
+
+static bool update_monitor_connection_string(KeeperConfig *config);
+
 static CommandLine enable_secondary_command =
 	make_command("secondary",
 				 "Enable secondary nodes on a formation",
@@ -63,9 +71,19 @@ static CommandLine disable_maintenance_command =
 				 cli_getopt_pgdata,
 				 cli_disable_maintenance);
 
+static CommandLine enable_ssl_command =
+	make_command("ssl",
+				 "Enable SSL configuration on this node",
+				 CLI_PGDATA_USAGE,
+				 CLI_PGDATA_OPTION
+				 KEEPER_CLI_SSL_OPTIONS,
+				 cli_ssl_getopts,
+				 cli_enable_ssl);
+
 static CommandLine *enable_subcommands[] = {
 	&enable_secondary_command,
 	&enable_maintenance_command,
+	&enable_ssl_command,
 	NULL
 };
 
@@ -400,5 +418,448 @@ cli_disable_maintenance(int argc, char **argv)
 	{
 		log_error("Failed to wait until the new setting has been applied");
 		exit(EXIT_CODE_MONITOR);
+	}
+}
+
+
+/*
+ * cli_create_monitor_getopts parses the command line options necessary to
+ * initialise a PostgreSQL instance as our monitor.
+ */
+static int
+cli_ssl_getopts(int argc, char **argv)
+{
+	KeeperConfig options = { 0 };
+	int c, option_index = 0, errors = 0;
+	int verboseCount = 0;
+	SSLCommandLineOptions sslCommandLineOptions = SSL_CLI_UNKNOWN;
+
+	static struct option long_options[] = {
+		{ "pgdata", required_argument, NULL, 'D' },
+		{ "version", no_argument, NULL, 'V' },
+		{ "verbose", no_argument, NULL, 'v' },
+		{ "quiet", no_argument, NULL, 'q' },
+		{ "help", no_argument, NULL, 'h' },
+		{ "no-ssl", no_argument, NULL, 'N' },
+		{ "ssl-self-signed", no_argument, NULL, 's' },
+		{ "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG },
+		{ "ssl-ca-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG },
+		{ "ssl-crl-file", required_argument, &ssl_flag, SSL_CRL_FILE_FLAG },
+		{ "server-cert", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG },
+		{ "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG },
+		{ NULL, 0, NULL, 0 }
+	};
+
+	/* hard-coded defaults */
+	options.pgSetup.pgport = pgsetup_get_pgport();
+
+	optind = 0;
+
+	while ((c = getopt_long(argc, argv, "D:VvqhNs",
+							long_options, &option_index)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(options.pgSetup.pgdata, optarg, MAXPGPATH);
+				log_trace("--pgdata %s", options.pgSetup.pgdata);
+				break;
+			}
+
+			case 'V':
+			{
+				/* keeper_cli_print_version prints version and exits. */
+				keeper_cli_print_version(argc, argv);
+				break;
+			}
+
+			case 'v':
+			{
+				++verboseCount;
+				switch (verboseCount)
+				{
+					case 1:
+					{
+						log_set_level(LOG_INFO);
+						break;
+					}
+
+					case 2:
+					{
+						log_set_level(LOG_DEBUG);
+						break;
+					}
+
+					default:
+					{
+						log_set_level(LOG_TRACE);
+						break;
+					}
+				}
+				break;
+			}
+
+			case 'q':
+			{
+				log_set_level(LOG_ERROR);
+				break;
+			}
+
+			case 'h':
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_QUIT);
+				break;
+			}
+
+			case 's':
+			{
+				/* { "ssl-self-signed", no_argument, NULL, 's' }, */
+				if (!cli_getopt_accept_ssl_options(SSL_CLI_SELF_SIGNED,
+												   sslCommandLineOptions))
+				{
+					errors++;
+					break;
+				}
+				sslCommandLineOptions = SSL_CLI_SELF_SIGNED;
+
+				options.pgSetup.ssl.active = 1;
+				options.pgSetup.ssl.createSelfSignedCert = true;
+				log_trace("--ssl-self-signed");
+				break;
+			}
+
+			case 'N':
+			{
+				/* { "no-ssl", no_argument, NULL, 'N' }, */
+				if (!cli_getopt_accept_ssl_options(SSL_CLI_NO_SSL,
+												   sslCommandLineOptions))
+				{
+					errors++;
+					break;
+				}
+				sslCommandLineOptions = SSL_CLI_NO_SSL;
+
+				options.pgSetup.ssl.active = 0;
+				options.pgSetup.ssl.createSelfSignedCert = false;
+				log_trace("--no-ssl");
+				break;
+			}
+
+			/*
+			 * { "ssl-ca-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG }
+			 * { "ssl-crl-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG }
+			 * { "server-crt", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG }
+			 * { "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG }
+			 * { "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG },
+			 */
+			case 0:
+			{
+				if (ssl_flag != SSL_MODE_FLAG)
+				{
+					if (!cli_getopt_accept_ssl_options(SSL_CLI_USER_PROVIDED,
+													   sslCommandLineOptions))
+					{
+						errors++;
+						break;
+					}
+
+					sslCommandLineOptions = SSL_CLI_USER_PROVIDED;
+					options.pgSetup.ssl.active = 1;
+				}
+
+				if (!cli_getopt_ssl_flags(ssl_flag, optarg, &(options.pgSetup)))
+				{
+					errors++;
+				}
+				break;
+			}
+
+			default:
+			{
+				/* getopt_long already wrote an error message */
+				commandline_help(stderr);
+				exit(EXIT_CODE_BAD_ARGS);
+				break;
+			}
+		}
+	}
+
+	if (errors > 0)
+	{
+		commandline_help(stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	/*
+	 * We're not using pg_setup_init() here: we are following a very different
+	 * set of rules. We just want to check:
+	 *
+	 *   - PGDATA is set and the directory does not exists
+	 *   - PGPORT is either set or defaults to 5432
+	 *
+	 * Also we use the first pg_ctl binary found in the PATH, we're not picky
+	 * here, we don't have to manage the whole life-time of that PostgreSQL
+	 * instance.
+	 */
+	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
+	{
+		get_env_pgdata_or_exit(options.pgSetup.pgdata);
+	}
+
+	if (!keeper_config_set_pathnames_from_pgdata(&(options.pathnames),
+												 options.pgSetup.pgdata))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	/*
+	 * If any --ssl-* option is provided, either we have a root ca file and a
+	 * server.key and a server.crt or none of them. Any other combo is a
+	 * mistake.
+	 */
+	if (sslCommandLineOptions == SSL_CLI_UNKNOWN)
+	{
+		log_fatal("Explicit SSL choice is required: please use either "
+				  "--ssl-self-signed or provide your certificates "
+				  "using --ssl-ca-file, --ssl-crl-file, "
+				  "--server-key, and --server-crt (or use --no-ssl if you "
+				  "are very sure that you do not want encrypted traffic)");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (!pgsetup_validate_ssl_settings(&(options.pgSetup)))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	/* publish our option parsing in the global variable */
+	keeperOptions = options;
+
+	return optind;
+}
+
+
+/*
+ * cli_enable_ssl enables SSL setup on this node.
+ *
+ *  - edit our Postgres configuration with the given SSL files and options
+ *  - when run on a keeper, checks that the monitor accepts ssl connections
+ *  - edits our configuration at pg_autoctl.conf
+ */
+static void
+cli_enable_ssl(int argc, char **argv)
+{
+	KeeperConfig options = keeperOptions;
+
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = true;
+
+	switch (ProbeConfigurationFileRole(options.pathnames.config))
+	{
+		case PG_AUTOCTL_ROLE_MONITOR:
+		{
+			MonitorConfig mconfig = { 0 };
+			PostgresSetup *pgSetup = &(mconfig.pgSetup);
+			LocalPostgresServer postgres = { 0 };
+
+			if (!monitor_config_init_from_pgsetup(&mconfig,
+												  &options.pgSetup,
+												  missingPgdataIsOk,
+												  pgIsNotRunningIsOk))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
+
+			if (pgSetup->ssl.active)
+			{
+				log_error("SSL has already been setup in \"%s\"",
+						  mconfig.pathnames.config);
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
+
+			/* now override current on-file settings with CLI ssl options */
+			pgSetup->ssl = options.pgSetup.ssl;
+
+			local_postgres_init(&postgres, pgSetup);
+
+			/* update the Postgres SSL setup and maybe create the certificate */
+			if (!update_ssl_configuration(&postgres, mconfig.nodename))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_INTERNAL_ERROR);
+			}
+
+			/* update the monitor's configuration to use SSL */
+			if (!monitor_config_write_file(&mconfig))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
+
+			break;
+		}
+
+		case PG_AUTOCTL_ROLE_KEEPER:
+		{
+			KeeperConfig kconfig = { 0 };
+			PostgresSetup *pgSetup = &(kconfig.pgSetup);
+			LocalPostgresServer postgres = { 0 };
+
+			kconfig.pgSetup = options.pgSetup;
+			kconfig.pathnames = options.pathnames;
+
+			if (!keeper_config_read_file(&kconfig,
+										 missingPgdataIsOk,
+										 pgIsNotRunningIsOk,
+										 monitorDisabledIsOk))
+			{
+				log_fatal("Failed to read configuration file \"%s\"",
+						  kconfig.pathnames.config);
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
+
+			if (pgSetup->ssl.active)
+			{
+				log_error("SSL has already been setup in \"%s\"",
+						  kconfig.pathnames.config);
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
+
+			/* now override current on-file settings with CLI ssl options */
+			pgSetup->ssl = options.pgSetup.ssl;
+
+			local_postgres_init(&postgres, pgSetup);
+
+			/* update the Postgres SSL setup and maybe create the certificate */
+			if (!update_ssl_configuration(&postgres, kconfig.nodename))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_INTERNAL_ERROR);
+			}
+
+			/* log about the need to edit the monitor connection string */
+			(void) update_monitor_connection_string(&kconfig);
+
+			/* and write our brand new setup to file */
+			if (!keeper_config_write_file(&kconfig))
+			{
+				log_fatal("Failed to write the pg_autoctl configuration file, "
+						  "see above");
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
+
+			break;
+		}
+
+		default:
+		{
+			log_fatal("Unrecognized configuration file \"%s\"",
+					  options.pathnames.config);
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+	}
+}
+
+
+/*
+ * update_ssl_configuration updates the local SSL configuration.
+ */
+static bool
+update_ssl_configuration(LocalPostgresServer *postgres, const char *nodename)
+{
+	char hbaFilePath[MAXPGPATH] = { 0 };
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+
+	log_warn("update_ssl_configuration: ssl %s",
+			 pgSetup->ssl.active ? "on" : "off");
+
+	/*
+	 * Make sure we configure Postgres with absolute file paths.
+	 */
+	if (!normalize_filename(pgSetup->pgdata, pgSetup->pgdata, MAXPGPATH))
+	{
+		return false;
+	}
+
+	/*
+	 * When --ssl-self-signed is used, create a certificate.
+	 */
+	if (pgSetup->ssl.createSelfSignedCert &&
+		(!file_exists(pgSetup->ssl.serverKey) ||
+		 !file_exists(pgSetup->ssl.serverCert)))
+	{
+		if (!pg_create_self_signed_cert(pgSetup, nodename))
+		{
+			log_error("Failed to create SSL self-signed certificate, "
+					  "see above for details");
+			return false;
+		}
+	}
+
+	/* edit our Postgres setup to include the new SSL settings */
+	if (!postgres_add_default_settings(postgres))
+	{
+		log_error("Failed to initialise postgres as primary because "
+				  "adding default settings failed, see above for details");
+		return false;
+	}
+
+	/* call pg_ctl_reload() while connected as the local superuser */
+	strlcpy(pgSetup->username, "", NAMEDATALEN);
+
+	local_postgres_init(postgres, pgSetup);
+
+	if (!pgsql_reload_conf(&(postgres->sqlClient)))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/* HBA rules for hostssl are not edited */
+	sformat(hbaFilePath, MAXPGPATH, "%s/pg_hba.conf", pgSetup->pgdata);
+
+	log_warn("HBA rules in \"%s\" have NOT been edited: \"host\" "
+			 " records match either SSL or non-SSL connection attempts.",
+			 hbaFilePath);
+
+	return true;
+}
+
+
+/*
+ * update_monitor_connection_string connects to the monitor to see if ssl is
+ * active on the server. When that's the case, the function edits the monitor
+ * URI in the given KeeperConfig.
+ */
+static bool
+update_monitor_connection_string(KeeperConfig *config)
+{
+	Monitor monitor = { 0 };
+
+	if (!monitor_init(&monitor, config->monitor_pguri))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (monitor_ssl_active(&monitor))
+	{
+		log_warn("The monitor SSL setup is ready and your current "
+				 "connection string is \"%s\", you might need to update it",
+				 config->monitor_pguri);
+		log_info("Use pg_autoctl config set pg_autoctl.monitor for updating "
+				 "your monitor connection string, then restart pg_autoctl ");
+		return true;
+	}
+	else
+	{
+		log_warn("The monitor SSL setup is not ready yet: ssl is off");
+		return false;
 	}
 }
