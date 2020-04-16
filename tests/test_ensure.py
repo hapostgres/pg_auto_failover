@@ -58,7 +58,7 @@ def test_004_demoted():
     # We must not wait for PG to run, since otherwise we might miss the demoted
     # state
 
-    assert node1.wait_until_state(target_state="demoted", other_node=node2)
+    assert node1.wait_until_state(target_state="demoted")
 
     # ideally we should be able to check that we refrain from starting
     # postgres again before calling the transition function

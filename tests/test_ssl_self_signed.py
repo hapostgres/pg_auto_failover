@@ -77,8 +77,8 @@ def test_003_init_secondary():
     assert node2.config_get("ssl.sslmode") == "require"
 
     node2.run()
-    assert node2.wait_until_state(target_state="secondary", other_node=node1)
-    assert node1.wait_until_state(target_state="primary", other_node=node2)
+    assert node2.wait_until_state(target_state="secondary")
+    assert node1.wait_until_state(target_state="primary")
 
     check_ssl_files(node2)
     check_ssl_ciphers(node2)
@@ -88,5 +88,5 @@ def test_004_failover():
     print()
     print("Calling pgautofailover.failover() on the monitor")
     cluster.monitor.failover()
-    assert node2.wait_until_state(target_state="primary", other_node=node1)
-    assert node1.wait_until_state(target_state="secondary", other_node=node2)
+    assert node2.wait_until_state(target_state="primary")
+    assert node1.wait_until_state(target_state="secondary")
