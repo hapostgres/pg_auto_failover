@@ -314,7 +314,7 @@ has been used at creation time. That's because the ``host`` records match
 either SSL or non-SSL connection attempts in Postgres HBA file, so the
 pre-existing setup will continue to work. To enhance the SSL setup, you can
 manually edit the HBA files and change the existing lines from ``host`` to
-``hostssl``.
+``hostssl`` to dissallow unencrypted connections at the server side.
 
 When updating a node's SSL setup, we connect to the monitor and check if the
 SSL setup has been made there. When that's the case, the monitor URI in the
