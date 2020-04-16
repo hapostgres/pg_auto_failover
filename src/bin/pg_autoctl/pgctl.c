@@ -1342,36 +1342,29 @@ prepare_primary_conninfo(char *primaryConnInfo,
 static bool
 prepare_conninfo_sslmode(PQExpBuffer buffer, SSLOptions sslOptions)
 {
-	if (sslOptions.active)
+	if (sslOptions.sslMode == SSL_MODE_UNKNOWN)
 	{
-		if (sslOptions.sslMode == SSL_MODE_UNKNOWN)
-		{
-			/* that's a bug really */
-			log_error("SSL is active in the configuration, "
-					  "but sslmode is unknown");
-			return false;
-		}
-
-		appendPQExpBuffer(buffer, "sslmode=%s",
-						  pgsetup_sslmode_to_string(sslOptions.sslMode));
-
-		if (sslOptions.sslMode >= SSL_MODE_VERIFY_CA)
-		{
-			/* ssl revocation list might not be provided, it's ok */
-			if (!IS_EMPTY_STRING_BUFFER(sslOptions.crlFile))
-			{
-				appendPQExpBuffer(buffer, " sslrootcert=%s sslcrl=%s",
-								  sslOptions.caFile, sslOptions.crlFile);
-			}
-			else
-			{
-				appendPQExpBuffer(buffer, " sslrootcert=%s", sslOptions.caFile);
-			}
-		}
+		/* that's a bug really */
+		log_error("SSL is active in the configuration, "
+				  "but sslmode is unknown");
+		return false;
 	}
-	else
+
+	appendPQExpBuffer(buffer, "sslmode=%s",
+					  pgsetup_sslmode_to_string(sslOptions.sslMode));
+
+	if (sslOptions.sslMode >= SSL_MODE_VERIFY_CA)
 	{
-		appendPQExpBuffer(buffer, "sslmode=disable");
+		/* ssl revocation list might not be provided, it's ok */
+		if (!IS_EMPTY_STRING_BUFFER(sslOptions.crlFile))
+		{
+			appendPQExpBuffer(buffer, " sslrootcert=%s sslcrl=%s",
+							  sslOptions.caFile, sslOptions.crlFile);
+		}
+		else
+		{
+			appendPQExpBuffer(buffer, " sslrootcert=%s", sslOptions.caFile);
+		}
 	}
 
 	return true;
