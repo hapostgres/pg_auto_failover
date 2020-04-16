@@ -736,15 +736,15 @@ cli_enable_ssl(int argc, char **argv)
 
 			local_postgres_init(&postgres, pgSetup);
 
+			/* log about the need to edit the monitor connection string */
+			(void) update_monitor_connection_string(&kconfig);
+
 			/* update the Postgres SSL setup and maybe create the certificate */
 			if (!update_ssl_configuration(&postgres, kconfig.nodename))
 			{
 				/* errors have already been logged */
 				exit(EXIT_CODE_INTERNAL_ERROR);
 			}
-
-			/* log about the need to edit the monitor connection string */
-			(void) update_monitor_connection_string(&kconfig);
 
 			/* and write our brand new setup to file */
 			if (!keeper_config_write_file(&kconfig))
@@ -847,6 +847,9 @@ update_monitor_connection_string(KeeperConfig *config)
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
+
+	log_warn("The connection string to connect to the monitor is "
+			 "not automatically updated when using this command");
 
 	if (monitor_ssl_active(&monitor))
 	{
