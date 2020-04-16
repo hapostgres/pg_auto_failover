@@ -1344,10 +1344,15 @@ prepare_conninfo_sslmode(PQExpBuffer buffer, SSLOptions sslOptions)
 {
 	if (sslOptions.sslMode == SSL_MODE_UNKNOWN)
 	{
-		/* that's a bug really */
-		log_error("SSL is active in the configuration, "
-				  "but sslmode is unknown");
-		return false;
+		if (sslOptions.active)
+		{
+			/* that's a bug really */
+			log_error("SSL is active in the configuration, "
+					  "but sslmode is unknown");
+			return false;
+		}
+
+		return true;
 	}
 
 	appendPQExpBuffer(buffer, "sslmode=%s",
