@@ -41,14 +41,14 @@ def test_004_read_from_secondary():
 
 def test_005_maintenance():
     node2.enable_maintenance()
-    assert node2.wait_until_state(target_state="maintenance", other_node=node1)
+    assert node2.wait_until_state(target_state="maintenance")
     node2.fail()
     node1.run_sql_query("INSERT INTO t1 VALUES (3)")
     node2.run()
-    node2.disable_maintenance(other_node=node1)
+    node2.disable_maintenance()
     assert node2.wait_until_pg_is_running()
-    assert node2.wait_until_state(target_state="secondary", other_node=node1)
-    assert node1.wait_until_state(target_state="primary", other_node=node2)
+    assert node2.wait_until_state(target_state="secondary")
+    assert node1.wait_until_state(target_state="primary")
 
 def test_006_fail_primary():
     node1.fail()
