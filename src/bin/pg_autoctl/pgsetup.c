@@ -132,6 +132,15 @@ pg_setup_init(PostgresSetup *pgSetup,
 			return false;
 		}
 
+		/*
+		 * Normalize PGDATA if the directory exists, otherwise keep the
+		 * relative path.
+		 */
+		if (!normalize_filename(pgSetup->pgdata, pgSetup->pgdata, MAXPGPATH))
+		{
+			return false;
+		}
+
 		pg_controldata(pgSetup, missing_pgdata_is_ok);
 
 		if (pgSetup->control.pg_control_version == 0)

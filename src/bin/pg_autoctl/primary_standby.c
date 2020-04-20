@@ -155,14 +155,6 @@ local_postgres_update(LocalPostgresServer *postgres, bool postgresNotRunningIsOk
 		return false;
 	}
 
-	/*
-	 * Now that we now that pgdata exists, lets normalize the path.
-	 */
-	if (!normalize_filename(pgSetup->pgdata, pgSetup->pgdata, MAXPGPATH))
-	{
-		return false;
-	}
-
 	(void) local_postgres_init(postgres, &newPgSetup);
 
 	return true;
