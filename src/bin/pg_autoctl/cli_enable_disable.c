@@ -676,13 +676,6 @@ cli_enable_ssl(int argc, char **argv)
 				exit(EXIT_CODE_BAD_CONFIG);
 			}
 
-			if (pgSetup->ssl.active)
-			{
-				log_error("SSL has already been setup in \"%s\"",
-						  mconfig.pathnames.config);
-				exit(EXIT_CODE_BAD_CONFIG);
-			}
-
 			/* now override current on-file settings with CLI ssl options */
 			pgSetup->ssl = options.pgSetup.ssl;
 
@@ -720,13 +713,6 @@ cli_enable_ssl(int argc, char **argv)
 										 monitorDisabledIsOk))
 			{
 				log_fatal("Failed to read configuration file \"%s\"",
-						  kconfig.pathnames.config);
-				exit(EXIT_CODE_BAD_CONFIG);
-			}
-
-			if (pgSetup->ssl.active)
-			{
-				log_error("SSL has already been setup in \"%s\"",
 						  kconfig.pathnames.config);
 				exit(EXIT_CODE_BAD_CONFIG);
 			}

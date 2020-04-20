@@ -163,21 +163,21 @@ users::
 
   $ pg_autoctl create monitor --ssl-ca-file root.crt   \
                               --ssl-crl-file root.crl  \
-                              --server-crt server.crt  \
+                              --server-cert server.crt  \
                               --server-key server.key  \
-                              --ssl-mode validate-full \
+                              --ssl-mode verify-full \
                               ...
 
   $ pg_autoctl create postgres --ssl-ca-file root.crt   \
-                               --server-crt server.crt  \
+                               --server-cert server.crt  \
                                --server-key server.key  \
-                               --ssl-mode validate-full \
+                               --ssl-mode verify-full \
                                ...
 
   $ pg_autoctl create postgres --ssl-ca-file root.crt   \
-                               --server-crt server.crt  \
+                               --server-cert server.crt  \
                                --server-key server.key  \
-                               --ssl-mode validate-full \
+                               --ssl-mode verify-full \
                                ...
 
 The option ``--ssl-mode`` can be used to force connection strings used by
@@ -300,9 +300,9 @@ ssl certificates::
 
   $ pg_autoctl enable ssl --ssl-ca-file root.crt   \
                           --ssl-crl-file root.crl  \
-                          --server-crt server.crt  \
+                          --server-cert server.crt  \
                           --server-key server.key  \
-                          --ssl-mode validate-full
+                          --ssl-mode verify-full
 
 The ``pg_autoctl enable ssl`` command edits the
 ``postgresql-auto-failover.conf`` Postgres configuration file to match the
