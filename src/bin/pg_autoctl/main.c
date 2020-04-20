@@ -79,7 +79,10 @@ main(int argc, char **argv)
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
-	(void) commandline_run(&command, argc, argv);
+	if (!commandline_run(&command, argc, argv))
+	{
+		exit(EXIT_CODE_BAD_ARGS);
+	}
 
 	return 0;
 }
