@@ -1,5 +1,5 @@
 import pgautofailover_utils as pgautofailover
-from nose.tools import *
+import time
 
 cluster = None
 monitor = None
@@ -46,7 +46,6 @@ def test_005_maintenance():
     node1.run_sql_query("INSERT INTO t1 VALUES (3)")
     node2.run()
     node2.disable_maintenance()
-    assert node2.wait_until_pg_is_running()
     assert node2.wait_until_pg_is_running()
     assert node2.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")

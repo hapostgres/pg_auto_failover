@@ -34,14 +34,14 @@ typedef struct MonitorAssignedState
 
 typedef struct StateNotification
 {
-	char        message[BUFSIZE];
-	NodeState	reportedState;
-	NodeState	goalState;
-	char	    formationId[NAMEDATALEN];
-	int			groupId;
-	int			nodeId;
-	char	    nodeName[_POSIX_HOST_NAME_MAX];
-	int			nodePort;
+	char message[BUFSIZE];
+	NodeState reportedState;
+	NodeState goalState;
+	char formationId[NAMEDATALEN];
+	int groupId;
+	int nodeId;
+	char nodeName[_POSIX_HOST_NAME_MAX];
+	int nodePort;
 } StateNotification;
 
 typedef struct MonitorExtensionVersion
@@ -87,15 +87,15 @@ bool monitor_node_active(Monitor *monitor,
 bool monitor_get_node_replication_settings(Monitor *monitor, int nodeid,
 										   NodeReplicationSettings *settings);
 bool monitor_set_node_candidate_priority(Monitor *monitor, int nodeid,
-										 char* nodeName, int nodePort,
+										 char *nodeName, int nodePort,
 										 int candidatePriority);
 bool monitor_set_node_replication_quorum(Monitor *monitor, int nodeid,
-										 char* nodeName, int nodePort,
+										 char *nodeName, int nodePort,
 										 bool replicationQuorum);
 bool monitor_get_formation_number_sync_standbys(Monitor *monitor, char *formation,
 												int *numberSyncStandbys);
 bool monitor_set_formation_number_sync_standbys(Monitor *monitor, char *formation,
-										   int numberSyncStandbys);
+												int numberSyncStandbys);
 
 bool monitor_remove(Monitor *monitor, char *host, int port);
 bool monitor_perform_failover(Monitor *monitor, char *formation, int group);

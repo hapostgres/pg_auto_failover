@@ -12,6 +12,7 @@
 
 
 #include <limits.h>
+#include <stdbool.h>
 
 #include "libpq-fe.h"
 
@@ -66,9 +67,9 @@ typedef enum
 
 typedef struct PGSQL
 {
-	ConnectionType	connectionType;
-	char			connectionString[MAXCONNINFO];
-	PGconn		   *connection;
+	ConnectionType connectionType;
+	char connectionString[MAXCONNINFO];
+	PGconn *connection;
 } PGSQL;
 
 /* PostgreSQL ("Grand Unified Configuration") setting */
@@ -81,9 +82,9 @@ typedef struct GUC
 /* network address of a node in an HA group */
 typedef struct NodeAddress
 {
-	int  nodeId;
+	int nodeId;
 	char host[_POSIX_HOST_NAME_MAX];
-	int  port;
+	int port;
 	char lsn[PG_LSN_MAXLENGTH];
 	bool isPrimary;
 } NodeAddress;
@@ -149,29 +150,29 @@ typedef struct SingleValueResultContext
 } SingleValueResultContext;
 
 
-#define CHECK__SETTINGS_SQL											\
-	"select bool_and(ok) "											\
-	"from ("														\
-	"select current_setting('max_wal_senders')::int >= 4"			\
-	" union all "													\
-	"select current_setting('max_replication_slots')::int >= 4"		\
-	" union all "													\
-	"select current_setting('wal_level') in ('replica', 'logical')"	\
-	" union all "													\
+#define CHECK__SETTINGS_SQL \
+	"select bool_and(ok) " \
+	"from (" \
+	"select current_setting('max_wal_senders')::int >= 4" \
+	" union all " \
+	"select current_setting('max_replication_slots')::int >= 4" \
+	" union all " \
+	"select current_setting('wal_level') in ('replica', 'logical')" \
+	" union all " \
 	"select current_setting('wal_log_hints') = 'on'"
 
 #define CHECK_POSTGRESQL_NODE_SETTINGS_SQL \
-	CHECK__SETTINGS_SQL					   \
+	CHECK__SETTINGS_SQL \
 	") as t(ok) "
 
-#define CHECK_CITUS_NODE_SETTINGS_SQL						\
-	CHECK__SETTINGS_SQL										\
-	" union all "											\
-	"select lib = 'citus' "									\
-	"from unnest(string_to_array("							\
-	"current_setting('shared_preload_libraries'), ',') "	\
-	" || array['not citus']) "								\
-	"with ordinality ast(lib, n) where n = 1"				\
+#define CHECK_CITUS_NODE_SETTINGS_SQL \
+	CHECK__SETTINGS_SQL \
+	" union all " \
+	"select lib = 'citus' " \
+	"from unnest(string_to_array(" \
+	"current_setting('shared_preload_libraries'), ',') " \
+	" || array['not citus']) " \
+	"with ordinality ast(lib, n) where n = 1" \
 	") as t(ok) "
 
 bool pgsql_init(PGSQL *pgsql, char *url, ConnectionType connectionType);
@@ -186,11 +187,15 @@ bool pgsql_check_monitor_settings(PGSQL *pgsql, bool *settings_are_ok);
 bool pgsql_is_in_recovery(PGSQL *pgsql, bool *is_in_recovery);
 bool pgsql_reload_conf(PGSQL *pgsql);
 bool pgsql_create_replication_slot(PGSQL *pgsql, const char *slotName);
-bool pgsql_drop_replication_slot(PGSQL *pgsql, const char *slotName, bool verbose);
-bool pgsql_drop_replication_slots(PGSQL *pgsql);
+bool pgsql_drop_replication_slot(PGSQL *pgsql, const char *slotName);
 bool postgres_sprintf_replicationSlotName(int nodeId, char *slotName, int size);
 bool pgsql_set_synchronous_standby_names(PGSQL *pgsql,
 										 char *synchronous_standby_names);
+bool pgsql_drop_replication_slots(PGSQL *pgsql);
+bool pgsql_replication_slot_drop_removed(PGSQL *pgsql,
+										 NodeAddressArray *nodeArray);
+bool pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray);
+bool postgres_sprintf_replicationSlotName(int nodeId, char *slotName, int size);
 bool pgsql_enable_synchronous_replication(PGSQL *pgsql);
 bool pgsql_disable_synchronous_replication(PGSQL *pgsql);
 bool pgsql_set_default_transaction_mode_read_only(PGSQL *pgsql);

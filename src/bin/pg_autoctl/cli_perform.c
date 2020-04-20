@@ -26,7 +26,7 @@ CommandLine perform_failover_command =
 	make_command("failover",
 				 "Perform a failover for given formation and group",
 				 " [ --pgdata --formation --group ] ",
-				 "  --pgdata      path to data directory	 \n"		\
+				 "  --pgdata      path to data directory	 \n" \
 				 "  --formation   formation to target, defaults to 'default' \n" \
 				 "  --group       group to target, defaults to 0 \n",
 				 cli_perform_failover_getopts,
@@ -36,7 +36,7 @@ CommandLine perform_switchover_command =
 	make_command("switchover",
 				 "Perform a switchover for given formation and group",
 				 " [ --pgdata --formation --group ] ",
-				 "  --pgdata      path to data directory	 \n"		\
+				 "  --pgdata      path to data directory	 \n" \
 				 "  --formation   formation to target, defaults to 'default' \n" \
 				 "  --group       group to target, defaults to 0 \n",
 				 cli_perform_failover_getopts,
@@ -131,16 +131,22 @@ cli_perform_failover_getopts(int argc, char **argv)
 				switch (verboseCount)
 				{
 					case 1:
+					{
 						log_set_level(LOG_INFO);
 						break;
+					}
 
 					case 2:
+					{
 						log_set_level(LOG_DEBUG);
 						break;
+					}
 
 					default:
+					{
 						log_set_level(LOG_TRACE);
 						break;
+					}
 				}
 				break;
 			}

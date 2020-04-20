@@ -87,16 +87,22 @@ cli_systemd_getopt(int argc, char **argv)
 				switch (verboseCount)
 				{
 					case 1:
+					{
 						log_set_level(LOG_INFO);
 						break;
+					}
 
 					case 2:
+					{
 						log_set_level(LOG_DEBUG);
 						break;
+					}
 
 					default:
+					{
 						log_set_level(LOG_TRACE);
 						break;
+					}
 				}
 				break;
 			}
@@ -165,6 +171,7 @@ cli_systemd_cat_service_file(int argc, char **argv)
 	log_info("pg_autoctl -q show systemd --pgdata \"%s\" | sudo tee %s",
 			 config.pgSetup.pgdata, config.pathnames.systemd);
 	log_info("sudo systemctl daemon-reload");
+	log_info("sudo systemctl enable pgautofailover");
 	log_info("sudo systemctl start pgautofailover");
 
 	if (!systemd_config_write(stdout, &config))

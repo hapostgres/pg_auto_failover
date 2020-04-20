@@ -109,16 +109,22 @@ keeper_cli_formation_getopts(int argc, char **argv)
 				switch (verboseCount)
 				{
 					case 1:
+					{
 						log_set_level(LOG_INFO);
 						break;
+					}
 
 					case 2:
+					{
 						log_set_level(LOG_DEBUG);
 						break;
+					}
 
 					default:
+					{
 						log_set_level(LOG_TRACE);
 						break;
+					}
 				}
 				break;
 			}
@@ -255,16 +261,22 @@ keeper_cli_formation_create_getopts(int argc, char **argv)
 				switch (verboseCount)
 				{
 					case 1:
+					{
 						log_set_level(LOG_INFO);
 						break;
+					}
 
 					case 2:
+					{
 						log_set_level(LOG_DEBUG);
 						break;
+					}
 
 					default:
+					{
 						log_set_level(LOG_TRACE);
 						break;
+					}
 				}
 				break;
 			}
@@ -287,7 +299,7 @@ keeper_cli_formation_create_getopts(int argc, char **argv)
 				/* { "number-sync-standbys", required_argument, NULL, 'n'} */
 				int numberSyncStandbys = strtol(optarg, NULL, 10);
 
-				if (errno == EINVAL|| numberSyncStandbys < 0)
+				if (errno == EINVAL || numberSyncStandbys < 0)
 				{
 					log_fatal("--number-sync-standbys argument is not valid."
 							  " Use a non-negative integer value.");
@@ -312,8 +324,8 @@ keeper_cli_formation_create_getopts(int argc, char **argv)
 		get_env_pgdata_or_exit(options.pgSetup.pgdata);
 	}
 
-	if (IS_EMPTY_STRING_BUFFER(options.formation)
-		|| IS_EMPTY_STRING_BUFFER(options.formationKind))
+	if (IS_EMPTY_STRING_BUFFER(options.formation) ||
+		IS_EMPTY_STRING_BUFFER(options.formationKind))
 	{
 		log_error("Options --formation and --kind are mandatory");
 		exit(EXIT_CODE_BAD_ARGS);
@@ -362,7 +374,8 @@ keeper_cli_formation_create(int argc, char **argv)
 	}
 
 	log_info("Created formation \"%s\" of kind \"%s\" on the monitor, with secondary %s.",
-			 config.formation, config.formationKind, config.formationHasSecondary ? "enabled" : "disabled");
+			 config.formation, config.formationKind, config.formationHasSecondary ?
+			 "enabled" : "disabled");
 }
 
 

@@ -18,9 +18,11 @@
 #include "primary_standby.h"
 
 
-static void local_postgres_update_pg_failures_tracking(
-	LocalPostgresServer *postgres,
-	bool pgIsRunning);
+static void local_postgres_update_pg_failures_tracking(LocalPostgresServer *postgres,
+													   bool pgIsRunning);
+
+static bool local_postgres_update(LocalPostgresServer *postgres,
+								  bool postgresNotRunningIsOk);
 
 /*
  * Default settings for postgres databases managed by pg_auto_failover.
@@ -30,32 +32,32 @@ static void local_postgres_update_pg_failures_tracking(
  * listen_addresses and port are placeholder values in this array and are
  * replaced with dynamic values from the setup when used.
  */
-#define DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER		\
-	{ "listen_addresses", "'*'" },						\
-	{ "port", "5432" },									\
-	{ "max_wal_senders", "4" },							\
-	{ "max_replication_slots", "4" },					\
-	{ "wal_level", "'replica'" },						\
-	{ "wal_log_hints", "on" },							\
-	{ "wal_keep_segments", "64" },						\
-	{ "wal_sender_timeout", "'30s'" },					\
-	{ "hot_standby_feedback", "on" },					\
-	{ "hot_standby", "on" },							\
-	{ "synchronous_commit", "on" },						\
-	{ "logging_collector", "on" },						\
-	{ "log_destination", "stderr"},						\
-	{ "logging_collector", "on"},						\
-	{ "log_directory", "log"},							\
-	{ "log_min_messages", "info"},						\
-	{ "log_connections", "on"},							\
-	{ "log_disconnections", "on"},						\
-	{ "log_lock_waits", "on"},							\
-	{ "ssl", "off" },									\
-	{ "ssl_ca_file", "" },								\
-	{ "ssl_crl_file", "" },								\
-	{ "ssl_cert_file", "" },							\
-	{ "ssl_key_file", "" },								\
-	{ "ssl_ciphers", "'TLSv1.2+HIGH:!aNULL:!eNULL'" }
+#define DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER \
+	{ "listen_addresses", "'*'" }, \
+	{ "port", "5432" }, \
+	{ "max_wal_senders", "4" }, \
+	{ "max_replication_slots", "4" }, \
+	{ "wal_level", "'replica'" }, \
+	{ "wal_log_hints", "on" }, \
+	{ "wal_keep_segments", "64" }, \
+	{ "wal_sender_timeout", "'30s'" }, \
+	{ "hot_standby_feedback", "on" }, \
+	{ "hot_standby", "on" }, \
+	{ "synchronous_commit", "on" }, \
+	{ "logging_collector", "on" }, \
+	{ "log_destination", "stderr" }, \
+	{ "logging_collector", "on" }, \
+	{ "log_directory", "log" }, \
+	{ "log_min_messages", "info" }, \
+	{ "log_connections", "on" }, \
+	{ "log_disconnections", "on" }, \
+	{ "log_lock_waits", "on" }, \
+	{ "ssl", "off" }, \
+	{ "ssl_ca_file", "" }, \
+	{ "ssl_crl_file", "" }, \
+	{ "ssl_cert_file", "" }, \
+	{ "ssl_key_file", "" }, \
+	{ "ssl_ciphers", "'" DEFAULT_SSL_CIPHERS "'" }
 
 GUC postgres_default_settings[] = {
 	DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER,
@@ -64,7 +66,8 @@ GUC postgres_default_settings[] = {
 
 GUC citus_default_settings[] = {
 	DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER,
-	{ "shared_preload_libraries", "citus" },
+	{ "shared_preload_libraries", "'citus'" },
+	{ "citus.node_conninfo", "'sslmode=prefer'" },
 	{ NULL, NULL }
 };
 
@@ -100,7 +103,6 @@ static void
 local_postgres_update_pg_failures_tracking(LocalPostgresServer *postgres,
 										   bool pgIsRunning)
 {
-
 	if (pgIsRunning)
 	{
 		/* reset PostgreSQL restart failures tracking */
@@ -121,6 +123,7 @@ local_postgres_update_pg_failures_tracking(LocalPostgresServer *postgres,
 	}
 }
 
+
 /*
  * local_postgres_finish closes our connection to the local PostgreSQL
  * server, if needs be.
@@ -129,6 +132,32 @@ void
 local_postgres_finish(LocalPostgresServer *postgres)
 {
 	pgsql_finish(&postgres->sqlClient);
+}
+
+
+/*
+ * local_postgres_update updates the LocalPostgresServer pgSetup information
+ * with what we discover from the newly created Postgres instance. Typically
+ * used just after a pg_basebackup.
+ */
+static bool
+local_postgres_update(LocalPostgresServer *postgres, bool postgresNotRunningIsOk)
+{
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+	PostgresSetup newPgSetup = { 0 };
+	bool missingPgdataIsOk = false;
+
+	if (!pg_setup_init(&newPgSetup, pgSetup,
+					   missingPgdataIsOk,
+					   postgresNotRunningIsOk))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	(void) local_postgres_init(postgres, &newPgSetup);
+
+	return true;
 }
 
 
@@ -179,7 +208,7 @@ ensure_local_postgres_is_running(LocalPostgresServer *postgres)
 
 				log_trace("waiting for pg_setup_is_running() [%s], attempt %d/%d",
 						  pgIsRunning ? "true" : "false",
-						  attempts+1,
+						  attempts + 1,
 						  maxAttempts);
 
 				if (pgIsRunning)
@@ -243,19 +272,9 @@ primary_create_replication_slot(LocalPostgresServer *postgres,
 								char *replicationSlotName)
 {
 	PGSQL *pgsql = &(postgres->sqlClient);
-	bool verbose = false;
 	bool result = false;
 
 	log_trace("primary_create_replication_slot(%s)", replicationSlotName);
-
-	/*
-	 * Try dropping the replication slot in case it already exists and
-	 * is stuck at some arbitrary point in the timeline.
-	 *
-	 * We ignore failures because all we really care about is creating
-	 * the slot.
-	 */
-	pgsql_drop_replication_slot(pgsql, replicationSlotName, verbose);
 
 	result = pgsql_create_replication_slot(pgsql, replicationSlotName);
 
@@ -277,7 +296,7 @@ primary_drop_replication_slot(LocalPostgresServer *postgres,
 
 	log_trace("primary_drop_replication_slot");
 
-	result = pgsql_drop_replication_slot(pgsql, replicationSlotName, true);
+	result = pgsql_drop_replication_slot(pgsql, replicationSlotName);
 
 	pgsql_finish(pgsql);
 	return result;
@@ -297,6 +316,46 @@ primary_drop_replication_slots(LocalPostgresServer *postgres)
 	log_trace("primary_drop_replication_slots");
 
 	result = pgsql_drop_replication_slots(pgsql);
+
+	pgsql_finish(pgsql);
+	return result;
+}
+
+
+/*
+ * postgres_replication_slot_drop_removed drops the replication slots that
+ * belong to dropped nodes on a primary server.
+ */
+bool
+postgres_replication_slot_drop_removed(LocalPostgresServer *postgres,
+									   NodeAddressArray *nodeArray)
+{
+	bool result = false;
+	PGSQL *pgsql = &(postgres->sqlClient);
+
+	log_trace("postgres_replication_slot_drop_removed");
+
+	result = pgsql_replication_slot_drop_removed(pgsql, nodeArray);
+
+	pgsql_finish(pgsql);
+	return result;
+}
+
+
+/*
+ * postgres_replication_slot_advance advances the current confirmed position of
+ * the given replication slot up to the given LSN position.
+ */
+bool
+postgres_replication_slot_maintain(LocalPostgresServer *postgres,
+								   NodeAddressArray *nodeArray)
+{
+	bool result = false;
+	PGSQL *pgsql = &(postgres->sqlClient);
+
+	log_trace("postgres_replication_slot_maintain");
+
+	result = pgsql_replication_slot_maintain(pgsql, nodeArray);
 
 	pgsql_finish(pgsql);
 	return result;
@@ -495,14 +554,14 @@ primary_add_standby_to_hba(LocalPostgresServer *postgres,
 {
 	PGSQL *pgsql = &(postgres->sqlClient);
 	PostgresSetup *postgresSetup = &(postgres->postgresSetup);
-	char hbaFilePath[MAXPGPATH];
+	char hbaFilePath[MAXPGPATH] = { 0 };
 	char *authMethod = pg_setup_get_auth_method(postgresSetup);
 
 	if (replicationPassword == NULL)
 	{
 		/* most authentication methods require a password */
-		if (strcmp(authMethod, "trust") != 0
-			|| strcmp(authMethod, SKIP_HBA_AUTH_METHOD) != 0)
+		if (strcmp(authMethod, "trust") != 0 &&
+			strcmp(authMethod, SKIP_HBA_AUTH_METHOD) != 0)
 		{
 			log_warn("Granting replication connection for \"%s\" "
 					 "using authentication method \"%s\" although no "
@@ -514,13 +573,7 @@ primary_add_standby_to_hba(LocalPostgresServer *postgres,
 
 	log_trace("primary_add_standby_to_hba");
 
-	if (!pgsql_get_hba_file_path(pgsql, hbaFilePath, MAXPGPATH))
-	{
-		log_error("Failed to add the standby node to PostgreSQL HBA file: "
-				  "couldn't get the standby pg_hba file location from the local "
-				  "postgres server.");
-		return false;
-	}
+	sformat(hbaFilePath, MAXPGPATH, "%s/pg_hba.conf", postgresSetup->pgdata);
 
 	if (!pghba_ensure_host_rule_exists(hbaFilePath,
 									   postgresSetup->ssl.active,
@@ -591,8 +644,27 @@ standby_init_database(LocalPostgresServer *postgres,
 	 * Now, we know that pgdata either doesn't exists or belongs to a stopped
 	 * PostgreSQL instance. We can safely proceed with pg_basebackup.
 	 */
-	if (!pg_basebackup(pgSetup->pgdata, pgSetup->pg_ctl, replicationSource))
+	if (!pg_basebackup(pgSetup->pgdata,
+					   pgSetup->pg_ctl,
+					   replicationSource))
 	{
+		return false;
+	}
+
+	/* we have a new PGDATA, update our pgSetup information */
+	if (!local_postgres_update(postgres, true))
+	{
+		log_error("Failed to update our internal Postgres representation "
+				  "after pg_basebackup, see above for details");
+		return false;
+	}
+
+	/* now setup the replication configuration (primary_conninfo etc) */
+	if (!pg_setup_standby_mode(pgSetup->control.pg_control_version,
+							   pgSetup->pgdata,
+							   replicationSource))
+	{
+		log_error("Failed to setup Postgres as a standby after pg_basebackup");
 		return false;
 	}
 
@@ -615,22 +687,11 @@ standby_init_database(LocalPostgresServer *postgres,
 		}
 	}
 
-	if (!ensure_local_postgres_is_running(postgres))
-	{
-		return false;
-	}
-
-	log_info("PostgreSQL started on port %d", pgSetup->pgport);
-
 	/*
 	 * We might have local edits to implement to the PostgreSQL
-	 * configuration, such as a specific listen_addresses.
-	 *
-	 * Because pg_auto_failover always enforce the listen_addresses and port
-	 * settings in pg_ctl_start, we don't actually have to restart PostgreSQL
-	 * after having applied the settings here. The reason for doing the effort
-	 * is to make the situation cleaner in case an operator was to manually
-	 * start/restart PostgreSQL.
+	 * configuration, such as a specific listen_addresses or different TLS
+	 * key and cert locations. By changing this before starting postgres these
+	 * new settings will automatically be applied.
 	 */
 	if (!postgres_add_default_settings(postgres))
 	{
@@ -638,6 +699,13 @@ standby_init_database(LocalPostgresServer *postgres,
 				  "see above for details.");
 		return false;
 	}
+
+	if (!ensure_local_postgres_is_running(postgres))
+	{
+		return false;
+	}
+
+	log_info("PostgreSQL started on port %d", pgSetup->pgport);
 
 	return true;
 }
@@ -651,16 +719,12 @@ bool
 primary_rewind_to_standby(LocalPostgresServer *postgres,
 						  ReplicationSource *replicationSource)
 {
-	char configFilePath[MAXPGPATH];
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	NodeAddress *primaryNode = &(replicationSource->primaryNode);
 
 	log_trace("primary_rewind_to_standby");
 	log_info("Rewinding PostgreSQL to follow new primary %s:%d",
 			 primaryNode->host, primaryNode->port);
-
-	/* configFilePath = $PGDATA/postgresql.conf */
-	join_path_components(configFilePath, pgSetup->pgdata, "postgresql.conf");
 
 	if (!pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata))
 	{
@@ -675,7 +739,6 @@ primary_rewind_to_standby(LocalPostgresServer *postgres,
 	}
 
 	if (!pg_setup_standby_mode(pgSetup->control.pg_control_version,
-							   configFilePath,
 							   pgSetup->pgdata,
 							   replicationSource))
 	{
@@ -740,8 +803,7 @@ standby_promote(LocalPostgresServer *postgres)
 		return false;
 	}
 
-	do
-	{
+	do {
 		log_info("Waiting for postgres to promote");
 		pg_usleep(AWAIT_PROMOTION_SLEEP_TIME_MS * 1000);
 
@@ -751,8 +813,7 @@ standby_promote(LocalPostgresServer *postgres)
 					  "recovery mode after promotion");
 			return false;
 		}
-	}
-	while (inRecovery);
+	} while (inRecovery);
 
 	/*
 	 * It's necessary to do a checkpoint before allowing the old primary to
@@ -767,18 +828,15 @@ standby_promote(LocalPostgresServer *postgres)
 		return false;
 	}
 
-	/*
-	 * Starting with Postgres 12, pg_basebackup sets the recovery configuration
-	 * parameters in the postgresql.auto.conf file. We need to make sure to
-	 * RESET this value so that our own configuration setting takes effect.
-	 */
-	if (pgSetup->control.pg_control_version >= 1200)
+	/* cleanup our standby setup */
+	if (!pg_cleanup_standby_mode(pgSetup->control.pg_control_version,
+								 pgSetup->pg_ctl,
+								 pgSetup->pgdata,
+								 pgsql))
 	{
-		if (!pgsql_reset_primary_conninfo(pgsql))
-		{
-			log_error("Failed to RESET primary_conninfo");
-			return false;
-		}
+		log_error("Failed to clean-up Postgres replication settings, "
+				  "see above for details");
+		return false;
 	}
 
 	/* disconnect from PostgreSQL now */

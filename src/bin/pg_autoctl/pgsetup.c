@@ -31,7 +31,7 @@
 
 static bool get_pgpid(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok);
 static PostmasterStatus pmStatusFromString(const char *postmasterStatus);
-static char *pmStatusToString(PostmasterStatus pm_status);
+static char * pmStatusToString(PostmasterStatus pm_status);
 
 
 /*
@@ -132,6 +132,15 @@ pg_setup_init(PostgresSetup *pgSetup,
 			return false;
 		}
 
+		/*
+		 * Normalize PGDATA if the directory exists, otherwise keep the
+		 * relative path.
+		 */
+		if (!normalize_filename(pgSetup->pgdata, pgSetup->pgdata, MAXPGPATH))
+		{
+			return false;
+		}
+
 		pg_controldata(pgSetup, missing_pgdata_is_ok);
 
 		if (pgSetup->control.pg_control_version == 0)
@@ -145,7 +154,7 @@ pg_setup_init(PostgresSetup *pgSetup,
 		else
 		{
 			log_debug("Found PostgreSQL system %" PRIu64 " at \"%s\", "
-					  "version %u, catalog version %u",
+														 "version %u, catalog version %u",
 					  pgSetup->control.system_identifier,
 					  pgSetup->pgdata,
 					  pgSetup->control.pg_control_version,
@@ -231,7 +240,6 @@ pg_setup_init(PostgresSetup *pgSetup,
 				/* errors have already been logged */
 				return false;
 			}
-
 		}
 	}
 
@@ -323,9 +331,9 @@ pg_setup_init(PostgresSetup *pgSetup,
 	 * And we always double-check with PGDATA/postmaster.pid if we have it, and
 	 * we should have it in the normal/expected case.
 	 */
-	if (pgIsReady
-		&& pgSetup->pidFile.pid > 0
-		&& pgSetup->pgport != pgSetup->pidFile.port)
+	if (pgIsReady &&
+		pgSetup->pidFile.pid > 0 &&
+		pgSetup->pgport != pgSetup->pidFile.port)
 	{
 		log_error("Given --pgport %d doesn't match PostgreSQL "
 				  "port %d from \"%s/postmaster.pid\"",
@@ -336,9 +344,9 @@ pg_setup_init(PostgresSetup *pgSetup,
 	/*
 	 * If PostgreSQL is running, register if it's in recovery or not.
 	 */
-	if (pgSetup->control.pg_control_version > 0
-		&& pgSetup->pidFile.port > 0
-		&& pgSetup->pgport == pgSetup->pidFile.port)
+	if (pgSetup->control.pg_control_version > 0 &&
+		pgSetup->pidFile.port > 0 &&
+		pgSetup->pgport == pgSetup->pidFile.port)
 	{
 		PGSQL pgsql = { 0 };
 		char connInfo[MAXCONNINFO];
@@ -412,6 +420,16 @@ get_pgpid(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 	int pid = -1;
 
 	join_path_components(pidfile, pgSetup->pgdata, "postmaster.pid");
+
+	if (!file_exists(pidfile))
+	{
+		if (!pg_is_not_running_is_ok)
+		{
+			log_error("Failed get postmaster pid, file \"%s\" does not exists",
+					  pidfile);
+		}
+		return false;
+	}
 
 	if (!read_file(pidfile, &contents, &fileSize))
 	{
@@ -571,7 +589,7 @@ read_pg_pidfile(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 			}
 		}
 	}
- 	fclose(fp);
+	fclose(fp);
 
 	log_trace("read_pg_pidfile: pid %ld, port %d, host %s, status \"%s\"",
 			  pgSetup->pidFile.pid,
@@ -602,9 +620,9 @@ fprintf_pg_setup(FILE *stream, PostgresSetup *pgSetup)
 	fformat(stream, "Control Version:    %u\n",
 			pgSetup->control.pg_control_version);
 	fformat(stream, "Catalog Version:    %u\n",
-				 pgSetup->control.catalog_version_no);
+			pgSetup->control.catalog_version_no);
 	fformat(stream, "System Identifier:  %" PRIu64 "\n",
-				 pgSetup->control.system_identifier);
+			pgSetup->control.system_identifier);
 	fflush(stream);
 }
 
@@ -645,6 +663,7 @@ pg_setup_as_json(PostgresSetup *pgSetup, JSON_Value *js)
 	return true;
 }
 
+
 /*
  * pg_setup_get_local_connection_string build a connecting string to connect
  * to the local postgres server and writes it to connectionString, which should
@@ -668,27 +687,28 @@ pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 					  pgSetup->pgport, pgSetup->dbname);
 
 	if (pg_regress_sock_dir_exists &&
-			!get_env_copy("PG_REGRESS_SOCK_DIR", pg_regress_sock_dir, MAXPGPATH))
+		!get_env_copy("PG_REGRESS_SOCK_DIR", pg_regress_sock_dir, MAXPGPATH))
 	{
 		/* errors have already been logged */
 		return false;
 	}
+
 	/*
 	 * When PG_REGRESS_SOCK_DIR is set and empty, we force the connection
 	 * string to use "localhost" (TCP/IP hostname for IP 127.0.0.1 or ::1,
 	 * usually), even when the configuration setup is using a unix directory
 	 * setting.
 	 */
-	if (env_found_empty("PG_REGRESS_SOCK_DIR")
-		&& (IS_EMPTY_STRING_BUFFER(pgSetup->pghost)
-			|| pgSetup->pghost[0] == '/'))
+	if (env_found_empty("PG_REGRESS_SOCK_DIR") &&
+		(IS_EMPTY_STRING_BUFFER(pgSetup->pghost) ||
+		 pgSetup->pghost[0] == '/'))
 	{
 		appendPQExpBufferStr(connStringBuffer, " host=localhost");
 	}
 	else if (!IS_EMPTY_STRING_BUFFER(pgSetup->pghost))
 	{
-		if (pg_regress_sock_dir_exists && strlen(pg_regress_sock_dir) > 0
-			&& strcmp(pgSetup->pghost, pg_regress_sock_dir) != 0)
+		if (pg_regress_sock_dir_exists && strlen(pg_regress_sock_dir) > 0 &&
+			strcmp(pgSetup->pghost, pg_regress_sock_dir) != 0)
 		{
 			/*
 			 * It might turn out ok (stray environment), but in case of
@@ -749,9 +769,10 @@ pg_setup_is_running(PostgresSetup *pgSetup)
 	bool pg_is_not_running_is_ok = true;
 
 	return pgSetup->pidFile.pid != 0
-		/* if we don't have the PID yet, try reading it now */
-		|| (get_pgpid(pgSetup, pg_is_not_running_is_ok)
-			&& pgSetup->pidFile.pid != 0);
+
+	       /* if we don't have the PID yet, try reading it now */
+		   || (get_pgpid(pgSetup, pg_is_not_running_is_ok) &&
+			   pgSetup->pidFile.pid != 0);
 }
 
 
@@ -796,7 +817,7 @@ pg_setup_is_ready(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 			log_trace("pg_setup_is_ready: %s",
 					  pmStatusToString(pgSetup->pm_status));
 
- 			if (!get_pgpid(pgSetup, pg_is_not_running_is_ok))
+			if (!get_pgpid(pgSetup, pg_is_not_running_is_ok))
 			{
 				/*
 				 * We failed to read the Postgres pid file, and infinite
@@ -923,6 +944,7 @@ pg_setup_get_username(PostgresSetup *pgSetup)
 	if (pw)
 	{
 		log_trace("username found in passwd: %s", pw->pw_name);
+
 		/* struct passwd is in thread shared space, return a copy */
 		return strdup(pw->pw_name);
 	}
@@ -967,8 +989,8 @@ pg_setup_get_auth_method(PostgresSetup *pgSetup)
 bool
 pg_setup_skip_hba_edits(PostgresSetup *pgSetup)
 {
-	return !IS_EMPTY_STRING_BUFFER(pgSetup->authMethod)
-		&& strcmp(pgSetup->authMethod, SKIP_HBA_AUTH_METHOD) == 0;
+	return !IS_EMPTY_STRING_BUFFER(pgSetup->authMethod) &&
+		   strcmp(pgSetup->authMethod, SKIP_HBA_AUTH_METHOD) == 0;
 }
 
 
@@ -1017,16 +1039,18 @@ pg_setup_set_absolute_pgdata(PostgresSetup *pgSetup)
 PgInstanceKind
 nodeKindFromString(const char *nodeKind)
 {
-	PgInstanceKind kindArray[] = { NODE_KIND_UNKNOWN,
-								   NODE_KIND_UNKNOWN,
-								   NODE_KIND_STANDALONE,
-								   NODE_KIND_CITUS_COORDINATOR,
-								   NODE_KIND_CITUS_WORKER };
+	PgInstanceKind kindArray[] = {
+		NODE_KIND_UNKNOWN,
+		NODE_KIND_UNKNOWN,
+		NODE_KIND_STANDALONE,
+		NODE_KIND_CITUS_COORDINATOR,
+		NODE_KIND_CITUS_WORKER
+	};
 	char *kindList[] = {
 		"", "unknown", "standalone", "coordinator", "worker", NULL
 	};
 
-	for(int listIndex = 0; kindList[listIndex] != NULL; listIndex++)
+	for (int listIndex = 0; kindList[listIndex] != NULL; listIndex++)
 	{
 		char *candidate = kindList[listIndex];
 
@@ -1056,13 +1080,19 @@ nodeKindToString(PgInstanceKind kind)
 	switch (kind)
 	{
 		case NODE_KIND_STANDALONE:
+		{
 			return "standalone";
+		}
 
 		case NODE_KIND_CITUS_COORDINATOR:
+		{
 			return "coordinator";
+		}
 
 		case NODE_KIND_CITUS_WORKER:
+		{
 			return "worker";
+		}
 
 		default:
 			log_fatal("nodeKindToString: unknown node kind %d", kind);
@@ -1120,20 +1150,28 @@ pmStatusToString(PostmasterStatus pm_status)
 	switch (pm_status)
 	{
 		case POSTMASTER_STATUS_UNKNOWN:
+		{
 			return "unknown";
+		}
 
 		case POSTMASTER_STATUS_STARTING:
+		{
 			return "starting";
+		}
 
 		case POSTMASTER_STATUS_STOPPING:
+		{
 			return "stopping";
+		}
 
 		case POSTMASTER_STATUS_READY:
+		{
 			return "ready";
+		}
 
 		case POSTMASTER_STATUS_STANDBY:
 			return "standby";
-	};
+	}
 
 	/* keep compiler happy */
 	return "unknown";
@@ -1200,9 +1238,9 @@ pgsetup_validate_ssl_settings(PostgresSetup *pgSetup)
 	if (ssl->active && !ssl->createSelfSignedCert)
 	{
 		/* we say allFilesGiven but we can do without the CRL file */
-		bool allFilesGiven = !IS_EMPTY_STRING_BUFFER(ssl->caFile)
-			&& !IS_EMPTY_STRING_BUFFER(ssl->serverCert)
-			&& !IS_EMPTY_STRING_BUFFER(ssl->serverKey);
+		bool allFilesGiven = !IS_EMPTY_STRING_BUFFER(ssl->caFile) &&
+							 !IS_EMPTY_STRING_BUFFER(ssl->serverCert) &&
+							 !IS_EMPTY_STRING_BUFFER(ssl->serverKey);
 
 		if (!allFilesGiven)
 		{
@@ -1315,15 +1353,19 @@ pgsetup_validate_ssl_settings(PostgresSetup *pgSetup)
 SSLMode
 pgsetup_parse_sslmode(const char *sslMode)
 {
-	SSLMode enumArray[] = {	SSL_MODE_DISABLE,
-							SSL_MODE_ALLOW,
-							SSL_MODE_PREFER,
-							SSL_MODE_REQUIRE,
-							SSL_MODE_VERIFY_CA,
-							SSL_MODE_VERIFY_FULL };
+	SSLMode enumArray[] = {
+		SSL_MODE_DISABLE,
+		SSL_MODE_ALLOW,
+		SSL_MODE_PREFER,
+		SSL_MODE_REQUIRE,
+		SSL_MODE_VERIFY_CA,
+		SSL_MODE_VERIFY_FULL
+	};
 
-	char *sslModeArray[] = {"disable", "allow", "prefer", "require",
-							"verify-ca", "verify-full", NULL};
+	char *sslModeArray[] = {
+		"disable", "allow", "prefer", "require",
+		"verify-ca", "verify-full", NULL
+	};
 
 	int sslModeArrayIndex = 0;
 
@@ -1350,21 +1392,34 @@ pgsetup_sslmode_to_string(SSLMode sslMode)
 	switch (sslMode)
 	{
 		case SSL_MODE_UNKNOWN:
+		{
 			return "unknown";
+		}
+
 		case SSL_MODE_DISABLE:
+		{
 			return "disable";
+		}
 
 		case SSL_MODE_ALLOW:
+		{
 			return "allow";
+		}
 
 		case SSL_MODE_PREFER:
+		{
 			return "prefer";
+		}
 
 		case SSL_MODE_REQUIRE:
+		{
 			return "require";
+		}
 
 		case SSL_MODE_VERIFY_CA:
+		{
 			return "verify-ca";
+		}
 
 		case SSL_MODE_VERIFY_FULL:
 			return "verify-full";

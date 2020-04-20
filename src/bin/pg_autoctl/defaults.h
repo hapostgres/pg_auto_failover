@@ -39,6 +39,23 @@
 #define POSTGRES_CONNECT_TIMEOUT "5"
 #define MAXIMUM_BACKUP_RATE "100M"
 
+
+/*
+ * Microsoft approved cipher string.
+ * This cipher string implicitely enables only TLSv1.2+, because these ciphers
+ * were all added in TLSv1.2. This can be confirmed by running:
+ * openssl -v <below strings concatenated>
+ */
+#define DEFAULT_SSL_CIPHERS "ECDHE-ECDSA-AES128-GCM-SHA256:" \
+							"ECDHE-ECDSA-AES256-GCM-SHA384:" \
+							"ECDHE-RSA-AES128-GCM-SHA256:" \
+							"ECDHE-RSA-AES256-GCM-SHA384:" \
+							"ECDHE-ECDSA-AES128-SHA256:" \
+							"ECDHE-ECDSA-AES256-SHA384:" \
+							"ECDHE-RSA-AES128-SHA256:" \
+							"ECDHE-RSA-AES256-SHA384"
+
+
 /* retry PQping for a maximum of 15 mins */
 #define POSTGRES_PING_RETRY_TIMEOUT 900
 
@@ -48,7 +65,7 @@
 #define PREPARE_PROMOTION_CATCHUP_TIMEOUT 30
 #define PREPARE_PROMOTION_WALRECEIVER_TIMEOUT 5
 
-#define PG_AUTOCTL_KEEPER_SLEEP_TIME 5
+#define PG_AUTOCTL_KEEPER_SLEEP_TIME 1
 #define PG_AUTOCTL_MONITOR_SLEEP_TIME 1
 
 #define PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT 30
@@ -107,7 +124,7 @@
 /*
  * Error codes returned to the shell in case something goes wrong.
  */
-#define EXIT_CODE_QUIT 0		/* it's ok, we were asked politely */
+#define EXIT_CODE_QUIT 0        /* it's ok, we were asked politely */
 #define EXIT_CODE_BAD_ARGS 1
 #define EXIT_CODE_BAD_CONFIG 2
 #define EXIT_CODE_BAD_STATE 3
@@ -123,6 +140,7 @@
  * This opens file write only and creates if it doesn't exist.
  */
 #define FOPEN_FLAGS_W O_WRONLY | O_TRUNC | O_CREAT
+
 /*
  * This opens the file in append mode and creates it if it doesn't exist.
  */

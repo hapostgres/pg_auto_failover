@@ -27,22 +27,22 @@
 							   config->Description, "pg_auto_failover")
 
 #define OPTION_SYSTEMD_WORKING_DIRECTORY(config) \
-	make_strbuf_option_default("Service", "WorkingDirectory",			\
-							   NULL, true, BUFSIZE,						\
+	make_strbuf_option_default("Service", "WorkingDirectory", \
+							   NULL, true, BUFSIZE, \
 							   config->WorkingDirectory, "/var/lib/postgresql")
 
 #define OPTION_SYSTEMD_ENVIRONMENT_PGDATA(config) \
-	make_strbuf_option_default("Service", "Environment",				\
-							   NULL, true, BUFSIZE,						\
-							   config->EnvironmentPGDATA,				\
+	make_strbuf_option_default("Service", "Environment", \
+							   NULL, true, BUFSIZE, \
+							   config->EnvironmentPGDATA, \
 							   "PGDATA=/var/lib/postgresql/11/pg_auto_failover")
 
 #define OPTION_SYSTEMD_USER(config) \
-	make_strbuf_option_default("Service", "User", NULL, true, BUFSIZE,	\
+	make_strbuf_option_default("Service", "User", NULL, true, BUFSIZE, \
 							   config->User, "postgres")
 
 #define OPTION_SYSTEMD_EXECSTART(config) \
-	make_strbuf_option_default("Service", "ExecStart", NULL, true, BUFSIZE,	\
+	make_strbuf_option_default("Service", "ExecStart", NULL, true, BUFSIZE, \
 							   config->ExecStart, "/usr/bin/pg_autoctl run")
 
 #define OPTION_SYSTEMD_RESTART(config) \
@@ -59,14 +59,14 @@
 
 #define SET_INI_OPTIONS_ARRAY(config) \
 	{ \
-		OPTION_SYSTEMD_DESCRIPTION(config),		 \
-		OPTION_SYSTEMD_WORKING_DIRECTORY(config),	\
-		OPTION_SYSTEMD_ENVIRONMENT_PGDATA(config),	\
-		OPTION_SYSTEMD_USER(config),				\
-		OPTION_SYSTEMD_EXECSTART(config),			\
-		OPTION_SYSTEMD_RESTART(config),				\
-		OPTION_SYSTEMD_STARTLIMITBURST(config),		\
-		OPTION_SYSTEMD_WANTEDBY(config),			\
+		OPTION_SYSTEMD_DESCRIPTION(config), \
+		OPTION_SYSTEMD_WORKING_DIRECTORY(config), \
+		OPTION_SYSTEMD_ENVIRONMENT_PGDATA(config), \
+		OPTION_SYSTEMD_USER(config), \
+		OPTION_SYSTEMD_EXECSTART(config), \
+		OPTION_SYSTEMD_RESTART(config), \
+		OPTION_SYSTEMD_STARTLIMITBURST(config), \
+		OPTION_SYSTEMD_WANTEDBY(config), \
 		INI_OPTION_LAST \
 	}
 
@@ -84,7 +84,7 @@ systemd_config_init(SystemdServiceConfig *config, const char *pgdata)
 
 	/* time to setup config->pathnames.systemd */
 	sformat(config->pathnames.systemd, MAXPGPATH,
-			 "/etc/systemd/system/%s", KEEPER_SYSTEMD_FILENAME);
+			"/etc/systemd/system/%s", KEEPER_SYSTEMD_FILENAME);
 
 	/*
 	 * In its operations pg_autoctl might remove PGDATA and replace it with a
@@ -102,10 +102,12 @@ systemd_config_init(SystemdServiceConfig *config, const char *pgdata)
 
 	/* adjust defaults to known values from the config */
 	sformat(config->EnvironmentPGDATA, BUFSIZE,
-			 "'PGDATA=%s'", config->pgSetup.pgdata);
+			"'PGDATA=%s'", config->pgSetup.pgdata);
 
-	strlcpy(config->User, config->pgSetup.username, NAMEDATALEN);
+	/* adjust the user to the current system user */
+	strlcpy(config->User, user, NAMEDATALEN);
 
+	/* adjust the program to the current full path of argv[0] */
 	sformat(config->ExecStart, BUFSIZE, "%s run", pg_autoctl_program);
 
 	if (!ini_validate_options(systemdOptions))

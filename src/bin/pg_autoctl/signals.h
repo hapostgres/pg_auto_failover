@@ -14,11 +14,12 @@
 #include <signal.h>
 
 /* This flag controls termination of the main loop. */
-extern volatile sig_atomic_t asked_to_stop;		 /* SIGTERM */
+extern volatile sig_atomic_t asked_to_stop;      /* SIGTERM */
 extern volatile sig_atomic_t asked_to_stop_fast; /* SIGINT */
-extern volatile sig_atomic_t asked_to_reload;	 /* SIGHUP */
+extern volatile sig_atomic_t asked_to_reload;    /* SIGHUP */
 
-#define CHECK_FOR_FAST_SHUTDOWN {if (asked_to_stop_fast) {break;}}
+#define CHECK_FOR_FAST_SHUTDOWN { if (asked_to_stop_fast) { break; } \
+}
 
 void set_signal_handlers(void);
 void catch_reload(int sig);

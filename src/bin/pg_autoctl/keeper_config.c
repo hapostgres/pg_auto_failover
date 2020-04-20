@@ -70,7 +70,7 @@
 	make_int_option("postgresql", "port", "pgport", \
 					true, &(config->pgSetup.pgport))
 
-#define OPTION_POSTGRESQL_PROXY_PORT(config)				\
+#define OPTION_POSTGRESQL_PROXY_PORT(config) \
 	make_int_option("postgresql", "proxyport", "proxyport", \
 					false, &(config->pgSetup.proxyport))
 
@@ -78,32 +78,32 @@
 	make_strbuf_option("postgresql", "listen_addresses", "listen", \
 					   false, MAXPGPATH, config->pgSetup.listen_addresses)
 
-#define OPTION_POSTGRESQL_AUTH_METHOD(config)				\
+#define OPTION_POSTGRESQL_AUTH_METHOD(config) \
 	make_strbuf_option("postgresql", "auth_method", "auth", \
 					   false, MAXPGPATH, config->pgSetup.authMethod)
 
-#define OPTION_SSL_ACTIVE(config)							\
-	make_int_option_default("ssl", "active", NULL,			\
+#define OPTION_SSL_ACTIVE(config) \
+	make_int_option_default("ssl", "active", NULL, \
 							false, &(config->pgSetup.ssl.active), 0)
 
-#define OPTION_SSL_MODE(config)										\
-	make_strbuf_option("ssl", "sslmode", "ssl-mode",				\
+#define OPTION_SSL_MODE(config) \
+	make_strbuf_option("ssl", "sslmode", "ssl-mode", \
 					   false, SSL_MODE_STRLEN, config->pgSetup.ssl.sslModeStr)
 
-#define OPTION_SSL_CA_FILE(config)								\
-	make_strbuf_option("ssl", "ca_file", "ssl-ca-file",			\
+#define OPTION_SSL_CA_FILE(config) \
+	make_strbuf_option("ssl", "ca_file", "ssl-ca-file", \
 					   false, MAXPGPATH, config->pgSetup.ssl.caFile)
 
-#define OPTION_SSL_CRL_FILE(config)								\
-	make_strbuf_option("ssl", "crl_file", "ssl-crl-file",		\
+#define OPTION_SSL_CRL_FILE(config) \
+	make_strbuf_option("ssl", "crl_file", "ssl-crl-file", \
 					   false, MAXPGPATH, config->pgSetup.ssl.crlFile)
 
-#define OPTION_SSL_SERVER_CERT(config)							\
-	make_strbuf_option("ssl", "cert_file", "server-cert",		\
+#define OPTION_SSL_SERVER_CERT(config) \
+	make_strbuf_option("ssl", "cert_file", "server-cert", \
 					   false, MAXPGPATH, config->pgSetup.ssl.serverCert)
 
-#define OPTION_SSL_SERVER_KEY(config)								\
-	make_strbuf_option("ssl", "key_file", "server-key",				\
+#define OPTION_SSL_SERVER_KEY(config) \
+	make_strbuf_option("ssl", "key_file", "server-key", \
 					   false, MAXPGPATH, config->pgSetup.ssl.serverKey)
 
 #define OPTION_REPLICATION_SLOT_NAME(config) \
@@ -178,7 +178,7 @@
 		OPTION_POSTGRESQL_AUTH_METHOD(config), \
 		OPTION_SSL_ACTIVE(config), \
 		OPTION_SSL_MODE(config), \
-		OPTION_SSL_CA_FILE(config),	 \
+		OPTION_SSL_CA_FILE(config), \
 		OPTION_SSL_CRL_FILE(config), \
 		OPTION_SSL_SERVER_CERT(config), \
 		OPTION_SSL_SERVER_KEY(config), \
@@ -597,45 +597,14 @@ bool
 keeper_config_set_groupId_and_slot_name(KeeperConfig *config,
 										int nodeId, int groupId)
 {
-	IniOption *option;
-	IniOption keeperOptions[] = SET_INI_OPTIONS_ARRAY(config);
 	char buffer[BUFSIZE] = { 0 };
 	char *replicationSlotName = NULL;
 
-	snprintf(buffer, BUFSIZE, "%s_%d", REPLICATION_SLOT_NAME_DEFAULT, nodeId);
+	sformat(buffer, BUFSIZE, "%s_%d", REPLICATION_SLOT_NAME_DEFAULT, nodeId);
 	replicationSlotName = strdup(buffer);
 
 	config->groupId = groupId;
 	config->replication_slot_name = replicationSlotName;
-
-	/*
-	 * Fix the INI structure for the configuration file. First, groupId.
-	 */
-	option = lookup_ini_option(keeperOptions, "pg_autoctl", "group");
-
-	if (option == NULL)
-	{
-		log_error(
-			"BUG: keeper_config_set_groupId: lookup failed for pg_autoctl.group");
-		return false;
-	}
-
-	*(option->intValue) = groupId;
-
-	/*
-	 * Fix the INI structure for the configuration file. Second,
-	 * replication_slot_name.
-	 */
-	option = lookup_ini_option(keeperOptions, "replication", "slot");
-
-	if (option == NULL)
-	{
-		log_error(
-			"BUG: keeper_config_set_groupId: lookup failed for replication.slot");
-		return false;
-	}
-
-	*(option->strValue) = replicationSlotName;
 
 	return keeper_config_write_file(config);
 }
@@ -669,7 +638,7 @@ keeper_config_destroy(KeeperConfig *config)
  * current config into the new one that's been editing.
  */
 #define strneq(x, y) \
-	((x != NULL) && (y != NULL) && ( strcmp(x, y) != 0))
+	((x != NULL) && (y != NULL) && (strcmp(x, y) != 0))
 
 bool
 keeper_config_accept_new(KeeperConfig *config, KeeperConfig *newConfig)
@@ -759,7 +728,7 @@ keeper_config_accept_new(KeeperConfig *config, KeeperConfig *newConfig)
 	{
 		log_info("Reloading configuration: "
 				 "replication.maximum_backup_rate is now \"%s\"; "
-				 "used to be \"%s\"" ,
+				 "used to be \"%s\"",
 				 newConfig->maximum_backup_rate, config->maximum_backup_rate);
 
 		/* note: strneq checks args are not NULL, it's safe to proceed */
@@ -770,8 +739,7 @@ keeper_config_accept_new(KeeperConfig *config, KeeperConfig *newConfig)
 	/*
 	 * And now the timeouts. Of course we support changing them at run-time.
 	 */
-	if (newConfig->network_partition_timeout
-		!= config->network_partition_timeout)
+	if (newConfig->network_partition_timeout != config->network_partition_timeout)
 	{
 		log_info("Reloading configuration: timeout.network_partition_timeout "
 				 "is now %d; used to be %d",
@@ -782,8 +750,7 @@ keeper_config_accept_new(KeeperConfig *config, KeeperConfig *newConfig)
 			newConfig->network_partition_timeout;
 	}
 
-	if (newConfig->prepare_promotion_catchup
-		!= config->prepare_promotion_catchup)
+	if (newConfig->prepare_promotion_catchup != config->prepare_promotion_catchup)
 	{
 		log_info("Reloading configuration: timeout.prepare_promotion_catchup "
 				 "is now %d; used to be %d",
@@ -794,8 +761,7 @@ keeper_config_accept_new(KeeperConfig *config, KeeperConfig *newConfig)
 			newConfig->prepare_promotion_catchup;
 	}
 
-	if (newConfig->prepare_promotion_walreceiver
-		!= config->prepare_promotion_walreceiver)
+	if (newConfig->prepare_promotion_walreceiver != config->prepare_promotion_walreceiver)
 	{
 		log_info(
 			"Reloading configuration: timeout.prepare_promotion_walreceiver "
@@ -807,8 +773,8 @@ keeper_config_accept_new(KeeperConfig *config, KeeperConfig *newConfig)
 			newConfig->prepare_promotion_walreceiver;
 	}
 
-	if (newConfig->postgresql_restart_failure_timeout
-		!= config->postgresql_restart_failure_timeout)
+	if (newConfig->postgresql_restart_failure_timeout !=
+		config->postgresql_restart_failure_timeout)
 	{
 		log_info(
 			"Reloading configuration: timeout.postgresql_restart_failure_timeout "
@@ -820,8 +786,8 @@ keeper_config_accept_new(KeeperConfig *config, KeeperConfig *newConfig)
 			newConfig->postgresql_restart_failure_timeout;
 	}
 
-	if (newConfig->postgresql_restart_failure_max_retries
-		!= config->postgresql_restart_failure_max_retries)
+	if (newConfig->postgresql_restart_failure_max_retries !=
+		config->postgresql_restart_failure_max_retries)
 	{
 		log_info(
 			"Reloading configuration: retries.postgresql_restart_failure_max_retries "
@@ -896,7 +862,7 @@ keeper_config_set_backup_directory(KeeperConfig *config, int nodeId)
 	char absoluteBackupDirectory[PATH_MAX];
 
 	/* build the default nodename based backup directory path */
-	snprintf(subdirs, MAXPGPATH, "backup/%s", config->nodename);
+	sformat(subdirs, MAXPGPATH, "backup/%s", config->nodename);
 	path_in_same_directory(pgdata, subdirs, backupDirectory);
 
 	/*
@@ -911,8 +877,8 @@ keeper_config_set_backup_directory(KeeperConfig *config, int nodeId)
 	}
 
 	/* if we didn't have a backup directory yet, set one */
-	if (IS_EMPTY_STRING_BUFFER(config->backupDirectory)
-		|| strcmp(backupDirectory, config->backupDirectory) == 0)
+	if (IS_EMPTY_STRING_BUFFER(config->backupDirectory) ||
+		strcmp(backupDirectory, config->backupDirectory) == 0)
 	{
 		/* we might be able to use the nodeId, better than the nodename */
 		if (nodeId > 0)

@@ -104,11 +104,11 @@ fsm_init_primary(Keeper *keeper)
 	}
 
 	pgInstanceIsOurs =
-		   initState.pgInitState == PRE_INIT_STATE_EMPTY
-		|| initState.pgInitState == PRE_INIT_STATE_EXISTS;
+		initState.pgInitState == PRE_INIT_STATE_EMPTY ||
+		initState.pgInitState == PRE_INIT_STATE_EXISTS;
 
-	if (initState.pgInitState == PRE_INIT_STATE_EMPTY
-		&& !postgresInstanceExists)
+	if (initState.pgInitState == PRE_INIT_STATE_EMPTY &&
+		!postgresInstanceExists)
 	{
 		if (!pg_ctl_initdb(pgSetup.pg_ctl, pgSetup.pgdata))
 		{
@@ -191,9 +191,9 @@ fsm_init_primary(Keeper *keeper)
 	 * self-signed certificate for the server. We place the certificate and
 	 * private key in $PGDATA/server.key and $PGDATA/server.crt
 	 */
-	if (pgSetup.ssl.createSelfSignedCert
-		&& (!file_exists(pgSetup.ssl.serverKey)
-			|| !file_exists(pgSetup.ssl.serverCert)))
+	if (pgSetup.ssl.createSelfSignedCert &&
+		(!file_exists(pgSetup.ssl.serverKey) ||
+		 !file_exists(pgSetup.ssl.serverCert)))
 	{
 		if (!pg_create_self_signed_cert(&pgSetup, config->nodename))
 		{
@@ -334,21 +334,12 @@ fsm_init_primary(Keeper *keeper)
 bool
 fsm_disable_replication(Keeper *keeper)
 {
-	KeeperConfig *config = &(keeper->config);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
 	if (!primary_disable_synchronous_replication(postgres))
 	{
 		log_error("Failed to disable replication because disabling synchronous "
 				  "failed, see above for details");
-		return false;
-	}
-
-	if (!primary_drop_replication_slots(postgres))
-	{
-		log_error("Failed to disable replication because dropping the replication "
-				  "slot \"%s\" used by the standby failed, see above for details",
-				  config->replication_slot_name);
 		return false;
 	}
 
@@ -473,10 +464,6 @@ prepare_replication(Keeper *keeper, NodeState otherNodeState)
 	 * going to try and add HBA entries and create replication slots again.
 	 * Both operations succeed when their target entry already exists.
 	 *
-	 * Note that primary_create_replication_slot() is idempotent thanks to
-	 * first dropping the target replication slot, then creating it again. We
-	 * might want to avoid drop/create noise on those servers that we managed
-	 * to process in the previous loop.
 	 */
 	for (nodeIndex = 0; nodeIndex < keeper->otherNodes.count; nodeIndex++)
 	{
@@ -660,10 +647,9 @@ fsm_apply_settings(Keeper *keeper)
 		strlcpy(synchronous_standby_names, "*", BUFSIZE);
 	}
 
-	return
-		primary_set_synchronous_standby_names(
-			postgres,
-			synchronous_standby_names);
+	return primary_set_synchronous_standby_names(
+		postgres,
+		synchronous_standby_names);
 }
 
 
@@ -689,7 +675,6 @@ fsm_stop_postgres(Keeper *keeper)
 
 	return pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata);
 }
-
 
 
 /*
@@ -767,7 +752,6 @@ fsm_rewind_or_init(Keeper *keeper)
 	int groupId = keeper->state.current_group;
 
 	char applicationName[BUFSIZE] = { 0 };
-	char standbySlotName[BUFSIZE] = { 0 };
 
 	/* get the primary node to follow */
 	if (!config->monitorDisabled)
@@ -818,30 +802,21 @@ fsm_rewind_or_init(Keeper *keeper)
 		}
 	}
 
-	/* prepare the standby's replication slot name */
-	if (!postgres_sprintf_replicationSlotName(
-			keeper->otherNodes.nodes[0].nodeId,
-			standbySlotName,
-			sizeof(standbySlotName)))
-	{
-		/* that's highly unlikely... */
-		log_error("Failed to snprintf replication slot name for node %d",
-				  keeper->otherNodes.nodes[0].nodeId);
-		return false;
-	}
-
-	if (!primary_drop_replication_slot(postgres, standbySlotName))
-	{
-		log_error("Failed to drop replication slot \"%s\" used by "
-				  "standby %d (%s:%d)",
-				  standbySlotName,
-				  keeper->otherNodes.nodes[0].nodeId,
-				  keeper->otherNodes.nodes[0].host,
-				  keeper->otherNodes.nodes[0].port);
-		return false;
-	}
-
 	return true;
+}
+
+
+/*
+ * fsm_maintain_replication_slots is used when going from CATCHINGUP to
+ * SECONDARY, to create missing replication slots. We want to maintain a
+ * replication slot for each of the other nodes in the system, so that we make
+ * sure we have the WAL bytes around when a standby nodes has to follow a new
+ * primary, after failover.
+ */
+bool
+fsm_maintain_replication_slots(Keeper *keeper)
+{
+	return keeper_maintain_replication_slots(keeper);
 }
 
 

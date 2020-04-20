@@ -149,7 +149,8 @@ StartMonitorNode(void)
 	worker.bgw_notify_pid = 0;
 	strlcpy(worker.bgw_library_name, "pgautofailover", sizeof(worker.bgw_library_name));
 	strlcpy(worker.bgw_name, "pg_auto_failover monitor", sizeof(worker.bgw_name));
-	strlcpy(worker.bgw_function_name, "HealthCheckWorkerLauncherMain", sizeof(worker.bgw_function_name));
+	strlcpy(worker.bgw_function_name, "HealthCheckWorkerLauncherMain",
+			sizeof(worker.bgw_function_name));
 
 	RegisterBackgroundWorker(&worker);
 }

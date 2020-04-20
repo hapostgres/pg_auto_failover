@@ -1,4 +1,5 @@
 from pyroute2 import netns, IPDB, IPRoute, netlink, NetNS, NSPopen
+from contextlib import contextmanager
 import ipaddress
 import subprocess
 import os
@@ -10,6 +11,23 @@ and explain why we use them here.
 """
 
 BRIDGE_NF_CALL_IPTABLES = "/proc/sys/net/bridge/bridge-nf-call-iptables"
+COMMAND_TIMEOUT = 60
+
+
+@contextmanager
+def managed_nspopen(*args, **kwds):
+    proc = NSPopen(*args, **kwds)
+    try:
+        yield proc
+    finally:
+        if proc.poll() is None:
+            # send SIGKILL to the process and wait for it to die if it's still
+            # running
+            proc.kill()
+            proc.communicate()
+        # release proxy process resourecs
+        proc.release()
+
 
 class VirtualLAN:
     """
@@ -123,14 +141,47 @@ class VirtualNode:
     def run(self, command, user=os.getenv("USER")):
         """
         Executes a command under the given user from this virtual node. Returns
-        an NSOpen object to control the process. NSOpen has the same API as
-        subprocess.POpen.
+        a context manager that returns NSOpen object to control the process.
+        NSOpen has the same API as subprocess.POpen.
         """
         sudo_command = ['sudo', '-E', '-u', user,
                         'env', 'PATH=' + os.getenv("PATH")] + command
-        return NSPopen(self.namespace, sudo_command, stdin=subprocess.PIPE,
-                       stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                       universal_newlines=True, start_new_session=True)
+        return managed_nspopen(self.namespace, sudo_command,
+                               stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, universal_newlines=True,
+                               start_new_session=True)
+
+    def run_unmanaged(self, command, user=os.getenv("USER")):
+        """
+        Executes a command under the given user from this virtual node. Returns
+        an NSPopen object to control the process. NSOpen has the same API as
+        subprocess.Popen. This NSPopen object needs to be manually release. In
+        general you should prefer using run, where this is done automatically
+        by the context manager.
+        """
+        sudo_command = ['sudo', '-E', '-u', user,
+                        'env', 'PATH=' + os.getenv("PATH")] + command
+        return NSPopen(self.namespace, sudo_command,
+                       stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                       stderr=subprocess.PIPE, universal_newlines=True,
+                       start_new_session=True)
+
+    def run_and_wait(self, command, name, timeout=COMMAND_TIMEOUT):
+        """
+        Waits for command to exit successfully. If it exits with error or it timeouts,
+        raises an execption with stdout and stderr streams of the process.
+        """
+        with self.run(command) as proc:
+            try:
+                out, err = proc.communicate(timeout=timeout)
+                if proc.returncode > 0:
+                    raise Exception("%s failed, out: %s\n, err: %s" % (name, out, err))
+                return out, err
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                out, err = proc.communicate()
+                raise Exception("%s timed out after %d seconds. out: %s\n, err: %s" \
+                                % (name, timeout, out, err))
 
     def _add_namespace(self, name, address, netmaskLength):
         """
@@ -170,7 +221,7 @@ class VirtualNode:
         """
         try:
             netns.remove(name)
-        except:
+        except Exception:
             # Namespace doesn't exist. Return silently.
             pass
 

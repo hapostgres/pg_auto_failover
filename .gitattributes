@@ -15,3 +15,13 @@ README.*	conflict-marker-size=32
 # These files are maintained or generated elsewhere.  We take them as is.
 configure				-whitespace
 
+# all C files (implementation and header) use our style...
+*.[ch] citus-style
+
+# except these exceptions...
+src/bin/lib/parson/** -citus-style
+src/bin/lib/log/** -citus-style
+src/bin/lib/libs/** -citus-style
+src/bin/lib/pg/** -citus-style
+src/bin/lib/subcommands.c/** -citus-style
+src/monitor/version_compat.c -citus-style

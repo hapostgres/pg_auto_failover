@@ -49,6 +49,7 @@ static bool reach_initial_state(Keeper *keeper);
 static bool wait_until_primary_is_ready(Keeper *config,
 										MonitorAssignedState *assignedState);
 static bool keeper_pg_init_node_active(Keeper *keeper);
+
 /*
  * keeper_pg_init initializes a pg_autoctl keeper and its local PostgreSQL.
  *
@@ -60,7 +61,7 @@ bool
 keeper_pg_init(Keeper *keeper, KeeperConfig *config)
 {
 	log_trace("keeper_pg_init: monitor is %s",
-			  config->monitorDisabled ? "disabled" : "enabled" );
+			  config->monitorDisabled ? "disabled" : "enabled");
 
 	if (config->monitorDisabled)
 	{
@@ -155,9 +156,9 @@ keeper_pg_init_and_register(Keeper *keeper, KeeperConfig *config)
 		return createAndRun;
 	}
 
-	if (postgresInstanceExists
-		&& postgresInstanceIsPrimary
-		&& !allowRemovingPgdata)
+	if (postgresInstanceExists &&
+		postgresInstanceIsPrimary &&
+		!allowRemovingPgdata)
 	{
 		char absolutePgdata[PATH_MAX];
 
@@ -280,6 +281,7 @@ keeper_pg_init_and_register(Keeper *keeper, KeeperConfig *config)
 	return false;
 }
 
+
 /*
  * keeper_pg_init_continue attempts to continue a `pg_autoctl create` that
  * failed through in the middle. A particular case of interest is trying to
@@ -320,9 +322,9 @@ keeper_pg_init_continue(Keeper *keeper, KeeperConfig *config)
 	 * If we have an init file and the state file looks good, then the
 	 * operation that failed was removing the init state file.
 	 */
-	if (keeper->state.current_role == keeper->state.assigned_role
-		&& (keeper->state.current_role == SINGLE_STATE
-			|| keeper->state.current_role == CATCHINGUP_STATE))
+	if (keeper->state.current_role == keeper->state.assigned_role &&
+		(keeper->state.current_role == SINGLE_STATE ||
+		 keeper->state.current_role == CATCHINGUP_STATE))
 	{
 		return unlink_file(config->pathnames.init);
 	}
@@ -346,7 +348,7 @@ keeper_pg_init_continue(Keeper *keeper, KeeperConfig *config)
 static bool
 reach_initial_state(Keeper *keeper)
 {
-	KeeperConfig config = keeper->config;
+	KeeperConfig *config = &(keeper->config);
 
 	log_trace("reach_initial_state: %s to %s",
 			  NodeStateToString(keeper->state.current_role),
@@ -370,7 +372,6 @@ reach_initial_state(Keeper *keeper)
 	 */
 	switch (keeper->state.assigned_role)
 	{
-
 		case CATCHINGUP_STATE:
 		{
 			/*
@@ -446,6 +447,7 @@ reach_initial_state(Keeper *keeper)
 		}
 
 		default:
+
 			/* we don't support any other state at initialization time */
 			log_error("reach_initial_state: don't know how to read state %s",
 					  NodeStateToString(keeper->state.assigned_role));
@@ -463,7 +465,7 @@ reach_initial_state(Keeper *keeper)
 	}
 
 	/* everything went fine, get rid of the init state file */
-	return unlink_file(config.pathnames.init);
+	return unlink_file(config->pathnames.init);
 }
 
 
@@ -661,9 +663,9 @@ create_database_and_extension(Keeper *keeper)
 	if (!IS_EMPTY_STRING_BUFFER(pgSetup->username))
 	{
 		if (!pgsql_create_user(&initPostgres.sqlClient, pgSetup->username,
-							   /* password, login, superuser, replication */
-							   NULL, true, true, false))
 
+		                       /* password, login, superuser, replication */
+							   NULL, true, true, false))
 		{
 			log_fatal("Failed to create role \"%s\""
 					  ", see above for details", pgSetup->username);
@@ -737,7 +739,6 @@ create_database_and_extension(Keeper *keeper)
 					  pgSetup->dbname, pgSetup->username);
 			return false;
 		}
-
 	}
 
 	/* close the "template1" connection now */

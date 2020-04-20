@@ -54,9 +54,9 @@ typedef struct AutoFailoverFormation
 
 
 /* public function declarations */
-extern AutoFailoverFormation *GetFormation(const char *formationId);
+extern AutoFailoverFormation * GetFormation(const char *formationId);
 extern void AddFormation(const char *formationId, FormationKind kind, Name dbname,
-							  bool optionSecondary, int numberSyncStandbys);
+						 bool optionSecondary, int numberSyncStandbys);
 extern void RemoveFormation(const char *formationId);
 extern void SetFormationKind(const char *formationId, FormationKind kind);
 extern void SetFormationDBName(const char *formationId, const char *dbname);
@@ -69,5 +69,5 @@ extern bool FormationNumSyncStandbyIsValid(AutoFailoverFormation *formation,
 										   int *standbyCount);
 
 extern FormationKind FormationKindFromString(const char *kind);
-extern char *FormationKindToString(FormationKind kind);
+extern char * FormationKindToString(FormationKind kind);
 extern FormationKind FormationKindFromNodeKindString(const char *nodeKind);

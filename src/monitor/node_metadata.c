@@ -70,7 +70,7 @@ AllAutoFailoverNodes(char *formationId)
 	uint64 rowNumber = 0;
 
 	const char *selectQuery =
-			SELECT_ALL_FROM_AUTO_FAILOVER_NODE_TABLE " WHERE formationid = $1";
+		SELECT_ALL_FROM_AUTO_FAILOVER_NODE_TABLE " WHERE formationid = $1";
 
 	SPI_connect();
 
@@ -134,8 +134,8 @@ TupleToAutoFailoverNode(TupleDesc tupleDescriptor, HeapTuple heapTuple)
 	Datum reportTime = heap_getattr(heapTuple, Anum_pgautofailover_node_reporttime,
 									tupleDescriptor, &isNull);
 	Datum walReportTime = heap_getattr(heapTuple,
-										Anum_pgautofailover_node_walreporttime,
-										tupleDescriptor, &isNull);
+									   Anum_pgautofailover_node_walreporttime,
+									   tupleDescriptor, &isNull);
 	Datum health = heap_getattr(heapTuple, Anum_pgautofailover_node_health,
 								tupleDescriptor, &isNull);
 	Datum healthCheckTime = heap_getattr(heapTuple,
@@ -145,13 +145,13 @@ TupleToAutoFailoverNode(TupleDesc tupleDescriptor, HeapTuple heapTuple)
 										 Anum_pgautofailover_node_statechangetime,
 										 tupleDescriptor, &isNull);
 	Datum reportedLSN = heap_getattr(heapTuple, Anum_pgautofailover_node_reportedLSN,
-								   tupleDescriptor, &isNull);
+									 tupleDescriptor, &isNull);
 	Datum candidatePriority = heap_getattr(heapTuple,
-										 Anum_pgautofailover_node_candidate_priority,
-										 tupleDescriptor, &isNull);
+										   Anum_pgautofailover_node_candidate_priority,
+										   tupleDescriptor, &isNull);
 	Datum replicationQuorum = heap_getattr(heapTuple,
-										 Anum_pgautofailover_node_replication_quorum,
-										 tupleDescriptor, &isNull);
+										   Anum_pgautofailover_node_replication_quorum,
+										   tupleDescriptor, &isNull);
 
 	Oid goalStateOid = DatumGetObjectId(goalState);
 	Oid reportedStateOid = DatumGetObjectId(reportedState);
@@ -443,13 +443,13 @@ AllNodesHaveSameCandidatePriority(List *groupNodeList)
 {
 	ListCell *nodeCell = NULL;
 	int candidatePriority =
-		((AutoFailoverNode *)linitial(groupNodeList))->candidatePriority;
+		((AutoFailoverNode *) linitial(groupNodeList))->candidatePriority;
 
 	foreach(nodeCell, groupNodeList)
 	{
 		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
 
-		if (node->candidatePriority != candidatePriority )
+		if (node->candidatePriority != candidatePriority)
 		{
 			return false;
 		}
@@ -648,13 +648,13 @@ AddAutoFailoverNode(char *formationId, int groupId, char *nodeName, int nodePort
 
 	Datum argValues[] = {
 		CStringGetTextDatum(formationId),   /* formationid */
-		Int32GetDatum(groupId),			    /* groupid */
+		Int32GetDatum(groupId),             /* groupid */
 		CStringGetTextDatum(nodeName),      /* nodename */
-		Int32GetDatum(nodePort),		    /* nodeport */
-		ObjectIdGetDatum(goalStateOid),	    /* goalstate */
+		Int32GetDatum(nodePort),            /* nodeport */
+		ObjectIdGetDatum(goalStateOid),     /* goalstate */
 		ObjectIdGetDatum(reportedStateOid), /* reportedstate */
 		Int32GetDatum(candidatePriority),   /* candidate_priority */
-		BoolGetDatum(replicationQuorum)	/* replication_quorum */
+		BoolGetDatum(replicationQuorum) /* replication_quorum */
 	};
 
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
@@ -753,18 +753,18 @@ ReportAutoFailoverNodeState(char *nodeName, int nodePort,
 
 	Oid argTypes[] = {
 		replicationStateTypeOid, /* reportedstate */
-		BOOLOID,				 /* pg_ctl status: is running */
-		TEXTOID,				 /* pg_stat_replication.sync_state */
-		LSNOID,				 	 /* reportedlsn */
-		TEXTOID,				 /* nodename */
-		INT4OID					 /* nodeport */
+		BOOLOID,                 /* pg_ctl status: is running */
+		TEXTOID,                 /* pg_stat_replication.sync_state */
+		LSNOID,                  /* reportedlsn */
+		TEXTOID,                 /* nodename */
+		INT4OID                  /* nodeport */
 	};
 
 	Datum argValues[] = {
 		ObjectIdGetDatum(reportedStateOid),   /* reportedstate */
-		BoolGetDatum(pgIsRunning),			  /* pg_ctl status: is running */
+		BoolGetDatum(pgIsRunning),            /* pg_ctl status: is running */
 		CStringGetTextDatum(SyncStateToString(pgSyncState)), /* sync_state */
-		LSNGetDatum(reportedLSN),			  /* reportedlsn */
+		LSNGetDatum(reportedLSN),             /* reportedlsn */
 		CStringGetTextDatum(nodeName),        /* nodename */
 		Int32GetDatum(nodePort)               /* nodeport */
 	};
@@ -843,6 +843,7 @@ ReportAutoFailoverNodeHealth(char *nodeName, int nodePort,
 	SPI_finish();
 }
 
+
 /*
  * ReportAutoFailoverNodeReplicationSetting persists the replication properties of
  * a node.
@@ -851,21 +852,21 @@ ReportAutoFailoverNodeHealth(char *nodeName, int nodePort,
  */
 void
 ReportAutoFailoverNodeReplicationSetting(int nodeid, char *nodeName, int nodePort,
-									 	 int candidatePriority,
+										 int candidatePriority,
 										 bool replicationQuorum)
 {
 	Oid argTypes[] = {
-		INT4OID,				 /* candidate_priority */
-		BOOLOID,				 /* repliation_quorum */
-		INT4OID,				 /* nodeid */
-		TEXTOID,				 /* nodename */
-		INT4OID					 /* nodeport */
+		INT4OID,                 /* candidate_priority */
+		BOOLOID,                 /* repliation_quorum */
+		INT4OID,                 /* nodeid */
+		TEXTOID,                 /* nodename */
+		INT4OID                  /* nodeport */
 	};
 
 	Datum argValues[] = {
-		Int32GetDatum(candidatePriority),	  /* candidate_priority */
-		BoolGetDatum(replicationQuorum),	  /* replication_quorum */
-		Int32GetDatum(nodeid),				  /* nodeid */
+		Int32GetDatum(candidatePriority),     /* candidate_priority */
+		BoolGetDatum(replicationQuorum),      /* replication_quorum */
+		Int32GetDatum(nodeid),                /* nodeid */
 		CStringGetTextDatum(nodeName),        /* nodename */
 		Int32GetDatum(nodePort)               /* nodeport */
 	};
@@ -874,8 +875,8 @@ ReportAutoFailoverNodeReplicationSetting(int nodeid, char *nodeName, int nodePor
 
 	const char *updateQuery =
 		"UPDATE " AUTO_FAILOVER_NODE_TABLE " SET "
-		"candidatepriority = $1, replicationquorum = $2 "
-		"WHERE nodeid = $3 and nodename = $4 AND nodeport = $5";
+										   "candidatepriority = $1, replicationquorum = $2 "
+										   "WHERE nodeid = $3 and nodename = $4 AND nodeport = $5";
 
 	SPI_connect();
 
@@ -890,6 +891,7 @@ ReportAutoFailoverNodeReplicationSetting(int nodeid, char *nodeName, int nodePor
 
 	SPI_finish();
 }
+
 
 /*
  * RemoveAutoFailoverNode removes a node from a AutoFailover formation.
@@ -936,17 +938,21 @@ RemoveAutoFailoverNode(char *nodeName, int nodePort)
 SyncState
 SyncStateFromString(const char *pgsrSyncState)
 {
-	SyncState syncStateArray[] = { SYNC_STATE_UNKNOWN,
-								   SYNC_STATE_UNKNOWN,
-								   SYNC_STATE_SYNC,
-								   SYNC_STATE_ASYNC,
-								   SYNC_STATE_QUORUM,
-								   SYNC_STATE_POTENTIAL };
-	char *syncStateList[] = {"", "unknown",
-							 "sync", "async", "quorum", "potential",
-							 NULL};
+	SyncState syncStateArray[] = {
+		SYNC_STATE_UNKNOWN,
+		SYNC_STATE_UNKNOWN,
+		SYNC_STATE_SYNC,
+		SYNC_STATE_ASYNC,
+		SYNC_STATE_QUORUM,
+		SYNC_STATE_POTENTIAL
+	};
+	char *syncStateList[] = {
+		"", "unknown",
+		"sync", "async", "quorum", "potential",
+		NULL
+	};
 
-	for(int listIndex = 0; syncStateList[listIndex] != NULL; listIndex++)
+	for (int listIndex = 0; syncStateList[listIndex] != NULL; listIndex++)
 	{
 		char *candidate = syncStateList[listIndex];
 
@@ -974,19 +980,29 @@ SyncStateToString(SyncState pgsrSyncState)
 	switch (pgsrSyncState)
 	{
 		case SYNC_STATE_UNKNOWN:
+		{
 			return "unknown";
+		}
 
 		case SYNC_STATE_ASYNC:
+		{
 			return "async";
+		}
 
 		case SYNC_STATE_SYNC:
+		{
 			return "sync";
+		}
 
 		case SYNC_STATE_QUORUM:
+		{
 			return "quorum";
+		}
 
 		case SYNC_STATE_POTENTIAL:
+		{
 			return "potential";
+		}
 
 		default:
 			ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -1006,9 +1022,9 @@ SyncStateToString(SyncState pgsrSyncState)
 bool
 IsCurrentState(AutoFailoverNode *pgAutoFailoverNode, ReplicationState state)
 {
-	return pgAutoFailoverNode != NULL
-		&& pgAutoFailoverNode->goalState == pgAutoFailoverNode->reportedState
-		&& pgAutoFailoverNode->goalState == state;
+	return pgAutoFailoverNode != NULL &&
+		   pgAutoFailoverNode->goalState == pgAutoFailoverNode->reportedState &&
+		   pgAutoFailoverNode->goalState == state;
 }
 
 
@@ -1019,11 +1035,11 @@ IsCurrentState(AutoFailoverNode *pgAutoFailoverNode, ReplicationState state)
 bool
 CanTakeWritesInState(ReplicationState state)
 {
-	return state == REPLICATION_STATE_SINGLE
-		|| state == REPLICATION_STATE_PRIMARY
-		|| state == REPLICATION_STATE_WAIT_PRIMARY
-		|| state == REPLICATION_STATE_JOIN_PRIMARY
-		|| state == REPLICATION_STATE_APPLY_SETTINGS;
+	return state == REPLICATION_STATE_SINGLE ||
+		   state == REPLICATION_STATE_PRIMARY ||
+		   state == REPLICATION_STATE_WAIT_PRIMARY ||
+		   state == REPLICATION_STATE_JOIN_PRIMARY ||
+		   state == REPLICATION_STATE_APPLY_SETTINGS;
 }
 
 
@@ -1034,10 +1050,9 @@ CanTakeWritesInState(ReplicationState state)
 bool
 StateBelongsToPrimary(ReplicationState state)
 {
-	return CanTakeWritesInState(state)
-		|| state == REPLICATION_STATE_DRAINING
-		|| state == REPLICATION_STATE_DEMOTED
-		|| state == REPLICATION_STATE_DEMOTE_TIMEOUT;
+	return CanTakeWritesInState(state) ||
+		   state == REPLICATION_STATE_DRAINING ||
+		   state == REPLICATION_STATE_DEMOTE_TIMEOUT;
 }
 
 
@@ -1049,11 +1064,11 @@ StateBelongsToPrimary(ReplicationState state)
 bool
 IsInWaitOrJoinState(AutoFailoverNode *node)
 {
-	return node != NULL
-		&& (node->reportedState == REPLICATION_STATE_WAIT_PRIMARY
-			|| node->goalState == REPLICATION_STATE_WAIT_PRIMARY
-			|| node->reportedState == REPLICATION_STATE_JOIN_PRIMARY
-			|| node->goalState == REPLICATION_STATE_JOIN_PRIMARY);
+	return node != NULL &&
+		   (node->reportedState == REPLICATION_STATE_WAIT_PRIMARY ||
+			node->goalState == REPLICATION_STATE_WAIT_PRIMARY ||
+			node->reportedState == REPLICATION_STATE_JOIN_PRIMARY ||
+			node->goalState == REPLICATION_STATE_JOIN_PRIMARY);
 }
 
 
@@ -1064,7 +1079,7 @@ IsInWaitOrJoinState(AutoFailoverNode *node)
 bool
 IsInPrimaryState(AutoFailoverNode *pgAutoFailoverNode)
 {
-	return pgAutoFailoverNode != NULL
-		&& pgAutoFailoverNode->goalState == pgAutoFailoverNode->reportedState
-		&& CanTakeWritesInState(pgAutoFailoverNode->goalState);
+	return pgAutoFailoverNode != NULL &&
+		   pgAutoFailoverNode->goalState == pgAutoFailoverNode->reportedState &&
+		   CanTakeWritesInState(pgAutoFailoverNode->goalState);
 }

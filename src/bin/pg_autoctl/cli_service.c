@@ -83,12 +83,16 @@ cli_service_run(int argc, char **argv)
 	switch (ProbeConfigurationFileRole(config.pathnames.config))
 	{
 		case PG_AUTOCTL_ROLE_MONITOR:
+		{
 			(void) cli_monitor_run(argc, argv);
 			break;
+		}
 
 		case PG_AUTOCTL_ROLE_KEEPER:
+		{
 			(void) cli_keeper_run(argc, argv);
 			break;
+		}
 
 		default:
 		{
@@ -307,16 +311,22 @@ cli_getopt_pgdata_and_mode(int argc, char **argv)
 				switch (verboseCount)
 				{
 					case 1:
+					{
 						log_set_level(LOG_INFO);
 						break;
+					}
 
 					case 2:
+					{
 						log_set_level(LOG_DEBUG);
 						break;
+					}
 
 					default:
+					{
 						log_set_level(LOG_TRACE);
 						break;
+					}
 				}
 				break;
 			}

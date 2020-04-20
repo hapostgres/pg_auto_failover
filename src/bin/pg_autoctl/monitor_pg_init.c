@@ -34,19 +34,19 @@ GUC monitor_default_settings[] = {
 	{ "shared_preload_libraries", "'pgautofailover'" },
 	{ "listen_addresses", "'*'" },
 	{ "port", "5432" },
-	{ "log_destination", "stderr"},
-	{ "logging_collector", "on"},
-	{ "log_directory", "log"},
-	{ "log_min_messages", "info"},
-	{ "log_connections", "on"},
-	{ "log_disconnections", "on"},
-	{ "log_lock_waits", "on"},
+	{ "log_destination", "stderr" },
+	{ "logging_collector", "on" },
+	{ "log_directory", "log" },
+	{ "log_min_messages", "info" },
+	{ "log_connections", "on" },
+	{ "log_disconnections", "on" },
+	{ "log_lock_waits", "on" },
 	{ "ssl", "off" },
 	{ "ssl_ca_file", "" },
 	{ "ssl_crl_file", "" },
 	{ "ssl_cert_file", "" },
 	{ "ssl_key_file", "" },
-	{ "ssl_ciphers", "'TLSv1.2+HIGH:!aNULL:!eNULL'" },
+	{ "ssl_ciphers", "'" DEFAULT_SSL_CIPHERS "'" },
 #ifdef TEST
 	{ "unix_socket_directories", "''" },
 #endif
@@ -212,6 +212,7 @@ monitor_install(const char *nodename,
 	local_postgres_init(&postgres, &pgSetup);
 
 	if (!pgsql_create_user(&postgres.sqlClient, PG_AUTOCTL_MONITOR_DBOWNER,
+
 	                       /* password, login, superuser, replication */
 						   NULL, true, false, false))
 	{

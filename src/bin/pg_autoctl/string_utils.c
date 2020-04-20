@@ -14,7 +14,13 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "postgres_fe.h"
+#include "pqexpbuffer.h"
+
+#include "defaults.h"
 #include "file_utils.h"
+#include "log.h"
+#include "parsing.h"
 #include "string_utils.h"
 
 /*
@@ -267,7 +273,7 @@ stringToShort(const char *str, short *number)
 }
 
 
- /*
+/*
  * converts given string to unsigned short value.
  * returns 0 upon failure and sets error flag
  */
@@ -360,7 +366,7 @@ stringToInt32(const char *str, int32_t *number)
 }
 
 
- /*
+/*
  * converts given string to 32 bit unsigned int value.
  * returns 0 upon failure and sets error flag
  */
@@ -417,8 +423,7 @@ splitLines(char *errorMessage, char **linesArray, int size)
 	int lineNumber = 0;
 	char *currentLine = errorMessage;
 
-	do
-	{
+	do {
 		char *newLinePtr = strchr(currentLine, '\n');
 
 		if (newLinePtr == NULL && strlen(currentLine) > 0)
@@ -434,9 +439,7 @@ splitLines(char *errorMessage, char **linesArray, int size)
 
 			currentLine = ++newLinePtr;
 		}
-	}
-	while (currentLine != NULL && *currentLine != '\0' && lineNumber < size);
+	} while (currentLine != NULL && *currentLine != '\0' && lineNumber < size);
 
 	return lineNumber;
 }
-
