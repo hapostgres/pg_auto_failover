@@ -1288,7 +1288,18 @@ pgsetup_validate_ssl_settings(PostgresSetup *pgSetup)
 			log_info("Using default --ssl-mode \"%s\"", ssl->sslModeStr);
 		}
 
-		return true;
+		/*
+		 * Normalize the filenames.
+		 * We already log errors so we can simply return the result
+		 */
+		return normalize_filename(pgSetup->ssl.caFile, pgSetup->ssl.caFile,
+								  MAXPGPATH) &&
+			   normalize_filename(pgSetup->ssl.crlFile, pgSetup->ssl.crlFile,
+								  MAXPGPATH) &&
+			   normalize_filename(pgSetup->ssl.serverCert, pgSetup->ssl.serverCert,
+								  MAXPGPATH) &&
+			   normalize_filename(pgSetup->ssl.serverKey, pgSetup->ssl.serverKey,
+								  MAXPGPATH);
 	}
 
 	/*
