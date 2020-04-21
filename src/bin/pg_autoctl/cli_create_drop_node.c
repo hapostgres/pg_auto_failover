@@ -532,7 +532,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 			/*
 			 * { "ssl-ca-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG }
 			 * { "ssl-crl-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG }
-			 * { "server-crt", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG }
+			 * { "server-cert", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG }
 			 * { "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG }
 			 * { "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG },
 			 */
@@ -615,7 +615,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 		log_fatal("Explicit SSL choice is required: please use either "
 				  "--ssl-self-signed or provide your certificates "
 				  "using --ssl-ca-file, --ssl-crl-file, "
-				  "--server-key, and --server-crt (or use --no-ssl if you "
+				  "--server-key, and --server-cert (or use --no-ssl if you "
 				  "are very sure that you do not want encrypted traffic)");
 		exit(EXIT_CODE_BAD_ARGS);
 	}

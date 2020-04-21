@@ -1232,7 +1232,7 @@ pgsetup_validate_ssl_settings(PostgresSetup *pgSetup)
 	 *
 	 *  --ssl-ca-file
 	 *  --ssl-crl-file
-	 *  --server-crt
+	 *  --server-cert
 	 *  --server-key
 	 */
 	if (ssl->active && !ssl->createSelfSignedCert)
@@ -1267,7 +1267,7 @@ pgsetup_validate_ssl_settings(PostgresSetup *pgSetup)
 
 		if (!file_exists(ssl->serverCert))
 		{
-			log_error("--server-crt file does not exist at \"%s\"",
+			log_error("--server-cert file does not exist at \"%s\"",
 					  ssl->serverCert);
 			return false;
 		}
