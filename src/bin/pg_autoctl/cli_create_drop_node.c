@@ -189,9 +189,11 @@ cli_create_config(Keeper *keeper, KeeperConfig *config)
  * handling.
  */
 void
-cli_create_pg(Keeper *keeper, KeeperConfig *config)
+cli_create_pg(Keeper *keeper)
 {
-	if (!keeper_pg_init(keeper, config))
+	KeeperConfig *config = &(keeper->config);
+
+	if (!keeper_pg_init(keeper))
 	{
 		/* errors have been logged */
 		exit(EXIT_CODE_BAD_STATE);
@@ -303,28 +305,30 @@ static void
 cli_create_postgres(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
-	KeeperConfig config = keeperOptions;
+	KeeperConfig *config = &(keeper.config);
 
-	if (!file_exists(config.pathnames.config))
+	keeper.config = keeperOptions;
+
+	if (!file_exists(keeper.config.pathnames.config))
 	{
 		/* pg_autoctl create postgres: mark ourselves as a standalone node */
-		config.pgSetup.pgKind = NODE_KIND_STANDALONE;
-		strlcpy(config.nodeKind, "standalone", NAMEDATALEN);
+		keeper.config.pgSetup.pgKind = NODE_KIND_STANDALONE;
+		strlcpy(keeper.config.nodeKind, "standalone", NAMEDATALEN);
 
-		if (!check_or_discover_nodename(&config))
+		if (!check_or_discover_nodename(config))
 		{
 			/* errors have already been logged */
 			exit(EXIT_CODE_BAD_ARGS);
 		}
 	}
 
-	if (!cli_create_config(&keeper, &config))
+	if (!cli_create_config(&keeper, config))
 	{
 		log_error("Failed to initialize our configuration, see above.");
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	cli_create_pg(&keeper, &config);
+	cli_create_pg(&keeper);
 }
 
 

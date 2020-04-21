@@ -99,7 +99,7 @@ keeper_service_init(Keeper *keeper, pid_t *pid)
 	{
 		log_warn("The `pg_autoctl create` did not complete, completing now.");
 
-		if (!keeper_pg_init_continue(keeper, config))
+		if (!keeper_pg_init_continue(keeper))
 		{
 			/* errors have already been logged. */
 			return false;

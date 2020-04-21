@@ -830,8 +830,10 @@ keeper_check_monitor_extension_version(Keeper *keeper)
  * difference that we don't have a monitor to talk to.
  */
 bool
-keeper_init_fsm(Keeper *keeper, KeeperConfig *config)
+keeper_init_fsm(Keeper *keeper)
 {
+	KeeperConfig *config = &(keeper->config);
+
 	/* fake the initial state provided at monitor registration time */
 	MonitorAssignedState assignedState = {
 		.nodeId = -1,

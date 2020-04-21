@@ -34,7 +34,7 @@ typedef struct Keeper
 
 
 bool keeper_init(Keeper *keeper, KeeperConfig *config);
-bool keeper_init_fsm(Keeper *keeper, KeeperConfig *config);
+bool keeper_init_fsm(Keeper *keeper);
 bool keeper_register_and_init(Keeper *keeper, KeeperConfig *config,
 							  NodeState initialState);
 bool keeper_load_state(Keeper *keeper);

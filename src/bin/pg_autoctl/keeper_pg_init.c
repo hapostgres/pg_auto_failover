@@ -43,8 +43,8 @@ bool keeperInitWarnings = false;
 
 static KeeperStateInit initState = { 0 };
 
-static bool keeper_pg_init_fsm(Keeper *keeper, KeeperConfig *config);
-static bool keeper_pg_init_and_register(Keeper *keeper, KeeperConfig *config);
+static bool keeper_pg_init_fsm(Keeper *keeper);
+static bool keeper_pg_init_and_register(Keeper *keeper);
 static bool reach_initial_state(Keeper *keeper);
 static bool wait_until_primary_is_ready(Keeper *config,
 										MonitorAssignedState *assignedState);
@@ -58,18 +58,20 @@ static bool keeper_pg_init_node_active(Keeper *keeper);
  * keeper_pg_init_fsm.
  */
 bool
-keeper_pg_init(Keeper *keeper, KeeperConfig *config)
+keeper_pg_init(Keeper *keeper)
 {
+	KeeperConfig *config = &(keeper->config);
+
 	log_trace("keeper_pg_init: monitor is %s",
 			  config->monitorDisabled ? "disabled" : "enabled");
 
 	if (config->monitorDisabled)
 	{
-		return keeper_pg_init_fsm(keeper, config);
+		return keeper_pg_init_fsm(keeper);
 	}
 	else
 	{
-		return keeper_pg_init_and_register(keeper, config);
+		return keeper_pg_init_and_register(keeper);
 	}
 }
 
@@ -81,9 +83,9 @@ keeper_pg_init(Keeper *keeper, KeeperConfig *config)
  * for orders from another software.
  */
 static bool
-keeper_pg_init_fsm(Keeper *keeper, KeeperConfig *config)
+keeper_pg_init_fsm(Keeper *keeper)
 {
-	return keeper_init_fsm(keeper, config);
+	return keeper_init_fsm(keeper);
 }
 
 
@@ -109,8 +111,10 @@ keeper_pg_init_fsm(Keeper *keeper, KeeperConfig *config)
  * done, PostgreSQL is known to be running in the proper state.
  */
 static bool
-keeper_pg_init_and_register(Keeper *keeper, KeeperConfig *config)
+keeper_pg_init_and_register(Keeper *keeper)
 {
+	KeeperConfig *config = &(keeper->config);
+
 	/*
 	 * The initial state we may register in depend on the current PostgreSQL
 	 * instance that might exist or not at PGDATA.
@@ -135,7 +139,7 @@ keeper_pg_init_and_register(Keeper *keeper, KeeperConfig *config)
 	 */
 	if (file_exists(config->pathnames.init))
 	{
-		return keeper_pg_init_continue(keeper, config);
+		return keeper_pg_init_continue(keeper);
 	}
 
 	if (file_exists(config->pathnames.state))
@@ -294,8 +298,10 @@ keeper_pg_init_and_register(Keeper *keeper, KeeperConfig *config)
  * registered to the monitor: that's when we create the init file.
  */
 bool
-keeper_pg_init_continue(Keeper *keeper, KeeperConfig *config)
+keeper_pg_init_continue(Keeper *keeper)
 {
+	KeeperConfig *config = &(keeper->config);
+
 	if (!keeper_init(keeper, config))
 	{
 		/* errors have already been logged */
