@@ -579,7 +579,19 @@ cli_config_set(int argc, char **argv)
 
 		case PG_AUTOCTL_ROLE_KEEPER:
 		{
+			pid_t pid;
+
 			(void) cli_keeper_config_set(argc, argv);
+
+			if (read_pidfile(config.pathnames.pid, &pid))
+			{
+				if (kill(pid, SIGHUP) != 0)
+				{
+					log_error("Failed to send SIGHUP to the keeper's pid %d: %m",
+							  pid);
+					exit(EXIT_CODE_INTERNAL_ERROR);
+				}
+			}
 			break;
 		}
 
