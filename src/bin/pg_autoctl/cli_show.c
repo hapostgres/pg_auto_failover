@@ -816,6 +816,12 @@ cli_show_formation_uri(int argc, char **argv)
 				exit(EXIT_CODE_BAD_CONFIG);
 			}
 
+			/*
+			 * Use the pgSetup values from the monitor. This makes sure the ssl
+			 * options are correct.
+			 */
+			kconfig.pgSetup = mconfig.pgSetup;
+
 			(void) print_monitor_and_formation_uri(&kconfig, &monitor, stdout);
 			break;
 		}
