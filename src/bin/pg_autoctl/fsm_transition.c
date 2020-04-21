@@ -673,8 +673,6 @@ fsm_init_standby(Keeper *keeper)
 	ReplicationSource replicationSource = { 0 };
 	int groupId = keeper->state.current_group;
 
-	char applicationName[BUFSIZE] = { 0 };
-
 	/* get the primary node to follow */
 	if (!config->monitorDisabled)
 	{
@@ -695,19 +693,19 @@ fsm_init_standby(Keeper *keeper)
 		replicationSource.primaryNode.port = keeper->otherNodes.nodes[0].port;
 	}
 
-	replicationSource.userName = PG_AUTOCTL_REPLICA_USERNAME;
-	replicationSource.password = config->replication_password;
-	replicationSource.slotName = config->replication_slot_name;
-	replicationSource.maximumBackupRate = config->maximum_backup_rate;
-	replicationSource.backupDir = config->backupDirectory;
-	replicationSource.sslOptions = config->pgSetup.ssl;
-
-	/* prepare our application_name */
-	sformat(applicationName, BUFSIZE,
-			"%s%d",
-			REPLICATION_APPLICATION_NAME_PREFIX,
-			keeper->state.current_node_id);
-	replicationSource.applicationName = applicationName;
+	if (!standby_init_replication_source(&replicationSource,
+										 NULL, /* primaryNode is done */
+										 PG_AUTOCTL_REPLICA_USERNAME,
+										 config->replication_password,
+										 config->replication_slot_name,
+										 config->maximum_backup_rate,
+										 config->backupDirectory,
+										 config->pgSetup.ssl,
+										 keeper->state.current_node_id))
+	{
+		/* can't happen at the moment */
+		return false;
+	}
 
 	if (!standby_init_database(postgres, &replicationSource, config->nodename))
 	{
@@ -734,8 +732,6 @@ fsm_rewind_or_init(Keeper *keeper)
 	ReplicationSource replicationSource = { 0 };
 	int groupId = keeper->state.current_group;
 
-	char applicationName[BUFSIZE] = { 0 };
-
 	/* get the primary node to follow */
 	if (!config->monitorDisabled)
 	{
@@ -756,20 +752,19 @@ fsm_rewind_or_init(Keeper *keeper)
 		replicationSource.primaryNode.port = keeper->otherNodes.nodes[0].port;
 	}
 
-	replicationSource.userName = PG_AUTOCTL_REPLICA_USERNAME;
-	replicationSource.password = config->replication_password;
-	replicationSource.slotName = config->replication_slot_name;
-	replicationSource.applicationName = config->replication_slot_name;
-	replicationSource.maximumBackupRate = config->maximum_backup_rate;
-	replicationSource.backupDir = config->backupDirectory;
-	replicationSource.sslOptions = config->pgSetup.ssl;
-
-	/* prepare our application_name */
-	sformat(applicationName, BUFSIZE,
-			"%s%d",
-			REPLICATION_APPLICATION_NAME_PREFIX,
-			keeper->state.current_node_id);
-	replicationSource.applicationName = applicationName;
+	if (!standby_init_replication_source(&replicationSource,
+										 NULL, /* primaryNode is done */
+										 PG_AUTOCTL_REPLICA_USERNAME,
+										 config->replication_password,
+										 config->replication_slot_name,
+										 config->maximum_backup_rate,
+										 config->backupDirectory,
+										 config->pgSetup.ssl,
+										 keeper->state.current_node_id))
+	{
+		/* can't happen at the moment */
+		return false;
+	}
 
 	if (!primary_rewind_to_standby(postgres, &replicationSource))
 	{

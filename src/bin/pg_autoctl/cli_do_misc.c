@@ -273,11 +273,19 @@ keeper_cli_init_standby(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	replicationSource.userName = PG_AUTOCTL_REPLICA_USERNAME;
-	replicationSource.password = config.replication_password;
-	replicationSource.slotName = config.replication_slot_name;
-	replicationSource.maximumBackupRate = MAXIMUM_BACKUP_RATE;
-	replicationSource.backupDir = config.backupDirectory;
+	if (!standby_init_replication_source(&replicationSource,
+										 NULL, /* primaryNode is done */
+										 PG_AUTOCTL_REPLICA_USERNAME,
+										 config.replication_password,
+										 config.replication_slot_name,
+										 config.maximum_backup_rate,
+										 config.backupDirectory,
+										 config.pgSetup.ssl,
+										 0))
+	{
+		/* can't happen at the moment */
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
 
 	if (!standby_init_database(&postgres, &replicationSource, config.nodename))
 	{
@@ -325,12 +333,19 @@ keeper_cli_rewind_old_primary(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	replicationSource.userName = PG_AUTOCTL_REPLICA_USERNAME;
-	replicationSource.password = config.replication_password;
-	replicationSource.slotName = config.replication_slot_name;
-	replicationSource.applicationName = config.replication_slot_name;
-	replicationSource.maximumBackupRate = MAXIMUM_BACKUP_RATE;
-	replicationSource.sslOptions = config.pgSetup.ssl;
+	if (!standby_init_replication_source(&replicationSource,
+										 NULL, /* primaryNode is done */
+										 PG_AUTOCTL_REPLICA_USERNAME,
+										 config.replication_password,
+										 config.replication_slot_name,
+										 config.maximum_backup_rate,
+										 config.backupDirectory,
+										 config.pgSetup.ssl,
+										 0))
+	{
+		/* can't happen at the moment */
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
 
 	if (!primary_rewind_to_standby(&postgres, &replicationSource))
 	{

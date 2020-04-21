@@ -557,6 +557,50 @@ primary_add_standby_to_hba(LocalPostgresServer *postgres,
 
 
 /*
+ * standby_init_replication_source initializes a replication source structure
+ * with given arguments. If the primaryNode is NULL, then the
+ * replicationSource.primary structure slot is not updated.
+ *
+ * Note that we just store the pointers to all those const char *arguments
+ * here, expect for the primaryNode there's no copying involved.
+ */
+bool
+standby_init_replication_source(ReplicationSource *replicationSource,
+								NodeAddress *primaryNode,
+								const char *username,
+								const char *password,
+								const char *slotName,
+								const char *maximumBackupRate,
+								const char *backupDirectory,
+								SSLOptions sslOptions,
+								int currentNodeId)
+{
+	if (primaryNode != NULL)
+	{
+		strlcpy(replicationSource->primaryNode.host,
+				primaryNode->host, _POSIX_HOST_NAME_MAX);
+
+		replicationSource->primaryNode.port = primaryNode->port;
+	}
+
+	strlcpy(replicationSource->userName, username, NAMEDATALEN);
+	strlcpy(replicationSource->password, password, MAXCONNINFO);
+	strlcpy(replicationSource->slotName, slotName, MAXCONNINFO);
+	strlcpy(replicationSource->maximumBackupRate, maximumBackupRate, MAXCONNINFO);
+	strlcpy(replicationSource->backupDir, backupDirectory, MAXCONNINFO);
+	replicationSource->sslOptions = sslOptions;
+
+	/* prepare our application_name */
+	sformat(replicationSource->applicationName, MAXCONNINFO,
+			"%s%d",
+			REPLICATION_APPLICATION_NAME_PREFIX,
+			currentNodeId);
+
+	return true;
+}
+
+
+/*
  * standby_init_database tries to initialize PostgreSQL as a hot standby. It uses
  * pg_basebackup to do so. Returns false on failure.
  */

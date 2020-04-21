@@ -95,15 +95,21 @@ typedef struct NodeAddressArray
 	NodeAddress nodes[NODE_ARRAY_MAX_COUNT];
 } NodeAddressArray;
 
+/*
+ * The replicationSource structure is used to pass the bits of a connection
+ * string to the primary node around in several function calls. All the
+ * information stored in there must fit in a connection string, so MAXCONNINFO
+ * is a good proxy for their maximum size.
+ */
 typedef struct ReplicationSource
 {
 	NodeAddress primaryNode;
-	char *userName;
-	char *slotName;
-	char *password;
-	char *maximumBackupRate;
-	char *backupDir;
-	char *applicationName;
+	char userName[NAMEDATALEN];
+	char slotName[MAXCONNINFO];
+	char password[MAXCONNINFO];
+	char maximumBackupRate[MAXCONNINFO];
+	char backupDir[MAXCONNINFO];
+	char applicationName[MAXCONNINFO];
 	SSLOptions sslOptions;
 } ReplicationSource;
 

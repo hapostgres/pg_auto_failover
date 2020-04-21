@@ -569,7 +569,7 @@ pg_basebackup(const char *pgdata,
 
 	setenv("PGCONNECT_TIMEOUT", POSTGRES_CONNECT_TIMEOUT, 1);
 
-	if (replicationSource->password != NULL)
+	if (!IS_EMPTY_STRING_BUFFER(replicationSource->password))
 	{
 		setenv("PGPASSWORD", replicationSource->password, 1);
 	}
@@ -670,7 +670,7 @@ pg_rewind(const char *pgdata,
 
 	setenv("PGCONNECT_TIMEOUT", POSTGRES_CONNECT_TIMEOUT, 1);
 
-	if (replicationSource->password != NULL)
+	if (!IS_EMPTY_STRING_BUFFER(replicationSource->password))
 	{
 		setenv("PGPASSWORD", replicationSource->password, 1);
 	}

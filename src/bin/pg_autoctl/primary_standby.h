@@ -63,11 +63,20 @@ bool primary_create_replication_user(LocalPostgresServer *postgres,
 									 char *replicationPassword);
 bool primary_add_standby_to_hba(LocalPostgresServer *postgres,
 								char *standbyHost, const char *replicationPassword);
-bool primary_rewind_to_standby(LocalPostgresServer *postgres,
-							   ReplicationSource *replicationSource);
+bool standby_init_replication_source(ReplicationSource *replicationSource,
+									 NodeAddress *primaryNode,
+									 const char *username,
+									 const char *password,
+									 const char *slotName,
+									 const char *maximumBackupRate,
+									 const char *backupDirectory,
+									 SSLOptions sslOptions,
+									 int currentNodeId);
 bool standby_init_database(LocalPostgresServer *postgres,
 						   ReplicationSource *replicationSource,
 						   const char *nodename);
+bool primary_rewind_to_standby(LocalPostgresServer *postgres,
+							   ReplicationSource *replicationSource);
 bool standby_promote(LocalPostgresServer *postgres);
 bool check_postgresql_settings(LocalPostgresServer *postgres,
 							   bool *settings_are_ok);
