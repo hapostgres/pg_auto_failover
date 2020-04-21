@@ -32,7 +32,7 @@ keeper::
     + show      Show pg_auto_failover information
     + enable    Enable a feature on a formation
     + disable   Disable a feature on a formation
-    + perform  Perform an action orchestrated by the monitor      
+    + perform  Perform an action orchestrated by the monitor
       run       Run the pg_autoctl service (monitor or keeper)
       stop      signal the pg_autoctl service for it to stop
       reload    signal the pg_autoctl for it to reload its configuration
@@ -64,15 +64,17 @@ keeper::
     pg_autoctl enable
       secondary    Enable secondary nodes on a formation
       maintenance  Enable Postgres maintenance mode on this node
+      ssl          Enable SSL configuration on this node
 
     pg_autoctl disable
       secondary    Disable secondary nodes on a formation
       maintenance  Disable Postgres maintenance mode on this node
+      ssl          Disable SSL configuration on this node
 
     pg_autoctl perform
       failover    Perform a failover for given formation and group
       switchover  Perform a switchover for given formation and group
-      
+
 
 The first step consists of creating a pg_auto_failover monitor thanks to the
 command ``pg_autoctl create monitor``, and the command ``pg_autoctl show
@@ -133,7 +135,7 @@ commands are dealing with the monitor:
      You may use the `--nodename` command line option to bypass the whole
      DNS lookup based process and force the local node name to a fixed
      value.
-     
+
      The ``--auth`` option allows setting up authentication method to be
      used for connections from data nodes with ``autoctl_node`` user. When
      testing pg_auto_failover for the first time using ``--auth trust``
@@ -142,7 +144,7 @@ commands are dealing with the monitor:
      password is manually set on the monitor, and appropriate setting is
      added to `.pgpass` file on data node. You could also use some of the
      advanced Postgres authentication mechanism such as SSL certificates.
-     
+
      See :ref:`pg_auto_failover_security` for notes on `.pgpass`
 
   - ``pg_autoctl run``
@@ -266,13 +268,13 @@ To discover current information about a pg_auto_failover setup, the
       $ pg_autoctl show file --help
       pg_autoctl show file: List pg_autoctl internal files (config, state, pid)
       usage: pg_autoctl show file  [ --pgdata --all --config | --state | --init | --pid --contents ]
-      
-        --pgdata      path to data directory 
-        --all         show all pg_autoctl files 
-        --config      show pg_autoctl configuration file 
-        --state       show pg_autoctl state file 
-        --init        show pg_autoctl initialisation state file 
-        --pid         show pg_autoctl PID file 
+
+        --pgdata      path to data directory
+        --all         show all pg_autoctl files
+        --config      show pg_autoctl configuration file
+        --state       show pg_autoctl state file
+        --init        show pg_autoctl initialisation state file
+        --pid         show pg_autoctl PID file
         --contents    show selected file contents
 
     The command ``pg_auctoctl show file`` outputs a JSON object with the
@@ -282,7 +284,7 @@ To discover current information about a pg_auto_failover setup, the
     is printed.
 
     Here's an example of the JSON output::
-      
+
       $ pg_autoctl show file --pgdata /data/pgsql
       {
         "config": "/Users/dim/.config/pg_autoctl/data/pgsql/pg_autoctl.cfg",
@@ -290,13 +292,13 @@ To discover current information about a pg_auto_failover setup, the
         "init": "/Users/dim/.local/share/pg_autoctl/data/pgsql/pg_autoctl.init",
         "pid": "/private/tmp/pg_autoctl/data/pgsql/pg_autoctl.pid"
       }
-    
+
 
   - ``pg_autoctl show systemd``
 
     This command outputs a configuration unit that is suitable for
     registering ``pg_autoctl`` as a systemd service.
-          
+
 
 .. _pg_autoctl_create_postgres:
 
@@ -543,7 +545,7 @@ keeper and monitor, use the following command::
     $ pg_autoctl drop node --help
     pg_autoctl drop node: Drop a node from the pg_auto_failover monitor
     usage: pg_autoctl drop node [ --pgdata --destroy --nodename --nodeport ]
-    
+
       --pgdata      path to data directory
       --destroy     also destroy Postgres database
       --nodename    nodename to remove from the monitor
@@ -606,10 +608,12 @@ through the following commands, only available in debug environments::
     pg_autoctl enable
       secondary    Enable secondary nodes on a formation
       maintenance  Enable Postgres maintenance mode on this node
+      ssl          Enable SSL configuration on this node
 
     pg_autoctl disable
       secondary    Disable secondary nodes on a formation
       maintenance  Disable Postgres maintenance mode on this node
+      ssl          Disable SSL configuration on this node
 
     pg_autoctl do
     + monitor      Query a pg_auto_failover monitor

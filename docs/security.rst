@@ -317,11 +317,18 @@ is not edited for you, because it might be using complex local connection
 options. Please take time to edit your connection string to the monitor
 using::
 
-  $ pg_autoctl config set pg_autoctl.monitor
+  $ pg_autoctl config set pg_autoctl.monitor <the-connection-string>
 
 Before that, you can verify your current configuration with::
 
   $ pg_autoctl config get pg_autoctl.monitor
+
+Note that an already running pg_autoctl deamon will try to reload its
+configuration after ``pg_autoctl config set`` has finished. In some cases
+this is not possible to do without a restart. So be sure to check the logs
+from a running daemon to confirm that the reload succeeded. If it did not
+you may need to restart the daemon to ensure the new connection string is
+used.
 
 The HBA settings are not edited, irrespective of the ``--skip-pg-hba`` that
 has been used at creation time. That's because the ``host`` records match
