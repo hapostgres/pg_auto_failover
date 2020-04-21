@@ -1339,6 +1339,15 @@ pgsetup_validate_ssl_settings(PostgresSetup *pgSetup)
 				 "achieve more security with the same ease of deployment.");
 		log_warn("See https://www.postgresql.org/docs/current/libpq-ssl.html "
 				 "for details on how to improve");
+
+		/* Install a default value for --ssl-mode */
+		if (ssl->sslMode == SSL_MODE_UNKNOWN)
+		{
+			ssl->sslMode = SSL_MODE_PREFER;
+			strlcpy(ssl->sslModeStr,
+					pgsetup_sslmode_to_string(ssl->sslMode), SSL_MODE_STRLEN);
+			log_info("Using default --ssl-mode \"%s\"", ssl->sslModeStr);
+		}
 		return true;
 	}
 

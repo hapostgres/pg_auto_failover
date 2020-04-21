@@ -371,8 +371,8 @@ keeper_config_read_file_skip_pgsetup(KeeperConfig *config,
 
 
 /*
- * keeper_config_read_file_skip_pgsetup overrides values in given KeeperConfig
- * with whatever values are read from given configuration filename.
+ * keeper_config_pgsetup_init overrides values in given KeeperConfig with
+ * whatever values are read from given configuration filename.
  */
 bool
 keeper_config_pgsetup_init(KeeperConfig *config,
