@@ -754,7 +754,7 @@ normalize_filename(const char *filename, char *dst, int size)
 	/* normalize the path to the configuration file, if it exists */
 	if (file_exists(filename))
 	{
-		char realPath[PATH_MAX];
+		char realPath[PATH_MAX] = { 0 };
 
 		if (realpath(filename, realPath) == NULL)
 		{
@@ -772,7 +772,11 @@ normalize_filename(const char *filename, char *dst, int size)
 	}
 	else
 	{
-		strlcpy(dst, filename, MAXPGPATH);
+		char realPath[PATH_MAX] = { 0 };
+
+		/* protect against undefined behavior if dst overlaps with filename */
+		strlcpy(realPath, filename, MAXPGPATH);
+		strlcpy(dst, realPath, MAXPGPATH);
 	}
 
 	return true;
