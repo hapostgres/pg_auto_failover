@@ -31,6 +31,7 @@ static void cli_disable_maintenance(int argc, char **argv);
 
 static int cli_ssl_getopts(int argc, char **argv);
 static void cli_enable_ssl(int argc, char **argv);
+static void cli_disable_ssl(int argc, char **argv);
 
 static bool update_ssl_configuration(LocalPostgresServer *postgres,
 									 const char *nodename);
@@ -80,6 +81,14 @@ static CommandLine enable_ssl_command =
 				 cli_ssl_getopts,
 				 cli_enable_ssl);
 
+static CommandLine disable_ssl_command =
+	make_command("ssl",
+				 "Disable SSL configuration on this node",
+				 CLI_PGDATA_USAGE,
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
+				 cli_disable_ssl);
+
 static CommandLine *enable_subcommands[] = {
 	&enable_secondary_command,
 	&enable_maintenance_command,
@@ -90,6 +99,7 @@ static CommandLine *enable_subcommands[] = {
 static CommandLine *disable_subcommands[] = {
 	&disable_secondary_command,
 	&disable_maintenance_command,
+	&disable_ssl_command,
 	NULL
 };
 
@@ -851,4 +861,30 @@ update_monitor_connection_string(KeeperConfig *config)
 		log_warn("The monitor SSL setup is not ready yet: ssl is off");
 		return false;
 	}
+}
+
+
+/*
+ * cli_disable_ssl enables SSL setup on this node.
+ *
+ * The following two commands do the same thing:
+ *
+ *  - pg_autoctl enable ssl --no-ssl
+ *  - pg_autoctl disable ssl
+ */
+static void
+cli_disable_ssl(int argc, char **argv)
+{
+	/* prepare the global command line options keeperOptions as if --no-ssl */
+	keeperOptions.pgSetup.ssl.active = 0;
+	keeperOptions.pgSetup.ssl.createSelfSignedCert = false;
+
+	/* this does some validation and user facing WARNing messages */
+	if (!pgsetup_validate_ssl_settings(&(keeperOptions.pgSetup)))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	(void) cli_enable_ssl(argc, argv);
 }
