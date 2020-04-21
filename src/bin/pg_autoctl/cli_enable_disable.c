@@ -707,6 +707,22 @@ cli_enable_ssl(int argc, char **argv)
 				exit(EXIT_CODE_BAD_CONFIG);
 			}
 
+			/* display a nice summary to our users */
+			log_info("Successfully enabled new SSL configuration:");
+			log_info("  SSL is now %s",
+					 pgSetup->ssl.active ? "active" : "disabled");
+
+			if (pgSetup->ssl.createSelfSignedCert)
+			{
+				log_info("  Self-Signed certificates have been created and "
+						 "deployed in Postgres configuration settings "
+						 "ssl_key_file and ssl_cert_file");
+			}
+
+			log_info("  Health-check connections to Postgres nodes now "
+					 "use sslmode=%s",
+					 pgsetup_sslmode_to_string(pgSetup->ssl.sslMode));
+
 			break;
 		}
 
@@ -715,6 +731,8 @@ cli_enable_ssl(int argc, char **argv)
 			KeeperConfig kconfig = { 0 };
 			PostgresSetup *pgSetup = &(kconfig.pgSetup);
 			LocalPostgresServer postgres = { 0 };
+
+			bool updatedPrimaryConninfo = false;
 
 			kconfig.pgSetup = options.pgSetup;
 			kconfig.pathnames = options.pathnames;
@@ -753,14 +771,29 @@ cli_enable_ssl(int argc, char **argv)
 			}
 
 			/* update our primary_conninfo to the new sslmode, when secondary */
-			if (!update_primary_conninfo(&kconfig))
+			updatedPrimaryConninfo = update_primary_conninfo(&kconfig);
+
+			/* display a nice summary to our users */
+			log_info("Successfully enabled new SSL configuration:");
+			log_info("  SSL is now %s",
+					 pgSetup->ssl.active ? "active" : "disabled");
+
+			if (pgSetup->ssl.createSelfSignedCert)
 			{
-				log_fatal("Failed to update the replication connection string "
-						  "primary_conninfo to use sslmode \"%s\"",
-						  pgsetup_sslmode_to_string(pgSetup->ssl.sslMode));
-				exit(EXIT_CODE_INTERNAL_ERROR);
+				log_info("  Self-Signed certificates have been created and "
+						 "deployed in Postgres configuration settings "
+						 "ssl_key_file and ssl_cert_file");
 			}
 
+			log_warn("  Postgres connection string to the monitor "
+					 "has not been changed, see above for details");
+
+			if (updatedPrimaryConninfo)
+			{
+				log_info("  Replication connection string primary_conninfo "
+						 "has been updated to use the new sslmode \"%s\"",
+						 pgsetup_sslmode_to_string(pgSetup->ssl.sslMode));
+			}
 			break;
 		}
 
@@ -812,8 +845,9 @@ update_ssl_configuration(LocalPostgresServer *postgres, const char *nodename)
 	/* edit our Postgres setup to include the new SSL settings */
 	if (!postgres_add_default_settings(postgres))
 	{
-		log_error("Failed to initialise postgres as primary because "
-				  "adding default settings failed, see above for details");
+		log_error("Failed to enable SSL: "
+				  "adding default Postgres settings failed, "
+				  "see above for details");
 		return false;
 	}
 
@@ -914,11 +948,8 @@ update_primary_conninfo(KeeperConfig *config)
 		 * already setup the streaming replication from the primary. That's
 		 * when we have locally reached CATCHINGUP or when we have been
 		 * assigned SECONDARY from the monitor.
-		 *
-		 * In all other cases, we have nothing to do here and we happily return
-		 * true as if our task was complete.
 		 */
-		return true;
+		return false;
 	}
 
 	if (!monitor_init(&monitor, config->monitor_pguri))
@@ -962,6 +993,7 @@ update_primary_conninfo(KeeperConfig *config)
 	}
 
 	/* and restart Postgres */
+	log_info("Restarting Postgres to enable new primary_conninfo");
 	return pg_ctl_restart(pgSetup->pg_ctl, pgSetup->pgdata);
 }
 
