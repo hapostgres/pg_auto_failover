@@ -1284,7 +1284,7 @@ prepare_primary_conninfo(char *primaryConnInfo,
 		appendPQExpBuffer(buffer, " dbname=%s", dbname);
 	}
 
-	if (replicationPassword != NULL)
+	if (replicationPassword != NULL && !IS_EMPTY_STRING_BUFFER(replicationPassword))
 	{
 		appendPQExpBuffer(buffer, " password=%s", replicationPassword);
 	}
