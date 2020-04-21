@@ -215,24 +215,7 @@ monitor_config_init_from_pgsetup(MonitorConfig *mconfig,
 	PostgresSetup *MpgSetup = &(mconfig->pgSetup);
 
 	/* copy command line options over to the MonitorConfig structure */
-	strlcpy(MpgSetup->pgdata, pgSetup->pgdata, MAXPGPATH);
-	strlcpy(MpgSetup->pg_ctl, pgSetup->pg_ctl, MAXPGPATH);
-	strlcpy(MpgSetup->pg_version, pgSetup->pg_version, PG_VERSION_STRING_MAX);
-	strlcpy(MpgSetup->pghost, pgSetup->pghost, _POSIX_HOST_NAME_MAX);
-	strlcpy(MpgSetup->listen_addresses, pgSetup->listen_addresses, MAXPGPATH);
-	MpgSetup->pgport = pgSetup->pgport;
-
-	/*
-	 * Make sure that we keep the SSL options too.
-	 */
-	MpgSetup->ssl.active = pgSetup->ssl.active;
-	MpgSetup->ssl.createSelfSignedCert = pgSetup->ssl.createSelfSignedCert;
-	MpgSetup->ssl.sslMode = pgSetup->ssl.sslMode;
-	strlcpy(MpgSetup->ssl.sslModeStr, pgSetup->ssl.sslModeStr, SSL_MODE_STRLEN);
-	strlcpy(MpgSetup->ssl.caFile, pgSetup->ssl.caFile, MAXPGPATH);
-	strlcpy(MpgSetup->ssl.crlFile, pgSetup->ssl.crlFile, MAXPGPATH);
-	strlcpy(MpgSetup->ssl.serverCert, pgSetup->ssl.serverCert, MAXPGPATH);
-	strlcpy(MpgSetup->ssl.serverKey, pgSetup->ssl.serverKey, MAXPGPATH);
+	*MpgSetup = *pgSetup;
 
 	if (!monitor_config_set_pathnames_from_pgdata(mconfig))
 	{
