@@ -47,18 +47,22 @@ static bool fprint_file_contents(const char *filename);
 
 static int cli_show_uri_getopts(int argc, char **argv);
 static void cli_show_uri(int argc, char **argv);
-static void cli_show_all_uri(int argc, char **argv);
-static void cli_show_formation_uri(int argc, char **argv);
 
-static void print_monitor_and_formation_uri(KeeperConfig *config,
-											Monitor *monitor,
-											FILE *stream);
+static void print_monitor_uri(Monitor *monitor, FILE *stream);
+static void print_formation_uri(SSLOptions *ssl,
+								Monitor *monitor,
+								const char *formation,
+								FILE *stream);
+static void print_all_uri(SSLOptions *ssl,
+						  Monitor *monitor,
+						  FILE *stream);
 
 CommandLine show_uri_command =
 	make_command("uri",
 				 "Show the postgres uri to use to connect to pg_auto_failover nodes",
-				 " [ --pgdata --formation --json ] ",
+				 " [ --pgdata --monitor --formation --json ] ",
 				 "  --pgdata      path to data directory\n"
+				 "  --monitor     show the monitor uri\n"
 				 "  --formation   show the coordinator uri of given formation\n"
 				 "  --json        output data in the JSON format\n",
 				 cli_show_uri_getopts,
@@ -152,6 +156,14 @@ typedef struct ShowFileOptions
 
 static ShowFileOptions showFileOptions;
 
+typedef struct ShowUriOptions
+{
+	bool monitorOnly;
+	char formation[NAMEDATALEN];
+} ShowUriOptions;
+
+static ShowUriOptions showUriOptions = { 0 };
+
 
 /*
  * keeper_cli_monitor_state_getopts parses the command line options for the
@@ -166,6 +178,7 @@ cli_show_state_getopts(int argc, char **argv)
 
 	static struct option long_options[] = {
 		{ "pgdata", required_argument, NULL, 'D' },
+		{ "monitor", no_argument, NULL, 'm' },
 		{ "formation", required_argument, NULL, 'f' },
 		{ "group", required_argument, NULL, 'g' },
 		{ "count", required_argument, NULL, 'n' },
@@ -638,6 +651,7 @@ cli_show_uri_getopts(int argc, char **argv)
 
 	static struct option long_options[] = {
 		{ "pgdata", required_argument, NULL, 'D' },
+		{ "monitor", no_argument, NULL, 'm' },
 		{ "formation", required_argument, NULL, 'f' },
 		{ "json", no_argument, NULL, 'J' },
 		{ "version", no_argument, NULL, 'V' },
@@ -657,7 +671,7 @@ cli_show_uri_getopts(int argc, char **argv)
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "D:f:Vvqh",
+	while ((c = getopt_long(argc, argv, "D:Vvqh",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -669,10 +683,17 @@ cli_show_uri_getopts(int argc, char **argv)
 				break;
 			}
 
+			case 'm':
+			{
+				showUriOptions.monitorOnly = true;
+				log_trace("--monitor");
+				break;
+			}
+
 			case 'f':
 			{
-				strlcpy(options.formation, optarg, NAMEDATALEN);
-				log_trace("--formation %s", options.formation);
+				strlcpy(showUriOptions.formation, optarg, NAMEDATALEN);
+				log_trace("--formation %s", showUriOptions.formation);
 				break;
 			}
 
@@ -739,6 +760,12 @@ cli_show_uri_getopts(int argc, char **argv)
 		}
 	}
 
+	if (showUriOptions.monitorOnly && !IS_EMPTY_STRING_BUFFER(showUriOptions.formation))
+	{
+		log_fatal("Please use either --monitor or --formation, not both");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
 	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 	{
 		get_env_pgdata_or_exit(options.pgSetup.pgdata);
@@ -763,32 +790,14 @@ cli_show_uri_getopts(int argc, char **argv)
 static void
 cli_show_uri(int argc, char **argv)
 {
-	KeeperConfig config = keeperOptions;
-
-	if (!IS_EMPTY_STRING_BUFFER(config.formation))
-	{
-		(void) cli_show_formation_uri(argc, argv);
-	}
-	else
-	{
-		(void) cli_show_all_uri(argc, argv);
-	}
-}
-
-
-/*
- * keeper_cli_formation_uri lists the connection string to connect to a formation
- */
-static void
-cli_show_formation_uri(int argc, char **argv)
-{
 	KeeperConfig kconfig = keeperOptions;
+	Monitor monitor = { 0 };
+	SSLOptions *ssl = NULL;
 
 	switch (ProbeConfigurationFileRole(kconfig.pathnames.config))
 	{
 		case PG_AUTOCTL_ROLE_MONITOR:
 		{
-			Monitor monitor = { 0 };
 			MonitorConfig mconfig = { 0 };
 
 			bool missingPgdataIsOk = true;
@@ -815,20 +824,13 @@ cli_show_formation_uri(int argc, char **argv)
 				/* errors have already been logged */
 				exit(EXIT_CODE_BAD_CONFIG);
 			}
+			ssl = &(mconfig.pgSetup.ssl);
 
-			/*
-			 * Use the pgSetup values from the monitor. This makes sure the ssl
-			 * options are correct.
-			 */
-			kconfig.pgSetup = mconfig.pgSetup;
-
-			(void) print_monitor_and_formation_uri(&kconfig, &monitor, stdout);
 			break;
 		}
 
 		case PG_AUTOCTL_ROLE_KEEPER:
 		{
-			Monitor monitor = { 0 };
 			bool monitorDisabledIsOk = false;
 
 			if (!keeper_config_read_file_skip_pgsetup(&kconfig,
@@ -843,8 +845,7 @@ cli_show_formation_uri(int argc, char **argv)
 				/* errors have already been logged */
 				exit(EXIT_CODE_BAD_CONFIG);
 			}
-
-			(void) print_monitor_and_formation_uri(&kconfig, &monitor, stdout);
+			ssl = &(kconfig.pgSetup.ssl);
 			break;
 		}
 
@@ -855,120 +856,65 @@ cli_show_formation_uri(int argc, char **argv)
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 	}
+
+
+	if (showUriOptions.monitorOnly)
+	{
+		(void) print_monitor_uri(&monitor, stdout);
+	}
+	else if (!IS_EMPTY_STRING_BUFFER(showUriOptions.formation))
+	{
+		(void) print_formation_uri(ssl, &monitor, showUriOptions.formation, stdout);
+	}
+	else
+	{
+		(void) print_all_uri(ssl, &monitor, stdout);
+	}
 }
 
 
 /*
- * keeper_cli_monitor_uri shows the postgres uri to use for connecting to the
- * monitor
+ * print_monitor_uri shows the connection strings for the monitor and all
+ * formations managed by it
  */
 static void
-cli_show_all_uri(int argc, char **argv)
+print_monitor_uri(Monitor *monitor,
+				  FILE *stream)
 {
-	KeeperConfig kconfig = keeperOptions;
-
-	switch (ProbeConfigurationFileRole(kconfig.pathnames.config))
+	if (outputJSON)
 	{
-		case PG_AUTOCTL_ROLE_MONITOR:
-		{
-			Monitor monitor = { 0 };
-			MonitorConfig mconfig = { 0 };
-			bool missingPgdataIsOk = true;
-			bool pgIsNotRunningIsOk = true;
-			char connInfo[MAXCONNINFO];
+		JSON_Value *js = json_value_init_object();
+		JSON_Object *jsObj = json_value_get_object(js);
 
-			if (!monitor_config_init_from_pgsetup(&mconfig,
-												  &kconfig.pgSetup,
-												  missingPgdataIsOk,
-												  pgIsNotRunningIsOk))
-			{
-				/* errors have already been logged */
-				exit(EXIT_CODE_PGCTL);
-			}
+		json_object_set_string(jsObj,
+							   "monitor",
+							   monitor->pgsql.connectionString);
 
-			if (!monitor_config_get_postgres_uri(&mconfig, connInfo, MAXCONNINFO))
-			{
-				/* errors have already been logged */
-				exit(EXIT_CODE_BAD_CONFIG);
-			}
-
-			monitor_init(&monitor, connInfo);
-
-			if (outputJSON)
-			{
-				const char *sslMode = mconfig.pgSetup.ssl.sslModeStr;
-
-				if (!monitor_print_every_formation_uri_as_json(&monitor,
-															   sslMode,
-															   stdout))
-				{
-					log_fatal("Failed to get the list of formation URIs");
-					exit(EXIT_CODE_MONITOR);
-				}
-			}
-			else
-			{
-				const char *sslMode = mconfig.pgSetup.ssl.sslModeStr;
-
-				if (!monitor_print_every_formation_uri(&monitor, sslMode))
-				{
-					log_fatal("Failed to get the list of formation URIs");
-					exit(EXIT_CODE_MONITOR);
-				}
-			}
-
-			break;
-		}
-
-		case PG_AUTOCTL_ROLE_KEEPER:
-		{
-			Monitor monitor = { 0 };
-			bool monitorDisabledIsOk = false;
-
-			if (!keeper_config_read_file_skip_pgsetup(
-					&kconfig,
-					monitorDisabledIsOk))
-			{
-				/* errors have already been logged */
-				exit(EXIT_CODE_BAD_CONFIG);
-			}
-
-			if (!monitor_init(&monitor, kconfig.monitor_pguri))
-			{
-				/* errors have already been logged */
-				exit(EXIT_CODE_BAD_CONFIG);
-			}
-
-			(void) print_monitor_and_formation_uri(&kconfig, &monitor, stdout);
-
-			break;
-		}
-
-		default:
-		{
-			log_fatal("Unrecognized configuration file \"%s\"",
-					  kconfig.pathnames.config);
-			exit(EXIT_CODE_INTERNAL_ERROR);
-		}
+		(void) cli_pprint_json(js);
+	}
+	else
+	{
+		fformat(stdout, "%s\n", monitor->pgsql.connectionString);
 	}
 }
 
 
 /*
- * print_monitor_and_formation_uri connects to given monitor to fetch the
+ * print_formation_uri connects to given monitor to fetch the
  * keeper configuration formation's URI, and prints it out on given stream. It
  * is printed in JSON format when outputJSON is true (--json options).
  */
 static void
-print_monitor_and_formation_uri(KeeperConfig *config,
-								Monitor *monitor,
-								FILE *stream)
+print_formation_uri(SSLOptions *ssl,
+					Monitor *monitor,
+					const char *formation,
+					FILE *stream)
 {
 	char postgresUri[MAXCONNINFO];
 
 	if (!monitor_formation_uri(monitor,
-							   config->formation,
-							   config->pgSetup.ssl.sslModeStr,
+							   formation,
+							   ssl->sslModeStr,
 							   postgresUri,
 							   MAXCONNINFO))
 	{
@@ -985,13 +931,43 @@ print_monitor_and_formation_uri(KeeperConfig *config,
 							   "monitor",
 							   monitor->pgsql.connectionString);
 
-		json_object_set_string(jsObj, config->formation, postgresUri);
+		json_object_set_string(jsObj, formation, postgresUri);
 
 		(void) cli_pprint_json(js);
 	}
 	else
 	{
 		fformat(stdout, "%s\n", postgresUri);
+	}
+}
+
+
+/*
+ * print_all_uri prints the connection strings for the monitor and all
+ * formations managed by it
+ */
+static void
+print_all_uri(SSLOptions *ssl,
+			  Monitor *monitor,
+			  FILE *stream)
+{
+	if (outputJSON)
+	{
+		if (!monitor_print_every_formation_uri_as_json(monitor,
+													   ssl->sslModeStr,
+													   stdout))
+		{
+			log_fatal("Failed to get the list of formation URIs");
+			exit(EXIT_CODE_MONITOR);
+		}
+	}
+	else
+	{
+		if (!monitor_print_every_formation_uri(monitor, ssl->sslModeStr))
+		{
+			log_fatal("Failed to get the list of formation URIs");
+			exit(EXIT_CODE_MONITOR);
+		}
 	}
 }
 
