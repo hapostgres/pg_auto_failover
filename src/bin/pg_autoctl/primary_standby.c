@@ -584,7 +584,12 @@ standby_init_replication_source(ReplicationSource *replicationSource,
 	}
 
 	strlcpy(replicationSource->userName, username, NAMEDATALEN);
-	strlcpy(replicationSource->password, password, MAXCONNINFO);
+
+	if (password != NULL)
+	{
+		strlcpy(replicationSource->password, password, MAXCONNINFO);
+	}
+
 	strlcpy(replicationSource->slotName, slotName, MAXCONNINFO);
 	strlcpy(replicationSource->maximumBackupRate, maximumBackupRate, MAXCONNINFO);
 	strlcpy(replicationSource->backupDir, backupDirectory, MAXCONNINFO);
