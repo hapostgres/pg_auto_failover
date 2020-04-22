@@ -140,10 +140,17 @@ monitor_pg_init(Monitor *monitor, MonitorConfig *config)
 	 */
 	if (pgSetup->ssl.createSelfSignedCert)
 	{
-		if (!pg_create_self_signed_cert(pgSetup, config->nodename))
+		if (!pg_create_self_signed_cert(&(config->pgSetup), config->nodename))
 		{
 			log_error("Failed to create SSL self-signed certificate, "
 					  "see above for details");
+			return false;
+		}
+
+		/* update our configuration with ssl server.{key,cert} */
+		if (!monitor_config_write_file(config))
+		{
+			/* errors have already been logged */
 			return false;
 		}
 	}

@@ -201,6 +201,13 @@ fsm_init_primary(Keeper *keeper)
 					  "see above for details");
 			return false;
 		}
+
+		/* update our configuration with ssl server.{key,cert} */
+		if (!keeper_config_write_file(config))
+		{
+			/* errors have already been logged */
+			return false;
+		}
 	}
 
 	if (!postgres_add_default_settings(postgres))

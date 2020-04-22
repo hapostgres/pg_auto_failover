@@ -668,6 +668,13 @@ create_database_and_extension(Keeper *keeper)
 					  "see above for details");
 			return false;
 		}
+
+		/* update our configuration with ssl server.{key,cert} */
+		if (!keeper_config_write_file(config))
+		{
+			/* errors have already been logged */
+			return false;
+		}
 	}
 
 	/* publish our new pgSetup to the caller postgres state too */

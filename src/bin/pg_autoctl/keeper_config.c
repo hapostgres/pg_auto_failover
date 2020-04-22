@@ -746,6 +746,19 @@ keeper_config_accept_new(KeeperConfig *config, KeeperConfig *newConfig)
 	}
 
 	/*
+	 * The backupDirectory can be changed online too.
+	 */
+	if (strneq(newConfig->backupDirectory, config->backupDirectory))
+	{
+		log_info("Reloading configuration: "
+				 "replication.backup_directory is now \"%s\"; "
+				 "used to be \"%s\"",
+				 newConfig->backupDirectory, config->backupDirectory);
+
+		strlcpy(config->backupDirectory, newConfig->backupDirectory, MAXPGPATH);
+	}
+
+	/*
 	 * And now the timeouts. Of course we support changing them at run-time.
 	 */
 	if (newConfig->network_partition_timeout != config->network_partition_timeout)
@@ -808,6 +821,9 @@ keeper_config_accept_new(KeeperConfig *config, KeeperConfig *newConfig)
 			newConfig->postgresql_restart_failure_max_retries;
 	}
 
+	/*
+	 * We can change any SSL related setup options at runtime.
+	 */
 	if (config->pgSetup.ssl.active != newConfig->pgSetup.ssl.active)
 	{
 		log_info("Reloading configuration: ssl is now %s; used to be %s",
@@ -822,7 +838,39 @@ keeper_config_accept_new(KeeperConfig *config, KeeperConfig *newConfig)
 				 pgsetup_sslmode_to_string(config->pgSetup.ssl.sslMode));
 	}
 
+	if (strneq(config->pgSetup.ssl.caFile, newConfig->pgSetup.ssl.caFile))
+	{
+		log_info("Reloading configuration: ssl CA file is now %s; used to be %s",
+				 newConfig->pgSetup.ssl.caFile, config->pgSetup.ssl.caFile);
+	}
+
+	if (strneq(config->pgSetup.ssl.crlFile, newConfig->pgSetup.ssl.crlFile))
+	{
+		log_info("Reloading configuration: ssl CRL file is now %s; used to be %s",
+				 newConfig->pgSetup.ssl.crlFile, config->pgSetup.ssl.crlFile);
+	}
+
+	if (strneq(config->pgSetup.ssl.serverCert, newConfig->pgSetup.ssl.serverCert))
+	{
+		log_info("Reloading configuration: ssl server cert file is now %s; "
+				 "used to be %s",
+				 newConfig->pgSetup.ssl.serverCert,
+				 config->pgSetup.ssl.serverCert);
+	}
+
+	if (strneq(config->pgSetup.ssl.serverKey, newConfig->pgSetup.ssl.serverKey))
+	{
+		log_info("Reloading configuration: ssl server key file is now %s; "
+				 "used to be %s",
+				 newConfig->pgSetup.ssl.serverKey,
+				 config->pgSetup.ssl.serverKey);
+	}
+
+	/* install the new SSL settings, wholesale */
 	config->pgSetup.ssl = newConfig->pgSetup.ssl;
+	strlcpy(config->pgSetup.ssl.sslModeStr,
+			pgsetup_sslmode_to_string(config->pgSetup.ssl.sslMode),
+			SSL_MODE_STRLEN);
 
 	return true;
 }

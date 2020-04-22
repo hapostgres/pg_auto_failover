@@ -425,6 +425,8 @@ reload_configuration(Keeper *keeper)
 									monitorDisabledIsOk) &&
 			keeper_config_accept_new(config, &newConfig))
 		{
+			LocalPostgresServer *postgres = &(keeper->postgres);
+
 			/*
 			 * The keeper->config changed, not the keeper->postgres, but the
 			 * main loop takes care of updating it at each loop anyway, so we
@@ -432,6 +434,24 @@ reload_configuration(Keeper *keeper)
 			 */
 			log_info("Reloaded the new configuration from \"%s\"",
 					 config->pathnames.config);
+
+			/*
+			 * The new configuration might impact the Postgres setup, such as
+			 * when changing the SSL file paths.
+			 */
+			if (!postgres_add_default_settings(postgres))
+			{
+				log_warn("Failed to edit Postgres configuration after "
+						 "reloading pg_autoctl configuration, "
+						 "see above for details");
+			}
+
+			if (!pgsql_reload_conf(&(postgres->sqlClient)))
+			{
+				log_warn("Failed to reload Postgres configuration after "
+						 "reloading pg_autoctl configuration, "
+						 "see above for details");
+			}
 		}
 		else
 		{

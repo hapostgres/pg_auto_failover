@@ -757,6 +757,9 @@ cli_enable_ssl(int argc, char **argv)
 				exit(EXIT_CODE_INTERNAL_ERROR);
 			}
 
+			/* make sure that the new SSL files are part of the setup */
+			kconfig.pgSetup.ssl = postgres.postgresSetup.ssl;
+
 			/* and write our brand new setup to file */
 			if (!keeper_config_write_file(&kconfig))
 			{
@@ -818,15 +821,16 @@ update_ssl_configuration(LocalPostgresServer *postgres, const char *nodename)
 			 pgSetup->ssl.active ? "on" : "off");
 
 	/*
-	 * Make sure we configure Postgres with absolute file paths.
-	 */
-	if (!normalize_filename(pgSetup->pgdata, pgSetup->pgdata, MAXPGPATH))
-	{
-		return false;
-	}
-
-	/*
 	 * When --ssl-self-signed is used, create a certificate.
+	 *
+	 * In the caller function cli_enable_ssl() we then later write the
+	 * pg_autoctl.conf file with the new SSL settings, including both the
+	 * ssl.cert_file and the ssl.key_file values, and reload the pg_autoctl
+	 * service if it's running.
+	 *
+	 * At reload time, the pg_autoctl service will edit our Postgres settings
+	 * in postgresql-auto-failover.conf with the new values and reload
+	 * Postgres.
 	 */
 	if (pgSetup->ssl.createSelfSignedCert &&
 		(!file_exists(pgSetup->ssl.serverKey) ||
@@ -838,26 +842,6 @@ update_ssl_configuration(LocalPostgresServer *postgres, const char *nodename)
 					  "see above for details");
 			return false;
 		}
-	}
-
-	/* edit our Postgres setup to include the new SSL settings */
-	if (!postgres_add_default_settings(postgres))
-	{
-		log_error("Failed to enable SSL: "
-				  "adding default Postgres settings failed, "
-				  "see above for details");
-		return false;
-	}
-
-	/* call pg_ctl_reload() while connected as the local superuser */
-	strlcpy(pgSetup->username, "", NAMEDATALEN);
-
-	local_postgres_init(postgres, pgSetup);
-
-	if (!pgsql_reload_conf(&(postgres->sqlClient)))
-	{
-		/* errors have already been logged */
-		return false;
 	}
 
 	/* HBA rules for hostssl are not edited */

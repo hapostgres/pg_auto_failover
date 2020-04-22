@@ -1548,6 +1548,12 @@ pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *nodename)
 		return false;
 	}
 
+	/* ensure PGDATA has been normalized */
+	if (!normalize_filename(pgSetup->pgdata, pgSetup->pgdata, MAXPGPATH))
+	{
+		return false;
+	}
+
 	size = sformat(pgSetup->ssl.serverKey, MAXPGPATH,
 				   "%s/server.key", pgSetup->pgdata);
 
