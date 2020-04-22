@@ -419,6 +419,9 @@ reload_configuration(Keeper *keeper)
 		strlcpy(newConfig.pathnames.config, config->pathnames.config, MAXPGPATH);
 		strlcpy(newConfig.pathnames.state, config->pathnames.state, MAXPGPATH);
 
+		/* disconnect to the current monitor if we're connected */
+		(void) pgsql_finish(&(keeper->monitor.pgsql));
+
 		if (keeper_config_read_file(&newConfig,
 									missingPgdataIsOk,
 									pgIsNotRunningIsOk,
@@ -451,6 +454,13 @@ reload_configuration(Keeper *keeper)
 				log_warn("Failed to reload Postgres configuration after "
 						 "reloading pg_autoctl configuration, "
 						 "see above for details");
+			}
+
+			if (!monitor_init(&(keeper->monitor), config->monitor_pguri))
+			{
+				/* we tested already in keeper_config_accept_new, so... */
+				log_warn("Failed to contact the monitor because its "
+						 "URL is invalid, see above for details");
 			}
 		}
 		else
