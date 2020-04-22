@@ -293,7 +293,7 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 			}
 		}
 
-		if (asked_to_stop || asked_to_stop_fast)
+		if (asked_to_stop || asked_to_stop_fast || asked_to_reload)
 		{
 			retry = false;
 		}
