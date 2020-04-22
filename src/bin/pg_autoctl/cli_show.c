@@ -857,7 +857,6 @@ cli_show_uri(int argc, char **argv)
 		}
 	}
 
-
 	if (showUriOptions.monitorOnly)
 	{
 		(void) print_monitor_uri(&monitor, stdout);

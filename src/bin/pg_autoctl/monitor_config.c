@@ -292,6 +292,15 @@ monitor_config_read_file(MonitorConfig *config,
 	strlcpy(config->pgSetup.dbname, PG_AUTOCTL_MONITOR_DBNAME, NAMEDATALEN);
 	strlcpy(config->pgSetup.username, PG_AUTOCTL_MONITOR_USERNAME, NAMEDATALEN);
 
+	/*
+	 * Required for grandfathering old clusters that don't have sslmode
+	 * explicitely set
+	 */
+	if (IS_EMPTY_STRING_BUFFER(config->pgSetup.ssl.sslModeStr))
+	{
+		strlcpy(config->pgSetup.ssl.sslModeStr, "prefer", SSL_MODE_STRLEN);
+	}
+
 	/* set the ENUM value for sslMode */
 	config->pgSetup.ssl.sslMode =
 		pgsetup_parse_sslmode(config->pgSetup.ssl.sslModeStr);
