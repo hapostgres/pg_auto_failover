@@ -77,10 +77,12 @@ def test_003_init_secondary():
     node2.create()
     node2.enable_ssl(sslSelfSigned=True, sslMode="require")
 
+    node2.run()
+    node2.wait_until_pg_is_running()
+
     assert node2.config_get("ssl.sslmode") == "require"
     eq_(node2.pg_config_get('ssl'), "on")
 
-    node2.run()
     assert node2.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")
 

@@ -833,35 +833,38 @@ keeper_config_accept_new(KeeperConfig *config, KeeperConfig *newConfig)
 
 	if (config->pgSetup.ssl.sslMode != newConfig->pgSetup.ssl.sslMode)
 	{
-		log_info("Reloading configuration: sslmode is now %s; used to be %s",
+		log_info("Reloading configuration: sslmode is now \"%s\"; "
+				 "used to be \"%s\"",
 				 pgsetup_sslmode_to_string(newConfig->pgSetup.ssl.sslMode),
 				 pgsetup_sslmode_to_string(config->pgSetup.ssl.sslMode));
 	}
 
 	if (strneq(config->pgSetup.ssl.caFile, newConfig->pgSetup.ssl.caFile))
 	{
-		log_info("Reloading configuration: ssl CA file is now %s; used to be %s",
+		log_info("Reloading configuration: ssl CA file is now \"%s\"; "
+				 "used to be \"%s\"",
 				 newConfig->pgSetup.ssl.caFile, config->pgSetup.ssl.caFile);
 	}
 
 	if (strneq(config->pgSetup.ssl.crlFile, newConfig->pgSetup.ssl.crlFile))
 	{
-		log_info("Reloading configuration: ssl CRL file is now %s; used to be %s",
+		log_info("Reloading configuration: ssl CRL file is now \"%s\"; "
+				 "used to be \"%s\"",
 				 newConfig->pgSetup.ssl.crlFile, config->pgSetup.ssl.crlFile);
 	}
 
 	if (strneq(config->pgSetup.ssl.serverCert, newConfig->pgSetup.ssl.serverCert))
 	{
-		log_info("Reloading configuration: ssl server cert file is now %s; "
-				 "used to be %s",
+		log_info("Reloading configuration: ssl server cert file is now \"%s\"; "
+				 "used to be \"%s\"",
 				 newConfig->pgSetup.ssl.serverCert,
 				 config->pgSetup.ssl.serverCert);
 	}
 
 	if (strneq(config->pgSetup.ssl.serverKey, newConfig->pgSetup.ssl.serverKey))
 	{
-		log_info("Reloading configuration: ssl server key file is now %s; "
-				 "used to be %s",
+		log_info("Reloading configuration: ssl server key file is now \"%s\"; "
+				 "used to be \"%s\"",
 				 newConfig->pgSetup.ssl.serverKey,
 				 config->pgSetup.ssl.serverKey);
 	}

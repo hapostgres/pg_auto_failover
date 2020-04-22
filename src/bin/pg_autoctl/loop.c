@@ -75,7 +75,7 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		 * signaled to us and from where we can immediately exit whatever we're
 		 * doing. It's important to avoid e.g. leaving state.new files behind.
 		 */
-		if (asked_to_reload)
+		if (asked_to_reload || firstLoop)
 		{
 			(void) reload_configuration(keeper);
 		}
@@ -428,8 +428,6 @@ reload_configuration(Keeper *keeper)
 									monitorDisabledIsOk) &&
 			keeper_config_accept_new(config, &newConfig))
 		{
-			LocalPostgresServer *postgres = &(keeper->postgres);
-
 			/*
 			 * The keeper->config changed, not the keeper->postgres, but the
 			 * main loop takes care of updating it at each loop anyway, so we
@@ -442,25 +440,10 @@ reload_configuration(Keeper *keeper)
 			 * The new configuration might impact the Postgres setup, such as
 			 * when changing the SSL file paths.
 			 */
-			if (!postgres_add_default_settings(postgres))
+			if (!keeper_ensure_configuration(keeper))
 			{
-				log_warn("Failed to edit Postgres configuration after "
-						 "reloading pg_autoctl configuration, "
+				log_warn("Failed to reload pg_autoctl configuration, "
 						 "see above for details");
-			}
-
-			if (!pgsql_reload_conf(&(postgres->sqlClient)))
-			{
-				log_warn("Failed to reload Postgres configuration after "
-						 "reloading pg_autoctl configuration, "
-						 "see above for details");
-			}
-
-			if (!monitor_init(&(keeper->monitor), config->monitor_pguri))
-			{
-				/* we tested already in keeper_config_accept_new, so... */
-				log_warn("Failed to contact the monitor because its "
-						 "URL is invalid, see above for details");
 			}
 		}
 		else

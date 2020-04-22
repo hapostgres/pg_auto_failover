@@ -592,7 +592,7 @@ class PGNode:
             ssl_args += ['--no-ssl']
 
         command = PGAutoCtl(self, argv=ssl_args)
-        command.execute("enable ssl")
+        out, err = command.execute("enable ssl")
 
 
 class DataNode(PGNode):
