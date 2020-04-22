@@ -1307,6 +1307,8 @@ cli_pg_autoctl_reload(const char *pidfile)
 					  pid);
 			return false;
 		}
+
+		return true;
 	}
 
 	return false;
