@@ -356,6 +356,15 @@ keeper_config_read_file_skip_pgsetup(KeeperConfig *config,
 		}
 	}
 
+	/*
+	 * Required for grandfathering old clusters that don't have sslmode
+	 * explicitely set
+	 */
+	if (IS_EMPTY_STRING_BUFFER(config->pgSetup.ssl.sslModeStr))
+	{
+		strlcpy(config->pgSetup.ssl.sslModeStr, "prefer", SSL_MODE_STRLEN);
+	}
+
 	/* set the ENUM value for sslMode */
 	config->pgSetup.ssl.sslMode =
 		pgsetup_parse_sslmode(config->pgSetup.ssl.sslModeStr);
@@ -371,8 +380,8 @@ keeper_config_read_file_skip_pgsetup(KeeperConfig *config,
 
 
 /*
- * keeper_config_read_file_skip_pgsetup overrides values in given KeeperConfig
- * with whatever values are read from given configuration filename.
+ * keeper_config_pgsetup_init overrides values in given KeeperConfig with
+ * whatever values are read from given configuration filename.
  */
 bool
 keeper_config_pgsetup_init(KeeperConfig *config,

@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdbool.h>
 
 #include "commandline.h"
 
@@ -23,16 +24,22 @@ static void commandline_pretty_print_subcommands(CommandLine *command,
  *
  * Parses the command line given the Command_t cmd context, and run commands
  * that match with the subcommand definitions.
+ *
+ * It returns false if the command parsing failed. In that case it will also
+ * output a helpful error message to stderr.
  */
-void
+bool
 commandline_run(CommandLine *command, int argc, char **argv)
 {
-	const char *argv0 = NULL;
+	const char *argv0 = "unknown_command";
+	const char *breadcrumb = NULL;
 
 	if (argc > 0)
 	{
 		argv0 = argv[0];
 	}
+
+	breadcrumb = command->breadcrumb == NULL ? argv0 : command->breadcrumb;
 
 	/*
 	 * If the user gives the --help option at this point, describe the current
@@ -41,7 +48,7 @@ commandline_run(CommandLine *command, int argc, char **argv)
 	if (argc >= 2 && (streq(argv[1], "--help") || streq(argv[1], "-h")))
 	{
 		commandline_print_usage(command, stderr);
-		return;
+		return true;
 	}
 
 	current_command = command;
@@ -61,46 +68,47 @@ commandline_run(CommandLine *command, int argc, char **argv)
 
 	if (command->run != NULL)
 	{
-		return command->run(argc, argv);
+		command->run(argc, argv);
+		return true;
 	}
-	else if (argc == 0)
+
+	if (argc == 0)
 	{
 		/*
 		 * We're at the end of the command line already, and command->run is
 		 * not set, which means we expected a subcommand to be used, but none
 		 * have been given by the user. Inform him.
 		 */
-		commandline_print_subcommands(command, stderr);
+		fprintf(stderr, "%s: expected a command\n", breadcrumb);
 	}
-	else
+	else if (command->subcommands != NULL)
 	{
-		if (command->subcommands != NULL)
+		CommandLine **subcommand = command->subcommands;
+
+		for (; *subcommand != NULL; subcommand++)
 		{
-			CommandLine **subcommand = command->subcommands;
-
-			for (; *subcommand != NULL; subcommand++)
+			if (streq(argv[0], (*subcommand)->name))
 			{
-				if (streq(argv[0], (*subcommand)->name))
-				{
-					commandline_add_breadcrumb(command, *subcommand);
+				commandline_add_breadcrumb(command, *subcommand);
 
-					return commandline_run(*subcommand, argc, argv);
-				}
+				return commandline_run(*subcommand, argc, argv);
 			}
-
-			/* if we reach this code, we didn't find a subcommand */
-			{
-				const char *breadcrumb =
-					command->breadcrumb == NULL ? argv0 : command->breadcrumb;
-
-				fprintf(stderr,
-						"%s: %s: unknown command\n", breadcrumb, argv[0]);
-			}
-
-			fprintf(stderr, "\n");
-			commandline_print_subcommands(command, stderr);
 		}
+
+		/* if we reach this code, we didn't find a subcommand */
+		fprintf(stderr, "%s: %s: unknown command\n", breadcrumb, argv[0]);
+	} else {
+		/* This should not be reached */
+		fprintf(stderr, "%s: an unexpected state was reached during command parsing\n", breadcrumb);
 	}
+
+	/*
+	 * Print the subcommands after the actual error message for easy fixing of
+	 * the command
+	 */
+	fprintf(stderr, "\n");
+	commandline_print_subcommands(command, stderr);
+	return false;
 }
 
 
