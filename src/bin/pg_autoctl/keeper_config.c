@@ -808,6 +808,22 @@ keeper_config_accept_new(KeeperConfig *config, KeeperConfig *newConfig)
 			newConfig->postgresql_restart_failure_max_retries;
 	}
 
+	if (config->pgSetup.ssl.active != newConfig->pgSetup.ssl.active)
+	{
+		log_info("Reloading configuration: ssl is now %s; used to be %s",
+				 newConfig->pgSetup.ssl.active ? "active" : "disabled",
+				 config->pgSetup.ssl.active ? "active" : "disabled");
+	}
+
+	if (config->pgSetup.ssl.sslMode != newConfig->pgSetup.ssl.sslMode)
+	{
+		log_info("Reloading configuration: sslmode is now %s; used to be %s",
+				 pgsetup_sslmode_to_string(newConfig->pgSetup.ssl.sslMode),
+				 pgsetup_sslmode_to_string(config->pgSetup.ssl.sslMode));
+	}
+
+	config->pgSetup.ssl = newConfig->pgSetup.ssl;
+
 	return true;
 }
 

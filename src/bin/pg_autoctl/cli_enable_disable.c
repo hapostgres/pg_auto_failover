@@ -37,7 +37,6 @@ static bool update_ssl_configuration(LocalPostgresServer *postgres,
 									 const char *nodename);
 
 static bool update_monitor_connection_string(KeeperConfig *config);
-static bool update_primary_conninfo(KeeperConfig *config);
 
 
 static CommandLine enable_secondary_command =
@@ -719,10 +718,6 @@ cli_enable_ssl(int argc, char **argv)
 						 "ssl_key_file and ssl_cert_file");
 			}
 
-			log_info("  Health-check connections to Postgres nodes now "
-					 "use sslmode=%s",
-					 pgsetup_sslmode_to_string(pgSetup->ssl.sslMode));
-
 			break;
 		}
 
@@ -732,7 +727,7 @@ cli_enable_ssl(int argc, char **argv)
 			PostgresSetup *pgSetup = &(kconfig.pgSetup);
 			LocalPostgresServer postgres = { 0 };
 
-			bool updatedPrimaryConninfo = false;
+			bool reloadedService = false;
 
 			kconfig.pgSetup = options.pgSetup;
 			kconfig.pathnames = options.pathnames;
@@ -770,8 +765,7 @@ cli_enable_ssl(int argc, char **argv)
 				exit(EXIT_CODE_BAD_CONFIG);
 			}
 
-			/* update our primary_conninfo to the new sslmode, when secondary */
-			updatedPrimaryConninfo = update_primary_conninfo(&kconfig);
+			reloadedService = cli_pg_autoctl_reload(kconfig.pathnames.pid);
 
 			/* display a nice summary to our users */
 			log_info("Successfully enabled new SSL configuration:");
@@ -785,15 +779,19 @@ cli_enable_ssl(int argc, char **argv)
 						 "ssl_key_file and ssl_cert_file");
 			}
 
+			if (reloadedService)
+			{
+				log_info("  pg_autoctl service has been signaled to reload "
+						 "its configuration");
+			}
+
 			log_warn("  Postgres connection string to the monitor "
 					 "has not been changed, see above for details");
 
-			if (updatedPrimaryConninfo)
-			{
-				log_info("  Replication connection string primary_conninfo "
-						 "has been updated to use the new sslmode \"%s\"",
-						 pgsetup_sslmode_to_string(pgSetup->ssl.sslMode));
-			}
+			log_info("  Replication connection string primary_conninfo "
+					 "is going to be updated in the main service loop "
+					 "to use ssl mode \"%s\"",
+					 pgsetup_sslmode_to_string(pgSetup->ssl.sslMode));
 			break;
 		}
 
@@ -906,95 +904,6 @@ update_monitor_connection_string(KeeperConfig *config)
 		log_warn("The monitor SSL setup is not ready yet: ssl is off");
 		return false;
 	}
-}
-
-
-/*
- * update_primary_conninfo updates the primary_conninfo connection string on a
- * secondary server to use the possibly new sslmode that is now setup.
- *
- * Unfortunately for the primary_conninfo to take effect we need to restart
- * Postgres on the secondary node. This should be fast enough that we don't
- * need to go down to the maintenance state for that operation though. The
- * write queries on the primary are going to wait until we're back, and in case
- * of a failover we don't lose any data.
- */
-static bool
-update_primary_conninfo(KeeperConfig *config)
-{
-	Monitor monitor = { 0 };
-	KeeperStateData keeperState = { 0 };
-	ReplicationSource replicationSource = { 0 };
-	PostgresSetup *pgSetup = &(config->pgSetup);
-
-	if (config->monitorDisabled)
-	{
-		log_error(
-			"Can't update the primary_conninfo when the monitor is disabled");
-		return false;
-	}
-
-	if (!keeper_state_read(&keeperState, config->pathnames.state))
-	{
-		/* errors have already been logged */
-		return false;
-	}
-
-	if (!(keeperState.current_role == CATCHINGUP_STATE ||
-		  keeperState.assigned_role == SECONDARY_STATE))
-	{
-		/*
-		 * Updating the primary_conninfo only needs to happen when we have
-		 * already setup the streaming replication from the primary. That's
-		 * when we have locally reached CATCHINGUP or when we have been
-		 * assigned SECONDARY from the monitor.
-		 */
-		return false;
-	}
-
-	if (!monitor_init(&monitor, config->monitor_pguri))
-	{
-		/* errors have already been logged */
-		return false;
-	}
-
-	if (!monitor_get_primary(&monitor,
-							 config->formation,
-							 keeperState.current_group,
-							 &replicationSource.primaryNode))
-	{
-		log_error("Failed to update primary_conninfo because getting "
-				  " the primary node from the monitor failed, "
-				  "see above for details");
-		return false;
-	}
-
-	if (!standby_init_replication_source(&replicationSource,
-										 NULL, /* primaryNode is done */
-										 PG_AUTOCTL_REPLICA_USERNAME,
-										 config->replication_password,
-										 config->replication_slot_name,
-										 config->maximum_backup_rate,
-										 config->backupDirectory,
-										 config->pgSetup.ssl,
-										 keeperState.current_node_id))
-	{
-		/* can't happen at the moment */
-		return false;
-	}
-
-	/* now setup the replication configuration (primary_conninfo etc) */
-	if (!pg_setup_standby_mode(pgSetup->control.pg_control_version,
-							   pgSetup->pgdata,
-							   &replicationSource))
-	{
-		log_error("Failed to setup Postgres as a standby after pg_basebackup");
-		return false;
-	}
-
-	/* and restart Postgres */
-	log_info("Restarting Postgres to enable new primary_conninfo");
-	return pg_ctl_restart(pgSetup->pg_ctl, pgSetup->pgdata);
 }
 
 

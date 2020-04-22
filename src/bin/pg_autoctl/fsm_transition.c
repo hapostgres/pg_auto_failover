@@ -670,14 +670,15 @@ fsm_init_standby(Keeper *keeper)
 	KeeperConfig *config = &(keeper->config);
 	Monitor *monitor = &(keeper->monitor);
 	LocalPostgresServer *postgres = &(keeper->postgres);
-	ReplicationSource replicationSource = { 0 };
+
 	int groupId = keeper->state.current_group;
+	NodeAddress *primaryNode = NULL;
 
 	/* get the primary node to follow */
 	if (!config->monitorDisabled)
 	{
 		if (!monitor_get_primary(monitor, config->formation, groupId,
-								 &replicationSource.primaryNode))
+								 &(postgres->replicationSource.primaryNode)))
 		{
 			log_error("Failed to initialise standby because get the primary node "
 					  "from the monitor failed, see above for details");
@@ -687,14 +688,11 @@ fsm_init_standby(Keeper *keeper)
 	else
 	{
 		/* copy information from keeper->otherNodes into replicationSource */
-		strlcpy(replicationSource.primaryNode.host,
-				keeper->otherNodes.nodes[0].host, _POSIX_HOST_NAME_MAX);
-
-		replicationSource.primaryNode.port = keeper->otherNodes.nodes[0].port;
+		primaryNode = &(keeper->otherNodes.nodes[0]);
 	}
 
-	if (!standby_init_replication_source(&replicationSource,
-										 NULL, /* primaryNode is done */
+	if (!standby_init_replication_source(postgres,
+										 primaryNode,
 										 PG_AUTOCTL_REPLICA_USERNAME,
 										 config->replication_password,
 										 config->replication_slot_name,
@@ -707,7 +705,7 @@ fsm_init_standby(Keeper *keeper)
 		return false;
 	}
 
-	if (!standby_init_database(postgres, &replicationSource, config->nodename))
+	if (!standby_init_database(postgres, config->nodename))
 	{
 		log_error("Failed initialise standby server, see above for details");
 		return false;
@@ -729,14 +727,14 @@ fsm_rewind_or_init(Keeper *keeper)
 	Monitor *monitor = &(keeper->monitor);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
-	ReplicationSource replicationSource = { 0 };
 	int groupId = keeper->state.current_group;
+	NodeAddress *primaryNode = NULL;
 
 	/* get the primary node to follow */
 	if (!config->monitorDisabled)
 	{
 		if (!monitor_get_primary(monitor, config->formation, groupId,
-								 &replicationSource.primaryNode))
+								 &(postgres->replicationSource.primaryNode)))
 		{
 			log_error("Failed to initialise standby because get the primary node "
 					  "from the monitor failed, see above for details");
@@ -746,14 +744,11 @@ fsm_rewind_or_init(Keeper *keeper)
 	else
 	{
 		/* copy information from keeper->otherNodes into replicationSource */
-		strlcpy(replicationSource.primaryNode.host,
-				keeper->otherNodes.nodes[0].host, _POSIX_HOST_NAME_MAX);
-
-		replicationSource.primaryNode.port = keeper->otherNodes.nodes[0].port;
+		primaryNode = &(keeper->otherNodes.nodes[0]);
 	}
 
-	if (!standby_init_replication_source(&replicationSource,
-										 NULL, /* primaryNode is done */
+	if (!standby_init_replication_source(postgres,
+										 primaryNode,
 										 PG_AUTOCTL_REPLICA_USERNAME,
 										 config->replication_password,
 										 config->replication_slot_name,
@@ -766,14 +761,12 @@ fsm_rewind_or_init(Keeper *keeper)
 		return false;
 	}
 
-	if (!primary_rewind_to_standby(postgres, &replicationSource))
+	if (!primary_rewind_to_standby(postgres))
 	{
 		log_warn("Failed to rewind demoted primary to standby, "
 				 "trying pg_basebackup instead");
 
-		if (!standby_init_database(postgres,
-								   &replicationSource,
-								   config->nodename))
+		if (!standby_init_database(postgres, config->nodename))
 		{
 			log_error("Failed to become standby server, see above for details");
 			return false;

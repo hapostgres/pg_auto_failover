@@ -170,4 +170,6 @@ bool cli_getopt_accept_ssl_options(SSLCommandLineOptions newSSLOption,
 								   SSLCommandLineOptions currentSSLOptions);
 void cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy);
 
+bool cli_pg_autoctl_reload(const char *pidfile);
+
 #endif  /* CLI_COMMON_H */

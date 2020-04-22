@@ -1280,3 +1280,25 @@ stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathnames,
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 }
+
+
+/*
+ * cli_pg_autoctl_reload signals the pg_autoctl process to reload its
+ * configuration by sending it the SIGHUP signal.
+ */
+bool
+cli_pg_autoctl_reload(const char *pidfile)
+{
+	pid_t pid;
+
+	if (read_pidfile(pidfile, &pid))
+	{
+		if (kill(pid, SIGHUP) != 0)
+		{
+			log_error("Failed to send SIGHUP to the pg_autoctl's pid %d: %m",
+					  pid);
+			return false;
+		}
+	}
+	return true;
+}

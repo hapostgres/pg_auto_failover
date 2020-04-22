@@ -565,7 +565,7 @@ primary_add_standby_to_hba(LocalPostgresServer *postgres,
  * here, expect for the primaryNode there's no copying involved.
  */
 bool
-standby_init_replication_source(ReplicationSource *replicationSource,
+standby_init_replication_source(LocalPostgresServer *postgres,
 								NodeAddress *primaryNode,
 								const char *username,
 								const char *password,
@@ -575,28 +575,30 @@ standby_init_replication_source(ReplicationSource *replicationSource,
 								SSLOptions sslOptions,
 								int currentNodeId)
 {
+	ReplicationSource *upstream = &(postgres->replicationSource);
+
 	if (primaryNode != NULL)
 	{
-		strlcpy(replicationSource->primaryNode.host,
+		strlcpy(upstream->primaryNode.host,
 				primaryNode->host, _POSIX_HOST_NAME_MAX);
 
-		replicationSource->primaryNode.port = primaryNode->port;
+		upstream->primaryNode.port = primaryNode->port;
 	}
 
-	strlcpy(replicationSource->userName, username, NAMEDATALEN);
+	strlcpy(upstream->userName, username, NAMEDATALEN);
 
 	if (password != NULL)
 	{
-		strlcpy(replicationSource->password, password, MAXCONNINFO);
+		strlcpy(upstream->password, password, MAXCONNINFO);
 	}
 
-	strlcpy(replicationSource->slotName, slotName, MAXCONNINFO);
-	strlcpy(replicationSource->maximumBackupRate, maximumBackupRate, MAXCONNINFO);
-	strlcpy(replicationSource->backupDir, backupDirectory, MAXCONNINFO);
-	replicationSource->sslOptions = sslOptions;
+	strlcpy(upstream->slotName, slotName, MAXCONNINFO);
+	strlcpy(upstream->maximumBackupRate, maximumBackupRate, MAXCONNINFO);
+	strlcpy(upstream->backupDir, backupDirectory, MAXCONNINFO);
+	upstream->sslOptions = sslOptions;
 
 	/* prepare our application_name */
-	sformat(replicationSource->applicationName, MAXCONNINFO,
+	sformat(upstream->applicationName, MAXCONNINFO,
 			"%s%d",
 			REPLICATION_APPLICATION_NAME_PREFIX,
 			currentNodeId);
@@ -611,10 +613,10 @@ standby_init_replication_source(ReplicationSource *replicationSource,
  */
 bool
 standby_init_database(LocalPostgresServer *postgres,
-					  ReplicationSource *replicationSource,
 					  const char *nodename)
 {
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+	ReplicationSource *upstream = &(postgres->replicationSource);
 
 	log_trace("standby_init_database");
 	log_info("Initialising PostgreSQL as a hot standby");
@@ -638,9 +640,7 @@ standby_init_database(LocalPostgresServer *postgres,
 	 * Now, we know that pgdata either doesn't exists or belongs to a stopped
 	 * PostgreSQL instance. We can safely proceed with pg_basebackup.
 	 */
-	if (!pg_basebackup(pgSetup->pgdata,
-					   pgSetup->pg_ctl,
-					   replicationSource))
+	if (!pg_basebackup(pgSetup->pgdata, pgSetup->pg_ctl, upstream))
 	{
 		return false;
 	}
@@ -656,7 +656,7 @@ standby_init_database(LocalPostgresServer *postgres,
 	/* now setup the replication configuration (primary_conninfo etc) */
 	if (!pg_setup_standby_mode(pgSetup->control.pg_control_version,
 							   pgSetup->pgdata,
-							   replicationSource))
+							   upstream))
 	{
 		log_error("Failed to setup Postgres as a standby after pg_basebackup");
 		return false;
@@ -710,10 +710,10 @@ standby_init_database(LocalPostgresServer *postgres,
  * into a state where it can become the standby of the new primary.
  */
 bool
-primary_rewind_to_standby(LocalPostgresServer *postgres,
-						  ReplicationSource *replicationSource)
+primary_rewind_to_standby(LocalPostgresServer *postgres)
 {
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+	ReplicationSource *replicationSource = &(postgres->replicationSource);
 	NodeAddress *primaryNode = &(replicationSource->primaryNode);
 
 	log_trace("primary_rewind_to_standby");

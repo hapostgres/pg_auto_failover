@@ -245,7 +245,6 @@ keeper_cli_init_standby(int argc, char **argv)
 
 	KeeperConfig config = keeperOptions;
 	LocalPostgresServer postgres = { 0 };
-	ReplicationSource replicationSource = { 0 };
 	int hostLength = 0;
 
 	if (argc != 2)
@@ -257,7 +256,7 @@ keeper_cli_init_standby(int argc, char **argv)
 	keeper_config_init(&config, missing_pgdata_is_ok, pg_not_running_is_ok);
 	local_postgres_init(&postgres, &(config.pgSetup));
 
-	hostLength = strlcpy(replicationSource.primaryNode.host, argv[0],
+	hostLength = strlcpy(postgres.replicationSource.primaryNode.host, argv[0],
 						 _POSIX_HOST_NAME_MAX);
 	if (hostLength >= _POSIX_HOST_NAME_MAX)
 	{
@@ -267,13 +266,13 @@ keeper_cli_init_standby(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!stringToInt(argv[1], &replicationSource.primaryNode.port))
+	if (!stringToInt(argv[1], &(postgres.replicationSource.primaryNode.port)))
 	{
 		log_fatal("Argument is not a valid port number: \"%s\"", argv[1]);
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!standby_init_replication_source(&replicationSource,
+	if (!standby_init_replication_source(&postgres,
 										 NULL, /* primaryNode is done */
 										 PG_AUTOCTL_REPLICA_USERNAME,
 										 config.replication_password,
@@ -287,7 +286,7 @@ keeper_cli_init_standby(int argc, char **argv)
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
-	if (!standby_init_database(&postgres, &replicationSource, config.nodename))
+	if (!standby_init_database(&postgres, config.nodename))
 	{
 		log_fatal("Failed to grant access to the standby by adding "
 				  "relevant lines to pg_hba.conf for the "
@@ -306,7 +305,6 @@ keeper_cli_rewind_old_primary(int argc, char **argv)
 
 	KeeperConfig config = keeperOptions;
 	LocalPostgresServer postgres = { 0 };
-	ReplicationSource replicationSource = { 0 };
 
 	if (argc < 1 || argc > 2)
 	{
@@ -317,7 +315,7 @@ keeper_cli_rewind_old_primary(int argc, char **argv)
 	keeper_config_init(&config, missing_pgdata_is_ok, pg_not_running_is_ok);
 	local_postgres_init(&postgres, &(config.pgSetup));
 
-	hostLength = strlcpy(replicationSource.primaryNode.host, argv[0],
+	hostLength = strlcpy(postgres.replicationSource.primaryNode.host, argv[0],
 						 _POSIX_HOST_NAME_MAX);
 	if (hostLength >= _POSIX_HOST_NAME_MAX)
 	{
@@ -327,13 +325,13 @@ keeper_cli_rewind_old_primary(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!stringToInt(argv[1], &replicationSource.primaryNode.port))
+	if (!stringToInt(argv[1], &(postgres.replicationSource.primaryNode.port)))
 	{
 		log_fatal("Argument is not a valid port number: \"%s\"", argv[1]);
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!standby_init_replication_source(&replicationSource,
+	if (!standby_init_replication_source(&postgres,
 										 NULL, /* primaryNode is done */
 										 PG_AUTOCTL_REPLICA_USERNAME,
 										 config.replication_password,
@@ -347,7 +345,7 @@ keeper_cli_rewind_old_primary(int argc, char **argv)
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
-	if (!primary_rewind_to_standby(&postgres, &replicationSource))
+	if (!primary_rewind_to_standby(&postgres))
 	{
 		log_fatal("Failed to rewind a demoted primary to standby, "
 				  "see above for details");
