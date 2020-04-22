@@ -487,19 +487,30 @@ comment on function pgautofailover.current_state(text, int)
 CREATE FUNCTION pgautofailover.formation_uri
  (
     IN formation_id         text DEFAULT 'default',
-    IN sslmode              text DEFAULT 'prefer'
+    IN sslmode              text DEFAULT 'prefer',
+    IN sslrootcert          text DEFAULT '',
+    IN sslcrl               text DEFAULT ''
  )
 RETURNS text LANGUAGE SQL STRICT
 AS $$
     select case
            when string_agg(format('%s:%s', nodename, nodeport),',') is not null
-           then format('postgres://%s/%s?target_session_attrs=read-write&sslmode=%s',
-                       string_agg(format('%s:%s', nodename, nodeport),','),
-                       -- as we join formation on node we get the same dbname for all
-                       -- entries, pick one.
-                       min(dbname),
-                       min(sslmode)
-                      )
+           then format(
+               'postgres://%s/%s?target_session_attrs=read-write&sslmode=%s%s%s',
+               string_agg(format('%s:%s', nodename, nodeport),','),
+               -- as we join formation on node we get the same dbname for all
+               -- entries, pick one.
+               min(dbname),
+               min(sslmode),
+               CASE WHEN min(sslrootcert) = ''
+                   THEN ''
+                   ELSE '&sslrootcert=' || sslrootcert
+               END,
+               CASE WHEN min(sslcrl) = ''
+                   THEN ''
+                   ELSE '&sslcrl=' || sslcrl
+               END
+           )
            end as uri
       from pgautofailover.node as node
            join pgautofailover.formation using(formationid)
@@ -586,7 +597,7 @@ comment on function pgautofailover.set_node_candidate_priority(int, text, int, i
 grant execute on function
       pgautofailover.set_node_candidate_priority(int, text, int, int)
    to autoctl_node;
- 
+
 CREATE FUNCTION pgautofailover.set_node_replication_quorum
  (
     IN nodeid				int,

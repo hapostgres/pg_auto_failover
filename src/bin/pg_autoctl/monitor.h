@@ -109,9 +109,9 @@ bool monitor_print_last_events_as_json(Monitor *monitor,
 									   int count,
 									   FILE *stream);
 
-bool monitor_print_every_formation_uri(Monitor *monitor, const char *sslMode);
+bool monitor_print_every_formation_uri(Monitor *monitor, const SSLOptions *ssl);
 bool monitor_print_every_formation_uri_as_json(Monitor *monitor,
-											   const char *sslMode,
+											   const SSLOptions *ssl,
 											   FILE *stream);
 
 bool monitor_create_formation(Monitor *monitor, char *formation, char *kind,
@@ -125,7 +125,7 @@ bool monitor_drop_formation(Monitor *monitor, char *formation);
 
 bool monitor_formation_uri(Monitor *monitor,
 						   const char *formation,
-						   const char *sslMode,
+						   const SSLOptions *ssl,
 						   char *connectionString,
 						   size_t size);
 
