@@ -309,17 +309,9 @@ The ``pg_autoctl enable ssl`` command edits the
 command line arguments given and enable SSL as instructed, and then updates
 the pg_autoctl configuration.
 
-The connection string to connect to the monitor is not automatically updated
-by the ``pg_autoctl enable ssl`` command. When updating a node's SSL setup,
-we connect to the monitor and check if the SSL setup has been made there.
-When that's the case, the monitor URI in the pg_autoctl configuration file
-is not edited for you, because it might be using complex local connection
-options. Please take time to edit your connection string to the monitor
-using::
-
-  $ pg_autoctl config set pg_autoctl.monitor <the-connection-string>
-
-Before that, you can verify your current configuration with::
+The connection string to connect to the monitor is also automatically
+updated by the ``pg_autoctl enable ssl`` command. You can verify your new
+configuration with::
 
   $ pg_autoctl config get pg_autoctl.monitor
 
@@ -342,10 +334,9 @@ In summary, to upgrade an existing pg_auto_failover setup to enable SSL:
   1. run the ``pg_autoctl enable ssl`` command on your monitor and then all
      the Postgres nodes,
 
-  2. on the Postgres nodes, edit your connection string to the monitor to
-     ensure it's using the expected ``sslmode`` setting, either
-     ``sslmode=require`` or maybe ``sslmode=verify-full
-     sslrootcert=/path/to/the/root.cert sslcrl=…``
+  2. on the Postgres nodes, review your pg_autoctl logs to make sure that
+     the reload operation has been effective, and review your Postgres
+     settings to verify that you have the expected result,
 
   3. review youur HBA rules setup to change the pg_auto_failover rules from
      ``host`` to ``hostssl`` to disallow insecure connections.

@@ -19,6 +19,7 @@
 #include "keeper_config.h"
 #include "log.h"
 #include "monitor.h"
+#include "parsing.h"
 #include "pgsetup.h"
 
 
@@ -748,7 +749,10 @@ cli_enable_ssl(int argc, char **argv)
 			local_postgres_init(&postgres, pgSetup);
 
 			/* log about the need to edit the monitor connection string */
-			(void) update_monitor_connection_string(&kconfig);
+			if (!update_monitor_connection_string(&kconfig))
+			{
+				log_warn("Failed to update the monitor URI to use SSL");
+			}
 
 			/* update the Postgres SSL setup and maybe create the certificate */
 			if (!update_ssl_configuration(&postgres, kconfig.nodename))
@@ -792,7 +796,8 @@ cli_enable_ssl(int argc, char **argv)
 			}
 
 			log_warn("  Postgres connection string to the monitor "
-					 "has not been changed, see above for details");
+					 "has been changed to use sslmode \"%s\"",
+					 pgsetup_sslmode_to_string(pgSetup->ssl.sslMode));
 
 			log_info("  Replication connection string primary_conninfo "
 					 "is going to be updated in the main service loop "
@@ -820,8 +825,8 @@ update_ssl_configuration(LocalPostgresServer *postgres, const char *nodename)
 	char hbaFilePath[MAXPGPATH] = { 0 };
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 
-	log_warn("update_ssl_configuration: ssl %s",
-			 pgSetup->ssl.active ? "on" : "off");
+	log_trace("update_ssl_configuration: ssl %s",
+			  pgSetup->ssl.active ? "on" : "off");
 
 	/*
 	 * When --ssl-self-signed is used, create a certificate.
@@ -879,16 +884,68 @@ update_monitor_connection_string(KeeperConfig *config)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	log_warn("The connection string to connect to the monitor is "
-			 "not automatically updated when using this command");
-
 	if (monitor_ssl_active(&monitor))
 	{
-		log_warn("The monitor SSL setup is ready and your current "
-				 "connection string is \"%s\", you might need to update it",
-				 config->monitor_pguri);
-		log_info("Use pg_autoctl config set pg_autoctl.monitor for updating "
-				 "your monitor connection string, then restart pg_autoctl ");
+		char username[MAXCONNINFO] = { 0 };
+		char hostname[MAXCONNINFO] = { 0 };
+		char port[MAXCONNINFO] = { 0 };
+		char dbname[MAXCONNINFO] = { 0 };
+
+		KeyVal params = { 0 };
+		KeyVal sslParams = {
+			3, { "sslmode", "sslrootcert", "sslcrl" }, { 0 }
+		};
+
+		char newPgURI[MAXCONNINFO] = { 0 };
+
+		/* initialize SSL Params values */
+		strlcpy(sslParams.values[0],
+				pgsetup_sslmode_to_string(config->pgSetup.ssl.sslMode),
+				MAXCONNINFO);
+
+		strlcpy(sslParams.values[1], config->pgSetup.ssl.caFile, MAXCONNINFO);
+		strlcpy(sslParams.values[2], config->pgSetup.ssl.crlFile, MAXCONNINFO);
+
+		if (!parse_pguri_info_key_vals(config->monitor_pguri,
+									   &sslParams,
+									   username,
+									   hostname,
+									   port,
+									   dbname,
+									   &params))
+		{
+			log_warn(
+				"The monitor SSL setup is ready and your current "
+				"connection string is \"%s\", you might need to update it",
+				config->monitor_pguri);
+
+			log_info(
+				"Use pg_autoctl config set pg_autoctl.monitor for updating "
+				"your monitor connection string, then restart pg_autoctl ");
+		}
+
+		if (!buildPostgresURIfromPieces(&params,
+										username,
+										hostname,
+										port,
+										dbname,
+										newPgURI))
+		{
+			log_error("Failed to produce the new monitor connection string");
+			return false;
+		}
+
+		if (!monitor_init(&monitor, newPgURI))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
+		/* we have a new monitor URI with our new SSL parameters */
+		strlcpy(config->monitor_pguri, newPgURI, MAXCONNINFO);
+
+		log_info("Updating the monitor URI to \"%s\"", config->monitor_pguri);
+
 		return true;
 	}
 	else

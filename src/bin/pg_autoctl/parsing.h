@@ -27,4 +27,26 @@ bool parse_bool(const char *value, bool *result);
 
 #define boolToString(value) (value) ? "true" : "false"
 
+typedef struct KeyVal
+{
+	int count;
+	char keywords[64][MAXCONNINFO];
+	char values[64][MAXCONNINFO];
+} KeyVal;
+
+bool parse_pguri_info_key_vals(const char *pguri,
+							   KeyVal *overrides,
+							   char *username,
+							   char *hostname,
+							   char *port,
+							   char *dbname,
+							   KeyVal *uriParameters);
+
+bool buildPostgresURIfromPieces(KeyVal *uriParams,
+								const char *username,
+								const char *hostname,
+								const char *port,
+								const char *dbname,
+								char *pguri);
+
 #endif /* PARSING_H */

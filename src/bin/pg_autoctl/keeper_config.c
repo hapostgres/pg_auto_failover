@@ -688,6 +688,10 @@ keeper_config_accept_new(KeeperConfig *config, KeeperConfig *newConfig)
 			return false;
 		}
 
+		log_info("Reloading configuration: monitor uri is now \"%s\"; "
+				 "used to be \"%s\"",
+				 newConfig->monitor_pguri, config->monitor_pguri);
+
 		strlcpy(config->monitor_pguri, newConfig->monitor_pguri, MAXCONNINFO);
 	}
 

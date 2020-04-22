@@ -476,3 +476,195 @@ parse_bool(const char *value, bool *result)
 {
 	return parse_bool_with_len(value, strlen(value), result);
 }
+
+
+/*
+ * parse_pguri_info_key_vals decomposes elements of a Postgres connection
+ * string (URI) into separate arrays of keywords and values as expected by
+ * PQconnectdbParams.
+ *
+ * In passing, parse_pguri_info_key_vals also prepares some components as
+ * separate entities to make it easier to re-build a user-friendly connection
+ * string from pieces. The username, hostname, port, and dbname parameters are
+ * expected to point to memory allocated by the caller.
+ *
+ * keywords and values are arrays of string and the arrays must be large enough
+ * to fit all the connection parameters (of which we count 36 at the moment on
+ * the Postgres documentation). Again, those are pointers to memory allocated
+ * by the caller.
+ *
+ * We use strlcpy() to place values in the provided memory places with a length
+ * limit of MAXCONNINFO for each connection keyword and value.
+ *
+ * See https://www.postgresql.org/docs/current/libpq-connect.html
+ */
+bool
+parse_pguri_info_key_vals(const char *pguri,
+						  KeyVal *overrides,
+						  char *username,
+						  char *hostname,
+						  char *port,
+						  char *dbname,
+						  KeyVal *uriParameters)
+{
+	char *errmsg;
+	PQconninfoOption *conninfo, *option;
+
+	bool foundHost = false;
+	bool foundUser = false;
+	bool foundPort = false;
+	bool foundDBName = false;
+
+	int paramIndex = 0;
+
+	conninfo = PQconninfoParse(pguri, &errmsg);
+	if (conninfo == NULL)
+	{
+		log_error("Failed to parse pguri \"%s\": %s", pguri, errmsg);
+		PQfreemem(errmsg);
+		return false;
+	}
+
+	for (option = conninfo; option->keyword != NULL; option++)
+	{
+		char *value = NULL;
+		int ovIndex = 0;
+
+		/*
+		 * If the keyword is in our overrides array, use the value from the
+		 * override values. Yeah that's O(n*m) but here m is expected to be
+		 * something very small, like 3 (typically: sslmode, sslrootcert,
+		 * sslcrl).
+		 */
+		for (ovIndex = 0; ovIndex < overrides->count; ovIndex++)
+		{
+			if (strcmp(overrides->keywords[ovIndex], option->keyword) == 0)
+			{
+				if (!IS_EMPTY_STRING_BUFFER(overrides->values[ovIndex]))
+				{
+					value = overrides->values[ovIndex];
+				}
+			}
+		}
+
+		/* not found in the override, keep the original, or skip */
+		if (value == NULL)
+		{
+			if (option->val == NULL || strcmp(option->val, "") == 0)
+			{
+				continue;
+			}
+			else
+			{
+				value = option->val;
+			}
+		}
+
+		if (strcmp(option->keyword, "host") == 0 ||
+			strcmp(option->keyword, "hostaddr") == 0)
+		{
+			foundHost = true;
+			strlcpy(hostname, option->val, MAXCONNINFO);
+		}
+		else if (strcmp(option->keyword, "port") == 0)
+		{
+			foundPort = true;
+			strlcpy(port, option->val, MAXCONNINFO);
+		}
+		else if (strcmp(option->keyword, "user") == 0)
+		{
+			foundUser = true;
+			strlcpy(username, option->val, MAXCONNINFO);
+		}
+		else if (strcmp(option->keyword, "dbname") == 0)
+		{
+			foundDBName = true;
+			strlcpy(dbname, option->val, MAXCONNINFO);
+		}
+		else
+		{
+			/* make a copy in our key/val arrays */
+			strlcpy(uriParameters->keywords[paramIndex],
+					option->keyword,
+					MAXCONNINFO);
+
+			strlcpy(uriParameters->values[paramIndex], value, MAXCONNINFO);
+
+			++uriParameters->count;
+			++paramIndex;
+		}
+	}
+
+	/*
+	 * Display an error message per missing field, and only then return false
+	 * if we're missing any one of those.
+	 */
+	if (!foundHost)
+	{
+		log_error("Failed to find hostname in the pguri \"%s\"", pguri);
+	}
+
+	if (!foundPort)
+	{
+		log_error("Failed to find port in the pguri \"%s\"", pguri);
+	}
+
+	if (!foundUser)
+	{
+		log_error("Failed to find username in the pguri \"%s\"", pguri);
+	}
+
+	if (!foundDBName)
+	{
+		log_error("Failed to find dbname in the pguri \"%s\"", pguri);
+	}
+
+	return foundHost && foundPort && foundUser && foundDBName;
+}
+
+
+/*
+ * buildPostgresURIfromPieces builds a Postgres connection string from keywords
+ * and values, in a user friendly way. The pguri parameter should point to a
+ * memory area that has been allocated by the caller and has at least
+ * MAXCONNINFO bytes.
+ */
+bool
+buildPostgresURIfromPieces(KeyVal *uriParams,
+						   const char *username,
+						   const char *hostname,
+						   const char *port,
+						   const char *dbname,
+						   char *pguri)
+{
+	int keyvalIndex = 0;
+
+	sformat(pguri, MAXCONNINFO,
+			"postgres://%s@%s:%s/%s?",
+			username,
+			hostname,
+			port,
+			dbname);
+
+	for (keyvalIndex = 0; keyvalIndex < uriParams->count; keyvalIndex++)
+	{
+		if (keyvalIndex == 0)
+		{
+			sformat(pguri, MAXCONNINFO,
+					"%s%s=%s",
+					pguri,
+					uriParams->keywords[keyvalIndex],
+					uriParams->values[keyvalIndex]);
+		}
+		else
+		{
+			sformat(pguri, MAXCONNINFO,
+					"%s&%s=%s",
+					pguri,
+					uriParams->keywords[keyvalIndex],
+					uriParams->values[keyvalIndex]);
+		}
+	}
+
+	return true;
+}
