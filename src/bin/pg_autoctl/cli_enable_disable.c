@@ -768,7 +768,10 @@ cli_enable_ssl(int argc, char **argv)
 				exit(EXIT_CODE_BAD_CONFIG);
 			}
 
-			reloadedService = cli_pg_autoctl_reload(kconfig.pathnames.pid);
+			if (file_exists(kconfig.pathnames.pid))
+			{
+				reloadedService = cli_pg_autoctl_reload(kconfig.pathnames.pid);
+			}
 
 			/* display a nice summary to our users */
 			log_info("Successfully enabled new SSL configuration:");
