@@ -1293,6 +1293,14 @@ cli_pg_autoctl_reload(const char *pidfile)
 
 	if (read_pidfile(pidfile, &pid))
 	{
+		if (pid <= 0)
+		{
+			log_error("Failed to reload pg_autoctl: "
+					  "pid file \"%s\" contains negative-or-zero pid %d",
+					  pidfile, pid);
+			return false;
+		}
+
 		if (kill(pid, SIGHUP) != 0)
 		{
 			log_error("Failed to send SIGHUP to the pg_autoctl's pid %d: %m",
@@ -1300,5 +1308,6 @@ cli_pg_autoctl_reload(const char *pidfile)
 			return false;
 		}
 	}
-	return true;
+
+	return false;
 }
