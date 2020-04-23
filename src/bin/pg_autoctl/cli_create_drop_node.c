@@ -230,7 +230,10 @@ cli_create_pg(Keeper *keeper, KeeperConfig *config)
 				exit(EXIT_CODE_MONITOR);
 			}
 
-			(void) keeper_node_active_loop(keeper, pid);
+			if (!keeper_node_active_loop(keeper, pid))
+			{
+				exit(EXIT_CODE_KEEPER);
+			}
 		}
 	}
 

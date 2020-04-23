@@ -37,63 +37,6 @@ static void reload_configuration(Keeper *keeper);
 
 
 /*
- * keeper_start_node_active_process starts a sub-process that communicates with
- * the monitor to implement the node_active protocol.
- */
-bool
-keeper_start_node_active_process(Keeper *keeper, pid_t *nodeActivePid)
-{
-	/* the forked process' parent pid is our pid */
-	pid_t pid, ppid = getpid();
-
-	/* Flush stdio channels just before fork, to avoid double-output problems */
-	fflush(stdout);
-	fflush(stderr);
-
-	/* time to create the node_active sub-process */
-	pid = fork();
-
-	switch (pid)
-	{
-		case -1:
-		{
-			log_error("Failed to fork the node_active process");
-			return false;
-		}
-
-		case 0:
-		{
-			/* the PID file is created with our parent pid */
-			(void) keeper_node_active_loop(keeper, ppid);
-
-			/*
-			 * When the "main" function for the child process is over, it's the
-			 * end of our execution thread. Don't get back to the caller.
-			 */
-			if (asked_to_stop || asked_to_stop_fast)
-			{
-				exit(EXIT_CODE_QUIT);
-			}
-			else
-			{
-				/* something went wrong (e.g. broken pipe) */
-				exit(EXIT_CODE_INTERNAL_ERROR);
-			}
-		}
-
-		default:
-		{
-			/* fork succeeded, in parent */
-			log_debug("pg_autoctl node_active protocol started in subprocess %d",
-					  pid);
-			*nodeActivePid = pid;
-			return true;
-		}
-	}
-}
-
-
-/*
  * keeper_node_active_loop implements the main loop of the keeper, which
  * periodically gets the goal state from the monitor and makes the state
  * transitions.
