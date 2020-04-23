@@ -2,7 +2,7 @@
 # Licensed under the PostgreSQL License.
 
 EXTENSION = pgautofailover
-EXTVERSION = 1.2
+EXTVERSION = 1.3
 
 SRC_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
@@ -22,5 +22,5 @@ USE_PGXS = 1
 
 include $(PGXS)
 
-$(EXTENSION)--1.2.sql: $(EXTENSION).sql
+$(EXTENSION)--$(EXTVERSION).sql: $(EXTENSION).sql
 	cat $^ > $@

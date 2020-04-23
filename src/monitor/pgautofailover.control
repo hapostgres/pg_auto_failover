@@ -1,4 +1,4 @@
 comment = 'pg_auto_failover'
-default_version = '1.2'
+default_version = '1.3'
 module_pathname = '$libdir/pgautofailover'
 relocatable = false
