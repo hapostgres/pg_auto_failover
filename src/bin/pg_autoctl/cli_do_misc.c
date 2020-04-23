@@ -215,11 +215,11 @@ keeper_cli_add_standby_to_hba(int argc, char **argv)
 
 
 /*
- * keeper_cli_discover_pg_setup implements the CLI to discover a PostgreSQL
+ * keeper_cli_pgsetup_discover implements the CLI to discover a PostgreSQL
  * setup thanks to PGDATA and other environment variables.
  */
 void
-keeper_cli_discover_pg_setup(int argc, char **argv)
+keeper_cli_pgsetup_discover(int argc, char **argv)
 {
 	PostgresSetup pgSetup = { 0 };
 
@@ -237,6 +237,91 @@ keeper_cli_discover_pg_setup(int argc, char **argv)
 }
 
 
+/*
+ * keeper_cli_pgsetup_is_ready returns success when the local PostgreSQL setup
+ * belongs to a server that is "ready".
+ */
+void
+keeper_cli_pgsetup_is_ready(int argc, char **argv)
+{
+	PostgresSetup pgSetup = { 0 };
+	bool pgIsReady = false;
+	bool pgIsNotRunningIsOk = false;
+
+	if (!pg_setup_init(&pgSetup, &keeperOptions.pgSetup, true, true))
+	{
+		exit(EXIT_CODE_PGCTL);
+	}
+
+	log_debug("Initialized pgSetup, now calling pg_setup_wait_until_is_ready()");
+
+	pgIsReady = pg_setup_is_ready(&pgSetup, pgIsNotRunningIsOk);
+
+	log_info("Postgres status is: \"%s\"", pmStatusToString(pgSetup.pm_status));
+
+	if (pgIsReady)
+	{
+		exit(EXIT_CODE_QUIT);
+	}
+	exit(EXIT_CODE_PGSQL);
+}
+
+
+/*
+ * keeper_cli_discover_pg_setup implements the CLI to discover a PostgreSQL
+ * setup thanks to PGDATA and other environment variables.
+ */
+void
+keeper_cli_pgsetup_wait_until_ready(int argc, char **argv)
+{
+	int timeout = 30;
+	PostgresSetup pgSetup = { 0 };
+	bool pgIsReady = false;
+
+	if (!pg_setup_init(&pgSetup, &keeperOptions.pgSetup, true, true))
+	{
+		exit(EXIT_CODE_PGCTL);
+	}
+
+	log_debug("Initialized pgSetup, now calling pg_setup_wait_until_is_ready()");
+
+	pgIsReady = pg_setup_wait_until_is_ready(&pgSetup, timeout, LOG_INFO);
+
+	log_info("Postgres status is: \"%s\"", pmStatusToString(pgSetup.pm_status));
+
+	if (pgIsReady)
+	{
+		exit(EXIT_CODE_QUIT);
+	}
+	exit(EXIT_CODE_PGSQL);
+}
+
+
+/*
+ * keeper_cli_pgsetup_startup_logs logs the Postgre startup logs.
+ */
+void
+keeper_cli_pgsetup_startup_logs(int argc, char **argv)
+{
+	PostgresSetup pgSetup = { 0 };
+
+	if (!pg_setup_init(&pgSetup, &keeperOptions.pgSetup, true, true))
+	{
+		exit(EXIT_CODE_PGCTL);
+	}
+
+	log_debug("Initialized pgSetup, now calling pg_setup_wait_until_is_ready()");
+
+	if (!pg_log_startup(pgSetup.pgdata, LOG_INFO))
+	{
+		exit(EXIT_CODE_PGCTL);
+	}
+}
+
+
+/*
+ * keeper_cli_init_standby initializes a standby
+ */
 void
 keeper_cli_init_standby(int argc, char **argv)
 {

@@ -248,7 +248,7 @@ cli_config_check_pgsetup(PostgresSetup *pgSetup)
 	}
 
 	log_info("Postgres setup for PGDATA \"%s\" is ok, "
-			 "running with PID %d and port %ld",
+			 "running with PID %d and port %d",
 			 pgSetup->pgdata, pgSetup->pidFile.port, pgSetup->pidFile.pid);
 }
 

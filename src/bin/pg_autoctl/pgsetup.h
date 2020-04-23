@@ -39,7 +39,7 @@ typedef struct pg_control_data
  */
 typedef struct pg_pidfile
 {
-	long pid;
+	pid_t pid;
 	unsigned short port;
 } PostgresPIDFile;
 
@@ -162,7 +162,9 @@ bool pg_setup_init(PostgresSetup *pgSetup,
 				   bool missing_pgdata_is_ok,
 				   bool pg_is_not_running_is_ok);
 
-bool read_pg_pidfile(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok);
+bool read_pg_pidfile(PostgresSetup *pgSetup,
+					 bool pgIsNotRunningIsOk,
+					 int maxRetries);
 
 void fprintf_pg_setup(FILE *stream, PostgresSetup *pgSetup);
 bool pg_setup_as_json(PostgresSetup *pgSetup, JSON_Value *js);
@@ -173,6 +175,12 @@ bool pg_setup_pgdata_exists(PostgresSetup *pgSetup);
 bool pg_setup_is_running(PostgresSetup *pgSetup);
 bool pg_setup_is_primary(PostgresSetup *pgSetup);
 bool pg_setup_is_ready(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok);
+bool pg_setup_wait_until_is_ready(PostgresSetup *pgSetup,
+								  int timeout, int logLevel);
+bool pg_setup_wait_until_is_stopped(PostgresSetup *pgSetup,
+									int timeout, int logLevel);
+char * pmStatusToString(PostmasterStatus pm_status);
+
 char * pg_setup_get_username(PostgresSetup *pgSetup);
 
 #define SKIP_HBA(authMethod) \

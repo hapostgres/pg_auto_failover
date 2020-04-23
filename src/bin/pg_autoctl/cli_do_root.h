@@ -65,7 +65,12 @@ void keeper_cli_create_replication_slot(int argc, char **argv);
 void keeper_cli_drop_replication_slot(int argc, char **argv);
 void keeper_cli_enable_synchronous_replication(int argc, char **argv);
 void keeper_cli_disable_synchronous_replication(int argc, char **argv);
-void keeper_cli_discover_pg_setup(int argc, char **argv);
+
+void keeper_cli_pgsetup_discover(int argc, char **argv);
+void keeper_cli_pgsetup_is_ready(int argc, char **argv);
+void keeper_cli_pgsetup_wait_until_ready(int argc, char **argv);
+void keeper_cli_pgsetup_startup_logs(int argc, char **argv);
+
 void keeper_cli_add_default_settings(int argc, char **argv);
 void keeper_cli_create_replication_user(int argc, char **argv);
 void keeper_cli_add_standby_to_hba(int argc, char **argv);

@@ -129,16 +129,34 @@ extern CommandLine show_standby_names_command;
 /* cli_systemd.c */
 extern CommandLine systemd_cat_service_file_command;
 
+/*
+ * Handling SSL options on the command line and their inter-compatibility is a
+ * little complex.
+ */
+typedef enum
+{
+	SSL_CLI_UNKNOWN = 0,
+	SSL_CLI_NO_SSL,
+	SSL_CLI_SELF_SIGNED,
+	SSL_CLI_USER_PROVIDED
+} SSLCommandLineOptions;
 
 void keeper_cli_help(int argc, char **argv);
 int cli_print_version_getopts(int argc, char **argv);
 void keeper_cli_print_version(int argc, char **argv);
 void cli_pprint_json(JSON_Value *js);
 
+int cli_common_keeper_getopts(int argc, char **argv,
+							  struct option *long_options,
+							  const char *optstring,
+							  KeeperConfig *options,
+							  SSLCommandLineOptions *sslCommandLineOptions);
+
 int cli_create_node_getopts(int argc, char **argv,
 							struct option *long_options,
 							const char *optstring,
 							KeeperConfig *options);
+
 int cli_getopt_pgdata(int argc, char **argv);
 void prepare_keeper_options(KeeperConfig *options);
 
@@ -152,18 +170,6 @@ bool cli_create_config(Keeper *keeper, KeeperConfig *config);
 void cli_create_pg(Keeper *keeper);
 bool check_or_discover_nodename(KeeperConfig *config);
 void keeper_cli_destroy_node(int argc, char **argv);
-
-/*
- * Handling SSL options on the command line and their inter-compatibility is a
- * little complex.
- */
-typedef enum
-{
-	SSL_CLI_UNKNOWN = 0,
-	SSL_CLI_NO_SSL,
-	SSL_CLI_SELF_SIGNED,
-	SSL_CLI_USER_PROVIDED
-} SSLCommandLineOptions;
 
 bool cli_getopt_ssl_flags(int ssl_flag, char *optarg, PostgresSetup *pgSetup);
 bool cli_getopt_accept_ssl_options(SSLCommandLineOptions newSSLOption,

@@ -42,8 +42,9 @@ static void stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathname
 													   PostgresSetup *pgSetup);
 
 /*
- * cli_create_node_getopts parses the CLI options for the pg_autoctl create
- * command. An example of a long_options parameter would look like this:
+ * cli_common_keeper_getopts parses the CLI options for the pg_autoctl create
+ * postgres command, and others such as pg_autoctl do discover. An example of a
+ * long_options parameter would look like this:
  *
  *	static struct option long_options[] = {
  *		{ "pgctl", required_argument, NULL, 'C' },
@@ -81,15 +82,15 @@ static void stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathname
  *
  */
 int
-cli_create_node_getopts(int argc, char **argv,
-						struct option *long_options,
-						const char *optstring,
-						KeeperConfig *options)
+cli_common_keeper_getopts(int argc, char **argv,
+						  struct option *long_options,
+						  const char *optstring,
+						  KeeperConfig *options,
+						  SSLCommandLineOptions *sslCommandLineOptions)
 {
 	KeeperConfig LocalOptionConfig = { 0 };
 	int c, option_index = 0, errors = 0;
 	int verboseCount = 0;
-	SSLCommandLineOptions sslCommandLineOptions = SSL_CLI_UNKNOWN;
 
 	/* force some non-zero default values */
 	LocalOptionConfig.monitorDisabled = false;
@@ -372,12 +373,12 @@ cli_create_node_getopts(int argc, char **argv,
 			{
 				/* { "ssl-self-signed", no_argument, NULL, 's' }, */
 				if (!cli_getopt_accept_ssl_options(SSL_CLI_SELF_SIGNED,
-												   sslCommandLineOptions))
+												   *sslCommandLineOptions))
 				{
 					errors++;
 					break;
 				}
-				sslCommandLineOptions = SSL_CLI_SELF_SIGNED;
+				*sslCommandLineOptions = SSL_CLI_SELF_SIGNED;
 
 				LocalOptionConfig.pgSetup.ssl.active = 1;
 				LocalOptionConfig.pgSetup.ssl.createSelfSignedCert = true;
@@ -389,12 +390,12 @@ cli_create_node_getopts(int argc, char **argv,
 			{
 				/* { "no-ssl", no_argument, NULL, 'N' }, */
 				if (!cli_getopt_accept_ssl_options(SSL_CLI_NO_SSL,
-												   sslCommandLineOptions))
+												   *sslCommandLineOptions))
 				{
 					errors++;
 					break;
 				}
-				sslCommandLineOptions = SSL_CLI_NO_SSL;
+				*sslCommandLineOptions = SSL_CLI_NO_SSL;
 
 				LocalOptionConfig.pgSetup.ssl.active = 0;
 				LocalOptionConfig.pgSetup.ssl.createSelfSignedCert = false;
@@ -414,13 +415,13 @@ cli_create_node_getopts(int argc, char **argv,
 				if (ssl_flag != SSL_MODE_FLAG)
 				{
 					if (!cli_getopt_accept_ssl_options(SSL_CLI_USER_PROVIDED,
-													   sslCommandLineOptions))
+													   *sslCommandLineOptions))
 					{
 						errors++;
 						break;
 					}
 
-					sslCommandLineOptions = SSL_CLI_USER_PROVIDED;
+					*sslCommandLineOptions = SSL_CLI_USER_PROVIDED;
 					LocalOptionConfig.pgSetup.ssl.active = 1;
 				}
 
@@ -457,11 +458,79 @@ cli_create_node_getopts(int argc, char **argv,
 	}
 
 	/*
+	 * We have a PGDATA setting, prepare our configuration pathnames from it.
+	 */
+	if (!keeper_config_set_pathnames_from_pgdata(
+			&(LocalOptionConfig.pathnames), LocalOptionConfig.pgSetup.pgdata))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	/* publish our option parsing now */
+	*options = LocalOptionConfig;
+
+	return optind;
+}
+
+
+/*
+ * cli_create_node_getopts parses the CLI options for the pg_autoctl create
+ * command. An example of a long_options parameter would look like this:
+ *
+ *	static struct option long_options[] = {
+ *		{ "pgctl", required_argument, NULL, 'C' },
+ *		{ "pgdata", required_argument, NULL, 'D' },
+ *		{ "pghost", required_argument, NULL, 'H' },
+ *		{ "pgport", required_argument, NULL, 'p' },
+ *		{ "listen", required_argument, NULL, 'l' },
+ *		{ "proxyport", required_argument, NULL, 'y' },
+ *		{ "username", required_argument, NULL, 'U' },
+ *		{ "auth", required_argument, NULL, 'A' },
+ *		{ "skip-pg-hba", required_argument, NULL, 'S' },
+ *		{ "dbname", required_argument, NULL, 'd' },
+ *		{ "nodename", required_argument, NULL, 'n' },
+ *		{ "formation", required_argument, NULL, 'f' },
+ *		{ "group", required_argument, NULL, 'g' },
+ *		{ "monitor", required_argument, NULL, 'm' },
+ *		{ "disable-monitor", no_argument, NULL, 'M' },
+ *		{ "allow-removing-pgdata", no_argument, NULL, 'R' },
+ *		{ "version", no_argument, NULL, 'V' },
+ *		{ "verbose", no_argument, NULL, 'v' },
+ *		{ "quiet", no_argument, NULL, 'q' },
+ *		{ "help", no_argument, NULL, 'h' },
+ *		{ "candidate-priority", required_argument, NULL, 'P'},
+ *		{ "replication-quorum", required_argument, NULL, 'r'},
+ *		{ "help", no_argument, NULL, 0 },
+ *		{ "run", no_argument, NULL, 'x' },
+ *      { "ssl-self-signed", no_argument, NULL, 's' },
+ *      { "no-ssl", no_argument, NULL, 'N' },
+ *      { "ssl-ca-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG },
+ *      { "server-crt", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG },
+ *      { "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG },
+ *      { "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG },
+ *		{ NULL, 0, NULL, 0 }
+ *	};
+ *
+ */
+int
+cli_create_node_getopts(int argc, char **argv,
+						struct option *long_options,
+						const char *optstring,
+						KeeperConfig *options)
+{
+	SSLCommandLineOptions sslCommandLineOptions = SSL_CLI_UNKNOWN;
+
+	optind = cli_common_keeper_getopts(argc, argv,
+									   long_options, optstring,
+									   options, &sslCommandLineOptions);
+
+	/*
 	 * We require the user to specify an authentication mechanism, or to use
 	 * ---skip-pg-hba. Our documentation tutorial will use --auth trust, and we
 	 * should make it obvious that this is not the right choice for production.
 	 */
-	if (IS_EMPTY_STRING_BUFFER(LocalOptionConfig.pgSetup.authMethod))
+	if (IS_EMPTY_STRING_BUFFER(options->pgSetup.authMethod))
 	{
 		log_fatal("Please use either --auth trust|md5|... or --skip-pg-hba");
 		log_info("pg_auto_failover can be set to edit Postgres HBA rules "
@@ -489,7 +558,7 @@ cli_create_node_getopts(int argc, char **argv,
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!pgsetup_validate_ssl_settings(&(LocalOptionConfig.pgSetup)))
+	if (!pgsetup_validate_ssl_settings(&(options->pgSetup)))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_ARGS);
@@ -498,43 +567,30 @@ cli_create_node_getopts(int argc, char **argv,
 	/*
 	 * You can't both have a monitor a use --disable-monitor.
 	 */
-	if (!IS_EMPTY_STRING_BUFFER(LocalOptionConfig.monitor_pguri) &&
-		LocalOptionConfig.monitorDisabled)
+	if (!IS_EMPTY_STRING_BUFFER(options->monitor_pguri) &&
+		options->monitorDisabled)
 	{
 		log_fatal("Use either --monitor or --disable-monitor, not both.");
 		exit(EXIT_CODE_BAD_ARGS);
 	}
-	else if (IS_EMPTY_STRING_BUFFER(LocalOptionConfig.monitor_pguri) &&
-			 !LocalOptionConfig.monitorDisabled)
+	else if (IS_EMPTY_STRING_BUFFER(options->monitor_pguri) &&
+			 !options->monitorDisabled)
 	{
 		log_fatal("Failed to set the monitor URI: "
 				  "use either --monitor postgresql://... or --disable-monitor");
 		exit(EXIT_CODE_BAD_ARGS);
 	}
-	else if (LocalOptionConfig.monitorDisabled)
+	else if (options->monitorDisabled)
 	{
 		/*
 		 * We must be able to restore this setup from the configuration file,
 		 * and for that we set the pg_autoctl.monitor URI in the file to the
 		 * "magic" value PG_AUTOCTL_DISABLED.
 		 */
-		strlcpy(LocalOptionConfig.monitor_pguri,
+		strlcpy(options->monitor_pguri,
 				PG_AUTOCTL_MONITOR_DISABLED,
 				MAXCONNINFO);
 	}
-
-	/*
-	 * We have a PGDATA setting, prepare our configuration pathnames from it.
-	 */
-	if (!keeper_config_set_pathnames_from_pgdata(
-			&(LocalOptionConfig.pathnames), LocalOptionConfig.pgSetup.pgdata))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_ARGS);
-	}
-
-	/* publish our option parsing now */
-	*options = LocalOptionConfig;
 
 	return optind;
 }
