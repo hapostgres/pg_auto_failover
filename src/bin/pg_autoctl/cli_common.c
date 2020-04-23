@@ -28,6 +28,7 @@
 #include "pgsetup.h"
 #include "pgsql.h"
 #include "state.h"
+#include "service.h"
 #include "string_utils.h"
 
 /* handle command line options for our setup. */
@@ -1147,7 +1148,7 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 
 		if (read_pidfile(config->pathnames.pid, &pid))
 		{
-			log_info("An instance of this keeper is running with PID %d, "
+			log_info("An instance of pg_autoctl is running with PID %d, "
 					 "stopping it.", pid);
 
 			if (kill(pid, SIGQUIT) != 0)
