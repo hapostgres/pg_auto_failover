@@ -233,8 +233,6 @@ cli_service_reload(int argc, char **argv)
 
 	keeper.config = keeperOptions;
 
-	(void) exit_unless_role_is_keeper(&(keeper.config));
-
 	if (read_pidfile(keeper.config.pathnames.pid, &pid))
 	{
 		if (kill(pid, SIGHUP) != 0)
