@@ -42,7 +42,7 @@ monitor_service_init(MonitorConfig *config, pid_t *pid)
 	/* Check that the keeper service is not already running */
 	if (read_pidfile(config->pathnames.pid, pid))
 	{
-		log_fatal("An instance of this keeper is already running with PID %d, "
+		log_fatal("An instance of pg_autoctl is already running with PID %d, "
 				  "as seen in pidfile \"%s\"",
 				  *pid, config->pathnames.pid);
 		return false;
@@ -83,7 +83,7 @@ keeper_service_init(Keeper *keeper, pid_t *pid)
 	/* Check that the keeper service is not already running */
 	if (read_pidfile(config->pathnames.pid, pid))
 	{
-		log_fatal("An instance of this keeper is already running with PID %d, "
+		log_fatal("An instance of pg_autoctl is already running with PID %d, "
 				  "as seen in pidfile \"%s\"",
 				  *pid, config->pathnames.pid);
 		return false;

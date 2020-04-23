@@ -237,7 +237,7 @@ cli_service_reload(int argc, char **argv)
 	{
 		if (kill(pid, SIGHUP) != 0)
 		{
-			log_error("Failed to send SIGHUP to the keeper's pid %d: %m", pid);
+			log_error("Failed to send SIGHUP to the pg_autoctl pid %d: %m", pid);
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 	}
