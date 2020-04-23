@@ -582,3 +582,33 @@ monitor_config_update_with_absolute_pgdata(MonitorConfig *config)
 
 	return true;
 }
+
+
+/*
+ * monitor_config_accept_new returns true when we can accept to RELOAD our
+ * current config into the new one that's been editing.
+ */
+bool
+monitor_config_accept_new(MonitorConfig *config, MonitorConfig *newConfig)
+{
+	/* some elements are not supposed to change on a reload */
+	if (strneq(newConfig->pgSetup.pgdata, config->pgSetup.pgdata))
+	{
+		log_error("Attempt to change postgresql.pgdata from \"%s\" to \"%s\"",
+				  config->pgSetup.pgdata, newConfig->pgSetup.pgdata);
+		return false;
+	}
+
+	/* changing the nodename online is supported */
+	if (strneq(newConfig->nodename, config->nodename))
+	{
+		log_info("Reloading configuration: nodename is now \"%s\"; "
+				 "used to be \"%s\"",
+				 newConfig->nodename, config->nodename);
+		strlcpy(config->nodename, newConfig->nodename, _POSIX_HOST_NAME_MAX);
+	}
+
+	/* we can change any SSL related setup options at runtime */
+	return config_accept_new_ssloptions(&(config->pgSetup),
+										&(newConfig->pgSetup));
+}
