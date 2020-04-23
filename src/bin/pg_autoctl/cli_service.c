@@ -190,15 +190,15 @@ static void
 cli_monitor_run(int argc, char **argv)
 {
 	KeeperConfig options = keeperOptions;
-	MonitorConfig mconfig = { 0 };
 	Monitor monitor = { 0 };
+	MonitorConfig *mconfig = &(monitor.config);
 	bool missingPgdataIsOk = false;
 	bool pgIsNotRunningIsOk = true;
 	char connInfo[MAXCONNINFO];
 	pid_t pid = 0;
 
 	/* Prepare MonitorConfig from the CLI options fed in options */
-	if (!monitor_config_init_from_pgsetup(&mconfig,
+	if (!monitor_config_init_from_pgsetup(mconfig,
 										  &options.pgSetup,
 										  missingPgdataIsOk,
 										  pgIsNotRunningIsOk))
@@ -207,7 +207,7 @@ cli_monitor_run(int argc, char **argv)
 		exit(EXIT_CODE_PGCTL);
 	}
 
-	if (!monitor_service_init(&mconfig, &pid))
+	if (!monitor_service_init(mconfig, &pid))
 	{
 		log_fatal("Failed to initialize pg_auto_failover service, "
 				  "see above for details");
@@ -215,10 +215,12 @@ cli_monitor_run(int argc, char **argv)
 	}
 
 	/* Initialize our local connection to the monitor */
-	pg_setup_get_local_connection_string(&(mconfig.pgSetup), connInfo);
+	pg_setup_get_local_connection_string(&(mconfig->pgSetup), connInfo);
 	monitor_init(&monitor, connInfo);
 
-	(void) monitor_service_run(&monitor, &mconfig, pid);
+	(void) monitor_service_run(&monitor, pid);
+
+	service_stop(&(mconfig->pathnames));
 }
 
 

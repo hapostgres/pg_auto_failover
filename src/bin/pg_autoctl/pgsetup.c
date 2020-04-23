@@ -1004,32 +1004,7 @@ pg_setup_skip_hba_edits(PostgresSetup *pgSetup)
 bool
 pg_setup_set_absolute_pgdata(PostgresSetup *pgSetup)
 {
-	char absolutePgdata[PATH_MAX];
-
-	/*
-	 * We managed to initdb, refresh our configuration file location with
-	 * the realpath(3): we might have been given a relative pathname.
-	 */
-	if (!realpath(pgSetup->pgdata, absolutePgdata))
-	{
-		/* unexpected error, but not fatal, just don't overwrite the config. */
-		log_warn("Failed to get the realpath of given pgdata \"%s\": %m",
-				 pgSetup->pgdata);
-		return false;
-	}
-
-	if (strcmp(pgSetup->pgdata, absolutePgdata) != 0)
-	{
-		/* use the absolute path now that it exists. */
-		strlcpy(pgSetup->pgdata, absolutePgdata, MAXPGPATH);
-
-		log_info("Now using absolute pgdata value \"%s\" in the configuration",
-				 pgSetup->pgdata);
-
-		return true;
-	}
-
-	return false;
+	return normalize_filename(pgSetup->pgdata, pgSetup->pgdata, MAXPGPATH);
 }
 
 

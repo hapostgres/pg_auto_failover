@@ -21,6 +21,7 @@
 typedef struct Monitor
 {
 	PGSQL pgsql;
+	MonitorConfig config;
 } Monitor;
 
 typedef struct MonitorAssignedState

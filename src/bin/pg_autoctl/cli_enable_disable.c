@@ -679,6 +679,8 @@ cli_enable_ssl(int argc, char **argv)
 			PostgresSetup *pgSetup = &(mconfig.pgSetup);
 			LocalPostgresServer postgres = { 0 };
 
+			bool reloadedService = false;
+
 			if (!monitor_config_init_from_pgsetup(&mconfig,
 												  &options.pgSetup,
 												  missingPgdataIsOk,
@@ -707,6 +709,11 @@ cli_enable_ssl(int argc, char **argv)
 				exit(EXIT_CODE_BAD_CONFIG);
 			}
 
+			if (file_exists(mconfig.pathnames.pid))
+			{
+				reloadedService = cli_pg_autoctl_reload(mconfig.pathnames.pid);
+			}
+
 			/* display a nice summary to our users */
 			log_info("Successfully enabled new SSL configuration:");
 			log_info("  SSL is now %s",
@@ -717,6 +724,12 @@ cli_enable_ssl(int argc, char **argv)
 				log_info("  Self-Signed certificates have been created and "
 						 "deployed in Postgres configuration settings "
 						 "ssl_key_file and ssl_cert_file");
+			}
+
+			if (reloadedService)
+			{
+				log_info("  pg_autoctl service has been signaled to reload "
+						 "its configuration");
 			}
 
 			break;
