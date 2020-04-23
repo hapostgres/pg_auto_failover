@@ -482,30 +482,11 @@ parse_bool(const char *value, bool *result)
  * parse_pguri_info_key_vals decomposes elements of a Postgres connection
  * string (URI) into separate arrays of keywords and values as expected by
  * PQconnectdbParams.
- *
- * In passing, parse_pguri_info_key_vals also prepares some components as
- * separate entities to make it easier to re-build a user-friendly connection
- * string from pieces. The username, hostname, port, and dbname parameters are
- * expected to point to memory allocated by the caller.
- *
- * keywords and values are arrays of string and the arrays must be large enough
- * to fit all the connection parameters (of which we count 36 at the moment on
- * the Postgres documentation). Again, those are pointers to memory allocated
- * by the caller.
- *
- * We use strlcpy() to place values in the provided memory places with a length
- * limit of MAXCONNINFO for each connection keyword and value.
- *
- * See https://www.postgresql.org/docs/current/libpq-connect.html
  */
 bool
 parse_pguri_info_key_vals(const char *pguri,
 						  KeyVal *overrides,
-						  char *username,
-						  char *hostname,
-						  char *port,
-						  char *dbname,
-						  KeyVal *uriParameters)
+						  URIParams *uriParameters)
 {
 	char *errmsg;
 	PQconninfoOption *conninfo, *option;
@@ -564,33 +545,35 @@ parse_pguri_info_key_vals(const char *pguri,
 			strcmp(option->keyword, "hostaddr") == 0)
 		{
 			foundHost = true;
-			strlcpy(hostname, option->val, MAXCONNINFO);
+			strlcpy(uriParameters->hostname, option->val, MAXCONNINFO);
 		}
 		else if (strcmp(option->keyword, "port") == 0)
 		{
 			foundPort = true;
-			strlcpy(port, option->val, MAXCONNINFO);
+			strlcpy(uriParameters->port, option->val, MAXCONNINFO);
 		}
 		else if (strcmp(option->keyword, "user") == 0)
 		{
 			foundUser = true;
-			strlcpy(username, option->val, MAXCONNINFO);
+			strlcpy(uriParameters->username, option->val, MAXCONNINFO);
 		}
 		else if (strcmp(option->keyword, "dbname") == 0)
 		{
 			foundDBName = true;
-			strlcpy(dbname, option->val, MAXCONNINFO);
+			strlcpy(uriParameters->dbname, option->val, MAXCONNINFO);
 		}
 		else
 		{
 			/* make a copy in our key/val arrays */
-			strlcpy(uriParameters->keywords[paramIndex],
+			strlcpy(uriParameters->parameters.keywords[paramIndex],
 					option->keyword,
 					MAXCONNINFO);
 
-			strlcpy(uriParameters->values[paramIndex], value, MAXCONNINFO);
+			strlcpy(uriParameters->parameters.values[paramIndex],
+					value,
+					MAXCONNINFO);
 
-			++uriParameters->count;
+			++uriParameters->parameters.count;
 			++paramIndex;
 		}
 	}
@@ -630,39 +613,34 @@ parse_pguri_info_key_vals(const char *pguri,
  * MAXCONNINFO bytes.
  */
 bool
-buildPostgresURIfromPieces(KeyVal *uriParams,
-						   const char *username,
-						   const char *hostname,
-						   const char *port,
-						   const char *dbname,
-						   char *pguri)
+buildPostgresURIfromPieces(URIParams *uriParams, char *pguri)
 {
-	int keyvalIndex = 0;
+	int index = 0;
 
 	sformat(pguri, MAXCONNINFO,
 			"postgres://%s@%s:%s/%s?",
-			username,
-			hostname,
-			port,
-			dbname);
+			uriParams->username,
+			uriParams->hostname,
+			uriParams->port,
+			uriParams->dbname);
 
-	for (keyvalIndex = 0; keyvalIndex < uriParams->count; keyvalIndex++)
+	for (index = 0; index < uriParams->parameters.count; index++)
 	{
-		if (keyvalIndex == 0)
+		if (index == 0)
 		{
 			sformat(pguri, MAXCONNINFO,
 					"%s%s=%s",
 					pguri,
-					uriParams->keywords[keyvalIndex],
-					uriParams->values[keyvalIndex]);
+					uriParams->parameters.keywords[index],
+					uriParams->parameters.values[index]);
 		}
 		else
 		{
 			sformat(pguri, MAXCONNINFO,
 					"%s&%s=%s",
 					pguri,
-					uriParams->keywords[keyvalIndex],
-					uriParams->values[keyvalIndex]);
+					uriParams->parameters.keywords[index],
+					uriParams->parameters.values[index]);
 		}
 	}
 

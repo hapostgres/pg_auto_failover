@@ -886,12 +886,7 @@ update_monitor_connection_string(KeeperConfig *config)
 
 	if (monitor_ssl_active(&monitor))
 	{
-		char username[MAXCONNINFO] = { 0 };
-		char hostname[MAXCONNINFO] = { 0 };
-		char port[MAXCONNINFO] = { 0 };
-		char dbname[MAXCONNINFO] = { 0 };
-
-		KeyVal params = { 0 };
+		URIParams params = { 0 };
 		KeyVal sslParams = {
 			3, { "sslmode", "sslrootcert", "sslcrl" }, { 0 }
 		};
@@ -908,10 +903,6 @@ update_monitor_connection_string(KeeperConfig *config)
 
 		if (!parse_pguri_info_key_vals(config->monitor_pguri,
 									   &sslParams,
-									   username,
-									   hostname,
-									   port,
-									   dbname,
 									   &params))
 		{
 			log_warn(
@@ -924,12 +915,7 @@ update_monitor_connection_string(KeeperConfig *config)
 				"your monitor connection string, then restart pg_autoctl ");
 		}
 
-		if (!buildPostgresURIfromPieces(&params,
-										username,
-										hostname,
-										port,
-										dbname,
-										newPgURI))
+		if (!buildPostgresURIfromPieces(&params, newPgURI))
 		{
 			log_error("Failed to produce the new monitor connection string");
 			return false;
