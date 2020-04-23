@@ -24,65 +24,6 @@
 
 
 /*
- * monitor_start_listen_process starts a sub-process that listens to the
- * monitor notifications and outputs them for the user.
- */
-bool
-monitor_start_listen_process(Monitor *monitor,
-							 MonitorConfig *mconfig,
-							 pid_t *listenPid)
-{
-	/* the forked process' parent pid is our pid */
-	pid_t pid, ppid = getpid();
-
-	/* Flush stdio channels just before fork, to avoid double-output problems */
-	fflush(stdout);
-	fflush(stderr);
-
-	/* time to create the node_active sub-process */
-	pid = fork();
-
-	switch (pid)
-	{
-		case -1:
-		{
-			log_error("Failed to fork the node_active process");
-			return false;
-		}
-
-		case 0:
-		{
-			/* the PID file is created with our parent pid */
-			(void) monitor_service_run(monitor, mconfig, ppid);
-
-			/*
-			 * When the "main" function for the child process is over, it's the
-			 * end of our execution thread. Don't get back to the caller.
-			 */
-			if (asked_to_stop || asked_to_stop_fast)
-			{
-				exit(EXIT_CODE_QUIT);
-			}
-			else
-			{
-				/* something went wrong (e.g. broken pipe) */
-				exit(EXIT_CODE_INTERNAL_ERROR);
-			}
-		}
-
-		default:
-		{
-			/* fork succeeded, in parent */
-			log_debug("pg_autoctl listen process started in subprocess %d",
-					  pid);
-			*listenPid = pid;
-			return true;
-		}
-	}
-}
-
-
-/*
  * ensure_monitor_pg_running checks if monitor is running, attempts to restart
  * if it is not. The function verifies if the extension version is the same as
  * expected. It returns true if the monitor is up and running.
