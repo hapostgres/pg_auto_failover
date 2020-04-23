@@ -648,6 +648,38 @@ create_database_and_extension(Keeper *keeper)
 	local_postgres_init(&initPostgres, &initPgSetup);
 
 	/*
+	 * When --ssl-self-signed has been used, now is the time to build a
+	 * self-signed certificate for the server. We place the certificate and
+	 * private key in $PGDATA/server.key and $PGDATA/server.crt
+	 */
+	if (pgSetup->ssl.createSelfSignedCert)
+	{
+		/* use the newly initialized initPostgres.postgreSetup */
+		if (!pg_create_self_signed_cert(&(initPostgres.postgresSetup),
+										config->nodename))
+		{
+			log_error("Failed to create SSL self-signed certificate, "
+					  "see above for details");
+			return false;
+		}
+	}
+
+	/* publish our new pgSetup to the caller postgres state too */
+	postgres->postgresSetup.ssl = initPostgres.postgresSetup.ssl;
+
+	/*
+	 * Add pg_autoctl PostgreSQL settings, including Citus extension in
+	 * shared_preload_libraries when dealing with a Citus worker or coordinator
+	 * node.
+	 */
+	if (!postgres_add_default_settings(&initPostgres))
+	{
+		log_error("Failed to add default settings to newly initialized "
+				  "PostgreSQL instance, see above for details");
+		return false;
+	}
+
+	/*
 	 * Now start the database, we need to create our dbname and maybe the Citus
 	 * Extension too.
 	 */
@@ -670,53 +702,6 @@ create_database_and_extension(Keeper *keeper)
 			log_fatal("Failed to create role \"%s\""
 					  ", see above for details", pgSetup->username);
 
-			return false;
-		}
-	}
-
-	/*
-	 * When --ssl-self-signed has been used, now is the time to build a
-	 * self-signed certificate for the server. We place the certificate and
-	 * private key in $PGDATA/server.key and $PGDATA/server.crt
-	 */
-	if (pgSetup->ssl.createSelfSignedCert)
-	{
-		if (!pg_create_self_signed_cert(pgSetup, config->nodename))
-		{
-			log_error("Failed to create SSL self-signed certificate, "
-					  "see above for details");
-			return false;
-		}
-	}
-
-	/*
-	 * Add pg_autoctl PostgreSQL settings, including Citus extension in
-	 * shared_preload_libraries when dealing with a Citus worker or coordinator
-	 * node.
-	 */
-	if (!postgres_add_default_settings(&initPostgres))
-	{
-		log_error("Failed to add default settings to newly initialized "
-				  "PostgreSQL instance, see above for details");
-		return false;
-	}
-
-	/*
-	 * Now allow nodes on the same network to connect to the coordinator, and
-	 * the coordinator to connect to its workers.
-	 */
-	if (IS_CITUS_INSTANCE_KIND(postgres->pgKind))
-	{
-		if (!pghba_enable_lan_cidr(&initPostgres.sqlClient,
-								   pgSetup->ssl.active,
-								   HBA_DATABASE_DBNAME,
-								   pgSetup->dbname,
-								   config->nodename,
-								   pg_setup_get_username(pgSetup),
-								   pg_setup_get_auth_method(pgSetup),
-								   NULL))
-		{
-			log_error("Failed to grant local network connections in HBA");
 			return false;
 		}
 	}
@@ -745,19 +730,6 @@ create_database_and_extension(Keeper *keeper)
 	pgsql_finish(&initPostgres.sqlClient);
 
 	/*
-	 * Because we did create the PostgreSQL cluster in this function, we feel
-	 * free to restart it to make sure that the defaults we just installed are
-	 * actually in place.
-	 */
-
-	if (!keeper_restart_postgres(keeper))
-	{
-		log_fatal("Failed to restart PostgreSQL to enable pg_auto_failover "
-				  "configuration");
-		return false;
-	}
-
-	/*
 	 * When initialiasing a PostgreSQL instance that's going to be used as a
 	 * Citus node, either a coordinator or a worker, we have to also create an
 	 * extension in a database that can be used by citus.
@@ -765,15 +737,42 @@ create_database_and_extension(Keeper *keeper)
 	if (IS_CITUS_INSTANCE_KIND(postgres->pgKind))
 	{
 		/*
+		 * Now allow nodes on the same network to connect to the coordinator,
+		 * and the coordinator to connect to its workers.
+		 */
+		if (!pghba_enable_lan_cidr(&initPostgres.sqlClient,
+								   pgSetup->ssl.active,
+								   HBA_DATABASE_DBNAME,
+								   pgSetup->dbname,
+								   config->nodename,
+								   pg_setup_get_username(pgSetup),
+								   pg_setup_get_auth_method(pgSetup),
+								   NULL))
+		{
+			log_error("Failed to grant local network connections in HBA");
+			return false;
+		}
+
+		/*
+		 * Connect to pgsql as the system user to create extension: Same user
+		 * as initdb with superuser privileges.
+		 *
+		 * Calling keeper_update_state will re-init our sqlClient to now
+		 * connect per the configuration settings, cleaning-up the local
+		 * changes we made before.
+		 */
+		if (!keeper_update_pg_state(keeper))
+		{
+			log_error("Failed to update the keeper's state from the local "
+					  "PostgreSQL instance, see above for details.");
+			return false;
+		}
+
+		/*
 		 * Install the citus extension in that database, skipping if the
 		 * extension has already been installed.
 		 */
 		log_info("CREATE EXTENSION %s;", CITUS_EXTENSION_NAME);
-
-		/*
-		 * Connect to pgsql as the system user to create extension: Same
-		 * user as initdb with superuser privileges.
-		 */
 
 		if (!pgsql_create_extension(&(postgres->sqlClient), CITUS_EXTENSION_NAME))
 		{
