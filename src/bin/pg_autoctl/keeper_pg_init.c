@@ -754,14 +754,12 @@ create_database_and_extension(Keeper *keeper)
 		}
 
 		/*
-		 * Install the citus extension in that database, skipping if the
-		 * extension has already been installed.
-		 */
-		log_info("CREATE EXTENSION %s;", CITUS_EXTENSION_NAME);
-
-		/*
-		 * Connect to pgsql as the system user to create extension: Same
-		 * user as initdb with superuser privileges.
+		 * Connect to pgsql as the system user to create extension: Same user
+		 * as initdb with superuser privileges.
+		 *
+		 * Calling keeper_update_state will re-init our sqlClient to now
+		 * connect per the configuration settings, cleaning-up the local
+		 * changes we made before.
 		 */
 		if (!keeper_update_pg_state(keeper))
 		{
@@ -769,6 +767,12 @@ create_database_and_extension(Keeper *keeper)
 					  "PostgreSQL instance, see above for details.");
 			return false;
 		}
+
+		/*
+		 * Install the citus extension in that database, skipping if the
+		 * extension has already been installed.
+		 */
+		log_info("CREATE EXTENSION %s;", CITUS_EXTENSION_NAME);
 
 		if (!pgsql_create_extension(&(postgres->sqlClient), CITUS_EXTENSION_NAME))
 		{
