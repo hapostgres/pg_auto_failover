@@ -29,7 +29,8 @@ def teardown_module():
 
 
 def check_ssl_files(node):
-    for setting, f in [("ssl_key_file", "server.key"), ("ssl_cert_file", "server.crt")]:
+    for setting, f in [("ssl_key_file", "server.key"),
+                       ("ssl_cert_file", "server.crt")]:
         file_path = os.path.join(node.datadir, f)
         assert os.path.isfile(file_path)
         eq_(node.pg_config_get(setting), file_path)
