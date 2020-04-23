@@ -729,6 +729,21 @@ keeper_ensure_configuration(Keeper *keeper)
 	LocalPostgresServer *postgres = &(keeper->postgres);
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 
+	bool postgresNotRunningIsOk = false;
+
+	/*
+	 * We just reloaded our configuration file from disk. Use the pgSetup from
+	 * the new configuration to re-init our local postgres instance
+	 * information, including a maybe different SSL setup.
+	 */
+	postgres->postgresSetup = config->pgSetup;
+
+	if (!local_postgres_update(postgres, postgresNotRunningIsOk))
+	{
+		log_error("Failed to reload configuration, see above for details");
+		return false;
+	}
+
 	/*
 	 * We might have to deploy a new Postgres configuration, from new SSL
 	 * options being found in our pg_autoctl configuration file or for other
@@ -764,7 +779,8 @@ keeper_ensure_configuration(Keeper *keeper)
 	 * then restart Postgres.
 	 */
 	if (state->current_role == CATCHINGUP_STATE ||
-		state->current_role == SECONDARY_STATE)
+		state->current_role == SECONDARY_STATE ||
+		state->current_role == MAINTENANCE_STATE)
 	{
 		ReplicationSource *upstream = &(postgres->replicationSource);
 
@@ -793,7 +809,7 @@ keeper_ensure_configuration(Keeper *keeper)
 									 &(upstream->primaryNode)))
 			{
 				log_error("Failed to update primary_conninfo because getting "
-						  " the primary node from the monitor failed, "
+						  "the primary node from the monitor failed, "
 						  "see above for details");
 				return false;
 			}
@@ -847,9 +863,24 @@ keeper_ensure_configuration(Keeper *keeper)
 
 		if (strcmp(newConfContents, currentConfContents) != 0)
 		{
-			log_info("Replication settings at  \"%s\" have changed, "
+			log_info("Replication settings at \"%s\" have changed, "
 					 "restarting Postgres", upstreamConfPath);
-			return keeper_restart_postgres(keeper);
+
+			if (!pgsql_checkpoint(&(postgres->sqlClient)))
+			{
+				log_warn("Failed to CHECKPOINT before restart, "
+						 "see above for details");
+			}
+
+			if (!keeper_restart_postgres(keeper))
+			{
+				log_error("Failed to restart Postgres to enable new "
+						  "replication settings, see above for details");
+				return false;
+			}
+
+			log_debug("SSL is now: \"%s\"",
+					  pgsql_ssl_active(&postgres->sqlClient) ? "on" : "off");
 		}
 	}
 

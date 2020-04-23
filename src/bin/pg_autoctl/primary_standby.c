@@ -21,9 +21,6 @@
 static void local_postgres_update_pg_failures_tracking(LocalPostgresServer *postgres,
 													   bool pgIsRunning);
 
-static bool local_postgres_update(LocalPostgresServer *postgres,
-								  bool postgresNotRunningIsOk);
-
 /*
  * Default settings for postgres databases managed by pg_auto_failover.
  * These settings primarily ensure that streaming replication is
@@ -140,12 +137,15 @@ local_postgres_finish(LocalPostgresServer *postgres)
  * with what we discover from the newly created Postgres instance. Typically
  * used just after a pg_basebackup.
  */
-static bool
+bool
 local_postgres_update(LocalPostgresServer *postgres, bool postgresNotRunningIsOk)
 {
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	PostgresSetup newPgSetup = { 0 };
 	bool missingPgdataIsOk = false;
+
+	/* in case a connection is still established, now is time to close */
+	(void) local_postgres_finish(postgres);
 
 	if (!pg_setup_init(&newPgSetup, pgSetup,
 					   missingPgdataIsOk,

@@ -65,26 +65,9 @@ def test_005_enable_ssl_monitor():
     check_ssl_files(monitor)
 
 def test_006_enable_ssl_primary():
-    node1.stop_pg_autoctl()
     node1.enable_ssl(sslSelfSigned=True, sslMode="require")
     node1.run()
     node1.sleep(5)
-
-    conf = node1.config_file_path()
-    print()
-    print("%s:" % conf)
-    with open(conf, "r") as f:
-        print("%s" % "".join(f.readlines()))
-
-    conf = "/tmp/enable/node1/postgresql-auto-failover.conf"
-    print()
-    print("%s:" % conf)
-    with open(conf, "r") as f:
-        print("%s" % "".join(f.readlines()))
-
-    node1.flush_output()
-    print(node1.pg_autoctl.out)
-    print(node1.pg_autoctl.err)
 
     assert node1.config_get("ssl.sslmode") == "require"
     eq_(node1.pg_config_get('ssl'), "on")
@@ -92,9 +75,11 @@ def test_006_enable_ssl_primary():
 
 def test_007_enable_ssl_secondary():
     node2.enable_ssl(sslSelfSigned=True, sslMode="require")
-    node2.sleep(2)
+    node2.sleep(5)
 
     assert node2.config_get("ssl.sslmode") == "require"
+
+    node2.wait_until_pg_is_running()
     eq_(node2.pg_config_get('ssl'), "on")
     check_ssl_files(node2)
 

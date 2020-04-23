@@ -41,6 +41,8 @@ typedef struct LocalPostgresServer
 void local_postgres_init(LocalPostgresServer *postgres,
 						 PostgresSetup *postgresSetup);
 void local_postgres_finish(LocalPostgresServer *postgres);
+bool local_postgres_update(LocalPostgresServer *postgres,
+						   bool postgresNotRunningIsOk);
 bool ensure_local_postgres_is_running(LocalPostgresServer *postgres);
 bool primary_has_replica(LocalPostgresServer *postgres, char *userName,
 						 bool *hasStandby);
