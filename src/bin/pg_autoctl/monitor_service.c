@@ -222,12 +222,43 @@ monitor_ensure_configuration(Monitor *monitor)
 	PostgresSetup *pgSetup = &(config->pgSetup);
 	char configFilePath[MAXPGPATH] = { 0 };
 
+	LocalPostgresServer postgres = { 0 };
+	PostgresSetup *pgSetupReload = &(postgres.postgresSetup);
+	bool missingPgdataIsOk = false;
+	bool pgIsNotRunningIsOk = false;
+
 	join_path_components(configFilePath, pgSetup->pgdata, "postgresql.conf");
 
 	if (!monitor_add_postgres_default_settings(monitor))
 	{
 		log_error("Failed to initialize our Postgres settings, "
 				  "see above for details");
+		return false;
+	}
+
+	if (!pg_setup_init(pgSetupReload,
+					   pgSetup,
+					   missingPgdataIsOk,
+					   pgIsNotRunningIsOk))
+	{
+		log_fatal("Failed to initialise a monitor node, see above for details");
+		return false;
+	}
+
+	/*
+	 * To reload Postgres config, we need to connect as the local system user,
+	 * otherwise using the autoctl_node user does not provide us with enough
+	 * privileges.
+	 */
+	strlcpy(pgSetupReload->username, "", NAMEDATALEN);
+	strlcpy(pgSetupReload->dbname, "template1", NAMEDATALEN);
+	local_postgres_init(&postgres, pgSetupReload);
+
+	if (!pgsql_reload_conf(&(postgres.sqlClient)))
+	{
+		log_warn("Failed to reload Postgres configuration after "
+				 "reloading pg_autoctl configuration, "
+				 "see above for details");
 		return false;
 	}
 
