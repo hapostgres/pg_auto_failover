@@ -913,7 +913,7 @@ print_formation_uri(SSLOptions *ssl,
 
 	if (!monitor_formation_uri(monitor,
 							   formation,
-							   ssl->sslModeStr,
+							   ssl,
 							   postgresUri,
 							   MAXCONNINFO))
 	{
@@ -953,7 +953,7 @@ print_all_uri(SSLOptions *ssl,
 	if (outputJSON)
 	{
 		if (!monitor_print_every_formation_uri_as_json(monitor,
-													   ssl->sslModeStr,
+													   ssl,
 													   stdout))
 		{
 			log_fatal("Failed to get the list of formation URIs");
@@ -962,7 +962,7 @@ print_all_uri(SSLOptions *ssl,
 	}
 	else
 	{
-		if (!monitor_print_every_formation_uri(monitor, ssl->sslModeStr))
+		if (!monitor_print_every_formation_uri(monitor, ssl))
 		{
 			log_fatal("Failed to get the list of formation URIs");
 			exit(EXIT_CODE_MONITOR);
