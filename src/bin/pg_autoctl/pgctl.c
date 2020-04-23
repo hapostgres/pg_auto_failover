@@ -1064,9 +1064,9 @@ pg_log_startup(const char *pgdata, int logLevel)
 				}
 			}
 		}
-
-		closedir(logDir);
 	}
+
+	closedir(logDir);
 
 	return true;
 }
