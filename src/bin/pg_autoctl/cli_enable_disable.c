@@ -702,6 +702,9 @@ cli_enable_ssl(int argc, char **argv)
 				exit(EXIT_CODE_INTERNAL_ERROR);
 			}
 
+			/* make sure that the new SSL files are part of the setup */
+			mconfig.pgSetup.ssl = postgres.postgresSetup.ssl;
+
 			/* update the monitor's configuration to use SSL */
 			if (!monitor_config_write_file(&mconfig))
 			{
