@@ -30,12 +30,16 @@ def test_000_create_monitor():
     monitor.run()
     monitor.wait_until_pg_is_running()
 
+    eq_(monitor.pg_config_get('ssl'), "off")
+
 def test_001_init_primary():
     global node1
     node1 = cluster.create_datanode("/tmp/enable/node1")
     node1.create()
     node1.run()
     assert node1.wait_until_state(target_state="single")
+
+    eq_(monitor.pg_config_get('ssl'), "off")
 
 def test_002_create_t1():
     node1.run_sql_query("CREATE TABLE t1(a int)")
@@ -49,6 +53,8 @@ def test_003_init_secondary():
 
     assert node2.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")
+
+    eq_(monitor.pg_config_get('ssl'), "off")
 
 def test_004_maintenance():
     print()
@@ -75,6 +81,7 @@ def test_006_enable_ssl_primary():
     node1.sleep(2)
 
     eq_(node1.config_get("ssl.sslmode"), "require")
+    assert "sslmode=require" in node1.config_get("pg_autoctl.monitor")
     eq_(node1.pg_config_get('ssl'), "on")
     check_ssl_files(node1)
 

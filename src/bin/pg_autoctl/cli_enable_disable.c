@@ -435,8 +435,8 @@ cli_disable_maintenance(int argc, char **argv)
 
 
 /*
- * cli_create_monitor_getopts parses the command line options necessary to
- * initialise a PostgreSQL instance as our monitor.
+ * cli_ssl_getopts parses the command line options necessary to initialise a
+ * PostgreSQL instance as our monitor.
  */
 static int
 cli_ssl_getopts(int argc, char **argv)
@@ -604,17 +604,7 @@ cli_ssl_getopts(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	/*
-	 * We're not using pg_setup_init() here: we are following a very different
-	 * set of rules. We just want to check:
-	 *
-	 *   - PGDATA is set and the directory does not exists
-	 *   - PGPORT is either set or defaults to 5432
-	 *
-	 * Also we use the first pg_ctl binary found in the PATH, we're not picky
-	 * here, we don't have to manage the whole life-time of that PostgreSQL
-	 * instance.
-	 */
+	/* Initialize with given PGDATA */
 	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 	{
 		get_env_pgdata_or_exit(options.pgSetup.pgdata);
@@ -659,7 +649,7 @@ cli_ssl_getopts(int argc, char **argv)
  * cli_enable_ssl enables SSL setup on this node.
  *
  *  - edit our Postgres configuration with the given SSL files and options
- *  - when run on a keeper, checks that the monitor accepts ssl connections
+ *  - when run on a keeper, edit the monitor connection string to use SSL
  *  - edits our configuration at pg_autoctl.conf
  */
 static void
@@ -715,6 +705,12 @@ cli_enable_ssl(int argc, char **argv)
 			if (file_exists(mconfig.pathnames.pid))
 			{
 				reloadedService = cli_pg_autoctl_reload(mconfig.pathnames.pid);
+
+				if (!reloadedService)
+				{
+					log_error("Failed to reload the pg_autoctl, consider "
+							  "restarting it to implement the SSL changes");
+				}
 			}
 
 			/* display a nice summary to our users */
@@ -770,7 +766,8 @@ cli_enable_ssl(int argc, char **argv)
 			{
 				updatedMonitorString = false;
 				log_error(
-					"Failed to update the monitor URI, rerun this command again after resolving the issue to update it");
+					"Failed to update the monitor URI, rerun this command "
+					"again after resolving the issue to update it");
 			}
 
 			/* update the Postgres SSL setup and maybe create the certificate */
@@ -794,6 +791,12 @@ cli_enable_ssl(int argc, char **argv)
 			if (file_exists(kconfig.pathnames.pid))
 			{
 				reloadedService = cli_pg_autoctl_reload(kconfig.pathnames.pid);
+
+				if (!reloadedService)
+				{
+					log_error("Failed to reload the pg_autoctl, consider "
+							  "restarting it to implement the SSL changes");
+				}
 			}
 
 			/* display a nice summary to our users */
@@ -849,7 +852,6 @@ cli_enable_ssl(int argc, char **argv)
 static bool
 update_ssl_configuration(LocalPostgresServer *postgres, const char *nodename)
 {
-	char hbaFilePath[MAXPGPATH] = { 0 };
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 
 	log_trace("update_ssl_configuration: ssl %s",
@@ -880,11 +882,9 @@ update_ssl_configuration(LocalPostgresServer *postgres, const char *nodename)
 	}
 
 	/* HBA rules for hostssl are not edited */
-	sformat(hbaFilePath, MAXPGPATH, "%s/pg_hba.conf", pgSetup->pgdata);
-
-	log_warn("HBA rules in \"%s\" have NOT been edited: \"host\" "
+	log_warn("HBA rules in \"%s/pg_hba.conf\" have NOT been edited: \"host\" "
 			 " records match either SSL or non-SSL connection attempts.",
-			 hbaFilePath);
+			 pgSetup->pgdata);
 
 	return true;
 }

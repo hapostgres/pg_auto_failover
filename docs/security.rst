@@ -316,7 +316,7 @@ configuration with::
   $ pg_autoctl config get pg_autoctl.monitor
 
 Note that an already running pg_autoctl deamon will try to reload its
-configuration after ``pg_autoctl config set`` has finished. In some cases
+configuration after ``pg_autoctl enable ssl`` has finished. In some cases
 this is not possible to do without a restart. So be sure to check the logs
 from a running daemon to confirm that the reload succeeded. If it did not
 you may need to restart the daemon to ensure the new connection string is
@@ -338,5 +338,5 @@ In summary, to upgrade an existing pg_auto_failover setup to enable SSL:
      the reload operation has been effective, and review your Postgres
      settings to verify that you have the expected result,
 
-  3. review youur HBA rules setup to change the pg_auto_failover rules from
+  3. review your HBA rules setup to change the pg_auto_failover rules from
      ``host`` to ``hostssl`` to disallow insecure connections.

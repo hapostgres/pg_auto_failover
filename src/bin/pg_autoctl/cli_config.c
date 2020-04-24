@@ -581,12 +581,6 @@ cli_config_set(int argc, char **argv)
 		case PG_AUTOCTL_ROLE_KEEPER:
 		{
 			(void) cli_keeper_config_set(argc, argv);
-
-			if (!cli_pg_autoctl_reload(config.pathnames.pid))
-			{
-				/* errors have already been logged */
-				exit(EXIT_CODE_INTERNAL_ERROR);
-			}
 			break;
 		}
 
@@ -596,6 +590,12 @@ cli_config_set(int argc, char **argv)
 					  config.pathnames.config);
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
+	}
+
+	if (!cli_pg_autoctl_reload(config.pathnames.pid))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 }
 

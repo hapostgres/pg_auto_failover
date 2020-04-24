@@ -228,6 +228,4 @@ bool pgsql_listen(PGSQL *pgsql, char *channels[]);
 bool pgsql_alter_extension_update_to(PGSQL *pgsql,
 									 const char *extname, const char *version);
 
-bool pgsql_ssl_active(PGSQL *pgsql);
-
 #endif /* PGSQL_H */

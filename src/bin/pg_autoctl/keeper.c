@@ -749,7 +749,7 @@ keeper_create_self_signed_cert(Keeper *keeper)
  * pg_autoctl configuration file, if necessary.
  *
  * This includes making sure that the SSL server.{key,cert} files are used in
- * the Postgres configuration, and on a secondary server, that means updateing
+ * the Postgres configuration, and on a secondary server, that means updating
  * the primary_conninfo connection string to make sure we use the proper
  * sslmode that is setup.
  *
@@ -916,9 +916,6 @@ keeper_ensure_configuration(Keeper *keeper)
 						  "replication settings, see above for details");
 				return false;
 			}
-
-			log_debug("SSL is now: \"%s\"",
-					  pgsql_ssl_active(&postgres->sqlClient) ? "on" : "off");
 		}
 	}
 

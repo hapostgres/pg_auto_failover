@@ -3062,13 +3062,3 @@ prepare_connection_to_current_system_user(Monitor *source, Monitor *target)
 
 	return true;
 }
-
-
-/*
- * monitor_ssl_active checks if SSL is active on the monitor.
- */
-bool
-monitor_ssl_active(Monitor *monitor)
-{
-	return pgsql_ssl_active(&(monitor->pgsql));
-}

@@ -1933,30 +1933,3 @@ pgsql_alter_extension_update_to(PGSQL *pgsql,
 
 	return true;
 }
-
-
-/*
- * monitor_ssl_active checks if SSL is active on the monitor.
- */
-bool
-pgsql_ssl_active(PGSQL *pgsql)
-{
-	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BOOL, false };
-	const char *sql = "SELECT current_setting('ssl')::bool";
-
-	if (!pgsql_execute_with_params(pgsql, sql, 0, NULL, NULL,
-								   &context, &parseSingleValueResult))
-	{
-		log_error("Failed to check if SSL is active on the monitor");
-		return false;
-	}
-
-	if (!context.parsedOk)
-	{
-		log_error("Failed to check if SSL is active on the monitor: "
-				  "could not parse monitor's result.");
-		return false;
-	}
-
-	return context.boolVal;
-}

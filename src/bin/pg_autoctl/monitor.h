@@ -153,7 +153,5 @@ bool monitor_extension_update(Monitor *monitor, const char *targetVersion);
 bool monitor_ensure_extension_version(Monitor *monitor,
 									  MonitorExtensionVersion *version);
 
-bool monitor_ssl_active(Monitor *monitor);
-
 
 #endif /* MONITOR_H */
