@@ -49,8 +49,8 @@ static bool local_postgres_update(LocalPostgresServer *postgres,
 	{ "logging_collector", "on" }, \
 	{ "log_directory", "log" }, \
 	{ "log_min_messages", "info" }, \
-	{ "log_connections", "on" }, \
-	{ "log_disconnections", "on" }, \
+	{ "log_connections", "off" }, \
+	{ "log_disconnections", "off" }, \
 	{ "log_lock_waits", "on" }, \
 	{ "ssl", "off" }, \
 	{ "ssl_ca_file", "" }, \

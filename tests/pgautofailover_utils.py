@@ -892,11 +892,13 @@ SELECT reportedstate
         if set(expected_slots) == set(current_slots):
             print("slots list on %s is %s, as expected" %
                   (self.datadir, current_slots))
-        else:
-            print("slots list on %s is %s, expected %s" %
-                  (self.datadir, current_slots, expected_slots))
+            return True
 
-        return set(expected_slots) == set(current_slots)
+        self.print_debug_logs()
+        print()
+        print("slots list on %s is %s, expected %s" %
+              (self.datadir, current_slots, expected_slots))
+        return False
 
 
 class MonitorNode(PGNode):

@@ -326,7 +326,8 @@ fsm_init_primary(Keeper *keeper)
  * fsm_disable_replication is used when other node was forcibly removed, now
  * single.
  *
- * disable_synchronous_replication && drop_replication_slot
+ *    disable_synchronous_replication
+ * && keeper_drop_replication_slots_for_removed_nodes
  *
  * TODO: We currently use a separate session for each step. We should use
  * a single connection.
@@ -343,7 +344,8 @@ fsm_disable_replication(Keeper *keeper)
 		return false;
 	}
 
-	return true;
+	/* when a standby has been removed, remove its replication slot */
+	return keeper_drop_replication_slots_for_removed_nodes(keeper);
 }
 
 
@@ -353,7 +355,7 @@ fsm_disable_replication(Keeper *keeper)
  *
  *    start_postgres
  * && disable_synchronous_replication
- * && drop_replication_slot
+ * && keeper_drop_replication_slots_for_removed_nodes
  *
  * So we reuse fsm_disable_replication() here, rather than copy/pasting the same
  * bits code in the fsm_resume_as_primary() function body. If the definition of
@@ -872,14 +874,21 @@ fsm_restart_standby(Keeper *keeper)
 
 
 /*
- * The following actions are needed to promote a standby, and used in several
- * situations in the FSM transitions:
+ * fsm_promote_standby is used in several situations in the FSM transitions and
+ * the following actions are needed to promote a standby:
  *
  *    start_postgres
  * && promote_standby
  * && add_standby_to_hba
  * && create_replication_slot
  * && disable_synchronous_replication
+ * && keeper_drop_replication_slots_for_removed_nodes
+ *
+ * So we reuse fsm_disable_replication() here, rather than copy/pasting the same
+ * bits code in the fsm_promote_standby() function body. If the definition of
+ * the fsm_promote_standby transition ever came to diverge from whatever
+ * fsm_disable_replication() is doing, we'd have to copy/paste and maintain
+ * separate code path.
  */
 bool
 fsm_promote_standby(Keeper *keeper)
@@ -917,7 +926,7 @@ fsm_promote_standby(Keeper *keeper)
 		return false;
 	}
 
-	if (!primary_disable_synchronous_replication(postgres))
+	if (!fsm_disable_replication(keeper))
 	{
 		log_error("Failed to disable synchronous replication after promotion, "
 				  "see above for details");
