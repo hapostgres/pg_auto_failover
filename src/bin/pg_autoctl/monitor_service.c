@@ -56,7 +56,7 @@ ensure_monitor_pg_running(Monitor *monitor)
 		/*
 		 * Check version compatibility.
 		 *
-		 * The function terminates any existing connection during clenaup
+		 * The function terminates any existing connection during cleanup
 		 * therefore it is not called when PG is found to be running to not
 		 * to intervene pgsql_listen call.
 		 */
