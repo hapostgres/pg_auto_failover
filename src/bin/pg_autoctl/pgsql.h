@@ -70,6 +70,7 @@ typedef struct PGSQL
 	ConnectionType connectionType;
 	char connectionString[MAXCONNINFO];
 	PGconn *connection;
+	bool connectFailFast;
 } PGSQL;
 
 /* PostgreSQL ("Grand Unified Configuration") setting */

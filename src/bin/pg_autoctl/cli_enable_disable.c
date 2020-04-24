@@ -745,6 +745,7 @@ cli_enable_ssl(int argc, char **argv)
 			LocalPostgresServer postgres = { 0 };
 
 			bool reloadedService = false;
+			bool updatedMonitorString = true;
 
 			kconfig.pgSetup = options.pgSetup;
 			kconfig.pathnames = options.pathnames;
@@ -767,7 +768,9 @@ cli_enable_ssl(int argc, char **argv)
 			/* log about the need to edit the monitor connection string */
 			if (!update_monitor_connection_string(&kconfig))
 			{
-				log_warn("Failed to update the monitor URI to use SSL");
+				updatedMonitorString = false;
+				log_error(
+					"Failed to update the monitor URI, rerun this command again after resolving the issue to update it");
 			}
 
 			/* update the Postgres SSL setup and maybe create the certificate */
@@ -811,9 +814,17 @@ cli_enable_ssl(int argc, char **argv)
 						 "its configuration");
 			}
 
-			log_warn("  Postgres connection string to the monitor "
-					 "has been changed to use sslmode \"%s\"",
-					 pgsetup_sslmode_to_string(pgSetup->ssl.sslMode));
+			if (updatedMonitorString)
+			{
+				log_info("  Postgres connection string to the monitor "
+						 "has been changed to use sslmode \"%s\"",
+						 pgsetup_sslmode_to_string(pgSetup->ssl.sslMode));
+			}
+			else
+			{
+				log_error("  Postgres connection string to the monitor "
+						  "could not be updated, see above for details");
+			}
 
 			log_info("  Replication connection string primary_conninfo "
 					 "is going to be updated in the main service loop "
@@ -894,67 +905,69 @@ update_monitor_connection_string(KeeperConfig *config)
 {
 	Monitor monitor = { 0 };
 
-	if (!monitor_init(&monitor, config->monitor_pguri))
+	URIParams params = { 0 };
+	KeyVal sslParams = {
+		3, { "sslmode", "sslrootcert", "sslcrl" }, { 0 }
+	};
+
+	char newPgURI[MAXCONNINFO] = { 0 };
+
+	/* initialize SSL Params values */
+	strlcpy(sslParams.values[0],
+			pgsetup_sslmode_to_string(config->pgSetup.ssl.sslMode),
+			MAXCONNINFO);
+
+	strlcpy(sslParams.values[1], config->pgSetup.ssl.caFile, MAXCONNINFO);
+	strlcpy(sslParams.values[2], config->pgSetup.ssl.crlFile, MAXCONNINFO);
+
+	if (!parse_pguri_info_key_vals(config->monitor_pguri,
+								   &sslParams,
+								   &params))
 	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_CONFIG);
+		log_warn(
+			"The monitor SSL setup is ready and your current "
+			"connection string is \"%s\", you might need to update it",
+			config->monitor_pguri);
+
+		log_info(
+			"Use pg_autoctl config set pg_autoctl.monitor for updating "
+			"your monitor connection string, then restart pg_autoctl ");
 	}
 
-	if (monitor_ssl_active(&monitor))
+	if (!buildPostgresURIfromPieces(&params, newPgURI))
 	{
-		URIParams params = { 0 };
-		KeyVal sslParams = {
-			3, { "sslmode", "sslrootcert", "sslcrl" }, { 0 }
-		};
-
-		char newPgURI[MAXCONNINFO] = { 0 };
-
-		/* initialize SSL Params values */
-		strlcpy(sslParams.values[0],
-				pgsetup_sslmode_to_string(config->pgSetup.ssl.sslMode),
-				MAXCONNINFO);
-
-		strlcpy(sslParams.values[1], config->pgSetup.ssl.caFile, MAXCONNINFO);
-		strlcpy(sslParams.values[2], config->pgSetup.ssl.crlFile, MAXCONNINFO);
-
-		if (!parse_pguri_info_key_vals(config->monitor_pguri,
-									   &sslParams,
-									   &params))
-		{
-			log_warn(
-				"The monitor SSL setup is ready and your current "
-				"connection string is \"%s\", you might need to update it",
-				config->monitor_pguri);
-
-			log_info(
-				"Use pg_autoctl config set pg_autoctl.monitor for updating "
-				"your monitor connection string, then restart pg_autoctl ");
-		}
-
-		if (!buildPostgresURIfromPieces(&params, newPgURI))
-		{
-			log_error("Failed to produce the new monitor connection string");
-			return false;
-		}
-
-		if (!monitor_init(&monitor, newPgURI))
-		{
-			/* errors have already been logged */
-			return false;
-		}
-
-		/* we have a new monitor URI with our new SSL parameters */
-		strlcpy(config->monitor_pguri, newPgURI, MAXCONNINFO);
-
-		log_info("Updating the monitor URI to \"%s\"", config->monitor_pguri);
-
-		return true;
-	}
-	else
-	{
-		log_warn("The monitor SSL setup is not ready yet: ssl is off");
+		log_error("Failed to produce the new monitor connection string");
 		return false;
 	}
+
+	if (!monitor_init(&monitor, newPgURI))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+
+	log_info(
+		"Trying to connect to monitor using connection string \"%s\"",
+		newPgURI
+		);
+
+	/*
+	 * Try to connect using the new connection string and don't update it if it
+	 * does not actually allow connecting.
+	 */
+	monitor.pgsql.connectFailFast = true;
+	if (!pgsql_execute_with_params(&monitor.pgsql, "SELECT 1", 0, NULL, NULL, NULL, NULL))
+	{
+		return false;
+	}
+
+	/* we have a new monitor URI with our new SSL parameters */
+	strlcpy(config->monitor_pguri, newPgURI, MAXCONNINFO);
+
+	log_info("Updating the monitor URI to \"%s\"", config->monitor_pguri);
+
+	return true;
 }
 
 
