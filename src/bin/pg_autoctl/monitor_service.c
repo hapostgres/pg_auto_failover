@@ -83,19 +83,19 @@ monitor_service_run(Monitor *monitor, pid_t start_pid)
 	char *channels[] = { "log", "state", NULL };
 	char postgresUri[MAXCONNINFO];
 
-	if (!monitor_ensure_configuration(monitor))
-	{
-		log_fatal("Failed to apply the current monitor configuration, "
-				  "see above for details");
-		exit(EXIT_CODE_MONITOR);
-	}
-
 	/* We exit the loop if we can't get monitor to be running during the start */
 	if (!ensure_monitor_pg_running(monitor))
 	{
 		/* errors were already logged */
 		log_warn("Failed to ensure PostgreSQL is running, exiting the service");
 		return false;
+	}
+
+	if (!monitor_ensure_configuration(monitor))
+	{
+		log_fatal("Failed to apply the current monitor configuration, "
+				  "see above for details");
+		exit(EXIT_CODE_MONITOR);
 	}
 
 	/* Now get the the Monitor URI to display it to the user, and move along */
