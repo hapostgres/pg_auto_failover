@@ -45,8 +45,16 @@
 #include "utils/memutils.h"
 #include "tcop/utility.h"
 
+/*
+ * The healthcheck only checks if it gets a response back from postgres. So
+ * both user and password are actually useless, because we do not need to
+ * authenticate. They are provided though to override any settings set through
+ * PGPASSWORD environment variable or .pgpass file. This way it does not matter
+ * that TLS is not necessarily used, because no secret information is sent.
+ */
 #define CONN_INFO_TEMPLATE \
 	"host=%s port=%u user=pgautofailover_monitor dbname=postgres " \
+	"password=pgautofailover_monitor" \
 	"connect_timeout=%u"
 #define MAX_CONN_INFO_SIZE 1024
 
