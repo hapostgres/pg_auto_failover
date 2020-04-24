@@ -60,7 +60,7 @@ def test_005_enable_ssl_monitor():
     monitor.enable_ssl(sslSelfSigned=True, sslMode="require")
     monitor.sleep(2) # we signaled, wait some time
 
-    assert monitor.config_get("ssl.sslmode") == "require"
+    eq_(monitor.config_get("ssl.sslmode"), "require")
     eq_(monitor.pg_config_get('ssl'), "on")
     check_ssl_files(monitor)
 
@@ -69,7 +69,7 @@ def test_006_enable_ssl_primary():
     node1.run()
     node1.sleep(5)
 
-    assert node1.config_get("ssl.sslmode") == "require"
+    eq_(node1.config_get("ssl.sslmode"), "require")
     eq_(node1.pg_config_get('ssl'), "on")
     check_ssl_files(node1)
 
@@ -77,7 +77,7 @@ def test_007_enable_ssl_secondary():
     node2.enable_ssl(sslSelfSigned=True, sslMode="require")
     node2.sleep(5)
 
-    assert node2.config_get("ssl.sslmode") == "require"
+    eq_(node2.config_get("ssl.sslmode"), "require")
 
     node2.wait_until_pg_is_running()
     eq_(node2.pg_config_get('ssl'), "on")
