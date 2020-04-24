@@ -14,7 +14,7 @@ import json
 import ssl_cert_utils as cert
 
 COMMAND_TIMEOUT = network.COMMAND_TIMEOUT
-POLLING_INTERVAL = 0.1
+POLLING_INTERVAL = 0.01
 STATE_CHANGE_TIMEOUT = 90
 PGVERSION = os.getenv("PGVERSION", "11")
 
