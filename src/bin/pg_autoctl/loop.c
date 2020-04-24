@@ -75,7 +75,7 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		 * signaled to us and from where we can immediately exit whatever we're
 		 * doing. It's important to avoid e.g. leaving state.new files behind.
 		 */
-		if (asked_to_reload)
+		if (asked_to_reload || firstLoop)
 		{
 			(void) reload_configuration(keeper);
 		}
@@ -419,6 +419,9 @@ reload_configuration(Keeper *keeper)
 		strlcpy(newConfig.pathnames.config, config->pathnames.config, MAXPGPATH);
 		strlcpy(newConfig.pathnames.state, config->pathnames.state, MAXPGPATH);
 
+		/* disconnect to the current monitor if we're connected */
+		(void) pgsql_finish(&(keeper->monitor.pgsql));
+
 		if (keeper_config_read_file(&newConfig,
 									missingPgdataIsOk,
 									pgIsNotRunningIsOk,
@@ -432,6 +435,16 @@ reload_configuration(Keeper *keeper)
 			 */
 			log_info("Reloaded the new configuration from \"%s\"",
 					 config->pathnames.config);
+
+			/*
+			 * The new configuration might impact the Postgres setup, such as
+			 * when changing the SSL file paths.
+			 */
+			if (!keeper_ensure_configuration(keeper))
+			{
+				log_warn("Failed to reload pg_autoctl configuration, "
+						 "see above for details");
+			}
 		}
 		else
 		{

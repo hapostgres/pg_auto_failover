@@ -162,6 +162,13 @@ pgsql_open_connection(PGSQL *pgsql)
 		 * want to implement a retry loop: it might be a transient failure,
 		 * such as when the remote node is not ready yet.
 		 */
+		if (pgsql->connectFailFast)
+		{
+			log_error("Connection to database failed: %s",
+					  PQerrorMessage(connection));
+			pgsql_finish(pgsql);
+			return NULL;
+		}
 		switch (pgsql->connectionType)
 		{
 			case PGSQL_CONN_LOCAL:
@@ -293,7 +300,7 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 			}
 		}
 
-		if (asked_to_stop || asked_to_stop_fast)
+		if (asked_to_stop || asked_to_stop_fast || asked_to_reload)
 		{
 			retry = false;
 		}

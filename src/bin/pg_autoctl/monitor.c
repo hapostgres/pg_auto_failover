@@ -93,6 +93,8 @@ static bool prepare_connection_to_current_system_user(Monitor *source,
 bool
 monitor_init(Monitor *monitor, char *url)
 {
+	log_trace("monitor_init: %s", url);
+
 	if (!pgsql_init(&monitor->pgsql, url, PGSQL_CONN_MONITOR))
 	{
 		/* URL must be invalid, pgsql_init logged an error */

@@ -17,10 +17,15 @@
 #include "log.h"
 #include "monitor.h"
 #include "monitor_config.h"
+#include "monitor_pg_init.h"
 #include "monitor_service.h"
 #include "service.h"
 #include "signals.h"
 #include "string_utils.h"
+
+
+static void reload_configuration(Monitor *monitor);
+static bool monitor_ensure_configuration(Monitor *monitor);
 
 
 /*
@@ -29,8 +34,9 @@
  * expected. It returns true if the monitor is up and running.
  */
 bool
-ensure_monitor_pg_running(Monitor *monitor, MonitorConfig *mconfig)
+ensure_monitor_pg_running(Monitor *monitor)
 {
+	MonitorConfig *mconfig = &(monitor->config);
 	MonitorExtensionVersion version = { 0 };
 
 	if (!pg_is_running(mconfig->pgSetup.pg_ctl, mconfig->pgSetup.pgdata))
@@ -50,7 +56,7 @@ ensure_monitor_pg_running(Monitor *monitor, MonitorConfig *mconfig)
 		/*
 		 * Check version compatibility.
 		 *
-		 * The function terminates any existing connection during clenaup
+		 * The function terminates any existing connection during cleanup
 		 * therefore it is not called when PG is found to be running to not
 		 * to intervene pgsql_listen call.
 		 */
@@ -71,17 +77,25 @@ ensure_monitor_pg_running(Monitor *monitor, MonitorConfig *mconfig)
  * change of state on the monitor, and prints the change on stdout.
  */
 bool
-monitor_service_run(Monitor *monitor, MonitorConfig *mconfig, pid_t start_pid)
+monitor_service_run(Monitor *monitor, pid_t start_pid)
 {
+	MonitorConfig *mconfig = &(monitor->config);
 	char *channels[] = { "log", "state", NULL };
 	char postgresUri[MAXCONNINFO];
 
 	/* We exit the loop if we can't get monitor to be running during the start */
-	if (!ensure_monitor_pg_running(monitor, mconfig))
+	if (!ensure_monitor_pg_running(monitor))
 	{
 		/* errors were already logged */
 		log_warn("Failed to ensure PostgreSQL is running, exiting the service");
 		return false;
+	}
+
+	if (!monitor_ensure_configuration(monitor))
+	{
+		log_fatal("Failed to apply the current monitor configuration, "
+				  "see above for details");
+		exit(EXIT_CODE_MONITOR);
 	}
 
 	/* Now get the the Monitor URI to display it to the user, and move along */
@@ -98,6 +112,11 @@ monitor_service_run(Monitor *monitor, MonitorConfig *mconfig, pid_t start_pid)
 	 */
 	for (;;)
 	{
+		if (asked_to_reload)
+		{
+			(void) reload_configuration(monitor);
+		}
+
 		if (asked_to_stop || asked_to_stop_fast)
 		{
 			break;
@@ -106,7 +125,7 @@ monitor_service_run(Monitor *monitor, MonitorConfig *mconfig, pid_t start_pid)
 		/* Check that we still own our PID file, or quit now */
 		(void) check_pidfile(mconfig->pathnames.pid, start_pid);
 
-		if (!ensure_monitor_pg_running(monitor, mconfig))
+		if (!ensure_monitor_pg_running(monitor))
 		{
 			log_warn("Failed to ensure PostgreSQL is running, "
 					 "retrying in %d seconds",
@@ -130,6 +149,118 @@ monitor_service_run(Monitor *monitor, MonitorConfig *mconfig, pid_t start_pid)
 	}
 
 	pgsql_finish(&(monitor->pgsql));
+
+	return true;
+}
+
+
+/*
+ * reload_configuration reads the supposedly new configuration file and
+ * integrates accepted new values into the current setup.
+ */
+static void
+reload_configuration(Monitor *monitor)
+{
+	MonitorConfig *config = &(monitor->config);
+
+	if (file_exists(config->pathnames.config))
+	{
+		MonitorConfig newConfig = { 0 };
+		bool missingPgdataIsOk = true;
+		bool pgIsNotRunningIsOk = true;
+
+		/*
+		 * Set the same configuration and state file as the current config.
+		 */
+		strlcpy(newConfig.pathnames.config, config->pathnames.config, MAXPGPATH);
+
+		if (monitor_config_read_file(&newConfig,
+									 missingPgdataIsOk,
+									 pgIsNotRunningIsOk) &&
+			monitor_config_accept_new(config, &newConfig))
+		{
+			log_info("Reloaded the new configuration from \"%s\"",
+					 config->pathnames.config);
+
+			/*
+			 * The new configuration might impact the Postgres setup, such as
+			 * when changing the SSL file paths.
+			 */
+			if (!monitor_ensure_configuration(monitor))
+			{
+				log_warn("Failed to reload pg_autoctl configuration, "
+						 "see above for details");
+			}
+		}
+		else
+		{
+			log_warn("Failed to read configuration file \"%s\", "
+					 "continuing with the same configuration.",
+					 config->pathnames.config);
+		}
+	}
+	else
+	{
+		log_warn("Configuration file \"%s\" does not exists, "
+				 "continuing with the same configuration.",
+				 config->pathnames.config);
+	}
+
+	/* we're done reloading now. */
+	asked_to_reload = 0;
+}
+
+
+/*
+ * monitor_ensure_configuration updates the Postgres settings to match the
+ * pg_autoctl configuration file, if necessary.
+ */
+static bool
+monitor_ensure_configuration(Monitor *monitor)
+{
+	MonitorConfig *config = &(monitor->config);
+	PostgresSetup *pgSetup = &(config->pgSetup);
+	char configFilePath[MAXPGPATH] = { 0 };
+
+	LocalPostgresServer postgres = { 0 };
+	PostgresSetup *pgSetupReload = &(postgres.postgresSetup);
+	bool missingPgdataIsOk = false;
+	bool pgIsNotRunningIsOk = false;
+
+	join_path_components(configFilePath, pgSetup->pgdata, "postgresql.conf");
+
+	if (!monitor_add_postgres_default_settings(monitor))
+	{
+		log_error("Failed to initialize our Postgres settings, "
+				  "see above for details");
+		return false;
+	}
+
+	if (!pg_setup_init(pgSetupReload,
+					   pgSetup,
+					   missingPgdataIsOk,
+					   pgIsNotRunningIsOk))
+	{
+		log_fatal("Failed to initialise a monitor node, see above for details");
+		return false;
+	}
+
+	/*
+	 * To reload Postgres config, we need to connect as the local system user,
+	 * otherwise using the autoctl_node user does not provide us with enough
+	 * privileges.
+	 */
+	strlcpy(pgSetupReload->username, "", NAMEDATALEN);
+	strlcpy(pgSetupReload->dbname, "template1", NAMEDATALEN);
+	local_postgres_init(&postgres, pgSetupReload);
+
+	if (!pgsql_reload_conf(&(postgres.sqlClient)))
+	{
+		log_warn("Failed to reload Postgres configuration after "
+				 "reloading pg_autoctl configuration, "
+				 "see above for details");
+		return false;
+	}
 
 	return true;
 }

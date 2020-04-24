@@ -560,6 +560,40 @@ class PGNode:
             logs += node.logs()
         print(logs)
 
+    def enable_ssl(self, sslMode=None, sslSelfSigned=None,
+                   sslCAFile=None, sslServerKey=None, sslServerCert=None):
+        """
+        Enables SSL on a pg_autoctl node
+        """
+        self.sslMode = sslMode
+        self.sslSelfSigned = sslSelfSigned
+        self.sslCAFile = sslCAFile
+        self.sslServerKey = sslServerKey
+        self.sslServerCert = sslServerCert
+
+        ssl_args = ['enable', 'ssl', '-vvv', '--pgdata', self.datadir]
+
+        if self.sslMode:
+            ssl_args += ['--ssl-mode', self.sslMode]
+
+        if self.sslSelfSigned:
+            ssl_args += ['--ssl-self-signed']
+
+        if self.sslCAFile:
+            ssl_args += ['--ssl-ca-file', self.sslCAFile]
+
+        if self.sslServerKey:
+            ssl_args += ['--server-key', self.sslServerKey]
+
+        if self.sslServerCert:
+            ssl_args += ['--server-cert', self.sslServerCert]
+
+        if not self.sslSelfSigned and not self.sslCAFile:
+            ssl_args += ['--no-ssl']
+
+        command = PGAutoCtl(self, argv=ssl_args)
+        out, err = command.execute("enable ssl")
+
 
 class DataNode(PGNode):
     def __init__(self, cluster, datadir, vnode, port,

@@ -44,7 +44,7 @@ def test_000_create_monitor():
     monitor = cluster.create_monitor("/tmp/ssl-self-signed/monitor",
                                      sslSelfSigned=True)
 
-    assert monitor.config_get("ssl.sslmode") == "require"
+    eq_(monitor.config_get("ssl.sslmode"), "require")
     monitor.wait_until_pg_is_running()
     check_ssl_files(monitor)
     # TODO: Uncomment when there can be super user access to the monitor
@@ -56,10 +56,12 @@ def test_001_init_primary():
     node1 = cluster.create_datanode("/tmp/ssl-self-signed/node1",
                                     sslSelfSigned=True)
     node1.create()
-    assert node1.config_get("ssl.sslmode") == "require"
-
     node1.run()
     assert node1.wait_until_state(target_state="single")
+
+    eq_(node1.config_get("ssl.sslmode"), "require")
+    eq_(node1.pg_config_get('ssl'), "on")
+
     check_ssl_files(node1)
     check_ssl_ciphers(node1)
 
@@ -72,14 +74,17 @@ def test_002_create_t1():
 def test_003_init_secondary():
     global node2
     node2 = cluster.create_datanode("/tmp/ssl-self-signed/node2",
-                                    sslSelfSigned=True)
+                                    sslSelfSigned=True,
+                                    sslMode="require")
 
     node2.create()
-    assert node2.config_get("ssl.sslmode") == "require"
-
     node2.run()
+
     assert node2.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")
+
+    eq_(node2.config_get("ssl.sslmode"), "require")
+    eq_(node2.pg_config_get('ssl'), "on")
 
     check_ssl_files(node2)
     check_ssl_ciphers(node2)

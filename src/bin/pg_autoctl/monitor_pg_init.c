@@ -65,9 +65,9 @@ static bool check_monitor_settings(PostgresSetup pgSetup);
  * existing cluster.
  */
 bool
-monitor_pg_init(Monitor *monitor, MonitorConfig *config)
+monitor_pg_init(Monitor *monitor)
 {
-	char configFilePath[MAXPGPATH];
+	MonitorConfig *config = &(monitor->config);
 	PostgresSetup *pgSetup = &(config->pgSetup);
 
 	if (directory_exists(pgSetup->pgdata))
@@ -117,43 +117,10 @@ monitor_pg_init(Monitor *monitor, MonitorConfig *config)
 		return false;
 	}
 
-	/*
-	 * We managed to initdb, refresh our configuration file location with
-	 * the realpath(3): we might have been given a relative pathname.
-	 */
-	if (!monitor_config_update_with_absolute_pgdata(config))
+	if (!monitor_add_postgres_default_settings(monitor))
 	{
-		/* errors have already been logged */
-		return false;
-	}
-
-	/*
-	 * We just did the initdb ourselves, so we know where the configuration
-	 * file is to be found Also, we didn't start PostgreSQL yet.
-	 */
-	join_path_components(configFilePath, pgSetup->pgdata, "postgresql.conf");
-
-	/*
-	 * When --ssl-self-signed has been used, now is the time to build a
-	 * self-signed certificate for the server. We place the certificate and
-	 * private key in $PGDATA/server.key and $PGDATA/server.crt
-	 */
-	if (pgSetup->ssl.createSelfSignedCert)
-	{
-		if (!pg_create_self_signed_cert(pgSetup, config->nodename))
-		{
-			log_error("Failed to create SSL self-signed certificate, "
-					  "see above for details");
-			return false;
-		}
-	}
-
-	if (!pg_add_auto_failover_default_settings(pgSetup, configFilePath,
-											   monitor_default_settings))
-	{
-		log_error("Failed to add default settings to \"%s\": couldn't "
-				  "write the new postgresql.conf, see above for details",
-				  configFilePath);
+		log_fatal("Failed to initialize our Postgres settings, "
+				  "see above for details");
 		return false;
 	}
 
@@ -323,4 +290,65 @@ check_monitor_settings(PostgresSetup pgSetup)
 	}
 
 	return settingsAreOk;
+}
+
+
+/*
+ * monitor_add_postgres_default_settings adds the monitor Postgres setup.
+ */
+bool
+monitor_add_postgres_default_settings(Monitor *monitor)
+{
+	MonitorConfig *config = &(monitor->config);
+	PostgresSetup *pgSetup = &(config->pgSetup);
+	char configFilePath[MAXPGPATH] = { 0 };
+
+	/*
+	 * We managed to initdb, refresh our configuration file location with
+	 * the realpath(3): we might have been given a relative pathname.
+	 */
+	if (!monitor_config_update_with_absolute_pgdata(config))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/*
+	 * We just did the initdb ourselves, so we know where the configuration
+	 * file is to be found Also, we didn't start PostgreSQL yet.
+	 */
+	join_path_components(configFilePath, pgSetup->pgdata, "postgresql.conf");
+
+	/*
+	 * When --ssl-self-signed has been used, now is the time to build a
+	 * self-signed certificate for the server. We place the certificate and
+	 * private key in $PGDATA/server.key and $PGDATA/server.crt
+	 */
+	if (pgSetup->ssl.createSelfSignedCert)
+	{
+		if (!pg_create_self_signed_cert(&(config->pgSetup), config->nodename))
+		{
+			log_error("Failed to create SSL self-signed certificate, "
+					  "see above for details");
+			return false;
+		}
+
+		/* update our configuration with ssl server.{key,cert} */
+		if (!monitor_config_write_file(config))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+	}
+
+	if (!pg_add_auto_failover_default_settings(pgSetup, configFilePath,
+											   monitor_default_settings))
+	{
+		log_error("Failed to add default settings to \"%s\": couldn't "
+				  "write the new postgresql.conf, see above for details",
+				  configFilePath);
+		return false;
+	}
+
+	return true;
 }

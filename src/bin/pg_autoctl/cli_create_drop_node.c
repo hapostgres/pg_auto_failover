@@ -189,9 +189,11 @@ cli_create_config(Keeper *keeper, KeeperConfig *config)
  * handling.
  */
 void
-cli_create_pg(Keeper *keeper, KeeperConfig *config)
+cli_create_pg(Keeper *keeper)
 {
-	if (!keeper_pg_init(keeper, config))
+	KeeperConfig *config = &(keeper->config);
+
+	if (!keeper_pg_init(keeper))
 	{
 		/* errors have been logged */
 		exit(EXIT_CODE_BAD_STATE);
@@ -303,28 +305,30 @@ static void
 cli_create_postgres(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
-	KeeperConfig config = keeperOptions;
+	KeeperConfig *config = &(keeper.config);
 
-	if (!file_exists(config.pathnames.config))
+	keeper.config = keeperOptions;
+
+	if (!file_exists(keeper.config.pathnames.config))
 	{
 		/* pg_autoctl create postgres: mark ourselves as a standalone node */
-		config.pgSetup.pgKind = NODE_KIND_STANDALONE;
-		strlcpy(config.nodeKind, "standalone", NAMEDATALEN);
+		keeper.config.pgSetup.pgKind = NODE_KIND_STANDALONE;
+		strlcpy(keeper.config.nodeKind, "standalone", NAMEDATALEN);
 
-		if (!check_or_discover_nodename(&config))
+		if (!check_or_discover_nodename(config))
 		{
 			/* errors have already been logged */
 			exit(EXIT_CODE_BAD_ARGS);
 		}
 	}
 
-	if (!cli_create_config(&keeper, &config))
+	if (!cli_create_config(&keeper, config))
 	{
 		log_error("Failed to initialize our configuration, see above.");
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	cli_create_pg(&keeper, &config);
+	cli_create_pg(&keeper);
 }
 
 
@@ -532,7 +536,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 			/*
 			 * { "ssl-ca-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG }
 			 * { "ssl-crl-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG }
-			 * { "server-crt", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG }
+			 * { "server-cert", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG }
 			 * { "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG }
 			 * { "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG },
 			 */
@@ -615,7 +619,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 		log_fatal("Explicit SSL choice is required: please use either "
 				  "--ssl-self-signed or provide your certificates "
 				  "using --ssl-ca-file, --ssl-crl-file, "
-				  "--server-key, and --server-crt (or use --no-ssl if you "
+				  "--server-key, and --server-cert (or use --no-ssl if you "
 				  "are very sure that you do not want encrypted traffic)");
 		exit(EXIT_CODE_BAD_ARGS);
 	}
@@ -662,31 +666,34 @@ static void
 cli_create_monitor(int argc, char **argv)
 {
 	Monitor monitor = { 0 };
-	MonitorConfig config = monitorOptions;
+	MonitorConfig *config = &(monitor.config);
 	char connInfo[MAXCONNINFO];
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
+
+	*config = monitorOptions;
 
 	/*
 	 * We support two modes of operations here:
 	 *   - configuration exists already, we need PGDATA
 	 *   - configuration doesn't exist already, we need PGDATA, and more
 	 */
-	if (!monitor_config_set_pathnames_from_pgdata(&config))
+	if (!monitor_config_set_pathnames_from_pgdata(config))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (file_exists(config.pathnames.config))
+	if (file_exists(config->pathnames.config))
 	{
-		MonitorConfig options = config;
+		MonitorConfig options = *config;
 
-		if (!monitor_config_read_file(&config,
-									  missingPgdataIsOk, pgIsNotRunningIsOk))
+		if (!monitor_config_read_file(config,
+									  missingPgdataIsOk,
+									  pgIsNotRunningIsOk))
 		{
 			log_fatal("Failed to read configuration file \"%s\"",
-					  config.pathnames.config);
+					  config->pathnames.config);
 			exit(EXIT_CODE_BAD_CONFIG);
 		}
 
@@ -694,7 +701,7 @@ cli_create_monitor(int argc, char **argv)
 		 * Now that we have loaded the configuration file, apply the command
 		 * line options on top of it, giving them priority over the config.
 		 */
-		if (!monitor_config_merge_options(&config, &options))
+		if (!monitor_config_merge_options(config, &options))
 		{
 			/* errors have been logged already */
 			exit(EXIT_CODE_BAD_CONFIG);
@@ -703,9 +710,9 @@ cli_create_monitor(int argc, char **argv)
 	else
 	{
 		/* Take care of the --nodename */
-		if (IS_EMPTY_STRING_BUFFER(config.nodename))
+		if (IS_EMPTY_STRING_BUFFER(config->nodename))
 		{
-			if (!discover_nodename((char *) (&config.nodename),
+			if (!discover_nodename((char *) (&config->nodename),
 								   _POSIX_HOST_NAME_MAX,
 								   DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME,
 								   DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT))
@@ -729,14 +736,16 @@ cli_create_monitor(int argc, char **argv)
 			 * checks, so we only WARN when finding something that might be
 			 * fishy, and proceed with the setup of the local node anyway.
 			 */
-			(void) check_nodename(config.nodename);
+			(void) check_nodename(config->nodename);
 		}
 
 		/* set our MonitorConfig from the command line options now. */
-		(void) monitor_config_init(&config, missingPgdataIsOk, pgIsNotRunningIsOk);
+		(void) monitor_config_init(config,
+								   missingPgdataIsOk,
+								   pgIsNotRunningIsOk);
 
 		/* and write our brand new setup to file */
-		if (!monitor_config_write_file(&config))
+		if (!monitor_config_write_file(config))
 		{
 			log_fatal("Failed to write the monitor's configuration file, "
 					  "see above");
@@ -744,11 +753,11 @@ cli_create_monitor(int argc, char **argv)
 		}
 	}
 
-	pg_setup_get_local_connection_string(&(config.pgSetup), connInfo);
+	pg_setup_get_local_connection_string(&(config->pgSetup), connInfo);
 	monitor_init(&monitor, connInfo);
 
 	/* Ok, now we know we have a configuration file, and it's been loaded. */
-	if (!monitor_pg_init(&monitor, &config))
+	if (!monitor_pg_init(&monitor))
 	{
 		/* errors have been logged */
 		exit(EXIT_CODE_BAD_STATE);
@@ -760,20 +769,20 @@ cli_create_monitor(int argc, char **argv)
 	{
 		pid_t pid = 0;
 
-		if (!monitor_service_init(&config, &pid))
+		if (!monitor_service_init(config, &pid))
 		{
 			log_fatal("Failed to initialize pg_auto_failover service, "
 					  "see above for details");
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 
-		(void) monitor_service_run(&monitor, &config, pid);
+		(void) monitor_service_run(&monitor, pid);
 	}
 	else
 	{
 		char postgresUri[MAXCONNINFO];
 
-		if (monitor_config_get_postgres_uri(&config, postgresUri, MAXCONNINFO))
+		if (monitor_config_get_postgres_uri(config, postgresUri, MAXCONNINFO))
 		{
 			log_info("pg_auto_failover monitor is ready at %s", postgresUri);
 		}

@@ -1004,32 +1004,7 @@ pg_setup_skip_hba_edits(PostgresSetup *pgSetup)
 bool
 pg_setup_set_absolute_pgdata(PostgresSetup *pgSetup)
 {
-	char absolutePgdata[PATH_MAX];
-
-	/*
-	 * We managed to initdb, refresh our configuration file location with
-	 * the realpath(3): we might have been given a relative pathname.
-	 */
-	if (!realpath(pgSetup->pgdata, absolutePgdata))
-	{
-		/* unexpected error, but not fatal, just don't overwrite the config. */
-		log_warn("Failed to get the realpath of given pgdata \"%s\": %m",
-				 pgSetup->pgdata);
-		return false;
-	}
-
-	if (strcmp(pgSetup->pgdata, absolutePgdata) != 0)
-	{
-		/* use the absolute path now that it exists. */
-		strlcpy(pgSetup->pgdata, absolutePgdata, MAXPGPATH);
-
-		log_info("Now using absolute pgdata value \"%s\" in the configuration",
-				 pgSetup->pgdata);
-
-		return true;
-	}
-
-	return false;
+	return normalize_filename(pgSetup->pgdata, pgSetup->pgdata, MAXPGPATH);
 }
 
 
@@ -1232,7 +1207,7 @@ pgsetup_validate_ssl_settings(PostgresSetup *pgSetup)
 	 *
 	 *  --ssl-ca-file
 	 *  --ssl-crl-file
-	 *  --server-crt
+	 *  --server-cert
 	 *  --server-key
 	 */
 	if (ssl->active && !ssl->createSelfSignedCert)
@@ -1267,7 +1242,7 @@ pgsetup_validate_ssl_settings(PostgresSetup *pgSetup)
 
 		if (!file_exists(ssl->serverCert))
 		{
-			log_error("--server-crt file does not exist at \"%s\"",
+			log_error("--server-cert file does not exist at \"%s\"",
 					  ssl->serverCert);
 			return false;
 		}
@@ -1288,7 +1263,18 @@ pgsetup_validate_ssl_settings(PostgresSetup *pgSetup)
 			log_info("Using default --ssl-mode \"%s\"", ssl->sslModeStr);
 		}
 
-		return true;
+		/*
+		 * Normalize the filenames.
+		 * We already log errors so we can simply return the result
+		 */
+		return normalize_filename(pgSetup->ssl.caFile, pgSetup->ssl.caFile,
+								  MAXPGPATH) &&
+			   normalize_filename(pgSetup->ssl.crlFile, pgSetup->ssl.crlFile,
+								  MAXPGPATH) &&
+			   normalize_filename(pgSetup->ssl.serverCert, pgSetup->ssl.serverCert,
+								  MAXPGPATH) &&
+			   normalize_filename(pgSetup->ssl.serverKey, pgSetup->ssl.serverKey,
+								  MAXPGPATH);
 	}
 
 	/*
