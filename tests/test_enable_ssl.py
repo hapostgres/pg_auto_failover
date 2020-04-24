@@ -65,9 +65,14 @@ def test_005_enable_ssl_monitor():
     check_ssl_files(monitor)
 
 def test_006_enable_ssl_primary():
+    # we stop pg_autoctl to make it easier for the test to be reliable
+    # without too much delay/sleep hacking; when doing the `pg_autoctl
+    # enable ssl` online we need to make sure the signal made it to the
+    # running process and then was acted upon
+    node1.stop_pg_autoctl()
     node1.enable_ssl(sslSelfSigned=True, sslMode="require")
     node1.run()
-    node1.sleep(5)
+    node1.sleep(2)
 
     eq_(node1.config_get("ssl.sslmode"), "require")
     eq_(node1.pg_config_get('ssl'), "on")
@@ -80,6 +85,7 @@ def test_007_enable_ssl_secondary():
     eq_(node2.config_get("ssl.sslmode"), "require")
 
     node2.wait_until_pg_is_running()
+
     eq_(node2.pg_config_get('ssl'), "on")
     check_ssl_files(node2)
 

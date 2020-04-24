@@ -707,6 +707,44 @@ keeper_ensure_postgres_is_running(Keeper *keeper, bool updateRetries)
 
 
 /*
+ * keeper_create_self_signed_cert creates SSL self-signed certificates if
+ * needed within the current configuration, and then makes sure we update our
+ * keeper configuration both in-memory and on-disk with the new normalized
+ * filenames of the certificate files created.
+ */
+bool
+keeper_create_self_signed_cert(Keeper *keeper)
+{
+	KeeperConfig *config = &(keeper->config);
+	LocalPostgresServer *postgres = &(keeper->postgres);
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+
+	if (pgSetup->ssl.createSelfSignedCert &&
+		!(file_exists(pgSetup->ssl.serverKey) &&
+		  file_exists(pgSetup->ssl.serverCert)))
+	{
+		if (!pg_create_self_signed_cert(pgSetup, config->nodename))
+		{
+			log_error("Failed to create SSL self-signed certificate, "
+					  "see above for details");
+			return false;
+		}
+	}
+
+	/* ensure the SSL setup is synced with the keeper config */
+	config->pgSetup.ssl = pgSetup->ssl;
+
+	/* update our configuration with ssl server.{key,cert} */
+	if (!keeper_config_write_file(config))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+	return true;
+}
+
+
+/*
  * keeper_ensure_configuration updates the Postgres settings to match the
  * pg_autoctl configuration file, if necessary.
  *

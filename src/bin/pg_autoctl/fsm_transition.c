@@ -191,26 +191,10 @@ fsm_init_primary(Keeper *keeper)
 	 * self-signed certificate for the server. We place the certificate and
 	 * private key in $PGDATA/server.key and $PGDATA/server.crt
 	 */
-	if (pgSetup->ssl.createSelfSignedCert &&
-		!(file_exists(pgSetup->ssl.serverKey) &&
-		  file_exists(pgSetup->ssl.serverCert)))
+	if (!keeper_create_self_signed_cert(keeper))
 	{
-		if (!pg_create_self_signed_cert(pgSetup, config->nodename))
-		{
-			log_error("Failed to create SSL self-signed certificate, "
-					  "see above for details");
-			return false;
-		}
-
-		/* ensure the SSL setup is synced with the keeper config */
-		config->pgSetup.ssl = pgSetup->ssl;
-
-		/* update our configuration with ssl server.{key,cert} */
-		if (!keeper_config_write_file(config))
-		{
-			/* errors have already been logged */
-			return false;
-		}
+		/* errors have already been logged */
+		return false;
 	}
 
 	if (!postgres_add_default_settings(postgres))
@@ -722,10 +706,7 @@ fsm_init_standby(Keeper *keeper)
 	}
 
 	/* ensure the SSL setup is synced with the keeper config */
-	config->pgSetup.ssl = postgres->postgresSetup.ssl;
-
-	/* update our configuration with ssl server.{key,cert} */
-	if (!keeper_config_write_file(config))
+	if (!keeper_create_self_signed_cert(keeper))
 	{
 		/* errors have already been logged */
 		return false;
@@ -793,10 +774,7 @@ fsm_rewind_or_init(Keeper *keeper)
 		}
 
 		/* ensure the SSL setup is synced with the keeper config */
-		config->pgSetup.ssl = postgres->postgresSetup.ssl;
-
-		/* update our configuration with ssl server.{key,cert} */
-		if (!keeper_config_write_file(config))
+		if (!keeper_create_self_signed_cert(keeper))
 		{
 			/* errors have already been logged */
 			return false;

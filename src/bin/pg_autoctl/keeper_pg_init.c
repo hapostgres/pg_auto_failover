@@ -658,26 +658,10 @@ create_database_and_extension(Keeper *keeper)
 	 * self-signed certificate for the server. We place the certificate and
 	 * private key in $PGDATA/server.key and $PGDATA/server.crt
 	 */
-	if (pgSetup->ssl.createSelfSignedCert)
+	if (!keeper_create_self_signed_cert(keeper))
 	{
-		/* use the newly initialized initPostgres.postgreSetup */
-		if (!pg_create_self_signed_cert(&(initPostgres.postgresSetup),
-										config->nodename))
-		{
-			log_error("Failed to create SSL self-signed certificate, "
-					  "see above for details");
-			return false;
-		}
-
-		/* ensure the SSL setup is synced with the keeper config */
-		config->pgSetup.ssl = initPostgres.postgresSetup.ssl;
-
-		/* update our configuration with ssl server.{key,cert} */
-		if (!keeper_config_write_file(config))
-		{
-			/* errors have already been logged */
-			return false;
-		}
+		/* errors have already been logged */
+		return false;
 	}
 
 	/* publish our new pgSetup to the caller postgres state too */
