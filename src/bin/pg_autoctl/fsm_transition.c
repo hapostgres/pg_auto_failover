@@ -218,8 +218,6 @@ fsm_init_primary(Keeper *keeper)
 	{
 		char monitorHostname[_POSIX_HOST_NAME_MAX];
 		int monitorPort = 0;
-		char *password = NULL;
-		char *authMethod = NULL;
 
 		if (!hostname_from_uri(config->monitor_pguri,
 							   monitorHostname, _POSIX_HOST_NAME_MAX,
@@ -228,23 +226,6 @@ fsm_init_primary(Keeper *keeper)
 			/* developer error, this should never happen */
 			log_fatal("BUG: monitor_pguri should be validated before calling "
 					  "fsm_init_primary");
-			return false;
-		}
-
-		authMethod = pg_setup_get_auth_method(&(config->pgSetup));
-
-		/*
-		 * We need to add the monitor host:port in the HBA settings for the
-		 * node to enable the health checks.
-		 */
-		if (!primary_create_user_with_hba(postgres,
-										  PG_AUTOCTL_HEALTH_USERNAME, password,
-										  monitorHostname, authMethod))
-		{
-			log_error(
-				"Failed to initialise postgres as primary because "
-				"creating the database user that the pg_auto_failover monitor "
-				"uses for health checks failed, see above for details");
 			return false;
 		}
 	}
