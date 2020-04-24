@@ -669,6 +669,9 @@ create_database_and_extension(Keeper *keeper)
 			return false;
 		}
 
+		/* ensure the SSL setup is synced with the keeper config */
+		config->pgSetup.ssl = initPostgres.postgresSetup.ssl;
+
 		/* update our configuration with ssl server.{key,cert} */
 		if (!keeper_config_write_file(config))
 		{
