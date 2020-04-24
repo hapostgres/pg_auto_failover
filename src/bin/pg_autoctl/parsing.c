@@ -521,10 +521,7 @@ parse_pguri_info_key_vals(const char *pguri,
 		{
 			if (strcmp(overrides->keywords[ovIndex], option->keyword) == 0)
 			{
-				if (!IS_EMPTY_STRING_BUFFER(overrides->values[ovIndex]))
-				{
-					value = overrides->values[ovIndex];
-				}
+				value = overrides->values[ovIndex];
 			}
 		}
 
@@ -562,7 +559,7 @@ parse_pguri_info_key_vals(const char *pguri,
 			foundDBName = true;
 			strlcpy(uriParameters->dbname, option->val, MAXCONNINFO);
 		}
-		else
+		else if (!IS_EMPTY_STRING_BUFFER(value))
 		{
 			/* make a copy in our key/val arrays */
 			strlcpy(uriParameters->parameters.keywords[paramIndex],
