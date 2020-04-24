@@ -721,6 +721,16 @@ fsm_init_standby(Keeper *keeper)
 		return false;
 	}
 
+	/* ensure the SSL setup is synced with the keeper config */
+	config->pgSetup.ssl = postgres->postgresSetup.ssl;
+
+	/* update our configuration with ssl server.{key,cert} */
+	if (!keeper_config_write_file(config))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
 	/* now, in case we have an init state file around, remove it */
 	return unlink_file(config->pathnames.init);
 }
@@ -779,6 +789,16 @@ fsm_rewind_or_init(Keeper *keeper)
 		if (!standby_init_database(postgres, config->nodename))
 		{
 			log_error("Failed to become standby server, see above for details");
+			return false;
+		}
+
+		/* ensure the SSL setup is synced with the keeper config */
+		config->pgSetup.ssl = postgres->postgresSetup.ssl;
+
+		/* update our configuration with ssl server.{key,cert} */
+		if (!keeper_config_write_file(config))
+		{
+			/* errors have already been logged */
 			return false;
 		}
 	}
