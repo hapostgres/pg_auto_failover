@@ -96,6 +96,9 @@ def test_007_enable_ssl_secondary():
     eq_(node2.pg_config_get('ssl'), "on")
     check_ssl_files(node2)
 
+    if self.pgmajor() >= 12:
+        assert "sslmode=require" in node2.pg_config_get('primary_conninfo')
+
 def test_008_disable_maintenance():
     print("Disabling maintenance on node2")
     node2.disable_maintenance()

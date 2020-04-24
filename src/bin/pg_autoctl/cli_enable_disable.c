@@ -730,6 +730,11 @@ cli_enable_ssl(int argc, char **argv)
 				log_info("  pg_autoctl service has been signaled to reload "
 						 "its configuration");
 			}
+			else
+			{
+				log_info("  pg_autoctl service is not running, changes "
+						 "will only apply at next start of pg_autoctl");
+			}
 
 			break;
 		}
@@ -811,12 +816,6 @@ cli_enable_ssl(int argc, char **argv)
 						 "ssl_key_file and ssl_cert_file");
 			}
 
-			if (reloadedService)
-			{
-				log_info("  pg_autoctl service has been signaled to reload "
-						 "its configuration");
-			}
-
 			if (updatedMonitorString)
 			{
 				log_info("  Postgres connection string to the monitor "
@@ -833,6 +832,18 @@ cli_enable_ssl(int argc, char **argv)
 					 "is going to be updated in the main service loop "
 					 "to use ssl mode \"%s\"",
 					 pgsetup_sslmode_to_string(pgSetup->ssl.sslMode));
+
+			if (reloadedService)
+			{
+				log_info("  pg_autoctl service has been signaled to reload "
+						 "its configuration");
+			}
+			else
+			{
+				log_info("  pg_autoctl service is not running, changes "
+						 "will only apply at next start of pg_autoctl");
+			}
+
 			break;
 		}
 
