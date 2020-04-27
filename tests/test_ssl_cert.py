@@ -128,6 +128,7 @@ def test_001_init_primary():
 
     # Now create the server with the certificates
     node1 = cluster.create_datanode("/tmp/cert/node1",
+                                    nodeName="node1",
                                     authMethod="skip",
                                     sslMode="verify-ca",
                                     sslCAFile=cluster.cert.crt,
@@ -171,6 +172,7 @@ def test_003_init_secondary():
 
     # Now create the server with the certificates
     node2 = cluster.create_datanode("/tmp/cert/node2",
+                                    nodeName="node2",
                                     authMethod="skip",
                                     sslMode="verify-ca",
                                     sslCAFile=cluster.cert.crt,

@@ -26,7 +26,10 @@ def test_001_custom_single():
     # verify postgresql.conf is not in data directory
     assert not os.path.exists(postgres_conf_path)
 
-    node1 = cluster.create_datanode(node1_path, port=6001, listen_flag=True)
+    node1 = cluster.create_datanode(node1_path,
+                                    nodeName="node1",
+                                    port=6001,
+                                    listen_flag=True)
     node1.create(level='-vv')
 
     # verify postgresql.conf is in data directory now

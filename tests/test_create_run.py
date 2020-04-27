@@ -20,7 +20,7 @@ def test_000_create_monitor():
 
 def test_001_init_primary():
     global node1
-    node1 = cluster.create_datanode("/tmp/create-run/node1")
+    node1 = cluster.create_datanode("/tmp/create-run/node1", nodeName="node1")
     node1.create(run = True)
     assert node1.wait_until_state(target_state="single")
 
@@ -30,7 +30,7 @@ def test_002_create_t1():
 
 def test_003_init_secondary():
     global node2
-    node2 = cluster.create_datanode("/tmp/create-run/node2")
+    node2 = cluster.create_datanode("/tmp/create-run/node2", nodeName="node2")
     node2.create(run = True)
     assert node2.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")

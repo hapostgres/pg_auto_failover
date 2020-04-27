@@ -84,6 +84,7 @@ typedef struct GUC
 typedef struct NodeAddress
 {
 	int nodeId;
+	char name[_POSIX_HOST_NAME_MAX];
 	char host[_POSIX_HOST_NAME_MAX];
 	int port;
 	char lsn[PG_LSN_MAXLENGTH];

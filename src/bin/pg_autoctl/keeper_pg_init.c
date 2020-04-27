@@ -263,7 +263,7 @@ keeper_pg_init_and_register(Keeper *keeper)
 					  "\"%s:%d\" running at \"%s\""
 					  "to the pg_auto_failover monitor at %s, "
 					  "see above for details",
-					  config->nodename, config->pgSetup.pgport,
+					  config->hostname, config->pgSetup.pgport,
 					  config->pgSetup.pgdata, config->monitor_pguri);
 			return false;
 		}
@@ -394,7 +394,7 @@ reach_initial_state(Keeper *keeper)
 			/*
 			 * Now the transition from INIT_STATE to WAIT_STANDBY_STATE consist
 			 * of doing nothing on the keeper's side: we are just waiting until
-			 * the primary has update its HBA setup with our nodename.
+			 * the primary has update its HBA setup with our hostname.
 			 */
 			MonitorAssignedState assignedState = { 0 };
 
@@ -503,7 +503,7 @@ wait_until_primary_is_ready(Keeper *keeper,
 
 		if (!monitor_node_active(&(keeper->monitor),
 								 keeper->config.formation,
-								 keeper->config.nodename,
+								 keeper->config.hostname,
 								 keeper->config.pgSetup.pgport,
 								 keeper->state.current_node_id,
 								 keeper->state.current_group,
@@ -592,7 +592,7 @@ create_database_and_extension(Keeper *keeper)
 
 	/*
 	 * The Postgres URI given to the user by our facility is going to use
-	 * --dbname and --nodename, as per the following command:
+	 * --dbname and --hostname, as per the following command:
 	 *
 	 *   $ pg_autoctl show uri --formation default
 	 *
@@ -604,11 +604,11 @@ create_database_and_extension(Keeper *keeper)
 									   HBA_DATABASE_DBNAME,
 									   pgSetup->dbname,
 									   pg_setup_get_username(pgSetup),
-									   config->nodename,
+									   config->hostname,
 									   pg_setup_get_auth_method(pgSetup)))
 	{
 		log_error("Failed to edit \"%s\" to grant connections to \"%s\", "
-				  "see above for details", hbaFilePath, config->nodename);
+				  "see above for details", hbaFilePath, config->hostname);
 		return false;
 	}
 
@@ -743,7 +743,7 @@ create_database_and_extension(Keeper *keeper)
 								   pgSetup->ssl.active,
 								   HBA_DATABASE_DBNAME,
 								   pgSetup->dbname,
-								   config->nodename,
+								   config->hostname,
 								   pg_setup_get_username(pgSetup),
 								   pg_setup_get_auth_method(pgSetup),
 								   NULL))
@@ -817,7 +817,7 @@ keeper_pg_init_node_active(Keeper *keeper)
 
 	if (!monitor_node_active(&(keeper->monitor),
 							 keeper->config.formation,
-							 keeper->config.nodename,
+							 keeper->config.hostname,
 							 keeper->config.pgSetup.pgport,
 							 keeper->state.current_node_id,
 							 keeper->state.current_group,

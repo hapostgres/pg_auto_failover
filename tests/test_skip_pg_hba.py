@@ -46,6 +46,7 @@ def test_001_init_primary():
     # we need to give the nodename here, because our method to find it
     # automatically will fail in the test environment
     node1 = cluster.create_datanode(node1_path,
+                                    nodeName="path",
                                     authMethod="skip")
     node1.create(level='-vvv')
 
@@ -93,7 +94,9 @@ def test_003_init_secondary():
 
     os.environ["PG_REGRESS_SOCK_DIR"] = "/tmp/socks/node2"
 
-    node2 = cluster.create_datanode("/tmp/skip/node2", authMethod="skip")
+    node2 = cluster.create_datanode("/tmp/skip/node2",
+                                    nodeName="skip",
+                                    authMethod="skip")
     node2.create()
 
     with open(os.path.join("/tmp/skip/node2", "pg_hba.conf"), 'a') as hba:

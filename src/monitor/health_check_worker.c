@@ -776,11 +776,11 @@ ManageHealthCheck(HealthCheck *healthCheck, struct timeval currentTime)
 				if (nodeHealth->healthState != NODE_HEALTH_BAD)
 				{
 					elog(LOG, "pg_auto_failover monitor marking node %s:%d as unhealthy",
-						 nodeHealth->nodeName,
+						 nodeHealth->nodeHost,
 						 nodeHealth->nodePort);
 				}
 
-				SetNodeHealthState(healthCheck->node->nodeName,
+				SetNodeHealthState(healthCheck->node->nodeHost,
 								   healthCheck->node->nodePort,
 								   NODE_HEALTH_BAD);
 
@@ -805,7 +805,7 @@ ManageHealthCheck(HealthCheck *healthCheck, struct timeval currentTime)
 			StringInfo connInfoString = makeStringInfo();
 
 			appendStringInfo(connInfoString, CONN_INFO_TEMPLATE,
-							 nodeHealth->nodeName, nodeHealth->nodePort,
+							 nodeHealth->nodeHost, nodeHealth->nodePort,
 							 HealthCheckTimeout);
 
 			connection = PQconnectStart(connInfoString->data);
@@ -893,11 +893,11 @@ ManageHealthCheck(HealthCheck *healthCheck, struct timeval currentTime)
 				if (nodeHealth->healthState != NODE_HEALTH_GOOD)
 				{
 					elog(LOG, "pg_auto_failover monitor marking node %s:%d as healthy",
-						 nodeHealth->nodeName,
+						 nodeHealth->nodeHost,
 						 nodeHealth->nodePort);
 				}
 
-				SetNodeHealthState(healthCheck->node->nodeName,
+				SetNodeHealthState(healthCheck->node->nodeHost,
 								   healthCheck->node->nodePort,
 								   NODE_HEALTH_GOOD);
 

@@ -30,6 +30,7 @@ extern bool outputJSON;
 #define SSL_SERVER_KEY_FLAG 4   /* server.crt (public certificate) */
 #define SSL_MODE_FLAG 5         /* client side sslmode for connection strings */
 
+extern int help_flag;
 extern int ssl_flag;
 
 #define KEEPER_CLI_SSL_OPTIONS \
@@ -50,7 +51,8 @@ extern int ssl_flag;
 	"  --username        PostgreSQL's username\n" \
 	"  --dbname          PostgreSQL's database name\n" \
 	"  --proxyport       Proxy's port number\n" \
-	"  --nodename        pg_auto_failover node\n" \
+	"  --hostname        hostname used to connect from other nodes\n" \
+	"  --nodename        pg_auto_failover node name\n" \
 	"  --formation       pg_auto_failover formation\n" \
 	"  --group           pg_auto_failover group Id\n" \
 	"  --monitor         pg_auto_failover Monitor Postgres URL\n" \
@@ -64,7 +66,8 @@ extern int ssl_flag;
 	"  --listen          PostgreSQL's listen_addresses\n" \
 	"  --username        PostgreSQL's username\n" \
 	"  --dbname          PostgreSQL's database name\n" \
-	"  --nodename        pg_auto_failover node\n" \
+	"  --proxyport       Proxy's port number\n" \
+	"  --hostname        hostname used to connect from other nodes\n" \
 	"  --formation       pg_auto_failover formation\n" \
 	"  --group           pg_auto_failover group Id\n" \
 	"  --monitor         pg_auto_failover Monitor Postgres URL\n" \
@@ -168,7 +171,7 @@ void exit_unless_role_is_keeper(KeeperConfig *kconfig);
 /* cli_create_drop_node.c */
 bool cli_create_config(Keeper *keeper, KeeperConfig *config);
 void cli_create_pg(Keeper *keeper);
-bool check_or_discover_nodename(KeeperConfig *config);
+bool check_or_discover_hostname(KeeperConfig *config);
 void keeper_cli_destroy_node(int argc, char **argv);
 
 bool cli_getopt_ssl_flags(int ssl_flag, char *optarg, PostgresSetup *pgSetup);

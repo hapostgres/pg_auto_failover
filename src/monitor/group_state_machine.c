@@ -85,9 +85,9 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of %s:%d to single as there is no other "
+			"Setting goal state of %s (%s:%d) to single as there is no other "
 			"node.",
-			activeNode->nodeName, activeNode->nodePort);
+			activeNode->nodeName, activeNode->nodeHost, activeNode->nodePort);
 
 		/* other node may have been removed */
 		AssignGoalState(activeNode, REPLICATION_STATE_SINGLE, message);
@@ -505,7 +505,7 @@ AssignGoalState(AutoFailoverNode *pgAutoFailoverNode,
 	{
 		pgAutoFailoverNode->goalState = state;
 
-		SetNodeGoalState(pgAutoFailoverNode->nodeName,
+		SetNodeGoalState(pgAutoFailoverNode->nodeHost,
 						 pgAutoFailoverNode->nodePort, state);
 
 		NotifyStateChange(pgAutoFailoverNode->reportedState,
@@ -514,6 +514,7 @@ AssignGoalState(AutoFailoverNode *pgAutoFailoverNode,
 						  pgAutoFailoverNode->groupId,
 						  pgAutoFailoverNode->nodeId,
 						  pgAutoFailoverNode->nodeName,
+						  pgAutoFailoverNode->nodeHost,
 						  pgAutoFailoverNode->nodePort,
 						  pgAutoFailoverNode->pgsrSyncState,
 						  pgAutoFailoverNode->reportedLSN,

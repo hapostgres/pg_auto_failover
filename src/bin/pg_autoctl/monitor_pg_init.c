@@ -54,7 +54,7 @@ GUC monitor_default_settings[] = {
 };
 
 
-static bool monitor_install(const char *nodename,
+static bool monitor_install(const char *hostname,
 							PostgresSetup pgSetupOption, bool checkSettings);
 static bool check_monitor_settings(PostgresSetup pgSetup);
 
@@ -91,7 +91,7 @@ monitor_pg_init(Monitor *monitor)
 					 "PostgreSQL instance at \"%s\" running on port %d",
 					 pgSetup->pgdata, existingPgSetup.pidFile.port);
 
-			if (!monitor_install(config->nodename, existingPgSetup, true))
+			if (!monitor_install(config->hostname, existingPgSetup, true))
 			{
 				log_fatal("Failed to install pg_auto_failover monitor, "
 						  "see above for details");
@@ -133,7 +133,7 @@ monitor_pg_init(Monitor *monitor)
 		return false;
 	}
 
-	if (!monitor_install(config->nodename, *pgSetup, false))
+	if (!monitor_install(config->hostname, *pgSetup, false))
 	{
 		return false;
 	}
@@ -151,7 +151,7 @@ monitor_pg_init(Monitor *monitor)
  *  - create extension pgautofailover;
  */
 bool
-monitor_install(const char *nodename,
+monitor_install(const char *hostname,
 				PostgresSetup pgSetupOption, bool checkSettings)
 {
 	PostgresSetup pgSetup = { 0 };
@@ -221,7 +221,7 @@ monitor_install(const char *nodename,
 							   pgSetup.ssl.active,
 							   HBA_DATABASE_DBNAME,
 							   PG_AUTOCTL_MONITOR_DBNAME,
-							   nodename,
+							   hostname,
 							   PG_AUTOCTL_MONITOR_USERNAME,
 							   pg_setup_get_auth_method(&pgSetup),
 							   NULL))
@@ -326,7 +326,7 @@ monitor_add_postgres_default_settings(Monitor *monitor)
 	 */
 	if (pgSetup->ssl.createSelfSignedCert)
 	{
-		if (!pg_create_self_signed_cert(&(config->pgSetup), config->nodename))
+		if (!pg_create_self_signed_cert(&(config->pgSetup), config->hostname))
 		{
 			log_error("Failed to create SSL self-signed certificate, "
 					  "see above for details");

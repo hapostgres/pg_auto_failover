@@ -20,7 +20,7 @@ def test_000_create_monitor():
 
 def test_001_init_primary():
     global node1
-    node1 = cluster.create_datanode("/tmp/ensure/node1")
+    node1 = cluster.create_datanode("/tmp/ensure/node1", nodeName="node1")
     print()
     print("create node1")
     node1.create()
@@ -38,7 +38,7 @@ def test_002_create_t1():
 
 def test_003_init_secondary():
     global node2
-    node2 = cluster.create_datanode("/tmp/ensure/node2")
+    node2 = cluster.create_datanode("/tmp/ensure/node2", nodeName="node2")
     node2.create()
     node2.stop_postgres()
     node2.run()

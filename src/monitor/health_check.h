@@ -37,7 +37,7 @@ typedef enum
  */
 typedef struct NodeHealth
 {
-	char *nodeName;
+	char *nodeHost;
 	int nodePort;
 	NodeHealthState healthState;
 } NodeHealth;

@@ -40,6 +40,11 @@
 					   true, _POSIX_HOST_NAME_MAX, \
 					   config->nodename)
 
+#define OPTION_AUTOCTL_HOSTNAME(config) \
+	make_strbuf_option("pg_autoctl", "hostname", "hostname", \
+					   true, _POSIX_HOST_NAME_MAX, \
+					   config->hostname)
+
 #define OPTION_AUTOCTL_NODEKIND(config) \
 	make_strbuf_option("pg_autoctl", "nodekind", NULL, false, NAMEDATALEN, \
 					   config->nodeKind)
@@ -166,6 +171,7 @@
 		OPTION_AUTOCTL_FORMATION(config), \
 		OPTION_AUTOCTL_GROUPID(config), \
 		OPTION_AUTOCTL_NODENAME(config), \
+		OPTION_AUTOCTL_HOSTNAME(config), \
 		OPTION_AUTOCTL_NODEKIND(config), \
 		OPTION_POSTGRESQL_PGDATA(config), \
 		OPTION_POSTGRESQL_PG_CTL(config), \
@@ -480,6 +486,7 @@ keeper_config_log_settings(KeeperConfig config)
 	log_debug("pg_autoctl.formation: %s", config.formation);
 
 	log_debug("postgresql.nodename: %s", config.nodename);
+	log_debug("postgresql.hostname: %s", config.hostname);
 	log_debug("postgresql.nodekind: %s", config.nodeKind);
 	log_debug("postgresql.pgdata: %s", config.pgSetup.pgdata);
 	log_debug("postgresql.pg_ctl: %s", config.pgSetup.pg_ctl);
@@ -717,6 +724,14 @@ keeper_config_accept_new(KeeperConfig *config, KeeperConfig *newConfig)
 				 "used to be \"%s\"",
 				 newConfig->nodename, config->nodename);
 		strlcpy(config->nodename, newConfig->nodename, _POSIX_HOST_NAME_MAX);
+	}
+
+	if (strneq(newConfig->hostname, config->hostname))
+	{
+		log_info("Reloading configuration: hostname is now \"%s\"; "
+				 "used to be \"%s\"",
+				 newConfig->hostname, config->hostname);
+		strlcpy(config->hostname, newConfig->hostname, _POSIX_HOST_NAME_MAX);
 	}
 
 	/*

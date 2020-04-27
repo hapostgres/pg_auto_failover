@@ -29,6 +29,7 @@ def test_000_create_monitor():
 def test_001_init_primary():
     global node1
     node1 = cluster.create_datanode("/tmp/ssl-self-signed/node1",
+                                    nodeName="node1",
                                     sslSelfSigned=True)
     node1.create()
     node1.run()
@@ -45,6 +46,7 @@ def test_002_create_t1():
 def test_003_init_secondary():
     global node2
     node2 = cluster.create_datanode("/tmp/ssl-self-signed/node2",
+                                    nodeName="node2",
                                     sslSelfSigned=True,
                                     sslMode="require")
 

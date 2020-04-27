@@ -733,7 +733,7 @@ keeper_create_self_signed_cert(Keeper *keeper)
 		!(file_exists(pgSetup->ssl.serverKey) &&
 		  file_exists(pgSetup->ssl.serverCert)))
 	{
-		if (!pg_create_self_signed_cert(pgSetup, config->nodename))
+		if (!pg_create_self_signed_cert(pgSetup, config->hostname))
 		{
 			log_error("Failed to create SSL self-signed certificate, "
 					  "see above for details");
@@ -968,7 +968,7 @@ keeper_drop_replication_slots_for_removed_nodes(Keeper *keeper)
 	PostgresSetup *pgSetup = &(keeper->postgres.postgresSetup);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
-	char *host = keeper->config.nodename;
+	char *host = keeper->config.hostname;
 	int port = pgSetup->pgport;
 
 	log_trace("keeper_drop_replication_slots_for_removed_nodes");
@@ -1003,7 +1003,7 @@ keeper_maintain_replication_slots(Keeper *keeper)
 	PostgresSetup *pgSetup = &(keeper->postgres.postgresSetup);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
-	char *host = keeper->config.nodename;
+	char *host = keeper->config.hostname;
 	int port = pgSetup->pgport;
 
 	log_trace("keeper_maintain_replication_slots");
@@ -1185,6 +1185,7 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 	if (!monitor_register_node(monitor,
 							   config->formation,
 							   config->nodename,
+							   config->hostname,
 							   config->pgSetup.pgport,
 							   config->pgSetup.dbname,
 							   config->groupId,
@@ -1283,7 +1284,7 @@ keeper_remove(Keeper *keeper, KeeperConfig *config, bool ignore_monitor_errors)
 		 * from the monitor already, but failed to remove the state file.
 		 */
 		if (!monitor_remove(&(keeper->monitor),
-							config->nodename,
+							config->hostname,
 							config->pgSetup.pgport))
 		{
 			/* we already logged about errors */

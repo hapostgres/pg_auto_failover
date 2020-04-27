@@ -290,6 +290,11 @@ parse_state_notification_message(StateNotification *notification)
 										   notification->nodeName,
 										   NAMEDATALEN);
 
+	/* read the nodeHost, then move past it */
+	ptr += read_length_delimited_string_at(ptr,
+										   notification->hostName,
+										   NAMEDATALEN);
+
 	/* read the nodePort */
 	if (!stringToInt(ptr, &notification->nodePort))
 	{

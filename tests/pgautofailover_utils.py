@@ -69,7 +69,7 @@ class Cluster:
     # create cli as an argument when explicitly set by the test
     def create_datanode(self, datadir, port=5432, group=0,
                         listen_flag=False, role=Role.Postgres,
-                        formation=None, authMethod=None,
+                        formation=None, nodeName=None, authMethod=None,
                         sslMode=None, sslSelfSigned=False,
                         sslCAFile=None, sslServerKey=None, sslServerCert=None):
         """
@@ -82,7 +82,7 @@ class Cluster:
         datanode = DataNode(self, datadir, vnode, port,
                             os.getenv("USER"), authMethod, "postgres",
                             self.monitor, nodeid, group, listen_flag,
-                            role, formation,
+                            role, formation, nodeName,
                             sslMode=sslMode,
                             sslSelfSigned=sslSelfSigned,
                             sslCAFile=sslCAFile,
@@ -690,7 +690,7 @@ class PGNode:
 class DataNode(PGNode):
     def __init__(self, cluster, datadir, vnode, port,
                  username, authMethod, database, monitor,
-                 nodeid, group, listen_flag, role, formation,
+                 nodeid, group, listen_flag, role, formation, nodeName,
                  sslMode=None, sslSelfSigned=False,
                  sslCAFile=None, sslServerKey=None, sslServerCert=None):
         super().__init__(cluster, datadir, vnode, port,
@@ -701,6 +701,7 @@ class DataNode(PGNode):
                          sslServerKey=sslServerKey,
                          sslServerCert=sslServerCert)
         self.monitor = monitor
+        self.nodename = nodeName
         self.nodeid = nodeid
         self.group = group
         self.listen_flag = listen_flag
@@ -725,6 +726,7 @@ class DataNode(PGNode):
                        '--pgdata', self.datadir,
                        '--pghost', pghost,
                        '--pgport', str(self.port),
+                       '--nodename', self.nodename,
                        '--pgctl', shutil.which('pg_ctl'),
                        '--auth', self.authMethod,
                        '--monitor', self.monitor.connection_string()]
@@ -1053,7 +1055,7 @@ class MonitorNode(PGNode):
                        '--pgdata', self.datadir,
                        '--pgport', str(self.port),
                        '--auth', self.authMethod,
-                       '--nodename', self.nodename]
+                       '--hostname', self.nodename]
 
         if self.sslMode:
             create_args += ['--ssl-mode', self.sslMode]

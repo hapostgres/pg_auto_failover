@@ -21,7 +21,7 @@ def test_000_create_monitor():
 
 def test_001_init_primary():
     global node1
-    node1 = cluster.create_datanode("/tmp/basic/node1")
+    node1 = cluster.create_datanode("/tmp/basic/node1", nodeName="node1")
     node1.create()
     node1.run()
     assert node1.wait_until_state(target_state="single")
@@ -36,7 +36,7 @@ def test_003_create_t1():
 
 def test_004_init_secondary():
     global node2
-    node2 = cluster.create_datanode("/tmp/basic/node2")
+    node2 = cluster.create_datanode("/tmp/basic/node2", nodeName="node2")
     node2.create()
     node2.run()
     assert node2.wait_until_state(target_state="secondary")
@@ -108,7 +108,7 @@ def test_014_drop_secondary():
 
 def test_015_add_new_secondary():
     global node3
-    node3 = cluster.create_datanode("/tmp/basic/node3")
+    node3 = cluster.create_datanode("/tmp/basic/node3", nodeName="node3")
     node3.create()
 
 @raises(Exception)

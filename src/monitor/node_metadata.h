@@ -29,25 +29,27 @@
 #define Anum_pgautofailover_node_nodeid 2
 #define Anum_pgautofailover_node_groupid 3
 #define Anum_pgautofailover_node_nodename 4
-#define Anum_pgautofailover_node_nodeport 5
-#define Anum_pgautofailover_node_goalstate 6
-#define Anum_pgautofailover_node_reportedstate 7
-#define Anum_pgautofailover_node_reportedpgisrunning 8
-#define Anum_pgautofailover_node_reportedrepstate 9
-#define Anum_pgautofailover_node_reporttime 10
-#define Anum_pgautofailover_node_walreporttime 11
-#define Anum_pgautofailover_node_health 12
-#define Anum_pgautofailover_node_healthchecktime 13
-#define Anum_pgautofailover_node_statechangetime 14
-#define Anum_pgautofailover_node_reportedLSN 15
-#define Anum_pgautofailover_node_candidate_priority 16
-#define Anum_pgautofailover_node_replication_quorum 17
+#define Anum_pgautofailover_node_nodehost 5
+#define Anum_pgautofailover_node_nodeport 6
+#define Anum_pgautofailover_node_goalstate 7
+#define Anum_pgautofailover_node_reportedstate 8
+#define Anum_pgautofailover_node_reportedpgisrunning 9
+#define Anum_pgautofailover_node_reportedrepstate 10
+#define Anum_pgautofailover_node_reporttime 11
+#define Anum_pgautofailover_node_walreporttime 12
+#define Anum_pgautofailover_node_health 13
+#define Anum_pgautofailover_node_healthchecktime 14
+#define Anum_pgautofailover_node_statechangetime 15
+#define Anum_pgautofailover_node_reportedLSN 16
+#define Anum_pgautofailover_node_candidate_priority 17
+#define Anum_pgautofailover_node_replication_quorum 18
 
 #define AUTO_FAILOVER_NODE_TABLE_ALL_COLUMNS \
 	"formationid, " \
 	"nodeid, " \
 	"groupid, " \
 	"nodename, " \
+	"nodehost, " \
 	"nodeport, " \
 	"goalstate, " \
 	"reportedstate, " \
@@ -64,7 +66,8 @@
 
 
 #define SELECT_ALL_FROM_AUTO_FAILOVER_NODE_TABLE \
-	"SELECT " AUTO_FAILOVER_NODE_TABLE_ALL_COLUMNS " FROM " AUTO_FAILOVER_NODE_TABLE
+	"SELECT " AUTO_FAILOVER_NODE_TABLE_ALL_COLUMNS \
+	" FROM " AUTO_FAILOVER_NODE_TABLE
 
 /* pg_stat_replication.sync_state: "sync", "async", "quorum", "potential" */
 typedef enum SyncState
@@ -87,6 +90,7 @@ typedef struct AutoFailoverNode
 	int nodeId;
 	int groupId;
 	char *nodeName;
+	char *nodeHost;
 	int nodePort;
 	ReplicationState goalState;
 	ReplicationState reportedState;
@@ -117,14 +121,17 @@ extern bool AllNodesHaveSameCandidatePriority(List *groupNodeList);
 extern int CountStandbyCandidates(AutoFailoverNode *primaryNode,
 								  List *stateList);
 extern AutoFailoverNode * GetAutoFailoverNode(char *nodeName, int nodePort);
-extern AutoFailoverNode * GetAutoFailoverNodeWithId(int nodeid, char *nodeName, int
-													nodePort);
+extern AutoFailoverNode * GetAutoFailoverNodeWithFormationAndName(char *formationId,
+																  char *nodeName);
+extern AutoFailoverNode * GetAutoFailoverNodeWithId(int nodeid,
+													char *nodeHost,
+													int nodePort);
 extern AutoFailoverNode * OtherNodeInGroup(AutoFailoverNode *pgAutoFailoverNode);
 extern AutoFailoverNode * GetWritableNodeInGroup(char *formationId, int32 groupId);
 extern AutoFailoverNode * TupleToAutoFailoverNode(TupleDesc tupleDescriptor,
 												  HeapTuple heapTuple);
 extern int AddAutoFailoverNode(char *formationId, int groupId,
-							   char *nodeName, int nodePort,
+							   char *nodeName, char *nodeHost, int nodePort,
 							   ReplicationState goalState,
 							   ReplicationState reportedState,
 							   int candidatePriority,

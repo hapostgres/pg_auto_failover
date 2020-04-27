@@ -21,7 +21,7 @@ def test_000_create_monitor():
 
 def test_001_init_primary():
     global node1
-    node1 = cluster.create_datanode("/tmp/multi_standby/node1")
+    node1 = cluster.create_datanode("/tmp/multi_standby/node1", nodeName="node1")
     node1.create()
     node1.run()
     assert node1.wait_until_state(target_state="single")
@@ -42,17 +42,17 @@ def test_003_replication_quorum():
     assert node1.get_replication_quorum()
 
     assert node1.set_replication_quorum("false")
-    assert not node1.get_replication_quorum()
+    eq_(node1.get_replication_quorum(), False)
 
     assert node1.set_replication_quorum("true")
-    assert node1.get_replication_quorum()
+    eq_(node1.get_replication_quorum(), True)
 
 def test_004_add_standby():
     # the next test wants to set number_sync_standbys to 2
     # so we need at least 3 standbys to allow that
     global node2
 
-    node2 = cluster.create_datanode("/tmp/multi_standby/node2")
+    node2 = cluster.create_datanode("/tmp/multi_standby/node2", nodeName="node2")
     node2.create()
     node2.run()
     assert node2.wait_until_state(target_state="secondary")

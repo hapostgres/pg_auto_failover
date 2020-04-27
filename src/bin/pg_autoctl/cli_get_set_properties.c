@@ -728,7 +728,7 @@ set_node_candidate_priority(Keeper *keeper, int candidatePriority)
 	if (!monitor_set_node_candidate_priority(
 			&(keeper->monitor),
 			keeper->state.current_node_id,
-			config->nodename,
+			config->hostname,
 			config->pgSetup.pgport,
 			candidatePriority))
 	{
@@ -793,7 +793,7 @@ set_node_replication_quorum(Keeper *keeper, bool replicationQuorum)
 	if (!monitor_set_node_replication_quorum(
 			&(keeper->monitor),
 			keeper->state.current_node_id,
-			config->nodename,
+			config->hostname,
 			config->pgSetup.pgport,
 			replicationQuorum))
 	{

@@ -54,22 +54,22 @@ static void cli_drop_node(int argc, char **argv);
 static void cli_drop_monitor(int argc, char **argv);
 
 static void cli_drop_node_from_monitor(KeeperConfig *config,
-									   const char *nodename,
+									   const char *hostname,
 									   int port);
 
-static bool discover_nodename(char *nodename, int size,
+static bool discover_hostname(char *hostname, int size,
 							  const char *monitorHostname, int monitorPort);
-static void check_nodename(const char *nodename);
+static void check_hostname(const char *hostname);
 
 CommandLine create_monitor_command =
 	make_command(
 		"monitor",
 		"Initialize a pg_auto_failover monitor node",
-		" [ --pgdata --pgport --pgctl --nodename ] ",
+		" [ --pgdata --pgport --pgctl --nodename --hostname ] ",
 		"  --pgctl           path to pg_ctl\n"
 		"  --pgdata          path to data directory\n"
 		"  --pgport          PostgreSQL's port number\n"
-		"  --nodename        hostname by which postgres is reachable\n"
+		"  --hostname        hostname by which postgres is reachable\n"
 		"  --auth            authentication method for connections from data nodes\n"
 		"  --skip-pg-hba     skip editing pg_hba.conf rules\n"
 		"  --run             create node then run pg_autoctl service\n"
@@ -84,12 +84,13 @@ CommandLine create_postgres_command =
 		"",
 		"  --pgctl           path to pg_ctl\n"
 		"  --pgdata          path to data director\n"
-		"  --pghost          PostgreSQL's hostname\n"
+		"  --pghost          hostname used to connect locally to PostgreSQL\n"
 		"  --pgport          PostgreSQL's port number\n"
 		"  --listen          PostgreSQL's listen_addresses\n"
 		"  --username        PostgreSQL's username\n"
 		"  --dbname          PostgreSQL's database name\n"
-		"  --nodename        pg_auto_failover node\n"
+		"  --hostname        hostname used to connect from other nodes\n"
+		"  --nodename        pg_auto_failover node name\n"
 		"  --formation       pg_auto_failover formation\n"
 		"  --monitor         pg_auto_failover Monitor Postgres URL\n"
 		"  --auth            authentication method for connections from monitor\n"
@@ -113,10 +114,10 @@ CommandLine drop_monitor_command =
 CommandLine drop_node_command =
 	make_command("node",
 				 "Drop a node from the pg_auto_failover monitor",
-				 "[ --pgdata --destroy --nodename --pgport ]",
+				 "[ --pgdata --destroy --hostname --pgport ]",
 				 "  --pgdata      path to data directory\n"
 				 "  --destroy     also destroy Postgres database\n"
-				 "  --nodename    nodename to remove from the monitor\n"
+				 "  --hostname    hostname to remove from the monitor\n"
 				 "  --pgport      Postgres port of the node to remove",
 				 cli_drop_node_getopts,
 				 cli_drop_node);
@@ -262,6 +263,7 @@ cli_create_postgres_getopts(int argc, char **argv)
 		{ "auth", required_argument, NULL, 'A' },
 		{ "skip-pg-hba", no_argument, NULL, 'S' },
 		{ "dbname", required_argument, NULL, 'd' },
+		{ "hostname", required_argument, NULL, 'h' },
 		{ "nodename", required_argument, NULL, 'n' },
 		{ "formation", required_argument, NULL, 'f' },
 		{ "monitor", required_argument, NULL, 'm' },
@@ -287,7 +289,7 @@ cli_create_postgres_getopts(int argc, char **argv)
 
 	int optind =
 		cli_create_node_getopts(argc, argv, long_options,
-								"C:D:H:p:l:U:A:Sd:n:f:m:MRVvqhP:r:xsN",
+								"C:D:H:p:l:U:A:Sd:h:n:f:m:MRVvqhP:r:xsN",
 								&options);
 
 	/* publish our option parsing in the global variable */
@@ -315,7 +317,7 @@ cli_create_postgres(int argc, char **argv)
 		keeper.config.pgSetup.pgKind = NODE_KIND_STANDALONE;
 		strlcpy(keeper.config.nodeKind, "standalone", NAMEDATALEN);
 
-		if (!check_or_discover_nodename(config))
+		if (!check_or_discover_hostname(config))
 		{
 			/* errors have already been logged */
 			exit(EXIT_CODE_BAD_ARGS);
@@ -348,14 +350,14 @@ cli_create_monitor_getopts(int argc, char **argv)
 		{ "pgctl", required_argument, NULL, 'C' },
 		{ "pgdata", required_argument, NULL, 'D' },
 		{ "pgport", required_argument, NULL, 'p' },
-		{ "nodename", required_argument, NULL, 'n' },
+		{ "hostname", required_argument, NULL, 'h' },
 		{ "listen", required_argument, NULL, 'l' },
 		{ "auth", required_argument, NULL, 'A' },
 		{ "skip-pg-hba", no_argument, NULL, 'S' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
-		{ "help", no_argument, NULL, 'h' },
+		{ "help", no_argument, &help_flag, 0 },
 		{ "run", no_argument, NULL, 'x' },
 		{ "no-ssl", no_argument, NULL, 'N' },
 		{ "ssl-self-signed", no_argument, NULL, 's' },
@@ -372,7 +374,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "C:D:p:n:l:A:SVvqhxNs",
+	while ((c = getopt_long(argc, argv, "C:D:p:h:n:l:A:SVvqhxNs",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -410,10 +412,10 @@ cli_create_monitor_getopts(int argc, char **argv)
 				break;
 			}
 
-			case 'n':
+			case 'h':
 			{
-				strlcpy(options.nodename, optarg, _POSIX_HOST_NAME_MAX);
-				log_trace("--nodename %s", options.nodename);
+				strlcpy(options.hostname, optarg, _POSIX_HOST_NAME_MAX);
+				log_trace("--hostname %s", options.hostname);
 				break;
 			}
 
@@ -484,13 +486,6 @@ cli_create_monitor_getopts(int argc, char **argv)
 				break;
 			}
 
-			case 'h':
-			{
-				commandline_help(stderr);
-				exit(EXIT_CODE_QUIT);
-				break;
-			}
-
 			case 'x':
 			{
 				/* { "run", no_argument, NULL, 'x' }, */
@@ -542,6 +537,12 @@ cli_create_monitor_getopts(int argc, char **argv)
 			 */
 			case 0:
 			{
+				if (help_flag)
+				{
+					commandline_help(stderr);
+					exit(EXIT_CODE_QUIT);
+				}
+
 				if (ssl_flag != SSL_MODE_FLAG)
 				{
 					if (!cli_getopt_accept_ssl_options(SSL_CLI_USER_PROVIDED,
@@ -709,23 +710,23 @@ cli_create_monitor(int argc, char **argv)
 	}
 	else
 	{
-		/* Take care of the --nodename */
-		if (IS_EMPTY_STRING_BUFFER(config->nodename))
+		/* Take care of the --hostname */
+		if (IS_EMPTY_STRING_BUFFER(config->hostname))
 		{
-			if (!discover_nodename((char *) (&config->nodename),
+			if (!discover_hostname((char *) (&config->hostname),
 								   _POSIX_HOST_NAME_MAX,
 								   DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME,
 								   DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT))
 			{
 				log_fatal("Failed to auto-detect the hostname of this machine, "
-						  "please provide one via --nodename");
+						  "please provide one via --hostname");
 				exit(EXIT_CODE_BAD_ARGS);
 			}
 		}
 		else
 		{
 			/*
-			 * When provided with a --nodename option, we run some checks on
+			 * When provided with a --hostname option, we run some checks on
 			 * the user provided value based on Postgres usage for the hostname
 			 * in its HBA setup. Both forward and reverse DNS needs to return
 			 * meaningful values for the connections to be granted when using a
@@ -736,7 +737,7 @@ cli_create_monitor(int argc, char **argv)
 			 * checks, so we only WARN when finding something that might be
 			 * fishy, and proceed with the setup of the local node anyway.
 			 */
-			(void) check_nodename(config->nodename);
+			(void) check_hostname(config->hostname);
 		}
 
 		/* set our MonitorConfig from the command line options now. */
@@ -804,7 +805,7 @@ cli_drop_node_getopts(int argc, char **argv)
 	static struct option long_options[] = {
 		{ "pgdata", required_argument, NULL, 'D' },
 		{ "destroy", no_argument, NULL, 'd' },
-		{ "nodename", required_argument, NULL, 'n' },
+		{ "hostname", required_argument, NULL, 'n' },
 		{ "pgport", required_argument, NULL, 'p' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
@@ -836,8 +837,8 @@ cli_drop_node_getopts(int argc, char **argv)
 
 			case 'n':
 			{
-				strlcpy(options.nodename, optarg, _POSIX_HOST_NAME_MAX);
-				log_trace("--nodename %s", options.nodename);
+				strlcpy(options.hostname, optarg, _POSIX_HOST_NAME_MAX);
+				log_trace("--hostname %s", options.hostname);
 				break;
 			}
 
@@ -910,10 +911,10 @@ cli_drop_node_getopts(int argc, char **argv)
 	}
 
 	if (dropAndDestroy &&
-		(!IS_EMPTY_STRING_BUFFER(options.nodename) ||
+		(!IS_EMPTY_STRING_BUFFER(options.hostname) ||
 		 options.pgSetup.pgport != 0))
 	{
-		log_error("Please use either --nodename and --pgport or ---destroy");
+		log_error("Please use either --hostname and --pgport or ---destroy");
 		log_info("Destroying a node is not supported from a distance");
 		exit(EXIT_CODE_BAD_ARGS);
 	}
@@ -962,27 +963,27 @@ cli_drop_node(int argc, char **argv)
 		case PG_AUTOCTL_ROLE_MONITOR:
 		{
 			/*
-			 * Now check --nodename and --pgport and remove the entry on the
+			 * Now check --hostname and --pgport and remove the entry on the
 			 * monitor.
 			 */
-			if (IS_EMPTY_STRING_BUFFER(config.nodename) ||
+			if (IS_EMPTY_STRING_BUFFER(config.hostname) ||
 				config.pgSetup.pgport == 0)
 			{
 				log_fatal("To remove a node from the monitor, both the "
-						  "--nodename and --pgport options are required");
+						  "--hostname and --pgport options are required");
 				exit(EXIT_CODE_BAD_ARGS);
 			}
 
 			/* pg_autoctl drop node on the monitor drops another node */
 			(void) cli_drop_node_from_monitor(&config,
-											  config.nodename,
+											  config.hostname,
 											  config.pgSetup.pgport);
 			return;
 		}
 
 		case PG_AUTOCTL_ROLE_KEEPER:
 		{
-			if (!IS_EMPTY_STRING_BUFFER(config.nodename) ||
+			if (!IS_EMPTY_STRING_BUFFER(config.hostname) ||
 				config.pgSetup.pgport != 0)
 			{
 				log_fatal("Only dropping the local node is supported");
@@ -1095,10 +1096,10 @@ cli_drop_monitor(int argc, char **argv)
 
 /*
  * cli_drop_node_from_monitor calls pgautofailover.remove_node() on the
- * monitor for the given --nodename and --pgport.
+ * monitor for the given --hostname and --pgport.
  */
 static void
-cli_drop_node_from_monitor(KeeperConfig *config, const char *nodename, int port)
+cli_drop_node_from_monitor(KeeperConfig *config, const char *hostname, int port)
 {
 	Monitor monitor = { 0 };
 	MonitorConfig mconfig = { 0 };
@@ -1123,7 +1124,7 @@ cli_drop_node_from_monitor(KeeperConfig *config, const char *nodename, int port)
 	pg_setup_get_local_connection_string(&(mconfig.pgSetup), connInfo);
 	monitor_init(&monitor, connInfo);
 
-	if (!monitor_remove(&monitor, (char *) nodename, port))
+	if (!monitor_remove(&monitor, (char *) hostname, port))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_MONITOR);
@@ -1132,15 +1133,15 @@ cli_drop_node_from_monitor(KeeperConfig *config, const char *nodename, int port)
 
 
 /*
- * check_or_discover_nodename checks given --nodename or attempt to discover a
+ * check_or_discover_hostname checks given --hostname or attempt to discover a
  * suitable default value for the current node when it's not been provided on
  * the command line.
  */
 bool
-check_or_discover_nodename(KeeperConfig *config)
+check_or_discover_hostname(KeeperConfig *config)
 {
-	/* take care of the nodename */
-	if (IS_EMPTY_STRING_BUFFER(config->nodename))
+	/* take care of the hostname */
+	if (IS_EMPTY_STRING_BUFFER(config->hostname))
 	{
 		char monitorHostname[_POSIX_HOST_NAME_MAX];
 		int monitorPort = 0;
@@ -1166,20 +1167,20 @@ check_or_discover_nodename(KeeperConfig *config)
 			return false;
 		}
 
-		if (!discover_nodename((char *) &(config->nodename),
+		if (!discover_hostname((char *) &(config->hostname),
 							   _POSIX_HOST_NAME_MAX,
 							   monitorHostname,
 							   monitorPort))
 		{
 			log_fatal("Failed to auto-detect the hostname of this machine, "
-					  "please provide one via --nodename");
+					  "please provide one via --hostname");
 			return false;
 		}
 	}
 	else
 	{
 		/*
-		 * When provided with a --nodename option, we run some checks on the
+		 * When provided with a --hostname option, we run some checks on the
 		 * user provided value based on Postgres usage for the hostname in its
 		 * HBA setup. Both forward and reverse DNS needs to return meaningful
 		 * values for the connections to be granted when using a hostname.
@@ -1189,14 +1190,14 @@ check_or_discover_nodename(KeeperConfig *config)
 		 * only WARN when finding something that might be fishy, and proceed
 		 * with the setup of the local node anyway.
 		 */
-		(void) check_nodename(config->nodename);
+		(void) check_hostname(config->hostname);
 	}
 	return true;
 }
 
 
 /*
- * discover_nodename discovers a suitable --nodename default value in three
+ * discover_hostname discovers a suitable --hostname default value in three
  * steps:
  *
  * 1. First find the local LAN IP address by connecting a socket() to either an
@@ -1204,9 +1205,9 @@ check_or_discover_nodename(KeeperConfig *config)
  *    then inspecting which local address has been used.
  *
  * 2. Use the local IP address obtained in the first step and do a reverse DNS
- *    lookup for it. The answer is our candidate default --nodename.
+ *    lookup for it. The answer is our candidate default --hostname.
  *
- * 3. Do a DNS lookup for the candidate default --nodename. If we get back a IP
+ * 3. Do a DNS lookup for the candidate default --hostname. If we get back a IP
  *    address that matches one of the local network interfaces, we keep the
  *    candidate, the DNS lookup that Postgres does at connection time is
  *    expected to then work.
@@ -1214,10 +1215,10 @@ check_or_discover_nodename(KeeperConfig *config)
  * All this dansing around DNS lookups is necessary in order to mimic Postgres
  * HBA matching of hostname rules against client IP addresses: the hostname in
  * the HBA rule is resolved and compared to the client IP address. We want the
- * --nodename we use to resolve to an IP address that exists on the local
+ * --hostname we use to resolve to an IP address that exists on the local
  * Postgres server.
  *
- * Worst case here is that we fail to discover a --nodename and then ask the
+ * Worst case here is that we fail to discover a --hostname and then ask the
  * user to provide one for us.
  *
  * monitorHostname and monitorPort are used to open a socket to that address,
@@ -1227,63 +1228,63 @@ check_or_discover_nodename(KeeperConfig *config)
  * are the Google DNS service: 8.8.8.8:53, expected to be reachable.
  */
 static bool
-discover_nodename(char *nodename, int size,
+discover_hostname(char *hostname, int size,
 				  const char *monitorHostname, int monitorPort)
 {
 	/*
-	 * Try and find a default --nodename. The --nodename is mandatory, so
+	 * Try and find a default --hostname. The --hostname is mandatory, so
 	 * when not provided for by the user, then failure to discover a
-	 * suitable nodename is a fatal error.
+	 * suitable hostname is a fatal error.
 	 */
 	char ipAddr[BUFSIZE];
 	char localIpAddr[BUFSIZE];
-	char hostname[_POSIX_HOST_NAME_MAX];
+	char _hostname[_POSIX_HOST_NAME_MAX];
 
 	/* fetch our local address among the network interfaces */
 	if (!fetchLocalIPAddress(ipAddr, BUFSIZE, monitorHostname, monitorPort))
 	{
 		log_fatal("Failed to find a local IP address, "
-				  "please provide --nodename.");
+				  "please provide --hostname.");
 		return false;
 	}
 
-	/* from there on we can take the ipAddr as the default --nodename */
-	strlcpy(nodename, ipAddr, size);
-	log_debug("discover_nodename: local ip %s", ipAddr);
+	/* from there on we can take the ipAddr as the default --hostname */
+	strlcpy(hostname, ipAddr, size);
+	log_debug("discover_hostname: local ip %s", ipAddr);
 
 	/* do a reverse DNS lookup from our local LAN ip address */
 	if (!findHostnameFromLocalIpAddress(ipAddr,
-										hostname, _POSIX_HOST_NAME_MAX))
+										_hostname, _POSIX_HOST_NAME_MAX))
 	{
 		/* errors have already been logged */
-		log_info("Using local IP address \"%s\" as the --nodename.", ipAddr);
+		log_info("Using local IP address \"%s\" as the --hostname.", ipAddr);
 		return true;
 	}
-	log_debug("discover_nodename: host from ip %s", hostname);
+	log_debug("discover_hostname: host from ip %s", _hostname);
 
 	/* do a DNS lookup of the hostname we got from the IP address */
-	if (!findHostnameLocalAddress(hostname, localIpAddr, BUFSIZE))
+	if (!findHostnameLocalAddress(_hostname, localIpAddr, BUFSIZE))
 	{
 		/* errors have already been logged */
-		log_info("Using local IP address \"%s\" as the --nodename.", ipAddr);
+		log_info("Using local IP address \"%s\" as the --hostname.", ipAddr);
 		return true;
 	}
-	log_debug("discover_nodename: ip from host %s", localIpAddr);
+	log_debug("discover_hostname: ip from host %s", localIpAddr);
 
 	/*
 	 * ok ipAddr resolves to an hostname that resolved back to a local address,
 	 * we should be able to use the hostname in pg_hba.conf
 	 */
-	strlcpy(nodename, hostname, size);
-	log_info("Using --nodename \"%s\", which resolves to IP address \"%s\"",
-			 nodename, localIpAddr);
+	strlcpy(hostname, _hostname, size);
+	log_info("Using --hostname \"%s\", which resolves to IP address \"%s\"",
+			 hostname, localIpAddr);
 
 	return true;
 }
 
 
 /*
- * check_nodename runs some DNS check against the provided --nodename in order
+ * check_hostname runs some DNS check against the provided --hostname in order
  * to warn the user in case we might later fail to use it in the Postgres HBA
  * setup.
  *
@@ -1293,30 +1294,30 @@ discover_nodename(char *nodename, int size,
  * and refuses the connection where there's no match.
  */
 static void
-check_nodename(const char *nodename)
+check_hostname(const char *hostname)
 {
 	char localIpAddress[INET_ADDRSTRLEN];
-	IPType ipType = ip_address_type(nodename);
+	IPType ipType = ip_address_type(hostname);
 
 	if (ipType == IPTYPE_NONE)
 	{
-		if (!findHostnameLocalAddress(nodename,
+		if (!findHostnameLocalAddress(hostname,
 									  localIpAddress, INET_ADDRSTRLEN))
 		{
 			log_warn(
-				"Failed to resolve nodename \"%s\" to a local IP address, "
-				"automated pg_hba.conf setup might fail.", nodename);
+				"Failed to resolve hostname \"%s\" to a local IP address, "
+				"automated pg_hba.conf setup might fail.", hostname);
 		}
 	}
 	else
 	{
 		char cidr[BUFSIZE];
 
-		if (!fetchLocalCIDR(nodename, cidr, BUFSIZE))
+		if (!fetchLocalCIDR(hostname, cidr, BUFSIZE))
 		{
 			log_warn("Failed to find adress \"%s\" in local network "
 					 "interfaces, automated pg_hba.conf setup might fail.",
-					 nodename);
+					 hostname);
 		}
 	}
 }

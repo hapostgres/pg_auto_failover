@@ -31,6 +31,7 @@ typedef struct KeeperConfig
 	char formation[NAMEDATALEN];
 	int groupId;
 	char nodename[_POSIX_HOST_NAME_MAX];
+	char hostname[_POSIX_HOST_NAME_MAX];
 	char nodeKind[NAMEDATALEN];
 
 	/* PostgreSQL setup */

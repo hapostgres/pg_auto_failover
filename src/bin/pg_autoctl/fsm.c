@@ -175,7 +175,7 @@ KeeperFSMTransition KeeperFSM[] = {
 
 	{ APPLY_SETTINGS_STATE, DRAINING_STATE, COMMENT_PRIMARY_TO_DRAINING, &fsm_stop_postgres },
 	{ APPLY_SETTINGS_STATE, DEMOTED_STATE, COMMENT_PRIMARY_TO_DEMOTED, &fsm_stop_postgres },
-	{ APPLY_SETTINGS_STATE, DEMOTE_TIMEOUT_STATE, COMMENT_PRIMARY_TO_DEMOTED, &fsm_stop_postgres },	
+	{ APPLY_SETTINGS_STATE, DEMOTE_TIMEOUT_STATE, COMMENT_PRIMARY_TO_DEMOTED, &fsm_stop_postgres },
 
 	/*
 	 * was demoted, need to be dead now.
@@ -315,7 +315,7 @@ keeper_fsm_step(Keeper *keeper)
 
 	if (!monitor_node_active(monitor,
 							 config->formation,
-							 config->nodename,
+							 config->hostname,
 							 config->pgSetup.pgport,
 							 keeperState->current_node_id,
 							 keeperState->current_group,

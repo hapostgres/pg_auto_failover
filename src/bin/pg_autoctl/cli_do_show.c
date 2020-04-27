@@ -34,7 +34,7 @@
 static void cli_show_ipaddr(int argc, char **argv);
 static void cli_show_cidr(int argc, char **argv);
 static void cli_show_lookup(int argc, char **argv);
-static void cli_show_nodename(int argc, char **argv);
+static void cli_show_hostname(int argc, char **argv);
 
 static CommandLine do_show_ipaddr_command =
 	make_command("ipaddr",
@@ -49,19 +49,19 @@ static CommandLine do_show_cidr_command =
 static CommandLine do_show_lookup_command =
 	make_command("lookup",
 				 "Print this node's DNS lookup information",
-				 "<nodename>", "",
+				 "<hostname>", "",
 				 NULL, cli_show_lookup);
 
-static CommandLine do_show_nodename_command =
-	make_command("nodename",
-				 "Print this node's default nodename", "", "",
-				 NULL, cli_show_nodename);
+static CommandLine do_show_hostname_command =
+	make_command("hostname",
+				 "Print this node's default hostname", "", "",
+				 NULL, cli_show_hostname);
 
 CommandLine *do_show_subcommands[] = {
 	&do_show_ipaddr_command,
 	&do_show_cidr_command,
 	&do_show_lookup_command,
-	&do_show_nodename_command,
+	&do_show_hostname_command,
 	NULL
 };
 
@@ -122,15 +122,15 @@ cli_show_cidr(int argc, char **argv)
 
 
 /*
- * cli_check_nodename checks that the --nodename argument is either an IP
- * address that exists on the local list of interfaces, or a hostname that a
- * DNS lookup solves to an IP address we have on the local machine.
+ * cli_show_lookup does a DNS lookup of the given argument (either a hostname
+ * or an IP address) and check that the IP address (either from a DNS lookup or
+ * the one given) belongs to a local network interface.
  *
  */
 static void
 cli_show_lookup(int argc, char **argv)
 {
-	char *nodename;
+	char *hostname;
 	IPType ipType = IPTYPE_NONE;
 
 	if (argc != 1)
@@ -138,26 +138,26 @@ cli_show_lookup(int argc, char **argv)
 		commandline_print_usage(&do_show_lookup_command, stderr);
 		exit(EXIT_CODE_BAD_ARGS);
 	}
-	nodename = argv[0];
-	ipType = ip_address_type(nodename);
+	hostname = argv[0];
+	ipType = ip_address_type(hostname);
 
 	if (ipType == IPTYPE_NONE)
 	{
 		char localIpAddress[BUFSIZE];
 
-		if (!findHostnameLocalAddress(nodename, localIpAddress, BUFSIZE))
+		if (!findHostnameLocalAddress(hostname, localIpAddress, BUFSIZE))
 		{
-			log_fatal("Failed to check nodename \"%s\", see above for details",
-					  nodename);
+			log_fatal("Failed to check hostname \"%s\", see above for details",
+					  hostname);
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 
-		fformat(stdout, "%s: %s\n", nodename, localIpAddress);
+		fformat(stdout, "%s: %s\n", hostname, localIpAddress);
 	}
 	else
 	{
 		/* an IP address has been given, we do a reverse lookup */
-		char *ipAddr = nodename;
+		char *ipAddr = hostname;
 		char hostname[_POSIX_HOST_NAME_MAX];
 		char localIpAddress[BUFSIZE];
 
@@ -173,7 +173,7 @@ cli_show_lookup(int argc, char **argv)
 		/* DNS lookup of the given hostname to make sure we get back here */
 		if (!findHostnameLocalAddress(hostname, localIpAddress, BUFSIZE))
 		{
-			log_fatal("Failed to check nodename \"%s\", see above for details",
+			log_fatal("Failed to check hostname \"%s\", see above for details",
 					  hostname);
 
 			/* keep ipAddr and show exit failure */
@@ -188,11 +188,11 @@ cli_show_lookup(int argc, char **argv)
 
 
 /*
- * cli_show_nodename shows the default --nodename we would use. It's the
+ * cli_show_hostname shows the default --hostname we would use. It's the
  * reverse DNS entry for the local IP address we probe.
  */
 static void
-cli_show_nodename(int argc, char **argv)
+cli_show_hostname(int argc, char **argv)
 {
 	char ipAddr[BUFSIZE];
 	char localIpAddress[BUFSIZE];
@@ -206,29 +206,29 @@ cli_show_nodename(int argc, char **argv)
 		log_warn("Failed to determine network configuration.");
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
-	log_debug("cli_show_nodename: ip %s", ipAddr);
+	log_debug("cli_show_hostname: ip %s", ipAddr);
 
 	/* do a reverse DNS lookup from this local address to an hostname */
 	if (!findHostnameFromLocalIpAddress(ipAddr, hostname, _POSIX_HOST_NAME_MAX))
 	{
-		/* the nodename is going to be the ipAddr in that case */
+		/* the hostname is going to be the ipAddr in that case */
 		fformat(stdout, "%s\n", ipAddr);
 
 		/* still indicate it was a failure */
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
-	log_debug("cli_show_nodename: host %s", hostname);
+	log_debug("cli_show_hostname: host %s", hostname);
 
 	/* do a lookup of the host name and see that we get a local address back */
 	if (!findHostnameLocalAddress(hostname, localIpAddress, BUFSIZE))
 	{
-		/* the nodename is going to be the ipAddr in that case */
+		/* the hostname is going to be the ipAddr in that case */
 		fformat(stdout, "%s\n", ipAddr);
 
 		/* still indicate it was a failure */
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
-	log_debug("cli_show_nodename: ip %s", localIpAddress);
+	log_debug("cli_show_hostname: ip %s", localIpAddress);
 
 	fformat(stdout, "%s\n", hostname);
 }

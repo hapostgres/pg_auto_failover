@@ -42,6 +42,7 @@ typedef struct StateNotification
 	int groupId;
 	int nodeId;
 	char nodeName[_POSIX_HOST_NAME_MAX];
+	char hostName[_POSIX_HOST_NAME_MAX];
 	int nodePort;
 } StateNotification;
 
@@ -54,8 +55,9 @@ typedef struct MonitorExtensionVersion
 bool monitor_init(Monitor *monitor, char *url);
 void monitor_finish(Monitor *monitor);
 
-void printNodeHeader(int maxNodeNameSize);
-void printNodeEntry(NodeAddress *node);
+void printNodeHeader(int maxNodeNameSize, int maxHostNameSize);
+void printNodeEntry(NodeAddress *node, int maxNodeNameSize, int maxHostNameSize);
+void prepareHeaderSeparator(char *buffer, int size);
 
 bool monitor_get_nodes(Monitor *monitor, char *formation, int groupId,
 					   NodeAddressArray *nodeArray);
@@ -75,9 +77,17 @@ bool monitor_get_primary(Monitor *monitor, char *formation, int groupId,
 						 NodeAddress *node);
 bool monitor_get_coordinator(Monitor *monitor, char *formation,
 							 NodeAddress *node);
-bool monitor_register_node(Monitor *monitor, char *formation, char *host, int port,
-						   char *dbname, int desiredGroupId, NodeState initialSate,
-						   PgInstanceKind kind, int candidatePriority, bool quorum,
+bool monitor_register_node(Monitor *monitor,
+						   char *formation,
+						   char *name,
+						   char *host,
+						   int port,
+						   char *dbname,
+						   int desiredGroupId,
+						   NodeState initialState,
+						   PgInstanceKind kind,
+						   int candidatePriority,
+						   bool quorum,
 						   MonitorAssignedState *assignedState);
 bool monitor_node_active(Monitor *monitor,
 						 char *formation, char *host, int port, int nodeId,
@@ -137,8 +147,8 @@ bool monitor_synchronous_standby_names(Monitor *monitor,
 
 bool monitor_set_nodename(Monitor *monitor, int nodeId, const char *nodename);
 
-bool monitor_start_maintenance(Monitor *monitor, char *host, int port);
-bool monitor_stop_maintenance(Monitor *monitor, char *host, int port);
+bool monitor_start_maintenance(Monitor *monitor, char *formation, char *nodename);
+bool monitor_stop_maintenance(Monitor *monitor, char *formation, char *nodename);
 
 bool monitor_get_notifications(Monitor *monitor);
 bool monitor_wait_until_primary_applied_settings(Monitor *monitor,

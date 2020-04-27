@@ -1853,7 +1853,7 @@ pg_is_running(const char *pg_ctl, const char *pgdata)
  *             -keyout server.key -subj "/CN=dbhost.yourdomain.com"
  */
 bool
-pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *nodename)
+pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *hostname)
 {
 	Program program;
 	char subject[BUFSIZE] = { 0 };
@@ -1893,13 +1893,13 @@ pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *nodename)
 		return false;
 	}
 
-	size = sformat(subject, BUFSIZE, "/CN=%s", nodename);
+	size = sformat(subject, BUFSIZE, "/CN=%s", hostname);
 
 	if (size == -1 || size > BUFSIZE)
 	{
 		log_error("BUG: the ssl subject \"/CN=%s\" requires %d bytes and"
 				  "pg_auto_failover only support up to %d bytes",
-				  nodename, size, BUFSIZE);
+				  hostname, size, BUFSIZE);
 		return false;
 	}
 

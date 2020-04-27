@@ -25,10 +25,10 @@
 	make_strbuf_option_default("pg_autoctl", "role", NULL, true, NAMEDATALEN, \
 							   config->role, MONITOR_ROLE)
 
-#define OPTION_AUTOCTL_NODENAME(config) \
-	make_strbuf_option("pg_autoctl", "nodename", "nodename", \
+#define OPTION_AUTOCTL_HOSTNAME(config) \
+	make_strbuf_option("pg_autoctl", "hostname", "hostname", \
 					   true, _POSIX_HOST_NAME_MAX, \
-					   config->nodename)
+					   config->hostname)
 
 #define OPTION_POSTGRESQL_PGDATA(config) \
 	make_strbuf_option("postgresql", "pgdata", "pgdata", true, MAXPGPATH, \
@@ -92,7 +92,7 @@
 #define SET_INI_OPTIONS_ARRAY(config) \
 	{ \
 		OPTION_AUTOCTL_ROLE(config), \
-		OPTION_AUTOCTL_NODENAME(config), \
+		OPTION_AUTOCTL_HOSTNAME(config), \
 		OPTION_POSTGRESQL_PGDATA(config), \
 		OPTION_POSTGRESQL_PG_CTL(config), \
 		OPTION_POSTGRESQL_USERNAME(config), \
@@ -430,9 +430,9 @@ monitor_config_get_postgres_uri(MonitorConfig *config, char *connectionString,
 	char *connStringEnd = connectionString;
 	char host[BUFSIZE];
 
-	if (!IS_EMPTY_STRING_BUFFER(config->nodename))
+	if (!IS_EMPTY_STRING_BUFFER(config->hostname))
 	{
-		strlcpy(host, config->nodename, BUFSIZE);
+		strlcpy(host, config->hostname, BUFSIZE);
 	}
 	else if (IS_EMPTY_STRING_BUFFER(config->pgSetup.listen_addresses) ||
 			 strcmp(config->pgSetup.listen_addresses,
@@ -599,13 +599,13 @@ monitor_config_accept_new(MonitorConfig *config, MonitorConfig *newConfig)
 		return false;
 	}
 
-	/* changing the nodename online is supported */
-	if (strneq(newConfig->nodename, config->nodename))
+	/* changing the hostname online is supported */
+	if (strneq(newConfig->hostname, config->hostname))
 	{
-		log_info("Reloading configuration: nodename is now \"%s\"; "
+		log_info("Reloading configuration: hostname is now \"%s\"; "
 				 "used to be \"%s\"",
-				 newConfig->nodename, config->nodename);
-		strlcpy(config->nodename, newConfig->nodename, _POSIX_HOST_NAME_MAX);
+				 newConfig->hostname, config->hostname);
+		strlcpy(config->hostname, newConfig->hostname, _POSIX_HOST_NAME_MAX);
 	}
 
 	/* we can change any SSL related setup options at runtime */

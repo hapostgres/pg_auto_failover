@@ -66,6 +66,6 @@ bool pg_cleanup_standby_mode(uint32_t pg_control_version,
 							 PGSQL *pgsql);
 
 bool pg_is_running(const char *pg_ctl, const char *pgdata);
-bool pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *nodename);
+bool pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *hostname);
 
 #endif /* PGCTL_H */

@@ -69,6 +69,7 @@ NotifyStateChange(ReplicationState reportedState,
 				  int groupId,
 				  int64 nodeId,
 				  const char *nodeName,
+				  const char *nodeHost,
 				  int nodePort,
 				  SyncState pgsrSyncState,
 				  XLogRecPtr reportedLSN,
@@ -82,7 +83,8 @@ NotifyStateChange(ReplicationState reportedState,
 	/*
 	 * Insert the event in our events table.
 	 */
-	eventid = InsertEvent(formationId, groupId, nodeId, nodeName, nodePort,
+	eventid = InsertEvent(formationId, groupId, nodeId,
+						  nodeName, nodeHost, nodePort,
 						  reportedState, goalState, pgsrSyncState, reportedLSN,
 						  candidatePriority, replicationQuorum, description);
 
@@ -92,7 +94,7 @@ NotifyStateChange(ReplicationState reportedState,
 	 * string in the message. Parsing is then easier on the receiving side too.
 	 */
 	appendStringInfo(payload,
-					 "S:%s:%s:%lu.%s:%d:%ld:%lu.%s:%d",
+					 "S:%s:%s:%lu.%s:%d:%ld:%lu.%s:%lu.%s:%d",
 					 ReplicationStateGetName(reportedState),
 					 ReplicationStateGetName(goalState),
 					 strlen(formationId),
@@ -101,6 +103,8 @@ NotifyStateChange(ReplicationState reportedState,
 					 nodeId,
 					 strlen(nodeName),
 					 nodeName,
+					 strlen(nodeHost),
+					 nodeHost,
 					 nodePort);
 
 	Async_Notify(CHANNEL_STATE, payload->data);
@@ -117,7 +121,7 @@ NotifyStateChange(ReplicationState reportedState,
  */
 int64
 InsertEvent(const char *formationId, int groupId, int64 nodeId,
-			const char *nodeName, int nodePort,
+			const char *nodeName, const char *nodeHost, int nodePort,
 			ReplicationState reportedState,
 			ReplicationState goalState,
 			SyncState pgsrSyncState,
@@ -135,6 +139,7 @@ InsertEvent(const char *formationId, int groupId, int64 nodeId,
 		INT8OID, /* nodeid */
 		INT4OID, /* groupid */
 		TEXTOID, /* nodename */
+		TEXTOID, /* nodehost */
 		INT4OID, /* nodeport */
 		replicationStateTypeOid, /* reportedstate */
 		replicationStateTypeOid, /* goalstate */
@@ -150,6 +155,7 @@ InsertEvent(const char *formationId, int groupId, int64 nodeId,
 		Int64GetDatum(nodeId),              /* nodeid */
 		Int32GetDatum(groupId),             /* groupid */
 		CStringGetTextDatum(nodeName),      /* nodename */
+		CStringGetTextDatum(nodeHost),      /* nodehost */
 		Int32GetDatum(nodePort),            /* nodeport */
 		ObjectIdGetDatum(reportedStateOid), /* reportedstate */
 		ObjectIdGetDatum(goalStateOid),     /* goalstate */
@@ -166,9 +172,11 @@ InsertEvent(const char *formationId, int groupId, int64 nodeId,
 
 	const char *insertQuery =
 		"INSERT INTO " AUTO_FAILOVER_EVENT_TABLE
-		"(formationid, nodeid, groupid, nodename, nodeport,"
-		" reportedstate, goalstate, reportedrepstate, reportedlsn, candidatepriority, replicationquorum, description) "
-		"VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING eventid";
+		"(formationid, nodeid, groupid, nodename, nodehost, nodeport,"
+		" reportedstate, goalstate, reportedrepstate, reportedlsn, "
+		" candidatepriority, replicationquorum, description) "
+		"VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) "
+		"RETURNING eventid";
 
 	SPI_connect();
 

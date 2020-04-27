@@ -35,7 +35,7 @@ static void cli_enable_ssl(int argc, char **argv);
 static void cli_disable_ssl(int argc, char **argv);
 
 static bool update_ssl_configuration(LocalPostgresServer *postgres,
-									 const char *nodename);
+									 const char *hostname);
 
 static bool update_monitor_connection_string(KeeperConfig *config);
 
@@ -348,8 +348,8 @@ cli_enable_maintenance(int argc, char **argv)
 	}
 
 	if (!monitor_start_maintenance(&(keeper.monitor),
-								   keeper.config.nodename,
-								   keeper.config.pgSetup.pgport))
+								   keeper.config.formation,
+								   keeper.config.nodename))
 	{
 		log_fatal("Failed to start maintenance from the monitor, "
 				  "see above for details");
@@ -415,8 +415,8 @@ cli_disable_maintenance(int argc, char **argv)
 	}
 
 	if (!monitor_stop_maintenance(&(keeper.monitor),
-								  keeper.config.nodename,
-								  keeper.config.pgSetup.pgport))
+								  keeper.config.formation,
+								  keeper.config.nodename))
 	{
 		log_fatal("Failed to stop maintenance from the monitor, "
 				  "see above for details");
@@ -686,7 +686,7 @@ cli_enable_ssl(int argc, char **argv)
 			local_postgres_init(&postgres, pgSetup);
 
 			/* update the Postgres SSL setup and maybe create the certificate */
-			if (!update_ssl_configuration(&postgres, mconfig.nodename))
+			if (!update_ssl_configuration(&postgres, mconfig.hostname))
 			{
 				/* errors have already been logged */
 				exit(EXIT_CODE_INTERNAL_ERROR);
@@ -776,7 +776,7 @@ cli_enable_ssl(int argc, char **argv)
 			}
 
 			/* update the Postgres SSL setup and maybe create the certificate */
-			if (!update_ssl_configuration(&postgres, kconfig.nodename))
+			if (!update_ssl_configuration(&postgres, kconfig.hostname))
 			{
 				/* errors have already been logged */
 				exit(EXIT_CODE_INTERNAL_ERROR);
@@ -861,7 +861,7 @@ cli_enable_ssl(int argc, char **argv)
  * update_ssl_configuration updates the local SSL configuration.
  */
 static bool
-update_ssl_configuration(LocalPostgresServer *postgres, const char *nodename)
+update_ssl_configuration(LocalPostgresServer *postgres, const char *hostname)
 {
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 
@@ -884,7 +884,7 @@ update_ssl_configuration(LocalPostgresServer *postgres, const char *nodename)
 		(!file_exists(pgSetup->ssl.serverKey) ||
 		 !file_exists(pgSetup->ssl.serverCert)))
 	{
-		if (!pg_create_self_signed_cert(pgSetup, nodename))
+		if (!pg_create_self_signed_cert(pgSetup, hostname))
 		{
 			log_error("Failed to create SSL self-signed certificate, "
 					  "see above for details");

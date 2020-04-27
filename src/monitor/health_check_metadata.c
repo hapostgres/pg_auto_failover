@@ -67,7 +67,7 @@ LoadNodeHealthList(void)
 	{
 		initStringInfo(&query);
 		appendStringInfo(&query,
-						 "SELECT nodename, nodeport, health "
+						 "SELECT nodehost, nodeport, health "
 						 "FROM " AUTO_FAILOVER_NODE_TABLE);
 
 		pgstat_report_activity(STATE_RUNNING, query.data);
@@ -80,7 +80,8 @@ LoadNodeHealthList(void)
 		for (uint64 rowNumber = 0; rowNumber < SPI_processed; rowNumber++)
 		{
 			HeapTuple heapTuple = SPI_tuptable->vals[rowNumber];
-			NodeHealth *nodeHealth = TupleToNodeHealth(heapTuple, SPI_tuptable->tupdesc);
+			NodeHealth *nodeHealth = TupleToNodeHealth(heapTuple,
+													   SPI_tuptable->tupdesc);
 			nodeHealthList = lappend(nodeHealthList, nodeHealth);
 		}
 
@@ -142,7 +143,7 @@ TupleToNodeHealth(HeapTuple heapTuple, TupleDesc tupleDescriptor)
 	NodeHealth *nodeHealth = NULL;
 	bool isNull = false;
 
-	Datum nodeNameDatum = SPI_getbinval(heapTuple, tupleDescriptor,
+	Datum nodeHostDatum = SPI_getbinval(heapTuple, tupleDescriptor,
 										TLIST_NUM_NODE_NAME, &isNull);
 	Datum nodePortDatum = SPI_getbinval(heapTuple, tupleDescriptor,
 										TLIST_NUM_NODE_PORT, &isNull);
@@ -150,7 +151,7 @@ TupleToNodeHealth(HeapTuple heapTuple, TupleDesc tupleDescriptor)
 										   TLIST_NUM_HEALTH_STATUS, &isNull);
 
 	nodeHealth = palloc0(sizeof(NodeHealth));
-	nodeHealth->nodeName = TextDatumGetCString(nodeNameDatum);
+	nodeHealth->nodeHost = TextDatumGetCString(nodeHostDatum);
 	nodeHealth->nodePort = DatumGetInt32(nodePortDatum);
 	nodeHealth->healthState = DatumGetInt32(healthStateDatum);
 
@@ -162,7 +163,7 @@ TupleToNodeHealth(HeapTuple heapTuple, TupleDesc tupleDescriptor)
  * SetNodeHealthState updates the health state of a node in the metadata.
  */
 void
-SetNodeHealthState(char *nodeName, uint16 nodePort, int healthState)
+SetNodeHealthState(char *nodeHost, uint16 nodePort, int healthState)
 {
 	StringInfoData query;
 	int spiStatus PG_USED_FOR_ASSERTS_ONLY = 0;
@@ -176,9 +177,9 @@ SetNodeHealthState(char *nodeName, uint16 nodePort, int healthState)
 		appendStringInfo(&query,
 						 "UPDATE " AUTO_FAILOVER_NODE_TABLE
 						 "   SET health = %d, healthchecktime = now() "
-						 " WHERE nodename = %s AND nodeport = %d",
+						 " WHERE nodehost = %s AND nodeport = %d",
 						 healthState,
-						 quote_literal_cstr(nodeName),
+						 quote_literal_cstr(nodeHost),
 						 nodePort);
 
 		pgstat_report_activity(STATE_RUNNING, query.data);

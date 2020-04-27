@@ -254,7 +254,7 @@ fsm_init_primary(Keeper *keeper)
 			if (!pghba_enable_lan_cidr(&keeper->postgres.sqlClient,
 									   keeper->config.pgSetup.ssl.active,
 									   HBA_DATABASE_ALL, NULL,
-									   keeper->config.nodename,
+									   keeper->config.hostname,
 									   NULL, DEFAULT_AUTH_METHOD, NULL))
 			{
 				log_error("Failed to grant local network connections in HBA");
@@ -369,11 +369,11 @@ fsm_prepare_replication(Keeper *keeper)
 {
 	KeeperConfig *config = &(keeper->config);
 
-	if (IS_EMPTY_STRING_BUFFER(config->nodename))
+	if (IS_EMPTY_STRING_BUFFER(config->hostname))
 	{
 		/* developer error, this should never happen */
 		log_fatal(
-			"BUG: nodename should be set before calling fsm_prepare_replication");
+			"BUG: hostname should be set before calling fsm_prepare_replication");
 		return false;
 	}
 
@@ -405,7 +405,7 @@ prepare_replication(Keeper *keeper, NodeState otherNodeState)
 	 */
 	if (!config->monitorDisabled)
 	{
-		char *host = config->nodename;
+		char *host = config->hostname;
 		int port = pgSetup->pgport;
 
 		if (!monitor_get_other_nodes(monitor, host, port,
@@ -701,7 +701,7 @@ fsm_init_standby(Keeper *keeper)
 		return false;
 	}
 
-	if (!standby_init_database(postgres, config->nodename))
+	if (!standby_init_database(postgres, config->hostname))
 	{
 		log_error("Failed initialise standby server, see above for details");
 		return false;
@@ -769,7 +769,7 @@ fsm_rewind_or_init(Keeper *keeper)
 		log_warn("Failed to rewind demoted primary to standby, "
 				 "trying pg_basebackup instead");
 
-		if (!standby_init_database(postgres, config->nodename))
+		if (!standby_init_database(postgres, config->hostname))
 		{
 			log_error("Failed to become standby server, see above for details");
 			return false;
