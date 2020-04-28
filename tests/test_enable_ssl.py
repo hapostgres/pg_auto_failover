@@ -15,6 +15,20 @@ def setup_module():
 def teardown_module():
     cluster.destroy()
 
+    # remove client side setup for certificates too
+    client_top_directory = os.path.join(os.getenv("HOME"), ".postgresql")
+
+    p = subprocess.Popen(["sudo", "-E", '-u', os.getenv("USER"),
+                          'env', 'PATH=' + os.getenv("PATH"),
+                          "rm", "-rf", client_top_directory])
+    assert(p.wait() == 0)
+
+    # also remove certificates we created for the servers
+    p = subprocess.run(["sudo", "-E", '-u', os.getenv("USER"),
+                        'env', 'PATH=' + os.getenv("PATH"),
+                        "rm", "-rf", "/tmp/certs"])
+    assert(p.returncode == 0)
+
 
 def check_ssl_files(node):
     for setting, f in [("ssl_key_file", "server.key"),
@@ -114,7 +128,7 @@ def test_009_enable_maintenance():
 
     assert node2.wait_until_state(target_state="maintenance")
 
-def test_009_enable_ssl_verify_ca_monitor():
+def test_010_enable_ssl_verify_ca_monitor():
     client_top_directory = os.path.join(os.getenv("HOME"), ".postgresql")
 
     cluster.create_root_cert(client_top_directory,
@@ -128,11 +142,24 @@ def test_009_enable_ssl_verify_ca_monitor():
     clientCert.create_signed_certificate(rootKey = cluster.cert.key,
                                          rootCert = cluster.cert.crt)
 
+    # the root user also needs the certificates, tests are connecting with it
+    subprocess.run(["ln", "-s", client_top_directory, "/root/.postgresql"])
+    assert(p.returncode == 0)
+
     # now create and sign the SERVER certificate for the monitor
     monitorCert = cert.SSLCert("/tmp/certs/monitor", "server",
                               "/CN=monitor.pgautofailover.ca")
     monitorCert.create_signed_certificate(rootKey = cluster.cert.key,
                                           rootCert = cluster.cert.crt)
+
+    p = subprocess.run(["ls", "-ld",
+                        client_top_directory,
+                        cluster.cert.crt, cluster.cert.csr, cluster.cert.key,
+                        clientCert.crt, clientCert.csr, clientCert.key,
+                        serverCert.crt, serverCert.csr, serverCert.key],
+                       text=True,
+                       capture_output=True)
+    print("%s" % p.stdout)
 
     monitor.enable_ssl(sslCAFile=cluster.cert.crt,
                        sslServerKey=monitorCert.key,
@@ -141,11 +168,12 @@ def test_009_enable_ssl_verify_ca_monitor():
 
     monitor.sleep(2) # we signaled, wait some time
 
+    eq_(monitor.config_get("ssl.cert_file"), monitorCert.crt)
     eq_(monitor.config_get("ssl.sslmode"), "verify-ca")
     eq_(monitor.pg_config_get('ssl'), "on")
     check_ssl_files(monitor)
 
-def test_010_enable_ssl_verify_ca_primary():
+def test_011_enable_ssl_verify_ca_primary():
     node1Cert = cert.SSLCert("/tmp/certs/node1", "server",
                               "/CN=node1.pgautofailover.ca")
     node1Cert.create_signed_certificate(rootKey = cluster.cert.key,
@@ -161,7 +189,7 @@ def test_010_enable_ssl_verify_ca_primary():
     eq_(node1.pg_config_get('ssl'), "on")
     check_ssl_files(node1)
 
-def test_011_enable_ssl_verify_ca_primary():
+def test_012_enable_ssl_verify_ca_primary():
     node2Cert = cert.SSLCert("/tmp/certs/node2", "server",
                               "/CN=node2.pgautofailover.ca")
     node2Cert.create_signed_certificate(rootKey = cluster.cert.key,
@@ -180,7 +208,7 @@ def test_011_enable_ssl_verify_ca_primary():
     if node2.pgmajor() >= 12:
         assert "sslmode=verify-ca" in node2.pg_config_get('primary_conninfo')
 
-def test_012_disable_maintenance():
+def test_013_disable_maintenance():
     print("Disabling maintenance on node2")
     node2.disable_maintenance()
     assert node2.wait_until_pg_is_running()
