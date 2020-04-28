@@ -708,8 +708,8 @@ cli_enable_ssl(int argc, char **argv)
 
 				if (!reloadedService)
 				{
-					log_error("Failed to reload the pg_autoctl, consider "
-							  "restarting it to implement the SSL changes");
+					log_warn("Failed to reload the pg_autoctl, consider "
+							 "restarting it to implement the SSL changes");
 				}
 			}
 
@@ -732,7 +732,7 @@ cli_enable_ssl(int argc, char **argv)
 			}
 			else
 			{
-				log_info("  pg_autoctl service is not running, changes "
+				log_warn("  pg_autoctl service is not running, changes "
 						 "will only apply at next start of pg_autoctl");
 			}
 
@@ -840,8 +840,8 @@ cli_enable_ssl(int argc, char **argv)
 			}
 			else
 			{
-				log_info("  pg_autoctl service is not running, changes "
-						 "will only apply at next start of pg_autoctl");
+				log_error("  pg_autoctl service is not running, changes "
+						  "will only apply at next start of pg_autoctl");
 			}
 
 			break;
