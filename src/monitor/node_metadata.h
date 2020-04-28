@@ -126,6 +126,7 @@ extern AutoFailoverNode * GetAutoFailoverNodeWithFormationAndName(char *formatio
 extern AutoFailoverNode * GetAutoFailoverNodeWithId(int nodeid,
 													char *nodeHost,
 													int nodePort);
+extern AutoFailoverNode * GetAutoFailoverNodeById(int nodeid);
 extern AutoFailoverNode * OtherNodeInGroup(AutoFailoverNode *pgAutoFailoverNode);
 extern AutoFailoverNode * GetWritableNodeInGroup(char *formationId, int32 groupId);
 extern AutoFailoverNode * TupleToAutoFailoverNode(TupleDesc tupleDescriptor,
@@ -151,6 +152,10 @@ extern void ReportAutoFailoverNodeReplicationSetting(int nodeid,
 													 int nodePort,
 													 int candidatePriority,
 													 bool replicationQuorum);
+extern void UpdateAutoFailoverNodeMetadata(int nodeid,
+										   char *nodeName,
+										   char *nodeHost,
+										   int nodePort);
 extern void RemoveAutoFailoverNode(char *nodeName, int nodePort);
 
 extern SyncState SyncStateFromString(const char *pgsrSyncState);

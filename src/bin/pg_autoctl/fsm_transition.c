@@ -391,50 +391,14 @@ static bool
 prepare_replication(Keeper *keeper, NodeState otherNodeState)
 {
 	KeeperConfig *config = &(keeper->config);
-	Monitor *monitor = &(keeper->monitor);
 	LocalPostgresServer *postgres = &(keeper->postgres);
-	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 
 	int nodeIndex = 0;
 
-	/*
-	 * When using the monitor, now is the time to fetch the otherNode hostname
-	 * and port from it. When the monitor is disabled, it is expected that the
-	 * information has been already filled in keeper->otherNode; see
-	 * `keeper_cli_fsm_assign' for an example of that.
-	 */
-	if (!config->monitorDisabled)
+	if (!keeper_get_other_nodes(keeper, otherNodeState))
 	{
-		char *host = config->hostname;
-		int port = pgSetup->pgport;
-
-		if (!monitor_get_other_nodes(monitor, host, port,
-									 otherNodeState,
-									 &(keeper->otherNodes)))
-		{
-			/* errors have already been logged */
-			return false;
-		}
-
-		if (keeper->otherNodes.count == 0)
-		{
-			if (otherNodeState == ANY_STATE)
-			{
-				log_warn("There's no other node for %s:%d", host, port);
-			}
-			else
-			{
-				/*
-				 * Should we warn about it really? it might be a replication
-				 * setting change that will impact synchronous_standby_names
-				 * and that's all.
-				 */
-				log_warn("There's no other node in state \"%s\" "
-						 "for node %s:%d",
-						 NodeStateToString(otherNodeState),
-						 host, port);
-			}
-		}
+		/* errors have already been logged */
+		return false;
 	}
 
 	/*
@@ -449,17 +413,17 @@ prepare_replication(Keeper *keeper, NodeState otherNodeState)
 		NodeAddress *otherNode = &(keeper->otherNodes.nodes[nodeIndex]);
 		char replicationSlotName[BUFSIZE] = { 0 };
 
-		log_info("Preparing replication for standby node %d (%s:%d)",
-				 otherNode->nodeId, otherNode->host, otherNode->port);
+		log_info("Preparing replication for standby node %s (%s:%d)",
+				 otherNode->name, otherNode->host, otherNode->port);
 
 		if (!primary_add_standby_to_hba(postgres,
 										otherNode->host,
 										config->replication_password))
 		{
-			log_error("Failed to grant access to the standby %d (%s:%d) "
+			log_error("Failed to grant access to the standby %s (%s:%d) "
 					  "by adding relevant lines to pg_hba.conf for the standby "
 					  "hostname and user, see above for details",
-					  otherNode->nodeId, otherNode->host, otherNode->port);
+					  otherNode->name, otherNode->host, otherNode->port);
 			return false;
 		}
 
@@ -467,8 +431,9 @@ prepare_replication(Keeper *keeper, NodeState otherNodeState)
 												  replicationSlotName, BUFSIZE))
 		{
 			/* that's highly unlikely... */
-			log_error("Failed to snprintf replication slot name for node %d",
-					  otherNode->nodeId);
+			log_error("Failed to snprintf replication slot name for node %s "
+					  "(with id %d)",
+					  otherNode->name, otherNode->nodeId);
 			return false;
 		}
 
@@ -589,11 +554,12 @@ fsm_enable_sync_rep(Keeper *keeper)
 
 /*
  * fsm_apply_settings is used when a pg_auto_failover setting has changed, such
- * as number_sync_standbys or node priorities and replication quorum
- * properties.
+ * as number_sync_standbys, node metadata (name, hostname, port), or node
+ * replication settings (candidate priority, replication quorum).
  *
  * So we have to fetch the current synchronous_standby_names setting value from
- * the monitor and apply it (reload) to the current node.
+ * the monitor and apply it (reload) to the current node, and make sure that if
+ * an hostname has changed we add the new hostname to the HBA.
  */
 bool
 fsm_apply_settings(Keeper *keeper)
@@ -603,6 +569,40 @@ fsm_apply_settings(Keeper *keeper)
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
 	char synchronous_standby_names[BUFSIZE] = { 0 };
+
+	int nodeIndex = 0;
+
+	if (!keeper_get_other_nodes(keeper, ANY_STATE))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/*
+	 * Should we fail somewhere in this loop, we return false and fail the
+	 * whole transition. The transition is going to be tried again, and we are
+	 * going to try and add HBA entries and create replication slots again.
+	 * Both operations succeed when their target entry already exists.
+	 *
+	 */
+	for (nodeIndex = 0; nodeIndex < keeper->otherNodes.count; nodeIndex++)
+	{
+		NodeAddress *otherNode = &(keeper->otherNodes.nodes[nodeIndex]);
+
+		log_info("Preparing replication for standby node %s (%s:%d)",
+				 otherNode->name, otherNode->host, otherNode->port);
+
+		if (!primary_add_standby_to_hba(postgres,
+										otherNode->host,
+										config->replication_password))
+		{
+			log_error("Failed to grant access to the standby %s (%s:%d) "
+					  "by adding relevant lines to pg_hba.conf for the standby "
+					  "hostname and user, see above for details",
+					  otherNode->name, otherNode->host, otherNode->port);
+			return false;
+		}
+	}
 
 	/* get synchronous_standby_names value from the monitor */
 	if (!config->monitorDisabled)

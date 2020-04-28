@@ -142,31 +142,6 @@ CREATE TABLE pgautofailover.event
 
 GRANT SELECT ON ALL TABLES IN SCHEMA pgautofailover TO autoctl_node;
 
-CREATE FUNCTION pgautofailover.update_node_metadata
- (
-    IN node_id   bigint,
-    IN node_name text,
-    IN node_host text,
-    IN node_port int,
-   OUT node_id   bigint,
-   OUT name      text,
-   OUT host      text,
-   OUT port      int
- )
-RETURNS record LANGUAGE SQL STRICT SECURITY DEFINER
-AS $$
-      update pgautofailover.node
-         set nodename = coalesce(node_name, nodename),
-             nodehost = coalesce(node_host, nodehost),
-             nodeport = coalesce(node_port, nodeport)
-       where nodeid = node_id
-   returning nodeid, nodename, nodehost, nodeport;
-$$;
-
-grant execute on function pgautofailover.update_node_metadata(bigint,text,text,int)
-   to autoctl_node;
-
-
 CREATE FUNCTION pgautofailover.register_node
  (
     IN formation_id         text,
@@ -216,6 +191,19 @@ AS 'MODULE_PATHNAME', $$node_active$$;
 grant execute on function
       pgautofailover.node_active(text,text,int,int,int,
                           pgautofailover.replication_state,bool,pg_lsn,text)
+   to autoctl_node;
+
+CREATE FUNCTION pgautofailover.update_node_metadata
+ (
+    IN node_id   bigint,
+    IN node_name text,
+    IN node_host text,
+    IN node_port int
+ )
+RETURNS boolean LANGUAGE C SECURITY DEFINER
+AS 'MODULE_PATHNAME', $$update_node_metadata$$;
+
+grant execute on function pgautofailover.update_node_metadata(bigint,text,text,int)
    to autoctl_node;
 
 CREATE FUNCTION pgautofailover.get_nodes

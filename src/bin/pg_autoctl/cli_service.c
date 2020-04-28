@@ -41,9 +41,12 @@ static void cli_service_stop(int argc, char **argv);
 CommandLine service_run_command =
 	make_command("run",
 				 "Run the pg_autoctl service (monitor or keeper)",
-				 CLI_PGDATA_USAGE,
-				 CLI_PGDATA_OPTION,
-				 cli_getopt_pgdata,
+				 " [ --pgdata --nodename --hostname --pgport ] ",
+				 "  --pgdata      path to data directory\n"
+				 "  --nodename    pg_auto_failover node name\n"
+				 "  --hostname    hostname used to connect from other nodes\n"
+				 "  --pgport      PostgreSQL's port number\n",
+				 cli_node_metadata_getopts,
 				 cli_service_run);
 
 CommandLine service_stop_command =
@@ -114,6 +117,7 @@ static void
 cli_keeper_run(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
+	KeeperConfig *config = &(keeper.config);
 	pid_t pid = 0;
 
 	bool missingPgdataIsOk = true;
@@ -131,8 +135,7 @@ cli_keeper_run(int argc, char **argv)
 	 * that loop, we need to install our signal handlers and pidfile prior to
 	 * getting there.
 	 */
-	if (!keeper_config_read_file_skip_pgsetup(&(keeper.config),
-											  monitorDisabledIsOk))
+	if (!keeper_config_read_file_skip_pgsetup(config, monitorDisabledIsOk))
 	{
 		/* errors have already been logged. */
 		exit(EXIT_CODE_BAD_CONFIG);
@@ -145,7 +148,7 @@ cli_keeper_run(int argc, char **argv)
 		exit(EXIT_CODE_KEEPER);
 	}
 
-	if (!keeper_config_pgsetup_init(&(keeper.config),
+	if (!keeper_config_pgsetup_init(config,
 									missingPgdataIsOk,
 									pgIsNotRunningIsOk))
 	{
@@ -153,7 +156,7 @@ cli_keeper_run(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	if (!keeper_init(&keeper, &keeper.config))
+	if (!keeper_init(&keeper, config))
 	{
 		log_fatal("Failed to initialise keeper, see above for details");
 		exit(EXIT_CODE_PGCTL);
@@ -165,10 +168,35 @@ cli_keeper_run(int argc, char **argv)
 		 * At the moment, we have nothing to do here. Later we might want to
 		 * open an HTTPd service and wait for API calls.
 		 */
-		(void) service_stop(&(keeper.config.pathnames));
+		(void) service_stop(&(config->pathnames));
 	}
 	else
 	{
+		Monitor *monitor = &(keeper.monitor);
+		KeeperConfig oldConfig = *config; /* copy the config before changes */
+
+		/*
+		 * Now that we have loaded the configuration file, apply the command
+		 * line options on top of it, giving them priority over the config.
+		 */
+		if (!keeper_config_merge_options(config, &keeperOptions))
+		{
+			/* errors have been logged already */
+			exit(EXIT_CODE_BAD_CONFIG);
+		}
+
+		if (!monitor_init(monitor, config->monitor_pguri))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		if (!keeper_set_node_metadata(&keeper, &oldConfig))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_MONITOR);
+		}
+
 		/* Start with a monitor: implement the node active loop */
 		if (!keeper_check_monitor_extension_version(&keeper))
 		{

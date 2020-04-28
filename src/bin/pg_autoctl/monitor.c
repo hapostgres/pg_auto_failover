@@ -2239,23 +2239,27 @@ monitor_synchronous_standby_names(Monitor *monitor,
  * update command.
  */
 bool
-monitor_set_nodename(Monitor *monitor, int nodeId, const char *nodename)
+monitor_update_node_metadata(Monitor *monitor, int nodeId,
+							 const char *nodename,
+							 const char *hostname,
+							 int port)
 {
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BOOL, false };
 	PGSQL *pgsql = &monitor->pgsql;
-	const char *sql = "SELECT * FROM pgautofailover.set_node_nodename($1, $2)";
-	int paramCount = 2;
-	Oid paramTypes[2] = { INT8OID, TEXTOID };
-	const char *paramValues[2];
-
-	NodeAddress node = { 0 };
-	NodeAddressParseContext parseContext = { { 0 }, &node, false };
+	const char *sql =
+		"SELECT * FROM pgautofailover.update_node_metadata($1, $2, $3, $4)";
+	int paramCount = 4;
+	Oid paramTypes[4] = { INT8OID, TEXTOID, TEXTOID, INT4OID };
+	const char *paramValues[4];
 
 	paramValues[0] = intToString(nodeId).strValue;
 	paramValues[1] = nodename;
+	paramValues[2] = hostname;
+	paramValues[3] = intToString(port).strValue;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
-								   &parseContext, parseNodeResult))
+								   &context, &parseSingleValueResult))
 	{
 		log_error("Failed to set_node_nodename of node %d from the monitor",
 				  nodeId);
@@ -2265,13 +2269,13 @@ monitor_set_nodename(Monitor *monitor, int nodeId, const char *nodename)
 	/* disconnect from PostgreSQL now */
 	pgsql_finish(&monitor->pgsql);
 
-	if (!parseContext.parsedOK)
+	if (!context.parsedOk)
 	{
 		log_error(
-			"Failed to set node %d nodename to \"%s\" on the monitor "
+			"Failed to set node %d metadata on the monitor "
 			"because it returned an unexpected result. "
 			"See previous line for details.",
-			nodeId, nodename);
+			nodeId);
 		return false;
 	}
 

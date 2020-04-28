@@ -318,9 +318,6 @@ ini_option_to_string(IniOption *option, char *dest, size_t size)
 }
 
 
-#define streq(x, y) ((x != NULL) && (y != NULL) && ( \
-						 strcmp(x, y) == 0))
-
 /*
  * write_ini_to_stream writes in-memory INI structure to given STREAM in the
  * INI format specifications.

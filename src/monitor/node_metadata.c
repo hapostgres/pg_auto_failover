@@ -576,7 +576,7 @@ GetAutoFailoverNodeWithId(int nodeid, char *nodeHost, int nodePort)
 	MemoryContext callerContext = CurrentMemoryContext;
 
 	Oid argTypes[] = {
-		INT4OID, /* nodeport */
+		INT4OID, /* nodeid */
 		TEXTOID, /* nodehost */
 		INT4OID  /* nodeport */
 	};
@@ -592,6 +592,57 @@ GetAutoFailoverNodeWithId(int nodeid, char *nodeHost, int nodePort)
 	const char *selectQuery =
 		SELECT_ALL_FROM_AUTO_FAILOVER_NODE_TABLE
 		" WHERE nodeid = $1 and nodehost = $2 AND nodeport = $3";
+
+	SPI_connect();
+
+	spiStatus = SPI_execute_with_args(selectQuery, argCount, argTypes, argValues,
+									  NULL, false, 1);
+	if (spiStatus != SPI_OK_SELECT)
+	{
+		elog(ERROR, "could not select from " AUTO_FAILOVER_NODE_TABLE);
+	}
+
+	if (SPI_processed > 0)
+	{
+		MemoryContext spiContext = MemoryContextSwitchTo(callerContext);
+		pgAutoFailoverNode = TupleToAutoFailoverNode(SPI_tuptable->tupdesc,
+													 SPI_tuptable->vals[0]);
+		MemoryContextSwitchTo(spiContext);
+	}
+	else
+	{
+		pgAutoFailoverNode = NULL;
+	}
+
+	SPI_finish();
+
+	return pgAutoFailoverNode;
+}
+
+
+/*
+ * GetAutoFailoverNodeWithId returns a single AutoFailover
+ * identified by node id, node name and node port.
+ */
+AutoFailoverNode *
+GetAutoFailoverNodeById(int nodeid)
+{
+	AutoFailoverNode *pgAutoFailoverNode = NULL;
+	MemoryContext callerContext = CurrentMemoryContext;
+
+	Oid argTypes[] = {
+		INT4OID /* nodeid */
+	};
+
+	Datum argValues[] = {
+		Int32GetDatum(nodeid)   /* nodeid */
+	};
+	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
+	int spiStatus = 0;
+
+	const char *selectQuery =
+		SELECT_ALL_FROM_AUTO_FAILOVER_NODE_TABLE
+		" WHERE nodeid = $1";
 
 	SPI_connect();
 
@@ -938,6 +989,54 @@ ReportAutoFailoverNodeReplicationSetting(int nodeid,
 		"UPDATE " AUTO_FAILOVER_NODE_TABLE " SET "
 										   "candidatepriority = $1, replicationquorum = $2 "
 										   "WHERE nodeid = $3 and nodehost = $4 AND nodeport = $5";
+
+	SPI_connect();
+
+	spiStatus = SPI_execute_with_args(updateQuery,
+									  argCount, argTypes, argValues,
+									  NULL, false, 0);
+
+	if (spiStatus != SPI_OK_UPDATE)
+	{
+		elog(ERROR, "could not update " AUTO_FAILOVER_NODE_TABLE);
+	}
+
+	SPI_finish();
+}
+
+
+/*
+ * UpdateAutoFailoverNodeMetadata updates a node registration to a possibly new
+ * nodeName, nodeHost, and nodePort. Those are NULL (or zero) when not changed.
+ *
+ * We use SPI to automatically handle triggers, function calls, etc.
+ */
+void
+UpdateAutoFailoverNodeMetadata(int nodeid,
+							   char *nodeName,
+							   char *nodeHost,
+							   int nodePort)
+{
+	Oid argTypes[] = {
+		INT4OID,                 /* nodeid */
+		TEXTOID,                 /* nodename */
+		TEXTOID,                 /* nodehost */
+		INT4OID                  /* nodeport */
+	};
+
+	Datum argValues[] = {
+		Int32GetDatum(nodeid),                /* nodeid */
+		CStringGetTextDatum(nodeName),        /* nodename */
+		CStringGetTextDatum(nodeHost),        /* nodehost */
+		Int32GetDatum(nodePort)               /* nodeport */
+	};
+	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
+	int spiStatus = 0;
+
+	const char *updateQuery =
+		"UPDATE " AUTO_FAILOVER_NODE_TABLE
+		" SET nodename = $2, nodehost = $3, nodeport = $4 "
+		"WHERE nodeid = $1";
 
 	SPI_connect();
 

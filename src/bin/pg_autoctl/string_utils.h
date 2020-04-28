@@ -11,6 +11,10 @@
 
 #include <stdbool.h>
 
+/* that defines the streq() macro */
+#include "commandline.h"
+
+#define strneq(a, b) (a != NULL && b != NULL && strcmp(a, b) != 0)
 
 /* maximum decimal int64 length with minus and NUL */
 #define INTSTRING_MAX_DIGITS 21

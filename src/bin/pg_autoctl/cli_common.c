@@ -1491,3 +1491,168 @@ cli_pg_autoctl_reload(const char *pidfile)
 
 	return true;
 }
+
+
+/*
+ * cli_node_metadata_getopts parses the command line options for the
+ * pg_autoctl set node metadata command.
+ */
+int
+cli_node_metadata_getopts(int argc, char **argv)
+{
+	KeeperConfig options = { 0 };
+	int c, option_index = 0, errors = 0;
+	int verboseCount = 0;
+
+	static struct option long_options[] = {
+		{ "pgdata", required_argument, NULL, 'D' },
+		{ "nodename", required_argument, NULL, 'n' },
+		{ "hostname", required_argument, NULL, 'h' },
+		{ "pgport", required_argument, NULL, 'p' },
+		{ "json", no_argument, NULL, 'J' },
+		{ "version", no_argument, NULL, 'V' },
+		{ "verbose", no_argument, NULL, 'v' },
+		{ "quiet", no_argument, NULL, 'q' },
+		{ "help", no_argument, &help_flag, 0 },
+		{ NULL, 0, NULL, 0 }
+	};
+
+	/* set default values for our options, when we have some */
+	options.groupId = -1;
+	options.network_partition_timeout = -1;
+	options.prepare_promotion_catchup = -1;
+	options.prepare_promotion_walreceiver = -1;
+	options.postgresql_restart_failure_timeout = -1;
+	options.postgresql_restart_failure_max_retries = -1;
+
+	strlcpy(options.formation, "default", NAMEDATALEN);
+
+	optind = 0;
+
+	while ((c = getopt_long(argc, argv, "D:n:h:p:Vvqh",
+							long_options, &option_index)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(options.pgSetup.pgdata, optarg, MAXPGPATH);
+				log_trace("--pgdata %s", options.pgSetup.pgdata);
+				break;
+			}
+
+			case 'h':
+			{
+				/* { "hostname", required_argument, NULL, 'h' } */
+				strlcpy(options.hostname, optarg, _POSIX_HOST_NAME_MAX);
+				log_trace("--hostname %s", options.hostname);
+				break;
+			}
+
+			case 'n':
+			{
+				/* { "nodename", required_argument, NULL, 'n' } */
+				strlcpy(options.nodename, optarg, _POSIX_HOST_NAME_MAX);
+				log_trace("--nodename %s", options.nodename);
+				break;
+			}
+
+			case 'p':
+			{
+				/* { "pgport", required_argument, NULL, 'p' } */
+				if (!stringToInt(optarg, &options.pgSetup.pgport))
+				{
+					log_error("Failed to parse --pgport number \"%s\"",
+							  optarg);
+					errors++;
+				}
+				log_trace("--pgport %d", options.pgSetup.pgport);
+				break;
+			}
+
+
+			case 'V':
+			{
+				/* keeper_cli_print_version prints version and exits. */
+				keeper_cli_print_version(argc, argv);
+				break;
+			}
+
+			case 'v':
+			{
+				++verboseCount;
+				switch (verboseCount)
+				{
+					case 1:
+					{
+						log_set_level(LOG_INFO);
+						break;
+					}
+
+					case 2:
+					{
+						log_set_level(LOG_DEBUG);
+						break;
+					}
+
+					default:
+					{
+						log_set_level(LOG_TRACE);
+						break;
+					}
+				}
+				break;
+			}
+
+			case 'q':
+			{
+				log_set_level(LOG_ERROR);
+				break;
+			}
+
+			case 'J':
+			{
+				outputJSON = true;
+				log_trace("--json");
+				break;
+			}
+
+			case 0:
+			{
+				if (help_flag)
+				{
+					commandline_help(stderr);
+					exit(EXIT_CODE_QUIT);
+				}
+			}
+
+			default:
+			{
+				/* getopt_long already wrote an error message */
+				errors++;
+			}
+		}
+	}
+
+	if (errors > 0)
+	{
+		commandline_help(stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
+	{
+		get_env_pgdata_or_exit(options.pgSetup.pgdata);
+	}
+
+	if (!keeper_config_set_pathnames_from_pgdata(&(options.pathnames),
+												 options.pgSetup.pgdata))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	keeperOptions = options;
+
+	return optind;
+}

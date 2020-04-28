@@ -63,6 +63,7 @@ PG_FUNCTION_INFO_V1(stop_maintenance);
 PG_FUNCTION_INFO_V1(set_node_candidate_priority);
 PG_FUNCTION_INFO_V1(set_node_replication_quorum);
 PG_FUNCTION_INFO_V1(synchronous_standby_names);
+PG_FUNCTION_INFO_V1(update_node_metadata);
 
 
 /*
@@ -1735,4 +1736,139 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 			PG_RETURN_TEXT_P(cstring_to_text(sbnames->data));
 		}
 	}
+}
+
+
+/*
+ * update_node_metadata allows to update a node nodename, hostname, and port.
+ * Once the monitor entry for the node has been updated, we change the PRIMARY
+ * to APPLY_SETTINGS state so that it may update its HBA rule set.
+ *
+ * If the primary is in WAIT_PRIMARY state, if standby hostname:port changes
+ * (probably to fix a mistake or adjust to a new network configuration), then
+ * the current way forward is to remove the standby node and add in back again.
+ */
+Datum
+update_node_metadata(PG_FUNCTION_ARGS)
+{
+	int32 nodeid = 0;
+	char *nodeName = NULL;
+	char *nodeHost = NULL;
+	int32 nodePort = 0;
+
+	char message[BUFSIZE] = { 0 };
+
+	AutoFailoverNode *currentNode = NULL;
+	List *nodesGroupList = NIL;
+	int nodesCount = 0;
+
+	checkPgAutoFailoverVersion();
+
+	if (PG_ARGISNULL(0))
+	{
+		ereport(ERROR,
+				(errmsg("udpate_node_metadata requires a non-null nodeid")));
+	}
+	else
+	{
+		nodeid = PG_GETARG_INT32(0);
+	}
+
+	currentNode = GetAutoFailoverNodeById(nodeid);
+
+	if (currentNode == NULL)
+	{
+		ereport(ERROR, (errmsg("node %d is not registered", nodeid)));
+	}
+
+	LockFormation(currentNode->formationId, ShareLock);
+	LockNodeGroup(currentNode->formationId, currentNode->groupId, ExclusiveLock);
+
+	/*
+	 * When arguments are NULL, replace them with the current value of the node
+	 * metadata, so that the UPDATE statement then is a noop on that field.
+	 */
+	if (PG_ARGISNULL(1))
+	{
+		nodeName = currentNode->nodeName;
+	}
+	else
+	{
+		text *nodeNameText = PG_GETARG_TEXT_P(1);
+
+		nodeName = text_to_cstring(nodeNameText);
+	}
+
+	if (PG_ARGISNULL(2))
+	{
+		nodeHost = currentNode->nodeHost;
+	}
+	else
+	{
+		text *nodeHostText = PG_GETARG_TEXT_P(2);
+
+		nodeHost = text_to_cstring(nodeHostText);
+	}
+
+	if (PG_ARGISNULL(3))
+	{
+		nodePort = currentNode->nodePort;
+	}
+	else
+	{
+		nodePort = PG_GETARG_INT32(3);
+	}
+
+	nodesGroupList =
+		AutoFailoverNodeGroup(currentNode->formationId, currentNode->groupId);
+	nodesCount = list_length(nodesGroupList);
+
+	UpdateAutoFailoverNodeMetadata(currentNode->nodeId,
+								   nodeName, nodeHost, nodePort);
+
+	/* we need to see the result of that operation in the next query */
+	CommandCounterIncrement();
+
+	/* when we have more than one node, fetch the primary */
+	if (nodesCount == 1)
+	{
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Updating node id %d name to \"%s\", hostname to \"%s\", "
+			"and port to %d",
+			currentNode->nodeId, nodeName, nodeHost, nodePort);
+	}
+	else
+	{
+		AutoFailoverNode *primaryNode =
+			GetPrimaryNodeInGroup(currentNode->formationId,
+								  currentNode->groupId);
+
+		if (primaryNode == NULL)
+		{
+			/* maybe we could use an Assert() instead? */
+			ereport(ERROR,
+					(errmsg("Couldn't find the primary node in formation \"%s\", "
+							"group %d",
+							currentNode->formationId,
+							currentNode->groupId)));
+		}
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of %s (%s:%d) to apply_settings "
+			"after updating medadata for node %s (%s:%d) to %s (%s:%d).",
+			primaryNode->nodeName,
+			primaryNode->nodeHost,
+			primaryNode->nodePort,
+			currentNode->nodeName,
+			currentNode->nodeHost,
+			currentNode->nodePort,
+			nodeName, nodeHost, nodePort);
+
+		SetNodeGoalState(primaryNode->nodeHost, primaryNode->nodePort,
+						 REPLICATION_STATE_APPLY_SETTINGS);
+	}
+
+	PG_RETURN_BOOL(true);
 }

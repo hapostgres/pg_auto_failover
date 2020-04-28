@@ -142,7 +142,9 @@ cli_create_config(Keeper *keeper, KeeperConfig *config)
 	 */
 	if (file_exists(config->pathnames.config))
 	{
+		Monitor *monitor = &(keeper->monitor);
 		KeeperConfig options = *config;
+		KeeperConfig oldConfig = { 0 };
 
 		if (!keeper_config_read_file(config,
 									 missingPgdataIsOk,
@@ -154,14 +156,37 @@ cli_create_config(Keeper *keeper, KeeperConfig *config)
 			exit(EXIT_CODE_BAD_CONFIG);
 		}
 
+		oldConfig = *config;
+
 		/*
 		 * Now that we have loaded the configuration file, apply the command
 		 * line options on top of it, giving them priority over the config.
 		 */
+		if (!monitor_init(monitor, config->monitor_pguri))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
 		if (!keeper_config_merge_options(config, &options))
 		{
 			/* errors have been logged already */
 			exit(EXIT_CODE_BAD_CONFIG);
+		}
+
+		/*
+		 * If we have registerd to the monitor already, then we need to check
+		 * if the user is providing new --nodename, --hostname, or --pgport
+		 * arguments. After all, they may change their mind of have just
+		 * realized that the --pgport they wanted to use is already in use.
+		 */
+		if (file_exists(config->pathnames.state) && !config->monitorDisabled)
+		{
+			if (!keeper_set_node_metadata(keeper, &oldConfig))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_MONITOR);
+			}
 		}
 	}
 	else
@@ -276,7 +301,7 @@ cli_create_postgres_getopts(int argc, char **argv)
 		{ "candidate-priority", required_argument, NULL, 'P' },
 		{ "replication-quorum", required_argument, NULL, 'r' },
 		{ "run", no_argument, NULL, 'x' },
-		{ "help", no_argument, NULL, 0 },
+		{ "help", no_argument, &help_flag, 0 },
 		{ "no-ssl", no_argument, NULL, 'N' },
 		{ "ssl-self-signed", no_argument, NULL, 's' },
 		{ "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG },
@@ -289,7 +314,7 @@ cli_create_postgres_getopts(int argc, char **argv)
 
 	int optind =
 		cli_create_node_getopts(argc, argv, long_options,
-								"C:D:H:p:l:U:A:Sd:h:n:f:m:MRVvqhP:r:xsN",
+								"C:D:H:p:l:U:A:Sd:h:n:f:m:MRVvqh:P:r:xsN",
 								&options);
 
 	/* publish our option parsing in the global variable */

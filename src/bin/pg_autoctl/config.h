@@ -15,6 +15,7 @@
 
 #include "pgctl.h"
 #include "pgsql.h"
+#include "string_utils.h"
 
 #define KEEPER_ROLE "keeper"
 #define MONITOR_ROLE "monitor"
@@ -73,9 +74,6 @@ bool SetPidFilePath(ConfigFilePaths *pathnames, const char *pgdata);
 
 pgAutoCtlNodeRole ProbeConfigurationFileRole(const char *filename);
 
-
-#define strneq(x, y) \
-	((x != NULL) && (y != NULL) && (strcmp(x, y) != 0))
 
 bool config_accept_new_ssloptions(PostgresSetup *pgSetup,
 								  PostgresSetup *newPgSetup);

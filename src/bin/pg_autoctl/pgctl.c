@@ -458,9 +458,6 @@ ensure_default_settings_file_exists(const char *configFilePath,
  * compile time, some of them can be provided by our users, such as
  * listen_addresses, port, and SSL related configuration parameters.
  */
-
-#define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
-
 static bool
 prepare_guc_settings_from_pgsetup(const char *configFilePath,
 								  PQExpBuffer config,
