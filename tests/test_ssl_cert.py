@@ -57,26 +57,24 @@ def test_000_create_monitor():
     # authority
     client_top_directory = os.path.join(os.getenv("HOME"), ".postgresql")
 
-    server_csr, server_key, server_crt = \
-        cert.create_signed_certificate("/tmp/certs/monitor",
-                                       rootKey = cluster.cert.key,
-                                       rootCert = cluster.cert.crt,
-                                       basename = "server",
-                                       CN = "/CN=monitor.pgautofailover.ca")
-
     # now create and sign the CLIENT certificate
-    postgresql_csr, postgresql_key, postgresql_crt = \
-        cert.create_signed_certificate(client_top_directory,
-                                       rootKey = cluster.cert.key,
-                                       rootCert = cluster.cert.crt,
-                                       basename = "postgresql",
-                                       CN = "/CN=autoctl_node")
+    clientCert = cert.SSLCert(client_top_directory,
+                              basename = "postgresql",
+                              CN = "/CN=autoctl_node")
+    clientCert.create_signed_certificate(rootKey = cluster.cert.key,
+                                         rootCert = cluster.cert.crt)
+
+    # now create and sign the SERVER certificate for the monitor
+    serverCert = cert.SSLCert("/tmp/certs/monitor", "server",
+                              "/CN=monitor.pgautofailover.ca")
+    serverCert.create_signed_certificate(rootKey = cluster.cert.key,
+                                         rootCert = cluster.cert.crt)
 
     p = subprocess.run(["ls", "-ld",
                         client_top_directory,
                         cluster.cert.crt, cluster.cert.csr, cluster.cert.key,
-                        postgresql_crt, postgresql_csr, postgresql_key,
-                        server_crt, server_csr, server_key],
+                        clientCert.crt, clientCert.csr, clientCert.key,
+                        serverCert.crt, serverCert.csr, serverCert.key],
                        text=True,
                        capture_output=True)
     print("%s" % p.stdout)
@@ -92,8 +90,8 @@ def test_000_create_monitor():
                                      authMethod="skip",
                                      sslMode="verify-ca",
                                      sslCAFile=cluster.cert.crt,
-                                     sslServerKey=server_key,
-                                     sslServerCert=server_crt)
+                                     sslServerKey=serverCert.key,
+                                     sslServerCert=serverCert.crt)
     monitor.wait_until_pg_is_running()
 
     with open(os.path.join("/tmp/cert/monitor", "pg_hba.conf"), 'a') as hba:
@@ -125,20 +123,18 @@ def test_001_init_primary():
     # Create a server certificate signed by the root Certificate Authority
     certs_dir = "/tmp/certs/node1"
 
-    server_csr, server_key, server_crt = \
-        cert.create_signed_certificate(certs_dir,
-                                       rootKey = cluster.cert.key,
-                                       rootCert = cluster.cert.crt,
-                                       basename = "server",
-                                       CN = "/CN=node1.pgautofailover.ca")
+    serverCert = cert.SSLCert("/tmp/certs/node1", "server",
+                              "/CN=node1.pgautofailover.ca")
+    serverCert.create_signed_certificate(rootKey = cluster.cert.key,
+                                         rootCert = cluster.cert.crt)
 
     # Now create the server with the certificates
     node1 = cluster.create_datanode("/tmp/cert/node1",
                                     authMethod="skip",
                                     sslMode="verify-ca",
                                     sslCAFile=cluster.cert.crt,
-                                    sslServerKey=server_key,
-                                    sslServerCert=server_crt)
+                                    sslServerKey=serverCert.key,
+                                    sslServerCert=serverCert.crt)
     node1.create(level='-vv')
 
     with open(os.path.join("/tmp/cert/node1", "pg_hba.conf"), 'a') as hba:
@@ -170,23 +166,18 @@ def test_003_init_secondary():
     # Create a server certificate signed by the root Certificate Authority
     certs_dir = "/tmp/certs/node2"
 
-    root_key = os.path.join(os.getenv("HOME"), ".postgresql", "root.key")
-    root_crt = os.path.join(os.getenv("HOME"), ".postgresql", "root.crt")
-
-    server_csr, server_key, server_crt = \
-        cert.create_signed_certificate(certs_dir,
-                                       rootKey = cluster.cert.key,
-                                       rootCert = cluster.cert.crt,
-                                       basename = "server",
-                                       CN = "/CN=node2.pgautofailover.ca")
+    serverCert = cert.SSLCert("/tmp/certs/node2", "server",
+                              "/CN=node2.pgautofailover.ca")
+    serverCert.create_signed_certificate(rootKey = cluster.cert.key,
+                                         rootCert = cluster.cert.crt)
 
     # Now create the server with the certificates
     node2 = cluster.create_datanode("/tmp/cert/node2",
                                     authMethod="skip",
                                     sslMode="verify-ca",
                                     sslCAFile=cluster.cert.crt,
-                                    sslServerKey=server_key,
-                                    sslServerCert=server_crt)
+                                    sslServerKey=serverCert.key,
+                                    sslServerCert=serverCert.crt)
     node2.create(level='-vv')
 
     with open(os.path.join("/tmp/cert/node2", "pg_hba.conf"), 'a') as hba:
