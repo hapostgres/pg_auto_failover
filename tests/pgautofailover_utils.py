@@ -9,6 +9,8 @@ import subprocess
 import datetime as dt
 from enum import Enum
 
+import ssl_cert_utils as cert
+
 COMMAND_TIMEOUT = network.COMMAND_TIMEOUT
 POLLING_INTERVAL = 0.1
 STATE_CHANGE_TIMEOUT = 90
@@ -175,6 +177,10 @@ class Cluster:
 
         self.flush_output()
         return proc.communicate(timeout=timeout - full_secs)
+
+    def create_root_cert(self, directory, basename="root", CN="root"):
+        self.cert = cert.SSLCert(directory, basename, CN)
+        self.cert.create_root_cert()
 
 
 class PGNode:
