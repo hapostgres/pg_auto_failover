@@ -32,16 +32,18 @@ def teardown_module():
     assert(p.returncode == 0)
 
 
-def check_ssl_files(node, in_datadir=True):
-    for setting, f in [("ssl_key_file", "server.key"),
-                       ("ssl_cert_file", "server.crt")]:
-        path_in_setting = node.pg_config_get(setting)
-        assert path_in_setting.endswith(f), f"{path_in_setting} does not end with {f}"
-        assert os.path.isfile(path_in_setting)
-        if in_datadir:
-            datadir_path = os.path.join(node.datadir, f)
-            assert os.path.isfile(datadir_path)
-            eq_(path_in_setting, datadir_path)
+def check_ssl_files(node, SSLCert=None):
+    if SSLCert is not None:
+        key = SSLCert.key
+        crt = SSLCert.crt
+    else:
+        key = os.path.join(node.datadir, "server.key")
+        crt = os.path.join(node.datadir, "server.crt")
+
+    for setting, file_path in [("ssl_key_file", key),
+                               ("ssl_cert_file", crt)]:
+        assert os.path.isfile(file_path)
+        eq_(node.pg_config_get(setting), file_path)
 
 
 def test_000_create_monitor():
@@ -200,7 +202,7 @@ def test_010_enable_ssl_verify_ca_monitor():
     eq_(monitor.config_get("ssl.cert_file"), monitorCert.crt)
     eq_(monitor.config_get("ssl.sslmode"), "verify-ca")
     eq_(monitor.pg_config_get('ssl'), "on")
-    check_ssl_files(monitor, in_datadir=False)
+    check_ssl_files(monitor, monitorCert)
 
 def test_011_enable_ssl_verify_ca_primary():
     node1Cert = cert.SSLCert("/tmp/certs/node1", "server",
@@ -216,7 +218,7 @@ def test_011_enable_ssl_verify_ca_primary():
     eq_(node1.config_get("ssl.sslmode"), "verify-ca")
     assert "sslmode=verify-ca" in node1.config_get("pg_autoctl.monitor")
     eq_(node1.pg_config_get('ssl'), "on")
-    check_ssl_files(node1, in_datadir=False)
+    check_ssl_files(node1, node1Cert)
 
 def test_012_enable_ssl_verify_ca_primary():
     node2Cert = cert.SSLCert("/tmp/certs/node2", "server",
@@ -232,7 +234,7 @@ def test_012_enable_ssl_verify_ca_primary():
     node2.wait_until_pg_is_running()
 
     eq_(node2.pg_config_get('ssl'), "on")
-    check_ssl_files(node2, in_datadir=False)
+    check_ssl_files(node2, node2Cert)
 
     if node2.pgmajor() >= 12:
         assert "sslmode=verify-ca" in node2.pg_config_get('primary_conninfo')
