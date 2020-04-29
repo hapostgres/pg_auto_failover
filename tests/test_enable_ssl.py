@@ -1,5 +1,6 @@
 import pgautofailover_utils as pgautofailover
 import ssl_cert_utils as cert
+import subprocess
 from nose.tools import *
 
 import os
