@@ -211,7 +211,10 @@ def test_011_enable_ssl_verify_ca_primary():
                                         rootCert = cluster.cert.crt)
 
     node1.stop_pg_autoctl()
-    node1.enable_ssl(sslSelfSigned=True, sslMode="verify-ca")
+    node1.enable_ssl(sslCAFile = cluster.cert.crt,
+                     sslServerKey = node1Cert.key,
+                     sslServerCert = node1Cert.crt,
+                     sslMode="verify-ca")
     node1.run()
     node1.sleep(2)
 
@@ -226,7 +229,10 @@ def test_012_enable_ssl_verify_ca_primary():
     node2Cert.create_signed_certificate(rootKey = cluster.cert.key,
                                         rootCert = cluster.cert.crt)
 
-    node2.enable_ssl(sslSelfSigned=True, sslMode="require")
+    node2.enable_ssl(sslCAFile = cluster.cert.crt,
+                     sslServerKey = node2Cert.key,
+                     sslServerCert = node2Cert.crt,
+                     sslMode="verify-ca")
     node2.sleep(5)
 
     eq_(node2.config_get("ssl.sslmode"), "verify-ca")
