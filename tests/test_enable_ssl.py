@@ -1,4 +1,5 @@
 import pgautofailover_utils as pgautofailover
+import ssl_cert_utils as cert
 from nose.tools import *
 
 import os
@@ -131,22 +132,45 @@ def test_009_enable_maintenance():
 def test_010_enable_ssl_verify_ca_monitor():
     client_top_directory = os.path.join(os.getenv("HOME"), ".postgresql")
 
+    print()
+    print("Creating cluster root certificate")
     cluster.create_root_cert(client_top_directory,
                              basename = "root",
                              CN = "/CN=root.pgautofailover.ca")
 
+    p = subprocess.run(["ls", "-ld",
+                        client_top_directory,
+                        cluster.cert.crt, cluster.cert.csr, cluster.cert.key],
+                       text=True,
+                       capture_output=True)
+    print("%s" % p.stdout)
+
     # now create and sign the CLIENT certificate
+    print("Creating cluster client certificate")
     clientCert = cert.SSLCert(client_top_directory,
                               basename = "postgresql",
                               CN = "/CN=autoctl_node")
     clientCert.create_signed_certificate(rootKey = cluster.cert.key,
                                          rootCert = cluster.cert.crt)
 
+    p = subprocess.run(["ls", "-ld",
+                        client_top_directory,
+                        clientCert.crt, clientCert.csr, clientCert.key],
+                       text=True,
+                       capture_output=True)
+    print("%s" % p.stdout)
+
     # the root user also needs the certificates, tests are connecting with it
     subprocess.run(["ln", "-s", client_top_directory, "/root/.postgresql"])
     assert(p.returncode == 0)
 
+    p = subprocess.run(["ls", "-l", "/root/.postgresql"],
+                       text=True,
+                       capture_output=True)
+    print("%s" % p.stdout)
+
     # now create and sign the SERVER certificate for the monitor
+    print("Creating monitor server certificate")
     monitorCert = cert.SSLCert("/tmp/certs/monitor", "server",
                               "/CN=monitor.pgautofailover.ca")
     monitorCert.create_signed_certificate(rootKey = cluster.cert.key,
@@ -156,7 +180,7 @@ def test_010_enable_ssl_verify_ca_monitor():
                         client_top_directory,
                         cluster.cert.crt, cluster.cert.csr, cluster.cert.key,
                         clientCert.crt, clientCert.csr, clientCert.key,
-                        serverCert.crt, serverCert.csr, serverCert.key],
+                        monitorCert.crt, monitorCert.csr, monitorCert.key],
                        text=True,
                        capture_output=True)
     print("%s" % p.stdout)
@@ -184,7 +208,7 @@ def test_011_enable_ssl_verify_ca_primary():
     node1.run()
     node1.sleep(2)
 
-    eq_(node1.config_get("ssl.sslmode"), "require")
+    eq_(node1.config_get("ssl.sslmode"), "verify-ca")
     assert "sslmode=verify-ca" in node1.config_get("pg_autoctl.monitor")
     eq_(node1.pg_config_get('ssl'), "on")
     check_ssl_files(node1)
