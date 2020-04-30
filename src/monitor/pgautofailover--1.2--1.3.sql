@@ -173,6 +173,34 @@ grant execute on function
       pgautofailover.register_node(text,text,int,name,int,pgautofailover.replication_state,text, int, bool)
    to autoctl_node;
 
+DROP FUNCTION IF EXISTS pgautofailover.node_active(text,text,int,int,int,
+                          pgautofailover.replication_state,bool,pg_lsn,text);
+
+CREATE FUNCTION pgautofailover.node_active
+ (
+    In formation_id           		text,
+    IN node_name              		text,
+    IN node_port              		int,
+    IN current_node_id        		int default -1,
+    IN current_group_id       		int default -1,
+    IN current_group_role     		pgautofailover.replication_state default 'init',
+    IN current_pg_is_running  		bool default true,
+    IN current_lsn			  		pg_lsn default '0/0',
+    IN current_rep_state      		text default '',
+   OUT assigned_node_id       		int,
+   OUT assigned_group_id      		int,
+   OUT assigned_group_state   		pgautofailover.replication_state,
+   OUT assigned_candidate_priority 	int,
+   OUT assigned_replication_quorum  bool
+ )
+RETURNS record LANGUAGE C STRICT SECURITY DEFINER
+AS 'MODULE_PATHNAME', $$node_active$$;
+
+grant execute on function
+      pgautofailover.node_active(text,text,int,int,int,
+                          pgautofailover.replication_state,bool,pg_lsn,text)
+   to autoctl_node;
+
 DROP FUNCTION IF EXISTS pgautofailover.get_nodes(text, text);
 
 CREATE FUNCTION pgautofailover.get_nodes
