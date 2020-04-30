@@ -621,7 +621,7 @@ class PGNode:
 
     def get_formation_uri(self, formationName='default'):
         """
-        pg_autoctl show uri --monitor
+        pg_autoctl show uri --formation {formationName}
         """
         command = PGAutoCtl(self)
         out, err = command.execute("show uri --formation",
