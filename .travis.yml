@@ -19,7 +19,6 @@ matrix:
     - env: PGVERSION=12
     - env: LINTING=true
 before_install:
-  - cat /usr/lib/ssl/openssl.cnf
   - git clone -b update-uncrustify-on-travis --depth 1 https://github.com/citusdata/tools.git
   - sudo make -C tools install
   - 'if [ -z "$LINTING" ]; then setup_apt; fi'

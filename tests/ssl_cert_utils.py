@@ -20,6 +20,7 @@ class SSLCert():
 
         self.rootKey = None
         self.rootCert = None
+        self.crl = None
 
         self.sudo_mkdir_p()
 

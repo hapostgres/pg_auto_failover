@@ -231,10 +231,9 @@ class PGNode:
                  self.port,
                  self.database)
 
-        if self.sslMode:
-            # If a local CA is used, or even a self-signed certificate,
-            # using verify-ca often provides enough protection.
-            dsn += "?sslmode=%s" % self.sslMode
+        # If a local CA is used, or even a self-signed certificate,
+        # using verify-ca often provides enough protection.
+        dsn += "?sslmode=%s" % (self.sslMode or 'prefer')
 
         return dsn
 
