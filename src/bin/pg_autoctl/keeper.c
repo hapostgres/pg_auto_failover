@@ -805,6 +805,22 @@ keeper_ensure_configuration(Keeper *keeper)
 		return false;
 	}
 
+	/*
+	 * In pg_auto_failover before version 1.3 we would use pg_basebackup with
+	 * the --write-recovery-conf option. Starting with Postgres 12, this option
+	 * would cause pg_basebackup to edit postgresql.auto.conf rather than
+	 * recovery.conf... meaning that our own setup would not have any effect.
+	 *
+	 * Now is a good time to clean-up, at start-up or reload, and either on a
+	 * primary or a secondary, because those parameters should not remain set
+	 * on a primary either.
+	 */
+	if (pgSetup->control.pg_control_version >= 1200)
+	{
+		/* errors are logged already, and non-fatal to this function */
+		(void) pgsql_reset_primary_conninfo(&(postgres->sqlClient));
+	}
+
 	if (!pgsql_reload_conf(&(postgres->sqlClient)))
 	{
 		log_warn("Failed to reload Postgres configuration after "
