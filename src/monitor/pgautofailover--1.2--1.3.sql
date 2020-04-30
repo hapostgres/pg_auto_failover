@@ -127,6 +127,8 @@ INSERT INTO pgautofailover.event
         reportedstate, goalstate, reportedrepstate, description
    FROM pgautofailover.event_upgrade_old;
 
+GRANT SELECT ON ALL TABLES IN SCHEMA pgautofailover TO autoctl_node;
+
 CREATE FUNCTION pgautofailover.set_node_nodename
  (
     IN node_id   bigint,
