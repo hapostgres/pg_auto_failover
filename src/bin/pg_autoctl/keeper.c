@@ -593,6 +593,16 @@ keeper_update_pg_state(Keeper *keeper)
 			 * pgsql_get_postgres_metadata should always return a non-empty
 			 * string when we are a PRIMARY and our standby is connected.
 			 */
+
+			if (IS_EMPTY_STRING_BUFFER(postgres->pgsrSyncState))
+			{
+				log_error("Failed to fetch current replication properties "
+						  "from standby node: no standby connected in "
+						  "pg_stat_replication.");
+				log_warn("HINT: check pg_autoctl and Postgres logs on "
+						 "standby nodes");
+			}
+
 			return postgres->pgIsRunning &&
 				   !IS_EMPTY_STRING_BUFFER(postgres->currentLSN) &&
 				   !IS_EMPTY_STRING_BUFFER(postgres->pgsrSyncState);
