@@ -69,14 +69,15 @@ class SSLCert():
         assert(p.wait() == 0)
 
 
-    def create_signed_certificate(self, rootKey=None, rootCert=None):
+    def create_signed_certificate(self, rootSSLCert):
         # avoid bugs where we overwrite certificates in a given directory
         assert self.csr is None
         assert self.crt is None
         assert self.key is None
 
-        self.rootKey = rootKey
-        self.rootCert = rootCert
+        self.rootKey = rootSSLCert.key
+        self.rootCert = rootSSLCert.crt
+        self.crl = rootSSLCert.crl
 
         self.crt = os.path.join(self.directory, "%s.crt" % self.basename)
         self.csr = os.path.join(self.directory, "%s.csr" % self.basename)

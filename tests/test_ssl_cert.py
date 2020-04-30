@@ -61,14 +61,12 @@ def test_000_create_monitor():
     clientCert = cert.SSLCert(client_top_directory,
                               basename = "postgresql",
                               CN = "/CN=autoctl_node")
-    clientCert.create_signed_certificate(rootKey = cluster.cert.key,
-                                         rootCert = cluster.cert.crt)
+    clientCert.create_signed_certificate(cluster.cert)
 
     # now create and sign the SERVER certificate for the monitor
     serverCert = cert.SSLCert("/tmp/certs/monitor", "server",
                               "/CN=monitor.pgautofailover.ca")
-    serverCert.create_signed_certificate(rootKey = cluster.cert.key,
-                                         rootCert = cluster.cert.crt)
+    serverCert.create_signed_certificate(cluster.cert)
 
     p = subprocess.run(["ls", "-ld",
                         client_top_directory,
@@ -125,8 +123,7 @@ def test_001_init_primary():
 
     serverCert = cert.SSLCert("/tmp/certs/node1", "server",
                               "/CN=node1.pgautofailover.ca")
-    serverCert.create_signed_certificate(rootKey = cluster.cert.key,
-                                         rootCert = cluster.cert.crt)
+    serverCert.create_signed_certificate(cluster.cert)
 
     # Now create the server with the certificates
     node1 = cluster.create_datanode("/tmp/cert/node1",
@@ -168,8 +165,7 @@ def test_003_init_secondary():
 
     serverCert = cert.SSLCert("/tmp/certs/node2", "server",
                               "/CN=node2.pgautofailover.ca")
-    serverCert.create_signed_certificate(rootKey = cluster.cert.key,
-                                         rootCert = cluster.cert.crt)
+    serverCert.create_signed_certificate(cluster.cert)
 
     # Now create the server with the certificates
     node2 = cluster.create_datanode("/tmp/cert/node2",

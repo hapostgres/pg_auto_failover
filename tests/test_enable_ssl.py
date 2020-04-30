@@ -184,8 +184,7 @@ def test_010_enable_ssl_verify_ca_monitor():
     clientCert = cert.SSLCert(client_top_directory,
                               basename = "postgresql",
                               CN = "/CN=autoctl_node")
-    clientCert.create_signed_certificate(rootKey = cluster.cert.key,
-                                         rootCert = cluster.cert.crt)
+    clientCert.create_signed_certificate(cluster.cert)
 
     p = subprocess.run(["ls", "-ld",
                         client_top_directory,
@@ -207,8 +206,7 @@ def test_010_enable_ssl_verify_ca_monitor():
     print("Creating monitor server certificate")
     monitorCert = cert.SSLCert("/tmp/certs/monitor", "server",
                               "/CN=monitor.pgautofailover.ca")
-    monitorCert.create_signed_certificate(rootKey = cluster.cert.key,
-                                          rootCert = cluster.cert.crt)
+    monitorCert.create_signed_certificate(cluster.cert)
 
     p = subprocess.run(["ls", "-ld",
                         client_top_directory,
@@ -231,8 +229,7 @@ def test_010_enable_ssl_verify_ca_monitor():
 def test_011_enable_ssl_verify_ca_primary():
     node1Cert = cert.SSLCert("/tmp/certs/node1", "server",
                               "/CN=node1.pgautofailover.ca")
-    node1Cert.create_signed_certificate(rootKey = cluster.cert.key,
-                                        rootCert = cluster.cert.crt)
+    node1Cert.create_signed_certificate(cluster.cert)
 
     node1.stop_pg_autoctl()
     node1.enable_ssl(sslCAFile = cluster.cert.crt,
@@ -247,8 +244,7 @@ def test_011_enable_ssl_verify_ca_primary():
 def test_012_enable_ssl_verify_ca_primary():
     node2Cert = cert.SSLCert("/tmp/certs/node2", "server",
                               "/CN=node2.pgautofailover.ca")
-    node2Cert.create_signed_certificate(rootKey = cluster.cert.key,
-                                        rootCert = cluster.cert.crt)
+    node2Cert.create_signed_certificate(cluster.cert)
 
     node2.enable_ssl(sslCAFile = cluster.cert.crt,
                      sslServerKey = node2Cert.key,
