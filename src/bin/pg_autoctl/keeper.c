@@ -861,10 +861,15 @@ keeper_ensure_configuration(Keeper *keeper)
 							 pgSetup->pgdata,
 							 relativeConfPathName);
 
-		if (!read_file(upstreamConfPath, &currentConfContents, &currentConfSize))
+		if (file_exists(upstreamConfPath))
 		{
-			/* errors have already been logged */
-			return false;
+			if (!read_file(upstreamConfPath,
+						   &currentConfContents,
+						   &currentConfSize))
+			{
+				/* errors have already been logged */
+				return false;
+			}
 		}
 
 		/* prepare a replicationSource from the primary and our SSL setup */
@@ -899,7 +904,8 @@ keeper_ensure_configuration(Keeper *keeper)
 			return false;
 		}
 
-		if (strcmp(newConfContents, currentConfContents) != 0)
+		if (currentConfContents == NULL ||
+			strcmp(newConfContents, currentConfContents) != 0)
 		{
 			log_info("Replication settings at \"%s\" have changed, "
 					 "restarting Postgres", upstreamConfPath);
