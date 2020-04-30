@@ -1,4 +1,5 @@
 import pgautofailover_utils as pgautofailover
+import ssl_cert_utils as cert
 from nose.tools import *
 
 import subprocess
@@ -11,6 +12,12 @@ node2 = None
 def setup_module():
     global cluster
     cluster = pgautofailover.Cluster()
+
+    client_top_directory = os.path.join(os.getenv("HOME"), ".postgresql")
+
+    cluster.create_root_cert(client_top_directory,
+                             basename = "root",
+                             CN = "/CN=root.pgautofailover.ca")
 
 def teardown_module():
     cluster.destroy()
@@ -46,98 +53,26 @@ def test_000_create_monitor():
     # requesting the client's leaf certificate, libpq will send the
     # certificates stored in file ~/.postgresql/postgresql.crt in the user's
     # home directory
+    # Now, create a server certificate signed by the new root certificate
+    # authority
     client_top_directory = os.path.join(os.getenv("HOME"), ".postgresql")
 
-    p = subprocess.Popen(["sudo", "-E", '-u', os.getenv("USER"),
-                          'env', 'PATH=' + os.getenv("PATH"),
-                          "mkdir", "-p", client_top_directory])
-    assert(p.wait() == 0)
-
-    root_csr = os.path.join(client_top_directory, "root.csr")
-    root_key = os.path.join(client_top_directory, "root.key")
-    root_crt = os.path.join(client_top_directory, "root.crt")
-
-    # first create a certificate signing request (CSR) and a public/private
-    # key file
-    print()
-    p = subprocess.Popen(["sudo", "-E", '-u', os.getenv("USER"),
-                          'env', 'PATH=' + os.getenv("PATH"),
-                          "openssl", "req", "-new", "-nodes", "-text",
-                          "-out", root_csr, "-keyout", root_key,
-                          "-subj", "/CN=root.pgautofailover.ca"])
-    assert(p.wait() == 0)
-
-    p = subprocess.Popen(["chmod", "og-rwx", root_key])
-    assert(p.wait() == 0)
-
-    # Then, sign the request with the key to create a root certificate authority
-    p = subprocess.Popen(["sudo", "-E", '-u', os.getenv("USER"),
-                          'env', 'PATH=' + os.getenv("PATH"),
-                          "openssl", "x509", "-req", "-in", root_csr,
-                          "-text", "-days", "3650",
-                          "-extfile", "/etc/ssl/openssl.cnf",
-                          "-extensions", "v3_ca",
-                          "-signkey", root_key,
-                          "-out", root_crt])
-    assert(p.wait() == 0)
-
-    # Finally, create a server certificate signed by the new root
-    # certificate authority
-    p = subprocess.run(["sudo", "-E", '-u', os.getenv("USER"),
-                        'env', 'PATH=' + os.getenv("PATH"),
-                        "mkdir", "-p", "/tmp/certs/monitor"])
-    assert(p.returncode == 0)
-
-    server_crt = os.path.join("/tmp/certs/monitor", "server.crt")
-    server_csr = os.path.join("/tmp/certs/monitor", "server.csr")
-    server_key = os.path.join("/tmp/certs/monitor", "server.key")
-
-    p = subprocess.Popen(["sudo", "-E", '-u', os.getenv("USER"),
-                          'env', 'PATH=' + os.getenv("PATH"),
-                          "openssl", "req", "-new", "-nodes", "-text",
-                          "-out", server_csr, "-keyout", server_key,
-                          "-subj", "/CN=monitor.pgautofailover.ca"])
-    assert(p.wait() == 0)
-
-    p = subprocess.Popen(["chmod", "og-rwx", server_key])
-    assert(p.wait() == 0)
-
-    p = subprocess.Popen(["sudo", "-E", '-u', os.getenv("USER"),
-                          'env', 'PATH=' + os.getenv("PATH"),
-                          "openssl", "x509", "-req", "-in", server_csr,
-                          "-text", "-days", "365",
-                          "-CA", root_crt, "-CAkey", root_key,
-                          "-CAcreateserial", "-out", server_crt])
-    assert(p.wait() == 0)
-
     # now create and sign the CLIENT certificate
-    postgresql_csr = os.path.join(client_top_directory, "postgresql.csr")
-    postgresql_key = os.path.join(client_top_directory, "postgresql.key")
-    postgresql_crt = os.path.join(client_top_directory, "postgresql.crt")
+    clientCert = cert.SSLCert(client_top_directory,
+                              basename = "postgresql",
+                              CN = "/CN=autoctl_node")
+    clientCert.create_signed_certificate(cluster.cert)
 
-    p = subprocess.Popen(["sudo", "-E", '-u', os.getenv("USER"),
-                          'env', 'PATH=' + os.getenv("PATH"),
-                          "openssl", "req", "-new", "-nodes", "-text",
-                          "-out", postgresql_csr, "-keyout", postgresql_key,
-                          "-subj", "/CN=autoctl_node"])
-    assert(p.wait() == 0)
-
-    p = subprocess.Popen(["chmod", "og-rwx", postgresql_key])
-    assert(p.wait() == 0)
-
-    p = subprocess.Popen(["sudo", "-E", '-u', os.getenv("USER"),
-                          'env', 'PATH=' + os.getenv("PATH"),
-                          "openssl", "x509", "-req", "-in", postgresql_csr,
-                          "-text", "-days", "365",
-                          "-CA", root_crt, "-CAkey", root_key,
-                          "-CAcreateserial", "-out", postgresql_crt])
-    assert(p.wait() == 0)
+    # now create and sign the SERVER certificate for the monitor
+    serverCert = cert.SSLCert("/tmp/certs/monitor", "server",
+                              "/CN=monitor.pgautofailover.ca")
+    serverCert.create_signed_certificate(cluster.cert)
 
     p = subprocess.run(["ls", "-ld",
                         client_top_directory,
-                        root_crt, root_csr, root_key,
-                        postgresql_crt, postgresql_csr, postgresql_key,
-                        server_crt, server_csr, server_key],
+                        cluster.cert.crt, cluster.cert.csr, cluster.cert.key,
+                        clientCert.crt, clientCert.csr, clientCert.key,
+                        serverCert.crt, serverCert.csr, serverCert.key],
                        text=True,
                        capture_output=True)
     print("%s" % p.stdout)
@@ -152,9 +87,9 @@ def test_000_create_monitor():
     monitor = cluster.create_monitor("/tmp/cert/monitor",
                                      authMethod="skip",
                                      sslMode="verify-ca",
-                                     sslCAFile=root_crt,
-                                     sslServerKey=server_key,
-                                     sslServerCert=server_crt)
+                                     sslCAFile=cluster.cert.crt,
+                                     sslServerKey=serverCert.key,
+                                     sslServerCert=serverCert.crt)
     monitor.wait_until_pg_is_running()
 
     with open(os.path.join("/tmp/cert/monitor", "pg_hba.conf"), 'a') as hba:
@@ -164,7 +99,8 @@ def test_000_create_monitor():
 
     # check the SSL settings
     cmd = ["openssl", "s_client", "-starttls", "postgres",
-           "-connect", "172.27.1.2:5432", "-showcerts", "-CAfile", root_crt]
+           "-connect", "172.27.1.2:5432", "-showcerts",
+           "-CAfile", cluster.cert.crt]
     print(" ".join(cmd))
     p = subprocess.run(["sudo", "-E", '-u', os.getenv("USER"),
                         'env', 'PATH=' + os.getenv("PATH")] + cmd,
@@ -178,50 +114,25 @@ def test_000_create_monitor():
 
     # print connection string
     print("monitor: %s" % monitor.connection_string())
+    monitor.check_ssl("on", "verify-ca")
 
 def test_001_init_primary():
     global node1
 
+    # Create a server certificate signed by the root Certificate Authority
     certs_dir = "/tmp/certs/node1"
 
-    # Create a server certificate signed by the root Certificate Authority
-    p = subprocess.Popen(["sudo", "-E", '-u', os.getenv("USER"),
-                          'env', 'PATH=' + os.getenv("PATH"),
-                          "mkdir", "-p", certs_dir])
-    assert(p.wait() == 0)
-
-    root_key = os.path.join(os.getenv("HOME"), ".postgresql", "root.key")
-    root_crt = os.path.join(os.getenv("HOME"), ".postgresql", "root.crt")
-
-    server_crt = os.path.join(certs_dir, "server.crt")
-    server_csr = os.path.join(certs_dir, "server.csr")
-    server_key = os.path.join(certs_dir, "server.key")
-
-    p = subprocess.Popen(["sudo", "-E", '-u', os.getenv("USER"),
-                          'env', 'PATH=' + os.getenv("PATH"),
-                          "openssl", "req", "-new", "-nodes", "-text",
-                          "-out", server_csr, "-keyout", server_key,
-                          "-subj", "/CN=node1.pgautofailover.ca"])
-    assert(p.wait() == 0)
-
-    p = subprocess.Popen(["chmod", "og-rwx", server_key])
-    assert(p.wait() == 0)
-
-    p = subprocess.Popen(["sudo", "-E", '-u', os.getenv("USER"),
-                          'env', 'PATH=' + os.getenv("PATH"),
-                          "openssl", "x509", "-req", "-in", server_csr,
-                          "-text", "-days", "365",
-                          "-CA", root_crt, "-CAkey", root_key,
-                          "-CAcreateserial", "-out", server_crt])
-    assert(p.wait() == 0)
+    serverCert = cert.SSLCert("/tmp/certs/node1", "server",
+                              "/CN=node1.pgautofailover.ca")
+    serverCert.create_signed_certificate(cluster.cert)
 
     # Now create the server with the certificates
     node1 = cluster.create_datanode("/tmp/cert/node1",
                                     authMethod="skip",
                                     sslMode="verify-ca",
-                                    sslCAFile=root_crt,
-                                    sslServerKey=server_key,
-                                    sslServerCert=server_crt)
+                                    sslCAFile=cluster.cert.crt,
+                                    sslServerKey=serverCert.key,
+                                    sslServerCert=serverCert.crt)
     node1.create(level='-vv')
 
     with open(os.path.join("/tmp/cert/node1", "pg_hba.conf"), 'a') as hba:
@@ -240,6 +151,7 @@ def test_001_init_primary():
 
     node1.run()
     assert node1.wait_until_state(target_state="single")
+    node1.check_ssl("on", "verify-ca", primary=True)
 
 def test_002_create_t1():
     print()
@@ -250,46 +162,20 @@ def test_002_create_t1():
 def test_003_init_secondary():
     global node2
 
+    # Create a server certificate signed by the root Certificate Authority
     certs_dir = "/tmp/certs/node2"
 
-    # Create a server certificate signed by the root Certificate Authority
-    p = subprocess.Popen(["sudo", "-E", '-u', os.getenv("USER"),
-                          'env', 'PATH=' + os.getenv("PATH"),
-                          "mkdir", "-p", certs_dir])
-    assert(p.wait() == 0)
-
-    root_key = os.path.join(os.getenv("HOME"), ".postgresql", "root.key")
-    root_crt = os.path.join(os.getenv("HOME"), ".postgresql", "root.crt")
-
-    server_crt = os.path.join(certs_dir, "server.crt")
-    server_csr = os.path.join(certs_dir, "server.csr")
-    server_key = os.path.join(certs_dir, "server.key")
-
-    p = subprocess.Popen(["sudo", "-E", '-u', os.getenv("USER"),
-                          'env', 'PATH=' + os.getenv("PATH"),
-                          "openssl", "req", "-new", "-nodes", "-text",
-                          "-out", server_csr, "-keyout", server_key,
-                          "-subj", "/CN=node2.pgautofailover.ca"])
-    assert(p.wait() == 0)
-
-    p = subprocess.Popen(["chmod", "og-rwx", server_key])
-    assert(p.wait() == 0)
-
-    p = subprocess.Popen(["sudo", "-E", '-u', os.getenv("USER"),
-                          'env', 'PATH=' + os.getenv("PATH"),
-                          "openssl", "x509", "-req", "-in", server_csr,
-                          "-text", "-days", "365",
-                          "-CA", root_crt, "-CAkey", root_key,
-                          "-CAcreateserial", "-out", server_crt])
-    assert(p.wait() == 0)
+    serverCert = cert.SSLCert("/tmp/certs/node2", "server",
+                              "/CN=node2.pgautofailover.ca")
+    serverCert.create_signed_certificate(cluster.cert)
 
     # Now create the server with the certificates
     node2 = cluster.create_datanode("/tmp/cert/node2",
                                     authMethod="skip",
                                     sslMode="verify-ca",
-                                    sslCAFile=root_crt,
-                                    sslServerKey=server_key,
-                                    sslServerCert=server_crt)
+                                    sslCAFile=cluster.cert.crt,
+                                    sslServerKey=serverCert.key,
+                                    sslServerCert=serverCert.crt)
     node2.create(level='-vv')
 
     with open(os.path.join("/tmp/cert/node2", "pg_hba.conf"), 'a') as hba:
@@ -306,6 +192,7 @@ def test_003_init_secondary():
     node2.run()
     assert node2.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")
+    node2.check_ssl("on", "verify-ca")
 
 def test_004_failover():
     print()
