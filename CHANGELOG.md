@@ -1,5 +1,6 @@
 ### pg_auto_failover v1.3 (April 30, 2020) ###
 
+* Fix systemd integration [#212]
 * Change default TLS cipher list [#214]
 * SSL certificates management fixes [#228]
 * Improve replication slots handling [#222]
