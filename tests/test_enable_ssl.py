@@ -1,8 +1,6 @@
 import pgautofailover_utils as pgautofailover
 import ssl_cert_utils as cert
 import subprocess
-from nose.tools import eq_
-
 import os
 
 cluster = None
@@ -32,65 +30,13 @@ def teardown_module():
     assert(p.returncode == 0)
 
 
-def check_ssl(node, ssl, sslmode, monitor=False, primary=False, SSLCert=None):
-    key = None
-    crt = None
-    crl = None
-    rootCert = None
-    if SSLCert is not None:
-        key = SSLCert.key
-        crt = SSLCert.crt
-        crl = SSLCert.crl
-        rootCert = SSLCert.rootCert
-    elif ssl == "on":
-        key = os.path.join(node.datadir, "server.key")
-        crt = os.path.join(node.datadir, "server.crt")
-
-    eq_(node.pg_config_get('ssl'), ssl)
-    eq_(node.config_get("ssl.sslmode"), sslmode)
-
-    def check_conn_string(conn_string):
-        print("checking connstring =", conn_string)
-        assert f"sslmode={sslmode}" in conn_string
-        if rootCert:
-            assert f"sslrootcert={rootCert}" in conn_string
-        if crl:
-            assert f"sslcrl={crl}" in conn_string
-
-    conn_string, _ = pgautofailover.PGAutoCtl(node)\
-        .execute("show uri --monitor", 'show', 'uri', '--monitor')
-    check_conn_string(conn_string)
-    if not monitor:
-        check_conn_string(node.config_get("pg_autoctl.monitor"))
-        conn_string, _ = pgautofailover.PGAutoCtl(node)\
-            .execute("show uri --monitor", 'show', 'uri', '--formation', 'default')
-
-    for pg_setting, autoctl_setting, file_path in [
-            ("ssl_key_file", "ssl.key_file", key),
-            ("ssl_cert_file", "ssl.cert_file", crt),
-            ("ssl_crl_file", "ssl.crl_file", crl),
-            ("ssl_ca_file", "ssl.ca_file", rootCert)]:
-        if file_path is None:
-            continue
-        assert os.path.isfile(file_path)
-        print("checking", pg_setting)
-        eq_(node.pg_config_get(pg_setting), file_path)
-        eq_(node.config_get(autoctl_setting), file_path)
-
-    if monitor or primary:
-        return
-
-    if node.pgmajor() >= 12:
-        check_conn_string(node.pg_config_get('primary_conninfo'))
-
-
 def test_000_create_monitor():
     global monitor
     monitor = cluster.create_monitor("/tmp/enable/monitor")
     monitor.run()
     monitor.wait_until_pg_is_running()
 
-    check_ssl(monitor, "off", "prefer", monitor=True)
+    monitor.check_ssl("off", "prefer")
 
 def test_001_init_primary():
     global node1
@@ -99,7 +45,7 @@ def test_001_init_primary():
     node1.run()
     assert node1.wait_until_state(target_state="single")
 
-    check_ssl(node1, "off", "prefer", primary=True)
+    node1.check_ssl("off", "prefer", primary=True)
 
 def test_002_create_t1():
     node1.run_sql_query("CREATE TABLE t1(a int)")
@@ -114,7 +60,7 @@ def test_003_init_secondary():
     assert node2.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")
 
-    check_ssl(node2, "off", "prefer")
+    node2.check_ssl("off", "prefer")
 
 def test_004_maintenance():
     print()
@@ -126,7 +72,7 @@ def test_005_enable_ssl_monitor():
     monitor.enable_ssl(sslSelfSigned=True, sslMode="require")
     monitor.sleep(2) # we signaled, wait some time
 
-    check_ssl(monitor, "on", "require", monitor=True)
+    monitor.check_ssl("on", "require")
 
 def test_006_enable_ssl_primary():
     # we stop pg_autoctl to make it easier for the test to be reliable
@@ -138,7 +84,7 @@ def test_006_enable_ssl_primary():
     node1.run()
     node1.sleep(2)
 
-    check_ssl(node1, "on", "require", primary=True)
+    node1.check_ssl("on", "require", primary=True)
 
 def test_007_enable_ssl_secondary():
     node2.enable_ssl(sslSelfSigned=True, sslMode="require")
@@ -146,7 +92,7 @@ def test_007_enable_ssl_secondary():
 
     node2.wait_until_pg_is_running()
 
-    check_ssl(node2, "on", "require")
+    node2.check_ssl("on", "require")
 
 def test_008_disable_maintenance():
     print("Disabling maintenance on node2")
@@ -224,7 +170,7 @@ def test_010_enable_ssl_verify_ca_monitor():
 
     monitor.sleep(2) # we signaled, wait some time
 
-    check_ssl(monitor, "on", "verify-ca", monitor=True, SSLCert=monitorCert)
+    monitor.check_ssl("on", "verify-ca")
 
 def test_011_enable_ssl_verify_ca_primary():
     node1Cert = cert.SSLCert("/tmp/certs/node1", "server",
@@ -239,7 +185,7 @@ def test_011_enable_ssl_verify_ca_primary():
     node1.run()
     node1.sleep(2)
 
-    check_ssl(node1, "on", "verify-ca", primary=True, SSLCert=node1Cert)
+    node1.check_ssl("on", "verify-ca", primary=True)
 
 def test_012_enable_ssl_verify_ca_primary():
     node2Cert = cert.SSLCert("/tmp/certs/node2", "server",
@@ -254,7 +200,7 @@ def test_012_enable_ssl_verify_ca_primary():
 
     node2.wait_until_pg_is_running()
 
-    check_ssl(node2, "on", "verify-ca", SSLCert=node2Cert)
+    node2.check_ssl("on", "verify-ca")
 
 def test_013_disable_maintenance():
     print("Disabling maintenance on node2")

@@ -7,16 +7,6 @@ import os.path
 cluster = None
 node1 = None
 node2 = None
-expected_ciphers = (
-    "ECDHE-ECDSA-AES128-GCM-SHA256:"
-    "ECDHE-ECDSA-AES256-GCM-SHA384:"
-    "ECDHE-RSA-AES128-GCM-SHA256:"
-    "ECDHE-RSA-AES256-GCM-SHA384:"
-    "ECDHE-ECDSA-AES128-SHA256:"
-    "ECDHE-ECDSA-AES256-SHA384:"
-    "ECDHE-RSA-AES128-SHA256:"
-    "ECDHE-RSA-AES256-SHA384"
-)
 
 
 def setup_module():
@@ -28,27 +18,12 @@ def teardown_module():
     cluster.destroy()
 
 
-def check_ssl_files(node):
-    for setting, f in [("ssl_key_file", "server.key"),
-                       ("ssl_cert_file", "server.crt")]:
-        file_path = os.path.join(node.datadir, f)
-        assert os.path.isfile(file_path)
-        eq_(node.pg_config_get(setting), file_path)
-
-
-def check_ssl_ciphers(node):
-    eq_(node.pg_config_get("ssl_ciphers"), expected_ciphers)
-
-
 def test_000_create_monitor():
     monitor = cluster.create_monitor("/tmp/ssl-self-signed/monitor",
                                      sslSelfSigned=True)
 
-    eq_(monitor.config_get("ssl.sslmode"), "require")
     monitor.wait_until_pg_is_running()
-    check_ssl_files(monitor)
-    # TODO: Uncomment when there can be super user access to the monitor
-    # check_ssl_ciphers(node1)
+    monitor.check_ssl("on", "require")
 
 
 def test_001_init_primary():
@@ -59,11 +34,7 @@ def test_001_init_primary():
     node1.run()
     assert node1.wait_until_state(target_state="single")
 
-    eq_(node1.config_get("ssl.sslmode"), "require")
-    eq_(node1.pg_config_get('ssl'), "on")
-
-    check_ssl_files(node1)
-    check_ssl_ciphers(node1)
+    node1.check_ssl("on", "require", primary=True)
 
 
 def test_002_create_t1():
@@ -83,11 +54,7 @@ def test_003_init_secondary():
     assert node2.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")
 
-    eq_(node2.config_get("ssl.sslmode"), "require")
-    eq_(node2.pg_config_get('ssl'), "on")
-
-    check_ssl_files(node2)
-    check_ssl_ciphers(node2)
+    node2.check_ssl("on", "require")
 
 
 def test_004_failover():

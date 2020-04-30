@@ -114,6 +114,7 @@ def test_000_create_monitor():
 
     # print connection string
     print("monitor: %s" % monitor.connection_string())
+    monitor.check_ssl("on", "verify-ca")
 
 def test_001_init_primary():
     global node1
@@ -150,6 +151,7 @@ def test_001_init_primary():
 
     node1.run()
     assert node1.wait_until_state(target_state="single")
+    node1.check_ssl("on", "verify-ca", primary=True)
 
 def test_002_create_t1():
     print()
@@ -190,6 +192,7 @@ def test_003_init_secondary():
     node2.run()
     assert node2.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")
+    node2.check_ssl("on", "verify-ca")
 
 def test_004_failover():
     print()

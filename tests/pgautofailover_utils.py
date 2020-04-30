@@ -7,6 +7,7 @@ import network
 import psycopg2
 import subprocess
 import datetime as dt
+from nose.tools import eq_
 from enum import Enum
 
 import ssl_cert_utils as cert
@@ -233,7 +234,17 @@ class PGNode:
 
         # If a local CA is used, or even a self-signed certificate,
         # using verify-ca often provides enough protection.
-        dsn += "?sslmode=%s" % (self.sslMode or 'prefer')
+        if self.sslMode:
+            sslMode = self.sslMode
+        elif self.sslSelfSigned:
+            sslMode = "require"
+        else:
+            sslMode = "prefer"
+
+        dsn += "?sslmode=%s" % sslMode
+
+        if self.sslCAFile:
+            dsn += f"&sslrootcert={self.sslCAFile}"
 
         return dsn
 
@@ -599,6 +610,71 @@ class PGNode:
         command = PGAutoCtl(self, argv=ssl_args)
         out, err = command.execute("enable ssl")
 
+    def check_ssl(self, ssl, sslmode, monitor=False, primary=False):
+        """
+        Checks if ssl settings match how the node is set up
+        """
+        key = self.sslServerKey
+        crt = self.sslServerCert
+        crl = None
+        rootCert = self.sslCAFile
+        if self.sslSelfSigned:
+            key = os.path.join(self.datadir, "server.key")
+            crt = os.path.join(self.datadir, "server.crt")
+
+        eq_(self.pg_config_get('ssl'), ssl)
+        eq_(self.config_get("ssl.sslmode"), sslmode)
+
+        expected_ciphers = (
+            "ECDHE-ECDSA-AES128-GCM-SHA256:"
+            "ECDHE-ECDSA-AES256-GCM-SHA384:"
+            "ECDHE-RSA-AES128-GCM-SHA256:"
+            "ECDHE-RSA-AES256-GCM-SHA384:"
+            "ECDHE-ECDSA-AES128-SHA256:"
+            "ECDHE-ECDSA-AES256-SHA384:"
+            "ECDHE-RSA-AES128-SHA256:"
+            "ECDHE-RSA-AES256-SHA384"
+        )
+
+        # TODO: also do this for monitor once we can have superuser access to
+        # the monitor
+        if not monitor:
+            eq_(self.pg_config_get("ssl_ciphers"), expected_ciphers)
+
+        def check_conn_string(conn_string):
+            print("checking connstring =", conn_string)
+            assert f"sslmode={sslmode}" in conn_string
+            if rootCert:
+                assert f"sslrootcert={rootCert}" in conn_string
+            if crl:
+                assert f"sslcrl={crl}" in conn_string
+
+        conn_string, _ = PGAutoCtl(self)\
+            .execute("show uri --monitor", 'show', 'uri', '--monitor')
+        check_conn_string(conn_string)
+        if not monitor:
+            check_conn_string(self.config_get("pg_autoctl.monitor"))
+            conn_string, _ = PGAutoCtl(self)\
+                .execute("show uri --monitor", 'show', 'uri', '--formation', 'default')
+
+        for pg_setting, autoctl_setting, file_path in [
+                ("ssl_key_file", "ssl.key_file", key),
+                ("ssl_cert_file", "ssl.cert_file", crt),
+                ("ssl_crl_file", "ssl.crl_file", crl),
+                ("ssl_ca_file", "ssl.ca_file", rootCert)]:
+            if file_path is None:
+                continue
+            assert os.path.isfile(file_path)
+            print("checking", pg_setting)
+            eq_(self.pg_config_get(pg_setting), file_path)
+            eq_(self.config_get(autoctl_setting), file_path)
+
+        if monitor or primary:
+            return
+
+        if self.pgmajor() >= 12:
+            check_conn_string(self.pg_config_get('primary_conninfo'))
+
 
 class DataNode(PGNode):
     def __init__(self, cluster, datadir, vnode, port,
@@ -957,7 +1033,6 @@ class MonitorNode(PGNode):
         else:
             self.nodename = str(self.vnode.address)
 
-
     def create(self, run = False):
         """
         Initializes and runs the monitor process.
@@ -1112,6 +1187,12 @@ class MonitorNode(PGNode):
         """
         query = "select * from pgautofailover.get_other_nodes(%s, %s)"
         return self.run_sql_query(query, host, port)
+
+    def check_ssl(self, ssl, sslmode):
+        """
+        Checks if ssl settings match how the node is set up
+        """
+        return super().check_ssl(ssl, sslmode, monitor=True)
 
 
 class PGAutoCtl():
