@@ -610,6 +610,38 @@ class PGNode:
         command = PGAutoCtl(self, argv=ssl_args)
         out, err = command.execute("enable ssl")
 
+    def get_monitor_uri(self):
+        """
+        pg_autoctl show uri --monitor
+        """
+        command = PGAutoCtl(self)
+        out, err = command.execute("show uri --monitor",
+                                   'show', 'uri', '--monitor')
+        return out
+
+    def get_formation_uri(self, formationName='default'):
+        """
+        pg_autoctl show uri --monitor
+        """
+        command = PGAutoCtl(self)
+        out, err = command.execute("show uri --formation",
+                                   'show', 'uri', '--formation', formationName)
+        return out
+
+    def check_conn_string_ssl(self, conn_string, sslmode):
+        """
+        Asserts that given connection string embeds expected SSL settings.
+        """
+        crl = None
+        rootCert = self.sslCAFile
+
+        print("checking connstring =", conn_string)
+        assert f"sslmode={sslmode}" in conn_string
+        if rootCert:
+            assert f"sslrootcert={rootCert}" in conn_string
+        if crl:
+            assert f"sslcrl={crl}" in conn_string
+
     def check_ssl(self, ssl, sslmode, monitor=False, primary=False):
         """
         Checks if ssl settings match how the node is set up
@@ -649,13 +681,15 @@ class PGNode:
             if crl:
                 assert f"sslcrl={crl}" in conn_string
 
-        conn_string, _ = PGAutoCtl(self)\
-            .execute("show uri --monitor", 'show', 'uri', '--monitor')
-        check_conn_string(conn_string)
+        monitor_uri = self.get_monitor_uri()
+        self.check_conn_string_ssl(monitor_uri, sslmode)
+
         if not monitor:
-            check_conn_string(self.config_get("pg_autoctl.monitor"))
-            conn_string, _ = PGAutoCtl(self)\
-                .execute("show uri --monitor", 'show', 'uri', '--formation', 'default')
+            monitor_uri = self.config_get("pg_autoctl.monitor")
+            self.check_conn_string_ssl(monitor_uri, sslmode)
+
+            formation_uri = self.get_formation_uri()
+            self.check_conn_string_ssl(formation_uri, sslmode)
 
         for pg_setting, autoctl_setting, file_path in [
                 ("ssl_key_file", "ssl.key_file", key),
