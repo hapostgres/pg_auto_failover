@@ -1,3 +1,13 @@
+### pg_auto_failover v1.3 (April 30, 2020) ###
+
+* Change default TLS cipher list [#214]
+* SSL certificates management fixes [#228]
+* Improve replication slots handling [#222]
+* Implement pg_autoctl enable|disable ssl [#233]
+* Implement pg_autoctl show uri --monitor [#238]
+* Implement pg_autoctl stop|reload for the monitor [#241]
+* Don't create pgautofailover_monitor user anymore [#247]
+
 ### pg_auto_failover v1.2 (March 17, 2020) ###
 
 * Feature implement an option (--skip-pg-hba) to skip editing of HBA rules by pg_autoctl (#169)
