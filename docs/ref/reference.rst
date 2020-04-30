@@ -391,7 +391,7 @@ running PostgreSQL standby node. In that situation, it is necessary to
 prepare a new secondary system from scratch.
 
 When `--nodename` is omitted, it is computed as above (see
-:ref:`_pg_autoctl_create_monitor`), with the difference that step 1 uses the
+:ref:`pg_autoctl_create_monitor`), with the difference that step 1 uses the
 monitor IP and port rather than the public service 8.8.8.8:53.
 
 The ``--auth`` option allows setting up authentication method to be used
