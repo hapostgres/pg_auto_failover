@@ -20,7 +20,14 @@ PG_CONFIG ?= pg_config
 PGXS = $(shell $(PG_CONFIG) --pgxs)
 USE_PGXS = 1
 
+.PHONY: cleanup-before-install
+
 include $(PGXS)
+
+cleanup-before-install:
+	rm -f $(DESTDIR)$(datadir)/$(datamoduledir)/pgautofailover*
+
+install: cleanup-before-install
 
 $(EXTENSION)--$(EXTVERSION).sql: $(EXTENSION).sql
 	cat $^ > $@
