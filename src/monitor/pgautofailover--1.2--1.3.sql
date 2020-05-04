@@ -12,6 +12,10 @@ ALTER TABLE pgautofailover.formation
 
 DROP FUNCTION IF EXISTS pgautofailover.create_formation(text, text);
 
+DROP FUNCTION IF EXISTS pgautofailover.create_formation(text,text,name,boolean);
+DROP FUNCTION IF EXISTS pgautofailover.get_other_node(text,integer);
+DROP FUNCTION IF EXISTS pgautofailover.register_node(text,text,integer,name,integer,pgautofailover.replication_state,text);
+
 CREATE FUNCTION pgautofailover.set_formation_number_sync_standbys
  (
     IN formation_id  		text,
@@ -50,7 +54,7 @@ ALTER TABLE pgautofailover.node
 CREATE TABLE pgautofailover.node
  (
     formationid          text not null default 'default',
-    nodeid               bigserial,
+    nodeid               bigint not null DEFAULT nextval('pgautofailover.node_nodeid_seq'::regclass),
     groupid              int not null,
     nodename             text not null,
     nodeport             int not null,
