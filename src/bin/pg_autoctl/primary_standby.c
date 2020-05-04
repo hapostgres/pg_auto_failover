@@ -304,25 +304,6 @@ primary_drop_replication_slot(LocalPostgresServer *postgres,
 
 
 /*
- * primary_drop_replication_slots drops all the replication slots found. The
- * return value indicates whether the operation was successful.
- */
-bool
-primary_drop_replication_slots(LocalPostgresServer *postgres)
-{
-	bool result = false;
-	PGSQL *pgsql = &(postgres->sqlClient);
-
-	log_trace("primary_drop_replication_slots");
-
-	result = pgsql_drop_replication_slots(pgsql);
-
-	pgsql_finish(pgsql);
-	return result;
-}
-
-
-/*
  * postgres_replication_slot_drop_removed drops the replication slots that
  * belong to dropped nodes on a primary server.
  */

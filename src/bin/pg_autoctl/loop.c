@@ -173,6 +173,8 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 
 		if (couldContactMonitor)
 		{
+			char expectedSlotName[BUFSIZE];
+
 			keeperState->last_monitor_contact = now;
 			keeperState->assigned_role = assignedState.state;
 
@@ -182,6 +184,36 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 
 				log_info("Monitor assigned new state \"%s\"",
 						 NodeStateToString(keeperState->assigned_role));
+			}
+
+			/*
+			 * Also update the groupId and replication slot name in the
+			 * configuration file.
+			 */
+			(void) postgres_sprintf_replicationSlotName(assignedState.nodeId,
+														expectedSlotName,
+														sizeof(expectedSlotName));
+
+			if (assignedState.groupId != config->groupId ||
+				strneq(config->replication_slot_name, expectedSlotName))
+			{
+				if (!keeper_config_set_groupId_and_slot_name(config,
+															 assignedState.nodeId,
+															 assignedState.groupId))
+				{
+					log_error("Failed to update the configuration file "
+							  "with groupId %d and replication.slot \"%s\"",
+							  assignedState.groupId, expectedSlotName);
+					return false;
+				}
+
+				if (!keeper_ensure_configuration(keeper))
+				{
+					log_error("Failed to update our Postgres configuration "
+							  "after a change of groupId or "
+							  "replication slot name, see above for details");
+					return false;
+				}
 			}
 		}
 		else

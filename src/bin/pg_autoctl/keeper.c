@@ -593,6 +593,16 @@ keeper_update_pg_state(Keeper *keeper)
 			 * pgsql_get_postgres_metadata should always return a non-empty
 			 * string when we are a PRIMARY and our standby is connected.
 			 */
+
+			if (IS_EMPTY_STRING_BUFFER(postgres->pgsrSyncState))
+			{
+				log_error("Failed to fetch current replication properties "
+						  "from standby node: no standby connected in "
+						  "pg_stat_replication.");
+				log_warn("HINT: check pg_autoctl and Postgres logs on "
+						 "standby nodes");
+			}
+
 			return postgres->pgIsRunning &&
 				   !IS_EMPTY_STRING_BUFFER(postgres->currentLSN) &&
 				   !IS_EMPTY_STRING_BUFFER(postgres->pgsrSyncState);
@@ -795,6 +805,22 @@ keeper_ensure_configuration(Keeper *keeper)
 		return false;
 	}
 
+	/*
+	 * In pg_auto_failover before version 1.3 we would use pg_basebackup with
+	 * the --write-recovery-conf option. Starting with Postgres 12, this option
+	 * would cause pg_basebackup to edit postgresql.auto.conf rather than
+	 * recovery.conf... meaning that our own setup would not have any effect.
+	 *
+	 * Now is a good time to clean-up, at start-up or reload, and either on a
+	 * primary or a secondary, because those parameters should not remain set
+	 * on a primary either.
+	 */
+	if (pgSetup->control.pg_control_version >= 1200)
+	{
+		/* errors are logged already, and non-fatal to this function */
+		(void) pgsql_reset_primary_conninfo(&(postgres->sqlClient));
+	}
+
 	if (!pgsql_reload_conf(&(postgres->sqlClient)))
 	{
 		log_warn("Failed to reload Postgres configuration after "
@@ -861,10 +887,15 @@ keeper_ensure_configuration(Keeper *keeper)
 							 pgSetup->pgdata,
 							 relativeConfPathName);
 
-		if (!read_file(upstreamConfPath, &currentConfContents, &currentConfSize))
+		if (file_exists(upstreamConfPath))
 		{
-			/* errors have already been logged */
-			return false;
+			if (!read_file(upstreamConfPath,
+						   &currentConfContents,
+						   &currentConfSize))
+			{
+				/* errors have already been logged */
+				return false;
+			}
 		}
 
 		/* prepare a replicationSource from the primary and our SSL setup */
@@ -899,7 +930,8 @@ keeper_ensure_configuration(Keeper *keeper)
 			return false;
 		}
 
-		if (strcmp(newConfContents, currentConfContents) != 0)
+		if (currentConfContents == NULL ||
+			strcmp(newConfContents, currentConfContents) != 0)
 		{
 			log_info("Replication settings at \"%s\" have changed, "
 					 "restarting Postgres", upstreamConfPath);

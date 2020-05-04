@@ -609,7 +609,7 @@ keeper_config_set_groupId_and_slot_name(KeeperConfig *config,
 	char buffer[BUFSIZE] = { 0 };
 	char *replicationSlotName = NULL;
 
-	sformat(buffer, BUFSIZE, "%s_%d", REPLICATION_SLOT_NAME_DEFAULT, nodeId);
+	(void) postgres_sprintf_replicationSlotName(nodeId, buffer, sizeof(buffer));
 	replicationSlotName = strdup(buffer);
 
 	config->groupId = groupId;

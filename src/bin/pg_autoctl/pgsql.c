@@ -709,27 +709,6 @@ pgsql_drop_replication_slot(PGSQL *pgsql, const char *slotName)
 
 
 /*
- * pgsql_drop_replication_slots drops all the pg_auto_failover physical
- * replication slots. (We might not own all those that exist on the server)
- */
-bool
-pgsql_drop_replication_slots(PGSQL *pgsql)
-{
-	/* *INDENT-OFF* */
-	char *sql =
-		"SELECT pg_drop_replication_slot(slot_name) "
-		"  FROM pg_replication_slots "
-		" WHERE slot_name ~ '" REPLICATION_SLOT_NAME_PATTERN "' "
-		"   AND slot_type = 'physical'";
-	/* *INDENT-ON* */
-
-	log_info("Drop pg_auto_failover physical replication slots");
-
-	return pgsql_execute_with_params(pgsql, sql, 0, NULL, NULL, NULL, NULL);
-}
-
-
-/*
  * BuildNodesArrayValues build the SQL expression to use in a FROM clause to
  * represent the list of other standby nodes from the given nodeArray.
  *
@@ -860,7 +839,18 @@ pgsql_replication_slot_drop_removed(PGSQL *pgsql, NodeAddressArray *nodeArray)
 		" SELECT slot_name, pg_drop_replication_slot(slot_name) "
 		"   FROM pg_replication_slots pgrs LEFT JOIN nodes USING(slot_name) "
 		"  WHERE nodes.slot_name IS NULL "
+		"    AND (   slot_name ~ '" REPLICATION_SLOT_NAME_PATTERN "' "
+		"         OR slot_name ~ '" REPLICATION_SLOT_NAME_DEFAULT "' )"
+		"    AND slot_type = 'physical'"
+		"), \n"
+		"created as ("
+		"SELECT c.slot_name, c.lsn "
+		"  FROM nodes LEFT JOIN pg_replication_slots pgrs USING(slot_name), "
+		"       LATERAL pg_create_physical_replication_slot(slot_name, true) c"
+		" WHERE pgrs.slot_name IS NULL "
 		") \n"
+		"SELECT 'create', slot_name, lsn FROM created "
+		" union all "
 		"SELECT 'drop', slot_name, NULL::pg_lsn FROM dropped";
 	/* *INDENT-ON* */
 
@@ -913,6 +903,8 @@ pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray)
 		" SELECT slot_name, pg_drop_replication_slot(slot_name) "
 		"   FROM pg_replication_slots pgrs LEFT JOIN nodes USING(slot_name) "
 		"  WHERE nodes.slot_name IS NULL "
+		"    AND slot_name ~ '" REPLICATION_SLOT_NAME_PATTERN "' "
+		"    AND slot_type = 'physical'"
 		"), \n"
 		"advanced as ("
 		"SELECT a.slot_name, a.end_lsn"
@@ -1115,6 +1107,38 @@ pgsql_alter_system_set(PGSQL *pgsql, GUC setting)
 	}
 
 	if (!pgsql_reload_conf(pgsql))
+	{
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * pgsql_reset_primary_conninfo issues the following SQL commands:
+ *
+ *   ALTER SYSTEM RESET primary_conninfo;
+ *   ALTER SYSTEM RESET primary_slot_name;
+ *
+ * That's necessary to clean-up the replication settings that pg_basebackup
+ * puts in place in postgresql.auto.conf in Postgres 12. We don't reload the
+ * configuration after the RESET in that case, because Postgres 12 requires a
+ * restart to apply the new setting value anyway.
+ */
+bool
+pgsql_reset_primary_conninfo(PGSQL *pgsql)
+{
+	char *reset_primary_conninfo = "ALTER SYSTEM RESET primary_conninfo";
+	char *reset_primary_slot_name = "ALTER SYSTEM RESET primary_slot_name";
+
+	/* ALTER SYSTEM cannot run inside a transaction block */
+	if (!pgsql_execute(pgsql, reset_primary_conninfo))
+	{
+		return false;
+	}
+
+	if (!pgsql_execute(pgsql, reset_primary_slot_name))
 	{
 		return false;
 	}
@@ -1699,6 +1723,7 @@ pgsql_get_postgres_metadata(PGSQL *pgsql, const char *slotName,
 		"     join pg_stat_replication rep"
 		"       on rep.pid = slot.active_pid"
 		"   where slot_name ~ '" REPLICATION_SLOT_NAME_PATTERN "' "
+		"      or slot_name = '" REPLICATION_SLOT_NAME_DEFAULT "' "
 		"order by case sync_state "
 		"         when 'quorum' then 4 "
 		"         when 'sync' then 3 "
