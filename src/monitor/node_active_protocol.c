@@ -943,8 +943,7 @@ perform_failover(PG_FUNCTION_ARGS)
 	AutoFailoverNode *primaryNode = NULL;
 	AutoFailoverNode *secondaryNode = NULL;
 
-	List *primaryStates = list_make2_int(REPLICATION_STATE_PRIMARY,
-										 REPLICATION_STATE_WAIT_PRIMARY);
+	List *primaryStates = list_make1_int(REPLICATION_STATE_PRIMARY);
 	List *secondaryStates = list_make2_int(REPLICATION_STATE_SECONDARY,
 										   REPLICATION_STATE_CATCHINGUP);
 
@@ -976,7 +975,20 @@ perform_failover(PG_FUNCTION_ARGS)
 	}
 	else
 	{
-		ereport(ERROR, (errmsg("cannot fail over: there is no primary node")));
+		ereport(ERROR,
+				(errmsg("cannot fail over: there is no primary node"),
+				 errdetail("node %d (%s:%d) is in state \"%s\" and "
+						   "node %d (%s:%d) is in state \"%s\"",
+						   firstNode->nodeId,
+						   firstNode->nodeName,
+						   firstNode->nodePort,
+						   ReplicationStateGetName(firstNode->reportedState),
+						   secondNode->nodeId,
+						   secondNode->nodeName,
+						   secondNode->nodePort,
+						   ReplicationStateGetName(secondNode->reportedState)),
+				 errhint("we need one node to be in state \"primary\" to "
+						 "perform a manual failover")));
 	}
 
 	if (IsStateIn(firstNode->reportedState, secondaryStates) &&
