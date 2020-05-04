@@ -943,11 +943,7 @@ perform_failover(PG_FUNCTION_ARGS)
 	AutoFailoverNode *primaryNode = NULL;
 	AutoFailoverNode *secondaryNode = NULL;
 
-	List *primaryStates = list_make1_int(REPLICATION_STATE_PRIMARY);
-	List *secondaryStates = list_make2_int(REPLICATION_STATE_SECONDARY,
-										   REPLICATION_STATE_CATCHINGUP);
-
-	char message[BUFSIZE];
+	char message[BUFSIZE] = { 0 };
 
 	checkPgAutoFailoverVersion();
 
@@ -963,13 +959,21 @@ perform_failover(PG_FUNCTION_ARGS)
 	firstNode = linitial(groupNodeList);
 	secondNode = lsecond(groupNodeList);
 
-	if (IsStateIn(firstNode->goalState, primaryStates) &&
-		IsStateIn(firstNode->reportedState, primaryStates))
+	/*
+	 * A manual failover is allowed to happen only when we have a solid state:
+	 * one node is assigned primary, the other node is assigned secondary.
+	 *
+	 * Because of the way the node_active protocol works, it might be that the
+	 * nodes didn't reach the assigned goalState yet, though the monitor knows
+	 * it's okay already to perform a failover. So here, we only test for the
+	 * assigned goalState to be as expected.
+	 */
+
+	if (firstNode->goalState == REPLICATION_STATE_PRIMARY)
 	{
 		primaryNode = firstNode;
 	}
-	else if (IsStateIn(secondNode->reportedState, primaryStates) &&
-			 IsStateIn(secondNode->goalState, primaryStates))
+	else if (secondNode->goalState == REPLICATION_STATE_PRIMARY)
 	{
 		primaryNode = secondNode;
 	}
@@ -987,17 +991,15 @@ perform_failover(PG_FUNCTION_ARGS)
 						   secondNode->nodeName,
 						   secondNode->nodePort,
 						   ReplicationStateGetName(secondNode->reportedState)),
-				 errhint("we need one node to be in state \"primary\" to "
+				 errhint("one node must be in state \"primary\" to "
 						 "perform a manual failover")));
 	}
 
-	if (IsStateIn(firstNode->reportedState, secondaryStates) &&
-		IsStateIn(firstNode->goalState, secondaryStates))
+	if (firstNode->goalState == REPLICATION_STATE_SECONDARY)
 	{
 		secondaryNode = firstNode;
 	}
-	else if (IsStateIn(secondNode->reportedState, secondaryStates) &&
-			 IsStateIn(secondNode->goalState, secondaryStates))
+	else if (secondNode->goalState == REPLICATION_STATE_SECONDARY)
 	{
 		secondaryNode = secondNode;
 	}

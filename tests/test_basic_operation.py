@@ -110,6 +110,12 @@ def test_015_add_new_secondary():
     global node3
     node3 = cluster.create_datanode("/tmp/basic/node3")
     node3.create()
+
+@raises(Exception)
+def test_016_cant_failover_yet():
+    monitor.failover()
+
+def test_017_run_secondary():
     node3.run()
     assert node3.wait_until_state(target_state="secondary")
     assert node2.wait_until_state(target_state="primary")
@@ -126,7 +132,7 @@ def test_015_add_new_secondary():
 # replication, we check that we still have a replication slot for the other
 # node.
 #
-def test_016_multiple_manual_failover_verify_replication_slots():
+def test_018_multiple_manual_failover_verify_replication_slots():
     print()
 
     print("Calling pgautofailover.failover() on the monitor")
@@ -145,12 +151,12 @@ def test_016_multiple_manual_failover_verify_replication_slots():
     assert node2.has_needed_replication_slots()
     assert node3.has_needed_replication_slots()
 
-def test_017_drop_primary():
+def test_019_drop_primary():
     node2.drop()
     assert not node2.pg_is_running()
     assert node3.wait_until_state(target_state="single")
 
-def test_018_stop_postgres_monitor():
+def test_020_stop_postgres_monitor():
     original_state = node3.get_state()
     monitor.stop_postgres()
     monitor.wait_until_pg_is_running()
