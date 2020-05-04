@@ -709,27 +709,6 @@ pgsql_drop_replication_slot(PGSQL *pgsql, const char *slotName)
 
 
 /*
- * pgsql_drop_replication_slots drops all the pg_auto_failover physical
- * replication slots. (We might not own all those that exist on the server)
- */
-bool
-pgsql_drop_replication_slots(PGSQL *pgsql)
-{
-	/* *INDENT-OFF* */
-	char *sql =
-		"SELECT pg_drop_replication_slot(slot_name) "
-		"  FROM pg_replication_slots "
-		" WHERE slot_name ~ '" REPLICATION_SLOT_NAME_PATTERN "' "
-		"   AND slot_type = 'physical'";
-	/* *INDENT-ON* */
-
-	log_info("Drop pg_auto_failover physical replication slots");
-
-	return pgsql_execute_with_params(pgsql, sql, 0, NULL, NULL, NULL, NULL);
-}
-
-
-/*
  * BuildNodesArrayValues build the SQL expression to use in a FROM clause to
  * represent the list of other standby nodes from the given nodeArray.
  *
