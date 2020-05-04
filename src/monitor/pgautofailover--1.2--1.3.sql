@@ -95,7 +95,7 @@ ALTER TABLE pgautofailover.event
 
 CREATE TABLE pgautofailover.event
  (
-    eventid           bigserial not null,
+    eventid           bigint not null DEFAULT nextval('pgautofailover.event_eventid_seq'::regclass),
     eventtime         timestamptz not null default now(),
     formationid       text not null,
     nodeid            bigint not null,
