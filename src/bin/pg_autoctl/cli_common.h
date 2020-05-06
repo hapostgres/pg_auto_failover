@@ -88,7 +88,6 @@ extern CommandLine config_commands;
 /* cli_create_drop_node.c */
 extern CommandLine create_monitor_command;
 extern CommandLine create_postgres_command;
-extern CommandLine create_standby_command;
 extern CommandLine drop_node_command;
 extern CommandLine drop_monitor_command;
 extern CommandLine destroy_command;
