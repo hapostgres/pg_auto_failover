@@ -7,7 +7,7 @@ EXTVERSION = 1.3
 SRC_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
 DATA_built = $(EXTENSION)--$(EXTVERSION).sql
-DATA = $(EXTENSION)--1.0.sql $(wildcard $(EXTENSION)--*--*.sql)
+DATA = $(EXTENSION)--1.0.sql $(patsubst ${SRC_DIR}%,%,$(wildcard ${SRC_DIR}$(EXTENSION)--*--*.sql))
 
 # compilation configuration
 MODULE_big = $(EXTENSION)
