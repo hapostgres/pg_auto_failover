@@ -921,16 +921,8 @@ standby_fetch_missing_wal_and_promote(LocalPostgresServer *postgres)
 	ReplicationSource *replicationSource = &(postgres->replicationSource);
 	NodeAddress *upstreamNode = &(replicationSource->primaryNode);
 
-	char replayLSN[PG_LSN_MAXLENGTH] = { 0 };
-	uint64_t currentLSN = 0;
-	uint64_t targetLSN = 0;
-
-	/* make it possible to compare the current and target LSN positions */
-	if (!parseLSN(replicationSource->targetLSN, &targetLSN) || targetLSN == 0)
-	{
-		log_error("Failed to parse LSN \"%s\"", replicationSource->targetLSN);
-		return false;
-	}
+	char currentLSN[PG_LSN_MAXLENGTH] = { 0 };
+	bool reachedLSN = false;
 
 	log_info("Fetching WAL from upstream node %d (%s:%d) up to LSN %s",
 			 upstreamNode->nodeId,
@@ -977,30 +969,27 @@ standby_fetch_missing_wal_and_promote(LocalPostgresServer *postgres)
 	/*
 	 * Now loop until replay has reached our targetLSN.
 	 */
-	while (currentLSN < targetLSN)
+	while (!reachedLSN)
 	{
-		if (!pgsql_get_last_wal_replay_lsn(pgsql, replayLSN))
+		if (!pgsql_has_reached_target_lsn(pgsql,
+										  replicationSource->targetLSN,
+										  currentLSN,
+										  &reachedLSN))
 		{
 			/* errors have already been logged */
 			return false;
 		}
 
-		if (!parseLSN(replayLSN, &currentLSN))
-		{
-			log_error("Failed to parse LSN \"%s\"", replayLSN);
-			return false;
-		}
-
-		if (currentLSN < targetLSN)
+		if (!reachedLSN)
 		{
 			log_info("Postgres recovery is at LSN %s, waiting for LSN %s",
-					 replayLSN, replicationSource->targetLSN);
+					 currentLSN, replicationSource->targetLSN);
 			pg_usleep(AWAIT_PROMOTION_SLEEP_TIME_MS * 1000);
 		}
 	}
 
 	/* done with fast-forwarding, keep the value for node_active() call */
-	strlcpy(postgres->currentLSN, replayLSN, PG_LSN_MAXLENGTH);
+	strlcpy(postgres->currentLSN, currentLSN, PG_LSN_MAXLENGTH);
 	log_info("Fast-forward is done, now at LSN %s", postgres->currentLSN);
 
 	/*

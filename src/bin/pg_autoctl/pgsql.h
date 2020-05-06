@@ -221,7 +221,8 @@ bool pgsql_reset_primary_conninfo(PGSQL *pgsql);
 
 bool pgsql_get_postgres_metadata(PGSQL *pgsql, bool *pg_is_in_recovery,
 								 char *pgsrSyncState, char *currentLSN);
-bool pgsql_get_last_wal_replay_lsn(PGSQL *pgsql, char *replayLSN);
+bool pgsql_has_reached_target_lsn(PGSQL *pgsql, char *targetLSN,
+								  char *currentLSN, bool *reachedLSN);
 
 bool pgsql_listen(PGSQL *pgsql, char *channels[]);
 

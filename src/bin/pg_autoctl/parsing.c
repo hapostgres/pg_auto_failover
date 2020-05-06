@@ -479,53 +479,6 @@ parse_bool(const char *value, bool *result)
 
 
 /*
- * parseLSN parses a LSN string and sets the parsed value in lsn.
- *
- * We took the code from pg_lsn_in in Postgres source file
- * src/backend/utils/adt/pg_lsn.c
- */
-#define MAXPG_LSNLEN 17
-#define MAXPG_LSNCOMPONENT 8
-
-bool
-parseLSN(const char *lsn_string, uint64_t *lsn)
-{
-	int len1,
-		len2;
-	uint32 id,
-		   off;
-
-	/* Sanity check input format. */
-	len1 = strspn(lsn_string, "0123456789abcdefABCDEF");
-
-	if (len1 < 1 ||
-		len1 > MAXPG_LSNCOMPONENT ||
-		lsn_string[len1] != '/')
-	{
-		log_error("Failed to parse LSN value \"%s\"", lsn_string);
-		return false;
-	}
-
-	len2 = strspn(lsn_string + len1 + 1, "0123456789abcdefABCDEF");
-
-	if (len2 < 1 ||
-		len2 > MAXPG_LSNCOMPONENT ||
-		lsn_string[len1 + 1 + len2] != '\0')
-	{
-		log_error("Failed to parse LSN value \"%s\"", lsn_string);
-		return false;
-	}
-
-	/* Decode result. */
-	id = (uint32) strtoul(lsn_string, NULL, 16);
-	off = (uint32) strtoul(lsn_string + len1 + 1, NULL, 16);
-	*lsn = ((uint64) id << 32) | off;
-
-	return true;
-}
-
-
-/*
  * parse_pguri_info_key_vals decomposes elements of a Postgres connection
  * string (URI) into separate arrays of keywords and values as expected by
  * PQconnectdbParams.

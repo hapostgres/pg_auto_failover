@@ -35,6 +35,7 @@ static bool pgsql_alter_system_set(PGSQL *pgsql, GUC setting);
 static bool pgsql_get_current_setting(PGSQL *pgsql, char *settingName,
 									  char **currentValue);
 static void parsePgMetadata(void *ctx, PGresult *result);
+static void parsePgReachedTargetLSN(void *ctx, PGresult *result);
 static void parseReplicationSlotMaintain(void *ctx, PGresult *result);
 
 
@@ -1817,22 +1818,33 @@ parsePgMetadata(void *ctx, PGresult *result)
 }
 
 
+typedef struct PgReachedTargetLSN
+{
+	char sqlstate[6];
+	bool parsedOk;
+	bool reachedLSN;
+	char currentLSN[PG_LSN_MAXLENGTH];
+} PgReachedTargetLSN;
+
+
 /*
- * pgsql_get_last_wal_replay_lsn calls pg_last_wal_replay_lsn() and provides
- * the result in the given pre-allocated char buffer.
- *
- * We reuse parsePgMetadata here even though we're not executing the same SQL
- * query, we arrange for the result set to be compatible and map the internal
- * context to the actual values being fetched.
+ * pgsql_has_reached_target_lsn calls pg_last_wal_replay_lsn() and compares the
+ * current LSN on the system to the given targetLSN.
  */
 bool
-pgsql_get_last_wal_replay_lsn(PGSQL *pgsql, char *replayLSN)
+pgsql_has_reached_target_lsn(PGSQL *pgsql, char *targetLSN,
+							 char *currentLSN, bool *reachedLSN)
 {
-	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_STRING, false };
-	char *sql = "SELECT pg_last_wal_replay_lsn()";
+	PgReachedTargetLSN context = { 0 };
+	char *sql =
+		"SELECT $1::pg_lsn < pg_last_wal_replay_lsn(), "
+		" pg_last_wal_replay_lsn()";
 
-	if (!pgsql_execute_with_params(pgsql, sql, 0, NULL, NULL,
-								   &context, &parseSingleValueResult))
+	const Oid paramTypes[1] = { LSNOID };
+	const char *paramValues[1] = { targetLSN };
+
+	if (!pgsql_execute_with_params(pgsql, sql, 1, paramTypes, paramValues,
+								   &context, &parsePgReachedTargetLSN))
 	{
 		/* errors have been logged already */
 		return false;
@@ -1844,9 +1856,50 @@ pgsql_get_last_wal_replay_lsn(PGSQL *pgsql, char *replayLSN)
 		return false;
 	}
 
-	strlcpy(replayLSN, context.strVal, PG_LSN_MAXLENGTH);
+	*reachedLSN = context.reachedLSN;
+	strlcpy(currentLSN, context.currentLSN, PG_LSN_MAXLENGTH);
 
 	return true;
+}
+
+
+/*
+ * parsePgMetadata parses the result from a PostgreSQL query fetching
+ * two columns from pg_stat_replication: sync_state and currentLSN.
+ */
+static void
+parsePgReachedTargetLSN(void *ctx, PGresult *result)
+{
+	PgReachedTargetLSN *context = (PgReachedTargetLSN *) ctx;
+
+	if (PQnfields(result) != 2)
+	{
+		log_error("Query returned %d columns, expected 2", PQnfields(result));
+		context->parsedOk = false;
+		return;
+	}
+
+	if (PQntuples(result) != 1)
+	{
+		log_error("Query returned %d rows, expected 1", PQntuples(result));
+		context->parsedOk = false;
+		return;
+	}
+
+	context->reachedLSN = strcmp(PQgetvalue(result, 0, 0), "t") == 0;
+
+	if (!PQgetisnull(result, 0, 1))
+	{
+		char *value = PQgetvalue(result, 0, 2);
+
+		strlcpy(context->currentLSN, value, PG_LSN_MAXLENGTH);
+	}
+	else
+	{
+		context->currentLSN[0] = '\0';
+	}
+
+	context->parsedOk = true;
 }
 
 

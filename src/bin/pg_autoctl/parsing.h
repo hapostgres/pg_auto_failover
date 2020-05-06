@@ -27,8 +27,6 @@ bool parse_bool(const char *value, bool *result);
 
 #define boolToString(value) (value) ? "true" : "false"
 
-bool parseLSN(const char *lsn_string, uint64_t *lsn);
-
 
 /*
  * To parse Postgres URI we need to store keywords and values in separate
