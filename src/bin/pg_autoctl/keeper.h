@@ -34,9 +34,8 @@ typedef struct Keeper
 
 
 bool keeper_init(Keeper *keeper, KeeperConfig *config);
-bool keeper_init_fsm(Keeper *keeper, KeeperConfig *config);
-bool keeper_register_and_init(Keeper *keeper, KeeperConfig *config,
-							  NodeState initialState);
+bool keeper_init_fsm(Keeper *keeper);
+bool keeper_register_and_init(Keeper *keeper, NodeState initialState);
 bool keeper_load_state(Keeper *keeper);
 bool keeper_store_state(Keeper *keeper);
 bool keeper_update_state(Keeper *keeper, int node_id, int group_id, NodeState state,
@@ -48,6 +47,8 @@ bool keeper_ensure_postgres_is_running(Keeper *keeper, bool updateRetries);
 bool keeper_drop_replication_slots_for_removed_nodes(Keeper *keeper);
 bool keeper_maintain_replication_slots(Keeper *keeper);
 bool keeper_ensure_current_state(Keeper *keeper);
+bool keeper_create_self_signed_cert(Keeper *keeper);
+bool keeper_ensure_configuration(Keeper *keeper);
 bool keeper_update_pg_state(Keeper *keeper);
 bool ReportPgIsRunning(Keeper *keeper);
 bool keeper_remove(Keeper *keeper, KeeperConfig *config,
@@ -60,9 +61,6 @@ bool keeper_state_as_json(Keeper *keeper, char *json, int size);
 bool keeper_init_state_discover(Keeper *keeper, KeeperStateInit *initState);
 
 /* loop.c */
-bool keeper_service_init(Keeper *keeper, pid_t *pid);
-bool keeper_service_stop(Keeper *keeper);
-bool keeper_service_run(Keeper *keeper, pid_t *start_pid);
-bool read_pidfile(const char *pidfile, pid_t *pid);
+bool keeper_node_active_loop(Keeper *keeper, pid_t start_pid);
 
 #endif /* KEEPER_H */

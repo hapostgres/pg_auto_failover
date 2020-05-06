@@ -64,8 +64,8 @@ fsm_init_primary(Keeper *keeper)
 	bool inRecovery = false;
 
 	KeeperStateInit initState = { 0 };
-	PostgresSetup pgSetup = keeper->config.pgSetup;
-	bool postgresInstanceExists = pg_setup_pgdata_exists(&pgSetup);
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+	bool postgresInstanceExists = pg_setup_pgdata_exists(pgSetup);
 	bool pgInstanceIsOurs = false;
 
 	log_info("Initialising postgres as a primary");
@@ -110,10 +110,10 @@ fsm_init_primary(Keeper *keeper)
 	if (initState.pgInitState == PRE_INIT_STATE_EMPTY &&
 		!postgresInstanceExists)
 	{
-		if (!pg_ctl_initdb(pgSetup.pg_ctl, pgSetup.pgdata))
+		if (!pg_ctl_initdb(pgSetup->pg_ctl, pgSetup->pgdata))
 		{
 			log_fatal("Failed to initialise a PostgreSQL instance at \"%s\""
-					  ", see above for details", pgSetup.pgdata);
+					  ", see above for details", pgSetup->pgdata);
 
 			return false;
 		}
@@ -133,7 +133,7 @@ fsm_init_primary(Keeper *keeper)
 	{
 		log_error("PostgreSQL is already running at \"%s\", refusing to "
 				  "initialize a new cluster on-top of the current one.",
-				  pgSetup.pgdata);
+				  pgSetup->pgdata);
 
 		return false;
 	}
@@ -191,16 +191,10 @@ fsm_init_primary(Keeper *keeper)
 	 * self-signed certificate for the server. We place the certificate and
 	 * private key in $PGDATA/server.key and $PGDATA/server.crt
 	 */
-	if (pgSetup.ssl.createSelfSignedCert &&
-		(!file_exists(pgSetup.ssl.serverKey) ||
-		 !file_exists(pgSetup.ssl.serverCert)))
+	if (!keeper_create_self_signed_cert(keeper))
 	{
-		if (!pg_create_self_signed_cert(&pgSetup, config->nodename))
-		{
-			log_error("Failed to create SSL self-signed certificate, "
-					  "see above for details");
-			return false;
-		}
+		/* errors have already been logged */
+		return false;
 	}
 
 	if (!postgres_add_default_settings(postgres))
@@ -218,8 +212,6 @@ fsm_init_primary(Keeper *keeper)
 	{
 		char monitorHostname[_POSIX_HOST_NAME_MAX];
 		int monitorPort = 0;
-		char *password = NULL;
-		char *authMethod = NULL;
 
 		if (!hostname_from_uri(config->monitor_pguri,
 							   monitorHostname, _POSIX_HOST_NAME_MAX,
@@ -228,23 +220,6 @@ fsm_init_primary(Keeper *keeper)
 			/* developer error, this should never happen */
 			log_fatal("BUG: monitor_pguri should be validated before calling "
 					  "fsm_init_primary");
-			return false;
-		}
-
-		authMethod = pg_setup_get_auth_method(&(config->pgSetup));
-
-		/*
-		 * We need to add the monitor host:port in the HBA settings for the
-		 * node to enable the health checks.
-		 */
-		if (!primary_create_user_with_hba(postgres,
-										  PG_AUTOCTL_HEALTH_USERNAME, password,
-										  monitorHostname, authMethod))
-		{
-			log_error(
-				"Failed to initialise postgres as primary because "
-				"creating the database user that the pg_auto_failover monitor "
-				"uses for health checks failed, see above for details");
 			return false;
 		}
 	}
@@ -326,7 +301,8 @@ fsm_init_primary(Keeper *keeper)
  * fsm_disable_replication is used when other node was forcibly removed, now
  * single.
  *
- * disable_synchronous_replication && drop_replication_slot
+ *    disable_synchronous_replication
+ * && keeper_drop_replication_slots_for_removed_nodes
  *
  * TODO: We currently use a separate session for each step. We should use
  * a single connection.
@@ -334,7 +310,6 @@ fsm_init_primary(Keeper *keeper)
 bool
 fsm_disable_replication(Keeper *keeper)
 {
-	KeeperConfig *config = &(keeper->config);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
 	if (!primary_disable_synchronous_replication(postgres))
@@ -344,15 +319,8 @@ fsm_disable_replication(Keeper *keeper)
 		return false;
 	}
 
-	if (!primary_drop_replication_slots(postgres))
-	{
-		log_error("Failed to disable replication because dropping the replication "
-				  "slot \"%s\" used by the standby failed, see above for details",
-				  config->replication_slot_name);
-		return false;
-	}
-
-	return true;
+	/* when a standby has been removed, remove its replication slot */
+	return keeper_drop_replication_slots_for_removed_nodes(keeper);
 }
 
 
@@ -362,7 +330,7 @@ fsm_disable_replication(Keeper *keeper)
  *
  *    start_postgres
  * && disable_synchronous_replication
- * && drop_replication_slot
+ * && keeper_drop_replication_slots_for_removed_nodes
  *
  * So we reuse fsm_disable_replication() here, rather than copy/pasting the same
  * bits code in the fsm_resume_as_primary() function body. If the definition of
@@ -734,16 +702,15 @@ fsm_init_standby(Keeper *keeper)
 	KeeperConfig *config = &(keeper->config);
 	Monitor *monitor = &(keeper->monitor);
 	LocalPostgresServer *postgres = &(keeper->postgres);
-	ReplicationSource replicationSource = { 0 };
-	int groupId = keeper->state.current_group;
 
-	char applicationName[BUFSIZE] = { 0 };
+	int groupId = keeper->state.current_group;
+	NodeAddress *primaryNode = NULL;
 
 	/* get the primary node to follow */
 	if (!config->monitorDisabled)
 	{
 		if (!monitor_get_primary(monitor, config->formation, groupId,
-								 &replicationSource.primaryNode))
+								 &(postgres->replicationSource.primaryNode)))
 		{
 			log_error("Failed to initialise standby because get the primary node "
 					  "from the monitor failed, see above for details");
@@ -753,29 +720,34 @@ fsm_init_standby(Keeper *keeper)
 	else
 	{
 		/* copy information from keeper->otherNodes into replicationSource */
-		strlcpy(replicationSource.primaryNode.host,
-				keeper->otherNodes.nodes[0].host, _POSIX_HOST_NAME_MAX);
-
-		replicationSource.primaryNode.port = keeper->otherNodes.nodes[0].port;
+		primaryNode = &(keeper->otherNodes.nodes[0]);
 	}
 
-	replicationSource.userName = PG_AUTOCTL_REPLICA_USERNAME;
-	replicationSource.password = config->replication_password;
-	replicationSource.slotName = config->replication_slot_name;
-	replicationSource.maximumBackupRate = config->maximum_backup_rate;
-	replicationSource.backupDir = config->backupDirectory;
-	replicationSource.sslOptions = config->pgSetup.ssl;
+	if (!standby_init_replication_source(postgres,
+										 primaryNode,
+										 PG_AUTOCTL_REPLICA_USERNAME,
+										 config->replication_password,
+										 config->replication_slot_name,
+										 config->maximum_backup_rate,
+										 config->backupDirectory,
+										 NULL, /* no targetLSN */
+										 config->pgSetup.ssl,
+										 keeper->state.current_node_id))
+	{
+		/* can't happen at the moment */
+		return false;
+	}
 
-	/* prepare our application_name */
-	sformat(applicationName, BUFSIZE,
-			"%s%d",
-			REPLICATION_APPLICATION_NAME_PREFIX,
-			keeper->state.current_node_id);
-	replicationSource.applicationName = applicationName;
-
-	if (!standby_init_database(postgres, &replicationSource, config->nodename))
+	if (!standby_init_database(postgres, config->nodename))
 	{
 		log_error("Failed initialise standby server, see above for details");
+		return false;
+	}
+
+	/* ensure the SSL setup is synced with the keeper config */
+	if (!keeper_create_self_signed_cert(keeper))
+	{
+		/* errors have already been logged */
 		return false;
 	}
 
@@ -795,17 +767,14 @@ fsm_rewind_or_init(Keeper *keeper)
 	Monitor *monitor = &(keeper->monitor);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
-	ReplicationSource replicationSource = { 0 };
 	int groupId = keeper->state.current_group;
-
-	char applicationName[BUFSIZE] = { 0 };
-	char standbySlotName[BUFSIZE] = { 0 };
+	NodeAddress *primaryNode = NULL;
 
 	/* get the primary node to follow */
 	if (!config->monitorDisabled)
 	{
 		if (!monitor_get_primary(monitor, config->formation, groupId,
-								 &replicationSource.primaryNode))
+								 &(postgres->replicationSource.primaryNode)))
 		{
 			log_error("Failed to initialise standby because get the primary node "
 					  "from the monitor failed, see above for details");
@@ -815,62 +784,41 @@ fsm_rewind_or_init(Keeper *keeper)
 	else
 	{
 		/* copy information from keeper->otherNodes into replicationSource */
-		strlcpy(replicationSource.primaryNode.host,
-				keeper->otherNodes.nodes[0].host, _POSIX_HOST_NAME_MAX);
-
-		replicationSource.primaryNode.port = keeper->otherNodes.nodes[0].port;
+		primaryNode = &(keeper->otherNodes.nodes[0]);
 	}
 
-	replicationSource.userName = PG_AUTOCTL_REPLICA_USERNAME;
-	replicationSource.password = config->replication_password;
-	replicationSource.slotName = config->replication_slot_name;
-	replicationSource.applicationName = config->replication_slot_name;
-	replicationSource.maximumBackupRate = config->maximum_backup_rate;
-	replicationSource.backupDir = config->backupDirectory;
-	replicationSource.sslOptions = config->pgSetup.ssl;
+	if (!standby_init_replication_source(postgres,
+										 primaryNode,
+										 PG_AUTOCTL_REPLICA_USERNAME,
+										 config->replication_password,
+										 config->replication_slot_name,
+										 config->maximum_backup_rate,
+										 config->backupDirectory,
+										 NULL, /* no targetLSN */
+										 config->pgSetup.ssl,
+										 keeper->state.current_node_id))
+	{
+		/* can't happen at the moment */
+		return false;
+	}
 
-	/* prepare our application_name */
-	sformat(applicationName, BUFSIZE,
-			"%s%d",
-			REPLICATION_APPLICATION_NAME_PREFIX,
-			keeper->state.current_node_id);
-	replicationSource.applicationName = applicationName;
-
-	if (!primary_rewind_to_standby(postgres, &replicationSource))
+	if (!primary_rewind_to_standby(postgres))
 	{
 		log_warn("Failed to rewind demoted primary to standby, "
 				 "trying pg_basebackup instead");
 
-		if (!standby_init_database(postgres,
-								   &replicationSource,
-								   config->nodename))
+		if (!standby_init_database(postgres, config->nodename))
 		{
 			log_error("Failed to become standby server, see above for details");
 			return false;
 		}
-	}
 
-	/* prepare the standby's replication slot name */
-	if (!postgres_sprintf_replicationSlotName(
-			keeper->otherNodes.nodes[0].nodeId,
-			standbySlotName,
-			sizeof(standbySlotName)))
-	{
-		/* that's highly unlikely... */
-		log_error("Failed to snprintf replication slot name for node %d",
-				  keeper->otherNodes.nodes[0].nodeId);
-		return false;
-	}
-
-	if (!primary_drop_replication_slot(postgres, standbySlotName))
-	{
-		log_error("Failed to drop replication slot \"%s\" used by "
-				  "standby %d (%s:%d)",
-				  standbySlotName,
-				  keeper->otherNodes.nodes[0].nodeId,
-				  keeper->otherNodes.nodes[0].host,
-				  keeper->otherNodes.nodes[0].port);
-		return false;
+		/* ensure the SSL setup is synced with the keeper config */
+		if (!keeper_create_self_signed_cert(keeper))
+		{
+			/* errors have already been logged */
+			return false;
+		}
 	}
 
 	return true;
@@ -956,14 +904,21 @@ fsm_restart_standby(Keeper *keeper)
 
 
 /*
- * The following actions are needed to promote a standby, and used in several
- * situations in the FSM transitions:
+ * fsm_promote_standby is used in several situations in the FSM transitions and
+ * the following actions are needed to promote a standby:
  *
  *    start_postgres
  * && promote_standby
  * && add_standby_to_hba
  * && create_replication_slot
  * && disable_synchronous_replication
+ * && keeper_drop_replication_slots_for_removed_nodes
+ *
+ * So we reuse fsm_disable_replication() here, rather than copy/pasting the same
+ * bits code in the fsm_promote_standby() function body. If the definition of
+ * the fsm_promote_standby transition ever came to diverge from whatever
+ * fsm_disable_replication() is doing, we'd have to copy/paste and maintain
+ * separate code path.
  */
 bool
 fsm_promote_standby(Keeper *keeper)
@@ -1014,7 +969,7 @@ fsm_promote_standby(Keeper *keeper)
 		return false;
 	}
 
-	if (!primary_disable_synchronous_replication(postgres))
+	if (!fsm_disable_replication(keeper))
 	{
 		log_error("Failed to disable synchronous replication after promotion, "
 				  "see above for details");
@@ -1087,7 +1042,7 @@ fsm_fast_forward(Keeper *keeper)
 
 		if (keeper->otherNodes.count != 1)
 		{
-			log_error("Failed to find a node in state \"fast_forward\" on "
+			log_error("Failed to find a node in state \"wait_cascade\" on "
 					  "the monitor, pgautofailover.get_other_nodes() "
 					  "returned %d node(s)",
 					  keeper->otherNodes.count);
@@ -1095,22 +1050,26 @@ fsm_fast_forward(Keeper *keeper)
 	}
 
 	/*
-	 * We expect a single FAST_FORWARD node in the system at any point.
+	 * We expect a single WAIT_CASCADE node in the system at any point.
 	 */
 	upstreamNode = &(keeper->otherNodes.nodes[0]);
 
-	/* copy upstream node over replicationSource.primaryNode */
-	replicationSource.primaryNode = keeper->otherNodes.nodes[0];
+	if (!standby_init_replication_source(postgres,
+										 upstreamNode,
+										 PG_AUTOCTL_REPLICA_USERNAME,
+										 config->replication_password,
+										 config->replication_slot_name,
+										 config->maximum_backup_rate,
+										 config->backupDirectory,
+										 upstreamNode->lsn,
+										 config->pgSetup.ssl,
+										 keeper->state.current_node_id))
+	{
+		/* can't happen at the moment */
+		return false;
+	}
 
-	replicationSource.userName = PG_AUTOCTL_REPLICA_USERNAME;
-	replicationSource.password = config->replication_password;
-	replicationSource.slotName = config->replication_slot_name;
-	replicationSource.applicationName = config->replication_slot_name;
-	replicationSource.maximumBackupRate = config->maximum_backup_rate;
-	replicationSource.backupDir = config->backupDirectory;
-	replicationSource.targetLSN = upstreamNode->lsn;
-
-	if (!standby_fetch_missing_wal_and_promote(postgres, &replicationSource))
+	if (!standby_fetch_missing_wal_and_promote(postgres))
 	{
 		log_error("Failed to fetch WAL bytes from standby node %d (%s:%d), "
 				  "see above for details",
@@ -1224,32 +1183,40 @@ fsm_follow_new_primary(Keeper *keeper)
 	KeeperConfig *config = &(keeper->config);
 	Monitor *monitor = &(keeper->monitor);
 	LocalPostgresServer *postgres = &(keeper->postgres);
-	ReplicationSource replicationSource = { 0 };
+	ReplicationSource *replicationSource = &(postgres->replicationSource);
 	int groupId = keeper->state.current_group;
 
 	/* get the primary node to follow */
 	if (!monitor_get_primary(monitor, config->formation, groupId,
-							 &replicationSource.primaryNode))
+							 &(replicationSource->primaryNode)))
 	{
 		log_error("Failed to get the primary node from the monitor, "
 				  "see above for details");
 		return false;
 	}
 
-	replicationSource.userName = PG_AUTOCTL_REPLICA_USERNAME;
-	replicationSource.password = config->replication_password;
-	replicationSource.slotName = config->replication_slot_name;
-	replicationSource.applicationName = config->replication_slot_name;
-	replicationSource.maximumBackupRate = config->maximum_backup_rate;
-	replicationSource.backupDir = config->backupDirectory;
+	if (!standby_init_replication_source(postgres,
+										 NULL,
+										 PG_AUTOCTL_REPLICA_USERNAME,
+										 config->replication_password,
+										 config->replication_slot_name,
+										 config->maximum_backup_rate,
+										 config->backupDirectory,
+										 NULL, /* no targetLSN */
+										 config->pgSetup.ssl,
+										 keeper->state.current_node_id))
+	{
+		/* can't happen at the moment */
+		return false;
+	}
 
-	if (!standby_follow_new_primary(postgres, &replicationSource))
+	if (!standby_follow_new_primary(postgres))
 	{
 		log_error("Failed to change standby setup to follow new primary "
 				  "node %d at %s:%d, see above for details",
-				  replicationSource.primaryNode.nodeId,
-				  replicationSource.primaryNode.host,
-				  replicationSource.primaryNode.port);
+				  replicationSource->primaryNode.nodeId,
+				  replicationSource->primaryNode.host,
+				  replicationSource->primaryNode.port);
 		return false;
 	}
 

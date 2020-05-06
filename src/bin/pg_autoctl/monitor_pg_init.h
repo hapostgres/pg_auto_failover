@@ -15,6 +15,7 @@
 #include "monitor.h"
 #include "monitor_config.h"
 
-bool monitor_pg_init(Monitor *monitor, MonitorConfig *config);
+bool monitor_pg_init(Monitor *monitor);
+bool monitor_add_postgres_default_settings(Monitor *monitor);
 
 #endif /* MONITOR_PG_INIT_H */

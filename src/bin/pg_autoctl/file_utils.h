@@ -17,6 +17,13 @@
 #include <fcntl.h>
 
 
+#if defined(__APPLE__)
+#define ST_MTIME_S(st) ((int64_t) st.st_mtimespec.tv_sec)
+#else
+#define ST_MTIME_S(st) ((int64_t) st.st_mtime)
+#endif
+
+
 bool file_exists(const char *filename);
 bool directory_exists(const char *path);
 bool ensure_empty_dir(const char *dirname, int mode);

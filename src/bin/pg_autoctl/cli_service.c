@@ -23,6 +23,8 @@
 #include "keeper.h"
 #include "monitor.h"
 #include "monitor_config.h"
+#include "monitor_service.h"
+#include "service.h"
 #include "signals.h"
 
 static int stop_signal = SIGTERM;
@@ -163,22 +165,18 @@ cli_keeper_run(int argc, char **argv)
 		 * At the moment, we have nothing to do here. Later we might want to
 		 * open an HTTPd service and wait for API calls.
 		 */
-		(void) keeper_service_stop(&keeper);
+		(void) service_stop(&(keeper.config.pathnames));
 	}
 	else
 	{
-		/*
-		 * Start with a monitor, so check everything is in order, then start
-		 * the HTTPd service, and finally the main monitor node_active protocol
-		 * loop.
-		 */
+		/* Start with a monitor: implement the node active loop */
 		if (!keeper_check_monitor_extension_version(&keeper))
 		{
 			/* errors have already been logged */
 			exit(EXIT_CODE_MONITOR);
 		}
 
-		keeper_service_run(&keeper, &pid);
+		(void) keeper_node_active_loop(&keeper, pid);
 	}
 }
 
@@ -191,15 +189,17 @@ cli_keeper_run(int argc, char **argv)
 static void
 cli_monitor_run(int argc, char **argv)
 {
-	KeeperConfig kconfig = keeperOptions;
-	MonitorConfig mconfig = { 0 };
+	KeeperConfig options = keeperOptions;
 	Monitor monitor = { 0 };
+	MonitorConfig *mconfig = &(monitor.config);
 	bool missingPgdataIsOk = false;
 	bool pgIsNotRunningIsOk = true;
 	char connInfo[MAXCONNINFO];
+	pid_t pid = 0;
 
-	if (!monitor_config_init_from_pgsetup(&mconfig,
-										  &kconfig.pgSetup,
+	/* Prepare MonitorConfig from the CLI options fed in options */
+	if (!monitor_config_init_from_pgsetup(mconfig,
+										  &options.pgSetup,
 										  missingPgdataIsOk,
 										  pgIsNotRunningIsOk))
 	{
@@ -207,10 +207,20 @@ cli_monitor_run(int argc, char **argv)
 		exit(EXIT_CODE_PGCTL);
 	}
 
-	pg_setup_get_local_connection_string(&(mconfig.pgSetup), connInfo);
+	if (!monitor_service_init(mconfig, &pid))
+	{
+		log_fatal("Failed to initialize pg_auto_failover service, "
+				  "see above for details");
+		exit(EXIT_CODE_KEEPER);
+	}
+
+	/* Initialize our local connection to the monitor */
+	pg_setup_get_local_connection_string(&(mconfig->pgSetup), connInfo);
 	monitor_init(&monitor, connInfo);
 
-	(void) monitor_service_run(&monitor, &mconfig);
+	(void) monitor_service_run(&monitor, pid);
+
+	service_stop(&(mconfig->pathnames));
 }
 
 
@@ -225,13 +235,11 @@ cli_service_reload(int argc, char **argv)
 
 	keeper.config = keeperOptions;
 
-	(void) exit_unless_role_is_keeper(&(keeper.config));
-
 	if (read_pidfile(keeper.config.pathnames.pid, &pid))
 	{
 		if (kill(pid, SIGHUP) != 0)
 		{
-			log_error("Failed to send SIGHUP to the keeper's pid %d: %m", pid);
+			log_error("Failed to send SIGHUP to the pg_autoctl pid %d: %m", pid);
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 	}
@@ -372,8 +380,6 @@ cli_service_stop(int argc, char **argv)
 	Keeper keeper = { 0 };
 
 	keeper.config = keeperOptions;
-
-	(void) exit_unless_role_is_keeper(&(keeper.config));
 
 	if (read_pidfile(keeper.config.pathnames.pid, &pid))
 	{

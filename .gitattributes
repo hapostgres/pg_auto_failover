@@ -23,3 +23,5 @@ src/bin/lib/parson/** -citus-style
 src/bin/lib/log/** -citus-style
 src/bin/lib/libs/** -citus-style
 src/bin/lib/pg/** -citus-style
+src/bin/lib/subcommands.c/** -citus-style
+src/monitor/version_compat.c -citus-style

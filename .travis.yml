@@ -17,11 +17,12 @@ matrix:
     - env: PGVERSION=10
     - env: PGVERSION=11
     - env: PGVERSION=12
+    - env: LINTING=true
 before_install:
-  - git clone -b v0.7.12 --depth 1 https://github.com/citusdata/tools.git
+  - git clone -b update-uncrustify-on-travis --depth 1 https://github.com/citusdata/tools.git
   - sudo make -C tools install
-  - setup_apt
-  - nuke_pg
+  - 'if [ -z "$LINTING" ]; then setup_apt; fi'
+  - 'if [ -z "$LINTING" ]; then nuke_pg; fi'
   - python --version
   - pyenv versions
   - pyenv install -s 3.7
@@ -31,14 +32,16 @@ before_install:
   - sudo pip3 install --upgrade pip
   - pip3 install --user pipenv
 install:
-  - install_uncrustify
-  - install_pg
-  - install_custom_pg
+  - 'if [ -n "$LINTING" ]; then install_uncrustify; fi'
+  - 'if [ -z "$LINTING" ]; then install_pg; fi'
+  - 'if [ -z "$LINTING" ]; then install_custom_pg; fi'
   - PIPENV_PIPFILE="${TRAVIS_BUILD_DIR}"/tests/Pipfile pipenv install --system --deploy
   - env
-  - pg_config
-  - PATH=`pg_config --bindir`:$PATH which pg_ctl
+  - 'if [ -z "$LINTING" ]; then pg_config; fi'
+  - 'if [ -z "$LINTING" ]; then PATH=`pg_config --bindir`:$PATH which pg_ctl; fi'
 script:
-  - make -j5 CFLAGS=-Werror
-  - sudo make install
-  - PATH=`pg_config --bindir`:$PATH make test
+  - 'if [ -n "$LINTING" ]; then citus_indent --check; fi'
+  - 'if [ -n "$LINTING" ]; then ci/banned.h.sh; fi'
+  - 'if [ -z "$LINTING" ]; then make -j5 CFLAGS=-Werror; fi'
+  - 'if [ -z "$LINTING" ]; then sudo make install; fi'
+  - 'if [ -z "$LINTING" ]; then PATH=`pg_config --bindir`:$PATH make test; fi'

@@ -215,24 +215,7 @@ monitor_config_init_from_pgsetup(MonitorConfig *mconfig,
 	PostgresSetup *MpgSetup = &(mconfig->pgSetup);
 
 	/* copy command line options over to the MonitorConfig structure */
-	strlcpy(MpgSetup->pgdata, pgSetup->pgdata, MAXPGPATH);
-	strlcpy(MpgSetup->pg_ctl, pgSetup->pg_ctl, MAXPGPATH);
-	strlcpy(MpgSetup->pg_version, pgSetup->pg_version, PG_VERSION_STRING_MAX);
-	strlcpy(MpgSetup->pghost, pgSetup->pghost, _POSIX_HOST_NAME_MAX);
-	strlcpy(MpgSetup->listen_addresses, pgSetup->listen_addresses, MAXPGPATH);
-	MpgSetup->pgport = pgSetup->pgport;
-
-	/*
-	 * Make sure that we keep the SSL options too.
-	 */
-	MpgSetup->ssl.active = pgSetup->ssl.active;
-	MpgSetup->ssl.createSelfSignedCert = pgSetup->ssl.createSelfSignedCert;
-	MpgSetup->ssl.sslMode = pgSetup->ssl.sslMode;
-	strlcpy(MpgSetup->ssl.sslModeStr, pgSetup->ssl.sslModeStr, SSL_MODE_STRLEN);
-	strlcpy(MpgSetup->ssl.caFile, pgSetup->ssl.caFile, MAXPGPATH);
-	strlcpy(MpgSetup->ssl.crlFile, pgSetup->ssl.crlFile, MAXPGPATH);
-	strlcpy(MpgSetup->ssl.serverCert, pgSetup->ssl.serverCert, MAXPGPATH);
-	strlcpy(MpgSetup->ssl.serverKey, pgSetup->ssl.serverKey, MAXPGPATH);
+	*MpgSetup = *pgSetup;
 
 	if (!monitor_config_set_pathnames_from_pgdata(mconfig))
 	{
@@ -291,6 +274,15 @@ monitor_config_read_file(MonitorConfig *config,
 	/* A part of the monitor's pgSetup is hard-coded. */
 	strlcpy(config->pgSetup.dbname, PG_AUTOCTL_MONITOR_DBNAME, NAMEDATALEN);
 	strlcpy(config->pgSetup.username, PG_AUTOCTL_MONITOR_USERNAME, NAMEDATALEN);
+
+	/*
+	 * Required for grandfathering old clusters that don't have sslmode
+	 * explicitely set
+	 */
+	if (IS_EMPTY_STRING_BUFFER(config->pgSetup.ssl.sslModeStr))
+	{
+		strlcpy(config->pgSetup.ssl.sslModeStr, "prefer", SSL_MODE_STRLEN);
+	}
 
 	/* set the ENUM value for sslMode */
 	config->pgSetup.ssl.sslMode =
@@ -589,4 +581,34 @@ monitor_config_update_with_absolute_pgdata(MonitorConfig *config)
 	}
 
 	return true;
+}
+
+
+/*
+ * monitor_config_accept_new returns true when we can accept to RELOAD our
+ * current config into the new one that's been editing.
+ */
+bool
+monitor_config_accept_new(MonitorConfig *config, MonitorConfig *newConfig)
+{
+	/* some elements are not supposed to change on a reload */
+	if (strneq(newConfig->pgSetup.pgdata, config->pgSetup.pgdata))
+	{
+		log_error("Attempt to change postgresql.pgdata from \"%s\" to \"%s\"",
+				  config->pgSetup.pgdata, newConfig->pgSetup.pgdata);
+		return false;
+	}
+
+	/* changing the nodename online is supported */
+	if (strneq(newConfig->nodename, config->nodename))
+	{
+		log_info("Reloading configuration: nodename is now \"%s\"; "
+				 "used to be \"%s\"",
+				 newConfig->nodename, config->nodename);
+		strlcpy(config->nodename, newConfig->nodename, _POSIX_HOST_NAME_MAX);
+	}
+
+	/* we can change any SSL related setup options at runtime */
+	return config_accept_new_ssloptions(&(config->pgSetup),
+										&(newConfig->pgSetup));
 }

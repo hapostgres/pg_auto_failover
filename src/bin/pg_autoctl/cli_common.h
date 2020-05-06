@@ -149,7 +149,7 @@ void exit_unless_role_is_keeper(KeeperConfig *kconfig);
 
 /* cli_create_drop_node.c */
 bool cli_create_config(Keeper *keeper, KeeperConfig *config);
-void cli_create_pg(Keeper *keeper, KeeperConfig *config, NodeState initNodeState);
+void cli_create_pg(Keeper *keeper, NodeState initNodeState);
 bool check_or_discover_nodename(KeeperConfig *config);
 void keeper_cli_destroy_node(int argc, char **argv);
 
@@ -169,5 +169,7 @@ bool cli_getopt_ssl_flags(int ssl_flag, char *optarg, PostgresSetup *pgSetup);
 bool cli_getopt_accept_ssl_options(SSLCommandLineOptions newSSLOption,
 								   SSLCommandLineOptions currentSSLOptions);
 void cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy);
+
+bool cli_pg_autoctl_reload(const char *pidfile);
 
 #endif  /* CLI_COMMON_H */

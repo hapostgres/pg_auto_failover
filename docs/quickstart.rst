@@ -17,7 +17,7 @@ health, manages global state, and assigns nodes their roles.
 .. _quickstart_install:
 
 Install the "pg_autoctl" executable
---------------------------------
+-----------------------------------
 
 This guide uses Red Hat Linux, but similar steps will work on other distributions. All that differs are the packages and paths. See :ref:`install`.
 
@@ -66,12 +66,12 @@ In our case, ``pg_autoctl create monitor`` creates a database called
 ``pg_auto_failover``, installs the ``pgautofailover`` Postgres extension,
 and grants access to a new ``autoctl_node`` user.
 
-In the Quick Start we use `--auth trust` to avoid complex security settings.
-The Postgres `trust authentication method
-https://www.postgresql.org/docs/current/auth-trust.html`_ is not considered
-a reasonable choice for production environments. Consider either using the
-`--skip-pg-hba` option or `--auth scram-sha-256` and then setting up
-passwords yourself.
+In the Quick Start we use ``--auth trust`` to avoid complex security settings.
+The Postgres `trust authentication method`__ is not considered a reasonable
+choice for production environments. Consider either using the ``--skip-pg-hba``
+option or ``--auth scram-sha-256`` and then setting up passwords yourself.
+
+__ https://www.postgresql.org/docs/current/auth-trust.html_
 
 Bring up the nodes
 ------------------
@@ -219,7 +219,7 @@ To discover the url to use in our case, the following command can be used:
 .. code-block:: bash
 
    pg_autoctl show uri --pgdata ./monitor
-   
+
 
             Type |    Name | Connection String
    -----------+---------+-------------------------------

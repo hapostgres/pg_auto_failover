@@ -6,9 +6,14 @@ import time
 import network
 import psycopg2
 import subprocess
+import datetime as dt
+from nose.tools import eq_
 from enum import Enum
 
-COMMAND_TIMEOUT = 60
+import ssl_cert_utils as cert
+
+COMMAND_TIMEOUT = network.COMMAND_TIMEOUT
+POLLING_INTERVAL = 0.1
 STATE_CHANGE_TIMEOUT = 90
 PGVERSION = os.getenv("PGVERSION", "11")
 
@@ -52,7 +57,7 @@ class Cluster:
         if self.monitor is not None:
             raise Exception("Monitor has already been created.")
         vnode = self.vlan.create_node()
-        self.monitor = MonitorNode(datadir, vnode, port, nodename,
+        self.monitor = MonitorNode(self, datadir, vnode, port, nodename,
                                    authMethod, sslMode, sslSelfSigned,
                                    sslCAFile=sslCAFile,
                                    sslServerKey=sslServerKey,
@@ -74,7 +79,7 @@ class Cluster:
         vnode = self.vlan.create_node()
         nodeid = len(self.datanodes) + 1
 
-        datanode = DataNode(datadir, vnode, port,
+        datanode = DataNode(self, datadir, vnode, port,
                             os.getenv("USER"), authMethod, "postgres",
                             self.monitor, nodeid, group, listen_flag,
                             role, formation,
@@ -92,7 +97,6 @@ class Cluster:
         directory path.
         """
         vnode = self.vlan.create_node()
-        nodeid = len(self.datanodes) + 1
 
         create_command = ["sudo", shutil.which('pg_createcluster'),
                           "-U", os.getenv("USER"),
@@ -100,11 +104,7 @@ class Cluster:
 
         print("%s" % " ".join(create_command))
 
-        create_proc = vnode.run(create_command)
-        out, err = create_proc.communicate(timeout=COMMAND_TIMEOUT)
-        if create_proc.returncode > 0:
-            raise Exception("pg_createcluster failed, out: %s\n, err: %s" %
-                            (out, err))
+        vnode.run_and_wait(create_command, "pg_createcluster")
 
         abspath = os.path.join("/var/lib/postgresql/", PGVERSION, datadir)
 
@@ -113,12 +113,7 @@ class Cluster:
                          "/var/lib/postgresql/%s/backup" % PGVERSION]
 
         print("%s" % " ".join(chmod_command))
-
-        chmod_proc = vnode.run(chmod_command)
-        out, err = chmod_proc.communicate(timeout=COMMAND_TIMEOUT)
-        if chmod_proc.returncode > 0:
-            raise Exception("chmod failed, out: %s\n, err: %s" %
-                            (out, err))
+        vnode.run_and_wait(chmod_command, "chmod")
 
         return abspath
 
@@ -132,15 +127,72 @@ class Cluster:
             self.monitor.destroy()
         self.vlan.destroy()
 
+    def nodes(self):
+        """
+        Returns a list of all nodes in the cluster including the monitor
+
+        NOTE: Monitor is explicitely last in this list. So this list of nodes
+        can be stopped in order safely.
+        """
+        nodes = self.datanodes.copy()
+        if self.monitor:
+            nodes.append(self.monitor)
+        return nodes
+
+    def flush_output(self):
+        """
+        flush the output for all running pg_autoctl processes in the cluster
+        """
+        for node in self.nodes():
+            node.flush_output()
+
+    def sleep(self, secs):
+        """
+        sleep for the specified time while flushing output of the cluster at
+        least every second
+        """
+        full_secs = int(secs)
+
+        for i in range(full_secs):
+            self.flush_output()
+            time.sleep(1)
+
+        self.flush_output()
+        time.sleep(secs - full_secs)
+
+    def communicate(self, proc, timeout):
+        """
+        communicate with the process with the specified timeout while flushing
+        output of the cluster at least every second
+        """
+        full_secs = int(timeout)
+
+        for i in range(full_secs):
+            self.flush_output()
+            try:
+                # wait until process is done for one second each iteration
+                # of this loop, to add up to the actual timeout argument
+                return proc.communicate(timeout=1)
+            except subprocess.TimeoutExpired:
+                pass
+
+        self.flush_output()
+        return proc.communicate(timeout=timeout - full_secs)
+
+    def create_root_cert(self, directory, basename="root", CN="root"):
+        self.cert = cert.SSLCert(directory, basename, CN)
+        self.cert.create_root_cert()
+
 
 class PGNode:
     """
     Common stuff between MonitorNode and DataNode.
     """
-    def __init__(self, datadir, vnode, port, username, authMethod,
+    def __init__(self, cluster, datadir, vnode, port, username, authMethod,
                  database, role,
                  sslMode=None, sslSelfSigned=False,
                  sslCAFile=None, sslServerKey=None, sslServerCert=None):
+        self.cluster = cluster
         self.datadir = datadir
         self.vnode = vnode
         self.port = port
@@ -157,6 +209,9 @@ class PGNode:
         self.sslCAFile = sslCAFile
         self.sslServerKey = sslServerKey
         self.sslServerCert = sslServerCert
+
+        self._pgversion = None
+        self._pgmajor = None
 
     def connection_string(self):
         """
@@ -179,10 +234,19 @@ class PGNode:
                  self.port,
                  self.database)
 
+        # If a local CA is used, or even a self-signed certificate,
+        # using verify-ca often provides enough protection.
         if self.sslMode:
-            # If a local CA is used, or even a self-signed certificate,
-            # using verify-ca often provides enough protection.
-            dsn += "?sslmode=%s" % self.sslMode
+            sslMode = self.sslMode
+        elif self.sslSelfSigned:
+            sslMode = "require"
+        else:
+            sslMode = "prefer"
+
+        dsn += "?sslmode=%s" % sslMode
+
+        if self.sslCAFile:
+            dsn += f"&sslrootcert={self.sslCAFile}"
 
         return dsn
 
@@ -190,8 +254,29 @@ class PGNode:
         """
         Runs "pg_autoctl run"
         """
-        self.pg_autoctl = PGAutoCtl(self.vnode, self.datadir)
+        self.pg_autoctl = PGAutoCtl(self)
         self.pg_autoctl.run()
+
+    def running(self):
+        return self.pg_autoctl and self.pg_autoctl.run_proc
+
+    def flush_output(self):
+        """
+        Flushes the output of pg_autoctl if it's running to be sure that it
+        does not get stuck, because of a filled up pipe.
+        """
+        if self.running():
+            self.pg_autoctl.consume_output(0.001)
+
+    def sleep(self, secs):
+        """
+        Sleep for the specfied amount of seconds but meanwile consume output of
+        the pg_autoctl process to make sure it does not lock up.
+        """
+        if self.running():
+            self.pg_autoctl.consume_output(secs)
+        else:
+            time.sleep(secs)
 
     def run_sql_query(self, query, *args):
         """
@@ -222,10 +307,7 @@ class PGNode:
         passwd_command = [shutil.which('psql'),
                           '-d', self.database,
                           '-c', alter_user_set_passwd_command]
-        passwd_proc = self.vnode.run(passwd_command)
-        wait_or_timeout_proc(passwd_proc,
-                         name="user passwd",
-                         timeout=COMMAND_TIMEOUT)
+        self.vnode.run_and_wait(passwd_command, name="user passwd")
         self.authenticatedUsers[username] = password
 
     def stop_pg_autoctl(self):
@@ -240,18 +322,36 @@ class PGNode:
         Stops the postgres process by running:
           pg_ctl -D ${self.datadir} --wait --mode fast stop
         """
-        stop_command = [shutil.which('pg_ctl'), '-D', self.datadir,
-                        '--wait', '--mode', 'fast', 'stop']
-        stop_proc = self.vnode.run(stop_command)
-        out, err = stop_proc.communicate(timeout=COMMAND_TIMEOUT)
-        if stop_proc.returncode > 0:
-            print("stopping postgres for '%s' failed, out: %s\n, err: %s"
-                  %(self.vnode.address, out, err))
-            return False
-        elif stop_proc.returncode is None:
-            print("stopping postgres for '%s' timed out")
-            return False
-        return True
+        # pg_ctl stop is racey when another process is trying to start postgres
+        # again in the background. It will not finish in that case. pg_autoctl
+        # does this, so we try stopping postgres a couple of times. This way we
+        # make sure the race does not impact our tests.
+        #
+        # The race can be easily reproduced by in one shell doing:
+        #    while true; do pg_ctl --pgdata monitor/ start; done
+        # And in another:
+        #    pg_ctl --pgdata monitor --wait --mode fast stop
+        # The second command will not finish, since the first restarts postgres
+        # before the second finds out it has been killed.
+
+        for i in range(60):
+            stop_command = [shutil.which('pg_ctl'), '-D', self.datadir,
+                            '--wait', '--mode', 'fast', 'stop']
+            try:
+                with self.vnode.run(stop_command) as stop_proc:
+                    out, err = stop_proc.communicate(timeout=1)
+                    if stop_proc.returncode > 0:
+                        print("stopping postgres for '%s' failed, out: %s\n, err: %s"
+                              % (self.vnode.address, out, err))
+                        return False
+                    elif stop_proc.returncode is None:
+                        print("stopping postgres for '%s' timed out")
+                        return False
+                    return True
+            except subprocess.TimeoutExpired:
+                pass
+        else:
+            raise Exception("Postgres could not be stopped after 60 attempts")
 
     def reload_postgres(self):
         """
@@ -259,16 +359,16 @@ class PGNode:
           pg_ctl -D ${self.datadir} reload
         """
         reload_command = [shutil.which('pg_ctl'), '-D', self.datadir, 'reload']
-        reload_proc = self.vnode.run(reload_command)
-        out, err = reload_proc.communicate(timeout=COMMAND_TIMEOUT)
-        if reload_proc.returncode > 0:
-            print("reloading postgres for '%s' failed, out: %s\n, err: %s"
-                  %(self.vnode.address, out, err))
-            return False
-        elif reload_proc.returncode is None:
-            print("reloading postgres for '%s' timed out")
-            return False
-        return True
+        with self.vnode.run(reload_command) as reload_proc:
+            out, err = self.cluster.communicate(reload_proc, COMMAND_TIMEOUT)
+            if reload_proc.returncode > 0:
+                print("reloading postgres for '%s' failed, out: %s\n, err: %s"
+                      % (self.vnode.address, out, err))
+                return False
+            elif reload_proc.returncode is None:
+                print("reloading postgres for '%s' timed out")
+                return False
+            return True
 
     def restart_postgres(self):
         """
@@ -276,58 +376,62 @@ class PGNode:
           pg_ctl -D ${self.datadir} restart
         """
         restart_command = [shutil.which('pg_ctl'), '-D', self.datadir, 'restart']
-        restart_proc = self.vnode.run(restart_command)
-        out, err = restart_proc.communicate(timeout=COMMAND_TIMEOUT)
-        if restart_proc.returncode > 0:
-            print("restarting postgres for '%s' failed, out: %s\n, err: %s"
-                  %(self.vnode.address, out, err))
-            return False
-        elif restart_proc.returncode is None:
-            print("restarting postgres for '%s' timed out")
-            return False
-        return True
+        with self.vnode.run(restart_command) as restart_proc:
+            out, err = self.cluster.communicate(restart_proc, COMMAND_TIMEOUT)
+            if restart_proc.returncode > 0:
+                print("restarting postgres for '%s' failed, out: %s\n, err: %s"
+                      % (self.vnode.address, out, err))
+                return False
+            elif restart_proc.returncode is None:
+                print("restarting postgres for '%s' timed out")
+                return False
+            return True
 
     def pg_is_running(self, timeout=COMMAND_TIMEOUT):
         """
         Returns true when Postgres is running. We use pg_ctl status.
         """
         status_command = [shutil.which('pg_ctl'), '-D', self.datadir, 'status']
-        status_proc = self.vnode.run(status_command)
-        out, err = status_proc.communicate(timeout=timeout)
-        if status_proc.returncode == 0:
-            # pg_ctl status is happy to report 0 (Postgres is running) even
-            # when it's still "starting" and thus not ready for queries.
-            #
-            # because our tests need to be able to send queries to Postgres,
-            # the "starting" status is not good enough for us, we're only
-            # happy with "ready".
-            pidfile = os.path.join(self.datadir, 'postmaster.pid')
-            with open(pidfile, "r") as p:
-                pidlines = p.readlines()
-                if len(pidlines) > 7:
-                    pg_status = pidlines[7]
-                    return pg_status.startswith("ready")
-        elif status_proc.returncode > 0:
-            # ignore `pg_ctl status` output, silently try again till timeout
-            return False
-        elif status_proc.returncode is None:
-            print("pg_ctl status timed out after %ds" % timeout)
-            return False
+        with self.vnode.run(status_command) as status_proc:
+            out, err = self.cluster.communicate(status_proc, timeout)
+            if status_proc.returncode == 0:
+                # pg_ctl status is happy to report 0 (Postgres is running) even
+                # when it's still "starting" and thus not ready for queries.
+                #
+                # because our tests need to be able to send queries to Postgres,
+                # the "starting" status is not good enough for us, we're only
+                # happy with "ready".
+                pidfile = os.path.join(self.datadir, 'postmaster.pid')
+                try:
+                    with open(pidfile, "r") as p:
+                        pidlines = p.readlines()
+                        if len(pidlines) > 7:
+                            pg_status = pidlines[7]
+                            return pg_status.startswith("ready")
+                except FileNotFoundError:
+                    # It's possible that the pidfile or pgdata does not exist yet.
+                    # Obviously postgres is not running in that case
+                    return False
+            elif status_proc.returncode > 0:
+                # ignore `pg_ctl status` output, silently try again till timeout
+                return False
+            elif status_proc.returncode is None:
+                print("pg_ctl status timed out after %ds" % timeout)
+                return False
 
     def wait_until_pg_is_running(self, timeout=STATE_CHANGE_TIMEOUT):
         """
         Waits until the underlying Postgres process is running.
         """
-        for i in range(timeout):
-            time.sleep(1)
-
+        wait_until = dt.datetime.now() + dt.timedelta(seconds=timeout)
+        while wait_until > dt.datetime.now():
             if self.pg_is_running():
                 return True
+            time.sleep(POLLING_INTERVAL)
 
-        else:
-            print("Postgres is still not running in %s after %d attempts" %
-                  (self.datadir, timeout))
-            return False
+        print("Postgres is still not running in %s after %d seconds" %
+              (self.datadir, timeout))
+        return False
 
     def fail(self):
         """
@@ -336,6 +440,7 @@ class PGNode:
         """
         self.stop_pg_autoctl()
         self.stop_postgres()
+
 
     def config_file_path(self):
         """
@@ -365,7 +470,12 @@ class PGNode:
 
     def get_postgres_logs(self):
         ldir = os.path.join(self.datadir, "log")
-        logfiles = os.listdir(ldir)
+        try:
+            logfiles = os.listdir(ldir)
+        except FileNotFoundError:
+            # If the log directory does not exist then there's also no logs to
+            # display
+            return ""
         logfiles.sort()
 
         logs = []
@@ -396,7 +506,7 @@ class PGNode:
 
         # server_version_num is 110005 for 11.5
         self._pgversion = int(self.run_sql_query("show server_version_num")[0][0])
-        self._pgmajor = int(self._pgversion / 10000)
+        self._pgmajor = self._pgversion // 10000
 
         return self._pgversion
 
@@ -423,7 +533,7 @@ class PGNode:
         """
         Set a configuration parameter to given value
         """
-        command = PGAutoCtl(self.vnode, self.datadir)
+        command = PGAutoCtl(self)
         command.execute("config set %s" % setting,
                         'config', 'set', setting, value)
         return True
@@ -432,7 +542,7 @@ class PGNode:
         """
         Set a configuration parameter to given value
         """
-        command = PGAutoCtl(self.vnode, self.datadir)
+        command = PGAutoCtl(self)
         out, err = command.execute("config get %s" % setting,
                                    'config', 'get', setting)
         return out[:-1]
@@ -441,21 +551,173 @@ class PGNode:
         """
         Runs pg_autoctl show uri
         """
-        command = PGAutoCtl(self.vnode, self.datadir)
+        command = PGAutoCtl(self)
         if json:
             out, err = command.execute("show uri", 'show', 'uri', '--json')
         else:
             out, err = command.execute("show uri", 'show', 'uri')
         return out
 
+    def logs(self):
+        log_string = ""
+        if self.running():
+            out, err = self.stop_pg_autoctl()
+            log_string += f"STDOUT OF PG_AUTOCTL FOR {self.datadir}:\n{out}\n"
+            log_string += f"STDERR OF PG_AUTOCTL FOR {self.datadir}:\n{err}\n"
+
+        pglogs = self.get_postgres_logs()
+        log_string += f"POSTGRES LOGS FOR {self.datadir}:\n{pglogs}\n"
+        return log_string
+
+    def print_debug_logs(self):
+        events = self.get_events_str()
+        logs = f"MONITOR EVENTS:\n{events}\n"
+
+        for node in self.cluster.nodes():
+            logs += node.logs()
+        print(logs)
+
+    def enable_ssl(self, sslMode=None, sslSelfSigned=None,
+                   sslCAFile=None, sslServerKey=None, sslServerCert=None):
+        """
+        Enables SSL on a pg_autoctl node
+        """
+        self.sslMode = sslMode
+        self.sslSelfSigned = sslSelfSigned
+        self.sslCAFile = sslCAFile
+        self.sslServerKey = sslServerKey
+        self.sslServerCert = sslServerCert
+
+        ssl_args = ['enable', 'ssl', '-vvv', '--pgdata', self.datadir]
+
+        if self.sslMode:
+            ssl_args += ['--ssl-mode', self.sslMode]
+
+        if self.sslSelfSigned:
+            ssl_args += ['--ssl-self-signed']
+
+        if self.sslCAFile:
+            ssl_args += ['--ssl-ca-file', self.sslCAFile]
+
+        if self.sslServerKey:
+            ssl_args += ['--server-key', self.sslServerKey]
+
+        if self.sslServerCert:
+            ssl_args += ['--server-cert', self.sslServerCert]
+
+        if not self.sslSelfSigned and not self.sslCAFile:
+            ssl_args += ['--no-ssl']
+
+        command = PGAutoCtl(self, argv=ssl_args)
+        out, err = command.execute("enable ssl")
+
+    def get_monitor_uri(self):
+        """
+        pg_autoctl show uri --monitor
+        """
+        command = PGAutoCtl(self)
+        out, err = command.execute("show uri --monitor",
+                                   'show', 'uri', '--monitor')
+        return out
+
+    def get_formation_uri(self, formationName='default'):
+        """
+        pg_autoctl show uri --formation {formationName}
+        """
+        command = PGAutoCtl(self)
+        out, err = command.execute("show uri --formation",
+                                   'show', 'uri', '--formation', formationName)
+        return out
+
+    def check_conn_string_ssl(self, conn_string, sslmode):
+        """
+        Asserts that given connection string embeds expected SSL settings.
+        """
+        crl = None
+        rootCert = self.sslCAFile
+
+        print("checking connstring =", conn_string)
+        assert f"sslmode={sslmode}" in conn_string
+        if rootCert:
+            assert f"sslrootcert={rootCert}" in conn_string
+        if crl:
+            assert f"sslcrl={crl}" in conn_string
+
+    def check_ssl(self, ssl, sslmode, monitor=False, primary=False):
+        """
+        Checks if ssl settings match how the node is set up
+        """
+        key = self.sslServerKey
+        crt = self.sslServerCert
+        crl = None
+        rootCert = self.sslCAFile
+        if self.sslSelfSigned:
+            key = os.path.join(self.datadir, "server.key")
+            crt = os.path.join(self.datadir, "server.crt")
+
+        eq_(self.pg_config_get('ssl'), ssl)
+        eq_(self.config_get("ssl.sslmode"), sslmode)
+
+        expected_ciphers = (
+            "ECDHE-ECDSA-AES128-GCM-SHA256:"
+            "ECDHE-ECDSA-AES256-GCM-SHA384:"
+            "ECDHE-RSA-AES128-GCM-SHA256:"
+            "ECDHE-RSA-AES256-GCM-SHA384:"
+            "ECDHE-ECDSA-AES128-SHA256:"
+            "ECDHE-ECDSA-AES256-SHA384:"
+            "ECDHE-RSA-AES128-SHA256:"
+            "ECDHE-RSA-AES256-SHA384"
+        )
+
+        # TODO: also do this for monitor once we can have superuser access to
+        # the monitor
+        if not monitor:
+            eq_(self.pg_config_get("ssl_ciphers"), expected_ciphers)
+
+        def check_conn_string(conn_string):
+            print("checking connstring =", conn_string)
+            assert f"sslmode={sslmode}" in conn_string
+            if rootCert:
+                assert f"sslrootcert={rootCert}" in conn_string
+            if crl:
+                assert f"sslcrl={crl}" in conn_string
+
+        monitor_uri = self.get_monitor_uri()
+        self.check_conn_string_ssl(monitor_uri, sslmode)
+
+        if not monitor:
+            monitor_uri = self.config_get("pg_autoctl.monitor")
+            self.check_conn_string_ssl(monitor_uri, sslmode)
+
+            formation_uri = self.get_formation_uri()
+            self.check_conn_string_ssl(formation_uri, sslmode)
+
+        for pg_setting, autoctl_setting, file_path in [
+                ("ssl_key_file", "ssl.key_file", key),
+                ("ssl_cert_file", "ssl.cert_file", crt),
+                ("ssl_crl_file", "ssl.crl_file", crl),
+                ("ssl_ca_file", "ssl.ca_file", rootCert)]:
+            if file_path is None:
+                continue
+            assert os.path.isfile(file_path)
+            print("checking", pg_setting)
+            eq_(self.pg_config_get(pg_setting), file_path)
+            eq_(self.config_get(autoctl_setting), file_path)
+
+        if monitor or primary:
+            return
+
+        if self.pgmajor() >= 12:
+            check_conn_string(self.pg_config_get('primary_conninfo'))
+
 
 class DataNode(PGNode):
-    def __init__(self, datadir, vnode, port,
+    def __init__(self, cluster, datadir, vnode, port,
                  username, authMethod, database, monitor,
                  nodeid, group, listen_flag, role, formation,
                  sslMode=None, sslSelfSigned=False,
                  sslCAFile=None, sslServerKey=None, sslServerCert=None):
-        super().__init__(datadir, vnode, port,
+        super().__init__(cluster, datadir, vnode, port,
                          username, authMethod, database, role,
                          sslMode=sslMode,
                          sslSelfSigned=sslSelfSigned,
@@ -521,7 +783,7 @@ class DataNode(PGNode):
         # when run is requested pg_autoctl does not terminate
         # therefore we do not wait for process to complete
         # we just record the process
-        self.pg_autoctl = PGAutoCtl(self.vnode, self.datadir, create_args)
+        self.pg_autoctl = PGAutoCtl(self, create_args)
         if run:
             self.pg_autoctl.run()
         else:
@@ -534,7 +796,7 @@ class DataNode(PGNode):
         self.stop_pg_autoctl()
 
         try:
-            destroy = PGAutoCtl(self.vnode, self.datadir)
+            destroy = PGAutoCtl(self)
             destroy.execute("pg_autoctl drop node --destroy",
                             'drop', 'node', '--destroy')
         except Exception as e:
@@ -551,18 +813,16 @@ class DataNode(PGNode):
             pass
 
     def wait_until_state(self, target_state,
-                         timeout=STATE_CHANGE_TIMEOUT, sleep_time=1):
+                         timeout=STATE_CHANGE_TIMEOUT,
+                         sleep_time=POLLING_INTERVAL):
         """
         Waits until this data node reaches the target state, and then returns
         True. If this doesn't happen until "timeout" seconds, returns False.
         """
         prev_state = None
-        for i in range(timeout):
-            # ensure we read from the pg_autoctl process pipe
-            if self.pg_autoctl and self.pg_autoctl.run_proc:
-                self.pg_autoctl.consume_output(sleep_time)
-            else:
-                time.sleep(sleep_time)
+        wait_until = dt.datetime.now() + dt.timedelta(seconds=timeout)
+        while wait_until > dt.datetime.now():
+            self.cluster.sleep(sleep_time)
 
             current_state = self.get_state()
 
@@ -580,23 +840,12 @@ class DataNode(PGNode):
 
             prev_state = current_state
 
-        else:
-            print("%s didn't reach %s after %d attempts" %
-                (self.datadir, target_state, timeout))
-
-            events = self.get_events_str()
-            pglogs = self.get_postgres_logs()
-
-            if self.pg_autoctl and self.pg_autoctl.run_proc:
-                out, err = self.stop_pg_autoctl()
-                raise Exception("%s failed to reach %s after %d attempts: " \
-                                "\n%s\n%s\n%s\n%s" %
-                                (self.datadir, target_state, timeout,
-                                 out, err, events, pglogs))
-            else:
-                raise Exception("%s failed to reach %s after %d attempts:\n%s" %
-                                (self.datadir, target_state, timeout, events))
-            return False
+        print("%s didn't reach %s after %d seconds" %
+              (self.datadir, target_state, timeout))
+        error_msg = (f"{self.datadir} failed to reach {target_state} "
+                     f"after {timeout} seconds\n")
+        self.print_debug_logs()
+        raise Exception(error_msg)
 
     def get_state(self):
         """
@@ -621,7 +870,7 @@ SELECT reportedstate
         """
         Returns the current list of events from the monitor.
         """
-        last_events_query = "select nodeid, nodename, " \
+        last_events_query = "select eventtime, nodeid, nodename, " \
             "reportedstate, goalstate, " \
             "reportedrepstate, reportedlsn, description " \
             "from pgautofailover.last_events('default', count => 20)"
@@ -630,12 +879,12 @@ SELECT reportedstate
 
     def get_events_str(self):
         return "\n".join(
-            ["%s:%-14s %17s/%-17s %7s %10s %s" % ("id", "nodename",
-                                                  "state", "goal state",
-                                                  "repl st", "lsn", "event")]
+            ["%s %25s:%-14s %17s/%-17s %7s %10s %s" % ("eventtime", "id", "nodename",
+                                                       "state", "goal state",
+                                                       "repl st", "lsn", "event")]
             +
-            ["%2d:%-14s %17s/%-17s %7s %10s %s" % (id, n, rs, gs, reps, lsn, desc)
-             for id, n, rs, gs, reps, lsn, desc in self.get_events()])
+            ["%s %2d:%-14s %17s/%-17s %7s %10s %s" % result
+             for result in self.get_events()])
 
     def enable_maintenance(self):
         """
@@ -643,7 +892,7 @@ SELECT reportedstate
 
         :return:
         """
-        command = PGAutoCtl(self.vnode, self.datadir)
+        command = PGAutoCtl(self)
         command.execute("enable maintenance", 'enable', 'maintenance')
 
     def disable_maintenance(self):
@@ -652,8 +901,9 @@ SELECT reportedstate
 
         :return:
         """
-        command = PGAutoCtl(self.vnode, self.datadir)
-        command.execute("disable maintenance", 'disable', 'maintenance')
+        command = PGAutoCtl(self)
+        command.execute("disable maintenance", 'disable', 'maintenance',
+                        timeout=10)
 
     def drop(self):
         """
@@ -661,7 +911,7 @@ SELECT reportedstate
 
         :return:
         """
-        command = PGAutoCtl(self.vnode, self.datadir)
+        command = PGAutoCtl(self)
         command.execute("drop node", 'drop', 'node')
         return True
 
@@ -669,12 +919,12 @@ SELECT reportedstate
         """
             Sets candidate priority via pg_autoctl
         """
-        command = PGAutoCtl(self.vnode, self.datadir)
+        command = PGAutoCtl(self)
         try:
             command.execute("set canditate priority", 'set', 'node',
                             'candidate-priority', '--', str(candidatePriority))
         except Exception as e:
-            if command.run_proc and command.run_proc.returncode == 1:
+            if command.last_returncode == 1:
                 return False
             raise e
         return True
@@ -683,7 +933,7 @@ SELECT reportedstate
         """
             Gets candidate priority via pg_autoctl
         """
-        command = PGAutoCtl(self.vnode, self.datadir)
+        command = PGAutoCtl(self)
         out, err = command.execute("get canditate priority",
                                    'get', 'node', 'candidate-priority')
         return int(out)
@@ -692,12 +942,12 @@ SELECT reportedstate
         """
             Sets replication quorum via pg_autoctl
         """
-        command = PGAutoCtl(self.vnode, self.datadir)
+        command = PGAutoCtl(self)
         try:
             command.execute("set replication quorum", 'set', 'node',
                             'replication-quorum', replicationQuorum)
         except Exception as e:
-            if command.run_proc.returncode == 1:
+            if command.last_returncode == 1:
                 return False
             raise e
         return True
@@ -706,7 +956,7 @@ SELECT reportedstate
         """
             Gets replication quorum via pg_autoctl
         """
-        command = PGAutoCtl(self.vnode, self.datadir)
+        command = PGAutoCtl(self)
         out, err = command.execute("get replication quorum",
                                    'get', 'node', 'replication-quorum')
 
@@ -721,14 +971,14 @@ SELECT reportedstate
         """
             Sets number sync standbys via pg_autoctl
         """
-        command = PGAutoCtl(self.vnode, self.datadir)
+        command = PGAutoCtl(self)
         try:
             command.execute("set number sync standbys",
                             'set', 'formation',
                             'number-sync-standbys', str(numberSyncStandbys))
         except Exception as e:
             # either caught as a BAD ARG (1) or by the monitor (6)
-            if command.run_proc.returncode in (1, 6):
+            if command.last_returncode in (1, 6):
                 return False
             raise e
         return True
@@ -737,7 +987,7 @@ SELECT reportedstate
         """
             Gets number sync standbys  via pg_autoctl
         """
-        command = PGAutoCtl(self.vnode, self.datadir)
+        command = PGAutoCtl(self)
         out, err = command.execute("get number sync standbys",
                                    'get', 'formation', 'number-sync-standbys')
 
@@ -747,7 +997,7 @@ SELECT reportedstate
         """
             Gets number sync standbys  via pg_autoctl
         """
-        command = PGAutoCtl(self.vnode, self.datadir)
+        command = PGAutoCtl(self)
         out, err = command.execute("get synchronous_standby_names",
                                    'show', 'synchronous_standby_names')
 
@@ -789,19 +1039,21 @@ SELECT reportedstate
         if set(expected_slots) == set(current_slots):
             print("slots list on %s is %s, as expected" %
                   (self.datadir, current_slots))
-        else:
-            print("slots list on %s is %s, expected %s" %
-                  (self.datadir, current_slots, expected_slots))
+            return True
 
-        return set(expected_slots) == set(current_slots)
+        self.print_debug_logs()
+        print()
+        print("slots list on %s is %s, expected %s" %
+              (self.datadir, current_slots, expected_slots))
+        return False
 
 
 class MonitorNode(PGNode):
-    def __init__(self, datadir, vnode, port, nodename, authMethod,
+    def __init__(self, cluster, datadir, vnode, port, nodename, authMethod,
                  sslMode=None, sslSelfSigned=None,
                  sslCAFile=None, sslServerKey=None, sslServerCert=None):
 
-        super().__init__(datadir, vnode, port,
+        super().__init__(cluster, datadir, vnode, port,
                          "autoctl_node", authMethod,
                          "pg_auto_failover", Role.Monitor,
                          sslMode, sslSelfSigned,
@@ -812,7 +1064,6 @@ class MonitorNode(PGNode):
             self.nodename = nodename
         else:
             self.nodename = str(self.vnode.address)
-
 
     def create(self, run = False):
         """
@@ -849,7 +1100,7 @@ class MonitorNode(PGNode):
         # therefore we do not wait for process to complete
         # we just record the process
 
-        self.pg_autoctl = PGAutoCtl(self.vnode, self.datadir, create_args)
+        self.pg_autoctl = PGAutoCtl(self, create_args)
         if run:
             self.pg_autoctl.run()
         else:
@@ -859,7 +1110,7 @@ class MonitorNode(PGNode):
         """
         Runs "pg_autoctl run"
         """
-        self.pg_autoctl = PGAutoCtl(self.vnode, self.datadir)
+        self.pg_autoctl = PGAutoCtl(self)
         self.pg_autoctl.run(level='-v')
 
     def destroy(self):
@@ -874,7 +1125,7 @@ class MonitorNode(PGNode):
                 print("Monitor logs:\n%s\n%s\n" % (out, err))
 
         try:
-            destroy = PGAutoCtl(self.vnode, self.datadir)
+            destroy = PGAutoCtl(self)
             destroy.execute("pg_autoctl node destroy",
                             'drop', 'monitor', '--destroy')
         except Exception as e:
@@ -917,10 +1168,7 @@ class MonitorNode(PGNode):
             else:
                 formation_command += ['--disable-secondary']
 
-        formation_proc = self.vnode.run(formation_command)
-        wait_or_timeout_proc(formation_proc,
-                             name="create formation",
-                             timeout=COMMAND_TIMEOUT)
+        self.vnode.run_and_wait(formation_command, name="create formation")
 
     def enable(self, feature, formation='default'):
         """
@@ -930,7 +1178,7 @@ class MonitorNode(PGNode):
         :param formation: name of the formation to enable the feature on
         :return: None
         """
-        command = PGAutoCtl(self.vnode, self.datadir)
+        command = PGAutoCtl(self)
         command.execute("enable %s" % feature.command(),
                         'enable', feature.command(), '--formation', formation)
 
@@ -942,7 +1190,7 @@ class MonitorNode(PGNode):
         :param formation: name of the formation to disable the feature on
         :return: None
         """
-        command = PGAutoCtl(self.vnode, self.datadir)
+        command = PGAutoCtl(self)
         command.execute("disable %s" % feature.command(),
                         'disable', feature.command(), '--formation', formation)
 
@@ -956,16 +1204,12 @@ class MonitorNode(PGNode):
         failover_command = [shutil.which('psql'),
                             '-d', self.database,
                             '-c', failover_commmand_text]
-        failover_proc = self.vnode.run(failover_command)
-        wait_or_timeout_proc(failover_proc,
-                         name="manual failover",
-                         timeout=COMMAND_TIMEOUT)
-
+        self.vnode.run_and_wait(failover_command, name="manual failover")
 
     def print_state(self, formation="default"):
         print("pg_autoctl show state --pgdata %s" % self.datadir)
 
-        command = PGAutoCtl(self.vnode, self.datadir)
+        command = PGAutoCtl(self)
         out, err = command.execute("show state", 'show', 'state')
         print("%s" % out)
 
@@ -976,16 +1220,24 @@ class MonitorNode(PGNode):
         query = "select * from pgautofailover.get_other_nodes(%s, %s)"
         return self.run_sql_query(query, host, port)
 
+    def check_ssl(self, ssl, sslmode):
+        """
+        Checks if ssl settings match how the node is set up
+        """
+        return super().check_ssl(ssl, sslmode, monitor=True)
+
 
 class PGAutoCtl():
-    def __init__(self, vnode, datadir, argv=None):
-        self.vnode = vnode
-        self.datadir = datadir
+    def __init__(self, pgnode, argv=None):
+        self.vnode = pgnode.vnode
+        self.datadir = pgnode.datadir
+        self.pgnode = pgnode
 
         self.program = shutil.which('pg_autoctl')
         self.command = None
 
         self.run_proc = None
+        self.last_returncode = None
         self.out = ""
         self.err = ""
 
@@ -1002,44 +1254,33 @@ class PGAutoCtl():
         if not self.command:
             self.command = [self.program, 'run', '--pgdata', self.datadir, level]
 
-        self.run_proc = self.vnode.run(self.command)
+        if self.run_proc:
+            self.run_proc.release()
+        self.run_proc = self.vnode.run_unmanaged(self.command)
         print("pg_autoctl run [%d]" % self.run_proc.pid)
 
-    def execute(self, name, *args):
+    def execute(self, name, *args, timeout=COMMAND_TIMEOUT):
         """
         Execute a single pg_autoctl command, wait for its completion.
         """
         self.set_command(*args)
-        self.run_proc = self.vnode.run(self.command)
+        with self.vnode.run(self.command) as proc:
+            try:
+                out, err = self.pgnode.cluster.communicate(proc, timeout)
+            except subprocess.TimeoutExpired:
+                string_command = " ".join(self.command)
+                self.pgnode.print_debug_logs()
+                raise Exception(
+                    f"{name} timed out after {timeout} seconds.\n{string_command}\n",
+                )
 
-        try:
-            # wait until process is done, still applying COMMAND_TIMEOUT
-            self.communicate(timeout=COMMAND_TIMEOUT)
-
-            if self.run_proc.returncode > 0:
+            self.last_returncode = proc.returncode
+            if proc.returncode > 0:
                 raise Exception("%s failed\n%s\n%s\n%s" %
                                 (name,
                                  " ".join(self.command),
-                                 self.out,
-                                 self.err))
-            return self.out, self.err
-
-        except subprocess.TimeoutExpired:
-            # we already spent our allocated waiting time, just kill the process
-            self.run_proc.kill()
-            self.run_proc.wait()
-            self.run_proc.release()
-
-            self.run_proc = None
-
-            raise Exception("%s timed out after %d seconds.\n%s\n%s\n%s"%
-                            (name,
-                             COMMAND_TIMEOUT,
-                             " ".join(self.command),
-                             self.out,
-                             self.err))
-
-        return self.out, self.err
+                                 out, err))
+            return out, err
 
     def stop(self):
         """
@@ -1053,13 +1294,7 @@ class PGAutoCtl():
                 pgid = os.getpgid(self.run_proc.pid)
                 os.killpg(pgid, signal.SIGQUIT)
 
-                self.communicate()
-                self.run_proc.wait()
-                self.run_proc.release()
-
-                self.run_proc = None
-
-                return self.out, self.err
+                return self.pgnode.cluster.communicate(self, COMMAND_TIMEOUT)
 
             except ProcessLookupError as e:
                 self.run_proc = None
@@ -1073,17 +1308,30 @@ class PGAutoCtl():
     def communicate(self, timeout=COMMAND_TIMEOUT):
         """
         Read all data from the Unix PIPE
+
+        This call is idempotent. If it is called a second time after a earlier
+        successful call, then it returns the results from when the process
+        exited originally.
         """
+        if not self.run_proc:
+            return self.out, self.err
+
         self.out, self.err = self.run_proc.communicate(timeout=timeout)
+
+        # The process exited, so let's clean this process up. Calling
+        # communicate again would otherwise cause an "Invalid file object"
+        # error.
+        self.run_proc.release()
+        self.run_proc = None
 
         return self.out, self.err
 
-    def consume_output(self, secs=1):
+    def consume_output(self, secs):
         """
         Read available lines from the process for some given seconds
         """
         try:
-            self.out, self.err = self.run_proc.communicate(timeout=secs)
+            self.out, self.err = self.communicate(timeout=secs)
         except subprocess.TimeoutExpired:
             # all good, we'll comme back
             pass
@@ -1111,20 +1359,3 @@ class PGAutoCtl():
             self.command += pgdata
 
         return self.command
-
-
-def wait_or_timeout_proc(proc, name, timeout):
-    """
-    Waits for command to exit successfully. If it exits with error or it timeouts,
-    raises an execption with stdout and stderr streams of the process.
-    """
-    try:
-        out, err = proc.communicate(timeout=COMMAND_TIMEOUT)
-        if proc.returncode > 0:
-            raise Exception("%s failed, out: %s\n, err: %s" % (name, out, err))
-        return out, err
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        out, err = proc.communicate()
-        raise Exception("%s timed out after %d seconds. out: %s\n, err: %s" \
-                        % (name, timeout, out, err))

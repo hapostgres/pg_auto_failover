@@ -163,21 +163,21 @@ users::
 
   $ pg_autoctl create monitor --ssl-ca-file root.crt   \
                               --ssl-crl-file root.crl  \
-                              --server-crt server.crt  \
+                              --server-cert server.crt  \
                               --server-key server.key  \
-                              --ssl-mode validate-full \
+                              --ssl-mode verify-full \
                               ...
 
   $ pg_autoctl create postgres --ssl-ca-file root.crt   \
-                               --server-crt server.crt  \
+                               --server-cert server.crt  \
                                --server-key server.key  \
-                               --ssl-mode validate-full \
+                               --ssl-mode verify-full \
                                ...
 
   $ pg_autoctl create postgres --ssl-ca-file root.crt   \
-                               --server-crt server.crt  \
+                               --server-cert server.crt  \
                                --server-key server.key  \
-                               --ssl-mode validate-full \
+                               --ssl-mode verify-full \
                                ...
 
 The option ``--ssl-mode`` can be used to force connection strings used by
@@ -280,3 +280,63 @@ If you have your own HBA provisioning solution, you can include the rules
 needed for pg_auto_failover and then use the ``--skip-pg-hba`` option to the
 ``pg_autoctl create`` commands.
 
+
+Enable SSL connections on an existing setup
+-------------------------------------------
+
+Whether you upgrade pg_auto_failover from a previous version that did not
+have support for the SSL features, or when you started with ``--no-ssl`` and
+later change your mind, it is possible with pg_auto_failover to add SSL
+settings on system that has already been setup without explicit SSL support.
+
+In this section we detail how to upgrade to SSL settings.
+
+Installing Self-Signed certificates on-top of an already existing
+pg_auto_failover setup is done with one of the following pg_autoctl command
+variants, depending if you want self-signed certificates or fully verified
+ssl certificates::
+
+  $ pg_autoctl enable ssl --ssl-self-signed --ssl-mode required
+
+  $ pg_autoctl enable ssl --ssl-ca-file root.crt   \
+                          --ssl-crl-file root.crl  \
+                          --server-cert server.crt  \
+                          --server-key server.key  \
+                          --ssl-mode verify-full
+
+The ``pg_autoctl enable ssl`` command edits the
+``postgresql-auto-failover.conf`` Postgres configuration file to match the
+command line arguments given and enable SSL as instructed, and then updates
+the pg_autoctl configuration.
+
+The connection string to connect to the monitor is also automatically
+updated by the ``pg_autoctl enable ssl`` command. You can verify your new
+configuration with::
+
+  $ pg_autoctl config get pg_autoctl.monitor
+
+Note that an already running pg_autoctl deamon will try to reload its
+configuration after ``pg_autoctl enable ssl`` has finished. In some cases
+this is not possible to do without a restart. So be sure to check the logs
+from a running daemon to confirm that the reload succeeded. If it did not
+you may need to restart the daemon to ensure the new connection string is
+used.
+
+The HBA settings are not edited, irrespective of the ``--skip-pg-hba`` that
+has been used at creation time. That's because the ``host`` records match
+either SSL or non-SSL connection attempts in Postgres HBA file, so the
+pre-existing setup will continue to work. To enhance the SSL setup, you can
+manually edit the HBA files and change the existing lines from ``host`` to
+``hostssl`` to dissallow unencrypted connections at the server side.
+
+In summary, to upgrade an existing pg_auto_failover setup to enable SSL:
+
+  1. run the ``pg_autoctl enable ssl`` command on your monitor and then all
+     the Postgres nodes,
+
+  2. on the Postgres nodes, review your pg_autoctl logs to make sure that
+     the reload operation has been effective, and review your Postgres
+     settings to verify that you have the expected result,
+
+  3. review your HBA rules setup to change the pg_auto_failover rules from
+     ``host`` to ``hostssl`` to disallow insecure connections.

@@ -443,7 +443,7 @@ FormationKindFromString(const char *kind)
 		}
 	}
 
-	ereport(ERROR, (ERRCODE_INVALID_PARAMETER_VALUE,
+	ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 					errmsg("unknown formation kind \"%s\"", kind)));
 
 	/* never happens, make compiler happy */
@@ -475,7 +475,7 @@ FormationKindToString(FormationKind kind)
 		}
 
 		default:
-			ereport(ERROR, (ERRCODE_INVALID_PARAMETER_VALUE,
+			ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 							errmsg("unknown formation kind value %d", kind)));
 	}
 
@@ -512,7 +512,7 @@ FormationKindFromNodeKindString(const char *nodeKind)
 		}
 	}
 
-	ereport(ERROR, (ERRCODE_INVALID_PARAMETER_VALUE,
+	ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 					errmsg("unknown formation kind \"%s\"", nodeKind)));
 
 	/* never happens, make compiler happy */
@@ -554,7 +554,7 @@ set_formation_number_sync_standbys(PG_FUNCTION_ARGS)
 
 	if (formation == NULL)
 	{
-		ereport(ERROR, (ERRCODE_INVALID_PARAMETER_VALUE,
+		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 						errmsg("unknown formation \"%s\"", formationId)));
 	}
 
@@ -564,7 +564,7 @@ set_formation_number_sync_standbys(PG_FUNCTION_ARGS)
 	if (number_sync_standbys < 0)
 	{
 		ereport(ERROR,
-				(ERRCODE_INVALID_PARAMETER_VALUE,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 				 errmsg("invalid value for number_sync_standbys: \"%d\"",
 						number_sync_standbys),
 				 errdetail("A non-negative integer is expected")));
@@ -605,7 +605,7 @@ set_formation_number_sync_standbys(PG_FUNCTION_ARGS)
 										&standbyCount))
 	{
 		ereport(ERROR,
-				(ERRCODE_INVALID_PARAMETER_VALUE,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 				 errmsg("invalid value for number_sync_standbys: \"%d\"",
 						number_sync_standbys),
 				 errdetail("At least %d standby nodes are required, "

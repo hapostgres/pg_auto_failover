@@ -19,6 +19,7 @@
 #include "monitor_config.h"
 #include "parsing.h"
 #include "pgsql.h"
+#include "signals.h"
 #include "string_utils.h"
 
 #define STR_ERRCODE_OBJECT_IN_USE "55006"
@@ -92,6 +93,8 @@ static bool prepare_connection_to_current_system_user(Monitor *source,
 bool
 monitor_init(Monitor *monitor, char *url)
 {
+	log_trace("monitor_init: %s", url);
+
 	if (!pgsql_init(&monitor->pgsql, url, PGSQL_CONN_MONITOR))
 	{
 		/* URL must be invalid, pgsql_init logged an error */
@@ -234,7 +237,7 @@ monitor_print_nodes_as_json(Monitor *monitor, char *formation, int groupId)
 		return false;
 	}
 
-	fprintf(stdout, "%s\n", context.strVal);
+	fformat(stdout, "%s\n", context.strVal);
 
 	return true;
 }
@@ -376,7 +379,7 @@ monitor_print_other_nodes_as_json(Monitor *monitor,
 		return false;
 	}
 
-	fprintf(stdout, "%s\n", context.strVal);
+	fformat(stdout, "%s\n", context.strVal);
 
 	return true;
 }
@@ -809,7 +812,7 @@ parseNodeReplicationSettings(void *ctx, PGresult *result)
 	}
 
 	value = PQgetvalue(result, 0, 0);
-	if (sscanf(value, "%d", &context->candidatePriority) != 1)
+	if (!stringToInt(value, &context->candidatePriority))
 	{
 		log_error("Invalid failover candidate priority \"%s\" "
 				  "returned by monitor", value);
@@ -1174,7 +1177,7 @@ printNodeArray(NodeAddressArray *nodesArray)
 		printNodeEntry(node);
 	}
 
-	fprintf(stdout, "\n");
+	fformat(stdout, "\n");
 }
 
 
@@ -1200,10 +1203,10 @@ printNodeHeader(int maxNodeNameSize)
 		}
 	}
 
-	fprintf(stdout, "%3s | %*s | %6s | %18s | %8s\n",
+	fformat(stdout, "%3s | %*s | %6s | %18s | %8s\n",
 			"ID", maxNodeNameSize, "Host", "Port", "LSN", "Primary?");
 
-	fprintf(stdout, "%3s-+-%*s-+-%6s-+-%18s-+-%8s\n",
+	fformat(stdout, "%3s-+-%*s-+-%6s-+-%18s-+-%8s\n",
 			"---", maxNodeNameSize, nameSeparatorHeader, "------",
 			"------------------", "--------");
 }
@@ -1215,7 +1218,7 @@ printNodeHeader(int maxNodeNameSize)
 void
 printNodeEntry(NodeAddress *node)
 {
-	fprintf(stdout, "%3d | %s | %6d | %18s | %8s\n",
+	fformat(stdout, "%3d | %s | %6d | %18s | %8s\n",
 			node->nodeId, node->host, node->port, node->lsn,
 			node->isPrimary ? "yes" : "no");
 }
@@ -1272,7 +1275,7 @@ parseNodeState(void *ctx, PGresult *result)
 	}
 
 	value = PQgetvalue(result, 0, 3);
-	if (sscanf(value, "%d", &context->assignedState->candidatePriority) != 1)
+	if (!stringToInt(value, &context->assignedState->candidatePriority))
 	{
 		log_error("Invalid failover candidate priority \"%s\" "
 				  "returned by monitor", value);
@@ -1925,20 +1928,22 @@ monitor_drop_formation(Monitor *monitor, char *formation)
 bool
 monitor_formation_uri(Monitor *monitor,
 					  const char *formation,
-					  const char *sslMode,
+					  const SSLOptions *ssl,
 					  char *connectionString,
 					  size_t size)
 {
 	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_STRING, false };
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
-		"SELECT formation_uri FROM pgautofailover.formation_uri($1, $2)";
-	int paramCount = 2;
-	Oid paramTypes[2] = { TEXTOID, TEXTOID };
-	const char *paramValues[2];
+		"SELECT formation_uri FROM pgautofailover.formation_uri($1, $2, $3, $4)";
+	int paramCount = 4;
+	Oid paramTypes[4] = { TEXTOID, TEXTOID, TEXTOID, TEXTOID };
+	const char *paramValues[4] = { 0 };
 
 	paramValues[0] = formation;
-	paramValues[1] = sslMode;
+	paramValues[1] = ssl->sslModeStr;
+	paramValues[2] = ssl->caFile;
+	paramValues[3] = ssl->crlFile;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
@@ -1977,7 +1982,7 @@ monitor_formation_uri(Monitor *monitor,
  * strings: first the monitor URI itself, and then one line per formation.
  */
 bool
-monitor_print_every_formation_uri(Monitor *monitor, const char *sslMode)
+monitor_print_every_formation_uri(Monitor *monitor, const SSLOptions *ssl)
 {
 	FormationURIParseContext context = { 0 };
 	PGSQL *pgsql = &monitor->pgsql;
@@ -1986,14 +1991,16 @@ monitor_print_every_formation_uri(Monitor *monitor, const char *sslMode)
 		" UNION ALL "
 		"SELECT 'formation', formationid, formation_uri "
 		"  FROM pgautofailover.formation, "
-		"       pgautofailover.formation_uri(formation.formationid, $2)";
+		"       pgautofailover.formation_uri(formation.formationid, $2, $3, $4)";
 
-	int paramCount = 2;
-	Oid paramTypes[2] = { TEXTOID, TEXTOID };
-	const char *paramValues[2];
+	int paramCount = 4;
+	Oid paramTypes[4] = { TEXTOID, TEXTOID, TEXTOID, TEXTOID };
+	const char *paramValues[4];
 
 	paramValues[0] = monitor->pgsql.connectionString;
-	paramValues[1] = sslMode;
+	paramValues[1] = ssl->sslModeStr;
+	paramValues[2] = ssl->caFile;
+	paramValues[3] = ssl->crlFile;
 
 	context.parsedOK = false;
 
@@ -2026,7 +2033,7 @@ monitor_print_every_formation_uri(Monitor *monitor, const char *sslMode)
  */
 bool
 monitor_print_every_formation_uri_as_json(Monitor *monitor,
-										  const char *sslMode,
+										  const SSLOptions *ssl,
 										  FILE *stream)
 {
 	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_STRING, false };
@@ -2037,16 +2044,18 @@ monitor_print_every_formation_uri_as_json(Monitor *monitor,
 		" UNION ALL "
 		"SELECT 'formation', formationid, formation_uri "
 		"  FROM pgautofailover.formation, "
-		"       pgautofailover.formation_uri(formation.formationid, $2)"
+		"       pgautofailover.formation_uri(formation.formationid, $2, $3, $4)"
 		") "
 		"SELECT jsonb_pretty(jsonb_agg(row_to_json(formation))) FROM formation";
 
-	int paramCount = 2;
-	Oid paramTypes[2] = { TEXTOID, TEXTOID };
-	const char *paramValues[2];
+	int paramCount = 4;
+	Oid paramTypes[4] = { TEXTOID, TEXTOID, TEXTOID, TEXTOID };
+	const char *paramValues[4];
 
 	paramValues[0] = monitor->pgsql.connectionString;
-	paramValues[1] = sslMode;
+	paramValues[1] = ssl->sslModeStr;
+	paramValues[2] = ssl->caFile;
+	paramValues[3] = ssl->crlFile;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
@@ -2421,8 +2430,15 @@ monitor_get_notifications(Monitor *monitor)
 
 	if (select(sock + 1, &input_mask, NULL, NULL, NULL) < 0)
 	{
-		log_warn("select() failed: %m");
-		return false;
+		if (asked_to_stop || asked_to_stop_fast)
+		{
+			return true;
+		}
+		else
+		{
+			log_warn("select() failed: %m");
+			return false;
+		}
 	}
 
 	/* Now check for input */
@@ -2534,7 +2550,7 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 
 		if (select(sock + 1, &input_mask, NULL, NULL, NULL) < 0)
 		{
-			log_warn("select() failed: %s\n", strerror(errno));
+			log_warn("select() failed: %m");
 			return false;
 		}
 
@@ -2694,7 +2710,7 @@ monitor_wait_until_node_reported_state(Monitor *monitor,
 
 		if (select(sock + 1, &input_mask, NULL, NULL, NULL) < 0)
 		{
-			log_warn("select() failed: %s\n", strerror(errno));
+			log_warn("select() failed: %m");
 			return false;
 		}
 
@@ -3051,105 +3067,4 @@ prepare_connection_to_current_system_user(Monitor *source, Monitor *target)
 	PQconninfoFree(conninfo);
 
 	return true;
-}
-
-
-/*
- * ensure_monitor_pg_running checks if monitor is running, attempts to restart if it is not.
- * The function verifies if the extension version is the same as expected.  It returns true
- * if the monitor is up and running.
- */
-bool
-ensure_monitor_pg_running(Monitor *monitor, struct MonitorConfig *mconfig)
-{
-	MonitorExtensionVersion version = { 0 };
-
-	if (!pg_is_running(mconfig->pgSetup.pg_ctl, mconfig->pgSetup.pgdata))
-	{
-		log_info("Postgres is not running, starting postgres");
-		pgsql_finish(&(monitor->pgsql));
-
-		if (!pg_ctl_start(mconfig->pgSetup.pg_ctl,
-						  mconfig->pgSetup.pgdata,
-						  mconfig->pgSetup.pgport,
-						  mconfig->pgSetup.listen_addresses))
-		{
-			log_error("Failed to start PostgreSQL, see above for details");
-			return false;
-		}
-
-		/*
-		 * Check version compatibility.
-		 *
-		 * The function terminates any existing connection during clenaup
-		 * therefore it is not called when PG is found to be running to not
-		 * to intervene pgsql_listen call.
-		 */
-		if (!monitor_ensure_extension_version(monitor, &version))
-		{
-			/* errors have already been logged */
-			return false;
-		}
-	}
-
-	return true;
-}
-
-
-/*
- * monitor_service_run watches over monitor process, restarts if it is necessary,
- * also loops over a LISTEN command that is notified at every
- * change of state on the monitor, and prints the change on stdout.
- */
-bool
-monitor_service_run(Monitor *monitor, struct MonitorConfig *mconfig)
-{
-	char *channels[] = { "log", "state", NULL };
-	char postgresUri[MAXCONNINFO];
-
-	/* We exit the loop if we can't get monitor to be running during the start */
-	if (!ensure_monitor_pg_running(monitor, mconfig))
-	{
-		/* errors were already logged */
-		log_warn("Failed to ensure PostgreSQL is running, exiting the service");
-		return false;
-	}
-
-	/* Now get the the Monitor URI to display it to the user, and move along */
-	if (monitor_config_get_postgres_uri(mconfig, postgresUri, MAXCONNINFO))
-	{
-		log_info("pg_auto_failover monitor is ready at %s", postgresUri);
-	}
-
-	log_info("Contacting the monitor to LISTEN to its events.");
-	pgsql_listen(&(monitor->pgsql), channels);
-
-	/*
-	 * Main loop for notifications.
-	 */
-	for (;;)
-	{
-		if (!ensure_monitor_pg_running(monitor, mconfig))
-		{
-			log_warn("Failed to ensure PostgreSQL is running, "
-					 "retrying in %d seconds",
-					 PG_AUTOCTL_MONITOR_SLEEP_TIME);
-			sleep(PG_AUTOCTL_MONITOR_SLEEP_TIME);
-			continue;
-		}
-
-		if (!monitor_get_notifications(monitor))
-		{
-			log_warn("Re-establishing connection. We might miss notifications.");
-			pgsql_finish(&(monitor->pgsql));
-
-			pgsql_listen(&(monitor->pgsql), channels);
-
-			/* skip sleeping */
-			continue;
-		}
-
-		sleep(PG_AUTOCTL_MONITOR_SLEEP_TIME);
-	}
-	pgsql_finish(&(monitor->pgsql));
 }

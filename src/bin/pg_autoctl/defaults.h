@@ -14,10 +14,10 @@
 #define PG_AUTOCTL_STATE_VERSION 1
 
 /* additional version information for printing version on CLI */
-#define PG_AUTOCTL_VERSION "1.2"
+#define PG_AUTOCTL_VERSION "1.3"
 
 /* version of the extension that we requite to talk to on the monitor */
-#define PG_AUTOCTL_EXTENSION_VERSION "1.2"
+#define PG_AUTOCTL_EXTENSION_VERSION "1.3"
 
 /* environment variable to use to make DEBUG facilities available */
 #define PG_AUTOCTL_DEBUG "PG_AUTOCTL_DEBUG"
@@ -65,7 +65,7 @@
 #define PREPARE_PROMOTION_CATCHUP_TIMEOUT 30
 #define PREPARE_PROMOTION_WALRECEIVER_TIMEOUT 5
 
-#define PG_AUTOCTL_KEEPER_SLEEP_TIME 5
+#define PG_AUTOCTL_KEEPER_SLEEP_TIME 1
 #define PG_AUTOCTL_MONITOR_SLEEP_TIME 1
 
 #define PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT 30

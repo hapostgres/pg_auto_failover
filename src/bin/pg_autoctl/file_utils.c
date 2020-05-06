@@ -809,7 +809,8 @@ rewrite_file_skipping_lines_matching(const char *filename, const char *regex)
 /*
  * normalize_filename returns the real path of a given filename that belongs to
  * an existing file on-disk, resolving symlinks and pruning double-slashes and
- * other weird constructs.
+ * other weird constructs. filename and dst are allowed to point to the same
+ * adress.
  */
 bool
 normalize_filename(const char *filename, char *dst, int size)
@@ -817,7 +818,7 @@ normalize_filename(const char *filename, char *dst, int size)
 	/* normalize the path to the configuration file, if it exists */
 	if (file_exists(filename))
 	{
-		char realPath[PATH_MAX];
+		char realPath[PATH_MAX] = { 0 };
 
 		if (realpath(filename, realPath) == NULL)
 		{
@@ -835,7 +836,11 @@ normalize_filename(const char *filename, char *dst, int size)
 	}
 	else
 	{
-		strlcpy(dst, filename, MAXPGPATH);
+		char realPath[PATH_MAX] = { 0 };
+
+		/* protect against undefined behavior if dst overlaps with filename */
+		strlcpy(realPath, filename, MAXPGPATH);
+		strlcpy(dst, realPath, MAXPGPATH);
 	}
 
 	return true;

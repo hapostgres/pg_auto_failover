@@ -238,7 +238,7 @@ cli_get_node_replication_quorum(int argc, char **argv)
 	}
 	else
 	{
-		fprintf(stdout, "%s\n", boolToString(settings.replicationQuorum));
+		fformat(stdout, "%s\n", boolToString(settings.replicationQuorum));
 	}
 }
 
@@ -271,7 +271,7 @@ cli_get_node_candidate_priority(int argc, char **argv)
 	}
 	else
 	{
-		fprintf(stdout, "%d\n", settings.candidatePriority);
+		fformat(stdout, "%d\n", settings.candidatePriority);
 	}
 }
 
@@ -333,7 +333,7 @@ cli_get_formation_number_sync_standbys(int argc, char **argv)
 	}
 	else
 	{
-		fprintf(stdout, "%d\n", numberSyncStandbys);
+		fformat(stdout, "%d\n", numberSyncStandbys);
 	}
 }
 
@@ -419,7 +419,7 @@ cli_set_node_replication_quorum(int argc, char **argv)
 	}
 	else
 	{
-		fprintf(stdout, "%s\n", boolToString(replicationQuorum));
+		fformat(stdout, "%s\n", boolToString(replicationQuorum));
 	}
 }
 
@@ -506,7 +506,7 @@ cli_set_node_candidate_priority(int argc, char **argv)
 	}
 	else
 	{
-		fprintf(stdout, "%d\n", candidatePriority);
+		fformat(stdout, "%d\n", candidatePriority);
 	}
 }
 
@@ -581,7 +581,7 @@ cli_set_node_nodename(int argc, char **argv)
 	}
 	else
 	{
-		fprintf(stdout, "%s\n", argv[0]);
+		fformat(stdout, "%s\n", argv[0]);
 	}
 }
 
@@ -683,7 +683,7 @@ cli_set_formation_number_sync_standbys(int argc, char **argv)
 	}
 	else
 	{
-		fprintf(stdout, "%d\n", numberSyncStandbys);
+		fformat(stdout, "%d\n", numberSyncStandbys);
 	}
 }
 

@@ -17,9 +17,8 @@
 
 extern bool keeperInitWarnings;
 
-bool keeper_pg_init(Keeper *keeper, KeeperConfig *config,
-					NodeState initNodeState);
-bool keeper_pg_init_continue(Keeper *keeper, KeeperConfig *config);
+bool keeper_pg_init(Keeper *keeper, NodeState initNodeState);
+bool keeper_pg_init_continue(Keeper *keeper);
 bool create_database_and_extension(Keeper *keeper);
 
 #endif /* KEEPER_INIT_H */

@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdbool.h>
 
 typedef int (*command_getopt)(int argc, char **argv);
 typedef void (*command_run)(int argc, char **argv);
@@ -38,7 +39,7 @@ extern CommandLine *current_command;
 #define make_command(name, desc, usage, help, getopt, run) \
 	{ name, desc, usage, help, getopt, run, NULL, NULL }
 
-void commandline_run(CommandLine *command, int argc, char **argv);
+bool commandline_run(CommandLine *command, int argc, char **argv);
 void commandline_help(FILE *stream);
 void commandline_print_usage(CommandLine *command, FILE *stream);
 void commandline_print_subcommands(CommandLine *command, FILE *stream);

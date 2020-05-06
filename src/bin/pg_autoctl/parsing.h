@@ -30,4 +30,50 @@ bool parse_bool(const char *value, bool *result);
 bool parseLSN(const char *lsn_string, uint64_t *lsn);
 
 
+/*
+ * To parse Postgres URI we need to store keywords and values in separate
+ * arrays of strings, because that's the libpq way of doing things.
+ *
+ * keywords and values are arrays of string and the arrays must be large enough
+ * to fit all the connection parameters (of which we count 36 at the moment on
+ * the Postgres documentation).
+ *
+ * See https://www.postgresql.org/docs/current/libpq-connect.html
+ *
+ * So here we use 64 entries each of MAXCONNINFO, to ensure we have enough room
+ * to store all the parts of a typicallay MAXCONNINFO bounded full URI. That
+ * amounts to 64kB of memory, so that's not even a luxury.
+ */
+typedef struct KeyVal
+{
+	int count;
+	char keywords[64][MAXCONNINFO];
+	char values[64][MAXCONNINFO];
+} KeyVal;
+
+
+/*
+ * In our own internal processing of Postgres URIs, we want to have some of the
+ * URL parts readily accessible by name rather than mixed in the KeyVal
+ * structure.
+ *
+ * That's mostly becase we want to produce an URI with the following form:
+ *
+ *  postgres://user@host:port/dbname?opt=val
+ */
+typedef struct URIParams
+{
+	char username[MAXCONNINFO];
+	char hostname[MAXCONNINFO];
+	char port[MAXCONNINFO];
+	char dbname[MAXCONNINFO];
+	KeyVal parameters;
+} URIParams;
+
+bool parse_pguri_info_key_vals(const char *pguri,
+							   KeyVal *overrides,
+							   URIParams *uriParameters);
+
+bool buildPostgresURIfromPieces(URIParams *uriParams, char *pguri);
+
 #endif /* PARSING_H */

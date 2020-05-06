@@ -203,9 +203,11 @@ def test_013_maintenance_and_failover():
 
     print("Disabling maintenance on node1, should connect to the new primary")
     node1.disable_maintenance()
-    assert node1.wait_until_state(target_state="secondary")
+    assert node1.wait_until_state(target_state="catchingup")
+    print("node3: %s" % str(node3.vnode.address))
     print("recovery.conf:\n%s" %
           open("/tmp/multi_standby/node1/recovery.conf").read())
+    assert node1.wait_until_state(target_state="secondary")
 
     assert node1.has_needed_replication_slots()
     assert node2.has_needed_replication_slots()

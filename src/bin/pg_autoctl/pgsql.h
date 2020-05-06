@@ -70,6 +70,7 @@ typedef struct PGSQL
 	ConnectionType connectionType;
 	char connectionString[MAXCONNINFO];
 	PGconn *connection;
+	bool connectFailFast;
 } PGSQL;
 
 /* PostgreSQL ("Grand Unified Configuration") setting */
@@ -95,16 +96,22 @@ typedef struct NodeAddressArray
 	NodeAddress nodes[NODE_ARRAY_MAX_COUNT];
 } NodeAddressArray;
 
+/*
+ * The replicationSource structure is used to pass the bits of a connection
+ * string to the primary node around in several function calls. All the
+ * information stored in there must fit in a connection string, so MAXCONNINFO
+ * is a good proxy for their maximum size.
+ */
 typedef struct ReplicationSource
 {
 	NodeAddress primaryNode;
-	char *userName;
-	char *slotName;
-	char *password;
-	char *maximumBackupRate;
-	char *backupDir;
-	char *applicationName;
-	char *targetLSN;
+	char userName[NAMEDATALEN];
+	char slotName[MAXCONNINFO];
+	char password[MAXCONNINFO];
+	char maximumBackupRate[MAXCONNINFO];
+	char backupDir[MAXCONNINFO];
+	char applicationName[MAXCONNINFO];
+	char targetLSN[MAXCONNINFO];
 	SSLOptions sslOptions;
 } ReplicationSource;
 
@@ -192,13 +199,10 @@ bool pgsql_drop_replication_slot(PGSQL *pgsql, const char *slotName);
 bool postgres_sprintf_replicationSlotName(int nodeId, char *slotName, int size);
 bool pgsql_set_synchronous_standby_names(PGSQL *pgsql,
 										 char *synchronous_standby_names);
-bool pgsql_drop_replication_slots(PGSQL *pgsql);
 bool pgsql_replication_slot_drop_removed(PGSQL *pgsql,
 										 NodeAddressArray *nodeArray);
 bool pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray);
 bool postgres_sprintf_replicationSlotName(int nodeId, char *slotName, int size);
-bool pgsql_set_synchronous_standby_names(PGSQL *pgsql,
-										 char *synchronous_standby_names);
 bool pgsql_enable_synchronous_replication(PGSQL *pgsql);
 bool pgsql_disable_synchronous_replication(PGSQL *pgsql);
 bool pgsql_set_default_transaction_mode_read_only(PGSQL *pgsql);

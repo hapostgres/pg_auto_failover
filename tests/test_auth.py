@@ -24,7 +24,6 @@ def test_001_init_primary():
     node1 = cluster.create_datanode("/tmp/auth/node1", authMethod="md5")
     node1.create()
 
-    node1.set_user_password("pgautofailover_monitor", "monitor_password")
     node1.set_user_password("pgautofailover_replicator", "streaming_password")
     node1.config_set("replication.password", "streaming_password")
 

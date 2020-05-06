@@ -357,6 +357,15 @@ keeper_config_read_file_skip_pgsetup(KeeperConfig *config,
 		}
 	}
 
+	/*
+	 * Required for grandfathering old clusters that don't have sslmode
+	 * explicitely set
+	 */
+	if (IS_EMPTY_STRING_BUFFER(config->pgSetup.ssl.sslModeStr))
+	{
+		strlcpy(config->pgSetup.ssl.sslModeStr, "prefer", SSL_MODE_STRLEN);
+	}
+
 	/* set the ENUM value for sslMode */
 	config->pgSetup.ssl.sslMode =
 		pgsetup_parse_sslmode(config->pgSetup.ssl.sslModeStr);
@@ -372,8 +381,8 @@ keeper_config_read_file_skip_pgsetup(KeeperConfig *config,
 
 
 /*
- * keeper_config_read_file_skip_pgsetup overrides values in given KeeperConfig
- * with whatever values are read from given configuration filename.
+ * keeper_config_pgsetup_init overrides values in given KeeperConfig with
+ * whatever values are read from given configuration filename.
  */
 bool
 keeper_config_pgsetup_init(KeeperConfig *config,
@@ -602,7 +611,7 @@ keeper_config_update(KeeperConfig *config, int nodeId, int groupId)
 	char buffer[BUFSIZE] = { 0 };
 	char *replicationSlotName = NULL;
 
-	snprintf(buffer, BUFSIZE, "%s_%d", REPLICATION_SLOT_NAME_DEFAULT, nodeId);
+	(void) postgres_sprintf_replicationSlotName(nodeId, buffer, sizeof(buffer));
 	replicationSlotName = strdup(buffer);
 
 	config->groupId = groupId;
@@ -652,9 +661,6 @@ keeper_config_destroy(KeeperConfig *config)
  * keeper_config_accept_new returns true when we can accept to RELOAD our
  * current config into the new one that's been editing.
  */
-#define strneq(x, y) \
-	((x != NULL) && (y != NULL) && (strcmp(x, y) != 0))
-
 bool
 keeper_config_accept_new(KeeperConfig *config, KeeperConfig *newConfig)
 {
@@ -693,6 +699,10 @@ keeper_config_accept_new(KeeperConfig *config, KeeperConfig *newConfig)
 					  "see above for details");
 			return false;
 		}
+
+		log_info("Reloading configuration: monitor uri is now \"%s\"; "
+				 "used to be \"%s\"",
+				 newConfig->monitor_pguri, config->monitor_pguri);
 
 		strlcpy(config->monitor_pguri, newConfig->monitor_pguri, MAXCONNINFO);
 	}
@@ -749,6 +759,19 @@ keeper_config_accept_new(KeeperConfig *config, KeeperConfig *newConfig)
 		/* note: strneq checks args are not NULL, it's safe to proceed */
 		free(config->maximum_backup_rate);
 		config->maximum_backup_rate = strdup(newConfig->maximum_backup_rate);
+	}
+
+	/*
+	 * The backupDirectory can be changed online too.
+	 */
+	if (strneq(newConfig->backupDirectory, config->backupDirectory))
+	{
+		log_info("Reloading configuration: "
+				 "replication.backup_directory is now \"%s\"; "
+				 "used to be \"%s\"",
+				 newConfig->backupDirectory, config->backupDirectory);
+
+		strlcpy(config->backupDirectory, newConfig->backupDirectory, MAXPGPATH);
 	}
 
 	/*
@@ -814,7 +837,9 @@ keeper_config_accept_new(KeeperConfig *config, KeeperConfig *newConfig)
 			newConfig->postgresql_restart_failure_max_retries;
 	}
 
-	return true;
+	/* we can change any SSL related setup options at runtime */
+	return config_accept_new_ssloptions(&(config->pgSetup),
+										&(newConfig->pgSetup));
 }
 
 
@@ -877,7 +902,7 @@ keeper_config_set_backup_directory(KeeperConfig *config, int nodeId)
 	char absoluteBackupDirectory[PATH_MAX];
 
 	/* build the default nodename based backup directory path */
-	snprintf(subdirs, MAXPGPATH, "backup/%s", config->nodename);
+	sformat(subdirs, MAXPGPATH, "backup/%s", config->nodename);
 	path_in_same_directory(pgdata, subdirs, backupDirectory);
 
 	/*

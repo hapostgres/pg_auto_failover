@@ -162,6 +162,13 @@ pgsql_open_connection(PGSQL *pgsql)
 		 * want to implement a retry loop: it might be a transient failure,
 		 * such as when the remote node is not ready yet.
 		 */
+		if (pgsql->connectFailFast)
+		{
+			log_error("Connection to database failed: %s",
+					  PQerrorMessage(connection));
+			pgsql_finish(pgsql);
+			return NULL;
+		}
 		switch (pgsql->connectionType)
 		{
 			case PGSQL_CONN_LOCAL:
@@ -293,7 +300,7 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 			}
 		}
 
-		if (asked_to_stop || asked_to_stop_fast)
+		if (asked_to_stop || asked_to_stop_fast || asked_to_reload)
 		{
 			retry = false;
 		}
@@ -610,7 +617,7 @@ postgres_sprintf_replicationSlotName(int nodeId, char *slotName, int size)
 
 
 /*
- * pgsql_set_synchronous_standby_names set synchronous_standby_names ton the
+ * pgsql_set_synchronous_standby_names set synchronous_standby_names on the
  * local Postgres to the value computed on the pg_auto_failover monitor.
  */
 bool
@@ -622,7 +629,7 @@ pgsql_set_synchronous_standby_names(PGSQL *pgsql,
 
 	log_info("Enabling synchronous replication");
 
-	if (snprintf(quoted, BUFSIZE, "'%s'", synchronous_standby_names) >= BUFSIZE)
+	if (sformat(quoted, BUFSIZE, "'%s'", synchronous_standby_names) >= BUFSIZE)
 	{
 		log_error("Failed to apply the synchronous_standby_names value \"%s\": "
 				  "pg_autoctl supports values up to %d bytes and this one "
@@ -702,25 +709,6 @@ pgsql_drop_replication_slot(PGSQL *pgsql, const char *slotName)
 
 
 /*
- * pgsql_drop_replication_slots drops all the pg_auto_failover physical
- * replication slots. (We might not own all those that exist on the server)
- */
-bool
-pgsql_drop_replication_slots(PGSQL *pgsql)
-{
-	char *sql =
-		"SELECT pg_drop_replication_slot(slot_name) "
-		"  FROM pg_replication_slots "
-		" WHERE slot_name ~ '" REPLICATION_SLOT_NAME_PATTERN "' "
-															 "   AND slot_type = 'physical'";
-
-	log_info("Drop pg_auto_failover physical replication slots");
-
-	return pgsql_execute_with_params(pgsql, sql, 0, NULL, NULL, NULL, NULL);
-}
-
-
-/*
  * BuildNodesArrayValues build the SQL expression to use in a FROM clause to
  * represent the list of other standby nodes from the given nodeArray.
  *
@@ -761,21 +749,24 @@ BuildNodesArrayValues(NodeAddressArray *nodeArray,
 		NodeAddress *node = &(nodeArray->nodes[nodeIndex]);
 		IntString nodeIdString = intToString(node->nodeId);
 
-		paramTypes[paramIndex] = INT4OID;
-		paramValues[paramIndex++] = strdup(nodeIdString.strValue);
+		int idParamIndex = paramIndex;
+		int lsnParamIndex = paramIndex + 1;
 
-		paramTypes[paramIndex] = LSNOID;
-		paramValues[paramIndex++] = node->lsn;
+		paramTypes[idParamIndex] = INT4OID;
+		paramValues[idParamIndex] = strdup(nodeIdString.strValue);
 
-		valuesIndex += snprintf(buffer + valuesIndex, BUFSIZE - valuesIndex,
-								"%s($%d, $%d%s)",
-								valuesIndex == 0 ? "" : ",",
+		paramTypes[lsnParamIndex] = LSNOID;
+		paramValues[lsnParamIndex] = node->lsn;
 
-		                        /* we begin at $1 here: intentional off-by-one */
-								paramIndex - 1, paramIndex,
+		valuesIndex += sformat(buffer + valuesIndex, BUFSIZE - valuesIndex,
+							   "%s($%d, $%d%s)",
+							   valuesIndex == 0 ? "" : ",",
 
-		                        /* cast only the first row */
-								valuesIndex == 0 ? "::pg_lsn" : "");
+		                       /* we begin at $1 here: intentional off-by-one */
+							   idParamIndex + 1, lsnParamIndex + 1,
+
+		                       /* cast only the first row */
+							   valuesIndex == 0 ? "::pg_lsn" : "");
 
 		if (valuesIndex > BUFSIZE)
 		{
@@ -784,13 +775,16 @@ BuildNodesArrayValues(NodeAddressArray *nodeArray,
 					  "pgsql_replication_slot_maintain");
 			return false;
 		}
+
+		/* prepare next round */
+		paramIndex += 2;
 	}
 
 	/* when we didn't find any node to process, return our empty set */
 	if (paramIndex == 0)
 	{
 		/* we know it fits, size is BUFSIZE or more */
-		sprintf(values,
+		sformat(values, size,
 				"SELECT id, lsn "
 				"FROM (values (null::int, null::pg_lsn)) as t(id, lsn) "
 				"where false");
@@ -799,7 +793,7 @@ BuildNodesArrayValues(NodeAddressArray *nodeArray,
 	{
 		int bytes = 0;
 
-		bytes = snprintf(values, size, "values %s", buffer);
+		bytes = sformat(values, size, "values %s", buffer);
 
 		if (bytes > size)
 		{
@@ -818,7 +812,7 @@ BuildNodesArrayValues(NodeAddressArray *nodeArray,
  * nodes that have been removed. We call that function on the primary, where
  * the slots are maintained by the replication protocol.
  *
- * On the standby nodes, we advance the lots ourselves and use the other
+ * On the standby nodes, we advance the slots ourselves and use the other
  * function pgsql_replication_slot_maintain which is complete (create, drop,
  * advance).
  */
@@ -828,8 +822,9 @@ pgsql_replication_slot_drop_removed(PGSQL *pgsql, NodeAddressArray *nodeArray)
 	int bytes;
 	char sql[2 * BUFSIZE] = { 0 };
 	char values[BUFSIZE] = { 0 };
-	char *sqlTemplate =
 
+	/* *INDENT-OFF* */
+	char *sqlTemplate =
 		/*
 		 * We could simplify the writing of this query, but we prefer that it
 		 * looks as much as possible like the query used in
@@ -838,14 +833,26 @@ pgsql_replication_slot_drop_removed(PGSQL *pgsql, NodeAddressArray *nodeArray)
 		 */
 		"WITH nodes(slot_name, lsn) as ("
 		" SELECT '" REPLICATION_SLOT_NAME_DEFAULT "_' || id, lsn"
-												  "   FROM (%s) as sb(id, lsn) "
-												  "), \n"
-												  "dropped as ("
-												  " SELECT slot_name, pg_drop_replication_slot(slot_name) "
-												  "   FROM pg_replication_slots pgrs LEFT JOIN nodes USING(slot_name) "
-												  "  WHERE nodes.slot_name IS NULL "
-												  ") \n"
-												  "SELECT 'drop', slot_name, NULL::pg_lsn FROM dropped";
+		"   FROM (%s) as sb(id, lsn) "
+		"), \n"
+		"dropped as ("
+		" SELECT slot_name, pg_drop_replication_slot(slot_name) "
+		"   FROM pg_replication_slots pgrs LEFT JOIN nodes USING(slot_name) "
+		"  WHERE nodes.slot_name IS NULL "
+		"    AND (   slot_name ~ '" REPLICATION_SLOT_NAME_PATTERN "' "
+		"         OR slot_name ~ '" REPLICATION_SLOT_NAME_DEFAULT "' )"
+		"    AND slot_type = 'physical'"
+		"), \n"
+		"created as ("
+		"SELECT c.slot_name, c.lsn "
+		"  FROM nodes LEFT JOIN pg_replication_slots pgrs USING(slot_name), "
+		"       LATERAL pg_create_physical_replication_slot(slot_name, true) c"
+		" WHERE pgrs.slot_name IS NULL "
+		") \n"
+		"SELECT 'create', slot_name, lsn FROM created "
+		" union all "
+		"SELECT 'drop', slot_name, NULL::pg_lsn FROM dropped";
+	/* *INDENT-ON* */
 
 	Oid paramTypes[NODE_ARRAY_MAX_COUNT * 2] = { 0 };
 	const char *paramValues[NODE_ARRAY_MAX_COUNT * 2] = { 0 };
@@ -856,7 +863,7 @@ pgsql_replication_slot_drop_removed(PGSQL *pgsql, NodeAddressArray *nodeArray)
 										   values, BUFSIZE);
 
 	/* add the computed ($1,$2), ... string to the query "template" */
-	bytes = snprintf(sql, 2 * BUFSIZE, sqlTemplate, values);
+	bytes = sformat(sql, 2 * BUFSIZE, sqlTemplate, values);
 
 	if (bytes > 2 * BUFSIZE)
 	{
@@ -874,9 +881,10 @@ pgsql_replication_slot_drop_removed(PGSQL *pgsql, NodeAddressArray *nodeArray)
 
 
 /*
- * pgsql_replication_slot_maintain maintains replication slots that belong to
- * other standby nodes. We call that function on the standby nodes, where the
- * slots are maintained manually just in case we need them at failover.
+ * pgsql_replication_slot_maintain creates, drops, and advance replication
+ * slots that belong to other standby nodes. We call that function on the
+ * standby nodes, where the slots are maintained manually just in case we need
+ * them at failover.
  */
 bool
 pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray)
@@ -884,33 +892,38 @@ pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray)
 	int bytes;
 	char sql[2 * BUFSIZE] = { 0 };
 	char values[BUFSIZE] = { 0 };
+
+	/* *INDENT-OFF* */
 	char *sqlTemplate =
 		"WITH nodes(slot_name, lsn) as ("
 		" SELECT '" REPLICATION_SLOT_NAME_DEFAULT "_' || id, lsn"
-												  "   FROM (%s) as sb(id, lsn) "
-												  "), \n"
-												  "dropped as ("
-												  " SELECT slot_name, pg_drop_replication_slot(slot_name) "
-												  "   FROM pg_replication_slots pgrs LEFT JOIN nodes USING(slot_name) "
-												  "  WHERE nodes.slot_name IS NULL "
-												  "), \n"
-												  "advanced as ("
-												  "SELECT a.slot_name, a.end_lsn"
-												  "  FROM pg_replication_slots JOIN nodes USING(slot_name), "
-												  "       LATERAL pg_replication_slot_advance(slot_name, lsn) a"
-												  " WHERE nodes.lsn <> '0/0'"
-												  "), \n"
-												  "created as ("
-												  "SELECT c.slot_name, c.lsn "
-												  "  FROM nodes LEFT JOIN pg_replication_slots pgrs USING(slot_name), "
-												  "       LATERAL pg_create_physical_replication_slot(slot_name, true) c"
-												  " WHERE pgrs.slot_name IS NULL "
-												  ") \n"
-												  "SELECT 'create', slot_name, lsn FROM created "
-												  " union all "
-												  "SELECT 'drop', slot_name, NULL::pg_lsn FROM dropped "
-												  " union all "
-												  "SELECT 'advance', slot_name, end_lsn FROM advanced ";
+		"   FROM (%s) as sb(id, lsn) "
+		"), \n"
+		"dropped as ("
+		" SELECT slot_name, pg_drop_replication_slot(slot_name) "
+		"   FROM pg_replication_slots pgrs LEFT JOIN nodes USING(slot_name) "
+		"  WHERE nodes.slot_name IS NULL "
+		"    AND slot_name ~ '" REPLICATION_SLOT_NAME_PATTERN "' "
+		"    AND slot_type = 'physical'"
+		"), \n"
+		"advanced as ("
+		"SELECT a.slot_name, a.end_lsn"
+		"  FROM pg_replication_slots JOIN nodes USING(slot_name), "
+		"       LATERAL pg_replication_slot_advance(slot_name, lsn) a"
+		" WHERE nodes.lsn <> '0/0'"
+		"), \n"
+		"created as ("
+		"SELECT c.slot_name, c.lsn "
+		"  FROM nodes LEFT JOIN pg_replication_slots pgrs USING(slot_name), "
+		"       LATERAL pg_create_physical_replication_slot(slot_name, true) c"
+		" WHERE pgrs.slot_name IS NULL "
+		") \n"
+		"SELECT 'create', slot_name, lsn FROM created "
+		" union all "
+		"SELECT 'drop', slot_name, NULL::pg_lsn FROM dropped "
+		" union all "
+		"SELECT 'advance', slot_name, end_lsn FROM advanced ";
+	/* *INDENT-ON* */
 
 	Oid paramTypes[NODE_ARRAY_MAX_COUNT * 2] = { 0 };
 	const char *paramValues[NODE_ARRAY_MAX_COUNT * 2] = { 0 };
@@ -921,7 +934,7 @@ pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray)
 										   values, BUFSIZE);
 
 	/* add the computed ($1,$2), ... string to the query "template" */
-	bytes = snprintf(sql, 2 * BUFSIZE, sqlTemplate, values);
+	bytes = sformat(sql, 2 * BUFSIZE, sqlTemplate, values);
 
 	if (bytes > 2 * BUFSIZE)
 	{
@@ -939,8 +952,8 @@ pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray)
 
 
 /*
- * parseReplicationSlotMaintain parses the result of the replication slot
- * queries that return one line per slot maintained.
+ * parseReplicationSlotMaintain parses the result from a PostgreSQL query
+ * fetching two columns from pg_stat_replication: sync_state and currentLSN.
  */
 static void
 parseReplicationSlotMaintain(void *ctx, PGresult *result)
@@ -958,6 +971,7 @@ parseReplicationSlotMaintain(void *ctx, PGresult *result)
 
 	for (rowNumber = 0; rowNumber < PQntuples(result); rowNumber++)
 	{
+		/* operation and slotName can't be NULL given how the SQL is built */
 		char *operation = PQgetvalue(result, rowNumber, 0);
 		char *slotName = PQgetvalue(result, rowNumber, 1);
 		char *lsn = PQgetisnull(result, rowNumber, 2) ? ""
@@ -1008,7 +1022,9 @@ pgsql_disable_synchronous_replication(PGSQL *pgsql)
 {
 	GUC setting = { "synchronous_standby_names", "''" };
 	char *cancelBlockedStatementsCommand =
-		"SELECT pg_cancel_backend(pid) FROM pg_stat_activity WHERE wait_event = 'SyncRep'";
+		"SELECT pg_cancel_backend(pid) "
+		"  FROM pg_stat_activity "
+		" WHERE wait_event = 'SyncRep'";
 
 	log_info("Disabling synchronous replication");
 
@@ -1680,8 +1696,9 @@ pgsql_get_postgres_metadata(PGSQL *pgsql, bool *pg_is_in_recovery,
 							char *pgsrSyncState, char *currentLSN)
 {
 	PgMetadata context = { 0 };
-	char *sql =
 
+	/* *INDENT-OFF* */
+	char *sql =
 		/*
 		 * Make it so that we still have the current WAL LSN even in the case
 		 * where there's no replication slot in use by any standby.
@@ -1705,15 +1722,17 @@ pgsql_get_postgres_metadata(PGSQL *pgsql, bool *pg_is_in_recovery,
 		"     join pg_stat_replication rep"
 		"       on rep.pid = slot.active_pid"
 		"   where slot_name ~ '" REPLICATION_SLOT_NAME_PATTERN "' "
-															   "order by case sync_state "
-															   "         when 'quorum' then 4 "
-															   "         when 'sync' then 3 "
-															   "         when 'potential' then 2 "
-															   "         when 'async' then 1 "
-															   "         else 0 end "
-															   "    desc limit 1"
-															   " ) "
-															   "as rep on true";
+		"      or slot_name = '" REPLICATION_SLOT_NAME_DEFAULT "' "
+		"order by case sync_state "
+		"         when 'quorum' then 4 "
+		"         when 'sync' then 3 "
+		"         when 'potential' then 2 "
+		"         when 'async' then 1 "
+		"         else 0 end "
+		"    desc limit 1"
+		" ) "
+		"as rep on true";
+	/* *INDENT-ON* */
 
 	if (!pgsql_execute_with_params(pgsql, sql, 0, NULL, NULL,
 								   &context, &parsePgMetadata))

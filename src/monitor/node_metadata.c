@@ -335,6 +335,34 @@ GetPrimaryNodeInGroup(char *formationId, int32 groupId)
 
 
 /*
+ * GetPrimaryNodeInGroup returns the writable node in the specified group, if
+ * any.
+ */
+AutoFailoverNode *
+GetNodeToFailoverFromInGroup(char *formationId, int32 groupId)
+{
+	AutoFailoverNode *failoverNode = NULL;
+	List *groupNodeList = NIL;
+	ListCell *nodeCell = NULL;
+
+	groupNodeList = AutoFailoverNodeGroup(formationId, groupId);
+
+	foreach(nodeCell, groupNodeList)
+	{
+		AutoFailoverNode *currentNode = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (CanInitiateFailover(currentNode->goalState))
+		{
+			failoverNode = currentNode;
+			break;
+		}
+	}
+
+	return failoverNode;
+}
+
+
+/*
  * GetPrimaryNodeInGroup returns the node in the group with a role that only a
  * primary can have.
  *
@@ -1040,7 +1068,7 @@ SyncStateFromString(const char *pgsrSyncState)
 		}
 	}
 
-	ereport(ERROR, (ERRCODE_INVALID_PARAMETER_VALUE,
+	ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 					errmsg("unknown pg_stat_replication.sync_state \"%s\"",
 						   pgsrSyncState)));
 
@@ -1083,7 +1111,7 @@ SyncStateToString(SyncState pgsrSyncState)
 		}
 
 		default:
-			ereport(ERROR, (ERRCODE_INVALID_PARAMETER_VALUE,
+			ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 							errmsg("unknown SyncState enum value %d",
 								   pgsrSyncState)));
 	}
@@ -1122,6 +1150,20 @@ CanTakeWritesInState(ReplicationState state)
 
 
 /*
+ * CanInitiateFailover returns whether a node is a primary that we can initiate
+ * a (manual) failover from. We refuse to failover from a WAIT_PRIMARY node
+ * because we're not sure if the secondary has done catching-up yet.
+ */
+bool
+CanInitiateFailover(ReplicationState state)
+{
+	return state == REPLICATION_STATE_SINGLE ||
+		   state == REPLICATION_STATE_PRIMARY ||
+		   state == REPLICATION_STATE_JOIN_PRIMARY;
+}
+
+
+/*
  * StateBelongsToPrimary returns true when given state belongs to a primary
  * node, either in a healthy state or even when in the middle of being demoted.
  */
@@ -1130,7 +1172,6 @@ StateBelongsToPrimary(ReplicationState state)
 {
 	return CanTakeWritesInState(state) ||
 		   state == REPLICATION_STATE_DRAINING ||
-		   state == REPLICATION_STATE_DEMOTED ||
 		   state == REPLICATION_STATE_DEMOTE_TIMEOUT;
 }
 

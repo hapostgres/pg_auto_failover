@@ -44,16 +44,11 @@ bool keeperInitWarnings = false;
 
 static KeeperStateInit initState = { 0 };
 
-static bool keeper_pg_init_fsm(Keeper *keeper, KeeperConfig *config);
-
-static bool keeper_pg_init_and_register(Keeper *keeper,
-										KeeperConfig *config,
-										NodeState initNodeState);
-
-static bool keeper_pg_init_check_initial_state(Keeper *keeper, KeeperConfig *config,
+static bool keeper_pg_init_fsm(Keeper *keeper);
+static bool keeper_pg_init_and_register(Keeper *keeper, NodeState initNodeState);
+static bool keeper_pg_init_check_initial_state(Keeper *keeper,
 											   NodeState initialNodeStateCandidate,
 											   NodeState *initialNodeState);
-
 static bool reach_initial_state(Keeper *keeper);
 static bool wait_until_primary_is_ready(Keeper *config,
 										MonitorAssignedState *assignedState);
@@ -67,18 +62,20 @@ static bool keeper_pg_init_node_active(Keeper *keeper);
  * keeper_pg_init_fsm.
  */
 bool
-keeper_pg_init(Keeper *keeper, KeeperConfig *config, NodeState initNodeState)
+keeper_pg_init(Keeper *keeper, NodeState initNodeState)
 {
+	KeeperConfig *config = &(keeper->config);
+
 	log_trace("keeper_pg_init: monitor is %s",
 			  config->monitorDisabled ? "disabled" : "enabled");
 
 	if (config->monitorDisabled)
 	{
-		return keeper_pg_init_fsm(keeper, config);
+		return keeper_pg_init_fsm(keeper);
 	}
 	else
 	{
-		return keeper_pg_init_and_register(keeper, config, initNodeState);
+		return keeper_pg_init_and_register(keeper, initNodeState);
 	}
 }
 
@@ -90,9 +87,9 @@ keeper_pg_init(Keeper *keeper, KeeperConfig *config, NodeState initNodeState)
  * for orders from another software.
  */
 static bool
-keeper_pg_init_fsm(Keeper *keeper, KeeperConfig *config)
+keeper_pg_init_fsm(Keeper *keeper)
 {
-	return keeper_init_fsm(keeper, config);
+	return keeper_init_fsm(keeper);
 }
 
 
@@ -118,9 +115,9 @@ keeper_pg_init_fsm(Keeper *keeper, KeeperConfig *config)
  * done, PostgreSQL is known to be running in the proper state.
  */
 static bool
-keeper_pg_init_and_register(Keeper *keeper, KeeperConfig *config,
-							NodeState initNodeStateCandidate)
+keeper_pg_init_and_register(Keeper *keeper, NodeState initNodeStateCandidate)
 {
+	KeeperConfig *config = &(keeper->config);
 	NodeState initNodeState = NO_STATE;
 
 	/*
@@ -130,7 +127,7 @@ keeper_pg_init_and_register(Keeper *keeper, KeeperConfig *config,
 	 */
 	if (file_exists(config->pathnames.init))
 	{
-		return keeper_pg_init_continue(keeper, config);
+		return keeper_pg_init_continue(keeper);
 	}
 
 	/*
@@ -163,7 +160,7 @@ keeper_pg_init_and_register(Keeper *keeper, KeeperConfig *config,
 	 * Postgres instance and the candidate state we want to reach. If all is
 	 * good and compatible, go ahead. Otherwise, stop now.
 	 */
-	if (!keeper_pg_init_check_initial_state(keeper, config,
+	if (!keeper_pg_init_check_initial_state(keeper,
 											initNodeStateCandidate,
 											&initNodeState))
 	{
@@ -180,7 +177,7 @@ keeper_pg_init_and_register(Keeper *keeper, KeeperConfig *config,
 	 * Note that keeper_register_and_init cleans up the state file when if
 	 * fails, so that we don't have to do that here.
 	 */
-	if (!keeper_register_and_init(keeper, config, initNodeState))
+	if (!keeper_register_and_init(keeper, initNodeState))
 	{
 		log_error("Failed to register the existing local Postgres node "
 				  "\"%s:%d\" running at \"%s\" "
@@ -219,10 +216,12 @@ keeper_pg_init_and_register(Keeper *keeper, KeeperConfig *config,
  * in that state actually.
  */
 static bool
-keeper_pg_init_check_initial_state(Keeper *keeper, KeeperConfig *config,
+keeper_pg_init_check_initial_state(Keeper *keeper,
 								   NodeState initialNodeStateCandidate,
 								   NodeState *initialNodeState)
 {
+	KeeperConfig *config = &(keeper->config);
+
 	/*
 	 * The initial state we may register in depend on the current PostgreSQL
 	 * instance that might exist or not at PGDATA.
@@ -350,8 +349,10 @@ keeper_pg_init_check_initial_state(Keeper *keeper, KeeperConfig *config,
  * registered to the monitor: that's when we create the init file.
  */
 bool
-keeper_pg_init_continue(Keeper *keeper, KeeperConfig *config)
+keeper_pg_init_continue(Keeper *keeper)
 {
+	KeeperConfig *config = &(keeper->config);
+
 	if (!keeper_init(keeper, config))
 	{
 		/* errors have already been logged */
@@ -404,7 +405,7 @@ keeper_pg_init_continue(Keeper *keeper, KeeperConfig *config)
 static bool
 reach_initial_state(Keeper *keeper)
 {
-	KeeperConfig config = keeper->config;
+	KeeperConfig *config = &(keeper->config);
 
 	log_trace("reach_initial_state: %s to %s",
 			  NodeStateToString(keeper->state.current_role),
@@ -521,7 +522,7 @@ reach_initial_state(Keeper *keeper)
 	}
 
 	/* everything went fine, get rid of the init state file */
-	return unlink_file(config.pathnames.init);
+	return unlink_file(config->pathnames.init);
 }
 
 
@@ -704,6 +705,32 @@ create_database_and_extension(Keeper *keeper)
 	local_postgres_init(&initPostgres, &initPgSetup);
 
 	/*
+	 * When --ssl-self-signed has been used, now is the time to build a
+	 * self-signed certificate for the server. We place the certificate and
+	 * private key in $PGDATA/server.key and $PGDATA/server.crt
+	 */
+	if (!keeper_create_self_signed_cert(keeper))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/* publish our new pgSetup to the caller postgres state too */
+	postgres->postgresSetup.ssl = initPostgres.postgresSetup.ssl;
+
+	/*
+	 * Add pg_autoctl PostgreSQL settings, including Citus extension in
+	 * shared_preload_libraries when dealing with a Citus worker or coordinator
+	 * node.
+	 */
+	if (!postgres_add_default_settings(&initPostgres))
+	{
+		log_error("Failed to add default settings to newly initialized "
+				  "PostgreSQL instance, see above for details");
+		return false;
+	}
+
+	/*
 	 * Now start the database, we need to create our dbname and maybe the Citus
 	 * Extension too.
 	 */
@@ -726,53 +753,6 @@ create_database_and_extension(Keeper *keeper)
 			log_fatal("Failed to create role \"%s\""
 					  ", see above for details", pgSetup->username);
 
-			return false;
-		}
-	}
-
-	/*
-	 * When --ssl-self-signed has been used, now is the time to build a
-	 * self-signed certificate for the server. We place the certificate and
-	 * private key in $PGDATA/server.key and $PGDATA/server.crt
-	 */
-	if (pgSetup->ssl.createSelfSignedCert)
-	{
-		if (!pg_create_self_signed_cert(pgSetup, config->nodename))
-		{
-			log_error("Failed to create SSL self-signed certificate, "
-					  "see above for details");
-			return false;
-		}
-	}
-
-	/*
-	 * Add pg_autoctl PostgreSQL settings, including Citus extension in
-	 * shared_preload_libraries when dealing with a Citus worker or coordinator
-	 * node.
-	 */
-	if (!postgres_add_default_settings(&initPostgres))
-	{
-		log_error("Failed to add default settings to newly initialized "
-				  "PostgreSQL instance, see above for details");
-		return false;
-	}
-
-	/*
-	 * Now allow nodes on the same network to connect to the coordinator, and
-	 * the coordinator to connect to its workers.
-	 */
-	if (IS_CITUS_INSTANCE_KIND(postgres->pgKind))
-	{
-		if (!pghba_enable_lan_cidr(&initPostgres.sqlClient,
-								   pgSetup->ssl.active,
-								   HBA_DATABASE_DBNAME,
-								   pgSetup->dbname,
-								   config->nodename,
-								   pg_setup_get_username(pgSetup),
-								   pg_setup_get_auth_method(pgSetup),
-								   NULL))
-		{
-			log_error("Failed to grant local network connections in HBA");
 			return false;
 		}
 	}
@@ -801,19 +781,6 @@ create_database_and_extension(Keeper *keeper)
 	pgsql_finish(&initPostgres.sqlClient);
 
 	/*
-	 * Because we did create the PostgreSQL cluster in this function, we feel
-	 * free to restart it to make sure that the defaults we just installed are
-	 * actually in place.
-	 */
-
-	if (!keeper_restart_postgres(keeper))
-	{
-		log_fatal("Failed to restart PostgreSQL to enable pg_auto_failover "
-				  "configuration");
-		return false;
-	}
-
-	/*
 	 * When initialiasing a PostgreSQL instance that's going to be used as a
 	 * Citus node, either a coordinator or a worker, we have to also create an
 	 * extension in a database that can be used by citus.
@@ -821,15 +788,42 @@ create_database_and_extension(Keeper *keeper)
 	if (IS_CITUS_INSTANCE_KIND(postgres->pgKind))
 	{
 		/*
+		 * Now allow nodes on the same network to connect to the coordinator,
+		 * and the coordinator to connect to its workers.
+		 */
+		if (!pghba_enable_lan_cidr(&initPostgres.sqlClient,
+								   pgSetup->ssl.active,
+								   HBA_DATABASE_DBNAME,
+								   pgSetup->dbname,
+								   config->nodename,
+								   pg_setup_get_username(pgSetup),
+								   pg_setup_get_auth_method(pgSetup),
+								   NULL))
+		{
+			log_error("Failed to grant local network connections in HBA");
+			return false;
+		}
+
+		/*
+		 * Connect to pgsql as the system user to create extension: Same user
+		 * as initdb with superuser privileges.
+		 *
+		 * Calling keeper_update_state will re-init our sqlClient to now
+		 * connect per the configuration settings, cleaning-up the local
+		 * changes we made before.
+		 */
+		if (!keeper_update_pg_state(keeper))
+		{
+			log_error("Failed to update the keeper's state from the local "
+					  "PostgreSQL instance, see above for details.");
+			return false;
+		}
+
+		/*
 		 * Install the citus extension in that database, skipping if the
 		 * extension has already been installed.
 		 */
 		log_info("CREATE EXTENSION %s;", CITUS_EXTENSION_NAME);
-
-		/*
-		 * Connect to pgsql as the system user to create extension: Same
-		 * user as initdb with superuser privileges.
-		 */
 
 		if (!pgsql_create_extension(&(postgres->sqlClient), CITUS_EXTENSION_NAME))
 		{

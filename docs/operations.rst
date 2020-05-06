@@ -35,12 +35,14 @@ __ https://www.postgresql.org/docs/current/auth-pg-hba-conf.html
 
 Security for following connections should be considered when setting up
 `.pgpass` file.
+
   1. health check connection from monitor for `autoctl` user to both `postgres` and `pg_auto_failover` databases.
   2. connections for `pg_autoctl` command from data nodes to monitor for `autoctl_node` user.
   3. replication connections from secondary to primary data nodes for `replication` user.
      Notice that primary and secondary nodes change during failover. Thus this setting
      should be done on both primary and secondary nodes.
   4. settings need to be updated after a new node is added.
+
 See `PostgreSQL documentation`__ on setting up `.pgpass` file.
 
 __ https://www.postgresql.org/docs/current/libpq-pgpass.html

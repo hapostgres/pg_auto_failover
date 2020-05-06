@@ -4,7 +4,7 @@
    contain the root `toctree` directive.
 
 Welcome to pg_auto_failover's documentation!
-====================================
+============================================
 
 .. toctree::
    :maxdepth: 3

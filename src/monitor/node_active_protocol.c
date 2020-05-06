@@ -493,7 +493,7 @@ JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 		}
 
 		/* target group already has a primary, any other node is a standby */
-		else if (formation->opt_secondary && list_length(groupNodeList) == 1)
+		else if (formation->opt_secondary)
 		{
 			AutoFailoverNode *primaryNode = NULL;
 
@@ -577,15 +577,6 @@ JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 							 errhint("Retry registering in a moment")));
 				}
 			}
-		}
-		else
-		{
-			ereport(ERROR,
-					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-					 errmsg("can't register a new node in formation %s, "
-							"group %d, initial state %s",
-							formation->formationId, groupId,
-							ReplicationStateGetName(initialState))));
 		}
 	}
 	else
@@ -993,10 +984,7 @@ perform_failover(PG_FUNCTION_ARGS)
 
 	AutoFailoverNode *primaryNode = NULL;
 
-	List *secondaryStates = list_make2_int(REPLICATION_STATE_SECONDARY,
-										   REPLICATION_STATE_CATCHINGUP);
-
-	char message[BUFSIZE];
+	char message[BUFSIZE] = { 0 };
 
 	checkPgAutoFailoverVersion();
 
@@ -1015,7 +1003,7 @@ perform_failover(PG_FUNCTION_ARGS)
 	}
 
 	/* get a current primary node that we can failover from (accepts writes) */
-	primaryNode = GetPrimaryNodeInGroup(formationId, groupId);
+	primaryNode = GetNodeToFailoverFromInGroup(formationId, groupId);
 
 	if (primaryNode == NULL)
 	{
@@ -1051,11 +1039,10 @@ perform_failover(PG_FUNCTION_ARGS)
 
 		secondaryNode = linitial(standbyNodesGroupList);
 
-		if (!(IsStateIn(secondaryNode->reportedState, secondaryStates) &&
-			  IsStateIn(secondaryNode->goalState, secondaryStates)))
+		if (secondaryNode->goalState != REPLICATION_STATE_SECONDARY)
 		{
 			const char *secondaryState =
-				ReplicationStateGetName(secondaryNode->reportedState);
+				ReplicationStateGetName(secondaryNode->goalState);
 
 			ereport(ERROR,
 					(errmsg("standby node %d (%s:%d) is in state \"%s\", which "
@@ -1068,10 +1055,15 @@ perform_failover(PG_FUNCTION_ARGS)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of %s:%d to draining and %s:%d to "
-			"prepare_promotion after a user-initiated failover.",
-			primaryNode->nodeName, primaryNode->nodePort,
-			secondaryNode->nodeName, secondaryNode->nodePort);
+			"Setting goal state of node %d (%s:%d) to draining "
+			"and node %d (%s:%d) to prepare_promotion "
+			"after a user-initiated failover.",
+			primaryNode->nodeId,
+			primaryNode->nodeName,
+			primaryNode->nodePort,
+			secondaryNode->nodeId,
+			secondaryNode->nodeName,
+			secondaryNode->nodePort);
 
 		SetNodeGoalState(primaryNode->nodeName, primaryNode->nodePort,
 						 REPLICATION_STATE_DRAINING);
@@ -1115,9 +1107,9 @@ perform_failover(PG_FUNCTION_ARGS)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state %s:%d to draining "
+			"Setting goal state of node %d (%s:%d) to draining "
 			"after a user-initiated failover.",
-			primaryNode->nodeName, primaryNode->nodePort);
+			primaryNode->nodeId, primaryNode->nodeName, primaryNode->nodePort);
 
 		SetNodeGoalState(primaryNode->nodeName, primaryNode->nodePort,
 						 REPLICATION_STATE_DRAINING);
@@ -1412,7 +1404,7 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 
 	if (candidatePriority < 0 || candidatePriority > 100)
 	{
-		ereport(ERROR, (ERRCODE_INVALID_PARAMETER_VALUE,
+		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 						errmsg("invalid value for candidate_priority \"%d\" "
 							   "expected an integer value between 0 and 100",
 							   candidatePriority)));
@@ -1568,7 +1560,7 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 											&standbyCount))
 		{
 			ereport(ERROR,
-					(ERRCODE_INVALID_PARAMETER_VALUE,
+					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 					 errmsg("can't set replication quorum to false"),
 					 errdetail("At least %d standby nodes are required "
 							   "in formation %s with number_sync_standbys = %d, "

@@ -145,59 +145,6 @@ keeper_cli_add_default_settings(int argc, char **argv)
 
 
 /*
- * keeper_create_monitor_user implements the CLI to add a user for the
- * pg_auto_failover monitor.
- */
-void
-keeper_cli_create_monitor_user(int argc, char **argv)
-{
-	KeeperConfig config = keeperOptions;
-	LocalPostgresServer postgres = { 0 };
-	bool missingPgdataOk = false;
-	bool postgresNotRunningOk = false;
-	int urlLength = 0;
-	char monitorHostname[_POSIX_HOST_NAME_MAX];
-	int monitorPort = 0;
-
-	/*
-	 * Monitor does not use a password, we expect it to login and immediately
-	 * disconnect.
-	 */
-	char *password = NULL;
-
-	keeper_config_init(&config, missingPgdataOk, postgresNotRunningOk);
-	local_postgres_init(&postgres, &(config.pgSetup));
-
-	urlLength = strlcpy(config.monitor_pguri, argv[0], MAXCONNINFO);
-	if (urlLength >= MAXCONNINFO)
-	{
-		log_fatal("Monitor URL \"%s\" given in command line is %d characters, "
-				  "the maximum supported by pg_autoctl is %d",
-				  argv[0], urlLength, MAXCONNINFO - 1);
-		exit(EXIT_CODE_BAD_ARGS);
-	}
-
-	if (!hostname_from_uri(config.monitor_pguri,
-						   monitorHostname, _POSIX_HOST_NAME_MAX,
-						   &monitorPort))
-	{
-		log_fatal("Failed to determine monitor hostname");
-		exit(EXIT_CODE_BAD_ARGS);
-	}
-
-	if (!primary_create_user_with_hba(&postgres,
-									  PG_AUTOCTL_HEALTH_USERNAME, password,
-									  monitorHostname,
-									  pg_setup_get_auth_method(&(config.pgSetup))))
-	{
-		log_fatal("Failed to create the database user that the pg_auto_failover "
-				  " monitor uses for health checks, see above for details");
-		exit(EXIT_CODE_PGSQL);
-	}
-}
-
-
-/*
  * keeper_create_replication_user implements the CLI to add a user for the
  * secondary.
  */
@@ -298,7 +245,6 @@ keeper_cli_init_standby(int argc, char **argv)
 
 	KeeperConfig config = keeperOptions;
 	LocalPostgresServer postgres = { 0 };
-	ReplicationSource replicationSource = { 0 };
 	int hostLength = 0;
 
 	if (argc != 2)
@@ -310,7 +256,7 @@ keeper_cli_init_standby(int argc, char **argv)
 	keeper_config_init(&config, missing_pgdata_is_ok, pg_not_running_is_ok);
 	local_postgres_init(&postgres, &(config.pgSetup));
 
-	hostLength = strlcpy(replicationSource.primaryNode.host, argv[0],
+	hostLength = strlcpy(postgres.replicationSource.primaryNode.host, argv[0],
 						 _POSIX_HOST_NAME_MAX);
 	if (hostLength >= _POSIX_HOST_NAME_MAX)
 	{
@@ -320,19 +266,28 @@ keeper_cli_init_standby(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!stringToInt(argv[1], &replicationSource.primaryNode.port))
+	if (!stringToInt(argv[1], &(postgres.replicationSource.primaryNode.port)))
 	{
 		log_fatal("Argument is not a valid port number: \"%s\"", argv[1]);
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	replicationSource.userName = PG_AUTOCTL_REPLICA_USERNAME;
-	replicationSource.password = config.replication_password;
-	replicationSource.slotName = config.replication_slot_name;
-	replicationSource.maximumBackupRate = MAXIMUM_BACKUP_RATE;
-	replicationSource.backupDir = config.backupDirectory;
+	if (!standby_init_replication_source(&postgres,
+										 NULL, /* primaryNode is done */
+										 PG_AUTOCTL_REPLICA_USERNAME,
+										 config.replication_password,
+										 config.replication_slot_name,
+										 config.maximum_backup_rate,
+										 config.backupDirectory,
+										 NULL, /* no targetLSN */
+										 config.pgSetup.ssl,
+										 0))
+	{
+		/* can't happen at the moment */
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
 
-	if (!standby_init_database(&postgres, &replicationSource, config.nodename))
+	if (!standby_init_database(&postgres, config.nodename))
 	{
 		log_fatal("Failed to grant access to the standby by adding "
 				  "relevant lines to pg_hba.conf for the "
@@ -351,7 +306,6 @@ keeper_cli_rewind_old_primary(int argc, char **argv)
 
 	KeeperConfig config = keeperOptions;
 	LocalPostgresServer postgres = { 0 };
-	ReplicationSource replicationSource = { 0 };
 
 	if (argc < 1 || argc > 2)
 	{
@@ -362,7 +316,7 @@ keeper_cli_rewind_old_primary(int argc, char **argv)
 	keeper_config_init(&config, missing_pgdata_is_ok, pg_not_running_is_ok);
 	local_postgres_init(&postgres, &(config.pgSetup));
 
-	hostLength = strlcpy(replicationSource.primaryNode.host, argv[0],
+	hostLength = strlcpy(postgres.replicationSource.primaryNode.host, argv[0],
 						 _POSIX_HOST_NAME_MAX);
 	if (hostLength >= _POSIX_HOST_NAME_MAX)
 	{
@@ -372,20 +326,28 @@ keeper_cli_rewind_old_primary(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!stringToInt(argv[1], &replicationSource.primaryNode.port))
+	if (!stringToInt(argv[1], &(postgres.replicationSource.primaryNode.port)))
 	{
 		log_fatal("Argument is not a valid port number: \"%s\"", argv[1]);
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	replicationSource.userName = PG_AUTOCTL_REPLICA_USERNAME;
-	replicationSource.password = config.replication_password;
-	replicationSource.slotName = config.replication_slot_name;
-	replicationSource.applicationName = config.replication_slot_name;
-	replicationSource.maximumBackupRate = MAXIMUM_BACKUP_RATE;
-	replicationSource.sslOptions = config.pgSetup.ssl;
+	if (!standby_init_replication_source(&postgres,
+										 NULL, /* primaryNode is done */
+										 PG_AUTOCTL_REPLICA_USERNAME,
+										 config.replication_password,
+										 config.replication_slot_name,
+										 config.maximum_backup_rate,
+										 config.backupDirectory,
+										 NULL, /* no targetLSN */
+										 config.pgSetup.ssl,
+										 0))
+	{
+		/* can't happen at the moment */
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
 
-	if (!primary_rewind_to_standby(&postgres, &replicationSource))
+	if (!primary_rewind_to_standby(&postgres))
 	{
 		log_fatal("Failed to rewind a demoted primary to standby, "
 				  "see above for details");

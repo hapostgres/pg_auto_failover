@@ -110,6 +110,7 @@ extern List * AutoFailoverOtherNodesList(AutoFailoverNode *pgAutoFailoverNode);
 extern List * AutoFailoverOtherNodesListInState(AutoFailoverNode *pgAutoFailoverNode,
 												ReplicationState currentState);
 extern AutoFailoverNode * GetPrimaryNodeInGroup(char *formationId, int32 groupId);
+AutoFailoverNode * GetNodeToFailoverFromInGroup(char *formationId, int32 groupId);
 extern AutoFailoverNode * GetPrimaryOrDemotedNodeInGroup(char *formationId,
 														 int32 groupId);
 extern AutoFailoverNode * FindFailoverNewStandbyNode(List *groupNodeList);
@@ -154,6 +155,7 @@ extern char * SyncStateToString(SyncState pgsrSyncState);
 extern bool IsCurrentState(AutoFailoverNode *pgAutoFailoverNode,
 						   ReplicationState state);
 extern bool CanTakeWritesInState(ReplicationState state);
+extern bool CanInitiateFailover(ReplicationState state);
 extern bool StateBelongsToPrimary(ReplicationState state);
 extern bool IsBeingPromoted(AutoFailoverNode *node);
 extern bool IsInWaitOrJoinState(AutoFailoverNode *node);

@@ -28,6 +28,7 @@ typedef struct LocalPostgresServer
 {
 	PGSQL sqlClient;
 	PostgresSetup postgresSetup;
+	ReplicationSource replicationSource;
 	bool pgIsRunning;
 	char pgsrSyncState[PGSR_SYNC_STATE_MAXLENGTH];
 	char currentLSN[PG_LSN_MAXLENGTH];
@@ -40,6 +41,8 @@ typedef struct LocalPostgresServer
 void local_postgres_init(LocalPostgresServer *postgres,
 						 PostgresSetup *postgresSetup);
 void local_postgres_finish(LocalPostgresServer *postgres);
+bool local_postgres_update(LocalPostgresServer *postgres,
+						   bool postgresNotRunningIsOk);
 bool ensure_local_postgres_is_running(LocalPostgresServer *postgres);
 bool primary_has_replica(LocalPostgresServer *postgres, char *userName,
 						 bool *hasStandby);
@@ -50,35 +53,35 @@ bool primary_drop_replication_slot(LocalPostgresServer *postgres,
 bool primary_drop_replication_slots(LocalPostgresServer *postgres);
 bool primary_set_synchronous_standby_names(LocalPostgresServer *postgres,
 										   char *synchronous_standby_names);
-bool primary_drop_replication_slots(LocalPostgresServer *postgres);
 bool postgres_replication_slot_drop_removed(LocalPostgresServer *postgres,
 											NodeAddressArray *nodeArray);
 bool postgres_replication_slot_maintain(LocalPostgresServer *postgres,
 										NodeAddressArray *nodeArray);
-bool primary_set_synchronous_standby_names(LocalPostgresServer *postgres,
-										   char *synchronous_standby_names);
 bool primary_enable_synchronous_replication(LocalPostgresServer *postgres);
 bool primary_disable_synchronous_replication(LocalPostgresServer *postgres);
 bool postgres_add_default_settings(LocalPostgresServer *postgres);
-bool primary_create_user_with_hba(LocalPostgresServer *postgres, char *userName,
-								  char *password, char *hostname, char *authMethod);
 bool primary_create_replication_user(LocalPostgresServer *postgres,
 									 char *replicationUser,
 									 char *replicationPassword);
 bool primary_add_standby_to_hba(LocalPostgresServer *postgres,
 								char *standbyHost, const char *replicationPassword);
-bool primary_rewind_to_standby(LocalPostgresServer *postgres,
-							   ReplicationSource *replicationSource);
-bool standby_init_database(LocalPostgresServer *postgres,
-						   ReplicationSource *replicationSource,
-						   const char *nodename);
+bool standby_init_replication_source(LocalPostgresServer *postgres,
+									 NodeAddress *primaryNode,
+									 const char *username,
+									 const char *password,
+									 const char *slotName,
+									 const char *maximumBackupRate,
+									 const char *backupDirectory,
+									 const char *targetLSN,
+									 SSLOptions sslOptions,
+									 int currentNodeId);
+bool standby_init_database(LocalPostgresServer *postgres, const char *nodename);
+bool primary_rewind_to_standby(LocalPostgresServer *postgres);
 bool standby_promote(LocalPostgresServer *postgres);
 bool check_postgresql_settings(LocalPostgresServer *postgres,
 							   bool *settings_are_ok);
-bool standby_follow_new_primary(LocalPostgresServer *postgres,
-								ReplicationSource *replicationSource);
-bool standby_fetch_missing_wal_and_promote(LocalPostgresServer *postgres,
-										   ReplicationSource *replicationSource);
+bool standby_follow_new_primary(LocalPostgresServer *postgres);
+bool standby_fetch_missing_wal_and_promote(LocalPostgresServer *postgres);
 bool standby_cleanup_and_restart_as_primary(LocalPostgresServer *postgres);
 
 
