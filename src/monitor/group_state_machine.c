@@ -1141,7 +1141,14 @@ SelectFailoverCandidateNode(List *candidateNodesGroupList,
 
 			continue;
 		}
-		else if (!WalDifferenceWithin(node, primaryNode, PromoteXlogThreshold))
+
+		/*
+		 * We only select the most advanced standby node when it is within our
+		 * acceptable WAL lag threshold. Other candidates are fine because we
+		 * are going to apply our "forward lsn" sequence when picking them.
+		 */
+		else if (node->nodeId == mostAdvancedNode->nodeId &&
+				 !WalDifferenceWithin(node, primaryNode, PromoteXlogThreshold))
 		{
 			char message[BUFSIZE];
 
