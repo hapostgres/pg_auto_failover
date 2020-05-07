@@ -63,20 +63,6 @@ security group and a subnet.
        --address-prefixes 10.0.1.0/24 \
        --network-security-group ha-demo-nsg
 
-Allow VMs to resolve each other via internal DNS:
-
-.. code-block:: bash
-
-   az network private-dns zone create \
-       --resource-group ha-demo \
-       --name ha-demo.local
-   az network private-dns link vnet create \
-       --name ha-demo-zone-link \
-       --resource-group ha-demo \
-       --virtual-network ha-demo-net \
-       --zone-name ha-demo.local \
-       --registration-enabled true
-
 Finally add four virtual machines (ha-demo-a, ha-demo-b, ha-demo-monitor, and
 ha-demo-app). For speed we background the ``az vm create`` processes and run
 them in parallel:
@@ -116,7 +102,7 @@ Let's review what we created so far.
 .. code-block:: bash
 
   az resource list --output table --query \
-    "[?resourceGroup=='ha-demo-dim'].{ name: name, flavor: kind, resourceType: type, region: location }"
+    "[?resourceGroup=='ha-demo'].{ name: name, flavor: kind, resourceType: type, region: location }"
 
 This shows the following resources:
 
@@ -133,8 +119,6 @@ This shows the following resources:
     ha-demo-bVMNic                   Microsoft.Network/networkInterfaces                    eastus
     ha-demo-monitorVMNic             Microsoft.Network/networkInterfaces                    eastus
     ha-demo-nsg                      Microsoft.Network/networkSecurityGroups                eastus
-    ha-demo.local                    Microsoft.Network/privateDnsZones                      global
-    ha-demo.local/ha-demo-zone-link  Microsoft.Network/privateDnsZones/virtualNetworkLinks  global
     ha-demo-a-ip                     Microsoft.Network/publicIPAddresses                    eastus
     ha-demo-app-ip                   Microsoft.Network/publicIPAddresses                    eastus
     ha-demo-b-ip                     Microsoft.Network/publicIPAddresses                    eastus
@@ -166,7 +150,7 @@ nodes. It will help us run and observe PostgreSQL.
         "curl https://install.citusdata.com/community/deb.sh | sudo bash" \
         "sudo apt-get install -q -y postgresql-common" \
         "echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf" \
-        "sudo apt-get install -q -y postgresql-11-auto-failover-1.2" \
+        "sudo apt-get install -q -y postgresql-11-auto-failover-1.3" \
         "sudo usermod -a -G postgres ha-admin" &
   done
   wait
@@ -208,6 +192,20 @@ option or ``--auth scram-sha-256`` and then setting up passwords yourself.
 
 __ https://www.postgresql.org/docs/current/auth-trust.html_
 
+At this point the monitor is created. Now we'll install it as a service with
+systemd so that it will resume if the VM restarts.
+
+.. code-block:: bash
+
+   ssh -l ha-admin `vm_ip monitor` << CMD
+     pg_autoctl -q show systemd --pgdata ~ha-admin/monitor > pgautofailover.service
+     sudo mv pgautofailover.service /etc/systemd/system
+     sudo systemctl daemon-reload
+     sudo systemctl enable pgautofailover
+     sudo systemctl start pgautofailover
+   CMD
+
+
 Bring up the nodes
 ------------------
 
@@ -224,7 +222,7 @@ We’ll create the primary database using the ``pg_autoctl create`` subcommand.
        --dbname appdb \
        --nodename ha-demo-a.internal.cloudapp.net \
        --pgctl /usr/lib/postgresql/11/bin/pg_ctl \
-       --monitor postgres://autoctl_node@ha-demo-monitor.internal.cloudapp.net/pg_auto_failover?sslmode=require
+       --monitor 'postgres://autoctl_node@ha-demo-monitor.internal.cloudapp.net/pg_auto_failover?sslmode=require'
 
 Notice the user and database name in the monitor connection string -- these
 are what monitor init created. We also give it the path to pg_ctl so that the
@@ -244,8 +242,7 @@ with systemd so that it will resume if the VM restarts.
 .. code-block:: bash
 
    ssh -l ha-admin `vm_ip a` << CMD
-     sudo -i -u postgres \
-       pg_autoctl -q show systemd --pgdata ~ha-admin/ha > pgautofailover.service
+     pg_autoctl -q show systemd --pgdata ~ha-admin/ha > pgautofailover.service
      sudo mv pgautofailover.service /etc/systemd/system
      sudo systemctl daemon-reload
      sudo systemctl enable pgautofailover
@@ -265,12 +262,10 @@ Next connect to node B and do the same process. We'll do both steps at once:
        --dbname appdb \
        --nodename ha-demo-b.internal.cloudapp.net \
        --pgctl /usr/lib/postgresql/11/bin/pg_ctl \
-       --nodename `hostname -I` \
-       --monitor postgres://autoctl_node@ha-demo-monitor/pg_auto_failover
+       --monitor 'postgres://autoctl_node@ha-demo-monitor.internal.cloudapp.net/pg_auto_failover?sslmode=require'
 
    ssh -l ha-admin `vm_ip b` << CMD
-     sudo -i -u postgres \
-       pg_autoctl -q show systemd --pgdata ~ha-admin/ha > pgautofailover.service
+     pg_autoctl -q show systemd --pgdata ~ha-admin/ha > pgautofailover.service
      sudo mv pgautofailover.service /etc/systemd/system
      sudo systemctl daemon-reload
      sudo systemctl enable pgautofailover
@@ -292,11 +287,8 @@ following lines to node A:
    # automatically added to node A
 
    host "appdb" "ha-admin" ha-demo-a.internal.cloudapp.net trust
-   host all "pgautofailover_monitor" ha-demo-monitor.internal.cloudapp.net trust
    host replication "pgautofailover_replicator" ha-demo-b.internal.cloudapp.net trust
    host "appdb" "pgautofailover_replicator" ha-demo-b.internal.cloudapp.net trust
-   host replication "pgautofailover_replicator" ha-demo-a.internal.cloudapp.net trust
-   host "appdb" "pgautofailover_replicator" ha-demo-a.internal.cloudapp.net trust
 
 For ``pg_hba.conf`` on the monitor node pg_autoctl inspects the local network
 and makes its best guess about the subnet to allow. In our case it guessed
@@ -306,7 +298,7 @@ correctly:
 
    # automatically added to the monitor
 
-   host "pg_auto_failover" "autoctl_node" 10.0.1.0/24 trust
+   hostssl "pg_auto_failover" "autoctl_node" 10.0.1.0/24 trust
 
 If worker nodes have more ad-hoc addresses and are not in the same subnet, it's
 better to disable pg_autoctl's automatic modification of pg_hba using the
@@ -332,8 +324,19 @@ states it has assigned them:
 
 This looks good. We can add data to the primary, and later see it appear in the
 secondary. We'll connect to the database from inside our "app" virtual machine,
-using a connection string obtained from the monitor. First we'll get the
-connection string and store it in a local environment variable:
+using a connection string obtained from the monitor.
+
+.. code-block:: bash
+
+   ssh -l ha-admin `vm_ip monitor` pg_autoctl show uri --pgdata monitor
+
+         Type |    Name | Connection String
+   -----------+---------+-------------------------------
+      monitor | monitor | postgres://autoctl_node@ha-demo-monitor.internal.cloudapp.net:5432/pg_auto_failover?sslmode=require
+    formation | default | postgres://ha-demo-b.internal.cloudapp.net:5432,ha-demo-a.internal.cloudapp.net:5432/appdb?target_session_attrs=read-write&sslmode=require
+
+Now we'll get the connection string and store it in a local environment
+variable:
 
 .. code-block:: bash
 
@@ -369,8 +372,8 @@ and query the data, this time from node B.
      pg_autoctl perform switchover --pgdata monitor
 
    # watch the progress
-   watch -d \
-     ssh -l ha-admin `vm_ip monitor` pg_autoctl show state --pgdata monitor
+   ssh -t -l ha-admin `vm_ip monitor` -- \
+     watch -n 1 -d pg_autoctl show state --pgdata monitor
 
    # press CTRL-C to stop watching
 
@@ -403,8 +406,8 @@ In one terminal let’s keep an eye on events:
 
 .. code-block:: bash
 
-   watch -d \
-     ssh -l ha-admin `vm_ip monitor` pg_autoctl show state --pgdata monitor
+   ssh -t -l ha-admin `vm_ip monitor` -- \
+     watch -n 1 -d pg_autoctl show state --pgdata monitor
 
 In another terminal we’ll turn off the virtual server.
 
