@@ -1,4 +1,8 @@
-### pg_auto_failover v1.3 (April 30, 2020) ###
+### pg_auto_failover v1.3.1 (May 7, 2020) ###
+
+* Fix `make install` for Ubuntu/Debian packages [#258]
+
+### pg_auto_failover v1.3.0 (April 30, 2020) ###
 
 * Fix systemd integration [#212]
 * Change default TLS cipher list [#214]
