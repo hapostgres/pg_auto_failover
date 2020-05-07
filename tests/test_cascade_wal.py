@@ -79,7 +79,12 @@ def test_006_failover():
     print("Reconnecting node2 (ifconfig up)")
     node2.ifup()
 
-    # now we should be able to continue with the failover, but miss some WAL
+    # now we should be able to continue with the failover, and fetch missing
+    # WAL bits from node3
+    node2.wait_until_pg_is_running()
+    assert node2.has_needed_replication_slots()
+    assert node3.has_needed_replication_slots()
+
     assert node2.wait_until_state(target_state="wait_primary", timeout=120)
     assert node3.wait_until_state(target_state="secondary")
     assert node2.wait_until_state(target_state="primary")
