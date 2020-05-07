@@ -307,6 +307,7 @@ KeeperFSMTransition KeeperFSM[] = {
 	 * In case of multiple standbys, failover begins with reporting current LSN
 	 */
 	{ SECONDARY_STATE, REPORT_LSN_STATE, COMMENT_SECONDARY_TO_REPORT_LSN, &fsm_report_lsn },
+	{ CATCHINGUP_STATE, REPORT_LSN_STATE, COMMENT_SECONDARY_TO_REPORT_LSN, &fsm_report_lsn },
 	{ REPORT_LSN_STATE, PREP_PROMOTION_STATE, COMMENT_REPORT_LSN_TO_PREP_PROMOTION, &fsm_prepare_standby_for_promotion },
 
 	{ REPORT_LSN_STATE, WAIT_FORWARD_STATE, COMMENT_REPORT_LSN_TO_WAIT_FORWARD, NULL },

@@ -662,7 +662,7 @@ get_primary(PG_FUNCTION_ARGS)
 
 	checkPgAutoFailoverVersion();
 
-	primaryNode = GetPrimaryNodeInGroup(formationId, groupId);
+	primaryNode = GetPrimaryOrDemotedNodeInGroup(formationId, groupId);
 	if (primaryNode == NULL)
 	{
 		ereport(ERROR, (errmsg("group has no writable node right now")));
@@ -1320,9 +1320,14 @@ stop_maintenance(PG_FUNCTION_ARGS)
 						currentNode->nodeName, currentNode->nodePort)));
 	}
 
+	/*
+	 * We need to find the primary node even if we are in the middle of a
+	 * failover, and it's already set to draining. That way we may rejoin the
+	 * cluster, report our LSN, and help proceed to reach a consistent state.
+	 */
 	primaryNode =
-		GetPrimaryNodeInGroup(currentNode->formationId,
-							  currentNode->groupId);
+		GetPrimaryOrDemotedNodeInGroup(currentNode->formationId,
+									   currentNode->groupId);
 
 	if (primaryNode == NULL)
 	{
@@ -1330,18 +1335,6 @@ stop_maintenance(PG_FUNCTION_ARGS)
 				(errmsg("couldn't find the primary node in formation \"%s\", "
 						"group %d",
 						currentNode->formationId, currentNode->groupId)));
-	}
-
-	if (!(IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
-		  IsCurrentState(primaryNode, REPLICATION_STATE_JOIN_PRIMARY) ||
-		  IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY)))
-	{
-		ereport(ERROR,
-				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("cannot stop maintenance when current state for "
-						"node %s:%d is \"%s\"",
-						primaryNode->nodeName, primaryNode->nodePort,
-						ReplicationStateGetName(primaryNode->reportedState))));
 	}
 
 	LogAndNotifyMessage(
