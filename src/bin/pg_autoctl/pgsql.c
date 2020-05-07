@@ -1837,7 +1837,7 @@ pgsql_has_reached_target_lsn(PGSQL *pgsql, char *targetLSN,
 {
 	PgReachedTargetLSN context = { 0 };
 	char *sql =
-		"SELECT $1::pg_lsn < pg_last_wal_replay_lsn(), "
+		"SELECT $1::pg_lsn <= pg_last_wal_replay_lsn(), "
 		" pg_last_wal_replay_lsn()";
 
 	const Oid paramTypes[1] = { LSNOID };
@@ -1890,7 +1890,7 @@ parsePgReachedTargetLSN(void *ctx, PGresult *result)
 
 	if (!PQgetisnull(result, 0, 1))
 	{
-		char *value = PQgetvalue(result, 0, 2);
+		char *value = PQgetvalue(result, 0, 1);
 
 		strlcpy(context->currentLSN, value, PG_LSN_MAXLENGTH);
 	}
