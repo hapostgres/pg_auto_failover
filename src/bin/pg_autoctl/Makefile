@@ -33,7 +33,7 @@ DEFAULT_CFLAGS = -std=c99 -D_GNU_SOURCE -g
 DEFAULT_CFLAGS += -I $(shell $(PG_CONFIG) --includedir)
 DEFAULT_CFLAGS += -I $(shell $(PG_CONFIG) --includedir-server)
 DEFAULT_CFLAGS += -I $(shell $(PG_CONFIG) --pkgincludedir)/internal
-DEFAULT_CFLAGS += -I $(shell $(PG_CONFIG) --cflags)
+DEFAULT_CFLAGS += $(shell $(PG_CONFIG) --cflags)
 DEFAULT_CFLAGS += -Wformat
 DEFAULT_CFLAGS += -Wall
 DEFAULT_CFLAGS += -Werror=implicit-int
