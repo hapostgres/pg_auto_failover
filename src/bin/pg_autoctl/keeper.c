@@ -232,7 +232,9 @@ keeper_ensure_current_state(Keeper *keeper)
 
 		case SECONDARY_STATE:
 		{
-			if (!keeper_ensure_postgres_is_running(keeper, false))
+			bool updateRetries = false;
+
+			if (!keeper_ensure_postgres_is_running(keeper, updateRetries))
 			{
 				/* errors have already been logged */
 				return false;
@@ -252,7 +254,9 @@ keeper_ensure_current_state(Keeper *keeper)
 		 */
 		case CATCHINGUP_STATE:
 		{
-			return keeper_ensure_postgres_is_running(keeper, false);
+			bool updateRetries = false;
+
+			return keeper_ensure_postgres_is_running(keeper, updateRetries);
 		}
 
 		case DEMOTED_STATE:
@@ -588,6 +592,16 @@ keeper_update_pg_state(Keeper *keeper)
 			 * pgsql_get_postgres_metadata should always return a non-empty
 			 * string when we are a PRIMARY and our standby is connected.
 			 */
+
+			if (IS_EMPTY_STRING_BUFFER(postgres->pgsrSyncState))
+			{
+				log_error("Failed to fetch current replication properties "
+						  "from standby node: no standby connected in "
+						  "pg_stat_replication.");
+				log_warn("HINT: check pg_autoctl and Postgres logs on "
+						 "standby nodes");
+			}
+
 			return postgres->pgIsRunning &&
 				   !IS_EMPTY_STRING_BUFFER(postgres->currentLSN) &&
 				   !IS_EMPTY_STRING_BUFFER(postgres->pgsrSyncState);
@@ -644,6 +658,276 @@ keeper_ensure_postgres_is_running(Keeper *keeper, bool updateRetries)
 				  pgSetup->pgdata);
 		return false;
 	}
+}
+
+
+/*
+ * keeper_restart_postgres asks the Postgres controller process to stop and
+ * then to restart Postgres.
+ *
+ * TODO: At the moment we just ensure postgres is stopped, and when that's the
+ * case, ensure it's running again. It would arguably be more efficient to send
+ * the explicit order to restart Postgres on the Postgres controller process
+ * though.
+ */
+bool
+keeper_restart_postgres(Keeper *keeper)
+{
+	LocalPostgresServer *postgres = &(keeper->postgres);
+
+	if (ensure_local_postgres_is_stopped(postgres))
+	{
+		bool updateRetries = false;
+
+		return keeper_ensure_postgres_is_running(keeper, updateRetries);
+	}
+
+	return false;
+}
+
+
+/*
+ * keeper_create_self_signed_cert creates SSL self-signed certificates if
+ * needed within the current configuration, and then makes sure we update our
+ * keeper configuration both in-memory and on-disk with the new normalized
+ * filenames of the certificate files created.
+ */
+bool
+keeper_create_self_signed_cert(Keeper *keeper)
+{
+	KeeperConfig *config = &(keeper->config);
+	LocalPostgresServer *postgres = &(keeper->postgres);
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+
+	if (pgSetup->ssl.createSelfSignedCert &&
+		!(file_exists(pgSetup->ssl.serverKey) &&
+		  file_exists(pgSetup->ssl.serverCert)))
+	{
+		if (!pg_create_self_signed_cert(pgSetup, config->nodename))
+		{
+			log_error("Failed to create SSL self-signed certificate, "
+					  "see above for details");
+			return false;
+		}
+	}
+
+	/* ensure the SSL setup is synced with the keeper config */
+	config->pgSetup.ssl = pgSetup->ssl;
+
+	/* update our configuration with ssl server.{key,cert} */
+	if (!keeper_config_write_file(config))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+	return true;
+}
+
+
+/*
+ * keeper_ensure_configuration updates the Postgres settings to match the
+ * pg_autoctl configuration file, if necessary.
+ *
+ * This includes making sure that the SSL server.{key,cert} files are used in
+ * the Postgres configuration, and on a secondary server, that means updating
+ * the primary_conninfo connection string to make sure we use the proper
+ * sslmode that is setup.
+ *
+ * This could change anytime with `pg_autoctl enable|disable ssl`. We cache the
+ * primary node information in the LocalPostgresServer with the other
+ * replicationSource parameters, and the monitor has the responsiblity to
+ * instruct us when this cache needs to be invalidated (new primary, etc).
+ */
+bool
+keeper_ensure_configuration(Keeper *keeper)
+{
+	Monitor *monitor = &(keeper->monitor);
+	KeeperConfig *config = &(keeper->config);
+	KeeperStateData *state = &(keeper->state);
+	LocalPostgresServer *postgres = &(keeper->postgres);
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+
+	bool postgresNotRunningIsOk = true;
+
+	log_trace("keeper_ensure_configuration");
+
+	/*
+	 * We just reloaded our configuration file from disk. Use the pgSetup from
+	 * the new configuration to re-init our local postgres instance
+	 * information, including a maybe different SSL setup.
+	 */
+	postgres->postgresSetup = config->pgSetup;
+
+	if (!local_postgres_update(postgres, postgresNotRunningIsOk))
+	{
+		log_error("Failed to reload configuration, see above for details");
+		return false;
+	}
+
+	/*
+	 * We might have to deploy a new Postgres configuration, from new SSL
+	 * options being found in our pg_autoctl configuration file or for other
+	 * reasons.
+	 */
+	if (!postgres_add_default_settings(postgres))
+	{
+		log_warn("Failed to edit Postgres configuration after "
+				 "reloading pg_autoctl configuration, "
+				 "see above for details");
+		return false;
+	}
+
+	if (pg_setup_is_running(pgSetup))
+	{
+		/*
+		 * In pg_auto_failover before version 1.3 we would use pg_basebackup
+		 * with the --write-recovery-conf option. Starting with Postgres 12,
+		 * this option would cause pg_basebackup to edit postgresql.auto.conf
+		 * rather than recovery.conf... meaning that our own setup would not
+		 * have any effect.
+		 *
+		 * Now is a good time to clean-up, at start-up or reload, and either on
+		 * a primary or a secondary, because those parameters should not remain
+		 * set on a primary either.
+		 */
+		if (pgSetup->control.pg_control_version >= 1200)
+		{
+			/* errors are logged already, and non-fatal to this function */
+			(void) pgsql_reset_primary_conninfo(&(postgres->sqlClient));
+		}
+
+		if (!pgsql_reload_conf(&(postgres->sqlClient)))
+		{
+			log_warn("Failed to reload Postgres configuration after "
+					 "reloading pg_autoctl configuration, "
+					 "see above for details");
+			return false;
+		}
+	}
+
+	if (!monitor_init(&(keeper->monitor), config->monitor_pguri))
+	{
+		/* we tested already in keeper_config_accept_new, but... */
+		log_warn("Failed to contact the monitor because its "
+				 "URL is invalid, see above for details");
+		return false;
+	}
+
+	/*
+	 * On a standby server we might have to produce a new recovery settings
+	 * file (either recovery.conf or postgresql-auto-failover-standby.conf) and
+	 * then restart Postgres.
+	 */
+	if (state->current_role == CATCHINGUP_STATE ||
+		state->current_role == SECONDARY_STATE ||
+		state->current_role == MAINTENANCE_STATE)
+	{
+		ReplicationSource *upstream = &(postgres->replicationSource);
+
+		/* either recovery.conf or AUTOCTL_STANDBY_CONF_FILENAME */
+		char *relativeConfPathName =
+			pgSetup->control.pg_control_version < 1200
+			? "recovery.conf"
+			: AUTOCTL_STANDBY_CONF_FILENAME;
+
+		char upstreamConfPath[MAXPGPATH] = { 0 };
+
+		char *currentConfContents = NULL;
+		long currentConfSize = 0L;
+
+		char *newConfContents = NULL;
+		long newConfSize = 0L;
+
+		/* do we have the primaryNode already? */
+		if (IS_EMPTY_STRING_BUFFER(upstream->primaryNode.host))
+		{
+			log_debug("keeper_update_primary_conninfo: monitor_get_primary()");
+
+			if (!monitor_get_primary(monitor,
+									 config->formation,
+									 state->current_group,
+									 &(upstream->primaryNode)))
+			{
+				log_error("Failed to update primary_conninfo because getting "
+						  "the primary node from the monitor failed, "
+						  "see above for details");
+				return false;
+			}
+		}
+
+		/*
+		 * Read the contents of the standby configuration file now, so that we
+		 * only restart Postgres when it has been changed with the next step.
+		 */
+		join_path_components(upstreamConfPath,
+							 pgSetup->pgdata,
+							 relativeConfPathName);
+
+		if (file_exists(upstreamConfPath))
+		{
+			if (!read_file(upstreamConfPath,
+						   &currentConfContents,
+						   &currentConfSize))
+			{
+				/* errors have already been logged */
+				return false;
+			}
+		}
+
+		/* prepare a replicationSource from the primary and our SSL setup */
+		if (!standby_init_replication_source(postgres,
+											 NULL, /* primaryNode is done */
+											 PG_AUTOCTL_REPLICA_USERNAME,
+											 config->replication_password,
+											 config->replication_slot_name,
+											 config->maximum_backup_rate,
+											 config->backupDirectory,
+											 config->pgSetup.ssl,
+											 state->current_node_id))
+		{
+			/* can't happen at the moment */
+			return false;
+		}
+
+		/* now setup the replication configuration (primary_conninfo etc) */
+		if (!pg_setup_standby_mode(pgSetup->control.pg_control_version,
+								   pgSetup->pgdata,
+								   upstream))
+		{
+			log_error("Failed to setup Postgres as a standby after primary "
+					  "connection settings change");
+			return false;
+		}
+
+		/* restart Postgres only when the configuration file has changed */
+		if (!read_file(upstreamConfPath, &newConfContents, &newConfSize))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
+		if (currentConfContents == NULL ||
+			strcmp(newConfContents, currentConfContents) != 0)
+		{
+			log_info("Replication settings at \"%s\" have changed, "
+					 "restarting Postgres", upstreamConfPath);
+
+			if (!pgsql_checkpoint(&(postgres->sqlClient)))
+			{
+				log_warn("Failed to CHECKPOINT before restart, "
+						 "see above for details");
+			}
+
+			if (!keeper_restart_postgres(keeper))
+			{
+				log_error("Failed to restart Postgres to enable new "
+						  "replication settings, see above for details");
+				return false;
+			}
+		}
+	}
+
+	return true;
 }
 
 

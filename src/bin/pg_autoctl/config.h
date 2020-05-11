@@ -73,4 +73,11 @@ bool SetPidFilePath(ConfigFilePaths *pathnames, const char *pgdata);
 
 pgAutoCtlNodeRole ProbeConfigurationFileRole(const char *filename);
 
+
+#define strneq(x, y) \
+	((x != NULL) && (y != NULL) && (strcmp(x, y) != 0))
+
+bool config_accept_new_ssloptions(PostgresSetup *pgSetup,
+								  PostgresSetup *newPgSetup);
+
 #endif /* CONFIG_H */

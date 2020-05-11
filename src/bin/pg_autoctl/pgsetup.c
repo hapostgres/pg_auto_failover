@@ -1462,7 +1462,7 @@ pgsetup_validate_ssl_settings(PostgresSetup *pgSetup)
 	 *
 	 *  --ssl-ca-file
 	 *  --ssl-crl-file
-	 *  --server-crt
+	 *  --server-cert
 	 *  --server-key
 	 */
 	if (ssl->active && !ssl->createSelfSignedCert)
@@ -1497,7 +1497,7 @@ pgsetup_validate_ssl_settings(PostgresSetup *pgSetup)
 
 		if (!file_exists(ssl->serverCert))
 		{
-			log_error("--server-crt file does not exist at \"%s\"",
+			log_error("--server-cert file does not exist at \"%s\"",
 					  ssl->serverCert);
 			return false;
 		}
@@ -1518,7 +1518,18 @@ pgsetup_validate_ssl_settings(PostgresSetup *pgSetup)
 			log_info("Using default --ssl-mode \"%s\"", ssl->sslModeStr);
 		}
 
-		return true;
+		/*
+		 * Normalize the filenames.
+		 * We already log errors so we can simply return the result
+		 */
+		return normalize_filename(pgSetup->ssl.caFile, pgSetup->ssl.caFile,
+								  MAXPGPATH) &&
+			   normalize_filename(pgSetup->ssl.crlFile, pgSetup->ssl.crlFile,
+								  MAXPGPATH) &&
+			   normalize_filename(pgSetup->ssl.serverCert, pgSetup->ssl.serverCert,
+								  MAXPGPATH) &&
+			   normalize_filename(pgSetup->ssl.serverKey, pgSetup->ssl.serverKey,
+								  MAXPGPATH);
 	}
 
 	/*
@@ -1569,6 +1580,15 @@ pgsetup_validate_ssl_settings(PostgresSetup *pgSetup)
 				 "achieve more security with the same ease of deployment.");
 		log_warn("See https://www.postgresql.org/docs/current/libpq-ssl.html "
 				 "for details on how to improve");
+
+		/* Install a default value for --ssl-mode */
+		if (ssl->sslMode == SSL_MODE_UNKNOWN)
+		{
+			ssl->sslMode = SSL_MODE_PREFER;
+			strlcpy(ssl->sslModeStr,
+					pgsetup_sslmode_to_string(ssl->sslMode), SSL_MODE_STRLEN);
+			log_info("Using default --ssl-mode \"%s\"", ssl->sslModeStr);
+		}
 		return true;
 	}
 

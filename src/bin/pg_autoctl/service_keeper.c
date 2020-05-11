@@ -38,6 +38,7 @@ static bool keepRunning = true;
 static bool is_network_healthy(Keeper *keeper);
 static bool in_network_partition(KeeperStateData *keeperState, uint64_t now,
 								 int networkPartitionTimeout);
+static void reload_configuration(Keeper *keeper);
 
 
 /*
@@ -250,6 +251,15 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 			exit(EXIT_CODE_RELOAD);
 		}
 
+		/*
+		 * After a reload, at restart, make sure we apply the configuration and
+		 * possibly restart Postgres.
+		 */
+		if (firstLoop)
+		{
+			(void) reload_configuration(keeper);
+		}
+
 		if (doSleep)
 		{
 			sleep(PG_AUTOCTL_KEEPER_SLEEP_TIME);
@@ -338,6 +348,8 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 
 		if (couldContactMonitor)
 		{
+			char expectedSlotName[BUFSIZE];
+
 			keeperState->last_monitor_contact = now;
 			keeperState->assigned_role = assignedState.state;
 
@@ -347,6 +359,36 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 
 				log_info("Monitor assigned new state \"%s\"",
 						 NodeStateToString(keeperState->assigned_role));
+			}
+
+			/*
+			 * Also update the groupId and replication slot name in the
+			 * configuration file.
+			 */
+			(void) postgres_sprintf_replicationSlotName(assignedState.nodeId,
+														expectedSlotName,
+														sizeof(expectedSlotName));
+
+			if (assignedState.groupId != config->groupId ||
+				strneq(config->replication_slot_name, expectedSlotName))
+			{
+				if (!keeper_config_set_groupId_and_slot_name(config,
+															 assignedState.nodeId,
+															 assignedState.groupId))
+				{
+					log_error("Failed to update the configuration file "
+							  "with groupId %d and replication.slot \"%s\"",
+							  assignedState.groupId, expectedSlotName);
+					return false;
+				}
+
+				if (!keeper_ensure_configuration(keeper))
+				{
+					log_error("Failed to update our Postgres configuration "
+							  "after a change of groupId or "
+							  "replication slot name, see above for details");
+					return false;
+				}
 			}
 		}
 		else
@@ -581,7 +623,8 @@ in_network_partition(KeeperStateData *keeperState, uint64_t now,
 
 
 /*
- * service_keeper_init initialises our keeper structure.
+ * service_keeper_node_active_init initialises the pg_autoctl service for the
+ * node_active protocol.
  */
 bool
 service_keeper_node_active_init(Keeper *keeper)
@@ -644,4 +687,79 @@ service_keeper_node_active_init(Keeper *keeper)
 	}
 
 	return true;
+}
+
+
+/*
+ * reload_configuration reads the supposedly new configuration file and
+ * integrates accepted new values into the current setup.
+ */
+static void
+reload_configuration(Keeper *keeper)
+{
+	KeeperConfig *config = &(keeper->config);
+
+	log_trace("reload_configuration");
+
+	if (file_exists(config->pathnames.config))
+	{
+		KeeperConfig newConfig = { 0 };
+
+		bool missingPgdataIsOk = true;
+		bool pgIsNotRunningIsOk = true;
+		bool monitorDisabledIsOk = false;
+
+		/*
+		 * Set the same configuration and state file as the current config.
+		 */
+		strlcpy(newConfig.pathnames.config, config->pathnames.config, MAXPGPATH);
+		strlcpy(newConfig.pathnames.state, config->pathnames.state, MAXPGPATH);
+
+		/* disconnect to the current monitor if we're connected */
+		(void) pgsql_finish(&(keeper->monitor.pgsql));
+
+		if (keeper_config_read_file(&newConfig,
+									missingPgdataIsOk,
+									pgIsNotRunningIsOk,
+									monitorDisabledIsOk) &&
+			keeper_config_accept_new(config, &newConfig))
+		{
+			/*
+			 * The keeper->config changed, not the keeper->postgres, but the
+			 * main loop takes care of updating it at each loop anyway, so we
+			 * don't have to take care of that now.
+			 */
+			log_info("Reloaded the new configuration from \"%s\"",
+					 config->pathnames.config);
+
+			/*
+			 * The new configuration might impact the Postgres setup, such as
+			 * when changing the SSL file paths.
+			 */
+			if (!keeper_ensure_configuration(keeper))
+			{
+				log_warn("Failed to reload pg_autoctl configuration, "
+						 "see above for details");
+				exit(EXIT_CODE_INTERNAL_ERROR);
+			}
+		}
+		else
+		{
+			log_warn("Failed to read configuration file \"%s\", "
+					 "continuing with the same configuration.",
+					 config->pathnames.config);
+		}
+
+		/* we're done the the newConfig now */
+		keeper_config_destroy(&newConfig);
+	}
+	else
+	{
+		log_warn("Configuration file \"%s\" does not exists, "
+				 "continuing with the same configuration.",
+				 config->pathnames.config);
+	}
+
+	/* we're done reloading now. */
+	asked_to_reload = 0;
 }

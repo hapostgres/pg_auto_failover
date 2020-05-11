@@ -75,7 +75,7 @@ static void stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathname
  *      { "ssl-self-signed", no_argument, NULL, 's' },
  *      { "no-ssl", no_argument, NULL, 'N' },
  *      { "ssl-ca-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG },
- *      { "server-crt", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG },
+ *      { "server-cert", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG },
  *      { "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG },
  *      { "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG },
  *		{ NULL, 0, NULL, 0 }
@@ -407,7 +407,7 @@ cli_common_keeper_getopts(int argc, char **argv,
 			/*
 			 * { "ssl-ca-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG }
 			 * { "ssl-crl-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG }
-			 * { "server-crt", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG }
+			 * { "server-cert", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG }
 			 * { "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG }
 			 * { "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG },
 			 */
@@ -554,7 +554,7 @@ cli_create_node_getopts(int argc, char **argv,
 		log_fatal("Explicit SSL choice is required: please use either "
 				  "--ssl-self-signed or provide your certificates "
 				  "using --ssl-ca-file, --ssl-crl-file, "
-				  "--server-key, and --server-crt (or use --no-ssl if you "
+				  "--server-key, and --server-cert (or use --no-ssl if you "
 				  "are very sure that you do not want encrypted traffic)");
 		exit(EXIT_CODE_BAD_ARGS);
 	}
@@ -642,7 +642,7 @@ cli_getopt_accept_ssl_options(SSLCommandLineOptions newSSLOption,
  *
  * { "ssl-ca-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG }
  * { "ssl-crl-file", required_argument, &ssl_flag, SSL_CRL_FILE_FLAG }
- * { "server-crt", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG }
+ * { "server-cert", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG }
  * { "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG }
  * { "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG },
  *
@@ -1205,7 +1205,7 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 
 		if (read_pidfile(config->pathnames.pid, &pid))
 		{
-			log_info("An instance of this keeper is running with PID %d, "
+			log_info("An instance of pg_autoctl is running with PID %d, "
 					 "stopping it.", pid);
 
 			if (kill(pid, SIGQUIT) != 0)
@@ -1391,8 +1391,8 @@ logLevelToString(int logLevel)
 
 
 /*
- * cli_plop prepares a pgSetup instance from either a keeper or a monitor
- * configuration file.
+ * cli_common_pgsetup_init prepares a pgSetup instance from either a keeper or
+ * a monitor configuration file.
  */
 bool
 cli_common_pgsetup_init(ConfigFilePaths *pathnames, PostgresSetup *pgSetup)
@@ -1458,6 +1458,37 @@ cli_common_pgsetup_init(ConfigFilePaths *pathnames, PostgresSetup *pgSetup)
 		{
 			log_fatal("Unrecognized configuration file \"%s\"",
 					  kconfig.pathnames.config);
+			return false;
+		}
+	}
+
+	return true;
+}
+
+
+/*
+ * cli_pg_autoctl_reload signals the pg_autoctl process to reload its
+ * configuration by sending it the SIGHUP signal.
+ */
+bool
+cli_pg_autoctl_reload(const char *pidfile)
+{
+	pid_t pid;
+
+	if (read_pidfile(pidfile, &pid))
+	{
+		if (pid <= 0)
+		{
+			log_error("Failed to reload pg_autoctl: "
+					  "pid file \"%s\" contains negative-or-zero pid %d",
+					  pidfile, pid);
+			return false;
+		}
+
+		if (kill(pid, SIGHUP) != 0)
+		{
+			log_error("Failed to send SIGHUP to the pg_autoctl's pid %d: %m",
+					  pid);
 			return false;
 		}
 	}

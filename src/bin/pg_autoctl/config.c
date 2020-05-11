@@ -283,3 +283,64 @@ ProbeConfigurationFileRole(const char *filename)
 	/* can't happen: keep compiler happy */
 	return PG_AUTOCTL_ROLE_UNKNOWN;
 }
+
+
+/*
+ * config_accept_new_ssloptions allows to reload SSL options at runtime.
+ */
+bool
+config_accept_new_ssloptions(PostgresSetup *pgSetup, PostgresSetup *newPgSetup)
+{
+	if (pgSetup->ssl.active != newPgSetup->ssl.active)
+	{
+		log_info("Reloading configuration: ssl is now %s; used to be %s",
+				 newPgSetup->ssl.active ? "active" : "disabled",
+				 pgSetup->ssl.active ? "active" : "disabled");
+	}
+
+	if (pgSetup->ssl.sslMode != newPgSetup->ssl.sslMode)
+	{
+		log_info("Reloading configuration: sslmode is now \"%s\"; "
+				 "used to be \"%s\"",
+				 pgsetup_sslmode_to_string(newPgSetup->ssl.sslMode),
+				 pgsetup_sslmode_to_string(pgSetup->ssl.sslMode));
+	}
+
+	if (strneq(pgSetup->ssl.caFile, newPgSetup->ssl.caFile))
+	{
+		log_info("Reloading configuration: ssl CA file is now \"%s\"; "
+				 "used to be \"%s\"",
+				 newPgSetup->ssl.caFile, pgSetup->ssl.caFile);
+	}
+
+	if (strneq(pgSetup->ssl.crlFile, newPgSetup->ssl.crlFile))
+	{
+		log_info("Reloading configuration: ssl CRL file is now \"%s\"; "
+				 "used to be \"%s\"",
+				 newPgSetup->ssl.crlFile, pgSetup->ssl.crlFile);
+	}
+
+	if (strneq(pgSetup->ssl.serverCert, newPgSetup->ssl.serverCert))
+	{
+		log_info("Reloading configuration: ssl server cert file is now \"%s\"; "
+				 "used to be \"%s\"",
+				 newPgSetup->ssl.serverCert,
+				 pgSetup->ssl.serverCert);
+	}
+
+	if (strneq(pgSetup->ssl.serverKey, newPgSetup->ssl.serverKey))
+	{
+		log_info("Reloading configuration: ssl server key file is now \"%s\"; "
+				 "used to be \"%s\"",
+				 newPgSetup->ssl.serverKey,
+				 pgSetup->ssl.serverKey);
+	}
+
+	/* install the new SSL settings, wholesale */
+	pgSetup->ssl = newPgSetup->ssl;
+	strlcpy(pgSetup->ssl.sslModeStr,
+			pgsetup_sslmode_to_string(pgSetup->ssl.sslMode),
+			SSL_MODE_STRLEN);
+
+	return true;
+}

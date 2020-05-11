@@ -130,7 +130,6 @@ extern CommandLine show_standby_names_command;
 /* cli_systemd.c */
 extern CommandLine systemd_cat_service_file_command;
 
-
 /*
  * Handling SSL options on the command line and their inter-compatibility is a
  * little complex.
@@ -159,6 +158,7 @@ int cli_create_node_getopts(int argc, char **argv,
 							struct option *long_options,
 							const char *optstring,
 							KeeperConfig *options);
+
 int cli_getopt_pgdata(int argc, char **argv);
 void prepare_keeper_options(KeeperConfig *options);
 
@@ -181,5 +181,7 @@ void cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy);
 char * logLevelToString(int logLevel);
 
 bool cli_common_pgsetup_init(ConfigFilePaths *pathnames, PostgresSetup *pgSetup);
+
+bool cli_pg_autoctl_reload(const char *pidfile);
 
 #endif  /* CLI_COMMON_H */

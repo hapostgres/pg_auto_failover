@@ -23,6 +23,9 @@
 #include "pgsetup.h"
 #include "pgsql.h"
 
+#define AUTOCTL_DEFAULTS_CONF_FILENAME "postgresql-auto-failover.conf"
+#define AUTOCTL_STANDBY_CONF_FILENAME "postgresql-auto-failover-standby.conf"
+
 #define PG_CTL_STATUS_NOT_RUNNING 3
 
 bool pg_controldata(PostgresSetup *pgSetup, bool missing_ok);

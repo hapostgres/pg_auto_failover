@@ -19,6 +19,7 @@
 #include "log.h"
 #include "monitor.h"
 #include "monitor_config.h"
+#include "monitor_pg_init.h"
 #include "service.h"
 #include "service_monitor.h"
 #include "service_postgres_ctl.h"
@@ -26,6 +27,11 @@
 #include "string_utils.h"
 
 #include "runprogram.h"
+
+
+static void reload_configuration(Monitor *monitor);
+static bool monitor_ensure_configuration(Monitor *monitor);
+
 
 /*
  * monitor_service_start starts the monitor processes: the Postgres instance
@@ -221,6 +227,13 @@ monitor_service_run(Monitor *monitor)
 		return false;
 	}
 
+	if (!monitor_ensure_configuration(monitor))
+	{
+		log_fatal("Failed to apply the current monitor configuration, "
+				  "see above for details");
+		exit(EXIT_CODE_MONITOR);
+	}
+
 	log_info("Contacting the monitor to LISTEN to its events.");
 	pgsql_listen(&(monitor->pgsql), channels);
 
@@ -232,6 +245,8 @@ monitor_service_run(Monitor *monitor)
 		/* we quit on reload, the supervisor is going to restart us */
 		if (asked_to_reload)
 		{
+			/* TODO: make this available on SIGUSR1 or something */
+			(void) reload_configuration(monitor);
 			exit(EXIT_CODE_RELOAD);
 		}
 
@@ -310,4 +325,116 @@ service_monitor_reload(void *context)
 			"Failed to send SIGHUP to pg_autoctl monitor listener pid %d: %m",
 			service->pid);
 	}
+}
+
+
+/*
+ * reload_configuration reads the supposedly new configuration file and
+ * integrates accepted new values into the current setup.
+ */
+static void
+reload_configuration(Monitor *monitor)
+{
+	MonitorConfig *config = &(monitor->config);
+
+	if (file_exists(config->pathnames.config))
+	{
+		MonitorConfig newConfig = { 0 };
+		bool missingPgdataIsOk = true;
+		bool pgIsNotRunningIsOk = true;
+
+		/*
+		 * Set the same configuration and state file as the current config.
+		 */
+		strlcpy(newConfig.pathnames.config, config->pathnames.config, MAXPGPATH);
+
+		if (monitor_config_read_file(&newConfig,
+									 missingPgdataIsOk,
+									 pgIsNotRunningIsOk) &&
+			monitor_config_accept_new(config, &newConfig))
+		{
+			log_info("Reloaded the new configuration from \"%s\"",
+					 config->pathnames.config);
+
+			/*
+			 * The new configuration might impact the Postgres setup, such as
+			 * when changing the SSL file paths.
+			 */
+			if (!monitor_ensure_configuration(monitor))
+			{
+				log_warn("Failed to reload pg_autoctl configuration, "
+						 "see above for details");
+			}
+		}
+		else
+		{
+			log_warn("Failed to read configuration file \"%s\", "
+					 "continuing with the same configuration.",
+					 config->pathnames.config);
+		}
+	}
+	else
+	{
+		log_warn("Configuration file \"%s\" does not exists, "
+				 "continuing with the same configuration.",
+				 config->pathnames.config);
+	}
+
+	/* we're done reloading now. */
+	asked_to_reload = 0;
+}
+
+
+/*
+ * monitor_ensure_configuration updates the Postgres settings to match the
+ * pg_autoctl configuration file, if necessary.
+ */
+static bool
+monitor_ensure_configuration(Monitor *monitor)
+{
+	MonitorConfig *config = &(monitor->config);
+	PostgresSetup *pgSetup = &(config->pgSetup);
+	char configFilePath[MAXPGPATH] = { 0 };
+
+	LocalPostgresServer postgres = { 0 };
+	PostgresSetup *pgSetupReload = &(postgres.postgresSetup);
+	bool missingPgdataIsOk = false;
+	bool pgIsNotRunningIsOk = false;
+
+	join_path_components(configFilePath, pgSetup->pgdata, "postgresql.conf");
+
+	if (!monitor_add_postgres_default_settings(monitor))
+	{
+		log_error("Failed to initialize our Postgres settings, "
+				  "see above for details");
+		return false;
+	}
+
+	if (!pg_setup_init(pgSetupReload,
+					   pgSetup,
+					   missingPgdataIsOk,
+					   pgIsNotRunningIsOk))
+	{
+		log_fatal("Failed to initialise a monitor node, see above for details");
+		return false;
+	}
+
+	/*
+	 * To reload Postgres config, we need to connect as the local system user,
+	 * otherwise using the autoctl_node user does not provide us with enough
+	 * privileges.
+	 */
+	strlcpy(pgSetupReload->username, "", NAMEDATALEN);
+	strlcpy(pgSetupReload->dbname, "template1", NAMEDATALEN);
+	local_postgres_init(&postgres, pgSetupReload);
+
+	if (!pgsql_reload_conf(&(postgres.sqlClient)))
+	{
+		log_warn("Failed to reload Postgres configuration after "
+				 "reloading pg_autoctl configuration, "
+				 "see above for details");
+		return false;
+	}
+
+	return true;
 }

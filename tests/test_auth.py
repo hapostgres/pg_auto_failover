@@ -27,7 +27,6 @@ def test_001_init_primary():
     node1.run()
     node1.wait_until_pg_is_running()
 
-    node1.set_user_password("pgautofailover_monitor", "monitor_password")
     node1.set_user_password("pgautofailover_replicator", "streaming_password")
     node1.config_set("replication.password", "streaming_password")
 
@@ -46,12 +45,12 @@ def test_003_init_secondary():
     node2.config_set("replication.password", "streaming_password")
 
     node2.run()
-    assert node2.wait_until_state(target_state="secondary", other_node=node1)
-    assert node1.wait_until_state(target_state="primary", other_node=node2)
+    assert node2.wait_until_state(target_state="secondary")
+    assert node1.wait_until_state(target_state="primary")
 
 def test_004_failover():
     print()
     print("Calling pgautofailover.failover() on the monitor")
     cluster.monitor.failover()
-    assert node2.wait_until_state(target_state="primary", other_node=node1)
-    assert node1.wait_until_state(target_state="secondary", other_node=node2)
+    assert node2.wait_until_state(target_state="primary")
+    assert node1.wait_until_state(target_state="secondary")

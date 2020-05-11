@@ -21,8 +21,8 @@
 #include "state.h"
 
 
-static bool local_postgres_update(LocalPostgresServer *postgres,
-								  bool postgresNotRunningIsOk);
+static void local_postgres_update_pg_failures_tracking(LocalPostgresServer *postgres,
+													   bool pgIsRunning);
 
 /*
  * Default settings for postgres databases managed by pg_auto_failover.
@@ -145,7 +145,7 @@ local_postgres_set_status_path(LocalPostgresServer *postgres, bool unlink)
  * local_postgres_UpdatePgFailuresTracking updates our tracking of PostgreSQL
  * restart failures.
  */
-void
+static void
 local_postgres_update_pg_failures_tracking(LocalPostgresServer *postgres,
 										   bool pgIsRunning)
 {
@@ -186,26 +186,21 @@ local_postgres_finish(LocalPostgresServer *postgres)
  * with what we discover from the newly created Postgres instance. Typically
  * used just after a pg_basebackup.
  */
-static bool
+bool
 local_postgres_update(LocalPostgresServer *postgres, bool postgresNotRunningIsOk)
 {
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	PostgresSetup newPgSetup = { 0 };
 	bool missingPgdataIsOk = false;
 
+	/* in case a connection is still established, now is time to close */
+	(void) local_postgres_finish(postgres);
+
 	if (!pg_setup_init(&newPgSetup, pgSetup,
 					   missingPgdataIsOk,
 					   postgresNotRunningIsOk))
 	{
 		/* errors have already been logged */
-		return false;
-	}
-
-	/*
-	 * Now that we now that pgdata exists, lets normalize the path.
-	 */
-	if (!normalize_filename(pgSetup->pgdata, pgSetup->pgdata, MAXPGPATH))
-	{
 		return false;
 	}
 
@@ -355,25 +350,6 @@ primary_drop_replication_slot(LocalPostgresServer *postgres,
 
 
 /*
- * primary_drop_replication_slots drops all the replication slots found. The
- * return value indicates whether the operation was successful.
- */
-bool
-primary_drop_replication_slots(LocalPostgresServer *postgres)
-{
-	bool result = false;
-	PGSQL *pgsql = &(postgres->sqlClient);
-
-	log_trace("primary_drop_replication_slots");
-
-	result = pgsql_drop_replication_slots(pgsql);
-
-	pgsql_finish(pgsql);
-	return result;
-}
-
-
-/*
  * postgres_replication_slot_drop_removed drops the replication slots that
  * belong to dropped nodes on a primary server.
  */
@@ -514,61 +490,6 @@ postgres_add_default_settings(LocalPostgresServer *postgres)
 
 
 /*
- * primary_create_user_with_hba creates a user and updates pg_hba.conf
- * to allow the user to connect from the given hostname.
- */
-bool
-primary_create_user_with_hba(LocalPostgresServer *postgres, char *userName,
-							 char *password, char *hostname, char *authMethod)
-{
-	PGSQL *pgsql = &(postgres->sqlClient);
-	bool login = true;
-	bool superuser = false;
-	bool replication = false;
-	char hbaFilePath[MAXPGPATH];
-
-	log_trace("primary_create_user_with_hba");
-
-	if (!pgsql_create_user(pgsql, userName, password,
-						   login, superuser, replication))
-	{
-		log_error("Failed to create user \"%s\" on local postgres server",
-				  userName);
-		return false;
-	}
-
-	if (!pgsql_get_hba_file_path(pgsql, hbaFilePath, MAXPGPATH))
-	{
-		log_error("Failed to set the pg_hba rule for user \"%s\": couldn't get "
-				  "hba_file from local postgres server", userName);
-		return false;
-	}
-
-	if (!pghba_ensure_host_rule_exists(hbaFilePath,
-									   postgres->postgresSetup.ssl.active,
-									   HBA_DATABASE_ALL,
-									   NULL,
-									   userName,
-									   hostname,
-									   authMethod))
-	{
-		log_error("Failed to set the pg_hba rule for user \"%s\"", userName);
-		return false;
-	}
-
-	if (!pgsql_reload_conf(pgsql))
-	{
-		log_error("Failed to reload pg_hba settings after updating pg_hba.conf");
-		return false;
-	}
-
-	pgsql_finish(pgsql);
-
-	return true;
-}
-
-
-/*
  * primary_create_replication_user creates a user that allows the secondary
  * to connect for replication.
  */
@@ -663,15 +584,66 @@ primary_add_standby_to_hba(LocalPostgresServer *postgres,
 
 
 /*
+ * standby_init_replication_source initializes a replication source structure
+ * with given arguments. If the primaryNode is NULL, then the
+ * replicationSource.primary structure slot is not updated.
+ *
+ * Note that we just store the pointers to all those const char *arguments
+ * here, expect for the primaryNode there's no copying involved.
+ */
+bool
+standby_init_replication_source(LocalPostgresServer *postgres,
+								NodeAddress *primaryNode,
+								const char *username,
+								const char *password,
+								const char *slotName,
+								const char *maximumBackupRate,
+								const char *backupDirectory,
+								SSLOptions sslOptions,
+								int currentNodeId)
+{
+	ReplicationSource *upstream = &(postgres->replicationSource);
+
+	if (primaryNode != NULL)
+	{
+		strlcpy(upstream->primaryNode.host,
+				primaryNode->host, _POSIX_HOST_NAME_MAX);
+
+		upstream->primaryNode.port = primaryNode->port;
+	}
+
+	strlcpy(upstream->userName, username, NAMEDATALEN);
+
+	if (password != NULL)
+	{
+		strlcpy(upstream->password, password, MAXCONNINFO);
+	}
+
+	strlcpy(upstream->slotName, slotName, MAXCONNINFO);
+	strlcpy(upstream->maximumBackupRate, maximumBackupRate, MAXCONNINFO);
+	strlcpy(upstream->backupDir, backupDirectory, MAXCONNINFO);
+	upstream->sslOptions = sslOptions;
+
+	/* prepare our application_name */
+	sformat(upstream->applicationName, MAXCONNINFO,
+			"%s%d",
+			REPLICATION_APPLICATION_NAME_PREFIX,
+			currentNodeId);
+
+	return true;
+}
+
+
+/*
  * standby_init_database tries to initialize PostgreSQL as a hot standby. It uses
  * pg_basebackup to do so. Returns false on failure.
  */
 bool
 standby_init_database(LocalPostgresServer *postgres,
-					  ReplicationSource *replicationSource,
 					  const char *nodename)
 {
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+	ReplicationSource *upstream = &(postgres->replicationSource);
 
 	log_trace("standby_init_database");
 	log_info("Initialising PostgreSQL as a hot standby");
@@ -689,9 +661,7 @@ standby_init_database(LocalPostgresServer *postgres,
 	 * Now, we know that pgdata either doesn't exists or belongs to a stopped
 	 * PostgreSQL instance. We can safely proceed with pg_basebackup.
 	 */
-	if (!pg_basebackup(pgSetup->pgdata,
-					   pgSetup->pg_ctl,
-					   replicationSource))
+	if (!pg_basebackup(pgSetup->pgdata, pgSetup->pg_ctl, upstream))
 	{
 		return false;
 	}
@@ -707,7 +677,7 @@ standby_init_database(LocalPostgresServer *postgres,
 	/* now setup the replication configuration (primary_conninfo etc) */
 	if (!pg_setup_standby_mode(pgSetup->control.pg_control_version,
 							   pgSetup->pgdata,
-							   replicationSource))
+							   upstream))
 	{
 		log_error("Failed to setup Postgres as a standby after pg_basebackup");
 		return false;
@@ -761,10 +731,10 @@ standby_init_database(LocalPostgresServer *postgres,
  * into a state where it can become the standby of the new primary.
  */
 bool
-primary_rewind_to_standby(LocalPostgresServer *postgres,
-						  ReplicationSource *replicationSource)
+primary_rewind_to_standby(LocalPostgresServer *postgres)
 {
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+	ReplicationSource *replicationSource = &(postgres->replicationSource);
 	NodeAddress *primaryNode = &(replicationSource->primaryNode);
 
 	log_trace("primary_rewind_to_standby");

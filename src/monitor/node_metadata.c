@@ -962,7 +962,7 @@ SyncStateFromString(const char *pgsrSyncState)
 		}
 	}
 
-	ereport(ERROR, (ERRCODE_INVALID_PARAMETER_VALUE,
+	ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 					errmsg("unknown pg_stat_replication.sync_state \"%s\"",
 						   pgsrSyncState)));
 
@@ -1005,7 +1005,7 @@ SyncStateToString(SyncState pgsrSyncState)
 		}
 
 		default:
-			ereport(ERROR, (ERRCODE_INVALID_PARAMETER_VALUE,
+			ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 							errmsg("unknown SyncState enum value %d",
 								   pgsrSyncState)));
 	}

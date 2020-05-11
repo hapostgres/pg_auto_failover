@@ -63,6 +63,7 @@ def test_007_maintenance():
     assert node1.wait_until_state(target_state="primary")
     node2.enable_maintenance()
     assert node2.wait_until_state(target_state="maintenance")
+    assert node1.wait_until_state(target_state="wait_primary")
     node2.stop_postgres()
     node1.run_sql_query("INSERT INTO t1 VALUES (3)")
 
@@ -114,9 +115,15 @@ def test_015_add_new_secondary():
     global node3
     node3 = cluster.create_datanode("/tmp/basic/node3")
     node3.create()
+
+@raises(Exception)
+def test_016_cant_failover_yet():
+    monitor.failover()
+
+def test_017_run_secondary():
     node3.run()
-    assert node3.wait_until_state(target_state="secondary", other_node=node2)
-    assert node2.wait_until_state(target_state="primary", other_node=node3)
+    assert node3.wait_until_state(target_state="secondary")
+    assert node2.wait_until_state(target_state="primary")
 
     assert node2.has_needed_replication_slots()
     assert node3.has_needed_replication_slots()
@@ -130,26 +137,32 @@ def test_015_add_new_secondary():
 # replication, we check that we still have a replication slot for the other
 # node.
 #
-def test_016_multiple_manual_failover_verify_replication_slots():
+def test_018_multiple_manual_failover_verify_replication_slots():
     print()
 
     print("Calling pgautofailover.failover() on the monitor")
     monitor.failover()
-    assert node2.wait_until_state(target_state="secondary", other_node=node3)
-    assert node3.wait_until_state(target_state="primary", other_node=node2)
+    assert node2.wait_until_state(target_state="secondary")
+    assert node3.wait_until_state(target_state="primary")
 
     assert node2.has_needed_replication_slots()
     assert node3.has_needed_replication_slots()
 
     print("Calling pgautofailover.failover() on the monitor")
     monitor.failover()
-    assert node2.wait_until_state(target_state="primary", other_node=node3)
-    assert node3.wait_until_state(target_state="secondary", other_node=node2)
+    assert node2.wait_until_state(target_state="primary")
+    assert node3.wait_until_state(target_state="secondary")
 
     assert node2.has_needed_replication_slots()
     assert node3.has_needed_replication_slots()
 
-def test_017_drop_primary():
+def test_019_drop_primary():
     node2.drop()
     assert not node2.pg_is_running()
     assert node3.wait_until_state(target_state="single")
+
+def test_020_stop_postgres_monitor():
+    original_state = node3.get_state()
+    monitor.stop_postgres()
+    monitor.wait_until_pg_is_running()
+    assert node3.wait_until_state(target_state=original_state)

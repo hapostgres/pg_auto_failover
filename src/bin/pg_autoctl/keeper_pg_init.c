@@ -655,50 +655,34 @@ create_database_and_extension(Keeper *keeper)
 	local_postgres_init(&initPostgres, &initPgSetup);
 
 	/*
+	 * When --ssl-self-signed has been used, now is the time to build a
+	 * self-signed certificate for the server. We place the certificate and
+	 * private key in $PGDATA/server.key and $PGDATA/server.crt
+	 */
+	if (!keeper_create_self_signed_cert(keeper))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/* publish our new pgSetup to the caller postgres state too */
+	postgres->postgresSetup.ssl = initPostgres.postgresSetup.ssl;
+
+	/*
 	 * Add pg_autoctl PostgreSQL settings, including Citus extension in
 	 * shared_preload_libraries when dealing with a Citus worker or coordinator
 	 * node.
 	 */
 	if (!postgres_add_default_settings(&initPostgres))
 	{
-		log_error("Failed to add default settings to newly initialized "
-				  "PostgreSQL instance, see above for details");
+		log_error("Failed to start PostgreSQL, see above for details");
 		return false;
 	}
 
 	/*
-	 * If username was set in the setup and doesn't exist we need to create it.
+	 * Now start the database, we need to create our dbname and maybe the Citus
+	 * Extension too.
 	 */
-	if (!IS_EMPTY_STRING_BUFFER(pgSetup->username))
-	{
-		if (!pgsql_create_user(&initPostgres.sqlClient, pgSetup->username,
-
-		                       /* password, login, superuser, replication */
-
-							   NULL, true, true, false))
-		{
-			log_fatal("Failed to create role \"%s\""
-					  ", see above for details", pgSetup->username);
-
-			return false;
-		}
-	}
-
-	/*
-	 * When --ssl-self-signed has been used, now is the time to build a
-	 * self-signed certificate for the server. We place the certificate and
-	 * private key in $PGDATA/server.key and $PGDATA/server.crt
-	 */
-	if (pgSetup->ssl.createSelfSignedCert)
-	{
-		if (!pg_create_self_signed_cert(pgSetup, config->nodename))
-		{
-			log_error("Failed to create SSL self-signed certificate, "
-					  "see above for details");
-			return false;
-		}
-	}
-
 	if (!ensure_local_postgres_is_running(&initPostgres))
 	{
 		log_error("Failed to start PostgreSQL, see above for details");
@@ -770,14 +754,12 @@ create_database_and_extension(Keeper *keeper)
 		}
 
 		/*
-		 * Install the citus extension in that database, skipping if the
-		 * extension has already been installed.
-		 */
-		log_info("CREATE EXTENSION %s;", CITUS_EXTENSION_NAME);
-
-		/*
-		 * Connect to pgsql as the system user to create extension: Same
-		 * user as initdb with superuser privileges.
+		 * Connect to pgsql as the system user to create extension: Same user
+		 * as initdb with superuser privileges.
+		 *
+		 * Calling keeper_update_state will re-init our sqlClient to now
+		 * connect per the configuration settings, cleaning-up the local
+		 * changes we made before.
 		 */
 		if (!keeper_update_pg_state(keeper))
 		{
@@ -785,6 +767,12 @@ create_database_and_extension(Keeper *keeper)
 					  "PostgreSQL instance, see above for details.");
 			return false;
 		}
+
+		/*
+		 * Install the citus extension in that database, skipping if the
+		 * extension has already been installed.
+		 */
+		log_info("CREATE EXTENSION %s;", CITUS_EXTENSION_NAME);
 
 		if (!pgsql_create_extension(&(postgres->sqlClient), CITUS_EXTENSION_NAME))
 		{

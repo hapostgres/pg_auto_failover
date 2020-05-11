@@ -2,12 +2,12 @@
 # Licensed under the PostgreSQL License.
 
 EXTENSION = pgautofailover
-EXTVERSION = 1.2
+EXTVERSION = 1.3
 
 SRC_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
 DATA_built = $(EXTENSION)--$(EXTVERSION).sql
-DATA = $(EXTENSION)--1.0.sql $(wildcard $(EXTENSION)--*--*.sql)
+DATA = $(EXTENSION)--1.0.sql $(patsubst ${SRC_DIR}%,%,$(wildcard ${SRC_DIR}$(EXTENSION)--*--*.sql))
 
 # compilation configuration
 MODULE_big = $(EXTENSION)
@@ -20,7 +20,14 @@ PG_CONFIG ?= pg_config
 PGXS = $(shell $(PG_CONFIG) --pgxs)
 USE_PGXS = 1
 
+.PHONY: cleanup-before-install
+
 include $(PGXS)
 
-$(EXTENSION)--1.2.sql: $(EXTENSION).sql
+cleanup-before-install:
+	rm -f $(DESTDIR)$(datadir)/$(datamoduledir)/pgautofailover*
+
+install: cleanup-before-install
+
+$(EXTENSION)--$(EXTVERSION).sql: $(EXTENSION).sql
 	cat $^ > $@

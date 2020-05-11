@@ -16,4 +16,20 @@ ALTER EXTENSION pgautofailover UPDATE TO '1.1';
  pgautofailover | 1.1     | public | pg_auto_failover
 (1 row)
 
+ALTER EXTENSION pgautofailover UPDATE TO '1.2';
+\dx pgautofailover
+             List of installed extensions
+      Name      | Version | Schema |   Description    
+----------------+---------+--------+------------------
+ pgautofailover | 1.2     | public | pg_auto_failover
+(1 row)
+
+ALTER EXTENSION pgautofailover UPDATE TO '1.3';
+\dx pgautofailover
+             List of installed extensions
+      Name      | Version | Schema |   Description    
+----------------+---------+--------+------------------
+ pgautofailover | 1.3     | public | pg_auto_failover
+(1 row)
+
 DROP EXTENSION pgautofailover;

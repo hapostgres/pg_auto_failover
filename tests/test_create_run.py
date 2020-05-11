@@ -35,8 +35,8 @@ def test_003_init_secondary():
     global node2
     node2 = cluster.create_datanode("/tmp/create-run/node2")
     node2.create(run=True)
-    assert node2.wait_until_state(target_state="secondary", other_node=node1)
-    assert node1.wait_until_state(target_state="primary", other_node=node2)
+    assert node2.wait_until_state(target_state="secondary")
+    assert node1.wait_until_state(target_state="primary")
 
 def test_004_read_from_secondary():
     results = node2.run_sql_query("SELECT * FROM t1")
@@ -44,25 +44,23 @@ def test_004_read_from_secondary():
 
 def test_005_maintenance():
     node2.enable_maintenance()
-    assert node2.wait_until_state(target_state="maintenance", other_node=node1)
+    assert node2.wait_until_state(target_state="maintenance")
     node2.fail()
     node1.run_sql_query("INSERT INTO t1 VALUES (3)")
     node2.run()
-    node2.disable_maintenance(other_node=node1)
+    node2.disable_maintenance()
     assert node2.wait_until_pg_is_running()
-    assert node1.wait_until_pg_is_running()
-    assert node2.wait_until_state(target_state="secondary", other_node=node1)
-    assert node1.wait_until_state(target_state="primary", other_node=node2)
+    assert node2.wait_until_state(target_state="secondary")
+    assert node1.wait_until_state(target_state="primary")
 
 def test_006_fail_primary():
     node1.fail()
     assert node2.wait_until_state(target_state="wait_primary", timeout=180)
 
 def test_007_start_node1_again():
-    print("\n%s" % node1.get_events_str())
-    node1.create(run = True)
-    assert node2.wait_until_state(target_state="primary", other_node=node1)
-    assert node1.wait_until_state(target_state="secondary", other_node=node2)
+    node1.create(run=True, loglevel=pgautofailover.LogLevel.TRACE)
+    assert node2.wait_until_state(target_state="primary")
+    assert node1.wait_until_state(target_state="secondary")
 
 def test_008_read_from_new_secondary():
     node1.wait_until_pg_is_running()
