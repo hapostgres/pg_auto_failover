@@ -584,15 +584,15 @@ class PGNode:
             ssl_args += ['--no-ssl']
 
         command = PGAutoCtl(self, argv=ssl_args)
-        out, err = command.execute("enable ssl")
+        out, err, ret = command.execute("enable ssl")
 
     def get_monitor_uri(self):
         """
         pg_autoctl show uri --monitor
         """
         command = PGAutoCtl(self)
-        out, err = command.execute("show uri --monitor",
-                                   'show', 'uri', '--monitor')
+        out, err, ret = command.execute("show uri --monitor",
+                                        'show', 'uri', '--monitor')
         return out
 
     def get_formation_uri(self, formationName='default'):
@@ -600,8 +600,9 @@ class PGNode:
         pg_autoctl show uri --formation {formationName}
         """
         command = PGAutoCtl(self)
-        out, err = command.execute("show uri --formation",
-                                   'show', 'uri', '--formation', formationName)
+        out, err, ret = command.execute("show uri --formation",
+                                        'show', 'uri',
+                                        '--formation', formationName)
         return out
 
     def check_conn_string_ssl(self, conn_string, sslmode):
