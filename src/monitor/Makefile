@@ -22,6 +22,10 @@ USE_PGXS = 1
 
 .PHONY: cleanup-before-install
 
+DEFAULT_CFLAGS = -std=c99 -D_GNU_SOURCE -g
+DEFAULT_CFLAGS += $(shell $(PG_CONFIG) --cflags)
+override CFLAGS := $(DEFAULT_CFLAGS) $(CFLAGS)
+
 include $(PGXS)
 
 cleanup-before-install:
