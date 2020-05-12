@@ -30,6 +30,7 @@ void log_set_udata(void *udata);
 void log_set_lock(log_LockFn fn);
 void log_set_fp(FILE *fp);
 void log_set_level(int level);
+int log_get_level(void);
 void log_set_quiet(int enable);
 void log_use_colors(int enable);
 

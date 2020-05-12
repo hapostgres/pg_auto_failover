@@ -34,10 +34,12 @@
 bool
 monitor_service_init(MonitorConfig *config, pid_t *pid)
 {
+	bool exitOnQuit = true;
+
 	log_trace("monitor_service_init");
 
 	/* Establish a handler for signals. */
-	(void) set_signal_handlers();
+	(void) set_signal_handlers(exitOnQuit);
 
 	/* Check that the keeper service is not already running */
 	if (read_pidfile(config->pathnames.pid, pid))
@@ -74,11 +76,12 @@ bool
 keeper_service_init(Keeper *keeper, pid_t *pid)
 {
 	KeeperConfig *config = &(keeper->config);
+	bool exitOnQuit = true;
 
 	log_trace("keeper_service_init");
 
 	/* Establish a handler for signals. */
-	(void) set_signal_handlers();
+	(void) set_signal_handlers(exitOnQuit);
 
 	/* Check that the keeper service is not already running */
 	if (read_pidfile(config->pathnames.pid, pid))

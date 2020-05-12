@@ -198,7 +198,7 @@ SetStateFilePath(ConfigFilePaths *pathnames, const char *pgdata)
 		if (!build_xdg_path(pathnames->init,
 							XDG_DATA,
 							pgdata,
-							KEEPER_INIT_FILENAME))
+							KEEPER_INIT_STATE_FILENAME))
 		{
 			log_error("Failed to build pg_autoctl init state file pathname, "
 					  "see above.");

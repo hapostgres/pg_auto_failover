@@ -99,7 +99,8 @@
 #define KEEPER_CONFIGURATION_FILENAME "pg_autoctl.cfg"
 #define KEEPER_STATE_FILENAME "pg_autoctl.state"
 #define KEEPER_PID_FILENAME "pg_autoctl.pid"
-#define KEEPER_INIT_FILENAME "pg_autoctl.init"
+#define KEEPER_INIT_STATE_FILENAME "pg_autoctl.init"
+#define KEEPER_POSTGRES_STATE_FILENAME "pg_autoctl.pg"
 
 #define KEEPER_SYSTEMD_SERVICE "pgautofailover"
 #define KEEPER_SYSTEMD_FILENAME "pgautofailover.service"
@@ -133,6 +134,7 @@
 #define EXIT_CODE_MONITOR 6
 #define EXIT_CODE_COORDINATOR 7
 #define EXIT_CODE_KEEPER 8
+#define EXIT_CODE_RELOAD 9
 #define EXIT_CODE_INTERNAL_ERROR 12
 
 

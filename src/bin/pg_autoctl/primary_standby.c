@@ -10,12 +10,15 @@
 
 #include "postgres_fe.h"
 
+#include "config.h"
 #include "file_utils.h"
+#include "keeper.h"
 #include "log.h"
 #include "pgctl.h"
 #include "pghba.h"
 #include "pgsql.h"
 #include "primary_standby.h"
+#include "state.h"
 
 
 static void local_postgres_update_pg_failures_tracking(LocalPostgresServer *postgres,
@@ -43,7 +46,6 @@ static void local_postgres_update_pg_failures_tracking(LocalPostgresServer *post
 	{ "synchronous_commit", "on" }, \
 	{ "logging_collector", "on" }, \
 	{ "log_destination", "stderr" }, \
-	{ "logging_collector", "on" }, \
 	{ "log_directory", "log" }, \
 	{ "log_min_messages", "info" }, \
 	{ "log_connections", "off" }, \
@@ -89,6 +91,53 @@ local_postgres_init(LocalPostgresServer *postgres, PostgresSetup *pgSetup)
 
 	/* set the local instance kind from the configuration. */
 	postgres->pgKind = pgSetup->pgKind;
+
+	if (!local_postgres_set_status_path(postgres, true))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_STATE);
+	}
+}
+
+
+/*
+ * local_postgres_set_status_path sets the file pathname to the pg_autoctl.pg
+ * file that we use to signal the Postgres controller if Postgres is expected
+ * to be running or not.
+ *
+ * When the file does not exist, the controller do nothing, so it's safe to
+ * always remove the file at startup.
+ */
+bool
+local_postgres_set_status_path(LocalPostgresServer *postgres, bool unlink)
+{
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+	LocalExpectedPostgresStatus *pgStatus = &(postgres->expectedPgStatus);
+
+	log_trace("local_postgres_set_status_path: %s", pgSetup->pgdata);
+
+	/* initialize our Postgres state file path */
+	if (!build_xdg_path(pgStatus->pgStatusPath,
+						XDG_RUNTIME,
+						pgSetup->pgdata,
+						KEEPER_POSTGRES_STATE_FILENAME))
+	{
+		/* highly unexpected */
+		log_error("Failed to build pg_autoctl postgres state file pathname, "
+				  "see above for details.");
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	log_trace("local_postgres_set_status_path: %s", pgStatus->pgStatusPath);
+
+	/* local_postgres_init removes any stale pg_autoctl.pg file */
+	if (unlink && !unlink_file(pgStatus->pgStatusPath))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	return true;
 }
 
 
@@ -240,6 +289,88 @@ ensure_local_postgres_is_running(LocalPostgresServer *postgres)
 	}
 
 	return true;
+}
+
+
+/*
+ * ensure_postgres_service_is_running signals the Postgres controller service
+ * that Postgres is expected to be running, by updating the expectedPgStatus
+ * file to the proper values, and then wait until Postgres is running before
+ * returning true in case of success.
+ */
+bool
+ensure_postgres_service_is_running(LocalPostgresServer *postgres)
+{
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+	LocalExpectedPostgresStatus *pgStatus = &(postgres->expectedPgStatus);
+
+	int timeout = 10;       /* wait for Postgres for 10s */
+	bool pgIsRunning = pg_is_running(pgSetup->pg_ctl, pgSetup->pgdata);
+
+	log_trace("ensure_local_postgres_is_running: Postgres %s in \"%s\"",
+			  pgIsRunning ? "is running" : "is not running", pgSetup->pgdata);
+
+	/* update our data structure in-memory, then on-disk */
+	if (!keeper_set_postgres_state_running(&(pgStatus->state),
+										   pgStatus->pgStatusPath))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	if (!pgIsRunning)
+	{
+		/* main logging is done in the Postgres controller sub-process */
+		pgIsRunning = pg_setup_wait_until_is_ready(pgSetup, timeout, LOG_DEBUG);
+
+		/* update connection string for connection to postgres */
+		(void)
+		local_postgres_update_pg_failures_tracking(postgres, pgIsRunning);
+
+		if (pgIsRunning)
+		{
+			/* update pgSetup cache with new Postgres pid and all */
+			local_postgres_init(postgres, pgSetup);
+
+			log_debug("ensure_local_postgres_is_running: Postgres is running "
+					  "with pid %d", pgSetup->pidFile.pid);
+		}
+		else
+		{
+			log_error("Failed to ensure that Postgres is running in \"%s\"",
+					  pgSetup->pgdata);
+		}
+	}
+
+	return pgIsRunning;
+}
+
+
+/*
+ * ensure_postgres_service_is_running signals the Postgres controller service
+ * that Postgres is expected to not be running, by updating the
+ * expectedPgStatus file to the proper values, and then wait until Postgres is
+ * stopped before returning true in case of success.
+ */
+bool
+ensure_postgres_service_is_stopped(LocalPostgresServer *postgres)
+{
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+	LocalExpectedPostgresStatus *pgStatus = &(postgres->expectedPgStatus);
+
+	int timeout = 10;       /* wait for Postgres for 10s */
+
+	log_trace("keeper_ensure_postgres_is_stopped");
+
+	/* update our data structure in-memory, then on-disk */
+	if (!keeper_set_postgres_state_stopped(&(pgStatus->state),
+										   pgStatus->pgStatusPath))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	return pg_setup_wait_until_is_stopped(pgSetup, timeout, LOG_DEBUG);
 }
 
 

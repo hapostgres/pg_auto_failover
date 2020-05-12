@@ -838,3 +838,72 @@ sformat(char *str, size_t count, const char *fmt, ...)
 
 	return len;
 }
+
+
+/*
+ * set_ps_title sets the process title seen in ps/top and friends, truncating
+ * if there is not enough space, rather than causing memory corruption.
+ *
+ * Inspired / stolen from Postgres code src/backend/utils/misc/ps_status.c with
+ * most of the portability bits removed. At the moment we prefer simple code
+ * that works on few targets to highly portable code.
+ */
+void
+init_ps_buffer(int argc, char **argv)
+{
+#if defined(__linux__) || defined(__darwin__)
+	char *end_of_area = NULL;
+	int i;
+
+	/*
+	 * check for contiguous argv strings
+	 */
+	for (i = 0; i < argc; i++)
+	{
+		if (i == 0 || end_of_area + 1 == argv[i])
+		{
+			end_of_area = argv[i] + strlen(argv[i]);
+		}
+	}
+
+	if (end_of_area == NULL)    /* probably can't happen? */
+	{
+		ps_buffer = NULL;
+		ps_buffer_size = 0;
+		return;
+	}
+
+	ps_buffer = argv[0];
+	last_status_len = ps_buffer_size = end_of_area - argv[0];
+
+#else
+	ps_buffer = NULL;
+	ps_buffer_size = 0;
+
+	return;
+#endif
+}
+
+
+/*
+ * set_ps_title sets our process name visible in ps/top/pstree etc.
+ */
+void
+set_ps_title(const char *title)
+{
+	int n;
+
+	if (ps_buffer == NULL)
+	{
+		/* noop */
+		return;
+	}
+
+	n = sformat(ps_buffer, ps_buffer_size, "%s", title);
+
+	/* pad our process title string */
+	for (int i = n; i < ps_buffer_size; i++)
+	{
+		*(ps_buffer + i) = '\0';
+	}
+}

@@ -41,8 +41,6 @@
  */
 bool keeperInitWarnings = false;
 
-static KeeperStateInit initState = { 0 };
-
 static bool keeper_pg_init_fsm(Keeper *keeper);
 static bool keeper_pg_init_and_register(Keeper *keeper);
 static bool reach_initial_state(Keeper *keeper);
@@ -182,7 +180,7 @@ keeper_pg_init_and_register(Keeper *keeper)
 		 * revert the situation by removing ourselves from the monitor and
 		 * removing the state file.
 		 */
-		if (!keeper_register_and_init(keeper, config, INIT_STATE))
+		if (!keeper_register_and_init(keeper, INIT_STATE))
 		{
 			/* monitor_register_node logs relevant errors */
 			return false;
@@ -228,7 +226,7 @@ keeper_pg_init_and_register(Keeper *keeper)
 		 * we register in INIT_STATE and let the monitor decide.
 		 */
 
-		if (!keeper_register_and_init(keeper, config, INIT_STATE))
+		if (!keeper_register_and_init(keeper, INIT_STATE))
 		{
 			/* monitor_register_node logs relevant errors */
 			return false;
@@ -259,7 +257,7 @@ keeper_pg_init_and_register(Keeper *keeper)
 		 * So our strategy is to ask the monitor to pick a state for us and
 		 * then implement whatever was decided.
 		 */
-		if (!keeper_register_and_init(keeper, config, INIT_STATE))
+		if (!keeper_register_and_init(keeper, INIT_STATE))
 		{
 			log_error("Failed to register the existing local Postgres node "
 					  "\"%s:%d\" running at \"%s\""
@@ -300,6 +298,7 @@ keeper_pg_init_and_register(Keeper *keeper)
 bool
 keeper_pg_init_continue(Keeper *keeper)
 {
+	KeeperStateInit *initState = &(keeper->initState);
 	KeeperConfig *config = &(keeper->config);
 
 	if (!keeper_init(keeper, config))
@@ -308,7 +307,7 @@ keeper_pg_init_continue(Keeper *keeper)
 		return false;
 	}
 
-	if (!keeper_init_state_read(keeper, &initState))
+	if (!keeper_init_state_read(initState, config->pathnames.init))
 	{
 		log_fatal("Failed to restart from previous keeper init attempt");
 		log_info("HINT: use `pg_autoctl drop node` to retry in a clean state");
@@ -317,7 +316,7 @@ keeper_pg_init_continue(Keeper *keeper)
 
 	log_info("Continuing from a previous `pg_autoctl create` failed attempt");
 	log_info("PostgreSQL state at registration time was: %s",
-			 PreInitPostgreInstanceStateToString(initState.pgInitState));
+			 PreInitPostgreInstanceStateToString(initState->pgInitState));
 
 	/*
 	 * TODO: verify the information in the state file against the information
