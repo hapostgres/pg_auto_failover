@@ -8,6 +8,7 @@
  *
  */
 
+#include <dirent.h>
 #include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
@@ -36,8 +37,6 @@
 
 #define AUTOCTL_CONF_INCLUDE_LINE "include '" AUTOCTL_DEFAULTS_CONF_FILENAME "'"
 #define AUTOCTL_SB_CONF_INCLUDE_LINE "include '" AUTOCTL_STANDBY_CONF_FILENAME "'"
-
-#define PROGRAM_NOT_RUNNING 3
 
 
 static bool pg_include_config(const char *configFilePath,
@@ -921,6 +920,159 @@ pg_ctl_start(const char *pg_ctl,
 
 
 /*
+ * pg_log_startup logs the PGDATA/startup.log file contents so that our users
+ * have enough information about why Postgres failed to start when that
+ * happens.
+ */
+bool
+pg_log_startup(const char *pgdata, int logLevel)
+{
+	char pgLogDirPath[MAXPGPATH] = { 0 };
+
+	char pgStartupPath[MAXPGPATH] = { 0 };
+	char *fileContents;
+	long fileSize;
+
+	/* logLevel to use when introducing which file path logs come from */
+	int pathLogLevel = logLevel <= LOG_DEBUG ? LOG_DEBUG : LOG_WARN;
+
+	struct stat pgStartupStat;
+	int64_t pgStartupMtime = 0;
+
+	DIR *logDir = NULL;
+	struct dirent *logFileDirEntry = NULL;
+
+	/* prepare startup.log file in PGDATA */
+	join_path_components(pgStartupPath, pgdata, "startup.log");
+
+	if (read_file(pgStartupPath, &fileContents, &fileSize) && fileSize > 0)
+	{
+		char *lines[BUFSIZE];
+		int lineCount = splitLines(fileContents, lines, BUFSIZE);
+		int lineNumber = 0;
+
+		log_level(pathLogLevel, "Postgres logs from \"%s\":", pgStartupPath);
+
+		for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
+		{
+			log_level(logLevel, "%s", lines[lineNumber]);
+		}
+	}
+
+	/*
+	 * Add in the most recent Postgres log file if it's been created after the
+	 * startup.log file, it might contain very useful information, such as a
+	 * FATAL line(s).
+	 *
+	 * Given that we setup Postgres to use the logging_collector, we expect
+	 * there to be a single Postgres log file in the "log" directory that was
+	 * created later than the "startup.log" file, and we expect the file to be
+	 * rather short.
+	 *
+	 * Also we setup log_directory to be "log" so that's where we are looking
+	 * into.
+	 */
+
+	/* prepare PGDATA/log directory path */
+	join_path_components(pgLogDirPath, pgdata, "log");
+
+	if (!directory_exists(pgLogDirPath))
+	{
+		/* then there's no other log files to process here */
+		return true;
+	}
+
+	/* get the time of last modification of the startup.log file */
+	if (lstat(pgStartupPath, &pgStartupStat) != 0)
+	{
+		log_error("Failed to get file information for \"%s\": %m",
+				  pgStartupPath);
+		return false;
+	}
+	pgStartupMtime = ST_MTIME_S(pgStartupStat);
+
+	/* open and scan through the Postgres log directory */
+	logDir = opendir(pgLogDirPath);
+
+	if (logDir == NULL)
+	{
+		log_error("Failed to open Postgres log directory \"%s\": %m",
+				  pgLogDirPath);
+		return false;
+	}
+
+	while ((logFileDirEntry = readdir(logDir)) != NULL)
+	{
+		char pgLogFilePath[MAXPGPATH] = { 0 };
+		struct stat pgLogFileStat;
+		int64_t pgLogFileMtime = 0;
+
+		/* our logFiles are regular files, skip . and .. and others */
+		if (logFileDirEntry->d_type != DT_REG)
+		{
+			continue;
+		}
+
+		/* build the absolute file path for the logfile */
+		join_path_components(pgLogFilePath,
+							 pgLogDirPath,
+							 logFileDirEntry->d_name);
+
+		/* get the file information for the current logFile */
+		if (lstat(pgLogFilePath, &pgLogFileStat) != 0)
+		{
+			log_error("Failed to get file information for \"%s\": %m",
+					  pgLogFilePath);
+			return false;
+		}
+		pgLogFileMtime = ST_MTIME_S(pgLogFileStat);
+
+		/*
+		 * Compare modification times and only add to our logs the content
+		 * from the Postgres log file that was created after the
+		 * startup.log file.
+		 */
+		if (pgLogFileMtime >= pgStartupMtime)
+		{
+			char *fileContents;
+			long fileSize;
+
+			log_level(pathLogLevel,
+					  "Postgres logs from \"%s\":", pgLogFilePath);
+
+			if (read_file(pgLogFilePath, &fileContents, &fileSize) &&
+				fileSize > 0)
+			{
+				char *lines[BUFSIZE];
+				int lineCount = splitLines(fileContents, lines, BUFSIZE);
+				int lineNumber = 0;
+
+				for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
+				{
+					if (strstr(lines[lineNumber], "FATAL") != NULL)
+					{
+						log_fatal("%s", lines[lineNumber]);
+					}
+					else if (strstr(lines[lineNumber], "ERROR") != NULL)
+					{
+						log_error("%s", lines[lineNumber]);
+					}
+					else
+					{
+						log_level(logLevel, "%s", lines[lineNumber]);
+					}
+				}
+			}
+		}
+
+		closedir(logDir);
+	}
+
+	return true;
+}
+
+
+/*
  * pg_ctl_stop tries to stop a PostgreSQL server by running a "pg_ctl stop"
  * command. If the server was stopped successfully, or if the server is not
  * running at all, it returns true.
@@ -975,7 +1127,7 @@ pg_ctl_stop(const char *pg_ctl, const char *pgdata)
 	 */
 
 	status = pg_ctl_status(pg_ctl, pgdata, log_output);
-	if (status == PROGRAM_NOT_RUNNING)
+	if (status == PG_CTL_STATUS_NOT_RUNNING)
 	{
 		log_info("pg_ctl stop failed, but PostgreSQL is not running anyway");
 		free_program(&program);

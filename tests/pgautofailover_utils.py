@@ -389,47 +389,23 @@ class PGNode:
         """
         Returns true when Postgres is running. We use pg_ctl status.
         """
-        status_command = [shutil.which('pg_ctl'), '-D', self.datadir, 'status']
-        with self.vnode.run(status_command) as status_proc:
-            out, err = self.cluster.communicate(status_proc, timeout)
-            if status_proc.returncode == 0:
-                # pg_ctl status is happy to report 0 (Postgres is running) even
-                # when it's still "starting" and thus not ready for queries.
-                #
-                # because our tests need to be able to send queries to Postgres,
-                # the "starting" status is not good enough for us, we're only
-                # happy with "ready".
-                pidfile = os.path.join(self.datadir, 'postmaster.pid')
-                try:
-                    with open(pidfile, "r") as p:
-                        pidlines = p.readlines()
-                        if len(pidlines) > 7:
-                            pg_status = pidlines[7]
-                            return pg_status.startswith("ready")
-                except FileNotFoundError:
-                    # It's possible that the pidfile or pgdata does not exist yet.
-                    # Obviously postgres is not running in that case
-                    return False
-            elif status_proc.returncode > 0:
-                # ignore `pg_ctl status` output, silently try again till timeout
-                return False
-            elif status_proc.returncode is None:
-                print("pg_ctl status timed out after %ds" % timeout)
-                return False
+        command = PGAutoCtl(self)
+
+        try:
+            command.execute("pgsetup ready", 'do', 'pgsetup', 'ready', '-vvv')
+        except Exception as e:
+            # pg_autoctl uses EXIT_CODE_PGSQL when Postgres is not ready
+            return False
+        return True
 
     def wait_until_pg_is_running(self, timeout=STATE_CHANGE_TIMEOUT):
         """
         Waits until the underlying Postgres process is running.
         """
-        wait_until = dt.datetime.now() + dt.timedelta(seconds=timeout)
-        while wait_until > dt.datetime.now():
-            if self.pg_is_running():
-                return True
-            time.sleep(POLLING_INTERVAL)
-
-        print("Postgres is still not running in %s after %d seconds" %
-              (self.datadir, timeout))
-        return False
+        command = PGAutoCtl(self)
+        out, err, ret = command.execute("pgsetup ready",
+                                        'do', 'pgsetup', 'wait', '-vvv')
+        return ret == 0
 
     def fail(self):
         """
@@ -542,8 +518,8 @@ class PGNode:
         Set a configuration parameter to given value
         """
         command = PGAutoCtl(self)
-        out, err = command.execute("config get %s" % setting,
-                                   'config', 'get', setting)
+        out, err, ret = command.execute("config get %s" % setting,
+                                        'config', 'get', setting)
         return out[:-1]
 
     def show_uri(self, json=False):
@@ -552,9 +528,9 @@ class PGNode:
         """
         command = PGAutoCtl(self)
         if json:
-            out, err = command.execute("show uri", 'show', 'uri', '--json')
+            out, err, ret = command.execute("show uri", 'show', 'uri', '--json')
         else:
-            out, err = command.execute("show uri", 'show', 'uri')
+            out, err, ret = command.execute("show uri", 'show', 'uri')
         return out
 
     def logs(self):
@@ -608,15 +584,15 @@ class PGNode:
             ssl_args += ['--no-ssl']
 
         command = PGAutoCtl(self, argv=ssl_args)
-        out, err = command.execute("enable ssl")
+        out, err, ret = command.execute("enable ssl")
 
     def get_monitor_uri(self):
         """
         pg_autoctl show uri --monitor
         """
         command = PGAutoCtl(self)
-        out, err = command.execute("show uri --monitor",
-                                   'show', 'uri', '--monitor')
+        out, err, ret = command.execute("show uri --monitor",
+                                        'show', 'uri', '--monitor')
         return out
 
     def get_formation_uri(self, formationName='default'):
@@ -624,8 +600,9 @@ class PGNode:
         pg_autoctl show uri --formation {formationName}
         """
         command = PGAutoCtl(self)
-        out, err = command.execute("show uri --formation",
-                                   'show', 'uri', '--formation', formationName)
+        out, err, ret = command.execute("show uri --formation",
+                                        'show', 'uri',
+                                        '--formation', formationName)
         return out
 
     def check_conn_string_ssl(self, conn_string, sslmode):
@@ -933,8 +910,8 @@ SELECT reportedstate
             Gets candidate priority via pg_autoctl
         """
         command = PGAutoCtl(self)
-        out, err = command.execute("get canditate priority",
-                                   'get', 'node', 'candidate-priority')
+        out, err, ret = command.execute("get canditate priority",
+                                        'get', 'node', 'candidate-priority')
         return int(out)
 
     def set_replication_quorum(self, replicationQuorum):
@@ -956,8 +933,8 @@ SELECT reportedstate
             Gets replication quorum via pg_autoctl
         """
         command = PGAutoCtl(self)
-        out, err = command.execute("get replication quorum",
-                                   'get', 'node', 'replication-quorum')
+        out, err, ret = command.execute("get replication quorum",
+                                        'get', 'node', 'replication-quorum')
 
         value = out.strip()
 
@@ -987,8 +964,9 @@ SELECT reportedstate
             Gets number sync standbys  via pg_autoctl
         """
         command = PGAutoCtl(self)
-        out, err = command.execute("get number sync standbys",
-                                   'get', 'formation', 'number-sync-standbys')
+        out, err, ret = command.execute("get number sync standbys",
+                                        'get', 'formation',
+                                        'number-sync-standbys')
 
         return int(out)
 
@@ -997,8 +975,8 @@ SELECT reportedstate
             Gets number sync standbys  via pg_autoctl
         """
         command = PGAutoCtl(self)
-        out, err = command.execute("get synchronous_standby_names",
-                                   'show', 'synchronous_standby_names')
+        out, err, ret = command.execute("get synchronous_standby_names",
+                                        'show', 'synchronous_standby_names')
 
         return out.strip()
 
@@ -1212,7 +1190,7 @@ class MonitorNode(PGNode):
         print("pg_autoctl show state --pgdata %s" % self.datadir)
 
         command = PGAutoCtl(self)
-        out, err = command.execute("show state", 'show', 'state')
+        out, err, ret = command.execute("show state", 'show', 'state')
         print("%s" % out)
 
     def get_other_nodes(self, host, port):
@@ -1282,7 +1260,7 @@ class PGAutoCtl():
                                 (name,
                                  " ".join(self.command),
                                  out, err))
-            return out, err
+            return out, err, proc.returncode
 
     def stop(self):
         """

@@ -178,13 +178,50 @@ CommandLine do_standby_ =
 					 "Manage a PostgreSQL standby server", NULL, NULL,
 					 NULL, do_standby);
 
-CommandLine do_discover =
+CommandLine do_pgsetup_discover =
 	make_command("discover",
 				 "Discover local PostgreSQL instance, if any",
 				 "[option ...]",
 				 KEEPER_CLI_WORKER_SETUP_OPTIONS,
 				 keeper_cli_keeper_setup_getopts,
-				 keeper_cli_discover_pg_setup);
+				 keeper_cli_pgsetup_discover);
+
+CommandLine do_pgsetup_is_ready =
+	make_command("ready",
+				 "Return true is the local Postgres server is ready",
+				 "[option ...]",
+				 KEEPER_CLI_WORKER_SETUP_OPTIONS,
+				 keeper_cli_keeper_setup_getopts,
+				 keeper_cli_pgsetup_is_ready);
+
+CommandLine do_pgsetup_wait_until_ready =
+	make_command("wait",
+				 "Wait until the local Postgres server is ready",
+				 "[option ...]",
+				 KEEPER_CLI_WORKER_SETUP_OPTIONS,
+				 keeper_cli_keeper_setup_getopts,
+				 keeper_cli_pgsetup_wait_until_ready);
+
+CommandLine do_pgsetup_startup_logs =
+	make_command("logs",
+				 "Outputs the Postgres startup logs",
+				 "[option ...]",
+				 KEEPER_CLI_WORKER_SETUP_OPTIONS,
+				 keeper_cli_keeper_setup_getopts,
+				 keeper_cli_pgsetup_startup_logs);
+
+CommandLine *do_pg[] = {
+	&do_pgsetup_discover,
+	&do_pgsetup_is_ready,
+	&do_pgsetup_wait_until_ready,
+	&do_pgsetup_startup_logs,
+	NULL
+};
+
+CommandLine do_pg_commands =
+	make_command_set("pgsetup",
+					 "Manage a local Postgres setup", NULL, NULL,
+					 NULL, do_pg);
 
 CommandLine *do_subcommands[] = {
 	&do_monitor_commands,
@@ -192,7 +229,7 @@ CommandLine *do_subcommands[] = {
 	&do_primary_,
 	&do_standby_,
 	&do_show_commands,
-	&do_discover,
+	&do_pg_commands,
 	NULL
 };
 
@@ -212,20 +249,22 @@ keeper_cli_keeper_setup_getopts(int argc, char **argv)
 	KeeperConfig options = { 0 };
 	int optind;
 
+	SSLCommandLineOptions sslCommandLineOptions = SSL_CLI_UNKNOWN;
+
 	static struct option long_options[] = {
 		{ "pgctl", required_argument, NULL, 'C' },
 		{ "pgdata", required_argument, NULL, 'D' },
 		{ "pghost", required_argument, NULL, 'H' },
 		{ "pgport", required_argument, NULL, 'p' },
 		{ "listen", required_argument, NULL, 'l' },
-		{ "proxyport", required_argument, NULL, 'y' },
 		{ "username", required_argument, NULL, 'U' },
 		{ "auth", required_argument, NULL, 'A' },
+		{ "skip-pg-hba", no_argument, NULL, 'S' },
 		{ "dbname", required_argument, NULL, 'd' },
 		{ "nodename", required_argument, NULL, 'n' },
 		{ "formation", required_argument, NULL, 'f' },
-		{ "group", required_argument, NULL, 'g' },
 		{ "monitor", required_argument, NULL, 'm' },
+		{ "disable-monitor", no_argument, NULL, 'M' },
 		{ "allow-removing-pgdata", no_argument, NULL, 'R' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
@@ -233,6 +272,15 @@ keeper_cli_keeper_setup_getopts(int argc, char **argv)
 		{ "help", no_argument, NULL, 'h' },
 		{ "candidate-priority", required_argument, NULL, 'P' },
 		{ "replication-quorum", required_argument, NULL, 'r' },
+		{ "run", no_argument, NULL, 'x' },
+		{ "help", no_argument, NULL, 0 },
+		{ "no-ssl", no_argument, NULL, 'N' },
+		{ "ssl-self-signed", no_argument, NULL, 's' },
+		{ "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG },
+		{ "ssl-ca-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG },
+		{ "ssl-crl-file", required_argument, &ssl_flag, SSL_CRL_FILE_FLAG },
+		{ "server-cert", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG },
+		{ "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG },
 		{ NULL, 0, NULL, 0 }
 	};
 
@@ -246,9 +294,11 @@ keeper_cli_keeper_setup_getopts(int argc, char **argv)
 	 */
 	unsetenv("POSIXLY_CORRECT");
 
-	optind = cli_create_node_getopts(argc, argv,
-									 long_options, "C:D:H:p:l:y:U:A:d:n:f:g:m:RVvqhP:r:",
-									 &options);
+	optind = cli_common_keeper_getopts(argc, argv,
+									   long_options,
+									   "C:D:H:p:l:U:A:Sd:n:f:m:MRVvqhP:r:xsN",
+									   &options,
+									   &sslCommandLineOptions);
 
 	/* publish our option parsing in the global variable */
 	keeperOptions = options;
