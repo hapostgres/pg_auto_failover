@@ -307,7 +307,7 @@ ensure_postgres_service_is_running(LocalPostgresServer *postgres)
 	int timeout = 10;       /* wait for Postgres for 10s */
 	bool pgIsRunning = pg_is_running(pgSetup->pg_ctl, pgSetup->pgdata);
 
-	log_trace("ensure_local_postgres_is_running: Postgres %s in \"%s\"",
+	log_trace("ensure_postgres_service_is_running: Postgres %s in \"%s\"",
 			  pgIsRunning ? "is running" : "is not running", pgSetup->pgdata);
 
 	/* update our data structure in-memory, then on-disk */
@@ -332,7 +332,7 @@ ensure_postgres_service_is_running(LocalPostgresServer *postgres)
 			/* update pgSetup cache with new Postgres pid and all */
 			local_postgres_init(postgres, pgSetup);
 
-			log_debug("ensure_local_postgres_is_running: Postgres is running "
+			log_debug("ensure_postgres_service_is_running: Postgres is running "
 					  "with pid %d", pgSetup->pidFile.pid);
 		}
 		else

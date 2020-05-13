@@ -115,15 +115,15 @@ cli_do_service_postgresctl_on(int argc, char **argv)
 {
 	ConfigFilePaths pathnames = { 0 };
 	LocalPostgresServer postgres = { 0 };
-	PostgresSetup pgSetup = { 0 };
+	PostgresSetup *pgSetup = &(postgres.postgresSetup);
 
-	if (!cli_common_pgsetup_init(&pathnames, &pgSetup))
+	if (!cli_common_pgsetup_init(&pathnames, pgSetup))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	(void) local_postgres_init(&postgres, &pgSetup);
+	(void) local_postgres_init(&postgres, pgSetup);
 
 	if (!ensure_postgres_service_is_running(&postgres))
 	{
@@ -131,13 +131,13 @@ cli_do_service_postgresctl_on(int argc, char **argv)
 	}
 
 	log_info("Postgres is serving PGDATA \"%s\" on port %d with pid %d",
-			 pgSetup.pgdata, pgSetup.pgport, pgSetup.pidFile.pid);
+			 pgSetup->pgdata, pgSetup->pgport, pgSetup->pidFile.pid);
 
 	if (outputJSON)
 	{
 		JSON_Value *js = json_value_init_object();
 
-		if (!pg_setup_as_json(&pgSetup, js))
+		if (!pg_setup_as_json(pgSetup, js))
 		{
 			/* can't happen */
 			exit(EXIT_CODE_INTERNAL_ERROR);
@@ -157,20 +157,20 @@ cli_do_service_postgresctl_off(int argc, char **argv)
 {
 	ConfigFilePaths pathnames = { 0 };
 	LocalPostgresServer postgres = { 0 };
-	PostgresSetup pgSetup = { 0 };
+	PostgresSetup *pgSetup = &(postgres.postgresSetup);
 
-	if (!cli_common_pgsetup_init(&pathnames, &pgSetup))
+	if (!cli_common_pgsetup_init(&pathnames, pgSetup))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	(void) local_postgres_init(&postgres, &pgSetup);
+	(void) local_postgres_init(&postgres, pgSetup);
 
 	if (!ensure_postgres_service_is_stopped(&postgres))
 	{
 		exit(EXIT_CODE_PGCTL);
 	}
 
-	log_info("Postgres has been stopped for PGDATA \"%s\"", pgSetup.pgdata);
+	log_info("Postgres has been stopped for PGDATA \"%s\"", pgSetup->pgdata);
 }
