@@ -15,7 +15,8 @@ def teardown_module():
     cluster.destroy()
 
 def test_000_create_monitor():
-    cluster.create_monitor("/tmp/update/monitor")
+    monitor = cluster.create_monitor("/tmp/update/monitor")
+    monitor.run()
 
 def test_001_update_extension():
     os.environ["PG_AUTOCTL_DEBUG"] = '1'

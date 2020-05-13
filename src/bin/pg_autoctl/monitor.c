@@ -106,6 +106,30 @@ monitor_init(Monitor *monitor, char *url)
 
 
 /*
+ * monitor_local_init initialises a Monitor struct to connect to the local
+ * monitor postgres instance, for use from the pg_autoctl instance that manages
+ * the monitor.
+ */
+bool
+monitor_local_init(Monitor *monitor)
+{
+	MonitorConfig *mconfig = &(monitor->config);
+	PostgresSetup *pgSetup = &(mconfig->pgSetup);
+	char connInfo[MAXCONNINFO] = { 0 };
+
+	pg_setup_get_local_connection_string(pgSetup, connInfo);
+
+	if (!pgsql_init(&monitor->pgsql, connInfo, PGSQL_CONN_LOCAL))
+	{
+		/* URL must be invalid, pgsql_init logged an error */
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
  * monitor_get_nodes gets the hostname and port of all the nodes in the given
  * group.
  */

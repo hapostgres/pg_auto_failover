@@ -24,6 +24,7 @@
 #include "monitor.h"
 #include "monitor_config.h"
 #include "service.h"
+#include "service_monitor.h"
 #include "service_postgres_ctl.h"
 #include "signals.h"
 #include "supervisor.h"
@@ -36,6 +37,8 @@ static void cli_do_service_postgresctl_on(int argc, char **argv);
 static void cli_do_service_postgresctl_off(int argc, char **argv);
 
 static void cli_do_service_restart_postgres(int argc, char **argv);
+
+static void cli_do_service_monitor(int argc, char **argv);
 
 CommandLine service_getpid =
 	make_command("getpid",
@@ -53,6 +56,7 @@ CommandLine service_pgcontroller =
 				 cli_getopt_pgdata,
 				 cli_do_service_pgcontroller);
 
+
 CommandLine service_postgres =
 	make_command("postgres",
 				 "pg_autoctl service that start/stop postgres when asked",
@@ -60,6 +64,14 @@ CommandLine service_postgres =
 				 CLI_PGDATA_OPTION,
 				 cli_getopt_pgdata,
 				 cli_do_service_postgres);
+
+CommandLine service_monitor =
+	make_command("monitor",
+				 "pg_autoctl service that listens to the monitor notifications",
+				 CLI_PGDATA_USAGE,
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
+				 cli_do_service_monitor);
 
 CommandLine service_restart_postgres =
 	make_command("postgres",
@@ -84,6 +96,7 @@ static CommandLine *service[] = {
 	&service_getpid,
 	&service_pgcontroller,
 	&service_postgres,
+	&service_monitor,
 	NULL
 };
 
@@ -236,8 +249,7 @@ cli_do_service_pgcontroller(int argc, char **argv)
 		"postgres",
 		RP_PERMANENT,
 		-1,
-		&service_postgres_ctl_start,
-		(void *) &(postgres.postgresSetup)
+		&service_postgres_ctl_start
 	};
 
 	int subprocessesCount = sizeof(subprocesses) / sizeof(subprocesses[0]);
@@ -362,4 +374,39 @@ cli_do_service_postgresctl_off(int argc, char **argv)
 	}
 
 	log_info("Postgres has been stopped for PGDATA \"%s\"", pgSetup->pgdata);
+}
+
+
+/*
+ * cli_do_service_monitor starts the monitor service.
+ */
+static void
+cli_do_service_monitor(int argc, char **argv)
+{
+	KeeperConfig options = keeperOptions;
+
+	Monitor monitor = { 0 };
+	bool missingPgdataIsOk = false;
+	bool pgIsNotRunningIsOk = true;
+
+	bool exitOnQuit = true;
+
+	/* Establish a handler for signals. */
+	(void) set_signal_handlers(exitOnQuit);
+
+	/* Prepare MonitorConfig from the CLI options fed in options */
+	if (!monitor_config_init_from_pgsetup(&(monitor.config),
+										  &options.pgSetup,
+										  missingPgdataIsOk,
+										  pgIsNotRunningIsOk))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_PGCTL);
+	}
+
+	/* display a user-friendly process name */
+	(void) set_ps_title("pg_autoctl: monitor listener");
+
+	/* Start the monitor service */
+	(void) monitor_service_run(&monitor);
 }

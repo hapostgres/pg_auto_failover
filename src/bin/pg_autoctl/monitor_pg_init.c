@@ -24,7 +24,11 @@
 #include "pgsetup.h"
 #include "pgsql.h"
 #include "primary_standby.h"
-
+#include "service.h"
+#include "service_monitor.h"
+#include "service_monitor_init.h"
+#include "service_postgres.h"
+#include "signals.h"
 
 /*
  * Default settings for PostgreSQL instance when running the pg_auto_failover
@@ -54,8 +58,6 @@ GUC monitor_default_settings[] = {
 };
 
 
-static bool monitor_install(const char *nodename,
-							PostgresSetup pgSetupOption, bool checkSettings);
 static bool check_monitor_settings(PostgresSetup pgSetup);
 
 
@@ -87,54 +89,28 @@ monitor_pg_init(Monitor *monitor)
 
 		if (pg_setup_is_running(&existingPgSetup))
 		{
-			log_info("Installing pg_auto_failover monitor in existing "
-					 "PostgreSQL instance at \"%s\" running on port %d",
-					 pgSetup->pgdata, existingPgSetup.pidFile.port);
+			log_error("Installing pg_auto_failover monitor in existing "
+					  "PostgreSQL instance at \"%s\" running on port %d "
+					  "is not supported.",
+					  pgSetup->pgdata, existingPgSetup.pidFile.port);
 
-			if (!monitor_install(config->nodename, existingPgSetup, true))
-			{
-				log_fatal("Failed to install pg_auto_failover monitor, "
-						  "see above for details");
-				return false;
-			}
-
-			/* and we're done now! */
-			return true;
-		}
-
-		if (pg_setup_pgdata_exists(&existingPgSetup))
-		{
-			log_fatal("PGDATA directory \"%s\" already exists, skipping",
-					  pgSetup->pgdata);
 			return false;
 		}
 	}
-
-	if (!pg_ctl_initdb(pgSetup->pg_ctl, pgSetup->pgdata))
+	else
 	{
-		log_fatal("Failed to initialise a PostgreSQL instance at \"%s\", "
-				  "see above for details", pgSetup->pgdata);
-		return false;
+		if (!pg_ctl_initdb(pgSetup->pg_ctl, pgSetup->pgdata))
+		{
+			log_fatal("Failed to initialise a PostgreSQL instance at \"%s\", "
+					  "see above for details", pgSetup->pgdata);
+			return false;
+		}
 	}
 
 	if (!monitor_add_postgres_default_settings(monitor))
 	{
 		log_fatal("Failed to initialize our Postgres settings, "
 				  "see above for details");
-		return false;
-	}
-
-	if (!pg_ctl_start(pgSetup->pg_ctl,
-					  pgSetup->pgdata,
-					  pgSetup->pgport,
-					  pgSetup->listen_addresses))
-	{
-		log_error("Failed to start postgres, see above");
-		return false;
-	}
-
-	if (!monitor_install(config->nodename, *pgSetup, false))
-	{
 		return false;
 	}
 
@@ -156,7 +132,7 @@ monitor_install(const char *nodename,
 {
 	PostgresSetup pgSetup = { 0 };
 	bool missingPgdataIsOk = false;
-	bool pgIsNotRunningIsOk = false;
+	bool pgIsNotRunningIsOk = true;
 	LocalPostgresServer postgres = { 0 };
 	char connInfo[MAXCONNINFO];
 
@@ -176,7 +152,14 @@ monitor_install(const char *nodename,
 		exit(EXIT_CODE_PGCTL);
 	}
 
-	local_postgres_init(&postgres, &pgSetup);
+	(void) local_postgres_init(&postgres, &pgSetup);
+
+	if (!ensure_local_postgres_is_running(&postgres))
+	{
+		log_error("Failed to install pg_auto_failover in the the monitor's "
+				  "Postgres database, see above for details");
+		return false;
+	}
 
 	if (!pgsql_create_user(&postgres.sqlClient, PG_AUTOCTL_MONITOR_DBOWNER,
 

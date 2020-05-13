@@ -22,6 +22,7 @@ def test_000_create_monitor():
     monitor = cluster.create_monitor("/tmp/ssl-self-signed/monitor",
                                      sslSelfSigned=True)
 
+    monitor.run()
     monitor.wait_until_pg_is_running()
     monitor.check_ssl("on", "require")
 

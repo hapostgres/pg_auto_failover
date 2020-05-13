@@ -30,17 +30,18 @@
 #include "monitor.h"
 #include "monitor_config.h"
 #include "monitor_pg_init.h"
-#include "monitor_service.h"
 #include "pgctl.h"
 #include "primary_standby.h"
 #include "service.h"
+#include "service_monitor.h"
+#include "service_monitor_init.h"
 #include "string_utils.h"
 
 /*
  * Global variables that we're going to use to "communicate" in between getopts
  * functions and their command implementation. We can't pass parameters around.
  */
-MonitorConfig monitorOptions;
+MonitorConfig monitorOptions = { 0 };
 static bool dropAndDestroy = false;
 
 static int cli_create_postgres_getopts(int argc, char **argv);
@@ -649,48 +650,23 @@ cli_create_monitor_getopts(int argc, char **argv)
 
 
 /*
- * Initialize the PostgreSQL instance that we're using for the Monitor:
- *
- *  - pg_ctl initdb
- *  - add postgresql-citus.conf to postgresql.conf
- *  - pg_ctl start
- *  - create user autoctl with createdb login;
- *  - create database pg_auto_failover with owner autoctl;
- *  - create extension pgautofailover;
- *
- * When this function is called (from monitor_config_init at the CLI level), we
- * know that PGDATA has been initdb already, and that's about it.
- *
+ * cli_create_monitor_config takes care of the monitor configuration, either
+ * creating it from scratch or merging the pg_autoctl create monitor command
+ * line arguments and options with the pre-existing configuration file (for
+ * when people change their mind or fix an error in the previous command).
  */
-static void
-cli_create_monitor(int argc, char **argv)
+static bool
+cli_create_monitor_config(Monitor *monitor, MonitorConfig *config)
 {
-	Monitor monitor = { 0 };
-	MonitorConfig *config = &(monitor.config);
-	char connInfo[MAXCONNINFO];
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
 
-	*config = monitorOptions;
-
-	/*
-	 * We support two modes of operations here:
-	 *   - configuration exists already, we need PGDATA
-	 *   - configuration doesn't exist already, we need PGDATA, and more
-	 */
-	if (!monitor_config_set_pathnames_from_pgdata(config))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_ARGS);
-	}
-
 	if (file_exists(config->pathnames.config))
 	{
-		MonitorConfig options = *config;
+		MonitorConfig options = monitor->config;
 
 		if (!monitor_config_read_file(config,
-									  missingPgdataIsOk,
-									  pgIsNotRunningIsOk))
+									  missingPgdataIsOk, pgIsNotRunningIsOk))
 		{
 			log_fatal("Failed to read configuration file \"%s\"",
 					  config->pathnames.config);
@@ -753,8 +729,55 @@ cli_create_monitor(int argc, char **argv)
 		}
 	}
 
-	pg_setup_get_local_connection_string(&(config->pgSetup), connInfo);
-	monitor_init(&monitor, connInfo);
+	return true;
+}
+
+
+/*
+ * Initialize the PostgreSQL instance that we're using for the Monitor:
+ *
+ *  - pg_ctl initdb
+ *  - add postgresql-citus.conf to postgresql.conf
+ *  - pg_ctl start
+ *  - create user autoctl with createdb login;
+ *  - create database pg_auto_failover with owner autoctl;
+ *  - create extension pgautofailover;
+ *
+ * When this function is called (from monitor_config_init at the CLI level), we
+ * know that PGDATA has been initdb already, and that's about it.
+ *
+ */
+static void
+cli_create_monitor(int argc, char **argv)
+{
+	Monitor monitor = { 0 };
+	MonitorConfig *config = &(monitor.config);
+
+	monitor.config = monitorOptions;
+
+	/*
+	 * We support two modes of operations here:
+	 *   - configuration exists already, we need PGDATA
+	 *   - configuration doesn't exist already, we need PGDATA, and more
+	 */
+	if (!monitor_config_set_pathnames_from_pgdata(config))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (!cli_create_monitor_config(&monitor, config))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	/* Initialize our local connection to the monitor */
+	if (!monitor_local_init(&monitor))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_MONITOR);
+	}
 
 	/* Ok, now we know we have a configuration file, and it's been loaded. */
 	if (!monitor_pg_init(&monitor))
@@ -763,29 +786,10 @@ cli_create_monitor(int argc, char **argv)
 		exit(EXIT_CODE_BAD_STATE);
 	}
 
-	log_info("Monitor has been succesfully initialized.");
-
-	if (createAndRun)
+	if (!service_monitor_init(&monitor))
 	{
-		pid_t pid = 0;
-
-		if (!monitor_service_init(config, &pid))
-		{
-			log_fatal("Failed to initialize pg_auto_failover service, "
-					  "see above for details");
-			exit(EXIT_CODE_INTERNAL_ERROR);
-		}
-
-		(void) monitor_service_run(&monitor, pid);
-	}
-	else
-	{
-		char postgresUri[MAXCONNINFO];
-
-		if (monitor_config_get_postgres_uri(config, postgresUri, MAXCONNINFO))
-		{
-			log_info("pg_auto_failover monitor is ready at %s", postgresUri);
-		}
+		/* errors have been logged */
+		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 }
 
