@@ -574,6 +574,7 @@ read_pg_pidfile(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk, int maxRetries)
 				return false;
 			}
 
+			/* a standalone backend pid is negative, we signal the actual pid */
 			pgSetup->pidFile.pid = abs(pid);
 
 			if (kill(pgSetup->pidFile.pid, 0) != 0)

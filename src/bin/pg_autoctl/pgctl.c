@@ -936,6 +936,12 @@ pg_log_startup(const char *pgdata, int logLevel)
 	/* logLevel to use when introducing which file path logs come from */
 	int pathLogLevel = logLevel <= LOG_DEBUG ? LOG_DEBUG : LOG_WARN;
 
+	struct stat pgStartupStat;
+	int64_t pgStartupMtime = 0;
+
+	DIR *logDir = NULL;
+	struct dirent *logFileDirEntry = NULL;
+
 	/* prepare startup.log file in PGDATA */
 	join_path_components(pgStartupPath, pgdata, "startup.log");
 
@@ -970,93 +976,90 @@ pg_log_startup(const char *pgdata, int logLevel)
 	/* prepare PGDATA/log directory path */
 	join_path_components(pgLogDirPath, pgdata, "log");
 
-	if (directory_exists(pgLogDirPath))
+	if (!directory_exists(pgLogDirPath))
 	{
-		struct stat pgStartupStat;
-		int64_t pgStartupMtime = 0;
+		/* then there's no other log files to process here */
+		return true;
+	}
 
-		DIR *logDir = NULL;
-		struct dirent *logFileDirEntry = NULL;
+	/* get the time of last modification of the startup.log file */
+	if (lstat(pgStartupPath, &pgStartupStat) != 0)
+	{
+		log_error("Failed to get file information for \"%s\": %m",
+				  pgStartupPath);
+		return false;
+	}
+	pgStartupMtime = ST_MTIME_S(pgStartupStat);
 
-		/* get the time of last modification of the startup.log file */
-		if (lstat(pgStartupPath, &pgStartupStat) != 0)
+	/* open and scan through the Postgres log directory */
+	logDir = opendir(pgLogDirPath);
+
+	if (logDir == NULL)
+	{
+		log_error("Failed to open Postgres log directory \"%s\": %m",
+				  pgLogDirPath);
+		return false;
+	}
+
+	while ((logFileDirEntry = readdir(logDir)) != NULL)
+	{
+		char pgLogFilePath[MAXPGPATH] = { 0 };
+		struct stat pgLogFileStat;
+		int64_t pgLogFileMtime = 0;
+
+		/* our logFiles are regular files, skip . and .. and others */
+		if (logFileDirEntry->d_type != DT_REG)
+		{
+			continue;
+		}
+
+		/* build the absolute file path for the logfile */
+		join_path_components(pgLogFilePath,
+							 pgLogDirPath,
+							 logFileDirEntry->d_name);
+
+		/* get the file information for the current logFile */
+		if (lstat(pgLogFilePath, &pgLogFileStat) != 0)
 		{
 			log_error("Failed to get file information for \"%s\": %m",
-					  pgStartupPath);
+					  pgLogFilePath);
 			return false;
 		}
-		pgStartupMtime = ST_MTIME_S(pgStartupStat);
+		pgLogFileMtime = ST_MTIME_S(pgLogFileStat);
 
-		/* open and scan through the Postgres log directory */
-		logDir = opendir(pgLogDirPath);
-
-		if (logDir == NULL)
+		/*
+		 * Compare modification times and only add to our logs the content
+		 * from the Postgres log file that was created after the
+		 * startup.log file.
+		 */
+		if (pgLogFileMtime >= pgStartupMtime)
 		{
-			log_error("Failed to open Postgres log directory \"%s\": %m",
-					  pgLogDirPath);
-			return false;
-		}
+			char *fileContents;
+			long fileSize;
 
-		while ((logFileDirEntry = readdir(logDir)) != NULL)
-		{
-			char pgLogFilePath[MAXPGPATH] = { 0 };
-			struct stat pgLogFileStat;
-			int64_t pgLogFileMtime = 0;
+			log_level(pathLogLevel,
+					  "Postgres logs from \"%s\":", pgLogFilePath);
 
-			/* our logFiles are regular files, skip . and .. and others */
-			if (logFileDirEntry->d_type != DT_REG)
+			if (read_file(pgLogFilePath, &fileContents, &fileSize) &&
+				fileSize > 0)
 			{
-				continue;
-			}
+				char *lines[BUFSIZE];
+				int lineCount = splitLines(fileContents, lines, BUFSIZE);
+				int lineNumber = 0;
 
-			/* build the absolute file path for the logfile */
-			join_path_components(pgLogFilePath,
-								 pgLogDirPath,
-								 logFileDirEntry->d_name);
-
-			/* get the file information for the current logFile */
-			if (lstat(pgLogFilePath, &pgLogFileStat) != 0)
-			{
-				log_error("Failed to get file information for \"%s\": %m",
-						  pgLogFilePath);
-				return false;
-			}
-			pgLogFileMtime = ST_MTIME_S(pgLogFileStat);
-
-			/*
-			 * Compare modification times and only add to our logs the content
-			 * from the Postgres log file that was created after the
-			 * startup.log file.
-			 */
-			if (pgLogFileMtime >= pgStartupMtime)
-			{
-				char *fileContents;
-				long fileSize;
-
-				log_level(pathLogLevel,
-						  "Postgres logs from \"%s\":", pgLogFilePath);
-
-				if (read_file(pgLogFilePath, &fileContents, &fileSize) &&
-					fileSize > 0)
+				for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
 				{
-					char *lines[BUFSIZE];
-					int lineCount = splitLines(fileContents, lines, BUFSIZE);
-					int lineNumber = 0;
-
-					for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
+					if (strstr(lines[lineNumber], "FATAL") != NULL)
 					{
-						if (strstr(lines[lineNumber], "FATAL") != NULL)
-						{
-							log_fatal("%s", lines[lineNumber]);
-						}
-						else if (strstr(lines[lineNumber], "ERROR") != NULL)
-						{
-							log_error("%s", lines[lineNumber]);
-						}
-						else
-						{
-							log_level(logLevel, "%s", lines[lineNumber]);
-						}
+						log_fatal("%s", lines[lineNumber]);
+					}
+					else if (strstr(lines[lineNumber], "ERROR") != NULL)
+					{
+						log_error("%s", lines[lineNumber]);
+					}
+					else
+					{
+						log_level(logLevel, "%s", lines[lineNumber]);
 					}
 				}
 			}

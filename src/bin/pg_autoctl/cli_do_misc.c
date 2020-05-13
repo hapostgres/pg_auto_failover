@@ -253,7 +253,7 @@ keeper_cli_pgsetup_is_ready(int argc, char **argv)
 		exit(EXIT_CODE_PGCTL);
 	}
 
-	log_debug("Initialized pgSetup, now calling pg_setup_wait_until_is_ready()");
+	log_debug("Initialized pgSetup, now calling pg_setup_is_ready()");
 
 	pgIsReady = pg_setup_is_ready(&pgSetup, pgIsNotRunningIsOk);
 
@@ -310,7 +310,7 @@ keeper_cli_pgsetup_startup_logs(int argc, char **argv)
 		exit(EXIT_CODE_PGCTL);
 	}
 
-	log_debug("Initialized pgSetup, now calling pg_setup_wait_until_is_ready()");
+	log_debug("Initialized pgSetup, now calling pg_log_startup()");
 
 	if (!pg_log_startup(pgSetup.pgdata, LOG_INFO))
 	{
