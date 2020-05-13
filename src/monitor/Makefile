@@ -24,8 +24,15 @@ USE_PGXS = 1
 
 DEFAULT_CFLAGS = -std=c99 -D_GNU_SOURCE -g
 DEFAULT_CFLAGS += $(shell $(PG_CONFIG) --cflags)
+DEFAULT_CFLAGS += -Wformat
+DEFAULT_CFLAGS += -Wall
+DEFAULT_CFLAGS += -Werror=implicit-int
+DEFAULT_CFLAGS += -Werror=implicit-function-declaration
+DEFAULT_CFLAGS += -Werror=return-type
 DEFAULT_CFLAGS += -Wno-declaration-after-statement
 
+# Needed for OSX
+DEFAULT_CFLAGS += -Wno-missing-braces
 override CFLAGS := $(DEFAULT_CFLAGS) $(CFLAGS)
 
 include $(PGXS)
