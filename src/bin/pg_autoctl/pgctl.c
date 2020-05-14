@@ -52,6 +52,15 @@ static bool prepare_guc_settings_from_pgsetup(const char *configFilePath,
 											  GUC *settings,
 											  PostgresSetup *pgSetup);
 static void log_program_output(Program prog, int outLogLevel, int errorLogLevel);
+
+
+static bool prepare_recovery_settings(const char *pgdata,
+									  ReplicationSource *replicationSource,
+									  GUC *recovery_settings,
+									  char *primaryConnInfo,
+									  char *primarySlotName,
+									  char *targetLSN);
+
 static bool escape_recovery_conf_string(char *destination,
 										int destinationSize,
 										const char *recoveryConfString);
@@ -67,13 +76,9 @@ static bool prepare_primary_conninfo(char *primaryConnInfo,
 static bool prepare_conninfo_sslmode(PQExpBuffer buffer, SSLOptions sslOptions);
 
 static bool pg_write_recovery_conf(const char *pgdata,
-								   const char *primaryConnInfo,
-								   const char *replicationSlotName,
-								   const char *replicationTargetLSN);
+								   ReplicationSource *replicationSource);
 static bool pg_write_standby_signal(const char *pgdata,
-									const char *primaryConnInfo,
-									const char *replicationSlotName,
-									const char *replicationTargetLSN);
+									ReplicationSource *replicationSource);
 
 
 /*
@@ -514,7 +519,8 @@ prepare_guc_settings_from_pgsetup(const char *configFilePath,
 
 			appendPQExpBufferStr(config, "'\n");
 		}
-		else if (setting->value != NULL)
+		else if (setting->value != NULL &&
+				 !IS_EMPTY_STRING_BUFFER(setting->value))
 		{
 			appendPQExpBuffer(config, "%s = %s\n",
 							  setting->name,
@@ -522,9 +528,17 @@ prepare_guc_settings_from_pgsetup(const char *configFilePath,
 		}
 		else
 		{
-			log_error("BUG: GUC setting \"%s\" has a NULL value", setting->name);
-			destroyPQExpBuffer(config);
-			return false;
+			/*
+			 * Our GUC entry has a NULL (or empty) value. Skip the setting.
+			 *
+			 * In cases that's expected, such as when removing primary_conninfo
+			 * from the recovery.conf settings so that we disconnect from the
+			 * primary node being demoted.
+			 *
+			 * Still log about it, in case it might happen when it's not
+			 * expected.
+			 */
+			log_debug("GUC setting \"%s\" has a NULL value", setting->name);
 		}
 	}
 
@@ -1237,26 +1251,6 @@ pg_setup_standby_mode(uint32_t pg_control_version,
 					  const char *pgdata,
 					  ReplicationSource *replicationSource)
 {
-	NodeAddress *primaryNode = &(replicationSource->primaryNode);
-	char primaryConnInfo[MAXCONNINFO] = { 0 };
-	bool escape = true;
-
-	/* we ignore the length returned by prepare_primary_conninfo... */
-	if (!prepare_primary_conninfo(primaryConnInfo,
-								  MAXCONNINFO,
-								  primaryNode->host,
-								  primaryNode->port,
-								  replicationSource->userName,
-								  NULL, /* no database */
-								  replicationSource->password,
-								  replicationSource->applicationName,
-								  replicationSource->sslOptions,
-								  escape))
-	{
-		/* errors have already been logged. */
-		return false;
-	}
-
 	if (pg_control_version < 1000)
 	{
 		log_fatal("pg_auto_failover does not support PostgreSQL before "
@@ -1265,6 +1259,11 @@ pg_setup_standby_mode(uint32_t pg_control_version,
 				  pg_control_version, pgdata);
 		return false;
 	}
+
+	/*
+	 * And now that the settings themselved are ready, we have more code that
+	 * depends on Postgres version to handle the recovery settings.
+	 */
 	if (pg_control_version < 1200)
 	{
 		/*
@@ -1273,10 +1272,7 @@ pg_setup_standby_mode(uint32_t pg_control_version,
 		 * Controling whether the server would start in PITR or standby mode
 		 * was controlled by a setting in the recovery.conf file.
 		 */
-		return pg_write_recovery_conf(pgdata,
-									  primaryConnInfo,
-									  replicationSource->slotName,
-									  replicationSource->targetLSN);
+		return pg_write_recovery_conf(pgdata, replicationSource);
 	}
 	else
 	{
@@ -1285,10 +1281,7 @@ pg_setup_standby_mode(uint32_t pg_control_version,
 		 * the main postgresql.conf file and create an empty standby.signal
 		 * file to trigger starting the server in standby mode.
 		 */
-		return pg_write_standby_signal(pgdata,
-									   primaryConnInfo,
-									   replicationSource->slotName,
-									   replicationSource->targetLSN);
+		return pg_write_standby_signal(pgdata, replicationSource);
 	}
 }
 
@@ -1298,55 +1291,286 @@ pg_setup_standby_mode(uint32_t pg_control_version,
  * directory with the given primary connection info and replication slot name.
  */
 static bool
-pg_write_recovery_conf(const char *pgdata,
-					   const char *primaryConnInfo,
-					   const char *replicationSlotName,
-					   const char *replicationTargetLSN)
+pg_write_recovery_conf(const char *pgdata, ReplicationSource *replicationSource)
 {
 	char recoveryConfPath[MAXPGPATH];
-	PQExpBuffer content = NULL;
 
-	log_trace("pg_write_recovery_conf");
+	/* prepare storage areas for parameters */
+	char primaryConnInfo[MAXCONNINFO] = { 0 };
+	char primarySlotName[MAXCONNINFO] = { 0 };
+	char targetLSN[PG_LSN_MAXLENGTH] = { 0 };
 
-	/* build the contents of recovery.conf */
-	content = createPQExpBuffer();
-	appendPQExpBuffer(content, "standby_mode = 'on'");
-	appendPQExpBuffer(content, "\nprimary_conninfo = %s", primaryConnInfo);
-	appendPQExpBuffer(content, "\nprimary_slot_name = '%s'", replicationSlotName);
-	appendPQExpBuffer(content, "\nrecovery_target_timeline = 'latest'");
+	GUC recoverySettingsStandby[] = {
+		{ "standby_mode", "'on'" },
+		{ "primary_conninfo", (char *) primaryConnInfo },
+		{ "primary_slot_name", (char *) primarySlotName },
+		{ "recovery_target_timeline", "'latest'" },
+		{ NULL, NULL }
+	};
 
-	if (!IS_EMPTY_STRING_BUFFER(replicationTargetLSN))
-	{
-		appendPQExpBuffer(content,
-						  "\nrecovery_target_lsn = '%s'",
-						  replicationTargetLSN);
-		appendPQExpBuffer(content, "\nrecovery_target_inclusive = 'true'");
-		appendPQExpBuffer(content, "\nrecovery_target_action = 'pause'");
-	}
+	GUC recoverySettingsTargetLSN[] = {
+		{ "standby_mode", "'on'" },
+		{ "primary_conninfo", (char *) primaryConnInfo },
+		{ "primary_slot_name", (char *) primarySlotName },
+		{ "recovery_target_timeline", "'latest'" },
+		{ "recovery_target_lsn", (char *) targetLSN },
+		{ "recovery_target_inclusive", "'true'" },
+		{ "recovery_target_action", "'pause'" },
+		{ NULL, NULL }
+	};
 
-	appendPQExpBuffer(content, "\n");
-
-	/* memory allocation could have failed while building string */
-	if (PQExpBufferBroken(content))
-	{
-		log_error("Failed to allocate memory");
-		destroyPQExpBuffer(content);
-		return false;
-	}
+	GUC *recoverySettings =
+		IS_EMPTY_STRING_BUFFER(replicationSource->targetLSN)
+		? recoverySettingsStandby
+		: recoverySettingsTargetLSN;
 
 	join_path_components(recoveryConfPath, pgdata, "recovery.conf");
 
 	log_info("Writing recovery configuration to \"%s\"", recoveryConfPath);
-	log_debug("%s:\n%s", recoveryConfPath, content->data);
 
-	if (!write_file(content->data, content->len, recoveryConfPath))
+	if (!prepare_recovery_settings(pgdata,
+								   replicationSource,
+								   recoverySettings,
+								   primaryConnInfo,
+								   primarySlotName,
+								   targetLSN))
 	{
-		/* write_file logs I/O error */
-		destroyPQExpBuffer(content);
+		/* errors have already been logged */
 		return false;
 	}
 
-	destroyPQExpBuffer(content);
+	return ensure_default_settings_file_exists(recoveryConfPath,
+											   recoverySettings,
+											   NULL);
+}
+
+
+/*
+ * pg_write_standby_signal writes the ${PGDATA}/standby.signal file that is in
+ * use starting with Postgres 12 for starting a standby server. The file only
+ * needs to exists, and the setup is to be found in the main Postgres
+ * configuration file.
+ */
+static bool
+pg_write_standby_signal(const char *pgdata,
+						ReplicationSource *replicationSource)
+{
+	char standbyConfigFilePath[MAXPGPATH] = { 0 };
+	char signalFilePath[MAXPGPATH] = { 0 };
+	char configFilePath[MAXPGPATH] = { 0 };
+
+	/* prepare storage areas for parameters */
+	char primaryConnInfo[MAXCONNINFO] = { 0 };
+	char primarySlotName[MAXCONNINFO] = { 0 };
+	char targetLSN[PG_LSN_MAXLENGTH] = { 0 };
+
+	GUC recoverySettingsStandby[] = {
+		{ "primary_conninfo", (char *) primaryConnInfo },
+		{ "primary_slot_name", (char *) primarySlotName },
+		{ "recovery_target_timeline", "'latest'" },
+		{ NULL, NULL }
+	};
+
+	GUC recoverySettingsTargetLSN[] = {
+		{ "primary_conninfo", (char *) primaryConnInfo },
+		{ "primary_slot_name", (char *) primarySlotName },
+		{ "recovery_target_timeline", "'latest'" },
+		{ "recovery_target_lsn", (char *) targetLSN },
+		{ "recovery_target_inclusive", "'true'" },
+		{ "recovery_target_action", "'pause'" },
+		{ NULL, NULL }
+	};
+
+	GUC *recoverySettings =
+		IS_EMPTY_STRING_BUFFER(replicationSource->targetLSN)
+		? recoverySettingsStandby
+		: recoverySettingsTargetLSN;
+
+	log_trace("pg_write_standby_signal");
+
+	if (!prepare_recovery_settings(pgdata,
+								   replicationSource,
+								   recoverySettings,
+								   primaryConnInfo,
+								   primarySlotName,
+								   targetLSN))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/* set our configuration file paths, all found in PGDATA */
+	join_path_components(signalFilePath, pgdata, "standby.signal");
+	join_path_components(configFilePath, pgdata, "postgresql.conf");
+	join_path_components(standbyConfigFilePath,
+						 pgdata,
+						 AUTOCTL_STANDBY_CONF_FILENAME);
+
+	/*
+	 * First install the standby.signal file, so that if there's a problem
+	 * later and Postgres is started, it is started as a standby, with missing
+	 * configuration.
+	 */
+
+	/* only logs about this the first time */
+	if (!file_exists(signalFilePath))
+	{
+		log_info("Creating the standby signal file at \"%s\", "
+				 "and replication setup at \"%s\"",
+				 signalFilePath, standbyConfigFilePath);
+	}
+
+	if (!write_file("", 0, signalFilePath))
+	{
+		/* write_file logs I/O error */
+		return false;
+	}
+
+	/*
+	 * Now write the standby settings to postgresql-auto-failover-standby.conf
+	 * and include that file from postgresql.conf.
+	 *
+	 * we pass NULL as pgSetup because we know it won't be used...
+	 */
+	if (!ensure_default_settings_file_exists(standbyConfigFilePath,
+											 recoverySettings,
+											 NULL))
+	{
+		return false;
+	}
+
+	/*
+	 * We successfully created the standby.signal file, so Postgres will start
+	 * as a standby. If we fail to install the standby settings, then we return
+	 * false here and let the main loop try again. At least Postgres won't
+	 * start as a cloned single accepting writes.
+	 */
+	if (!pg_include_config(configFilePath,
+						   AUTOCTL_SB_CONF_INCLUDE_LINE,
+						   AUTOCTL_CONF_INCLUDE_COMMENT))
+	{
+		log_error("Failed to prepare \"%s\" with standby settings",
+				  standbyConfigFilePath);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * pgctl_prepare_recovery_config prepares a GUC structure with the settings
+ * that we need to install in either recovery.conf or our own
+ * postgresql-auto-failover-standby.conf depending on the Postgres major
+ * version.
+ */
+static bool
+prepare_recovery_settings(const char *pgdata,
+						  ReplicationSource *replicationSource,
+						  GUC *recovery_settings,
+						  char *primaryConnInfo,
+						  char *primarySlotName,
+						  char *targetLSN)
+{
+	bool escape = true;
+	NodeAddress *primaryNode = &(replicationSource->primaryNode);
+
+	/* when reaching REPORT_LSN we set recovery with no primary conninfo */
+	if (!IS_EMPTY_STRING_BUFFER(primaryNode->host))
+	{
+		/* we ignore the length returned by prepare_primary_conninfo... */
+		if (!prepare_primary_conninfo(primaryConnInfo,
+									  MAXCONNINFO,
+									  primaryNode->host,
+									  primaryNode->port,
+									  replicationSource->userName,
+									  NULL, /* no database */
+									  replicationSource->password,
+									  replicationSource->applicationName,
+									  replicationSource->sslOptions,
+									  escape))
+		{
+			/* errors have already been logged. */
+			return false;
+		}
+	}
+
+	/*
+	 * In-place edit quotedLSN and quotedSlotName to their expected value, and
+	 * pick either standby_settings or fetch_missing_wal_settings depending on
+	 * replicationTargetLSN being in use or not.
+	 *
+	 * When replicationTargetLSN is in use, we are in the middle of a failover
+	 * operation where the candidate node needs to be fetching some missing WAL
+	 * bytes from another standby node before it can get promoted.
+	 */
+	if (!IS_EMPTY_STRING_BUFFER(replicationSource->slotName))
+	{
+		sformat(primarySlotName, MAXCONNINFO, "'%s'",
+				replicationSource->slotName);
+	}
+
+	if (!IS_EMPTY_STRING_BUFFER(replicationSource->targetLSN))
+	{
+		sformat(targetLSN, PG_LSN_MAXLENGTH, "'%s'",
+				replicationSource->targetLSN);
+	}
+
+	return true;
+}
+
+
+/*
+ * pg_cleanup_standby_mode cleans-up the replication settings for the local
+ * instance of Postgres found at pgdata.
+ *
+ *  - remove either recovery.conf or standby.signal
+ *
+ *  - when using Postgres 12 also make postgresql-auto-failover-standby.conf an
+ *    empty file, so that we can still include it, but it has no effect.
+ */
+bool
+pg_cleanup_standby_mode(uint32_t pg_control_version,
+						const char *pg_ctl,
+						const char *pgdata,
+						PGSQL *pgsql)
+{
+	if (pg_control_version < 1200)
+	{
+		char recoveryConfPath[MAXPGPATH];
+
+		join_path_components(recoveryConfPath, pgdata, "recovery.conf");
+
+		if (!unlink_file(recoveryConfPath))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+	}
+	else
+	{
+		char standbyConfigFilePath[MAXPGPATH];
+		char signalFilePath[MAXPGPATH];
+
+		join_path_components(signalFilePath, pgdata, "standby.signal");
+		join_path_components(standbyConfigFilePath,
+							 pgdata,
+							 AUTOCTL_STANDBY_CONF_FILENAME);
+
+		if (!unlink_file(signalFilePath))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
+		/* empty out the standby configuration file */
+		if (!write_file("", 0, standbyConfigFilePath))
+		{
+			/* write_file logs I/O error */
+			return false;
+		}
+	}
+
 	return true;
 }
 
@@ -1532,183 +1756,6 @@ prepare_conninfo_sslmode(PQExpBuffer buffer, SSLOptions sslOptions)
 		else
 		{
 			appendPQExpBuffer(buffer, " sslrootcert=%s", sslOptions.caFile);
-		}
-	}
-
-	return true;
-}
-
-
-/*
- * pg_write_standby_signal writes the ${PGDATA}/standby.signal file that is in
- * use starting with Postgres 12 for starting a standby server. The file only
- * needs to exists, and the setup is to be found in the main Postgres
- * configuration file.
- */
-static bool
-pg_write_standby_signal(const char *pgdata,
-						const char *primaryConnInfo,
-						const char *replicationSlotName,
-						const char *replicationTargetLSN)
-{
-	char quotedLSN[BUFSIZE] = { 0 };
-	char quotedSlotName[BUFSIZE] = { 0 };
-
-	GUC standby_settings[] = {
-		{ "primary_conninfo", (char *) primaryConnInfo },
-		{ "primary_slot_name", (char *) quotedSlotName },
-		{ "recovery_target_timeline", "'latest'" },
-		{ NULL, NULL }
-	};
-
-	GUC fetch_missing_wal_settings[] = {
-		{ "primary_conninfo", (char *) primaryConnInfo },
-		{ "primary_slot_name", (char *) quotedSlotName },
-		{ "recovery_target_timeline", "'latest'" },
-		{ "recovery_target_lsn", (char *) quotedLSN },
-		{ "recovery_target_inclusive", "'true'" },
-		{ "recovery_target_action", "'pause'" },
-		{ NULL, NULL }
-	};
-
-	/* either standby_settings or fetch_missing_wal_settings */
-	GUC *recovery_settings = NULL;
-
-	char standbyConfigFilePath[MAXPGPATH] = { 0 };
-	char signalFilePath[MAXPGPATH] = { 0 };
-	char configFilePath[MAXPGPATH] = { 0 };
-
-	log_trace("pg_write_standby_signal");
-
-	/* set our configuration file paths, all found in PGDATA */
-	join_path_components(signalFilePath, pgdata, "standby.signal");
-	join_path_components(configFilePath, pgdata, "postgresql.conf");
-	join_path_components(standbyConfigFilePath,
-						 pgdata,
-						 AUTOCTL_STANDBY_CONF_FILENAME);
-
-	/*
-	 * In-place edit quotedLSN and quotedSlotName to their expected value, and
-	 * pick either standby_settings or fetch_missing_wal_settings depending on
-	 * replicationTargetLSN being in use or not.
-	 *
-	 * When replicationTargetLSN is in use, we are in the middle of a failover
-	 * operation where the candidate node needs to be fetching some missing WAL
-	 * bytes from another standby node before it can get promoted.
-	 */
-	sformat(quotedSlotName, sizeof(quotedSlotName), "'%s'", replicationSlotName);
-
-	if (!IS_EMPTY_STRING_BUFFER(replicationTargetLSN))
-	{
-		snprintf(quotedLSN, sizeof(quotedLSN), "'%s'", replicationTargetLSN);
-
-		recovery_settings = fetch_missing_wal_settings;
-	}
-	else
-	{
-		recovery_settings = standby_settings;
-	}
-
-	/*
-	 * First install the standby.signal file, so that if there's a problem
-	 * later and Postgres is started, it is started as a standby, with missing
-	 * configuration.
-	 */
-
-	/* only logs about this the first time */
-	if (!file_exists(signalFilePath))
-	{
-		log_info("Creating the standby signal file at \"%s\", "
-				 "and replication setup at \"%s\"",
-				 signalFilePath, standbyConfigFilePath);
-	}
-
-	if (!write_file("", 0, signalFilePath))
-	{
-		/* write_file logs I/O error */
-		return false;
-	}
-
-	/*
-	 * Now write the standby settings to postgresql-auto-failover-standby.conf
-	 * and include that file from postgresql.conf.
-	 *
-	 * we pass NULL as pgSetup because we know it won't be used...
-	 */
-	if (!ensure_default_settings_file_exists(standbyConfigFilePath,
-											 recovery_settings,
-											 NULL))
-	{
-		return false;
-	}
-
-	/*
-	 * We successfully created the standby.signal file, so Postgres will start
-	 * as a standby. If we fail to install the standby settings, then we return
-	 * false here and let the main loop try again. At least Postgres won't
-	 * start as a cloned single accepting writes.
-	 */
-	if (!pg_include_config(configFilePath,
-						   AUTOCTL_SB_CONF_INCLUDE_LINE,
-						   AUTOCTL_CONF_INCLUDE_COMMENT))
-	{
-		log_error("Failed to prepare \"%s\" with standby settings",
-				  standbyConfigFilePath);
-		return false;
-	}
-
-	return true;
-}
-
-
-/*
- * pg_cleanup_standby_mode cleans-up the replication settings for the local
- * instance of Postgres found at pgdata.
- *
- *  - remove either recovery.conf or standby.signal
- *
- *  - when using Postgres 12 also make postgresql-auto-failover-standby.conf an
- *    empty file, so that we can still include it, but it has no effect.
- */
-bool
-pg_cleanup_standby_mode(uint32_t pg_control_version,
-						const char *pg_ctl,
-						const char *pgdata,
-						PGSQL *pgsql)
-{
-	if (pg_control_version < 1200)
-	{
-		char recoveryConfPath[MAXPGPATH];
-
-		join_path_components(recoveryConfPath, pgdata, "recovery.conf");
-
-		if (!unlink_file(recoveryConfPath))
-		{
-			/* errors have already been logged */
-			return false;
-		}
-	}
-	else
-	{
-		char standbyConfigFilePath[MAXPGPATH];
-		char signalFilePath[MAXPGPATH];
-
-		join_path_components(signalFilePath, pgdata, "standby.signal");
-		join_path_components(standbyConfigFilePath,
-							 pgdata,
-							 AUTOCTL_STANDBY_CONF_FILENAME);
-
-		if (!unlink_file(signalFilePath))
-		{
-			/* errors have already been logged */
-			return false;
-		}
-
-		/* empty out the standby configuration file */
-		if (!write_file("", 0, standbyConfigFilePath))
-		{
-			/* write_file logs I/O error */
-			return false;
 		}
 	}
 

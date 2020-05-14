@@ -1712,7 +1712,7 @@ pgsql_get_postgres_metadata(PGSQL *pgsql, bool *pg_is_in_recovery,
 		"select pg_is_in_recovery(),"
 		" coalesce(rep.sync_state, '') as sync_state,"
 		" case when pg_is_in_recovery()"
-		" then pg_last_wal_receive_lsn()"
+		" then coalesce(pg_last_wal_receive_lsn(), pg_last_wal_replay_lsn())"
 		" else pg_current_wal_lsn()"
 		" end as current_lsn"
 		" from (values(1)) as dummy"

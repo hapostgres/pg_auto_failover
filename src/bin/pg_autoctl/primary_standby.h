@@ -82,6 +82,7 @@ bool check_postgresql_settings(LocalPostgresServer *postgres,
 							   bool *settings_are_ok);
 bool standby_follow_new_primary(LocalPostgresServer *postgres);
 bool standby_fetch_missing_wal_and_promote(LocalPostgresServer *postgres);
+bool standby_restart_with_no_primary(LocalPostgresServer *postgres);
 bool standby_cleanup_and_restart_as_primary(LocalPostgresServer *postgres);
 
 

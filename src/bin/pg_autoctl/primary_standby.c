@@ -1013,6 +1013,61 @@ standby_fetch_missing_wal_and_promote(LocalPostgresServer *postgres)
 
 
 /*
+ * standby_restart_with_no_primary sets up recovery parameters without a
+ * primary_conninfo, so as to force disconnect from the primary and still
+ * remain a standby that can report its current LSN position, for instance.
+ */
+bool
+standby_restart_with_no_primary(LocalPostgresServer *postgres)
+{
+	PGSQL *pgsql = &(postgres->sqlClient);
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+	ReplicationSource *replicationSource = &(postgres->replicationSource);
+
+	log_info("Restarting standby node to disconnect replication "
+			 "from failed primary node, to prepare failover");
+
+	/* cleanup our existing standby setup, including postgresql.auto.conf */
+	if (!pg_cleanup_standby_mode(pgSetup->control.pg_control_version,
+								 pgSetup->pg_ctl,
+								 pgSetup->pgdata,
+								 pgsql))
+	{
+		log_error("Failed to clean-up Postgres replication settings, "
+				  "see above for details");
+		return false;
+	}
+
+	log_info("Stopping Postgres at \"%s\"", pgSetup->pgdata);
+
+	if (!pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata))
+	{
+		log_error("Failed to stop Postgres at \"%s\"", pgSetup->pgdata);
+		return false;
+	}
+
+	if (!pg_setup_standby_mode(pgSetup->control.pg_control_version,
+							   pgSetup->pgdata,
+							   replicationSource))
+	{
+		log_error("Failed to setup Postgres as a standby, after rewind");
+		return false;
+	}
+
+	log_info("Restarting Postgres at \%s\"", pgSetup->pgdata);
+
+	if (!ensure_local_postgres_is_running(postgres))
+	{
+		log_error("Failed to restart Postgres after changing its "
+				  "primary conninfo, see above for details");
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
  * standby_cleanup_and_restart_as_primary removes the setup for a standby
  * server and restarts as a primary. It's typically called after
  * standby_fetch_missing_wal_and_promote so we expect Postgres to be running as

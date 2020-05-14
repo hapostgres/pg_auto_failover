@@ -996,6 +996,46 @@ fsm_report_lsn(Keeper *keeper)
 	PGSQL *pgsql = &(postgres->sqlClient);
 
 	/*
+	 * Forcibly disconnect from the primary node, for two reasons:
+	 *
+	 *  1. when the primary node can't connect to the monitor, and if there's
+	 *     no replica currently connected, it will then proceed to DEMOTE
+	 *     itself
+	 *
+	 *  2. that way we ensure that the current LSN we report can't change
+	 *     anymore, because we are a standby without a primary_conninfo, and
+	 *     without a restore_command either
+	 *
+	 * To disconnect the current node from its primary, we write a recovery
+	 * setup where there is no primary_conninfo and otherwise use the same
+	 * parameters as for streaming replication.
+	 */
+	NodeAddress upstreamNode = { 0 };
+
+	if (!standby_init_replication_source(postgres,
+										 &upstreamNode,
+										 PG_AUTOCTL_REPLICA_USERNAME,
+										 config->replication_password,
+										 config->replication_slot_name,
+										 config->maximum_backup_rate,
+										 config->backupDirectory,
+										 NULL, /* no targetLSN */
+										 config->pgSetup.ssl,
+										 keeper->state.current_node_id))
+	{
+		/* can't happen at the moment */
+		return false;
+	}
+
+	if (!standby_restart_with_no_primary(postgres))
+	{
+		log_error("Failed disconnect from failed primary node, "
+				  "see above for details");
+
+		return false;
+	}
+
+	/*
 	 * Fetch most recent metadata, that will be sent in the next node_active()
 	 * call.
 	 */
