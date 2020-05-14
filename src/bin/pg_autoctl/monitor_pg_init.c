@@ -154,7 +154,7 @@ monitor_install(const char *nodename,
 
 	(void) local_postgres_init(&postgres, &pgSetup);
 
-	if (!ensure_local_postgres_is_running(&postgres))
+	if (!ensure_postgres_service_is_running(&postgres))
 	{
 		log_error("Failed to install pg_auto_failover in the the monitor's "
 				  "Postgres database, see above for details");
