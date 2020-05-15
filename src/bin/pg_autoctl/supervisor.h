@@ -35,8 +35,8 @@ typedef struct Service
 	char name[NAMEDATALEN];             /* Service name for the user */
 	pid_t pid;                          /* Service PID */
 	ServiceStartFunction startFunction; /* how to re-start the service */
-	ServiceStopFunction stopFunction;   /* how to stop the service */
-	ServiceReloadFunction reloadFunction; /* how to reload the service */
+	bool (*stopFunction)(struct Service *service);
+	void (*reloadFunction)(struct Service *service);
 	void *context;             /* Service Context (Monitor or Keeper struct) */
 	int retries;
 	uint64_t startTime;

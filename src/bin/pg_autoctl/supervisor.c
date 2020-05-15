@@ -39,7 +39,7 @@
  *
  * There is no magic or heuristic that can help us decide if a failure is
  * transient or permanent, so we implement the simple thing: we restart our
- * dead service up to 5 times in a row, and spend up to 10 seconds or retrying,
+ * dead service up to 5 times in a row, and spend up to 10 seconds retrying,
  * and stop as soon as one of those conditions is reached.
  *
  * This strategy is inspired by http://erlang.org/doc/man/supervisor.html and
@@ -263,13 +263,8 @@ supervisor_loop(pid_t start_pid,
 
 					/*
 					 * If we've been waiting for quite a while for
-					 * sub-processes to terminate, it might be because a signal
-					 * was sent to only the process leader, such as when doing
-					 * `pkill pg_autoctl`, rather than to the process group,
-					 * such as when using killpg(2) or `pg_autoctl stop`.
-					 *
-					 * In that case let's signal all our process group
-					 * ourselves and see what happens next.
+					 * sub-processes to terminate. Let's signal again all our
+					 * process group ourselves and see what happens next.
 					 */
 					else if (stoppingLoopCounter == 50)
 					{
@@ -368,40 +363,14 @@ supervisor_loop(pid_t start_pid,
 				}
 
 				/*
-				 * One child process has terminated, with an erroneous exit
-				 * status, and we've already tried and restarted the process 5
-				 * times or tried for more than 20s. Time to give control back
-				 * to the operator, or maybe systemd, or maybe a container
-				 * orchestration facility.
-				 */
-				else if (dead->retries >= SUPERVISOR_SERVICE_MAX_RETRY ||
-						 (now - dead->stopTime) >= SUPERVISOR_SERVICE_MAX_TIME)
-				{
-					log_error("pg_autoctl service %s %s with exit status %d",
-							  dead->name, verb, returnCode);
-
-					log_fatal("pg_autoctl service %s has already been "
-							  "restarted %d times in the last %d seconds, "
-							  "stopping now",
-							  dead->name,
-							  dead->retries,
-							  (int) (now - dead->startTime));
-
-					/* avoid calling the stopFunction again and again */
-					shutdownSequenceInProgress = true;
-					(void) supervisor_stop_other_services(dead->pid,
-														  services,
-														  serviceCount);
-				}
-
-				/*
 				 * One child process has terminated, and with an erroneous exit
 				 * status. We're concerned, of course. We'd rather ensure our
 				 * services are fine, so we're applying our restart strategy:
 				 * try to restart the service up to 5 times or 20s, whichever
 				 * comes first.
 				 */
-				else
+				else if (dead->retries < SUPERVISOR_SERVICE_MAX_RETRY &&
+						 (now - dead->stopTime) < SUPERVISOR_SERVICE_MAX_TIME)
 				{
 					bool restarted = false;
 
@@ -451,6 +420,42 @@ supervisor_loop(pid_t start_pid,
 					}
 				}
 
+				/*
+				 * One child process has terminated, with an erroneous exit
+				 * status, and we've already tried and restarted the process 5
+				 * times or tried for more than 20s. Time to give control back
+				 * to the operator, or maybe systemd, or maybe a container
+				 * orchestration facility.
+				 */
+				else if (dead->retries >= SUPERVISOR_SERVICE_MAX_RETRY ||
+						 (now - dead->stopTime) >= SUPERVISOR_SERVICE_MAX_TIME)
+				{
+					log_error("pg_autoctl service %s %s with exit status %d",
+							  dead->name, verb, returnCode);
+
+					log_fatal("pg_autoctl service %s has already been "
+							  "restarted %d times in the last %d seconds, "
+							  "stopping now",
+							  dead->name,
+							  dead->retries,
+							  (int) (now - dead->startTime));
+
+					/* avoid calling the stopFunction again and again */
+					shutdownSequenceInProgress = true;
+					(void) supervisor_stop_other_services(dead->pid,
+														  services,
+														  serviceCount);
+				}
+
+				/*
+				 * Can't happen.
+				 */
+				else
+				{
+					log_error("BUG: a chid process is dead and we can't decide "
+							  "if we should restart it or not");
+				}
+
 				break;
 			}
 		}
@@ -492,7 +497,7 @@ supervisor_find_service(Service services[],
 /*
  * supervisor_reset_service_restart_counters loops over known services and
  * reset the retries count and stopTime of services that have been known
- * running for more than a minute (SUPERVISOR_SERVICE_RUNNING_TIME is 60s).
+ * running for more than 15s (SUPERVISOR_SERVICE_RUNNING_TIME is 15s).
  */
 static void
 supervisor_reset_service_restart_counters(Service services[],

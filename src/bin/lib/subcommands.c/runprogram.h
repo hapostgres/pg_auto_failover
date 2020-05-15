@@ -284,6 +284,12 @@ execute_subprogram(Program *prog)
 
 /*
  * Run given program with its args, by using exec().
+ *
+ * Using exec() means that we replace the currently running program and will
+ * take ownership of its standard input, output and error streams, etc. This
+ * routine is not supposed to ever return, so in case when something goes
+ * wrong, it exits the current process, which is assumed to be a sub-process
+ * started with fork().
  */
 void
 execute_program(Program *prog)
@@ -301,15 +307,31 @@ execute_program(Program *prog)
 		return;
 	}
 
-	/* Flush stdio channels just before fork, to avoid double-output problems */
+	/* Flush stdio channels just before dup, to avoid double-output problems */
 	fflush(stdout);
 	fflush(stderr);
 
-	dup2(stdIn, STDIN_FILENO);
+	if (dup2(stdIn, STDIN_FILENO) == -1)
+	{
+		fprintf(stdout, "%s\n", strerror(errno));
+		fprintf(stderr, "%s\n", strerror(errno));
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
 	close(stdIn);
 
-	dup2(prog->stdOutFd, STDOUT_FILENO);
-	dup2(prog->stdErrFd, STDERR_FILENO);
+	if (dup2(prog->stdOutFd, STDOUT_FILENO) == -1)
+	{
+		fprintf(stdout, "%s\n", strerror(errno));
+		fprintf(stderr, "%s\n", strerror(errno));
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	if (dup2(prog->stdErrFd, STDERR_FILENO) == -1)
+	{
+		fprintf(stdout, "%s\n", strerror(errno));
+		fprintf(stderr, "%s\n", strerror(errno));
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
 
 	/*
 	 * When asked to do so, before creating the child process, we call

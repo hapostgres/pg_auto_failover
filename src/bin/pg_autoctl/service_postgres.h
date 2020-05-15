@@ -14,11 +14,12 @@
 
 #include "keeper.h"
 #include "keeper_config.h"
+#include "supervisor.h"
 
 extern int countPostgresStart;
 
 bool service_postgres_start(void *context, pid_t *pid);
-bool service_postgres_stop(void *context);
-void service_postgres_reload(void *context);
+bool service_postgres_stop(Service *service);
+void service_postgres_reload(Service *service);
 
 #endif /* SERVICE_POSTGRES_H */

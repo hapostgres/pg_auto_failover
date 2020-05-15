@@ -168,7 +168,7 @@ typedef enum
 } ExpectedPostgresStatus;
 
 /*
- *  Note: This struct is serialized/serialiazed to/from state file. Therefore
+ *  Note: This struct is serialized/deserialized to/from state file. Therefore
  *  keeping the memory layout the same is important. Please
  *  - do not change the order of fields
  *  - do not add a new field in between, always add to the end

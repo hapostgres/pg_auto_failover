@@ -112,9 +112,8 @@ service_postgres_start(void *context, pid_t *pid)
  * service_postgres_stop stops the postgres service, using pg_ctl stop.
  */
 bool
-service_postgres_stop(void *context)
+service_postgres_stop(Service *service)
 {
-	Service *service = (Service *) context;
 	PostgresSetup *pgSetup = (PostgresSetup *) service->context;
 
 	log_info("Stopping pg_autoctl postgres service");
@@ -133,10 +132,8 @@ service_postgres_stop(void *context)
  * service_postgres_reload signal Postgres with a SIGHUP
  */
 void
-service_postgres_reload(void *context)
+service_postgres_reload(Service *service)
 {
-	Service *service = (Service *) context;
-
 	log_info("Reloading pg_autoctl postgres service [%d]", service->pid);
 
 	if (kill(service->pid, SIGHUP) != 0)

@@ -983,10 +983,15 @@ pg_ctl_start(const char *pg_ctl,
 
 
 /*
- * pg_ctl_postmaster runs the "postmaster" command-line in the current process,
+ * pg_ctl_postgres runs the "postgres" command-line in the current process,
  * with the same options as we would use in pg_ctl_start. pg_ctl_postmaster
  * does not fork a Postgres process in the background, we keep the control over
  * the postmaster process. Think exec() rather then fork().
+ *
+ * This function will take over the current standard output and standard error
+ * file descriptor, closing them and then giving control to them to Postgres
+ * itself. This function is meant to be called in the child process of a fork()
+ * call done by the caller.
  */
 bool
 pg_ctl_postgres(const char *pg_ctl, const char *pgdata, int pgport,
@@ -1032,14 +1037,17 @@ pg_ctl_postgres(const char *pg_ctl, const char *pgdata, int pgport,
 			return false;
 		}
 
-		/* pg_ctl --options can be specified multiple times */
 		args[argsIndex++] = "-k";
 		args[argsIndex++] = (char *) env_pg_regress_sock_dir;
 	}
 
 	args[argsIndex] = NULL;
 
-	/* we do not want to call setsid() when running this program. */
+	/*
+	 * We do not want to call setsid() when running this program, as the
+	 * postgres subprogram is not intended to be its own session leader, but
+	 * remain a sub-process in the same group as pg_autoctl.
+	 */
 	program = initialize_program(args, false);
 
 	/* we want to redirect the output to logfile */
