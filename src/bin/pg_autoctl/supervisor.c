@@ -15,6 +15,9 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "postgres_fe.h"
+#include "pqexpbuffer.h"
+
 #include "defaults.h"
 #include "fsm.h"
 #include "keeper.h"
@@ -82,6 +85,8 @@ static void supervisor_shutdown_sequence(int stoppingLoopCounter);
 static bool supervisor_restart_service(Supervisor *supervisor,
 									   Service *service,
 									   int status);
+
+static bool supervisor_update_pidfile(Supervisor *supervisor);
 
 
 /*
@@ -155,6 +160,22 @@ supervisor_start(Service services[], int serviceCount, const char *pidfile)
 
 			return false;
 		}
+	}
+
+	/*
+	 * We need to update our pid file with the PID for every service.
+	 */
+	if (!supervisor_update_pidfile(&supervisor))
+	{
+		log_fatal("Failed to update pidfile \"%s\", stopping all services now",
+				  supervisor.pidfile);
+
+		supervisor.cleanExit = false;
+		supervisor.shutdownSequenceInProgress = true;
+
+		(void) supervisor_stop_subprocesses(&supervisor);
+
+		return false;
 	}
 
 	/* now supervise sub-processes and implement retry strategy */
@@ -689,4 +710,40 @@ supervisor_restart_service(Supervisor *supervisor, Service *service, int status)
 	service->startTime = now;
 
 	return true;
+}
+
+
+/*
+ * supervisor_update_pidfile creates a pidfile with all our PIDs in there.
+ */
+static bool
+supervisor_update_pidfile(Supervisor *supervisor)
+{
+	int serviceCount = supervisor->serviceCount;
+	int serviceIndex = 0;
+	PQExpBuffer content = createPQExpBuffer();
+
+	bool success = false;
+
+	if (content == NULL)
+	{
+		log_error("Failed to allocate memory to update our PID file");
+		return false;
+	}
+
+	/* first line should still be our supervisor pid, alone */
+	appendPQExpBuffer(content, "%d\n", supervisor->pid);
+
+	for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
+	{
+		Service *service = &(supervisor->services[serviceIndex]);
+
+		/* one line per service, pid space name */
+		appendPQExpBuffer(content, "%d %s\n", service->pid, service->name);
+	}
+
+	success = write_file(content->data, content->len, supervisor->pidfile);
+	destroyPQExpBuffer(content);
+
+	return success;
 }
