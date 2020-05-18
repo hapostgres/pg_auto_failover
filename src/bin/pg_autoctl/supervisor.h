@@ -30,6 +30,47 @@ typedef enum
 	RP_TRANSIENT
 } RestartPolicy;
 
+
+/*
+ * Supervisor restart strategy.
+ *
+ * The idea is to restart processes that have failed, so that we can stay
+ * available without external intervention. Sometimes though if the
+ * configuration is wrong or the data directory damaged beyond repair or for
+ * some reasons, the service can't be restarted.
+ *
+ * There is no magic or heuristic that can help us decide if a failure is
+ * transient or permanent, so we implement the simple thing: we restart our
+ * dead service up to 5 times in a row, and spend up to 10 seconds retrying,
+ * and stop as soon as one of those conditions is reached.
+ *
+ * This strategy is inspired by http://erlang.org/doc/man/supervisor.html and
+ * http://erlang.org/doc/design_principles/sup_princ.html#maximum-restart-intensity
+ *
+ *    If more than MaxR number of restarts occur in the last MaxT seconds, the
+ *    supervisor terminates all the child processes and then itself. The
+ *    termination reason for the supervisor itself in that case will be
+ *    shutdown.
+ *
+ * SUPERVISOR_SERVICE_MAX_RETRY is MaxR, SUPERVISOR_SERVICE_MAX_TIME is MaxT.
+ */
+#define SUPERVISOR_SERVICE_MAX_RETRY 5
+#define SUPERVISOR_SERVICE_MAX_TIME 10     /* in seconds */
+
+/*
+ * We use a "ring buffer" of the MaxR most recent retries.
+ *
+ * With an array of SUPERVISOR_SERVICE_MAX_RETRY we can track this amount of
+ * retries and compare the oldest one with the current time to decide if we are
+ * allowed to restart or now, applying MaxT.
+ */
+typedef struct RestartCounters
+{
+	int count;                  /* how many restarts including first start */
+	int position;               /* array index */
+	uint64_t startTime[SUPERVISOR_SERVICE_MAX_RETRY + 1];
+}  RestartCounters;
+
 /*
  * The supervisor works with an array of Service entries. Each service defines
  * its behavior thanks to a start function, a stop function, and a reload
@@ -38,7 +79,6 @@ typedef enum
  *
  * In particular, services may be started more than once when they fail.
  */
-
 typedef struct Service
 {
 	char name[NAMEDATALEN];             /* Service name for the user */
@@ -46,9 +86,7 @@ typedef struct Service
 	pid_t pid;                          /* Service PID */
 	bool (*startFunction)(void *context, pid_t *pid);
 	void *context;             /* Service Context (Monitor or Keeper struct) */
-	int retries;
-	uint64_t startTime;
-	uint64_t stopTime;
+	RestartCounters restartCounters;
 } Service;
 
 typedef struct Supervisor

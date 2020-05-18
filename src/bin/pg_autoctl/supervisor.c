@@ -32,45 +32,11 @@
 #include "signals.h"
 #include "string_utils.h"
 
-/*
- * Supervisor restart strategy.
- *
- * The idea is to restart processes that have failed, so that we can stay
- * available without external intervention. Sometimes though if the
- * configuration is wrong or the data directory damaged beyond repair or for
- * some reasons, the service can't be restarted.
- *
- * There is no magic or heuristic that can help us decide if a failure is
- * transient or permanent, so we implement the simple thing: we restart our
- * dead service up to 5 times in a row, and spend up to 10 seconds retrying,
- * and stop as soon as one of those conditions is reached.
- *
- * This strategy is inspired by http://erlang.org/doc/man/supervisor.html and
- * http://erlang.org/doc/design_principles/sup_princ.html#maximum-restart-intensity
- *
- *    If more than MaxR number of restarts occur in the last MaxT seconds, the
- *    supervisor terminates all the child processes and then itself. The
- *    termination reason for the supervisor itself in that case will be
- *    shutdown.
- *
- * SUPERVISOR_SERVICE_MAX_RETRY is MaxR, SUPERVISOR_SERVICE_MAX_TIME is MaxT.
- *
- * SUPERVISOR_SERVICE_RUNNING_TIME is the time we allow before considering that
- * a restart has been successfull, because we implement async process start: we
- * know that the process has started (fork() succeeds), only to know later that
- * it failed (waitpid() reports a non-zero exit status).
- */
-#define SUPERVISOR_SERVICE_MAX_RETRY 5
-#define SUPERVISOR_SERVICE_MAX_TIME 10     /* in seconds */
-#define SUPERVISOR_SERVICE_RUNNING_TIME 15 /* in seconds */
-
 static bool supervisor_init(Supervisor *supervisor);
 static bool supervisor_loop(Supervisor *supervisor);
 
 static bool supervisor_find_service(Supervisor *supervisor, pid_t pid,
 									Service **result);
-
-static void supervisor_reset_service_restart_counters(Supervisor *supervisor);
 
 static void supervisor_stop_subprocesses(Supervisor *supervisor);
 
@@ -85,6 +51,8 @@ static void supervisor_shutdown_sequence(int stoppingLoopCounter);
 static bool supervisor_restart_service(Supervisor *supervisor,
 									   Service *service,
 									   int status);
+
+static bool supervisor_may_restart(Service *service);
 
 static bool supervisor_update_pidfile(Supervisor *supervisor);
 
@@ -132,8 +100,12 @@ supervisor_start(Service services[], int serviceCount, const char *pidfile)
 
 		if (started)
 		{
-			service->retries = 0;
-			service->startTime = time(NULL);
+			uint64_t now = time(NULL);
+			RestartCounters *counters = &(service->restartCounters);
+
+			counters->count = 1;
+			counters->position = 0;
+			counters->startTime[counters->position] = now;
 
 			log_info("Started pg_autoctl %s service with pid %d",
 					 service->name, service->pid);
@@ -264,22 +236,12 @@ supervisor_loop(Supervisor *supervisor)
 					(void) supervisor_shutdown_sequence(stoppingLoopCounter++);
 				}
 
-				/*
-				 * No stopped or exited children, not asked to stopped.
-				 * Everything is good. Time to check if we should reset some
-				 * retries counters.
-				 */
-				else
-				{
-					(void) supervisor_reset_service_restart_counters(supervisor);
-				}
 				break;
 			}
 
 			default:
 			{
 				Service *dead = NULL;
-				uint64_t now = time(NULL);
 
 				/* map the dead child pid to the known dead internal service */
 				if (!supervisor_find_service(supervisor, pid, &dead))
@@ -290,15 +252,6 @@ supervisor_loop(Supervisor *supervisor)
 
 				/* one child process is no more */
 				--subprocessCount;
-
-				/*
-				 * One child process has terminated at least once now. Time to
-				 * update our restart strategy counters.
-				 */
-				if (dead->stopTime == 0)
-				{
-					dead->stopTime = now;
-				}
 
 				/* apply the service restart policy */
 				if (supervisor_restart_service(supervisor, dead, status))
@@ -339,34 +292,6 @@ supervisor_find_service(Supervisor *supervisor, pid_t pid, Service **result)
 	}
 
 	return false;
-}
-
-
-/*
- * supervisor_reset_service_restart_counters loops over known services and
- * reset the retries count and stopTime of services that have been known
- * running for more than 15s (SUPERVISOR_SERVICE_RUNNING_TIME is 15s).
- */
-static void
-supervisor_reset_service_restart_counters(Supervisor *supervisor)
-{
-	uint64_t now = time(NULL);
-	int serviceCount = supervisor->serviceCount;
-	int serviceIndex = 0;
-
-	for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
-	{
-		Service *target = &(supervisor->services[serviceIndex]);
-
-		if (target->stopTime > 0)
-		{
-			if ((now - target->startTime) > SUPERVISOR_SERVICE_RUNNING_TIME)
-			{
-				target->retries = 0;
-				target->stopTime = 0;
-			}
-		}
-	}
 }
 
 
@@ -608,6 +533,8 @@ supervisor_restart_service(Supervisor *supervisor, Service *service, int status)
 	int logLevel = LOG_ERROR;
 	bool restarted = false;
 
+	RestartCounters *counters = &(service->restartCounters);
+
 	/*
 	 * If we're in the middle of a shutdown sequence, we won't have to restart
 	 * services and apply any restart strategy etc.
@@ -636,22 +563,22 @@ supervisor_restart_service(Supervisor *supervisor, Service *service, int status)
 	}
 
 	/*
-	 * Update our restart strategy counters. Well only the count of retries, we
-	 * want to keep our stopTime as it is so as to know that we've been trying
-	 * to restart 4 times in 10s. It's not 10s each time, it's 10s total.
+	 * Check that we are allowed to restart: apply MaxR/MaxT as per the
+	 * tracking we do in the counters ring buffer.
 	 */
-	service->retries += 1;
-
-	if (service->retries >= SUPERVISOR_SERVICE_MAX_RETRY ||
-		(now - service->stopTime) >= SUPERVISOR_SERVICE_MAX_TIME)
+	if (supervisor_may_restart(service))
 	{
-		log_fatal("pg_autoctl service %s has already been "
-				  "restarted %d times in the last %d seconds, "
-				  "stopping now",
-				  service->name,
-				  service->retries,
-				  (int) (now - service->startTime));
+		/* update our ring buffer: move our clock hand */
+		int size = SUPERVISOR_SERVICE_MAX_RETRY + 1;
+		int position = (counters->position + 1) % size;
 
+		/* we have restarted once more */
+		counters->count += 1;
+		counters->position = position;
+		counters->startTime[counters->position] = now;
+	}
+	else
+	{
 		/* exit with a non-zero exit code, and process with shutdown sequence */
 		supervisor->cleanExit = false;
 		supervisor->shutdownSequenceInProgress = true;
@@ -724,8 +651,77 @@ supervisor_restart_service(Supervisor *supervisor, Service *service, int status)
 		return false;
 	}
 
-	/* we could restart, update our service start time */
-	service->startTime = now;
+	return true;
+}
+
+
+/*
+ * supervisor_count_restarts returns true when we have restarted more than
+ * SUPERVISOR_SERVICE_MAX_RETRY in the last SUPERVISOR_SERVICE_MAX_TIME period
+ * of time.
+ */
+static bool
+supervisor_may_restart(Service *service)
+{
+	uint64_t now = time(NULL);
+	uint64_t oldestRestart = time(NULL);
+	RestartCounters *counters = &(service->restartCounters);
+	int position = counters->position;
+	int restarts = 0;
+	int count = 0;
+
+	char timestring[BUFSIZE] = { 0 };
+
+	/* we allow SUPERVISOR_SERVICE_MAX_RETRY retries, we count one more */
+	int size = SUPERVISOR_SERVICE_MAX_RETRY + 1;
+
+	log_debug("supervisor_may_restart: service \"%s\" restarted %d times, "
+			  "most recently at %s, %d seconds ago",
+			  service->name,
+			  counters->count,
+			  epoch_to_string(counters->startTime[position], timestring),
+			  (int) (now - counters->startTime[position]));
+
+	for (; position != counters->position || count == 0;)
+	{
+		uint64_t restartTime = counters->startTime[position];
+
+		/* if we have ever restarted once, only loop once */
+		if (count == counters->count)
+		{
+			break;
+		}
+
+		if ((now - restartTime) <= SUPERVISOR_SERVICE_MAX_TIME)
+		{
+			/* we loop through the ring buffer in restart order */
+			oldestRestart = restartTime;
+			restarts++;
+
+			log_trace("supervisor_may_restart: service \"%s\" restarted "
+					  " at %s, %d seconds ago",
+					  service->name,
+					  epoch_to_string(restartTime, timestring),
+					  (int) (now - restartTime));
+		}
+
+		count++;
+
+		/* progress backward in time in the ring buffer */
+		position = position == 0 ? size - 1 : position - 1;
+	}
+
+	if (restarts > SUPERVISOR_SERVICE_MAX_RETRY)
+	{
+		log_fatal("pg_autoctl service %s has already been "
+				  "restarted %d times in the last %d seconds, "
+				  "stopping now",
+				  service->name,
+				  restarts,
+				  (int) (now - oldestRestart));
+
+		return false;
+	}
 
 	return true;
 }
