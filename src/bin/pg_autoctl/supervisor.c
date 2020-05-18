@@ -254,12 +254,12 @@ supervisor_loop(pid_t start_pid,
 															subprocessCount);
 					}
 
-					++stoppingLoopCounter;
-
 					if (stoppingLoopCounter == 1)
 					{
 						log_info("Waiting for subprocesses to terminate.");
 					}
+
+					++stoppingLoopCounter;
 
 					/*
 					 * If we've been waiting for quite a while for
