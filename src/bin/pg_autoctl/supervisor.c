@@ -61,28 +61,27 @@
 #define SUPERVISOR_SERVICE_MAX_TIME 10     /* in seconds */
 #define SUPERVISOR_SERVICE_RUNNING_TIME 15 /* in seconds */
 
-static bool supervisor_init(const char *pidfile, pid_t *pid);
+static bool supervisor_init(Supervisor *supervisor);
+static bool supervisor_loop(Supervisor *supervisor);
 
-static bool supervisor_loop(pid_t start_pid,
-							Service services[],
-							int serviceCount,
-							const char *pidfile);
-
-static bool supervisor_find_service(Service services[],
-									int serviceCount,
-									pid_t pid,
+static bool supervisor_find_service(Supervisor *supervisor, pid_t pid,
 									Service **result);
 
-static void supervisor_reset_service_restart_counters(Service services[],
-													  int serviceCount);
+static void supervisor_reset_service_restart_counters(Supervisor *supervisor);
 
-static void supervisor_stop_subprocesses(Service services[], int serviceCount);
+static void supervisor_stop_subprocesses(Supervisor *supervisor);
 
-static void supervisor_stop_other_services(pid_t pid,
-										   Service services[],
-										   int serviceCount);
+static void supervisor_stop_other_services(Supervisor *supervisor, pid_t pid);
 
 static bool supervisor_signal_process_group(int signal);
+
+static void supervisor_reload_services(Supervisor *supervisor);
+
+static void supervisor_shutdown_sequence(int stoppingLoopCounter);
+
+static bool supervisor_restart_service(Supervisor *supervisor,
+									   Service *service,
+									   int status);
 
 
 /*
@@ -92,15 +91,19 @@ static bool supervisor_signal_process_group(int signal);
 bool
 supervisor_start(Service services[], int serviceCount, const char *pidfile)
 {
-	pid_t start_pid = 0;
 	int serviceIndex = 0;
 	bool success = true;
+
+	Supervisor supervisor = { services, serviceCount, { 0 }, -1 };
+
+	/* copy the pidfile over to our supervisor structure */
+	strlcpy(supervisor.pidfile, pidfile, MAXPGPATH);
 
 	/*
 	 * Create our PID file, or quit now if another pg_autoctl instance is
 	 * runnning.
 	 */
-	if (!supervisor_init(pidfile, &start_pid))
+	if (!supervisor_init(&supervisor))
 	{
 		log_fatal("Failed to setup pg_autoctl pidfile and signal handlers");
 		return false;
@@ -148,21 +151,21 @@ supervisor_start(Service services[], int serviceCount, const char *pidfile)
 			}
 
 			/* we return false always, even if supervisor_stop is successful */
-			(void) supervisor_stop(pidfile);
+			(void) supervisor_stop(&supervisor);
 
 			return false;
 		}
 	}
 
 	/* now supervise sub-processes and implement retry strategy */
-	if (!supervisor_loop(start_pid, services, serviceCount, pidfile))
+	if (!supervisor_loop(&supervisor))
 	{
 		log_fatal("Something went wrong in sub-process supervision, "
 				  "stopping now. See above for details.");
 		success = false;
 	}
 
-	return supervisor_stop(pidfile) && success;
+	return supervisor_stop(&supervisor) && success;
 }
 
 
@@ -172,15 +175,10 @@ supervisor_start(Service services[], int serviceCount, const char *pidfile)
  * file.
  */
 static bool
-supervisor_loop(pid_t start_pid,
-				Service services[],
-				int serviceCount,
-				const char *pidfile)
+supervisor_loop(Supervisor *supervisor)
 {
-	int subprocessCount = serviceCount;
+	int subprocessCount = supervisor->serviceCount;
 	int stoppingLoopCounter = 0;
-	bool shutdownSequenceInProgress = false;
-	bool cleanExit = false;
 
 	/* wait until all subprocesses are done */
 	while (subprocessCount > 0)
@@ -189,24 +187,12 @@ supervisor_loop(pid_t start_pid,
 		int status;
 
 		/* Check that we still own our PID file, or quit now */
-		(void) check_pidfile(pidfile, start_pid);
+		(void) check_pidfile(supervisor->pidfile, supervisor->pid);
 
 		/* If necessary, now is a good time to reload services */
 		if (asked_to_reload)
 		{
-			int serviceIndex = 0;
-
-			for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
-			{
-				Service *service = &(services[serviceIndex]);
-
-				log_debug("Reloading pg_autoctl %s service", service->name);
-
-				(void) (*service->reloadFunction)(service);
-			}
-
-			/* reset our signal handling facility */
-			asked_to_reload = 0;
+			(void) supervisor_reload_services(supervisor);
 		}
 
 		/* ignore errors */
@@ -243,56 +229,18 @@ supervisor_loop(pid_t start_pid,
 				 */
 				if (asked_to_stop || asked_to_stop_fast)
 				{
-					cleanExit = true;
+					supervisor->cleanExit = true;
+					supervisor->shutdownSequenceInProgress = true;
 
 					/*
 					 * Stop all the services.
 					 */
 					if (stoppingLoopCounter == 0)
 					{
-						(void) supervisor_stop_subprocesses(services,
-															subprocessCount);
+						(void) supervisor_stop_subprocesses(supervisor);
 					}
 
-					if (stoppingLoopCounter == 1)
-					{
-						log_info("Waiting for subprocesses to terminate.");
-					}
-
-					++stoppingLoopCounter;
-
-					/*
-					 * If we've been waiting for quite a while for
-					 * sub-processes to terminate. Let's signal again all our
-					 * process group ourselves and see what happens next.
-					 */
-					if (stoppingLoopCounter == 50)
-					{
-						log_info("pg_autoctl services are still running, "
-								 "signaling them with SIGTERM.");
-
-						if (!supervisor_signal_process_group(SIGTERM))
-						{
-							log_warn(
-								"Still waiting for subprocesses to terminate.");
-						}
-					}
-
-					/*
-					 * Wow it's been a very long time now...
-					 */
-					if (stoppingLoopCounter > 0 &&
-						stoppingLoopCounter % 100 == 0)
-					{
-						log_info("pg_autoctl services are still running, "
-								 "signaling them with SIGINT.");
-
-						if (!supervisor_signal_process_group(SIGINT))
-						{
-							log_warn(
-								"Still waiting for subprocesses to terminate.");
-						}
-					}
+					(void) supervisor_shutdown_sequence(stoppingLoopCounter++);
 				}
 
 				/*
@@ -302,22 +250,18 @@ supervisor_loop(pid_t start_pid,
 				 */
 				else
 				{
-					(void) supervisor_reset_service_restart_counters(
-						services,
-						serviceCount);
+					(void) supervisor_reset_service_restart_counters(supervisor);
 				}
 				break;
 			}
 
 			default:
 			{
-				char *verb = WIFEXITED(status) ? "exited" : "failed";
-				int returnCode = WEXITSTATUS(status);
 				Service *dead = NULL;
 				uint64_t now = time(NULL);
 
 				/* map the dead child pid to the known dead internal service */
-				if (!supervisor_find_service(services, serviceCount, pid, &dead))
+				if (!supervisor_find_service(supervisor, pid, &dead))
 				{
 					log_error("Unknown subprocess died with pid %d", pid);
 					break;
@@ -335,125 +279,10 @@ supervisor_loop(pid_t start_pid,
 					dead->stopTime = now;
 				}
 
-				/*
-				 * One child process has terminated. If it terminated and
-				 * returned 0 as its exit status, then we consider that our job
-				 * is done here and cleanly exit.
-				 *
-				 * Before we exit though, we need to stop the other running
-				 * services.
-				 */
-				if (returnCode == 0)
+				/* apply the service restart policy */
+				if (supervisor_restart_service(supervisor, dead, status))
 				{
-					cleanExit = true;
-
-					log_info("pg_autoctl service %s has finished, "
-							 "it was running with pid %d.",
-							 dead->name, dead->pid);
-
-					/* only stop other services once */
-					if (!shutdownSequenceInProgress)
-					{
-						shutdownSequenceInProgress = true;
-
-						(void) supervisor_stop_other_services(dead->pid,
-															  services,
-															  serviceCount);
-					}
-				}
-
-				/*
-				 * One child process has terminated, and with an erroneous exit
-				 * status. We're concerned, of course. We'd rather ensure our
-				 * services are fine, so we're applying our restart strategy:
-				 * try to restart the service up to 5 times or 20s, whichever
-				 * comes first.
-				 */
-				else if (dead->retries < SUPERVISOR_SERVICE_MAX_RETRY &&
-						 (now - dead->stopTime) < SUPERVISOR_SERVICE_MAX_TIME)
-				{
-					bool restarted = false;
-
-					/*
-					 * Update our restart strategy counters. Well only the
-					 * count of retries, we want to keep our stopTime as it is
-					 * so as to know that we've been trying to restart 4 times
-					 * in 10s. It's not 10s each time, it's 10s total.
-					 *
-					 * Some services when asked to reload implement an "online
-					 * restart": the supervisor is expected to restart the
-					 * service from the (maybe new) on-disk program.
-					 */
-					if (returnCode != EXIT_CODE_RELOAD)
-					{
-						log_error(
-							"pg_autoctl service %s %s with exit status %d",
-							dead->name, verb, returnCode);
-
-						dead->retries += 1;
-
-						log_info("Restarting pg_autoctl service %s, "
-								 "retrying (%d time%s in %d seconds)",
-								 dead->name,
-								 dead->retries,
-								 dead->retries == 1 ? "" : "s",
-								 (int) (now - dead->stopTime));
-					}
-
-					restarted =
-						(*dead->startFunction)(dead->context, &(dead->pid));
-
-					if (restarted)
-					{
-						/* one child process has joined */
-						++subprocessCount;
-
-						dead->startTime = now;
-					}
-					else
-					{
-						log_fatal("Failed to restart service %s", dead->name);
-
-						(void) supervisor_stop_other_services(dead->pid,
-															  services,
-															  serviceCount);
-					}
-				}
-
-				/*
-				 * One child process has terminated, with an erroneous exit
-				 * status, and we've already tried and restarted the process 5
-				 * times or tried for more than 20s. Time to give control back
-				 * to the operator, or maybe systemd, or maybe a container
-				 * orchestration facility.
-				 */
-				else if (dead->retries >= SUPERVISOR_SERVICE_MAX_RETRY ||
-						 (now - dead->stopTime) >= SUPERVISOR_SERVICE_MAX_TIME)
-				{
-					log_error("pg_autoctl service %s %s with exit status %d",
-							  dead->name, verb, returnCode);
-
-					log_fatal("pg_autoctl service %s has already been "
-							  "restarted %d times in the last %d seconds, "
-							  "stopping now",
-							  dead->name,
-							  dead->retries,
-							  (int) (now - dead->startTime));
-
-					/* avoid calling the stopFunction again and again */
-					shutdownSequenceInProgress = true;
-					(void) supervisor_stop_other_services(dead->pid,
-														  services,
-														  serviceCount);
-				}
-
-				/*
-				 * Can't happen.
-				 */
-				else
-				{
-					log_error("BUG: a chid process is dead and we can't decide "
-							  "if we should restart it or not");
+					++subprocessCount;
 				}
 
 				break;
@@ -465,7 +294,7 @@ supervisor_loop(pid_t start_pid,
 	}
 
 	/* we track in the main loop if it's a cleanExit or not */
-	return cleanExit;
+	return supervisor->cleanExit;
 }
 
 
@@ -474,18 +303,16 @@ supervisor_loop(pid_t start_pid,
  * return its entry in the array.
  */
 static bool
-supervisor_find_service(Service services[],
-						int serviceCount,
-						pid_t pid,
-						Service **result)
+supervisor_find_service(Supervisor *supervisor, pid_t pid, Service **result)
 {
+	int serviceCount = supervisor->serviceCount;
 	int serviceIndex = 0;
 
 	for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
 	{
-		if (pid == services[serviceIndex].pid)
+		if (pid == supervisor->services[serviceIndex].pid)
 		{
-			*result = &(services[serviceIndex]);
+			*result = &(supervisor->services[serviceIndex]);
 			return true;
 		}
 	}
@@ -500,15 +327,15 @@ supervisor_find_service(Service services[],
  * running for more than 15s (SUPERVISOR_SERVICE_RUNNING_TIME is 15s).
  */
 static void
-supervisor_reset_service_restart_counters(Service services[],
-										  int serviceCount)
+supervisor_reset_service_restart_counters(Supervisor *supervisor)
 {
 	uint64_t now = time(NULL);
+	int serviceCount = supervisor->serviceCount;
 	int serviceIndex = 0;
 
 	for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
 	{
-		Service *target = &(services[serviceIndex]);
+		Service *target = &(supervisor->services[serviceIndex]);
 
 		if (target->stopTime > 0)
 		{
@@ -523,19 +350,53 @@ supervisor_reset_service_restart_counters(Service services[],
 
 
 /*
- * supervisor_stop_subprocesses calls the stopFunction for all the registered
- * services to initiate the shutdown sequence.
+ * supervisor_reload_services sends SIGHUP to all our services.
  */
 static void
-supervisor_stop_subprocesses(Service services[], int serviceCount)
+supervisor_reload_services(Supervisor *supervisor)
 {
+	int serviceCount = supervisor->serviceCount;
 	int serviceIndex = 0;
 
 	for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
 	{
-		Service *target = &(services[serviceIndex]);
+		Service *service = &(supervisor->services[serviceIndex]);
 
-		(void) (*target->stopFunction)((void *) target);
+		log_info("Reloading service \"%s\" by signaling pid %d with SIGHUP",
+				 service->name, service->pid);
+
+		if (kill(service->pid, SIGHUP) != 0)
+		{
+			log_error("Failed to send SIGQUIT to service %s with pid %d",
+					  service->name, service->pid);
+		}
+	}
+
+	/* reset our signal handling facility */
+	asked_to_reload = 0;
+}
+
+
+/*
+ * supervisor_stop_subprocesses calls the stopFunction for all the registered
+ * services to initiate the shutdown sequence.
+ */
+static void
+supervisor_stop_subprocesses(Supervisor *supervisor)
+{
+	int signal = asked_to_stop_fast ? SIGINT : SIGTERM;
+	int serviceCount = supervisor->serviceCount;
+	int serviceIndex = 0;
+
+	for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
+	{
+		Service *service = &(supervisor->services[serviceIndex]);
+
+		if (kill(service->pid, signal) != 0)
+		{
+			log_error("Failed to send signal %s to service %s with pid %d",
+					  strsignal(signal), service->name, service->pid);
+		}
 	}
 }
 
@@ -545,8 +406,10 @@ supervisor_stop_subprocesses(Service services[], int serviceCount)
  * sub-processes when on of does is reported dead.
  */
 static void
-supervisor_stop_other_services(pid_t pid, Service services[], int serviceCount)
+supervisor_stop_other_services(Supervisor *supervisor, pid_t pid)
 {
+	int signal = asked_to_stop_fast ? SIGINT : SIGTERM;
+	int serviceCount = supervisor->serviceCount;
 	int serviceIndex = 0;
 
 	/*
@@ -558,11 +421,15 @@ supervisor_stop_other_services(pid_t pid, Service services[], int serviceCount)
 	{
 		for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
 		{
-			Service *target = &(services[serviceIndex]);
+			Service *service = &(supervisor->services[serviceIndex]);
 
-			if (target->pid != pid)
+			if (service->pid != pid)
 			{
-				(void) (*target->stopFunction)((void *) target);
+				if (kill(service->pid, signal) != 0)
+				{
+					log_error("Failed to send SIGQUIT to service %s with pid %d",
+							  service->name, service->pid);
+				}
 			}
 		}
 	}
@@ -605,7 +472,7 @@ supervisor_signal_process_group(int signal)
  * supervisor_init initializes our PID file and sets our signal handlers.
  */
 static bool
-supervisor_init(const char *pidfile, pid_t *pid)
+supervisor_init(Supervisor *supervisor)
 {
 	bool exitOnQuit = false;
 	log_trace("supervisor_init");
@@ -614,19 +481,21 @@ supervisor_init(const char *pidfile, pid_t *pid)
 	(void) set_signal_handlers(exitOnQuit);
 
 	/* Check that the keeper service is not already running */
-	if (read_pidfile(pidfile, pid))
+	if (read_pidfile(supervisor->pidfile, &(supervisor->pid)))
 	{
 		log_fatal("An instance of pg_autoctl is already running with PID %d, "
-				  "as seen in pidfile \"%s\"", *pid, pidfile);
+				  "as seen in pidfile \"%s\"",
+				  supervisor->pid,
+				  supervisor->pidfile);
 		return false;
 	}
 
 	/* Ok, we're going to start. Time to create our PID file. */
-	*pid = getpid();
+	supervisor->pid = getpid();
 
-	if (!create_pidfile(pidfile, *pid))
+	if (!create_pidfile(supervisor->pidfile, supervisor->pid))
 	{
-		log_fatal("Failed to write our PID to \"%s\"", pidfile);
+		log_fatal("Failed to write our PID to \"%s\"", supervisor->pidfile);
 		return false;
 	}
 
@@ -638,14 +507,186 @@ supervisor_init(const char *pidfile, pid_t *pid)
  * supervisor_stop stops the service and removes the pid file.
  */
 bool
-supervisor_stop(const char *pidfile)
+supervisor_stop(Supervisor *supervisor)
 {
 	log_info("Stop pg_autoctl");
 
-	if (!remove_pidfile(pidfile))
+	if (!remove_pidfile(supervisor->pidfile))
 	{
-		log_error("Failed to remove pidfile \"%s\"", pidfile);
+		log_error("Failed to remove pidfile \"%s\"", supervisor->pidfile);
 		return false;
 	}
+	return true;
+}
+
+
+/*
+ * supervisor_shutdown_sequence handles the shutdown sequence of the supervisor
+ * and insist towards registered services that now is the time to shutdown when
+ * they fail to do so timely.
+ *
+ * The stoppingLoopCounter is zero on the first loop and we do nothing, when
+ * it's 1 we have been waiting once without any child process reported absent
+ * by waitpid(), tell the user we are waiting.
+ *
+ * At 50 loops (typically we add a 100ms wait per loop), send SIGTERM.
+ *
+ * At every 100 loops, send SIGINT.
+ */
+static void
+supervisor_shutdown_sequence(int stoppingLoopCounter)
+{
+	if (stoppingLoopCounter == 1)
+	{
+		log_info("Waiting for subprocesses to terminate.");
+	}
+
+	/*
+	 * If we've been waiting for quite a while for
+	 * sub-processes to terminate. Let's signal again all our
+	 * process group ourselves and see what happens next.
+	 */
+	if (stoppingLoopCounter == 50)
+	{
+		log_info("pg_autoctl services are still running, "
+				 "signaling them with SIGTERM.");
+
+		if (!supervisor_signal_process_group(SIGTERM))
+		{
+			log_warn("Still waiting for subprocesses to terminate.");
+		}
+	}
+
+	/*
+	 * Wow it's been a very long time now...
+	 */
+	if (stoppingLoopCounter > 0 &&
+		stoppingLoopCounter % 100 == 0)
+	{
+		log_info("pg_autoctl services are still running, "
+				 "signaling them with SIGINT.");
+
+		if (!supervisor_signal_process_group(SIGINT))
+		{
+			log_warn("Still waiting for subprocesses to terminate.");
+		}
+	}
+}
+
+
+/*
+ * supervisor_restart_service restarts given service and maintains its MaxR and
+ * MaxT counters.
+ */
+static bool
+supervisor_restart_service(Supervisor *supervisor, Service *service, int status)
+{
+	char *verb = WIFEXITED(status) ? "exited" : "failed";
+	int returnCode = WEXITSTATUS(status);
+	uint64_t now = time(NULL);
+	int logLevel = LOG_ERROR;
+	bool restarted = false;
+
+	/*
+	 * If we're in the middle of a shutdown sequence, we won't have to restart
+	 * services and apply any restart strategy etc.
+	 */
+	if (supervisor->shutdownSequenceInProgress)
+	{
+		log_trace("supervisor_restart_service: shutdownSequenceInProgress");
+		return false;
+	}
+
+	/* refrain from an ERROR message for a TEMPORARY service */
+	if (service->policy == RP_TEMPORARY || returnCode == EXIT_CODE_QUIT)
+	{
+		logLevel = LOG_INFO;
+	}
+
+	log_level(logLevel, "pg_autoctl service %s %s with exit status %d",
+			  service->name, verb, returnCode);
+
+	/*
+	 * We don't restart temporary processes at all: we're done already.
+	 */
+	if (service->policy == RP_TEMPORARY)
+	{
+		return true;
+	}
+
+	/*
+	 * Update our restart strategy counters. Well only the count of retries, we
+	 * want to keep our stopTime as it is so as to know that we've been trying
+	 * to restart 4 times in 10s. It's not 10s each time, it's 10s total.
+	 */
+	service->retries += 1;
+
+	if (service->retries >= SUPERVISOR_SERVICE_MAX_RETRY ||
+		(now - service->stopTime) >= SUPERVISOR_SERVICE_MAX_TIME)
+	{
+		log_fatal("pg_autoctl service %s has already been "
+				  "restarted %d times in the last %d seconds, "
+				  "stopping now",
+				  service->name,
+				  service->retries,
+				  (int) (now - service->startTime));
+
+		/* exit with a non-zero exit code, and process with shutdown sequence */
+		supervisor->cleanExit = false;
+		supervisor->shutdownSequenceInProgress = true;
+
+		(void) supervisor_stop_other_services(supervisor, service->pid);
+
+		return false;
+	}
+
+	/*
+	 * When a transient service has quit happily (with a zero exit status), we
+	 * just shutdown the whole pg_autoctl. We consider this a clean shutdown.
+	 *
+	 * The main use case here is with the initialization of a node: unless
+	 * using the --run option, we want to shutdown as soon as the
+	 * initialisation is done.
+	 *
+	 * That's when using the "create" subcommand as in:
+	 *
+	 *  pg_autoctl create monitor
+	 *  pg_autoctl create postgres
+	 */
+	if (service->policy == RP_TRANSIENT && returnCode == EXIT_CODE_QUIT)
+	{
+		/* exit with a happy exit code, and process with shutdown sequence */
+		supervisor->cleanExit = true;
+		supervisor->shutdownSequenceInProgress = true;
+
+		(void) supervisor_stop_other_services(supervisor, service->pid);
+
+		return false;
+	}
+
+	/*
+	 * Now the service RestartPolicy is either RP_PERMANENT, and we need to
+	 * restart it no matter what, or RP_TRANSIENT with a failure status
+	 * (non-zero return code), and we need to start the service in that case
+	 * too.
+	 */
+	restarted = (*service->startFunction)(service->context, &(service->pid));
+
+	if (!restarted)
+	{
+		log_fatal("Failed to restart service %s", service->name);
+
+		/* exit with a non-zero exit code, and process with shutdown sequence */
+		supervisor->cleanExit = false;
+		supervisor->shutdownSequenceInProgress = true;
+
+		(void) supervisor_stop_other_services(supervisor, service->pid);
+
+		return false;
+	}
+
+	/* we could restart, update our service start time */
+	service->startTime = now;
+
 	return true;
 }

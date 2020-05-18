@@ -26,10 +26,21 @@
 #include "service.h"
 #include "service_postgres_ctl.h"
 #include "signals.h"
+#include "supervisor.h"
+
 
 static void cli_do_service_postgres(int argc, char **argv);
+static void cli_do_service_pgcontroler(int argc, char **argv);
 static void cli_do_service_postgresctl_on(int argc, char **argv);
 static void cli_do_service_postgresctl_off(int argc, char **argv);
+
+CommandLine service_pgcontroler =
+	make_command("pgcontroler",
+				 "pg_autoctl service that start/stop postgres when needed",
+				 CLI_PGDATA_USAGE,
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
+				 cli_do_service_pgcontroler);
 
 CommandLine service_postgres =
 	make_command("postgres",
@@ -40,6 +51,7 @@ CommandLine service_postgres =
 				 cli_do_service_postgres);
 
 static CommandLine *service[] = {
+	&service_pgcontroler,
 	&service_postgres,
 	NULL
 };
@@ -80,7 +92,58 @@ CommandLine do_service_postgres_ctl_commands =
 
 
 /*
- * cli_do_service_postgres starts the process service.
+ * cli_do_pgcontroler starts the process controller service within a
+ * supervision tree. It is used for debug purposes only. When using this entry
+ * point we have a supervisor process that is responsible for only one service:
+ *
+ *  pg_autoctl do service pgcontroler
+ *   - pg_autoctl do service postgres
+ *     - postgres
+ */
+static void
+cli_do_service_pgcontroler(int argc, char **argv)
+{
+	ConfigFilePaths pathnames = { 0 };
+	LocalPostgresServer postgres = { 0 };
+
+	Service subprocesses[] = {
+		"postgres",
+		RP_PERMANENT,
+		-1,
+		&service_postgres_ctl_start,
+		(void *) &(postgres.postgresSetup)
+	};
+
+	int subprocessesCount = sizeof(subprocesses) / sizeof(subprocesses[0]);
+
+	bool exitOnQuit = true;
+
+	/* Establish a handler for signals. */
+	(void) set_signal_handlers(exitOnQuit);
+
+	if (!cli_common_pgsetup_init(&pathnames, &(postgres.postgresSetup)))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (!supervisor_start(subprocesses, subprocessesCount, pathnames.pid))
+	{
+		log_fatal("Failed to start the supervisor, see above for details");
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+}
+
+
+/*
+ * cli_do_service_postgres starts the process service. This is intended to be
+ * used from the supervisor process tree itself. Then we have a main process
+ * that supervises two sub-processes, one of them is cli_do_service_postgres:
+ *
+ *  pg_autoctl
+ *   - pg_autoctl do service postgres
+ *     - postgres
+ *   - pg_autoctl do service keeper|monitor
  */
 static void
 cli_do_service_postgres(int argc, char **argv)

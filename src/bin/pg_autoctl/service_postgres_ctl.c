@@ -112,7 +112,7 @@ service_postgres_ctl_stop(void *context)
 
 
 /*
- * service_postgres_ctl_runprogram runs the node_active protocol service:
+ * service_postgres_ctl_runprogram runs the postgres controler service:
  *
  *   $ pg_autoctl do service postgres --pgdata ...
  */
@@ -190,12 +190,17 @@ service_postgres_ctl_loop(LocalPostgresServer *postgres)
 	LocalExpectedPostgresStatus *localStatus = &(postgres->expectedPgStatus);
 	KeeperStatePostgres *pgStatus = &(localStatus->state);
 
+	/*
+	 * We re-use a service definition because that's handy for our code here,
+	 * but we implement our own policy for handling the service: the keeper
+	 * process might want Postgres to not be running at times, to avoid
+	 * split-brain situations.
+	 */
 	Service postgresService = {
 		"postgres",
+		RP_PERMANENT,           /* actually micro-managed in this loop */
 		-1,
 		&service_postgres_start,
-		&service_postgres_stop,
-		&service_postgres_reload,
 		(void *) pgSetup
 	};
 
