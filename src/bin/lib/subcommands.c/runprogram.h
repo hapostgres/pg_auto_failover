@@ -57,6 +57,9 @@ int snprintf_program_command_line(Program *prog, char *buffer, int size);
 #ifdef RUN_PROGRAM_IMPLEMENTATION
 #undef RUN_PROGRAM_IMPLEMENTATION
 
+static void exit_internal_error(void);
+static void dup2_or_exit(int fildes, int fildes2);
+static void close_or_exit(int fildes);
 static void read_from_pipes(Program *prog,
 							pid_t childPid, int *outpipe, int *errpipe);
 static size_t read_into_buf(int filedes, PQExpBuffer buffer);
@@ -214,8 +217,13 @@ execute_subprogram(Program *prog)
 			 */
 			int stdIn = open(DEV_NULL, O_RDONLY);
 
-			dup2(stdIn, STDIN_FILENO);
-			close(stdIn);
+			if (stdIn == -1)
+			{
+				(void) exit_internal_error();
+			}
+
+			(void) dup2_or_exit(stdIn, STDIN_FILENO);
+			(void) close_or_exit(stdIn);
 
 			/*
 			 * Prepare either for capture the output in pipes, or redirect to
@@ -223,18 +231,18 @@ execute_subprogram(Program *prog)
 			 */
 			if (prog->capture)
 			{
-				dup2(outpipe[1], STDOUT_FILENO);
-				dup2(errpipe[1], STDERR_FILENO);
+				(void) dup2_or_exit(outpipe[1], STDOUT_FILENO);
+				(void) dup2(errpipe[1], STDERR_FILENO);
 
-				close(outpipe[0]);
-				close(outpipe[1]);
-				close(errpipe[0]);
-				close(errpipe[1]);
+				(void) close_or_exit(outpipe[0]);
+				(void) close_or_exit(outpipe[1]);
+				(void) close_or_exit(errpipe[0]);
+				(void) close_or_exit(errpipe[1]);
 			}
 			else
 			{
-				dup2(prog->stdOutFd, STDOUT_FILENO);
-				dup2(prog->stdErrFd, STDERR_FILENO);
+				(void) dup2_or_exit(prog->stdOutFd, STDOUT_FILENO);
+				(void) dup2_or_exit(prog->stdErrFd, STDERR_FILENO);
 			}
 
 			/*
@@ -311,27 +319,11 @@ execute_program(Program *prog)
 	fflush(stdout);
 	fflush(stderr);
 
-	if (dup2(stdIn, STDIN_FILENO) == -1)
-	{
-		fprintf(stdout, "%s\n", strerror(errno));
-		fprintf(stderr, "%s\n", strerror(errno));
-		exit(EXIT_CODE_INTERNAL_ERROR);
-	}
-	close(stdIn);
+	(void) dup2_or_exit(stdIn, STDIN_FILENO);
+	(void) close_or_exit(stdIn);
 
-	if (dup2(prog->stdOutFd, STDOUT_FILENO) == -1)
-	{
-		fprintf(stdout, "%s\n", strerror(errno));
-		fprintf(stderr, "%s\n", strerror(errno));
-		exit(EXIT_CODE_INTERNAL_ERROR);
-	}
-
-	if (dup2(prog->stdErrFd, STDERR_FILENO) == -1)
-	{
-		fprintf(stdout, "%s\n", strerror(errno));
-		fprintf(stderr, "%s\n", strerror(errno));
-		exit(EXIT_CODE_INTERNAL_ERROR);
-	}
+	(void) dup2_or_exit(prog->stdOutFd, STDOUT_FILENO);
+	(void) dup2_or_exit(prog->stdErrFd, STDERR_FILENO);
 
 	/*
 	 * When asked to do so, before creating the child process, we call
@@ -354,9 +346,7 @@ execute_program(Program *prog)
 		prog->returnCode = -1;
 		prog->error = errno;
 
-		fprintf(stdout, "%s\n", strerror(errno));
-		fprintf(stderr, "%s\n", strerror(errno));
-		exit(EXIT_CODE_INTERNAL_ERROR);
+		(void) exit_internal_error();
 	}
 
 	/* now the parent should waitpid() and may use waitprogram() */
@@ -384,6 +374,47 @@ free_program(Program *prog)
 	if (prog->stdErr != NULL)
 	{
 		free(prog->stdErr);
+	}
+}
+
+
+/*
+ * exit_internal_error prints the strerror of the current errno to both stdin
+ * and stdout and exits with the exit code EXIT_CODE_INTERNAL_ERROR.
+ */
+static void
+exit_internal_error()
+{
+	fprintf(stdout, "%s\n", strerror(errno));
+	fprintf(stderr, "%s\n", strerror(errno));
+	exit(EXIT_CODE_INTERNAL_ERROR);
+}
+
+
+/*
+ * dup2_or_exit calls dup2() on given arguments (file descriptors) and exits
+ * when dup2() fails.
+ */
+static void
+dup2_or_exit(int fildes, int fildes2)
+{
+	if (dup2(fildes, fildes2) == -1)
+	{
+		(void) exit_internal_error();
+	}
+}
+
+
+/*
+ * close_or_exit calls close() on given file descriptor and exits when close()
+ * fails.
+ */
+static void
+close_or_exit(int fildes)
+{
+	if (close(fildes) == -1)
+	{
+		(void) exit_internal_error();
 	}
 }
 
