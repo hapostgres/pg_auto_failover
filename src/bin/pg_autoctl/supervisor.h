@@ -66,5 +66,9 @@ bool supervisor_start(Service services[], int serviceCount, const char *pidfile)
 
 bool supervisor_stop(Supervisor *supervisor);
 
+bool supervisor_find_service_pid(const char *pidfile,
+								 const char *serviceName,
+								 pid_t *pid);
+
 
 #endif /* SUPERVISOR_H */

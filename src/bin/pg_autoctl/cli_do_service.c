@@ -29,10 +29,19 @@
 #include "supervisor.h"
 
 
+static void cli_do_service_getpid(int argc, char **argv);
 static void cli_do_service_postgres(int argc, char **argv);
 static void cli_do_service_pgcontroler(int argc, char **argv);
 static void cli_do_service_postgresctl_on(int argc, char **argv);
 static void cli_do_service_postgresctl_off(int argc, char **argv);
+
+CommandLine service_getpid =
+	make_command("getpid",
+				 "get PID of a pg_autoctl running service",
+				 CLI_PGDATA_USAGE " serviceName ",
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
+				 cli_do_service_getpid);
 
 CommandLine service_pgcontroler =
 	make_command("pgcontroler",
@@ -51,6 +60,7 @@ CommandLine service_postgres =
 				 cli_do_service_postgres);
 
 static CommandLine *service[] = {
+	&service_getpid,
 	&service_pgcontroler,
 	&service_postgres,
 	NULL
@@ -89,6 +99,41 @@ CommandLine do_service_postgres_ctl_commands =
 	make_command_set("pgctl",
 					 "Signal the pg_autoctl postgres service", NULL, NULL,
 					 NULL, pgctl);
+
+
+/*
+ * cli_do_service_getpid retrieves the PID of a service running within the
+ * pg_autoctl supervision.
+ */
+static void
+cli_do_service_getpid(int argc, char **argv)
+{
+	ConfigFilePaths pathnames = { 0 };
+	LocalPostgresServer postgres = { 0 };
+	char *serviceName = NULL;
+	pid_t pid = -1;
+
+	if (argc != 1)
+	{
+		commandline_print_usage(&service_getpid, stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+	serviceName = argv[0];
+
+	if (!cli_common_pgsetup_init(&pathnames, &(postgres.postgresSetup)))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (!supervisor_find_service_pid(pathnames.pid, serviceName, &pid))
+	{
+		log_fatal("Failed to find pid for service name \"%s\"", serviceName);
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	fformat(stdout, "%d\n", pid);
+}
 
 
 /*

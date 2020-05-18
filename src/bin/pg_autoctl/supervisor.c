@@ -747,3 +747,59 @@ supervisor_update_pidfile(Supervisor *supervisor)
 
 	return success;
 }
+
+
+/*
+ * supervisor_find_service_pid reads the pidfile contents and process it line
+ * by line to find the pid of the given service name.
+ */
+bool
+supervisor_find_service_pid(const char *pidfile,
+							const char *serviceName,
+							pid_t *pid)
+{
+	long fileSize = 0L;
+	char *fileContents = NULL;
+	char *fileLines[BUFSIZE] = { 0 };
+	int lineCount = 0;
+	int lineNumber;
+
+	if (!file_exists(pidfile))
+	{
+		return false;
+	}
+
+	if (!read_file(pidfile, &fileContents, &fileSize))
+	{
+		return false;
+	}
+
+	lineCount = splitLines(fileContents, fileLines, BUFSIZE);
+
+	for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
+	{
+		char *separator = NULL;
+
+		/* skip first line, that's the supervisor (main) pid */
+		if (lineNumber == 0)
+		{
+			continue;
+		}
+
+		if ((separator = strchr(fileLines[lineNumber], ' ')) == NULL)
+		{
+			log_debug("Failed to find a space separator in line: \"%s\"",
+					  fileLines[lineNumber]);
+			continue;
+		}
+
+		if (streq(serviceName, separator + 1))
+		{
+			*separator = '\0';
+			stringToInt(fileLines[lineNumber], pid);
+			return true;
+		}
+	}
+
+	return false;
+}
