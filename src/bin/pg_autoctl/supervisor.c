@@ -706,6 +706,24 @@ supervisor_restart_service(Supervisor *supervisor, Service *service, int status)
 		return false;
 	}
 
+	/*
+	 * Now we have restarted the service, it has a new PID and we need to
+	 * update our PID file with the new information. Failing to update the PID
+	 * file is a fatal error: the `pg_autoctl restart` command can't work then.
+	 */
+	if (!supervisor_update_pidfile(supervisor))
+	{
+		log_fatal("Failed to update pidfile \"%s\", stopping all services now",
+				  supervisor->pidfile);
+
+		supervisor->cleanExit = false;
+		supervisor->shutdownSequenceInProgress = true;
+
+		(void) supervisor_stop_subprocesses(supervisor);
+
+		return false;
+	}
+
 	/* we could restart, update our service start time */
 	service->startTime = now;
 
