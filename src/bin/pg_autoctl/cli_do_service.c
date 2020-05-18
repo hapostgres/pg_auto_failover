@@ -36,7 +36,7 @@ static void cli_do_service_postgresctl_off(int argc, char **argv);
 
 CommandLine service_pgcontroler =
 	make_command("pgcontroler",
-				 "pg_autoctl service that start/stop postgres when needed",
+				 "pg_autoctl supervised postgres controler",
 				 CLI_PGDATA_USAGE,
 				 CLI_PGDATA_OPTION,
 				 cli_getopt_pgdata,
@@ -44,7 +44,7 @@ CommandLine service_pgcontroler =
 
 CommandLine service_postgres =
 	make_command("postgres",
-				 "pg_autoctl service that start/stop postgres when needed",
+				 "pg_autoctl service that start/stop postgres when asked",
 				 CLI_PGDATA_USAGE,
 				 CLI_PGDATA_OPTION,
 				 cli_getopt_pgdata,
