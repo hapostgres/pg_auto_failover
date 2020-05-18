@@ -266,7 +266,7 @@ supervisor_loop(pid_t start_pid,
 					 * sub-processes to terminate. Let's signal again all our
 					 * process group ourselves and see what happens next.
 					 */
-					else if (stoppingLoopCounter == 50)
+					if (stoppingLoopCounter == 50)
 					{
 						log_info("pg_autoctl services are still running, "
 								 "signaling them with SIGTERM.");
@@ -281,8 +281,8 @@ supervisor_loop(pid_t start_pid,
 					/*
 					 * Wow it's been a very long time now...
 					 */
-					else if (stoppingLoopCounter > 0 &&
-							 stoppingLoopCounter % 100 == 0)
+					if (stoppingLoopCounter > 0 &&
+						stoppingLoopCounter % 100 == 0)
 					{
 						log_info("pg_autoctl services are still running, "
 								 "signaling them with SIGINT.");

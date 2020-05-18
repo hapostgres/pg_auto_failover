@@ -984,9 +984,9 @@ pg_ctl_start(const char *pg_ctl,
 
 /*
  * pg_ctl_postgres runs the "postgres" command-line in the current process,
- * with the same options as we would use in pg_ctl_start. pg_ctl_postmaster
- * does not fork a Postgres process in the background, we keep the control over
- * the postmaster process. Think exec() rather then fork().
+ * with the same options as we would use in pg_ctl_start. pg_ctl_postgres does
+ * not fork a Postgres process in the background, we keep the control over the
+ * postmaster process. Think exec() rather then fork().
  *
  * This function will take over the current standard output and standard error
  * file descriptor, closing them and then giving control to them to Postgres

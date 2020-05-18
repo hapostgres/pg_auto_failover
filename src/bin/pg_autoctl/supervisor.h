@@ -13,28 +13,18 @@
 #include <signal.h>
 
 /*
- * start and stop function used in the struct Service.
+ * The supervisor works with an array of Service entries. Each service defines
+ * its behavior thanks to a start function, a stop function, and a reload
+ * function. Those are called at different points to adjust to the situation as
+ * seen by the supervisor.
  *
- * start functions get passed a context that is manually provided in the
- * structure, typically a Monitor struct pointer for the monitor service and a
- * Keeper struct pointer for a keeper service.
- *
- * stop functions get passed a context that is a pointer to the Service struct
- * definition of the service being asked to stop, and we use a void * data type
- * here to break out of a mutual recursive definition.
- *
- * reload functions get passed a context that is a pointer to the Service
- * struct definition of the service being asked to stop.
+ * In particular, services may be started more than once when they fail.
  */
-typedef bool (*ServiceStartFunction)(void *context, pid_t *pid);
-typedef bool (*ServiceStopFunction)(void *context);
-typedef void (*ServiceReloadFunction)(void *context);
-
 typedef struct Service
 {
 	char name[NAMEDATALEN];             /* Service name for the user */
 	pid_t pid;                          /* Service PID */
-	ServiceStartFunction startFunction; /* how to re-start the service */
+	bool (*startFunction)(void *context, pid_t *pid);
 	bool (*stopFunction)(struct Service *service);
 	void (*reloadFunction)(struct Service *service);
 	void *context;             /* Service Context (Monitor or Keeper struct) */
