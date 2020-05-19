@@ -63,7 +63,7 @@ typedef struct RestartCounters
 {
 	int count;                  /* how many restarts including first start */
 	int position;               /* array index */
-	uint64_t startTime[SUPERVISOR_SERVICE_MAX_RETRY + 1];
+	uint64_t startTime[SUPERVISOR_SERVICE_MAX_RETRY];
 }  RestartCounters;
 
 /*

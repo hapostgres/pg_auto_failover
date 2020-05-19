@@ -651,8 +651,7 @@ supervisor_restart_service(Supervisor *supervisor, Service *service, int status)
 	if (supervisor_may_restart(service))
 	{
 		/* update our ring buffer: move our clock hand */
-		int size = SUPERVISOR_SERVICE_MAX_RETRY + 1;
-		int position = (counters->position + 1) % size;
+		int position = (counters->position + 1) % SUPERVISOR_SERVICE_MAX_RETRY;
 
 		/* we have restarted once more */
 		counters->count += 1;
@@ -752,9 +751,6 @@ supervisor_may_restart(Service *service)
 
 	char timestring[BUFSIZE] = { 0 };
 
-	/* we allow SUPERVISOR_SERVICE_MAX_RETRY retries, we count one more */
-	int size = SUPERVISOR_SERVICE_MAX_RETRY + 1;
-
 	log_debug("supervisor_may_restart: service \"%s\" restarted %d times, "
 			  "most recently at %s, %d seconds ago",
 			  service->name,
@@ -762,21 +758,21 @@ supervisor_may_restart(Service *service)
 			  epoch_to_string(counters->startTime[position], timestring),
 			  (int) (now - counters->startTime[position]));
 
-	/* until we have restarted MaxR+1 times, we know we can restart */
+	/* until we have restarted MaxR times, we know we can restart */
 	if (counters->count <= SUPERVISOR_SERVICE_MAX_RETRY)
 	{
 		return true;
 	}
 
 	/*
-	 * When we have restarted MaxR+1 times or more, the only case when we can't
+	 * When we have restarted more than MaxR times, the only case when we can't
 	 * restart again is if the oldest entry in the counters startTime array is
 	 * older than our MaxT.
 	 *
 	 * The oldest entry in the ring buffer is the one just after the current
 	 * one:
 	 */
-	position = (position + 1) % size;
+	position = (position + 1) % SUPERVISOR_SERVICE_MAX_RETRY;
 	oldestRestartTime = counters->startTime[position];
 
 	if ((now - oldestRestartTime) <= SUPERVISOR_SERVICE_MAX_TIME)
@@ -785,7 +781,7 @@ supervisor_may_restart(Service *service)
 				  "restarted %d times in the last %d seconds, "
 				  "stopping now",
 				  service->name,
-				  size,
+				  SUPERVISOR_SERVICE_MAX_RETRY,
 				  (int) (now - oldestRestartTime));
 
 		return false;
