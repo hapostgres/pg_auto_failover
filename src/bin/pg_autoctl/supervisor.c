@@ -489,7 +489,6 @@ supervisor_stop(Supervisor *supervisor)
 static void
 supervisor_handle_signals(Supervisor *supervisor)
 {
-	bool shutdownNow = false;
 	int signal = asked_to_stop_fast ? SIGINT : SIGTERM;
 	const char *signalStr = asked_to_stop_fast ? "SIGINT" : "SIGTERM";
 
@@ -499,46 +498,37 @@ supervisor_handle_signals(Supervisor *supervisor)
 		return;
 	}
 
-	/* use new signal, unless we were already using SIGINT */
+	/* once we got SIGINT, we always use SIGINT, even when receiving SIGTERM */
 	if (supervisor->shutdownSignal != SIGINT)
 	{
 		supervisor->shutdownSignal = signal;
 	}
 
-	/* only log once about terminating processes */
+	log_info("pg_autoctl received signal %s, terminating", signalStr);
+
+	/* the first time we receive a signal, set the shutdown properties */
 	if (!supervisor->shutdownSequenceInProgress)
 	{
-		log_info("pg_autoctl received signal %s, terminating", signalStr);
-
 		supervisor->cleanExit = true;
 		supervisor->shutdownSequenceInProgress = true;
-
-		shutdownNow = true;
-	}
-	else if (asked_to_stop_fast)
-	{
-		/*
-		 * Even when we are already shutting down, we process SIGINT again
-		 * and log about it.
-		 */
-		log_info("pg_autoctl received signal SIGINT, terminating");
-
-		shutdownNow = true;
 	}
 
-	/*
-	 * Initiate the stop sequence the first time we receive SIGTERM and then
-	 * each time we receive SIGINT.
-	 */
-	if (shutdownNow)
-	{
-		/* stop all the services. */
-		(void) supervisor_stop_subprocesses(supervisor);
+	/* forward the signal to all our service to terminate them */
+	(void) supervisor_stop_subprocesses(supervisor);
 
-		/* allow for processing SIGINT again next time it's sent: reset */
-		if (signal == SIGINT)
+	/* allow for processing signals again: reset signal variables */
+	switch (signal)
+	{
+		case SIGINT:
 		{
 			asked_to_stop_fast = 0;
+			break;
+		}
+
+		case SIGTERM:
+		{
+			asked_to_stop = 0;
+			break;
 		}
 	}
 }
