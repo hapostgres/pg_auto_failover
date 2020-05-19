@@ -284,19 +284,26 @@ supervisor_loop(Supervisor *supervisor)
 				{
 					/* stop all the services. */
 					(void) supervisor_stop_subprocesses(supervisor);
-
-
-					/* allow for processing SIGINT again next time it's sent */
-					if (asked_to_stop_fast)
-					{
-						asked_to_stop_fast = 0;
-					}
 				}
 
 				if (supervisor->shutdownSequenceInProgress)
 				{
 					(void) supervisor_shutdown_sequence(stoppingLoopCounter++);
 				}
+
+				/*
+				 * Allow for processing SIGINT again next time it's sent.
+				 *
+				 * Be careful to only reset asked_to_stop_fast when we are
+				 * already processing it, in case we receive the signal during
+				 * this loop: we don't want to reset with without having first
+				 * processed the signal.
+				 */
+				if (shutdownNow && asked_to_stop_fast)
+				{
+					asked_to_stop_fast = 0;
+				}
+
 				break;
 			}
 
