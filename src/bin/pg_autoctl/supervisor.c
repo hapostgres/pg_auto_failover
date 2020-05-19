@@ -282,14 +282,12 @@ supervisor_loop(Supervisor *supervisor)
 				 */
 				if (shutdownNow)
 				{
-					/*
-					 * Stop all the services.
-					 */
-					if (stoppingLoopCounter == 0)
-					{
-						(void) supervisor_stop_subprocesses(supervisor);
-					}
+					/* stop all the services. */
+					(void) supervisor_stop_subprocesses(supervisor);
+				}
 
+				if (supervisor->shutdownSequenceInProgress)
+				{
 					(void) supervisor_shutdown_sequence(stoppingLoopCounter++);
 				}
 
