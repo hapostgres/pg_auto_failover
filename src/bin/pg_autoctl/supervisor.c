@@ -284,19 +284,19 @@ supervisor_loop(Supervisor *supervisor)
 				{
 					/* stop all the services. */
 					(void) supervisor_stop_subprocesses(supervisor);
+
+
+					/* allow for processing SIGINT again next time it's sent */
+					if (asked_to_stop_fast)
+					{
+						asked_to_stop_fast = 0;
+					}
 				}
 
 				if (supervisor->shutdownSequenceInProgress)
 				{
 					(void) supervisor_shutdown_sequence(stoppingLoopCounter++);
 				}
-
-				/* allow for processing SIGINT again next time it's sent */
-				if (asked_to_stop_fast)
-				{
-					asked_to_stop_fast = 0;
-				}
-
 				break;
 			}
 
