@@ -50,7 +50,7 @@ typedef enum
  * SUPERVISOR_SERVICE_MAX_RETRY is MaxR, SUPERVISOR_SERVICE_MAX_TIME is MaxT.
  */
 #define SUPERVISOR_SERVICE_MAX_RETRY 5
-#define SUPERVISOR_SERVICE_MAX_TIME 10     /* in seconds */
+#define SUPERVISOR_SERVICE_MAX_TIME 300 /* in seconds */
 
 /*
  * We use a "ring buffer" of the MaxR most recent retries.
