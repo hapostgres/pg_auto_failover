@@ -66,7 +66,6 @@ void
 catch_int(int sig)
 {
 	asked_to_stop_fast = 1;
-	log_warn("Fast shutdown: received signal %s", strsignal(sig));
 	pqsignal(sig, catch_int);
 }
 
@@ -78,7 +77,6 @@ void
 catch_term(int sig)
 {
 	asked_to_stop = 1;
-	log_warn("Smart shutdown: received signal %s", strsignal(sig));
 	pqsignal(sig, catch_term);
 }
 
@@ -90,6 +88,5 @@ void
 catch_quit(int sig)
 {
 	/* default signal handler disposition is to core dump, we don't */
-	log_warn("Immediate shutdown: received signal %s", strsignal(sig));
 	exit(EXIT_CODE_QUIT);
 }

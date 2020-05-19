@@ -185,6 +185,8 @@ supervisor_loop(Supervisor *supervisor)
 		/* If necessary, now is a good time to reload services */
 		if (asked_to_reload)
 		{
+			log_info("pg_autoctl received a SIGHUP signal, "
+					 "reloading configuration");
 			(void) supervisor_reload_services(supervisor);
 		}
 
@@ -222,8 +224,14 @@ supervisor_loop(Supervisor *supervisor)
 				 */
 				if (asked_to_stop || asked_to_stop_fast)
 				{
-					supervisor->cleanExit = true;
-					supervisor->shutdownSequenceInProgress = true;
+					if (!supervisor->shutdownSequenceInProgress)
+					{
+						log_info("pg_autoctl received signal %s, terminating",
+								 asked_to_stop_fast ? "SIGINT" : "SIGTERM");
+
+						supervisor->cleanExit = true;
+						supervisor->shutdownSequenceInProgress = true;
+					}
 
 					/*
 					 * Stop all the services.
