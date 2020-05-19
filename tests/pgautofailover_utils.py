@@ -774,7 +774,7 @@ class DataNode(PGNode):
         try:
             destroy = PGAutoCtl(self)
             destroy.execute("pg_autoctl drop node --destroy",
-                            'drop', 'node', '--destroy')
+                            'drop', 'node', '--destroy', timeout=3)
         except Exception as e:
             print(str(e))
 

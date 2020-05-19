@@ -24,7 +24,9 @@ def managed_nspopen(*args, **kwds):
             # send SIGKILL to the process and wait for it to die if it's still
             # running
             proc.kill()
-            proc.communicate()
+            # If it's not dead after 2 seconds we throw an error
+            proc.communicate(timeout=2)
+
         # release proxy process resourecs
         proc.release()
 
