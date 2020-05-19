@@ -218,9 +218,9 @@ cli_do_service_restart_postgres(int argc, char **argv)
 
 
 /*
- * cli_do_pgcontroler starts the process controller service within a
- * supervision tree. It is used for debug purposes only. When using this entry
- * point we have a supervisor process that is responsible for only one service:
+ * cli_do_pgcontroler starts the process controler service within a supervision
+ * tree. It is used for debug purposes only. When using this entry point we
+ * have a supervisor process that is responsible for only one service:
  *
  *  pg_autoctl do service pgcontroler
  *   - pg_autoctl do service postgres

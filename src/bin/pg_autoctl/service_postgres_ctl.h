@@ -16,9 +16,7 @@
 #include "keeper_config.h"
 
 bool service_postgres_ctl_start(void *context, pid_t *pid);
-bool service_postgres_ctl_stop(void *context);
 void service_postgres_ctl_runprogram(void);
 void service_postgres_ctl_loop(LocalPostgresServer *postgres);
-void service_postgres_ctl_reload(void *context);
 
 #endif /* SERVICE_POSTGRES_CTL_H */

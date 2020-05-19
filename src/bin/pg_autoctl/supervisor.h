@@ -39,11 +39,6 @@ typedef enum
  * configuration is wrong or the data directory damaged beyond repair or for
  * some reasons, the service can't be restarted.
  *
- * There is no magic or heuristic that can help us decide if a failure is
- * transient or permanent, so we implement the simple thing: we restart our
- * dead service up to 5 times in a row, and spend up to 10 seconds retrying,
- * and stop as soon as one of those conditions is reached.
- *
  * This strategy is inspired by http://erlang.org/doc/man/supervisor.html and
  * http://erlang.org/doc/design_principles/sup_princ.html#maximum-restart-intensity
  *

@@ -807,7 +807,9 @@ pg_ctl_initdb(const char *pg_ctl, const char *pgdata)
 	program = run_program(pg_ctl, "initdb",
 						  "--silent",
 						  "--pgdata", pgdata,
-						  "-o", "'--auth=trust'", /* avoid warning message */
+
+	                      /* avoid warning message */
+						  "--option", "'--auth=trust'",
 						  NULL);
 	log_info("%s initdb -s -D %s", pg_ctl, pgdata);
 

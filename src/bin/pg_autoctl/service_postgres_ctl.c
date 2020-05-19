@@ -91,27 +91,6 @@ service_postgres_ctl_start(void *context, pid_t *pid)
 
 
 /*
- * service_postgres_stop stops the postgres service, using pg_ctl stop.
- */
-bool
-service_postgres_ctl_stop(void *context)
-{
-	Service *service = (Service *) context;
-
-	log_info("Stopping pg_autoctl: start/stop postgres service");
-
-	if (kill(service->pid, SIGTERM) != 0)
-	{
-		log_error("Failed to send SIGTERM to pid %d for service %s",
-				  service->pid, service->name);
-		return false;
-	}
-
-	return true;
-}
-
-
-/*
  * service_postgres_ctl_runprogram runs the postgres controler service:
  *
  *   $ pg_autoctl do service postgres --pgdata ...
@@ -385,48 +364,18 @@ service_postgres_ctl_loop(LocalPostgresServer *postgres)
 
 
 /*
- * service_postgres_ctl_reload sends a SIGHUP to the controller process.
- */
-void
-service_postgres_ctl_reload(void *context)
-{
-	Service *service = (Service *) context;
-
-	log_info("Reloading pg_autoctl postgres controller service [%d]",
-			 service->pid);
-
-	if (kill(service->pid, SIGHUP) != 0)
-	{
-		log_error(
-			"Failed to send SIGHUP to pg_autoctl postgres controller pid %d: %m",
-			service->pid);
-	}
-}
-
-
-/*
  * ensure_postgres_status ensures that the current keeper's state is met with
  * the current PostgreSQL status, at minimum that PostgreSQL is running when
  * it's expected to be, etc.
  *
- * The design choice here is in between re-using the state file for the FSM and
- * using a dedicated file or a PIPE to pass direct Postgres service commands
- * (start, stop, restart) to the sub-process.
+ * The Postgres controler process (the code in this file) takes orders from
+ * another process, either the monitor "listener" or the keeper "node active"
+ * process. The orders are sent through a shared file containing the expected
+ * status of the Postgres service.
  *
- * - using a PIPE makes the code complex: setting up the PIPE is ok, but then
- *   we need a reader and writer that talk to each other (so we need a command
- *   parser of sorts), and the reader itself needs to use a loop around
- *   select(2) to be able to also process signals, etc
- *
- * - using a dedicated file means that we now need to handle "stale" file
- *   staying around when one of the processes die and is restarted, and more
- *   generally that the dedicated command file(s) is always in sync with the
- *   FSM
- *
- * - using the state file from the FSM directly makes things overall simpler,
- *   the only drawback is that this is one more place where we need to
- *   implement the FSM semantics, it's not just the transition functions... it
- *   was never "just the transition functions" that said.
+ * This process only reads the file, and the "other" process is responsible for
+ * writing it: deleting a stale version of it at startup, creating it, updating
+ * it.
  */
 static bool
 ensure_postgres_status(LocalPostgresServer *postgres, Service *service)
