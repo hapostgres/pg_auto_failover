@@ -92,6 +92,8 @@ typedef struct Supervisor
 	pid_t pid;
 	bool cleanExit;
 	bool shutdownSequenceInProgress;
+	int shutdownSignal;
+	int stoppingLoopCounter;
 } Supervisor;
 
 

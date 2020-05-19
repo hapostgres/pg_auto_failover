@@ -46,7 +46,9 @@ static bool supervisor_signal_process_group(int signal);
 
 static void supervisor_reload_services(Supervisor *supervisor);
 
-static void supervisor_shutdown_sequence(int stoppingLoopCounter);
+static void supervisor_handle_signals(Supervisor *supervisor);
+
+static void supervisor_shutdown_sequence(Supervisor *supervisor);
 
 static bool supervisor_restart_service(Supervisor *supervisor,
 									   Service *service,
@@ -171,7 +173,6 @@ static bool
 supervisor_loop(Supervisor *supervisor)
 {
 	int subprocessCount = supervisor->serviceCount;
-	int stoppingLoopCounter = 0;
 	bool firstLoop = true;
 
 	/* wait until all subprocesses are done */
@@ -232,76 +233,15 @@ supervisor_loop(Supervisor *supervisor)
 				 * children, it's all good. It's the expected case when
 				 * everything is running smoothly, so enjoy and sleep for
 				 * awhile.
-				 *
-				 * That said, we could have received a signal that instructs a
-				 * shutdown, such as SIGTERM or SIGINT. In that case we need to
-				 * do one of these things:
-				 *
-				 * - first time we receive the signal, begin a shutdown
-				 *   sequence for all services and the main supervisor itself,
-				 *
-				 * - when receiving the signal again, if it's a SIGTERM
-				 *   continue the shutdown sequence,
-				 *
-				 * - when receiving a SIGINT forward it to our services so as
-				 *   to finish as fast as we can.
-				 *
-				 * Sending SIGTERM and then later SIGINT if the process is
-				 * still running is a classic way to handle service shutdown.
 				 */
-				bool shutdownNow = false;
 
-				if (asked_to_stop || asked_to_stop_fast)
-				{
-					if (!supervisor->shutdownSequenceInProgress)
-					{
-						log_info("pg_autoctl received signal %s, terminating",
-								 asked_to_stop_fast ? "SIGINT" : "SIGTERM");
+				/* handle SIGTERM and SIGINT if we've received them */
+				(void) supervisor_handle_signals(supervisor);
 
-						supervisor->cleanExit = true;
-						supervisor->shutdownSequenceInProgress = true;
-
-						shutdownNow = true;
-					}
-					else if (asked_to_stop_fast)
-					{
-						/*
-						 * Even when we are already shutting down, we process
-						 * SIGINT again and log about it.
-						 */
-						log_info(
-							"pg_autoctl received signal SIGINT, terminating");
-
-						shutdownNow = true;
-					}
-				}
-
-				/*
-				 * Initiate the stop sequence the first time we receive SIGTERM
-				 * and then each time we receive SIGINT.
-				 */
-				if (shutdownNow)
-				{
-					/* stop all the services. */
-					(void) supervisor_stop_subprocesses(supervisor);
-				}
-
+				/* if we're in a shutdown sequence, make sure we terminate */
 				if (supervisor->shutdownSequenceInProgress)
 				{
-					(void) supervisor_shutdown_sequence(stoppingLoopCounter++);
-				}
-
-				/*
-				 * Allow for processing SIGINT again next time it's sent.
-				 *
-				 * Be careful to only reset asked_to_stop_fast when we are
-				 * already processing it, in case we receive the signal during
-				 * this loop: we don't want to reset with without having first
-				 * processed the signal.
-				 */
-				if (shutdownNow && asked_to_stop_fast)
-				{
-					asked_to_stop_fast = 0;
+					(void) supervisor_shutdown_sequence(supervisor);
 				}
 
 				break;
@@ -530,6 +470,77 @@ supervisor_stop(Supervisor *supervisor)
 
 
 /*
+ * If we have received a signal that instructs a shutdown, such as SIGTERM or
+ * SIGINT, then we need to do one of these things:
+ *
+ * - first time we receive the signal, begin a shutdown sequence for all
+ *   services and the main supervisor itself,
+ *
+ * - when receiving the signal again, if it's a SIGTERM continue the shutdown
+ *   sequence,
+ *
+ * - when receiving a SIGINT forward it to our services so as to finish as fast
+ *   as we can, and from then on always use SIGINT (to that end we use
+ *   supervisor->shutdownSignal)
+ *
+ * Sending SIGTERM and then later SIGINT if the process is still running is a
+ * classic way to handle service shutdown.
+ */
+static void
+supervisor_handle_signals(Supervisor *supervisor)
+{
+	bool shutdownNow = false;
+	int signal = asked_to_stop_fast ? SIGINT : SIGTERM;
+	const char *signalStr = asked_to_stop_fast ? "SIGINT" : "SIGTERM";
+
+	if (asked_to_stop || asked_to_stop_fast)
+	{
+		/* use new signal, unless we were already using SIGINT */
+		if (supervisor->shutdownSignal != SIGINT)
+		{
+			supervisor->shutdownSignal = signal;
+		}
+
+		if (!supervisor->shutdownSequenceInProgress)
+		{
+			log_info("pg_autoctl received signal %s, terminating", signalStr);
+
+			supervisor->cleanExit = true;
+			supervisor->shutdownSequenceInProgress = true;
+
+			shutdownNow = true;
+		}
+		else if (asked_to_stop_fast)
+		{
+			/*
+			 * Even when we are already shutting down, we process SIGINT again
+			 * and log about it.
+			 */
+			log_info("pg_autoctl received signal SIGINT, terminating");
+
+			shutdownNow = true;
+		}
+	}
+
+	/*
+	 * Initiate the stop sequence the first time we receive SIGTERM and then
+	 * each time we receive SIGINT.
+	 */
+	if (shutdownNow)
+	{
+		/* stop all the services. */
+		(void) supervisor_stop_subprocesses(supervisor);
+
+		/* allow for processing SIGINT again next time it's sent: reset */
+		if (asked_to_stop_fast)
+		{
+			asked_to_stop_fast = 0;
+		}
+	}
+}
+
+
+/*
  * supervisor_shutdown_sequence handles the shutdown sequence of the supervisor
  * and insist towards registered services that now is the time to shutdown when
  * they fail to do so timely.
@@ -538,16 +549,15 @@ supervisor_stop(Supervisor *supervisor)
  * it's 1 we have been waiting once without any child process reported absent
  * by waitpid(), tell the user we are waiting.
  *
- * At 50 loops (typically we add a 100ms wait per loop), send SIGTERM.
+ * At 50 loops (typically we add a 100ms wait per loop), send either SIGTERM or
+ * SIGINT.
  *
  * At every 100 loops, send SIGINT.
  */
 static void
-supervisor_shutdown_sequence(int stoppingLoopCounter)
+supervisor_shutdown_sequence(Supervisor *supervisor)
 {
-	int signal = asked_to_stop_fast ? SIGINT : SIGTERM;
-
-	if (stoppingLoopCounter == 1)
+	if (supervisor->stoppingLoopCounter == 1)
 	{
 		log_info("Waiting for subprocesses to terminate.");
 	}
@@ -557,13 +567,13 @@ supervisor_shutdown_sequence(int stoppingLoopCounter)
 	 * Let's signal again all our process group ourselves and see what happens
 	 * next.
 	 */
-	if (stoppingLoopCounter == 50)
+	if (supervisor->stoppingLoopCounter == 50)
 	{
 		log_info("pg_autoctl services are still running, "
 				 "signaling them with %s.",
-				 signal == SIGINT ? "SIGINT" : "SIGTERM");
+				 supervisor->shutdownSignal == SIGINT ? "SIGINT" : "SIGTERM");
 
-		if (!supervisor_signal_process_group(signal))
+		if (!supervisor_signal_process_group(supervisor->shutdownSignal))
 		{
 			log_warn("Still waiting for subprocesses to terminate.");
 		}
@@ -572,17 +582,23 @@ supervisor_shutdown_sequence(int stoppingLoopCounter)
 	/*
 	 * Wow it's been a very long time now...
 	 */
-	if (stoppingLoopCounter > 0 &&
-		stoppingLoopCounter % 100 == 0)
+	if (supervisor->stoppingLoopCounter > 0 &&
+		supervisor->stoppingLoopCounter % 100 == 0)
 	{
 		log_info("pg_autoctl services are still running, "
 				 "signaling them with SIGINT.");
 
-		if (!supervisor_signal_process_group(SIGINT))
+		/* raise the signal from SIGTERM to SIGINT now */
+		supervisor->shutdownSignal = SIGINT;
+
+		if (!supervisor_signal_process_group(supervisor->shutdownSignal))
 		{
 			log_warn("Still waiting for subprocesses to terminate.");
 		}
 	}
+
+	/* increment our counter */
+	supervisor->stoppingLoopCounter++;
 }
 
 
