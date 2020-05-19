@@ -725,11 +725,9 @@ static bool
 supervisor_may_restart(Service *service)
 {
 	uint64_t now = time(NULL);
-	uint64_t oldestRestart = time(NULL);
 	RestartCounters *counters = &(service->restartCounters);
 	int position = counters->position;
-	int restarts = 0;
-	int count = 0;
+	uint64_t oldestRestartTime = 0;
 
 	char timestring[BUFSIZE] = { 0 };
 
@@ -743,43 +741,31 @@ supervisor_may_restart(Service *service)
 			  epoch_to_string(counters->startTime[position], timestring),
 			  (int) (now - counters->startTime[position]));
 
-	for (; position != counters->position || count == 0;)
+	/* until we have restarted MaxR+1 times, we know we can restart */
+	if (counters->count <= SUPERVISOR_SERVICE_MAX_RETRY)
 	{
-		uint64_t restartTime = counters->startTime[position];
-
-		/* if we have ever restarted once, only loop once */
-		if (count == counters->count)
-		{
-			break;
-		}
-
-		if ((now - restartTime) <= SUPERVISOR_SERVICE_MAX_TIME)
-		{
-			/* we loop through the ring buffer in restart order */
-			oldestRestart = restartTime;
-			restarts++;
-
-			log_trace("supervisor_may_restart: service \"%s\" restarted "
-					  " at %s, %d seconds ago",
-					  service->name,
-					  epoch_to_string(restartTime, timestring),
-					  (int) (now - restartTime));
-		}
-
-		count++;
-
-		/* progress backward in time in the ring buffer */
-		position = position == 0 ? size - 1 : position - 1;
+		return true;
 	}
 
-	if (restarts > SUPERVISOR_SERVICE_MAX_RETRY)
+	/*
+	 * When we have restarted MaxR+1 times or more, the only case when we can't
+	 * restart again is if the oldest entry in the counters startTime array is
+	 * older than our MaxT.
+	 *
+	 * The oldest entry in the ring buffer is the one just after the current
+	 * one:
+	 */
+	position = (position + 1) % size;
+	oldestRestartTime = counters->startTime[position];
+
+	if ((now - oldestRestartTime) <= SUPERVISOR_SERVICE_MAX_TIME)
 	{
 		log_fatal("pg_autoctl service %s has already been "
 				  "restarted %d times in the last %d seconds, "
 				  "stopping now",
 				  service->name,
-				  restarts,
-				  (int) (now - oldestRestart));
+				  size,
+				  (int) (now - oldestRestartTime));
 
 		return false;
 	}
