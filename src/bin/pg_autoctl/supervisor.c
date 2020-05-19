@@ -532,7 +532,7 @@ supervisor_handle_signals(Supervisor *supervisor)
 		(void) supervisor_stop_subprocesses(supervisor);
 
 		/* allow for processing SIGINT again next time it's sent: reset */
-		if (asked_to_stop_fast)
+		if (signal == SIGINT)
 		{
 			asked_to_stop_fast = 0;
 		}
