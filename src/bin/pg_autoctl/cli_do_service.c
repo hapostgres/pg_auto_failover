@@ -31,7 +31,7 @@
 
 static void cli_do_service_getpid(int argc, char **argv);
 static void cli_do_service_postgres(int argc, char **argv);
-static void cli_do_service_pgcontroler(int argc, char **argv);
+static void cli_do_service_pgcontroller(int argc, char **argv);
 static void cli_do_service_postgresctl_on(int argc, char **argv);
 static void cli_do_service_postgresctl_off(int argc, char **argv);
 
@@ -45,13 +45,13 @@ CommandLine service_getpid =
 				 cli_getopt_pgdata,
 				 cli_do_service_getpid);
 
-CommandLine service_pgcontroler =
-	make_command("pgcontroler",
-				 "pg_autoctl supervised postgres controler",
+CommandLine service_pgcontroller =
+	make_command("pgcontroller",
+				 "pg_autoctl supervised postgres controller",
 				 CLI_PGDATA_USAGE,
 				 CLI_PGDATA_OPTION,
 				 cli_getopt_pgdata,
-				 cli_do_service_pgcontroler);
+				 cli_do_service_pgcontroller);
 
 CommandLine service_postgres =
 	make_command("postgres",
@@ -63,7 +63,7 @@ CommandLine service_postgres =
 
 CommandLine service_restart_postgres =
 	make_command("postgres",
-				 "Restart the pg_autoctl postgres controler service",
+				 "Restart the pg_autoctl postgres controller service",
 				 CLI_PGDATA_USAGE,
 				 CLI_PGDATA_OPTION,
 				 cli_getopt_pgdata,
@@ -82,7 +82,7 @@ CommandLine do_service_restart_commands =
 static CommandLine *service[] = {
 	&do_service_restart_commands,
 	&service_getpid,
-	&service_pgcontroler,
+	&service_pgcontroller,
 	&service_postgres,
 	NULL
 };
@@ -218,16 +218,16 @@ cli_do_service_restart_postgres(int argc, char **argv)
 
 
 /*
- * cli_do_pgcontroler starts the process controler service within a supervision
+ * cli_do_pgcontroller starts the process controller service within a supervision
  * tree. It is used for debug purposes only. When using this entry point we
  * have a supervisor process that is responsible for only one service:
  *
- *  pg_autoctl do service pgcontroler
+ *  pg_autoctl do service pgcontroller
  *   - pg_autoctl do service postgres
  *     - postgres
  */
 static void
-cli_do_service_pgcontroler(int argc, char **argv)
+cli_do_service_pgcontroller(int argc, char **argv)
 {
 	ConfigFilePaths pathnames = { 0 };
 	LocalPostgresServer postgres = { 0 };
@@ -296,7 +296,7 @@ cli_do_service_postgres(int argc, char **argv)
 
 
 /*
- * cli_do_service_postgresctl_on asks the pg_autoctl Postgres controler service
+ * cli_do_service_postgresctl_on asks the pg_autoctl Postgres controller service
  * to ensure that Postgres is running.
  */
 static void
@@ -338,7 +338,7 @@ cli_do_service_postgresctl_on(int argc, char **argv)
 
 
 /*
- * cli_do_service_postgresctl_on asks the pg_autoctl Postgres controler service
+ * cli_do_service_postgresctl_on asks the pg_autoctl Postgres controller service
  * to ensure that Postgres is stopped.
  */
 static void

@@ -91,7 +91,7 @@ service_postgres_ctl_start(void *context, pid_t *pid)
 
 
 /*
- * service_postgres_ctl_runprogram runs the postgres controler service:
+ * service_postgres_ctl_runprogram runs the postgres controller service:
  *
  *   $ pg_autoctl do service postgres --pgdata ...
  */
@@ -207,7 +207,7 @@ service_postgres_ctl_loop(LocalPostgresServer *postgres)
 			if (!shutdownSequenceInProgress)
 			{
 				shutdownSequenceInProgress = true;
-				log_info("Postgres controler service received signal %s, "
+				log_info("Postgres controller service received signal %s, "
 						 "terminating",
 						 asked_to_stop_fast ? "SIGINT" : "SIGTERM");
 			}
@@ -368,7 +368,7 @@ service_postgres_ctl_loop(LocalPostgresServer *postgres)
  * the current PostgreSQL status, at minimum that PostgreSQL is running when
  * it's expected to be, etc.
  *
- * The Postgres controler process (the code in this file) takes orders from
+ * The Postgres controller process (the code in this file) takes orders from
  * another process, either the monitor "listener" or the keeper "node active"
  * process. The orders are sent through a shared file containing the expected
  * status of the Postgres service.
