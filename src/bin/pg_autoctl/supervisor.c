@@ -493,33 +493,37 @@ supervisor_handle_signals(Supervisor *supervisor)
 	int signal = asked_to_stop_fast ? SIGINT : SIGTERM;
 	const char *signalStr = asked_to_stop_fast ? "SIGINT" : "SIGTERM";
 
-	if (asked_to_stop || asked_to_stop_fast)
+	/* if no signal has been received, we have nothing to do here */
+	if (!(asked_to_stop || asked_to_stop_fast))
 	{
-		/* use new signal, unless we were already using SIGINT */
-		if (supervisor->shutdownSignal != SIGINT)
-		{
-			supervisor->shutdownSignal = signal;
-		}
+		return;
+	}
 
-		if (!supervisor->shutdownSequenceInProgress)
-		{
-			log_info("pg_autoctl received signal %s, terminating", signalStr);
+	/* use new signal, unless we were already using SIGINT */
+	if (supervisor->shutdownSignal != SIGINT)
+	{
+		supervisor->shutdownSignal = signal;
+	}
 
-			supervisor->cleanExit = true;
-			supervisor->shutdownSequenceInProgress = true;
+	/* only log once about terminating processes */
+	if (!supervisor->shutdownSequenceInProgress)
+	{
+		log_info("pg_autoctl received signal %s, terminating", signalStr);
 
-			shutdownNow = true;
-		}
-		else if (asked_to_stop_fast)
-		{
-			/*
-			 * Even when we are already shutting down, we process SIGINT again
-			 * and log about it.
-			 */
-			log_info("pg_autoctl received signal SIGINT, terminating");
+		supervisor->cleanExit = true;
+		supervisor->shutdownSequenceInProgress = true;
 
-			shutdownNow = true;
-		}
+		shutdownNow = true;
+	}
+	else if (asked_to_stop_fast)
+	{
+		/*
+		 * Even when we are already shutting down, we process SIGINT again
+		 * and log about it.
+		 */
+		log_info("pg_autoctl received signal SIGINT, terminating");
+
+		shutdownNow = true;
 	}
 
 	/*
