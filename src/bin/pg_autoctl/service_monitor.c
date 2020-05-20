@@ -157,6 +157,7 @@ service_monitor_runprogram(Monitor *monitor)
 		: monitorOptions.pgSetup.pgdata;
 
 	setenv(PG_AUTOCTL_DEBUG, "1", 1);
+	setenv(PG_AUTOCTL_SERVICE, "1", 1);
 
 	args[argsIndex++] = (char *) pg_autoctl_program;
 	args[argsIndex++] = "do";

@@ -16,6 +16,7 @@
 #include "env_utils.h"
 #include "keeper.h"
 #include "keeper_config.h"
+#include "lock_utils.h"
 
 char pg_autoctl_argv0[MAXPGPATH];
 char pg_autoctl_program[MAXPGPATH];
@@ -23,6 +24,8 @@ char pg_autoctl_program[MAXPGPATH];
 char *ps_buffer;                /* will point to argv area */
 size_t ps_buffer_size;          /* space determined at run time */
 size_t last_status_len;         /* use to minimize length of clobber */
+
+Semaphore log_semaphore;        /* allows inter-process locking */
 
 /*
  * Main entry point for the binary.
@@ -34,6 +37,16 @@ main(int argc, char **argv)
 
 	/* allows changing process title in ps/top/ptree etc */
 	(void) init_ps_buffer(argc, argv);
+
+	/* initialise the semaphore used for locking log output */
+	if (!semaphore_init(&log_semaphore))
+	{
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	/* set our logging facility to use our semaphore as a lock mechanism */
+	(void) log_set_udata(&log_semaphore);
+	(void) log_set_lock(&semaphore_log_lock_function);
 
 	/*
 	 * When PG_AUTOCTL_DEBUG is set in the environment, provide the user
@@ -89,6 +102,12 @@ main(int argc, char **argv)
 	if (!commandline_run(&command, argc, argv))
 	{
 		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (!semaphore_finish(&log_semaphore))
+	{
+		/* error have already been logged */
+		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
 	return 0;
