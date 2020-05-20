@@ -2450,13 +2450,14 @@ monitor_get_notifications(Monitor *monitor)
 
 	if (select(sock + 1, &input_mask, NULL, NULL, NULL) < 0)
 	{
-		if (asked_to_stop || asked_to_stop_fast)
+		/* it might be interrupted by a signal we know how to handle */
+		if (asked_to_reload || asked_to_stop || asked_to_stop_fast)
 		{
 			return true;
 		}
 		else
 		{
-			log_warn("select() failed: %m");
+			log_warn("Failed to get monitor notifications: select(): %m");
 			return false;
 		}
 	}

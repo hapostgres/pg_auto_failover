@@ -397,5 +397,7 @@ monitor_ensure_configuration(Monitor *monitor)
 		return false;
 	}
 
+	pgsql_finish(&(postgres.sqlClient));
+
 	return true;
 }
