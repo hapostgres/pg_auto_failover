@@ -30,13 +30,15 @@ typedef struct Keeper
 	 * information. This is necessary in some transitions.
 	 */
 	NodeAddressArray otherNodes;
+
+	/* Only useful during the initialization of the Keeper */
+	KeeperStateInit initState;
 } Keeper;
 
 
 bool keeper_init(Keeper *keeper, KeeperConfig *config);
 bool keeper_init_fsm(Keeper *keeper);
-bool keeper_register_and_init(Keeper *keeper, KeeperConfig *config,
-							  NodeState initialState);
+bool keeper_register_and_init(Keeper *keeper, NodeState initialState);
 bool keeper_load_state(Keeper *keeper);
 bool keeper_store_state(Keeper *keeper);
 bool keeper_update_state(Keeper *keeper, int node_id, int group_id, NodeState state,
@@ -55,11 +57,7 @@ bool ReportPgIsRunning(Keeper *keeper);
 bool keeper_remove(Keeper *keeper, KeeperConfig *config,
 				   bool ignore_monitor_errors);
 bool keeper_check_monitor_extension_version(Keeper *keeper);
-
-bool keeper_init_state_write(Keeper *keeper);
-bool keeper_init_state_read(Keeper *keeper, KeeperStateInit *initState);
 bool keeper_state_as_json(Keeper *keeper, char *json, int size);
-bool keeper_init_state_discover(Keeper *keeper, KeeperStateInit *initState);
 
 /* loop.c */
 bool keeper_node_active_loop(Keeper *keeper, pid_t start_pid);

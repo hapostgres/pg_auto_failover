@@ -21,7 +21,7 @@ extern volatile sig_atomic_t asked_to_reload;    /* SIGHUP */
 #define CHECK_FOR_FAST_SHUTDOWN { if (asked_to_stop_fast) { break; } \
 }
 
-void set_signal_handlers(void);
+void set_signal_handlers(bool exitOnQuit);
 void catch_reload(int sig);
 void catch_int(int sig);
 void catch_term(int sig);

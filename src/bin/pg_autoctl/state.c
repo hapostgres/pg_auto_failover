@@ -31,6 +31,10 @@
 #include "state.h"
 
 static bool keeper_state_is_readable(int pg_autoctl_state_version);
+static bool keeper_init_state_write(KeeperStateInit *initState,
+									const char *filename);
+static bool keeper_postgres_state_write(KeeperStatePostgres *pgStatus,
+										const char *filename);
 
 
 /*
@@ -337,7 +341,8 @@ keeperStateAsJSON(KeeperStateData *keeperState, JSON_Value *js)
 void
 print_keeper_init_state(KeeperStateInit *initState, FILE *stream)
 {
-	fformat(stream, "Postgres state at keeper init: %s\n",
+	fformat(stream,
+			"Postgres state at keeper init: %s\n",
 			PreInitPostgreInstanceStateToString(initState->pgInitState));
 	fflush(stream);
 }
@@ -594,4 +599,367 @@ PreInitPostgreInstanceStateToString(PreInitPostgreInstanceState pgInitState)
 
 	/* keep compiler happy */
 	return "unknown";
+}
+
+
+/*
+ * keeper_init_state_create create our pg_autoctl.init file.
+ *
+ * This file is created when entering keeper init and deleted only when the
+ * init has been successful. This allows the code to take smarter decisions and
+ * decipher in between a previous init having failed halfway through or
+ * initializing from scratch in conditions not supported (pre-existing and
+ * running cluster, etc).
+ */
+bool
+keeper_init_state_create(KeeperStateInit *initState,
+						 PostgresSetup *pgSetup,
+						 const char *filename)
+{
+	if (!keeper_init_state_discover(initState, pgSetup, filename))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	log_info("Writing keeper init state file at \"%s\"", filename);
+	log_debug("keeper_init_state_create: version = %d",
+			  initState->pg_autoctl_state_version);
+	log_debug("keeper_init_state_create: pgInitState = %s",
+			  PreInitPostgreInstanceStateToString(initState->pgInitState));
+
+	return keeper_init_state_write(initState, filename);
+}
+
+
+/*
+ * keeper_init_state_write writes our pg_autoctl.init file.
+ */
+static bool
+keeper_init_state_write(KeeperStateInit *initState, const char *filename)
+{
+	int fd;
+	char buffer[PG_AUTOCTL_KEEPER_STATE_FILE_SIZE] = { 0 };
+
+	memset(buffer, 0, PG_AUTOCTL_KEEPER_STATE_FILE_SIZE);
+
+	/*
+	 * Explanation of IGNORE-BANNED:
+	 * memcpy is safe to use here.
+	 * we have a static assert that sizeof(KeeperStateInit) is always
+	 * less than the buffer length PG_AUTOCTL_KEEPER_STATE_FILE_SIZE.
+	 * also KeeperStateData is a plain struct that does not contain
+	 * any pointers in it. Necessary comment about not using pointers
+	 * is added to the struct definition.
+	 */
+	memcpy(buffer, initState, sizeof(KeeperStateInit)); /* IGNORE-BANNED */
+
+	fd = open(filename, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
+	if (fd < 0)
+	{
+		log_fatal("Failed to create keeper init state file \"%s\": %m",
+				  filename);
+		return false;
+	}
+
+	errno = 0;
+	if (write(fd, buffer, PG_AUTOCTL_KEEPER_STATE_FILE_SIZE) !=
+		PG_AUTOCTL_KEEPER_STATE_FILE_SIZE)
+	{
+		/* if write didn't set errno, assume problem is no disk space */
+		if (errno == 0)
+		{
+			errno = ENOSPC;
+		}
+		log_fatal("Failed to write keeper init state file \"%s\": %m",
+				  filename);
+		return false;
+	}
+
+	if (fsync(fd) != 0)
+	{
+		log_fatal("fsync error: %m");
+		return false;
+	}
+
+	close(fd);
+
+	return true;
+}
+
+
+/*
+ * keeper_init_state_discover discovers the current KeeperStateInit from the
+ * command line options, by checking everything we can about the possibly
+ * existing Postgres instance.
+ */
+bool
+keeper_init_state_discover(KeeperStateInit *initState,
+						   PostgresSetup *pgSetup,
+						   const char *filename)
+{
+	PostgresSetup newPgSetup = { 0 };
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+
+	initState->pg_autoctl_state_version = PG_AUTOCTL_STATE_VERSION;
+
+	if (!pg_setup_init(&newPgSetup, pgSetup,
+					   missingPgdataIsOk, pgIsNotRunningIsOk))
+	{
+		log_fatal("Failed to initialise the keeper init state, "
+				  "see above for details");
+		return false;
+	}
+
+	if (pg_setup_is_running(pgSetup) && pg_setup_is_primary(pgSetup))
+	{
+		initState->pgInitState = PRE_INIT_STATE_PRIMARY;
+	}
+	else if (pg_setup_is_running(pgSetup))
+	{
+		initState->pgInitState = PRE_INIT_STATE_RUNNING;
+	}
+	else if (pg_setup_pgdata_exists(pgSetup))
+	{
+		initState->pgInitState = PRE_INIT_STATE_EXISTS;
+	}
+	else
+	{
+		initState->pgInitState = PRE_INIT_STATE_EMPTY;
+	}
+
+	return true;
+}
+
+
+/*
+ * keeper_init_state_read reads the information kept in the keeper init file.
+ */
+bool
+keeper_init_state_read(KeeperStateInit *initState, const char *filename)
+{
+	char *content = NULL;
+	long fileSize;
+	int pg_autoctl_state_version = 0;
+
+	log_debug("Reading current init state from \"%s\"", filename);
+
+	if (!read_file(filename, &content, &fileSize))
+	{
+		log_error("Failed to read Keeper state from file \"%s\"", filename);
+		return false;
+	}
+
+	pg_autoctl_state_version =
+		((KeeperStateInit *) content)->pg_autoctl_state_version;
+
+	if (fileSize >= sizeof(KeeperStateInit) &&
+		pg_autoctl_state_version == PG_AUTOCTL_STATE_VERSION)
+	{
+		*initState = *(KeeperStateInit *) content;
+		free(content);
+		return true;
+	}
+
+	free(content);
+
+	/* Looks like it's a mess. */
+	log_error("Keeper init state file \"%s\" exists but "
+			  "is broken or wrong version (%d)",
+			  filename, pg_autoctl_state_version);
+	return false;
+}
+
+
+/*
+ * ExpectedPostgresStatusToString return the string that represents our
+ * expected PostgreSQL state.
+ */
+char *
+ExpectedPostgresStatusToString(ExpectedPostgresStatus pgExpectedStatus)
+{
+	switch (pgExpectedStatus)
+	{
+		case PG_EXPECTED_STATUS_UNKNOWN:
+		{
+			return "unknown";
+		}
+
+		case PG_EXPECTED_STATUS_STOPPED:
+		{
+			return "Postgres should be stopped";
+		}
+
+		case PG_EXPECTED_STATUS_RUNNING:
+		{
+			return "Postgres should be running";
+		}
+	}
+
+	/* make compiler happy */
+	return "unknown";
+}
+
+
+/*
+ * keeper_set_postgres_state_unknown updates the Postgres expected status file
+ * to unknown.
+ */
+bool
+keeper_set_postgres_state_unknown(KeeperStatePostgres *pgStatus,
+								  const char *filename)
+{
+	pgStatus->pgExpectedStatus = PG_EXPECTED_STATUS_UNKNOWN;
+
+	return keeper_postgres_state_update(pgStatus, filename);
+}
+
+
+/*
+ * keeper_set_postgres_state_running updates the Postgres expected status file
+ * to running.
+ */
+bool
+keeper_set_postgres_state_running(KeeperStatePostgres *pgStatus,
+								  const char *filename)
+{
+	pgStatus->pgExpectedStatus = PG_EXPECTED_STATUS_RUNNING;
+
+	return keeper_postgres_state_update(pgStatus, filename);
+}
+
+
+/*
+ * keeper_set_postgres_state_stopped updates the Postgres expected status file
+ * to stopped.
+ */
+bool
+keeper_set_postgres_state_stopped(KeeperStatePostgres *pgStatus,
+								  const char *filename)
+{
+	pgStatus->pgExpectedStatus = PG_EXPECTED_STATUS_STOPPED;
+
+	return keeper_postgres_state_update(pgStatus, filename);
+}
+
+
+/*
+ * keeper_postgres_state_create creates our pg_autoctl.pg file.
+ */
+bool
+keeper_postgres_state_update(KeeperStatePostgres *pgStatus,
+							 const char *filename)
+{
+	pgStatus->pg_autoctl_state_version = PG_AUTOCTL_STATE_VERSION;
+
+	log_debug("Writing keeper postgres expected state file at \"%s\"", filename);
+	log_debug("keeper_postgres_state_create: version = %d",
+			  pgStatus->pg_autoctl_state_version);
+	log_debug("keeper_postgres_state_create: ExpectedPostgresStatus = %s",
+			  ExpectedPostgresStatusToString(pgStatus->pgExpectedStatus));
+
+	return keeper_postgres_state_write(pgStatus, filename);
+}
+
+
+/*
+ * keeper_postgres_state_write writes our pg_autoctl.init file.
+ */
+static bool
+keeper_postgres_state_write(KeeperStatePostgres *pgStatus,
+							const char *filename)
+{
+	int fd;
+	char buffer[PG_AUTOCTL_KEEPER_STATE_FILE_SIZE] = { 0 };
+
+	log_trace("keeper_postgres_state_write %s in %s",
+			  ExpectedPostgresStatusToString(pgStatus->pgExpectedStatus),
+			  filename);
+
+	memset(buffer, 0, PG_AUTOCTL_KEEPER_STATE_FILE_SIZE);
+
+	/*
+	 * Explanation of IGNORE-BANNED:
+	 * memcpy is safe to use here.
+	 * we have a static assert that sizeof(KeeperStateInit) is always
+	 * less than the buffer length PG_AUTOCTL_KEEPER_STATE_FILE_SIZE.
+	 * also KeeperStateData is a plain struct that does not contain
+	 * any pointers in it. Necessary comment about not using pointers
+	 * is added to the struct definition.
+	 */
+	memcpy(buffer, pgStatus, sizeof(KeeperStatePostgres)); /* IGNORE-BANNED */
+
+	fd = open(filename, O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+	if (fd < 0)
+	{
+		log_fatal(
+			"Failed to create keeper postgres expected status file \"%s\": %m",
+			filename);
+		return false;
+	}
+
+	errno = 0;
+	if (write(fd, buffer, PG_AUTOCTL_KEEPER_STATE_FILE_SIZE) !=
+		PG_AUTOCTL_KEEPER_STATE_FILE_SIZE)
+	{
+		/* if write didn't set errno, assume problem is no disk space */
+		if (errno == 0)
+		{
+			errno = ENOSPC;
+		}
+		log_fatal(
+			"Failed to write keeper postgres expected status file \"%s\": %m",
+			filename);
+		return false;
+	}
+
+	if (fsync(fd) != 0)
+	{
+		log_fatal("fsync error: %m");
+		return false;
+	}
+
+	close(fd);
+
+	return true;
+}
+
+
+/*
+ * keeper_postgres_state_read reads the information kept in the keeper postgres
+ * file.
+ */
+bool
+keeper_postgres_state_read(KeeperStatePostgres *pgStatus, const char *filename)
+{
+	char *content = NULL;
+	long fileSize;
+	int pg_autoctl_state_version = 0;
+
+	if (!read_file(filename, &content, &fileSize))
+	{
+		log_error("Failed to read postgres expected status from file \"%s\"",
+				  filename);
+		return false;
+	}
+
+	pg_autoctl_state_version =
+		((KeeperStatePostgres *) content)->pg_autoctl_state_version;
+
+	if (fileSize >= sizeof(KeeperStateInit) &&
+		pg_autoctl_state_version == PG_AUTOCTL_STATE_VERSION)
+	{
+		*pgStatus = *(KeeperStatePostgres *) content;
+		free(content);
+		return true;
+	}
+
+	free(content);
+
+	/* Looks like it's a mess. */
+	log_error("Keeper postgres expected status file \"%s\" exists but "
+			  "is broken or wrong version (%d)",
+			  filename, pg_autoctl_state_version);
+	return false;
 }

@@ -173,8 +173,17 @@ pgsql_open_connection(PGSQL *pgsql)
 		{
 			case PGSQL_CONN_LOCAL:
 			{
-				log_error("Connection to database failed: %s",
-						  PQerrorMessage(connection));
+				char *message = PQerrorMessage(connection);
+				char *errorLines[BUFSIZE];
+				int lineCount = splitLines(message, errorLines, BUFSIZE);
+				int lineNumber = 0;
+
+				for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
+				{
+					log_error("Connection to database failed: %s",
+							  errorLines[lineNumber]);
+				}
+
 				pgsql_finish(pgsql);
 				return NULL;
 			}
@@ -331,7 +340,17 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 static void
 pgAutoCtlDefaultNoticeProcessor(void *arg, const char *message)
 {
-	log_warn("%s", message);
+	char *m = strdup(message);
+	char *lines[BUFSIZE];
+	int lineCount = splitLines(m, lines, BUFSIZE);
+	int lineNumber = 0;
+
+	for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
+	{
+		log_warn("%s", lines[lineNumber]);
+	}
+
+	free(m);
 }
 
 
@@ -342,7 +361,17 @@ pgAutoCtlDefaultNoticeProcessor(void *arg, const char *message)
 static void
 pgAutoCtlDebugNoticeProcessor(void *arg, const char *message)
 {
-	log_debug("%s", message);
+	char *m = strdup(message);
+	char *lines[BUFSIZE];
+	int lineCount = splitLines(m, lines, BUFSIZE);
+	int lineNumber = 0;
+
+	for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
+	{
+		log_debug("%s", lines[lineNumber]);
+	}
+
+	free(m);
 }
 
 
