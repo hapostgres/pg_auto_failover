@@ -36,7 +36,9 @@ static void cli_do_service_pgcontroller(int argc, char **argv);
 static void cli_do_service_postgresctl_on(int argc, char **argv);
 static void cli_do_service_postgresctl_off(int argc, char **argv);
 
+static void cli_do_service_restart(const char *serviceName);
 static void cli_do_service_restart_postgres(int argc, char **argv);
+static void cli_do_service_restart_listener(int argc, char **argv);
 
 static void cli_do_service_monitor(int argc, char **argv);
 
@@ -55,7 +57,6 @@ CommandLine service_pgcontroller =
 				 CLI_PGDATA_OPTION,
 				 cli_getopt_pgdata,
 				 cli_do_service_pgcontroller);
-
 
 CommandLine service_postgres =
 	make_command("postgres",
@@ -81,8 +82,17 @@ CommandLine service_restart_postgres =
 				 cli_getopt_pgdata,
 				 cli_do_service_restart_postgres);
 
+CommandLine service_restart_listener =
+	make_command("listener",
+				 "Restart the pg_autoctl monitor listener service",
+				 CLI_PGDATA_USAGE,
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
+				 cli_do_service_restart_listener);
+
 static CommandLine *service_restart[] = {
 	&service_restart_postgres,
+	&service_restart_listener,
 	NULL
 };
 
@@ -171,16 +181,15 @@ cli_do_service_getpid(int argc, char **argv)
 
 
 /*
- * cli_do_service_restart_postgres sends the TERM signal to the postgres
- * service, which is known to have the restart policy RP_PERMANENT (that's
- * hard-coded). As a consequence the supervisor will restart the service.
+ * cli_do_service_restart sends the TERM signal to the given serviceName, which
+ * is known to have the restart policy RP_PERMANENT (that's hard-coded). As a
+ * consequence the supervisor will restart the service.
  */
 static void
-cli_do_service_restart_postgres(int argc, char **argv)
+cli_do_service_restart(const char *serviceName)
 {
 	ConfigFilePaths pathnames = { 0 };
 	LocalPostgresServer postgres = { 0 };
-	const char *serviceName = "postgres";
 
 	pid_t pid = -1;
 	pid_t newPid = -1;
@@ -227,6 +236,30 @@ cli_do_service_restart_postgres(int argc, char **argv)
 			 serviceName, newPid);
 
 	fformat(stdout, "%d\n", pid);
+}
+
+
+/*
+ * cli_do_service_restart_postgres sends the TERM signal to the postgres
+ * service, which is known to have the restart policy RP_PERMANENT (that's
+ * hard-coded). As a consequence the supervisor will restart the service.
+ */
+static void
+cli_do_service_restart_postgres(int argc, char **argv)
+{
+	(void) cli_do_service_restart("postgres");
+}
+
+
+/*
+ * cli_do_service_restart_postgres sends the TERM signal to the postgres
+ * service, which is known to have the restart policy RP_PERMANENT (that's
+ * hard-coded). As a consequence the supervisor will restart the service.
+ */
+static void
+cli_do_service_restart_listener(int argc, char **argv)
+{
+	(void) cli_do_service_restart("listener");
 }
 
 
