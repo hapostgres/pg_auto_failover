@@ -99,6 +99,7 @@ CommandLine *root_subcommands_with_debug[] = {
 	&service_run_command,
 	&service_stop_command,
 	&service_reload_command,
+	&service_status_command,
 	&help,
 	&version,
 	NULL
@@ -126,6 +127,7 @@ CommandLine *root_subcommands[] = {
 	&service_run_command,
 	&service_stop_command,
 	&service_reload_command,
+	&service_status_command,
 	&help,
 	&version,
 	NULL
