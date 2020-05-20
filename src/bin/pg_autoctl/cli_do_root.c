@@ -210,7 +210,7 @@ CommandLine do_pgsetup_startup_logs =
 				 keeper_cli_keeper_setup_getopts,
 				 keeper_cli_pgsetup_startup_logs);
 
-CommandLine *do_pg[] = {
+CommandLine *do_pgsetup[] = {
 	&do_pgsetup_discover,
 	&do_pgsetup_is_ready,
 	&do_pgsetup_wait_until_ready,
@@ -218,10 +218,10 @@ CommandLine *do_pg[] = {
 	NULL
 };
 
-CommandLine do_pg_commands =
+CommandLine do_pgsetup_commands =
 	make_command_set("pgsetup",
 					 "Manage a local Postgres setup", NULL, NULL,
-					 NULL, do_pg);
+					 NULL, do_pgsetup);
 
 CommandLine *do_subcommands[] = {
 	&do_monitor_commands,
@@ -229,7 +229,9 @@ CommandLine *do_subcommands[] = {
 	&do_primary_,
 	&do_standby_,
 	&do_show_commands,
-	&do_pg_commands,
+	&do_pgsetup_commands,
+	&do_service_postgres_ctl_commands,
+	&do_service_commands,
 	NULL
 };
 

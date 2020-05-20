@@ -6,9 +6,6 @@
  *
  */
 
-#ifdef RUN_PROGRAM_IMPLEMENTATION
-#undef RUN_PROGRAM_IMPLEMENTATION
-
 #include <fcntl.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -41,19 +38,32 @@ typedef struct
 	int error;                  /* save errno when something's gone wrong */
 	int returnCode;
 
+	bool capture;               /* do we capture output, or redirect it? */
+
+	int stdOutFd;               /* redirect stdout to file descriptor */
+	int stdErrFd;               /* redirect stderr to file descriptor */
+
 	char *stdOut;
 	char *stdErr;
 } Program;
 
 Program run_program(const char *program, ...);
 Program initialize_program(char **args, bool setsid);
+void execute_subprogram(Program *prog);
 void execute_program(Program *prog);
 void free_program(Program *prog);
 int snprintf_program_command_line(Program *prog, char *buffer, int size);
+
+#ifdef RUN_PROGRAM_IMPLEMENTATION
+#undef RUN_PROGRAM_IMPLEMENTATION
+
+static void exit_internal_error(void);
+static void dup2_or_exit(int fildes, int fildes2);
+static void close_or_exit(int fildes);
 static void read_from_pipes(Program *prog,
 							pid_t childPid, int *outpipe, int *errpipe);
 static size_t read_into_buf(int filedes, PQExpBuffer buffer);
-
+static void waitprogram(Program *prog, pid_t childPid);
 
 /*
  * Run a program using fork() and exec(), get the stdOut and stdErr output from
@@ -72,6 +82,9 @@ run_program(const char *program, ...)
 	prog.returnCode = -1;
 	prog.error = 0;
 	prog.setsid = false;
+	prog.capture = true;
+	prog.stdOutFd = -1;
+	prog.stdErrFd = -1;
 	prog.stdOut = NULL;
 	prog.stdErr = NULL;
 
@@ -99,7 +112,7 @@ run_program(const char *program, ...)
 	va_end(args);
 	prog.args[nb_args] = NULL;
 
-	execute_program(&prog);
+	execute_subprogram(&prog);
 
 	return prog;
 }
@@ -119,6 +132,12 @@ initialize_program(char **args, bool setsid)
 	prog.returnCode = -1;
 	prog.error = 0;
 	prog.setsid = setsid;
+
+	/* this could be changed by the caller before calling execute_program */
+	prog.capture = true;
+	prog.stdOutFd = -1;
+	prog.stdErrFd = -1;
+
 	prog.stdOut = NULL;
 	prog.stdErr = NULL;
 
@@ -144,10 +163,10 @@ initialize_program(char **args, bool setsid)
 /*
  * Run given program with its args, by doing the fork()/exec() dance, and also
  * capture the subprocess output by installing pipes. We accimulate the output
- * into an SDS data structure (Simple Dynamic Strings library).
+ * into a PQExpBuffer when prog->capture is true.
  */
 void
-execute_program(Program *prog)
+execute_subprogram(Program *prog)
 {
 	pid_t pid;
 	int outpipe[2] = { 0, 0 };
@@ -157,19 +176,22 @@ execute_program(Program *prog)
 	fflush(stdout);
 	fflush(stderr);
 
-	/* create the pipe now */
-	if (pipe(outpipe) < 0)
+	/* create the output capture pipes now */
+	if (prog->capture)
 	{
-		prog->returnCode = -1;
-		prog->error = errno;
-		return;
-	}
+		if (pipe(outpipe) < 0)
+		{
+			prog->returnCode = -1;
+			prog->error = errno;
+			return;
+		}
 
-	if (pipe(errpipe) < 0)
-	{
-		prog->returnCode = -1;
-		prog->error = errno;
-		return;
+		if (pipe(errpipe) < 0)
+		{
+			prog->returnCode = -1;
+			prog->error = errno;
+			return;
+		}
 	}
 
 	pid = fork();
@@ -195,15 +217,33 @@ execute_program(Program *prog)
 			 */
 			int stdIn = open(DEV_NULL, O_RDONLY);
 
-			dup2(stdIn, STDIN_FILENO);
-			dup2(outpipe[1], STDOUT_FILENO);
-			dup2(errpipe[1], STDERR_FILENO);
+			if (stdIn == -1)
+			{
+				(void) exit_internal_error();
+			}
 
-			close(stdIn);
-			close(outpipe[0]);
-			close(outpipe[1]);
-			close(errpipe[0]);
-			close(errpipe[1]);
+			(void) dup2_or_exit(stdIn, STDIN_FILENO);
+			(void) close_or_exit(stdIn);
+
+			/*
+			 * Prepare either for capture the output in pipes, or redirect to
+			 * the given open file descriptors.
+			 */
+			if (prog->capture)
+			{
+				(void) dup2_or_exit(outpipe[1], STDOUT_FILENO);
+				(void) dup2(errpipe[1], STDERR_FILENO);
+
+				(void) close_or_exit(outpipe[0]);
+				(void) close_or_exit(outpipe[1]);
+				(void) close_or_exit(errpipe[0]);
+				(void) close_or_exit(errpipe[1]);
+			}
+			else
+			{
+				(void) dup2_or_exit(prog->stdOutFd, STDOUT_FILENO);
+				(void) dup2_or_exit(prog->stdErrFd, STDERR_FILENO);
+			}
 
 			/*
 			 * When asked to do so, before creating the child process, we call
@@ -236,10 +276,80 @@ execute_program(Program *prog)
 		default:
 		{
 			/* fork succeeded, in parent */
-			read_from_pipes(prog, pid, outpipe, errpipe);
+			if (prog->capture)
+			{
+				read_from_pipes(prog, pid, outpipe, errpipe);
+			}
+			else
+			{
+				(void) waitprogram(prog, pid);
+			}
 			return;
 		}
 	}
+}
+
+
+/*
+ * Run given program with its args, by using exec().
+ *
+ * Using exec() means that we replace the currently running program and will
+ * take ownership of its standard input, output and error streams, etc. This
+ * routine is not supposed to ever return, so in case when something goes
+ * wrong, it exits the current process, which is assumed to be a sub-process
+ * started with fork().
+ */
+void
+execute_program(Program *prog)
+{
+	/*
+	 * We redirect /dev/null into stdIn rather than closing stdin, because
+	 * apparently closing it may cause undefined behavior if any read was to
+	 * happen.
+	 */
+	int stdIn = open(DEV_NULL, O_RDONLY);
+
+	if (prog->capture)
+	{
+		fprintf(stderr, "BUG: can't execute_program and capture the output");
+		return;
+	}
+
+	/* Flush stdio channels just before dup, to avoid double-output problems */
+	fflush(stdout);
+	fflush(stderr);
+
+	(void) dup2_or_exit(stdIn, STDIN_FILENO);
+	(void) close_or_exit(stdIn);
+
+	(void) dup2_or_exit(prog->stdOutFd, STDOUT_FILENO);
+	(void) dup2_or_exit(prog->stdErrFd, STDERR_FILENO);
+
+	/*
+	 * When asked to do so, before creating the child process, we call
+	 * setsid() to create our own session group and detach from the
+	 * terminal. That's useful when starting a service in the
+	 * background.
+	 */
+	if (prog->setsid)
+	{
+		if (setsid() == -1)
+		{
+			prog->returnCode = -1;
+			prog->error = errno;
+			return;
+		}
+	}
+
+	if (execv(prog->program, prog->args) == -1)
+	{
+		prog->returnCode = -1;
+		prog->error = errno;
+
+		(void) exit_internal_error();
+	}
+
+	/* now the parent should waitpid() and may use waitprogram() */
 }
 
 
@@ -269,6 +379,47 @@ free_program(Program *prog)
 
 
 /*
+ * exit_internal_error prints the strerror of the current errno to both stdin
+ * and stdout and exits with the exit code EXIT_CODE_INTERNAL_ERROR.
+ */
+static void
+exit_internal_error()
+{
+	fprintf(stdout, "%s\n", strerror(errno));
+	fprintf(stderr, "%s\n", strerror(errno));
+	exit(EXIT_CODE_INTERNAL_ERROR);
+}
+
+
+/*
+ * dup2_or_exit calls dup2() on given arguments (file descriptors) and exits
+ * when dup2() fails.
+ */
+static void
+dup2_or_exit(int fildes, int fildes2)
+{
+	if (dup2(fildes, fildes2) == -1)
+	{
+		(void) exit_internal_error();
+	}
+}
+
+
+/*
+ * close_or_exit calls close() on given file descriptor and exits when close()
+ * fails.
+ */
+static void
+close_or_exit(int fildes)
+{
+	if (close(fildes) == -1)
+	{
+		(void) exit_internal_error();
+	}
+}
+
+
+/*
  * read_from_pipes reads the output from the child process and sets the Program
  * slots stdOut and stdErr with the accumulated output we read.
  */
@@ -276,7 +427,6 @@ static void
 read_from_pipes(Program *prog, pid_t childPid, int *outpipe, int *errpipe)
 {
 	bool doneReading = false;
-	int status;
 	int countFdsReadyToRead, nfds; /* see man select(3) */
 	fd_set readFileDescriptorSet;
 	ssize_t bytes_out = BUFSIZE, bytes_err = BUFSIZE;
@@ -388,9 +538,19 @@ read_from_pipes(Program *prog, pid_t childPid, int *outpipe, int *errpipe)
 	destroyPQExpBuffer(outbuf);
 	destroyPQExpBuffer(errbuf);
 
-	/*
-	 * Now, wait until the child process is done.
-	 */
+	/* now, wait until the child process is done. */
+	(void) waitprogram(prog, childPid);
+}
+
+
+/*
+ * Wait until our Program is done.
+ */
+static void
+waitprogram(Program *prog, pid_t childPid)
+{
+	int status;
+
 	do {
 		if (waitpid(childPid, &status, WUNTRACED) == -1)
 		{

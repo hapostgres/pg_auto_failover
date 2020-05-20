@@ -20,6 +20,10 @@
 char pg_autoctl_argv0[MAXPGPATH];
 char pg_autoctl_program[MAXPGPATH];
 
+char *ps_buffer;                /* will point to argv area */
+size_t ps_buffer_size;          /* space determined at run time */
+size_t last_status_len;         /* use to minimize length of clobber */
+
 /*
  * Main entry point for the binary.
  */
@@ -27,6 +31,9 @@ int
 main(int argc, char **argv)
 {
 	CommandLine command = root;
+
+	/* allows changing process title in ps/top/ptree etc */
+	(void) init_ps_buffer(argc, argv);
 
 	/*
 	 * When PG_AUTOCTL_DEBUG is set in the environment, provide the user

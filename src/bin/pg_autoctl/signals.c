@@ -12,6 +12,8 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "postgres_fe.h"        /* pqsignal, portable sigaction wrapper */
+
 #include "defaults.h"
 #include "log.h"
 #include "signals.h"
@@ -21,19 +23,28 @@ volatile sig_atomic_t asked_to_stop = 0;      /* SIGTERM */
 volatile sig_atomic_t asked_to_stop_fast = 0; /* SIGINT */
 volatile sig_atomic_t asked_to_reload = 0;    /* SIGHUP */
 
-
 /*
  * set_signal_handlers sets our signal handlers for the 4 signals that we
  * specifically handle in pg_autoctl.
  */
 void
-set_signal_handlers()
+set_signal_handlers(bool exitOnQuit)
 {
 	/* Establish a handler for signals. */
-	signal(SIGHUP, catch_reload);
-	signal(SIGINT, catch_int);
-	signal(SIGTERM, catch_term);
-	signal(SIGQUIT, catch_quit);
+	log_trace("set_signal_handlers%s", exitOnQuit ? " (exit on quit)" : "");
+
+	pqsignal(SIGHUP, catch_reload);
+	pqsignal(SIGINT, catch_int);
+	pqsignal(SIGTERM, catch_term);
+
+	if (exitOnQuit)
+	{
+		pqsignal(SIGQUIT, catch_quit);
+	}
+	else
+	{
+		pqsignal(SIGQUIT, catch_int);
+	}
 }
 
 
@@ -44,8 +55,7 @@ void
 catch_reload(int sig)
 {
 	asked_to_reload = 1;
-	log_warn("Received signal %s", strsignal(sig));
-	signal(sig, catch_reload);
+	pqsignal(sig, catch_reload);
 }
 
 
@@ -56,8 +66,7 @@ void
 catch_int(int sig)
 {
 	asked_to_stop_fast = 1;
-	log_warn("Fast shutdown: received signal %s", strsignal(sig));
-	signal(sig, catch_int);
+	pqsignal(sig, catch_int);
 }
 
 
@@ -68,8 +77,7 @@ void
 catch_term(int sig)
 {
 	asked_to_stop = 1;
-	log_warn("Smart shutdown: received signal %s", strsignal(sig));
-	signal(sig, catch_term);
+	pqsignal(sig, catch_term);
 }
 
 
@@ -80,6 +88,5 @@ void
 catch_quit(int sig)
 {
 	/* default signal handler disposition is to core dump, we don't */
-	log_warn("Immediate shutdown: received signal %s", strsignal(sig));
 	exit(EXIT_CODE_QUIT);
 }

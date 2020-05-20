@@ -1339,6 +1339,120 @@ stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathnames,
 
 
 /*
+ * logLevelToString returns the string to use to enable the same logLevel in a
+ * sub-process.
+ *
+ * enum { LOG_TRACE, LOG_DEBUG, LOG_INFO, LOG_WARN, LOG_ERROR, LOG_FATAL };
+ */
+char *
+logLevelToString(int logLevel)
+{
+	switch (logLevel)
+	{
+		case LOG_TRACE:
+		{
+			return "-vvv";
+		}
+
+		case LOG_DEBUG:
+		{
+			return "-vv";
+		}
+
+		case LOG_WARN:
+		case LOG_INFO:
+		{
+			return "-v";
+		}
+
+		case LOG_ERROR:
+		case LOG_FATAL:
+		{
+			return "-q";
+		}
+	}
+
+	return "";
+}
+
+
+/*
+ * cli_common_pgsetup_init prepares a pgSetup instance from either a keeper or
+ * a monitor configuration file.
+ */
+bool
+cli_common_pgsetup_init(ConfigFilePaths *pathnames, PostgresSetup *pgSetup)
+{
+	KeeperConfig kconfig = keeperOptions;
+
+	if (!keeper_config_set_pathnames_from_pgdata(&(kconfig.pathnames),
+												 kconfig.pgSetup.pgdata))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/* copy the pathnames over to the caller */
+	*pathnames = kconfig.pathnames;
+
+	switch (ProbeConfigurationFileRole(kconfig.pathnames.config))
+	{
+		case PG_AUTOCTL_ROLE_MONITOR:
+		{
+			MonitorConfig mconfig = { 0 };
+
+			bool missingPgdataIsOk = true;
+			bool pgIsNotRunningIsOk = true;
+
+			if (!monitor_config_init_from_pgsetup(&mconfig,
+												  &kconfig.pgSetup,
+												  missingPgdataIsOk,
+												  pgIsNotRunningIsOk))
+			{
+				/* errors have already been logged */
+				return false;
+			}
+
+			/* copy the pgSetup from the config to the Local Postgres instance */
+			*pgSetup = mconfig.pgSetup;
+
+			break;
+		}
+
+		case PG_AUTOCTL_ROLE_KEEPER:
+		{
+			bool missingPgdataIsOk = true;
+			bool pgIsNotRunningIsOk = true;
+			bool monitorDisabledIsOk = true;
+
+			if (!keeper_config_read_file(&kconfig,
+										 missingPgdataIsOk,
+										 pgIsNotRunningIsOk,
+										 monitorDisabledIsOk))
+			{
+				/* errors have already been logged */
+				return false;
+			}
+
+			/* copy the pgSetup from the config to the Local Postgres instance */
+			*pgSetup = kconfig.pgSetup;
+
+			break;
+		}
+
+		default:
+		{
+			log_fatal("Unrecognized configuration file \"%s\"",
+					  kconfig.pathnames.config);
+			return false;
+		}
+	}
+
+	return true;
+}
+
+
+/*
  * cli_pg_autoctl_reload signals the pg_autoctl process to reload its
  * configuration by sending it the SIGHUP signal.
  */

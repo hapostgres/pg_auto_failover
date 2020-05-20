@@ -17,6 +17,10 @@ extern char pg_autoctl_argv0[];
 extern char pg_autoctl_program[];
 extern int logLevel;
 
+extern char *ps_buffer;
+extern size_t ps_buffer_size;
+extern size_t last_status_len;
+
 extern CommandLine help;
 extern CommandLine version;
 

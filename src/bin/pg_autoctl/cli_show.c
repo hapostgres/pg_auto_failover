@@ -1268,13 +1268,13 @@ cli_show_file(int argc, char **argv)
 			if (showFileOptions.showFileContents)
 			{
 				Keeper keeper = { 0 };
-				KeeperStateInit initState = { 0 };
 
 				keeper.config = config;
 
-				if (keeper_init_state_read(&keeper, &initState))
+				if (keeper_init_state_read(&(keeper.initState),
+										   config.pathnames.init))
 				{
-					(void) print_keeper_init_state(&initState, stdout);
+					(void) print_keeper_init_state(&(keeper.initState), stdout);
 				}
 				else
 				{

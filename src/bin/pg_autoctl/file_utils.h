@@ -47,6 +47,9 @@ bool unlink_file(const char *filename);
 bool set_program_absolute_path(char *program, int size);
 bool normalize_filename(const char *filename, char *dst, int size);
 
+void init_ps_buffer(int argc, char **argv);
+void set_ps_title(const char *title);
+
 int fformat(FILE *stream, const char *fmt, ...)
 __attribute__((format(printf, 2, 3)));
 

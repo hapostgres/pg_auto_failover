@@ -27,6 +27,7 @@
 #include "pgctl.h"
 #include "pgsql.h"
 #include "pgsetup.h"
+#include "signals.h"
 #include "string_utils.h"
 
 #define RUN_PROGRAM_IMPLEMENTATION
@@ -37,7 +38,6 @@
 
 #define AUTOCTL_CONF_INCLUDE_LINE "include '" AUTOCTL_DEFAULTS_CONF_FILENAME "'"
 #define AUTOCTL_SB_CONF_INCLUDE_LINE "include '" AUTOCTL_STANDBY_CONF_FILENAME "'"
-
 
 static bool pg_include_config(const char *configFilePath,
 							  const char *configIncludeLine,
@@ -105,7 +105,8 @@ pg_ctl_version(const char *pg_ctl_path)
 bool
 pg_controldata(PostgresSetup *pgSetup, bool missing_ok)
 {
-	char pg_controldata_path[MAXPGPATH];
+	char globalControlPath[MAXPGPATH] = { 0 };
+	char pg_controldata_path[MAXPGPATH] = { 0 };
 	Program prog;
 
 	if (pgSetup->pgdata[0] == '\0' || pgSetup->pg_ctl[0] == '\0')
@@ -114,6 +115,20 @@ pg_controldata(PostgresSetup *pgSetup, bool missing_ok)
 		return false;
 	}
 
+	/* globalControlFilePath = $PGDATA/global/pg_control */
+	join_path_components(globalControlPath, pgSetup->pgdata, "global/pg_control");
+
+	/*
+	 * Refrain from doing too many pg_controldata checks, only proceed when the
+	 * PGDATA/global/pg_control file exists on-disk: that's the first check
+	 * that pg_controldata does anyway.
+	 */
+	if (!file_exists(globalControlPath))
+	{
+		return false;
+	}
+
+	/* now find the pg_controldata binary */
 	path_in_same_directory(pgSetup->pg_ctl, "pg_controldata", pg_controldata_path);
 	log_debug("%s %s", pg_controldata_path, pgSetup->pgdata);
 
@@ -186,7 +201,7 @@ config_find_pg_ctl(PostgresSetup *pgSetup)
 			return 0;
 		}
 
-		log_info("Found pg_ctl for PostgreSQL %s at %s", version, program);
+		log_debug("Found pg_ctl for PostgreSQL %s at %s", version, program);
 
 		strlcpy(pgSetup->pg_ctl, program, MAXPGPATH);
 		strlcpy(pgSetup->pg_version, version, PG_VERSION_STRING_MAX);
@@ -261,6 +276,37 @@ pg_add_auto_failover_default_settings(PostgresSetup *pgSetup,
 	return pg_include_config(configFilePath,
 							 AUTOCTL_CONF_INCLUDE_LINE,
 							 AUTOCTL_CONF_INCLUDE_COMMENT);
+}
+
+
+/*
+ * pg_auto_failover_default_settings_file_exists returns true when our expected
+ * postgresql-auto-failover.conf file exists in PGDATA.
+ */
+bool
+pg_auto_failover_default_settings_file_exists(PostgresSetup *pgSetup)
+{
+	char pgAutoFailoverDefaultsConfigPath[MAXPGPATH] = { 0 };
+	char *contents = NULL;
+	long size = 0L;
+
+	join_path_components(pgAutoFailoverDefaultsConfigPath,
+						 pgSetup->pgdata,
+						 AUTOCTL_DEFAULTS_CONF_FILENAME);
+
+
+	/* make sure the file exists and is not empty (race conditions) */
+	if (!file_exists(pgAutoFailoverDefaultsConfigPath))
+	{
+		return false;
+	}
+
+	if (!read_file(pgAutoFailoverDefaultsConfigPath, &contents, &size))
+	{
+		return false;
+	}
+
+	return contents > 0;
 }
 
 
@@ -752,19 +798,38 @@ log_program_output(Program prog, int outLogLevel, int errorLogLevel)
 bool
 pg_ctl_initdb(const char *pg_ctl, const char *pgdata)
 {
-	Program program = run_program(pg_ctl, "initdb", "-s", "-D", pgdata, NULL);
-	int returnCode = program.returnCode;
+	Program program;
+	bool success = false;
 
+	/* initdb takes time, so log about the operation BEFORE doing it */
 	log_info("Initialising a PostgreSQL cluster at \"%s\"", pgdata);
-	log_debug("%s initdb -s -D %s [%d]", pg_ctl, pgdata, returnCode);
 
-	if (returnCode != 0)
+	program = run_program(pg_ctl, "initdb",
+						  "--silent",
+						  "--pgdata", pgdata,
+
+	                      /* avoid warning message */
+						  "--option", "'--auth=trust'",
+						  NULL);
+	log_info("%s initdb -s -D %s", pg_ctl, pgdata);
+
+	success = program.returnCode == 0;
+
+	if (program.returnCode != 0)
 	{
 		(void) log_program_output(program, LOG_INFO, LOG_ERROR);
+		log_fatal("Failed to initialize Postgres cluster at \"%s\", "
+				  "see above for details",
+				  pgdata);
+	}
+	else
+	{
+		/* we might still have important information to read there */
+		(void) log_program_output(program, LOG_INFO, LOG_WARN);
 	}
 	free_program(&program);
 
-	return returnCode == 0;
+	return success;
 }
 
 
@@ -847,7 +912,7 @@ pg_ctl_start(const char *pg_ctl,
 		log_info("%s", command);
 	}
 
-	(void) execute_program(&program);
+	(void) execute_subprogram(&program);
 
 	if (program.returnCode != 0)
 	{
@@ -916,6 +981,105 @@ pg_ctl_start(const char *pg_ctl,
 	free_program(&program);
 
 	return success;
+}
+
+
+/*
+ * pg_ctl_postgres runs the "postgres" command-line in the current process,
+ * with the same options as we would use in pg_ctl_start. pg_ctl_postgres does
+ * not fork a Postgres process in the background, we keep the control over the
+ * postmaster process. Think exec() rather then fork().
+ *
+ * This function will take over the current standard output and standard error
+ * file descriptor, closing them and then giving control to them to Postgres
+ * itself. This function is meant to be called in the child process of a fork()
+ * call done by the caller.
+ */
+bool
+pg_ctl_postgres(const char *pg_ctl, const char *pgdata, int pgport,
+				char *listen_addresses)
+{
+	Program program;
+	char postgres[MAXPGPATH];
+	char logfile[MAXPGPATH];
+	int logFileDescriptor = -1;
+
+	char *args[12];
+	int argsIndex = 0;
+
+	char env_pg_regress_sock_dir[MAXPGPATH];
+
+	char command[BUFSIZE];
+	int commandSize = 0;
+
+	/* call postgres directly */
+	path_in_same_directory(pg_ctl, "postgres", postgres);
+
+	/* prepare startup.log file in PGDATA */
+	join_path_components(logfile, pgdata, "startup.log");
+
+	args[argsIndex++] = (char *) postgres;
+	args[argsIndex++] = "-D";
+	args[argsIndex++] = (char *) pgdata;
+	args[argsIndex++] = "-p";
+	args[argsIndex++] = (char *) intToString(pgport).strValue;
+
+	if (!IS_EMPTY_STRING_BUFFER(listen_addresses))
+	{
+		args[argsIndex++] = "-h";
+		args[argsIndex++] = (char *) listen_addresses;
+	}
+
+	if (env_exists("PG_REGRESS_SOCK_DIR"))
+	{
+		if (!get_env_copy("PG_REGRESS_SOCK_DIR", env_pg_regress_sock_dir,
+						  MAXPGPATH))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
+		args[argsIndex++] = "-k";
+		args[argsIndex++] = (char *) env_pg_regress_sock_dir;
+	}
+
+	args[argsIndex] = NULL;
+
+	/*
+	 * We do not want to call setsid() when running this program, as the
+	 * postgres subprogram is not intended to be its own session leader, but
+	 * remain a sub-process in the same group as pg_autoctl.
+	 */
+	program = initialize_program(args, false);
+
+	/* we want to redirect the output to logfile */
+	logFileDescriptor = open(logfile, FOPEN_FLAGS_W, 0644);
+
+	if (logFileDescriptor == -1)
+	{
+		log_error("Failed to open file \"%s\": %m", logfile);
+	}
+
+	program.capture = false;    /* redirect output, don't capture */
+	program.stdOutFd = logFileDescriptor;
+	program.stdErrFd = logFileDescriptor;
+
+	/* log the exact command line we're using */
+	commandSize = snprintf_program_command_line(&program, command, BUFSIZE);
+
+	if (commandSize >= BUFSIZE)
+	{
+		/* we only display the first BUFSIZE bytes of the real command */
+		log_info("%s...", command);
+	}
+	else
+	{
+		log_info("%s", command);
+	}
+
+	(void) execute_program(&program);
+
+	return program.returnCode == 0;
 }
 
 
@@ -1064,9 +1228,9 @@ pg_log_startup(const char *pgdata, int logLevel)
 				}
 			}
 		}
-
-		closedir(logDir);
 	}
+
+	closedir(logDir);
 
 	return true;
 }
@@ -1085,7 +1249,7 @@ pg_ctl_stop(const char *pg_ctl, const char *pgdata)
 	bool pgdata_exists = false;
 	const bool log_output = true;
 
-	log_debug("%s --pgdata %s --wait stop --mode fast", pg_ctl, pgdata);
+	log_info("%s --pgdata %s --wait stop --mode fast", pg_ctl, pgdata);
 
 	program = run_program(pg_ctl,
 						  "--pgdata", pgdata,
@@ -1158,7 +1322,8 @@ pg_ctl_status(const char *pg_ctl, const char *pgdata, bool log_output)
 	Program program = run_program(pg_ctl, "status", "-D", pgdata, NULL);
 	int returnCode = program.returnCode;
 
-	log_debug("%s status -D %s [%d]", pg_ctl, pgdata, returnCode);
+	log_level(log_output ? LOG_INFO : LOG_DEBUG,
+			  "%s status -D %s [%d]", pg_ctl, pgdata, returnCode);
 
 	if (log_output)
 	{
