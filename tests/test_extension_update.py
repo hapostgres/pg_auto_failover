@@ -34,3 +34,6 @@ def test_001_update_extension():
             WHERE name = 'pgautofailover'
         """)
     eq_(results, [('dummy',)])
+
+    del os.environ["PG_AUTOCTL_EXTENSION_VERSION"]
+    assert "PG_AUTOCTL_EXTENSION_VERSION" not in os.environ
