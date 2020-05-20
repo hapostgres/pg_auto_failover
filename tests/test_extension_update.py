@@ -16,12 +16,10 @@ def teardown_module():
 
 def test_000_create_monitor():
     monitor = cluster.create_monitor("/tmp/update/monitor")
-    monitor.run()
 
 def test_001_update_extension():
     os.environ["PG_AUTOCTL_DEBUG"] = '1'
     os.environ["PG_AUTOCTL_EXTENSION_VERSION"] = 'dummy'
-    cluster.monitor.stop_postgres()
 
     cluster.monitor.run()
 
