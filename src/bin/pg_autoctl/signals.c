@@ -14,7 +14,9 @@
 
 #include "postgres_fe.h"        /* pqsignal, portable sigaction wrapper */
 
+#include "cli_root.h"
 #include "defaults.h"
+#include "lock_utils.h"
 #include "log.h"
 #include "signals.h"
 
@@ -88,5 +90,6 @@ void
 catch_quit(int sig)
 {
 	/* default signal handler disposition is to core dump, we don't */
+	(void) semaphore_finish(&log_semaphore);
 	exit(EXIT_CODE_QUIT);
 }

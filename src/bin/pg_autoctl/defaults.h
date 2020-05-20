@@ -23,6 +23,9 @@
 #define PG_AUTOCTL_DEBUG "PG_AUTOCTL_DEBUG"
 #define PG_AUTOCTL_EXTENSION_VERSION_VAR "PG_AUTOCTL_EXTENSION_VERSION"
 
+/* environment variable for logging semaphore and locks */
+#define PG_AUTOCTL_SERVICE "PG_AUTOCTL_SERVICE"
+
 /* default values for the pg_autoctl settings */
 #define POSTGRES_PORT 5432
 #define POSTGRES_DEFAULT_LISTEN_ADDRESSES "*"
