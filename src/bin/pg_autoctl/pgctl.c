@@ -808,8 +808,24 @@ pg_ctl_initdb(const char *pg_ctl, const char *pgdata)
 						  "--silent",
 						  "--pgdata", pgdata,
 
-	                      /* avoid warning message */
-						  "--option", "'--auth=trust'",
+						  /*
+						   * Allow unix domain socket connections, we'll later set
+						   * unix_socket_permissions to only allow the current
+						   * user (0700). The goal is to prevent any random access
+						   * over unix domain socket.
+						   */
+						  "--option",
+						  "'--auth-local=trust'",
+
+						  /*
+						   * Reject local TCP connections for "localhost".
+						   * pg_auto_failover uses only unix domain sockets for
+						   * local connections, other connections should pass
+						   * pg_hba rules even if they are from "localhost".
+						   */
+						  "--option",
+						  "'--auth-host=reject'",
+
 						  NULL);
 	log_info("%s initdb -s -D %s", pg_ctl, pgdata);
 
