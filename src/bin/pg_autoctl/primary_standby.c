@@ -56,7 +56,8 @@ static void local_postgres_update_pg_failures_tracking(LocalPostgresServer *post
 	{ "ssl_crl_file", "" }, \
 	{ "ssl_cert_file", "" }, \
 	{ "ssl_key_file", "" }, \
-	{ "ssl_ciphers", "'" DEFAULT_SSL_CIPHERS "'" }
+	{ "ssl_ciphers", "'" DEFAULT_SSL_CIPHERS "'" }, \
+	{ "unix_socket_permissions", "0700"}
 
 GUC postgres_default_settings[] = {
 	DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER,

@@ -47,6 +47,7 @@ GUC monitor_default_settings[] = {
 	{ "ssl_cert_file", "" },
 	{ "ssl_key_file", "" },
 	{ "ssl_ciphers", "'" DEFAULT_SSL_CIPHERS "'" },
+	{ "unix_socket_permissions", "0700"},
 #ifdef TEST
 	{ "unix_socket_directories", "''" },
 #endif
