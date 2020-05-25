@@ -62,9 +62,8 @@ static bool check_monitor_settings(PostgresSetup pgSetup);
 
 
 /*
- * monitor_pg_init initialises a pg_auto_failover monitor PostgreSQL cluster,
- * either from scratch using `pg_ctl initdb`, or creating a new database in an
- * existing cluster.
+ * monitor_pg_init initialises a pg_auto_failover monitor PostgreSQL cluster
+ * from scratch using `pg_ctl initdb`.
  */
 bool
 monitor_pg_init(Monitor *monitor)
@@ -142,8 +141,7 @@ monitor_install(const char *nodename,
 
 	/*
 	 * We might have just started a PostgreSQL instance, so we want to recheck
-	 * the PostgreSQL setup. Also this time we make sure PostgreSQL is running,
-	 * which the rest of this function assumes.
+	 * the PostgreSQL setup.
 	 */
 	if (!pg_setup_init(&pgSetup, &pgSetupOption,
 					   missingPgdataIsOk, pgIsNotRunningIsOk))

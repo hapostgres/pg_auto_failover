@@ -162,7 +162,7 @@ service_monitor_runprogram(Monitor *monitor)
 	args[argsIndex++] = (char *) pg_autoctl_program;
 	args[argsIndex++] = "do";
 	args[argsIndex++] = "service";
-	args[argsIndex++] = "monitor";
+	args[argsIndex++] = "listener";
 	args[argsIndex++] = "--pgdata";
 	args[argsIndex++] = pgdata;
 	args[argsIndex++] = logLevelToString(log_get_level());
