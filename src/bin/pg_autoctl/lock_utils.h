@@ -11,16 +11,15 @@
 #define LOCK_UTILS_H
 
 #include <stdbool.h>
-#include <semaphore.h>
 
-/* man sem_overview(7) for details */
-#define SEM_NAME_MAX 251
+#include <sys/types.h>
+#include <sys/ipc.h>
+#include <sys/sem.h>
 
 typedef struct Semaphore
 {
 	pid_t pid;
-	char name[SEM_NAME_MAX];
-	sem_t *sema;
+	int semId;
 } Semaphore;
 
 
@@ -29,7 +28,6 @@ bool semaphore_finish(Semaphore *semaphore);
 
 bool semaphore_create(Semaphore *semaphore);
 bool semaphore_open(Semaphore *semaphore);
-bool semaphore_close(Semaphore *semaphore);
 bool semaphore_unlink(Semaphore *semaphore);
 
 bool semaphore_lock(Semaphore *semaphore);

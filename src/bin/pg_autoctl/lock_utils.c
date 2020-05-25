@@ -7,16 +7,31 @@
  *
  */
 
-#include <semaphore.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
+#include <sys/types.h>
+#include <sys/ipc.h>
+#include <sys/sem.h>
 #include <unistd.h>
 
 #include "defaults.h"
 #include "file_utils.h"
 #include "env_utils.h"
 #include "lock_utils.h"
+
+
+/*
+ * See man semctl(2)
+ */
+#if !defined(__APPLE__)
+union semun
+{
+	int val;
+	struct semid_ds *buf;
+	unsigned short *array;
+};
+#endif
 
 /*
  * semaphore_init creates or opens a named semaphore for the current process.
@@ -48,7 +63,8 @@ semaphore_finish(Semaphore *semaphore)
 {
 	if (env_exists(PG_AUTOCTL_SERVICE))
 	{
-		return semaphore_close(semaphore);
+		/* there's no semaphore closing protocol in SysV */
+		return true;
 	}
 	else
 	{
@@ -63,24 +79,25 @@ semaphore_finish(Semaphore *semaphore)
 bool
 semaphore_create(Semaphore *semaphore)
 {
+	union semun semun;
 	pid_t pid = getpid();
 
 	semaphore->pid = pid;
-	sformat(semaphore->name, SEM_NAME_MAX, "/pg_autoctl.%u", pid);
+	semaphore->semId = semget(pid, 1, IPC_CREAT | IPC_EXCL | 0600);
 
-	semaphore->sema = sem_open(semaphore->name,
-							   O_CREAT | O_EXCL,
-							   (mode_t) 0600,
-							   (unsigned) 1);
-
-	if (semaphore->sema == SEM_FAILED)
+	if (semaphore->semId < 0)
 	{
-		fformat(stderr,
-				"Failed to create semaphore \"%s\": %m\n", semaphore->name);
+		fformat(stderr, "Failed to create semaphore: %m\n");
 		return false;
 	}
 
-	fformat(stderr, "[%d] semaphore_create: %s\n", getpid(), semaphore->name);
+	semun.val = 1;
+	if (semctl(semaphore->semId, 0, SETVAL, semun) < 0)
+	{
+		fformat(stderr, "Failed to set semaphore %d/%d to value %d : %m\n",
+				semaphore->semId, 0, semun.val);
+		return false;
+	}
 
 	return true;
 }
@@ -95,36 +112,15 @@ semaphore_open(Semaphore *semaphore)
 	pid_t ppid = getppid();
 
 	semaphore->pid = ppid;
-	sformat(semaphore->name, SEM_NAME_MAX, "/pg_autoctl.%u", ppid);
+	semaphore->semId = semget(ppid, 1, 0600);
 
-	semaphore->sema = sem_open(semaphore->name, 0);
-
-	if (semaphore->sema == SEM_FAILED)
+	if (semaphore->semId < 0)
 	{
-		fformat(stderr,
-				"Failed to open semaphore \"%s\": %m\n", semaphore->name);
+		fformat(stderr, "Failed to open semaphore %d: %m\n", ppid);
 		return false;
 	}
 
-	fformat(stderr, "[%d] semaphore_open: %s\n", getpid(), semaphore->name);
-
 	return true;
-}
-
-
-/*
- * semaphore_close closes given semaphore.
- */
-bool
-semaphore_close(Semaphore *semaphore)
-{
-	if (sem_close(semaphore->sema) == 0)
-	{
-		return true;
-	}
-
-	fformat(stderr, "Failed to close semaphore \"%s\": %m\n", semaphore->name);
-	return false;
 }
 
 
@@ -134,13 +130,17 @@ semaphore_close(Semaphore *semaphore)
 bool
 semaphore_unlink(Semaphore *semaphore)
 {
-	if (sem_unlink(semaphore->name) == 0)
+	union semun semun;
+
+	semun.val = 0;              /* unused, but keep compiler quiet */
+
+	if (semctl(semaphore->semId, 0, IPC_RMID, semun) < 0)
 	{
-		return true;
+		fformat(stderr, "Failed to remove semaphore %d: %m", semaphore->semId);
+		return false;
 	}
 
-	fformat(stderr, "Failed to unlink semaphore \"%s\": %m\n", semaphore->name);
-	return false;
+	return true;
 }
 
 
@@ -152,16 +152,30 @@ bool
 semaphore_lock(Semaphore *semaphore)
 {
 	int errStatus;
+	struct sembuf sops;
 
+	sops.sem_op = -1;           /* decrement */
+	sops.sem_flg = 0;
+	sops.sem_num = 0;
+
+	/*
+	 * Note: if errStatus is -1 and errno == EINTR then it means we returned
+	 * from the operation prematurely because we were sent a signal.  So we
+	 * try and lock the semaphore again.
+	 *
+	 * We used to check interrupts here, but that required servicing
+	 * interrupts directly from signal handlers. Which is hard to do safely
+	 * and portably.
+	 */
 	do {
-		errStatus = sem_wait(semaphore->sema);
+		errStatus = semop(semaphore->semId, &sops, 1);
 	} while (errStatus < 0 && errno == EINTR);
 
 	if (errStatus < 0)
 	{
 		fformat(stderr,
-				"Failed to acquire a lock with semaphore \"%s\": %m\n",
-				semaphore->name);
+				"Failed to acquire a lock with semaphore %d: %m\n",
+				semaphore->semId);
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
@@ -176,6 +190,11 @@ bool
 semaphore_unlock(Semaphore *semaphore)
 {
 	int errStatus;
+	struct sembuf sops;
+
+	sops.sem_op = 1;            /* increment */
+	sops.sem_flg = 0;
+	sops.sem_num = 0;
 
 	/*
 	 * Note: if errStatus is -1 and errno == EINTR then it means we returned
@@ -184,15 +203,14 @@ semaphore_unlock(Semaphore *semaphore)
 	 * but might as well cope.
 	 */
 	do {
-		errStatus = sem_post(semaphore->sema);
+		errStatus = semop(semaphore->semId, &sops, 1);
 	} while (errStatus < 0 && errno == EINTR);
 
 	if (errStatus < 0)
 	{
 		fformat(stderr,
-				"Failed to release a lock with semaphore \"%s\": %m\n",
-				semaphore->name);
-		exit(EXIT_CODE_INTERNAL_ERROR);
+				"Failed to release a lock with semaphore %d: %m\n",
+				semaphore->semId);
 	}
 
 	return true;
