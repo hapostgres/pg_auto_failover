@@ -145,7 +145,8 @@ typedef struct pg_setup
 	int pgport;                             /* PGPORT */
 	char listen_addresses[MAXPGPATH];       /* listen_addresses */
 	int proxyport;                          /* Proxy port */
-	char authMethod[NAMEDATALEN];           /* auth method, defaults to trust */
+	char authMethodHost[NAMEDATALEN];       /* auth method host, defaults to reject */
+	char authMethodLocal[NAMEDATALEN];      /* auth method local, defaults to trust */
 	PostmasterStatus pm_status;             /* Postmaster status */
 	bool is_in_recovery;                    /* select pg_is_in_recovery() */
 	PostgresControlData control;            /* pg_controldata pgdata */
@@ -186,8 +187,8 @@ char * pg_setup_get_username(PostgresSetup *pgSetup);
 #define SKIP_HBA(authMethod) \
 	(strncmp(authMethod, SKIP_HBA_AUTH_METHOD, strlen(SKIP_HBA_AUTH_METHOD)) == 0)
 
-char * pg_setup_get_auth_method(PostgresSetup *pgSetup);
-bool pg_setup_skip_hba_edits(PostgresSetup *pgSetup);
+char * pg_setup_get_auth_host_method(PostgresSetup *pgSetup);
+char * pg_setup_get_auth_local_method(PostgresSetup *pgSetup);
 
 bool pg_setup_set_absolute_pgdata(PostgresSetup *pgSetup);
 

@@ -64,6 +64,14 @@
 	make_strbuf_option("postgresql", "auth_method", "auth", \
 					   false, MAXPGPATH, config->pgSetup.authMethod)
 
+#define OPTION_POSTGRESQL_AUTH_METHOD_HOST(config) \
+	make_strbuf_option("postgresql", "auth_method_host", "auth-host", \
+					   false, MAXPGPATH, config->pgSetup.authMethodHost)
+
+#define OPTION_POSTGRESQL_AUTH_METHOD_LOCAL(config) \
+	make_strbuf_option("postgresql", "auth_method_local", "auth-local	", \
+					   false, MAXPGPATH, config->pgSetup.authMethodLocal)
+
 #define OPTION_SSL_ACTIVE(config) \
 	make_int_option_default("ssl", "active", NULL, \
 							false, &(config->pgSetup.ssl.active), 0)
@@ -100,7 +108,8 @@
 		OPTION_POSTGRESQL_HOST(config), \
 		OPTION_POSTGRESQL_PORT(config), \
 		OPTION_POSTGRESQL_LISTEN_ADDRESSES(config), \
-		OPTION_POSTGRESQL_AUTH_METHOD(config), \
+		OPTION_POSTGRESQL_AUTH_METHOD_HOST(config), \
+		OPTION_POSTGRESQL_AUTH_METHOD_LOCAL(config), \
 		OPTION_SSL_MODE(config), \
 		OPTION_SSL_ACTIVE(config), \
 		OPTION_SSL_CA_FILE(config), \
@@ -365,7 +374,8 @@ monitor_config_log_settings(MonitorConfig config)
 	log_debug("postgresql.dbname: %s", config.pgSetup.dbname);
 	log_debug("postgresql.host: %s", config.pgSetup.pghost);
 	log_debug("postgresql.port: %d", config.pgSetup.pgport);
-	log_debug("postgresql.auth: %s", config.pgSetup.authMethod);
+	log_debug("postgresql.authhost: %s", config.pgSetup.authMethodHost);
+	log_debug("postgresql.authlocal: %s", config.pgSetup.authMethodLocal);
 
 	log_debug("ssl.active: %d", config.pgSetup.ssl.active);
 	log_debug("ssl.sslMode: %s", config.pgSetup.ssl.sslModeStr);

@@ -82,6 +82,14 @@
 	make_strbuf_option("postgresql", "auth_method", "auth", \
 					   false, MAXPGPATH, config->pgSetup.authMethod)
 
+#define OPTION_POSTGRESQL_AUTH_METHOD_HOST(config) \
+	make_strbuf_option("postgresql", "auth_method_host", "auth-host", \
+					   false, MAXPGPATH, config->pgSetup.authMethodHost)
+
+#define OPTION_POSTGRESQL_AUTH_METHOD_LOCAL(config) \
+	make_strbuf_option("postgresql", "auth_method_local", "auth-local	", \
+					   false, MAXPGPATH, config->pgSetup.authMethodLocal)
+
 #define OPTION_SSL_ACTIVE(config) \
 	make_int_option_default("ssl", "active", NULL, \
 							false, &(config->pgSetup.ssl.active), 0)
@@ -175,7 +183,8 @@
 		OPTION_POSTGRESQL_PORT(config), \
 		OPTION_POSTGRESQL_PROXY_PORT(config), \
 		OPTION_POSTGRESQL_LISTEN_ADDRESSES(config), \
-		OPTION_POSTGRESQL_AUTH_METHOD(config), \
+		OPTION_POSTGRESQL_AUTH_METHOD_HOST(config), \
+		OPTION_POSTGRESQL_AUTH_METHOD_LOCAL(config), \
 		OPTION_SSL_ACTIVE(config), \
 		OPTION_SSL_MODE(config), \
 		OPTION_SSL_CA_FILE(config), \

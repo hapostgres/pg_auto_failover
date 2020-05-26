@@ -112,7 +112,7 @@ fsm_init_primary(Keeper *keeper)
 	if (initState->pgInitState == PRE_INIT_STATE_EMPTY &&
 		!postgresInstanceExists)
 	{
-		if (!pg_ctl_initdb(pgSetup->pg_ctl, pgSetup->pgdata))
+		if (!pg_ctl_initdb(pgSetup->pg_ctl, pgSetup->pgdata, pgSetup->authMethodHost, pgSetup->authMethodLocal))
 		{
 			log_fatal("Failed to initialise a PostgreSQL instance at \"%s\""
 					  ", see above for details", pgSetup->pgdata);
@@ -255,7 +255,7 @@ fsm_init_primary(Keeper *keeper)
 									   keeper->config.pgSetup.ssl.active,
 									   HBA_DATABASE_ALL, NULL,
 									   keeper->config.nodename,
-									   NULL, DEFAULT_AUTH_METHOD, NULL))
+									   NULL, DEFAULT_AUTH_HOST_METHOD, NULL))
 			{
 				log_error("Failed to grant local network connections in HBA");
 				return false;

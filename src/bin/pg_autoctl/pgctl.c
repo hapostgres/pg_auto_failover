@@ -796,7 +796,8 @@ log_program_output(Program prog, int outLogLevel, int errorLogLevel)
  * No provision is made to control (sanitize?) that environment.
  */
 bool
-pg_ctl_initdb(const char *pg_ctl, const char *pgdata)
+pg_ctl_initdb(const char *pg_ctl, const char *pgdata, const char *authmethodhost,
+			  const char *authmethodlocal)
 {
 	Program program;
 	bool success = false;

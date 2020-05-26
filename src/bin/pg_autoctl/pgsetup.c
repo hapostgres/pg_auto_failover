@@ -328,13 +328,23 @@ pg_setup_init(PostgresSetup *pgSetup,
 
 
 	/*
-	 * If --auth is given, then set our authMethod to this value
+	 * If --auth-host is given, then set our authMethod to this value
 	 * otherwise it remains empty
 	 */
-	if (!IS_EMPTY_STRING_BUFFER(options->authMethod))
+	if (!IS_EMPTY_STRING_BUFFER(options->authMethodHost))
 	{
-		strlcpy(pgSetup->authMethod,
-				options->authMethod, NAMEDATALEN);
+		strlcpy(pgSetup->authMethodHost,
+				options->authMethodHost, NAMEDATALEN);
+	}
+
+	/*
+	 * If --auth-local is given, then set our authMethod to this value
+	 * otherwise it remains empty
+	 */
+	if (!IS_EMPTY_STRING_BUFFER(options->authMethodLocal))
+	{
+		strlcpy(pgSetup->authMethodLocal,
+				options->authMethodLocal, NAMEDATALEN);
 	}
 
 	pgSetup->settings = options->settings;
@@ -1223,35 +1233,40 @@ pg_setup_get_username(PostgresSetup *pgSetup)
 
 
 /*
- * pg_setup_get_auth_method returns pgSetup->authMethod when it exists,
- * otherwise it returns DEFAULT_AUTH_METHOD
+ * pg_setup_get_auth_host_method returns pgSetup->authMethod when it exists,
+ * otherwise it returns DEFAULT_AUTH_HOST_METHOD
  */
 char *
-pg_setup_get_auth_method(PostgresSetup *pgSetup)
+pg_setup_get_auth_host_method(PostgresSetup *pgSetup)
 {
-	if (!IS_EMPTY_STRING_BUFFER(pgSetup->authMethod))
+	if (!IS_EMPTY_STRING_BUFFER(pgSetup->authMethodHost))
 	{
-		return pgSetup->authMethod;
+		return pgSetup->authMethodHost;
 	}
 
-	log_trace("auth method not configured, falling back to default value : %s",
-			  DEFAULT_AUTH_METHOD);
+	log_trace("auth host method not configured, falling back to default value : %s",
+			  DEFAULT_AUTH_HOST_METHOD);
 
-	return DEFAULT_AUTH_METHOD;
+	return DEFAULT_AUTH_HOST_METHOD;
 }
-
 
 /*
- * pg_setup_skip_hba_edits returns true when the user had setup pg_autoctl to
- * skip editing HBA entries.
+ * pg_setup_get_auth_host_method returns pgSetup->authMethod when it exists,
+ * otherwise it returns DEFAULT_AUTH_LOCAL_METHOD
  */
-bool
-pg_setup_skip_hba_edits(PostgresSetup *pgSetup)
+char *
+pg_setup_get_auth_local_method(PostgresSetup *pgSetup)
 {
-	return !IS_EMPTY_STRING_BUFFER(pgSetup->authMethod) &&
-		   strcmp(pgSetup->authMethod, SKIP_HBA_AUTH_METHOD) == 0;
-}
+	if (!IS_EMPTY_STRING_BUFFER(pgSetup->authMethodHost))
+	{
+		return pgSetup->authMethodHost;
+	}
 
+	log_trace("auth local method not configured, falling back to default value : %s",
+			DEFAULT_AUTH_LOCAL_METHOD);
+
+	return DEFAULT_AUTH_LOCAL_METHOD;
+}
 
 /*
  * pg_setup_set_absolute_pgdata uses realpath(3) to make sure that we re using

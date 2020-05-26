@@ -45,7 +45,8 @@ bool pg_rewind(const char *pgdata,
 			   const char *pg_ctl,
 			   ReplicationSource *replicationSource);
 
-bool pg_ctl_initdb(const char *pg_ctl, const char *pgdata);
+bool pg_ctl_initdb(const char *pg_ctl, const char *pgdata, const char *authmethodhost,
+		  	  	   const char *authmethodlocal);
 bool pg_ctl_start(const char *pg_ctl,
 				  const char *pgdata, int pgport, char *listen_addresses);
 bool pg_ctl_postgres(const char *pg_ctl, const char *pgdata, int pgport,

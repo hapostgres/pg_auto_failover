@@ -187,30 +187,50 @@ cli_common_keeper_getopts(int argc, char **argv,
 
 			case 'A':
 			{
-				/* { "auth", required_argument, NULL, 'A' }, */
-				if (!IS_EMPTY_STRING_BUFFER(LocalOptionConfig.pgSetup.authMethod))
-				{
-					errors++;
-					log_error("Please use either --auth or --skip-pg-hba");
-				}
+				/*
+				 * By definition, authMethod cascades into both authMethodLocal
+				 * and authMethodHost.
+				 */
+				strlcpy(LocalOptionConfig.pgSetup.authMethodLocal, optarg, NAMEDATALEN);
+				strlcpy(LocalOptionConfig.pgSetup.authMethodHost, optarg, NAMEDATALEN);
 
-				strlcpy(LocalOptionConfig.pgSetup.authMethod, optarg, NAMEDATALEN);
-				log_trace("--auth %s", LocalOptionConfig.pgSetup.authMethod);
+				log_trace("--auth %s", LocalOptionConfig.pgSetup.authMethodLocal);
+				break;
+			}
+
+			case 10:
+			{
+				strlcpy(LocalOptionConfig.pgSetup.authMethodLocal, optarg, NAMEDATALEN);
+
+				log_trace("--auth-local %s", LocalOptionConfig.pgSetup.authMethodLocal);
+				break;
+			}
+
+			case 11:
+			{
+				strlcpy(LocalOptionConfig.pgSetup.authMethodHost, optarg, NAMEDATALEN);
+
+				log_trace("--auth-host %s", LocalOptionConfig.pgSetup.authMethodHost);
 				break;
 			}
 
 			case 'S':
 			{
 				/* { "skip-pg-hba", required_argument, NULL, 'S' }, */
-				if (!IS_EMPTY_STRING_BUFFER(LocalOptionConfig.pgSetup.authMethod))
+				if (!IS_EMPTY_STRING_BUFFER(LocalOptionConfig.pgSetup.authMethodHost) ||
+					!IS_EMPTY_STRING_BUFFER(LocalOptionConfig.pgSetup.authMethodLocal))
 				{
 					errors++;
 					log_error("Please use either --auth or --skip-pg-hba");
 				}
 
-				strlcpy(LocalOptionConfig.pgSetup.authMethod,
+				strlcpy(LocalOptionConfig.pgSetup.authMethodHost,
 						SKIP_HBA_AUTH_METHOD,
 						NAMEDATALEN);
+				strlcpy(LocalOptionConfig.pgSetup.authMethodLocal,
+						SKIP_HBA_AUTH_METHOD,
+						NAMEDATALEN);
+
 				log_trace("--skip-pg-hba");
 				break;
 			}
@@ -487,6 +507,8 @@ cli_common_keeper_getopts(int argc, char **argv,
  *		{ "proxyport", required_argument, NULL, 'y' },
  *		{ "username", required_argument, NULL, 'U' },
  *		{ "auth", required_argument, NULL, 'A' },
+ *		{ "auth-local", required_argument, NULL, 10},
+		{ "auth-host", required_argument, NULL, 11},
  *		{ "skip-pg-hba", required_argument, NULL, 'S' },
  *		{ "dbname", required_argument, NULL, 'd' },
  *		{ "nodename", required_argument, NULL, 'n' },
@@ -530,7 +552,8 @@ cli_create_node_getopts(int argc, char **argv,
 	 * ---skip-pg-hba. Our documentation tutorial will use --auth trust, and we
 	 * should make it obvious that this is not the right choice for production.
 	 */
-	if (IS_EMPTY_STRING_BUFFER(options->pgSetup.authMethod))
+	if (IS_EMPTY_STRING_BUFFER(options->pgSetup.authMethodHost) ||
+		IS_EMPTY_STRING_BUFFER(options->pgSetup.authMethodLocal))
 	{
 		log_fatal("Please use either --auth trust|md5|... or --skip-pg-hba");
 		log_info("pg_auto_failover can be set to edit Postgres HBA rules "

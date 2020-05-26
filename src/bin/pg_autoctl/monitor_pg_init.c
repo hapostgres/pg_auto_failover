@@ -111,7 +111,10 @@ monitor_pg_init(Monitor *monitor)
 		}
 	}
 
-	if (!pg_ctl_initdb(pgSetup->pg_ctl, pgSetup->pgdata))
+	log_fatal("Failed to initialise a PostgreSQL instance at \"%s\" \"%s\" , "
+			  "see above for details", pgSetup->authMethodLocal, pgSetup->authMethodHost);
+	if (!pg_ctl_initdb(pgSetup->pg_ctl, pgSetup->pgdata, pgSetup->authMethodLocal,
+					   pgSetup->authMethodHost))
 	{
 		log_fatal("Failed to initialise a PostgreSQL instance at \"%s\", "
 				  "see above for details", pgSetup->pgdata);
@@ -224,7 +227,7 @@ monitor_install(const char *nodename,
 							   PG_AUTOCTL_MONITOR_DBNAME,
 							   nodename,
 							   PG_AUTOCTL_MONITOR_USERNAME,
-							   pg_setup_get_auth_method(&pgSetup),
+							   pg_setup_get_auth_host_method(&pgSetup),
 							   NULL))
 	{
 		log_warn("Failed to grant connection to local network.");

@@ -605,7 +605,7 @@ create_database_and_extension(Keeper *keeper)
 									   pgSetup->dbname,
 									   pg_setup_get_username(pgSetup),
 									   config->nodename,
-									   pg_setup_get_auth_method(pgSetup)))
+									   pg_setup_get_auth_host_method(pgSetup)))
 	{
 		log_error("Failed to edit \"%s\" to grant connections to \"%s\", "
 				  "see above for details", hbaFilePath, config->nodename);
@@ -745,7 +745,7 @@ create_database_and_extension(Keeper *keeper)
 								   pgSetup->dbname,
 								   config->nodename,
 								   pg_setup_get_username(pgSetup),
-								   pg_setup_get_auth_method(pgSetup),
+								   pg_setup_get_auth_host_method(pgSetup),
 								   NULL))
 		{
 			log_error("Failed to grant local network connections in HBA");
