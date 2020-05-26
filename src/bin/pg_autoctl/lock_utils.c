@@ -112,7 +112,7 @@ semaphore_open(Semaphore *semaphore)
 	pid_t ppid = getppid();
 
 	semaphore->pid = ppid;
-	semaphore->semId = semget(ppid, 1, 0600);
+	semaphore->semId = semget(ppid, 1, 0);
 
 	if (semaphore->semId < 0)
 	{
