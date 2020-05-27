@@ -211,6 +211,7 @@ semaphore_unlock(Semaphore *semaphore)
 		fformat(stderr,
 				"Failed to release a lock with semaphore %d: %m\n",
 				semaphore->semId);
+		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
 	return true;
@@ -231,14 +232,14 @@ semaphore_log_lock_function(void *udata, int mode)
 		/* unlock */
 		case 0:
 		{
-			(void) semaphore_lock(semaphore);
+			(void) semaphore_unlock(semaphore);
 			break;
 		}
 
 		/* lock */
 		case 1:
 		{
-			(void) semaphore_unlock(semaphore);
+			(void) semaphore_lock(semaphore);
 			break;
 		}
 
