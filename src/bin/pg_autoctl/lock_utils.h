@@ -30,6 +30,8 @@ bool semaphore_create(Semaphore *semaphore);
 bool semaphore_open(Semaphore *semaphore);
 bool semaphore_unlink(Semaphore *semaphore);
 
+bool semaphore_cleanup(pid_t pid);
+
 bool semaphore_lock(Semaphore *semaphore);
 bool semaphore_unlock(Semaphore *semaphore);
 

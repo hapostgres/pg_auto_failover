@@ -19,6 +19,7 @@
 #include "keeper.h"
 #include "keeper_config.h"
 #include "keeper_pg_init.h"
+#include "lock_utils.h"
 #include "log.h"
 #include "monitor.h"
 #include "pgctl.h"
@@ -211,6 +212,9 @@ read_pidfile(const char *pidfile, pid_t *pid)
 			 * at this point.
 			 */
 			(void) remove_pidfile(pidfile);
+
+			/* we might have to cleanup a stale SysV semaphore, too */
+			(void) semaphore_cleanup(*pid);
 
 			return false;
 		}

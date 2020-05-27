@@ -19,6 +19,7 @@
 #include "file_utils.h"
 #include "env_utils.h"
 #include "lock_utils.h"
+#include "log.h"
 
 
 /*
@@ -141,6 +142,34 @@ semaphore_unlink(Semaphore *semaphore)
 	}
 
 	return true;
+}
+
+
+/*
+ * semaphore_cleanup is used when we find a stale PID file, to remove a
+ * possibly left behind semaphore. The user could also use ipcs and ipcrm to
+ * figure that out, if the stale pidfile does not exists anymore.
+ */
+bool
+semaphore_cleanup(pid_t pid)
+{
+	Semaphore semaphore;
+
+	semaphore.pid = pid;
+	semaphore.semId = semget(pid, 1, 0);
+
+	if (semaphore.semId < 0)
+	{
+		/*
+		 *  We can use log_info here because we're not using the just created
+		 *  semaphore for logging, we're cleaning-up after a previous process
+		 *  instance.
+		 */
+		log_info("Semaphore for stale PID %d have already been cleaned-up", pid);
+		return true;
+	}
+
+	return semaphore_unlink(&semaphore);
 }
 
 
