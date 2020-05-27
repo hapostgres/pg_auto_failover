@@ -155,7 +155,7 @@ semaphore_lock(Semaphore *semaphore)
 	struct sembuf sops;
 
 	sops.sem_op = -1;           /* decrement */
-	sops.sem_flg = 0;
+	sops.sem_flg = SEM_UNDO;
 	sops.sem_num = 0;
 
 	/*
@@ -193,7 +193,7 @@ semaphore_unlock(Semaphore *semaphore)
 	struct sembuf sops;
 
 	sops.sem_op = 1;            /* increment */
-	sops.sem_flg = 0;
+	sops.sem_flg = SEM_UNDO;
 	sops.sem_num = 0;
 
 	/*
