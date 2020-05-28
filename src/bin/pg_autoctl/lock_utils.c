@@ -20,6 +20,7 @@
 #include "env_utils.h"
 #include "lock_utils.h"
 #include "log.h"
+#include "string_utils.h"
 
 
 /*
@@ -45,7 +46,7 @@ union semun
 bool
 semaphore_init(Semaphore *semaphore)
 {
-	if (env_exists(PG_AUTOCTL_SERVICE))
+	if (env_exists(PG_AUTOCTL_LOG_SEMAPHORE))
 	{
 		return semaphore_open(semaphore);
 	}
@@ -62,7 +63,7 @@ semaphore_init(Semaphore *semaphore)
 bool
 semaphore_finish(Semaphore *semaphore)
 {
-	if (env_exists(PG_AUTOCTL_SERVICE))
+	if (env_exists(PG_AUTOCTL_LOG_SEMAPHORE))
 	{
 		/* there's no semaphore closing protocol in SysV */
 		return true;
@@ -81,10 +82,8 @@ bool
 semaphore_create(Semaphore *semaphore)
 {
 	union semun semun;
-	pid_t pid = getpid();
 
-	semaphore->pid = pid;
-	semaphore->semId = semget(pid, 1, IPC_CREAT | IPC_EXCL | 0600);
+	semaphore->semId = semget(IPC_PRIVATE, 1, 0600);
 
 	if (semaphore->semId < 0)
 	{
@@ -110,14 +109,16 @@ semaphore_create(Semaphore *semaphore)
 bool
 semaphore_open(Semaphore *semaphore)
 {
-	pid_t ppid = getppid();
+	char semIdString[BUFSIZE];
 
-	semaphore->pid = ppid;
-	semaphore->semId = semget(ppid, 1, 0);
-
-	if (semaphore->semId < 0)
+	if (!get_env_copy(PG_AUTOCTL_LOG_SEMAPHORE, semIdString, BUFSIZE))
 	{
-		fformat(stderr, "Failed to open semaphore %d: %m\n", ppid);
+		/* errors have already been logged */
+		return false;
+	}
+	if (!stringToInt(semIdString, &semaphore->semId))
+	{
+		/* errors have already been logged */
 		return false;
 	}
 
@@ -155,7 +156,6 @@ semaphore_cleanup(pid_t pid)
 {
 	Semaphore semaphore;
 
-	semaphore.pid = pid;
 	semaphore.semId = semget(pid, 1, 0);
 
 	if (semaphore.semId < 0)
