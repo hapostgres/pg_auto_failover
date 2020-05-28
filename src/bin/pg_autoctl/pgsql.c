@@ -431,7 +431,15 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 				writePointer += bytesWritten;
 			}
 
-			bytesWritten = sformat(writePointer, remainingBytes, "'%s'", value);
+			if (value == NULL)
+			{
+				bytesWritten = sformat(writePointer, remainingBytes, "NULL");
+			}
+			else
+			{
+				bytesWritten =
+					sformat(writePointer, remainingBytes, "'%s'", value);
+			}
 			remainingBytes -= bytesWritten;
 			writePointer += bytesWritten;
 		}
@@ -1374,7 +1382,7 @@ pgsql_create_extension(PGSQL *pgsql, const char *name)
 	}
 
 	/* now build the SQL command */
-	sformat(command, BUFSIZE, "CREATE EXTENSION %s", escapedIdentifier);
+	sformat(command, BUFSIZE, "CREATE EXTENSION %s CASCADE", escapedIdentifier);
 	PQfreemem(escapedIdentifier);
 	log_debug("Running command on Postgres: %s;", command);
 

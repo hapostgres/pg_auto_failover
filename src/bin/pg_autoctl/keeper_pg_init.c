@@ -7,6 +7,7 @@
  *
  */
 
+#include <inttypes.h>
 #include <stdbool.h>
 #include <unistd.h>
 
@@ -43,6 +44,7 @@ bool keeperInitWarnings = false;
 
 static bool keeper_pg_init_fsm(Keeper *keeper);
 static bool keeper_pg_init_and_register(Keeper *keeper);
+static bool keeper_pg_init_and_register_primary(Keeper *keeper);
 static bool reach_initial_state(Keeper *keeper);
 static bool wait_until_primary_is_ready(Keeper *config,
 										MonitorAssignedState *assignedState);
@@ -117,9 +119,11 @@ keeper_pg_init_and_register(Keeper *keeper)
 	 * The initial state we may register in depend on the current PostgreSQL
 	 * instance that might exist or not at PGDATA.
 	 */
-	PostgresSetup pgSetup = config->pgSetup;
-	bool postgresInstanceExists = pg_setup_pgdata_exists(&pgSetup);
-	bool postgresInstanceIsPrimary = pg_setup_is_primary(&pgSetup);
+	PostgresSetup *pgSetup = &(config->pgSetup);
+	bool postgresInstanceExists = pg_setup_pgdata_exists(pgSetup);
+	bool postgresInstanceIsRunning = pg_setup_is_running(pgSetup);
+	PostgresRole postgresRole = pg_setup_role(pgSetup);
+	bool postgresInstanceIsPrimary = postgresRole == POSTGRES_ROLE_PRIMARY;
 
 	if (postgresInstanceExists)
 	{
@@ -158,58 +162,29 @@ keeper_pg_init_and_register(Keeper *keeper)
 		return createAndRun;
 	}
 
-	if (postgresInstanceExists &&
-		postgresInstanceIsPrimary &&
-		!allowRemovingPgdata)
+	/*
+	 * If the local Postgres instance does not exist, we have two possible
+	 * choices: either we're the only one in our group, or we are joining a
+	 * group that already exists.
+	 *
+	 * The situation is decided by the Monitor, which implements transaction
+	 * semantics and safe concurrency approach, needed here in case other
+	 * keeper are concurrently registering other nodes.
+	 *
+	 * So our strategy is to ask the monitor to pick a state for us and then
+	 * implement whatever was decided. After all PGDATA does not exists yet so
+	 * we can decide to either pg_ctl initdb or pg_basebackup to create it.
+	 */
+	if (!postgresInstanceExists)
 	{
-		char absolutePgdata[PATH_MAX];
-
-		log_warn("A postgres directory already exists at \"%s\", registering "
-				 "as a single node",
-				 realpath(pgSetup.pgdata, absolutePgdata));
-
-		/*
-		 * The local Postgres instance exists and we are not allowed to remove
-		 * it.
-		 *
-		 * If we're able to register as a single postgres server, that's great.
-		 *
-		 * If there already is a single postgres server, then we become the
-		 * wait_standby and we would have to remove our own database directory,
-		 * which the user didn't give us permission for. In that case, we
-		 * revert the situation by removing ourselves from the monitor and
-		 * removing the state file.
-		 */
 		if (!keeper_register_and_init(keeper, INIT_STATE))
 		{
-			/* monitor_register_node logs relevant errors */
-			return false;
-		}
-
-		if (keeper->state.assigned_role != SINGLE_STATE)
-		{
-			bool ignore_monitor_errors = false;
-
-			log_error("There is already another postgres node, so the monitor "
-					  "wants us to be in state %s. However, that would involve "
-					  "removing the database directory.",
-					  NodeStateToString(keeper->state.assigned_role));
-
-			log_warn("Removing the node from the monitor");
-
-			if (!keeper_remove(keeper, config, ignore_monitor_errors))
-			{
-				log_fatal("Failed to remove the node from the monitor, run "
-						  "`pg_autoctl drop node` to manually remove "
-						  "the node from the monitor");
-				return false;
-			}
-
-			log_warn("HINT: Re-run with --allow-removing-pgdata to allow "
-					 "pg_autoctl to remove \"%s\" and join as %s\n\n",
-					 absolutePgdata,
-					 NodeStateToString(keeper->state.assigned_role));
-
+			log_error("Failed to register the existing local Postgres node "
+					  "\"%s:%d\" running at \"%s\""
+					  "to the pg_auto_failover monitor at %s, "
+					  "see above for details",
+					  config->nodename, config->pgSetup.pgport,
+					  config->pgSetup.pgdata, config->monitor_pguri);
 			return false;
 		}
 
@@ -218,45 +193,60 @@ keeper_pg_init_and_register(Keeper *keeper)
 
 		return reach_initial_state(keeper);
 	}
-	else if (postgresInstanceExists && postgresInstanceIsPrimary)
-	{
-		/*
-		 * The local Postgres instance exists, but we are allowed to remove it
-		 * in case the monitor assigns the state wait_standby to us. Therefore,
-		 * we register in INIT_STATE and let the monitor decide.
-		 */
 
-		if (!keeper_register_and_init(keeper, INIT_STATE))
+	/*
+	 * Ok so there's already a Postgres instance that exists in $PGDATA.
+	 *
+	 * If it's running and is a primary, we can register it as it is and expect
+	 * a SINGLE state from the monitor.
+	 *
+	 * If it's running and is not a primary, we don't know how to handle the
+	 * situation yet: the already existing secondary is using its own
+	 * replication slot and primary conninfo string (with username, password,
+	 * SSL setup, etc).
+	 */
+	if (postgresInstanceIsRunning)
+	{
+		if (postgresInstanceIsPrimary)
 		{
-			/* monitor_register_node logs relevant errors */
+			log_info("Registering Postgres system %" PRIu64
+					 " running on port %d with pid %d found at \"%s\"",
+					 pgSetup->control.system_identifier,
+					 pgSetup->pidFile.port,
+					 pgSetup->pidFile.pid,
+					 pgSetup->pgdata);
+
+			return keeper_pg_init_and_register_primary(keeper);
+		}
+		else
+		{
+			log_error("pg_autoctl doesn't know how to register an already "
+					  "existing standby server at the moment");
 			return false;
 		}
-
-		log_info("Successfully registered as \"%s\" to the monitor.",
-				 NodeStateToString(keeper->state.assigned_role));
-
-		return reach_initial_state(keeper);
 	}
-	else if (postgresInstanceExists && !postgresInstanceIsPrimary)
+
+	/*
+	 * Ok so there's a Postgres instance that exists in $PGDATA and it's not
+	 * running at the moment. We have run pg_controldata on the instance and we
+	 * do have its system_identifier. Using it to register, we have two cases:
+	 *
+	 * - either we are the first node in our group and all is good, we can
+	 *   register the current PGDATA as a SINGLE, maybe promoting it to being a
+	 *   primary,
+	 *
+	 * - or a primary node already is registered in our group, and we are going
+	 *   to join it as a secondary: that is only possible when the
+	 *   system_identifier of the other nodes in the group are all the same,
+	 *   which the monitor checks for us in a way that registration fails when
+	 *   that's not the case.
+	 */
+	if (postgresInstanceExists && !postgresInstanceIsRunning)
 	{
-		log_error("pg_autoctl doesn't know how to register an already "
-				  "existing standby server at the moment");
-		return false;
-	}
-	else if (!postgresInstanceExists)
-	{
-		/*
-		 * The local Postgres instance does not exist. We have two possible
-		 * choices here, either we're the only one in our group, or we are
-		 * joining a group that already exists.
-		 *
-		 * The situation is decided by the Monitor, which implements
-		 * transaction semantics and safe concurrency approach, needed here in
-		 * case other keeper are concurrently registering other nodes.
-		 *
-		 * So our strategy is to ask the monitor to pick a state for us and
-		 * then implement whatever was decided.
-		 */
+		log_info("Registering Postgres system %" PRIu64 " found at \"%s\"",
+				 pgSetup->control.system_identifier,
+				 pgSetup->pgdata);
+
 		if (!keeper_register_and_init(keeper, INIT_STATE))
 		{
 			log_error("Failed to register the existing local Postgres node "
@@ -281,6 +271,74 @@ keeper_pg_init_and_register(Keeper *keeper)
 	log_debug("pg is primary: %s", postgresInstanceIsPrimary ? "yes" : "no");
 
 	return false;
+}
+
+
+/*
+ * keeper_pg_init_and_register_primary registers a local Postgres instance that
+ * is known to be a primary: Postgres is running and SELECT pg_is_in_recovery()
+ * returns false.
+ */
+static bool
+keeper_pg_init_and_register_primary(Keeper *keeper)
+{
+	KeeperConfig *config = &(keeper->config);
+	PostgresSetup *pgSetup = &(config->pgSetup);
+	char absolutePgdata[PATH_MAX];
+
+	/*
+	 * If we're able to register as a single postgres server, that's great.
+	 *
+	 * If there already is a single postgres server, then we become the
+	 * wait_standby and we would have to remove our own database directory,
+	 * which the user has to give us permission for with the command line
+	 * option --allow-removing-pgdata.
+	 *
+	 * When allowRemovingPgdata is true, we accept any role and thus register
+	 * with the expected state INIT (which is, we don't have any expectation
+	 * really).
+	 *
+	 * When allowRemovingPgdata is false, we expect to be registed in the
+	 * SINGLE state and publish that to the register_node() API call, so that
+	 * it fails on the server side when that's not possible.
+	 */
+	NodeState expectedState = allowRemovingPgdata ? INIT_STATE : SINGLE_STATE;
+
+	log_warn("A postgres directory already exists at \"%s\", registering "
+			 "as a single node",
+			 realpath(pgSetup->pgdata, absolutePgdata));
+
+	/* register to the monitor in the expected state directly */
+	if (!keeper_register_and_init(keeper, expectedState))
+	{
+		log_error("Failed to register the existing local Postgres node "
+				  "\"%s:%d\" running at \"%s\""
+				  "to the pg_auto_failover monitor at %s, "
+				  "see above for details",
+				  config->nodename, config->pgSetup.pgport,
+				  config->pgSetup.pgdata, config->monitor_pguri);
+
+		/* errors have already been logged */
+		if (!allowRemovingPgdata)
+		{
+			log_error("There is already another postgres node registered in "
+					  "our group and formation, so the monitor "
+					  "wants us to be in state %s. However, that would involve "
+					  "removing the database directory.",
+					  NodeStateToString(keeper->state.assigned_role));
+
+			log_warn("HINT: Re-run with --allow-removing-pgdata to allow "
+					 "pg_autoctl to remove \"%s\" and join as %s\n\n",
+					 absolutePgdata,
+					 NodeStateToString(keeper->state.assigned_role));
+		}
+		return false;
+	}
+
+	log_info("Successfully registered as \"%s\" to the monitor.",
+			 NodeStateToString(keeper->state.assigned_role));
+
+	return reach_initial_state(keeper);
 }
 
 

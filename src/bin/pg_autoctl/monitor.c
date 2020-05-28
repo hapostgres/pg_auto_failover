@@ -537,20 +537,21 @@ monitor_get_coordinator(Monitor *monitor, char *formation, NodeAddress *node)
  */
 bool
 monitor_register_node(Monitor *monitor, char *formation, char *host, int port,
+					  uint64_t system_identifier,
 					  char *dbname, int desiredGroupId, NodeState initialState,
 					  PgInstanceKind kind, int candidatePriority, bool quorum,
 					  MonitorAssignedState *assignedState)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
-		"SELECT * FROM pgautofailover.register_node($1, $2, $3, $4, $5, "
-		"$6::pgautofailover.replication_state, $7, $8, $9)";
-	int paramCount = 9;
-	Oid paramTypes[9] = {
-		TEXTOID, TEXTOID, INT4OID, NAMEOID, INT4OID,
-		TEXTOID, TEXTOID, INT4OID, BOOLOID
+		"SELECT * FROM pgautofailover.register_node($1, $2, $3, $4, $5, $6, "
+		"$7::pgautofailover.replication_state, $8, $9, $10)";
+	int paramCount = 10;
+	Oid paramTypes[10] = {
+		TEXTOID, TEXTOID, INT4OID, NAMEOID, INT8OID,
+		INT4OID, TEXTOID, TEXTOID, INT4OID, BOOLOID
 	};
-	const char *paramValues[9];
+	const char *paramValues[10];
 	MonitorAssignedStateParseContext parseContext =
 	{ { 0 }, assignedState, false };
 	const char *nodeStateString = NodeStateToString(initialState);
@@ -559,11 +560,12 @@ monitor_register_node(Monitor *monitor, char *formation, char *host, int port,
 	paramValues[1] = host;
 	paramValues[2] = intToString(port).strValue;
 	paramValues[3] = dbname;
-	paramValues[4] = intToString(desiredGroupId).strValue;
-	paramValues[5] = nodeStateString;
-	paramValues[6] = nodeKindToString(kind);
-	paramValues[7] = intToString(candidatePriority).strValue;
-	paramValues[8] = quorum ? "true" : "false";
+	paramValues[4] = intToString(system_identifier).strValue;
+	paramValues[5] = intToString(desiredGroupId).strValue;
+	paramValues[6] = nodeStateString;
+	paramValues[7] = nodeKindToString(kind);
+	paramValues[8] = intToString(candidatePriority).strValue;
+	paramValues[9] = quorum ? "true" : "false";
 
 
 	if (!pgsql_execute_with_params(pgsql, sql,
@@ -584,6 +586,7 @@ monitor_register_node(Monitor *monitor, char *formation, char *host, int port,
 
 			sleep(PG_AUTOCTL_KEEPER_SLEEP_TIME);
 			return monitor_register_node(monitor, formation, host, port,
+										 system_identifier,
 										 dbname, desiredGroupId, initialState,
 										 kind, candidatePriority, quorum,
 										 assignedState);
@@ -2259,6 +2262,54 @@ monitor_set_nodename(Monitor *monitor, int nodeId, const char *nodename)
 			"because it returned an unexpected result. "
 			"See previous line for details.",
 			nodeId, nodename);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * monitor_set_node_system_identifier sets the node's sysidentifier column on
+ * the monitor.
+ */
+bool
+monitor_set_node_system_identifier(Monitor *monitor,
+								   int nodeId,
+								   uint64_t system_identifier)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT * FROM pgautofailover.set_node_system_identifier($1, $2)";
+	int paramCount = 2;
+	Oid paramTypes[2] = { INT8OID, INT8OID };
+	const char *paramValues[2];
+
+	NodeAddress node = { 0 };
+	NodeAddressParseContext parseContext = { { 0 }, &node, false };
+
+	paramValues[0] = intToString(nodeId).strValue;
+	paramValues[1] = intToString(system_identifier).strValue;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &parseContext, parseNodeResult))
+	{
+		log_error("Failed to set_node_system_identifier of node %d "
+				  "from the monitor", nodeId);
+		return false;
+	}
+
+	/* disconnect from PostgreSQL now */
+	pgsql_finish(&monitor->pgsql);
+
+	if (!parseContext.parsedOK)
+	{
+		log_error(
+			"Failed to set node %d sysidentifier to \"%" PRIu64 "\""
+																" on the monitor because it returned an unexpected result. "
+																"See previous line for details.",
+			nodeId, system_identifier);
 		return false;
 	}
 

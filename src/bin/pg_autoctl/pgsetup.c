@@ -1157,22 +1157,101 @@ pg_setup_wait_until_is_stopped(PostgresSetup *pgSetup, int timeout, int logLevel
  * pg_setup_is_primary returns true when the local PostgreSQL instance is known
  * to not be recovery.
  */
-bool
-pg_setup_is_primary(PostgresSetup *pgSetup)
+PostgresRole
+pg_setup_role(PostgresSetup *pgSetup)
 {
+	char *pgdata = pgSetup->pgdata;
+
 	if (pg_setup_is_running(pgSetup))
 	{
-		return !pgSetup->is_in_recovery;
+		/*
+		 * Here we have either a recovery or a standby node. We don't know for
+		 * sure with just that piece of information.
+		 *
+		 * If we are using Postgres 12+ and there's a standby.signal file in
+		 * PGDATA, that's a strong hint that we can't have in previous version
+		 * short of parsing recovery.conf.
+		 *
+		 * Remember that in versions before Postgres 12 the standby_mode was
+		 * not exposed as a GUC so we can't inquire about that either. We would
+		 * have to parse the recovery.conf file for getting the standby mode.
+		 *
+		 * It's easier to just return POSTGRES_ROLE_RECOVERY in that case, and
+		 * let the caller figure out that this might be POSTGRES_ROLE_STANDBY.
+		 * At the moment the callers don't need that level of detail anyway.
+		 */
+		if (pgSetup->is_in_recovery)
+		{
+			char recoverySignalPath[MAXPGPATH] = { 0 };
+
+			join_path_components(recoverySignalPath, pgdata, "standby.signal");
+
+			if (file_exists(recoverySignalPath))
+			{
+				return POSTGRES_ROLE_STANDBY;
+			}
+			else
+			{
+				/* We are in recovery, we don't know if we are a standby */
+				return POSTGRES_ROLE_RECOVERY;
+			}
+		}
+
+		/*
+		 * Here it's running and SELECT pg_is_in_recovery() is false, so we
+		 * know we are talking about a primary server.
+		 */
+		else
+		{
+			return POSTGRES_ROLE_PRIMARY;
+		}
 	}
 	else
 	{
 		/*
-		 * PostgreSQL is not running, we don't know... assume we're not in
-		 * recovery, otherwise `pg_autoctl create` bails out without even
-		 * trying.
+		 * PostgreSQL is not running, we don't know yet... what we know is that
+		 * to be a standby the file $PDGATA/recovery.conf needs to be setup (up
+		 * to version 11 included), or the file $PGDATA/standby.signal needs to
+		 * exists (starting with version 12). A recovery.signal file starting
+		 * in Postgres 12 also indicates that we're not a primary server.
+		 *
+		 * There's no way that a Postgres instance is going to be a recovery or
+		 * standby node without one of those files existing:
 		 */
-		return true;
+		char standbyFilesArray[][MAXPGPATH] = {
+			"recovery.conf",
+			"recovery.signal",
+			"standby.signal"
+		};
+		PostgresRole standbyRoleArray[] = {
+			/* default to recovery, might be a standby */
+			POSTGRES_ROLE_RECOVERY, /* recovery.conf */
+			POSTGRES_ROLE_RECOVERY, /* recovery.signal */
+			POSTGRES_ROLE_STANDBY   /* standby.signal */
+		};
+		int pos = 0, count = 3;
+
+		for (pos = 0; pos < count; pos++)
+		{
+			char filePath[MAXPGPATH] = { 0 };
+
+			join_path_components(filePath, pgdata, standbyFilesArray[pos]);
+
+			if (file_exists(filePath))
+			{
+				return standbyRoleArray[pos];
+			}
+		}
+
+		/*
+		 * Postgres is not running, and there's no file around in PGDATA that
+		 * allows us to have a strong opinion on whether this instance is a
+		 * primary or a standby. It might be either.
+		 */
+		return POSTGRES_ROLE_UNKNOWN;
 	}
+
+	return POSTGRES_ROLE_UNKNOWN;
 }
 
 

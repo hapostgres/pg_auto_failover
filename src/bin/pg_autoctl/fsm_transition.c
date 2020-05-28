@@ -112,6 +112,11 @@ fsm_init_primary(Keeper *keeper)
 	if (initState->pgInitState == PRE_INIT_STATE_EMPTY &&
 		!postgresInstanceExists)
 	{
+		Monitor *monitor = &(keeper->monitor);
+		PostgresSetup newPgSetup = { 0 };
+		bool missingPgdataIsOk = false;
+		bool postgresNotRunningIsOk = true;
+
 		if (!pg_ctl_initdb(pgSetup->pg_ctl, pgSetup->pgdata))
 		{
 			log_fatal("Failed to initialise a PostgreSQL instance at \"%s\""
@@ -119,6 +124,18 @@ fsm_init_primary(Keeper *keeper)
 
 			return false;
 		}
+
+		if (!pg_setup_init(&newPgSetup,
+						   pgSetup,
+						   missingPgdataIsOk,
+						   postgresNotRunningIsOk))
+		{
+			/* errors have already been logged */
+			log_error("pg_setup_wait_until_is_ready: pg_setup_init is false");
+			return false;
+		}
+
+		*pgSetup = newPgSetup;
 
 		/*
 		 * We managed to initdb, refresh our configuration file location with
@@ -128,6 +145,18 @@ fsm_init_primary(Keeper *keeper)
 		if (!keeper_config_update_with_absolute_pgdata(&(keeper->config)))
 		{
 			/* errors have already been logged */
+			return false;
+		}
+
+		/*
+		 * We have a new system_identifier, we need to publish it now.
+		 */
+		if (!monitor_set_node_system_identifier(
+				monitor,
+				keeper->state.current_node_id,
+				pgSetup->control.system_identifier))
+		{
+			log_error("Failed to update the new node system_identifier");
 			return false;
 		}
 	}
@@ -670,6 +699,8 @@ fsm_init_standby(Keeper *keeper)
 	int groupId = keeper->state.current_group;
 	NodeAddress *primaryNode = NULL;
 
+	bool skipBaseBackup = false;
+
 	/* get the primary node to follow */
 	if (!config->monitorDisabled)
 	{
@@ -701,7 +732,10 @@ fsm_init_standby(Keeper *keeper)
 		return false;
 	}
 
-	if (!standby_init_database(postgres, config->nodename))
+	skipBaseBackup = file_exists(keeper->config.pathnames.init) &&
+					 keeper->initState.pgInitState == PRE_INIT_STATE_EXISTS;
+
+	if (!standby_init_database(postgres, config->nodename, skipBaseBackup))
 	{
 		log_error("Failed initialise standby server, see above for details");
 		return false;
@@ -766,10 +800,12 @@ fsm_rewind_or_init(Keeper *keeper)
 
 	if (!primary_rewind_to_standby(postgres))
 	{
+		bool skipBaseBackup = false;
+
 		log_warn("Failed to rewind demoted primary to standby, "
 				 "trying pg_basebackup instead");
 
-		if (!standby_init_database(postgres, config->nodename))
+		if (!standby_init_database(postgres, config->nodename, skipBaseBackup))
 		{
 			log_error("Failed to become standby server, see above for details");
 			return false;

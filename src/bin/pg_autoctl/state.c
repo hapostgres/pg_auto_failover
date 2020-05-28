@@ -712,7 +712,7 @@ keeper_init_state_discover(KeeperStateInit *initState,
 		return false;
 	}
 
-	if (pg_setup_is_running(pgSetup) && pg_setup_is_primary(pgSetup))
+	if (pg_setup_role(pgSetup) == POSTGRES_ROLE_PRIMARY)
 	{
 		initState->pgInitState = PRE_INIT_STATE_PRIMARY;
 	}

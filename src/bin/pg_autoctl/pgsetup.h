@@ -57,6 +57,24 @@ typedef enum
 } PostmasterStatus;
 
 /*
+ * When discovering Postgres we try to determine if the local $PGDATA directory
+ * belons to a primary or a secondary server. If the server is running, it's
+ * easy: connect and ask with the pg_is_in_recovery() SQL function. If the
+ * server is not running, we might be lucky and find a standby setup file and
+ * then we know it's not a primary.
+ *
+ * Otherwise we just don't know.
+ */
+typedef enum PostgresRole
+{
+	POSTGRES_ROLE_UNKNOWN,
+	POSTGRES_ROLE_PRIMARY,
+	POSTGRES_ROLE_RECOVERY,     /* Either PITR or Hot Standby */
+	POSTGRES_ROLE_STANDBY       /* We know it's an Hot Standby */
+} PostgresRole;
+
+
+/*
  * pg_auto_failover knows how to manage three kinds of PostgreSQL servers:
  *
  *  - Standalone PostgreSQL instances
@@ -173,7 +191,7 @@ bool pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 										  char *connectionString);
 bool pg_setup_pgdata_exists(PostgresSetup *pgSetup);
 bool pg_setup_is_running(PostgresSetup *pgSetup);
-bool pg_setup_is_primary(PostgresSetup *pgSetup);
+PostgresRole pg_setup_role(PostgresSetup *pgSetup);
 bool pg_setup_is_ready(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok);
 bool pg_setup_wait_until_is_ready(PostgresSetup *pgSetup,
 								  int timeout, int logLevel);
