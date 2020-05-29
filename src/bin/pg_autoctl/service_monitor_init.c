@@ -51,7 +51,7 @@ service_monitor_init(Monitor *monitor)
 			"postgres",
 			RP_PERMANENT,
 			-1,
-			&service_postgres_ctl_start,
+			&service_postgres_ctl_start
 		},
 		{
 			"installer",
@@ -63,6 +63,12 @@ service_monitor_init(Monitor *monitor)
 	};
 
 	int subprocessesCount = sizeof(subprocesses) / sizeof(subprocesses[0]);
+
+	/* when using pg_autoctl create monitor --run, use "listener" */
+	if (createAndRun)
+	{
+		strlcpy(subprocesses[1].name, "listener", NAMEDATALEN);
+	}
 
 	/* We didn't create our target username/dbname yet */
 	strlcpy(pgSetup->username, "", NAMEDATALEN);
@@ -114,9 +120,11 @@ service_monitor_init_start(void *context, pid_t *pid)
 
 		case 0:
 		{
-			/* finish the install */
-			(void) set_ps_title("installer");
+			const char *serviceName = createAndRun ? "listener" : "installer";
 
+			(void) set_ps_title(serviceName);
+
+			/* finish the install if necessary */
 			if (!monitor_install(config->nodename, *pgSetup, false))
 			{
 				/* errors have already been logged */
