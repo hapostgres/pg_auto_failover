@@ -120,7 +120,9 @@ service_monitor_init_start(void *context, pid_t *pid)
 
 		case 0:
 		{
-			const char *serviceName = createAndRun ? "listener" : "installer";
+			const char *serviceName = createAndRun ?
+									  "pg_autoctl: monitor listener" :
+									  "pg_autoctl: monitor installer";
 
 			(void) set_ps_title(serviceName);
 
