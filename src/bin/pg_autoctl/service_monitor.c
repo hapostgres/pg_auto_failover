@@ -123,6 +123,10 @@ service_monitor_start(void *context, pid_t *pid)
  * service_monitor_runprogram runs the node_active protocol service:
  *
  *   $ pg_autoctl do service monitor --pgdata ...
+ *
+ * This function is intended to be called from the child process after a fork()
+ * has been successfully done at the parent process level: it's calling
+ * execve() and willl never return.
  */
 void
 service_monitor_runprogram(Monitor *monitor)
@@ -244,7 +248,6 @@ monitor_service_run(Monitor *monitor)
 	 */
 	for (;;)
 	{
-		/* we quit on reload, the supervisor is going to restart us */
 		if (asked_to_reload)
 		{
 			(void) reload_configuration(monitor);
@@ -357,14 +360,11 @@ monitor_ensure_configuration(Monitor *monitor)
 {
 	MonitorConfig *config = &(monitor->config);
 	PostgresSetup *pgSetup = &(config->pgSetup);
-	char configFilePath[MAXPGPATH] = { 0 };
 
 	LocalPostgresServer postgres = { 0 };
 	PostgresSetup *pgSetupReload = &(postgres.postgresSetup);
 	bool missingPgdataIsOk = false;
 	bool pgIsNotRunningIsOk = false;
-
-	join_path_components(configFilePath, pgSetup->pgdata, "postgresql.conf");
 
 	if (!monitor_add_postgres_default_settings(monitor))
 	{

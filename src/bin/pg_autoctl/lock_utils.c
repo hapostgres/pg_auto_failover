@@ -87,15 +87,17 @@ semaphore_create(Semaphore *semaphore)
 
 	if (semaphore->semId < 0)
 	{
-		fformat(stderr, "Failed to create semaphore: %m\n");
+		/* the semaphore_log_lock_function has not been set yet */
+		log_fatal("Failed to create semaphore: %m\n");
 		return false;
 	}
 
 	semun.val = 1;
 	if (semctl(semaphore->semId, 0, SETVAL, semun) < 0)
 	{
-		fformat(stderr, "Failed to set semaphore %d/%d to value %d : %m\n",
-				semaphore->semId, 0, semun.val);
+		/* the semaphore_log_lock_function has not been set yet */
+		log_fatal("Failed to set semaphore %d/%d to value %d : %m\n",
+				  semaphore->semId, 0, semun.val);
 		return false;
 	}
 

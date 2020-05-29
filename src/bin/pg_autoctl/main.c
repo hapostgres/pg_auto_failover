@@ -27,6 +27,38 @@ size_t last_status_len;         /* use to minimize length of clobber */
 
 Semaphore log_semaphore;        /* allows inter-process locking */
 
+
+static void set_logger(void);
+
+
+/*
+ * set_logger creates our log semaphore, sets the logging utility aspects such
+ * as using colors in an interactive terminal and the default log level.
+ */
+static void
+set_logger()
+{
+	/* we're verbose by default */
+	log_set_level(LOG_INFO);
+
+	/*
+	 * Log messages go to stderr. We use colours when stderr is being shown
+	 * directly to the user to make it easier to spot warnings and errors.
+	 */
+	log_use_colors(isatty(fileno(stderr)));
+
+	/* initialise the semaphore used for locking log output */
+	if (!semaphore_init(&log_semaphore))
+	{
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	/* set our logging facility to use our semaphore as a lock mechanism */
+	(void) log_set_udata(&log_semaphore);
+	(void) log_set_lock(&semaphore_log_lock_function);
+}
+
+
 /*
  * Main entry point for the binary.
  */
@@ -38,15 +70,8 @@ main(int argc, char **argv)
 	/* allows changing process title in ps/top/ptree etc */
 	(void) init_ps_buffer(argc, argv);
 
-	/* initialise the semaphore used for locking log output */
-	if (!semaphore_init(&log_semaphore))
-	{
-		exit(EXIT_CODE_INTERNAL_ERROR);
-	}
-
-	/* set our logging facility to use our semaphore as a lock mechanism */
-	(void) log_set_udata(&log_semaphore);
-	(void) log_set_lock(&semaphore_log_lock_function);
+	/* set our logging infrastructure */
+	(void) set_logger();
 
 	/*
 	 * When PG_AUTOCTL_DEBUG is set in the environment, provide the user
@@ -70,15 +95,6 @@ main(int argc, char **argv)
 	 * might mix options and arguments.
 	 */
 	setenv("POSIXLY_CORRECT", "1", 1);
-
-	/* we're verbose by default */
-	log_set_level(LOG_INFO);
-
-	/*
-	 * Log messages go to stderr. We use colours when stderr is being shown
-	 * directly to the user to make it easier to spot warnings and errors.
-	 */
-	log_use_colors(isatty(fileno(stderr)));
 
 	/*
 	 * Stash away the argv[0] used to run this program and compute the realpath
