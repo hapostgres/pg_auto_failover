@@ -104,7 +104,14 @@ semaphore_create(Semaphore *semaphore)
 
 
 /*
- * semaphore_open opens an already existing semaphore.
+ * semaphore_open opens our IPC_PRIVATE semaphore.
+ *
+ * We don't have a key for it, because we asked the kernel to create a new
+ * semaphore set with the guarantee that it would not exist already. So we
+ * re-use the semaphore identifier directly.
+ *
+ * We don't even have to call semget(2) here at all, because we share our
+ * semaphore identifier in the environment directly.
  */
 bool
 semaphore_open(Semaphore *semaphore)
@@ -116,12 +123,14 @@ semaphore_open(Semaphore *semaphore)
 		/* errors have already been logged */
 		return false;
 	}
+
 	if (!stringToInt(semIdString, &semaphore->semId))
 	{
 		/* errors have already been logged */
 		return false;
 	}
 
+	/* we have the semaphore identifier, no need to call semget(2), done */
 	return true;
 }
 
@@ -152,21 +161,38 @@ semaphore_unlink(Semaphore *semaphore)
  * figure that out, if the stale pidfile does not exists anymore.
  */
 bool
-semaphore_cleanup(pid_t pid)
+semaphore_cleanup(const char *pidfile)
 {
 	Semaphore semaphore;
 
-	semaphore.semId = semget(pid, 1, 0);
+	long fileSize = 0L;
+	char *fileContents = NULL;
+	char *fileLines[BUFSIZE] = { 0 };
+	int lineCount = 0;
 
-	if (semaphore.semId < 0)
+	char semIdString[BUFSIZE] = { 0 };
+
+	if (!file_exists(pidfile))
 	{
-		/*
-		 *  We can use log_info here because we're not using the just created
-		 *  semaphore for logging, we're cleaning-up after a previous process
-		 *  instance.
-		 */
-		log_info("Semaphore for stale PID %d have already been cleaned-up", pid);
-		return true;
+		return false;
+	}
+
+	if (!read_file(pidfile, &fileContents, &fileSize))
+	{
+		return false;
+	}
+
+	lineCount = splitLines(fileContents, fileLines, BUFSIZE);
+
+	if (lineCount < 2)
+	{
+		return false;
+	}
+
+	if (!stringToInt(semIdString, &(semaphore.semId)))
+	{
+		/* errors have already been logged */
+		return false;
 	}
 
 	return semaphore_unlink(&semaphore);
