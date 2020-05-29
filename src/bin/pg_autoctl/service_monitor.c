@@ -126,7 +126,7 @@ service_monitor_start(void *context, pid_t *pid)
  *
  * This function is intended to be called from the child process after a fork()
  * has been successfully done at the parent process level: it's calling
- * execve() and willl never return.
+ * execve() and will never return.
  */
 void
 service_monitor_runprogram(Monitor *monitor)
