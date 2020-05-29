@@ -14,6 +14,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "cli_root.h"
 #include "defaults.h"
 #include "fsm.h"
 #include "keeper.h"
@@ -154,7 +155,7 @@ create_pidfile(const char *pidfile, pid_t pid)
 
 	log_trace("create_pidfile(%d): \"%s\"", pid, pidfile);
 
-	sformat(content, BUFSIZE, "%d", pid);
+	sformat(content, BUFSIZE, "%d\n%d\n", pid, log_semaphore.semId);
 
 	return write_file(content, strlen(content), pidfile);
 }
@@ -214,7 +215,7 @@ read_pidfile(const char *pidfile, pid_t *pid)
 			(void) remove_pidfile(pidfile);
 
 			/* we might have to cleanup a stale SysV semaphore, too */
-			(void) semaphore_cleanup(*pid);
+			(void) semaphore_cleanup(pidfile);
 
 			return false;
 		}
