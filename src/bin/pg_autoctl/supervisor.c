@@ -18,6 +18,7 @@
 #include "postgres_fe.h"
 #include "pqexpbuffer.h"
 
+#include "cli_root.h"
 #include "defaults.h"
 #include "fsm.h"
 #include "keeper.h"
@@ -805,6 +806,7 @@ supervisor_update_pidfile(Supervisor *supervisor)
 
 	/* first line should still be our supervisor pid, alone */
 	appendPQExpBuffer(content, "%d\n", supervisor->pid);
+	appendPQExpBuffer(content, "%d\n", log_semaphore.semId);
 
 	for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
 	{
@@ -852,8 +854,8 @@ supervisor_find_service_pid(const char *pidfile,
 	{
 		char *separator = NULL;
 
-		/* skip first line, that's the supervisor (main) pid */
-		if (lineNumber == 0)
+		/* skip first and second lines: main pid, semaphore id */
+		if (lineNumber < 2)
 		{
 			continue;
 		}

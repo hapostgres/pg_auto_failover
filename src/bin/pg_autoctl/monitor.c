@@ -106,6 +106,30 @@ monitor_init(Monitor *monitor, char *url)
 
 
 /*
+ * monitor_local_init initialises a Monitor struct to connect to the local
+ * monitor postgres instance, for use from the pg_autoctl instance that manages
+ * the monitor.
+ */
+bool
+monitor_local_init(Monitor *monitor)
+{
+	MonitorConfig *mconfig = &(monitor->config);
+	PostgresSetup *pgSetup = &(mconfig->pgSetup);
+	char connInfo[MAXCONNINFO] = { 0 };
+
+	pg_setup_get_local_connection_string(pgSetup, connInfo);
+
+	if (!pgsql_init(&monitor->pgsql, connInfo, PGSQL_CONN_LOCAL))
+	{
+		/* URL must be invalid, pgsql_init logged an error */
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
  * monitor_get_nodes gets the hostname and port of all the nodes in the given
  * group.
  */
@@ -2426,13 +2450,14 @@ monitor_get_notifications(Monitor *monitor)
 
 	if (select(sock + 1, &input_mask, NULL, NULL, NULL) < 0)
 	{
-		if (asked_to_stop || asked_to_stop_fast)
+		/* it might be interrupted by a signal we know how to handle */
+		if (asked_to_reload || asked_to_stop || asked_to_stop_fast)
 		{
 			return true;
 		}
 		else
 		{
-			log_warn("select() failed: %m");
+			log_warn("Failed to get monitor notifications: select(): %m");
 			return false;
 		}
 	}

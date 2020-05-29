@@ -1093,6 +1093,9 @@ class MonitorNode(PGNode):
         self.pg_autoctl = PGAutoCtl(self)
         self.pg_autoctl.run(level='-v')
 
+        # when on the monitor we always want Postgres to be running to continue
+        self.wait_until_pg_is_running()
+
     def destroy(self):
         """
         Cleans up processes and files created for this monitor node.

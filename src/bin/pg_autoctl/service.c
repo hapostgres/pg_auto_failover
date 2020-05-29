@@ -14,11 +14,13 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "cli_root.h"
 #include "defaults.h"
 #include "fsm.h"
 #include "keeper.h"
 #include "keeper_config.h"
 #include "keeper_pg_init.h"
+#include "lock_utils.h"
 #include "log.h"
 #include "monitor.h"
 #include "pgctl.h"
@@ -153,7 +155,7 @@ create_pidfile(const char *pidfile, pid_t pid)
 
 	log_trace("create_pidfile(%d): \"%s\"", pid, pidfile);
 
-	sformat(content, BUFSIZE, "%d", pid);
+	sformat(content, BUFSIZE, "%d\n%d\n", pid, log_semaphore.semId);
 
 	return write_file(content, strlen(content), pidfile);
 }
@@ -211,6 +213,9 @@ read_pidfile(const char *pidfile, pid_t *pid)
 			 * at this point.
 			 */
 			(void) remove_pidfile(pidfile);
+
+			/* we might have to cleanup a stale SysV semaphore, too */
+			(void) semaphore_cleanup(pidfile);
 
 			return false;
 		}

@@ -12,10 +12,13 @@
 #define CLI_ROOT_H
 
 #include "commandline.h"
+#include "lock_utils.h"
 
 extern char pg_autoctl_argv0[];
 extern char pg_autoctl_program[];
 extern int logLevel;
+
+extern Semaphore log_semaphore;
 
 extern char *ps_buffer;
 extern size_t ps_buffer_size;

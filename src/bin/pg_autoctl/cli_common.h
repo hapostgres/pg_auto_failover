@@ -116,6 +116,7 @@ extern CommandLine perform_commands;
 extern CommandLine service_run_command;
 extern CommandLine service_stop_command;
 extern CommandLine service_reload_command;
+extern CommandLine service_status_command;
 
 /* cli_show.c */
 extern CommandLine show_uri_command;

@@ -24,6 +24,7 @@
 #include "monitor.h"
 #include "monitor_config.h"
 #include "service.h"
+#include "service_monitor.h"
 #include "service_postgres_ctl.h"
 #include "signals.h"
 #include "supervisor.h"
@@ -35,7 +36,11 @@ static void cli_do_service_pgcontroller(int argc, char **argv);
 static void cli_do_service_postgresctl_on(int argc, char **argv);
 static void cli_do_service_postgresctl_off(int argc, char **argv);
 
+static void cli_do_service_restart(const char *serviceName);
 static void cli_do_service_restart_postgres(int argc, char **argv);
+static void cli_do_service_restart_listener(int argc, char **argv);
+
+static void cli_do_service_monitor_listener(int argc, char **argv);
 
 CommandLine service_getpid =
 	make_command("getpid",
@@ -61,6 +66,14 @@ CommandLine service_postgres =
 				 cli_getopt_pgdata,
 				 cli_do_service_postgres);
 
+CommandLine service_monitor_listener =
+	make_command("listener",
+				 "pg_autoctl service that listens to the monitor notifications",
+				 CLI_PGDATA_USAGE,
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
+				 cli_do_service_monitor_listener);
+
 CommandLine service_restart_postgres =
 	make_command("postgres",
 				 "Restart the pg_autoctl postgres controller service",
@@ -69,8 +82,17 @@ CommandLine service_restart_postgres =
 				 cli_getopt_pgdata,
 				 cli_do_service_restart_postgres);
 
+CommandLine service_restart_listener =
+	make_command("listener",
+				 "Restart the pg_autoctl monitor listener service",
+				 CLI_PGDATA_USAGE,
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
+				 cli_do_service_restart_listener);
+
 static CommandLine *service_restart[] = {
 	&service_restart_postgres,
+	&service_restart_listener,
 	NULL
 };
 
@@ -84,6 +106,7 @@ static CommandLine *service[] = {
 	&service_getpid,
 	&service_pgcontroller,
 	&service_postgres,
+	&service_monitor_listener,
 	NULL
 };
 
@@ -158,16 +181,15 @@ cli_do_service_getpid(int argc, char **argv)
 
 
 /*
- * cli_do_service_restart_postgres sends the TERM signal to the postgres
- * service, which is known to have the restart policy RP_PERMANENT (that's
- * hard-coded). As a consequence the supervisor will restart the service.
+ * cli_do_service_restart sends the TERM signal to the given serviceName, which
+ * is known to have the restart policy RP_PERMANENT (that's hard-coded). As a
+ * consequence the supervisor will restart the service.
  */
 static void
-cli_do_service_restart_postgres(int argc, char **argv)
+cli_do_service_restart(const char *serviceName)
 {
 	ConfigFilePaths pathnames = { 0 };
 	LocalPostgresServer postgres = { 0 };
-	const char *serviceName = "postgres";
 
 	pid_t pid = -1;
 	pid_t newPid = -1;
@@ -218,6 +240,30 @@ cli_do_service_restart_postgres(int argc, char **argv)
 
 
 /*
+ * cli_do_service_restart_postgres sends the TERM signal to the postgres
+ * service, which is known to have the restart policy RP_PERMANENT (that's
+ * hard-coded). As a consequence the supervisor will restart the service.
+ */
+static void
+cli_do_service_restart_postgres(int argc, char **argv)
+{
+	(void) cli_do_service_restart("postgres");
+}
+
+
+/*
+ * cli_do_service_restart_postgres sends the TERM signal to the postgres
+ * service, which is known to have the restart policy RP_PERMANENT (that's
+ * hard-coded). As a consequence the supervisor will restart the service.
+ */
+static void
+cli_do_service_restart_listener(int argc, char **argv)
+{
+	(void) cli_do_service_restart("listener");
+}
+
+
+/*
  * cli_do_pgcontroller starts the process controller service within a supervision
  * tree. It is used for debug purposes only. When using this entry point we
  * have a supervisor process that is responsible for only one service:
@@ -236,8 +282,7 @@ cli_do_service_pgcontroller(int argc, char **argv)
 		"postgres",
 		RP_PERMANENT,
 		-1,
-		&service_postgres_ctl_start,
-		(void *) &(postgres.postgresSetup)
+		&service_postgres_ctl_start
 	};
 
 	int subprocessesCount = sizeof(subprocesses) / sizeof(subprocesses[0]);
@@ -362,4 +407,39 @@ cli_do_service_postgresctl_off(int argc, char **argv)
 	}
 
 	log_info("Postgres has been stopped for PGDATA \"%s\"", pgSetup->pgdata);
+}
+
+
+/*
+ * cli_do_service_monitor_listener starts the monitor listener service.
+ */
+static void
+cli_do_service_monitor_listener(int argc, char **argv)
+{
+	KeeperConfig options = keeperOptions;
+
+	Monitor monitor = { 0 };
+	bool missingPgdataIsOk = false;
+	bool pgIsNotRunningIsOk = true;
+
+	bool exitOnQuit = true;
+
+	/* Establish a handler for signals. */
+	(void) set_signal_handlers(exitOnQuit);
+
+	/* Prepare MonitorConfig from the CLI options fed in options */
+	if (!monitor_config_init_from_pgsetup(&(monitor.config),
+										  &options.pgSetup,
+										  missingPgdataIsOk,
+										  pgIsNotRunningIsOk))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_PGCTL);
+	}
+
+	/* display a user-friendly process name */
+	(void) set_ps_title("pg_autoctl: monitor listener");
+
+	/* Start the monitor service */
+	(void) monitor_service_run(&monitor);
 }
