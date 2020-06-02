@@ -44,12 +44,16 @@ def test_003_init_secondary():
     assert(p.wait() == 0)
 
     node2 = cluster.create_datanode("/tmp/sb-from-pgdata/node2")
+@raises(Exception)
+def test_004_create_raises_error():
     try:
         node2.create()
     except Exception as e:
         # we want to see the failure here
         print(e)
-
+        raise
+        
+def test_005_cleanup_after_failure():
         print("Failed as expected, cleaning up")
         print("rm -rf /tmp/sb-from-pgdata/node2")
         p = subprocess.Popen(["sudo", "-E", '-u', os.getenv("USER"),
