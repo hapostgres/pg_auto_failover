@@ -83,7 +83,7 @@ register_node(PG_FUNCTION_ARGS)
 	char *nodeName = text_to_cstring(nodeNameText);
 	int32 nodePort = PG_GETARG_INT32(2);
 	Name dbnameName = PG_GETARG_NAME(3);
-	uint64 sysIdentifier = 0;
+	uint64 sysIdentifier = PG_GETARG_INT64(4);
 	const char *expectedDBName = NameStr(*dbnameName);
 
 	int32 currentGroupId = PG_GETARG_INT32(5);
