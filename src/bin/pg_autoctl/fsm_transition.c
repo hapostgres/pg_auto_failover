@@ -751,6 +751,18 @@ fsm_init_standby(Keeper *keeper)
 		return false;
 	}
 
+	/*
+	 * Publish our possibly new system_identifier now.
+	 */
+	if (!monitor_set_node_system_identifier(
+			monitor,
+			keeper->state.current_node_id,
+			postgres->postgresSetup.control.system_identifier))
+	{
+		log_error("Failed to update the new node system_identifier");
+		return false;
+	}
+
 	/* ensure the SSL setup is synced with the keeper config */
 	if (!keeper_create_self_signed_cert(keeper))
 	{

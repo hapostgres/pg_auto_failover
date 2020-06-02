@@ -601,7 +601,7 @@ monitor_register_node(Monitor *monitor, char *formation, char *host, int port,
 					  host, port, desiredGroupId, formation, system_identifier);
 
 			log_info(
-				"HINT: you may register a standby node from a non-existing"
+				"HINT: you may register a standby node from a non-existing "
 				"PGDATA directory that pg_autoctl then creates for you, or "
 				"PGDATA should be a copy of the current primary node such as "
 				"obtained from a backup and recovery tool.");

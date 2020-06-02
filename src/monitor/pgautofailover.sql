@@ -123,7 +123,8 @@ CREATE TABLE pgautofailover.node
     -- at the time we call the register_node() function.
     --
     CONSTRAINT system_identifier_is_null_at_init_only
-         CHECK (  (sysidentifier IS NULL and reportedstate = 'init')
+         CHECK (  (    sysidentifier IS NULL
+                   AND reportedstate in ('init', 'wait_standby', 'catchingup') )
                 OR sysidentifier IS NOT NULL),
     CONSTRAINT same_system_identifier_within_group
        EXCLUDE USING gist(groupid with =, sysidentifier with <>),

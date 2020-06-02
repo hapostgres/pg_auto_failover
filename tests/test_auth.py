@@ -2,7 +2,6 @@ import pgautofailover_utils as pgautofailover
 from nose.tools import *
 
 import os
-import subprocess
 
 cluster = None
 node1 = None
@@ -38,17 +37,6 @@ def test_002_create_t1():
 
 def test_003_init_secondary():
     global node2
-
-    # create node2 from a manual copy of node1 to test creating a standby
-    # from an existing PGDATA (typically PGDATA would be deployed from a
-    # backup and recovery mechanism)
-    p = subprocess.Popen(["sudo", "-E", '-u', os.getenv("USER"),
-                          'env', 'PATH=' + os.getenv("PATH"),
-                          "cp", "-a", "/tmp/auth/node1", "/tmp/auth/node2"])
-    assert(p.wait() == 0)
-
-    os.remove("/tmp/auth/node2/postmaster.pid")
-
     node2 = cluster.create_datanode("/tmp/auth/node2", authMethod="md5")
 
     os.putenv('PGPASSWORD', "streaming_password")
