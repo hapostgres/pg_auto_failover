@@ -591,6 +591,22 @@ monitor_register_node(Monitor *monitor, char *formation, char *host, int port,
 										 kind, candidatePriority, quorum,
 										 assignedState);
 		}
+		else if (strcmp(parseContext.sqlstate, "23P01") == 0)
+		{
+			log_error("Failed to register node %s:%d in "
+					  "group %d of formation \"%s\" "
+					  "with system_identifier %" PRIu64 ", "
+														"because another node already exists in this group with "
+														"another system_identifier",
+					  host, port, desiredGroupId, formation, system_identifier);
+
+			log_info(
+				"HINT: you may register a standby node from a non-existing"
+				"PGDATA directory that pg_autoctl then creates for you, or "
+				"PGDATA should be a copy of the current primary node such as "
+				"obtained from a backup and recovery tool.");
+			return false;
+		}
 
 		log_error("Failed to register node %s:%d in group %d of formation \"%s\" "
 				  "with initial state \"%s\", see previous lines for details",

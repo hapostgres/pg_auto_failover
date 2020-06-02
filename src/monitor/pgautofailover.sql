@@ -112,7 +112,21 @@ CREATE TABLE pgautofailover.node
     replicationquorum	 bool not null default true,
 
     UNIQUE (nodename, nodeport),
-    EXCLUDE USING gist(groupid with =, sysidentifier with <>),
+    --
+    -- The EXCLUDE constraint only allows the same sysidentifier for all the
+    -- nodes in the same group. The system_identifier is a property that is
+    -- kept when implementing streaming replication and should be unique per
+    -- Postgres instance in all other cases.
+    --
+    -- We allow the sysidentifier column to be NULL when registering a new
+    -- primary server from scratch, because we have not done pg_ctl initdb
+    -- at the time we call the register_node() function.
+    --
+    CONSTRAINT system_identifier_is_null_at_init_only
+         CHECK (  (sysidentifier IS NULL and reportedstate = 'init')
+                OR sysidentifier IS NOT NULL),
+    CONSTRAINT same_system_identifier_within_group
+       EXCLUDE USING gist(groupid with =, sysidentifier with <>),
     PRIMARY KEY (nodeid),
     FOREIGN KEY (formationid) REFERENCES pgautofailover.formation(formationid)
  )

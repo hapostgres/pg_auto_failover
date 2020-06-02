@@ -58,7 +58,7 @@ typedef enum
 
 /*
  * When discovering Postgres we try to determine if the local $PGDATA directory
- * belons to a primary or a secondary server. If the server is running, it's
+ * belongs to a primary or a secondary server. If the server is running, it's
  * easy: connect and ask with the pg_is_in_recovery() SQL function. If the
  * server is not running, we might be lucky and find a standby setup file and
  * then we know it's not a primary.

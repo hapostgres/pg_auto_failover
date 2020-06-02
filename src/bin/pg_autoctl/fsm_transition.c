@@ -732,6 +732,16 @@ fsm_init_standby(Keeper *keeper)
 		return false;
 	}
 
+	/*
+	 * At pg_autoctl create time when PGDATA already exists and we were
+	 * successful in registering the node, then we can proceed without a
+	 * pg_basebackup: we already have a copy of PGDATA on-disk.
+	 *
+	 * The existence of PGDATA at pg_autoctl create time is tracked in our init
+	 * state as the PRE_INIT_STATE_EXISTS enum value. Once init is finished, we
+	 * remove our init file: then we need to pg_basebackup again to init a
+	 * standby.
+	 */
 	skipBaseBackup = file_exists(keeper->config.pathnames.init) &&
 					 keeper->initState.pgInitState == PRE_INIT_STATE_EXISTS;
 

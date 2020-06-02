@@ -1154,8 +1154,10 @@ pg_setup_wait_until_is_stopped(PostgresSetup *pgSetup, int timeout, int logLevel
 
 
 /*
- * pg_setup_is_primary returns true when the local PostgreSQL instance is known
- * to not be recovery.
+ * pg_setup_role returns an enum value representing which role the local
+ * PostgreSQL instance currently has. We detect primary and secondary when
+ * Postgres is running, and either recovery or unknown when Postgres is not
+ * running.
  */
 PostgresRole
 pg_setup_role(PostgresSetup *pgSetup)
