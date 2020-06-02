@@ -110,11 +110,6 @@ register_node(PG_FUNCTION_ARGS)
 
 	checkPgAutoFailoverVersion();
 
-	if (!PG_ARGISNULL(4))
-	{
-		sysIdentifier = PG_GETARG_INT64(4);
-	}
-
 	currentNodeState.nodeId = -1;
 	currentNodeState.groupId = currentGroupId;
 	currentNodeState.replicationState =
