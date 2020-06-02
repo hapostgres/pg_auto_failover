@@ -64,7 +64,7 @@ def test_005_cleanup_after_failure():
 def test_004_init_secondary():
     global node3
 
-    # create node2 from a manual copy of node1 to test creating a standby
+    # create node3 from a manual copy of node1 to test creating a standby
     # from an existing PGDATA (typically PGDATA would be deployed from a
     # backup and recovery mechanism)
     p = subprocess.Popen(["sudo", "-E", '-u', os.getenv("USER"),
