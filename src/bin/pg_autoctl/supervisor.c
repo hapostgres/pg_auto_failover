@@ -213,7 +213,7 @@ supervisor_loop(Supervisor *supervisor)
 				if (errno == ECHILD)
 				{
 					/* no more childrens */
-					if (asked_to_stop || asked_to_stop_fast)
+					if (asked_to_stop || asked_to_stop_fast || asked_to_quit)
 					{
 						/* off we go */
 						log_info("Internal subprocesses are done, stopping");
@@ -336,7 +336,7 @@ supervisor_reload_services(Supervisor *supervisor)
 static void
 supervisor_stop_subprocesses(Supervisor *supervisor)
 {
-	int signal = asked_to_stop_fast ? SIGINT : SIGTERM;
+	int signal = get_current_signal(SIGTERM);
 	int serviceCount = supervisor->serviceCount;
 	int serviceIndex = 0;
 
@@ -360,7 +360,7 @@ supervisor_stop_subprocesses(Supervisor *supervisor)
 static void
 supervisor_stop_other_services(Supervisor *supervisor, pid_t pid)
 {
-	int signal = asked_to_stop_fast ? SIGINT : SIGTERM;
+	int signal = get_current_signal(SIGTERM);
 	int serviceCount = supervisor->serviceCount;
 	int serviceIndex = 0;
 
@@ -490,20 +490,22 @@ supervisor_stop(Supervisor *supervisor)
 static void
 supervisor_handle_signals(Supervisor *supervisor)
 {
-	int signal = asked_to_stop_fast ? SIGINT : SIGTERM;
-	const char *signalStr = asked_to_stop_fast ? "SIGINT" : "SIGTERM";
+	int signal = get_current_signal(SIGTERM);
+	const char *signalStr = signal_to_string(signal);
 
 	/* if no signal has been received, we have nothing to do here */
-	if (!(asked_to_stop || asked_to_stop_fast))
+	if (!(asked_to_stop || asked_to_stop_fast || asked_to_quit))
 	{
 		return;
 	}
 
-	/* once we got SIGINT, we always use SIGINT, even when receiving SIGTERM */
-	if (supervisor->shutdownSignal != SIGINT)
-	{
-		supervisor->shutdownSignal = signal;
-	}
+	/*
+	 * Once we have received and processed SIGQUIT we want to stay at this
+	 * signal level. Once we have received SIGINT we may upgrade to SIGQUIT,
+	 * but we won't downgrade to SIGTERM.
+	 */
+	supervisor->shutdownSignal =
+		pick_stronger_signal(supervisor->shutdownSignal, signal);
 
 	log_info("pg_autoctl received signal %s, terminating", signalStr);
 
@@ -529,6 +531,12 @@ supervisor_handle_signals(Supervisor *supervisor)
 		case SIGTERM:
 		{
 			asked_to_stop = 0;
+			break;
+		}
+
+		case SIGQUIT:
+		{
+			asked_to_quit = 0;
 			break;
 		}
 	}
@@ -623,9 +631,15 @@ supervisor_restart_service(Supervisor *supervisor, Service *service, int status)
 	}
 
 	/* refrain from an ERROR message for a TEMPORARY service */
-	if (service->policy == RP_TEMPORARY || returnCode == EXIT_CODE_QUIT)
+	if (service->policy == RP_TEMPORARY)
 	{
 		logLevel = LOG_INFO;
+	}
+
+	/* when a sub-process has quit and we're not shutting down, warn about it */
+	else if (returnCode == EXIT_CODE_QUIT)
+	{
+		logLevel = LOG_WARN;
 	}
 
 	log_level(logLevel, "pg_autoctl service %s %s with exit status %d",
@@ -694,6 +708,7 @@ supervisor_restart_service(Supervisor *supervisor, Service *service, int status)
 	 * (non-zero return code), and we need to start the service in that case
 	 * too.
 	 */
+	log_info("Restarting service %s", service->name);
 	restarted = (*service->startFunction)(service->context, &(service->pid));
 
 	if (!restarted)

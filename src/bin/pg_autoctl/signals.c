@@ -24,6 +24,7 @@
 volatile sig_atomic_t asked_to_stop = 0;      /* SIGTERM */
 volatile sig_atomic_t asked_to_stop_fast = 0; /* SIGINT */
 volatile sig_atomic_t asked_to_reload = 0;    /* SIGHUP */
+volatile sig_atomic_t asked_to_quit = 0;      /* SIGQUIT */
 
 /*
  * set_signal_handlers sets our signal handlers for the 4 signals that we
@@ -41,11 +42,11 @@ set_signal_handlers(bool exitOnQuit)
 
 	if (exitOnQuit)
 	{
-		pqsignal(SIGQUIT, catch_quit);
+		pqsignal(SIGQUIT, catch_quit_and_exit);
 	}
 	else
 	{
-		pqsignal(SIGQUIT, catch_int);
+		pqsignal(SIGQUIT, catch_quit);
 	}
 }
 
@@ -90,6 +91,104 @@ void
 catch_quit(int sig)
 {
 	/* default signal handler disposition is to core dump, we don't */
-	(void) semaphore_finish(&log_semaphore);
+	asked_to_quit = 1;
+	pqsignal(sig, catch_quit);
+}
+
+
+/*
+ * quit_and_exit exit(EXIT_CODE_QUIT) upon receiving the SIGQUIT signal.
+ */
+void
+catch_quit_and_exit(int sig)
+{
+	/* default signal handler disposition is to core dump, we don't */
 	exit(EXIT_CODE_QUIT);
+}
+
+
+/*
+ * get_current_signal returns the current signal to process and gives a prioriy
+ * towards SIGQUIT, then SIGINT, then SIGTERM.
+ */
+int
+get_current_signal(int defaultSignal)
+{
+	if (asked_to_quit)
+	{
+		return SIGQUIT;
+	}
+	else if (asked_to_stop_fast)
+	{
+		return SIGINT;
+	}
+	else if (asked_to_stop)
+	{
+		return SIGTERM;
+	}
+
+	/* no termination signal to process at this time, return the default */
+	return defaultSignal;
+}
+
+
+/*
+ * pick_stronger_signal returns the "stronger" signal among the two given
+ * arguments.
+ *
+ * Signal processing have a priority or hierarchy of their own. Once we have
+ * received and processed SIGQUIT we want to stay at this signal level. Once we
+ * have received SIGINT we may upgrade to SIGQUIT, but we won't downgrade to
+ * SIGTERM.
+ */
+int
+pick_stronger_signal(int sig1, int sig2)
+{
+	if (sig1 == SIGQUIT || sig2 == SIGQUIT)
+	{
+		return SIGQUIT;
+	}
+	else if (sig1 == SIGINT || sig2 == SIGINT)
+	{
+		return SIGINT;
+	}
+	else
+	{
+		return SIGTERM;
+	}
+}
+
+
+/*
+ * signal_to_string is our own specialised function to display a signal. The
+ * strsignal() output does not look like what we need.
+ */
+char *
+signal_to_string(int signal)
+{
+	switch (signal)
+	{
+		case SIGQUIT:
+		{
+			return "SIGQUIT";
+		}
+
+		case SIGTERM:
+		{
+			return "SIGTERM";
+		}
+
+		case SIGINT:
+		{
+			return "SIGINT";
+		}
+
+		case SIGHUP:
+		{
+			return "SIGHUP";
+		}
+
+		default:
+			return "unknown signal";
+	}
 }
