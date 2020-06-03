@@ -218,10 +218,10 @@ monitor_print_nodes_as_json(Monitor *monitor, char *formation, int groupId)
 	const char *sql =
 		groupId == -1
 		?
-		"SELECT jsonb_pretty(jsonb_agg(row_to_json(nodes)))"
+		"SELECT jsonb_pretty(coalesce(jsonb_agg(row_to_json(nodes)), '[]'))"
 		"  FROM pgautofailover.get_nodes($1) as nodes"
 		:
-		"SELECT jsonb_pretty(jsonb_agg(row_to_json(nodes)))"
+		"SELECT jsonb_pretty(coalesce(jsonb_agg(row_to_json(nodes)), '[]'))"
 		"  FROM pgautofailover.get_nodes($1, $2) as nodes";
 
 	int paramCount = 1;
@@ -361,10 +361,10 @@ monitor_print_other_nodes_as_json(Monitor *monitor,
 	const char *sql =
 		currentState == ANY_STATE
 		?
-		"SELECT jsonb_pretty(jsonb_agg(row_to_json(nodes)))"
+		"SELECT jsonb_pretty(coalesce(jsonb_agg(row_to_json(nodes)), '[]'))"
 		" FROM pgautofailover.get_other_nodes($1, $2) as nodes"
 		:
-		"SELECT jsonb_pretty(jsonb_agg(row_to_json(nodes)))"
+		"SELECT jsonb_pretty(coalesce(jsonb_agg(row_to_json(nodes)), '[]'))"
 		" FROM pgautofailover.get_other_nodes($1, $2, "
 		"$3::pgautofailover.replication_state) as nodes";
 
@@ -1554,7 +1554,8 @@ monitor_print_state_as_json(Monitor *monitor, char *formation, int group)
 	{
 		case -1:
 		{
-			sql = "SELECT jsonb_pretty(jsonb_agg(row_to_json(state)))"
+			sql = "SELECT jsonb_pretty("
+				  "coalesce(jsonb_agg(row_to_json(state)), '[]'))"
 				  " FROM pgautofailover.current_state($1) as state";
 
 			paramCount = 1;
@@ -1566,7 +1567,8 @@ monitor_print_state_as_json(Monitor *monitor, char *formation, int group)
 
 		default:
 		{
-			sql = "SELECT jsonb_pretty(jsonb_agg(row_to_json(state)))"
+			sql = "SELECT jsonb_pretty("
+				  "coalesce(jsonb_agg(row_to_json(state)), '[]'))"
 				  "FROM pgautofailover.current_state($1,$2) as state";
 
 			groupStr = intToString(group);
@@ -1709,7 +1711,8 @@ monitor_print_last_events_as_json(Monitor *monitor,
 	{
 		case -1:
 		{
-			sql = "SELECT jsonb_pretty(jsonb_agg(row_to_json(event)))"
+			sql = "SELECT jsonb_pretty("
+				  "coalesce(jsonb_agg(row_to_json(event)), '[]'))"
 				  " FROM pgautofailover.last_events($1, count => $2) as event";
 
 			countStr = intToString(count);
@@ -1725,7 +1728,8 @@ monitor_print_last_events_as_json(Monitor *monitor,
 
 		default:
 		{
-			sql = "SELECT jsonb_pretty(jsonb_agg(row_to_json(event)))"
+			sql = "SELECT jsonb_pretty("
+				  "coalesce(jsonb_agg(row_to_json(event)), '[]'))"
 				  " FROM * FROM pgautofailover.last_events($1,$2,$3) as event";
 
 			countStr = intToString(count);
