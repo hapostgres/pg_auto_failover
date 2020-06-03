@@ -20,7 +20,6 @@
 
 extern MonitorConfig monitorOptions;
 extern KeeperConfig keeperOptions;
-extern bool allowRemovingPgdata;
 extern bool createAndRun;
 extern bool outputJSON;
 
@@ -69,9 +68,6 @@ extern int ssl_flag;
 	"  --group           pg_auto_failover group Id\n" \
 	"  --monitor         pg_auto_failover Monitor Postgres URL\n" \
 	KEEPER_CLI_SSL_OPTIONS
-
-#define KEEPER_CLI_ALLOW_RM_PGDATA_OPTION \
-	"  --allow-removing-pgdata Allow pg_autoctl to remove the database directory\n"
 
 #define CLI_PGDATA_OPTION \
 	"  --pgdata      path to data directory\n" \

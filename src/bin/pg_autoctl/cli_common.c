@@ -33,7 +33,6 @@
 
 /* handle command line options for our setup. */
 KeeperConfig keeperOptions;
-bool allowRemovingPgdata = false;
 bool createAndRun = false;
 bool outputJSON = false;
 int ssl_flag = 0;
@@ -62,7 +61,6 @@ static void stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathname
  *		{ "group", required_argument, NULL, 'g' },
  *		{ "monitor", required_argument, NULL, 'm' },
  *		{ "disable-monitor", no_argument, NULL, 'M' },
- *		{ "allow-removing-pgdata", no_argument, NULL, 'R' },
  *		{ "version", no_argument, NULL, 'V' },
  *		{ "verbose", no_argument, NULL, 'v' },
  *		{ "quiet", no_argument, NULL, 'q' },
@@ -271,14 +269,6 @@ cli_common_keeper_getopts(int argc, char **argv,
 				/* { "disable-monitor", required_argument, NULL, 'M' }, */
 				LocalOptionConfig.monitorDisabled = true;
 				log_trace("--disable-monitor");
-				break;
-			}
-
-			case 'R':
-			{
-				/* { "allow-removing-pgdata", no_argument, NULL, 'R' } */
-				allowRemovingPgdata = true;
-				log_trace("--allow-removing-pgdata");
 				break;
 			}
 
@@ -494,7 +484,6 @@ cli_common_keeper_getopts(int argc, char **argv,
  *		{ "group", required_argument, NULL, 'g' },
  *		{ "monitor", required_argument, NULL, 'm' },
  *		{ "disable-monitor", no_argument, NULL, 'M' },
- *		{ "allow-removing-pgdata", no_argument, NULL, 'R' },
  *		{ "version", no_argument, NULL, 'V' },
  *		{ "verbose", no_argument, NULL, 'v' },
  *		{ "quiet", no_argument, NULL, 'q' },

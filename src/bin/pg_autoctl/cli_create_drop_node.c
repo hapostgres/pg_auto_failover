@@ -97,8 +97,7 @@ CommandLine create_postgres_command =
 		"  --skip-pg-hba     skip editing pg_hba.conf rules\n"
 		"  --candidate-priority    priority of the node to be promoted to become primary\n"
 		"  --replication-quorum    true if node participates in write quorum\n"
-		KEEPER_CLI_SSL_OPTIONS
-		KEEPER_CLI_ALLOW_RM_PGDATA_OPTION,
+		KEEPER_CLI_SSL_OPTIONS,
 		cli_create_postgres_getopts,
 		cli_create_postgres);
 
@@ -267,7 +266,6 @@ cli_create_postgres_getopts(int argc, char **argv)
 		{ "formation", required_argument, NULL, 'f' },
 		{ "monitor", required_argument, NULL, 'm' },
 		{ "disable-monitor", no_argument, NULL, 'M' },
-		{ "allow-removing-pgdata", no_argument, NULL, 'R' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },

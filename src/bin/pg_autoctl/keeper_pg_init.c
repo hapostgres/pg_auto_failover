@@ -286,30 +286,12 @@ keeper_pg_init_and_register_primary(Keeper *keeper)
 	PostgresSetup *pgSetup = &(config->pgSetup);
 	char absolutePgdata[PATH_MAX];
 
-	/*
-	 * If we're able to register as a single postgres server, that's great.
-	 *
-	 * If there already is a single postgres server, then we become the
-	 * wait_standby and we would have to remove our own database directory,
-	 * which the user has to give us permission for with the command line
-	 * option --allow-removing-pgdata.
-	 *
-	 * When allowRemovingPgdata is true, we accept any role and thus register
-	 * with the expected state INIT (which is, we don't have any expectation
-	 * really).
-	 *
-	 * When allowRemovingPgdata is false, we expect to be registed in the
-	 * SINGLE state and publish that to the register_node() API call, so that
-	 * it fails on the server side when that's not possible.
-	 */
-	NodeState expectedState = allowRemovingPgdata ? INIT_STATE : SINGLE_STATE;
-
-	log_warn("A postgres directory already exists at \"%s\", registering "
+	log_info("A postgres directory already exists at \"%s\", registering "
 			 "as a single node",
 			 realpath(pgSetup->pgdata, absolutePgdata));
 
 	/* register to the monitor in the expected state directly */
-	if (!keeper_register_and_init(keeper, expectedState))
+	if (!keeper_register_and_init(keeper, SINGLE_STATE))
 	{
 		log_error("Failed to register the existing local Postgres node "
 				  "\"%s:%d\" running at \"%s\""
@@ -317,22 +299,6 @@ keeper_pg_init_and_register_primary(Keeper *keeper)
 				  "see above for details",
 				  config->nodename, config->pgSetup.pgport,
 				  config->pgSetup.pgdata, config->monitor_pguri);
-
-		/* errors have already been logged */
-		if (!allowRemovingPgdata)
-		{
-			log_error("There is already another postgres node registered in "
-					  "our group and formation, so the monitor "
-					  "wants us to be in state %s. However, that would involve "
-					  "removing the database directory.",
-					  NodeStateToString(keeper->state.assigned_role));
-
-			log_warn("HINT: Re-run with --allow-removing-pgdata to allow "
-					 "pg_autoctl to remove \"%s\" and join as %s\n\n",
-					 absolutePgdata,
-					 NodeStateToString(keeper->state.assigned_role));
-		}
-		return false;
 	}
 
 	log_info("Successfully registered as \"%s\" to the monitor.",

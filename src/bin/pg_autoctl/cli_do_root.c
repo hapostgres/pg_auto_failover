@@ -267,7 +267,6 @@ keeper_cli_keeper_setup_getopts(int argc, char **argv)
 		{ "formation", required_argument, NULL, 'f' },
 		{ "monitor", required_argument, NULL, 'm' },
 		{ "disable-monitor", no_argument, NULL, 'M' },
-		{ "allow-removing-pgdata", no_argument, NULL, 'R' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
