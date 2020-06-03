@@ -61,7 +61,7 @@ def test_005_cleanup_after_failure():
                           "rm", "-rf", "/tmp/sb-from-pgdata/node2"])
         assert(p.wait() == 0)
 
-def test_004_init_secondary():
+def test_006_init_secondary():
     global node3
 
     # create node3 from a manual copy of node1 to test creating a standby
