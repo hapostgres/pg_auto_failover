@@ -342,7 +342,6 @@ The other commands accept the same set of options.
     --monitor     pg_auto_failover Monitor Postgres URL
     --auth        authentication method for connections from monitor
     --skip-pg-hba skip editing pg_hba.conf rules
-    --allow-removing-pgdata Allow pg_autoctl to remove the database directory
 
 Three different modes of initialization are supported by this command,
 corresponding to as many implementation strategies.

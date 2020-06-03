@@ -42,6 +42,7 @@ static AutoFailoverNodeState * NodeActive(char *formationId,
 										  AutoFailoverNodeState *currentNodeState);
 static void JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 									  char *nodeName, int nodePort,
+									  uint64 sysIdentifier,
 									  AutoFailoverNodeState *currentNodeState);
 static int AssignGroupId(AutoFailoverFormation *formation,
 						 char *nodeName, int nodePort,
@@ -82,17 +83,18 @@ register_node(PG_FUNCTION_ARGS)
 	char *nodeName = text_to_cstring(nodeNameText);
 	int32 nodePort = PG_GETARG_INT32(2);
 	Name dbnameName = PG_GETARG_NAME(3);
+	uint64 sysIdentifier = PG_GETARG_INT64(4);
 	const char *expectedDBName = NameStr(*dbnameName);
 
-	int32 currentGroupId = PG_GETARG_INT32(4);
-	Oid currentReplicationStateOid = PG_GETARG_OID(5);
+	int32 currentGroupId = PG_GETARG_INT32(5);
+	Oid currentReplicationStateOid = PG_GETARG_OID(6);
 
-	text *nodeKindText = PG_GETARG_TEXT_P(6);
+	text *nodeKindText = PG_GETARG_TEXT_P(7);
 	char *nodeKind = text_to_cstring(nodeKindText);
 	FormationKind expectedFormationKind =
 		FormationKindFromNodeKindString(nodeKind);
-	int candidatePriority = PG_GETARG_INT32(7);
-	bool replicationQuorum = PG_GETARG_BOOL(8);
+	int candidatePriority = PG_GETARG_INT32(8);
+	bool replicationQuorum = PG_GETARG_BOOL(9);
 
 	AutoFailoverFormation *formation = NULL;
 	AutoFailoverNode *pgAutoFailoverNode = NULL;
@@ -175,7 +177,11 @@ register_node(PG_FUNCTION_ARGS)
 		}
 	}
 
-	JoinAutoFailoverFormation(formation, nodeName, nodePort, &currentNodeState);
+	JoinAutoFailoverFormation(formation,
+							  nodeName,
+							  nodePort,
+							  sysIdentifier,
+							  &currentNodeState);
 	LockNodeGroup(formationId, currentNodeState.groupId, ExclusiveLock);
 
 	pgAutoFailoverNode = GetAutoFailoverNode(nodeName, nodePort);
@@ -414,7 +420,7 @@ NodeActive(char *formationId, char *nodeName, int32 nodePort,
  */
 static void
 JoinAutoFailoverFormation(AutoFailoverFormation *formation,
-						  char *nodeName, int nodePort,
+						  char *nodeName, int nodePort, uint64 sysIdentifier,
 						  AutoFailoverNodeState *currentNodeState)
 {
 	int groupId = -1;
@@ -539,8 +545,13 @@ JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 		groupId = AssignGroupId(formation, nodeName, nodePort, &initialState);
 	}
 
-	AddAutoFailoverNode(formation->formationId, groupId, nodeName, nodePort,
-						initialState, currentNodeState->replicationState,
+	AddAutoFailoverNode(formation->formationId,
+						groupId,
+						nodeName,
+						nodePort,
+						sysIdentifier,
+						initialState,
+						currentNodeState->replicationState,
 						currentNodeState->candidatePriority,
 						currentNodeState->replicationQuorum);
 

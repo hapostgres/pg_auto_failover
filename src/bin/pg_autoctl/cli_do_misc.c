@@ -327,6 +327,7 @@ keeper_cli_init_standby(int argc, char **argv)
 {
 	const bool missing_pgdata_is_ok = true;
 	const bool pg_not_running_is_ok = true;
+	const bool skipBaseBackup = false;
 
 	KeeperConfig config = keeperOptions;
 	LocalPostgresServer postgres = { 0 };
@@ -371,7 +372,7 @@ keeper_cli_init_standby(int argc, char **argv)
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
-	if (!standby_init_database(&postgres, config.nodename))
+	if (!standby_init_database(&postgres, config.nodename, skipBaseBackup))
 	{
 		log_fatal("Failed to grant access to the standby by adding "
 				  "relevant lines to pg_hba.conf for the "

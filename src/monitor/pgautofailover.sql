@@ -97,6 +97,7 @@ CREATE TABLE pgautofailover.node
     groupid              int not null,
     nodename             text not null,
     nodeport             int not null,
+    sysidentifier        bigint,
     goalstate            pgautofailover.replication_state not null default 'init',
     reportedstate        pgautofailover.replication_state not null,
     reportedpgisrunning  bool default true,
@@ -111,6 +112,22 @@ CREATE TABLE pgautofailover.node
     replicationquorum	 bool not null default true,
 
     UNIQUE (nodename, nodeport),
+    --
+    -- The EXCLUDE constraint only allows the same sysidentifier for all the
+    -- nodes in the same group. The system_identifier is a property that is
+    -- kept when implementing streaming replication and should be unique per
+    -- Postgres instance in all other cases.
+    --
+    -- We allow the sysidentifier column to be NULL when registering a new
+    -- primary server from scratch, because we have not done pg_ctl initdb
+    -- at the time we call the register_node() function.
+    --
+    CONSTRAINT system_identifier_is_null_at_init_only
+         CHECK (  (    sysidentifier IS NULL
+                   AND reportedstate in ('init', 'wait_standby', 'catchingup') )
+                OR sysidentifier IS NOT NULL),
+    CONSTRAINT same_system_identifier_within_group
+       EXCLUDE USING gist(groupid with =, sysidentifier with <>),
     PRIMARY KEY (nodeid),
     FOREIGN KEY (formationid) REFERENCES pgautofailover.formation(formationid)
  )
@@ -158,6 +175,25 @@ $$;
 grant execute on function pgautofailover.set_node_nodename(bigint,text)
    to autoctl_node;
 
+CREATE FUNCTION pgautofailover.set_node_system_identifier
+ (
+    IN node_id             bigint,
+    IN node_sysidentifier  bigint,
+   OUT node_id             bigint,
+   OUT name                text,
+   OUT port                int
+ )
+RETURNS record LANGUAGE SQL STRICT SECURITY DEFINER
+AS $$
+      update pgautofailover.node
+         set sysidentifier = node_sysidentifier
+       where nodeid = node_id
+   returning nodeid, nodename, nodeport;
+$$;
+
+grant execute on function pgautofailover.set_node_nodename(bigint,text)
+   to autoctl_node;
+
 
 CREATE FUNCTION pgautofailover.register_node
  (
@@ -165,6 +201,7 @@ CREATE FUNCTION pgautofailover.register_node
     IN node_name            text,
     IN node_port            int,
     IN dbname               name,
+    IN sysidentifier        bigint default 0,
     IN desired_group_id     int default -1,
     IN initial_group_role   pgautofailover.replication_state default 'init',
     IN node_kind            text default 'standalone',
@@ -180,7 +217,7 @@ RETURNS record LANGUAGE C STRICT SECURITY DEFINER
 AS 'MODULE_PATHNAME', $$register_node$$;
 
 grant execute on function
-      pgautofailover.register_node(text,text,int,name,int,pgautofailover.replication_state,text, int, bool)
+      pgautofailover.register_node(text,text,int,name,bigint,int,pgautofailover.replication_state,text, int, bool)
    to autoctl_node;
 
 
@@ -673,4 +710,3 @@ CREATE TRIGGER adjust_number_sync_standbys
             ON pgautofailover.node
            FOR EACH ROW
        EXECUTE PROCEDURE pgautofailover.adjust_number_sync_standbys();
-

@@ -725,7 +725,8 @@ standby_init_replication_source(LocalPostgresServer *postgres,
  */
 bool
 standby_init_database(LocalPostgresServer *postgres,
-					  const char *nodename)
+					  const char *nodename,
+					  bool skipBaseBackup)
 {
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	ReplicationSource *upstream = &(postgres->replicationSource);
@@ -733,7 +734,7 @@ standby_init_database(LocalPostgresServer *postgres,
 	log_trace("standby_init_database");
 	log_info("Initialising PostgreSQL as a hot standby");
 
-	if (pg_setup_pgdata_exists(pgSetup))
+	if (pg_setup_pgdata_exists(pgSetup) && pg_setup_is_running(pgSetup))
 	{
 		log_info("Target directory exists: \"%s\", stopping PostgreSQL",
 				 pgSetup->pgdata);
@@ -751,10 +752,23 @@ standby_init_database(LocalPostgresServer *postgres,
 	/*
 	 * Now, we know that pgdata either doesn't exists or belongs to a stopped
 	 * PostgreSQL instance. We can safely proceed with pg_basebackup.
+	 *
+	 * We might be asked to skip pg_basebackup when the PGDATA directory has
+	 * already been prepared externally: typically we are creating a standby
+	 * node and it was faster to install PGDATA from a file system snapshot or
+	 * a backup/recovery tooling.
 	 */
-	if (!pg_basebackup(pgSetup->pgdata, pgSetup->pg_ctl, upstream))
+	if (skipBaseBackup)
 	{
-		return false;
+		log_info("Skipping base backup to use pre-existing PGDATA at \"%s\"",
+				 pgSetup->pgdata);
+	}
+	else
+	{
+		if (!pg_basebackup(pgSetup->pgdata, pgSetup->pg_ctl, upstream))
+		{
+			return false;
+		}
 	}
 
 	/* we have a new PGDATA, update our pgSetup information */

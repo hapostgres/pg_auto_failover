@@ -120,6 +120,8 @@ TupleToAutoFailoverNode(TupleDesc tupleDescriptor, HeapTuple heapTuple)
 								  tupleDescriptor, &isNull);
 	Datum nodePort = heap_getattr(heapTuple, Anum_pgautofailover_node_nodeport,
 								  tupleDescriptor, &isNull);
+	Datum sysIdentifier = heap_getattr(heapTuple, Anum_pgautofailover_node_sysidentifier,
+									   tupleDescriptor, &isNull);
 	Datum goalState = heap_getattr(heapTuple, Anum_pgautofailover_node_goalstate,
 								   tupleDescriptor, &isNull);
 	Datum reportedState = heap_getattr(heapTuple,
@@ -162,6 +164,7 @@ TupleToAutoFailoverNode(TupleDesc tupleDescriptor, HeapTuple heapTuple)
 	pgAutoFailoverNode->groupId = DatumGetInt32(groupId);
 	pgAutoFailoverNode->nodeName = TextDatumGetCString(nodeName);
 	pgAutoFailoverNode->nodePort = DatumGetInt32(nodePort);
+	pgAutoFailoverNode->sysIdentifier = DatumGetInt64(sysIdentifier);
 	pgAutoFailoverNode->goalState = EnumGetReplicationState(goalStateOid);
 	pgAutoFailoverNode->reportedState = EnumGetReplicationState(reportedStateOid);
 	pgAutoFailoverNode->pgIsRunning = DatumGetBool(pgIsRunning);
@@ -625,7 +628,11 @@ GetWritableNodeInGroup(char *formationId, int32 groupId)
  * We use simple_heap_update instead of SPI to avoid recursing into triggers.
  */
 int
-AddAutoFailoverNode(char *formationId, int groupId, char *nodeName, int nodePort,
+AddAutoFailoverNode(char *formationId,
+					int groupId,
+					char *nodeName,
+					int nodePort,
+					uint64 sysIdentifier,
 					ReplicationState goalState,
 					ReplicationState reportedState,
 					int candidatePriority,
@@ -640,6 +647,7 @@ AddAutoFailoverNode(char *formationId, int groupId, char *nodeName, int nodePort
 		INT4OID, /* groupid */
 		TEXTOID, /* nodename */
 		INT4OID, /* nodeport */
+		INT8OID, /* sysidentifier */
 		replicationStateTypeOid, /* goalstate */
 		replicationStateTypeOid, /* reportedstate */
 		INT4OID, /* candidate_priority */
@@ -651,10 +659,34 @@ AddAutoFailoverNode(char *formationId, int groupId, char *nodeName, int nodePort
 		Int32GetDatum(groupId),             /* groupid */
 		CStringGetTextDatum(nodeName),      /* nodename */
 		Int32GetDatum(nodePort),            /* nodeport */
+		Int64GetDatum(sysIdentifier),       /* sysidentifier */
 		ObjectIdGetDatum(goalStateOid),     /* goalstate */
 		ObjectIdGetDatum(reportedStateOid), /* reportedstate */
 		Int32GetDatum(candidatePriority),   /* candidate_priority */
-		BoolGetDatum(replicationQuorum) /* replication_quorum */
+		BoolGetDatum(replicationQuorum)     /* replication_quorum */
+	};
+
+	/*
+	 * Rather than turning the register_node function as non STRICT, we accept
+	 * the default system identifier to be zero and then insert NULL here
+	 * instead.
+	 *
+	 * The alternative would imply testing the 10 args of the function against
+	 * the possibility of them being NULL. Also, on the client side, when
+	 * PGDATA does not exist our pg_control_data.system_identifier internal
+	 * structure is intialized with a zero value.
+	 */
+	const char argNulls[] = {
+		' ',                            /* formationid */
+		' ',                            /* groupid */
+		' ',                            /* nodename */
+		' ',                            /* nodeport */
+		sysIdentifier == 0 ? 'n' : ' ', /* sysidentifier */
+		' ',                            /* goalstate */
+		' ',                            /* reportedstate */
+		' ',                            /* candidate_priority */
+		' ',                            /* replication_quorum */
+		' ',
 	};
 
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
@@ -663,13 +695,16 @@ AddAutoFailoverNode(char *formationId, int groupId, char *nodeName, int nodePort
 
 	const char *insertQuery =
 		"INSERT INTO " AUTO_FAILOVER_NODE_TABLE
-		" (formationid, groupid, nodename, nodeport, goalstate, reportedstate, candidatepriority, replicationquorum)"
-		" VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING nodeid";
+		" (formationid, groupid, nodename, nodeport, sysidentifier, "
+		"  goalstate, reportedstate, candidatepriority, replicationquorum)"
+		" VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) "
+		"RETURNING nodeid";
 
 	SPI_connect();
 
-	spiStatus = SPI_execute_with_args(insertQuery, argCount, argTypes,
-									  argValues, NULL, false, 0);
+	spiStatus = SPI_execute_with_args(insertQuery, argCount,
+									  argTypes, argValues, argNulls,
+									  false, 0);
 
 	if (spiStatus == SPI_OK_INSERT_RETURNING && SPI_processed > 0)
 	{

@@ -88,7 +88,9 @@ bool standby_init_replication_source(LocalPostgresServer *postgres,
 									 const char *backupDirectory,
 									 SSLOptions sslOptions,
 									 int currentNodeId);
-bool standby_init_database(LocalPostgresServer *postgres, const char *nodename);
+bool standby_init_database(LocalPostgresServer *postgres,
+						   const char *nodename,
+						   bool skipBaseBackup);
 bool primary_rewind_to_standby(LocalPostgresServer *postgres);
 bool standby_promote(LocalPostgresServer *postgres);
 bool check_postgresql_settings(LocalPostgresServer *postgres,

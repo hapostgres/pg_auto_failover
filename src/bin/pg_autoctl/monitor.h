@@ -76,9 +76,17 @@ bool monitor_get_primary(Monitor *monitor, char *formation, int groupId,
 						 NodeAddress *node);
 bool monitor_get_coordinator(Monitor *monitor, char *formation,
 							 NodeAddress *node);
-bool monitor_register_node(Monitor *monitor, char *formation, char *host, int port,
-						   char *dbname, int desiredGroupId, NodeState initialSate,
-						   PgInstanceKind kind, int candidatePriority, bool quorum,
+bool monitor_register_node(Monitor *monitor,
+						   char *formation,
+						   char *host,
+						   int port,
+						   uint64_t system_identifier,
+						   char *dbname,
+						   int desiredGroupId,
+						   NodeState initialState,
+						   PgInstanceKind kind,
+						   int candidatePriority,
+						   bool quorum,
 						   MonitorAssignedState *assignedState);
 bool monitor_node_active(Monitor *monitor,
 						 char *formation, char *host, int port, int nodeId,
@@ -137,6 +145,9 @@ bool monitor_synchronous_standby_names(Monitor *monitor,
 									   int size);
 
 bool monitor_set_nodename(Monitor *monitor, int nodeId, const char *nodename);
+bool monitor_set_node_system_identifier(Monitor *monitor,
+										int nodeId,
+										uint64_t system_identifier);
 
 bool monitor_start_maintenance(Monitor *monitor, char *host, int port);
 bool monitor_stop_maintenance(Monitor *monitor, char *host, int port);

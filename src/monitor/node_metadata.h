@@ -24,24 +24,25 @@
  * indices must match with the columns given
  * in the following definition.
  */
-#define Natts_pgautofailover_node 15
+#define Natts_pgautofailover_node 18
 #define Anum_pgautofailover_node_formationid 1
 #define Anum_pgautofailover_node_nodeid 2
 #define Anum_pgautofailover_node_groupid 3
 #define Anum_pgautofailover_node_nodename 4
 #define Anum_pgautofailover_node_nodeport 5
-#define Anum_pgautofailover_node_goalstate 6
-#define Anum_pgautofailover_node_reportedstate 7
-#define Anum_pgautofailover_node_reportedpgisrunning 8
-#define Anum_pgautofailover_node_reportedrepstate 9
-#define Anum_pgautofailover_node_reporttime 10
-#define Anum_pgautofailover_node_walreporttime 11
-#define Anum_pgautofailover_node_health 12
-#define Anum_pgautofailover_node_healthchecktime 13
-#define Anum_pgautofailover_node_statechangetime 14
-#define Anum_pgautofailover_node_reportedLSN 15
-#define Anum_pgautofailover_node_candidate_priority 16
-#define Anum_pgautofailover_node_replication_quorum 17
+#define Anum_pgautofailover_node_sysidentifier 6
+#define Anum_pgautofailover_node_goalstate 7
+#define Anum_pgautofailover_node_reportedstate 8
+#define Anum_pgautofailover_node_reportedpgisrunning 9
+#define Anum_pgautofailover_node_reportedrepstate 10
+#define Anum_pgautofailover_node_reporttime 11
+#define Anum_pgautofailover_node_reportedLSN 12
+#define Anum_pgautofailover_node_walreporttime 13
+#define Anum_pgautofailover_node_health 14
+#define Anum_pgautofailover_node_healthchecktime 15
+#define Anum_pgautofailover_node_statechangetime 16
+#define Anum_pgautofailover_node_candidate_priority 17
+#define Anum_pgautofailover_node_replication_quorum 18
 
 #define AUTO_FAILOVER_NODE_TABLE_ALL_COLUMNS \
 	"formationid, " \
@@ -49,16 +50,17 @@
 	"groupid, " \
 	"nodename, " \
 	"nodeport, " \
+	"sysidentifier, " \
 	"goalstate, " \
 	"reportedstate, " \
 	"reportedpgisrunning, " \
 	"reportedrepstate, " \
 	"reporttime, " \
+	"reportedlsn, " \
 	"walreporttime, " \
 	"health, " \
 	"healthchecktime, " \
 	"statechangetime, " \
-	"reportedlsn, " \
 	"candidatepriority, " \
 	"replicationquorum"
 
@@ -88,6 +90,7 @@ typedef struct AutoFailoverNode
 	int groupId;
 	char *nodeName;
 	int nodePort;
+	uint64 sysIdentifier;
 	ReplicationState goalState;
 	ReplicationState reportedState;
 	TimestampTz reportTime;
@@ -123,8 +126,11 @@ extern AutoFailoverNode * OtherNodeInGroup(AutoFailoverNode *pgAutoFailoverNode)
 extern AutoFailoverNode * GetWritableNodeInGroup(char *formationId, int32 groupId);
 extern AutoFailoverNode * TupleToAutoFailoverNode(TupleDesc tupleDescriptor,
 												  HeapTuple heapTuple);
-extern int AddAutoFailoverNode(char *formationId, int groupId,
-							   char *nodeName, int nodePort,
+extern int AddAutoFailoverNode(char *formationId,
+							   int groupId,
+							   char *nodeName,
+							   int nodePort,
+							   uint64 sysIdentifier,
 							   ReplicationState goalState,
 							   ReplicationState reportedState,
 							   int candidatePriority,
