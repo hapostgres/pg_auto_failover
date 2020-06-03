@@ -204,14 +204,14 @@ service_postgres_ctl_loop(LocalPostgresServer *postgres)
 		}
 
 		/* that's expected the shutdown sequence from the supervisor */
-		if (asked_to_stop || asked_to_stop_fast)
+		if (asked_to_stop || asked_to_stop_fast || asked_to_quit)
 		{
 			if (!shutdownSequenceInProgress)
 			{
 				shutdownSequenceInProgress = true;
 				log_info("Postgres controller service received signal %s, "
 						 "terminating",
-						 asked_to_stop_fast ? "SIGINT" : "SIGTERM");
+						 signal_to_string(get_current_signal(SIGTERM)));
 			}
 
 			if (!ensure_postgres_status_stopped(postgres, &postgresService))

@@ -287,7 +287,7 @@ cli_do_service_pgcontroller(int argc, char **argv)
 
 	int subprocessesCount = sizeof(subprocesses) / sizeof(subprocesses[0]);
 
-	bool exitOnQuit = true;
+	bool exitOnQuit = false;
 
 	/* Establish a handler for signals. */
 	(void) set_signal_handlers(exitOnQuit);
@@ -322,7 +322,7 @@ cli_do_service_postgres(int argc, char **argv)
 	ConfigFilePaths pathnames = { 0 };
 	LocalPostgresServer postgres = { 0 };
 
-	bool exitOnQuit = true;
+	bool exitOnQuit = false;
 
 	/* Establish a handler for signals. */
 	(void) set_signal_handlers(exitOnQuit);
