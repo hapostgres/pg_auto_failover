@@ -82,7 +82,7 @@ def test_006_init_secondary():
     assert node3.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")
 
-def test_005_failover():
+def test_007_failover():
     print()
     print("Calling pgautofailover.failover() on the monitor")
     cluster.monitor.failover()
