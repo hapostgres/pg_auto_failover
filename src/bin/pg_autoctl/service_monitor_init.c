@@ -120,12 +120,6 @@ service_monitor_init_start(void *context, pid_t *pid)
 
 		case 0:
 		{
-			const char *serviceName = createAndRun ?
-									  "pg_autoctl: monitor listener" :
-									  "pg_autoctl: monitor installer";
-
-			(void) set_ps_title(serviceName);
-
 			/*
 			 * We are in a sub-process and didn't call exec() on our pg_autoctl
 			 * do service listener program yet we do not want to clean-up the
@@ -134,6 +128,12 @@ service_monitor_init_start(void *context, pid_t *pid)
 			 * function.
 			 */
 			IntString semIdString = intToString(log_semaphore.semId);
+
+			const char *serviceName = createAndRun ?
+									  "pg_autoctl: monitor listener" :
+									  "pg_autoctl: monitor installer";
+
+			(void) set_ps_title(serviceName);
 
 			setenv(PG_AUTOCTL_LOG_SEMAPHORE, semIdString.strValue, 1);
 
