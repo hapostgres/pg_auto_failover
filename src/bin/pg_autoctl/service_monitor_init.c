@@ -126,6 +126,17 @@ service_monitor_init_start(void *context, pid_t *pid)
 
 			(void) set_ps_title(serviceName);
 
+			/*
+			 * We are in a sub-process and didn't call exec() on our pg_autoctl
+			 * do service listener program yet we do not want to clean-up the
+			 * semaphore just yet. Publish that we are a sub-process and only
+			 * then quit, avoiding to call the atexit() semaphore clean-up
+			 * function.
+			 */
+			IntString semIdString = intToString(log_semaphore.semId);
+
+			setenv(PG_AUTOCTL_LOG_SEMAPHORE, semIdString.strValue, 1);
+
 			/* finish the install if necessary */
 			if (!monitor_install(config->nodename, *pgSetup, false))
 			{
@@ -146,17 +157,6 @@ service_monitor_init_start(void *context, pid_t *pid)
 			}
 			else
 			{
-				/*
-				 * We are in a sub-process and didn't call exec() on our
-				 * pg_autoctl do service listener program yet we do not want to
-				 * clean-up the semaphore just yet. Publish that we are a
-				 * sub-process and only then quit, avoiding to call the
-				 * atexit() semaphore clean-up function.
-				 */
-				IntString semIdString = intToString(log_semaphore.semId);
-
-				setenv(PG_AUTOCTL_LOG_SEMAPHORE, semIdString.strValue, 1);
-
 				exit(EXIT_CODE_QUIT);
 			}
 		}

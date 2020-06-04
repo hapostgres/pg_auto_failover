@@ -803,7 +803,7 @@ pg_ctl_initdb(const char *pg_ctl, const char *pgdata)
 
 	/* initdb takes time, so log about the operation BEFORE doing it */
 	log_info("Initialising a PostgreSQL cluster at \"%s\"", pgdata);
-	log_info("%s initdb -s -D %s", pg_ctl, pgdata);
+	log_info("%s initdb -s -D %s --option '--auth=trust'", pg_ctl, pgdata);
 
 	program = run_program(pg_ctl, "initdb",
 						  "--silent",
