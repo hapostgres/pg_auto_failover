@@ -20,7 +20,7 @@
 #include "monitor.h"
 #include "monitor_config.h"
 #include "monitor_pg_init.h"
-#include "service.h"
+#include "pidfile.h"
 #include "service_monitor.h"
 #include "service_postgres_ctl.h"
 #include "signals.h"
@@ -93,7 +93,7 @@ service_monitor_start(void *context, pid_t *pid)
 	{
 		case -1:
 		{
-			log_error("Failed to fork the node_active process");
+			log_error("Failed to fork the monitor listener process");
 			return false;
 		}
 
@@ -103,7 +103,7 @@ service_monitor_start(void *context, pid_t *pid)
 			(void) service_monitor_runprogram(monitor);
 
 			/* unexpected */
-			log_fatal("BUG: returned from service_keeper_runprogram()");
+			log_fatal("BUG: returned from service_monitor_runprogram()");
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 

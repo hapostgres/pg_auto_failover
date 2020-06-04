@@ -1,5 +1,5 @@
 /*
- * src/bin/pg_autoctl/loop.c
+ * src/bin/pg_autoctl/service_keeper.c
  *   The main loop of the pg_autoctl keeper
  *
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -14,6 +14,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "cli_common.h"
+#include "cli_root.h"
 #include "defaults.h"
 #include "fsm.h"
 #include "keeper.h"
@@ -22,18 +24,226 @@
 #include "log.h"
 #include "monitor.h"
 #include "pgctl.h"
-#include "state.h"
-#include "service.h"
+#include "pidfile.h"
+#include "service_keeper.h"
+#include "service_postgres_ctl.h"
 #include "signals.h"
+#include "state.h"
 #include "string_utils.h"
+#include "supervisor.h"
 
+#include "runprogram.h"
 
 static bool keepRunning = true;
 
 static bool is_network_healthy(Keeper *keeper);
 static bool in_network_partition(KeeperStateData *keeperState, uint64_t now,
 								 int networkPartitionTimeout);
-static void reload_configuration(Keeper *keeper);
+static void reload_configuration(Keeper *keeper, bool postgresNotRunningIsOk);
+
+
+/*
+ * keeper_service_start starts the keeper processes: the node_active main loop
+ * and depending on the current state the Postgres instance.
+ */
+bool
+start_keeper(Keeper *keeper)
+{
+	const char *pidfile = keeper->config.pathnames.pid;
+
+	Service subprocesses[] = {
+		{
+			"postgres",
+			RP_PERMANENT,
+			-1,
+			&service_postgres_ctl_start
+		},
+		{
+			"node active",
+			RP_PERMANENT,
+			-1,
+			&service_keeper_start,
+			(void *) keeper
+		}
+	};
+
+	int subprocessesCount = sizeof(subprocesses) / sizeof(subprocesses[0]);
+
+	return supervisor_start(subprocesses, subprocessesCount, pidfile);
+}
+
+
+/*
+ * keeper_start_node_active_process starts a sub-process that communicates with
+ * the monitor to implement the node_active protocol.
+ */
+bool
+service_keeper_start(void *context, pid_t *pid)
+{
+	Keeper *keeper = (Keeper *) context;
+	pid_t fpid;
+
+	/* Flush stdio channels just before fork, to avoid double-output problems */
+	fflush(stdout);
+	fflush(stderr);
+
+	/* time to create the node_active sub-process */
+	fpid = fork();
+
+	switch (fpid)
+	{
+		case -1:
+		{
+			log_error("Failed to fork the node-active process");
+			return false;
+		}
+
+		case 0:
+		{
+			/* here we call execv() so we never get back */
+			(void) service_keeper_runprogram(keeper);
+
+			/* unexpected */
+			log_fatal("BUG: returned from service_keeper_runprogram()");
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+
+		default:
+		{
+			/* fork succeeded, in parent */
+			log_debug("pg_autoctl node-active process started in subprocess %d",
+					  fpid);
+			*pid = fpid;
+			return true;
+		}
+	}
+}
+
+
+/*
+ * service_keeper_runprogram runs the node_active protocol service:
+ *
+ *   $ pg_autoctl do service node-active --pgdata ...
+ *
+ * This function is intended to be called from the child process after a fork()
+ * has been successfully done at the parent process level: it's calling
+ * execve() and will never return.
+ */
+void
+service_keeper_runprogram(Keeper *keeper)
+{
+	Program program;
+
+	char *args[12];
+	int argsIndex = 0;
+
+	char command[BUFSIZE];
+
+	/*
+	 * use --pgdata option rather than the config.
+	 *
+	 * On macOS when using /tmp, the file path is then redirected to being
+	 * /private/tmp when using realpath(2) as we do in normalize_filename(). So
+	 * for that case to be supported, we explicitely re-use whatever PGDATA or
+	 * --pgdata was parsed from the main command line to start our sub-process.
+	 */
+	char *pgdata = keeperOptions.pgSetup.pgdata;
+	IntString semIdString = intToString(log_semaphore.semId);
+
+	setenv(PG_AUTOCTL_DEBUG, "1", 1);
+	setenv(PG_AUTOCTL_LOG_SEMAPHORE, semIdString.strValue, 1);
+
+	args[argsIndex++] = (char *) pg_autoctl_program;
+	args[argsIndex++] = "do";
+	args[argsIndex++] = "service";
+	args[argsIndex++] = "node-active";
+	args[argsIndex++] = "--pgdata";
+	args[argsIndex++] = pgdata;
+	args[argsIndex++] = logLevelToString(log_get_level());
+	args[argsIndex] = NULL;
+
+	/* we do not want to call setsid() when running this program. */
+	program = initialize_program(args, false);
+
+	program.capture = false;    /* redirect output, don't capture */
+	program.stdOutFd = STDOUT_FILENO;
+	program.stdErrFd = STDERR_FILENO;
+
+	/* log the exact command line we're using */
+	(void) snprintf_program_command_line(&program, command, BUFSIZE);
+
+	log_info("%s", command);
+
+	(void) execute_program(&program);
+}
+
+
+/*
+ * service_keeper_node_active_init initialises the pg_autoctl service for the
+ * node_active protocol.
+ */
+bool
+service_keeper_node_active_init(Keeper *keeper)
+{
+	KeeperConfig *config = &(keeper->config);
+
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = false;
+
+	if (!keeper_config_read_file(config,
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
+	{
+		/* errors have already been logged. */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	/*
+	 * Check that the init is finished. This function is called from
+	 * cli_service_run when used in the CLI `pg_autoctl run`, and the
+	 * function cli_service_run calls into keeper_init(): we know that we could
+	 * read a keeper state file.
+	 */
+	if (!config->monitorDisabled && file_exists(config->pathnames.init))
+	{
+		log_warn("The `pg_autoctl create` did not complete, completing now.");
+
+		if (!keeper_pg_init_continue(keeper))
+		{
+			/* errors have already been logged. */
+			return false;
+		}
+	}
+
+	if (!keeper_init(keeper, config))
+	{
+		log_fatal("Failed to initialise keeper, see above for details");
+		exit(EXIT_CODE_PGCTL);
+	}
+
+	if (config->monitorDisabled)
+	{
+		/*
+		 * At the moment, we have nothing to do here. Later we might want to
+		 * open an HTTPd service and wait for API calls.
+		 */
+		log_fatal("--disable-monitor disables pg_autoctl servives");
+		exit(EXIT_CODE_MONITOR);
+	}
+	else
+	{
+		/* Check that we are compatible with the monitor's extension version */
+		if (!keeper_check_monitor_extension_version(keeper))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_MONITOR);
+		}
+	}
+
+	return true;
+}
 
 
 /*
@@ -79,7 +289,9 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		 */
 		if (asked_to_reload || firstLoop)
 		{
-			(void) reload_configuration(keeper);
+			bool postgresNotRunningIsOk = firstLoop;
+
+			(void) reload_configuration(keeper, postgresNotRunningIsOk);
 		}
 
 		if (asked_to_stop)
@@ -216,6 +428,8 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 			if (assignedState.groupId != config->groupId ||
 				strneq(config->replication_slot_name, expectedSlotName))
 			{
+				bool postgresNotRunningIsOk = false;
+
 				if (!keeper_config_set_groupId_and_slot_name(config,
 															 assignedState.nodeId,
 															 assignedState.groupId))
@@ -226,7 +440,7 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 					return false;
 				}
 
-				if (!keeper_ensure_configuration(keeper))
+				if (!keeper_ensure_configuration(keeper, postgresNotRunningIsOk))
 				{
 					log_error("Failed to update our Postgres configuration "
 							  "after a change of groupId or "
@@ -372,7 +586,7 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		}
 	}
 
-	return service_stop(&(keeper->config.pathnames));
+	return true;
 }
 
 
@@ -452,7 +666,7 @@ in_network_partition(KeeperStateData *keeperState, uint64_t now,
  * integrates accepted new values into the current setup.
  */
 static void
-reload_configuration(Keeper *keeper)
+reload_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 {
 	KeeperConfig *config = &(keeper->config);
 
@@ -491,7 +705,7 @@ reload_configuration(Keeper *keeper)
 			 * The new configuration might impact the Postgres setup, such as
 			 * when changing the SSL file paths.
 			 */
-			if (!keeper_ensure_configuration(keeper))
+			if (!keeper_ensure_configuration(keeper, postgresNotRunningIsOk))
 			{
 				log_warn("Failed to reload pg_autoctl configuration, "
 						 "see above for details");

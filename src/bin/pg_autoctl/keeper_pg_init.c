@@ -26,6 +26,7 @@
 #include "pghba.h"
 #include "pgsetup.h"
 #include "pgsql.h"
+#include "service_keeper_init.h"
 #include "state.h"
 
 
@@ -43,7 +44,6 @@
 bool keeperInitWarnings = false;
 
 static bool keeper_pg_init_fsm(Keeper *keeper);
-static bool keeper_pg_init_and_register(Keeper *keeper);
 static bool keeper_pg_init_and_register_primary(Keeper *keeper);
 static bool reach_initial_state(Keeper *keeper);
 static bool wait_until_primary_is_ready(Keeper *config,
@@ -71,7 +71,7 @@ keeper_pg_init(Keeper *keeper)
 	}
 	else
 	{
-		return keeper_pg_init_and_register(keeper);
+		return service_keeper_init(keeper);
 	}
 }
 
@@ -110,7 +110,7 @@ keeper_pg_init_fsm(Keeper *keeper)
  * the first loop when the keeper service starts. Once `pg_autoctl create` is
  * done, PostgreSQL is known to be running in the proper state.
  */
-static bool
+bool
 keeper_pg_init_and_register(Keeper *keeper)
 {
 	KeeperConfig *config = &(keeper->config);
@@ -706,7 +706,7 @@ create_database_and_extension(Keeper *keeper)
 	 * Now start the database, we need to create our dbname and maybe the Citus
 	 * Extension too.
 	 */
-	if (!ensure_local_postgres_is_running(&initPostgres))
+	if (!ensure_postgres_service_is_running(&initPostgres))
 	{
 		log_error("Failed to start PostgreSQL, see above for details");
 		return false;

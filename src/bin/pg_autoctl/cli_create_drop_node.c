@@ -31,8 +31,10 @@
 #include "monitor_config.h"
 #include "monitor_pg_init.h"
 #include "pgctl.h"
+#include "pidfile.h"
 #include "primary_standby.h"
-#include "service.h"
+#include "service_keeper.h"
+#include "service_keeper_init.h"
 #include "service_monitor.h"
 #include "service_monitor_init.h"
 #include "string_utils.h"
@@ -191,55 +193,11 @@ cli_create_config(Keeper *keeper, KeeperConfig *config)
 void
 cli_create_pg(Keeper *keeper)
 {
-	KeeperConfig *config = &(keeper->config);
-
 	if (!keeper_pg_init(keeper))
 	{
 		/* errors have been logged */
 		exit(EXIT_CODE_BAD_STATE);
 	}
-
-	if (keeperInitWarnings)
-	{
-		log_info("Keeper has been succesfully initialized, "
-				 "please fix above warnings to complete installation.");
-	}
-	else
-	{
-		log_info("Keeper has been succesfully initialized.");
-
-		if (createAndRun)
-		{
-			pid_t pid = 0;
-
-			/* now that keeper_pg_init is done, finish the keeper init */
-			if (!keeper_init(keeper, config))
-			{
-				/* errors have already been logged */
-				exit(EXIT_CODE_KEEPER);
-			}
-
-			if (!keeper_service_init(keeper, &pid))
-			{
-				log_fatal("Failed to initialize pg_auto_failover service, "
-						  "see above for details");
-				exit(EXIT_CODE_KEEPER);
-			}
-
-			if (!keeper_check_monitor_extension_version(keeper))
-			{
-				/* errors have already been logged */
-				exit(EXIT_CODE_MONITOR);
-			}
-
-			if (!keeper_node_active_loop(keeper, pid))
-			{
-				exit(EXIT_CODE_KEEPER);
-			}
-		}
-	}
-
-	keeper_config_destroy(config);
 }
 
 

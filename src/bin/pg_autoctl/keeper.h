@@ -51,15 +51,12 @@ bool keeper_drop_replication_slots_for_removed_nodes(Keeper *keeper);
 bool keeper_maintain_replication_slots(Keeper *keeper);
 bool keeper_ensure_current_state(Keeper *keeper);
 bool keeper_create_self_signed_cert(Keeper *keeper);
-bool keeper_ensure_configuration(Keeper *keeper);
+bool keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk);
 bool keeper_update_pg_state(Keeper *keeper);
 bool ReportPgIsRunning(Keeper *keeper);
 bool keeper_remove(Keeper *keeper, KeeperConfig *config,
 				   bool ignore_monitor_errors);
 bool keeper_check_monitor_extension_version(Keeper *keeper);
 bool keeper_state_as_json(Keeper *keeper, char *json, int size);
-
-/* loop.c */
-bool keeper_node_active_loop(Keeper *keeper, pid_t start_pid);
 
 #endif /* KEEPER_H */

@@ -24,7 +24,8 @@
 #include "keeper.h"
 #include "monitor.h"
 #include "monitor_config.h"
-#include "service.h"
+#include "pidfile.h"
+#include "service_keeper.h"
 #include "service_monitor.h"
 #include "signals.h"
 
@@ -124,7 +125,9 @@ static void
 cli_keeper_run(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
-	pid_t pid = 0;
+	KeeperConfig *config = &(keeper.config);
+	PostgresSetup *pgSetup = &(keeper.config.pgSetup);
+	LocalPostgresServer *postgres = &(keeper.postgres);
 
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
@@ -132,61 +135,24 @@ cli_keeper_run(int argc, char **argv)
 
 	keeper.config = keeperOptions;
 
-	/*
-	 * keeper_config_read_file() calls into pg_setup_init() which uses
-	 * pg_setup_is_ready(), and this function might loop until Postgres is
-	 * ready, as per its name.
-	 *
-	 * In order to make it possible to interrupt the pg_autctl service while in
-	 * that loop, we need to install our signal handlers and pidfile prior to
-	 * getting there.
-	 */
-	if (!keeper_config_read_file_skip_pgsetup(&(keeper.config),
-											  monitorDisabledIsOk))
+	/* initialize our pgSetup and LocalPostgresServer instances */
+	if (!keeper_config_read_file(config,
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
 	{
 		/* errors have already been logged. */
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	if (!keeper_service_init(&keeper, &pid))
+	/* initialize our local Postgres instance representation */
+	(void) local_postgres_init(postgres, pgSetup);
+
+	if (!start_keeper(&keeper))
 	{
-		log_fatal("Failed to initialize pg_auto_failover service, "
+		log_fatal("Failed to start pg_autoctl keeper service, "
 				  "see above for details");
-		exit(EXIT_CODE_KEEPER);
-	}
-
-	if (!keeper_config_pgsetup_init(&(keeper.config),
-									missingPgdataIsOk,
-									pgIsNotRunningIsOk))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_CONFIG);
-	}
-
-	if (!keeper_init(&keeper, &keeper.config))
-	{
-		log_fatal("Failed to initialise keeper, see above for details");
-		exit(EXIT_CODE_PGCTL);
-	}
-
-	if (keeper.config.monitorDisabled)
-	{
-		/*
-		 * At the moment, we have nothing to do here. Later we might want to
-		 * open an HTTPd service and wait for API calls.
-		 */
-		(void) service_stop(&(keeper.config.pathnames));
-	}
-	else
-	{
-		/* Start with a monitor: implement the node active loop */
-		if (!keeper_check_monitor_extension_version(&keeper))
-		{
-			/* errors have already been logged */
-			exit(EXIT_CODE_MONITOR);
-		}
-
-		(void) keeper_node_active_loop(&keeper, pid);
+		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 }
 

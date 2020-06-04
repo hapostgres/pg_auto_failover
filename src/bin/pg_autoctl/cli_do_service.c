@@ -23,32 +23,31 @@
 #include "keeper.h"
 #include "monitor.h"
 #include "monitor_config.h"
-#include "service.h"
+#include "pidfile.h"
+#include "service_keeper.h"
 #include "service_monitor.h"
 #include "service_postgres_ctl.h"
 #include "signals.h"
 #include "supervisor.h"
 
 
-static void cli_do_service_getpid(int argc, char **argv);
 static void cli_do_service_postgres(int argc, char **argv);
 static void cli_do_service_pgcontroller(int argc, char **argv);
 static void cli_do_service_postgresctl_on(int argc, char **argv);
 static void cli_do_service_postgresctl_off(int argc, char **argv);
 
+static void cli_do_service_getpid(const char *serviceName);
+static void cli_do_service_getpid_postgres(int argc, char **argv);
+static void cli_do_service_getpid_listener(int argc, char **argv);
+static void cli_do_service_getpid_node_active(int argc, char **argv);
+
 static void cli_do_service_restart(const char *serviceName);
 static void cli_do_service_restart_postgres(int argc, char **argv);
 static void cli_do_service_restart_listener(int argc, char **argv);
+static void cli_do_service_restart_node_active(int argc, char **argv);
 
 static void cli_do_service_monitor_listener(int argc, char **argv);
-
-CommandLine service_getpid =
-	make_command("getpid",
-				 "get PID of a pg_autoctl running service",
-				 CLI_PGDATA_USAGE " serviceName ",
-				 CLI_PGDATA_OPTION,
-				 cli_getopt_pgdata,
-				 cli_do_service_getpid);
+static void cli_do_service_node_active(int argc, char **argv);
 
 CommandLine service_pgcontroller =
 	make_command("pgcontroller",
@@ -74,6 +73,51 @@ CommandLine service_monitor_listener =
 				 cli_getopt_pgdata,
 				 cli_do_service_monitor_listener);
 
+CommandLine service_node_active =
+	make_command("node-active",
+				 "pg_autoctl service that implements the node active protocol",
+				 CLI_PGDATA_USAGE,
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
+				 cli_do_service_node_active);
+
+CommandLine service_getpid_postgres =
+	make_command("postgres",
+				 "Get the pid of the pg_autoctl postgres controller service",
+				 CLI_PGDATA_USAGE,
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
+				 cli_do_service_getpid_postgres);
+
+CommandLine service_getpid_listener =
+	make_command("listener",
+				 "Get the pid of the pg_autoctl monitor listener service",
+				 CLI_PGDATA_USAGE,
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
+				 cli_do_service_getpid_listener);
+
+CommandLine service_getpid_node_active =
+	make_command("node-active",
+				 "Get the pid of the pg_autoctl keeper node-active service",
+				 CLI_PGDATA_USAGE,
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
+				 cli_do_service_getpid_node_active);
+
+static CommandLine *service_getpid[] = {
+	&service_getpid_postgres,
+	&service_getpid_listener,
+	&service_getpid_node_active,
+	NULL
+};
+
+CommandLine do_service_getpid_commands =
+	make_command_set("getpid",
+					 "Get the pid of pg_autoctl sub-processes (services)",
+					 NULL, NULL,
+					 NULL, service_getpid);
+
 CommandLine service_restart_postgres =
 	make_command("postgres",
 				 "Restart the pg_autoctl postgres controller service",
@@ -90,9 +134,18 @@ CommandLine service_restart_listener =
 				 cli_getopt_pgdata,
 				 cli_do_service_restart_listener);
 
+CommandLine service_restart_node_active =
+	make_command("node-active",
+				 "Restart the pg_autoctl keeper node-active service",
+				 CLI_PGDATA_USAGE,
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
+				 cli_do_service_restart_node_active);
+
 static CommandLine *service_restart[] = {
 	&service_restart_postgres,
 	&service_restart_listener,
+	&service_restart_node_active,
 	NULL
 };
 
@@ -102,11 +155,12 @@ CommandLine do_service_restart_commands =
 					 NULL, service_restart);
 
 static CommandLine *service[] = {
+	&do_service_getpid_commands,
 	&do_service_restart_commands,
-	&service_getpid,
 	&service_pgcontroller,
 	&service_postgres,
 	&service_monitor_listener,
+	&service_node_active,
 	NULL
 };
 
@@ -150,19 +204,11 @@ CommandLine do_service_postgres_ctl_commands =
  * pg_autoctl supervision.
  */
 static void
-cli_do_service_getpid(int argc, char **argv)
+cli_do_service_getpid(const char *serviceName)
 {
 	ConfigFilePaths pathnames = { 0 };
 	LocalPostgresServer postgres = { 0 };
-	char *serviceName = NULL;
 	pid_t pid = -1;
-
-	if (argc != 1)
-	{
-		commandline_print_usage(&service_getpid, stderr);
-		exit(EXIT_CODE_BAD_ARGS);
-	}
-	serviceName = argv[0];
 
 	if (!cli_common_pgsetup_init(&pathnames, &(postgres.postgresSetup)))
 	{
@@ -177,6 +223,36 @@ cli_do_service_getpid(int argc, char **argv)
 	}
 
 	fformat(stdout, "%d\n", pid);
+}
+
+
+/*
+ * cli_do_service_getpid_postgres gets the postgres service pid.
+ */
+static void
+cli_do_service_getpid_postgres(int argc, char **argv)
+{
+	(void) cli_do_service_getpid("postgres");
+}
+
+
+/*
+ * cli_do_service_getpid_listener gets the postgres service pid.
+ */
+static void
+cli_do_service_getpid_listener(int argc, char **argv)
+{
+	(void) cli_do_service_getpid("listener");
+}
+
+
+/*
+ * cli_do_service_getpid_node_active gets the postgres service pid.
+ */
+static void
+cli_do_service_getpid_node_active(int argc, char **argv)
+{
+	(void) cli_do_service_getpid("node active");
 }
 
 
@@ -252,14 +328,28 @@ cli_do_service_restart_postgres(int argc, char **argv)
 
 
 /*
- * cli_do_service_restart_postgres sends the TERM signal to the postgres
- * service, which is known to have the restart policy RP_PERMANENT (that's
- * hard-coded). As a consequence the supervisor will restart the service.
+ * cli_do_service_restart_postgres sends the TERM signal to the monitor
+ * listener service, which is known to have the restart policy RP_PERMANENT
+ * (that's hard-coded). As a consequence the supervisor will restart the
+ * service.
  */
 static void
 cli_do_service_restart_listener(int argc, char **argv)
 {
 	(void) cli_do_service_restart("listener");
+}
+
+
+/*
+ * cli_do_service_restart_postgres sends the TERM signal to the keeper node
+ * active service, which is known to have the restart policy RP_PERMANENT
+ * (that's hard-coded). As a consequence the supervisor will restart the
+ * service.
+ */
+static void
+cli_do_service_restart_node_active(int argc, char **argv)
+{
+	(void) cli_do_service_restart("node active");
 }
 
 
@@ -442,4 +532,37 @@ cli_do_service_monitor_listener(int argc, char **argv)
 
 	/* Start the monitor service */
 	(void) monitor_service_run(&monitor);
+}
+
+
+/*
+ * cli_do_service_node_active starts the node active service.
+ */
+static void
+cli_do_service_node_active(int argc, char **argv)
+{
+	Keeper keeper = { 0 };
+
+	pid_t ppid = getppid();
+
+	bool exitOnQuit = true;
+
+	keeper.config = keeperOptions;
+
+	/* Establish a handler for signals. */
+	(void) set_signal_handlers(exitOnQuit);
+
+	/* Prepare our Keeper and KeeperConfig from the CLI options */
+	if (!service_keeper_node_active_init(&keeper))
+	{
+		log_fatal("Failed to initialise the node active service, "
+				  "see above for details");
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	/* display a user-friendly process name */
+	(void) set_ps_title("pg_autoctl: node active");
+
+	/* Start the node_active() protocol client */
+	(void) keeper_node_active_loop(&keeper, ppid);
 }

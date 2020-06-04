@@ -152,6 +152,7 @@ def test_001_init_primary():
 
     node1.run()
     assert node1.wait_until_state(target_state="single")
+    node1.wait_until_pg_is_running()
     node1.check_ssl("on", "verify-ca", primary=True)
 
 def test_002_create_t1():
@@ -193,6 +194,7 @@ def test_003_init_secondary():
     node2.run()
     assert node2.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")
+    node2.wait_until_pg_is_running()
     node2.check_ssl("on", "verify-ca")
 
 def test_004_failover():

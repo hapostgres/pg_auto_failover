@@ -21,8 +21,8 @@
 #include "monitor.h"
 #include "monitor_pg_init.h"
 #include "pgctl.h"
+#include "pidfile.h"
 #include "state.h"
-#include "service.h"
 #include "service_monitor.h"
 #include "service_monitor_init.h"
 #include "service_postgres_ctl.h"
@@ -152,7 +152,7 @@ service_monitor_init_start(void *context, pid_t *pid)
 				(void) service_monitor_runprogram(monitor);
 
 				/* unexpected */
-				log_fatal("BUG: returned from service_keeper_runprogram()");
+				log_fatal("BUG: returned from service_monitor_runprogram()");
 				exit(EXIT_CODE_INTERNAL_ERROR);
 			}
 			else

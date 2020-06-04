@@ -1,6 +1,6 @@
 /*
- * src/bin/pg_autoctl/service.c
- *   Utilities to start/stop the pg_autoctl service.
+ * src/bin/pg_autoctl/pidfile.c
+ *   Utilities to manage the pg_autoctl pidfile.
  *
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
@@ -24,121 +24,10 @@
 #include "log.h"
 #include "monitor.h"
 #include "pgctl.h"
+#include "pidfile.h"
 #include "state.h"
-#include "service.h"
 #include "signals.h"
 #include "string_utils.h"
-
-
-/*
- * monitor_service_init initialises a PID file for the monitor process.
- */
-bool
-monitor_service_init(MonitorConfig *config, pid_t *pid)
-{
-	bool exitOnQuit = true;
-
-	log_trace("monitor_service_init");
-
-	/* Establish a handler for signals. */
-	(void) set_signal_handlers(exitOnQuit);
-
-	/* Check that the keeper service is not already running */
-	if (read_pidfile(config->pathnames.pid, pid))
-	{
-		log_fatal("An instance of pg_autoctl is already running with PID %d, "
-				  "as seen in pidfile \"%s\"",
-				  *pid, config->pathnames.pid);
-		return false;
-	}
-
-	/* Ok, we're going to start. Time to create our PID file. */
-	*pid = getpid();
-
-	if (!create_pidfile(config->pathnames.pid, *pid))
-	{
-		log_fatal("Failed to write our PID to \"%s\"", config->pathnames.pid);
-		return false;
-	}
-
-	return true;
-}
-
-
-/*
- * keeper_service_init initialises the bits and pieces that the keeper service
- * depend on:
- *
- *  - sets the signal handlers
- *  - check pidfile to see if the service is already running
- *  - creates the pidfile for our service
- *  - clean-up from previous execution
- */
-bool
-keeper_service_init(Keeper *keeper, pid_t *pid)
-{
-	KeeperConfig *config = &(keeper->config);
-	bool exitOnQuit = true;
-
-	log_trace("keeper_service_init");
-
-	/* Establish a handler for signals. */
-	(void) set_signal_handlers(exitOnQuit);
-
-	/* Check that the keeper service is not already running */
-	if (read_pidfile(config->pathnames.pid, pid))
-	{
-		log_fatal("An instance of pg_autoctl is already running with PID %d, "
-				  "as seen in pidfile \"%s\"",
-				  *pid, config->pathnames.pid);
-		return false;
-	}
-
-	/*
-	 * Check that the init is finished. This function is called from
-	 * cli_service_run when used in the CLI `pg_autoctl run`, and the
-	 * function cli_service_run calls into keeper_init(): we know that we could
-	 * read a keeper state file.
-	 */
-	if (!config->monitorDisabled && file_exists(config->pathnames.init))
-	{
-		log_warn("The `pg_autoctl create` did not complete, completing now.");
-
-		if (!keeper_pg_init_continue(keeper))
-		{
-			/* errors have already been logged. */
-			return false;
-		}
-	}
-
-	/* Ok, we're going to start. Time to create our PID file. */
-	*pid = getpid();
-
-	if (!create_pidfile(config->pathnames.pid, *pid))
-	{
-		log_fatal("Failed to write our PID to \"%s\"", config->pathnames.pid);
-		return false;
-	}
-
-	return true;
-}
-
-
-/*
- * service_stop stops the service and removes the pid file.
- */
-bool
-service_stop(ConfigFilePaths *pathnames)
-{
-	log_info("pg_autoctl service stopping");
-
-	if (!remove_pidfile(pathnames->pid))
-	{
-		log_error("Failed to remove pidfile \"%s\"", pathnames->pid);
-		return false;
-	}
-	return true;
-}
 
 
 /*
