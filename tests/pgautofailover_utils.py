@@ -9,6 +9,7 @@ import subprocess
 import datetime as dt
 from nose.tools import eq_
 from enum import Enum
+import json
 
 import ssl_cert_utils as cert
 
@@ -764,6 +765,21 @@ class DataNode(PGNode):
             self.pg_autoctl.run()
         else:
             self.pg_autoctl.execute("pg_autoctl create")
+
+        # sometimes we might have holes in the nodeid sequence
+        self.nodeid = self.get_nodeid()
+
+    def get_nodeid(self):
+        """
+        Fetch the nodeid from the pg_autoctl state file.
+        """
+        command = PGAutoCtl(self)
+        out, err, ret = command.execute("get node id", 'do', 'fsm', 'state')
+
+        print(out)
+        self.state = json.loads(out)
+        print(self.state)
+        return self.state['state']['nodeId']
 
     def destroy(self):
         """
