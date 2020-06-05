@@ -40,6 +40,9 @@ typedef struct
 
 	bool capture;               /* do we capture output, or redirect it? */
 
+	/* register a function to process output as it appears */
+	void (*processBuffer)(const char *buffer, bool error);
+
 	int stdOutFd;               /* redirect stdout to file descriptor */
 	int stdErrFd;               /* redirect stderr to file descriptor */
 
@@ -62,7 +65,10 @@ static void dup2_or_exit(int fildes, int fildes2);
 static void close_or_exit(int fildes);
 static void read_from_pipes(Program *prog,
 							pid_t childPid, int *outpipe, int *errpipe);
-static size_t read_into_buf(int filedes, PQExpBuffer buffer);
+static size_t read_into_buf(Program *prog,
+							int filedes,
+							PQExpBuffer buffer,
+							bool error);
 static void waitprogram(Program *prog, pid_t childPid);
 
 /*
@@ -76,13 +82,14 @@ run_program(const char *program, ...)
 	int nb_args = 0;
 	va_list args;
 	const char *param;
-	Program prog;
+	Program prog = { 0 };
 
 	prog.program = strdup(program);
 	prog.returnCode = -1;
 	prog.error = 0;
 	prog.setsid = false;
 	prog.capture = true;
+	prog.processBuffer = NULL;
 	prog.stdOutFd = -1;
 	prog.stdErrFd = -1;
 	prog.stdOut = NULL;
@@ -127,7 +134,7 @@ Program
 initialize_program(char **args, bool setsid)
 {
 	int argsIndex, nb_args = 0;
-	Program prog;
+	Program prog = { 0 };
 
 	prog.returnCode = -1;
 	prog.error = 0;
@@ -135,6 +142,7 @@ initialize_program(char **args, bool setsid)
 
 	/* this could be changed by the caller before calling execute_program */
 	prog.capture = true;
+	prog.processBuffer = NULL;
 	prog.stdOutFd = -1;
 	prog.stdErrFd = -1;
 
@@ -494,7 +502,7 @@ read_from_pipes(Program *prog, pid_t childPid, int *outpipe, int *errpipe)
 		{
 			if (FD_ISSET(outpipe[0], &readFileDescriptorSet))
 			{
-				bytes_out = read_into_buf(outpipe[0], outbuf);
+				bytes_out = read_into_buf(prog, outpipe[0], outbuf, false);
 
 				if (bytes_out == -1 && errno != 0)
 				{
@@ -505,7 +513,7 @@ read_from_pipes(Program *prog, pid_t childPid, int *outpipe, int *errpipe)
 
 			if (FD_ISSET(errpipe[0], &readFileDescriptorSet))
 			{
-				bytes_err = read_into_buf(errpipe[0], errbuf);
+				bytes_err = read_into_buf(prog, errpipe[0], errbuf, true);
 
 				if (bytes_err == -1 && errno != 0)
 				{
@@ -568,7 +576,7 @@ waitprogram(Program *prog, pid_t childPid)
  * Read from a file descriptor and directly appends to our buffer string.
  */
 static size_t
-read_into_buf(int filedes, PQExpBuffer buffer)
+read_into_buf(Program *prog, int filedes, PQExpBuffer buffer, bool error)
 {
 	char temp_buffer[BUFSIZE] = { 0 };
 	size_t bytes = read(filedes, temp_buffer, BUFSIZE);
@@ -576,6 +584,11 @@ read_into_buf(int filedes, PQExpBuffer buffer)
 	if (bytes > 0)
 	{
 		appendPQExpBufferStr(buffer, temp_buffer);
+
+		if (prog->processBuffer)
+		{
+			(*prog->processBuffer)(temp_buffer, error);
+		}
 	}
 	return bytes;
 }

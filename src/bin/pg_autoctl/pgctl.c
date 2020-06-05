@@ -599,6 +599,12 @@ pg_basebackup(const char *pgdata,
 	NodeAddress *primaryNode = &(replicationSource->primaryNode);
 	char primaryConnInfo[MAXCONNINFO] = { 0 };
 
+	char *args[16];
+	int argsIndex = 0;
+
+	char command[BUFSIZE];
+	int commandSize = 0;
+
 	log_debug("mkdir -p \"%s\"", replicationSource->backupDir);
 	if (!ensure_empty_dir(replicationSource->backupDir, 0700))
 	{
@@ -633,29 +639,45 @@ pg_basebackup(const char *pgdata,
 		return false;
 	}
 
-	log_info(" %s -w -d '%s' --pgdata %s -U %s "
-			 "--max-rate %s --wal-method=stream --slot %s",
-			 pg_basebackup,
-			 primaryConnInfo,
-			 replicationSource->backupDir,
-			 replicationSource->userName,
-			 replicationSource->maximumBackupRate,
-			 replicationSource->slotName);
+	args[argsIndex++] = (char *) pg_basebackup;
+	args[argsIndex++] = "-w";
+	args[argsIndex++] = "-d";
+	args[argsIndex++] = primaryConnInfo;
+	args[argsIndex++] = "--pgdata";
+	args[argsIndex++] = replicationSource->backupDir;
+	args[argsIndex++] = "-U";
+	args[argsIndex++] = replicationSource->userName;
+	args[argsIndex++] = "--verbose";
+	args[argsIndex++] = "--progress";
+	args[argsIndex++] = "--max-rate";
+	args[argsIndex++] = replicationSource->maximumBackupRate;
+	args[argsIndex++] = "--wal-method=stream";
+	args[argsIndex++] = "--slot";
+	args[argsIndex++] = replicationSource->slotName;
+	args[argsIndex] = NULL;
 
-	program = run_program(pg_basebackup,
-						  "-w",
-						  "-d", primaryConnInfo,
-						  "--pgdata", replicationSource->backupDir,
-						  "-U", replicationSource->userName,
-						  "--verbose",
-						  "--progress",
-						  "--max-rate", replicationSource->maximumBackupRate,
-						  "--wal-method=stream",
-						  "--slot", replicationSource->slotName,
-						  NULL);
+	/*
+	 * We do not want to call setsid() when running this program, as the
+	 * pg_basebackup subprogram is not intended to be its own session leader,
+	 * but remain a sub-process in the same group as pg_autoctl.
+	 */
+	program = initialize_program(args, false);
+	program.processBuffer = &processBufferCallback;
 
-	/* pg_basebackup uses stderr for all of its output */
-	(void) log_program_output(program, LOG_INFO, LOG_INFO);
+	/* log the exact command line we're using */
+	commandSize = snprintf_program_command_line(&program, command, BUFSIZE);
+
+	if (commandSize >= BUFSIZE)
+	{
+		/* we only display the first BUFSIZE bytes of the real command */
+		log_info("%s...", command);
+	}
+	else
+	{
+		log_info("%s", command);
+	}
+
+	(void) execute_subprogram(&program);
 
 	returnCode = program.returnCode;
 	free_program(&program);

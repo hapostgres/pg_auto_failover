@@ -443,3 +443,30 @@ splitLines(char *errorMessage, char **linesArray, int size)
 
 	return lineNumber;
 }
+
+
+/*
+ * processBufferCallback is a function callback to use with the subcommands.c
+ * library when we want to output a command's output as it's running, such as
+ * when running a pg_basebackup command.
+ */
+void
+processBufferCallback(const char *buffer, bool error)
+{
+	char *outLines[BUFSIZE] = { 0 };
+	int lineCount = splitLines((char *) buffer, outLines, BUFSIZE);
+	int lineNumber = 0;
+
+	for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
+	{
+		if (strneq(outLines[lineNumber], ""))
+		{
+			/*
+			 * pg_basebackup and other utilities write their progress output on
+			 * stderr, we don't want to have ERROR message when it's all good.
+			 * As a result we always target INFO log level here.
+			 */
+			log_info("%s", outLines[lineNumber]);
+		}
+	}
+}
