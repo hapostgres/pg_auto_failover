@@ -134,7 +134,7 @@ Program
 initialize_program(char **args, bool setsid)
 {
 	int argsIndex, nb_args = 0;
-	Program prog;
+	Program prog = { 0 };
 
 	prog.returnCode = -1;
 	prog.error = 0;
@@ -142,6 +142,7 @@ initialize_program(char **args, bool setsid)
 
 	/* this could be changed by the caller before calling execute_program */
 	prog.capture = true;
+	prog.processBuffer = NULL;
 	prog.stdOutFd = -1;
 	prog.stdErrFd = -1;
 
