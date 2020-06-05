@@ -29,34 +29,7 @@ Semaphore log_semaphore;        /* allows inter-process locking */
 
 
 static void set_logger(void);
-
-
-/*
- * set_logger creates our log semaphore, sets the logging utility aspects such
- * as using colors in an interactive terminal and the default log level.
- */
-static void
-set_logger()
-{
-	/* we're verbose by default */
-	log_set_level(LOG_INFO);
-
-	/*
-	 * Log messages go to stderr. We use colours when stderr is being shown
-	 * directly to the user to make it easier to spot warnings and errors.
-	 */
-	log_use_colors(isatty(fileno(stderr)));
-
-	/* initialise the semaphore used for locking log output */
-	if (!semaphore_init(&log_semaphore))
-	{
-		exit(EXIT_CODE_INTERNAL_ERROR);
-	}
-
-	/* set our logging facility to use our semaphore as a lock mechanism */
-	(void) log_set_udata(&log_semaphore);
-	(void) log_set_lock(&semaphore_log_lock_function);
-}
+static void log_semaphore_unlink_atexit(void);
 
 
 /*
@@ -72,6 +45,9 @@ main(int argc, char **argv)
 
 	/* set our logging infrastructure */
 	(void) set_logger();
+
+	/* register our logging clean-up atexit */
+	atexit(log_semaphore_unlink_atexit);
 
 	/*
 	 * When PG_AUTOCTL_DEBUG is set in the environment, provide the user
@@ -120,11 +96,43 @@ main(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!semaphore_finish(&log_semaphore))
+	return 0;
+}
+
+
+/*
+ * set_logger creates our log semaphore, sets the logging utility aspects such
+ * as using colors in an interactive terminal and the default log level.
+ */
+static void
+set_logger()
+{
+	/* we're verbose by default */
+	log_set_level(LOG_INFO);
+
+	/*
+	 * Log messages go to stderr. We use colours when stderr is being shown
+	 * directly to the user to make it easier to spot warnings and errors.
+	 */
+	log_use_colors(isatty(fileno(stderr)));
+
+	/* initialise the semaphore used for locking log output */
+	if (!semaphore_init(&log_semaphore))
 	{
-		/* error have already been logged */
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
-	return 0;
+	/* set our logging facility to use our semaphore as a lock mechanism */
+	(void) log_set_udata(&log_semaphore);
+	(void) log_set_lock(&semaphore_log_lock_function);
+}
+
+
+/*
+ * log_semaphore_unlink_atexit calls semaphore_unlink() atexit.
+ */
+static void
+log_semaphore_unlink_atexit(void)
+{
+	(void) semaphore_finish(&log_semaphore);
 }

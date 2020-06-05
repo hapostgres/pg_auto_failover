@@ -92,6 +92,9 @@ semaphore_create(Semaphore *semaphore)
 		return false;
 	}
 
+	/* to see this log line, change the default log level in set_logger() */
+	log_trace("Created semaphore %d", semaphore->semId);
+
 	semun.val = 1;
 	if (semctl(semaphore->semId, 0, SETVAL, semun) < 0)
 	{
@@ -132,6 +135,9 @@ semaphore_open(Semaphore *semaphore)
 		return false;
 	}
 
+	/* to see this log line, change the default log level in set_logger() */
+	log_trace("Using semaphore %d", semaphore->semId);
+
 	/* we have the semaphore identifier, no need to call semget(2), done */
 	return true;
 }
@@ -146,6 +152,8 @@ semaphore_unlink(Semaphore *semaphore)
 	union semun semun;
 
 	semun.val = 0;              /* unused, but keep compiler quiet */
+
+	log_trace("ipcrm -s %d\n", semaphore->semId);
 
 	if (semctl(semaphore->semId, 0, IPC_RMID, semun) < 0)
 	{
@@ -197,6 +205,8 @@ semaphore_cleanup(const char *pidfile)
 		return false;
 	}
 
+	log_trace("Read semaphore id %d from stale pidfile", semaphore.semId);
+
 	return semaphore_unlink(&semaphore);
 }
 
@@ -231,7 +241,8 @@ semaphore_lock(Semaphore *semaphore)
 	if (errStatus < 0)
 	{
 		fformat(stderr,
-				"Failed to acquire a lock with semaphore %d: %m\n",
+				"%d Failed to acquire a lock with semaphore %d: %m\n",
+				getpid(),
 				semaphore->semId);
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
