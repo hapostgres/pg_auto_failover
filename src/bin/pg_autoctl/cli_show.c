@@ -1221,17 +1221,17 @@ cli_show_file(int argc, char **argv)
 			}
 			else
 			{
-				fformat(stdout, "%6s | %s\n", "File", "Path");
-				fformat(stdout, "%6s-+-%15s\n", "------", "---------------");
+				fformat(stdout, "%7s | %s\n", "File", "Path");
+				fformat(stdout, "%7s-+-%15s\n", "-------", "---------------");
 
-				fformat(stdout, "%6s | %s\n", "Config", config.pathnames.config);
+				fformat(stdout, "%7s | %s\n", "Config", config.pathnames.config);
 
 				if (role == PG_AUTOCTL_ROLE_KEEPER)
 				{
-					fformat(stdout, "%6s | %s\n", "State", config.pathnames.state);
-					fformat(stdout, "%6s | %s\n", "Init", config.pathnames.init);
+					fformat(stdout, "%7s | %s\n", "State", config.pathnames.state);
+					fformat(stdout, "%7s | %s\n", "Init", config.pathnames.init);
 				}
-				fformat(stdout, "%6s | %s\n", "Pid", config.pathnames.pid);
+				fformat(stdout, "%7s | %s\n", "Pid", config.pathnames.pid);
 				fformat(stdout, "\n");
 			}
 			break;
