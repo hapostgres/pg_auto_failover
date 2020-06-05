@@ -57,6 +57,8 @@ static void print_all_uri(SSLOptions *ssl,
 						  Monitor *monitor,
 						  FILE *stream);
 
+static void fprint_pidfile_as_json(const char *pidfile);
+
 CommandLine show_uri_command =
 	make_command("uri",
 				 "Show the postgres uri to use to connect to pg_auto_failover nodes",
@@ -991,6 +993,7 @@ cli_show_file_getopts(int argc, char **argv)
 		{ "init", no_argument, NULL, 'i' },
 		{ "pid", no_argument, NULL, 'p' },
 		{ "contents", no_argument, NULL, 'C' },
+		{ "json", no_argument, NULL, 'J' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
@@ -1090,6 +1093,13 @@ cli_show_file_getopts(int argc, char **argv)
 				break;
 			}
 
+			case 'J':
+			{
+				outputJSON = true;
+				log_trace("--json");
+				break;
+			}
+
 			case 'V':
 			{
 				/* keeper_cli_print_version prints version and exits. */
@@ -1186,27 +1196,44 @@ cli_show_file(int argc, char **argv)
 	{
 		case SHOW_FILE_ALL:
 		{
-			char *serialized_string = NULL;
-			JSON_Value *js = json_value_init_object();
-			JSON_Object *root = json_value_get_object(js);
-
-			json_object_set_string(root, "config", config.pathnames.config);
-
-			if (role == PG_AUTOCTL_ROLE_KEEPER)
+			if (outputJSON)
 			{
-				json_object_set_string(root, "state", config.pathnames.state);
-				json_object_set_string(root, "init", config.pathnames.init);
+				char *serialized_string = NULL;
+				JSON_Value *js = json_value_init_object();
+				JSON_Object *root = json_value_get_object(js);
+
+				json_object_set_string(root, "config", config.pathnames.config);
+
+				if (role == PG_AUTOCTL_ROLE_KEEPER)
+				{
+					json_object_set_string(root, "state", config.pathnames.state);
+					json_object_set_string(root, "init", config.pathnames.init);
+				}
+
+				json_object_set_string(root, "pid", config.pathnames.pid);
+
+				serialized_string = json_serialize_to_string_pretty(js);
+
+				fformat(stdout, "%s\n", serialized_string);
+
+				json_free_serialized_string(serialized_string);
+				json_value_free(js);
 			}
+			else
+			{
+				fformat(stdout, "%6s | %s\n", "File", "Path");
+				fformat(stdout, "%6s-+-%15s\n", "------", "---------------");
 
-			json_object_set_string(root, "pid", config.pathnames.pid);
+				fformat(stdout, "%6s | %s\n", "Config", config.pathnames.config);
 
-			serialized_string = json_serialize_to_string_pretty(js);
-
-			fformat(stdout, "%s\n", serialized_string);
-
-			json_free_serialized_string(serialized_string);
-			json_value_free(js);
-
+				if (role == PG_AUTOCTL_ROLE_KEEPER)
+				{
+					fformat(stdout, "%6s | %s\n", "State", config.pathnames.state);
+					fformat(stdout, "%6s | %s\n", "Init", config.pathnames.init);
+				}
+				fformat(stdout, "%6s | %s\n", "Pid", config.pathnames.pid);
+				fformat(stdout, "\n");
+			}
 			break;
 		}
 
@@ -1214,7 +1241,69 @@ cli_show_file(int argc, char **argv)
 		{
 			if (showFileOptions.showFileContents)
 			{
-				if (!fprint_file_contents(config.pathnames.config))
+				if (outputJSON)
+				{
+					JSON_Value *js = json_value_init_object();
+
+					const bool missingPgdataIsOk = true;
+					const bool pgIsNotRunningIsOk = true;
+					bool monitorDisabledIsOk = true;
+
+					switch (role)
+					{
+						case PG_AUTOCTL_ROLE_MONITOR:
+						{
+							MonitorConfig mconfig = { 0 };
+
+							mconfig.pathnames = config.pathnames;
+
+							if (!monitor_config_read_file(&mconfig,
+														  missingPgdataIsOk,
+														  pgIsNotRunningIsOk))
+							{
+								/* errors have already been logged */
+								exit(EXIT_CODE_BAD_CONFIG);
+							}
+
+							if (!monitor_config_to_json(&mconfig, js))
+							{
+								log_fatal(
+									"Failed to serialize configuration to JSON");
+								exit(EXIT_CODE_BAD_CONFIG);
+							}
+							break;
+						}
+
+						case PG_AUTOCTL_ROLE_KEEPER:
+						{
+							if (!keeper_config_read_file(&config,
+														 missingPgdataIsOk,
+														 pgIsNotRunningIsOk,
+														 monitorDisabledIsOk))
+							{
+								exit(EXIT_CODE_BAD_CONFIG);
+							}
+
+							if (!keeper_config_to_json(&config, js))
+							{
+								log_fatal(
+									"Failed to serialize configuration to JSON");
+								exit(EXIT_CODE_BAD_CONFIG);
+							}
+							break;
+						}
+
+						case PG_AUTOCTL_ROLE_UNKNOWN:
+						{
+							log_fatal("Unknown node role %d", role);
+							exit(EXIT_CODE_BAD_CONFIG);
+						}
+					}
+
+					/* we have the config as a JSON object, print it out now */
+					(void) cli_pprint_json(js);
+				}
+				else if (!fprint_file_contents(config.pathnames.config))
 				{
 					/* errors have already been logged */
 					exit(EXIT_CODE_BAD_CONFIG);
@@ -1241,7 +1330,17 @@ cli_show_file(int argc, char **argv)
 
 				if (keeper_state_read(&keeperState, config.pathnames.state))
 				{
-					(void) print_keeper_state(&keeperState, stdout);
+					if (outputJSON)
+					{
+						JSON_Value *js = json_value_init_object();
+
+						keeperStateAsJSON(&keeperState, js);
+						(void) cli_pprint_json(js);
+					}
+					else
+					{
+						(void) print_keeper_state(&keeperState, stdout);
+					}
 				}
 				else
 				{
@@ -1294,10 +1393,17 @@ cli_show_file(int argc, char **argv)
 		{
 			if (showFileOptions.showFileContents)
 			{
-				if (!fprint_file_contents(config.pathnames.pid))
+				if (outputJSON)
 				{
-					/* errors have already been logged */
-					exit(EXIT_CODE_INTERNAL_ERROR);
+					(void) fprint_pidfile_as_json(config.pathnames.pid);
+				}
+				else
+				{
+					if (!fprint_file_contents(config.pathnames.pid))
+					{
+						/* errors have already been logged */
+						exit(EXIT_CODE_INTERNAL_ERROR);
+					}
 				}
 			}
 			else
@@ -1337,4 +1443,82 @@ fprint_file_contents(const char *filename)
 		/* errors have already been logged */
 		return false;
 	}
+}
+
+
+/*
+ * fprint_pidfile_as_json prints the content of the pidfile as JSON.
+ */
+static void
+fprint_pidfile_as_json(const char *pidfile)
+{
+	JSON_Value *js = json_value_init_object();
+	JSON_Value *jsServices = json_value_init_object();
+
+	JSON_Object *jsobj = json_value_get_object(js);
+	JSON_Object *jsServicesObj = json_value_get_object(jsServices);
+
+	long fileSize = 0L;
+	char *fileContents = NULL;
+	char *fileLines[BUFSIZE] = { 0 };
+	int lineCount = 0;
+	int lineNumber;
+
+	if (!file_exists(pidfile))
+	{
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	if (!read_file(pidfile, &fileContents, &fileSize))
+	{
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	lineCount = splitLines(fileContents, fileLines, BUFSIZE);
+
+	for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
+	{
+		char *separator = NULL;
+
+		/* main pid */
+		if (lineNumber == 0)
+		{
+			int pidnum = 0;
+			stringToInt(fileLines[0], &pidnum);
+			json_object_set_number(jsobj, "pid", (double) pidnum);
+
+			continue;
+		}
+
+		/* semId */
+		if (lineNumber == 1)
+		{
+			int semId = 0;
+			stringToInt(fileLines[1], &semId);
+			json_object_set_number(jsobj, "semId", (double) semId);
+
+			continue;
+		}
+
+		if ((separator = strchr(fileLines[lineNumber], ' ')) == NULL)
+		{
+			log_debug("Failed to find a space separator in line: \"%s\"",
+					  fileLines[lineNumber]);
+			continue;
+		}
+		else
+		{
+			int pidnum = 0;
+			char *serviceName = separator + 1;
+
+			*separator = '\0';
+			stringToInt(fileLines[lineNumber], &pidnum);
+
+			json_object_set_number(jsServicesObj, serviceName, pidnum);
+		}
+	}
+
+	json_object_set_value(jsobj, "services", jsServices);
+
+	(void) cli_pprint_json(js);
 }
