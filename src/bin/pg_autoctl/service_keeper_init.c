@@ -102,11 +102,22 @@ service_keeper_init_start(void *context, pid_t *pid)
 
 		case 0:
 		{
+			/*
+			 * We are in a sub-process and didn't call exec() on our pg_autoctl
+			 * do service listener program yet we do not want to clean-up the
+			 * semaphore just yet. Publish that we are a sub-process and only
+			 * then quit, avoiding to call the atexit() semaphore clean-up
+			 * function.
+			 */
+			IntString semIdString = intToString(log_semaphore.semId);
+
 			const char *serviceName = createAndRun ?
 									  "pg_autoctl: node active" :
 									  "pg_autoctl: node installer";
 
 			(void) set_ps_title(serviceName);
+
+			setenv(PG_AUTOCTL_LOG_SEMAPHORE, semIdString.strValue, 1);
 
 			if (!keeper_pg_init_and_register(keeper))
 			{
