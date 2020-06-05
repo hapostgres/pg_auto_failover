@@ -776,9 +776,7 @@ class DataNode(PGNode):
         command = PGAutoCtl(self)
         out, err, ret = command.execute("get node id", 'do', 'fsm', 'state')
 
-        print(out)
         self.state = json.loads(out)
-        print(self.state)
         return self.state['state']['nodeId']
 
     def destroy(self):
