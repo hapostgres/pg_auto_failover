@@ -658,8 +658,8 @@ pg_basebackup(const char *pgdata,
 
 	/*
 	 * We do not want to call setsid() when running this program, as the
-	 * postgres subprogram is not intended to be its own session leader, but
-	 * remain a sub-process in the same group as pg_autoctl.
+	 * pg_basebackup subprogram is not intended to be its own session leader,
+	 * but remain a sub-process in the same group as pg_autoctl.
 	 */
 	program = initialize_program(args, false);
 	program.processBuffer = &processBufferCallback;
