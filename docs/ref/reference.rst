@@ -118,16 +118,16 @@ commands are dealing with the monitor:
      provided, a default value is computed by running the following
      algorithm:
 
-       1. Open a connection to the 8.8.8.8:53 public service and looks the
+       1. Open a connection to the 8.8.8.8:53 public service and looks up the
           TCP/IP client address that has been used to make that connection.
 
        2. Do a reverse DNS lookup on this IP address to fetch a hostname for
           our local machine.
 
-       3. If the reverse DNS lookup is successfull , then `pg_autoctl` does
+       3. If the reverse DNS lookup is successful , then `pg_autoctl` does
           with a forward DNS lookup of that hostname.
 
-     When the forward DNS lookup repsonse in step 3. is an IP address found
+     When the forward DNS lookup response in step 3. is an IP address found
      in one of our local network interfaces, then `pg_autoctl` uses the
      hostname found in step 2. as the default `--nodename`. Otherwise it
      uses the IP address found in step 1.
@@ -356,7 +356,7 @@ corresponding to as many implementation strategies.
      The monitor answers to the registration call with a state to assign to
      the new member of the group, either *SINGLE* or *WAIT_STANDBY*. When
      the assigned state is *SINGLE*, then ``pg_autoctl create postgres``
-     procedes to initialize a new PostgreSQL instance.
+     proceedes to initialize a new PostgreSQL instance.
 
   2. Initialize an already existing primary server
 
@@ -381,7 +381,7 @@ corresponding to as many implementation strategies.
      states of registering a secondary server, which includes preparing the
      primary server PostgreSQL HBA rules and creating a replication slot.
 
-     When the command ends succesfully, a PostgreSQL secondary server has
+     When the command ends successfully, a PostgreSQL secondary server has
      been created with ``pg_basebackup`` and is now started, catching-up to
      the primary server.
 

@@ -155,16 +155,16 @@ Once the building and installation is done, follow those steps:
          To determine your nodename `pg_autoctl` implements the following
          three steps:
 
-           1. open a connection to the monitor and looks the TCP/IP client
+           1. open a connection to the monitor and looks up the TCP/IP client
               address that has been used to make that connection.
 
            2. Do a reverse DNS lookup on this IP address to fetch a
               hostname for our local machine.
 
-           3. If the reverse DNS lookup is successfull , then `pg_autoctl`
+           3. If the reverse DNS lookup is successful, then `pg_autoctl`
               does with a forward DNS lookup of that hostname.
 
-         When the forward DNS lookup repsonse in step 3. is an IP address
+         When the forward DNS lookup response in step 3. is an IP address
          found in one of our local network interfaces, then `pg_autoctl`
          uses the hostname found in step 2. as the default `--nodename`.
          Otherwise it uses the IP address found in step 1.

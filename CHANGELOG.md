@@ -36,7 +36,7 @@
 * Feature add perform destroy command, and -destroy option to drop node command #141
 * Feature support debian/ubuntu style PostgreSQLclusters #135
 * Feature add files option to show command
-* Feature add --run option to create commmand #110
+* Feature add --run option to create command #110
 * Feature add --json option to all commands for json output #106
 * Feature report current LSN of Postgres nodes rather than WAL lag. (#53)
 
