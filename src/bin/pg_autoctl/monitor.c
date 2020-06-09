@@ -3022,9 +3022,7 @@ monitor_wait_until_new_primary(Monitor *monitor,
 			StateNotification notification = { 0 };
 
 			uint64_t now = time(NULL);
-			time_t t = time(NULL);
-			struct tm *lt;
-			char time[16];
+			char timestring[MAXCTIMESIZE];
 
 			if ((now - start) > PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT)
 			{
@@ -3058,12 +3056,14 @@ monitor_wait_until_new_primary(Monitor *monitor,
 				continue;
 			}
 
-			/* same as in src/bin/lib/log/src/log.c */
-			lt = localtime(&t);
-			time[strftime(time, sizeof(time), "%H:%M:%S", lt)] = '\0';
+			/* format the current time to be user-friendly */
+			epoch_to_string(now, timestring);
+
+			/* "Wed Jun 30 21:49:08 1993" -> "21:49:08" */
+			timestring[11 + 8] = '\0';
 
 			fformat(stdout, "%8s | %3d | %*s | %6d | %18s | %18s\n",
-					time,
+					timestring + 11,
 					notification.nodeId, maxNodeNameSize,
 					notification.nodeName,
 					notification.nodePort,
