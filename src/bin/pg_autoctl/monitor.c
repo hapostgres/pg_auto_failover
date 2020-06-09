@@ -72,6 +72,10 @@ typedef struct MonitorExtensionVersionParseContext
 	bool parsedOK;
 } MonitorExtensionVersionParseContext;
 
+static int MaxNodeNameSizeInNodesArray(NodeAddressArray *nodesArray);
+static void prepareNodeNameSeparator(char nameSeparatorHeader[],
+									 int maxNodeNameSize);
+
 static bool parseNode(PGresult *result, int rowNumber, NodeAddress *node);
 static void parseNodeResult(void *ctx, PGresult *result);
 static void parseNodeArray(void *ctx, PGresult *result);
@@ -166,9 +170,6 @@ monitor_get_nodes(Monitor *monitor, char *formation, int groupId,
 				  sql, formation, groupId);
 		return false;
 	}
-
-	/* disconnect from PostgreSQL now */
-	pgsql_finish(&monitor->pgsql);
 
 	if (!parseContext.parsedOK)
 	{
@@ -1217,6 +1218,52 @@ parseNodeArray(void *ctx, PGresult *result)
 
 
 /*
+ * MaxNodeNameSizeInNodesArray returns the greatest node name length in the
+ * given array of nodes.
+ */
+static int
+MaxNodeNameSizeInNodesArray(NodeAddressArray *nodesArray)
+{
+	int maxNodeNameSize = 0;
+	int i = 0;
+
+	for (i = 0; i < nodesArray->count; i++)
+	{
+		NodeAddress node = nodesArray->nodes[i];
+
+		if (strlen(node.host) > maxNodeNameSize)
+		{
+			maxNodeNameSize = strlen(node.host);
+		}
+	}
+
+	return maxNodeNameSize;
+}
+
+
+/*
+ * prepareNodeNameSeparator fills in the pre-allocated given string with the
+ * expected amount of dashes to use as a separator line in our tabular output.
+ */
+static void
+prepareNodeNameSeparator(char nameSeparatorHeader[], int maxNodeNameSize)
+{
+	for (int i = 0; i <= maxNodeNameSize; i++)
+	{
+		if (i < maxNodeNameSize)
+		{
+			nameSeparatorHeader[i] = '-';
+		}
+		else
+		{
+			nameSeparatorHeader[i] = '\0';
+			break;
+		}
+	}
+}
+
+
+/*
  * printCurrentState loops over pgautofailover.current_state() results and prints
  * them, one per line.
  */
@@ -1230,15 +1277,7 @@ printNodeArray(NodeAddressArray *nodesArray)
 	 * Dynamically adjust our display output to the length of the longer
 	 * nodename in the result set
 	 */
-	for (nodesArrayIndex = 0; nodesArrayIndex < nodesArray->count; nodesArrayIndex++)
-	{
-		NodeAddress node = nodesArray->nodes[nodesArrayIndex];
-
-		if (strlen(node.host) > maxNodeNameSize)
-		{
-			maxNodeNameSize = strlen(node.host);
-		}
-	}
+	maxNodeNameSize = MaxNodeNameSizeInNodesArray(nodesArray);
 
 	(void) printNodeHeader(maxNodeNameSize);
 
@@ -1261,19 +1300,7 @@ printNodeHeader(int maxNodeNameSize)
 {
 	char nameSeparatorHeader[BUFSIZE] = { 0 };
 
-	/* prepare a nice dynamic string of '-' as a header separator */
-	for (int i = 0; i <= maxNodeNameSize; i++)
-	{
-		if (i < maxNodeNameSize)
-		{
-			nameSeparatorHeader[i] = '-';
-		}
-		else
-		{
-			nameSeparatorHeader[i] = '\0';
-			break;
-		}
-	}
+	(void) prepareNodeNameSeparator(nameSeparatorHeader, maxNodeNameSize);
 
 	fformat(stdout, "%3s | %*s | %6s | %18s | %8s\n",
 			"ID", maxNodeNameSize, "Host", "Port", "LSN", "Primary?");
@@ -2906,12 +2933,18 @@ monitor_wait_until_node_reported_state(Monitor *monitor,
  * useful for its user, the main one being the test suite.
  */
 bool
-monitor_wait_until_new_primary(Monitor *monitor, const char *formation)
+monitor_wait_until_new_primary(Monitor *monitor,
+							   const char *formation,
+							   int groupId)
 {
 	PGconn *connection = monitor->pgsql.connection;
+	NodeAddressArray nodesArray = { 0 };
 	bool failoverIsDone = false;
 
 	uint64_t start = time(NULL);
+
+	int maxNodeNameSize = 5;    /* strlen("Name") + 1, the header */
+	char nameSeparatorHeader[BUFSIZE] = { 0 };
 
 	if (connection == NULL)
 	{
@@ -2919,7 +2952,31 @@ monitor_wait_until_new_primary(Monitor *monitor, const char *formation)
 		return false;
 	}
 
-	log_info("Waiting for a new primary node");
+	log_info("Listening monitor notifications about state changes "
+			 "in formation \"%s\" and group %d",
+			 formation, groupId);
+	log_info("Following table displays times when notifications are received");
+
+	if (!monitor_get_nodes(monitor,
+						   (char *) formation,
+						   groupId,
+						   &nodesArray))
+	{
+		/* ignore the error, use an educated guess for the max size */
+		log_warn("Failed to get_nodes() on the monitor");
+		maxNodeNameSize = 25;
+	}
+
+	maxNodeNameSize = MaxNodeNameSizeInNodesArray(&nodesArray);
+	(void) prepareNodeNameSeparator(nameSeparatorHeader, maxNodeNameSize);
+
+	fformat(stdout, "%8s | %3s | %*s | %6s | %18s | %18s\n",
+			"Time", "ID", maxNodeNameSize, "Host", "Port",
+			"Current State", "Assigned State");
+
+	fformat(stdout, "%8s-+-%3s-+-%*s-+-%6s-+-%18s-+-%18s\n",
+			"--------", "---", maxNodeNameSize, nameSeparatorHeader,
+			"------", "------------------", "------------------");
 
 	while (!failoverIsDone)
 	{
@@ -2932,8 +2989,7 @@ monitor_wait_until_new_primary(Monitor *monitor, const char *formation)
 
 		if ((now - start) > PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT)
 		{
-			log_error("Failed to receive monitor's notifications that the "
-					  "settings have been applied");
+			log_error("Failed to receive monitor's notifications");
 			break;
 		}
 
@@ -2947,6 +3003,7 @@ monitor_wait_until_new_primary(Monitor *monitor, const char *formation)
 
 		if (sock < 0)
 		{
+			log_error("Failed to get the connection socket with PQsocket()");
 			return false;   /* shouldn't happen */
 		}
 		FD_ZERO(&input_mask);
@@ -2965,6 +3022,9 @@ monitor_wait_until_new_primary(Monitor *monitor, const char *formation)
 			StateNotification notification = { 0 };
 
 			uint64_t now = time(NULL);
+			time_t t = time(NULL);
+			struct tm *lt;
+			char time[16];
 
 			if ((now - start) > PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT)
 			{
@@ -2992,24 +3052,28 @@ monitor_wait_until_new_primary(Monitor *monitor, const char *formation)
 			}
 
 			/* filter notifications for our own formation */
-			if (strcmp(notification.formationId, formation) != 0)
+			if (strcmp(notification.formationId, formation) != 0 ||
+				notification.groupId != groupId)
 			{
 				continue;
 			}
 
-			/* log a message for every new state we are notified about */
-			log_info("New state for %s:%d in formation \"%s\": %s/%s",
-					 notification.nodeName,
-					 notification.nodePort,
-					 notification.formationId,
-					 NodeStateToString(notification.reportedState),
-					 NodeStateToString(notification.goalState));
+			/* same as in src/bin/lib/log/src/log.c */
+			lt = localtime(&t);
+			time[strftime(time, sizeof(time), "%H:%M:%S", lt)] = '\0';
+
+			fformat(stdout, "%8s | %3d | %*s | %6d | %18s | %18s\n",
+					time,
+					notification.nodeId, maxNodeNameSize,
+					notification.nodeName,
+					notification.nodePort,
+					NodeStateToString(notification.reportedState),
+					NodeStateToString(notification.goalState));
 
 			if (notification.goalState == PRIMARY_STATE &&
 				notification.reportedState == PRIMARY_STATE)
 			{
 				failoverIsDone = true;
-				log_info("Failover has been performed successfully");
 				break;
 			}
 
