@@ -108,6 +108,7 @@ bool monitor_set_formation_number_sync_standbys(Monitor *monitor, char *formatio
 												int numberSyncStandbys);
 
 bool monitor_remove(Monitor *monitor, char *host, int port);
+bool monitor_count_groups(Monitor *monitor, char *formation, int *groupsCount);
 bool monitor_perform_failover(Monitor *monitor, char *formation, int group);
 
 bool monitor_print_state(Monitor *monitor, char *formation, int group);

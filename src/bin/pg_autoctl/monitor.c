@@ -1020,6 +1020,38 @@ monitor_remove(Monitor *monitor, char *host, int port)
 
 
 /*
+ * monitor_count_groups counts how many groups we have in this formation, and
+ * sets the obtained value in the groupsCount parameter.
+ */
+bool
+monitor_count_groups(Monitor *monitor, char *formation, int *groupsCount)
+{
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_INT, false };
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT count(distinct(groupid)) "
+		"FROM pgautofailover.node "
+		"WHERE formationid = $1";
+	int paramCount = 1;
+	Oid paramTypes[1] = { TEXTOID };
+	const char *paramValues[1] = { formation };
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &parseSingleValueResult))
+	{
+		log_error("Failed to get how many groups are in formation %s",
+				  formation);
+		return false;
+	}
+
+	*groupsCount = context.intVal;
+
+	return true;
+}
+
+
+/*
  * monitor_perform_failover calls the pgautofailover.monitor_perform_failover
  * function on the monitor.
  */
