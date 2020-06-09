@@ -4,8 +4,77 @@
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
 -- \echo Use "ALTER EXTENSION pgautofailover UPDATE TO 1.3" to load this file. \quit
 
-ALTER TYPE pgautofailover.replication_state ADD VALUE 'join_primary';
-ALTER TYPE pgautofailover.replication_state ADD VALUE 'apply_settings';
+--- The following only works in Postgres 12 onward
+-- ALTER TYPE pgautofailover.replication_state ADD VALUE 'join_primary';
+-- ALTER TYPE pgautofailover.replication_state ADD VALUE 'apply_settings';
+
+
+DROP FUNCTION IF EXISTS pgautofailover.register_node(text,text,integer,name,integer,pgautofailover.replication_state,text);
+
+DROP FUNCTION IF EXISTS pgautofailover.node_active(text,text,int,int,int,
+                          pgautofailover.replication_state,bool,pg_lsn,text);
+
+DROP FUNCTION IF EXISTS pgautofailover.current_state(text);
+
+DROP FUNCTION IF EXISTS pgautofailover.current_state(text, int);
+
+
+ALTER TABLE pgautofailover.node
+      ALTER COLUMN goalstate TYPE text,
+      ALTER COLUMN goalstate DROP NOT NULL,
+      ALTER COLUMN goalstate DROP DEFAULT,
+      ALTER COLUMN reportedstate TYPE text;
+
+ALTER TABLE pgautofailover.event
+      ALTER COLUMN goalstate TYPE text,
+      ALTER COLUMN reportedstate TYPE text;
+
+DROP TYPE IF EXISTS pgautofailover.replication_state;
+
+CREATE TYPE pgautofailover.replication_state
+    AS ENUM
+ (
+    'unknown',
+    'init',
+    'single',
+    'wait_primary',
+    'primary',
+    'draining',
+    'demote_timeout',
+    'demoted',
+    'catchingup',
+    'secondary',
+    'prepare_promotion',
+    'stop_replication',
+    'wait_standby',
+    'maintenance',
+    'join_primary',
+    'apply_settings'
+ );
+
+ALTER TABLE pgautofailover.node
+
+      ALTER COLUMN goalstate
+              TYPE pgautofailover.replication_state
+             USING goalstate::pgautofailover.replication_state,
+
+      ALTER COLUMN goalstate SET DEFAULT 'init',
+
+      ALTER COLUMN goalstate SET NOT NULL,
+
+      ALTER COLUMN reportedstate
+              TYPE pgautofailover.replication_state
+             USING goalstate::pgautofailover.replication_state;
+
+ALTER TABLE pgautofailover.event
+
+      ALTER COLUMN goalstate
+              TYPE pgautofailover.replication_state
+             USING goalstate::pgautofailover.replication_state,
+
+      ALTER COLUMN reportedstate
+              TYPE pgautofailover.replication_state
+             USING goalstate::pgautofailover.replication_state;
 
 ALTER TABLE pgautofailover.formation
  ADD COLUMN number_sync_standbys int  NOT NULL DEFAULT 1;
@@ -14,7 +83,6 @@ DROP FUNCTION IF EXISTS pgautofailover.create_formation(text, text);
 
 DROP FUNCTION IF EXISTS pgautofailover.create_formation(text,text,name,boolean);
 DROP FUNCTION IF EXISTS pgautofailover.get_other_node(text,integer);
-DROP FUNCTION IF EXISTS pgautofailover.register_node(text,text,integer,name,integer,pgautofailover.replication_state,text);
 
 CREATE FUNCTION pgautofailover.set_formation_number_sync_standbys
  (
@@ -179,8 +247,6 @@ grant execute on function
       pgautofailover.register_node(text,text,int,name,int,pgautofailover.replication_state,text, int, bool)
    to autoctl_node;
 
-DROP FUNCTION IF EXISTS pgautofailover.node_active(text,text,int,int,int,
-                          pgautofailover.replication_state,bool,pg_lsn,text);
 
 CREATE FUNCTION pgautofailover.node_active
  (
@@ -371,7 +437,6 @@ $$;
 comment on function pgautofailover.last_events(text,int,int)
         is 'retrieve last COUNT events for given formation and group';
 
-DROP FUNCTION IF EXISTS pgautofailover.current_state(text);
 
 CREATE FUNCTION pgautofailover.current_state
  (
@@ -396,8 +461,6 @@ $$;
 
 comment on function pgautofailover.current_state(text)
         is 'get the current state of both nodes of a formation';
-
-DROP FUNCTION IF EXISTS pgautofailover.current_state(text, int);
 
 CREATE FUNCTION pgautofailover.current_state
  (
