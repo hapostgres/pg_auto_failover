@@ -1079,9 +1079,6 @@ monitor_perform_failover(Monitor *monitor, char *formation, int group)
 		return false;
 	}
 
-	/* disconnect from PostgreSQL now */
-	pgsql_finish(&monitor->pgsql);
-
 	return true;
 }
 
@@ -2897,6 +2894,135 @@ monitor_wait_until_node_reported_state(Monitor *monitor,
 	pgsql_finish(&monitor->pgsql);
 
 	return reachedMaintenance;
+}
+
+
+/*
+ * monitor_wait_until_new_primary receives notifications and watches for a new
+ * node to be reported as a primary.
+ *
+ * If we lose the monitor connection while watching for the transition steps
+ * then we stop watching. It's a best effort attempt at having the CLI be
+ * useful for its user, the main one being the test suite.
+ */
+bool
+monitor_wait_until_new_primary(Monitor *monitor, const char *formation)
+{
+	PGconn *connection = monitor->pgsql.connection;
+	bool failoverIsDone = false;
+
+	uint64_t start = time(NULL);
+
+	if (connection == NULL)
+	{
+		log_warn("Lost connection.");
+		return false;
+	}
+
+	log_info("Waiting for a new primary node");
+
+	while (!failoverIsDone)
+	{
+		/* Sleep until something happens on the connection. */
+		int sock;
+		fd_set input_mask;
+		PGnotify *notify;
+
+		uint64_t now = time(NULL);
+
+		if ((now - start) > PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT)
+		{
+			log_error("Failed to receive monitor's notifications that the "
+					  "settings have been applied");
+			break;
+		}
+
+		/*
+		 * It looks like we are violating modularity of the code, when we are
+		 * following Postgres documentation and examples:
+		 *
+		 * https://www.postgresql.org/docs/current/libpq-example.html#LIBPQ-EXAMPLE-2
+		 */
+		sock = PQsocket(connection);
+
+		if (sock < 0)
+		{
+			return false;   /* shouldn't happen */
+		}
+		FD_ZERO(&input_mask);
+		FD_SET(sock, &input_mask);
+
+		if (select(sock + 1, &input_mask, NULL, NULL, NULL) < 0)
+		{
+			log_warn("select() failed: %m");
+			return false;
+		}
+
+		/* Now check for input */
+		PQconsumeInput(connection);
+		while ((notify = PQnotifies(connection)) != NULL)
+		{
+			StateNotification notification = { 0 };
+
+			uint64_t now = time(NULL);
+
+			if ((now - start) > PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT)
+			{
+				/* errors are handled in the main loop */
+				break;
+			}
+
+			if (strcmp(notify->relname, "state") != 0)
+			{
+				log_warn("%s: %s", notify->relname, notify->extra);
+				continue;
+			}
+
+			log_debug("received \"%s\"", notify->extra);
+
+			/* the parsing scribbles on the message, make a copy now */
+			strlcpy(notification.message, notify->extra, BUFSIZE);
+
+			/* errors are logged by parse_state_notification_message */
+			if (!parse_state_notification_message(&notification))
+			{
+				log_warn("Failed to parse notification message \"%s\"",
+						 notify->extra);
+				continue;
+			}
+
+			/* filter notifications for our own formation */
+			if (strcmp(notification.formationId, formation) != 0)
+			{
+				continue;
+			}
+
+			/* log a message for every new state we are notified about */
+			log_info("New state for %s:%d in formation \"%s\": %s/%s",
+					 notification.nodeName,
+					 notification.nodePort,
+					 notification.formationId,
+					 NodeStateToString(notification.reportedState),
+					 NodeStateToString(notification.goalState));
+
+			if (notification.goalState == PRIMARY_STATE &&
+				notification.reportedState == PRIMARY_STATE)
+			{
+				failoverIsDone = true;
+				log_info("Failover has been performed successfully");
+				break;
+			}
+
+			/* prepare next iteration */
+			PQfreemem(notify);
+			PQconsumeInput(connection);
+		}
+	}
+
+	/* disconnect from monitor */
+	pgsql_finish(&monitor->pgsql);
+
+	return true;
 }
 
 
