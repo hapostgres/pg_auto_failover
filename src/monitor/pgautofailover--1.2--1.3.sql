@@ -18,18 +18,7 @@ DROP FUNCTION IF EXISTS pgautofailover.current_state(text);
 
 DROP FUNCTION IF EXISTS pgautofailover.current_state(text, int);
 
-
-ALTER TABLE pgautofailover.node
-      ALTER COLUMN goalstate TYPE text,
-      ALTER COLUMN goalstate DROP NOT NULL,
-      ALTER COLUMN goalstate DROP DEFAULT,
-      ALTER COLUMN reportedstate TYPE text;
-
-ALTER TABLE pgautofailover.event
-      ALTER COLUMN goalstate TYPE text,
-      ALTER COLUMN reportedstate TYPE text;
-
-DROP TYPE IF EXISTS pgautofailover.replication_state;
+ALTER TYPE pgautofailover.replication_state RENAME TO old_replication_state;
 
 CREATE TYPE pgautofailover.replication_state
     AS ENUM
@@ -52,32 +41,33 @@ CREATE TYPE pgautofailover.replication_state
     'apply_settings'
  );
 
+-- Note the double cast here, first to text and only then to the new enums
 ALTER TABLE pgautofailover.node
+      ALTER COLUMN goalstate DROP NOT NULL,
+      ALTER COLUMN goalstate DROP DEFAULT,
 
       ALTER COLUMN goalstate
               TYPE pgautofailover.replication_state
-             USING goalstate::pgautofailover.replication_state,
+             USING goalstate::text::pgautofailover.replication_state,
 
       ALTER COLUMN goalstate SET DEFAULT 'init',
-
       ALTER COLUMN goalstate SET NOT NULL,
 
       ALTER COLUMN reportedstate
               TYPE pgautofailover.replication_state
-             USING goalstate::pgautofailover.replication_state;
+             USING reportedstate::text::pgautofailover.replication_state;
 
 ALTER TABLE pgautofailover.event
-
       ALTER COLUMN goalstate
               TYPE pgautofailover.replication_state
-             USING goalstate::pgautofailover.replication_state,
+             USING goalstate::text::pgautofailover.replication_state,
 
       ALTER COLUMN reportedstate
               TYPE pgautofailover.replication_state
-             USING goalstate::pgautofailover.replication_state;
+             USING reportedstate::text::pgautofailover.replication_state;
 
-ALTER TABLE pgautofailover.formation
- ADD COLUMN number_sync_standbys int  NOT NULL DEFAULT 1;
+DROP TYPE pgautofailover.old_replication_state;
+
 
 DROP FUNCTION IF EXISTS pgautofailover.create_formation(text, text);
 
