@@ -68,6 +68,8 @@ ALTER TABLE pgautofailover.event
 
 DROP TYPE pgautofailover.old_replication_state;
 
+ALTER TABLE pgautofailover.formation
+  ADD COLUMN number_sync_standbys int  NOT NULL DEFAULT 1;
 
 DROP FUNCTION IF EXISTS pgautofailover.create_formation(text, text);
 
