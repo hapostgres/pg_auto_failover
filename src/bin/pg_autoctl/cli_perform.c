@@ -200,6 +200,8 @@ cli_perform_failover(int argc, char **argv)
 	Monitor monitor = { 0 };
 	int groupsCount = 0;
 
+	char *channels[] = { "state", NULL };
+
 	if (!monitor_init_from_pgsetup(&monitor, &config.pgSetup))
 	{
 		/* errors have already been logged */
@@ -240,10 +242,26 @@ cli_perform_failover(int argc, char **argv)
 		}
 	}
 
+	/* start listening to the state changes before we call perform_failover */
+	if (!pgsql_listen(&(monitor.pgsql), channels))
+	{
+		log_error("Failed to listen to state changes from the monitor");
+		exit(EXIT_CODE_MONITOR);
+	}
+
 	if (!monitor_perform_failover(&monitor, config.formation, config.groupId))
 	{
 		log_fatal("Failed to perform failover/switchover, "
 				  "see above for details");
 		exit(EXIT_CODE_MONITOR);
+	}
+
+	/* process state changes notification until we have a new primary */
+	if (!monitor_wait_until_new_primary(&monitor,
+										config.formation,
+										config.groupId))
+	{
+		log_error("Failed to wait until a new primary has been notified");
+		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 }
