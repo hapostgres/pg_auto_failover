@@ -767,7 +767,10 @@ class DataNode(PGNode):
             self.pg_autoctl.execute("pg_autoctl create")
 
         # sometimes we might have holes in the nodeid sequence
-        self.nodeid = self.get_nodeid()
+        # grab the current nodeid, if it's already available
+        nodeid = self.get_nodeid()
+        if nodeid > 0:
+            self.nodeid = nodeid
 
     def get_nodeid(self):
         """
