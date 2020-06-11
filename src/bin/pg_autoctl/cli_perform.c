@@ -202,6 +202,13 @@ cli_perform_failover(int argc, char **argv)
 
 	char *channels[] = { "state", NULL };
 
+	if (!keeper_config_set_pathnames_from_pgdata(&config.pathnames,
+												 config.pgSetup.pgdata))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
 	if (!monitor_init_from_pgsetup(&monitor, &config.pgSetup))
 	{
 		/* errors have already been logged */
@@ -228,17 +235,46 @@ cli_perform_failover(int argc, char **argv)
 	 */
 	if (config.groupId == -1)
 	{
-		if (groupsCount == 1)
+		/*
+		 * When --group is not given and we have a keeper node, we can grab a
+		 * default from the configuration file.
+		 */
+		pgAutoCtlNodeRole role =
+			ProbeConfigurationFileRole(config.pathnames.config);
+
+		if (role == PG_AUTOCTL_ROLE_KEEPER)
 		{
-			/* we have only one group, it's group number zero, proceed */
-			config.groupId = 0;
+			const bool missingPgdataIsOk = true;
+			const bool pgIsNotRunningIsOk = true;
+			const bool monitorDisabledIsOk = false;
+
+			if (!keeper_config_read_file(&config,
+										 missingPgdataIsOk,
+										 pgIsNotRunningIsOk,
+										 monitorDisabledIsOk))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
+
+			log_info("Targetting group %d in formation \"%s\"",
+					 config.groupId,
+					 config.formation);
 		}
 		else
 		{
-			log_error("Please use the --group option to target a "
-					  "specific group in formation \"%s\"",
-					  config.formation);
-			exit(EXIT_CODE_BAD_ARGS);
+			if (groupsCount == 1)
+			{
+				/* we have only one group, it's group number zero, proceed */
+				config.groupId = 0;
+			}
+			else
+			{
+				log_error("Please use the --group option to target a "
+						  "specific group in formation \"%s\"",
+						  config.formation);
+				exit(EXIT_CODE_BAD_ARGS);
+			}
 		}
 	}
 
