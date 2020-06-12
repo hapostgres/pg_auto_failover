@@ -76,7 +76,7 @@ cli_perform_failover_getopts(int argc, char **argv)
 	};
 
 	/* set default values for our options, when we have some */
-	options.groupId = 0;
+	options.groupId = -1;
 	options.network_partition_timeout = -1;
 	options.prepare_promotion_catchup = -1;
 	options.prepare_promotion_walreceiver = -1;
@@ -198,6 +198,16 @@ cli_perform_failover(int argc, char **argv)
 {
 	KeeperConfig config = keeperOptions;
 	Monitor monitor = { 0 };
+	int groupsCount = 0;
+
+	char *channels[] = { "state", NULL };
+
+	if (!keeper_config_set_pathnames_from_pgdata(&config.pathnames,
+												 config.pgSetup.pgdata))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
 
 	if (!monitor_init_from_pgsetup(&monitor, &config.pgSetup))
 	{
@@ -205,9 +215,89 @@ cli_perform_failover(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!monitor_perform_failover(&monitor, config.formation, config.groupId))
+	if (!monitor_count_groups(&monitor, config.formation, &groupsCount))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_MONITOR);
+	}
+
+	if (groupsCount == 0)
+	{
+		/* nothing to be done here */
+		log_fatal("The monitor currently has no Postgres nodes registered");
+		exit(EXIT_CODE_BAD_STATE);
+	}
+
+	/*
+	 * When --group was not given, we may proceed when there is only one
+	 * possible target group in the formation, which is the case with Postgres
+	 * standalone setups.
+	 */
+	if (config.groupId == -1)
+	{
+		/*
+		 * When --group is not given and we have a keeper node, we can grab a
+		 * default from the configuration file.
+		 */
+		pgAutoCtlNodeRole role =
+			ProbeConfigurationFileRole(config.pathnames.config);
+
+		if (role == PG_AUTOCTL_ROLE_KEEPER)
+		{
+			const bool missingPgdataIsOk = true;
+			const bool pgIsNotRunningIsOk = true;
+			const bool monitorDisabledIsOk = false;
+
+			if (!keeper_config_read_file(&config,
+										 missingPgdataIsOk,
+										 pgIsNotRunningIsOk,
+										 monitorDisabledIsOk))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
+
+			log_info("Targetting group %d in formation \"%s\"",
+					 config.groupId,
+					 config.formation);
+		}
+		else
+		{
+			if (groupsCount == 1)
+			{
+				/* we have only one group, it's group number zero, proceed */
+				config.groupId = 0;
+			}
+			else
+			{
+				log_error("Please use the --group option to target a "
+						  "specific group in formation \"%s\"",
+						  config.formation);
+				exit(EXIT_CODE_BAD_ARGS);
+			}
+		}
+	}
+
+	/* start listening to the state changes before we call perform_failover */
+	if (!pgsql_listen(&(monitor.pgsql), channels))
+	{
+		log_error("Failed to listen to state changes from the monitor");
+		exit(EXIT_CODE_MONITOR);
+	}
+
+	if (!monitor_perform_failover(&monitor, config.formation, config.groupId))
+	{
+		log_fatal("Failed to perform failover/switchover, "
+				  "see above for details");
+		exit(EXIT_CODE_MONITOR);
+	}
+
+	/* process state changes notification until we have a new primary */
+	if (!monitor_wait_until_new_primary(&monitor,
+										config.formation,
+										config.groupId))
+	{
+		log_error("Failed to wait until a new primary has been notified");
+		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 }

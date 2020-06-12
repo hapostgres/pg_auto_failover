@@ -72,6 +72,10 @@ typedef struct MonitorExtensionVersionParseContext
 	bool parsedOK;
 } MonitorExtensionVersionParseContext;
 
+static int MaxNodeNameSizeInNodesArray(NodeAddressArray *nodesArray);
+static void prepareNodeNameSeparator(char nameSeparatorHeader[],
+									 int maxNodeNameSize);
+
 static bool parseNode(PGresult *result, int rowNumber, NodeAddress *node);
 static void parseNodeResult(void *ctx, PGresult *result);
 static void parseNodeArray(void *ctx, PGresult *result);
@@ -166,9 +170,6 @@ monitor_get_nodes(Monitor *monitor, char *formation, int groupId,
 				  sql, formation, groupId);
 		return false;
 	}
-
-	/* disconnect from PostgreSQL now */
-	pgsql_finish(&monitor->pgsql);
 
 	if (!parseContext.parsedOK)
 	{
@@ -1020,6 +1021,38 @@ monitor_remove(Monitor *monitor, char *host, int port)
 
 
 /*
+ * monitor_count_groups counts how many groups we have in this formation, and
+ * sets the obtained value in the groupsCount parameter.
+ */
+bool
+monitor_count_groups(Monitor *monitor, char *formation, int *groupsCount)
+{
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_INT, false };
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT count(distinct(groupid)) "
+		"FROM pgautofailover.node "
+		"WHERE formationid = $1";
+	int paramCount = 1;
+	Oid paramTypes[1] = { TEXTOID };
+	const char *paramValues[1] = { formation };
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &parseSingleValueResult))
+	{
+		log_error("Failed to get how many groups are in formation %s",
+				  formation);
+		return false;
+	}
+
+	*groupsCount = context.intVal;
+
+	return true;
+}
+
+
+/*
  * monitor_perform_failover calls the pgautofailover.monitor_perform_failover
  * function on the monitor.
  */
@@ -1046,9 +1079,6 @@ monitor_perform_failover(Monitor *monitor, char *formation, int group)
 				  formation, group);
 		return false;
 	}
-
-	/* disconnect from PostgreSQL now */
-	pgsql_finish(&monitor->pgsql);
 
 	return true;
 }
@@ -1188,6 +1218,52 @@ parseNodeArray(void *ctx, PGresult *result)
 
 
 /*
+ * MaxNodeNameSizeInNodesArray returns the greatest node name length in the
+ * given array of nodes.
+ */
+static int
+MaxNodeNameSizeInNodesArray(NodeAddressArray *nodesArray)
+{
+	int maxNodeNameSize = 0;
+	int i = 0;
+
+	for (i = 0; i < nodesArray->count; i++)
+	{
+		NodeAddress node = nodesArray->nodes[i];
+
+		if (strlen(node.host) > maxNodeNameSize)
+		{
+			maxNodeNameSize = strlen(node.host);
+		}
+	}
+
+	return maxNodeNameSize;
+}
+
+
+/*
+ * prepareNodeNameSeparator fills in the pre-allocated given string with the
+ * expected amount of dashes to use as a separator line in our tabular output.
+ */
+static void
+prepareNodeNameSeparator(char nameSeparatorHeader[], int maxNodeNameSize)
+{
+	for (int i = 0; i <= maxNodeNameSize; i++)
+	{
+		if (i < maxNodeNameSize)
+		{
+			nameSeparatorHeader[i] = '-';
+		}
+		else
+		{
+			nameSeparatorHeader[i] = '\0';
+			break;
+		}
+	}
+}
+
+
+/*
  * printCurrentState loops over pgautofailover.current_state() results and prints
  * them, one per line.
  */
@@ -1201,15 +1277,7 @@ printNodeArray(NodeAddressArray *nodesArray)
 	 * Dynamically adjust our display output to the length of the longer
 	 * nodename in the result set
 	 */
-	for (nodesArrayIndex = 0; nodesArrayIndex < nodesArray->count; nodesArrayIndex++)
-	{
-		NodeAddress node = nodesArray->nodes[nodesArrayIndex];
-
-		if (strlen(node.host) > maxNodeNameSize)
-		{
-			maxNodeNameSize = strlen(node.host);
-		}
-	}
+	maxNodeNameSize = MaxNodeNameSizeInNodesArray(nodesArray);
 
 	(void) printNodeHeader(maxNodeNameSize);
 
@@ -1232,19 +1300,7 @@ printNodeHeader(int maxNodeNameSize)
 {
 	char nameSeparatorHeader[BUFSIZE] = { 0 };
 
-	/* prepare a nice dynamic string of '-' as a header separator */
-	for (int i = 0; i <= maxNodeNameSize; i++)
-	{
-		if (i < maxNodeNameSize)
-		{
-			nameSeparatorHeader[i] = '-';
-		}
-		else
-		{
-			nameSeparatorHeader[i] = '\0';
-			break;
-		}
-	}
+	(void) prepareNodeNameSeparator(nameSeparatorHeader, maxNodeNameSize);
 
 	fformat(stdout, "%3s | %*s | %6s | %18s | %8s\n",
 			"ID", maxNodeNameSize, "Host", "Port", "LSN", "Primary?");
@@ -2865,6 +2921,172 @@ monitor_wait_until_node_reported_state(Monitor *monitor,
 	pgsql_finish(&monitor->pgsql);
 
 	return reachedMaintenance;
+}
+
+
+/*
+ * monitor_wait_until_new_primary receives notifications and watches for a new
+ * node to be reported as a primary.
+ *
+ * If we lose the monitor connection while watching for the transition steps
+ * then we stop watching. It's a best effort attempt at having the CLI be
+ * useful for its user, the main one being the test suite.
+ */
+bool
+monitor_wait_until_new_primary(Monitor *monitor,
+							   const char *formation,
+							   int groupId)
+{
+	PGconn *connection = monitor->pgsql.connection;
+	NodeAddressArray nodesArray = { 0 };
+	bool failoverIsDone = false;
+
+	uint64_t start = time(NULL);
+
+	int maxNodeNameSize = 5;    /* strlen("Name") + 1, the header */
+	char nameSeparatorHeader[BUFSIZE] = { 0 };
+
+	if (connection == NULL)
+	{
+		log_warn("Lost connection.");
+		return false;
+	}
+
+	log_info("Listening monitor notifications about state changes "
+			 "in formation \"%s\" and group %d",
+			 formation, groupId);
+	log_info("Following table displays times when notifications are received");
+
+	if (!monitor_get_nodes(monitor,
+						   (char *) formation,
+						   groupId,
+						   &nodesArray))
+	{
+		/* ignore the error, use an educated guess for the max size */
+		log_warn("Failed to get_nodes() on the monitor");
+		maxNodeNameSize = 25;
+	}
+
+	maxNodeNameSize = MaxNodeNameSizeInNodesArray(&nodesArray);
+	(void) prepareNodeNameSeparator(nameSeparatorHeader, maxNodeNameSize);
+
+	fformat(stdout, "%8s | %3s | %*s | %6s | %18s | %18s\n",
+			"Time", "ID", maxNodeNameSize, "Host", "Port",
+			"Current State", "Assigned State");
+
+	fformat(stdout, "%8s-+-%3s-+-%*s-+-%6s-+-%18s-+-%18s\n",
+			"--------", "---", maxNodeNameSize, nameSeparatorHeader,
+			"------", "------------------", "------------------");
+
+	while (!failoverIsDone)
+	{
+		/* Sleep until something happens on the connection. */
+		int sock;
+		fd_set input_mask;
+		PGnotify *notify;
+
+		uint64_t now = time(NULL);
+
+		if ((now - start) > PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT)
+		{
+			log_error("Failed to receive monitor's notifications");
+			break;
+		}
+
+		/*
+		 * It looks like we are violating modularity of the code, when we are
+		 * following Postgres documentation and examples:
+		 *
+		 * https://www.postgresql.org/docs/current/libpq-example.html#LIBPQ-EXAMPLE-2
+		 */
+		sock = PQsocket(connection);
+
+		if (sock < 0)
+		{
+			log_error("Failed to get the connection socket with PQsocket()");
+			return false;   /* shouldn't happen */
+		}
+		FD_ZERO(&input_mask);
+		FD_SET(sock, &input_mask);
+
+		if (select(sock + 1, &input_mask, NULL, NULL, NULL) < 0)
+		{
+			log_warn("select() failed: %m");
+			return false;
+		}
+
+		/* Now check for input */
+		PQconsumeInput(connection);
+		while ((notify = PQnotifies(connection)) != NULL)
+		{
+			StateNotification notification = { 0 };
+
+			uint64_t now = time(NULL);
+			char timestring[MAXCTIMESIZE];
+
+			if ((now - start) > PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT)
+			{
+				/* errors are handled in the main loop */
+				break;
+			}
+
+			if (strcmp(notify->relname, "state") != 0)
+			{
+				log_warn("%s: %s", notify->relname, notify->extra);
+				continue;
+			}
+
+			log_debug("received \"%s\"", notify->extra);
+
+			/* the parsing scribbles on the message, make a copy now */
+			strlcpy(notification.message, notify->extra, BUFSIZE);
+
+			/* errors are logged by parse_state_notification_message */
+			if (!parse_state_notification_message(&notification))
+			{
+				log_warn("Failed to parse notification message \"%s\"",
+						 notify->extra);
+				continue;
+			}
+
+			/* filter notifications for our own formation */
+			if (strcmp(notification.formationId, formation) != 0 ||
+				notification.groupId != groupId)
+			{
+				continue;
+			}
+
+			/* format the current time to be user-friendly */
+			epoch_to_string(now, timestring);
+
+			/* "Wed Jun 30 21:49:08 1993" -> "21:49:08" */
+			timestring[11 + 8] = '\0';
+
+			fformat(stdout, "%8s | %3d | %*s | %6d | %18s | %18s\n",
+					timestring + 11,
+					notification.nodeId, maxNodeNameSize,
+					notification.nodeName,
+					notification.nodePort,
+					NodeStateToString(notification.reportedState),
+					NodeStateToString(notification.goalState));
+
+			if (notification.goalState == PRIMARY_STATE &&
+				notification.reportedState == PRIMARY_STATE)
+			{
+				failoverIsDone = true;
+				break;
+			}
+
+			/* prepare next iteration */
+			PQfreemem(notify);
+			PQconsumeInput(connection);
+		}
+	}
+
+	/* disconnect from monitor */
+	pgsql_finish(&monitor->pgsql);
+
+	return true;
 }
 
 

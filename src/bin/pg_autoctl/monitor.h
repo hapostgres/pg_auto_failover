@@ -108,6 +108,7 @@ bool monitor_set_formation_number_sync_standbys(Monitor *monitor, char *formatio
 												int numberSyncStandbys);
 
 bool monitor_remove(Monitor *monitor, char *host, int port);
+bool monitor_count_groups(Monitor *monitor, char *formation, int *groupsCount);
 bool monitor_perform_failover(Monitor *monitor, char *formation, int group);
 
 bool monitor_print_state(Monitor *monitor, char *formation, int group);
@@ -158,6 +159,9 @@ bool monitor_wait_until_primary_applied_settings(Monitor *monitor,
 bool monitor_wait_until_node_reported_state(Monitor *monitor,
 											int nodeId,
 											NodeState state);
+bool monitor_wait_until_new_primary(Monitor *monitor,
+									const char *formation,
+									int groupId);
 
 bool monitor_get_extension_version(Monitor *monitor,
 								   MonitorExtensionVersion *version);
