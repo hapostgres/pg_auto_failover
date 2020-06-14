@@ -46,7 +46,7 @@ static void pgautofailover_ProcessUtility(PlannedStmt *pstmt,
 										  ParamListInfo params,
 										  struct QueryEnvironment *queryEnv,
 										  DestReceiver *dest,
-										  char *completionTag);
+										  QueryCompletion *completionTag);
 
 
 PG_MODULE_MAGIC;
@@ -169,7 +169,7 @@ pgautofailover_ProcessUtility(PlannedStmt *pstmt,
 							  ParamListInfo params,
 							  struct QueryEnvironment *queryEnv,
 							  DestReceiver *dest,
-							  char *completionTag)
+							  QueryCompletion *completionTag)
 {
 	Node *parsetree = pstmt->utilityStmt;
 
