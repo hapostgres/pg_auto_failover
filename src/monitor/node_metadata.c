@@ -550,7 +550,11 @@ FindCandidateNodeBeingPromoted(List *groupNodeList)
  *	  qsort comparator for sorting node lists by candidate priority
  */
 static int
+#if (PG_VERSION_NUM >= 130000)
+pgautofailover_node_candidate_priority_compare(const union ListCell *a, const union ListCell *b)
+#else
 pgautofailover_node_candidate_priority_compare(const void *a, const void *b)
+#endif
 {
 	AutoFailoverNode *node1 = (AutoFailoverNode *) lfirst(*(ListCell **) a);
 	AutoFailoverNode *node2 = (AutoFailoverNode *) lfirst(*(ListCell **) b);
@@ -579,9 +583,15 @@ GroupListCandidates(List *groupNodeList)
 {
 	ListCell *nodeCell = NULL;
 	List *candidateNodesList = NIL;
+
+	#if (PG_VERSION_NUM >= 130000)
+	List *sortedNodeList = list_copy(groupNodeList);
+	list_sort(sortedNodeList, pgautofailover_node_candidate_priority_compare);
+	#else
 	List *sortedNodeList =
 		list_qsort(groupNodeList,
 				   pgautofailover_node_candidate_priority_compare);
+	#endif
 
 	foreach(nodeCell, sortedNodeList)
 	{
@@ -672,9 +682,15 @@ GroupListSyncStandbys(List *groupNodeList)
 {
 	ListCell *nodeCell = NULL;
 	List *syncStandbyNodesList = NIL;
+
+	#if (PG_VERSION_NUM >= 130000)
+	List *sortedNodeList = list_copy(groupNodeList);
+	list_sort(sortedNodeList, pgautofailover_node_candidate_priority_compare);
+	#else
 	List *sortedNodeList =
 		list_qsort(groupNodeList,
 				   pgautofailover_node_candidate_priority_compare);
+	#endif
 
 	foreach(nodeCell, sortedNodeList)
 	{

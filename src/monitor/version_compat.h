@@ -14,8 +14,8 @@
 
 #include "postgres.h"
 
-/* we only support Postgres versions 10, 11, and 12. */
-#if (PG_VERSION_NUM < 100000 || PG_VERSION_NUM >= 130000)
+/* we only support Postgres versions 10, 11, 12 and 13. */
+#if (PG_VERSION_NUM < 100000 || PG_VERSION_NUM >= 140000)
 #error "Unknown or unsupported postgresql version"
 #endif
 
@@ -58,6 +58,22 @@ HeapTupleGetOid(HeapTuple tuple)
 	return dbForm->oid;
 }
 
+
+#endif
+
+#if (PG_VERSION_NUM >= 130000)
+
+#include "common/hashfn.h"
+
+#define heap_open(r, l) table_open(r, l)
+#define heap_close(r, l) table_close(r, l)
+
+#endif
+
+#if (PG_VERSION_NUM < 130000)
+
+/* Compatibility for ProcessUtility hook */
+#define QueryCompletion char
 
 #endif
 

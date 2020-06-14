@@ -15,6 +15,7 @@
 #include "fmgr.h"
 
 #include "metadata.h"
+#include "version_compat.h"
 
 #include "access/genam.h"
 #include "access/heapam.h"

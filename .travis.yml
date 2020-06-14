@@ -17,9 +17,11 @@ matrix:
     - env: PGVERSION=10 TEST=single
     - env: PGVERSION=11 TEST=single
     - env: PGVERSION=12 TEST=single
+    - env: PGVERSION=13 TEST=single
     - env: PGVERSION=10 TEST=multi
     - env: PGVERSION=11 TEST=multi
     - env: PGVERSION=12 TEST=multi
+    - env: PGVERSION=13 TEST=multi
     - env: LINTING=true
 before_install:
   - git clone -b update-uncrustify-on-travis --depth 1 https://github.com/citusdata/tools.git
