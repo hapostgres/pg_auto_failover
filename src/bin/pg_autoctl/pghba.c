@@ -308,36 +308,33 @@ pghba_enable_lan_cidr(PGSQL *pgsql,
 	char ipAddr[BUFSIZE];
 	char cidr[BUFSIZE];
 
-	/*
-	 * When the authentication method is "skip", the option --skip-pg-hba has
-	 * been used. In that case, we still WARN about the HBA rule that we need,
-	 * so that users can review their HBA settings and provisioning.
-	 */
-	if (SKIP_HBA(authenticationScheme))
-	{
-		log_warn("Skipping HBA edits (per --skip-pg-hba) for local network");
-		return true;
-	}
-
 	/* Compute the CIDR notation for our hostname */
 	if (!findHostnameLocalAddress(hostname, ipAddr, BUFSIZE))
 	{
-		log_fatal("Failed to find IP address for hostname \"%s\", "
+		int logLevel = SKIP_HBA(authenticationScheme) ? LOG_WARN : LOG_FATAL;
+
+		log_level(logLevel,
+				  "Failed to find IP address for hostname \"%s\", "
 				  "see above for details",
 				  hostname);
-		return false;
+
+		/* when --skip-pg-hba is used, we don't mind the failure here */
+		return SKIP_HBA(authenticationScheme) ? true : false;
 	}
 
 	if (!fetchLocalCIDR(ipAddr, cidr, BUFSIZE))
 	{
 		log_warn("Failed to determine network configuration for "
 				 "IP address \"%s\", skipping HBA settings", ipAddr);
-		return false;
+
+		/* when --skip-pg-hba is used, we don't mind the failure here */
+		return SKIP_HBA(authenticationScheme) ? true : false;
 	}
 
 	log_debug("HBA: adding CIDR from hostname \"%s\"", hostname);
 	log_debug("HBA: local ip address: %s", ipAddr);
 	log_debug("HBA: CIDR address to open: %s", cidr);
+
 	log_info("Granting connection privileges on %s", cidr);
 
 	/* The caller gives pgdata when PostgreSQL is not yet running */
@@ -356,6 +353,10 @@ pghba_enable_lan_cidr(PGSQL *pgsql,
 		sformat(hbaFilePath, MAXPGPATH, "%s/pg_hba.conf", pgdata);
 	}
 
+	/*
+	 * We still go on when skipping HBA, so that we display a useful message to
+	 * the user with the specific rule we are skipping here.
+	 */
 	if (!pghba_ensure_host_rule_exists(hbaFilePath, ssl, databaseType, database,
 									   username, cidr, authenticationScheme))
 	{
@@ -367,7 +368,9 @@ pghba_enable_lan_cidr(PGSQL *pgsql,
 	/*
 	 * pgdata is given when PostgreSQL is not yet running, don't reload then...
 	 */
-	if (pgdata == NULL && !pgsql_reload_conf(pgsql))
+	if (pgdata == NULL &&
+		!SKIP_HBA(authenticationScheme) &&
+		!pgsql_reload_conf(pgsql))
 	{
 		log_error("Failed to reload PostgreSQL configuration for new HBA rule");
 		return false;
