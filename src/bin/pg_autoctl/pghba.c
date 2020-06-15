@@ -308,6 +308,11 @@ pghba_enable_lan_cidr(PGSQL *pgsql,
 	char ipAddr[BUFSIZE];
 	char cidr[BUFSIZE];
 
+	/*
+	 * When the authentication method is "skip", the option --skip-pg-hba has
+	 * been used. In that case, we still WARN about the HBA rule that we need,
+	 * so that users can review their HBA settings and provisioning.
+	 */
 	if (SKIP_HBA(authenticationScheme))
 	{
 		log_warn("Skipping HBA edits (per --skip-pg-hba) for local network");
