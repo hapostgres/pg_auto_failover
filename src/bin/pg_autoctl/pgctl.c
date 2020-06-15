@@ -729,6 +729,12 @@ pg_rewind(const char *pgdata,
 	NodeAddress *primaryNode = &(replicationSource->primaryNode);
 	char primaryConnInfo[MAXCONNINFO] = { 0 };
 
+	char *args[7];
+	int argsIndex = 0;
+
+	char command[BUFSIZE];
+	int commandSize = 0;
+
 	/* call pg_rewind*/
 	path_in_same_directory(pg_ctl, "pg_rewind", pg_rewind);
 
@@ -755,17 +761,36 @@ pg_rewind(const char *pgdata,
 		return false;
 	}
 
-	log_info(" %s --target-pgdata \"%s\" --source-server \"%s\" --progress",
-			 pg_rewind, pgdata, primaryConnInfo);
+	args[argsIndex++] = (char *) pg_rewind;
+	args[argsIndex++] = "--target-pgdata";
+	args[argsIndex++] = (char *) pgdata;
+	args[argsIndex++] = "--source-server";
+	args[argsIndex++] = primaryConnInfo;
+	args[argsIndex++] = "--progress";
+	args[argsIndex] = NULL;
 
-	program = run_program(pg_rewind,
-						  "--target-pgdata", pgdata,
-						  "--source-server", primaryConnInfo,
-						  "--progress",
-						  NULL);
+	/*
+	 * We do not want to call setsid() when running this program, as the
+	 * pg_rewind subprogram is not intended to be its own session leader, but
+	 * remain a sub-process in the same group as pg_autoctl.
+	 */
+	program = initialize_program(args, false);
+	program.processBuffer = &processBufferCallback;
 
-	/* pg_basebackup uses stderr for all of its output */
-	(void) log_program_output(program, LOG_INFO, LOG_INFO);
+	/* log the exact command line we're using */
+	commandSize = snprintf_program_command_line(&program, command, BUFSIZE);
+
+	if (commandSize >= BUFSIZE)
+	{
+		/* we only display the first BUFSIZE bytes of the real command */
+		log_info("%s...", command);
+	}
+	else
+	{
+		log_info("%s", command);
+	}
+
+	(void) execute_subprogram(&program);
 
 	returnCode = program.returnCode;
 	free_program(&program);
