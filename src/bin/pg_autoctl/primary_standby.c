@@ -947,5 +947,8 @@ primary_wait_until_standby_has_caught_up(LocalPostgresServer *postgres)
 		}
 	}
 
+	log_info("Standby reached LSN %s, thus advanced past LSN %s",
+			 standbyCurrentLSN, postgres->currentLSN);
+
 	return true;
 }
