@@ -308,6 +308,12 @@ pghba_enable_lan_cidr(PGSQL *pgsql,
 	char ipAddr[BUFSIZE];
 	char cidr[BUFSIZE];
 
+	if (SKIP_HBA(authenticationScheme))
+	{
+		log_warn("Skipping HBA edits (per --skip-pg-hba) for local network");
+		return true;
+	}
+
 	/* Compute the CIDR notation for our hostname */
 	if (!findHostnameLocalAddress(hostname, ipAddr, BUFSIZE))
 	{
