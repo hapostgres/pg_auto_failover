@@ -40,6 +40,7 @@ static bool pgsql_get_current_setting(PGSQL *pgsql, char *settingName,
 									  char **currentValue);
 static void parsePgMetadata(void *ctx, PGresult *result);
 static void parseReplicationSlotMaintain(void *ctx, PGresult *result);
+static void parsePgReachedTargetLSN(void *ctx, PGresult *result);
 
 
 /*
@@ -2167,6 +2168,110 @@ parsePgMetadata(void *ctx, PGresult *result)
 	if (!PQgetisnull(result, 0, 2))
 	{
 		char *value = PQgetvalue(result, 0, 2);
+
+		strlcpy(context->currentLSN, value, PG_LSN_MAXLENGTH);
+	}
+	else
+	{
+		context->currentLSN[0] = '\0';
+	}
+
+	context->parsedOk = true;
+}
+
+
+typedef struct PgReachedTargetLSN
+{
+	char sqlstate[6];
+	bool parsedOk;
+	bool reachedLSN;
+	char currentLSN[PG_LSN_MAXLENGTH];
+} PgReachedTargetLSN;
+
+
+/*
+ * pgsql_one_slot_has_reached_target_lsn checks that at least one replication
+ * slot has reached the given LSN already, using the Postgres system views
+ * pg_replication_slots and pg_stat_replication on the primary server.
+ */
+bool
+pgsql_one_slot_has_reached_target_lsn(PGSQL *pgsql,
+									  char *targetLSN,
+									  char *currentLSN,
+									  bool *reachedLSN)
+{
+	PgReachedTargetLSN context = { 0 };
+
+	/*
+	 * We pick the most advanced LSN reached by the pgautofailover replication
+	 * slots, and only consider those that have made it to "sync" or "quorum"
+	 * sync_state already. This function is typically called after sync rep has
+	 * been enabled on the primary.
+	 */
+
+	/* *INDENT-OFF* */
+	char *sql =
+		"   select $1::pg_lsn <= flush_lsn, flush_lsn "
+		"     from pg_replication_slots slot"
+		"     join pg_stat_replication rep"
+		"       on rep.pid = slot.active_pid"
+		"   where (   slot_name ~ '" REPLICATION_SLOT_NAME_PATTERN "' "
+		"          or slot_name = '" REPLICATION_SLOT_NAME_DEFAULT "') "
+		"     and sync_state in ('sync', 'quorum') "
+		"order by flush_lsn desc limit 1";
+	/* *INDENT-ON* */
+
+	const Oid paramTypes[1] = { LSNOID };
+	const char *paramValues[1] = { targetLSN };
+
+	if (!pgsql_execute_with_params(pgsql, sql, 1, paramTypes, paramValues,
+								   &context, &parsePgReachedTargetLSN))
+	{
+		/* errors have been logged already */
+		return false;
+	}
+
+	if (!context.parsedOk)
+	{
+		log_error("Failed to get result from pg_last_wal_replay_lsn()");
+		return false;
+	}
+
+	*reachedLSN = context.reachedLSN;
+	strlcpy(currentLSN, context.currentLSN, PG_LSN_MAXLENGTH);
+
+	return true;
+}
+
+
+/*
+ * parsePgMetadata parses the result from a PostgreSQL query fetching
+ * two columns from pg_stat_replication: sync_state and currentLSN.
+ */
+static void
+parsePgReachedTargetLSN(void *ctx, PGresult *result)
+{
+	PgReachedTargetLSN *context = (PgReachedTargetLSN *) ctx;
+
+	if (PQnfields(result) != 2)
+	{
+		log_error("Query returned %d columns, expected 2", PQnfields(result));
+		context->parsedOk = false;
+		return;
+	}
+
+	if (PQntuples(result) != 1)
+	{
+		log_error("Query returned %d rows, expected 1", PQntuples(result));
+		context->parsedOk = false;
+		return;
+	}
+
+	context->reachedLSN = strcmp(PQgetvalue(result, 0, 0), "t") == 0;
+
+	if (!PQgetisnull(result, 0, 1))
+	{
+		char *value = PQgetvalue(result, 0, 1);
 
 		strlcpy(context->currentLSN, value, PG_LSN_MAXLENGTH);
 	}

@@ -261,6 +261,11 @@ bool pgsql_get_postgres_metadata(PGSQL *pgsql, const char *slotName,
 								 bool *pg_is_in_recovery,
 								 char *pgsrSyncState, char *currentLSN);
 
+bool pgsql_one_slot_has_reached_target_lsn(PGSQL *pgsql,
+										   char *targetLSN,
+										   char *currentLSN,
+										   bool *reachedLSN);
+
 bool pgsql_listen(PGSQL *pgsql, char *channels[]);
 
 bool pgsql_alter_extension_update_to(PGSQL *pgsql,

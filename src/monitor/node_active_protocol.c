@@ -1020,17 +1020,13 @@ perform_failover(PG_FUNCTION_ARGS)
 	}
 
 	/*
-	 * In order to safely proceed we need one of the following situations:
-	 *
-	 *  - primary node has both reported and goal state PRIMARY
-	 *
-	 * - primary node is still in progress (assigned PRIMARY, not reported yet)
-	 *   and the secondary node has already reported SECONDARY
-	 *
-	 * Any other situation does not warrant for a failover to be performed.
+	 * In order to safely proceed we need to ensure that the primary node has
+	 * reached the primary state fully already. In the transition to PRIMARY we
+	 * actually wait until the current LSN observed on the primary has made it
+	 * to the secondary, which is a needed guarantee for avoiding data loss.
 	 */
-	if (!((primaryNode->reportedState == primaryNode->goalState) ||
-		  (secondaryNode->reportedState == REPLICATION_STATE_SECONDARY)))
+	if (!IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY) ||
+		!IsCurrentState(secondaryNode, REPLICATION_STATE_SECONDARY))
 	{
 		ereport(ERROR,
 				(errmsg("cannot fail over: primary node is not in a stable state"),
