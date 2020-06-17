@@ -293,7 +293,12 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 
 			case PQPING_NO_RESPONSE:
 			{
-				log_debug("PQping: no response after %d attempts",
+				int logLevel = attempts % 30 == 0 ? LOG_INFO : LOG_DEBUG;
+
+				log_level(logLevel,
+						  "PQping: no response from server at \"%s\" "
+						  "after %d attempts",
+						  pgsql->connectionString,
 						  attempts);
 				retry = true;
 				break;
