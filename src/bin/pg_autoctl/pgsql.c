@@ -223,8 +223,6 @@ pgsql_set_interactive_retry_policy(PGSQL *pgsql)
 static int
 pgsql_compute_connection_retry_sleep_time(PGSQL *pgsql)
 {
-	++(pgsql->retryPolicy.attempts);
-
 	/*
 	 * https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/
 	 *
@@ -264,11 +262,14 @@ pgsql_compute_connection_retry_sleep_time(PGSQL *pgsql)
 	 * time spent, something we care to optimize for even when it means more
 	 * work on the monitor side.
 	 */
+	int previousSleepTime = pgsql->retryPolicy.sleepTime;
+	int sleepTime = random_between(pgsql->retryPolicy.baseSleepTime,
+								   previousSleepTime * 3);
 
 	pgsql->retryPolicy.sleepTime =
-		min(pgsql->retryPolicy.maxSleepTime,
-			random_between(pgsql->retryPolicy.baseSleepTime,
-						   pgsql->retryPolicy.sleepTime * 3));
+		min(pgsql->retryPolicy.maxSleepTime, sleepTime);
+
+	++(pgsql->retryPolicy.attempts);
 
 	return pgsql->retryPolicy.sleepTime;
 }
