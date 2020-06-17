@@ -710,6 +710,18 @@ cli_create_monitor(int argc, char **argv)
 	monitor.config = monitorOptions;
 
 	/*
+	 * We prefer to ignore PGHOST variable for the monitor. The reason is that we
+	 * qualify monitor database as an internal/embedded database for pg_auto_failover.
+	 * In other words, we don't want anyone else to be able to connect to the database,
+	 * except for pg_auto_failover itself. To do that, we hard code host to be the
+	 * unix domain socket, where we can restrict the access.
+	 */
+	if (unsetenv("PGHOST") != 0)
+	{
+		exit(EXIT_CODE_BAD_STATE);
+	}
+
+	/*
 	 * We support two modes of operations here:
 	 *   - configuration exists already, we need PGDATA
 	 *   - configuration doesn't exist already, we need PGDATA, and more
