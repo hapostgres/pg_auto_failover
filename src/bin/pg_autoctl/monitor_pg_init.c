@@ -59,6 +59,7 @@ GUC monitor_default_settings[] = {
 
 
 static bool check_monitor_settings(PostgresSetup pgSetup);
+static bool replace_monitor_pg_hba(const char  *pgDataPath);
 
 
 /*
@@ -104,6 +105,13 @@ monitor_pg_init(Monitor *monitor)
 					  "see above for details", pgSetup->pgdata);
 			return false;
 		}
+
+		if (!replace_monitor_pg_hba(pgSetup->pgdata))
+		{
+			log_fatal("Failed to replace pg_hba of monitor PostgreSQL instance "
+					  "at \"%s\", see above for details", pgSetup->pgdata);
+			return false;
+		}
 	}
 
 	if (!monitor_add_postgres_default_settings(monitor))
@@ -116,6 +124,28 @@ monitor_pg_init(Monitor *monitor)
 	return true;
 }
 
+
+/*
+ * replace_monitor_pg_hba gets the path of pgData of the monitor, and
+ * overrides the pg_hba rules.
+ */
+static bool
+replace_monitor_pg_hba(const char  *pgDataPath)
+
+{
+	char hbaFilePath[MAXPGPATH];
+
+	log_trace("replacing pg_hba for monitor");
+
+	sformat(hbaFilePath, MAXPGPATH, "%s/pg_hba.conf", pgDataPath);
+
+	if (!write_trust_local_hba_rule(hbaFilePath))
+	{
+		return false;
+	}
+
+	return true;
+}
 
 /*
  * Install pg_auto_failover monitor in some existing PostgreSQL instance:

@@ -38,4 +38,6 @@ bool pghba_enable_lan_cidr(PGSQL *pgsql,
 						   const char *authenticationScheme,
 						   const char *pgdata);
 
+bool write_trust_local_hba_rule(const char *hbaFilePath);
+
 #endif /* PGHBA_H */

@@ -173,6 +173,59 @@ pghba_ensure_host_rule_exists(const char *hbaFilePath,
 
 
 /*
+ * write_trust_local_hba_rule gets the hbaFilePath and overrides it with
+ * 		"local all all  trust"
+ * 	which means allow all connections via unix domain sockets.
+ */
+bool
+write_trust_local_hba_rule(const char *hbaFilePath)
+{
+	const char *userName = "all";
+	const char *authenticationScheme = "trust";
+
+	PQExpBuffer hbaLineBuffer = createPQExpBuffer();
+	if (hbaLineBuffer == NULL)
+	{
+		log_error("Failed to allocate memory");
+		return false;
+	}
+
+	appendPQExpBufferStr(hbaLineBuffer, "local ");
+
+	append_database_field(hbaLineBuffer, HBA_DATABASE_ALL, NULL);
+	appendPQExpBufferStr(hbaLineBuffer, " ");
+
+	appendPQExpBufferStr(hbaLineBuffer, userName);
+	appendPQExpBufferStr(hbaLineBuffer, " ");
+
+	appendPQExpBuffer(hbaLineBuffer, " %s", authenticationScheme);
+
+	appendPQExpBufferStr(hbaLineBuffer, HBA_LINE_COMMENT "\n");
+
+	if (PQExpBufferBroken(hbaLineBuffer))
+	{
+		log_error("Failed to allocate memory");
+		destroyPQExpBuffer(hbaLineBuffer);
+		return false;
+	}
+
+	log_debug("generated monitor pg_hba rule for unix domain socket: \"%s\"", hbaLineBuffer->data);
+
+	/* write the resulting content at the destination path */
+	if (!write_file(hbaLineBuffer->data, hbaLineBuffer->len, hbaFilePath))
+	{
+		/* error is already logged */
+		destroyPQExpBuffer(hbaLineBuffer);
+		return false;
+	}
+
+	destroyPQExpBuffer(hbaLineBuffer);
+
+	return true;
+}
+
+
+/*
  * append_database_field writes the database field to destination according to
  * the databaseType. If the type is HBA_DATABASE_DBNAME then the databaseName
  * is written in quoted form.
