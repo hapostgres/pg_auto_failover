@@ -1182,6 +1182,9 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 		return false;
 	}
 
+	/* use a special connection retry policy for initialisation */
+	(void) pgsql_set_init_retry_policy(&(keeper->monitor.pgsql));
+
 	if (!monitor_register_node(monitor,
 							   config->formation,
 							   config->nodename,
@@ -1276,6 +1279,9 @@ keeper_remove(Keeper *keeper, KeeperConfig *config, bool ignore_monitor_errors)
 		}
 
 		log_info("Removing local node from the pg_auto_failover monitor.");
+
+		/* use a special connection retry policy for interactive commands */
+		(void) pgsql_set_interactive_retry_policy(&(keeper->monitor.pgsql));
 
 		/*
 		 * If the node was already removed from the monitor, then the

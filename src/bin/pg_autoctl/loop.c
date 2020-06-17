@@ -56,8 +56,13 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 
 	log_debug("pg_autoctl service is starting");
 
+	/* ensure we use the default retry policy with the monitor */
+	(void) pgsql_set_default_retry_policy(&(keeper->monitor.pgsql));
+
 	while (keepRunning)
 	{
+		bool couldContactMonitorThisRound = false;
+
 		MonitorAssignedState assignedState = { 0 };
 		bool needStateChange = false;
 		bool transitionFailed = false;
@@ -158,7 +163,7 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		/*
 		 * Report the current state to the monitor and get the assigned state.
 		 */
-		couldContactMonitor =
+		couldContactMonitorThisRound =
 			monitor_node_active(monitor,
 								config->formation,
 								config->nodename,
@@ -170,6 +175,19 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 								postgres->currentLSN,
 								postgres->pgsrSyncState,
 								&assignedState);
+
+		if (!couldContactMonitor && couldContactMonitorThisRound && !firstLoop)
+		{
+			/*
+			 * Last message the user saw in the output is the following, and so
+			 * we should say that we're back to the expected situation:
+			 *
+			 * Failed to get the goal state from the monitor
+			 */
+			log_info("Could get the goal state from the monitor");
+		}
+
+		couldContactMonitor = couldContactMonitorThisRound;
 
 		if (couldContactMonitor)
 		{

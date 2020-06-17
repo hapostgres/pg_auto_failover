@@ -6,6 +6,7 @@
  * Licensed under the PostgreSQL License.
  *
  */
+#include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -24,7 +25,9 @@
 #define ERRCODE_DUPLICATE_OBJECT "42710"
 #define ERRCODE_DUPLICATE_DATABASE "42P04"
 
-
+static char * connectionTypeToString(ConnectionType connectionType);
+static int pgsql_compute_connection_retry_sleep_time(PGSQL *pgsql);
+static void log_connection_error(PGconn *connection, int logLevel);
 static void pgAutoCtlDefaultNoticeProcessor(void *arg, const char *message);
 static void pgAutoCtlDebugNoticeProcessor(void *arg, const char *message);
 static PGconn * pgsql_open_connection(PGSQL *pgsql);
@@ -104,6 +107,9 @@ pgsql_init(PGSQL *pgsql, char *url, ConnectionType connectionType)
 	pgsql->connectionType = connectionType;
 	pgsql->connection = NULL;
 
+	/* set our default retry policy: do not retry at pgsql_open_connection */
+	(void) pgsql_set_default_retry_policy(pgsql);
+
 	if (validate_connection_string(url))
 	{
 		/* size of url has already been validated. */
@@ -118,6 +124,157 @@ pgsql_init(PGSQL *pgsql, char *url, ConnectionType connectionType)
 
 
 /*
+ * pgsql_set_retry_policy sets the retry policy to the given maxT (maximum
+ * total time spent retrying), maxR (maximum number of retries, zero when not
+ * retrying at all, -1 for unbounded number of retries), and maxSleepTime to
+ * cap our exponential backoff with decorrelated jitter computation.
+ */
+void
+pgsql_set_retry_policy(PGSQL *pgsql,
+					   int maxT,
+					   int maxR,
+					   int maxSleepTime,
+					   int baseSleepTime)
+{
+	pgsql->retryPolicy.maxT = maxT;
+	pgsql->retryPolicy.maxR = maxR;
+	pgsql->retryPolicy.maxSleepTime = maxSleepTime;
+	pgsql->retryPolicy.baseSleepTime = baseSleepTime;
+
+	/* initialize a seed for our random number generator */
+	pg_srand48(time(0));
+
+	log_debug("pgsql_set_retry_policy(\"%s\"): maxT=%d maxR=%d cap=%d base=%d",
+			  pgsql->connectionString,
+			  pgsql->retryPolicy.maxT,
+			  pgsql->retryPolicy.maxR,
+			  pgsql->retryPolicy.maxSleepTime,
+			  pgsql->retryPolicy.baseSleepTime);
+}
+
+
+/*
+ * pgsql_set_default_retry_policy sets the default retry policy: no retry. We
+ * use the other default parameters but with a maxR of zero they don't get
+ * used.
+ *
+ * This is the retry policy that prevails in the main keeper loop.
+ */
+void
+pgsql_set_default_retry_policy(PGSQL *pgsql)
+{
+	(void) pgsql_set_retry_policy(pgsql,
+								  POSTGRES_PING_RETRY_TIMEOUT,
+								  0, /* do not retry by default */
+								  POSTGRES_PING_RETRY_CAP_SLEEP_TIME,
+								  POSTGRES_PING_RETRY_BASE_SLEEP_TIME);
+}
+
+
+/*
+ * pgsql_set_init_retry_policy sets the retry policy to 15 mins of total
+ * retrying time, unbounded number of attempts, and up to 2 seconds of sleep
+ * time in between attempts.
+ *
+ * This is the policy that we use in keeper_register_and_init. When using
+ * automated provisioning tools and frameworks, it might be that every node is
+ * provisionned concurrently and we might try to connect to the monitor before
+ * it's ready. In that case we want to retry for a long time.
+ */
+void
+pgsql_set_init_retry_policy(PGSQL *pgsql)
+{
+	(void) pgsql_set_retry_policy(pgsql,
+								  POSTGRES_PING_RETRY_TIMEOUT,
+								  -1, /* unbounded number of attempts */
+								  POSTGRES_PING_RETRY_CAP_SLEEP_TIME,
+								  POSTGRES_PING_RETRY_BASE_SLEEP_TIME);
+}
+
+
+/*
+ * pgsql_set_interactive_retry_policy sets the retry policy to 1 minute of
+ * total retrying time, unbounded number of attempts, and up to 2 seconds of
+ * sleep time in between attempts.
+ */
+void
+pgsql_set_interactive_retry_policy(PGSQL *pgsql)
+{
+	(void) pgsql_set_retry_policy(pgsql,
+								  60,
+								  -1, /* unbounded number of attempts */
+								  POSTGRES_PING_RETRY_CAP_SLEEP_TIME,
+								  POSTGRES_PING_RETRY_BASE_SLEEP_TIME);
+}
+
+
+#define min(a, b) (a < b ? a : b)
+
+/*
+ * http://c-faq.com/lib/randrange.html
+ */
+#define random_between(M, N) \
+	((M) + pg_lrand48() / (RAND_MAX / ((N) -(M) +1) + 1))
+
+/*
+ * pgsql_compute_connection_retry_sleep_time returns how much time to sleep
+ * this time, in milliseconds.
+ */
+static int
+pgsql_compute_connection_retry_sleep_time(PGSQL *pgsql)
+{
+	++(pgsql->retryPolicy.attempts);
+
+	/*
+	 * https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/
+	 *
+	 * Adding jitter is a small change to the sleep function:
+	 *
+	 *  sleep = random_between(0, min(cap, base * 2^attempt))
+	 *
+	 * There are a few ways to implement these timed backoff loops. Let’s call
+	 * the algorithm above “Full Jitter”, and consider two alternatives. The
+	 * first alternative is “Equal Jitter”, where we always keep some of the
+	 * backoff and jitter by a smaller amount:
+	 *
+	 *  temp = min(cap, base * 2^attempt)
+	 *  sleep = temp/2 + random_between(0, temp/2)
+	 *
+	 * The intuition behind this one is that it prevents very short sleeps,
+	 * always keeping some of the slow down from the backoff.
+	 *
+	 * A second alternative is “Decorrelated Jitter”, which is similar to “Full
+	 * Jitter”, but we also increase the maximum jitter based on the last
+	 * random value.
+	 *
+	 *  sleep = min(cap, random_between(base, sleep*3))
+	 *
+	 * Which approach do you think is best?
+	 *
+	 * The no-jitter exponential backoff approach is the clear loser. [...]
+	 *
+	 * Of the jittered approaches, “Equal Jitter” is the loser. It does
+	 * slightly more work than “Full Jitter”, and takes much longer. The
+	 * decision between “Decorrelated Jitter” and “Full Jitter” is less clear.
+	 * The “Full Jitter” approach uses less work, but slightly more time. Both
+	 * approaches, though, present a substantial decrease in client work and
+	 * server load.
+	 *
+	 * Here we implement "Decorrelated Jitter", which is better in terms of
+	 * time spent, something we care to optimize for even when it means more
+	 * work on the monitor side.
+	 */
+
+	pgsql->retryPolicy.sleepTime =
+		min(pgsql->retryPolicy.maxSleepTime,
+			random_between(pgsql->retryPolicy.baseSleepTime,
+						   pgsql->retryPolicy.sleepTime * 3));
+
+	return pgsql->retryPolicy.sleepTime;
+}
+
+
+/*
  * Finish a PGSQL client connection.
  */
 void
@@ -128,6 +285,65 @@ pgsql_finish(PGSQL *pgsql)
 		log_debug("Disconnecting from \"%s\"", pgsql->connectionString);
 		PQfinish(pgsql->connection);
 		pgsql->connection = NULL;
+	}
+}
+
+
+/*
+ * connectionTypeToString transforms a connectionType in a string to be used in
+ * a user facing message.
+ */
+static char *
+connectionTypeToString(ConnectionType connectionType)
+{
+	switch (connectionType)
+	{
+		case PGSQL_CONN_LOCAL:
+		{
+			return "local Postgres";
+		}
+
+		case PGSQL_CONN_MONITOR:
+		{
+			return "monitor";
+		}
+
+		case PGSQL_CONN_COORDINATOR:
+		{
+			return "coordinator";
+		}
+
+		default:
+		{
+			return "unknown connection type";
+		}
+	}
+}
+
+
+/*
+ * log_connection_error logs the PQerrorMessage from the given connection.
+ */
+static void
+log_connection_error(PGconn *connection, int logLevel)
+{
+	char *message = PQerrorMessage(connection);
+	char *errorLines[BUFSIZE] = { 0 };
+	int lineCount = splitLines(message, errorLines, BUFSIZE);
+	int lineNumber = 0;
+
+	for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
+	{
+		char *line = errorLines[lineNumber];
+
+		if (lineNumber == 0)
+		{
+			log_level(logLevel, "Connection to database failed: %s", line);
+		}
+		else
+		{
+			log_level(logLevel, "%s", line);
+		}
 	}
 }
 
@@ -156,59 +372,40 @@ pgsql_open_connection(PGSQL *pgsql)
 	/* Check to see that the backend connection was successfully made */
 	if (PQstatus(connection) != CONNECTION_OK)
 	{
-		/* We failed to connect to Postgres. When connecting to a local node,
-		 * we are going to handle the situation by probing the postmasted.pid
-		 * file. When connecting to a remove node (monitor or coordinator), we
-		 * want to implement a retry loop: it might be a transient failure,
-		 * such as when the remote node is not ready yet.
+		/*
+		 * Implement the retry policy:
+		 *
+		 * - for a local Postgres node, we always expect to be able to connect
+		 *   and defer managing this at the Postgres Controller level, so we
+		 *   never retry.
+		 *
+		 * - for MONITOR or COORDINATOR (remote) connections, we may have a
+		 *   specific policy to follow. In any case we observe first the maxR
+		 *   property: maximum retries allowed. When set to zero, we don't
+		 *   retry at all.
 		 */
-		if (pgsql->connectFailFast)
+		if (pgsql->connectionType == PGSQL_CONN_LOCAL ||
+			pgsql->retryPolicy.maxR == 0)
 		{
-			log_error("Connection to database failed: %s",
-					  PQerrorMessage(connection));
+			(void) log_connection_error(connection, LOG_ERROR);
+			log_error("Failed to connect to %s database at \"%s\", "
+					  "see above for details",
+					  connectionTypeToString(pgsql->connectionType),
+					  pgsql->connectionString);
 			pgsql_finish(pgsql);
 			return NULL;
 		}
-		switch (pgsql->connectionType)
+
+		/*
+		 * If we reach this part of the code, the connectionType is not LOCAL
+		 * and the retryPolicy has a non-zero maximum retry count. Let's retry!
+		 */
+		connection = pgsql_retry_open_connection(pgsql);
+
+		if (connection == NULL)
 		{
-			case PGSQL_CONN_LOCAL:
-			{
-				char *message = PQerrorMessage(connection);
-				char *errorLines[BUFSIZE];
-				int lineCount = splitLines(message, errorLines, BUFSIZE);
-				int lineNumber = 0;
-
-				for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
-				{
-					log_error("Connection to database failed: %s",
-							  errorLines[lineNumber]);
-				}
-
-				pgsql_finish(pgsql);
-				return NULL;
-			}
-
-			case PGSQL_CONN_MONITOR:
-			case PGSQL_CONN_COORDINATOR:
-			{
-				/* call into the retry loop logic */
-				connection = pgsql_retry_open_connection(pgsql);
-
-				if (connection == NULL)
-				{
-					/* errors have already been logged */
-					return NULL;
-				}
-				break;
-			}
-
-			default:
-			{
-				/* should never happen */
-				log_error("BUG: unknown connection type %d",
-						  pgsql->connectionType);
-				return NULL;
-			}
+			/* errors have already been logged */
+			return NULL;
 		}
 	}
 
@@ -230,32 +427,83 @@ static PGconn *
 pgsql_retry_open_connection(PGSQL *pgsql)
 {
 	PGconn *connection = NULL;
-	int attempts = 0;
-	bool retry = true;
 	bool connectionOk = false;
+
 	uint64_t startTime = time(NULL);
+	PGPing lastWarningMessage = PQPING_OK;
+	uint64_t lastWarningTime = 0;
 
 	log_warn("Failed to connect to \"%s\", retrying until "
 			 "the server is ready", pgsql->connectionString);
 
-	while (retry)
+	/* should not happen */
+	if (pgsql->retryPolicy.maxR == 0)
 	{
+		return NULL;
+	}
+
+	/* reset our internal counter before entering the retry loop */
+	pgsql->retryPolicy.attempts = 0;
+
+	while (!connectionOk)
+	{
+		int sleep = 0;
 		uint64_t now = time(NULL);
 
-		if ((now - startTime) >= POSTGRES_PING_RETRY_TIMEOUT)
+		/* Any signal is reason enough to break out from this retry loop. */
+		if (asked_to_quit ||
+			asked_to_stop ||
+			asked_to_stop_fast ||
+			asked_to_reload)
 		{
-			log_warn("Failed to connect to \"%s\" after %d attempts, "
-					 "stopping now", pgsql->connectionString, attempts);
 			break;
 		}
 
-		++attempts;
+		/*
+		 * We stop retrying as soon as we have spent all of our time budget or
+		 * all of our attempts count budget, whichever comes first.
+		 *
+		 * maxR = 0 (zero) means no retry at all, checked before the loop
+		 * maxR < 0 (zero) means unlimited number of retries
+		 */
+		if ((now - startTime) >= pgsql->retryPolicy.maxT ||
+			(pgsql->retryPolicy.maxR > 0 &&
+			 pgsql->retryPolicy.attempts >= pgsql->retryPolicy.maxR))
+		{
+			log_warn("Failed to connect to \"%s\" "
+					 "after %d attempts in %d seconds, "
+					 "pg_autoctl stops retrying now",
+					 pgsql->connectionString,
+					 pgsql->retryPolicy.attempts,
+					 (int) (now - startTime));
+			break;
+		}
+
+		/*
+		 * Now compute how much time to wait for this round, and increment how
+		 * many times we tried to connect already.
+		 */
+		sleep = pgsql_compute_connection_retry_sleep_time(pgsql);
+
+		/* we have milliseconds, pg_usleep() wants microseconds */
+		(void) pg_usleep(sleep * 1000);
+
+		log_debug("PQping(%s): slept %d ms on attempt %d",
+				  pgsql->connectionString,
+				  pgsql->retryPolicy.sleepTime,
+				  pgsql->retryPolicy.attempts);
+
 		switch (PQping(pgsql->connectionString))
 		{
+			/*
+			 * https://www.postgresql.org/docs/current/libpq-connect.html
+			 *
+			 * The server is running and appears to be accepting connections.
+			 */
 			case PQPING_OK:
 			{
-				log_debug("PQping OK after %d attempts", attempts);
-				retry = false;
+				log_debug("PQping OK after %d attempts",
+						  pgsql->retryPolicy.attempts);
 
 				/*
 				 * Ping is now ok, and connection is still NULL because the
@@ -270,65 +518,107 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 				if (PQstatus(connection) == CONNECTION_OK)
 				{
 					connectionOk = true;
-					log_info("Successfully connected to \"%s\"",
-							 pgsql->connectionString);
+					log_info("Successfully connected to \"%s\" "
+							 "after %d attempts in %d seconds.",
+							 pgsql->connectionString,
+							 pgsql->retryPolicy.attempts,
+							 (int) (now - startTime));
 				}
 				else
 				{
-					log_error("Failed to connect after successful "
-							  "ping, please verify authentication "
-							  "and logs on the server at \"%s\"",
-							  pgsql->connectionString);
+					lastWarningMessage = PQPING_OK;
+					lastWarningTime = now;
+
+					(void) log_connection_error(connection, LOG_WARN);
+
+					log_warn("Failed to connect after successful "
+							 "ping, please verify authentication "
+							 "and logs on the server at \"%s\"",
+							 pgsql->connectionString);
+
+					log_warn("Authentication might have failed on the Postgres "
+							 "server due to missing HBA rules.");
 				}
 				break;
 			}
 
+			/*
+			 * https://www.postgresql.org/docs/current/libpq-connect.html
+			 *
+			 * The server is running but is in a state that disallows
+			 * connections (startup, shutdown, or crash recovery).
+			 */
 			case PQPING_REJECT:
 			{
-				log_error("Connection rejected: \"%s\"",
-						  pgsql->connectionString);
-				retry = false;
+				if (lastWarningMessage != PQPING_REJECT ||
+					(now - lastWarningTime) > 30)
+				{
+					lastWarningMessage = PQPING_REJECT;
+					lastWarningTime = now;
+
+					log_warn(
+						"The server at \"%s\" is running but is in a state "
+						"that disallows connections (startup, shutdown, or "
+						"crash recovery).",
+						pgsql->connectionString);
+				}
 				break;
 			}
 
+			/*
+			 * https://www.postgresql.org/docs/current/libpq-connect.html
+			 *
+			 * The server could not be contacted. This might indicate that the
+			 * server is not running, or that there is something wrong with the
+			 * given connection parameters (for example, wrong port number), or
+			 * that there is a network connectivity problem (for example, a
+			 * firewall blocking the connection request).
+			 */
 			case PQPING_NO_RESPONSE:
 			{
-				int logLevel = attempts % 30 == 0 ? LOG_INFO : LOG_DEBUG;
+				if (lastWarningMessage != PQPING_NO_RESPONSE ||
+					(now - lastWarningTime) > 30)
+				{
+					lastWarningMessage = PQPING_NO_RESPONSE;
+					lastWarningTime = now;
 
-				log_level(logLevel,
-						  "PQping: no response from server at \"%s\" "
-						  "after %d attempts",
-						  pgsql->connectionString,
-						  attempts);
-				retry = true;
+					log_warn(
+						"The server at \"%s\" could not be contacted "
+						"after %d attempts in %d seconds. "
+						"This might indicate that the server is not running, "
+						"or that there is something wrong with the given "
+						"connection parameters (for example, wrong port "
+						"number), or that there is a network connectivity "
+						"problem (for example, a firewall blocking the "
+						"connection request).",
+						pgsql->connectionString,
+						pgsql->retryPolicy.attempts,
+						(int) (now - startTime));
+				}
 				break;
 			}
 
+			/*
+			 * https://www.postgresql.org/docs/current/libpq-connect.html
+			 *
+			 * No attempt was made to contact the server, because the supplied
+			 * parameters were obviously incorrect or there was some
+			 * client-side problem (for example, out of memory).
+			 */
 			case PQPING_NO_ATTEMPT:
 			{
-				log_error("Failed to ping server \"%s\" because of "
+				lastWarningMessage = PQPING_NO_ATTEMPT;
+				log_debug("Failed to ping server \"%s\" because of "
 						  "client-side problems (no attempt were made)",
 						  pgsql->connectionString);
-				retry = false;
 				break;
 			}
-		}
-
-		if (asked_to_stop || asked_to_stop_fast || asked_to_reload)
-		{
-			retry = false;
-		}
-
-		if (retry)
-		{
-			sleep(PG_AUTOCTL_KEEPER_SLEEP_TIME);
 		}
 	}
 
 	if (!connectionOk && connection != NULL)
 	{
-		log_error("Connection to database failed: %s",
-				  PQerrorMessage(connection));
+		(void) log_connection_error(connection, LOG_ERROR);
 		pgsql_finish(pgsql);
 		return NULL;
 	}

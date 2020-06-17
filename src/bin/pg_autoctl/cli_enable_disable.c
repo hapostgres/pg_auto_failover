@@ -905,11 +905,6 @@ update_ssl_configuration(LocalPostgresServer *postgres, const char *nodename)
  * update_monitor_connection_string connects to the monitor to see if ssl is
  * active on the server. When that's the case, the function complains about
  * updating the monitor URI in the given KeeperConfig.
- *
- * TODO: it would be nice that we actually edit the URI that we have in the
- * file, but it appears to be too big an amount of work for the time being. We
- * could use PQconninfoParse and then add our own SSL settings, and then use
- * PQconnectdbParams to make sure we can use the new connection.
  */
 static bool
 update_monitor_connection_string(KeeperConfig *config)
@@ -958,17 +953,18 @@ update_monitor_connection_string(KeeperConfig *config)
 	}
 
 
-	log_info(
-		"Trying to connect to monitor using connection string \"%s\"",
-		newPgURI
-		);
+	log_info("Trying to connect to monitor using connection string \"%s\"",
+			 newPgURI);
 
 	/*
 	 * Try to connect using the new connection string and don't update it if it
-	 * does not actually allow connecting.
+	 * does not actually allow connecting. Note that we use a custom retry
+	 * policy in this interactive command: we retry for up to one minute.
 	 */
-	monitor.pgsql.connectFailFast = true;
-	if (!pgsql_execute_with_params(&monitor.pgsql, "SELECT 1", 0, NULL, NULL, NULL, NULL))
+	(void) pgsql_set_interactive_retry_policy(&monitor.pgsql);
+
+	if (!pgsql_execute_with_params(&(monitor.pgsql), "SELECT 1",
+								   0, NULL, NULL, NULL, NULL))
 	{
 		return false;
 	}

@@ -65,13 +65,44 @@ typedef enum
 	PGSQL_CONN_COORDINATOR
 } ConnectionType;
 
+
+/*
+ * Retry policy to follow when we fail to connect to a Postgres URI.
+ *
+ * In almost all the code base the retry mechanism is implemented in the main
+ * loop so we want to fail fast and let the main loop handle the connection
+ * retry and the different network timeouts that we have, including the network
+ * partition detection timeout.
+ *
+ * In the initialisation code path though, pg_autoctl might be launched from
+ * provisioning script on a set of nodes in parallel, and in that case we need
+ * to secure a connection and implement a retry policy at the point in the code
+ * where we open a connection, so that it's transparent to the caller.
+ *
+ * When we do retry connecting, we implement an Exponential Backoff with
+ * Decorrelated Jitter algorithm as proven useful in the following article:
+ *
+ *  https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/
+ */
+typedef struct ConnectionRetryPolicy
+{
+	int maxT;                   /* maximum time spent retrying (seconds) */
+	int maxR;                   /* maximum number of retries, might be zero */
+	int maxSleepTime;           /* in millisecond, used to cap sleepTime */
+	int baseSleepTime;          /* in millisecond, base time to sleep for */
+	int sleepTime;              /* in millisecond, time waited for last round */
+	int attempts;               /* how many attempts have been made so far */
+} ConnectionRetryPolicy;
+
+
 typedef struct PGSQL
 {
 	ConnectionType connectionType;
 	char connectionString[MAXCONNINFO];
 	PGconn *connection;
-	bool connectFailFast;
+	ConnectionRetryPolicy retryPolicy;
 } PGSQL;
+
 
 /* PostgreSQL ("Grand Unified Configuration") setting */
 typedef struct GUC
@@ -183,6 +214,14 @@ typedef struct SingleValueResultContext
 	") as t(ok) "
 
 bool pgsql_init(PGSQL *pgsql, char *url, ConnectionType connectionType);
+void pgsql_set_retry_policy(PGSQL *pgsql,
+							int maxT,
+							int maxR,
+							int maxSleepTime,
+							int baseSleepTime);
+void pgsql_set_default_retry_policy(PGSQL *pgsql);
+void pgsql_set_init_retry_policy(PGSQL *pgsql);
+void pgsql_set_interactive_retry_policy(PGSQL *pgsql);
 void pgsql_finish(PGSQL *pgsql);
 void parseSingleValueResult(void *ctx, PGresult *result);
 bool pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,

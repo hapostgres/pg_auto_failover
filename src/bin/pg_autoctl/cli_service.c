@@ -180,6 +180,10 @@ cli_keeper_run(int argc, char **argv)
 	else
 	{
 		/* Start with a monitor: implement the node active loop */
+
+		/* use a special connection retry policy for initialisation */
+		(void) pgsql_set_interactive_retry_policy(&(keeper.monitor.pgsql));
+
 		if (!keeper_check_monitor_extension_version(&keeper))
 		{
 			/* errors have already been logged */
