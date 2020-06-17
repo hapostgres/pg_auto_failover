@@ -123,7 +123,7 @@ minimum.
 In the case of pg_auto_failover, because we use **synchronous replication**,
 we don't face data loss risks when triggering a manual failover. Moreover,
 our monitor knows the current primary health at the time when the failover
-is triggerred, and drives the failover accordingly.
+is triggered, and drives the failover accordingly.
 
 So to trigger a controlled switchover with pg_auto_failover you can use the
 same API as for a manual failover::

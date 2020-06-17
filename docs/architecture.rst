@@ -118,7 +118,7 @@ Client-side HA
 
 Implementing client-side High Availability is included in PostgreSQL's
 driver `libpq` from version 10 onward. Using this driver, it is possible to
-specify mulitple host names or IP addresses in the same connection string::
+specify multiple host names or IP addresses in the same connection string::
 
   $ psql -d "postgresql://host1,host2/dbname?target_session_attrs=read-write"
   $ psql -d "postgresql://host1:port2,host2:port2/dbname?target_session_attrs=read-write"
@@ -147,7 +147,7 @@ When using pg_auto_failover, configure your application connection string to use
 primary and the secondary server host names, and set
 ``target_session_attrs=read-write`` too, so that your application
 automatically connects to the current primary, even after a failover
-occured.
+occurred.
 
 Monitoring protocol
 -------------------
@@ -203,7 +203,7 @@ following to ``postgresql.conf``::
  synchronous_commit = 'local'
 
 This ensures that writes return as soon as they are committed on the primary
-under all circumstance. In that case, failover might lead to some data loss,
+under all circumstances. In that case, failover might lead to some data loss,
 but failover is not initiated if the secondary is more than 10 WAL segments
 (configurable) behind on the primary. During a manual failover, the standby
 will continue accepting writes from the old primary and will stop only if

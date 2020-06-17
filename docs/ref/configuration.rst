@@ -39,7 +39,7 @@ operations:
     safely, and the wal lag is 0 in that case.
 
     In the case when the secondary server had been detected unhealthy
-    before, then the pg_auto_failover monitor switches it from the sate SECONDARY to
+    before, then the pg_auto_failover monitor switches it from the state SECONDARY to
     the state CATCHING-UP and promotion is prevented then.
 
     The following setting allows to still promote the secondary, allowing
@@ -53,7 +53,8 @@ pg_auto_failover Monitor
 The configuration for the behavior of the monitor happens in the PostgreSQL
 database where the extension has been deployed::
 
-  pg_auto_failover=> select name, setting, unit, short_desc from pg_settings where name ~ 'pgautofailover.';                                                                                                                                                                                                                                                           -[ RECORD 1 ]----------------------------------------------------------------------------------------------------
+  pg_auto_failover=> select name, setting, unit, short_desc from pg_settings where name ~ 'pgautofailover.';
+  -[ RECORD 1 ]----------------------------------------------------------------------------------------------------
   name       | pgautofailover.enable_sync_wal_log_threshold
   setting    | 16777216
   unit       |

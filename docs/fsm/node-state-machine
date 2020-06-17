@@ -36,7 +36,7 @@ draining : marked unhealthy, stop writes
 demote_timeout : waiting for drain timeout to expire
 demoted : drain timeout expired, node should be down
 catching_up : following a primary but not caught up
-secondary : folling a primary, caught up
+secondary : following a primary, caught up
 prepare_promotion : secondary doesn't converge to this
 prepare_promotion : state until it has caught up with the
 prepare_promotion : primary or timed-out trying

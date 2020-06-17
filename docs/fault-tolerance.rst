@@ -1,7 +1,7 @@
 pg_auto_failover Fault Tolerance
 ================================
 
-At the heart of the pg_auto_failover implemetation is a State Machine. The state
+At the heart of the pg_auto_failover implementation is a State Machine. The state
 machine is driven by the monitor, and its transitions are implemented in the
 keeper service, which then reports success to the monitor.
 
@@ -18,7 +18,7 @@ Unhealthy Nodes
 ---------------
 
 The pg_auto_failover monitor is responsible for running regular health-checks with
-every PostgreSQL node it manages. A health-check is successul when it is
+every PostgreSQL node it manages. A health-check is successful when it is
 able to connect to the PostgreSQL node using the PostgreSQL protocol
 (libpq), imitating the ``pg_isready`` command.
 
