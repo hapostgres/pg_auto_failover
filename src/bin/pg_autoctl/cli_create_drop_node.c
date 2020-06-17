@@ -723,7 +723,7 @@ cli_create_monitor(int argc, char **argv)
 	 * 	unix socket directories, now --pghost is mandatory, but unset.
 	 *
 	 */
-	if (env_found_empty("PG_REGRESS_SOCK_DIR") && unsetenv("PGHOST") != 0)
+	if (!env_found_empty("PG_REGRESS_SOCK_DIR")  && unsetenv("PGHOST") != 0)
 	{
 		exit(EXIT_CODE_BAD_STATE);
 	}
