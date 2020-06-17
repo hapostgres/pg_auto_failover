@@ -709,14 +709,21 @@ cli_create_monitor(int argc, char **argv)
 
 	monitor.config = monitorOptions;
 
+
 	/*
 	 * We prefer to ignore PGHOST variable for the monitor. The reason is that we
 	 * qualify monitor database as an internal/embedded database for pg_auto_failover.
 	 * In other words, we don't want anyone else to be able to connect to the database,
 	 * except for pg_auto_failover itself. To do that, we hard code host to be the
 	 * unix domain socket, where we can restrict the access.
+	 *
+	 * TODO: Not allowing to set PGHOST fails regression tests with:
+	 *
+	 * 	ERROR pgsetup.c:269 PG_REGRESS_SOCK_DIR is set to "" to disable
+	 * 	unix socket directories, now --pghost is mandatory, but unset.
+	 *
 	 */
-	if (unsetenv("PGHOST") != 0)
+	if (env_found_empty("PG_REGRESS_SOCK_DIR") && unsetenv("PGHOST") != 0)
 	{
 		exit(EXIT_CODE_BAD_STATE);
 	}
