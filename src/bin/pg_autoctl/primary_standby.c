@@ -910,15 +910,12 @@ check_postgresql_settings(LocalPostgresServer *postgres, bool *settings_are_ok)
  * slot.
  */
 bool
-primary_wait_until_standby_has_caught_up(LocalPostgresServer *postgres)
+primary_standby_has_caught_up(LocalPostgresServer *postgres)
 {
 	PGSQL *pgsql = &(postgres->sqlClient);
 
 	char standbyCurrentLSN[PG_LSN_MAXLENGTH] = { 0 };
 	bool reachedLSN = false;
-
-	log_info("Waiting until standby node has caught-up to LSN %s",
-			 postgres->currentLSN);
 
 	/* ensure some WAL level traffic to move things forward */
 	if (!pgsql_checkpoint(pgsql))
@@ -927,28 +924,30 @@ primary_wait_until_standby_has_caught_up(LocalPostgresServer *postgres)
 		return false;
 	}
 
-	/* loop until we have a slot that went past the current LSN */
-	while (!reachedLSN)
+	if (!pgsql_one_slot_has_reached_target_lsn(pgsql,
+											   postgres->standbyTargetLSN,
+											   standbyCurrentLSN,
+											   &reachedLSN))
 	{
-		if (!pgsql_one_slot_has_reached_target_lsn(pgsql,
-												   postgres->currentLSN,
-												   standbyCurrentLSN,
-												   &reachedLSN))
-		{
-			/* errors have already been logged */
-			return false;
-		}
-
-		if (!reachedLSN)
-		{
-			log_info("Standby reached LSN %s, waiting for LSN %s",
-					 standbyCurrentLSN, postgres->currentLSN);
-			pg_usleep(AWAIT_PROMOTION_SLEEP_TIME_MS * 1000);
-		}
+		/* errors have already been logged */
+		return false;
 	}
 
-	log_info("Standby reached LSN %s, thus advanced past LSN %s",
-			 standbyCurrentLSN, postgres->currentLSN);
+	if (reachedLSN)
+	{
+		log_info("Standby reached LSN %s, thus advanced past LSN %s",
+				 standbyCurrentLSN, postgres->standbyTargetLSN);
 
-	return true;
+		/* cache invalidation */
+		bzero((void *) postgres->standbyTargetLSN, PG_LSN_MAXLENGTH);
+
+		return true;
+	}
+	else
+	{
+		log_info("Standby reached LSN %s, waiting for LSN %s",
+				 standbyCurrentLSN, postgres->standbyTargetLSN);
+
+		return false;
+	}
 }

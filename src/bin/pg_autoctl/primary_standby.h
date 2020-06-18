@@ -45,6 +45,7 @@ typedef struct LocalPostgresServer
 	int pgStartRetries;
 	PgInstanceKind pgKind;
 	LocalExpectedPostgresStatus expectedPgStatus;
+	char standbyTargetLSN[PG_LSN_MAXLENGTH];
 } LocalPostgresServer;
 
 
@@ -94,7 +95,7 @@ bool primary_rewind_to_standby(LocalPostgresServer *postgres);
 bool standby_promote(LocalPostgresServer *postgres);
 bool check_postgresql_settings(LocalPostgresServer *postgres,
 							   bool *settings_are_ok);
-bool primary_wait_until_standby_has_caught_up(LocalPostgresServer *postgres);
+bool primary_standby_has_caught_up(LocalPostgresServer *postgres);
 
 
 #endif /* LOCAL_POSTGRES_H */

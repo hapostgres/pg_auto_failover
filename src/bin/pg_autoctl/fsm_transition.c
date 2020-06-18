@@ -627,15 +627,25 @@ fsm_enable_sync_rep(Keeper *keeper)
 		return false;
 	}
 
-	/* fetch most recent metadata */
-	if (!pgsql_get_postgres_metadata(pgsql,
-									 config->replication_slot_name,
-									 &pgSetup->is_in_recovery,
-									 postgres->pgsrSyncState,
-									 postgres->currentLSN))
+	/* first time in that state, fetch most recent metadata */
+	if (IS_EMPTY_STRING_BUFFER(postgres->standbyTargetLSN))
 	{
-		log_error("Failed to update the local Postgres metadata");
-		return false;
+		if (!pgsql_get_postgres_metadata(pgsql,
+										 config->replication_slot_name,
+										 &pgSetup->is_in_recovery,
+										 postgres->pgsrSyncState,
+										 postgres->currentLSN))
+		{
+			log_error("Failed to update the local Postgres metadata");
+			return false;
+		}
+
+		strlcpy(postgres->standbyTargetLSN,
+				postgres->currentLSN,
+				PG_LSN_MAXLENGTH);
+
+		log_info("Waiting until standby node has caught-up to LSN %s",
+				 postgres->standbyTargetLSN);
 	}
 
 	/*
@@ -645,7 +655,7 @@ fsm_enable_sync_rep(Keeper *keeper)
 	 * transaction on the primary: get the current LSN, and wait until the
 	 * reported LSN from the secondary has advanced past the current point.
 	 */
-	return primary_wait_until_standby_has_caught_up(postgres);
+	return primary_standby_has_caught_up(postgres);
 }
 
 
