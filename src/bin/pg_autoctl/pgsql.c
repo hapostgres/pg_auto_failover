@@ -32,7 +32,7 @@ static void log_connection_error(PGconn *connection, int logLevel);
 static void pgAutoCtlDefaultNoticeProcessor(void *arg, const char *message);
 static void pgAutoCtlDebugNoticeProcessor(void *arg, const char *message);
 static PGconn * pgsql_open_connection(PGSQL *pgsql);
-static PGconn * pgsql_retry_open_connection(PGSQL *pgsql, uint64_t startTime);
+static bool pgsql_retry_open_connection(PGSQL *pgsql, uint64_t startTime);
 static bool is_response_ok(PGresult *result);
 static bool clear_results(PGconn *connection);
 static bool pgsql_alter_system_set(PGSQL *pgsql, GUC setting);
@@ -364,7 +364,6 @@ log_connection_error(PGconn *connection, int logLevel)
 static PGconn *
 pgsql_open_connection(PGSQL *pgsql)
 {
-	PGconn *connection = NULL;
 	uint64_t startTime = time(NULL);
 
 	/* we might be connected already */
@@ -379,10 +378,10 @@ pgsql_open_connection(PGSQL *pgsql)
 	setenv("PGCONNECT_TIMEOUT", POSTGRES_CONNECT_TIMEOUT, 1);
 
 	/* Make a connection to the database */
-	connection = PQconnectdb(pgsql->connectionString);
+	pgsql->connection = PQconnectdb(pgsql->connectionString);
 
 	/* Check to see that the backend connection was successfully made */
-	if (PQstatus(connection) != CONNECTION_OK)
+	if (PQstatus(pgsql->connection) != CONNECTION_OK)
 	{
 		/*
 		 * Implement the retry policy:
@@ -399,7 +398,7 @@ pgsql_open_connection(PGSQL *pgsql)
 		if (pgsql->connectionType == PGSQL_CONN_LOCAL ||
 			pgsql->retryPolicy.maxR == 0)
 		{
-			(void) log_connection_error(connection, LOG_ERROR);
+			(void) log_connection_error(pgsql->connection, LOG_ERROR);
 
 			log_error("Failed to connect to %s database at \"%s\", "
 					  "see above for details",
@@ -414,21 +413,19 @@ pgsql_open_connection(PGSQL *pgsql)
 		 * If we reach this part of the code, the connectionType is not LOCAL
 		 * and the retryPolicy has a non-zero maximum retry count. Let's retry!
 		 */
-		connection = pgsql_retry_open_connection(pgsql, startTime);
-
-		if (connection == NULL)
+		if (!pgsql_retry_open_connection(pgsql, startTime))
 		{
 			/* errors have already been logged */
 			return NULL;
 		}
 	}
 
-	pgsql->connection = connection;
-
 	/* set the libpq notice receiver to integrate notifications as warnings. */
-	PQsetNoticeProcessor(connection, &pgAutoCtlDefaultNoticeProcessor, NULL);
+	PQsetNoticeProcessor(pgsql->connection,
+						 &pgAutoCtlDefaultNoticeProcessor,
+						 NULL);
 
-	return connection;
+	return pgsql->connection;
 }
 
 
@@ -437,10 +434,9 @@ pgsql_open_connection(PGSQL *pgsql)
  * is ready to accept connections, and then connects to it and returns true
  * when it could connect, false otherwise.
  */
-static PGconn *
+bool
 pgsql_retry_open_connection(PGSQL *pgsql, uint64_t startTime)
 {
-	PGconn *connection = NULL;
 	bool connectionOk = false;
 
 	PGPing lastWarningMessage = PQPING_OK;
@@ -452,7 +448,7 @@ pgsql_retry_open_connection(PGSQL *pgsql, uint64_t startTime)
 	/* should not happen */
 	if (pgsql->retryPolicy.maxR == 0)
 	{
-		return NULL;
+		return false;
 	}
 
 	/* reset our internal counter before entering the retry loop */
@@ -483,7 +479,8 @@ pgsql_retry_open_connection(PGSQL *pgsql, uint64_t startTime)
 			(pgsql->retryPolicy.maxR > 0 &&
 			 pgsql->retryPolicy.attempts >= pgsql->retryPolicy.maxR))
 		{
-			(void) log_connection_error(connection, LOG_ERROR);
+			(void) log_connection_error(pgsql->connection, LOG_ERROR);
+			pgsql_finish(pgsql);
 
 			log_error("Failed to connect to \"%s\" "
 					  "after %d attempts in %d seconds, "
@@ -491,7 +488,8 @@ pgsql_retry_open_connection(PGSQL *pgsql, uint64_t startTime)
 					  pgsql->connectionString,
 					  pgsql->retryPolicy.attempts,
 					  (int) (now - startTime));
-			break;
+
+			return false;
 		}
 
 		/*
@@ -528,9 +526,9 @@ pgsql_retry_open_connection(PGSQL *pgsql, uint64_t startTime)
 				 * PQping does not check authentication, so we might still fail
 				 * to connect to the server.
 				 */
-				connection = PQconnectdb(pgsql->connectionString);
+				pgsql->connection = PQconnectdb(pgsql->connectionString);
 
-				if (PQstatus(connection) == CONNECTION_OK)
+				if (PQstatus(pgsql->connection) == CONNECTION_OK)
 				{
 					uint64_t now = time(NULL);
 
@@ -549,7 +547,7 @@ pgsql_retry_open_connection(PGSQL *pgsql, uint64_t startTime)
 					lastWarningMessage = PQPING_OK;
 					lastWarningTime = now;
 
-					(void) log_connection_error(connection, LOG_WARN);
+					(void) log_connection_error(pgsql->connection, LOG_WARN);
 					pgsql_finish(pgsql);
 
 					log_warn("Failed to connect after successful "
@@ -641,14 +639,15 @@ pgsql_retry_open_connection(PGSQL *pgsql, uint64_t startTime)
 		}
 	}
 
-	if (!connectionOk && connection != NULL)
+	if (!connectionOk && pgsql->connection != NULL)
 	{
-		(void) log_connection_error(connection, LOG_ERROR);
+		(void) log_connection_error(pgsql->connection, LOG_ERROR);
 		pgsql_finish(pgsql);
-		return NULL;
+
+		return false;
 	}
 
-	return connection;
+	return true;
 }
 
 
