@@ -711,17 +711,14 @@ cli_create_monitor(int argc, char **argv)
 
 
 	/*
-	 * We prefer to ignore PGHOST variable for the monitor. The reason is that we
-	 * qualify monitor database as an internal/embedded database for pg_auto_failover.
-	 * In other words, we don't want anyone else to be able to connect to the database,
-	 * except for pg_auto_failover itself. To do that, we hard code host to be the
-	 * unix domain socket, where we can restrict the access.
+	 * The pg_auto_failover monitor Postgres database needs to allow
+	 * connections from the pg_autoctl monitor binary itself (this code) and
+	 * later from other pg_autoctl nodes that are using this monitor instance.
 	 *
-	 * TODO: Not allowing to set PGHOST fails regression tests with:
-	 *
-	 * 	ERROR pgsetup.c:269 PG_REGRESS_SOCK_DIR is set to "" to disable
-	 * 	unix socket directories, now --pghost is mandatory, but unset.
-	 *
+	 * In any case, we don't use --pghost nor PGHOST to build our connection
+	 * string to the Postgres monitor database in this `pg_autoctl create
+	 * monitor` program. Instead we always use the Unix Domain Socket directory
+	 * used by Postgres.
 	 */
 	if (!env_found_empty("PG_REGRESS_SOCK_DIR")  && unsetenv("PGHOST") != 0)
 	{
