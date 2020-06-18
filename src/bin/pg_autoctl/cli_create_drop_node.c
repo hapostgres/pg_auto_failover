@@ -186,9 +186,7 @@ cli_create_config(Keeper *keeper, KeeperConfig *config)
 
 
 /*
- * cli_pg_create calls keeper_pg_init and handle errors and warnings, then
- * destroys the extra config structure instance from the command line option
- * handling.
+ * cli_pg_create calls keeper_pg_init where all the magic happens.
  */
 void
 cli_create_pg(Keeper *keeper)
