@@ -166,7 +166,7 @@ pgsql_set_main_loop_retry_policy(PGSQL *pgsql)
 {
 	(void) pgsql_set_retry_policy(pgsql,
 								  POSTGRES_PING_RETRY_TIMEOUT,
-								  2, /* do not retry by default */
+								  0, /* do not retry by default */
 								  POSTGRES_PING_RETRY_CAP_SLEEP_TIME,
 								  POSTGRES_PING_RETRY_BASE_SLEEP_TIME);
 }
@@ -545,6 +545,7 @@ pgsql_retry_open_connection(PGSQL *pgsql, uint64_t startTime)
 					lastWarningTime = now;
 
 					(void) log_connection_error(connection, LOG_WARN);
+					pgsql_finish(pgsql);
 
 					log_warn("Failed to connect after successful "
 							 "ping, please verify authentication "
