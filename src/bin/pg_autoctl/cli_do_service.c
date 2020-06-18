@@ -328,7 +328,7 @@ cli_do_service_restart_postgres(int argc, char **argv)
 
 
 /*
- * cli_do_service_restart_postgres sends the TERM signal to the monitor
+ * cli_do_service_restart_listener sends the TERM signal to the monitor
  * listener service, which is known to have the restart policy RP_PERMANENT
  * (that's hard-coded). As a consequence the supervisor will restart the
  * service.
