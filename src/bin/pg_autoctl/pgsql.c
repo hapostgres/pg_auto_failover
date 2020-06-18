@@ -483,7 +483,7 @@ pgsql_retry_open_connection(PGSQL *pgsql, uint64_t startTime)
 			(pgsql->retryPolicy.maxR > 0 &&
 			 pgsql->retryPolicy.attempts >= pgsql->retryPolicy.maxR))
 		{
-			(void) log_connection_error(connection, LOG_WARN);
+			(void) log_connection_error(connection, LOG_ERROR);
 
 			log_error("Failed to connect to \"%s\" "
 					  "after %d attempts in %d seconds, "
@@ -532,7 +532,10 @@ pgsql_retry_open_connection(PGSQL *pgsql, uint64_t startTime)
 
 				if (PQstatus(connection) == CONNECTION_OK)
 				{
+					uint64_t now = time(NULL);
+
 					connectionOk = true;
+
 					log_info("Successfully connected to \"%s\" "
 							 "after %d attempts in %d seconds.",
 							 pgsql->connectionString,
@@ -541,6 +544,8 @@ pgsql_retry_open_connection(PGSQL *pgsql, uint64_t startTime)
 				}
 				else
 				{
+					uint64_t now = time(NULL);
+
 					lastWarningMessage = PQPING_OK;
 					lastWarningTime = now;
 
@@ -566,6 +571,8 @@ pgsql_retry_open_connection(PGSQL *pgsql, uint64_t startTime)
 			 */
 			case PQPING_REJECT:
 			{
+				uint64_t now = time(NULL);
+
 				if (lastWarningMessage != PQPING_REJECT ||
 					(now - lastWarningTime) > 30)
 				{
@@ -592,6 +599,8 @@ pgsql_retry_open_connection(PGSQL *pgsql, uint64_t startTime)
 			 */
 			case PQPING_NO_RESPONSE:
 			{
+				uint64_t now = time(NULL);
+
 				if (lastWarningMessage != PQPING_NO_RESPONSE ||
 					(now - lastWarningTime) > 30)
 				{
