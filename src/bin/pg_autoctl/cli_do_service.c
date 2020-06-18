@@ -341,7 +341,7 @@ cli_do_service_restart_listener(int argc, char **argv)
 
 
 /*
- * cli_do_service_restart_postgres sends the TERM signal to the keeper node
+ * cli_do_service_restart_node_active sends the TERM signal to the keeper node
  * active service, which is known to have the restart policy RP_PERMANENT
  * (that's hard-coded). As a consequence the supervisor will restart the
  * service.
