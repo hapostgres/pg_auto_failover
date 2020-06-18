@@ -958,11 +958,8 @@ update_monitor_connection_string(KeeperConfig *config)
 
 	/*
 	 * Try to connect using the new connection string and don't update it if it
-	 * does not actually allow connecting. Note that we use a custom retry
-	 * policy in this interactive command: we retry for up to one minute.
+	 * does not actually allow connecting.
 	 */
-	(void) pgsql_set_interactive_retry_policy(&monitor.pgsql);
-
 	if (!pgsql_execute_with_params(&(monitor.pgsql), "SELECT 1",
 								   0, NULL, NULL, NULL, NULL))
 	{

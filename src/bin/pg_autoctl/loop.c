@@ -56,9 +56,6 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 
 	log_debug("pg_autoctl service is starting");
 
-	/* ensure we use the default retry policy with the monitor */
-	(void) pgsql_set_default_retry_policy(&(keeper->monitor.pgsql));
-
 	while (keepRunning)
 	{
 		bool couldContactMonitorThisRound = false;
@@ -160,6 +157,10 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 				  postgres->pgsrSyncState,
 				  postgres->currentLSN);
 
+
+		/* ensure we use the correct retry policy with the monitor */
+		(void) pgsql_set_main_loop_retry_policy(&(monitor->pgsql));
+
 		/*
 		 * Report the current state to the monitor and get the assigned state.
 		 */
@@ -184,7 +185,7 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 			 *
 			 * Failed to get the goal state from the monitor
 			 */
-			log_info("Could get the goal state from the monitor");
+			log_info("Successfully got the goal state from the monitor");
 		}
 
 		couldContactMonitor = couldContactMonitorThisRound;

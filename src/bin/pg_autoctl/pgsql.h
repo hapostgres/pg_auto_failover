@@ -219,7 +219,7 @@ void pgsql_set_retry_policy(PGSQL *pgsql,
 							int maxR,
 							int maxSleepTime,
 							int baseSleepTime);
-void pgsql_set_default_retry_policy(PGSQL *pgsql);
+void pgsql_set_main_loop_retry_policy(PGSQL *pgsql);
 void pgsql_set_init_retry_policy(PGSQL *pgsql);
 void pgsql_set_interactive_retry_policy(PGSQL *pgsql);
 void pgsql_finish(PGSQL *pgsql);

@@ -14,6 +14,7 @@
 #include "libpq-fe.h"
 #include "pqexpbuffer.h"
 
+#include "cli_root.h"
 #include "defaults.h"
 #include "log.h"
 #include "parsing.h"
@@ -107,8 +108,8 @@ pgsql_init(PGSQL *pgsql, char *url, ConnectionType connectionType)
 	pgsql->connectionType = connectionType;
 	pgsql->connection = NULL;
 
-	/* set our default retry policy: do not retry at pgsql_open_connection */
-	(void) pgsql_set_default_retry_policy(pgsql);
+	/* set our default retry policy for interactive commands */
+	(void) pgsql_set_interactive_retry_policy(pgsql);
 
 	if (validate_connection_string(url))
 	{
@@ -161,7 +162,7 @@ pgsql_set_retry_policy(PGSQL *pgsql,
  * This is the retry policy that prevails in the main keeper loop.
  */
 void
-pgsql_set_default_retry_policy(PGSQL *pgsql)
+pgsql_set_main_loop_retry_policy(PGSQL *pgsql)
 {
 	(void) pgsql_set_retry_policy(pgsql,
 								  POSTGRES_PING_RETRY_TIMEOUT,
@@ -193,15 +194,15 @@ pgsql_set_init_retry_policy(PGSQL *pgsql)
 
 
 /*
- * pgsql_set_interactive_retry_policy sets the retry policy to 1 minute of
- * total retrying time, unbounded number of attempts, and up to 2 seconds of
- * sleep time in between attempts.
+ * pgsql_set_interactive_retry_policy sets the retry policy to 2 seconds of
+ * total retrying time (or PGCONNECT_TIMEOUT when that's set), unbounded number
+ * of attempts, and up to 2 seconds of sleep time in between attempts.
  */
 void
 pgsql_set_interactive_retry_policy(PGSQL *pgsql)
 {
 	(void) pgsql_set_retry_policy(pgsql,
-								  60,
+								  pgconnect_timeout,
 								  -1, /* unbounded number of attempts */
 								  POSTGRES_PING_RETRY_CAP_SLEEP_TIME,
 								  POSTGRES_PING_RETRY_BASE_SLEEP_TIME);
@@ -367,6 +368,9 @@ pgsql_open_connection(PGSQL *pgsql)
 
 	log_debug("Connecting to \"%s\"", pgsql->connectionString);
 
+	/* we implement our own retry strategy */
+	setenv("PGCONNECT_TIMEOUT", POSTGRES_CONNECT_TIMEOUT, 1);
+
 	/* Make a connection to the database */
 	connection = PQconnectdb(pgsql->connectionString);
 
@@ -471,12 +475,14 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 			(pgsql->retryPolicy.maxR > 0 &&
 			 pgsql->retryPolicy.attempts >= pgsql->retryPolicy.maxR))
 		{
-			log_warn("Failed to connect to \"%s\" "
-					 "after %d attempts in %d seconds, "
-					 "pg_autoctl stops retrying now",
-					 pgsql->connectionString,
-					 pgsql->retryPolicy.attempts,
-					 (int) (now - startTime));
+			(void) log_connection_error(connection, LOG_WARN);
+
+			log_error("Failed to connect to \"%s\" "
+					  "after %d attempts in %d seconds, "
+					  "pg_autoctl stops retrying now",
+					  pgsql->connectionString,
+					  pgsql->retryPolicy.attempts,
+					  (int) (now - startTime));
 			break;
 		}
 

@@ -1280,9 +1280,6 @@ keeper_remove(Keeper *keeper, KeeperConfig *config, bool ignore_monitor_errors)
 
 		log_info("Removing local node from the pg_auto_failover monitor.");
 
-		/* use a special connection retry policy for interactive commands */
-		(void) pgsql_set_interactive_retry_policy(&(keeper->monitor.pgsql));
-
 		/*
 		 * If the node was already removed from the monitor, then the
 		 * monitor_remove function is going to return true here. It means that
