@@ -32,7 +32,7 @@ static void log_connection_error(PGconn *connection, int logLevel);
 static void pgAutoCtlDefaultNoticeProcessor(void *arg, const char *message);
 static void pgAutoCtlDebugNoticeProcessor(void *arg, const char *message);
 static PGconn * pgsql_open_connection(PGSQL *pgsql);
-static PGconn * pgsql_retry_open_connection(PGSQL *pgsql);
+static PGconn * pgsql_retry_open_connection(PGSQL *pgsql, uint64_t startTime);
 static bool is_response_ok(PGresult *result);
 static bool clear_results(PGconn *connection);
 static bool pgsql_alter_system_set(PGSQL *pgsql, GUC setting);
@@ -166,7 +166,7 @@ pgsql_set_main_loop_retry_policy(PGSQL *pgsql)
 {
 	(void) pgsql_set_retry_policy(pgsql,
 								  POSTGRES_PING_RETRY_TIMEOUT,
-								  0, /* do not retry by default */
+								  2, /* do not retry by default */
 								  POSTGRES_PING_RETRY_CAP_SLEEP_TIME,
 								  POSTGRES_PING_RETRY_BASE_SLEEP_TIME);
 }
@@ -329,10 +329,16 @@ connectionTypeToString(ConnectionType connectionType)
 static void
 log_connection_error(PGconn *connection, int logLevel)
 {
-	char *message = PQerrorMessage(connection);
+	char *message = connection != NULL ? PQerrorMessage(connection) : NULL;
 	char *errorLines[BUFSIZE] = { 0 };
 	int lineCount = splitLines(message, errorLines, BUFSIZE);
 	int lineNumber = 0;
+
+	/* PQerrorMessage is then "connection pointer is NULL", not helpful */
+	if (connection == NULL)
+	{
+		return;
+	}
 
 	for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
 	{
@@ -359,6 +365,7 @@ static PGconn *
 pgsql_open_connection(PGSQL *pgsql)
 {
 	PGconn *connection = NULL;
+	uint64_t startTime = time(NULL);
 
 	/* we might be connected already */
 	if (pgsql->connection != NULL)
@@ -393,10 +400,12 @@ pgsql_open_connection(PGSQL *pgsql)
 			pgsql->retryPolicy.maxR == 0)
 		{
 			(void) log_connection_error(connection, LOG_ERROR);
+
 			log_error("Failed to connect to %s database at \"%s\", "
 					  "see above for details",
 					  connectionTypeToString(pgsql->connectionType),
 					  pgsql->connectionString);
+
 			pgsql_finish(pgsql);
 			return NULL;
 		}
@@ -405,7 +414,7 @@ pgsql_open_connection(PGSQL *pgsql)
 		 * If we reach this part of the code, the connectionType is not LOCAL
 		 * and the retryPolicy has a non-zero maximum retry count. Let's retry!
 		 */
-		connection = pgsql_retry_open_connection(pgsql);
+		connection = pgsql_retry_open_connection(pgsql, startTime);
 
 		if (connection == NULL)
 		{
@@ -429,12 +438,11 @@ pgsql_open_connection(PGSQL *pgsql)
  * when it could connect, false otherwise.
  */
 static PGconn *
-pgsql_retry_open_connection(PGSQL *pgsql)
+pgsql_retry_open_connection(PGSQL *pgsql, uint64_t startTime)
 {
 	PGconn *connection = NULL;
 	bool connectionOk = false;
 
-	uint64_t startTime = time(NULL);
 	PGPing lastWarningMessage = PQPING_OK;
 	uint64_t lastWarningTime = 0;
 
@@ -448,7 +456,7 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 	}
 
 	/* reset our internal counter before entering the retry loop */
-	pgsql->retryPolicy.attempts = 0;
+	pgsql->retryPolicy.attempts = 1;
 
 	while (!connectionOk)
 	{

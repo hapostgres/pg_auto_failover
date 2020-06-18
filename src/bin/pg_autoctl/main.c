@@ -21,7 +21,7 @@
 
 char pg_autoctl_argv0[MAXPGPATH];
 char pg_autoctl_program[MAXPGPATH];
-int pgconnect_timeout = 2;
+int pgconnect_timeout = 2;      /* see also POSTGRES_CONNECT_TIMEOUT */
 
 char *ps_buffer;                /* will point to argv area */
 size_t ps_buffer_size;          /* space determined at run time */
