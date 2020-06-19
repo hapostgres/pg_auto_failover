@@ -998,19 +998,21 @@ fsm_restart_standby(Keeper *keeper)
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	PostgresRole role = pg_setup_role(pgSetup);
 
-	/* when a primary was put in maintenance, first pg_rewind */
 	switch (role)
 	{
-		case POSTGRES_ROLE_STANDBY:
-		case POSTGRES_ROLE_RECOVERY:
-		{
-			return fsm_start_postgres(keeper);
-		}
-
 		case POSTGRES_ROLE_PRIMARY:
 		case POSTGRES_ROLE_UNKNOWN:
 		{
+			/* when a primary was put in maintenance, first pg_rewind */
 			return fsm_rewind_or_init(keeper);
+		}
+
+		case POSTGRES_ROLE_STANDBY:
+		case POSTGRES_ROLE_RECOVERY:
+		default:
+		{
+			/* when a secondary was put in maintenance, just restart Postgres */
+			return fsm_start_postgres(keeper);
 		}
 	}
 }
