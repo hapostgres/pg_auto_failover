@@ -1109,8 +1109,6 @@ start_maintenance(PG_FUNCTION_ARGS)
 
 	char message[BUFSIZE];
 
-	List *primaryStates = list_make2_int(REPLICATION_STATE_PRIMARY,
-										 REPLICATION_STATE_WAIT_PRIMARY);
 	List *secondaryStates = list_make2_int(REPLICATION_STATE_SECONDARY,
 										   REPLICATION_STATE_CATCHINGUP);
 
@@ -1137,76 +1135,109 @@ start_maintenance(PG_FUNCTION_ARGS)
 	if (currentNode->reportedState == REPLICATION_STATE_MAINTENANCE ||
 		currentNode->goalState == REPLICATION_STATE_MAINTENANCE)
 	{
-		ereport(ERROR,
-				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("cannot start maintenance: "
-						"node %s:%d is already in maintenance",
-						currentNode->nodeName, currentNode->nodePort)));
+		/* if we're already in maintenance, we're good */
+		PG_RETURN_BOOL(true);
 	}
 
-	if (!(IsStateIn(currentNode->reportedState, secondaryStates) &&
-		  currentNode->reportedState == currentNode->goalState))
+	/*
+	 * We allow to go to maintenance in the following cases only:
+	 *
+	 *  - current node is a primary, and we then promote the secondary
+	 *  - current node is a secondary or is catching up
+	 */
+	if (!(IsCurrentState(currentNode, REPLICATION_STATE_PRIMARY) ||
+		  (IsStateIn(currentNode->reportedState, secondaryStates))))
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("cannot start maintenance: current state for node %s:%d "
-						"is \"%s\", expected either "
+						"is \"%s\", expected either \"primary\", "
 						"\"secondary\" or \"catchingup\"",
 						currentNode->nodeName, currentNode->nodePort,
 						ReplicationStateGetName(currentNode->reportedState))));
 	}
 
-	if (!(IsStateIn(otherNode->goalState, primaryStates) &&
-		  currentNode->reportedState == currentNode->goalState))
+	if (IsCurrentState(currentNode, REPLICATION_STATE_PRIMARY))
 	{
+		/*
+		 * We put the primary to maintenance now, and when it has reached the
+		 * assigned goal then the group state machine in ProceedGroupState() is
+		 * going to drive the secondary straight to WAIT_PRIMARY.
+		 */
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of %s:%d to maintenance "
+			"after a user-initiated start_maintenance call.",
+			currentNode->nodeName, currentNode->nodePort);
+
+		SetNodeGoalState(currentNode->nodeName, currentNode->nodePort,
+						 REPLICATION_STATE_MAINTENANCE);
+
+		NotifyStateChange(currentNode->reportedState,
+						  REPLICATION_STATE_MAINTENANCE,
+						  currentNode->formationId,
+						  currentNode->groupId,
+						  currentNode->nodeId,
+						  currentNode->nodeName,
+						  currentNode->nodePort,
+						  currentNode->pgsrSyncState,
+						  currentNode->reportedLSN,
+						  currentNode->candidatePriority,
+						  currentNode->replicationQuorum,
+						  message);
+	}
+	else if (IsStateIn(currentNode->reportedState, secondaryStates))
+	{
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of %s:%d to wait_primary and %s:%d to"
+			"maintenance after a user-initiated start_maintenance call.",
+			otherNode->nodeName, otherNode->nodePort,
+			currentNode->nodeName, currentNode->nodePort);
+
+		SetNodeGoalState(otherNode->nodeName, otherNode->nodePort,
+						 REPLICATION_STATE_WAIT_PRIMARY);
+
+		NotifyStateChange(otherNode->reportedState,
+						  REPLICATION_STATE_WAIT_PRIMARY,
+						  otherNode->formationId,
+						  otherNode->groupId,
+						  otherNode->nodeId,
+						  otherNode->nodeName,
+						  otherNode->nodePort,
+						  otherNode->pgsrSyncState,
+						  otherNode->reportedLSN,
+						  otherNode->candidatePriority,
+						  otherNode->replicationQuorum,
+						  message);
+
+		SetNodeGoalState(currentNode->nodeName, currentNode->nodePort,
+						 REPLICATION_STATE_MAINTENANCE);
+
+		NotifyStateChange(currentNode->reportedState,
+						  REPLICATION_STATE_MAINTENANCE,
+						  currentNode->formationId,
+						  currentNode->groupId,
+						  currentNode->nodeId,
+						  currentNode->nodeName,
+						  currentNode->nodePort,
+						  currentNode->pgsrSyncState,
+						  currentNode->reportedLSN,
+						  currentNode->candidatePriority,
+						  currentNode->replicationQuorum,
+						  message);
+	}
+	else
+	{
+		/* should never happen... but still */
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("cannot start maintenance: current state for node %s:%d "
-						"is \"%s\", expected one of "
-						"\"primary\",  \"wait_primary\", or \"join_primary\"",
-						otherNode->nodeName, otherNode->nodePort,
-						ReplicationStateGetName(otherNode->reportedState))));
+						"is \"%s\", expected either \"primary\", "
+						"\"secondary\" or \"catchingup\"",
+						currentNode->nodeName, currentNode->nodePort,
+						ReplicationStateGetName(currentNode->reportedState))));
 	}
-
-	LogAndNotifyMessage(
-		message, BUFSIZE,
-		"Setting goal state of %s:%d to wait_primary and %s:%d to"
-		"maintenance after a user-initiated start_maintenance call.",
-		otherNode->nodeName, otherNode->nodePort,
-		currentNode->nodeName, currentNode->nodePort);
-
-	SetNodeGoalState(otherNode->nodeName, otherNode->nodePort,
-					 REPLICATION_STATE_WAIT_PRIMARY);
-
-	NotifyStateChange(otherNode->reportedState,
-					  REPLICATION_STATE_WAIT_PRIMARY,
-					  otherNode->formationId,
-					  otherNode->groupId,
-					  otherNode->nodeId,
-					  otherNode->nodeName,
-					  otherNode->nodePort,
-					  otherNode->pgsrSyncState,
-					  otherNode->reportedLSN,
-					  otherNode->candidatePriority,
-					  otherNode->replicationQuorum,
-					  message);
-
-	SetNodeGoalState(currentNode->nodeName, currentNode->nodePort,
-					 REPLICATION_STATE_MAINTENANCE);
-
-	NotifyStateChange(currentNode->reportedState,
-					  REPLICATION_STATE_MAINTENANCE,
-					  currentNode->formationId,
-					  currentNode->groupId,
-					  currentNode->nodeId,
-					  currentNode->nodeName,
-					  currentNode->nodePort,
-					  currentNode->pgsrSyncState,
-					  currentNode->reportedLSN,
-					  currentNode->candidatePriority,
-					  currentNode->replicationQuorum,
-					  message);
-
 	PG_RETURN_BOOL(true);
 }
 

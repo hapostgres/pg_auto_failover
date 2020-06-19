@@ -358,6 +358,8 @@ cli_enable_maintenance(int argc, char **argv)
 
 	if (!monitor_wait_until_node_reported_state(
 			&(keeper.monitor),
+			keeper.config.formation,
+			keeper.config.groupId,
 			keeper.state.current_node_id,
 			MAINTENANCE_STATE))
 	{
@@ -425,8 +427,10 @@ cli_disable_maintenance(int argc, char **argv)
 
 	if (!monitor_wait_until_node_reported_state(
 			&(keeper.monitor),
+			keeper.config.formation,
+			keeper.config.groupId,
 			keeper.state.current_node_id,
-			CATCHINGUP_STATE))
+			SECONDARY_STATE))
 	{
 		log_error("Failed to wait until the new setting has been applied");
 		exit(EXIT_CODE_MONITOR);

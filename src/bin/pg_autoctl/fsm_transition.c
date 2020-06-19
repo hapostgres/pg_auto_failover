@@ -748,6 +748,21 @@ bool
 fsm_stop_postgres(Keeper *keeper)
 {
 	LocalPostgresServer *postgres = &(keeper->postgres);
+	PGSQL *pgsql = &(postgres->sqlClient);
+
+	/*
+	 * The first checkpoint writes all the in-memory buffers, the second
+	 * checkpoint writes everything that was added during the first one. The
+	 * third one might have still some work to do.
+	 */
+	for (int i = 0; i < 3; i++)
+	{
+		if (!pgsql_checkpoint(pgsql))
+		{
+			log_error("Failed to checkpoint before stopping Postgres");
+			return false;
+		}
+	}
 
 	return ensure_postgres_service_is_stopped(postgres);
 }
@@ -968,13 +983,36 @@ fsm_start_maintenance_on_standby(Keeper *keeper)
 
 
 /*
- * fsm_restart_standby is used when restarting standby after manual maintenance
- * is done.
+ * fsm_restart_standby is used when restarting a node after manual maintenance
+ * is done. If the node used to be a primary node, then we first pg_rewind it
+ * to the current primary, or use pg_basebackup when that fails.
+ *
+ * We know if the node used to be a primary because it's then missing the
+ * recovery.conf or standby.signal file in PGDATA, which we probe using
+ * pg_setup_role().
  */
 bool
 fsm_restart_standby(Keeper *keeper)
 {
-	return fsm_start_postgres(keeper);
+	LocalPostgresServer *postgres = &(keeper->postgres);
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+	PostgresRole role = pg_setup_role(pgSetup);
+
+	/* when a primary was put in maintenance, first pg_rewind */
+	switch (role)
+	{
+		case POSTGRES_ROLE_STANDBY:
+		case POSTGRES_ROLE_RECOVERY:
+		{
+			return fsm_start_postgres(keeper);
+		}
+
+		case POSTGRES_ROLE_PRIMARY:
+		case POSTGRES_ROLE_UNKNOWN:
+		{
+			return fsm_rewind_or_init(keeper);
+		}
+	}
 }
 
 

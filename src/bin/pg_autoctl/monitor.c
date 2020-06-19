@@ -2809,19 +2809,51 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
  */
 bool
 monitor_wait_until_node_reported_state(Monitor *monitor,
+									   const char *formation,
+									   int groupId,
 									   int nodeId,
 									   NodeState state)
 {
 	PGconn *connection = monitor->pgsql.connection;
+	NodeAddressArray nodesArray = { 0 };
 	bool reachedMaintenance = false;
 
 	uint64_t start = time(NULL);
+
+	int maxNodeNameSize = 5;    /* strlen("Name") + 1, the header */
+	char nameSeparatorHeader[BUFSIZE] = { 0 };
 
 	if (connection == NULL)
 	{
 		log_warn("Lost connection.");
 		return false;
 	}
+
+	log_info("Listening monitor notifications about state changes "
+			 "in formation \"%s\" and group %d",
+			 formation, groupId);
+	log_info("Following table displays times when notifications are received");
+
+	if (!monitor_get_nodes(monitor,
+						   (char *) formation,
+						   groupId,
+						   &nodesArray))
+	{
+		/* ignore the error, use an educated guess for the max size */
+		log_warn("Failed to get_nodes() on the monitor");
+		maxNodeNameSize = 25;
+	}
+
+	maxNodeNameSize = MaxNodeNameSizeInNodesArray(&nodesArray);
+	(void) prepareNodeNameSeparator(nameSeparatorHeader, maxNodeNameSize);
+
+	fformat(stdout, "%8s | %3s | %*s | %6s | %18s | %18s\n",
+			"Time", "ID", maxNodeNameSize, "Host", "Port",
+			"Current State", "Assigned State");
+
+	fformat(stdout, "%8s-+-%3s-+-%*s-+-%6s-+-%18s-+-%18s\n",
+			"--------", "---", maxNodeNameSize, nameSeparatorHeader,
+			"------", "------------------", "------------------");
 
 	while (!reachedMaintenance)
 	{
@@ -2867,6 +2899,7 @@ monitor_wait_until_node_reported_state(Monitor *monitor,
 			StateNotification notification = { 0 };
 
 			uint64_t now = time(NULL);
+			char timestring[MAXCTIMESIZE];
 
 			if ((now - start) > PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT)
 			{
@@ -2894,12 +2927,28 @@ monitor_wait_until_node_reported_state(Monitor *monitor,
 			}
 
 			/* filter notifications for our own formation */
-			if (notification.nodeId != nodeId)
+			if (strcmp(notification.formationId, formation) != 0 ||
+				notification.groupId != groupId)
 			{
 				continue;
 			}
 
-			if (notification.reportedState == state &&
+			/* format the current time to be user-friendly */
+			epoch_to_string(now, timestring);
+
+			/* "Wed Jun 30 21:49:08 1993" -> "21:49:08" */
+			timestring[11 + 8] = '\0';
+
+			fformat(stdout, "%8s | %3d | %*s | %6d | %18s | %18s\n",
+					timestring + 11,
+					notification.nodeId, maxNodeNameSize,
+					notification.nodeName,
+					notification.nodePort,
+					NodeStateToString(notification.reportedState),
+					NodeStateToString(notification.goalState));
+
+			if (notification.nodeId == nodeId &&
+				notification.reportedState == state &&
 				notification.goalState == state)
 			{
 				reachedMaintenance = true;

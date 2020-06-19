@@ -109,14 +109,42 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 	if (primaryNode == NULL)
 	{
-		/* that's a bug, really, maybe we could use an Assert() instead */
-		ereport(ERROR,
-				(errmsg("ProceedGroupState couldn't find the primary node "
-						"in formation \"%s\", group %d",
-						formationId, groupId),
-				 errdetail("activeNode is %s:%d in state %s",
-						   activeNode->nodeName, activeNode->nodePort,
-						   ReplicationStateGetName(activeNode->goalState))));
+		AutoFailoverNode *otherNode = OtherNodeInGroup(activeNode);
+
+		/*
+		 * when primary is put to maintenance
+		 *  secondary -> wait_primary
+		 */
+		if (IsCurrentState(activeNode, REPLICATION_STATE_SECONDARY) &&
+			IsCurrentState(otherNode, REPLICATION_STATE_MAINTENANCE))
+		{
+			char message[BUFSIZE];
+
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of %s:%d to wait_primary "
+				"after %s:%d has reached maintenance.",
+				activeNode->nodeName, activeNode->nodePort,
+				otherNode->nodeName, otherNode->nodePort);
+
+			/* promote the secondary */
+			AssignGoalState(activeNode, REPLICATION_STATE_WAIT_PRIMARY, message);
+
+			return true;
+		}
+
+		/* if active node is in maintenance, it might be the primary */
+		if (activeNode->goalState != REPLICATION_STATE_MAINTENANCE)
+		{
+			/* that's a bug, really, maybe we could use an Assert() instead */
+			ereport(ERROR,
+					(errmsg("ProceedGroupState couldn't find the primary node "
+							"in formation \"%s\", group %d",
+							formationId, groupId),
+					 errdetail("activeNode is %s:%d in state %s",
+							   activeNode->nodeName, activeNode->nodePort,
+							   ReplicationStateGetName(activeNode->goalState))));
+		}
 	}
 
 	if (IsUnhealthy(primaryNode))
