@@ -244,7 +244,7 @@ semaphore_lock(Semaphore *semaphore)
 				"%d Failed to acquire a lock with semaphore %d: %m\n",
 				getpid(),
 				semaphore->semId);
-		exit(EXIT_CODE_INTERNAL_ERROR);
+		return false;
 	}
 
 	return true;
@@ -279,7 +279,7 @@ semaphore_unlock(Semaphore *semaphore)
 		fformat(stderr,
 				"Failed to release a lock with semaphore %d: %m\n",
 				semaphore->semId);
-		exit(EXIT_CODE_INTERNAL_ERROR);
+		return false;
 	}
 
 	return true;
@@ -294,6 +294,13 @@ void
 semaphore_log_lock_function(void *udata, int mode)
 {
 	Semaphore *semaphore = (Semaphore *) udata;
+
+	/*
+	 * If locking/unlocking fails for some weird reason, we still want to log.
+	 * It's not so bad that we want to completely quit the program.
+	 * That's why we ignore the return values of semaphore_unlock and
+	 * semaphore_lock.
+	 */
 
 	switch (mode)
 	{
