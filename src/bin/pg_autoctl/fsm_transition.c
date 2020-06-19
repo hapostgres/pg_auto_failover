@@ -350,6 +350,9 @@ fsm_disable_replication(Keeper *keeper)
 		return false;
 	}
 
+	/* cache invalidation in case we're doing WAIT_PRIMARY to SINGLE */
+	bzero((void *) postgres->standbyTargetLSN, PG_LSN_MAXLENGTH);
+
 	/* when a standby has been removed, remove its replication slot */
 	return keeper_drop_replication_slots_for_removed_nodes(keeper);
 }
