@@ -21,13 +21,25 @@ typedef enum HBADatabaseType
 } HBADatabaseType;
 
 
+/* supported HBA connection values */
+typedef enum HBAConnectionType
+{
+	HBA_CONNECTION_LOCAL,
+	HBA_CONNECTION_HOST,
+	HBA_CONNECTION_HOSTSSL,
+	HBA_CONNECTION_HOSTNOSSL,
+	HBA_CONNECTION_HOSTGSSENC,
+	HBA_CONNECTION_HOSTNOGSSENC
+} HBAConnectionType;
+
 bool pghba_ensure_host_rule_exists(const char *hbaFilePath,
-								   bool ssl,
+								   HBAConnectionType connectionType,
 								   HBADatabaseType,
 								   const char *database,
 								   const char *username,
 								   const char *hostname,
 								   const char *authenticationScheme);
+bool override_pg_hba_with_only_domain_socket_access(const char *hbaFilePath);
 
 bool pghba_enable_lan_cidr(PGSQL *pgsql,
 						   bool ssl,
@@ -38,6 +50,5 @@ bool pghba_enable_lan_cidr(PGSQL *pgsql,
 						   const char *authenticationScheme,
 						   const char *pgdata);
 
-bool write_trust_local_hba_rule(const char *hbaFilePath);
 
 #endif /* PGHBA_H */

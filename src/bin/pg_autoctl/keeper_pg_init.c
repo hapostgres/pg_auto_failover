@@ -602,6 +602,8 @@ create_database_and_extension(Keeper *keeper)
 	PostgresSetup *pgSetup = &(config->pgSetup);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 	PGSQL *pgsql = &(postgres->sqlClient);
+	HBAConnectionType connectionType =
+		pgSetup->ssl.active ? HBA_CONNECTION_HOSTSSL : HBA_CONNECTION_HOST;
 
 	LocalPostgresServer initPostgres = { 0 };
 	PostgresSetup initPgSetup = { 0 };
@@ -624,7 +626,7 @@ create_database_and_extension(Keeper *keeper)
 	 * string with at least the --username used to create the database.
 	 */
 	if (!pghba_ensure_host_rule_exists(hbaFilePath,
-									   pgSetup->ssl.active,
+									   pgSetup->ssl.active ? HBA_CONNECTION_HOSTSSL : HBA_CONNECTION_HOST,
 									   HBA_DATABASE_DBNAME,
 									   pgSetup->dbname,
 									   pg_setup_get_username(pgSetup),
@@ -647,7 +649,7 @@ create_database_and_extension(Keeper *keeper)
 
 		/* Intended use is restricted to unit testing, hard-code "trust" here */
 		if (!pghba_ensure_host_rule_exists(hbaFilePath,
-										   pgSetup->ssl.active,
+										   connectionType,
 										   HBA_DATABASE_ALL,
 										   NULL, /* all: no database name */
 										   NULL, /* no username, "all" */

@@ -60,7 +60,6 @@ GUC monitor_default_settings[] = {
 
 
 static bool check_monitor_settings(PostgresSetup pgSetup);
-static bool replace_monitor_pg_hba(const char  *pgDataPath);
 
 
 /*
@@ -100,6 +99,8 @@ monitor_pg_init(Monitor *monitor)
 	}
 	else
 	{
+		char hbaFilePath[MAXPGPATH];
+
 		if (!pg_ctl_initdb(pgSetup->pg_ctl, pgSetup->pgdata))
 		{
 			log_fatal("Failed to initialise a PostgreSQL instance at \"%s\", "
@@ -107,9 +108,12 @@ monitor_pg_init(Monitor *monitor)
 			return false;
 		}
 
-		if (!replace_monitor_pg_hba(pgSetup->pgdata))
+		log_trace("overriding pg_hba for monitor");
+
+		sformat(hbaFilePath, MAXPGPATH, "%s/pg_hba.conf", pgSetup->pgdata);
+		if (!override_pg_hba_with_only_domain_socket_access(hbaFilePath))
 		{
-			log_fatal("Failed to replace pg_hba of monitor PostgreSQL instance "
+			log_fatal("Failed to override pg_hba of monitor PostgreSQL instance "
 					  "at \"%s\", see above for details", pgSetup->pgdata);
 			return false;
 		}
@@ -125,28 +129,6 @@ monitor_pg_init(Monitor *monitor)
 	return true;
 }
 
-
-/*
- * replace_monitor_pg_hba gets the path of pgData of the monitor, and
- * overrides the pg_hba rules.
- */
-static bool
-replace_monitor_pg_hba(const char  *pgDataPath)
-
-{
-	char hbaFilePath[MAXPGPATH];
-
-	log_trace("replacing pg_hba for monitor");
-
-	sformat(hbaFilePath, MAXPGPATH, "%s/pg_hba.conf", pgDataPath);
-
-	if (!write_trust_local_hba_rule(hbaFilePath))
-	{
-		return false;
-	}
-
-	return true;
-}
 
 /*
  * Install pg_auto_failover monitor in some existing PostgreSQL instance:

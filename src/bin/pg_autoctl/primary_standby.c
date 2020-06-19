@@ -531,6 +531,8 @@ primary_add_standby_to_hba(LocalPostgresServer *postgres,
 	PostgresSetup *postgresSetup = &(postgres->postgresSetup);
 	char hbaFilePath[MAXPGPATH] = { 0 };
 	char *authMethod = pg_setup_get_auth_method(postgresSetup);
+	HBAConnectionType connectionType =
+		postgresSetup->ssl.active ? HBA_CONNECTION_HOSTSSL : HBA_CONNECTION_HOST;
 
 	if (replicationPassword == NULL)
 	{
@@ -562,7 +564,7 @@ primary_add_standby_to_hba(LocalPostgresServer *postgres,
 	}
 
 	if (!pghba_ensure_host_rule_exists(hbaFilePath,
-									   postgresSetup->ssl.active,
+									   connectionType,
 									   HBA_DATABASE_DBNAME,
 									   postgresSetup->dbname,
 									   PG_AUTOCTL_REPLICA_USERNAME,

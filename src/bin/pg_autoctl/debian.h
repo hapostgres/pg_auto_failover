@@ -63,6 +63,8 @@ typedef struct debian_pathnames
 
 
 bool keeper_ensure_pg_configuration_files_in_pgdata(KeeperConfig *config);
-
+bool comment_out_configuration_parameters(const char *srcConfPath,
+										  const char *dstConfPath,
+										  const char *targetVariableExpression);
 
 #endif /* DEBIAN_H */

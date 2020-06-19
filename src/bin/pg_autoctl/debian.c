@@ -50,9 +50,6 @@ static bool postgresConfigFilesAllExist(PostgresConfigFiles *pgConfigFiles);
 static bool move_configuration_files(PostgresConfigFiles *src,
 									 PostgresConfigFiles *dst);
 
-static bool comment_out_configuration_parameters(const char *srcConfPath,
-												 const char *dstConfPath);
-
 static bool disableAutoStart(PostgresConfigFiles *pgConfigFiles);
 
 
@@ -522,10 +519,19 @@ postgresConfigFilesAllExist(PostgresConfigFiles *pgConfigFiles)
 static bool
 move_configuration_files(PostgresConfigFiles *src, PostgresConfigFiles *dst)
 {
+	/*
+	 * configuration parameters can appear in any order, and we
+	 * need to check for patterns for NAME = VALUE and NAME=VALUE
+	 */
+	const char *targetVariableExpression =
+		"(data_directory|hba_file|ident_file|include_dir)( *)=";
+
 	/* edit postgresql.conf and move it to its dst pathname */
 	log_info("Preparing \"%s\" from \"%s\"", dst->conf, src->conf);
 
-	if (!comment_out_configuration_parameters(src->conf, dst->conf))
+
+	if (!comment_out_configuration_parameters(src->conf, dst->conf,
+											 targetVariableExpression))
 	{
 		return false;
 	}
@@ -582,30 +588,18 @@ move_configuration_files(PostgresConfigFiles *src, PostgresConfigFiles *dst)
 
 
 /*
- * comment_out_configuration_parameters reads postgresql.conf file from source
- * location and writes a new version of it at destination location with some
- * parameters commented out:
- *
- *  data_directory
- *  config_file
- *  hba_file
- *  ident_file
- *  include_dir
+ * comment_out_configuration_parameters reads any configuration file from source
+ * location and writes a new version of it at destination location with the
+ * parameters that are defined targetVariableExpression in commented out.
  */
-static bool
+bool
 comment_out_configuration_parameters(const char *srcConfPath,
-									 const char *dstConfPath)
+									 const char *dstConfPath,
+									 const char *targetVariableExpression)
 {
 	FILE *fileStream = NULL;
 	PQExpBuffer newConfContents = NULL;
 	char lineBuffer[BUFSIZE];
-
-	/*
-	 * configuration parameters can appear in any order, and we
-	 * need to check for patterns for NAME = VALUE and NAME=VALUE
-	 */
-	char *targetVariableExpression =
-		"(data_directory|hba_file|ident_file|include_dir)( *)=";
 
 	/* open a file */
 	fileStream = fopen_read_only(srcConfPath);
