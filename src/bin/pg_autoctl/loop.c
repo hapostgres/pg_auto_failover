@@ -58,6 +58,8 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 
 	while (keepRunning)
 	{
+		bool couldContactMonitorThisRound = false;
+
 		MonitorAssignedState assignedState = { 0 };
 		bool needStateChange = false;
 		bool transitionFailed = false;
@@ -155,10 +157,14 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 				  postgres->pgsrSyncState,
 				  postgres->currentLSN);
 
+
+		/* ensure we use the correct retry policy with the monitor */
+		(void) pgsql_set_main_loop_retry_policy(&(monitor->pgsql));
+
 		/*
 		 * Report the current state to the monitor and get the assigned state.
 		 */
-		couldContactMonitor =
+		couldContactMonitorThisRound =
 			monitor_node_active(monitor,
 								config->formation,
 								config->nodename,
@@ -170,6 +176,19 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 								postgres->currentLSN,
 								postgres->pgsrSyncState,
 								&assignedState);
+
+		if (!couldContactMonitor && couldContactMonitorThisRound && !firstLoop)
+		{
+			/*
+			 * Last message the user saw in the output is the following, and so
+			 * we should say that we're back to the expected situation:
+			 *
+			 * Failed to get the goal state from the monitor
+			 */
+			log_info("Successfully got the goal state from the monitor");
+		}
+
+		couldContactMonitor = couldContactMonitorThisRound;
 
 		if (couldContactMonitor)
 		{

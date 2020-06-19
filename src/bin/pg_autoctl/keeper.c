@@ -1182,6 +1182,9 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 		return false;
 	}
 
+	/* use a special connection retry policy for initialisation */
+	(void) pgsql_set_init_retry_policy(&(keeper->monitor.pgsql));
+
 	if (!monitor_register_node(monitor,
 							   config->formation,
 							   config->nodename,

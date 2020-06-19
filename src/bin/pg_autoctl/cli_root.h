@@ -16,6 +16,7 @@
 
 extern char pg_autoctl_argv0[];
 extern char pg_autoctl_program[];
+extern int pgconnect_timeout;
 extern int logLevel;
 
 extern Semaphore log_semaphore;

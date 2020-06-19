@@ -423,12 +423,21 @@ splitLines(char *errorMessage, char **linesArray, int size)
 	int lineNumber = 0;
 	char *currentLine = errorMessage;
 
+	if (errorMessage == NULL)
+	{
+		return 0;
+	}
+
 	do {
 		char *newLinePtr = strchr(currentLine, '\n');
 
-		if (newLinePtr == NULL && strlen(currentLine) > 0)
+		if (newLinePtr == NULL)
 		{
-			linesArray[lineNumber++] = currentLine;
+			if (strlen(currentLine) > 0)
+			{
+				linesArray[lineNumber++] = currentLine;
+			}
+
 			currentLine = NULL;
 		}
 		else
