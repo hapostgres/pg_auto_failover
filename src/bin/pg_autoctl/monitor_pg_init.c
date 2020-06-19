@@ -108,6 +108,21 @@ monitor_pg_init(Monitor *monitor)
 			return false;
 		}
 
+		/*
+		 * The default rules that Postgres generates for pg_hba.conf is overly
+		 * permissive, it allows anyone to connect from localhost over TCP
+		 * connections.
+		 *
+		 * We considered passing auth-local=trust and --auth-host=trust (or =reject)
+		 * to initdb. However, passing --auth-host=trust allows too many connections.
+		 * Passing --auth-host=reject also doesn't help because pg_auto_failover would
+		 * later append lines to pg_hba.conf, where earlier lines would include reject
+		 * lines.
+		 *
+		 * Instead, we override pg_hba.conf with only allowing local unix domain sockets
+		 * here, and any other rule that pg_auto_failover decides to add can be safely
+		 * appended to the file later on.
+		 */
 		log_trace("overriding pg_hba for monitor");
 
 		sformat(hbaFilePath, MAXPGPATH, "%s/pg_hba.conf", pgSetup->pgdata);

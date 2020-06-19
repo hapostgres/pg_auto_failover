@@ -196,8 +196,10 @@ pghba_ensure_host_rule_exists(const char *hbaFilePath,
 
 /*
  * comment_out_configuration_parameters gets the hbaFilePath and overrides it with
- * 		"local all all  trust"
- * 	which means allow all connections via unix domain sockets.
+ * 		"local all all trust"
+ * 	which means allow all connections via unix domain sockets. The function also
+ * 	keeps the comments and comments out the the already existing rules by
+ * 	explicitly mentioning that pg_auto_failover edited ("edited by pg_auto_failover").
  */
 bool
 override_pg_hba_with_only_domain_socket_access(const char *hbaFilePath)
