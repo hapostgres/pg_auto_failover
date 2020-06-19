@@ -22,11 +22,13 @@
 #include "parsing.h"
 #include "pgsetup.h"
 
+bool allowFailover = false;
 
 static int cli_secondary_getopts(int argc, char **argv);
 static void cli_enable_secondary(int argc, char **argv);
 static void cli_disable_secondary(int argc, char **argv);
 
+static int cli_maintenance_getopts(int argc, char **argv);
 static void cli_enable_maintenance(int argc, char **argv);
 static void cli_disable_maintenance(int argc, char **argv);
 
@@ -61,17 +63,17 @@ static CommandLine disable_secondary_command =
 static CommandLine enable_maintenance_command =
 	make_command("maintenance",
 				 "Enable Postgres maintenance mode on this node",
-				 CLI_PGDATA_USAGE,
+				 " [ --pgdata --allow-failover ]",
 				 CLI_PGDATA_OPTION,
-				 cli_getopt_pgdata,
+				 cli_maintenance_getopts,
 				 cli_enable_maintenance);
 
 static CommandLine disable_maintenance_command =
 	make_command("maintenance",
 				 "Disable Postgres maintenance mode on this node",
-				 CLI_PGDATA_USAGE,
+				 " [ --pgdata --allow-failover ]",
 				 CLI_PGDATA_OPTION,
-				 cli_getopt_pgdata,
+				 cli_maintenance_getopts,
 				 cli_disable_maintenance);
 
 static CommandLine enable_ssl_command =
@@ -133,6 +135,7 @@ cli_secondary_getopts(int argc, char **argv)
 	static struct option long_options[] = {
 		{ "pgdata", required_argument, NULL, 'D' },
 		{ "formation", required_argument, NULL, 'f' },
+		{ "allow-failover", no_argument, NULL, 'A' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
@@ -158,6 +161,13 @@ cli_secondary_getopts(int argc, char **argv)
 			{
 				strlcpy(options.formation, optarg, NAMEDATALEN);
 				log_trace("--formation %s", options.formation);
+				break;
+			}
+
+			case 'A':
+			{
+				allowFailover = true;
+				log_trace("--allow-failover");
 				break;
 			}
 
@@ -301,6 +311,121 @@ cli_disable_secondary(int argc, char **argv)
 
 
 /*
+ * cli_secondary_getopts parses command line options for the secondary feature,
+ * both during enable and disable. Little verification is performed however the
+ * function will error when no --pgdata or --formation are provided, existance
+ * of either are not verified.
+ */
+static int
+cli_maintenance_getopts(int argc, char **argv)
+{
+	KeeperConfig options = { 0 };
+	int c, option_index, errors = 0;
+	int verboseCount = 0;
+
+	static struct option long_options[] = {
+		{ "pgdata", required_argument, NULL, 'D' },
+		{ "allow-failover", no_argument, NULL, 'A' },
+		{ "version", no_argument, NULL, 'V' },
+		{ "verbose", no_argument, NULL, 'v' },
+		{ "quiet", no_argument, NULL, 'q' },
+		{ "help", no_argument, NULL, 'h' },
+		{ NULL, 0, NULL, 0 }
+	};
+
+	optind = 0;
+
+	while ((c = getopt_long(argc, argv, "D:f:Vvqh",
+							long_options, &option_index)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(options.pgSetup.pgdata, optarg, MAXPGPATH);
+				log_trace("--pgdata %s", options.pgSetup.pgdata);
+				break;
+			}
+
+			case 'A':
+			{
+				allowFailover = true;
+				log_trace("--allow-failover");
+				break;
+			}
+
+			case 'V':
+			{
+				/* keeper_cli_print_version prints version and exits. */
+				keeper_cli_print_version(argc, argv);
+				break;
+			}
+
+			case 'v':
+			{
+				++verboseCount;
+				switch (verboseCount)
+				{
+					case 1:
+					{
+						log_set_level(LOG_INFO);
+						break;
+					}
+
+					case 2:
+					{
+						log_set_level(LOG_DEBUG);
+						break;
+					}
+
+					default:
+					{
+						log_set_level(LOG_TRACE);
+						break;
+					}
+				}
+				break;
+			}
+
+			case 'q':
+			{
+				log_set_level(LOG_ERROR);
+				break;
+			}
+
+			case 'h':
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_QUIT);
+				break;
+			}
+
+			default:
+			{
+				/* getopt_long already wrote an error message */
+				errors++;
+				break;
+			}
+		}
+	}
+
+	if (errors > 0)
+	{
+		commandline_help(stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	/* now that we have the command line parameters, prepare the options */
+	(void) prepare_keeper_options(&options);
+
+	/* publish our option parsing in the global variable */
+	keeperOptions = options;
+
+	return optind;
+}
+
+
+/*
  * cli_enable_maintenance calls the pgautofailover.start_maintenance() function
  * on the monitor for the local node.
  */
@@ -332,6 +457,13 @@ cli_enable_maintenance(int argc, char **argv)
 	{
 		log_fatal("Failed to initialise keeper, see above for details");
 		exit(EXIT_CODE_KEEPER);
+	}
+
+	if (keeper.state.current_role == PRIMARY_STATE && !allowFailover)
+	{
+		log_warn("Enabling maintenance on a primary causes a failover");
+		log_fatal("Please use --allow-failover to allow the command proceed");
+		exit(EXIT_CODE_BAD_ARGS);
 	}
 
 	if (!monitor_init(&(keeper.monitor), keeper.config.monitor_pguri))
