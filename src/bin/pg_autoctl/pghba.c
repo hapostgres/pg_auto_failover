@@ -210,10 +210,10 @@ override_pg_hba_with_only_domain_socket_access(const char *hbaFilePath)
 	const char *userName = NULL;
 	const char *authenticationScheme = "trust";
 
-	/* we already pass HBA_DATABASE_ALL so this is useless */
+	/* means "all" databases */
 	const char *databaseName = NULL;
 
-	/* means all hosts */
+	/* means "all" hosts */
 	const char *host = "";
 
 	/* comment out lines starting with these values */
