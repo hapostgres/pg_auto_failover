@@ -628,56 +628,27 @@ keeper_update_pg_state(Keeper *keeper)
 
 
 /*
- * keeper_start_postgres calls pg_ctl_start and then update our local
- * PostgreSQL instance setup and connection string to reflect the new reality.
- */
-bool
-keeper_start_postgres(Keeper *keeper)
-{
-	PostgresSetup *pgSetup = &(keeper->config.pgSetup);
-
-	if (!pg_ctl_start(pgSetup->pg_ctl,
-					  pgSetup->pgdata,
-					  pgSetup->pgport,
-					  pgSetup->listen_addresses))
-	{
-		log_error("Failed to start PostgreSQL at \"%s\" on port %d, "
-				  "see above for details.",
-				  pgSetup->pgdata, pgSetup->pgport);
-		return false;
-	}
-	if (!keeper_update_pg_state(keeper))
-	{
-		log_error("Failed to update the keeper's state from the local "
-				  "PostgreSQL instance, see above for details.");
-		return false;
-	}
-	return true;
-}
-
-
-/*
- * keeper_restart_postgres calls pg_ctl_restart and then update our local
- * PostgreSQL instance setup and connection string to reflect the new reality.
+ * keeper_restart_postgres asks the Postgres controller process to stop and
+ * then to restart Postgres.
+ *
+ * TODO: At the moment we just ensure postgres is stopped, and when that's the
+ * case, ensure it's running again. It would arguably be more efficient to send
+ * the explicit order to restart Postgres on the Postgres controller process
+ * though.
  */
 bool
 keeper_restart_postgres(Keeper *keeper)
 {
-	PostgresSetup *pgSetup = &(keeper->postgres.postgresSetup);
+	LocalPostgresServer *postgres = &(keeper->postgres);
 
-	if (!pg_ctl_restart(pgSetup->pg_ctl, pgSetup->pgdata))
+	if (ensure_postgres_service_is_stopped(postgres))
 	{
-		log_error("Failed to restart PostgreSQL instance at \"%s\", "
-				  "see above for details.", pgSetup->pgdata);
-		return false;
+		bool updateRetries = false;
+
+		return keeper_ensure_postgres_is_running(keeper, updateRetries);
 	}
-	if (!keeper_update_pg_state(keeper))
-	{
-		log_error("Failed to update the keeper's state from the local "
-				  "PostgreSQL instance, see above for details.");
-		return false;
-	}
-	return true;
+
+	return false;
 }
 
 
@@ -700,7 +671,7 @@ keeper_ensure_postgres_is_running(Keeper *keeper, bool updateRetries)
 		}
 		return true;
 	}
-	else if (ensure_local_postgres_is_running(postgres))
+	else if (ensure_postgres_service_is_running(postgres))
 	{
 		log_warn("PostgreSQL was not running, restarted with pid %d",
 				 pgSetup->pidFile.pid);
@@ -769,15 +740,13 @@ keeper_create_self_signed_cert(Keeper *keeper)
  * instruct us when this cache needs to be invalidated (new primary, etc).
  */
 bool
-keeper_ensure_configuration(Keeper *keeper)
+keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 {
 	Monitor *monitor = &(keeper->monitor);
 	KeeperConfig *config = &(keeper->config);
 	KeeperStateData *state = &(keeper->state);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
-
-	bool postgresNotRunningIsOk = false;
 
 	/*
 	 * We just reloaded our configuration file from disk. Use the pgSetup from
@@ -811,22 +780,34 @@ keeper_ensure_configuration(Keeper *keeper)
 	 * would cause pg_basebackup to edit postgresql.auto.conf rather than
 	 * recovery.conf... meaning that our own setup would not have any effect.
 	 *
-	 * Now is a good time to clean-up, at start-up or reload, and either on a
-	 * primary or a secondary, because those parameters should not remain set
-	 * on a primary either.
+	 * Now is a good time to clean-up, at reload, and either on a primary or a
+	 * secondary, because those parameters should not remain set on a primary
+	 * either.
+	 *
+	 * At start-up, we call reload_configuration() before having contacted the
+	 * monitor, so Postgres is not running yet. When Postgres is not running we
+	 * can't ALTER SYSTEM to clean-up the primary_conninfo and
+	 * primary_slot_name, so we skip that step.
+	 *
+	 * At start-up we don't need to reload the configuration by calling the SQL
+	 * function pg_reload_conf() because Postgres is not running yet, it will
+	 * start with the new setup already.
 	 */
-	if (pgSetup->control.pg_control_version >= 1200)
+	if (pg_setup_is_running(pgSetup))
 	{
-		/* errors are logged already, and non-fatal to this function */
-		(void) pgsql_reset_primary_conninfo(&(postgres->sqlClient));
-	}
+		if (pgSetup->control.pg_control_version >= 1200)
+		{
+			/* errors are logged already, and non-fatal to this function */
+			(void) pgsql_reset_primary_conninfo(&(postgres->sqlClient));
+		}
 
-	if (!pgsql_reload_conf(&(postgres->sqlClient)))
-	{
-		log_warn("Failed to reload Postgres configuration after "
-				 "reloading pg_autoctl configuration, "
-				 "see above for details");
-		return false;
+		if (!pgsql_reload_conf(&(postgres->sqlClient)))
+		{
+			log_warn("Failed to reload Postgres configuration after "
+					 "reloading pg_autoctl configuration, "
+					 "see above for details");
+			return false;
+		}
 	}
 
 	if (!monitor_init(&(keeper->monitor), config->monitor_pguri))

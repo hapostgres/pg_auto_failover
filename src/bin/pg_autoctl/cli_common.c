@@ -27,8 +27,8 @@
 #include "parsing.h"
 #include "pgsetup.h"
 #include "pgsql.h"
+#include "pidfile.h"
 #include "state.h"
-#include "service.h"
 #include "string_utils.h"
 
 /* handle command line options for our setup. */

@@ -35,6 +35,7 @@ def test_001_init_primary():
     node1.run()
     assert node1.wait_until_state(target_state="single")
 
+    node1.wait_until_pg_is_running()
     node1.check_ssl("on", "require", primary=True)
 
 
@@ -55,6 +56,7 @@ def test_003_init_secondary():
     assert node2.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")
 
+    node2.wait_until_pg_is_running()
     node2.check_ssl("on", "require")
 
 

@@ -19,6 +19,7 @@ extern bool keeperInitWarnings;
 
 bool keeper_pg_init(Keeper *keeper);
 bool keeper_pg_init_continue(Keeper *keeper);
+bool keeper_pg_init_and_register(Keeper *keeper);
 bool create_database_and_extension(Keeper *keeper);
 
 #endif /* KEEPER_INIT_H */

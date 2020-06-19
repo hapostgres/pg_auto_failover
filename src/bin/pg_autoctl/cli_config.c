@@ -22,7 +22,7 @@
 #include "keeper.h"
 #include "monitor.h"
 #include "monitor_config.h"
-#include "service.h"
+#include "pidfile.h"
 
 
 static void cli_config_check(int argc, char **argv);

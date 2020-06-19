@@ -189,7 +189,7 @@ fsm_init_primary(Keeper *keeper)
 	 * prepare a SINGLE from INIT are depending on being able to connect to the
 	 * local Postgres service.
 	 */
-	if (!ensure_local_postgres_is_running(postgres))
+	if (!ensure_postgres_service_is_running(postgres))
 	{
 		log_error("Failed to initialise postgres as primary because "
 				  "starting postgres failed, see above for details");
@@ -372,8 +372,12 @@ fsm_disable_replication(Keeper *keeper)
 bool
 fsm_resume_as_primary(Keeper *keeper)
 {
-	if (!keeper_start_postgres(keeper))
+	LocalPostgresServer *postgres = &(keeper->postgres);
+
+	if (!ensure_postgres_service_is_running(postgres))
 	{
+		log_error("Failed to promote postgres because the server could not "
+				  "be started before promotion, see above for details");
 		return false;
 	}
 
@@ -668,7 +672,16 @@ fsm_apply_settings(Keeper *keeper)
 bool
 fsm_start_postgres(Keeper *keeper)
 {
-	return keeper_start_postgres(keeper);
+	LocalPostgresServer *postgres = &(keeper->postgres);
+
+	if (!ensure_postgres_service_is_running(postgres))
+	{
+		log_error("Failed to promote postgres because the server could not "
+				  "be started before promotion, see above for details");
+		return false;
+	}
+
+	return true;
 }
 
 
@@ -678,10 +691,9 @@ fsm_start_postgres(Keeper *keeper)
 bool
 fsm_stop_postgres(Keeper *keeper)
 {
-	KeeperConfig *config = &(keeper->config);
-	PostgresSetup *pgSetup = &(config->pgSetup);
+	LocalPostgresServer *postgres = &(keeper->postgres);
 
-	return pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata);
+	return ensure_postgres_service_is_stopped(postgres);
 }
 
 
@@ -932,7 +944,7 @@ fsm_promote_standby(Keeper *keeper)
 {
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
-	if (!ensure_local_postgres_is_running(postgres))
+	if (!ensure_postgres_service_is_running(postgres))
 	{
 		log_error("Failed to promote postgres because the server could not "
 				  "be started before promotion, see above for details");

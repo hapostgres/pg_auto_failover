@@ -211,88 +211,6 @@ local_postgres_update(LocalPostgresServer *postgres, bool postgresNotRunningIsOk
 
 
 /*
- * ensure_local_postgres_is_running starts postgres if it is not already
- * running and updates the setup such that we can connect to it.
- */
-bool
-ensure_local_postgres_is_running(LocalPostgresServer *postgres)
-{
-	PostgresSetup *pgSetup = &(postgres->postgresSetup);
-
-	log_trace("ensure_local_postgres_is_running");
-
-	if (!pg_is_running(pgSetup->pg_ctl, pgSetup->pgdata))
-	{
-		log_info("Postgres is not running, starting postgres");
-
-		if (!pg_ctl_start(pgSetup->pg_ctl,
-						  pgSetup->pgdata,
-						  pgSetup->pgport,
-						  pgSetup->listen_addresses))
-		{
-			/* errors have already been logged */
-			bool pgIsRunning = false;
-			local_postgres_update_pg_failures_tracking(postgres, pgIsRunning);
-			return false;
-		}
-		else
-		{
-			/* we expect postgres to be running now */
-			PostgresSetup newPgSetup = { 0 };
-			bool missingPgdataIsOk = false;
-			bool postgresNotRunningIsOk = false;
-			bool pgIsRunning = false;
-
-			/*
-			 * We know that pg_ctl start --wait was successfull. Still Postgres
-			 * might not have updated its postmaster.pid file yet. Have a
-			 * couple attempts at
-			 */
-			int maxAttempts = 5;
-			int attempts = 0;
-
-			for (attempts = 0; attempts < maxAttempts; attempts++)
-			{
-				bool pgIsRunning = pg_setup_is_running(pgSetup);
-
-				log_trace("waiting for pg_setup_is_running() [%s], attempt %d/%d",
-						  pgIsRunning ? "true" : "false",
-						  attempts + 1,
-						  maxAttempts);
-
-				if (pgIsRunning)
-				{
-					break;
-				}
-
-				/* wait for 100 ms and try again */
-				pg_usleep(100 * 1000);
-			}
-
-			/* update settings from running database */
-			if (!pg_setup_init(&newPgSetup, pgSetup, missingPgdataIsOk,
-							   postgresNotRunningIsOk))
-			{
-				/* errors have already been logged */
-				pgIsRunning = false;
-				local_postgres_update_pg_failures_tracking(postgres, pgIsRunning);
-				return false;
-			}
-
-			/* update connection string for connection to postgres */
-			local_postgres_init(postgres, &newPgSetup);
-
-			/* update PostgreSQL restart failure tracking */
-			pgIsRunning = true;
-			local_postgres_update_pg_failures_tracking(postgres, pgIsRunning);
-		}
-	}
-
-	return true;
-}
-
-
-/*
  * ensure_postgres_service_is_running signals the Postgres controller service
  * that Postgres is expected to be running, by updating the expectedPgStatus
  * file to the proper values, and then wait until Postgres is running before
@@ -547,7 +465,7 @@ postgres_add_default_settings(LocalPostgresServer *postgres)
 	char configFilePath[MAXPGPATH];
 	GUC *default_settings = postgres_default_settings;
 
-	log_trace("primary_add_default_postgres_settings");
+	log_trace("postgres_add_default_settings");
 
 	/* configFilePath = $PGDATA/postgresql.conf */
 	join_path_components(configFilePath, pgSetup->pgdata, "postgresql.conf");
@@ -820,7 +738,7 @@ standby_init_database(LocalPostgresServer *postgres,
 		return false;
 	}
 
-	if (!ensure_local_postgres_is_running(postgres))
+	if (!ensure_postgres_service_is_running(postgres))
 	{
 		return false;
 	}
@@ -866,7 +784,7 @@ primary_rewind_to_standby(LocalPostgresServer *postgres)
 		return false;
 	}
 
-	if (!ensure_local_postgres_is_running(postgres))
+	if (!ensure_postgres_service_is_running(postgres))
 	{
 		log_error("Failed to start postgres after rewind");
 		return false;
