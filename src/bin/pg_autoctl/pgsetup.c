@@ -58,7 +58,12 @@ pg_setup_init(PostgresSetup *pgSetup,
 
 	log_info("pg_setup_init started");
 
-	if (getenv("PG_REGRESS_SOCK_DIR") != NULL)
+	if (strstr(options->pghost, "regress") != NULL)
+	{
+		setenv("PGHOST", options->pghost, true);
+		setenv("PG_REGRESS_SOCK_DIR", options->pghost, true);
+	}
+	else if (env_found_empty("PG_REGRESS_SOCK_DIR"))
 	{
 		if (!set_temp_sockdir())
 		{
@@ -69,8 +74,8 @@ pg_setup_init(PostgresSetup *pgSetup,
 		}
 		log_error("Setting tempdir to pghost: %s", tempDir);
 
-		strlcpy(options->pghost, tempDir, _POSIX_HOST_NAME_MAX);
-		strlcpy(pgSetup->pghost, tempDir, _POSIX_HOST_NAME_MAX);
+		//strlcpy(options->pghost, tempDir, _POSIX_HOST_NAME_MAX);
+		//strlcpy(pgSetup->pghost, tempDir, _POSIX_HOST_NAME_MAX);
 
 
 		log_info("options->pghost is set to: %s", options->pghost);
