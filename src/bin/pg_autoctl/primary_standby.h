@@ -46,6 +46,7 @@ typedef struct LocalPostgresServer
 	PgInstanceKind pgKind;
 	LocalExpectedPostgresStatus expectedPgStatus;
 	char standbyTargetLSN[PG_LSN_MAXLENGTH];
+	int shutdownCheckpointCount;
 } LocalPostgresServer;
 
 

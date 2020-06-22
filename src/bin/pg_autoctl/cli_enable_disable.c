@@ -311,10 +311,10 @@ cli_disable_secondary(int argc, char **argv)
 
 
 /*
- * cli_secondary_getopts parses command line options for the secondary feature,
- * both during enable and disable. Little verification is performed however the
- * function will error when no --pgdata or --formation are provided, existance
- * of either are not verified.
+ * cli_maintenance_getopts parses command line options for the pg_autoctl
+ * enable|disable maintenance feature. We accept the --allow-failover option
+ * that is unique to this command and so we have our own version of the getopt
+ * parsing.
  */
 static int
 cli_maintenance_getopts(int argc, char **argv)

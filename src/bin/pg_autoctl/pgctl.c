@@ -1453,6 +1453,15 @@ prepare_primary_conninfo(char *primaryConnInfo,
 	char escaped[BUFSIZE];
 	PQExpBuffer buffer = NULL;
 
+	if (IS_EMPTY_STRING_BUFFER(primaryHost))
+	{
+		log_debug("prepare_primary_conninfo: missing primary hostname");
+
+		bzero((void *) primaryConnInfo, primaryConnInfoSize);
+
+		return true;
+	}
+
 	buffer = createPQExpBuffer();
 
 	/* application_name shows up in pg_stat_replication on the primary */

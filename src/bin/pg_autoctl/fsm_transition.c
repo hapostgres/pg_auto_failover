@@ -754,21 +754,89 @@ fsm_stop_postgres(Keeper *keeper)
 	if (pg_setup_is_running(pgSetup))
 	{
 		/*
+		 * PostgreSQL shutdown sequence includes a CHECKPOINT, that is issued
+		 * by the checkpointer process one every query backend has stopped
+		 * already. During this final CHECKPOINT no work can be done, so it's
+		 * best to reduce the amount of work needed there. To reduce the
+		 * checkpointer shutdown activity, we perform a manual shutdown while
+		 * still having concurrent activity.
+		 *
 		 * The first checkpoint writes all the in-memory buffers, the second
-		 * checkpoint writes everything that was added during the first one. The
-		 * third one might have still some work to do.
+		 * checkpoint writes everything that was added during the first one.
 		 */
-		for (int i = 0; i < 3; i++)
+		log_info("Preparing shutdown for maintenance: CHECKPOINT;");
+
+		/* we may fail to CHECKPOINT and then will retry at next FSM loop */
+		for (int i = postgres->shutdownCheckpointCount; i < 2; i++)
 		{
 			if (!pgsql_checkpoint(pgsql))
 			{
 				log_error("Failed to checkpoint before stopping Postgres");
 				return false;
 			}
+
+			++(postgres->shutdownCheckpointCount);
 		}
+
+		/* cache invalidation */
+		postgres->shutdownCheckpointCount = 0;
 	}
 
 	return ensure_postgres_service_is_stopped(postgres);
+}
+
+
+/*
+ * fsm_stop_postgres_and_setup_standby is used when the primary is put to
+ * maintenance. Not only do we stop Postgres, we also prepare a partial setup
+ * as a secondary.
+ *
+ * Because we do a clean shutdown of the primary before promoting the
+ * secondary, we consider that there's no extra precaution to take here when
+ * going from primary to maintenance then to catchinup; such as pg_rewind.
+ */
+bool
+fsm_stop_postgres_and_setup_standby(Keeper *keeper)
+{
+	LocalPostgresServer *postgres = &(keeper->postgres);
+	ReplicationSource *upstream = &(postgres->replicationSource);
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+	KeeperConfig *config = &(keeper->config);
+
+	/* we want to produce primary_conninfo = '' anyway */
+	NodeAddress primaryNode = { 0 };
+
+	if (!fsm_stop_postgres(keeper))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/* prepare a partial standby setup (no primary conninfo etc) */
+	if (!standby_init_replication_source(postgres,
+										 &primaryNode,
+										 PG_AUTOCTL_REPLICA_USERNAME,
+										 config->replication_password,
+										 config->replication_slot_name,
+										 config->maximum_backup_rate,
+										 config->backupDirectory,
+										 config->pgSetup.ssl,
+										 keeper->state.current_node_id))
+	{
+		/* can't happen at the moment */
+		return false;
+	}
+
+	/* make the Postgres setup for a standby node without a primary yet */
+	if (!pg_setup_standby_mode(pgSetup->control.pg_control_version,
+							   pgSetup->pgdata,
+							   upstream))
+	{
+		log_error("Failed to setup Postgres as a standby after pg_basebackup");
+		return false;
+	}
+
+	return true;
 }
 
 
@@ -882,8 +950,9 @@ fsm_rewind_or_init(Keeper *keeper)
 		if (!monitor_get_primary(monitor, config->formation, groupId,
 								 &(postgres->replicationSource.primaryNode)))
 		{
-			log_error("Failed to initialise standby because get the primary node "
-					  "from the monitor failed, see above for details");
+			log_error("Failed to initialise standby because pg_autoctl "
+					  "failed to get the primary node from the monitor, "
+					  "see above for details");
 			return false;
 		}
 	}
@@ -988,37 +1057,70 @@ fsm_start_maintenance_on_standby(Keeper *keeper)
 
 /*
  * fsm_restart_standby is used when restarting a node after manual maintenance
- * is done. If the node used to be a primary node, then we first pg_rewind it
- * to the current primary, or use pg_basebackup when that fails.
+ * is done. In case that changed we get the current primary from the monitor
+ * and reset the standby setup (primary_conninfo) to target it, then restart
+ * Postgres.
  *
- * We know if the node used to be a primary because it's then missing the
- * recovery.conf or standby.signal file in PGDATA, which we probe using
- * pg_setup_role().
+ * When the node used to be a primary before maintenance, thanks to our clean
+ * shutdown before promotion we consider it safe to setup the standby and
+ * restart Postgres.
  */
 bool
 fsm_restart_standby(Keeper *keeper)
 {
+	KeeperConfig *config = &(keeper->config);
+	Monitor *monitor = &(keeper->monitor);
+
 	LocalPostgresServer *postgres = &(keeper->postgres);
+	ReplicationSource *upstream = &(postgres->replicationSource);
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
-	PostgresRole role = pg_setup_role(pgSetup);
 
-	switch (role)
+	int groupId = keeper->state.current_group;
+	NodeAddress *primaryNode = NULL;
+
+	/* get the primary node to follow */
+	if (!config->monitorDisabled)
 	{
-		case POSTGRES_ROLE_PRIMARY:
-		case POSTGRES_ROLE_UNKNOWN:
+		if (!monitor_get_primary(monitor, config->formation, groupId,
+								 &(postgres->replicationSource.primaryNode)))
 		{
-			/* when a primary was put in maintenance, first pg_rewind */
-			return fsm_rewind_or_init(keeper);
-		}
-
-		case POSTGRES_ROLE_STANDBY:
-		case POSTGRES_ROLE_RECOVERY:
-		default:
-		{
-			/* when a secondary was put in maintenance, just restart Postgres */
-			return fsm_start_postgres(keeper);
+			log_error("Failed to restart standby because pg_autoctl failed "
+					  "to get the primary node from the monitor, "
+					  "see above for details");
+			return false;
 		}
 	}
+	else
+	{
+		/* copy information from keeper->otherNodes into replicationSource */
+		primaryNode = &(keeper->otherNodes.nodes[0]);
+	}
+
+	if (!standby_init_replication_source(postgres,
+										 primaryNode,
+										 PG_AUTOCTL_REPLICA_USERNAME,
+										 config->replication_password,
+										 config->replication_slot_name,
+										 config->maximum_backup_rate,
+										 config->backupDirectory,
+										 config->pgSetup.ssl,
+										 keeper->state.current_node_id))
+	{
+		/* can't happen at the moment */
+		return false;
+	}
+
+	/* make the Postgres setup for the current (new) primary */
+	if (!pg_setup_standby_mode(pgSetup->control.pg_control_version,
+							   pgSetup->pgdata,
+							   upstream))
+	{
+		log_error("Failed to setup Postgres as a standby after pg_basebackup");
+		return false;
+	}
+
+	/* now restart Postgres */
+	return fsm_start_postgres(keeper);
 }
 
 
