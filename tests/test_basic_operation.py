@@ -53,22 +53,7 @@ def test_005_read_from_secondary():
 def test_006_writes_to_node2_fail():
     node2.run_sql_query("INSERT INTO t1 VALUES (3)")
 
-def test_007_maintenance_secondary():
-    print()
-    print("Enabling maintenance on node2")
-    assert node1.wait_until_state(target_state="primary")
-    node2.enable_maintenance()
-    assert node2.wait_until_state(target_state="maintenance")
-    node2.stop_postgres()
-    node1.run_sql_query("INSERT INTO t1 VALUES (3)")
-
-    print("Disabling maintenance on node2")
-    node2.disable_maintenance()
-    assert node2.wait_until_pg_is_running()
-    assert node2.wait_until_state(target_state="secondary")
-    assert node1.wait_until_state(target_state="primary")
-
-def test_008_maintenance_primary():
+def test_007_maintenance_primary():
     print()
     print("Enabling maintenance on node1, allowing failover")
     assert node1.wait_until_state(target_state="primary")
@@ -82,6 +67,22 @@ def test_008_maintenance_primary():
     assert node1.wait_until_state(target_state="secondary")
     assert node2.wait_until_state(target_state="primary")
 
+def test_008_maintenance_secondary():
+    print()
+    print("Enabling maintenance on node2")
+    assert node2.wait_until_state(target_state="primary")
+    node1.enable_maintenance()
+    assert node1.wait_until_state(target_state="maintenance")
+    node1.stop_postgres()
+    node2.run_sql_query("INSERT INTO t1 VALUES (3)")
+
+    print("Disabling maintenance on node2")
+    node1.disable_maintenance()
+    assert node1.wait_until_pg_is_running()
+    assert node1.wait_until_state(target_state="secondary")
+    assert node2.wait_until_state(target_state="primary")
+
+# the rest of the tests expect node1 to be primary, make it so
 def test_009_failback():
     print()
     monitor.failover()
