@@ -217,7 +217,7 @@ class PGNode:
         Returns a connection string which can be used to connect to this postgres
         node.
         """
-        host = self.vnode.address
+        host = '/tmp/regress.111111'
 
         if (self.authMethod and self.username in self.authenticatedUsers):
             dsn = "postgres://%s:%s@%s:%d/%s" % \
