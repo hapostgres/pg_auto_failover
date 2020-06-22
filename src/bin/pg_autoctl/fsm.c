@@ -205,7 +205,7 @@ KeeperFSMTransition KeeperFSM[] = {
 	/*
 	 * primary was put to maintenance
 	 */
-	{ SECONDARY_STATE, WAIT_PRIMARY_STATE, COMMENT_PRIMARY_TO_MAINTENANCE, &fsm_promote_standby },
+	{ SECONDARY_STATE, WAIT_PRIMARY_STATE, COMMENT_PRIMARY_TO_MAINTENANCE, &fsm_promote_standby_for_primary_maintenance },
 
 	/*
 	 * went down to force the primary to time out, but then it was removed

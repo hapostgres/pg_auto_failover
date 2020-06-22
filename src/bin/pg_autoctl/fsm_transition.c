@@ -1084,3 +1084,67 @@ fsm_promote_standby(Keeper *keeper)
 
 	return true;
 }
+
+
+/*
+ * fsm_promote_standby is used in several situations in the FSM transitions and
+ * the following actions are needed to promote a standby:
+ *
+ *    start_postgres
+ * && promote_standby
+ * && add_standby_to_hba
+ * && create_replication_slot
+ * && disable_synchronous_replication
+ * && keeper_drop_replication_slots_for_removed_nodes
+ *
+ * So we reuse fsm_disable_replication() here, rather than copy/pasting the same
+ * bits code in the fsm_promote_standby() function body. If the definition of
+ * the fsm_promote_standby transition ever came to diverge from whatever
+ * fsm_disable_replication() is doing, we'd have to copy/paste and maintain
+ * separate code path.
+ */
+bool
+fsm_promote_standby_for_primary_maintenance(Keeper *keeper)
+{
+	LocalPostgresServer *postgres = &(keeper->postgres);
+
+	if (!ensure_postgres_service_is_running(postgres))
+	{
+		log_error("Failed to promote postgres because the server could not "
+				  "be started before promotion, see above for details");
+		return false;
+	}
+
+	/*
+	 * If postgres is no longer in recovery mode, standby_promote returns true
+	 * immediately and therefore this function is idempotent.
+	 */
+	if (!standby_promote(postgres))
+	{
+		log_error("Failed to promote the local postgres server from standby "
+				  "to single state, see above for details");
+		return false;
+	}
+
+	/*
+	 * The old primary will (hopefully) come back as a secondary and should
+	 * be able to open a replication connection. We therefore need to do the
+	 * same steps we take when going from single to wait_primary, namely to
+	 * create a replication slot and add the other node to pg_hba.conf. These
+	 * steps are implemented in fsm_prepare_replication.
+	 */
+	if (!prepare_replication(keeper, MAINTENANCE_STATE))
+	{
+		/* prepare_replication logs relevant errors */
+		return false;
+	}
+
+	if (!fsm_disable_replication(keeper))
+	{
+		log_error("Failed to disable synchronous replication after promotion, "
+				  "see above for details");
+		return false;
+	}
+
+	return true;
+}

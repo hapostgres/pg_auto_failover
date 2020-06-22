@@ -48,6 +48,7 @@ bool fsm_promote_standby(Keeper *keeper);
 bool fsm_prepare_standby_for_promotion(Keeper *keeper);
 bool fsm_promote_standby_to_primary(Keeper *keeper);
 bool fsm_promote_standby_to_single(Keeper *keeper);
+bool fsm_promote_standby_for_primary_maintenance(Keeper *keeper);
 bool fsm_stop_replication(Keeper *keeper);
 
 bool fsm_enable_sync_rep(Keeper *keeper);
