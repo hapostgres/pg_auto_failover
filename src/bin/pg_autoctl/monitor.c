@@ -2799,9 +2799,8 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 
 
 /*
- * monitor_wait_until_node_reported_maintenance receives notifications and
- * watches for the given node to have goalState and reportedState set to given
- * state.
+ * monitor_wait_until_node_reported_state receives notifications and watches
+ * for the given node to have goalState and reportedState set to given state.
  *
  * If we lose the monitor connection while watching for the transition steps
  * then we stop watching. It's a best effort attempt at having the CLI be
