@@ -20,8 +20,8 @@
 #include "monitor.h"
 #include "monitor_config.h"
 #include "pgsetup.h"
+#include "pidfile.h"
 #include "primary_standby.h"
-#include "service.h"
 #include "service_postgres.h"
 #include "signals.h"
 #include "supervisor.h"
@@ -98,8 +98,14 @@ service_postgres_start(void *context, pid_t *pid)
 			{
 				(void) pg_log_startup(pgSetup->pgdata, LOG_ERROR);
 			}
-			else
+			else if (log_get_level() <= LOG_DEBUG)
 			{
+				/*
+				 * If postgres started successfully we only log startup
+				 * messages in DEBUG or TRACE loglevel. Otherwise we get might
+				 * see this confusing error, but harmless error message:
+				 * ERROR:  database "postgres" already exists
+				 */
 				(void) pg_log_startup(pgSetup->pgdata, LOG_DEBUG);
 			}
 			return pgIsReady;

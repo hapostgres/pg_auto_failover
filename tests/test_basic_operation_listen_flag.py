@@ -22,6 +22,7 @@ def test_001_init_primary():
     node1.create()
     node1.run()
     assert node1.wait_until_state(target_state="single")
+    node1.wait_until_pg_is_running()
 
 def test_002_create_t1():
     node1.run_sql_query("CREATE TABLE t1(a int)")

@@ -74,4 +74,5 @@ def test_010_drop_secondary():
     assert node1.wait_until_state(target_state="secondary")
     node1.drop()
     assert not node1.pg_is_running()
+    assert node2.wait_until_pg_is_running()
     assert node2.wait_until_state(target_state="single")

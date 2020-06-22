@@ -54,7 +54,6 @@ bool local_postgres_set_status_path(LocalPostgresServer *postgres, bool unlink);
 void local_postgres_finish(LocalPostgresServer *postgres);
 bool local_postgres_update(LocalPostgresServer *postgres,
 						   bool postgresNotRunningIsOk);
-bool ensure_local_postgres_is_running(LocalPostgresServer *postgres);
 bool ensure_postgres_service_is_running(LocalPostgresServer *postgres);
 bool ensure_postgres_service_is_stopped(LocalPostgresServer *postgres);
 

@@ -26,6 +26,7 @@ def test_001_init_primary():
     node1.create()
     node1.run()
     assert node1.wait_until_state(target_state="single")
+    node1.wait_until_pg_is_running()
 
 def test_002_create_t1():
     node1.run_sql_query("CREATE TABLE t1(a int)")
@@ -44,6 +45,7 @@ def test_003_init_secondary():
     assert(p.wait() == 0)
 
     node2 = cluster.create_datanode("/tmp/sb-from-pgdata/node2")
+
 @raises(Exception)
 def test_004_create_raises_error():
     try:
@@ -52,7 +54,7 @@ def test_004_create_raises_error():
         # we want to see the failure here
         print(e)
         raise
-        
+
 def test_005_cleanup_after_failure():
         print("Failed as expected, cleaning up")
         print("rm -rf /tmp/sb-from-pgdata/node2")
@@ -79,6 +81,7 @@ def test_006_init_secondary():
     node3 = cluster.create_datanode("/tmp/sb-from-pgdata/node3")
     node3.create()
     node3.run()
+    cluster.monitor.print_state()
     assert node3.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")
 

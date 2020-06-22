@@ -185,20 +185,6 @@ cli_do_fsm_state(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	/* check that the state matches with running PostgreSQL instance */
-	if (!keeper_update_pg_state(&keeper))
-	{
-		log_fatal("Failed to update the keeper's state from the local "
-				  "PostgreSQL instance, see above.");
-		exit(EXIT_CODE_BAD_STATE);
-	}
-
-	if (!keeper_store_state(&keeper))
-	{
-		/* errors logged in keeper_state_write */
-		exit(EXIT_CODE_BAD_STATE);
-	}
-
 	if (!keeper_state_as_json(&keeper, keeperStateJSON, BUFSIZE))
 	{
 		log_error("Failed to serialize internal keeper state to JSON");

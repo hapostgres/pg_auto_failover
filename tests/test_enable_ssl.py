@@ -45,6 +45,7 @@ def test_001_init_primary():
     node1.run()
     assert node1.wait_until_state(target_state="single")
 
+    node1.wait_until_pg_is_running()
     node1.check_ssl("off", "prefer", primary=True)
 
 def test_002_create_t1():
@@ -82,16 +83,16 @@ def test_006_enable_ssl_primary():
     node1.stop_pg_autoctl()
     node1.enable_ssl(sslSelfSigned=True, sslMode="require")
     node1.run()
-    node1.sleep(2)
 
+    node1.wait_until_pg_is_running()
     node1.check_ssl("on", "require", primary=True)
 
 def test_007_enable_ssl_secondary():
+    node2.stop_pg_autoctl()
     node2.enable_ssl(sslSelfSigned=True, sslMode="require")
-    node2.sleep(5)
+    node2.run()
 
     node2.wait_until_pg_is_running()
-
     node2.check_ssl("on", "require")
 
 def test_008_disable_maintenance():
@@ -183,8 +184,7 @@ def test_011_enable_ssl_verify_ca_primary():
                      sslServerCert = node1Cert.crt,
                      sslMode="verify-ca")
     node1.run()
-    node1.sleep(2)
-
+    node1.wait_until_pg_is_running()
     node1.check_ssl("on", "verify-ca", primary=True)
 
 def test_012_enable_ssl_verify_ca_primary():
@@ -192,14 +192,13 @@ def test_012_enable_ssl_verify_ca_primary():
                               "/CN=node2.pgautofailover.ca")
     node2Cert.create_signed_certificate(cluster.cert)
 
+    node2.stop_pg_autoctl()
     node2.enable_ssl(sslCAFile = cluster.cert.crt,
                      sslServerKey = node2Cert.key,
                      sslServerCert = node2Cert.crt,
                      sslMode="verify-ca")
-    node2.sleep(5)
-
+    node2.run()
     node2.wait_until_pg_is_running()
-
     node2.check_ssl("on", "verify-ca")
 
 def test_013_disable_maintenance():

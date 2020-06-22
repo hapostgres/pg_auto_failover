@@ -39,7 +39,7 @@
 #define REPLICATION_APPLICATION_NAME_PREFIX "pgautofailover_standby_"
 #define FORMATION_DEFAULT "default"
 #define GROUP_ID_DEFAULT 0
-#define POSTGRES_CONNECT_TIMEOUT "5"
+#define POSTGRES_CONNECT_TIMEOUT "2"
 #define MAXIMUM_BACKUP_RATE "100M"
 
 
@@ -59,8 +59,10 @@
 							"ECDHE-RSA-AES256-SHA384"
 
 
-/* retry PQping for a maximum of 15 mins */
-#define POSTGRES_PING_RETRY_TIMEOUT 900
+/* retry PQping for a maximum of 15 mins, up to 2 secs between attemps */
+#define POSTGRES_PING_RETRY_TIMEOUT 900               /* seconds */
+#define POSTGRES_PING_RETRY_CAP_SLEEP_TIME (2 * 1000) /* milliseconds */
+#define POSTGRES_PING_RETRY_BASE_SLEEP_TIME 5         /* milliseconds */
 
 #define PG_AUTOCTL_MONITOR_DISABLED "PG_AUTOCTL_DISABLED"
 
