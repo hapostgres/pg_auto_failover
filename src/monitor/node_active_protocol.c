@@ -1019,6 +1019,35 @@ perform_failover(PG_FUNCTION_ARGS)
 		ereport(ERROR, (errmsg("cannot fail over: there is no secondary node")));
 	}
 
+	/*
+	 * In order to safely proceed we need to ensure that the primary node has
+	 * reached the primary state fully already. In the transition to PRIMARY we
+	 * actually wait until the current LSN observed on the primary has made it
+	 * to the secondary, which is a needed guarantee for avoiding data loss.
+	 */
+	if (!IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY) ||
+		!IsCurrentState(secondaryNode, REPLICATION_STATE_SECONDARY))
+	{
+		ereport(ERROR,
+				(errmsg("cannot fail over: primary node is not in a stable state"),
+				 errdetail("node %d (%s:%d) has reported state \"%s\" and "
+						   "is assigned state \"%s\", "
+						   "and node %d (%s:%d) has reported state \"%s\" "
+						   "and is assigned state \"%s\"",
+						   firstNode->nodeId,
+						   firstNode->nodeName,
+						   firstNode->nodePort,
+						   ReplicationStateGetName(firstNode->reportedState),
+						   ReplicationStateGetName(firstNode->goalState),
+						   secondNode->nodeId,
+						   secondNode->nodeName,
+						   secondNode->nodePort,
+						   ReplicationStateGetName(secondNode->reportedState),
+						   ReplicationStateGetName(secondNode->goalState)),
+				 errhint("a stable state must be observed to "
+						 "perform a manual failover")));
+	}
+
 	LogAndNotifyMessage(
 		message, BUFSIZE,
 		"Setting goal state of %s:%d to draining and %s:%d to "

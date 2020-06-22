@@ -350,6 +350,9 @@ fsm_disable_replication(Keeper *keeper)
 		return false;
 	}
 
+	/* cache invalidation in case we're doing WAIT_PRIMARY to SINGLE */
+	bzero((void *) postgres->standbyTargetLSN, PG_LSN_MAXLENGTH);
+
 	/* when a standby has been removed, remove its replication slot */
 	return keeper_drop_replication_slots_for_removed_nodes(keeper);
 }
@@ -612,11 +615,64 @@ fsm_promote_standby_to_primary(Keeper *keeper)
 bool
 fsm_enable_sync_rep(Keeper *keeper)
 {
+	LocalPostgresServer *postgres = &(keeper->postgres);
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+	PGSQL *pgsql = &(postgres->sqlClient);
+	KeeperConfig *config = &(keeper->config);
+
 	/*
-	 * We need to fetch and apply the synchronous_standby_names setting value
-	 * from the monitor... and that's about it really.
+	 * First, we need to fetch and apply the synchronous_standby_names setting
+	 * value from the monitor...
 	 */
-	return fsm_apply_settings(keeper);
+	if (!fsm_apply_settings(keeper))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/* first time in that state, fetch most recent metadata */
+	if (IS_EMPTY_STRING_BUFFER(postgres->standbyTargetLSN))
+	{
+		if (!pgsql_get_postgres_metadata(pgsql,
+										 config->replication_slot_name,
+										 &pgSetup->is_in_recovery,
+										 postgres->pgsrSyncState,
+										 postgres->currentLSN))
+		{
+			log_error("Failed to update the local Postgres metadata");
+			return false;
+		}
+
+		/*
+		 * Our standbyTargetLSN needs to be set once we have at least one
+		 * standby that's known to participate in the synchronous replication
+		 * quorum.
+		 */
+		if (!(streq(postgres->pgsrSyncState, "quorum") ||
+			  streq(postgres->pgsrSyncState, "sync")))
+		{
+			/* it's an expected situation here, don't fill-up the logs */
+			log_debug("Failed to set the standby Target LSN because we don't "
+					  "have a quorum candidate yet");
+			return false;
+		}
+
+		strlcpy(postgres->standbyTargetLSN,
+				postgres->currentLSN,
+				PG_LSN_MAXLENGTH);
+
+		log_info("Waiting until standby node has caught-up to LSN %s",
+				 postgres->standbyTargetLSN);
+	}
+
+	/*
+	 * Now, we have set synchronous_standby_names and have one standby that's
+	 * expected to be caught-up. Make sure that is the case by checking the LSN
+	 * positions in much the same way as Postgres does when committing a
+	 * transaction on the primary: get the current LSN, and wait until the
+	 * reported LSN from the secondary has advanced past the current point.
+	 */
+	return primary_standby_has_caught_up(postgres);
 }
 
 
