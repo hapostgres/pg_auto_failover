@@ -58,7 +58,7 @@ pg_setup_init(PostgresSetup *pgSetup,
 
 	log_info("pg_setup_init started");
 
-	if (env_found_empty("PG_REGRESS_SOCK_DIR") )
+	if (getenv("PG_REGRESS_SOCK_DIR") != NULL)
 	{
 		if (!set_temp_sockdir())
 		{
