@@ -29,7 +29,7 @@
 #include "signals.h"
 #include "string_utils.h"
 
-char template[] = "/tmp/regress.XXXXXX";
+char template[] = "/tmp/regress.111111";
 char *tempDir = NULL;
 
 static bool set_temp_sockdir(void);
@@ -430,7 +430,9 @@ set_temp_sockdir(void)
 	{
 		log_info("calling mkdtemp");
 
-		tempDir = mkdtemp(template);
+		tempDir = template;
+
+		//tempDir = mkdtemp(template);
 		if (tempDir == NULL)
 		{
 			log_error("mkdtemp failed: ");
@@ -829,7 +831,7 @@ pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 					 pgSetup->pghost);
 		}
 
-		log_warn("pg_setup_get_local_connection_string.6 %s-%s", pgSetup->pghost,pg_regress_sock_dir);
+		log_warn("pg_setup_get_local_connection_string.6  %s-%s", pgSetup->pghost,pg_regress_sock_dir);
 
 		appendPQExpBuffer(connStringBuffer, " host=%s", pgSetup->pghost);
 	}

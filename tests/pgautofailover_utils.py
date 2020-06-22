@@ -43,7 +43,7 @@ class Cluster:
         """
         os.environ["PG_REGRESS_SOCK_DIR"] = ''
         os.environ["PG_AUTOCTL_DEBUG"] = ''
-        os.environ["PGHOST"] = 'localhost'
+        os.environ["PGHOST"] = '/tmp/regress.111111'
         self.networkSubnet = networkSubnet
         self.vlan = network.VirtualLAN(networkNamePrefix, networkSubnet)
         self.monitor = None
@@ -305,6 +305,7 @@ class PGNode:
             "alter user %s with password \'%s\'" % (username, password)
         passwd_command = [shutil.which('psql'),
                           '-d', self.database,
+                          '-h', '/tmp/regress.111111',
                           '-c', alter_user_set_passwd_command]
         self.vnode.run_and_wait(passwd_command, name="user passwd")
         self.authenticatedUsers[username] = password
@@ -1203,6 +1204,7 @@ class MonitorNode(PGNode):
             (formation, group)
         failover_command = [shutil.which('psql'),
                             '-d', self.database,
+                            '-h', '/tmp/regress.111111',
                             '-c', failover_commmand_text]
         self.vnode.run_and_wait(failover_command, name="manual failover")
 
