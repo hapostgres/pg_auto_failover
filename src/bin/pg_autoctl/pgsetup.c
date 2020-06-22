@@ -29,8 +29,10 @@
 #include "signals.h"
 #include "string_utils.h"
 
-char template[] = "/tmp/regress.XXXXXX";
-char *tempDir = NULL;
+char unixDomainSocketTemplate[] = "/tmp/regress.111111";
+
+/* todo: make it NULL for actual values */
+char *currentUnixDomainSocket = unixDomainSocketTemplate;
 
 static bool set_temp_sockdir(void);
 static bool get_pgpid(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk);
@@ -56,29 +58,32 @@ pg_setup_init(PostgresSetup *pgSetup,
 	bool pgIsReady = false;
 	int errors = 0;
 
-	log_info("pg_setup_init started");
-
-	if (strstr(options->pghost, "regress") != NULL)
+	/*
+	 * If pg_auto_failover restarted, we read PGHOST from the config files.
+	 * And, if the config file contains the temporary folder name
+	 * (e.g., unixDomainSocketTemplate), we should use it.
+	 * */
+	if (strstr(options->pghost, "/regress.") != NULL)
 	{
 		setenv("PGHOST", options->pghost, true);
 		setenv("PG_REGRESS_SOCK_DIR", options->pghost, true);
 	}
 	else if (env_found_empty("PG_REGRESS_SOCK_DIR"))
 	{
+		/*
+		 * If we're inside regression test, we should set the unix domain socket
+		 * to a temporary socket.
+		 */
 		if (!set_temp_sockdir())
 		{
 			log_error("Failed to set temporary socket directory");
 
-
 			return false;
 		}
-		log_error("Setting tempdir to pghost: %s", tempDir);
 
-		//strlcpy(options->pghost, tempDir, _POSIX_HOST_NAME_MAX);
-		//strlcpy(pgSetup->pghost, tempDir, _POSIX_HOST_NAME_MAX);
-
-
-		log_info("options->pghost is set to: %s", options->pghost);
+		log_trace("Setting unix domain socket to to pghost: %s",
+				  currentUnixDomainSocket);
+		log_trace("options->pghost is set to: %s", options->pghost);
 	}
 
 	/*
@@ -423,25 +428,34 @@ pg_setup_init(PostgresSetup *pgSetup,
 }
 
 
+
+/*
+ * TODO: add  comments.
+ */
 static bool
 set_temp_sockdir(void)
 {
-	if (tempDir == NULL)
+	/* create the tempDir once */
+	if (currentUnixDomainSocket == NULL)
 	{
-		log_info("calling mkdtemp");
-
-		tempDir = mkdtemp(template);
-		if (tempDir == NULL)
+		/* TODO: cleanup the temp folder as Postgres does */
+		currentUnixDomainSocket = mkdtemp(unixDomainSocketTemplate);
+		if (currentUnixDomainSocket == NULL)
 		{
+			/* TODO: is there anything we can do? */
 			log_error("mkdtemp failed: ");
 			return false;
 		}
 	}
 
-	log_info("set_temp_sockdir started:%s", tempDir);
-
-	setenv("PGHOST", tempDir, true);
-	setenv("PG_REGRESS_SOCK_DIR", tempDir, true);
+	/*
+	 * Forcefully set PGHOST and PG_REGRESS_SOCK_DIR as some other code-paths
+	 * rely on these enviroment variables.
+	 *
+	 * TODO: Do we really need to forcefully set both?
+	 */
+	setenv("PGHOST", currentUnixDomainSocket, true);
+	setenv("PG_REGRESS_SOCK_DIR", currentUnixDomainSocket, true);
 
 	return true;
 }
@@ -788,7 +802,6 @@ pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 	if (pg_regress_sock_dir_exists &&
 		!get_env_copy("PG_REGRESS_SOCK_DIR", pg_regress_sock_dir, MAXPGPATH))
 	{
-		log_warn("pg_setup_get_local_connection_string.1");
 		/* errors have already been logged */
 		return false;
 	}
@@ -799,25 +812,18 @@ pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 	 * usually), even when the configuration setup is using a unix directory
 	 * setting.
 	 */
-	log_warn("pg_setup_get_local_connection_string.2");
 
 	if (env_found_empty("PG_REGRESS_SOCK_DIR") &&
 		(IS_EMPTY_STRING_BUFFER(pgSetup->pghost) ||
 		 pgSetup->pghost[0] == '/'))
 	{
-		log_warn("pg_setup_get_local_connection_string.3: %s", pgSetup->pghost);
-
 		appendPQExpBufferStr(connStringBuffer, " host=localhost");
 	}
 	else if (!IS_EMPTY_STRING_BUFFER(pgSetup->pghost))
 	{
-		log_warn("pg_setup_get_local_connection_string.4: %s", pgSetup->pghost);
-
 		if (pg_regress_sock_dir_exists && strlen(pg_regress_sock_dir) > 0 &&
 			strcmp(pgSetup->pghost, pg_regress_sock_dir) != 0)
 		{
-			log_warn("pg_setup_get_local_connection_string.5 %s-%s", pgSetup->pghost,pg_regress_sock_dir);
-
 			/*
 			 * It might turn out ok (stray environment), but in case of
 			 * connection error, this warning should be useful to debug the
@@ -828,8 +834,6 @@ pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 					 pg_regress_sock_dir,
 					 pgSetup->pghost);
 		}
-
-		log_warn("pg_setup_get_local_connection_string.6 %s-%s", pgSetup->pghost,pg_regress_sock_dir);
 
 		appendPQExpBuffer(connStringBuffer, " host=%s", pgSetup->pghost);
 	}

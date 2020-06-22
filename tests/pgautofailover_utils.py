@@ -305,6 +305,7 @@ class PGNode:
             "alter user %s with password \'%s\'" % (username, password)
         passwd_command = [shutil.which('psql'),
                           '-d', self.database,
+			  '-h', '/tmp/regress.111111',
                           '-c', alter_user_set_passwd_command]
         self.vnode.run_and_wait(passwd_command, name="user passwd")
         self.authenticatedUsers[username] = password
