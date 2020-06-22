@@ -709,22 +709,6 @@ cli_create_monitor(int argc, char **argv)
 
 	monitor.config = monitorOptions;
 
-
-	/*
-	 * The pg_auto_failover monitor Postgres database needs to allow
-	 * connections from the pg_autoctl monitor binary itself (this code) and
-	 * later from other pg_autoctl nodes that are using this monitor instance.
-	 *
-	 * In any case, we don't use --pghost nor PGHOST to build our connection
-	 * string to the Postgres monitor database in this `pg_autoctl create
-	 * monitor` program. Instead we always use the Unix Domain Socket directory
-	 * used by Postgres.
-	 */
-	if (!env_found_empty("PG_REGRESS_SOCK_DIR")  && unsetenv("PGHOST") != 0)
-	{
-		exit(EXIT_CODE_BAD_STATE);
-	}
-
 	/*
 	 * We support two modes of operations here:
 	 *   - configuration exists already, we need PGDATA

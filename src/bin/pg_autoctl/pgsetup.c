@@ -29,7 +29,10 @@
 #include "signals.h"
 #include "string_utils.h"
 
+char template[] = "/tmp/regress.XXXXXX";
+char *tempDir = NULL;
 
+static bool set_temp_sockdir(void);
 static bool get_pgpid(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk);
 static PostmasterStatus pmStatusFromString(const char *postmasterStatus);
 
@@ -52,6 +55,26 @@ pg_setup_init(PostgresSetup *pgSetup,
 {
 	bool pgIsReady = false;
 	int errors = 0;
+
+	log_info("pg_setup_init started");
+
+	if (env_found_empty("PG_REGRESS_SOCK_DIR") )
+	{
+		if (!set_temp_sockdir())
+		{
+			log_error("Failed to set temporary socket directory");
+
+
+			return false;
+		}
+		log_error("Setting tempdir to pghost: %s", tempDir);
+
+		strlcpy(options->pghost, tempDir, _POSIX_HOST_NAME_MAX);
+		strlcpy(pgSetup->pghost, tempDir, _POSIX_HOST_NAME_MAX);
+
+
+		log_info("options->pghost is set to: %s", options->pghost);
+	}
 
 	/*
 	 * Make sure that we keep the options->nodeKind in the pgSetup.
@@ -394,6 +417,29 @@ pg_setup_init(PostgresSetup *pgSetup,
 	return true;
 }
 
+
+static bool
+set_temp_sockdir(void)
+{
+	if (tempDir == NULL)
+	{
+		log_info("calling mkdtemp");
+
+		tempDir = mkdtemp(template);
+		if (tempDir == NULL)
+		{
+			log_error("mkdtemp failed: ");
+			return false;
+		}
+	}
+
+	log_info("set_temp_sockdir started:%s", tempDir);
+
+	setenv("PGHOST", tempDir, true);
+	setenv("PG_REGRESS_SOCK_DIR", tempDir, true);
+
+	return true;
+}
 
 /*
  * Read the first line of the PGDATA/postmaster.pid file to get Postgres PID.
