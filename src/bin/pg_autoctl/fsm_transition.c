@@ -748,19 +748,23 @@ bool
 fsm_stop_postgres(Keeper *keeper)
 {
 	LocalPostgresServer *postgres = &(keeper->postgres);
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	PGSQL *pgsql = &(postgres->sqlClient);
 
-	/*
-	 * The first checkpoint writes all the in-memory buffers, the second
-	 * checkpoint writes everything that was added during the first one. The
-	 * third one might have still some work to do.
-	 */
-	for (int i = 0; i < 3; i++)
+	if (pg_setup_is_running(pgSetup))
 	{
-		if (!pgsql_checkpoint(pgsql))
+		/*
+		 * The first checkpoint writes all the in-memory buffers, the second
+		 * checkpoint writes everything that was added during the first one. The
+		 * third one might have still some work to do.
+		 */
+		for (int i = 0; i < 3; i++)
 		{
-			log_error("Failed to checkpoint before stopping Postgres");
-			return false;
+			if (!pgsql_checkpoint(pgsql))
+			{
+				log_error("Failed to checkpoint before stopping Postgres");
+				return false;
+			}
 		}
 	}
 
