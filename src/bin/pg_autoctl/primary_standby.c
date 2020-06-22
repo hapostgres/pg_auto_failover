@@ -902,3 +902,52 @@ check_postgresql_settings(LocalPostgresServer *postgres, bool *settings_are_ok)
 	pgsql_finish(pgsql);
 	return result;
 }
+
+
+/*
+ * primary_wait_until_standby_has_caught_up loops over a SQL query on the
+ * primary that checks the current reported LSN from the standby's replication
+ * slot.
+ */
+bool
+primary_standby_has_caught_up(LocalPostgresServer *postgres)
+{
+	PGSQL *pgsql = &(postgres->sqlClient);
+
+	char standbyCurrentLSN[PG_LSN_MAXLENGTH] = { 0 };
+	bool reachedLSN = false;
+
+	/* ensure some WAL level traffic to move things forward */
+	if (!pgsql_checkpoint(pgsql))
+	{
+		log_error("Failed to checkpoint after promotion");
+		return false;
+	}
+
+	if (!pgsql_one_slot_has_reached_target_lsn(pgsql,
+											   postgres->standbyTargetLSN,
+											   standbyCurrentLSN,
+											   &reachedLSN))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	if (reachedLSN)
+	{
+		log_info("Standby reached LSN %s, thus advanced past LSN %s",
+				 standbyCurrentLSN, postgres->standbyTargetLSN);
+
+		/* cache invalidation */
+		bzero((void *) postgres->standbyTargetLSN, PG_LSN_MAXLENGTH);
+
+		return true;
+	}
+	else
+	{
+		log_info("Standby reached LSN %s, waiting for LSN %s",
+				 standbyCurrentLSN, postgres->standbyTargetLSN);
+
+		return false;
+	}
+}

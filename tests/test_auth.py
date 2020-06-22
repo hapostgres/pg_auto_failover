@@ -24,11 +24,11 @@ def test_001_init_primary():
     global node1
     node1 = cluster.create_datanode("/tmp/auth/node1", authMethod="md5")
     node1.create()
-    node1.run()
-    node1.wait_until_pg_is_running()
-
-    node1.set_user_password("pgautofailover_replicator", "streaming_password")
     node1.config_set("replication.password", "streaming_password")
+    node1.run()
+
+    node1.wait_until_pg_is_running()
+    node1.set_user_password("pgautofailover_replicator", "streaming_password")
 
     assert node1.wait_until_state(target_state="single")
 
@@ -50,6 +50,8 @@ def test_003_init_secondary():
 
 def test_004_failover():
     print()
+    print("node1 replication.password: %s" % node1.config_get("replication.password"))
+    print("node2 replication.password: %s" % node2.config_get("replication.password"))
     print("Calling pgautofailover.failover() on the monitor")
     cluster.monitor.failover()
     assert node2.wait_until_state(target_state="primary")
