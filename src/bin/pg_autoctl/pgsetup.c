@@ -788,6 +788,7 @@ pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 	if (pg_regress_sock_dir_exists &&
 		!get_env_copy("PG_REGRESS_SOCK_DIR", pg_regress_sock_dir, MAXPGPATH))
 	{
+		log_warn("pg_setup_get_local_connection_string.1");
 		/* errors have already been logged */
 		return false;
 	}
@@ -798,17 +799,25 @@ pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 	 * usually), even when the configuration setup is using a unix directory
 	 * setting.
 	 */
+	log_warn("pg_setup_get_local_connection_string.2");
+
 	if (env_found_empty("PG_REGRESS_SOCK_DIR") &&
 		(IS_EMPTY_STRING_BUFFER(pgSetup->pghost) ||
 		 pgSetup->pghost[0] == '/'))
 	{
+		log_warn("pg_setup_get_local_connection_string.3: %s", pgSetup->pghost);
+
 		appendPQExpBufferStr(connStringBuffer, " host=localhost");
 	}
 	else if (!IS_EMPTY_STRING_BUFFER(pgSetup->pghost))
 	{
+		log_warn("pg_setup_get_local_connection_string.4: %s", pgSetup->pghost);
+
 		if (pg_regress_sock_dir_exists && strlen(pg_regress_sock_dir) > 0 &&
 			strcmp(pgSetup->pghost, pg_regress_sock_dir) != 0)
 		{
+			log_warn("pg_setup_get_local_connection_string.5 %s-%s", pgSetup->pghost,pg_regress_sock_dir);
+
 			/*
 			 * It might turn out ok (stray environment), but in case of
 			 * connection error, this warning should be useful to debug the
@@ -819,6 +828,9 @@ pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 					 pg_regress_sock_dir,
 					 pgSetup->pghost);
 		}
+
+		log_warn("pg_setup_get_local_connection_string.6 %s-%s", pgSetup->pghost,pg_regress_sock_dir);
+
 		appendPQExpBuffer(connStringBuffer, " host=%s", pgSetup->pghost);
 	}
 
