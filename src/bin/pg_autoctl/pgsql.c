@@ -2271,7 +2271,7 @@ parsePgReachedTargetLSN(void *ctx, PGresult *result)
 
 	if (PQntuples(result) == 0)
 	{
-		log_warn("Query returned no rows");
+		log_debug("parsePgReachedTargetLSN: query returned no rows");
 		context->parsedOk = false;
 		context->noRows = true;
 		return;
