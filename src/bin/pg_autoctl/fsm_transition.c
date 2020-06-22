@@ -643,6 +643,20 @@ fsm_enable_sync_rep(Keeper *keeper)
 			return false;
 		}
 
+		/*
+		 * Our standbyTargetLSN needs to be set once we have at least one
+		 * standby that's known to participate in the synchronous replication
+		 * quorum.
+		 */
+		if (!(streq(postgres->pgsrSyncState, "quorum") ||
+			  streq(postgres->pgsrSyncState, "sync")))
+		{
+			/* it's an expected situation here, don't fill-up the logs */
+			log_debug("Failed to set the standby Target LSN because we don't "
+					  "have a quorum candidate yet");
+			return false;
+		}
+
 		strlcpy(postgres->standbyTargetLSN,
 				postgres->currentLSN,
 				PG_LSN_MAXLENGTH);

@@ -2186,6 +2186,7 @@ typedef struct PgReachedTargetLSN
 	bool parsedOk;
 	bool reachedLSN;
 	char currentLSN[PG_LSN_MAXLENGTH];
+	bool noRows;
 } PgReachedTargetLSN;
 
 
@@ -2233,7 +2234,15 @@ pgsql_one_slot_has_reached_target_lsn(PGSQL *pgsql,
 
 	if (!context.parsedOk)
 	{
-		log_error("Failed to get result from pg_last_wal_replay_lsn()");
+		if (context.noRows)
+		{
+			log_warn("No standby nodes are connected at the moment");
+		}
+		else
+		{
+			log_error("Failed to fetch current flush_lsn location for "
+					  "connected standby nodes, see above for details");
+		}
 		return false;
 	}
 
@@ -2260,6 +2269,13 @@ parsePgReachedTargetLSN(void *ctx, PGresult *result)
 		return;
 	}
 
+	if (PQntuples(result) == 0)
+	{
+		log_warn("Query returned no rows");
+		context->parsedOk = false;
+		context->noRows = true;
+		return;
+	}
 	if (PQntuples(result) != 1)
 	{
 		log_error("Query returned %d rows, expected 1", PQntuples(result));
