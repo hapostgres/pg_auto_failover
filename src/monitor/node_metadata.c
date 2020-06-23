@@ -1119,3 +1119,16 @@ IsInPrimaryState(AutoFailoverNode *pgAutoFailoverNode)
 		   pgAutoFailoverNode->goalState == pgAutoFailoverNode->reportedState &&
 		   CanTakeWritesInState(pgAutoFailoverNode->goalState);
 }
+
+
+/*
+ * IsInMaintenance returns true if the given node has been assigned a
+ * maintenance state, whether it reached it yet or not.
+ */
+bool
+IsInMaintenance(AutoFailoverNode *node)
+{
+	return node != NULL &&
+		   (node->goalState == REPLICATION_STATE_PREPARE_MAINTENANCE ||
+			node->goalState == REPLICATION_STATE_MAINTENANCE);
+}

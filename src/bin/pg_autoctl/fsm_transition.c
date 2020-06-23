@@ -40,6 +40,8 @@
 #include "state.h"
 
 static bool prepare_replication(Keeper *keeper, NodeState otherNodeState);
+static bool promote_standby_and_prepare_replication(Keeper *keeper,
+													NodeState otherNodeState);
 
 
 /*
@@ -1083,8 +1085,30 @@ fsm_restart_standby(Keeper *keeper)
 
 
 /*
- * fsm_promote_standby is used in several situations in the FSM transitions and
- * the following actions are needed to promote a standby:
+ * fsm_promote_standby is used in several situations in the FSM transitions.
+ */
+bool
+fsm_promote_standby(Keeper *keeper)
+{
+	return promote_standby_and_prepare_replication(keeper, DEMOTE_TIMEOUT_STATE);
+}
+
+
+/*
+ * fsm_promote_standby_for_primary_maintenance is used to promote a standby and
+ * prepare the HBA entries for the current primary, that is currently being put
+ * to maintenance.
+ */
+bool
+fsm_promote_standby_for_primary_maintenance(Keeper *keeper)
+{
+	return promote_standby_and_prepare_replication(keeper, MAINTENANCE_STATE);
+}
+
+
+/*
+ * promote_standby_and_prepare_replication is used in several situations in the
+ * FSM transitions and the following actions are needed to promote a standby:
  *
  *    start_postgres
  * && promote_standby
@@ -1098,9 +1122,13 @@ fsm_restart_standby(Keeper *keeper)
  * the fsm_promote_standby transition ever came to diverge from whatever
  * fsm_disable_replication() is doing, we'd have to copy/paste and maintain
  * separate code path.
+ *
+ * We open the HBA connections for the other node as found per given state,
+ * most often a DEMOTE_TIMEOUT_STATE, sometimes though MAINTENANCE_STATE.
  */
-bool
-fsm_promote_standby(Keeper *keeper)
+static bool
+promote_standby_and_prepare_replication(Keeper *keeper,
+										NodeState otherNodeState)
 {
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
@@ -1129,7 +1157,7 @@ fsm_promote_standby(Keeper *keeper)
 	 * create a replication slot and add the other node to pg_hba.conf. These
 	 * steps are implemented in fsm_prepare_replication.
 	 */
-	if (!prepare_replication(keeper, DEMOTE_TIMEOUT_STATE))
+	if (!prepare_replication(keeper, otherNodeState))
 	{
 		/* prepare_replication logs relevant errors */
 		return false;

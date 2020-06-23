@@ -258,7 +258,7 @@ KeeperFSMTransition KeeperFSM[] = {
 	/*
 	 * finish the promotion
 	 */
-	{ PREP_PROMOTION_STATE, WAIT_PRIMARY_STATE, COMMENT_BLOCKED_WRITES, &fsm_promote_standby },
+	{ PREP_PROMOTION_STATE, WAIT_PRIMARY_STATE, COMMENT_BLOCKED_WRITES, &fsm_promote_standby_for_primary_maintenance },
 
 	/*
 	 * Just wait until primary is ready

@@ -899,8 +899,7 @@ SELECT reportedstate
         :return:
         """
         command = PGAutoCtl(self)
-        command.execute("disable maintenance", 'disable', 'maintenance',
-                        timeout=10)
+        command.execute("disable maintenance", 'disable', 'maintenance')
 
     def drop(self):
         """

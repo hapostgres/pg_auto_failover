@@ -263,8 +263,13 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	/*
 	 * when node is seeing no more writes:
 	 *  prepare_promotion -> stop_replication
+	 *
+	 * refrain from prepare_maintenance -> demote_timeout on the primary, which
+	 * might happen here when secondary has reached prepare_promotion before
+	 * primary has reached prepare_maintenance.
 	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_PREPARE_PROMOTION))
+	if (IsCurrentState(activeNode, REPLICATION_STATE_PREPARE_PROMOTION) &&
+		!IsInMaintenance(primaryNode))
 	{
 		char message[BUFSIZE];
 

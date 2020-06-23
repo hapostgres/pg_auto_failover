@@ -160,3 +160,4 @@ extern bool CanTakeWritesInState(ReplicationState state);
 extern bool StateBelongsToPrimary(ReplicationState state);
 extern bool IsInWaitOrJoinState(AutoFailoverNode *node);
 extern bool IsInPrimaryState(AutoFailoverNode *pgAutoFailoverNode);
+extern bool IsInMaintenance(AutoFailoverNode *node);
