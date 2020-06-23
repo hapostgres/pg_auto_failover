@@ -1296,7 +1296,7 @@ stop_maintenance(PG_FUNCTION_ARGS)
 				 errmsg("cannot stop maintenance when current state for "
 						"node %s:%d is \"%s\"",
 						otherNode->nodeName, otherNode->nodePort,
-						ReplicationStateGetName(otherNode->goalState))));
+						ReplicationStateGetName(otherNode->reportedState))));
 	}
 
 	LogAndNotifyMessage(
