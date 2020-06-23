@@ -2799,180 +2799,6 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 
 
 /*
- * monitor_wait_until_node_reported_state receives notifications and watches
- * for the given node to have goalState and reportedState set to given state.
- *
- * If we lose the monitor connection while watching for the transition steps
- * then we stop watching. It's a best effort attempt at having the CLI be
- * useful for its user, the main one being the test suite.
- */
-bool
-monitor_wait_until_node_reported_state(Monitor *monitor,
-									   const char *formation,
-									   int groupId,
-									   int nodeId,
-									   NodeState state)
-{
-	PGconn *connection = monitor->pgsql.connection;
-	NodeAddressArray nodesArray = { 0 };
-	bool reachedState = false;
-
-	uint64_t start = time(NULL);
-
-	int maxNodeNameSize = 5;    /* strlen("Name") + 1, the header */
-	char nameSeparatorHeader[BUFSIZE] = { 0 };
-
-	if (connection == NULL)
-	{
-		log_warn("Lost connection.");
-		return false;
-	}
-
-	log_info("Listening monitor notifications about state changes "
-			 "in formation \"%s\" and group %d",
-			 formation, groupId);
-	log_info("Following table displays times when notifications are received");
-
-	if (!monitor_get_nodes(monitor,
-						   (char *) formation,
-						   groupId,
-						   &nodesArray))
-	{
-		/* ignore the error, use an educated guess for the max size */
-		log_warn("Failed to get_nodes() on the monitor");
-		maxNodeNameSize = 25;
-	}
-
-	maxNodeNameSize = MaxNodeNameSizeInNodesArray(&nodesArray);
-	(void) prepareNodeNameSeparator(nameSeparatorHeader, maxNodeNameSize);
-
-	fformat(stdout, "%8s | %3s | %*s | %6s | %18s | %18s\n",
-			"Time", "ID", maxNodeNameSize, "Host", "Port",
-			"Current State", "Assigned State");
-
-	fformat(stdout, "%8s-+-%3s-+-%*s-+-%6s-+-%18s-+-%18s\n",
-			"--------", "---", maxNodeNameSize, nameSeparatorHeader,
-			"------", "------------------", "------------------");
-
-	while (!reachedState)
-	{
-		/* Sleep until something happens on the connection. */
-		int sock;
-		fd_set input_mask;
-		PGnotify *notify;
-
-		uint64_t now = time(NULL);
-
-		if ((now - start) > PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT)
-		{
-			log_error("Failed to receive monitor's notifications that the "
-					  "settings have been applied");
-			break;
-		}
-
-		/*
-		 * It looks like we are violating modularity of the code, when we are
-		 * following Postgres documentation and examples:
-		 *
-		 * https://www.postgresql.org/docs/current/libpq-example.html#LIBPQ-EXAMPLE-2
-		 */
-		sock = PQsocket(connection);
-
-		if (sock < 0)
-		{
-			return false;   /* shouldn't happen */
-		}
-		FD_ZERO(&input_mask);
-		FD_SET(sock, &input_mask);
-
-		if (select(sock + 1, &input_mask, NULL, NULL, NULL) < 0)
-		{
-			log_warn("select() failed: %m");
-			return false;
-		}
-
-		/* Now check for input */
-		PQconsumeInput(connection);
-		while ((notify = PQnotifies(connection)) != NULL)
-		{
-			StateNotification notification = { 0 };
-
-			uint64_t now = time(NULL);
-			char timestring[MAXCTIMESIZE];
-
-			if ((now - start) > PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT)
-			{
-				/* errors are handled in the main loop */
-				break;
-			}
-
-			if (strcmp(notify->relname, "state") != 0)
-			{
-				log_warn("%s: %s", notify->relname, notify->extra);
-				continue;
-			}
-
-			log_debug("received \"%s\"", notify->extra);
-
-			/* the parsing scribbles on the message, make a copy now */
-			strlcpy(notification.message, notify->extra, BUFSIZE);
-
-			/* errors are logged by parse_state_notification_message */
-			if (!parse_state_notification_message(&notification))
-			{
-				log_warn("Failed to parse notification message \"%s\"",
-						 notify->extra);
-				continue;
-			}
-
-			/* filter notifications for our own formation */
-			if (strcmp(notification.formationId, formation) != 0 ||
-				notification.groupId != groupId)
-			{
-				continue;
-			}
-
-			/* format the current time to be user-friendly */
-			epoch_to_string(now, timestring);
-
-			/* "Wed Jun 30 21:49:08 1993" -> "21:49:08" */
-			timestring[11 + 8] = '\0';
-
-			fformat(stdout, "%8s | %3d | %*s | %6d | %18s | %18s\n",
-					timestring + 11,
-					notification.nodeId, maxNodeNameSize,
-					notification.nodeName,
-					notification.nodePort,
-					NodeStateToString(notification.reportedState),
-					NodeStateToString(notification.goalState));
-
-			if (notification.nodeId == nodeId &&
-				notification.reportedState == state &&
-				notification.goalState == state)
-			{
-				reachedState = true;
-
-				log_debug("node %d (%s:%d) is now in state \"%s\"",
-						  notification.nodeId,
-						  notification.nodeName,
-						  notification.nodePort,
-						  NodeStateToString(state));
-			}
-
-			/* prepare next iteration */
-			PQfreemem(notify);
-			PQconsumeInput(connection);
-		}
-	}
-
-	/* disconnect from monitor */
-	pgsql_finish(&monitor->pgsql);
-
-	return reachedState;
-}
-
-
-/*
  * monitor_wait_until_new_primary receives notifications and watches for a new
  * node to be reported as a primary.
  *
@@ -2981,9 +2807,10 @@ monitor_wait_until_node_reported_state(Monitor *monitor,
  * useful for its user, the main one being the test suite.
  */
 bool
-monitor_wait_until_new_primary(Monitor *monitor,
-							   const char *formation,
-							   int groupId)
+monitor_wait_until_some_node_reported_state(Monitor *monitor,
+											const char *formation,
+											int groupId,
+											NodeState targetState)
 {
 	PGconn *connection = monitor->pgsql.connection;
 	NodeAddressArray nodesArray = { 0 };
@@ -3118,8 +2945,8 @@ monitor_wait_until_new_primary(Monitor *monitor,
 					NodeStateToString(notification.reportedState),
 					NodeStateToString(notification.goalState));
 
-			if (notification.goalState == PRIMARY_STATE &&
-				notification.reportedState == PRIMARY_STATE)
+			if (notification.goalState == targetState &&
+				notification.reportedState == targetState)
 			{
 				failoverIsDone = true;
 				break;

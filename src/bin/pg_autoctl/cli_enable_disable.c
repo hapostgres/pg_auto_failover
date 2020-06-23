@@ -497,14 +497,13 @@ cli_enable_maintenance(int argc, char **argv)
 
 	if (keeper.state.current_role != MAINTENANCE_STATE)
 	{
-		if (!monitor_wait_until_node_reported_state(
+		if (!monitor_wait_until_some_node_reported_state(
 				&(keeper.monitor),
 				keeper.config.formation,
 				keeper.config.groupId,
-				keeper.state.current_node_id,
-				MAINTENANCE_STATE))
+				WAIT_PRIMARY_STATE))
 		{
-			log_error("Failed to wait until the new setting has been applied");
+			log_error("Failed to wait until a node reached the wait_primary state");
 			exit(EXIT_CODE_MONITOR);
 		}
 	}
@@ -567,14 +566,13 @@ cli_disable_maintenance(int argc, char **argv)
 		exit(EXIT_CODE_MONITOR);
 	}
 
-	if (!monitor_wait_until_node_reported_state(
+	if (!monitor_wait_until_some_node_reported_state(
 			&(keeper.monitor),
 			keeper.config.formation,
 			keeper.config.groupId,
-			keeper.state.current_node_id,
-			SECONDARY_STATE))
+			PRIMARY_STATE))
 	{
-		log_error("Failed to wait until the new setting has been applied");
+		log_error("Failed to wait until a node reached the secondary state");
 		exit(EXIT_CODE_MONITOR);
 	}
 }
