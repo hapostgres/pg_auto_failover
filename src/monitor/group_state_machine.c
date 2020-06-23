@@ -109,42 +109,14 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 	if (primaryNode == NULL)
 	{
-		AutoFailoverNode *otherNode = OtherNodeInGroup(activeNode);
-
-		/*
-		 * when primary is put to maintenance
-		 *  secondary -> wait_primary
-		 */
-		if (IsCurrentState(activeNode, REPLICATION_STATE_SECONDARY) &&
-			IsCurrentState(otherNode, REPLICATION_STATE_MAINTENANCE))
-		{
-			char message[BUFSIZE];
-
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Setting goal state of %s:%d to wait_primary "
-				"after %s:%d has reached maintenance.",
-				activeNode->nodeName, activeNode->nodePort,
-				otherNode->nodeName, otherNode->nodePort);
-
-			/* promote the secondary */
-			AssignGoalState(activeNode, REPLICATION_STATE_WAIT_PRIMARY, message);
-
-			return true;
-		}
-
-		/* if active node is in maintenance, it might be the primary */
-		if (activeNode->goalState != REPLICATION_STATE_MAINTENANCE)
-		{
-			/* that's a bug, really, maybe we could use an Assert() instead */
-			ereport(ERROR,
-					(errmsg("ProceedGroupState couldn't find the primary node "
-							"in formation \"%s\", group %d",
-							formationId, groupId),
-					 errdetail("activeNode is %s:%d in state %s",
-							   activeNode->nodeName, activeNode->nodePort,
-							   ReplicationStateGetName(activeNode->goalState))));
-		}
+		/* that's a bug, really, maybe we could use an Assert() instead */
+		ereport(ERROR,
+				(errmsg("ProceedGroupState couldn't find the primary node "
+						"in formation \"%s\", group %d",
+						formationId, groupId),
+				 errdetail("activeNode is %s:%d in state %s",
+						   activeNode->nodeName, activeNode->nodePort,
+						   ReplicationStateGetName(activeNode->goalState))));
 	}
 
 	if (IsUnhealthy(primaryNode))
@@ -233,6 +205,32 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		/* shut down the primary */
 		AssignGoalState(primaryNode, REPLICATION_STATE_DRAINING, message);
+
+		return true;
+	}
+
+	/*
+	 * when primary is put to maintenance
+	 *  prepare_maintenance -> maintenance
+	 *  secondary -> prepare_promotion
+	 */
+	if (IsCurrentState(activeNode, REPLICATION_STATE_PREPARE_PROMOTION) &&
+		IsCurrentState(primaryNode, REPLICATION_STATE_PREPARE_MAINTENANCE))
+	{
+		char message[BUFSIZE];
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of %s:%d to wait_primary "
+			"and %s:%d to maintenance.",
+			activeNode->nodeName, activeNode->nodePort,
+			primaryNode->nodeName, primaryNode->nodePort);
+
+		/* promote the secondary */
+		AssignGoalState(activeNode, REPLICATION_STATE_WAIT_PRIMARY, message);
+
+		/* ready for maintenance */
+		AssignGoalState(primaryNode, REPLICATION_STATE_MAINTENANCE, message);
 
 		return true;
 	}

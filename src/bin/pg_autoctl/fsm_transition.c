@@ -813,7 +813,7 @@ fsm_stop_postgres_and_setup_standby(Keeper *keeper)
 	/* we want to produce primary_conninfo = '' anyway */
 	NodeAddress primaryNode = { 0 };
 
-	if (!fsm_stop_postgres_for_primary_maintenance(keeper))
+	if (!ensure_postgres_service_is_stopped(postgres))
 	{
 		/* errors have already been logged */
 		return false;
@@ -1130,59 +1130,6 @@ fsm_promote_standby(Keeper *keeper)
 	 * steps are implemented in fsm_prepare_replication.
 	 */
 	if (!prepare_replication(keeper, DEMOTE_TIMEOUT_STATE))
-	{
-		/* prepare_replication logs relevant errors */
-		return false;
-	}
-
-	if (!fsm_disable_replication(keeper))
-	{
-		log_error("Failed to disable synchronous replication after promotion, "
-				  "see above for details");
-		return false;
-	}
-
-	return true;
-}
-
-
-/*
- * fsm_promote_standby_for_primary_maintenance implements the same transition
- * as the fsm_promote_standby() function, the only difference now is that we
- * expect the other node to be in the MAINTENANCE state rather than the
- * DEMOTE_TIMEOUT_STATE.
- */
-bool
-fsm_promote_standby_for_primary_maintenance(Keeper *keeper)
-{
-	LocalPostgresServer *postgres = &(keeper->postgres);
-
-	if (!ensure_postgres_service_is_running(postgres))
-	{
-		log_error("Failed to promote postgres because the server could not "
-				  "be started before promotion, see above for details");
-		return false;
-	}
-
-	/*
-	 * If postgres is no longer in recovery mode, standby_promote returns true
-	 * immediately and therefore this function is idempotent.
-	 */
-	if (!standby_promote(postgres))
-	{
-		log_error("Failed to promote the local postgres server from standby "
-				  "to single state, see above for details");
-		return false;
-	}
-
-	/*
-	 * The old primary will (hopefully) come back as a secondary and should
-	 * be able to open a replication connection. We therefore need to do the
-	 * same steps we take when going from single to wait_primary, namely to
-	 * create a replication slot and add the other node to pg_hba.conf. These
-	 * steps are implemented in fsm_prepare_replication.
-	 */
-	if (!prepare_replication(keeper, MAINTENANCE_STATE))
 	{
 		/* prepare_replication logs relevant errors */
 		return false;

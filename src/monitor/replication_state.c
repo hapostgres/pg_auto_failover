@@ -226,6 +226,11 @@ ReplicationStateGetName(ReplicationState replicationState)
 			return "apply_settings";
 		}
 
+		case REPLICATION_STATE_PREPARE_MAINTENANCE:
+		{
+			return "prepare_maintenance";
+		}
+
 		default:
 		{
 			ereport(ERROR,

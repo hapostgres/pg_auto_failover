@@ -1087,7 +1087,8 @@ StateBelongsToPrimary(ReplicationState state)
 {
 	return CanTakeWritesInState(state) ||
 		   state == REPLICATION_STATE_DRAINING ||
-		   state == REPLICATION_STATE_DEMOTE_TIMEOUT;
+		   state == REPLICATION_STATE_DEMOTE_TIMEOUT ||
+		   state == REPLICATION_STATE_PREPARE_MAINTENANCE;
 }
 
 

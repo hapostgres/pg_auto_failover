@@ -437,6 +437,11 @@ NodeStateToString(NodeState s)
 			return "apply_settings";
 		}
 
+		case PREPARE_MAINTENANCE_STATE:
+		{
+			return "prepare_maintenance";
+		}
+
 		case ANY_STATE:
 		{
 			return "#any state#";
@@ -518,6 +523,10 @@ NodeStateFromString(const char *str)
 	else if (strcmp(str, "apply_settings") == 0)
 	{
 		return APPLY_SETTINGS_STATE;
+	}
+	else if (strcmp(str, "prepare_maintenance") == 0)
+	{
+		return PREPARE_MAINTENANCE_STATE;
 	}
 	else
 	{

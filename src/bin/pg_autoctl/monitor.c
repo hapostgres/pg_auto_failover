@@ -1849,13 +1849,13 @@ printLastEvents(void *ctx, PGresult *result)
 		return;
 	}
 
-	fformat(stdout, "%30s | %10s | %6s | %18s | %18s | %s\n",
+	fformat(stdout, "%30s | %10s | %6s | %19s | %19s | %s\n",
 			"Event Time", "Formation", "Node",
 			"Current State", "Assigned State", "Comment");
-	fformat(stdout, "%30s-+-%10s-+-%6s-+-%18s-+-%18s-+-%10s\n",
+	fformat(stdout, "%30s-+-%10s-+-%6s-+-%19s-+-%19s-+-%10s\n",
 			"------------------------------", "----------",
-			"------", "------------------",
-			"------------------", "----------");
+			"------", "-------------------",
+			"-------------------", "----------");
 
 	for (currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
 	{
@@ -1871,7 +1871,7 @@ printLastEvents(void *ctx, PGresult *result)
 		/* for our grid alignment output it's best to have a single col here */
 		sformat(node, BUFSIZE, "%s/%s", groupId, nodeId);
 
-		fformat(stdout, "%30s | %10s | %6s | %18s | %18s | %s\n",
+		fformat(stdout, "%30s | %10s | %6s | %19s | %19s | %s\n",
 				eventTime, formation, node,
 				currentState, goalState, description);
 	}
@@ -2845,13 +2845,13 @@ monitor_wait_until_some_node_reported_state(Monitor *monitor,
 	maxNodeNameSize = MaxNodeNameSizeInNodesArray(&nodesArray);
 	(void) prepareNodeNameSeparator(nameSeparatorHeader, maxNodeNameSize);
 
-	fformat(stdout, "%8s | %3s | %*s | %6s | %18s | %18s\n",
+	fformat(stdout, "%8s | %3s | %*s | %6s | %19s | %19s\n",
 			"Time", "ID", maxNodeNameSize, "Host", "Port",
 			"Current State", "Assigned State");
 
-	fformat(stdout, "%8s-+-%3s-+-%*s-+-%6s-+-%18s-+-%18s\n",
+	fformat(stdout, "%8s-+-%3s-+-%*s-+-%6s-+-%19s-+-%19s\n",
 			"--------", "---", maxNodeNameSize, nameSeparatorHeader,
-			"------", "------------------", "------------------");
+			"------", "-------------------", "-------------------");
 
 	while (!failoverIsDone)
 	{
@@ -2937,7 +2937,7 @@ monitor_wait_until_some_node_reported_state(Monitor *monitor,
 			/* "Wed Jun 30 21:49:08 1993" -> "21:49:08" */
 			timestring[11 + 8] = '\0';
 
-			fformat(stdout, "%8s | %3d | %*s | %6d | %18s | %18s\n",
+			fformat(stdout, "%8s | %3d | %*s | %6d | %19s | %19s\n",
 					timestring + 11,
 					notification.nodeId, maxNodeNameSize,
 					notification.nodeName,

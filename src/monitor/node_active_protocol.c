@@ -1160,21 +1160,22 @@ start_maintenance(PG_FUNCTION_ARGS)
 	if (IsCurrentState(currentNode, REPLICATION_STATE_PRIMARY))
 	{
 		/*
-		 * We put the primary to maintenance now, and when it has reached the
-		 * assigned goal then the group state machine in ProceedGroupState() is
-		 * going to drive the secondary straight to WAIT_PRIMARY.
+		 * We put the primary to prepare_maintenance now, and the secondary to
+		 * prepare_replication.
 		 */
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of %s:%d to maintenance "
+			"Setting goal state of %s:%d to prepare_maintenance "
+			"and %s:%d to prepare_promotion "
 			"after a user-initiated start_maintenance call.",
-			currentNode->nodeName, currentNode->nodePort);
+			currentNode->nodeName, currentNode->nodePort,
+			otherNode->nodeName, otherNode->nodePort);
 
 		SetNodeGoalState(currentNode->nodeName, currentNode->nodePort,
-						 REPLICATION_STATE_MAINTENANCE);
+						 REPLICATION_STATE_PREPARE_MAINTENANCE);
 
 		NotifyStateChange(currentNode->reportedState,
-						  REPLICATION_STATE_MAINTENANCE,
+						  REPLICATION_STATE_PREPARE_MAINTENANCE,
 						  currentNode->formationId,
 						  currentNode->groupId,
 						  currentNode->nodeId,
@@ -1185,12 +1186,28 @@ start_maintenance(PG_FUNCTION_ARGS)
 						  currentNode->candidatePriority,
 						  currentNode->replicationQuorum,
 						  message);
+
+		SetNodeGoalState(otherNode->nodeName, otherNode->nodePort,
+						 REPLICATION_STATE_PREPARE_PROMOTION);
+
+		NotifyStateChange(otherNode->reportedState,
+						  REPLICATION_STATE_PREPARE_PROMOTION,
+						  otherNode->formationId,
+						  otherNode->groupId,
+						  otherNode->nodeId,
+						  otherNode->nodeName,
+						  otherNode->nodePort,
+						  otherNode->pgsrSyncState,
+						  otherNode->reportedLSN,
+						  otherNode->candidatePriority,
+						  otherNode->replicationQuorum,
+						  message);
 	}
 	else if (IsStateIn(currentNode->reportedState, secondaryStates))
 	{
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of %s:%d to wait_primary and %s:%d to"
+			"Setting goal state of %s:%d to wait_primaru and %s:%d to "
 			"maintenance after a user-initiated start_maintenance call.",
 			otherNode->nodeName, otherNode->nodePort,
 			currentNode->nodeName, currentNode->nodePort);

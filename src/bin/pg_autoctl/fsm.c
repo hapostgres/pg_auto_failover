@@ -58,9 +58,12 @@
 #define COMMENT_PRIMARY_TO_DRAINING \
 	"A failover occurred, stopping writes "
 
-#define COMMENT_PRIMARY_TO_MAINTENANCE \
+#define COMMENT_PRIMARY_TO_PREPARE_MAINTENANCE \
 	"Promoting the standby to enable maintenance on the " \
 	"primary, stopping Postgres "
+
+#define COMMENT_PRIMARY_TO_MAINTENANCE \
+	"Setting up Postgres in standby mode for maintenance operations"
 
 #define COMMENT_PRIMARY_TO_MAINTENANCE_PROMOTE_SECONDARY \
 	"Promoting the standby to enable maintenance on the primary"
@@ -122,8 +125,7 @@
 	"Restarting standby after manual maintenance is done."
 
 #define COMMENT_BLOCKED_WRITES \
-	"Promoting a Citus Worker standby after having blocked writes " \
-	"from the coordinator."
+	"Promoting the standby node after the primary has blocked writes"
 
 #define COMMENT_PRIMARY_TO_APPLY_SETTINGS \
 	"Apply new pg_auto_failover settings (synchronous_standby_names)"
@@ -175,7 +177,6 @@ KeeperFSMTransition KeeperFSM[] = {
 	{ DRAINING_STATE, DEMOTED_STATE, COMMENT_DRAINING_TO_DEMOTED, &fsm_stop_postgres },
 	{ PRIMARY_STATE, DEMOTED_STATE, COMMENT_PRIMARY_TO_DEMOTED, &fsm_stop_postgres },
 	{ PRIMARY_STATE, DEMOTE_TIMEOUT_STATE, COMMENT_PRIMARY_TO_DEMOTED, &fsm_stop_postgres },
-	{ PRIMARY_STATE, MAINTENANCE_STATE, COMMENT_PRIMARY_TO_MAINTENANCE, &fsm_stop_postgres_and_setup_standby },
 
 	{ JOIN_PRIMARY_STATE, DRAINING_STATE, COMMENT_PRIMARY_TO_DRAINING, &fsm_stop_postgres },
 	{ JOIN_PRIMARY_STATE, DEMOTED_STATE, COMMENT_PRIMARY_TO_DEMOTED, &fsm_stop_postgres },
@@ -184,6 +185,12 @@ KeeperFSMTransition KeeperFSM[] = {
 	{ APPLY_SETTINGS_STATE, DRAINING_STATE, COMMENT_PRIMARY_TO_DRAINING, &fsm_stop_postgres },
 	{ APPLY_SETTINGS_STATE, DEMOTED_STATE, COMMENT_PRIMARY_TO_DEMOTED, &fsm_stop_postgres },
 	{ APPLY_SETTINGS_STATE, DEMOTE_TIMEOUT_STATE, COMMENT_PRIMARY_TO_DEMOTED, &fsm_stop_postgres },
+
+	/*
+	 * primary is put to maintenance
+	 */
+	{ PRIMARY_STATE, PREPARE_MAINTENANCE_STATE, COMMENT_PRIMARY_TO_PREPARE_MAINTENANCE, &fsm_stop_postgres_for_primary_maintenance },
+	{ PREPARE_MAINTENANCE_STATE, MAINTENANCE_STATE, COMMENT_PRIMARY_TO_MAINTENANCE, &fsm_stop_postgres_and_setup_standby },
 
 	/*
 	 * was demoted, need to be dead now.
@@ -204,11 +211,6 @@ KeeperFSMTransition KeeperFSM[] = {
 	{ SECONDARY_STATE, SINGLE_STATE, COMMENT_LOST_PRIMARY, &fsm_promote_standby },
 	{ CATCHINGUP_STATE, SINGLE_STATE, COMMENT_LOST_PRIMARY, &fsm_promote_standby },
 	{ PREP_PROMOTION_STATE, SINGLE_STATE, COMMENT_LOST_PRIMARY, &fsm_promote_standby },
-
-	/*
-	 * primary was put to maintenance
-	 */
-	{ SECONDARY_STATE, WAIT_PRIMARY_STATE, COMMENT_PRIMARY_TO_MAINTENANCE_PROMOTE_SECONDARY, &fsm_promote_standby_for_primary_maintenance },
 
 	/*
 	 * went down to force the primary to time out, but then it was removed
