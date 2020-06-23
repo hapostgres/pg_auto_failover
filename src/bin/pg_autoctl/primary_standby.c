@@ -764,7 +764,7 @@ primary_rewind_to_standby(LocalPostgresServer *postgres)
 	log_info("Rewinding PostgreSQL to follow new primary %s:%d",
 			 primaryNode->host, primaryNode->port);
 
-	if (!pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata))
+	if (!ensure_postgres_service_is_stopped(postgres))
 	{
 		log_error("Failed to stop postgres to do rewind");
 		return false;

@@ -804,10 +804,6 @@ fsm_stop_postgres_for_maintenance(Keeper *keeper)
  * fsm_stop_postgres_and_setup_standby is used when the primary is put to
  * maintenance. Not only do we stop Postgres, we also prepare a partial setup
  * as a secondary.
- *
- * Because we do a clean shutdown of the primary before promoting the
- * secondary, we consider that there's no extra precaution to take here when
- * going from primary to maintenance then to catchinup; such as pg_rewind.
  */
 bool
 fsm_stop_postgres_and_setup_standby(Keeper *keeper)
@@ -1075,66 +1071,17 @@ fsm_start_maintenance_on_standby(Keeper *keeper)
  * and reset the standby setup (primary_conninfo) to target it, then restart
  * Postgres.
  *
- * When the node used to be a primary before maintenance, thanks to our clean
- * shutdown before promotion we consider it safe to setup the standby and
- * restart Postgres.
+ * We don't know what happened during the maintenance of the node, so we use
+ * pg_rewind to make sure we're in a position to be a standby to the current
+ * primary.
+ *
+ * So we're back to doing the exact same thing as fsm_rewind_or_init() now, and
+ * that's why we just call that function.
  */
 bool
 fsm_restart_standby(Keeper *keeper)
 {
-	KeeperConfig *config = &(keeper->config);
-	Monitor *monitor = &(keeper->monitor);
-
-	LocalPostgresServer *postgres = &(keeper->postgres);
-	ReplicationSource *upstream = &(postgres->replicationSource);
-	PostgresSetup *pgSetup = &(postgres->postgresSetup);
-
-	int groupId = keeper->state.current_group;
-	NodeAddress *primaryNode = NULL;
-
-	/* get the primary node to follow */
-	if (!config->monitorDisabled)
-	{
-		if (!monitor_get_primary(monitor, config->formation, groupId,
-								 &(postgres->replicationSource.primaryNode)))
-		{
-			log_error("Failed to restart standby because pg_autoctl failed "
-					  "to get the primary node from the monitor, "
-					  "see above for details");
-			return false;
-		}
-	}
-	else
-	{
-		/* copy information from keeper->otherNodes into replicationSource */
-		primaryNode = &(keeper->otherNodes.nodes[0]);
-	}
-
-	if (!standby_init_replication_source(postgres,
-										 primaryNode,
-										 PG_AUTOCTL_REPLICA_USERNAME,
-										 config->replication_password,
-										 config->replication_slot_name,
-										 config->maximum_backup_rate,
-										 config->backupDirectory,
-										 config->pgSetup.ssl,
-										 keeper->state.current_node_id))
-	{
-		/* can't happen at the moment */
-		return false;
-	}
-
-	/* make the Postgres setup for the current (new) primary */
-	if (!pg_setup_standby_mode(pgSetup->control.pg_control_version,
-							   pgSetup->pgdata,
-							   upstream))
-	{
-		log_error("Failed to setup Postgres as a standby after pg_basebackup");
-		return false;
-	}
-
-	/* now restart Postgres */
-	return fsm_start_postgres(keeper);
+	return fsm_rewind_or_init(keeper);
 }
 
 
