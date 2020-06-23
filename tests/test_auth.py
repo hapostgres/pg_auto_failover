@@ -50,8 +50,6 @@ def test_003_init_secondary():
 
 def test_004_failover():
     print()
-    print("node1 replication.password: %s" % node1.config_get("replication.password"))
-    print("node2 replication.password: %s" % node2.config_get("replication.password"))
     print("Calling pgautofailover.failover() on the monitor")
     cluster.monitor.failover()
     assert node2.wait_until_state(target_state="primary")
