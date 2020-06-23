@@ -754,12 +754,12 @@ fsm_stop_postgres(Keeper *keeper)
 
 
 /*
- * fsm_stop_postgres_for_maintenance is used when pg_autoctl enable maintenance
- * has been used on the primary server, we do a couple CHECKPOINT before
- * stopping Postgres to ensure a smooth transition.
+ * fsm_stop_postgres_for_primary_maintenance is used when pg_autoctl enable
+ * maintenance has been used on the primary server, we do a couple CHECKPOINT
+ * before stopping Postgres to ensure a smooth transition.
  */
 bool
-fsm_stop_postgres_for_maintenance(Keeper *keeper)
+fsm_stop_postgres_for_primary_maintenance(Keeper *keeper)
 {
 	LocalPostgresServer *postgres = &(keeper->postgres);
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
@@ -780,20 +780,13 @@ fsm_stop_postgres_for_maintenance(Keeper *keeper)
 		 */
 		log_info("Preparing shutdown for maintenance: CHECKPOINT;");
 
-		/* we may fail to CHECKPOINT and then will retry at next FSM loop */
-		for (int i = postgres->shutdownCheckpointCount; i < 2; i++)
+		for (int i = 0; i < 2; i++)
 		{
 			if (!pgsql_checkpoint(pgsql))
 			{
-				log_error("Failed to checkpoint before stopping Postgres");
-				return false;
+				log_warn("Failed to checkpoint before stopping Postgres");
 			}
-
-			++(postgres->shutdownCheckpointCount);
 		}
-
-		/* cache invalidation */
-		postgres->shutdownCheckpointCount = 0;
 	}
 
 	return ensure_postgres_service_is_stopped(postgres);
@@ -804,6 +797,10 @@ fsm_stop_postgres_for_maintenance(Keeper *keeper)
  * fsm_stop_postgres_and_setup_standby is used when the primary is put to
  * maintenance. Not only do we stop Postgres, we also prepare a partial setup
  * as a secondary.
+ *
+ * Also, to be user friendly, we try to CHECKPOINT while the read-write traffic
+ * is still open to the primary server, in order to prepare a faster Postgres
+ * shutdown.
  */
 bool
 fsm_stop_postgres_and_setup_standby(Keeper *keeper)
@@ -816,7 +813,7 @@ fsm_stop_postgres_and_setup_standby(Keeper *keeper)
 	/* we want to produce primary_conninfo = '' anyway */
 	NodeAddress primaryNode = { 0 };
 
-	if (!fsm_stop_postgres_for_maintenance(keeper))
+	if (!fsm_stop_postgres_for_primary_maintenance(keeper))
 	{
 		/* errors have already been logged */
 		return false;
@@ -1150,21 +1147,10 @@ fsm_promote_standby(Keeper *keeper)
 
 
 /*
- * fsm_promote_standby is used in several situations in the FSM transitions and
- * the following actions are needed to promote a standby:
- *
- *    start_postgres
- * && promote_standby
- * && add_standby_to_hba
- * && create_replication_slot
- * && disable_synchronous_replication
- * && keeper_drop_replication_slots_for_removed_nodes
- *
- * So we reuse fsm_disable_replication() here, rather than copy/pasting the same
- * bits code in the fsm_promote_standby() function body. If the definition of
- * the fsm_promote_standby transition ever came to diverge from whatever
- * fsm_disable_replication() is doing, we'd have to copy/paste and maintain
- * separate code path.
+ * fsm_promote_standby_for_primary_maintenance implements the same transition
+ * as the fsm_promote_standby() function, the only difference now is that we
+ * expect the other node to be in the MAINTENANCE state rather than the
+ * DEMOTE_TIMEOUT_STATE.
  */
 bool
 fsm_promote_standby_for_primary_maintenance(Keeper *keeper)
