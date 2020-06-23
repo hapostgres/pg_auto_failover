@@ -501,7 +501,7 @@ cli_enable_maintenance(int argc, char **argv)
 				&(keeper.monitor),
 				keeper.config.formation,
 				keeper.config.groupId,
-				WAIT_PRIMARY_STATE))
+				MAINTENANCE_STATE))
 		{
 			log_error("Failed to wait until a node reached the wait_primary state");
 			exit(EXIT_CODE_MONITOR);
