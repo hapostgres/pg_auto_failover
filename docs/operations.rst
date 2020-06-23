@@ -73,44 +73,127 @@ so that the Postgres server is not doing *synchronous replication* anymore
 and can be taken down for maintenance purposes, such as security kernel
 upgrades or the like.
 
-The monitor exposes the following API to schedule maintenance operations on
-a secondary node::
+The command line tool ``pg_autoctl`` exposes an API to schedule maintenance
+operations on the current node, which must be a secondary node at the moment
+when maintenance is requested.
 
-  $ psql postgres://autoctl@monitor/pg_auto_failover
-  > select pgautofailover.start_maintenance('nodename', 5432);
-  > select pgautofailover.stop_maintenance('nodename', 5432);
-
-The command line tool ``pg_autoctl`` also exposes an API to schedule
-maintenance operations on the current node, which must be a secondary node
-at the moment when maintenance is requested::
+Here's an example of using the maintenance commands on a secondary node,
+including the output. Of course, when you try that on your own nodes, dates
+and PID information might differ::
 
   $ pg_autoctl enable maintenance
-  ...
+  11:47:20 47247 INFO  Listening monitor notifications about state changes in formation "default" and group 0
+  11:47:20 47247 INFO  Following table displays times when notifications are received
+      Time |  ID |      Host |   Port |      Current State |     Assigned State
+  ---------+-----+-----------+--------+--------------------+-------------------
+  11:47:20 |   2 | localhost |   5002 |            primary |       wait_primary
+  11:47:20 |   1 | localhost |   5001 |          secondary |        maintenance
+  11:47:20 |   1 | localhost |   5001 |        maintenance |        maintenance
+
+The command listens to the state changes in the current node's formation and
+group on the monitor and displays those changes as it receives them. The
+operation is done when the node has reached the ``maintenance`` state.
+
+It is now possible to disable maintenance to allow ``pg_autoctl`` to manage
+this standby node again::
+
   $ pg_autoctl disable maintenance
+  11:47:37 47364 INFO  Listening monitor notifications about state changes in formation "default" and group 0
+  11:47:37 47364 INFO  Following table displays times when notifications are received
+      Time |  ID |      Host |   Port |      Current State |     Assigned State
+  ---------+-----+-----------+--------+--------------------+-------------------
+  11:47:38 |   1 | localhost |   5001 |        maintenance |         catchingup
+  11:47:38 |   1 | localhost |   5001 |         catchingup |         catchingup
+  11:47:39 |   1 | localhost |   5001 |         catchingup |          secondary
+  11:47:39 |   2 | localhost |   5002 |       wait_primary |            primary
+  11:47:39 |   1 | localhost |   5001 |          secondary |          secondary
 
 When a standby node is in maintenance, the monitor sets the primary node
 replication to WAIT_PRIMARY: in this role, the PostgreSQL streaming
 replication is now asynchronous and the standby PostgreSQL server may be
 stopped, rebooted, etc.
 
-pg_auto_failover does not provide support for primary server maintenance.
+Maintenance of a primary node
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+A primary node must be available at all times in any formation and group in
+pg_auto_failover, that is the invariant provided by the whole solution. With
+that in mind, the only way to allow a primary node to go to a maintenance
+mode is to first failover and promote the secondary node.
+
+The same command ``pg_autoctl enable maintenance`` implements that operation
+when run on a primary node with the option ``--allow-failover``. Here is an
+example of such an operation::
+
+  $ pg_autoctl enable maintenance
+  11:53:03 50526 WARN  Enabling maintenance on a primary causes a failover
+  11:53:03 50526 FATAL Please use --allow-failover to allow the command proceed
+
+As we can see the option ``allow-maintenance`` is mandatory. In the next
+example we use it::
+
+  $ pg_autoctl enable maintenance --allow-failover
+  11:53:11 50599 INFO  Listening monitor notifications about state changes in formation "default" and group 0
+  11:53:11 50599 INFO  Following table displays times when notifications are received
+      Time |  ID |      Host |   Port |      Current State |     Assigned State
+  ---------+-----+-----------+--------+--------------------+-------------------
+  11:53:12 |   2 | localhost |   5002 |            primary |        maintenance
+  11:53:12 |   2 | localhost |   5002 |        maintenance |        maintenance
+
+One the primary has reached the ``maintenance`` state then the secondary is
+promoted, which we don't see here. When the operation is done we can have
+the old primary re-join the group, this time as a secondary::
+
+  $ pg_autoctl disable maintenance
+  11:54:09 50913 INFO  Listening monitor notifications about state changes in formation "default" and group 0
+  11:54:09 50913 INFO  Following table displays times when notifications are received
+      Time |  ID |      Host |   Port |      Current State |     Assigned State
+  ---------+-----+-----------+--------+--------------------+-------------------
+  11:54:09 |   2 | localhost |   5002 |        maintenance |         catchingup
+  11:54:09 |   2 | localhost |   5002 |         catchingup |         catchingup
+  11:54:12 |   2 | localhost |   5002 |         catchingup |          secondary
+  11:54:12 |   1 | localhost |   5001 |       wait_primary |            primary
+  11:54:12 |   2 | localhost |   5002 |          secondary |          secondary
+
 
 Triggering a failover
 ^^^^^^^^^^^^^^^^^^^^^
 
-It is possible to trigger a failover manually with pg_auto_failover, by
-using the SQL API provided by the monitor::
+It is possible to trigger a manual failover, or a switchover, using the
+command ``pg_autoctl perform failover``. Here's an example of what happens
+when running the command::
 
-  $ psql postgres://autoctl@monitor/pg_auto_failover
-  > select pgautofailover.perform_failover(formation_id => 'default', group_id => 0);
+  $ pg_autoctl perform failover
+  11:58:00 53224 INFO  Listening monitor notifications about state changes in formation "default" and group 0
+  11:58:00 53224 INFO  Following table displays times when notifications are received
+      Time |  ID |      Host |   Port |      Current State |     Assigned State
+  ---------+-----+-----------+--------+--------------------+-------------------
+  11:58:01 |   1 | localhost |   5001 |            primary |           draining
+  11:58:01 |   2 | localhost |   5002 |          secondary |  prepare_promotion
+  11:58:01 |   1 | localhost |   5001 |           draining |           draining
+  11:58:01 |   2 | localhost |   5002 |  prepare_promotion |  prepare_promotion
+  11:58:02 |   2 | localhost |   5002 |  prepare_promotion |   stop_replication
+  11:58:02 |   1 | localhost |   5001 |           draining |     demote_timeout
+  11:58:03 |   1 | localhost |   5001 |     demote_timeout |     demote_timeout
+  11:58:04 |   2 | localhost |   5002 |   stop_replication |   stop_replication
+  11:58:05 |   2 | localhost |   5002 |   stop_replication |       wait_primary
+  11:58:05 |   1 | localhost |   5001 |     demote_timeout |            demoted
+  11:58:05 |   2 | localhost |   5002 |       wait_primary |       wait_primary
+  11:58:05 |   1 | localhost |   5001 |            demoted |            demoted
+  11:58:06 |   1 | localhost |   5001 |            demoted |         catchingup
+  11:58:06 |   1 | localhost |   5001 |         catchingup |         catchingup
+  11:58:08 |   1 | localhost |   5001 |         catchingup |          secondary
+  11:58:08 |   2 | localhost |   5002 |       wait_primary |            primary
+  11:58:08 |   1 | localhost |   5001 |          secondary |          secondary
+  11:58:08 |   2 | localhost |   5002 |            primary |            primary
 
-To call the function, you need to figure out the formation and group of the
-group where the failover happens. The following commands when run on a
-pg_auto_failover keeper node provide for the necessary information::
+Again, timings and PID numbers are not expected to be the same when you run
+the command on your own setup.
 
-  $ export PGDATA=...
-  $ pg_autoctl config get pg_autoctl.formation
-  $ pg_autoctl config get pg_autoctl.group
+Also note in the output that the command shows the whole set of transitions
+including when the old primary is now a secondary node. The database is
+available for read-write traffic as soon as we reach the state
+``wait_primary``.
 
 Implementing a controlled switchover
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -128,8 +211,12 @@ is triggered, and drives the failover accordingly.
 So to trigger a controlled switchover with pg_auto_failover you can use the
 same API as for a manual failover::
 
-  $ psql postgres://autoctl@monitor/pg_auto_failover
-  > select pgautofailover.perform_failover(formation_id => 'default', group_id => 0);
+  $ pg_autoctl perform switchover
+
+Because the subtelties of orchestrating either a controlled switchover or an
+unplanned failover are all handled by the monitor, rather than the client
+side command line, at the client level the two command ``pg_autoctl perform
+failover`` and ``pg_autoctl perform switchover`` are synonyms, or aliases.
 
 Current state, last events
 --------------------------
