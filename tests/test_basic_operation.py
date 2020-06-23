@@ -53,7 +53,12 @@ def test_005_read_from_secondary():
 def test_006_writes_to_node2_fail():
     node2.run_sql_query("INSERT INTO t1 VALUES (3)")
 
-def test_007_maintenance_primary():
+@raises(Exception)
+def test_007a_maintenance_primary():
+    assert node1.wait_until_state(target_state="primary")
+    node1.enable_maintenance()  # without --allow-failover, that fails
+
+def test_007b_maintenance_primary_allow_failover():
     print()
     print("Enabling maintenance on node1, allowing failover")
     assert node1.wait_until_state(target_state="primary")
