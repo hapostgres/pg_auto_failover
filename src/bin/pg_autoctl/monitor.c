@@ -2815,7 +2815,7 @@ monitor_wait_until_node_reported_state(Monitor *monitor,
 {
 	PGconn *connection = monitor->pgsql.connection;
 	NodeAddressArray nodesArray = { 0 };
-	bool reachedMaintenance = false;
+	bool reachedState = false;
 
 	uint64_t start = time(NULL);
 
@@ -2854,7 +2854,7 @@ monitor_wait_until_node_reported_state(Monitor *monitor,
 			"--------", "---", maxNodeNameSize, nameSeparatorHeader,
 			"------", "------------------", "------------------");
 
-	while (!reachedMaintenance)
+	while (!reachedState)
 	{
 		/* Sleep until something happens on the connection. */
 		int sock;
@@ -2950,7 +2950,7 @@ monitor_wait_until_node_reported_state(Monitor *monitor,
 				notification.reportedState == state &&
 				notification.goalState == state)
 			{
-				reachedMaintenance = true;
+				reachedState = true;
 
 				log_debug("node %d (%s:%d) is now in state \"%s\"",
 						  notification.nodeId,
@@ -2968,7 +2968,7 @@ monitor_wait_until_node_reported_state(Monitor *monitor,
 	/* disconnect from monitor */
 	pgsql_finish(&monitor->pgsql);
 
-	return reachedMaintenance;
+	return reachedState;
 }
 
 

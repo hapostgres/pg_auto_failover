@@ -140,7 +140,7 @@ example we use it::
   11:53:12 |   2 | localhost |   5002 |            primary |        maintenance
   11:53:12 |   2 | localhost |   5002 |        maintenance |        maintenance
 
-One the primary has reached the ``maintenance`` state then the secondary is
+Once the primary has reached the ``maintenance`` state then the secondary is
 promoted, which we don't see here. When the operation is done we can have
 the old primary re-join the group, this time as a secondary::
 
