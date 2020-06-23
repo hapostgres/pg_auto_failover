@@ -474,7 +474,7 @@ cli_enable_maintenance(int argc, char **argv)
 	}
 
 	/*
-	 * If we're already in MAINTENANCE we monitor returns true but we don't
+	 * If we're already in MAINTENANCE the monitor returns true but we don't
 	 * want to listen to changes, we don't expect any
 	 */
 	if (keeper.state.current_role != MAINTENANCE_STATE)

@@ -135,10 +135,16 @@ example we use it::
   $ pg_autoctl enable maintenance --allow-failover
   11:53:11 50599 INFO  Listening monitor notifications about state changes in formation "default" and group 0
   11:53:11 50599 INFO  Following table displays times when notifications are received
-      Time |  ID |      Host |   Port |      Current State |     Assigned State
-  ---------+-----+-----------+--------+--------------------+-------------------
-  11:53:12 |   2 | localhost |   5002 |            primary |        maintenance
-  11:53:12 |   2 | localhost |   5002 |        maintenance |        maintenance
+      Time |  ID |      Host |   Port |       Current State |      Assigned State
+  ---------+-----+-----------+--------+---------------------+--------------------
+  18:35:24 |   2 | localhost |   5002 |             primary | prepare_maintenance
+  18:35:24 |   1 | localhost |   5001 |           secondary |   prepare_promotion
+  18:35:24 |   1 | localhost |   5001 |   prepare_promotion |   prepare_promotion
+  18:35:24 |   2 | localhost |   5002 | prepare_maintenance | prepare_maintenance
+  18:35:25 |   1 | localhost |   5001 |   prepare_promotion |        wait_primary
+  18:35:25 |   2 | localhost |   5002 | prepare_maintenance |         maintenance
+  18:35:26 |   1 | localhost |   5001 |        wait_primary |        wait_primary
+  18:35:27 |   2 | localhost |   5002 |         maintenance |         maintenance
 
 Once the primary has reached the ``maintenance`` state then the secondary is
 promoted, which we don't see here. When the operation is done we can have
@@ -147,13 +153,14 @@ the old primary re-join the group, this time as a secondary::
   $ pg_autoctl disable maintenance
   11:54:09 50913 INFO  Listening monitor notifications about state changes in formation "default" and group 0
   11:54:09 50913 INFO  Following table displays times when notifications are received
-      Time |  ID |      Host |   Port |      Current State |     Assigned State
-  ---------+-----+-----------+--------+--------------------+-------------------
-  11:54:09 |   2 | localhost |   5002 |        maintenance |         catchingup
-  11:54:09 |   2 | localhost |   5002 |         catchingup |         catchingup
-  11:54:12 |   2 | localhost |   5002 |         catchingup |          secondary
-  11:54:12 |   1 | localhost |   5001 |       wait_primary |            primary
-  11:54:12 |   2 | localhost |   5002 |          secondary |          secondary
+      Time |  ID |      Host |   Port |       Current State |      Assigned State
+  ---------+-----+-----------+--------+---------------------+--------------------
+  18:35:33 |   2 | localhost |   5002 |         maintenance |          catchingup
+  18:35:33 |   2 | localhost |   5002 |          catchingup |          catchingup
+  18:35:34 |   2 | localhost |   5002 |          catchingup |           secondary
+  18:35:34 |   1 | localhost |   5001 |        wait_primary |             primary
+  18:35:34 |   2 | localhost |   5002 |           secondary |           secondary
+  18:35:35 |   1 | localhost |   5001 |             primary |             primary
 
 
 Triggering a failover
