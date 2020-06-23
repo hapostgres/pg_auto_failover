@@ -71,7 +71,7 @@ static CommandLine enable_maintenance_command =
 static CommandLine disable_maintenance_command =
 	make_command("maintenance",
 				 "Disable Postgres maintenance mode on this node",
-				 " [ --pgdata --allow-failover ]",
+				 " [ --pgdata ]",
 				 CLI_PGDATA_OPTION,
 				 cli_maintenance_getopts,
 				 cli_disable_maintenance);
@@ -335,7 +335,7 @@ cli_maintenance_getopts(int argc, char **argv)
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "D:f:Vvqh",
+	while ((c = getopt_long(argc, argv, "D:f:AVvqh",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -473,10 +473,17 @@ cli_enable_maintenance(int argc, char **argv)
 		exit(EXIT_CODE_MONITOR);
 	}
 
-	if (!pgsql_listen(&(keeper.monitor.pgsql), channels))
+	/*
+	 * If we're already in MAINTENANCE we monitor returns true but we don't
+	 * want to listen to changes, we don't expect any
+	 */
+	if (keeper.state.current_role != MAINTENANCE_STATE)
 	{
-		log_error("Failed to listen to state changes from the monitor");
-		exit(EXIT_CODE_MONITOR);
+		if (!pgsql_listen(&(keeper.monitor.pgsql), channels))
+		{
+			log_error("Failed to listen to state changes from the monitor");
+			exit(EXIT_CODE_MONITOR);
+		}
 	}
 
 	if (!monitor_start_maintenance(&(keeper.monitor),
@@ -488,15 +495,18 @@ cli_enable_maintenance(int argc, char **argv)
 		exit(EXIT_CODE_MONITOR);
 	}
 
-	if (!monitor_wait_until_node_reported_state(
-			&(keeper.monitor),
-			keeper.config.formation,
-			keeper.config.groupId,
-			keeper.state.current_node_id,
-			MAINTENANCE_STATE))
+	if (keeper.state.current_role != MAINTENANCE_STATE)
 	{
-		log_error("Failed to wait until the new setting has been applied");
-		exit(EXIT_CODE_MONITOR);
+		if (!monitor_wait_until_node_reported_state(
+				&(keeper.monitor),
+				keeper.config.formation,
+				keeper.config.groupId,
+				keeper.state.current_node_id,
+				MAINTENANCE_STATE))
+		{
+			log_error("Failed to wait until the new setting has been applied");
+			exit(EXIT_CODE_MONITOR);
+		}
 	}
 }
 
