@@ -131,6 +131,14 @@ secondary will be online to accept writes. When the old primary reaches
 the wait_primary state then the secondary is safe to take offline with
 minimal consequences.
 
+**Prepare_maintenance**
+
+The cluster administrator can manually move a primary node into the
+maintenance state to gracefully take it offline. The primary then
+transitions to the prepare_maintenance state to make sure the secondary is
+not missing any writes. In the prepare_maintenance state, the primary shuts
+down.
+
 **Draining**
 
 A state between primary and demoted where replication buffers finish
