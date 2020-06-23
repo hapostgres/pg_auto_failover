@@ -748,6 +748,20 @@ bool
 fsm_stop_postgres(Keeper *keeper)
 {
 	LocalPostgresServer *postgres = &(keeper->postgres);
+
+	return ensure_postgres_service_is_stopped(postgres);
+}
+
+
+/*
+ * fsm_stop_postgres_for_maintenance is used when pg_autoctl enable maintenance
+ * has been used on the primary server, we do a couple CHECKPOINT before
+ * stopping Postgres to ensure a smooth transition.
+ */
+bool
+fsm_stop_postgres_for_maintenance(Keeper *keeper)
+{
+	LocalPostgresServer *postgres = &(keeper->postgres);
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	PGSQL *pgsql = &(postgres->sqlClient);
 
@@ -806,7 +820,7 @@ fsm_stop_postgres_and_setup_standby(Keeper *keeper)
 	/* we want to produce primary_conninfo = '' anyway */
 	NodeAddress primaryNode = { 0 };
 
-	if (!fsm_stop_postgres(keeper))
+	if (!fsm_stop_postgres_for_maintenance(keeper))
 	{
 		/* errors have already been logged */
 		return false;

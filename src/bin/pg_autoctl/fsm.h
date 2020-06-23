@@ -57,6 +57,7 @@ bool fsm_apply_settings(Keeper *keeper);
 
 bool fsm_start_postgres(Keeper *keeper);
 bool fsm_stop_postgres(Keeper *keeper);
+bool fsm_stop_postgres_for_maintenance(Keeper *keeper);
 bool fsm_stop_postgres_and_setup_standby(Keeper *keeper);
 
 bool fsm_start_maintenance_on_standby(Keeper *keeper);
