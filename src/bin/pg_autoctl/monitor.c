@@ -3086,7 +3086,7 @@ monitor_wait_until_new_primary(Monitor *monitor,
 	/* disconnect from monitor */
 	pgsql_finish(&monitor->pgsql);
 
-	return true;
+	return failoverIsDone;
 }
 
 
