@@ -125,7 +125,8 @@
 	"Restarting standby after manual maintenance is done."
 
 #define COMMENT_BLOCKED_WRITES \
-	"Promoting the standby node after the primary has blocked writes"
+	"Promoting a Citus Worker standby after having blocked writes " \
+	"from the coordinator."
 
 #define COMMENT_PRIMARY_TO_APPLY_SETTINGS \
 	"Apply new pg_auto_failover settings (synchronous_standby_names)"
@@ -258,7 +259,7 @@ KeeperFSMTransition KeeperFSM[] = {
 	/*
 	 * finish the promotion
 	 */
-	{ PREP_PROMOTION_STATE, WAIT_PRIMARY_STATE, COMMENT_BLOCKED_WRITES, &fsm_promote_standby_for_primary_maintenance },
+	{ PREP_PROMOTION_STATE, WAIT_PRIMARY_STATE, COMMENT_BLOCKED_WRITES, &fsm_promote_standby },
 
 	/*
 	 * Just wait until primary is ready

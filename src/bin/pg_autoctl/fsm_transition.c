@@ -40,8 +40,6 @@
 #include "state.h"
 
 static bool prepare_replication(Keeper *keeper, NodeState otherNodeState);
-static bool promote_standby_and_prepare_replication(Keeper *keeper,
-													NodeState otherNodeState);
 
 
 /*
@@ -1085,30 +1083,8 @@ fsm_restart_standby(Keeper *keeper)
 
 
 /*
- * fsm_promote_standby is used in several situations in the FSM transitions.
- */
-bool
-fsm_promote_standby(Keeper *keeper)
-{
-	return promote_standby_and_prepare_replication(keeper, DEMOTE_TIMEOUT_STATE);
-}
-
-
-/*
- * fsm_promote_standby_for_primary_maintenance is used to promote a standby and
- * prepare the HBA entries for the current primary, that is currently being put
- * to maintenance.
- */
-bool
-fsm_promote_standby_for_primary_maintenance(Keeper *keeper)
-{
-	return promote_standby_and_prepare_replication(keeper, MAINTENANCE_STATE);
-}
-
-
-/*
- * promote_standby_and_prepare_replication is used in several situations in the
- * FSM transitions and the following actions are needed to promote a standby:
+ * fsm_promote_standby is used in several situations in the FSM transitions and
+ * the following actions are needed to promote a standby:
  *
  *    start_postgres
  * && promote_standby
@@ -1126,9 +1102,8 @@ fsm_promote_standby_for_primary_maintenance(Keeper *keeper)
  * We open the HBA connections for the other node as found per given state,
  * most often a DEMOTE_TIMEOUT_STATE, sometimes though MAINTENANCE_STATE.
  */
-static bool
-promote_standby_and_prepare_replication(Keeper *keeper,
-										NodeState otherNodeState)
+bool
+fsm_promote_standby(Keeper *keeper)
 {
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
@@ -1156,8 +1131,13 @@ promote_standby_and_prepare_replication(Keeper *keeper,
 	 * same steps we take when going from single to wait_primary, namely to
 	 * create a replication slot and add the other node to pg_hba.conf. These
 	 * steps are implemented in fsm_prepare_replication.
+	 *
+	 * The other node is expected to be in either DEMOTE_TIMEOUT_STATE or in
+	 * PREPARE_MAINTENANCE state. There's no harm in preparing replication
+	 * settings for all the other nodes in the system anyway, so let's just do
+	 * that.
 	 */
-	if (!prepare_replication(keeper, otherNodeState))
+	if (!prepare_replication(keeper, ANY_STATE))
 	{
 		/* prepare_replication logs relevant errors */
 		return false;

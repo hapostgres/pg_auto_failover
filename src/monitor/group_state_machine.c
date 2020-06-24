@@ -211,8 +211,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 	/*
 	 * when primary is put to maintenance
-	 *  prepare_maintenance -> maintenance
-	 *  secondary -> prepare_promotion
+	 *  prepare_promotion -> stop_replication
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_PREPARE_PROMOTION) &&
 		IsCurrentState(primaryNode, REPLICATION_STATE_PREPARE_MAINTENANCE))
@@ -227,10 +226,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 			primaryNode->nodeName, primaryNode->nodePort);
 
 		/* promote the secondary */
-		AssignGoalState(activeNode, REPLICATION_STATE_WAIT_PRIMARY, message);
-
-		/* ready for maintenance */
-		AssignGoalState(primaryNode, REPLICATION_STATE_MAINTENANCE, message);
+		AssignGoalState(activeNode, REPLICATION_STATE_STOP_REPLICATION, message);
 
 		return true;
 	}
@@ -287,6 +283,31 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		/* wait for possibly-alive primary to kill itself */
 		AssignGoalState(primaryNode, REPLICATION_STATE_DEMOTE_TIMEOUT, message);
+
+		return true;
+	}
+
+	/*
+	 * when primary node is going to maintenance
+	 *  stop_replication -> wait_primary
+	 */
+	if (IsCurrentState(activeNode, REPLICATION_STATE_STOP_REPLICATION) &&
+		IsCurrentState(primaryNode, REPLICATION_STATE_PREPARE_MAINTENANCE))
+	{
+		char message[BUFSIZE];
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of %s:%d to wait_primary and %s:%d to "
+			"maintenance.",
+			activeNode->nodeName, activeNode->nodePort,
+			primaryNode->nodeName, primaryNode->nodePort);
+
+		/* node is now taking writes */
+		AssignGoalState(activeNode, REPLICATION_STATE_WAIT_PRIMARY, message);
+
+		/* old primary node is now ready for maintenance operations */
+		AssignGoalState(primaryNode, REPLICATION_STATE_MAINTENANCE, message);
 
 		return true;
 	}
