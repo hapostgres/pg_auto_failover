@@ -1150,11 +1150,13 @@ start_maintenance(PG_FUNCTION_ARGS)
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("cannot start maintenance: current state for node %s:%d "
-						"is \"%s\", expected either \"primary\", "
+				 errmsg("cannot start maintenance: node %s:%d has reported state "
+						"\"%s\" and is assigned state \"%s\", "
+						"expected either \"primary\", "
 						"\"secondary\" or \"catchingup\"",
 						currentNode->nodeName, currentNode->nodePort,
-						ReplicationStateGetName(currentNode->reportedState))));
+						ReplicationStateGetName(currentNode->reportedState),
+						ReplicationStateGetName(currentNode->goalState))));
 	}
 
 	if (IsCurrentState(currentNode, REPLICATION_STATE_PRIMARY))
