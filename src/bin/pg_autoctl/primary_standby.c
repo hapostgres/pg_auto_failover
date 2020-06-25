@@ -131,13 +131,27 @@ local_postgres_set_status_path(LocalPostgresServer *postgres, bool unlink)
 	log_trace("local_postgres_set_status_path: %s", pgStatus->pgStatusPath);
 
 	/* local_postgres_init removes any stale pg_autoctl.pg file */
-	if (unlink && !unlink_file(pgStatus->pgStatusPath))
+	if (unlink && !local_postgres_unlink_status_file(postgres))
 	{
 		/* errors have already been logged */
 		return false;
 	}
 
 	return true;
+}
+
+
+/*
+ * local_postgres_unlink_status_file unlinks the file we use to communicate
+ * with the Postgres controller, so that this process won't interfere with
+ * whatever the user is doing durning maintenance (such as stop Postgres).
+ */
+bool
+local_postgres_unlink_status_file(LocalPostgresServer *postgres)
+{
+	LocalExpectedPostgresStatus *pgStatus = &(postgres->expectedPgStatus);
+
+	return unlink_file(pgStatus->pgStatusPath);
 }
 
 

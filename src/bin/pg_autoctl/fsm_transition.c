@@ -819,6 +819,15 @@ fsm_stop_postgres_and_setup_standby(Keeper *keeper)
 		return false;
 	}
 
+	/* Move the Postgres controller out of the way */
+	if (!local_postgres_unlink_status_file(postgres))
+	{
+		/* highly unexpected */
+		log_error("Failed to remove our Postgres status file "
+				  "see above for details");
+		return false;
+	}
+
 	/* get the primary node to follow */
 	if (!config->monitorDisabled)
 	{
@@ -1078,6 +1087,17 @@ fsm_prepare_standby_for_promotion(Keeper *keeper)
 bool
 fsm_start_maintenance_on_standby(Keeper *keeper)
 {
+	LocalPostgresServer *postgres = &(keeper->postgres);
+
+	/* Move the Postgres controller out of the way */
+	if (!local_postgres_unlink_status_file(postgres))
+	{
+		/* highly unexpected */
+		log_error("Failed to remove our Postgres status file "
+				  "see above for details");
+		return false;
+	}
+
 	return true;
 }
 
