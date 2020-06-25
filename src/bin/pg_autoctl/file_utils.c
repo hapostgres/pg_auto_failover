@@ -546,9 +546,20 @@ search_path(const char *filename, char ***result)
 
 	/* allocate array of pointers */
 	*result = malloc(pathListLength * sizeof(char *));
+	if (!*result)
+	{
+		log_error("Failed to allocate memory, probably because it's all used");
+		return 0;
+	}
 
 	/* allocate memory to store the strings */
 	stringSpace = malloc(pathListLength * MAXPGPATH);
+	if (!stringSpace)
+	{
+		log_error("Failed to allocate memory, probably because it's all used");
+		free(*result);
+		return 0;
+	}
 
 	path = pathlist;
 
