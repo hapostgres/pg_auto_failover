@@ -2799,8 +2799,8 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 
 
 /*
- * monitor_wait_until_new_primary receives notifications and watches for a new
- * node to be reported as a primary.
+ * monitor_wait_until_some_node_reported_state receives notifications and
+ * watches for a new node to be reported with the given targetState.
  *
  * If we lose the monitor connection while watching for the transition steps
  * then we stop watching. It's a best effort attempt at having the CLI be

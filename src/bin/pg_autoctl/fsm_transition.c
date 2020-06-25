@@ -797,10 +797,6 @@ fsm_stop_postgres_for_primary_maintenance(Keeper *keeper)
  * fsm_stop_postgres_and_setup_standby is used when the primary is put to
  * maintenance. Not only do we stop Postgres, we also prepare a setup as a
  * secondary.
- *
- * Also, to be user friendly, we try to CHECKPOINT while the read-write traffic
- * is still open to the primary server, in order to prepare a faster Postgres
- * shutdown.
  */
 bool
 fsm_stop_postgres_and_setup_standby(Keeper *keeper)

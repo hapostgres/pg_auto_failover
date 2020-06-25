@@ -82,13 +82,16 @@ including the output. Of course, when you try that on your own nodes, dates
 and PID information might differ::
 
   $ pg_autoctl enable maintenance
-  11:47:20 47247 INFO  Listening monitor notifications about state changes in formation "default" and group 0
-  11:47:20 47247 INFO  Following table displays times when notifications are received
-      Time |  ID |      Host |   Port |      Current State |     Assigned State
-  ---------+-----+-----------+--------+--------------------+-------------------
-  11:47:20 |   2 | localhost |   5002 |            primary |       wait_primary
-  11:47:20 |   1 | localhost |   5001 |          secondary |        maintenance
-  11:47:20 |   1 | localhost |   5001 |        maintenance |        maintenance
+  17:49:19 14377 INFO  Listening monitor notifications about state changes in formation "default" and group 0
+  17:49:19 14377 INFO  Following table displays times when notifications are received
+      Time |  ID |      Host |   Port |       Current State |      Assigned State
+  ---------+-----+-----------+--------+---------------------+--------------------
+  17:49:19 |   1 | localhost |   5001 |             primary |        wait_primary
+  17:49:19 |   2 | localhost |   5002 |           secondary |    wait_maintenance
+  17:49:19 |   2 | localhost |   5002 |    wait_maintenance |    wait_maintenance
+  17:49:20 |   1 | localhost |   5001 |        wait_primary |        wait_primary
+  17:49:20 |   2 | localhost |   5002 |    wait_maintenance |         maintenance
+  17:49:20 |   2 | localhost |   5002 |         maintenance |         maintenance
 
 The command listens to the state changes in the current node's formation and
 group on the monitor and displays those changes as it receives them. The
@@ -98,15 +101,16 @@ It is now possible to disable maintenance to allow ``pg_autoctl`` to manage
 this standby node again::
 
   $ pg_autoctl disable maintenance
-  11:47:37 47364 INFO  Listening monitor notifications about state changes in formation "default" and group 0
-  11:47:37 47364 INFO  Following table displays times when notifications are received
-      Time |  ID |      Host |   Port |      Current State |     Assigned State
-  ---------+-----+-----------+--------+--------------------+-------------------
-  11:47:38 |   1 | localhost |   5001 |        maintenance |         catchingup
-  11:47:38 |   1 | localhost |   5001 |         catchingup |         catchingup
-  11:47:39 |   1 | localhost |   5001 |         catchingup |          secondary
-  11:47:39 |   2 | localhost |   5002 |       wait_primary |            primary
-  11:47:39 |   1 | localhost |   5001 |          secondary |          secondary
+  17:49:26 14437 INFO  Listening monitor notifications about state changes in formation "default" and group 0
+  17:49:26 14437 INFO  Following table displays times when notifications are received
+      Time |  ID |      Host |   Port |       Current State |      Assigned State
+  ---------+-----+-----------+--------+---------------------+--------------------
+  17:49:27 |   2 | localhost |   5002 |         maintenance |          catchingup
+  17:49:27 |   2 | localhost |   5002 |          catchingup |          catchingup
+  17:49:28 |   2 | localhost |   5002 |          catchingup |           secondary
+  17:49:28 |   1 | localhost |   5001 |        wait_primary |             primary
+  17:49:28 |   2 | localhost |   5002 |           secondary |           secondary
+  17:49:29 |   1 | localhost |   5001 |             primary |             primary
 
 When a standby node is in maintenance, the monitor sets the primary node
 replication to WAIT_PRIMARY: in this role, the PostgreSQL streaming
@@ -148,9 +152,8 @@ example we use it::
   13:13:46 |   1 | localhost |   5001 |        wait_primary |        wait_primary
   13:13:47 |   2 | localhost |   5002 |         maintenance |         maintenance
 
-Once the primary has reached the ``maintenance`` state then the secondary is
-promoted, which we don't see here. When the operation is done we can have
-the old primary re-join the group, this time as a secondary::
+When the operation is done we can have the old primary re-join the group,
+this time as a secondary::
 
   $ pg_autoctl disable maintenance
   13:14:46 1985 INFO  Listening monitor notifications about state changes in formation "default" and group 0

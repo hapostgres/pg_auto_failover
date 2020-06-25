@@ -495,17 +495,20 @@ cli_enable_maintenance(int argc, char **argv)
 		exit(EXIT_CODE_MONITOR);
 	}
 
-	if (keeper.state.current_role != MAINTENANCE_STATE)
+	if (keeper.state.current_role == MAINTENANCE_STATE)
 	{
-		if (!monitor_wait_until_some_node_reported_state(
-				&(keeper.monitor),
-				keeper.config.formation,
-				keeper.config.groupId,
-				MAINTENANCE_STATE))
-		{
-			log_error("Failed to wait until a node reached the wait_primary state");
-			exit(EXIT_CODE_MONITOR);
-		}
+		log_info("This node is already in the \"maintenance\" state.");
+		exit(EXIT_CODE_QUIT);
+	}
+
+	if (!monitor_wait_until_some_node_reported_state(
+			&(keeper.monitor),
+			keeper.config.formation,
+			keeper.config.groupId,
+			MAINTENANCE_STATE))
+	{
+		log_error("Failed to wait until a node reached the wait_primary state");
+		exit(EXIT_CODE_MONITOR);
 	}
 }
 
