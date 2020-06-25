@@ -672,7 +672,7 @@ standby_init_database(LocalPostgresServer *postgres,
 				 pgSetup->pgdata);
 
 		/* try to stop PostgreSQL, stop here if that fails */
-		if (!pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata))
+		if (!ensure_postgres_service_is_stopped(postgres))
 		{
 			log_error("Failed to initialise a standby: "
 					  "the database directory exists "
