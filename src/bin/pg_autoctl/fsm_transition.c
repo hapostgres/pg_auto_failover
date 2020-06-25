@@ -795,8 +795,8 @@ fsm_stop_postgres_for_primary_maintenance(Keeper *keeper)
 
 /*
  * fsm_stop_postgres_and_setup_standby is used when the primary is put to
- * maintenance. Not only do we stop Postgres, we also prepare a partial setup
- * as a secondary.
+ * maintenance. Not only do we stop Postgres, we also prepare a setup as a
+ * secondary.
  *
  * Also, to be user friendly, we try to CHECKPOINT while the read-write traffic
  * is still open to the primary server, in order to prepare a faster Postgres
@@ -806,12 +806,12 @@ bool
 fsm_stop_postgres_and_setup_standby(Keeper *keeper)
 {
 	LocalPostgresServer *postgres = &(keeper->postgres);
+	Monitor *monitor = &(keeper->monitor);
 	ReplicationSource *upstream = &(postgres->replicationSource);
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	KeeperConfig *config = &(keeper->config);
 
-	/* we want to produce primary_conninfo = '' anyway */
-	NodeAddress primaryNode = { 0 };
+	NodeAddress *primaryNode = NULL;
 
 	if (!ensure_postgres_service_is_stopped(postgres))
 	{
@@ -819,9 +819,28 @@ fsm_stop_postgres_and_setup_standby(Keeper *keeper)
 		return false;
 	}
 
-	/* prepare a partial standby setup (no primary conninfo etc) */
+	/* get the primary node to follow */
+	if (!config->monitorDisabled)
+	{
+		if (!monitor_get_primary(monitor,
+								 config->formation,
+								 keeper->state.current_group,
+								 &(postgres->replicationSource.primaryNode)))
+		{
+			log_error("Failed to initialise standby because get the primary node "
+					  "from the monitor failed, see above for details");
+			return false;
+		}
+	}
+	else
+	{
+		/* copy information from keeper->otherNodes into replicationSource */
+		primaryNode = &(keeper->otherNodes.nodes[0]);
+	}
+
+	/* prepare a standby setup */
 	if (!standby_init_replication_source(postgres,
-										 &primaryNode,
+										 primaryNode,
 										 PG_AUTOCTL_REPLICA_USERNAME,
 										 config->replication_password,
 										 config->replication_slot_name,
@@ -834,12 +853,12 @@ fsm_stop_postgres_and_setup_standby(Keeper *keeper)
 		return false;
 	}
 
-	/* make the Postgres setup for a standby node without a primary yet */
+	/* make the Postgres setup for a standby node before reaching maintenance */
 	if (!pg_setup_standby_mode(pgSetup->control.pg_control_version,
 							   pgSetup->pgdata,
 							   upstream))
 	{
-		log_error("Failed to setup Postgres as a standby after pg_basebackup");
+		log_error("Failed to setup Postgres as a standby to go to maintenance");
 		return false;
 	}
 
