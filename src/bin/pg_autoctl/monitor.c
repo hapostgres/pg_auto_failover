@@ -1338,9 +1338,9 @@ parseNodeState(void *ctx, PGresult *result)
 		return;
 	}
 
-	if (PQnfields(result) != 5)
+	if (PQnfields(result) != 6)
 	{
-		log_error("Query returned %d columns, expected 5", PQnfields(result));
+		log_error("Query returned %d columns, expected 6", PQnfields(result));
 		context->parsedOK = false;
 		return;
 	}
@@ -1389,6 +1389,16 @@ parseNodeState(void *ctx, PGresult *result)
 		context->assignedState->replicationQuorum = (*value) == 't';
 	}
 
+	value = PQgetvalue(result, 0, 5);
+	if (value == NULL)
+	{
+		log_error("Invalid group MD5 (NULL) returned by monitor");
+		++errors;
+	}
+	else
+	{
+		strlcpy(context->assignedState->groupMD5, value, MD5_HASH_LEN + 1);
+	}
 
 	if (errors > 0)
 	{

@@ -105,8 +105,8 @@ register_node(PG_FUNCTION_ARGS)
 	TypeFuncClass resultTypeClass = 0;
 	Datum resultDatum = 0;
 	HeapTuple resultTuple = NULL;
-	Datum values[5];
-	bool isNulls[5];
+	Datum values[6];
+	bool isNulls[6];
 
 	checkPgAutoFailoverVersion();
 
@@ -203,6 +203,9 @@ register_node(PG_FUNCTION_ARGS)
 	assignedNodeState->candidatePriority = pgAutoFailoverNode->candidatePriority;
 	assignedNodeState->replicationQuorum = pgAutoFailoverNode->replicationQuorum;
 
+	AutoFailoverNodeGroupDigest(formationId, pgAutoFailoverNode->groupId,
+								assignedNodeState->groupMD5);
+
 	/*
 	 * Check that the state selected by the monitor matches the state required
 	 * by the keeper, if any. REPLICATION_STATE_INITIAL means the monitor can
@@ -240,6 +243,7 @@ register_node(PG_FUNCTION_ARGS)
 		ReplicationStateGetEnum(pgAutoFailoverNode->goalState));
 	values[3] = Int32GetDatum(assignedNodeState->candidatePriority);
 	values[4] = BoolGetDatum(assignedNodeState->replicationQuorum);
+	values[5] = CStringGetTextDatum(assignedNodeState->groupMD5);
 
 	resultTypeClass = get_call_result_type(fcinfo, NULL, &resultDescriptor);
 	if (resultTypeClass != TYPEFUNC_COMPOSITE)
@@ -285,8 +289,8 @@ node_active(PG_FUNCTION_ARGS)
 	TypeFuncClass resultTypeClass = 0;
 	Datum resultDatum = 0;
 	HeapTuple resultTuple = NULL;
-	Datum values[5];
-	bool isNulls[5];
+	Datum values[6];
+	bool isNulls[6];
 
 	checkPgAutoFailoverVersion();
 
@@ -311,6 +315,7 @@ node_active(PG_FUNCTION_ARGS)
 	values[2] = ObjectIdGetDatum(newReplicationStateOid);
 	values[3] = Int32GetDatum(assignedNodeState->candidatePriority);
 	values[4] = BoolGetDatum(assignedNodeState->replicationQuorum);
+	values[5] = CStringGetTextDatum(assignedNodeState->groupMD5);
 
 	resultTypeClass = get_call_result_type(fcinfo, NULL, &resultDescriptor);
 	if (resultTypeClass != TYPEFUNC_COMPOSITE)
@@ -410,6 +415,9 @@ NodeActive(char *formationId, char *nodeName, int32 nodePort,
 	assignedNodeState->replicationState = pgAutoFailoverNode->goalState;
 	assignedNodeState->candidatePriority = pgAutoFailoverNode->candidatePriority;
 	assignedNodeState->replicationQuorum = pgAutoFailoverNode->replicationQuorum;
+
+	AutoFailoverNodeGroupDigest(formationId, pgAutoFailoverNode->groupId,
+								assignedNodeState->groupMD5);
 
 	return assignedNodeState;
 }

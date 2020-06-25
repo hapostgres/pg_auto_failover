@@ -30,6 +30,7 @@ typedef struct Keeper
 	 * information. This is necessary in some transitions.
 	 */
 	NodeAddressArray otherNodes;
+	char groupMD5[MD5_HASH_LEN + 1];
 
 	/* Only useful during the initialization of the Keeper */
 	KeeperStateInit initState;
@@ -58,5 +59,6 @@ bool keeper_remove(Keeper *keeper, KeeperConfig *config,
 				   bool ignore_monitor_errors);
 bool keeper_check_monitor_extension_version(Keeper *keeper);
 bool keeper_state_as_json(Keeper *keeper, char *json, int size);
+bool keeper_update_group_hba(Keeper *keeper, char *groupMD5);
 
 #endif /* KEEPER_H */

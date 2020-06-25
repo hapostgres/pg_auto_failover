@@ -17,6 +17,10 @@
 #include "pgctl.h"
 #include "pgsetup.h"
 
+/* MD5 produces a 16 byte (128 bit) hash; double it for hex */
+#define MD5_HASH_LEN 32
+
+
 /*
  * We need 80 bytes, but we'll mimic what PostgreSQL is doing with the handling
  * of its super important pg_control file, see the following files:

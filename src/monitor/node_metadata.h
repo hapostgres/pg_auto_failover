@@ -106,9 +106,15 @@ typedef struct AutoFailoverNode
 } AutoFailoverNode;
 
 
+/* MD5 produces a 16 byte (128 bit) hash; double it for hex */
+#define MD5_HASH_LEN 32
+
+
 /* public function declarations */
 extern List * AllAutoFailoverNodes(char *formationId);
 extern List * AutoFailoverNodeGroup(char *formationId, int groupId);
+extern bool AutoFailoverNodeGroupDigest(char *formationId, int groupId,
+										char *hexsum);
 extern List * AutoFailoverOtherNodesList(AutoFailoverNode *pgAutoFailoverNode);
 extern List * AutoFailoverOtherNodesListInState(AutoFailoverNode *pgAutoFailoverNode,
 												ReplicationState currentState);

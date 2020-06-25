@@ -18,6 +18,7 @@
 #include "file_utils.h"
 #include "keeper.h"
 #include "keeper_config.h"
+#include "pghba.h"
 #include "pgsetup.h"
 #include "primary_standby.h"
 #include "state.h"
@@ -1316,4 +1317,69 @@ keeper_state_as_json(Keeper *keeper, char *json, int size)
 
 	/* strlcpy returns how many bytes where necessary */
 	return len < size;
+}
+
+
+/*
+ * keeper_update_group_hba updates the group MD5 as given by the monitor when
+ * calling the register_node() or node_active() API endpoints, and when the new
+ * MD5 is different from the previous cached one, updates the HBA file too.
+ */
+bool
+keeper_update_group_hba(Keeper *keeper, char *groupMD5)
+{
+	Monitor *monitor = &(keeper->monitor);
+	KeeperConfig *config = &(keeper->config);
+	PostgresSetup *postgresSetup = &(keeper->postgres.postgresSetup);
+	NodeAddressArray *otherNodesArray = &(keeper->otherNodes);
+
+	char hbaFilePath[MAXPGPATH] = { 0 };
+	char *authMethod = pg_setup_get_auth_method(postgresSetup);
+
+	char *host = config->nodename;
+	int port = postgresSetup->pgport;
+
+	log_trace("keeper_update_group_hba: %s", groupMD5);
+
+	if (streq(keeper->groupMD5, groupMD5))
+	{
+		return true;
+	}
+
+	if (!monitor_get_other_nodes(monitor, host, port, ANY_STATE, otherNodesArray))
+	{
+		/* ignore the error, use an educated guess for the max size */
+		log_error("Failed to get_nodes() on the monitor");
+		return false;
+	}
+
+	/* early exit when we're alone in the group */
+	if (otherNodesArray->count == 0)
+	{
+		return true;
+	}
+
+	log_info("Fetched current list of %d other nodes from the monitor "
+			 "to update HBA rules.",
+			 otherNodesArray->count);
+
+	sformat(hbaFilePath, MAXPGPATH, "%s/pg_hba.conf", postgresSetup->pgdata);
+
+	if (!pghba_ensure_host_rules_exist(hbaFilePath,
+									   otherNodesArray,
+									   postgresSetup->ssl.active,
+									   postgresSetup->dbname,
+									   PG_AUTOCTL_REPLICA_USERNAME,
+									   authMethod))
+	{
+		log_error("Failed to edit HBA file \"%s\" to update rules to current "
+				  "list of nodes registered on the monitor",
+				  hbaFilePath);
+		return false;
+	}
+
+	/* update our cached value for the group digest now */
+	strlcpy(keeper->groupMD5, groupMD5, MD5_HASH_LEN + 1);
+
+	return true;
 }

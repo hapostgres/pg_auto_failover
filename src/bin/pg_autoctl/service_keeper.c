@@ -411,6 +411,16 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 			keeperState->last_monitor_contact = now;
 			keeperState->assigned_role = assignedState.state;
 
+			/* update our cached value for the group digest */
+			if (!keeper_update_group_hba(keeper, assignedState.groupMD5))
+			{
+				log_error("Failed to update the HBA entries for the new "
+						  "elements in the our formation \"%s\" and group %d",
+						  keeper->config.formation,
+						  keeper->state.current_group);
+				return false;
+			}
+
 			if (keeperState->assigned_role != keeperState->current_role)
 			{
 				needStateChange = true;
