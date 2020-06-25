@@ -210,6 +210,29 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	}
 
 	/*
+	 * when secondary is put to maintenance
+	 *  wait_maintenance -> maintenance
+	 */
+	if (IsCurrentState(activeNode, REPLICATION_STATE_WAIT_MAINTENANCE) &&
+		IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY))
+	{
+		char message[BUFSIZE];
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of %s:%d to maintenance "
+			"after %s:%d converged to wait_primary.",
+			activeNode->nodeName, activeNode->nodePort,
+			primaryNode->nodeName, primaryNode->nodePort);
+
+		/* promote the secondary */
+		AssignGoalState(activeNode, REPLICATION_STATE_MAINTENANCE, message);
+
+		return true;
+	}
+
+
+	/*
 	 * when primary is put to maintenance
 	 *  prepare_promotion -> stop_replication
 	 */
@@ -290,6 +313,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	/*
 	 * when primary node is going to maintenance
 	 *  stop_replication -> wait_primary
+	 *  prepare_maintenance -> maintenance
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_STOP_REPLICATION) &&
 		IsCurrentState(primaryNode, REPLICATION_STATE_PREPARE_MAINTENANCE))

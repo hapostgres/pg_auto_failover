@@ -1070,9 +1070,10 @@ fsm_prepare_standby_for_promotion(Keeper *keeper)
 
 
 /*
- * fsm_suspend_standby is used when putting the standby in maintenance mode
- * (kernel upgrades, change of hardware, etc). Maintenance means that the user
- * now is driving the service, refrain from doing anything ourselves.
+ * fsm_start_maintenance_on_standby is used when putting the standby in
+ * maintenance mode (kernel upgrades, change of hardware, etc). Maintenance
+ * means that the user now is driving the service, refrain from doing anything
+ * ourselves.
  */
 bool
 fsm_start_maintenance_on_standby(Keeper *keeper)

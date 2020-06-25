@@ -1231,10 +1231,10 @@ start_maintenance(PG_FUNCTION_ARGS)
 						  message);
 
 		SetNodeGoalState(currentNode->nodeName, currentNode->nodePort,
-						 REPLICATION_STATE_MAINTENANCE);
+						 REPLICATION_STATE_WAIT_MAINTENANCE);
 
 		NotifyStateChange(currentNode->reportedState,
-						  REPLICATION_STATE_MAINTENANCE,
+						  REPLICATION_STATE_WAIT_MAINTENANCE,
 						  currentNode->formationId,
 						  currentNode->groupId,
 						  currentNode->nodeId,

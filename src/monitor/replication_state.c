@@ -231,6 +231,11 @@ ReplicationStateGetName(ReplicationState replicationState)
 			return "prepare_maintenance";
 		}
 
+		case REPLICATION_STATE_WAIT_MAINTENANCE:
+		{
+			return "wait_maintenance";
+		}
+
 		default:
 		{
 			ereport(ERROR,

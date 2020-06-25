@@ -118,6 +118,10 @@
 #define COMMENT_INIT_TO_WAIT_STANDBY \
 	"Start following a primary"
 
+#define COMMENT_SECONDARY_TO_WAIT_MAINTENANCE \
+	"Waiting for the primary to be disable sync replication before " \
+	"going to maintenance."
+
 #define COMMENT_SECONDARY_TO_MAINTENANCE \
 	"Suspending standby for manual maintenance."
 
@@ -269,8 +273,9 @@ KeeperFSMTransition KeeperFSM[] = {
 	/*
 	 * In case of maintenance of the standby server, we stop PostgreSQL.
 	 */
-	{ SECONDARY_STATE, MAINTENANCE_STATE, COMMENT_SECONDARY_TO_MAINTENANCE, &fsm_start_maintenance_on_standby },
-	{ CATCHINGUP_STATE, MAINTENANCE_STATE, COMMENT_SECONDARY_TO_MAINTENANCE, &fsm_start_maintenance_on_standby },
+	{ SECONDARY_STATE, WAIT_MAINTENANCE_STATE, COMMENT_SECONDARY_TO_WAIT_MAINTENANCE, NULL },
+	{ CATCHINGUP_STATE, WAIT_MAINTENANCE_STATE, COMMENT_SECONDARY_TO_WAIT_MAINTENANCE, NULL },
+	{ WAIT_MAINTENANCE_STATE, MAINTENANCE_STATE, COMMENT_SECONDARY_TO_MAINTENANCE, &fsm_start_maintenance_on_standby },
 	{ MAINTENANCE_STATE, CATCHINGUP_STATE, COMMENT_MAINTENANCE_TO_CATCHINGUP, &fsm_restart_standby },
 
 	/*

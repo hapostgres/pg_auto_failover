@@ -36,7 +36,8 @@ CREATE TYPE pgautofailover.replication_state
     'maintenance',
     'join_primary',
     'apply_settings',
-    'prepare_maintenance'
+    'prepare_maintenance',
+    'wait_maintenance'
  );
 
 CREATE TABLE pgautofailover.formation
