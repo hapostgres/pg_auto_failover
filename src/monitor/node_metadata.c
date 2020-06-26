@@ -551,9 +551,10 @@ FindCandidateNodeBeingPromoted(List *groupNodeList)
  */
 static int
 #if (PG_VERSION_NUM >= 130000)
-pgautofailover_node_candidate_priority_compare(const union ListCell *a, const union ListCell *b)
+pgautofailover_node_candidate_priority_compare(const union ListCell *a,
+											   const union ListCell *b)
 #else
-pgautofailover_node_candidate_priority_compare(const void *a, const void *b)
+pgautofailover_node_candidate_priority_compare(const void * a, const void * b)
 #endif
 {
 	AutoFailoverNode *node1 = (AutoFailoverNode *) lfirst(*(ListCell **) a);
