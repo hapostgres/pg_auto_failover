@@ -825,6 +825,18 @@ fsm_init_standby(Keeper *keeper)
 		return false;
 	}
 
+	if (!skipBaseBackup)
+	{
+		bool forceCacheInvalidation = true;
+
+		/* write our own HBA rules, pg_basebackup copies pg_hba.conf too */
+		if (!keeper_refresh_other_nodes(keeper, forceCacheInvalidation))
+		{
+			log_error("Failed to update HBA rules after a base backup");
+			return false;
+		}
+	}
+
 	/*
 	 * Publish our possibly new system_identifier now.
 	 */
@@ -898,6 +910,7 @@ fsm_rewind_or_init(Keeper *keeper)
 	if (!primary_rewind_to_standby(postgres))
 	{
 		bool skipBaseBackup = false;
+		bool forceCacheInvalidation = true;
 
 		log_warn("Failed to rewind demoted primary to standby, "
 				 "trying pg_basebackup instead");
@@ -912,6 +925,13 @@ fsm_rewind_or_init(Keeper *keeper)
 		if (!keeper_create_self_signed_cert(keeper))
 		{
 			/* errors have already been logged */
+			return false;
+		}
+
+		/* write our own HBA rules, pg_basebackup copies pg_hba.conf too */
+		if (!keeper_refresh_other_nodes(keeper, forceCacheInvalidation))
+		{
+			log_error("Failed to update HBA rules after a base backup");
 			return false;
 		}
 	}

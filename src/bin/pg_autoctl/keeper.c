@@ -1363,9 +1363,15 @@ keeper_update_group_hba(Keeper *keeper, NodeAddressArray *diffNodesArray)
  * keeper_refresh_other_nodes call pgautofailover.get_other_nodes on the
  * monitor and refreshes the keeper otherNodes array with fresh information,
  * including each node's LSN position.
+ *
+ * When forceCacheInvalidation is true, instead of trusting our previous value
+ * for the keeper otherNodes array, keeper_refresh_other_nodes() instead runs
+ * through the whole monitor.get_other_nodes() result and updates HBA rules for
+ * all entries there. That's necessary after a pg_basebackup for instance.
+ * which will copy over the origin's pg_hba.conf.
  */
 bool
-keeper_refresh_other_nodes(Keeper *keeper)
+keeper_refresh_other_nodes(Keeper *keeper, bool forceCacheInvalidation)
 {
 	Monitor *monitor = &(keeper->monitor);
 	KeeperConfig *config = &(keeper->config);
@@ -1387,7 +1393,14 @@ keeper_refresh_other_nodes(Keeper *keeper)
 	}
 
 	/* compute nodes that need an HBA change (new ones, new hostnames) */
-	(void) diff_nodesArray(&oldNodesArray, otherNodesArray, &diffNodesArray);
+	if (forceCacheInvalidation)
+	{
+		diffNodesArray = *otherNodesArray;
+	}
+	else
+	{
+		(void) diff_nodesArray(&oldNodesArray, otherNodesArray, &diffNodesArray);
+	}
 
 	/*
 	 * When we're alone in the group, and also when there's no change, then we
@@ -1463,15 +1476,19 @@ diff_nodesArray(NodeAddressArray *previousNodesArray,
 
 				diffNodesArray[diffIndex++] = currentNodesArray[currIndex];
 			}
-
 			prevIndex++;
 		}
 		else if (currNode->nodeId > prevNode->nodeId)
 		{
-			log_debug("Node %d has been dropped from the group in the monitor",
-					  prevNode->nodeId);
-
-			prevIndex++;
+			/*
+			 * All the remaining entries of currentNodesArray are new.
+			 *
+			 * We might have entries in previousNodesArray that are not found
+			 * in currentNodesArray anymore, but we don't know how to clean-up
+			 * the HBA file entries at the moment anyway, so we just skip them.
+			 */
+			diffNodesArray[diffIndex++] = currentNodesArray[currIndex];
+			break;
 		}
 		else
 		{

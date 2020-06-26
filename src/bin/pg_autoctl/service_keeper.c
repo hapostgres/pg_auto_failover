@@ -522,6 +522,7 @@ keeper_node_active(Keeper *keeper)
 
 	char expectedSlotName[BUFSIZE] = { 0 };
 
+	bool forceCacheInvalidation = false;
 	bool reportPgIsRunning = ReportPgIsRunning(keeper);
 
 	/* We used to output that in INFO every 5s, which is too much chatter */
@@ -590,7 +591,7 @@ keeper_node_active(Keeper *keeper)
 	keeperState->assigned_role = assignedState.state;
 
 	/* maybe update our cached list of other nodes */
-	if (!keeper_refresh_other_nodes(keeper))
+	if (!keeper_refresh_other_nodes(keeper, forceCacheInvalidation))
 	{
 		/*
 		 * We have a new MD5 but failed to update our list, try again next

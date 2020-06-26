@@ -59,6 +59,6 @@ bool keeper_remove(Keeper *keeper, KeeperConfig *config,
 bool keeper_check_monitor_extension_version(Keeper *keeper);
 bool keeper_state_as_json(Keeper *keeper, char *json, int size);
 bool keeper_update_group_hba(Keeper *keeper, NodeAddressArray *diffNodesArray);
-bool keeper_refresh_other_nodes(Keeper *keeper);
+bool keeper_refresh_other_nodes(Keeper *keeper, bool forceCacheInvalidation);
 
 #endif /* KEEPER_H */
