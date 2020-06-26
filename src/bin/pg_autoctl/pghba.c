@@ -305,7 +305,8 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 			return false;
 		}
 
-		log_info("Ensuring HBA rules for host \"%s\"", node->host);
+		log_info("Ensuring HBA rules for node %d (%s:%d)",
+				 node->nodeId, node->host, node->port);
 
 		for (hbaLinesIndex = 0; hbaLines[hbaLinesIndex] != NULL; hbaLinesIndex++)
 		{

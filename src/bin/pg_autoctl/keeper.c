@@ -883,23 +883,12 @@ keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 bool
 keeper_drop_replication_slots_for_removed_nodes(Keeper *keeper)
 {
-	Monitor *monitor = &(keeper->monitor);
-	PostgresSetup *pgSetup = &(keeper->postgres.postgresSetup);
 	LocalPostgresServer *postgres = &(keeper->postgres);
-
-	char *host = keeper->config.nodename;
-	int port = pgSetup->pgport;
+	NodeAddressArray *otherNodesArray = &(keeper->otherNodes);
 
 	log_trace("keeper_drop_replication_slots_for_removed_nodes");
 
-	if (!monitor_get_other_nodes(monitor, host, port,
-								 ANY_STATE, &(keeper->otherNodes)))
-	{
-		/* errors have already been logged */
-		return false;
-	}
-
-	if (!postgres_replication_slot_drop_removed(postgres, &(keeper->otherNodes)))
+	if (!postgres_replication_slot_drop_removed(postgres, otherNodesArray))
 	{
 		log_error("Failed to maintain replication slots on the local Postgres "
 				  "instance, see above for details");
@@ -918,12 +907,9 @@ keeper_drop_replication_slots_for_removed_nodes(Keeper *keeper)
 bool
 keeper_maintain_replication_slots(Keeper *keeper)
 {
-	Monitor *monitor = &(keeper->monitor);
 	PostgresSetup *pgSetup = &(keeper->postgres.postgresSetup);
 	LocalPostgresServer *postgres = &(keeper->postgres);
-
-	char *host = keeper->config.nodename;
-	int port = pgSetup->pgport;
+	NodeAddressArray *otherNodesArray = &(keeper->otherNodes);
 
 	log_trace("keeper_maintain_replication_slots");
 
@@ -933,14 +919,7 @@ keeper_maintain_replication_slots(Keeper *keeper)
 		return true;
 	}
 
-	if (!monitor_get_other_nodes(monitor, host, port,
-								 ANY_STATE, &(keeper->otherNodes)))
-	{
-		/* errors have already been logged */
-		return false;
-	}
-
-	if (!postgres_replication_slot_maintain(postgres, &(keeper->otherNodes)))
+	if (!postgres_replication_slot_maintain(postgres, otherNodesArray))
 	{
 		log_error("Failed to maintain replication slots on the local Postgres "
 				  "instance, see above for details");
@@ -1321,47 +1300,26 @@ keeper_state_as_json(Keeper *keeper, char *json, int size)
 
 
 /*
- * keeper_update_group_hba updates the group MD5 as given by the monitor when
- * calling the register_node() or node_active() API endpoints, and when the new
- * MD5 is different from the previous cached one, updates the HBA file too.
+ * keeper_update_group_hba updates updates the HBA file to ensure we have two
+ * entries per other node in the group, allowing for both replication
+ * connections and connections to the --dbname.
  */
 bool
-keeper_update_group_hba(Keeper *keeper, char *groupMD5)
+keeper_update_group_hba(Keeper *keeper)
 {
-	Monitor *monitor = &(keeper->monitor);
-	KeeperConfig *config = &(keeper->config);
-	PostgresSetup *postgresSetup = &(keeper->postgres.postgresSetup);
 	NodeAddressArray *otherNodesArray = &(keeper->otherNodes);
+	LocalPostgresServer *postgres = &(keeper->postgres);
+	PostgresSetup *postgresSetup = &(postgres->postgresSetup);
+	PGSQL *pgsql = &(postgres->sqlClient);
 
 	char hbaFilePath[MAXPGPATH] = { 0 };
 	char *authMethod = pg_setup_get_auth_method(postgresSetup);
-
-	char *host = config->nodename;
-	int port = postgresSetup->pgport;
-
-	log_trace("keeper_update_group_hba: %s", groupMD5);
-
-	if (streq(keeper->groupMD5, groupMD5))
-	{
-		return true;
-	}
-
-	if (!monitor_get_other_nodes(monitor, host, port, ANY_STATE, otherNodesArray))
-	{
-		/* ignore the error, use an educated guess for the max size */
-		log_error("Failed to get_nodes() on the monitor");
-		return false;
-	}
 
 	/* early exit when we're alone in the group */
 	if (otherNodesArray->count == 0)
 	{
 		return true;
 	}
-
-	log_info("Fetched current list of %d other nodes from the monitor "
-			 "to update HBA rules.",
-			 otherNodesArray->count);
 
 	sformat(hbaFilePath, MAXPGPATH, "%s/pg_hba.conf", postgresSetup->pgdata);
 
@@ -1375,6 +1333,74 @@ keeper_update_group_hba(Keeper *keeper, char *groupMD5)
 		log_error("Failed to edit HBA file \"%s\" to update rules to current "
 				  "list of nodes registered on the monitor",
 				  hbaFilePath);
+		return false;
+	}
+
+	/*
+	 * Only reload if Postgres is known to be running. If it's not running, we
+	 * edited the HBA and it's going to take effect at next restart of
+	 * Postgres, so we're good here.
+	 */
+	if (pg_setup_is_running(postgresSetup))
+	{
+		if (!pgsql_reload_conf(pgsql))
+		{
+			log_error("Failed to reload the postgres configuration after adding "
+					  "the standby user to pg_hba");
+			return false;
+		}
+	}
+
+	return true;
+}
+
+
+/*
+ * keeper_refresh_other_nodes implements cache invalidation for the keeper's
+ * otherNodes array.
+ *
+ * The monitor API node_active() returns a MD5 of the host names for all nodes
+ * in the same group, and we use that to drive our cache invalidation and
+ * retrieve a new list when needed.
+ */
+bool
+keeper_refresh_other_nodes(Keeper *keeper, char *groupMD5)
+{
+	Monitor *monitor = &(keeper->monitor);
+	KeeperConfig *config = &(keeper->config);
+	PostgresSetup *postgresSetup = &(keeper->postgres.postgresSetup);
+	NodeAddressArray *otherNodesArray = &(keeper->otherNodes);
+
+	char *host = config->nodename;
+	int port = postgresSetup->pgport;
+
+	log_trace("keeper_refresh_other_nodes: %s", groupMD5);
+
+	if (streq(keeper->groupMD5, groupMD5))
+	{
+		return true;
+	}
+
+	if (!monitor_get_other_nodes(monitor, host, port, ANY_STATE, otherNodesArray))
+	{
+		log_error("Failed to get_other_nodes() on the monitor");
+		return false;
+	}
+
+	if (otherNodesArray->count > 0)
+	{
+		log_info("Fetched current list of %d other nodes from the monitor "
+				 "to update HBA rules.",
+				 otherNodesArray->count);
+	}
+
+	/* we have a new list of other nodes, update the HBA file */
+	if (!keeper_update_group_hba(keeper))
+	{
+		log_error("Failed to update the HBA entries for the new "
+				  "elements in the our formation \"%s\" and group %d",
+				  keeper->config.formation,
+				  keeper->state.current_group);
 		return false;
 	}
 

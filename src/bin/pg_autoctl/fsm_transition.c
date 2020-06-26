@@ -39,8 +39,6 @@
 #include "primary_standby.h"
 #include "state.h"
 
-static bool prepare_replication(Keeper *keeper, NodeState otherNodeState);
-
 
 /*
  * fsm_init_primary initializes the postgres server as primary.
@@ -399,124 +397,13 @@ fsm_resume_as_primary(Keeper *keeper)
  * fsm_prepare_replication is used when a new standby was added.
  *
  * add_standby_to_hba && create_replication_slot
+ *
+ * Those operations are now done eagerly rather than just in time. So it's been
+ * taken care of aready, nothing to do within this state transition.
  */
 bool
 fsm_prepare_replication(Keeper *keeper)
 {
-	KeeperConfig *config = &(keeper->config);
-
-	if (IS_EMPTY_STRING_BUFFER(config->nodename))
-	{
-		/* developer error, this should never happen */
-		log_fatal(
-			"BUG: nodename should be set before calling fsm_prepare_replication");
-		return false;
-	}
-
-	return prepare_replication(keeper, WAIT_STANDBY_STATE);
-}
-
-
-/*
- * prepare_replication is the work-horse for fsm_prepare_replication and used
- * in fsm_promote_standby too, where we could have to accept the fact that
- * there's no other node at the moment: we're doing a secondary ➜ single
- * transition after all.
- */
-static bool
-prepare_replication(Keeper *keeper, NodeState otherNodeState)
-{
-	KeeperConfig *config = &(keeper->config);
-	Monitor *monitor = &(keeper->monitor);
-	LocalPostgresServer *postgres = &(keeper->postgres);
-	PostgresSetup *pgSetup = &(postgres->postgresSetup);
-
-	int nodeIndex = 0;
-
-	/*
-	 * When using the monitor, now is the time to fetch the otherNode hostname
-	 * and port from it. When the monitor is disabled, it is expected that the
-	 * information has been already filled in keeper->otherNode; see
-	 * `keeper_cli_fsm_assign' for an example of that.
-	 */
-	if (!config->monitorDisabled)
-	{
-		char *host = config->nodename;
-		int port = pgSetup->pgport;
-
-		if (!monitor_get_other_nodes(monitor, host, port,
-									 otherNodeState,
-									 &(keeper->otherNodes)))
-		{
-			/* errors have already been logged */
-			return false;
-		}
-
-		if (keeper->otherNodes.count == 0)
-		{
-			if (otherNodeState == ANY_STATE)
-			{
-				log_warn("There's no other node for %s:%d", host, port);
-			}
-			else
-			{
-				/*
-				 * Should we warn about it really? it might be a replication
-				 * setting change that will impact synchronous_standby_names
-				 * and that's all.
-				 */
-				log_warn("There's no other node in state \"%s\" "
-						 "for node %s:%d",
-						 NodeStateToString(otherNodeState),
-						 host, port);
-			}
-		}
-	}
-
-	/*
-	 * Should we fail somewhere in this loop, we return false and fail the
-	 * whole transition. The transition is going to be tried again, and we are
-	 * going to try and add HBA entries and create replication slots again.
-	 * Both operations succeed when their target entry already exists.
-	 *
-	 */
-	for (nodeIndex = 0; nodeIndex < keeper->otherNodes.count; nodeIndex++)
-	{
-		NodeAddress *otherNode = &(keeper->otherNodes.nodes[nodeIndex]);
-		char replicationSlotName[BUFSIZE] = { 0 };
-
-		log_info("Preparing replication for standby node %d (%s:%d)",
-				 otherNode->nodeId, otherNode->host, otherNode->port);
-
-		if (!primary_add_standby_to_hba(postgres,
-										otherNode->host,
-										config->replication_password))
-		{
-			log_error("Failed to grant access to the standby %d (%s:%d) "
-					  "by adding relevant lines to pg_hba.conf for the standby "
-					  "hostname and user, see above for details",
-					  otherNode->nodeId, otherNode->host, otherNode->port);
-			return false;
-		}
-
-		if (!postgres_sprintf_replicationSlotName(otherNode->nodeId,
-												  replicationSlotName, BUFSIZE))
-		{
-			/* that's highly unlikely... */
-			log_error("Failed to snprintf replication slot name for node %d",
-					  otherNode->nodeId);
-			return false;
-		}
-
-		if (!primary_create_replication_slot(postgres, replicationSlotName))
-		{
-			log_error(
-				"Failed to enable replication from the primary server because "
-				"creating the replication slot failed, see above for details");
-			return false;
-		}
-	}
-
 	return true;
 }
 
@@ -1130,6 +1017,10 @@ fsm_restart_standby(Keeper *keeper)
  * && disable_synchronous_replication
  * && keeper_drop_replication_slots_for_removed_nodes
  *
+ * Note that the HBA and slot maintenance are done eagerly in the main keeper
+ * loop as soon as a new node is added to the group, so we don't need to handle
+ * those operations in the context of a the FSM transitions anymore.
+ *
  * So we reuse fsm_disable_replication() here, rather than copy/pasting the same
  * bits code in the fsm_promote_standby() function body. If the definition of
  * the fsm_promote_standby transition ever came to diverge from whatever
@@ -1159,24 +1050,6 @@ fsm_promote_standby(Keeper *keeper)
 	{
 		log_error("Failed to promote the local postgres server from standby "
 				  "to single state, see above for details");
-		return false;
-	}
-
-	/*
-	 * The old primary will (hopefully) come back as a secondary and should
-	 * be able to open a replication connection. We therefore need to do the
-	 * same steps we take when going from single to wait_primary, namely to
-	 * create a replication slot and add the other node to pg_hba.conf. These
-	 * steps are implemented in fsm_prepare_replication.
-	 *
-	 * The other node is expected to be in either DEMOTE_TIMEOUT_STATE or in
-	 * PREPARE_MAINTENANCE state. There's no harm in preparing replication
-	 * settings for all the other nodes in the system anyway, so let's just do
-	 * that.
-	 */
-	if (!prepare_replication(keeper, ANY_STATE))
-	{
-		/* prepare_replication logs relevant errors */
 		return false;
 	}
 
