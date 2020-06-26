@@ -139,6 +139,14 @@ transitions to the prepare_maintenance state to make sure the secondary is
 not missing any writes. In the prepare_maintenance state, the primary shuts
 down.
 
+**Wait_maintenance**
+
+The custer administrator can manually move a secondary into the maintenance
+state to gracefully take it offline. Before reaching the maintenance state
+though, we want to switch the primary node to asynchronous replication, in
+order to avoid writes being blocked. In the state wait_maintenance the
+standby waits until the primary has reached wait_primary.
+
 **Draining**
 
 A state between primary and demoted where replication buffers finish
@@ -174,3 +182,10 @@ to avoid split-brain situations.
 For safety, when the primary fails to contact the monitor and fails
 to see the pg_auto_failover connection in pg_stat_replication, then it goes to
 the demoted state of its own accord.
+
+**Prepare_promotion**
+
+The prepare_promotion state is meant to prepare the standby server to being
+promoted. This state allows synchronisation on the monitor, making sure that
+the primary has stopped Postgres before promoting the secondary, hence
+preventing split brain situations.
