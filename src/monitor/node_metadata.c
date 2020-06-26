@@ -35,7 +35,6 @@
 #include "catalog/pg_extension.h"
 #include "catalog/pg_type.h"
 #include "commands/sequence.h"
-#include "common/md5.h"
 #include "executor/spi.h"
 #include "lib/stringinfo.h"
 #include "nodes/pg_list.h"
@@ -237,64 +236,6 @@ AutoFailoverNodeGroup(char *formationId, int groupId)
 	SPI_finish();
 
 	return nodeList;
-}
-
-
-/*
- * AutoFailoverNodeGroupDigest computes the md5 of the combined nodenames of
- * the nodes of the given group. Each time we add, remove, or edit a node
- * hostname we get a new md5 sum.
- */
-bool
-AutoFailoverNodeGroupDigest(char *formationId, int groupId, char *hexsum)
-{
-	MemoryContext callerContext = CurrentMemoryContext;
-
-	Oid argTypes[] = {
-		TEXTOID, /* formationid */
-		INT4OID  /* groupid */
-	};
-
-	Datum argValues[] = {
-		CStringGetTextDatum(formationId), /* formationid */
-		Int32GetDatum(groupId)            /* groupid */
-	};
-
-	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
-	int spiStatus = 0;
-
-	const char *selectQuery =
-		"SELECT md5(string_agg(nodename, E'\n')) FROM " AUTO_FAILOVER_NODE_TABLE
-		" WHERE formationid = $1 AND groupid = $2";
-
-	SPI_connect();
-
-	spiStatus = SPI_execute_with_args(selectQuery, argCount, argTypes, argValues,
-									  NULL, false, 0);
-	if (spiStatus != SPI_OK_SELECT)
-	{
-		elog(ERROR, "could not select from " AUTO_FAILOVER_NODE_TABLE);
-	}
-
-	/* we expect a single row of output */
-	if (SPI_processed > 0)
-	{
-		MemoryContext spiContext = MemoryContextSwitchTo(callerContext);
-		TupleDesc tupleDescriptor = SPI_tuptable->tupdesc;
-		HeapTuple heapTuple = SPI_tuptable->vals[0];
-		bool isNull = false;
-
-		Datum md5Text = heap_getattr(heapTuple, 1, tupleDescriptor, &isNull);
-		char *md5 = TextDatumGetCString(md5Text);
-
-		strlcpy(hexsum, md5, MD5_HASH_LEN + 1);
-
-		MemoryContextSwitchTo(spiContext);
-	}
-
-	SPI_finish();
-
-	return true;
 }
 
 

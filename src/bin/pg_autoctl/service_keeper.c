@@ -590,7 +590,7 @@ keeper_node_active(Keeper *keeper)
 	keeperState->assigned_role = assignedState.state;
 
 	/* maybe update our cached list of other nodes */
-	if (!keeper_refresh_other_nodes(keeper, assignedState.groupMD5))
+	if (!keeper_refresh_other_nodes(keeper))
 	{
 		/*
 		 * We have a new MD5 but failed to update our list, try again next

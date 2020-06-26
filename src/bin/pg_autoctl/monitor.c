@@ -280,9 +280,13 @@ monitor_get_other_nodes(Monitor *monitor,
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
 		currentState == ANY_STATE
-		? "SELECT * FROM pgautofailover.get_other_nodes($1, $2)"
-		: "SELECT * FROM pgautofailover.get_other_nodes($1, $2, "
-		  "$3::pgautofailover.replication_state)";
+		?
+		"SELECT * FROM pgautofailover.get_other_nodes($1, $2) "
+		"ORDER BY node_id"
+		:
+		"SELECT * FROM pgautofailover.get_other_nodes($1, $2, "
+		"$3::pgautofailover.replication_state) "
+		"ORDER BY node_id";
 	int paramCount = 2;
 	Oid paramTypes[3] = { TEXTOID, INT4OID, TEXTOID };
 	const char *paramValues[3] = { 0 };
@@ -1338,9 +1342,9 @@ parseNodeState(void *ctx, PGresult *result)
 		return;
 	}
 
-	if (PQnfields(result) != 6)
+	if (PQnfields(result) != 5)
 	{
-		log_error("Query returned %d columns, expected 6", PQnfields(result));
+		log_error("Query returned %d columns, expected 5", PQnfields(result));
 		context->parsedOK = false;
 		return;
 	}
@@ -1387,17 +1391,6 @@ parseNodeState(void *ctx, PGresult *result)
 	else
 	{
 		context->assignedState->replicationQuorum = (*value) == 't';
-	}
-
-	value = PQgetvalue(result, 0, 5);
-	if (value == NULL)
-	{
-		log_error("Invalid group MD5 (NULL) returned by monitor");
-		++errors;
-	}
-	else
-	{
-		strlcpy(context->assignedState->groupMD5, value, MD5_HASH_LEN + 1);
 	}
 
 	if (errors > 0)

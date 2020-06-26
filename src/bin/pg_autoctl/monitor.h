@@ -30,7 +30,6 @@ typedef struct MonitorAssignedState
 	NodeState state;
 	int candidatePriority;
 	bool replicationQuorum;
-	char groupMD5[MD5_HASH_LEN + 1];
 } MonitorAssignedState;
 
 typedef struct StateNotification

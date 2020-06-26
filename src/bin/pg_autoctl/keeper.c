@@ -24,6 +24,11 @@
 #include "state.h"
 
 
+static void diff_nodesArray(NodeAddressArray *previousNodesArray,
+							NodeAddressArray *currentNodesArray,
+							NodeAddressArray *diffNodesArray);
+
+
 /*
  * keeper_init initializes the keeper logic according to the given keeper
  * configuration. It also reads the state file from disk. The state file
@@ -1305,9 +1310,8 @@ keeper_state_as_json(Keeper *keeper, char *json, int size)
  * connections and connections to the --dbname.
  */
 bool
-keeper_update_group_hba(Keeper *keeper)
+keeper_update_group_hba(Keeper *keeper, NodeAddressArray *diffNodesArray)
 {
-	NodeAddressArray *otherNodesArray = &(keeper->otherNodes);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 	PostgresSetup *postgresSetup = &(postgres->postgresSetup);
 	PGSQL *pgsql = &(postgres->sqlClient);
@@ -1316,7 +1320,7 @@ keeper_update_group_hba(Keeper *keeper)
 	char *authMethod = pg_setup_get_auth_method(postgresSetup);
 
 	/* early exit when we're alone in the group */
-	if (otherNodesArray->count == 0)
+	if (diffNodesArray->count == 0)
 	{
 		return true;
 	}
@@ -1324,7 +1328,7 @@ keeper_update_group_hba(Keeper *keeper)
 	sformat(hbaFilePath, MAXPGPATH, "%s/pg_hba.conf", postgresSetup->pgdata);
 
 	if (!pghba_ensure_host_rules_exist(hbaFilePath,
-									   otherNodesArray,
+									   diffNodesArray,
 									   postgresSetup->ssl.active,
 									   postgresSetup->dbname,
 									   PG_AUTOCTL_REPLICA_USERNAME,
@@ -1356,30 +1360,25 @@ keeper_update_group_hba(Keeper *keeper)
 
 
 /*
- * keeper_refresh_other_nodes implements cache invalidation for the keeper's
- * otherNodes array.
- *
- * The monitor API node_active() returns a MD5 of the host names for all nodes
- * in the same group, and we use that to drive our cache invalidation and
- * retrieve a new list when needed.
+ * keeper_refresh_other_nodes call pgautofailover.get_other_nodes on the
+ * monitor and refreshes the keeper otherNodes array with fresh information,
+ * including each node's LSN position.
  */
 bool
-keeper_refresh_other_nodes(Keeper *keeper, char *groupMD5)
+keeper_refresh_other_nodes(Keeper *keeper)
 {
 	Monitor *monitor = &(keeper->monitor);
 	KeeperConfig *config = &(keeper->config);
 	PostgresSetup *postgresSetup = &(keeper->postgres.postgresSetup);
+
 	NodeAddressArray *otherNodesArray = &(keeper->otherNodes);
+	NodeAddressArray oldNodesArray = *otherNodesArray;
+	NodeAddressArray diffNodesArray = { 0 };
 
 	char *host = config->nodename;
 	int port = postgresSetup->pgport;
 
-	log_trace("keeper_refresh_other_nodes: %s", groupMD5);
-
-	if (streq(keeper->groupMD5, groupMD5))
-	{
-		return true;
-	}
+	log_trace("keeper_refresh_other_nodes");
 
 	if (!monitor_get_other_nodes(monitor, host, port, ANY_STATE, otherNodesArray))
 	{
@@ -1387,15 +1386,27 @@ keeper_refresh_other_nodes(Keeper *keeper, char *groupMD5)
 		return false;
 	}
 
-	if (otherNodesArray->count > 0)
+	/* compute nodes that need an HBA change (new ones, new hostnames) */
+	(void) diff_nodesArray(&oldNodesArray, otherNodesArray, &diffNodesArray);
+
+	/*
+	 * When we're alone in the group, and also when there's no change, then we
+	 * are done here already.
+	 */
+	if (otherNodesArray->count == 0 || diffNodesArray.count == 0)
 	{
-		log_info("Fetched current list of %d other nodes from the monitor "
-				 "to update HBA rules.",
-				 otherNodesArray->count);
+		return true;
 	}
 
-	/* we have a new list of other nodes, update the HBA file */
-	if (!keeper_update_group_hba(keeper))
+	log_info("Fetched current list of %d other nodes from the monitor "
+			 "to update HBA rules, including %d changes.",
+			 otherNodesArray->count, diffNodesArray.count);
+
+	/*
+	 * We have a new list of other nodes, update the HBA file. We only update
+	 * the nodes that we didn't know before, or that have a new host property.
+	 */
+	if (!keeper_update_group_hba(keeper, &diffNodesArray))
 	{
 		log_error("Failed to update the HBA entries for the new "
 				  "elements in the our formation \"%s\" and group %d",
@@ -1404,8 +1415,68 @@ keeper_refresh_other_nodes(Keeper *keeper, char *groupMD5)
 		return false;
 	}
 
-	/* update our cached value for the group digest now */
-	strlcpy(keeper->groupMD5, groupMD5, MD5_HASH_LEN + 1);
-
 	return true;
+}
+
+
+/*
+ * merge_new_node_array merges the node Array just received from the monitor
+ * with the existing one. The nodes are all sorted on nodeId so we can
+ * implement a merge diff here.
+ */
+static void
+diff_nodesArray(NodeAddressArray *previousNodesArray,
+				NodeAddressArray *currentNodesArray,
+				NodeAddressArray *diffNodesArray)
+{
+	int prevIndex = 0;
+	int currIndex = 0;
+	int diffIndex = 0;
+
+	NodeAddress *prevNode = NULL;
+
+	if (previousNodesArray->count == 0)
+	{
+		/* all the entries are new and we want them in diffNodesArray */
+		*diffNodesArray = *currentNodesArray;
+		return;
+	}
+
+	prevNode = &(previousNodesArray->nodes[prevIndex]);
+
+	/* we only care about the nodes in the current nodes array */
+	for (currIndex = 0; currIndex < currentNodesArray->count; currIndex++)
+	{
+		NodeAddress *currNode = &(currentNodesArray->nodes[currIndex]);
+
+		/* remember, the input arrays are sorted on nodeId */
+		if (currNode->nodeId < prevNode->nodeId)
+		{
+			diffNodesArray[diffIndex++] = currentNodesArray[currIndex];
+		}
+		else if (currNode->nodeId == prevNode->nodeId)
+		{
+			if (!streq(currNode->host, prevNode->host))
+			{
+				log_debug("Node %d has a new hostname \"%s\"",
+						  currNode->nodeId, currNode->host);
+
+				diffNodesArray[diffIndex++] = currentNodesArray[currIndex];
+			}
+
+			prevIndex++;
+		}
+		else if (currNode->nodeId > prevNode->nodeId)
+		{
+			log_debug("Node %d has been dropped from the group in the monitor",
+					  prevNode->nodeId);
+
+			prevIndex++;
+		}
+		else
+		{
+			log_error("BUG in diff_nodesArray!");
+			return;
+		}
+	}
 }
