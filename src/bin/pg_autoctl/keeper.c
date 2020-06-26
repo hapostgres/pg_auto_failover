@@ -174,7 +174,6 @@ bool
 keeper_ensure_current_state(Keeper *keeper)
 {
 	KeeperStateData *keeperState = &(keeper->state);
-	PostgresSetup *pgSetup = &(keeper->postgres.postgresSetup);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
 	log_debug("Ensuring current state: %s",
@@ -270,7 +269,7 @@ keeper_ensure_current_state(Keeper *keeper)
 						 "stopping PostgreSQL.",
 						 NodeStateToString(keeperState->current_role));
 
-				return pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata);
+				return ensure_postgres_service_is_stopped(postgres);
 			}
 			return true;
 		}
