@@ -293,9 +293,10 @@ cli_perform_failover(int argc, char **argv)
 	}
 
 	/* process state changes notification until we have a new primary */
-	if (!monitor_wait_until_new_primary(&monitor,
-										config.formation,
-										config.groupId))
+	if (!monitor_wait_until_some_node_reported_state(&monitor,
+													 config.formation,
+													 config.groupId,
+													 PRIMARY_STATE))
 	{
 		log_error("Failed to wait until a new primary has been notified");
 		exit(EXIT_CODE_INTERNAL_ERROR);

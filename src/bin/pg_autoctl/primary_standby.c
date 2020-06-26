@@ -131,13 +131,27 @@ local_postgres_set_status_path(LocalPostgresServer *postgres, bool unlink)
 	log_trace("local_postgres_set_status_path: %s", pgStatus->pgStatusPath);
 
 	/* local_postgres_init removes any stale pg_autoctl.pg file */
-	if (unlink && !unlink_file(pgStatus->pgStatusPath))
+	if (unlink && !local_postgres_unlink_status_file(postgres))
 	{
 		/* errors have already been logged */
 		return false;
 	}
 
 	return true;
+}
+
+
+/*
+ * local_postgres_unlink_status_file unlinks the file we use to communicate
+ * with the Postgres controller, so that this process won't interfere with
+ * whatever the user is doing durning maintenance (such as stop Postgres).
+ */
+bool
+local_postgres_unlink_status_file(LocalPostgresServer *postgres)
+{
+	LocalExpectedPostgresStatus *pgStatus = &(postgres->expectedPgStatus);
+
+	return unlink_file(pgStatus->pgStatusPath);
 }
 
 
@@ -764,7 +778,7 @@ primary_rewind_to_standby(LocalPostgresServer *postgres)
 	log_info("Rewinding PostgreSQL to follow new primary %s:%d",
 			 primaryNode->host, primaryNode->port);
 
-	if (!pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata))
+	if (!ensure_postgres_service_is_stopped(postgres))
 	{
 		log_error("Failed to stop postgres to do rewind");
 		return false;
