@@ -143,7 +143,7 @@ pg_setup_init(PostgresSetup *pgSetup,
 		log_fatal("Database directory \"%s\" not found", pgSetup->pgdata);
 		return false;
 	}
-	else
+	else if (!missing_pgdata_is_ok)
 	{
 		char globalControlPath[MAXPGPATH] = { 0 };
 
@@ -157,8 +157,11 @@ pg_setup_init(PostgresSetup *pgSetup,
 					  "see above for details");
 			return false;
 		}
+	}
 
-		/* get the real path of PGDATA now */
+	/* get the real path of PGDATA now */
+	if (directory_exists(pgSetup->pgdata))
+	{
 		if (!normalize_filename(pgSetup->pgdata, pgSetup->pgdata, MAXPGPATH))
 		{
 			/* errors have already been logged */
