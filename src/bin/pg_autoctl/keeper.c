@@ -1081,10 +1081,6 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 	Monitor *monitor = &(keeper->monitor);
 	MonitorAssignedState assignedState = { 0 };
 
-	char *sqlBegin = "BEGIN";
-	char *sqlCommit = "COMMIT";
-	char *sqlRollback = "ROLLBACK";
-
 	/*
 	 * First try to create our state file. The keeper_state_create_file function
 	 * may fail if we have no permission to write to the state file directory
@@ -1114,7 +1110,7 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 	 *
 	 * In particular, if we fail to update our local state file, we should
 	 * cancel our registration, because there's no way we can re-discover our
-	 * nodeId later,
+	 * nodeId later.
 	 *
 	 * We register to the monitor in a SQL transaction that we only COMMIT
 	 * after we have updated our local state file. If we fail to do so, we
@@ -1123,7 +1119,7 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 	 * registration (process killed, crash, etc), then the server issues a
 	 * ROLLBACK for us upon disconnection.
 	 */
-	if (!pgsql_execute(&(monitor->pgsql), sqlBegin))
+	if (!pgsql_execute(&(monitor->pgsql), "BEGIN"))
 	{
 		log_error("Failed to open a SQL transaction to register this node");
 
@@ -1192,7 +1188,7 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 		goto rollback;
 	}
 
-	if (!pgsql_execute(&(monitor->pgsql), sqlCommit))
+	if (!pgsql_execute(&(monitor->pgsql), "COMMIT"))
 	{
 		log_error("Failed to COMMIT register_node transaction on the "
 				  "monitor, see above for details");
@@ -1207,7 +1203,7 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 rollback:
 	unlink_file(config->pathnames.state);
 
-	if (!pgsql_execute(&(monitor->pgsql), sqlRollback))
+	if (!pgsql_execute(&(monitor->pgsql), "ROLLBACK"))
 	{
 		log_error("Failed to ROLLBACK failed register_node transaction "
 				  " on the monitor, see above for details.");
