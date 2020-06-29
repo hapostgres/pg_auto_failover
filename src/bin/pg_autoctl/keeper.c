@@ -396,6 +396,7 @@ keeper_update_pg_state(Keeper *keeper)
 	LocalPostgresServer *postgres = &(keeper->postgres);
 	PGSQL *pgsql = &(postgres->sqlClient);
 
+	bool missingPgDataIsOk = false;
 	bool pg_is_not_running_is_ok = true;
 
 	log_debug("Update local PostgreSQL state");
@@ -406,111 +407,6 @@ keeper_update_pg_state(Keeper *keeper)
 	postgres->pgIsRunning = false;
 	memset(postgres->pgsrSyncState, 0, PGSR_SYNC_STATE_MAXLENGTH);
 	strlcpy(postgres->currentLSN, "0/0", sizeof(postgres->currentLSN));
-
-	/*
-	 * In some states, it's ok to not have a PostgreSQL data directory at all.
-	 */
-	switch (keeperState->current_role)
-	{
-		case NO_STATE:
-		case INIT_STATE:
-		case WAIT_STANDBY_STATE:
-		case DEMOTED_STATE:
-		case DEMOTE_TIMEOUT_STATE:
-		case STOP_REPLICATION_STATE:
-		{
-			bool missing_ok = true;
-
-			/*
-			 * Given missing_ok, pg_controldata returns true even when the
-			 * directory doesn't exists, so we take care of that situation
-			 * ourselves here.
-			 */
-			if (directory_exists(config->pgSetup.pgdata))
-			{
-				if (!pg_controldata(pgSetup, missing_ok))
-				{
-					/*
-					 * In case of corrupted files in PGDATA, avoid spurious log
-					 * messages later when checking everything is fine: we
-					 * already know that things are not fine, don't bother
-					 * checking system_identifier etc.
-					 */
-					return false;
-				}
-			}
-			else
-			{
-				/* If there's no PGDATA, just stop here, and it's ok */
-				return true;
-			}
-			break;
-		}
-
-		default:
-		{
-			bool missing_ok = false;
-
-			if (!pg_controldata(pgSetup, missing_ok))
-			{
-				/* If there's no PGDATA, just stop here: we have a problem */
-				return false;
-			}
-		}
-	}
-
-	if (keeperState->system_identifier != pgSetup->control.system_identifier)
-	{
-		if (keeperState->system_identifier == 0)
-		{
-			keeperState->system_identifier =
-				pgSetup->control.system_identifier;
-		}
-		else
-		{
-			/*
-			 * This is a physical replication deal breaker, so it's mighty
-			 * confusing to get that here. In the least, the keeper should get
-			 * initialized from scratch again, but basically, we don't know
-			 * what we are doing anymore.
-			 */
-			log_error("Unknown PostgreSQL system identifier: %" PRIu64 ", "
-																	   "expected %" PRIu64,
-					  pgSetup->control.system_identifier,
-					  keeperState->system_identifier);
-			return false;
-		}
-	}
-
-	if (keeperState->pg_control_version != pgSetup->control.pg_control_version)
-	{
-		if (keeperState->pg_control_version == 0)
-		{
-			keeperState->pg_control_version =
-				pgSetup->control.pg_control_version;
-		}
-		else
-		{
-			log_warn("PostgreSQL version changed from %u to %u",
-					 keeperState->pg_control_version,
-					 pgSetup->control.pg_control_version);
-		}
-	}
-
-	if (keeperState->catalog_version_no != pgSetup->control.catalog_version_no)
-	{
-		if (keeperState->catalog_version_no == 0)
-		{
-			keeperState->catalog_version_no =
-				pgSetup->control.catalog_version_no;
-		}
-		else
-		{
-			log_warn("PostgreSQL catalog version changed from %u to %u",
-					 keeperState->catalog_version_no,
-					 pgSetup->control.catalog_version_no);
-		}
-	}
 
 	/*
 	 * When PostgreSQL is running, do some extra checks that are going to be
@@ -549,14 +445,16 @@ keeper_update_pg_state(Keeper *keeper)
 		 *
 		 * Also update our view of pg_is_in_recovery, the replication sync
 		 * state when we are a primary with a standby currently using our
-		 * replication slot, and our current LSN position.
-		 *
+		 * replication slot, our current LSN position, and the control data
+		 * values (pg_control_version, catalog_version_no, and
+		 * system_identifier).
 		 */
 		if (!pgsql_get_postgres_metadata(pgsql,
 										 config->replication_slot_name,
 										 &pgSetup->is_in_recovery,
 										 postgres->pgsrSyncState,
-										 postgres->currentLSN))
+										 postgres->currentLSN,
+										 &(pgSetup->control)))
 		{
 			log_error("Failed to update the local Postgres metadata");
 			return false;
@@ -566,7 +464,47 @@ keeper_update_pg_state(Keeper *keeper)
 	{
 		/* Postgres is not running. */
 		postgres->pgIsRunning = false;
+
+		/*
+		 * In some states, it's ok to not have a PostgreSQL data directory at
+		 * all.
+		 */
+		switch (keeperState->current_role)
+		{
+			case NO_STATE:
+			case INIT_STATE:
+			case WAIT_STANDBY_STATE:
+			case DEMOTED_STATE:
+			case DEMOTE_TIMEOUT_STATE:
+			case STOP_REPLICATION_STATE:
+			{
+				missingPgDataIsOk = true;
+				break;
+			}
+
+			default:
+			{
+				missingPgDataIsOk = true;
+				break;
+			}
+		}
+
+		if (!pg_setup_controldata(pgSetup, missingPgDataIsOk))
+		{
+			/* errors have already been logged */
+			return false;
+		}
 	}
+
+	/*
+	 * We got new control data from either running pg_controldata or connecting
+	 * to the local Postgres instance and running our
+	 * pgsql_get_postgres_metadata() SQL query. In either case we now need to
+	 * update our Keeper State with the control data values.
+	 */
+	keeperState->pg_control_version = pgSetup->control.pg_control_version;
+	keeperState->catalog_version_no = pgSetup->control.catalog_version_no;
+	keeperState->system_identifier = pgSetup->control.system_identifier;
 
 	/*
 	 * In some states, PostgreSQL isn't expected to be running, or not expected

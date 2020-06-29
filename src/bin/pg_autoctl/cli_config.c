@@ -99,6 +99,7 @@ cli_config_check(int argc, char **argv)
 	{
 		case PG_AUTOCTL_ROLE_MONITOR:
 		{
+			bool missingPgDataIsOk = true;
 			MonitorConfig mconfig = { 0 };
 
 			if (!monitor_config_init_from_pgsetup(&mconfig,
@@ -108,6 +109,12 @@ cli_config_check(int argc, char **argv)
 			{
 				/* errors have already been logged */
 				exit(EXIT_CODE_BAD_CONFIG);
+			}
+
+			if (!pg_controldata(&(mconfig.pgSetup), missingPgDataIsOk))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_PGCTL);
 			}
 
 			(void) cli_config_check_pgsetup(&(mconfig.pgSetup));
@@ -150,6 +157,8 @@ cli_config_check(int argc, char **argv)
 
 		case PG_AUTOCTL_ROLE_KEEPER:
 		{
+			bool missingPgDataIsOk = true;
+
 			if (!keeper_config_read_file(&config,
 										 missingPgdataIsOk,
 										 pgIsNotRunningIsOk,
@@ -157,6 +166,12 @@ cli_config_check(int argc, char **argv)
 			{
 				/* errors have already been logged */
 				exit(EXIT_CODE_BAD_CONFIG);
+			}
+
+			if (!pg_controldata(&(config.pgSetup), missingPgDataIsOk))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_PGCTL);
 			}
 
 			(void) cli_config_check_pgsetup(&(config.pgSetup));
@@ -226,7 +241,12 @@ cli_config_check_pgsetup(PostgresSetup *pgSetup)
 	 * --pgport and other options, on purpose. Another reason is that we want
 	 * to check for everything rather than fail fast.
 	 */
-	if (pgSetup->control.pg_control_version == 0)
+	char globalControlPath[MAXPGPATH] = { 0 };
+
+	/* globalControlFilePath = $PGDATA/global/pg_control */
+	join_path_components(globalControlPath, pgSetup->pgdata, "global/pg_control");
+
+	if (!file_exists(globalControlPath))
 	{
 		errors++;
 		log_error("postgresql.pgdata does not belong to a PostgreSQL cluster: "
