@@ -732,7 +732,7 @@ keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 	 */
 	if (pg_setup_is_running(pgSetup))
 	{
-		if (pgSetup->control.pg_control_version >= 1200)
+		if (state->pg_control_version >= 1200)
 		{
 			/* errors are logged already, and non-fatal to this function */
 			(void) pgsql_reset_primary_conninfo(&(postgres->sqlClient));
@@ -768,7 +768,7 @@ keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 
 		/* either recovery.conf or AUTOCTL_STANDBY_CONF_FILENAME */
 		char *relativeConfPathName =
-			pgSetup->control.pg_control_version < 1200
+			state->pg_control_version < 1200
 			? "recovery.conf"
 			: AUTOCTL_STANDBY_CONF_FILENAME;
 
@@ -832,7 +832,7 @@ keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 		}
 
 		/* now setup the replication configuration (primary_conninfo etc) */
-		if (!pg_setup_standby_mode(pgSetup->control.pg_control_version,
+		if (!pg_setup_standby_mode(state->pg_control_version,
 								   pgSetup->pgdata,
 								   upstream))
 		{
