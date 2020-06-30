@@ -27,6 +27,7 @@
 #include "pghba.h"
 #include "pgsetup.h"
 #include "pgsql.h"
+#include "pidfile.h"
 #include "state.h"
 #include "string_utils.h"
 
@@ -1453,10 +1454,10 @@ static void
 fprint_pidfile_as_json(const char *pidfile)
 {
 	JSON_Value *js = json_value_init_object();
-	JSON_Value *jsServices = json_value_init_object();
+	JSON_Value *jsServices = json_value_init_array();
+	JSON_Array *jsServicesArray = json_value_get_array(jsServices);
 
 	JSON_Object *jsobj = json_value_get_object(js);
-	JSON_Object *jsServicesObj = json_value_get_object(jsServices);
 
 	long fileSize = 0L;
 	char *fileContents = NULL;
@@ -1478,10 +1479,11 @@ fprint_pidfile_as_json(const char *pidfile)
 
 	for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
 	{
+		int pidLine = lineNumber + 1; /* zero-based, one-based */
 		char *separator = NULL;
 
 		/* main pid */
-		if (lineNumber == 0)
+		if (pidLine == PIDFILE_LINE_PID)
 		{
 			int pidnum = 0;
 			stringToInt(fileLines[0], &pidnum);
@@ -1490,8 +1492,20 @@ fprint_pidfile_as_json(const char *pidfile)
 			continue;
 		}
 
+		/* data directory */
+		if (pidLine == PIDFILE_LINE_DATA_DIR)
+		{
+			json_object_set_string(jsobj, "pgdata", fileLines[lineNumber]);
+		}
+
+		/* version string */
+		if (pidLine == PIDFILE_LINE_VERSION_STRING)
+		{
+			json_object_set_string(jsobj, "version", fileLines[lineNumber]);
+		}
+
 		/* semId */
-		if (lineNumber == 1)
+		if (pidLine == PIDFILE_LINE_SEM_ID)
 		{
 			int semId = 0;
 			stringToInt(fileLines[1], &semId);
@@ -1500,21 +1514,49 @@ fprint_pidfile_as_json(const char *pidfile)
 			continue;
 		}
 
-		if ((separator = strchr(fileLines[lineNumber], ' ')) == NULL)
+		if (pidLine >= PIDFILE_LINE_FIRST_SERVICE)
 		{
-			log_debug("Failed to find a space separator in line: \"%s\"",
-					  fileLines[lineNumber]);
-			continue;
-		}
-		else
-		{
-			int pidnum = 0;
-			char *serviceName = separator + 1;
+			JSON_Value *jsService = json_value_init_object();
+			JSON_Object *jsServiceObj = json_value_get_object(jsService);
 
-			*separator = '\0';
-			stringToInt(fileLines[lineNumber], &pidnum);
+			if ((separator = strchr(fileLines[lineNumber], ' ')) == NULL)
+			{
+				log_debug("Failed to find a space separator in line: \"%s\"",
+						  fileLines[lineNumber]);
+				continue;
+			}
+			else
+			{
+				int pidnum = 0;
+				char *serviceName = separator + 1;
+				char versionString[BUFSIZE] = { 0 };
+				char servicePidFile[BUFSIZE] = { 0 };
 
-			json_object_set_number(jsServicesObj, serviceName, pidnum);
+				*separator = '\0';
+				stringToInt(fileLines[lineNumber], &pidnum);
+
+				json_object_set_string(jsServiceObj, "name", serviceName);
+				json_object_set_number(jsServiceObj, "pid", pidnum);
+
+				/* grab version number of the service by parsing its pidfile */
+				get_service_pidfile(pidfile, serviceName, servicePidFile);
+
+				if (!read_service_pidfile_version_string(servicePidFile,
+														 versionString))
+				{
+					/* warn about it and continue */
+					log_warn("Failed to read version string for "
+							 "service \"%s\" in pidfile \"%s\"",
+							 serviceName,
+							 servicePidFile);
+				}
+				else
+				{
+					json_object_set_string(jsServiceObj, "version", versionString);
+				}
+			}
+
+			json_array_append_value(jsServicesArray, jsService);
 		}
 	}
 

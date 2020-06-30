@@ -14,8 +14,12 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "postgres_fe.h"
+#include "pqexpbuffer.h"
+
 #include "cli_root.h"
 #include "defaults.h"
+#include "env_utils.h"
 #include "fsm.h"
 #include "keeper.h"
 #include "keeper_config.h"
@@ -29,6 +33,10 @@
 #include "signals.h"
 #include "string_utils.h"
 
+/* pidfile for this process */
+char service_pidfile[MAXPGPATH] = { 0 };
+
+static void remove_service_pidfile_atexit(void);
 
 /*
  * create_pidfile writes our pid in a file.
@@ -40,13 +48,86 @@
 bool
 create_pidfile(const char *pidfile, pid_t pid)
 {
-	char content[BUFSIZE];
+	char pgdata[MAXPGPATH] = { 0 };
+	PQExpBuffer content = createPQExpBuffer();
+
+	bool success = false;
 
 	log_trace("create_pidfile(%d): \"%s\"", pid, pidfile);
 
-	sformat(content, BUFSIZE, "%d\n%d\n", pid, log_semaphore.semId);
+	if (content == NULL)
+	{
+		log_fatal("Failed to allocate memory to update our PID file");
+		return false;
+	}
 
-	return write_file(content, strlen(content), pidfile);
+	/* we get PGDATA from the environment */
+	if (!get_env_pgdata(pgdata))
+	{
+		log_fatal("Failed to get PGDATA to create the PID file");
+		return false;
+	}
+
+	/*
+	 * line #
+	 *		1	supervisor PID
+	 *		2	data directory path
+	 *		3	version number (PG_AUTOCTL_VERSION)
+	 *		4	shared semaphore id (used to serialize log writes)
+	 */
+	appendPQExpBuffer(content, "%d\n", pid);
+	appendPQExpBuffer(content, "%s\n", pgdata);
+	appendPQExpBuffer(content, "%s\n", PG_AUTOCTL_VERSION);
+	appendPQExpBuffer(content, "%d\n", log_semaphore.semId);
+
+	success = write_file(content->data, content->len, pidfile);
+	destroyPQExpBuffer(content);
+
+	return success;
+}
+
+
+/*
+ * create_pidfile writes the given serviceName pidfile, using getpid().
+ */
+bool
+create_service_pidfile(const char *pidfile, const char *serviceName)
+{
+	pid_t pid = getpid();
+
+	/* compute the service pidfile and store it in our global variable */
+	(void) get_service_pidfile(pidfile, serviceName, service_pidfile);
+
+	/* register our service pidfile clean-up atexit */
+	atexit(remove_service_pidfile_atexit);
+
+	return create_pidfile(service_pidfile, pid);
+}
+
+
+/*
+ * get_service_pidfile computes the pidfile names for the given service.
+ */
+void
+get_service_pidfile(const char *pidfile,
+					const char *serviceName,
+					char *servicePidFilename)
+{
+	char filename[MAXPGPATH] = { 0 };
+
+	sformat(filename, sizeof(filename), "pg_autoctl_%s.pid", serviceName);
+	path_in_same_directory(pidfile, filename, servicePidFilename);
+}
+
+
+/*
+ * remove_service_pidfile_atexit is called atexit() to remove the service
+ * pidfile.
+ */
+static void
+remove_service_pidfile_atexit()
+{
+	(void) remove_pidfile(service_pidfile);
 }
 
 
@@ -178,4 +259,46 @@ check_pidfile(const char *pidfile, pid_t start_pid)
 		log_fatal("PID file not found at \"%s\", quitting.", pidfile);
 		exit(EXIT_CODE_QUIT);
 	}
+}
+
+
+/*
+ * read_service_pidfile_version_string reads a service pidfile and copies the
+ * version string found on line PIDFILE_LINE_VERSION_STRING into the
+ * pre-allocated buffer versionString.
+ */
+bool
+read_service_pidfile_version_string(const char *pidfile, char *versionString)
+{
+	long fileSize = 0L;
+	char *fileContents = NULL;
+	char *fileLines[BUFSIZE] = { 0 };
+	int lineCount = 0;
+	int lineNumber;
+
+	if (!file_exists(pidfile))
+	{
+		return false;
+	}
+
+	if (!read_file(pidfile, &fileContents, &fileSize))
+	{
+		return false;
+	}
+
+	lineCount = splitLines(fileContents, fileLines, BUFSIZE);
+
+	for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
+	{
+		int pidLine = lineNumber + 1; /* zero-based, one-based */
+
+		/* version string */
+		if (pidLine == PIDFILE_LINE_VERSION_STRING)
+		{
+			strlcpy(versionString, fileLines[lineNumber], BUFSIZE);
+			return true;
+		}
+	}
+
+	return false;
 }

@@ -13,6 +13,26 @@
 #include <signal.h>
 
 /*
+ * pg_autoctl runs sub-processes as "services", and we need to use the same
+ * service names in several places:
+ *
+ *  - the main pidfile,
+ *  - the per-service name for the pidfile is derived from this,
+ *  - the pg_autoctl do service getpid|restart commands
+ */
+#define SERVICE_NAME_POSTGRES "postgres"
+#define SERVICE_NAME_KEEPER "node-active"
+#define SERVICE_NAME_MONITOR "listener"
+
+/*
+ * At pg_autoctl create time we use a transient service to initialize our local
+ * node. When using the --run option, the transient service is terminated and
+ * we start the permanent service with the name defined above.
+ */
+#define SERVICE_NAME_KEEPER_INIT "node-active"
+#define SERVICE_NAME_MONITOR_INIT "node-active"
+
+/*
  * Our supervisor process may retart a service sub-process when it quits,
  * depending on the exit status and the restart policy that has been choosen:
  *

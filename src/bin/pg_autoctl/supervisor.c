@@ -20,6 +20,7 @@
 
 #include "cli_root.h"
 #include "defaults.h"
+#include "env_utils.h"
 #include "fsm.h"
 #include "keeper.h"
 #include "keeper_config.h"
@@ -813,6 +814,7 @@ supervisor_update_pidfile(Supervisor *supervisor)
 	int serviceCount = supervisor->serviceCount;
 	int serviceIndex = 0;
 	PQExpBuffer content = createPQExpBuffer();
+	char pgdata[MAXPGPATH] = { 0 };
 
 	bool success = false;
 
@@ -822,10 +824,29 @@ supervisor_update_pidfile(Supervisor *supervisor)
 		return false;
 	}
 
-	/* first line should still be our supervisor pid, alone */
+	/* we get PGDATA from the environment */
+	if (!get_env_pgdata(pgdata))
+	{
+		log_fatal("Failed to get PGDATA to create the PID file");
+		return false;
+	}
+
+	/*
+	 * line #
+	 *		1	supervisor PID
+	 *		2	data directory path
+	 *		3	version number (PG_AUTOCTL_VERSION)
+	 *		4	shared semaphore id (used to serialize log writes)
+	 */
 	appendPQExpBuffer(content, "%d\n", supervisor->pid);
+	appendPQExpBuffer(content, "%s\n", pgdata);
+	appendPQExpBuffer(content, "%s\n", PG_AUTOCTL_VERSION);
 	appendPQExpBuffer(content, "%d\n", log_semaphore.semId);
 
+	/*
+	 *		5	first supervised service pid line
+	 *		6	second supervised service pid line
+	 */
 	for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
 	{
 		Service *service = &(supervisor->services[serviceIndex]);
@@ -872,15 +893,15 @@ supervisor_find_service_pid(const char *pidfile,
 	{
 		char *separator = NULL;
 
-		/* skip first and second lines: main pid, semaphore id */
-		if (lineNumber < 2)
+		/* skip first lines, see pidfile.h (where we count from 1) */
+		if ((lineNumber + 1) < PIDFILE_LINE_FIRST_SERVICE)
 		{
 			continue;
 		}
 
 		if ((separator = strchr(fileLines[lineNumber], ' ')) == NULL)
 		{
-			log_debug("Failed to find a space separator in line: \"%s\"",
+			log_error("Failed to find first space separator in line: \"%s\"",
 					  fileLines[lineNumber]);
 			continue;
 		}

@@ -1139,6 +1139,8 @@ keeper_cli_print_version(int argc, char **argv)
 		JSON_Object *root = json_value_get_object(js);
 
 		json_object_set_string(root, "pg_autoctl", PG_AUTOCTL_VERSION);
+		json_object_set_string(root,
+							   "pgautofailover", PG_AUTOCTL_EXTENSION_VERSION);
 		json_object_set_string(root, "pg_major", PG_MAJORVERSION);
 		json_object_set_string(root, "pg_version", PG_VERSION);
 		json_object_set_string(root, "pg_version_str", PG_VERSION_STR);
@@ -1149,6 +1151,9 @@ keeper_cli_print_version(int argc, char **argv)
 	else
 	{
 		fformat(stdout, "pg_autoctl version %s\n", PG_AUTOCTL_VERSION);
+		fformat(stdout,
+				"pg_autoctl extension version %s\n",
+				PG_AUTOCTL_EXTENSION_VERSION);
 		fformat(stdout, "compiled with %s\n", PG_VERSION_STR);
 		fformat(stdout, "compatible with Postgres 10, 11, and 12\n");
 	}
