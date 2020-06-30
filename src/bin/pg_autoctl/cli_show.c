@@ -1504,6 +1504,13 @@ fprint_pidfile_as_json(const char *pidfile)
 			json_object_set_string(jsobj, "version", fileLines[lineNumber]);
 		}
 
+		/* extension version string */
+		if (pidLine == PIDFILE_LINE_EXTENSION_VERSION)
+		{
+			/* skip it, the supervisor does not connect to the monitor */
+			(void) 0;
+		}
+
 		/* semId */
 		if (pidLine == PIDFILE_LINE_SEM_ID)
 		{
@@ -1529,8 +1536,11 @@ fprint_pidfile_as_json(const char *pidfile)
 			{
 				int pidnum = 0;
 				char *serviceName = separator + 1;
-				char versionString[BUFSIZE] = { 0 };
+
 				char servicePidFile[BUFSIZE] = { 0 };
+
+				char versionString[BUFSIZE] = { 0 };
+				char extensionVersionString[BUFSIZE] = { 0 };
 
 				*separator = '\0';
 				stringToInt(fileLines[lineNumber], &pidnum);
@@ -1541,8 +1551,10 @@ fprint_pidfile_as_json(const char *pidfile)
 				/* grab version number of the service by parsing its pidfile */
 				get_service_pidfile(pidfile, serviceName, servicePidFile);
 
-				if (!read_service_pidfile_version_string(servicePidFile,
-														 versionString))
+				if (!read_service_pidfile_version_strings(
+						servicePidFile,
+						versionString,
+						extensionVersionString))
 				{
 					/* warn about it and continue */
 					log_warn("Failed to read version string for "
@@ -1552,7 +1564,11 @@ fprint_pidfile_as_json(const char *pidfile)
 				}
 				else
 				{
-					json_object_set_string(jsServiceObj, "version", versionString);
+					json_object_set_string(jsServiceObj,
+										   "version", versionString);
+					json_object_set_string(jsServiceObj,
+										   "pgautofailover",
+										   extensionVersionString);
 				}
 			}
 

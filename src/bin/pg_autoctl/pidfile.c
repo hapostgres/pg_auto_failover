@@ -94,11 +94,13 @@ prepare_pidfile_buffer(PQExpBuffer content, pid_t pid)
 	 *		1	supervisor PID
 	 *		2	data directory path
 	 *		3	version number (PG_AUTOCTL_VERSION)
-	 *		4	shared semaphore id (used to serialize log writes)
+	 *		4	extension version number (PG_AUTOCTL_EXTENSION_VERSION)
+	 *		5	shared semaphore id (used to serialize log writes)
 	 */
 	appendPQExpBuffer(content, "%d\n", pid);
 	appendPQExpBuffer(content, "%s\n", pgdata);
 	appendPQExpBuffer(content, "%s\n", PG_AUTOCTL_VERSION);
+	appendPQExpBuffer(content, "%s\n", PG_AUTOCTL_EXTENSION_VERSION);
 	appendPQExpBuffer(content, "%d\n", log_semaphore.semId);
 
 	return true;
@@ -286,7 +288,9 @@ check_pidfile(const char *pidfile, pid_t start_pid)
  * pre-allocated buffer versionString.
  */
 bool
-read_service_pidfile_version_string(const char *pidfile, char *versionString)
+read_service_pidfile_version_strings(const char *pidfile,
+									 char *versionString,
+									 char *extensionVersionString)
 {
 	long fileSize = 0L;
 	char *fileContents = NULL;
@@ -314,6 +318,12 @@ read_service_pidfile_version_string(const char *pidfile, char *versionString)
 		if (pidLine == PIDFILE_LINE_VERSION_STRING)
 		{
 			strlcpy(versionString, fileLines[lineNumber], BUFSIZE);
+		}
+
+		/* extension version string, comes later in the file */
+		if (pidLine == PIDFILE_LINE_EXTENSION_VERSION)
+		{
+			strlcpy(extensionVersionString, fileLines[lineNumber], BUFSIZE);
 			return true;
 		}
 	}

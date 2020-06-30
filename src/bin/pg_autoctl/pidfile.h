@@ -27,9 +27,10 @@
  *		1	supervisor PID
  *		2	data directory path
  *		3	version number (PG_AUTOCTL_VERSION)
- *		4	shared semaphore id (used to serialize log writes)
- *		5	first supervised service pid line
- *		6	second supervised service pid line
+ *		4	extension version number (PG_AUTOCTL_EXTENSION_VERSION)
+ *		5	shared semaphore id (used to serialize log writes)
+ *		6	first supervised service pid line
+ *		7	second supervised service pid line
  *    ...
  *
  * The supervised service lines are added later, not the first tim we create
@@ -45,8 +46,9 @@
 #define PIDFILE_LINE_PID 1
 #define PIDFILE_LINE_DATA_DIR 2
 #define PIDFILE_LINE_VERSION_STRING 3
-#define PIDFILE_LINE_SEM_ID 4
-#define PIDFILE_LINE_FIRST_SERVICE 5
+#define PIDFILE_LINE_EXTENSION_VERSION 4
+#define PIDFILE_LINE_SEM_ID 5
+#define PIDFILE_LINE_FIRST_SERVICE 6
 
 bool create_pidfile(const char *pidfile, pid_t pid);
 
@@ -55,8 +57,9 @@ bool create_service_pidfile(const char *pidfile, const char *serviceName);
 void get_service_pidfile(const char *pidfile,
 						 const char *serviceName,
 						 char *filename);
-bool read_service_pidfile_version_string(const char *pidfile,
-										 char *versionString);
+bool read_service_pidfile_version_strings(const char *pidfile,
+										  char *versionString,
+										  char *extensionVersionString);
 
 bool read_pidfile(const char *pidfile, pid_t *pid);
 bool remove_pidfile(const char *pidfile);
