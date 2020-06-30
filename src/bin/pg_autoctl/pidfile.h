@@ -12,6 +12,9 @@
 #include <inttypes.h>
 #include <signal.h>
 
+#include "postgres_fe.h"
+#include "pqexpbuffer.h"
+
 #include "keeper.h"
 #include "keeper_config.h"
 #include "monitor.h"
@@ -46,6 +49,8 @@
 #define PIDFILE_LINE_FIRST_SERVICE 5
 
 bool create_pidfile(const char *pidfile, pid_t pid);
+
+bool prepare_pidfile_buffer(PQExpBuffer content, pid_t pid);
 bool create_service_pidfile(const char *pidfile, const char *serviceName);
 void get_service_pidfile(const char *pidfile,
 						 const char *serviceName,

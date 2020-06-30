@@ -48,7 +48,6 @@ static void remove_service_pidfile_atexit(void);
 bool
 create_pidfile(const char *pidfile, pid_t pid)
 {
-	char pgdata[MAXPGPATH] = { 0 };
 	PQExpBuffer content = createPQExpBuffer();
 
 	bool success = false;
@@ -60,6 +59,28 @@ create_pidfile(const char *pidfile, pid_t pid)
 		log_fatal("Failed to allocate memory to update our PID file");
 		return false;
 	}
+
+	if (!prepare_pidfile_buffer(content, pid))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	success = write_file(content->data, content->len, pidfile);
+	destroyPQExpBuffer(content);
+
+	return success;
+}
+
+
+/*
+ * prepare_pidfile_buffer prepares a PQExpBuffer content with the information
+ * expected to be found in a pidfile.
+ */
+bool
+prepare_pidfile_buffer(PQExpBuffer content, pid_t pid)
+{
+	char pgdata[MAXPGPATH] = { 0 };
 
 	/* we get PGDATA from the environment */
 	if (!get_env_pgdata(pgdata))
@@ -80,10 +101,7 @@ create_pidfile(const char *pidfile, pid_t pid)
 	appendPQExpBuffer(content, "%s\n", PG_AUTOCTL_VERSION);
 	appendPQExpBuffer(content, "%d\n", log_semaphore.semId);
 
-	success = write_file(content->data, content->len, pidfile);
-	destroyPQExpBuffer(content);
-
-	return success;
+	return true;
 }
 
 

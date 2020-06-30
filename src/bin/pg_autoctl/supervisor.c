@@ -814,7 +814,6 @@ supervisor_update_pidfile(Supervisor *supervisor)
 	int serviceCount = supervisor->serviceCount;
 	int serviceIndex = 0;
 	PQExpBuffer content = createPQExpBuffer();
-	char pgdata[MAXPGPATH] = { 0 };
 
 	bool success = false;
 
@@ -824,29 +823,13 @@ supervisor_update_pidfile(Supervisor *supervisor)
 		return false;
 	}
 
-	/* we get PGDATA from the environment */
-	if (!get_env_pgdata(pgdata))
+	if (!prepare_pidfile_buffer(content, supervisor->pid))
 	{
-		log_fatal("Failed to get PGDATA to create the PID file");
+		/* errors have already been logged */
 		return false;
 	}
 
-	/*
-	 * line #
-	 *		1	supervisor PID
-	 *		2	data directory path
-	 *		3	version number (PG_AUTOCTL_VERSION)
-	 *		4	shared semaphore id (used to serialize log writes)
-	 */
-	appendPQExpBuffer(content, "%d\n", supervisor->pid);
-	appendPQExpBuffer(content, "%s\n", pgdata);
-	appendPQExpBuffer(content, "%s\n", PG_AUTOCTL_VERSION);
-	appendPQExpBuffer(content, "%d\n", log_semaphore.semId);
-
-	/*
-	 *		5	first supervised service pid line
-	 *		6	second supervised service pid line
-	 */
+	/* now add a line per service  */
 	for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
 	{
 		Service *service = &(supervisor->services[serviceIndex]);
