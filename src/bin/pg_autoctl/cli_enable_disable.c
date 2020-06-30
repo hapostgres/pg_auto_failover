@@ -232,10 +232,7 @@ cli_secondary_getopts(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
-	{
-		get_env_pgdata_or_exit(options.pgSetup.pgdata);
-	}
+	cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
 
 	if (IS_EMPTY_STRING_BUFFER(options.formation))
 	{
@@ -752,10 +749,7 @@ cli_ssl_getopts(int argc, char **argv)
 	}
 
 	/* Initialize with given PGDATA */
-	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
-	{
-		get_env_pgdata_or_exit(options.pgSetup.pgdata);
-	}
+	cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
 
 	if (!keeper_config_set_pathnames_from_pgdata(&(options.pathnames),
 												 options.pgSetup.pgdata))

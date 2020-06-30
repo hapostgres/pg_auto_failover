@@ -315,10 +315,7 @@ cli_show_state_getopts(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
-	{
-		get_env_pgdata_or_exit(options.pgSetup.pgdata);
-	}
+	cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
 
 	keeperOptions = options;
 
@@ -537,10 +534,7 @@ cli_show_nodes_getopts(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
-	{
-		get_env_pgdata_or_exit(options.pgSetup.pgdata);
-	}
+	cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
 
 	keeperOptions = options;
 
@@ -763,16 +757,14 @@ cli_show_uri_getopts(int argc, char **argv)
 		}
 	}
 
-	if (showUriOptions.monitorOnly && !IS_EMPTY_STRING_BUFFER(showUriOptions.formation))
+	if (showUriOptions.monitorOnly &&
+		!IS_EMPTY_STRING_BUFFER(showUriOptions.formation))
 	{
 		log_fatal("Please use either --monitor or --formation, not both");
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
-	{
-		get_env_pgdata_or_exit(options.pgSetup.pgdata);
-	}
+	cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
 
 	if (!keeper_config_set_pathnames_from_pgdata(&(options.pathnames),
 												 options.pgSetup.pgdata))
@@ -1157,10 +1149,7 @@ cli_show_file_getopts(int argc, char **argv)
 		}
 	}
 
-	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
-	{
-		get_env_pgdata_or_exit(options.pgSetup.pgdata);
-	}
+	cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
 
 	if (!keeper_config_set_pathnames_from_pgdata(&options.pathnames,
 												 options.pgSetup.pgdata))

@@ -235,9 +235,6 @@ keeper_config_set_pathnames_from_pgdata(ConfigFilePaths *pathnames,
 		return false;
 	}
 
-	/* set our own PGDATA environment for the rest of the program duration */
-	setenv("PGDATA", pgdata, 1);
-
 	return true;
 }
 

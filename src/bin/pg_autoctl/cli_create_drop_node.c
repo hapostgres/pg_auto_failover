@@ -544,10 +544,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 	 * here, we don't have to manage the whole life-time of that PostgreSQL
 	 * instance.
 	 */
-	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
-	{
-		get_env_pgdata_or_exit(options.pgSetup.pgdata);
-	}
+	cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
 
 	/*
 	 * We require the user to specify an authentication mechanism, or to use

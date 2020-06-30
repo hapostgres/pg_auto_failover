@@ -157,10 +157,7 @@ keeper_cli_formation_getopts(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
-	{
-		get_env_pgdata_or_exit(options.pgSetup.pgdata);
-	}
+	cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
 
 	/* publish our option parsing in the global variable */
 	formationOptions = options;
@@ -319,10 +316,7 @@ keeper_cli_formation_create_getopts(int argc, char **argv)
 		}
 	}
 
-	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
-	{
-		get_env_pgdata_or_exit(options.pgSetup.pgdata);
-	}
+	cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
 
 	if (IS_EMPTY_STRING_BUFFER(options.formation) ||
 		IS_EMPTY_STRING_BUFFER(options.formationKind))

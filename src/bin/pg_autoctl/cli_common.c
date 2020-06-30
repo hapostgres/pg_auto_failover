@@ -442,10 +442,7 @@ cli_common_keeper_getopts(int argc, char **argv,
 	/*
 	 * Now, all commands need PGDATA validation.
 	 */
-	if (IS_EMPTY_STRING_BUFFER(LocalOptionConfig.pgSetup.pgdata))
-	{
-		get_env_pgdata_or_exit(LocalOptionConfig.pgSetup.pgdata);
-	}
+	cli_common_get_set_pgdata_or_exit(&(LocalOptionConfig.pgSetup));
 
 	/*
 	 * We have a PGDATA setting, prepare our configuration pathnames from it.
@@ -698,6 +695,27 @@ cli_getopt_ssl_flags(int ssl_flag, char *optarg, PostgresSetup *pgSetup)
 
 
 /*
+ * cli_common_get_set_pgdata_or_exit gets pgdata from either --pgdata or PGDATA
+ * in the environment, and when we have a value for it, then we set it in the
+ * environment.
+ */
+void
+cli_common_get_set_pgdata_or_exit(PostgresSetup *pgSetup)
+{
+	/* if --pgdata is not given, fetch PGDATA from the environment or exit */
+	if (IS_EMPTY_STRING_BUFFER(pgSetup->pgdata))
+	{
+		get_env_pgdata_or_exit(pgSetup->pgdata);
+	}
+	else
+	{
+		/* from now on on want PGDATA set in the environment */
+		setenv("PGDATA", pgSetup->pgdata, 1);
+	}
+}
+
+
+/*
  * keeper_cli_getopt_pgdata gets the PGDATA options or environment variable,
  * either of those must be set for all of pg_autoctl's commands. This parameter
  * allows to know which PostgreSQL instance we are the keeper of, and also
@@ -834,10 +852,7 @@ cli_getopt_pgdata(int argc, char **argv)
 void
 prepare_keeper_options(KeeperConfig *options)
 {
-	if (IS_EMPTY_STRING_BUFFER(options->pgSetup.pgdata))
-	{
-		get_env_pgdata_or_exit(options->pgSetup.pgdata);
-	}
+	cli_common_get_set_pgdata_or_exit(&(options->pgSetup));
 
 	log_debug("Managing PostgreSQL installation at \"%s\"",
 			  options->pgSetup.pgdata);

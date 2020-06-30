@@ -143,6 +143,8 @@ int cli_print_version_getopts(int argc, char **argv);
 void keeper_cli_print_version(int argc, char **argv);
 void cli_pprint_json(JSON_Value *js);
 
+void cli_common_get_set_pgdata_or_exit(PostgresSetup *pgSetup);
+
 int cli_common_keeper_getopts(int argc, char **argv,
 							  struct option *long_options,
 							  const char *optstring,
