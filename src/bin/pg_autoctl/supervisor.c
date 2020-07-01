@@ -380,7 +380,9 @@ supervisor_stop_other_services(Supervisor *supervisor, pid_t pid)
 				if (kill(service->pid, signal) != 0)
 				{
 					log_error("Failed to send signal %s to service %s with pid %d",
-							  strsignal(signal), service->name, service->pid);
+							  signal_to_string(signal),
+							  service->name,
+							  service->pid);
 				}
 			}
 		}
@@ -410,7 +412,7 @@ supervisor_signal_process_group(int signal)
 	if (killpg(pgrp, signal) != 0)
 	{
 		log_error("Failed to send %s to the keeper's pid %d: %m",
-				  strsignal(signal), pgrp);
+				  signal_to_string(signal), pgrp);
 		return false;
 	}
 
@@ -574,7 +576,7 @@ supervisor_shutdown_sequence(Supervisor *supervisor)
 	{
 		log_info("pg_autoctl services are still running, "
 				 "signaling them with %s.",
-				 supervisor->shutdownSignal == SIGINT ? "SIGINT" : "SIGTERM");
+				 signal_to_string(supervisor->shutdownSignal));
 
 		if (!supervisor_signal_process_group(supervisor->shutdownSignal))
 		{
@@ -592,7 +594,8 @@ supervisor_shutdown_sequence(Supervisor *supervisor)
 				 "signaling them with SIGINT.");
 
 		/* raise the signal from SIGTERM to SIGINT now */
-		supervisor->shutdownSignal = SIGINT;
+		supervisor->shutdownSignal =
+			pick_stronger_signal(supervisor->shutdownSignal, SIGINT);
 
 		if (!supervisor_signal_process_group(supervisor->shutdownSignal))
 		{
