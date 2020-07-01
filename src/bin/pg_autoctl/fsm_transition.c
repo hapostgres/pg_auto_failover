@@ -754,6 +754,124 @@ fsm_stop_postgres(Keeper *keeper)
 
 
 /*
+ * fsm_stop_postgres_for_primary_maintenance is used when pg_autoctl enable
+ * maintenance has been used on the primary server, we do a couple CHECKPOINT
+ * before stopping Postgres to ensure a smooth transition.
+ */
+bool
+fsm_stop_postgres_for_primary_maintenance(Keeper *keeper)
+{
+	LocalPostgresServer *postgres = &(keeper->postgres);
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+	PGSQL *pgsql = &(postgres->sqlClient);
+
+	if (pg_setup_is_running(pgSetup))
+	{
+		/*
+		 * PostgreSQL shutdown sequence includes a CHECKPOINT, that is issued
+		 * by the checkpointer process one every query backend has stopped
+		 * already. During this final CHECKPOINT no work can be done, so it's
+		 * best to reduce the amount of work needed there. To reduce the
+		 * checkpointer shutdown activity, we perform a manual shutdown while
+		 * still having concurrent activity.
+		 *
+		 * The first checkpoint writes all the in-memory buffers, the second
+		 * checkpoint writes everything that was added during the first one.
+		 */
+		log_info("Preparing shutdown for maintenance: CHECKPOINT;");
+
+		for (int i = 0; i < 2; i++)
+		{
+			if (!pgsql_checkpoint(pgsql))
+			{
+				log_warn("Failed to checkpoint before stopping Postgres");
+			}
+		}
+	}
+
+	return ensure_postgres_service_is_stopped(postgres);
+}
+
+
+/*
+ * fsm_stop_postgres_and_setup_standby is used when the primary is put to
+ * maintenance. Not only do we stop Postgres, we also prepare a setup as a
+ * secondary.
+ */
+bool
+fsm_stop_postgres_and_setup_standby(Keeper *keeper)
+{
+	LocalPostgresServer *postgres = &(keeper->postgres);
+	Monitor *monitor = &(keeper->monitor);
+	ReplicationSource *upstream = &(postgres->replicationSource);
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+	KeeperConfig *config = &(keeper->config);
+
+	NodeAddress *primaryNode = NULL;
+
+	if (!ensure_postgres_service_is_stopped(postgres))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/* Move the Postgres controller out of the way */
+	if (!local_postgres_unlink_status_file(postgres))
+	{
+		/* highly unexpected */
+		log_error("Failed to remove our Postgres status file "
+				  "see above for details");
+		return false;
+	}
+
+	/* get the primary node to follow */
+	if (!config->monitorDisabled)
+	{
+		if (!monitor_get_primary(monitor,
+								 config->formation,
+								 keeper->state.current_group,
+								 &(postgres->replicationSource.primaryNode)))
+		{
+			log_error("Failed to initialise standby because get the primary node "
+					  "from the monitor failed, see above for details");
+			return false;
+		}
+	}
+	else
+	{
+		/* copy information from keeper->otherNodes into replicationSource */
+		primaryNode = &(keeper->otherNodes.nodes[0]);
+	}
+
+	/* prepare a standby setup */
+	if (!standby_init_replication_source(postgres,
+										 primaryNode,
+										 PG_AUTOCTL_REPLICA_USERNAME,
+										 config->replication_password,
+										 config->replication_slot_name,
+										 config->maximum_backup_rate,
+										 config->backupDirectory,
+										 config->pgSetup.ssl,
+										 keeper->state.current_node_id))
+	{
+		/* can't happen at the moment */
+		return false;
+	}
+
+	/* make the Postgres setup for a standby node before reaching maintenance */
+	if (!pg_setup_standby_mode(pgSetup->control.pg_control_version,
+							   pgSetup->pgdata,
+							   upstream))
+	{
+		log_error("Failed to setup Postgres as a standby to go to maintenance");
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
  * fsm_init_standby is used when the primary is now ready to accept a standby,
  * we're the standby.
  */
@@ -863,8 +981,9 @@ fsm_rewind_or_init(Keeper *keeper)
 		if (!monitor_get_primary(monitor, config->formation, groupId,
 								 &(postgres->replicationSource.primaryNode)))
 		{
-			log_error("Failed to initialise standby because get the primary node "
-					  "from the monitor failed, see above for details");
+			log_error("Failed to initialise standby because pg_autoctl "
+					  "failed to get the primary node from the monitor, "
+					  "see above for details");
 			return false;
 		}
 	}
@@ -956,25 +1075,46 @@ fsm_prepare_standby_for_promotion(Keeper *keeper)
 
 
 /*
- * fsm_suspend_standby is used when putting the standby in maintenance mode
- * (kernel upgrades, change of hardware, etc). Maintenance means that the user
- * now is driving the service, refrain from doing anything ourselves.
+ * fsm_start_maintenance_on_standby is used when putting the standby in
+ * maintenance mode (kernel upgrades, change of hardware, etc). Maintenance
+ * means that the user now is driving the service, refrain from doing anything
+ * ourselves.
  */
 bool
 fsm_start_maintenance_on_standby(Keeper *keeper)
 {
+	LocalPostgresServer *postgres = &(keeper->postgres);
+
+	/* Move the Postgres controller out of the way */
+	if (!local_postgres_unlink_status_file(postgres))
+	{
+		/* highly unexpected */
+		log_error("Failed to remove our Postgres status file "
+				  "see above for details");
+		return false;
+	}
+
 	return true;
 }
 
 
 /*
- * fsm_restart_standby is used when restarting standby after manual maintenance
- * is done.
+ * fsm_restart_standby is used when restarting a node after manual maintenance
+ * is done. In case that changed we get the current primary from the monitor
+ * and reset the standby setup (primary_conninfo) to target it, then restart
+ * Postgres.
+ *
+ * We don't know what happened during the maintenance of the node, so we use
+ * pg_rewind to make sure we're in a position to be a standby to the current
+ * primary.
+ *
+ * So we're back to doing the exact same thing as fsm_rewind_or_init() now, and
+ * that's why we just call that function.
  */
 bool
 fsm_restart_standby(Keeper *keeper)
 {
-	return fsm_start_postgres(keeper);
+	return fsm_rewind_or_init(keeper);
 }
 
 
@@ -994,6 +1134,9 @@ fsm_restart_standby(Keeper *keeper)
  * the fsm_promote_standby transition ever came to diverge from whatever
  * fsm_disable_replication() is doing, we'd have to copy/paste and maintain
  * separate code path.
+ *
+ * We open the HBA connections for the other node as found per given state,
+ * most often a DEMOTE_TIMEOUT_STATE, sometimes though MAINTENANCE_STATE.
  */
 bool
 fsm_promote_standby(Keeper *keeper)
@@ -1024,8 +1167,13 @@ fsm_promote_standby(Keeper *keeper)
 	 * same steps we take when going from single to wait_primary, namely to
 	 * create a replication slot and add the other node to pg_hba.conf. These
 	 * steps are implemented in fsm_prepare_replication.
+	 *
+	 * The other node is expected to be in either DEMOTE_TIMEOUT_STATE or in
+	 * PREPARE_MAINTENANCE state. There's no harm in preparing replication
+	 * settings for all the other nodes in the system anyway, so let's just do
+	 * that.
 	 */
-	if (!prepare_replication(keeper, DEMOTE_TIMEOUT_STATE))
+	if (!prepare_replication(keeper, ANY_STATE))
 	{
 		/* prepare_replication logs relevant errors */
 		return false;

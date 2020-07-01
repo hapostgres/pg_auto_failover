@@ -879,14 +879,18 @@ SELECT reportedstate
             ["%s %2d:%-14s %17s/%-17s %7s %10s %s" % result
              for result in self.get_events()])
 
-    def enable_maintenance(self):
+    def enable_maintenance(self, allowFailover=False):
         """
         Enables maintenance on a pg_autoctl standby node
 
         :return:
         """
         command = PGAutoCtl(self)
-        command.execute("enable maintenance", 'enable', 'maintenance')
+        if allowFailover:
+            command.execute("enable maintenance",
+                            'enable', 'maintenance', '--allow-failover')
+        else:
+            command.execute("enable maintenance", 'enable', 'maintenance')
 
     def disable_maintenance(self):
         """
@@ -895,8 +899,7 @@ SELECT reportedstate
         :return:
         """
         command = PGAutoCtl(self)
-        command.execute("disable maintenance", 'disable', 'maintenance',
-                        timeout=10)
+        command.execute("disable maintenance", 'disable', 'maintenance')
 
     def drop(self):
         """

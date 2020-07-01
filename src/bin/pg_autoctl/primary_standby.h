@@ -52,6 +52,7 @@ typedef struct LocalPostgresServer
 void local_postgres_init(LocalPostgresServer *postgres,
 						 PostgresSetup *postgresSetup);
 bool local_postgres_set_status_path(LocalPostgresServer *postgres, bool unlink);
+bool local_postgres_unlink_status_file(LocalPostgresServer *postgres);
 void local_postgres_finish(LocalPostgresServer *postgres);
 bool local_postgres_update(LocalPostgresServer *postgres,
 						   bool postgresNotRunningIsOk);
