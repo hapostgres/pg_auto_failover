@@ -1141,9 +1141,7 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 							   &assignedState))
 	{
 		/* errors have already been logged, remove state file */
-		unlink_file(config->pathnames.state);
-
-		return false;
+		goto rollback;
 	}
 
 	/* initialize FSM state from monitor's answer */
@@ -1157,11 +1155,6 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 	{
 		log_error("Failed to update keepers's state");
 
-		/*
-		 * Make sure we don't have a corrupted state file around, that could
-		 * prevent trying to init again and cause strange errors.
-		 */
-		unlink_file(config->pathnames.state);
 		goto rollback;
 	}
 
@@ -1195,12 +1188,20 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 
 		/* we can't send a ROLLBACK when a COMMIT failed */
 		unlink_file(config->pathnames.state);
+
+		pgsql_finish(&(monitor->pgsql));
 		return false;
 	}
+
+	pgsql_finish(&(monitor->pgsql));
 	return true;
 
-
 rollback:
+
+	/*
+	 * Make sure we don't have a corrupted state file around, that could
+	 * prevent trying to init again and cause strange errors.
+	 */
 	unlink_file(config->pathnames.state);
 
 	if (!pgsql_execute(&(monitor->pgsql), "ROLLBACK"))
@@ -1208,6 +1209,8 @@ rollback:
 		log_error("Failed to ROLLBACK failed register_node transaction "
 				  " on the monitor, see above for details.");
 	}
+	pgsql_finish(&(monitor->pgsql));
+
 	return false;
 }
 
