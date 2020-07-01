@@ -573,9 +573,6 @@ monitor_register_node(Monitor *monitor, char *formation, char *host, int port,
 								   paramCount, paramTypes, paramValues,
 								   &parseContext, parseNodeState))
 	{
-		/* disconnect from PostgreSQL now */
-		pgsql_finish(&monitor->pgsql);
-
 		if (strcmp(parseContext.sqlstate, STR_ERRCODE_OBJECT_IN_USE) == 0)
 		{
 			log_warn("Failed to register node %s:%d in group %d of "
@@ -594,12 +591,14 @@ monitor_register_node(Monitor *monitor, char *formation, char *host, int port,
 		}
 		else if (strcmp(parseContext.sqlstate, "23P01") == 0)
 		{
+			/* *INDENT-OFF* */
 			log_error("Failed to register node %s:%d in "
 					  "group %d of formation \"%s\" "
 					  "with system_identifier %" PRIu64 ", "
-														"because another node already exists in this group with "
-														"another system_identifier",
+					  "because another node already exists in this group with "
+					  "another system_identifier",
 					  host, port, desiredGroupId, formation, system_identifier);
+			/* *INDENT-ON* */
 
 			log_info(
 				"HINT: you may register a standby node from a non-existing "
@@ -614,9 +613,6 @@ monitor_register_node(Monitor *monitor, char *formation, char *host, int port,
 				  host, port, desiredGroupId, formation, nodeStateString);
 		return false;
 	}
-
-	/* disconnect from PostgreSQL now */
-	pgsql_finish(&monitor->pgsql);
 
 	if (!parseContext.parsedOK)
 	{

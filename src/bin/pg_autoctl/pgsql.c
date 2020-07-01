@@ -702,7 +702,7 @@ pgAutoCtlDebugNoticeProcessor(void *arg, const char *message)
  * We avoid persisting connection across multiple commands to simplify error
  * handling.
  */
-static bool
+bool
 pgsql_execute(PGSQL *pgsql, const char *sql)
 {
 	return pgsql_execute_with_params(pgsql, sql, 0, NULL, NULL, NULL, NULL);

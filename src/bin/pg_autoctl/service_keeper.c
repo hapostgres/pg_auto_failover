@@ -258,6 +258,8 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 	KeeperStateData *keeperState = &(keeper->state);
 	Monitor *monitor = &(keeper->monitor);
 	LocalPostgresServer *postgres = &(keeper->postgres);
+	PGSQL *pgsql = &(postgres->sqlClient);
+
 	bool doSleep = false;
 	bool couldContactMonitor = false;
 	bool firstLoop = true;
@@ -545,6 +547,10 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 						 postgres->pgIsRunning ? "is" : "is not");
 			}
 		}
+
+		/* now is a good time to make sure we're closing our connections */
+		pgsql_finish(pgsql);
+		pgsql_finish(&(keeper->monitor.pgsql));
 
 		CHECK_FOR_FAST_SHUTDOWN;
 

@@ -1103,6 +1103,30 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 	/* use a special connection retry policy for initialisation */
 	(void) pgsql_set_init_retry_policy(&(keeper->monitor.pgsql));
 
+	/*
+	 * When registering to the monitor, we get assigned a nodeId, that we keep
+	 * preciously in our state file. We need to have a local version of the
+	 * nodeId that is the same one as on the monitor.
+	 *
+	 * In particular, if we fail to update our local state file, we should
+	 * cancel our registration, because there's no way we can re-discover our
+	 * nodeId later.
+	 *
+	 * We register to the monitor in a SQL transaction that we only COMMIT
+	 * after we have updated our local state file. If we fail to do so, we
+	 * ROLLBACK the transaction, and thus we are not registered to the monitor
+	 * and may try again. If we are disconnected halfway through the
+	 * registration (process killed, crash, etc), then the server issues a
+	 * ROLLBACK for us upon disconnection.
+	 */
+	if (!pgsql_execute(&(monitor->pgsql), "BEGIN"))
+	{
+		log_error("Failed to open a SQL transaction to register this node");
+
+		unlink_file(config->pathnames.state);
+		return false;
+	}
+
 	if (!monitor_register_node(monitor,
 							   config->formation,
 							   config->nodename,
@@ -1117,9 +1141,7 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 							   &assignedState))
 	{
 		/* errors have already been logged, remove state file */
-		unlink_file(config->pathnames.state);
-
-		return false;
+		goto rollback;
 	}
 
 	/* initialize FSM state from monitor's answer */
@@ -1133,13 +1155,7 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 	{
 		log_error("Failed to update keepers's state");
 
-		/*
-		 * Make sure we don't have a corrupted state file around, that could
-		 * prevent trying to init again and cause strange errors.
-		 */
-		unlink_file(config->pathnames.state);
-
-		return false;
+		goto rollback;
 	}
 
 	/* also update the groupId in the configuration file. */
@@ -1149,7 +1165,7 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 	{
 		log_error("Failed to update the configuration file with the groupId: %d",
 				  assignedState.groupId);
-		return false;
+		goto rollback;
 	}
 
 	/*
@@ -1162,10 +1178,40 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 								  keeper->config.pathnames.init))
 	{
 		/* errors have already been logged */
+		goto rollback;
+	}
+
+	if (!pgsql_execute(&(monitor->pgsql), "COMMIT"))
+	{
+		log_error("Failed to COMMIT register_node transaction on the "
+				  "monitor, see above for details");
+
+		/* we can't send a ROLLBACK when a COMMIT failed */
+		unlink_file(config->pathnames.state);
+
+		pgsql_finish(&(monitor->pgsql));
 		return false;
 	}
 
+	pgsql_finish(&(monitor->pgsql));
 	return true;
+
+rollback:
+
+	/*
+	 * Make sure we don't have a corrupted state file around, that could
+	 * prevent trying to init again and cause strange errors.
+	 */
+	unlink_file(config->pathnames.state);
+
+	if (!pgsql_execute(&(monitor->pgsql), "ROLLBACK"))
+	{
+		log_error("Failed to ROLLBACK failed register_node transaction "
+				  " on the monitor, see above for details.");
+	}
+	pgsql_finish(&(monitor->pgsql));
+
+	return false;
 }
 
 

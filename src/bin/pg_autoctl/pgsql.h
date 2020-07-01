@@ -224,6 +224,7 @@ void pgsql_set_init_retry_policy(PGSQL *pgsql);
 void pgsql_set_interactive_retry_policy(PGSQL *pgsql);
 void pgsql_finish(PGSQL *pgsql);
 void parseSingleValueResult(void *ctx, PGresult *result);
+bool pgsql_execute(PGSQL *pgsql, const char *sql);
 bool pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 							   const Oid *paramTypes, const char **paramValues,
 							   void *parseContext, ParsePostgresResultCB *parseFun);
