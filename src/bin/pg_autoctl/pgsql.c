@@ -2033,7 +2033,7 @@ validate_connection_string(const char *connectionString)
  *  - current_lsn from the server
  *  - pg_control_version
  *  - catalog_version_no
- *  - systemd_identifier
+ *  - system_identifier
  *
  * With those metadata we can then check our expectations and take decisions in
  * some cases. We can obtain all the metadata that we need easily enough in a

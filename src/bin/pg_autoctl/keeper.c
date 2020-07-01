@@ -484,7 +484,7 @@ keeper_update_pg_state(Keeper *keeper)
 
 			default:
 			{
-				missingPgDataIsOk = true;
+				missingPgDataIsOk = false;
 				break;
 			}
 		}
