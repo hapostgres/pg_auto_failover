@@ -581,7 +581,7 @@ class PGNode:
         if self.sslServerCert:
             ssl_args += ['--server-cert', self.sslServerCert]
 
-        if not self.sslSelfSigned and not self.sslCAFile:
+        if not self.sslSelfSigned and not self.sslServerKey:
             ssl_args += ['--no-ssl']
 
         command = PGAutoCtl(self, argv=ssl_args)

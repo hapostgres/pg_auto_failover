@@ -1549,34 +1549,19 @@ pgsetup_validate_ssl_settings(PostgresSetup *pgSetup)
 	 */
 	if (ssl->active && !ssl->createSelfSignedCert)
 	{
-		/* we say allFilesGiven but we can do without the CRL file */
-		bool allFilesGiven = !IS_EMPTY_STRING_BUFFER(ssl->caFile) &&
-							 !IS_EMPTY_STRING_BUFFER(ssl->serverCert) &&
-							 !IS_EMPTY_STRING_BUFFER(ssl->serverKey);
-
-		if (!allFilesGiven)
+		/*
+		 * When passing files in manually for SSL we need at least  cert and a
+		 * key
+		 */
+		if (IS_EMPTY_STRING_BUFFER(ssl->serverCert) ||
+			IS_EMPTY_STRING_BUFFER(ssl->serverKey))
 		{
 			log_error("Failed to setup SSL with user-provided certificates: "
-					  "options --ssl-ca-file --ssl-server-cert --ssl-server-key"
-					  "are required.");
+					  "options --server-cert and --server-key are required.");
 			return false;
 		}
 
-		/* when given all the files, check they exist */
-		if (!file_exists(ssl->caFile))
-		{
-			log_error("--ssl-ca-file file does not exist at \"%s\"",
-					  ssl->caFile);
-			return false;
-		}
-
-		if (!IS_EMPTY_STRING_BUFFER(ssl->crlFile) && !file_exists(ssl->crlFile))
-		{
-			log_error("--ssl-crl-file file does not exist at \"%s\"",
-					  ssl->crlFile);
-			return false;
-		}
-
+		/* check that the given files exist */
 		if (!file_exists(ssl->serverCert))
 		{
 			log_error("--server-cert file does not exist at \"%s\"",
@@ -1591,6 +1576,20 @@ pgsetup_validate_ssl_settings(PostgresSetup *pgSetup)
 			return false;
 		}
 
+		if (!IS_EMPTY_STRING_BUFFER(ssl->caFile) && !file_exists(ssl->caFile))
+		{
+			log_error("--ssl-ca-file file does not exist at \"%s\"",
+					  ssl->caFile);
+			return false;
+		}
+
+		if (!IS_EMPTY_STRING_BUFFER(ssl->crlFile) && !file_exists(ssl->crlFile))
+		{
+			log_error("--ssl-crl-file file does not exist at \"%s\"",
+					  ssl->crlFile);
+			return false;
+		}
+
 		/* install a default value for --ssl-mode, use verify-full */
 		if (ssl->sslMode == SSL_MODE_UNKNOWN)
 		{
@@ -1598,6 +1597,14 @@ pgsetup_validate_ssl_settings(PostgresSetup *pgSetup)
 			strlcpy(ssl->sslModeStr,
 					pgsetup_sslmode_to_string(ssl->sslMode), SSL_MODE_STRLEN);
 			log_info("Using default --ssl-mode \"%s\"", ssl->sslModeStr);
+		}
+
+		/* check that we have a CA file to use with verif-ca/verify-full */
+		if (ssl->sslMode >= SSL_MODE_VERIFY_CA && IS_EMPTY_STRING_BUFFER(ssl->caFile))
+		{
+			log_error("--ssl-ca-file is required when --ssl-mode \"%s\" is used",
+					  ssl->sslModeStr);
+			return false;
 		}
 
 		/*
