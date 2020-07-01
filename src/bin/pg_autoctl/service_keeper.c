@@ -372,7 +372,8 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 
 		couldContactMonitor = couldContactMonitorThisRound;
 
-		if (keeperState->assigned_role != keeperState->current_role)
+		if (couldContactMonitor &&
+			keeperState->assigned_role != keeperState->current_role)
 		{
 			needStateChange = true;
 

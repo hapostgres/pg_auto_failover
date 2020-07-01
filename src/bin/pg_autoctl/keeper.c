@@ -1425,6 +1425,18 @@ keeper_refresh_other_nodes(Keeper *keeper, bool forceCacheInvalidation)
 				  "elements in the our formation \"%s\" and group %d",
 				  keeper->config.formation,
 				  keeper->state.current_group);
+
+		/*
+		 * If we failed to install the changes, retain the previous version of
+		 * the otherNodesArray in-memory (cancel the update).
+		 *
+		 * The otherNodesArrays is also used in the keeper maintenance
+		 * functions for the replication slots, but here we return false and
+		 * then the main keeper loop will skip slot maintenance (part of the
+		 * keeper_ensure_current_state duties).
+		 */
+		*otherNodesArray = oldNodesArray;
+
 		return false;
 	}
 
@@ -1433,9 +1445,10 @@ keeper_refresh_other_nodes(Keeper *keeper, bool forceCacheInvalidation)
 
 
 /*
- * merge_new_node_array merges the node Array just received from the monitor
- * with the existing one. The nodes are all sorted on nodeId so we can
- * implement a merge diff here.
+ * diff_nodesArray computes the array of nodes entries that should be added in
+ * the HBA file in the given pre-allocated diffNodesArray parameter. The diff
+ * is computed from the keeper's otherNodesArray on the previous round, and the
+ * one we just got from the monitor.
  */
 static void
 diff_nodesArray(NodeAddressArray *previousNodesArray,

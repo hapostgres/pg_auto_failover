@@ -82,13 +82,6 @@ pghba_append_rule_to_buffer(PQExpBuffer buffer,
 	append_hostname_or_cidr(buffer, host);
 	appendPQExpBuffer(buffer, " %s", authenticationScheme);
 
-	if (PQExpBufferBroken(buffer))
-	{
-		log_error("Failed to allocate memory");
-		destroyPQExpBuffer(buffer);
-		return false;
-	}
-
 	/* memory allocation could have failed while building string */
 	if (PQExpBufferBroken(buffer))
 	{
@@ -136,6 +129,10 @@ pghba_ensure_host_rule_exists(const char *hbaFilePath,
 									 authenticationScheme))
 	{
 		/* errors have already been logged */
+
+		/* done with the new HBA line buffer */
+		destroyPQExpBuffer(hbaLineBuffer);
+
 		return false;
 	}
 
@@ -145,6 +142,10 @@ pghba_ensure_host_rule_exists(const char *hbaFilePath,
 	if (!read_file(hbaFilePath, &currentHbaContents, &currentHbaSize))
 	{
 		/* read_file logs an error */
+
+		/* done with the new HBA line buffer */
+		destroyPQExpBuffer(hbaLineBuffer);
+
 		return false;
 	}
 
@@ -159,6 +160,8 @@ pghba_ensure_host_rule_exists(const char *hbaFilePath,
 	{
 		log_debug("Line already exists in %s, skipping %s",
 				  hbaFilePath, hbaLineBuffer->data);
+
+		destroyPQExpBuffer(hbaLineBuffer);
 		free(currentHbaContents);
 		return true;
 	}
@@ -172,6 +175,8 @@ pghba_ensure_host_rule_exists(const char *hbaFilePath,
 	{
 		log_warn("Skipping HBA edits (per --skip-pg-hba) for rule: %s",
 				 hbaLineBuffer->data);
+		destroyPQExpBuffer(hbaLineBuffer);
+		free(currentHbaContents);
 		return true;
 	}
 
@@ -180,6 +185,7 @@ pghba_ensure_host_rule_exists(const char *hbaFilePath,
 	if (newHbaContents == NULL)
 	{
 		log_error("Failed to allocate memory");
+		destroyPQExpBuffer(hbaLineBuffer);
 		free(currentHbaContents);
 		return false;
 	}
@@ -243,6 +249,9 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 
 	int nodeIndex = 0;
 
+	PQExpBuffer hbaLineReplicationBuffer = NULL;
+	PQExpBuffer hbaLineDatabaseBuffer = NULL;
+
 	if (newHbaContents == NULL)
 	{
 		log_error("Failed to allocate memory");
@@ -261,20 +270,30 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 	for (nodeIndex = 0; nodeIndex < nodesArray->count; nodeIndex++)
 	{
 		NodeAddress *node = &(nodesArray->nodes[nodeIndex]);
-		PQExpBuffer hbaLineReplicationBuffer = createPQExpBuffer();
-		PQExpBuffer hbaLineDatabaseBuffer = createPQExpBuffer();
 
 		int hbaLinesIndex = 0;
-		PQExpBuffer hbaLines[] = {
-			hbaLineReplicationBuffer,
-			hbaLineDatabaseBuffer,
-			NULL
-		};
+		PQExpBuffer hbaLines[3] = { 0 };
+
+		/* done with the new HBA line buffers (and safe to call on NULL) */
+		destroyPQExpBuffer(hbaLineReplicationBuffer);
+		destroyPQExpBuffer(hbaLineDatabaseBuffer);
+
+		/* we need new buffers now */
+		hbaLineReplicationBuffer = createPQExpBuffer();
+		hbaLineDatabaseBuffer = createPQExpBuffer();
 
 		if (hbaLineReplicationBuffer == NULL ||
 			hbaLineDatabaseBuffer == NULL)
 		{
 			log_error("Failed to allocate memory");
+
+			/* done with the old pg_hba.conf contents */
+			free(currentHbaContents);
+
+			/* done with the new HBA line buffers */
+			destroyPQExpBuffer(hbaLineReplicationBuffer);
+			destroyPQExpBuffer(hbaLineDatabaseBuffer);
+
 			return false;
 		}
 
@@ -290,6 +309,14 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 										 authenticationScheme))
 		{
 			/* errors have already been logged */
+
+			/* done with the old pg_hba.conf contents */
+			free(currentHbaContents);
+
+			/* done with the new HBA line buffers (and safe to call on NULL) */
+			destroyPQExpBuffer(hbaLineReplicationBuffer);
+			destroyPQExpBuffer(hbaLineDatabaseBuffer);
+
 			return false;
 		}
 
@@ -302,11 +329,22 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 										 authenticationScheme))
 		{
 			/* errors have already been logged */
+
+			/* done with the old pg_hba.conf contents */
+			free(currentHbaContents);
+
+			/* done with the new HBA line buffers (and safe to call on NULL) */
+			destroyPQExpBuffer(hbaLineReplicationBuffer);
+			destroyPQExpBuffer(hbaLineDatabaseBuffer);
+
 			return false;
 		}
 
 		log_info("Ensuring HBA rules for node %d (%s:%d)",
 				 node->nodeId, node->host, node->port);
+
+		hbaLines[0] = hbaLineReplicationBuffer;
+		hbaLines[1] = hbaLineDatabaseBuffer;
 
 		for (hbaLinesIndex = 0; hbaLines[hbaLinesIndex] != NULL; hbaLinesIndex++)
 		{
@@ -340,6 +378,7 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 			{
 				log_warn("Skipping HBA edits (per --skip-pg-hba) for rule: %s",
 						 hbaLineBuffer->data);
+
 				continue;
 			}
 
@@ -347,11 +386,11 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 			appendPQExpBufferStr(newHbaContents, hbaLineBuffer->data);
 			appendPQExpBufferStr(newHbaContents, HBA_LINE_COMMENT "\n");
 		}
-
-		/* done with the new HBA line buffers */
-		destroyPQExpBuffer(hbaLineReplicationBuffer);
-		destroyPQExpBuffer(hbaLineDatabaseBuffer);
 	}
+
+	/* done with the new HBA line buffers (and safe to call on NULL) */
+	destroyPQExpBuffer(hbaLineReplicationBuffer);
+	destroyPQExpBuffer(hbaLineDatabaseBuffer);
 
 	/* done with the old pg_hba.conf contents */
 	free(currentHbaContents);
