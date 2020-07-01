@@ -59,6 +59,11 @@ pg_setup_init(PostgresSetup *pgSetup,
 	pgSetup->pgKind = options->pgKind;
 
 	/*
+	 * Also make sure that we keep the pg_controldata results if we have them.
+	 */
+	pgSetup->control = options->control;
+
+	/*
 	 * Make sure that we keep the SSL options too.
 	 */
 	pgSetup->ssl.active = options->ssl.active;
@@ -133,44 +138,34 @@ pg_setup_init(PostgresSetup *pgSetup,
 		}
 	}
 
-	/*
-	 * We want to know if PostgreSQL is running, and if that's the case, we
-	 * want to discover all we can about its properties: port, pid, socket
-	 * directory, is_in_recovery, etc.
-	 */
-	if (errors == 0)
+	if (!missing_pgdata_is_ok && !directory_exists(pgSetup->pgdata))
 	{
-		if (!missing_pgdata_is_ok && !directory_exists(pgSetup->pgdata))
+		log_fatal("Database directory \"%s\" not found", pgSetup->pgdata);
+		return false;
+	}
+	else if (!missing_pgdata_is_ok)
+	{
+		char globalControlPath[MAXPGPATH] = { 0 };
+
+		/* globalControlFilePath = $PGDATA/global/pg_control */
+		join_path_components(globalControlPath,
+							 pgSetup->pgdata, "global/pg_control");
+
+		if (!file_exists(globalControlPath))
 		{
-			log_fatal("Database directory \"%s\" not found", pgSetup->pgdata);
+			log_error("PGDATA exists but is not a Postgres directory, "
+					  "see above for details");
 			return false;
 		}
+	}
 
-		pg_controldata(pgSetup, missing_pgdata_is_ok);
-
-		if (pgSetup->control.pg_control_version == 0)
+	/* get the real path of PGDATA now */
+	if (directory_exists(pgSetup->pgdata))
+	{
+		if (!normalize_filename(pgSetup->pgdata, pgSetup->pgdata, MAXPGPATH))
 		{
-			/* we already logged about it */
-			if (!missing_pgdata_is_ok)
-			{
-				errors++;
-			}
-		}
-		else
-		{
-			/* get the real path of PGDATA now */
-			if (!normalize_filename(pgSetup->pgdata, pgSetup->pgdata, MAXPGPATH))
-			{
-				/* errors have already been logged */
-				return false;
-			}
-
-			log_debug("Found PostgreSQL system %" PRIu64 " at \"%s\", "
-														 "version %u, catalog version %u",
-					  pgSetup->control.system_identifier,
-					  pgSetup->pgdata,
-					  pgSetup->control.pg_control_version,
-					  pgSetup->control.catalog_version_no);
+			/* errors have already been logged */
+			return false;
 		}
 	}
 
@@ -354,25 +349,56 @@ pg_setup_init(PostgresSetup *pgSetup,
 	}
 
 	/*
-	 * If PostgreSQL is running, register if it's in recovery or not.
+	 * When we have a PGDATA and Postgres is not running, we need to grab more
+	 * information about the local installation: pg_controldata can give us the
+	 * pg-_control_version, catalog_version_no, and system_identifier.
 	 */
-	if (pgSetup->control.pg_control_version > 0 &&
-		pgSetup->pidFile.port > 0 &&
-		pgSetup->pgport == pgSetup->pidFile.port)
+	if (errors == 0)
 	{
 		/*
-		 * Sometimes `pg_ctl start` returns with success and Postgres is still
-		 * in crash recovery replaying WAL files, in the "starting" state
-		 * rather than the "ready" state.
-		 *
-		 * In that case, we wait until Postgres is ready for connections. The
-		 * whole pg_autoctl code is expecting to be able to connect to
-		 * Postgres, so there's no point in returning now and having the next
-		 * connection attempt fail with something like the following:
-		 *
-		 * ERROR Connection to database failed: FATAL: the database system is
-		 * starting up
+		 * Only run pg_controldata when Postgres is not running, otherwise we
+		 * get the same information later from an SQL query, see
+		 * pgsql_get_postgres_metadata.
 		 */
+		if (!pg_setup_is_running(pgSetup) &&
+			pgSetup->control.pg_control_version == 0)
+		{
+			pg_controldata(pgSetup, missing_pgdata_is_ok);
+
+			if (pgSetup->control.pg_control_version == 0)
+			{
+				/* we already logged about it */
+				if (!missing_pgdata_is_ok)
+				{
+					errors++;
+				}
+			}
+
+			log_debug("Found PostgreSQL system %" PRIu64 " at \"%s\", "
+														 "version %u, catalog version %u",
+					  pgSetup->control.system_identifier,
+					  pgSetup->pgdata,
+					  pgSetup->control.pg_control_version,
+					  pgSetup->control.catalog_version_no);
+		}
+	}
+
+	/*
+	 * Sometimes `pg_ctl start` returns with success and Postgres is still in
+	 * crash recovery replaying WAL files, in the "starting" state rather than
+	 * the "ready" state.
+	 *
+	 * In that case, we wait until Postgres is ready for connections. The whole
+	 * pg_autoctl code is expecting to be able to connect to Postgres, so
+	 * there's no point in returning now and having the next connection attempt
+	 * fail with something like the following:
+	 *
+	 * ERROR Connection to database failed: FATAL: the database system is
+	 * starting up
+	 */
+	if (pgSetup->pidFile.port > 0 &&
+		pgSetup->pgport == pgSetup->pidFile.port)
+	{
 		if (!pgIsReady)
 		{
 			if (!pg_is_not_running_is_ok)
@@ -389,6 +415,96 @@ pg_setup_init(PostgresSetup *pgSetup,
 		log_fatal("Failed to discover PostgreSQL setup, "
 				  "please fix previous errors.");
 		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * pg_setup_controldata runs pg_controldata and updates the given pgSetup
+ * control data from there. When we have conflicting values, such as an updated
+ * system identifier, return false.
+ */
+bool
+pg_setup_controldata(PostgresSetup *pgSetup, bool missingPgDataIsOk)
+{
+	PostgresSetup newPgSetup = { 0 };
+
+	PostgresControlData *oldControl = &(pgSetup->control);
+	PostgresControlData *newControl = &(newPgSetup.control);
+
+	if (!directory_exists(pgSetup->pgdata))
+	{
+		if (!missingPgDataIsOk)
+		{
+			log_fatal("Database directory \"%s\" not found", pgSetup->pgdata);
+			return false;
+		}
+
+		/* PGDATA directory does not exists, stop here, it's ok */
+		return true;
+	}
+
+	/*
+	 * Now fetch new control values from running pg_controldata on PGDATA.
+	 */
+	if (!pg_controldata(pgSetup, missingPgDataIsOk))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	if (oldControl->system_identifier != newControl->system_identifier)
+	{
+		if (oldControl->system_identifier == 0)
+		{
+			oldControl->system_identifier = newControl->system_identifier;
+		}
+		else
+		{
+			/*
+			 * This is a physical replication deal breaker, so it's mighty
+			 * confusing to get that here. In the least, the keeper should get
+			 * initialized from scratch again, but basically, we don't know
+			 * what we are doing anymore.
+			 */
+			log_error("Unknown PostgreSQL system identifier: %" PRIu64 ", "
+																	   "expected %" PRIu64,
+					  newControl->system_identifier,
+					  oldControl->system_identifier);
+			return false;
+		}
+	}
+
+	if (oldControl->pg_control_version != newControl->pg_control_version)
+	{
+		if (oldControl->pg_control_version == 0)
+		{
+			oldControl->pg_control_version = newControl->pg_control_version;
+		}
+		else
+		{
+			/* Postgres minor upgrade happened */
+			log_warn("PostgreSQL version changed from %u to %u",
+					 oldControl->pg_control_version,
+					 newControl->pg_control_version);
+		}
+	}
+
+	if (oldControl->catalog_version_no != newControl->catalog_version_no)
+	{
+		if (oldControl->catalog_version_no == 0)
+		{
+			oldControl->catalog_version_no = newControl->catalog_version_no;
+		}
+		else
+		{
+			/* Postgres major upgrade happened */
+			log_warn("PostgreSQL catalog version changed from %u to %u",
+					 oldControl->catalog_version_no,
+					 newControl->catalog_version_no);
+		}
 	}
 
 	return true;

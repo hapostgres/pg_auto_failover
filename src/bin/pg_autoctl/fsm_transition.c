@@ -637,7 +637,8 @@ fsm_enable_sync_rep(Keeper *keeper)
 										 config->replication_slot_name,
 										 &pgSetup->is_in_recovery,
 										 postgres->pgsrSyncState,
-										 postgres->currentLSN))
+										 postgres->currentLSN,
+										 &(postgres->postgresSetup.control)))
 		{
 			log_error("Failed to update the local Postgres metadata");
 			return false;

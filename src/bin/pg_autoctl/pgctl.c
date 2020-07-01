@@ -1292,7 +1292,7 @@ pg_setup_standby_mode(uint32_t pg_control_version,
 	if (pg_control_version < 1000)
 	{
 		log_fatal("pg_auto_failover does not support PostgreSQL before "
-				  "Postgres 10, we have pg_control version numer %d from "
+				  "Postgres 10, we have pg_control version number %d from "
 				  "pg_controldata \"%s\"",
 				  pg_control_version, pgdata);
 		return false;

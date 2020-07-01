@@ -2028,11 +2028,12 @@ validate_connection_string(const char *connectionString)
  * pgsql_get_postgres_metadata returns several bits of information that we need
  * to take decisions in the rest of the code:
  *
- *  - config_file path (cache invalidation in case it changed)
- *  - hba_file path (cache invalidation in case it changed)
  *  - pg_is_in_recovery (primary or standby, as expected?)
  *  - sync_state from pg_stat_replication when a primary
  *  - current_lsn from the server
+ *  - pg_control_version
+ *  - catalog_version_no
+ *  - system_identifier
  *
  * With those metadata we can then check our expectations and take decisions in
  * some cases. We can obtain all the metadata that we need easily enough in a
@@ -2045,13 +2046,15 @@ typedef struct PgMetadata
 	bool pg_is_in_recovery;
 	char syncState[PGSR_SYNC_STATE_MAXLENGTH];
 	char currentLSN[PG_LSN_MAXLENGTH];
+	PostgresControlData control;
 } PgMetadata;
 
 
 bool
 pgsql_get_postgres_metadata(PGSQL *pgsql, const char *slotName,
 							bool *pg_is_in_recovery,
-							char *pgsrSyncState, char *currentLSN)
+							char *pgsrSyncState, char *currentLSN,
+							PostgresControlData *control)
 {
 	PgMetadata context = { 0 };
 
@@ -2071,8 +2074,14 @@ pgsql_get_postgres_metadata(PGSQL *pgsql, const char *slotName,
 		" case when pg_is_in_recovery()"
 		" then pg_last_wal_receive_lsn()"
 		" else pg_current_wal_lsn()"
-		" end as current_lsn"
+		" end as current_lsn,"
+		" pg_control_version, catalog_version_no, system_identifier"
 		" from (values(1)) as dummy"
+		" full outer join"
+		" (select pg_control_version, catalog_version_no, system_identifier "
+		"    from pg_control_system()"
+		" )"
+		" as control on true"
 		" full outer join"
 		" ("
 		"   select sync_state"
@@ -2123,6 +2132,9 @@ pgsql_get_postgres_metadata(PGSQL *pgsql, const char *slotName,
 		strlcpy(currentLSN, context.currentLSN, PG_LSN_MAXLENGTH);
 	}
 
+	/* overwrite the Control Data fetched from the query */
+	*control = context.control;
+
 	pgsql_finish(pgsql);
 
 	return true;
@@ -2137,8 +2149,9 @@ static void
 parsePgMetadata(void *ctx, PGresult *result)
 {
 	PgMetadata *context = (PgMetadata *) ctx;
+	char *value;
 
-	if (PQnfields(result) != 3)
+	if (PQnfields(result) != 6)
 	{
 		log_error("Query returned %d columns, expected 3", PQnfields(result));
 		context->parsedOk = false;
@@ -2156,7 +2169,7 @@ parsePgMetadata(void *ctx, PGresult *result)
 
 	if (!PQgetisnull(result, 0, 1))
 	{
-		char *value = PQgetvalue(result, 0, 1);
+		value = PQgetvalue(result, 0, 1);
 
 		strlcpy(context->syncState, value, PGSR_SYNC_STATE_MAXLENGTH);
 	}
@@ -2167,13 +2180,37 @@ parsePgMetadata(void *ctx, PGresult *result)
 
 	if (!PQgetisnull(result, 0, 2))
 	{
-		char *value = PQgetvalue(result, 0, 2);
+		value = PQgetvalue(result, 0, 2);
 
 		strlcpy(context->currentLSN, value, PG_LSN_MAXLENGTH);
 	}
 	else
 	{
 		context->currentLSN[0] = '\0';
+	}
+
+	value = PQgetvalue(result, 0, 3);
+	if (!stringToUInt(value, &(context->control.pg_control_version)))
+	{
+		log_error("Failed to parse pg_control_version \"%s\"", value);
+		context->parsedOk = true;
+		return;
+	}
+
+	value = PQgetvalue(result, 0, 4);
+	if (!stringToUInt(value, &(context->control.catalog_version_no)))
+	{
+		log_error("Failed to parse catalog_version_no \"%s\"", value);
+		context->parsedOk = true;
+		return;
+	}
+
+	value = PQgetvalue(result, 0, 5);
+	if (!stringToUInt64(value, &(context->control.system_identifier)))
+	{
+		log_error("Failed to parse system_identifier \"%s\"", value);
+		context->parsedOk = true;
+		return;
 	}
 
 	context->parsedOk = true;
