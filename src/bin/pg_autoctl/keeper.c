@@ -916,10 +916,12 @@ keeper_maintain_replication_slots(Keeper *keeper)
 	Monitor *monitor = &(keeper->monitor);
 	PostgresSetup *pgSetup = &(keeper->postgres.postgresSetup);
 	LocalPostgresServer *postgres = &(keeper->postgres);
-	KeeperStateData *keeperState = &(keeper->state);
 
 	char *host = keeper->config.nodename;
 	int port = pgSetup->pgport;
+
+	/* do we bypass the whole operation? */
+	bool bypass = false;
 
 	log_trace("keeper_maintain_replication_slots");
 
@@ -958,36 +960,31 @@ keeper_maintain_replication_slots(Keeper *keeper)
 	if (pgSetup->control.pg_control_version < 1100)
 	{
 		/* Postgres 10 does not have pg_replication_slot_advance() */
-		return true;
+		bypass = true;
+	}
+	else
+	{
+		/*
+		 * When using the PG_AUTOCTL_DEBUG environment variable, we still use
+		 * replication slots in all versions of Postgres 11 and 12, so that we
+		 * can test our implementation.
+		 */
+		if (env_exists(PG_AUTOCTL_DEBUG))
+		{
+			bypass = false;
+		}
+		else
+		{
+			bypass = !pg_setup_standby_slot_supported(pgSetup, LOG_TRACE);
+		}
 	}
 
 	/*
-	 * On the primary, always "maintain" the replication slots. It means
-	 * creating it before the standby does a pg_basebackup, and removing it
-	 * when we have lost the standby.
-	 *
-	 * On a standby, check for Postgres version before creating a replication
-	 * slot, we want to be able to use pg_replication_slot_advance().
-	 *
-	 * When using the PG_AUTOCTL_DEBUG environment variable, we still use
-	 * replication slots in all versions of Postgres 11 and 12, so that we can
-	 * test our implementation.
+	 * Do we actually want to maintain replication slots on this standby node?
 	 */
-	if (!(keeperState->current_role == PRIMARY_STATE ||
-		  keeperState->current_role == WAIT_PRIMARY_STATE))
+	if (bypass)
 	{
-		/*
-		 * Bypass replication slot maintenance unless Postgres has support for
-		 * replication slots on a standby, or unless PG_AUTOCTL_DEBUG is set in
-		 * the environment.
-		 */
-		bool bypass = !env_exists(PG_AUTOCTL_DEBUG) ||
-					  !pg_setup_standby_slot_supported(pgSetup, LOG_TRACE);
-
-		if (bypass)
-		{
-			return true;
-		}
+		return true;
 	}
 
 	if (!monitor_get_other_nodes(monitor, host, port,
