@@ -96,7 +96,13 @@ monitor_pg_init(Monitor *monitor)
 			return false;
 		}
 	}
-	else
+
+	/*
+	 * At this point we may have an env figured out, but not necessarily a
+	 * populated PGDATA directory in the case of an empty directory pointed
+	 * to by pgdata.
+	 */
+	if (!directory_exists(pgSetup->pgdata) || directory_isempty(pgSetup->pgdata))
 	{
 		if (!pg_ctl_initdb(pgSetup->pg_ctl, pgSetup->pgdata))
 		{

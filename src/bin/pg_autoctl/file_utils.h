@@ -26,6 +26,7 @@
 
 bool file_exists(const char *filename);
 bool directory_exists(const char *path);
+bool directory_isempty(const char *path);
 bool ensure_empty_dir(const char *dirname, int mode);
 FILE * fopen_with_umask(const char *filePath, const char *modes, int flags, mode_t umask);
 FILE * fopen_read_only(const char *filePath);

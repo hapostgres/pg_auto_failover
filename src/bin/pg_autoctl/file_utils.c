@@ -7,6 +7,7 @@
  *
  */
 
+#include <dirent.h>
 #include <limits.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -77,6 +78,57 @@ directory_exists(const char *path)
 	}
 
 	result = (info.st_mode & S_IFMT) == S_IFDIR;
+	return result;
+}
+
+
+/*
+ * directory_isempty returns whether the given path is the name of an empty
+ * directory or not. Hidden files are allowed to exist on UNIX filesystems to
+ * handle .dot-files.
+ */
+bool
+directory_isempty(const char *path)
+{
+	bool result = true;
+	DIR *dir;
+	struct dirent *file;
+
+	dir = opendir(path);
+	if (!dir)
+	{
+		/*
+		 * We could inspect errno here for ENOENT but the returnvalue would be
+		 * the same, we assume that the caller has verified that the directory
+		 * exists already.
+		 */
+		return false;
+	}
+
+	while (errno = 0, (result && (file = readdir(dir)) != NULL))
+	{
+		if (strcmp(file->d_name, ".") == 0 || strcmp(file->d_name, "..") == 0)
+			continue;
+
+#ifndef WIN32
+		if (file->d_name[0] == '.')
+			continue;
+#endif
+		result = false;
+	}
+
+	/*
+	 * closedir can set errno as well, so we need to inspect it before closing
+	 * the DIR pointer. If errno is set from closedir we might want to act on
+	 * it at some point, but for now the subsequent commands will report an
+	 * error on problems with the directory so lets be content with checking
+	 * for emptiness and assume a happy path.
+	 */
+	if (errno)
+		result = false;
+
+	(void) closedir(dir);
+
 	return result;
 }
 
