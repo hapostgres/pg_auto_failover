@@ -497,7 +497,7 @@ postgres_add_default_settings(LocalPostgresServer *postgres)
 											   configFilePath,
 											   default_settings))
 	{
-		log_error("Failed to add default settings to postgres.conf: couldn't "
+		log_error("Failed to add default settings to postgresql.conf: couldn't "
 				  "write the new postgresql.conf, see above for details");
 		return false;
 	}
