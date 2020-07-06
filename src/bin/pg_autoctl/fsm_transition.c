@@ -43,7 +43,7 @@ static bool prepare_replication(Keeper *keeper, NodeState otherNodeState);
 
 
 /*
- * fsm_init_primary initialises the postgres server as primary.
+ * fsm_init_primary initializes the postgres server as primary.
  *
  * This function actually covers the transition from INIT to SINGLE.
  *
@@ -119,7 +119,7 @@ fsm_init_primary(Keeper *keeper)
 
 		if (!pg_ctl_initdb(pgSetup->pg_ctl, pgSetup->pgdata))
 		{
-			log_fatal("Failed to initialise a PostgreSQL instance at \"%s\""
+			log_fatal("Failed to initialize a PostgreSQL instance at \"%s\""
 					  ", see above for details", pgSetup->pgdata);
 
 			return false;
@@ -191,7 +191,7 @@ fsm_init_primary(Keeper *keeper)
 	 */
 	if (!ensure_postgres_service_is_running(postgres))
 	{
-		log_error("Failed to initialise postgres as primary because "
+		log_error("Failed to initialize postgres as primary because "
 				  "starting postgres failed, see above for details");
 		return false;
 	}
@@ -208,7 +208,7 @@ fsm_init_primary(Keeper *keeper)
 
 		if (!standby_promote(postgres))
 		{
-			log_error("Failed to initialise postgres as primary because promoting "
+			log_error("Failed to initialize postgres as primary because promoting "
 					  "postgres failed, see above for details");
 			return false;
 		}
@@ -230,7 +230,7 @@ fsm_init_primary(Keeper *keeper)
 
 	if (!postgres_add_default_settings(postgres))
 	{
-		log_error("Failed to initialise postgres as primary because "
+		log_error("Failed to initialize postgres as primary because "
 				  "adding default settings failed, see above for details");
 		return false;
 	}
@@ -262,7 +262,7 @@ fsm_init_primary(Keeper *keeper)
 	if (!primary_create_replication_user(postgres, PG_AUTOCTL_REPLICA_USERNAME,
 										 config->replication_password))
 	{
-		log_error("Failed to initialise postgres as primary because creating the "
+		log_error("Failed to initialize postgres as primary because creating the "
 				  "replication user for the standby failed, see above for details");
 		return false;
 	}
@@ -833,7 +833,7 @@ fsm_stop_postgres_and_setup_standby(Keeper *keeper)
 								 keeper->state.current_group,
 								 &(postgres->replicationSource.primaryNode)))
 		{
-			log_error("Failed to initialise standby because get the primary node "
+			log_error("Failed to initialize standby because get the primary node "
 					  "from the monitor failed, see above for details");
 			return false;
 		}
@@ -894,7 +894,7 @@ fsm_init_standby(Keeper *keeper)
 		if (!monitor_get_primary(monitor, config->formation, groupId,
 								 &(postgres->replicationSource.primaryNode)))
 		{
-			log_error("Failed to initialise standby because get the primary node "
+			log_error("Failed to initialize standby because get the primary node "
 					  "from the monitor failed, see above for details");
 			return false;
 		}
@@ -934,7 +934,7 @@ fsm_init_standby(Keeper *keeper)
 
 	if (!standby_init_database(postgres, config->nodename, skipBaseBackup))
 	{
-		log_error("Failed initialise standby server, see above for details");
+		log_error("Failed initialize standby server, see above for details");
 		return false;
 	}
 
@@ -982,7 +982,7 @@ fsm_rewind_or_init(Keeper *keeper)
 		if (!monitor_get_primary(monitor, config->formation, groupId,
 								 &(postgres->replicationSource.primaryNode)))
 		{
-			log_error("Failed to initialise standby because pg_autoctl "
+			log_error("Failed to initialize standby because pg_autoctl "
 					  "failed to get the primary node from the monitor, "
 					  "see above for details");
 			return false;

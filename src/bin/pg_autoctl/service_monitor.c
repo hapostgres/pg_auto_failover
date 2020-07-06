@@ -378,7 +378,7 @@ monitor_ensure_configuration(Monitor *monitor)
 					   missingPgdataIsOk,
 					   pgIsNotRunningIsOk))
 	{
-		log_fatal("Failed to initialise a monitor node, see above for details");
+		log_fatal("Failed to initialize a monitor node, see above for details");
 		return false;
 	}
 

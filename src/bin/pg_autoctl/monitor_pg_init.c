@@ -62,7 +62,7 @@ static bool check_monitor_settings(PostgresSetup pgSetup);
 
 
 /*
- * monitor_pg_init initialises a pg_auto_failover monitor PostgreSQL cluster
+ * monitor_pg_init initializes a pg_auto_failover monitor PostgreSQL cluster
  * from scratch using `pg_ctl initdb`.
  */
 bool
@@ -81,7 +81,7 @@ monitor_pg_init(Monitor *monitor)
 						   missing_pgdata_is_ok,
 						   pg_is_not_running_is_ok))
 		{
-			log_fatal("Failed to initialise a monitor node, "
+			log_fatal("Failed to initialize a monitor node, "
 					  "see above for details");
 			return false;
 		}
@@ -100,7 +100,7 @@ monitor_pg_init(Monitor *monitor)
 	{
 		if (!pg_ctl_initdb(pgSetup->pg_ctl, pgSetup->pgdata))
 		{
-			log_fatal("Failed to initialise a PostgreSQL instance at \"%s\", "
+			log_fatal("Failed to initialize a PostgreSQL instance at \"%s\", "
 					  "see above for details", pgSetup->pgdata);
 			return false;
 		}
@@ -146,7 +146,7 @@ monitor_install(const char *nodename,
 	if (!pg_setup_init(&pgSetup, &pgSetupOption,
 					   missingPgdataIsOk, pgIsNotRunningIsOk))
 	{
-		log_fatal("Failed to initialise a monitor node, see above for details");
+		log_fatal("Failed to initialize a monitor node, see above for details");
 		exit(EXIT_CODE_PGCTL);
 	}
 

@@ -72,7 +72,7 @@ GUC citus_default_settings[] = {
 
 
 /*
- * local_postgres_init initialises an interface for managing a local
+ * local_postgres_init initializes an interface for managing a local
  * postgres server with the given setup.
  */
 void
@@ -327,7 +327,7 @@ primary_has_replica(LocalPostgresServer *postgres, char *userName, bool *hasStan
 
 /*
  * primary_create_replication_slot (re)creates a replication slot. The
- * replication slot will not have its LSN initialised until first use. The
+ * replication slot will not have its LSN initialized until first use. The
  * return value indicates whether the operation was successful.
  */
 bool
@@ -674,7 +674,7 @@ standby_init_database(LocalPostgresServer *postgres,
 		/* try to stop PostgreSQL, stop here if that fails */
 		if (!ensure_postgres_service_is_stopped(postgres))
 		{
-			log_error("Failed to initialise a standby: "
+			log_error("Failed to initialize a standby: "
 					  "the database directory exists "
 					  "and postgres could not be stopped");
 			return false;

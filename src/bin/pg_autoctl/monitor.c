@@ -91,7 +91,7 @@ static bool prepare_connection_to_current_system_user(Monitor *source,
 													  Monitor *target);
 
 /*
- * monitor_init initialises a Monitor struct to connect to the given
+ * monitor_init initializes a Monitor struct to connect to the given
  * database URL.
  */
 bool
@@ -110,7 +110,7 @@ monitor_init(Monitor *monitor, char *url)
 
 
 /*
- * monitor_local_init initialises a Monitor struct to connect to the local
+ * monitor_local_init initializes a Monitor struct to connect to the local
  * monitor postgres instance, for use from the pg_autoctl instance that manages
  * the monitor.
  */
@@ -530,7 +530,7 @@ monitor_get_coordinator(Monitor *monitor, char *formation, NodeAddress *node)
  * directly.
  *
  * The initialState can also be used to indicate that the node is already
- * correctly initialised in a particular state. This can be useful when
+ * correctly initialized in a particular state. This can be useful when
  * bringing back a keeper after replacing the monitor.
  *
  * The node ID and group ID selected by the monitor, as well as the goal

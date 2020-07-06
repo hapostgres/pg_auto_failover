@@ -1232,7 +1232,7 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 	}
 
 	/*
-	 * Either --destroy the whole Postgres cluster and configuraiton, or leave
+	 * Either --destroy the whole Postgres cluster and configuration, or leave
 	 * enough behind us that it's possible to re-join a formation later.
 	 */
 	if (dropAndDestroy)

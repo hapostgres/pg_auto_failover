@@ -40,7 +40,7 @@ union semun
  *
  * We use the environment variable PG_AUTOCTL_SERVICE to signal when a process
  * is a child process of the main pg_autoctl supervisor so that we are able to
- * initialise our locking strategy before parsing the command line. After all,
+ * initialize our locking strategy before parsing the command line. After all,
  * we might have to log some output during the parsing itself.
  */
 bool

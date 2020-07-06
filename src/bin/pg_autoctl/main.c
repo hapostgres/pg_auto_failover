@@ -142,7 +142,7 @@ set_logger()
 	 */
 	log_use_colors(isatty(fileno(stderr)));
 
-	/* initialise the semaphore used for locking log output */
+	/* initialize the semaphore used for locking log output */
 	if (!semaphore_init(&log_semaphore))
 	{
 		exit(EXIT_CODE_INTERNAL_ERROR);

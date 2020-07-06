@@ -151,7 +151,7 @@ monitor_config_set_pathnames_from_pgdata(MonitorConfig *config)
 
 
 /*
- * monitor_config_init initialises a MonitorConfig with the default values.
+ * monitor_config_init initializes a MonitorConfig with the default values.
  */
 void
 monitor_config_init(MonitorConfig *config,
@@ -188,7 +188,7 @@ monitor_config_init(MonitorConfig *config,
 
 
 /*
- * monitor_config_init initialises a MonitorConfig from a KeeperConfig
+ * monitor_config_init initializes a MonitorConfig from a KeeperConfig
  * structure. That's useful for commands that may run on either a monitor or a
  * keeper node, such as `pg_autoctl monitor state|events|formation`, or
  * `pg_autoctl do destroy`.

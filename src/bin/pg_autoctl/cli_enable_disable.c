@@ -455,7 +455,7 @@ cli_enable_maintenance(int argc, char **argv)
 
 	if (!keeper_init(&keeper, &keeper.config))
 	{
-		log_fatal("Failed to initialise keeper, see above for details");
+		log_fatal("Failed to initialize keeper, see above for details");
 		exit(EXIT_CODE_KEEPER);
 	}
 
@@ -543,7 +543,7 @@ cli_disable_maintenance(int argc, char **argv)
 
 	if (!keeper_init(&keeper, &keeper.config))
 	{
-		log_fatal("Failed to initialise keeper, see above for details");
+		log_fatal("Failed to initialize keeper, see above for details");
 		exit(EXIT_CODE_KEEPER);
 	}
 
@@ -582,7 +582,7 @@ cli_disable_maintenance(int argc, char **argv)
 
 
 /*
- * cli_ssl_getopts parses the command line options necessary to initialise a
+ * cli_ssl_getopts parses the command line options necessary to initialize a
  * PostgreSQL instance as our monitor.
  */
 static int

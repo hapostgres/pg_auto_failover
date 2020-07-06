@@ -239,7 +239,7 @@ keeper_config_set_pathnames_from_pgdata(ConfigFilePaths *pathnames,
 
 
 /*
- * keeper_config_init initialises a KeeperConfig with the default values.
+ * keeper_config_init initializes a KeeperConfig with the default values.
  */
 void
 keeper_config_init(KeeperConfig *config,

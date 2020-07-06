@@ -24,7 +24,7 @@
 
 
 /*
- * keeper_init initialises the keeper logic according to the given keeper
+ * keeper_init initializes the keeper logic according to the given keeper
  * configuration. It also reads the state file from disk. The state file
  * must be generated before calling keeper_init.
  */
@@ -428,7 +428,7 @@ keeper_update_pg_state(Keeper *keeper)
 		postgres->pgIsRunning = true;
 
 		/*
-		 * Reinitialise connection string in case host changed or was first
+		 * Reinitialize connection string in case host changed or was first
 		 * discovered.
 		 */
 		pg_setup_get_local_connection_string(pgSetup, connInfo);

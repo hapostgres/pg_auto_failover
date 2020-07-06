@@ -289,7 +289,7 @@ cli_create_postgres(int argc, char **argv)
 
 /*
  * cli_create_monitor_getopts parses the command line options necessary to
- * initialise a PostgreSQL instance as our monitor.
+ * initialize a PostgreSQL instance as our monitor.
  */
 static int
 cli_create_monitor_getopts(int argc, char **argv)

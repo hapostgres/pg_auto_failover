@@ -1765,7 +1765,7 @@ pgsetup_validate_ssl_settings(PostgresSetup *pgSetup)
 		}
 
 		log_info("Using --ssl-self-signed: pg_autoctl will "
-				 " create self-signed certificates, allowing for "
+				 "create self-signed certificates, allowing for "
 				 "encrypted network traffic");
 		log_warn("Self-signed certificates provide protection against "
 				 "eavesdropping; this setup does NOT protect against "

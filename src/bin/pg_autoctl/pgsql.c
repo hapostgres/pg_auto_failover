@@ -100,7 +100,7 @@ parseSingleValueResult(void *ctx, PGresult *result)
 
 
 /*
- * pgsql_init initialises a PGSQL struct to connect to the given database
+ * pgsql_init initializes a PGSQL struct to connect to the given database
  * URL or connection string.
  */
 bool
@@ -1505,7 +1505,7 @@ pgsql_reset_primary_conninfo(PGSQL *pgsql)
 
 
 /*
- * pgsql_reload_conf causes open sessions to reload the PostgresSQL configuration
+ * pgsql_reload_conf causes open sessions to reload the PostgreSQL configuration
  * files.
  */
 bool

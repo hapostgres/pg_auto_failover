@@ -179,7 +179,7 @@ service_keeper_runprogram(Keeper *keeper)
 
 
 /*
- * service_keeper_node_active_init initialises the pg_autoctl service for the
+ * service_keeper_node_active_init initializes the pg_autoctl service for the
  * node_active protocol.
  */
 bool
@@ -219,7 +219,7 @@ service_keeper_node_active_init(Keeper *keeper)
 
 	if (!keeper_init(keeper, config))
 	{
-		log_fatal("Failed to initialise keeper, see above for details");
+		log_fatal("Failed to initialize keeper, see above for details");
 		exit(EXIT_CODE_PGCTL);
 	}
 
