@@ -973,15 +973,16 @@ keeper_maintain_replication_slots(Keeper *keeper)
 	 * replication slots in all versions of Postgres 11 and 12, so that we can
 	 * test our implementation.
 	 */
-	if (keeperState->current_role == PRIMARY_STATE ||
-		keeperState->current_role == WAIT_PRIMARY_STATE ||
-		!env_exists(PG_AUTOCTL_DEBUG))
+	if (!(keeperState->current_role == PRIMARY_STATE ||
+		  keeperState->current_role == WAIT_PRIMARY_STATE))
 	{
 		/*
 		 * Bypass replication slot maintenance unless Postgres has support for
-		 * replication slots on a standby.
+		 * replication slots on a standby, or unless PG_AUTOCTL_DEBUG is set in
+		 * the environment.
 		 */
-		bool bypass = !pg_setup_standby_slot_supported(pgSetup, LOG_TRACE);
+		bool bypass = !env_exists(PG_AUTOCTL_DEBUG) ||
+					  !pg_setup_standby_slot_supported(pgSetup, LOG_TRACE);
 
 		if (bypass)
 		{
