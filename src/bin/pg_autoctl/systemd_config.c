@@ -72,7 +72,7 @@
 
 
 /*
- * systemd_config_init initialises a SystemdServiceConfig with the default
+ * systemd_config_init initializes a SystemdServiceConfig with the default
  * values.
  */
 void

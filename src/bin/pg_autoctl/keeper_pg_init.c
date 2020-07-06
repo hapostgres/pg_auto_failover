@@ -90,7 +90,7 @@ keeper_pg_init_fsm(Keeper *keeper)
 
 
 /*
- * keeper_pg_init_and_register initialises a pg_autoctl keeper and its local
+ * keeper_pg_init_and_register initializes a pg_autoctl keeper and its local
  * PostgreSQL instance. Registering a PostgreSQL instance to the monitor is a 3
  * states story:
  *

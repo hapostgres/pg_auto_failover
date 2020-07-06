@@ -555,7 +555,7 @@ cli_do_service_node_active(int argc, char **argv)
 	/* Prepare our Keeper and KeeperConfig from the CLI options */
 	if (!service_keeper_node_active_init(&keeper))
 	{
-		log_fatal("Failed to initialise the node active service, "
+		log_fatal("Failed to initialize the node active service, "
 				  "see above for details");
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}

@@ -100,7 +100,7 @@ parseSingleValueResult(void *ctx, PGresult *result)
 
 
 /*
- * pgsql_init initialises a PGSQL struct to connect to the given database
+ * pgsql_init initializes a PGSQL struct to connect to the given database
  * URL or connection string.
  */
 bool

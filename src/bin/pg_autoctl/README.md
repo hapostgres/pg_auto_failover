@@ -76,10 +76,10 @@ files have specific charters:
   - the `loop.c` file implements the keeper service.
 
   - the `keeper_pg_init` module implements the `pg_autoctl create postgres`
-    command, which initialises a Postgres node for pg_auto_failover.
+    command, which initializes a Postgres node for pg_auto_failover.
 
   - the `monitor_pg_init` module implements the `pg_autoctl create monitor`
-    command, which initialises a monitor node for pg_auto_failover.
+    command, which initializes a monitor node for pg_auto_failover.
 
   - the `debian` module contains code that recognize if we're given a debian
     style cluster, such as created with `pg_createcluster`, and tools to

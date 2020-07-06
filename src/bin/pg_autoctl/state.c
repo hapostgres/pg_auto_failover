@@ -725,7 +725,7 @@ keeper_init_state_discover(KeeperStateInit *initState,
 	if (!pg_setup_init(&newPgSetup, pgSetup,
 					   missingPgdataIsOk, pgIsNotRunningIsOk))
 	{
-		log_fatal("Failed to initialise the keeper init state, "
+		log_fatal("Failed to initialize the keeper init state, "
 				  "see above for details");
 		return false;
 	}

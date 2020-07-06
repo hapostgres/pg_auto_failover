@@ -836,7 +836,7 @@ log_program_output(Program prog, int outLogLevel, int errorLogLevel)
 
 
 /*
- * pg_ctl_initdb initialises a PostgreSQL directory from scratch by calling
+ * pg_ctl_initdb initializes a PostgreSQL directory from scratch by calling
  * "pg_ctl initdb", and returns true when this was successful. Beware that it
  * will inherit from the environment, such as LC_COLLATE and LC_ALL etc.
  *

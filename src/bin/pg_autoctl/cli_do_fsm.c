@@ -379,7 +379,7 @@ cli_do_fsm_step(int argc, char **argv)
 
 	if (!keeper_init(&keeper, &keeper.config))
 	{
-		log_fatal("Failed to initialise keeper, see above for details");
+		log_fatal("Failed to initialize keeper, see above for details");
 		exit(EXIT_CODE_PGCTL);
 	}
 
