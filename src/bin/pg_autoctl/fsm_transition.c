@@ -1320,6 +1320,8 @@ fsm_fast_forward(Keeper *keeper)
 	NodeAddress *upstreamNode = NULL;
 	ReplicationSource replicationSource = { 0 };
 
+	char slotName[MAXCONNINFO] = { 0 };
+
 	if (!config->monitorDisabled)
 	{
 		char *host = config->nodename;
@@ -1347,11 +1349,20 @@ fsm_fast_forward(Keeper *keeper)
 	 */
 	upstreamNode = &(keeper->otherNodes.nodes[0]);
 
+	/*
+	 * Postgres 10 does not have pg_replication_slot_advance(), so we don't
+	 * support replication slots on standby nodes there.
+	 */
+	if (pgSetup->control.pg_control_version >= 1100)
+	{
+		strlcpy(slotName, config->replication_slot_name, MAXCONNINFO);
+	}
+
 	if (!standby_init_replication_source(postgres,
 										 upstreamNode,
 										 PG_AUTOCTL_REPLICA_USERNAME,
 										 config->replication_password,
-										 config->replication_slot_name,
+										 slotName,
 										 config->maximum_backup_rate,
 										 config->backupDirectory,
 										 upstreamNode->lsn,

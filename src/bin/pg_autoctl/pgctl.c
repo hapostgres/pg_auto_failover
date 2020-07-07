@@ -1530,13 +1530,8 @@ prepare_recovery_settings(const char *pgdata,
 	}
 
 	/*
-	 * In-place edit quotedLSN and quotedSlotName to their expected value, and
-	 * pick either standby_settings or fetch_missing_wal_settings depending on
-	 * replicationTargetLSN being in use or not.
-	 *
-	 * When replicationTargetLSN is in use, we are in the middle of a failover
-	 * operation where the candidate node needs to be fetching some missing WAL
-	 * bytes from another standby node before it can get promoted.
+	 * We don't always have a replication slot name to use when connecting to a
+	 * standby node.
 	 */
 	if (!IS_EMPTY_STRING_BUFFER(replicationSource->slotName))
 	{
@@ -1544,6 +1539,7 @@ prepare_recovery_settings(const char *pgdata,
 				replicationSource->slotName);
 	}
 
+	/* We use the targetLSN only when doing a WAL fast_forward operation */
 	if (!IS_EMPTY_STRING_BUFFER(replicationSource->targetLSN))
 	{
 		sformat(targetLSN, PG_LSN_MAXLENGTH, "'%s'",
