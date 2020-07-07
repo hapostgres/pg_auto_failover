@@ -195,7 +195,7 @@ def test_013_maintenance_and_failover():
     node1.stop_postgres()
 
     # assigned and goal state must be the same
-    assert node2.wait_until_state(target_state="primary")
+    assert node2.wait_until_state(target_state="join_primary")
 
     print("Calling pgautofailover.failover() on the monitor")
     monitor.failover()

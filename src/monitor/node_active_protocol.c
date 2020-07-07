@@ -1336,10 +1336,10 @@ start_maintenance(PG_FUNCTION_ARGS)
 			currentNode->nodeName, currentNode->nodePort);
 
 		SetNodeGoalState(primaryNode->nodeName, primaryNode->nodePort,
-						 REPLICATION_STATE_WAIT_PRIMARY);
+						 primaryGoalState);
 
 		NotifyStateChange(primaryNode->reportedState,
-						  REPLICATION_STATE_WAIT_PRIMARY,
+						  primaryGoalState,
 						  primaryNode->formationId,
 						  primaryNode->groupId,
 						  primaryNode->nodeId,
