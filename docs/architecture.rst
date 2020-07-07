@@ -29,6 +29,7 @@ writes when there's a single server available, and this opens the service
 for potential data loss if now the primary server were to be failing too.
 
 .. figure:: ./pg_auto_failover-arch.png
+   :alt: pg_auto_failover Architecture for a standalone PostgreSQL service
 
    pg_auto_failover Architecture for a standalone PostgreSQL service
 
@@ -228,6 +229,7 @@ machine for each node that is implemented by the monitor:
 
 .. figure:: ./fsm/node-state-machine.png
    :scale: 30%
+   :alt: Node state machine
 
    Node state machine
 
@@ -236,6 +238,7 @@ Since the state machines of the data nodes always move in tandem, a pair
 
 .. figure:: ./fsm/group-state-machine.png
    :scale: 40%
+   :alt: Group state machine
 
    Group state machine
 
@@ -258,5 +261,6 @@ output:
 
 .. figure:: ./fsm.png
    :scale: 35%
+   :alt: Keeper state machine
 
    Keeper State Machine
