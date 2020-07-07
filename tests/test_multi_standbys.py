@@ -2,6 +2,8 @@ import pgautofailover_utils as pgautofailover
 from nose.tools import *
 import time
 
+import os.path
+
 cluster = None
 monitor = None
 node1 = None
@@ -207,8 +209,14 @@ def test_013_maintenance_and_failover():
     # we might fail to see that state
     # assert node1.wait_until_state(target_state="catchingup")
     print("node3: %s" % str(node3.vnode.address))
-    print("recovery.conf:\n%s" %
-          open("/tmp/multi_standby/node1/recovery.conf").read())
+
+    if node1.pgmajor() < 12:
+        fn = "recovery.conf"
+    else:
+        fn = "postgresql-auto-failover-standby.conf"
+
+    print("recovery.conf:\n%s" % open(os.path.join(node1.datadir, fn)).read())
+
     assert node1.wait_until_state(target_state="secondary")
 
     assert node1.has_needed_replication_slots()
