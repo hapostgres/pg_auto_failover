@@ -247,16 +247,23 @@ List *
 AutoFailoverOtherNodesList(AutoFailoverNode *pgAutoFailoverNode)
 {
 	ListCell *nodeCell = NULL;
-	List *groupNodeList =
-		AutoFailoverNodeGroup(pgAutoFailoverNode->formationId,
-							  pgAutoFailoverNode->groupId);
+	List *groupNodeList = NIL;
 	List *otherNodesList = NIL;
+
+	if (pgAutoFailoverNode == NULL)
+	{
+		return NIL;
+	}
+
+	groupNodeList = AutoFailoverNodeGroup(pgAutoFailoverNode->formationId,
+										  pgAutoFailoverNode->groupId);
 
 	foreach(nodeCell, groupNodeList)
 	{
 		AutoFailoverNode *otherNode = (AutoFailoverNode *) lfirst(nodeCell);
 
-		if (otherNode->nodeId != pgAutoFailoverNode->nodeId)
+		if (otherNode != NULL &&
+			otherNode->nodeId != pgAutoFailoverNode->nodeId)
 		{
 			otherNodesList = lappend(otherNodesList, otherNode);
 		}
@@ -303,11 +310,72 @@ AutoFailoverOtherNodesListInState(AutoFailoverNode *pgAutoFailoverNode,
 
 
 /*
- * GetPrimaryNodeInGroup returns the node in the group with a role that only a
- * primary can have.
+ * GetPrimaryNodeInGroup returns the writable node in the specified group, if
+ * any.
  */
 AutoFailoverNode *
 GetPrimaryNodeInGroup(char *formationId, int32 groupId)
+{
+	AutoFailoverNode *writableNode = NULL;
+	List *groupNodeList = NIL;
+	ListCell *nodeCell = NULL;
+
+	groupNodeList = AutoFailoverNodeGroup(formationId, groupId);
+
+	foreach(nodeCell, groupNodeList)
+	{
+		AutoFailoverNode *currentNode = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (CanTakeWritesInState(currentNode->goalState))
+		{
+			writableNode = currentNode;
+			break;
+		}
+	}
+
+	return writableNode;
+}
+
+
+/*
+ * GetPrimaryNodeInGroup returns the writable node in the specified group, if
+ * any.
+ */
+AutoFailoverNode *
+GetNodeToFailoverFromInGroup(char *formationId, int32 groupId)
+{
+	AutoFailoverNode *failoverNode = NULL;
+	List *groupNodeList = NIL;
+	ListCell *nodeCell = NULL;
+
+	groupNodeList = AutoFailoverNodeGroup(formationId, groupId);
+
+	foreach(nodeCell, groupNodeList)
+	{
+		AutoFailoverNode *currentNode = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (CanInitiateFailover(currentNode->goalState))
+		{
+			failoverNode = currentNode;
+			break;
+		}
+	}
+
+	return failoverNode;
+}
+
+
+/*
+ * GetPrimaryNodeInGroup returns the node in the group with a role that only a
+ * primary can have.
+ *
+ * When handling multiple standbys, it could be that one standby node gets
+ * demoted, triggering a failover with the other(s) standby nodes. Then the
+ * demoted node connects back to the monitor, and should be processed as a
+ * standby that re-joins the group, not as a primary being demoted.
+ */
+AutoFailoverNode *
+GetPrimaryOrDemotedNodeInGroup(char *formationId, int32 groupId)
 {
 	AutoFailoverNode *primaryNode = NULL;
 	List *groupNodeList = NIL;
@@ -315,6 +383,23 @@ GetPrimaryNodeInGroup(char *formationId, int32 groupId)
 
 	groupNodeList = AutoFailoverNodeGroup(formationId, groupId);
 
+	foreach(nodeCell, groupNodeList)
+	{
+		AutoFailoverNode *currentNode = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (CanTakeWritesInState(currentNode->goalState))
+		{
+			primaryNode = currentNode;
+			break;
+		}
+	}
+
+	if (primaryNode != NULL)
+	{
+		return primaryNode;
+	}
+
+	/* maybe we have a primary that is draining or has been demoted? */
 	foreach(nodeCell, groupNodeList)
 	{
 		AutoFailoverNode *currentNode = (AutoFailoverNode *) lfirst(nodeCell);
@@ -331,7 +416,8 @@ GetPrimaryNodeInGroup(char *formationId, int32 groupId)
 
 
 /*
- * FindFailoverNewStandbyNode returns the first node found in given list
+ * FindFailoverNewStandbyNode returns the first node found in given list that
+ * is a new standby, so that we can process each standby one after the other.
  */
 AutoFailoverNode *
 FindFailoverNewStandbyNode(List *groupNodeList)
@@ -352,6 +438,32 @@ FindFailoverNewStandbyNode(List *groupNodeList)
 	}
 
 	return standbyNode;
+}
+
+
+/*
+ * FindMostAdvancedStandby returns the node in groupNodeList that has the most
+ * advanced LSN.
+ */
+AutoFailoverNode *
+FindMostAdvancedStandby(List *groupNodeList)
+{
+	ListCell *nodeCell = NULL;
+	AutoFailoverNode *mostAdvancedNode = NULL;
+
+	/* find the standby for errdetail */
+	foreach(nodeCell, groupNodeList)
+	{
+		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (mostAdvancedNode == NULL ||
+			mostAdvancedNode->reportedLSN < node->reportedLSN)
+		{
+			mostAdvancedNode = node;
+		}
+	}
+
+	return mostAdvancedNode;
 }
 
 
@@ -462,6 +574,53 @@ AllNodesHaveSameCandidatePriority(List *groupNodeList)
 
 
 /*
+ * CountStandbyCandidates returns how many standby nodes are currently eligible
+ * as failover candidates.
+ */
+int
+CountStandbyCandidates(AutoFailoverNode *primaryNode, List *stateList)
+{
+	List *standbyNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
+	ListCell *nodeCell = NULL;
+	int candidateCount = 0;
+
+	foreach(nodeCell, standbyNodesGroupList)
+	{
+		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (node == NULL)
+		{
+			/* shouldn't happen */
+			ereport(ERROR,
+					(errmsg("BUG in CountStandbyCandidates: node is NULL")));
+			continue;
+		}
+
+		/* if a promotion is already in progress, game over */
+		if (IsBeingPromoted(node))
+		{
+			ereport(ERROR,
+					(errmsg("node %d (%s:%d) is already being promoted",
+							node->nodeId,
+							node->nodeName,
+							node->nodePort)));
+		}
+
+		/* skip nodes if they are not a failover candidate */
+		if (!(IsStateIn(node->reportedState, stateList) &&
+			  IsStateIn(node->goalState, stateList)))
+		{
+			continue;
+		}
+
+		++candidateCount;
+	}
+
+	return candidateCount;
+}
+
+
+/*
  * GetAutoFailoverNode returns a single AutoFailover node by hostname and port.
  */
 AutoFailoverNode *
@@ -565,59 +724,6 @@ GetAutoFailoverNodeWithId(int nodeid, char *nodeName, int nodePort)
 	SPI_finish();
 
 	return pgAutoFailoverNode;
-}
-
-
-/*
- * OtherNodeInGroup returns the other node in a primary-secondary group, or
- * NULL if the group consists of 1 node.
- */
-AutoFailoverNode *
-OtherNodeInGroup(AutoFailoverNode *pgAutoFailoverNode)
-{
-	ListCell *nodeCell = NULL;
-	List *groupNodeList =
-		AutoFailoverNodeGroup(pgAutoFailoverNode->formationId,
-							  pgAutoFailoverNode->groupId);
-
-	foreach(nodeCell, groupNodeList)
-	{
-		AutoFailoverNode *otherNode = (AutoFailoverNode *) lfirst(nodeCell);
-
-		if (otherNode->nodeId != pgAutoFailoverNode->nodeId)
-		{
-			return otherNode;
-		}
-	}
-
-	return NULL;
-}
-
-
-/*
- * GetWritableNode returns the writable node in the specified group, if any.
- */
-AutoFailoverNode *
-GetWritableNodeInGroup(char *formationId, int32 groupId)
-{
-	AutoFailoverNode *writableNode = NULL;
-	List *groupNodeList = NIL;
-	ListCell *nodeCell = NULL;
-
-	groupNodeList = AutoFailoverNodeGroup(formationId, groupId);
-
-	foreach(nodeCell, groupNodeList)
-	{
-		AutoFailoverNode *currentNode = (AutoFailoverNode *) lfirst(nodeCell);
-
-		if (CanTakeWritesInState(currentNode->reportedState))
-		{
-			writableNode = currentNode;
-			break;
-		}
-	}
-
-	return writableNode;
 }
 
 
@@ -1079,6 +1185,20 @@ CanTakeWritesInState(ReplicationState state)
 
 
 /*
+ * CanInitiateFailover returns whether a node is a primary that we can initiate
+ * a (manual) failover from. We refuse to failover from a WAIT_PRIMARY node
+ * because we're not sure if the secondary has done catching-up yet.
+ */
+bool
+CanInitiateFailover(ReplicationState state)
+{
+	return state == REPLICATION_STATE_SINGLE ||
+		   state == REPLICATION_STATE_PRIMARY ||
+		   state == REPLICATION_STATE_JOIN_PRIMARY;
+}
+
+
+/*
  * StateBelongsToPrimary returns true when given state belongs to a primary
  * node, either in a healthy state or even when in the middle of being demoted.
  */
@@ -1089,6 +1209,31 @@ StateBelongsToPrimary(ReplicationState state)
 		   state == REPLICATION_STATE_DRAINING ||
 		   state == REPLICATION_STATE_DEMOTE_TIMEOUT ||
 		   state == REPLICATION_STATE_PREPARE_MAINTENANCE;
+}
+
+
+/*
+ * IsBeingPromoted returns whether a standby node is going through the process
+ * of a promotion.
+ */
+bool
+IsBeingPromoted(AutoFailoverNode *node)
+{
+	return node != NULL &&
+		   (node->reportedState == REPLICATION_STATE_WAIT_FORWARD ||
+			node->goalState == REPLICATION_STATE_WAIT_FORWARD
+
+			|| node->reportedState == REPLICATION_STATE_FAST_FORWARD ||
+			node->goalState == REPLICATION_STATE_FAST_FORWARD
+
+			|| node->reportedState == REPLICATION_STATE_PREPARE_PROMOTION ||
+			node->goalState == REPLICATION_STATE_PREPARE_PROMOTION
+
+			|| node->reportedState == REPLICATION_STATE_STOP_REPLICATION ||
+			node->goalState == REPLICATION_STATE_STOP_REPLICATION
+
+			|| node->reportedState == REPLICATION_STATE_WAIT_PRIMARY ||
+			node->goalState == REPLICATION_STATE_WAIT_PRIMARY);
 }
 
 
@@ -1131,4 +1276,25 @@ IsInMaintenance(AutoFailoverNode *node)
 	return node != NULL &&
 		   (node->goalState == REPLICATION_STATE_PREPARE_MAINTENANCE ||
 			node->goalState == REPLICATION_STATE_MAINTENANCE);
+}
+
+
+/*
+ * IsStateIn returns true if state is equal to any of allowedStates
+ */
+bool
+IsStateIn(ReplicationState state, List *allowedStates)
+{
+	ListCell *cell = NULL;
+
+	foreach(cell, allowedStates)
+	{
+		ReplicationState allowedState = (ReplicationState) lfirst_int(cell);
+		if (state == allowedState)
+		{
+			return true;
+		}
+	}
+
+	return false;
 }

@@ -39,6 +39,7 @@ static bool pgsql_alter_system_set(PGSQL *pgsql, GUC setting);
 static bool pgsql_get_current_setting(PGSQL *pgsql, char *settingName,
 									  char **currentValue);
 static void parsePgMetadata(void *ctx, PGresult *result);
+static void parsePgReachedTargetLSN(void *ctx, PGresult *result);
 static void parseReplicationSlotMaintain(void *ctx, PGresult *result);
 static void parsePgReachedTargetLSN(void *ctx, PGresult *result);
 
@@ -1238,7 +1239,7 @@ pgsql_replication_slot_drop_removed(PGSQL *pgsql, NodeAddressArray *nodeArray)
 
 
 /*
- * pgsql_replication_slot_maintain creates, dropts, and advance replication
+ * pgsql_replication_slot_maintain creates, drops, and advance replication
  * slots that belong to other standby nodes. We call that function on the
  * standby nodes, where the slots are maintained manually just in case we need
  * them at failover.
@@ -2051,7 +2052,7 @@ typedef struct PgMetadata
 
 
 bool
-pgsql_get_postgres_metadata(PGSQL *pgsql, const char *slotName,
+pgsql_get_postgres_metadata(PGSQL *pgsql,
 							bool *pg_is_in_recovery,
 							char *pgsrSyncState, char *currentLSN,
 							PostgresControlData *control)
@@ -2072,7 +2073,7 @@ pgsql_get_postgres_metadata(PGSQL *pgsql, const char *slotName,
 		"select pg_is_in_recovery(),"
 		" coalesce(rep.sync_state, '') as sync_state,"
 		" case when pg_is_in_recovery()"
-		" then pg_last_wal_receive_lsn()"
+		" then coalesce(pg_last_wal_receive_lsn(), pg_last_wal_replay_lsn())"
 		" else pg_current_wal_lsn()"
 		" end as current_lsn,"
 		" pg_control_version, catalog_version_no, system_identifier"
@@ -2101,15 +2102,10 @@ pgsql_get_postgres_metadata(PGSQL *pgsql, const char *slotName,
 		"as rep on true";
 	/* *INDENT-ON* */
 
-	const Oid paramTypes[1] = { TEXTOID };
-	const char *paramValues[1] = { slotName };
-	int paramCount = 1;
-
-	if (!pgsql_execute_with_params(pgsql, sql,
-								   paramCount, paramTypes, paramValues,
+	if (!pgsql_execute_with_params(pgsql, sql, 0, NULL, NULL,
 								   &context, &parsePgMetadata))
 	{
-		/* errors have already been logged */
+		/* errors have been logged already */
 		return false;
 	}
 
@@ -2280,6 +2276,42 @@ pgsql_one_slot_has_reached_target_lsn(PGSQL *pgsql,
 			log_error("Failed to fetch current flush_lsn location for "
 					  "connected standby nodes, see above for details");
 		}
+		return false;
+	}
+
+	*reachedLSN = context.reachedLSN;
+	strlcpy(currentLSN, context.currentLSN, PG_LSN_MAXLENGTH);
+
+	return true;
+}
+
+
+/*
+ * pgsql_has_reached_target_lsn calls pg_last_wal_replay_lsn() and compares the
+ * current LSN on the system to the given targetLSN.
+ */
+bool
+pgsql_has_reached_target_lsn(PGSQL *pgsql, char *targetLSN,
+							 char *currentLSN, bool *reachedLSN)
+{
+	PgReachedTargetLSN context = { 0 };
+	char *sql =
+		"SELECT $1::pg_lsn <= pg_last_wal_replay_lsn(), "
+		" pg_last_wal_replay_lsn()";
+
+	const Oid paramTypes[1] = { LSNOID };
+	const char *paramValues[1] = { targetLSN };
+
+	if (!pgsql_execute_with_params(pgsql, sql, 1, paramTypes, paramValues,
+								   &context, &parsePgReachedTargetLSN))
+	{
+		/* errors have been logged already */
+		return false;
+	}
+
+	if (!context.parsedOk)
+	{
+		log_error("Failed to get result from pg_last_wal_replay_lsn()");
 		return false;
 	}
 

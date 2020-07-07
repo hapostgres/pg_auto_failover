@@ -450,7 +450,6 @@ keeper_update_pg_state(Keeper *keeper)
 		 * system_identifier).
 		 */
 		if (!pgsql_get_postgres_metadata(pgsql,
-										 config->replication_slot_name,
 										 &pgSetup->is_in_recovery,
 										 postgres->pgsrSyncState,
 										 postgres->currentLSN,
@@ -549,8 +548,15 @@ keeper_update_pg_state(Keeper *keeper)
 		case CATCHINGUP_STATE:
 		{
 			/* pg_stat_replication.sync_state is only available upstream */
-			return postgres->pgIsRunning &&
-				   !IS_EMPTY_STRING_BUFFER(postgres->currentLSN);
+			bool success = postgres->pgIsRunning;
+
+			if (!success)
+			{
+				log_warn("Postgres is %s and we are in state %s",
+						 postgres->pgIsRunning ? "running" : "not running",
+						 NodeStateToString(keeperState->current_role));
+			}
+			return success;
 		}
 
 		default:
@@ -577,6 +583,8 @@ bool
 keeper_restart_postgres(Keeper *keeper)
 {
 	LocalPostgresServer *postgres = &(keeper->postgres);
+
+	log_info("Restarting Postgres at \%s\"", postgres->postgresSetup.pgdata);
 
 	if (ensure_postgres_service_is_stopped(postgres))
 	{
@@ -824,6 +832,7 @@ keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 											 config->replication_slot_name,
 											 config->maximum_backup_rate,
 											 config->backupDirectory,
+											 NULL, /* no targetLSN */
 											 config->pgSetup.ssl,
 											 state->current_node_id))
 		{
@@ -1078,6 +1087,7 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 	KeeperConfig *config = &(keeper->config);
 	PostgresSetup *pgSetup = &(config->pgSetup);
 	KeeperStateInit *initState = &(keeper->initState);
+
 	Monitor *monitor = &(keeper->monitor);
 	MonitorAssignedState assignedState = { 0 };
 
@@ -1159,9 +1169,9 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 	}
 
 	/* also update the groupId in the configuration file. */
-	if (!keeper_config_set_groupId_and_slot_name(&(keeper->config),
-												 assignedState.nodeId,
-												 assignedState.groupId))
+	if (!keeper_config_update(config,
+							  assignedState.nodeId,
+							  assignedState.groupId))
 	{
 		log_error("Failed to update the configuration file with the groupId: %d",
 				  assignedState.groupId);

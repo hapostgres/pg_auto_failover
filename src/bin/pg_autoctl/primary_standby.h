@@ -87,6 +87,7 @@ bool standby_init_replication_source(LocalPostgresServer *postgres,
 									 const char *slotName,
 									 const char *maximumBackupRate,
 									 const char *backupDirectory,
+									 const char *targetLSN,
 									 SSLOptions sslOptions,
 									 int currentNodeId);
 bool standby_init_database(LocalPostgresServer *postgres,
@@ -97,6 +98,10 @@ bool standby_promote(LocalPostgresServer *postgres);
 bool check_postgresql_settings(LocalPostgresServer *postgres,
 							   bool *settings_are_ok);
 bool primary_standby_has_caught_up(LocalPostgresServer *postgres);
+bool standby_follow_new_primary(LocalPostgresServer *postgres);
+bool standby_fetch_missing_wal_and_promote(LocalPostgresServer *postgres);
+bool standby_restart_with_no_primary(LocalPostgresServer *postgres);
+bool standby_cleanup_as_primary(LocalPostgresServer *postgres);
 
 
 #endif /* LOCAL_POSTGRES_H */

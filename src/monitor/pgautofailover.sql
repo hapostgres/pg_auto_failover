@@ -38,6 +38,11 @@ CREATE TYPE pgautofailover.replication_state
     'apply_settings',
     'prepare_maintenance',
     'wait_maintenance'
+    'report_lsn',
+    'fast_forward',
+    'wait_forward',
+    'wait_cascade',
+    'join_secondary'
  );
 
 CREATE TABLE pgautofailover.formation
@@ -82,7 +87,7 @@ grant execute on function pgautofailover.drop_formation(text) to autoctl_node;
 
 CREATE FUNCTION pgautofailover.set_formation_number_sync_standbys
  (
-    IN formation_id  		text,
+    IN formation_id         text,
     IN number_sync_standbys int
  )
 RETURNS bool LANGUAGE C STRICT SECURITY DEFINER
@@ -639,10 +644,10 @@ grant execute on function
 
 CREATE FUNCTION pgautofailover.set_node_replication_quorum
  (
-    IN nodeid				int,
-	IN nodename             text,
-	IN nodeport             int,
-    IN replication_quorum	bool
+    IN nodeid             int,
+    IN nodename           text,
+    IN nodeport           int,
+    IN replication_quorum bool
  )
 RETURNS bool LANGUAGE C STRICT SECURITY DEFINER
 AS 'MODULE_PATHNAME', $$set_node_replication_quorum$$;

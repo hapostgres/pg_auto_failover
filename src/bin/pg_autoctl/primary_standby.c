@@ -14,6 +14,7 @@
 #include "file_utils.h"
 #include "keeper.h"
 #include "log.h"
+#include "parsing.h"
 #include "pgctl.h"
 #include "pghba.h"
 #include "pgsql.h"
@@ -616,6 +617,7 @@ standby_init_replication_source(LocalPostgresServer *postgres,
 								const char *slotName,
 								const char *maximumBackupRate,
 								const char *backupDirectory,
+								const char *targetLSN,
 								SSLOptions sslOptions,
 								int currentNodeId)
 {
@@ -639,6 +641,12 @@ standby_init_replication_source(LocalPostgresServer *postgres,
 	strlcpy(upstream->slotName, slotName, MAXCONNINFO);
 	strlcpy(upstream->maximumBackupRate, maximumBackupRate, MAXCONNINFO);
 	strlcpy(upstream->backupDir, backupDirectory, MAXCONNINFO);
+
+	if (targetLSN != NULL)
+	{
+		strlcpy(upstream->targetLSN, targetLSN, MAXCONNINFO);
+	}
+
 	upstream->sslOptions = sslOptions;
 
 	/* prepare our application_name */
@@ -919,9 +927,8 @@ check_postgresql_settings(LocalPostgresServer *postgres, bool *settings_are_ok)
 
 
 /*
- * primary_wait_until_standby_has_caught_up loops over a SQL query on the
- * primary that checks the current reported LSN from the standby's replication
- * slot.
+ * primary_standby_has_caught_up loops over a SQL query on the primary that
+ * checks the current reported LSN from the standby's replication slot.
  */
 bool
 primary_standby_has_caught_up(LocalPostgresServer *postgres)
@@ -964,4 +971,250 @@ primary_standby_has_caught_up(LocalPostgresServer *postgres)
 
 		return false;
 	}
+}
+
+
+/*
+ * standby_follow_new_primary rewrites the replication setup to follow the new
+ * primary after a failover.
+ */
+bool
+standby_follow_new_primary(LocalPostgresServer *postgres)
+{
+	PGSQL *pgsql = &(postgres->sqlClient);
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+	ReplicationSource *replicationSource = &(postgres->replicationSource);
+	NodeAddress *primaryNode = &(replicationSource->primaryNode);
+
+	log_info("Follow new primary %s:%d", primaryNode->host, primaryNode->port);
+
+	/* cleanup our existing standby setup, including postgresql.auto.conf */
+	if (!pg_cleanup_standby_mode(pgSetup->control.pg_control_version,
+								 pgSetup->pg_ctl,
+								 pgSetup->pgdata,
+								 pgsql))
+	{
+		log_error("Failed to clean-up Postgres replication settings, "
+				  "see above for details");
+		return false;
+	}
+
+	/* we might be back from maintenance and find Postgres is not running */
+	if (pg_is_running(pgSetup->pg_ctl, pgSetup->pgdata))
+	{
+		log_info("Stopping Postgres at \"%s\"", pgSetup->pgdata);
+
+		if (!pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata))
+		{
+			log_error("Failed to stop Postgres at \"%s\"", pgSetup->pgdata);
+			return false;
+		}
+	}
+
+	if (!pg_setup_standby_mode(pgSetup->control.pg_control_version,
+							   pgSetup->pgdata,
+							   replicationSource))
+	{
+		log_error("Failed to setup Postgres as a standby");
+		return false;
+	}
+
+	log_info("Restarting Postgres at \%s\"", pgSetup->pgdata);
+
+	if (!ensure_postgres_service_is_running(postgres))
+	{
+		log_error("Failed to restart Postgres after changing its "
+				  "primary conninfo, see above for details");
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * standby_fetch_missing_wal_and_promote sets up replication to fetch up to
+ * given recovery_target_lsn (inclusive) with a recovery_target_action set to
+ * 'promote' so that as soon as we get our WAL bytes we are promoted to being a
+ * primary.
+ */
+bool
+standby_fetch_missing_wal_and_promote(LocalPostgresServer *postgres)
+{
+	PGSQL *pgsql = &(postgres->sqlClient);
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+	ReplicationSource *replicationSource = &(postgres->replicationSource);
+	NodeAddress *upstreamNode = &(replicationSource->primaryNode);
+
+	char currentLSN[PG_LSN_MAXLENGTH] = { 0 };
+	bool reachedLSN = false;
+
+	log_info("Fetching WAL from upstream node %d (%s:%d) up to LSN %s",
+			 upstreamNode->nodeId,
+			 upstreamNode->host,
+			 upstreamNode->port,
+			 replicationSource->targetLSN);
+
+	/* cleanup our existing standby setup, including postgresql.auto.conf */
+	if (!pg_cleanup_standby_mode(pgSetup->control.pg_control_version,
+								 pgSetup->pg_ctl,
+								 pgSetup->pgdata,
+								 pgsql))
+	{
+		log_error("Failed to clean-up Postgres replication settings, "
+				  "see above for details");
+		return false;
+	}
+
+	log_info("Stopping Postgres at \"%s\"", pgSetup->pgdata);
+
+	if (!pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata))
+	{
+		log_error("Failed to stop Postgres at \"%s\"", pgSetup->pgdata);
+		return false;
+	}
+
+	if (!pg_setup_standby_mode(pgSetup->control.pg_control_version,
+							   pgSetup->pgdata,
+							   replicationSource))
+	{
+		log_error("Failed to setup Postgres as a standby, after rewind");
+		return false;
+	}
+
+	log_info("Restarting Postgres at \%s\"", pgSetup->pgdata);
+
+	if (!ensure_postgres_service_is_running(postgres))
+	{
+		log_error("Failed to restart Postgres after changing its "
+				  "primary conninfo, see above for details");
+		return false;
+	}
+
+	/*
+	 * Now loop until replay has reached our targetLSN.
+	 */
+	while (!reachedLSN)
+	{
+		if (!pgsql_has_reached_target_lsn(pgsql,
+										  replicationSource->targetLSN,
+										  currentLSN,
+										  &reachedLSN))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
+		if (!reachedLSN)
+		{
+			log_info("Postgres recovery is at LSN %s, waiting for LSN %s",
+					 currentLSN, replicationSource->targetLSN);
+			pg_usleep(AWAIT_PROMOTION_SLEEP_TIME_MS * 1000);
+		}
+	}
+
+	/* done with fast-forwarding, keep the value for node_active() call */
+	strlcpy(postgres->currentLSN, currentLSN, PG_LSN_MAXLENGTH);
+	log_info("Fast-forward is done, now at LSN %s", postgres->currentLSN);
+
+	/*
+	 * It's necessary to do a checkpoint before allowing the old primary to
+	 * rewind, since there can be a race condition in which pg_rewind detects
+	 * no change in timeline in the pg_control file, but a checkpoint is
+	 * already in progress causing the timelines to diverge before replication
+	 * starts.
+	 */
+	if (!pgsql_checkpoint(pgsql))
+	{
+		log_error("Failed to checkpoint after promotion");
+		return false;
+	}
+
+	/* disconnect from PostgreSQL now */
+	pgsql_finish(pgsql);
+
+	return true;
+}
+
+
+/*
+ * standby_restart_with_no_primary sets up recovery parameters without a
+ * primary_conninfo, so as to force disconnect from the primary and still
+ * remain a standby that can report its current LSN position, for instance.
+ */
+bool
+standby_restart_with_no_primary(LocalPostgresServer *postgres)
+{
+	PGSQL *pgsql = &(postgres->sqlClient);
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+	ReplicationSource *replicationSource = &(postgres->replicationSource);
+
+	log_info("Restarting standby node to disconnect replication "
+			 "from failed primary node, to prepare failover");
+
+	/* cleanup our existing standby setup, including postgresql.auto.conf */
+	if (!pg_cleanup_standby_mode(pgSetup->control.pg_control_version,
+								 pgSetup->pg_ctl,
+								 pgSetup->pgdata,
+								 pgsql))
+	{
+		log_error("Failed to clean-up Postgres replication settings, "
+				  "see above for details");
+		return false;
+	}
+
+	log_info("Stopping Postgres at \"%s\"", pgSetup->pgdata);
+
+	if (!pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata))
+	{
+		log_error("Failed to stop Postgres at \"%s\"", pgSetup->pgdata);
+		return false;
+	}
+
+	if (!pg_setup_standby_mode(pgSetup->control.pg_control_version,
+							   pgSetup->pgdata,
+							   replicationSource))
+	{
+		log_error("Failed to setup Postgres as a standby, after rewind");
+		return false;
+	}
+
+	log_info("Restarting Postgres at \%s\"", pgSetup->pgdata);
+
+	if (!ensure_postgres_service_is_running(postgres))
+	{
+		log_error("Failed to restart Postgres after changing its "
+				  "primary conninfo, see above for details");
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * standby_cleanup_and_restart_as_primary removes the setup for a standby
+ * server and restarts as a primary. It's typically called after
+ * standby_fetch_missing_wal_and_promote so we expect Postgres to be running as
+ * a standby and be "paused".
+ */
+bool
+standby_cleanup_as_primary(LocalPostgresServer *postgres)
+{
+	PGSQL *pgsql = &(postgres->sqlClient);
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+
+	log_info("Cleaning-up Postgres replication settings");
+
+	if (!pg_cleanup_standby_mode(pgSetup->control.pg_control_version,
+								 pgSetup->pg_ctl,
+								 pgSetup->pgdata,
+								 pgsql))
+	{
+		log_error("Failed to clean-up Postgres replication settings, "
+				  "see above for details");
+		return false;
+	}
+
+	return true;
 }

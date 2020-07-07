@@ -618,7 +618,6 @@ fsm_enable_sync_rep(Keeper *keeper)
 	LocalPostgresServer *postgres = &(keeper->postgres);
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	PGSQL *pgsql = &(postgres->sqlClient);
-	KeeperConfig *config = &(keeper->config);
 
 	/*
 	 * First, we need to fetch and apply the synchronous_standby_names setting
@@ -634,7 +633,6 @@ fsm_enable_sync_rep(Keeper *keeper)
 	if (IS_EMPTY_STRING_BUFFER(postgres->standbyTargetLSN))
 	{
 		if (!pgsql_get_postgres_metadata(pgsql,
-										 config->replication_slot_name,
 										 &pgSetup->is_in_recovery,
 										 postgres->pgsrSyncState,
 										 postgres->currentLSN,
@@ -762,35 +760,7 @@ fsm_stop_postgres(Keeper *keeper)
 bool
 fsm_stop_postgres_for_primary_maintenance(Keeper *keeper)
 {
-	LocalPostgresServer *postgres = &(keeper->postgres);
-	PostgresSetup *pgSetup = &(postgres->postgresSetup);
-	PGSQL *pgsql = &(postgres->sqlClient);
-
-	if (pg_setup_is_running(pgSetup))
-	{
-		/*
-		 * PostgreSQL shutdown sequence includes a CHECKPOINT, that is issued
-		 * by the checkpointer process one every query backend has stopped
-		 * already. During this final CHECKPOINT no work can be done, so it's
-		 * best to reduce the amount of work needed there. To reduce the
-		 * checkpointer shutdown activity, we perform a manual shutdown while
-		 * still having concurrent activity.
-		 *
-		 * The first checkpoint writes all the in-memory buffers, the second
-		 * checkpoint writes everything that was added during the first one.
-		 */
-		log_info("Preparing shutdown for maintenance: CHECKPOINT;");
-
-		for (int i = 0; i < 2; i++)
-		{
-			if (!pgsql_checkpoint(pgsql))
-			{
-				log_warn("Failed to checkpoint before stopping Postgres");
-			}
-		}
-	}
-
-	return ensure_postgres_service_is_stopped(postgres);
+	return fsm_checkpoint_and_stop_postgres(keeper);
 }
 
 
@@ -852,6 +822,7 @@ fsm_stop_postgres_and_setup_standby(Keeper *keeper)
 										 config->replication_slot_name,
 										 config->maximum_backup_rate,
 										 config->backupDirectory,
+										 NULL, /* no targetLSN */
 										 config->pgSetup.ssl,
 										 keeper->state.current_node_id))
 	{
@@ -869,6 +840,63 @@ fsm_stop_postgres_and_setup_standby(Keeper *keeper)
 	}
 
 	return true;
+}
+
+
+/*
+ * fsm_checkpoint_and_stop_postgres is used when shutting down Postgres as part
+ * of some FSM step when we have a controlled situation. We do a couple
+ * CHECKPOINT before stopping Postgres to ensure a smooth transition.
+ */
+bool
+fsm_checkpoint_and_stop_postgres(Keeper *keeper)
+{
+	LocalPostgresServer *postgres = &(keeper->postgres);
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+	PGSQL *pgsql = &(postgres->sqlClient);
+
+	if (pg_setup_is_running(pgSetup))
+	{
+		/*
+		 * Starting with Postgres 12, pg_basebackup sets the recovery
+		 * configuration parameters in the postgresql.auto.conf file. We need
+		 * to make sure to RESET this value so that our own configuration
+		 * setting takes effect.
+		 */
+		if (pgSetup->control.pg_control_version >= 1200)
+		{
+			if (!pgsql_reset_primary_conninfo(pgsql))
+			{
+				log_error("Failed to RESET primary_conninfo");
+				return false;
+			}
+		}
+
+		/*
+		 * PostgreSQL shutdown sequence includes a CHECKPOINT, that is issued
+		 * by the checkpointer process one every query backend has stopped
+		 * already. During this final CHECKPOINT no work can be done, so it's
+		 * best to reduce the amount of work needed there. To reduce the
+		 * checkpointer shutdown activity, we perform a manual shutdown while
+		 * still having concurrent activity.
+		 *
+		 * The first checkpoint writes all the in-memory buffers, the second
+		 * checkpoint writes everything that was added during the first one.
+		 */
+		log_info("Preparing Postgres shutdown: CHECKPOINT;");
+
+		for (int i = 0; i < 2; i++)
+		{
+			if (!pgsql_checkpoint(pgsql))
+			{
+				log_warn("Failed to checkpoint before stopping Postgres");
+			}
+		}
+	}
+
+	log_info("Stopping Postgres at \"%s\"", pgSetup->pgdata);
+
+	return ensure_postgres_service_is_stopped(postgres);
 }
 
 
@@ -912,6 +940,7 @@ fsm_init_standby(Keeper *keeper)
 										 config->replication_slot_name,
 										 config->maximum_backup_rate,
 										 config->backupDirectory,
+										 NULL, /* no targetLSN */
 										 config->pgSetup.ssl,
 										 keeper->state.current_node_id))
 	{
@@ -1001,6 +1030,7 @@ fsm_rewind_or_init(Keeper *keeper)
 										 config->replication_slot_name,
 										 config->maximum_backup_rate,
 										 config->backupDirectory,
+										 NULL, /* no targetLSN */
 										 config->pgSetup.ssl,
 										 keeper->state.current_node_id))
 	{
@@ -1169,10 +1199,21 @@ fsm_promote_standby(Keeper *keeper)
 	 * create a replication slot and add the other node to pg_hba.conf. These
 	 * steps are implemented in fsm_prepare_replication.
 	 *
-	 * The other node is expected to be in either DEMOTE_TIMEOUT_STATE or in
-	 * PREPARE_MAINTENANCE state. There's no harm in preparing replication
-	 * settings for all the other nodes in the system anyway, so let's just do
-	 * that.
+	 * The former primary node is expected to be in either DEMOTE_TIMEOUT_STATE
+	 * or in PREPARE_MAINTENANCE state.
+	 *
+	 * The other secondaries, if any, are now in either REPORT_LSN or already
+	 * in JOIN_SECONDARY state, and we need to prepare for them to be able to
+	 * connect as replica to the new primary too.
+	 *
+	 * Then we also have the most advanced node which might be used to fetch
+	 * WAL bytes from before promotion, and this node is in state WAIT_CASCADE
+	 * and then being assigned SECONDARY directly.
+	 *
+	 * All those steps may happen at before, during, of after this transition.
+	 * At the end of the day we want every registered node in the formation to
+	 * be able to connect as a standby to the current primary, so prepare
+	 * replication for all of them.
 	 */
 	if (!prepare_replication(keeper, ANY_STATE))
 	{
@@ -1188,4 +1229,297 @@ fsm_promote_standby(Keeper *keeper)
 	}
 
 	return true;
+}
+
+
+/*
+ * When more than one secondary is available for failover we need to pick one.
+ * We want to pick the secondary that received the most WAL, so the monitor
+ * asks every secondary to report its current LSN position.
+ *
+ * secondary ➜ report_lsn
+ */
+bool
+fsm_report_lsn(Keeper *keeper)
+{
+	KeeperConfig *config = &(keeper->config);
+	PostgresSetup *pgSetup = &(config->pgSetup);
+	LocalPostgresServer *postgres = &(keeper->postgres);
+	PGSQL *pgsql = &(postgres->sqlClient);
+
+	/*
+	 * Forcibly disconnect from the primary node, for two reasons:
+	 *
+	 *  1. when the primary node can't connect to the monitor, and if there's
+	 *     no replica currently connected, it will then proceed to DEMOTE
+	 *     itself
+	 *
+	 *  2. that way we ensure that the current LSN we report can't change
+	 *     anymore, because we are a standby without a primary_conninfo, and
+	 *     without a restore_command either
+	 *
+	 * To disconnect the current node from its primary, we write a recovery
+	 * setup where there is no primary_conninfo and otherwise use the same
+	 * parameters as for streaming replication.
+	 */
+	NodeAddress upstreamNode = { 0 };
+
+	if (!standby_init_replication_source(postgres,
+										 &upstreamNode,
+										 PG_AUTOCTL_REPLICA_USERNAME,
+										 config->replication_password,
+										 config->replication_slot_name,
+										 config->maximum_backup_rate,
+										 config->backupDirectory,
+										 NULL, /* no targetLSN */
+										 config->pgSetup.ssl,
+										 keeper->state.current_node_id))
+	{
+		/* can't happen at the moment */
+		return false;
+	}
+
+	if (!standby_restart_with_no_primary(postgres))
+	{
+		log_error("Failed disconnect from failed primary node, "
+				  "see above for details");
+
+		return false;
+	}
+
+	/*
+	 * Fetch most recent metadata, that will be sent in the next node_active()
+	 * call.
+	 */
+	if (!pgsql_get_postgres_metadata(pgsql,
+									 &pgSetup->is_in_recovery,
+									 postgres->pgsrSyncState,
+									 postgres->currentLSN,
+									 &(postgres->postgresSetup.control)))
+	{
+		log_error("Failed to update the local Postgres metadata");
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * When the selected failover candidate does not have the latest received WAL,
+ * it fetches them from another standby, the one in WAIT_CASCADE state.
+ */
+bool
+fsm_fast_forward(Keeper *keeper)
+{
+	KeeperConfig *config = &(keeper->config);
+	Monitor *monitor = &(keeper->monitor);
+	LocalPostgresServer *postgres = &(keeper->postgres);
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+
+	NodeAddress *upstreamNode = NULL;
+	ReplicationSource replicationSource = { 0 };
+
+	if (!config->monitorDisabled)
+	{
+		char *host = config->nodename;
+		int port = pgSetup->pgport;
+
+		if (!monitor_get_other_nodes(monitor, host, port,
+									 WAIT_CASCADE_STATE,
+									 &(keeper->otherNodes)))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
+		if (keeper->otherNodes.count != 1)
+		{
+			log_error("Failed to find a node in state \"wait_cascade\" on "
+					  "the monitor, pgautofailover.get_other_nodes() "
+					  "returned %d node(s)",
+					  keeper->otherNodes.count);
+		}
+	}
+
+	/*
+	 * We expect a single WAIT_CASCADE node in the system at any point.
+	 */
+	upstreamNode = &(keeper->otherNodes.nodes[0]);
+
+	if (!standby_init_replication_source(postgres,
+										 upstreamNode,
+										 PG_AUTOCTL_REPLICA_USERNAME,
+										 config->replication_password,
+										 config->replication_slot_name,
+										 config->maximum_backup_rate,
+										 config->backupDirectory,
+										 upstreamNode->lsn,
+										 config->pgSetup.ssl,
+										 keeper->state.current_node_id))
+	{
+		/* can't happen at the moment */
+		return false;
+	}
+
+	if (!standby_fetch_missing_wal_and_promote(postgres))
+	{
+		log_error("Failed to fetch WAL bytes from standby node %d (%s:%d), "
+				  "see above for details",
+				  replicationSource.primaryNode.nodeId,
+				  replicationSource.primaryNode.host,
+				  replicationSource.primaryNode.port);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * fsm_cleanup_and_resume_as_primary cleans-up the replication setting and
+ * start the local node as primary. It's called after a fast-forward operation.
+ */
+bool
+fsm_cleanup_and_resume_as_primary(Keeper *keeper)
+{
+	LocalPostgresServer *postgres = &(keeper->postgres);
+
+	if (!standby_cleanup_as_primary(postgres))
+	{
+		log_error("Failed to cleanup replication settings and restart Postgres "
+				  "to continue as a primary, see above for details");
+		return false;
+	}
+
+	if (!keeper_restart_postgres(keeper))
+	{
+		log_error("Failed to restart Postgres after changing its "
+				  "primary conninfo, see above for details");
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * When the selected failover candidate does not have the latest received WAL,
+ * it fetches them from another standby. This standby that has the latest WAL
+ * then goes in WAIT_CASCADE state to add the other node's HBA entries and
+ * such.
+ *
+ * The selected failover node is in state WAIT_FORWARD and we need to open an
+ * HBA entry for it. We already have a replication slot ready.
+ */
+bool
+fsm_prepare_cascade(Keeper *keeper)
+{
+	KeeperConfig *config = &(keeper->config);
+	Monitor *monitor = &(keeper->monitor);
+	LocalPostgresServer *postgres = &(keeper->postgres);
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+
+	NodeAddress *candidateNode = NULL;
+
+	if (!config->monitorDisabled)
+	{
+		char *host = config->nodename;
+		int port = pgSetup->pgport;
+
+		if (!monitor_get_other_nodes(monitor, host, port,
+									 WAIT_FORWARD_STATE,
+									 &(keeper->otherNodes)))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
+		if (keeper->otherNodes.count != 1)
+		{
+			log_error("Failed to find a node in state \"wait_forward\" on "
+					  "the monitor, pgautofailover.get_other_nodes() "
+					  "returned %d node(s)",
+					  keeper->otherNodes.count);
+		}
+	}
+
+	/*
+	 * We expect a single WAIT_FORWARD node in the system at any point, because
+	 * we can only have one failover candidate.
+	 */
+	candidateNode = &(keeper->otherNodes.nodes[0]);
+
+	log_info("Preparing cascading replication for failover target node %d (%s:%d)",
+			 candidateNode->nodeId, candidateNode->host, candidateNode->port);
+
+	if (!primary_add_standby_to_hba(postgres,
+									candidateNode->host,
+									config->replication_password))
+	{
+		log_error("Failed to grant access to the standby %d (%s:%d) "
+				  "by adding relevant lines to pg_hba.conf for the standby "
+				  "hostname and user, see above for details",
+				  candidateNode->nodeId,
+				  candidateNode->host,
+				  candidateNode->port);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * When the failover is done we need to follow the new primary. We should be
+ * able to do that directly, by changing our primary_conninfo, thanks to our
+ * candidate selection where we make it so that the failover candidate always
+ * has the most advanced LSN, and also thanks to our use of replication slots
+ * on every standby.
+ */
+bool
+fsm_follow_new_primary(Keeper *keeper)
+{
+	KeeperConfig *config = &(keeper->config);
+	Monitor *monitor = &(keeper->monitor);
+	LocalPostgresServer *postgres = &(keeper->postgres);
+	ReplicationSource *replicationSource = &(postgres->replicationSource);
+	int groupId = keeper->state.current_group;
+
+	/* get the primary node to follow */
+	if (!monitor_get_primary(monitor, config->formation, groupId,
+							 &(replicationSource->primaryNode)))
+	{
+		log_error("Failed to get the primary node from the monitor, "
+				  "see above for details");
+		return false;
+	}
+
+	if (!standby_init_replication_source(postgres,
+										 NULL,
+										 PG_AUTOCTL_REPLICA_USERNAME,
+										 config->replication_password,
+										 config->replication_slot_name,
+										 config->maximum_backup_rate,
+										 config->backupDirectory,
+										 NULL, /* no targetLSN */
+										 config->pgSetup.ssl,
+										 keeper->state.current_node_id))
+	{
+		/* can't happen at the moment */
+		return false;
+	}
+
+	if (!standby_follow_new_primary(postgres))
+	{
+		log_error("Failed to change standby setup to follow new primary "
+				  "node %d at %s:%d, see above for details",
+				  replicationSource->primaryNode.nodeId,
+				  replicationSource->primaryNode.host,
+				  replicationSource->primaryNode.port);
+		return false;
+	}
+
+	/* now, in case we have an init state file around, remove it */
+	return unlink_file(config->pathnames.init);
 }

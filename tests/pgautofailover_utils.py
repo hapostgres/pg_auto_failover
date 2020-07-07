@@ -203,6 +203,8 @@ class PGNode:
         self.role = role
         self.pg_autoctl = None
         self.authenticatedUsers = {}
+        self._pgversion = None
+        self._pgmajor = None
         self.sslMode = sslMode
         self.sslSelfSigned = sslSelfSigned
         self.sslCAFile = sslCAFile
@@ -467,6 +469,8 @@ class PGNode:
             if os.path.isfile(conf):
                 logs += ["\n\n%s:\n" % conf]
                 logs += open(conf).readlines()
+            else:
+                logs += ["\n\n%s does not exists\n" % conf]
 
         return "".join(logs)
 
@@ -492,12 +496,9 @@ class PGNode:
 
     def ifdown(self):
         """
-        Set a configuration parameter to given value
+        Bring the network interface down for this node
         """
-        command = PGAutoCtl(self)
-        command.execute("config set %s" % setting,
-                        'config', 'set', setting, value)
-        return True
+        self.vnode.ifdown()
 
     def ifup(self):
         """
@@ -1024,9 +1025,6 @@ SELECT reportedstate
         if self.pgmajor() == 10:
             return True
 
-        print("has_needed_replication_slots: pgversion = %s, pgmajor = %s" %
-              (self.pgversion(), self.pgmajor()))
-
         hostname = str(self.vnode.address)
         other_nodes = self.monitor.get_other_nodes(hostname, self.port)
         expected_slots = ['pgautofailover_standby_%s' % n[0] for n in other_nodes]
@@ -1163,8 +1161,8 @@ class MonitorNode(PGNode):
         if dbname is not None:
             formation_command += ['--dbname', dbname]
 
-        # pass true or false to --enable-secondary or --disable-secondary, only when ha is
-        # actually set by the user
+        # pass true or false to --enable-secondary or --disable-secondary,
+        # only when ha is actually set by the user
         if secondary is not None:
             if secondary:
                 formation_command += ['--enable-secondary']

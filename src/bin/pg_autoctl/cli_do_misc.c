@@ -365,6 +365,7 @@ keeper_cli_init_standby(int argc, char **argv)
 										 config.replication_slot_name,
 										 config.maximum_backup_rate,
 										 config.backupDirectory,
+										 NULL, /* no targetLSN */
 										 config.pgSetup.ssl,
 										 0))
 	{
@@ -424,6 +425,7 @@ keeper_cli_rewind_old_primary(int argc, char **argv)
 										 config.replication_slot_name,
 										 config.maximum_backup_rate,
 										 config.backupDirectory,
+										 NULL, /* no targetLSN */
 										 config.pgSetup.ssl,
 										 0))
 	{

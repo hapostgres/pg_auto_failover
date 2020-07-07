@@ -27,6 +27,7 @@ bool parse_bool(const char *value, bool *result);
 
 #define boolToString(value) (value) ? "true" : "false"
 
+
 /*
  * To parse Postgres URI we need to store keywords and values in separate
  * arrays of strings, because that's the libpq way of doing things.

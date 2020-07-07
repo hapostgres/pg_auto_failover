@@ -17,6 +17,7 @@
 #include "keeper.h"
 #include "keeper_config.h"
 #include "log.h"
+#include "parsing.h"
 #include "pgctl.h"
 
 #define OPTION_AUTOCTL_ROLE(config) \
@@ -600,11 +601,12 @@ keeper_config_merge_options(KeeperConfig *config, KeeperConfig *options)
 
 
 /*
- * keeper_config_set_groupId sets the groupId in the configuration file.
+ * keeper_config_update updates the configuration of the keeper once we are
+ * registered and know our nodeId and group: then we can also set our
+ * replication slot name and our backup directory using the nodeId.
  */
 bool
-keeper_config_set_groupId_and_slot_name(KeeperConfig *config,
-										int nodeId, int groupId)
+keeper_config_update(KeeperConfig *config, int nodeId, int groupId)
 {
 	char buffer[BUFSIZE] = { 0 };
 	char *replicationSlotName = NULL;
@@ -614,6 +616,19 @@ keeper_config_set_groupId_and_slot_name(KeeperConfig *config,
 
 	config->groupId = groupId;
 	config->replication_slot_name = replicationSlotName;
+
+	/*
+	 * Compute the backupDirectory from pgdata, or check the one given in the
+	 * configuration file already.
+	 */
+	if (!keeper_config_set_backup_directory(config, nodeId))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	log_warn("keeper_config_update: backup directory = %s",
+			 config->backupDirectory);
 
 	return keeper_config_write_file(config);
 }

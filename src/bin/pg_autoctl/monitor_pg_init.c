@@ -36,6 +36,7 @@
  */
 GUC monitor_default_settings[] = {
 	{ "shared_preload_libraries", "'pgautofailover'" },
+	{ "cluster_name", "'pg_auto_failover monitor'" },
 	{ "listen_addresses", "'*'" },
 	{ "port", "5432" },
 	{ "log_destination", "stderr" },
@@ -45,6 +46,7 @@ GUC monitor_default_settings[] = {
 	{ "log_connections", "off" },
 	{ "log_disconnections", "off" },
 	{ "log_lock_waits", "on" },
+	{ "log_statement", "all" },
 	{ "ssl", "off" },
 	{ "ssl_ca_file", "" },
 	{ "ssl_crl_file", "" },

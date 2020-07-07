@@ -432,9 +432,9 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 			{
 				bool postgresNotRunningIsOk = false;
 
-				if (!keeper_config_set_groupId_and_slot_name(config,
-															 assignedState.nodeId,
-															 assignedState.groupId))
+				if (!keeper_config_update(config,
+										  assignedState.nodeId,
+										  assignedState.groupId))
 				{
 					log_error("Failed to update the configuration file "
 							  "with groupId %d and replication.slot \"%s\"",

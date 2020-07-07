@@ -45,6 +45,8 @@ int search_path(const char *filename, char ***result);
 void search_path_destroy_result(char **result);
 bool unlink_file(const char *filename);
 bool set_program_absolute_path(char *program, int size);
+bool rewrite_file_skipping_lines_matching(const char *filename,
+										  const char *regex);
 bool normalize_filename(const char *filename, char *dst, int size);
 
 void init_ps_buffer(int argc, char **argv);

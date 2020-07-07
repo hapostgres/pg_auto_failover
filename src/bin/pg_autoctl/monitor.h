@@ -144,7 +144,6 @@ bool monitor_synchronous_standby_names(Monitor *monitor,
 									   char *formation, int groupId,
 									   char *synchronous_standby_names,
 									   int size);
-
 bool monitor_set_nodename(Monitor *monitor, int nodeId, const char *nodename);
 bool monitor_set_node_system_identifier(Monitor *monitor,
 										int nodeId,

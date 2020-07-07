@@ -113,15 +113,19 @@ extern List * AutoFailoverOtherNodesList(AutoFailoverNode *pgAutoFailoverNode);
 extern List * AutoFailoverOtherNodesListInState(AutoFailoverNode *pgAutoFailoverNode,
 												ReplicationState currentState);
 extern AutoFailoverNode * GetPrimaryNodeInGroup(char *formationId, int32 groupId);
+AutoFailoverNode * GetNodeToFailoverFromInGroup(char *formationId, int32 groupId);
+extern AutoFailoverNode * GetPrimaryOrDemotedNodeInGroup(char *formationId,
+														 int32 groupId);
 extern AutoFailoverNode * FindFailoverNewStandbyNode(List *groupNodeList);
 extern List * GroupListCandidates(List *groupNodeList);
 extern List * GroupListSyncStandbys(List *groupNodeList);
 extern bool AllNodesHaveSameCandidatePriority(List *groupNodeList);
 extern int CountStandbyCandidates(AutoFailoverNode *primaryNode,
 								  List *stateList);
+extern AutoFailoverNode * FindMostAdvancedStandby(List *groupNodeList);
 extern AutoFailoverNode * GetAutoFailoverNode(char *nodeName, int nodePort);
-extern AutoFailoverNode * GetAutoFailoverNodeWithId(int nodeid, char *nodeName, int
-													nodePort);
+extern AutoFailoverNode * GetAutoFailoverNodeWithId(int nodeid,
+													char *nodeName, int nodePort);
 extern AutoFailoverNode * OtherNodeInGroup(AutoFailoverNode *pgAutoFailoverNode);
 extern AutoFailoverNode * GetWritableNodeInGroup(char *formationId, int32 groupId);
 extern AutoFailoverNode * TupleToAutoFailoverNode(TupleDesc tupleDescriptor,
@@ -157,7 +161,10 @@ extern char * SyncStateToString(SyncState pgsrSyncState);
 extern bool IsCurrentState(AutoFailoverNode *pgAutoFailoverNode,
 						   ReplicationState state);
 extern bool CanTakeWritesInState(ReplicationState state);
+extern bool CanInitiateFailover(ReplicationState state);
 extern bool StateBelongsToPrimary(ReplicationState state);
+extern bool IsBeingPromoted(AutoFailoverNode *node);
 extern bool IsInWaitOrJoinState(AutoFailoverNode *node);
 extern bool IsInPrimaryState(AutoFailoverNode *pgAutoFailoverNode);
 extern bool IsInMaintenance(AutoFailoverNode *node);
+extern bool IsStateIn(ReplicationState state, List *allowedStates);
