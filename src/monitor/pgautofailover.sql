@@ -37,7 +37,7 @@ CREATE TYPE pgautofailover.replication_state
     'join_primary',
     'apply_settings',
     'prepare_maintenance',
-    'wait_maintenance'
+    'wait_maintenance',
     'report_lsn',
     'fast_forward',
     'wait_forward',
