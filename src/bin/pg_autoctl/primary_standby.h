@@ -99,8 +99,8 @@ bool check_postgresql_settings(LocalPostgresServer *postgres,
 							   bool *settings_are_ok);
 bool primary_standby_has_caught_up(LocalPostgresServer *postgres);
 bool standby_follow_new_primary(LocalPostgresServer *postgres);
-bool standby_fetch_missing_wal_and_promote(LocalPostgresServer *postgres);
-bool standby_restart_with_no_primary(LocalPostgresServer *postgres);
+bool standby_fetch_missing_wal(LocalPostgresServer *postgres);
+bool standby_restart_with_current_replication_source(LocalPostgresServer *postgres);
 bool standby_cleanup_as_primary(LocalPostgresServer *postgres);
 
 

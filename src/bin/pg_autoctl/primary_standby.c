@@ -19,6 +19,7 @@
 #include "pghba.h"
 #include "pgsql.h"
 #include "primary_standby.h"
+#include "signals.h"
 #include "state.h"
 
 
@@ -936,7 +937,7 @@ primary_standby_has_caught_up(LocalPostgresServer *postgres)
 	PGSQL *pgsql = &(postgres->sqlClient);
 
 	char standbyCurrentLSN[PG_LSN_MAXLENGTH] = { 0 };
-	bool reachedLSN = false;
+	bool hasReachedLSN = false;
 
 	/* ensure some WAL level traffic to move things forward */
 	if (!pgsql_checkpoint(pgsql))
@@ -948,13 +949,13 @@ primary_standby_has_caught_up(LocalPostgresServer *postgres)
 	if (!pgsql_one_slot_has_reached_target_lsn(pgsql,
 											   postgres->standbyTargetLSN,
 											   standbyCurrentLSN,
-											   &reachedLSN))
+											   &hasReachedLSN))
 	{
 		/* errors have already been logged */
 		return false;
 	}
 
-	if (reachedLSN)
+	if (hasReachedLSN)
 	{
 		log_info("Standby reached LSN %s, thus advanced past LSN %s",
 				 standbyCurrentLSN, postgres->standbyTargetLSN);
@@ -1039,15 +1040,14 @@ standby_follow_new_primary(LocalPostgresServer *postgres)
  * primary.
  */
 bool
-standby_fetch_missing_wal_and_promote(LocalPostgresServer *postgres)
+standby_fetch_missing_wal(LocalPostgresServer *postgres)
 {
 	PGSQL *pgsql = &(postgres->sqlClient);
-	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	ReplicationSource *replicationSource = &(postgres->replicationSource);
 	NodeAddress *upstreamNode = &(replicationSource->primaryNode);
 
 	char currentLSN[PG_LSN_MAXLENGTH] = { 0 };
-	bool reachedLSN = false;
+	bool hasReachedLSN = false;
 
 	log_info("Fetching WAL from upstream node %d (%s:%d) up to LSN %s",
 			 upstreamNode->nodeId,
@@ -1055,57 +1055,37 @@ standby_fetch_missing_wal_and_promote(LocalPostgresServer *postgres)
 			 upstreamNode->port,
 			 replicationSource->targetLSN);
 
-	/* cleanup our existing standby setup, including postgresql.auto.conf */
-	if (!pg_cleanup_standby_mode(pgSetup->control.pg_control_version,
-								 pgSetup->pg_ctl,
-								 pgSetup->pgdata,
-								 pgsql))
+	/* apply new replication source to fetch missing WAL bits */
+	if (!standby_restart_with_current_replication_source(postgres))
 	{
-		log_error("Failed to clean-up Postgres replication settings, "
-				  "see above for details");
-		return false;
-	}
-
-	log_info("Stopping Postgres at \"%s\"", pgSetup->pgdata);
-
-	if (!pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata))
-	{
-		log_error("Failed to stop Postgres at \"%s\"", pgSetup->pgdata);
-		return false;
-	}
-
-	if (!pg_setup_standby_mode(pgSetup->control.pg_control_version,
-							   pgSetup->pgdata,
-							   replicationSource))
-	{
-		log_error("Failed to setup Postgres as a standby, after rewind");
-		return false;
-	}
-
-	log_info("Restarting Postgres at \%s\"", pgSetup->pgdata);
-
-	if (!ensure_postgres_service_is_running(postgres))
-	{
-		log_error("Failed to restart Postgres after changing its "
-				  "primary conninfo, see above for details");
-		return false;
+		log_error("Failed to setup replication from upstream node %d (%s:%d), "
+				  "see above for details",
+				  upstreamNode->nodeId,
+				  upstreamNode->host,
+				  upstreamNode->port);
 	}
 
 	/*
 	 * Now loop until replay has reached our targetLSN.
 	 */
-	while (!reachedLSN)
+	while (!hasReachedLSN)
 	{
+		if (asked_to_stop || asked_to_stop_fast)
+		{
+			log_trace("standby_fetch_missing_wal_and_promote: signaled");
+			break;
+		}
+
 		if (!pgsql_has_reached_target_lsn(pgsql,
 										  replicationSource->targetLSN,
 										  currentLSN,
-										  &reachedLSN))
+										  &hasReachedLSN))
 		{
 			/* errors have already been logged */
 			return false;
 		}
 
-		if (!reachedLSN)
+		if (!hasReachedLSN)
 		{
 			log_info("Postgres recovery is at LSN %s, waiting for LSN %s",
 					 currentLSN, replicationSource->targetLSN);
@@ -1143,14 +1123,11 @@ standby_fetch_missing_wal_and_promote(LocalPostgresServer *postgres)
  * remain a standby that can report its current LSN position, for instance.
  */
 bool
-standby_restart_with_no_primary(LocalPostgresServer *postgres)
+standby_restart_with_current_replication_source(LocalPostgresServer *postgres)
 {
 	PGSQL *pgsql = &(postgres->sqlClient);
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	ReplicationSource *replicationSource = &(postgres->replicationSource);
-
-	log_info("Restarting standby node to disconnect replication "
-			 "from failed primary node, to prepare failover");
 
 	/* cleanup our existing standby setup, including postgresql.auto.conf */
 	if (!pg_cleanup_standby_mode(pgSetup->control.pg_control_version,
@@ -1165,7 +1142,7 @@ standby_restart_with_no_primary(LocalPostgresServer *postgres)
 
 	log_info("Stopping Postgres at \"%s\"", pgSetup->pgdata);
 
-	if (!pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata))
+	if (!ensure_postgres_service_is_stopped(postgres))
 	{
 		log_error("Failed to stop Postgres at \"%s\"", pgSetup->pgdata);
 		return false;
@@ -1193,10 +1170,9 @@ standby_restart_with_no_primary(LocalPostgresServer *postgres)
 
 
 /*
- * standby_cleanup_and_restart_as_primary removes the setup for a standby
- * server and restarts as a primary. It's typically called after
- * standby_fetch_missing_wal_and_promote so we expect Postgres to be running as
- * a standby and be "paused".
+ * standby_cleanup_as_primary removes the setup for a standby server and
+ * restarts as a primary. It's typically called after standby_fetch_missing_wal
+ * so we expect Postgres to be running as a standby and be "paused".
  */
 bool
 standby_cleanup_as_primary(LocalPostgresServer *postgres)

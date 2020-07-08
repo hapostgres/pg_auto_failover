@@ -369,7 +369,7 @@ GetNodeToFailoverFromInGroup(char *formationId, int32 groupId)
  * GetPrimaryNodeInGroup returns the node in the group with a role that only a
  * primary can have.
  *
- * When handling multiple standbys, it could be that one standby node gets
+ * When handling multiple standbys, it could be that the primary node gets
  * demoted, triggering a failover with the other(s) standby nodes. Then the
  * demoted node connects back to the monitor, and should be processed as a
  * standby that re-joins the group, not as a primary being demoted.

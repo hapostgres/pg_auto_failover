@@ -2217,7 +2217,7 @@ typedef struct PgReachedTargetLSN
 {
 	char sqlstate[6];
 	bool parsedOk;
-	bool reachedLSN;
+	bool hasReachedLSN;
 	char currentLSN[PG_LSN_MAXLENGTH];
 	bool noRows;
 } PgReachedTargetLSN;
@@ -2232,7 +2232,7 @@ bool
 pgsql_one_slot_has_reached_target_lsn(PGSQL *pgsql,
 									  char *targetLSN,
 									  char *currentLSN,
-									  bool *reachedLSN)
+									  bool *hasReachedLSN)
 {
 	PgReachedTargetLSN context = { 0 };
 
@@ -2279,7 +2279,7 @@ pgsql_one_slot_has_reached_target_lsn(PGSQL *pgsql,
 		return false;
 	}
 
-	*reachedLSN = context.reachedLSN;
+	*hasReachedLSN = context.hasReachedLSN;
 	strlcpy(currentLSN, context.currentLSN, PG_LSN_MAXLENGTH);
 
 	return true;
@@ -2292,7 +2292,7 @@ pgsql_one_slot_has_reached_target_lsn(PGSQL *pgsql,
  */
 bool
 pgsql_has_reached_target_lsn(PGSQL *pgsql, char *targetLSN,
-							 char *currentLSN, bool *reachedLSN)
+							 char *currentLSN, bool *hasReachedLSN)
 {
 	PgReachedTargetLSN context = { 0 };
 	char *sql =
@@ -2315,7 +2315,7 @@ pgsql_has_reached_target_lsn(PGSQL *pgsql, char *targetLSN,
 		return false;
 	}
 
-	*reachedLSN = context.reachedLSN;
+	*hasReachedLSN = context.hasReachedLSN;
 	strlcpy(currentLSN, context.currentLSN, PG_LSN_MAXLENGTH);
 
 	return true;
@@ -2352,7 +2352,7 @@ parsePgReachedTargetLSN(void *ctx, PGresult *result)
 		return;
 	}
 
-	context->reachedLSN = strcmp(PQgetvalue(result, 0, 0), "t") == 0;
+	context->hasReachedLSN = strcmp(PQgetvalue(result, 0, 0), "t") == 0;
 
 	if (!PQgetisnull(result, 0, 1))
 	{

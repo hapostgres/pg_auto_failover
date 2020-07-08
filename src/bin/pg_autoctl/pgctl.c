@@ -54,7 +54,6 @@ static void log_program_output(Program prog, int outLogLevel, int errorLogLevel)
 
 static bool prepare_recovery_settings(const char *pgdata,
 									  ReplicationSource *replicationSource,
-									  GUC *recovery_settings,
 									  char *primaryConnInfo,
 									  char *primarySlotName,
 									  char *targetLSN);
@@ -1364,7 +1363,6 @@ pg_write_recovery_conf(const char *pgdata, ReplicationSource *replicationSource)
 
 	if (!prepare_recovery_settings(pgdata,
 								   replicationSource,
-								   recoverySettings,
 								   primaryConnInfo,
 								   primarySlotName,
 								   targetLSN))
@@ -1424,7 +1422,6 @@ pg_write_standby_signal(const char *pgdata,
 
 	if (!prepare_recovery_settings(pgdata,
 								   replicationSource,
-								   recoverySettings,
 								   primaryConnInfo,
 								   primarySlotName,
 								   targetLSN))
@@ -1493,15 +1490,13 @@ pg_write_standby_signal(const char *pgdata,
 
 
 /*
- * pgctl_prepare_recovery_config prepares a GUC structure with the settings
- * that we need to install in either recovery.conf or our own
- * postgresql-auto-failover-standby.conf depending on the Postgres major
- * version.
+ * prepare_recovery_settings prepares the settings that we need to install in
+ * either recovery.conf or our own postgresql-auto-failover-standby.conf
+ * depending on the Postgres major version.
  */
 static bool
 prepare_recovery_settings(const char *pgdata,
 						  ReplicationSource *replicationSource,
-						  GUC *recovery_settings,
 						  char *primaryConnInfo,
 						  char *primarySlotName,
 						  char *targetLSN)

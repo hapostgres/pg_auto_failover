@@ -1279,9 +1279,12 @@ fsm_report_lsn(Keeper *keeper)
 		return false;
 	}
 
-	if (!standby_restart_with_no_primary(postgres))
+	log_info("Restarting standby node to disconnect replication "
+			 "from failed primary node, to prepare failover");
+
+	if (!standby_restart_with_current_replication_source(postgres))
 	{
-		log_error("Failed disconnect from failed primary node, "
+		log_error("Failed to disconnect from failed primary node, "
 				  "see above for details");
 
 		return false;
@@ -1373,7 +1376,7 @@ fsm_fast_forward(Keeper *keeper)
 		return false;
 	}
 
-	if (!standby_fetch_missing_wal_and_promote(postgres))
+	if (!standby_fetch_missing_wal(postgres))
 	{
 		log_error("Failed to fetch WAL bytes from standby node %d (%s:%d), "
 				  "see above for details",
