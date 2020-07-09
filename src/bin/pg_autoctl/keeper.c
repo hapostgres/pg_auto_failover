@@ -1408,6 +1408,8 @@ keeper_refresh_other_nodes(Keeper *keeper, bool forceCacheInvalidation)
 	 */
 	if (newNodesArray.count == 0 || diffNodesArray.count == 0)
 	{
+		/* refresh the keeper's cache with the current other nodes array */
+		keeper->otherNodes = newNodesArray;
 		return true;
 	}
 
