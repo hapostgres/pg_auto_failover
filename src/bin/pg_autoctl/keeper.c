@@ -1378,7 +1378,7 @@ keeper_refresh_other_nodes(Keeper *keeper, bool forceCacheInvalidation)
 	PostgresSetup *postgresSetup = &(keeper->postgres.postgresSetup);
 
 	NodeAddressArray *otherNodesArray = &(keeper->otherNodes);
-	NodeAddressArray oldNodesArray = *otherNodesArray;
+	NodeAddressArray newNodesArray = { 0 };
 	NodeAddressArray diffNodesArray = { 0 };
 
 	char *host = config->nodename;
@@ -1386,7 +1386,7 @@ keeper_refresh_other_nodes(Keeper *keeper, bool forceCacheInvalidation)
 
 	log_trace("keeper_refresh_other_nodes");
 
-	if (!monitor_get_other_nodes(monitor, host, port, ANY_STATE, otherNodesArray))
+	if (!monitor_get_other_nodes(monitor, host, port, ANY_STATE, &newNodesArray))
 	{
 		log_error("Failed to get_other_nodes() on the monitor");
 		return false;
@@ -1395,25 +1395,25 @@ keeper_refresh_other_nodes(Keeper *keeper, bool forceCacheInvalidation)
 	/* compute nodes that need an HBA change (new ones, new hostnames) */
 	if (forceCacheInvalidation)
 	{
-		diffNodesArray = *otherNodesArray;
+		diffNodesArray = newNodesArray;
 	}
 	else
 	{
-		(void) diff_nodesArray(&oldNodesArray, otherNodesArray, &diffNodesArray);
+		(void) diff_nodesArray(otherNodesArray, &newNodesArray, &diffNodesArray);
 	}
 
 	/*
 	 * When we're alone in the group, and also when there's no change, then we
 	 * are done here already.
 	 */
-	if (otherNodesArray->count == 0 || diffNodesArray.count == 0)
+	if (newNodesArray.count == 0 || diffNodesArray.count == 0)
 	{
 		return true;
 	}
 
 	log_info("Fetched current list of %d other nodes from the monitor "
 			 "to update HBA rules, including %d changes.",
-			 otherNodesArray->count, diffNodesArray.count);
+			 newNodesArray.count, diffNodesArray.count);
 
 	/*
 	 * We have a new list of other nodes, update the HBA file. We only update
@@ -1426,19 +1426,13 @@ keeper_refresh_other_nodes(Keeper *keeper, bool forceCacheInvalidation)
 				  keeper->config.formation,
 				  keeper->state.current_group);
 
-		/*
-		 * If we failed to install the changes, retain the previous version of
-		 * the otherNodesArray in-memory (cancel the update).
-		 *
-		 * The otherNodesArrays is also used in the keeper maintenance
-		 * functions for the replication slots, but here we return false and
-		 * then the main keeper loop will skip slot maintenance (part of the
-		 * keeper_ensure_current_state duties).
-		 */
-		*otherNodesArray = oldNodesArray;
-
 		return false;
 	}
+
+	/*
+	 * In case of success, copy the current nodes array to the keeper's cache.
+	 */
+	keeper->otherNodes = newNodesArray;
 
 	return true;
 }
