@@ -372,13 +372,21 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 
 		couldContactMonitor = couldContactMonitorThisRound;
 
-		if (couldContactMonitor &&
-			keeperState->assigned_role != keeperState->current_role)
+		if (keeperState->assigned_role != keeperState->current_role)
 		{
 			needStateChange = true;
 
-			log_info("Monitor assigned new state \"%s\"",
-					 NodeStateToString(keeperState->assigned_role));
+			if (couldContactMonitor)
+			{
+				log_info("Monitor assigned new state \"%s\"",
+						 NodeStateToString(keeperState->assigned_role));
+			}
+			else
+			{
+				/* if network is not healthy we might self-assign a state */
+				log_info("Reaching new state \"%s\"",
+						 NodeStateToString(keeperState->assigned_role));
+			}
 		}
 
 		CHECK_FOR_FAST_SHUTDOWN;
