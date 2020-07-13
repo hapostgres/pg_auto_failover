@@ -36,6 +36,7 @@
 
 static bool keepRunning = true;
 
+static bool keeper_node_active(Keeper *keeper);
 static bool is_network_healthy(Keeper *keeper);
 static bool in_network_partition(KeeperStateData *keeperState, uint64_t now,
 								 int networkPartitionTimeout);
@@ -256,7 +257,6 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 {
 	KeeperConfig *config = &(keeper->config);
 	KeeperStateData *keeperState = &(keeper->state);
-	Monitor *monitor = &(keeper->monitor);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 	PGSQL *pgsql = &(postgres->sqlClient);
 
@@ -272,11 +272,8 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 	{
 		bool couldContactMonitorThisRound = false;
 
-		MonitorAssignedState assignedState = { 0 };
 		bool needStateChange = false;
 		bool transitionFailed = false;
-		bool reportPgIsRunning = false;
-		uint64_t now = time(NULL);
 
 		/*
 		 * Handle signals.
@@ -355,41 +352,12 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 
 		CHECK_FOR_FAST_SHUTDOWN;
 
-		reportPgIsRunning = ReportPgIsRunning(keeper);
-
-		/* We used to output that in INFO every 5s, which is too much chatter */
-		log_debug("Calling node_active for node %s/%d/%d with current state: "
-				  "%s, "
-				  "PostgreSQL %s running, "
-				  "sync_state is \"%s\", "
-				  "current lsn is \"%s\".",
-				  config->formation,
-				  keeperState->current_node_id,
-				  keeperState->current_group,
-				  NodeStateToString(keeperState->current_role),
-				  reportPgIsRunning ? "is" : "is not",
-				  postgres->pgsrSyncState,
-				  postgres->currentLSN);
-
-
-		/* ensure we use the correct retry policy with the monitor */
-		(void) pgsql_set_main_loop_retry_policy(&(monitor->pgsql));
-
 		/*
-		 * Report the current state to the monitor and get the assigned state.
+		 * Call the node_active function on the monitor and update the keeper
+		 * data structure accordingy, refreshing our cache of other nodes if
+		 * needed.
 		 */
-		couldContactMonitorThisRound =
-			monitor_node_active(monitor,
-								config->formation,
-								config->nodename,
-								config->pgSetup.pgport,
-								keeperState->current_node_id,
-								keeperState->current_group,
-								keeperState->current_role,
-								reportPgIsRunning,
-								postgres->currentLSN,
-								postgres->pgsrSyncState,
-								&assignedState);
+		couldContactMonitorThisRound = keeper_node_active(keeper);
 
 		if (!couldContactMonitor && couldContactMonitorThisRound && !firstLoop)
 		{
@@ -404,76 +372,20 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 
 		couldContactMonitor = couldContactMonitorThisRound;
 
-		if (couldContactMonitor)
+		if (keeperState->assigned_role != keeperState->current_role)
 		{
-			char expectedSlotName[BUFSIZE];
+			needStateChange = true;
 
-			keeperState->last_monitor_contact = now;
-			keeperState->assigned_role = assignedState.state;
-
-			if (keeperState->assigned_role != keeperState->current_role)
+			if (couldContactMonitor)
 			{
-				needStateChange = true;
-
 				log_info("Monitor assigned new state \"%s\"",
 						 NodeStateToString(keeperState->assigned_role));
 			}
-
-			/*
-			 * Also update the groupId and replication slot name in the
-			 * configuration file.
-			 */
-			(void) postgres_sprintf_replicationSlotName(assignedState.nodeId,
-														expectedSlotName,
-														sizeof(expectedSlotName));
-
-			if (assignedState.groupId != config->groupId ||
-				strneq(config->replication_slot_name, expectedSlotName))
+			else
 			{
-				bool postgresNotRunningIsOk = false;
-
-				if (!keeper_config_set_groupId_and_slot_name(config,
-															 assignedState.nodeId,
-															 assignedState.groupId))
-				{
-					log_error("Failed to update the configuration file "
-							  "with groupId %d and replication.slot \"%s\"",
-							  assignedState.groupId, expectedSlotName);
-					return false;
-				}
-
-				if (!keeper_ensure_configuration(keeper, postgresNotRunningIsOk))
-				{
-					log_error("Failed to update our Postgres configuration "
-							  "after a change of groupId or "
-							  "replication slot name, see above for details");
-					return false;
-				}
-			}
-		}
-		else
-		{
-			log_error("Failed to get the goal state from the monitor");
-
-			/*
-			 * Check whether we're likely to be in a network partition.
-			 * That will cause the assigned_role to become demoted.
-			 */
-			if (keeperState->current_role == PRIMARY_STATE)
-			{
-				log_warn("Checking for network partitions...");
-
-				if (!is_network_healthy(keeper))
-				{
-					keeperState->assigned_role = DEMOTE_TIMEOUT_STATE;
-
-					log_info("Network in not healthy, switching to state %s",
-							 NodeStateToString(keeperState->assigned_role));
-				}
-				else
-				{
-					log_info("Network is healthy");
-				}
+				/* if network is not healthy we might self-assign a state */
+				log_info("Reaching new state \"%s\"",
+						 NodeStateToString(keeperState->assigned_role));
 			}
 		}
 
@@ -589,6 +501,144 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		{
 			warnedOnPreviousIteration = true;
 			warnedOnCurrentIteration = false;
+		}
+	}
+
+	return true;
+}
+
+
+/*
+ * keeper_node_active calls the node_active function on the monitor, and when
+ * it could contact the monitor it also updates our copy of the list of other
+ * nodes currenty in the group (keeper->otherNodes).
+ *
+ * keeper_node_active returns true if it could successfully connect to the
+ * monitor, and false otherwise. When it returns false, it also checks for
+ * network partitions and set the goal state to DEMOTE_TIMEOUT_STATE when
+ * needed.
+ */
+static bool
+keeper_node_active(Keeper *keeper)
+{
+	KeeperConfig *config = &(keeper->config);
+	KeeperStateData *keeperState = &(keeper->state);
+	Monitor *monitor = &(keeper->monitor);
+	LocalPostgresServer *postgres = &(keeper->postgres);
+
+	uint64_t now = time(NULL);
+	MonitorAssignedState assignedState = { 0 };
+
+	char expectedSlotName[BUFSIZE] = { 0 };
+
+	bool forceCacheInvalidation = false;
+	bool reportPgIsRunning = ReportPgIsRunning(keeper);
+
+	/* We used to output that in INFO every 5s, which is too much chatter */
+	log_debug("Calling node_active for node %s/%d/%d with current state: "
+			  "%s, "
+			  "PostgreSQL %s running, "
+			  "sync_state is \"%s\", "
+			  "current lsn is \"%s\".",
+			  config->formation,
+			  keeperState->current_node_id,
+			  keeperState->current_group,
+			  NodeStateToString(keeperState->current_role),
+			  reportPgIsRunning ? "is" : "is not",
+			  postgres->pgsrSyncState,
+			  postgres->currentLSN);
+
+
+	/* ensure we use the correct retry policy with the monitor */
+	(void) pgsql_set_main_loop_retry_policy(&(monitor->pgsql));
+
+	/*
+	 * Report the current state to the monitor and get the assigned state.
+	 */
+	if (!monitor_node_active(monitor,
+							 config->formation,
+							 config->nodename,
+							 config->pgSetup.pgport,
+							 keeperState->current_node_id,
+							 keeperState->current_group,
+							 keeperState->current_role,
+							 reportPgIsRunning,
+							 postgres->currentLSN,
+							 postgres->pgsrSyncState,
+							 &assignedState))
+	{
+		log_error("Failed to get the goal state from the monitor");
+
+		/*
+		 * Check whether we're likely to be in a network partition.
+		 * That will cause the assigned_role to become demoted.
+		 */
+		if (keeperState->current_role == PRIMARY_STATE)
+		{
+			log_warn("Checking for network partitions...");
+
+			if (!is_network_healthy(keeper))
+			{
+				keeperState->assigned_role = DEMOTE_TIMEOUT_STATE;
+
+				log_info("Network in not healthy, switching to state %s",
+						 NodeStateToString(keeperState->assigned_role));
+			}
+			else
+			{
+				log_info("Network is healthy");
+			}
+		}
+
+		return false;
+	}
+
+	/*
+	 * We could contact the monitor, update our internal state.
+	 */
+	keeperState->last_monitor_contact = now;
+	keeperState->assigned_role = assignedState.state;
+
+	/* maybe update our cached list of other nodes */
+	if (!keeper_refresh_other_nodes(keeper, forceCacheInvalidation))
+	{
+		/*
+		 * We have a new MD5 but failed to update our list, try again next
+		 * round, the monitor might be restarting or something.
+		 */
+		log_error("Failed to update our list of other nodes");
+		return false;
+	}
+
+	/*
+	 * Also update the groupId and replication slot name in the
+	 * configuration file.
+	 */
+	(void) postgres_sprintf_replicationSlotName(assignedState.nodeId,
+												expectedSlotName,
+												sizeof(expectedSlotName));
+
+	if (assignedState.groupId != config->groupId ||
+		strneq(config->replication_slot_name, expectedSlotName))
+	{
+		bool postgresNotRunningIsOk = false;
+
+		if (!keeper_config_set_groupId_and_slot_name(config,
+													 assignedState.nodeId,
+													 assignedState.groupId))
+		{
+			log_error("Failed to update the configuration file "
+					  "with groupId %d and replication.slot \"%s\"",
+					  assignedState.groupId, expectedSlotName);
+			return false;
+		}
+
+		if (!keeper_ensure_configuration(keeper, postgresNotRunningIsOk))
+		{
+			log_error("Failed to update our Postgres configuration "
+					  "after a change of groupId or "
+					  "replication slot name, see above for details");
+			return false;
 		}
 	}
 

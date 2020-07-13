@@ -280,9 +280,13 @@ monitor_get_other_nodes(Monitor *monitor,
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
 		currentState == ANY_STATE
-		? "SELECT * FROM pgautofailover.get_other_nodes($1, $2)"
-		: "SELECT * FROM pgautofailover.get_other_nodes($1, $2, "
-		  "$3::pgautofailover.replication_state)";
+		?
+		"SELECT * FROM pgautofailover.get_other_nodes($1, $2) "
+		"ORDER BY node_id"
+		:
+		"SELECT * FROM pgautofailover.get_other_nodes($1, $2, "
+		"$3::pgautofailover.replication_state) "
+		"ORDER BY node_id";
 	int paramCount = 2;
 	Oid paramTypes[3] = { TEXTOID, INT4OID, TEXTOID };
 	const char *paramValues[3] = { 0 };
@@ -1388,7 +1392,6 @@ parseNodeState(void *ctx, PGresult *result)
 	{
 		context->assignedState->replicationQuorum = (*value) == 't';
 	}
-
 
 	if (errors > 0)
 	{

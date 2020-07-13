@@ -170,51 +170,6 @@ keeper_cli_create_replication_user(int argc, char **argv)
 
 
 /*
- * keeper_add_standby_to_hba implements the CLI to add the pg_auto_failover
- * replication user to pg_hba.
- */
-void
-keeper_cli_add_standby_to_hba(int argc, char **argv)
-{
-	KeeperConfig config = keeperOptions;
-	LocalPostgresServer postgres = { 0 };
-	char standbyHostname[_POSIX_HOST_NAME_MAX];
-	bool missingPgdataOk = false;
-	bool postgresNotRunningOk = false;
-	int hostLength = 0;
-
-	keeper_config_init(&config, missingPgdataOk, postgresNotRunningOk);
-	local_postgres_init(&postgres, &(config.pgSetup));
-
-	if (argc != 1)
-	{
-		log_error("a standby hostname is required");
-		commandline_help(stderr);
-		exit(EXIT_CODE_BAD_ARGS);
-	}
-
-	hostLength = strlcpy(standbyHostname, argv[0],
-						 _POSIX_HOST_NAME_MAX);
-	if (hostLength >= _POSIX_HOST_NAME_MAX)
-	{
-		log_fatal("Hostname \"%s\" given in command line is %d characters, "
-				  "the maximum supported by pg_autoctl is %d",
-				  argv[0], hostLength, MAXCONNINFO - 1);
-		exit(EXIT_CODE_BAD_ARGS);
-	}
-
-	if (!primary_add_standby_to_hba(&postgres, standbyHostname,
-									config.replication_password))
-	{
-		log_fatal("Failed to grant access to the standby by adding relevant lines to "
-				  "pg_hba.conf for the standby hostname and user, see above for "
-				  "details");
-		exit(EXIT_CODE_PGSQL);
-	}
-}
-
-
-/*
  * keeper_cli_pgsetup_discover implements the CLI to discover a PostgreSQL
  * setup thanks to PGDATA and other environment variables.
  */

@@ -56,7 +56,6 @@ def test_006_fail_primary():
     assert node2.wait_until_state(target_state="wait_primary", timeout=180)
 
 def test_007_start_node1_again():
-    print("\n%s" % node1.get_events_str())
     node1.create(run = True)
     assert node2.wait_until_state(target_state="primary")
     assert node1.wait_until_state(target_state="secondary")
