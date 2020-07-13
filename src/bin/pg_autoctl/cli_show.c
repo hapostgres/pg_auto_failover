@@ -1475,7 +1475,7 @@ fprint_pidfile_as_json(const char *pidfile)
 		if (pidLine == PIDFILE_LINE_PID)
 		{
 			int pidnum = 0;
-			stringToInt(fileLines[0], &pidnum);
+			stringToInt(fileLines[lineNumber], &pidnum);
 			json_object_set_number(jsobj, "pid", (double) pidnum);
 
 			continue;
@@ -1504,8 +1504,15 @@ fprint_pidfile_as_json(const char *pidfile)
 		if (pidLine == PIDFILE_LINE_SEM_ID)
 		{
 			int semId = 0;
-			stringToInt(fileLines[1], &semId);
-			json_object_set_number(jsobj, "semId", (double) semId);
+
+			if (stringToInt(fileLines[lineNumber], &semId))
+			{
+				json_object_set_number(jsobj, "semId", (double) semId);
+			}
+			else
+			{
+				log_error("Failed to parse semId \"%s\"", fileLines[lineNumber]);
+			}
 
 			continue;
 		}

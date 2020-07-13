@@ -310,7 +310,7 @@ cli_do_service_restart(const char *serviceName)
 	log_info("Service \"%s\" has been restarted with pid %d",
 			 serviceName, newPid);
 
-	fformat(stdout, "%d\n", pid);
+	fformat(stdout, "%d\n", newPid);
 }
 
 

@@ -63,6 +63,16 @@ create_pidfile(const char *pidfile, pid_t pid)
 	if (!prepare_pidfile_buffer(content, pid))
 	{
 		/* errors have already been logged */
+		destroyPQExpBuffer(content);
+		return false;
+	}
+
+
+	/* memory allocation could have failed while building string */
+	if (PQExpBufferBroken(content))
+	{
+		log_error("Failed to create pidfile \"%s\": out of memory", pidfile);
+		destroyPQExpBuffer(content);
 		return false;
 	}
 
@@ -231,7 +241,7 @@ remove_pidfile(const char *pidfile)
 {
 	if (remove(pidfile) != 0)
 	{
-		log_error("Failed to remove keeper's pid file \"%s\": %m", pidfile);
+		log_error("Failed to remove pid file \"%s\": %m", pidfile);
 		return false;
 	}
 	return true;

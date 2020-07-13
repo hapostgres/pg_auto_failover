@@ -29,8 +29,8 @@
  * node. When using the --run option, the transient service is terminated and
  * we start the permanent service with the name defined above.
  */
-#define SERVICE_NAME_KEEPER_INIT "node-active"
-#define SERVICE_NAME_MONITOR_INIT "node-active"
+#define SERVICE_NAME_KEEPER_INIT "node-init"
+#define SERVICE_NAME_MONITOR_INIT "monitor-init"
 
 /*
  * Our supervisor process may retart a service sub-process when it quits,

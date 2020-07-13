@@ -33,8 +33,8 @@
  *		7	second supervised service pid line
  *    ...
  *
- * The supervised service lines are added later, not the first tim we create
- * the pidfile. Each service line contains 3 bits of information, separated
+ * The supervised service lines are added later, not the first time we create
+ * the pidfile. Each service line contains 2 bits of information, separated
  * with spaces:
  *
  *   pid service-name
