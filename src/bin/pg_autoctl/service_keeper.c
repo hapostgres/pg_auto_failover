@@ -690,9 +690,12 @@ is_network_healthy(Keeper *keeper)
 		return true;
 	}
 
-	log_info("Failed to contact the monitor or standby in %" PRIu64 " seconds, "
-																	"at %d seconds we shut down PostgreSQL to prevent split brain issues",
-			 keeperState->last_monitor_contact - now, networkPartitionTimeout);
+	/* *INDENT-OFF* */
+	log_info(
+		"Failed to contact the monitor or standby in %" PRIu64 " seconds, "
+		"at %d seconds we shut down PostgreSQL to prevent split brain issues",
+		now - keeperState->last_monitor_contact, networkPartitionTimeout);
+	/* *INDENT-ON* */
 
 	return false;
 }
