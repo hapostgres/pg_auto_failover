@@ -449,7 +449,7 @@ pg_setup_controldata(PostgresSetup *pgSetup, bool missingPgDataIsOk)
 	/*
 	 * Now fetch new control values from running pg_controldata on PGDATA.
 	 */
-	if (!pg_controldata(pgSetup, missingPgDataIsOk))
+	if (!pg_controldata(&newPgSetup, missingPgDataIsOk))
 	{
 		/* errors have already been logged */
 		return false;
