@@ -529,6 +529,27 @@ keeper_node_active(Keeper *keeper)
 	 * First, connect to the monitor and check we're compatible with the
 	 * extension there. An upgrade on the monitor might have happened in
 	 * between loops here.
+	 *
+	 * Note that we don't need a very strong a guarantee about the version
+	 * number of the monitor extension, as we have other places in the code
+	 * that are protected against "suprises". The worst case would be a race
+	 * condition where the extension check passes, and then the monitor is
+	 * upgraded, and then we call node_active().
+	 *
+	 *  - The extension on the monitor is protected against running a version
+	 *    of the node_active (or any other) function that does not match with
+	 *    the SQL level version.
+	 *
+	 *  - Then, if we changed the API without changing the arguments, that
+	 *    means we changed what we may return. We are protected against changes
+	 *    in number of return values, so we're left with changes within the
+	 *    columns themselves. Basically that's a new state that we don't know
+	 *    how to handle. In that case we're going to fail to parse it, and at
+	 *    next attempt we're going to catch up with the new version number.
+	 *
+	 * All in all, the worst case is going to be one extra call before we
+	 * restart node active process, and an extra error message in the logs
+	 * during the live upgrade of pg_auto_failover.
 	 */
 	if (!keeper_check_monitor_extension_version(keeper))
 	{
