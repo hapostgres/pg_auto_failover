@@ -2998,9 +2998,6 @@ monitor_get_extension_version(Monitor *monitor, MonitorExtensionVersion *version
 		return false;
 	}
 
-	/* disconnect from PostgreSQL now */
-	pgsql_finish(&monitor->pgsql);
-
 	return true;
 }
 
@@ -3099,7 +3096,8 @@ monitor_ensure_extension_version(Monitor *monitor,
 	char envExtensionVersion[MAXPGPATH];
 
 	/* in test environment, we can export any target version we want */
-	if (env_exists(PG_AUTOCTL_DEBUG) && env_exists(PG_AUTOCTL_EXTENSION_VERSION_VAR))
+	if (env_exists(PG_AUTOCTL_DEBUG) &&
+		env_exists(PG_AUTOCTL_EXTENSION_VERSION_VAR))
 	{
 		if (!get_env_copy(PG_AUTOCTL_EXTENSION_VERSION_VAR, envExtensionVersion,
 						  MAXPGPATH))

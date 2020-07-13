@@ -354,6 +354,9 @@ cli_config_check_connections(PostgresSetup *pgSetup,
 		exit(EXIT_CODE_MONITOR);
 	}
 
+	/* disconnect from the monitor now */
+	pgsql_finish(&(monitor.pgsql));
+
 	log_info("Connection to monitor ok, using \"%s\"", monitor_pguri);
 
 	if (strcmp(version.installedVersion, PG_AUTOCTL_EXTENSION_VERSION) == 0)

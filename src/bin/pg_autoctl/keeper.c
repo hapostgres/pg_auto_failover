@@ -967,8 +967,8 @@ keeper_check_monitor_extension_version(Keeper *keeper)
 	}
 	else
 	{
-		log_info("The version of extension \"%s\" is \"%s\" on the monitor",
-				 PG_AUTOCTL_MONITOR_EXTENSION_NAME, version.installedVersion);
+		log_trace("The version of extension \"%s\" is \"%s\" on the monitor",
+				  PG_AUTOCTL_MONITOR_EXTENSION_NAME, version.installedVersion);
 	}
 
 	return true;
