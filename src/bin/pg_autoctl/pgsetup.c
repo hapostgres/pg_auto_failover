@@ -373,13 +373,15 @@ pg_setup_init(PostgresSetup *pgSetup,
 					errors++;
 				}
 			}
-
-			log_debug("Found PostgreSQL system %" PRIu64 " at \"%s\", "
-														 "version %u, catalog version %u",
-					  pgSetup->control.system_identifier,
-					  pgSetup->pgdata,
-					  pgSetup->control.pg_control_version,
-					  pgSetup->control.catalog_version_no);
+			else
+			{
+				log_debug("Found PostgreSQL system %" PRIu64 " at \"%s\", "
+															 "version %u, catalog version %u",
+						  pgSetup->control.system_identifier,
+						  pgSetup->pgdata,
+						  pgSetup->control.pg_control_version,
+						  pgSetup->control.catalog_version_no);
+			}
 		}
 	}
 
@@ -919,6 +921,22 @@ pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 bool
 pg_setup_pgdata_exists(PostgresSetup *pgSetup)
 {
+	char globalControlPath[MAXPGPATH] = { 0 };
+
+	/* make sure our cached value in pgSetup still makes sense */
+	if (!directory_exists(pgSetup->pgdata))
+	{
+		return false;
+	}
+
+	/* globalControlFilePath = $PGDATA/global/pg_control */
+	join_path_components(globalControlPath, pgSetup->pgdata, "global/pg_control");
+
+	if (!file_exists(globalControlPath))
+	{
+		return false;
+	}
+
 	return pgSetup->control.system_identifier != 0;
 }
 
@@ -1084,7 +1102,7 @@ pg_setup_wait_until_is_ready(PostgresSetup *pgSetup, int timeout, int logLevel)
 		/* let's not be THAT verbose about it */
 		if ((attempts - 1) % 10 == 0)
 		{
-			log_trace("pg_setup_wait_until_is_ready(): postgres %s, "
+			log_debug("pg_setup_wait_until_is_ready(): postgres %s, "
 					  "pid %d (was %d), after %ds and %d attempt(s)",
 					  pgIsRunning ? "is running" : "is not running",
 					  pgSetup->pidFile.pid,
@@ -1124,7 +1142,6 @@ pg_setup_wait_until_is_ready(PostgresSetup *pgSetup, int timeout, int logLevel)
 
 		*pgSetup = newPgSetup;
 
-
 		/* avoid an extra pg_setup_is_ready call if we're all good already */
 		pgIsReady = pgSetup->pm_status == POSTMASTER_STATUS_READY;
 	}
@@ -1144,7 +1161,7 @@ pg_setup_wait_until_is_ready(PostgresSetup *pgSetup, int timeout, int logLevel)
 		/* let's not be THAT verbose about it */
 		if ((attempts - 1) % 10 == 0)
 		{
-			log_trace("pg_setup_wait_until_is_ready(): pgstatus is %s, "
+			log_debug("pg_setup_wait_until_is_ready(): pgstatus is %s, "
 					  "pid %d (was %d), after %ds and %d attempt(s)",
 					  pmStatusToString(pgSetup->pm_status),
 					  pgSetup->pidFile.pid,

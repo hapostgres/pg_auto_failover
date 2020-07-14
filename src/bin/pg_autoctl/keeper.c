@@ -1134,7 +1134,9 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 	PostgresSetup *pgSetup = &(config->pgSetup);
 	KeeperStateInit *initState = &(keeper->initState);
 	Monitor *monitor = &(keeper->monitor);
+
 	MonitorAssignedState assignedState = { 0 };
+	char expectedSlotName[BUFSIZE] = { 0 };
 
 	/*
 	 * First try to create our state file. The keeper_state_create_file function
@@ -1212,6 +1214,14 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 
 		goto rollback;
 	}
+
+	/*
+	 * Also update the groupId and replication slot name in the
+	 * configuration file.
+	 */
+	(void) postgres_sprintf_replicationSlotName(assignedState.nodeId,
+												expectedSlotName,
+												sizeof(expectedSlotName));
 
 	/* also update the groupId in the configuration file. */
 	if (!keeper_config_set_groupId_and_slot_name(&(keeper->config),

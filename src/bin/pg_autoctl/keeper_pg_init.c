@@ -322,15 +322,18 @@ keeper_pg_init_and_register_primary(Keeper *keeper)
 bool
 keeper_pg_init_continue(Keeper *keeper)
 {
+	KeeperStateData *keeperState = &(keeper->state);
 	KeeperStateInit *initState = &(keeper->initState);
 	KeeperConfig *config = &(keeper->config);
 
+	/* initialize our keeper state and read the state file */
 	if (!keeper_init(keeper, config))
 	{
 		/* errors have already been logged */
 		return false;
 	}
 
+	/* also read the init state file */
 	if (!keeper_init_state_read(initState, config->pathnames.init))
 	{
 		log_fatal("Failed to restart from previous keeper init attempt");
@@ -346,6 +349,23 @@ keeper_pg_init_continue(Keeper *keeper)
 	 * TODO: verify the information in the state file against the information
 	 * in the monitor and decide if it's stale or not.
 	 */
+
+	/*
+	 * Also update the groupId and replication slot name in the configuration
+	 * file, from the keeper state file: we might not have reached a point
+	 * where the configuration changes have been saved to disk in the previous
+	 * attempt.
+	 */
+	if (!keeper_config_set_groupId_and_slot_name(&(keeper->config),
+												 keeperState->current_node_id,
+												 keeperState->current_group))
+	{
+		log_error("Failed to update the configuration file with the groupId %d "
+				  "and the nodeId %d",
+				  keeperState->current_group,
+				  keeperState->current_node_id);
+		return false;
+	}
 
 	/*
 	 * If we have an init file and the state file looks good, then the
