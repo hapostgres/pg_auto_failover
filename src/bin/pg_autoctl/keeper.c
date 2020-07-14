@@ -15,6 +15,7 @@
 
 #include "parson.h"
 
+#include "env_utils.h"
 #include "file_utils.h"
 #include "keeper.h"
 #include "keeper_config.h"
@@ -912,19 +913,90 @@ keeper_drop_replication_slots_for_removed_nodes(Keeper *keeper)
 bool
 keeper_maintain_replication_slots(Keeper *keeper)
 {
+	Monitor *monitor = &(keeper->monitor);
 	PostgresSetup *pgSetup = &(keeper->postgres.postgresSetup);
 	LocalPostgresServer *postgres = &(keeper->postgres);
-	NodeAddressArray *otherNodesArray = &(keeper->otherNodes);
+	KeeperStateData *keeperState = &(keeper->state);
+
+	char *host = keeper->config.nodename;
+	int port = pgSetup->pgport;
 
 	log_trace("keeper_maintain_replication_slots");
 
+	/*
+	 * We would like to maintain replication slots on the standby nodes in a
+	 * group by using the function pg_replication_slot_advance(). This ensures
+	 * that every node keep a local copy of the WAL files that each other node
+	 * might need.
+	 *
+	 * This WAL files might be necessary in the following two cases:
+	 *
+	 * - when a primary has been demoted and now rejoins as a secondary, then
+	 *   it uses pg_rewind and needs to find the WAL it missed on the new
+	 *   primary ; in that case we need the replication slot to have been
+	 *   maintained before the failover.
+	 *
+	 * - when a failover happens with more than one standby, all the standby
+	 *   nodes that are not promoted need to follow a new primary node, and for
+	 *   that it's best that the new-primary already had a replication slot for
+	 *   its new set of standby nodes.
+	 *
+	 * The pg_replication_slot_advance() function is new in Postgres 11, so we
+	 * can't install replication slots on our standby nodes when using Postgres
+	 * 10.
+	 *
+	 * In Postgres 11 and 12, the pg_replication_slot_advance() function has
+	 * been buggy for quite some time and prevented WAL recycling on standby
+	 * servers, see https://github.com/citusdata/pg_auto_failover/issues/283
+	 * for the problem and
+	 * https://git.postgresql.org/gitweb/?p=postgresql.git;a=commit;h=b48df81
+	 * for the solution.
+	 *
+	 * The bug fix appears in the minor releases 12.4 and 11.9. Before that, we
+	 * disable the slot maintenance feature of pg_auto_failover.
+	 */
 	if (pgSetup->control.pg_control_version < 1100)
 	{
 		/* Postgres 10 does not have pg_replication_slot_advance() */
 		return true;
 	}
 
-	if (!postgres_replication_slot_maintain(postgres, otherNodesArray))
+	/*
+	 * On the primary, always "maintain" the replication slots. It means
+	 * creating it before the standby does a pg_basebackup, and removing it
+	 * when we have lost the standby.
+	 *
+	 * On a standby, check for Postgres version before creating a replication
+	 * slot, we want to be able to use pg_replication_slot_advance().
+	 *
+	 * When using the PG_AUTOCTL_DEBUG environment variable, we still use
+	 * replication slots in all versions of Postgres 11 and 12, so that we can
+	 * test our implementation.
+	 */
+	if (keeperState->current_role == PRIMARY_STATE ||
+		keeperState->current_role == WAIT_PRIMARY_STATE ||
+		!env_exists(PG_AUTOCTL_DEBUG))
+	{
+		/*
+		 * Bypass replication slot maintenance unless Postgres has support for
+		 * replication slots on a standby.
+		 */
+		bool bypass = !pg_setup_standby_slot_supported(pgSetup, LOG_TRACE);
+
+		if (bypass)
+		{
+			return true;
+		}
+	}
+
+	if (!monitor_get_other_nodes(monitor, host, port,
+								 ANY_STATE, &(keeper->otherNodes)))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	if (!postgres_replication_slot_maintain(postgres, &(keeper->otherNodes)))
 	{
 		log_error("Failed to maintain replication slots on the local Postgres "
 				  "instance, see above for details");

@@ -219,5 +219,7 @@ bool pgsetup_validate_ssl_settings(PostgresSetup *pgSetup);
 SSLMode pgsetup_parse_sslmode(const char *sslMode);
 char * pgsetup_sslmode_to_string(SSLMode sslMode);
 
+bool pg_setup_standby_slot_supported(PostgresSetup *pgSetup, int logLevel);
+
 
 #endif /* PGSETUP_H */

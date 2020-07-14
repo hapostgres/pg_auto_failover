@@ -334,6 +334,15 @@ cli_config_check_connections(PostgresSetup *pgSetup,
 				 "please review your Postgres configuration");
 	}
 
+	if (pg_setup_standby_slot_supported(pgSetup, LOG_WARN))
+	{
+		int major = pgSetup->control.pg_control_version / 100;
+		int minor = pgSetup->control.pg_control_version % 100;
+
+		log_info("Postgres version %d.%d allows using replication slots "
+				 "on the standby nodes", major, minor);
+	}
+
 	/*
 	 * Now, on Postgres nodes, check that the monitor uri is valid and that we
 	 * can connect to the monitor just fine. This requires having setup the
