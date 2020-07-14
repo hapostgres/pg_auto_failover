@@ -923,8 +923,6 @@ keeper_maintain_replication_slots(Keeper *keeper)
 	/* do we bypass the whole operation? */
 	bool bypass = false;
 
-	log_trace("keeper_maintain_replication_slots");
-
 	/*
 	 * We would like to maintain replication slots on the standby nodes in a
 	 * group by using the function pg_replication_slot_advance(). This ensures
@@ -965,17 +963,22 @@ keeper_maintain_replication_slots(Keeper *keeper)
 	else
 	{
 		/*
-		 * When using the PG_AUTOCTL_DEBUG environment variable, we still use
-		 * replication slots in all versions of Postgres 11 and 12, so that we
-		 * can test our implementation.
+		 * When running our test suite, we still use replication slots in all
+		 * versions of Postgres 11 and 12, for testing purposes.
+		 *
+		 * We estimate that we are in the test suite when both of
+		 * PG_AUTOCTL_DEBUG and PG_REGRESS_SOCK_DIR are set.
 		 */
-		if (env_exists(PG_AUTOCTL_DEBUG))
+		if (env_exists(PG_AUTOCTL_DEBUG) && env_exists("PG_REGRESS_SOCK_DIR"))
 		{
 			bypass = false;
 		}
 		else
 		{
-			bypass = !pg_setup_standby_slot_supported(pgSetup, LOG_TRACE);
+			bool maintainSlots =
+				pg_setup_standby_slot_supported(pgSetup, LOG_TRACE);
+
+			bypass = !maintainSlots;
 		}
 	}
 
@@ -984,6 +987,8 @@ keeper_maintain_replication_slots(Keeper *keeper)
 	 */
 	if (bypass)
 	{
+		log_trace("Skipping replication slots on a secondary running %d",
+				  pgSetup->control.pg_control_version);
 		return true;
 	}
 
