@@ -27,6 +27,7 @@
 #include "pghba.h"
 #include "pgsetup.h"
 #include "pgsql.h"
+#include "pidfile.h"
 #include "state.h"
 #include "string_utils.h"
 
@@ -314,10 +315,7 @@ cli_show_state_getopts(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
-	{
-		get_env_pgdata_or_exit(options.pgSetup.pgdata);
-	}
+	cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
 
 	keeperOptions = options;
 
@@ -536,10 +534,7 @@ cli_show_nodes_getopts(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
-	{
-		get_env_pgdata_or_exit(options.pgSetup.pgdata);
-	}
+	cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
 
 	keeperOptions = options;
 
@@ -762,16 +757,14 @@ cli_show_uri_getopts(int argc, char **argv)
 		}
 	}
 
-	if (showUriOptions.monitorOnly && !IS_EMPTY_STRING_BUFFER(showUriOptions.formation))
+	if (showUriOptions.monitorOnly &&
+		!IS_EMPTY_STRING_BUFFER(showUriOptions.formation))
 	{
 		log_fatal("Please use either --monitor or --formation, not both");
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
-	{
-		get_env_pgdata_or_exit(options.pgSetup.pgdata);
-	}
+	cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
 
 	if (!keeper_config_set_pathnames_from_pgdata(&(options.pathnames),
 												 options.pgSetup.pgdata))
@@ -1156,10 +1149,7 @@ cli_show_file_getopts(int argc, char **argv)
 		}
 	}
 
-	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
-	{
-		get_env_pgdata_or_exit(options.pgSetup.pgdata);
-	}
+	cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
 
 	if (!keeper_config_set_pathnames_from_pgdata(&options.pathnames,
 												 options.pgSetup.pgdata))
@@ -1453,10 +1443,10 @@ static void
 fprint_pidfile_as_json(const char *pidfile)
 {
 	JSON_Value *js = json_value_init_object();
-	JSON_Value *jsServices = json_value_init_object();
+	JSON_Value *jsServices = json_value_init_array();
+	JSON_Array *jsServicesArray = json_value_get_array(jsServices);
 
 	JSON_Object *jsobj = json_value_get_object(js);
-	JSON_Object *jsServicesObj = json_value_get_object(jsServices);
 
 	long fileSize = 0L;
 	char *fileContents = NULL;
@@ -1478,43 +1468,107 @@ fprint_pidfile_as_json(const char *pidfile)
 
 	for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
 	{
+		int pidLine = lineNumber + 1; /* zero-based, one-based */
 		char *separator = NULL;
 
 		/* main pid */
-		if (lineNumber == 0)
+		if (pidLine == PIDFILE_LINE_PID)
 		{
 			int pidnum = 0;
-			stringToInt(fileLines[0], &pidnum);
+			stringToInt(fileLines[lineNumber], &pidnum);
 			json_object_set_number(jsobj, "pid", (double) pidnum);
 
 			continue;
 		}
 
+		/* data directory */
+		if (pidLine == PIDFILE_LINE_DATA_DIR)
+		{
+			json_object_set_string(jsobj, "pgdata", fileLines[lineNumber]);
+		}
+
+		/* version string */
+		if (pidLine == PIDFILE_LINE_VERSION_STRING)
+		{
+			json_object_set_string(jsobj, "version", fileLines[lineNumber]);
+		}
+
+		/* extension version string */
+		if (pidLine == PIDFILE_LINE_EXTENSION_VERSION)
+		{
+			/* skip it, the supervisor does not connect to the monitor */
+			(void) 0;
+		}
+
 		/* semId */
-		if (lineNumber == 1)
+		if (pidLine == PIDFILE_LINE_SEM_ID)
 		{
 			int semId = 0;
-			stringToInt(fileLines[1], &semId);
-			json_object_set_number(jsobj, "semId", (double) semId);
+
+			if (stringToInt(fileLines[lineNumber], &semId))
+			{
+				json_object_set_number(jsobj, "semId", (double) semId);
+			}
+			else
+			{
+				log_error("Failed to parse semId \"%s\"", fileLines[lineNumber]);
+			}
 
 			continue;
 		}
 
-		if ((separator = strchr(fileLines[lineNumber], ' ')) == NULL)
+		if (pidLine >= PIDFILE_LINE_FIRST_SERVICE)
 		{
-			log_debug("Failed to find a space separator in line: \"%s\"",
-					  fileLines[lineNumber]);
-			continue;
-		}
-		else
-		{
-			int pidnum = 0;
-			char *serviceName = separator + 1;
+			JSON_Value *jsService = json_value_init_object();
+			JSON_Object *jsServiceObj = json_value_get_object(jsService);
 
-			*separator = '\0';
-			stringToInt(fileLines[lineNumber], &pidnum);
+			if ((separator = strchr(fileLines[lineNumber], ' ')) == NULL)
+			{
+				log_debug("Failed to find a space separator in line: \"%s\"",
+						  fileLines[lineNumber]);
+				continue;
+			}
+			else
+			{
+				int pidnum = 0;
+				char *serviceName = separator + 1;
 
-			json_object_set_number(jsServicesObj, serviceName, pidnum);
+				char servicePidFile[BUFSIZE] = { 0 };
+
+				char versionString[BUFSIZE] = { 0 };
+				char extensionVersionString[BUFSIZE] = { 0 };
+
+				*separator = '\0';
+				stringToInt(fileLines[lineNumber], &pidnum);
+
+				json_object_set_string(jsServiceObj, "name", serviceName);
+				json_object_set_number(jsServiceObj, "pid", pidnum);
+
+				/* grab version number of the service by parsing its pidfile */
+				get_service_pidfile(pidfile, serviceName, servicePidFile);
+
+				if (!read_service_pidfile_version_strings(
+						servicePidFile,
+						versionString,
+						extensionVersionString))
+				{
+					/* warn about it and continue */
+					log_warn("Failed to read version string for "
+							 "service \"%s\" in pidfile \"%s\"",
+							 serviceName,
+							 servicePidFile);
+				}
+				else
+				{
+					json_object_set_string(jsServiceObj,
+										   "version", versionString);
+					json_object_set_string(jsServiceObj,
+										   "pgautofailover",
+										   extensionVersionString);
+				}
+			}
+
+			json_array_append_value(jsServicesArray, jsService);
 		}
 	}
 

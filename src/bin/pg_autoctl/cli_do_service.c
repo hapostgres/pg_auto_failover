@@ -30,7 +30,6 @@
 #include "signals.h"
 #include "supervisor.h"
 
-
 static void cli_do_service_postgres(int argc, char **argv);
 static void cli_do_service_pgcontroller(int argc, char **argv);
 static void cli_do_service_postgresctl_on(int argc, char **argv);
@@ -232,7 +231,7 @@ cli_do_service_getpid(const char *serviceName)
 static void
 cli_do_service_getpid_postgres(int argc, char **argv)
 {
-	(void) cli_do_service_getpid("postgres");
+	(void) cli_do_service_getpid(SERVICE_NAME_POSTGRES);
 }
 
 
@@ -242,7 +241,7 @@ cli_do_service_getpid_postgres(int argc, char **argv)
 static void
 cli_do_service_getpid_listener(int argc, char **argv)
 {
-	(void) cli_do_service_getpid("listener");
+	(void) cli_do_service_getpid(SERVICE_NAME_MONITOR);
 }
 
 
@@ -252,7 +251,7 @@ cli_do_service_getpid_listener(int argc, char **argv)
 static void
 cli_do_service_getpid_node_active(int argc, char **argv)
 {
-	(void) cli_do_service_getpid("node active");
+	(void) cli_do_service_getpid(SERVICE_NAME_KEEPER);
 }
 
 
@@ -311,7 +310,7 @@ cli_do_service_restart(const char *serviceName)
 	log_info("Service \"%s\" has been restarted with pid %d",
 			 serviceName, newPid);
 
-	fformat(stdout, "%d\n", pid);
+	fformat(stdout, "%d\n", newPid);
 }
 
 
@@ -323,7 +322,7 @@ cli_do_service_restart(const char *serviceName)
 static void
 cli_do_service_restart_postgres(int argc, char **argv)
 {
-	(void) cli_do_service_restart("postgres");
+	(void) cli_do_service_restart(SERVICE_NAME_POSTGRES);
 }
 
 
@@ -336,7 +335,7 @@ cli_do_service_restart_postgres(int argc, char **argv)
 static void
 cli_do_service_restart_listener(int argc, char **argv)
 {
-	(void) cli_do_service_restart("listener");
+	(void) cli_do_service_restart(SERVICE_NAME_MONITOR);
 }
 
 
@@ -349,7 +348,7 @@ cli_do_service_restart_listener(int argc, char **argv)
 static void
 cli_do_service_restart_node_active(int argc, char **argv)
 {
-	(void) cli_do_service_restart("node active");
+	(void) cli_do_service_restart(SERVICE_NAME_KEEPER);
 }
 
 
@@ -425,6 +424,13 @@ cli_do_service_postgres(int argc, char **argv)
 
 	/* display a user-friendly process name */
 	(void) set_ps_title("pg_autoctl: start/stop postgres");
+
+	/* create the service pidfile */
+	if (!create_service_pidfile(pathnames.pid, SERVICE_NAME_POSTGRES))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
 
 	(void) service_postgres_ctl_loop(&postgres);
 }
@@ -530,6 +536,14 @@ cli_do_service_monitor_listener(int argc, char **argv)
 	/* display a user-friendly process name */
 	(void) set_ps_title("pg_autoctl: monitor listener");
 
+	/* create the service pidfile */
+	if (!create_service_pidfile(monitor.config.pathnames.pid,
+								SERVICE_NAME_MONITOR))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
 	/* Start the monitor service */
 	(void) monitor_service_run(&monitor);
 }
@@ -562,6 +576,14 @@ cli_do_service_node_active(int argc, char **argv)
 
 	/* display a user-friendly process name */
 	(void) set_ps_title("pg_autoctl: node active");
+
+	/* create the service pidfile */
+	if (!create_service_pidfile(keeper.config.pathnames.pid,
+								SERVICE_NAME_KEEPER))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
 
 	/* Start the node_active() protocol client */
 	(void) keeper_node_active_loop(&keeper, ppid);

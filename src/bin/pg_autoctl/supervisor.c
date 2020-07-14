@@ -20,6 +20,7 @@
 
 #include "cli_root.h"
 #include "defaults.h"
+#include "env_utils.h"
 #include "fsm.h"
 #include "keeper.h"
 #include "keeper_config.h"
@@ -822,10 +823,13 @@ supervisor_update_pidfile(Supervisor *supervisor)
 		return false;
 	}
 
-	/* first line should still be our supervisor pid, alone */
-	appendPQExpBuffer(content, "%d\n", supervisor->pid);
-	appendPQExpBuffer(content, "%d\n", log_semaphore.semId);
+	if (!prepare_pidfile_buffer(content, supervisor->pid))
+	{
+		/* errors have already been logged */
+		return false;
+	}
 
+	/* now add a line per service  */
 	for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
 	{
 		Service *service = &(supervisor->services[serviceIndex]);
@@ -872,15 +876,15 @@ supervisor_find_service_pid(const char *pidfile,
 	{
 		char *separator = NULL;
 
-		/* skip first and second lines: main pid, semaphore id */
-		if (lineNumber < 2)
+		/* skip first lines, see pidfile.h (where we count from 1) */
+		if ((lineNumber + 1) < PIDFILE_LINE_FIRST_SERVICE)
 		{
 			continue;
 		}
 
 		if ((separator = strchr(fileLines[lineNumber], ' ')) == NULL)
 		{
-			log_debug("Failed to find a space separator in line: \"%s\"",
+			log_error("Failed to find first space separator in line: \"%s\"",
 					  fileLines[lineNumber]);
 			continue;
 		}

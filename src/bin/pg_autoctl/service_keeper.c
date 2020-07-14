@@ -54,13 +54,13 @@ start_keeper(Keeper *keeper)
 
 	Service subprocesses[] = {
 		{
-			"postgres",
+			SERVICE_NAME_POSTGRES,
 			RP_PERMANENT,
 			-1,
 			&service_postgres_ctl_start
 		},
 		{
-			"node active",
+			SERVICE_NAME_KEEPER,
 			RP_PERMANENT,
 			-1,
 			&service_keeper_start,
