@@ -89,6 +89,7 @@ build_xdg_path(char *dst,
 
 	join_path_components(filename, xdg_topdir, "pg_autoctl");
 
+	/* append PGDATA now */
 	if (pgdata[0] == '/')
 	{
 		/* skip the first / to avoid having a double-slash in the name */
@@ -105,36 +106,19 @@ build_xdg_path(char *dst,
 		 * yet, precluding the use of realpath(3) to get the absolute name
 		 * here.
 		 */
-		if (directory_exists(pgdata))
+		char currentWorkingDirectory[MAXPGPATH] = { 0 };
+
+		if (getcwd(currentWorkingDirectory, MAXPGPATH) == NULL)
 		{
-			char absolutePgdata[MAXPGPATH] = { 0 };
-
-			/* normalize the existing path to PGDATA */
-			if (!normalize_filename(pgdata, absolutePgdata, MAXPGPATH))
-			{
-				/* errors have already been logged */
-				return false;
-			}
-
-			/* skip the first / to avoid having a double-slash in the name */
-			join_path_components(filename, filename, absolutePgdata + 1);
+			log_error("Failed to get the current working directory: %m");
+			return false;
 		}
-		else
-		{
-			char currentWorkingDirectory[MAXPGPATH] = { 0 };
 
-			if (getcwd(currentWorkingDirectory, MAXPGPATH) == NULL)
-			{
-				log_error("Failed to get the current working directory: %m");
-				return false;
-			}
+		/* avoid double-slash by skipping the first one */
+		join_path_components(filename, filename, currentWorkingDirectory + 1);
 
-			/* avoid double-slash by skipping the first one */
-			join_path_components(filename, filename, currentWorkingDirectory + 1);
-
-			/* now add in pgdata */
-			join_path_components(filename, filename, pgdata);
-		}
+		/* now add in pgdata */
+		join_path_components(filename, filename, pgdata);
 	}
 
 	/* mkdir -p the target directory */
