@@ -233,15 +233,6 @@ service_keeper_node_active_init(Keeper *keeper)
 		log_fatal("--disable-monitor disables pg_autoctl servives");
 		exit(EXIT_CODE_MONITOR);
 	}
-	else
-	{
-		/* Check that we are compatible with the monitor's extension version */
-		if (!keeper_check_monitor_extension_version(keeper))
-		{
-			/* errors have already been logged */
-			exit(EXIT_CODE_MONITOR);
-		}
-	}
 
 	return true;
 }
@@ -534,6 +525,53 @@ keeper_node_active(Keeper *keeper)
 	bool forceCacheInvalidation = false;
 	bool reportPgIsRunning = ReportPgIsRunning(keeper);
 
+	/*
+	 * First, connect to the monitor and check we're compatible with the
+	 * extension there. An upgrade on the monitor might have happened in
+	 * between loops here.
+	 *
+	 * Note that we don't need a very strong a guarantee about the version
+	 * number of the monitor extension, as we have other places in the code
+	 * that are protected against "suprises". The worst case would be a race
+	 * condition where the extension check passes, and then the monitor is
+	 * upgraded, and then we call node_active().
+	 *
+	 *  - The extension on the monitor is protected against running a version
+	 *    of the node_active (or any other) function that does not match with
+	 *    the SQL level version.
+	 *
+	 *  - Then, if we changed the API without changing the arguments, that
+	 *    means we changed what we may return. We are protected against changes
+	 *    in number of return values, so we're left with changes within the
+	 *    columns themselves. Basically that's a new state that we don't know
+	 *    how to handle. In that case we're going to fail to parse it, and at
+	 *    next attempt we're going to catch up with the new version number.
+	 *
+	 * All in all, the worst case is going to be one extra call before we
+	 * restart node active process, and an extra error message in the logs
+	 * during the live upgrade of pg_auto_failover.
+	 */
+	if (!keeper_check_monitor_extension_version(keeper))
+	{
+		/*
+		 * Okay we're not compatible with the current version of the
+		 * pgautofailover extension on the monitor. The most plausible scenario
+		 * is that the monitor got update: we're still running e.g. 1.4 and the
+		 * monitor is running 1.5.
+		 *
+		 * In that case we exit, and because the keeper node-active service is
+		 * RP_PERMANENT the supervisor is going to restart this process. The
+		 * restart happens with fork() and exec(), so it uses the current
+		 * version of pg_autoctl binary on disk, which with luck has been
+		 * updated to e.g. 1.5 too.
+		 *
+		 * TL;DR: just exit now, have the service restarted by the supervisor
+		 * with the expected version of pg_autoctl that matches the monitor's
+		 * extension version.
+		 */
+		exit(EXIT_CODE_MONITOR);
+	}
+
 	/* We used to output that in INFO every 5s, which is too much chatter */
 	log_debug("Calling node_active for node %s/%d/%d with current state: "
 			  "%s, "
@@ -690,12 +728,10 @@ is_network_healthy(Keeper *keeper)
 		return true;
 	}
 
-	/* *INDENT-OFF* */
-	log_info(
-		"Failed to contact the monitor or standby in %" PRIu64 " seconds, "
-		"at %d seconds we shut down PostgreSQL to prevent split brain issues",
-		now - keeperState->last_monitor_contact, networkPartitionTimeout);
-	/* *INDENT-ON* */
+	log_info("Failed to contact the monitor or standby in %d seconds, "
+			 "at %d seconds we shut down PostgreSQL to prevent split brain issues",
+			 (int) (now - keeperState->last_monitor_contact),
+			 networkPartitionTimeout);
 
 	return false;
 }
