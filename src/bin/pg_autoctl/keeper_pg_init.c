@@ -326,12 +326,14 @@ keeper_pg_init_continue(Keeper *keeper)
 	KeeperStateInit *initState = &(keeper->initState);
 	KeeperConfig *config = &(keeper->config);
 
+	/* initialize our keeper state and read the state file */
 	if (!keeper_init(keeper, config))
 	{
 		/* errors have already been logged */
 		return false;
 	}
 
+	/* also read the init state file */
 	if (!keeper_init_state_read(initState, config->pathnames.init))
 	{
 		log_fatal("Failed to restart from previous keeper init attempt");

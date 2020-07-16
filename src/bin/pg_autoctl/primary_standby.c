@@ -267,6 +267,9 @@ ensure_postgres_service_is_running(LocalPostgresServer *postgres)
 
 	if (!pgIsRunning)
 	{
+		log_info("Waiting until Postgres is ready to serve \"%s\"",
+				 pgSetup->pgdata);
+
 		/* main logging is done in the Postgres controller sub-process */
 		pgIsRunning = pg_setup_wait_until_is_ready(pgSetup, timeout, LOG_DEBUG);
 

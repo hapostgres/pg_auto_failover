@@ -15,6 +15,7 @@
 
 #include "parson.h"
 
+#include "env_utils.h"
 #include "file_utils.h"
 #include "keeper.h"
 #include "keeper_config.h"
@@ -921,19 +922,93 @@ keeper_drop_replication_slots_for_removed_nodes(Keeper *keeper)
 bool
 keeper_maintain_replication_slots(Keeper *keeper)
 {
+	Monitor *monitor = &(keeper->monitor);
 	PostgresSetup *pgSetup = &(keeper->postgres.postgresSetup);
 	LocalPostgresServer *postgres = &(keeper->postgres);
-	NodeAddressArray *otherNodesArray = &(keeper->otherNodes);
 
-	log_trace("keeper_maintain_replication_slots");
+	char *host = keeper->config.nodename;
+	int port = pgSetup->pgport;
 
+	/* do we bypass the whole operation? */
+	bool bypass = false;
+
+	/*
+	 * We would like to maintain replication slots on the standby nodes in a
+	 * group by using the function pg_replication_slot_advance(). This ensures
+	 * that every node keep a local copy of the WAL files that each other node
+	 * might need.
+	 *
+	 * This WAL files might be necessary in the following two cases:
+	 *
+	 * - when a primary has been demoted and now rejoins as a secondary, then
+	 *   it uses pg_rewind and needs to find the WAL it missed on the new
+	 *   primary ; in that case we need the replication slot to have been
+	 *   maintained before the failover.
+	 *
+	 * - when a failover happens with more than one standby, all the standby
+	 *   nodes that are not promoted need to follow a new primary node, and for
+	 *   that it's best that the new-primary already had a replication slot for
+	 *   its new set of standby nodes.
+	 *
+	 * The pg_replication_slot_advance() function is new in Postgres 11, so we
+	 * can't install replication slots on our standby nodes when using Postgres
+	 * 10.
+	 *
+	 * In Postgres 11 and 12, the pg_replication_slot_advance() function has
+	 * been buggy for quite some time and prevented WAL recycling on standby
+	 * servers, see https://github.com/citusdata/pg_auto_failover/issues/283
+	 * for the problem and
+	 * https://git.postgresql.org/gitweb/?p=postgresql.git;a=commit;h=b48df81
+	 * for the solution.
+	 *
+	 * The bug fix appears in the minor releases 12.4 and 11.9. Before that, we
+	 * disable the slot maintenance feature of pg_auto_failover.
+	 */
 	if (pgSetup->control.pg_control_version < 1100)
 	{
 		/* Postgres 10 does not have pg_replication_slot_advance() */
+		bypass = true;
+	}
+	else
+	{
+		/*
+		 * When running our test suite, we still use replication slots in all
+		 * versions of Postgres 11 and 12, for testing purposes.
+		 *
+		 * We estimate that we are in the test suite when both of
+		 * PG_AUTOCTL_DEBUG and PG_REGRESS_SOCK_DIR are set.
+		 */
+		if (env_exists(PG_AUTOCTL_DEBUG) && env_exists("PG_REGRESS_SOCK_DIR"))
+		{
+			bypass = false;
+		}
+		else
+		{
+			bool maintainSlots =
+				pg_setup_standby_slot_supported(pgSetup, LOG_TRACE);
+
+			bypass = !maintainSlots;
+		}
+	}
+
+	/*
+	 * Do we actually want to maintain replication slots on this standby node?
+	 */
+	if (bypass)
+	{
+		log_trace("Skipping replication slots on a secondary running %d",
+				  pgSetup->control.pg_control_version);
 		return true;
 	}
 
-	if (!postgres_replication_slot_maintain(postgres, otherNodesArray))
+	if (!monitor_get_other_nodes(monitor, host, port,
+								 ANY_STATE, &(keeper->otherNodes)))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	if (!postgres_replication_slot_maintain(postgres, &(keeper->otherNodes)))
 	{
 		log_error("Failed to maintain replication slots on the local Postgres "
 				  "instance, see above for details");
@@ -1074,7 +1149,9 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 	KeeperStateInit *initState = &(keeper->initState);
 
 	Monitor *monitor = &(keeper->monitor);
+
 	MonitorAssignedState assignedState = { 0 };
+	char expectedSlotName[BUFSIZE] = { 0 };
 
 	/*
 	 * First try to create our state file. The keeper_state_create_file function
@@ -1152,6 +1229,14 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 
 		goto rollback;
 	}
+
+	/*
+	 * Also update the groupId and replication slot name in the
+	 * configuration file.
+	 */
+	(void) postgres_sprintf_replicationSlotName(assignedState.nodeId,
+												expectedSlotName,
+												sizeof(expectedSlotName));
 
 	/* also update the groupId in the configuration file. */
 	if (!keeper_config_update(config,

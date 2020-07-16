@@ -373,13 +373,15 @@ pg_setup_init(PostgresSetup *pgSetup,
 					errors++;
 				}
 			}
-
-			log_debug("Found PostgreSQL system %" PRIu64 " at \"%s\", "
-														 "version %u, catalog version %u",
-					  pgSetup->control.system_identifier,
-					  pgSetup->pgdata,
-					  pgSetup->control.pg_control_version,
-					  pgSetup->control.catalog_version_no);
+			else
+			{
+				log_debug("Found PostgreSQL system %" PRIu64 " at \"%s\", "
+															 "version %u, catalog version %u",
+						  pgSetup->control.system_identifier,
+						  pgSetup->pgdata,
+						  pgSetup->control.pg_control_version,
+						  pgSetup->control.catalog_version_no);
+			}
 		}
 	}
 
@@ -919,6 +921,22 @@ pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 bool
 pg_setup_pgdata_exists(PostgresSetup *pgSetup)
 {
+	char globalControlPath[MAXPGPATH] = { 0 };
+
+	/* make sure our cached value in pgSetup still makes sense */
+	if (!directory_exists(pgSetup->pgdata))
+	{
+		return false;
+	}
+
+	/* globalControlFilePath = $PGDATA/global/pg_control */
+	join_path_components(globalControlPath, pgSetup->pgdata, "global/pg_control");
+
+	if (!file_exists(globalControlPath))
+	{
+		return false;
+	}
+
 	return pgSetup->control.system_identifier != 0;
 }
 
@@ -1084,7 +1102,7 @@ pg_setup_wait_until_is_ready(PostgresSetup *pgSetup, int timeout, int logLevel)
 		/* let's not be THAT verbose about it */
 		if ((attempts - 1) % 10 == 0)
 		{
-			log_trace("pg_setup_wait_until_is_ready(): postgres %s, "
+			log_debug("pg_setup_wait_until_is_ready(): postgres %s, "
 					  "pid %d (was %d), after %ds and %d attempt(s)",
 					  pgIsRunning ? "is running" : "is not running",
 					  pgSetup->pidFile.pid,
@@ -1124,7 +1142,6 @@ pg_setup_wait_until_is_ready(PostgresSetup *pgSetup, int timeout, int logLevel)
 
 		*pgSetup = newPgSetup;
 
-
 		/* avoid an extra pg_setup_is_ready call if we're all good already */
 		pgIsReady = pgSetup->pm_status == POSTMASTER_STATUS_READY;
 	}
@@ -1144,7 +1161,7 @@ pg_setup_wait_until_is_ready(PostgresSetup *pgSetup, int timeout, int logLevel)
 		/* let's not be THAT verbose about it */
 		if ((attempts - 1) % 10 == 0)
 		{
-			log_trace("pg_setup_wait_until_is_ready(): pgstatus is %s, "
+			log_debug("pg_setup_wait_until_is_ready(): pgstatus is %s, "
 					  "pid %d (was %d), after %ds and %d attempt(s)",
 					  pmStatusToString(pgSetup->pm_status),
 					  pgSetup->pidFile.pid,
@@ -1883,4 +1900,70 @@ pgsetup_sslmode_to_string(SSLMode sslMode)
 	/* This is a huge bug */
 	log_error("BUG: some unknown SSL_MODE enum value was encountered");
 	return "unknown";
+}
+
+
+/*
+ * pg_setup_standby_slot_supported returns true when the target Postgres
+ * instance represented in pgSetup is compatible with using
+ * pg_replication_slot_advance() on a standby node.
+ *
+ * In Postgres 11 and 12, the pg_replication_slot_advance() function has been
+ * buggy and prevented WAL recycling on standby nodes.
+ *
+ * See https://github.com/citusdata/pg_auto_failover/issues/283 for the problem
+ * and https://git.postgresql.org/gitweb/?p=postgresql.git;a=commit;h=b48df81
+ * for the solution.
+ *
+ * We need Postgres 11 starting at 11.9, Postgres 12 starting at 12.4, or
+ * Postgres 13 or more recent to make use of pg_replication_slot_advance.
+ */
+bool
+pg_setup_standby_slot_supported(PostgresSetup *pgSetup, int logLevel)
+{
+	int major = pgSetup->control.pg_control_version / 100;
+	int minor = pgSetup->control.pg_control_version % 100;
+
+	/* do we have Postgres 10 (or before, though we don't support that) */
+	if (pgSetup->control.pg_control_version < 1100)
+	{
+		log_trace("pg_setup_standby_slot_supported(%d): false",
+				  pgSetup->control.pg_control_version);
+		return false;
+	}
+
+	/* Postgres 11.0 up to 11.8 included the bug */
+	if (pgSetup->control.pg_control_version >= 1100 &&
+		pgSetup->control.pg_control_version < 1109)
+	{
+		log_level(logLevel,
+				  "Postgres %d.%d does not support replication slots "
+				  "on a standby node", major, minor);
+
+		return false;
+	}
+
+	/* Postgres 12.0 up to 12.3 included the bug */
+	if (pgSetup->control.pg_control_version >= 1200 &&
+		pgSetup->control.pg_control_version < 1204)
+	{
+		log_level(logLevel,
+				  "Postgres %d.%d does not support replication slots "
+				  "on a standby node", major, minor);
+
+		return false;
+	}
+
+	/* Starting with Postgres 13, all versions are known to have the bug fix */
+	if (pgSetup->control.pg_control_version >= 1300)
+	{
+		return true;
+	}
+
+	/* should not happen */
+	log_debug("BUG in pg_setup_standby_slot_supported(%d): "
+			  "unknown Postgres version, returning false",
+			  pgSetup->control.pg_control_version);
+
+	return false;
 }

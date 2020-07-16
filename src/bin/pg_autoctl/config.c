@@ -89,6 +89,7 @@ build_xdg_path(char *dst,
 
 	join_path_components(filename, xdg_topdir, "pg_autoctl");
 
+	/* append PGDATA now */
 	if (pgdata[0] == '/')
 	{
 		/* skip the first / to avoid having a double-slash in the name */
