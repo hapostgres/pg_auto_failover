@@ -91,7 +91,7 @@ StartMonitorNode(void)
 
 	DefineCustomIntVariable("pgautofailover.health_check_period",
 							"Duration between each check (in milliseconds).",
-							NULL, &HealthCheckPeriod, 20 * 1000, 1, INT_MAX, PGC_SIGHUP,
+							NULL, &HealthCheckPeriod, 1 * 1000, 1, INT_MAX, PGC_SIGHUP,
 							GUC_UNIT_MS, NULL, NULL, NULL);
 
 	DefineCustomIntVariable("pgautofailover.health_check_timeout",

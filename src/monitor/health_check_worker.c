@@ -148,7 +148,7 @@ static volatile sig_atomic_t got_sighup = false;
 static volatile sig_atomic_t got_sigterm = false;
 
 /* GUC variables */
-int HealthCheckPeriod = 20 * 1000;
+int HealthCheckPeriod = 1 * 1000;
 int HealthCheckTimeout = 5 * 1000;
 int HealthCheckMaxRetries = 2;
 int HealthCheckRetryDelay = 2 * 1000;
