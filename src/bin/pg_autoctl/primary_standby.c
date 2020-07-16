@@ -116,6 +116,17 @@ local_postgres_set_status_path(LocalPostgresServer *postgres, bool unlink)
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	LocalExpectedPostgresStatus *pgStatus = &(postgres->expectedPgStatus);
 
+	/* normalize our PGDATA path when it exists on-disk already */
+ 	if (directory_exists(pgSetup->pgdata))
+ 	{
+ 		/* normalize the existing path to PGDATA */
+ 		if (!normalize_filename(pgSetup->pgdata, pgSetup->pgdata, MAXPGPATH))
+ 		{
+ 			/* errors have already been logged */
+ 			return false;
+ 		}
+ 	}
+
 	log_trace("local_postgres_set_status_path: %s", pgSetup->pgdata);
 
 	/* initialize our Postgres state file path */
@@ -152,6 +163,8 @@ bool
 local_postgres_unlink_status_file(LocalPostgresServer *postgres)
 {
 	LocalExpectedPostgresStatus *pgStatus = &(postgres->expectedPgStatus);
+
+	log_trace("local_postgres_unlink_status_file: %s", pgStatus->pgStatusPath);
 
 	return unlink_file(pgStatus->pgStatusPath);
 }
