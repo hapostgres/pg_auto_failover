@@ -89,6 +89,7 @@ build_xdg_path(char *dst,
 
 	join_path_components(filename, xdg_topdir, "pg_autoctl");
 
+	/* append PGDATA now */
 	if (pgdata[0] == '/')
 	{
 		/* skip the first / to avoid having a double-slash in the name */
@@ -105,7 +106,7 @@ build_xdg_path(char *dst,
 		 * yet, precluding the use of realpath(3) to get the absolute name
 		 * here.
 		 */
-		char currentWorkingDirectory[MAXPGPATH];
+		char currentWorkingDirectory[MAXPGPATH] = { 0 };
 
 		if (getcwd(currentWorkingDirectory, MAXPGPATH) == NULL)
 		{
@@ -127,15 +128,15 @@ build_xdg_path(char *dst,
 		return false;
 	}
 
-	/* and finally add the configuration file name */
-	join_path_components(filename, filename, name);
-
-	/* normalize the path to the configuration file, if it exists */
+	/* normalize the existing path to the configuration file */
 	if (!normalize_filename(filename, dst, MAXPGPATH))
 	{
 		/* errors have already been logged */
 		return false;
 	}
+
+	/* and finally add the configuration file name */
+	join_path_components(dst, dst, name);
 
 	return true;
 }
