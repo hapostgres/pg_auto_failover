@@ -33,10 +33,10 @@ def test_001_init_primary():
     assert node1.wait_until_state(target_state="single")
 
 def test_002_candidate_priority():
-    assert node1.get_candidate_priority() == 100
+    assert node1.get_candidate_priority() == 50
 
     assert not node1.set_candidate_priority(-1)
-    assert node1.get_candidate_priority() == 100
+    assert node1.get_candidate_priority() == 50
 
     assert node1.set_candidate_priority(99)
     assert node1.get_candidate_priority() == 99
