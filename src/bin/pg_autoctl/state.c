@@ -457,16 +457,6 @@ NodeStateToString(NodeState s)
 			return "fast_forward";
 		}
 
-		case WAIT_FORWARD_STATE:
-		{
-			return "wait_forward";
-		}
-
-		case WAIT_CASCADE_STATE:
-		{
-			return "wait_cascade";
-		}
-
 		case JOIN_SECONDARY_STATE:
 		{
 			return "join_secondary";
@@ -569,14 +559,6 @@ NodeStateFromString(const char *str)
 	else if (strcmp(str, "fast_forward") == 0)
 	{
 		return FAST_FORWARD_STATE;
-	}
-	else if (strcmp(str, "wait_forward") == 0)
-	{
-		return WAIT_FORWARD_STATE;
-	}
-	else if (strcmp(str, "wait_cascade") == 0)
-	{
-		return WAIT_CASCADE_STATE;
 	}
 	else if (strcmp(str, "apply_settings") == 0)
 	{

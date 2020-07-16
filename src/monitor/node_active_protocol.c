@@ -376,12 +376,7 @@ NodeActive(char *formationId, char *nodeName, int32 nodePort,
 			 */
 			char message[BUFSIZE];
 
-			List *notifyLSNStates =
-				list_make3_int(REPLICATION_STATE_REPORT_LSN,
-							   REPLICATION_STATE_WAIT_FORWARD,
-							   REPLICATION_STATE_FAST_FORWARD);
-
-			if (IsStateIn(pgAutoFailoverNode->goalState, notifyLSNStates))
+			if (pgAutoFailoverNode->goalState == REPLICATION_STATE_REPORT_LSN)
 			{
 				LogAndNotifyMessage(
 					message, BUFSIZE,

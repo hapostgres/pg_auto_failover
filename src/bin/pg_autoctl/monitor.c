@@ -521,6 +521,64 @@ monitor_get_coordinator(Monitor *monitor, char *formation, NodeAddress *node)
 
 
 /*
+ * monitor_get_most_advanced_standby finds the standby node in state REPORT_LSN
+ * with the most advanced LSN position.
+ */
+bool
+monitor_get_most_advanced_standby(Monitor *monitor,
+								  char *formation, int groupId,
+								  NodeAddress *node)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT nodeid, nodename, nodeport, reportedlsn, false "
+		" FROM pgautofailover.node "
+		"WHERE formation = $1 AND groupid = $2 AND reportedstate = 'report_lsn' "
+		"ORDER BY reportedlsn DESC"
+		"LIMIT 1";
+	int paramCount = 2;
+	Oid paramTypes[2] = { TEXTOID, INT4OID };
+	const char *paramValues[2];
+	NodeAddressParseContext parseContext = { { 0 }, node, false };
+	IntString groupIdString = intToString(groupId);
+
+	paramValues[0] = formation;
+	paramValues[1] = groupIdString.strValue;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &parseContext, parseNodeResult))
+	{
+		log_error(
+			"Failed to get most advanced standby node in the HA group "
+			"from the monitor while running \"%s\" with "
+			"formation \"%s\" and group ID %d",
+			sql, formation, groupId);
+		return false;
+	}
+
+	/* disconnect from PostgreSQL now */
+	pgsql_finish(&monitor->pgsql);
+
+	if (!parseContext.parsedOK)
+	{
+		log_error(
+			"Failed to get the most advanced standby node from the monitor "
+			"while running \"%s\" with formation \"%s\" and group ID %d "
+			"because it returned an unexpected result. "
+			"See previous line for details.",
+			sql, formation, groupId);
+		return false;
+	}
+
+	log_debug("The most advanced standby node is %s:%d, with id %d",
+			  node->host, node->port, node->nodeId);
+
+	return true;
+}
+
+
+/*
  * monitor_register_node performs the initial registration of a node with the
  * monitor in the given formation.
  *

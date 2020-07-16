@@ -117,15 +117,15 @@ local_postgres_set_status_path(LocalPostgresServer *postgres, bool unlink)
 	LocalExpectedPostgresStatus *pgStatus = &(postgres->expectedPgStatus);
 
 	/* normalize our PGDATA path when it exists on-disk already */
- 	if (directory_exists(pgSetup->pgdata))
- 	{
- 		/* normalize the existing path to PGDATA */
- 		if (!normalize_filename(pgSetup->pgdata, pgSetup->pgdata, MAXPGPATH))
- 		{
- 			/* errors have already been logged */
- 			return false;
- 		}
- 	}
+	if (directory_exists(pgSetup->pgdata))
+	{
+		/* normalize the existing path to PGDATA */
+		if (!normalize_filename(pgSetup->pgdata, pgSetup->pgdata, MAXPGPATH))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+	}
 
 	log_trace("local_postgres_set_status_path: %s", pgSetup->pgdata);
 

@@ -52,8 +52,6 @@ typedef enum
 	WAIT_MAINTENANCE_STATE,
 	REPORT_LSN_STATE,
 	FAST_FORWARD_STATE,
-	WAIT_FORWARD_STATE,
-	WAIT_CASCADE_STATE,
 	JOIN_SECONDARY_STATE,
 
 	/* Allow some wildcard-matching transitions (from ANY state to) */

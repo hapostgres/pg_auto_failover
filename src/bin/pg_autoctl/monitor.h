@@ -75,6 +75,9 @@ bool monitor_get_primary(Monitor *monitor, char *formation, int groupId,
 						 NodeAddress *node);
 bool monitor_get_coordinator(Monitor *monitor, char *formation,
 							 NodeAddress *node);
+bool monitor_get_most_advanced_standby(Monitor *monitor,
+									   char *formation, int groupId,
+									   NodeAddress *node);
 bool monitor_register_node(Monitor *monitor,
 						   char *formation,
 						   char *host,

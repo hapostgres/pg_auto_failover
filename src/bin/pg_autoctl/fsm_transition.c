@@ -1201,38 +1201,28 @@ fsm_fast_forward(Keeper *keeper)
 	Monitor *monitor = &(keeper->monitor);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+	int groupId = keeper->state.current_group;
 
-	NodeAddress *upstreamNode = NULL;
+	NodeAddress upstreamNode = { 0 };
 	ReplicationSource replicationSource = { 0 };
 
 	char slotName[MAXCONNINFO] = { 0 };
 
 	if (!config->monitorDisabled)
 	{
-		char *host = config->nodename;
-		int port = pgSetup->pgport;
-
-		if (!monitor_get_other_nodes(monitor, host, port,
-									 WAIT_CASCADE_STATE,
-									 &(keeper->otherNodes)))
+		if (!monitor_get_most_advanced_standby(monitor,
+											   config->formation,
+											   groupId,
+											   &upstreamNode))
 		{
 			/* errors have already been logged */
 			return false;
 		}
-
-		if (keeper->otherNodes.count != 1)
-		{
-			log_error("Failed to find a node in state \"wait_cascade\" on "
-					  "the monitor, pgautofailover.get_other_nodes() "
-					  "returned %d node(s)",
-					  keeper->otherNodes.count);
-		}
 	}
-
-	/*
-	 * We expect a single WAIT_CASCADE node in the system at any point.
-	 */
-	upstreamNode = &(keeper->otherNodes.nodes[0]);
+	else
+	{
+		upstreamNode = keeper->otherNodes.nodes[0];
+	}
 
 	/*
 	 * Postgres 10 does not have pg_replication_slot_advance(), so we don't
@@ -1244,13 +1234,13 @@ fsm_fast_forward(Keeper *keeper)
 	}
 
 	if (!standby_init_replication_source(postgres,
-										 upstreamNode,
+										 &upstreamNode,
 										 PG_AUTOCTL_REPLICA_USERNAME,
 										 config->replication_password,
 										 slotName,
 										 config->maximum_backup_rate,
 										 config->backupDirectory,
-										 upstreamNode->lsn,
+										 upstreamNode.lsn,
 										 config->pgSetup.ssl,
 										 keeper->state.current_node_id))
 	{
@@ -1295,23 +1285,6 @@ fsm_cleanup_and_resume_as_primary(Keeper *keeper)
 		return false;
 	}
 
-	return true;
-}
-
-
-/*
- * When the selected failover candidate does not have the latest received WAL,
- * it fetches them from another standby. This standby that has the latest WAL
- * then goes in WAIT_CASCADE state to add the other node's HBA entries and
- * such.
- *
- * The selected failover node is in state WAIT_FORWARD and we need to open an
- * HBA entry for it. We already have a replication slot ready.
- */
-bool
-fsm_prepare_cascade(Keeper *keeper)
-{
-	/* merge commit note: remove the function and states altogether */
 	return true;
 }
 

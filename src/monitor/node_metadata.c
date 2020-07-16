@@ -1220,10 +1220,7 @@ bool
 IsBeingPromoted(AutoFailoverNode *node)
 {
 	return node != NULL &&
-		   (node->reportedState == REPLICATION_STATE_WAIT_FORWARD ||
-			node->goalState == REPLICATION_STATE_WAIT_FORWARD
-
-			|| node->reportedState == REPLICATION_STATE_FAST_FORWARD ||
+		   (node->reportedState == REPLICATION_STATE_FAST_FORWARD ||
 			node->goalState == REPLICATION_STATE_FAST_FORWARD
 
 			|| node->reportedState == REPLICATION_STATE_PREPARE_PROMOTION ||

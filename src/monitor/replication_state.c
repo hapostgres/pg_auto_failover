@@ -246,16 +246,6 @@ ReplicationStateGetName(ReplicationState replicationState)
 			return "fast_forward";
 		}
 
-		case REPLICATION_STATE_WAIT_FORWARD:
-		{
-			return "wait_forward";
-		}
-
-		case REPLICATION_STATE_WAIT_CASCADE:
-		{
-			return "wait_cascade";
-		}
-
 		case REPLICATION_STATE_JOIN_SECONDARY:
 		{
 			return "join_secondary";

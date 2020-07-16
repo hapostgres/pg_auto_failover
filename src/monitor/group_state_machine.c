@@ -153,9 +153,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 * failover.
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_REPORT_LSN) ||
-		IsCurrentState(activeNode, REPLICATION_STATE_WAIT_FORWARD) ||
-		IsCurrentState(activeNode, REPLICATION_STATE_FAST_FORWARD) ||
-		IsCurrentState(activeNode, REPLICATION_STATE_WAIT_CASCADE))
+		IsCurrentState(activeNode, REPLICATION_STATE_FAST_FORWARD))
 	{
 		return ProceedGroupStateForMSFailover(activeNode, primaryNode);
 	}
@@ -966,26 +964,19 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 
 				LogAndNotifyMessage(
 					message, BUFSIZE,
-					"Setting goal state of node %d (%s:%d) to wait_forward "
-					"and goal state of node %d (%s:%d) to wait_cascade "
+					"Setting goal state of node %d (%s:%d) to fast_forward "
 					"after node %d (%s:%d) became unhealthy "
 					"and %d nodes reported their LSN position.",
 					selectedNode->nodeId,
 					selectedNode->nodeName,
 					selectedNode->nodePort,
-					mostAdvancedNode->nodeId,
-					mostAdvancedNode->nodeName,
-					mostAdvancedNode->nodePort,
 					primaryNode->nodeId,
 					primaryNode->nodeName,
 					primaryNode->nodePort,
 					reportedLSNCount);
 
 				AssignGoalState(selectedNode,
-								REPLICATION_STATE_WAIT_FORWARD, message);
-
-				AssignGoalState(mostAdvancedNode,
-								REPLICATION_STATE_WAIT_CASCADE, message);
+								REPLICATION_STATE_FAST_FORWARD, message);
 
 				return true;
 			}
@@ -1047,67 +1038,7 @@ static bool
 ProceedWithMSFailover(AutoFailoverNode *activeNode,
 					  AutoFailoverNode *candidateNode)
 {
-	List *finishedCascading =
-		list_make5_int(REPLICATION_STATE_PREPARE_PROMOTION,
-					   REPLICATION_STATE_STOP_REPLICATION,
-					   REPLICATION_STATE_WAIT_PRIMARY,
-					   REPLICATION_STATE_PRIMARY,
-					   REPLICATION_STATE_JOIN_PRIMARY);
-
 	Assert(candidateNode != NULL);
-
-	/*
-	 * Everyone reported their LSN, we found a candidate, and it has to fast
-	 * forward. First, the node with the most advanced LSN position had to
-	 * reach wait_cascade:
-	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_WAIT_CASCADE) &&
-		IsCurrentState(candidateNode, REPLICATION_STATE_WAIT_FORWARD))
-	{
-		char message[BUFSIZE];
-
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of node %d (%s:%d) to fast_forward "
-			"after node %d (%s:%d) converged to wait_cascade.",
-			candidateNode->nodeId,
-			candidateNode->nodeName,
-			candidateNode->nodePort,
-			activeNode->nodeId,
-			activeNode->nodeName,
-			activeNode->nodePort);
-
-		AssignGoalState(candidateNode,
-						REPLICATION_STATE_FAST_FORWARD, message);
-
-		return true;
-	}
-
-	/*
-	 * The candidate had to fast forward with the activeNode, grabbing WAL bits
-	 * that only this node had. Now that's done. The activeNode has to follow
-	 * the new primary that's being promoted.
-	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_WAIT_CASCADE) &&
-		IsStateIn(candidateNode->goalState, finishedCascading))
-	{
-		char message[BUFSIZE];
-
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of node %d (%s:%d) to secondary "
-			"after node %d (%s:%d) converged to stop_replication.",
-			activeNode->nodeId,
-			activeNode->nodeName,
-			activeNode->nodePort,
-			candidateNode->nodeId,
-			candidateNode->nodeName,
-			candidateNode->nodePort);
-
-		AssignGoalState(activeNode, REPLICATION_STATE_JOIN_SECONDARY, message);
-
-		return true;
-	}
 
 	/*
 	 * When the candidate is done fast forwarding the locally missing WAL bits,

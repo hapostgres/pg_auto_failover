@@ -145,14 +145,8 @@
 	"Stop traffic to primary, " \
 	"wait for it to finish draining."
 
-#define COMMENT_REPORT_LSN_TO_WAIT_FORWARD \
-	"Preparing to fetch missing WAL bits from another standby before promotion"
-
 #define COMMENT_REPORT_LSN_TO_FAST_FORWARD \
 	"Fetching missing WAL bits from another standby before promotion"
-
-#define COMMENT_REPORT_LSN_TO_WAIT_CASCADE \
-	"Prepare replication for the failover candidate"
 
 #define COMMENT_FOLLOW_NEW_PRIMARY \
 	"Switch replication to the new primary"
@@ -162,9 +156,6 @@
 
 #define COMMENT_APPLY_SETTINGS_TO_PRIMARY \
 	"Back to primary state after having applied new pg_auto_failover settings"
-
-#define COMMENT_WAIT_CASCADE_TO_JOIN_SECONDARY \
-	"Switch replication to the new primary"
 
 #define COMMENT_REPORT_LSN_TO_JOIN_SECONDARY \
 	"A failover candidate has been selected, stop replication"
@@ -299,7 +290,7 @@ KeeperFSMTransition KeeperFSM[] = {
 	/*
 	 * finish the promotion
 	 */
-	{ STOP_REPLICATION_STATE, WAIT_PRIMARY_STATE, COMMENT_STOP_REPLICATION_TO_WAIT_PRIMARY, &fsm_promote_standby_to_primary },	
+	{ STOP_REPLICATION_STATE, WAIT_PRIMARY_STATE, COMMENT_STOP_REPLICATION_TO_WAIT_PRIMARY, &fsm_promote_standby_to_primary },
 	{ PREP_PROMOTION_STATE, WAIT_PRIMARY_STATE, COMMENT_BLOCKED_WRITES, &fsm_promote_standby },
 
 	/*
@@ -331,12 +322,8 @@ KeeperFSMTransition KeeperFSM[] = {
 	{ CATCHINGUP_STATE, REPORT_LSN_STATE, COMMENT_SECONDARY_TO_REPORT_LSN, &fsm_report_lsn },
 	{ REPORT_LSN_STATE, PREP_PROMOTION_STATE, COMMENT_REPORT_LSN_TO_PREP_PROMOTION, &fsm_prepare_standby_for_promotion },
 
-	{ REPORT_LSN_STATE, WAIT_FORWARD_STATE, COMMENT_REPORT_LSN_TO_WAIT_FORWARD, NULL },
-	{ WAIT_FORWARD_STATE, FAST_FORWARD_STATE, COMMENT_REPORT_LSN_TO_FAST_FORWARD, &fsm_fast_forward },
+	{ REPORT_LSN_STATE, FAST_FORWARD_STATE, COMMENT_REPORT_LSN_TO_FAST_FORWARD, &fsm_fast_forward },
 	{ FAST_FORWARD_STATE, PREP_PROMOTION_STATE, COMMENT_FAST_FORWARD_TO_PREP_PROMOTION, &fsm_cleanup_and_resume_as_primary },
-
-	{ REPORT_LSN_STATE, WAIT_CASCADE_STATE, COMMENT_REPORT_LSN_TO_WAIT_CASCADE, &fsm_prepare_cascade },
-	{ WAIT_CASCADE_STATE, JOIN_SECONDARY_STATE, COMMENT_WAIT_CASCADE_TO_JOIN_SECONDARY, &fsm_checkpoint_and_stop_postgres },
 
 	{ REPORT_LSN_STATE, JOIN_SECONDARY_STATE, COMMENT_REPORT_LSN_TO_JOIN_SECONDARY, &fsm_checkpoint_and_stop_postgres },
 	{ JOIN_SECONDARY_STATE, SECONDARY_STATE, COMMENT_JOIN_SECONDARY_TO_SECONDARY, &fsm_follow_new_primary },
