@@ -668,8 +668,8 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 			 * does not change the configured trade-offs. Writes are blocked
 			 * until one of the two defective standby nodes is available again.
 			 */
-			if (formation->number_sync_standbys == 1 &&
-				failoverCandidateCount < formation->number_sync_standbys)
+			if (formation->number_sync_standbys == 0 &&
+				failoverCandidateCount == 0)
 			{
 				char message[BUFSIZE];
 

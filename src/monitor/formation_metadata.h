@@ -68,6 +68,9 @@ extern bool FormationNumSyncStandbyIsValid(AutoFailoverFormation *formation,
 										   int groupId,
 										   int *standbyCount);
 
+extern bool SetFormationNumberSyncStandbys(const char *formationId,
+										   int numberSyncStandbys);
+
 extern FormationKind FormationKindFromString(const char *kind);
 extern char * FormationKindToString(FormationKind kind);
 extern FormationKind FormationKindFromNodeKindString(const char *nodeKind);

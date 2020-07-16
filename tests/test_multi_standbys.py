@@ -68,6 +68,9 @@ def test_004_add_three_standbys():
     assert node1.has_needed_replication_slots()
     assert node2.has_needed_replication_slots()
 
+    # with one standby, we have number_sync_standbys set to 0 still
+    assert node1.get_number_sync_standbys() == 0
+
     # refrain from waiting for the primary to be ready, to trigger a race
     # condition that could segfault the monitor (if the code was less
     # careful than it is now)
@@ -82,6 +85,9 @@ def test_004_add_three_standbys():
     assert node1.has_needed_replication_slots()
     assert node2.has_needed_replication_slots()
     assert node3.has_needed_replication_slots()
+
+    # the formation number_sync_standbys is expected to be set to 1 now
+    assert node1.get_number_sync_standbys() == 1
 
     node4 = cluster.create_datanode("/tmp/multi_standby/node4")
     node4.create()

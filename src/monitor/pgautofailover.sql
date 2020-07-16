@@ -49,7 +49,7 @@ CREATE TABLE pgautofailover.formation
     kind                 text NOT NULL DEFAULT 'pgsql',
     dbname               name NOT NULL DEFAULT 'postgres',
     opt_secondary        bool NOT NULL DEFAULT true,
-    number_sync_standbys int  NOT NULL DEFAULT 1,
+    number_sync_standbys int  NOT NULL DEFAULT 0,
     PRIMARY KEY   (formationid)
  );
 insert into pgautofailover.formation (formationid) values ('default');

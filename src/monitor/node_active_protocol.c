@@ -204,6 +204,39 @@ register_node(PG_FUNCTION_ARGS)
 						formationId, currentNodeState.groupId)));
 	}
 
+	/*
+	 * When adding a second node to a formation that has number_sync_standbys
+	 * set to zero (the default value for single node and single standby
+	 * formations), we switch the default value to 1 automatically.
+	 */
+	if (formation->number_sync_standbys == 0)
+	{
+		List *allNodes = AllAutoFailoverNodes(formationId);
+
+		/* second standby to be registered */
+		if (list_length(allNodes) == 3)
+		{
+			char message[BUFSIZE] = { 0 };
+
+			formation->number_sync_standbys = 1;
+
+			if (!SetFormationNumberSyncStandbys(formationId, 1))
+			{
+				ereport(ERROR,
+						(errmsg("couldn't set the formation \"%s\" "
+								"number_sync_standbys to 1 now that a third "
+								"node has been added",
+								formationId)));
+			}
+
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting number_sync_standbys to %d for formation %s.",
+				formation->number_sync_standbys,
+				formation->formationId);
+		}
+	}
+
 	assignedNodeState =
 		(AutoFailoverNodeState *) palloc0(sizeof(AutoFailoverNodeState));
 	assignedNodeState->nodeId = pgAutoFailoverNode->nodeId;
@@ -1815,7 +1848,7 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 	standbyNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
 
 	/*
-	 * Single standby case
+	 * Single standby case, we assume formation->number_sync_standbys == 0
 	 */
 	if (nodesCount == 2)
 	{
@@ -1861,7 +1894,7 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 
 		int count = list_length(syncStandbyNodesGroupList);
 
-		if (count == 0 || formation->number_sync_standbys == 0)
+		if (count == 0)
 		{
 			/*
 			 *  If no standby participates in the replication Quorum, we
@@ -1874,6 +1907,16 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 			bool allTheSamePriority =
 				AllNodesHaveSameCandidatePriority(syncStandbyNodesGroupList);
 
+			/*
+			 * We accept number_sync_standbys to be set to zero to enable our
+			 * failover trade-off, but won't send a synchronous_standby_names
+			 * setting with ANY 0 () or FIRST 0 (), that would not make sense.
+			 */
+			int number_sync_standbys =
+				formation->number_sync_standbys == 0
+				? 1
+				: formation->number_sync_standbys;
+
 			StringInfo sbnames = makeStringInfo();
 			ListCell *nodeCell = NULL;
 			bool firstNode = true;
@@ -1881,7 +1924,7 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 			appendStringInfo(sbnames,
 							 "%s %d (",
 							 allTheSamePriority ? "ANY" : "FIRST",
-							 formation->number_sync_standbys);
+							 number_sync_standbys);
 
 			foreach(nodeCell, syncStandbyNodesGroupList)
 			{
