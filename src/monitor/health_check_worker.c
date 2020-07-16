@@ -148,7 +148,7 @@ static volatile sig_atomic_t got_sighup = false;
 static volatile sig_atomic_t got_sigterm = false;
 
 /* GUC variables */
-int HealthCheckPeriod = 20 * 1000;
+int HealthCheckPeriod = 5 * 1000;
 int HealthCheckTimeout = 5 * 1000;
 int HealthCheckMaxRetries = 2;
 int HealthCheckRetryDelay = 2 * 1000;
@@ -773,15 +773,9 @@ ManageHealthCheck(HealthCheck *healthCheck, struct timeval currentTime)
 		{
 			if (healthCheck->numTries >= HealthCheckMaxRetries + 1)
 			{
-				if (nodeHealth->healthState != NODE_HEALTH_BAD)
-				{
-					elog(LOG, "pg_auto_failover monitor marking node %s:%d as unhealthy",
-						 nodeHealth->nodeName,
-						 nodeHealth->nodePort);
-				}
-
 				SetNodeHealthState(healthCheck->node->nodeName,
 								   healthCheck->node->nodePort,
+								   nodeHealth->healthState,
 								   NODE_HEALTH_BAD);
 
 				healthCheck->state = HEALTH_CHECK_DEAD;
@@ -890,15 +884,9 @@ ManageHealthCheck(HealthCheck *healthCheck, struct timeval currentTime)
 			{
 				PQfinish(connection);
 
-				if (nodeHealth->healthState != NODE_HEALTH_GOOD)
-				{
-					elog(LOG, "pg_auto_failover monitor marking node %s:%d as healthy",
-						 nodeHealth->nodeName,
-						 nodeHealth->nodePort);
-				}
-
 				SetNodeHealthState(healthCheck->node->nodeName,
 								   healthCheck->node->nodePort,
+								   nodeHealth->healthState,
 								   NODE_HEALTH_GOOD);
 
 				healthCheck->connection = NULL;
