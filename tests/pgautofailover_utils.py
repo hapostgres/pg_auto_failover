@@ -1293,7 +1293,7 @@ class PGAutoCtl():
 
             try:
                 pgid = os.getpgid(self.run_proc.pid)
-                os.killpg(pgid, signal.SIGQUIT)
+                os.killpg(pgid, signal.SIGTERM)
 
                 return self.pgnode.cluster.communicate(self, COMMAND_TIMEOUT)
 

@@ -16,7 +16,6 @@
 #include "monitor_config.h"
 #include "state.h"
 
-
 /* the monitor manages a postgres server running the pgautofailover extension */
 typedef struct Monitor
 {

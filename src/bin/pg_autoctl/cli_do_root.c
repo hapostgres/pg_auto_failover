@@ -109,31 +109,11 @@ CommandLine do_primary_defaults =
 				 keeper_cli_keeper_setup_getopts,
 				 keeper_cli_add_default_settings);
 
-CommandLine do_primary_hba_setup =
-	make_command("setup",
-				 "Make sure the standby has replication access in pg_hba",
-				 "<standby hostname>",
-				 KEEPER_CLI_WORKER_SETUP_OPTIONS,
-				 keeper_cli_keeper_setup_getopts,
-				 keeper_cli_add_standby_to_hba);
-
-CommandLine *do_primary_hba_commands[] = {
-	&do_primary_hba_setup,
-	NULL
-};
-
-CommandLine do_primary_hba =
-	make_command_set("hba",
-					 "Manage pg_hba settings on the primary server", NULL, NULL,
-					 NULL, do_primary_hba_commands);
-
-
 CommandLine *do_primary[] = {
 	&do_primary_slot_,
 	&do_primary_syncrep_,
-	&do_primary_defaults,
 	&do_primary_adduser,
-	&do_primary_hba,
+	&do_primary_defaults,
 	NULL
 };
 

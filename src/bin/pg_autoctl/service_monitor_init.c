@@ -48,13 +48,13 @@ service_monitor_init(Monitor *monitor)
 
 	Service subprocesses[] = {
 		{
-			"postgres",
+			SERVICE_NAME_POSTGRES,
 			RP_PERMANENT,
 			-1,
 			&service_postgres_ctl_start
 		},
 		{
-			"installer",
+			SERVICE_NAME_MONITOR_INIT,
 			createAndRun ? RP_PERMANENT : RP_TRANSIENT,
 			-1,
 			&service_monitor_init_start,
@@ -67,7 +67,7 @@ service_monitor_init(Monitor *monitor)
 	/* when using pg_autoctl create monitor --run, use "listener" */
 	if (createAndRun)
 	{
-		strlcpy(subprocesses[1].name, "listener", NAMEDATALEN);
+		strlcpy(subprocesses[1].name, SERVICE_NAME_MONITOR, NAMEDATALEN);
 	}
 
 	/* We didn't create our target username/dbname yet */

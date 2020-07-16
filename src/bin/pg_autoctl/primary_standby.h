@@ -78,8 +78,6 @@ bool postgres_add_default_settings(LocalPostgresServer *postgres);
 bool primary_create_replication_user(LocalPostgresServer *postgres,
 									 char *replicationUser,
 									 char *replicationPassword);
-bool primary_add_standby_to_hba(LocalPostgresServer *postgres,
-								char *standbyHost, const char *replicationPassword);
 bool standby_init_replication_source(LocalPostgresServer *postgres,
 									 NodeAddress *primaryNode,
 									 const char *username,

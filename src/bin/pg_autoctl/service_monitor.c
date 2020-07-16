@@ -47,13 +47,13 @@ start_monitor(Monitor *monitor)
 
 	Service subprocesses[] = {
 		{
-			"postgres",
+			SERVICE_NAME_POSTGRES,
 			RP_PERMANENT,
 			-1,
 			&service_postgres_ctl_start
 		},
 		{
-			"listener",
+			SERVICE_NAME_MONITOR,
 			RP_PERMANENT,
 			-1,
 			&service_monitor_start,

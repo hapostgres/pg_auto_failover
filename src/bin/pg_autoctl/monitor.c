@@ -280,9 +280,13 @@ monitor_get_other_nodes(Monitor *monitor,
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
 		currentState == ANY_STATE
-		? "SELECT * FROM pgautofailover.get_other_nodes($1, $2) ORDER BY node_id"
-		: "SELECT * FROM pgautofailover.get_other_nodes($1, $2, "
-		  "$3::pgautofailover.replication_state) ORDER BY node_id";
+		?
+		"SELECT * FROM pgautofailover.get_other_nodes($1, $2) "
+		"ORDER BY node_id"
+		:
+		"SELECT * FROM pgautofailover.get_other_nodes($1, $2, "
+		"$3::pgautofailover.replication_state) "
+		"ORDER BY node_id";
 	int paramCount = 2;
 	Oid paramTypes[3] = { TEXTOID, INT4OID, TEXTOID };
 	const char *paramValues[3] = { 0 };
@@ -1388,7 +1392,6 @@ parseNodeState(void *ctx, PGresult *result)
 	{
 		context->assignedState->replicationQuorum = (*value) == 't';
 	}
-
 
 	if (errors > 0)
 	{
@@ -2978,9 +2981,6 @@ monitor_get_extension_version(Monitor *monitor, MonitorExtensionVersion *version
 		return false;
 	}
 
-	/* disconnect from PostgreSQL now */
-	pgsql_finish(&monitor->pgsql);
-
 	return true;
 }
 
@@ -3079,7 +3079,8 @@ monitor_ensure_extension_version(Monitor *monitor,
 	char envExtensionVersion[MAXPGPATH];
 
 	/* in test environment, we can export any target version we want */
-	if (env_exists(PG_AUTOCTL_DEBUG) && env_exists(PG_AUTOCTL_EXTENSION_VERSION_VAR))
+	if (env_exists(PG_AUTOCTL_DEBUG) &&
+		env_exists(PG_AUTOCTL_EXTENSION_VERSION_VAR))
 	{
 		if (!get_env_copy(PG_AUTOCTL_EXTENSION_VERSION_VAR, envExtensionVersion,
 						  MAXPGPATH))

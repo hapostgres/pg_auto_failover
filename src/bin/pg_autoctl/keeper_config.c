@@ -235,6 +235,7 @@ keeper_config_set_pathnames_from_pgdata(ConfigFilePaths *pathnames,
 				  " see above for details.", pgdata);
 		return false;
 	}
+
 	return true;
 }
 

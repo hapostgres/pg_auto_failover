@@ -418,7 +418,7 @@ reach_initial_state(Keeper *keeper)
 			/*
 			 * Now the transition from INIT_STATE to WAIT_STANDBY_STATE consist
 			 * of doing nothing on the keeper's side: we are just waiting until
-			 * the primary has update its HBA setup with our nodename.
+			 * the primary has updated its HBA setup with our nodename.
 			 */
 			MonitorAssignedState assignedState = { 0 };
 

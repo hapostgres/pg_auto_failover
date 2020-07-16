@@ -18,9 +18,15 @@
 #include "file_utils.h"
 #include "keeper.h"
 #include "keeper_config.h"
+#include "pghba.h"
 #include "pgsetup.h"
 #include "primary_standby.h"
 #include "state.h"
+
+
+static void diff_nodesArray(NodeAddressArray *previousNodesArray,
+							NodeAddressArray *currentNodesArray,
+							NodeAddressArray *diffNodesArray);
 
 
 /*
@@ -891,23 +897,12 @@ keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 bool
 keeper_drop_replication_slots_for_removed_nodes(Keeper *keeper)
 {
-	Monitor *monitor = &(keeper->monitor);
-	PostgresSetup *pgSetup = &(keeper->postgres.postgresSetup);
 	LocalPostgresServer *postgres = &(keeper->postgres);
-
-	char *host = keeper->config.nodename;
-	int port = pgSetup->pgport;
+	NodeAddressArray *otherNodesArray = &(keeper->otherNodes);
 
 	log_trace("keeper_drop_replication_slots_for_removed_nodes");
 
-	if (!monitor_get_other_nodes(monitor, host, port,
-								 ANY_STATE, &(keeper->otherNodes)))
-	{
-		/* errors have already been logged */
-		return false;
-	}
-
-	if (!postgres_replication_slot_drop_removed(postgres, &(keeper->otherNodes)))
+	if (!postgres_replication_slot_drop_removed(postgres, otherNodesArray))
 	{
 		log_error("Failed to maintain replication slots on the local Postgres "
 				  "instance, see above for details");
@@ -926,12 +921,9 @@ keeper_drop_replication_slots_for_removed_nodes(Keeper *keeper)
 bool
 keeper_maintain_replication_slots(Keeper *keeper)
 {
-	Monitor *monitor = &(keeper->monitor);
 	PostgresSetup *pgSetup = &(keeper->postgres.postgresSetup);
 	LocalPostgresServer *postgres = &(keeper->postgres);
-
-	char *host = keeper->config.nodename;
-	int port = pgSetup->pgport;
+	NodeAddressArray *otherNodesArray = &(keeper->otherNodes);
 
 	log_trace("keeper_maintain_replication_slots");
 
@@ -941,14 +933,7 @@ keeper_maintain_replication_slots(Keeper *keeper)
 		return true;
 	}
 
-	if (!monitor_get_other_nodes(monitor, host, port,
-								 ANY_STATE, &(keeper->otherNodes)))
-	{
-		/* errors have already been logged */
-		return false;
-	}
-
-	if (!postgres_replication_slot_maintain(postgres, &(keeper->otherNodes)))
+	if (!postgres_replication_slot_maintain(postgres, otherNodesArray))
 	{
 		log_error("Failed to maintain replication slots on the local Postgres "
 				  "instance, see above for details");
@@ -991,8 +976,8 @@ keeper_check_monitor_extension_version(Keeper *keeper)
 	}
 	else
 	{
-		log_info("The version of extension \"%s\" is \"%s\" on the monitor",
-				 PG_AUTOCTL_MONITOR_EXTENSION_NAME, version.installedVersion);
+		log_trace("The version of extension \"%s\" is \"%s\" on the monitor",
+				  PG_AUTOCTL_MONITOR_EXTENSION_NAME, version.installedVersion);
 	}
 
 	return true;
@@ -1326,4 +1311,208 @@ keeper_state_as_json(Keeper *keeper, char *json, int size)
 
 	/* strlcpy returns how many bytes where necessary */
 	return len < size;
+}
+
+
+/*
+ * keeper_update_group_hba updates updates the HBA file to ensure we have two
+ * entries per other node in the group, allowing for both replication
+ * connections and connections to the --dbname.
+ */
+bool
+keeper_update_group_hba(Keeper *keeper, NodeAddressArray *diffNodesArray)
+{
+	LocalPostgresServer *postgres = &(keeper->postgres);
+	PostgresSetup *postgresSetup = &(postgres->postgresSetup);
+	PGSQL *pgsql = &(postgres->sqlClient);
+
+	char hbaFilePath[MAXPGPATH] = { 0 };
+	char *authMethod = pg_setup_get_auth_method(postgresSetup);
+
+	/* early exit when we're alone in the group */
+	if (diffNodesArray->count == 0)
+	{
+		return true;
+	}
+
+	sformat(hbaFilePath, MAXPGPATH, "%s/pg_hba.conf", postgresSetup->pgdata);
+
+	if (!pghba_ensure_host_rules_exist(hbaFilePath,
+									   diffNodesArray,
+									   postgresSetup->ssl.active,
+									   postgresSetup->dbname,
+									   PG_AUTOCTL_REPLICA_USERNAME,
+									   authMethod))
+	{
+		log_error("Failed to edit HBA file \"%s\" to update rules to current "
+				  "list of nodes registered on the monitor",
+				  hbaFilePath);
+		return false;
+	}
+
+	/*
+	 * Only reload if Postgres is known to be running. If it's not running, we
+	 * edited the HBA and it's going to take effect at next restart of
+	 * Postgres, so we're good here.
+	 */
+	if (pg_setup_is_running(postgresSetup))
+	{
+		if (!pgsql_reload_conf(pgsql))
+		{
+			log_error("Failed to reload the postgres configuration after adding "
+					  "the standby user to pg_hba");
+			return false;
+		}
+	}
+
+	return true;
+}
+
+
+/*
+ * keeper_refresh_other_nodes call pgautofailover.get_other_nodes on the
+ * monitor and refreshes the keeper otherNodes array with fresh information,
+ * including each node's LSN position.
+ *
+ * When forceCacheInvalidation is true, instead of trusting our previous value
+ * for the keeper otherNodes array, keeper_refresh_other_nodes() instead runs
+ * through the whole monitor.get_other_nodes() result and updates HBA rules for
+ * all entries there. That's necessary after a pg_basebackup for instance.
+ * which will copy over the origin's pg_hba.conf.
+ */
+bool
+keeper_refresh_other_nodes(Keeper *keeper, bool forceCacheInvalidation)
+{
+	Monitor *monitor = &(keeper->monitor);
+	KeeperConfig *config = &(keeper->config);
+	PostgresSetup *postgresSetup = &(keeper->postgres.postgresSetup);
+
+	NodeAddressArray *otherNodesArray = &(keeper->otherNodes);
+	NodeAddressArray newNodesArray = { 0 };
+	NodeAddressArray diffNodesArray = { 0 };
+
+	char *host = config->nodename;
+	int port = postgresSetup->pgport;
+
+	log_trace("keeper_refresh_other_nodes");
+
+	if (!monitor_get_other_nodes(monitor, host, port, ANY_STATE, &newNodesArray))
+	{
+		log_error("Failed to get_other_nodes() on the monitor");
+		return false;
+	}
+
+	/* compute nodes that need an HBA change (new ones, new hostnames) */
+	if (forceCacheInvalidation)
+	{
+		diffNodesArray = newNodesArray;
+	}
+	else
+	{
+		(void) diff_nodesArray(otherNodesArray, &newNodesArray, &diffNodesArray);
+	}
+
+	/*
+	 * When we're alone in the group, and also when there's no change, then we
+	 * are done here already.
+	 */
+	if (newNodesArray.count == 0 || diffNodesArray.count == 0)
+	{
+		/* refresh the keeper's cache with the current other nodes array */
+		keeper->otherNodes = newNodesArray;
+		return true;
+	}
+
+	log_info("Fetched current list of %d other nodes from the monitor "
+			 "to update HBA rules, including %d changes.",
+			 newNodesArray.count, diffNodesArray.count);
+
+	/*
+	 * We have a new list of other nodes, update the HBA file. We only update
+	 * the nodes that we didn't know before, or that have a new host property.
+	 */
+	if (!keeper_update_group_hba(keeper, &diffNodesArray))
+	{
+		log_error("Failed to update the HBA entries for the new "
+				  "elements in the our formation \"%s\" and group %d",
+				  keeper->config.formation,
+				  keeper->state.current_group);
+
+		return false;
+	}
+
+	/*
+	 * In case of success, copy the current nodes array to the keeper's cache.
+	 */
+	keeper->otherNodes = newNodesArray;
+
+	return true;
+}
+
+
+/*
+ * diff_nodesArray computes the array of nodes entries that should be added in
+ * the HBA file in the given pre-allocated diffNodesArray parameter. The diff
+ * is computed from the keeper's otherNodesArray on the previous round, and the
+ * one we just got from the monitor.
+ */
+static void
+diff_nodesArray(NodeAddressArray *previousNodesArray,
+				NodeAddressArray *currentNodesArray,
+				NodeAddressArray *diffNodesArray)
+{
+	int prevIndex = 0;
+	int currIndex = 0;
+	int diffIndex = 0;
+
+	NodeAddress *prevNode = NULL;
+
+	if (previousNodesArray->count == 0)
+	{
+		/* all the entries are new and we want them in diffNodesArray */
+		*diffNodesArray = *currentNodesArray;
+		return;
+	}
+
+	prevNode = &(previousNodesArray->nodes[prevIndex]);
+
+	/* we only care about the nodes in the current nodes array */
+	for (currIndex = 0; currIndex < currentNodesArray->count; currIndex++)
+	{
+		NodeAddress *currNode = &(currentNodesArray->nodes[currIndex]);
+
+		/* remember, the input arrays are sorted on nodeId */
+		if (currNode->nodeId < prevNode->nodeId)
+		{
+			diffNodesArray[diffIndex++] = currentNodesArray[currIndex];
+		}
+		else if (currNode->nodeId == prevNode->nodeId)
+		{
+			if (!streq(currNode->host, prevNode->host))
+			{
+				log_debug("Node %d has a new hostname \"%s\"",
+						  currNode->nodeId, currNode->host);
+
+				diffNodesArray[diffIndex++] = currentNodesArray[currIndex];
+			}
+			prevIndex++;
+		}
+		else if (currNode->nodeId > prevNode->nodeId)
+		{
+			/*
+			 * All the remaining entries of currentNodesArray are new.
+			 *
+			 * We might have entries in previousNodesArray that are not found
+			 * in currentNodesArray anymore, but we don't know how to clean-up
+			 * the HBA file entries at the moment anyway, so we just skip them.
+			 */
+			diffNodesArray[diffIndex++] = currentNodesArray[currIndex];
+			break;
+		}
+		else
+		{
+			log_error("BUG in diff_nodesArray!");
+			return;
+		}
+	}
 }

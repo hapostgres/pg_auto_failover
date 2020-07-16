@@ -178,10 +178,7 @@ cli_perform_failover_getopts(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
-	{
-		get_env_pgdata_or_exit(options.pgSetup.pgdata);
-	}
+	cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
 
 	keeperOptions = options;
 

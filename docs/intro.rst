@@ -5,6 +5,7 @@ pg_auto_failover is an extension for PostgreSQL that monitors and manages failov
 for a postgres clusters. It is optimised for simplicity and correctness.
 
 .. figure:: ./pg_auto_failover-arch.png
+   :alt: pg_auto_failover Architecture for a standalone PostgreSQL service
 
    pg_auto_failover Architecture for a standalone PostgreSQL service
 
