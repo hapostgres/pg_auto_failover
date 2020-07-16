@@ -366,11 +366,11 @@ GetNodeToFailoverFromInGroup(char *formationId, int32 groupId)
 
 
 /*
- * GetPrimaryNodeInGroup returns the node in the group with a role that only a
- * primary can have.
+ * GetPrimaryOrDemotedNodeInGroup returns the node in the group with a role
+ * that only a primary can have.
  *
  * When handling multiple standbys, it could be that the primary node gets
- * demoted, triggering a failover with the other(s) standby nodes. Then the
+ * demoted, triggering a failover with the other standby node(s). Then the
  * demoted node connects back to the monitor, and should be processed as a
  * standby that re-joins the group, not as a primary being demoted.
  */
@@ -383,6 +383,7 @@ GetPrimaryOrDemotedNodeInGroup(char *formationId, int32 groupId)
 
 	groupNodeList = AutoFailoverNodeGroup(formationId, groupId);
 
+	/* first find a node that is writable */
 	foreach(nodeCell, groupNodeList)
 	{
 		AutoFailoverNode *currentNode = (AutoFailoverNode *) lfirst(nodeCell);
@@ -394,6 +395,7 @@ GetPrimaryOrDemotedNodeInGroup(char *formationId, int32 groupId)
 		}
 	}
 
+	/* if we found a writable node, we're done */
 	if (primaryNode != NULL)
 	{
 		return primaryNode;

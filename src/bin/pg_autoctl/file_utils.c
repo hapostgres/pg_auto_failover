@@ -16,7 +16,6 @@
 #endif
 
 #include "postgres_fe.h"
-#include "pqexpbuffer.h"
 
 #include "snprintf.h"
 
@@ -25,8 +24,6 @@
 #include "env_utils.h"
 #include "file_utils.h"
 #include "log.h"
-#include "parsing.h"
-#include "string_utils.h"
 
 /*
  * file_exists returns true if the given filename is known to exist

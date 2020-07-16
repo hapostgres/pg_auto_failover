@@ -449,10 +449,6 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	/*
 	 * when a new primary is ready:
 	 *  demoted -> catchingup
-	 *
-	 * TODO: check that we can join a WAIT_PRIMARY node without having to wait
-	 * until it's done registering the new standby node. It might be that our
-	 * HBA entry is not there yet, but I think we're good.
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_DEMOTED) &&
 		IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY))
@@ -498,6 +494,13 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 		return true;
 	}
 
+	/*
+	 * when a new secondary re-appears after a failover or at a "random" time
+	 * in the FSM cycle, and the wait_primary or join_primary node has already
+	 * made progress to primary.
+	 *
+	 *  join_secondary -> secondary
+	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_JOIN_SECONDARY) &&
 		IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY))
 	{
@@ -751,7 +754,6 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 		{
 			/* shouldn't happen */
 			ereport(ERROR, (errmsg("BUG: node is NULL")));
-			continue;
 		}
 
 		/* we might have a failover ongoing already */
@@ -866,6 +868,8 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 				node->nodeId, node->nodeName, node->nodePort);
 
 			AssignGoalState(node, REPLICATION_STATE_REPORT_LSN, message);
+
+			continue;
 		}
 	}
 
@@ -1105,14 +1109,10 @@ ProceedWithMSFailover(AutoFailoverNode *activeNode,
  * (thanks to the FSM transition secondary -> report_lsn), and now we need to
  * select one of the failover candidates.
  *
- * As input we need two lists of node:
- *
- * - standbyNodesGroupList contains all the standby nodes known in this group,
- *   even when they won't be a candidate for failover (because of a
- *   candidatepriority of zero, or because they are not healthy at this time)
- *
- * - candidateNodesGroupList is a filtered list of standby that are known to be
- *   a failover candidate from an earlier filtering process
+ * As input we get the candidateNodesGroupList, a filtered list of standby that
+ * are known to be a failover candidate from an earlier filtering process. We
+ * also get the mostAdvancedNode and the primaryNode so that we can decide on
+ * the next step (cascade WALs or promote directly).
  */
 static AutoFailoverNode *
 SelectFailoverCandidateNode(List *candidateNodesGroupList,
