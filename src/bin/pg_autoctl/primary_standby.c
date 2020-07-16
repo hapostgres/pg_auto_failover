@@ -125,6 +125,8 @@ local_postgres_set_status_path(LocalPostgresServer *postgres, bool unlink)
 		}
 	}
 
+	log_trace("local_postgres_set_status_path: %s", pgSetup->pgdata);
+
 	/* initialize our Postgres state file path */
 	if (!build_xdg_path(pgStatus->pgStatusPath,
 						XDG_RUNTIME,

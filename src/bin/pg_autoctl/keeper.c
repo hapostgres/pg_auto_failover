@@ -1540,8 +1540,6 @@ diff_nodesArray(NodeAddressArray *previousNodesArray,
 	int currIndex = 0;
 	int diffIndex = 0;
 
-	NodeAddress *prevNode = NULL;
-
 	if (previousNodesArray->count == 0)
 	{
 		/* all the entries are new and we want them in diffNodesArray */
@@ -1549,28 +1547,41 @@ diff_nodesArray(NodeAddressArray *previousNodesArray,
 		return;
 	}
 
-	prevNode = &(previousNodesArray->nodes[prevIndex]);
-
 	/* we only care about the nodes in the current nodes array */
 	for (currIndex = 0; currIndex < currentNodesArray->count; currIndex++)
 	{
 		NodeAddress *currNode = &(currentNodesArray->nodes[currIndex]);
+		NodeAddress *prevNode = &(previousNodesArray->nodes[prevIndex]);
 
 		/* remember, the input arrays are sorted on nodeId */
 		if (currNode->nodeId < prevNode->nodeId)
 		{
-			diffNodesArray[diffIndex++] = currentNodesArray[currIndex];
+			diffNodesArray->count++;
+			diffNodesArray->nodes[diffIndex++] = *currNode;
 		}
 		else if (currNode->nodeId == prevNode->nodeId)
 		{
+			/*
+			 * We still have to update our HBA file when the host of a node
+			 * that we already have has changed on the monitor.
+			 */
 			if (!streq(currNode->host, prevNode->host))
 			{
 				log_debug("Node %d has a new hostname \"%s\"",
 						  currNode->nodeId, currNode->host);
 
-				diffNodesArray[diffIndex++] = currentNodesArray[currIndex];
+				diffNodesArray->count++;
+				diffNodesArray->nodes[diffIndex++] = *currNode;
 			}
-			prevIndex++;
+
+			/*
+			 * In any case, if we have more elements in previousNodesArray,
+			 * advance our position there.
+			 */
+			if (prevIndex < previousNodesArray->count)
+			{
+				prevIndex++;
+			}
 		}
 		else if (currNode->nodeId > prevNode->nodeId)
 		{
@@ -1581,7 +1592,9 @@ diff_nodesArray(NodeAddressArray *previousNodesArray,
 			 * in currentNodesArray anymore, but we don't know how to clean-up
 			 * the HBA file entries at the moment anyway, so we just skip them.
 			 */
-			diffNodesArray[diffIndex++] = currentNodesArray[currIndex];
+			diffNodesArray->count++;
+			diffNodesArray->nodes[diffIndex++] = *currNode;
+
 			break;
 		}
 		else
