@@ -192,9 +192,9 @@ typedef struct SingleValueResultContext
 #define CHECK__SETTINGS_SQL \
 	"select bool_and(ok) " \
 	"from (" \
-	"select current_setting('max_wal_senders')::int >= 4" \
+	"select current_setting('max_wal_senders')::int >= 12" \
 	" union all " \
-	"select current_setting('max_replication_slots')::int >= 4" \
+	"select current_setting('max_replication_slots')::int >= 12" \
 	" union all " \
 	"select current_setting('wal_level') in ('replica', 'logical')" \
 	" union all " \

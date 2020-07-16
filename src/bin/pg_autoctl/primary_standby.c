@@ -37,8 +37,8 @@ static void local_postgres_update_pg_failures_tracking(LocalPostgresServer *post
 #define DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER \
 	{ "listen_addresses", "'*'" }, \
 	{ "port", "5432" }, \
-	{ "max_wal_senders", "4" }, \
-	{ "max_replication_slots", "4" }, \
+	{ "max_wal_senders", "12" }, \
+	{ "max_replication_slots", "12" }, \
 	{ "wal_level", "'replica'" }, \
 	{ "wal_log_hints", "on" }, \
 	{ "wal_keep_segments", "64" }, \
