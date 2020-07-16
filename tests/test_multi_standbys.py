@@ -141,7 +141,13 @@ def test_007_create_t1():
     node1.run_sql_query("INSERT INTO t1 VALUES (1), (2)")
     node1.run_sql_query("CHECKPOINT")
 
-def test_008_set_candidate_priorities():
+@raises(Exception)
+def test_008a_set_candidate_priorities_to_zero():
+    # we need two nodes with non-zero candidate priority
+    node1.set_candidate_priority(0)
+    node2.set_candidate_priority(0)
+
+def test_008b_set_candidate_priorities():
     # set priorities in a way that we know the candidate: node2
     node1.set_candidate_priority(90) # current primary
     node2.set_candidate_priority(90)

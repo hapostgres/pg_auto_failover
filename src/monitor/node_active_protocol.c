@@ -1472,8 +1472,11 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 	int candidatePriority = PG_GETARG_INT32(3);
 
 	AutoFailoverNode *currentNode = NULL;
+
 	List *nodesGroupList = NIL;
+	ListCell *nodeCell = NULL;
 	int nodesCount = 0;
+	int nonZeroCandidatePriorityNodeCount = 0;
 
 	checkPgAutoFailoverVersion();
 
@@ -1497,6 +1500,36 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 						errmsg("invalid value for candidate_priority \"%d\" "
 							   "expected an integer value between 0 and 100",
 							   candidatePriority)));
+	}
+
+	if (candidatePriority == 0)
+	{
+		/*
+		 * We need to ensure we have at least two nodes with a non-zero
+		 * candidate priority, otherwise we can't failover. Those two nodes
+		 * include the current primary.
+		 */
+		foreach(nodeCell, nodesGroupList)
+		{
+			AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+			if (node->candidatePriority > 0)
+			{
+				nonZeroCandidatePriorityNodeCount++;
+			}
+		}
+
+		/* account for the change we're asked to implement */
+		nonZeroCandidatePriorityNodeCount -= 1;
+
+		if (nonZeroCandidatePriorityNodeCount < 2)
+		{
+			ereport(ERROR,
+					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					 errmsg("cannot set candidate priority to zero, we must "
+							"have at least two nodes with non-zero candidate "
+							"priority to allow for a failover")));
+		}
 	}
 
 	currentNode->candidatePriority = candidatePriority;
