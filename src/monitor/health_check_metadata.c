@@ -15,6 +15,7 @@
 
 #include "health_check.h"
 #include "metadata.h"
+#include "notifications.h"
 
 #include "access/htup.h"
 #include "access/tupdesc.h"
@@ -162,7 +163,9 @@ TupleToNodeHealth(HeapTuple heapTuple, TupleDesc tupleDescriptor)
  * SetNodeHealthState updates the health state of a node in the metadata.
  */
 void
-SetNodeHealthState(char *nodeName, uint16 nodePort, int healthState)
+SetNodeHealthState(char *nodeName, uint16 nodePort,
+				   int previousHealthState,
+				   int healthState)
 {
 	StringInfoData query;
 	int spiStatus PG_USED_FOR_ASSERTS_ONLY = 0;
@@ -185,6 +188,17 @@ SetNodeHealthState(char *nodeName, uint16 nodePort, int healthState)
 
 		spiStatus = SPI_execute(query.data, false, 0);
 		Assert(spiStatus == SPI_OK_UPDATE);
+
+		if (healthState != previousHealthState)
+		{
+			char message[BUFSIZE] = { 0 };
+
+			LogAndNotifyMessage(message, sizeof(message),
+								"Node %s:%d is marked as %s by the monitor",
+								nodeName,
+								nodePort,
+								healthState == 0 ? "unhealthy" : "healthy");
+		}
 	}
 	else
 	{

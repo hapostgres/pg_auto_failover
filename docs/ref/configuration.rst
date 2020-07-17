@@ -26,7 +26,7 @@ operations:
     secondary at shutdown time, thus preventing data loss.::
 
       pgautofailover.primary_demote_timeout
-        
+
   - Preventing promotion of the secondary
 
     pg_auto_failover implements a trade-off where data availability trumps service
@@ -66,7 +66,7 @@ database where the extension has been deployed::
   short_desc | Maximum number of re-tries before marking a node as failed.
   -[ RECORD 3 ]----------------------------------------------------------------------------------------------------
   name       | pgautofailover.health_check_period
-  setting    | 20000
+  setting    | 5000
   unit       | ms
   short_desc | Duration between each check (in milliseconds).
   -[ RECORD 4 ]----------------------------------------------------------------------------------------------------
@@ -119,19 +119,19 @@ An example configuration file looks like the following::
   group = 0
   nodename = node1.db
   nodekind = standalone
-  
+
   [postgresql]
   pgdata = /data/pgsql/
   pg_ctl = /usr/pgsql-10/bin/pg_ctl
   dbname = postgres
   host = /tmp
   port = 5000
-  
+
   [replication]
   slot = pgautofailover_standby
   maximum_backup_rate = 100M
   backup_directory = /data/backup/node1.db
-  
+
   [timeout]
   network_partition_timeout = 20
   postgresql_restart_failure_timeout = 20
@@ -143,7 +143,7 @@ commands are provided::
   pg_autoctl config check [--pgdata <pgdata>]
   pg_autoctl config get [--pgdata <pgdata>] section.option
   pg_autoctl config set [--pgdata <pgdata>] section.option value
-  
+
 The ``[postgresql]`` section is discovered automatically by the ``pg_autoctl``
 command and is not intended to be changed manually.
 
