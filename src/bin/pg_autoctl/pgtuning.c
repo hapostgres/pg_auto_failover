@@ -27,7 +27,6 @@
  * effective_cache_size, autovacuum_max_workers.
  */
 GUC postgres_tuning[] = {
-	{ "shared_preload_libraries", "'pg_stat_statements'" },
 	{ "track_io_timing", "on" },
 	{ "track_functions", "pl" },
 	{ "shared_buffers", "'128 MB'" },

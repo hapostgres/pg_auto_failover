@@ -124,7 +124,6 @@ pretty_print_bytes(char *buffer, size_t size, uint64_t bytes)
 
 	uint sIndex = 0;
 	long double count = bytes;
-	long double remainder = 0.0;
 
 	while (count >= 1024 && sIndex < 7)
 	{
@@ -132,16 +131,6 @@ pretty_print_bytes(char *buffer, size_t size, uint64_t bytes)
 		count /= 1024;
 	}
 
-	remainder = count - floorl(count);
-
-	if (remainder == 0.0)
-	{
-		sformat(buffer, size, "%d %s", (int) count, suffixes[sIndex]);
-	}
-	else
-	{
-		/* I can't seem to make %.1Lf work with pg_vsnprintf() */
-		sformat(buffer, size, "%d.%d %s",
-				(int) count, (int) (remainder * 10), suffixes[sIndex]);
-	}
+	/* forget about having more precision, Postgres wants integers here */
+	sformat(buffer, size, "%d %s", (int) count, suffixes[sIndex]);
 }
