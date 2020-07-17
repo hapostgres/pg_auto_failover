@@ -592,14 +592,18 @@ prepare_guc_settings_from_pgsetup(const char *configFilePath,
 	 * Postgres system on those targets.
 	 */
 #if defined(__linux__)
-	char tuning[BUFSIZE] = { 0 };
-
-	if (!pgtuning_prepare_guc_settings(postgres_tuning, tuning, sizeof(tuning)))
 	{
-		log_warn("Failed to compute Postgres basic tuning for this system");
-	}
+		char tuning[BUFSIZE] = { 0 };
 
-	appendPQExpBuffer(config, "\n%s\n", tuning);
+		if (!pgtuning_prepare_guc_settings(postgres_tuning,
+										   tuning,
+										   sizeof(tuning)))
+		{
+			log_warn("Failed to compute Postgres basic tuning for this system");
+		}
+
+		appendPQExpBuffer(config, "\n%s\n", tuning);
+	}
 #endif
 
 	/* memory allocation could have failed while building string */
