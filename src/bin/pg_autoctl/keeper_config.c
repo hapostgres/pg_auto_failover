@@ -35,10 +35,20 @@
 #define OPTION_AUTOCTL_GROUPID(config) \
 	make_int_option("pg_autoctl", "group", "group", false, &(config->groupId))
 
+/*
+ * --hostname used to be --nodename, and we need to support transition from the
+ * old to the new name. For that, we read the pg_autoctl.nodename config
+ * setting and change it on the fly to hostname instead.
+ *
+ * As a result HOSTNAME is marked not required and NODENAME is marked compat.
+ */
 #define OPTION_AUTOCTL_HOSTNAME(config) \
 	make_strbuf_option("pg_autoctl", "hostname", "hostname", \
-					   true, _POSIX_HOST_NAME_MAX, \
-					   config->hostname)
+					   false, _POSIX_HOST_NAME_MAX, config->hostname)
+
+#define OPTION_AUTOCTL_NODENAME(config) \
+	make_strbuf_compat_option("pg_autoctl", "nodename", \
+							  _POSIX_HOST_NAME_MAX, config->hostname)
 
 #define OPTION_AUTOCTL_NODEKIND(config) \
 	make_strbuf_option("pg_autoctl", "nodekind", NULL, false, NAMEDATALEN, \
@@ -166,6 +176,7 @@
 		OPTION_AUTOCTL_FORMATION(config), \
 		OPTION_AUTOCTL_GROUPID(config), \
 		OPTION_AUTOCTL_HOSTNAME(config), \
+		OPTION_AUTOCTL_NODENAME(config), \
 		OPTION_AUTOCTL_NODEKIND(config), \
 		OPTION_POSTGRESQL_PGDATA(config), \
 		OPTION_POSTGRESQL_PG_CTL(config), \
@@ -342,6 +353,26 @@ keeper_config_read_file_skip_pgsetup(KeeperConfig *config,
 	if (!read_ini_file(filename, keeperOptions))
 	{
 		log_error("Failed to parse configuration file \"%s\"", filename);
+		return false;
+	}
+
+	/*
+	 * We have changed the --nodename option to being named --hostname, and
+	 * same in the configuration file: pg_autoctl.nodename is now
+	 * pg_autoctl.hostname.
+	 *
+	 * We can read either names from the configuration file and will then write
+	 * the current option name (pg_autoctl.hostname), but we can't have either
+	 * one be required anymore.
+	 *
+	 * Implement the "require" property here by making sure one of those names
+	 * have been used to populate the monitor config structure.
+	 */
+	if (IS_EMPTY_STRING_BUFFER(config->hostname))
+	{
+		log_error("Failed to read either pg_autoctl.hostname or its older "
+				  "name pg_autoctl.nodename from the \"%s\" configuration file",
+				  filename);
 		return false;
 	}
 
