@@ -41,7 +41,7 @@ static void local_postgres_update_pg_failures_tracking(LocalPostgresServer *post
 	{ "max_replication_slots", "12" }, \
 	{ "wal_level", "'replica'" }, \
 	{ "wal_log_hints", "on" }, \
-	{ "wal_keep_segments", "64" }, \
+	{ "wal_keep_segments", "512" }, \
 	{ "wal_sender_timeout", "'30s'" }, \
 	{ "hot_standby_feedback", "on" }, \
 	{ "hot_standby", "on" }, \
