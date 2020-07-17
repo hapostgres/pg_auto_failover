@@ -38,14 +38,14 @@
 
 /* private function forward declarations */
 static AutoFailoverNodeState * NodeActive(char *formationId,
-										  char *nodeName, int32 nodePort,
+										  char *nodeHost, int32 nodePort,
 										  AutoFailoverNodeState *currentNodeState);
 static void JoinAutoFailoverFormation(AutoFailoverFormation *formation,
-									  char *nodeName, int nodePort,
+									  char *nodeHost, int nodePort,
 									  uint64 sysIdentifier,
 									  AutoFailoverNodeState *currentNodeState);
 static int AssignGroupId(AutoFailoverFormation *formation,
-						 char *nodeName, int nodePort,
+						 char *nodeHost, int nodePort,
 						 ReplicationState *initialState);
 
 static bool IsStateIn(ReplicationState state, List *allowedStates);
@@ -70,7 +70,7 @@ PG_FUNCTION_INFO_V1(synchronous_standby_names);
 /*
  * register_node adds a node to a given formation
  *
- * At register time the monitor connects to the node to check that nodename and
+ * At register time the monitor connects to the node to check that nodehost and
  * nodeport are valid, and it does a SELECT pg_is_in_recovery() to help decide
  * what initial role to attribute the entering node.
  */
@@ -79,8 +79,8 @@ register_node(PG_FUNCTION_ARGS)
 {
 	text *formationIdText = PG_GETARG_TEXT_P(0);
 	char *formationId = text_to_cstring(formationIdText);
-	text *nodeNameText = PG_GETARG_TEXT_P(1);
-	char *nodeName = text_to_cstring(nodeNameText);
+	text *nodeHostText = PG_GETARG_TEXT_P(1);
+	char *nodeHost = text_to_cstring(nodeHostText);
 	int32 nodePort = PG_GETARG_INT32(2);
 	Name dbnameName = PG_GETARG_NAME(3);
 	uint64 sysIdentifier = PG_GETARG_INT64(4);
@@ -150,7 +150,7 @@ register_node(PG_FUNCTION_ARGS)
 			ereport(ERROR,
 					(errmsg("node %s:%d of kind \"%s\" can not be registered in "
 							"formation \"%s\" of kind \"%s\"",
-							nodeName, nodePort, nodeKind,
+							nodeHost, nodePort, nodeKind,
 							formationId,
 							FormationKindToString(formation->kind))));
 		}
@@ -171,27 +171,27 @@ register_node(PG_FUNCTION_ARGS)
 			ereport(ERROR,
 					(errmsg("node %s:%d with dbname \"%s\" can not be registered in "
 							"formation \"%s\" which expects dbname \"%s\"",
-							nodeName, nodePort, expectedDBName,
+							nodeHost, nodePort, expectedDBName,
 							formationId,
 							formation->dbname)));
 		}
 	}
 
 	JoinAutoFailoverFormation(formation,
-							  nodeName,
+							  nodeHost,
 							  nodePort,
 							  sysIdentifier,
 							  &currentNodeState);
 	LockNodeGroup(formationId, currentNodeState.groupId, ExclusiveLock);
 
-	pgAutoFailoverNode = GetAutoFailoverNode(nodeName, nodePort);
+	pgAutoFailoverNode = GetAutoFailoverNode(nodeHost, nodePort);
 	if (pgAutoFailoverNode == NULL)
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_INTERNAL_ERROR),
 				 errmsg("node %s:%d with dbname \"%s\" could not be registered in "
 						"formation \"%s\", could not get information for node that was inserted",
-						nodeName, nodePort, expectedDBName,
+						nodeHost, nodePort, expectedDBName,
 						formationId)));
 	}
 
@@ -225,7 +225,7 @@ register_node(PG_FUNCTION_ARGS)
 			ereport(ERROR,
 					(errmsg("node %s:%d can not be registered in state %s, "
 							"it should be in state %s",
-							nodeName, nodePort, currentState, goalState)));
+							nodeHost, nodePort, currentState, goalState)));
 		}
 	}
 
@@ -264,8 +264,8 @@ node_active(PG_FUNCTION_ARGS)
 {
 	text *formationIdText = PG_GETARG_TEXT_P(0);
 	char *formationId = text_to_cstring(formationIdText);
-	text *nodeNameText = PG_GETARG_TEXT_P(1);
-	char *nodeName = text_to_cstring(nodeNameText);
+	text *nodeHostText = PG_GETARG_TEXT_P(1);
+	char *nodeHost = text_to_cstring(nodeHostText);
 	int32 nodePort = PG_GETARG_INT32(2);
 
 	int32 currentNodeId = PG_GETARG_INT32(3);
@@ -298,7 +298,7 @@ node_active(PG_FUNCTION_ARGS)
 	currentNodeState.pgsrSyncState = SyncStateFromString(currentPgsrSyncState);
 	currentNodeState.pgIsRunning = currentPgIsRunning;
 	assignedNodeState =
-		NodeActive(formationId, nodeName, nodePort, &currentNodeState);
+		NodeActive(formationId, nodeHost, nodePort, &currentNodeState);
 
 	newReplicationStateOid =
 		ReplicationStateGetEnum(assignedNodeState->replicationState);
@@ -329,29 +329,29 @@ node_active(PG_FUNCTION_ARGS)
  * NodeActive reports the current state of a node and returns the assigned state.
  */
 static AutoFailoverNodeState *
-NodeActive(char *formationId, char *nodeName, int32 nodePort,
+NodeActive(char *formationId, char *nodeHost, int32 nodePort,
 		   AutoFailoverNodeState *currentNodeState)
 {
 	AutoFailoverNode *pgAutoFailoverNode = NULL;
 	AutoFailoverNodeState *assignedNodeState = NULL;
 
-	pgAutoFailoverNode = GetAutoFailoverNode(nodeName, nodePort);
+	pgAutoFailoverNode = GetAutoFailoverNode(nodeHost, nodePort);
 	if (pgAutoFailoverNode == NULL)
 	{
 		ereport(ERROR, (errmsg("node %s:%d is not registered",
-							   nodeName, nodePort)));
+							   nodeHost, nodePort)));
 	}
 	else if (strcmp(pgAutoFailoverNode->formationId, formationId) != 0)
 	{
 		ereport(ERROR, (errmsg("node %s:%d does not belong to formation %s",
-							   nodeName, nodePort, formationId)));
+							   nodeHost, nodePort, formationId)));
 	}
 	else if (currentNodeState->nodeId != pgAutoFailoverNode->nodeId &&
 			 currentNodeState->nodeId != -1)
 	{
 		ereport(ERROR,
 				(errmsg("node %s:%d with nodeid %d was removed",
-						nodeName, nodePort, currentNodeState->nodeId),
+						nodeHost, nodePort, currentNodeState->nodeId),
 				 errhint("Remove your state file to re-register the node.")));
 	}
 	else
@@ -370,7 +370,7 @@ NodeActive(char *formationId, char *nodeName, int32 nodePort,
 			LogAndNotifyMessage(
 				message, BUFSIZE,
 				"Node %s:%d reported new state %s",
-				pgAutoFailoverNode->nodeName, pgAutoFailoverNode->nodePort,
+				pgAutoFailoverNode->nodeHost, pgAutoFailoverNode->nodePort,
 				ReplicationStateGetName(currentNodeState->replicationState));
 
 			NotifyStateChange(currentNodeState->replicationState,
@@ -378,7 +378,7 @@ NodeActive(char *formationId, char *nodeName, int32 nodePort,
 							  formationId,
 							  pgAutoFailoverNode->groupId,
 							  pgAutoFailoverNode->nodeId,
-							  pgAutoFailoverNode->nodeName,
+							  pgAutoFailoverNode->nodeHost,
 							  pgAutoFailoverNode->nodePort,
 							  currentNodeState->pgsrSyncState,
 							  currentNodeState->reportedLSN,
@@ -391,7 +391,7 @@ NodeActive(char *formationId, char *nodeName, int32 nodePort,
 		 * Report the current state. The state might not have changed, but in
 		 * that case we still update the last report time.
 		 */
-		ReportAutoFailoverNodeState(pgAutoFailoverNode->nodeName,
+		ReportAutoFailoverNodeState(pgAutoFailoverNode->nodeHost,
 									pgAutoFailoverNode->nodePort,
 									currentNodeState->replicationState,
 									currentNodeState->pgIsRunning,
@@ -420,7 +420,7 @@ NodeActive(char *formationId, char *nodeName, int32 nodePort,
  */
 static void
 JoinAutoFailoverFormation(AutoFailoverFormation *formation,
-						  char *nodeName, int nodePort, uint64 sysIdentifier,
+						  char *nodeHost, int nodePort, uint64 sysIdentifier,
 						  AutoFailoverNodeState *currentNodeState)
 {
 	int groupId = -1;
@@ -439,7 +439,7 @@ JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 			ereport(ERROR,
 					(errmsg("node %s:%d can not be registered in group %d "
 							"in formation \"%s\" of type pgsql",
-							nodeName, nodePort,
+							nodeHost, nodePort,
 							currentNodeState->groupId, formation->formationId),
 					 errdetail("in a pgsql formation, there can be only one "
 							   "group, with groupId 0")));
@@ -515,14 +515,14 @@ JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 				ereport(ERROR,
 						(errcode(ERRCODE_OBJECT_IN_USE),
 						 errmsg("primary node %s:%d is already in state %s",
-								primaryNode->nodeName, primaryNode->nodePort,
+								primaryNode->nodeHost, primaryNode->nodePort,
 								ReplicationStateGetName(primaryNode->goalState)),
 						 errdetail("Only one standby can be registered at a "
 								   "time in pg_auto_failover, and "
 								   "node %d (%s:%d) is currently being "
 								   "registered.",
 								   standbyNode->nodeId,
-								   standbyNode->nodeName,
+								   standbyNode->nodeHost,
 								   standbyNode->nodePort),
 						 errhint("Retry registering in a moment")));
 			}
@@ -542,12 +542,12 @@ JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 		 *
 		 * That's the policy implemented in AssignGroupId.
 		 */
-		groupId = AssignGroupId(formation, nodeName, nodePort, &initialState);
+		groupId = AssignGroupId(formation, nodeHost, nodePort, &initialState);
 	}
 
 	AddAutoFailoverNode(formation->formationId,
 						groupId,
-						nodeName,
+						nodeHost,
 						nodePort,
 						sysIdentifier,
 						initialState,
@@ -563,7 +563,7 @@ JoinAutoFailoverFormation(AutoFailoverFormation *formation,
  * AssignGroupId assigns a group ID to a new node and returns it.
  */
 static int
-AssignGroupId(AutoFailoverFormation *formation, char *nodeName, int nodePort,
+AssignGroupId(AutoFailoverFormation *formation, char *nodeHost, int nodePort,
 			  ReplicationState *initialState)
 {
 	int groupId = -1;
@@ -631,7 +631,7 @@ get_primary(PG_FUNCTION_ARGS)
 	memset(isNulls, false, sizeof(isNulls));
 
 	values[0] = Int32GetDatum(primaryNode->nodeId);
-	values[1] = CStringGetTextDatum(primaryNode->nodeName);
+	values[1] = CStringGetTextDatum(primaryNode->nodeHost);
 	values[2] = Int32GetDatum(primaryNode->nodePort);
 
 	resultTypeClass = get_call_result_type(fcinfo, NULL, &resultDescriptor);
@@ -728,7 +728,7 @@ get_nodes(PG_FUNCTION_ARGS)
 		memset(isNulls, false, sizeof(isNulls));
 
 		values[0] = Int32GetDatum(node->nodeId);
-		values[1] = CStringGetTextDatum(node->nodeName);
+		values[1] = CStringGetTextDatum(node->nodeHost);
 		values[2] = Int32GetDatum(node->nodePort);
 		values[3] = LSNGetDatum(node->reportedLSN);
 		values[4] = BoolGetDatum(CanTakeWritesInState(node->reportedState));
@@ -779,8 +779,8 @@ get_other_nodes(PG_FUNCTION_ARGS)
 	/* stuff done only on the first call of the function */
 	if (SRF_IS_FIRSTCALL())
 	{
-		text *nodeNameText = PG_GETARG_TEXT_P(0);
-		char *nodeName = text_to_cstring(nodeNameText);
+		text *nodeHostText = PG_GETARG_TEXT_P(0);
+		char *nodeHost = text_to_cstring(nodeHostText);
 		int32 nodePort = PG_GETARG_INT32(1);
 
 		AutoFailoverNode *activeNode = NULL;
@@ -802,11 +802,11 @@ get_other_nodes(PG_FUNCTION_ARGS)
 		 * Use fctx to keep state from call to call. Seed current with the
 		 * original start value
 		 */
-		activeNode = GetAutoFailoverNode(nodeName, nodePort);
+		activeNode = GetAutoFailoverNode(nodeHost, nodePort);
 		if (activeNode == NULL)
 		{
 			ereport(ERROR,
-					(errmsg("node %s:%d is not registered", nodeName, nodePort)));
+					(errmsg("node %s:%d is not registered", nodeHost, nodePort)));
 		}
 
 		if (PG_NARGS() == 2)
@@ -857,7 +857,7 @@ get_other_nodes(PG_FUNCTION_ARGS)
 		memset(isNulls, false, sizeof(isNulls));
 
 		values[0] = Int32GetDatum(node->nodeId);
-		values[1] = CStringGetTextDatum(node->nodeName);
+		values[1] = CStringGetTextDatum(node->nodeHost);
 		values[2] = Int32GetDatum(node->nodePort);
 		values[3] = LSNGetDatum(node->reportedLSN);
 		values[4] = BoolGetDatum(CanTakeWritesInState(node->reportedState));
@@ -887,8 +887,8 @@ get_other_nodes(PG_FUNCTION_ARGS)
 Datum
 remove_node(PG_FUNCTION_ARGS)
 {
-	text *nodeNameText = PG_GETARG_TEXT_P(0);
-	char *nodeName = text_to_cstring(nodeNameText);
+	text *nodeHostText = PG_GETARG_TEXT_P(0);
+	char *nodeHost = text_to_cstring(nodeHostText);
 	int32 nodePort = PG_GETARG_INT32(1);
 
 	AutoFailoverNode *currentNode = NULL;
@@ -896,7 +896,7 @@ remove_node(PG_FUNCTION_ARGS)
 
 	checkPgAutoFailoverVersion();
 
-	currentNode = GetAutoFailoverNode(nodeName, nodePort);
+	currentNode = GetAutoFailoverNode(nodeHost, nodePort);
 	if (currentNode == NULL)
 	{
 		PG_RETURN_BOOL(false);
@@ -906,7 +906,7 @@ remove_node(PG_FUNCTION_ARGS)
 
 	otherNode = OtherNodeInGroup(currentNode);
 
-	RemoveAutoFailoverNode(nodeName, nodePort);
+	RemoveAutoFailoverNode(nodeHost, nodePort);
 
 	if (otherNode != NULL)
 	{
@@ -995,11 +995,11 @@ perform_failover(PG_FUNCTION_ARGS)
 				 errdetail("node %d (%s:%d) is in state \"%s\" and "
 						   "node %d (%s:%d) is in state \"%s\"",
 						   firstNode->nodeId,
-						   firstNode->nodeName,
+						   firstNode->nodeHost,
 						   firstNode->nodePort,
 						   ReplicationStateGetName(firstNode->reportedState),
 						   secondNode->nodeId,
-						   secondNode->nodeName,
+						   secondNode->nodeHost,
 						   secondNode->nodePort,
 						   ReplicationStateGetName(secondNode->reportedState)),
 				 errhint("one node must be in state \"primary\" to "
@@ -1035,12 +1035,12 @@ perform_failover(PG_FUNCTION_ARGS)
 						   "and node %d (%s:%d) has reported state \"%s\" "
 						   "and is assigned state \"%s\"",
 						   firstNode->nodeId,
-						   firstNode->nodeName,
+						   firstNode->nodeHost,
 						   firstNode->nodePort,
 						   ReplicationStateGetName(firstNode->reportedState),
 						   ReplicationStateGetName(firstNode->goalState),
 						   secondNode->nodeId,
-						   secondNode->nodeName,
+						   secondNode->nodeHost,
 						   secondNode->nodePort,
 						   ReplicationStateGetName(secondNode->reportedState),
 						   ReplicationStateGetName(secondNode->goalState)),
@@ -1052,10 +1052,10 @@ perform_failover(PG_FUNCTION_ARGS)
 		message, BUFSIZE,
 		"Setting goal state of %s:%d to draining and %s:%d to "
 		"prepare_promotion after a user-initiated failover.",
-		primaryNode->nodeName, primaryNode->nodePort,
-		secondaryNode->nodeName, secondaryNode->nodePort);
+		primaryNode->nodeHost, primaryNode->nodePort,
+		secondaryNode->nodeHost, secondaryNode->nodePort);
 
-	SetNodeGoalState(primaryNode->nodeName, primaryNode->nodePort,
+	SetNodeGoalState(primaryNode->nodeHost, primaryNode->nodePort,
 					 REPLICATION_STATE_DRAINING);
 
 	NotifyStateChange(primaryNode->reportedState,
@@ -1063,7 +1063,7 @@ perform_failover(PG_FUNCTION_ARGS)
 					  primaryNode->formationId,
 					  primaryNode->groupId,
 					  primaryNode->nodeId,
-					  primaryNode->nodeName,
+					  primaryNode->nodeHost,
 					  primaryNode->nodePort,
 					  primaryNode->pgsrSyncState,
 					  primaryNode->reportedLSN,
@@ -1071,7 +1071,7 @@ perform_failover(PG_FUNCTION_ARGS)
 					  primaryNode->replicationQuorum,
 					  message);
 
-	SetNodeGoalState(secondaryNode->nodeName, secondaryNode->nodePort,
+	SetNodeGoalState(secondaryNode->nodeHost, secondaryNode->nodePort,
 					 REPLICATION_STATE_PREPARE_PROMOTION);
 
 	NotifyStateChange(secondaryNode->reportedState,
@@ -1079,7 +1079,7 @@ perform_failover(PG_FUNCTION_ARGS)
 					  secondaryNode->formationId,
 					  secondaryNode->groupId,
 					  secondaryNode->nodeId,
-					  secondaryNode->nodeName,
+					  secondaryNode->nodeHost,
 					  secondaryNode->nodePort,
 					  secondaryNode->pgsrSyncState,
 					  secondaryNode->reportedLSN,
@@ -1100,8 +1100,8 @@ perform_failover(PG_FUNCTION_ARGS)
 Datum
 start_maintenance(PG_FUNCTION_ARGS)
 {
-	text *nodeNameText = PG_GETARG_TEXT_P(0);
-	char *nodeName = text_to_cstring(nodeNameText);
+	text *nodeHostText = PG_GETARG_TEXT_P(0);
+	char *nodeHost = text_to_cstring(nodeHostText);
 	int32 nodePort = PG_GETARG_INT32(1);
 
 	AutoFailoverNode *currentNode = NULL;
@@ -1114,7 +1114,7 @@ start_maintenance(PG_FUNCTION_ARGS)
 
 	checkPgAutoFailoverVersion();
 
-	currentNode = GetAutoFailoverNode(nodeName, nodePort);
+	currentNode = GetAutoFailoverNode(nodeHost, nodePort);
 	if (currentNode == NULL)
 	{
 		PG_RETURN_BOOL(false);
@@ -1154,7 +1154,7 @@ start_maintenance(PG_FUNCTION_ARGS)
 						"\"%s\" and is assigned state \"%s\", "
 						"expected either \"primary\", "
 						"\"secondary\" or \"catchingup\"",
-						currentNode->nodeName, currentNode->nodePort,
+						currentNode->nodeHost, currentNode->nodePort,
 						ReplicationStateGetName(currentNode->reportedState),
 						ReplicationStateGetName(currentNode->goalState))));
 	}
@@ -1170,10 +1170,10 @@ start_maintenance(PG_FUNCTION_ARGS)
 			"Setting goal state of %s:%d to prepare_maintenance "
 			"and %s:%d to prepare_promotion "
 			"after a user-initiated start_maintenance call.",
-			currentNode->nodeName, currentNode->nodePort,
-			otherNode->nodeName, otherNode->nodePort);
+			currentNode->nodeHost, currentNode->nodePort,
+			otherNode->nodeHost, otherNode->nodePort);
 
-		SetNodeGoalState(currentNode->nodeName, currentNode->nodePort,
+		SetNodeGoalState(currentNode->nodeHost, currentNode->nodePort,
 						 REPLICATION_STATE_PREPARE_MAINTENANCE);
 
 		NotifyStateChange(currentNode->reportedState,
@@ -1181,7 +1181,7 @@ start_maintenance(PG_FUNCTION_ARGS)
 						  currentNode->formationId,
 						  currentNode->groupId,
 						  currentNode->nodeId,
-						  currentNode->nodeName,
+						  currentNode->nodeHost,
 						  currentNode->nodePort,
 						  currentNode->pgsrSyncState,
 						  currentNode->reportedLSN,
@@ -1189,7 +1189,7 @@ start_maintenance(PG_FUNCTION_ARGS)
 						  currentNode->replicationQuorum,
 						  message);
 
-		SetNodeGoalState(otherNode->nodeName, otherNode->nodePort,
+		SetNodeGoalState(otherNode->nodeHost, otherNode->nodePort,
 						 REPLICATION_STATE_PREPARE_PROMOTION);
 
 		NotifyStateChange(otherNode->reportedState,
@@ -1197,7 +1197,7 @@ start_maintenance(PG_FUNCTION_ARGS)
 						  otherNode->formationId,
 						  otherNode->groupId,
 						  otherNode->nodeId,
-						  otherNode->nodeName,
+						  otherNode->nodeHost,
 						  otherNode->nodePort,
 						  otherNode->pgsrSyncState,
 						  otherNode->reportedLSN,
@@ -1211,10 +1211,10 @@ start_maintenance(PG_FUNCTION_ARGS)
 			message, BUFSIZE,
 			"Setting goal state of %s:%d to wait_primaru and %s:%d to "
 			"maintenance after a user-initiated start_maintenance call.",
-			otherNode->nodeName, otherNode->nodePort,
-			currentNode->nodeName, currentNode->nodePort);
+			otherNode->nodeHost, otherNode->nodePort,
+			currentNode->nodeHost, currentNode->nodePort);
 
-		SetNodeGoalState(otherNode->nodeName, otherNode->nodePort,
+		SetNodeGoalState(otherNode->nodeHost, otherNode->nodePort,
 						 REPLICATION_STATE_WAIT_PRIMARY);
 
 		NotifyStateChange(otherNode->reportedState,
@@ -1222,7 +1222,7 @@ start_maintenance(PG_FUNCTION_ARGS)
 						  otherNode->formationId,
 						  otherNode->groupId,
 						  otherNode->nodeId,
-						  otherNode->nodeName,
+						  otherNode->nodeHost,
 						  otherNode->nodePort,
 						  otherNode->pgsrSyncState,
 						  otherNode->reportedLSN,
@@ -1230,7 +1230,7 @@ start_maintenance(PG_FUNCTION_ARGS)
 						  otherNode->replicationQuorum,
 						  message);
 
-		SetNodeGoalState(currentNode->nodeName, currentNode->nodePort,
+		SetNodeGoalState(currentNode->nodeHost, currentNode->nodePort,
 						 REPLICATION_STATE_WAIT_MAINTENANCE);
 
 		NotifyStateChange(currentNode->reportedState,
@@ -1238,7 +1238,7 @@ start_maintenance(PG_FUNCTION_ARGS)
 						  currentNode->formationId,
 						  currentNode->groupId,
 						  currentNode->nodeId,
-						  currentNode->nodeName,
+						  currentNode->nodeHost,
 						  currentNode->nodePort,
 						  currentNode->pgsrSyncState,
 						  currentNode->reportedLSN,
@@ -1254,7 +1254,7 @@ start_maintenance(PG_FUNCTION_ARGS)
 				 errmsg("cannot start maintenance: current state for node %s:%d "
 						"is \"%s\", expected either \"primary\", "
 						"\"secondary\" or \"catchingup\"",
-						currentNode->nodeName, currentNode->nodePort,
+						currentNode->nodeHost, currentNode->nodePort,
 						ReplicationStateGetName(currentNode->reportedState))));
 	}
 	PG_RETURN_BOOL(true);
@@ -1270,8 +1270,8 @@ start_maintenance(PG_FUNCTION_ARGS)
 Datum
 stop_maintenance(PG_FUNCTION_ARGS)
 {
-	text *nodeNameText = PG_GETARG_TEXT_P(0);
-	char *nodeName = text_to_cstring(nodeNameText);
+	text *nodeHostText = PG_GETARG_TEXT_P(0);
+	char *nodeHost = text_to_cstring(nodeHostText);
 	int32 nodePort = PG_GETARG_INT32(1);
 
 	AutoFailoverNode *currentNode = NULL;
@@ -1281,7 +1281,7 @@ stop_maintenance(PG_FUNCTION_ARGS)
 
 	checkPgAutoFailoverVersion();
 
-	currentNode = GetAutoFailoverNode(nodeName, nodePort);
+	currentNode = GetAutoFailoverNode(nodeHost, nodePort);
 	if (currentNode == NULL)
 	{
 		PG_RETURN_BOOL(false);
@@ -1305,7 +1305,7 @@ stop_maintenance(PG_FUNCTION_ARGS)
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("cannot stop maintenance when current state for "
 						"node %s:%d is not \"maintenance\"",
-						currentNode->nodeName, currentNode->nodePort)));
+						currentNode->nodeHost, currentNode->nodePort)));
 	}
 
 	if (!IsCurrentState(otherNode, REPLICATION_STATE_WAIT_PRIMARY))
@@ -1314,7 +1314,7 @@ stop_maintenance(PG_FUNCTION_ARGS)
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("cannot stop maintenance when current state for "
 						"node %s:%d is \"%s\"",
-						otherNode->nodeName, otherNode->nodePort,
+						otherNode->nodeHost, otherNode->nodePort,
 						ReplicationStateGetName(otherNode->reportedState))));
 	}
 
@@ -1322,9 +1322,9 @@ stop_maintenance(PG_FUNCTION_ARGS)
 		message, BUFSIZE,
 		"Setting goal state of %s:%d to catchingup  "
 		"after a user-initiated stop_maintenance call.",
-		currentNode->nodeName, currentNode->nodePort);
+		currentNode->nodeHost, currentNode->nodePort);
 
-	SetNodeGoalState(currentNode->nodeName, currentNode->nodePort,
+	SetNodeGoalState(currentNode->nodeHost, currentNode->nodePort,
 					 REPLICATION_STATE_CATCHINGUP);
 
 	NotifyStateChange(currentNode->reportedState,
@@ -1332,7 +1332,7 @@ stop_maintenance(PG_FUNCTION_ARGS)
 					  currentNode->formationId,
 					  currentNode->groupId,
 					  currentNode->nodeId,
-					  currentNode->nodeName,
+					  currentNode->nodeHost,
 					  currentNode->nodePort,
 					  currentNode->pgsrSyncState,
 					  currentNode->reportedLSN,
@@ -1351,8 +1351,8 @@ Datum
 set_node_candidate_priority(PG_FUNCTION_ARGS)
 {
 	int32 nodeId = PG_GETARG_INT32(0);
-	text *nodeNameText = PG_GETARG_TEXT_P(1);
-	char *nodeName = text_to_cstring(nodeNameText);
+	text *nodeHostText = PG_GETARG_TEXT_P(1);
+	char *nodeHost = text_to_cstring(nodeHostText);
 	int32 nodePort = PG_GETARG_INT32(2);
 	int candidatePriority = PG_GETARG_INT32(3);
 
@@ -1364,7 +1364,7 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 
 	checkPgAutoFailoverVersion();
 
-	currentNode = GetAutoFailoverNodeWithId(nodeId, nodeName, nodePort);
+	currentNode = GetAutoFailoverNodeWithId(nodeId, nodeHost, nodePort);
 
 	if (currentNode == NULL)
 	{
@@ -1390,7 +1390,7 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 
 	ReportAutoFailoverNodeReplicationSetting(
 		currentNode->nodeId,
-		currentNode->nodeName,
+		currentNode->nodeHost,
 		currentNode->nodePort,
 		currentNode->candidatePriority,
 		currentNode->replicationQuorum);
@@ -1401,7 +1401,7 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 			message, BUFSIZE,
 			"Updating candidate priority to %d for node %s:%d",
 			currentNode->candidatePriority,
-			currentNode->nodeName,
+			currentNode->nodeHost,
 			currentNode->nodePort);
 	}
 	else
@@ -1424,7 +1424,7 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 					 errmsg("cannot set candidate priority when current state "
 							"for primary node %s:%d is \"%s\"",
-							primaryNode->nodeName, primaryNode->nodePort,
+							primaryNode->nodeHost, primaryNode->nodePort,
 							ReplicationStateGetName(primaryNode->reportedState)),
 					 errdetail("The primary node so must be in state \"primary\" "
 							   "to be able to apply configuration changes to "
@@ -1435,11 +1435,11 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 			message, BUFSIZE,
 			"Setting goal state of %s:%d to apply_settings "
 			"after updating candidate priority to %d for node %s:%d.",
-			primaryNode->nodeName, primaryNode->nodePort,
+			primaryNode->nodeHost, primaryNode->nodePort,
 			currentNode->candidatePriority,
-			currentNode->nodeName, currentNode->nodePort);
+			currentNode->nodeHost, currentNode->nodePort);
 
-		SetNodeGoalState(primaryNode->nodeName, primaryNode->nodePort,
+		SetNodeGoalState(primaryNode->nodeHost, primaryNode->nodePort,
 						 REPLICATION_STATE_APPLY_SETTINGS);
 
 		NotifyStateChange(primaryNode->reportedState,
@@ -1447,7 +1447,7 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 						  primaryNode->formationId,
 						  primaryNode->groupId,
 						  primaryNode->nodeId,
-						  primaryNode->nodeName,
+						  primaryNode->nodeHost,
 						  primaryNode->nodePort,
 						  primaryNode->pgsrSyncState,
 						  primaryNode->reportedLSN,
@@ -1461,7 +1461,7 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 					  currentNode->formationId,
 					  currentNode->groupId,
 					  currentNode->nodeId,
-					  currentNode->nodeName,
+					  currentNode->nodeHost,
 					  currentNode->nodePort,
 					  currentNode->pgsrSyncState,
 					  currentNode->reportedLSN,
@@ -1480,8 +1480,8 @@ Datum
 set_node_replication_quorum(PG_FUNCTION_ARGS)
 {
 	int32 nodeid = PG_GETARG_INT32(0);
-	text *nodeNameText = PG_GETARG_TEXT_P(1);
-	char *nodeName = text_to_cstring(nodeNameText);
+	text *nodeHostText = PG_GETARG_TEXT_P(1);
+	char *nodeHost = text_to_cstring(nodeHostText);
 	int32 nodePort = PG_GETARG_INT32(2);
 	bool replicationQuorum = PG_GETARG_BOOL(3);
 
@@ -1493,7 +1493,7 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 
 	checkPgAutoFailoverVersion();
 
-	currentNode = GetAutoFailoverNodeWithId(nodeid, nodeName, nodePort);
+	currentNode = GetAutoFailoverNodeWithId(nodeid, nodeHost, nodePort);
 
 	if (currentNode == NULL)
 	{
@@ -1510,7 +1510,7 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 	currentNode->replicationQuorum = replicationQuorum;
 
 	ReportAutoFailoverNodeReplicationSetting(currentNode->nodeId,
-											 currentNode->nodeName,
+											 currentNode->nodeHost,
 											 currentNode->nodePort,
 											 currentNode->candidatePriority,
 											 currentNode->replicationQuorum);
@@ -1563,7 +1563,7 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 			message, BUFSIZE,
 			"Updating replicationQuorum to %s for node %s:%d",
 			currentNode->replicationQuorum ? "true" : "false",
-			currentNode->nodeName,
+			currentNode->nodeHost,
 			currentNode->nodePort);
 	}
 	else
@@ -1586,7 +1586,7 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 					 errmsg("cannot set replication quorum when current state "
 							"for primary node %s:%d is \"%s\"",
-							primaryNode->nodeName, primaryNode->nodePort,
+							primaryNode->nodeHost, primaryNode->nodePort,
 							ReplicationStateGetName(primaryNode->reportedState)),
 					 errdetail("The primary node so must be in state \"primary\" "
 							   "to be able to apply configuration changes to "
@@ -1597,11 +1597,11 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 			message, BUFSIZE,
 			"Setting goal state of %s:%d to apply_settings "
 			"after updating replication quorum to %s for node %s:%d.",
-			primaryNode->nodeName, primaryNode->nodePort,
+			primaryNode->nodeHost, primaryNode->nodePort,
 			currentNode->replicationQuorum ? "true" : "false",
-			currentNode->nodeName, currentNode->nodePort);
+			currentNode->nodeHost, currentNode->nodePort);
 
-		SetNodeGoalState(primaryNode->nodeName, primaryNode->nodePort,
+		SetNodeGoalState(primaryNode->nodeHost, primaryNode->nodePort,
 						 REPLICATION_STATE_APPLY_SETTINGS);
 
 		NotifyStateChange(primaryNode->reportedState,
@@ -1609,7 +1609,7 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 						  primaryNode->formationId,
 						  primaryNode->groupId,
 						  primaryNode->nodeId,
-						  primaryNode->nodeName,
+						  primaryNode->nodeHost,
 						  primaryNode->nodePort,
 						  primaryNode->pgsrSyncState,
 						  primaryNode->reportedLSN,
@@ -1623,7 +1623,7 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 					  currentNode->formationId,
 					  currentNode->groupId,
 					  currentNode->nodeId,
-					  currentNode->nodeName,
+					  currentNode->nodeHost,
 					  currentNode->nodePort,
 					  currentNode->pgsrSyncState,
 					  currentNode->reportedLSN,

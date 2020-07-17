@@ -402,7 +402,7 @@ ipv6eq(struct sockaddr_in6 *a, struct sockaddr_in6 *b)
 
 /*
  * findHostnameLocalAddress does a reverse DNS lookup given a hostname
- * (--nodename), and if the DNS lookup fails or doesn't return any local IP
+ * (--hostname), and if the DNS lookup fails or doesn't return any local IP
  * address, then returns false.
  */
 bool

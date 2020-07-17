@@ -315,7 +315,7 @@ pg_setup_init(PostgresSetup *pgSetup,
 		 * The default listen_addresses is '*', because we are dealing with a
 		 * cluster setup and 'localhost' isn't going to cut it: the monitor and
 		 * the coordinator nodes need to be able to connect to our local node
-		 * using a connection string with nodename:port.
+		 * using a connection string with hostname:port.
 		 */
 		strlcpy(pgSetup->listen_addresses,
 				POSTGRES_DEFAULT_LISTEN_ADDRESSES, MAXPGPATH);

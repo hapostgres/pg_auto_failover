@@ -220,7 +220,7 @@ parse_controldata_field_uint64(const char *controlDataString,
  *
  *  S:catchingup:secondary:7.default:0:3:9.localhost:6020
  *
- *  S:<state>:<state>:<len.formationId>:groupId:nodeId:<len.nodeName>:nodePort
+ *  S:<state>:<state>:<len.formationId>:groupId:nodeId:<len.hostName>:nodePort
  *
  * We trust the input to a degree, so we don't check everything that could go
  * wrong. We might want to revisit that choice later.
@@ -285,9 +285,9 @@ parse_state_notification_message(StateNotification *notification)
 	}
 	ptr = ++col;
 
-	/* read the nodeName, then move past it */
+	/* read the hostName, then move past it */
 	ptr += read_length_delimited_string_at(ptr,
-										   notification->nodeName,
+										   notification->hostName,
 										   NAMEDATALEN);
 
 	/* read the nodePort */

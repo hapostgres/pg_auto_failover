@@ -44,7 +44,7 @@ def test_001_init_primary():
 
     os.environ["PG_REGRESS_SOCK_DIR"] = "/tmp/socks/node1"
 
-    # we need to give the nodename here, because our method to find it
+    # we need to give the hostname here, because our method to find it
     # automatically will fail in the test environment
     node1 = cluster.create_datanode(node1_path,
                                     authMethod="skip")

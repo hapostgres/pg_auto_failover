@@ -24,7 +24,7 @@ typedef struct MonitorConfig
 	ConfigFilePaths pathnames;
 
 	/* pg_autoctl setup */
-	char nodename[_POSIX_HOST_NAME_MAX];
+	char hostname[_POSIX_HOST_NAME_MAX];
 
 	/* PostgreSQL setup */
 	char role[NAMEDATALEN];

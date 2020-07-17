@@ -16,7 +16,7 @@
 #include "monitor_config.h"
 
 bool monitor_pg_init(Monitor *monitor);
-bool monitor_install(const char *nodename,
+bool monitor_install(const char *hostname,
 					 PostgresSetup pgSetupOption,
 					 bool checkSettings);
 bool monitor_add_postgres_default_settings(Monitor *monitor);

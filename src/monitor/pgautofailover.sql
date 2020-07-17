@@ -97,7 +97,7 @@ CREATE TABLE pgautofailover.node
     formationid          text not null default 'default',
     nodeid               bigserial,
     groupid              int not null,
-    nodename             text not null,
+    nodehost             text not null,
     nodeport             int not null,
     sysidentifier        bigint,
     goalstate            pgautofailover.replication_state not null default 'init',
@@ -113,7 +113,7 @@ CREATE TABLE pgautofailover.node
     candidatepriority	 int not null default 100,
     replicationquorum	 bool not null default true,
 
-    UNIQUE (nodename, nodeport),
+    UNIQUE (nodehost, nodeport),
     --
     -- The EXCLUDE constraint only allows the same sysidentifier for all the
     -- nodes in the same group. The system_identifier is a property that is
@@ -143,7 +143,7 @@ CREATE TABLE pgautofailover.event
     formationid       text not null,
     nodeid            bigint not null,
     groupid           int not null,
-    nodename          text not null,
+    nodehost          text not null,
     nodeport          integer not null,
     reportedstate     pgautofailover.replication_state not null,
     goalstate         pgautofailover.replication_state not null,
@@ -158,7 +158,7 @@ CREATE TABLE pgautofailover.event
 
 GRANT SELECT ON ALL TABLES IN SCHEMA pgautofailover TO autoctl_node;
 
-CREATE FUNCTION pgautofailover.set_node_nodename
+CREATE FUNCTION pgautofailover.set_node_nodehost
  (
     IN node_id   bigint,
     IN node_name text,
@@ -169,12 +169,12 @@ CREATE FUNCTION pgautofailover.set_node_nodename
 RETURNS record LANGUAGE SQL STRICT SECURITY DEFINER
 AS $$
       update pgautofailover.node
-         set nodename = node_name
+         set nodehost = node_name
        where nodeid = node_id
-   returning nodeid, nodename, nodeport;
+   returning nodeid, nodehost, nodeport;
 $$;
 
-grant execute on function pgautofailover.set_node_nodename(bigint,text)
+grant execute on function pgautofailover.set_node_nodehost(bigint,text)
    to autoctl_node;
 
 CREATE FUNCTION pgautofailover.set_node_system_identifier
@@ -190,10 +190,10 @@ AS $$
       update pgautofailover.node
          set sysidentifier = node_sysidentifier
        where nodeid = node_id
-   returning nodeid, nodename, nodeport;
+   returning nodeid, nodehost, nodeport;
 $$;
 
-grant execute on function pgautofailover.set_node_nodename(bigint,text)
+grant execute on function pgautofailover.set_node_nodehost(bigint,text)
    to autoctl_node;
 
 
@@ -333,7 +333,7 @@ CREATE FUNCTION pgautofailover.get_coordinator
  )
 RETURNS SETOF record LANGUAGE SQL STRICT
 AS $$
-  select nodename, nodeport
+  select nodehost, nodeport
     from pgautofailover.node
          join pgautofailover.formation using(formationid)
    where formationid = formation_id
@@ -410,7 +410,7 @@ AS $$
 with last_events as
 (
   select eventid, eventtime, formationid,
-         nodeid, groupid, nodename, nodeport,
+         nodeid, groupid, nodehost, nodeport,
          reportedstate, goalstate,
          reportedrepstate, reportedlsn, candidatepriority, replicationquorum, description
     from pgautofailover.event
@@ -433,7 +433,7 @@ AS $$
 with last_events as
 (
     select eventid, eventtime, formationid,
-           nodeid, groupid, nodename, nodeport,
+           nodeid, groupid, nodehost, nodeport,
            reportedstate, goalstate,
            reportedrepstate, reportedlsn, candidatepriority, replicationquorum, description
       from pgautofailover.event
@@ -458,7 +458,7 @@ AS $$
 with last_events as
 (
     select eventid, eventtime, formationid,
-           nodeid, groupid, nodename, nodeport,
+           nodeid, groupid, nodehost, nodeport,
            reportedstate, goalstate,
            reportedrepstate, reportedlsn, candidatepriority, replicationquorum, description
       from pgautofailover.event
@@ -476,7 +476,7 @@ comment on function pgautofailover.last_events(text,int,int)
 CREATE FUNCTION pgautofailover.current_state
  (
     IN formation_id         text default 'default',
-   OUT nodename             text,
+   OUT nodehost             text,
    OUT nodeport             int,
    OUT group_id             int,
    OUT node_id              bigint,
@@ -487,7 +487,7 @@ CREATE FUNCTION pgautofailover.current_state
  )
 RETURNS SETOF record LANGUAGE SQL STRICT
 AS $$
-   select nodename, nodeport, groupid, nodeid, reportedstate, goalstate,
+   select nodehost, nodeport, groupid, nodeid, reportedstate, goalstate,
    		candidatepriority, replicationquorum
    from pgautofailover.node
    where formationid = formation_id
@@ -501,7 +501,7 @@ CREATE FUNCTION pgautofailover.current_state
  (
     IN formation_id         text,
     IN group_id             int,
-   OUT nodename             text,
+   OUT nodehost             text,
    OUT nodeport             int,
    OUT group_id             int,
    OUT node_id              bigint,
@@ -512,7 +512,7 @@ CREATE FUNCTION pgautofailover.current_state
  )
 RETURNS SETOF record LANGUAGE SQL STRICT
 AS $$
-   select nodename, nodeport, groupid, nodeid, reportedstate, goalstate,
+   select nodehost, nodeport, groupid, nodeid, reportedstate, goalstate,
    		  candidatepriority, replicationquorum
    from pgautofailover.node
    where formationid = formation_id
@@ -533,10 +533,10 @@ CREATE FUNCTION pgautofailover.formation_uri
 RETURNS text LANGUAGE SQL STRICT
 AS $$
     select case
-           when string_agg(format('%s:%s', nodename, nodeport),',') is not null
+           when string_agg(format('%s:%s', nodehost, nodeport),',') is not null
            then format(
                'postgres://%s/%s?target_session_attrs=read-write&sslmode=%s%s%s',
-               string_agg(format('%s:%s', nodename, nodeport),','),
+               string_agg(format('%s:%s', nodehost, nodeport),','),
                -- as we join formation on node we get the same dbname for all
                -- entries, pick one.
                min(dbname),
@@ -623,7 +623,7 @@ CREATE TRIGGER disable_secondary_check
 CREATE FUNCTION pgautofailover.set_node_candidate_priority
  (
     IN nodeid				int,
-	IN nodename             text,
+	IN nodehost             text,
 	IN nodeport             int,
     IN candidate_priority	int
  )
@@ -640,7 +640,7 @@ grant execute on function
 CREATE FUNCTION pgautofailover.set_node_replication_quorum
  (
     IN nodeid				int,
-	IN nodename             text,
+	IN nodehost             text,
 	IN nodeport             int,
     IN replication_quorum	bool
  )
