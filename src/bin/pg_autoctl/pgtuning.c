@@ -81,9 +81,9 @@ pgtuning_prepare_guc_settings(GUC *settings, char *config, size_t size)
 
 	(void) pretty_print_bytes(totalram, sizeof(totalram), sysInfo.totalram);
 
-	log_info("Detected %d CPUs and %s total RAM on this server",
-			 sysInfo.ncpu,
-			 totalram);
+	log_debug("Detected %d CPUs and %s total RAM on this server",
+			  sysInfo.ncpu,
+			  totalram);
 
 	tuning.maxWorkers = pgtuning_compute_max_workers(&sysInfo);
 
@@ -93,7 +93,7 @@ pgtuning_prepare_guc_settings(GUC *settings, char *config, size_t size)
 		return false;
 	}
 
-	(void) pgtuning_log_settings(&tuning, LOG_INFO);
+	(void) pgtuning_log_settings(&tuning, LOG_DEBUG);
 
 	return pgtuning_edit_guc_settings(settings, &tuning, config, size);
 }
@@ -244,11 +244,6 @@ static bool
 pgtuning_edit_guc_settings(GUC *settings, DynamicTuning *tuning,
 						   char *config, size_t size)
 {
-	/*
-	 * Only bother to apply settings on Linux, macOS and Windows are considered
-	 * development environment and we decide to refrain from tuning a dedicated
-	 * Postgres system on those targets.
-	 */
 	PQExpBuffer contents = createPQExpBuffer();
 	int settingIndex = 0;
 
@@ -257,6 +252,9 @@ pgtuning_edit_guc_settings(GUC *settings, DynamicTuning *tuning,
 		log_error("Failed to allocate memory");
 		return false;
 	}
+
+	appendPQExpBuffer(contents,
+					  "# basic tuning computed by pg_auto_failover\n");
 
 	/* replace placeholder values with dynamic tuned values */
 	for (settingIndex = 0; settings[settingIndex].name != NULL; settingIndex++)
