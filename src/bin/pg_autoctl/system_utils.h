@@ -1,5 +1,5 @@
 /*
- * src/bin/pg_autoctl/hardware_utils.h
+ * src/bin/pg_autoctl/system_utils.h
  *   Utility functions for getting CPU and Memory information.
  *
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -17,7 +17,7 @@
 typedef struct SystemInfo
 {
 	uint64_t totalram;          /* Total usable main memory size */
-	unsigned short procs;    /* Number of current processes */
+	unsigned short ncpu;        /* Number of current processes */
 } SystemInfo;
 
 bool get_system_info(SystemInfo *sysInfo);

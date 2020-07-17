@@ -74,6 +74,7 @@ void keeper_cli_pgsetup_discover(int argc, char **argv);
 void keeper_cli_pgsetup_is_ready(int argc, char **argv);
 void keeper_cli_pgsetup_wait_until_ready(int argc, char **argv);
 void keeper_cli_pgsetup_startup_logs(int argc, char **argv);
+void keeper_cli_pgsetup_tune(int argc, char **argv);
 
 void keeper_cli_add_default_settings(int argc, char **argv);
 void keeper_cli_create_replication_user(int argc, char **argv);

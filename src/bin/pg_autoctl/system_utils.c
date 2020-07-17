@@ -62,7 +62,7 @@ get_system_info_linux(SystemInfo *sysInfo)
 		return false;
 	}
 
-	sysInfo->procs = get_nprocs();
+	sysInfo->ncpu = get_nprocs();
 	sysInfo->totalram = linuxSysInfo.totalram;
 
 	return true;
@@ -90,7 +90,7 @@ get_system_info_bsd(SystemInfo *sysInfo)
 		return false;
 	}
 
-	sysInfo->procs = (unsigned short) ncpu;
+	sysInfo->ncpu = (unsigned short) ncpu;
 
 	if (sysctlbyname("hw.memsize", &(sysInfo->totalram), &memSize, NULL, 0) != 0)
 	{

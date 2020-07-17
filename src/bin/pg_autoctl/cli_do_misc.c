@@ -27,6 +27,7 @@
 #include "monitor.h"
 #include "monitor_config.h"
 #include "pgctl.h"
+#include "pgtuning.h"
 #include "primary_standby.h"
 #include "string_utils.h"
 
@@ -271,6 +272,23 @@ keeper_cli_pgsetup_startup_logs(int argc, char **argv)
 	{
 		exit(EXIT_CODE_PGCTL);
 	}
+}
+
+
+/*
+ * keeper_cli_pgsetup_tune compute some Postgres tuning for the local system.
+ */
+void
+keeper_cli_pgsetup_tune(int argc, char **argv)
+{
+	char config[BUFSIZE] = { 0 };
+
+	if (!pgtuning_prepare_guc_settings(postgres_tuning, config, BUFSIZE))
+	{
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	fformat(stdout, "%s\n", config);
 }
 
 
