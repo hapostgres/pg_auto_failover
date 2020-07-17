@@ -1192,7 +1192,7 @@ discover_nodename(char *nodename, int size,
 	 */
 	char ipAddr[BUFSIZE];
 	char localIpAddr[BUFSIZE];
-	char hostname[_POSIX_HOST_NAME_MAX];
+	char nodenameCandidate[_POSIX_HOST_NAME_MAX];
 
 	/* fetch our local address among the network interfaces */
 	if (!fetchLocalIPAddress(ipAddr, BUFSIZE, monitorHostname, monitorPort))
@@ -1208,16 +1208,17 @@ discover_nodename(char *nodename, int size,
 
 	/* do a reverse DNS lookup from our local LAN ip address */
 	if (!findHostnameFromLocalIpAddress(ipAddr,
-										hostname, _POSIX_HOST_NAME_MAX))
+										nodenameCandidate,
+										_POSIX_HOST_NAME_MAX))
 	{
 		/* errors have already been logged */
 		log_info("Using local IP address \"%s\" as the --nodename.", ipAddr);
 		return true;
 	}
-	log_debug("discover_nodename: host from ip %s", hostname);
+	log_debug("discover_nodename: host from ip %s", nodenameCandidate);
 
 	/* do a DNS lookup of the hostname we got from the IP address */
-	if (!findHostnameLocalAddress(hostname, localIpAddr, BUFSIZE))
+	if (!findHostnameLocalAddress(nodenameCandidate, localIpAddr, BUFSIZE))
 	{
 		/* errors have already been logged */
 		log_info("Using local IP address \"%s\" as the --nodename.", ipAddr);
@@ -1229,7 +1230,7 @@ discover_nodename(char *nodename, int size,
 	 * ok ipAddr resolves to an hostname that resolved back to a local address,
 	 * we should be able to use the hostname in pg_hba.conf
 	 */
-	strlcpy(nodename, hostname, size);
+	strlcpy(nodename, nodenameCandidate, size);
 	log_info("Using --nodename \"%s\", which resolves to IP address \"%s\"",
 			 nodename, localIpAddr);
 
