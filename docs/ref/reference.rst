@@ -98,12 +98,12 @@ commands are dealing with the monitor:
 
       $ pg_autoctl create monitor --help
       pg_autoctl create monitor: Initialize a pg_auto_failover monitor node
-      usage: pg_autoctl create monitor  [ --pgdata --pgport --pgctl --nodename ]
+      usage: pg_autoctl create monitor  [ --pgdata --pgport --pgctl --hostname ]
 
         --pgctl       path to pg_ctl
         --pgdata      path to data directory
         --pgport      PostgreSQL's port number
-        --nodename    hostname by which postgres is reachable
+        --hostname    hostname by which postgres is reachable
         --auth        authentication method for connections from data nodes
         --skip-pg-hba skip editing pg_hba.conf rules
         --run         create node then run pg_autoctl service
@@ -113,7 +113,7 @@ commands are dealing with the monitor:
      ``--pgctl`` option defaults to the first ``pg_ctl`` entry found in your
      `PATH`.
 
-     The ``--nodename`` option allows setting the hostname that the other
+     The ``--hostname`` option allows setting the hostname that the other
      nodes of the cluster will use to access to the monitor. When not
      provided, a default value is computed by running the following
      algorithm:
@@ -129,10 +129,10 @@ commands are dealing with the monitor:
 
      When the forward DNS lookup response in step 3. is an IP address found
      in one of our local network interfaces, then `pg_autoctl` uses the
-     hostname found in step 2. as the default `--nodename`. Otherwise it
+     hostname found in step 2. as the default `--hostname`. Otherwise it
      uses the IP address found in step 1.
 
-     You may use the `--nodename` command line option to bypass the whole
+     You may use the `--hostname` command line option to bypass the whole
      DNS lookup based process and force the local node name to a fixed
      value.
 
@@ -337,7 +337,7 @@ The other commands accept the same set of options.
     --listen      PostgreSQL's listen_addresses
     --username    PostgreSQL's username
     --dbname      PostgreSQL's database name
-    --nodename    pg_auto_failover node
+    --hostname    pg_auto_failover node
     --formation   pg_auto_failover formation
     --monitor     pg_auto_failover Monitor Postgres URL
     --auth        authentication method for connections from monitor
@@ -350,7 +350,7 @@ corresponding to as many implementation strategies.
 
      This happens when ``--pgdata`` (or the environment variable ``PGDATA``)
      points to an non-existing or empty directory. Then the given
-     ``--nodename`` is registered to the pg_auto_failover ``--monitor`` as a
+     ``--hostname`` is registered to the pg_auto_failover ``--monitor`` as a
      member of the ``--formation``.
 
      The monitor answers to the registration call with a state to assign to
@@ -365,7 +365,7 @@ corresponding to as many implementation strategies.
      instance. The standard PostgreSQL tool ``pg_controldata`` is used to
      recognize whether the directory belongs to a PostgreSQL instance.
 
-     In that case, the given ``--nodename`` is registered to the monitor in
+     In that case, the given ``--hostname`` is registered to the monitor in
      the tentative *SINGLE* state. When the given ``--formation`` and
      ``--group`` is currently empty, then the monitor accepts the
      registration and the ``pg_autoctl create`` prepares the already existing
@@ -389,7 +389,7 @@ Currently, ``pg_autoctl create`` doesn't know how to initialize from an already
 running PostgreSQL standby node. In that situation, it is necessary to
 prepare a new secondary system from scratch.
 
-When `--nodename` is omitted, it is computed as above (see
+When `--hostname` is omitted, it is computed as above (see
 :ref:`pg_autoctl_create_monitor`), with the difference that step 1 uses the
 monitor IP and port rather than the public service 8.8.8.8:53.
 
@@ -432,7 +432,7 @@ When initializing a pg_auto_failover keeper with ``--pgdata /data/pgsql``, then:
       monitor = postgres://autoctl_node@192.168.1.34:6000/pg_auto_failover
       formation = default
       group = 1
-      nodename = node1.db
+      hostname = node1.db
 
       [postgresql]
       pgdata = /data/pgsql/
@@ -543,21 +543,21 @@ keeper and monitor, use the following command::
 
     $ pg_autoctl drop node --help
     pg_autoctl drop node: Drop a node from the pg_auto_failover monitor
-    usage: pg_autoctl drop node [ --pgdata --destroy --nodename --nodeport ]
+    usage: pg_autoctl drop node [ --pgdata --destroy --hostname --nodeport ]
 
       --pgdata      path to data directory
       --destroy     also destroy Postgres database
-      --nodename    nodename to remove from the monitor
+      --hostname    hostname to remove from the monitor
       --nodeport    Postgres port of the node to remove
 
-The ``pg_autoctl drop node`` connects to the monitor and removes the
-nodename from it, then removes the local pg_auto_failover keeper state file. The
+The ``pg_autoctl drop node`` connects to the monitor and removes the node
+from it, then removes the local pg_auto_failover keeper state file. The
 configuration file is not removed.
 
 It is possible to run the ``pg_autoctl drop node`` command either from the
 node itself and then the ``--destroy`` option is available to wipe out
 everything, including configuration files and PGDATA; or to run the command
-from the monitor and then use the ``--nodename`` and ``--nodeport`` options
+from the monitor and then use the ``--hostname`` and ``--nodeport`` options
 to target a (presumably dead) node to remove from the monitor registration.
 
 .. _pg_autoctl_maintenance:
@@ -629,7 +629,7 @@ through the following commands, only available in debug environments::
 
     pg_autoctl do monitor get
       primary      Get the primary node from pg_auto_failover in given formation/group
-      other        Get the other node from the pg_auto_failover group of nodename/port
+      other        Get the other node from the pg_auto_failover group of hostname/port
       coordinator  Get the coordinator node from the pg_auto_failover formation
 
     pg_autoctl do fsm
@@ -671,4 +671,4 @@ through the following commands, only available in debug environments::
       ipaddr    Print this node's IP address information
       cidr      Print this node's CIDR information
       lookup    Print this node's DNS lookup information
-      nodename  Print this node's default nodename
+      hostname  Print this node's default hostname
