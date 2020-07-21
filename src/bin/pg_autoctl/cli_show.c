@@ -37,9 +37,7 @@ static int cli_show_state_getopts(int argc, char **argv);
 static void cli_show_state(int argc, char **argv);
 static void cli_show_events(int argc, char **argv);
 
-static int cli_show_nodes_getopts(int argc, char **argv);
-static void cli_show_nodes(int argc, char **argv);
-
+static int cli_show_standby_names_getopts(int argc, char **argv);
 static void cli_show_standby_names(int argc, char **argv);
 
 static int cli_show_file_getopts(int argc, char **argv);
@@ -93,28 +91,6 @@ CommandLine show_state_command =
 				 cli_show_state_getopts,
 				 cli_show_state);
 
-CommandLine show_nodes_command =
-	make_command("nodes",
-				 "Prints monitor nodes of nodes in a given formation and group",
-				 " [ --pgdata --formation --group ] ",
-				 "  --pgdata      path to data directory	 \n"
-				 "  --formation   formation to query, defaults to 'default' \n"
-				 "  --group       group to query formation, defaults to all \n"
-				 "  --json        output data in the JSON format\n",
-				 cli_show_nodes_getopts,
-				 cli_show_nodes);
-
-CommandLine show_sync_standby_names_command =
-	make_command("synchronous_standby_names",
-				 "Prints synchronous_standby_names for a given group",
-				 " [ --pgdata ] --formation --group",
-				 "  --pgdata      path to data directory	 \n"
-				 "  --formation   formation to query, defaults to 'default'\n"
-				 "  --group       group to query formation, defaults to all\n"
-				 "  --json        output data in the JSON format\n",
-				 cli_show_nodes_getopts,
-				 cli_show_standby_names);
-
 CommandLine show_standby_names_command =
 	make_command("standby-names",
 				 "Prints synchronous_standby_names for a given group",
@@ -123,7 +99,7 @@ CommandLine show_standby_names_command =
 				 "  --formation   formation to query, defaults to 'default'\n"
 				 "  --group       group to query formation, defaults to all\n"
 				 "  --json        output data in the JSON format\n",
-				 cli_show_nodes_getopts,
+				 cli_show_standby_names_getopts,
 				 cli_show_standby_names);
 
 CommandLine show_file_command =
@@ -405,7 +381,7 @@ cli_show_state(int argc, char **argv)
  * command `pg_autoctl show nodes`.
  */
 static int
-cli_show_nodes_getopts(int argc, char **argv)
+cli_show_standby_names_getopts(int argc, char **argv)
 {
 	KeeperConfig options = { 0 };
 	int c, option_index = 0, errors = 0;
@@ -538,46 +514,6 @@ cli_show_nodes_getopts(int argc, char **argv)
 	keeperOptions = options;
 
 	return optind;
-}
-
-
-/*
- * keeper_cli_monitor_print_state prints the current state of given formation
- * and port from the monitor's point of view.
- */
-static void
-cli_show_nodes(int argc, char **argv)
-{
-	KeeperConfig config = keeperOptions;
-	Monitor monitor = { 0 };
-
-	if (!monitor_init_from_pgsetup(&monitor, &config.pgSetup))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_ARGS);
-	}
-
-	if (outputJSON)
-	{
-		if (!monitor_print_nodes_as_json(&monitor,
-										 config.formation,
-										 config.groupId))
-		{
-			/* errors have already been logged */
-			exit(EXIT_CODE_MONITOR);
-		}
-	}
-	else
-	{
-		if (!monitor_print_nodes(&monitor,
-								 config.formation,
-								 config.groupId))
-		{
-			log_fatal("Failed to get the other nodes from the monitor, "
-					  "see above for details");
-			exit(EXIT_CODE_MONITOR);
-		}
-	}
 }
 
 

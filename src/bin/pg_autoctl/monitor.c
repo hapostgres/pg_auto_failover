@@ -187,27 +187,6 @@ monitor_get_nodes(Monitor *monitor, char *formation, int groupId,
 
 
 /*
- * monitor_print_nodes gets all the nodes in the given group and prints them
- * out to stdout in a human-friendly tabular format.
- */
-bool
-monitor_print_nodes(Monitor *monitor, char *formation, int groupId)
-{
-	NodeAddressArray nodesArray;
-
-	if (!monitor_get_nodes(monitor, formation, groupId, &nodesArray))
-	{
-		/* errors have already been logged */
-		return false;
-	}
-
-	(void) printNodeArray(&nodesArray);
-
-	return true;
-}
-
-
-/*
  * monitor_get_other_nodes_as_json gets the hostname and port of the other node
  * in the group and prints them out in JSON format.
  */
