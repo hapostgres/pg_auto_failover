@@ -1000,27 +1000,26 @@ remove_node(PG_FUNCTION_ARGS)
 
 	RemoveAutoFailoverNode(nodeHost, nodePort);
 
-	/* review the FSM for every other node */
-	foreach(nodeCell, otherNodesGroupList)
+	/* review the FSM for every other node, when removing the primary */
+	if (currentNodeIsPrimary)
 	{
-		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
-
-		if (node == NULL)
-		{
-			/* shouldn't happen */
-			ereport(ERROR, (errmsg("BUG: node is NULL")));
-			continue;
-		}
-
-		/* skip nodes that are currently in maintenance */
-		if (IsInMaintenance(node))
-		{
-			continue;
-		}
-
-		if (currentNodeIsPrimary)
+		foreach(nodeCell, otherNodesGroupList)
 		{
 			char message[BUFSIZE] = { 0 };
+			AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+			if (node == NULL)
+			{
+				/* shouldn't happen */
+				ereport(ERROR, (errmsg("BUG: node is NULL")));
+				continue;
+			}
+
+			/* skip nodes that are currently in maintenance */
+			if (IsInMaintenance(node))
+			{
+				continue;
+			}
 
 			LogAndNotifyMessage(
 				message, BUFSIZE,
@@ -1049,15 +1048,23 @@ remove_node(PG_FUNCTION_ARGS)
 	/* now proceed with the failover, starting with the first standby */
 	if (currentNodeIsPrimary)
 	{
-		(void) ProceedGroupState(firstStandbyNode);
+		/* maybe that was the last node in the group */
+		if (firstStandbyNode)
+		{
+			(void) ProceedGroupState(firstStandbyNode);
+		}
 	}
 	else
 	{
+		/* find the primary, if any, and have it realize a node has left */
 		AutoFailoverNode *primaryNode =
 			GetNodeToFailoverFromInGroup(currentNode->formationId,
 										 currentNode->groupId);
 
-		(void) ProceedGroupState(primaryNode);
+		if (primaryNode)
+		{
+			(void) ProceedGroupState(primaryNode);
+		}
 	}
 
 	PG_RETURN_BOOL(true);
