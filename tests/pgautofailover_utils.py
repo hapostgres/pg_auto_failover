@@ -408,6 +408,7 @@ class PGNode:
         command = PGAutoCtl(self)
         out, err, ret = command.execute("pgsetup ready",
                                         'do', 'pgsetup', 'wait', '-vvv')
+
         return ret == 0
 
     def fail(self):
@@ -416,8 +417,10 @@ class PGNode:
         postgres.
         """
         self.stop_pg_autoctl()
-        self.stop_postgres()
 
+        # stopping pg_autoctl also stops Postgres, unless bugs.
+        if self.pg_is_running():
+            self.stop_postgres()
 
     def config_file_path(self):
         """
