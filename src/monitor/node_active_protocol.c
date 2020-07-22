@@ -972,9 +972,11 @@ remove_node(PG_FUNCTION_ARGS)
 	int32 nodePort = PG_GETARG_INT32(1);
 
 	AutoFailoverNode *currentNode = NULL;
+	bool currentNodeIsPrimary = false;
 
 	List *otherNodesGroupList = NIL;
 	ListCell *nodeCell = NULL;
+	AutoFailoverNode *firstStandbyNode = NULL;
 
 	checkPgAutoFailoverVersion();
 
@@ -986,7 +988,9 @@ remove_node(PG_FUNCTION_ARGS)
 
 	LockFormation(currentNode->formationId, ExclusiveLock);
 
+	currentNodeIsPrimary = StateBelongsToPrimary(currentNode->reportedState);
 	otherNodesGroupList = AutoFailoverOtherNodesList(currentNode);
+	firstStandbyNode = linitial(otherNodesGroupList);
 
 	RemoveAutoFailoverNode(nodeName, nodePort);
 
@@ -1002,7 +1006,38 @@ remove_node(PG_FUNCTION_ARGS)
 			continue;
 		}
 
-		ProceedGroupState(node);
+		if (currentNodeIsPrimary)
+		{
+			char message[BUFSIZE] = { 0 };
+
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of node %d (%s:%d) to report_lsn "
+				"after primary node removal.",
+				node->nodeId, node->nodeName, node->nodePort);
+
+			SetNodeGoalState(node->nodeName, node->nodePort,
+							 REPLICATION_STATE_REPORT_LSN);
+
+			NotifyStateChange(node->reportedState,
+							  REPLICATION_STATE_REPORT_LSN,
+							  node->formationId,
+							  node->groupId,
+							  node->nodeId,
+							  node->nodeName,
+							  node->nodePort,
+							  node->pgsrSyncState,
+							  node->reportedLSN,
+							  node->candidatePriority,
+							  node->replicationQuorum,
+							  message);
+		}
+	}
+
+	/* now proceed with the failover, starting with the first standby */
+	if (currentNodeIsPrimary)
+	{
+		(void) ProceedGroupState(firstStandbyNode);
 	}
 
 	PG_RETURN_BOOL(true);
