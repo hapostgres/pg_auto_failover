@@ -145,26 +145,14 @@
 	"Stop traffic to primary, " \
 	"wait for it to finish draining."
 
-#define COMMENT_REPORT_LSN_TO_FAST_FORWARD \
-	"Fetching missing WAL bits from another standby before promotion"
-
 #define COMMENT_FOLLOW_NEW_PRIMARY \
 	"Switch replication to the new primary"
-
-#define COMMENT_PRIMARY_TO_APPLY_SETTINGS \
-	"Apply new pg_auto_failover settings (synchronous_standby_names)"
-
-#define COMMENT_APPLY_SETTINGS_TO_PRIMARY \
-	"Back to primary state after having applied new pg_auto_failover settings"
 
 #define COMMENT_REPORT_LSN_TO_JOIN_SECONDARY \
 	"A failover candidate has been selected, stop replication"
 
 #define COMMENT_JOIN_SECONDARY_TO_SECONDARY \
 	"Failover is done, we have a new primary to follow"
-
-#define COMMENT_FAST_FORWARD_TO_PREP_PROMOTION \
-	"Got the missing WAL bytes, promoted"
 
 /* *INDENT-OFF* */
 

@@ -982,8 +982,8 @@ standby_follow_new_primary(LocalPostgresServer *postgres)
 
 
 /*
- * standby_fetch_missing_wal_and_promote sets up replication to fetch up to
- * given recovery_target_lsn (inclusive) with a recovery_target_action set to
+ * standby_fetch_missing_wal sets up replication to fetch up to given
+ * recovery_target_lsn (inclusive) with a recovery_target_action set to
  * 'promote' so that as soon as we get our WAL bytes we are promoted to being a
  * primary.
  */

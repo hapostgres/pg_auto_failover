@@ -1192,7 +1192,8 @@ fsm_report_lsn(Keeper *keeper)
 
 /*
  * When the selected failover candidate does not have the latest received WAL,
- * it fetches them from another standby, the one in WAIT_CASCADE state.
+ * it fetches them from another standby, the first one with the most LSN
+ * available.
  */
 bool
 fsm_fast_forward(Keeper *keeper)

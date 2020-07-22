@@ -591,7 +591,7 @@ keeper_restart_postgres(Keeper *keeper)
 {
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
-	log_info("Restarting Postgres at \%s\"", postgres->postgresSetup.pgdata);
+	log_info("Restarting Postgres at \"%s\"", postgres->postgresSetup.pgdata);
 
 	if (ensure_postgres_service_is_stopped(postgres))
 	{
