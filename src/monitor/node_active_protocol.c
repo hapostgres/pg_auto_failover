@@ -988,9 +988,15 @@ remove_node(PG_FUNCTION_ARGS)
 
 	LockFormation(currentNode->formationId, ExclusiveLock);
 
+	/* when removing the primary, initiate a failover */
 	currentNodeIsPrimary = StateBelongsToPrimary(currentNode->reportedState);
+
+	/* get the list of the other nodes */
 	otherNodesGroupList = AutoFailoverOtherNodesList(currentNode);
-	firstStandbyNode = linitial(otherNodesGroupList);
+
+	/* and the first other node to trigger our first FSM transition */
+	firstStandbyNode =
+		otherNodesGroupList == NIL ? NULL : linitial(otherNodesGroupList);
 
 	RemoveAutoFailoverNode(nodeHost, nodePort);
 
@@ -1003,6 +1009,12 @@ remove_node(PG_FUNCTION_ARGS)
 		{
 			/* shouldn't happen */
 			ereport(ERROR, (errmsg("BUG: node is NULL")));
+			continue;
+		}
+
+		/* skip nodes that are currently in maintenance */
+		if (IsInMaintenance(node))
+		{
 			continue;
 		}
 
@@ -1038,6 +1050,14 @@ remove_node(PG_FUNCTION_ARGS)
 	if (currentNodeIsPrimary)
 	{
 		(void) ProceedGroupState(firstStandbyNode);
+	}
+	else
+	{
+		AutoFailoverNode *primaryNode =
+			GetNodeToFailoverFromInGroup(currentNode->formationId,
+										 currentNode->groupId);
+
+		(void) ProceedGroupState(primaryNode);
 	}
 
 	PG_RETURN_BOOL(true);
