@@ -260,7 +260,7 @@ cli_config_check_pgsetup(PostgresSetup *pgSetup)
 		log_error("PostgreSQL is not running");
 	}
 
-	/* TODO: check formation, group, nodename on the monitor */
+	/* TODO: check formation, group, hostname on the monitor */
 
 	if (errors > 0)
 	{

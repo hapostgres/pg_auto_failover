@@ -243,7 +243,7 @@ keeper_cli_keeper_setup_getopts(int argc, char **argv)
 		{ "auth", required_argument, NULL, 'A' },
 		{ "skip-pg-hba", no_argument, NULL, 'S' },
 		{ "dbname", required_argument, NULL, 'd' },
-		{ "nodename", required_argument, NULL, 'n' },
+		{ "hostname", required_argument, NULL, 'n' },
 		{ "formation", required_argument, NULL, 'f' },
 		{ "monitor", required_argument, NULL, 'm' },
 		{ "disable-monitor", no_argument, NULL, 'M' },

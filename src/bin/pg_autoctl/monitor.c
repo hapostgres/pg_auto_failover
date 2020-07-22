@@ -72,9 +72,9 @@ typedef struct MonitorExtensionVersionParseContext
 	bool parsedOK;
 } MonitorExtensionVersionParseContext;
 
-static int MaxNodeNameSizeInNodesArray(NodeAddressArray *nodesArray);
-static void prepareNodeNameSeparator(char nameSeparatorHeader[],
-									 int maxNodeNameSize);
+static int MaxHostNameSizeInNodesArray(NodeAddressArray *nodesArray);
+static void prepareHostNameSeparator(char nameSeparatorHeader[],
+									 int maxHostNameSize);
 
 static bool parseNode(PGresult *result, int rowNumber, NodeAddress *node);
 static void parseNodeResult(void *ctx, PGresult *result);
@@ -771,7 +771,7 @@ monitor_node_active(Monitor *monitor,
  */
 bool
 monitor_set_node_candidate_priority(Monitor *monitor,
-									int nodeid, char *nodeName, int nodePort,
+									int nodeid, char *hostName, int nodePort,
 									int candidate_priority)
 {
 	PGSQL *pgsql = &monitor->pgsql;
@@ -784,7 +784,7 @@ monitor_set_node_candidate_priority(Monitor *monitor,
 	bool success = true;
 
 	paramValues[0] = intToString(nodeid).strValue;
-	paramValues[1] = nodeName,
+	paramValues[1] = hostName,
 	paramValues[2] = intToString(nodePort).strValue;
 	paramValues[3] = candidatePriorityText;
 
@@ -809,7 +809,7 @@ monitor_set_node_candidate_priority(Monitor *monitor,
  */
 bool
 monitor_set_node_replication_quorum(Monitor *monitor, int nodeid,
-									char *nodeName, int nodePort,
+									char *hostName, int nodePort,
 									bool replicationQuorum)
 {
 	PGSQL *pgsql = &monitor->pgsql;
@@ -822,7 +822,7 @@ monitor_set_node_replication_quorum(Monitor *monitor, int nodeid,
 	bool success = true;
 
 	paramValues[0] = intToString(nodeid).strValue;
-	paramValues[1] = nodeName;
+	paramValues[1] = hostName;
 	paramValues[2] = intToString(nodePort).strValue;
 	paramValues[3] = replicationQuorumText;
 
@@ -1276,39 +1276,39 @@ parseNodeArray(void *ctx, PGresult *result)
 
 
 /*
- * MaxNodeNameSizeInNodesArray returns the greatest node name length in the
+ * MaxHostNameSizeInNodesArray returns the greatest node name length in the
  * given array of nodes.
  */
 static int
-MaxNodeNameSizeInNodesArray(NodeAddressArray *nodesArray)
+MaxHostNameSizeInNodesArray(NodeAddressArray *nodesArray)
 {
-	int maxNodeNameSize = 0;
+	int maxHostNameSize = 0;
 	int i = 0;
 
 	for (i = 0; i < nodesArray->count; i++)
 	{
 		NodeAddress node = nodesArray->nodes[i];
 
-		if (strlen(node.host) > maxNodeNameSize)
+		if (strlen(node.host) > maxHostNameSize)
 		{
-			maxNodeNameSize = strlen(node.host);
+			maxHostNameSize = strlen(node.host);
 		}
 	}
 
-	return maxNodeNameSize;
+	return maxHostNameSize;
 }
 
 
 /*
- * prepareNodeNameSeparator fills in the pre-allocated given string with the
+ * prepareHostNameSeparator fills in the pre-allocated given string with the
  * expected amount of dashes to use as a separator line in our tabular output.
  */
 static void
-prepareNodeNameSeparator(char nameSeparatorHeader[], int maxNodeNameSize)
+prepareHostNameSeparator(char nameSeparatorHeader[], int maxHostNameSize)
 {
-	for (int i = 0; i <= maxNodeNameSize; i++)
+	for (int i = 0; i <= maxHostNameSize; i++)
 	{
-		if (i < maxNodeNameSize)
+		if (i < maxHostNameSize)
 		{
 			nameSeparatorHeader[i] = '-';
 		}
@@ -1329,15 +1329,15 @@ void
 printNodeArray(NodeAddressArray *nodesArray)
 {
 	int nodesArrayIndex = 0;
-	int maxNodeNameSize = 5;    /* strlen("Name") + 1, the header */
+	int maxHostNameSize = 5;    /* strlen("Name") + 1, the header */
 
 	/*
 	 * Dynamically adjust our display output to the length of the longer
-	 * nodename in the result set
+	 * hostname in the result set
 	 */
-	maxNodeNameSize = MaxNodeNameSizeInNodesArray(nodesArray);
+	maxHostNameSize = MaxHostNameSizeInNodesArray(nodesArray);
 
-	(void) printNodeHeader(maxNodeNameSize);
+	(void) printNodeHeader(maxHostNameSize);
 
 	for (nodesArrayIndex = 0; nodesArrayIndex < nodesArray->count; nodesArrayIndex++)
 	{
@@ -1354,17 +1354,17 @@ printNodeArray(NodeAddressArray *nodesArray)
  * printNodeHeader pretty prints a header for a node list.
  */
 void
-printNodeHeader(int maxNodeNameSize)
+printNodeHeader(int maxHostNameSize)
 {
 	char nameSeparatorHeader[BUFSIZE] = { 0 };
 
-	(void) prepareNodeNameSeparator(nameSeparatorHeader, maxNodeNameSize);
+	(void) prepareHostNameSeparator(nameSeparatorHeader, maxHostNameSize);
 
 	fformat(stdout, "%3s | %*s | %6s | %18s | %8s\n",
-			"ID", maxNodeNameSize, "Host", "Port", "LSN", "Primary?");
+			"ID", maxHostNameSize, "Host", "Port", "LSN", "Primary?");
 
 	fformat(stdout, "%3s-+-%*s-+-%6s-+-%18s-+-%8s\n",
-			"---", maxNodeNameSize, nameSeparatorHeader, "------",
+			"---", maxHostNameSize, nameSeparatorHeader, "------",
 			"------------------", "--------");
 }
 
@@ -1544,7 +1544,7 @@ printCurrentState(void *ctx, PGresult *result)
 		(MonitorAssignedStateParseContext *) ctx;
 	int currentTupleIndex = 0;
 	int nTuples = PQntuples(result);
-	int maxNodeNameSize = 5;    /* strlen("Name") + 1, the header */
+	int maxHostNameSize = 5;    /* strlen("Name") + 1, the header */
 	char *nameSeparatorHeader = NULL;
 
 	if (PQnfields(result) != 8)
@@ -1556,20 +1556,20 @@ printCurrentState(void *ctx, PGresult *result)
 
 	/*
 	 * Dynamically adjust our display output to the length of the longer
-	 * nodename in the result set
+	 * hostname in the result set
 	 */
 	for (currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
 	{
-		char *nodename = PQgetvalue(result, currentTupleIndex, 0);
+		char *hostname = PQgetvalue(result, currentTupleIndex, 0);
 
-		if (strlen(nodename) > maxNodeNameSize)
+		if (strlen(hostname) > maxHostNameSize)
 		{
-			maxNodeNameSize = strlen(nodename);
+			maxHostNameSize = strlen(hostname);
 		}
 	}
 
 	/* prepare a nice dynamic string of '-' as a header separator */
-	nameSeparatorHeader = (char *) malloc((maxNodeNameSize + 1) * sizeof(char));
+	nameSeparatorHeader = (char *) malloc((maxHostNameSize + 1) * sizeof(char));
 
 	if (nameSeparatorHeader == NULL)
 	{
@@ -1578,9 +1578,9 @@ printCurrentState(void *ctx, PGresult *result)
 		return;
 	}
 
-	for (int i = 0; i <= maxNodeNameSize; i++)
+	for (int i = 0; i <= maxHostNameSize; i++)
 	{
-		if (i < maxNodeNameSize)
+		if (i < maxHostNameSize)
 		{
 			nameSeparatorHeader[i] = '-';
 		}
@@ -1591,12 +1591,12 @@ printCurrentState(void *ctx, PGresult *result)
 	}
 
 	fformat(stdout, "%*s | %6s | %5s | %5s | %17s | %17s | %8s | %6s\n",
-			maxNodeNameSize, "Name", "Port",
+			maxHostNameSize, "Name", "Port",
 			"Group", "Node", "Current State", "Assigned State",
 			"Priority", "Quorum");
 
 	fformat(stdout, "%*s-+-%6s-+-%5s-+-%5s-+-%17s-+-%17s-+-%8s-+-%6s\n",
-			maxNodeNameSize, nameSeparatorHeader, "------",
+			maxHostNameSize, nameSeparatorHeader, "------",
 			"-----", "-----", "-----------------", "-----------------",
 			"--------", "------");
 
@@ -1604,7 +1604,7 @@ printCurrentState(void *ctx, PGresult *result)
 
 	for (currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
 	{
-		char *nodename = PQgetvalue(result, currentTupleIndex, 0);
+		char *hostname = PQgetvalue(result, currentTupleIndex, 0);
 		char *nodeport = PQgetvalue(result, currentTupleIndex, 1);
 		char *groupId = PQgetvalue(result, currentTupleIndex, 2);
 		char *nodeId = PQgetvalue(result, currentTupleIndex, 3);
@@ -1614,7 +1614,7 @@ printCurrentState(void *ctx, PGresult *result)
 		char *replicationQuorum = PQgetvalue(result, currentTupleIndex, 7);
 
 		fformat(stdout, "%*s | %6s | %5s | %5s | %17s | %17s | %8s | %6s\n",
-				maxNodeNameSize, nodename, nodeport,
+				maxHostNameSize, hostname, nodeport,
 				groupId, nodeId, currentState, goalState,
 				candidatePriority, replicationQuorum);
 	}
@@ -2245,7 +2245,7 @@ printFormationURI(void *ctx, PGresult *result)
 
 	/*
 	 * Dynamically adjust our display output to the length of the longer
-	 * nodename in the result set
+	 * hostname in the result set
 	 */
 	for (currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
 	{
@@ -2339,14 +2339,14 @@ monitor_synchronous_standby_names(Monitor *monitor,
 
 
 /*
- * monitor_set_nodename sets the nodename on the monitor, using a simple SQL
+ * monitor_set_hostname sets the hostname on the monitor, using a simple SQL
  * update command.
  */
 bool
-monitor_set_nodename(Monitor *monitor, int nodeId, const char *nodename)
+monitor_set_hostname(Monitor *monitor, int nodeId, const char *hostname)
 {
 	PGSQL *pgsql = &monitor->pgsql;
-	const char *sql = "SELECT * FROM pgautofailover.set_node_nodename($1, $2)";
+	const char *sql = "SELECT * FROM pgautofailover.set_node_hostname($1, $2)";
 	int paramCount = 2;
 	Oid paramTypes[2] = { INT8OID, TEXTOID };
 	const char *paramValues[2];
@@ -2355,13 +2355,13 @@ monitor_set_nodename(Monitor *monitor, int nodeId, const char *nodename)
 	NodeAddressParseContext parseContext = { { 0 }, &node, false };
 
 	paramValues[0] = intToString(nodeId).strValue;
-	paramValues[1] = nodename;
+	paramValues[1] = hostname;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
 								   &parseContext, parseNodeResult))
 	{
-		log_error("Failed to set_node_nodename of node %d from the monitor",
+		log_error("Failed to set_node_hostname of node %d from the monitor",
 				  nodeId);
 		return false;
 	}
@@ -2372,10 +2372,10 @@ monitor_set_nodename(Monitor *monitor, int nodeId, const char *nodename)
 	if (!parseContext.parsedOK)
 	{
 		log_error(
-			"Failed to set node %d nodename to \"%s\" on the monitor "
+			"Failed to set node %d hostname to \"%s\" on the monitor "
 			"because it returned an unexpected result. "
 			"See previous line for details.",
-			nodeId, nodename);
+			nodeId, hostname);
 		return false;
 	}
 
@@ -2647,10 +2647,8 @@ monitor_get_notifications(Monitor *monitor)
 			/* errors are logged by parse_state_notification_message */
 			if (parse_state_notification_message(&notification))
 			{
-				log_info("New state for node %d (%s:%d) in formation \"%s\": "
-						 "%s/%s",
-						 notification.nodeId,
-						 notification.nodeName,
+				log_info("New state for %s:%d in formation \"%s\": %s/%s",
+						 notification.hostName,
 						 notification.nodePort,
 						 notification.formationId,
 						 NodeStateToString(notification.reportedState),
@@ -2786,7 +2784,7 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 
 				log_debug("step 1/4: primary node %d (%s:%d) is assigned \"%s\"",
 						  notification.nodeId,
-						  notification.nodeName,
+						  notification.hostName,
 						  notification.nodePort,
 						  NodeStateToString(notification.goalState));
 			}
@@ -2797,7 +2795,7 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 
 				log_debug("step 2/4: primary node %d (%s:%d) reported \"%s\"",
 						  notification.nodeId,
-						  notification.nodeName,
+						  notification.hostName,
 						  notification.nodePort,
 						  NodeStateToString(notification.reportedState));
 			}
@@ -2808,7 +2806,7 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 
 				log_debug("step 3/4: primary node %d (%s:%d) is assigned \"%s\"",
 						  notification.nodeId,
-						  notification.nodeName,
+						  notification.hostName,
 						  notification.nodePort,
 						  NodeStateToString(notification.goalState));
 			}
@@ -2820,7 +2818,7 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 
 				log_debug("step 4/4: primary node %d (%s:%d) reported \"%s\"",
 						  notification.nodeId,
-						  notification.nodeName,
+						  notification.hostName,
 						  notification.nodePort,
 						  NodeStateToString(notification.reportedState));
 			}
@@ -2858,7 +2856,7 @@ monitor_wait_until_some_node_reported_state(Monitor *monitor,
 
 	uint64_t start = time(NULL);
 
-	int maxNodeNameSize = 5;    /* strlen("Name") + 1, the header */
+	int maxHostNameSize = 5;    /* strlen("Name") + 1, the header */
 	char nameSeparatorHeader[BUFSIZE] = { 0 };
 
 	if (connection == NULL)
@@ -2879,18 +2877,18 @@ monitor_wait_until_some_node_reported_state(Monitor *monitor,
 	{
 		/* ignore the error, use an educated guess for the max size */
 		log_warn("Failed to get_nodes() on the monitor");
-		maxNodeNameSize = 25;
+		maxHostNameSize = 25;
 	}
 
-	maxNodeNameSize = MaxNodeNameSizeInNodesArray(&nodesArray);
-	(void) prepareNodeNameSeparator(nameSeparatorHeader, maxNodeNameSize);
+	maxHostNameSize = MaxHostNameSizeInNodesArray(&nodesArray);
+	(void) prepareHostNameSeparator(nameSeparatorHeader, maxHostNameSize);
 
 	fformat(stdout, "%8s | %3s | %*s | %6s | %19s | %19s\n",
-			"Time", "ID", maxNodeNameSize, "Host", "Port",
+			"Time", "ID", maxHostNameSize, "Host", "Port",
 			"Current State", "Assigned State");
 
 	fformat(stdout, "%8s-+-%3s-+-%*s-+-%6s-+-%19s-+-%19s\n",
-			"--------", "---", maxNodeNameSize, nameSeparatorHeader,
+			"--------", "---", maxHostNameSize, nameSeparatorHeader,
 			"------", "-------------------", "-------------------");
 
 	while (!failoverIsDone)
@@ -2979,8 +2977,8 @@ monitor_wait_until_some_node_reported_state(Monitor *monitor,
 
 			fformat(stdout, "%8s | %3d | %*s | %6d | %19s | %19s\n",
 					timestring + 11,
-					notification.nodeId, maxNodeNameSize,
-					notification.nodeName,
+					notification.nodeId, maxHostNameSize,
+					notification.hostName,
 					notification.nodePort,
 					NodeStateToString(notification.reportedState),
 					NodeStateToString(notification.goalState));

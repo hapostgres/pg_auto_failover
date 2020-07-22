@@ -109,10 +109,10 @@ Once the building and installation is done, follow those steps:
      You may change the port using `--pgport`.
 
      The Postgres instance created will listen by default on all its network
-     interfaces, and the monitor nodename is determined automatically by
+     interfaces, and the monitor hostname is determined automatically by
      `pg_autoctl` by having a look at the network interfaces on the machine
      and doing some reverse then forward DNS queries. You may force the
-     regitered nodename used with the `--nodename` option.
+     regitered hostname used with the `--hostname` option.
 
      The command also creates a `autoctl` user and database, and a
      `autoctl_node` user for the other nodes to use. In the `pg_auto_failover`
@@ -146,13 +146,13 @@ Once the building and installation is done, follow those steps:
          and if not given as an command line option then the environment
          variable `PGDATA` is used, when defined.
 
-       - The nodename of this server is automatically discovered by
+       - The hostname of this server is automatically discovered by
          `pg_autoctl`, and used by the other nodes to then connect to the
          newly created node: the monitor connects for running its
          health-checks, and the secondary instance connects using the
          replication protocol.
 
-         To determine your nodename `pg_autoctl` implements the following
+         To determine your hostname `pg_autoctl` implements the following
          three steps:
 
            1. open a connection to the monitor and looks up the TCP/IP client
@@ -166,18 +166,18 @@ Once the building and installation is done, follow those steps:
 
          When the forward DNS lookup response in step 3. is an IP address
          found in one of our local network interfaces, then `pg_autoctl`
-         uses the hostname found in step 2. as the default `--nodename`.
+         uses the hostname found in step 2. as the default `--hostname`.
          Otherwise it uses the IP address found in step 1.
 
-         You may use the `--nodename` command line option to bypass the
+         You may use the `--hostname` command line option to bypass the
          whole DNS lookup based process and force the local node name to a
          fixed value.
 
-         The `--nodename` is used by other nodes to connect to this one, so
+         The `--hostname` is used by other nodes to connect to this one, so
          it should be a hostname or an IP address that is reachable by the
          other members (localhost probably won't work).
 
-         The provided `--nodename` is going to be used by pg_auto_failover
+         The provided `--hostname` is going to be used by pg_auto_failover
          to grant connection privileges in the Postgres HBA file. When using
          a hostname rather than an IP address, please make sure that reverse
          DNS is then working with the provided hostname, because that's how
@@ -202,7 +202,7 @@ Once the building and installation is done, follow those steps:
      The initialisation step probes the given `--pgdata` directory for an
      existing PostgreSQL cluster, and when the directory doesn't exist it
      will go ahead and `pg_ctl initdb` one for you, after having registered
-     the local node (`nodename:pgport`) to the pg_auto_failover monitor.
+     the local node (`hostname:pgport`) to the pg_auto_failover monitor.
 
      Now that the installation is ready we can run the keeper service, which
      connects to the pg_auto_failover monitor every 5 seconds and implement the

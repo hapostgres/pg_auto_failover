@@ -67,6 +67,12 @@ read_ini_file(const char *filename, IniOption *optionList)
 			optionIndex = ini_find_property(ini, sectionIndex, option->name, 0);
 		}
 
+		/*
+		 * When we didn't find an option, we have three cases to consider:
+		 *  1. it's required, error out
+		 *  2. it's a compatibility option, skip it
+		 *  3. use the default value instead
+		 */
 		if (optionIndex == INI_NOT_FOUND)
 		{
 			if (option->required)
@@ -75,6 +81,11 @@ read_ini_file(const char *filename, IniOption *optionList)
 						  option->section, option->name, filename);
 				ini_destroy(ini);
 				return false;
+			}
+			else if (option->compat)
+			{
+				/* skip compatibility options that are not found */
+				continue;
 			}
 			else
 			{
@@ -338,6 +349,12 @@ write_ini_to_stream(FILE *stream, IniOption *optionList)
 
 	for (option = optionList; option->type != INI_END_T; option++)
 	{
+		/* we read "compatibility" options but never write them back */
+		if (option->compat)
+		{
+			continue;
+		}
+
 		/* we might need to open a new section */
 		if (!streq(currentSection, option->section))
 		{
@@ -420,6 +437,12 @@ ini_to_json(JSON_Object *jsRoot, IniOption *optionList)
 
 	for (option = optionList; option->type != INI_END_T; option++)
 	{
+		/* we read "compatibility" options but never write them back */
+		if (option->compat)
+		{
+			continue;
+		}
+
 		/* we might need to open a new section */
 		if (!streq(currentSection, option->section))
 		{

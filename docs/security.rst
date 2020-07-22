@@ -138,7 +138,7 @@ Certificates`__ page.
 
 __ https://www.postgresql.org/docs/current/ssl-tcp.html#SSL-CERTIFICATE-CREATION
 
-The certificate subject CN defaults to the ``--nodename`` parameter, which
+The certificate subject CN defaults to the ``--hostname`` parameter, which
 can be given explicitely or computed by ``pg_autoctl`` as either your
 hostname when you have proper DNS resolution, or your current IP address.
 

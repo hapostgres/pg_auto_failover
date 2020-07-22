@@ -281,7 +281,7 @@ fsm_init_primary(Keeper *keeper)
 			if (!pghba_enable_lan_cidr(&keeper->postgres.sqlClient,
 									   keeper->config.pgSetup.ssl.active,
 									   HBA_DATABASE_ALL, NULL,
-									   keeper->config.nodename,
+									   keeper->config.hostname,
 									   NULL, DEFAULT_AUTH_METHOD, NULL))
 			{
 				log_error("Failed to grant local network connections in HBA");
@@ -848,7 +848,7 @@ fsm_init_standby(Keeper *keeper)
 	skipBaseBackup = file_exists(keeper->config.pathnames.init) &&
 					 keeper->initState.pgInitState == PRE_INIT_STATE_EXISTS;
 
-	if (!standby_init_database(postgres, config->nodename, skipBaseBackup))
+	if (!standby_init_database(postgres, config->hostname, skipBaseBackup))
 	{
 		log_error("Failed initialize standby server, see above for details");
 		return false;
@@ -945,7 +945,7 @@ fsm_rewind_or_init(Keeper *keeper)
 		log_warn("Failed to rewind demoted primary to standby, "
 				 "trying pg_basebackup instead");
 
-		if (!standby_init_database(postgres, config->nodename, skipBaseBackup))
+		if (!standby_init_database(postgres, config->hostname, skipBaseBackup))
 		{
 			log_error("Failed to become standby server, see above for details");
 			return false;

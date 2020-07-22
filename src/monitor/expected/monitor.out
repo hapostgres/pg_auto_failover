@@ -42,14 +42,14 @@ opt_secondary        | t
 number_sync_standbys | 1
 
 -- dump the pgautofailover.node table, omitting the timely columns
-select formationid, nodeid, groupid, nodename, nodeport,
+select formationid, nodeid, groupid, nodehost, nodeport,
        goalstate, reportedstate, reportedpgisrunning, reportedrepstate
   from pgautofailover.node;
 -[ RECORD 1 ]-------+-------------
 formationid         | default
 nodeid              | 1
 groupid             | 0
-nodename            | localhost
+nodehost            | localhost
 nodeport            | 9876
 goalstate           | single
 reportedstate       | single
@@ -59,7 +59,7 @@ reportedrepstate    | unknown
 formationid         | default
 nodeid              | 2
 groupid             | 0
-nodename            | localhost
+nodehost            | localhost
 nodeport            | 9877
 goalstate           | wait_standby
 reportedstate       | init
@@ -103,14 +103,14 @@ opt_secondary        | t
 number_sync_standbys | 1
 
 -- dump the pgautofailover.node table, omitting the timely columns
-select formationid, nodeid, groupid, nodename, nodeport,
+select formationid, nodeid, groupid, nodehost, nodeport,
        goalstate, reportedstate, reportedpgisrunning, reportedrepstate
   from pgautofailover.node;
 -[ RECORD 1 ]-------+----------
 formationid         | default
 nodeid              | 2
 groupid             | 0
-nodename            | localhost
+nodehost            | localhost
 nodeport            | 9877
 goalstate           | single
 reportedstate       | init

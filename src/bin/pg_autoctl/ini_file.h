@@ -49,6 +49,7 @@ typedef struct IniOption
 	const char *name;
 	const char *optName;        /* command line option name */
 	bool required;
+	bool compat;               /* compatibility: read but don't write */
 	char *strDefault;          /* default value when type is string */
 	int intDefault;            /* default value when type is int */
 	int strBufferSize;         /* size of the BUFFER when INI_STRBUF_T */
@@ -58,33 +59,38 @@ typedef struct IniOption
 } IniOption;
 
 #define make_int_option(section, name, optName, required, value) \
-	{ INI_INT_T, section, name, optName, required, NULL, -1, -1, NULL, NULL, value }
+	{ INI_INT_T, section, name, optName, required, false, \
+	  NULL, -1, -1, NULL, NULL, value }
 
 #define make_int_option_default(section, name, optName, \
 								required, value, default) \
-	{ INI_INT_T, section, name, optName, required, \
+	{ INI_INT_T, section, name, optName, required, false, \
 	  NULL, default, -1, NULL, NULL, value }
 
 #define make_string_option(section, name, optName, required, value) \
-	{ INI_STRING_T, section, name, optName, required, \
+	{ INI_STRING_T, section, name, optName, required, false, \
 	  NULL, -1, -1, value, NULL, NULL }
 
 #define make_string_option_default(section, name, optName, required, \
 								   value, default) \
-	{ INI_STRING_T, section, name, optName, required, \
+	{ INI_STRING_T, section, name, optName, required, false, \
 	  default, -1, -1, value, NULL, NULL }
 
 #define make_strbuf_option(section, name, optName, required, size, value) \
-	{ INI_STRBUF_T, section, name, optName, required, \
+	{ INI_STRBUF_T, section, name, optName, required, false, \
+	  NULL, -1, size, NULL, value, NULL }
+
+#define make_strbuf_compat_option(section, name, size, value) \
+	{ INI_STRBUF_T, section, name, NULL, false, true, \
 	  NULL, -1, size, NULL, value, NULL }
 
 #define make_strbuf_option_default(section, name, optName, required, \
 								   size, value, default) \
-	{ INI_STRBUF_T, section, name, optName, required, \
+	{ INI_STRBUF_T, section, name, optName, required, false, \
 	  default, -1, size, NULL, value, NULL }
 
 #define INI_OPTION_LAST \
-	{ INI_END_T, NULL, NULL, NULL, false, NULL, -1, -1, NULL, NULL, NULL }
+	{ INI_END_T, NULL, NULL, NULL, false, false, NULL, -1, -1, NULL, NULL, NULL }
 
 bool read_ini_file(const char *filename, IniOption *opts);
 bool ini_validate_options(IniOption *optionList);

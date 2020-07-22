@@ -113,7 +113,7 @@ is ready for a replication connection (pg_hba.conf has been properly
 edited, connection role added, etc).
 
 The standby node keeper runs pg_basebackup, connecting to the primary's
-nodename and port. The keeper then edits recovery.conf and starts
+hostname and port. The keeper then edits recovery.conf and starts
 PostgreSQL in hot standby node.
 
 **Secondary**

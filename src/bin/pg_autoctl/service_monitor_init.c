@@ -138,7 +138,7 @@ service_monitor_init_start(void *context, pid_t *pid)
 			setenv(PG_AUTOCTL_LOG_SEMAPHORE, semIdString.strValue, 1);
 
 			/* finish the install if necessary */
-			if (!monitor_install(config->nodename, *pgSetup, false))
+			if (!monitor_install(config->hostname, *pgSetup, false))
 			{
 				/* errors have already been logged */
 				exit(EXIT_CODE_INTERNAL_ERROR);

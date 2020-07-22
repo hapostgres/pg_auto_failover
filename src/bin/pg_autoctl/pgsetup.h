@@ -86,7 +86,7 @@ typedef enum PostgresRole
  * citus extension in shared_preload_libraries, which the keeper ensures.
  *
  * At failover time, when dealing with a Citus worker instance, the keeper
- * fetches its coordinator nodename and port from the monitor and blocks writes
+ * fetches its coordinator hostname and port from the monitor and blocks writes
  * using the citus master_update_node() function call in a prepared
  * transaction.
  */

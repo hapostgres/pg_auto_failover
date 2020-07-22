@@ -183,9 +183,9 @@ keeper_cli_pgsetup_discover(int argc, char **argv)
 		exit(EXIT_CODE_PGCTL);
 	}
 
-	if (!IS_EMPTY_STRING_BUFFER(keeperOptions.nodename))
+	if (!IS_EMPTY_STRING_BUFFER(keeperOptions.hostname))
 	{
-		fformat(stdout, "Node Name:          %s\n", keeperOptions.nodename);
+		fformat(stdout, "Node Name:          %s\n", keeperOptions.hostname);
 	}
 
 	fprintf_pg_setup(stdout, &pgSetup);
@@ -328,7 +328,7 @@ keeper_cli_init_standby(int argc, char **argv)
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
-	if (!standby_init_database(&postgres, config.nodename, skipBaseBackup))
+	if (!standby_init_database(&postgres, config.hostname, skipBaseBackup))
 	{
 		log_fatal("Failed to grant access to the standby by adding "
 				  "relevant lines to pg_hba.conf for the "
