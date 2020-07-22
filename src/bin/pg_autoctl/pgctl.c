@@ -117,7 +117,7 @@ pg_controldata(PostgresSetup *pgSetup, bool missing_ok)
 
 	if (pgSetup->pgdata[0] == '\0' || pgSetup->pg_ctl[0] == '\0')
 	{
-		log_debug("Failed to run pg_control_data on an empty pgSetup");
+		log_error("BUG: pg_controldata: missing pgSetup pgdata or pg_ctl");
 		return false;
 	}
 
