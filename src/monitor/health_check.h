@@ -57,5 +57,7 @@ extern void HealthCheckWorkerLauncherMain(Datum arg);
 extern List * LoadNodeHealthList(void);
 extern NodeHealth * TupleToNodeHealth(HeapTuple heapTuple,
 									  TupleDesc tupleDescriptor);
-extern void SetNodeHealthState(char *nodeName, uint16 nodePort, int healthStatus);
+extern void SetNodeHealthState(char *nodeName, uint16 nodePort,
+							   int previousHealthState,
+							   int healthState);
 extern void StopHealthCheckWorker(Oid databaseId);

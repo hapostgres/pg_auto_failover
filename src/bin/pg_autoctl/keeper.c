@@ -1571,6 +1571,10 @@ diff_nodesArray(NodeAddressArray *previousNodesArray,
 		}
 		else if (currNode->nodeId == prevNode->nodeId)
 		{
+			/*
+			 * We still have to update our HBA file when the host of a node
+			 * that we already have has changed on the monitor.
+			 */
 			if (!streq(currNode->host, prevNode->host))
 			{
 				log_debug("Node %d has a new hostname \"%s\"",
@@ -1579,7 +1583,15 @@ diff_nodesArray(NodeAddressArray *previousNodesArray,
 				diffNodesArray->count++;
 				diffNodesArray->nodes[diffIndex++] = *currNode;
 			}
-			prevIndex++;
+
+			/*
+			 * In any case, if we have more elements in previousNodesArray,
+			 * advance our position there.
+			 */
+			if (prevIndex < previousNodesArray->count)
+			{
+				prevIndex++;
+			}
 		}
 		else if (currNode->nodeId > prevNode->nodeId)
 		{
