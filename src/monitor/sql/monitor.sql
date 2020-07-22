@@ -19,7 +19,7 @@ select *
 table pgautofailover.formation;
 
 -- dump the pgautofailover.node table, omitting the timely columns
-select formationid, nodeid, groupid, nodename, nodeport,
+select formationid, nodeid, groupid, nodehost, nodeport,
        goalstate, reportedstate, reportedpgisrunning, reportedrepstate
   from pgautofailover.node;
 
@@ -35,7 +35,7 @@ select pgautofailover.remove_node('localhost', 9876);
 table pgautofailover.formation;
 
 -- dump the pgautofailover.node table, omitting the timely columns
-select formationid, nodeid, groupid, nodename, nodeport,
+select formationid, nodeid, groupid, nodehost, nodeport,
        goalstate, reportedstate, reportedpgisrunning, reportedrepstate
   from pgautofailover.node;
 

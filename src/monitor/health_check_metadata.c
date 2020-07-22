@@ -31,7 +31,7 @@
 
 
 /* human-readable names for addressing columns of health check queries */
-#define TLIST_NUM_NODE_NAME 1
+#define TLIST_NUM_NODE_HOST 1
 #define TLIST_NUM_NODE_PORT 2
 #define TLIST_NUM_HEALTH_STATUS 3
 
@@ -68,7 +68,7 @@ LoadNodeHealthList(void)
 	{
 		initStringInfo(&query);
 		appendStringInfo(&query,
-						 "SELECT nodename, nodeport, health "
+						 "SELECT nodehost, nodeport, health "
 						 "FROM " AUTO_FAILOVER_NODE_TABLE);
 
 		pgstat_report_activity(STATE_RUNNING, query.data);
@@ -143,15 +143,15 @@ TupleToNodeHealth(HeapTuple heapTuple, TupleDesc tupleDescriptor)
 	NodeHealth *nodeHealth = NULL;
 	bool isNull = false;
 
-	Datum nodeNameDatum = SPI_getbinval(heapTuple, tupleDescriptor,
-										TLIST_NUM_NODE_NAME, &isNull);
+	Datum nodeHostDatum = SPI_getbinval(heapTuple, tupleDescriptor,
+										TLIST_NUM_NODE_HOST, &isNull);
 	Datum nodePortDatum = SPI_getbinval(heapTuple, tupleDescriptor,
 										TLIST_NUM_NODE_PORT, &isNull);
 	Datum healthStateDatum = SPI_getbinval(heapTuple, tupleDescriptor,
 										   TLIST_NUM_HEALTH_STATUS, &isNull);
 
 	nodeHealth = palloc0(sizeof(NodeHealth));
-	nodeHealth->nodeName = TextDatumGetCString(nodeNameDatum);
+	nodeHealth->nodeHost = TextDatumGetCString(nodeHostDatum);
 	nodeHealth->nodePort = DatumGetInt32(nodePortDatum);
 	nodeHealth->healthState = DatumGetInt32(healthStateDatum);
 
@@ -163,7 +163,7 @@ TupleToNodeHealth(HeapTuple heapTuple, TupleDesc tupleDescriptor)
  * SetNodeHealthState updates the health state of a node in the metadata.
  */
 void
-SetNodeHealthState(char *nodeName, uint16 nodePort,
+SetNodeHealthState(char *nodeHost, uint16 nodePort,
 				   int previousHealthState,
 				   int healthState)
 {
@@ -179,9 +179,9 @@ SetNodeHealthState(char *nodeName, uint16 nodePort,
 		appendStringInfo(&query,
 						 "UPDATE " AUTO_FAILOVER_NODE_TABLE
 						 "   SET health = %d, healthchecktime = now() "
-						 " WHERE nodename = %s AND nodeport = %d",
+						 " WHERE nodehost = %s AND nodeport = %d",
 						 healthState,
-						 quote_literal_cstr(nodeName),
+						 quote_literal_cstr(nodeHost),
 						 nodePort);
 
 		pgstat_report_activity(STATE_RUNNING, query.data);
@@ -195,7 +195,7 @@ SetNodeHealthState(char *nodeName, uint16 nodePort,
 
 			LogAndNotifyMessage(message, sizeof(message),
 								"Node %s:%d is marked as %s by the monitor",
-								nodeName,
+								nodeHost,
 								nodePort,
 								healthState == 0 ? "unhealthy" : "healthy");
 		}

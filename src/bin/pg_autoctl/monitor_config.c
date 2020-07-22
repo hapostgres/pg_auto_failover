@@ -25,10 +25,20 @@
 	make_strbuf_option_default("pg_autoctl", "role", NULL, true, NAMEDATALEN, \
 							   config->role, MONITOR_ROLE)
 
+/*
+ * --hostname used to be --nodename, and we need to support transition from the
+ * old to the new name. For that, we read the pg_autoctl.nodename config
+ * setting and change it on the fly to hostname instead.
+ *
+ * As a result HOSTNAME is marked not required and NODENAME is marked compat.
+ */
+#define OPTION_AUTOCTL_HOSTNAME(config) \
+	make_strbuf_option("pg_autoctl", "hostname", "hostname", \
+					   false, _POSIX_HOST_NAME_MAX, config->hostname)
+
 #define OPTION_AUTOCTL_NODENAME(config) \
-	make_strbuf_option("pg_autoctl", "nodename", "nodename", \
-					   true, _POSIX_HOST_NAME_MAX, \
-					   config->nodename)
+	make_strbuf_compat_option("pg_autoctl", "nodename", \
+							  _POSIX_HOST_NAME_MAX, config->hostname)
 
 #define OPTION_POSTGRESQL_PGDATA(config) \
 	make_strbuf_option("postgresql", "pgdata", "pgdata", true, MAXPGPATH, \
@@ -92,6 +102,7 @@
 #define SET_INI_OPTIONS_ARRAY(config) \
 	{ \
 		OPTION_AUTOCTL_ROLE(config), \
+		OPTION_AUTOCTL_HOSTNAME(config), \
 		OPTION_AUTOCTL_NODENAME(config), \
 		OPTION_POSTGRESQL_PGDATA(config), \
 		OPTION_POSTGRESQL_PG_CTL(config), \
@@ -241,6 +252,26 @@ monitor_config_read_file(MonitorConfig *config,
 	if (!read_ini_file(filename, monitorOptions))
 	{
 		log_error("Failed to parse configuration file \"%s\"", filename);
+		return false;
+	}
+
+	/*
+	 * We have changed the --nodename option to being named --hostname, and
+	 * same in the configuration file: pg_autoctl.nodename is now
+	 * pg_autoctl.hostname.
+	 *
+	 * We can read either names from the configuration file and will then write
+	 * the current option name (pg_autoctl.hostname), but we can't have either
+	 * one be required anymore.
+	 *
+	 * Implement the "require" property here by making sure one of those names
+	 * have been used to populate the monitor config structure.
+	 */
+	if (IS_EMPTY_STRING_BUFFER(config->hostname))
+	{
+		log_error("Failed to read either pg_autoctl.hostname or its older "
+				  "name pg_autoctl.nodename from the \"%s\" configuration file",
+				  filename);
 		return false;
 	}
 
@@ -417,9 +448,9 @@ monitor_config_get_postgres_uri(MonitorConfig *config, char *connectionString,
 	char *connStringEnd = connectionString;
 	char host[BUFSIZE];
 
-	if (!IS_EMPTY_STRING_BUFFER(config->nodename))
+	if (!IS_EMPTY_STRING_BUFFER(config->hostname))
 	{
-		strlcpy(host, config->nodename, BUFSIZE);
+		strlcpy(host, config->hostname, BUFSIZE);
 	}
 	else if (IS_EMPTY_STRING_BUFFER(config->pgSetup.listen_addresses) ||
 			 strcmp(config->pgSetup.listen_addresses,
@@ -586,13 +617,13 @@ monitor_config_accept_new(MonitorConfig *config, MonitorConfig *newConfig)
 		return false;
 	}
 
-	/* changing the nodename online is supported */
-	if (strneq(newConfig->nodename, config->nodename))
+	/* changing the hostname online is supported */
+	if (strneq(newConfig->hostname, config->hostname))
 	{
-		log_info("Reloading configuration: nodename is now \"%s\"; "
+		log_info("Reloading configuration: hostname is now \"%s\"; "
 				 "used to be \"%s\"",
-				 newConfig->nodename, config->nodename);
-		strlcpy(config->nodename, newConfig->nodename, _POSIX_HOST_NAME_MAX);
+				 newConfig->hostname, config->hostname);
+		strlcpy(config->hostname, newConfig->hostname, _POSIX_HOST_NAME_MAX);
 	}
 
 	/* we can change any SSL related setup options at runtime */

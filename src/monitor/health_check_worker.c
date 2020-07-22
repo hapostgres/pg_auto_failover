@@ -773,7 +773,7 @@ ManageHealthCheck(HealthCheck *healthCheck, struct timeval currentTime)
 		{
 			if (healthCheck->numTries >= HealthCheckMaxRetries + 1)
 			{
-				SetNodeHealthState(healthCheck->node->nodeName,
+				SetNodeHealthState(healthCheck->node->nodeHost,
 								   healthCheck->node->nodePort,
 								   nodeHealth->healthState,
 								   NODE_HEALTH_BAD);
@@ -799,7 +799,7 @@ ManageHealthCheck(HealthCheck *healthCheck, struct timeval currentTime)
 			StringInfo connInfoString = makeStringInfo();
 
 			appendStringInfo(connInfoString, CONN_INFO_TEMPLATE,
-							 nodeHealth->nodeName, nodeHealth->nodePort,
+							 nodeHealth->nodeHost, nodeHealth->nodePort,
 							 HealthCheckTimeout);
 
 			connection = PQconnectStart(connInfoString->data);
@@ -884,7 +884,7 @@ ManageHealthCheck(HealthCheck *healthCheck, struct timeval currentTime)
 			{
 				PQfinish(connection);
 
-				SetNodeHealthState(healthCheck->node->nodeName,
+				SetNodeHealthState(healthCheck->node->nodeHost,
 								   healthCheck->node->nodePort,
 								   nodeHealth->healthState,
 								   NODE_HEALTH_GOOD);

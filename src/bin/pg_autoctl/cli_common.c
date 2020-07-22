@@ -56,7 +56,7 @@ static void stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathname
  *		{ "auth", required_argument, NULL, 'A' },
  *		{ "skip-pg-hba", required_argument, NULL, 'S' },
  *		{ "dbname", required_argument, NULL, 'd' },
- *		{ "nodename", required_argument, NULL, 'n' },
+ *		{ "hostname", required_argument, NULL, 'n' },
  *		{ "formation", required_argument, NULL, 'f' },
  *		{ "group", required_argument, NULL, 'g' },
  *		{ "monitor", required_argument, NULL, 'm' },
@@ -223,9 +223,9 @@ cli_common_keeper_getopts(int argc, char **argv,
 
 			case 'n':
 			{
-				/* { "nodename", required_argument, NULL, 'n' } */
-				strlcpy(LocalOptionConfig.nodename, optarg, _POSIX_HOST_NAME_MAX);
-				log_trace("--nodename %s", LocalOptionConfig.nodename);
+				/* { "hostname", required_argument, NULL, 'n' } */
+				strlcpy(LocalOptionConfig.hostname, optarg, _POSIX_HOST_NAME_MAX);
+				log_trace("--hostname %s", LocalOptionConfig.hostname);
 				break;
 			}
 
@@ -476,7 +476,7 @@ cli_common_keeper_getopts(int argc, char **argv,
  *		{ "auth", required_argument, NULL, 'A' },
  *		{ "skip-pg-hba", required_argument, NULL, 'S' },
  *		{ "dbname", required_argument, NULL, 'd' },
- *		{ "nodename", required_argument, NULL, 'n' },
+ *		{ "hostname", required_argument, NULL, 'n' },
  *		{ "formation", required_argument, NULL, 'f' },
  *		{ "group", required_argument, NULL, 'g' },
  *		{ "monitor", required_argument, NULL, 'm' },

@@ -602,7 +602,7 @@ standby_init_replication_source(LocalPostgresServer *postgres,
  */
 bool
 standby_init_database(LocalPostgresServer *postgres,
-					  const char *nodename,
+					  const char *hostname,
 					  bool skipBaseBackup)
 {
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
@@ -676,7 +676,7 @@ standby_init_database(LocalPostgresServer *postgres,
 	 */
 	if (pgSetup->ssl.createSelfSignedCert)
 	{
-		if (!pg_create_self_signed_cert(pgSetup, nodename))
+		if (!pg_create_self_signed_cert(pgSetup, hostname))
 		{
 			log_error("Failed to create SSL self-signed certificate, "
 					  "see above for details");

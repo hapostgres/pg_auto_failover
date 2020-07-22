@@ -231,8 +231,8 @@ pghba_ensure_host_rule_exists(const char *hbaFilePath,
  *
  * Each node in the array needs two rules:
  *
- *  host(ssl) replication "pgautofailover_replicator" nodename/ip trust
- *  host(ssl) "dbname"    "pgautofailover_replicator" nodename/ip trust
+ *  host(ssl) replication "pgautofailover_replicator" hostname/ip trust
+ *  host(ssl) "dbname"    "pgautofailover_replicator" hostname/ip trust
  */
 bool
 pghba_ensure_host_rules_exist(const char *hbaFilePath,

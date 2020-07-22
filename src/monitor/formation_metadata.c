@@ -587,7 +587,7 @@ set_formation_number_sync_standbys(PG_FUNCTION_ARGS)
 						"goal state for primary node %d (%s:%d) is \"%s\", "
 						"and current reported state is \"%s\"",
 						primaryNode->nodeId,
-						primaryNode->nodeName,
+						primaryNode->nodeHost,
 						primaryNode->nodePort,
 						ReplicationStateGetName(primaryNode->goalState),
 						ReplicationStateGetName(primaryNode->reportedState)),
@@ -622,11 +622,11 @@ set_formation_number_sync_standbys(PG_FUNCTION_ARGS)
 		message, BUFSIZE,
 		"Setting goal state of %s:%d to apply_settings "
 		"after updating number_sync_standbys to %d for formation %s.",
-		primaryNode->nodeName, primaryNode->nodePort,
+		primaryNode->nodeHost, primaryNode->nodePort,
 		formation->number_sync_standbys,
 		formation->formationId);
 
-	SetNodeGoalState(primaryNode->nodeName, primaryNode->nodePort,
+	SetNodeGoalState(primaryNode->nodeHost, primaryNode->nodePort,
 					 REPLICATION_STATE_APPLY_SETTINGS);
 
 	NotifyStateChange(primaryNode->reportedState,
@@ -634,7 +634,7 @@ set_formation_number_sync_standbys(PG_FUNCTION_ARGS)
 					  primaryNode->formationId,
 					  primaryNode->groupId,
 					  primaryNode->nodeId,
-					  primaryNode->nodeName,
+					  primaryNode->nodeHost,
 					  primaryNode->nodePort,
 					  primaryNode->pgsrSyncState,
 					  primaryNode->reportedLSN,

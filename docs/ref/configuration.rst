@@ -117,7 +117,7 @@ An example configuration file looks like the following::
   monitor = postgres://autoctl_node@192.168.1.34:6000/pg_auto_failover
   formation = default
   group = 0
-  nodename = node1.db
+  hostname = node1.db
   nodekind = standalone
 
   [postgresql]
@@ -162,7 +162,7 @@ formation name `default` is usually fine.
 This information is retrieved by the pg_auto_failover keeper when registering a node
 to the monitor, and should not be changed afterwards. Use at your own risk.
 
-**pg_autoctl.nodename**
+**pg_autoctl.hostname**
 
 Node `hostname` used by all the other nodes in the cluster to contact this
 node. In particular, if this node is a primary then its standby uses that
@@ -187,7 +187,7 @@ command, this parameter is the target directory where to copy the bits from
 the primary server. When the copy has been successful, then the directory is
 renamed to **postgresql.pgdata**.
 
-The default value is computed from ``${PGDATA}/../backup/${nodename}`` and
+The default value is computed from ``${PGDATA}/../backup/${hostname}`` and
 can be set to any value of your preference. Remember that the directory
 renaming is an atomic operation only when both the source and the target of
 the copy are in the same filesystem, at least in Unix systems.

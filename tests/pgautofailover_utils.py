@@ -49,7 +49,7 @@ class Cluster:
         self.monitor = None
         self.datanodes = []
 
-    def create_monitor(self, datadir, port=5432, nodename=None,
+    def create_monitor(self, datadir, port=5432, hostname=None,
                        authMethod=None, sslMode=None, sslSelfSigned=False,
                        sslCAFile=None, sslServerKey=None, sslServerCert=None):
         """
@@ -58,7 +58,7 @@ class Cluster:
         if self.monitor is not None:
             raise Exception("Monitor has already been created.")
         vnode = self.vlan.create_node()
-        self.monitor = MonitorNode(self, datadir, vnode, port, nodename,
+        self.monitor = MonitorNode(self, datadir, vnode, port, hostname,
                                    authMethod, sslMode, sslSelfSigned,
                                    sslCAFile=sslCAFile,
                                    sslServerKey=sslServerKey,
@@ -720,8 +720,8 @@ class DataNode(PGNode):
         if sockdir and sockdir != "":
             pghost = sockdir
 
-        # don't pass --nodename to Postgres nodes in order to exercise the
-        # automatic detection of the nodename.
+        # don't pass --hostname to Postgres nodes in order to exercise the
+        # automatic detection of the hostname.
         create_args = ['create', self.role.command(), level,
                        '--pgdata', self.datadir,
                        '--pghost', pghost,
@@ -863,7 +863,7 @@ SELECT reportedstate
         """
         Returns the current list of events from the monitor.
         """
-        last_events_query = "select eventtime, nodeid, nodename, " \
+        last_events_query = "select eventtime, nodeid, hostname, " \
             "reportedstate, goalstate, " \
             "reportedrepstate, reportedlsn, description " \
             "from pgautofailover.last_events('default', count => 20)"
@@ -872,7 +872,7 @@ SELECT reportedstate
 
     def get_events_str(self):
         return "\n".join(
-            ["%s %25s:%-14s %17s/%-17s %7s %10s %s" % ("eventtime", "id", "nodename",
+            ["%s %25s:%-14s %17s/%-17s %7s %10s %s" % ("eventtime", "id", "hostname",
                                                        "state", "goal state",
                                                        "repl st", "lsn", "event")]
             +
@@ -1049,7 +1049,7 @@ SELECT reportedstate
 
 
 class MonitorNode(PGNode):
-    def __init__(self, cluster, datadir, vnode, port, nodename, authMethod,
+    def __init__(self, cluster, datadir, vnode, port, hostname, authMethod,
                  sslMode=None, sslSelfSigned=None,
                  sslCAFile=None, sslServerKey=None, sslServerCert=None):
 
@@ -1059,11 +1059,11 @@ class MonitorNode(PGNode):
                          sslMode, sslSelfSigned,
                          sslCAFile, sslServerKey, sslServerCert)
 
-        # set the nodename, default to the ip address of the node
-        if nodename:
-            self.nodename = nodename
+        # set the hostname, default to the ip address of the node
+        if hostname:
+            self.hostname = hostname
         else:
-            self.nodename = str(self.vnode.address)
+            self.hostname = str(self.vnode.address)
 
     def create(self, run = False):
         """
@@ -1073,7 +1073,7 @@ class MonitorNode(PGNode):
                        '--pgdata', self.datadir,
                        '--pgport', str(self.port),
                        '--auth', self.authMethod,
-                       '--nodename', self.nodename]
+                       '--hostname', self.hostname]
 
         if self.sslMode:
             create_args += ['--ssl-mode', self.sslMode]

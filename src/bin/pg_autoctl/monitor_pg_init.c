@@ -126,7 +126,7 @@ monitor_pg_init(Monitor *monitor)
  *  - create extension pgautofailover;
  */
 bool
-monitor_install(const char *nodename,
+monitor_install(const char *hostname,
 				PostgresSetup pgSetupOption, bool checkSettings)
 {
 	PostgresSetup pgSetup = { 0 };
@@ -202,7 +202,7 @@ monitor_install(const char *nodename,
 							   pgSetup.ssl.active,
 							   HBA_DATABASE_DBNAME,
 							   PG_AUTOCTL_MONITOR_DBNAME,
-							   nodename,
+							   hostname,
 							   PG_AUTOCTL_MONITOR_USERNAME,
 							   pg_setup_get_auth_method(&pgSetup),
 							   NULL))
@@ -307,7 +307,7 @@ monitor_add_postgres_default_settings(Monitor *monitor)
 	 */
 	if (pgSetup->ssl.createSelfSignedCert)
 	{
-		if (!pg_create_self_signed_cert(&(config->pgSetup), config->nodename))
+		if (!pg_create_self_signed_cert(&(config->pgSetup), config->hostname))
 		{
 			log_error("Failed to create SSL self-signed certificate, "
 					  "see above for details");

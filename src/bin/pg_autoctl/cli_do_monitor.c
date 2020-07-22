@@ -4,7 +4,7 @@
  *     monitor.
  *
  * The monitor API only makes sense given a local pg_auto_failover keeper
- * setup: we need the formation and group, or the nodename and port, and at
+ * setup: we need the formation and group, or the hostname and port, and at
  * registration time we want to create a state file, then at node_active time
  * we need many information obtained in both the configuration and the current
  * state.
@@ -56,7 +56,7 @@ static CommandLine monitor_get_primary_command =
 
 static CommandLine monitor_get_other_nodes_command =
 	make_command("others",
-				 "Get the other nodes from the pg_auto_failover group of nodename/port",
+				 "Get the other nodes from the pg_auto_failover group of hostname/port",
 				 CLI_PGDATA_USAGE,
 				 CLI_PGDATA_OPTION,
 				 cli_getopt_pgdata,
@@ -197,7 +197,7 @@ cli_do_monitor_get_primary_node(int argc, char **argv)
 
 /*
  * cli_do_monitor_get_other_nodes contacts the pg_auto_failover monitor and
- * retrieves the "other node" information for given nodename and port.
+ * retrieves the "other node" information for given hostname and port.
  */
 static void
 cli_do_monitor_get_other_nodes(int argc, char **argv)
@@ -229,7 +229,7 @@ cli_do_monitor_get_other_nodes(int argc, char **argv)
 	if (outputJSON)
 	{
 		if (!monitor_print_other_nodes_as_json(&monitor,
-											   config.nodename,
+											   config.hostname,
 											   config.pgSetup.pgport,
 											   ANY_STATE))
 		{
@@ -241,7 +241,7 @@ cli_do_monitor_get_other_nodes(int argc, char **argv)
 	else
 	{
 		if (!monitor_print_other_nodes(&monitor,
-									   config.nodename,
+									   config.hostname,
 									   config.pgSetup.pgport,
 									   ANY_STATE))
 		{
@@ -412,7 +412,7 @@ cli_do_monitor_register_node(int argc, char **argv)
 		JSON_Object *root = json_value_get_object(js);
 
 		json_object_set_string(root, "formation", config.formation);
-		json_object_set_string(root, "host", config.nodename);
+		json_object_set_string(root, "host", config.hostname);
 		json_object_set_number(root, "port", (double) config.pgSetup.pgport);
 		json_object_set_number(root, "nodeId",
 							   (double) keeper.state.current_node_id);
@@ -429,7 +429,7 @@ cli_do_monitor_register_node(int argc, char **argv)
 				"%s/%d %s:%d %d:%d %s\n",
 				config.formation,
 				config.groupId,
-				config.nodename,
+				config.hostname,
 				config.pgSetup.pgport,
 				keeper.state.current_node_id,
 				keeper.state.current_group,
@@ -479,7 +479,7 @@ cli_do_monitor_node_active(int argc, char **argv)
 
 	if (!monitor_node_active(&keeper.monitor,
 							 config.formation,
-							 config.nodename,
+							 config.hostname,
 							 config.pgSetup.pgport,
 							 keeper.state.current_node_id,
 							 keeper.state.current_group,
@@ -508,7 +508,7 @@ cli_do_monitor_node_active(int argc, char **argv)
 		JSON_Object *root = json_value_get_object(js);
 
 		json_object_set_string(root, "formation", config.formation);
-		json_object_set_string(root, "host", config.nodename);
+		json_object_set_string(root, "host", config.hostname);
 		json_object_set_number(root, "port", (double) config.pgSetup.pgport);
 		json_object_set_number(root, "nodeId", (double) assignedState.nodeId);
 		json_object_set_number(root, "groupId", (double) assignedState.groupId);
@@ -524,7 +524,7 @@ cli_do_monitor_node_active(int argc, char **argv)
 				"%s/%d %s:%d %d:%d %s\n",
 				config.formation,
 				config.groupId,
-				config.nodename,
+				config.hostname,
 				config.pgSetup.pgport,
 				assignedState.nodeId,
 				assignedState.groupId,
@@ -593,14 +593,14 @@ cli_do_monitor_parse_notification(int argc, char **argv)
 	if (parse_state_notification_message(&notification))
 	{
 		log_info("New state for %s:%d in formation \"%s\": %s/%s",
-				 notification.nodeName,
+				 notification.hostName,
 				 notification.nodePort,
 				 notification.formationId,
 				 NodeStateToString(notification.reportedState),
 				 NodeStateToString(notification.goalState));
 	}
 
-	json_object_set_string(root, "nodename", notification.nodeName);
+	json_object_set_string(root, "hostname", notification.hostName);
 	json_object_set_number(root, "nodeport", (double) notification.nodePort);
 	json_object_set_string(root, "formationid", notification.formationId);
 	json_object_set_string(root, "reportedState",

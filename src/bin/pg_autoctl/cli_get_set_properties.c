@@ -19,12 +19,12 @@ static void cli_get_formation_number_sync_standbys(int argc, char **argv);
 
 static void cli_set_node_replication_quorum(int argc, char **argv);
 static void cli_set_node_candidate_priority(int argc, char **argv);
-static void cli_set_node_nodename(int argc, char **argv);
+static void cli_set_node_hostname(int argc, char **argv);
 static void cli_set_formation_number_sync_standbys(int arc, char **argv);
 
 static bool set_node_candidate_priority(Keeper *keeper, int candidatePriority);
 static bool set_node_replication_quorum(Keeper *keeper, bool replicationQuorum);
-static bool set_node_nodename(Keeper *keeper, const char *nodename);
+static bool set_node_hostname(Keeper *keeper, const char *hostname);
 static bool set_formation_number_sync_standbys(Monitor *monitor,
 											   char *formation,
 											   int groupId,
@@ -106,19 +106,19 @@ static CommandLine set_node_candidate_priority_command =
 				 cli_getopt_pgdata,
 				 cli_set_node_candidate_priority);
 
-static CommandLine set_node_nodename_command =
-	make_command("nodename",
-				 "set nodename on the monitor",
+static CommandLine set_node_hostname_command =
+	make_command("hostname",
+				 "set hostname on the monitor",
 				 CLI_PGDATA_USAGE "<hostname|ipaddr>",
 				 CLI_PGDATA_OPTION,
 				 cli_getopt_pgdata,
-				 cli_set_node_nodename);
+				 cli_set_node_hostname);
 
 
 static CommandLine *set_node_subcommands[] = {
 	&set_node_replication_quorum_command,
 	&set_node_candidate_priority_command,
-	&set_node_nodename_command,
+	&set_node_hostname_command,
 	NULL
 };
 
@@ -512,12 +512,12 @@ cli_set_node_candidate_priority(int argc, char **argv)
 
 
 /*
- * cli_set_node_nodename sets this pg_autoctl "nodename" on the monitor. That's
+ * cli_set_node_hostname sets this pg_autoctl "hostname" on the monitor. That's
  * the hostname that is used by every other node in the system to contact the
  * local node, so it might as well be an IP address.
  */
 static void
-cli_set_node_nodename(int argc, char **argv)
+cli_set_node_hostname(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
 
@@ -564,7 +564,7 @@ cli_set_node_nodename(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!set_node_nodename(&keeper, argv[0]))
+	if (!set_node_hostname(&keeper, argv[0]))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_MONITOR);
@@ -575,7 +575,7 @@ cli_set_node_nodename(int argc, char **argv)
 		JSON_Value *js = json_value_init_object();
 		JSON_Object *jsObj = json_value_get_object(js);
 
-		json_object_set_string(jsObj, "nodename", argv[0]);
+		json_object_set_string(jsObj, "hostname", argv[0]);
 
 		(void) cli_pprint_json(js);
 	}
@@ -728,7 +728,7 @@ set_node_candidate_priority(Keeper *keeper, int candidatePriority)
 	if (!monitor_set_node_candidate_priority(
 			&(keeper->monitor),
 			keeper->state.current_node_id,
-			config->nodename,
+			config->hostname,
 			config->pgSetup.pgport,
 			candidatePriority))
 	{
@@ -793,7 +793,7 @@ set_node_replication_quorum(Keeper *keeper, bool replicationQuorum)
 	if (!monitor_set_node_replication_quorum(
 			&(keeper->monitor),
 			keeper->state.current_node_id,
-			config->nodename,
+			config->hostname,
 			config->pgSetup.pgport,
 			replicationQuorum))
 	{
@@ -819,12 +819,12 @@ set_node_replication_quorum(Keeper *keeper, bool replicationQuorum)
 
 
 /*
- * set_node_nodename sets a new nodename for the current pg_autoctl node on the
+ * set_node_hostname sets a new hostname for the current pg_autoctl node on the
  * monitor. This node might be in an environment where you might get a new IP
  * at reboot, such as in Kubernetes.
  */
 static bool
-set_node_nodename(Keeper *keeper, const char *nodename)
+set_node_hostname(Keeper *keeper, const char *hostname)
 {
 	KeeperStateData keeperState = { 0 };
 	int nodeId = -1;
@@ -837,19 +837,19 @@ set_node_nodename(Keeper *keeper, const char *nodename)
 
 	nodeId = keeperState.current_node_id;
 
-	if (!monitor_set_nodename(&(keeper->monitor), nodeId, nodename))
+	if (!monitor_set_hostname(&(keeper->monitor), nodeId, hostname))
 	{
 		/* errors have already been logged */
 		return false;
 	}
 
-	strlcpy(keeper->config.nodename, nodename, _POSIX_HOST_NAME_MAX);
+	strlcpy(keeper->config.hostname, hostname, _POSIX_HOST_NAME_MAX);
 
 	if (!keeper_config_write_file(&(keeper->config)))
 	{
-		log_warn("This node nodename has been updated to \"%s\" on the monitor "
+		log_warn("This node hostname has been updated to \"%s\" on the monitor "
 				 "but could not be update in the local configuration file!",
-				 nodename);
+				 hostname);
 		return false;
 	}
 

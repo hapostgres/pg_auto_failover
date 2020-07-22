@@ -40,7 +40,7 @@ typedef struct StateNotification
 	char formationId[NAMEDATALEN];
 	int groupId;
 	int nodeId;
-	char nodeName[_POSIX_HOST_NAME_MAX];
+	char hostName[_POSIX_HOST_NAME_MAX];
 	int nodePort;
 } StateNotification;
 
@@ -54,7 +54,7 @@ bool monitor_init(Monitor *monitor, char *url);
 bool monitor_local_init(Monitor *monitor);
 void monitor_finish(Monitor *monitor);
 
-void printNodeHeader(int maxNodeNameSize);
+void printNodeHeader(int maxHostNameSize);
 void printNodeEntry(NodeAddress *node);
 
 bool monitor_get_nodes(Monitor *monitor, char *formation, int groupId,
@@ -96,10 +96,10 @@ bool monitor_node_active(Monitor *monitor,
 bool monitor_get_node_replication_settings(Monitor *monitor, int nodeid,
 										   NodeReplicationSettings *settings);
 bool monitor_set_node_candidate_priority(Monitor *monitor, int nodeid,
-										 char *nodeName, int nodePort,
+										 char *hostName, int nodePort,
 										 int candidatePriority);
 bool monitor_set_node_replication_quorum(Monitor *monitor, int nodeid,
-										 char *nodeName, int nodePort,
+										 char *hostName, int nodePort,
 										 bool replicationQuorum);
 bool monitor_get_formation_number_sync_standbys(Monitor *monitor, char *formation,
 												int *numberSyncStandbys);
@@ -144,7 +144,7 @@ bool monitor_synchronous_standby_names(Monitor *monitor,
 									   char *synchronous_standby_names,
 									   int size);
 
-bool monitor_set_nodename(Monitor *monitor, int nodeId, const char *nodename);
+bool monitor_set_hostname(Monitor *monitor, int nodeId, const char *hostname);
 bool monitor_set_node_system_identifier(Monitor *monitor,
 										int nodeId,
 										uint64_t system_identifier);
