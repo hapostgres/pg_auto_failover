@@ -145,6 +145,9 @@
 	"Stop traffic to primary, " \
 	"wait for it to finish draining."
 
+#define COMMENT_REPORT_LSN_TO_FAST_FORWARD \
+	"Fetching missing WAL bits from another standby before promotion"
+
 #define COMMENT_FOLLOW_NEW_PRIMARY \
 	"Switch replication to the new primary"
 
@@ -153,6 +156,10 @@
 
 #define COMMENT_JOIN_SECONDARY_TO_SECONDARY \
 	"Failover is done, we have a new primary to follow"
+
+#define COMMENT_FAST_FORWARD_TO_PREP_PROMOTION \
+	"Got the missing WAL bytes, promoted"
+
 
 /* *INDENT-OFF* */
 

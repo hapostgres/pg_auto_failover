@@ -538,8 +538,8 @@ fsm_enable_sync_rep(Keeper *keeper)
 			  streq(postgres->pgsrSyncState, "sync")))
 		{
 			/* it's an expected situation here, don't fill-up the logs */
-			log_debug("Failed to set the standby Target LSN because we don't "
-					  "have a quorum candidate yet");
+			log_warn("Failed to set the standby Target LSN because we don't "
+					 "have a quorum candidate yet");
 			return false;
 		}
 

@@ -985,8 +985,6 @@ pgsql_set_synchronous_standby_names(PGSQL *pgsql,
 	char quoted[BUFSIZE] = { 0 };
 	GUC setting = { "synchronous_standby_names", quoted };
 
-	log_info("Enabling synchronous replication");
-
 	if (sformat(quoted, BUFSIZE, "'%s'", synchronous_standby_names) >= BUFSIZE)
 	{
 		log_error("Failed to apply the synchronous_standby_names value \"%s\": "
@@ -995,6 +993,7 @@ pgsql_set_synchronous_standby_names(PGSQL *pgsql,
 				  synchronous_standby_names,
 				  BUFSIZE,
 				  strlen(synchronous_standby_names));
+		return false;
 	}
 
 	return pgsql_alter_system_set(pgsql, setting);
@@ -1454,18 +1453,24 @@ pgsql_checkpoint(PGSQL *pgsql)
 static bool
 pgsql_alter_system_set(PGSQL *pgsql, GUC setting)
 {
-	char command[1024];
+	char command[BUFSIZE];
 
-	sformat(command, 1024,
+	sformat(command, sizeof(command),
 			"ALTER SYSTEM SET %s TO %s", setting.name, setting.value);
 
 	if (!pgsql_execute(pgsql, command))
 	{
+		log_error("Failed to set \"%s\" to \"%s\" with ALTER SYSTEM, "
+				  "see above for details",
+				  setting.name, setting.value);
 		return false;
 	}
 
 	if (!pgsql_reload_conf(pgsql))
 	{
+		log_error("Failed to reload Postgres config after ALTER SYSTEM "
+				  "to set \"%s\" to \"%s\".",
+				  setting.name, setting.value);
 		return false;
 	}
 
