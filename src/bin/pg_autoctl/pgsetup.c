@@ -451,6 +451,9 @@ pg_setup_controldata(PostgresSetup *pgSetup, bool missingPgDataIsOk)
 	/*
 	 * Now fetch new control values from running pg_controldata on PGDATA.
 	 */
+	strlcpy(newPgSetup.pgdata, pgSetup->pgdata, MAXPGPATH);
+	strlcpy(newPgSetup.pg_ctl, pgSetup->pg_ctl, MAXPGPATH);
+
 	if (!pg_controldata(&newPgSetup, missingPgDataIsOk))
 	{
 		/* errors have already been logged */
