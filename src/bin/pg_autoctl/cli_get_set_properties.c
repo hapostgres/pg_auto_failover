@@ -19,12 +19,11 @@ static void cli_get_formation_number_sync_standbys(int argc, char **argv);
 
 static void cli_set_node_replication_quorum(int argc, char **argv);
 static void cli_set_node_candidate_priority(int argc, char **argv);
-static void cli_set_node_hostname(int argc, char **argv);
+static void cli_set_node_metadata(int argc, char **argv);
 static void cli_set_formation_number_sync_standbys(int arc, char **argv);
 
 static bool set_node_candidate_priority(Keeper *keeper, int candidatePriority);
 static bool set_node_replication_quorum(Keeper *keeper, bool replicationQuorum);
-static bool set_node_hostname(Keeper *keeper, const char *hostname);
 static bool set_formation_number_sync_standbys(Monitor *monitor,
 											   char *formation,
 											   int groupId,
@@ -106,19 +105,22 @@ static CommandLine set_node_candidate_priority_command =
 				 cli_getopt_pgdata,
 				 cli_set_node_candidate_priority);
 
-static CommandLine set_node_hostname_command =
-	make_command("hostname",
-				 "set hostname on the monitor",
-				 CLI_PGDATA_USAGE "<hostname|ipaddr>",
-				 CLI_PGDATA_OPTION,
-				 cli_getopt_pgdata,
-				 cli_set_node_hostname);
+static CommandLine set_node_metadata_command =
+	make_command("metadata",
+				 "set metadata on the monitor",
+				 " [ --pgdata --name --hostname --pgport ] ",
+				 "  --pgdata      path to data directory\n"
+				 "  --name        pg_auto_failover node name\n"
+				 "  --hostname    hostname used to connect from other nodes\n"
+				 "  --pgport      PostgreSQL's port number\n",
+				 cli_node_metadata_getopts,
+				 cli_set_node_metadata);
 
 
 static CommandLine *set_node_subcommands[] = {
+	&set_node_metadata_command,
 	&set_node_replication_quorum_command,
 	&set_node_candidate_priority_command,
-	&set_node_hostname_command,
 	NULL
 };
 
@@ -512,76 +514,104 @@ cli_set_node_candidate_priority(int argc, char **argv)
 
 
 /*
- * cli_set_node_hostname sets this pg_autoctl "hostname" on the monitor. That's
- * the hostname that is used by every other node in the system to contact the
- * local node, so it might as well be an IP address.
+ * cli_set_node_metadata sets this pg_autoctl node name, hostname, and port on
+ * the monitor. That's the hostname that is used by every other node in the
+ * system to contact the local node, so it might as well be an IP address.
  */
 static void
-cli_set_node_hostname(int argc, char **argv)
+cli_set_node_metadata(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
+	KeeperConfig *config = &(keeper.config);
+	Monitor *monitor = &(keeper.monitor);
 
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
 	bool monitorDisabledIsOk = false;
 
-	keeper.config = keeperOptions;
+	KeeperConfig oldConfig = { 0 };
 
-	if (argc != 1)
+	/* initialize from the command lines options */
+	*config = keeperOptions;
+
+	if (IS_EMPTY_STRING_BUFFER(keeperOptions.name) &&
+		IS_EMPTY_STRING_BUFFER(keeperOptions.hostname) &&
+		keeperOptions.pgSetup.pgport == 0)
 	{
-		log_error("Failed to parse command line arguments: "
-				  "got %d when 1 is expected",
-				  argc);
+		log_error("Please use at least one of "
+				  "--nodename, --hostname, or --pgport");
 		commandline_help(stderr);
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!keeper_config_read_file(&(keeper.config),
+	if (!file_exists(config->pathnames.config))
+	{
+		log_error("Failed to read configuration file \"%s\"",
+				  config->pathnames.config);
+	}
+
+	if (!keeper_config_read_file(config,
 								 missingPgdataIsOk,
 								 pgIsNotRunningIsOk,
 								 monitorDisabledIsOk))
 	{
-		/* errors have already been logged. */
+		log_fatal("Failed to read configuration file \"%s\"",
+				  config->pathnames.config);
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	if (keeper.config.monitorDisabled)
+	if (config->monitorDisabled)
 	{
-		log_error("This node has disabled monitor, "
-				  "pg_autoctl get and set commands are not available.");
+		log_error("This node has disabled monitor");
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	if (!keeper_init(&keeper, &keeper.config))
+	/* keep a copy */
+	oldConfig = *config;
+
+	/*
+	 * Now that we have loaded the configuration file, apply the command
+	 * line options on top of it, giving them priority over the config.
+	 */
+	if (!keeper_config_merge_options(config, &keeperOptions))
 	{
-		log_fatal("Failed to initialize keeper, see above for details");
-		exit(EXIT_CODE_KEEPER);
+		/* errors have been logged already */
+		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	if (!monitor_init(&(keeper.monitor), keeper.config.monitor_pguri))
+	if (!monitor_init(monitor, config->monitor_pguri))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!set_node_hostname(&keeper, argv[0]))
+	if (!keeper_set_node_metadata(&keeper, &oldConfig))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_MONITOR);
 	}
 
+	if (file_exists(config->pathnames.pid))
+	{
+		if (!cli_pg_autoctl_reload(config->pathnames.pid))
+		{
+			log_error("Failed to reload the pg_autoctl service, consider "
+					  "restarting it to implement the metadata changes");
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+	}
+
 	if (outputJSON)
 	{
 		JSON_Value *js = json_value_init_object();
-		JSON_Object *jsObj = json_value_get_object(js);
 
-		json_object_set_string(jsObj, "hostname", argv[0]);
+		if (!keeper_config_to_json(config, js))
+		{
+			log_fatal("Failed to serialize configuration to JSON");
+			exit(EXIT_CODE_BAD_CONFIG);
+		}
 
 		(void) cli_pprint_json(js);
-	}
-	else
-	{
-		fformat(stdout, "%s\n", argv[0]);
 	}
 }
 
@@ -812,45 +842,6 @@ set_node_replication_quorum(Keeper *keeper, bool replicationQuorum)
 			log_error("Failed to wait until the new setting has been applied");
 			return false;
 		}
-	}
-
-	return true;
-}
-
-
-/*
- * set_node_hostname sets a new hostname for the current pg_autoctl node on the
- * monitor. This node might be in an environment where you might get a new IP
- * at reboot, such as in Kubernetes.
- */
-static bool
-set_node_hostname(Keeper *keeper, const char *hostname)
-{
-	KeeperStateData keeperState = { 0 };
-	int nodeId = -1;
-
-	if (!keeper_state_read(&keeperState, keeper->config.pathnames.state))
-	{
-		/* errors have already been logged */
-		return false;
-	}
-
-	nodeId = keeperState.current_node_id;
-
-	if (!monitor_set_hostname(&(keeper->monitor), nodeId, hostname))
-	{
-		/* errors have already been logged */
-		return false;
-	}
-
-	strlcpy(keeper->config.hostname, hostname, _POSIX_HOST_NAME_MAX);
-
-	if (!keeper_config_write_file(&(keeper->config)))
-	{
-		log_warn("This node hostname has been updated to \"%s\" on the monitor "
-				 "but could not be update in the local configuration file!",
-				 hostname);
-		return false;
 	}
 
 	return true;

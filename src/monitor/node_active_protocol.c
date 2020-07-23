@@ -38,15 +38,16 @@
 
 /* private function forward declarations */
 static AutoFailoverNodeState * NodeActive(char *formationId,
-										  char *nodeHost, int32 nodePort,
 										  AutoFailoverNodeState *currentNodeState);
 static void JoinAutoFailoverFormation(AutoFailoverFormation *formation,
-									  char *nodeHost, int nodePort,
+									  char *nodeName, char *nodeHost, int nodePort,
 									  uint64 sysIdentifier,
 									  AutoFailoverNodeState *currentNodeState);
 static int AssignGroupId(AutoFailoverFormation *formation,
 						 char *nodeHost, int nodePort,
 						 ReplicationState *initialState);
+
+static bool RemoveNode(AutoFailoverNode *currentNode);
 
 static bool IsStateIn(ReplicationState state, List *allowedStates);
 
@@ -54,11 +55,14 @@ static bool IsStateIn(ReplicationState state, List *allowedStates);
 /* SQL-callable function declarations */
 PG_FUNCTION_INFO_V1(register_node);
 PG_FUNCTION_INFO_V1(node_active);
+PG_FUNCTION_INFO_V1(update_node_metadata);
 PG_FUNCTION_INFO_V1(get_nodes);
 PG_FUNCTION_INFO_V1(get_primary);
 PG_FUNCTION_INFO_V1(get_other_node);
 PG_FUNCTION_INFO_V1(get_other_nodes);
 PG_FUNCTION_INFO_V1(remove_node);
+PG_FUNCTION_INFO_V1(remove_node_by_nodeid);
+PG_FUNCTION_INFO_V1(remove_node_by_host);
 PG_FUNCTION_INFO_V1(perform_failover);
 PG_FUNCTION_INFO_V1(start_maintenance);
 PG_FUNCTION_INFO_V1(stop_maintenance);
@@ -79,22 +83,28 @@ register_node(PG_FUNCTION_ARGS)
 {
 	text *formationIdText = PG_GETARG_TEXT_P(0);
 	char *formationId = text_to_cstring(formationIdText);
+
 	text *nodeHostText = PG_GETARG_TEXT_P(1);
 	char *nodeHost = text_to_cstring(nodeHostText);
 	int32 nodePort = PG_GETARG_INT32(2);
+
 	Name dbnameName = PG_GETARG_NAME(3);
-	uint64 sysIdentifier = PG_GETARG_INT64(4);
 	const char *expectedDBName = NameStr(*dbnameName);
 
-	int32 currentGroupId = PG_GETARG_INT32(5);
-	Oid currentReplicationStateOid = PG_GETARG_OID(6);
+	text *nodeNameText = PG_GETARG_TEXT_P(4);
+	char *nodeName = text_to_cstring(nodeNameText);
 
-	text *nodeKindText = PG_GETARG_TEXT_P(7);
+	uint64 sysIdentifier = PG_GETARG_INT64(5);
+
+	int32 currentGroupId = PG_GETARG_INT32(6);
+	Oid currentReplicationStateOid = PG_GETARG_OID(7);
+
+	text *nodeKindText = PG_GETARG_TEXT_P(8);
 	char *nodeKind = text_to_cstring(nodeKindText);
 	FormationKind expectedFormationKind =
 		FormationKindFromNodeKindString(nodeKind);
-	int candidatePriority = PG_GETARG_INT32(8);
-	bool replicationQuorum = PG_GETARG_BOOL(9);
+	int candidatePriority = PG_GETARG_INT32(9);
+	bool replicationQuorum = PG_GETARG_BOOL(10);
 
 	AutoFailoverFormation *formation = NULL;
 	AutoFailoverNode *pgAutoFailoverNode = NULL;
@@ -177,7 +187,14 @@ register_node(PG_FUNCTION_ARGS)
 		}
 	}
 
+	/*
+	 * The register_node() function is STRICT but users may have skipped the
+	 * --name option on the create command line. We still want to avoid having
+	 * to scan all the 10 parameters for ISNULL tests, so instead our client
+	 * sends an empty string for the nodename.
+	 */
 	JoinAutoFailoverFormation(formation,
+							  strcmp(nodeName, "") == 0 ? NULL : nodeName,
 							  nodeHost,
 							  nodePort,
 							  sysIdentifier,
@@ -264,17 +281,14 @@ node_active(PG_FUNCTION_ARGS)
 {
 	text *formationIdText = PG_GETARG_TEXT_P(0);
 	char *formationId = text_to_cstring(formationIdText);
-	text *nodeHostText = PG_GETARG_TEXT_P(1);
-	char *nodeHost = text_to_cstring(nodeHostText);
-	int32 nodePort = PG_GETARG_INT32(2);
 
-	int32 currentNodeId = PG_GETARG_INT32(3);
-	int32 currentGroupId = PG_GETARG_INT32(4);
-	Oid currentReplicationStateOid = PG_GETARG_OID(5);
+	int32 currentNodeId = PG_GETARG_INT32(1);
+	int32 currentGroupId = PG_GETARG_INT32(2);
+	Oid currentReplicationStateOid = PG_GETARG_OID(3);
+	bool currentPgIsRunning = PG_GETARG_BOOL(4);
+	XLogRecPtr currentLSN = PG_GETARG_LSN(5);
 
-	bool currentPgIsRunning = PG_GETARG_BOOL(6);
-	XLogRecPtr currentLSN = PG_GETARG_LSN(7);
-	text *currentPgsrSyncStateText = PG_GETARG_TEXT_P(8);
+	text *currentPgsrSyncStateText = PG_GETARG_TEXT_P(6);
 	char *currentPgsrSyncState = text_to_cstring(currentPgsrSyncStateText);
 
 	AutoFailoverNodeState currentNodeState = { 0 };
@@ -297,8 +311,7 @@ node_active(PG_FUNCTION_ARGS)
 	currentNodeState.reportedLSN = currentLSN;
 	currentNodeState.pgsrSyncState = SyncStateFromString(currentPgsrSyncState);
 	currentNodeState.pgIsRunning = currentPgIsRunning;
-	assignedNodeState =
-		NodeActive(formationId, nodeHost, nodePort, &currentNodeState);
+	assignedNodeState = NodeActive(formationId, &currentNodeState);
 
 	newReplicationStateOid =
 		ReplicationStateGetEnum(assignedNodeState->replicationState);
@@ -329,30 +342,17 @@ node_active(PG_FUNCTION_ARGS)
  * NodeActive reports the current state of a node and returns the assigned state.
  */
 static AutoFailoverNodeState *
-NodeActive(char *formationId, char *nodeHost, int32 nodePort,
-		   AutoFailoverNodeState *currentNodeState)
+NodeActive(char *formationId, AutoFailoverNodeState *currentNodeState)
 {
 	AutoFailoverNode *pgAutoFailoverNode = NULL;
 	AutoFailoverNodeState *assignedNodeState = NULL;
 
-	pgAutoFailoverNode = GetAutoFailoverNode(nodeHost, nodePort);
+	pgAutoFailoverNode = GetAutoFailoverNodeById(currentNodeState->nodeId);
+
 	if (pgAutoFailoverNode == NULL)
 	{
-		ereport(ERROR, (errmsg("node %s:%d is not registered",
-							   nodeHost, nodePort)));
-	}
-	else if (strcmp(pgAutoFailoverNode->formationId, formationId) != 0)
-	{
-		ereport(ERROR, (errmsg("node %s:%d does not belong to formation %s",
-							   nodeHost, nodePort, formationId)));
-	}
-	else if (currentNodeState->nodeId != pgAutoFailoverNode->nodeId &&
-			 currentNodeState->nodeId != -1)
-	{
-		ereport(ERROR,
-				(errmsg("node %s:%d with nodeid %d was removed",
-						nodeHost, nodePort, currentNodeState->nodeId),
-				 errhint("Remove your state file to re-register the node.")));
+		ereport(ERROR, (errmsg("couldn't find node with nodeid %d",
+							   currentNodeState->nodeId)));
 	}
 	else
 	{
@@ -365,7 +365,7 @@ NodeActive(char *formationId, char *nodeHost, int32 nodePort,
 			 * state, supposedly. Log the new reported state as an event, and
 			 * notify it.
 			 */
-			char message[BUFSIZE];
+			char message[BUFSIZE] = { 0 };
 
 			LogAndNotifyMessage(
 				message, BUFSIZE,
@@ -373,18 +373,11 @@ NodeActive(char *formationId, char *nodeHost, int32 nodePort,
 				pgAutoFailoverNode->nodeHost, pgAutoFailoverNode->nodePort,
 				ReplicationStateGetName(currentNodeState->replicationState));
 
-			NotifyStateChange(currentNodeState->replicationState,
-							  pgAutoFailoverNode->goalState,
-							  formationId,
-							  pgAutoFailoverNode->groupId,
-							  pgAutoFailoverNode->nodeId,
-							  pgAutoFailoverNode->nodeHost,
-							  pgAutoFailoverNode->nodePort,
-							  currentNodeState->pgsrSyncState,
-							  currentNodeState->reportedLSN,
-							  pgAutoFailoverNode->candidatePriority,
-							  pgAutoFailoverNode->replicationQuorum,
-							  message);
+			pgAutoFailoverNode->reportedState = currentNodeState->replicationState;
+			pgAutoFailoverNode->pgsrSyncState = currentNodeState->pgsrSyncState;
+			pgAutoFailoverNode->reportedLSN = currentNodeState->reportedLSN;
+
+			NotifyStateChange(pgAutoFailoverNode, message);
 		}
 
 		/*
@@ -420,7 +413,8 @@ NodeActive(char *formationId, char *nodeHost, int32 nodePort,
  */
 static void
 JoinAutoFailoverFormation(AutoFailoverFormation *formation,
-						  char *nodeHost, int nodePort, uint64 sysIdentifier,
+						  char *nodeName, char *nodeHost, int nodePort,
+						  uint64 sysIdentifier,
 						  AutoFailoverNodeState *currentNodeState)
 {
 	int groupId = -1;
@@ -547,6 +541,7 @@ JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 
 	AddAutoFailoverNode(formation->formationId,
 						groupId,
+						nodeName,
 						nodeHost,
 						nodePort,
 						sysIdentifier,
@@ -616,8 +611,8 @@ get_primary(PG_FUNCTION_ARGS)
 	TypeFuncClass resultTypeClass = 0;
 	Datum resultDatum = 0;
 	HeapTuple resultTuple = NULL;
-	Datum values[3];
-	bool isNulls[3];
+	Datum values[4];
+	bool isNulls[4];
 
 	checkPgAutoFailoverVersion();
 
@@ -631,8 +626,9 @@ get_primary(PG_FUNCTION_ARGS)
 	memset(isNulls, false, sizeof(isNulls));
 
 	values[0] = Int32GetDatum(primaryNode->nodeId);
-	values[1] = CStringGetTextDatum(primaryNode->nodeHost);
-	values[2] = Int32GetDatum(primaryNode->nodePort);
+	values[1] = CStringGetTextDatum(primaryNode->nodeName);
+	values[2] = CStringGetTextDatum(primaryNode->nodeHost);
+	values[3] = Int32GetDatum(primaryNode->nodePort);
 
 	resultTypeClass = get_call_result_type(fcinfo, NULL, &resultDescriptor);
 	if (resultTypeClass != TYPEFUNC_COMPOSITE)
@@ -719,8 +715,8 @@ get_nodes(PG_FUNCTION_ARGS)
 		TypeFuncClass resultTypeClass = 0;
 		Datum resultDatum = 0;
 		HeapTuple resultTuple = NULL;
-		Datum values[5];
-		bool isNulls[5];
+		Datum values[6];
+		bool isNulls[6];
 
 		AutoFailoverNode *node = (AutoFailoverNode *) linitial(fctx->nodesList);
 
@@ -728,10 +724,11 @@ get_nodes(PG_FUNCTION_ARGS)
 		memset(isNulls, false, sizeof(isNulls));
 
 		values[0] = Int32GetDatum(node->nodeId);
-		values[1] = CStringGetTextDatum(node->nodeHost);
-		values[2] = Int32GetDatum(node->nodePort);
-		values[3] = LSNGetDatum(node->reportedLSN);
-		values[4] = BoolGetDatum(CanTakeWritesInState(node->reportedState));
+		values[1] = CStringGetTextDatum(node->nodeName);
+		values[2] = CStringGetTextDatum(node->nodeHost);
+		values[3] = Int32GetDatum(node->nodePort);
+		values[4] = LSNGetDatum(node->reportedLSN);
+		values[5] = BoolGetDatum(CanTakeWritesInState(node->reportedState));
 
 		resultTypeClass = get_call_result_type(fcinfo, NULL, &resultDescriptor);
 		if (resultTypeClass != TYPEFUNC_COMPOSITE)
@@ -848,8 +845,8 @@ get_other_nodes(PG_FUNCTION_ARGS)
 		TypeFuncClass resultTypeClass = 0;
 		Datum resultDatum = 0;
 		HeapTuple resultTuple = NULL;
-		Datum values[5];
-		bool isNulls[5];
+		Datum values[6];
+		bool isNulls[6];
 
 		AutoFailoverNode *node = (AutoFailoverNode *) linitial(fctx->nodesList);
 
@@ -857,10 +854,11 @@ get_other_nodes(PG_FUNCTION_ARGS)
 		memset(isNulls, false, sizeof(isNulls));
 
 		values[0] = Int32GetDatum(node->nodeId);
-		values[1] = CStringGetTextDatum(node->nodeHost);
-		values[2] = Int32GetDatum(node->nodePort);
-		values[3] = LSNGetDatum(node->reportedLSN);
-		values[4] = BoolGetDatum(CanTakeWritesInState(node->reportedState));
+		values[1] = CStringGetTextDatum(node->nodeName);
+		values[2] = CStringGetTextDatum(node->nodeHost);
+		values[3] = Int32GetDatum(node->nodePort);
+		values[4] = LSNGetDatum(node->reportedLSN);
+		values[5] = BoolGetDatum(CanTakeWritesInState(node->reportedState));
 
 		resultTypeClass = get_call_result_type(fcinfo, NULL, &resultDescriptor);
 		if (resultTypeClass != TYPEFUNC_COMPOSITE)
@@ -882,38 +880,80 @@ get_other_nodes(PG_FUNCTION_ARGS)
 
 
 /*
- * remove_node removes the given node from the monitor.
+ * remove_node is not supported anymore, but we might want to be able to have
+ * the pgautofailover.so for 1.1 co-exists with the SQL definitions for 1.0 at
+ * least during an upgrade, or to test upgrades.
  */
 Datum
 remove_node(PG_FUNCTION_ARGS)
+{
+	ereport(ERROR,
+			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+			 errmsg("pgautofailover.remove_node is no longer supported")));
+}
+
+
+/*
+ * remove_node removes the given node from the monitor.
+ */
+Datum
+remove_node_by_nodeid(PG_FUNCTION_ARGS)
+{
+	int32 nodeId = PG_GETARG_INT32(0);
+
+	AutoFailoverNode *currentNode = NULL;
+
+	checkPgAutoFailoverVersion();
+
+	currentNode = GetAutoFailoverNodeById(nodeId);
+
+	PG_RETURN_BOOL(RemoveNode(currentNode));
+}
+
+
+/*
+ * remove_node removes the given node from the monitor.
+ */
+Datum
+remove_node_by_host(PG_FUNCTION_ARGS)
 {
 	text *nodeHostText = PG_GETARG_TEXT_P(0);
 	char *nodeHost = text_to_cstring(nodeHostText);
 	int32 nodePort = PG_GETARG_INT32(1);
 
 	AutoFailoverNode *currentNode = NULL;
-	AutoFailoverNode *otherNode = NULL;
 
 	checkPgAutoFailoverVersion();
 
 	currentNode = GetAutoFailoverNode(nodeHost, nodePort);
+
+	PG_RETURN_BOOL(RemoveNode(currentNode));
+}
+
+
+/* RemoveNode removes the given node from the monitor. */
+static bool
+RemoveNode(AutoFailoverNode *currentNode)
+{
+	AutoFailoverNode *otherNode = NULL;
+
 	if (currentNode == NULL)
 	{
-		PG_RETURN_BOOL(false);
+		return false;
 	}
 
 	LockFormation(currentNode->formationId, ExclusiveLock);
 
 	otherNode = OtherNodeInGroup(currentNode);
 
-	RemoveAutoFailoverNode(nodeHost, nodePort);
+	RemoveAutoFailoverNode(currentNode);
 
 	if (otherNode != NULL)
 	{
 		ProceedGroupState(otherNode);
 	}
 
-	PG_RETURN_BOOL(true);
+	return true;
 }
 
 
@@ -1055,37 +1095,8 @@ perform_failover(PG_FUNCTION_ARGS)
 		primaryNode->nodeHost, primaryNode->nodePort,
 		secondaryNode->nodeHost, secondaryNode->nodePort);
 
-	SetNodeGoalState(primaryNode->nodeHost, primaryNode->nodePort,
-					 REPLICATION_STATE_DRAINING);
-
-	NotifyStateChange(primaryNode->reportedState,
-					  REPLICATION_STATE_DRAINING,
-					  primaryNode->formationId,
-					  primaryNode->groupId,
-					  primaryNode->nodeId,
-					  primaryNode->nodeHost,
-					  primaryNode->nodePort,
-					  primaryNode->pgsrSyncState,
-					  primaryNode->reportedLSN,
-					  primaryNode->candidatePriority,
-					  primaryNode->replicationQuorum,
-					  message);
-
-	SetNodeGoalState(secondaryNode->nodeHost, secondaryNode->nodePort,
-					 REPLICATION_STATE_PREPARE_PROMOTION);
-
-	NotifyStateChange(secondaryNode->reportedState,
-					  REPLICATION_STATE_PREPARE_PROMOTION,
-					  secondaryNode->formationId,
-					  secondaryNode->groupId,
-					  secondaryNode->nodeId,
-					  secondaryNode->nodeHost,
-					  secondaryNode->nodePort,
-					  secondaryNode->pgsrSyncState,
-					  secondaryNode->reportedLSN,
-					  secondaryNode->candidatePriority,
-					  secondaryNode->replicationQuorum,
-					  message);
+	SetNodeGoalState(primaryNode, REPLICATION_STATE_DRAINING, message);
+	SetNodeGoalState(secondaryNode, REPLICATION_STATE_PREPARE_PROMOTION, message);
 
 	PG_RETURN_VOID();
 }
@@ -1100,9 +1111,7 @@ perform_failover(PG_FUNCTION_ARGS)
 Datum
 start_maintenance(PG_FUNCTION_ARGS)
 {
-	text *nodeHostText = PG_GETARG_TEXT_P(0);
-	char *nodeHost = text_to_cstring(nodeHostText);
-	int32 nodePort = PG_GETARG_INT32(1);
+	int32 nodeId = PG_GETARG_INT32(0);
 
 	AutoFailoverNode *currentNode = NULL;
 	AutoFailoverNode *otherNode = NULL;
@@ -1114,7 +1123,7 @@ start_maintenance(PG_FUNCTION_ARGS)
 
 	checkPgAutoFailoverVersion();
 
-	currentNode = GetAutoFailoverNode(nodeHost, nodePort);
+	currentNode = GetAutoFailoverNodeById(nodeId);
 	if (currentNode == NULL)
 	{
 		PG_RETURN_BOOL(false);
@@ -1173,37 +1182,11 @@ start_maintenance(PG_FUNCTION_ARGS)
 			currentNode->nodeHost, currentNode->nodePort,
 			otherNode->nodeHost, otherNode->nodePort);
 
-		SetNodeGoalState(currentNode->nodeHost, currentNode->nodePort,
-						 REPLICATION_STATE_PREPARE_MAINTENANCE);
+		SetNodeGoalState(currentNode,
+						 REPLICATION_STATE_PREPARE_MAINTENANCE, message);
 
-		NotifyStateChange(currentNode->reportedState,
-						  REPLICATION_STATE_PREPARE_MAINTENANCE,
-						  currentNode->formationId,
-						  currentNode->groupId,
-						  currentNode->nodeId,
-						  currentNode->nodeHost,
-						  currentNode->nodePort,
-						  currentNode->pgsrSyncState,
-						  currentNode->reportedLSN,
-						  currentNode->candidatePriority,
-						  currentNode->replicationQuorum,
-						  message);
-
-		SetNodeGoalState(otherNode->nodeHost, otherNode->nodePort,
-						 REPLICATION_STATE_PREPARE_PROMOTION);
-
-		NotifyStateChange(otherNode->reportedState,
-						  REPLICATION_STATE_PREPARE_PROMOTION,
-						  otherNode->formationId,
-						  otherNode->groupId,
-						  otherNode->nodeId,
-						  otherNode->nodeHost,
-						  otherNode->nodePort,
-						  otherNode->pgsrSyncState,
-						  otherNode->reportedLSN,
-						  otherNode->candidatePriority,
-						  otherNode->replicationQuorum,
-						  message);
+		SetNodeGoalState(otherNode,
+						 REPLICATION_STATE_PREPARE_PROMOTION, message);
 	}
 	else if (IsStateIn(currentNode->reportedState, secondaryStates))
 	{
@@ -1214,37 +1197,8 @@ start_maintenance(PG_FUNCTION_ARGS)
 			otherNode->nodeHost, otherNode->nodePort,
 			currentNode->nodeHost, currentNode->nodePort);
 
-		SetNodeGoalState(otherNode->nodeHost, otherNode->nodePort,
-						 REPLICATION_STATE_WAIT_PRIMARY);
-
-		NotifyStateChange(otherNode->reportedState,
-						  REPLICATION_STATE_WAIT_PRIMARY,
-						  otherNode->formationId,
-						  otherNode->groupId,
-						  otherNode->nodeId,
-						  otherNode->nodeHost,
-						  otherNode->nodePort,
-						  otherNode->pgsrSyncState,
-						  otherNode->reportedLSN,
-						  otherNode->candidatePriority,
-						  otherNode->replicationQuorum,
-						  message);
-
-		SetNodeGoalState(currentNode->nodeHost, currentNode->nodePort,
-						 REPLICATION_STATE_WAIT_MAINTENANCE);
-
-		NotifyStateChange(currentNode->reportedState,
-						  REPLICATION_STATE_WAIT_MAINTENANCE,
-						  currentNode->formationId,
-						  currentNode->groupId,
-						  currentNode->nodeId,
-						  currentNode->nodeHost,
-						  currentNode->nodePort,
-						  currentNode->pgsrSyncState,
-						  currentNode->reportedLSN,
-						  currentNode->candidatePriority,
-						  currentNode->replicationQuorum,
-						  message);
+		SetNodeGoalState(otherNode, REPLICATION_STATE_WAIT_PRIMARY, message);
+		SetNodeGoalState(currentNode, REPLICATION_STATE_WAIT_MAINTENANCE, message);
 	}
 	else
 	{
@@ -1270,9 +1224,7 @@ start_maintenance(PG_FUNCTION_ARGS)
 Datum
 stop_maintenance(PG_FUNCTION_ARGS)
 {
-	text *nodeHostText = PG_GETARG_TEXT_P(0);
-	char *nodeHost = text_to_cstring(nodeHostText);
-	int32 nodePort = PG_GETARG_INT32(1);
+	int32 nodeId = PG_GETARG_INT32(0);
 
 	AutoFailoverNode *currentNode = NULL;
 	AutoFailoverNode *otherNode = NULL;
@@ -1281,7 +1233,7 @@ stop_maintenance(PG_FUNCTION_ARGS)
 
 	checkPgAutoFailoverVersion();
 
-	currentNode = GetAutoFailoverNode(nodeHost, nodePort);
+	currentNode = GetAutoFailoverNodeById(nodeId);
 	if (currentNode == NULL)
 	{
 		PG_RETURN_BOOL(false);
@@ -1324,21 +1276,7 @@ stop_maintenance(PG_FUNCTION_ARGS)
 		"after a user-initiated stop_maintenance call.",
 		currentNode->nodeHost, currentNode->nodePort);
 
-	SetNodeGoalState(currentNode->nodeHost, currentNode->nodePort,
-					 REPLICATION_STATE_CATCHINGUP);
-
-	NotifyStateChange(currentNode->reportedState,
-					  REPLICATION_STATE_CATCHINGUP,
-					  currentNode->formationId,
-					  currentNode->groupId,
-					  currentNode->nodeId,
-					  currentNode->nodeHost,
-					  currentNode->nodePort,
-					  currentNode->pgsrSyncState,
-					  currentNode->reportedLSN,
-					  currentNode->candidatePriority,
-					  currentNode->replicationQuorum,
-					  message);
+	SetNodeGoalState(currentNode, REPLICATION_STATE_CATCHINGUP, message);
 
 	PG_RETURN_BOOL(true);
 }
@@ -1439,35 +1377,10 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 			currentNode->candidatePriority,
 			currentNode->nodeHost, currentNode->nodePort);
 
-		SetNodeGoalState(primaryNode->nodeHost, primaryNode->nodePort,
-						 REPLICATION_STATE_APPLY_SETTINGS);
-
-		NotifyStateChange(primaryNode->reportedState,
-						  REPLICATION_STATE_APPLY_SETTINGS,
-						  primaryNode->formationId,
-						  primaryNode->groupId,
-						  primaryNode->nodeId,
-						  primaryNode->nodeHost,
-						  primaryNode->nodePort,
-						  primaryNode->pgsrSyncState,
-						  primaryNode->reportedLSN,
-						  primaryNode->candidatePriority,
-						  primaryNode->replicationQuorum,
-						  message);
+		SetNodeGoalState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS, message);
 	}
 
-	NotifyStateChange(currentNode->reportedState,
-					  currentNode->goalState,
-					  currentNode->formationId,
-					  currentNode->groupId,
-					  currentNode->nodeId,
-					  currentNode->nodeHost,
-					  currentNode->nodePort,
-					  currentNode->pgsrSyncState,
-					  currentNode->reportedLSN,
-					  currentNode->candidatePriority,
-					  currentNode->replicationQuorum,
-					  message);
+	NotifyStateChange(currentNode, message);
 
 	PG_RETURN_BOOL(true);
 }
@@ -1601,36 +1514,91 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 			currentNode->replicationQuorum ? "true" : "false",
 			currentNode->nodeHost, currentNode->nodePort);
 
-		SetNodeGoalState(primaryNode->nodeHost, primaryNode->nodePort,
-						 REPLICATION_STATE_APPLY_SETTINGS);
-
-		NotifyStateChange(primaryNode->reportedState,
-						  REPLICATION_STATE_APPLY_SETTINGS,
-						  primaryNode->formationId,
-						  primaryNode->groupId,
-						  primaryNode->nodeId,
-						  primaryNode->nodeHost,
-						  primaryNode->nodePort,
-						  primaryNode->pgsrSyncState,
-						  primaryNode->reportedLSN,
-						  primaryNode->candidatePriority,
-						  primaryNode->replicationQuorum,
-						  message);
+		SetNodeGoalState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS, message);
 	}
 
-	NotifyStateChange(currentNode->reportedState,
-					  currentNode->goalState,
-					  currentNode->formationId,
-					  currentNode->groupId,
-					  currentNode->nodeId,
-					  currentNode->nodeHost,
-					  currentNode->nodePort,
-					  currentNode->pgsrSyncState,
-					  currentNode->reportedLSN,
-					  currentNode->candidatePriority,
-					  currentNode->replicationQuorum,
-					  message);
+	NotifyStateChange(currentNode, message);
 
+	PG_RETURN_BOOL(true);
+}
+
+
+/*
+ * update_node_metadata allows to update a node's nodename, hostname, and port.
+ *
+ * The pg_autoctl client fetches the list of "other" nodes on each iteration
+ * and will take it from there that they need to update their HBA rules when
+ * the hostname has changed.
+ */
+Datum
+update_node_metadata(PG_FUNCTION_ARGS)
+{
+	int32 nodeid = 0;
+	char *nodeName = NULL;
+	char *nodeHost = NULL;
+	int32 nodePort = 0;
+
+	AutoFailoverNode *currentNode = NULL;
+
+	checkPgAutoFailoverVersion();
+
+	if (PG_ARGISNULL(0))
+	{
+		ereport(ERROR,
+				(errmsg("udpate_node_metadata requires a non-null nodeid")));
+	}
+	else
+	{
+		nodeid = PG_GETARG_INT32(0);
+	}
+
+	currentNode = GetAutoFailoverNodeById(nodeid);
+
+	if (currentNode == NULL)
+	{
+		ereport(ERROR, (errmsg("node %d is not registered", nodeid)));
+	}
+
+	LockFormation(currentNode->formationId, ShareLock);
+	LockNodeGroup(currentNode->formationId, currentNode->groupId, ExclusiveLock);
+
+	/*
+	 * When arguments are NULL, replace them with the current value of the node
+	 * metadata, so that the UPDATE statement then is a noop on that field.
+	 */
+	if (PG_ARGISNULL(1))
+	{
+		nodeName = currentNode->nodeName;
+	}
+	else
+	{
+		text *nodeNameText = PG_GETARG_TEXT_P(1);
+
+		nodeName = text_to_cstring(nodeNameText);
+	}
+
+	if (PG_ARGISNULL(2))
+	{
+		nodeHost = currentNode->nodeHost;
+	}
+	else
+	{
+		text *nodeHostText = PG_GETARG_TEXT_P(2);
+
+		nodeHost = text_to_cstring(nodeHostText);
+	}
+
+	if (PG_ARGISNULL(3))
+	{
+		nodePort = currentNode->nodePort;
+	}
+	else
+	{
+		nodePort = PG_GETARG_INT32(3);
+	}
+
+	UpdateAutoFailoverNodeMetadata(currentNode->nodeId,
+								   nodeName, nodeHost, nodePort);
 	PG_RETURN_BOOL(true);
 }
 

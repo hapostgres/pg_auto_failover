@@ -626,21 +626,7 @@ set_formation_number_sync_standbys(PG_FUNCTION_ARGS)
 		formation->number_sync_standbys,
 		formation->formationId);
 
-	SetNodeGoalState(primaryNode->nodeHost, primaryNode->nodePort,
-					 REPLICATION_STATE_APPLY_SETTINGS);
-
-	NotifyStateChange(primaryNode->reportedState,
-					  REPLICATION_STATE_APPLY_SETTINGS,
-					  primaryNode->formationId,
-					  primaryNode->groupId,
-					  primaryNode->nodeId,
-					  primaryNode->nodeHost,
-					  primaryNode->nodePort,
-					  primaryNode->pgsrSyncState,
-					  primaryNode->reportedLSN,
-					  primaryNode->candidatePriority,
-					  primaryNode->replicationQuorum,
-					  message);
+	SetNodeGoalState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS, message);
 
 	PG_RETURN_BOOL(success);
 }

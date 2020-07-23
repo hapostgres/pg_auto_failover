@@ -92,7 +92,8 @@ CommandLine create_postgres_command =
 		"  --listen          PostgreSQL's listen_addresses\n"
 		"  --username        PostgreSQL's username\n"
 		"  --dbname          PostgreSQL's database name\n"
-		"  --hostname        pg_auto_failover node\n"
+		"  --name            pg_auto_failover node name\n"
+		"  --hostname        hostname used to connect from the other nodes\n"
 		"  --formation       pg_auto_failover formation\n"
 		"  --monitor         pg_auto_failover Monitor Postgres URL\n"
 		"  --auth            authentication method for connections from monitor\n"
@@ -218,6 +219,7 @@ cli_create_postgres_getopts(int argc, char **argv)
 		{ "auth", required_argument, NULL, 'A' },
 		{ "skip-pg-hba", no_argument, NULL, 'S' },
 		{ "dbname", required_argument, NULL, 'd' },
+		{ "name", required_argument, NULL, 'a' },
 		{ "hostname", required_argument, NULL, 'n' },
 		{ "formation", required_argument, NULL, 'f' },
 		{ "monitor", required_argument, NULL, 'm' },
@@ -242,7 +244,7 @@ cli_create_postgres_getopts(int argc, char **argv)
 
 	int optind =
 		cli_create_node_getopts(argc, argv, long_options,
-								"C:D:H:p:l:U:A:Sd:n:f:m:MRVvqhP:r:xsN",
+								"C:D:H:p:l:U:A:Sd:a:n:f:m:MRVvqhP:r:xsN",
 								&options);
 
 	/* publish our option parsing in the global variable */

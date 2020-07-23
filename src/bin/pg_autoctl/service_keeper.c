@@ -611,8 +611,6 @@ keeper_node_active(Keeper *keeper)
 	 */
 	if (!monitor_node_active(monitor,
 							 config->formation,
-							 config->hostname,
-							 config->pgSetup.pgport,
 							 keeperState->current_node_id,
 							 keeperState->current_group,
 							 keeperState->current_role,

@@ -97,6 +97,7 @@ CREATE TABLE pgautofailover.node
     formationid          text not null default 'default',
     nodeid               bigserial,
     groupid              int not null,
+    nodename             text not null,
     nodehost             text not null,
     nodeport             int not null,
     sysidentifier        bigint,
@@ -113,6 +114,9 @@ CREATE TABLE pgautofailover.node
     candidatepriority	 int not null default 100,
     replicationquorum	 bool not null default true,
 
+    -- node names must be unique in a given formation
+    UNIQUE (formationid, nodename),
+    -- any nodehost:port can only be a unique node in the system
     UNIQUE (nodehost, nodeport),
     --
     -- The EXCLUDE constraint only allows the same sysidentifier for all the
@@ -143,6 +147,7 @@ CREATE TABLE pgautofailover.event
     formationid       text not null,
     nodeid            bigint not null,
     groupid           int not null,
+    nodename          text not null,
     nodehost          text not null,
     nodeport          integer not null,
     reportedstate     pgautofailover.replication_state not null,
@@ -158,51 +163,46 @@ CREATE TABLE pgautofailover.event
 
 GRANT SELECT ON ALL TABLES IN SCHEMA pgautofailover TO autoctl_node;
 
-CREATE FUNCTION pgautofailover.set_node_nodehost
- (
-    IN node_id   bigint,
-    IN node_name text,
-   OUT node_id   bigint,
-   OUT name      text,
-   OUT port      int
- )
-RETURNS record LANGUAGE SQL STRICT SECURITY DEFINER
-AS $$
-      update pgautofailover.node
-         set nodehost = node_name
-       where nodeid = node_id
-   returning nodeid, nodehost, nodeport;
-$$;
-
-grant execute on function pgautofailover.set_node_nodehost(bigint,text)
-   to autoctl_node;
-
 CREATE FUNCTION pgautofailover.set_node_system_identifier
  (
     IN node_id             bigint,
     IN node_sysidentifier  bigint,
-   OUT node_id             bigint,
-   OUT name                text,
-   OUT port                int
+   OUT node_id          bigint,
+   OUT node_name        text,
+   OUT node_host        text,
+   OUT node_port        int
  )
 RETURNS record LANGUAGE SQL STRICT SECURITY DEFINER
 AS $$
       update pgautofailover.node
          set sysidentifier = node_sysidentifier
-       where nodeid = node_id
-   returning nodeid, nodehost, nodeport;
+       where nodeid = set_node_system_identifier.node_id
+   returning nodeid, nodename, nodehost, nodeport;
 $$;
 
-grant execute on function pgautofailover.set_node_nodehost(bigint,text)
+grant execute on function pgautofailover.set_node_system_identifier(bigint,bigint)
    to autoctl_node;
 
+CREATE FUNCTION pgautofailover.update_node_metadata
+  (
+     IN node_id   bigint,
+     IN node_name text,
+     IN node_host text,
+     IN node_port int
+  )
+ RETURNS boolean LANGUAGE C SECURITY DEFINER
+ AS 'MODULE_PATHNAME', $$update_node_metadata$$;
+
+grant execute on function pgautofailover.update_node_metadata(bigint,text,text,int)
+   to autoctl_node;
 
 CREATE FUNCTION pgautofailover.register_node
  (
     IN formation_id         text,
-    IN node_name            text,
+    IN node_host            text,
     IN node_port            int,
     IN dbname               name,
+    IN node_name            text default '',
     IN sysidentifier        bigint default 0,
     IN desired_group_id     int default -1,
     IN initial_group_role   pgautofailover.replication_state default 'init',
@@ -219,17 +219,15 @@ RETURNS record LANGUAGE C STRICT SECURITY DEFINER
 AS 'MODULE_PATHNAME', $$register_node$$;
 
 grant execute on function
-      pgautofailover.register_node(text,text,int,name,bigint,int,pgautofailover.replication_state,text, int, bool)
+      pgautofailover.register_node(text,text,int,name,text,bigint,int,pgautofailover.replication_state,text, int, bool)
    to autoctl_node;
 
 
 CREATE FUNCTION pgautofailover.node_active
  (
     IN formation_id           		text,
-    IN node_name              		text,
-    IN node_port              		int,
-    IN current_node_id        		int default -1,
-    IN current_group_id       		int default -1,
+    IN node_id        		        int,
+    IN group_id       		        int,
     IN current_group_role     		pgautofailover.replication_state default 'init',
     IN current_pg_is_running  		bool default true,
     IN current_lsn			  		pg_lsn default '0/0',
@@ -244,7 +242,7 @@ RETURNS record LANGUAGE C STRICT SECURITY DEFINER
 AS 'MODULE_PATHNAME', $$node_active$$;
 
 grant execute on function
-      pgautofailover.node_active(text,text,int,int,int,
+      pgautofailover.node_active(text,int,int,
                           pgautofailover.replication_state,bool,pg_lsn,text)
    to autoctl_node;
 
@@ -254,6 +252,7 @@ CREATE FUNCTION pgautofailover.get_nodes
     IN group_id         int default NULL,
    OUT node_id          int,
    OUT node_name        text,
+   OUT node_host        text,
    OUT node_port        int,
    OUT node_lsn         pg_lsn,
    OUT node_is_primary  bool
@@ -273,6 +272,7 @@ CREATE FUNCTION pgautofailover.get_primary
     IN group_id          int default 0,
    OUT primary_node_id   int,
    OUT primary_name      text,
+   OUT primary_host      text,
    OUT primary_port      int
  )
 RETURNS record LANGUAGE C STRICT SECURITY DEFINER
@@ -290,6 +290,7 @@ CREATE FUNCTION pgautofailover.get_other_nodes
     IN node_port        int,
    OUT node_id          int,
    OUT node_name        text,
+   OUT node_host        text,
    OUT node_port        int,
    OUT node_lsn         pg_lsn,
    OUT node_is_primary  bool
@@ -310,6 +311,7 @@ CREATE FUNCTION pgautofailover.get_other_nodes
     IN current_state    pgautofailover.replication_state,
    OUT node_id          int,
    OUT node_name        text,
+   OUT node_host        text,
    OUT node_port        int,
    OUT node_lsn         pg_lsn,
    OUT node_is_primary  bool
@@ -328,7 +330,7 @@ grant execute on function pgautofailover.get_other_nodes
 CREATE FUNCTION pgautofailover.get_coordinator
  (
     IN formation_id  text default 'default',
-   OUT node_name     text,
+   OUT node_host     text,
    OUT node_port     int
  )
 RETURNS SETOF record LANGUAGE SQL STRICT
@@ -347,11 +349,24 @@ grant execute on function pgautofailover.get_coordinator(text)
 
 CREATE FUNCTION pgautofailover.remove_node
  (
-   node_name text,
+   node_id int
+ )
+RETURNS bool LANGUAGE C STRICT SECURITY DEFINER
+AS 'MODULE_PATHNAME', $$remove_node_by_nodeid$$;
+
+comment on function pgautofailover.remove_node(int)
+        is 'remove a node from the monitor';
+
+grant execute on function pgautofailover.remove_node(int)
+   to autoctl_node;
+
+CREATE FUNCTION pgautofailover.remove_node
+ (
+   node_host text,
    node_port int default 5432
  )
 RETURNS bool LANGUAGE C STRICT SECURITY DEFINER
-AS 'MODULE_PATHNAME', $$remove_node$$;
+AS 'MODULE_PATHNAME', $$remove_node_by_host$$;
 
 comment on function pgautofailover.remove_node(text,int)
         is 'remove a node from the monitor';
@@ -373,32 +388,24 @@ comment on function pgautofailover.perform_failover(text,int)
 grant execute on function pgautofailover.perform_failover(text,int)
    to autoctl_node;
 
-CREATE FUNCTION pgautofailover.start_maintenance
- (
-   node_name text,
-   node_port int default 5432
- )
+CREATE FUNCTION pgautofailover.start_maintenance(node_id int)
 RETURNS bool LANGUAGE C STRICT SECURITY DEFINER
 AS 'MODULE_PATHNAME', $$start_maintenance$$;
 
-comment on function pgautofailover.start_maintenance(text,int)
+comment on function pgautofailover.start_maintenance(int)
         is 'set a node in maintenance state';
 
-grant execute on function pgautofailover.start_maintenance(text,int)
+grant execute on function pgautofailover.start_maintenance(int)
    to autoctl_node;
 
-CREATE FUNCTION pgautofailover.stop_maintenance
- (
-   node_name text,
-   node_port int default 5432
- )
+CREATE FUNCTION pgautofailover.stop_maintenance(node_id int)
 RETURNS bool LANGUAGE C STRICT SECURITY DEFINER
 AS 'MODULE_PATHNAME', $$stop_maintenance$$;
 
-comment on function pgautofailover.stop_maintenance(text,int)
+comment on function pgautofailover.stop_maintenance(int)
         is 'set a node out of maintenance state';
 
-grant execute on function pgautofailover.stop_maintenance(text,int)
+grant execute on function pgautofailover.stop_maintenance(int)
    to autoctl_node;
 
 CREATE FUNCTION pgautofailover.last_events
@@ -410,9 +417,10 @@ AS $$
 with last_events as
 (
   select eventid, eventtime, formationid,
-         nodeid, groupid, nodehost, nodeport,
+         nodeid, groupid, nodename, nodehost, nodeport,
          reportedstate, goalstate,
-         reportedrepstate, reportedlsn, candidatepriority, replicationquorum, description
+         reportedrepstate, reportedlsn,
+         candidatepriority, replicationquorum, description
     from pgautofailover.event
 order by eventid desc
    limit count
@@ -433,9 +441,10 @@ AS $$
 with last_events as
 (
     select eventid, eventtime, formationid,
-           nodeid, groupid, nodehost, nodeport,
+           nodeid, groupid, nodename, nodehost, nodeport,
            reportedstate, goalstate,
-           reportedrepstate, reportedlsn, candidatepriority, replicationquorum, description
+           reportedrepstate, reportedlsn,
+           candidatepriority, replicationquorum, description
       from pgautofailover.event
      where formationid = formation_id
   order by eventid desc
@@ -458,9 +467,10 @@ AS $$
 with last_events as
 (
     select eventid, eventtime, formationid,
-           nodeid, groupid, nodehost, nodeport,
+           nodeid, groupid, nodename, nodehost, nodeport,
            reportedstate, goalstate,
-           reportedrepstate, reportedlsn, candidatepriority, replicationquorum, description
+           reportedrepstate, reportedlsn,
+           candidatepriority, replicationquorum, description
       from pgautofailover.event
      where formationid = formation_id
        and groupid = group_id
@@ -476,6 +486,7 @@ comment on function pgautofailover.last_events(text,int,int)
 CREATE FUNCTION pgautofailover.current_state
  (
     IN formation_id         text default 'default',
+   OUT nodename             text,
    OUT nodehost             text,
    OUT nodeport             int,
    OUT group_id             int,
@@ -487,10 +498,11 @@ CREATE FUNCTION pgautofailover.current_state
  )
 RETURNS SETOF record LANGUAGE SQL STRICT
 AS $$
-   select nodehost, nodeport, groupid, nodeid, reportedstate, goalstate,
-   		candidatepriority, replicationquorum
-   from pgautofailover.node
-   where formationid = formation_id
+   select nodename, nodehost, nodeport, groupid, nodeid,
+          reportedstate, goalstate,
+   		  candidatepriority, replicationquorum
+     from pgautofailover.node
+    where formationid = formation_id
  order by groupid, nodeid;
 $$;
 
@@ -501,6 +513,7 @@ CREATE FUNCTION pgautofailover.current_state
  (
     IN formation_id         text,
     IN group_id             int,
+   OUT nodename             text,
    OUT nodehost             text,
    OUT nodeport             int,
    OUT group_id             int,
@@ -512,10 +525,11 @@ CREATE FUNCTION pgautofailover.current_state
  )
 RETURNS SETOF record LANGUAGE SQL STRICT
 AS $$
-   select nodehost, nodeport, groupid, nodeid, reportedstate, goalstate,
+   select nodename, nodehost, nodeport, groupid, nodeid,
+          reportedstate, goalstate,
    		  candidatepriority, replicationquorum
-   from pgautofailover.node
-   where formationid = formation_id
+     from pgautofailover.node
+    where formationid = formation_id
       and groupid = group_id
  order by groupid, nodeid;
 $$;

@@ -479,8 +479,6 @@ cli_do_monitor_node_active(int argc, char **argv)
 
 	if (!monitor_node_active(&keeper.monitor,
 							 config.formation,
-							 config.hostname,
-							 config.pgSetup.pgport,
 							 keeper.state.current_node_id,
 							 keeper.state.current_group,
 							 keeper.state.current_role,

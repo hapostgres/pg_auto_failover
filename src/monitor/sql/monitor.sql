@@ -10,8 +10,10 @@ select *
   from pgautofailover.register_node('default', 'localhost', 9877, 'postgres');
 
 select *
-  from pgautofailover.node_active('default', 'localhost', 9876,
-                                  current_group_role => 'single');
+  from pgautofailover.set_node_system_identifier(1, 6852685710417058800);
+
+select *
+  from pgautofailover.node_active('default', 1, 0, current_group_role => 'single');
 
 select *
   from pgautofailover.register_node('default', 'localhost', 9877, 'postgres');
@@ -39,7 +41,10 @@ select formationid, nodeid, groupid, nodehost, nodeport,
        goalstate, reportedstate, reportedpgisrunning, reportedrepstate
   from pgautofailover.node;
 
-select * from pgautofailover.node_active('default', 'localhost', 9877);
+select *
+  from pgautofailover.set_node_system_identifier(2, 6852685710417058800);
+
+select * from pgautofailover.node_active('default', 2, 0);
 
 -- should fail as there's no primary at this point
 select pgautofailover.perform_failover();

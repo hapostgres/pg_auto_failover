@@ -1191,6 +1191,7 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 
 	if (!monitor_register_node(monitor,
 							   config->formation,
+							   config->name,
 							   config->hostname,
 							   config->pgSetup.pgport,
 							   config->pgSetup.control.system_identifier,
@@ -1603,4 +1604,75 @@ diff_nodesArray(NodeAddressArray *previousNodesArray,
 			return;
 		}
 	}
+}
+
+
+/*
+ * keeper_set_node_metadata sets a new nodename for the current pg_autoctl node
+ * on the monitor. This node might be in an environment where you might get a
+ * new IP at reboot, such as in Kubernetes.
+ */
+bool
+keeper_set_node_metadata(Keeper *keeper, KeeperConfig *oldConfig)
+{
+	KeeperConfig *config = &(keeper->config);
+	KeeperStateData keeperState = { 0 };
+	int nodeId = -1;
+
+	if (!keeper_state_read(&keeperState, keeper->config.pathnames.state))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	nodeId = keeperState.current_node_id;
+
+	if (streq(oldConfig->name, config->name) &&
+		streq(oldConfig->hostname, config->hostname) &&
+		oldConfig->pgSetup.pgport == config->pgSetup.pgport)
+	{
+		log_trace("keeper_set_node_metadata: no changes");
+		return true;
+	}
+
+	if (!monitor_update_node_metadata(&(keeper->monitor),
+									  nodeId,
+									  keeper->config.name,
+									  keeper->config.hostname,
+									  keeper->config.pgSetup.pgport))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	if (!keeper_config_write_file(&(keeper->config)))
+	{
+		log_warn("This node nodename has been updated with nodename \"%s\", "
+				 "hostname \"%s\" and pgport %d on the monitor "
+				 "but could not be update in the local configuration file!",
+				 keeper->config.name,
+				 keeper->config.hostname,
+				 keeper->config.pgSetup.pgport);
+		return false;
+	}
+
+	if (strneq(oldConfig->name, config->name))
+	{
+		log_info("Node name is now \"%s\", used to be \"%s\"",
+				 config->name, oldConfig->name);
+	}
+
+	if (strneq(oldConfig->hostname, config->hostname))
+	{
+		log_info("Node hostname is now \"%s\", used to be \"%s\"",
+				 config->hostname, oldConfig->hostname);
+	}
+
+	if (oldConfig->pgSetup.pgport != config->pgSetup.pgport)
+	{
+		log_info("Node pgport is now %d, used to be %d",
+				 config->pgSetup.pgport, oldConfig->pgSetup.pgport);
+	}
+
+	return true;
 }
