@@ -160,7 +160,7 @@ debian_find_postgres_configuration_files(PostgresSetup *pgSetup,
 
 	pgConfigFiles->kind = PG_CONFIG_TYPE_UNKNOWN;
 
-	if (!pg_setup_pgdata_exists(pgSetup))
+	if (!pg_setup_pgdata_accessible(pgSetup))
 	{
 		return PG_CONFIG_TYPE_UNKNOWN;
 	}
@@ -500,14 +500,14 @@ initPostgresConfigFiles(const char *dirname,
 
 /*
  * postgresConfigFilesAllExist returns true when the three files that we track
- * all exit on the file system, per file_exists() test.
+ * all exit on the file system, per file_accessible() test.
  */
 static bool
 postgresConfigFilesAllExist(PostgresConfigFiles *pgConfigFiles)
 {
-	return file_exists(pgConfigFiles->conf) &&
-		   file_exists(pgConfigFiles->ident) &&
-		   file_exists(pgConfigFiles->hba);
+	return file_accessible(pgConfigFiles->conf) &&
+		   file_accessible(pgConfigFiles->ident) &&
+		   file_accessible(pgConfigFiles->hba);
 }
 
 

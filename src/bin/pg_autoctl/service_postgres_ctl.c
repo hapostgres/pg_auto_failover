@@ -270,7 +270,7 @@ service_postgres_ctl_loop(LocalPostgresServer *postgres)
 			}
 		}
 
-		if (pg_setup_pgdata_exists(pgSetup))
+		if (pg_setup_pgdata_accessible(pgSetup))
 		{
 			/*
 			 * If we have a PGDATA directory, now is a good time to initialize
@@ -317,12 +317,33 @@ service_postgres_ctl_loop(LocalPostgresServer *postgres)
 			bool missingPgdataIsOk = true;
 			bool postgresNotRunningIsOk = true;
 
-			if (pg_setup_init(&newPgSetup,
+			if (!pg_setup_init(&newPgSetup,
 							  pgSetup,
 							  missingPgdataIsOk,
-							  postgresNotRunningIsOk) &&
-				pg_setup_pgdata_exists(&newPgSetup) &&
-				pg_auto_failover_default_settings_file_exists(&newPgSetup))
+							  postgresNotRunningIsOk))
+			{
+				continue;
+			}
+
+			if (!pg_setup_pgdata_readable_writable(pgSetup))
+			{
+				/* this is not  going to be resolved by itself, bail out */
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
+
+			if (!pg_setup_pgdata_exists(&newPgSetup))
+			{
+				/* we might still get this*/
+				continue;
+			}
+
+			if (!pg_setup_pgdata_readable_writable(&newPgSetup))
+			{
+				/* this is not  going to be resolved by itself, bail out */
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
+
+			if (pg_auto_failover_default_settings_file_accessible(&newPgSetup))
 			{
 				*pgSetup = newPgSetup;
 			}
@@ -340,7 +361,7 @@ service_postgres_ctl_loop(LocalPostgresServer *postgres)
 		 * Adding to that, during the `pg_autoctl create postgres` phase we
 		 * also need to start Postgres and sometimes even restart it.
 		 */
-		if (pgStatusPathIsReady && file_exists(localStatus->pgStatusPath))
+		if (pgStatusPathIsReady && file_accessible(localStatus->pgStatusPath))
 		{
 			const char *filename = localStatus->pgStatusPath;
 
@@ -359,6 +380,7 @@ service_postgres_ctl_loop(LocalPostgresServer *postgres)
 				pgStatusPathIsReady = false;
 			}
 		}
+
 
 		pg_usleep(100 * 1000);  /* 100ms */
 	}

@@ -207,7 +207,7 @@ service_keeper_node_active_init(Keeper *keeper)
 	 * function cli_service_run calls into keeper_init(): we know that we could
 	 * read a keeper state file.
 	 */
-	if (!config->monitorDisabled && file_exists(config->pathnames.init))
+	if (!config->monitorDisabled && file_accessible(config->pathnames.init))
 	{
 		log_warn("The `pg_autoctl create` did not complete, completing now.");
 
@@ -765,7 +765,7 @@ reload_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 {
 	KeeperConfig *config = &(keeper->config);
 
-	if (file_exists(config->pathnames.config))
+	if (file_accessible(config->pathnames.config))
 	{
 		KeeperConfig newConfig = { 0 };
 

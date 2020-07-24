@@ -174,7 +174,7 @@ read_pidfile(const char *pidfile, pid_t *pid)
 	bool error = false;
 	int pidnum = 0;
 
-	if (!file_exists(pidfile))
+	if (!file_accessible(pidfile))
 	{
 		return false;
 	}
@@ -308,7 +308,7 @@ read_service_pidfile_version_strings(const char *pidfile,
 	int lineCount = 0;
 	int lineNumber;
 
-	if (!file_exists(pidfile))
+	if (!file_accessible(pidfile))
 	{
 		return false;
 	}

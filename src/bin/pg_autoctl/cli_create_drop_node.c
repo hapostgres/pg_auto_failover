@@ -141,7 +141,7 @@ cli_create_config(Keeper *keeper, KeeperConfig *config)
 	 *   - configuration exists already, we need PGDATA
 	 *   - configuration doesn't exist already, we need PGDATA, and more
 	 */
-	if (file_exists(config->pathnames.config))
+	if (file_accessible(config->pathnames.config))
 	{
 		KeeperConfig options = *config;
 
@@ -264,7 +264,7 @@ cli_create_postgres(int argc, char **argv)
 
 	keeper.config = keeperOptions;
 
-	if (!file_exists(keeper.config.pathnames.config))
+	if (!file_accessible(keeper.config.pathnames.config))
 	{
 		/* pg_autoctl create postgres: mark ourselves as a standalone node */
 		keeper.config.pgSetup.pgKind = NODE_KIND_STANDALONE;
@@ -612,7 +612,7 @@ cli_create_monitor_config(Monitor *monitor, MonitorConfig *config)
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
 
-	if (file_exists(config->pathnames.config))
+	if (file_accessible(config->pathnames.config))
 	{
 		MonitorConfig options = monitor->config;
 
@@ -901,7 +901,7 @@ cli_drop_node(int argc, char **argv)
 	 * implement "continue from previous failed attempt" when the configuration
 	 * file does not exists.
 	 */
-	if (!file_exists(config.pathnames.config))
+	if (!file_accessible(config.pathnames.config))
 	{
 		log_error("Failed to find expected configuration file \"%s\"",
 				  config.pathnames.config);
@@ -987,7 +987,7 @@ cli_drop_monitor(int argc, char **argv)
 	 * implement "continue from previous failed attempt" when the configuration
 	 * file does not exists.
 	 */
-	if (!file_exists(config.pathnames.config))
+	if (!file_accessible(config.pathnames.config))
 	{
 		log_error("Failed to find expected configuration file \"%s\"",
 				  config.pathnames.config);

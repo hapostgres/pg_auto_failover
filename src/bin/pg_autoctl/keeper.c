@@ -673,8 +673,8 @@ keeper_create_self_signed_cert(Keeper *keeper)
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 
 	if (pgSetup->ssl.createSelfSignedCert &&
-		!(file_exists(pgSetup->ssl.serverKey) &&
-		  file_exists(pgSetup->ssl.serverCert)))
+		!(file_accessible(pgSetup->ssl.serverKey) &&
+		  file_accessible(pgSetup->ssl.serverCert)))
 	{
 		if (!pg_create_self_signed_cert(pgSetup, config->hostname))
 		{
@@ -840,7 +840,7 @@ keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 							 pgSetup->pgdata,
 							 relativeConfPathName);
 
-		if (file_exists(upstreamConfPath))
+		if (file_accessible(upstreamConfPath))
 		{
 			if (!read_file(upstreamConfPath,
 						   &currentConfContents,

@@ -843,7 +843,7 @@ cli_enable_ssl(int argc, char **argv)
 				exit(EXIT_CODE_BAD_CONFIG);
 			}
 
-			if (file_exists(mconfig.pathnames.pid))
+			if (file_accessible(mconfig.pathnames.pid))
 			{
 				reloadedService = cli_pg_autoctl_reload(mconfig.pathnames.pid);
 
@@ -934,7 +934,7 @@ cli_enable_ssl(int argc, char **argv)
 				exit(EXIT_CODE_BAD_CONFIG);
 			}
 
-			if (file_exists(kconfig.pathnames.pid))
+			if (file_accessible(kconfig.pathnames.pid))
 			{
 				reloadedService = cli_pg_autoctl_reload(kconfig.pathnames.pid);
 
@@ -1022,8 +1022,8 @@ update_ssl_configuration(LocalPostgresServer *postgres, const char *hostname)
 	 * Postgres.
 	 */
 	if (pgSetup->ssl.createSelfSignedCert &&
-		(!file_exists(pgSetup->ssl.serverKey) ||
-		 !file_exists(pgSetup->ssl.serverCert)))
+		(!file_accessible(pgSetup->ssl.serverKey) ||
+		 !file_accessible(pgSetup->ssl.serverCert)))
 	{
 		if (!pg_create_self_signed_cert(pgSetup, hostname))
 		{

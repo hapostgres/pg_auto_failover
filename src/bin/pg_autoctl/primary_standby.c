@@ -115,7 +115,7 @@ local_postgres_set_status_path(LocalPostgresServer *postgres, bool unlink)
 	LocalExpectedPostgresStatus *pgStatus = &(postgres->expectedPgStatus);
 
 	/* normalize our PGDATA path when it exists on-disk already */
-	if (directory_exists(pgSetup->pgdata))
+	if (directory_accessible(pgSetup->pgdata))
 	{
 		/* normalize the existing path to PGDATA */
 		if (!normalize_filename(pgSetup->pgdata, pgSetup->pgdata, MAXPGPATH))
@@ -611,7 +611,7 @@ standby_init_database(LocalPostgresServer *postgres,
 	log_trace("standby_init_database");
 	log_info("Initialising PostgreSQL as a hot standby");
 
-	if (pg_setup_pgdata_exists(pgSetup) && pg_setup_is_running(pgSetup))
+	if (pg_setup_pgdata_accessible(pgSetup) && pg_setup_is_running(pgSetup))
 	{
 		log_info("Target directory exists: \"%s\", stopping PostgreSQL",
 				 pgSetup->pgdata);

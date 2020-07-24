@@ -42,7 +42,7 @@
 static bool pg_include_config(const char *configFilePath,
 							  const char *configIncludeLine,
 							  const char *configIncludeComment);
-static bool ensure_default_settings_file_exists(const char *configFilePath,
+static bool ensure_default_settings_file_accessible(const char *configFilePath,
 												GUC *settings,
 												PostgresSetup *pgSetup);
 static bool prepare_guc_settings_from_pgsetup(const char *configFilePath,
@@ -123,7 +123,7 @@ pg_controldata(PostgresSetup *pgSetup, bool missing_ok)
 	 * PGDATA/global/pg_control file exists on-disk: that's the first check
 	 * that pg_controldata does anyway.
 	 */
-	if (!file_exists(globalControlPath))
+	if (!file_accessible(globalControlPath))
 	{
 		return false;
 	}
@@ -267,7 +267,7 @@ pg_add_auto_failover_default_settings(PostgresSetup *pgSetup,
 	path_in_same_directory(configFilePath, AUTOCTL_DEFAULTS_CONF_FILENAME,
 						   pgAutoFailoverDefaultsConfigPath);
 
-	if (!ensure_default_settings_file_exists(pgAutoFailoverDefaultsConfigPath,
+	if (!ensure_default_settings_file_accessible(pgAutoFailoverDefaultsConfigPath,
 											 settings, pgSetup))
 	{
 		return false;
@@ -280,11 +280,11 @@ pg_add_auto_failover_default_settings(PostgresSetup *pgSetup,
 
 
 /*
- * pg_auto_failover_default_settings_file_exists returns true when our expected
+ * pg_auto_failover_default_settings_file_accessible returns true when our expected
  * postgresql-auto-failover.conf file exists in PGDATA.
  */
 bool
-pg_auto_failover_default_settings_file_exists(PostgresSetup *pgSetup)
+pg_auto_failover_default_settings_file_accessible(PostgresSetup *pgSetup)
 {
 	char pgAutoFailoverDefaultsConfigPath[MAXPGPATH] = { 0 };
 	char *contents = NULL;
@@ -296,7 +296,7 @@ pg_auto_failover_default_settings_file_exists(PostgresSetup *pgSetup)
 
 
 	/* make sure the file exists and is not empty (race conditions) */
-	if (!file_exists(pgAutoFailoverDefaultsConfigPath))
+	if (!file_accessible(pgAutoFailoverDefaultsConfigPath))
 	{
 		return false;
 	}
@@ -383,11 +383,11 @@ pg_include_config(const char *configFilePath,
 
 
 /*
- * ensure_default_settings_file_exists writes the postgresql-auto-failover.conf
+ * ensure_default_settings_file_accessible writes the postgresql-auto-failover.conf
  * file to the database directory.
  */
 static bool
-ensure_default_settings_file_exists(const char *configFilePath,
+ensure_default_settings_file_accessible(const char *configFilePath,
 									GUC *settings,
 									PostgresSetup *pgSetup)
 {
@@ -402,7 +402,7 @@ ensure_default_settings_file_exists(const char *configFilePath,
 		return false;
 	}
 
-	if (file_exists(configFilePath))
+	if (file_accessible(configFilePath))
 	{
 		char *currentDefaultConfContents = NULL;
 		long currentDefaultConfSize = 0L;
@@ -689,7 +689,7 @@ pg_basebackup(const char *pgdata,
 	}
 
 	/* replace $pgdata with the backup directory */
-	if (directory_exists(pgdata))
+	if (directory_accessible(pgdata))
 	{
 		if (!rmtree(pgdata, true))
 		{
@@ -1036,7 +1036,7 @@ pg_log_startup(const char *pgdata, int logLevel)
 	/* prepare PGDATA/log directory path */
 	join_path_components(pgLogDirPath, pgdata, "log");
 
-	if (!directory_exists(pgLogDirPath))
+	if (!directory_accessible(pgLogDirPath))
 	{
 		/* then there's no other log files to process here */
 		return true;
@@ -1168,7 +1168,7 @@ pg_ctl_stop(const char *pg_ctl, const char *pgdata)
 	 * Case 2. The data directory doesn't exist. So we assume PostgreSQL is
 	 * not running, so stopping the PostgreSQL server was successful.
 	 */
-	pgdata_exists = directory_exists(pgdata);
+	pgdata_exists = directory_accessible(pgdata);
 	if (!pgdata_exists)
 	{
 		log_info("pgdata \"%s\" does not exists, consider this as PostgreSQL "
@@ -1608,7 +1608,7 @@ pg_write_standby_signal(const char *pgdata,
 						   standbyConfigFilePath);
 
 	/* only logs about this the first time */
-	if (!file_exists(signalFilePath))
+	if (!file_accessible(signalFilePath))
 	{
 		log_info("Creating the standby signal file at \"%s\", "
 				 "and replication setup at \"%s\"",
@@ -1627,7 +1627,7 @@ pg_write_standby_signal(const char *pgdata,
 	 *
 	 * we pass NULL as pgSetup because we know it won't be used...
 	 */
-	if (!ensure_default_settings_file_exists(standbyConfigFilePath,
+	if (!ensure_default_settings_file_accessible(standbyConfigFilePath,
 											 standby_settings,
 											 NULL))
 	{

@@ -120,7 +120,7 @@ keeper_pg_init_and_register(Keeper *keeper)
 	 * instance that might exist or not at PGDATA.
 	 */
 	PostgresSetup *pgSetup = &(config->pgSetup);
-	bool postgresInstanceExists = pg_setup_pgdata_exists(pgSetup);
+	bool postgresInstanceExists = pg_setup_pgdata_accessible(pgSetup);
 	bool postgresInstanceIsRunning = pg_setup_is_running(pgSetup);
 	PostgresRole postgresRole = pg_setup_role(pgSetup);
 	bool postgresInstanceIsPrimary = postgresRole == POSTGRES_ROLE_PRIMARY;
@@ -139,12 +139,12 @@ keeper_pg_init_and_register(Keeper *keeper)
 	 * If we don't have a state file, we consider that we're initializing from
 	 * scratch and can move on, nothing to do here.
 	 */
-	if (file_exists(config->pathnames.init))
+	if (file_accessible(config->pathnames.init))
 	{
 		return keeper_pg_init_continue(keeper);
 	}
 
-	if (file_exists(config->pathnames.state))
+	if (file_accessible(config->pathnames.state))
 	{
 		if (createAndRun)
 		{

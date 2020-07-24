@@ -27,14 +27,15 @@
 
 
 /*
- * file_exists returns true if the given filename is known to exist
+ * file_accessible returns true if the given filename is known to exist
  * on the file system or false if it does not exists or in case of
  * error.
  */
 bool
-file_exists(const char *filename)
+file_accessible(const char *filename)
 {
 	bool exists = access(filename, F_OK) != -1;
+
 	if (!exists && errno != 0)
 	{
 		/*
@@ -48,16 +49,64 @@ file_exists(const char *filename)
 		{
 			log_error("Failed to check if file \"%s\" exists: %m", filename);
 		}
+
 		return false;
 	}
 
 	return exists;
 }
 
+bool file_exists(const char *filename)
+{
+	bool exists = access(filename, F_OK) != -1;
+
+	return exists;
+}
+
+bool
+file_is_readable_writable(const char *filename)
+{
+	bool readableWritable = access(filename, W_OK | R_OK) != -1;
+
+	if (errno == EACCES)
+	{
+		log_error("File is not readeable or writable \"%s\"", filename);
+	}
+
+	return readableWritable;
+}
+
+
 
 /*
- * directory_exists returns whether the given path is the name of a directory that
+ * directory_accessible returns whether the given path is the name of a directory that
  * exists on the file system or not.
+ */
+bool
+directory_accessible(const char *path)
+{
+	bool result = false;
+	struct stat info;
+
+	if (!file_accessible(path))
+	{
+		return false;
+	}
+
+	if (stat(path, &info) != 0)
+	{
+		log_error("Failed to stat \"%s\": %m\n", path);
+		return false;
+	}
+
+	result = (info.st_mode & S_IFMT) == S_IFDIR;
+	return result;
+}
+
+
+
+/*
+ * directory_exists
  */
 bool
 directory_exists(const char *path)
@@ -80,7 +129,6 @@ directory_exists(const char *path)
 	return result;
 }
 
-
 /*
  * ensure_empty_dir ensures that the given path points to an empty directory with
  * the given mode. If it fails to do so, it returns false.
@@ -92,7 +140,7 @@ ensure_empty_dir(const char *dirname, int mode)
 	char dirname_copy[MAXPGPATH];
 	strlcpy(dirname_copy, dirname, MAXPGPATH);
 
-	if (directory_exists(dirname))
+	if (directory_accessible(dirname))
 	{
 		if (!rmtree(dirname, true))
 		{
@@ -324,14 +372,14 @@ move_file(char *sourcePath, char *destinationPath)
 		return true;
 	}
 
-	if (!file_exists(sourcePath))
+	if (!file_accessible(sourcePath))
 	{
 		log_error("Failed to move file, source file \"%s\" does not exist.",
 				  sourcePath);
 		return false;
 	}
 
-	if (file_exists(destinationPath))
+	if (file_accessible(destinationPath))
 	{
 		log_error("Failed to move file, destination file \"%s\" already exists.",
 				  destinationPath);
@@ -391,7 +439,7 @@ duplicate_file(char *sourcePath, char *destinationPath)
 		return false;
 	}
 
-	if (file_exists(destinationPath))
+	if (file_accessible(destinationPath))
 	{
 		log_error("Failed to duplicate, destination file already exists : %s",
 				  destinationPath);
@@ -577,7 +625,7 @@ search_path(const char *filename, char ***result)
 		join_path_components(candidate, path, filename);
 		canonicalize_path(candidate);
 
-		if (file_exists(candidate))
+		if (file_accessible(candidate))
 		{
 			char *destinationString = stringSpace + resultSize * MAXPGPATH;
 			bool duplicated = false;
@@ -763,7 +811,7 @@ bool
 normalize_filename(const char *filename, char *dst, int size)
 {
 	/* normalize the path to the configuration file, if it exists */
-	if (file_exists(filename))
+	if (file_accessible(filename))
 	{
 		char realPath[PATH_MAX] = { 0 };
 

@@ -82,7 +82,7 @@ build_xdg_path(char *dst,
 		return false;
 	}
 
-	if (xdgType == XDG_RUNTIME && !directory_exists(xdg_topdir))
+	if (xdgType == XDG_RUNTIME && !directory_accessible(xdg_topdir))
 	{
 		strlcpy(xdg_topdir, "/tmp", MAXPGPATH);
 	}

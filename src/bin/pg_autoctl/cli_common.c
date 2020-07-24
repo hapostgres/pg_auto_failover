@@ -881,12 +881,12 @@ prepare_keeper_options(KeeperConfig *options)
 	 * filename from the PGDATA value. So we're going to go a little out of our
 	 * way and be helpful to the user.
 	 */
-	if (!file_exists(options->pathnames.config))
+	if (!file_accessible(options->pathnames.config))
 	{
 		log_fatal("Expected configuration file does not exists: \"%s\"",
 				  options->pathnames.config);
 
-		if (!directory_exists(options->pgSetup.pgdata))
+		if (!directory_accessible(options->pgSetup.pgdata))
 		{
 			log_warn("HINT: Check your PGDATA setting: \"%s\"",
 					 options->pgSetup.pgdata);
@@ -1207,7 +1207,7 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 	/*
 	 * Now also stop the pg_autoctl process.
 	 */
-	if (file_exists(config->pathnames.pid))
+	if (file_accessible(config->pathnames.pid))
 	{
 		pid_t pid = 0;
 
@@ -1226,7 +1226,7 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 	}
 
 	/* only keeper_remove when we still have a state file around */
-	if (file_exists(config->pathnames.state))
+	if (file_accessible(config->pathnames.state))
 	{
 		bool ignoreMonitorErrors = true;
 
@@ -1285,7 +1285,7 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 		log_warn("Configuration file \"%s\" has been preserved",
 				 config->pathnames.config);
 
-		if (directory_exists(config->pgSetup.pgdata))
+		if (directory_accessible(config->pgSetup.pgdata))
 		{
 			log_warn("Postgres Data Directory \"%s\" has been preserved",
 					 config->pgSetup.pgdata);
@@ -1321,7 +1321,7 @@ stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathnames,
 	/*
 	 * Only try to rm -rf PGDATA if we managed to stop PostgreSQL.
 	 */
-	if (directory_exists(pgSetup->pgdata))
+	if (directory_accessible(pgSetup->pgdata))
 	{
 		log_info("Removing \"%s\"", pgSetup->pgdata);
 

@@ -246,7 +246,7 @@ cli_config_check_pgsetup(PostgresSetup *pgSetup)
 	/* globalControlFilePath = $PGDATA/global/pg_control */
 	join_path_components(globalControlPath, pgSetup->pgdata, "global/pg_control");
 
-	if (!file_exists(globalControlPath))
+	if (!file_accessible(globalControlPath))
 	{
 		errors++;
 		log_error("postgresql.pgdata does not belong to a PostgreSQL cluster: "

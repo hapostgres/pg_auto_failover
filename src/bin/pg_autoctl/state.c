@@ -738,7 +738,7 @@ keeper_init_state_discover(KeeperStateInit *initState,
 	{
 		initState->pgInitState = PRE_INIT_STATE_RUNNING;
 	}
-	else if (pg_setup_pgdata_exists(pgSetup))
+	else if (pg_setup_pgdata_accessible(pgSetup))
 	{
 		initState->pgInitState = PRE_INIT_STATE_EXISTS;
 	}

@@ -36,7 +36,7 @@ bool pg_add_auto_failover_default_settings(PostgresSetup *pgSetup,
 										   char *configFilePath,
 										   GUC *settings);
 
-bool pg_auto_failover_default_settings_file_exists(PostgresSetup *pgSetup);
+bool pg_auto_failover_default_settings_file_accessible(PostgresSetup *pgSetup);
 
 bool pg_basebackup(const char *pgdata,
 				   const char *pg_ctl,

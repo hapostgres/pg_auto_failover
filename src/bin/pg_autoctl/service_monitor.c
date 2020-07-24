@@ -303,7 +303,7 @@ reload_configuration(Monitor *monitor)
 {
 	MonitorConfig *config = &(monitor->config);
 
-	if (file_exists(config->pathnames.config))
+	if (file_accessible(config->pathnames.config))
 	{
 		MonitorConfig newConfig = { 0 };
 		bool missingPgdataIsOk = true;

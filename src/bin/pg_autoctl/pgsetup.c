@@ -138,7 +138,7 @@ pg_setup_init(PostgresSetup *pgSetup,
 		}
 	}
 
-	if (!missing_pgdata_is_ok && !directory_exists(pgSetup->pgdata))
+	if (!missing_pgdata_is_ok && !directory_accessible(pgSetup->pgdata))
 	{
 		log_fatal("Database directory \"%s\" not found", pgSetup->pgdata);
 		return false;
@@ -151,7 +151,7 @@ pg_setup_init(PostgresSetup *pgSetup,
 		join_path_components(globalControlPath,
 							 pgSetup->pgdata, "global/pg_control");
 
-		if (!file_exists(globalControlPath))
+		if (!file_accessible(globalControlPath))
 		{
 			log_error("PGDATA exists but is not a Postgres directory, "
 					  "see above for details");
@@ -160,7 +160,7 @@ pg_setup_init(PostgresSetup *pgSetup,
 	}
 
 	/* get the real path of PGDATA now */
-	if (directory_exists(pgSetup->pgdata))
+	if (directory_accessible(pgSetup->pgdata))
 	{
 		if (!normalize_filename(pgSetup->pgdata, pgSetup->pgdata, MAXPGPATH))
 		{
@@ -437,7 +437,7 @@ get_pgpid(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk)
 
 	join_path_components(pidfile, pgSetup->pgdata, "postmaster.pid");
 
-	if (!file_exists(pidfile))
+	if (!file_accessible(pidfile))
 	{
 		if (!pgIsNotRunningIsOk)
 		{
@@ -825,8 +825,33 @@ pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 
 
 /*
- * pg_setup_pgdata_exists returns true when the pg_controldata probe was
+ * pg_setup_pgdata_accessible returns true when the pg_controldata probe was
  * susccessful.
+ */
+bool
+pg_setup_pgdata_accessible(PostgresSetup *pgSetup)
+{
+	char globalControlPath[MAXPGPATH] = { 0 };
+
+	/* make sure our cached value in pgSetup still makes sense */
+	if (!directory_accessible(pgSetup->pgdata))
+	{
+		return false;
+	}
+
+	/* globalControlFilePath = $PGDATA/global/pg_control */
+	join_path_components(globalControlPath, pgSetup->pgdata, "global/pg_control");
+
+	if (!file_accessible(globalControlPath))
+	{
+		return false;
+	}
+
+	return pgSetup->control.system_identifier != 0;
+}
+
+/*
+ * pg_setup_pgdata_exists
  */
 bool
 pg_setup_pgdata_exists(PostgresSetup *pgSetup)
@@ -847,12 +872,39 @@ pg_setup_pgdata_exists(PostgresSetup *pgSetup)
 		return false;
 	}
 
-	return pgSetup->control.system_identifier != 0;
+	return true;
 }
 
 
 /*
- * pg_setup_pgdata_exists returns true when the pg_controldata probe was
+ * pg_setup_pgdata_readable_writable returns true when the pg_controldata file can
+ * be read/written.
+ */
+bool
+pg_setup_pgdata_readable_writable(PostgresSetup *pgSetup)
+{
+	char globalControlPath[MAXPGPATH] = { 0 };
+
+	/* make sure our cached value in pgSetup still makes sense */
+	if (!directory_exists(pgSetup->pgdata))
+	{
+		return false;
+	}
+
+	/* globalControlFilePath = $PGDATA/global/pg_control */
+	join_path_components(globalControlPath, pgSetup->pgdata, "global/pg_control");
+
+	if (!file_is_readable_writable(globalControlPath))
+	{
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * pg_setup_pgdata_accessible returns true when the pg_controldata probe was
  * susccessful.
  */
 bool
@@ -880,7 +932,7 @@ pg_setup_is_ready(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk)
 	/* globalControlFilePath = $PGDATA/global/pg_control */
 	join_path_components(globalControlPath, pgSetup->pgdata, "global/pg_control");
 
-	if (!file_exists(globalControlPath))
+	if (!file_accessible(globalControlPath))
 	{
 		return false;
 	}
@@ -1231,7 +1283,7 @@ pg_setup_role(PostgresSetup *pgSetup)
 
 			join_path_components(recoverySignalPath, pgdata, "standby.signal");
 
-			if (file_exists(recoverySignalPath))
+			if (file_accessible(recoverySignalPath))
 			{
 				return POSTGRES_ROLE_STANDBY;
 			}
@@ -1282,7 +1334,7 @@ pg_setup_role(PostgresSetup *pgSetup)
 
 			join_path_components(filePath, pgdata, standbyFilesArray[pos]);
 
-			if (file_exists(filePath))
+			if (file_accessible(filePath))
 			{
 				return standbyRoleArray[pos];
 			}
@@ -1605,28 +1657,28 @@ pgsetup_validate_ssl_settings(PostgresSetup *pgSetup)
 		}
 
 		/* check that the given files exist */
-		if (!file_exists(ssl->serverCert))
+		if (!file_accessible(ssl->serverCert))
 		{
 			log_error("--server-cert file does not exist at \"%s\"",
 					  ssl->serverCert);
 			return false;
 		}
 
-		if (!file_exists(ssl->serverKey))
+		if (!file_accessible(ssl->serverKey))
 		{
 			log_error("--server-key file does not exist at \"%s\"",
 					  ssl->serverKey);
 			return false;
 		}
 
-		if (!IS_EMPTY_STRING_BUFFER(ssl->caFile) && !file_exists(ssl->caFile))
+		if (!IS_EMPTY_STRING_BUFFER(ssl->caFile) && !file_accessible(ssl->caFile))
 		{
 			log_error("--ssl-ca-file file does not exist at \"%s\"",
 					  ssl->caFile);
 			return false;
 		}
 
-		if (!IS_EMPTY_STRING_BUFFER(ssl->crlFile) && !file_exists(ssl->crlFile))
+		if (!IS_EMPTY_STRING_BUFFER(ssl->crlFile) && !file_accessible(ssl->crlFile))
 		{
 			log_error("--ssl-crl-file file does not exist at \"%s\"",
 					  ssl->crlFile);

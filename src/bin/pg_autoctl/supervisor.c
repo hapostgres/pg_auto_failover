@@ -860,7 +860,7 @@ supervisor_find_service_pid(const char *pidfile,
 	int lineCount = 0;
 	int lineNumber;
 
-	if (!file_exists(pidfile))
+	if (!file_accessible(pidfile))
 	{
 		return false;
 	}

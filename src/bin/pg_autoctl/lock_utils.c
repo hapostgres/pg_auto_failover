@@ -182,7 +182,7 @@ semaphore_cleanup(const char *pidfile)
 
 	char semIdString[BUFSIZE] = { 0 };
 
-	if (!file_exists(pidfile))
+	if (!file_accessible(pidfile))
 	{
 		return false;
 	}

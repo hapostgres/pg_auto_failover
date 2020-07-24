@@ -63,7 +63,7 @@ fsm_init_primary(Keeper *keeper)
 
 	KeeperStateInit *initState = &(keeper->initState);
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
-	bool postgresInstanceExists = pg_setup_pgdata_exists(pgSetup);
+	bool postgresInstanceExists = pg_setup_pgdata_accessible(pgSetup);
 	bool pgInstanceIsOurs = false;
 
 	log_info("Initialising postgres as a primary");
@@ -816,7 +816,7 @@ fsm_init_standby(Keeper *keeper)
 	 * remove our init file: then we need to pg_basebackup again to init a
 	 * standby.
 	 */
-	skipBaseBackup = file_exists(keeper->config.pathnames.init) &&
+	skipBaseBackup = file_accessible(keeper->config.pathnames.init) &&
 					 keeper->initState.pgInitState == PRE_INIT_STATE_EXISTS;
 
 	if (!standby_init_database(postgres, config->hostname, skipBaseBackup))

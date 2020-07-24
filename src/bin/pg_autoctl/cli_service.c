@@ -385,7 +385,7 @@ cli_service_status(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	if (!file_exists(pathnames->pid))
+	if (!file_accessible(pathnames->pid))
 	{
 		log_info("pg_autoctl pid file \"%s\" does not exists", pathnames->pid);
 

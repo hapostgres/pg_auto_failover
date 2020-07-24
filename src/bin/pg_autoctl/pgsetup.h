@@ -189,6 +189,8 @@ bool pg_setup_as_json(PostgresSetup *pgSetup, JSON_Value *js);
 
 bool pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 										  char *connectionString);
+bool pg_setup_pgdata_accessible(PostgresSetup *pgSetup);
+bool pg_setup_pgdata_readable_writable(PostgresSetup *pgSetup);
 bool pg_setup_pgdata_exists(PostgresSetup *pgSetup);
 bool pg_setup_is_running(PostgresSetup *pgSetup);
 PostgresRole pg_setup_role(PostgresSetup *pgSetup);
