@@ -123,6 +123,8 @@ extern bool AllNodesHaveSameCandidatePriority(List *groupNodeList);
 extern int CountStandbyCandidates(AutoFailoverNode *primaryNode,
 								  List *stateList);
 extern AutoFailoverNode * FindMostAdvancedStandby(List *groupNodeList);
+extern AutoFailoverNode * FindCandidateNodeBeingPromoted(List *groupNodeList);
+
 extern AutoFailoverNode * GetAutoFailoverNode(char *nodeHost, int nodePort);
 extern AutoFailoverNode * GetAutoFailoverNodeWithId(int nodeid,
 													char *nodeHost, int nodePort);

@@ -470,6 +470,36 @@ FindMostAdvancedStandby(List *groupNodeList)
 
 
 /*
+ * FindCandidateNodeBeingPromoted scans through the given groupNodeList and
+ * returns the first node found that IsBeingPromoted().
+ */
+AutoFailoverNode *
+FindCandidateNodeBeingPromoted(List *groupNodeList)
+{
+	ListCell *nodeCell = NULL;
+
+	foreach(nodeCell, groupNodeList)
+	{
+		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (node == NULL)
+		{
+			/* shouldn't happen */
+			ereport(ERROR, (errmsg("BUG: node is NULL")));
+		}
+
+		/* we might have a failover ongoing already */
+		if (IsBeingPromoted(node))
+		{
+			return node;
+		}
+	}
+
+	return NULL;
+}
+
+
+/*
  * pgautofailover_node_candidate_priority_compare
  *	  qsort comparator for sorting node lists by candidate priority
  */
