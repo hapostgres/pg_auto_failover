@@ -25,6 +25,9 @@
 #include "state.h"
 
 
+static bool keeper_state_check_postgres(Keeper *keeper,
+										PostgresControlData *control);
+
 static void diff_nodesArray(NodeAddressArray *previousNodesArray,
 							NodeAddressArray *currentNodesArray,
 							NodeAddressArray *diffNodesArray);
@@ -403,8 +406,7 @@ keeper_update_pg_state(Keeper *keeper)
 	LocalPostgresServer *postgres = &(keeper->postgres);
 	PGSQL *pgsql = &(postgres->sqlClient);
 
-	bool missingPgDataIsOk = false;
-	bool pg_is_not_running_is_ok = true;
+	bool pgIsNotRunningIsOk = true;
 
 	log_debug("Update local PostgreSQL state");
 
@@ -419,7 +421,7 @@ keeper_update_pg_state(Keeper *keeper)
 	 * When PostgreSQL is running, do some extra checks that are going to be
 	 * helpful to drive the keeper's FSM decision making.
 	 */
-	if (pg_setup_is_ready(pgSetup, pg_is_not_running_is_ok))
+	if (pg_setup_is_ready(pgSetup, pgIsNotRunningIsOk))
 	{
 		char connInfo[MAXCONNINFO];
 
@@ -466,52 +468,19 @@ keeper_update_pg_state(Keeper *keeper)
 			log_error("Failed to update the local Postgres metadata");
 			return false;
 		}
+
+		if (!keeper_state_check_postgres(keeper, &(pgSetup->control)))
+		{
+			log_error("Failed to update the local Postgres metadata, "
+					  "see above for details");
+			return false;
+		}
 	}
 	else
 	{
 		/* Postgres is not running. */
 		postgres->pgIsRunning = false;
-
-		/*
-		 * In some states, it's ok to not have a PostgreSQL data directory at
-		 * all.
-		 */
-		switch (keeperState->current_role)
-		{
-			case NO_STATE:
-			case INIT_STATE:
-			case WAIT_STANDBY_STATE:
-			case DEMOTED_STATE:
-			case DEMOTE_TIMEOUT_STATE:
-			case STOP_REPLICATION_STATE:
-			{
-				missingPgDataIsOk = true;
-				break;
-			}
-
-			default:
-			{
-				missingPgDataIsOk = false;
-				break;
-			}
-		}
-
-		if (!pg_setup_controldata(pgSetup, missingPgDataIsOk))
-		{
-			/* errors have already been logged */
-			return false;
-		}
 	}
-
-	/*
-	 * We got new control data from either running pg_controldata or connecting
-	 * to the local Postgres instance and running our
-	 * pgsql_get_postgres_metadata() SQL query. In either case we now need to
-	 * update our Keeper State with the control data values.
-	 */
-	keeperState->pg_control_version = pgSetup->control.pg_control_version;
-	keeperState->catalog_version_no = pgSetup->control.catalog_version_no;
-	keeperState->system_identifier = pgSetup->control.system_identifier;
 
 	/*
 	 * In some states, PostgreSQL isn't expected to be running, or not expected
@@ -566,6 +535,65 @@ keeper_update_pg_state(Keeper *keeper)
 			break;
 		}
 	}
+
+	return true;
+}
+
+
+/*
+ * keeper_state_check_postgres checks that the Postgres control data main
+ * properties are still as we expect them to be. At the moment we don't support
+ * Postgres minor and major upgrades, and we can't support the system
+ * identifier ever changing.
+ */
+static bool
+keeper_state_check_postgres(Keeper *keeper, PostgresControlData *control)
+{
+	KeeperStateData *keeperState = &(keeper->state);
+
+	/*
+	 * We got new control data from either running pg_controldata or connecting
+	 * to the local Postgres instance and running our
+	 * pgsql_get_postgres_metadata() SQL query. In either case we now need to
+	 * update our Keeper State with the control data values.
+	 */
+	if (keeperState->system_identifier != control->system_identifier &&
+		keeperState->system_identifier != 0)
+	{
+		/*
+		 * This is a physical replication deal breaker, so it's mighty
+		 * confusing to get that here. In the least, the keeper should get
+		 * initialized from scratch again, but basically, we don't know what we
+		 * are doing anymore.
+		 */
+		log_error("Unknown PostgreSQL system identifier: %" PRIu64 ", "
+																   "expected %" PRIu64,
+				  keeperState->system_identifier,
+				  control->system_identifier);
+		return false;
+	}
+
+	if (keeperState->pg_control_version != control->pg_control_version &&
+		keeperState->pg_control_version != 0)
+	{
+		/* Postgres minor upgrade happened */
+		log_warn("PostgreSQL version changed from %u to %u",
+				 keeperState->pg_control_version,
+				 control->pg_control_version);
+	}
+
+	if (keeperState->catalog_version_no != control->catalog_version_no &&
+		keeperState->catalog_version_no != 0)
+	{
+		/* Postgres major upgrade happened */
+		log_warn("PostgreSQL catalog version changed from %u to %u",
+				 keeperState->catalog_version_no,
+				 control->catalog_version_no);
+	}
+
+	keeperState->pg_control_version = control->pg_control_version;
+	keeperState->catalog_version_no = control->catalog_version_no;
+	keeperState->system_identifier = control->system_identifier;
 
 	return true;
 }
