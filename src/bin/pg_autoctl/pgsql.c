@@ -289,6 +289,13 @@ pgsql_finish(PGSQL *pgsql)
 		log_debug("Disconnecting from \"%s\"", pgsql->connectionString);
 		PQfinish(pgsql->connection);
 		pgsql->connection = NULL;
+
+		/*
+		 * When we fail to connect, on the way out we call pgsql_finish to
+		 * reset the connection to NULL. We still want the callers to be able
+		 * to inquire about our connection status, so refrain to reset the
+		 * status.
+		 */
 	}
 }
 
@@ -407,6 +414,8 @@ pgsql_open_connection(PGSQL *pgsql)
 					  connectionTypeToString(pgsql->connectionType),
 					  pgsql->connectionString);
 
+			pgsql->status = PG_CONNECTION_BAD;
+
 			pgsql_finish(pgsql);
 			return NULL;
 		}
@@ -421,6 +430,8 @@ pgsql_open_connection(PGSQL *pgsql)
 			return NULL;
 		}
 	}
+
+	pgsql->status = PG_CONNECTION_OK;
 
 	/* set the libpq notice receiver to integrate notifications as warnings. */
 	PQsetNoticeProcessor(pgsql->connection,
@@ -482,6 +493,7 @@ pgsql_retry_open_connection(PGSQL *pgsql, uint64_t startTime)
 			 pgsql->retryPolicy.attempts >= pgsql->retryPolicy.maxR))
 		{
 			(void) log_connection_error(pgsql->connection, LOG_ERROR);
+			pgsql->status = PG_CONNECTION_BAD;
 			pgsql_finish(pgsql);
 
 			log_error("Failed to connect to \"%s\" "
@@ -535,6 +547,7 @@ pgsql_retry_open_connection(PGSQL *pgsql, uint64_t startTime)
 					uint64_t now = time(NULL);
 
 					connectionOk = true;
+					pgsql->status = PG_CONNECTION_OK;
 
 					log_info("Successfully connected to \"%s\" "
 							 "after %d attempts in %d seconds.",
@@ -644,6 +657,7 @@ pgsql_retry_open_connection(PGSQL *pgsql, uint64_t startTime)
 	if (!connectionOk && pgsql->connection != NULL)
 	{
 		(void) log_connection_error(pgsql->connection, LOG_ERROR);
+		pgsql->status = PG_CONNECTION_BAD;
 		pgsql_finish(pgsql);
 
 		return false;

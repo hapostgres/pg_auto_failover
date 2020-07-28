@@ -95,12 +95,28 @@ typedef struct ConnectionRetryPolicy
 } ConnectionRetryPolicy;
 
 
+/*
+ * Allow higher level code to distinguish between failure to connect to the
+ * target Postgres service and failure to run a query or obtain the expected
+ * result. To that end we expose PQstatus() of the connection.
+ *
+ * We don't use the same enum values as in libpq because we want to have the
+ * unknown value when we didn't try to connect yet.
+ */
+typedef enum
+{
+	PG_CONNECTION_UNKNOWN = 0,
+	PG_CONNECTION_OK,
+	PG_CONNECTION_BAD
+} PGConnStatus;
+
 typedef struct PGSQL
 {
 	ConnectionType connectionType;
 	char connectionString[MAXCONNINFO];
 	PGconn *connection;
 	ConnectionRetryPolicy retryPolicy;
+	PGConnStatus status;
 } PGSQL;
 
 
