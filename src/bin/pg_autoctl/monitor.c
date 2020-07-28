@@ -531,15 +531,15 @@ monitor_get_most_advanced_standby(Monitor *monitor,
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
-		"SELECT nodeid, nodename, nodeport, reportedlsn, false "
-		" FROM pgautofailover.node "
-		"WHERE formation = $1 AND groupid = $2 AND reportedstate = 'report_lsn' "
-		"ORDER BY reportedlsn DESC"
-		"LIMIT 1";
+		"SELECT * FROM pgautofailover.get_most_advanced_standby($1, $2)";
 	int paramCount = 2;
 	Oid paramTypes[2] = { TEXTOID, INT4OID };
 	const char *paramValues[2];
-	NodeAddressParseContext parseContext = { { 0 }, node, false };
+
+	/* we expect a single entry */
+	NodeAddressArray nodeArray = { 0 };
+	NodeAddressArrayParseContext parseContext = { { 0 }, &nodeArray, false };
+
 	IntString groupIdString = intToString(groupId);
 
 	paramValues[0] = formation;
@@ -547,7 +547,7 @@ monitor_get_most_advanced_standby(Monitor *monitor,
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
-								   &parseContext, parseNodeResult))
+								   &parseContext, parseNodeArray))
 	{
 		log_error(
 			"Failed to get most advanced standby node in the HA group "
@@ -560,7 +560,7 @@ monitor_get_most_advanced_standby(Monitor *monitor,
 	/* disconnect from PostgreSQL now */
 	pgsql_finish(&monitor->pgsql);
 
-	if (!parseContext.parsedOK)
+	if (!parseContext.parsedOK || nodeArray.count != 1)
 	{
 		log_error(
 			"Failed to get the most advanced standby node from the monitor "
@@ -570,6 +570,9 @@ monitor_get_most_advanced_standby(Monitor *monitor,
 			sql, formation, groupId);
 		return false;
 	}
+
+	/* copy the node we retrieved in the expected place */
+	*node = nodeArray.nodes[0];
 
 	log_debug("The most advanced standby node is %s:%d, with id %d",
 			  node->host, node->port, node->nodeId);

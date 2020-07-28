@@ -35,6 +35,18 @@
 #include "utils/timestamp.h"
 
 
+/*
+ * To communicate with the BuildCandidateList function, it's easier to handle a
+ * structure with those bits of information to share:
+ */
+typedef struct CandidateList
+{
+	List *candidateNodesGroupList;
+	int candidateCount;
+	int waitingForReportedLSN;
+} CandidateList;
+
+
 /* private function forward declarations */
 static bool ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode);
 static bool ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
@@ -42,8 +54,8 @@ static bool ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 static bool ProceedWithMSFailover(AutoFailoverNode *activeNode,
 								  AutoFailoverNode *candidateNode);
 
-static List * BuildCandidateList(List *standbyNodesGroupList,
-								 int *waitingForReportedLSN);
+static bool BuildCandidateList(List *standbyNodesGroupList,
+							   CandidateList *candidateList);
 
 static AutoFailoverNode * SelectFailoverCandidateNode(List *candidateNodesGroupList,
 													  AutoFailoverNode *mostAdvancedNode,
@@ -134,6 +146,22 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	/* Multiple Standby failover is handled in its own function. */
 	if (nodesCount > 2 && IsUnhealthy(primaryNode))
 	{
+		/* stop replication from the primary and proceed with replacement */
+		if (IsInPrimaryState(primaryNode))
+		{
+			char message[BUFSIZE] = { 0 };
+
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of node %d (%s:%d) to draining "
+				"after it became unhealthy.",
+				primaryNode->nodeId,
+				primaryNode->nodeHost,
+				primaryNode->nodePort);
+
+			AssignGoalState(primaryNode, REPLICATION_STATE_DRAINING, message);
+		}
+
 		/*
 		 * ProceedGroupStateForMSFailover chooses the failover candidate when
 		 * there's more than one standby node around, by applying the
@@ -731,7 +759,7 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 							   AutoFailoverNode *primaryNode)
 {
 	List *standbyNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
-	List *candidateNodesGroupList = NIL;
+	CandidateList candidateList = { 0 };
 
 	/*
 	 * Done with the single standby code path, now we have several standby
@@ -744,9 +772,6 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 	AutoFailoverNode *candidateNode =
 		FindCandidateNodeBeingPromoted(standbyNodesGroupList);
 
-	int candidateCount = 0;
-	int waitingForReportedLSN = 0;
-
 	/*
 	 * If a failover is in progress, continue driving it.
 	 */
@@ -756,23 +781,6 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 			 candidateNode->nodeId,
 			 candidateNode->nodeHost,
 			 candidateNode->nodePort);
-
-		/* shut down the primary, known unhealthy (see pre-conditions) */
-		if (IsInPrimaryState(primaryNode))
-		{
-			char message[BUFSIZE];
-
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Setting goal state of node %d (%s:%d) to draining "
-				"after it became unhealthy. We count %d failover candidates",
-				primaryNode->nodeId,
-				primaryNode->nodeHost,
-				primaryNode->nodePort,
-				candidateCount);
-
-			AssignGoalState(primaryNode, REPLICATION_STATE_DRAINING, message);
-		}
 
 		return ProceedWithMSFailover(activeNode, candidateNode);
 	}
@@ -796,31 +804,7 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 	 * different candidateNodesGroupList in which every node has reported their
 	 * LSN position, allowing progress to be made.
 	 */
-	candidateNodesGroupList =
-		BuildCandidateList(standbyNodesGroupList, &waitingForReportedLSN);
-
-	candidateCount = list_length(candidateNodesGroupList);
-
-	/* shut down the primary as soon as possible */
-	if (candidateCount > 0)
-	{
-		/* shut down the primary, known unhealthy (see pre-conditions) */
-		if (IsInPrimaryState(primaryNode))
-		{
-			char message[BUFSIZE];
-
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Setting goal state of node %d (%s:%d) to draining "
-				"after it became unhealthy. We count %d failover candidates",
-				primaryNode->nodeId,
-				primaryNode->nodeHost,
-				primaryNode->nodePort,
-				candidateCount);
-
-			AssignGoalState(primaryNode, REPLICATION_STATE_DRAINING, message);
-		}
-	}
+	BuildCandidateList(standbyNodesGroupList, &candidateList);
 
 	/*
 	 * Time to select a candidate?
@@ -846,7 +830,7 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 	 *   should be able to account for that new global state and make progress:
 	 *   the now faulty standby will NOT be counted as candidate anymore.
 	 */
-	if (waitingForReportedLSN > 0)
+	if (candidateList.waitingForReportedLSN > 0)
 	{
 		char message[BUFSIZE];
 
@@ -855,7 +839,7 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 			"Failover still in progress after %d nodes reported their LSN "
 			"and we are waiting for %d nodes to report, "
 			"activeNode is %d (%s:%d) and reported state \"%s\"",
-			candidateCount, waitingForReportedLSN,
+			candidateList.candidateCount, candidateList.waitingForReportedLSN,
 			activeNode->nodeId, activeNode->nodeHost, activeNode->nodePort,
 			ReplicationStateGetName(activeNode->reportedState));
 
@@ -866,7 +850,7 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 	 * All the currently healthy standby nodes have reported their LSN, proceed
 	 * to find a node to failover to. Well, if we have at list one candidate.
 	 */
-	if (candidateCount > 0)
+	if (candidateList.candidateCount > 0)
 	{
 		/* find the standby node that has the most advanced LSN */
 		AutoFailoverNode *mostAdvancedNode =
@@ -874,7 +858,7 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 
 		/* select a node to failover to */
 		AutoFailoverNode *selectedNode =
-			SelectFailoverCandidateNode(candidateNodesGroupList,
+			SelectFailoverCandidateNode(candidateList.candidateNodesGroupList,
 										mostAdvancedNode,
 										primaryNode);
 
@@ -893,7 +877,7 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 				"Failover still in progress after all %d candidate nodes "
 				"reported their LSN and we failed to select one of them; "
 				"activeNode is %d (%s:%d) and reported state \"%s\"",
-				candidateCount,
+				candidateList.candidateCount,
 				activeNode->nodeId, activeNode->nodeHost, activeNode->nodePort,
 				ReplicationStateGetName(activeNode->reportedState));
 
@@ -927,7 +911,7 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 				primaryNode->nodeId,
 				primaryNode->nodeHost,
 				primaryNode->nodePort,
-				candidateCount);
+				candidateList.candidateCount);
 
 			AssignGoalState(selectedNode,
 							REPLICATION_STATE_PREPARE_PROMOTION,
@@ -951,7 +935,7 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 				primaryNode->nodeId,
 				primaryNode->nodeHost,
 				primaryNode->nodePort,
-				candidateCount);
+				candidateList.candidateCount);
 
 			AssignGoalState(selectedNode,
 							REPLICATION_STATE_FAST_FORWARD, message);
@@ -968,8 +952,8 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
  * BuildCandidateList builds the list of current standby candidates that have
  * already reported their LSN, and sets
  */
-static List *
-BuildCandidateList(List *standbyNodesGroupList, int *waitingForReportedLSN)
+static bool
+BuildCandidateList(List *standbyNodesGroupList, CandidateList *candidateList)
 {
 	ListCell *nodeCell = NULL;
 	List *candidateNodesGroupList = NIL;
@@ -994,6 +978,9 @@ BuildCandidateList(List *standbyNodesGroupList, int *waitingForReportedLSN)
 			elog(LOG,
 				 "Skipping candidate node %d (%s:%d), which is unhealthy",
 				 node->nodeId, node->nodeHost, node->nodePort);
+
+			++(candidateList->waitingForReportedLSN);
+
 			continue;
 		}
 
@@ -1008,7 +995,7 @@ BuildCandidateList(List *standbyNodesGroupList, int *waitingForReportedLSN)
 		/* if REPORT LSN is assigned and not reached yet, count that */
 		if (node->goalState == REPLICATION_STATE_REPORT_LSN)
 		{
-			++(*waitingForReportedLSN);
+			++(candidateList->waitingForReportedLSN);
 
 			continue;
 		}
@@ -1022,7 +1009,7 @@ BuildCandidateList(List *standbyNodesGroupList, int *waitingForReportedLSN)
 		{
 			char message[BUFSIZE] = { 0 };
 
-			++(*waitingForReportedLSN);
+			++(candidateList->waitingForReportedLSN);
 
 			LogAndNotifyMessage(
 				message, BUFSIZE,
@@ -1036,7 +1023,10 @@ BuildCandidateList(List *standbyNodesGroupList, int *waitingForReportedLSN)
 		}
 	}
 
-	return candidateNodesGroupList;
+	candidateList->candidateNodesGroupList = candidateNodesGroupList;
+	candidateList->candidateCount = list_length(candidateNodesGroupList);
+
+	return true;
 }
 
 

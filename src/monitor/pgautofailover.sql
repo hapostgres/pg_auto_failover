@@ -348,6 +348,32 @@ $$;
 grant execute on function pgautofailover.get_coordinator(text)
    to autoctl_node;
 
+
+CREATE FUNCTION pgautofailover.get_most_advanced_standby
+ (
+   IN formationid       text default 'default',
+   IN groupid           int default 0,
+   OUT node_id          bigint,
+   OUT node_name        text,
+   OUT node_port        int,
+   OUT node_lsn         pg_lsn,
+   OUT node_is_primary  bool
+ )
+RETURNS SETOF record LANGUAGE SQL STRICT
+AS $$
+   select nodeid, nodehost, nodeport, reportedlsn, false
+     from pgautofailover.node
+    where formationid = $1
+      and groupid = $2
+      and reportedstate = 'report_lsn'
+ order by reportedlsn desc, health desc
+    limit 1;
+$$;
+
+grant execute on function pgautofailover.get_most_advanced_standby(text,int)
+   to autoctl_node;
+
+
 CREATE FUNCTION pgautofailover.remove_node
  (
    node_name text,
