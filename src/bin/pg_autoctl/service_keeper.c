@@ -554,6 +554,22 @@ keeper_node_active(Keeper *keeper)
 	if (!keeper_check_monitor_extension_version(keeper))
 	{
 		/*
+		 * We could fail here for two different reasons:
+		 *
+		 * - if we failed to connect to the monitor (network split, monitor is
+		 *   in maintenance or being restarted, etc): in that case just return
+		 *   false and have the main loop handle the situation
+		 *
+		 * - if we could connect to the monitor and then failed to check that
+		 *   the version of the monitor is the one we expect, then we're not
+		 *   compatible with this monitor and that's a different story.
+		 */
+		if (monitor->pgsql.status != PG_CONNECTION_OK)
+		{
+			return false;
+		}
+
+		/*
 		 * Okay we're not compatible with the current version of the
 		 * pgautofailover extension on the monitor. The most plausible scenario
 		 * is that the monitor got update: we're still running e.g. 1.4 and the
