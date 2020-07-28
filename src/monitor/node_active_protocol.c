@@ -1001,32 +1001,9 @@ remove_node(PG_FUNCTION_ARGS)
 	/* review the FSM for every other node, when removing the primary */
 	if (currentNodeIsPrimary)
 	{
-		char message[BUFSIZE] = { 0 };
-
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of node %d (%s:%d) to draining "
-			"to prepare for its removal.",
-			currentNode->nodeId, currentNode->nodeHost, currentNode->nodePort);
-
-		SetNodeGoalState(currentNode->nodeHost, currentNode->nodePort,
-						 REPLICATION_STATE_DRAINING);
-
-		NotifyStateChange(currentNode->reportedState,
-						  REPLICATION_STATE_DRAINING,
-						  currentNode->formationId,
-						  currentNode->groupId,
-						  currentNode->nodeId,
-						  currentNode->nodeHost,
-						  currentNode->nodePort,
-						  currentNode->pgsrSyncState,
-						  currentNode->reportedLSN,
-						  currentNode->candidatePriority,
-						  currentNode->replicationQuorum,
-						  message);
-
 		foreach(nodeCell, otherNodesGroupList)
 		{
+			char message[BUFSIZE] = { 0 };
 			AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
 
 			if (node == NULL)
@@ -1066,16 +1043,17 @@ remove_node(PG_FUNCTION_ARGS)
 		}
 	}
 
+	/* time to actually remove the primary */
+	RemoveAutoFailoverNode(nodeHost, nodePort);
+
 	/* now proceed with the failover, starting with the first standby */
 	if (currentNodeIsPrimary)
 	{
-		/* maybe that was the last node in the group */
+		/* if we have at least one other node in the group, proceed */
 		if (firstStandbyNode)
 		{
 			(void) ProceedGroupState(firstStandbyNode);
 		}
-
-		RemoveAutoFailoverNode(nodeHost, nodePort);
 	}
 	else
 	{
@@ -1083,8 +1061,6 @@ remove_node(PG_FUNCTION_ARGS)
 		AutoFailoverNode *primaryNode =
 			GetNodeToFailoverFromInGroup(currentNode->formationId,
 										 currentNode->groupId);
-
-		RemoveAutoFailoverNode(nodeHost, nodePort);
 
 		if (primaryNode)
 		{

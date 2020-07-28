@@ -473,6 +473,48 @@ FindMostAdvancedStandby(List *groupNodeList)
  * FindCandidateNodeBeingPromoted scans through the given groupNodeList and
  * returns the first node found that IsBeingPromoted().
  */
+bool
+IsFailoverInProgress(List *groupNodeList)
+{
+	ListCell *nodeCell = NULL;
+
+	foreach(nodeCell, groupNodeList)
+	{
+		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (node == NULL)
+		{
+			/* shouldn't happen */
+			ereport(ERROR, (errmsg("BUG: node is NULL")));
+		}
+
+		/*
+		 * A single node participating in a promotion allows to answer already.
+		 */
+		if (IsParticipatingInPromotion(node))
+		{
+			return true;
+		}
+
+		/* no conclusions to be drawn from nodes in maintenance */
+		if (IsInMaintenance(node))
+		{
+			continue;
+		}
+	}
+
+	/*
+	 * If no node is participating in a promotion, then no failover is in
+	 * progress.
+	 */
+	return false;
+}
+
+
+/*
+ * FindCandidateNodeBeingPromoted scans through the given groupNodeList and
+ * returns the first node found that IsBeingPromoted().
+ */
 AutoFailoverNode *
 FindCandidateNodeBeingPromoted(List *groupNodeList)
 {
@@ -1263,6 +1305,24 @@ IsBeingPromoted(AutoFailoverNode *node)
 
 			|| node->reportedState == REPLICATION_STATE_WAIT_PRIMARY ||
 			node->goalState == REPLICATION_STATE_WAIT_PRIMARY);
+}
+
+
+/*
+ * IsParticipatingInPromotion returns whether a node is currently participating
+ * in a promotion, either as a candidate that IsBeingPromoted, or as a
+ * "support" node that is reporting its LSN or re-joining as a secondary.
+ */
+bool
+IsParticipatingInPromotion(AutoFailoverNode *node)
+{
+	return IsBeingPromoted(node) ||
+
+		   node->reportedState == REPLICATION_STATE_REPORT_LSN ||
+		   node->goalState == REPLICATION_STATE_REPORT_LSN ||
+
+		   node->reportedState == REPLICATION_STATE_JOIN_SECONDARY ||
+		   node->goalState == REPLICATION_STATE_JOIN_SECONDARY;
 }
 
 

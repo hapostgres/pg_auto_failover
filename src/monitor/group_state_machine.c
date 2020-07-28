@@ -131,9 +131,25 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 	primaryNode = GetPrimaryOrDemotedNodeInGroup(formationId, groupId);
 
-	if (primaryNode == NULL)
+	/*
+	 * We want to have a primaryNode around for most operations, but also need
+	 * to support the case that the primaryNode has been dropped manually by a
+	 * call to remove_node(). So we have two main cases to think about here:
+	 *
+	 * - we have two nodes, one of them has been removed, we catch that earlier
+	 *   in this function and assign the remaining one with the SINGLE state,
+	 *
+	 * - we have more than two nodes in total, and the primary has just been
+	 *   removed (maybe it was still marked unhealthy and the operator knows it
+	 *   won't ever come back so called remove_node() already): in that case in
+	 *   remove_node() we set all the other nodes to REPORT_LSN (unless they
+	 *   are in MAINTENANCE), and we should be able to make progress with the
+	 *   failover without a primary around.
+	 *
+	 * In all other cases we require a primaryNode to be identified.
+	 */
+	if (primaryNode == NULL && !IsFailoverInProgress(nodesGroupList))
 	{
-		/* that's a bug, really, maybe we could use an Assert() instead */
 		ereport(ERROR,
 				(errmsg("ProceedGroupState couldn't find the primary node "
 						"in formation \"%s\", group %d",
@@ -355,6 +371,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 * primary has reached prepare_maintenance.
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_PREPARE_PROMOTION) &&
+		primaryNode &&
 		!IsInMaintenance(primaryNode))
 	{
 		char message[BUFSIZE];
@@ -373,6 +390,28 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		/* wait for possibly-alive primary to kill itself */
 		AssignGoalState(primaryNode, REPLICATION_STATE_DEMOTE_TIMEOUT, message);
+
+		return true;
+	}
+
+	/*
+	 * when primary node has been removed and we are promoting one standby
+	 *  prepare_promotion -> stop_replication
+	 */
+	if (IsCurrentState(activeNode, REPLICATION_STATE_PREPARE_PROMOTION) &&
+		primaryNode == NULL)
+	{
+		char message[BUFSIZE] = { 0 };
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of and node %d (%s:%d) to wait_primary "
+			"after node %d (%s:%d) converged to prepare_promotion.",
+			activeNode->nodeId, activeNode->nodeHost, activeNode->nodePort,
+			activeNode->nodeId, activeNode->nodeHost, activeNode->nodePort);
+
+		/* perform promotion to stop replication */
+		AssignGoalState(activeNode, REPLICATION_STATE_WAIT_PRIMARY, message);
 
 		return true;
 	}
@@ -758,7 +797,10 @@ static bool
 ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 							   AutoFailoverNode *primaryNode)
 {
-	List *standbyNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
+	List *standbyNodesGroupList =
+		primaryNode == NULL
+		? AutoFailoverNodeGroup(activeNode->formationId, activeNode->groupId)
+		: AutoFailoverOtherNodesList(primaryNode);
 	CandidateList candidateList = { 0 };
 
 	/*
@@ -900,18 +942,32 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 		{
 			char message[BUFSIZE] = { 0 };
 
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Setting goal state of node %d (%s:%d) to prepare_promotion "
-				"after node %d (%s:%d) became unhealthy "
-				"and %d nodes reported their LSN position.",
-				selectedNode->nodeId,
-				selectedNode->nodeHost,
-				selectedNode->nodePort,
-				primaryNode->nodeId,
-				primaryNode->nodeHost,
-				primaryNode->nodePort,
-				candidateList.candidateCount);
+			if (primaryNode)
+			{
+				LogAndNotifyMessage(
+					message, BUFSIZE,
+					"Setting goal state of node %d (%s:%d) to prepare_promotion "
+					"after node %d (%s:%d) became unhealthy "
+					"and %d nodes reported their LSN position.",
+					selectedNode->nodeId,
+					selectedNode->nodeHost,
+					selectedNode->nodePort,
+					primaryNode->nodeId,
+					primaryNode->nodeHost,
+					primaryNode->nodePort,
+					candidateList.candidateCount);
+			}
+			else
+			{
+				LogAndNotifyMessage(
+					message, BUFSIZE,
+					"Setting goal state of node %d (%s:%d) to prepare_promotion "
+					"and %d nodes reported their LSN position.",
+					selectedNode->nodeId,
+					selectedNode->nodeHost,
+					selectedNode->nodePort,
+					candidateList.candidateCount);
+			}
 
 			AssignGoalState(selectedNode,
 							REPLICATION_STATE_PREPARE_PROMOTION,
@@ -924,18 +980,32 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 		{
 			char message[BUFSIZE] = { 0 };
 
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Setting goal state of node %d (%s:%d) to fast_forward "
-				"after node %d (%s:%d) became unhealthy "
-				"and %d nodes reported their LSN position.",
-				selectedNode->nodeId,
-				selectedNode->nodeHost,
-				selectedNode->nodePort,
-				primaryNode->nodeId,
-				primaryNode->nodeHost,
-				primaryNode->nodePort,
-				candidateList.candidateCount);
+			if (primaryNode)
+			{
+				LogAndNotifyMessage(
+					message, BUFSIZE,
+					"Setting goal state of node %d (%s:%d) to fast_forward "
+					"after node %d (%s:%d) became unhealthy "
+					"and %d nodes reported their LSN position.",
+					selectedNode->nodeId,
+					selectedNode->nodeHost,
+					selectedNode->nodePort,
+					primaryNode->nodeId,
+					primaryNode->nodeHost,
+					primaryNode->nodePort,
+					candidateList.candidateCount);
+			}
+			else
+			{
+				LogAndNotifyMessage(
+					message, BUFSIZE,
+					"Setting goal state of node %d (%s:%d) to fast_forward "
+					"and %d nodes reported their LSN position.",
+					selectedNode->nodeId,
+					selectedNode->nodeHost,
+					selectedNode->nodePort,
+					candidateList.candidateCount);
+			}
 
 			AssignGoalState(selectedNode,
 							REPLICATION_STATE_FAST_FORWARD, message);
@@ -1159,6 +1229,7 @@ SelectFailoverCandidateNode(List *candidateNodesGroupList,
 		 * are going to apply our "forward lsn" sequence when picking them.
 		 */
 		else if (node->nodeId == mostAdvancedNode->nodeId &&
+				 primaryNode &&
 				 !WalDifferenceWithin(node, primaryNode, PromoteXlogThreshold))
 		{
 			char message[BUFSIZE];
