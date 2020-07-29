@@ -126,6 +126,43 @@ def test_005_number_sync_standbys():
     print("synchronous_standby_names = '%s'" %
           node1.get_synchronous_standby_names())
 
+    # we should have at least two nodes
+    # participating in the quorun when
+    # sync standbys = 1
+
+    # first, set all the nodes to true back
+    # which should be allowed
+    assert node1.set_replication_quorum("true")
+    assert node1.get_replication_quorum()
+    assert node2.set_replication_quorum("true")
+    assert node2.get_replication_quorum()
+    assert node3.set_replication_quorum("true")
+    assert node3.get_replication_quorum()
+    assert node4.set_replication_quorum("true")
+    assert node4.get_replication_quorum()
+
+    print("set number_sync_standbys = 1")
+    assert node1.set_number_sync_standbys(1)
+    assert node1.get_number_sync_standbys() == 1
+    print("synchronous_standby_names = '%s'" %
+          node1.get_synchronous_standby_names())
+
+    # the first two nodes should be set to false
+    assert node1.set_replication_quorum("false")
+    assert not node1.get_replication_quorum()
+    assert node2.set_replication_quorum("false")
+    assert not node2.get_replication_quorum()
+
+    # the third node cannot be set to false
+    assert not node3.set_replication_quorum("false")
+    assert node3.get_replication_quorum()
+
+    # set back to true since the next tests rely on it
+    assert node1.set_replication_quorum("true")
+    assert node1.get_replication_quorum()
+    assert node2.set_replication_quorum("true")
+    assert node2.get_replication_quorum()
+
 def test_006_number_sync_standbys_trigger():
     assert node1.set_number_sync_standbys(2)
     assert node1.get_number_sync_standbys() == 2

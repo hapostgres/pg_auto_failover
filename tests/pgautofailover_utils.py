@@ -947,7 +947,7 @@ SELECT reportedstate
             command.execute("set replication quorum", 'set', 'node',
                             'replication-quorum', replicationQuorum)
         except Exception as e:
-            if command.last_returncode == 1:
+            if command.last_returncode in (1, 6):
                 return False
             raise e
         return True
