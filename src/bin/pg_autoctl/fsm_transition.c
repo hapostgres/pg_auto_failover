@@ -516,6 +516,16 @@ fsm_enable_sync_rep(Keeper *keeper)
 		return false;
 	}
 
+	/*
+	 * If we don't have any standby with replication-quorum true, then we don't
+	 * actually enable sync rep here. In that case don't bother making sure the
+	 * standbys have reached a meaningful LSN target before continuing.
+	 */
+	if (streq(postgres->synchronousStandbyNames, ""))
+	{
+		return true;
+	}
+
 	/* first time in that state, fetch most recent metadata */
 	if (IS_EMPTY_STRING_BUFFER(postgres->standbyTargetLSN))
 	{
@@ -577,8 +587,6 @@ fsm_apply_settings(Keeper *keeper)
 	KeeperConfig *config = &(keeper->config);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
-	char synchronous_standby_names[BUFSIZE] = { 0 };
-
 	/* get synchronous_standby_names value from the monitor */
 	if (!config->monitorDisabled)
 	{
@@ -586,8 +594,8 @@ fsm_apply_settings(Keeper *keeper)
 				monitor,
 				config->formation,
 				keeper->state.current_group,
-				synchronous_standby_names,
-				BUFSIZE))
+				postgres->synchronousStandbyNames,
+				sizeof(postgres->synchronousStandbyNames)))
 		{
 			log_error("Failed to enable synchronous replication because "
 					  "we failed to get the synchronous_standby_names value "
@@ -598,12 +606,11 @@ fsm_apply_settings(Keeper *keeper)
 	else
 	{
 		/* no monitor: use the generic value '*' */
-		strlcpy(synchronous_standby_names, "*", BUFSIZE);
+		strlcpy(postgres->synchronousStandbyNames, "*",
+				sizeof(postgres->synchronousStandbyNames));
 	}
 
-	return primary_set_synchronous_standby_names(
-		postgres,
-		synchronous_standby_names);
+	return primary_set_synchronous_standby_names(postgres);
 }
 
 

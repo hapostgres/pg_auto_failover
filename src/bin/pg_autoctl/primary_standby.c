@@ -426,17 +426,17 @@ postgres_replication_slot_maintain(LocalPostgresServer *postgres,
  * on a primary postgres node.
  */
 bool
-primary_set_synchronous_standby_names(LocalPostgresServer *postgres,
-									  char *synchronous_standby_names)
+primary_set_synchronous_standby_names(LocalPostgresServer *postgres)
 {
 	bool result = false;
 	PGSQL *pgsql = &(postgres->sqlClient);
 
 	log_info("Setting synchronous_standby_names to '%s'",
-			 synchronous_standby_names);
+			 postgres->synchronousStandbyNames);
 
 	result =
-		pgsql_set_synchronous_standby_names(pgsql, synchronous_standby_names);
+		pgsql_set_synchronous_standby_names(pgsql,
+											postgres->synchronousStandbyNames);
 
 	pgsql_finish(pgsql);
 	return result;
@@ -590,7 +590,7 @@ standby_init_replication_source(LocalPostgresServer *postgres,
 
 	if (targetLSN != NULL)
 	{
-		strlcpy(upstream->targetLSN, targetLSN, MAXCONNINFO);
+		strlcpy(upstream->targetLSN, targetLSN, PG_LSN_MAXLENGTH);
 	}
 
 	upstream->sslOptions = sslOptions;

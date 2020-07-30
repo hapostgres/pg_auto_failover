@@ -158,7 +158,7 @@ typedef struct ReplicationSource
 	char maximumBackupRate[MAXCONNINFO];
 	char backupDir[MAXCONNINFO];
 	char applicationName[MAXCONNINFO];
-	char targetLSN[MAXCONNINFO];
+	char targetLSN[PG_LSN_MAXLENGTH];
 	SSLOptions sslOptions;
 } ReplicationSource;
 
