@@ -296,3 +296,71 @@ def test_020_start_node3_again():
     assert node1.has_needed_replication_slots()
     assert node2.has_needed_replication_slots()
     assert node3.has_needed_replication_slots()
+
+# test_021_XXX, test_022_XXX, test_023_XXX, test_024_XXX and test_025_XXX
+# are meant to test the scenario when the most advanced secondary
+# becomes inaccessible at the same time when the primary is inaccessible
+def test_021_prepare_candidate_priorities():
+    # we are aiming to promote node2
+    assert node2.set_candidate_priority(100)  # the next primary
+
+    # other nodes are already candidates for primary, but with less
+    # priority
+    assert node1.get_candidate_priority() == 90
+    assert node3.get_candidate_priority() == 90
+
+def test_022_prepare_replication_quorums():
+    # for the purpose of this test, we need one node
+    # async, to allow that we should decrement the sync stanbys
+    node1.set_number_sync_standbys(0)
+
+    # to emulate one node is behind, it is easier to make it async
+    # we want node2 to be behind others
+    assert node2.set_replication_quorum("false")
+
+    # others should be sync
+    assert node1.get_replication_quorum()
+    assert node3.get_replication_quorum()
+
+def test_023_secondary_gets_behind_primary():
+
+    # make sure that node2 gets behind of the primary
+    node2.ifdown()
+
+    # primary ingests some data
+    node1.run_sql_query("INSERT INTO t1 VALUES (5), (6)")
+    node1.run_sql_query("CHECKPOINT")
+
+    # ensure that the healthy secondary gets the change
+    results = node3.run_sql_query("SELECT count(*) FROM t1")
+    assert results == [(100006,)]
+
+def test_024_secondary_reports_lsn():
+    # make the primary and mostAdvanced secondary inaccessible
+    # and the candidate for failover as accessible
+    # which means that node2 will not be able to fetch wal
+    # and blocked until the other secondary is up
+    node1.ifdown()    # primary
+    node3.ifdown()    # most advanced standby
+    node2.ifup()      # failover candidate
+
+    print()
+    print("Calling pgautofailover.failover() on the monitor")
+    monitor.failover()
+
+    # node2 reports its LSN while others are inaccessible
+    assert node2.wait_until_state(target_state="report_lsn")
+
+def test_025_finalize_failover_after_most_advanced_secondary_gets_back():
+    # when they are accessible again, both should become
+    # secondaries
+    node3.ifup()    # old most advanced secondary, now secondary
+    node1.ifup()    # old primary, now secodary
+
+    # and, node2 should finally become the primary without losing any data
+    assert node2.wait_until_state(target_state="primary")
+    results = node2.run_sql_query("SELECT count(*) FROM t1")
+    assert results == [(100006,)]
+
+    assert node1.wait_until_state(target_state="secondary")
+    assert node3.wait_until_state(target_state="secondary")
