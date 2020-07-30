@@ -28,7 +28,7 @@ of a standby node failure. This allows the PostgreSQL service to accept
 writes when there's a single server available, and this opens the service
 for potential data loss if now the primary server were to be failing too.
 
-.. figure:: ./pg_auto_failover-arch.png
+.. figure:: ./tikz/arch-single-standby.svg
    :alt: pg_auto_failover Architecture for a standalone PostgreSQL service
 
    pg_auto_failover Architecture for a standalone PostgreSQL service
@@ -221,6 +221,18 @@ demoted, it will learn this from the monitor. Once the node reports, it is
 allowed to come back as a standby by running ``pg_rewind``. If it is too far
 behind the node performs a new ``pg_basebackup``.
 
+pg_auto_failover State Machine
+------------------------------
+
+The following diagram shows the pg_auto_failover State Machine. It's missing
+links to the ``single`` state, which can always been reached when removing
+all the other nodes.
+
+.. figure:: ./tikz/arch-single-standby.svg
+   :alt: pg_auto_failover Finite State Machine diagram
+
+   pg_auto_failover Finite State Machine diagram
+
 Failover logic
 --------------
 
@@ -245,7 +257,7 @@ Since the state machines of the data nodes always move in tandem, a pair
 .. raw:: latex
 
     \newpage
-   
+
 .. _state_machine_diagram:
 
 pg_auto_failover keeper's State Machine
@@ -264,3 +276,35 @@ output:
    :alt: Keeper state machine
 
    Keeper State Machine
+
+
+Multi-nodes architecture
+========================
+
+pg_auto_failover also allows to have more than one standby node, and
+implements the following three parameters to control the behavior of the
+system in case of a failover:
+
+  - number_sync_stanbys
+  - candidate priority
+  - replication quorum
+
+.. figure:: ./tikz/arch-multi-standby.svg
+   :alt: pg_auto_failover architecture with two standby nodes
+
+   pg_auto_failover architecture with two standby nodes
+
+It is possible to also have more than two standby nodes managed
+automatically by pg_auto_failover, as seen in the next two diagrams:
+
+.. figure:: ./tikz/arch-three-standby.svg
+   :alt: pg_auto_failover architecture with three standby nodes
+
+   pg_auto_failover architecture with three standby nodes
+
+And another one:
+
+.. figure:: ./tikz/arch-three-standby-one-async.svg
+   :alt: pg_auto_failover architecture with three standby nodes, one async
+
+   pg_auto_failover architecture with three standby nodes, one asyn
