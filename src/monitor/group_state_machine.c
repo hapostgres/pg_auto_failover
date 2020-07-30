@@ -43,7 +43,7 @@ typedef struct CandidateList
 {
 	List *candidateNodesGroupList;
 	int candidateCount;
-	int waitingForReportedLSN;
+	int missingNodesCount;
 } CandidateList;
 
 
@@ -60,6 +60,11 @@ static bool BuildCandidateList(List *standbyNodesGroupList,
 static AutoFailoverNode * SelectFailoverCandidateNode(List *candidateNodesGroupList,
 													  AutoFailoverNode *mostAdvancedNode,
 													  AutoFailoverNode *primaryNode);
+
+static bool PromoteSelectedNode(AutoFailoverNode *selectedNode,
+								AutoFailoverNode *mostAdvancedNode,
+								AutoFailoverNode *primaryNode,
+								int candidateCount);
 
 static void AssignGoalState(AutoFailoverNode *pgAutoFailoverNode,
 							ReplicationState state, char *description);
@@ -811,20 +816,20 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 	 * currently happening, by looping over all the nodes in case one of them
 	 * has already been selected as the failover candidate.
 	 */
-	AutoFailoverNode *candidateNode =
+	AutoFailoverNode *nodeBeingPromoted =
 		FindCandidateNodeBeingPromoted(standbyNodesGroupList);
 
 	/*
 	 * If a failover is in progress, continue driving it.
 	 */
-	if (candidateNode != NULL)
+	if (nodeBeingPromoted != NULL)
 	{
 		elog(LOG, "Found candidate node %d (%s:%d)",
-			 candidateNode->nodeId,
-			 candidateNode->nodeHost,
-			 candidateNode->nodePort);
+			 nodeBeingPromoted->nodeId,
+			 nodeBeingPromoted->nodeHost,
+			 nodeBeingPromoted->nodePort);
 
-		return ProceedWithMSFailover(activeNode, candidateNode);
+		return ProceedWithMSFailover(activeNode, nodeBeingPromoted);
 	}
 
 	/*
@@ -859,20 +864,18 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 	 * candidate (thanks to the FSM transition secondary -> report_lsn), and
 	 * now we need to select one of the failover candidates.
 	 *
-	 * We might fail to have reportedLSNCount == candidateCount in the
-	 * following cases:
+	 * We might have a non-zero missingNodesCount in the following cases:
 	 *
 	 * - the activeNode is the first to report its LSN, we didn't hear from the
 	 *   other nodes yet; in that case we want to wait until we hear from them,
-	 *   it is expected to happen within the next 5 seconds.
+	 *   it is expected to happen within the next seconds.
 	 *
 	 * - a standby that was counted as a candidate is not reporting; most
-	 *   probably it's not healthy anymore (or has been put to maintenance
-	 *   during the failover process), and the next call to node_active()
-	 *   should be able to account for that new global state and make progress:
-	 *   the now faulty standby will NOT be counted as candidate anymore.
+	 *   probably it's not healthy anymore. In that case we might not be able
+	 *   to proceed with the failover without a risk of data-loss. We avoid
+	 *   data-loss situations by waiting until the secondary is back.
 	 */
-	if (candidateList.waitingForReportedLSN > 0)
+	if (candidateList.missingNodesCount > 0)
 	{
 		char message[BUFSIZE];
 
@@ -881,7 +884,7 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 			"Failover still in progress after %d nodes reported their LSN "
 			"and we are waiting for %d nodes to report, "
 			"activeNode is %d (%s:%d) and reported state \"%s\"",
-			candidateList.candidateCount, candidateList.waitingForReportedLSN,
+			candidateList.candidateCount, candidateList.missingNodesCount,
 			activeNode->nodeId, activeNode->nodeHost, activeNode->nodePort,
 			ReplicationStateGetName(activeNode->reportedState));
 
@@ -926,92 +929,10 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 			return false;
 		}
 
-		/*
-		 * Ok so we now may start the failover process, we have selected a
-		 * candidate after all nodes reported their LSN. We still have two
-		 * possible situations here:
-		 *
-		 * - if the selected candidate has all the WAL bytes, promote it
-		 *   already
-		 *
-		 * - if the selected candidate is lagging, we ask it to connect to a
-		 *   standby that has not been selected and grab missing WAL bytes from
-		 *   there
-		 */
-		if (selectedNode->reportedLSN == mostAdvancedNode->reportedLSN)
-		{
-			char message[BUFSIZE] = { 0 };
-
-			if (primaryNode)
-			{
-				LogAndNotifyMessage(
-					message, BUFSIZE,
-					"Setting goal state of node %d (%s:%d) to prepare_promotion "
-					"after node %d (%s:%d) became unhealthy "
-					"and %d nodes reported their LSN position.",
-					selectedNode->nodeId,
-					selectedNode->nodeHost,
-					selectedNode->nodePort,
-					primaryNode->nodeId,
-					primaryNode->nodeHost,
-					primaryNode->nodePort,
-					candidateList.candidateCount);
-			}
-			else
-			{
-				LogAndNotifyMessage(
-					message, BUFSIZE,
-					"Setting goal state of node %d (%s:%d) to prepare_promotion "
-					"and %d nodes reported their LSN position.",
-					selectedNode->nodeId,
-					selectedNode->nodeHost,
-					selectedNode->nodePort,
-					candidateList.candidateCount);
-			}
-
-			AssignGoalState(selectedNode,
-							REPLICATION_STATE_PREPARE_PROMOTION,
-							message);
-
-			/* leave the other nodes in ReportLSN state for now */
-			return true;
-		}
-		else
-		{
-			char message[BUFSIZE] = { 0 };
-
-			if (primaryNode)
-			{
-				LogAndNotifyMessage(
-					message, BUFSIZE,
-					"Setting goal state of node %d (%s:%d) to fast_forward "
-					"after node %d (%s:%d) became unhealthy "
-					"and %d nodes reported their LSN position.",
-					selectedNode->nodeId,
-					selectedNode->nodeHost,
-					selectedNode->nodePort,
-					primaryNode->nodeId,
-					primaryNode->nodeHost,
-					primaryNode->nodePort,
-					candidateList.candidateCount);
-			}
-			else
-			{
-				LogAndNotifyMessage(
-					message, BUFSIZE,
-					"Setting goal state of node %d (%s:%d) to fast_forward "
-					"and %d nodes reported their LSN position.",
-					selectedNode->nodeId,
-					selectedNode->nodeHost,
-					selectedNode->nodePort,
-					candidateList.candidateCount);
-			}
-
-			AssignGoalState(selectedNode,
-							REPLICATION_STATE_FAST_FORWARD, message);
-
-			return true;
-		}
+		return PromoteSelectedNode(selectedNode,
+								   mostAdvancedNode,
+								   primaryNode,
+								   candidateList.candidateCount);
 	}
 
 	return false;
@@ -1049,7 +970,7 @@ BuildCandidateList(List *standbyNodesGroupList, CandidateList *candidateList)
 				 "Skipping candidate node %d (%s:%d), which is unhealthy",
 				 node->nodeId, node->nodeHost, node->nodePort);
 
-			++(candidateList->waitingForReportedLSN);
+			++(candidateList->missingNodesCount);
 
 			continue;
 		}
@@ -1065,7 +986,7 @@ BuildCandidateList(List *standbyNodesGroupList, CandidateList *candidateList)
 		/* if REPORT LSN is assigned and not reached yet, count that */
 		if (node->goalState == REPLICATION_STATE_REPORT_LSN)
 		{
-			++(candidateList->waitingForReportedLSN);
+			++(candidateList->missingNodesCount);
 
 			continue;
 		}
@@ -1079,7 +1000,7 @@ BuildCandidateList(List *standbyNodesGroupList, CandidateList *candidateList)
 		{
 			char message[BUFSIZE] = { 0 };
 
-			++(candidateList->waitingForReportedLSN);
+			++(candidateList->missingNodesCount);
 
 			LogAndNotifyMessage(
 				message, BUFSIZE,
@@ -1280,6 +1201,104 @@ SelectFailoverCandidateNode(List *candidateNodesGroupList,
 	}
 
 	return selectedNode;
+}
+
+
+/*
+ * PromoteSelectedNode assigns goal state to the selected node to failover to.
+ */
+static bool
+PromoteSelectedNode(AutoFailoverNode *selectedNode,
+					AutoFailoverNode *mostAdvancedNode,
+					AutoFailoverNode *primaryNode,
+					int candidateCount)
+{
+	/*
+	 * Ok so we now may start the failover process, we have selected a
+	 * candidate after all nodes reported their LSN. We still have two
+	 * possible situations here:
+	 *
+	 * - if the selected candidate has all the WAL bytes, promote it
+	 *   already
+	 *
+	 * - if the selected candidate is lagging, we ask it to connect to a
+	 *   standby that has not been selected and grab missing WAL bytes from
+	 *   there
+	 */
+	if (selectedNode->reportedLSN == mostAdvancedNode->reportedLSN)
+	{
+		char message[BUFSIZE] = { 0 };
+
+		if (primaryNode)
+		{
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of node %d (%s:%d) to prepare_promotion "
+				"after node %d (%s:%d) became unhealthy "
+				"and %d nodes reported their LSN position.",
+				selectedNode->nodeId,
+				selectedNode->nodeHost,
+				selectedNode->nodePort,
+				primaryNode->nodeId,
+				primaryNode->nodeHost,
+				primaryNode->nodePort,
+				candidateCount);
+		}
+		else
+		{
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of node %d (%s:%d) to prepare_promotion "
+				"and %d nodes reported their LSN position.",
+				selectedNode->nodeId,
+				selectedNode->nodeHost,
+				selectedNode->nodePort,
+				candidateCount);
+		}
+
+		AssignGoalState(selectedNode,
+						REPLICATION_STATE_PREPARE_PROMOTION,
+						message);
+
+		/* leave the other nodes in ReportLSN state for now */
+		return true;
+	}
+	else
+	{
+		char message[BUFSIZE] = { 0 };
+
+		if (primaryNode)
+		{
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of node %d (%s:%d) to fast_forward "
+				"after node %d (%s:%d) became unhealthy "
+				"and %d nodes reported their LSN position.",
+				selectedNode->nodeId,
+				selectedNode->nodeHost,
+				selectedNode->nodePort,
+				primaryNode->nodeId,
+				primaryNode->nodeHost,
+				primaryNode->nodePort,
+				candidateCount);
+		}
+		else
+		{
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of node %d (%s:%d) to fast_forward "
+				"and %d nodes reported their LSN position.",
+				selectedNode->nodeId,
+				selectedNode->nodeHost,
+				selectedNode->nodePort,
+				candidateCount);
+		}
+
+		AssignGoalState(selectedNode,
+						REPLICATION_STATE_FAST_FORWARD, message);
+
+		return true;
+	}
 }
 
 
