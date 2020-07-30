@@ -118,6 +118,7 @@ extern AutoFailoverNode * GetPrimaryOrDemotedNodeInGroup(char *formationId,
 														 int32 groupId);
 extern AutoFailoverNode * FindFailoverNewStandbyNode(List *groupNodeList);
 extern List * GroupListCandidates(List *groupNodeList);
+extern List * ListMostAdvancedStandbyNodes(List *groupNodeList);
 extern List * GroupListSyncStandbys(List *groupNodeList);
 extern bool AllNodesHaveSameCandidatePriority(List *groupNodeList);
 extern int CountStandbyCandidates(AutoFailoverNode *primaryNode,

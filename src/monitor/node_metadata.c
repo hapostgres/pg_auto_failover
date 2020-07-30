@@ -595,6 +595,67 @@ GroupListCandidates(List *groupNodeList)
 
 
 /*
+ * pgautofailover_node_candidate_priority_compare
+ *	  qsort comparator for sorting node lists by candidate priority
+ */
+static int
+pgautofailover_node_reportedlsn_compare(const void *a, const void *b)
+{
+	AutoFailoverNode *node1 = (AutoFailoverNode *) lfirst(*(ListCell **) a);
+	AutoFailoverNode *node2 = (AutoFailoverNode *) lfirst(*(ListCell **) b);
+
+	if (node1->reportedLSN > node2->reportedLSN)
+	{
+		return -1;
+	}
+
+	if (node1->reportedLSN < node2->reportedLSN)
+	{
+		return 1;
+	}
+
+	return 0;
+}
+
+
+/*
+ * ListMostAdvancedStandbyNodes returns the nodes in groupNodeList that have
+ * the most advanced LSN.
+ */
+List *
+ListMostAdvancedStandbyNodes(List *groupNodeList)
+{
+	ListCell *nodeCell = NULL;
+	List *mostAdvancedNodeList = NIL;
+	List *sortedNodeList =
+		list_qsort(groupNodeList,
+				   pgautofailover_node_reportedlsn_compare);
+
+	XLogRecPtr mostAdvancedLSN = 0;
+
+	if (groupNodeList == NIL)
+	{
+		return NIL;
+	}
+
+	mostAdvancedLSN =
+		((AutoFailoverNode *) linitial(groupNodeList))->reportedLSN;
+
+	foreach(nodeCell, sortedNodeList)
+	{
+		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (node->reportedLSN == mostAdvancedLSN)
+		{
+			mostAdvancedNodeList = lappend(mostAdvancedNodeList, node);
+		}
+	}
+
+	return mostAdvancedNodeList;
+}
+
+
+/*
  * GroupListSyncStandbys returns a list of nodes in groupNodeList that are all
  * candidates for failover (those with AutoFailoverNode.replicationQuorum set
  * to true), sorted by candidatePriority.
