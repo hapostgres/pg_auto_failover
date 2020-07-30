@@ -3,12 +3,17 @@
 [![Slack Status](http://slack.citusdata.com/badge.svg)](https://slack.citusdata.com)
 [![Documentation Status](https://readthedocs.org/projects/pg-auto-failover/badge/?version=latest)](https://pg-auto-failover.readthedocs.io/en/latest/?badge=latest)
 
-pg_auto_failover is an extension and service for PostgreSQL that monitors and manages
-automated failover for a Postgres cluster. It is optimized for simplicity and correctness and supports Postgres 10 and newer.
+pg_auto_failover is an extension and service for PostgreSQL that monitors
+and manages automated failover for a Postgres cluster. It is optimized for
+simplicity and correctness and supports Postgres 10 and newer.
 
-We set up one PostgreSQL server as a **monitor** node as well as a **primary** and **secondary** node for storing data. The monitor node tracks the health of the data nodes and implements a failover state machine. On the PostgreSQL nodes, the `pg_autoctl` program runs alongside PostgreSQL and runs the necessary commands to configure synchronous streaming replication.
+We set up one PostgreSQL server as a **monitor** node as well as a
+**primary** and **secondary** node for storing data. The monitor node tracks
+the health of the data nodes and implements a failover state machine. On the
+PostgreSQL nodes, the `pg_autoctl` program runs alongside PostgreSQL and
+runs the necessary commands to configure synchronous streaming replication.
 
-![pg_auto_failover Architecture](docs/pg_auto_failover-arch.png?raw=true "pg_auto_failover Architecture")
+![pg_auto_failover Architecture](docs/tikz/arch-single-standby.svg?raw=true "pg_auto_failover Architecture")
 
 The pg_auto_failover Monitor implements a state machine and relies on in-core
 PostgreSQL facilities to deliver HA. For example. when the **secondary** node
@@ -26,7 +31,7 @@ pg_auto_failover consists of the following parts:
 ## Dependencies
 
 At runtime, pg_auto_failover depends on only Postgres. Both Postgres version
-10 and 11 are currently supported.
+10, 11, and 12 are currently supported.
 
 At buildtime. pg_auto_failover depends on Postgres server development
 package like any other Postgres extensions (the server development package
@@ -34,6 +39,12 @@ for Postgres 11 when using debian or Ubuntu is named
 `postgresql-server-dev-11`), and then `libssl-dev` and `libkrb5-dev` are
 needed to for the client side when building with all the `libpq`
 authentication options.
+
+## Documentation
+
+Please check out project
+[documentation](https://pg-auto-failover.readthedocs.io/en/latest/) for how
+to guides and troubleshooting information.
 
 ## Installing pg_auto_failover from packages
 
@@ -296,11 +307,6 @@ To allow application servers to connect to the Postgres database, edit your
 `pg_hba.conf` file as documented in [the pg_hba.conf
 file](https://www.postgresql.org/docs/current/auth-pg-hba-conf.html) chapter
 of the PostgreSQL documentation.
-
-## Documentation
-
-Please check out project [documentation](https://pg-auto-failover.readthedocs.io/en/latest/)
-for how to guides and troubleshooting information.
 
 ## Reporting Security Issues
 

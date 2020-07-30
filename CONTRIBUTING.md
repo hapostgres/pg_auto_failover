@@ -55,3 +55,16 @@ citus_indent --check --diff || { citus_indent --diff; exit 1; }
 __EOF__
 chmod +x .git/hooks/pre-commit
 ```
+
+### Producing the documentation diagrams
+
+The diagrams are TikZ sources, which means they're edited with your usual
+editor tooling. The diagrams are actually code, and the compilation tool
+chain involve the following software:
+
+  - LuaTex
+  - TikZ
+  - pdftocairo, found in the poppler software
+
+Current TeX distributions should include luatex and tikz for you already.
+One such distribution is TexLive and is widely available.
