@@ -595,8 +595,8 @@ GroupListCandidates(List *groupNodeList)
 
 
 /*
- * pgautofailover_node_candidate_priority_compare
- *	  qsort comparator for sorting node lists by candidate priority
+ * pgautofailover_node_reportedlsn_compare
+ *	  qsort comparator for sorting node lists by reported lsn, descending
  */
 static int
 pgautofailover_node_reportedlsn_compare(const void *a, const void *b)
@@ -639,7 +639,7 @@ ListMostAdvancedStandbyNodes(List *groupNodeList)
 	}
 
 	mostAdvancedLSN =
-		((AutoFailoverNode *) linitial(groupNodeList))->reportedLSN;
+		((AutoFailoverNode *) linitial(sortedNodeList))->reportedLSN;
 
 	foreach(nodeCell, sortedNodeList)
 	{
