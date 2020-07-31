@@ -233,21 +233,15 @@ class VirtualNode:
         """
         with IPRoute() as ipr:
             # bring it down
-            try:
-                ipr.link('set', ifname=self.vethPeer, state='down')
-            except netlink.exceptions.NetlinkError:
-                pass
+            ipr.link('set', ifname=self.vethPeer, state='down')
 
     def ifup(self):
         """
         Bring the network interface down for this node
         """
         with IPRoute() as ipr:
-            # bring it down
-            try:
-                ipr.link('set', ifname=self.vethPeer, state='up')
-            except netlink.exceptions.NetlinkError:
-                pass
+            # bring it up
+            ipr.link('set', ifname=self.vethPeer, state='up')
 
 
 def _remove_interface_if_exists(name):
