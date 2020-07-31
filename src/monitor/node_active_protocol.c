@@ -1239,9 +1239,13 @@ perform_failover(PG_FUNCTION_ARGS)
 		/* so we have at least one candidate, let's get started */
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of node %d (%s:%d) to draining "
+			"Setting goal state of node %d (%s:%d) at LSN %X/%X to draining "
 			"after a user-initiated failover.",
-			primaryNode->nodeId, primaryNode->nodeHost, primaryNode->nodePort);
+			primaryNode->nodeId,
+			primaryNode->nodeHost,
+			primaryNode->nodePort,
+			(uint32) (primaryNode->reportedLSN >> 32),
+			(uint32) primaryNode->reportedLSN);
 
 		SetNodeGoalState(primaryNode->nodeHost, primaryNode->nodePort,
 						 REPLICATION_STATE_DRAINING);

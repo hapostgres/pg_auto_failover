@@ -904,9 +904,25 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 		 */
 		if (list_length(mostAdvancedNodeList) > 0)
 		{
+			AutoFailoverNode *mostAdvancedNode =
+				(AutoFailoverNode *) linitial(mostAdvancedNodeList);
+
+			char message[BUFSIZE] = { 0 };
+
 			candidateList.mostAdvancedNodesGroupList = mostAdvancedNodeList;
-			candidateList.mostAdvancedReportedLSN =
-				((AutoFailoverNode *) linitial(mostAdvancedNodeList))->reportedLSN;
+			candidateList.mostAdvancedReportedLSN = mostAdvancedNode->reportedLSN;
+
+			/* TODO: should we keep that message in the production release? */
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"The current most advanced reported LSN is %X/%X, "
+				"as reported by node %d (%s:%d) and %d other nodes",
+				(uint32) (mostAdvancedNode->reportedLSN >> 32),
+				(uint32) mostAdvancedNode->reportedLSN,
+				mostAdvancedNode->nodeId,
+				mostAdvancedNode->nodeHost,
+				mostAdvancedNode->nodePort,
+				list_length(mostAdvancedNodeList) - 1);
 		}
 		else
 		{
