@@ -234,10 +234,19 @@ up node A as primary because the monitor reports there are no other nodes in
 the system yet. This is one example of how the keeper is state-based: it makes
 observations and then adjusts its state, in this case from "init" to "single."
 
-At this point the monitor and primary nodes are created and running. Next we
+Also add a setting to trust connections from our "application" VM:
+
+.. code-block:: bash
+
+   ssh -l ha-admin `vm_ip a` << CMD
+     echo 'hostssl "appdb" "ha-admin" ha-demo-app.internal.cloudapp.net trust' \
+       >> ~ha-admin/ha/pg_hba.conf
+   CMD
+
+At this point the monitor and primary node are created and running. Next we
 need to run the keeper. It’s an independent process so that it can continue
-operating even if the Postgres primary goes down. We'll install it as a service
-with systemd so that it will resume if the VM restarts.
+operating even if the PostgreSQL process goes terminates on the node. We'll
+install it as a service with systemd so that it will resume if the VM restarts.
 
 .. code-block:: bash
 
