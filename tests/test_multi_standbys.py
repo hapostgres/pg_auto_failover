@@ -342,7 +342,6 @@ def test_022_prepare_replication_quorums():
     assert node3.get_replication_quorum()
 
 def test_023_secondary_gets_behind_primary():
-
     # make sure that node2 gets behind of the primary
     node2.ifdown()
 
@@ -363,7 +362,7 @@ def test_023_secondary_gets_behind_primary():
     lsn3m = monitor.run_sql_query(q)[0][0]
     print("%s " % lsn3m, end="", flush=True)
 
-    eq(lsn, lsn3m)
+    eq_(lsn, lsn3m)
 
 def test_024_secondary_reports_lsn():
     # make the primary and mostAdvanced secondary inaccessible
