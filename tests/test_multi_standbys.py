@@ -354,6 +354,17 @@ def test_023_secondary_gets_behind_primary():
     results = node3.run_sql_query("SELECT count(*) FROM t1")
     assert results == [(100006,)]
 
+    lsn3 = node3.run_sql_query("select pg_last_wal_receive_lsn()")[0][0]
+    print("%s " % lsn3, end="", flush=True)
+
+    # ensure the monitor received this lsn
+    time.sleep(2)
+    q = "select reportedlsn from pgautofailover.node where nodeid = 3"
+    lsn3m = monitor.run_sql_query(q)[0][0]
+    print("%s " % lsn3m, end="", flush=True)
+
+    eq(lsn, lsn3m)
+
 def test_024_secondary_reports_lsn():
     # make the primary and mostAdvanced secondary inaccessible
     # and the candidate for failover as accessible
