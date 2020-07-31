@@ -84,7 +84,10 @@ man:
 pdf: $(PDF)
 
 $(PDF):
+	$(MAKE) -s -C docs/tikz pdf
+	perl -pi -e 's/(^.. figure:: .*)\.svg/\1.pdf/' docs/*.rst
 	$(MAKE) -s -C docs latexpdf
+	perl -pi -e 's/(^.. figure:: .*)\.pdf/\1./' docs/*.rst
 	ls -l $@
 
 $(FSM): bin
