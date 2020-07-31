@@ -362,7 +362,7 @@ def test_023_secondary_gets_behind_primary():
     lsn3m = monitor.run_sql_query(q)[0][0]
     print("%s " % lsn3m, end="", flush=True)
 
-    eq_(lsn, lsn3m)
+    eq_(lsn3, lsn3m)
 
 def test_024_secondary_reports_lsn():
     # make the primary and mostAdvanced secondary inaccessible
