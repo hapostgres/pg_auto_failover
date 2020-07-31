@@ -1,5 +1,5 @@
 import pgautofailover_utils as pgautofailover
-from nose.tools import *
+from nose.tools import raises, eq_
 import time
 
 import os.path
@@ -23,7 +23,6 @@ def test_000_create_monitor():
     monitor = cluster.create_monitor("/tmp/multi_standby/monitor")
     monitor.run()
     monitor.wait_until_pg_is_running()
-    monitor.run()
 
 def test_001_init_primary():
     global node1
@@ -252,6 +251,15 @@ def test_015_set_candidate_priorities():
     print()
     assert node3.wait_until_state(target_state="primary")
 
+    # node2 should still be "sync"
+    assert node3.get_number_sync_standbys() == 1
+    assert node2.get_replication_quorum()
+
+    # also let's see synchronous_standby_names here
+    print("Monitor: %s" % node3.get_synchronous_standby_names())
+    print("Node 3:  %s" %
+          node3.run_sql_query("show synchronous_standby_names")[0][0])
+
 def test_016_ifdown_node1():
     node1.ifdown()
 
@@ -260,8 +268,19 @@ def test_017_insert_rows():
         "INSERT INTO t1 SELECT x+10 FROM generate_series(1, 100000) as gs(x)")
     node3.run_sql_query("CHECKPOINT")
 
-    lsn = node3.run_sql_query("select pg_current_wal_lsn()")[0][0]
-    print("%s " % lsn, end="", flush=True)
+    lsn3 = node3.run_sql_query("select pg_current_wal_lsn()")[0][0]
+    print("%s " % lsn3, end="", flush=True)
+
+    # node2 is sync and should get the WAL
+    lsn2 = node2.run_sql_query("select pg_last_wal_receive_lsn()")[0][0]
+    print("%s " % lsn2, end="", flush=True)
+
+    # node2 is sync and should get the WAL
+    time.sleep(5)
+    lsn2 = node2.run_sql_query("select pg_last_wal_receive_lsn()")[0][0]
+    print("%s " % lsn2, end="", flush=True)
+
+    #eq_(lsn3, lsn2)
 
 def test_018_failover():
     print()
@@ -358,9 +377,13 @@ def test_025_finalize_failover_after_most_advanced_secondary_gets_back():
     node1.ifup()    # old primary, now secodary
 
     # and, node2 should finally become the primary without losing any data
-    assert node2.wait_until_state(target_state="primary")
+    assert node2.wait_until_state(target_state="wait_primary")
+
+    print("%s" % monitor.pg_autoctl.err)
+
     results = node2.run_sql_query("SELECT count(*) FROM t1")
-    assert results == [(100006,)]
+    eq_(results, [(100006,)])
 
     assert node1.wait_until_state(target_state="secondary")
     assert node3.wait_until_state(target_state="secondary")
+    assert node2.wait_until_state(target_state="primary")
