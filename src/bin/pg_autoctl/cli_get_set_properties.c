@@ -516,7 +516,7 @@ cli_set_node_candidate_priority(int argc, char **argv)
 /*
  * cli_set_node_metadata sets this pg_autoctl node name, hostname, and port on
  * the monitor. That's the hostname that is used by every other node in the
- * system to contact the local node, so it might as well be an IP address.
+ * system to contact the local node, so it can be an IP address as well.
  */
 static void
 cli_set_node_metadata(int argc, char **argv)
