@@ -1031,9 +1031,17 @@ keeper_check_monitor_extension_version(Keeper *keeper)
 
 	if (!monitor_get_extension_version(monitor, &version))
 	{
-		log_fatal("Failed to check version compatibility with the monitor "
-				  "extension \"%s\", see above for details",
-				  PG_AUTOCTL_MONITOR_EXTENSION_NAME);
+		/*
+		 * Only output a FATAL error message when we could connect and then
+		 * failed to get the monitor extension version that we expect.
+		 * Connection failures are retried the usual way.
+		 */
+		if (monitor->pgsql.status == PG_CONNECTION_OK)
+		{
+			log_fatal("Failed to check version compatibility with the monitor "
+					  "extension \"%s\", see above for details",
+					  PG_AUTOCTL_MONITOR_EXTENSION_NAME);
+		}
 		return false;
 	}
 
