@@ -31,9 +31,10 @@
 
 
 /* human-readable names for addressing columns of health check queries */
-#define TLIST_NUM_NODE_HOST 1
-#define TLIST_NUM_NODE_PORT 2
-#define TLIST_NUM_HEALTH_STATUS 3
+#define TLIST_NUM_NODE_ID 1
+#define TLIST_NUM_NODE_HOST 2
+#define TLIST_NUM_NODE_PORT 3
+#define TLIST_NUM_HEALTH_STATUS 4
 
 
 /* GUCs */
@@ -68,7 +69,7 @@ LoadNodeHealthList(void)
 	{
 		initStringInfo(&query);
 		appendStringInfo(&query,
-						 "SELECT nodehost, nodeport, health "
+						 "SELECT nodeid, nodehost, nodeport, health "
 						 "FROM " AUTO_FAILOVER_NODE_TABLE);
 
 		pgstat_report_activity(STATE_RUNNING, query.data);
@@ -143,6 +144,8 @@ TupleToNodeHealth(HeapTuple heapTuple, TupleDesc tupleDescriptor)
 	NodeHealth *nodeHealth = NULL;
 	bool isNull = false;
 
+	Datum nodeIdDatum = SPI_getbinval(heapTuple, tupleDescriptor,
+									  TLIST_NUM_NODE_ID, &isNull);
 	Datum nodeHostDatum = SPI_getbinval(heapTuple, tupleDescriptor,
 										TLIST_NUM_NODE_HOST, &isNull);
 	Datum nodePortDatum = SPI_getbinval(heapTuple, tupleDescriptor,
@@ -151,6 +154,7 @@ TupleToNodeHealth(HeapTuple heapTuple, TupleDesc tupleDescriptor)
 										   TLIST_NUM_HEALTH_STATUS, &isNull);
 
 	nodeHealth = palloc0(sizeof(NodeHealth));
+	nodeHealth->nodeId = DatumGetInt32(nodeIdDatum);
 	nodeHealth->nodeHost = TextDatumGetCString(nodeHostDatum);
 	nodeHealth->nodePort = DatumGetInt32(nodePortDatum);
 	nodeHealth->healthState = DatumGetInt32(healthStateDatum);
@@ -163,7 +167,7 @@ TupleToNodeHealth(HeapTuple heapTuple, TupleDesc tupleDescriptor)
  * SetNodeHealthState updates the health state of a node in the metadata.
  */
 void
-SetNodeHealthState(char *nodeHost, uint16 nodePort,
+SetNodeHealthState(int nodeId, char *nodeHost, uint16 nodePort,
 				   int previousHealthState,
 				   int healthState)
 {
@@ -194,7 +198,8 @@ SetNodeHealthState(char *nodeHost, uint16 nodePort,
 			char message[BUFSIZE] = { 0 };
 
 			LogAndNotifyMessage(message, sizeof(message),
-								"Node %s:%d is marked as %s by the monitor",
+								"Node %d (%s:%d) is marked as %s by the monitor",
+								nodeId,
 								nodeHost,
 								nodePort,
 								healthState == 0 ? "unhealthy" : "healthy");
