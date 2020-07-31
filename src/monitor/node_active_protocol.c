@@ -354,6 +354,11 @@ NodeActive(char *formationId, AutoFailoverNodeState *currentNodeState)
 		ereport(ERROR, (errmsg("couldn't find node with nodeid %d",
 							   currentNodeState->nodeId)));
 	}
+	else if (strcmp(pgAutoFailoverNode->formationId, formationId) != 0)
+	{
+		ereport(ERROR, (errmsg("node %d does not belong to formation %s",
+							   currentNodeState->nodeId, formationId)));
+	}
 	else
 	{
 		LockFormation(formationId, ShareLock);
