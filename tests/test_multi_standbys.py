@@ -275,12 +275,12 @@ def test_017_insert_rows():
     lsn2 = node2.run_sql_query("select pg_last_wal_receive_lsn()")[0][0]
     print("%s " % lsn2, end="", flush=True)
 
-    # node2 is sync and should get the WAL
-    time.sleep(5)
-    lsn2 = node2.run_sql_query("select pg_last_wal_receive_lsn()")[0][0]
-    print("%s " % lsn2, end="", flush=True)
+    while lsn2 != lsn3:
+        time.sleep(1)
+        lsn2 = node2.run_sql_query("select pg_last_wal_receive_lsn()")[0][0]
+        print("%s " % lsn2, end="", flush=True)
 
-    #eq_(lsn3, lsn2)
+    eq_(lsn3, lsn2)
 
 def test_018_failover():
     print()
