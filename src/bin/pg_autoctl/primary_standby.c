@@ -950,7 +950,7 @@ standby_follow_new_primary(LocalPostgresServer *postgres)
 	{
 		log_info("Stopping Postgres at \"%s\"", pgSetup->pgdata);
 
-		if (!pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata))
+		if (!ensure_postgres_service_is_stopped(postgres))
 		{
 			log_error("Failed to stop Postgres at \"%s\"", pgSetup->pgdata);
 			return false;
