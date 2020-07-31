@@ -397,3 +397,41 @@ def test_025_finalize_failover_after_most_advanced_secondary_gets_back():
     assert node1.wait_until_state(target_state="secondary")
     assert node3.wait_until_state(target_state="secondary")
     assert node2.wait_until_state(target_state="primary")
+
+# test_026 and test_027 aims to test the scenario when
+# all secondaries are async
+def test_026_prepare_replication_quorumans_and_priority():
+    # for the purpose of this test, we need all nodes async
+    eq_(node1.get_number_sync_standbys(), 0)
+
+    # to emulate one node is behind, it is easier to make it async
+    # we want node2 to be behind others
+    eq_(node2.get_replication_quorum(), False)    # primary
+
+    # when we set candidate priority we go to join_primary then primary
+    print()
+    assert node2.wait_until_state(target_state="primary")
+
+    assert node1.set_replication_quorum("false")    # secondary
+    assert node3.set_replication_quorum("false")    # secondary
+
+    # to make the tests consistent, we assign higher
+    # priorty to node1
+    assert node2.set_candidate_priority(90)      # previous primary
+    assert node1.set_candidate_priority(100)     # the next primary
+    assert node3.get_candidate_priority() == 90  # secondary
+
+    # when we set candidate priority we go to join_primary then primary
+    print()
+    assert node2.wait_until_state(target_state="primary")
+
+def test_027_failover_when_all_nodes_async():
+
+    print()
+    print("Calling pgautofailover.failover() on the monitor")
+    monitor.failover()
+
+    assert node1.wait_until_state(target_state="wait_primary") # primary
+    assert node2.wait_until_state(target_state="secondary")    # secondary
+    assert node3.wait_until_state(target_state="secondary")    # secondary
+    assert node1.wait_until_state(target_state="primary")      # primary
