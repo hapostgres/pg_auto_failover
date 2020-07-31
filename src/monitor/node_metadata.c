@@ -644,24 +644,12 @@ ListMostAdvancedStandbyNodes(List *groupNodeList)
 
 	foreach(nodeCell, sortedNodeList)
 	{
-		char message[BUFSIZE] = { 0 };
-
 		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
 
 		if (node->reportedLSN == mostAdvancedLSN)
 		{
 			mostAdvancedNodeList = lappend(mostAdvancedNodeList, node);
 		}
-
-		/* TODO: remove that message in the production release */
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"ListMostAdvancedStandbyNodes: %d %X/%X [%X/%X]",
-			node->nodeId,
-			(uint32) (node->reportedLSN >> 32),
-			(uint32) node->reportedLSN,
-			(uint32) (mostAdvancedLSN >> 32),
-			(uint32) mostAdvancedLSN);
 	}
 
 	return mostAdvancedNodeList;
