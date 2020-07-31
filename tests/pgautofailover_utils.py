@@ -557,6 +557,9 @@ class PGNode:
             logs += node.logs()
         print(logs)
 
+        if self.cluster.monitor.pg_autoctl:
+            print("%s" % self.cluster.monitor.pg_autoctl.err)
+
     def enable_ssl(self, sslMode=None, sslSelfSigned=None,
                    sslCAFile=None, sslServerKey=None, sslServerCert=None):
         """
