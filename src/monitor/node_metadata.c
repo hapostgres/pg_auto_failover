@@ -520,6 +520,8 @@ GetAutoFailoverNode(char *nodeHost, int nodePort)
 /*
  * GetAutoFailoverNodeWithId returns a single AutoFailover
  * identified by node id, node name and node port.
+ *
+ * This function returns NULL, when the node could not be found.
  */
 AutoFailoverNode *
 GetAutoFailoverNodeById(int nodeId)
