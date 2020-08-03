@@ -249,12 +249,12 @@ class PGNode:
 
         return dsn
 
-    def run(self, env={}):
+    def run(self, env={}, name=None, host=None, port=None):
         """
         Runs "pg_autoctl run"
         """
         self.pg_autoctl = PGAutoCtl(self)
-        self.pg_autoctl.run()
+        self.pg_autoctl.run(name=name, host=host, port=port)
 
     def running(self):
         return self.pg_autoctl and self.pg_autoctl.run_proc
@@ -707,7 +707,7 @@ class DataNode(PGNode):
         self.listen_flag = listen_flag
         self.formation = formation
 
-    def create(self, run=False, level='-v'):
+    def create(self, run=False, level='-v', name=None, host=None, port=None):
         """
         Runs "pg_autoctl create"
         """
@@ -876,7 +876,7 @@ SELECT reportedstate
         """
         Returns the current list of events from the monitor.
         """
-        last_events_query = "select eventtime, nodeid, nodename, " \
+        last_events_query = "select eventtime, nodename, " \
             "reportedstate, goalstate, " \
             "reportedrepstate, reportedlsn, description " \
             "from pgautofailover.last_events('default', count => 20)"
@@ -885,11 +885,11 @@ SELECT reportedstate
 
     def get_events_str(self):
         return "\n".join(
-            ["%s %25s:%-14s %17s/%-17s %7s %10s %s" % ("eventtime", "id", "name",
+            ["%s %-14s %17s/%-17s %7s %10s %s" % ("eventtime", "name",
                                                        "state", "goal state",
                                                        "repl st", "lsn", "event")]
             +
-            ["%s %2d:%-14s %17s/%-17s %7s %10s %s" % result
+            ["%s %-14s %17s/%-17s %7s %10s %s" % result
              for result in self.get_events()])
 
     def enable_maintenance(self, allowFailover=False):
@@ -924,7 +924,7 @@ SELECT reportedstate
         command.execute("drop node", 'drop', 'node')
         return True
 
-    def set_node_metadata(self, name=None, host=None, port=None):
+    def set_metadata(self, name=None, host=None, port=None):
         """
             Sets node metadata via pg_autoctl
         """
@@ -934,10 +934,10 @@ SELECT reportedstate
             args += ["--name", name]
 
         if host:
-            args += ["--host", host]
+            args += ["--hostname", host]
 
         if port:
-            args += ["--port", port]
+            args += ["--pgport", port]
 
         command = PGAutoCtl(self)
         command.execute(*args)
@@ -1137,7 +1137,7 @@ class MonitorNode(PGNode):
         else:
             self.pg_autoctl.execute("create monitor")
 
-    def run(self, env={}):
+    def run(self, env={}, name=None, host=None, port=None):
         """
         Runs "pg_autoctl run"
         """
@@ -1278,7 +1278,7 @@ class PGAutoCtl():
         if argv:
             self.command = [self.program] + argv
 
-    def run(self, level='-vv'):
+    def run(self, level='-vv', name=None, host=None, port=None):
         """
         Runs our command in the background, returns immediately.
 
@@ -1288,8 +1288,18 @@ class PGAutoCtl():
         if not self.command:
             self.command = [self.program, 'run', '--pgdata', self.datadir, level]
 
+        if name:
+            self.command += ["--name", name]
+
+        if host:
+            self.command += ["--hostname", host]
+
+        if port:
+            self.command += ["--pgport", port]
+
         if self.run_proc:
             self.run_proc.release()
+
         self.run_proc = self.vnode.run_unmanaged(self.command)
         print("pg_autoctl run [%d]" % self.run_proc.pid)
 

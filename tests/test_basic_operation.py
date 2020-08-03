@@ -27,6 +27,9 @@ def test_001_init_primary():
     # the name of the node should be "%s_%d" % ("node", node1.nodeid)
     eq_(node1.get_nodename(), "node_%d" % node1.get_nodeid())
 
+    node1.set_metadata(name="a")
+    eq_(node1.get_nodename(), "a")
+
     node1.run()
     assert node1.wait_until_state(target_state="single")
 
@@ -42,7 +45,10 @@ def test_004_init_secondary():
     global node2
     node2 = cluster.create_datanode("/tmp/basic/node2")
     node2.create()
-    node2.run()
+    node2.run(name="b")
+
+    eq_(node2.get_nodename(), "b")
+
     assert node2.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")
 
