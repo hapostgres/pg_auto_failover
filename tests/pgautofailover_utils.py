@@ -754,6 +754,15 @@ class DataNode(PGNode):
         if self.formation:
             create_args += ['--formation', self.formation]
 
+        if name:
+            create_args += ["--name", name]
+
+        if host:
+            create_args += ["--hostname", host]
+
+        if port:
+            create_args += ["--pgport", port]
+
         if run:
             create_args += ['--run']
 
