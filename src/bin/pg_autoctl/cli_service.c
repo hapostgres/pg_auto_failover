@@ -44,9 +44,12 @@ static void cli_service_status(int argc, char **argv);
 CommandLine service_run_command =
 	make_command("run",
 				 "Run the pg_autoctl service (monitor or keeper)",
-				 CLI_PGDATA_USAGE,
-				 CLI_PGDATA_OPTION,
-				 cli_getopt_pgdata,
+				 " [ --pgdata --nodename --hostname --pgport ] ",
+				 "  --pgdata      path to data directory\n"
+				 "  --nodename    pg_auto_failover node name\n"
+				 "  --hostname    hostname used to connect from other nodes\n"
+				 "  --pgport      PostgreSQL's port number\n",
+				 cli_node_metadata_getopts,
 				 cli_service_run);
 
 CommandLine service_stop_command =
@@ -125,9 +128,13 @@ static void
 cli_keeper_run(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
+	Monitor *monitor = &(keeper.monitor);
 	KeeperConfig *config = &(keeper.config);
 	PostgresSetup *pgSetup = &(keeper.config.pgSetup);
 	LocalPostgresServer *postgres = &(keeper.postgres);
+
+	/* in case --name, --hostname, or --pgport are used */
+	KeeperConfig oldConfig = { 0 };
 
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
@@ -143,6 +150,36 @@ cli_keeper_run(int argc, char **argv)
 	{
 		/* errors have already been logged. */
 		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	/* keep a copy */
+	oldConfig = *config;
+
+	/*
+	 * Now that we have loaded the configuration file, apply the command
+	 * line options on top of it, giving them priority over the config.
+	 */
+	if (!keeper_config_merge_options(config, &keeperOptions))
+	{
+		/* errors have been logged already */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (!monitor_init(monitor, config->monitor_pguri))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (keeper_set_node_metadata(&keeper, &oldConfig))
+	{
+		/* we don't keep a connection to the monitor in this process */
+		pgsql_finish(&(monitor->pgsql));
+	}
+	else
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_MONITOR);
 	}
 
 	/* initialize our local Postgres instance representation */

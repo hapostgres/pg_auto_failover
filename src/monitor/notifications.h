@@ -39,26 +39,5 @@
 void LogAndNotifyMessage(char *message, size_t size, const char *fmt, ...) __attribute__(
 	(format(printf, 3, 4)));
 
-
-int64 NotifyStateChange(ReplicationState reportedState,
-						ReplicationState goalState,
-						const char *formationId,
-						int groupId,
-						int64 nodeId,
-						const char *nodeHost,
-						int nodePort,
-						SyncState pgsrSyncState,
-						XLogRecPtr reportedLSN,
-						int candidatePriority,
-						bool replicationQuorum,
-						char *description);
-
-int64 InsertEvent(const char *formationId, int groupId, int64 nodeId,
-				  const char *nodeHost, int nodePort,
-				  ReplicationState reportedState,
-				  ReplicationState goalState,
-				  SyncState pgsrSyncState,
-				  XLogRecPtr reportedLSN,
-				  int candidatePriority,
-				  bool replicationQuorum,
-				  char *description);
+int64 NotifyStateChange(AutoFailoverNode *node, char *description);
+int64 InsertEvent(AutoFailoverNode *node, char *description);

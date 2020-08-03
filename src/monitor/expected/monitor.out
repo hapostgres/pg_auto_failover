@@ -15,8 +15,15 @@ select *
 ERROR:  primary node is still initializing
 HINT:  Retry registering in a moment
 select *
-  from pgautofailover.node_active('default', 'localhost', 9876,
-                                  current_group_role => 'single');
+  from pgautofailover.set_node_system_identifier(1, 6852685710417058800);
+-[ RECORD 1 ]--------
+node_id   | 1
+node_name | node_1
+node_host | localhost
+node_port | 9876
+
+select *
+  from pgautofailover.node_active('default', 1, 0, current_group_role => 'single');
 -[ RECORD 1 ]---------------+-------
 assigned_node_id            | 1
 assigned_group_id           | 0
@@ -73,19 +80,22 @@ ERROR:  group has no writable node right now
 select * from pgautofailover.get_primary();
 -[ RECORD 1 ]---+----------
 primary_node_id | 1
-primary_name    | localhost
+primary_name    | node_1
+primary_host    | localhost
 primary_port    | 9876
 
 select * from pgautofailover.get_primary('default', 0);
 -[ RECORD 1 ]---+----------
 primary_node_id | 1
-primary_name    | localhost
+primary_name    | node_1
+primary_host    | localhost
 primary_port    | 9876
 
 select * from pgautofailover.get_other_nodes('localhost', 9876);
 -[ RECORD 1 ]---+----------
 node_id         | 2
-node_name       | localhost
+node_name       | node_2
+node_host       | localhost
 node_port       | 9877
 node_lsn        | 0/0
 node_is_primary | f
@@ -117,7 +127,15 @@ reportedstate       | init
 reportedpgisrunning | t
 reportedrepstate    | async
 
-select * from pgautofailover.node_active('default', 'localhost', 9877);
+select *
+  from pgautofailover.set_node_system_identifier(2, 6852685710417058800);
+-[ RECORD 1 ]--------
+node_id   | 2
+node_name | node_2
+node_host | localhost
+node_port | 9877
+
+select * from pgautofailover.node_active('default', 2, 0);
 -[ RECORD 1 ]---------------+-------
 assigned_node_id            | 2
 assigned_group_id           | 0

@@ -92,7 +92,8 @@ CommandLine create_postgres_command =
 		"  --listen          PostgreSQL's listen_addresses\n"
 		"  --username        PostgreSQL's username\n"
 		"  --dbname          PostgreSQL's database name\n"
-		"  --hostname        pg_auto_failover node\n"
+		"  --name            pg_auto_failover node name\n"
+		"  --hostname        hostname used to connect from the other nodes\n"
 		"  --formation       pg_auto_failover formation\n"
 		"  --monitor         pg_auto_failover Monitor Postgres URL\n"
 		"  --auth            authentication method for connections from monitor\n"
@@ -143,7 +144,10 @@ cli_create_config(Keeper *keeper, KeeperConfig *config)
 	 */
 	if (file_exists(config->pathnames.config))
 	{
+		Monitor *monitor = &(keeper->monitor);
 		KeeperConfig options = *config;
+		KeeperConfig oldConfig = { 0 };
+		PostgresSetup optionsFullPgSetup = { 0 };
 
 		if (!keeper_config_read_file(config,
 									 missingPgdataIsOk,
@@ -155,6 +159,23 @@ cli_create_config(Keeper *keeper, KeeperConfig *config)
 			exit(EXIT_CODE_BAD_CONFIG);
 		}
 
+		oldConfig = *config;
+
+		/*
+		 * Before merging command line options into the (maybe) pre-existing
+		 * configuration file, we should also mix in the environment variables
+		 * values in the command line options.
+		 */
+		if (!pg_setup_init(&optionsFullPgSetup,
+						   &(options.pgSetup),
+						   missingPgdataIsOk,
+						   pgIsNotRunningIsOk))
+		{
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		options.pgSetup = optionsFullPgSetup;
+
 		/*
 		 * Now that we have loaded the configuration file, apply the command
 		 * line options on top of it, giving them priority over the config.
@@ -163,6 +184,27 @@ cli_create_config(Keeper *keeper, KeeperConfig *config)
 		{
 			/* errors have been logged already */
 			exit(EXIT_CODE_BAD_CONFIG);
+		}
+
+		/*
+		 * If we have registered to the monitor already, then we need to check
+		 * if the user is providing new --nodename, --hostname, or --pgport
+		 * arguments. After all, they may change their mind of have just
+		 * realized that the --pgport they wanted to use is already in use.
+		 */
+		if (!monitor_init(monitor, config->monitor_pguri))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		if (file_exists(config->pathnames.state) && !config->monitorDisabled)
+		{
+			if (!keeper_set_node_metadata(keeper, &oldConfig))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_MONITOR);
+			}
 		}
 	}
 	else
@@ -218,6 +260,7 @@ cli_create_postgres_getopts(int argc, char **argv)
 		{ "auth", required_argument, NULL, 'A' },
 		{ "skip-pg-hba", no_argument, NULL, 'S' },
 		{ "dbname", required_argument, NULL, 'd' },
+		{ "name", required_argument, NULL, 'a' },
 		{ "hostname", required_argument, NULL, 'n' },
 		{ "formation", required_argument, NULL, 'f' },
 		{ "monitor", required_argument, NULL, 'm' },
@@ -242,7 +285,7 @@ cli_create_postgres_getopts(int argc, char **argv)
 
 	int optind =
 		cli_create_node_getopts(argc, argv, long_options,
-								"C:D:H:p:l:U:A:Sd:n:f:m:MRVvqhP:r:xsN",
+								"C:D:H:p:l:U:A:Sd:a:n:f:m:MRVvqhP:r:xsN",
 								&options);
 
 	/* publish our option parsing in the global variable */

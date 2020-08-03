@@ -547,8 +547,6 @@ wait_until_primary_is_ready(Keeper *keeper,
 
 		if (!monitor_node_active(&(keeper->monitor),
 								 keeper->config.formation,
-								 keeper->config.hostname,
-								 keeper->config.pgSetup.pgport,
 								 keeper->state.current_node_id,
 								 keeper->state.current_group,
 								 keeper->state.current_role,
@@ -861,8 +859,6 @@ keeper_pg_init_node_active(Keeper *keeper)
 
 	if (!monitor_node_active(&(keeper->monitor),
 							 keeper->config.formation,
-							 keeper->config.hostname,
-							 keeper->config.pgSetup.pgport,
 							 keeper->state.current_node_id,
 							 keeper->state.current_group,
 							 keeper->state.current_role,

@@ -484,8 +484,7 @@ cli_enable_maintenance(int argc, char **argv)
 	}
 
 	if (!monitor_start_maintenance(&(keeper.monitor),
-								   keeper.config.hostname,
-								   keeper.config.pgSetup.pgport))
+								   keeper.state.current_node_id))
 	{
 		log_fatal("Failed to start maintenance from the monitor, "
 				  "see above for details");
@@ -558,8 +557,7 @@ cli_disable_maintenance(int argc, char **argv)
 	}
 
 	if (!monitor_stop_maintenance(&(keeper.monitor),
-								  keeper.config.hostname,
-								  keeper.config.pgSetup.pgport))
+								  keeper.state.current_node_id))
 	{
 		log_fatal("Failed to stop maintenance from the monitor, "
 				  "see above for details");

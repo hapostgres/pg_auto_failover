@@ -62,12 +62,13 @@ bool monitor_get_nodes(Monitor *monitor, char *formation, int groupId,
 bool monitor_print_nodes(Monitor *monitor, char *formation, int groupId);
 bool monitor_print_nodes_as_json(Monitor *monitor, char *formation, int groupId);
 bool monitor_get_other_nodes(Monitor *monitor,
-							 char *myHost, int myPort, NodeState currentState,
+							 int myNodeId,
+							 NodeState currentState,
 							 NodeAddressArray *nodeArray);
 bool monitor_print_other_nodes(Monitor *monitor,
-							   char *myHost, int myPort, NodeState currentState);
+							   int myNodeId, NodeState currentState);
 bool monitor_print_other_nodes_as_json(Monitor *monitor,
-									   char *myHost, int myPort,
+									   int myNodeId,
 									   NodeState currentState);
 void printNodeArray(NodeAddressArray *nodesArray);
 
@@ -77,6 +78,7 @@ bool monitor_get_coordinator(Monitor *monitor, char *formation,
 							 NodeAddress *node);
 bool monitor_register_node(Monitor *monitor,
 						   char *formation,
+						   char *name,
 						   char *host,
 						   int port,
 						   uint64_t system_identifier,
@@ -88,7 +90,7 @@ bool monitor_register_node(Monitor *monitor,
 						   bool quorum,
 						   MonitorAssignedState *assignedState);
 bool monitor_node_active(Monitor *monitor,
-						 char *formation, char *host, int port, int nodeId,
+						 char *formation, int nodeId,
 						 int groupId, NodeState currentState,
 						 bool pgIsRunning,
 						 char *currentLSN, char *pgsrSyncState,
@@ -144,13 +146,17 @@ bool monitor_synchronous_standby_names(Monitor *monitor,
 									   char *synchronous_standby_names,
 									   int size);
 
-bool monitor_set_hostname(Monitor *monitor, int nodeId, const char *hostname);
+bool monitor_update_node_metadata(Monitor *monitor,
+								  int nodeId,
+								  const char *name,
+								  const char *hostname,
+								  int port);
 bool monitor_set_node_system_identifier(Monitor *monitor,
 										int nodeId,
 										uint64_t system_identifier);
 
-bool monitor_start_maintenance(Monitor *monitor, char *host, int port);
-bool monitor_stop_maintenance(Monitor *monitor, char *host, int port);
+bool monitor_start_maintenance(Monitor *monitor, int nodeId);
+bool monitor_stop_maintenance(Monitor *monitor, int nodeId);
 
 bool monitor_get_notifications(Monitor *monitor);
 bool monitor_wait_until_primary_applied_settings(Monitor *monitor,

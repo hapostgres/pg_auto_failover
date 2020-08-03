@@ -249,12 +249,12 @@ class PGNode:
 
         return dsn
 
-    def run(self, env={}):
+    def run(self, env={}, name=None, host=None, port=None):
         """
         Runs "pg_autoctl run"
         """
         self.pg_autoctl = PGAutoCtl(self)
-        self.pg_autoctl.run()
+        self.pg_autoctl.run(name=name, host=host, port=port)
 
     def running(self):
         return self.pg_autoctl and self.pg_autoctl.run_proc
@@ -707,7 +707,7 @@ class DataNode(PGNode):
         self.listen_flag = listen_flag
         self.formation = formation
 
-    def create(self, run=False, level='-v'):
+    def create(self, run=False, level='-v', name=None, host=None, port=None):
         """
         Runs "pg_autoctl create"
         """
@@ -754,6 +754,15 @@ class DataNode(PGNode):
         if self.formation:
             create_args += ['--formation', self.formation]
 
+        if name:
+            create_args += ["--name", name]
+
+        if host:
+            create_args += ["--hostname", host]
+
+        if port:
+            create_args += ["--pgport", port]
+
         if run:
             create_args += ['--run']
 
@@ -781,6 +790,19 @@ class DataNode(PGNode):
 
         self.state = json.loads(out)
         return self.state['state']['nodeId']
+
+    def get_nodename(self, nodeId=None):
+        """
+        Fetch the node name from the monitor, given its nodeid
+        """
+        if nodeId is None:
+            nodeId = self.get_nodeid()
+
+        self.name = self.cluster.monitor.run_sql_query(
+            "select nodename from pgautofailover.node where nodeid = %s",
+            nodeId)[0][0]
+
+        return self.name
 
     def destroy(self):
         """
@@ -863,7 +885,7 @@ SELECT reportedstate
         """
         Returns the current list of events from the monitor.
         """
-        last_events_query = "select eventtime, nodeid, hostname, " \
+        last_events_query = "select eventtime, nodename, " \
             "reportedstate, goalstate, " \
             "reportedrepstate, reportedlsn, description " \
             "from pgautofailover.last_events('default', count => 20)"
@@ -871,12 +893,13 @@ SELECT reportedstate
 
 
     def get_events_str(self):
+        "2020-08-03 12:04:41.513761+00:00"
         return "\n".join(
-            ["%s %25s:%-14s %17s/%-17s %7s %10s %s" % ("eventtime", "id", "hostname",
-                                                       "state", "goal state",
-                                                       "repl st", "lsn", "event")]
+            ["%32s %8s %17s/%-17s %7s %10s %s" % ("eventtime", "name",
+                                                  "state", "goal state",
+                                                  "repl st", "lsn", "event")]
             +
-            ["%s %2d:%-14s %17s/%-17s %7s %10s %s" % result
+            ["%32s %8s %17s/%-17s %7s %10s %s" % result
              for result in self.get_events()])
 
     def enable_maintenance(self, allowFailover=False):
@@ -910,6 +933,24 @@ SELECT reportedstate
         command = PGAutoCtl(self)
         command.execute("drop node", 'drop', 'node')
         return True
+
+    def set_metadata(self, name=None, host=None, port=None):
+        """
+            Sets node metadata via pg_autoctl
+        """
+        args = ["set node metadata", 'set', 'node', 'metadata']
+
+        if name:
+            args += ["--name", name]
+
+        if host:
+            args += ["--hostname", host]
+
+        if port:
+            args += ["--pgport", port]
+
+        command = PGAutoCtl(self)
+        command.execute(*args)
 
     def set_candidate_priority(self, candidatePriority):
         """
@@ -1028,7 +1069,7 @@ SELECT reportedstate
               (self.pgversion(), self.pgmajor()))
 
         hostname = str(self.vnode.address)
-        other_nodes = self.monitor.get_other_nodes(hostname, self.port)
+        other_nodes = self.monitor.get_other_nodes(self.nodeid)
         expected_slots = ['pgautofailover_standby_%s' % n[0] for n in other_nodes]
         current_slots = self.list_replication_slot_names()
 
@@ -1106,7 +1147,7 @@ class MonitorNode(PGNode):
         else:
             self.pg_autoctl.execute("create monitor")
 
-    def run(self, env={}):
+    def run(self, env={}, name=None, host=None, port=None):
         """
         Runs "pg_autoctl run"
         """
@@ -1216,12 +1257,12 @@ class MonitorNode(PGNode):
         out, err, ret = command.execute("show state", 'show', 'state')
         print("%s" % out)
 
-    def get_other_nodes(self, host, port):
+    def get_other_nodes(self, nodeid):
         """
         Returns the list of the other nodes in the same formation/group.
         """
-        query = "select * from pgautofailover.get_other_nodes(%s, %s)"
-        return self.run_sql_query(query, host, port)
+        query = "select * from pgautofailover.get_other_nodes(%s)"
+        return self.run_sql_query(query, nodeid)
 
     def check_ssl(self, ssl, sslmode):
         """
@@ -1247,7 +1288,7 @@ class PGAutoCtl():
         if argv:
             self.command = [self.program] + argv
 
-    def run(self, level='-vv'):
+    def run(self, level='-vv', name=None, host=None, port=None):
         """
         Runs our command in the background, returns immediately.
 
@@ -1257,8 +1298,18 @@ class PGAutoCtl():
         if not self.command:
             self.command = [self.program, 'run', '--pgdata', self.datadir, level]
 
+        if name:
+            self.command += ["--name", name]
+
+        if host:
+            self.command += ["--hostname", host]
+
+        if port:
+            self.command += ["--pgport", port]
+
         if self.run_proc:
             self.run_proc.release()
+
         self.run_proc = self.vnode.run_unmanaged(self.command)
         print("pg_autoctl run [%d]" % self.run_proc.pid)
 

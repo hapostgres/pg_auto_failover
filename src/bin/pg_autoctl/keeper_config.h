@@ -30,6 +30,7 @@ typedef struct KeeperConfig
 	char monitor_pguri[MAXCONNINFO];
 	char formation[NAMEDATALEN];
 	int groupId;
+	char name[_POSIX_HOST_NAME_MAX];
 	char hostname[_POSIX_HOST_NAME_MAX];
 	char nodeKind[NAMEDATALEN];
 
