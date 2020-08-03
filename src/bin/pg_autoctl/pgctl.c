@@ -805,6 +805,119 @@ pg_rewind(const char *pgdata,
 }
 
 
+/*
+ * pg_rewind runs the pg_receivewal program to retrieve WAL files in the given
+ * database directory. We need the ability to connect to the node.
+ */
+bool
+pg_receivewal(const char *pgdata,
+			  const char *pg_ctl,
+			  ReplicationSource *replicationSource,
+			  char *targetLSN,
+			  int logLevel)
+{
+	int returnCode;
+	Program program;
+	char pg_receivewal[MAXPGPATH] = { 0 };
+	char pg_wal[MAXPGPATH] = { 0 };
+
+	NodeAddress *primaryNode = &(replicationSource->primaryNode);
+	char primaryConnInfo[MAXCONNINFO] = { 0 };
+
+	char *args[11];
+	int argsIndex = 0;
+
+	char command[BUFSIZE];
+	int commandSize = 0;
+
+	/* call pg_receivewal */
+	path_in_same_directory(pg_ctl, "pg_receivewal", pg_receivewal);
+
+	/* put the received WAL bits, if any, in $PGDATA/pg_wal */
+	sformat(pg_wal, sizeof(pg_wal), "%s/pg_wal", pgdata);
+
+	setenv("PGCONNECT_TIMEOUT", POSTGRES_CONNECT_TIMEOUT, 1);
+
+	if (!IS_EMPTY_STRING_BUFFER(replicationSource->password))
+	{
+		setenv("PGPASSWORD", replicationSource->password, 1);
+	}
+
+	/* we ignore the length returned by prepare_primary_conninfo... */
+	if (!prepare_primary_conninfo(primaryConnInfo,
+								  MAXCONNINFO,
+								  primaryNode->host,
+								  primaryNode->port,
+								  replicationSource->userName,
+								  NULL, /* no database here */
+								  NULL, /* no password here */
+								  replicationSource->applicationName,
+								  replicationSource->sslOptions,
+								  false)) /* do not escape this one */
+	{
+		/* errors have already been logged. */
+		return false;
+	}
+
+	args[argsIndex++] = (char *) pg_receivewal;
+	args[argsIndex++] = "--verbose";
+	args[argsIndex++] = "--directory";
+	args[argsIndex++] = pg_wal;
+	args[argsIndex++] = "--slot";
+	args[argsIndex++] = (char *) replicationSource->slotName;
+	args[argsIndex++] = "--dbname";
+	args[argsIndex++] = primaryConnInfo;
+	args[argsIndex++] = "--synchronous";
+
+	if (targetLSN != NULL)
+	{
+		args[argsIndex++] = "--endpos";
+		args[argsIndex++] = targetLSN;
+	}
+
+	args[argsIndex] = NULL;
+
+	/*
+	 * We do not want to call setsid() when running this program, as the
+	 * pg_rewind subprogram is not intended to be its own session leader, but
+	 * remain a sub-process in the same group as pg_autoctl.
+	 */
+	program = initialize_program(args, false);
+
+	/* log the exact command line we're using */
+	commandSize = snprintf_program_command_line(&program, command, BUFSIZE);
+
+	if (commandSize >= BUFSIZE)
+	{
+		/* we only display the first BUFSIZE bytes of the real command */
+		log_level(logLevel, "%s...", command);
+	}
+	else
+	{
+		log_level(logLevel, "%s", command);
+	}
+
+	(void) execute_subprogram(&program);
+
+	returnCode = program.returnCode;
+	free_program(&program);
+
+	if (returnCode != 0)
+	{
+		(void) log_program_output(program, LOG_INFO, LOG_ERROR);
+
+		log_error("Failed to run pg_receivewal: exit code %d", returnCode);
+		return false;
+	}
+	else
+	{
+		(void) log_program_output(program, LOG_DEBUG, LOG_DEBUG);
+	}
+
+	return true;
+}
+
+
 /* log_program_output logs the output of the given program. */
 static void
 log_program_output(Program prog, int outLogLevel, int errorLogLevel)
@@ -1297,6 +1410,7 @@ pg_setup_standby_mode(uint32_t pg_control_version,
 				  pg_control_version, pgdata);
 		return false;
 	}
+
 	if (pg_control_version < 1200)
 	{
 		/*

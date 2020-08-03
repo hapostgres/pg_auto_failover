@@ -81,6 +81,7 @@ void keeper_cli_add_standby_to_hba(int argc, char **argv);
 void keeper_cli_init_standby(int argc, char **argv);
 void keeper_cli_rewind_old_primary(int argc, char **argv);
 void keeper_cli_promote_standby(int argc, char **argv);
+void keeper_cli_receiwal(int argc, char **argv);
 
 
 #endif  /* CLI_DO_ROOT_H */
