@@ -893,12 +893,13 @@ SELECT reportedstate
 
 
     def get_events_str(self):
+        "2020-08-03 12:04:41.513761+00:00"
         return "\n".join(
-            ["%s %-14s %17s/%-17s %7s %10s %s" % ("eventtime", "name",
-                                                       "state", "goal state",
-                                                       "repl st", "lsn", "event")]
+            ["%32s %8s %17s/%-17s %7s %10s %s" % ("eventtime", "name",
+                                                  "state", "goal state",
+                                                  "repl st", "lsn", "event")]
             +
-            ["%s %-14s %17s/%-17s %7s %10s %s" % result
+            ["%32s %8s %17s/%-17s %7s %10s %s" % result
              for result in self.get_events()])
 
     def enable_maintenance(self, allowFailover=False):
