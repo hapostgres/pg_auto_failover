@@ -1495,9 +1495,11 @@ printCurrentState(void *ctx, PGresult *result)
 
 	int maxNameSize = 5;    /* strlen("Name") + 1, the header */
 	int maxHostSize = 10;   /* strlen("Host:Port") + 1, the header */
+	int maxNodeSize = 5;    /* strlen("Node") + 1, the header */
 
 	char *nameSeparatorHeader = NULL;
 	char *hostSeparatorHeader = NULL;
+	char *nodeSeparatorHeader = NULL;
 
 	bool pg_autoctl_debug = env_exists(PG_AUTOCTL_DEBUG);
 
@@ -1518,7 +1520,11 @@ printCurrentState(void *ctx, PGresult *result)
 		char *host = PQgetvalue(result, currentTupleIndex, 1);
 		char *port = PQgetvalue(result, currentTupleIndex, 2);
 
+		char *groupId = PQgetvalue(result, currentTupleIndex, 3);
+		char *nodeId = PQgetvalue(result, currentTupleIndex, 4);
+
 		int hostLen = strlen(host) + strlen(port) + 1; /* host:port */
+		int nodeLen = strlen(groupId) + strlen(nodeId) + 1; /* 0/1 */
 
 		if (strlen(name) > maxNameSize)
 		{
@@ -1529,6 +1535,11 @@ printCurrentState(void *ctx, PGresult *result)
 		{
 			maxHostSize = hostLen;
 		}
+
+		if (nodeLen > maxNodeSize)
+		{
+			maxNodeSize = nodeLen;
+		}
 	}
 
 	/* prepare a nice dynamic string of '-' as a header separator */
@@ -1538,7 +1549,12 @@ printCurrentState(void *ctx, PGresult *result)
 	hostSeparatorHeader = (char *) malloc((maxHostSize + 1) * sizeof(char));
 	(void) bzero((void *) hostSeparatorHeader, maxHostSize + 1);
 
-	if (nameSeparatorHeader == NULL || hostSeparatorHeader == NULL)
+	nodeSeparatorHeader = (char *) malloc((maxNodeSize + 1) * sizeof(char));
+	(void) bzero((void *) nodeSeparatorHeader, maxNodeSize + 1);
+
+	if (nameSeparatorHeader == NULL ||
+		hostSeparatorHeader == NULL ||
+		nodeSeparatorHeader == NULL)
 	{
 		log_error("Failed to allocate memory, probably because it's all used");
 		context->parsedOK = false;
@@ -1554,31 +1570,40 @@ printCurrentState(void *ctx, PGresult *result)
 	{
 		hostSeparatorHeader[i] = '-';
 	}
+	for (int i = 0; i < maxNodeSize; i++)
+	{
+		nodeSeparatorHeader[i] = '-';
+	}
 
 	if (pg_autoctl_debug)
 	{
-		fformat(stdout, "%*s | %*s | %6s | %17s | %17s | %8s | %6s\n",
-				maxNameSize, "Name", maxHostSize, "Host:Port",
-				"Node", "Current State", "Assigned State",
+		fformat(stdout, "%*s | %*s | %*s | %17s | %17s | %8s | %6s\n",
+				maxNameSize, "Name",
+				maxHostSize, "Host:Port",
+				maxNodeSize, "Node",
+				"Current State", "Assigned State",
 				"Priority", "Quorum");
 
-		fformat(stdout, "%*s-+-%*s-+-%6s-+-%17s-+-%17s-+-%8s-+-%6s\n",
+		fformat(stdout, "%*s-+-%*s-+-%*s-+-%17s-+-%17s-+-%8s-+-%6s\n",
 				maxNameSize, nameSeparatorHeader,
 				maxHostSize, hostSeparatorHeader,
-				"------", "-----------------", "-----------------",
+				maxNodeSize, nodeSeparatorHeader,
+				"-----------------", "-----------------",
 				"--------", "------");
 	}
 	else
 	{
-		fformat(stdout, "%*s | %*s | %5s | %17s | %17s\n",
+		fformat(stdout, "%*s | %*s | %*s | %17s | %17s\n",
 				maxNameSize, "Name",
 				maxHostSize, "Host:Port",
-				"Node", "Current State", "Assigned State");
+				maxNodeSize, "Node",
+				"Current State", "Assigned State");
 
-		fformat(stdout, "%*s-+-%*s-+-%6s-+-%17s-+-%17s\n",
+		fformat(stdout, "%*s-+-%*s-+-%*s-+-%17s-+-%17s\n",
 				maxNameSize, nameSeparatorHeader,
 				maxHostSize, hostSeparatorHeader,
-				"------", "-----------------", "-----------------");
+				maxNodeSize, nodeSeparatorHeader,
+				"-----------------", "-----------------");
 	}
 
 	free(nameSeparatorHeader);
@@ -1604,18 +1629,18 @@ printCurrentState(void *ctx, PGresult *result)
 
 		if (pg_autoctl_debug)
 		{
-			fformat(stdout, "%*s | %*s | %6s | %17s | %17s | %8s | %6s\n",
+			fformat(stdout, "%*s | %*s | %*s | %17s | %17s | %8s | %6s\n",
 					maxNameSize, name,
 					maxHostSize, hostport,
-					composedId,
+					maxNodeSize, composedId,
 					currentState, goalState,
 					candidatePriority, replicationQuorum);
 		}
 		else
 		{
-			fformat(stdout, "%*s | %*s | %6s | %17s | %17s\n",
+			fformat(stdout, "%*s | %*s | %*s | %17s | %17s\n",
 					maxNameSize, name, maxHostSize, hostport,
-					composedId, currentState, goalState);
+					maxNodeSize, composedId, currentState, goalState);
 		}
 	}
 	fformat(stdout, "\n");
