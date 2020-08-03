@@ -1492,8 +1492,12 @@ printCurrentState(void *ctx, PGresult *result)
 		(MonitorAssignedStateParseContext *) ctx;
 	int currentTupleIndex = 0;
 	int nTuples = PQntuples(result);
+
 	int maxNameSize = 5;    /* strlen("Name") + 1, the header */
+	int maxHostSize = 10;   /* strlen("Host:Port") + 1, the header */
+
 	char *nameSeparatorHeader = NULL;
+	char *hostSeparatorHeader = NULL;
 
 	bool pg_autoctl_debug = env_exists(PG_AUTOCTL_DEBUG);
 
@@ -1510,11 +1514,20 @@ printCurrentState(void *ctx, PGresult *result)
 	 */
 	for (currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
 	{
-		char *hostname = PQgetvalue(result, currentTupleIndex, 0);
+		char *name = PQgetvalue(result, currentTupleIndex, 0);
+		char *host = PQgetvalue(result, currentTupleIndex, 1);
+		char *port = PQgetvalue(result, currentTupleIndex, 2);
 
-		if (strlen(hostname) > maxNameSize)
+		int hostLen = strlen(host) + strlen(port) + 1; /* host:port */
+
+		if (strlen(name) > maxNameSize)
 		{
-			maxNameSize = strlen(hostname);
+			maxNameSize = strlen(name);
+		}
+
+		if (hostLen > maxHostSize)
+		{
+			maxHostSize = hostLen;
 		}
 	}
 
@@ -1522,48 +1535,60 @@ printCurrentState(void *ctx, PGresult *result)
 	nameSeparatorHeader = (char *) malloc((maxNameSize + 1) * sizeof(char));
 	(void) bzero((void *) nameSeparatorHeader, maxNameSize + 1);
 
-	if (nameSeparatorHeader == NULL)
+	hostSeparatorHeader = (char *) malloc((maxHostSize + 1) * sizeof(char));
+	(void) bzero((void *) hostSeparatorHeader, maxHostSize + 1);
+
+	if (nameSeparatorHeader == NULL || hostSeparatorHeader == NULL)
 	{
 		log_error("Failed to allocate memory, probably because it's all used");
 		context->parsedOK = false;
 		return;
 	}
 
+	/* print size times a "-" charatter in the separator string */
 	for (int i = 0; i < maxNameSize; i++)
 	{
 		nameSeparatorHeader[i] = '-';
 	}
+	for (int i = 0; i < maxHostSize; i++)
+	{
+		hostSeparatorHeader[i] = '-';
+	}
 
 	if (pg_autoctl_debug)
 	{
-		fformat(stdout, "%*s | %6s | %5s | %17s | %17s | %8s | %6s\n",
-				maxNameSize, "Name",
-				"Group", "Node", "Current State", "Assigned State",
+		fformat(stdout, "%*s | %*s | %6s | %17s | %17s | %8s | %6s\n",
+				maxNameSize, "Name", maxHostSize, "Host:Port",
+				"Node", "Current State", "Assigned State",
 				"Priority", "Quorum");
 
-		fformat(stdout, "%*s-+-%6s-+-%5s-+-%17s-+-%17s-+-%8s-+-%6s\n",
+		fformat(stdout, "%*s-+-%*s-+-%6s-+-%17s-+-%17s-+-%8s-+-%6s\n",
 				maxNameSize, nameSeparatorHeader,
-				"------", "-----", "-----------------", "-----------------",
+				maxHostSize, hostSeparatorHeader,
+				"------", "-----------------", "-----------------",
 				"--------", "------");
 	}
 	else
 	{
-		fformat(stdout, "%*s | %6s | %5s | %17s | %17s\n",
+		fformat(stdout, "%*s | %*s | %5s | %17s | %17s\n",
 				maxNameSize, "Name",
-				"Group", "Node", "Current State", "Assigned State");
+				maxHostSize, "Host:Port",
+				"Node", "Current State", "Assigned State");
 
-		fformat(stdout, "%*s-+-%6s-+-%5s-+-%17s-+-%17s\n",
+		fformat(stdout, "%*s-+-%*s-+-%6s-+-%17s-+-%17s\n",
 				maxNameSize, nameSeparatorHeader,
-				"------", "-----", "-----------------", "-----------------");
+				maxHostSize, hostSeparatorHeader,
+				"------", "-----------------", "-----------------");
 	}
+
 	free(nameSeparatorHeader);
+	free(hostSeparatorHeader);
 
 	for (currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
 	{
 		char *name = PQgetvalue(result, currentTupleIndex, 0);
-
-		/* char *hostname = PQgetvalue(result, currentTupleIndex, 1); */
-		/* char *nodeport = PQgetvalue(result, currentTupleIndex, 2); */
+		char *host = PQgetvalue(result, currentTupleIndex, 1);
+		char *port = PQgetvalue(result, currentTupleIndex, 2);
 		char *groupId = PQgetvalue(result, currentTupleIndex, 3);
 		char *nodeId = PQgetvalue(result, currentTupleIndex, 4);
 		char *currentState = PQgetvalue(result, currentTupleIndex, 5);
@@ -1571,18 +1596,26 @@ printCurrentState(void *ctx, PGresult *result)
 		char *candidatePriority = PQgetvalue(result, currentTupleIndex, 7);
 		char *replicationQuorum = PQgetvalue(result, currentTupleIndex, 8);
 
+		char hostport[BUFSIZE] = { 0 };
+		char composedId[BUFSIZE] = { 0 };
+
+		sformat(hostport, sizeof(hostport), "%s:%s", host, port);
+		sformat(composedId, sizeof(hostport), "%s/%s", groupId, nodeId);
+
 		if (pg_autoctl_debug)
 		{
-			fformat(stdout, "%*s | %6s | %5s | %17s | %17s | %8s | %6s\n",
-					maxNameSize, name, groupId, nodeId,
+			fformat(stdout, "%*s | %*s | %6s | %17s | %17s | %8s | %6s\n",
+					maxNameSize, name,
+					maxHostSize, hostport,
+					composedId,
 					currentState, goalState,
 					candidatePriority, replicationQuorum);
 		}
 		else
 		{
-			fformat(stdout, "%*s | %6s | %5s | %17s | %17s\n",
-					maxNameSize, name, groupId, nodeId,
-					currentState, goalState);
+			fformat(stdout, "%*s | %*s | %6s | %17s | %17s\n",
+					maxNameSize, name, maxHostSize, hostport,
+					composedId, currentState, goalState);
 		}
 	}
 	fformat(stdout, "\n");
