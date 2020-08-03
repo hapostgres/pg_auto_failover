@@ -158,6 +158,7 @@ keeper_pg_init_and_register(Keeper *keeper)
 			log_fatal("The state file \"%s\" exists and "
 					  "there's no init in progress", config->pathnames.state);
 			log_info("HINT: use `pg_autoctl run` to start the service.");
+			exit(EXIT_CODE_QUIT);
 		}
 		return createAndRun;
 	}
