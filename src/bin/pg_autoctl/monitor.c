@@ -1497,9 +1497,9 @@ printCurrentState(void *ctx, PGresult *result)
 	int maxHostSize = 10;   /* strlen("Host:Port") + 1, the header */
 	int maxNodeSize = 5;    /* strlen("Node") + 1, the header */
 
-	char *nameSeparatorHeader = NULL;
-	char *hostSeparatorHeader = NULL;
-	char *nodeSeparatorHeader = NULL;
+	char nameSeparatorHeader[BUFSIZE] = { 0 };
+	char hostSeparatorHeader[BUFSIZE] = { 0 };
+	char nodeSeparatorHeader[BUFSIZE] = { 0 };
 
 	bool pg_autoctl_debug = env_exists(PG_AUTOCTL_DEBUG);
 
@@ -1543,37 +1543,9 @@ printCurrentState(void *ctx, PGresult *result)
 	}
 
 	/* prepare a nice dynamic string of '-' as a header separator */
-	nameSeparatorHeader = (char *) malloc((maxNameSize + 1) * sizeof(char));
-	(void) bzero((void *) nameSeparatorHeader, maxNameSize + 1);
-
-	hostSeparatorHeader = (char *) malloc((maxHostSize + 1) * sizeof(char));
-	(void) bzero((void *) hostSeparatorHeader, maxHostSize + 1);
-
-	nodeSeparatorHeader = (char *) malloc((maxNodeSize + 1) * sizeof(char));
-	(void) bzero((void *) nodeSeparatorHeader, maxNodeSize + 1);
-
-	if (nameSeparatorHeader == NULL ||
-		hostSeparatorHeader == NULL ||
-		nodeSeparatorHeader == NULL)
-	{
-		log_error("Failed to allocate memory, probably because it's all used");
-		context->parsedOK = false;
-		return;
-	}
-
-	/* print size times a "-" charatter in the separator string */
-	for (int i = 0; i < maxNameSize; i++)
-	{
-		nameSeparatorHeader[i] = '-';
-	}
-	for (int i = 0; i < maxHostSize; i++)
-	{
-		hostSeparatorHeader[i] = '-';
-	}
-	for (int i = 0; i < maxNodeSize; i++)
-	{
-		nodeSeparatorHeader[i] = '-';
-	}
+	(void) prepareHostNameSeparator(nameSeparatorHeader, maxNameSize);
+	(void) prepareHostNameSeparator(hostSeparatorHeader, maxHostSize);
+	(void) prepareHostNameSeparator(nodeSeparatorHeader, maxNodeSize);
 
 	if (pg_autoctl_debug)
 	{
@@ -1605,9 +1577,6 @@ printCurrentState(void *ctx, PGresult *result)
 				maxNodeSize, nodeSeparatorHeader,
 				"-----------------", "-----------------");
 	}
-
-	free(nameSeparatorHeader);
-	free(hostSeparatorHeader);
 
 	for (currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
 	{
@@ -2255,7 +2224,6 @@ printFormationURI(void *ctx, PGresult *result)
 	int currentTupleIndex = 0;
 	int nTuples = PQntuples(result);
 
-	int index = 0;
 	int maxFormationNameSize = 7;   /* "monitor" */
 	char formationNameSeparator[BUFSIZE] = { 0 };
 
@@ -2283,10 +2251,7 @@ printFormationURI(void *ctx, PGresult *result)
 	}
 
 	/* create the visual separator for the formation name too */
-	for (index = 0; index < maxFormationNameSize; index++)
-	{
-		formationNameSeparator[index] = '-';
-	}
+	(void) prepareHostNameSeparator(formationNameSeparator, maxFormationNameSize);
 
 	fformat(stdout, "%10s | %*s | %s\n",
 			"Type", maxFormationNameSize, "Name", "Connection String");
