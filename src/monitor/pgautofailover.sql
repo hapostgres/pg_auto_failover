@@ -286,8 +286,7 @@ grant execute on function pgautofailover.get_primary(text,int)
 
 CREATE FUNCTION pgautofailover.get_other_nodes
  (
-    IN node_name        text,
-    IN node_port        int,
+    IN nodeid           int,
    OUT node_id          int,
    OUT node_name        text,
    OUT node_host        text,
@@ -298,16 +297,15 @@ CREATE FUNCTION pgautofailover.get_other_nodes
 RETURNS SETOF record LANGUAGE C STRICT
 AS 'MODULE_PATHNAME', $$get_other_nodes$$;
 
-comment on function pgautofailover.get_other_nodes(text,int)
+comment on function pgautofailover.get_other_nodes(int)
         is 'get the other nodes in a group';
 
-grant execute on function pgautofailover.get_other_nodes(text,int)
+grant execute on function pgautofailover.get_other_nodes(int)
    to autoctl_node;
 
 CREATE FUNCTION pgautofailover.get_other_nodes
  (
-    IN node_name        text,
-    IN node_port        int,
+    IN nodeid           int,
     IN current_state    pgautofailover.replication_state,
    OUT node_id          int,
    OUT node_name        text,
@@ -320,11 +318,11 @@ RETURNS SETOF record LANGUAGE C STRICT
 AS 'MODULE_PATHNAME', $$get_other_nodes$$;
 
 comment on function pgautofailover.get_other_nodes
-                    (text,int,pgautofailover.replication_state)
+                    (int,pgautofailover.replication_state)
         is 'get the other nodes in a group, filtering on current_state';
 
 grant execute on function pgautofailover.get_other_nodes
-                          (text,int,pgautofailover.replication_state)
+                          (int,pgautofailover.replication_state)
    to autoctl_node;
 
 CREATE FUNCTION pgautofailover.get_coordinator

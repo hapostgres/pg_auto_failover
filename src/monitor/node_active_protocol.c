@@ -654,7 +654,7 @@ typedef struct get_nodes_fctx
 } get_nodes_fctx;
 
 /*
- * get_other_node returns the other node in a group, if any.
+ * get_nodes returns all the node in a group, if any.
  */
 Datum
 get_nodes(PG_FUNCTION_ARGS)
@@ -781,9 +781,7 @@ get_other_nodes(PG_FUNCTION_ARGS)
 	/* stuff done only on the first call of the function */
 	if (SRF_IS_FIRSTCALL())
 	{
-		text *nodeHostText = PG_GETARG_TEXT_P(0);
-		char *nodeHost = text_to_cstring(nodeHostText);
-		int32 nodePort = PG_GETARG_INT32(1);
+		int32 nodeId = PG_GETARG_INT32(0);
 
 		AutoFailoverNode *activeNode = NULL;
 
@@ -804,20 +802,19 @@ get_other_nodes(PG_FUNCTION_ARGS)
 		 * Use fctx to keep state from call to call. Seed current with the
 		 * original start value
 		 */
-		activeNode = GetAutoFailoverNode(nodeHost, nodePort);
+		activeNode = GetAutoFailoverNodeById(nodeId);
 		if (activeNode == NULL)
 		{
-			ereport(ERROR,
-					(errmsg("node %s:%d is not registered", nodeHost, nodePort)));
+			ereport(ERROR, (errmsg("node %d is not registered", nodeId)));
 		}
 
-		if (PG_NARGS() == 2)
+		if (PG_NARGS() == 1)
 		{
 			fctx->nodesList = AutoFailoverOtherNodesList(activeNode);
 		}
-		else if (PG_NARGS() == 3)
+		else if (PG_NARGS() == 2)
 		{
-			Oid currentReplicationStateOid = PG_GETARG_OID(2);
+			Oid currentReplicationStateOid = PG_GETARG_OID(1);
 			ReplicationState currentState =
 				EnumGetReplicationState(currentReplicationStateOid);
 

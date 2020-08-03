@@ -274,32 +274,34 @@ monitor_print_nodes_as_json(Monitor *monitor, char *formation, int groupId)
  */
 bool
 monitor_get_other_nodes(Monitor *monitor,
-						char *myHost, int myPort, NodeState currentState,
+						int myNodeId,
+						NodeState currentState,
 						NodeAddressArray *nodeArray)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
 		currentState == ANY_STATE
 		?
-		"SELECT * FROM pgautofailover.get_other_nodes($1, $2) "
+		"SELECT * FROM pgautofailover.get_other_nodes($1) "
 		"ORDER BY node_id"
 		:
-		"SELECT * FROM pgautofailover.get_other_nodes($1, $2, "
-		"$3::pgautofailover.replication_state) "
+		"SELECT * FROM pgautofailover.get_other_nodes($1, "
+		"$2::pgautofailover.replication_state) "
 		"ORDER BY node_id";
-	int paramCount = 2;
-	Oid paramTypes[3] = { TEXTOID, INT4OID, TEXTOID };
-	const char *paramValues[3] = { 0 };
-	NodeAddressArrayParseContext parseContext = { { 0 }, nodeArray, false };
-	IntString myPortString = intToString(myPort);
 
-	paramValues[0] = myHost;
-	paramValues[1] = myPortString.strValue;
+	int paramCount = currentState == ANY_STATE ? 1 : 2;
+	Oid paramTypes[2] = { INT4OID, TEXTOID };
+	const char *paramValues[3] = { 0 };
+
+	NodeAddressArrayParseContext parseContext = { { 0 }, nodeArray, false };
+
+	IntString myNodeIdString = intToString(myNodeId);
+
+	paramValues[0] = myNodeIdString.strValue;
 
 	if (currentState != ANY_STATE)
 	{
-		++paramCount;
-		paramValues[2] = NodeStateToString(currentState);
+		paramValues[1] = NodeStateToString(currentState);
 	}
 
 	if (!pgsql_execute_with_params(pgsql, sql,
@@ -307,7 +309,7 @@ monitor_get_other_nodes(Monitor *monitor,
 								   &parseContext, parseNodeArray))
 	{
 		log_error("Failed to get other nodes from the monitor while running "
-				  "\"%s\" with host %s and port %d", sql, myHost, myPort);
+				  "\"%s\" with node id %d", sql, myNodeId);
 		return false;
 	}
 
@@ -317,9 +319,9 @@ monitor_get_other_nodes(Monitor *monitor,
 	if (!parseContext.parsedOK)
 	{
 		log_error("Failed to get the other nodes from the monitor while running "
-				  "\"%s\" with host %s and port %d because it returned an "
+				  "\"%s\" with node id %d because it returned an "
 				  "unexpected result. See previous line for details.",
-				  sql, myHost, myPort);
+				  sql, myNodeId);
 		return false;
 	}
 
@@ -333,12 +335,11 @@ monitor_get_other_nodes(Monitor *monitor,
  */
 bool
 monitor_print_other_nodes(Monitor *monitor,
-						  char *myHost, int myPort, NodeState currentState)
+						  int myNodeId, NodeState currentState)
 {
 	NodeAddressArray otherNodesArray;
 
-	if (!monitor_get_other_nodes(monitor,
-								 myHost, myPort, currentState,
+	if (!monitor_get_other_nodes(monitor, myNodeId, currentState,
 								 &otherNodesArray))
 	{
 		/* errors have already been logged */
@@ -357,7 +358,7 @@ monitor_print_other_nodes(Monitor *monitor,
  */
 bool
 monitor_print_other_nodes_as_json(Monitor *monitor,
-								  char *myHost, int myPort,
+								  int myNodeId,
 								  NodeState currentState)
 {
 	PGSQL *pgsql = &monitor->pgsql;
@@ -367,24 +368,22 @@ monitor_print_other_nodes_as_json(Monitor *monitor,
 		currentState == ANY_STATE
 		?
 		"SELECT jsonb_pretty(coalesce(jsonb_agg(row_to_json(nodes)), '[]'))"
-		" FROM pgautofailover.get_other_nodes($1, $2) as nodes"
+		" FROM pgautofailover.get_other_nodes($1) as nodes"
 		:
 		"SELECT jsonb_pretty(coalesce(jsonb_agg(row_to_json(nodes)), '[]'))"
-		" FROM pgautofailover.get_other_nodes($1, $2, "
+		" FROM pgautofailover.get_other_nodes($1, "
 		"$3::pgautofailover.replication_state) as nodes";
 
-	int paramCount = 2;
-	Oid paramTypes[3] = { TEXTOID, INT4OID, TEXTOID };
-	const char *paramValues[3] = { 0 };
-	IntString myPortString = intToString(myPort);
+	int paramCount = currentState == ANY_STATE ? 2 : 1;
+	Oid paramTypes[2] = { INT4OID, TEXTOID };
+	const char *paramValues[2] = { 0 };
+	IntString myNodeIdString = intToString(myNodeId);
 
-	paramValues[0] = myHost;
-	paramValues[1] = myPortString.strValue;
+	paramValues[0] = myNodeIdString.strValue;
 
 	if (currentState != ANY_STATE)
 	{
-		++paramCount;
-		paramValues[2] = NodeStateToString(currentState);
+		paramValues[1] = NodeStateToString(currentState);
 	}
 
 	if (!pgsql_execute_with_params(pgsql, sql,
@@ -392,7 +391,7 @@ monitor_print_other_nodes_as_json(Monitor *monitor,
 								   &context, &parseSingleValueResult))
 	{
 		log_error("Failed to get the other nodes from the monitor while running "
-				  "\"%s\" with host %s and port %d", sql, myHost, myPort);
+				  "\"%s\" with node id %d", sql, myNodeId);
 		return false;
 	}
 
@@ -402,9 +401,9 @@ monitor_print_other_nodes_as_json(Monitor *monitor,
 	if (!context.parsedOk)
 	{
 		log_error("Failed to get the other nodes from the monitor while running "
-				  "\"%s\" with host %s and port %d because it returned an "
+				  "\"%s\" with node id %d because it returned an "
 				  "unexpected result. See previous line for details.",
-				  sql, myHost, myPort);
+				  sql, myNodeId);
 		return false;
 	}
 

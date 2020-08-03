@@ -1069,7 +1069,7 @@ SELECT reportedstate
               (self.pgversion(), self.pgmajor()))
 
         hostname = str(self.vnode.address)
-        other_nodes = self.monitor.get_other_nodes(hostname, self.port)
+        other_nodes = self.monitor.get_other_nodes(self.nodeid)
         expected_slots = ['pgautofailover_standby_%s' % n[0] for n in other_nodes]
         current_slots = self.list_replication_slot_names()
 
@@ -1257,12 +1257,12 @@ class MonitorNode(PGNode):
         out, err, ret = command.execute("show state", 'show', 'state')
         print("%s" % out)
 
-    def get_other_nodes(self, host, port):
+    def get_other_nodes(self, nodeid):
         """
         Returns the list of the other nodes in the same formation/group.
         """
-        query = "select * from pgautofailover.get_other_nodes(%s, %s)"
-        return self.run_sql_query(query, host, port)
+        query = "select * from pgautofailover.get_other_nodes(%s)"
+        return self.run_sql_query(query, nodeid)
 
     def check_ssl(self, ssl, sslmode):
         """

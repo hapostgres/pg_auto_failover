@@ -917,9 +917,6 @@ keeper_maintain_replication_slots(Keeper *keeper)
 	PostgresSetup *pgSetup = &(keeper->postgres.postgresSetup);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
-	char *host = keeper->config.hostname;
-	int port = pgSetup->pgport;
-
 	/* do we bypass the whole operation? */
 	bool bypass = false;
 
@@ -992,7 +989,7 @@ keeper_maintain_replication_slots(Keeper *keeper)
 		return true;
 	}
 
-	if (!monitor_get_other_nodes(monitor, host, port,
+	if (!monitor_get_other_nodes(monitor, keeper->state.current_node_id,
 								 ANY_STATE, &(keeper->otherNodes)))
 	{
 		/* errors have already been logged */
@@ -1460,19 +1457,16 @@ bool
 keeper_refresh_other_nodes(Keeper *keeper, bool forceCacheInvalidation)
 {
 	Monitor *monitor = &(keeper->monitor);
-	KeeperConfig *config = &(keeper->config);
-	PostgresSetup *postgresSetup = &(keeper->postgres.postgresSetup);
 
 	NodeAddressArray *otherNodesArray = &(keeper->otherNodes);
 	NodeAddressArray newNodesArray = { 0 };
 	NodeAddressArray diffNodesArray = { 0 };
 
-	char *host = config->hostname;
-	int port = postgresSetup->pgport;
+	int nodeId = keeper->state.current_node_id;
 
 	log_trace("keeper_refresh_other_nodes");
 
-	if (!monitor_get_other_nodes(monitor, host, port, ANY_STATE, &newNodesArray))
+	if (!monitor_get_other_nodes(monitor, nodeId, ANY_STATE, &newNodesArray))
 	{
 		log_error("Failed to get_other_nodes() on the monitor");
 		return false;

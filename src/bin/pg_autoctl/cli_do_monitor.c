@@ -202,15 +202,17 @@ cli_do_monitor_get_primary_node(int argc, char **argv)
 static void
 cli_do_monitor_get_other_nodes(int argc, char **argv)
 {
-	KeeperConfig config = keeperOptions;
-
-	Monitor monitor = { 0 };
+	Keeper keeper = { 0 };
+	KeeperConfig *config = &(keeper.config);
+	Monitor *monitor = &(keeper.monitor);
 
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
 	bool monitorDisabledIsOk = false;
 
-	if (!keeper_config_read_file(&config,
+	keeper.config = keeperOptions;
+
+	if (!keeper_config_read_file(config,
 								 missingPgdataIsOk,
 								 pgIsNotRunningIsOk,
 								 monitorDisabledIsOk))
@@ -219,7 +221,14 @@ cli_do_monitor_get_other_nodes(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	if (!monitor_init(&monitor, config.monitor_pguri))
+	/* load the state file to get the node id */
+	if (!keeper_init(&keeper, config))
+	{
+		/* errors are logged in keeper_state_read */
+		exit(EXIT_CODE_BAD_STATE);
+	}
+
+	if (!monitor_init(monitor, config->monitor_pguri))
 	{
 		log_fatal("Failed to contact the monitor because its URL is invalid, "
 				  "see above for details");
@@ -228,9 +237,8 @@ cli_do_monitor_get_other_nodes(int argc, char **argv)
 
 	if (outputJSON)
 	{
-		if (!monitor_print_other_nodes_as_json(&monitor,
-											   config.hostname,
-											   config.pgSetup.pgport,
+		if (!monitor_print_other_nodes_as_json(monitor,
+											   keeper.state.current_node_id,
 											   ANY_STATE))
 		{
 			log_fatal("Failed to get the other nodes from the monitor, "
@@ -240,9 +248,8 @@ cli_do_monitor_get_other_nodes(int argc, char **argv)
 	}
 	else
 	{
-		if (!monitor_print_other_nodes(&monitor,
-									   config.hostname,
-									   config.pgSetup.pgport,
+		if (!monitor_print_other_nodes(monitor,
+									   keeper.state.current_node_id,
 									   ANY_STATE))
 		{
 			log_fatal("Failed to get the other nodes from the monitor, "

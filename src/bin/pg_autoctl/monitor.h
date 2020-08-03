@@ -62,12 +62,13 @@ bool monitor_get_nodes(Monitor *monitor, char *formation, int groupId,
 bool monitor_print_nodes(Monitor *monitor, char *formation, int groupId);
 bool monitor_print_nodes_as_json(Monitor *monitor, char *formation, int groupId);
 bool monitor_get_other_nodes(Monitor *monitor,
-							 char *myHost, int myPort, NodeState currentState,
+							 int myNodeId,
+							 NodeState currentState,
 							 NodeAddressArray *nodeArray);
 bool monitor_print_other_nodes(Monitor *monitor,
-							   char *myHost, int myPort, NodeState currentState);
+							   int myNodeId, NodeState currentState);
 bool monitor_print_other_nodes_as_json(Monitor *monitor,
-									   char *myHost, int myPort,
+									   int myNodeId,
 									   NodeState currentState);
 void printNodeArray(NodeAddressArray *nodesArray);
 
