@@ -1,7 +1,5 @@
-.. _postgres_quickstart:
-
-pg_auto_failover Quick Start
-============================
+pg_auto_failover Tutorial
+=========================
 
 In this guide we’ll create a primary and secondary Postgres node and set
 up pg_auto_failover to replicate data between them. We’ll simulate failure in
@@ -13,8 +11,6 @@ platform, but the techniques here are relevant to any cloud provider or
 on-premise network. We'll use four virtual machines: a primary database, a
 secondary database, a monitor, and an "application." The monitor watches the
 other nodes’ health, manages global state, and assigns nodes their roles.
-
-.. _quickstart_network:
 
 Create virtual network
 ----------------------
@@ -125,8 +121,6 @@ This shows the following resources:
     ha-demo-monitor-ip               Microsoft.Network/publicIPAddresses                    eastus
     ha-demo-net                      Microsoft.Network/virtualNetworks                      eastus
 
-.. _quickstart_install:
-
 Install the "pg_autoctl" executable
 -----------------------------------
 
@@ -154,8 +148,6 @@ nodes. It will help us run and observe PostgreSQL.
         "sudo usermod -a -G postgres ha-admin" &
   done
   wait
-
-.. _quickstart_run_monitor:
 
 Run a monitor
 -------------
