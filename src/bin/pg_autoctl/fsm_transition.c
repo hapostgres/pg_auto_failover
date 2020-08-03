@@ -749,6 +749,7 @@ fsm_stop_postgres_and_setup_standby(Keeper *keeper)
 	/* make the Postgres setup for a standby node before reaching maintenance */
 	if (!pg_setup_standby_mode(pgSetup->control.pg_control_version,
 							   pgSetup->pgdata,
+							   pgSetup->pg_ctl,
 							   upstream))
 	{
 		log_error("Failed to setup Postgres as a standby to go to maintenance");

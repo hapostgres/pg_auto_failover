@@ -1380,6 +1380,7 @@ pg_ctl_promote(const char *pg_ctl, const char *pgdata)
 bool
 pg_setup_standby_mode(uint32_t pg_control_version,
 					  const char *pgdata,
+					  const char *pg_ctl,
 					  ReplicationSource *replicationSource)
 {
 	NodeAddress *primaryNode = &(replicationSource->primaryNode);
@@ -1408,6 +1409,25 @@ pg_setup_standby_mode(uint32_t pg_control_version,
 				  "Postgres 10, we have pg_control version number %d from "
 				  "pg_controldata \"%s\"",
 				  pg_control_version, pgdata);
+		return false;
+	}
+
+	/*
+	 * Check that we can actually connect to the primary with the given primary
+	 * conninfo setting. For that we use pg_receivewal, which knows about the
+	 * Postgres replication protocol and will match the HBA rules that we need
+	 * on the server side.
+	 *
+	 * Target LSN 0/1 (which we already have) to test the replication
+	 * connection without actually doing anything else.
+	 */
+	if (!pg_receivewal(pgdata, pg_ctl, replicationSource, "0/1", LOG_DEBUG))
+	{
+		log_fatal("Failed to connect to the upstream server %d (%s:%d) "
+				  "for replication, see above for details",
+				  primaryNode->nodeId,
+				  primaryNode->host,
+				  primaryNode->port);
 		return false;
 	}
 
