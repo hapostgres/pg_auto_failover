@@ -782,6 +782,19 @@ class DataNode(PGNode):
         self.state = json.loads(out)
         return self.state['state']['nodeId']
 
+    def get_nodename(self, nodeId=None):
+        """
+        Fetch the node name from the monitor, given its nodeid
+        """
+        if nodeId is None:
+            nodeId = self.get_nodeid()
+
+        self.name = self.cluster.monitor.run_sql_query(
+            "select nodename from pgautofailover.node where nodeid = %s",
+            nodeId)[0][0]
+
+        return self.name
+
     def destroy(self):
         """
         Cleans up processes and files created for this data node.
@@ -910,6 +923,24 @@ SELECT reportedstate
         command = PGAutoCtl(self)
         command.execute("drop node", 'drop', 'node')
         return True
+
+    def set_node_metadata(self, name=None, host=None, port=None):
+        """
+            Sets node metadata via pg_autoctl
+        """
+        args = ["set node metadata", 'set', 'node', 'metadata']
+
+        if name:
+            args += ["--name", name]
+
+        if host:
+            args += ["--host", host]
+
+        if port:
+            args += ["--port", port]
+
+        command = PGAutoCtl(self)
+        command.execute(*args)
 
     def set_candidate_priority(self, candidatePriority):
         """

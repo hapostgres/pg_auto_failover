@@ -1,5 +1,5 @@
 import pgautofailover_utils as pgautofailover
-from nose.tools import *
+from nose.tools import raises, eq_
 
 cluster = None
 monitor = None
@@ -23,6 +23,10 @@ def test_001_init_primary():
     global node1
     node1 = cluster.create_datanode("/tmp/basic/node1")
     node1.create()
+
+    # the name of the node should be "%s_%d" % ("node", node1.nodeid)
+    eq_(node1.get_nodename(), "node_%d" % node1.get_nodeid())
+
     node1.run()
     assert node1.wait_until_state(target_state="single")
 
