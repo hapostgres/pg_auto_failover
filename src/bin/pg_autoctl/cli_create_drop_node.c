@@ -144,7 +144,10 @@ cli_create_config(Keeper *keeper, KeeperConfig *config)
 	 */
 	if (file_exists(config->pathnames.config))
 	{
+		Monitor *monitor = &(keeper->monitor);
 		KeeperConfig options = *config;
+		KeeperConfig oldConfig = { 0 };
+		PostgresSetup optionsFullPgSetup = { 0 };
 
 		if (!keeper_config_read_file(config,
 									 missingPgdataIsOk,
@@ -156,6 +159,23 @@ cli_create_config(Keeper *keeper, KeeperConfig *config)
 			exit(EXIT_CODE_BAD_CONFIG);
 		}
 
+		oldConfig = *config;
+
+		/*
+		 * Before merging command line options into the (maybe) pre-existing
+		 * configuration file, we should also mix in the environment variables
+		 * values in the command line options.
+		 */
+		if (!pg_setup_init(&optionsFullPgSetup,
+						   &(options.pgSetup),
+						   missingPgdataIsOk,
+						   pgIsNotRunningIsOk))
+		{
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		options.pgSetup = optionsFullPgSetup;
+
 		/*
 		 * Now that we have loaded the configuration file, apply the command
 		 * line options on top of it, giving them priority over the config.
@@ -164,6 +184,27 @@ cli_create_config(Keeper *keeper, KeeperConfig *config)
 		{
 			/* errors have been logged already */
 			exit(EXIT_CODE_BAD_CONFIG);
+		}
+
+		/*
+		 * If we have registered to the monitor already, then we need to check
+		 * if the user is providing new --nodename, --hostname, or --pgport
+		 * arguments. After all, they may change their mind of have just
+		 * realized that the --pgport they wanted to use is already in use.
+		 */
+		if (!monitor_init(monitor, config->monitor_pguri))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		if (file_exists(config->pathnames.state) && !config->monitorDisabled)
+		{
+			if (!keeper_set_node_metadata(keeper, &oldConfig))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_MONITOR);
+			}
 		}
 	}
 	else
