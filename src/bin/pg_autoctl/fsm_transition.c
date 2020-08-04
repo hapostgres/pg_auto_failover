@@ -482,6 +482,8 @@ fsm_disable_sync_rep(Keeper *keeper)
 bool
 fsm_promote_standby_to_primary(Keeper *keeper)
 {
+	bool forceCacheInvalidation = true;
+
 	LocalPostgresServer *postgres = &(keeper->postgres);
 	PGSQL *client = &(postgres->sqlClient);
 
@@ -492,6 +494,14 @@ fsm_promote_standby_to_primary(Keeper *keeper)
 				  "target_session_attrs read-write");
 		return false;
 	}
+
+	/* now is a good time to make sure we invalidate other nodes cache */
+	if (!keeper_refresh_other_nodes(keeper, forceCacheInvalidation))
+	{
+		log_error("Failed to update HBA rules after resuming writes");
+		return false;
+	}
+
 	return true;
 }
 
