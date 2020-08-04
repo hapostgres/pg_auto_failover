@@ -802,10 +802,8 @@ static bool
 ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 							   AutoFailoverNode *primaryNode)
 {
-	List *standbyNodesGroupList =
-		primaryNode == NULL
-		? AutoFailoverNodeGroup(activeNode->formationId, activeNode->groupId)
-		: AutoFailoverOtherNodesList(primaryNode);
+	List *nodesGroupList =
+		AutoFailoverNodeGroup(activeNode->formationId, activeNode->groupId);
 	CandidateList candidateList = { 0 };
 
 	/*
@@ -817,7 +815,7 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 	 * has already been selected as the failover candidate.
 	 */
 	AutoFailoverNode *nodeBeingPromoted =
-		FindCandidateNodeBeingPromoted(standbyNodesGroupList);
+		FindCandidateNodeBeingPromoted(nodesGroupList);
 
 	/*
 	 * If a failover is in progress, continue driving it.
@@ -851,7 +849,7 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 	 * different candidateNodesGroupList in which every node has reported their
 	 * LSN position, allowing progress to be made.
 	 */
-	BuildCandidateList(standbyNodesGroupList, &candidateList);
+	BuildCandidateList(nodesGroupList, &candidateList);
 
 	/*
 	 * Time to select a candidate?
@@ -890,7 +888,7 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 	{
 		/* build the list of most advanced standby nodes, not ordered */
 		List *mostAdvancedNodeList =
-			ListMostAdvancedStandbyNodes(standbyNodesGroupList);
+			ListMostAdvancedStandbyNodes(nodesGroupList);
 
 		/* select a node to failover to */
 		AutoFailoverNode *selectedNode = NULL;
@@ -968,7 +966,7 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
  * already reported their LSN, and sets
  */
 static bool
-BuildCandidateList(List *standbyNodesGroupList, CandidateList *candidateList)
+BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
 {
 	ListCell *nodeCell = NULL;
 	List *candidateNodesGroupList = NIL;
@@ -976,7 +974,7 @@ BuildCandidateList(List *standbyNodesGroupList, CandidateList *candidateList)
 	List *secondaryStates = list_make2_int(REPLICATION_STATE_SECONDARY,
 										   REPLICATION_STATE_CATCHINGUP);
 
-	foreach(nodeCell, standbyNodesGroupList)
+	foreach(nodeCell, nodesGroupList)
 	{
 		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
 
@@ -984,6 +982,16 @@ BuildCandidateList(List *standbyNodesGroupList, CandidateList *candidateList)
 		{
 			/* shouldn't happen */
 			ereport(ERROR, (errmsg("BUG: node is NULL")));
+			continue;
+		}
+
+		/* skip old and new primary nodes (if a selection has been made) */
+		if (StateBelongsToPrimary(node->goalState))
+		{
+			elog(LOG,
+				 "Skipping candidate node %d (%s:%d), "
+				 "which is a primary (old or new)",
+				 node->nodeId, node->nodeHost, node->nodePort);
 			continue;
 		}
 
@@ -1087,7 +1095,8 @@ ProceedWithMSFailover(AutoFailoverNode *activeNode,
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_REPORT_LSN) &&
 		(IsCurrentState(candidateNode, REPLICATION_STATE_PREPARE_PROMOTION) ||
-		 IsCurrentState(candidateNode, REPLICATION_STATE_STOP_REPLICATION)))
+		 IsCurrentState(candidateNode, REPLICATION_STATE_STOP_REPLICATION) ||
+		 IsCurrentState(candidateNode, REPLICATION_STATE_WAIT_PRIMARY)))
 	{
 		char message[BUFSIZE];
 

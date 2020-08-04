@@ -637,17 +637,20 @@ ListMostAdvancedStandbyNodes(List *groupNodeList)
 
 	XLogRecPtr mostAdvancedLSN = 0;
 
-	if (groupNodeList == NIL)
-	{
-		return NIL;
-	}
-
-	mostAdvancedLSN =
-		((AutoFailoverNode *) linitial(sortedNodeList))->reportedLSN;
-
 	foreach(nodeCell, sortedNodeList)
 	{
 		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+		/* skip old primary */
+		if (StateBelongsToPrimary(node->reportedState))
+		{
+			continue;
+		}
+
+		if (mostAdvancedLSN == 0)
+		{
+			mostAdvancedLSN = node->reportedLSN;
+		}
 
 		if (node->reportedLSN == mostAdvancedLSN)
 		{
