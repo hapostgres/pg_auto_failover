@@ -36,6 +36,11 @@
 #define OPTION_AUTOCTL_GROUPID(config) \
 	make_int_option("pg_autoctl", "group", "group", false, &(config->groupId))
 
+#define OPTION_AUTOCTL_NAME(config) \
+	make_strbuf_option_default("pg_autoctl", "name", "name", \
+							   false, _POSIX_HOST_NAME_MAX, \
+							   config->name, "")
+
 /*
  * --hostname used to be --nodename, and we need to support transition from the
  * old to the new name. For that, we read the pg_autoctl.nodename config
@@ -176,6 +181,7 @@
 		OPTION_AUTOCTL_MONITOR(config), \
 		OPTION_AUTOCTL_FORMATION(config), \
 		OPTION_AUTOCTL_GROUPID(config), \
+		OPTION_AUTOCTL_NAME(config), \
 		OPTION_AUTOCTL_HOSTNAME(config), \
 		OPTION_AUTOCTL_NODENAME(config), \
 		OPTION_AUTOCTL_NODEKIND(config), \

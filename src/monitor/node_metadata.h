@@ -24,30 +24,32 @@
  * indices must match with the columns given
  * in the following definition.
  */
-#define Natts_pgautofailover_node 18
+#define Natts_pgautofailover_node 19
 #define Anum_pgautofailover_node_formationid 1
 #define Anum_pgautofailover_node_nodeid 2
 #define Anum_pgautofailover_node_groupid 3
-#define Anum_pgautofailover_node_nodehost 4
-#define Anum_pgautofailover_node_nodeport 5
-#define Anum_pgautofailover_node_sysidentifier 6
-#define Anum_pgautofailover_node_goalstate 7
-#define Anum_pgautofailover_node_reportedstate 8
-#define Anum_pgautofailover_node_reportedpgisrunning 9
-#define Anum_pgautofailover_node_reportedrepstate 10
-#define Anum_pgautofailover_node_reporttime 11
-#define Anum_pgautofailover_node_reportedLSN 12
-#define Anum_pgautofailover_node_walreporttime 13
-#define Anum_pgautofailover_node_health 14
-#define Anum_pgautofailover_node_healthchecktime 15
-#define Anum_pgautofailover_node_statechangetime 16
-#define Anum_pgautofailover_node_candidate_priority 17
-#define Anum_pgautofailover_node_replication_quorum 18
+#define Anum_pgautofailover_node_nodename 4
+#define Anum_pgautofailover_node_nodehost 5
+#define Anum_pgautofailover_node_nodeport 6
+#define Anum_pgautofailover_node_sysidentifier 7
+#define Anum_pgautofailover_node_goalstate 8
+#define Anum_pgautofailover_node_reportedstate 9
+#define Anum_pgautofailover_node_reportedpgisrunning 10
+#define Anum_pgautofailover_node_reportedrepstate 11
+#define Anum_pgautofailover_node_reporttime 12
+#define Anum_pgautofailover_node_reportedLSN 13
+#define Anum_pgautofailover_node_walreporttime 14
+#define Anum_pgautofailover_node_health 15
+#define Anum_pgautofailover_node_healthchecktime 16
+#define Anum_pgautofailover_node_statechangetime 17
+#define Anum_pgautofailover_node_candidate_priority 18
+#define Anum_pgautofailover_node_replication_quorum 19
 
 #define AUTO_FAILOVER_NODE_TABLE_ALL_COLUMNS \
 	"formationid, " \
 	"nodeid, " \
 	"groupid, " \
+	"nodename, " \
 	"nodehost, " \
 	"nodeport, " \
 	"sysidentifier, " \
@@ -88,6 +90,7 @@ typedef struct AutoFailoverNode
 	char *formationId;
 	int nodeId;
 	int groupId;
+	char *nodeName;
 	char *nodeHost;
 	int nodePort;
 	uint64 sysIdentifier;
@@ -128,14 +131,16 @@ extern AutoFailoverNode * FindMostAdvancedStandby(List *groupNodeList);
 extern AutoFailoverNode * FindCandidateNodeBeingPromoted(List *groupNodeList);
 
 extern AutoFailoverNode * GetAutoFailoverNode(char *nodeHost, int nodePort);
-extern AutoFailoverNode * GetAutoFailoverNodeWithId(int nodeid,
-													char *nodeHost, int nodePort);
+extern AutoFailoverNode * GetAutoFailoverNodeById(int nodeId);
+extern AutoFailoverNode * GetAutoFailoverNodeWithId(int nodeid, char *nodeHost, int
+													nodePort);
 extern AutoFailoverNode * OtherNodeInGroup(AutoFailoverNode *pgAutoFailoverNode);
 extern AutoFailoverNode * GetWritableNodeInGroup(char *formationId, int32 groupId);
 extern AutoFailoverNode * TupleToAutoFailoverNode(TupleDesc tupleDescriptor,
 												  HeapTuple heapTuple);
 extern int AddAutoFailoverNode(char *formationId,
 							   int groupId,
+							   char *nodeName,
 							   char *nodeHost,
 							   int nodePort,
 							   uint64 sysIdentifier,
@@ -143,8 +148,9 @@ extern int AddAutoFailoverNode(char *formationId,
 							   ReplicationState reportedState,
 							   int candidatePriority,
 							   bool replicationQuorum);
-extern void SetNodeGoalState(char *nodeHost, int nodePort,
-							 ReplicationState goalState);
+extern void SetNodeGoalState(AutoFailoverNode *pgAutoFailoverNode,
+							 ReplicationState goalState,
+							 const char *message);
 extern void ReportAutoFailoverNodeState(char *nodeHost, int nodePort,
 										ReplicationState reportedState,
 										bool pgIsRunning,
@@ -158,7 +164,12 @@ extern void ReportAutoFailoverNodeReplicationSetting(int nodeid,
 													 int nodePort,
 													 int candidatePriority,
 													 bool replicationQuorum);
-extern void RemoveAutoFailoverNode(char *nodeHost, int nodePort);
+extern void UpdateAutoFailoverNodeMetadata(int nodeid,
+										   char *nodeName,
+										   char *nodeHost,
+										   int nodePort);
+extern void RemoveAutoFailoverNode(AutoFailoverNode *pgAutoFailoverNode);
+
 
 extern SyncState SyncStateFromString(const char *pgsrSyncState);
 extern char * SyncStateToString(SyncState pgsrSyncState);

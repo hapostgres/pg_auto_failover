@@ -1393,23 +1393,7 @@ AssignGoalState(AutoFailoverNode *pgAutoFailoverNode,
 {
 	if (pgAutoFailoverNode != NULL)
 	{
-		pgAutoFailoverNode->goalState = state;
-
-		SetNodeGoalState(pgAutoFailoverNode->nodeHost,
-						 pgAutoFailoverNode->nodePort, state);
-
-		NotifyStateChange(pgAutoFailoverNode->reportedState,
-						  state,
-						  pgAutoFailoverNode->formationId,
-						  pgAutoFailoverNode->groupId,
-						  pgAutoFailoverNode->nodeId,
-						  pgAutoFailoverNode->nodeHost,
-						  pgAutoFailoverNode->nodePort,
-						  pgAutoFailoverNode->pgsrSyncState,
-						  pgAutoFailoverNode->reportedLSN,
-						  pgAutoFailoverNode->candidatePriority,
-						  pgAutoFailoverNode->replicationQuorum,
-						  description);
+		SetNodeGoalState(pgAutoFailoverNode, state, description);
 	}
 }
 

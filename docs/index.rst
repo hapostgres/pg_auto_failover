@@ -11,7 +11,7 @@ Welcome to pg_auto_failover's documentation!
    :caption: Contents:
 
    intro
-   quickstart
+   tutorial
    architecture
    fault-tolerance
    install

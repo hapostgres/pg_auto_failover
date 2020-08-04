@@ -158,6 +158,7 @@ keeper_pg_init_and_register(Keeper *keeper)
 			log_fatal("The state file \"%s\" exists and "
 					  "there's no init in progress", config->pathnames.state);
 			log_info("HINT: use `pg_autoctl run` to start the service.");
+			exit(EXIT_CODE_QUIT);
 		}
 		return createAndRun;
 	}
@@ -547,8 +548,6 @@ wait_until_primary_is_ready(Keeper *keeper,
 
 		if (!monitor_node_active(&(keeper->monitor),
 								 keeper->config.formation,
-								 keeper->config.hostname,
-								 keeper->config.pgSetup.pgport,
 								 keeper->state.current_node_id,
 								 keeper->state.current_group,
 								 keeper->state.current_role,
@@ -861,8 +860,6 @@ keeper_pg_init_node_active(Keeper *keeper)
 
 	if (!monitor_node_active(&(keeper->monitor),
 							 keeper->config.formation,
-							 keeper->config.hostname,
-							 keeper->config.pgSetup.pgport,
 							 keeper->state.current_node_id,
 							 keeper->state.current_group,
 							 keeper->state.current_role,

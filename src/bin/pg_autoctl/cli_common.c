@@ -56,6 +56,7 @@ static void stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathname
  *		{ "auth", required_argument, NULL, 'A' },
  *		{ "skip-pg-hba", required_argument, NULL, 'S' },
  *		{ "dbname", required_argument, NULL, 'd' },
+ *		{ "name", required_argument, NULL, 'a' },
  *		{ "hostname", required_argument, NULL, 'n' },
  *		{ "formation", required_argument, NULL, 'f' },
  *		{ "group", required_argument, NULL, 'g' },
@@ -218,6 +219,14 @@ cli_common_keeper_getopts(int argc, char **argv,
 				/* { "dbname", required_argument, NULL, 'd' } */
 				strlcpy(LocalOptionConfig.pgSetup.dbname, optarg, NAMEDATALEN);
 				log_trace("--dbname %s", LocalOptionConfig.pgSetup.dbname);
+				break;
+			}
+
+			case 'a':
+			{
+				/* { "name", required_argument, NULL, 'a' }, */
+				strlcpy(LocalOptionConfig.name, optarg, _POSIX_HOST_NAME_MAX);
+				log_trace("--name %s", LocalOptionConfig.name);
 				break;
 			}
 
@@ -1489,4 +1498,165 @@ cli_pg_autoctl_reload(const char *pidfile)
 	}
 
 	return true;
+}
+
+
+/*
+ * cli_node_metadata_getopts parses the command line options for the
+ * pg_autoctl set node metadata command.
+ */
+int
+cli_node_metadata_getopts(int argc, char **argv)
+{
+	KeeperConfig options = { 0 };
+	int c, option_index = 0, errors = 0;
+	int verboseCount = 0;
+
+	static struct option long_options[] = {
+		{ "pgdata", required_argument, NULL, 'D' },
+		{ "name", required_argument, NULL, 'n' },
+		{ "hostname", required_argument, NULL, 'H' },
+		{ "pgport", required_argument, NULL, 'p' },
+		{ "json", no_argument, NULL, 'J' },
+		{ "version", no_argument, NULL, 'V' },
+		{ "verbose", no_argument, NULL, 'v' },
+		{ "quiet", no_argument, NULL, 'q' },
+		{ "help", no_argument, NULL, 'h' },
+		{ NULL, 0, NULL, 0 }
+	};
+
+	/* set default values for our options, when we have some */
+	options.groupId = -1;
+	options.network_partition_timeout = -1;
+	options.prepare_promotion_catchup = -1;
+	options.prepare_promotion_walreceiver = -1;
+	options.postgresql_restart_failure_timeout = -1;
+	options.postgresql_restart_failure_max_retries = -1;
+
+	strlcpy(options.formation, "default", NAMEDATALEN);
+
+	optind = 0;
+
+	while ((c = getopt_long(argc, argv, "D:n:H:p:JVvqh",
+							long_options, &option_index)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(options.pgSetup.pgdata, optarg, MAXPGPATH);
+				log_trace("--pgdata %s", options.pgSetup.pgdata);
+				break;
+			}
+
+			case 'H':
+			{
+				/* { "hostname", required_argument, NULL, 'h' } */
+				strlcpy(options.hostname, optarg, _POSIX_HOST_NAME_MAX);
+				log_trace("--hostname %s", options.hostname);
+				break;
+			}
+
+			case 'n':
+			{
+				/* { "name", required_argument, NULL, 'n' } */
+				strlcpy(options.name, optarg, _POSIX_HOST_NAME_MAX);
+				log_trace("--name %s", options.name);
+				break;
+			}
+
+			case 'p':
+			{
+				/* { "pgport", required_argument, NULL, 'p' } */
+				if (!stringToInt(optarg, &options.pgSetup.pgport))
+				{
+					log_error("Failed to parse --pgport number \"%s\"",
+							  optarg);
+					errors++;
+				}
+				log_trace("--pgport %d", options.pgSetup.pgport);
+				break;
+			}
+
+
+			case 'V':
+			{
+				/* keeper_cli_print_version prints version and exits. */
+				keeper_cli_print_version(argc, argv);
+				break;
+			}
+
+			case 'v':
+			{
+				++verboseCount;
+				switch (verboseCount)
+				{
+					case 1:
+					{
+						log_set_level(LOG_INFO);
+						break;
+					}
+
+					case 2:
+					{
+						log_set_level(LOG_DEBUG);
+						break;
+					}
+
+					default:
+					{
+						log_set_level(LOG_TRACE);
+						break;
+					}
+				}
+				break;
+			}
+
+			case 'q':
+			{
+				log_set_level(LOG_ERROR);
+				break;
+			}
+
+			case 'J':
+			{
+				outputJSON = true;
+				log_trace("--json");
+				break;
+			}
+
+			default:
+			{
+				/* getopt_long already wrote an error message */
+				errors++;
+			}
+		}
+	}
+
+
+	if (errors > 0)
+	{
+		commandline_help(stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	/*
+	 * Now, all commands need PGDATA validation.
+	 */
+	cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
+
+	/*
+	 * We have a PGDATA setting, prepare our configuration pathnames from it.
+	 */
+	if (!keeper_config_set_pathnames_from_pgdata(&(options.pathnames),
+												 options.pgSetup.pgdata))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	/* publish our option parsing now */
+	keeperOptions = options;
+
+	return optind;
 }

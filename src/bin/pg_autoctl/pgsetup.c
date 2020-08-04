@@ -528,23 +528,25 @@ get_pgpid(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk)
 	char *lines[1];
 	int pid = -1;
 
+	/* when !pgIsNotRunningIsOk then log_error(), otherwise log_debug() */
+	int logLevel = pgIsNotRunningIsOk ? LOG_DEBUG : LOG_ERROR;
+
 	join_path_components(pidfile, pgSetup->pgdata, "postmaster.pid");
 
 	if (!file_exists(pidfile))
 	{
-		if (!pgIsNotRunningIsOk)
-		{
-			log_error("Failed get postmaster pid, file \"%s\" does not exists",
-					  pidfile);
-		}
+		log_level(logLevel,
+				  "Failed get postmaster pid, file \"%s\" does not exists",
+				  pidfile);
 		return false;
 	}
 
 	if (!read_file(pidfile, &contents, &fileSize))
 	{
+		log_level(logLevel, "Failed to open file \"%s\": %m", pidfile);
+
 		if (!pgIsNotRunningIsOk)
 		{
-			log_error("Failed to open file \"%s\": %m", pidfile);
 			log_info("Is PostgreSQL at \"%s\" up and running?", pgSetup->pgdata);
 		}
 		return false;
@@ -582,14 +584,10 @@ get_pgpid(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk)
 		}
 		else
 		{
-			if (!pgIsNotRunningIsOk)
-			{
-				log_warn("Read a stale pid in \"postmaster.pid\": %d", pid);
-			}
-			else
-			{
-				log_debug("Read a stale pid in \"postmaster.pid\": %d", pid);
-			}
+			int logLevel = pgIsNotRunningIsOk ? LOG_DEBUG : LOG_WARN;
+
+			log_level(logLevel,
+					  "Read a stale pid in \"postmaster.pid\": %d", pid);
 
 			return false;
 		}
