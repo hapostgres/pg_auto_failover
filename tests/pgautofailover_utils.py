@@ -1337,6 +1337,9 @@ class PGAutoCtl():
 
             self.last_returncode = proc.returncode
             if proc.returncode > 0:
+                out = out.decode("utf-8", "backslashreplace")
+                err = err.decode("utf-8", "backslashreplace")
+
                 raise Exception("%s failed\n%s\n%s\n%s" %
                                 (name,
                                  " ".join(self.command),
