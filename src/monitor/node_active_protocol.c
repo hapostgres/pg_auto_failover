@@ -1418,8 +1418,14 @@ start_maintenance(PG_FUNCTION_ARGS)
 	}
 	else if (IsStateIn(currentNode->reportedState, secondaryStates))
 	{
+		/*
+		 * When putting the last secondary node to maintenance, we disable sync
+		 * rep on the primary by switching it to wait_primary. Because we
+		 * didn't change the state of any standby node yet, we get there when
+		 * the count is one (not zero).
+		 */
 		ReplicationState primaryGoalState =
-			secondaryNodesCount == 0
+			secondaryNodesCount == 1
 			? REPLICATION_STATE_WAIT_PRIMARY
 			: REPLICATION_STATE_JOIN_PRIMARY;
 
