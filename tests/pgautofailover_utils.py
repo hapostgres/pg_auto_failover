@@ -538,10 +538,6 @@ class PGNode:
         log_string = ""
         if self.running():
             out, err = self.stop_pg_autoctl()
-
-            out = out.decode("utf-8", "backslashreplace")
-            err = err.decode("utf-8", "backslashreplace")
-
             log_string += f"STDOUT OF PG_AUTOCTL FOR {self.datadir}:\n{out}\n"
             log_string += f"STDERR OF PG_AUTOCTL FOR {self.datadir}:\n{err}\n"
 
@@ -1169,9 +1165,6 @@ class MonitorNode(PGNode):
             out, err = self.pg_autoctl.stop()
 
             if out or err:
-                out = out.decode("utf-8", "backslashreplace")
-                err = err.decode("utf-8", "backslashreplace")
-
                 print()
                 print("Monitor logs:\n%s\n%s\n" % (out, err))
 
@@ -1328,6 +1321,7 @@ class PGAutoCtl():
         with self.vnode.run(self.command) as proc:
             try:
                 out, err = self.pgnode.cluster.communicate(proc, timeout)
+
             except subprocess.TimeoutExpired:
                 string_command = " ".join(self.command)
                 self.pgnode.print_debug_logs()
@@ -1337,13 +1331,11 @@ class PGAutoCtl():
 
             self.last_returncode = proc.returncode
             if proc.returncode > 0:
-                out = out.decode("utf-8", "backslashreplace")
-                err = err.decode("utf-8", "backslashreplace")
-
                 raise Exception("%s failed\n%s\n%s\n%s" %
                                 (name,
                                  " ".join(self.command),
                                  out, err))
+
             return out, err, proc.returncode
 
     def stop(self):
