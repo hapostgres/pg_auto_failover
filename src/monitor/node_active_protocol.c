@@ -1271,12 +1271,16 @@ start_maintenance(PG_FUNCTION_ARGS)
 
 	AutoFailoverNode *currentNode = NULL;
 	AutoFailoverNode *primaryNode = NULL;
+	AutoFailoverFormation *formation = NULL;
 
 	List *secondaryStates = list_make2_int(REPLICATION_STATE_SECONDARY,
 										   REPLICATION_STATE_CATCHINGUP);
 
+	List *secondaryNodesList = NIL;
 	List *groupNodesList = NIL;
-	int nodesCount = 0;
+
+	int totalNodesCount = 0;
+	int secondaryNodesCount = 0;
 
 	char message[BUFSIZE];
 
@@ -1291,9 +1295,18 @@ start_maintenance(PG_FUNCTION_ARGS)
 	LockFormation(currentNode->formationId, ShareLock);
 	LockNodeGroup(currentNode->formationId, currentNode->groupId, ExclusiveLock);
 
+	formation = GetFormation(currentNode->formationId);
+
 	groupNodesList =
 		AutoFailoverNodeGroup(currentNode->formationId, currentNode->groupId);
-	nodesCount = list_length(groupNodesList);
+
+	totalNodesCount = list_length(groupNodesList);
+
+	secondaryNodesList =
+		AutoFailoverOtherNodesListInState(currentNode,
+										  REPLICATION_STATE_SECONDARY);
+
+	secondaryNodesCount = list_length(secondaryNodesList);
 
 	/* check pre-conditions for the current node (secondary) */
 	if (currentNode->reportedState == REPLICATION_STATE_MAINTENANCE ||
@@ -1343,7 +1356,7 @@ start_maintenance(PG_FUNCTION_ARGS)
 		SetNodeGoalState(currentNode,
 						 REPLICATION_STATE_PREPARE_MAINTENANCE, message);
 
-		if (nodesCount == 2)
+		if (totalNodesCount == 2)
 		{
 			AutoFailoverNode *otherNode = firstStandbyNode;
 
@@ -1367,10 +1380,22 @@ start_maintenance(PG_FUNCTION_ARGS)
 			(void) ProceedGroupState(firstStandbyNode);
 		}
 	}
+	else if (formation->number_sync_standbys > 0 &&
+			 secondaryNodesCount <= formation->number_sync_standbys)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("cannot start maintenance: we currently have %d "
+						"node(s) in the \"secondary\" state and require at "
+						"least %d sync standbys in formation \"%s\"",
+						secondaryNodesCount,
+						formation->number_sync_standbys,
+						formation->formationId)));
+	}
 	else if (IsStateIn(currentNode->reportedState, secondaryStates))
 	{
 		ReplicationState primaryGoalState =
-			nodesCount == 2
+			secondaryNodesCount == 0
 			? REPLICATION_STATE_WAIT_PRIMARY
 			: REPLICATION_STATE_JOIN_PRIMARY;
 
