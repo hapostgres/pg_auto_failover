@@ -1418,15 +1418,21 @@ pg_setup_standby_mode(uint32_t pg_control_version,
 	 *
 	 * Target LSN 0/1 (which we already have) to test the replication
 	 * connection without actually doing anything else.
+	 *
+	 * pg_receivewal --endpos feature was introduced in Postgres 11, so we skip
+	 * that connection string testing in Postgres 10.
 	 */
-	if (!pg_receivewal(pgdata, pg_ctl, replicationSource, "0/1", LOG_DEBUG))
+	if (pg_control_version >= 1100)
 	{
-		log_fatal("Failed to connect to the upstream server %d (%s:%d) "
-				  "for replication, see above for details",
-				  primaryNode->nodeId,
-				  primaryNode->host,
-				  primaryNode->port);
-		return false;
+		if (!pg_receivewal(pgdata, pg_ctl, replicationSource, "0/1", LOG_DEBUG))
+		{
+			log_fatal("Failed to connect to the upstream server %d (%s:%d) "
+					  "for replication, see above for details",
+					  primaryNode->nodeId,
+					  primaryNode->host,
+					  primaryNode->port);
+			return false;
+		}
 	}
 
 	if (pg_control_version < 1200)
