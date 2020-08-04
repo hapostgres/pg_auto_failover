@@ -355,13 +355,14 @@ CREATE FUNCTION pgautofailover.get_most_advanced_standby
    IN groupid           int default 0,
    OUT node_id          bigint,
    OUT node_name        text,
+   OUT node_host        text,
    OUT node_port        int,
    OUT node_lsn         pg_lsn,
    OUT node_is_primary  bool
  )
 RETURNS SETOF record LANGUAGE SQL STRICT
 AS $$
-   select nodeid, nodehost, nodeport, reportedlsn, false
+   select nodeid, nodename, nodehost, nodeport, reportedlsn, false
      from pgautofailover.node
     where formationid = $1
       and groupid = $2
