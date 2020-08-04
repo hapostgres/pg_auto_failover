@@ -1302,12 +1302,6 @@ start_maintenance(PG_FUNCTION_ARGS)
 
 	totalNodesCount = list_length(groupNodesList);
 
-	secondaryNodesList =
-		AutoFailoverOtherNodesListInState(currentNode,
-										  REPLICATION_STATE_SECONDARY);
-
-	secondaryNodesCount = list_length(secondaryNodesList);
-
 	/* check pre-conditions for the current node (secondary) */
 	if (currentNode->reportedState == REPLICATION_STATE_MAINTENANCE ||
 		currentNode->goalState == REPLICATION_STATE_MAINTENANCE)
@@ -1379,9 +1373,39 @@ start_maintenance(PG_FUNCTION_ARGS)
 			/* now proceed with the failover, starting with the first standby */
 			(void) ProceedGroupState(firstStandbyNode);
 		}
+
+		PG_RETURN_BOOL(true);
 	}
-	else if (formation->number_sync_standbys > 0 &&
-			 secondaryNodesCount <= formation->number_sync_standbys)
+
+	/*
+	 * Done with dealing with a primary, we now have a secondary to take care
+	 * of. The primary needs to be in a stable state to allow for maintenance.
+	 */
+	primaryNode = GetPrimaryNodeInGroup(currentNode->formationId,
+										currentNode->groupId);
+
+	if (primaryNode == NULL)
+	{
+		ereport(ERROR,
+				(errmsg("couldn't find the primary node in formation \"%s\", "
+						"group %d",
+						currentNode->formationId, currentNode->groupId)));
+	}
+
+	/*
+	 * We need to always have at least formation->number_sync_standbys nodes in
+	 * the SECONDARY state, otherwise writes may be blocked on the primary. So
+	 * we refuse to put a node in maintenance when it would force blocking
+	 * writes.
+	 */
+	secondaryNodesList =
+		AutoFailoverOtherNodesListInState(primaryNode,
+										  REPLICATION_STATE_SECONDARY);
+
+	secondaryNodesCount = list_length(secondaryNodesList);
+
+	if (formation->number_sync_standbys > 0 &&
+		secondaryNodesCount <= formation->number_sync_standbys)
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -1398,19 +1422,6 @@ start_maintenance(PG_FUNCTION_ARGS)
 			secondaryNodesCount == 0
 			? REPLICATION_STATE_WAIT_PRIMARY
 			: REPLICATION_STATE_JOIN_PRIMARY;
-
-		/* the primary needs to be in a stable state to allow for maintenance */
-		primaryNode = GetPrimaryNodeInGroup(currentNode->formationId,
-											currentNode->groupId);
-
-		if (primaryNode == NULL)
-		{
-			ereport(ERROR,
-					(errmsg("couldn't find the primary node in formation \"%s\", "
-							"group %d",
-							currentNode->formationId, currentNode->groupId)));
-		}
-
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,

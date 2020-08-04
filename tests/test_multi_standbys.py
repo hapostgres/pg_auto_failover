@@ -199,6 +199,8 @@ def test_012_set_candidate_priorities():
     # when we set candidate priority we go to apply_settings then primary
     print()
     assert node2.wait_until_state(target_state="primary")
+    assert node3.wait_until_state(target_state="secondary")
+    assert node1.wait_until_state(target_state="secondary")
 
 def test_013_maintenance_and_failover():
     print()
