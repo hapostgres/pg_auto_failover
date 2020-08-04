@@ -908,6 +908,10 @@ pg_receivewal(const char *pgdata,
 		log_error("Failed to run pg_receivewal: exit code %d", returnCode);
 		return false;
 	}
+	else
+	{
+		(void) log_program_output(program, LOG_DEBUG, LOG_DEBUG);
+	}
 
 	return true;
 }
