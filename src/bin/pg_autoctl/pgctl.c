@@ -867,7 +867,6 @@ pg_receivewal(const char *pgdata,
 	args[argsIndex++] = (char *) replicationSource->slotName;
 	args[argsIndex++] = "--dbname";
 	args[argsIndex++] = primaryConnInfo;
-	args[argsIndex++] = "--synchronous";
 
 	if (targetLSN != NULL)
 	{
