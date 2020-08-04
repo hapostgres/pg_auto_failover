@@ -816,7 +816,7 @@ pg_receivewal(const char *pgdata,
 			  char *targetLSN,
 			  int logLevel)
 {
-	int returnCode;
+	bool success;
 	Program program;
 	char pg_receivewal[MAXPGPATH] = { 0 };
 	char pg_wal[MAXPGPATH] = { 0 };
@@ -898,22 +898,21 @@ pg_receivewal(const char *pgdata,
 
 	(void) execute_subprogram(&program);
 
-	returnCode = program.returnCode;
-	free_program(&program);
+	success = program.returnCode == 0;
 
-	if (returnCode != 0)
+	if (program.returnCode != 0)
 	{
 		(void) log_program_output(program, LOG_INFO, LOG_ERROR);
 
-		log_error("Failed to run pg_receivewal: exit code %d", returnCode);
-		return false;
+		log_error("Failed to run pg_receivewal: exit code %d", program.returnCode);
 	}
 	else
 	{
 		(void) log_program_output(program, LOG_DEBUG, LOG_DEBUG);
 	}
 
-	return true;
+	free_program(&program);
+	return success;
 }
 
 
