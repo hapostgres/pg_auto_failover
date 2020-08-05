@@ -178,8 +178,8 @@ def test_011_all_to_maintenance():
     assert node3.wait_until_state(target_state="wait_primary")
 
     # also let's see synchronous_standby_names here
-    print("Monitor: %s" % node3.get_synchronous_standby_names())
-    print("Node 3:  %s" %
+    print("Monitor: '%s'" % node3.get_synchronous_standby_names())
+    print("Node 3:  '%s'" %
           node3.run_sql_query("show synchronous_standby_names")[0][0])
 
 def test_012_can_write_during_maintenance():
@@ -188,10 +188,12 @@ def test_012_can_write_during_maintenance():
 
 def test_013_disable_maintenance():
     print()
+    assert node2.wait_until_state(target_state="maintenance")
     print("Disabling maintenance on node2")
     node2.disable_maintenance()
 
     assert node3.wait_until_state(target_state="primary")
+    assert node1.wait_until_state(target_state="maintenance")
 
     print("Disabling maintenance on node1")
     node1.disable_maintenance()
