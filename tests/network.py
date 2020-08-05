@@ -150,7 +150,8 @@ class VirtualNode:
                         'env', 'PATH=' + os.getenv("PATH")] + command
         return managed_nspopen(self.namespace, sudo_command,
                                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE, universal_newlines=True,
+                               stderr=subprocess.PIPE,
+                               universal_newlines=True,
                                start_new_session=True)
 
     def run_unmanaged(self, command, user=os.getenv("USER")):
@@ -165,7 +166,8 @@ class VirtualNode:
                         'env', 'PATH=' + os.getenv("PATH")] + command
         return NSPopen(self.namespace, sudo_command,
                        stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                       stderr=subprocess.PIPE, universal_newlines=True,
+                       stderr=subprocess.PIPE,
+                       universal_newlines=True,
                        start_new_session=True)
 
     def run_and_wait(self, command, name, timeout=COMMAND_TIMEOUT):

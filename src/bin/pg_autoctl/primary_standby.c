@@ -668,6 +668,7 @@ standby_init_database(LocalPostgresServer *postgres,
 	/* now setup the replication configuration (primary_conninfo etc) */
 	if (!pg_setup_standby_mode(pgSetup->control.pg_control_version,
 							   pgSetup->pgdata,
+							   pgSetup->pg_ctl,
 							   upstream))
 	{
 		log_error("Failed to setup Postgres as a standby after pg_basebackup");
@@ -746,6 +747,7 @@ primary_rewind_to_standby(LocalPostgresServer *postgres)
 
 	if (!pg_setup_standby_mode(pgSetup->control.pg_control_version,
 							   pgSetup->pgdata,
+							   pgSetup->pg_ctl,
 							   replicationSource))
 	{
 		log_error("Failed to setup Postgres as a standby, after rewind");

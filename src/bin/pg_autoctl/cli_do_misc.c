@@ -414,3 +414,77 @@ keeper_cli_promote_standby(int argc, char **argv)
 		exit(EXIT_CODE_PGSQL);
 	}
 }
+
+
+/*
+ * keeper_cli_receiwal allows to run pg_receivewal targetting the current
+ * primary conninfo of a standby node, either to check that the connection
+ * makes sense, or to actually start a sub-process receiving WAL.
+ */
+void
+keeper_cli_receiwal(int argc, char **argv)
+{
+	const bool missing_pgdata_is_ok = true;
+	const bool pg_not_running_is_ok = true;
+
+	KeeperConfig config = keeperOptions;
+	LocalPostgresServer postgres = { 0 };
+	PostgresSetup *pgSetup = &(postgres.postgresSetup);
+	int hostLength = 0;
+
+	char *targetLSN = NULL;
+
+	if (argc != 3)
+	{
+		commandline_print_usage(&do_standby_init, stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	keeper_config_init(&config, missing_pgdata_is_ok, pg_not_running_is_ok);
+	local_postgres_init(&postgres, &(config.pgSetup));
+
+	hostLength = strlcpy(postgres.replicationSource.primaryNode.host, argv[0],
+						 _POSIX_HOST_NAME_MAX);
+	if (hostLength >= _POSIX_HOST_NAME_MAX)
+	{
+		log_fatal("Hostname \"%s\" given in command line is %d characters, "
+				  "the maximum supported by pg_autoctl is %d",
+				  argv[0], hostLength, _POSIX_HOST_NAME_MAX - 1);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (!stringToInt(argv[1], &(postgres.replicationSource.primaryNode.port)))
+	{
+		log_fatal("Argument is not a valid port number: \"%s\"", argv[1]);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	targetLSN = argv[2];
+
+	if (!standby_init_replication_source(&postgres,
+										 NULL, /* primaryNode is done */
+										 PG_AUTOCTL_REPLICA_USERNAME,
+										 config.replication_password,
+										 config.replication_slot_name,
+										 config.maximum_backup_rate,
+										 config.backupDirectory,
+										 config.pgSetup.ssl,
+										 0))
+	{
+		/* can't happen at the moment */
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	if (!pg_receivewal(pgSetup->pgdata,
+					   pgSetup->pg_ctl,
+					   &(postgres.replicationSource),
+					   targetLSN,
+					   LOG_INFO))
+	{
+		log_fatal("Failed to connect to the upstream server %s:%d "
+				  "for replication, see above for details",
+				  postgres.replicationSource.primaryNode.host,
+				  postgres.replicationSource.primaryNode.port);
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+}

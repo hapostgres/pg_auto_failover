@@ -44,6 +44,11 @@ bool pg_basebackup(const char *pgdata,
 bool pg_rewind(const char *pgdata,
 			   const char *pg_ctl,
 			   ReplicationSource *replicationSource);
+bool pg_receivewal(const char *pgdata,
+				   const char *pg_ctl,
+				   ReplicationSource *replicationSource,
+				   char *targetLSN,
+				   int logLevel);
 
 bool pg_ctl_initdb(const char *pg_ctl, const char *pgdata);
 bool pg_ctl_postgres(const char *pg_ctl, const char *pgdata, int pgport,
@@ -54,6 +59,7 @@ int pg_ctl_status(const char *pg_ctl, const char *pgdata, bool log_output);
 bool pg_ctl_promote(const char *pg_ctl, const char *pgdata);
 
 bool pg_setup_standby_mode(uint32_t pg_control_version,
+						   const char *pg_ctl,
 						   const char *pgdata,
 						   ReplicationSource *replicationSource);
 

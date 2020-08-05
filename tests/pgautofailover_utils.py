@@ -1325,6 +1325,7 @@ class PGAutoCtl():
         with self.vnode.run(self.command) as proc:
             try:
                 out, err = self.pgnode.cluster.communicate(proc, timeout)
+
             except subprocess.TimeoutExpired:
                 string_command = " ".join(self.command)
                 self.pgnode.print_debug_logs()
@@ -1338,6 +1339,7 @@ class PGAutoCtl():
                                 (name,
                                  " ".join(self.command),
                                  out, err))
+
             return out, err, proc.returncode
 
     def stop(self):
