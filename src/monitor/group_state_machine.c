@@ -330,8 +330,8 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of %s:%d to wait_primary "
-			"and %s:%d to maintenance.",
+			"Setting goal state of %s:%d to stop_replication "
+			"after %s:%d converged to prepare_maintenance.",
 			activeNode->nodeHost, activeNode->nodePort,
 			primaryNode->nodeHost, primaryNode->nodePort);
 
