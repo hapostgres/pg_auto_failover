@@ -468,6 +468,7 @@ keeper_cli_receiwal(int argc, char **argv)
 										 config.replication_slot_name,
 										 config.maximum_backup_rate,
 										 config.backupDirectory,
+										 targetLSN,
 										 config.pgSetup.ssl,
 										 0))
 	{
