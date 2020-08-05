@@ -482,6 +482,8 @@ fsm_disable_sync_rep(Keeper *keeper)
 bool
 fsm_promote_standby_to_primary(Keeper *keeper)
 {
+	bool forceCacheInvalidation = true;
+
 	LocalPostgresServer *postgres = &(keeper->postgres);
 	PGSQL *client = &(postgres->sqlClient);
 
@@ -492,6 +494,14 @@ fsm_promote_standby_to_primary(Keeper *keeper)
 				  "target_session_attrs read-write");
 		return false;
 	}
+
+	/* now is a good time to make sure we invalidate other nodes cache */
+	if (!keeper_refresh_other_nodes(keeper, forceCacheInvalidation))
+	{
+		log_error("Failed to update HBA rules after resuming writes");
+		return false;
+	}
+
 	return true;
 }
 
@@ -749,6 +759,7 @@ fsm_stop_postgres_and_setup_standby(Keeper *keeper)
 	/* make the Postgres setup for a standby node before reaching maintenance */
 	if (!pg_setup_standby_mode(pgSetup->control.pg_control_version,
 							   pgSetup->pgdata,
+							   pgSetup->pg_ctl,
 							   upstream))
 	{
 		log_error("Failed to setup Postgres as a standby to go to maintenance");

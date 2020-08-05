@@ -841,6 +841,7 @@ keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 		/* now setup the replication configuration (primary_conninfo etc) */
 		if (!pg_setup_standby_mode(state->pg_control_version,
 								   pgSetup->pgdata,
+								   pgSetup->pg_ctl,
 								   upstream))
 		{
 			log_error("Failed to setup Postgres as a standby after primary "
