@@ -101,14 +101,11 @@ def test_004_add_three_standbys():
     assert node3.has_needed_replication_slots()
     assert node4.has_needed_replication_slots()
 
-@raises(Exception)
-def test_005a_number_sync_standbys():
+def test_005_number_sync_standbys():
     print()
-    assert node1.get_number_sync_standbys() == 1
-    node1.set_number_sync_standbys(-1) # monitor raises an error
 
-def test_005b_number_sync_standbys():
-    print()
+    assert node1.get_number_sync_standbys() == 1
+    node1.set_number_sync_standbys(-1)
     assert node1.get_number_sync_standbys() == 1
 
     print("set number_sync_standbys = 2")
