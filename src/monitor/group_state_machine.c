@@ -256,16 +256,6 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	}
 
 	/*
-	 * There are other cases when we want to continue an already started
-	 * failover.
-	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_REPORT_LSN) ||
-		IsCurrentState(activeNode, REPLICATION_STATE_FAST_FORWARD))
-	{
-		return ProceedGroupStateForMSFailover(activeNode, primaryNode);
-	}
-
-	/*
 	 * When the candidate is done fast forwarding the locally missing WAL bits,
 	 * it can be promoted.
 	 */
@@ -281,6 +271,16 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 		AssignGoalState(activeNode, REPLICATION_STATE_PREPARE_PROMOTION, message);
 
 		return true;
+	}
+
+	/*
+	 * There are other cases when we want to continue an already started
+	 * failover.
+	 */
+	if (IsCurrentState(activeNode, REPLICATION_STATE_REPORT_LSN) ||
+		IsCurrentState(activeNode, REPLICATION_STATE_FAST_FORWARD))
+	{
+		return ProceedGroupStateForMSFailover(activeNode, primaryNode);
 	}
 
 	/*

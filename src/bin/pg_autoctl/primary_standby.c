@@ -1043,6 +1043,17 @@ standby_fetch_missing_wal(LocalPostgresServer *postgres)
 
 	/* done with fast-forwarding, keep the value for node_active() call */
 	strlcpy(postgres->currentLSN, currentLSN, PG_LSN_MAXLENGTH);
+
+	/* we might have been interrupted before the end */
+	if (!hasReachedLSN)
+	{
+		log_error("Fast-forward reached LSN %s, target LSN is %s",
+				  postgres->currentLSN,
+				  replicationSource->targetLSN);
+		pgsql_finish(pgsql);
+		return false;
+	}
+
 	log_info("Fast-forward is done, now at LSN %s", postgres->currentLSN);
 
 	/*

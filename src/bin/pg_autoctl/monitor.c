@@ -571,10 +571,15 @@ monitor_get_most_advanced_standby(Monitor *monitor,
 	}
 
 	/* copy the node we retrieved in the expected place */
-	*node = nodeArray.nodes[0];
+	node->nodeId = nodeArray.nodes[0].nodeId;
+	strlcpy(node->name, nodeArray.nodes[0].name, _POSIX_HOST_NAME_MAX);
+	strlcpy(node->host, nodeArray.nodes[0].host, _POSIX_HOST_NAME_MAX);
+	node->port = nodeArray.nodes[0].port;
+	strlcpy(node->lsn, nodeArray.nodes[0].lsn, PG_LSN_MAXLENGTH);
+	node->isPrimary = nodeArray.nodes[0].isPrimary;
 
-	log_debug("The most advanced standby node is %s:%d, with id %d",
-			  node->host, node->port, node->nodeId);
+	log_debug("The most advanced standby node is node %d (%s:%d)",
+			  node->nodeId, node->host, node->port);
 
 	return true;
 }
