@@ -19,13 +19,13 @@ def teardown_module():
 
 def test_000_create_monitor():
     global monitor
-    monitor = cluster.create_monitor("/tmp/multi_ifdown/monitor")
+    monitor = cluster.create_monitor("/tmp/multi_async/monitor")
     monitor.run()
     monitor.wait_until_pg_is_running()
 
 def test_001_init_primary():
     global node1
-    node1 = cluster.create_datanode("/tmp/multi_ifdown/node1")
+    node1 = cluster.create_datanode("/tmp/multi_async/node1")
     node1.create()
     node1.run()
     assert node1.wait_until_state(target_state="single")
@@ -33,7 +33,7 @@ def test_001_init_primary():
 def test_002_add_standby():
     global node2
 
-    node2 = cluster.create_datanode("/tmp/multi_ifdown/node2")
+    node2 = cluster.create_datanode("/tmp/multi_async/node2")
     node2.create()
     node2.run()
 
@@ -48,7 +48,7 @@ def test_002_add_standby():
 def test_003_add_standby():
     global node3
 
-    node3 = cluster.create_datanode("/tmp/multi_ifdown/node3")
+    node3 = cluster.create_datanode("/tmp/multi_async/node3")
     node3.create()
     node3.run()
 

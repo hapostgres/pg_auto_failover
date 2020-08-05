@@ -1021,8 +1021,7 @@ SELECT reportedstate
                             'set', 'formation',
                             'number-sync-standbys', str(numberSyncStandbys))
         except Exception as e:
-            # either caught as a BAD ARG (1) or by the monitor (6)
-            if command.last_returncode in (1, 6):
+            if command.last_returncode == 1:
                 return False
             raise e
         return True

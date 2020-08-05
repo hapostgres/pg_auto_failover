@@ -101,10 +101,14 @@ def test_004_add_three_standbys():
     assert node3.has_needed_replication_slots()
     assert node4.has_needed_replication_slots()
 
-def test_005_number_sync_standbys():
+@raises(Exception)
+def test_005a_number_sync_standbys():
     print()
     assert node1.get_number_sync_standbys() == 1
-    assert not node1.set_number_sync_standbys(-1)
+    node1.set_number_sync_standbys(-1) # monitor raises an error
+
+def test_005b_number_sync_standbys():
+    print()
     assert node1.get_number_sync_standbys() == 1
 
     print("set number_sync_standbys = 2")
@@ -186,57 +190,3 @@ def test_011_write_into_new_primary():
 
     # generate more WAL trafic for replication
     node2.run_sql_query("CHECKPOINT")
-
-def test_012_set_candidate_priorities():
-    print()
-    assert node2.wait_until_state(target_state="primary")
-
-    # set priorities in a way that we know the candidate: node3
-    node1.set_candidate_priority(70)
-    node2.set_candidate_priority(90) # current primary
-    node3.set_candidate_priority(90)
-
-    # when we set candidate priority we go to apply_settings then primary
-    print()
-    assert node2.wait_until_state(target_state="primary")
-    assert node3.wait_until_state(target_state="secondary")
-    assert node1.wait_until_state(target_state="secondary")
-
-def test_013_maintenance_and_failover():
-    print()
-    print("Enabling maintenance on node1")
-    node1.enable_maintenance()
-    assert node1.wait_until_state(target_state="maintenance")
-    node1.stop_postgres()
-
-    # assigned and goal state must be the same
-    assert node2.wait_until_state(target_state="join_primary")
-
-    print("Calling pgautofailover.failover() on the monitor")
-    monitor.failover()
-    assert node3.wait_until_state(target_state="primary")
-    assert node2.wait_until_state(target_state="secondary")
-
-    print("Disabling maintenance on node1, should connect to the new primary")
-    node1.disable_maintenance()
-
-    # allow manual checking of primary_conninfo
-    print("current primary is node3 at %s" % str(node3.vnode.address))
-
-    if node1.pgmajor() < 12:
-        fn = "recovery.conf"
-    else:
-        fn = "postgresql-auto-failover-standby.conf"
-
-    fn = os.path.join(node1.datadir, fn)
-    print("%s:\n%s" % (fn, open(fn).read()))
-
-    assert node1.wait_until_state(target_state="secondary")
-
-    assert node1.has_needed_replication_slots()
-    assert node2.has_needed_replication_slots()
-    assert node3.has_needed_replication_slots()
-
-def test_014_read_from_new_primary():
-    results = node3.run_sql_query("SELECT * FROM t1")
-    assert results == [(1,), (2,), (3,), (4,)]

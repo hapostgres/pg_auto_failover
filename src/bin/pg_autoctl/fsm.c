@@ -251,6 +251,7 @@ KeeperFSMTransition KeeperFSM[] = {
 	{ SINGLE_STATE, WAIT_PRIMARY_STATE, COMMENT_SINGLE_TO_WAIT_PRIMARY, &fsm_prepare_replication },
 	{ PRIMARY_STATE, JOIN_PRIMARY_STATE, COMMENT_PRIMARY_TO_JOIN_PRIMARY, &fsm_prepare_replication },
 	{ PRIMARY_STATE, WAIT_PRIMARY_STATE, COMMENT_PRIMARY_TO_WAIT_PRIMARY, &fsm_disable_sync_rep },
+	{ JOIN_PRIMARY_STATE, WAIT_PRIMARY_STATE, COMMENT_PRIMARY_TO_WAIT_PRIMARY, &fsm_disable_sync_rep },
 
 	/*
 	 * Situation is getting back to normal on the primary
