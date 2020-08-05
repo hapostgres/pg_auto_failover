@@ -1421,7 +1421,8 @@ pg_setup_standby_mode(uint32_t pg_control_version,
 	{
 		NodeAddress *primaryNode = &(replicationSource->primaryNode);
 
-		if (!pg_receivewal(pgdata, pg_ctl, replicationSource, "0/1", LOG_DEBUG))
+		if (!IS_EMPTY_STRING_BUFFER(primaryNode->host) &&
+			!pg_receivewal(pgdata, pg_ctl, replicationSource, "0/1", LOG_DEBUG))
 		{
 			log_fatal("Failed to connect to the upstream server %d (%s:%d) "
 					  "for replication, see above for details",
