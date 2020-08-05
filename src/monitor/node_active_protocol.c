@@ -1330,6 +1330,62 @@ start_maintenance(PG_FUNCTION_ARGS)
 						ReplicationStateGetName(currentNode->goalState))));
 	}
 
+	/*
+	 * We now need to have the primary node identified, and the list of the
+	 * secondary nodes (not including those already in maintenance), to decide
+	 * if we can proceed.
+	 */
+	if (IsCurrentState(currentNode, REPLICATION_STATE_PRIMARY))
+	{
+		primaryNode = currentNode;
+	}
+	else
+	{
+		primaryNode = GetPrimaryNodeInGroup(currentNode->formationId,
+											currentNode->groupId);
+
+		if (primaryNode == NULL)
+		{
+			ereport(ERROR,
+					(errmsg("couldn't find the primary node in formation \"%s\", "
+							"group %d",
+							currentNode->formationId, currentNode->groupId)));
+		}
+	}
+
+	/*
+	 * We need to always have at least formation->number_sync_standbys nodes in
+	 * the SECONDARY state, otherwise writes may be blocked on the primary. So
+	 * we refuse to put a node in maintenance when it would force blocking
+	 * writes.
+	 */
+	secondaryNodesList =
+		AutoFailoverOtherNodesListInState(primaryNode,
+										  REPLICATION_STATE_SECONDARY);
+
+	secondaryNodesCount = list_length(secondaryNodesList);
+
+	if (formation->number_sync_standbys > 0 &&
+		secondaryNodesCount <= formation->number_sync_standbys)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("cannot start maintenance: we currently have %d "
+						"node(s) in the \"secondary\" state and require at "
+						"least %d sync standbys in formation \"%s\"",
+						secondaryNodesCount,
+						formation->number_sync_standbys,
+						formation->formationId)));
+	}
+
+	/*
+	 * Now that we cleared that adding another node in MAINTENANCE is
+	 * compatible with our service expectations from
+	 * formation->number_sync_standbys, we may proceed.
+	 *
+	 * We proceed in different ways when asked to put a primary or a secondary
+	 * to maintenance: in the case of a primary, we must failover.
+	 */
 	if (IsCurrentState(currentNode, REPLICATION_STATE_PRIMARY))
 	{
 		List *standbyNodesGroupList = AutoFailoverOtherNodesList(currentNode);
@@ -1375,46 +1431,6 @@ start_maintenance(PG_FUNCTION_ARGS)
 		}
 
 		PG_RETURN_BOOL(true);
-	}
-
-	/*
-	 * Done with dealing with a primary, we now have a secondary to take care
-	 * of. The primary needs to be in a stable state to allow for maintenance.
-	 */
-	primaryNode = GetPrimaryNodeInGroup(currentNode->formationId,
-										currentNode->groupId);
-
-	if (primaryNode == NULL)
-	{
-		ereport(ERROR,
-				(errmsg("couldn't find the primary node in formation \"%s\", "
-						"group %d",
-						currentNode->formationId, currentNode->groupId)));
-	}
-
-	/*
-	 * We need to always have at least formation->number_sync_standbys nodes in
-	 * the SECONDARY state, otherwise writes may be blocked on the primary. So
-	 * we refuse to put a node in maintenance when it would force blocking
-	 * writes.
-	 */
-	secondaryNodesList =
-		AutoFailoverOtherNodesListInState(primaryNode,
-										  REPLICATION_STATE_SECONDARY);
-
-	secondaryNodesCount = list_length(secondaryNodesList);
-
-	if (formation->number_sync_standbys > 0 &&
-		secondaryNodesCount <= formation->number_sync_standbys)
-	{
-		ereport(ERROR,
-				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("cannot start maintenance: we currently have %d "
-						"node(s) in the \"secondary\" state and require at "
-						"least %d sync standbys in formation \"%s\"",
-						secondaryNodesCount,
-						formation->number_sync_standbys,
-						formation->formationId)));
 	}
 	else if (IsStateIn(currentNode->reportedState, secondaryStates))
 	{
@@ -1489,7 +1505,11 @@ stop_maintenance(PG_FUNCTION_ARGS)
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("cannot stop maintenance when current state for "
 						"node %s:%d is not \"maintenance\"",
-						currentNode->nodeHost, currentNode->nodePort)));
+						currentNode->nodeHost, currentNode->nodePort),
+				 errdetail("Current reported state is \"%s\" and "
+						   "assigned state is \"%s\"",
+						   ReplicationStateGetName(currentNode->reportedState),
+						   ReplicationStateGetName(currentNode->goalState))));
 	}
 
 	/*
@@ -1980,7 +2000,8 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 
 		int count = list_length(syncStandbyNodesGroupList);
 
-		if (count == 0)
+		if (count == 0 ||
+			IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY))
 		{
 			/*
 			 *  If no standby participates in the replication Quorum, we

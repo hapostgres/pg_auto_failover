@@ -202,6 +202,60 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	}
 
 	/*
+	 * when report_lsn and the promotion has been done already:
+	 *      report_lsn -> secondary
+	 *
+	 */
+	if (IsCurrentState(activeNode, REPLICATION_STATE_REPORT_LSN) &&
+		(IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
+		 IsCurrentState(primaryNode, REPLICATION_STATE_JOIN_PRIMARY)))
+	{
+		char message[BUFSIZE];
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of node %d (%s:%d) to secondary "
+			"after node %d (%s:%d) got selected as the failover candidate.",
+			activeNode->nodeId,
+			activeNode->nodeHost,
+			activeNode->nodePort,
+			primaryNode->nodeId,
+			primaryNode->nodeHost,
+			primaryNode->nodePort);
+
+		AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
+		AssignGoalState(primaryNode, REPLICATION_STATE_PRIMARY, message);
+
+		return true;
+	}
+
+	/*
+	 * when report_lsn and the promotion has been done already:
+	 *      report_lsn -> secondary
+	 *
+	 */
+	if (IsCurrentState(activeNode, REPLICATION_STATE_REPORT_LSN) &&
+		IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY))
+	{
+		char message[BUFSIZE];
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of node %d (%s:%d) to secondary "
+			"after node %d (%s:%d) got selected as the failover candidate.",
+			activeNode->nodeId,
+			activeNode->nodeHost,
+			activeNode->nodePort,
+			primaryNode->nodeId,
+			primaryNode->nodeHost,
+			primaryNode->nodePort);
+
+		AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
+
+		return true;
+	}
+
+	/*
 	 * There are other cases when we want to continue an already started
 	 * failover.
 	 */
@@ -209,6 +263,24 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 		IsCurrentState(activeNode, REPLICATION_STATE_FAST_FORWARD))
 	{
 		return ProceedGroupStateForMSFailover(activeNode, primaryNode);
+	}
+
+	/*
+	 * When the candidate is done fast forwarding the locally missing WAL bits,
+	 * it can be promoted.
+	 */
+	if (IsCurrentState(activeNode, REPLICATION_STATE_FAST_FORWARD))
+	{
+		char message[BUFSIZE] = { 0 };
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of node %d (%s:%d) to prepare_promotion",
+			activeNode->nodeId, activeNode->nodeHost, activeNode->nodePort);
+
+		AssignGoalState(activeNode, REPLICATION_STATE_PREPARE_PROMOTION, message);
+
+		return true;
 	}
 
 	/*
@@ -296,12 +368,11 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	}
 
 	/*
-	 * when secondary is put to maintenance
+	 * when secondary is put to maintenance and there's a single standby
 	 *  wait_maintenance -> maintenance
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_WAIT_MAINTENANCE) &&
-		(IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
-		 IsCurrentState(primaryNode, REPLICATION_STATE_JOIN_PRIMARY)))
+		IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY))
 	{
 		char message[BUFSIZE];
 
@@ -312,12 +383,37 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 			activeNode->nodeHost, activeNode->nodePort,
 			primaryNode->nodeHost, primaryNode->nodePort);
 
-		/* promote the secondary */
+		/* secondary reached maintenance */
 		AssignGoalState(activeNode, REPLICATION_STATE_MAINTENANCE, message);
 
 		return true;
 	}
 
+	/*
+	 * when secondary is put to maintenance and we have mode standby nodes
+	 *  wait_maintenance -> maintenance
+	 *  join_primary -> primary
+	 */
+	if (IsCurrentState(activeNode, REPLICATION_STATE_WAIT_MAINTENANCE) &&
+		IsCurrentState(primaryNode, REPLICATION_STATE_JOIN_PRIMARY))
+	{
+		char message[BUFSIZE];
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of %s:%d to maintenance "
+			"after %s:%d converged to wait_primary.",
+			activeNode->nodeHost, activeNode->nodePort,
+			primaryNode->nodeHost, primaryNode->nodePort);
+
+		/* secondary reached maintenance */
+		AssignGoalState(activeNode, REPLICATION_STATE_MAINTENANCE, message);
+
+		/* set the primary back to its normal state (we can failover still) */
+		AssignGoalState(primaryNode, REPLICATION_STATE_PRIMARY, message);
+
+		return true;
+	}
 
 	/*
 	 * when primary is put to maintenance
@@ -1067,26 +1163,6 @@ ProceedWithMSFailover(AutoFailoverNode *activeNode,
 					  AutoFailoverNode *candidateNode)
 {
 	Assert(candidateNode != NULL);
-
-	/*
-	 * When the candidate is done fast forwarding the locally missing WAL bits,
-	 * it can be promoted.
-	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_FAST_FORWARD))
-	{
-		char message[BUFSIZE];
-
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of node %d (%s:%d) to prepare_promotion",
-			activeNode->nodeId, activeNode->nodeHost, activeNode->nodePort);
-
-		AssignGoalState(activeNode,
-						REPLICATION_STATE_PREPARE_PROMOTION,
-						message);
-
-		return true;
-	}
 
 	/*
 	 * When the activeNode is "just" another standby which did REPORT LSN, we

@@ -680,6 +680,12 @@ GroupListSyncStandbys(List *groupNodeList)
 	{
 		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
 
+		if (IsInMaintenance(node))
+		{
+			/* skip nodes in maintenance from the current sync standby list */
+			continue;
+		}
+
 		if (node->replicationQuorum)
 		{
 			syncStandbyNodesList = lappend(syncStandbyNodesList, node);
