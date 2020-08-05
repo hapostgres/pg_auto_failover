@@ -447,7 +447,7 @@ keeper_cli_receiwal(int argc, char **argv)
 	{
 		log_fatal("Hostname \"%s\" given in command line is %d characters, "
 				  "the maximum supported by pg_autoctl is %d",
-				  argv[0], hostLength, MAXCONNINFO - 1);
+				  argv[0], hostLength, _POSIX_HOST_NAME_MAX - 1);
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 

@@ -806,8 +806,8 @@ pg_rewind(const char *pgdata,
 
 
 /*
- * pg_rewind runs the pg_receivewal program to retrieve WAL files in the given
- * database directory. We need the ability to connect to the node.
+ * pg_receivewal runs the pg_receivewal program to retrieve WAL files in the
+ * given database directory. We need the ability to connect to the node.
  */
 bool
 pg_receivewal(const char *pgdata,
