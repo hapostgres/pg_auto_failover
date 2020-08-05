@@ -1469,9 +1469,10 @@ IsUnhealthy(AutoFailoverNode *pgAutoFailoverNode)
 {
 	TimestampTz now = GetCurrentTimestamp();
 	List *pgIsNotRunningStateList =
-		list_make3_int(REPLICATION_STATE_DRAINING,
+		list_make4_int(REPLICATION_STATE_DRAINING,
 					   REPLICATION_STATE_DEMOTED,
-					   REPLICATION_STATE_DEMOTE_TIMEOUT);
+					   REPLICATION_STATE_DEMOTE_TIMEOUT,
+					   REPLICATION_STATE_PREPARE_MAINTENANCE);
 
 	if (pgAutoFailoverNode == NULL)
 	{
