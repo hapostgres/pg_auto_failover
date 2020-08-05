@@ -239,7 +239,7 @@ class VirtualNode:
 
     def ifup(self):
         """
-        Bring the network interface down for this node
+        Bring the network interface up for this node
         """
         with IPRoute() as ipr:
             # bring it up

@@ -326,15 +326,6 @@ KeeperFSMTransition KeeperFSM[] = {
 	{ JOIN_SECONDARY_STATE, SECONDARY_STATE, COMMENT_JOIN_SECONDARY_TO_SECONDARY, &fsm_follow_new_primary },
 
 	/*
-	 * Applying new replication/cluster settings (per node replication quorum,
-	 * candidate priorities, or per formation number_sync_standbys) means we
-	 * have to fetch the new value for synchronous_standby_names from the
-	 * monitor.
-	 */
-	{ PRIMARY_STATE, APPLY_SETTINGS_STATE, COMMENT_PRIMARY_TO_APPLY_SETTINGS, &fsm_apply_settings },
-	{ APPLY_SETTINGS_STATE, PRIMARY_STATE, COMMENT_APPLY_SETTINGS_TO_PRIMARY, NULL },
-
-	/*
 	 * This is the end, my friend.
 	 */
 	{ NO_STATE, NO_STATE, NULL, NULL },

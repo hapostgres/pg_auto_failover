@@ -560,10 +560,6 @@ NodeStateFromString(const char *str)
 	{
 		return FAST_FORWARD_STATE;
 	}
-	else if (strcmp(str, "apply_settings") == 0)
-	{
-		return APPLY_SETTINGS_STATE;
-	}
 	else if (strcmp(str, "join_secondary") == 0)
 	{
 		return JOIN_SECONDARY_STATE;

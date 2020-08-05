@@ -968,7 +968,7 @@ standby_follow_new_primary(LocalPostgresServer *postgres)
 		return false;
 	}
 
-	log_info("Restarting Postgres at \%s\"", pgSetup->pgdata);
+	log_info("Restarting Postgres at \"%s\"", pgSetup->pgdata);
 
 	if (!ensure_postgres_service_is_running(postgres))
 	{
@@ -1105,7 +1105,7 @@ standby_restart_with_current_replication_source(LocalPostgresServer *postgres)
 		return false;
 	}
 
-	log_info("Restarting Postgres at \%s\"", pgSetup->pgdata);
+	log_info("Restarting Postgres at \"%s\"", pgSetup->pgdata);
 
 	if (!ensure_postgres_service_is_running(postgres))
 	{
