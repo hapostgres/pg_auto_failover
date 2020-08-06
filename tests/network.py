@@ -229,6 +229,23 @@ class VirtualNode:
             # Namespace doesn't exist. Return silently.
             pass
 
+    def ifdown(self):
+        """
+        Bring the network interface down for this node
+        """
+        with IPRoute() as ipr:
+            # bring it down
+            ipr.link('set', ifname=self.vethPeer, state='down')
+
+    def ifup(self):
+        """
+        Bring the network interface up for this node
+        """
+        with IPRoute() as ipr:
+            # bring it up
+            ipr.link('set', ifname=self.vethPeer, state='up')
+
+
 def _remove_interface_if_exists(name):
     """
     If the given interface exists, brings it down and removes it. Otherwise

@@ -144,8 +144,8 @@ monitor_get_nodes(Monitor *monitor, char *formation, int groupId,
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
 		groupId == -1
-		? "SELECT * FROM pgautofailover.get_nodes($1)"
-		: "SELECT * FROM pgautofailover.get_nodes($1, $2)";
+		? "SELECT * FROM pgautofailover.get_nodes($1) ORDER BY node_id"
+		: "SELECT * FROM pgautofailover.get_nodes($1, $2) ORDER BY node_id";
 	int paramCount = 1;
 	Oid paramTypes[2] = { TEXTOID, INT4OID };
 	const char *paramValues[2] = { 0 };
@@ -514,6 +514,72 @@ monitor_get_coordinator(Monitor *monitor, char *formation, NodeAddress *node)
 
 	log_debug("The coordinator node returned by the monitor is %s:%d",
 			  node->host, node->port);
+
+	return true;
+}
+
+
+/*
+ * monitor_get_most_advanced_standby finds the standby node in state REPORT_LSN
+ * with the most advanced LSN position.
+ */
+bool
+monitor_get_most_advanced_standby(Monitor *monitor,
+								  char *formation, int groupId,
+								  NodeAddress *node)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT * FROM pgautofailover.get_most_advanced_standby($1, $2)";
+	int paramCount = 2;
+	Oid paramTypes[2] = { TEXTOID, INT4OID };
+	const char *paramValues[2];
+
+	/* we expect a single entry */
+	NodeAddressArray nodeArray = { 0 };
+	NodeAddressArrayParseContext parseContext = { { 0 }, &nodeArray, false };
+
+	IntString groupIdString = intToString(groupId);
+
+	paramValues[0] = formation;
+	paramValues[1] = groupIdString.strValue;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &parseContext, parseNodeArray))
+	{
+		log_error(
+			"Failed to get most advanced standby node in the HA group "
+			"from the monitor while running \"%s\" with "
+			"formation \"%s\" and group ID %d",
+			sql, formation, groupId);
+		return false;
+	}
+
+	/* disconnect from PostgreSQL now */
+	pgsql_finish(&monitor->pgsql);
+
+	if (!parseContext.parsedOK || nodeArray.count != 1)
+	{
+		log_error(
+			"Failed to get the most advanced standby node from the monitor "
+			"while running \"%s\" with formation \"%s\" and group ID %d "
+			"because it returned an unexpected result. "
+			"See previous line for details.",
+			sql, formation, groupId);
+		return false;
+	}
+
+	/* copy the node we retrieved in the expected place */
+	node->nodeId = nodeArray.nodes[0].nodeId;
+	strlcpy(node->name, nodeArray.nodes[0].name, _POSIX_HOST_NAME_MAX);
+	strlcpy(node->host, nodeArray.nodes[0].host, _POSIX_HOST_NAME_MAX);
+	node->port = nodeArray.nodes[0].port;
+	strlcpy(node->lsn, nodeArray.nodes[0].lsn, PG_LSN_MAXLENGTH);
+	node->isPrimary = nodeArray.nodes[0].isPrimary;
+
+	log_debug("The most advanced standby node is node %d (%s:%d)",
+			  node->nodeId, node->host, node->port);
 
 	return true;
 }
@@ -1434,7 +1500,9 @@ monitor_print_state(Monitor *monitor, char *formation, int group)
 	{
 		case -1:
 		{
-			sql = "SELECT * FROM pgautofailover.current_state($1)";
+			sql =
+				"SELECT * FROM pgautofailover.current_state($1) "
+				"ORDER BY node_id";
 
 			paramCount = 1;
 			paramTypes[0] = TEXTOID;
@@ -1445,7 +1513,9 @@ monitor_print_state(Monitor *monitor, char *formation, int group)
 
 		default:
 		{
-			sql = "SELECT * FROM pgautofailover.current_state($1,$2)";
+			sql =
+				"SELECT * FROM pgautofailover.current_state($1,$2) "
+				"ORDER BY node_id";
 
 			groupStr = intToString(group);
 
@@ -1500,8 +1570,6 @@ printCurrentState(void *ctx, PGresult *result)
 	char hostSeparatorHeader[BUFSIZE] = { 0 };
 	char nodeSeparatorHeader[BUFSIZE] = { 0 };
 
-	bool pg_autoctl_debug = env_exists(PG_AUTOCTL_DEBUG);
-
 	if (PQnfields(result) != 9)
 	{
 		log_error("Query returned %d columns, expected 9", PQnfields(result));
@@ -1546,36 +1614,19 @@ printCurrentState(void *ctx, PGresult *result)
 	(void) prepareHostNameSeparator(hostSeparatorHeader, maxHostSize);
 	(void) prepareHostNameSeparator(nodeSeparatorHeader, maxNodeSize);
 
-	if (pg_autoctl_debug)
-	{
-		fformat(stdout, "%*s | %*s | %*s | %17s | %17s | %8s | %6s\n",
-				maxNameSize, "Name",
-				maxHostSize, "Host:Port",
-				maxNodeSize, "Node",
-				"Current State", "Assigned State",
-				"Priority", "Quorum");
+	fformat(stdout, "%*s | %*s | %*s | %17s | %17s | %8s | %6s\n",
+			maxNameSize, "Name",
+			maxHostSize, "Host:Port",
+			maxNodeSize, "Node",
+			"Current State", "Assigned State",
+			"Priority", "Quorum");
 
-		fformat(stdout, "%*s-+-%*s-+-%*s-+-%17s-+-%17s-+-%8s-+-%6s\n",
-				maxNameSize, nameSeparatorHeader,
-				maxHostSize, hostSeparatorHeader,
-				maxNodeSize, nodeSeparatorHeader,
-				"-----------------", "-----------------",
-				"--------", "------");
-	}
-	else
-	{
-		fformat(stdout, "%*s | %*s | %*s | %17s | %17s\n",
-				maxNameSize, "Name",
-				maxHostSize, "Host:Port",
-				maxNodeSize, "Node",
-				"Current State", "Assigned State");
-
-		fformat(stdout, "%*s-+-%*s-+-%*s-+-%17s-+-%17s\n",
-				maxNameSize, nameSeparatorHeader,
-				maxHostSize, hostSeparatorHeader,
-				maxNodeSize, nodeSeparatorHeader,
-				"-----------------", "-----------------");
-	}
+	fformat(stdout, "%*s-+-%*s-+-%*s-+-%17s-+-%17s-+-%8s-+-%6s\n",
+			maxNameSize, nameSeparatorHeader,
+			maxHostSize, hostSeparatorHeader,
+			maxNodeSize, nodeSeparatorHeader,
+			"-----------------", "-----------------",
+			"--------", "------");
 
 	for (currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
 	{
@@ -1595,21 +1646,12 @@ printCurrentState(void *ctx, PGresult *result)
 		sformat(hostport, sizeof(hostport), "%s:%s", host, port);
 		sformat(composedId, sizeof(hostport), "%s/%s", groupId, nodeId);
 
-		if (pg_autoctl_debug)
-		{
-			fformat(stdout, "%*s | %*s | %*s | %17s | %17s | %8s | %6s\n",
-					maxNameSize, name,
-					maxHostSize, hostport,
-					maxNodeSize, composedId,
-					currentState, goalState,
-					candidatePriority, replicationQuorum);
-		}
-		else
-		{
-			fformat(stdout, "%*s | %*s | %*s | %17s | %17s\n",
-					maxNameSize, name, maxHostSize, hostport,
-					maxNodeSize, composedId, currentState, goalState);
-		}
+		fformat(stdout, "%*s | %*s | %*s | %17s | %17s | %8s | %6s\n",
+				maxNameSize, name,
+				maxHostSize, hostport,
+				maxNodeSize, composedId,
+				currentState, goalState,
+				candidatePriority, replicationQuorum);
 	}
 	fformat(stdout, "\n");
 
@@ -2640,10 +2682,10 @@ monitor_get_notifications(Monitor *monitor)
 			/* errors are logged by parse_state_notification_message */
 			if (parse_state_notification_message(&notification))
 			{
-				log_info("New state for %s:%d in formation \"%s\": %s/%s",
+				log_info("New state for node %d (%s:%d): %s ➜ %s",
+						 notification.nodeId,
 						 notification.hostName,
 						 notification.nodePort,
-						 notification.formationId,
 						 NodeStateToString(notification.reportedState),
 						 NodeStateToString(notification.goalState));
 			}

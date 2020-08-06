@@ -6,10 +6,17 @@ TEST_CONTAINER_NAME = pg_auto_failover-test
 DOCKER_RUN_OPTS = --cap-add=SYS_ADMIN --cap-add=NET_ADMIN -ti --rm
 PDF = ./docs/_build/latex/pg_auto_failover.pdf
 
+# Tests for multiple standbys
+MULTI_SB_TESTS = $(basename $(notdir $(wildcard tests/test*_multi*)))
+
 # TEST indicates the testfile to run
 TEST ?=
 ifeq ($(TEST),)
-	TEST_ARGUMENT = "--where=tests"
+	TEST_ARGUMENT = --where=tests
+else ifeq ($(TEST),multi)
+	TEST_ARGUMENT = --where=tests --tests=$(MULTI_SB_TESTS)
+else ifeq ($(TEST),single)
+	TEST_ARGUMENT = --where=tests --exclude='_multi_'
 else
 	TEST_ARGUMENT = $(TEST:%=tests/%.py)
 endif

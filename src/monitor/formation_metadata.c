@@ -39,7 +39,6 @@ PG_FUNCTION_INFO_V1(enable_secondary);
 PG_FUNCTION_INFO_V1(disable_secondary);
 PG_FUNCTION_INFO_V1(set_formation_number_sync_standbys);
 
-bool SetFormationNumberSyncStandbys(const char *formationId, int numberSyncStandbys);
 Datum AutoFailoverFormationGetDatum(FunctionCallInfo fcinfo,
 									AutoFailoverFormation *formation);
 
@@ -662,14 +661,14 @@ FormationNumSyncStandbyIsValid(AutoFailoverFormation *formation,
 	*standbyCount = count;
 
 	/*
-	 * number_sync_standbys = 1 is a special case in our FSM, because we have
-	 * special handling of a missing standby them
+	 * number_sync_standbys = 0 is a special case in our FSM, because we have
+	 * special handling of a missing standby then.
 	 *
 	 * For other values (N) of number_sync_standbys, we require N+1 known
 	 * standby nodes, so that you can lose a standby at any point in time and
 	 * still accept writes. That's the service availability trade-off and cost.
 	 */
-	if (formation->number_sync_standbys == 1)
+	if (formation->number_sync_standbys == 0)
 	{
 		return true;
 	}

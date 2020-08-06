@@ -37,7 +37,10 @@ CREATE TYPE pgautofailover.replication_state
     'join_primary',
     'apply_settings',
     'prepare_maintenance',
-    'wait_maintenance'
+    'wait_maintenance',
+    'report_lsn',
+    'fast_forward',
+    'join_secondary'
  );
 
 CREATE TABLE pgautofailover.formation
@@ -46,7 +49,7 @@ CREATE TABLE pgautofailover.formation
     kind                 text NOT NULL DEFAULT 'pgsql',
     dbname               name NOT NULL DEFAULT 'postgres',
     opt_secondary        bool NOT NULL DEFAULT true,
-    number_sync_standbys int  NOT NULL DEFAULT 1,
+    number_sync_standbys int  NOT NULL DEFAULT 0,
     PRIMARY KEY   (formationid)
  );
 insert into pgautofailover.formation (formationid) values ('default');
@@ -82,7 +85,7 @@ grant execute on function pgautofailover.drop_formation(text) to autoctl_node;
 
 CREATE FUNCTION pgautofailover.set_formation_number_sync_standbys
  (
-    IN formation_id  		text,
+    IN formation_id         text,
     IN number_sync_standbys int
  )
 RETURNS bool LANGUAGE C STRICT SECURITY DEFINER
@@ -344,6 +347,33 @@ $$;
 
 grant execute on function pgautofailover.get_coordinator(text)
    to autoctl_node;
+
+
+CREATE FUNCTION pgautofailover.get_most_advanced_standby
+ (
+   IN formationid       text default 'default',
+   IN groupid           int default 0,
+   OUT node_id          bigint,
+   OUT node_name        text,
+   OUT node_host        text,
+   OUT node_port        int,
+   OUT node_lsn         pg_lsn,
+   OUT node_is_primary  bool
+ )
+RETURNS SETOF record LANGUAGE SQL STRICT
+AS $$
+   select nodeid, nodename, nodehost, nodeport, reportedlsn, false
+     from pgautofailover.node
+    where formationid = $1
+      and groupid = $2
+      and reportedstate = 'report_lsn'
+ order by reportedlsn desc, health desc
+    limit 1;
+$$;
+
+grant execute on function pgautofailover.get_most_advanced_standby(text,int)
+   to autoctl_node;
+
 
 CREATE FUNCTION pgautofailover.remove_node
  (
@@ -651,10 +681,10 @@ grant execute on function
 
 CREATE FUNCTION pgautofailover.set_node_replication_quorum
  (
-    IN nodeid				int,
-	IN nodehost             text,
-	IN nodeport             int,
-    IN replication_quorum	bool
+    IN nodeid             int,
+    IN nodehost           text,
+    IN nodeport           int,
+    IN replication_quorum bool
  )
 RETURNS bool LANGUAGE C STRICT SECURITY DEFINER
 AS 'MODULE_PATHNAME', $$set_node_replication_quorum$$;

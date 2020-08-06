@@ -50,6 +50,9 @@ typedef enum
 	APPLY_SETTINGS_STATE,
 	PREPARE_MAINTENANCE_STATE,
 	WAIT_MAINTENANCE_STATE,
+	REPORT_LSN_STATE,
+	FAST_FORWARD_STATE,
+	JOIN_SECONDARY_STATE,
 
 	/* Allow some wildcard-matching transitions (from ANY state to) */
 	ANY_STATE = 128

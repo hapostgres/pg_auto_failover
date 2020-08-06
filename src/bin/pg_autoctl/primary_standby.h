@@ -46,6 +46,7 @@ typedef struct LocalPostgresServer
 	PgInstanceKind pgKind;
 	LocalExpectedPostgresStatus expectedPgStatus;
 	char standbyTargetLSN[PG_LSN_MAXLENGTH];
+	char synchronousStandbyNames[BUFSIZE];
 } LocalPostgresServer;
 
 
@@ -66,8 +67,7 @@ bool primary_create_replication_slot(LocalPostgresServer *postgres,
 bool primary_drop_replication_slot(LocalPostgresServer *postgres,
 								   char *replicationSlotName);
 bool primary_drop_replication_slots(LocalPostgresServer *postgres);
-bool primary_set_synchronous_standby_names(LocalPostgresServer *postgres,
-										   char *synchronous_standby_names);
+bool primary_set_synchronous_standby_names(LocalPostgresServer *postgres);
 bool postgres_replication_slot_drop_removed(LocalPostgresServer *postgres,
 											NodeAddressArray *nodeArray);
 bool postgres_replication_slot_maintain(LocalPostgresServer *postgres,
@@ -85,6 +85,7 @@ bool standby_init_replication_source(LocalPostgresServer *postgres,
 									 const char *slotName,
 									 const char *maximumBackupRate,
 									 const char *backupDirectory,
+									 const char *targetLSN,
 									 SSLOptions sslOptions,
 									 int currentNodeId);
 bool standby_init_database(LocalPostgresServer *postgres,
@@ -95,6 +96,10 @@ bool standby_promote(LocalPostgresServer *postgres);
 bool check_postgresql_settings(LocalPostgresServer *postgres,
 							   bool *settings_are_ok);
 bool primary_standby_has_caught_up(LocalPostgresServer *postgres);
+bool standby_follow_new_primary(LocalPostgresServer *postgres);
+bool standby_fetch_missing_wal(LocalPostgresServer *postgres);
+bool standby_restart_with_current_replication_source(LocalPostgresServer *postgres);
+bool standby_cleanup_as_primary(LocalPostgresServer *postgres);
 
 
 #endif /* LOCAL_POSTGRES_H */

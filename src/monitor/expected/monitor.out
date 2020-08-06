@@ -145,4 +145,5 @@ assigned_replication_quorum | t
 
 -- should fail as there's no primary at this point
 select pgautofailover.perform_failover();
-ERROR:  cannot fail over: group does not have 2 nodes
+ERROR:  cannot fail over: group 0 in formation default currently has 0 node registered
+DETAIL:  At least 2 nodes are required to implement a failover

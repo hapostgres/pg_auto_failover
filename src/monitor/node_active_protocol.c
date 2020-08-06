@@ -49,9 +49,6 @@ static int AssignGroupId(AutoFailoverFormation *formation,
 
 static bool RemoveNode(AutoFailoverNode *currentNode);
 
-static bool IsStateIn(ReplicationState state, List *allowedStates);
-
-
 /* SQL-callable function declarations */
 PG_FUNCTION_INFO_V1(register_node);
 PG_FUNCTION_INFO_V1(node_active);
@@ -179,8 +176,9 @@ register_node(PG_FUNCTION_ARGS)
 		else
 		{
 			ereport(ERROR,
-					(errmsg("node %s:%d with dbname \"%s\" can not be registered in "
-							"formation \"%s\" which expects dbname \"%s\"",
+					(errmsg("node %s:%d with dbname \"%s\" can not be "
+							"registered in formation \"%s\" "
+							"which expects dbname \"%s\"",
 							nodeHost, nodePort, expectedDBName,
 							formationId,
 							formation->dbname)));
@@ -210,6 +208,49 @@ register_node(PG_FUNCTION_ARGS)
 						"formation \"%s\", could not get information for node that was inserted",
 						nodeHost, nodePort, expectedDBName,
 						formationId)));
+	}
+
+	if (pgAutoFailoverNode == NULL)
+	{
+		/* that's a bug, really, maybe we could use an Assert() instead */
+		ereport(ERROR,
+				(errmsg("couldn't find the newly registered node %s:%d "
+						"in formation \"%s\", group %d",
+						nodeHost, nodePort,
+						formationId, currentNodeState.groupId)));
+	}
+
+	/*
+	 * When adding a second node to a formation that has number_sync_standbys
+	 * set to zero (the default value for single node and single standby
+	 * formations), we switch the default value to 1 automatically.
+	 */
+	if (formation->number_sync_standbys == 0)
+	{
+		List *allNodes = AllAutoFailoverNodes(formationId);
+
+		/* second standby to be registered */
+		if (list_length(allNodes) == 3)
+		{
+			char message[BUFSIZE] = { 0 };
+
+			formation->number_sync_standbys = 1;
+
+			if (!SetFormationNumberSyncStandbys(formationId, 1))
+			{
+				ereport(ERROR,
+						(errmsg("couldn't set the formation \"%s\" "
+								"number_sync_standbys to 1 now that a third "
+								"node has been added",
+								formationId)));
+			}
+
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting number_sync_standbys to %d for formation %s.",
+				formation->number_sync_standbys,
+				formation->formationId);
+		}
 	}
 
 	assignedNodeState =
@@ -372,11 +413,28 @@ NodeActive(char *formationId, AutoFailoverNodeState *currentNodeState)
 			 */
 			char message[BUFSIZE] = { 0 };
 
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Node %s:%d reported new state %s",
-				pgAutoFailoverNode->nodeHost, pgAutoFailoverNode->nodePort,
-				ReplicationStateGetName(currentNodeState->replicationState));
+			if (pgAutoFailoverNode->goalState == REPLICATION_STATE_REPORT_LSN)
+			{
+				LogAndNotifyMessage(
+					message, BUFSIZE,
+					"Node %d (%s:%d) reported new state \"%s\" with LSN %X/%X",
+					pgAutoFailoverNode->nodeId,
+					pgAutoFailoverNode->nodeHost,
+					pgAutoFailoverNode->nodePort,
+					ReplicationStateGetName(currentNodeState->replicationState),
+					(uint32) (pgAutoFailoverNode->reportedLSN >> 32),
+					(uint32) pgAutoFailoverNode->reportedLSN);
+			}
+			else
+			{
+				LogAndNotifyMessage(
+					message, BUFSIZE,
+					"Node %d (%s:%d) reported new state \"%s\"",
+					pgAutoFailoverNode->nodeId,
+					pgAutoFailoverNode->nodeHost,
+					pgAutoFailoverNode->nodePort,
+					ReplicationStateGetName(currentNodeState->replicationState));
+			}
 
 			pgAutoFailoverNode->reportedState = currentNodeState->replicationState;
 			pgAutoFailoverNode->pgsrSyncState = currentNodeState->pgsrSyncState;
@@ -467,7 +525,7 @@ JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 		}
 
 		/* target group already has a primary, any other node is a standby */
-		else if (formation->opt_secondary && list_length(groupNodeList) == 1)
+		else if (formation->opt_secondary)
 		{
 			AutoFailoverNode *primaryNode = NULL;
 
@@ -488,8 +546,10 @@ JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 			 * We detect the situation here and report error code 55006 so that
 			 * pg_autoctl knows to retry registering.
 			 */
-			primaryNode = GetWritableNodeInGroup(formation->formationId,
-												 currentNodeState->groupId);
+			primaryNode =
+				GetPrimaryNodeInGroup(
+					formation->formationId,
+					currentNodeState->groupId);
 
 			if (primaryNode == NULL)
 			{
@@ -500,36 +560,55 @@ JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 				 */
 				ereport(ERROR,
 						(errcode(ERRCODE_OBJECT_IN_USE),
-						 errmsg("primary node is still initializing"),
+						 errmsg("JoinAutoFailoverFormation couldn't find the "
+								" primary node in formation \"%s\", group %d",
+								formation->formationId,
+								currentNodeState->groupId),
 						 errhint("Retry registering in a moment")));
 			}
 
+			/*
+			 * We can only accept a single new standby at a time. Spend some
+			 * cycles on grabbing more information for a user-friendly report.
+			 */
 			if (IsInWaitOrJoinState(primaryNode))
 			{
+				const char *primaryState =
+					ReplicationStateGetName(primaryNode->reportedState);
+
 				AutoFailoverNode *standbyNode =
 					FindFailoverNewStandbyNode(groupNodeList);
 
-				Assert(standbyNode != NULL);
-
-				ereport(ERROR,
-						(errcode(ERRCODE_OBJECT_IN_USE),
-						 errmsg("primary node %s:%d is already in state %s",
-								primaryNode->nodeHost, primaryNode->nodePort,
-								ReplicationStateGetName(primaryNode->goalState)),
-						 errdetail("Only one standby can be registered at a "
-								   "time in pg_auto_failover, and "
-								   "node %d (%s:%d) is currently being "
-								   "registered.",
-								   standbyNode->nodeId,
-								   standbyNode->nodeHost,
-								   standbyNode->nodePort),
-						 errhint("Retry registering in a moment")));
+				/* race condition: the standby might be SECONDARY already */
+				if (standbyNode != NULL)
+				{
+					ereport(ERROR,
+							(errcode(ERRCODE_OBJECT_IN_USE),
+							 errmsg("primary node %s:%d is already in state %s",
+									primaryNode->nodeHost,
+									primaryNode->nodePort,
+									primaryState),
+							 errdetail("Only one standby can be registered "
+									   "at a time in pg_auto_failover, and "
+									   "node %d (%s:%d) is currently being "
+									   "registered.",
+									   standbyNode->nodeId,
+									   standbyNode->nodeHost,
+									   standbyNode->nodePort),
+							 errhint("Retry registering in a moment")));
+				}
+				else
+				{
+					/* sadly we don't have details in that case */
+					ereport(ERROR,
+							(errcode(ERRCODE_OBJECT_IN_USE),
+							 errmsg("primary node %s:%d is already in state %s",
+									primaryNode->nodeHost,
+									primaryNode->nodePort,
+									primaryState),
+							 errhint("Retry registering in a moment")));
+				}
 			}
-		}
-		else
-		{
-			ereport(ERROR, (errmsg("group %d already has %d members", groupId,
-								   list_length(groupNodeList))));
 		}
 	}
 	else
@@ -621,7 +700,7 @@ get_primary(PG_FUNCTION_ARGS)
 
 	checkPgAutoFailoverVersion();
 
-	primaryNode = GetWritableNodeInGroup(formationId, groupId);
+	primaryNode = GetPrimaryOrDemotedNodeInGroup(formationId, groupId);
 	if (primaryNode == NULL)
 	{
 		ereport(ERROR, (errmsg("group has no writable node right now")));
@@ -937,7 +1016,11 @@ remove_node_by_host(PG_FUNCTION_ARGS)
 static bool
 RemoveNode(AutoFailoverNode *currentNode)
 {
-	AutoFailoverNode *otherNode = NULL;
+	bool currentNodeIsPrimary = false;
+
+	List *otherNodesGroupList = NIL;
+	ListCell *nodeCell = NULL;
+	AutoFailoverNode *firstStandbyNode = NULL;
 
 	if (currentNode == NULL)
 	{
@@ -946,35 +1029,73 @@ RemoveNode(AutoFailoverNode *currentNode)
 
 	LockFormation(currentNode->formationId, ExclusiveLock);
 
-	otherNode = OtherNodeInGroup(currentNode);
+	/* when removing the primary, initiate a failover */
+	currentNodeIsPrimary = StateBelongsToPrimary(currentNode->reportedState);
 
-	RemoveAutoFailoverNode(currentNode);
+	/* get the list of the other nodes */
+	otherNodesGroupList = AutoFailoverOtherNodesList(currentNode);
 
-	if (otherNode != NULL)
+	/* and the first other node to trigger our first FSM transition */
+	firstStandbyNode =
+		otherNodesGroupList == NIL ? NULL : linitial(otherNodesGroupList);
+
+	/* review the FSM for every other node, when removing the primary */
+	if (currentNodeIsPrimary)
 	{
-		ProceedGroupState(otherNode);
-	}
-
-	return true;
-}
-
-
-/* returns true if state is equal to any of allowedStates */
-static bool
-IsStateIn(ReplicationState state, List *allowedStates)
-{
-	ListCell *cell = NULL;
-
-	foreach(cell, allowedStates)
-	{
-		ReplicationState allowedState = (ReplicationState) lfirst_int(cell);
-		if (state == allowedState)
+		foreach(nodeCell, otherNodesGroupList)
 		{
-			return true;
+			char message[BUFSIZE] = { 0 };
+			AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+			if (node == NULL)
+			{
+				/* shouldn't happen */
+				ereport(ERROR, (errmsg("BUG: node is NULL")));
+				continue;
+			}
+
+			/* skip nodes that are currently in maintenance */
+			if (IsInMaintenance(node))
+			{
+				continue;
+			}
+
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of node %d (%s:%d) to report_lsn "
+				"after primary node removal.",
+				node->nodeId, node->nodeHost, node->nodePort);
+
+			SetNodeGoalState(node, REPLICATION_STATE_REPORT_LSN, message);
 		}
 	}
 
-	return false;
+	/* time to actually remove the current node */
+	RemoveAutoFailoverNode(currentNode);
+
+	/* now proceed with the failover, starting with the first standby */
+	if (currentNodeIsPrimary)
+	{
+		/* if we have at least one other node in the group, proceed */
+		if (firstStandbyNode)
+		{
+			(void) ProceedGroupState(firstStandbyNode);
+		}
+	}
+	else
+	{
+		/* find the primary, if any, and have it realize a node has left */
+		AutoFailoverNode *primaryNode =
+			GetNodeToFailoverFromInGroup(currentNode->formationId,
+										 currentNode->groupId);
+
+		if (primaryNode)
+		{
+			(void) ProceedGroupState(primaryNode);
+		}
+	}
+
+	PG_RETURN_BOOL(true);
 }
 
 
@@ -990,11 +1111,7 @@ perform_failover(PG_FUNCTION_ARGS)
 
 	List *groupNodeList = NULL;
 
-	AutoFailoverNode *firstNode = NULL;
-	AutoFailoverNode *secondNode = NULL;
-
 	AutoFailoverNode *primaryNode = NULL;
-	AutoFailoverNode *secondaryNode = NULL;
 
 	char message[BUFSIZE] = { 0 };
 
@@ -1004,101 +1121,138 @@ perform_failover(PG_FUNCTION_ARGS)
 	LockNodeGroup(formationId, groupId, ExclusiveLock);
 
 	groupNodeList = AutoFailoverNodeGroup(formationId, groupId);
-	if (list_length(groupNodeList) != 2)
+	if (list_length(groupNodeList) < 2)
 	{
-		ereport(ERROR, (errmsg("cannot fail over: group does not have 2 nodes")));
+		ereport(ERROR,
+				(errmsg("cannot fail over: group %d in formation %s "
+						"currently has %d node registered",
+						groupId, formationId, list_length(groupNodeList)),
+				 errdetail("At least 2 nodes are required "
+						   "to implement a failover")));
 	}
 
-	firstNode = linitial(groupNodeList);
-	secondNode = lsecond(groupNodeList);
+	/* get a current primary node that we can failover from (accepts writes) */
+	primaryNode = GetNodeToFailoverFromInGroup(formationId, groupId);
+
+	if (primaryNode == NULL)
+	{
+		ereport(ERROR,
+				(errmsg("couldn't find the primary node in formation \"%s\", "
+						"group %d", formationId, groupId)));
+	}
 
 	/*
-	 * A manual failover is allowed to happen only when we have a solid state:
-	 * one node is assigned primary, the other node is assigned secondary.
+	 * When we have only two nodes, we can failover directly to the secondary
+	 * node, provided its current state allows for that.
 	 *
-	 * Because of the way the node_active protocol works, it might be that the
-	 * nodes didn't reach the assigned goalState yet, though the monitor knows
-	 * it's okay already to perform a failover. So here, we only test for the
-	 * assigned goalState to be as expected.
+	 * When we have more than two nodes, then we need to check that we have at
+	 * least one candidate for failover and initiate the REPORT_LSN dance to
+	 * make the failover happen.
 	 */
+	if (list_length(groupNodeList) == 2)
+	{
+		AutoFailoverNode *secondaryNode = NULL;
+		List *standbyNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
 
-	if (firstNode->goalState == REPLICATION_STATE_PRIMARY)
-	{
-		primaryNode = firstNode;
-	}
-	else if (secondNode->goalState == REPLICATION_STATE_PRIMARY)
-	{
-		primaryNode = secondNode;
+		if (list_length(standbyNodesGroupList) != 1)
+		{
+			ereport(ERROR,
+					(errmsg("couldn't find the standby node in "
+							"formation \"%s\", group %d with primary node "
+							"%d (%s:%d)",
+							formationId, groupId,
+							primaryNode->nodeId,
+							primaryNode->nodeHost,
+							primaryNode->nodePort)));
+		}
+
+		secondaryNode = linitial(standbyNodesGroupList);
+
+		if (secondaryNode->goalState != REPLICATION_STATE_SECONDARY)
+		{
+			const char *secondaryState =
+				ReplicationStateGetName(secondaryNode->goalState);
+
+			ereport(ERROR,
+					(errmsg("standby node %d (%s:%d) is in state \"%s\", which "
+							"prevents the node for being a failover candidate",
+							secondaryNode->nodeId,
+							secondaryNode->nodeHost,
+							secondaryNode->nodePort,
+							secondaryState)));
+		}
+
+		/*
+		 * In order to safely proceed we need to ensure that the primary node
+		 * has reached the primary state fully already. In the transition to
+		 * PRIMARY we actually wait until the current LSN observed on the
+		 * primary has made it to the secondary, which is a needed guarantee
+		 * for avoiding data loss.
+		 */
+		if (!IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY) ||
+			!IsCurrentState(secondaryNode, REPLICATION_STATE_SECONDARY))
+		{
+			ereport(ERROR,
+					(errmsg(
+						 "cannot fail over: primary node is not in a stable state"),
+					 errdetail("node %d (%s:%d) has reported state \"%s\" and "
+							   "is assigned state \"%s\", "
+							   "and node %d (%s:%d) has reported state \"%s\" "
+							   "and is assigned state \"%s\"",
+							   primaryNode->nodeId,
+							   primaryNode->nodeHost,
+							   primaryNode->nodePort,
+							   ReplicationStateGetName(primaryNode->reportedState),
+							   ReplicationStateGetName(primaryNode->goalState),
+							   secondaryNode->nodeId,
+							   secondaryNode->nodeHost,
+							   secondaryNode->nodePort,
+							   ReplicationStateGetName(secondaryNode->reportedState),
+							   ReplicationStateGetName(secondaryNode->goalState)),
+					 errhint("a stable state must be observed to "
+							 "perform a manual failover")));
+		}
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of node %d (%s:%d) to draining "
+			"and node %d (%s:%d) to prepare_promotion "
+			"after a user-initiated failover.",
+			primaryNode->nodeId,
+			primaryNode->nodeHost,
+			primaryNode->nodePort,
+			secondaryNode->nodeId,
+			secondaryNode->nodeHost,
+			secondaryNode->nodePort);
+
+		SetNodeGoalState(primaryNode,
+						 REPLICATION_STATE_DRAINING, message);
+
+		SetNodeGoalState(secondaryNode,
+						 REPLICATION_STATE_PREPARE_PROMOTION, message);
 	}
 	else
 	{
-		ereport(ERROR,
-				(errmsg("cannot fail over: there is no primary node"),
-				 errdetail("node %d (%s:%d) is in state \"%s\" and "
-						   "node %d (%s:%d) is in state \"%s\"",
-						   firstNode->nodeId,
-						   firstNode->nodeHost,
-						   firstNode->nodePort,
-						   ReplicationStateGetName(firstNode->reportedState),
-						   secondNode->nodeId,
-						   secondNode->nodeHost,
-						   secondNode->nodePort,
-						   ReplicationStateGetName(secondNode->reportedState)),
-				 errhint("one node must be in state \"primary\" to "
-						 "perform a manual failover")));
-	}
+		List *standbyNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
+		AutoFailoverNode *firstStandbyNode = linitial(standbyNodesGroupList);
+		char message[BUFSIZE];
 
-	if (firstNode->goalState == REPLICATION_STATE_SECONDARY)
-	{
-		secondaryNode = firstNode;
-	}
-	else if (secondNode->goalState == REPLICATION_STATE_SECONDARY)
-	{
-		secondaryNode = secondNode;
-	}
-	else
-	{
-		ereport(ERROR, (errmsg("cannot fail over: there is no secondary node")));
-	}
+		/* so we have at least one candidate, let's get started */
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of node %d (%s:%d) at LSN %X/%X to draining "
+			"after a user-initiated failover.",
+			primaryNode->nodeId,
+			primaryNode->nodeHost,
+			primaryNode->nodePort,
+			(uint32) (primaryNode->reportedLSN >> 32),
+			(uint32) primaryNode->reportedLSN);
 
-	/*
-	 * In order to safely proceed we need to ensure that the primary node has
-	 * reached the primary state fully already. In the transition to PRIMARY we
-	 * actually wait until the current LSN observed on the primary has made it
-	 * to the secondary, which is a needed guarantee for avoiding data loss.
-	 */
-	if (!IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY) ||
-		!IsCurrentState(secondaryNode, REPLICATION_STATE_SECONDARY))
-	{
-		ereport(ERROR,
-				(errmsg("cannot fail over: primary node is not in a stable state"),
-				 errdetail("node %d (%s:%d) has reported state \"%s\" and "
-						   "is assigned state \"%s\", "
-						   "and node %d (%s:%d) has reported state \"%s\" "
-						   "and is assigned state \"%s\"",
-						   firstNode->nodeId,
-						   firstNode->nodeHost,
-						   firstNode->nodePort,
-						   ReplicationStateGetName(firstNode->reportedState),
-						   ReplicationStateGetName(firstNode->goalState),
-						   secondNode->nodeId,
-						   secondNode->nodeHost,
-						   secondNode->nodePort,
-						   ReplicationStateGetName(secondNode->reportedState),
-						   ReplicationStateGetName(secondNode->goalState)),
-				 errhint("a stable state must be observed to "
-						 "perform a manual failover")));
+		SetNodeGoalState(primaryNode, REPLICATION_STATE_DRAINING, message);
+
+		/* now proceed with the failover, starting with the first standby */
+		(void) ProceedGroupState(firstStandbyNode);
 	}
-
-	LogAndNotifyMessage(
-		message, BUFSIZE,
-		"Setting goal state of %s:%d to draining and %s:%d to "
-		"prepare_promotion after a user-initiated failover.",
-		primaryNode->nodeHost, primaryNode->nodePort,
-		secondaryNode->nodeHost, secondaryNode->nodePort);
-
-	SetNodeGoalState(primaryNode, REPLICATION_STATE_DRAINING, message);
-	SetNodeGoalState(secondaryNode, REPLICATION_STATE_PREPARE_PROMOTION, message);
 
 	PG_RETURN_VOID();
 }
@@ -1116,12 +1270,19 @@ start_maintenance(PG_FUNCTION_ARGS)
 	int32 nodeId = PG_GETARG_INT32(0);
 
 	AutoFailoverNode *currentNode = NULL;
-	AutoFailoverNode *otherNode = NULL;
-
-	char message[BUFSIZE];
+	AutoFailoverNode *primaryNode = NULL;
+	AutoFailoverFormation *formation = NULL;
 
 	List *secondaryStates = list_make2_int(REPLICATION_STATE_SECONDARY,
 										   REPLICATION_STATE_CATCHINGUP);
+
+	List *secondaryNodesList = NIL;
+	List *groupNodesList = NIL;
+
+	int totalNodesCount = 0;
+	int secondaryNodesCount = 0;
+
+	char message[BUFSIZE];
 
 	checkPgAutoFailoverVersion();
 
@@ -1134,15 +1295,14 @@ start_maintenance(PG_FUNCTION_ARGS)
 	LockFormation(currentNode->formationId, ShareLock);
 	LockNodeGroup(currentNode->formationId, currentNode->groupId, ExclusiveLock);
 
-	otherNode = OtherNodeInGroup(currentNode);
+	formation = GetFormation(currentNode->formationId);
 
-	if (otherNode == NULL)
-	{
-		ereport(ERROR,
-				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("cannot start maintenance: group does not have 2 nodes")));
-	}
+	groupNodesList =
+		AutoFailoverNodeGroup(currentNode->formationId, currentNode->groupId);
 
+	totalNodesCount = list_length(groupNodesList);
+
+	/* check pre-conditions for the current node (secondary) */
 	if (currentNode->reportedState == REPLICATION_STATE_MAINTENANCE ||
 		currentNode->goalState == REPLICATION_STATE_MAINTENANCE)
 	{
@@ -1170,49 +1330,158 @@ start_maintenance(PG_FUNCTION_ARGS)
 						ReplicationStateGetName(currentNode->goalState))));
 	}
 
+	/*
+	 * We now need to have the primary node identified, and the list of the
+	 * secondary nodes (not including those already in maintenance), to decide
+	 * if we can proceed.
+	 */
 	if (IsCurrentState(currentNode, REPLICATION_STATE_PRIMARY))
 	{
+		primaryNode = currentNode;
+	}
+	else
+	{
+		primaryNode = GetPrimaryNodeInGroup(currentNode->formationId,
+											currentNode->groupId);
+
+		if (primaryNode == NULL)
+		{
+			ereport(ERROR,
+					(errmsg("couldn't find the primary node in formation \"%s\", "
+							"group %d",
+							currentNode->formationId, currentNode->groupId)));
+		}
+	}
+
+	/*
+	 * We need to always have at least formation->number_sync_standbys nodes in
+	 * the SECONDARY state, otherwise writes may be blocked on the primary. So
+	 * we refuse to put a node in maintenance when it would force blocking
+	 * writes.
+	 */
+	secondaryNodesList =
+		AutoFailoverOtherNodesListInState(primaryNode,
+										  REPLICATION_STATE_SECONDARY);
+
+	secondaryNodesCount = list_length(secondaryNodesList);
+
+	if (formation->number_sync_standbys > 0 &&
+		secondaryNodesCount <= formation->number_sync_standbys)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("cannot start maintenance: we currently have %d "
+						"node(s) in the \"secondary\" state and require at "
+						"least %d sync standbys in formation \"%s\"",
+						secondaryNodesCount,
+						formation->number_sync_standbys,
+						formation->formationId)));
+	}
+
+	/*
+	 * Now that we cleared that adding another node in MAINTENANCE is
+	 * compatible with our service expectations from
+	 * formation->number_sync_standbys, we may proceed.
+	 *
+	 * We proceed in different ways when asked to put a primary or a secondary
+	 * to maintenance: in the case of a primary, we must failover.
+	 */
+	if (IsCurrentState(currentNode, REPLICATION_STATE_PRIMARY))
+	{
+		List *standbyNodesGroupList = AutoFailoverOtherNodesList(currentNode);
+		AutoFailoverNode *firstStandbyNode = linitial(standbyNodesGroupList);
+		char message[BUFSIZE] = { 0 };
+
 		/*
-		 * We put the primary to prepare_maintenance now, and the secondary to
-		 * prepare_replication.
+		 * Set the primary to prepare_maintenance now, and if we have a single
+		 * secondary we assign it prepare_promotion, otherwise we need to elect
+		 * a secondary, same as in perform_failover.
 		 */
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of %s:%d to prepare_maintenance "
-			"and %s:%d to prepare_promotion "
+			"Setting goal state of node %d (%s:%d) to prepare_maintenance "
 			"after a user-initiated start_maintenance call.",
-			currentNode->nodeHost, currentNode->nodePort,
-			otherNode->nodeHost, otherNode->nodePort);
+			currentNode->nodeId, currentNode->nodeHost, currentNode->nodePort);
 
 		SetNodeGoalState(currentNode,
 						 REPLICATION_STATE_PREPARE_MAINTENANCE, message);
 
-		SetNodeGoalState(otherNode,
-						 REPLICATION_STATE_PREPARE_PROMOTION, message);
+		if (totalNodesCount == 2)
+		{
+			AutoFailoverNode *otherNode = firstStandbyNode;
+
+			/*
+			 * We put the only secondary node straight to prepare_replication.
+			 */
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of %s:%d to prepare_maintenance "
+				"and %s:%d to prepare_promotion "
+				"after a user-initiated start_maintenance call.",
+				currentNode->nodeHost, currentNode->nodePort,
+				otherNode->nodeHost, otherNode->nodePort);
+
+			SetNodeGoalState(otherNode,
+							 REPLICATION_STATE_PREPARE_PROMOTION, message);
+		}
+		else
+		{
+			/* now proceed with the failover, starting with the first standby */
+			(void) ProceedGroupState(firstStandbyNode);
+		}
+
+		PG_RETURN_BOOL(true);
 	}
-	else if (IsStateIn(currentNode->reportedState, secondaryStates))
+
+	/*
+	 * Only allow a secondary to get to MAINTENANCE when the primary is in the
+	 * PRIMARY state.
+	 */
+	else if (IsStateIn(currentNode->reportedState, secondaryStates) &&
+			 IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY))
 	{
+		/*
+		 * When putting the last secondary node to maintenance, we disable sync
+		 * rep on the primary by switching it to wait_primary. Because we
+		 * didn't change the state of any standby node yet, we get there when
+		 * the count is one (not zero).
+		 */
+		ReplicationState primaryGoalState =
+			secondaryNodesCount == 1
+			? REPLICATION_STATE_WAIT_PRIMARY
+			: REPLICATION_STATE_JOIN_PRIMARY;
+
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of %s:%d to wait_primaru and %s:%d to "
-			"maintenance after a user-initiated start_maintenance call.",
-			otherNode->nodeHost, otherNode->nodePort,
+			"Setting goal state of %s:%d to %s and %s:%d to "
+			"wait_maintenance after a user-initiated start_maintenance call.",
+			primaryNode->nodeHost, primaryNode->nodePort,
+			ReplicationStateGetName(primaryGoalState),
 			currentNode->nodeHost, currentNode->nodePort);
 
-		SetNodeGoalState(otherNode, REPLICATION_STATE_WAIT_PRIMARY, message);
+		SetNodeGoalState(primaryNode, primaryGoalState, message);
 		SetNodeGoalState(currentNode, REPLICATION_STATE_WAIT_MAINTENANCE, message);
 	}
 	else
 	{
-		/* should never happen... but still */
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("cannot start maintenance: current state for node %s:%d "
-						"is \"%s\", expected either \"primary\", "
-						"\"secondary\" or \"catchingup\"",
-						currentNode->nodeHost, currentNode->nodePort,
-						ReplicationStateGetName(currentNode->reportedState))));
+				 errmsg("cannot start maintenance: current state for "
+						"node %d (%s:%d) is \"%s\", "
+						"expected \"secondary\" or \"catchingup\", "
+						"and current state for primary node %d (%s:%d) "
+						"is \"%s\" ➜ \"%s\" ",
+						currentNode->nodeId,
+						currentNode->nodeHost,
+						currentNode->nodePort,
+						ReplicationStateGetName(currentNode->reportedState),
+						primaryNode->nodeId,
+						primaryNode->nodeHost,
+						primaryNode->nodePort,
+						ReplicationStateGetName(primaryNode->reportedState),
+						ReplicationStateGetName(primaryNode->goalState))));
 	}
+
 	PG_RETURN_BOOL(true);
 }
 
@@ -1229,7 +1498,7 @@ stop_maintenance(PG_FUNCTION_ARGS)
 	int32 nodeId = PG_GETARG_INT32(0);
 
 	AutoFailoverNode *currentNode = NULL;
-	AutoFailoverNode *otherNode = NULL;
+	AutoFailoverNode *primaryNode = NULL;
 
 	char message[BUFSIZE];
 
@@ -1244,32 +1513,34 @@ stop_maintenance(PG_FUNCTION_ARGS)
 	LockFormation(currentNode->formationId, ShareLock);
 	LockNodeGroup(currentNode->formationId, currentNode->groupId, ExclusiveLock);
 
-	otherNode = OtherNodeInGroup(currentNode);
-
-	if (otherNode == NULL)
-	{
-		ereport(ERROR,
-				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("cannot stop maintenance: group does not have 2 nodes")));
-	}
-
 	if (!IsCurrentState(currentNode, REPLICATION_STATE_MAINTENANCE))
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("cannot stop maintenance when current state for "
 						"node %s:%d is not \"maintenance\"",
-						currentNode->nodeHost, currentNode->nodePort)));
+						currentNode->nodeHost, currentNode->nodePort),
+				 errdetail("Current reported state is \"%s\" and "
+						   "assigned state is \"%s\"",
+						   ReplicationStateGetName(currentNode->reportedState),
+						   ReplicationStateGetName(currentNode->goalState))));
 	}
 
-	if (!IsCurrentState(otherNode, REPLICATION_STATE_WAIT_PRIMARY))
+	/*
+	 * We need to find the primary node even if we are in the middle of a
+	 * failover, and it's already set to draining. That way we may rejoin the
+	 * cluster, report our LSN, and help proceed to reach a consistent state.
+	 */
+	primaryNode =
+		GetPrimaryOrDemotedNodeInGroup(currentNode->formationId,
+									   currentNode->groupId);
+
+	if (primaryNode == NULL)
 	{
 		ereport(ERROR,
-				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("cannot stop maintenance when current state for "
-						"node %s:%d is \"%s\"",
-						otherNode->nodeHost, otherNode->nodePort,
-						ReplicationStateGetName(otherNode->reportedState))));
+				(errmsg("couldn't find the primary node in formation \"%s\", "
+						"group %d",
+						currentNode->formationId, currentNode->groupId)));
 	}
 
 	LogAndNotifyMessage(
@@ -1296,11 +1567,12 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 	int32 nodePort = PG_GETARG_INT32(2);
 	int candidatePriority = PG_GETARG_INT32(3);
 
-	char message[BUFSIZE];
-
 	AutoFailoverNode *currentNode = NULL;
+
 	List *nodesGroupList = NIL;
+	ListCell *nodeCell = NULL;
 	int nodesCount = 0;
+	int nonZeroCandidatePriorityNodeCount = 0;
 
 	checkPgAutoFailoverVersion();
 
@@ -1326,6 +1598,36 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 							   candidatePriority)));
 	}
 
+	if (candidatePriority == 0)
+	{
+		/*
+		 * We need to ensure we have at least two nodes with a non-zero
+		 * candidate priority, otherwise we can't failover. Those two nodes
+		 * include the current primary.
+		 */
+		foreach(nodeCell, nodesGroupList)
+		{
+			AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+			if (node->candidatePriority > 0)
+			{
+				nonZeroCandidatePriorityNodeCount++;
+			}
+		}
+
+		/* account for the change we're asked to implement */
+		nonZeroCandidatePriorityNodeCount -= 1;
+
+		if (nonZeroCandidatePriorityNodeCount < 2)
+		{
+			ereport(ERROR,
+					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					 errmsg("cannot set candidate priority to zero, we must "
+							"have at least two nodes with non-zero candidate "
+							"priority to allow for a failover")));
+		}
+	}
+
 	currentNode->candidatePriority = candidatePriority;
 
 	ReportAutoFailoverNodeReplicationSetting(
@@ -1337,15 +1639,22 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 
 	if (nodesCount == 1)
 	{
+		char message[BUFSIZE];
+
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Updating candidate priority to %d for node %s:%d",
+			"Updating candidate priority to %d for node %d (%s:%d)",
 			currentNode->candidatePriority,
+			currentNode->nodeId,
 			currentNode->nodeHost,
 			currentNode->nodePort);
+
+		NotifyStateChange(currentNode, message);
 	}
 	else
 	{
+		char message[BUFSIZE];
+
 		AutoFailoverNode *primaryNode =
 			GetPrimaryNodeInGroup(currentNode->formationId,
 								  currentNode->groupId);
@@ -1363,8 +1672,10 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 			ereport(ERROR,
 					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 					 errmsg("cannot set candidate priority when current state "
-							"for primary node %s:%d is \"%s\"",
-							primaryNode->nodeHost, primaryNode->nodePort,
+							"for primary node %d (%s:%d) is \"%s\"",
+							primaryNode->nodeId,
+							primaryNode->nodeHost,
+							primaryNode->nodePort,
 							ReplicationStateGetName(primaryNode->reportedState)),
 					 errdetail("The primary node so must be in state \"primary\" "
 							   "to be able to apply configuration changes to "
@@ -1373,16 +1684,14 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of %s:%d to apply_settings "
-			"after updating candidate priority to %d for node %s:%d.",
-			primaryNode->nodeHost, primaryNode->nodePort,
-			currentNode->candidatePriority,
-			currentNode->nodeHost, currentNode->nodePort);
+			"Setting goal state of node %d (%s:%d) to apply_settings "
+			"after updating node %d (%s:%d) candidate priority to %d.",
+			primaryNode->nodeId, primaryNode->nodeHost, primaryNode->nodePort,
+			currentNode->nodeId, currentNode->nodeHost, currentNode->nodePort,
+			currentNode->candidatePriority);
 
 		SetNodeGoalState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS, message);
 	}
-
-	NotifyStateChange(currentNode, message);
 
 	PG_RETURN_BOOL(true);
 }
@@ -1399,8 +1708,6 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 	char *nodeHost = text_to_cstring(nodeHostText);
 	int32 nodePort = PG_GETARG_INT32(2);
 	bool replicationQuorum = PG_GETARG_BOOL(3);
-
-	char message[BUFSIZE];
 
 	AutoFailoverNode *currentNode = NULL;
 	List *nodesGroupList = NIL;
@@ -1474,15 +1781,22 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 
 	if (nodesCount == 1)
 	{
+		char message[BUFSIZE];
+
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Updating replicationQuorum to %s for node %s:%d",
+			"Updating replicationQuorum to %s for  %d (%s:%d)",
 			currentNode->replicationQuorum ? "true" : "false",
+			currentNode->nodeId,
 			currentNode->nodeHost,
 			currentNode->nodePort);
+
+		NotifyStateChange(currentNode, message);
 	}
 	else
 	{
+		char message[BUFSIZE];
+
 		AutoFailoverNode *primaryNode =
 			GetPrimaryNodeInGroup(currentNode->formationId,
 								  currentNode->groupId);
@@ -1518,8 +1832,6 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 
 		SetNodeGoalState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS, message);
 	}
-
-	NotifyStateChange(currentNode, message);
 
 	PG_RETURN_BOOL(true);
 }
@@ -1601,6 +1913,7 @@ update_node_metadata(PG_FUNCTION_ARGS)
 
 	UpdateAutoFailoverNodeMetadata(currentNode->nodeId,
 								   nodeName, nodeHost, nodePort);
+
 	PG_RETURN_BOOL(true);
 }
 
@@ -1647,7 +1960,6 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 
 	if (primaryNode == NULL)
 	{
-		/* maybe we could use an Assert() instead? */
 		ereport(ERROR,
 				(errmsg("Couldn't find the primary node in formation \"%s\", "
 						"group %d", formationId, groupId)));
@@ -1656,7 +1968,7 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 	standbyNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
 
 	/*
-	 * Single standby case
+	 * Single standby case, we assume formation->number_sync_standbys == 0
 	 */
 	if (nodesCount == 2)
 	{
@@ -1702,7 +2014,8 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 
 		int count = list_length(syncStandbyNodesGroupList);
 
-		if (count == 0 || formation->number_sync_standbys == 0)
+		if (count == 0 ||
+			IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY))
 		{
 			/*
 			 *  If no standby participates in the replication Quorum, we
@@ -1715,6 +2028,16 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 			bool allTheSamePriority =
 				AllNodesHaveSameCandidatePriority(syncStandbyNodesGroupList);
 
+			/*
+			 * We accept number_sync_standbys to be set to zero to enable our
+			 * failover trade-off, but won't send a synchronous_standby_names
+			 * setting with ANY 0 () or FIRST 0 (), that would not make sense.
+			 */
+			int number_sync_standbys =
+				formation->number_sync_standbys == 0
+				? 1
+				: formation->number_sync_standbys;
+
 			StringInfo sbnames = makeStringInfo();
 			ListCell *nodeCell = NULL;
 			bool firstNode = true;
@@ -1722,7 +2045,7 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 			appendStringInfo(sbnames,
 							 "%s %d (",
 							 allTheSamePriority ? "ANY" : "FIRST",
-							 formation->number_sync_standbys);
+							 number_sync_standbys);
 
 			foreach(nodeCell, syncStandbyNodesGroupList)
 			{

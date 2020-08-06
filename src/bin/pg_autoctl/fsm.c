@@ -53,7 +53,7 @@
 	"Secondary became unhealthy"
 
 #define COMMENT_PRIMARY_TO_JOIN_PRIMARY \
-	"A new secondary became unhealthy"
+	"A new secondary was added"
 
 #define COMMENT_PRIMARY_TO_DRAINING \
 	"A failover occurred, stopping writes "
@@ -137,6 +137,29 @@
 
 # define COMMENT_APPLY_SETTINGS_TO_PRIMARY \
 	"Back to primary state after having applied new pg_auto_failover settings"
+
+#define COMMENT_SECONDARY_TO_REPORT_LSN \
+	"Reporting the last write-ahead log location received"
+
+#define COMMENT_REPORT_LSN_TO_PREP_PROMOTION \
+	"Stop traffic to primary, " \
+	"wait for it to finish draining."
+
+#define COMMENT_REPORT_LSN_TO_FAST_FORWARD \
+	"Fetching missing WAL bits from another standby before promotion"
+
+#define COMMENT_FOLLOW_NEW_PRIMARY \
+	"Switch replication to the new primary"
+
+#define COMMENT_REPORT_LSN_TO_JOIN_SECONDARY \
+	"A failover candidate has been selected, stop replication"
+
+#define COMMENT_JOIN_SECONDARY_TO_SECONDARY \
+	"Failover is done, we have a new primary to follow"
+
+#define COMMENT_FAST_FORWARD_TO_PREP_PROMOTION \
+	"Got the missing WAL bytes, promoted"
+
 
 /* *INDENT-OFF* */
 
@@ -228,13 +251,13 @@ KeeperFSMTransition KeeperFSM[] = {
 	{ SINGLE_STATE, WAIT_PRIMARY_STATE, COMMENT_SINGLE_TO_WAIT_PRIMARY, &fsm_prepare_replication },
 	{ PRIMARY_STATE, JOIN_PRIMARY_STATE, COMMENT_PRIMARY_TO_JOIN_PRIMARY, &fsm_prepare_replication },
 	{ PRIMARY_STATE, WAIT_PRIMARY_STATE, COMMENT_PRIMARY_TO_WAIT_PRIMARY, &fsm_disable_sync_rep },
-	{ STOP_REPLICATION_STATE, WAIT_PRIMARY_STATE, COMMENT_STOP_REPLICATION_TO_WAIT_PRIMARY, &fsm_promote_standby_to_primary },
+	{ JOIN_PRIMARY_STATE, WAIT_PRIMARY_STATE, COMMENT_PRIMARY_TO_WAIT_PRIMARY, &fsm_disable_sync_rep },
 
 	/*
 	 * Situation is getting back to normal on the primary
 	 */
 	{ WAIT_PRIMARY_STATE, PRIMARY_STATE, COMMENT_WAIT_PRIMARY_TO_PRIMARY, &fsm_enable_sync_rep },
-	{ JOIN_PRIMARY_STATE, PRIMARY_STATE, COMMENT_JOIN_PRIMARY_TO_PRIMARY, NULL },
+	{ JOIN_PRIMARY_STATE, PRIMARY_STATE, COMMENT_JOIN_PRIMARY_TO_PRIMARY, &fsm_enable_sync_rep },
 	{ DEMOTE_TIMEOUT_STATE, PRIMARY_STATE, COMMENT_DEMOTE_TO_PRIMARY, &fsm_start_postgres },
 
 	/*
@@ -242,7 +265,7 @@ KeeperFSMTransition KeeperFSM[] = {
 	 */
 	{ WAIT_STANDBY_STATE, CATCHINGUP_STATE, COMMENT_WAIT_STANDBY_TO_CATCHINGUP, &fsm_init_standby },
 	{ DEMOTED_STATE, CATCHINGUP_STATE, COMMENT_DEMOTED_TO_CATCHINGUP, &fsm_rewind_or_init },
-	{ SECONDARY_STATE, CATCHINGUP_STATE, COMMENT_SECONDARY_TO_CATCHINGUP, NULL },
+	{ SECONDARY_STATE, CATCHINGUP_STATE, COMMENT_SECONDARY_TO_CATCHINGUP, &fsm_follow_new_primary },
 
 	/*
 	 * We're asked to be a standby.
@@ -263,6 +286,7 @@ KeeperFSMTransition KeeperFSM[] = {
 	/*
 	 * finish the promotion
 	 */
+	{ STOP_REPLICATION_STATE, WAIT_PRIMARY_STATE, COMMENT_STOP_REPLICATION_TO_WAIT_PRIMARY, &fsm_promote_standby_to_primary },
 	{ PREP_PROMOTION_STATE, WAIT_PRIMARY_STATE, COMMENT_BLOCKED_WRITES, &fsm_promote_standby },
 
 	/*
@@ -286,6 +310,20 @@ KeeperFSMTransition KeeperFSM[] = {
 	 */
 	{ PRIMARY_STATE, APPLY_SETTINGS_STATE, COMMENT_PRIMARY_TO_APPLY_SETTINGS, &fsm_apply_settings },
 	{ APPLY_SETTINGS_STATE, PRIMARY_STATE, COMMENT_APPLY_SETTINGS_TO_PRIMARY, NULL },
+
+	/*
+	 * In case of multiple standbys, failover begins with reporting current LSN
+	 */
+	{ SECONDARY_STATE, REPORT_LSN_STATE, COMMENT_SECONDARY_TO_REPORT_LSN, &fsm_report_lsn },
+	{ CATCHINGUP_STATE, REPORT_LSN_STATE, COMMENT_SECONDARY_TO_REPORT_LSN, &fsm_report_lsn },
+	{ REPORT_LSN_STATE, PREP_PROMOTION_STATE, COMMENT_REPORT_LSN_TO_PREP_PROMOTION, &fsm_prepare_standby_for_promotion },
+
+	{ REPORT_LSN_STATE, FAST_FORWARD_STATE, COMMENT_REPORT_LSN_TO_FAST_FORWARD, &fsm_fast_forward },
+	{ FAST_FORWARD_STATE, PREP_PROMOTION_STATE, COMMENT_FAST_FORWARD_TO_PREP_PROMOTION, &fsm_cleanup_and_resume_as_primary },
+
+	{ REPORT_LSN_STATE, JOIN_SECONDARY_STATE, COMMENT_REPORT_LSN_TO_JOIN_SECONDARY, &fsm_checkpoint_and_stop_postgres },
+	{ REPORT_LSN_STATE, SECONDARY_STATE, COMMENT_REPORT_LSN_TO_JOIN_SECONDARY, &fsm_follow_new_primary },
+	{ JOIN_SECONDARY_STATE, SECONDARY_STATE, COMMENT_JOIN_SECONDARY_TO_SECONDARY, &fsm_follow_new_primary },
 
 	/*
 	 * This is the end, my friend.

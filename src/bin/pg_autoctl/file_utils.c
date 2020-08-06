@@ -25,7 +25,6 @@
 #include "file_utils.h"
 #include "log.h"
 
-
 /*
  * file_exists returns true if the given filename is known to exist
  * on the file system or false if it does not exists or in case of

@@ -447,6 +447,21 @@ NodeStateToString(NodeState s)
 			return "wait_maintenance";
 		}
 
+		case REPORT_LSN_STATE:
+		{
+			return "report_lsn";
+		}
+
+		case FAST_FORWARD_STATE:
+		{
+			return "fast_forward";
+		}
+
+		case JOIN_SECONDARY_STATE:
+		{
+			return "join_secondary";
+		}
+
 		case ANY_STATE:
 		{
 			return "#any state#";
@@ -536,6 +551,18 @@ NodeStateFromString(const char *str)
 	else if (strcmp(str, "wait_maintenance") == 0)
 	{
 		return WAIT_MAINTENANCE_STATE;
+	}
+	else if (strcmp(str, "report_lsn") == 0)
+	{
+		return REPORT_LSN_STATE;
+	}
+	else if (strcmp(str, "fast_forward") == 0)
+	{
+		return FAST_FORWARD_STATE;
+	}
+	else if (strcmp(str, "join_secondary") == 0)
+	{
+		return JOIN_SECONDARY_STATE;
 	}
 	else
 	{

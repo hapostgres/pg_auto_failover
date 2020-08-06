@@ -159,6 +159,7 @@ typedef struct ReplicationSource
 	char maximumBackupRate[MAXCONNINFO];
 	char backupDir[MAXCONNINFO];
 	char applicationName[MAXCONNINFO];
+	char targetLSN[PG_LSN_MAXLENGTH];
 	SSLOptions sslOptions;
 } ReplicationSource;
 
@@ -208,9 +209,9 @@ typedef struct SingleValueResultContext
 #define CHECK__SETTINGS_SQL \
 	"select bool_and(ok) " \
 	"from (" \
-	"select current_setting('max_wal_senders')::int >= 4" \
+	"select current_setting('max_wal_senders')::int >= 12" \
 	" union all " \
-	"select current_setting('max_replication_slots')::int >= 4" \
+	"select current_setting('max_replication_slots')::int >= 12" \
 	" union all " \
 	"select current_setting('wal_level') in ('replica', 'logical')" \
 	" union all " \
@@ -275,7 +276,7 @@ bool hostname_from_uri(const char *pguri,
 bool validate_connection_string(const char *connectionString);
 bool pgsql_reset_primary_conninfo(PGSQL *pgsql);
 
-bool pgsql_get_postgres_metadata(PGSQL *pgsql, const char *slotName,
+bool pgsql_get_postgres_metadata(PGSQL *pgsql,
 								 bool *pg_is_in_recovery,
 								 char *pgsrSyncState, char *currentLSN,
 								 PostgresControlData *control);
@@ -283,8 +284,9 @@ bool pgsql_get_postgres_metadata(PGSQL *pgsql, const char *slotName,
 bool pgsql_one_slot_has_reached_target_lsn(PGSQL *pgsql,
 										   char *targetLSN,
 										   char *currentLSN,
-										   bool *reachedLSN);
-
+										   bool *hasReachedLSN);
+bool pgsql_has_reached_target_lsn(PGSQL *pgsql, char *targetLSN,
+								  char *currentLSN, bool *hasReachedLSN);
 bool pgsql_listen(PGSQL *pgsql, char *channels[]);
 
 bool pgsql_alter_extension_update_to(PGSQL *pgsql,

@@ -357,9 +357,9 @@ keeper_pg_init_continue(Keeper *keeper)
 	 * where the configuration changes have been saved to disk in the previous
 	 * attempt.
 	 */
-	if (!keeper_config_set_groupId_and_slot_name(&(keeper->config),
-												 keeperState->current_node_id,
-												 keeperState->current_group))
+	if (!keeper_config_update(&(keeper->config),
+							  keeperState->current_node_id,
+							  keeperState->current_group))
 	{
 		log_error("Failed to update the configuration file with the groupId %d "
 				  "and the nodeId %d",

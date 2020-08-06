@@ -203,6 +203,8 @@ class PGNode:
         self.role = role
         self.pg_autoctl = None
         self.authenticatedUsers = {}
+        self._pgversion = None
+        self._pgmajor = None
         self.sslMode = sslMode
         self.sslSelfSigned = sslSelfSigned
         self.sslCAFile = sslCAFile
@@ -406,6 +408,7 @@ class PGNode:
         command = PGAutoCtl(self)
         out, err, ret = command.execute("pgsetup ready",
                                         'do', 'pgsetup', 'wait', '-vvv')
+
         return ret == 0
 
     def fail(self):
@@ -414,8 +417,10 @@ class PGNode:
         postgres.
         """
         self.stop_pg_autoctl()
-        self.stop_postgres()
 
+        # stopping pg_autoctl also stops Postgres, unless bugs.
+        if self.pg_is_running():
+            self.stop_postgres()
 
     def config_file_path(self):
         """
@@ -467,6 +472,8 @@ class PGNode:
             if os.path.isfile(conf):
                 logs += ["\n\n%s:\n" % conf]
                 logs += open(conf).readlines()
+            else:
+                logs += ["\n\n%s does not exists\n" % conf]
 
         return "".join(logs)
 
@@ -492,12 +499,9 @@ class PGNode:
 
     def ifdown(self):
         """
-        Set a configuration parameter to given value
+        Bring the network interface down for this node
         """
-        command = PGAutoCtl(self)
-        command.execute("config set %s" % setting,
-                        'config', 'set', setting, value)
-        return True
+        self.vnode.ifdown()
 
     def ifup(self):
         """
@@ -552,6 +556,9 @@ class PGNode:
         for node in self.cluster.nodes():
             logs += node.logs()
         print(logs)
+
+        if self.cluster.monitor.pg_autoctl:
+            print("%s" % self.cluster.monitor.pg_autoctl.err)
 
     def enable_ssl(self, sslMode=None, sslSelfSigned=None,
                    sslCAFile=None, sslServerKey=None, sslServerCert=None):
@@ -1014,8 +1021,7 @@ SELECT reportedstate
                             'set', 'formation',
                             'number-sync-standbys', str(numberSyncStandbys))
         except Exception as e:
-            # either caught as a BAD ARG (1) or by the monitor (6)
-            if command.last_returncode in (1, 6):
+            if command.last_returncode == 1:
                 return False
             raise e
         return True
@@ -1064,9 +1070,6 @@ SELECT reportedstate
         """
         if self.pgmajor() == 10:
             return True
-
-        print("has_needed_replication_slots: pgversion = %s, pgmajor = %s" %
-              (self.pgversion(), self.pgmajor()))
 
         hostname = str(self.vnode.address)
         other_nodes = self.monitor.get_other_nodes(self.nodeid)
@@ -1204,8 +1207,8 @@ class MonitorNode(PGNode):
         if dbname is not None:
             formation_command += ['--dbname', dbname]
 
-        # pass true or false to --enable-secondary or --disable-secondary, only when ha is
-        # actually set by the user
+        # pass true or false to --enable-secondary or --disable-secondary,
+        # only when ha is actually set by the user
         if secondary is not None:
             if secondary:
                 formation_command += ['--enable-secondary']
