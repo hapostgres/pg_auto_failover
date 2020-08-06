@@ -158,6 +158,7 @@ def test_009_disable_maintenance():
     print("Disabling maintenance on node1")
     node1.disable_maintenance()
 
+    assert node1.wait_until_state(target_state="secondary")
     assert node3.wait_until_state(target_state="primary")
 
 def test_010_set_number_sync_standby_to_zero():
@@ -170,6 +171,8 @@ def test_011_all_to_maintenance():
 
     print("Enabling maintenance on node1")
     node1.enable_maintenance()
+
+    assert node3.wait_until_state(target_state="primary")
 
     # now we can, because we don't care about having any standbys
     print("Enabling maintenance on node2")
@@ -188,14 +191,16 @@ def test_012_can_write_during_maintenance():
 
 def test_013_disable_maintenance():
     print()
-    assert node2.wait_until_state(target_state="maintenance")
+    # make sure node2 is still in maintenance, then disable maintenance
     print("Disabling maintenance on node2")
+    assert node2.wait_until_state(target_state="maintenance")
     node2.disable_maintenance()
 
     assert node3.wait_until_state(target_state="primary")
-    assert node1.wait_until_state(target_state="maintenance")
 
     print("Disabling maintenance on node1")
+    # make sure node1 is still in maintenance, then disable maintenance
+    assert node1.wait_until_state(target_state="maintenance")
     node1.disable_maintenance()
 
     assert node3.wait_until_state(target_state="primary")
@@ -240,7 +245,8 @@ def test_016_two_standbys_in_maintenance():
     print("Enabling maintenance on node1")
     node1.enable_maintenance()
 
-    # now we can, because we don't care about having any standbys
+    assert node3.wait_until_state(target_state="primary")
+
     print("Enabling maintenance on node2")
     node2.enable_maintenance()
 
@@ -248,6 +254,11 @@ def test_016_two_standbys_in_maintenance():
 
 @raises(Exception)
 def test_017_primary_to_maintenance():
+    # this should fail, because we have 4 nodes and number_sync_standbys = 1
+    # and 2 nodes are already in maintenance
+    #
+    # if we allowed a 3rd node to be in maintenance, we would have no
+    # standby node left and 0 < 1
     print()
     print("Enabling maintenance on node3 (primary)")
     node3.enable_maintenance()
@@ -255,9 +266,14 @@ def test_017_primary_to_maintenance():
 def test_018_disable_maintenance():
     print()
     print("Disabling maintenance on node2")
+    assert node2.wait_until_state(target_state="maintenance")
     node2.disable_maintenance()
 
+    assert node3.wait_until_state(target_state="primary")
+
+    # make sure node1 is still in maintenance, then disable maintenance
     print("Disabling maintenance on node1")
+    assert node1.wait_until_state(target_state="maintenance")
     node1.disable_maintenance()
 
     assert node3.wait_until_state(target_state="primary")

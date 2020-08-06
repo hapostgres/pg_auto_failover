@@ -1432,7 +1432,13 @@ start_maintenance(PG_FUNCTION_ARGS)
 
 		PG_RETURN_BOOL(true);
 	}
-	else if (IsStateIn(currentNode->reportedState, secondaryStates))
+
+	/*
+	 * Only allow a secondary to get to MAINTENANCE when the primary is in the
+	 * PRIMARY state.
+	 */
+	else if (IsStateIn(currentNode->reportedState, secondaryStates) &&
+			 IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY))
 	{
 		/*
 		 * When putting the last secondary node to maintenance, we disable sync
@@ -1458,14 +1464,22 @@ start_maintenance(PG_FUNCTION_ARGS)
 	}
 	else
 	{
-		/* should never happen... but still */
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("cannot start maintenance: current state for node %s:%d "
-						"is \"%s\", expected either \"primary\", "
-						"\"secondary\" or \"catchingup\"",
-						currentNode->nodeHost, currentNode->nodePort,
-						ReplicationStateGetName(currentNode->reportedState))));
+				 errmsg("cannot start maintenance: current state for "
+						"node %d (%s:%d) is \"%s\", "
+						"expected \"secondary\" or \"catchingup\", "
+						"and current state for primary node %d (%s:%d) "
+						"is \"%s\" ➜ \"%s\" ",
+						currentNode->nodeId,
+						currentNode->nodeHost,
+						currentNode->nodePort,
+						ReplicationStateGetName(currentNode->reportedState),
+						primaryNode->nodeId,
+						primaryNode->nodeHost,
+						primaryNode->nodePort,
+						ReplicationStateGetName(primaryNode->reportedState),
+						ReplicationStateGetName(primaryNode->goalState))));
 	}
 
 	PG_RETURN_BOOL(true);

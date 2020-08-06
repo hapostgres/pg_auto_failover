@@ -368,8 +368,9 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	}
 
 	/*
-	 * when secondary is put to maintenance and there's a single standby
+	 * when secondary is put to maintenance and there's no standby left
 	 *  wait_maintenance -> maintenance
+	 *  wait_primary
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_WAIT_MAINTENANCE) &&
 		IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY))
@@ -390,7 +391,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	}
 
 	/*
-	 * when secondary is put to maintenance and we have mode standby nodes
+	 * when secondary is put to maintenance and we have more standby nodes
 	 *  wait_maintenance -> maintenance
 	 *  join_primary -> primary
 	 */
