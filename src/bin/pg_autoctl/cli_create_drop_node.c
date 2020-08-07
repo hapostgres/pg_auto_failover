@@ -302,10 +302,17 @@ cli_create_postgres_getopts(int argc, char **argv)
 static void
 cli_create_postgres(int argc, char **argv)
 {
+	pid_t pid = 0;
 	Keeper keeper = { 0 };
 	KeeperConfig *config = &(keeper.config);
 
 	keeper.config = keeperOptions;
+
+	if (read_pidfile(keeper.config.pathnames.pid, &pid))
+	{
+		log_fatal("pg_autoctl is already running with pid %d", pid);
+		exit(EXIT_CODE_BAD_STATE);
+	}
 
 	if (!file_exists(keeper.config.pathnames.config))
 	{
@@ -744,6 +751,7 @@ cli_create_monitor_config(Monitor *monitor, MonitorConfig *config)
 static void
 cli_create_monitor(int argc, char **argv)
 {
+	pid_t pid = 0;
 	Monitor monitor = { 0 };
 	MonitorConfig *config = &(monitor.config);
 
@@ -758,6 +766,12 @@ cli_create_monitor(int argc, char **argv)
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (read_pidfile(config->pathnames.pid, &pid))
+	{
+		log_fatal("pg_autoctl is already running with pid %d", pid);
+		exit(EXIT_CODE_BAD_STATE);
 	}
 
 	if (!cli_create_monitor_config(&monitor, config))
