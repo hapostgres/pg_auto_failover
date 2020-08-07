@@ -889,7 +889,9 @@ primary_standby_has_caught_up(LocalPostgresServer *postgres)
 	/* ensure some WAL level traffic to move things forward */
 	if (!pgsql_checkpoint(pgsql))
 	{
-		log_error("Failed to checkpoint after promotion");
+		log_error("Failed to checkpoint before checking "
+				  "if a standby has caught-up to LSN %s",
+				  postgres->standbyTargetLSN);
 		return false;
 	}
 
@@ -1065,7 +1067,8 @@ standby_fetch_missing_wal(LocalPostgresServer *postgres)
 	 */
 	if (!pgsql_checkpoint(pgsql))
 	{
-		log_error("Failed to checkpoint after promotion");
+		log_error("Failed to checkpoint after fast-forward to LSN %s",
+				  postgres->currentLSN);
 		return false;
 	}
 
