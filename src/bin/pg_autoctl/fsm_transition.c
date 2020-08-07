@@ -1121,6 +1121,13 @@ fsm_promote_standby(Keeper *keeper)
 		return false;
 	}
 
+	if (!standby_cleanup_as_primary(postgres))
+	{
+		log_error("Failed to cleanup replication settings, "
+				  "see above for details");
+		return false;
+	}
+
 	if (!fsm_disable_replication(keeper))
 	{
 		log_error("Failed to disable synchronous replication after promotion, "
