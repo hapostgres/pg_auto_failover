@@ -735,9 +735,9 @@ keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 	 */
 	postgres->postgresSetup = config->pgSetup;
 
-	if (!keeper_config_set_groupId_and_slot_name(config,
-												 state->current_node_id,
-												 state->current_group))
+	if (!keeper_config_update(config,
+							  state->current_node_id,
+							  state->current_group))
 	{
 		log_error("Failed to update configuration");
 		return false;
