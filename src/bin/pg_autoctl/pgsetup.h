@@ -180,8 +180,6 @@ bool pg_setup_init(PostgresSetup *pgSetup,
 				   bool missing_pgdata_is_ok,
 				   bool pg_is_not_running_is_ok);
 
-bool pg_setup_controldata(PostgresSetup *pgSetup, bool missingPgDataIsOk);
-
 bool read_pg_pidfile(PostgresSetup *pgSetup,
 					 bool pgIsNotRunningIsOk,
 					 int maxRetries);
