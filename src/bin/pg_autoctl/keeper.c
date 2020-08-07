@@ -474,6 +474,10 @@ keeper_update_pg_state(Keeper *keeper)
 					  "see above for details");
 			return false;
 		}
+
+		keeperState->pg_control_version = pgSetup->control.pg_control_version;
+		keeperState->catalog_version_no = pgSetup->control.catalog_version_no;
+		keeperState->system_identifier = pgSetup->control.system_identifier;
 	}
 	else
 	{
@@ -596,10 +600,6 @@ keeper_state_check_postgres(Keeper *keeper, PostgresControlData *control)
 				 keeperState->catalog_version_no,
 				 control->catalog_version_no);
 	}
-
-	keeperState->pg_control_version = control->pg_control_version;
-	keeperState->catalog_version_no = control->catalog_version_no;
-	keeperState->system_identifier = control->system_identifier;
 
 	return true;
 }
