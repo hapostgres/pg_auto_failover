@@ -246,12 +246,12 @@ KeeperFSMTransition KeeperFSM[] = {
 	/*
 	 * went down to force the primary to time out, but then it was removed
 	 */
-	{ STOP_REPLICATION_STATE, SINGLE_STATE, COMMENT_REPORT_LSN_TO_SINGLE, &fsm_promote_standby },
+	{ STOP_REPLICATION_STATE, SINGLE_STATE, COMMENT_REPLICATION_TO_SINGLE, &fsm_promote_standby },
 
 	/*
 	 *
 	 */
-	{ REPORT_LSN_STATE, SINGLE_STATE, COMMENT_REPLICATION_TO_SINGLE, &fsm_promote_standby },
+	{ REPORT_LSN_STATE, SINGLE_STATE, COMMENT_REPORT_LSN_TO_SINGLE, &fsm_promote_standby },
 
 
 	/*
