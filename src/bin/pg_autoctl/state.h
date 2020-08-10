@@ -13,8 +13,6 @@
 #include <assert.h>
 #include "parson.h"
 
-#include "keeper_config.h"
-#include "pgctl.h"
 #include "pgsetup.h"
 
 /*

@@ -16,7 +16,10 @@
 
 #include "libpq-fe.h"
 
+#include "defaults.h"
 #include "pgsetup.h"
+#include "state.h"
+
 
 /*
  * OID values from PostgreSQL src/include/catalog/pg_type.h
@@ -143,6 +146,7 @@ typedef struct NodeAddressArray
 	int count;
 	NodeAddress nodes[NODE_ARRAY_MAX_COUNT];
 } NodeAddressArray;
+
 
 /*
  * The replicationSource structure is used to pass the bits of a connection
@@ -292,5 +296,6 @@ bool pgsql_listen(PGSQL *pgsql, char *channels[]);
 
 bool pgsql_alter_extension_update_to(PGSQL *pgsql,
 									 const char *extname, const char *version);
+
 
 #endif /* PGSQL_H */
