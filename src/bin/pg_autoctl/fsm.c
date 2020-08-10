@@ -148,6 +148,9 @@
 #define COMMENT_REPORT_LSN_TO_FAST_FORWARD \
 	"Fetching missing WAL bits from another standby before promotion"
 
+#define COMMENT_REPORT_LSN_TO_SINGLE \
+	"There is no other node anymore, promote this node"
+
 #define COMMENT_FOLLOW_NEW_PRIMARY \
 	"Switch replication to the new primary"
 
@@ -244,6 +247,12 @@ KeeperFSMTransition KeeperFSM[] = {
 	 * went down to force the primary to time out, but then it was removed
 	 */
 	{ STOP_REPLICATION_STATE, SINGLE_STATE, COMMENT_REPLICATION_TO_SINGLE, &fsm_promote_standby },
+
+	/*
+	 * all states should lead to SINGLE, including REPORT_LSN
+	 */
+	{ REPORT_LSN_STATE, SINGLE_STATE, COMMENT_REPORT_LSN_TO_SINGLE, &fsm_promote_standby },
+
 
 	/*
 	 * On the Primary, wait for a standby to be ready: WAIT_PRIMARY
