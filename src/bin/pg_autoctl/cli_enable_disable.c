@@ -437,6 +437,13 @@ cli_enable_maintenance(int argc, char **argv)
 
 	char *channels[] = { "state", NULL };
 
+	ConnectionRetryPolicy retryPolicy = {
+		POSTGRES_PING_RETRY_TIMEOUT,
+		-1, /* unbounded number of attempts */
+		5 * 1000,               /* sleep up to 5s between attempts */
+		1 * 1000                /* first retry happens after 1 second */
+	};
+
 	keeper.config = keeperOptions;
 
 	(void) exit_unless_role_is_keeper(&(keeper.config));
@@ -483,8 +490,14 @@ cli_enable_maintenance(int argc, char **argv)
 		}
 	}
 
+	/*
+	 * Set a retry policy for cases when we have a transient error on the
+	 * monitor.
+	 */
+
 	if (!monitor_start_maintenance(&(keeper.monitor),
-								   keeper.state.current_node_id))
+								   keeper.state.current_node_id,
+								   &retryPolicy))
 	{
 		log_fatal("Failed to start maintenance from the monitor, "
 				  "see above for details");
@@ -525,6 +538,13 @@ cli_disable_maintenance(int argc, char **argv)
 
 	char *channels[] = { "state", NULL };
 
+	ConnectionRetryPolicy retryPolicy = {
+		POSTGRES_PING_RETRY_TIMEOUT,
+		-1, /* unbounded number of attempts */
+		5 * 1000,               /* sleep up to 5s between attempts */
+		1 * 1000                /* first retry happens after 1 second */
+	};
+
 	keeper.config = keeperOptions;
 
 	(void) exit_unless_role_is_keeper(&(keeper.config));
@@ -558,7 +578,8 @@ cli_disable_maintenance(int argc, char **argv)
 	}
 
 	if (!monitor_stop_maintenance(&(keeper.monitor),
-								  keeper.state.current_node_id))
+								  keeper.state.current_node_id,
+								  &retryPolicy))
 	{
 		log_fatal("Failed to stop maintenance from the monitor, "
 				  "see above for details");

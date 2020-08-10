@@ -169,8 +169,10 @@ bool monitor_set_node_system_identifier(Monitor *monitor,
 										int nodeId,
 										uint64_t system_identifier);
 
-bool monitor_start_maintenance(Monitor *monitor, int nodeId);
-bool monitor_stop_maintenance(Monitor *monitor, int nodeId);
+bool monitor_start_maintenance(Monitor *monitor, int nodeId,
+							   ConnectionRetryPolicy *retryPolicy);
+bool monitor_stop_maintenance(Monitor *monitor, int nodeId,
+							  ConnectionRetryPolicy *retryPolicy);
 
 bool monitor_get_notifications(Monitor *monitor, int timeoutMs);
 bool monitor_wait_until_primary_applied_settings(Monitor *monitor,
