@@ -1727,7 +1727,9 @@ printCurrentState(void *ctx, PGresult *result)
 
 	for (int position = 0; position < context->nodesArray->count; position++)
 	{
-		(void) nodestatePrintNodeState(context->nodesArray, position);
+		CurrentNodeState *nodeState = &(context->nodesArray->nodes[position]);
+
+		(void) nodestatePrintNodeState(context->nodesArray, nodeState);
 	}
 
 	fformat(stdout, "\n");
@@ -2749,22 +2751,19 @@ monitor_get_notifications(Monitor *monitor)
 		}
 		else if (strcmp(notify->relname, "state") == 0)
 		{
-			StateNotification notification = { 0 };
+			CurrentNodeState nodeState = { 0 };
 
 			log_debug("received \"%s\"", notify->extra);
 
-			/* the parsing scribbles on the message, make a copy now */
-			strlcpy(notification.message, notify->extra, BUFSIZE);
-
 			/* errors are logged by parse_state_notification_message */
-			if (parse_state_notification_message(&notification))
+			if (parse_state_notification_message(&nodeState, notify->extra))
 			{
 				log_info("New state for node %d (%s:%d): %s ➜ %s",
-						 notification.nodeId,
-						 notification.hostName,
-						 notification.nodePort,
-						 NodeStateToString(notification.reportedState),
-						 NodeStateToString(notification.goalState));
+						 nodeState.node.nodeId,
+						 nodeState.node.host,
+						 nodeState.node.port,
+						 NodeStateToString(nodeState.reportedState),
+						 NodeStateToString(nodeState.goalState));
 			}
 		}
 		else
@@ -2854,7 +2853,7 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 		PQconsumeInput(connection);
 		while ((notify = PQnotifies(connection)) != NULL)
 		{
-			StateNotification notification = { 0 };
+			CurrentNodeState nodeState = { 0 };
 
 			uint64_t now = time(NULL);
 
@@ -2872,11 +2871,8 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 
 			log_debug("received \"%s\"", notify->extra);
 
-			/* the parsing scribbles on the message, make a copy now */
-			strlcpy(notification.message, notify->extra, BUFSIZE);
-
 			/* errors are logged by parse_state_notification_message */
-			if (!parse_state_notification_message(&notification))
+			if (!parse_state_notification_message(&nodeState, notify->extra))
 			{
 				log_warn("Failed to parse notification message \"%s\"",
 						 notify->extra);
@@ -2884,55 +2880,55 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 			}
 
 			/* filter notifications for our own formation */
-			if (strcmp(notification.formationId, formation) != 0)
+			if (strcmp(nodeState.formation, formation) != 0)
 			{
 				continue;
 			}
 
-			if (notification.reportedState == PRIMARY_STATE &&
-				notification.goalState == APPLY_SETTINGS_STATE)
+			if (nodeState.reportedState == PRIMARY_STATE &&
+				nodeState.goalState == APPLY_SETTINGS_STATE)
 			{
 				applySettingsTransitionInProgress = true;
 
 				log_debug("step 1/4: primary node %d (%s:%d) is assigned \"%s\"",
-						  notification.nodeId,
-						  notification.hostName,
-						  notification.nodePort,
-						  NodeStateToString(notification.goalState));
+						  nodeState.node.nodeId,
+						  nodeState.node.host,
+						  nodeState.node.port,
+						  NodeStateToString(nodeState.goalState));
 			}
-			else if (notification.reportedState == APPLY_SETTINGS_STATE &&
-					 notification.goalState == APPLY_SETTINGS_STATE)
+			else if (nodeState.reportedState == APPLY_SETTINGS_STATE &&
+					 nodeState.goalState == APPLY_SETTINGS_STATE)
 			{
 				applySettingsTransitionInProgress = true;
 
 				log_debug("step 2/4: primary node %d (%s:%d) reported \"%s\"",
-						  notification.nodeId,
-						  notification.hostName,
-						  notification.nodePort,
-						  NodeStateToString(notification.reportedState));
+						  nodeState.node.nodeId,
+						  nodeState.node.host,
+						  nodeState.node.port,
+						  NodeStateToString(nodeState.reportedState));
 			}
-			else if (notification.reportedState == APPLY_SETTINGS_STATE &&
-					 notification.goalState == PRIMARY_STATE)
+			else if (nodeState.reportedState == APPLY_SETTINGS_STATE &&
+					 nodeState.goalState == PRIMARY_STATE)
 			{
 				applySettingsTransitionInProgress = true;
 
 				log_debug("step 3/4: primary node %d (%s:%d) is assigned \"%s\"",
-						  notification.nodeId,
-						  notification.hostName,
-						  notification.nodePort,
-						  NodeStateToString(notification.goalState));
+						  nodeState.node.nodeId,
+						  nodeState.node.host,
+						  nodeState.node.port,
+						  NodeStateToString(nodeState.goalState));
 			}
 			else if (applySettingsTransitionInProgress &&
-					 notification.reportedState == PRIMARY_STATE &&
-					 notification.goalState == PRIMARY_STATE)
+					 nodeState.reportedState == PRIMARY_STATE &&
+					 nodeState.goalState == PRIMARY_STATE)
 			{
 				applySettingsTransitionDone = true;
 
 				log_debug("step 4/4: primary node %d (%s:%d) reported \"%s\"",
-						  notification.nodeId,
-						  notification.hostName,
-						  notification.nodePort,
-						  NodeStateToString(notification.reportedState));
+						  nodeState.node.nodeId,
+						  nodeState.node.host,
+						  nodeState.node.port,
+						  NodeStateToString(nodeState.reportedState));
 			}
 
 			/* prepare next iteration */
@@ -3044,7 +3040,7 @@ monitor_wait_until_some_node_reported_state(Monitor *monitor,
 		PQconsumeInput(connection);
 		while ((notify = PQnotifies(connection)) != NULL)
 		{
-			StateNotification notification = { 0 };
+			CurrentNodeState nodeState = { 0 };
 
 			uint64_t now = time(NULL);
 			char timestring[MAXCTIMESIZE];
@@ -3063,11 +3059,8 @@ monitor_wait_until_some_node_reported_state(Monitor *monitor,
 
 			log_debug("received \"%s\"", notify->extra);
 
-			/* the parsing scribbles on the message, make a copy now */
-			strlcpy(notification.message, notify->extra, BUFSIZE);
-
 			/* errors are logged by parse_state_notification_message */
-			if (!parse_state_notification_message(&notification))
+			if (!parse_state_notification_message(&nodeState, notify->extra))
 			{
 				log_warn("Failed to parse notification message \"%s\"",
 						 notify->extra);
@@ -3075,8 +3068,8 @@ monitor_wait_until_some_node_reported_state(Monitor *monitor,
 			}
 
 			/* filter notifications for our own formation */
-			if (strcmp(notification.formationId, formation) != 0 ||
-				notification.groupId != groupId)
+			if (strcmp(nodeState.formation, formation) != 0 ||
+				nodeState.groupId != groupId)
 			{
 				continue;
 			}
@@ -3089,14 +3082,14 @@ monitor_wait_until_some_node_reported_state(Monitor *monitor,
 
 			fformat(stdout, "%8s | %3d | %*s | %6d | %19s | %19s\n",
 					timestring + 11,
-					notification.nodeId, maxHostNameSize,
-					notification.hostName,
-					notification.nodePort,
-					NodeStateToString(notification.reportedState),
-					NodeStateToString(notification.goalState));
+					nodeState.node.nodeId, maxHostNameSize,
+					nodeState.node.host,
+					nodeState.node.port,
+					NodeStateToString(nodeState.reportedState),
+					NodeStateToString(nodeState.goalState));
 
-			if (notification.goalState == targetState &&
-				notification.reportedState == targetState)
+			if (nodeState.goalState == targetState &&
+				nodeState.reportedState == targetState)
 			{
 				failoverIsDone = true;
 				break;

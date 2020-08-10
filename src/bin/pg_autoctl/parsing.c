@@ -14,7 +14,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "parson.h"
+
 #include "log.h"
+#include "nodestate_utils.h"
 #include "parsing.h"
 #include "string_utils.h"
 
@@ -25,9 +28,6 @@ static bool parse_controldata_field_uint32(const char *controlDataString,
 static bool parse_controldata_field_uint64(const char *controlDataString,
 										   const char *fieldName,
 										   uint64_t *dest);
-
-static int read_length_delimited_string_at(const char *ptr,
-										   char *buffer, int size);
 
 static bool parse_bool_with_len(const char *value, size_t len, bool *result);
 
@@ -216,119 +216,95 @@ parse_controldata_field_uint64(const char *controlDataString,
 
 
 /*
- * Parse a State message from the monitor.
- *
- *  S:catchingup:secondary:7.default:0:3:9.localhost:6020
- *
- *  S:<state>:<state>:<len.formationId>:groupId:nodeId:<len.hostName>:nodePort
- *
- * We trust the input to a degree, so we don't check everything that could go
- * wrong. We might want to revisit that choice later.
+ * parse_notification_message parses pgautofailover state change notifications,
+ * which are sent in the JSON format.
  */
-#define FIELD_SEP ':'
-#define STRLEN_SEP '.'
-
 bool
-parse_state_notification_message(StateNotification *notification)
+parse_state_notification_message(CurrentNodeState *nodeState,
+								 const char *message)
 {
-	char *ptr = (char *) notification->message;
-	char *col = NULL;
+	char *str;
+	double number;
+	JSON_Value *json = json_parse_string(message);
+	JSON_Object *jsobj = json_value_get_object(json);
 
-	/* 10 is the amount of character S, colons (:) and dots (.) */
-	if (ptr == NULL || strlen(ptr) < 10 || *ptr != 'S')
+	log_debug("parse_state_notification_message: %s", message);
+
+	if (json_type(json) != JSONObject)
 	{
-		log_warn("Failed to parse notification \"%s\"", notification->message);
+		log_error("Failed to parse JSON notification message: \"%s\"", message);
 		return false;
 	}
 
-	/* skip S: */
-	ptr++;
-	ptr++;
+	str = (char *) json_object_get_string(jsobj, "type");
 
-	/* read the states */
-	col = strchr(ptr, FIELD_SEP);
-	*col = '\0';
-
-	notification->reportedState = NodeStateFromString(ptr);
-
-	ptr = ++col;
-
-	col = strchr(ptr, FIELD_SEP);
-	*col = '\0';
-
-	notification->goalState = NodeStateFromString(ptr);
-
-	ptr = ++col;
-
-	/* read the formationId */
-	ptr += read_length_delimited_string_at(ptr,
-										   notification->formationId,
-										   NAMEDATALEN);
-
-	/* read the groupId and nodeId */
-	col = strchr(ptr, FIELD_SEP);
-	*col = '\0';
-	if (!stringToInt(ptr, &notification->groupId))
+	if (strcmp(str, "state") != 0)
 	{
-		log_warn("Failed to parse group id \"%s\"", ptr);
+		log_error("Failed to parse JSOBJ notification state message: "
+				  "jsobj object type is not \"state\" as expected");
 		return false;
 	}
-	ptr = ++col;
 
-	col = strchr(ptr, FIELD_SEP);
-	*col = '\0';
+	str = (char *) json_object_get_string(jsobj, "formation");
 
-	if (!stringToInt(ptr, &notification->nodeId))
+	if (str == NULL)
 	{
-		log_warn("Failed to parse node id \"%s\"", ptr);
+		log_error("Failed to parse formation in JSON "
+				  "notification message \"%s\"", message);
 		return false;
 	}
-	ptr = ++col;
+	strlcpy(nodeState->formation, str, sizeof(nodeState->formation));
 
-	/* read the hostName, then move past it */
-	ptr += read_length_delimited_string_at(ptr,
-										   notification->hostName,
-										   NAMEDATALEN);
+	number = json_object_get_number(jsobj, "groupId");
+	nodeState->groupId = (int) number;
 
-	/* read the nodePort */
-	if (!stringToInt(ptr, &notification->nodePort))
+	number = json_object_get_number(jsobj, "nodeId");
+	nodeState->node.nodeId = (int) number;
+
+	str = (char *) json_object_get_string(jsobj, "name");
+
+	if (str == NULL)
 	{
-		log_warn("Failed to parse node port id \"%s\"", ptr);
+		log_error("Failed to parse node name in JSON "
+				  "notification message \"%s\"", message);
 		return false;
 	}
+	strlcpy(nodeState->node.name, str, sizeof(nodeState->node.name));
+
+	str = (char *) json_object_get_string(jsobj, "host");
+
+	if (str == NULL)
+	{
+		log_error("Failed to parse node host in JSON "
+				  "notification message \"%s\"", message);
+		return false;
+	}
+	strlcpy(nodeState->node.host, str, sizeof(nodeState->node.host));
+
+	number = json_object_get_number(jsobj, "port");
+	nodeState->node.port = (int) number;
+
+	str = (char *) json_object_get_string(jsobj, "reportedState");
+
+	if (str == NULL)
+	{
+		log_error("Failed to parse reportedState in JSON "
+				  "notification message \"%s\"", message);
+		return false;
+	}
+	nodeState->reportedState = NodeStateFromString(str);
+
+	str = (char *) json_object_get_string(jsobj, "goalState");
+
+	if (str == NULL)
+	{
+		log_error("Failed to parse goalState in JSON "
+				  "notification message \"%s\"", message);
+		return false;
+	}
+	nodeState->goalState = NodeStateFromString(str);
 
 	return true;
-}
-
-
-/*
- * read_length_delimited_string_at reads a length delimited string such as
- * 12.abcdefghijkl found at given ptr.
- */
-static int
-read_length_delimited_string_at(const char *ptr, char *buffer, int size)
-{
-	char *col = NULL;
-	int len = 0;
-
-	col = strchr(ptr, STRLEN_SEP);
-	*col = '\0';
-	if (!stringToInt(ptr, &len))
-	{
-		/* that's a BUG really */
-		log_error("Failed to read length of string in notitication message: %s",
-				  ptr);
-		return 0;
-	}
-
-	if (len < size)
-	{
-		/* advance col past the separator */
-		strlcpy(buffer, ++col, len + 1);
-	}
-
-	/* col - ptr is the length of the digits plus the separator  */
-	return (col - ptr) + len + 1;
 }
 
 

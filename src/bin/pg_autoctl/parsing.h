@@ -13,6 +13,7 @@
 #include <stdbool.h>
 
 #include "monitor.h"
+#include "nodestate_utils.h"
 #include "pgctl.h"
 
 char * regexp_first_match(const char *string, const char *re);
@@ -21,7 +22,8 @@ char * parse_version_number(const char *version_string);
 bool parse_controldata(PostgresControlData *pgControlData,
 					   const char *control_data_string);
 
-bool parse_state_notification_message(StateNotification *notification);
+bool parse_state_notification_message(CurrentNodeState *nodeState,
+									  const char *message);
 
 bool parse_bool(const char *value, bool *result);
 

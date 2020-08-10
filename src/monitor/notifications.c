@@ -74,22 +74,27 @@ NotifyStateChange(AutoFailoverNode *node, char *description)
 	 */
 	eventid = InsertEvent(node, description);
 
-	/*
-	 * Rather than try and escape dots and colon characters from the user
-	 * provided strings formationId and nodeHost, we include the length of the
-	 * string in the message. Parsing is then easier on the receiving side too.
-	 */
-	appendStringInfo(payload,
-					 "S:%s:%s:%lu.%s:%d:%d:%lu.%s:%d",
-					 ReplicationStateGetName(node->reportedState),
-					 ReplicationStateGetName(node->goalState),
-					 strlen(node->formationId),
-					 node->formationId,
-					 node->groupId,
-					 node->nodeId,
-					 strlen(node->nodeHost),
-					 node->nodeHost,
-					 node->nodePort);
+	/* build a json object from the notification pieces */
+	appendStringInfoChar(payload, '{');
+
+	appendStringInfo(payload, "\"type\": \"state\", ");
+
+	appendStringInfo(payload, "\"formation\": \"%s\", ",
+					 node->formationId);
+
+	appendStringInfo(payload, "\"groupId\": %d, ", node->groupId);
+	appendStringInfo(payload, "\"nodeId\": %d, ", node->nodeId);
+	appendStringInfo(payload, "\"name\": \"%s\", ", node->nodeName);
+	appendStringInfo(payload, "\"host\": \"%s\", ", node->nodeHost);
+	appendStringInfo(payload, "\"port\": \"%d\", ", node->nodePort);
+
+	appendStringInfo(payload, "\"reportedState\": \"%s\", ",
+					 ReplicationStateGetName(node->reportedState));
+
+	appendStringInfo(payload, "\"goalState\": \"%s\"",
+					 ReplicationStateGetName(node->reportedState));
+
+	appendStringInfoChar(payload, '}');
 
 	Async_Notify(CHANNEL_STATE, payload->data);
 

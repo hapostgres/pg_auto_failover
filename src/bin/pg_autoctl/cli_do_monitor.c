@@ -31,6 +31,7 @@
 #include "keeper_config.h"
 #include "keeper.h"
 #include "monitor.h"
+#include "nodestate_utils.h"
 #include "parsing.h"
 #include "pgctl.h"
 #include "pgsetup.h"
@@ -581,7 +582,8 @@ cli_do_monitor_version(int argc, char **argv)
 static void
 cli_do_monitor_parse_notification(int argc, char **argv)
 {
-	StateNotification notification = { 0 };
+	CurrentNodeState nodeState = { 0 };
+
 	JSON_Value *js = json_value_init_object();
 	JSON_Object *root = json_value_get_object(js);
 
@@ -591,27 +593,27 @@ cli_do_monitor_parse_notification(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	/* the parsing scribbles on the message, make a copy now */
-	strlcpy(notification.message, argv[0], BUFSIZE);
-
 	/* errors are logged by parse_state_notification_message */
-	if (parse_state_notification_message(&notification))
+	if (!parse_state_notification_message(&nodeState, argv[0]))
 	{
-		log_info("New state for %s:%d in formation \"%s\": %s/%s",
-				 notification.hostName,
-				 notification.nodePort,
-				 notification.formationId,
-				 NodeStateToString(notification.reportedState),
-				 NodeStateToString(notification.goalState));
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	json_object_set_string(root, "hostname", notification.hostName);
-	json_object_set_number(root, "nodeport", (double) notification.nodePort);
-	json_object_set_string(root, "formationid", notification.formationId);
+	log_info("New state for %s:%d in formation \"%s\": %s/%s",
+			 nodeState.node.host,
+			 nodeState.node.port,
+			 nodeState.formation,
+			 NodeStateToString(nodeState.reportedState),
+			 NodeStateToString(nodeState.goalState));
+
+	json_object_set_string(root, "hostname", nodeState.node.host);
+	json_object_set_number(root, "nodeport", (double) nodeState.node.port);
+	json_object_set_string(root, "formationid", nodeState.formation);
 	json_object_set_string(root, "reportedState",
-						   NodeStateToString(notification.reportedState));
+						   NodeStateToString(nodeState.reportedState));
 	json_object_set_string(root, "goalState",
-						   NodeStateToString(notification.goalState));
+						   NodeStateToString(nodeState.goalState));
 
 	(void) cli_pprint_json(js);
 }

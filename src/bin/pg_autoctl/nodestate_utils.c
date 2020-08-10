@@ -102,10 +102,9 @@ nodestatePrintHeader(CurrentNodeStateArray *nodesArray)
  * nodesArray, using the nodesArray pre-computed sizes for the dynamic columns.
  */
 void
-nodestatePrintNodeState(CurrentNodeStateArray *nodesArray, int position)
+nodestatePrintNodeState(CurrentNodeStateArray *nodesArray,
+						CurrentNodeState *nodeState)
 {
-	CurrentNodeState *nodeState = &(nodesArray->nodes[position]);
-
 	char hostport[BUFSIZE] = { 0 };
 	char composedId[BUFSIZE] = { 0 };
 

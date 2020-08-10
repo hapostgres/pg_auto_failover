@@ -22,6 +22,7 @@
 typedef struct CurrentNodeState
 {
 	NodeAddress node;
+	char formation[NAMEDATALEN];
 	int groupId;
 
 	NodeState reportedState;
@@ -50,7 +51,8 @@ typedef struct CurrentNodeStateArray
 
 void nodestatePrepareHeaders(CurrentNodeStateArray *nodesArray);
 void nodestatePrintHeader(CurrentNodeStateArray *nodesArray);
-void nodestatePrintNodeState(CurrentNodeStateArray *nodesArray, int position);
+void nodestatePrintNodeState(CurrentNodeStateArray *nodesArray,
+							 CurrentNodeState *nodeState);
 void prepareHostNameSeparator(char nameSeparatorHeader[], int size);
 
 #endif /* NODESTATE_H */
