@@ -187,3 +187,17 @@ def test_011_write_into_new_primary():
 
     # generate more WAL trafic for replication
     node2.run_sql_query("CHECKPOINT")
+
+def test_012_fail_primary():
+    print()
+    print("Failing current primary node 2")
+    node2.fail()
+
+    assert node1.wait_until_state(target_state="primary")
+    assert node3.wait_until_state(target_state="secondary")
+
+def test_013_remove_old_primary():
+    node2.drop()
+
+    assert node1.wait_until_state(target_state="primary")
+    assert node3.wait_until_state(target_state="secondary")
