@@ -38,8 +38,8 @@ typedef struct KeeperConfig
 	PostgresSetup pgSetup;
 
 	/* PostgreSQL replication / tooling setup */
-	char *replication_slot_name;
-	char *replication_password;
+	char replication_slot_name[MAXCONNINFO];
+	char replication_password[MAXCONNINFO];
 	char *maximum_backup_rate;
 	char backupDirectory[MAXPGPATH];
 

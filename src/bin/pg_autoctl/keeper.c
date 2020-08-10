@@ -735,6 +735,14 @@ keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 	 */
 	postgres->postgresSetup = config->pgSetup;
 
+	if (!keeper_config_update(config,
+							  state->current_node_id,
+							  state->current_group))
+	{
+		log_error("Failed to update configuration");
+		return false;
+	}
+
 	if (!local_postgres_update(postgres, postgresNotRunningIsOk))
 	{
 		log_error("Failed to reload configuration, see above for details");
