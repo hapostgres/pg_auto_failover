@@ -590,8 +590,11 @@ prepare_guc_settings_from_pgsetup(const char *configFilePath,
 	 * Only bother to apply settings on Linux, macOS and Windows are considered
 	 * development environment and we decide to refrain from tuning a dedicated
 	 * Postgres system on those targets.
+	 *
+	 * Also disable Postgres tuning when running the unit test suite.
 	 */
 #if defined(__linux__)
+	if (!(env_exists(PG_AUTOCTL_DEBUG) && env_exists("PG_REGRESS_SOCK_DIR")))
 	{
 		char tuning[BUFSIZE] = { 0 };
 

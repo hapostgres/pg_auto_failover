@@ -42,7 +42,7 @@ GUC postgres_tuning[] = {
 
 typedef struct DynamicTuning
 {
-	int maxWorkers;
+	int autovacuum_max_workers;
 	uint64_t shared_buffers;
 	uint64_t work_mem;
 	uint64_t maintenance_work_mem;
@@ -84,7 +84,7 @@ pgtuning_prepare_guc_settings(GUC *settings, char *config, size_t size)
 			  sysInfo.ncpu,
 			  totalram);
 
-	tuning.maxWorkers = pgtuning_compute_max_workers(&sysInfo);
+	tuning.autovacuum_max_workers = pgtuning_compute_max_workers(&sysInfo);
 
 	if (!pgtuning_compute_mem_settings(&sysInfo, &tuning))
 	{
@@ -213,7 +213,7 @@ pgtuning_log_settings(DynamicTuning *tuning, int logLevel)
 	char buf[BUFSIZE] = { 0 };
 
 	log_level(logLevel,
-			  "Setting autovacuum_max_workers to %d", tuning->maxWorkers);
+			  "Setting autovacuum_max_workers to %d", tuning->autovacuum_max_workers);
 
 	(void) pretty_print_bytes(buf, sizeof(buf), tuning->shared_buffers);
 	log_level(logLevel, "Setting shared_buffers to %s", buf);
@@ -264,7 +264,7 @@ pgtuning_edit_guc_settings(GUC *settings, DynamicTuning *tuning,
 		{
 			appendPQExpBuffer(contents, "%s = %d\n",
 							  setting->name,
-							  tuning->maxWorkers);
+							  tuning->autovacuum_max_workers);
 		}
 		else if (streq(setting->name, "shared_buffers"))
 		{
