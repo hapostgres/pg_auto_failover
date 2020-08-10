@@ -1030,7 +1030,7 @@ RemoveNode(AutoFailoverNode *currentNode)
 	LockFormation(currentNode->formationId, ExclusiveLock);
 
 	/* when removing the primary, initiate a failover */
-	currentNodeIsPrimary = StateBelongsToPrimary(currentNode->reportedState);
+	currentNodeIsPrimary = CanTakeWritesInState(currentNode->goalState);
 
 	/* get the list of the other nodes */
 	otherNodesGroupList = AutoFailoverOtherNodesList(currentNode);
