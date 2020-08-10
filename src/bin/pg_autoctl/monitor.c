@@ -728,7 +728,8 @@ monitor_register_node(Monitor *monitor, char *formation,
 								   paramCount, paramTypes, paramValues,
 								   &parseContext, parseNodeState))
 	{
-		if (strcmp(parseContext.sqlstate, STR_ERRCODE_OBJECT_IN_USE) == 0)
+		if (strcmp(parseContext.sqlstate, STR_ERRCODE_OBJECT_IN_USE) == 0 &&
+			!pgsql_retry_policy_expired(retryPolicy))
 		{
 			int sleep = pgsql_compute_connection_retry_sleep_time(retryPolicy);
 
@@ -750,7 +751,8 @@ monitor_register_node(Monitor *monitor, char *formation,
 										 assignedState);
 		}
 		else if (strcmp(parseContext.sqlstate,
-						STR_ERRCODE_EXCLUSION_VIOLATION) == 0)
+						STR_ERRCODE_EXCLUSION_VIOLATION) == 0 &&
+				 !pgsql_retry_policy_expired(retryPolicy))
 		{
 			/* *INDENT-OFF* */
 			log_error("Failed to register node %s:%d in "
@@ -3030,7 +3032,8 @@ monitor_start_maintenance(Monitor *monitor, int nodeId,
 								   paramCount, paramTypes, paramValues,
 								   &context, &parseSingleValueResult))
 	{
-		if (monitor_retryable_error(context.sqlstate))
+		if (monitor_retryable_error(context.sqlstate) &&
+			!pgsql_retry_policy_expired(retryPolicy))
 		{
 			int sleep = pgsql_compute_connection_retry_sleep_time(retryPolicy);
 
@@ -3083,7 +3086,8 @@ monitor_stop_maintenance(Monitor *monitor, int nodeId,
 								   paramCount, paramTypes, paramValues,
 								   &context, &parseSingleValueResult))
 	{
-		if (monitor_retryable_error(context.sqlstate))
+		if (monitor_retryable_error(context.sqlstate) &&
+			!pgsql_retry_policy_expired(retryPolicy))
 		{
 			int sleep = pgsql_compute_connection_retry_sleep_time(retryPolicy);
 

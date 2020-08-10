@@ -31,7 +31,7 @@ static void log_connection_error(PGconn *connection, int logLevel);
 static void pgAutoCtlDefaultNoticeProcessor(void *arg, const char *message);
 static void pgAutoCtlDebugNoticeProcessor(void *arg, const char *message);
 static PGconn * pgsql_open_connection(PGSQL *pgsql);
-static bool pgsql_retry_open_connection(PGSQL *pgsql, uint64_t startTime);
+static bool pgsql_retry_open_connection(PGSQL *pgsql);
 static bool is_response_ok(PGresult *result);
 static bool clear_results(PGSQL *pgsql);
 static void pgsql_handle_notifications(PGSQL *pgsql);
@@ -294,6 +294,40 @@ pgsql_compute_connection_retry_sleep_time(ConnectionRetryPolicy *retryPolicy)
 
 
 /*
+ * pgsql_retry_policy_expired returns true when we should stop retrying, either
+ * per the policy (maxR / maxT) or because we received a signal that we have to
+ * obey.
+ */
+bool
+pgsql_retry_policy_expired(ConnectionRetryPolicy *retryPolicy)
+{
+	uint64_t now = time(NULL);
+
+	/* Any signal is reason enough to break out from this retry loop. */
+	if (asked_to_quit || asked_to_stop || asked_to_stop_fast || asked_to_reload)
+	{
+		return true;
+	}
+
+	/*
+	 * We stop retrying as soon as we have spent all of our time budget or all
+	 * of our attempts count budget, whichever comes first.
+	 *
+	 * maxR = 0 (zero) means no retry at all, checked before the loop
+	 * maxR < 0 (zero) means unlimited number of retries
+	 */
+	if ((now - retryPolicy->startTime) >= retryPolicy->maxT ||
+		(retryPolicy->maxR > 0 &&
+		 retryPolicy->attempts >= retryPolicy->maxR))
+	{
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
  * Finish a PGSQL client connection.
  */
 void
@@ -439,7 +473,9 @@ pgsql_open_connection(PGSQL *pgsql)
 		 * If we reach this part of the code, the connectionType is not LOCAL
 		 * and the retryPolicy has a non-zero maximum retry count. Let's retry!
 		 */
-		if (!pgsql_retry_open_connection(pgsql, startTime))
+		pgsql->retryPolicy.startTime = startTime;
+
+		if (!pgsql_retry_open_connection(pgsql))
 		{
 			/* errors have already been logged */
 			return NULL;
@@ -462,8 +498,8 @@ pgsql_open_connection(PGSQL *pgsql)
  * is ready to accept connections, and then connects to it and returns true
  * when it could connect, false otherwise.
  */
-bool
-pgsql_retry_open_connection(PGSQL *pgsql, uint64_t startTime)
+static bool
+pgsql_retry_open_connection(PGSQL *pgsql)
 {
 	bool connectionOk = false;
 
@@ -485,28 +521,11 @@ pgsql_retry_open_connection(PGSQL *pgsql, uint64_t startTime)
 	while (!connectionOk)
 	{
 		int sleep = 0;
-		uint64_t now = time(NULL);
 
-		/* Any signal is reason enough to break out from this retry loop. */
-		if (asked_to_quit ||
-			asked_to_stop ||
-			asked_to_stop_fast ||
-			asked_to_reload)
+		if (pgsql_retry_policy_expired(&(pgsql->retryPolicy)))
 		{
-			break;
-		}
+			uint64_t now = time(NULL);
 
-		/*
-		 * We stop retrying as soon as we have spent all of our time budget or
-		 * all of our attempts count budget, whichever comes first.
-		 *
-		 * maxR = 0 (zero) means no retry at all, checked before the loop
-		 * maxR < 0 (zero) means unlimited number of retries
-		 */
-		if ((now - startTime) >= pgsql->retryPolicy.maxT ||
-			(pgsql->retryPolicy.maxR > 0 &&
-			 pgsql->retryPolicy.attempts >= pgsql->retryPolicy.maxR))
-		{
 			(void) log_connection_error(pgsql->connection, LOG_ERROR);
 			pgsql->status = PG_CONNECTION_BAD;
 			pgsql_finish(pgsql);
@@ -516,7 +535,7 @@ pgsql_retry_open_connection(PGSQL *pgsql, uint64_t startTime)
 					  "pg_autoctl stops retrying now",
 					  pgsql->connectionString,
 					  pgsql->retryPolicy.attempts,
-					  (int) (now - startTime));
+					  (int) (now - pgsql->retryPolicy.startTime));
 
 			return false;
 		}
@@ -568,7 +587,7 @@ pgsql_retry_open_connection(PGSQL *pgsql, uint64_t startTime)
 							 "after %d attempts in %d seconds.",
 							 pgsql->connectionString,
 							 pgsql->retryPolicy.attempts,
-							 (int) (now - startTime));
+							 (int) (now - pgsql->retryPolicy.startTime));
 				}
 				else
 				{
@@ -646,7 +665,7 @@ pgsql_retry_open_connection(PGSQL *pgsql, uint64_t startTime)
 						"connection request).",
 						pgsql->connectionString,
 						pgsql->retryPolicy.attempts,
-						(int) (now - startTime));
+						(int) (now - pgsql->retryPolicy.startTime));
 				}
 				break;
 			}
