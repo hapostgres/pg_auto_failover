@@ -1714,22 +1714,24 @@ static void
 printCurrentState(void *ctx, PGresult *result)
 {
 	CurrentNodeStateContext *context = (CurrentNodeStateContext *) ctx;
+	CurrentNodeStateArray *nodesArray = context->nodesArray;
+	NodeAddressHeaders *headers = &(nodesArray->headers);
 
-	if (!parseCurrentNodeStateArray(context->nodesArray, result))
+	if (!parseCurrentNodeStateArray(nodesArray, result))
 	{
 		/* errors have already been logged */
 		context->parsedOK = false;
 		return;
 	}
 
-	(void) nodestatePrepareHeaders(context->nodesArray);
-	(void) nodestatePrintHeader(context->nodesArray);
+	(void) nodestatePrepareHeaders(nodesArray);
+	(void) nodestatePrintHeader(headers);
 
 	for (int position = 0; position < context->nodesArray->count; position++)
 	{
-		CurrentNodeState *nodeState = &(context->nodesArray->nodes[position]);
+		CurrentNodeState *nodeState = &(nodesArray->nodes[position]);
 
-		(void) nodestatePrintNodeState(context->nodesArray, nodeState);
+		(void) nodestatePrintNodeState(headers, nodeState);
 	}
 
 	fformat(stdout, "\n");

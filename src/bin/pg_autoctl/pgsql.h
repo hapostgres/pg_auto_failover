@@ -38,15 +38,6 @@
 
 
 /*
- * Maximum length of serialized pg_lsn value
- * It is taken from postgres file pg_lsn.c.
- * It defines MAXPG_LSNLEN to be 17 and
- * allocates a buffer 1 byte larger. We
- * went for 18 to make buffer allocation simpler.
- */
-#define PG_LSN_MAXLENGTH 18
-
-/*
  * pg_stat_replication.sync_state is one if:
  *   sync, async, quorum, potential
  */

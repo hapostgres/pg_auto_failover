@@ -29,6 +29,10 @@ static bool parse_controldata_field_uint64(const char *controlDataString,
 										   const char *fieldName,
 										   uint64_t *dest);
 
+static bool parse_controldata_field_lsn(const char *controlDataString,
+										const char *fieldName,
+										char lsn[]);
+
 static bool parse_bool_with_len(const char *value, size_t len, bool *result);
 
 #define RE_MATCH_COUNT 10
@@ -140,7 +144,11 @@ parse_controldata(PostgresControlData *pgControlData,
 
 		!parse_controldata_field_uint64(control_data_string,
 										"Database system identifier",
-										&(pgControlData->system_identifier)))
+										&(pgControlData->system_identifier)) ||
+
+		!parse_controldata_field_lsn(control_data_string,
+									 "Minimum recovery ending location",
+									 pgControlData->recoveryEndingLocation))
 	{
 		log_error("Failed to parse pg_controldata output");
 		return false;
@@ -209,6 +217,34 @@ parse_controldata_field_uint64(const char *controlDataString,
 		free(match);
 		return false;
 	}
+
+	free(match);
+	return true;
+}
+
+
+/*
+ * parse_controldata_field_lsn matches pg_controldata output for a field name
+ * and gets its value as a string, in an area that must be pre-allocated with
+ * at least PG_LSN_MAXLENGTH bytes.
+ */
+static bool
+parse_controldata_field_lsn(const char *controlDataString,
+							const char *fieldName,
+							char lsn[])
+{
+	char regex[BUFSIZE];
+	char *match;
+
+	sformat(regex, BUFSIZE, "^%s: *([0-9A-F]+/[0-9A-F]+)$", fieldName);
+	match = regexp_first_match(controlDataString, regex);
+
+	if (match == NULL)
+	{
+		return false;
+	}
+
+	strlcpy(lsn, match, PG_LSN_MAXLENGTH);
 
 	free(match);
 	return true;

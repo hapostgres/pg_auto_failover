@@ -695,6 +695,8 @@ fprintf_pg_setup(FILE *stream, PostgresSetup *pgSetup)
 			pgSetup->control.catalog_version_no);
 	fformat(stream, "System Identifier:  %" PRIu64 "\n",
 			pgSetup->control.system_identifier);
+	fformat(stream, "Recovery End LSN:   %s\n",
+			pgSetup->control.recoveryEndingLocation);
 	fformat(stream, "Postmaster status:  %s\n",
 			pmStatusToString(pgSetup->pm_status));
 	fflush(stream);

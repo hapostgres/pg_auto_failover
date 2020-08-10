@@ -65,12 +65,14 @@ void nodestateAdjustHeaders(NodeAddressHeaders *headers,
 							NodeAddress *node, int groupId);
 void prepareHeaderSeparators(NodeAddressHeaders *headers);
 
-void nodestatePrintHeader(CurrentNodeStateArray *nodesArray);
-void nodestatePrintNodeState(CurrentNodeStateArray *nodesArray,
+void nodestatePrintHeader(NodeAddressHeaders *headers);
+void nodestatePrintNodeState(NodeAddressHeaders *headers,
 							 CurrentNodeState *nodeState);
 
 void nodestatePrepareNode(NodeAddress *node,
 						  int groupId, char *hostport, char *composedId);
 void prepareHostNameSeparator(char nameSeparatorHeader[], int size);
+
+bool nodestateAsJSON(CurrentNodeState *nodeState, JSON_Value *js);
 
 #endif /* NODESTATE_H */

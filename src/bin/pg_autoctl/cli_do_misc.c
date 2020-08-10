@@ -227,9 +227,15 @@ keeper_cli_create_replication_user(int argc, char **argv)
 void
 keeper_cli_pgsetup_discover(int argc, char **argv)
 {
+	bool missingPgdataOk = true;
 	PostgresSetup pgSetup = { 0 };
 
 	if (!pg_setup_init(&pgSetup, &keeperOptions.pgSetup, true, true))
+	{
+		exit(EXIT_CODE_PGCTL);
+	}
+
+	if (!pg_controldata(&pgSetup, missingPgdataOk))
 	{
 		exit(EXIT_CODE_PGCTL);
 	}

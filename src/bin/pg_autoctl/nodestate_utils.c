@@ -55,10 +55,6 @@ nodeAddressArrayPrepareHeaders(NodeAddressHeaders *headers,
 {
 	int index = 0;
 
-	headers->maxNameSize = 4;  /* "Name" */
-	headers->maxHostSize = 10; /* "Host:Port" */
-	headers->maxNodeSize = 5;  /* "Node" */
-
 	/*
 	 * Dynamically adjust our display output to the length of the longer
 	 * hostname in the result set
@@ -114,6 +110,25 @@ nodestateAdjustHeaders(NodeAddressHeaders *headers,
 	int nodeLen =
 		strlen(groupIdString.strValue) + strlen(nodeIdString.strValue) + 1;
 
+	/* initialize to mininum values, if needed */
+	if (headers->maxNameSize == 0)
+	{
+		/* Name */
+		headers->maxNameSize = 5;
+	}
+
+	if (headers->maxHostSize == 0)
+	{
+		/* Host:Port */
+		headers->maxHostSize = 10;
+	}
+
+	if (headers->maxNodeSize == 0)
+	{
+		/* groupId/nodeId */
+		headers->maxNodeSize = 5;
+	}
+
 	if (nameLen > headers->maxNameSize)
 	{
 		headers->maxNameSize = nameLen;
@@ -135,22 +150,22 @@ nodestateAdjustHeaders(NodeAddressHeaders *headers,
  * nodestatePrintHeader prints the given CurrentNodeStateArray header.
  */
 void
-nodestatePrintHeader(CurrentNodeStateArray *nodesArray)
+nodestatePrintHeader(NodeAddressHeaders *headers)
 {
 	fformat(stdout, "%*s | %*s | %*s | %17s | %17s | %17s | %6s\n",
-			nodesArray->headers.maxNameSize, "Name",
-			nodesArray->headers.maxNodeSize, "Node",
-			nodesArray->headers.maxHostSize, "Host:Port",
+			headers->maxNameSize, "Name",
+			headers->maxNodeSize, "Node",
+			headers->maxHostSize, "Host:Port",
 			"Current State", "Assigned State",
 			"LSN", "Health");
 
 	fformat(stdout, "%*s-+-%*s-+-%*s-+-%17s-+-%17s-+-%17s-+-%6s\n",
-			nodesArray->headers.maxNameSize,
-			nodesArray->headers.nameSeparatorHeader,
-			nodesArray->headers.maxNodeSize,
-			nodesArray->headers.nodeSeparatorHeader,
-			nodesArray->headers.maxHostSize,
-			nodesArray->headers.hostSeparatorHeader,
+			headers->maxNameSize,
+			headers->nameSeparatorHeader,
+			headers->maxNodeSize,
+			headers->nodeSeparatorHeader,
+			headers->maxHostSize,
+			headers->hostSeparatorHeader,
 			"-----------------", "-----------------", "-----------------",
 			"------");
 }
@@ -161,7 +176,7 @@ nodestatePrintHeader(CurrentNodeStateArray *nodesArray)
  * nodesArray, using the nodesArray pre-computed sizes for the dynamic columns.
  */
 void
-nodestatePrintNodeState(CurrentNodeStateArray *nodesArray,
+nodestatePrintNodeState(NodeAddressHeaders *headers,
 						CurrentNodeState *nodeState)
 {
 	char hostport[BUFSIZE] = { 0 };
@@ -173,12 +188,13 @@ nodestatePrintNodeState(CurrentNodeStateArray *nodesArray,
 								composedId);
 
 	fformat(stdout, "%*s | %*s | %*s | %17s | %17s | %17s | %6s\n",
-			nodesArray->headers.maxNameSize, nodeState->node.name,
-			nodesArray->headers.maxNodeSize, composedId,
-			nodesArray->headers.maxHostSize, hostport,
+			headers->maxNameSize, nodeState->node.name,
+			headers->maxNodeSize, composedId,
+			headers->maxHostSize, hostport,
 			NodeStateToString(nodeState->reportedState),
 			NodeStateToString(nodeState->goalState),
 			nodeState->node.lsn,
+			nodeState->health == -1 ? "?" :
 			nodeState->health == 1 ? "✓" : "✗");
 }
 
@@ -216,4 +232,36 @@ prepareHostNameSeparator(char nameSeparatorHeader[], int size)
 			break;
 		}
 	}
+}
+
+
+/*
+ * nodestateAsJSON populates a given JSON_Value with an JSON object that mimics
+ * the output from SELECT * FROM pgautofailover.current_state() by taking the
+ * information bits from the given nodeState.
+ */
+bool
+nodestateAsJSON(CurrentNodeState *nodeState, JSON_Value *js)
+{
+	JSON_Object *jsobj = json_value_get_object(js);
+
+	/* same field names as SELECT * FROM pgautofailover.current_state() */
+	json_object_set_number(jsobj, "node_id", (double) nodeState->node.nodeId);
+	json_object_set_number(jsobj, "group_id", (double) nodeState->groupId);
+	json_object_set_string(jsobj, "nodename", nodeState->node.name);
+	json_object_set_string(jsobj, "nodehost", nodeState->node.host);
+	json_object_set_number(jsobj, "nodeport", (double) nodeState->node.port);
+
+	json_object_set_string(jsobj, "current_group_state",
+						   NodeStateToString(nodeState->reportedState));
+
+	json_object_set_string(jsobj, "assigned_group_state",
+						   NodeStateToString(nodeState->goalState));
+
+	json_object_set_string(jsobj, "Minimum Recovery Ending LSN",
+						   nodeState->node.lsn);
+
+	json_object_set_boolean(jsobj, "health", nodeState->health == 1);
+
+	return true;
 }
