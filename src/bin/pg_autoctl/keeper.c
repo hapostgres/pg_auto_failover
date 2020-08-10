@@ -485,8 +485,12 @@ keeper_update_pg_state(Keeper *keeper)
 		/* Postgres is not running. */
 		postgres->pgIsRunning = false;
 
-		/* keep the current values we have for the Postgres characteristics */
-		if (pgSetup->control.pg_control_version != 0)
+		/*
+		 * Cache invalidation: keep the current values we have for the Postgres
+		 * characteristics, when we already have them, or fetch them anew using
+		 * pg_controldata.
+		 */
+		if (keeperState->pg_control_version != 0)
 		{
 			pgSetup->control.pg_control_version = keeperState->pg_control_version;
 			pgSetup->control.catalog_version_no = keeperState->catalog_version_no;
