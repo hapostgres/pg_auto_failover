@@ -1564,9 +1564,9 @@ printCurrentState(void *ctx, PGresult *result)
 	char hostSeparatorHeader[BUFSIZE] = { 0 };
 	char nodeSeparatorHeader[BUFSIZE] = { 0 };
 
-	if (PQnfields(result) != 9)
+	if (PQnfields(result) != 11)
 	{
-		log_error("Query returned %d columns, expected 9", PQnfields(result));
+		log_error("Query returned %d columns, expected 11", PQnfields(result));
 		context->parsedOK = false;
 		return;
 	}
@@ -1608,19 +1608,19 @@ printCurrentState(void *ctx, PGresult *result)
 	(void) prepareHostNameSeparator(hostSeparatorHeader, maxHostSize);
 	(void) prepareHostNameSeparator(nodeSeparatorHeader, maxNodeSize);
 
-	fformat(stdout, "%*s | %*s | %*s | %17s | %17s | %8s | %6s\n",
+	fformat(stdout, "%*s | %*s | %*s | %17s | %17s | %17s | %6s\n",
 			maxNameSize, "Name",
 			maxHostSize, "Host:Port",
 			maxNodeSize, "Node",
 			"Current State", "Assigned State",
-			"Priority", "Quorum");
+			"LSN", "Health");
 
-	fformat(stdout, "%*s-+-%*s-+-%*s-+-%17s-+-%17s-+-%8s-+-%6s\n",
+	fformat(stdout, "%*s-+-%*s-+-%*s-+-%17s-+-%17s-+-%17s-+-%6s\n",
 			maxNameSize, nameSeparatorHeader,
 			maxHostSize, hostSeparatorHeader,
 			maxNodeSize, nodeSeparatorHeader,
-			"-----------------", "-----------------",
-			"--------", "------");
+			"-----------------", "-----------------", "-----------------",
+			"------");
 
 	for (currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
 	{
@@ -1631,8 +1631,14 @@ printCurrentState(void *ctx, PGresult *result)
 		char *nodeId = PQgetvalue(result, currentTupleIndex, 4);
 		char *currentState = PQgetvalue(result, currentTupleIndex, 5);
 		char *goalState = PQgetvalue(result, currentTupleIndex, 6);
-		char *candidatePriority = PQgetvalue(result, currentTupleIndex, 7);
-		char *replicationQuorum = PQgetvalue(result, currentTupleIndex, 8);
+
+		/*
+		 * currently unused
+		 * char *candidatePriority = PQgetvalue(result, currentTupleIndex, 7);
+		 * char *replicationQuorum = PQgetvalue(result, currentTupleIndex, 8);
+		 */
+		char *reportedLSN = PQgetvalue(result, currentTupleIndex, 9);
+		char *health = PQgetvalue(result, currentTupleIndex, 10);
 
 		char hostport[BUFSIZE] = { 0 };
 		char composedId[BUFSIZE] = { 0 };
@@ -1640,12 +1646,12 @@ printCurrentState(void *ctx, PGresult *result)
 		sformat(hostport, sizeof(hostport), "%s:%s", host, port);
 		sformat(composedId, sizeof(hostport), "%s/%s", groupId, nodeId);
 
-		fformat(stdout, "%*s | %*s | %*s | %17s | %17s | %8s | %6s\n",
+		fformat(stdout, "%*s | %*s | %*s | %17s | %17s | %17s | %6s\n",
 				maxNameSize, name,
 				maxHostSize, hostport,
 				maxNodeSize, composedId,
 				currentState, goalState,
-				candidatePriority, replicationQuorum);
+				reportedLSN, strcmp(health, "1") == 0 ? "✓" : "✗");
 	}
 	fformat(stdout, "\n");
 
