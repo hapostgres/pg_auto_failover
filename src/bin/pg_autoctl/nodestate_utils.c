@@ -22,9 +22,9 @@ nodestatePrepareHeaders(CurrentNodeStateArray *nodesArray)
 {
 	int index = 0;
 
-	nodesArray->maxNameSize = 4;  /* "Name" */
-	nodesArray->maxHostSize = 10; /* "Host:Port" */
-	nodesArray->maxNodeSize = 5;  /* "Node" */
+	nodesArray->headers.maxNameSize = 4;  /* "Name" */
+	nodesArray->headers.maxHostSize = 10; /* "Host:Port" */
+	nodesArray->headers.maxNodeSize = 5;  /* "Node" */
 
 	/*
 	 * Dynamically adjust our display output to the length of the longer
@@ -34,44 +34,100 @@ nodestatePrepareHeaders(CurrentNodeStateArray *nodesArray)
 	{
 		CurrentNodeState *nodeState = &(nodesArray->nodes[index]);
 
-		int nameLen = strlen(nodeState->node.name);
-
-		/* compute strlen of host:port */
-		IntString portString = intToString(nodeState->node.port);
-		int hostLen =
-			strlen(nodeState->node.host) + strlen(portString.strValue) + 1;
-
-		/* compute strlen of groupId/nodeId, as in "0/1" */
-		IntString nodeIdString = intToString(nodeState->node.nodeId);
-		IntString groupIdString = intToString(nodeState->groupId);
-		int nodeLen =
-			strlen(groupIdString.strValue) + strlen(nodeIdString.strValue) + 1;
-
-		if (nameLen > nodesArray->maxNameSize)
-		{
-			nodesArray->maxNameSize = nameLen;
-		}
-
-		if (hostLen > nodesArray->maxHostSize)
-		{
-			nodesArray->maxHostSize = hostLen;
-		}
-
-		if (nodeLen > nodesArray->maxNodeSize)
-		{
-			nodesArray->maxNodeSize = nodeLen;
-		}
+		(void) nodestateAdjustHeaders(&(nodesArray->headers),
+									  &(nodeState->node),
+									  nodeState->groupId);
 	}
 
 	/* prepare a nice dynamic string of '-' as a header separator */
-	(void) prepareHostNameSeparator(nodesArray->nameSeparatorHeader,
-									nodesArray->maxNameSize);
+	(void) prepareHeaderSeparators(&(nodesArray->headers));
+}
 
-	(void) prepareHostNameSeparator(nodesArray->hostSeparatorHeader,
-									nodesArray->maxHostSize);
 
-	(void) prepareHostNameSeparator(nodesArray->nodeSeparatorHeader,
-									nodesArray->maxNodeSize);
+/*
+ * nodestatePrepareHeaders computes the maximum length needed for variable
+ * length columns and prepare the separation strings, filling them with the
+ * right amount of dashes.
+ */
+void
+nodeAddressArrayPrepareHeaders(NodeAddressHeaders *headers,
+							   NodeAddressArray *nodesArray, int groupId)
+{
+	int index = 0;
+
+	headers->maxNameSize = 4;  /* "Name" */
+	headers->maxHostSize = 10; /* "Host:Port" */
+	headers->maxNodeSize = 5;  /* "Node" */
+
+	/*
+	 * Dynamically adjust our display output to the length of the longer
+	 * hostname in the result set
+	 */
+	for (index = 0; index < nodesArray->count; index++)
+	{
+		NodeAddress *node = &(nodesArray->nodes[index]);
+
+		(void) nodestateAdjustHeaders(headers, node, groupId);
+	}
+
+	/* prepare a nice dynamic string of '-' as a header separator */
+	(void) prepareHeaderSeparators(headers);
+}
+
+
+/*
+ * prepareHeaderSeparators prepares all the separator strings. headers sizes
+ * must have been pre-computed.
+ */
+void
+prepareHeaderSeparators(NodeAddressHeaders *headers)
+{
+	(void) prepareHostNameSeparator(headers->nameSeparatorHeader,
+									headers->maxNameSize);
+
+	(void) prepareHostNameSeparator(headers->hostSeparatorHeader,
+									headers->maxHostSize);
+
+	(void) prepareHostNameSeparator(headers->nodeSeparatorHeader,
+									headers->maxNodeSize);
+}
+
+
+/*
+ * re-compute headers properties from current properties and the new node
+ * characteristics.
+ */
+void
+nodestateAdjustHeaders(NodeAddressHeaders *headers,
+					   NodeAddress *node, int groupId)
+{
+	int nameLen = strlen(node->name);
+
+	/* compute strlen of host:port */
+	IntString portString = intToString(node->port);
+	int hostLen =
+		strlen(node->host) + strlen(portString.strValue) + 1;
+
+	/* compute strlen of groupId/nodeId, as in "0/1" */
+	IntString nodeIdString = intToString(node->nodeId);
+	IntString groupIdString = intToString(groupId);
+	int nodeLen =
+		strlen(groupIdString.strValue) + strlen(nodeIdString.strValue) + 1;
+
+	if (nameLen > headers->maxNameSize)
+	{
+		headers->maxNameSize = nameLen;
+	}
+
+	if (hostLen > headers->maxHostSize)
+	{
+		headers->maxHostSize = hostLen;
+	}
+
+	if (nodeLen > headers->maxNodeSize)
+	{
+		headers->maxNodeSize = nodeLen;
+	}
 }
 
 
@@ -82,16 +138,19 @@ void
 nodestatePrintHeader(CurrentNodeStateArray *nodesArray)
 {
 	fformat(stdout, "%*s | %*s | %*s | %17s | %17s | %17s | %6s\n",
-			nodesArray->maxNameSize, "Name",
-			nodesArray->maxHostSize, "Host:Port",
-			nodesArray->maxNodeSize, "Node",
+			nodesArray->headers.maxNameSize, "Name",
+			nodesArray->headers.maxNodeSize, "Node",
+			nodesArray->headers.maxHostSize, "Host:Port",
 			"Current State", "Assigned State",
 			"LSN", "Health");
 
 	fformat(stdout, "%*s-+-%*s-+-%*s-+-%17s-+-%17s-+-%17s-+-%6s\n",
-			nodesArray->maxNameSize, nodesArray->nameSeparatorHeader,
-			nodesArray->maxHostSize, nodesArray->hostSeparatorHeader,
-			nodesArray->maxNodeSize, nodesArray->nodeSeparatorHeader,
+			nodesArray->headers.maxNameSize,
+			nodesArray->headers.nameSeparatorHeader,
+			nodesArray->headers.maxNodeSize,
+			nodesArray->headers.nodeSeparatorHeader,
+			nodesArray->headers.maxHostSize,
+			nodesArray->headers.hostSeparatorHeader,
 			"-----------------", "-----------------", "-----------------",
 			"------");
 }
@@ -108,22 +167,33 @@ nodestatePrintNodeState(CurrentNodeStateArray *nodesArray,
 	char hostport[BUFSIZE] = { 0 };
 	char composedId[BUFSIZE] = { 0 };
 
-	sformat(hostport, sizeof(hostport), "%s:%d",
-			nodeState->node.host,
-			nodeState->node.port);
-
-	sformat(composedId, sizeof(hostport), "%d/%d",
-			nodeState->groupId,
-			nodeState->node.nodeId);
+	(void) nodestatePrepareNode(&(nodeState->node),
+								nodeState->groupId,
+								hostport,
+								composedId);
 
 	fformat(stdout, "%*s | %*s | %*s | %17s | %17s | %17s | %6s\n",
-			nodesArray->maxNameSize, nodeState->node.name,
-			nodesArray->maxHostSize, hostport,
-			nodesArray->maxNodeSize, composedId,
+			nodesArray->headers.maxNameSize, nodeState->node.name,
+			nodesArray->headers.maxNodeSize, composedId,
+			nodesArray->headers.maxHostSize, hostport,
 			NodeStateToString(nodeState->reportedState),
 			NodeStateToString(nodeState->goalState),
 			nodeState->node.lsn,
 			nodeState->health == 1 ? "✓" : "✗");
+}
+
+
+/*
+ * nodestatePrepareNode prepares the "host:port" and the "Node" computed
+ * columns used to display a node. The hostport and composedId parameters must
+ * be pre-allocated string buffers.
+ */
+void
+nodestatePrepareNode(NodeAddress *node,
+					 int groupId, char *hostport, char *composedId)
+{
+	sformat(hostport, BUFSIZE, "%s:%d", node->host, node->port);
+	sformat(composedId, BUFSIZE, "%d/%d", groupId, node->nodeId);
 }
 
 

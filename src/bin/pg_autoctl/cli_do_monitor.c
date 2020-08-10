@@ -607,8 +607,9 @@ cli_do_monitor_parse_notification(int argc, char **argv)
 			 NodeStateToString(nodeState.reportedState),
 			 NodeStateToString(nodeState.goalState));
 
+	json_object_set_string(root, "name", nodeState.node.name);
 	json_object_set_string(root, "hostname", nodeState.node.host);
-	json_object_set_number(root, "nodeport", (double) nodeState.node.port);
+	json_object_set_number(root, "port", (double) nodeState.node.port);
 	json_object_set_string(root, "formationid", nodeState.formation);
 	json_object_set_string(root, "reportedState",
 						   NodeStateToString(nodeState.reportedState));

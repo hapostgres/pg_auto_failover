@@ -2959,13 +2959,15 @@ monitor_wait_until_some_node_reported_state(Monitor *monitor,
 											NodeState targetState)
 {
 	PGconn *connection = monitor->pgsql.connection;
+
 	NodeAddressArray nodesArray = { 0 };
+	NodeAddressHeaders headers = { 0 };
+
 	bool failoverIsDone = false;
 
 	uint64_t start = time(NULL);
 
-	int maxHostNameSize = 5;    /* strlen("Name") + 1, the header */
-	char nameSeparatorHeader[BUFSIZE] = { 0 };
+	bool firstLoop = true;
 
 	if (connection == NULL)
 	{
@@ -2985,19 +2987,30 @@ monitor_wait_until_some_node_reported_state(Monitor *monitor,
 	{
 		/* ignore the error, use an educated guess for the max size */
 		log_warn("Failed to get_nodes() on the monitor");
-		maxHostNameSize = 25;
+
+		headers.maxNameSize = 25;
+		headers.maxHostSize = 25;
+		headers.maxNodeSize = 5;
+
+		(void) prepareHeaderSeparators(&headers);
 	}
 
-	maxHostNameSize = MaxHostNameSizeInNodesArray(&nodesArray);
-	(void) prepareHostNameSeparator(nameSeparatorHeader, maxHostNameSize);
+	(void) nodeAddressArrayPrepareHeaders(&headers, &nodesArray, groupId);
 
-	fformat(stdout, "%8s | %3s | %*s | %6s | %19s | %19s\n",
-			"Time", "ID", maxHostNameSize, "Host", "Port",
-			"Current State", "Assigned State");
+	fformat(stdout, "%8s | %*s | %*s | %*s | %19s | %19s\n",
+			"Time",
+			headers.maxNameSize, "Name",
+			headers.maxNodeSize, "Node",
+			headers.maxHostSize, "Host:Port",
+			"Current State",
+			"Assigned State");
 
-	fformat(stdout, "%8s-+-%3s-+-%*s-+-%6s-+-%19s-+-%19s\n",
-			"--------", "---", maxHostNameSize, nameSeparatorHeader,
-			"------", "-------------------", "-------------------");
+	fformat(stdout, "%8s-+-%*s-+-%*s-+-%*s-+-%19s-+-%19s\n",
+			"--------",
+			headers.maxNameSize, headers.nameSeparatorHeader,
+			headers.maxNodeSize, headers.nodeSeparatorHeader,
+			headers.maxHostSize, headers.hostSeparatorHeader,
+			"-------------------", "-------------------");
 
 	while (!failoverIsDone)
 	{
@@ -3045,6 +3058,9 @@ monitor_wait_until_some_node_reported_state(Monitor *monitor,
 			uint64_t now = time(NULL);
 			char timestring[MAXCTIMESIZE];
 
+			char hostport[BUFSIZE] = { 0 };
+			char composedId[BUFSIZE] = { 0 };
+
 			if ((now - start) > PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT)
 			{
 				/* errors are handled in the main loop */
@@ -3080,16 +3096,22 @@ monitor_wait_until_some_node_reported_state(Monitor *monitor,
 			/* "Wed Jun 30 21:49:08 1993" -> "21:49:08" */
 			timestring[11 + 8] = '\0';
 
-			fformat(stdout, "%8s | %3d | %*s | %6d | %19s | %19s\n",
+			(void) nodestatePrepareNode(&(nodeState.node),
+										groupId,
+										hostport,
+										composedId);
+
+			fformat(stdout, "%8s | %*s | %*s | %*s | %19s | %19s\n",
 					timestring + 11,
-					nodeState.node.nodeId, maxHostNameSize,
-					nodeState.node.host,
-					nodeState.node.port,
+					headers.maxNameSize, nodeState.node.name,
+					headers.maxNodeSize, composedId,
+					headers.maxHostSize, hostport,
 					NodeStateToString(nodeState.reportedState),
 					NodeStateToString(nodeState.goalState));
 
 			if (nodeState.goalState == targetState &&
-				nodeState.reportedState == targetState)
+				nodeState.reportedState == targetState &&
+				!firstLoop)
 			{
 				failoverIsDone = true;
 				break;
@@ -3098,6 +3120,11 @@ monitor_wait_until_some_node_reported_state(Monitor *monitor,
 			/* prepare next iteration */
 			PQfreemem(notify);
 			PQconsumeInput(connection);
+		}
+
+		if (firstLoop)
+		{
+			firstLoop = false;
 		}
 	}
 

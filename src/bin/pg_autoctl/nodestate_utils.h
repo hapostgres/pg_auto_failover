@@ -34,11 +34,12 @@ typedef struct CurrentNodeState
 } CurrentNodeState;
 
 
-typedef struct CurrentNodeStateArray
+/*
+ * CurrentNodeStateHeaders caches the information we need to print a nice user
+ * formatted table from an array of NodeAddress.
+ */
+typedef struct NodeAddressHeaders
 {
-	int count;
-	CurrentNodeState nodes[NODE_ARRAY_MAX_COUNT];
-
 	int maxNameSize;
 	int maxHostSize;
 	int maxNodeSize;
@@ -46,13 +47,30 @@ typedef struct CurrentNodeStateArray
 	char nameSeparatorHeader[BUFSIZE];
 	char hostSeparatorHeader[BUFSIZE];
 	char nodeSeparatorHeader[BUFSIZE];
+} NodeAddressHeaders;
+
+
+typedef struct CurrentNodeStateArray
+{
+	int count;
+	CurrentNodeState nodes[NODE_ARRAY_MAX_COUNT];
+	NodeAddressHeaders headers;
 } CurrentNodeStateArray;
 
 
 void nodestatePrepareHeaders(CurrentNodeStateArray *nodesArray);
+void nodeAddressArrayPrepareHeaders(NodeAddressHeaders *headers,
+									NodeAddressArray *nodesArray, int groupId);
+void nodestateAdjustHeaders(NodeAddressHeaders *headers,
+							NodeAddress *node, int groupId);
+void prepareHeaderSeparators(NodeAddressHeaders *headers);
+
 void nodestatePrintHeader(CurrentNodeStateArray *nodesArray);
 void nodestatePrintNodeState(CurrentNodeStateArray *nodesArray,
 							 CurrentNodeState *nodeState);
+
+void nodestatePrepareNode(NodeAddress *node,
+						  int groupId, char *hostport, char *composedId);
 void prepareHostNameSeparator(char nameSeparatorHeader[], int size);
 
 #endif /* NODESTATE_H */

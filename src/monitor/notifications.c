@@ -86,7 +86,7 @@ NotifyStateChange(AutoFailoverNode *node, char *description)
 	appendStringInfo(payload, "\"nodeId\": %d, ", node->nodeId);
 	appendStringInfo(payload, "\"name\": \"%s\", ", node->nodeName);
 	appendStringInfo(payload, "\"host\": \"%s\", ", node->nodeHost);
-	appendStringInfo(payload, "\"port\": \"%d\", ", node->nodePort);
+	appendStringInfo(payload, "\"port\": %d, ", node->nodePort);
 
 	appendStringInfo(payload, "\"reportedState\": \"%s\", ",
 					 ReplicationStateGetName(node->reportedState));
