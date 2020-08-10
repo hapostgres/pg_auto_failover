@@ -1840,7 +1840,7 @@ monitor_print_last_events(Monitor *monitor, char *formation, int group, int coun
 		case -1:
 		{
 			sql =
-				"SELECT eventTime, formationid, nodeid, groupid, "
+				"SELECT eventTime, nodeid, groupid, "
 				"       reportedstate, goalState, description "
 				"  FROM pgautofailover.last_events($1, count => $2)";
 
@@ -1858,7 +1858,7 @@ monitor_print_last_events(Monitor *monitor, char *formation, int group, int coun
 		default:
 		{
 			sql =
-				"SELECT eventTime, formationid, nodeid, groupid, "
+				"SELECT eventTime, nodeid, groupid, "
 				"       reportedstate, goalState, description "
 				"  FROM pgautofailover.last_events($1,$2,$3)";
 
@@ -1996,37 +1996,36 @@ printLastEvents(void *ctx, PGresult *result)
 
 	log_trace("printLastEvents: %d tuples", nTuples);
 
-	if (PQnfields(result) != 7)
+	if (PQnfields(result) != 6)
 	{
-		log_error("Query returned %d columns, expected 7", PQnfields(result));
+		log_error("Query returned %d columns, expected 6", PQnfields(result));
 		context->parsedOK = false;
 		return;
 	}
 
-	fformat(stdout, "%30s | %10s | %6s | %19s | %19s | %s\n",
-			"Event Time", "Formation", "Node",
+	fformat(stdout, "%30s | %6s | %19s | %19s | %s\n",
+			"Event Time", "Node",
 			"Current State", "Assigned State", "Comment");
-	fformat(stdout, "%30s-+-%10s-+-%6s-+-%19s-+-%19s-+-%10s\n",
-			"------------------------------", "----------",
+	fformat(stdout, "%30s-+-%6s-+-%19s-+-%19s-+-%10s\n",
+			"------------------------------",
 			"------", "-------------------",
 			"-------------------", "----------");
 
 	for (currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
 	{
 		char *eventTime = PQgetvalue(result, currentTupleIndex, 0);
-		char *formation = PQgetvalue(result, currentTupleIndex, 1);
-		char *nodeId = PQgetvalue(result, currentTupleIndex, 2);
-		char *groupId = PQgetvalue(result, currentTupleIndex, 3);
-		char *currentState = PQgetvalue(result, currentTupleIndex, 4);
-		char *goalState = PQgetvalue(result, currentTupleIndex, 5);
-		char *description = PQgetvalue(result, currentTupleIndex, 6);
+		char *nodeId = PQgetvalue(result, currentTupleIndex, 1);
+		char *groupId = PQgetvalue(result, currentTupleIndex, 2);
+		char *currentState = PQgetvalue(result, currentTupleIndex, 3);
+		char *goalState = PQgetvalue(result, currentTupleIndex, 4);
+		char *description = PQgetvalue(result, currentTupleIndex, 5);
 		char node[BUFSIZE];
 
 		/* for our grid alignment output it's best to have a single col here */
 		sformat(node, BUFSIZE, "%s/%s", groupId, nodeId);
 
-		fformat(stdout, "%30s | %10s | %6s | %19s | %19s | %s\n",
-				eventTime, formation, node,
+		fformat(stdout, "%30s | %6s | %19s | %19s | %s\n",
+				eventTime, node,
 				currentState, goalState, description);
 	}
 	fformat(stdout, "\n");
