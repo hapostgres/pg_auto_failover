@@ -246,6 +246,7 @@ void pgsql_set_retry_policy(PGSQL *pgsql,
 void pgsql_set_main_loop_retry_policy(PGSQL *pgsql);
 void pgsql_set_init_retry_policy(PGSQL *pgsql);
 void pgsql_set_interactive_retry_policy(PGSQL *pgsql);
+int pgsql_compute_connection_retry_sleep_time(ConnectionRetryPolicy *retryPolicy);
 void pgsql_finish(PGSQL *pgsql);
 void parseSingleValueResult(void *ctx, PGresult *result);
 void fetchedRows(void *ctx, PGresult *result);

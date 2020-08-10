@@ -27,7 +27,6 @@
 #define ERRCODE_DUPLICATE_DATABASE "42P04"
 
 static char * connectionTypeToString(ConnectionType connectionType);
-static int pgsql_compute_connection_retry_sleep_time(PGSQL *pgsql);
 static void log_connection_error(PGconn *connection, int logLevel);
 static void pgAutoCtlDefaultNoticeProcessor(void *arg, const char *message);
 static void pgAutoCtlDebugNoticeProcessor(void *arg, const char *message);
@@ -240,8 +239,8 @@ pgsql_set_interactive_retry_policy(PGSQL *pgsql)
  * pgsql_compute_connection_retry_sleep_time returns how much time to sleep
  * this time, in milliseconds.
  */
-static int
-pgsql_compute_connection_retry_sleep_time(PGSQL *pgsql)
+int
+pgsql_compute_connection_retry_sleep_time(ConnectionRetryPolicy *retryPolicy)
 {
 	/*
 	 * https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/
@@ -282,16 +281,15 @@ pgsql_compute_connection_retry_sleep_time(PGSQL *pgsql)
 	 * time spent, something we care to optimize for even when it means more
 	 * work on the monitor side.
 	 */
-	int previousSleepTime = pgsql->retryPolicy.sleepTime;
-	int sleepTime = random_between(pgsql->retryPolicy.baseSleepTime,
-								   previousSleepTime * 3);
+	int previousSleepTime = retryPolicy->sleepTime;
+	int sleepTime =
+		random_between(retryPolicy->baseSleepTime, previousSleepTime * 3);
 
-	pgsql->retryPolicy.sleepTime =
-		min(pgsql->retryPolicy.maxSleepTime, sleepTime);
+	retryPolicy->sleepTime = min(retryPolicy->maxSleepTime, sleepTime);
 
-	++(pgsql->retryPolicy.attempts);
+	++(retryPolicy->attempts);
 
-	return pgsql->retryPolicy.sleepTime;
+	return retryPolicy->sleepTime;
 }
 
 
@@ -527,7 +525,7 @@ pgsql_retry_open_connection(PGSQL *pgsql, uint64_t startTime)
 		 * Now compute how much time to wait for this round, and increment how
 		 * many times we tried to connect already.
 		 */
-		sleep = pgsql_compute_connection_retry_sleep_time(pgsql);
+		sleep = pgsql_compute_connection_retry_sleep_time(&(pgsql->retryPolicy));
 
 		/* we have milliseconds, pg_usleep() wants microseconds */
 		(void) pg_usleep(sleep * 1000);
