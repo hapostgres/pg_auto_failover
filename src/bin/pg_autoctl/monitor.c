@@ -24,6 +24,14 @@
 #include "string_utils.h"
 
 #define STR_ERRCODE_OBJECT_IN_USE "55006"
+#define STR_ERRCODE_EXCLUSION_VIOLATION "23P01"
+
+#define STR_ERRCODE_SERIALIZATION_FAILURE "40001"
+#define STR_ERRCODE_STATEMENT_COMPLETION_UNKNOWN "40003"
+#define STR_ERRCODE_DEADLOCK_DETECTED "40P01"
+
+#define STR_ERRCODE_CLASS_INSUFFICIENT_RESOURCES "53"
+#define STR_ERRCODE_CLASS_PROGRAM_LIMIT_EXCEEDED "54"
 
 typedef struct NodeAddressParseContext
 {
@@ -190,6 +198,43 @@ monitor_local_init(Monitor *monitor)
 	}
 
 	return true;
+}
+
+
+/*
+ * monitor_retryable_error returns true when we may retry our query. That's
+ * mostly useful to CLI entry points such as pg_autoctl enable|disable
+ * maintenance where it's better if we can retry in those rare cases.
+ */
+bool
+monitor_retryable_error(const char *sqlstate)
+{
+	if (strcmp(sqlstate, STR_ERRCODE_SERIALIZATION_FAILURE) == 0)
+	{
+		return true;
+	}
+
+	if (strcmp(sqlstate, STR_ERRCODE_STATEMENT_COMPLETION_UNKNOWN) == 0)
+	{
+		return true;
+	}
+
+	if (strcmp(sqlstate, STR_ERRCODE_DEADLOCK_DETECTED) == 0)
+	{
+		return true;
+	}
+
+	if (strncmp(sqlstate, STR_ERRCODE_CLASS_INSUFFICIENT_RESOURCES, 2) == 0)
+	{
+		return true;
+	}
+
+	if (strncmp(sqlstate, STR_ERRCODE_CLASS_PROGRAM_LIMIT_EXCEEDED, 2) == 0)
+	{
+		return true;
+	}
+
+	return false;
 }
 
 
@@ -698,7 +743,8 @@ monitor_register_node(Monitor *monitor, char *formation,
 										 kind, candidatePriority, quorum,
 										 assignedState);
 		}
-		else if (strcmp(parseContext.sqlstate, "23P01") == 0)
+		else if (strcmp(parseContext.sqlstate,
+						STR_ERRCODE_EXCLUSION_VIOLATION) == 0)
 		{
 			/* *INDENT-OFF* */
 			log_error("Failed to register node %s:%d in "
@@ -2977,8 +3023,19 @@ monitor_start_maintenance(Monitor *monitor, int nodeId)
 								   paramCount, paramTypes, paramValues,
 								   &context, &parseSingleValueResult))
 	{
+		if (monitor_retryable_error(context.sqlstate))
+		{
+			log_warn("Failed to start_maintenance of node %d on the monitor, "
+					 "retrying in %ds.",
+					 nodeId, PG_AUTOCTL_KEEPER_SLEEP_TIME);
+
+			sleep(PG_AUTOCTL_KEEPER_SLEEP_TIME);
+			return monitor_start_maintenance(monitor, nodeId);
+		}
+
 		log_error("Failed to start_maintenance of node %d from the monitor",
 				  nodeId);
+
 		return false;
 	}
 
@@ -3014,6 +3071,16 @@ monitor_stop_maintenance(Monitor *monitor, int nodeId)
 								   paramCount, paramTypes, paramValues,
 								   &context, &parseSingleValueResult))
 	{
+		if (monitor_retryable_error(context.sqlstate))
+		{
+			log_warn("Failed to start_maintenance of node %d on the monitor, "
+					 "retrying in %ds.",
+					 nodeId, PG_AUTOCTL_KEEPER_SLEEP_TIME);
+
+			sleep(PG_AUTOCTL_KEEPER_SLEEP_TIME);
+			return monitor_start_maintenance(monitor, nodeId);
+		}
+
 		log_error("Failed to stop_maintenance of node %d from the monitor",
 				  nodeId);
 		return false;

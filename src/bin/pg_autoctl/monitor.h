@@ -54,6 +54,8 @@ bool monitor_init(Monitor *monitor, char *url);
 bool monitor_local_init(Monitor *monitor);
 void monitor_finish(Monitor *monitor);
 
+bool monitor_retryable_error(const char *sqlstate);
+
 void printNodeHeader(int maxHostNameSize);
 void printNodeEntry(NodeAddress *node);
 
