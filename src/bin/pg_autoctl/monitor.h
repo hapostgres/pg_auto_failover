@@ -93,6 +93,7 @@ bool monitor_register_node(Monitor *monitor,
 						   PgInstanceKind kind,
 						   int candidatePriority,
 						   bool quorum,
+						   ConnectionRetryPolicy *retryPolicy,
 						   MonitorAssignedState *assignedState);
 bool monitor_node_active(Monitor *monitor,
 						 char *formation, int nodeId,

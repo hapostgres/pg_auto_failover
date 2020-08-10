@@ -1223,6 +1223,13 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 	MonitorAssignedState assignedState = { 0 };
 	char expectedSlotName[BUFSIZE] = { 0 };
 
+	ConnectionRetryPolicy retryPolicy = {
+		POSTGRES_PING_RETRY_TIMEOUT,
+		-1,                     /* unbounded number of attempts */
+		5 * 1000,               /* sleep up to 5s between attempts */
+		1 * 1000                /* first retry happens after 1 second */
+	};
+
 	/*
 	 * First try to create our state file. The keeper_state_create_file function
 	 * may fail if we have no permission to write to the state file directory
@@ -1269,6 +1276,11 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 		return false;
 	}
 
+	/*
+	 * We implement a specific retry policy for cases where we have a transient
+	 * error on the monitor, such as OBJECT_IN_USE which indicates that another
+	 * standby is concurfrently being added to the same group.
+	 */
 	if (!monitor_register_node(monitor,
 							   config->formation,
 							   config->name,
@@ -1281,6 +1293,7 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 							   config->pgSetup.pgKind,
 							   config->pgSetup.settings.candidatePriority,
 							   config->pgSetup.settings.replicationQuorum,
+							   &retryPolicy,
 							   &assignedState))
 	{
 		/* errors have already been logged, remove state file */

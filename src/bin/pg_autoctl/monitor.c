@@ -695,6 +695,7 @@ monitor_register_node(Monitor *monitor, char *formation,
 					  uint64_t system_identifier,
 					  char *dbname, int desiredGroupId, NodeState initialState,
 					  PgInstanceKind kind, int candidatePriority, bool quorum,
+					  ConnectionRetryPolicy *retryPolicy,
 					  MonitorAssignedState *assignedState)
 {
 	PGSQL *pgsql = &monitor->pgsql;
@@ -729,18 +730,23 @@ monitor_register_node(Monitor *monitor, char *formation,
 	{
 		if (strcmp(parseContext.sqlstate, STR_ERRCODE_OBJECT_IN_USE) == 0)
 		{
+			int sleep = pgsql_compute_connection_retry_sleep_time(retryPolicy);
+
 			log_warn("Failed to register node %s:%d in group %d of "
 					 "formation \"%s\" with initial state \"%s\" "
 					 "because the monitor is already registering another "
-					 "standby, retrying in %ds",
+					 "standby, retrying in %d ms",
 					 host, port, desiredGroupId, formation, nodeStateString,
-					 PG_AUTOCTL_KEEPER_SLEEP_TIME);
+					 sleep);
 
-			sleep(PG_AUTOCTL_KEEPER_SLEEP_TIME);
+			/* we have milliseconds, pg_usleep() wants microseconds */
+			(void) pg_usleep(sleep * 1000);
+
 			return monitor_register_node(monitor, formation, name, host, port,
 										 system_identifier,
 										 dbname, desiredGroupId, initialState,
 										 kind, candidatePriority, quorum,
+										 retryPolicy,
 										 assignedState);
 		}
 		else if (strcmp(parseContext.sqlstate,
