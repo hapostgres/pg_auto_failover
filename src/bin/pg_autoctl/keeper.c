@@ -475,6 +475,7 @@ keeper_update_pg_state(Keeper *keeper)
 			return false;
 		}
 
+		/* update the state from the metadata we just obtained */
 		keeperState->pg_control_version = pgSetup->control.pg_control_version;
 		keeperState->catalog_version_no = pgSetup->control.catalog_version_no;
 		keeperState->system_identifier = pgSetup->control.system_identifier;
@@ -483,6 +484,25 @@ keeper_update_pg_state(Keeper *keeper)
 	{
 		/* Postgres is not running. */
 		postgres->pgIsRunning = false;
+
+		/* keep the current values we have for the Postgres characteristics */
+		if (pgSetup->control.pg_control_version != 0)
+		{
+			pgSetup->control.pg_control_version = keeperState->pg_control_version;
+			pgSetup->control.catalog_version_no = keeperState->catalog_version_no;
+			pgSetup->control.system_identifier = keeperState->system_identifier;
+		}
+		else
+		{
+			/* Postgres is not running and we have yet to call pg_controldata */
+			const bool missingPgdataIsOk = false;
+
+			if (!pg_controldata(pgSetup, missingPgdataIsOk))
+			{
+				/* errors have already been logged */
+				return false;
+			}
+		}
 	}
 
 	/*
