@@ -3118,14 +3118,14 @@ monitor_wait_until_some_node_reported_state(Monitor *monitor,
 				break;
 			}
 
+			if (firstLoop)
+			{
+				firstLoop = false;
+			}
+
 			/* prepare next iteration */
 			PQfreemem(notify);
 			PQconsumeInput(connection);
-		}
-
-		if (firstLoop)
-		{
-			firstLoop = false;
 		}
 	}
 
