@@ -29,6 +29,7 @@ extern CommandLine do_show_commands;
 /* src/bin/pg_autoctl/cli_do_root.c */
 extern CommandLine do_primary_adduser;
 extern CommandLine *do_primary_adduser_subcommands[];
+extern CommandLine do_primary_adduser_monitor;
 extern CommandLine do_primary_adduser_replica;
 
 extern CommandLine do_primary_syncrep_;
@@ -77,6 +78,7 @@ void keeper_cli_pgsetup_startup_logs(int argc, char **argv);
 void keeper_cli_pgsetup_tune(int argc, char **argv);
 
 void keeper_cli_add_default_settings(int argc, char **argv);
+void keeper_cli_create_monitor_user(int argc, char **argv);
 void keeper_cli_create_replication_user(int argc, char **argv);
 void keeper_cli_add_standby_to_hba(int argc, char **argv);
 void keeper_cli_init_standby(int argc, char **argv);

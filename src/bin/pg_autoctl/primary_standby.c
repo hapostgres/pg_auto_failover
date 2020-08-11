@@ -523,6 +523,61 @@ postgres_add_default_settings(LocalPostgresServer *postgres)
 
 
 /*
+ * primary_create_user_with_hba creates a user and updates pg_hba.conf
+ * to allow the user to connect from the given hostname.
+ */
+bool
+primary_create_user_with_hba(LocalPostgresServer *postgres, char *userName,
+							 char *password, char *hostname, char *authMethod)
+{
+	PGSQL *pgsql = &(postgres->sqlClient);
+	bool login = true;
+	bool superuser = false;
+	bool replication = false;
+	char hbaFilePath[MAXPGPATH];
+
+	log_trace("primary_create_user_with_hba");
+
+	if (!pgsql_create_user(pgsql, userName, password,
+						   login, superuser, replication))
+	{
+		log_error("Failed to create user \"%s\" on local postgres server",
+				  userName);
+		return false;
+	}
+
+	if (!pgsql_get_hba_file_path(pgsql, hbaFilePath, MAXPGPATH))
+	{
+		log_error("Failed to set the pg_hba rule for user \"%s\": couldn't get "
+				  "hba_file from local postgres server", userName);
+		return false;
+	}
+
+	if (!pghba_ensure_host_rule_exists(hbaFilePath,
+									   postgres->postgresSetup.ssl.active,
+									   HBA_DATABASE_ALL,
+									   NULL,
+									   userName,
+									   hostname,
+									   authMethod))
+	{
+		log_error("Failed to set the pg_hba rule for user \"%s\"", userName);
+		return false;
+	}
+
+	if (!pgsql_reload_conf(pgsql))
+	{
+		log_error("Failed to reload pg_hba settings after updating pg_hba.conf");
+		return false;
+	}
+
+	pgsql_finish(pgsql);
+
+	return true;
+}
+
+
+/*
  * primary_create_replication_user creates a user that allows the secondary
  * to connect for replication.
  */

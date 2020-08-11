@@ -146,6 +146,59 @@ keeper_cli_add_default_settings(int argc, char **argv)
 
 
 /*
+ * keeper_create_monitor_user implements the CLI to add a user for the
+ * pg_auto_failover monitor.
+ */
+void
+keeper_cli_create_monitor_user(int argc, char **argv)
+{
+	KeeperConfig config = keeperOptions;
+	LocalPostgresServer postgres = { 0 };
+	bool missingPgdataOk = false;
+	bool postgresNotRunningOk = false;
+	int urlLength = 0;
+	char monitorHostname[_POSIX_HOST_NAME_MAX];
+	int monitorPort = 0;
+
+	/*
+	 * Monitor does not use a password, we expect it to login and immediately
+	 * disconnect.
+	 */
+	char *password = NULL;
+
+	keeper_config_init(&config, missingPgdataOk, postgresNotRunningOk);
+	local_postgres_init(&postgres, &(config.pgSetup));
+
+	urlLength = strlcpy(config.monitor_pguri, argv[0], MAXCONNINFO);
+	if (urlLength >= MAXCONNINFO)
+	{
+		log_fatal("Monitor URL \"%s\" given in command line is %d characters, "
+				  "the maximum supported by pg_autoctl is %d",
+				  argv[0], urlLength, MAXCONNINFO - 1);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (!hostname_from_uri(config.monitor_pguri,
+						   monitorHostname, _POSIX_HOST_NAME_MAX,
+						   &monitorPort))
+	{
+		log_fatal("Failed to determine monitor hostname");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (!primary_create_user_with_hba(&postgres,
+									  PG_AUTOCTL_HEALTH_USERNAME, password,
+									  monitorHostname,
+									  pg_setup_get_auth_method(&(config.pgSetup))))
+	{
+		log_fatal("Failed to create the database user that the pg_auto_failover "
+				  " monitor uses for health checks, see above for details");
+		exit(EXIT_CODE_PGSQL);
+	}
+}
+
+
+/*
  * keeper_create_replication_user implements the CLI to add a user for the
  * secondary.
  */
