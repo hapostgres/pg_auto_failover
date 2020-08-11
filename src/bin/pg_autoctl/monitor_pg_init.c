@@ -163,8 +163,8 @@ monitor_install(const char *hostname,
 
 	if (!pgsql_create_user(&postgres.sqlClient, PG_AUTOCTL_MONITOR_DBOWNER,
 
-	                       /* password, login, superuser, replication */
-						   NULL, true, false, false))
+	                       /* password, login, superuser, replication, connlimit */
+						   NULL, true, false, false, -1))
 	{
 		log_error("Failed to create user \"%s\" on local postgres server",
 				  PG_AUTOCTL_MONITOR_DBOWNER);

@@ -269,7 +269,8 @@ bool pgsql_get_hba_file_path(PGSQL *pgsql, char *hbaFilePath, int maxPathLength)
 bool pgsql_create_database(PGSQL *pgsql, const char *dbname, const char *owner);
 bool pgsql_create_extension(PGSQL *pgsql, const char *name);
 bool pgsql_create_user(PGSQL *pgsql, const char *userName, const char *password,
-					   bool login, bool superuser, bool replication);
+					   bool login, bool superuser, bool replication,
+					   int connlimit);
 bool pgsql_has_replica(PGSQL *pgsql, char *userName, bool *hasReplica);
 bool hostname_from_uri(const char *pguri,
 					   char *hostname, int maxHostLength, int *port);

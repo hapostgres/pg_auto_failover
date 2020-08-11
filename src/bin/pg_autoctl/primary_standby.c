@@ -528,7 +528,8 @@ postgres_add_default_settings(LocalPostgresServer *postgres)
  */
 bool
 primary_create_user_with_hba(LocalPostgresServer *postgres, char *userName,
-							 char *password, char *hostname, char *authMethod)
+							 char *password, char *hostname, char *authMethod,
+							 int connlimit)
 {
 	PGSQL *pgsql = &(postgres->sqlClient);
 	bool login = true;
@@ -539,7 +540,7 @@ primary_create_user_with_hba(LocalPostgresServer *postgres, char *userName,
 	log_trace("primary_create_user_with_hba");
 
 	if (!pgsql_create_user(pgsql, userName, password,
-						   login, superuser, replication))
+						   login, superuser, replication, connlimit))
 	{
 		log_error("Failed to create user \"%s\" on local postgres server",
 				  userName);
@@ -591,11 +592,12 @@ primary_create_replication_user(LocalPostgresServer *postgres,
 	bool login = true;
 	bool superuser = true;
 	bool replication = true;
+	int connlimit = -1;
 
 	log_trace("primary_create_replication_user");
 
 	result = pgsql_create_user(pgsql, replicationUsername, replicationPassword,
-							   login, superuser, replication);
+							   login, superuser, replication, connlimit);
 
 	pgsql_finish(pgsql);
 

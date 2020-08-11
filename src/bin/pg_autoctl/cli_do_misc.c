@@ -159,12 +159,7 @@ keeper_cli_create_monitor_user(int argc, char **argv)
 	int urlLength = 0;
 	char monitorHostname[_POSIX_HOST_NAME_MAX];
 	int monitorPort = 0;
-
-	/*
-	 * Monitor does not use a password, we expect it to login and immediately
-	 * disconnect.
-	 */
-	char *password = NULL;
+	int connlimit = 1;
 
 	keeper_config_init(&config, missingPgdataOk, postgresNotRunningOk);
 	local_postgres_init(&postgres, &(config.pgSetup));
@@ -187,9 +182,11 @@ keeper_cli_create_monitor_user(int argc, char **argv)
 	}
 
 	if (!primary_create_user_with_hba(&postgres,
-									  PG_AUTOCTL_HEALTH_USERNAME, password,
+									  PG_AUTOCTL_HEALTH_USERNAME,
+									  PG_AUTOCTL_HEALTH_PASSWORD,
 									  monitorHostname,
-									  pg_setup_get_auth_method(&(config.pgSetup))))
+									  "trust",
+									  connlimit))
 	{
 		log_fatal("Failed to create the database user that the pg_auto_failover "
 				  " monitor uses for health checks, see above for details");

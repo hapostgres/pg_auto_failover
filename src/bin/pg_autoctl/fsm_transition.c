@@ -241,8 +241,7 @@ fsm_init_primary(Keeper *keeper)
 	{
 		char monitorHostname[_POSIX_HOST_NAME_MAX];
 		int monitorPort = 0;
-		char *password = NULL;
-		char *authMethod = NULL;
+		int connlimit = 1;
 
 		if (!hostname_from_uri(config->monitor_pguri,
 							   monitorHostname, _POSIX_HOST_NAME_MAX,
@@ -254,15 +253,22 @@ fsm_init_primary(Keeper *keeper)
 			return false;
 		}
 
-		authMethod = pg_setup_get_auth_method(&(config->pgSetup));
-
 		/*
 		 * We need to add the monitor host:port in the HBA settings for the
 		 * node to enable the health checks.
+		 *
+		 * Node that we forcibly use the authentication method "trust" for the
+		 * pgautofailover_monitor user, which from the monitor also uses the
+		 * hard-coded password PG_AUTOCTL_HEALTH_PASSWORD. The idea is to avoid
+		 * leaking information from the passfile, environment variable, or
+		 * other places.
 		 */
 		if (!primary_create_user_with_hba(postgres,
-										  PG_AUTOCTL_HEALTH_USERNAME, password,
-										  monitorHostname, authMethod))
+										  PG_AUTOCTL_HEALTH_USERNAME,
+										  PG_AUTOCTL_HEALTH_PASSWORD,
+										  monitorHostname,
+										  "trust",
+										  connlimit))
 		{
 			log_error(
 				"Failed to initialise postgres as primary because "
