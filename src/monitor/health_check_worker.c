@@ -47,7 +47,7 @@
 
 #define CONN_INFO_TEMPLATE \
 	"host=%s port=%u user=pgautofailover_monitor " \
-	"password=user=pgautofailover_monitor dbname=postgres " \
+	"password=pgautofailover_monitor dbname=postgres " \
 	"connect_timeout=%u"
 #define MAX_CONN_INFO_SIZE 1024
 
