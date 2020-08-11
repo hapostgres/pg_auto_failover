@@ -27,7 +27,6 @@
  * effective_cache_size, autovacuum_max_workers.
  */
 GUC postgres_tuning[] = {
-	{ "track_io_timing", "on" },
 	{ "track_functions", "pl" },
 	{ "shared_buffers", "'128 MB'" },
 	{ "work_mem", "'4 MB'" },
