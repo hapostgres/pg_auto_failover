@@ -241,6 +241,8 @@ fsm_init_primary(Keeper *keeper)
 	{
 		char monitorHostname[_POSIX_HOST_NAME_MAX];
 		int monitorPort = 0;
+		int connlimit = 1;
+		char *authMethod = pg_setup_get_auth_method(pgSetup);
 
 		if (!hostname_from_uri(config->monitor_pguri,
 							   monitorHostname, _POSIX_HOST_NAME_MAX,
@@ -249,6 +251,39 @@ fsm_init_primary(Keeper *keeper)
 			/* developer error, this should never happen */
 			log_fatal("BUG: monitor_pguri should be validated before calling "
 					  "fsm_init_primary");
+			return false;
+		}
+
+		/*
+		 * We need to add the monitor host:port in the HBA settings for the
+		 * node to enable the health checks.
+		 *
+		 * Node that we forcibly use the authentication method "trust" for the
+		 * pgautofailover_monitor user, which from the monitor also uses the
+		 * hard-coded password PG_AUTOCTL_HEALTH_PASSWORD. The idea is to avoid
+		 * leaking information from the passfile, environment variable, or
+		 * other places.
+		 *
+		 * Still, when --skip-pg-hba option has been used, we skip creating the
+		 * HBA entirely and to do that we keep the "skip" authentication method
+		 * in use. Otherwise we override it to "trust".
+		 */
+		if (!SKIP_HBA(authMethod))
+		{
+			authMethod = "trust";
+		}
+
+		if (!primary_create_user_with_hba(postgres,
+										  PG_AUTOCTL_HEALTH_USERNAME,
+										  PG_AUTOCTL_HEALTH_PASSWORD,
+										  monitorHostname,
+										  authMethod,
+										  connlimit))
+		{
+			log_error(
+				"Failed to initialise postgres as primary because "
+				"creating the database user that the pg_auto_failover monitor "
+				"uses for health checks failed, see above for details");
 			return false;
 		}
 	}

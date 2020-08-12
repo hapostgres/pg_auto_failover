@@ -1762,7 +1762,7 @@ pgsql_create_extension(PGSQL *pgsql, const char *name)
  */
 bool
 pgsql_create_user(PGSQL *pgsql, const char *userName, const char *password,
-				  bool login, bool superuser, bool replication)
+				  bool login, bool superuser, bool replication, int connlimit)
 {
 	PGconn *connection = NULL;
 	PGresult *result = NULL;
@@ -1807,6 +1807,10 @@ pgsql_create_user(PGSQL *pgsql, const char *userName, const char *password,
 	if (replication)
 	{
 		appendPQExpBufferStr(query, " REPLICATION");
+	}
+	if (connlimit > -1)
+	{
+		appendPQExpBuffer(query, " CONNECTION LIMIT %d", connlimit);
 	}
 	if (password)
 	{

@@ -30,6 +30,14 @@
 #include "primary_standby.h"
 
 
+CommandLine do_primary_adduser_monitor =
+	make_command("monitor",
+				 "add a local user for queries from the monitor",
+				 "",
+				 KEEPER_CLI_WORKER_SETUP_OPTIONS,
+				 keeper_cli_keeper_setup_getopts,
+				 keeper_cli_create_monitor_user);
+
 CommandLine do_primary_adduser_replica =
 	make_command("replica",
 				 "add a local user with replication privileges",
@@ -39,6 +47,7 @@ CommandLine do_primary_adduser_replica =
 				 keeper_cli_create_replication_user);
 
 CommandLine *do_primary_adduser_subcommands[] = {
+	&do_primary_adduser_monitor,
 	&do_primary_adduser_replica,
 	NULL
 };

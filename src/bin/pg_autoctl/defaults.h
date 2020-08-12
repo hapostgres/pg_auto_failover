@@ -112,6 +112,7 @@
 
 /* pg_auto_failover monitor related constants */
 #define PG_AUTOCTL_HEALTH_USERNAME "pgautofailover_monitor"
+#define PG_AUTOCTL_HEALTH_PASSWORD "pgautofailover_monitor"
 #define PG_AUTOCTL_REPLICA_USERNAME "pgautofailover_replicator"
 
 #define PG_AUTOCTL_MONITOR_DBNAME "pg_auto_failover"
