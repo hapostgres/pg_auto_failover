@@ -1722,7 +1722,8 @@ pgsql_create_extension(PGSQL *pgsql, const char *name)
 	}
 
 	/* now build the SQL command */
-	sformat(command, BUFSIZE, "CREATE EXTENSION %s CASCADE", escapedIdentifier);
+	sformat(command, BUFSIZE, "CREATE EXTENSION IF NOT EXISTS %s CASCADE",
+			escapedIdentifier);
 	PQfreemem(escapedIdentifier);
 	log_debug("Running command on Postgres: %s;", command);
 
@@ -1737,19 +1738,12 @@ pgsql_create_extension(PGSQL *pgsql, const char *name)
 		 */
 		char *sqlstate = PQresultErrorField(result, PG_DIAG_SQLSTATE);
 
-		if (strcmp(sqlstate, ERRCODE_DUPLICATE_OBJECT) == 0)
-		{
-			log_info("The extension \"%s\" already exists, skipping.", name);
-		}
-		else
-		{
-			log_error("Failed to create extension \"%s\"[%s]: %s",
-					  name, sqlstate, PQerrorMessage(connection));
-			PQclear(result);
-			clear_results(connection);
-			pgsql_finish(pgsql);
-			return false;
-		}
+		log_error("Failed to create extension \"%s\"[%s]: %s",
+				  name, sqlstate, PQerrorMessage(connection));
+		PQclear(result);
+		clear_results(connection);
+		pgsql_finish(pgsql);
+		return false;
 	}
 
 	PQclear(result);
