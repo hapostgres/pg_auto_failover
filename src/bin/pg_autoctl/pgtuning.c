@@ -150,16 +150,19 @@ pgtuning_compute_max_workers(SystemInfo *sysInfo)
 static bool
 pgtuning_compute_mem_settings(SystemInfo *sysInfo, DynamicTuning *tuning)
 {
-	uint64_t oneGB = 2 << 30;
+	uint64_t oneGB = ((uint64_t) 1) << 30;
+	log_error("total ram %ld", sysInfo->totalram);
+	log_error("shared bufferes %ld", sysInfo->totalram / 4);
 
 	/*
 	 * <= 8 GB of RAM
 	 */
 	if (sysInfo->totalram <= (8 * oneGB))
 	{
+		log_error("less than 8 gigs");
 		tuning->shared_buffers = sysInfo->totalram / 4;
-		tuning->work_mem = 16 * 2 << 20;              /*  16 MB */
-		tuning->maintenance_work_mem = 256 * 2 << 20; /* 256 MB */
+		tuning->work_mem = 16 * 1 << 20;              /*  16 MB */
+		tuning->maintenance_work_mem = 256 * 1 << 20; /* 256 MB */
 	}
 
 	/*
@@ -168,8 +171,8 @@ pgtuning_compute_mem_settings(SystemInfo *sysInfo, DynamicTuning *tuning)
 	else if (sysInfo->totalram <= (64 * oneGB))
 	{
 		tuning->shared_buffers = sysInfo->totalram / 4;
-		tuning->work_mem = 24 * 2 << 20;              /*  24 MB */
-		tuning->maintenance_work_mem = 512 * 2 << 20; /* 512 MB */
+		tuning->work_mem = 24 * 1 << 20;              /*  24 MB */
+		tuning->maintenance_work_mem = 512 * 1 << 20; /* 512 MB */
 	}
 
 	/*
@@ -178,7 +181,7 @@ pgtuning_compute_mem_settings(SystemInfo *sysInfo, DynamicTuning *tuning)
 	else if (sysInfo->totalram <= (256 * oneGB))
 	{
 		tuning->shared_buffers = 16 * oneGB;        /* 16 GB */
-		tuning->work_mem = 32 * 2 << 20;              /* 32 MB */
+		tuning->work_mem = 32 * 1 << 20;              /* 32 MB */
 		tuning->maintenance_work_mem = oneGB;       /*  1 GB */
 	}
 
@@ -188,7 +191,7 @@ pgtuning_compute_mem_settings(SystemInfo *sysInfo, DynamicTuning *tuning)
 	else
 	{
 		tuning->shared_buffers = 32 * oneGB;        /* 32 GB */
-		tuning->work_mem = 64 * 2 << 20;              /* 64 MB */
+		tuning->work_mem = 64 * 1 << 20;              /* 64 MB */
 		tuning->maintenance_work_mem = 2 * oneGB;   /*  2 GB */
 	}
 
