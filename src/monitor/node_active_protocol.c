@@ -112,8 +112,8 @@ register_node(PG_FUNCTION_ARGS)
 	TypeFuncClass resultTypeClass = 0;
 	Datum resultDatum = 0;
 	HeapTuple resultTuple = NULL;
-	Datum values[5];
-	bool isNulls[5];
+	Datum values[6];
+	bool isNulls[6];
 
 	checkPgAutoFailoverVersion();
 
@@ -298,6 +298,7 @@ register_node(PG_FUNCTION_ARGS)
 		ReplicationStateGetEnum(pgAutoFailoverNode->goalState));
 	values[3] = Int32GetDatum(assignedNodeState->candidatePriority);
 	values[4] = BoolGetDatum(assignedNodeState->replicationQuorum);
+	values[5] = CStringGetTextDatum(pgAutoFailoverNode->nodeName);
 
 	resultTypeClass = get_call_result_type(fcinfo, NULL, &resultDescriptor);
 	if (resultTypeClass != TYPEFUNC_COMPOSITE)

@@ -216,7 +216,8 @@ CREATE FUNCTION pgautofailover.register_node
    OUT assigned_group_id    int,
    OUT assigned_group_state pgautofailover.replication_state,
    OUT assigned_candidate_priority 	int,
-   OUT assigned_replication_quorum  bool
+   OUT assigned_replication_quorum  bool,
+   OUT assigned_node_name   text
  )
 RETURNS record LANGUAGE C STRICT SECURITY DEFINER
 AS 'MODULE_PATHNAME', $$register_node$$;
