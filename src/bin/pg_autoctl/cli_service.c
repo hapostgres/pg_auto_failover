@@ -426,18 +426,22 @@ cli_service_status(int argc, char **argv)
 	{
 		log_debug("pg_autoctl pid file \"%s\" does not exists", pathnames->pid);
 
+		/*
+		 * pg_autoctl should be the parent process of Postgres. That said, when
+		 * in maintenance, operators could stop pg_autoctl and then start/stop
+		 * Postgres to make some configuration changes, and then use pg_autoctl
+		 * again.
+		 *
+		 * So check if Postgres is running, and complain about it when it's the
+		 * case and pg_autoctl is not running, as it will get in the way when
+		 * starting pg_autoctl again.
+		 */
 		if (pg_setup_is_running(pgSetup))
 		{
 			log_fatal("Postgres is running at \"%s\" with pid %d",
 					  pgSetup->pgdata, pgSetup->pidFile.pid);
 		}
 
-		/*
-		 * That's not supposed to happen, because pg_autoctl should be the
-		 * parent process of Postgres. That said, when in maintenance,
-		 * operators could stop pg_autoctl and then start/stop Postgres to make
-		 * some configuration changes, and then use pg_autoctl again.
-		 */
 		log_info("pg_autoctl is not running at \"%s\"", pgSetup->pgdata);
 		exit(PG_CTL_STATUS_NOT_RUNNING);
 	}
