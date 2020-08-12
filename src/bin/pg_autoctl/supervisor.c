@@ -226,8 +226,7 @@ supervisor_loop(Supervisor *supervisor)
 				}
 				else
 				{
-					log_fatal("Failed to call waitpid(): %m");
-					return false;
+					log_debug("Failed to call waitpid(): %m");
 				}
 			}
 
