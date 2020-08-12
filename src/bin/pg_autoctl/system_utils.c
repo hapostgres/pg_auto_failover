@@ -125,7 +125,7 @@ pretty_print_bytes(char *buffer, size_t size, uint64_t bytes)
 	uint sIndex = 0;
 	long double count = bytes;
 
-	while (count >= 1024 && sIndex < 7)
+	while (count >= 10240 && sIndex < 7)
 	{
 		sIndex++;
 		count /= 1024;
