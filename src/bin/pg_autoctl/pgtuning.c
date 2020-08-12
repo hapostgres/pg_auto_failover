@@ -157,7 +157,6 @@ pgtuning_compute_mem_settings(SystemInfo *sysInfo, DynamicTuning *tuning)
 	 */
 	if (sysInfo->totalram <= (8 * oneGB))
 	{
-		log_error("less than 8 gigs");
 		tuning->shared_buffers = sysInfo->totalram / 4;
 		tuning->work_mem = 16 * 1 << 20;              /*  16 MB */
 		tuning->maintenance_work_mem = 256 * 1 << 20; /* 256 MB */
