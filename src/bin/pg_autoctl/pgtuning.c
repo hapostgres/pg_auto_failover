@@ -151,8 +151,6 @@ static bool
 pgtuning_compute_mem_settings(SystemInfo *sysInfo, DynamicTuning *tuning)
 {
 	uint64_t oneGB = ((uint64_t) 1) << 30;
-	log_error("total ram %ld", sysInfo->totalram);
-	log_error("shared bufferes %ld", sysInfo->totalram / 4);
 
 	/*
 	 * <= 8 GB of RAM
@@ -215,7 +213,8 @@ pgtuning_log_settings(DynamicTuning *tuning, int logLevel)
 	char buf[BUFSIZE] = { 0 };
 
 	log_level(logLevel,
-			  "Setting autovacuum_max_workers to %d", tuning->autovacuum_max_workers);
+			  "Setting autovacuum_max_workers to %d",
+			  tuning->autovacuum_max_workers);
 
 	(void) pretty_print_bytes(buf, sizeof(buf), tuning->shared_buffers);
 	log_level(logLevel, "Setting shared_buffers to %s", buf);
