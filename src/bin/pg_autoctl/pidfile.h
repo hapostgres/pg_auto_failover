@@ -65,5 +65,6 @@ bool read_pidfile(const char *pidfile, pid_t *pid);
 bool remove_pidfile(const char *pidfile);
 void check_pidfile(const char *pidfile, pid_t start_pid);
 
+void pidfile_as_json(JSON_Value *js, const char *pidfile, bool includeStatus);
 
 #endif /* PIDFILE_H */

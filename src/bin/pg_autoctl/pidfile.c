@@ -17,6 +17,7 @@
 #include "postgres_fe.h"
 #include "pqexpbuffer.h"
 
+#include "cli_common.h"
 #include "cli_root.h"
 #include "defaults.h"
 #include "env_utils.h"
@@ -171,7 +172,6 @@ read_pidfile(const char *pidfile, pid_t *pid)
 	long fileSize = 0L;
 	char *fileContents = NULL;
 	char *fileLines[1];
-	bool error = false;
 	int pidnum = 0;
 
 	if (!file_exists(pidfile))
@@ -181,6 +181,9 @@ read_pidfile(const char *pidfile, pid_t *pid)
 
 	if (!read_file(pidfile, &fileContents, &fileSize))
 	{
+		log_debug("Failed to read the PID file \"%s\", removing it", pidfile);
+		(void) remove_pidfile(pidfile);
+
 		return false;
 	}
 
@@ -191,45 +194,41 @@ read_pidfile(const char *pidfile, pid_t *pid)
 
 	free(fileContents);
 
-	if (!error)
+	if (pid <= 0)
 	{
-		/* is it a stale file? */
-		if (kill(*pid, 0) == 0)
-		{
-			return true;
-		}
-		else
-		{
-			log_debug("Failed to signal pid %d: %m", *pid);
-			*pid = 0;
-
-			log_info("Found a stale pidfile at \"%s\"", pidfile);
-			log_warn("Removing the stale pid file \"%s\"", pidfile);
-
-			/*
-			 * We must return false here, after having determined that the
-			 * pidfile belongs to a process that doesn't exist anymore. So we
-			 * remove the pidfile and don't take the return value into account
-			 * at this point.
-			 */
-			(void) remove_pidfile(pidfile);
-
-			/* we might have to cleanup a stale SysV semaphore, too */
-			(void) semaphore_cleanup(pidfile);
-
-			return false;
-		}
-	}
-	else
-	{
-		log_debug("Failed to read the PID file \"%s\", removing it", pidfile);
+		log_debug("Read negative pid %d in file \"%s\", removing it",
+				  *pid, pidfile);
 		(void) remove_pidfile(pidfile);
 
 		return false;
 	}
 
-	/* no warning, it's cool that the file doesn't exists. */
-	return false;
+	/* is it a stale file? */
+	if (kill(*pid, 0) == 0)
+	{
+		return true;
+	}
+	else
+	{
+		log_debug("Failed to signal pid %d: %m", *pid);
+		*pid = 0;
+
+		log_info("Found a stale pidfile at \"%s\"", pidfile);
+		log_warn("Removing the stale pid file \"%s\"", pidfile);
+
+		/*
+		 * We must return false here, after having determined that the
+		 * pidfile belongs to a process that doesn't exist anymore. So we
+		 * remove the pidfile and don't take the return value into account
+		 * at this point.
+		 */
+		(void) remove_pidfile(pidfile);
+
+		/* we might have to cleanup a stale SysV semaphore, too */
+		(void) semaphore_cleanup(pidfile);
+
+		return false;
+	}
 }
 
 
@@ -339,4 +338,170 @@ read_service_pidfile_version_strings(const char *pidfile,
 	}
 
 	return false;
+}
+
+
+/*
+ * fprint_pidfile_as_json prints the content of the pidfile as JSON.
+ *
+ * When includeStatus is true, add a "status" entry for each PID (main service
+ * and sub-processes) with either "running" or "stale" as a value, depending on
+ * what a kill -0 reports.
+ */
+void
+pidfile_as_json(JSON_Value *js, const char *pidfile, bool includeStatus)
+{
+	JSON_Value *jsServices = json_value_init_array();
+	JSON_Array *jsServicesArray = json_value_get_array(jsServices);
+
+	JSON_Object *jsobj = json_value_get_object(js);
+
+	long fileSize = 0L;
+	char *fileContents = NULL;
+	char *fileLines[BUFSIZE] = { 0 };
+	int lineCount = 0;
+	int lineNumber;
+
+	if (!file_exists(pidfile))
+	{
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	if (!read_file(pidfile, &fileContents, &fileSize))
+	{
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	lineCount = splitLines(fileContents, fileLines, BUFSIZE);
+
+	for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
+	{
+		int pidLine = lineNumber + 1; /* zero-based, one-based */
+		char *separator = NULL;
+
+		/* main pid */
+		if (pidLine == PIDFILE_LINE_PID)
+		{
+			int pidnum = 0;
+			stringToInt(fileLines[lineNumber], &pidnum);
+			json_object_set_number(jsobj, "pid", (double) pidnum);
+
+			if (includeStatus)
+			{
+				if (kill(pidnum, 0) == 0)
+				{
+					json_object_set_string(jsobj, "status", "running");
+				}
+				else
+				{
+					json_object_set_string(jsobj, "status", "stale");
+				}
+			}
+			continue;
+		}
+
+		/* data directory */
+		if (pidLine == PIDFILE_LINE_DATA_DIR)
+		{
+			json_object_set_string(jsobj, "pgdata", fileLines[lineNumber]);
+		}
+
+		/* version string */
+		if (pidLine == PIDFILE_LINE_VERSION_STRING)
+		{
+			json_object_set_string(jsobj, "version", fileLines[lineNumber]);
+		}
+
+		/* extension version string */
+		if (pidLine == PIDFILE_LINE_EXTENSION_VERSION)
+		{
+			/* skip it, the supervisor does not connect to the monitor */
+			(void) 0;
+		}
+
+		/* semId */
+		if (pidLine == PIDFILE_LINE_SEM_ID)
+		{
+			int semId = 0;
+
+			if (stringToInt(fileLines[lineNumber], &semId))
+			{
+				json_object_set_number(jsobj, "semId", (double) semId);
+			}
+			else
+			{
+				log_error("Failed to parse semId \"%s\"", fileLines[lineNumber]);
+			}
+
+			continue;
+		}
+
+		if (pidLine >= PIDFILE_LINE_FIRST_SERVICE)
+		{
+			JSON_Value *jsService = json_value_init_object();
+			JSON_Object *jsServiceObj = json_value_get_object(jsService);
+
+			if ((separator = strchr(fileLines[lineNumber], ' ')) == NULL)
+			{
+				log_debug("Failed to find a space separator in line: \"%s\"",
+						  fileLines[lineNumber]);
+				continue;
+			}
+			else
+			{
+				int pidnum = 0;
+				char *serviceName = separator + 1;
+
+				char servicePidFile[BUFSIZE] = { 0 };
+
+				char versionString[BUFSIZE] = { 0 };
+				char extensionVersionString[BUFSIZE] = { 0 };
+
+				*separator = '\0';
+				stringToInt(fileLines[lineNumber], &pidnum);
+
+				json_object_set_string(jsServiceObj, "name", serviceName);
+				json_object_set_number(jsServiceObj, "pid", pidnum);
+
+				if (includeStatus)
+				{
+					if (kill(pidnum, 0) == 0)
+					{
+						json_object_set_string(jsServiceObj, "status", "running");
+					}
+					else
+					{
+						json_object_set_string(jsServiceObj, "status", "stale");
+					}
+				}
+
+				/* grab version number of the service by parsing its pidfile */
+				get_service_pidfile(pidfile, serviceName, servicePidFile);
+
+				if (!read_service_pidfile_version_strings(
+						servicePidFile,
+						versionString,
+						extensionVersionString))
+				{
+					/* warn about it and continue */
+					log_warn("Failed to read version string for "
+							 "service \"%s\" in pidfile \"%s\"",
+							 serviceName,
+							 servicePidFile);
+				}
+				else
+				{
+					json_object_set_string(jsServiceObj,
+										   "version", versionString);
+					json_object_set_string(jsServiceObj,
+										   "pgautofailover",
+										   extensionVersionString);
+				}
+			}
+
+			json_array_append_value(jsServicesArray, jsService);
+		}
+	}
+
+	json_object_set_value(jsobj, "services", jsServices);
 }

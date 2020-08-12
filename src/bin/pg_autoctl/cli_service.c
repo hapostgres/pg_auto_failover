@@ -424,24 +424,32 @@ cli_service_status(int argc, char **argv)
 
 	if (!file_exists(pathnames->pid))
 	{
-		log_info("pg_autoctl pid file \"%s\" does not exists", pathnames->pid);
+		log_debug("pg_autoctl pid file \"%s\" does not exists", pathnames->pid);
 
+		/*
+		 * pg_autoctl should be the parent process of Postgres. That said, when
+		 * in maintenance, operators could stop pg_autoctl and then start/stop
+		 * Postgres to make some configuration changes, and then use pg_autoctl
+		 * again.
+		 *
+		 * So check if Postgres is running, and complain about it when it's the
+		 * case and pg_autoctl is not running, as it will get in the way when
+		 * starting pg_autoctl again.
+		 */
 		if (pg_setup_is_running(pgSetup))
 		{
 			log_fatal("Postgres is running at \"%s\" with pid %d",
 					  pgSetup->pgdata, pgSetup->pidFile.pid);
-			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
+
+		log_info("pg_autoctl is not running at \"%s\"", pgSetup->pgdata);
+		exit(PG_CTL_STATUS_NOT_RUNNING);
 	}
 
 	/* ok now we have a pidfile for pg_autoctl */
-	if (read_pidfile(pathnames->pid, &pid))
+	if (!read_pidfile(pathnames->pid, &pid))
 	{
-		if (kill(pid, 0) != 0)
-		{
-			log_error("pg_autoctl pid file contains stale pid %d", pid);
-			exit(EXIT_CODE_INTERNAL_ERROR);
-		}
+		exit(PG_CTL_STATUS_NOT_RUNNING);
 	}
 
 	/* and now we know pg_autoctl is running */
@@ -461,15 +469,14 @@ cli_service_status(int argc, char **argv)
 	if (outputJSON)
 	{
 		JSON_Value *js = json_value_init_object();
-		JSON_Value *jsPostgres = json_value_init_object();
-
 		JSON_Value *jsPGAutoCtl = json_value_init_object();
-		JSON_Object *jsobj = json_value_get_object(jsPGAutoCtl);
+		JSON_Value *jsPostgres = json_value_init_object();
 
 		JSON_Object *root = json_value_get_object(js);
 
-		/* prepare both JSON objects */
-		json_object_set_number(jsobj, "pid", (double) pid);
+		bool includeStatus = true;
+
+		pidfile_as_json(jsPGAutoCtl, pathnames->pid, includeStatus);
 
 		if (!pg_setup_as_json(pgSetup, jsPostgres))
 		{
@@ -483,6 +490,4 @@ cli_service_status(int argc, char **argv)
 
 		(void) cli_pprint_json(js);
 	}
-
-	exit(EXIT_CODE_QUIT);
 }

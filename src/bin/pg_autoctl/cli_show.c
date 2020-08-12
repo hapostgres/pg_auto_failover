@@ -58,7 +58,6 @@ static void print_all_uri(SSLOptions *ssl,
 						  Monitor *monitor,
 						  FILE *stream);
 
-static void fprint_pidfile_as_json(const char *pidfile);
 
 CommandLine show_uri_command =
 	make_command("uri",
@@ -1385,7 +1384,14 @@ cli_show_file(int argc, char **argv)
 			{
 				if (outputJSON)
 				{
-					(void) fprint_pidfile_as_json(config.pathnames.pid);
+					JSON_Value *js = json_value_init_object();
+					bool includeStatus = false;
+
+					(void) pidfile_as_json(js,
+										   config.pathnames.pid,
+										   includeStatus);
+
+					(void) cli_pprint_json(js);
 				}
 				else
 				{
@@ -1433,146 +1439,4 @@ fprint_file_contents(const char *filename)
 		/* errors have already been logged */
 		return false;
 	}
-}
-
-
-/*
- * fprint_pidfile_as_json prints the content of the pidfile as JSON.
- */
-static void
-fprint_pidfile_as_json(const char *pidfile)
-{
-	JSON_Value *js = json_value_init_object();
-	JSON_Value *jsServices = json_value_init_array();
-	JSON_Array *jsServicesArray = json_value_get_array(jsServices);
-
-	JSON_Object *jsobj = json_value_get_object(js);
-
-	long fileSize = 0L;
-	char *fileContents = NULL;
-	char *fileLines[BUFSIZE] = { 0 };
-	int lineCount = 0;
-	int lineNumber;
-
-	if (!file_exists(pidfile))
-	{
-		exit(EXIT_CODE_INTERNAL_ERROR);
-	}
-
-	if (!read_file(pidfile, &fileContents, &fileSize))
-	{
-		exit(EXIT_CODE_INTERNAL_ERROR);
-	}
-
-	lineCount = splitLines(fileContents, fileLines, BUFSIZE);
-
-	for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
-	{
-		int pidLine = lineNumber + 1; /* zero-based, one-based */
-		char *separator = NULL;
-
-		/* main pid */
-		if (pidLine == PIDFILE_LINE_PID)
-		{
-			int pidnum = 0;
-			stringToInt(fileLines[lineNumber], &pidnum);
-			json_object_set_number(jsobj, "pid", (double) pidnum);
-
-			continue;
-		}
-
-		/* data directory */
-		if (pidLine == PIDFILE_LINE_DATA_DIR)
-		{
-			json_object_set_string(jsobj, "pgdata", fileLines[lineNumber]);
-		}
-
-		/* version string */
-		if (pidLine == PIDFILE_LINE_VERSION_STRING)
-		{
-			json_object_set_string(jsobj, "version", fileLines[lineNumber]);
-		}
-
-		/* extension version string */
-		if (pidLine == PIDFILE_LINE_EXTENSION_VERSION)
-		{
-			/* skip it, the supervisor does not connect to the monitor */
-			(void) 0;
-		}
-
-		/* semId */
-		if (pidLine == PIDFILE_LINE_SEM_ID)
-		{
-			int semId = 0;
-
-			if (stringToInt(fileLines[lineNumber], &semId))
-			{
-				json_object_set_number(jsobj, "semId", (double) semId);
-			}
-			else
-			{
-				log_error("Failed to parse semId \"%s\"", fileLines[lineNumber]);
-			}
-
-			continue;
-		}
-
-		if (pidLine >= PIDFILE_LINE_FIRST_SERVICE)
-		{
-			JSON_Value *jsService = json_value_init_object();
-			JSON_Object *jsServiceObj = json_value_get_object(jsService);
-
-			if ((separator = strchr(fileLines[lineNumber], ' ')) == NULL)
-			{
-				log_debug("Failed to find a space separator in line: \"%s\"",
-						  fileLines[lineNumber]);
-				continue;
-			}
-			else
-			{
-				int pidnum = 0;
-				char *serviceName = separator + 1;
-
-				char servicePidFile[BUFSIZE] = { 0 };
-
-				char versionString[BUFSIZE] = { 0 };
-				char extensionVersionString[BUFSIZE] = { 0 };
-
-				*separator = '\0';
-				stringToInt(fileLines[lineNumber], &pidnum);
-
-				json_object_set_string(jsServiceObj, "name", serviceName);
-				json_object_set_number(jsServiceObj, "pid", pidnum);
-
-				/* grab version number of the service by parsing its pidfile */
-				get_service_pidfile(pidfile, serviceName, servicePidFile);
-
-				if (!read_service_pidfile_version_strings(
-						servicePidFile,
-						versionString,
-						extensionVersionString))
-				{
-					/* warn about it and continue */
-					log_warn("Failed to read version string for "
-							 "service \"%s\" in pidfile \"%s\"",
-							 serviceName,
-							 servicePidFile);
-				}
-				else
-				{
-					json_object_set_string(jsServiceObj,
-										   "version", versionString);
-					json_object_set_string(jsServiceObj,
-										   "pgautofailover",
-										   extensionVersionString);
-				}
-			}
-
-			json_array_append_value(jsServicesArray, jsService);
-		}
-	}
-
-	json_object_set_value(jsobj, "services", jsServices);
-
-	(void) cli_pprint_json(js);
 }
