@@ -172,7 +172,6 @@ read_pidfile(const char *pidfile, pid_t *pid)
 	long fileSize = 0L;
 	char *fileContents = NULL;
 	char *fileLines[1];
-	bool error = false;
 	int pidnum = 0;
 
 	if (!file_exists(pidfile))
@@ -182,6 +181,9 @@ read_pidfile(const char *pidfile, pid_t *pid)
 
 	if (!read_file(pidfile, &fileContents, &fileSize))
 	{
+		log_debug("Failed to read the PID file \"%s\", removing it", pidfile);
+		(void) remove_pidfile(pidfile);
+
 		return false;
 	}
 
@@ -192,45 +194,41 @@ read_pidfile(const char *pidfile, pid_t *pid)
 
 	free(fileContents);
 
-	if (!error)
+	if (pid <= 0)
 	{
-		/* is it a stale file? */
-		if (kill(*pid, 0) == 0)
-		{
-			return true;
-		}
-		else
-		{
-			log_debug("Failed to signal pid %d: %m", *pid);
-			*pid = 0;
-
-			log_info("Found a stale pidfile at \"%s\"", pidfile);
-			log_warn("Removing the stale pid file \"%s\"", pidfile);
-
-			/*
-			 * We must return false here, after having determined that the
-			 * pidfile belongs to a process that doesn't exist anymore. So we
-			 * remove the pidfile and don't take the return value into account
-			 * at this point.
-			 */
-			(void) remove_pidfile(pidfile);
-
-			/* we might have to cleanup a stale SysV semaphore, too */
-			(void) semaphore_cleanup(pidfile);
-
-			return false;
-		}
-	}
-	else
-	{
-		log_debug("Failed to read the PID file \"%s\", removing it", pidfile);
+		log_debug("Read negative pid %d in file \"%s\", removing it",
+				  *pid, pidfile);
 		(void) remove_pidfile(pidfile);
 
 		return false;
 	}
 
-	/* no warning, it's cool that the file doesn't exists. */
-	return false;
+	/* is it a stale file? */
+	if (kill(*pid, 0) == 0)
+	{
+		return true;
+	}
+	else
+	{
+		log_debug("Failed to signal pid %d: %m", *pid);
+		*pid = 0;
+
+		log_info("Found a stale pidfile at \"%s\"", pidfile);
+		log_warn("Removing the stale pid file \"%s\"", pidfile);
+
+		/*
+		 * We must return false here, after having determined that the
+		 * pidfile belongs to a process that doesn't exist anymore. So we
+		 * remove the pidfile and don't take the return value into account
+		 * at this point.
+		 */
+		(void) remove_pidfile(pidfile);
+
+		/* we might have to cleanup a stale SysV semaphore, too */
+		(void) semaphore_cleanup(pidfile);
+
+		return false;
+	}
 }
 
 
@@ -351,9 +349,8 @@ read_service_pidfile_version_strings(const char *pidfile,
  * what a kill -0 reports.
  */
 void
-fprint_pidfile_as_json(const char *pidfile, bool includeStatus)
+pidfile_as_json(JSON_Value *js, const char *pidfile, bool includeStatus)
 {
-	JSON_Value *js = json_value_init_object();
 	JSON_Value *jsServices = json_value_init_array();
 	JSON_Array *jsServicesArray = json_value_get_array(jsServices);
 
@@ -507,6 +504,4 @@ fprint_pidfile_as_json(const char *pidfile, bool includeStatus)
 	}
 
 	json_object_set_value(jsobj, "services", jsServices);
-
-	(void) cli_pprint_json(js);
 }

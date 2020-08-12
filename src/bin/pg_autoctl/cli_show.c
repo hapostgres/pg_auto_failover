@@ -1384,10 +1384,14 @@ cli_show_file(int argc, char **argv)
 			{
 				if (outputJSON)
 				{
+					JSON_Value *js = json_value_init_object();
 					bool includeStatus = false;
 
-					(void) fprint_pidfile_as_json(config.pathnames.pid,
-												  includeStatus);
+					(void) pidfile_as_json(js,
+										   config.pathnames.pid,
+										   includeStatus);
+
+					(void) cli_pprint_json(js);
 				}
 				else
 				{

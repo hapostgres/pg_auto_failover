@@ -432,25 +432,24 @@ cli_service_status(int argc, char **argv)
 					  pgSetup->pgdata, pgSetup->pidFile.pid);
 		}
 
+		/*
+		 * That's not supposed to happen, because pg_autoctl should be the
+		 * parent process of Postgres. That said, when in maintenance,
+		 * operators could stop pg_autoctl and then start/stop Postgres to make
+		 * some configuration changes, and then use pg_autoctl again.
+		 */
 		log_info("pg_autoctl is not running at \"%s\"", pgSetup->pgdata);
 		exit(PG_CTL_STATUS_NOT_RUNNING);
 	}
 
 	/* ok now we have a pidfile for pg_autoctl */
-	if (read_pidfile(pathnames->pid, &pid) && pid > 0)
+	if (!read_pidfile(pathnames->pid, &pid))
 	{
-		if (kill(pid, 0) != 0)
-		{
-			log_error("pg_autoctl pid file contains stale pid %d", pid);
-			exit(PG_CTL_STATUS_NOT_RUNNING);
-		}
+		exit(PG_CTL_STATUS_NOT_RUNNING);
 	}
 
 	/* and now we know pg_autoctl is running */
-	if (pid > 0)
-	{
-		log_info("pg_autoctl is running with pid %d", pid);
-	}
+	log_info("pg_autoctl is running with pid %d", pid);
 
 	/* add a word about the Postgres service itself */
 	if (pg_setup_is_ready(pgSetup, false))
@@ -465,8 +464,26 @@ cli_service_status(int argc, char **argv)
 
 	if (outputJSON)
 	{
+		JSON_Value *js = json_value_init_object();
+		JSON_Value *jsPGAutoCtl = json_value_init_object();
+		JSON_Value *jsPostgres = json_value_init_object();
+
+		JSON_Object *root = json_value_get_object(js);
+
 		bool includeStatus = true;
 
-		(void) fprint_pidfile_as_json(pathnames->pid, includeStatus);
+		pidfile_as_json(jsPGAutoCtl, pathnames->pid, includeStatus);
+
+		if (!pg_setup_as_json(pgSetup, jsPostgres))
+		{
+			/* can't happen */
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+
+		/* concatenate JSON objects into a container object */
+		json_object_set_value(root, "postgres", jsPostgres);
+		json_object_set_value(root, "pg_autoctl", jsPGAutoCtl);
+
+		(void) cli_pprint_json(js);
 	}
 }
