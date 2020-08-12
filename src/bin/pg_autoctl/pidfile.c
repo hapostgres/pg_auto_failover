@@ -179,20 +179,19 @@ read_pidfile(const char *pidfile, pid_t *pid)
 		return false;
 	}
 
-	if (!read_file(pidfile, &fileContents, &fileSize))
-	{
-		return false;
-	}
-
-	splitLines(fileContents, fileLines, 1);
-	stringToInt(fileLines[0], &pidnum);
-
-	*pid = pidnum;
-
-	free(fileContents);
+	error = read_file(pidfile, &fileContents, &fileSize);
 
 	if (!error)
 	{
+		splitLines(fileContents, fileLines, 1);
+		error = stringToInt(fileLines[0], &pidnum);
+		free(fileContents);
+	}
+
+	if (!error)
+	{
+		*pid = pidnum;
+
 		/* is it a stale file? */
 		if (kill(*pid, 0) == 0)
 		{
