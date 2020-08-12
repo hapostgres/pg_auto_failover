@@ -3094,7 +3094,7 @@ monitor_stop_maintenance(Monitor *monitor, int nodeId,
 			int sleepTimeMs =
 				pgsql_compute_connection_retry_sleep_time(retryPolicy);
 
-			log_warn("Failed to start_maintenance of node %d on the monitor, "
+			log_warn("Failed to stop_maintenance of node %d on the monitor, "
 					 "retrying in %d ms.",
 					 nodeId, sleepTimeMs);
 
