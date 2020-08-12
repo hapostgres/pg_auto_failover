@@ -436,7 +436,7 @@ get_pgpid(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk)
 	int pid = -1;
 
 	/* when !pgIsNotRunningIsOk then log_error(), otherwise log_debug() */
-	int logLevel = pgIsNotRunningIsOk ? LOG_DEBUG : LOG_ERROR;
+	int logLevel = pgIsNotRunningIsOk ? LOG_TRACE : LOG_ERROR;
 
 	join_path_components(pidfile, pgSetup->pgdata, "postmaster.pid");
 
