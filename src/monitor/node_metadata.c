@@ -614,7 +614,12 @@ GroupListCandidates(List *groupNodeList)
  *	  qsort comparator for sorting node lists by reported lsn, descending
  */
 static int
-pgautofailover_node_reportedlsn_compare(const void *a, const void *b)
+#if (PG_VERSION_NUM >= 130000)
+pgautofailover_node_reportedlsn_compare(const union ListCell *a,
+										const union ListCell *b)
+#else
+pgautofailover_node_reportedlsn_compare(const void * a, const void * b)
+#endif
 {
 	AutoFailoverNode *node1 = (AutoFailoverNode *) lfirst(*(ListCell **) a);
 	AutoFailoverNode *node2 = (AutoFailoverNode *) lfirst(*(ListCell **) b);
@@ -642,11 +647,16 @@ ListMostAdvancedStandbyNodes(List *groupNodeList)
 {
 	ListCell *nodeCell = NULL;
 	List *mostAdvancedNodeList = NIL;
+	XLogRecPtr mostAdvancedLSN = 0;
+
+	#if (PG_VERSION_NUM >= 130000)
+	List *sortedNodeList = list_copy(groupNodeList);
+	list_sort(sortedNodeList, pgautofailover_node_reportedlsn_compare);
+	#else
 	List *sortedNodeList =
 		list_qsort(groupNodeList,
 				   pgautofailover_node_reportedlsn_compare);
-
-	XLogRecPtr mostAdvancedLSN = 0;
+	#endif
 
 	foreach(nodeCell, sortedNodeList)
 	{
