@@ -549,16 +549,20 @@ FindCandidateNodeBeingPromoted(List *groupNodeList)
  * pgautofailover_node_candidate_priority_compare
  *	  qsort comparator for sorting node lists by candidate priority
  */
-static int
 #if (PG_VERSION_NUM >= 130000)
+static int
 pgautofailover_node_candidate_priority_compare(const union ListCell *a,
 											   const union ListCell *b)
+{
+	AutoFailoverNode *node1 = (AutoFailoverNode *) lfirst(a);
+	AutoFailoverNode *node2 = (AutoFailoverNode *) lfirst(b);
 #else
-pgautofailover_node_candidate_priority_compare(const void * a, const void * b)
-#endif
+static int
+pgautofailover_node_candidate_priority_compare(const void *a, const void *b)
 {
 	AutoFailoverNode *node1 = (AutoFailoverNode *) lfirst(*(ListCell **) a);
 	AutoFailoverNode *node2 = (AutoFailoverNode *) lfirst(*(ListCell **) b);
+#endif
 
 	if (node1->candidatePriority > node2->candidatePriority)
 	{
@@ -613,16 +617,20 @@ GroupListCandidates(List *groupNodeList)
  * pgautofailover_node_reportedlsn_compare
  *	  qsort comparator for sorting node lists by reported lsn, descending
  */
-static int
 #if (PG_VERSION_NUM >= 130000)
+static int
 pgautofailover_node_reportedlsn_compare(const union ListCell *a,
 										const union ListCell *b)
+{
+	AutoFailoverNode *node1 = (AutoFailoverNode *) lfirst(a);
+	AutoFailoverNode *node2 = (AutoFailoverNode *) lfirst(b);
 #else
-pgautofailover_node_reportedlsn_compare(const void * a, const void * b)
-#endif
+static int
+pgautofailover_node_reportedlsn_compare(const void *a, const void *b)
 {
 	AutoFailoverNode *node1 = (AutoFailoverNode *) lfirst(*(ListCell **) a);
 	AutoFailoverNode *node2 = (AutoFailoverNode *) lfirst(*(ListCell **) b);
+#endif
 
 	if (node1->reportedLSN > node2->reportedLSN)
 	{
