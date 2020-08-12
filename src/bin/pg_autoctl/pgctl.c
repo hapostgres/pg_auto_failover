@@ -27,6 +27,7 @@
 #include "pgctl.h"
 #include "pgsql.h"
 #include "pgsetup.h"
+#include "pgtuning.h"
 #include "signals.h"
 #include "string_utils.h"
 
@@ -584,6 +585,29 @@ prepare_guc_settings_from_pgsetup(const char *configFilePath,
 			log_debug("GUC setting \"%s\" has a NULL value", setting->name);
 		}
 	}
+
+	/*
+	 * Only bother to apply settings on Linux, macOS and Windows are considered
+	 * development environment and we decide to refrain from tuning a dedicated
+	 * Postgres system on those targets.
+	 *
+	 * Also disable Postgres tuning when running the unit test suite.
+	 */
+#if defined(__linux__)
+	if (!(env_exists(PG_AUTOCTL_DEBUG) && env_exists("PG_REGRESS_SOCK_DIR")))
+	{
+		char tuning[BUFSIZE] = { 0 };
+
+		if (!pgtuning_prepare_guc_settings(postgres_tuning,
+										   tuning,
+										   sizeof(tuning)))
+		{
+			log_warn("Failed to compute Postgres basic tuning for this system");
+		}
+
+		appendPQExpBuffer(config, "\n%s\n", tuning);
+	}
+#endif
 
 	/* memory allocation could have failed while building string */
 	if (PQExpBufferBroken(config))

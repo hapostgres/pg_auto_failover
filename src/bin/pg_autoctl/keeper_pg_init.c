@@ -772,6 +772,33 @@ create_database_and_extension(Keeper *keeper)
 	pgsql_finish(&initPostgres.sqlClient);
 
 	/*
+	 * Connect to Postgres as the system user to create extension: same user as
+	 * initdb with superuser privileges.
+	 *
+	 * Calling keeper_update_state will re-init our sqlClient to now connect
+	 * per the configuration settings, cleaning-up the local changes we made
+	 * before.
+	 */
+	if (!keeper_update_pg_state(keeper))
+	{
+		log_error("Failed to update the keeper's state from the local "
+				  "PostgreSQL instance, see above for details.");
+		return false;
+	}
+
+	/*
+	 * Install the pg_stat_statements extension in that database, skipping if
+	 * the extension has already been installed.
+	 */
+	log_info("CREATE EXTENSION pg_stat_statements;");
+
+	if (!pgsql_create_extension(&(postgres->sqlClient), "pg_stat_statements"))
+	{
+		log_error("Failed to create extension pg_stat_statements");
+		return false;
+	}
+
+	/*
 	 * When initialiasing a PostgreSQL instance that's going to be used as a
 	 * Citus node, either a coordinator or a worker, we have to also create an
 	 * extension in a database that can be used by citus.
@@ -796,21 +823,6 @@ create_database_and_extension(Keeper *keeper)
 		}
 
 		/*
-		 * Connect to pgsql as the system user to create extension: Same user
-		 * as initdb with superuser privileges.
-		 *
-		 * Calling keeper_update_state will re-init our sqlClient to now
-		 * connect per the configuration settings, cleaning-up the local
-		 * changes we made before.
-		 */
-		if (!keeper_update_pg_state(keeper))
-		{
-			log_error("Failed to update the keeper's state from the local "
-					  "PostgreSQL instance, see above for details.");
-			return false;
-		}
-
-		/*
 		 * Install the citus extension in that database, skipping if the
 		 * extension has already been installed.
 		 */
@@ -821,10 +833,10 @@ create_database_and_extension(Keeper *keeper)
 			log_error("Failed to create extension %s", CITUS_EXTENSION_NAME);
 			return false;
 		}
-
-		/* and we're done with this connection. */
-		pgsql_finish(pgsql);
 	}
+
+	/* and we're done with this connection. */
+	pgsql_finish(pgsql);
 
 	return true;
 }

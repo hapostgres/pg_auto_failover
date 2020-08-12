@@ -199,11 +199,20 @@ CommandLine do_pgsetup_startup_logs =
 				 keeper_cli_keeper_setup_getopts,
 				 keeper_cli_pgsetup_startup_logs);
 
+CommandLine do_pgsetup_tune =
+	make_command("tune",
+				 "Compute and log some Postgres tuning options",
+				 "[option ...]",
+				 KEEPER_CLI_WORKER_SETUP_OPTIONS,
+				 keeper_cli_keeper_setup_getopts,
+				 keeper_cli_pgsetup_tune);
+
 CommandLine *do_pgsetup[] = {
 	&do_pgsetup_discover,
 	&do_pgsetup_is_ready,
 	&do_pgsetup_wait_until_ready,
 	&do_pgsetup_startup_logs,
+	&do_pgsetup_tune,
 	NULL
 };
 
