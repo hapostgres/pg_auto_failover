@@ -780,30 +780,29 @@ monitor_node_active(Monitor *monitor,
  */
 bool
 monitor_set_node_candidate_priority(Monitor *monitor,
-									int nodeid, char *hostName, int nodePort,
+									char *formation, char *name,
 									int candidate_priority)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
-		"SELECT pgautofailover.set_node_candidate_priority($1, $2, $3, $4)";
-	int paramCount = 4;
-	Oid paramTypes[4] = { INT4OID, TEXTOID, INT4OID, INT4OID };
-	const char *paramValues[4];
+		"SELECT pgautofailover.set_node_candidate_priority($1, $2, $3)";
+	int paramCount = 3;
+	Oid paramTypes[3] = { TEXTOID, TEXTOID, INT4OID };
+	const char *paramValues[3];
 	char *candidatePriorityText = intToString(candidate_priority).strValue;
 	bool success = true;
 
-	paramValues[0] = intToString(nodeid).strValue;
-	paramValues[1] = hostName,
-	paramValues[2] = intToString(nodePort).strValue;
-	paramValues[3] = candidatePriorityText;
+	paramValues[0] = formation;
+	paramValues[1] = name,
+	paramValues[2] = candidatePriorityText;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
 								   NULL, NULL))
 	{
-		log_error("Failed to update node candidate priority on node %d"
-				  " for candidate_priority: \"%s\"",
-				  nodeid, candidatePriorityText);
+		log_error("Failed to update node candidate priority on node \"%s\""
+				  "in formation \"%s\" for candidate_priority: \"%s\"",
+				  name, formation, candidatePriorityText);
 
 		success = false;
 	}
@@ -817,30 +816,29 @@ monitor_set_node_candidate_priority(Monitor *monitor,
  * in the node replication quorum.
  */
 bool
-monitor_set_node_replication_quorum(Monitor *monitor, int nodeid,
-									char *hostName, int nodePort,
+monitor_set_node_replication_quorum(Monitor *monitor,
+									char *formation, char *name,
 									bool replicationQuorum)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
-		"SELECT pgautofailover.set_node_replication_quorum($1, $2, $3, $4)";
-	int paramCount = 4;
-	Oid paramTypes[4] = { INT4OID, TEXTOID, INT4OID, BOOLOID };
-	const char *paramValues[4];
+		"SELECT pgautofailover.set_node_replication_quorum($1, $2, $3)";
+	int paramCount = 3;
+	Oid paramTypes[3] = { TEXTOID, TEXTOID, BOOLOID };
+	const char *paramValues[3];
 	char *replicationQuorumText = replicationQuorum ? "true" : "false";
 	bool success = true;
 
-	paramValues[0] = intToString(nodeid).strValue;
-	paramValues[1] = hostName;
-	paramValues[2] = intToString(nodePort).strValue;
-	paramValues[3] = replicationQuorumText;
+	paramValues[0] = formation;
+	paramValues[1] = name,
+	paramValues[2] = replicationQuorumText;
 
 	if (!pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes,
 								   paramValues, NULL, NULL))
 	{
-		log_error("Failed to update node replication quorum on node %d"
-				  " and replication_quorum: \"%s\"",
-				  nodeid, replicationQuorumText);
+		log_error("Failed to update node replication quorum on node \"%s\""
+				  "in formation \"%s\" for replication_quorum: \"%s\"",
+				  name, formation, replicationQuorumText);
 
 		success = false;
 	}

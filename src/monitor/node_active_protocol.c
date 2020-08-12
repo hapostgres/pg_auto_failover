@@ -1562,11 +1562,13 @@ stop_maintenance(PG_FUNCTION_ARGS)
 Datum
 set_node_candidate_priority(PG_FUNCTION_ARGS)
 {
-	int32 nodeId = PG_GETARG_INT32(0);
-	text *nodeHostText = PG_GETARG_TEXT_P(1);
-	char *nodeHost = text_to_cstring(nodeHostText);
-	int32 nodePort = PG_GETARG_INT32(2);
-	int candidatePriority = PG_GETARG_INT32(3);
+	text *formationIdText = PG_GETARG_TEXT_P(0);
+	char *formationId = text_to_cstring(formationIdText);
+
+	text *nodeNameText = PG_GETARG_TEXT_P(1);
+	char *nodeName = text_to_cstring(nodeNameText);
+
+	int candidatePriority = PG_GETARG_INT32(2);
 
 	AutoFailoverNode *currentNode = NULL;
 
@@ -1577,11 +1579,13 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 
 	checkPgAutoFailoverVersion();
 
-	currentNode = GetAutoFailoverNodeWithId(nodeId, nodeHost, nodePort);
+	currentNode = GetAutoFailoverNodeByName(formationId, nodeName);
 
 	if (currentNode == NULL)
 	{
-		ereport(ERROR, (errmsg("node %d is not registered", nodeId)));
+		ereport(ERROR,
+				(errmsg("node \"%s\" is not registered in formation \"%s\"",
+						nodeName, formationId)));
 	}
 
 	LockFormation(currentNode->formationId, ShareLock);
@@ -1704,11 +1708,13 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 Datum
 set_node_replication_quorum(PG_FUNCTION_ARGS)
 {
-	int32 nodeid = PG_GETARG_INT32(0);
-	text *nodeHostText = PG_GETARG_TEXT_P(1);
-	char *nodeHost = text_to_cstring(nodeHostText);
-	int32 nodePort = PG_GETARG_INT32(2);
-	bool replicationQuorum = PG_GETARG_BOOL(3);
+	text *formationIdText = PG_GETARG_TEXT_P(0);
+	char *formationId = text_to_cstring(formationIdText);
+
+	text *nodeNameText = PG_GETARG_TEXT_P(1);
+	char *nodeName = text_to_cstring(nodeNameText);
+
+	bool replicationQuorum = PG_GETARG_BOOL(2);
 
 	AutoFailoverNode *currentNode = NULL;
 	List *nodesGroupList = NIL;
@@ -1716,11 +1722,13 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 
 	checkPgAutoFailoverVersion();
 
-	currentNode = GetAutoFailoverNodeWithId(nodeid, nodeHost, nodePort);
+	currentNode = GetAutoFailoverNodeByName(formationId, nodeName);
 
 	if (currentNode == NULL)
 	{
-		ereport(ERROR, (errmsg("node %d is not registered", nodeid)));
+		ereport(ERROR,
+				(errmsg("node \"%s\" is not registered in formation \"%s\"",
+						nodeName, formationId)));
 	}
 
 	LockFormation(currentNode->formationId, ShareLock);
@@ -1786,9 +1794,10 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Updating replicationQuorum to %s for  %d (%s:%d)",
+			"Updating replicationQuorum to %s for node %d \"%s\" (%s:%d)",
 			currentNode->replicationQuorum ? "true" : "false",
 			currentNode->nodeId,
+			currentNode->nodeName,
 			currentNode->nodeHost,
 			currentNode->nodePort);
 
@@ -1825,10 +1834,12 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of %s:%d to apply_settings "
-			"after updating replication quorum to %s for node %s:%d.",
+			"Setting goal state of node %d \"%s\" (%s:%d) to apply_settings "
+			"after updating replication quorum to %s for node %d \"%s\" (%s:%d).",
+			primaryNode->nodeId, primaryNode->nodeName,
 			primaryNode->nodeHost, primaryNode->nodePort,
 			currentNode->replicationQuorum ? "true" : "false",
+			currentNode->nodeId, currentNode->nodeName,
 			currentNode->nodeHost, currentNode->nodePort);
 
 		SetNodeGoalState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS, message);

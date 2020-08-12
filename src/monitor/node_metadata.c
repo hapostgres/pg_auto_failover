@@ -913,28 +913,26 @@ GetAutoFailoverNodeById(int nodeId)
  * identified by node id, node name and node port.
  */
 AutoFailoverNode *
-GetAutoFailoverNodeWithId(int nodeid, char *nodeHost, int nodePort)
+GetAutoFailoverNodeByName(char *formationId, char *nodeName)
 {
 	AutoFailoverNode *pgAutoFailoverNode = NULL;
 	MemoryContext callerContext = CurrentMemoryContext;
 
 	Oid argTypes[] = {
-		INT4OID, /* nodeport */
-		TEXTOID, /* nodehost */
-		INT4OID  /* nodeport */
+		TEXTOID,                    /* formationId */
+		TEXTOID                     /* nodename */
 	};
 
 	Datum argValues[] = {
-		Int32GetDatum(nodeid),         /* nodeid */
-		CStringGetTextDatum(nodeHost), /* nodehost */
-		Int32GetDatum(nodePort)        /* nodeport */
+		CStringGetTextDatum(formationId), /* formationId */
+		CStringGetTextDatum(nodeName)     /* nodename */
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
 	int spiStatus = 0;
 
 	const char *selectQuery =
 		SELECT_ALL_FROM_AUTO_FAILOVER_NODE_TABLE
-		" WHERE nodeid = $1 and nodehost = $2 AND nodeport = $3";
+		" WHERE formationid = $1 and nodename = $2";
 
 	SPI_connect();
 

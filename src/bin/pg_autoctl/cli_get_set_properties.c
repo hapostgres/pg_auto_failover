@@ -102,17 +102,21 @@ CommandLine get_commands =
 static CommandLine set_node_replication_quorum_command =
 	make_command("replication-quorum",
 				 "set replication-quorum property on the monitor",
-				 CLI_PGDATA_USAGE "<true|false>",
-				 CLI_PGDATA_OPTION,
-				 cli_getopt_pgdata,
+				 " [ --pgdata ] [ --json ] [ --name ] <true|false>",
+				 "  --pgdata      path to data directory\n"
+				 "  --name        pg_auto_failover node name\n"
+				 "  --json        output data in the JSON format\n",
+				 cli_get_set_properties_getopts,
 				 cli_set_node_replication_quorum);
 
 static CommandLine set_node_candidate_priority_command =
 	make_command("candidate-priority",
 				 "set candidate property on the monitor",
-				 CLI_PGDATA_USAGE "<priority: 0..100>",
-				 CLI_PGDATA_OPTION,
-				 cli_getopt_pgdata,
+				 " [ --pgdata ] [ --json ] [ --name ] <priority: 0..100>",
+				 "  --pgdata      path to data directory\n"
+				 "  --name        pg_auto_failover node name\n"
+				 "  --json        output data in the JSON format\n",
+				 cli_get_set_properties_getopts,
 				 cli_set_node_candidate_priority);
 
 static CommandLine set_node_metadata_command =
@@ -462,12 +466,7 @@ static void
 cli_set_node_replication_quorum(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
-
 	bool replicationQuorum = false;
-
-	bool missingPgdataIsOk = true;
-	bool pgIsNotRunningIsOk = true;
-	bool monitorDisabledIsOk = false;
 
 	keeper.config = keeperOptions;
 
@@ -480,34 +479,6 @@ cli_set_node_replication_quorum(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!keeper_config_read_file(&(keeper.config),
-								 missingPgdataIsOk,
-								 pgIsNotRunningIsOk,
-								 monitorDisabledIsOk))
-	{
-		/* errors have already been logged. */
-		exit(EXIT_CODE_BAD_CONFIG);
-	}
-
-	if (keeper.config.monitorDisabled)
-	{
-		log_error("This node has disabled monitor, "
-				  "pg_autoctl get and set commands are not available.");
-		exit(EXIT_CODE_BAD_CONFIG);
-	}
-
-	if (!keeper_init(&keeper, &keeper.config))
-	{
-		log_fatal("Failed to initialize keeper, see above for details");
-		exit(EXIT_CODE_KEEPER);
-	}
-
-	if (!monitor_init(&(keeper.monitor), keeper.config.monitor_pguri))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_ARGS);
-	}
-
 	if (!parse_bool(argv[0], &replicationQuorum))
 	{
 		log_error("replication-quorum value %s is not valid."
@@ -515,6 +486,15 @@ cli_set_node_replication_quorum(int argc, char **argv)
 
 		exit(EXIT_CODE_BAD_ARGS);
 	}
+
+	if (!monitor_init_from_pgsetup(&keeper.monitor, &keeper.config.pgSetup))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	/* grab --name from either the command options or the configuration file */
+	(void) cli_ensure_node_name(&keeper);
 
 	if (!set_node_replication_quorum(&keeper, replicationQuorum))
 	{
@@ -551,10 +531,6 @@ cli_set_node_candidate_priority(int argc, char **argv)
 
 	int candidatePriority = -1;
 
-	bool missingPgdataIsOk = true;
-	bool pgIsNotRunningIsOk = true;
-	bool monitorDisabledIsOk = false;
-
 	keeper.config = keeperOptions;
 
 	if (argc != 1)
@@ -566,34 +542,6 @@ cli_set_node_candidate_priority(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!keeper_config_read_file(&(keeper.config),
-								 missingPgdataIsOk,
-								 pgIsNotRunningIsOk,
-								 monitorDisabledIsOk))
-	{
-		/* errors have already been logged. */
-		exit(EXIT_CODE_BAD_CONFIG);
-	}
-
-	if (keeper.config.monitorDisabled)
-	{
-		log_error("This node has disabled monitor, "
-				  "pg_autoctl get and set commands are not available.");
-		exit(EXIT_CODE_BAD_CONFIG);
-	}
-
-	if (!keeper_init(&keeper, &keeper.config))
-	{
-		log_fatal("Failed to initialize keeper, see above for details");
-		exit(EXIT_CODE_KEEPER);
-	}
-
-	if (!monitor_init(&(keeper.monitor), keeper.config.monitor_pguri))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_ARGS);
-	}
-
 	candidatePriority = strtol(argv[0], NULL, 10);
 
 	if (errno == EINVAL || candidatePriority < 0 || candidatePriority > 100)
@@ -602,6 +550,15 @@ cli_set_node_candidate_priority(int argc, char **argv)
 				  " Valid values are integers from 0 to 100. ", argv[0]);
 		exit(EXIT_CODE_BAD_ARGS);
 	}
+
+	if (!monitor_init_from_pgsetup(&keeper.monitor, &keeper.config.pgSetup))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	/* grab --name from either the command options or the configuration file */
+	(void) cli_ensure_node_name(&keeper);
 
 	if (!set_node_candidate_priority(&keeper, candidatePriority))
 	{
@@ -849,12 +806,10 @@ set_node_candidate_priority(Keeper *keeper, int candidatePriority)
 		}
 	}
 
-	if (!monitor_set_node_candidate_priority(
-			&(keeper->monitor),
-			keeper->state.current_node_id,
-			config->hostname,
-			config->pgSetup.pgport,
-			candidatePriority))
+	if (!monitor_set_node_candidate_priority(&(keeper->monitor),
+											 config->formation,
+											 config->name,
+											 candidatePriority))
 	{
 		log_error("Failed to set \"candidate-priority\" to \"%d\".",
 				  candidatePriority);
@@ -914,12 +869,10 @@ set_node_replication_quorum(Keeper *keeper, bool replicationQuorum)
 		}
 	}
 
-	if (!monitor_set_node_replication_quorum(
-			&(keeper->monitor),
-			keeper->state.current_node_id,
-			config->hostname,
-			config->pgSetup.pgport,
-			replicationQuorum))
+	if (!monitor_set_node_replication_quorum(&(keeper->monitor),
+											 config->formation,
+											 config->name,
+											 replicationQuorum))
 	{
 		log_error("Failed to set \"replication-quorum\" to \"%s\".",
 				  boolToString(replicationQuorum));
