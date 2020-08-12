@@ -12,6 +12,7 @@
 #include "cli_common.h"
 #include "parsing.h"
 
+static void cli_ensure_node_name(Keeper *keeper);
 static int cli_get_set_properties_getopts(int argc, char **argv);
 
 static bool get_node_replication_settings(NodeReplicationSettings *settings);
@@ -34,17 +35,21 @@ static bool set_formation_number_sync_standbys(Monitor *monitor,
 CommandLine get_node_replication_quorum =
 	make_command("replication-quorum",
 				 "get replication-quorum property from the monitor",
-				 CLI_PGDATA_USAGE,
-				 CLI_PGDATA_OPTION,
-				 cli_getopt_pgdata,
+				 " [ --pgdata ] [ --json ] [ --name ]",
+				 "  --pgdata      path to data directory\n"
+				 "  --name        pg_auto_failover node name\n"
+				 "  --json        output data in the JSON format\n",
+				 cli_get_set_properties_getopts,
 				 cli_get_node_replication_quorum);
 
 CommandLine get_node_candidate_priority =
 	make_command("candidate-priority",
 				 "get candidate property from the monitor",
-				 CLI_PGDATA_USAGE,
-				 CLI_PGDATA_OPTION,
-				 cli_getopt_pgdata,
+				 " [ --pgdata ] [ --json ] [ --name ]",
+				 "  --pgdata      path to data directory\n"
+				 "  --name        pg_auto_failover node name\n"
+				 "  --json        output data in the JSON format\n",
+				 cli_get_set_properties_getopts,
 				 cli_get_node_candidate_priority);
 
 
@@ -319,44 +324,21 @@ get_node_replication_settings(NodeReplicationSettings *settings)
 {
 	Keeper keeper = { 0 };
 
-	bool missingPgdataIsOk = true;
-	bool pgIsNotRunningIsOk = true;
-	bool monitorDisabledIsOk = false;
-
 	keeper.config = keeperOptions;
 
-	(void) exit_unless_role_is_keeper(&(keeper.config));
-
-	if (!keeper_config_read_file(&(keeper.config),
-								 missingPgdataIsOk,
-								 pgIsNotRunningIsOk,
-								 monitorDisabledIsOk))
+	if (!monitor_init_from_pgsetup(&keeper.monitor, &keeper.config.pgSetup))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	if (keeper.config.monitorDisabled)
-	{
-		log_error("This node has disabled monitor, "
-				  "pg_autoctl get and set commands are not available.");
-		return false;
-	}
+	/* grab --name from either the command options or the configuration file */
+	(void) cli_ensure_node_name(&keeper);
 
-	if (!keeper_init(&keeper, &keeper.config))
-	{
-		log_fatal("Failed to initialize keeper, see above for details");
-		exit(EXIT_CODE_KEEPER);
-	}
+	/* copy the target name */
+	strlcpy(settings->name, keeper.config.name, _POSIX_HOST_NAME_MAX);
 
-	if (!monitor_init(&(keeper.monitor), keeper.config.monitor_pguri))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_ARGS);
-	}
-
-	return monitor_get_node_replication_settings(&(keeper.monitor),
-												 keeper.state.current_node_id, settings);
+	return monitor_get_node_replication_settings(&(keeper.monitor), settings);
 }
 
 
@@ -367,7 +349,7 @@ get_node_replication_settings(NodeReplicationSettings *settings)
 static void
 cli_get_node_replication_quorum(int argc, char **argv)
 {
-	NodeReplicationSettings settings = { 0, false };
+	NodeReplicationSettings settings = { { 0 }, 0, false };
 
 	if (!get_node_replication_settings(&settings))
 	{
@@ -379,6 +361,8 @@ cli_get_node_replication_quorum(int argc, char **argv)
 	{
 		JSON_Value *js = json_value_init_object();
 		JSON_Object *jsObj = json_value_get_object(js);
+
+		json_object_set_string(jsObj, "name", settings.name);
 
 		json_object_set_boolean(jsObj,
 								"replication-quorum",
@@ -400,7 +384,7 @@ cli_get_node_replication_quorum(int argc, char **argv)
 static void
 cli_get_node_candidate_priority(int argc, char **argv)
 {
-	NodeReplicationSettings settings = { 0, false };
+	NodeReplicationSettings settings = { { 0 }, 0, false };
 
 	if (!get_node_replication_settings(&settings))
 	{
@@ -412,6 +396,8 @@ cli_get_node_candidate_priority(int argc, char **argv)
 	{
 		JSON_Value *js = json_value_init_object();
 		JSON_Object *jsObj = json_value_get_object(js);
+
+		json_object_set_string(jsObj, "name", settings.name);
 
 		json_object_set_number(jsObj,
 							   "candidate-priority",
@@ -1017,4 +1003,51 @@ set_formation_number_sync_standbys(Monitor *monitor,
 	}
 
 	return true;
+}
+
+
+/*
+ * cli_ensure_node_name ensures that we have a node name to continue with,
+ * either from the command line itself, or from the configuration file when
+ * we're dealing with a keeper node.
+ */
+static void
+cli_ensure_node_name(Keeper *keeper)
+{
+	switch (ProbeConfigurationFileRole(keeper->config.pathnames.config))
+	{
+		case PG_AUTOCTL_ROLE_MONITOR:
+		{
+			if (IS_EMPTY_STRING_BUFFER(keeper->config.name))
+			{
+				log_fatal("Please use --name to target a specific node");
+				exit(EXIT_CODE_BAD_ARGS);
+			}
+			break;
+		}
+
+		case PG_AUTOCTL_ROLE_KEEPER:
+		{
+			/* when --name has not been used, fetch it from the config */
+			if (IS_EMPTY_STRING_BUFFER(keeper->config.name))
+			{
+				bool monitorDisabledIsOk = false;
+
+				if (!keeper_config_read_file_skip_pgsetup(&(keeper->config),
+														  monitorDisabledIsOk))
+				{
+					/* errors have already been logged */
+					exit(EXIT_CODE_BAD_CONFIG);
+				}
+			}
+			break;
+		}
+
+		default:
+		{
+			log_fatal("Unrecognized configuration file \"%s\"",
+					  keeper->config.pathnames.config);
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+	}
 }

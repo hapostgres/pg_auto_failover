@@ -854,26 +854,29 @@ monitor_set_node_replication_quorum(Monitor *monitor, int nodeid,
  * from the monitor.
  */
 bool
-monitor_get_node_replication_settings(Monitor *monitor, int nodeid,
+monitor_get_node_replication_settings(Monitor *monitor,
 									  NodeReplicationSettings *settings)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
 		"SELECT candidatepriority, replicationquorum FROM pgautofailover.node "
-		"WHERE nodeid = $1";
+		"WHERE nodename = $1";
+
 	int paramCount = 1;
-	Oid paramTypes[1] = { INT4OID };
+	Oid paramTypes[1] = { TEXTOID };
 	const char *paramValues[1];
+
 	NodeReplicationSettingsParseContext parseContext =
 	{ { 0 }, -1, false, false };
 
-	paramValues[0] = intToString(nodeid).strValue;
+	paramValues[0] = settings->name;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
 								   &parseContext, parseNodeReplicationSettings))
 	{
-		log_error("Failed to retrieve node settings for node \"%d\".", nodeid);
+		log_error("Failed to retrieve node settings for node \"%s\".",
+				  settings->name);
 
 		/* disconnect from monitor */
 		pgsql_finish(&monitor->pgsql);

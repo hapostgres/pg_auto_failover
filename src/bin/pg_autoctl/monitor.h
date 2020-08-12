@@ -98,7 +98,7 @@ bool monitor_node_active(Monitor *monitor,
 						 bool pgIsRunning,
 						 char *currentLSN, char *pgsrSyncState,
 						 MonitorAssignedState *assignedState);
-bool monitor_get_node_replication_settings(Monitor *monitor, int nodeid,
+bool monitor_get_node_replication_settings(Monitor *monitor,
 										   NodeReplicationSettings *settings);
 bool monitor_set_node_candidate_priority(Monitor *monitor, int nodeid,
 										 char *hostName, int nodePort,
