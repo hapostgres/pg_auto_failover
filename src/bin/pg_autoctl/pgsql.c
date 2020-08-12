@@ -127,7 +127,7 @@ pgsql_init(PGSQL *pgsql, char *url, ConnectionType connectionType)
 	pgsql->connection = NULL;
 
 	/* set our default retry policy for interactive commands */
-	(void) pgsql_set_interactive_retry_policy(pgsql);
+	(void) pgsql_set_interactive_retry_policy(&(pgsql->retryPolicy));
 
 	if (validate_connection_string(url))
 	{
@@ -149,26 +149,19 @@ pgsql_init(PGSQL *pgsql, char *url, ConnectionType connectionType)
  * cap our exponential backoff with decorrelated jitter computation.
  */
 void
-pgsql_set_retry_policy(PGSQL *pgsql,
+pgsql_set_retry_policy(ConnectionRetryPolicy *retryPolicy,
 					   int maxT,
 					   int maxR,
 					   int maxSleepTime,
 					   int baseSleepTime)
 {
-	pgsql->retryPolicy.maxT = maxT;
-	pgsql->retryPolicy.maxR = maxR;
-	pgsql->retryPolicy.maxSleepTime = maxSleepTime;
-	pgsql->retryPolicy.baseSleepTime = baseSleepTime;
+	retryPolicy->maxT = maxT;
+	retryPolicy->maxR = maxR;
+	retryPolicy->maxSleepTime = maxSleepTime;
+	retryPolicy->baseSleepTime = baseSleepTime;
 
 	/* initialize a seed for our random number generator */
 	pg_srand48(time(0));
-
-	log_debug("pgsql_set_retry_policy(\"%s\"): maxT=%d maxR=%d cap=%d base=%d",
-			  pgsql->connectionString,
-			  pgsql->retryPolicy.maxT,
-			  pgsql->retryPolicy.maxR,
-			  pgsql->retryPolicy.maxSleepTime,
-			  pgsql->retryPolicy.baseSleepTime);
 }
 
 
@@ -180,9 +173,9 @@ pgsql_set_retry_policy(PGSQL *pgsql,
  * This is the retry policy that prevails in the main keeper loop.
  */
 void
-pgsql_set_main_loop_retry_policy(PGSQL *pgsql)
+pgsql_set_main_loop_retry_policy(ConnectionRetryPolicy *retryPolicy)
 {
-	(void) pgsql_set_retry_policy(pgsql,
+	(void) pgsql_set_retry_policy(retryPolicy,
 								  POSTGRES_PING_RETRY_TIMEOUT,
 								  0, /* do not retry by default */
 								  POSTGRES_PING_RETRY_CAP_SLEEP_TIME,
@@ -201,9 +194,9 @@ pgsql_set_main_loop_retry_policy(PGSQL *pgsql)
  * it's ready. In that case we want to retry for a long time.
  */
 void
-pgsql_set_init_retry_policy(PGSQL *pgsql)
+pgsql_set_init_retry_policy(ConnectionRetryPolicy *retryPolicy)
 {
-	(void) pgsql_set_retry_policy(pgsql,
+	(void) pgsql_set_retry_policy(retryPolicy,
 								  POSTGRES_PING_RETRY_TIMEOUT,
 								  -1, /* unbounded number of attempts */
 								  POSTGRES_PING_RETRY_CAP_SLEEP_TIME,
@@ -217,13 +210,35 @@ pgsql_set_init_retry_policy(PGSQL *pgsql)
  * of attempts, and up to 2 seconds of sleep time in between attempts.
  */
 void
-pgsql_set_interactive_retry_policy(PGSQL *pgsql)
+pgsql_set_interactive_retry_policy(ConnectionRetryPolicy *retryPolicy)
 {
-	(void) pgsql_set_retry_policy(pgsql,
+	(void) pgsql_set_retry_policy(retryPolicy,
 								  pgconnect_timeout,
 								  -1, /* unbounded number of attempts */
 								  POSTGRES_PING_RETRY_CAP_SLEEP_TIME,
 								  POSTGRES_PING_RETRY_BASE_SLEEP_TIME);
+}
+
+
+/*
+ * pgsql_set_monitor_interactive_retry_policy sets the retry policy to 15 mins
+ * of total retrying time, unbounded number of attemps, and up to 5 seconds of
+ * sleep time in between attemps, starting at 1 second for the first retry.
+ *
+ * We use this policy in interactive commands when connecting to the monitor,
+ * such as when doing pg_autoctl enable|disable maintenance.
+ */
+void
+pgsql_set_monitor_interactive_retry_policy(ConnectionRetryPolicy *retryPolicy)
+{
+	int cap = 5 * 1000;         /* sleep up to 5s between attempts */
+	int sleepTime = 1 * 1000;   /* first retry happens after 1 second */
+
+	(void) pgsql_set_retry_policy(retryPolicy,
+								  POSTGRES_PING_RETRY_TIMEOUT,
+								  -1, /* unbounded number of attempts */
+								  cap,
+								  sleepTime);
 }
 
 
@@ -320,10 +335,10 @@ pgsql_retry_policy_expired(ConnectionRetryPolicy *retryPolicy)
 		(retryPolicy->maxR > 0 &&
 		 retryPolicy->attempts >= retryPolicy->maxR))
 	{
-		return false;
+		return true;
 	}
 
-	return true;
+	return false;
 }
 
 

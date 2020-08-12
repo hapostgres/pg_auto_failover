@@ -437,14 +437,11 @@ cli_enable_maintenance(int argc, char **argv)
 
 	char *channels[] = { "state", NULL };
 
-	ConnectionRetryPolicy retryPolicy = {
-		POSTGRES_PING_RETRY_TIMEOUT,
-		-1, /* unbounded number of attempts */
-		5 * 1000,               /* sleep up to 5s between attempts */
-		1 * 1000                /* first retry happens after 1 second */
-	};
+	ConnectionRetryPolicy retryPolicy = { 0 };
 
 	keeper.config = keeperOptions;
+
+	(void) pgsql_set_monitor_interactive_retry_policy(&retryPolicy);
 
 	(void) exit_unless_role_is_keeper(&(keeper.config));
 
@@ -538,14 +535,11 @@ cli_disable_maintenance(int argc, char **argv)
 
 	char *channels[] = { "state", NULL };
 
-	ConnectionRetryPolicy retryPolicy = {
-		POSTGRES_PING_RETRY_TIMEOUT,
-		-1, /* unbounded number of attempts */
-		5 * 1000,               /* sleep up to 5s between attempts */
-		1 * 1000                /* first retry happens after 1 second */
-	};
+	ConnectionRetryPolicy retryPolicy = { 0 };
 
 	keeper.config = keeperOptions;
+
+	(void) pgsql_set_monitor_interactive_retry_policy(&retryPolicy);
 
 	(void) exit_unless_role_is_keeper(&(keeper.config));
 

@@ -1223,12 +1223,9 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 	MonitorAssignedState assignedState = { 0 };
 	char expectedSlotName[BUFSIZE] = { 0 };
 
-	ConnectionRetryPolicy retryPolicy = {
-		POSTGRES_PING_RETRY_TIMEOUT,
-		-1,                     /* unbounded number of attempts */
-		5 * 1000,               /* sleep up to 5s between attempts */
-		1 * 1000                /* first retry happens after 1 second */
-	};
+	ConnectionRetryPolicy retryPolicy = { 0 };
+
+	(void) pgsql_set_monitor_interactive_retry_policy(&retryPolicy);
 
 	/*
 	 * First try to create our state file. The keeper_state_create_file function
@@ -1250,7 +1247,7 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 	}
 
 	/* use a special connection retry policy for initialisation */
-	(void) pgsql_set_init_retry_policy(&(keeper->monitor.pgsql));
+	(void) pgsql_set_init_retry_policy(&(keeper->monitor.pgsql.retryPolicy));
 
 	/*
 	 * When registering to the monitor, we get assigned a nodeId, that we keep

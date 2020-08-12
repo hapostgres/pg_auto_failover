@@ -241,14 +241,15 @@ typedef struct SingleValueResultContext
 
 bool pgsql_init(PGSQL *pgsql, char *url, ConnectionType connectionType);
 
-void pgsql_set_retry_policy(PGSQL *pgsql,
+void pgsql_set_retry_policy(ConnectionRetryPolicy *retryPolicy,
 							int maxT,
 							int maxR,
 							int maxSleepTime,
 							int baseSleepTime);
-void pgsql_set_main_loop_retry_policy(PGSQL *pgsql);
-void pgsql_set_init_retry_policy(PGSQL *pgsql);
-void pgsql_set_interactive_retry_policy(PGSQL *pgsql);
+void pgsql_set_main_loop_retry_policy(ConnectionRetryPolicy *retryPolicy);
+void pgsql_set_init_retry_policy(ConnectionRetryPolicy *retryPolicy);
+void pgsql_set_interactive_retry_policy(ConnectionRetryPolicy *retryPolicy);
+void pgsql_set_monitor_interactive_retry_policy(ConnectionRetryPolicy *retryPolicy);
 int pgsql_compute_connection_retry_sleep_time(ConnectionRetryPolicy *retryPolicy);
 bool pgsql_retry_policy_expired(ConnectionRetryPolicy *retryPolicy);
 

@@ -731,17 +731,18 @@ monitor_register_node(Monitor *monitor, char *formation,
 		if (strcmp(parseContext.sqlstate, STR_ERRCODE_OBJECT_IN_USE) == 0 &&
 			!pgsql_retry_policy_expired(retryPolicy))
 		{
-			int sleep = pgsql_compute_connection_retry_sleep_time(retryPolicy);
+			int sleepTimeMs =
+				pgsql_compute_connection_retry_sleep_time(retryPolicy);
 
 			log_warn("Failed to register node %s:%d in group %d of "
 					 "formation \"%s\" with initial state \"%s\" "
 					 "because the monitor is already registering another "
 					 "standby, retrying in %d ms",
 					 host, port, desiredGroupId, formation, nodeStateString,
-					 sleep);
+					 sleepTimeMs);
 
 			/* we have milliseconds, pg_usleep() wants microseconds */
-			(void) pg_usleep(sleep * 1000);
+			(void) pg_usleep(sleepTimeMs * 1000);
 
 			return monitor_register_node(monitor, formation, name, host, port,
 										 system_identifier,
@@ -3035,14 +3036,15 @@ monitor_start_maintenance(Monitor *monitor, int nodeId,
 		if (monitor_retryable_error(context.sqlstate) &&
 			!pgsql_retry_policy_expired(retryPolicy))
 		{
-			int sleep = pgsql_compute_connection_retry_sleep_time(retryPolicy);
+			int sleepTimeMs =
+				pgsql_compute_connection_retry_sleep_time(retryPolicy);
 
 			log_warn("Failed to start_maintenance of node %d on the monitor, "
 					 "retrying in %d ms.",
-					 nodeId, sleep);
+					 nodeId, sleepTimeMs);
 
 			/* we have milliseconds, pg_usleep() wants microseconds */
-			(void) pg_usleep(sleep * 1000);
+			(void) pg_usleep(sleepTimeMs * 1000);
 
 			return monitor_start_maintenance(monitor, nodeId, retryPolicy);
 		}
@@ -3089,16 +3091,17 @@ monitor_stop_maintenance(Monitor *monitor, int nodeId,
 		if (monitor_retryable_error(context.sqlstate) &&
 			!pgsql_retry_policy_expired(retryPolicy))
 		{
-			int sleep = pgsql_compute_connection_retry_sleep_time(retryPolicy);
+			int sleepTimeMs =
+				pgsql_compute_connection_retry_sleep_time(retryPolicy);
 
 			log_warn("Failed to start_maintenance of node %d on the monitor, "
 					 "retrying in %d ms.",
-					 nodeId, sleep);
+					 nodeId, sleepTimeMs);
 
 			/* we have milliseconds, pg_usleep() wants microseconds */
-			(void) pg_usleep(sleep * 1000);
+			(void) pg_usleep(sleepTimeMs * 1000);
 
-			return monitor_start_maintenance(monitor, nodeId, retryPolicy);
+			return monitor_stop_maintenance(monitor, nodeId, retryPolicy);
 		}
 
 		log_error("Failed to stop_maintenance of node %d from the monitor",
