@@ -9,6 +9,8 @@
  *-------------------------------------------------------------------------
  */
 
+#include "postgres.h"
+
 #if (PG_VERSION_NUM < 110000)
 
 /*
@@ -17,7 +19,6 @@
  * https://git.postgresql.org/gitweb/?p=postgresql.git;a=commit;h=ab72716778128fb63d54ac256adf7fe6820a1185
  */
 
-#include "postgres.h"
 #include "nodes/pg_list.h"
 #include "version_compat.h"
 

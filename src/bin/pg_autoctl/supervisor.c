@@ -220,12 +220,16 @@ supervisor_loop(Supervisor *supervisor)
 						log_info("Internal subprocesses are done, stopping");
 						return true;
 					}
+
+					log_fatal("Unexpected ECHILD error from waitpid()");
+					return false;
 				}
 				else
 				{
-					log_fatal("Failed to call waitpid(): %m");
-					return false;
+					log_debug("Failed to call waitpid(): %m");
 				}
+
+				break;
 			}
 
 			case 0:
