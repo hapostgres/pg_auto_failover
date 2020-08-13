@@ -734,7 +734,31 @@ GroupListSyncStandbys(List *groupNodeList)
 
 
 /*
- * AllNodesHaveSameCandidatePriority returns true when all the nodes in the
+ * CountSyncStandbys returns how many standby nodes have their
+ * replicationQuorum property set to true in the given groupNodeList.
+ */
+int
+CountSyncStandbys(List *groupNodeList)
+{
+	int count = 0;
+	ListCell *nodeCell = NULL;
+
+	foreach(nodeCell, groupNodeList)
+	{
+		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (node->replicationQuorum)
+		{
+			++count;
+		}
+	}
+
+	return count;
+}
+
+
+/*
+ * allnodeshavesamecandidatepriority returns true when all the nodes in the
  * given list have the same candidate priority.
  */
 bool

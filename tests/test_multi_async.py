@@ -49,7 +49,7 @@ def test_003_add_standby():
     global node3
 
     node3 = cluster.create_datanode("/tmp/multi_async/node3")
-    node3.create()
+    node3.create(level='-vv', replicationQuorum=False)
     node3.run()
 
     assert node3.wait_until_state(target_state="secondary")
@@ -60,8 +60,8 @@ def test_003_add_standby():
     assert node2.has_needed_replication_slots()
     assert node3.has_needed_replication_slots()
 
-    # the formation number_sync_standbys is expected to be set to 1 now
-    assert node1.get_number_sync_standbys() == 1
+    # the formation number_sync_standbys is expected to still be zero now
+    eq_(node1.get_number_sync_standbys(), 0)
 
     # make sure we reached primary on node1 before next tests
     assert node1.wait_until_state(target_state="primary")
