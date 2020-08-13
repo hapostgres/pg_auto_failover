@@ -62,6 +62,10 @@ This parameter can be set at the *formation* level in pg_auto_failover,
 meaning that it applies to the current primary and follow a failover to
 apply to any new primary that might replace the current one.
 
+To set this parameter to the value ``<n>``, use the following command::
+
+  pg_autoctl set formation number-sync-standbys <n>
+
 The default value in pg_auto_failover is zero. When set to zero, the
 Postgres parameter ``synchronous_standby_names`` can be set to either
 ``'*'`` or to ``''``:
@@ -109,6 +113,12 @@ set to true.
 It is possible to force asynchronous replication globally by setting
 replication quorum to false on all the standby nodes in a formation.
 
+To set this parameter to either true or false, use one of the following
+commands::
+
+  pg_autoctl set node replication-quorum true
+  pg_autoctl set node replication-quorum false
+
 Candidate Priority
 ^^^^^^^^^^^^^^^^^^
 
@@ -116,6 +126,10 @@ The candidate priority setting is an integer that can be set to any value
 between 0 (zero) and 100 (one hundred). The default value is 50. When the
 pg_auto_failover monitor decides to orchestrate a failover, it uses each
 node's candidate priority to pick the new primary node.
+
+To set this parameter to the value ``<n>``, use the following command::
+
+  pg_autoctl set node candidate-priority <n>
 
 When nodes have the same candidate priority, the monitor then picks the
 standby with the most advanced LSN position published to the monitor. When
@@ -151,7 +165,7 @@ different Postgres architectures for your production needs.
 
 In this case, the system is setup with three standby nodes all set the same
 way, with default parameters. This allows to then setup
-``number_sync_standbys = 1``. This means that Postgres will maintain three
+``number_sync_standbys = 2``. This means that Postgres will maintain three
 copies of the production data set at all time.
 
 On the other hand, if two standby nodes were to fail at the same time,
