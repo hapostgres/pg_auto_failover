@@ -51,8 +51,8 @@ As a result, here is the standard upgrade plan for pg_auto_failover:
   1. Upgrade the pg_auto_failover package on the all the nodes, monitor
      included.
 
-	 When using a debian based OS, this looks like the following command for
-	 pg_auto_failover 1.3.1::
+	 When using a debian based OS, this looks like the following command when 
+	 from 1.4 to 1.5::
 
 	   sudo apt-get remove pg-auto-failover-cli-enterprise-1.4 postgresql-11-auto-failover-enterprise-1.4
 	   sudo apt-get install -q -y pg-auto-failover-cli-enterprise-1.5 postgresql-11-auto-failover-enterprise-1.5
