@@ -501,6 +501,7 @@ cli_enable_maintenance(int argc, char **argv)
 			&(keeper.monitor),
 			keeper.config.formation,
 			keeper.config.groupId,
+			keeper.config.pgSetup.pgKind,
 			MAINTENANCE_STATE))
 	{
 		log_error("Failed to wait until a node reached the wait_primary state");
@@ -568,6 +569,7 @@ cli_disable_maintenance(int argc, char **argv)
 			&(keeper.monitor),
 			keeper.config.formation,
 			keeper.config.groupId,
+			keeper.config.pgSetup.pgKind,
 			PRIMARY_STATE))
 	{
 		log_error("Failed to wait until a node reached the secondary state");

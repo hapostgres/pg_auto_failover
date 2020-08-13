@@ -11,16 +11,18 @@
 #include "nodestate_utils.h"
 #include "string_utils.h"
 
-
 /*
  * nodestatePrepareHeaders computes the maximum length needed for variable
  * length columns and prepare the separation strings, filling them with the
  * right amount of dashes.
  */
 void
-nodestatePrepareHeaders(CurrentNodeStateArray *nodesArray)
+nodestatePrepareHeaders(CurrentNodeStateArray *nodesArray,
+						PgInstanceKind nodeKind)
 {
 	int index = 0;
+
+	nodesArray->headers.nodeKind = nodeKind;
 
 	nodesArray->headers.maxNameSize = 4;  /* "Name" */
 	nodesArray->headers.maxHostSize = 10; /* "Host:Port" */
@@ -51,9 +53,13 @@ nodestatePrepareHeaders(CurrentNodeStateArray *nodesArray)
  */
 void
 nodeAddressArrayPrepareHeaders(NodeAddressHeaders *headers,
-							   NodeAddressArray *nodesArray, int groupId)
+							   NodeAddressArray *nodesArray,
+							   int groupId,
+							   PgInstanceKind nodeKind)
 {
 	int index = 0;
+
+	headers->nodeKind = nodeKind;
 
 	/*
 	 * Dynamically adjust our display output to the length of the longer
@@ -106,9 +112,27 @@ nodestateAdjustHeaders(NodeAddressHeaders *headers,
 
 	/* compute strlen of groupId/nodeId, as in "0/1" */
 	IntString nodeIdString = intToString(node->nodeId);
-	IntString groupIdString = intToString(groupId);
-	int nodeLen =
-		strlen(groupIdString.strValue) + strlen(nodeIdString.strValue) + 1;
+	int nodeLen = 0;
+
+	switch (headers->nodeKind)
+	{
+		case NODE_KIND_STANDALONE:
+		{
+			nodeLen = strlen(nodeIdString.strValue);
+			break;
+		}
+
+		default:
+		{
+			IntString groupIdString = intToString(groupId);
+
+			nodeLen =
+				strlen(groupIdString.strValue) +
+				strlen(nodeIdString.strValue) + 1;
+
+			break;
+		}
+	}
 
 	/* initialize to mininum values, if needed */
 	if (headers->maxNameSize == 0)
@@ -182,7 +206,8 @@ nodestatePrintNodeState(NodeAddressHeaders *headers,
 	char hostport[BUFSIZE] = { 0 };
 	char composedId[BUFSIZE] = { 0 };
 
-	(void) nodestatePrepareNode(&(nodeState->node),
+	(void) nodestatePrepareNode(headers,
+								&(nodeState->node),
 								nodeState->groupId,
 								hostport,
 								composedId);
@@ -205,11 +230,25 @@ nodestatePrintNodeState(NodeAddressHeaders *headers,
  * be pre-allocated string buffers.
  */
 void
-nodestatePrepareNode(NodeAddress *node,
+nodestatePrepareNode(NodeAddressHeaders *headers, NodeAddress *node,
 					 int groupId, char *hostport, char *composedId)
 {
 	sformat(hostport, BUFSIZE, "%s:%d", node->host, node->port);
-	sformat(composedId, BUFSIZE, "%d/%d", groupId, node->nodeId);
+
+	switch (headers->nodeKind)
+	{
+		case NODE_KIND_STANDALONE:
+		{
+			sformat(composedId, BUFSIZE, "%d", node->nodeId);
+			break;
+		}
+
+		default:
+		{
+			sformat(composedId, BUFSIZE, "%d/%d", groupId, node->nodeId);
+			break;
+		}
+	}
 }
 
 

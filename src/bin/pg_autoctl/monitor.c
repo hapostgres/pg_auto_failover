@@ -1546,7 +1546,7 @@ parseCurrentNodeState(PGresult *result, int rowNumber,
 	int errors = 0;
 
 	/* we don't expect any of the column to be NULL */
-	for (colNumber = 0; colNumber < 11; colNumber++)
+	for (colNumber = 0; colNumber < 12; colNumber++)
 	{
 		if (PQgetisnull(result, rowNumber, 0))
 		{
@@ -1557,19 +1557,23 @@ parseCurrentNodeState(PGresult *result, int rowNumber,
 	}
 
 	/*
-	 *  0 - OUT nodename             text,
-	 *  1 - OUT nodehost             text,
-	 *  2 - OUT nodeport             int,
-	 *  3 - OUT group_id             int,
-	 *  4 - OUT node_id              bigint,
-	 *  5 - OUT current_group_state  pgautofailover.replication_state,
-	 *  6 - OUT assigned_group_state pgautofailover.replication_state,
-	 *  7 - OUT candidate_priority	 int,
-	 *  8 - OUT replication_quorum	 bool,
-	 *  9 - OUT reported_lsn         pg_lsn,
-	 * 10 - OUT health               integer
+	 *  0 - OUT formation_kind       text,
+	 *  1 - OUT nodename             text,
+	 *  2 - OUT nodehost             text,
+	 *  3 - OUT nodeport             int,
+	 *  4 - OUT group_id             int,
+	 *  5 - OUT node_id              bigint,
+	 *  6 - OUT current_group_state  pgautofailover.replication_state,
+	 *  7 - OUT assigned_group_state pgautofailover.replication_state,
+	 *  8 - OUT candidate_priority	 int,
+	 *  9 - OUT replication_quorum	 bool,
+	 * 10 - OUT reported_lsn         pg_lsn,
+	 * 11 - OUT health               integer
+	 *
+	 * We need the groupId to parse the formation kind into a nodeKind, so we
+	 * begin at column 1 and get back to column 0 later, after column 4.
 	 */
-	value = PQgetvalue(result, rowNumber, 0);
+	value = PQgetvalue(result, rowNumber, 1);
 	length = strlcpy(nodeState->node.name, value, _POSIX_HOST_NAME_MAX);
 	if (length >= _POSIX_HOST_NAME_MAX)
 	{
@@ -1579,7 +1583,7 @@ parseCurrentNodeState(PGresult *result, int rowNumber,
 		++errors;
 	}
 
-	value = PQgetvalue(result, rowNumber, 1);
+	value = PQgetvalue(result, rowNumber, 2);
 
 	length = strlcpy(nodeState->node.host, value, _POSIX_HOST_NAME_MAX);
 	if (length >= _POSIX_HOST_NAME_MAX)
@@ -1590,7 +1594,7 @@ parseCurrentNodeState(PGresult *result, int rowNumber,
 		++errors;
 	}
 
-	value = PQgetvalue(result, rowNumber, 2);
+	value = PQgetvalue(result, rowNumber, 3);
 
 	if (!stringToInt(value, &(nodeState->node.port)) ||
 		nodeState->node.port == 0)
@@ -1599,21 +1603,43 @@ parseCurrentNodeState(PGresult *result, int rowNumber,
 		++errors;
 	}
 
-	value = PQgetvalue(result, rowNumber, 3);
+	value = PQgetvalue(result, rowNumber, 4);
 	if (!stringToInt(value, &(nodeState->groupId)))
 	{
 		log_error("Invalid groupId \"%s\" returned by monitor", value);
 		++errors;
 	}
 
-	value = PQgetvalue(result, rowNumber, 4);
+	/* we need the groupId to parse the formation kind into a nodeKind */
+	value = PQgetvalue(result, rowNumber, 0);
+
+	if (strcmp(value, "pgsql") == 0 && nodeState->groupId == 0)
+	{
+		nodeState->pgKind = NODE_KIND_STANDALONE;
+	}
+	else if (strcmp(value, "citus") == 0 && nodeState->groupId == 0)
+	{
+		nodeState->pgKind = NODE_KIND_CITUS_COORDINATOR;
+	}
+	else if (strcmp(value, "citus") == 0 && nodeState->groupId > 0)
+	{
+		nodeState->pgKind = NODE_KIND_CITUS_WORKER;
+	}
+	else
+	{
+		log_error("Invalid groupId %d with formation kind \"%s\"",
+				  nodeState->groupId, value);
+		++errors;
+	}
+
+	value = PQgetvalue(result, rowNumber, 5);
 	if (!stringToInt(value, &(nodeState->node.nodeId)))
 	{
 		log_error("Invalid nodeId \"%s\" returned by monitor", value);
 		++errors;
 	}
 
-	value = PQgetvalue(result, rowNumber, 5);
+	value = PQgetvalue(result, rowNumber, 6);
 	nodeState->reportedState = NodeStateFromString(value);
 	if (nodeState->reportedState == NO_STATE)
 	{
@@ -1621,7 +1647,7 @@ parseCurrentNodeState(PGresult *result, int rowNumber,
 		++errors;
 	}
 
-	value = PQgetvalue(result, rowNumber, 6);
+	value = PQgetvalue(result, rowNumber, 7);
 	nodeState->goalState = NodeStateFromString(value);
 	if (nodeState->goalState == NO_STATE)
 	{
@@ -1629,7 +1655,7 @@ parseCurrentNodeState(PGresult *result, int rowNumber,
 		++errors;
 	}
 
-	value = PQgetvalue(result, rowNumber, 7);
+	value = PQgetvalue(result, rowNumber, 8);
 	if (!stringToInt(value, &(nodeState->candidatePriority)))
 	{
 		log_error("Invalid failover candidate priority \"%s\" "
@@ -1637,7 +1663,7 @@ parseCurrentNodeState(PGresult *result, int rowNumber,
 		++errors;
 	}
 
-	value = PQgetvalue(result, rowNumber, 8);
+	value = PQgetvalue(result, rowNumber, 9);
 	if (value == NULL || ((*value != 't') && (*value != 'f')))
 	{
 		log_error("Invalid replication quorum \"%s\" "
@@ -1650,10 +1676,10 @@ parseCurrentNodeState(PGresult *result, int rowNumber,
 	}
 
 	/* we trust Postgres pg_lsn data type to fit in our PG_LSN_MAXLENGTH */
-	value = PQgetvalue(result, rowNumber, 9);
+	value = PQgetvalue(result, rowNumber, 10);
 	strlcpy(nodeState->node.lsn, value, PG_LSN_MAXLENGTH);
 
-	value = PQgetvalue(result, rowNumber, 10);
+	value = PQgetvalue(result, rowNumber, 11);
 	if (!stringToInt(value, &(nodeState->health)))
 	{
 		log_error("Invalid node health \"%s\" returned by monitor", value);
@@ -1686,9 +1712,9 @@ parseCurrentNodeStateArray(CurrentNodeStateArray *nodesArray, PGresult *result)
 	}
 
 	/* pgautofailover.current_state returns 11 columns */
-	if (PQnfields(result) != 11)
+	if (PQnfields(result) != 12)
 	{
-		log_error("Query returned %d columns, expected 11", PQnfields(result));
+		log_error("Query returned %d columns, expected 12", PQnfields(result));
 		return false;
 	}
 
@@ -1716,6 +1742,7 @@ printCurrentState(void *ctx, PGresult *result)
 	CurrentNodeStateContext *context = (CurrentNodeStateContext *) ctx;
 	CurrentNodeStateArray *nodesArray = context->nodesArray;
 	NodeAddressHeaders *headers = &(nodesArray->headers);
+	PgInstanceKind firstNodeKind = NODE_KIND_UNKNOWN;
 
 	if (!parseCurrentNodeStateArray(nodesArray, result))
 	{
@@ -1724,7 +1751,12 @@ printCurrentState(void *ctx, PGresult *result)
 		return;
 	}
 
-	(void) nodestatePrepareHeaders(nodesArray);
+	if (nodesArray->count > 0)
+	{
+		firstNodeKind = nodesArray->nodes[0].pgKind;
+	}
+
+	(void) nodestatePrepareHeaders(nodesArray, firstNodeKind);
 	(void) nodestatePrintHeader(headers);
 
 	for (int position = 0; position < context->nodesArray->count; position++)
@@ -2957,6 +2989,7 @@ bool
 monitor_wait_until_some_node_reported_state(Monitor *monitor,
 											const char *formation,
 											int groupId,
+											PgInstanceKind nodeKind,
 											NodeState targetState)
 {
 	PGconn *connection = monitor->pgsql.connection;
@@ -2992,11 +3025,12 @@ monitor_wait_until_some_node_reported_state(Monitor *monitor,
 		headers.maxNameSize = 25;
 		headers.maxHostSize = 25;
 		headers.maxNodeSize = 5;
-
-		(void) prepareHeaderSeparators(&headers);
 	}
 
-	(void) nodeAddressArrayPrepareHeaders(&headers, &nodesArray, groupId);
+	(void) nodeAddressArrayPrepareHeaders(&headers,
+										  &nodesArray,
+										  groupId,
+										  nodeKind);
 
 	fformat(stdout, "%8s | %*s | %*s | %*s | %19s | %19s\n",
 			"Time",
@@ -3097,7 +3131,8 @@ monitor_wait_until_some_node_reported_state(Monitor *monitor,
 			/* "Wed Jun 30 21:49:08 1993" -> "21:49:08" */
 			timestring[11 + 8] = '\0';
 
-			(void) nodestatePrepareNode(&(nodeState.node),
+			(void) nodestatePrepareNode(&headers,
+										&(nodeState.node),
 										groupId,
 										hostport,
 										composedId);

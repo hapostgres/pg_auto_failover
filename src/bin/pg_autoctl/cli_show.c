@@ -37,6 +37,7 @@ static bool localState = false;
 
 static int cli_show_state_getopts(int argc, char **argv);
 static void cli_show_state(int argc, char **argv);
+static void cli_show_local_state(void);
 static void cli_show_events(int argc, char **argv);
 
 static int cli_show_standby_names_getopts(int argc, char **argv);
@@ -370,103 +371,7 @@ cli_show_state(int argc, char **argv)
 
 	if (localState)
 	{
-		switch (ProbeConfigurationFileRole(config.pathnames.config))
-		{
-			case PG_AUTOCTL_ROLE_MONITOR:
-			{
-				log_error("pg_autoctl show state --local is not supported "
-						  "on a monitor");
-				exit(EXIT_CODE_MONITOR);
-			}
-
-			case PG_AUTOCTL_ROLE_KEEPER:
-			{
-				bool missingPgdataIsOk = true;
-				bool pgIsNotRunningIsOk = true;
-				bool monitorDisabledIsOk = true;
-
-				Keeper keeper = { 0 };
-				CurrentNodeState nodeState = { 0 };
-
-				if (!keeper_config_read_file(&config,
-											 missingPgdataIsOk,
-											 pgIsNotRunningIsOk,
-											 monitorDisabledIsOk))
-				{
-					/* errors have already been logged */
-					exit(EXIT_CODE_BAD_CONFIG);
-				}
-
-				if (!keeper_init(&keeper, &config))
-				{
-					/* errors have already been logged */
-					exit(EXIT_CODE_BAD_CONFIG);
-				}
-
-				/* also grab the minimum recovery LSN if that's possible */
-				if (!pg_controldata(&(config.pgSetup), missingPgdataIsOk))
-				{
-					/* errors have already been logged, just continue */
-				}
-
-				/* build the CurrentNodeState from pieces */
-				nodeState.node.nodeId = keeper.state.current_node_id;
-				strlcpy(nodeState.node.name, config.name, _POSIX_HOST_NAME_MAX);
-				strlcpy(nodeState.node.host, config.hostname, _POSIX_HOST_NAME_MAX);
-				nodeState.node.port = config.pgSetup.pgport;
-
-				strlcpy(nodeState.formation, config.formation, NAMEDATALEN);
-				nodeState.groupId = config.groupId;
-
-				nodeState.reportedState = keeper.state.current_role;
-				nodeState.goalState = keeper.state.assigned_role;
-
-				strlcpy(nodeState.node.lsn,
-						config.pgSetup.control.recoveryEndingLocation,
-						PG_LSN_MAXLENGTH);
-
-				/* we have no idea, only the monitor knows, so display "?" */
-				nodeState.health = -1;
-
-				if (outputJSON)
-				{
-					JSON_Value *js = json_value_init_object();
-
-					if (!nodestateAsJSON(&nodeState, js))
-					{
-						/* can't happen */
-						exit(EXIT_CODE_INTERNAL_ERROR);
-					}
-					(void) cli_pprint_json(js);
-				}
-				else
-				{
-					NodeAddressHeaders headers = { 0 };
-
-					(void) nodestateAdjustHeaders(&headers,
-												  &(nodeState.node),
-												  nodeState.groupId);
-
-					(void) prepareHeaderSeparators(&headers);
-
-					(void) nodestatePrintHeader(&headers);
-
-					(void) nodestatePrintNodeState(&headers, &nodeState);
-
-					fformat(stdout, "\n");
-				}
-
-				break;
-			}
-
-			default:
-			{
-				log_fatal("Unrecognized configuration file \"%s\"",
-						  config.pathnames.config);
-				exit(EXIT_CODE_BAD_CONFIG);
-			}
-		}
-
+		(void) cli_show_local_state();
 		exit(EXIT_CODE_QUIT);
 	}
 
@@ -491,6 +396,115 @@ cli_show_state(int argc, char **argv)
 		{
 			/* errors have already been logged */
 			exit(EXIT_CODE_MONITOR);
+		}
+	}
+}
+
+
+/*
+ * cli_show_local_state implements pg_autoctl show state --local, which
+ * composes the state from what we have in the configuration file and the state
+ * file for the local (keeper) node.
+ */
+static void
+cli_show_local_state()
+{
+	KeeperConfig config = keeperOptions;
+
+	switch (ProbeConfigurationFileRole(config.pathnames.config))
+	{
+		case PG_AUTOCTL_ROLE_MONITOR:
+		{
+			log_error("pg_autoctl show state --local is not supported "
+					  "on a monitor");
+			exit(EXIT_CODE_MONITOR);
+		}
+
+		case PG_AUTOCTL_ROLE_KEEPER:
+		{
+			bool missingPgdataIsOk = true;
+			bool pgIsNotRunningIsOk = true;
+			bool monitorDisabledIsOk = true;
+
+			Keeper keeper = { 0 };
+			CurrentNodeState nodeState = { 0 };
+
+			if (!keeper_config_read_file(&config,
+										 missingPgdataIsOk,
+										 pgIsNotRunningIsOk,
+										 monitorDisabledIsOk))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
+
+			if (!keeper_init(&keeper, &config))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
+
+			/* also grab the minimum recovery LSN if that's possible */
+			if (!pg_controldata(&(config.pgSetup), missingPgdataIsOk))
+			{
+				/* errors have already been logged, just continue */
+			}
+
+			/* build the CurrentNodeState from pieces */
+			nodeState.node.nodeId = keeper.state.current_node_id;
+			strlcpy(nodeState.node.name, config.name, _POSIX_HOST_NAME_MAX);
+			strlcpy(nodeState.node.host, config.hostname, _POSIX_HOST_NAME_MAX);
+			nodeState.node.port = config.pgSetup.pgport;
+
+			strlcpy(nodeState.formation, config.formation, NAMEDATALEN);
+			nodeState.groupId = config.groupId;
+
+			nodeState.reportedState = keeper.state.current_role;
+			nodeState.goalState = keeper.state.assigned_role;
+
+			strlcpy(nodeState.node.lsn,
+					config.pgSetup.control.recoveryEndingLocation,
+					PG_LSN_MAXLENGTH);
+
+			/* we have no idea, only the monitor knows, so display "?" */
+			nodeState.health = -1;
+
+			if (outputJSON)
+			{
+				JSON_Value *js = json_value_init_object();
+
+				if (!nodestateAsJSON(&nodeState, js))
+				{
+					/* can't happen */
+					exit(EXIT_CODE_INTERNAL_ERROR);
+				}
+				(void) cli_pprint_json(js);
+			}
+			else
+			{
+				NodeAddressHeaders headers = { 0 };
+
+				(void) nodestateAdjustHeaders(&headers,
+											  &(nodeState.node),
+											  nodeState.groupId);
+
+				(void) prepareHeaderSeparators(&headers);
+
+				(void) nodestatePrintHeader(&headers);
+
+				(void) nodestatePrintNodeState(&headers, &nodeState);
+
+				fformat(stdout, "\n");
+			}
+
+			break;
+		}
+
+		default:
+		{
+			log_fatal("Unrecognized configuration file \"%s\"",
+					  config.pathnames.config);
+			exit(EXIT_CODE_BAD_CONFIG);
 		}
 	}
 }

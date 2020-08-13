@@ -50,7 +50,9 @@ CREATE TABLE pgautofailover.formation
     dbname               name NOT NULL DEFAULT 'postgres',
     opt_secondary        bool NOT NULL DEFAULT true,
     number_sync_standbys int  NOT NULL DEFAULT 0,
-    PRIMARY KEY   (formationid)
+
+    PRIMARY KEY   (formationid),
+    CHECK (kind IN ('pgsql', 'citus'))
  );
 insert into pgautofailover.formation (formationid) values ('default');
 
@@ -515,6 +517,7 @@ comment on function pgautofailover.last_events(text,int,int)
 CREATE FUNCTION pgautofailover.current_state
  (
     IN formation_id         text default 'default',
+   OUT formation_kind       text,
    OUT nodename             text,
    OUT nodehost             text,
    OUT nodeport             int,
@@ -529,11 +532,12 @@ CREATE FUNCTION pgautofailover.current_state
  )
 RETURNS SETOF record LANGUAGE SQL STRICT
 AS $$
-   select nodename, nodehost, nodeport, groupid, nodeid,
+   select kind, nodename, nodehost, nodeport, groupid, nodeid,
           reportedstate, goalstate,
    		  candidatepriority, replicationquorum,
           reportedlsn, health
      from pgautofailover.node
+     join pgautofailover.formation using(formationid)
     where formationid = formation_id
  order by groupid, nodeid;
 $$;
@@ -545,6 +549,7 @@ CREATE FUNCTION pgautofailover.current_state
  (
     IN formation_id         text,
     IN group_id             int,
+   OUT formation_kind       text,
    OUT nodename             text,
    OUT nodehost             text,
    OUT nodeport             int,
@@ -559,11 +564,12 @@ CREATE FUNCTION pgautofailover.current_state
  )
 RETURNS SETOF record LANGUAGE SQL STRICT
 AS $$
-   select nodename, nodehost, nodeport, groupid, nodeid,
+   select kind, nodename, nodehost, nodeport, groupid, nodeid,
           reportedstate, goalstate,
    		  candidatepriority, replicationquorum,
           reportedlsn, health
      from pgautofailover.node
+     join pgautofailover.formation using(formationid)
     where formationid = formation_id
       and groupid = group_id
  order by groupid, nodeid;

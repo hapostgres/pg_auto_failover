@@ -22,8 +22,10 @@
 typedef struct CurrentNodeState
 {
 	NodeAddress node;
+
 	char formation[NAMEDATALEN];
 	int groupId;
+	PgInstanceKind pgKind;
 
 	NodeState reportedState;
 	NodeState goalState;
@@ -40,6 +42,8 @@ typedef struct CurrentNodeState
  */
 typedef struct NodeAddressHeaders
 {
+	PgInstanceKind nodeKind;
+
 	int maxNameSize;
 	int maxHostSize;
 	int maxNodeSize;
@@ -58,9 +62,12 @@ typedef struct CurrentNodeStateArray
 } CurrentNodeStateArray;
 
 
-void nodestatePrepareHeaders(CurrentNodeStateArray *nodesArray);
+void nodestatePrepareHeaders(CurrentNodeStateArray *nodesArray,
+							 PgInstanceKind nodeKind);
 void nodeAddressArrayPrepareHeaders(NodeAddressHeaders *headers,
-									NodeAddressArray *nodesArray, int groupId);
+									NodeAddressArray *nodesArray,
+									int groupId,
+									PgInstanceKind nodeKind);
 void nodestateAdjustHeaders(NodeAddressHeaders *headers,
 							NodeAddress *node, int groupId);
 void prepareHeaderSeparators(NodeAddressHeaders *headers);
@@ -69,7 +76,7 @@ void nodestatePrintHeader(NodeAddressHeaders *headers);
 void nodestatePrintNodeState(NodeAddressHeaders *headers,
 							 CurrentNodeState *nodeState);
 
-void nodestatePrepareNode(NodeAddress *node,
+void nodestatePrepareNode(NodeAddressHeaders *headers, NodeAddress *node,
 						  int groupId, char *hostport, char *composedId);
 void prepareHostNameSeparator(char nameSeparatorHeader[], int size);
 
