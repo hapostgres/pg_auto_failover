@@ -7,10 +7,10 @@ pg_auto_failover is an extension and service for PostgreSQL that monitors
 and manages automated failover for a Postgres cluster. It is optimized for
 simplicity and correctness and supports Postgres 10 and newer.
 
-pg_auto_failover supports several Postgres architectures a safe automated
-failover for your Postgres service. It is possible to get started with only
-two nodes, which will be given the roles of primary and secondary by the
-monitor.
+pg_auto_failover supports several Postgres architectures and implements a
+safe automated failover for your Postgres service. It is possible to get
+started with only two nodes, which will be given the roles of primary and
+secondary by the monitor.
 
 ![pg_auto_failover Architecture with 2 nodes](docs/tikz/arch-single-standby.svg?raw=true "pg_auto_failover Architecture with 2 nodes")
 
@@ -179,9 +179,60 @@ Once the building and installation is done, follow those steps:
 That's it! You now have a running pg_auto_failover setup with two PostgreSQL nodes
 using Streaming Replication to implement fault-tolerance.
 
+## Your first failover
+
+Now that we have two nodes setup and running, we can initiate a manual
+failover, also named a switchover. It is possible to trigger such an
+operation without any node having to actually fail when using
+pg_auto_failover.
+
+The command `pg_autoctl perform switchover` can be used to force
+pg_auto_failover to orchestrate a failover. Because all the nodes are
+actually running file, the failover process does not have to carefuly
+implement timeouts to make sure to avoid split-brain.
+
+~~~ bash
+$ pg_autoctl perform switchover
+19:06:41 63977 INFO  Listening monitor notifications about state changes in formation "default" and group 0
+19:06:41 63977 INFO  Following table displays times when notifications are received
+    Time |  Name |  Node |      Host:Port |       Current State |      Assigned State
+---------+-------+-------+----------------+---------------------+--------------------
+19:06:43 |     a |     1 | localhost:5001 |             primary |            draining
+19:06:43 |     b |     2 | localhost:5002 |           secondary |   prepare_promotion
+19:06:43 |     b |     2 | localhost:5002 |   prepare_promotion |   prepare_promotion
+19:06:43 |     b |     2 | localhost:5002 |   prepare_promotion |    stop_replication
+19:06:43 |     a |     1 | localhost:5001 |             primary |      demote_timeout
+19:06:43 |     a |     1 | localhost:5001 |            draining |      demote_timeout
+19:06:43 |     a |     1 | localhost:5001 |      demote_timeout |      demote_timeout
+19:06:44 |     b |     2 | localhost:5002 |    stop_replication |    stop_replication
+19:06:44 |     b |     2 | localhost:5002 |    stop_replication |        wait_primary
+19:06:44 |     a |     1 | localhost:5001 |      demote_timeout |             demoted
+19:06:44 |     a |     1 | localhost:5001 |             demoted |             demoted
+19:06:44 |     b |     2 | localhost:5002 |        wait_primary |        wait_primary
+19:06:45 |     a |     1 | localhost:5001 |             demoted |          catchingup
+19:06:46 |     a |     1 | localhost:5001 |          catchingup |          catchingup
+19:06:47 |     a |     1 | localhost:5001 |          catchingup |           secondary
+19:06:47 |     b |     2 | localhost:5002 |        wait_primary |             primary
+19:06:47 |     a |     1 | localhost:5001 |           secondary |           secondary
+19:06:48 |     b |     2 | localhost:5002 |             primary |             primary
+~~~
+
+And there you have done a full failover from your node a, former primary, to
+your node b, new primary. We can have a look at the state now:
+
+~~~
+$ pg_autoctl show state
+Name |  Node |      Host:Port |     Current State |    Assigned State |               LSN | Health
+-----+-------+----------------+-------------------+-------------------+-------------------+-------
+   a |     1 | localhost:5001 |         secondary |         secondary |         0/3001648 |    ✓
+   b |     2 | localhost:5002 |           primary |           primary |         0/3001648 |    ✓
+~~~
+
+## Cleaning-up your local setup
+
 You can use the commands `pg_autoctl stop`, `pg_autoctl drop node
 --destroy`, and `pg_autoctl drop monitor --destroy` if you want to get rid
-of everything.
+of everything set-up so far.
 
 ## Formations and Groups
 

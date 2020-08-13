@@ -9,7 +9,7 @@
 
 \begin{tikzpicture}[>=stealth',auto,rounded corners]
 
-  \tikzstyle{app}=[circle,thick,draw=blue!75,fill=white]
+  \tikzstyle{app}=[circle,thick,draw=blue!75,fill=white,line width=0.25em]
   \tikzstyle{primary}=[rectangle split,rectangle split parts=3,
     text=white,draw=white,fill=blue!75,
     minimum height=3cm,minimum width=4cm]
@@ -20,7 +20,7 @@
     minimum height=1.5cm,minimum width=3cm]
 
   %% \draw [help lines] (-10,0) grid (10,20);
-  
+
   \node  (a)   at (0,17)   [primary]
          {Node A
            \nodepart{second}
@@ -28,7 +28,7 @@
            \nodepart{third}
            \texttt{number\_sync\_standby = 1}
          };
-  
+
   \node  (b)   at (-6,12)  [standby,text width=5.5cm,align=center]
          {Node B
            \nodepart{second}
@@ -37,7 +37,7 @@
            \texttt{replication quorum = true} \\
            \texttt{candidate priority = 50}
          };
-  
+
   \node  (c)   at (6,12)   [standby,text width=5.5cm,align=center]
          {Node C
            \nodepart{second}
@@ -46,7 +46,7 @@
            \texttt{replication quorum = true} \\
            \texttt{candidate priority = 50}
          };
-  
+
   \node  (app) at (-6,18)  [app]        {Application};
   \node  (m)   at (6,18)   [monitor]    {Monitor};
 
@@ -54,7 +54,7 @@
   \tikzstyle{sqlf}=[->,color=blue!75,line width=0.15em,loosely dashed]
   \tikzstyle{sr}=[->,line width=0.15em]
   \tikzstyle{hc}=[->,color=green!75,line width=0.15em,dashed]
-  
+
   \path (app) edge [sql]  node {SQL}                              (a)
               edge [sqlf] node[right,near start] {SQL (fallback)} (b)
               edge [sqlf,out=-90,in=180]                          (c)

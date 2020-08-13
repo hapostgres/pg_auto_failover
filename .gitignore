@@ -44,3 +44,6 @@ lib*.pc
 pgautofailover--?.?.sql
 !pgautofailover--1.0.sql
 
+# Exclude generated PDF and PNG files for the graphics
+docs/tikz/*.pdf
+docs/tikz/*.png
