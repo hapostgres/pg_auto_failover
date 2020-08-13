@@ -13,6 +13,8 @@ Welcome to pg_auto_failover's documentation!
    intro
    tutorial
    architecture
+   architecture-multi-standby
+   finite-state-machine
    fault-tolerance
    install
    security
