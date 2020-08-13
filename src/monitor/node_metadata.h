@@ -124,8 +124,6 @@ extern List * GroupListCandidates(List *groupNodeList);
 extern List * ListMostAdvancedStandbyNodes(List *groupNodeList);
 extern List * GroupListSyncStandbys(List *groupNodeList);
 extern bool AllNodesHaveSameCandidatePriority(List *groupNodeList);
-extern int CountStandbyCandidates(AutoFailoverNode *primaryNode,
-								  List *stateList);
 extern bool IsFailoverInProgress(List *groupNodeList);
 extern AutoFailoverNode * FindMostAdvancedStandby(List *groupNodeList);
 extern AutoFailoverNode * FindCandidateNodeBeingPromoted(List *groupNodeList);
