@@ -66,7 +66,7 @@ static void local_postgres_update_pg_failures_tracking(LocalPostgresServer *post
 
 #define DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER_13 \
 	DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER, \
-	{ "wal_keep_size", "8 GB" }
+	{ "wal_keep_size", "'8 GB'" }
 
 GUC postgres_default_settings_pre_13[] = {
 	DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER_PRE_13,
