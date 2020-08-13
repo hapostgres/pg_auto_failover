@@ -526,6 +526,11 @@ postgres_add_default_settings(LocalPostgresServer *postgres)
 	 * default settings are different depending on Postgres version and Citus
 	 * usage
 	 */
+	if (pgSetup->control.pg_control_version < 1000)
+	{
+		log_fatal("BUG: pg_control_version = %d",
+				  pgSetup->control.pg_control_version);
+	}
 	if (pgSetup->control.pg_control_version < 1300)
 	{
 		if (IS_CITUS_INSTANCE_KIND(postgres->pgKind))
@@ -760,6 +765,13 @@ standby_init_database(LocalPostgresServer *postgres,
 	{
 		log_error("Failed to update our internal Postgres representation "
 				  "after pg_basebackup, see above for details");
+		return false;
+	}
+
+	/* we also need to run pg_controldata to fetch pg_control_version etc */
+	if (!pg_controldata(pgSetup, false))
+	{
+		/* errors have already been logged */
 		return false;
 	}
 
