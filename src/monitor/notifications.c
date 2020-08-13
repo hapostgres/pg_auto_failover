@@ -92,7 +92,7 @@ NotifyStateChange(AutoFailoverNode *node, char *description)
 					 ReplicationStateGetName(node->reportedState));
 
 	appendStringInfo(payload, "\"goalState\": \"%s\"",
-					 ReplicationStateGetName(node->reportedState));
+					 ReplicationStateGetName(node->goalState));
 
 	appendStringInfoChar(payload, '}');
 
