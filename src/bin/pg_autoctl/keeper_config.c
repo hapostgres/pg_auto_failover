@@ -691,14 +691,6 @@ keeper_config_accept_new(KeeperConfig *config, KeeperConfig *newConfig)
 		return false;
 	}
 
-	if (strneq(newConfig->replication_slot_name, config->replication_slot_name))
-	{
-		log_error("Attempt to change replication.slot from \"%s\" to \"%s\"",
-				  config->replication_slot_name,
-				  newConfig->replication_slot_name);
-		return false;
-	}
-
 	/*
 	 * Changing the monitor URI. Well it might just be about using a new IP
 	 * address, e.g. switching to IPv6, or maybe the monitor has moved to
