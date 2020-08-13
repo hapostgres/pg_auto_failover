@@ -35,8 +35,9 @@ static bool set_formation_number_sync_standbys(Monitor *monitor,
 CommandLine get_node_replication_quorum =
 	make_command("replication-quorum",
 				 "get replication-quorum property from the monitor",
-				 " [ --pgdata ] [ --json ] [ --name ]",
+				 " [ --pgdata ] [ --json ] [ --formation ] [ --name ]",
 				 "  --pgdata      path to data directory\n"
+				 "  --formation   pg_auto_failover formation\n"
 				 "  --name        pg_auto_failover node name\n"
 				 "  --json        output data in the JSON format\n",
 				 cli_get_set_properties_getopts,
@@ -45,8 +46,9 @@ CommandLine get_node_replication_quorum =
 CommandLine get_node_candidate_priority =
 	make_command("candidate-priority",
 				 "get candidate property from the monitor",
-				 " [ --pgdata ] [ --json ] [ --name ]",
+				 " [ --pgdata ] [ --json ] [ --formation ] [ --name ]",
 				 "  --pgdata      path to data directory\n"
+				 "  --formation   pg_auto_failover formation\n"
 				 "  --name        pg_auto_failover node name\n"
 				 "  --json        output data in the JSON format\n",
 				 cli_get_set_properties_getopts,
@@ -68,9 +70,8 @@ static CommandLine get_node_command =
 static CommandLine get_formation_number_sync_standbys =
 	make_command("number-sync-standbys",
 				 "get number_sync_standbys for a formation from the monitor",
-				 " [ --pgdata ] [ --json ] [ --formation ] [ --name ]",
+				 " [ --pgdata ] [ --json ] [ --formation ] ",
 				 "  --pgdata      path to data directory\n"
-				 "  --name        pg_auto_failover node name\n"
 				 "  --json        output data in the JSON format\n"
 				 "  --formation   pg_auto_failover formation\n",
 				 cli_get_set_properties_getopts,
@@ -102,8 +103,10 @@ CommandLine get_commands =
 static CommandLine set_node_replication_quorum_command =
 	make_command("replication-quorum",
 				 "set replication-quorum property on the monitor",
-				 " [ --pgdata ] [ --json ] [ --name ] <true|false>",
+				 " [ --pgdata ] [ --json ] [ --formation ] [ --name ] "
+				 "<true|false>",
 				 "  --pgdata      path to data directory\n"
+				 "  --formation   pg_auto_failover formation\n"
 				 "  --name        pg_auto_failover node name\n"
 				 "  --json        output data in the JSON format\n",
 				 cli_get_set_properties_getopts,
@@ -112,8 +115,10 @@ static CommandLine set_node_replication_quorum_command =
 static CommandLine set_node_candidate_priority_command =
 	make_command("candidate-priority",
 				 "set candidate property on the monitor",
-				 " [ --pgdata ] [ --json ] [ --name ] <priority: 0..100>",
+				 " [ --pgdata ] [ --json ] [ --formation ] [ --name ] "
+				 "<priority: 0..100>",
 				 "  --pgdata      path to data directory\n"
+				 "  --formation   pg_auto_failover formation\n"
 				 "  --name        pg_auto_failover node name\n"
 				 "  --json        output data in the JSON format\n",
 				 cli_get_set_properties_getopts,
@@ -147,12 +152,11 @@ CommandLine set_node_command =
 static CommandLine set_formation_number_sync_standby_command =
 	make_command("number-sync-standbys",
 				 "set number-sync-standbys for a formation on the monitor",
-				 " [ --pgdata ] [ --json ] [ --formation ] [ --name ] "
+				 " [ --pgdata ] [ --json ] [ --formation ] "
 				 "<number_sync_standbys>",
 				 "  --pgdata      path to data directory\n"
-				 "  --name        pg_auto_failover node name\n"
-				 "  --json        output data in the JSON format\n"
-				 "  --formation   pg_auto_failover formation\n",
+				 "  --formation   pg_auto_failover formation\n"
+				 "  --json        output data in the JSON format\n",
 				 cli_get_set_properties_getopts,
 				 cli_set_formation_number_sync_standbys);
 
