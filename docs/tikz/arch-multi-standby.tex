@@ -51,9 +51,9 @@
   \node  (m)   at (6,18)   [monitor]    {Monitor};
 
   \tikzstyle{sql}=[->,color=blue!75,line width=0.15em]
-  \tikzstyle{sqlf}=[->,color=blue!75,line width=0.15em,loosely dashed]
-  \tikzstyle{sr}=[->,line width=0.15em]
-  \tikzstyle{hc}=[->,color=green!75,line width=0.15em,dashed]
+  \tikzstyle{sqlf}=[->,color=blue!35,line width=0.15em,loosely dashed]
+  \tikzstyle{sr}=[>->,line width=0.15em]
+  \tikzstyle{hc}=[<->,color=green!75,line width=0.15em,dotted]
 
   \path (app) edge [sql]  node {SQL}                              (a)
               edge [sqlf] node[right,near start] {SQL (fallback)} (b)

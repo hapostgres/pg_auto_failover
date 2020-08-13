@@ -188,8 +188,9 @@ pg_auto_failover.
 
 The command `pg_autoctl perform switchover` can be used to force
 pg_auto_failover to orchestrate a failover. Because all the nodes are
-actually running file, the failover process does not have to carefuly
-implement timeouts to make sure to avoid split-brain.
+actually running fine (meaning that `pg_autoctl` actively reports the local
+state of each node to the monitor), the failover process does not have to
+carefuly implement timeouts to make sure to avoid split-brain.
 
 ~~~ bash
 $ pg_autoctl perform switchover
@@ -216,6 +217,15 @@ $ pg_autoctl perform switchover
 19:06:47 |     a |     1 | localhost:5001 |           secondary |           secondary
 19:06:48 |     b |     2 | localhost:5002 |             primary |             primary
 ~~~
+
+The promotion of the secondary node is finished when the node reaches the
+goal state *wait_primary*. At this point, the application that connects to
+the secondary is allowed to proceed with write traffic.
+
+Because this is a switchover and no nodes have failed, node a that used to
+be the promary completes its cycle and joins as a secondary within the same
+operation. The Postgres tool `pg_rewind` is used to implement that
+transition.
 
 And there you have done a full failover from your node a, former primary, to
 your node b, new primary. We can have a look at the state now:
