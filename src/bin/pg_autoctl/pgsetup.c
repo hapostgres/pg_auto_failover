@@ -461,12 +461,15 @@ get_pgpid(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk)
 
 	if (fileSize == 0)
 	{
-		log_warn("The PID file \"%s\" is empty\n", pidfile);
+		/* yeah, that happens (race condition, kind of) */
+		log_warn("The PID file \"%s\" is empty", pidfile);
+		return false;
 	}
 	else if (splitLines(contents, lines, 1) != 1 ||
 			 !stringToInt(lines[0], &pid))
 	{
-		log_warn("Invalid data in PID file \"%s\"\n", pidfile);
+		log_warn("Invalid data in PID file \"%s\"", pidfile);
+		return false;
 	}
 
 	/* postmaster PID (or negative of a standalone backend's PID) */
