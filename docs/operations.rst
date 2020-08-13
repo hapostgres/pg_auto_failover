@@ -34,93 +34,22 @@ monitor and on the Postgres nodes:
 	Postgres operations on the Postgres nodes continue normally.
 
 	During the restart of the monitor, the other nodes might have trouble
-	connecting. The ``pg_autoctl`` command is designed to retry connecting
-	to the monitor and handle errors gracefully. It also checks of the
-	expected Postgres replication connections are still being made, and when
-	that's the case, nodes will continue operating normally during the
-	monitor ugprade.
+	connecting to the monitor. The ``pg_autoctl`` command is designed to
+	retry connecting to the monitor and handle errors gracefully.
 
   - on the Postgres nodes, the ``pg_autoctl`` command connects to the
     monitor every once in a while (every second by default), and then calls
     the ``node_active`` protocol, a stored procedure in the monitor databases.
 
-	When upgrading the monitor, it may happen that this procedure has a new
-	API contract. In that case queries from the running ``pg_autoctl`` are
-	going to fail. We need to upgrade the client program so that we have the
-	code that matches the monitor extension's version.
+	The ``pg_autoctl`` also verifies at each connection to the monitor that
+	it's running the expected version of the extension. When that's not the
+	case, the "node-active" sub-process quits, to be restarted with the
+	possibly new version of the ``pg_autoctl`` binary found on-disk.
 
 As a result, here is the standard upgrade plan for pg_auto_failover:
 
-  1. Put all the current secondary nodes in maintenance to prevent from any
-     failover to happen.
-
-	 Run the follow SQL query on the monitor database to make sure your
-	 setup current state allows for an upgrade operation to happen::
-
-		select nodeid, nodename, nodeport, goalstate, reportedstate
-		  from pgautofailover.node
-		 where reportedstate = 'secondary'
-		   and not exists
-			  (
-			   select nodeid
-				 from pgautofailover.node
-				where goalstate <> reportedstate
-				   or reportedstate not in ('primary', 'secondary')
-			  )
-		order by nodeid;
-
-	 The previous SQL query is expected to list all your Postgres nodes that
-	 are currently in the `secondary` state. If the cluster is not in a
-	 globally stable state, then this query returns no rows, and you should
-	 stop the upgrade now.
-
-	 A globally stable state is achieved when all the registered nodes are
-	 either in the state `primary` or in the state `secondary`, and their
-	 currently reported and goal state are the same.
-
-	 Run the follow SQL query on the monitor database to enable the
-	 maintenance operation::
-
-		select nodeid, nodename, nodeport,
-		       pgautofailover.start_maintenance(nodename, nodeport)
-		  from pgautofailover.node
-		 where reportedstate = 'secondary'
-		   and not exists
-			  (
-			   select nodeid
-				 from pgautofailover.node
-				where goalstate <> reportedstate
-				   or reportedstate not in ('primary', 'secondary')
-			  )
-		order by nodeid;
-
-	 Check that the selected nodes have reached `maintenance` by watching
-	 the output of the ``pg_autoctl show state`` command. When all selected
-	 nodes are in maintenance, we can move forward with the upgrade.
-
-	 .. note::
-
-		Alternatively you may also run the command ``pg_autoctl enable
-		maintenance`` on every secondary node.
-
-  2. Stop the ``pg_autoctl`` service on the monitor.
-
-	 The command to stop the systemd pgautofailover service is::
-
-	   sudo systemctl stop pgautofailover
-
-	 To verify that the service has been stopped as expected, we run the
-	 following command::
-
-	   sudo systemctl status pgautofailover
-
-	 At this point all the Postgres nodes in the system are going to error
-	 out every second when connecting to the monitor. In case of error to
-	 connect to the monitor, the node-active process retries every second,
-	 and will be able to continue normally as soon as the monitor is back
-	 online.
-
-  3. Upgrade the pg_auto_failover package on the monitor.
+  1. Upgrade the pg_auto_failover package on the all the nodes, monitor
+     included.
 
 	 When using a debian based OS, this looks like the following command for
 	 pg_auto_failover 1.3.1::
@@ -128,11 +57,11 @@ As a result, here is the standard upgrade plan for pg_auto_failover:
 	   sudo apt-get remove pg-auto-failover-cli-enterprise-1.0 postgresql-11-auto-failover-enterprise-1.0
 	   sudo apt-get install -q -y pg-auto-failover-cli-enterprise-1.3 postgresql-11-auto-failover-enterprise-1.3
 
-  4. Restart the ``pgautofailover`` service on the monitor.
+  2. Restart the ``pgautofailover`` service on the monitor.
 
 	 When using the systemd integration, all we need to do is::
 
-	   sudo systemctl start pgautofailover
+	   sudo systemctl restart pgautofailover
 
 	 Then we may use the following commands to make sure that the service is
 	 running as expected::
@@ -145,32 +74,13 @@ As a result, here is the standard upgrade plan for pg_auto_failover:
 	 pgautofailover UPDATE TO ...`` command. The monitor is ready with the
 	 new version of pg_auto_failover.
 
-  5. Upgrade the pg_auto_failover package on the Postgres nodes.
-
-	 Use the same command as on the monitor in step 4 above.
-
-  6. Restart the ``node-service`` service on all the Postgres nodes.
-
-	 When using the systemd integration, restarting the ``pgautofailover``
-	 service will also restart Postgres, which is not always possible. If
-	 you did implement step 2, your current service is not running, so you
-	 can restart it now::
-
-	   pg_autoctl restart node-active
-
-  7. Disable maintenance on the Postgres nodes.
-
-	 For that we can run the following SQL query on the monitor database::
-
-		select nodeid, nodename, nodeport,
-		       pgautofailover.stop_maintenance(nodename, nodeport)
-		  from pgautofailover.node
-		 where reportedstate = 'maintenance';
-
-	 .. note::
-
-		Alternatively you may also run the command ``pg_autoctl disable
-		maintenance`` on every secondary node.
+When the Postgres nodes ``pg_autoctl`` process connects to the new monitor
+version, the check for version compatibility fails, and the "node-active"
+sub-process exits. The main ``pg_autoctl`` process supervisor then restart
+the "node-active" sub-process from its on-disk binary executable file, which
+has been upgraded to the new version. That's why we first install the new
+packages for pg_auto_failover on every node, and only then restart the
+monitor.
 
 And when the upgrade is done we can use ``pg_autoctl show state`` on the
 monitor to see that eveything is as expected.
