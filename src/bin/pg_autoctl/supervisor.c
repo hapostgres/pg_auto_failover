@@ -228,6 +228,8 @@ supervisor_loop(Supervisor *supervisor)
 				{
 					log_debug("Failed to call waitpid(): %m");
 				}
+
+				break;
 			}
 
 			case 0:
