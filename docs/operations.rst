@@ -19,8 +19,8 @@ pg_auto_failover monitor. The ``pg_autoctl create`` command honors the
 running. If Postgres is detected, the new node is registered in SINGLE mode,
 bypassing the monitor's role assignment policy.
 
-Upgrading pg_auto_failover
---------------------------
+Upgrading pg_auto_failover, from versions 1.4 onwward
+-----------------------------------------------------
 
 When upgrading a pg_auto_failover setup, the procedure is different on the
 monitor and on the Postgres nodes:
@@ -82,8 +82,73 @@ has been upgraded to the new version. That's why we first install the new
 packages for pg_auto_failover on every node, and only then restart the
 monitor.
 
+.. important::
+
+   Before upgrading the monitor, which is a simple restart of the
+   ``pg_autoctl`` process, it is important that the OS packages for
+   pgautofailover be updated on all the Postgres nodes.
+
+   When that's not the case, ``pg_autoctl`` on the Postgres nodes will still
+   detect a version mismatch with the monitor extension, and the
+   "node-active" sub-process will exit. And when restarted automatically,
+   the same version of the local ``pg_autoctl`` binary executable is found
+   on-disk, leading to the same version mismatch with the monitor extension.
+
+   After restarting the "node-active" process 5 times, ``pg_autoctl`` quits
+   retrying and stops. This includes stopping the Postgres service too, and
+   a service downtime might then occur.
+
 And when the upgrade is done we can use ``pg_autoctl show state`` on the
 monitor to see that eveything is as expected.
+
+Upgrading from previous pg_auto_failover versions
+-------------------------------------------------
+
+The new upgrade procedure described in the previous section is part of
+pg_auto_failover since version 1.4. When upgrading from a previous version
+of pg_auto_failover, up to and including version 1.3, then all the
+``pg_autoctl`` processes have to be restarted fully.
+
+To prevent triggering a failover during the upgrade, it's best to put your
+secondary nodes in maintenance. The procedure then looks like the following:
+
+  1. Enable maintenance on your secondary node(s)::
+
+		pg_autoctl enable maintenance
+
+  2. Upgrade the OS packages for pg_auto_failover on every node, as per
+     previous section.
+
+  3. Restart the monitor to upgrade it to the new pg_auto_failover version:
+
+	 When using the systemd integration, all we need to do is::
+
+	   sudo systemctl restart pgautofailover
+
+	 Then we may use the following commands to make sure that the service is
+	 running as expected::
+
+	   sudo systemctl status pgautofailover
+	   sudo journalctl -u pgautofailover
+
+	 At this point it is expected that the ``pg_autoctl`` logs show that an
+	 upgrade has been performed by using the ``ALTER EXTENSION
+	 pgautofailover UPDATE TO ...`` command. The monitor is ready with the
+	 new version of pg_auto_failover.
+
+  4. Restart ``pg_autoctl`` on all Postgres nodes on the cluster.
+
+	 When using the systemd integration, all we need to do is::
+
+	   sudo systemctl restart pgautofailover
+
+	 As in the previous point in this list, make sure the service is now
+	 running as expected.
+
+  5. Disable maintenance on your secondary nodes(s)::
+
+		pg_autoctl disable maintenance
+
 
 Cluster Management and Operations
 ---------------------------------
