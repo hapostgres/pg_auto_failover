@@ -42,7 +42,6 @@ static void local_postgres_update_pg_failures_tracking(LocalPostgresServer *post
 	{ "max_replication_slots", "12" }, \
 	{ "wal_level", "'replica'" }, \
 	{ "wal_log_hints", "on" }, \
-	{ "wal_keep_segments", "512" }, \
 	{ "wal_sender_timeout", "'30s'" }, \
 	{ "hot_standby_feedback", "on" }, \
 	{ "hot_standby", "on" }, \
@@ -61,13 +60,33 @@ static void local_postgres_update_pg_failures_tracking(LocalPostgresServer *post
 	{ "ssl_key_file", "" }, \
 	{ "ssl_ciphers", "'" DEFAULT_SSL_CIPHERS "'" }
 
-GUC postgres_default_settings[] = {
-	DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER,
+#define DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER_PRE_13 \
+	DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER, \
+	{ "wal_keep_segments", "512" }
+
+#define DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER_13 \
+	DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER, \
+	{ "wal_keep_size", "8 GB" }
+
+GUC postgres_default_settings_pre_13[] = {
+	DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER_PRE_13,
 	{ NULL, NULL }
 };
 
-GUC citus_default_settings[] = {
-	DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER,
+GUC postgres_default_settings_13[] = {
+	DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER_13,
+	{ NULL, NULL }
+};
+
+GUC citus_default_settings_pre_13[] = {
+	DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER_PRE_13,
+	{ "shared_preload_libraries", "'citus','pg_stat_statements'" },
+	{ "citus.node_conninfo", "'sslmode=prefer'" },
+	{ NULL, NULL }
+};
+
+GUC citus_default_settings_13[] = {
+	DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER_13,
 	{ "shared_preload_libraries", "'citus','pg_stat_statements'" },
 	{ "citus.node_conninfo", "'sslmode=prefer'" },
 	{ NULL, NULL }
@@ -493,7 +512,7 @@ postgres_add_default_settings(LocalPostgresServer *postgres)
 	PGSQL *pgsql = &(postgres->sqlClient);
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	char configFilePath[MAXPGPATH];
-	GUC *default_settings = postgres_default_settings;
+	GUC *default_settings = NULL;
 
 	log_trace("postgres_add_default_settings");
 
@@ -503,10 +522,31 @@ postgres_add_default_settings(LocalPostgresServer *postgres)
 	/* in case of errors, pgsql_ functions finish the connection */
 	pgsql_finish(pgsql);
 
-	/* default settings are different when dealing with a Citus node */
-	if (IS_CITUS_INSTANCE_KIND(postgres->pgKind))
+	/*
+	 * default settings are different depending on Postgres version and Citus
+	 * usage
+	 */
+	if (pgSetup->control.pg_control_version < 1300)
 	{
-		default_settings = citus_default_settings;
+		if (IS_CITUS_INSTANCE_KIND(postgres->pgKind))
+		{
+			default_settings = citus_default_settings_pre_13;
+		}
+		else
+		{
+			default_settings = postgres_default_settings_pre_13;
+		}
+	}
+	else
+	{
+		if (IS_CITUS_INSTANCE_KIND(postgres->pgKind))
+		{
+			default_settings = citus_default_settings_13;
+		}
+		else
+		{
+			default_settings = postgres_default_settings_13;
+		}
 	}
 
 	if (!pg_add_auto_failover_default_settings(pgSetup,
