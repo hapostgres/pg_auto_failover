@@ -7,13 +7,12 @@ pg_auto_failover is an extension and service for PostgreSQL that monitors
 and manages automated failover for a Postgres cluster. It is optimized for
 simplicity and correctness and supports Postgres 10 and newer.
 
-We set up one PostgreSQL server as a **monitor** node as well as a
-**primary** and **secondary** node for storing data. The monitor node tracks
-the health of the data nodes and implements a failover state machine. On the
-PostgreSQL nodes, the `pg_autoctl` program runs alongside PostgreSQL and
-runs the necessary commands to configure synchronous streaming replication.
+pg_auto_failover supports several Postgres architectures a safe automated
+failover for your Postgres service. It is possible to get started with only
+two nodes, which will be given the roles of primary and secondary by the
+monitor.
 
-![pg_auto_failover Architecture](docs/tikz/arch-single-standby.svg?raw=true "pg_auto_failover Architecture")
+![pg_auto_failover Architecture with 2 nodes](docs/tikz/arch-single-standby.svg?raw=true "pg_auto_failover Architecture with 2 nodes")
 
 The pg_auto_failover Monitor implements a state machine and relies on in-core
 PostgreSQL facilities to deliver HA. For example. when the **secondary** node
@@ -27,6 +26,17 @@ pg_auto_failover consists of the following parts:
   - a PostgreSQL extension named `pgautofailover`
   - a PostgreSQL service to operate the pg_auto_failover monitor
   - a pg_auto_failover keeper to operate your PostgreSQL instances, see `pg_autoctl run`
+
+Starting with pg_auto_failover version 1.4, it is possible to implement a
+production architecture with 3 Postgres nodes, for better data availability
+guarantees.
+
+![pg_auto_failover Architecture with 3 nodes](docs/tikz/arch-multi-standby.svg?raw=true "pg_auto_failover Architecture with 3 nodes")
+
+By default, pg_auto_failover uses synchronous replication and every node
+that reaches the secondary state is added to synchronous_standby_names on
+the primary. With pg_auto_failover 1.4 it is possible to remove a node from
+the _replication quorum_ of Postgres.
 
 ## Dependencies
 
@@ -103,158 +113,75 @@ install the `pg_autoctl` binary command in the directory pointed to by
 `pg_config --bindir`, alongside other PostgreSQL tools such as `pg_ctl` and
 `pg_controldata`.
 
-## Using pg_auto_failover
+## Trying pg_auto_failover on your local computer
 
 Once the building and installation is done, follow those steps:
 
-  1. Install and start a pg_auto_failover monitor on your monitor machine:
+  1. Install a run a monitor
 
      ~~~ bash
-     $ pg_autoctl create monitor --pgdata /path/to/pgdata
+	 $ export PGDATA=./monitor
+	 $ export PGPORT=5000
+	 $ pg_autoctl create monitor --ssl-self-signed --hostname localhost --auth trust --run
      ~~~
-
-     Once this command is done, you should have a running PostgreSQL
-     instance on the machine, installed in the directory pointed to by the
-     `--pgdata` option, using the default port 5432.
-
-     You may change the port using `--pgport`.
-
-     The Postgres instance created will listen by default on all its network
-     interfaces, and the monitor hostname is determined automatically by
-     `pg_autoctl` by having a look at the network interfaces on the machine
-     and doing some reverse then forward DNS queries. You may force the
-     regitered hostname used with the `--hostname` option.
-
-     The command also creates a `autoctl` user and database, and a
-     `autoctl_node` user for the other nodes to use. In the `pg_auto_failover`
-     database, the extension `pgautofailover` is installed, and some *background
-     worker* jobs are active already, waiting until a PostgreSQL node gets
-     registered to run health-checks on it.
 
   2. Get the Postgres URI (connection string) for the monitor node:
 
      ~~~ bash
-     $ pg_autoctl show uri --pgdata /path/to/pgdata
-     postgres://autoctl_node@host/pg_auto_failover
+     $ pg_autoctl show uri --monitor --pgdata ./monitor
+	 postgres://autoctl_node@localhost:5000/pg_auto_failover?sslmode=require
      ~~~
 
      The following two steps are going to use the option `--monitor` which
      expects that connection string. So copy/paste your actual Postgres URI
      for the monitor in the next steps.
 
-  3. Install and start a primary PostgreSQL instance:
+  3. Install and run a primary PostgreSQL instance:
 
      ~~~ bash
-     $ pg_autoctl create postgres --pgdata /path/to/pgdata     \
-                                  --monitor postgres://autoctl_node@host/pg_auto_failover
+	 $ export PGDATA=./node_a
+	 $ export PGPORT=5001
+     $ pg_autoctl create postgres \
+         --name a \
+         --hostname localhost \
+         --auth trust \
+         --ssl-self-signed \
+         --monitor 'postgres://autoctl_node@localhost:5000/pg_auto_failover?sslmode=require' \
+         --run
      ~~~
 
-     This command is using lots of default parameters that you may want to
-     override, see its `--help` output for details. The three parameters
-     used above are mandatory, though:
-
-       - `--pgdata` sets the PGDATA directory where to install PostgreSQL,
-         and if not given as an command line option then the environment
-         variable `PGDATA` is used, when defined.
-
-       - The hostname of this server is automatically discovered by
-         `pg_autoctl`, and used by the other nodes to then connect to the
-         newly created node: the monitor connects for running its
-         health-checks, and the secondary instance connects using the
-         replication protocol.
-
-         To determine your hostname `pg_autoctl` implements the following
-         three steps:
-
-           1. open a connection to the monitor and looks up the TCP/IP client
-              address that has been used to make that connection.
-
-           2. Do a reverse DNS lookup on this IP address to fetch a
-              hostname for our local machine.
-
-           3. If the reverse DNS lookup is successful, then `pg_autoctl`
-              does with a forward DNS lookup of that hostname.
-
-         When the forward DNS lookup response in step 3. is an IP address
-         found in one of our local network interfaces, then `pg_autoctl`
-         uses the hostname found in step 2. as the default `--hostname`.
-         Otherwise it uses the IP address found in step 1.
-
-         You may use the `--hostname` command line option to bypass the
-         whole DNS lookup based process and force the local node name to a
-         fixed value.
-
-         The `--hostname` is used by other nodes to connect to this one, so
-         it should be a hostname or an IP address that is reachable by the
-         other members (localhost probably won't work).
-
-         The provided `--hostname` is going to be used by pg_auto_failover
-         to grant connection privileges in the Postgres HBA file. When using
-         a hostname rather than an IP address, please make sure that reverse
-         DNS is then working with the provided hostname, because that's how
-         Postgres will then match any connection attempt with the HBA rules
-         for granting connections, as described in Postgres documentation
-         for [the pg_hba.conf
-         file](https://www.postgresql.org/docs/current/auth-pg-hba-conf.html),
-         at the *address* field.
-
-         In particular, this matching is done when setting-up replication
-         from the primary to the secondary node by pg_auto_failover.
-
-       - `--monitor` is the Postgres URI used to connect to the monitor that
-         we deployed with the previous command, you should replace `host` in
-         the connection string to point to the right host and port.
-
-         Also, pg_auto_failover currently makes no provision on the monitor node
-         with respect to database connection privileges, that are edited in
-         PostgreSQL `pg_hba.conf` file. So please adjust the setup to allow
-         for your keepers to be able to connect to the monitor.
-
-     The initialisation step probes the given `--pgdata` directory for an
-     existing PostgreSQL cluster, and when the directory doesn't exist it
-     will go ahead and `pg_ctl initdb` one for you, after having registered
-     the local node (`hostname:pgport`) to the pg_auto_failover monitor.
-
-     Now that the installation is ready we can run the keeper service, which
-     connects to the pg_auto_failover monitor every 5 seconds and implement the
-     state transitions when needed:
+  4. Install and run a secondary PostgreSQL instance, using exactly the same
+     command, but with a different PGDATA and PGPORT, because we're running
+     everything on the same host:
 
      ~~~ bash
-     $ pg_autoctl run --pgdata /path/to/pgdata
+	 $ export PGDATA=./node_a
+	 $ export PGPORT=5002
+     $ pg_autoctl create postgres \
+         --name b \
+         --hostname localhost \
+         --auth trust \
+         --ssl-self-signed \
+         --monitor 'postgres://autoctl_node@localhost:5000/pg_auto_failover?sslmode=require' \
+         --run
      ~~~
 
-
-  4. Install and start a secondary PostgreSQL instance:
-
-     ~~~ bash
-     $ pg_autoctl create postgres --pgdata /path/to/pgdata     \
-                                  --monitor postgres://autoctl_node@host/pg_auto_failover
-     ~~~
-
-     This command is the same as in the previous section, because it's all
-     about initializing a PostgreSQL node again. This time, the monitor has
-     a node registered as a primary server already, in the state SINGLE.
-     Given this current state, the monitor is assigning this new node the
-     role of a standby, and `pg_autoctl create` makes that happen.
-
-     The command waits until the primary has prepared the PostgreSQL
-     replication, which means editing `pg_hba.conf` to allow for connecting
-     the standby with the *replication* privilege, and creating a
-     replication slot for the standby.
-
-     Once everything is ready, the monitor assign the goal state CATCHINGUP
-     to the secondary server, which can now `pg_basebackup` from the
-     primary, install its `recovery.conf` and start the PostgreSQL service.
-
-     Once the `pg_autoctl create` command is done, again, it's important
-     to run the keeper's service:
+  4. See the state of the new system:
 
      ~~~ bash
-     $ pg_autoctl run --pgdata /path/to/pgdata
+	 $ pg_autoctl show state
+     Name |  Node |      Host:Port |     Current State |    Assigned State |               LSN | Health
+     -----+-------+----------------+-------------------+-------------------+-------------------+-------
+        a |     1 | localhost:5001 |           primary |           primary |         0/30000D8 |    ✓
+        b |     2 | localhost:5002 |         secondary |         secondary |         0/30000D8 |    ✓
      ~~~
 
 That's it! You now have a running pg_auto_failover setup with two PostgreSQL nodes
 using Streaming Replication to implement fault-tolerance.
+
+You can use the commands `pg_autoctl stop`, `pg_autoctl drop node
+--destroy`, and `pg_autoctl drop monitor --destroy` if you want to get rid
+of everything.
 
 ## Formations and Groups
 
@@ -268,25 +195,12 @@ another formation.
 ## Installing pg_auto_failover on-top of an existing Postgres setup
 
 The `pg_autoctl create postgres --pgdata ${PGDATA}` step can be used with an
-existing Postgres installation running at ${PGDATA}, only with the primary
+existing Postgres installation running at `${PGDATA}`, only with the primary
 node.
 
-For enabling a secondary node, pg_auto_failover needs to control many
-parameters on the installation, and as a result doesn't know yet to make
-sure everything is set-up in a away that the failover as implemented in
-pg_auto_failover is compatible with any pre-existing Streaming Replication
-setup.
-
-So when `pg_autoctl create postgres` is used on an existing `${PGDATA}`
-where Postgres is running as a secondary node, then you have the following
-error message:
-
-~~~
-ERROR pg_autoctl doesn't know how to register an already existing standby server at the moment
-~~~
-
-We might make it possible at some future point to re-use an existing
-secondary server in a pg_auto_failover setup.
+On a secondary node, it is possible to re-use an existing data directory
+when it has the same `system_identifier` as the other node(s) already
+registered in the same formation and group.
 
 ## Application and Connection Strings
 
@@ -295,7 +209,7 @@ following command:
 
 ~~~ bash
 $ pg_autoctl show uri --formation default --pgdata ...
-postgres://nodea:7020,nodeb:7010/citus?target_session_attrs=read-write
+postgres://localhost:5002,localhost:5001/postgres?target_session_attrs=read-write&sslmode=require
 ~~~
 
 You can use that connection string from within your application, adjusting
