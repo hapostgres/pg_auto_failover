@@ -14,14 +14,13 @@ Welcome to pg_auto_failover's documentation!
    tutorial
    architecture
    architecture-multi-standby
-   finite-state-machine
+   failover-state-machine
    fault-tolerance
    install
    security
    ref/reference
    ref/configuration
    operations
-   fsm
 
 ..
    Indices and tables

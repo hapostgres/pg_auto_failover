@@ -1,9 +1,9 @@
-pg_auto_failover Fault Tolerance
-================================
+Failover and Fault Tolerance
+============================
 
-At the heart of the pg_auto_failover implementation is a State Machine. The state
-machine is driven by the monitor, and its transitions are implemented in the
-keeper service, which then reports success to the monitor.
+At the heart of the pg_auto_failover implementation is a State Machine. The
+state machine is driven by the monitor, and its transitions are implemented
+in the keeper service, which then reports success to the monitor.
 
 The keeper is allowed to retry transitions as many times as needed until
 they succeed, and reports also failures to reach the assigned state to the
