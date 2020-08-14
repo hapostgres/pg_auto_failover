@@ -555,6 +555,9 @@ cli_get_formation_settings(int argc, char **argv)
 	FormationReplicationSettings settingsArray[NODE_ARRAY_MAX_COUNT + 2] = { 0 };
 	int settingsIndex = 0;
 
+	JSON_Value *jsNodes = json_value_init_array();
+	JSON_Array *jsNodesArray = json_value_get_array(jsNodes);
+
 	if (!monitor_init_from_pgsetup(&monitor, &config.pgSetup))
 	{
 		/* errors have already been logged */
@@ -633,6 +636,23 @@ cli_get_formation_settings(int argc, char **argv)
 			prefixedName,
 			"Candidate Priority",
 			intToString(settings.candidatePriority).strValue);
+
+		if (outputJSON)
+		{
+			JSON_Value *jsNode = json_value_init_object();
+			JSON_Object *jsNodeObj = json_value_get_object(jsNode);
+
+			json_object_set_number(jsNodeObj, "nodeId", (double) node->nodeId);
+			json_object_set_string(jsNodeObj, "name", node->name);
+			json_object_set_boolean(jsNodeObj,
+									"replicationQuorum",
+									settings.replicationQuorum);
+			json_object_set_number(jsNodeObj,
+								   "candidatePriority",
+								   (double) settings.candidatePriority);
+
+			json_array_append_value(jsNodesArray, jsNode);
+		}
 	}
 
 	if (outputJSON)
@@ -640,9 +660,23 @@ cli_get_formation_settings(int argc, char **argv)
 		JSON_Value *js = json_value_init_object();
 		JSON_Object *jsObj = json_value_get_object(js);
 
-		json_object_set_number(jsObj,
+		JSON_Value *jsFormation = json_value_init_object();
+		JSON_Object *jsFormationObj = json_value_get_object(jsFormation);
+
+		JSON_Value *jsPrimary = json_value_init_object();
+		JSON_Object *jsPrimaryObj = json_value_get_object(jsPrimary);
+
+		json_object_set_number(jsFormationObj,
 							   "number-sync-standbys",
 							   (double) numberSyncStandbys);
+
+		json_object_set_string(jsPrimaryObj,
+							   "synchronous_standby_names",
+							   synchronous_standby_names);
+
+		json_object_set_value(jsObj, "formation", jsFormation);
+		json_object_set_value(jsObj, "primary", jsPrimary);
+		json_object_set_value(jsObj, "nodes", jsNodes);
 
 		(void) cli_pprint_json(js);
 	}
