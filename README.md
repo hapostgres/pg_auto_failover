@@ -142,7 +142,6 @@ Once the building and installation is done, follow those steps:
 	 $ export PGDATA=./node_a
 	 $ export PGPORT=5001
      $ pg_autoctl create postgres \
-         --name a \
          --hostname localhost \
          --auth trust \
          --ssl-self-signed \
@@ -158,7 +157,6 @@ Once the building and installation is done, follow those steps:
 	 $ export PGDATA=./node_a
 	 $ export PGPORT=5002
      $ pg_autoctl create postgres \
-         --name b \
          --hostname localhost \
          --auth trust \
          --ssl-self-signed \
@@ -170,10 +168,10 @@ Once the building and installation is done, follow those steps:
 
      ~~~ bash
 	 $ pg_autoctl show state
-     Name |  Node |      Host:Port |     Current State |    Assigned State |               LSN | Health
-     -----+-------+----------------+-------------------+-------------------+-------------------+-------
-        a |     1 | localhost:5001 |           primary |           primary |         0/30000D8 |    ✓
-        b |     2 | localhost:5002 |         secondary |         secondary |         0/30000D8 |    ✓
+       Name |  Node |      Host:Port |     Current State |    Assigned State |               LSN | Health
+     -------+-------+----------------+-------------------+-------------------+-------------------+-------
+     node_1 |     1 | localhost:5001 |           primary |           primary |         0/30000D8 |    ✓
+     node_2 |     2 | localhost:5002 |         secondary |         secondary |         0/30000D8 |    ✓
      ~~~
 
 That's it! You now have a running pg_auto_failover setup with two PostgreSQL nodes
@@ -196,26 +194,26 @@ carefuly implement timeouts to make sure to avoid split-brain.
 $ pg_autoctl perform switchover
 19:06:41 63977 INFO  Listening monitor notifications about state changes in formation "default" and group 0
 19:06:41 63977 INFO  Following table displays times when notifications are received
-    Time |  Name |  Node |      Host:Port |       Current State |      Assigned State
----------+-------+-------+----------------+---------------------+--------------------
-19:06:43 |     a |     1 | localhost:5001 |             primary |            draining
-19:06:43 |     b |     2 | localhost:5002 |           secondary |   prepare_promotion
-19:06:43 |     b |     2 | localhost:5002 |   prepare_promotion |   prepare_promotion
-19:06:43 |     b |     2 | localhost:5002 |   prepare_promotion |    stop_replication
-19:06:43 |     a |     1 | localhost:5001 |             primary |      demote_timeout
-19:06:43 |     a |     1 | localhost:5001 |            draining |      demote_timeout
-19:06:43 |     a |     1 | localhost:5001 |      demote_timeout |      demote_timeout
-19:06:44 |     b |     2 | localhost:5002 |    stop_replication |    stop_replication
-19:06:44 |     b |     2 | localhost:5002 |    stop_replication |        wait_primary
-19:06:44 |     a |     1 | localhost:5001 |      demote_timeout |             demoted
-19:06:44 |     a |     1 | localhost:5001 |             demoted |             demoted
-19:06:44 |     b |     2 | localhost:5002 |        wait_primary |        wait_primary
-19:06:45 |     a |     1 | localhost:5001 |             demoted |          catchingup
-19:06:46 |     a |     1 | localhost:5001 |          catchingup |          catchingup
-19:06:47 |     a |     1 | localhost:5001 |          catchingup |           secondary
-19:06:47 |     b |     2 | localhost:5002 |        wait_primary |             primary
-19:06:47 |     a |     1 | localhost:5001 |           secondary |           secondary
-19:06:48 |     b |     2 | localhost:5002 |             primary |             primary
+    Time |   Name |  Node |      Host:Port |       Current State |      Assigned State
+---------+--------+-------+----------------+---------------------+--------------------
+19:06:43 | node_1 |     1 | localhost:5001 |             primary |            draining
+19:06:43 | node_2 |     2 | localhost:5002 |           secondary |   prepare_promotion
+19:06:43 | node_2 |     2 | localhost:5002 |   prepare_promotion |   prepare_promotion
+19:06:43 | node_2 |     2 | localhost:5002 |   prepare_promotion |    stop_replication
+19:06:43 | node_1 |     1 | localhost:5001 |             primary |      demote_timeout
+19:06:43 | node_1 |     1 | localhost:5001 |            draining |      demote_timeout
+19:06:43 | node_1 |     1 | localhost:5001 |      demote_timeout |      demote_timeout
+19:06:44 | node_2 |     2 | localhost:5002 |    stop_replication |    stop_replication
+19:06:44 | node_2 |     2 | localhost:5002 |    stop_replication |        wait_primary
+19:06:44 | node_1 |     1 | localhost:5001 |      demote_timeout |             demoted
+19:06:44 | node_1 |     1 | localhost:5001 |             demoted |             demoted
+19:06:44 | node_2 |     2 | localhost:5002 |        wait_primary |        wait_primary
+19:06:45 | node_1 |     1 | localhost:5001 |             demoted |          catchingup
+19:06:46 | node_1 |     1 | localhost:5001 |          catchingup |          catchingup
+19:06:47 | node_1 |     1 | localhost:5001 |          catchingup |           secondary
+19:06:47 | node_2 |     2 | localhost:5002 |        wait_primary |             primary
+19:06:47 | node_1 |     1 | localhost:5001 |           secondary |           secondary
+19:06:48 | node_2 |     2 | localhost:5002 |             primary |             primary
 ~~~
 
 The promotion of the secondary node is finished when the node reaches the
@@ -232,10 +230,10 @@ your node b, new primary. We can have a look at the state now:
 
 ~~~
 $ pg_autoctl show state
-Name |  Node |      Host:Port |     Current State |    Assigned State |               LSN | Health
------+-------+----------------+-------------------+-------------------+-------------------+-------
-   a |     1 | localhost:5001 |         secondary |         secondary |         0/3001648 |    ✓
-   b |     2 | localhost:5002 |           primary |           primary |         0/3001648 |    ✓
+  Name |  Node |      Host:Port |     Current State |    Assigned State |               LSN | Health
+-------+-------+----------------+-------------------+-------------------+-------------------+-------
+node_1 |     1 | localhost:5001 |         secondary |         secondary |         0/3001648 |    ✓
+node_2 |     2 | localhost:5002 |           primary |           primary |         0/3001648 |    ✓
 ~~~
 
 ## Cleaning-up your local setup
