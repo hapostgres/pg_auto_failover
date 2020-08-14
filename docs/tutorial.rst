@@ -287,9 +287,9 @@ following lines to node A:
 
    # automatically added to node A
 
-   host "appdb" "ha-admin" ha-demo-a.internal.cloudapp.net trust
-   host replication "pgautofailover_replicator" ha-demo-b.internal.cloudapp.net trust
-   host "appdb" "pgautofailover_replicator" ha-demo-b.internal.cloudapp.net trust
+   hostssl "appdb" "ha-admin" ha-demo-a.internal.cloudapp.net trust
+   hostssl replication "pgautofailover_replicator" ha-demo-b.internal.cloudapp.net trust
+   hostssl "appdb" "pgautofailover_replicator" ha-demo-b.internal.cloudapp.net trust
 
 For ``pg_hba.conf`` on the monitor node pg_autoctl inspects the local network
 and makes its best guess about the subnet to allow. In our case it guessed
