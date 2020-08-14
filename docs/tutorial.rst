@@ -30,7 +30,7 @@ let's create a virtual network.
        --address-prefix 10.0.0.0/16
 
 We need to open ports 5432 (Postgres) and 22 (SSH) between the machines, and
-also give ourselves address from our remote IP. We'll do this with a network
+also give ourselves access from our remote IP. We'll do this with a network
 security group and a subnet.
 
 .. code-block:: bash
