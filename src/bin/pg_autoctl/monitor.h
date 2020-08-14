@@ -98,13 +98,13 @@ bool monitor_node_active(Monitor *monitor,
 						 bool pgIsRunning,
 						 char *currentLSN, char *pgsrSyncState,
 						 MonitorAssignedState *assignedState);
-bool monitor_get_node_replication_settings(Monitor *monitor, int nodeid,
+bool monitor_get_node_replication_settings(Monitor *monitor,
 										   NodeReplicationSettings *settings);
-bool monitor_set_node_candidate_priority(Monitor *monitor, int nodeid,
-										 char *hostName, int nodePort,
+bool monitor_set_node_candidate_priority(Monitor *monitor,
+										 char *formation, char *name,
 										 int candidatePriority);
-bool monitor_set_node_replication_quorum(Monitor *monitor, int nodeid,
-										 char *hostName, int nodePort,
+bool monitor_set_node_replication_quorum(Monitor *monitor,
+										 char *formation, char *name,
 										 bool replicationQuorum);
 bool monitor_get_formation_number_sync_standbys(Monitor *monitor, char *formation,
 												int *numberSyncStandbys);

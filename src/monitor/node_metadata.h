@@ -132,8 +132,8 @@ extern AutoFailoverNode * FindCandidateNodeBeingPromoted(List *groupNodeList);
 
 extern AutoFailoverNode * GetAutoFailoverNode(char *nodeHost, int nodePort);
 extern AutoFailoverNode * GetAutoFailoverNodeById(int nodeId);
-extern AutoFailoverNode * GetAutoFailoverNodeWithId(int nodeid, char *nodeHost, int
-													nodePort);
+extern AutoFailoverNode * GetAutoFailoverNodeByName(char *formationId,
+													char *nodeName);
 extern AutoFailoverNode * OtherNodeInGroup(AutoFailoverNode *pgAutoFailoverNode);
 extern AutoFailoverNode * GetWritableNodeInGroup(char *formationId, int32 groupId);
 extern AutoFailoverNode * TupleToAutoFailoverNode(TupleDesc tupleDescriptor,

@@ -41,6 +41,7 @@ typedef struct NodeAddressArrayParseContext
 typedef struct MonitorAssignedStateParseContext
 {
 	char sqlstate[SQLSTATE_LENGTH];
+	char name[_POSIX_HOST_NAME_MAX];
 	MonitorAssignedState *assignedState;
 	bool parsedOK;
 } MonitorAssignedStateParseContext;
@@ -624,7 +625,7 @@ monitor_register_node(Monitor *monitor, char *formation,
 	};
 	const char *paramValues[11];
 	MonitorAssignedStateParseContext parseContext =
-	{ { 0 }, assignedState, false };
+	{ { 0 }, { 0 }, assignedState, false };
 	const char *nodeStateString = NodeStateToString(initialState);
 
 	paramValues[0] = formation;
@@ -693,9 +694,12 @@ monitor_register_node(Monitor *monitor, char *formation,
 		return false;
 	}
 
-	log_info("Registered node %s:%d with id %d in formation \"%s\", "
+	/* update the caller's name with the result from the monitor */
+	strlcpy(name, parseContext.name, _POSIX_HOST_NAME_MAX);
+
+	log_info("Registered node %d (%s:%d) with name \"%s\" in formation \"%s\", "
 			 "group %d, state \"%s\"",
-			 host, port, assignedState->nodeId,
+			 assignedState->nodeId, host, port, name,
 			 formation, assignedState->groupId,
 			 NodeStateToString(assignedState->state));
 
@@ -726,7 +730,7 @@ monitor_node_active(Monitor *monitor,
 	};
 	const char *paramValues[7];
 	MonitorAssignedStateParseContext parseContext =
-	{ { 0 }, assignedState, false };
+	{ { 0 }, { 0 }, assignedState, false };
 	const char *nodeStateString = NodeStateToString(currentState);
 
 	paramValues[0] = formation;
@@ -776,30 +780,29 @@ monitor_node_active(Monitor *monitor,
  */
 bool
 monitor_set_node_candidate_priority(Monitor *monitor,
-									int nodeid, char *hostName, int nodePort,
+									char *formation, char *name,
 									int candidate_priority)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
-		"SELECT pgautofailover.set_node_candidate_priority($1, $2, $3, $4)";
-	int paramCount = 4;
-	Oid paramTypes[4] = { INT4OID, TEXTOID, INT4OID, INT4OID };
-	const char *paramValues[4];
+		"SELECT pgautofailover.set_node_candidate_priority($1, $2, $3)";
+	int paramCount = 3;
+	Oid paramTypes[3] = { TEXTOID, TEXTOID, INT4OID };
+	const char *paramValues[3];
 	char *candidatePriorityText = intToString(candidate_priority).strValue;
 	bool success = true;
 
-	paramValues[0] = intToString(nodeid).strValue;
-	paramValues[1] = hostName,
-	paramValues[2] = intToString(nodePort).strValue;
-	paramValues[3] = candidatePriorityText;
+	paramValues[0] = formation;
+	paramValues[1] = name,
+	paramValues[2] = candidatePriorityText;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
 								   NULL, NULL))
 	{
-		log_error("Failed to update node candidate priority on node %d"
-				  " for candidate_priority: \"%s\"",
-				  nodeid, candidatePriorityText);
+		log_error("Failed to update node candidate priority on node \"%s\""
+				  "in formation \"%s\" for candidate_priority: \"%s\"",
+				  name, formation, candidatePriorityText);
 
 		success = false;
 	}
@@ -813,30 +816,29 @@ monitor_set_node_candidate_priority(Monitor *monitor,
  * in the node replication quorum.
  */
 bool
-monitor_set_node_replication_quorum(Monitor *monitor, int nodeid,
-									char *hostName, int nodePort,
+monitor_set_node_replication_quorum(Monitor *monitor,
+									char *formation, char *name,
 									bool replicationQuorum)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
-		"SELECT pgautofailover.set_node_replication_quorum($1, $2, $3, $4)";
-	int paramCount = 4;
-	Oid paramTypes[4] = { INT4OID, TEXTOID, INT4OID, BOOLOID };
-	const char *paramValues[4];
+		"SELECT pgautofailover.set_node_replication_quorum($1, $2, $3)";
+	int paramCount = 3;
+	Oid paramTypes[3] = { TEXTOID, TEXTOID, BOOLOID };
+	const char *paramValues[3];
 	char *replicationQuorumText = replicationQuorum ? "true" : "false";
 	bool success = true;
 
-	paramValues[0] = intToString(nodeid).strValue;
-	paramValues[1] = hostName;
-	paramValues[2] = intToString(nodePort).strValue;
-	paramValues[3] = replicationQuorumText;
+	paramValues[0] = formation;
+	paramValues[1] = name,
+	paramValues[2] = replicationQuorumText;
 
 	if (!pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes,
 								   paramValues, NULL, NULL))
 	{
-		log_error("Failed to update node replication quorum on node %d"
-				  " and replication_quorum: \"%s\"",
-				  nodeid, replicationQuorumText);
+		log_error("Failed to update node replication quorum on node \"%s\""
+				  "in formation \"%s\" for replication_quorum: \"%s\"",
+				  name, formation, replicationQuorumText);
 
 		success = false;
 	}
@@ -850,26 +852,29 @@ monitor_set_node_replication_quorum(Monitor *monitor, int nodeid,
  * from the monitor.
  */
 bool
-monitor_get_node_replication_settings(Monitor *monitor, int nodeid,
+monitor_get_node_replication_settings(Monitor *monitor,
 									  NodeReplicationSettings *settings)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
 		"SELECT candidatepriority, replicationquorum FROM pgautofailover.node "
-		"WHERE nodeid = $1";
+		"WHERE nodename = $1";
+
 	int paramCount = 1;
-	Oid paramTypes[1] = { INT4OID };
+	Oid paramTypes[1] = { TEXTOID };
 	const char *paramValues[1];
+
 	NodeReplicationSettingsParseContext parseContext =
 	{ { 0 }, -1, false, false };
 
-	paramValues[0] = intToString(nodeid).strValue;
+	paramValues[0] = settings->name;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
 								   &parseContext, parseNodeReplicationSettings))
 	{
-		log_error("Failed to retrieve node settings for node \"%d\".", nodeid);
+		log_error("Failed to retrieve node settings for node \"%s\".",
+				  settings->name);
 
 		/* disconnect from monitor */
 		pgsql_finish(&monitor->pgsql);
@@ -1417,9 +1422,13 @@ parseNodeState(void *ctx, PGresult *result)
 		return;
 	}
 
-	if (PQnfields(result) != 5)
+	/*
+	 * We re-use the same data structure for register_node and node_active,
+	 * where the former adds the nodename to its result.
+	 */
+	if (PQnfields(result) != 5 && PQnfields(result) != 6)
 	{
-		log_error("Query returned %d columns, expected 5", PQnfields(result));
+		log_error("Query returned %d columns, expected 5 or 6", PQnfields(result));
 		context->parsedOK = false;
 		return;
 	}
@@ -1472,6 +1481,12 @@ parseNodeState(void *ctx, PGresult *result)
 	{
 		context->parsedOK = false;
 		return;
+	}
+
+	if (PQnfields(result) == 6)
+	{
+		value = PQgetvalue(result, 0, 5);
+		strlcpy(context->name, value, _POSIX_HOST_NAME_MAX);
 	}
 
 	/* if we reach this line, then we're good. */

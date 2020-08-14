@@ -216,7 +216,8 @@ CREATE FUNCTION pgautofailover.register_node
    OUT assigned_group_id    int,
    OUT assigned_group_state pgautofailover.replication_state,
    OUT assigned_candidate_priority 	int,
-   OUT assigned_replication_quorum  bool
+   OUT assigned_replication_quorum  bool,
+   OUT assigned_node_name   text
  )
 RETURNS record LANGUAGE C STRICT SECURITY DEFINER
 AS 'MODULE_PATHNAME', $$register_node$$;
@@ -664,36 +665,34 @@ CREATE TRIGGER disable_secondary_check
 
 CREATE FUNCTION pgautofailover.set_node_candidate_priority
  (
-    IN nodeid				int,
-	IN nodehost             text,
-	IN nodeport             int,
+    IN formation_id         text,
+    IN node_name            text,
     IN candidate_priority	int
  )
 RETURNS bool LANGUAGE C STRICT SECURITY DEFINER
 AS 'MODULE_PATHNAME', $$set_node_candidate_priority$$;
 
-comment on function pgautofailover.set_node_candidate_priority(int, text, int, int)
+comment on function pgautofailover.set_node_candidate_priority(text, text, int)
         is 'sets the candidate priority value for a node. Expects a priority value between 0 and 100. 0 if the node is not a candidate to be promoted to be primary.';
 
 grant execute on function
-      pgautofailover.set_node_candidate_priority(int, text, int, int)
+      pgautofailover.set_node_candidate_priority(text, text, int)
    to autoctl_node;
 
 CREATE FUNCTION pgautofailover.set_node_replication_quorum
  (
-    IN nodeid             int,
-    IN nodehost           text,
-    IN nodeport           int,
+    IN formation_id       text,
+    IN node_name          text,
     IN replication_quorum bool
  )
 RETURNS bool LANGUAGE C STRICT SECURITY DEFINER
 AS 'MODULE_PATHNAME', $$set_node_replication_quorum$$;
 
-comment on function pgautofailover.set_node_replication_quorum(int, text, int, bool)
+comment on function pgautofailover.set_node_replication_quorum(text, text, bool)
         is 'sets the replication quorum value for a node. true if the node participates in write quorum';
 
 grant execute on function
-      pgautofailover.set_node_replication_quorum(int, text, int, bool)
+      pgautofailover.set_node_replication_quorum(text, text, bool)
    to autoctl_node;
 
 

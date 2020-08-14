@@ -1010,6 +1010,13 @@ monitor_init_from_pgsetup(Monitor *monitor, PostgresSetup *pgSetup)
 				return false;
 			}
 
+			if (config.monitorDisabled)
+			{
+				log_error("This node has disabled monitor, "
+						  "pg_autoctl get and set commands are not available.");
+				return false;
+			}
+
 			if (!monitor_init(&(keeper.monitor), config.monitor_pguri))
 			{
 				return false;
