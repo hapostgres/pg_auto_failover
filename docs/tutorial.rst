@@ -392,6 +392,7 @@ It shows
 
 .. code-block::
 
+  .
     count
   ---------
    1000000
@@ -480,6 +481,7 @@ It shows
 
 .. code-block::
 
+  .
     count
   ---------
    2000000
