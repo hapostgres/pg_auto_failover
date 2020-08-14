@@ -1,5 +1,5 @@
-Single Standby Architecture
-===========================
+Architecture Basics
+===================
 
 pg_auto_failover is designed to handle a single PostgreSQL service using three
 nodes, and is resilient to losing any **one** of **three** nodes.
@@ -66,53 +66,105 @@ pg_auto_failover Glossary
 
 pg_auto_failover handles a single PostgreSQL service with the following concepts:
 
-  - the pg_auto_failover MONITOR is a service that keeps track of one or several
-    *formations* containing *groups* of two *nodes* each.
+Monitor
+^^^^^^^
 
-    The monitor is implemented as a PostgreSQL extension, so when you run
-    the command ``pg_autoctl create monitor`` a PostgreSQL instance is
-    initialized, configured with the extension, and started. The monitor
-    service is embedded into a PostgreSQL service.
+The pg_auto_failover monitor is a service that keeps track of one or several
+*formations* containing *groups* of two *nodes* each.
 
-  - a FORMATION is a logical set of PostgreSQL services.
+The monitor is implemented as a PostgreSQL extension, so when you run the
+command ``pg_autoctl create monitor`` a PostgreSQL instance is initialized,
+configured with the extension, and started. The monitor service embeds a
+PostgreSQL instance.
 
-  - a GROUP of two PostgreSQL NODES work together to provide a single
-    PostgreSQL service in a Highly Available fashion. A GROUP consists of a
-    PostgreSQL primary server and a secondary server setup with Hot Standby
-    synchronous replication. Note that pg_auto_failover can orchestrate the whole
-    setting-up of the replication for you.
+Formation
+^^^^^^^^^
 
-  - the pg_auto_failover KEEPER is an agent that must be running on the same server
-    where your PostgreSQL nodes are running. The KEEPER controls the local
-    PostgreSQL instance (using both the ``pg_ctl`` command line tool and SQL
-    queries), and communicates with the MONITOR:
+A formation is a logical set of PostgreSQL services.
 
-      - it sends updated data about the local node, such as the WAL delta in
-        between servers, measured via PostgreSQL statistics views,
+.. note::
+   The notion of a formation in pg_auto_failover is useful when setting-up
+   and managing a whole Citus formation, where the coordinator nodes belong
+   to group zero of the formation, and then each Citus worker node becomes
+   its own group and may have Postgres standby nodes.
 
-      - it receives state assignments from the monitor.
+It is possible to operate many formations with a single monitor instance.
+Each formation has a group of Postgres nodes and the FSM orchestration
+implemented by the monitor applies separately to each group.
 
-    Also the KEEPER maintains a local state that includes the most recent
-    communication established with the MONITOR and the other PostgreSQL node
-    of its group, enabling it to detect network partitions. More on that
-    later.
+Group
+^^^^^
 
-  - a NODE is a server (virtual or physical) that runs a PostgreSQL
-    instances and a KEEPER service.
+A group of two PostgreSQL nodes work together to provide a single PostgreSQL
+service in a Highly Available fashion. A group consists of a PostgreSQL
+primary server and a secondary server setup with Hot Standby synchronous
+replication. Note that pg_auto_failover can orchestrate the whole setting-up
+of the replication for you.
 
-  - a STATE is the representation of the per-instance and per-group
-    situation. The monitor and the keeper implement a Finite State Machine
-    to drive operations in the PostgreSQL groups and implement High
-    Availability without data loss.
+Up to pg_auto_failover version 1.3, a single Postgres group can only
+contains two Postgres nodes. Starting with pg_auto_failover 1.4, there's no
+limit to the number of Postgres nodes in a single group. Note that each
+Postgres instance that belongs to the same group serves the same data set in
+its data directory (PGDATA).
 
-    The KEEPER main loop enforce the current expected state of the local
-    PostgreSQL instance, and reports the current state and some more
-    information to the MONITOR. The MONITOR uses this set of information and
-    its own health-check information to drive the State Machine and assign a
-    GOAL STATE to the KEEPER.
+Keeper
+^^^^^^
 
-    The KEEPER implements the transitions between a current state and a
-    MONITOR assigned goal state.
+The pg_auto_failover *keeper* is an agent that must be running on the same
+server where your PostgreSQL nodes are running. The keeper controls the
+local PostgreSQL instance (using both the ``pg_ctl`` command line tool and
+SQL queries), and communicates with the monitor:
+
+  - it sends updated data about the local node, such as the WAL delta in
+    between servers, measured via PostgreSQL statistics views,
+
+  - it receives state assignments from the monitor.
+
+Also the keeper maintains a local state that includes the most recent
+communication established with the monitor and the other PostgreSQL node of
+its group, enabling it to detect :ref:`network_partitions`.
+
+.. note::
+
+   In pg_auto_failover versions up to 1.3 included, the *keeper* process
+   started with ``pg_autoctl run`` manages a separate Postgres instance,
+   running as its own process tree.
+
+   Starting in pg_auto_failover version 1.4, the *keeper* process started
+   with ``pg_autoctl run`` runs the Postgres instance as a sub-process of
+   the main ``pg_autoctl`` process, allowing tighter control over the
+   Postgres execution and also making the solution works better in both
+   container environment (because it's now a single process tree) and with
+   systemd, because it uses a specific cgroup per service unit.
+
+Node
+^^^^
+
+A node is a server (virtual or physical) that runs a PostgreSQL instances
+and a keeper service. At any given time, any node might be a primary or a
+secondary Postgres instance, and the whole point of pg_auto_failover is that
+this state is going to change.
+
+As a result, refrain from naming your nodes with the role you intend for
+them. Again, this will change. Otherwise you would not be having a use case
+for pg_auto_failover.
+
+State
+^^^^^
+
+A state is the representation of the per-instance and per-group situation.
+The monitor and the keeper implement a Finite State Machine to drive
+operations in the PostgreSQL groups; allowing pg_auto_failover to implement
+High Availability with the goal of zero data loss.
+
+The keeper main loop enforce the current expected state of the local
+PostgreSQL instance, and reports the current state and some more information
+to the monitor. The monitor uses this set of information and its own
+health-check information to drive the State Machine and assign a goal state
+to the keeper.
+
+The keeper implements the transitions between a current state and a monitor
+assigned goal state.
 
 Client-side HA
 --------------

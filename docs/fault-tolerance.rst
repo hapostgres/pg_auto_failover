@@ -87,6 +87,8 @@ failure is observed:
     from the nodes. Also, health checks are not performed. It means that no
     automated failover may happen, even if needed.
 
+.. _network_partitions:
+
 Network Partitions
 ------------------
 
@@ -105,7 +107,7 @@ PostgreSQL service:
 
     Otherwise, when the secondary isn't connected, and after the
     NETWORK\_PARTITION\_TIMEOUT has elapsed, the primary considers it might
-    be alone in a network partition: that's a potential split brain situation 
+    be alone in a network partition: that's a potential split brain situation
     and with only one way to prevent it. The primary stops, and reports a new
     state of DEMOTE\_TIMEOUT.
 
@@ -156,8 +158,8 @@ time a connection from the secondary was observed are both more than 30
 seconds in the past, the primary concludes it is on the losing side of a
 network partition and shuts itself down. It may be that the secondary and
 the monitor were actually down and the primary was the only node that was
-alive, but we currently do not have a way to distinguish such a situation. 
-As with consensus algorithms, availability can only be correctly preserved 
+alive, but we currently do not have a way to distinguish such a situation.
+As with consensus algorithms, availability can only be correctly preserved
 if at least 2 out of 3 nodes are up.
 
 In asymmetric network partitions, the primary might still be able to talk to
