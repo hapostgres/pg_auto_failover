@@ -577,7 +577,11 @@ cli_do_monitor_version(int argc, char **argv)
  * cli_do_monitor_parse_notification parses a raw notification message as given
  * by the monitor LISTEN/NOTIFY protocol on the state channel, such as:
  *
- *   "S:wait_primary:wait_primary:7.default:0:1:9.localhost:4001"
+ *   {
+ *     "type": "state", "formation": "default", "groupId": 0, "nodeId": 1,
+ *     "name": "node_1", "host": "localhost", "port": 5001,
+ *     "reportedState": "maintenance", "goalState": "maintenance"
+ *   }
  */
 static void
 cli_do_monitor_parse_notification(int argc, char **argv)

@@ -15,7 +15,7 @@
 #include "pgsql.h"
 
 /*
- * CurrentNodeState gather information we retrive through the monitor
+ * CurrentNodeState gathers information we retrive through the monitor
  * pgautofailover.current_state API, and that we can also form from other
  * pieces such as local configuration + local state, or monitor notifications.
  */

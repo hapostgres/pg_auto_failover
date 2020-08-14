@@ -23,6 +23,7 @@
 #include "executor/spi.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
+#include "utils/json.h"
 #include "utils/pg_lsn.h"
 
 
@@ -79,20 +80,25 @@ NotifyStateChange(AutoFailoverNode *node, char *description)
 
 	appendStringInfo(payload, "\"type\": \"state\", ");
 
-	appendStringInfo(payload, "\"formation\": \"%s\", ",
-					 node->formationId);
+	appendStringInfo(payload, "\"formation\": ");
+	escape_json(payload, node->formationId);
 
-	appendStringInfo(payload, "\"groupId\": %d, ", node->groupId);
+	appendStringInfo(payload, ", \"groupId\": %d, ", node->groupId);
 	appendStringInfo(payload, "\"nodeId\": %d, ", node->nodeId);
-	appendStringInfo(payload, "\"name\": \"%s\", ", node->nodeName);
-	appendStringInfo(payload, "\"host\": \"%s\", ", node->nodeHost);
-	appendStringInfo(payload, "\"port\": %d, ", node->nodePort);
 
-	appendStringInfo(payload, "\"reportedState\": \"%s\", ",
-					 ReplicationStateGetName(node->reportedState));
+	appendStringInfo(payload, "\"name\": ");
+	escape_json(payload, node->nodeName);
 
-	appendStringInfo(payload, "\"goalState\": \"%s\"",
-					 ReplicationStateGetName(node->goalState));
+	appendStringInfo(payload, ", \"host\": ");
+	escape_json(payload, node->nodeHost);
+
+	appendStringInfo(payload, ", \"port\": %d, ", node->nodePort);
+
+	appendStringInfo(payload, "\"reportedState\": ");
+	escape_json(payload, ReplicationStateGetName(node->reportedState));
+
+	appendStringInfo(payload, ", \"goalState\": ");
+	escape_json(payload, ReplicationStateGetName(node->goalState));
 
 	appendStringInfoChar(payload, '}');
 
