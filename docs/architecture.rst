@@ -235,19 +235,24 @@ causing a health check failure.
 Synchronous vs. asynchronous replication
 ----------------------------------------
 
-By default, pg_auto_failover uses synchronous replication, which means all writes
-block until the standby has accepted them. To handle cases in which the
-standby fails, the primary switches between two states called `wait_primary`
-and `primary` based on the health of the standby.
+By default, pg_auto_failover uses synchronous replication, which means all
+writes block until at least one standby node has reported receiving them. To
+handle cases in which the standby fails, the primary switches between two
+states called `wait_primary` and `primary` based on the health of standby
+nodes, and based on the replication setting ``number_sync_standby``.
 
-In `wait_primary`, synchronous replication is disabled by automatically
-setting ``synchronous_standby_names = ''`` to allow writes to proceed, but
-failover is also disabled since the standby might get arbitrarily far
-behind. If the standby is responding to health checks and within 1 WAL
-segment of the primary (configurable), synchronous replication is re-enabled
-on the primary by setting ``synchronous_standby_names = '*'`` which may
-cause a short latency spike since writes will then block until the standby
-has caught up.
+When in the `wait_primary` state, synchronous replication is disabled by
+automatically setting ``synchronous_standby_names = ''`` to allow writes to
+proceed, but failover is also disabled since the standby might get
+arbitrarily far behind. If the standby is responding to health checks and
+within 1 WAL segment of the primary (by default), synchronous replication is
+enabled again on the primary by setting ``synchronous_standby_names = '*'``
+which may cause a short latency spike since writes will then block until the
+standby has caught up.
+
+When using several standby nodes with replication quorum enabled, the actual
+setting for ``synchronous_standby_names`` is set to a list of those standby
+nodes that are set to participate to the replication quorum.
 
 If you wish to disable synchronous replication, you need to add the
 following to ``postgresql.conf``::
@@ -255,12 +260,34 @@ following to ``postgresql.conf``::
  synchronous_commit = 'local'
 
 This ensures that writes return as soon as they are committed on the primary
-under all circumstances. In that case, failover might lead to some data loss,
-but failover is not initiated if the secondary is more than 10 WAL segments
-(configurable) behind on the primary. During a manual failover, the standby
-will continue accepting writes from the old primary and will stop only if
-it's fully caught up (most common), the primary fails, or it does not
-receive writes for 2 minutes.
+under all circumstances. In that case, failover might lead to some data
+loss, but failover is not initiated if the secondary is more than 10 WAL
+segments (by default) behind on the primary. During a manual failover, the
+standby will continue accepting writes from the old primary and will stop
+only if it's fully caught up (most common), the primary fails, or it does
+not receive writes for 2 minutes.
+
+.. topic:: A note about performance
+
+		   In some cases the performance impact on the write latency when
+		   setting synrhonous replication makes the application fails to
+		   deliver expected performance. When testing, or production
+		   feedback, shows that you are in that case indeed, it is
+		   beneficial to switch to using asynchronous replication.
+
+		   The way to achieve that with pg_auto_failover is to change the
+		   ``synchronous_commit`` setting. This setting can be set per
+		   transaction, per session, or per user: it does not have to be set
+		   globally on your Postgres instance.
+
+		   One way to benefit from that would be::
+
+			 alter role fast_and_loose set synchronous_commit to local;
+
+		   That way in the parts of the application where performance is
+		   crucial, and where you can also lower your data durability
+		   guarantees, your transactions are not waiting on the standby
+		   nodes anymore.
 
 Node recovery
 -------------
