@@ -43,7 +43,7 @@ Postgres Architecture Setup
 ---------------------------
 
 The entire flexibility of pg_auto_failover can be leveraged with the
-following three replication parameters:
+following three replication settings:
 
   - Number sync stanbys
   - Replication quorum
