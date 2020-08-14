@@ -1,5 +1,5 @@
-Multi-nodes architecture
-========================
+Multi-nodes Architectures
+=========================
 
 pg_auto_failover also allows to have more than one standby node with
 advanced control over your production architecture characteristics.
