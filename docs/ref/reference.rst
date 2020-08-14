@@ -345,7 +345,6 @@ pg_autoctl show systemd
 This command outputs a configuration unit that is suitable for registering
 ``pg_autoctl`` as a systemd service.
 
-
 .. _pg_autoctl_create_postgres:
 
 pg_auto_failover Postgres Node Initialization
@@ -466,6 +465,80 @@ at first and consider something production grade later. Also, consider using
 security compliance process.
 
 See :ref:`pg_auto_failover_security` for notes on `.pgpass`
+
+Replication Settings
+--------------------
+
+The following commands allow to get and set the replication settings of
+pg_auto_failover nodes. See :ref:`architecture_setup` for details about
+those settings.
+
+pg_autoctl get formation number-sync-standbys
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+::
+
+   pg_autoctl get formation number-sync-standbys --help
+   pg_autoctl get formation number-sync-standbys: get number_sync_standbys for a formation from the monitor
+   usage: pg_autoctl get formation number-sync-standbys  [ --pgdata ] [ --json ]
+
+     --pgdata      path to data directory
+
+pg_autoctl set formation number-sync-standbys
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+::
+
+   pg_autoctl set formation number-sync-standbys --help
+   pg_autoctl set formation number-sync-standbys: set number-sync-standbys for a formation on the monitor
+   usage: pg_autoctl set formation number-sync-standbys  [ --pgdata ] [ --json ] <number_sync_standbys>
+
+     --pgdata      path to data directory
+
+pg_autoctl get node replication-quorum
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+::
+
+   pg_autoctl get node replication-quorum --help
+   pg_autoctl get node replication-quorum: get replication-quorum property from the monitor
+   usage: pg_autoctl get node replication-quorum  [ --pgdata ] [ --json ]
+
+     --pgdata      path to data directory
+
+pg_autoctl set node replication-quorum
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+::
+
+   pg_autoctl set node replication-quorum --help
+   pg_autoctl set node replication-quorum: set replication-quorum property on the monitor
+   usage: pg_autoctl set node replication-quorum  [ --pgdata ] [ --json ] <true|false>
+
+     --pgdata      path to data directory
+
+
+pg_autoctl get node candidate-priority
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+::
+
+   pg_autoctl get node candidate-priority --help
+   pg_autoctl get node candidate-priority: get candidate property from the monitor
+   usage: pg_autoctl get node candidate-priority  [ --pgdata ] [ --json ]
+
+     --pgdata      path to data directory
+
+pg_autoctl set node candidate-priority
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+::
+
+   pg_autoctl set node candidate-priority --help
+   pg_autoctl set node candidate-priority: set candidate property on the monitor
+   usage: pg_autoctl set node candidate-priority  [ --pgdata ] [ --json ] <priority: 0..100>
+
+     --pgdata      path to data directory
 
 .. _pg_autoctl_configuration:
 

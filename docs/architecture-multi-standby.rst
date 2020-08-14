@@ -39,6 +39,8 @@ copy of the production data set is kept, and if the primary was then to
 fail, some amount data will be lost. How much depends on your backup and
 recovery mechanisms.
 
+.. _architecture_setup:
+
 Postgres Architecture Setup
 ---------------------------
 
