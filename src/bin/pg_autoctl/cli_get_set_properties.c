@@ -11,6 +11,7 @@
 
 #include "cli_common.h"
 #include "parsing.h"
+#include "string_utils.h"
 
 static void cli_ensure_node_name(Keeper *keeper);
 static int cli_get_set_properties_getopts(int argc, char **argv);
@@ -18,6 +19,7 @@ static int cli_get_set_properties_getopts(int argc, char **argv);
 static bool get_node_replication_settings(NodeReplicationSettings *settings);
 static void cli_get_node_replication_quorum(int argc, char **argv);
 static void cli_get_node_candidate_priority(int argc, char **argv);
+static void cli_get_formation_settings(int argc, char **argv);
 static void cli_get_formation_number_sync_standbys(int argc, char **argv);
 
 static void cli_set_node_replication_quorum(int argc, char **argv);
@@ -67,6 +69,16 @@ static CommandLine get_node_command =
 					 NULL, NULL, NULL,
 					 get_node_subcommands);
 
+static CommandLine get_formation_settings =
+	make_command("settings",
+				 "get replication settings for a formation from the monitor",
+				 " [ --pgdata ] [ --json ] [ --formation ] ",
+				 "  --pgdata      path to data directory\n"
+				 "  --json        output data in the JSON format\n"
+				 "  --formation   pg_auto_failover formation\n",
+				 cli_get_set_properties_getopts,
+				 cli_get_formation_settings);
+
 static CommandLine get_formation_number_sync_standbys =
 	make_command("number-sync-standbys",
 				 "get number_sync_standbys for a formation from the monitor",
@@ -78,6 +90,7 @@ static CommandLine get_formation_number_sync_standbys =
 				 cli_get_formation_number_sync_standbys);
 
 static CommandLine *get_formation_subcommands[] = {
+	&get_formation_settings,
 	&get_formation_number_sync_standbys,
 	NULL
 };
@@ -430,9 +443,219 @@ cli_get_node_candidate_priority(int argc, char **argv)
 }
 
 
+typedef struct FormationReplicationSettings
+{
+	char context[BUFSIZE];
+	char setting[BUFSIZE];
+	char value[BUFSIZE];
+} FormationReplicationSettings;
+
+
+/*
+ * set_formation_replication_setting sets a replication setting entry.
+ */
+static void
+set_formation_replication_setting(FormationReplicationSettings *settings,
+								  char *context, char *setting, char *value)
+{
+	strlcpy(settings->context, context, BUFSIZE);
+	strlcpy(settings->setting, setting, BUFSIZE);
+	strlcpy(settings->value, value, BUFSIZE);
+}
+
+
+/*
+ * print_formation_replication_settings prints an array of replication settings.
+ */
+static void
+print_formation_replication_settings(FormationReplicationSettings *settingsArray,
+									 int count)
+{
+	int contextLen = 7;         /* "Context" */
+	int settingLen = 7;         /* "Setting" */
+	int valueLen = 5;           /* "Value" */
+
+	char contextSeparator[BUFSIZE] = { 0 };
+	char settingSeparator[BUFSIZE] = { 0 };
+	char valueSeparator[BUFSIZE] = { 0 };
+
+	for (int i = 0; i < count; i++)
+	{
+		FormationReplicationSettings *entry = &(settingsArray[i]);
+
+		if (strlen(entry->context) > contextLen)
+		{
+			contextLen = strlen(entry->context);
+		}
+
+		if (strlen(entry->setting) > settingLen)
+		{
+			settingLen = strlen(entry->setting);
+		}
+
+		if (strlen(entry->value) > valueLen)
+		{
+			valueLen = strlen(entry->value);
+		}
+	}
+
+	for (int i = 0; i < contextLen; i++)
+	{
+		contextSeparator[i] = '-';
+	}
+
+	for (int i = 0; i < settingLen; i++)
+	{
+		settingSeparator[i] = '-';
+	}
+
+	for (int i = 0; i < valueLen; i++)
+	{
+		valueSeparator[i] = '-';
+	}
+
+	fformat(stdout, "%*s | %*s | %*s\n",
+			contextLen, "Context",
+			settingLen, "Setting",
+			valueLen, "Value");
+
+	fformat(stdout, "%*s-+-%*s-+-%*s\n",
+			contextLen, contextSeparator,
+			settingLen, settingSeparator,
+			valueLen, valueSeparator);
+
+	for (int i = 0; i < count; i++)
+	{
+		FormationReplicationSettings *entry = &(settingsArray[i]);
+
+		fformat(stdout, "%*s | %*s | %*s\n",
+				contextLen, entry->context,
+				settingLen, entry->setting,
+				valueLen, entry->value);
+	}
+
+	fformat(stdout, "\n");
+}
+
+
+/*
+ * cli_get_formation_settings function prints the replication settings for a
+ * given formation.
+ */
+static void
+cli_get_formation_settings(int argc, char **argv)
+{
+	KeeperConfig config = keeperOptions;
+	Monitor monitor = { 0 };
+
+	int numberSyncStandbys = 0;
+	char synchronous_standby_names[BUFSIZE];
+	NodeAddressArray nodesArray = { 0 };
+
+	FormationReplicationSettings settingsArray[NODE_ARRAY_MAX_COUNT + 2] = { 0 };
+	int settingsIndex = 0;
+
+	if (!monitor_init_from_pgsetup(&monitor, &config.pgSetup))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (!monitor_get_formation_number_sync_standbys(&monitor,
+													config.formation,
+													&numberSyncStandbys))
+	{
+		exit(EXIT_CODE_MONITOR);
+	}
+
+	set_formation_replication_setting(&(settingsArray[settingsIndex++]),
+									  "formation",
+									  "number_sync_standbys",
+									  intToString(numberSyncStandbys).strValue);
+
+	if (monitor_synchronous_standby_names(
+			&monitor,
+			config.formation,
+			config.groupId,
+			synchronous_standby_names,
+			BUFSIZE))
+	{
+		char quotedStandbyNames[BUFSIZE] = { 0 };
+
+		sformat(quotedStandbyNames, BUFSIZE, "'%s'", synchronous_standby_names);
+
+		set_formation_replication_setting(&(settingsArray[settingsIndex++]),
+										  "primary",
+										  "synchronous_standby_names",
+										  quotedStandbyNames);
+	}
+	else
+	{
+		log_warn("Failed to get synchronous_standby_names on the monitor");
+	}
+
+	if (!monitor_get_nodes(&monitor,
+						   config.formation,
+						   config.groupId,
+						   &nodesArray))
+	{
+		log_warn("Failed to get_nodes() on the monitor");
+	}
+
+	for (int i = 0; i < nodesArray.count; i++)
+	{
+		NodeAddress *node = &(nodesArray.nodes[i]);
+		NodeReplicationSettings settings = { 0 };
+
+		char prefixedName[BUFSIZE] = { 0 };
+
+		/* copy the target name */
+		strlcpy(settings.name, node->name, _POSIX_HOST_NAME_MAX);
+
+		sformat(prefixedName, sizeof(prefixedName), "node %d: \"%s\"",
+				node->nodeId, node->name);
+
+		if (!monitor_get_node_replication_settings(&monitor, &settings))
+		{
+			log_warn("Failed to get replication settings for node %d \"%s\" "
+					 "from the monitor",
+					 node->nodeId, node->name);
+		}
+
+		set_formation_replication_setting(
+			&(settingsArray[settingsIndex++]),
+			prefixedName,
+			"Replication Quorum",
+			settings.replicationQuorum ? "true" : "false");
+
+		set_formation_replication_setting(
+			&(settingsArray[settingsIndex++]),
+			prefixedName,
+			"Candidate Priority",
+			intToString(settings.candidatePriority).strValue);
+	}
+
+	if (outputJSON)
+	{
+		JSON_Value *js = json_value_init_object();
+		JSON_Object *jsObj = json_value_get_object(js);
+
+		json_object_set_number(jsObj,
+							   "number-sync-standbys",
+							   (double) numberSyncStandbys);
+
+		(void) cli_pprint_json(js);
+	}
+	else
+	{
+		print_formation_replication_settings(settingsArray, settingsIndex);
+	}
+}
+
+
 /*
  * cli_get_formation_number_sync_standbys function prints
- * number sync standbys property of this node to standard output.
+ * number sync standbys property of this formation to standard output.
  */
 static void
 cli_get_formation_number_sync_standbys(int argc, char **argv)
