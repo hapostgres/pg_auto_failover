@@ -313,7 +313,7 @@ Watch the replication
 First let’s verify that the monitor knows about our nodes, and see what
 states it has assigned them:
 
-.. code-block::
+.. code-block:: bash
 
    ssh -l ha-admin `vm_ip monitor` pg_autoctl show state --pgdata monitor
 
@@ -390,7 +390,7 @@ that the data is still present:
 
 It shows
 
-.. code-block::
+.. code-block:: bash
 
   .
     count
@@ -479,7 +479,7 @@ are still present.
 
 It shows
 
-.. code-block::
+.. code-block:: bash
 
   .
     count
