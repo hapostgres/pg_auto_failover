@@ -225,8 +225,8 @@ be the primary completes its cycle and joins as a secondary within the same
 operation. The Postgres tool `pg_rewind` is used to implement that
 transition.
 
-And there you have done a full failover from your node a, former primary, to
-your node b, new primary. We can have a look at the state now:
+And there you have done a full failover from your `node_1`, former primary, to
+your `node_2`, new primary. We can have a look at the state now:
 
 ~~~
 $ pg_autoctl show state
