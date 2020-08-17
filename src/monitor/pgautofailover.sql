@@ -578,6 +578,7 @@ $$;
 comment on function pgautofailover.current_state(text, int)
         is 'get the current state of both nodes of a group in a formation';
 
+
 CREATE FUNCTION pgautofailover.formation_uri
  (
     IN formation_id         text DEFAULT 'default',
@@ -765,3 +766,61 @@ CREATE TRIGGER adjust_number_sync_standbys
             ON pgautofailover.node
            FOR EACH ROW
        EXECUTE PROCEDURE pgautofailover.adjust_number_sync_standbys();
+
+
+CREATE FUNCTION pgautofailover.formation_settings
+ (
+    IN formation_id         text default 'default',
+   OUT context              text,
+   OUT group_id             int,
+   OUT node_id              bigint,
+   OUT nodename             text,
+   OUT setting              text,
+   OUT value                text
+ )
+RETURNS SETOF record LANGUAGE SQL STRICT
+AS $$
+  with groups(formationid, groupid) as
+  (
+     select formationid, groupid
+       from pgautofailover.node
+      where formationid = formation_id
+   group by formationid, groupid
+  )
+
+  -- context: formation, number_sync_standbys
+  select 'formation' as context,
+         NULL as group_id, NULL as node_id, formationid as nodename,
+         'number_sync_standbys' as setting,
+         cast(number_sync_standbys as text) as value
+    from pgautofailover.formation
+   where formationid = formation_id
+
+union all
+
+  -- context: primary, one entry per group in the formation
+  select 'primary', groups.groupid, nodes.node_id, nodes.node_name,
+         'synchronous_standby_names',
+         format('''%s''',
+         pgautofailover.synchronous_standby_names(formationid, groupid))
+    from groups, pgautofailover.get_nodes(formationid, groupid) as nodes
+   where node_is_primary
+
+union all
+
+  -- context: node, one entry per node in the formation
+  select 'node', node.groupid, node.nodeid, node.nodename,
+         'replication quorum', cast(node.replicationquorum as text)
+    from pgautofailover.node as node
+   where node.formationid = formation_id
+
+union all
+
+  select 'node', node.groupid, node.nodeid, node.nodename,
+         'candidate priority', cast(node.candidatepriority as text)
+    from pgautofailover.node as node
+   where node.formationid = formation_id;
+$$;
+
+comment on function pgautofailover.formation_settings(text)
+        is 'get the current replication settings a formation';
