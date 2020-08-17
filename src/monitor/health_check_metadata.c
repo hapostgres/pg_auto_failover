@@ -240,3 +240,28 @@ EndSPITransaction(void)
 	PopActiveSnapshot();
 	CommitTransactionCommand();
 }
+
+
+/*
+ * NodeHealthToString returns a string representation of the given node health
+ * enum value.
+ */
+char *
+NodeHealthToString(NodeHealthState health)
+{
+	switch (health)
+	{
+		case NODE_HEALTH_UNKNOWN:
+		{
+			return "unknown";
+		}
+
+		case NODE_HEALTH_BAD:
+		{
+			return "bad";
+		}
+
+		case NODE_HEALTH_GOOD:
+			return "good";
+	}
+}

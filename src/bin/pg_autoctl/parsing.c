@@ -255,6 +255,8 @@ parse_controldata_field_lsn(const char *controlDataString,
  * parse_notification_message parses pgautofailover state change notifications,
  * which are sent in the JSON format.
  */
+#define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
+
 bool
 parse_state_notification_message(CurrentNodeState *nodeState,
 								 const char *message)
@@ -339,6 +341,27 @@ parse_state_notification_message(CurrentNodeState *nodeState,
 		return false;
 	}
 	nodeState->goalState = NodeStateFromString(str);
+
+	str = (char *) json_object_get_string(jsobj, "health");
+
+	if (streq(str, "unknown"))
+	{
+		nodeState->health = -1;
+	}
+	else if (streq(str, "bad"))
+	{
+		nodeState->health = 0;
+	}
+	else if (streq(str, "good"))
+	{
+		nodeState->health = 1;
+	}
+	else
+	{
+		log_error("Failed to parse health in JSON "
+				  "notification message \"%s\"", message);
+		return false;
+	}
 
 	return true;
 }

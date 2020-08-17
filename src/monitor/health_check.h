@@ -62,3 +62,4 @@ extern void SetNodeHealthState(int nodeId, char *nodeHost, uint16 nodePort,
 							   int previousHealthState,
 							   int healthState);
 extern void StopHealthCheckWorker(Oid databaseId);
+extern char * NodeHealthToString(NodeHealthState health);

@@ -92,6 +92,9 @@ prepareHeaderSeparators(NodeAddressHeaders *headers)
 
 	(void) prepareHostNameSeparator(headers->nodeSeparatorHeader,
 									headers->maxNodeSize);
+
+	(void) prepareHostNameSeparator(headers->lsnSeparatorHeader,
+									headers->maxLSNSize);
 }
 
 
@@ -113,6 +116,8 @@ nodestateAdjustHeaders(NodeAddressHeaders *headers,
 	/* compute strlen of groupId/nodeId, as in "0/1" */
 	IntString nodeIdString = intToString(node->nodeId);
 	int nodeLen = 0;
+
+	int lsnLen = strlen(node->lsn);
 
 	switch (headers->nodeKind)
 	{
@@ -153,6 +158,12 @@ nodestateAdjustHeaders(NodeAddressHeaders *headers,
 		headers->maxNodeSize = 5;
 	}
 
+	if (headers->maxLSNSize == 0)
+	{
+		/* Unknown LSN is going to be "0/0" */
+		headers->maxLSNSize = 3;
+	}
+
 	if (nameLen > headers->maxNameSize)
 	{
 		headers->maxNameSize = nameLen;
@@ -167,6 +178,11 @@ nodestateAdjustHeaders(NodeAddressHeaders *headers,
 	{
 		headers->maxNodeSize = nodeLen;
 	}
+
+	if (lsnLen > headers->maxLSNSize)
+	{
+		headers->maxLSNSize = lsnLen;
+	}
 }
 
 
@@ -176,21 +192,21 @@ nodestateAdjustHeaders(NodeAddressHeaders *headers,
 void
 nodestatePrintHeader(NodeAddressHeaders *headers)
 {
-	fformat(stdout, "%*s | %*s | %*s | %17s | %17s | %17s | %6s\n",
+	fformat(stdout, "%*s | %*s | %*s | %*s | %18s | %18s | %6s\n",
 			headers->maxNameSize, "Name",
 			headers->maxNodeSize, "Node",
 			headers->maxHostSize, "Host:Port",
+			headers->maxLSNSize, "LSN",
 			"Current State", "Assigned State",
-			"LSN", "Health");
+			"Health");
 
-	fformat(stdout, "%*s-+-%*s-+-%*s-+-%17s-+-%17s-+-%17s-+-%6s\n",
-			headers->maxNameSize,
-			headers->nameSeparatorHeader,
-			headers->maxNodeSize,
-			headers->nodeSeparatorHeader,
-			headers->maxHostSize,
-			headers->hostSeparatorHeader,
-			"-----------------", "-----------------", "-----------------",
+	fformat(stdout, "%*s-+-%*s-+-%*s-+-%*s-+-%18s-+-%18s-+-%6s\n",
+			headers->maxNameSize, headers->nameSeparatorHeader,
+			headers->maxNodeSize, headers->nodeSeparatorHeader,
+			headers->maxHostSize, headers->hostSeparatorHeader,
+			headers->maxLSNSize, headers->lsnSeparatorHeader,
+			"------------------",
+			"------------------",
 			"------");
 }
 
@@ -212,13 +228,13 @@ nodestatePrintNodeState(NodeAddressHeaders *headers,
 								hostport,
 								composedId);
 
-	fformat(stdout, "%*s | %*s | %*s | %17s | %17s | %17s | %6s\n",
+	fformat(stdout, "%*s | %*s | %*s | %*s | %18s | %18s | %6s\n",
 			headers->maxNameSize, nodeState->node.name,
 			headers->maxNodeSize, composedId,
 			headers->maxHostSize, hostport,
+			headers->maxLSNSize, nodeState->node.lsn,
 			NodeStateToString(nodeState->reportedState),
 			NodeStateToString(nodeState->goalState),
-			nodeState->node.lsn,
 			nodeState->health == -1 ? "?" :
 			nodeState->health == 1 ? "✓" : "✗");
 }

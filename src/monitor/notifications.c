@@ -78,27 +78,30 @@ NotifyStateChange(AutoFailoverNode *node, char *description)
 	/* build a json object from the notification pieces */
 	appendStringInfoChar(payload, '{');
 
-	appendStringInfo(payload, "\"type\": \"state\", ");
+	appendStringInfo(payload, "\"type\": \"state\"");
 
-	appendStringInfo(payload, "\"formation\": ");
+	appendStringInfo(payload, ", \"formation\": ");
 	escape_json(payload, node->formationId);
 
-	appendStringInfo(payload, ", \"groupId\": %d, ", node->groupId);
-	appendStringInfo(payload, "\"nodeId\": %d, ", node->nodeId);
+	appendStringInfo(payload, ", \"groupId\": %d", node->groupId);
+	appendStringInfo(payload, ", \"nodeId\": %d", node->nodeId);
 
-	appendStringInfo(payload, "\"name\": ");
+	appendStringInfo(payload, ", \"name\": ");
 	escape_json(payload, node->nodeName);
 
 	appendStringInfo(payload, ", \"host\": ");
 	escape_json(payload, node->nodeHost);
 
-	appendStringInfo(payload, ", \"port\": %d, ", node->nodePort);
+	appendStringInfo(payload, ", \"port\": %d", node->nodePort);
 
-	appendStringInfo(payload, "\"reportedState\": ");
+	appendStringInfo(payload, ", \"reportedState\": ");
 	escape_json(payload, ReplicationStateGetName(node->reportedState));
 
 	appendStringInfo(payload, ", \"goalState\": ");
 	escape_json(payload, ReplicationStateGetName(node->goalState));
+
+	appendStringInfo(payload, ", \"health\":");
+	escape_json(payload, NodeHealthToString(node->health));
 
 	appendStringInfoChar(payload, '}');
 

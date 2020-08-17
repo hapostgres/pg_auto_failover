@@ -15,7 +15,7 @@
 #include "pgsql.h"
 
 /*
- * CurrentNodeState gathers information we retrive through the monitor
+ * CurrentNodeState gathers information we retrieve through the monitor
  * pgautofailover.current_state API, and that we can also form from other
  * pieces such as local configuration + local state, or monitor notifications.
  */
@@ -47,10 +47,12 @@ typedef struct NodeAddressHeaders
 	int maxNameSize;
 	int maxHostSize;
 	int maxNodeSize;
+	int maxLSNSize;
 
 	char nameSeparatorHeader[BUFSIZE];
 	char hostSeparatorHeader[BUFSIZE];
 	char nodeSeparatorHeader[BUFSIZE];
+	char lsnSeparatorHeader[BUFSIZE];
 } NodeAddressHeaders;
 
 
