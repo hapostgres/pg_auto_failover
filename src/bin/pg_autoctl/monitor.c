@@ -2555,6 +2555,71 @@ printFormationSettings(void *ctx, PGresult *result)
 
 
 /*
+ * monitor_print_formation_settings calls the function
+ * pgautofailover.formation_settings on the monitor, and prints a line of
+ * output per state record obtained.
+ */
+bool
+monitor_print_formation_settings_as_json(Monitor *monitor, char *formation)
+{
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_STRING, false };
+	PGSQL *pgsql = &monitor->pgsql;
+	char *sql =
+		"with settings as "
+		" ( "
+		"  select * "
+		"    from pgautofailover.formation_settings('default') "
+		" ), "
+		" f(json) as "
+		" ( "
+		"   select row_to_json(settings) "
+		"     from settings "
+		"    where context = 'formation' "
+		" ), "
+		" p(json) as "
+		" ( "
+		"  select jsonb_agg(row_to_json(settings)) "
+		"    from settings "
+		"   where context = 'primary' "
+		" ), "
+		" n(json) as "
+		" ( "
+		"   select jsonb_agg(row_to_json(settings)) "
+		"     from settings "
+		"    where context = 'node' "
+		" ) "
+		"select jsonb_pretty(jsonb_build_object("
+		"'formation', f.json, 'primary', p.json, 'nodes', n.json)) "
+		"  from f, p, n";
+	int paramCount = 1;
+	Oid paramTypes[1] = { TEXTOID };
+	const char *paramValues[1] = { formation };
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &parseSingleValueResult))
+	{
+		log_error("Failed to retrieve current state from the monitor");
+		return false;
+	}
+
+	/* disconnect from PostgreSQL now */
+	pgsql_finish(&monitor->pgsql);
+
+	if (!context.parsedOk)
+	{
+		log_error("Failed to parse current state from the monitor");
+		log_error("%s", context.strVal == NULL ? NULL : context.strVal);
+		return false;
+	}
+
+	fformat(stdout, "%s\n", context.strVal);
+
+	return true;
+}
+
+
+/*
  * monitor_synchronous_standby_names returns the value for the Postgres
  * parameter "synchronous_standby_names" to use for a given group. The setting
  * is computed on the monitor depending on the current values of the formation

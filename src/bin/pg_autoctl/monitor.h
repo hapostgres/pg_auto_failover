@@ -139,6 +139,7 @@ bool monitor_disable_secondary_for_formation(Monitor *monitor,
 bool monitor_drop_formation(Monitor *monitor, char *formation);
 
 bool monitor_print_formation_settings(Monitor *monitor, char *formation);
+bool monitor_print_formation_settings_as_json(Monitor *monitor, char *formation);
 
 bool monitor_formation_uri(Monitor *monitor,
 						   const char *formation,

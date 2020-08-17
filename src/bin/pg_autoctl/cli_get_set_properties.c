@@ -459,9 +459,19 @@ cli_get_formation_settings(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	if (!monitor_print_formation_settings(&monitor, config.formation))
+	if (outputJSON)
 	{
-		exit(EXIT_CODE_MONITOR);
+		if (!monitor_print_formation_settings_as_json(&monitor, config.formation))
+		{
+			exit(EXIT_CODE_MONITOR);
+		}
+	}
+	else
+	{
+		if (!monitor_print_formation_settings(&monitor, config.formation))
+		{
+			exit(EXIT_CODE_MONITOR);
+		}
 	}
 }
 
