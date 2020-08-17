@@ -95,6 +95,12 @@ prepareHeaderSeparators(NodeAddressHeaders *headers)
 
 	(void) prepareHostNameSeparator(headers->lsnSeparatorHeader,
 									headers->maxLSNSize);
+
+	(void) prepareHostNameSeparator(headers->stateSeparatorHeader,
+									headers->maxStateSize);
+
+	(void) prepareHostNameSeparator(headers->healthSeparatorHeader,
+									headers->maxHealthSize);
 }
 
 
@@ -139,17 +145,24 @@ nodestateAdjustHeaders(NodeAddressHeaders *headers,
 		}
 	}
 
+	/*
+	 * In order to have a static nice table output even when using
+	 * auto-refreshing commands such as `watch(1)` when states are changing, we
+	 * always use the max known state length.
+	 */
+	headers->maxStateSize = MAX_NODE_STATE_LEN;
+
 	/* initialize to mininum values, if needed */
 	if (headers->maxNameSize == 0)
 	{
 		/* Name */
-		headers->maxNameSize = 5;
+		headers->maxNameSize = strlen("Name");
 	}
 
 	if (headers->maxHostSize == 0)
 	{
 		/* Host:Port */
-		headers->maxHostSize = 10;
+		headers->maxHostSize = strlen("Host:Port");
 	}
 
 	if (headers->maxNodeSize == 0)
@@ -162,6 +175,16 @@ nodestateAdjustHeaders(NodeAddressHeaders *headers,
 	{
 		/* Unknown LSN is going to be "0/0" */
 		headers->maxLSNSize = 3;
+	}
+
+	if (headers->maxHealthSize == 0)
+	{
+		/*
+		 * Reachable, which is longer than "unknown", "yes", and "no", so
+		 * that's all we use here, a static length actually. Which is good,
+		 * because a NodeAddress does not know its own health anyway.
+		 */
+		headers->maxHealthSize = strlen("Reachable");
 	}
 
 	if (nameLen > headers->maxNameSize)
@@ -192,22 +215,23 @@ nodestateAdjustHeaders(NodeAddressHeaders *headers,
 void
 nodestatePrintHeader(NodeAddressHeaders *headers)
 {
-	fformat(stdout, "%*s | %*s | %*s | %*s | %18s | %18s | %6s\n",
+	fformat(stdout, "%*s | %*s | %*s | %*s | %*s | %*s | %*s\n",
 			headers->maxNameSize, "Name",
 			headers->maxNodeSize, "Node",
 			headers->maxHostSize, "Host:Port",
 			headers->maxLSNSize, "LSN",
-			"Current State", "Assigned State",
-			"Health");
+			headers->maxStateSize, "Current State",
+			headers->maxStateSize, "Assigned State",
+			headers->maxHealthSize, "Reachable");
 
-	fformat(stdout, "%*s-+-%*s-+-%*s-+-%*s-+-%18s-+-%18s-+-%6s\n",
+	fformat(stdout, "%*s-+-%*s-+-%*s-+-%*s-+-%*s-+-%*s-+-%*s\n",
 			headers->maxNameSize, headers->nameSeparatorHeader,
 			headers->maxNodeSize, headers->nodeSeparatorHeader,
 			headers->maxHostSize, headers->hostSeparatorHeader,
 			headers->maxLSNSize, headers->lsnSeparatorHeader,
-			"------------------",
-			"------------------",
-			"------");
+			headers->maxStateSize, headers->stateSeparatorHeader,
+			headers->maxStateSize, headers->stateSeparatorHeader,
+			headers->maxHealthSize, headers->healthSeparatorHeader);
 }
 
 
@@ -228,15 +252,14 @@ nodestatePrintNodeState(NodeAddressHeaders *headers,
 								hostport,
 								composedId);
 
-	fformat(stdout, "%*s | %*s | %*s | %*s | %18s | %18s | %6s\n",
+	fformat(stdout, "%*s | %*s | %*s | %*s | %*s | %*s | %*s\n",
 			headers->maxNameSize, nodeState->node.name,
 			headers->maxNodeSize, composedId,
 			headers->maxHostSize, hostport,
 			headers->maxLSNSize, nodeState->node.lsn,
-			NodeStateToString(nodeState->reportedState),
-			NodeStateToString(nodeState->goalState),
-			nodeState->health == -1 ? "?" :
-			nodeState->health == 1 ? "✓" : "✗");
+			headers->maxStateSize, NodeStateToString(nodeState->reportedState),
+			headers->maxStateSize, NodeStateToString(nodeState->goalState),
+			headers->maxHealthSize, nodestateHealthToString(nodeState->health));
 }
 
 
@@ -319,4 +342,33 @@ nodestateAsJSON(CurrentNodeState *nodeState, JSON_Value *js)
 	json_object_set_number(jsobj, "health", (double) nodeState->health);
 
 	return true;
+}
+
+
+/*
+ * Transform the health column from a monitor into a string.
+ */
+char *
+nodestateHealthToString(int health)
+{
+	switch (health)
+	{
+		case -1:
+		{
+			return "unknown";
+		}
+
+		case 0:
+		{
+			return "no";
+		}
+
+		case 1:
+		{
+			return "yes";
+		}
+
+		default:
+			return intToString(health).strValue;
+	}
 }

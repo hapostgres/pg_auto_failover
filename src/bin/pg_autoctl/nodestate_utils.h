@@ -48,11 +48,15 @@ typedef struct NodeAddressHeaders
 	int maxHostSize;
 	int maxNodeSize;
 	int maxLSNSize;
+	int maxStateSize;
+	int maxHealthSize;
 
 	char nameSeparatorHeader[BUFSIZE];
 	char hostSeparatorHeader[BUFSIZE];
 	char nodeSeparatorHeader[BUFSIZE];
 	char lsnSeparatorHeader[BUFSIZE];
+	char stateSeparatorHeader[BUFSIZE];
+	char healthSeparatorHeader[BUFSIZE];
 } NodeAddressHeaders;
 
 
@@ -83,5 +87,7 @@ void nodestatePrepareNode(NodeAddressHeaders *headers, NodeAddress *node,
 void prepareHostNameSeparator(char nameSeparatorHeader[], int size);
 
 bool nodestateAsJSON(CurrentNodeState *nodeState, JSON_Value *js);
+
+char * nodestateHealthToString(int health);
 
 #endif /* NODESTATE_H */

@@ -56,6 +56,8 @@ typedef enum
 	ANY_STATE = 128
 } NodeState;
 
+#define MAX_NODE_STATE_LEN 19   /* "prepare_maintenance" */
+
 /*
  * ANY_STATE matches with any state, as its name implies:
  */
