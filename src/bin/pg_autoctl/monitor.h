@@ -167,6 +167,7 @@ bool monitor_wait_until_primary_applied_settings(Monitor *monitor,
 bool monitor_wait_until_some_node_reported_state(Monitor *monitor,
 												 const char *formation,
 												 int groupId,
+												 PgInstanceKind nodeKind,
 												 NodeState targetState);
 
 bool monitor_get_extension_version(Monitor *monitor,

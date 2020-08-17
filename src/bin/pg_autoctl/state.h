@@ -13,8 +13,6 @@
 #include <assert.h>
 #include "parson.h"
 
-#include "keeper_config.h"
-#include "pgctl.h"
 #include "pgsetup.h"
 
 /*
@@ -57,6 +55,8 @@ typedef enum
 	/* Allow some wildcard-matching transitions (from ANY state to) */
 	ANY_STATE = 128
 } NodeState;
+
+#define MAX_NODE_STATE_LEN 19   /* "prepare_maintenance" */
 
 /*
  * ANY_STATE matches with any state, as its name implies:

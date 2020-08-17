@@ -1043,7 +1043,7 @@ SELECT reportedstate
         """
         command = PGAutoCtl(self)
         out, err, ret = command.execute("get synchronous_standby_names",
-                                        'show', 'synchronous_standby_names')
+                                        'show', 'standby-names')
 
         return out.strip()
 

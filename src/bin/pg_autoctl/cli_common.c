@@ -1023,6 +1023,7 @@ monitor_init_from_pgsetup(Monitor *monitor, PostgresSetup *pgSetup)
 			}
 
 			*monitor = keeper.monitor;
+			*pgSetup = config.pgSetup;
 			break;
 		}
 

@@ -19,6 +19,15 @@
 #include "parson.h"
 
 /*
+ * Maximum length of serialized pg_lsn value
+ * It is taken from postgres file pg_lsn.c.
+ * It defines MAXPG_LSNLEN to be 17 and
+ * allocates a buffer 1 byte larger. We
+ * went for 18 to make buffer allocation simpler.
+ */
+#define PG_LSN_MAXLENGTH 18
+
+/*
  * To be able to check if a minor upgrade should be scheduled, and to check for
  * system WAL compatiblity, we use some parts of the pg_controldata output.
  *
@@ -30,6 +39,7 @@ typedef struct pg_control_data
 	uint32_t pg_control_version;        /* PG_CONTROL_VERSION */
 	uint32_t catalog_version_no;        /* see catversion.h */
 	uint64_t system_identifier;
+	char latestCheckpointLSN[PG_LSN_MAXLENGTH];
 } PostgresControlData;
 
 /*

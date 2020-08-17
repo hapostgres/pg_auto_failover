@@ -17,6 +17,7 @@
 #include "log.h"
 #include "monitor.h"
 #include "monitor_config.h"
+#include "nodestate_utils.h"
 #include "parsing.h"
 #include "pgsql.h"
 #include "signals.h"
@@ -54,6 +55,13 @@ typedef struct NodeReplicationSettingsParseContext
 	bool parsedOK;
 } NodeReplicationSettingsParseContext;
 
+typedef struct CurrentNodeStateContext
+{
+	char sqlstate[SQLSTATE_LENGTH];
+	CurrentNodeStateArray *nodesArray;
+	bool parsedOK;
+} CurrentNodeStateContext;
+
 /* either "monitor" or "formation" */
 #define CONNTYPE_LENGTH 10
 
@@ -74,14 +82,15 @@ typedef struct MonitorExtensionVersionParseContext
 } MonitorExtensionVersionParseContext;
 
 static int MaxHostNameSizeInNodesArray(NodeAddressArray *nodesArray);
-static void prepareHostNameSeparator(char nameSeparatorHeader[],
-									 int maxHostNameSize);
-
 static bool parseNode(PGresult *result, int rowNumber, NodeAddress *node);
 static void parseNodeResult(void *ctx, PGresult *result);
 static void parseNodeArray(void *ctx, PGresult *result);
 static void parseNodeState(void *ctx, PGresult *result);
 static void parseNodeReplicationSettings(void *ctx, PGresult *result);
+static bool parseCurrentNodeState(PGresult *result, int rowNumber,
+								  CurrentNodeState *nodeState);
+static bool parseCurrentNodeStateArray(CurrentNodeStateArray *nodesArray,
+									   PGresult *result);
 static void printCurrentState(void *ctx, PGresult *result);
 static void printLastEvents(void *ctx, PGresult *result);
 static void printFormationURI(void *ctx, PGresult *result);
@@ -181,27 +190,6 @@ monitor_get_nodes(Monitor *monitor, char *formation, int groupId,
 				  sql, formation, groupId);
 		return false;
 	}
-
-	return true;
-}
-
-
-/*
- * monitor_print_nodes gets all the nodes in the given group and prints them
- * out to stdout in a human-friendly tabular format.
- */
-bool
-monitor_print_nodes(Monitor *monitor, char *formation, int groupId)
-{
-	NodeAddressArray nodesArray;
-
-	if (!monitor_get_nodes(monitor, formation, groupId, &nodesArray))
-	{
-		/* errors have already been logged */
-		return false;
-	}
-
-	(void) printNodeArray(&nodesArray);
 
 	return true;
 }
@@ -1322,28 +1310,6 @@ MaxHostNameSizeInNodesArray(NodeAddressArray *nodesArray)
 
 
 /*
- * prepareHostNameSeparator fills in the pre-allocated given string with the
- * expected amount of dashes to use as a separator line in our tabular output.
- */
-static void
-prepareHostNameSeparator(char nameSeparatorHeader[], int maxHostNameSize)
-{
-	for (int i = 0; i <= maxHostNameSize; i++)
-	{
-		if (i < maxHostNameSize)
-		{
-			nameSeparatorHeader[i] = '-';
-		}
-		else
-		{
-			nameSeparatorHeader[i] = '\0';
-			break;
-		}
-	}
-}
-
-
-/*
  * printCurrentState loops over pgautofailover.current_state() results and prints
  * them, one per line.
  */
@@ -1501,7 +1467,8 @@ parseNodeState(void *ctx, PGresult *result)
 bool
 monitor_print_state(Monitor *monitor, char *formation, int group)
 {
-	MonitorAssignedStateParseContext context = { 0 };
+	CurrentNodeStateArray nodesArray = { 0 };
+	CurrentNodeStateContext context = { { 0 }, &nodesArray, false };
 	PGSQL *pgsql = &monitor->pgsql;
 	char *sql = NULL;
 	int paramCount = 0;
@@ -1566,108 +1533,239 @@ monitor_print_state(Monitor *monitor, char *formation, int group)
 
 
 /*
- * printCurrentState loops over pgautofailover.current_state() results and prints
- * them, one per line.
+ * parseCurrentNodeState parses the 11 columns returned by the API endpoint
+ * pgautofailover.current_state.
+ */
+static bool
+parseCurrentNodeState(PGresult *result, int rowNumber,
+					  CurrentNodeState *nodeState)
+{
+	char *value = NULL;
+	int length = 0;
+	int colNumber = 0;
+	int errors = 0;
+
+	/* we don't expect any of the column to be NULL */
+	for (colNumber = 0; colNumber < 12; colNumber++)
+	{
+		if (PQgetisnull(result, rowNumber, 0))
+		{
+			log_error("column %d in row %d returned by the monitor is NULL",
+					  colNumber, rowNumber);
+			return false;
+		}
+	}
+
+	/*
+	 *  0 - OUT formation_kind       text,
+	 *  1 - OUT nodename             text,
+	 *  2 - OUT nodehost             text,
+	 *  3 - OUT nodeport             int,
+	 *  4 - OUT group_id             int,
+	 *  5 - OUT node_id              bigint,
+	 *  6 - OUT current_group_state  pgautofailover.replication_state,
+	 *  7 - OUT assigned_group_state pgautofailover.replication_state,
+	 *  8 - OUT candidate_priority	 int,
+	 *  9 - OUT replication_quorum	 bool,
+	 * 10 - OUT reported_lsn         pg_lsn,
+	 * 11 - OUT health               integer
+	 *
+	 * We need the groupId to parse the formation kind into a nodeKind, so we
+	 * begin at column 1 and get back to column 0 later, after column 4.
+	 */
+	value = PQgetvalue(result, rowNumber, 1);
+	length = strlcpy(nodeState->node.name, value, _POSIX_HOST_NAME_MAX);
+	if (length >= _POSIX_HOST_NAME_MAX)
+	{
+		log_error("Node name \"%s\" returned by monitor is %d characters, "
+				  "the maximum supported by pg_autoctl is %d",
+				  value, length, _POSIX_HOST_NAME_MAX - 1);
+		++errors;
+	}
+
+	value = PQgetvalue(result, rowNumber, 2);
+
+	length = strlcpy(nodeState->node.host, value, _POSIX_HOST_NAME_MAX);
+	if (length >= _POSIX_HOST_NAME_MAX)
+	{
+		log_error("Hostname \"%s\" returned by monitor is %d characters, "
+				  "the maximum supported by pg_autoctl is %d",
+				  value, length, _POSIX_HOST_NAME_MAX - 1);
+		++errors;
+	}
+
+	value = PQgetvalue(result, rowNumber, 3);
+
+	if (!stringToInt(value, &(nodeState->node.port)) ||
+		nodeState->node.port == 0)
+	{
+		log_error("Invalid port number \"%s\" returned by monitor", value);
+		++errors;
+	}
+
+	value = PQgetvalue(result, rowNumber, 4);
+	if (!stringToInt(value, &(nodeState->groupId)))
+	{
+		log_error("Invalid groupId \"%s\" returned by monitor", value);
+		++errors;
+	}
+
+	/* we need the groupId to parse the formation kind into a nodeKind */
+	value = PQgetvalue(result, rowNumber, 0);
+
+	if (strcmp(value, "pgsql") == 0 && nodeState->groupId == 0)
+	{
+		nodeState->pgKind = NODE_KIND_STANDALONE;
+	}
+	else if (strcmp(value, "citus") == 0 && nodeState->groupId == 0)
+	{
+		nodeState->pgKind = NODE_KIND_CITUS_COORDINATOR;
+	}
+	else if (strcmp(value, "citus") == 0 && nodeState->groupId > 0)
+	{
+		nodeState->pgKind = NODE_KIND_CITUS_WORKER;
+	}
+	else
+	{
+		log_error("Invalid groupId %d with formation kind \"%s\"",
+				  nodeState->groupId, value);
+		++errors;
+	}
+
+	value = PQgetvalue(result, rowNumber, 5);
+	if (!stringToInt(value, &(nodeState->node.nodeId)))
+	{
+		log_error("Invalid nodeId \"%s\" returned by monitor", value);
+		++errors;
+	}
+
+	value = PQgetvalue(result, rowNumber, 6);
+	nodeState->reportedState = NodeStateFromString(value);
+	if (nodeState->reportedState == NO_STATE)
+	{
+		log_error("Invalid node state \"%s\" returned by monitor", value);
+		++errors;
+	}
+
+	value = PQgetvalue(result, rowNumber, 7);
+	nodeState->goalState = NodeStateFromString(value);
+	if (nodeState->goalState == NO_STATE)
+	{
+		log_error("Invalid node state \"%s\" returned by monitor", value);
+		++errors;
+	}
+
+	value = PQgetvalue(result, rowNumber, 8);
+	if (!stringToInt(value, &(nodeState->candidatePriority)))
+	{
+		log_error("Invalid failover candidate priority \"%s\" "
+				  "returned by monitor", value);
+		++errors;
+	}
+
+	value = PQgetvalue(result, rowNumber, 9);
+	if (value == NULL || ((*value != 't') && (*value != 'f')))
+	{
+		log_error("Invalid replication quorum \"%s\" "
+				  "returned by monitor", value);
+		++errors;
+	}
+	else
+	{
+		nodeState->replicationQuorum = (*value) == 't';
+	}
+
+	/* we trust Postgres pg_lsn data type to fit in our PG_LSN_MAXLENGTH */
+	value = PQgetvalue(result, rowNumber, 10);
+	strlcpy(nodeState->node.lsn, value, PG_LSN_MAXLENGTH);
+
+	value = PQgetvalue(result, rowNumber, 11);
+	if (!stringToInt(value, &(nodeState->health)))
+	{
+		log_error("Invalid node health \"%s\" returned by monitor", value);
+		++errors;
+	}
+
+	return errors == 0;
+}
+
+
+/*
+ * parseCurrentNodeStateArray parses an array of up to NODE_ARRAY_MAX_COUNT
+ * nodeStates, one entry per node in a given formation.
+ */
+static bool
+parseCurrentNodeStateArray(CurrentNodeStateArray *nodesArray, PGresult *result)
+{
+	bool parsedOk = true;
+	int rowNumber = 0;
+
+	log_trace("parseCurrentNodeStateArray: %d", PQntuples(result));
+
+	/* keep a NULL entry to mark the end of the array */
+	if (PQntuples(result) > NODE_ARRAY_MAX_COUNT)
+	{
+		log_error("Query returned %d rows, pg_auto_failover supports only up "
+				  "to %d standby nodes at the moment",
+				  PQntuples(result), NODE_ARRAY_MAX_COUNT);
+		return false;
+	}
+
+	/* pgautofailover.current_state returns 11 columns */
+	if (PQnfields(result) != 12)
+	{
+		log_error("Query returned %d columns, expected 12", PQnfields(result));
+		return false;
+	}
+
+	nodesArray->count = PQntuples(result);
+
+	for (rowNumber = 0; rowNumber < PQntuples(result); rowNumber++)
+	{
+		CurrentNodeState *nodeState = &(nodesArray->nodes[rowNumber]);
+
+		parsedOk = parsedOk &&
+				   parseCurrentNodeState(result, rowNumber, nodeState);
+	}
+
+	return parsedOk;
+}
+
+
+/*
+ * printCurrentState loops over pgautofailover.current_state() results and
+ * prints them, one per line.
  */
 static void
 printCurrentState(void *ctx, PGresult *result)
 {
-	MonitorAssignedStateParseContext *context =
-		(MonitorAssignedStateParseContext *) ctx;
-	int currentTupleIndex = 0;
-	int nTuples = PQntuples(result);
+	CurrentNodeStateContext *context = (CurrentNodeStateContext *) ctx;
+	CurrentNodeStateArray *nodesArray = context->nodesArray;
+	NodeAddressHeaders *headers = &(nodesArray->headers);
+	PgInstanceKind firstNodeKind = NODE_KIND_UNKNOWN;
 
-	int maxNameSize = 5;    /* strlen("Name") + 1, the header */
-	int maxHostSize = 10;   /* strlen("Host:Port") + 1, the header */
-	int maxNodeSize = 5;    /* strlen("Node") + 1, the header */
-
-	char nameSeparatorHeader[BUFSIZE] = { 0 };
-	char hostSeparatorHeader[BUFSIZE] = { 0 };
-	char nodeSeparatorHeader[BUFSIZE] = { 0 };
-
-	if (PQnfields(result) != 9)
+	if (!parseCurrentNodeStateArray(nodesArray, result))
 	{
-		log_error("Query returned %d columns, expected 9", PQnfields(result));
+		/* errors have already been logged */
 		context->parsedOK = false;
 		return;
 	}
 
-	/*
-	 * Dynamically adjust our display output to the length of the longer
-	 * hostname in the result set
-	 */
-	for (currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
+	if (nodesArray->count > 0)
 	{
-		char *name = PQgetvalue(result, currentTupleIndex, 0);
-		char *host = PQgetvalue(result, currentTupleIndex, 1);
-		char *port = PQgetvalue(result, currentTupleIndex, 2);
-
-		char *groupId = PQgetvalue(result, currentTupleIndex, 3);
-		char *nodeId = PQgetvalue(result, currentTupleIndex, 4);
-
-		int hostLen = strlen(host) + strlen(port) + 1; /* host:port */
-		int nodeLen = strlen(groupId) + strlen(nodeId) + 1; /* 0/1 */
-
-		if (strlen(name) > maxNameSize)
-		{
-			maxNameSize = strlen(name);
-		}
-
-		if (hostLen > maxHostSize)
-		{
-			maxHostSize = hostLen;
-		}
-
-		if (nodeLen > maxNodeSize)
-		{
-			maxNodeSize = nodeLen;
-		}
+		firstNodeKind = nodesArray->nodes[0].pgKind;
 	}
 
-	/* prepare a nice dynamic string of '-' as a header separator */
-	(void) prepareHostNameSeparator(nameSeparatorHeader, maxNameSize);
-	(void) prepareHostNameSeparator(hostSeparatorHeader, maxHostSize);
-	(void) prepareHostNameSeparator(nodeSeparatorHeader, maxNodeSize);
+	(void) nodestatePrepareHeaders(nodesArray, firstNodeKind);
+	(void) nodestatePrintHeader(headers);
 
-	fformat(stdout, "%*s | %*s | %*s | %17s | %17s | %8s | %6s\n",
-			maxNameSize, "Name",
-			maxHostSize, "Host:Port",
-			maxNodeSize, "Node",
-			"Current State", "Assigned State",
-			"Priority", "Quorum");
-
-	fformat(stdout, "%*s-+-%*s-+-%*s-+-%17s-+-%17s-+-%8s-+-%6s\n",
-			maxNameSize, nameSeparatorHeader,
-			maxHostSize, hostSeparatorHeader,
-			maxNodeSize, nodeSeparatorHeader,
-			"-----------------", "-----------------",
-			"--------", "------");
-
-	for (currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
+	for (int position = 0; position < context->nodesArray->count; position++)
 	{
-		char *name = PQgetvalue(result, currentTupleIndex, 0);
-		char *host = PQgetvalue(result, currentTupleIndex, 1);
-		char *port = PQgetvalue(result, currentTupleIndex, 2);
-		char *groupId = PQgetvalue(result, currentTupleIndex, 3);
-		char *nodeId = PQgetvalue(result, currentTupleIndex, 4);
-		char *currentState = PQgetvalue(result, currentTupleIndex, 5);
-		char *goalState = PQgetvalue(result, currentTupleIndex, 6);
-		char *candidatePriority = PQgetvalue(result, currentTupleIndex, 7);
-		char *replicationQuorum = PQgetvalue(result, currentTupleIndex, 8);
+		CurrentNodeState *nodeState = &(nodesArray->nodes[position]);
 
-		char hostport[BUFSIZE] = { 0 };
-		char composedId[BUFSIZE] = { 0 };
-
-		sformat(hostport, sizeof(hostport), "%s:%s", host, port);
-		sformat(composedId, sizeof(hostport), "%s/%s", groupId, nodeId);
-
-		fformat(stdout, "%*s | %*s | %*s | %17s | %17s | %8s | %6s\n",
-				maxNameSize, name,
-				maxHostSize, hostport,
-				maxNodeSize, composedId,
-				currentState, goalState,
-				candidatePriority, replicationQuorum);
+		(void) nodestatePrintNodeState(headers, nodeState);
 	}
+
 	fformat(stdout, "\n");
 
 	context->parsedOK = true;
@@ -1774,7 +1872,7 @@ monitor_print_last_events(Monitor *monitor, char *formation, int group, int coun
 		case -1:
 		{
 			sql =
-				"SELECT eventTime, formationid, nodeid, groupid, "
+				"SELECT eventTime, nodeid, groupid, "
 				"       reportedstate, goalState, description "
 				"  FROM pgautofailover.last_events($1, count => $2)";
 
@@ -1792,7 +1890,7 @@ monitor_print_last_events(Monitor *monitor, char *formation, int group, int coun
 		default:
 		{
 			sql =
-				"SELECT eventTime, formationid, nodeid, groupid, "
+				"SELECT eventTime, nodeid, groupid, "
 				"       reportedstate, goalState, description "
 				"  FROM pgautofailover.last_events($1,$2,$3)";
 
@@ -1930,37 +2028,36 @@ printLastEvents(void *ctx, PGresult *result)
 
 	log_trace("printLastEvents: %d tuples", nTuples);
 
-	if (PQnfields(result) != 7)
+	if (PQnfields(result) != 6)
 	{
-		log_error("Query returned %d columns, expected 7", PQnfields(result));
+		log_error("Query returned %d columns, expected 6", PQnfields(result));
 		context->parsedOK = false;
 		return;
 	}
 
-	fformat(stdout, "%30s | %10s | %6s | %19s | %19s | %s\n",
-			"Event Time", "Formation", "Node",
+	fformat(stdout, "%30s | %6s | %19s | %19s | %s\n",
+			"Event Time", "Node",
 			"Current State", "Assigned State", "Comment");
-	fformat(stdout, "%30s-+-%10s-+-%6s-+-%19s-+-%19s-+-%10s\n",
-			"------------------------------", "----------",
+	fformat(stdout, "%30s-+-%6s-+-%19s-+-%19s-+-%10s\n",
+			"------------------------------",
 			"------", "-------------------",
 			"-------------------", "----------");
 
 	for (currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
 	{
 		char *eventTime = PQgetvalue(result, currentTupleIndex, 0);
-		char *formation = PQgetvalue(result, currentTupleIndex, 1);
-		char *nodeId = PQgetvalue(result, currentTupleIndex, 2);
-		char *groupId = PQgetvalue(result, currentTupleIndex, 3);
-		char *currentState = PQgetvalue(result, currentTupleIndex, 4);
-		char *goalState = PQgetvalue(result, currentTupleIndex, 5);
-		char *description = PQgetvalue(result, currentTupleIndex, 6);
+		char *nodeId = PQgetvalue(result, currentTupleIndex, 1);
+		char *groupId = PQgetvalue(result, currentTupleIndex, 2);
+		char *currentState = PQgetvalue(result, currentTupleIndex, 3);
+		char *goalState = PQgetvalue(result, currentTupleIndex, 4);
+		char *description = PQgetvalue(result, currentTupleIndex, 5);
 		char node[BUFSIZE];
 
 		/* for our grid alignment output it's best to have a single col here */
 		sformat(node, BUFSIZE, "%s/%s", groupId, nodeId);
 
-		fformat(stdout, "%30s | %10s | %6s | %19s | %19s | %s\n",
-				eventTime, formation, node,
+		fformat(stdout, "%30s | %6s | %19s | %19s | %s\n",
+				eventTime, node,
 				currentState, goalState, description);
 	}
 	fformat(stdout, "\n");
@@ -2687,22 +2784,19 @@ monitor_get_notifications(Monitor *monitor)
 		}
 		else if (strcmp(notify->relname, "state") == 0)
 		{
-			StateNotification notification = { 0 };
+			CurrentNodeState nodeState = { 0 };
 
 			log_debug("received \"%s\"", notify->extra);
 
-			/* the parsing scribbles on the message, make a copy now */
-			strlcpy(notification.message, notify->extra, BUFSIZE);
-
 			/* errors are logged by parse_state_notification_message */
-			if (parse_state_notification_message(&notification))
+			if (parse_state_notification_message(&nodeState, notify->extra))
 			{
 				log_info("New state for node %d (%s:%d): %s ➜ %s",
-						 notification.nodeId,
-						 notification.hostName,
-						 notification.nodePort,
-						 NodeStateToString(notification.reportedState),
-						 NodeStateToString(notification.goalState));
+						 nodeState.node.nodeId,
+						 nodeState.node.host,
+						 nodeState.node.port,
+						 NodeStateToString(nodeState.reportedState),
+						 NodeStateToString(nodeState.goalState));
 			}
 		}
 		else
@@ -2792,7 +2886,7 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 		PQconsumeInput(connection);
 		while ((notify = PQnotifies(connection)) != NULL)
 		{
-			StateNotification notification = { 0 };
+			CurrentNodeState nodeState = { 0 };
 
 			uint64_t now = time(NULL);
 
@@ -2810,11 +2904,8 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 
 			log_debug("received \"%s\"", notify->extra);
 
-			/* the parsing scribbles on the message, make a copy now */
-			strlcpy(notification.message, notify->extra, BUFSIZE);
-
 			/* errors are logged by parse_state_notification_message */
-			if (!parse_state_notification_message(&notification))
+			if (!parse_state_notification_message(&nodeState, notify->extra))
 			{
 				log_warn("Failed to parse notification message \"%s\"",
 						 notify->extra);
@@ -2822,55 +2913,55 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 			}
 
 			/* filter notifications for our own formation */
-			if (strcmp(notification.formationId, formation) != 0)
+			if (strcmp(nodeState.formation, formation) != 0)
 			{
 				continue;
 			}
 
-			if (notification.reportedState == PRIMARY_STATE &&
-				notification.goalState == APPLY_SETTINGS_STATE)
+			if (nodeState.reportedState == PRIMARY_STATE &&
+				nodeState.goalState == APPLY_SETTINGS_STATE)
 			{
 				applySettingsTransitionInProgress = true;
 
 				log_debug("step 1/4: primary node %d (%s:%d) is assigned \"%s\"",
-						  notification.nodeId,
-						  notification.hostName,
-						  notification.nodePort,
-						  NodeStateToString(notification.goalState));
+						  nodeState.node.nodeId,
+						  nodeState.node.host,
+						  nodeState.node.port,
+						  NodeStateToString(nodeState.goalState));
 			}
-			else if (notification.reportedState == APPLY_SETTINGS_STATE &&
-					 notification.goalState == APPLY_SETTINGS_STATE)
+			else if (nodeState.reportedState == APPLY_SETTINGS_STATE &&
+					 nodeState.goalState == APPLY_SETTINGS_STATE)
 			{
 				applySettingsTransitionInProgress = true;
 
 				log_debug("step 2/4: primary node %d (%s:%d) reported \"%s\"",
-						  notification.nodeId,
-						  notification.hostName,
-						  notification.nodePort,
-						  NodeStateToString(notification.reportedState));
+						  nodeState.node.nodeId,
+						  nodeState.node.host,
+						  nodeState.node.port,
+						  NodeStateToString(nodeState.reportedState));
 			}
-			else if (notification.reportedState == APPLY_SETTINGS_STATE &&
-					 notification.goalState == PRIMARY_STATE)
+			else if (nodeState.reportedState == APPLY_SETTINGS_STATE &&
+					 nodeState.goalState == PRIMARY_STATE)
 			{
 				applySettingsTransitionInProgress = true;
 
 				log_debug("step 3/4: primary node %d (%s:%d) is assigned \"%s\"",
-						  notification.nodeId,
-						  notification.hostName,
-						  notification.nodePort,
-						  NodeStateToString(notification.goalState));
+						  nodeState.node.nodeId,
+						  nodeState.node.host,
+						  nodeState.node.port,
+						  NodeStateToString(nodeState.goalState));
 			}
 			else if (applySettingsTransitionInProgress &&
-					 notification.reportedState == PRIMARY_STATE &&
-					 notification.goalState == PRIMARY_STATE)
+					 nodeState.reportedState == PRIMARY_STATE &&
+					 nodeState.goalState == PRIMARY_STATE)
 			{
 				applySettingsTransitionDone = true;
 
 				log_debug("step 4/4: primary node %d (%s:%d) reported \"%s\"",
-						  notification.nodeId,
-						  notification.hostName,
-						  notification.nodePort,
-						  NodeStateToString(notification.reportedState));
+						  nodeState.node.nodeId,
+						  nodeState.node.host,
+						  nodeState.node.port,
+						  NodeStateToString(nodeState.reportedState));
 			}
 
 			/* prepare next iteration */
@@ -2898,16 +2989,19 @@ bool
 monitor_wait_until_some_node_reported_state(Monitor *monitor,
 											const char *formation,
 											int groupId,
+											PgInstanceKind nodeKind,
 											NodeState targetState)
 {
 	PGconn *connection = monitor->pgsql.connection;
+
 	NodeAddressArray nodesArray = { 0 };
+	NodeAddressHeaders headers = { 0 };
+
 	bool failoverIsDone = false;
 
 	uint64_t start = time(NULL);
 
-	int maxHostNameSize = 5;    /* strlen("Name") + 1, the header */
-	char nameSeparatorHeader[BUFSIZE] = { 0 };
+	bool firstLoop = true;
 
 	if (connection == NULL)
 	{
@@ -2927,19 +3021,31 @@ monitor_wait_until_some_node_reported_state(Monitor *monitor,
 	{
 		/* ignore the error, use an educated guess for the max size */
 		log_warn("Failed to get_nodes() on the monitor");
-		maxHostNameSize = 25;
+
+		headers.maxNameSize = 25;
+		headers.maxHostSize = 25;
+		headers.maxNodeSize = 5;
 	}
 
-	maxHostNameSize = MaxHostNameSizeInNodesArray(&nodesArray);
-	(void) prepareHostNameSeparator(nameSeparatorHeader, maxHostNameSize);
+	(void) nodeAddressArrayPrepareHeaders(&headers,
+										  &nodesArray,
+										  groupId,
+										  nodeKind);
 
-	fformat(stdout, "%8s | %3s | %*s | %6s | %19s | %19s\n",
-			"Time", "ID", maxHostNameSize, "Host", "Port",
-			"Current State", "Assigned State");
+	fformat(stdout, "%8s | %*s | %*s | %*s | %19s | %19s\n",
+			"Time",
+			headers.maxNameSize, "Name",
+			headers.maxNodeSize, "Node",
+			headers.maxHostSize, "Host:Port",
+			"Current State",
+			"Assigned State");
 
-	fformat(stdout, "%8s-+-%3s-+-%*s-+-%6s-+-%19s-+-%19s\n",
-			"--------", "---", maxHostNameSize, nameSeparatorHeader,
-			"------", "-------------------", "-------------------");
+	fformat(stdout, "%8s-+-%*s-+-%*s-+-%*s-+-%19s-+-%19s\n",
+			"--------",
+			headers.maxNameSize, headers.nameSeparatorHeader,
+			headers.maxNodeSize, headers.nodeSeparatorHeader,
+			headers.maxHostSize, headers.hostSeparatorHeader,
+			"-------------------", "-------------------");
 
 	while (!failoverIsDone)
 	{
@@ -2982,10 +3088,13 @@ monitor_wait_until_some_node_reported_state(Monitor *monitor,
 		PQconsumeInput(connection);
 		while ((notify = PQnotifies(connection)) != NULL)
 		{
-			StateNotification notification = { 0 };
+			CurrentNodeState nodeState = { 0 };
 
 			uint64_t now = time(NULL);
 			char timestring[MAXCTIMESIZE];
+
+			char hostport[BUFSIZE] = { 0 };
+			char composedId[BUFSIZE] = { 0 };
 
 			if ((now - start) > PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT)
 			{
@@ -3001,11 +3110,8 @@ monitor_wait_until_some_node_reported_state(Monitor *monitor,
 
 			log_debug("received \"%s\"", notify->extra);
 
-			/* the parsing scribbles on the message, make a copy now */
-			strlcpy(notification.message, notify->extra, BUFSIZE);
-
 			/* errors are logged by parse_state_notification_message */
-			if (!parse_state_notification_message(&notification))
+			if (!parse_state_notification_message(&nodeState, notify->extra))
 			{
 				log_warn("Failed to parse notification message \"%s\"",
 						 notify->extra);
@@ -3013,8 +3119,8 @@ monitor_wait_until_some_node_reported_state(Monitor *monitor,
 			}
 
 			/* filter notifications for our own formation */
-			if (strcmp(notification.formationId, formation) != 0 ||
-				notification.groupId != groupId)
+			if (strcmp(nodeState.formation, formation) != 0 ||
+				nodeState.groupId != groupId)
 			{
 				continue;
 			}
@@ -3025,19 +3131,31 @@ monitor_wait_until_some_node_reported_state(Monitor *monitor,
 			/* "Wed Jun 30 21:49:08 1993" -> "21:49:08" */
 			timestring[11 + 8] = '\0';
 
-			fformat(stdout, "%8s | %3d | %*s | %6d | %19s | %19s\n",
-					timestring + 11,
-					notification.nodeId, maxHostNameSize,
-					notification.hostName,
-					notification.nodePort,
-					NodeStateToString(notification.reportedState),
-					NodeStateToString(notification.goalState));
+			(void) nodestatePrepareNode(&headers,
+										&(nodeState.node),
+										groupId,
+										hostport,
+										composedId);
 
-			if (notification.goalState == targetState &&
-				notification.reportedState == targetState)
+			fformat(stdout, "%8s | %*s | %*s | %*s | %19s | %19s\n",
+					timestring + 11,
+					headers.maxNameSize, nodeState.node.name,
+					headers.maxNodeSize, composedId,
+					headers.maxHostSize, hostport,
+					NodeStateToString(nodeState.reportedState),
+					NodeStateToString(nodeState.goalState));
+
+			if (nodeState.goalState == targetState &&
+				nodeState.reportedState == targetState &&
+				!firstLoop)
 			{
 				failoverIsDone = true;
 				break;
+			}
+
+			if (firstLoop)
+			{
+				firstLoop = false;
 			}
 
 			/* prepare next iteration */

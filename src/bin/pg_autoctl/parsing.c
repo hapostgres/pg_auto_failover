@@ -14,7 +14,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "parson.h"
+
 #include "log.h"
+#include "nodestate_utils.h"
 #include "parsing.h"
 #include "string_utils.h"
 
@@ -26,8 +29,9 @@ static bool parse_controldata_field_uint64(const char *controlDataString,
 										   const char *fieldName,
 										   uint64_t *dest);
 
-static int read_length_delimited_string_at(const char *ptr,
-										   char *buffer, int size);
+static bool parse_controldata_field_lsn(const char *controlDataString,
+										const char *fieldName,
+										char lsn[]);
 
 static bool parse_bool_with_len(const char *value, size_t len, bool *result);
 
@@ -140,7 +144,11 @@ parse_controldata(PostgresControlData *pgControlData,
 
 		!parse_controldata_field_uint64(control_data_string,
 										"Database system identifier",
-										&(pgControlData->system_identifier)))
+										&(pgControlData->system_identifier)) ||
+
+		!parse_controldata_field_lsn(control_data_string,
+									 "Latest checkpoint location",
+									 pgControlData->latestCheckpointLSN))
 	{
 		log_error("Failed to parse pg_controldata output");
 		return false;
@@ -216,119 +224,146 @@ parse_controldata_field_uint64(const char *controlDataString,
 
 
 /*
- * Parse a State message from the monitor.
- *
- *  S:catchingup:secondary:7.default:0:3:9.localhost:6020
- *
- *  S:<state>:<state>:<len.formationId>:groupId:nodeId:<len.hostName>:nodePort
- *
- * We trust the input to a degree, so we don't check everything that could go
- * wrong. We might want to revisit that choice later.
+ * parse_controldata_field_lsn matches pg_controldata output for a field name
+ * and gets its value as a string, in an area that must be pre-allocated with
+ * at least PG_LSN_MAXLENGTH bytes.
  */
-#define FIELD_SEP ':'
-#define STRLEN_SEP '.'
-
-bool
-parse_state_notification_message(StateNotification *notification)
+static bool
+parse_controldata_field_lsn(const char *controlDataString,
+							const char *fieldName,
+							char lsn[])
 {
-	char *ptr = (char *) notification->message;
-	char *col = NULL;
+	char regex[BUFSIZE];
+	char *match;
 
-	/* 10 is the amount of character S, colons (:) and dots (.) */
-	if (ptr == NULL || strlen(ptr) < 10 || *ptr != 'S')
+	sformat(regex, BUFSIZE, "^%s: *([0-9A-F]+/[0-9A-F]+)$", fieldName);
+	match = regexp_first_match(controlDataString, regex);
+
+	if (match == NULL)
 	{
-		log_warn("Failed to parse notification \"%s\"", notification->message);
 		return false;
 	}
 
-	/* skip S: */
-	ptr++;
-	ptr++;
+	strlcpy(lsn, match, PG_LSN_MAXLENGTH);
 
-	/* read the states */
-	col = strchr(ptr, FIELD_SEP);
-	*col = '\0';
-
-	notification->reportedState = NodeStateFromString(ptr);
-
-	ptr = ++col;
-
-	col = strchr(ptr, FIELD_SEP);
-	*col = '\0';
-
-	notification->goalState = NodeStateFromString(ptr);
-
-	ptr = ++col;
-
-	/* read the formationId */
-	ptr += read_length_delimited_string_at(ptr,
-										   notification->formationId,
-										   NAMEDATALEN);
-
-	/* read the groupId and nodeId */
-	col = strchr(ptr, FIELD_SEP);
-	*col = '\0';
-	if (!stringToInt(ptr, &notification->groupId))
-	{
-		log_warn("Failed to parse group id \"%s\"", ptr);
-		return false;
-	}
-	ptr = ++col;
-
-	col = strchr(ptr, FIELD_SEP);
-	*col = '\0';
-
-	if (!stringToInt(ptr, &notification->nodeId))
-	{
-		log_warn("Failed to parse node id \"%s\"", ptr);
-		return false;
-	}
-	ptr = ++col;
-
-	/* read the hostName, then move past it */
-	ptr += read_length_delimited_string_at(ptr,
-										   notification->hostName,
-										   NAMEDATALEN);
-
-	/* read the nodePort */
-	if (!stringToInt(ptr, &notification->nodePort))
-	{
-		log_warn("Failed to parse node port id \"%s\"", ptr);
-		return false;
-	}
-
+	free(match);
 	return true;
 }
 
 
 /*
- * read_length_delimited_string_at reads a length delimited string such as
- * 12.abcdefghijkl found at given ptr.
+ * parse_notification_message parses pgautofailover state change notifications,
+ * which are sent in the JSON format.
  */
-static int
-read_length_delimited_string_at(const char *ptr, char *buffer, int size)
+#define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
+
+bool
+parse_state_notification_message(CurrentNodeState *nodeState,
+								 const char *message)
 {
-	char *col = NULL;
-	int len = 0;
+	char *str;
+	double number;
+	JSON_Value *json = json_parse_string(message);
+	JSON_Object *jsobj = json_value_get_object(json);
 
-	col = strchr(ptr, STRLEN_SEP);
-	*col = '\0';
-	if (!stringToInt(ptr, &len))
+	log_debug("parse_state_notification_message: %s", message);
+
+	if (json_type(json) != JSONObject)
 	{
-		/* that's a BUG really */
-		log_error("Failed to read length of string in notitication message: %s",
-				  ptr);
-		return 0;
+		log_error("Failed to parse JSON notification message: \"%s\"", message);
+		return false;
 	}
 
-	if (len < size)
+	str = (char *) json_object_get_string(jsobj, "type");
+
+	if (strcmp(str, "state") != 0)
 	{
-		/* advance col past the separator */
-		strlcpy(buffer, ++col, len + 1);
+		log_error("Failed to parse JSOBJ notification state message: "
+				  "jsobj object type is not \"state\" as expected");
+		return false;
 	}
 
-	/* col - ptr is the length of the digits plus the separator  */
-	return (col - ptr) + len + 1;
+	str = (char *) json_object_get_string(jsobj, "formation");
+
+	if (str == NULL)
+	{
+		log_error("Failed to parse formation in JSON "
+				  "notification message \"%s\"", message);
+		return false;
+	}
+	strlcpy(nodeState->formation, str, sizeof(nodeState->formation));
+
+	number = json_object_get_number(jsobj, "groupId");
+	nodeState->groupId = (int) number;
+
+	number = json_object_get_number(jsobj, "nodeId");
+	nodeState->node.nodeId = (int) number;
+
+	str = (char *) json_object_get_string(jsobj, "name");
+
+	if (str == NULL)
+	{
+		log_error("Failed to parse node name in JSON "
+				  "notification message \"%s\"", message);
+		return false;
+	}
+	strlcpy(nodeState->node.name, str, sizeof(nodeState->node.name));
+
+	str = (char *) json_object_get_string(jsobj, "host");
+
+	if (str == NULL)
+	{
+		log_error("Failed to parse node host in JSON "
+				  "notification message \"%s\"", message);
+		return false;
+	}
+	strlcpy(nodeState->node.host, str, sizeof(nodeState->node.host));
+
+	number = json_object_get_number(jsobj, "port");
+	nodeState->node.port = (int) number;
+
+	str = (char *) json_object_get_string(jsobj, "reportedState");
+
+	if (str == NULL)
+	{
+		log_error("Failed to parse reportedState in JSON "
+				  "notification message \"%s\"", message);
+		return false;
+	}
+	nodeState->reportedState = NodeStateFromString(str);
+
+	str = (char *) json_object_get_string(jsobj, "goalState");
+
+	if (str == NULL)
+	{
+		log_error("Failed to parse goalState in JSON "
+				  "notification message \"%s\"", message);
+		return false;
+	}
+	nodeState->goalState = NodeStateFromString(str);
+
+	str = (char *) json_object_get_string(jsobj, "health");
+
+	if (streq(str, "unknown"))
+	{
+		nodeState->health = -1;
+	}
+	else if (streq(str, "bad"))
+	{
+		nodeState->health = 0;
+	}
+	else if (streq(str, "good"))
+	{
+		nodeState->health = 1;
+	}
+	else
+	{
+		log_error("Failed to parse health in JSON "
+				  "notification message \"%s\"", message);
+		return false;
+	}
+
+	return true;
 }
 
 

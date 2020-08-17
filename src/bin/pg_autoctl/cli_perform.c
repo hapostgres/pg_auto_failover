@@ -196,6 +196,7 @@ cli_perform_failover(int argc, char **argv)
 	KeeperConfig config = keeperOptions;
 	Monitor monitor = { 0 };
 	int groupsCount = 0;
+	PgInstanceKind nodeKind = NODE_KIND_UNKNOWN;
 
 	char *channels[] = { "state", NULL };
 
@@ -257,6 +258,8 @@ cli_perform_failover(int argc, char **argv)
 			log_info("Targetting group %d in formation \"%s\"",
 					 config.groupId,
 					 config.formation);
+
+			nodeKind = config.pgSetup.pgKind;
 		}
 		else
 		{
@@ -264,6 +267,7 @@ cli_perform_failover(int argc, char **argv)
 			{
 				/* we have only one group, it's group number zero, proceed */
 				config.groupId = 0;
+				nodeKind = NODE_KIND_STANDALONE;
 			}
 			else
 			{
@@ -293,6 +297,7 @@ cli_perform_failover(int argc, char **argv)
 	if (!monitor_wait_until_some_node_reported_state(&monitor,
 													 config.formation,
 													 config.groupId,
+													 nodeKind,
 													 PRIMARY_STATE))
 	{
 		log_error("Failed to wait until a new primary has been notified");
