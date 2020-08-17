@@ -1087,8 +1087,8 @@ RemoveNode(AutoFailoverNode *currentNode)
 	{
 		/* find the primary, if any, and have it realize a node has left */
 		AutoFailoverNode *primaryNode =
-			GetNodeToFailoverFromInGroup(currentNode->formationId,
-										 currentNode->groupId);
+			GetPrimaryNodeInGroup(currentNode->formationId,
+								  currentNode->groupId);
 
 		if (primaryNode)
 		{

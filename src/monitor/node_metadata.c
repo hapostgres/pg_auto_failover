@@ -358,7 +358,8 @@ GetNodeToFailoverFromInGroup(char *formationId, int32 groupId)
 	{
 		AutoFailoverNode *currentNode = (AutoFailoverNode *) lfirst(nodeCell);
 
-		if (CanInitiateFailover(currentNode->goalState))
+		if (CanInitiateFailover(currentNode->goalState) &&
+			currentNode->reportedState == currentNode->goalState)
 		{
 			failoverNode = currentNode;
 			break;
