@@ -220,18 +220,18 @@ nodestatePrintHeader(NodeAddressHeaders *headers)
 			headers->maxNodeSize, "Node",
 			headers->maxHostSize, "Host:Port",
 			headers->maxLSNSize, "LSN",
+			headers->maxHealthSize, "Reachable",
 			headers->maxStateSize, "Current State",
-			headers->maxStateSize, "Assigned State",
-			headers->maxHealthSize, "Reachable");
+			headers->maxStateSize, "Assigned State");
 
 	fformat(stdout, "%*s-+-%*s-+-%*s-+-%*s-+-%*s-+-%*s-+-%*s\n",
 			headers->maxNameSize, headers->nameSeparatorHeader,
 			headers->maxNodeSize, headers->nodeSeparatorHeader,
 			headers->maxHostSize, headers->hostSeparatorHeader,
 			headers->maxLSNSize, headers->lsnSeparatorHeader,
+			headers->maxHealthSize, headers->healthSeparatorHeader,
 			headers->maxStateSize, headers->stateSeparatorHeader,
-			headers->maxStateSize, headers->stateSeparatorHeader,
-			headers->maxHealthSize, headers->healthSeparatorHeader);
+			headers->maxStateSize, headers->stateSeparatorHeader);
 }
 
 
@@ -257,9 +257,9 @@ nodestatePrintNodeState(NodeAddressHeaders *headers,
 			headers->maxNodeSize, composedId,
 			headers->maxHostSize, hostport,
 			headers->maxLSNSize, nodeState->node.lsn,
+			headers->maxHealthSize, nodestateHealthToString(nodeState->health),
 			headers->maxStateSize, NodeStateToString(nodeState->reportedState),
-			headers->maxStateSize, NodeStateToString(nodeState->goalState),
-			headers->maxHealthSize, nodestateHealthToString(nodeState->health));
+			headers->maxStateSize, NodeStateToString(nodeState->goalState));
 }
 
 
