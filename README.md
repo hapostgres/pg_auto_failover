@@ -220,7 +220,7 @@ The promotion of the secondary node is finished when the node reaches the
 goal state *wait_primary*. At this point, the application that connects to
 the secondary is allowed to proceed with write traffic.
 
-Because this is a switchover and no nodes have failed, node a that used to
+Because this is a switchover and no nodes have failed, `node_1` that used to
 be the primary completes its cycle and joins as a secondary within the same
 operation. The Postgres tool `pg_rewind` is used to implement that
 transition.
