@@ -462,7 +462,7 @@ get_pgpid(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk)
 	if (fileSize == 0)
 	{
 		/* yeah, that happens (race condition, kind of) */
-		log_warn("The PID file \"%s\" is empty", pidfile);
+		log_debug("The PID file \"%s\" is empty", pidfile);
 		return false;
 	}
 	else if (splitLines(contents, lines, 1) != 1 ||
