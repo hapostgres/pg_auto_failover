@@ -2568,7 +2568,7 @@ monitor_print_formation_settings_as_json(Monitor *monitor, char *formation)
 		"with settings as "
 		" ( "
 		"  select * "
-		"    from pgautofailover.formation_settings('default') "
+		"    from pgautofailover.formation_settings($1) "
 		" ), "
 		" f(json) as "
 		" ( "
@@ -2608,8 +2608,8 @@ monitor_print_formation_settings_as_json(Monitor *monitor, char *formation)
 
 	if (!context.parsedOk)
 	{
-		log_error("Failed to parse current state from the monitor");
-		log_error("%s", context.strVal == NULL ? NULL : context.strVal);
+		log_error("Failed to parse formation settings from the monitor "
+				  "for formation \"%s\"", formation);
 		return false;
 	}
 
