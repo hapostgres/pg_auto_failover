@@ -9,8 +9,8 @@ simplicity and correctness and supports Postgres 10 and newer.
 
 pg_auto_failover supports several Postgres architectures and implements a
 safe automated failover for your Postgres service. It is possible to get
-started with only two nodes, which will be given the roles of primary and
-secondary by the monitor.
+started with only two data nodes which will be given the roles of primary
+and secondary by the monitor.
 
 ![pg_auto_failover Architecture with 2 nodes](docs/tikz/arch-single-standby.svg?raw=true "pg_auto_failover Architecture with 2 nodes")
 
@@ -40,8 +40,8 @@ the _replication quorum_ of Postgres.
 
 ## Dependencies
 
-At runtime, pg_auto_failover depends on only Postgres. Both Postgres version
-10, 11, and 12 are currently supported.
+At runtime, pg_auto_failover depends on only Postgres. Postgres versions 10,
+11, and 12 are currently supported.
 
 At buildtime. pg_auto_failover depends on Postgres server development
 package like any other Postgres extensions (the server development package
@@ -139,7 +139,7 @@ Once the building and installation is done, follow those steps:
   3. Install and run a primary PostgreSQL instance:
 
      ~~~ bash
-	 $ export PGDATA=./node_a
+	 $ export PGDATA=./node_1
 	 $ export PGPORT=5001
      $ pg_autoctl create postgres \
          --hostname localhost \
@@ -154,7 +154,7 @@ Once the building and installation is done, follow those steps:
      everything on the same host:
 
      ~~~ bash
-	 $ export PGDATA=./node_a
+	 $ export PGDATA=./node_2
 	 $ export PGPORT=5002
      $ pg_autoctl create postgres \
          --hostname localhost \
@@ -221,7 +221,7 @@ goal state *wait_primary*. At this point, the application that connects to
 the secondary is allowed to proceed with write traffic.
 
 Because this is a switchover and no nodes have failed, node a that used to
-be the promary completes its cycle and joins as a secondary within the same
+be the primary completes its cycle and joins as a secondary within the same
 operation. The Postgres tool `pg_rewind` is used to implement that
 transition.
 

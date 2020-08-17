@@ -17,7 +17,7 @@ following architecture:
 
 In this case three nodes have been setup with the same characteristics,
 allowing to achieve HA for both the Postgres service and the production data
-set. With ``number_sync_stanbys`` set to one, this architecture always
+set. With ``number_sync_standbys`` set to one, this architecture always
 maintains two copies of the data set: one on the current primary node (node
 A in the previous diagram), and one on the standby that acknowledges the
 transaction first, either node B or node C in the diagram.
@@ -107,10 +107,11 @@ transition for the primary to update its local value of
 Replication Quorum
 ^^^^^^^^^^^^^^^^^^
 
-The replication quorum setting is a boolean and defaults to true. It can be
-set on a node, and pg_auto_failover only includes a given node in
+The replication quorum setting is a boolean and defaults to ``true``. It can
+be set on a node, and pg_auto_failover only includes a given node in
 ``synchronous_standby_names`` when the replication quorum parameter has been
-set to true.
+set to true. This means that asynchronous replication will be used for nodes
+where ``replication-quorum`` is set to ``false``.
 
 It is possible to force asynchronous replication globally by setting
 replication quorum to false on all the standby nodes in a formation.
@@ -185,8 +186,8 @@ Architecture with three standby nodes, one async
 In this case, the system is setup with two standby nodes participating in
 the replication quorum, allowing for ``number_sync_standbys = 1``. The
 system always maintain a minimum of two copies of the data set, one on the
-primary, another one on one on either node B or node D. Whenever we lose one
-of those nodes, we can hold to this guarantee of two copies of the data set.
+primary, another one on either node B or node D. Whenever we lose one of
+those nodes, we can hold to this guarantee of two copies of the data set.
 
 Adding to that, we have the standby server C which has been setup to not
 participate in the replication quorum. Node C will not be found in the

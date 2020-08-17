@@ -144,29 +144,31 @@ monitor PostgreSQL services::
     --server-key      set the Postgres ssl_key_file to that file path
     --server-cert     set the Postgres ssl_cert_file to that file path
 
-The ``--pgdata`` option is mandatory and default to the environment variable
-``PGDATA``. The ``--pgport`` default value is 5432, and the ``--pgctl``
-option defaults to the first ``pg_ctl`` entry found in your `PATH`.
+The ``--pgdata`` option is mandatory and defaults to the environment
+variable ``PGDATA``. The ``--pgport`` default value is 5432, and the
+``--pgctl`` option defaults to the first ``pg_ctl`` entry found in your
+`PATH`.
 
 The ``--hostname`` option allows setting the hostname that the other nodes
 of the cluster will use to access to the monitor. When not provided, a
 default value is computed by running the following algorithm:
 
-  1. Open a connection to the 8.8.8.8:53 public service and looks up the
-     TCP/IP client address that has been used to make that connection.
+  1. We get this machine's "public IP" by opening a connection to the
+     8.8.8.8:53 public service. Then we get TCP/IP client address
+     that has been used to make that connection.
 
-  2. Do a reverse DNS lookup on this IP address to fetch a hostname for our
-     local machine.
+  2. We then do a reverse DNS lookup on the IP address found in the previous
+     step to fetch a hostname for our local machine.
 
-  3. If the reverse DNS lookup is successful , then `pg_autoctl` does with a
+  3. If the reverse DNS lookup is successful , then ``pg_autoctl`` does a
      forward DNS lookup of that hostname.
 
 When the forward DNS lookup response in step 3. is an IP address found in
-one of our local network interfaces, then `pg_autoctl` uses the hostname
-found in step 2. as the default `--hostname`. Otherwise it uses the IP
+one of our local network interfaces, then ``pg_autoctl`` uses the hostname
+found in step 2. as the default ``--hostname``. Otherwise it uses the IP
 address found in step 1.
 
-You may use the `--hostname` command line option to bypass the whole DNS
+You may use the ``--hostname`` command line option to bypass the whole DNS
 lookup based process and force the local node name to a fixed value.
 
 The ``--auth`` option allows setting up authentication method to be used for
@@ -183,9 +185,13 @@ See :ref:`pg_auto_failover_security` for notes on `.pgpass`
 pg_autoctl run
 ^^^^^^^^^^^^^^
 
-This command makes sure that the PostgreSQL instance for the monitor is
-running, then connects to it and listens to the monitor notifications,
-displaying them as log messages::
+This commands starts the processes needed to run a monitor node or a keeper
+node, depending on the configuration file that belongs to the ``--pgdata``
+option or PGDATA environment variable.
+
+In the case of a monitor, ``pg_autoctl run`` starts a Postgres service where
+we run the pg_auto_failover database, and a listener process that listens to
+the notifications sent by the Postgres instance::
 
   $ pg_autoctl run --help
   pg_autoctl run: Run the pg_autoctl service (monitor or keeper)
@@ -452,6 +458,11 @@ corresponding to as many implementation strategies.
 	 have the same system identifier, and so in pg_auto_failover all the
 	 nodes in a same group have that constraint too.
 
+	 When the system identifier matches the already registered system
+	 identifier of other nodes in the same group, then the node is set-up as
+	 a standby and Postgres is started with the primary conninfo pointed at
+	 the current primary.
+
 When `--hostname` is omitted, it is computed as above (see
 :ref:`pg_autoctl_create_monitor`), with the difference that step 1 uses the
 monitor IP and port rather than the public service 8.8.8.8:53.
@@ -555,7 +566,7 @@ When initializing a pg_auto_failover keeper with ``--pgdata /data/pgsql``, then:
 Sample configuration file
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The pg_autoctl configuraiton file for an instance serving the data directory
+The pg_autoctl configuration file for an instance serving the data directory
 at ``/data/pgsql`` is found at
 ``~/.config/pg_autoctl/data/pgsql/pg_autoctl.cfg``, written in the INI
 format.

@@ -80,13 +80,8 @@ PostgreSQL instance.
 Formation
 ^^^^^^^^^
 
-A formation is a logical set of PostgreSQL services.
-
-.. note::
-   The notion of a formation in pg_auto_failover is useful when setting-up
-   and managing a whole Citus formation, where the coordinator nodes belong
-   to group zero of the formation, and then each Citus worker node becomes
-   its own group and may have Postgres standby nodes.
+A formation is a logical set of PostgreSQL services that are managed
+together.
 
 It is possible to operate many formations with a single monitor instance.
 Each formation has a group of Postgres nodes and the FSM orchestration
@@ -107,6 +102,14 @@ limit to the number of Postgres nodes in a single group. Note that each
 Postgres instance that belongs to the same group serves the same data set in
 its data directory (PGDATA).
 
+.. note::
+
+   The notion of a formation that contains multiple groups in
+   pg_auto_failover is useful when setting-up and managing a whole Citus
+   formation, where the coordinator nodes belong to group zero of the
+   formation, and then each Citus worker node becomes its own group and may
+   have Postgres standby nodes.
+
 Keeper
 ^^^^^^
 
@@ -116,7 +119,7 @@ local PostgreSQL instance (using both the ``pg_ctl`` command line tool and
 SQL queries), and communicates with the monitor:
 
   - it sends updated data about the local node, such as the WAL delta in
-    between servers, measured via PostgreSQL statistics views,
+    between servers, measured via PostgreSQL statistics views.
 
   - it receives state assignments from the monitor.
 
