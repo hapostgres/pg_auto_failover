@@ -30,7 +30,7 @@ let's create a virtual network.
        --address-prefix 10.0.0.0/16
 
 We need to open ports 5432 (Postgres) and 22 (SSH) between the machines, and
-also give ourselves address from our remote IP. We'll do this with a network
+also give ourselves access from our remote IP. We'll do this with a network
 security group and a subnet.
 
 .. code-block:: bash
@@ -287,9 +287,9 @@ following lines to node A:
 
    # automatically added to node A
 
-   host "appdb" "ha-admin" ha-demo-a.internal.cloudapp.net trust
-   host replication "pgautofailover_replicator" ha-demo-b.internal.cloudapp.net trust
-   host "appdb" "pgautofailover_replicator" ha-demo-b.internal.cloudapp.net trust
+   hostssl "appdb" "ha-admin" ha-demo-a.internal.cloudapp.net trust
+   hostssl replication "pgautofailover_replicator" ha-demo-b.internal.cloudapp.net trust
+   hostssl "appdb" "pgautofailover_replicator" ha-demo-b.internal.cloudapp.net trust
 
 For ``pg_hba.conf`` on the monitor node pg_autoctl inspects the local network
 and makes its best guess about the subnet to allow. In our case it guessed
@@ -313,7 +313,7 @@ Watch the replication
 First let’s verify that the monitor knows about our nodes, and see what
 states it has assigned them:
 
-.. code-block::
+.. code-block:: bash
 
    ssh -l ha-admin `vm_ip monitor` pg_autoctl show state --pgdata monitor
 
@@ -390,8 +390,9 @@ that the data is still present:
 
 It shows
 
-.. code-block::
+.. code-block:: bash
 
+  .
     count
   ---------
    1000000
@@ -478,8 +479,9 @@ are still present.
 
 It shows
 
-.. code-block::
+.. code-block:: bash
 
+  .
     count
   ---------
    2000000
