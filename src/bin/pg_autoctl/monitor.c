@@ -93,6 +93,7 @@ static bool parseCurrentNodeStateArray(CurrentNodeStateArray *nodesArray,
 									   PGresult *result);
 static void printCurrentState(void *ctx, PGresult *result);
 static void printLastEvents(void *ctx, PGresult *result);
+static void printFormationSettings(void *ctx, PGresult *result);
 static void printFormationURI(void *ctx, PGresult *result);
 static void parseCoordinatorNode(void *ctx, PGresult *result);
 static void parseExtensionVersion(void *ctx, PGresult *result);
@@ -2421,6 +2422,132 @@ printFormationURI(void *ctx, PGresult *result)
 		fformat(stdout, "%10s | %*s | %s\n",
 				type, maxFormationNameSize, name, URI);
 	}
+	fformat(stdout, "\n");
+
+	context->parsedOK = true;
+}
+
+
+/*
+ * monitor_print_formation_settings calls the function
+ * pgautofailover.formation_settings on the monitor, and prints a line of
+ * output per state record obtained.
+ */
+bool
+monitor_print_formation_settings(Monitor *monitor, char *formation)
+{
+	MonitorAssignedStateParseContext context = { 0 };
+	PGSQL *pgsql = &monitor->pgsql;
+	char *sql = "select * from pgautofailover.formation_settings($1)";
+	int paramCount = 1;
+	Oid paramTypes[1] = { TEXTOID };
+	const char *paramValues[1] = { formation };
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &printFormationSettings))
+	{
+		log_error("Failed to retrieve current state from the monitor");
+		return false;
+	}
+
+	/* disconnect from PostgreSQL now */
+	pgsql_finish(&monitor->pgsql);
+
+	if (!context.parsedOK)
+	{
+		log_error("Failed to parse current state from the monitor");
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * printFormationSettings loops over pgautofailover.formation_settings()
+ * results and prints them, one per line.
+ */
+static void
+printFormationSettings(void *ctx, PGresult *result)
+{
+	MonitorAssignedStateParseContext *context =
+		(MonitorAssignedStateParseContext *) ctx;
+	int index = 0;
+	int nTuples = PQntuples(result);
+
+	int maxNameSize = 4;        /* "Name" */
+	int maxSettingSize = 7;     /* "Setting" */
+	int maxValueSize = 5;       /* "Value" */
+
+	char nameSeparatorHeader[BUFSIZE] = { 0 };
+	char settingSeparatorHeader[BUFSIZE] = { 0 };
+	char valueSeparatorHeader[BUFSIZE] = { 0 };
+
+	if (PQnfields(result) != 6)
+	{
+		log_error("Query returned %d columns, expected 6", PQnfields(result));
+		context->parsedOK = false;
+		return;
+	}
+
+	for (index = 0; index < nTuples; index++)
+	{
+		char *nodename = PQgetvalue(result, index, 3);
+		char *setting = PQgetvalue(result, index, 4);
+		char *value = PQgetvalue(result, index, 5);
+
+		if (strlen(nodename) > maxNameSize)
+		{
+			maxNameSize = strlen(nodename);
+		}
+
+		if (strlen(setting) > maxSettingSize)
+		{
+			maxSettingSize = strlen(setting);
+		}
+
+		if (strlen(value) > maxValueSize)
+		{
+			maxValueSize = strlen(value);
+		}
+	}
+
+	(void) prepareHostNameSeparator(nameSeparatorHeader, maxNameSize);
+	(void) prepareHostNameSeparator(settingSeparatorHeader, maxSettingSize);
+	(void) prepareHostNameSeparator(valueSeparatorHeader, maxValueSize);
+
+	fformat(stdout, "%9s | %*s | %*s | %*s\n",
+			"Context",
+			maxNameSize, "Name",
+			maxSettingSize, "Setting",
+			maxValueSize, "Value");
+
+	fformat(stdout, "%9s-+-%*s-+-%*s-+-%*s\n",
+			"---------",
+			maxNameSize, nameSeparatorHeader,
+			maxSettingSize, settingSeparatorHeader,
+			maxValueSize, valueSeparatorHeader);
+
+	for (index = 0; index < nTuples; index++)
+	{
+		char *context = PQgetvalue(result, index, 0);
+
+		/* not used at the moment
+		 * char *group_id = PQgetvalue(result, index, 1);
+		 * char *node_id = PQgetvalue(result, index, 2);
+		 */
+		char *nodename = PQgetvalue(result, index, 3);
+		char *setting = PQgetvalue(result, index, 4);
+		char *value = PQgetvalue(result, index, 5);
+
+		fformat(stdout, "%9s | %*s | %*s | %*s\n",
+				context,
+				maxNameSize, nodename,
+				maxSettingSize, setting,
+				maxValueSize, value);
+	}
+
 	fformat(stdout, "\n");
 
 	context->parsedOK = true;
