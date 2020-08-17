@@ -444,12 +444,6 @@ cli_show_local_state()
 				exit(EXIT_CODE_BAD_CONFIG);
 			}
 
-			/* also grab the minimum recovery LSN if that's possible */
-			if (!pg_controldata(&(config.pgSetup), missingPgdataIsOk))
-			{
-				/* errors have already been logged, just continue */
-			}
-
 			/* build the CurrentNodeState from pieces */
 			nodeState.node.nodeId = keeper.state.current_node_id;
 			strlcpy(nodeState.node.name, config.name, _POSIX_HOST_NAME_MAX);
@@ -462,11 +456,38 @@ cli_show_local_state()
 			nodeState.reportedState = keeper.state.current_role;
 			nodeState.goalState = keeper.state.assigned_role;
 
-			strlcpy(nodeState.node.lsn,
-					config.pgSetup.control.recoveryEndingLocation,
-					PG_LSN_MAXLENGTH);
+			if (pg_setup_is_ready(&(config.pgSetup), pgIsNotRunningIsOk))
+			{
+				if (!pgsql_get_postgres_metadata(
+						&(keeper.postgres.sqlClient),
+						&(keeper.postgres.postgresSetup.is_in_recovery),
+						keeper.postgres.pgsrSyncState,
+						keeper.postgres.currentLSN,
+						&(keeper.postgres.postgresSetup.control)))
+				{
+					log_warn("Failed to update the local Postgres metadata");
 
-			/* we have no idea, only the monitor knows, so display "?" */
+					strlcpy(nodeState.node.lsn, "0/0", PG_LSN_MAXLENGTH);
+				}
+
+				strlcpy(nodeState.node.lsn,
+						keeper.postgres.currentLSN,
+						PG_LSN_MAXLENGTH);
+			}
+			else
+			{
+				/* also grab the minimum recovery LSN if that's possible */
+				if (!pg_controldata(&(config.pgSetup), missingPgdataIsOk))
+				{
+					/* errors have already been logged, just continue */
+				}
+
+				strlcpy(nodeState.node.lsn,
+						config.pgSetup.control.latestCheckpointLSN,
+						PG_LSN_MAXLENGTH);
+			}
+
+			/* we have no idea, only the monitor knows, so report "unknown" */
 			nodeState.health = -1;
 
 			if (outputJSON)
@@ -483,6 +504,8 @@ cli_show_local_state()
 			else
 			{
 				NodeAddressHeaders headers = { 0 };
+
+				headers.nodeKind = keeper.config.pgSetup.pgKind;
 
 				(void) nodestateAdjustHeaders(&headers,
 											  &(nodeState.node),

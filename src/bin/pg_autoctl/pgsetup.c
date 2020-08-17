@@ -680,24 +680,24 @@ read_pg_pidfile(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk, int maxRetries)
 void
 fprintf_pg_setup(FILE *stream, PostgresSetup *pgSetup)
 {
-	fformat(stream, "pgdata:             %s\n", pgSetup->pgdata);
-	fformat(stream, "pg_ctl:             %s\n", pgSetup->pg_ctl);
-	fformat(stream, "pg_version:         %s\n", pgSetup->pg_version);
-	fformat(stream, "pghost:             %s\n", pgSetup->pghost);
-	fformat(stream, "pgport:             %d\n", pgSetup->pgport);
-	fformat(stream, "proxyport:          %d\n", pgSetup->proxyport);
-	fformat(stream, "pid:                %d\n", pgSetup->pidFile.pid);
-	fformat(stream, "is in recovery:     %s\n",
+	fformat(stream, "pgdata:                %s\n", pgSetup->pgdata);
+	fformat(stream, "pg_ctl:                %s\n", pgSetup->pg_ctl);
+	fformat(stream, "pg_version:            %s\n", pgSetup->pg_version);
+	fformat(stream, "pghost:                %s\n", pgSetup->pghost);
+	fformat(stream, "pgport:                %d\n", pgSetup->pgport);
+	fformat(stream, "proxyport:             %d\n", pgSetup->proxyport);
+	fformat(stream, "pid:                   %d\n", pgSetup->pidFile.pid);
+	fformat(stream, "is in recovery:        %s\n",
 			pgSetup->is_in_recovery ? "yes" : "no");
-	fformat(stream, "Control Version:    %u\n",
+	fformat(stream, "Control Version:       %u\n",
 			pgSetup->control.pg_control_version);
-	fformat(stream, "Catalog Version:    %u\n",
+	fformat(stream, "Catalog Version:       %u\n",
 			pgSetup->control.catalog_version_no);
-	fformat(stream, "System Identifier:  %" PRIu64 "\n",
+	fformat(stream, "System Identifier:     %" PRIu64 "\n",
 			pgSetup->control.system_identifier);
-	fformat(stream, "Recovery End LSN:   %s\n",
-			pgSetup->control.recoveryEndingLocation);
-	fformat(stream, "Postmaster status:  %s\n",
+	fformat(stream, "Latest checkpoint LSN: %s\n",
+			pgSetup->control.latestCheckpointLSN);
+	fformat(stream, "Postmaster status:     %s\n",
 			pmStatusToString(pgSetup->pm_status));
 	fflush(stream);
 }

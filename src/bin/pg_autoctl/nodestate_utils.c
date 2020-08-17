@@ -339,7 +339,8 @@ nodestateAsJSON(CurrentNodeState *nodeState, JSON_Value *js)
 	json_object_set_string(jsobj, "Minimum Recovery Ending LSN",
 						   nodeState->node.lsn);
 
-	json_object_set_number(jsobj, "health", (double) nodeState->health);
+	json_object_set_string(jsobj, "reachable",
+						   nodestateHealthToString(nodeState->health));
 
 	return true;
 }

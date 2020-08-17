@@ -147,8 +147,8 @@ parse_controldata(PostgresControlData *pgControlData,
 										&(pgControlData->system_identifier)) ||
 
 		!parse_controldata_field_lsn(control_data_string,
-									 "Minimum recovery ending location",
-									 pgControlData->recoveryEndingLocation))
+									 "Latest checkpoint location",
+									 pgControlData->latestCheckpointLSN))
 	{
 		log_error("Failed to parse pg_controldata output");
 		return false;
