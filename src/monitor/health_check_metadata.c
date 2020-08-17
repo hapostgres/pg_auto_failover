@@ -262,6 +262,15 @@ NodeHealthToString(NodeHealthState health)
 		}
 
 		case NODE_HEALTH_GOOD:
+		{
 			return "good";
+		}
+
+		default:
+		{
+			/* shouldn't happen */
+			ereport(ERROR, (errmsg("BUG: health is %d", health)));
+			return "unknown";
+		}
 	}
 }

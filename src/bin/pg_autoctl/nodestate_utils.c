@@ -8,6 +8,7 @@
  */
 
 #include "file_utils.h"
+#include "log.h"
 #include "nodestate_utils.h"
 #include "string_utils.h"
 
@@ -370,6 +371,9 @@ nodestateHealthToString(int health)
 		}
 
 		default:
-			return intToString(health).strValue;
+		{
+			log_error("BUG in nodestateHealthToString: health = %d", health);
+			return "unknown";
+		}
 	}
 }
