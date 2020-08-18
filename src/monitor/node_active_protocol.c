@@ -646,6 +646,7 @@ JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 	}
 
 	AddAutoFailoverNode(formation->formationId,
+						formation->kind,
 						groupId,
 						nodeName,
 						nodeHost,
