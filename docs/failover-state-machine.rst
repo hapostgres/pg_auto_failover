@@ -87,7 +87,7 @@ name or IP address, and has granted the node hot standby access in the
 pg_hba.conf file.
 
 The wait_primary state may be caused either by a new potential secondary
-`being registered with the monitor (good), or an existing secondary
+being registered with the monitor (good), or an existing secondary
 becoming unhealthy (bad). In the latter case, during the transition from
 primary to wait_primary, the primary node's keeper disables synchronous
 replication on the node. It also cancels currently blocked queries.
