@@ -180,7 +180,7 @@ the monitor, and appropriate setting is added to `.pgpass` file on data
 node. You could also use some of the advanced Postgres authentication
 mechanism such as SSL certificates.
 
-See :ref:`pg_auto_failover_security` for notes on `.pgpass`
+See :ref:`security` for notes on `.pgpass`
 
 pg_autoctl run
 ^^^^^^^^^^^^^^
@@ -475,7 +475,7 @@ at first and consider something production grade later. Also, consider using
 ``--skip-pg-hba`` if you already have your own provisioning tools with a
 security compliance process.
 
-See :ref:`pg_auto_failover_security` for notes on `.pgpass`
+See :ref:`security` for notes on `.pgpass`
 
 Replication Settings
 --------------------
