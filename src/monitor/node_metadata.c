@@ -947,6 +947,7 @@ GetAutoFailoverNodeByName(char *formationId, char *nodeName)
  */
 int
 AddAutoFailoverNode(char *formationId,
+					FormationKind formationKind,
 					int groupId,
 					char *nodeName,
 					char *nodeHost,
@@ -961,6 +962,11 @@ AddAutoFailoverNode(char *formationId,
 	Oid reportedStateOid = ReplicationStateGetEnum(reportedState);
 	Oid replicationStateTypeOid = ReplicationStateTypeOid();
 
+	const char *prefix =
+		formationKind == FORMATION_KIND_CITUS
+		? (groupId == 0 ? "coordinator" : "worker")
+		: "node";
+
 	Oid argTypes[] = {
 		TEXTOID, /* formationid */
 		INT4OID, /* groupid */
@@ -971,7 +977,8 @@ AddAutoFailoverNode(char *formationId,
 		replicationStateTypeOid, /* goalstate */
 		replicationStateTypeOid, /* reportedstate */
 		INT4OID, /* candidate_priority */
-		BOOLOID  /* replication_quorum */
+		BOOLOID,  /* replication_quorum */
+		TEXTOID   /* node name prefix */
 	};
 
 	Datum argValues[] = {
@@ -984,7 +991,8 @@ AddAutoFailoverNode(char *formationId,
 		ObjectIdGetDatum(goalStateOid),     /* goalstate */
 		ObjectIdGetDatum(reportedStateOid), /* reportedstate */
 		Int32GetDatum(candidatePriority),   /* candidate_priority */
-		BoolGetDatum(replicationQuorum)     /* replication_quorum */
+		BoolGetDatum(replicationQuorum),    /* replication_quorum */
+		CStringGetTextDatum(prefix)         /* prefix */
 	};
 
 	/*
@@ -1008,7 +1016,7 @@ AddAutoFailoverNode(char *formationId,
 		' ',                            /* reportedstate */
 		' ',                            /* candidate_priority */
 		' ',                            /* replication_quorum */
-		' ',
+		' '                             /* prefix */
 	};
 
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
@@ -1017,12 +1025,18 @@ AddAutoFailoverNode(char *formationId,
 
 	/*
 	 * The node name can be specified by the user as the --name argument at
-	 * node registration time, in which case that's what we use of course. That
-	 * said, when the user is not using --name, we still want the node name NOT
-	 * NULL and default to 'node_%d' using the nodeid. We can't use another
-	 * column in a DEFAULT value though, so we implement this default in a CASE
-	 * expression in the INSERT query.
+	 * node registration time, in which case that's what we use of course.
+	 *
+	 * That said, when the user is not using --name, we still want the node
+	 * name NOT NULL and default to 'node_%d' using the nodeid. We can't use
+	 * another column in a DEFAULT value though, so we implement this default
+	 * in a CASE expression in the INSERT query.
+	 *
+	 * In a citus formation kind, we want to name the node with the convention
+	 * 'coordinator_%d' for the coordinator nodes, and 'worker%d' for the
+	 * worker nodes.
 	 */
+
 	const char *insertQuery =
 		"WITH seq(nodeid) AS "
 		"(SELECT nextval('pgautofailover.node_nodeid_seq'::regclass)) "
@@ -1031,7 +1045,7 @@ AddAutoFailoverNode(char *formationId,
 		" sysidentifier, goalstate, reportedstate, "
 		" candidatepriority, replicationquorum)"
 		" SELECT $1, seq.nodeid, $2, "
-		" case when $3 is null then format('node_%s', seq.nodeid) else $3 end, "
+		" case when $3 is null then format('%s_%s', $11, seq.nodeid) else $3 end, "
 		" $4, $5, $6, $7, $8, $9, $10 "
 		" FROM seq "
 		"RETURNING nodeid";

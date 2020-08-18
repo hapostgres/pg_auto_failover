@@ -14,7 +14,7 @@ MODULE_big = $(EXTENSION)
 OBJS = $(patsubst ${SRC_DIR}%.c,%.o,$(wildcard ${SRC_DIR}*.c))
 PG_CPPFLAGS = -std=c99 -Wall -Werror -Wno-unused-parameter -Iinclude -I$(libpq_srcdir) -g
 SHLIB_LINK = $(libpq)
-REGRESS = create_extension monitor dummy_update drop_extension upgrade
+REGRESS = create_extension monitor workers dummy_update drop_extension upgrade
 
 PG_CONFIG ?= pg_config
 PGXS = $(shell $(PG_CONFIG) --pgxs)
