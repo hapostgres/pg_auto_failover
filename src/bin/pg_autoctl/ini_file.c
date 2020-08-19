@@ -658,7 +658,7 @@ ini_get_setting(const char *filename, IniOption *optionList,
 {
 	IniOption *option = NULL;
 
-	log_debug("Reading configuration from %s", filename);
+	log_debug("Reading configuration from \"%s\"", filename);
 
 	if (!read_ini_file(filename, optionList))
 	{
@@ -687,6 +687,9 @@ ini_set_option(IniOption *optionList, const char *path, char *value)
 
 	if (option && ini_set_option_value(option, value))
 	{
+		log_debug("ini_set_option %s.%s = %s",
+				  option->section, option->name, value);
+
 		return true;
 	}
 

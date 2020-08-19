@@ -560,7 +560,7 @@ keeper_config_set_setting(KeeperConfig *config,
 	const char *filename = config->pathnames.config;
 	IniOption keeperOptions[] = SET_INI_OPTIONS_ARRAY(config);
 
-	log_trace("keeper_config_set_setting");
+	log_trace("keeper_config_set_setting: %s = %s", path, value);
 
 	if (ini_set_setting(filename, keeperOptions, path, value))
 	{
