@@ -154,6 +154,8 @@ commands::
   pg_autoctl set node replication-quorum true
   pg_autoctl set node replication-quorum false
 
+.. _candidate_priority:
+
 Candidate Priority
 ^^^^^^^^^^^^^^^^^^
 
@@ -186,6 +188,65 @@ node registered is healthy and in a position to be promoted.
 It is required at all times that at least two nodes have a non-zero candidate
 priority in any pg_auto_failover formation. Otherwise no failover is possible.
 
+Auditing replication settings
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The command ``pg_autoctl get formation settings`` can be used to obtain a
+summary of all the replication settings currently in effect in a formation.
+Still using the first diagram on this page, we get the following summary::
+
+  $ pg_autoctl get formation settings
+    Context |    Name |                   Setting | Value
+  ----------+---------+---------------------------+-------------------------------------------------------------
+  formation | default |      number_sync_standbys | 1
+    primary |  node_A | synchronous_standby_names | 'ANY 1 (pgautofailover_standby_3, pgautofailover_standby_2)'
+       node |  node_A |        replication quorum | true
+       node |  node_B |        replication quorum | true
+       node |  node_C |        replication quorum | true
+       node |  node_A |        candidate priority | 50
+       node |  node_B |        candidate priority | 50
+       node |  node_C |        candidate priority | 50
+
+We can see that the ``number_sync_standbys`` has been used to compute the
+current value of the `synchronous_standby_names`__ setting on the primary.
+
+__ https://www.postgresql.org/docs/current/runtime-config-replication.html#GUC-SYNCHRONOUS-STANDBY-NAMES
+
+Because all the nodes in that example have the same default candidate
+priority (50), then pg_auto_failover is using the form ``ANY 1`` with the
+list of standby nodes that are currently participating in the replication
+quorum.
+
+The entries in the `synchronous_standby_names` list are meant to match the
+`application_name` connection setting used in the `primary_conninfo`, and
+the format used by pg_auto_failover there is the format string
+`"pgautofailover_standby_%d"` where `%d` is replaced by the node id. This
+allows keeping the same connection string to the primary when the node name
+is changed (using the command ``pg_autoctl set metadata --name``).
+
+Here we can see the node id of each registered Postgres node with the
+following command::
+
+  $ pg_autoctl show state
+    Name |  Node |      Host:Port |       LSN | Reachable |       Current State |      Assigned State
+  -------+-------+----------------+-----------+-----------+---------------------+--------------------
+  node_A |     1 | localhost:5001 | 0/7002310 |       yes |             primary |             primary
+  node_B |     2 | localhost:5002 | 0/7002310 |       yes |           secondary |           secondary
+  node_C |     3 | localhost:5003 | 0/7002310 |       yes |           secondary |           secondary
+
+When setting pg_auto_failover with per formation `number_sync_standby` and
+then per node replication quorum and candidate priority replication
+settings, those properties are then used to compute the
+``synchronous_standby_names`` value on the primary node. This value is
+automatically maintained on the primary by pg_auto_failover, and is updated
+either when replication settings are changed or when a failover happens.
+
+The other situation when the pg_auto_failover replication settings are used
+is a candidate election when a failover happens and there is more than two
+nodes registered in a group. Then the node with the highest candidate
+priority is selected, as detailed above in the :ref:`candidate_priority`
+section.
+
 Architectures with three standby nodes
 --------------------------------------
 
@@ -205,6 +266,22 @@ copies of the production data set at all times.
 On the other hand, if two standby nodes were to fail at the same time,
 despite the fact that two copies of the data are still maintained, the
 Postgres service would be degraded to read-only.
+
+With this architecture diagram, here's the summary that we obtain::
+
+  $ pg_autoctl get formation settings
+    Context |    Name |                   Setting | Value
+  ----------+---------+---------------------------+---------------------------------------------------------------------------------------
+  formation | default |      number_sync_standbys | 2
+    primary |  node_A | synchronous_standby_names | 'ANY 2 (pgautofailover_standby_2, pgautofailover_standby_4, pgautofailover_standby_3)'
+       node |  node_A |        replication quorum | true
+       node |  node_B |        replication quorum | true
+       node |  node_C |        replication quorum | true
+       node |  node_D |        replication quorum | true
+       node |  node_A |        candidate priority | 50
+       node |  node_B |        candidate priority | 50
+       node |  node_C |        candidate priority | 50
+       node |  node_D |        candidate priority | 50
 
 Architectures with three standby nodes, one async
 -------------------------------------------------
@@ -232,3 +309,19 @@ implement high availability of both the Postgres service and the data set.
 
 Node C might be set up for Business Continuity in case the first data center
 is lost, or maybe for reporting needs on another application domain.
+
+With this architecture diagram, here's the summary that we obtain::
+
+  pg_autoctl get formation settings
+    Context |    Name |                   Setting | Value
+  ----------+---------+---------------------------+-------------------------------------------------------------
+  formation | default |      number_sync_standbys | 1
+    primary |  node_A | synchronous_standby_names | 'ANY 1 (pgautofailover_standby_4, pgautofailover_standby_2)'
+       node |  node_A |        replication quorum | true
+       node |  node_B |        replication quorum | true
+       node |  node_C |        replication quorum | false
+       node |  node_D |        replication quorum | true
+       node |  node_A |        candidate priority | 50
+       node |  node_B |        candidate priority | 50
+       node |  node_C |        candidate priority | 0
+       node |  node_D |        candidate priority | 50
