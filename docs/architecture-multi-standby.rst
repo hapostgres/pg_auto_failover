@@ -198,6 +198,5 @@ in the same data center or availability zone and node C in another one.
 Those three nodes are set up to support the main production traffic and
 implement high availability of both the Postgres service and the data set.
 
-Node C might be set up for Business Continuity in case the first data center is
-lost, or maybe for reporting the need for deployment on another application
-domain.
+Node C might be set up for Business Continuity in case the first data center
+is lost, or maybe for reporting needs on another application domain.
