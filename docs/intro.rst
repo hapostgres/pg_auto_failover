@@ -34,19 +34,19 @@ Monitor removes it from the `synchronous_standby_names` setting on the
 *primary* node. Until the *secondary* is back to being monitored healthy,
 failover and switchover operations are not allowed, preventing data loss.
 
-Multiple Standbys Architecture
-------------------------------
+Multiple Standby Architecture
+-----------------------------
 
 .. figure:: ./tikz/arch-multi-standby.svg
    :alt: pg_auto_failover Architecture for a standalone PostgreSQL service
 
    pg_auto_failover architecture with a primary and two standby nodes
 
-In that architecture pg_auto_failover implements Business Continuity and
-data availability at the same time, by implementing a single PostgreSQL
-service using multiple with automated failover and data redundancy. Even
-after losing any Postgres node in your production system, this architecture
-maintains two copies of the data on two different nodes.
+In the pictured architecture, pg_auto_failover implements Business Continuity
+and data availability by implementing a single PostgreSQL service using
+multiple with automated failover and data redundancy. Even after losing any
+Postgres node in a production system, this architecture maintains two copies of
+the data on two different nodes.
 
 When using more than one standby, different architectures can be achieved
 with pg_auto_failover, depending on the objectives and trade-offs needed for
@@ -65,20 +65,20 @@ different Postgres architectures for your production needs.
 
 In this case, the system is setup with two standby nodes participating in
 the replication quorum, allowing for ``number_sync_standbys = 1``. The
-system always maintain a minimum of two copies of the data set, one on the
+system always maintains a minimum of two copies of the data set: one on the
 primary, another one on one on either node B or node D. Whenever we lose one
 of those nodes, we can hold to this guarantee of two copies of the data set.
 
-Adding to that, we have the standby server C which has been setup to not
+Adding to that, we have the standby server C which has been set up to not
 participate in the replication quorum. Node C will not be found in the
-``synchronous_standby_names`` list of nodes. Also, node C is setup in a way
-to never be a candidate for failover, with ``candidate-priority = 0``.
+``synchronous_standby_names`` list of nodes. Also, node C is set up in a way to
+never be a candidate for failover, with ``candidate-priority = 0``.
 
-This architecture would fit a situation with nodes A, B, and D are deployed
-in the same data center or availability zone and node C in another one.
-Those three nodes are setup to support the main production traffic and
+This architecture would fit a situation where nodes A, B, and D are deployed
+in the same data center or availability zone, and node C in another.
+Those three nodes are set up to support the main production traffic and
 implement high availability of both the Postgres service and the data set.
 
-Node C might be setup for Business Continuity in case the first data center
-is lost, or maybe for reporting needs deployed on another application
+Node C might be set up for Business Continuity in case the first data center is
+lost, or maybe for reporting the need for deployment on another application
 domain.

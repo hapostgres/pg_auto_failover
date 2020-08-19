@@ -60,7 +60,7 @@ chmod +x .git/hooks/pre-commit
 
 The diagrams are TikZ sources, which means they're edited with your usual
 editor tooling. The diagrams are actually code, and the compilation tool
-chain involve the following software:
+chain involves the following software:
 
   - LuaTex
   - TikZ

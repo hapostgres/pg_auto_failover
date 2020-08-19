@@ -175,7 +175,7 @@ flushing. A draining node will not accept new client writes, but will
 continue to send existing data to the secondary.
 
 To implement that with Postgres we actually stop the service. When stopping,
-Postgres ensure that the current replication buffers are flushed correctly
+Postgres ensures that the current replication buffers are flushed correctly
 to synchronous standbys.
 
 Demoted
@@ -231,11 +231,10 @@ orchestrated and there are several standby nodes. To select a candidate for
 promotion, pg_auto_failover first needs a fresh report of the current LSN
 position reached on each standby node.
 
-When a node reaches the report_lsn state, the replication stream is stopped,
-by restarting Postgres without a ``primary_conninfo``. This allows the
-primary node to detect :ref:`network_partitions`: when the primary can't
-connect to the monitor and there's no standby listed in
-``pg_stat_replication``, that's a network split.
+When a node reaches the report_lsn state, the replication stream is stopped, by
+restarting Postgres without a ``primary_conninfo``. This allows the primary
+node to detect :ref:`network_partitions`, i.e. when the primary can't connect
+to the monitor and there's no standby listed in ``pg_stat_replication``.
 
 Fast_forward
 ^^^^^^^^^^^^

@@ -8,7 +8,7 @@ Note that a single Monitor can handle many PostgreSQL services, so that in
 practice if you want to handle N PostgreSQL services, you need at minimum
 2 * N + 1 servers (not 3 * N).
 
-pg_auto_failover considers that a PostgreSQL service is Highly-Available when the
+pg_auto_failover considers a PostgreSQL service to be Highly-Available when the
 following two guarantees are respected, in this order:
 
   1. Data loss is prevented in any situation that include the failure of a
@@ -18,15 +18,15 @@ following two guarantees are respected, in this order:
      possible, taking care of rule 1 first.
 
 It is important to understand that pg_auto_failover is optimized for *Business
-Continuity*. In the event of losing a single node, then pg_auto_failover is capable
+Continuity*. In the event of losing a single node, pg_auto_failover is capable
 of continuing the PostgreSQL service, and prevents any data loss when doing
 so, thanks to PostgreSQL *Synchronous Replication*.
 
-That said, pg_auto_failover design trade-off towards business continuity involves
-relaxing replication guarantees to *asynchronous replication* in the event
-of a standby node failure. This allows the PostgreSQL service to accept
-writes when there's a single server available, and this opens the service
-for potential data loss if now the primary server were to be failing too.
+That said, there is a trade-off involved in pg_auto_failover's design. The
+business continuity bias relaxes replication guarantees for *asynchronous
+replication* in the event of a standby node failure. This allows the PostgreSQL
+service to accept writes when there's a single server available, and opens the
+service for potential data loss if the primary server were also to fail.
 
 .. figure:: ./tikz/arch-single-standby.svg
    :alt: pg_auto_failover Architecture for a standalone PostgreSQL service
@@ -70,7 +70,7 @@ Monitor
 ^^^^^^^
 
 The pg_auto_failover monitor is a service that keeps track of one or several
-*formations* containing *groups* of two *nodes* each.
+*formations* containing *groups* of *nodes*.
 
 The monitor is implemented as a PostgreSQL extension, so when you run the
 command ``pg_autoctl create monitor`` a PostgreSQL instance is initialized,
@@ -96,18 +96,18 @@ primary server and a secondary server setup with Hot Standby synchronous
 replication. Note that pg_auto_failover can orchestrate the whole setting-up
 of the replication for you.
 
-Up to pg_auto_failover version 1.3, a single Postgres group can only
-contains two Postgres nodes. Starting with pg_auto_failover 1.4, there's no
+In pg_auto_failover versions up to 1.3, a single Postgres group can contain
+only two Postgres nodes. Starting with pg_auto_failover 1.4, there's no
 limit to the number of Postgres nodes in a single group. Note that each
-Postgres instance that belongs to the same group serves the same data set in
+Postgres instance that belongs to the same group serves the same dataset in
 its data directory (PGDATA).
 
 .. note::
 
    The notion of a formation that contains multiple groups in
-   pg_auto_failover is useful when setting-up and managing a whole Citus
+   pg_auto_failover is useful when setting up and managing a whole Citus
    formation, where the coordinator nodes belong to group zero of the
-   formation, and then each Citus worker node becomes its own group and may
+   formation, and each Citus worker node becomes its own group and may
    have Postgres standby nodes.
 
 Keeper
@@ -115,7 +115,7 @@ Keeper
 
 The pg_auto_failover *keeper* is an agent that must be running on the same
 server where your PostgreSQL nodes are running. The keeper controls the
-local PostgreSQL instance (using both the ``pg_ctl`` command line tool and
+local PostgreSQL instance (using both the ``pg_ctl`` command-line tool and
 SQL queries), and communicates with the monitor:
 
   - it sends updated data about the local node, such as the WAL delta in
@@ -123,34 +123,34 @@ SQL queries), and communicates with the monitor:
 
   - it receives state assignments from the monitor.
 
-Also the keeper maintains a local state that includes the most recent
+Also the keeper maintains local state that includes the most recent
 communication established with the monitor and the other PostgreSQL node of
 its group, enabling it to detect :ref:`network_partitions`.
 
 .. note::
 
-   In pg_auto_failover versions up to 1.3 included, the *keeper* process
+   In pg_auto_failover versions up to and including 1.3, the *keeper* process
    started with ``pg_autoctl run`` manages a separate Postgres instance,
    running as its own process tree.
 
-   Starting in pg_auto_failover version 1.4, the *keeper* process started
-   with ``pg_autoctl run`` runs the Postgres instance as a sub-process of
-   the main ``pg_autoctl`` process, allowing tighter control over the
-   Postgres execution and also making the solution works better in both
-   container environment (because it's now a single process tree) and with
+   Starting in pg_auto_failover version 1.4, the *keeper* process (started with
+   ``pg_autoctl run``) runs the Postgres instance as a sub-process of the main
+   ``pg_autoctl`` process, allowing tighter control over the Postgres
+   execution. Running the sub-process also makes the solution work better both
+   in container environments (because it's now a single process tree) and with
    systemd, because it uses a specific cgroup per service unit.
 
 Node
 ^^^^
 
-A node is a server (virtual or physical) that runs a PostgreSQL instances
+A node is a server (virtual or physical) that runs PostgreSQL instances
 and a keeper service. At any given time, any node might be a primary or a
-secondary Postgres instance, and the whole point of pg_auto_failover is that
-this state is going to change.
+secondary Postgres instance. The whole point of pg_auto_failover is to
+decide this state.
 
-As a result, refrain from naming your nodes with the role you intend for
-them. Again, this will change. Otherwise you would not be having a use case
-for pg_auto_failover.
+As a result, refrain from naming your nodes with the role you intend for them.
+Their roles can change. If they didn't, your system wouldn't need
+pg_auto_failover!
 
 State
 ^^^^^
@@ -160,14 +160,14 @@ The monitor and the keeper implement a Finite State Machine to drive
 operations in the PostgreSQL groups; allowing pg_auto_failover to implement
 High Availability with the goal of zero data loss.
 
-The keeper main loop enforce the current expected state of the local
+The keeper main loop enforces the current expected state of the local
 PostgreSQL instance, and reports the current state and some more information
 to the monitor. The monitor uses this set of information and its own
 health-check information to drive the State Machine and assign a goal state
 to the keeper.
 
-The keeper implements the transitions between a current state and a monitor
-assigned goal state.
+The keeper implements the transitions between a current state and a
+monitor-assigned goal state.
 
 Client-side HA
 --------------
@@ -246,7 +246,7 @@ nodes, and based on the replication setting ``number_sync_standby``.
 
 When in the `wait_primary` state, synchronous replication is disabled by
 automatically setting ``synchronous_standby_names = ''`` to allow writes to
-proceed, but failover is also disabled since the standby might get
+proceed. However doing so also disables failover, since the standby might get
 arbitrarily far behind. If the standby is responding to health checks and
 within 1 WAL segment of the primary (by default), synchronous replication is
 enabled again on the primary by setting ``synchronous_standby_names = '*'``
@@ -262,42 +262,40 @@ following to ``postgresql.conf``::
 
  synchronous_commit = 'local'
 
-This ensures that writes return as soon as they are committed on the primary
-under all circumstances. In that case, failover might lead to some data
-loss, but failover is not initiated if the secondary is more than 10 WAL
-segments (by default) behind on the primary. During a manual failover, the
-standby will continue accepting writes from the old primary and will stop
-only if it's fully caught up (most common), the primary fails, or it does
-not receive writes for 2 minutes.
+This ensures that writes return as soon as they are committed on the primary --
+under all circumstances. In that case, failover might lead to some data loss,
+but failover is not initiated if the secondary is more than 10 WAL segments (by
+default) behind on the primary. During a manual failover, the standby will
+continue accepting writes from the old primary. The standby will stop accepting
+writes only if it's fully caught up (most common), the primary fails, or it
+does not receive writes for 2 minutes.
 
 .. topic:: A note about performance
 
-		   In some cases the performance impact on the write latency when
-		   setting synrhonous replication makes the application fails to
-		   deliver expected performance. When testing, or production
-		   feedback, shows that you are in that case indeed, it is
-		   beneficial to switch to using asynchronous replication.
+  In some cases the performance impact on write latency when setting
+  synchronous replication makes the application fail to deliver expected
+  performance. If testing or production feedback shows this to be the case, it
+  is beneficial to switch to using asynchronous replication.
 
-		   The way to achieve that with pg_auto_failover is to change the
-		   ``synchronous_commit`` setting. This setting can be set per
-		   transaction, per session, or per user: it does not have to be set
-		   globally on your Postgres instance.
+  The way to use asynchronous replication in pg_auto_failover is to change the
+  ``synchronous_commit`` setting. This setting can be set per transaction, per
+  session, or per user. It does not have to be set globally on your Postgres
+  instance.
 
-		   One way to benefit from that would be::
+  One way to benefit from that would be::
 
-			 alter role fast_and_loose set synchronous_commit to local;
+    alter role fast_and_loose set synchronous_commit to local;
 
-		   That way in the parts of the application where performance is
-		   crucial, and where you can also lower your data durability
-		   guarantees, your transactions are not waiting on the standby
-		   nodes anymore.
+  That way performance-critical parts of the application don't have to wait for
+  the standby nodes. Only use this when you can also lower your data durability
+  guarantees.
 
 Node recovery
 -------------
 
-When bringing back a node after a failover, the keeper (``pg_autoctl run``) can
+When bringing a node back after a failover, the keeper (``pg_autoctl run``) can
 simply be restarted. It will also restart postgres if needed and obtain its
-goal state from the monitor. If the failed node was a primary and was
-demoted, it will learn this from the monitor. Once the node reports, it is
-allowed to come back as a standby by running ``pg_rewind``. If it is too far
-behind the node performs a new ``pg_basebackup``.
+goal state from the monitor. If the failed node was a primary and was demoted,
+it will learn this from the monitor. Once the node reports, it is allowed to
+come back as a standby by running ``pg_rewind``. If it is too far behind, the
+node performs a new ``pg_basebackup``.
