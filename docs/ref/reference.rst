@@ -310,6 +310,12 @@ registered to the pg_auto_failover monitor::
 For details about the options to the command, see above in the ``pg_autoctl
 show events`` command.
 
+The ``--local`` option displays information from the local node cache,
+without contacting the monitor. Note that when Postgres is not running the
+LSN position is then the `Latest checkpoint location` as taken from the
+output of the ``pg_controldata`` command, and might be an earlier location
+than the most recent one sent to the monitor.
+
 pg_autoctl show file
 ^^^^^^^^^^^^^^^^^^^^
 
