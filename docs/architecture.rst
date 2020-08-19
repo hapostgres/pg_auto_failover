@@ -1,37 +1,35 @@
+.. _architecture_basics:
+
 Architecture Basics
 ===================
 
-pg_auto_failover is designed to handle a single PostgreSQL service using three
-nodes, and is resilient to losing any **one** of **three** nodes.
+pg_auto_failover is designed as a simple and robust way to manage automated
+Postgres failover in production. On-top of robust operations,
+pg_auto_failover setup is flexible and allows either *Business Continuity*
+or *High Availability* configurations. pg_auto_failover design includes
+configuration changes in a live system without downtime.
 
-Note that a single Monitor can handle many PostgreSQL services, so that in
-practice if you want to handle N PostgreSQL services, you need at minimum
-2 * N + 1 servers (not 3 * N).
-
-pg_auto_failover considers a PostgreSQL service to be Highly-Available when the
-following two guarantees are respected, in this order:
-
-  1. Data loss is prevented in any situation that include the failure of a
-     single node in the system.
-
-  2. In case of service downtime, service is back available as soon as
-     possible, taking care of rule 1 first.
-
-It is important to understand that pg_auto_failover is optimized for *Business
-Continuity*. In the event of losing a single node, pg_auto_failover is capable
-of continuing the PostgreSQL service, and prevents any data loss when doing
-so, thanks to PostgreSQL *Synchronous Replication*.
-
-That said, there is a trade-off involved in pg_auto_failover's design. The
-business continuity bias relaxes replication guarantees for *asynchronous
-replication* in the event of a standby node failure. This allows the PostgreSQL
-service to accept writes when there's a single server available, and opens the
-service for potential data loss if the primary server were also to fail.
+pg_auto_failover is designed to be able to handle a single PostgreSQL
+service using three nodes. In this setting, the system is resilient to
+losing any **one** of **three** nodes.
 
 .. figure:: ./tikz/arch-single-standby.svg
    :alt: pg_auto_failover Architecture for a standalone PostgreSQL service
 
    pg_auto_failover Architecture for a standalone PostgreSQL service
+
+It is important to understand that when using only two Postgres nodes then
+pg_auto_failover is optimized for *Business Continuity*. In the event of
+losing a single node, pg_auto_failover is capable of continuing the
+PostgreSQL service, and prevents any data loss when doing so, thanks to
+PostgreSQL *Synchronous Replication*.
+
+That said, there is a trade-off involved in this architecture. The business
+continuity bias relaxes replication guarantees for *asynchronous
+replication* in the event of a standby node failure. This allows the
+PostgreSQL service to accept writes when there's a single server available,
+and opens the service for potential data loss if the primary server were
+also to fail.
 
 The pg_auto_failover Monitor
 ----------------------------

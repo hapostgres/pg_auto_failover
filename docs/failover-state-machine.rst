@@ -78,6 +78,8 @@ PostgreSQL instance, with no high availability and no failover. If the
 administrator removes a node the other node will revert to the single
 state.
 
+.. _wait_primary:
+
 Wait_primary
 ^^^^^^^^^^^^
 

@@ -19,25 +19,57 @@ In this case, three nodes get set up with the same characteristics, achieving
 HA for both the Postgres service and the production dataset. An important
 setting for this architecture is ``number_sync_standbys``.
 
-With ``number_sync_standbys`` set to one, this architecture always maintains
-two copies of the dataset: one on the current primary node (node A in the
-previous diagram), and one on the standby that acknowledges the transaction
-first (either node B or node C in the diagram).
+The replication setting ``number_sync_standbys`` sets how many standby nodes
+the primary should wait for when committing a transaction. In order to have
+a good availability in your system, pg_auto_failover requires
+``number_sync_standbys + 1`` standby nodes participating in the replication
+quorum: this allows any standby node to fail without impact on the system's
+ability to respect the replication quorum.
 
-When one of the standby nodes is unavailable, the second copy of the dataset
-can still be maintained thanks to the remaining standby. Maintenance doesn't
-require intervention such as modifying Postgres settings.
+When only two nodes are registered in a group on the monitor we have a
+primary and a single secondary node. Then ``number_sync_standbys`` can only
+be set to zero. When adding a second standby node to a pg_auto_failover
+group, then the monitor automatically increments ``number_sync_standbys`` to
+one, as we see in the diagram above.
 
-Setting ``number_sync_standbys`` to zero rather than the default of one has a
-different effect. If the second standby node becomes unhealthy at the same time
-as the first standby node, the Postgres service is degraded to read-only.
-Transactions that write to Postgres will have to wait until at least one
-standby node is healthy.
+When ``number_sync_standbys`` is set to zero then pg_auto_failover
+implements the *Business Continuity* setup as seen in
+:ref:`architecture_basics`: synchronous replication is then used as a way to
+guarantee that failover can be implemented without data loss.
 
-On the other hand, setting ``number_sync_standbys`` to zero allows data to be
-written even when both standby nodes are down. In this case, a single copy of
-the production data set is kept and, if the primary was then to fail, some data
-will be lost. How much depends on your backup and recovery mechanisms.
+In more details:
+
+ 1. With ``number_sync_standbys`` set to one, this architecture always
+    maintains two copies of the dataset: one on the current primary node
+    (node A in the previous diagram), and one on the standby that
+    acknowledges the transaction first (either node B or node C in the
+    diagram).
+
+    When one of the standby nodes is unavailable, the second copy of the
+    dataset can still be maintained thanks to the remaining standby.
+
+    When both the standby nodes are unavailable, then it's no longer
+    possible to guarantee the replication quorum, and thus writes on the
+    primary are blocked. The Postgres primary node waits until at least one
+    standby node acknowledges the transactions locally committed, thus
+    degrading your Postgres service to read-only.
+
+ 0. It is possible to manually set ``number_sync_standbys`` to zero when
+    having registered two standby nodes to the monitor, overriding the
+    default behavior.
+
+    In that case, when the second standby node becomes unhealthy at the same
+    time as the first standby node, the primary node is assigned the state
+    :ref:`wait_primary`. In that state, synchronous replication is disabled
+    on the primary by setting ``synchronous_standby_names`` to an empty
+    string. Writes are allowed on the primary, even though there's no extra
+    copy of the production dataset available at this time.
+
+    Setting ``number_sync_standbys`` to zero allows data to be written even
+    when both standby nodes are down. In this case, a single copy of the
+    production data set is kept and, if the primary was then to fail, some
+    data will be lost. How much depends on your backup and recovery
+    mechanisms.
 
 .. _architecture_setup:
 
