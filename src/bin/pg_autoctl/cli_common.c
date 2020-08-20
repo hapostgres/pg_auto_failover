@@ -1668,3 +1668,200 @@ cli_node_metadata_getopts(int argc, char **argv)
 
 	return optind;
 }
+
+
+/*
+ * cli_get_name_getopts parses the command line options for the command
+ * `pg_autoctl get|set` commands and the `pg_autoctl perform promotion`
+ * command, a list of commands which needs to target a node given by name.
+ */
+int
+cli_get_name_getopts(int argc, char **argv)
+{
+	KeeperConfig options = { 0 };
+	int c, option_index = 0, errors = 0;
+	int verboseCount = 0;
+
+	static struct option long_options[] = {
+		{ "pgdata", required_argument, NULL, 'D' },
+		{ "formation", required_argument, NULL, 'f' },
+		{ "name", required_argument, NULL, 'a' },
+		{ "json", no_argument, NULL, 'J' },
+		{ "version", no_argument, NULL, 'V' },
+		{ "verbose", no_argument, NULL, 'v' },
+		{ "quiet", no_argument, NULL, 'q' },
+		{ "help", no_argument, NULL, 'h' },
+		{ NULL, 0, NULL, 0 }
+	};
+
+	/* set default values for our options, when we have some */
+	options.groupId = -1;
+	options.network_partition_timeout = -1;
+	options.prepare_promotion_catchup = -1;
+	options.prepare_promotion_walreceiver = -1;
+	options.postgresql_restart_failure_timeout = -1;
+	options.postgresql_restart_failure_max_retries = -1;
+
+	strlcpy(options.formation, "default", NAMEDATALEN);
+
+	optind = 0;
+
+	/*
+	 * The only command lines that are using keeper_cli_getopt_pgdata are
+	 * terminal ones: they don't accept subcommands. In that case our option
+	 * parsing can happen in any order and we don't need getopt_long to behave
+	 * in a POSIXLY_CORRECT way.
+	 *
+	 * The unsetenv() call allows getopt_long() to reorder arguments for us.
+	 */
+	unsetenv("POSIXLY_CORRECT");
+
+	while ((c = getopt_long(argc, argv, "D:f:g:n:Vvqh",
+							long_options, &option_index)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(options.pgSetup.pgdata, optarg, MAXPGPATH);
+				log_trace("--pgdata %s", options.pgSetup.pgdata);
+				break;
+			}
+
+			case 'f':
+			{
+				strlcpy(options.formation, optarg, NAMEDATALEN);
+				log_trace("--formation %s", options.formation);
+				break;
+			}
+
+			case 'a':
+			{
+				/* { "name", required_argument, NULL, 'a' }, */
+				strlcpy(options.name, optarg, _POSIX_HOST_NAME_MAX);
+				log_trace("--name %s", options.name);
+				break;
+			}
+
+			case 'V':
+			{
+				/* keeper_cli_print_version prints version and exits. */
+				keeper_cli_print_version(argc, argv);
+				break;
+			}
+
+			case 'v':
+			{
+				++verboseCount;
+				switch (verboseCount)
+				{
+					case 1:
+					{
+						log_set_level(LOG_INFO);
+						break;
+					}
+
+					case 2:
+					{
+						log_set_level(LOG_DEBUG);
+						break;
+					}
+
+					default:
+					{
+						log_set_level(LOG_TRACE);
+						break;
+					}
+				}
+				break;
+			}
+
+			case 'q':
+			{
+				log_set_level(LOG_ERROR);
+				break;
+			}
+
+			case 'h':
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_QUIT);
+				break;
+			}
+
+			case 'J':
+			{
+				outputJSON = true;
+				log_trace("--json");
+				break;
+			}
+
+			default:
+			{
+				/* getopt_long already wrote an error message */
+				errors++;
+			}
+		}
+	}
+
+	if (errors > 0)
+	{
+		commandline_help(stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	/* now that we have the command line parameters, prepare the options */
+	(void) prepare_keeper_options(&options);
+
+	/* publish our option parsing in the global variable */
+	keeperOptions = options;
+
+	return optind;
+}
+
+
+/*
+ * cli_ensure_node_name ensures that we have a node name to continue with,
+ * either from the command line itself, or from the configuration file when
+ * we're dealing with a keeper node.
+ */
+void
+cli_ensure_node_name(Keeper *keeper)
+{
+	switch (ProbeConfigurationFileRole(keeper->config.pathnames.config))
+	{
+		case PG_AUTOCTL_ROLE_MONITOR:
+		{
+			if (IS_EMPTY_STRING_BUFFER(keeper->config.name))
+			{
+				log_fatal("Please use --name to target a specific node");
+				exit(EXIT_CODE_BAD_ARGS);
+			}
+			break;
+		}
+
+		case PG_AUTOCTL_ROLE_KEEPER:
+		{
+			/* when --name has not been used, fetch it from the config */
+			if (IS_EMPTY_STRING_BUFFER(keeper->config.name))
+			{
+				bool monitorDisabledIsOk = false;
+
+				if (!keeper_config_read_file_skip_pgsetup(&(keeper->config),
+														  monitorDisabledIsOk))
+				{
+					/* errors have already been logged */
+					exit(EXIT_CODE_BAD_CONFIG);
+				}
+			}
+			break;
+		}
+
+		default:
+		{
+			log_fatal("Unrecognized configuration file \"%s\"",
+					  keeper->config.pathnames.config);
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+	}
+}

@@ -1392,7 +1392,36 @@ PromoteSelectedNode(AutoFailoverNode *selectedNode,
 	 * - if the selected candidate is lagging, we ask it to connect to a
 	 *   standby that has not been selected and grab missing WAL bytes from
 	 *   there
+	 *
+	 * When the perform_promotion API has been used to promote a specific node
+	 * in the system then its candidate priority has been incremented by 100.
+	 * Now is the time to reset it.
 	 */
+	if (selectedNode->candidatePriority > 100)
+	{
+		char message[BUFSIZE] = { 0 };
+
+		selectedNode->candidatePriority -= 100;
+
+		ReportAutoFailoverNodeReplicationSetting(
+			selectedNode->nodeId,
+			selectedNode->nodeHost,
+			selectedNode->nodePort,
+			selectedNode->candidatePriority,
+			selectedNode->replicationQuorum);
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Updating candidate priority back to %d for node %d \"%s\" (%s:%d)",
+			selectedNode->candidatePriority,
+			selectedNode->nodeId,
+			selectedNode->nodeName,
+			selectedNode->nodeHost,
+			selectedNode->nodePort);
+
+		NotifyStateChange(selectedNode, message);
+	}
+
 	if (selectedNode->reportedLSN == candidateList->mostAdvancedReportedLSN)
 	{
 		char message[BUFSIZE] = { 0 };

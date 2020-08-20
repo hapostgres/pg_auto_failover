@@ -61,6 +61,7 @@ PG_FUNCTION_INFO_V1(remove_node);
 PG_FUNCTION_INFO_V1(remove_node_by_nodeid);
 PG_FUNCTION_INFO_V1(remove_node_by_host);
 PG_FUNCTION_INFO_V1(perform_failover);
+PG_FUNCTION_INFO_V1(perform_promotion);
 PG_FUNCTION_INFO_V1(start_maintenance);
 PG_FUNCTION_INFO_V1(stop_maintenance);
 PG_FUNCTION_INFO_V1(set_node_candidate_priority);
@@ -1278,6 +1279,120 @@ perform_failover(PG_FUNCTION_ARGS)
 	}
 
 	PG_RETURN_VOID();
+}
+
+
+/*
+ * promote promotes a given target node in a group.
+ */
+Datum
+perform_promotion(PG_FUNCTION_ARGS)
+{
+	text *formationIdText = PG_GETARG_TEXT_P(0);
+	char *formationId = text_to_cstring(formationIdText);
+
+	text *nodeNameText = PG_GETARG_TEXT_P(1);
+	char *nodeName = text_to_cstring(nodeNameText);
+
+	List *groupNodesList = NULL;
+	int totalNodesCount = 0;
+
+	AutoFailoverNode *currentNode = NULL;
+
+	checkPgAutoFailoverVersion();
+
+	currentNode = GetAutoFailoverNodeByName(formationId, nodeName);
+
+	if (currentNode == NULL)
+	{
+		ereport(ERROR,
+				(errmsg("node \"%s\" is not registered in formation \"%s\"",
+						nodeName, formationId)));
+	}
+
+	LockFormation(formationId, ShareLock);
+	LockNodeGroup(formationId, currentNode->groupId, ExclusiveLock);
+
+	/*
+	 * If the current node is the primary, that's done.
+	 */
+	if (IsCurrentState(currentNode, REPLICATION_STATE_SINGLE) ||
+		IsCurrentState(currentNode, REPLICATION_STATE_PRIMARY))
+	{
+		/* return false: no promotion is happening */
+		PG_RETURN_BOOL(false);
+	}
+
+	/*
+	 * If we have only two nodes in the group, then perform a failover.
+	 */
+	groupNodesList =
+		AutoFailoverNodeGroup(currentNode->formationId, currentNode->groupId);
+
+	totalNodesCount = list_length(groupNodesList);
+
+	if (totalNodesCount <= 2)
+	{
+		DirectFunctionCall2(perform_failover,
+							CStringGetTextDatum(formationId),
+							Int32GetDatum(currentNode->groupId));
+
+		/* if we reach this point, then a failover is in progress */
+		PG_RETURN_BOOL(true);
+	}
+	else
+	{
+		char message[BUFSIZE] = { 0 };
+
+		/*
+		 * In the general case, we perform a little trick:
+		 *
+		 *  - first increment the node's candidate-priority by 100,
+		 *
+		 *  - then call perform_failover,
+		 *
+		 *  - when the node reaches WAIT_PRIMARY again, after promotion, reset
+		 *    its candidate priority.
+		 */
+		if (currentNode->candidatePriority == 0)
+		{
+			ereport(ERROR,
+					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					 errmsg("cannot perform promotion: node %s in formation %s "
+							"has a candidate priority of 0 (zero).",
+							nodeName, formationId)));
+		}
+
+		currentNode->candidatePriority += 100;
+
+		ReportAutoFailoverNodeReplicationSetting(
+			currentNode->nodeId,
+			currentNode->nodeHost,
+			currentNode->nodePort,
+			currentNode->candidatePriority,
+			currentNode->replicationQuorum);
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Updating candidate priority to %d for node %d \"%s\" (%s:%d)",
+			currentNode->candidatePriority,
+			currentNode->nodeId,
+			currentNode->nodeName,
+			currentNode->nodeHost,
+			currentNode->nodePort);
+
+		NotifyStateChange(currentNode, message);
+
+		DirectFunctionCall2(perform_failover,
+							CStringGetTextDatum(formationId),
+							Int32GetDatum(currentNode->groupId));
+
+		/* if we reach this point, then a failover is in progress */
+		PG_RETURN_BOOL(true);
+	}
+
+	/* can't happen, keep compiler happy */
+	PG_RETURN_BOOL(false);
 }
 
 
