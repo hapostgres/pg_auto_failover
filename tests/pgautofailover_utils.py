@@ -940,6 +940,13 @@ SELECT reportedstate
         command = PGAutoCtl(self)
         command.execute("disable maintenance", 'disable', 'maintenance')
 
+    def perform_promotion(self):
+        """
+        Calls pg_autoctl perform promotion on a Postgres node
+        """
+        command = PGAutoCtl(self)
+        command.execute("perform promotion", 'perform', 'promotion')
+
     def drop(self):
         """
         Drops a pg_autoctl node from its formation
