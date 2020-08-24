@@ -11,6 +11,7 @@ Welcome to pg_auto_failover's documentation!
    :caption: Contents:
 
    intro
+   how-to
    tutorial
    architecture
    architecture-multi-standby

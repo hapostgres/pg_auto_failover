@@ -1,3 +1,5 @@
+.. _reference:
+
 pg_autoctl commands reference
 =============================
 
@@ -482,6 +484,29 @@ at first and consider something production grade later. Also, consider using
 security compliance process.
 
 See :ref:`security` for notes on `.pgpass`
+
+pg_autoctl run
+^^^^^^^^^^^^^^
+
+This commands starts the processes needed to run a monitor node or a keeper
+node, depending on the configuration file that belongs to the ``--pgdata``
+option or PGDATA environment variable.
+
+In the case of a monitor, ``pg_autoctl run`` starts a Postgres service where
+we run the pg_auto_failover database, and a listener process that listens to
+the notifications sent by the Postgres instance::
+
+  $ pg_autoctl run --help
+  pg_autoctl run: Run the pg_autoctl service (monitor or keeper)
+  usage: pg_autoctl run  [ --pgdata --nodename --hostname --pgport ]
+
+    --pgdata      path to data directory
+    --nodename    pg_auto_failover node name
+    --hostname    hostname used to connect from other nodes
+    --pgport      PostgreSQL's port number
+
+The option `--pgdata` (or the environment variable ``PGDATA``) allows
+pg_auto_failover to find the monitor configuration file.
 
 Replication Settings
 --------------------

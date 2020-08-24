@@ -1,3 +1,5 @@
+.. _multi_node_architecture:
+
 Multi-node Architectures
 ========================
 
