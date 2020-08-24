@@ -4,12 +4,12 @@ Main pg_autoctl commands
 pg_auto_failover includes the command line tool ``pg_autoctl`` that
 implements many commands to manage your Postgres nodes. To implement the
 Postgres architectures described in this documentation, and more, it is
-generally possible to use only a couple of the many ``pg_autoctl`` commands.
+generally possible to use only some of the many ``pg_autoctl`` commands.
 
 This section of the documentation is a short introduction to the main
 commands that are useful when getting started with pg_auto_failover. More
-commands can be useful in some cases, see the :ref:`reference` for the whole
-list.
+commands are available and help deal with a variety of situations, see the
+:ref:`reference` for the whole list.
 
 To understand which replication settings to use in your case, see
 :ref:`architecture_basics` section and then the
@@ -18,6 +18,9 @@ To understand which replication settings to use in your case, see
 To follow a step by step guide that you can reproduce on your own Azure
 subscription and create a production Postgres setup from VMs, see the
 :ref:`tutorial` section.
+
+To understand how to setup pg_auto_failover in a way that is compliant with
+your internal security guide lines, read the :ref:`security` section.
 
 Command line environment, configuration files, etc
 --------------------------------------------------
@@ -44,27 +47,43 @@ To create the monitor use the command::
 
   $ pg_autoctl create monitor
 
-The create the Postgres nodes use the command::
+The create the Postgres nodes use the following command on each node you
+want to create::
 
   $ pg_autoctl create postgres
 
-Those commands will initialize your nodes, now you have to actually run the
-Postgres service that are expected to be running. For that you can manually
-run the following command on every node::
+While those *create* commands initialize your nodes, now you have to
+actually run the Postgres service that are expected to be running. For that
+you can manually run the following command on every node::
 
   $ pg_autoctl run
 
 It is also possible (and recommanded) to integrate the pg_auto_failover
-service right in your usual service management facility. You can use the
-following command to produce the unit file configuration that systemd
-requires, and then you can install it and enable the systemd unit::
+service in your usual service management facility. When using **systemd**
+the following commands can be used to produce the unit file configuration
+required::
 
   $ pg_autoctl show systemd
+  INFO  HINT: to complete a systemd integration, run the following commands:
+  INFO  pg_autoctl -q show systemd --pgdata "/tmp/pgaf/m" | sudo tee /etc/systemd/system/pgautofailover.service
+  INFO  sudo systemctl daemon-reload
+  INFO  sudo systemctl enable pgautofailover
+  INFO  sudo systemctl start pgautofailover
+  [Unit]
+  ...
 
 While it is expected that for a production deployment each node actually is
 a separate machine (virtual or physical, or even a container), it is also
 possible to run several Postgres nodes all on the same machine for testing
 or development purposes.
+
+.. tip::
+
+   When running several ``pg_autoctl`` nodes on the same machine for testing
+   or contributing to pg_auto_failover, each Postgres instance needs to run
+   on its own port, and with its own data directory. It can make things
+   easier to then set the environement variables ``PGDATA`` and ``PGPORT``
+   in each terminal, shell, or tab where each instance is started.
 
 Inspecting nodes
 ----------------
@@ -81,8 +100,21 @@ following command::
 
   $ pg_autoctl show events
 
-Editing Replication Settings
-----------------------------
+.. hint::
+
+   The ``pg_autoctl show`` commands can be run from any node in your system.
+   Those command need to connect to the monitor and print the current state
+   or the current known list of events as per the monitor view of the system.
+
+   Use ``pg_autoctl show state --local`` to have a view of the local state
+   of a given node without connecting to the monitor Postgres instance.
+
+   The option ``--json`` is available in most ``pg_autoctl`` commands and
+   switches the output format from a human readable table form to a program
+   friendly JSON pretty-printed output.
+
+Inspecting and Editing Replication Settings
+-------------------------------------------
 
 When creating node it is possible to use the ``--candidate-priority`` and
 the ``--replication-quorum`` options to set the replication properties as
@@ -102,6 +134,21 @@ commands to adjust the replication settings on the fly::
   $ pg_autoctl set node replication-quorum
   $ pg_autoctl set node candidate-priority
 
+.. important::
+
+   The ``pg_autoctl get`` and ``pg_autoctl set`` commands always connect to
+   the monitor Postgres instance.
+
+   The ``pg_autoctl set`` command then changes the replication settings on
+   the node registration on the monitor. Then the monitor assigns the
+   APPLY_SETTINGS state to the current primary node in the system for it to
+   apply the new replication settings to its Postgres streaming replication
+   setup.
+
+   As a result, the ``pg_autoctl set`` commands requires a stable state in
+   the system to be allowed to proceed. Namely, the current primary node in
+   the system must have both its Current State and its Assigned State set to
+   primary, as per the ``pg_autoctl show state`` output.
 
 Implementing Maintenance Operations
 -----------------------------------
@@ -130,12 +177,21 @@ to have pg_auto_failover orchestrate that for you when using the command::
 
   $ pg_autoctl enable maintenance --allow-failover
 
+.. important::
+
+   The ``pg_autoctl enable`` and ``pg_autoctl disable`` commands requires a
+   stable state in the system to be allowed to proceed. Namely, the current
+   primary node in the system must have both its Current State and its
+   Assigned State set to primary, as per the ``pg_autoctl show state``
+   output.
+
 Manual failover, switchover, and promotions
 -------------------------------------------
 
 In the cases when a failover is needed without having an actual node
 failure, the pg_auto_failover monitor can be used to orchestrate the
-operation. Use one of the following commands::
+operation. Use one of the following commands, which are synonyms in the
+pg_auto_failover design::
 
   $ pg_autoctl perform failover
   $ pg_autoctl perform switchover
@@ -144,6 +200,13 @@ Finally, it is also possible to “elect” a new primary node in your formation
 with the command::
 
   $ pg_autoctl perform promotion
+
+.. important::
+
+   The ``pg_autoctl perform`` commands requires a stable state in the system
+   to be allowed to proceed. Namely, the current primary node in the system
+   must have both its Current State and its Assigned State set to primary,
+   as per the ``pg_autoctl show state`` output.
 
 What's next?
 ------------
