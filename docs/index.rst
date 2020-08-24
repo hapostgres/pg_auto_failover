@@ -22,6 +22,7 @@ Welcome to pg_auto_failover's documentation!
    ref/reference
    ref/configuration
    operations
+   faq
 
 ..
    Indices and tables
