@@ -30,15 +30,6 @@
 #define Anum_pgautofailover_formation_number_sync_standbys 5
 
 
-/* formation.kind: "pgsql" or "citus" */
-typedef enum FormationKind
-{
-	FORMATION_KIND_UNKNOWN = 0,
-	FORMATION_KIND_PGSQL,
-	FORMATION_KIND_CITUS
-} FormationKind;
-
-
 /*
  * AutoFailoverFormation represents a formation that is being managed by the
  * pg_auto_failover monitor.

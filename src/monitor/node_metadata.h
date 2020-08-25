@@ -109,6 +109,20 @@ typedef struct AutoFailoverNode
 } AutoFailoverNode;
 
 
+/*
+ * Formation.kind: "pgsql" or "citus"
+ *
+ * We define the formation kind here to avoid cyclic dependency between the
+ * formation_metadata.h and node_metadata.h headers.
+ */
+typedef enum FormationKind
+{
+	FORMATION_KIND_UNKNOWN = 0,
+	FORMATION_KIND_PGSQL,
+	FORMATION_KIND_CITUS
+} FormationKind;
+
+
 /* public function declarations */
 extern List * AllAutoFailoverNodes(char *formationId);
 extern List * AutoFailoverNodeGroup(char *formationId, int groupId);
@@ -138,6 +152,7 @@ extern AutoFailoverNode * GetWritableNodeInGroup(char *formationId, int32 groupI
 extern AutoFailoverNode * TupleToAutoFailoverNode(TupleDesc tupleDescriptor,
 												  HeapTuple heapTuple);
 extern int AddAutoFailoverNode(char *formationId,
+							   FormationKind formationKind,
 							   int groupId,
 							   char *nodeName,
 							   char *nodeHost,

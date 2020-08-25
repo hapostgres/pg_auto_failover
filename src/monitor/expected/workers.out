@@ -1,0 +1,61 @@
+-- Copyright (c) Microsoft Corporation. All rights reserved.
+-- Licensed under the PostgreSQL License.
+-- This only tests that names are assigned properly
+\x on
+-- create a citus formation
+select *
+  from pgautofailover.create_formation('citus', 'citus', 'citus', true, 0);
+-[ RECORD 1 ]--------+------
+formation_id         | citus
+kind                 | citus
+dbname               | citus
+opt_secondary        | t
+number_sync_standbys | 0
+
+-- register the first coordinator
+select *
+  from pgautofailover.register_node('citus', 'localhost', 9876,
+                                    dbname => 'citus',
+                                    desired_group_id => 0,
+                                    node_kind => 'coordinator');
+-[ RECORD 1 ]---------------+--------------
+assigned_node_id            | 3
+assigned_group_id           | 0
+assigned_group_state        | single
+assigned_candidate_priority | 100
+assigned_replication_quorum | t
+assigned_node_name          | coordinator_3
+
+select *
+  from pgautofailover.set_node_system_identifier(3, 6862008014275870855);
+-[ RECORD 1 ]------------
+node_id   | 3
+node_name | coordinator_3
+node_host | localhost
+node_port | 9876
+
+-- coordinator_1 reports single
+select *
+  from pgautofailover.node_active('citus', 3, 0,
+                                  current_group_role => 'single');
+-[ RECORD 1 ]---------------+-------
+assigned_node_id            | 3
+assigned_group_id           | 0
+assigned_group_state        | single
+assigned_candidate_priority | 100
+assigned_replication_quorum | t
+
+-- register first worker
+select *
+  from pgautofailover.register_node('citus', 'localhost', 9878,
+                                    dbname => 'citus',
+                                    desired_group_id => 1,
+                                    node_kind => 'worker');
+-[ RECORD 1 ]---------------+---------
+assigned_node_id            | 4
+assigned_group_id           | 1
+assigned_group_state        | single
+assigned_candidate_priority | 100
+assigned_replication_quorum | t
+assigned_node_name          | worker_4
+

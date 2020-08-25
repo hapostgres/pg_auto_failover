@@ -138,7 +138,9 @@ CREATE TABLE pgautofailover.node
                    AND reportedstate in ('init', 'wait_standby', 'catchingup') )
                 OR sysidentifier IS NOT NULL),
     CONSTRAINT same_system_identifier_within_group
-       EXCLUDE USING gist(groupid with =, sysidentifier with <>),
+       EXCLUDE USING gist(formationid with =,
+                          groupid with =,
+                          sysidentifier with <>),
     PRIMARY KEY (nodeid),
     FOREIGN KEY (formationid) REFERENCES pgautofailover.formation(formationid)
  )
