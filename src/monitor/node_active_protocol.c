@@ -1388,6 +1388,13 @@ perform_promotion(PG_FUNCTION_ARGS)
 
 		NotifyStateChange(currentNode, message);
 
+		/*
+		 * In case of errors in the perform_failover function, we ereport an
+		 * ERROR and that causes the transaction to fail (ROLLBACK). In that
+		 * case, the UPDATE of the candidate priority in the
+		 * pgautofailover.node table is also cancelled, and the notification
+		 * above is not sent either.
+		 */
 		DirectFunctionCall2(perform_failover,
 							CStringGetTextDatum(formationId),
 							Int32GetDatum(currentNode->groupId));
