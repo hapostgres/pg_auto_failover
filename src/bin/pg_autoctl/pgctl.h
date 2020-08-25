@@ -30,6 +30,7 @@
 
 bool pg_controldata(PostgresSetup *pgSetup, bool missing_ok);
 int config_find_pg_ctl(PostgresSetup *pgSetup);
+bool find_extension_control_file(const char *pg_ctl, const char *extName);
 char * pg_ctl_version(const char *pg_ctl_path);
 
 bool pg_add_auto_failover_default_settings(PostgresSetup *pgSetup,
