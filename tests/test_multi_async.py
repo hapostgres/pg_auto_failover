@@ -1,6 +1,7 @@
 import pgautofailover_utils as pgautofailover
 from nose.tools import raises, eq_
 import time
+import subprocess
 
 import os.path
 
@@ -19,6 +20,13 @@ def teardown_module():
 
 def test_000_create_monitor():
     global monitor
+
+    # test creating the monitor in an existing empty directory
+    p = subprocess.Popen(["sudo", "-E", '-u', os.getenv("USER"),
+                          'env', 'PATH=' + os.getenv("PATH"),
+                          "mkdir", "-p", "/tmp/multi_async/monitor"])
+    assert(p.wait() == 0)
+
     monitor = cluster.create_monitor("/tmp/multi_async/monitor")
     monitor.run()
     monitor.wait_until_pg_is_running()

@@ -73,7 +73,7 @@ monitor_pg_init(Monitor *monitor)
 	MonitorConfig *config = &(monitor->config);
 	PostgresSetup *pgSetup = &(config->pgSetup);
 
-	if (directory_exists(pgSetup->pgdata))
+	if (pg_setup_pgdata_exists(pgSetup))
 	{
 		PostgresSetup existingPgSetup = { 0 };
 		bool missing_pgdata_is_ok = true;
