@@ -1,6 +1,8 @@
 import pgautofailover_utils as pgautofailover
 from nose.tools import raises, eq_
 
+import time
+
 cluster = None
 monitor = None
 node1 = None
@@ -36,6 +38,9 @@ def test_001_init_primary():
 
     # we can also change the name directly in the configuration file
     node1.config_set("pg_autoctl.name", "a")
+
+    # wait until the reload signal has been processed before checking
+    time.sleep(2)
     eq_(node1.get_nodename(), "a")
 
 def test_002_stop_postgres():
