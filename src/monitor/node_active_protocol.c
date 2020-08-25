@@ -1329,6 +1329,31 @@ perform_promotion(PG_FUNCTION_ARGS)
 	}
 
 	/*
+	 * If the node is not a primary, it needs to be in the SECONDARY state.
+	 * When we call perform_failover() to implement the actual failover
+	 * orchestration, this condition is going to be checked again, but in a
+	 * different way.
+	 *
+	 * For instance, the target could be in MAINTENANCE and perform_failover
+	 * would still be able to implement a failover given another secondary node
+	 * being around.
+	 */
+	if (!IsCurrentState(currentNode, REPLICATION_STATE_SECONDARY))
+	{
+		/* return false: no promotion is happening */
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg(
+					 "cannot perform promotion: node %s in formation %s "
+					 "has reported state \"%s\" and is assigned state \"%s\", "
+					 "promotion can only be performed when "
+					 "in state \"secondary\".",
+					 nodeName, formationId,
+					 ReplicationStateGetName(currentNode->reportedState),
+					 ReplicationStateGetName(currentNode->goalState))));
+	}
+
+	/*
 	 * If we have only two nodes in the group, then perform a failover.
 	 */
 	groupNodesList =
