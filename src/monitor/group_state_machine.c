@@ -1397,11 +1397,11 @@ PromoteSelectedNode(AutoFailoverNode *selectedNode,
 	 * in the system then its candidate priority has been incremented by 100.
 	 * Now is the time to reset it.
 	 */
-	if (selectedNode->candidatePriority > 100)
+	if (selectedNode->candidatePriority > MAX_USER_DEFINED_CANDIDATE_PRIORITY)
 	{
 		char message[BUFSIZE] = { 0 };
 
-		selectedNode->candidatePriority -= 100;
+		selectedNode->candidatePriority -= MAX_USER_DEFINED_CANDIDATE_PRIORITY;
 
 		ReportAutoFailoverNodeReplicationSetting(
 			selectedNode->nodeId,

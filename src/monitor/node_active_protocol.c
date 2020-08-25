@@ -1320,6 +1320,11 @@ perform_promotion(PG_FUNCTION_ARGS)
 		IsCurrentState(currentNode, REPLICATION_STATE_PRIMARY))
 	{
 		/* return false: no promotion is happening */
+		ereport(NOTICE,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("cannot perform promotion: node %s in formation %s "
+						"is already a primary.",
+						nodeName, formationId)));
 		PG_RETURN_BOOL(false);
 	}
 
@@ -1363,7 +1368,7 @@ perform_promotion(PG_FUNCTION_ARGS)
 							nodeName, formationId)));
 		}
 
-		currentNode->candidatePriority += 100;
+		currentNode->candidatePriority += MAX_USER_DEFINED_CANDIDATE_PRIORITY;
 
 		ReportAutoFailoverNodeReplicationSetting(
 			currentNode->nodeId,
@@ -1732,12 +1737,14 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 		AutoFailoverNodeGroup(currentNode->formationId, currentNode->groupId);
 	nodesCount = list_length(nodesGroupList);
 
-	if (candidatePriority < 0 || candidatePriority > 100)
+	if (candidatePriority < 0 ||
+		candidatePriority > MAX_USER_DEFINED_CANDIDATE_PRIORITY)
 	{
 		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 						errmsg("invalid value for candidate_priority \"%d\" "
-							   "expected an integer value between 0 and 100",
-							   candidatePriority)));
+							   "expected an integer value between 0 and %d",
+							   candidatePriority,
+							   MAX_USER_DEFINED_CANDIDATE_PRIORITY)));
 	}
 
 	if (candidatePriority == 0)
