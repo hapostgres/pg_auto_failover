@@ -734,6 +734,30 @@ GroupListSyncStandbys(List *groupNodeList)
 
 
 /*
+ * CountSyncStandbys returns how many standby nodes have their
+ * replicationQuorum property set to true in the given groupNodeList.
+ */
+int
+CountSyncStandbys(List *groupNodeList)
+{
+	int count = 0;
+	ListCell *nodeCell = NULL;
+
+	foreach(nodeCell, groupNodeList)
+	{
+		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (node->replicationQuorum)
+		{
+			++count;
+		}
+	}
+
+	return count;
+}
+
+
+/*
  * AllNodesHaveSameCandidatePriority returns true when all the nodes in the
  * given list have the same candidate priority.
  */
@@ -754,53 +778,6 @@ AllNodesHaveSameCandidatePriority(List *groupNodeList)
 		}
 	}
 	return true;
-}
-
-
-/*
- * CountStandbyCandidates returns how many standby nodes are currently eligible
- * as failover candidates.
- */
-int
-CountStandbyCandidates(AutoFailoverNode *primaryNode, List *stateList)
-{
-	List *standbyNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
-	ListCell *nodeCell = NULL;
-	int candidateCount = 0;
-
-	foreach(nodeCell, standbyNodesGroupList)
-	{
-		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
-
-		if (node == NULL)
-		{
-			/* shouldn't happen */
-			ereport(ERROR,
-					(errmsg("BUG in CountStandbyCandidates: node is NULL")));
-			continue;
-		}
-
-		/* if a promotion is already in progress, game over */
-		if (IsBeingPromoted(node))
-		{
-			ereport(ERROR,
-					(errmsg("node %d (%s:%d) is already being promoted",
-							node->nodeId,
-							node->nodeHost,
-							node->nodePort)));
-		}
-
-		/* skip nodes if they are not a failover candidate */
-		if (!(IsStateIn(node->reportedState, stateList) &&
-			  IsStateIn(node->goalState, stateList)))
-		{
-			continue;
-		}
-
-		++candidateCount;
-	}
-
-	return candidateCount;
 }
 
 

@@ -714,7 +714,8 @@ class DataNode(PGNode):
         self.listen_flag = listen_flag
         self.formation = formation
 
-    def create(self, run=False, level='-v', name=None, host=None, port=None):
+    def create(self, run=False, level='-v', name=None, host=None, port=None,
+               candidatePriority=None, replicationQuorum=None):
         """
         Runs "pg_autoctl create"
         """
@@ -770,8 +771,16 @@ class DataNode(PGNode):
         if port:
             create_args += ["--pgport", port]
 
+        if candidatePriority:
+            create_args += ["--candidate-priority", candidatePriority]
+
+        if replicationQuorum is not None:
+            create_args += ["--replication-quorum", str(replicationQuorum)]
+
         if run:
             create_args += ['--run']
+
+        print("pg_autoctl %s" % " ".join(create_args))
 
         # when run is requested pg_autoctl does not terminate
         # therefore we do not wait for process to complete

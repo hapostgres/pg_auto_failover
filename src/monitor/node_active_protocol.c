@@ -221,16 +221,35 @@ register_node(PG_FUNCTION_ARGS)
 	}
 
 	/*
-	 * When adding a second node to a formation that has number_sync_standbys
-	 * set to zero (the default value for single node and single standby
-	 * formations), we switch the default value to 1 automatically.
+	 * When adding a second sync node to a formation that has
+	 * number_sync_standbys set to zero (the default value for single node and
+	 * single standby formations), we switch the default value to 1
+	 * automatically.
 	 */
-	if (formation->number_sync_standbys == 0)
+	if (pgAutoFailoverNode->goalState == REPLICATION_STATE_WAIT_STANDBY &&
+		formation->number_sync_standbys == 0)
 	{
-		List *allNodes = AllAutoFailoverNodes(formationId);
+		AutoFailoverNode *primaryNode =
+			GetPrimaryNodeInGroup(formationId, currentNodeState.groupId);
+		List *standbyNodesList = AutoFailoverOtherNodesList(primaryNode);
+		int syncStandbyNodeCount = CountSyncStandbys(standbyNodesList);
 
-		/* second standby to be registered */
-		if (list_length(allNodes) == 3)
+		/*
+		 * number_sync_standbys = 0 is a special case in our FSM, because we
+		 * have special handling of a missing standby then, switching to
+		 * wait_primary to disable synchronous replication when the standby is
+		 * not available.
+		 *
+		 * For other values (N) of number_sync_standbys, we require N+1 known
+		 * sync standby nodes, so that you can lose a standby at any point in
+		 * time and still accept writes.
+		 *
+		 * The default value for number_sync_standbys with two standby nodes is
+		 * 1. Because it was set to zero when adding the first standby, we need
+		 * to increment the value when adding a second standby node that
+		 * participates in the replication quorum (a "sync standby" node).
+		 */
+		if (syncStandbyNodeCount == 2)
 		{
 			char message[BUFSIZE] = { 0 };
 
@@ -247,9 +266,11 @@ register_node(PG_FUNCTION_ARGS)
 
 			LogAndNotifyMessage(
 				message, BUFSIZE,
-				"Setting number_sync_standbys to %d for formation %s.",
+				"Setting number_sync_standbys to %d for formation %s "
+				"now that we have %d/%d standby nodes set with replication-quorum.",
 				formation->number_sync_standbys,
-				formation->formationId);
+				formation->formationId,
+				syncStandbyNodeCount, list_length(standbyNodesList));
 		}
 	}
 
