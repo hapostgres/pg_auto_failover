@@ -662,7 +662,8 @@ FormationNumSyncStandbyIsValid(AutoFailoverFormation *formation,
 
 	/*
 	 * number_sync_standbys = 0 is a special case in our FSM, because we have
-	 * special handling of a missing standby then.
+	 * special handling of a missing standby then, switching to wait_primary to
+	 * disable synchronous replication when the standby is not available.
 	 *
 	 * For other values (N) of number_sync_standbys, we require N+1 known
 	 * standby nodes, so that you can lose a standby at any point in time and

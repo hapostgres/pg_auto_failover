@@ -758,7 +758,7 @@ CountSyncStandbys(List *groupNodeList)
 
 
 /*
- * allnodeshavesamecandidatepriority returns true when all the nodes in the
+ * AllNodesHaveSameCandidatePriority returns true when all the nodes in the
  * given list have the same candidate priority.
  */
 bool
