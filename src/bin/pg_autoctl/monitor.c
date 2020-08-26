@@ -1110,6 +1110,38 @@ monitor_count_groups(Monitor *monitor, char *formation, int *groupsCount)
 
 
 /*
+ * monitor_get_groupId_from_name returns the groupId that belongs to a node
+ * identified by name.
+ */
+bool
+monitor_get_groupId_from_name(Monitor *monitor, char *formation, char *name,
+							  int *groupId)
+{
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_INT, false };
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT groupid FROM pgautofailover.node "
+		"WHERE formationid = $1 and nodename = $2";
+	int paramCount = 2;
+	Oid paramTypes[2] = { TEXTOID, TEXTOID };
+	const char *paramValues[2] = { formation, name };
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &parseSingleValueResult))
+	{
+		log_error("Failed to retrieve groupId for node \"%s\" in formation \"%s\"",
+				  name, formation);
+		return false;
+	}
+
+	*groupId = context.intVal;
+
+	return true;
+}
+
+
+/*
  * monitor_perform_failover calls the pgautofailover.monitor_perform_failover
  * function on the monitor.
  */
@@ -1138,6 +1170,44 @@ monitor_perform_failover(Monitor *monitor, char *formation, int group)
 	}
 
 	return true;
+}
+
+
+/*
+ * monitor_perform_promotion calls the pgautofailover.perform_promotion
+ * function on the monitor.
+ */
+bool
+monitor_perform_promotion(Monitor *monitor, char *formation, char *name)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql = "SELECT pgautofailover.perform_promotion($1, $2)";
+	int paramCount = 2;
+	Oid paramTypes[2] = { TEXTOID, TEXTOID };
+	const char *paramValues[2] = { formation, name };
+
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BOOL, false };
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &parseSingleValueResult))
+	{
+		log_error("Failed to perform failover for node %s in formation %s",
+				  name, formation);
+		return false;
+	}
+
+	if (!context.parsedOk)
+	{
+		log_error(
+			"Failed to call pgautofailover.perform_promotion(\"%s\", \"%s\") "
+			"on the monitor: it returned an unexpected result. "
+			"See previous line for details.",
+			formation, name);
+		return false;
+	}
+
+	return context.boolVal;
 }
 
 
