@@ -1,6 +1,8 @@
 import pgautofailover_utils as pgautofailover
 from nose.tools import raises, eq_
 
+import time
+
 cluster = None
 monitor = None
 node1 = None
@@ -27,11 +29,19 @@ def test_001_init_primary():
     # the name of the node should be "%s_%d" % ("node", node1.nodeid)
     eq_(node1.get_nodename(), "node_%d" % node1.get_nodeid())
 
-    node1.set_metadata(name="a")
-    eq_(node1.get_nodename(), "a")
+    # we can change the name on the monitor with pg_autoctl set node metadata
+    node1.set_metadata(name="node a")
+    eq_(node1.get_nodename(), "node a")
 
     node1.run()
     assert node1.wait_until_state(target_state="single")
+
+    # we can also change the name directly in the configuration file
+    node1.config_set("pg_autoctl.name", "a")
+
+    # wait until the reload signal has been processed before checking
+    time.sleep(2)
+    eq_(node1.get_nodename(), "a")
 
 def test_002_stop_postgres():
     node1.stop_postgres()

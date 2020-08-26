@@ -661,8 +661,9 @@ cli_keeper_config_set(int argc, char **argv)
 		/* first write the new configuration settings to file */
 		if (!keeper_config_write_file(&config))
 		{
-			log_fatal("Failed to write the monitor's configuration file, "
-					  "see above");
+			log_fatal("Failed to write pg_autoctl configuration file \"%s\", "
+					  "see above for details",
+					  config.pathnames.config);
 			exit(EXIT_CODE_BAD_CONFIG);
 		}
 
