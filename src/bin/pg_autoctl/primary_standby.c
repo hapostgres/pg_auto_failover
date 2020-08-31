@@ -53,6 +53,7 @@ static void local_postgres_update_pg_failures_tracking(LocalPostgresServer *post
 	{ "log_connections", "off" }, \
 	{ "log_disconnections", "off" }, \
 	{ "log_lock_waits", "on" }, \
+	{ "password_encryption", "md5" }, \
 	{ "ssl", "off" }, \
 	{ "ssl_ca_file", "" }, \
 	{ "ssl_crl_file", "" }, \

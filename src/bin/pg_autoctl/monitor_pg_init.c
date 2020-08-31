@@ -47,6 +47,7 @@ GUC monitor_default_settings[] = {
 	{ "log_disconnections", "off" },
 	{ "log_lock_waits", "on" },
 	{ "log_statement", "ddl" },
+	{ "password_encryption", "md5" },
 	{ "ssl", "off" },
 	{ "ssl_ca_file", "" },
 	{ "ssl_crl_file", "" },
