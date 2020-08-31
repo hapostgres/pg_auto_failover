@@ -373,20 +373,12 @@ class PGNode:
 
     def restart_postgres(self):
         """
-        Restart the postgres configuration by running:
-          pg_ctl -D ${self.datadir} restart
+        Restart Postgres with pg_autoctl do service restart postgres
         """
-        restart_command = [shutil.which('pg_ctl'), '-D', self.datadir, 'restart']
-        with self.vnode.run(restart_command) as restart_proc:
-            out, err = self.cluster.communicate(restart_proc, COMMAND_TIMEOUT)
-            if restart_proc.returncode > 0:
-                print("restarting postgres for '%s' failed, out: %s\n, err: %s"
-                      % (self.vnode.address, out, err))
-                return False
-            elif restart_proc.returncode is None:
-                print("restarting postgres for '%s' timed out")
-                return False
-            return True
+        command = PGAutoCtl(self)
+
+        command.execute("service restart postgres",
+                        'do', 'service', 'restart', 'postgres')
 
     def pg_is_running(self, timeout=COMMAND_TIMEOUT):
         """
