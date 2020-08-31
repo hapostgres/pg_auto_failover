@@ -1704,7 +1704,7 @@ keeper_set_node_metadata(Keeper *keeper, KeeperConfig *oldConfig)
 		streq(oldConfig->hostname, config->hostname) &&
 		oldConfig->pgSetup.pgport == config->pgSetup.pgport)
 	{
-		log_warn("keeper_set_node_metadata: no changes");
+		log_trace("keeper_set_node_metadata: no changes");
 		return true;
 	}
 
