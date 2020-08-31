@@ -21,6 +21,7 @@
 
 static int cli_perform_failover_getopts(int argc, char **argv);
 static void cli_perform_failover(int argc, char **argv);
+static void cli_perform_promotion(int argc, char **argv);
 
 CommandLine perform_failover_command =
 	make_command("failover",
@@ -42,9 +43,20 @@ CommandLine perform_switchover_command =
 				 cli_perform_failover_getopts,
 				 cli_perform_failover);
 
+CommandLine perform_promotion_command =
+	make_command("promotion",
+				 "Perform a failover that promotes a target node",
+				 " [ --pgdata --formation --group ] ",
+				 "  --pgdata      path to data directory	 \n" \
+				 "  --formation   formation to target, defaults to 'default' \n" \
+				 "  --name        node name to target, defaults to current node \n",
+				 cli_get_name_getopts,
+				 cli_perform_promotion);
+
 CommandLine *perform_subcommands[] = {
 	&perform_failover_command,
 	&perform_switchover_command,
+	&perform_promotion_command,
 	NULL,
 };
 
@@ -302,5 +314,70 @@ cli_perform_failover(int argc, char **argv)
 	{
 		log_error("Failed to wait until a new primary has been notified");
 		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+}
+
+
+/*
+ * cli_perform_promotion calls the function pgautofailover.perform_promotion()
+ * on the monitor.
+ */
+static void
+cli_perform_promotion(int argc, char **argv)
+{
+	Keeper keeper = { 0 };
+	Monitor *monitor = &(keeper.monitor);
+	KeeperConfig *config = &(keeper.config);
+
+	int groupId = 0;
+
+	PgInstanceKind nodeKind = NODE_KIND_UNKNOWN;
+
+	char *channels[] = { "state", NULL };
+
+	keeper.config = keeperOptions;
+
+	if (!monitor_init_from_pgsetup(monitor, &keeper.config.pgSetup))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	/* grab --name from either the command options or the configuration file */
+	(void) cli_ensure_node_name(&keeper);
+
+	if (!monitor_get_groupId_from_name(monitor,
+									   config->formation,
+									   config->name,
+									   &groupId))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	/* start listening to the state changes before we call perform_promotion */
+	if (!pgsql_listen(&(monitor->pgsql), channels))
+	{
+		log_error("Failed to listen to state changes from the monitor");
+		exit(EXIT_CODE_MONITOR);
+	}
+
+	/*
+	 * pgautofailover.perform_promotion returns true when a promotion has been
+	 * triggered, and false when none was necessary. When an error occurs, it
+	 * reports an error condition, which is logged about already.
+	 */
+	if (monitor_perform_promotion(monitor, config->formation, config->name))
+	{
+		/* process state changes notification until we have a new primary */
+		if (!monitor_wait_until_some_node_reported_state(monitor,
+														 config->formation,
+														 groupId,
+														 nodeKind,
+														 PRIMARY_STATE))
+		{
+			log_error("Failed to wait until a new primary has been notified");
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
 	}
 }

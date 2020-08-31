@@ -800,7 +800,7 @@ reload_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 									missingPgdataIsOk,
 									pgIsNotRunningIsOk,
 									monitorDisabledIsOk) &&
-			keeper_config_accept_new(config, &newConfig))
+			keeper_config_accept_new(keeper, &newConfig))
 		{
 			/*
 			 * The keeper->config changed, not the keeper->postgres, but the

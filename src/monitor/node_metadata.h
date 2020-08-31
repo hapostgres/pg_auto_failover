@@ -82,6 +82,14 @@ typedef enum SyncState
 
 
 /*
+ * We restrict candidatePriority values in the range 0..100 to the users.
+ * Internally, we increment the candidatePriority (+= 100) when the
+ * perform_promotion API is used, in order to tweak the selection of the
+ * candidate.
+ */
+#define MAX_USER_DEFINED_CANDIDATE_PRIORITY 100
+
+/*
  * AutoFailoverNode represents a Postgres node that is being tracked by the
  * pg_auto_failover monitor.
  */

@@ -1749,3 +1749,219 @@ keeper_set_node_metadata(Keeper *keeper, KeeperConfig *oldConfig)
 
 	return true;
 }
+
+
+/*
+ * keeper_config_accept_new returns true when we can accept to RELOAD our
+ * current config into the new one that's been editing.
+ */
+bool
+keeper_config_accept_new(Keeper *keeper, KeeperConfig *newConfig)
+{
+	/* make a copy of the current values before changing them */
+	KeeperConfig oldConfig = keeper->config;
+	KeeperConfig *config = &(keeper->config);
+	bool monitorUpdateNeeded = false;
+
+	/* some elements are not supposed to change on a reload */
+	if (strneq(newConfig->pgSetup.pgdata, config->pgSetup.pgdata))
+	{
+		log_error("Attempt to change postgresql.pgdata from \"%s\" to \"%s\"",
+				  config->pgSetup.pgdata, newConfig->pgSetup.pgdata);
+		return false;
+	}
+
+	/*
+	 * Changing the monitor URI. Well it might just be about using a new IP
+	 * address, e.g. switching to IPv6, or maybe the monitor has moved to
+	 * another hostname.
+	 *
+	 * We don't check if we are still registered on the new monitor, only that
+	 * we can connect. The node_active calls are going to fail it we then
+	 * aren't registered anymore.
+	 */
+	if (strneq(newConfig->monitor_pguri, config->monitor_pguri))
+	{
+		Monitor monitor = { 0 };
+
+		if (!monitor_init(&monitor, newConfig->monitor_pguri))
+		{
+			log_fatal("Failed to contact the monitor because its URL is invalid, "
+					  "see above for details");
+			return false;
+		}
+
+		log_info("Reloading configuration: monitor uri is now \"%s\"; "
+				 "used to be \"%s\"",
+				 newConfig->monitor_pguri, config->monitor_pguri);
+
+		strlcpy(config->monitor_pguri, newConfig->monitor_pguri, MAXCONNINFO);
+	}
+
+	/*
+	 * We don't support changing formation, group, or hostname mid-flight: we
+	 * might have to register again to the monitor to make that work, and in
+	 * that case an admin should certainly be doing some offline steps, maybe
+	 * even having to `pg_autoctl create` all over again.
+	 */
+	if (strneq(newConfig->formation, config->formation))
+	{
+		log_warn("pg_autoctl doesn't know how to change formation at run-time, "
+				 "continuing with formation \"%s\".",
+				 config->formation);
+	}
+
+	/*
+	 * Changing the node name is okay, we need to sync the update to the
+	 * monitor though.
+	 */
+	if (strneq(newConfig->name, config->name))
+	{
+		monitorUpdateNeeded = true;
+
+		log_info("Reloading configuration: node name is now \"%s\"; "
+				 "used to be \"%s\"",
+				 newConfig->name, config->name);
+		strlcpy(config->name, newConfig->name, _POSIX_HOST_NAME_MAX);
+	}
+
+	/*
+	 * Changing the hostname seems ok, our registration is checked against
+	 * formation/groupId/nodeId anyway. The hostname is used so that other
+	 * nodes in the network may contact us. Again, it might be a change of
+	 * public IP address, e.g. switching to IPv6.
+	 *
+	 * Changing the hostname in the local configuration file requires also an
+	 * update of the metadata on the monitor.
+	 */
+	if (strneq(newConfig->hostname, config->hostname))
+	{
+		monitorUpdateNeeded = true;
+
+		log_info("Reloading configuration: hostname is now \"%s\"; "
+				 "used to be \"%s\"",
+				 newConfig->hostname, config->hostname);
+		strlcpy(config->hostname, newConfig->hostname, _POSIX_HOST_NAME_MAX);
+	}
+
+	if (monitorUpdateNeeded)
+	{
+		log_info("Node name or hostname have changed, updating the "
+				 "metadata on the monitor");
+
+		if (!keeper_set_node_metadata(keeper, &oldConfig))
+		{
+			log_error("Failed to update name and hostname on the monitor, "
+					  "see above for details");
+			return false;
+		}
+	}
+
+	/*
+	 * Changing the replication password? Sure.
+	 */
+	if (strneq(newConfig->replication_password, config->replication_password))
+	{
+		log_info("Reloading configuration: replication password has changed");
+
+		/* note: strneq checks args are not NULL, it's safe to proceed */
+		strlcpy(config->replication_password,
+				newConfig->replication_password,
+				MAXCONNINFO);
+	}
+
+	/*
+	 * Changing replication.maximum_backup_rate.
+	 */
+	if (strneq(newConfig->maximum_backup_rate, config->maximum_backup_rate))
+	{
+		log_info("Reloading configuration: "
+				 "replication.maximum_backup_rate is now \"%s\"; "
+				 "used to be \"%s\"",
+				 newConfig->maximum_backup_rate, config->maximum_backup_rate);
+
+		/* note: strneq checks args are not NULL, it's safe to proceed */
+		free(config->maximum_backup_rate);
+		config->maximum_backup_rate = strdup(newConfig->maximum_backup_rate);
+	}
+
+	/*
+	 * The backupDirectory can be changed online too.
+	 */
+	if (strneq(newConfig->backupDirectory, config->backupDirectory))
+	{
+		log_info("Reloading configuration: "
+				 "replication.backup_directory is now \"%s\"; "
+				 "used to be \"%s\"",
+				 newConfig->backupDirectory, config->backupDirectory);
+
+		strlcpy(config->backupDirectory, newConfig->backupDirectory, MAXPGPATH);
+	}
+
+	/*
+	 * And now the timeouts. Of course we support changing them at run-time.
+	 */
+	if (newConfig->network_partition_timeout != config->network_partition_timeout)
+	{
+		log_info("Reloading configuration: timeout.network_partition_timeout "
+				 "is now %d; used to be %d",
+				 newConfig->network_partition_timeout,
+				 config->network_partition_timeout);
+
+		config->network_partition_timeout =
+			newConfig->network_partition_timeout;
+	}
+
+	if (newConfig->prepare_promotion_catchup != config->prepare_promotion_catchup)
+	{
+		log_info("Reloading configuration: timeout.prepare_promotion_catchup "
+				 "is now %d; used to be %d",
+				 newConfig->prepare_promotion_catchup,
+				 config->prepare_promotion_catchup);
+
+		config->prepare_promotion_catchup =
+			newConfig->prepare_promotion_catchup;
+	}
+
+	if (newConfig->prepare_promotion_walreceiver != config->prepare_promotion_walreceiver)
+	{
+		log_info(
+			"Reloading configuration: timeout.prepare_promotion_walreceiver "
+			"is now %d; used to be %d",
+			newConfig->prepare_promotion_walreceiver,
+			config->prepare_promotion_walreceiver);
+
+		config->prepare_promotion_walreceiver =
+			newConfig->prepare_promotion_walreceiver;
+	}
+
+	if (newConfig->postgresql_restart_failure_timeout !=
+		config->postgresql_restart_failure_timeout)
+	{
+		log_info(
+			"Reloading configuration: timeout.postgresql_restart_failure_timeout "
+			"is now %d; used to be %d",
+			newConfig->postgresql_restart_failure_timeout,
+			config->postgresql_restart_failure_timeout);
+
+		config->postgresql_restart_failure_timeout =
+			newConfig->postgresql_restart_failure_timeout;
+	}
+
+	if (newConfig->postgresql_restart_failure_max_retries !=
+		config->postgresql_restart_failure_max_retries)
+	{
+		log_info(
+			"Reloading configuration: retries.postgresql_restart_failure_max_retries "
+			"is now %d; used to be %d",
+			newConfig->postgresql_restart_failure_max_retries,
+			config->postgresql_restart_failure_max_retries);
+
+		config->postgresql_restart_failure_max_retries =
+			newConfig->postgresql_restart_failure_max_retries;
+	}
+
+	/* we can change any SSL related setup options at runtime */
+	return config_accept_new_ssloptions(&(config->pgSetup),
+										&(newConfig->pgSetup));
+}

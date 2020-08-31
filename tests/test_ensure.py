@@ -2,6 +2,7 @@ import pgautofailover_utils as pgautofailover
 from nose.tools import *
 
 import time
+import os.path
 
 cluster = None
 node1 = None
@@ -65,3 +66,25 @@ def test_004_demoted():
     # postgres again before calling the transition function
     print("re-starting pg_autoctl on node1")
     assert node1.wait_until_state(target_state="secondary")
+
+def test_005_inject_error_in_node2():
+    assert node2.wait_until_state(target_state="primary")
+
+    # break Postgres setup on the primary, and restart Postgres: then
+    # Postgres keeps failing to start, and pg_autoctl still communicates
+    # with the monitor, which should still orchestrate a failover.
+    pgconf = os.path.join(node2.datadir, "postgresql.conf")
+
+    with open(pgconf, "a+") as f:
+        f.write("\n")
+        f.write("shared_preload_libraries='wrong_extension'\n")
+
+    node2.restart_postgres()
+
+    # the first step is the promotion of the other node as the new primary:
+    assert node1.wait_until_state("wait_primary")
+
+    # then when the failover happens, the new primary postgresql.conf gets
+    # copied over, and we get the nodes back to primary/secondary
+    assert node2.wait_until_state("secondary")
+    assert node1.wait_until_state("primary")

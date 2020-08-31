@@ -1392,7 +1392,36 @@ PromoteSelectedNode(AutoFailoverNode *selectedNode,
 	 * - if the selected candidate is lagging, we ask it to connect to a
 	 *   standby that has not been selected and grab missing WAL bytes from
 	 *   there
+	 *
+	 * When the perform_promotion API has been used to promote a specific node
+	 * in the system then its candidate priority has been incremented by 100.
+	 * Now is the time to reset it.
 	 */
+	if (selectedNode->candidatePriority > MAX_USER_DEFINED_CANDIDATE_PRIORITY)
+	{
+		char message[BUFSIZE] = { 0 };
+
+		selectedNode->candidatePriority -= MAX_USER_DEFINED_CANDIDATE_PRIORITY;
+
+		ReportAutoFailoverNodeReplicationSetting(
+			selectedNode->nodeId,
+			selectedNode->nodeHost,
+			selectedNode->nodePort,
+			selectedNode->candidatePriority,
+			selectedNode->replicationQuorum);
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Updating candidate priority back to %d for node %d \"%s\" (%s:%d)",
+			selectedNode->candidatePriority,
+			selectedNode->nodeId,
+			selectedNode->nodeName,
+			selectedNode->nodeHost,
+			selectedNode->nodePort);
+
+		NotifyStateChange(selectedNode, message);
+	}
+
 	if (selectedNode->reportedLSN == candidateList->mostAdvancedReportedLSN)
 	{
 		char message[BUFSIZE] = { 0 };
@@ -1545,11 +1574,6 @@ static bool
 IsUnhealthy(AutoFailoverNode *pgAutoFailoverNode)
 {
 	TimestampTz now = GetCurrentTimestamp();
-	List *pgIsNotRunningStateList =
-		list_make4_int(REPLICATION_STATE_DRAINING,
-					   REPLICATION_STATE_DEMOTED,
-					   REPLICATION_STATE_DEMOTE_TIMEOUT,
-					   REPLICATION_STATE_PREPARE_MAINTENANCE);
 
 	if (pgAutoFailoverNode == NULL)
 	{
@@ -1579,8 +1603,7 @@ IsUnhealthy(AutoFailoverNode *pgAutoFailoverNode)
 	 * If the keeper reports that PostgreSQL is not running, then the node
 	 * isn't Healthy.
 	 */
-	if (!pgAutoFailoverNode->pgIsRunning &&
-		IsStateIn(pgAutoFailoverNode->goalState, pgIsNotRunningStateList))
+	if (!pgAutoFailoverNode->pgIsRunning)
 	{
 		return true;
 	}
