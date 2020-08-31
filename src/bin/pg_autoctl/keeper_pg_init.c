@@ -710,6 +710,16 @@ create_database_and_extension(Keeper *keeper)
 	postgres->postgresSetup.ssl = initPostgres.postgresSetup.ssl;
 
 	/*
+	 * Ensure pg_stat_statements is installed in the server extension dir used
+	 * to create the Postgres instance
+	 */
+	if (!find_extension_control_file(config->pgSetup.pg_ctl, "pg_stat_statements"))
+	{
+		log_error("Cannot proceed without pg_stat_statements");
+		exit(EXIT_CODE_EXTENSION_MISSING);
+	}
+
+	/*
 	 * Add pg_autoctl PostgreSQL settings, including Citus extension in
 	 * shared_preload_libraries when dealing with a Citus worker or coordinator
 	 * node.
