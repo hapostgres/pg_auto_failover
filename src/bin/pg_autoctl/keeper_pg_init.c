@@ -710,13 +710,28 @@ create_database_and_extension(Keeper *keeper)
 	postgres->postgresSetup.ssl = initPostgres.postgresSetup.ssl;
 
 	/*
-	 * Ensure pg_stat_statements is installed in the server extension dir used
-	 * to create the Postgres instance
+	 * Ensure pg_stat_statements is available in the server extension dir used
+	 * to create the Postgres instance.
 	 */
-	if (!find_extension_control_file(config->pgSetup.pg_ctl, "pg_stat_statements"))
+	if (!find_extension_control_file(config->pgSetup.pg_ctl,
+									 "pg_stat_statements"))
 	{
-		log_error("Cannot proceed without pg_stat_statements");
+		log_error("Failed to find extension control file for "
+				  "\"pg_stat_statements\"");
 		exit(EXIT_CODE_EXTENSION_MISSING);
+	}
+
+	/*
+	 * Ensure citus extension is available in the server extension dir used to
+	 * create the Postgres instance.
+	 */
+	if (IS_CITUS_INSTANCE_KIND(postgres->pgKind))
+	{
+		if (!find_extension_control_file(config->pgSetup.pg_ctl, "citus"))
+		{
+			log_error("Failed to find extension control file for \"citus\"");
+			exit(EXIT_CODE_EXTENSION_MISSING);
+		}
 	}
 
 	/*
