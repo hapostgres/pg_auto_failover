@@ -116,7 +116,7 @@ following command::
 Inspecting and Editing Replication Settings
 -------------------------------------------
 
-When creating node it is possible to use the ``--candidate-priority`` and
+When creating a node it is possible to use the ``--candidate-priority`` and
 the ``--replication-quorum`` options to set the replication properties as
 required by your choice of Postgres architecture.
 
