@@ -64,4 +64,23 @@ bool keeper_refresh_other_nodes(Keeper *keeper, bool forceCacheInvalidation);
 bool keeper_set_node_metadata(Keeper *keeper, KeeperConfig *oldConfig);
 bool keeper_config_accept_new(Keeper *keeper, KeeperConfig *newConfig);
 
+
+/*
+ * When receiving a SIGHUP signal, the keeper knows how to reload its current
+ * in-memory configuration from the on-disk configuration file, and then apply
+ * changes. For this we use an array of functions that we call in order each
+ * time we are asked to reload.
+ *
+ * Because it's possible to edit the configuration file while pg_autoctl is not
+ * running, we also call the ReloadHook functions when entering our main loop
+ * the first time.
+ */
+typedef bool (*KeeperReloadFunction)(Keeper *keeper, bool firstLoop);
+
+/* src/bin/pg_autoctl/service_keeper.c */
+extern KeeperReloadFunction KeeperReloadHooks[];
+
+void keeper_call_reload_hooks(Keeper *keeper, bool firstLoop);
+bool keeper_reload_configuration(Keeper *keeper, bool firstLoop);
+
 #endif /* KEEPER_H */
