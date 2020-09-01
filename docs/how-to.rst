@@ -58,7 +58,7 @@ you can manually run the following command on every node::
 
   $ pg_autoctl run
 
-It is also possible (and recommanded) to integrate the pg_auto_failover
+It is also possible (and recommended) to integrate the pg_auto_failover
 service in your usual service management facility. When using **systemd**
 the following commands can be used to produce the unit file configuration
 required::
