@@ -43,7 +43,7 @@ The state of the system is blocked, what should I do?
 
 This question is a general case situation that is similar in nature to the
 previous situation, reached when adding a new standby to a group of Postgres
-nodes. Please check the same two elements: the monitor health cheks are
+nodes. Please check the same two elements: the monitor health checks are
 successful, and the ``pg_autoctl run`` command is running.
 
 The monitor is a SPOF in pg_auto_failover design, how should we handle that?
