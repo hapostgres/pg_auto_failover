@@ -49,6 +49,112 @@ successful, and the ``pg_autoctl run`` command is running.
 The monitor is a SPOF in pg_auto_failover design, how should we handle that?
 ----------------------------------------------------------------------------
 
+When using pg_auto_failover, the monitor is needed to make decisions and
+orchestrate changes in all the registered Postgres groups. Decisions are
+transmitted to the Postgres nodes by the monitor assigning nodes a goal
+state which is different from their current state.
+
+Consequences of the monitor being unavailable
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Nodes contact the monitor each second and call the node_active stored
+procedure, which returns a goal state that is possibly different from the
+current state.
+
+The monitor only assigns Postgres nodes with a new goal state when a cluster
+wide operation is needed. In practice, only the following operations require
+the monitor to assign a new goal state to a Postgres node:
+
+ - a new node is registered
+ - a failover needs to happen, either triggered automatically or manually
+ - a node is being put to maintenance
+ - a node replication setting is being changed.
+
+When the monitor node is not available, the ``pg_autoctl`` processes on the
+Postgres nodes will fail to contact the monitor every second, and log about
+this failure. Adding to that, no orchestration is possible.
+
+The Postgres streaming replication does not need the monitor to be available
+in order to deliver its service guarantees to your application, so your
+Postgres service is still available when the monitor is not available.
+
+To repair your installation after having lost a monitor, the following
+scenarios are to be considered.
+
+The monitor node can be brought up again without data having been lost
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+This is typically the case in Cloud Native environments such as Kubernetes,
+where you could have a service migrated to another pod and re-attached to
+its disk volume. This scenario is well supported by pg_auto_failover, and no
+intervention is needed.
+
+It is also possible to use synchronous archiving with the monitor so that
+it's possible to recovery from the current archives and continue operating
+without intervention on the Postgres nodes. This requires an archiving setup
+that uses synchronous replication so that any transaction committed on the
+monitor is known to have been replicated in your WAL archive.
+
+At the moment, you have to take care of that setup yourself. Here's a quick
+summary of what needs to be done:
+
+  1. Schedule base backups
+
+     Use ``pg_basebackup`` every once in a while to have a full copy of the
+     monitor Postgres database available.
+
+  2. Archive WAL files in a synchronous fashion
+
+     Use ``pg_receivewal --sync ...`` as a service to keep a WAL archive in
+     sync with the monitor Postgres instance at all time.
+
+  3. Prepare a recovery tool on top of your archiving strategy
+
+     Write a utility that knows how to create a new monitor node from your
+     most recent pg_basebackup copy and the WAL files copy.
+
+     Bonus points if that tool/script is tested at least once a day, so that
+     you avoid surprises on the unfortunate day that you actually need to
+     use it in production.
+
+A future version of pg_auto_failover will include this facility, but the
+current versions don't.
+
+The monitor node can only be built from scratch again
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If you don't have synchronous archiving for the monitor set-up, then you
+might not be able to restore a monitor database with the expected up-to-date
+node metadata. Specifically we need the nodes state to be in sync with what
+each ``pg_autoctl`` process has received the last time they could contact
+the monitor, before it has been unavailable.
+
+Baring that, the easiest way forward is to register your nodes again to the
+new monitor.
+
+.. caution::
+
+   At the moment we don't have support for this operation in any meaningful
+   way. We can't register the existing state on a new monitor, and we don't
+   have a command that registers again and is allowed to change the current
+   formation/groupid/nodeid of an existing system.
+
+   So the user would have to::
+
+     # drop node and ignore errors from the monitor
+     # this command stops Postgres
+     $ pg_autoctl drop node
+
+     # remove the left-over configuration file
+     $ rm ~/.config/pg_autoctl/path/to/pgdata/pg_autoctl.cfg
+
+     # register again
+     $ pg_autoctl create postgres
+
+
+The monitor is a SPOF in pg_auto_failover design, what's the road map like?
+---------------------------------------------------------------------------
+
 In the current pg_auto_failover design, there can be a single monitor node.
 That is a *Single Point of Failure*. When the monitor node is not available,
 there can be no state change in the system, which means that no failover can
