@@ -156,7 +156,7 @@ Implementing Maintenance Operations
 When a Postgres node must be taken offline for a maintenance operation, such
 as e.g. a kernel security upgrade or a minor Postgres update, it is best to
 make it so that the pg_auto_failover monitor knows about it. This prevents a
-failover to target a node that's schedule to not be available anymore, and
+failover to target a node that's scheduled to not be available anymore, and
 depending on your replication settings smoothly ensures that the primary
 node switches to async replication before Postgres is shut down on the
 secondary, avoiding write queries to be blocked.
