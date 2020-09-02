@@ -1,3 +1,31 @@
+### pg_auto_failover v1.4.0 (September 2, 2020) ###
+
+* Make pg_autoctl the parent process for Postgres [#265, #267, #284]
+* Allow adding a standby node from an exiting PGDATA directory [#276]
+* Improve output for many pg_autoctl commands, including JSON output
+* Fix pg_autoctl perform failover/switchover default --group [#289]
+* Fix pgautofailover extension upgrade script from 1.2 to 1.3 [#288]
+* Command pg_autoctl perform failover now waits until failover is done [#290]
+* Improve connection retry attempts [#299, #302]
+* Skip network DNS probes on pg_autoctl create monitor --skip-pg-hba [#298]
+* Fix pg_autoctl perform failover [#294, #307]
+* Implement pg_autoctl enable maintenance --allow-failover [#306]
+* Do not always require --ssl-ca-file for custom SSL [#303]
+* Review the registering process & transaction [#309]
+* Edit the HBA file as soon as a new node is added to the group [#311]
+* Check for monitor extension version every time we connect [#318]
+* Fix usage of replication slots to avoid a Postgres bug [#321]
+* Log and notify node health changes [#334]
+* Rename --nodename to --hostname, and nodename to nodehost [#273]
+* Implement a node name [#340]
+* Test primary_conninfo before starting Postgres standby [#350]
+* Allow multiple standbys in a Postgres group [#326]
+* Compute some memory/cpu Postgres tuning for the host [335]
+* Fix fatal auth pgautofailover monitor [#361]
+* Provide a better pg_auto_failover upgrade experience [#296]
+* Add support for building against Postgres 13 [#312]
+* Set default password encryption based on --auth [#383]
+
 ### pg_auto_failover v1.3.1 (May 7, 2020) ###
 
 * Fix build system for packaging extension files [#258]
