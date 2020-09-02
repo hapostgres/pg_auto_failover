@@ -184,7 +184,7 @@ again to the new running monitor::
   $ pg_autoctl drop node
 
   # register again, and restart Postgres on the node
-  $ pg_autoctl create postgres <--same options --as the --first time>
+  $ pg_autoctl create postgres --monitor <new monitor uri> <--same options --as the --first time>
 
   # when running with systemd, now start the systemd service again
   $ sudo systemctl start pgautofailover
