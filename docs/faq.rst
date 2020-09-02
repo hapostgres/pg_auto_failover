@@ -174,7 +174,7 @@ state on every node, and the ``pg_autoctl drop node`` command achieves that.
    This procedure includes a step where the Postgres service has to be
    stopped and started again.
 
-On every Postgres node, remove the local node state and register the node
+On every Postgres node, starting with the current primary, remove the local node state and register the node
 again to the new running monitor::
 
   # when running with systemd, stop the systemd service first
