@@ -3,7 +3,6 @@
 --
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
 
-
 DROP FUNCTION IF EXISTS pgautofailover.register_node(text,text,int,name,int,
                           pgautofailover.replication_state,text, int, bool);
 

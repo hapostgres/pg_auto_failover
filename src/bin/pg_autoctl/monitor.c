@@ -3793,6 +3793,21 @@ monitor_extension_update(Monitor *monitor, const char *targetVersion)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 
+	/*
+	 * When upgrading to version 1.4 we now require btree_gist. It does not
+	 * seem like Postgres knows how to handle changes in extension control
+	 * requires, so let's do that manually here.
+	 */
+	if (strcmp(targetVersion, "1.4") == 0)
+	{
+		if (!pgsql_create_extension(pgsql, "btree_gist"))
+		{
+			log_error("Failed to create extension \"btree_gist\", "
+					  "required by \"pgautofailover\" extension version 1.4");
+			return false;
+		}
+	}
+
 	return pgsql_alter_extension_update_to(pgsql,
 										   PG_AUTOCTL_MONITOR_EXTENSION_NAME,
 										   targetVersion);
