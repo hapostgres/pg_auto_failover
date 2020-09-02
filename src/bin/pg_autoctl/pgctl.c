@@ -566,6 +566,31 @@ prepare_guc_settings_from_pgsetup(const char *configFilePath,
 							  setting->name,
 							  pgSetup->listen_addresses);
 		}
+		else if (streq(setting->name, "password_encryption"))
+		{
+			/*
+			 * Set password_encryption if the authMethod is password based.
+			 */
+			if (streq(pgSetup->authMethod, "md5") ||
+				streq(pgSetup->authMethod, "scram-sha-256"))
+			{
+				appendPQExpBuffer(config, "%s = '%s'\n",
+								  setting->name,
+								  pgSetup->authMethod);
+			}
+			else if (streq(pgSetup->authMethod, "password"))
+			{
+				/*
+				 * The "password" auth method supports only the "md5" and
+				 * "scram-sha-256" password encryption settings.
+				 * Default the encryption setting to "scram-sha-256" in this
+				 * case, as it is the more secure alternative.
+				 */
+				appendPQExpBuffer(config, "%s = '%s'\n",
+								  setting->name,
+								  "scram-sha-256");
+			}
+		}
 		else if (streq(setting->name, "port"))
 		{
 			appendPQExpBuffer(config, "%s = %d\n",
