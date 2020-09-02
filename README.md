@@ -230,10 +230,10 @@ your `node_2`, new primary. We can have a look at the state now:
 
 ~~~
 $ pg_autoctl show state
-  Name |  Node |      Host:Port |     Current State |    Assigned State |               LSN | Health
--------+-------+----------------+-------------------+-------------------+-------------------+-------
-node_1 |     1 | localhost:5001 |         secondary |         secondary |         0/3001648 |    ✓
-node_2 |     2 | localhost:5002 |           primary |           primary |         0/3001648 |    ✓
+  Name |  Node |      Host:Port |       LSN | Reachable |       Current State |      Assigned State
+-------+-------+----------------+-----------+-----------+---------------------+--------------------
+node_1 |     1 | localhost:5001 | 0/3001648 |       yes |           secondary |           secondary
+node_2 |     2 | localhost:5002 | 0/3001648 |       yes |             primary |             primary
 ~~~
 
 ## Cleaning-up your local setup

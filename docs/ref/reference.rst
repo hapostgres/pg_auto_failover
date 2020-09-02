@@ -64,14 +64,12 @@ keeper::
       set    Set the value of a given pg_autoctl configuration variable
 
     pg_autoctl show
-      uri                        Show the postgres uri to use to connect to pg_auto_failover nodes
-      events                     Prints monitor's state of nodes in a given formation and group
-      state                      Prints monitor's state of nodes in a given formation and group
-      nodes                      Prints monitor nodes of nodes in a given formation and group
-      synchronous_standby_names  Prints synchronous_standby_names for a given group
-      standby-names              Prints synchronous_standby_names for a given group
-      file                       List pg_autoctl internal files (config, state, pid)
-      systemd                    Print systemd service file for this node
+      uri            Show the postgres uri to use to connect to pg_auto_failover nodes
+      events         Prints monitor's state of nodes in a given formation and group
+      state          Prints monitor's state of nodes in a given formation and group
+      standby-names  Prints synchronous_standby_names for a given group
+      file           List pg_autoctl internal files (config, state, pid)
+      systemd        Print systemd service file for this node
 
     pg_autoctl enable
       secondary    Enable secondary nodes on a formation
@@ -92,6 +90,7 @@ keeper::
       candidate-priority  get candidate property from the monitor
 
     pg_autoctl get formation
+      settings              get replication settings for a formation from the monitor
       number-sync-standbys  get number_sync_standbys for a formation from the monitor
 
     pg_autoctl set
@@ -109,6 +108,7 @@ keeper::
     pg_autoctl perform
       failover    Perform a failover for given formation and group
       switchover  Perform a switchover for given formation and group
+      promotion   Perform a failover that promotes a target node
 
 The first step consists of creating a pg_auto_failover monitor thanks to the
 command ``pg_autoctl create monitor``, and the command ``pg_autoctl show
@@ -669,7 +669,7 @@ Here's an example of such a configuration file::
   monitor = postgres://autoctl_node@localhost:5000/pg_auto_failover?sslmode=require
   formation = default
   group = 0
-  name = a
+  name = node_1
   hostname = localhost
   nodekind = standalone
 
@@ -891,6 +891,7 @@ through the following commands, only available in debug environments::
     candidate-priority  get candidate property from the monitor
 
   pg_autoctl get formation
+    settings              get replication settings for a formation from the monitor
     number-sync-standbys  get number_sync_standbys for a formation from the monitor
 
   pg_autoctl set
@@ -908,6 +909,7 @@ through the following commands, only available in debug environments::
   pg_autoctl perform
     failover    Perform a failover for given formation and group
     switchover  Perform a switchover for given formation and group
+    promotion   Perform a failover that promotes a target node
 
   pg_autoctl do
   + monitor  Query a pg_auto_failover monitor
