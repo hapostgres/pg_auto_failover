@@ -56,6 +56,10 @@ primary (goal: primary) and B secondary (goal: secondary).
 State reference
 ---------------
 
+The following diagram shows the pg_auto_failover State Machine. It's missing
+links to the ``single`` state, which can always been reached when removing
+all the other nodes.
+
 .. figure:: ./tikz/fsm.svg
    :alt: pg_auto_failover Finite State Machine diagram
 
@@ -220,10 +224,6 @@ The prepare_promotion state is meant to prepare the standby server to being
 promoted. This state allows synchronisation on the monitor, making sure that
 the primary has stopped Postgres before promoting the secondary, hence
 preventing split brain situations.
-
-The following diagram shows the pg_auto_failover State Machine. It's missing
-links to the ``single`` state, which can always been reached when removing
-all the other nodes.
 
 Report_LSN
 ^^^^^^^^^^

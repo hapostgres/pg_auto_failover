@@ -75,8 +75,8 @@ In more details:
 
 .. _architecture_setup:
 
-Postgres Architecture Setup
----------------------------
+Replication Settings and Postgres Architectures
+-----------------------------------------------
 
 The entire flexibility of pg_auto_failover can be leveraged with the
 following three replication settings:
@@ -166,6 +166,11 @@ between 0 (zero) and 100 (one hundred). The default value is 50. When the
 pg_auto_failover monitor decides to orchestrate a failover, it uses each
 node's candidate priority to pick the new primary node.
 
+When setting the candidate priority of a node down to zero, this node will
+never be selected to be promoted as the new primary when a failover is
+orchestrated by the monitor. The monitor will instead wait until another
+node registered is healthy and in a position to be promoted.
+
 To set this parameter to the value ``<n>``, use the following command::
 
   pg_autoctl set node candidate-priority <n>
@@ -181,11 +186,6 @@ failover mechanism. The candidate fetches the missing WAL bytes from one of the
 standby with the most advanced LSN position prior to being promoted. Postgres
 allows this operation thanks to cascading replication: any standby can be the
 upstream node for another standby.
-
-When setting the candidate priority of a node down to zero, this node will
-never be selected to be promoted as the new primary when a failover is
-orchestrated by the monitor. The monitor will instead wait until another
-node registered is healthy and in a position to be promoted.
 
 It is required at all times that at least two nodes have a non-zero candidate
 priority in any pg_auto_failover formation. Otherwise no failover is possible.

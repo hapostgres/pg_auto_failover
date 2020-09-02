@@ -8,6 +8,10 @@ pg_auto_failover comes with a PostgreSQL extension and a service:
   - The *pgautofailover* PostgreSQL extension implements the pg_auto_failover monitor.
   - The ``pg_autoctl`` command manages pg_auto_failover services.
 
+This section lists all the ``pg_autoctl`` commands, and we have a lot of
+them. For getting started with the essential set of commands, see the
+:ref:`how-to` section.
+
 pg_autoctl command list
 -----------------------
 

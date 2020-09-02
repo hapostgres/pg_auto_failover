@@ -28,8 +28,8 @@ pg_auto_failover consists of the following parts:
   - a pg_auto_failover keeper to operate your PostgreSQL instances, see `pg_autoctl run`
 
 Starting with pg_auto_failover version 1.4, it is possible to implement a
-production architecture with 3 Postgres nodes, for better data availability
-guarantees.
+production architecture with any number of Postgres nodes, for better data
+availability guarantees.
 
 ![pg_auto_failover Architecture with 3 nodes](docs/tikz/arch-multi-standby.svg?raw=true "pg_auto_failover Architecture with 3 nodes")
 

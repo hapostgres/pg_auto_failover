@@ -1,6 +1,12 @@
 Frequently Asked Questions
 ==========================
 
+Those questions have been asked in `GitHub issues`__ for the project by
+several people. If you have more questions, feel free to open a new issue,
+and your question and its answer might make it to this FAQ.
+
+__ https://github.com/citusdata/pg_auto_failover/issues_
+
 The secondary is blocked in the CATCHING_UP state, what should I do?
 --------------------------------------------------------------------
 
@@ -38,6 +44,32 @@ please check that the node is reachable from the monitor given its
 ``hostname`` and ``port`` known on the monitor, and check that the
 ``pg_autoctl run`` command is running for this node.
 
+When things are not obvious, the next step is to go read the logs. Both the
+output of the ``pg_autoctl`` command and the Postgres logs are relevant. See
+the :ref:`logs` question for details.
+
+.. _logs:
+
+Should I read the logs? Where are the logs?
+-------------------------------------------
+
+Yes. If anything seems strange to you, please do read the logs.
+
+As maintainers of the ``pg_autoctl`` tool, we can't foresee everything that
+may happen to your production environment. Still, a lot of efforts is spent
+on having a meaningful output. So when you're in a situation that's hard to
+understand, please make sure to read the ``pg_autoctl`` logs and the
+Postgres logs.
+
+When using systemd integration, the ``pg_autoctl`` logs are then handled
+entirely by the journal facility of systemd. Please then refer to
+``journalctl`` for viewing the logs.
+
+The Postgres logs are to be found in the ``$PGDATA/log`` directory with the
+default configuration deployed by ``pg_autoctl create ...``. When a custom
+Postgres setup is used, please refer to your actual setup to find Postgres
+logs.
+
 The state of the system is blocked, what should I do?
 -----------------------------------------------------
 
@@ -45,6 +77,10 @@ This question is a general case situation that is similar in nature to the
 previous situation, reached when adding a new standby to a group of Postgres
 nodes. Please check the same two elements: the monitor health checks are
 successful, and the ``pg_autoctl run`` command is running.
+
+When things are not obvious, the next step is to go read the logs. Both the
+output of the ``pg_autoctl`` command and the Postgres logs are relevant. See
+the :ref:`logs` question for details.
 
 The monitor is a SPOF in pg_auto_failover design, how should we handle that?
 ----------------------------------------------------------------------------
@@ -152,72 +188,3 @@ again to the new running monitor::
 
   # when running with systemd, now start the systemd service again
   $ sudo systemctl start pgautofailover
-
-
-The monitor is a SPOF in pg_auto_failover design, what's the road map like?
----------------------------------------------------------------------------
-
-In the current pg_auto_failover design, there can be a single monitor node.
-That is a *Single Point of Failure*. When the monitor node is not available,
-there can be no state change in the system, which means that no failover can
-happen.
-
-Losing a monitor node when the system is stable has no availability impact,
-as the Postgres streaming replication setup does not depend on the monitor
-to operate normally. If after losing the monitor node then another Postgres
-node becomes unavailable, then a failover will not happen as expected.
-
-So while the impact of losing a monitor node is limited, we still have a
-SPOF in current pg_auto_failover architecture. In the current version of
-things it is expected that a backup and recovery mechanism (PITR) be
-deployed alongside pg_auto_failover, and this should include the monitor.
-
-We have several ideas how to best address this situation in a future version
-of pg_auto_failover:
-
- - Resume operations on a new monitor.
-
-   At the moment, it's only possible to register new nodes on a Postgres
-   monitor when they are in very specific states: unknown, single, or
-   wait_standby.
-
-   We can implement a new protocol that allows registration of existing
-   nodes with their current state, whatever that is. Given such a protocol,
-   it would then be possible to replace the failed monitor by a new empty
-   instance, and have node register themselves again in their current
-   state, and the monitor would then be able to resume operations as
-   intended, with a minimal downtime.
-
- - Integrate Disaster Recovery capabilities for the monitor.
-
-   We are also thinking of integrating some Disaster Recovery facilities in
-   pg_auto_failover.
-
-   In most production setups, the PITR settings must be edited when a
-   failover occurs and a new primary node is elected, so pg_auto_failover
-   could integrate the necessary steps here, for instance.
-
-   With PITR solution in the scope of pg_auto_failover we can automate the
-   maintenance of a Disaster Recovery capability for the monitor itself.
-   Even with a manual procedure to replace a failed monitor, we would have
-   a much better answer to the current SPOF our design.
-
- - Implement a secondary monitor with manual failover.
-
-   In addition to managing a PITR and Disaster Recovery solution for the
-   monitor node, we could also integrate the management of a secondary node
-   for the monitor.
-
-   Because the question of “who monitors the monitor?” is recursive in
-   nature, we would implement a manual switchover capability to the monitor
-   node. Again, that would be an improvement over the current situation.
-
- - Design a distributed monitor system.
-
-   Finally, a distributed decision making architecture is in being studied
-   too. This would mean that 3 (or 5) monitor nodes are needed at all time,
-   and those nodes would use the RAFT protocol, or the PAXOS protocol, to
-   implement distributed consensus and membership management.
-
-   This solution introduces non-trivial complexities to the design of
-   pg_auto_failover, which is meant to be both simple and robust.
