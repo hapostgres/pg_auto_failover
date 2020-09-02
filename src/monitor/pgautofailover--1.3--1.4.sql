@@ -9,6 +9,9 @@ DROP FUNCTION IF EXISTS pgautofailover.register_node(text,text,int,name,int,
 DROP FUNCTION IF EXISTS pgautofailover.node_active(text,text,int,int,int,
                           pgautofailover.replication_state,bool,pg_lsn,text);
 
+DROP FUNCTION IF EXISTS pgautofailover.get_other_nodes
+                          (text,integer,pgautofailover.replication_state);
+
 DROP FUNCTION IF EXISTS pgautofailover.current_state(text);
 
 DROP FUNCTION IF EXISTS pgautofailover.current_state(text, int);
@@ -296,9 +299,6 @@ comment on function pgautofailover.get_nodes(text,int)
 grant execute on function pgautofailover.get_nodes(text,int)
    to autoctl_node;
 
-DROP FUNCTION pgautofailover.get_other_nodes(int);
-DROP FUNCTION pgautofailover.get_other_nodes(int,pgautofailover.replication_state);
-
 CREATE FUNCTION pgautofailover.get_other_nodes
  (
     IN nodeid           int,
@@ -529,9 +529,6 @@ $$;
 comment on function pgautofailover.last_events(text,int,int)
         is 'retrieve last COUNT events for given formation and group';
 
-
-DROP FUNCTION pgautofailover.current_state(text);
-DROP FUNCTION pgautofailover.current_state(text,int);
 
 CREATE FUNCTION pgautofailover.current_state
  (

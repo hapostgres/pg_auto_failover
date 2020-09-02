@@ -75,7 +75,16 @@ LoadNodeHealthList(void)
 		pgstat_report_activity(STATE_RUNNING, query.data);
 
 		spiStatus = SPI_execute(query.data, false, 0);
-		Assert(spiStatus == SPI_OK_SELECT);
+
+		/*
+		 * When we start the monitor during an upgrade (from 1.3 to 1.4), the
+		 * background worker might be reading the 1.3 pgautofailover catalogs
+		 * still, where the "nodehost" column does not exists.
+		 */
+		if (spiStatus != SPI_OK_SELECT)
+		{
+			return NIL;
+		}
 
 		oldContext = MemoryContextSwitchTo(upperContext);
 
