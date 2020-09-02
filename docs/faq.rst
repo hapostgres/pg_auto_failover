@@ -93,7 +93,7 @@ state which is different from their current state.
 Consequences of the monitor being unavailable
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Nodes contact the monitor each second and call the node_active stored
+Nodes contact the monitor each second and call the ``node_active`` stored
 procedure, which returns a goal state that is possibly different from the
 current state.
 
