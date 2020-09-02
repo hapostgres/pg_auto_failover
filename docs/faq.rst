@@ -126,7 +126,7 @@ its disk volume. This scenario is well supported by pg_auto_failover, and no
 intervention is needed.
 
 It is also possible to use synchronous archiving with the monitor so that
-it's possible to recovery from the current archives and continue operating
+it's possible to recover from the current archives and continue operating
 without intervention on the Postgres nodes. This requires an archiving setup
 that uses synchronous replication so that any transaction committed on the
 monitor is known to have been replicated in your WAL archive.
