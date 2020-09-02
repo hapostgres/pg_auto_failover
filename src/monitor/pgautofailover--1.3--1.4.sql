@@ -2,6 +2,7 @@
 -- extension update file from 1.3 to 1.4
 --
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
+\echo Use "CREATE EXTENSION pgautofailover" to load this file. \quit
 
 DROP FUNCTION IF EXISTS pgautofailover.register_node(text,text,int,name,int,
                           pgautofailover.replication_state,text, int, bool);
