@@ -253,6 +253,66 @@ config_find_pg_ctl(PostgresSetup *pgSetup)
 
 
 /*
+ * find_extension_control_file ensures that the extension is present in the
+ * given Postgres installation. This does the equivalent of:
+ * ls -l $(pg_config --sharedir)/extension/pg_stat_statements.control
+ */
+bool
+find_extension_control_file(const char *pg_ctl, const char *extName)
+{
+	char pg_config_path[MAXPGPATH] = { 0 };
+	char extension_path[MAXPGPATH] = { 0 };
+	char *share_dir;
+	char extension_control_file_name[MAXPGPATH] = { 0 };
+	char *lines[1];
+	Program prog;
+
+	log_debug("Checking if the %s extension is installed", extName);
+
+	path_in_same_directory(pg_ctl, "pg_config", pg_config_path);
+
+	prog = run_program(pg_config_path, "--sharedir", NULL);
+
+	if (prog.returnCode == 0)
+	{
+		if (!prog.stdOut)
+		{
+			log_error("Got empty output from pg_config --sharedir");
+			free_program(&prog);
+			return false;
+		}
+		if (splitLines(prog.stdOut, lines, 1) != 1)
+		{
+			log_error("Unable to parse output from pg_config --sharedir");
+			free_program(&prog);
+			return false;
+		}
+		share_dir = lines[0];
+
+		join_path_components(extension_path, share_dir, "extension");
+		sformat(extension_control_file_name, MAXPGPATH, "%s.control", extName);
+		join_path_components(extension_path, extension_path, extension_control_file_name);
+		if (!file_exists(extension_path))
+		{
+			log_error("Failed to find extension control file \"%s\"", extension_path);
+			free_program(&prog);
+			return false;
+		}
+	}
+	else
+	{
+		(void) log_program_output(prog, LOG_INFO, LOG_ERROR);
+		log_error("Failed to run \"%s\", see above for details",
+				  pg_config_path);
+		free_program(&prog);
+		return false;
+	}
+	free_program(&prog);
+	return true;
+}
+
+
+/*
  * pg_add_auto_failover_default_settings ensures the pg_auto_failover default
  * settings are included in postgresql.conf. For simplicity, this function
  * reads the whole contents of postgresql.conf into memory.
