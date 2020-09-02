@@ -129,27 +129,29 @@ node metadata. Specifically we need the nodes state to be in sync with what
 each ``pg_autoctl`` process has received the last time they could contact
 the monitor, before it has been unavailable.
 
-Baring that, the easiest way forward is to register your nodes again to the
-new monitor.
+Baring that, the way forward is to register your nodes again to the new
+monitor. To be able to register again, we need to have a clean initial local
+state on every node, and the ``pg_autoctl drop node`` command achieves that.
 
-.. caution::
+.. warning::
 
-   At the moment we don't have support for this operation in any meaningful
-   way. We can't register the existing state on a new monitor, and we don't
-   have a command that registers again and is allowed to change the current
-   formation/groupid/nodeid of an existing system.
+   This procedure includes a step where the Postgres service has to be
+   stopped and started again.
 
-   So the user would have to::
+On every Postgres node, remove the local node state and register the node
+again to the new running monitor::
 
-     # drop node and ignore errors from the monitor
-     # this command stops Postgres
-     $ pg_autoctl drop node
+  # when running with systemd, stop the systemd service first
+  $ sudo systemctl stop pgautofailover
 
-     # remove the left-over configuration file
-     $ rm ~/.config/pg_autoctl/path/to/pgdata/pg_autoctl.cfg
+  # drop node ignores connection error to the monitor, and stops Postgres
+  $ pg_autoctl drop node
 
-     # register again
-     $ pg_autoctl create postgres
+  # register again, and restart Postgres on the node
+  $ pg_autoctl create postgres <--same options --as the --first time>
+
+  # when running with systemd, now start the systemd service again
+  $ sudo systemctl start pgautofailover
 
 
 The monitor is a SPOF in pg_auto_failover design, what's the road map like?
