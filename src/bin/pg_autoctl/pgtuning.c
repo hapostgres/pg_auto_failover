@@ -11,6 +11,7 @@
 #include "pqexpbuffer.h"
 
 #include "config.h"
+#include "env_utils.h"
 #include "file_utils.h"
 #include "log.h"
 #include "pgctl.h"
@@ -83,12 +84,20 @@ pgtuning_prepare_guc_settings(GUC *settings, char *config, size_t size)
 			  sysInfo.ncpu,
 			  totalram);
 
-	tuning.autovacuum_max_workers = pgtuning_compute_max_workers(&sysInfo);
-
-	if (!pgtuning_compute_mem_settings(&sysInfo, &tuning))
+	/*
+	 * Disable Postgres tuning when running the unit test suite: we install our
+	 * default set of values rather than computing better values for the
+	 * current environment.
+	 */
+	if (!(env_exists(PG_AUTOCTL_DEBUG) && env_exists("PG_REGRESS_SOCK_DIR")))
 	{
-		log_error("Failed to compute memory settings, using defaults");
-		return false;
+		tuning.autovacuum_max_workers = pgtuning_compute_max_workers(&sysInfo);
+
+		if (!pgtuning_compute_mem_settings(&sysInfo, &tuning))
+		{
+			log_error("Failed to compute memory settings, using defaults");
+			return false;
+		}
 	}
 
 	(void) pgtuning_log_settings(&tuning, LOG_DEBUG);
@@ -262,44 +271,90 @@ pgtuning_edit_guc_settings(GUC *settings, DynamicTuning *tuning,
 
 		if (streq(setting->name, "autovacuum_max_workers"))
 		{
-			appendPQExpBuffer(contents, "%s = %d\n",
-							  setting->name,
-							  tuning->autovacuum_max_workers);
+			if (tuning->autovacuum_max_workers > 0)
+			{
+				appendPQExpBuffer(contents, "%s = %d\n",
+								  setting->name,
+								  tuning->autovacuum_max_workers);
+			}
+			else
+			{
+				appendPQExpBuffer(contents, "%s = %s\n",
+								  setting->name,
+								  setting->value);
+			}
 		}
 		else if (streq(setting->name, "shared_buffers"))
 		{
-			char pretty[BUFSIZE] = { 0 };
+			if (tuning->shared_buffers > 0)
+			{
+				char pretty[BUFSIZE] = { 0 };
 
-			(void) pretty_print_bytes(pretty, sizeof(pretty),
-									  tuning->shared_buffers);
+				(void) pretty_print_bytes(pretty, sizeof(pretty),
+										  tuning->shared_buffers);
 
-			appendPQExpBuffer(contents, "%s = '%s'\n", setting->name, pretty);
+				appendPQExpBuffer(contents, "%s = '%s'\n",
+								  setting->name, pretty);
+			}
+			else
+			{
+				appendPQExpBuffer(contents, "%s = %s\n",
+								  setting->name, setting->value);
+			}
 		}
 		else if (streq(setting->name, "work_mem"))
 		{
-			char pretty[BUFSIZE] = { 0 };
+			if (tuning->work_mem > 0)
+			{
+				char pretty[BUFSIZE] = { 0 };
 
-			(void) pretty_print_bytes(pretty, sizeof(pretty), tuning->work_mem);
+				(void) pretty_print_bytes(pretty, sizeof(pretty),
+										  tuning->work_mem);
 
-			appendPQExpBuffer(contents, "%s = '%s'\n", setting->name, pretty);
+				appendPQExpBuffer(contents, "%s = '%s'\n",
+								  setting->name, pretty);
+			}
+			else
+			{
+				appendPQExpBuffer(contents, "%s = %s\n",
+								  setting->name, setting->value);
+			}
 		}
 		else if (streq(setting->name, "maintenance_work_mem"))
 		{
-			char pretty[BUFSIZE] = { 0 };
+			if (tuning->maintenance_work_mem > 0)
+			{
+				char pretty[BUFSIZE] = { 0 };
 
-			(void) pretty_print_bytes(pretty, sizeof(pretty),
-									  tuning->maintenance_work_mem);
+				(void) pretty_print_bytes(pretty, sizeof(pretty),
+										  tuning->maintenance_work_mem);
 
-			appendPQExpBuffer(contents, "%s = '%s'\n", setting->name, pretty);
+				appendPQExpBuffer(contents, "%s = '%s'\n",
+								  setting->name, pretty);
+			}
+			else
+			{
+				appendPQExpBuffer(contents, "%s = %s\n",
+								  setting->name, setting->value);
+			}
 		}
 		else if (streq(setting->name, "effective_cache_size"))
 		{
-			char pretty[BUFSIZE] = { 0 };
+			if (tuning->effective_cache_size > 0)
+			{
+				char pretty[BUFSIZE] = { 0 };
 
-			(void) pretty_print_bytes(pretty, sizeof(pretty),
-									  tuning->effective_cache_size);
+				(void) pretty_print_bytes(pretty, sizeof(pretty),
+										  tuning->effective_cache_size);
 
-			appendPQExpBuffer(contents, "%s = '%s'\n", setting->name, pretty);
+				appendPQExpBuffer(contents, "%s = '%s'\n",
+								  setting->name, pretty);
+			}
+			else
+			{
+				appendPQExpBuffer(contents, "%s = %s\n",
+								  setting->name, setting->value);
+			}
 		}
 		else
 		{
