@@ -85,7 +85,7 @@ ALTER TABLE pgautofailover.node
 CREATE TABLE pgautofailover.node
  (
     formationid          text not null default 'default',
-    nodeid               bigserial,
+    nodeid               bigint not null DEFAULT nextval('pgautofailover.node_nodeid_seq'::regclass),
     groupid              int not null,
     nodename             text not null,
     nodehost             text not null,
@@ -157,7 +157,7 @@ ALTER TABLE pgautofailover.event
 
 CREATE TABLE pgautofailover.event
  (
-    eventid           bigserial not null,
+    eventid           bigint not null DEFAULT nextval('pgautofailover.event_eventid_seq'::regclass),
     eventtime         timestamptz not null default now(),
     formationid       text not null,
     nodeid            bigint not null,
@@ -213,6 +213,8 @@ $$;
 
 grant execute on function pgautofailover.set_node_system_identifier(bigint,bigint)
    to autoctl_node;
+
+DROP FUNCTION pgautofailover.set_node_nodename(bigint,text);
 
 CREATE FUNCTION pgautofailover.update_node_metadata
   (
@@ -299,6 +301,8 @@ comment on function pgautofailover.get_nodes(text,int)
 
 grant execute on function pgautofailover.get_nodes(text,int)
    to autoctl_node;
+
+DROP FUNCTION IF EXISTS pgautofailover.get_other_nodes (text,integer);
 
 CREATE FUNCTION pgautofailover.get_other_nodes
  (
