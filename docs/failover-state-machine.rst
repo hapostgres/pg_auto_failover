@@ -229,9 +229,9 @@ Report_LSN
 ^^^^^^^^^^
 
 The report_lsn state is assigned to standby nodes when a failover is
-orchestrated and there are several standby nodes. To select a candidate for
-promotion, pg_auto_failover first needs a fresh report of the current LSN
-position reached on each standby node.
+orchestrated and there are several standby nodes. In order to pick the
+furthest standby in the replication, pg_auto_failover first needs a fresh
+report of the current LSN position reached on each standby node.
 
 When a node reaches the report_lsn state, the replication stream is stopped, by
 restarting Postgres without a ``primary_conninfo``. This allows the primary

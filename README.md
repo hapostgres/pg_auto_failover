@@ -168,10 +168,10 @@ Once the building and installation is done, follow those steps:
 
      ~~~ bash
 	 $ pg_autoctl show state
-       Name |  Node |      Host:Port |     Current State |    Assigned State |               LSN | Health
-     -------+-------+----------------+-------------------+-------------------+-------------------+-------
-     node_1 |     1 | localhost:5001 |           primary |           primary |         0/30000D8 |    ✓
-     node_2 |     2 | localhost:5002 |         secondary |         secondary |         0/30000D8 |    ✓
+	   Name |  Node |      Host:Port |       LSN | Reachable |       Current State |      Assigned State
+     -------+-------+----------------+-----------+-----------+---------------------+--------------------
+     node_1 |     1 | localhost:5001 | 0/30000D8 |       yes |             primary |             primary
+     node_2 |     2 | localhost:5002 | 0/30000D8 |       yes |           secondary |           secondary
      ~~~
 
 That's it! You now have a running pg_auto_failover setup with two PostgreSQL nodes

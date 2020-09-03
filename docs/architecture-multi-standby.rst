@@ -148,7 +148,9 @@ been set to true. This means that asynchronous replication will be used for
 nodes where ``replication-quorum`` is set to ``false``.
 
 It is possible to force asynchronous replication globally by setting
-replication quorum to false on all the standby nodes in a formation.
+replication quorum to false on all the nodes in a formation. Remember that
+failovers will happen, and thus to set your replication settings on the
+current primary node too when needed: it is going to be a standby later.
 
 To set this parameter to either true or false, use one of the following
 commands::
@@ -249,8 +251,8 @@ nodes registered in a group. Then the node with the highest candidate
 priority is selected, as detailed above in the :ref:`candidate_priority`
 section.
 
-Architectures with three standby nodes
---------------------------------------
+Sample architectures with three standby nodes
+---------------------------------------------
 
 When setting the three parameters above, it's possible to design very
 different Postgres architectures for your production needs.
@@ -285,8 +287,8 @@ With this architecture diagram, here's the summary that we obtain::
        node |  node_C |        candidate priority | 50
        node |  node_D |        candidate priority | 50
 
-Architectures with three standby nodes, one async
--------------------------------------------------
+Sample architecture with three standby nodes, one async
+-------------------------------------------------------
 
 .. figure:: ./tikz/arch-three-standby-one-async.svg
    :alt: pg_auto_failover architecture with three standby nodes, one async
