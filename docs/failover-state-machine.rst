@@ -1,5 +1,5 @@
-The pg_auto_failover Finite State Machine
-=========================================
+Failover State Machine
+======================
 
 Introduction
 ------------
@@ -56,10 +56,17 @@ primary (goal: primary) and B secondary (goal: secondary).
 State reference
 ---------------
 
-For a graph of the states and their transitions, see
-:ref:`state_machine_diagram`.
+The following diagram shows the pg_auto_failover State Machine. It's missing
+links to the ``single`` state, which can always been reached when removing
+all the other nodes.
 
-**Init**
+.. figure:: ./tikz/fsm.svg
+   :alt: pg_auto_failover Finite State Machine diagram
+
+   pg_auto_failover Finite State Machine diagram
+
+Init
+^^^^
 
 A node is assigned the "init" state when it is first registered with
 the monitor. Nothing is known about the node at this point beyond its
@@ -67,14 +74,18 @@ existence.  If no other node has been registered with the monitor for
 the same formation and group ID then this node is assigned a goal state
 of "single." Otherwise the node has the goal state of "wait_standby."
 
-**Single**
+Single
+^^^^^^
 
 There is only one node in the group. It behaves as a regular
 PostgreSQL instance, with no high availability and no failover. If the
 administrator removes a node the other node will revert to the single
 state.
 
-**Wait_primary**
+.. _wait_primary:
+
+Wait_primary
+^^^^^^^^^^^^
 
 Applied to a node intended to be the primary but not yet in that
 position.  The primary-to-be at this point knows the secondary's node
@@ -87,7 +98,16 @@ becoming unhealthy (bad). In the latter case, during the transition from
 primary to wait_primary, the primary node's keeper disables synchronous
 replication on the node. It also cancels currently blocked queries.
 
-**Primary**
+Join_primary
+^^^^^^^^^^^^
+
+Applied to a primary node when another standby is joining the group. This
+allows the primary node to apply necessary changes to its HBA setup before
+allowing the new node joining the system to run the ``pg_basebackup``
+command.
+
+Primary
+^^^^^^^
 
 A healthy secondary node exists and has caught up with WAL
 replication.  Specifically, the keeper reports the primary state
@@ -101,12 +121,14 @@ During the transition from wait_primary to primary, the keeper also
 enables synchronous replication. This means that after a failover the
 secondary will be fully up to date.
 
-**Wait_standby**
+Wait_standby
+^^^^^^^^^^^^
 
 Monitor decides this node is a standby. Node must wait until the primary
 has authorized it to connect and setup hot standby replication.
 
-**Catchingup**
+Catchingup
+^^^^^^^^^^
 
 The monitor assigns catchingup to the standby node when the primary
 is ready for a replication connection (pg_hba.conf has been properly
@@ -116,13 +138,15 @@ The standby node keeper runs pg_basebackup, connecting to the primary's
 hostname and port. The keeper then edits recovery.conf and starts
 PostgreSQL in hot standby node.
 
-**Secondary**
+Secondary
+^^^^^^^^^
 
 A node with this state is acting as a hot standby for the primary, and
 is up to date with the WAL log there. In particular, it is within 16MB
 or 1 WAL segment of the primary.
 
-**Maintenance**
+Maintenance
+^^^^^^^^^^^
 
 The cluster administrator can manually move a secondary into the
 maintenance state to gracefully take it offline. The primary will then
@@ -131,7 +155,8 @@ secondary will be online to accept writes. When the old primary reaches
 the wait_primary state then the secondary is safe to take offline with
 minimal consequences.
 
-**Prepare_maintenance**
+Prepare_maintenance
+^^^^^^^^^^^^^^^^^^^
 
 The cluster administrator can manually move a primary node into the
 maintenance state to gracefully take it offline. The primary then
@@ -139,7 +164,8 @@ transitions to the prepare_maintenance state to make sure the secondary is
 not missing any writes. In the prepare_maintenance state, the primary shuts
 down.
 
-**Wait_maintenance**
+Wait_maintenance
+^^^^^^^^^^^^^^^^
 
 The custer administrator can manually move a secondary into the maintenance
 state to gracefully take it offline. Before reaching the maintenance state
@@ -147,13 +173,19 @@ though, we want to switch the primary node to asynchronous replication, in
 order to avoid writes being blocked. In the state wait_maintenance the
 standby waits until the primary has reached wait_primary.
 
-**Draining**
+Draining
+^^^^^^^^
 
 A state between primary and demoted where replication buffers finish
 flushing. A draining node will not accept new client writes, but will
 continue to send existing data to the secondary.
 
-**Demoted**
+To implement that with Postgres we actually stop the service. When stopping,
+Postgres ensures that the current replication buffers are flushed correctly
+to synchronous standbys.
+
+Demoted
+^^^^^^^
 
 The primary keeper or its database were unresponsive past a certain
 threshold. The monitor assigns demoted state to the primary to avoid
@@ -162,7 +194,8 @@ communicate with each other and both accept client writes.
 
 In that state the keeper stops PostgreSQL and prevents it from running.
 
-**Demote_timeout**
+Demote_timeout
+^^^^^^^^^^^^^^
 
 If the monitor assigns the primary a demoted goal state but the primary
 keeper doesn't acknowledge transitioning to that state within a timeout
@@ -171,7 +204,8 @@ window, then the monitor assigns demote_timeout to the primary.
 Most commonly may happen when the primary machine goes silent. The
 keeper is not reporting to the monitor.
 
-**Stop_replication**
+Stop_replication
+^^^^^^^^^^^^^^^^
 
 The stop_replication state is meant to ensure that the primary goes
 to the demoted state before the standby goes to single and accepts
@@ -183,9 +217,79 @@ For safety, when the primary fails to contact the monitor and fails
 to see the pg_auto_failover connection in pg_stat_replication, then it goes to
 the demoted state of its own accord.
 
-**Prepare_promotion**
+Prepare_promotion
+^^^^^^^^^^^^^^^^^
 
 The prepare_promotion state is meant to prepare the standby server to being
 promoted. This state allows synchronisation on the monitor, making sure that
 the primary has stopped Postgres before promoting the secondary, hence
 preventing split brain situations.
+
+Report_LSN
+^^^^^^^^^^
+
+The report_lsn state is assigned to standby nodes when a failover is
+orchestrated and there are several standby nodes. In order to pick the
+furthest standby in the replication, pg_auto_failover first needs a fresh
+report of the current LSN position reached on each standby node.
+
+When a node reaches the report_lsn state, the replication stream is stopped, by
+restarting Postgres without a ``primary_conninfo``. This allows the primary
+node to detect :ref:`network_partitions`, i.e. when the primary can't connect
+to the monitor and there's no standby listed in ``pg_stat_replication``.
+
+Fast_forward
+^^^^^^^^^^^^
+
+The fast_forward state is assigned to the selected promotion candidate
+during a failover when it won the election thanks to the candidate priority
+settings, but the selected node is not the most advanced standby node as
+reported in the report_lsn state.
+
+Missing WAL bytes are fetched from one of the most advanced standby nodes by
+using Postgres cascading replication features: it is possible to use any
+standby node in the ``primary_conninfo``.
+
+Failover logic
+--------------
+
+This section needs to be expanded further, but below is the failover state
+machine for each node that is implemented by the monitor:
+
+.. figure:: ./fsm/node-state-machine.png
+   :scale: 30%
+   :alt: Node state machine
+
+   Node state machine
+
+Since the state machines of the data nodes always move in tandem, a pair
+(group) of data nodes also implicitly has the following state machine:
+
+.. figure:: ./fsm/group-state-machine.png
+   :scale: 40%
+   :alt: Group state machine
+
+   Group state machine
+
+.. raw:: latex
+
+    \newpage
+
+.. _state_machine_diagram:
+
+pg_auto_failover keeper's State Machine
+---------------------------------------
+
+When built in TEST mode, it is then possible to use the following command to
+get a visual representation of the Keeper's Finite State Machine::
+
+  $ PG_AUTOCTL_DEBUG=1 pg_autoctl do fsm gv | dot -Tsvg > fsm.svg
+
+The `dot` program is part of the Graphviz suite and produces the following
+output:
+
+.. figure:: ./fsm.png
+   :scale: 35%
+   :alt: Keeper state machine
+
+   Keeper State Machine

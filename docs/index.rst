@@ -11,15 +11,18 @@ Welcome to pg_auto_failover's documentation!
    :caption: Contents:
 
    intro
+   how-to
    tutorial
    architecture
+   architecture-multi-standby
+   failover-state-machine
    fault-tolerance
    install
    security
    ref/reference
    ref/configuration
    operations
-   fsm
+   faq
 
 ..
    Indices and tables

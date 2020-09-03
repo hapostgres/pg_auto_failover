@@ -28,6 +28,9 @@ nodestatePrepareHeaders(CurrentNodeStateArray *nodesArray,
 	nodesArray->headers.maxNameSize = 4;  /* "Name" */
 	nodesArray->headers.maxHostSize = 10; /* "Host:Port" */
 	nodesArray->headers.maxNodeSize = 5;  /* "Node" */
+	nodesArray->headers.maxLSNSize = 3;   /* "LSN" */
+	nodesArray->headers.maxStateSize = MAX_NODE_STATE_LEN;
+	nodesArray->headers.maxHealthSize = strlen("Reachable");
 
 	/*
 	 * Dynamically adjust our display output to the length of the longer

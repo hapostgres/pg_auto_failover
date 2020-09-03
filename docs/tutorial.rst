@@ -1,3 +1,5 @@
+.. _tutorial:
+
 pg_auto_failover Tutorial
 =========================
 

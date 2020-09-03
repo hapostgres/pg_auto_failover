@@ -824,18 +824,24 @@ union all
 
 union all
 
+(
   -- context: node, one entry per node in the formation
   select 'node', node.groupid, node.nodeid, node.nodename,
          'replication quorum', cast(node.replicationquorum as text)
     from pgautofailover.node as node
    where node.formationid = formation_id
+order by nodeid
+)
 
 union all
 
+(
   select 'node', node.groupid, node.nodeid, node.nodename,
          'candidate priority', cast(node.candidatepriority as text)
     from pgautofailover.node as node
-   where node.formationid = formation_id;
+   where node.formationid = formation_id
+order by nodeid
+)
 $$;
 
 comment on function pgautofailover.formation_settings(text)

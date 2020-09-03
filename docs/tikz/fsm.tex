@@ -1,0 +1,101 @@
+\documentclass[border=10pt,12pt,convert={density=600,outext=.png}]{standalone}
+
+\usepackage{tikz}
+\usetikzlibrary{external}
+\usetikzlibrary{backgrounds}
+\usetikzlibrary {graphs,graphdrawing}
+\usegdlibrary {force,circular,layered,trees,routing}
+
+\begin{document}
+
+\begin{tikzpicture} [rounded corners]
+ %%\graph [layered layout, sibling distance=8mm, level distance=8mm]
+ %% \graph [simple necklace layout, node distance=4mm, nodes={circle,draw}]
+  %% \graph [simple necklace layout, node distance=4mm]
+
+ %%\draw [help lines] (-10,0) grid (10,20);
+
+  
+ \graph [
+   tree layout,
+   grow=right,
+   sibling distance=1.5cm,
+   level sep=1em,
+   %% spring electrical layout,
+   %% node distance=2.5cm,
+   %% convergence tolerance=0.01,
+   %% downsize ratio=0.25,
+   %% spring constant=0.1,
+   %% cooling factor=0.9,
+   %% coarsen=true,
+   %% iterations=2000,
+   nodes={text height=.7em, text depth=.2em,
+     draw=black!20, thick, fill=blue!20, font=\footnotesize}]
+        {
+          init [circle,draw,x=-10,y=10,color=white,fill=black!70] -> single [circle,draw=black,color=white,fill=black!50];
+          init -> "wait standby" [fill=violet!30];
+          single -> "wait primary" ;
+          "wait primary" -> primary [circle,draw=black,circle];
+          "join primary" -> primary;
+          "wait standby" -> "catching up" [fill=violet!30];
+          "catching up" -> secondary [circle,draw=black,circle,fill=violet!30];
+          primary -> "join primary" ;
+          primary -> "wait primary" ;
+          
+          primary -> draining [fill=red!30];
+          draining -> demoted [fill=red!30];
+          primary -> demoted ;
+          primary -> "demote timeout" [fill=red!30];
+          "join primary" -> draining ;
+          "join primary" -> demoted ;
+          "join primary" -> "demote timeout" ;
+          draining -> "demote timeout" ;
+          "demote timeout" -> demoted ;
+
+          primary -> "apply settings" [fill=green!20];
+          "apply settings" -> primary ;
+          "apply settings" -> draining ;
+          "apply settings" -> demoted ;
+          "apply settings" -> "demote timeout" ; 
+          "apply settings" -> primary ;
+
+           primary -> "prepare maintenance" [fill=blue!10];
+           "prepare maintenance" -> maintenance [fill=black!20];
+           secondary -> "wait maintenance" [fill=violet!20];
+           "catching up" -> "wait maintenance" ;
+           "wait maintenance" -> maintenance ;
+           maintenance -> "catching up" ;
+
+           secondary -> "catching up" ;
+           secondary -> "prepare promotion" [fill=violet!30];
+           "catching up" -> "prepare promotion" ;
+           "prepare promotion" -> "stop replication" [fill=violet!30];
+           "stop replication" -> "wait primary" ;
+           "prepare promotion" -> "wait primary" ;
+           "demote timeout" -> primary ;
+           demoted -> "catching up" ;
+           secondary -> "report LSN" [fill=violet!30];
+           "catching up" -> "report LSN" ;
+           "report LSN" -> "prepare promotion" ;
+           "report LSN" -> "fast forward" [fill=violet!30];
+           "fast forward" -> "prepare promotion" ;
+           "report LSN" -> "join secondary" [fill=violet!30];
+           "join secondary" -> secondary ;
+
+           %% primary -> single ;
+           %% "wait primary" -> single ;
+           %% "join primary" -> single ;
+           %% demoted -> single ;
+           %% "demote timeout" -> single ;
+           %% draining -> single ;
+           %% secondary -> single ;
+           %% "catching up" -> single ;
+           %% "prepare promotion" -> single ;
+           %% "stop replication" -> single ;
+
+        };
+\end{tikzpicture}
+        
+\end{document}
+
+
