@@ -546,7 +546,18 @@ wait_until_primary_is_ready(Keeper *keeper,
 		}
 		else
 		{
-			sleep(PG_AUTOCTL_KEEPER_SLEEP_TIME);
+			Monitor *monitor = &(keeper->monitor);
+			KeeperStateData *keeperState = &(keeper->state);
+			int timeoutMs = PG_AUTOCTL_KEEPER_SLEEP_TIME * 1000;
+
+			bool groupStateHasChanged = false;
+
+			(void) monitor_wait_for_state_change(monitor,
+												 keeper->config.formation,
+												 keeperState->current_group,
+												 keeperState->current_node_id,
+												 timeoutMs,
+												 &groupStateHasChanged);
 		}
 
 		if (!monitor_node_active(&(keeper->monitor),

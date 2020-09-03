@@ -252,6 +252,7 @@ service_keeper_node_active_init(Keeper *keeper)
 bool
 keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 {
+	Monitor *monitor = &(keeper->monitor);
 	KeeperConfig *config = &(keeper->config);
 	KeeperStateData *keeperState = &(keeper->state);
 	LocalPostgresServer *postgres = &(keeper->postgres);
@@ -265,12 +266,43 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 
 	log_debug("pg_autoctl service is starting");
 
+	/* setup our monitor client connection with our notification handler */
+	(void) monitor_setup_notifications(monitor, keeperState->current_group);
+
 	while (keepRunning)
 	{
 		bool couldContactMonitorThisRound = false;
 
 		bool needStateChange = false;
 		bool transitionFailed = false;
+
+		/*
+		 * If we're in a stable state (current state and goal state are the
+		 * same, and this didn't change in the previous loop), then we can
+		 * sleep for a while. As the monitor notifies every state change, we
+		 * can also interrupt our sleep as soon as we get the hint.
+		 */
+		if (doSleep)
+		{
+			int timeoutMs = PG_AUTOCTL_KEEPER_SLEEP_TIME * 1000;
+
+			bool groupStateHasChanged = false;
+
+			(void) monitor_wait_for_state_change(monitor,
+												 config->formation,
+												 keeperState->current_group,
+												 keeperState->current_node_id,
+												 timeoutMs,
+												 &groupStateHasChanged);
+
+			/* when no state change has been notified, close the connection */
+			if (!groupStateHasChanged)
+			{
+				pgsql_finish(&(keeper->monitor.pgsql));
+			}
+		}
+
+		doSleep = true;
 
 		/*
 		 * Handle signals.
@@ -292,13 +324,6 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		{
 			break;
 		}
-
-		if (doSleep)
-		{
-			sleep(PG_AUTOCTL_KEEPER_SLEEP_TIME);
-		}
-
-		doSleep = true;
 
 		/* Check that we still own our PID file, or quit now */
 		(void) check_pidfile(config->pathnames.pid, start_pid);
@@ -457,7 +482,6 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 
 		/* now is a good time to make sure we're closing our connections */
 		pgsql_finish(pgsql);
-		pgsql_finish(&(keeper->monitor.pgsql));
 
 		CHECK_FOR_FAST_SHUTDOWN;
 
@@ -470,7 +494,8 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 			transitionFailed = true;
 		}
 
-		if (needStateChange && !transitionFailed)
+		if ((needStateChange || monitor_has_received_notifications(monitor)) &&
+			!transitionFailed)
 		{
 			/* cycle faster if we made a state transition */
 			doSleep = false;
@@ -645,6 +670,13 @@ keeper_node_active(Keeper *keeper)
 	 */
 	keeperState->last_monitor_contact = now;
 	keeperState->assigned_role = assignedState.state;
+
+	if (keeperState->assigned_role != keeperState->current_role)
+	{
+		log_debug("keeper_node_active: %s ➜ %s",
+				  NodeStateToString(keeperState->current_role),
+				  NodeStateToString(keeperState->assigned_role));
+	}
 
 	/* maybe update our cached list of other nodes */
 	if (!keeper_refresh_other_nodes(keeper, forceCacheInvalidation))

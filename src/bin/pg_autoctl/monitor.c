@@ -151,6 +151,15 @@ typedef struct WaitUntilStateNotificationContext
 	bool firstLoop;
 } WaitUntilStateNotificationContext;
 
+
+typedef struct WaitForStateChangeNotificationContext
+{
+	char *formation;
+	int groupId;
+	int nodeId;
+	bool stateHasChanged;
+} WaitForStateChangeNotificationContext;
+
 static bool monitor_process_notifications(Monitor *monitor,
 										  int timeoutMs,
 										  char *channels[],
@@ -171,6 +180,68 @@ monitor_init(Monitor *monitor, char *url)
 	{
 		/* URL must be invalid, pgsql_init logged an error */
 		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * monitor_setup_notifications sets the monitor Postgres client structure to
+ * enable notification processing for a given groupId.
+ */
+void
+monitor_setup_notifications(Monitor *monitor, int groupId)
+{
+	monitor->pgsql.notificationGroupId = groupId;
+	monitor->pgsql.notificationReceived = false;
+
+	/* install our notification handler */
+	monitor->pgsql.notificationProcessFunction =
+		&monitor_process_state_notification;
+}
+
+
+/*
+ * monitor_has_received_notifications returns true when some notifications have
+ * been received between the last call to either monitor_setup_notifications or
+ * monitor_has_received_notifications.
+ */
+bool
+monitor_has_received_notifications(Monitor *monitor)
+{
+	bool ret = monitor->pgsql.notificationReceived;
+
+	monitor->pgsql.notificationReceived = false;
+
+	return ret;
+}
+
+
+/*
+ * monitor_process_state_notification processes a notification received on the
+ * "state" channel from the monitor.
+ */
+bool
+monitor_process_state_notification(int notificationGroupId,
+								   int notificationNodeId,
+								   char *channel,
+								   char *payload)
+{
+	CurrentNodeState nodeState = { 0 };
+
+	if (strcmp(channel, "state") != 0)
+	{
+		return false;
+	}
+
+	/* errors are logged by parse_state_notification_message */
+	if (parse_state_notification_message(&nodeState, payload))
+	{
+		if (nodeState.groupId == notificationGroupId)
+		{
+			(void) nodestate_log(&nodeState, LOG_INFO, notificationNodeId);
+		}
 	}
 
 	return true;
@@ -397,9 +468,6 @@ monitor_get_other_nodes(Monitor *monitor,
 		return false;
 	}
 
-	/* disconnect from PostgreSQL now */
-	pgsql_finish(&monitor->pgsql);
-
 	if (!parseContext.parsedOK)
 	{
 		log_error("Failed to get the other nodes from the monitor while running "
@@ -526,9 +594,6 @@ monitor_get_primary(Monitor *monitor, char *formation, int groupId,
 		return false;
 	}
 
-	/* disconnect from PostgreSQL now */
-	pgsql_finish(&monitor->pgsql);
-
 	if (!parseContext.parsedOK)
 	{
 		log_error(
@@ -573,9 +638,6 @@ monitor_get_coordinator(Monitor *monitor, char *formation, NodeAddress *node)
 				  sql, formation);
 		return false;
 	}
-
-	/* disconnect from PostgreSQL now */
-	pgsql_finish(&monitor->pgsql);
 
 	if (!parseContext.parsedOK)
 	{
@@ -639,9 +701,6 @@ monitor_get_most_advanced_standby(Monitor *monitor,
 			sql, formation, groupId);
 		return false;
 	}
-
-	/* disconnect from PostgreSQL now */
-	pgsql_finish(&monitor->pgsql);
 
 	if (!parseContext.parsedOK || nodeArray.count != 1)
 	{
@@ -829,9 +888,6 @@ monitor_node_active(Monitor *monitor,
 				  pgsrSyncState, currentLSN);
 		return false;
 	}
-
-	/* disconnect from PostgreSQL now */
-	pgsql_finish(&monitor->pgsql);
 
 	if (!parseContext.parsedOK)
 	{
@@ -2811,9 +2867,6 @@ monitor_synchronous_standby_names(Monitor *monitor,
 		return false;
 	}
 
-	/* disconnect from PostgreSQL now */
-	pgsql_finish(&monitor->pgsql);
-
 	if (!context.parsedOk)
 	{
 		log_error("Failed to get the synchronous_standby_names setting value "
@@ -2863,9 +2916,6 @@ monitor_update_node_metadata(Monitor *monitor,
 		return false;
 	}
 
-	/* disconnect from PostgreSQL now */
-	pgsql_finish(&monitor->pgsql);
-
 	if (!context.parsedOk)
 	{
 		log_error(
@@ -2911,16 +2961,16 @@ monitor_set_node_system_identifier(Monitor *monitor,
 		return false;
 	}
 
-	/* disconnect from PostgreSQL now */
-	pgsql_finish(&monitor->pgsql);
-
 	if (!parseContext.parsedOK)
 	{
+		/* *INDENT-OFF* */
 		log_error(
 			"Failed to set node %d sysidentifier to \"%" PRIu64 "\""
-																" on the monitor because it returned an unexpected result. "
-																"See previous line for details.",
+			" on the monitor because it returned an unexpected result. "
+			"See previous line for details.",
 			nodeId, system_identifier);
+		/* *INDENT-ON* */
+
 		return false;
 	}
 
@@ -3395,6 +3445,80 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 	pgsql_finish(&monitor->pgsql);
 
 	return context.applySettingsTransitionDone;
+}
+
+
+/*
+ * monitor_notification_process_wait_for_state_change is a Notification
+ * Processing Function that gets all the notifications from our group from the
+ * monitor and logs them.
+ */
+static void
+monitor_notification_process_wait_for_state_change(void *context,
+												   CurrentNodeState *nodeState)
+{
+	WaitForStateChangeNotificationContext *ctx =
+		(WaitForStateChangeNotificationContext *) context;
+
+	/* filter notifications for our own formation */
+	if (strcmp(nodeState->formation, ctx->formation) != 0 ||
+		nodeState->groupId != ctx->groupId)
+	{
+		return;
+	}
+
+	/* here, we received a state change that belongs to our formation/group */
+	ctx->stateHasChanged = true;
+	nodestate_log(nodeState, LOG_INFO, ctx->nodeId);
+}
+
+
+/*
+ * monitor_wait_for_state_change waits for timeout milliseconds or until we
+ * receive a notification for a state change concerning the given nodeId,
+ * whichever comes first.
+ *
+ * When we have received at least one notification for the given groupId then
+ * the stateHasChanged boolean is set to true, otherwise it's set to false.
+ */
+bool
+monitor_wait_for_state_change(Monitor *monitor,
+							  const char *formation,
+							  int groupId,
+							  int nodeId,
+							  int timeoutMs,
+							  bool *stateHasChanged)
+{
+	PGconn *connection = monitor->pgsql.connection;
+
+	WaitForStateChangeNotificationContext context = {
+		(char *) formation,
+		groupId,
+		nodeId,
+		false					/* stateHasChanged */
+	};
+
+	char *channels[] = { "state", NULL };
+
+	if (connection == NULL)
+	{
+		log_warn("Lost connection.");
+		return false;
+	}
+
+	if (!monitor_process_notifications(
+			monitor,
+			timeoutMs,
+			channels,
+			(void *) &context,
+			&monitor_notification_process_wait_for_state_change))
+	{
+		return false;
+	}
+
+	*stateHasChanged = context.stateHasChanged;
+
+	return true;
 }
 
 

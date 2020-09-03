@@ -51,6 +51,12 @@ typedef struct MonitorExtensionVersion
 } MonitorExtensionVersion;
 
 bool monitor_init(Monitor *monitor, char *url);
+void monitor_setup_notifications(Monitor *monitor, int groupId);
+bool monitor_has_received_notifications(Monitor *monitor);
+bool monitor_process_state_notification(int notificationGroupId,
+										int notificationNodeId,
+										char *channel,
+										char *payload);
 bool monitor_local_init(Monitor *monitor);
 void monitor_finish(Monitor *monitor);
 
@@ -181,7 +187,12 @@ bool monitor_wait_until_some_node_reported_state(Monitor *monitor,
 												 int groupId,
 												 PgInstanceKind nodeKind,
 												 NodeState targetState);
-
+bool monitor_wait_for_state_change(Monitor *monitor,
+								   const char *formation,
+								   int groupId,
+								   int nodeId,
+								   int timeoutMs,
+								   bool *stateHasChanged);
 bool monitor_get_extension_version(Monitor *monitor,
 								   MonitorExtensionVersion *version);
 bool monitor_extension_update(Monitor *monitor, const char *targetVersion);
