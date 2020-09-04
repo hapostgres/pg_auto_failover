@@ -541,6 +541,21 @@ class PGNode:
         log_string += f"POSTGRES LOGS FOR {self.datadir}:\n{pglogs}\n"
         return log_string
 
+    def get_events_str(self):
+        "2020-08-03 12:04:41.513761+00:00"
+        events = self.get_events()
+
+        if events:
+            return "\n".join(
+                ["%32s %8s %17s/%-17s %7s %10s %s" % ("eventtime", "name",
+                                                      "state", "goal state",
+                                                      "repl st", "lsn", "event")]
+                +
+                ["%32s %8s %17s/%-17s %7s %10s %s" % result
+                 for result in events ])
+        else:
+            return ""
+
     def print_debug_logs(self):
         events = self.get_events_str()
         logs = f"MONITOR EVENTS:\n{events}\n"
@@ -897,18 +912,7 @@ SELECT reportedstate
             "reportedstate, goalstate, " \
             "reportedrepstate, reportedlsn, description " \
             "from pgautofailover.last_events('default', count => 20)"
-        return self.monitor.run_sql_query(last_events_query)
-
-
-    def get_events_str(self):
-        "2020-08-03 12:04:41.513761+00:00"
-        return "\n".join(
-            ["%32s %8s %17s/%-17s %7s %10s %s" % ("eventtime", "name",
-                                                  "state", "goal state",
-                                                  "repl st", "lsn", "event")]
-            +
-            ["%32s %8s %17s/%-17s %7s %10s %s" % result
-             for result in self.get_events()])
+        return self.monitor.get_events()
 
     def enable_maintenance(self, allowFailover=False):
         """
@@ -1280,6 +1284,18 @@ class MonitorNode(PGNode):
         Checks if ssl settings match how the node is set up
         """
         return super().check_ssl(ssl, sslmode, monitor=True)
+
+    def get_events(self):
+        """
+        Returns the current list of events from the monitor.
+        """
+        last_events_query = "select eventtime, nodename, " \
+            "reportedstate, goalstate, " \
+            "reportedrepstate, reportedlsn, description " \
+            "from pgautofailover.last_events('default', count => 20)"
+
+        if self.pg_is_running():
+            return self.run_sql_query(last_events_query)
 
 
 class PGAutoCtl():

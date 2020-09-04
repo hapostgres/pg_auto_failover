@@ -45,11 +45,13 @@ static bool pg_include_config(const char *configFilePath,
 							  const char *configIncludeComment);
 static bool ensure_default_settings_file_exists(const char *configFilePath,
 												GUC *settings,
-												PostgresSetup *pgSetup);
+												PostgresSetup *pgSetup,
+												bool includeTuning);
 static bool prepare_guc_settings_from_pgsetup(const char *configFilePath,
 											  PQExpBuffer config,
 											  GUC *settings,
-											  PostgresSetup *pgSetup);
+											  PostgresSetup *pgSetup,
+											  bool includeTuning);
 static void log_program_output(Program prog, int outLogLevel, int errorLogLevel);
 
 
@@ -322,6 +324,7 @@ pg_add_auto_failover_default_settings(PostgresSetup *pgSetup,
 									  char *configFilePath,
 									  GUC *settings)
 {
+	bool includeTuning = true;
 	char pgAutoFailoverDefaultsConfigPath[MAXPGPATH];
 
 	/*
@@ -335,7 +338,9 @@ pg_add_auto_failover_default_settings(PostgresSetup *pgSetup,
 						   pgAutoFailoverDefaultsConfigPath);
 
 	if (!ensure_default_settings_file_exists(pgAutoFailoverDefaultsConfigPath,
-											 settings, pgSetup))
+											 settings,
+											 pgSetup,
+											 includeTuning))
 	{
 		return false;
 	}
@@ -456,14 +461,16 @@ pg_include_config(const char *configFilePath,
 static bool
 ensure_default_settings_file_exists(const char *configFilePath,
 									GUC *settings,
-									PostgresSetup *pgSetup)
+									PostgresSetup *pgSetup,
+									bool includeTuning)
 {
 	PQExpBuffer defaultConfContents = createPQExpBuffer();
 
 	if (!prepare_guc_settings_from_pgsetup(configFilePath,
 										   defaultConfContents,
 										   settings,
-										   pgSetup))
+										   pgSetup,
+										   includeTuning))
 	{
 		/* errors have already been logged */
 		return false;
@@ -532,8 +539,10 @@ static bool
 prepare_guc_settings_from_pgsetup(const char *configFilePath,
 								  PQExpBuffer config,
 								  GUC *settings,
-								  PostgresSetup *pgSetup)
+								  PostgresSetup *pgSetup,
+								  bool includeTuning)
 {
+	char tuning[BUFSIZE] = { 0 };
 	int settingIndex = 0;
 
 	appendPQExpBufferStr(config, "# Settings by pg_auto_failover\n");
@@ -671,18 +680,8 @@ prepare_guc_settings_from_pgsetup(const char *configFilePath,
 		}
 	}
 
-	/*
-	 * Only bother to apply settings on Linux, macOS and Windows are considered
-	 * development environment and we decide to refrain from tuning a dedicated
-	 * Postgres system on those targets.
-	 *
-	 * Also disable Postgres tuning when running the unit test suite.
-	 */
-#if defined(__linux__)
-	if (!(env_exists(PG_AUTOCTL_DEBUG) && env_exists("PG_REGRESS_SOCK_DIR")))
+	if (includeTuning)
 	{
-		char tuning[BUFSIZE] = { 0 };
-
 		if (!pgtuning_prepare_guc_settings(postgres_tuning,
 										   tuning,
 										   sizeof(tuning)))
@@ -692,7 +691,6 @@ prepare_guc_settings_from_pgsetup(const char *configFilePath,
 
 		appendPQExpBuffer(config, "\n%s\n", tuning);
 	}
-#endif
 
 	/* memory allocation could have failed while building string */
 	if (PQExpBufferBroken(config))
@@ -1602,6 +1600,8 @@ pg_write_recovery_conf(const char *pgdata, ReplicationSource *replicationSource)
 		? recoverySettingsStandby
 		: recoverySettingsTargetLSN;
 
+	bool includeTuning = false;
+
 	join_path_components(recoveryConfPath, pgdata, "recovery.conf");
 
 	log_info("Writing recovery configuration to \"%s\"", recoveryConfPath);
@@ -1618,7 +1618,8 @@ pg_write_recovery_conf(const char *pgdata, ReplicationSource *replicationSource)
 
 	return ensure_default_settings_file_exists(recoveryConfPath,
 											   recoverySettings,
-											   NULL);
+											   NULL,
+											   includeTuning);
 }
 
 
@@ -1662,6 +1663,8 @@ pg_write_standby_signal(const char *pgdata,
 		IS_EMPTY_STRING_BUFFER(replicationSource->targetLSN)
 		? recoverySettingsStandby
 		: recoverySettingsTargetLSN;
+
+	bool includeTuning = false;
 
 	log_trace("pg_write_standby_signal");
 
@@ -1710,7 +1713,8 @@ pg_write_standby_signal(const char *pgdata,
 	 */
 	if (!ensure_default_settings_file_exists(standbyConfigFilePath,
 											 recoverySettings,
-											 NULL))
+											 NULL,
+											 includeTuning))
 	{
 		return false;
 	}
