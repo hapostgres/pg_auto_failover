@@ -302,6 +302,26 @@ comment on function pgautofailover.get_nodes(text,int)
 grant execute on function pgautofailover.get_nodes(text,int)
    to autoctl_node;
 
+DROP FUNCTION pgautofailover.get_primary(text, int);
+
+CREATE FUNCTION pgautofailover.get_primary
+ (
+    IN formation_id      text default 'default',
+    IN group_id          int default 0,
+   OUT primary_node_id   int,
+   OUT primary_name      text,
+   OUT primary_host      text,
+   OUT primary_port      int
+ )
+RETURNS record LANGUAGE C STRICT SECURITY DEFINER
+AS 'MODULE_PATHNAME', $$get_primary$$;
+
+comment on function pgautofailover.get_primary(text,int)
+        is 'get the writable node for a group';
+
+grant execute on function pgautofailover.get_primary(text,int)
+   to autoctl_node;
+
 DROP FUNCTION IF EXISTS pgautofailover.get_other_nodes (text,integer);
 
 CREATE FUNCTION pgautofailover.get_other_nodes
