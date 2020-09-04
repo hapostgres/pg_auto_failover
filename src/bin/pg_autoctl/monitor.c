@@ -89,6 +89,7 @@ typedef struct MonitorExtensionVersionParseContext
 	bool parsedOK;
 } MonitorExtensionVersionParseContext;
 
+
 static int MaxHostNameSizeInNodesArray(NodeAddressArray *nodesArray);
 static bool parseNode(PGresult *result, int rowNumber, NodeAddress *node);
 static void parseNodeResult(void *ctx, PGresult *result);
@@ -2974,6 +2975,65 @@ monitor_set_node_system_identifier(Monitor *monitor,
 		/* *INDENT-ON* */
 
 		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * monitor_set_group_system_identifier sets the node's sysidentifier column on
+ * the monitor for all nodes in the same group, when the current sysidentifier
+ * they have is zero. That's needed after an upgrade from 1.3 to 1.4.
+ */
+bool
+monitor_set_group_system_identifier(Monitor *monitor,
+									int groupId,
+									uint64_t system_identifier)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT * FROM pgautofailover.set_group_system_identifier($1, $2)";
+	int paramCount = 2;
+	Oid paramTypes[2] = { INT8OID, INT8OID };
+	const char *paramValues[2];
+
+	SingleValueResultContext context = { 0 };
+
+	paramValues[0] = intToString(groupId).strValue;
+	paramValues[1] = intToString(system_identifier).strValue;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &fetchedRows))
+	{
+		log_error("Failed to set_group_system_identifier for group %d "
+				  "from the monitor", groupId);
+		return false;
+	}
+
+	/* disconnect from PostgreSQL now */
+	pgsql_finish(&monitor->pgsql);
+
+	if (!context.parsedOk)
+	{
+		/* *INDENT-OFF* */
+		log_error(
+			"Failed to set sysidentifier to \"%" PRIu64 "\" "
+			"for nodes in group %d "
+			"on the monitor because it returned an unexpected result. "
+			"See previous line for details.",
+			system_identifier, groupId);
+
+		/* *INDENT-ON* */
+		return false;
+	}
+
+	if (context.intVal > 0)
+	{
+		log_info("Updated system identifier of %d nodes in group %d "
+				 "to the local node value \"%" PRIu64 "\"",
+				 context.intVal, groupId, system_identifier);
 	}
 
 	return true;

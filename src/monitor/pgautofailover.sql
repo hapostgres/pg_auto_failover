@@ -137,10 +137,13 @@ CREATE TABLE pgautofailover.node
          CHECK (  (    sysidentifier IS NULL
                    AND reportedstate in ('init', 'wait_standby', 'catchingup') )
                 OR sysidentifier IS NOT NULL),
+
     CONSTRAINT same_system_identifier_within_group
        EXCLUDE USING gist(formationid with =,
                           groupid with =,
-                          sysidentifier with <>),
+                          sysidentifier with <>)
+    DEFERRABLE INITIALLY DEFERRED,
+
     PRIMARY KEY (nodeid),
     FOREIGN KEY (formationid) REFERENCES pgautofailover.formation(formationid)
  )
@@ -188,6 +191,27 @@ AS $$
 $$;
 
 grant execute on function pgautofailover.set_node_system_identifier(bigint,bigint)
+   to autoctl_node;
+
+CREATE FUNCTION pgautofailover.set_group_system_identifier
+ (
+    IN group_id            bigint,
+    IN node_sysidentifier  bigint,
+   OUT node_id          bigint,
+   OUT node_name        text,
+   OUT node_host        text,
+   OUT node_port        int
+ )
+RETURNS setof record LANGUAGE SQL STRICT SECURITY DEFINER
+AS $$
+      update pgautofailover.node
+         set sysidentifier = node_sysidentifier
+       where groupid = set_group_system_identifier.group_id
+         and sysidentifier = 0
+   returning nodeid, nodename, nodehost, nodeport;
+$$;
+
+grant execute on function pgautofailover.set_group_system_identifier(bigint,bigint)
    to autoctl_node;
 
 CREATE FUNCTION pgautofailover.update_node_metadata

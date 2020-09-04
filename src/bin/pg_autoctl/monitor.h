@@ -175,6 +175,9 @@ bool monitor_update_node_metadata(Monitor *monitor,
 bool monitor_set_node_system_identifier(Monitor *monitor,
 										int nodeId,
 										uint64_t system_identifier);
+bool monitor_set_group_system_identifier(Monitor *monitor,
+										 int groupId,
+										 uint64_t system_identifier);
 
 bool monitor_start_maintenance(Monitor *monitor, int nodeId, bool *mayRetry);
 bool monitor_stop_maintenance(Monitor *monitor, int nodeId, bool *mayRetry);
