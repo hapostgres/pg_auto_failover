@@ -95,7 +95,7 @@ typedef struct ConnectionRetryPolicy
 /*
  * Allow higher level code to distinguish between failure to connect to the
  * target Postgres service and failure to run a query or obtain the expected
- * result. To that end we expose PQstatus() of the connection.
+ * result. To that end we expose PQstatus() and the return value of PQping().
  *
  * We don't use the same enum values as in libpq because we want to have the
  * unknown value when we didn't try to connect yet.
@@ -106,6 +106,15 @@ typedef enum
 	PG_CONNECTION_OK,
 	PG_CONNECTION_BAD
 } PGConnStatus;
+
+typedef enum
+{
+	PG_CONNECTION_PING_UNKNOWN = 0,
+	PG_CONNECTION_PING_OK,
+	PG_CONNECTION_PING_REJECT,
+	PG_CONNECTION_PING_NO_RESPONSE,
+	PG_CONNECTION_PING_NO_ATTEMPT
+} PGConnPingStatus;
 
 /* notification processing */
 typedef bool (*ProcessNotificationFunction)(int notificationGroupId,
@@ -119,6 +128,7 @@ typedef struct PGSQL
 	PGconn *connection;
 	ConnectionRetryPolicy retryPolicy;
 	PGConnStatus status;
+	PGConnPingStatus pingStatus;
 
 	ProcessNotificationFunction notificationProcessFunction;
 	int notificationGroupId;
@@ -282,6 +292,7 @@ bool pgsql_enable_synchronous_replication(PGSQL *pgsql);
 bool pgsql_disable_synchronous_replication(PGSQL *pgsql);
 bool pgsql_set_default_transaction_mode_read_only(PGSQL *pgsql);
 bool pgsql_set_default_transaction_mode_read_write(PGSQL *pgsql);
+bool pgsql_set_password(PGSQL *pgsql, const char *userName, const char *password);
 bool pgsql_checkpoint(PGSQL *pgsql);
 bool pgsql_get_hba_file_path(PGSQL *pgsql, char *hbaFilePath, int maxPathLength);
 bool pgsql_create_database(PGSQL *pgsql, const char *dbname, const char *owner);

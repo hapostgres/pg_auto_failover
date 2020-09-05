@@ -24,6 +24,17 @@ typedef struct LocalExpectedPostgresStatus
 	KeeperStatePostgres state;
 } LocalExpectedPostgresStatus;
 
+/*
+ * ReplicationPasswordCache caches the replication.password entry in
+ * LocalPostgresServer in order to react to a replication password change in
+ * the keeper configuration for a primary.
+ */
+typedef struct ReplicationPasswordCache
+{
+	bool inited;
+	bool changed;
+	char password[MAXCONNINFO];
+} ReplicationPasswordCache;
 
 /*
  * LocalPostgresServer represents a local postgres database cluster that
@@ -47,6 +58,7 @@ typedef struct LocalPostgresServer
 	LocalExpectedPostgresStatus expectedPgStatus;
 	char standbyTargetLSN[PG_LSN_MAXLENGTH];
 	char synchronousStandbyNames[BUFSIZE];
+	ReplicationPasswordCache replicationPasswordCache;
 } LocalPostgresServer;
 
 

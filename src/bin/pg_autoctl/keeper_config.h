@@ -82,6 +82,8 @@ bool keeper_config_set_setting(KeeperConfig *config,
 							   const char *path,
 							   char *value);
 
+bool keeper_config_setting_requires_validation(const char *path);
+
 bool keeper_config_merge_options(KeeperConfig *config, KeeperConfig *options);
 bool keeper_config_update(KeeperConfig *config, int nodeId, int groupId);
 void keeper_config_destroy(KeeperConfig *config);

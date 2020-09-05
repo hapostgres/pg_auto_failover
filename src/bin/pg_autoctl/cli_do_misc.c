@@ -541,7 +541,7 @@ keeper_cli_identify_system(int argc, char **argv)
 	strlcpy(replicationSource.applicationName, "pg_autoctl", MAXCONNINFO);
 	strlcpy(replicationSource.userName, PG_AUTOCTL_REPLICA_USERNAME, NAMEDATALEN);
 
-	if (!pgctl_identify_system(&replicationSource))
+	if (!pgctl_identify_system(&replicationSource, NULL))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_INTERNAL_ERROR);

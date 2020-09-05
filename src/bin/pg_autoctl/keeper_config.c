@@ -588,6 +588,23 @@ keeper_config_set_setting(KeeperConfig *config,
 
 
 /*
+ * keeper_config_setting_requires_validation determines if the config param
+ * being update would require a validation of the replication settings.
+ */
+bool
+keeper_config_setting_requires_validation(const char *key)
+{
+	return streq(key, "replication.password") ||
+		   streq(key, "ssl.active") ||
+		   streq(key, "ssl.ca_file") ||
+		   streq(key, "ssl.crl_file") ||
+		   streq(key, "ssl.cert_file") ||
+		   streq(key, "ssl.key_file") ||
+		   streq(key, "ssl.sslmode");
+}
+
+
+/*
  * keeper_config_merge_options merges any option setup in options into config.
  * Its main use is to override configuration file settings with command line
  * options.

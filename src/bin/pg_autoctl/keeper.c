@@ -25,7 +25,6 @@
 #include "signals.h"
 #include "state.h"
 
-
 static bool keeper_state_check_postgres(Keeper *keeper,
 										PostgresControlData *control);
 
@@ -753,6 +752,7 @@ keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 	KeeperStateData *state = &(keeper->state);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+	ReplicationPasswordCache *passwordCache = &postgres->replicationPasswordCache;
 
 	/*
 	 * We just reloaded our configuration file from disk. Use the pgSetup from
@@ -786,6 +786,21 @@ keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 				 "reloading pg_autoctl configuration, "
 				 "see above for details");
 		return false;
+	}
+
+	/*
+	 * If there was a change in the replication password invalidate the cached
+	 * password in LocalPostgresServer. If this is the first config reload and
+	 * the cache hasn't been initialized, update the cache.
+	 */
+	if (!passwordCache->inited ||
+		strneq(passwordCache->password, config->replication_password))
+	{
+		strlcpy(passwordCache->password,
+				config->replication_password,
+				MAXCONNINFO);
+		passwordCache->inited = true;
+		passwordCache->changed = true;
 	}
 
 	/*
@@ -946,6 +961,35 @@ keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 				return false;
 			}
 		}
+	}
+	else if ((state->current_role == SINGLE_STATE ||
+			  state->current_role == WAIT_PRIMARY_STATE ||
+			  state->current_role == JOIN_PRIMARY_STATE ||
+			  state->current_role == PRIMARY_STATE ||
+			  state->current_role == APPLY_SETTINGS_STATE) &&
+			 passwordCache->changed)
+	{
+		/*
+		 * On the primary, the keeper's replication password may have been set
+		 * at rest. Ensure that the replication password is updated in the
+		 * catalog.
+		 */
+		if (!pg_setup_is_running(pgSetup))
+		{
+			log_warn("Failed to set replication password as server is not "
+					 "running. We will retry later");
+			return false;
+		}
+		if (!pgsql_set_password(&keeper->postgres.sqlClient,
+								PG_AUTOCTL_REPLICA_USERNAME,
+								keeper->config.replication_password))
+		{
+			log_error("Failed to set replication password, see above for details. "
+					  "We will retry later");
+			return false;
+		}
+
+		passwordCache->changed = false;
 	}
 
 	return true;
@@ -2139,6 +2183,7 @@ keeper_reload_configuration(Keeper *keeper, bool firstLoop)
 			{
 				log_warn("Failed to reload pg_autoctl configuration, "
 						 "see above for details");
+				return false;
 			}
 		}
 		else

@@ -325,7 +325,45 @@ ensure_postgres_service_is_running(LocalPostgresServer *postgres)
 		return false;
 	}
 
-	return local_postgres_wait_until_ready(postgres);
+	if (local_postgres_wait_until_ready(postgres))
+	{
+		bool isInRecovery;
+		ReplicationPasswordCache *passwordCache = &(postgres->replicationPasswordCache);
+
+		/*
+		 * If the replication password was changed and we are the primary, make
+		 * sure that the password is updated in the database. If we are a
+		 * secondary, we don't need to act on this, as necessary actions would
+		 * already have been taken in keeper_ensure_configuration.
+		 */
+		if (passwordCache->changed)
+		{
+			if (!pgsql_is_in_recovery(&postgres->sqlClient, &isInRecovery))
+			{
+				log_error("Failed to determine if server is primary/secondary");
+				return true;
+			}
+			if (!isInRecovery)
+			{
+				/* We are the primary */
+				if (!pgsql_set_password(&postgres->sqlClient,
+										PG_AUTOCTL_REPLICA_USERNAME,
+										postgres->replicationPasswordCache.password))
+				{
+					log_error(
+						"Failed to set replication password, see above for details. "
+						"We will retry later");
+					return true;
+				}
+			}
+
+			passwordCache->changed = false;
+		}
+
+		return true;
+	}
+
+	return false;
 }
 
 
@@ -1199,7 +1237,7 @@ standby_follow_new_primary(LocalPostgresServer *postgres)
 	/* when we have a primary, only proceed if we can reach it */
 	if (!IS_EMPTY_STRING_BUFFER(replicationSource->primaryNode.host))
 	{
-		if (!pgctl_identify_system(replicationSource))
+		if (!pgctl_identify_system(replicationSource, NULL))
 		{
 			log_error("Failed to establish a replication connection "
 					  "to the new primary, see above for details");
@@ -1365,7 +1403,7 @@ standby_restart_with_current_replication_source(LocalPostgresServer *postgres)
 	/* when we have a primary, only proceed if we can reach it */
 	if (!IS_EMPTY_STRING_BUFFER(replicationSource->primaryNode.host))
 	{
-		if (!pgctl_identify_system(replicationSource))
+		if (!pgctl_identify_system(replicationSource, NULL))
 		{
 			log_error("Failed to establish a replication connection "
 					  "to the primary node, see above for details");
