@@ -242,10 +242,11 @@ monitor_process_state_notification(int notificationGroupId,
 		if (nodeState.groupId == notificationGroupId)
 		{
 			(void) nodestate_log(&nodeState, LOG_INFO, notificationNodeId);
+			return true;
 		}
 	}
 
-	return true;
+	return false;
 }
 
 
