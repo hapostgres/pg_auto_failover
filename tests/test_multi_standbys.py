@@ -139,9 +139,9 @@ def test_006_number_sync_standbys_trigger():
 
     node1.pg_autoctl.sighup() # wake up from the 10s node_active delay
     node2.pg_autoctl.sighup() # wake up from the 10s node_active delay
-    node2.pg_autoctl.sighup() # wake up from the 10s node_active delay
+    node3.pg_autoctl.sighup() # wake up from the 10s node_active delay
 
-    time.sleep(2)
+    time.sleep(6)
 
     assert node1.has_needed_replication_slots()
     assert node2.has_needed_replication_slots()
