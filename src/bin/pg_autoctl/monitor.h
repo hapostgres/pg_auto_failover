@@ -51,7 +51,7 @@ typedef struct MonitorExtensionVersion
 } MonitorExtensionVersion;
 
 bool monitor_init(Monitor *monitor, char *url);
-void monitor_setup_notifications(Monitor *monitor, int groupId);
+void monitor_setup_notifications(Monitor *monitor, int groupId, int nodeId);
 bool monitor_has_received_notifications(Monitor *monitor);
 bool monitor_process_state_notification(int notificationGroupId,
 										int notificationNodeId,

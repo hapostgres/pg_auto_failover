@@ -267,7 +267,9 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 	log_debug("pg_autoctl service is starting");
 
 	/* setup our monitor client connection with our notification handler */
-	(void) monitor_setup_notifications(monitor, keeperState->current_group);
+	(void) monitor_setup_notifications(monitor,
+									   keeperState->current_group,
+									   keeperState->current_node_id);
 
 	while (keepRunning)
 	{

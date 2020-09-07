@@ -191,9 +191,10 @@ monitor_init(Monitor *monitor, char *url)
  * enable notification processing for a given groupId.
  */
 void
-monitor_setup_notifications(Monitor *monitor, int groupId)
+monitor_setup_notifications(Monitor *monitor, int groupId, int nodeId)
 {
 	monitor->pgsql.notificationGroupId = groupId;
+	monitor->pgsql.notificationNodeId = nodeId;
 	monitor->pgsql.notificationReceived = false;
 
 	/* install our notification handler */
