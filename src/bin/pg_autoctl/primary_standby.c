@@ -733,6 +733,9 @@ standby_init_replication_source(LocalPostgresServer *postgres,
 
 	if (primaryNode != NULL)
 	{
+		strlcpy(upstream->primaryNode.name,
+				primaryNode->name, _POSIX_HOST_NAME_MAX);
+
 		strlcpy(upstream->primaryNode.host,
 				primaryNode->host, _POSIX_HOST_NAME_MAX);
 

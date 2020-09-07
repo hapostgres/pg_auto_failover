@@ -723,8 +723,8 @@ monitor_get_most_advanced_standby(Monitor *monitor,
 	strlcpy(node->lsn, nodeArray.nodes[0].lsn, PG_LSN_MAXLENGTH);
 	node->isPrimary = nodeArray.nodes[0].isPrimary;
 
-	log_debug("The most advanced standby node is node %d (%s:%d)",
-			  node->nodeId, node->host, node->port);
+	log_debug("The most advanced standby node is node %d \"%s\" (%s:%d)",
+			  node->nodeId, node->name, node->host, node->port);
 
 	return true;
 }
