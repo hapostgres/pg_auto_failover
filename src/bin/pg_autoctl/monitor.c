@@ -609,8 +609,8 @@ monitor_get_primary(Monitor *monitor, char *formation, int groupId,
 	/* The monitor function pgautofailover.get_primary only returns 3 fields */
 	node->isPrimary = true;
 
-	log_debug("The primary node returned by the monitor is %s:%d, with id %d",
-			  node->host, node->port, node->nodeId);
+	log_debug("The primary node returned by the monitor is node %d \"%s\" (%s:%d)",
+			  node->nodeId, node->name, node->host, node->port);
 
 	return true;
 }
