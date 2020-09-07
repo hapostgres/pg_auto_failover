@@ -195,10 +195,18 @@ def test_013_secondary_gets_behind_primary():
     print("%s " % lsn1, end="", flush=True)
 
     # ensure the monitor received this lsn
-    time.sleep(2)
+    node1.pg_autoctl.sighup() # wake up from the 10s node_active delay
+    time.sleep(1)
+
     q = "select reportedlsn from pgautofailover.node where nodeid = 1"
     lsn1m = monitor.run_sql_query(q)[0][0]
     print("%s " % lsn1m, end="", flush=True)
+
+    retry = 0
+    while lsn1 != lsn1m and retry < 3:
+        time.sleep(1)
+        lsn1m = monitor.run_sql_query(q)[0][0]
+        print("%s " % lsn1m, end="", flush=True)
 
     eq_(lsn1, lsn1m)
 

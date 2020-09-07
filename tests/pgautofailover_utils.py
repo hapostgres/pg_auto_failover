@@ -1453,3 +1453,16 @@ class PGAutoCtl():
             self.command += pgdata
 
         return self.command
+
+    def sighup(self):
+        """
+        Send a SIGHUP signal to the pg_autoctl process
+        """
+        if self.run_proc and self.run_proc.pid:
+            print("Sending SIGHUP to the pg_autoctl process for %s [%d]" %
+                  (self.datadir, self.run_proc.pid))
+
+            os.kill(self.run_proc.pid, signal.SIGHUP)
+
+        else:
+            print("pg_autoctl process for %s is not running" % self.datadir)
