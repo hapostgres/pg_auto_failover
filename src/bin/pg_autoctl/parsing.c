@@ -266,7 +266,7 @@ parse_state_notification_message(CurrentNodeState *nodeState,
 	JSON_Value *json = json_parse_string(message);
 	JSON_Object *jsobj = json_value_get_object(json);
 
-	log_debug("parse_state_notification_message: %s", message);
+	log_trace("parse_state_notification_message: %s", message);
 
 	if (json_type(json) != JSONObject)
 	{
