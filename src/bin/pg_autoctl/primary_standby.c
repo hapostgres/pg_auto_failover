@@ -81,14 +81,14 @@ GUC postgres_default_settings_13[] = {
 
 GUC citus_default_settings_pre_13[] = {
 	DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER_PRE_13,
-	{ "shared_preload_libraries", "'citus','pg_stat_statements'" },
+	{ "shared_preload_libraries", "'citus,pg_stat_statements'" },
 	{ "citus.node_conninfo", "'sslmode=prefer'" },
 	{ NULL, NULL }
 };
 
 GUC citus_default_settings_13[] = {
 	DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER_13,
-	{ "shared_preload_libraries", "'citus','pg_stat_statements'" },
+	{ "shared_preload_libraries", "'citus,pg_stat_statements'" },
 	{ "citus.node_conninfo", "'sslmode=prefer'" },
 	{ NULL, NULL }
 };
