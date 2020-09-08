@@ -74,14 +74,14 @@
   \tikzstyle{hc}=[<->,color=green!50,text=black!90,line width=0.15em,dotted]
 
   \path (app) edge [sql,out=0,in=180]  node[below,near start] {SQL} (a)
-              edge [sqlf,out=-90,in=135]  (b.north west)
+              edge [sqlf,out=-90,in=135]  node[left,near start] {SQL (fallback)} (b.north west)
               edge [sqlf,out=-90,in=135]  (c.north west)
               edge [sqlf,out=-90,in=135]  (d.north west)
 
         (m)   edge [hc,out=-90,in=0] (a)
               edge [hc,out=-90,in=45] (b.north east)
               edge [hc,out=-90,in=45] (c.north east)
-              edge [hc,out=-90,in=45] (d.north east)
+              edge [hc,out=-90,in=45] node[right,near start] {Health checks} (d.north east)
 
         (a)   edge [sr] node[right]  {\textit{Streaming}} (b)
               edge [sr]                                   (c)
