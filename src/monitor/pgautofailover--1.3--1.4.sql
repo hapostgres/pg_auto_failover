@@ -511,6 +511,8 @@ AS 'MODULE_PATHNAME', $$stop_maintenance$$;
 comment on function pgautofailover.stop_maintenance(int)
         is 'set a node out of maintenance state';
 
+grant execute on function pgautofailover.stop_maintenance(int)
+   to autoctl_node;
 
 DROP FUNCTION pgautofailover.last_events(int);
 DROP FUNCTION pgautofailover.last_events(text,int);
