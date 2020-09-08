@@ -1259,10 +1259,11 @@ fsm_fast_forward(Keeper *keeper)
 	Monitor *monitor = &(keeper->monitor);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+	ReplicationSource *upstream = &(postgres->replicationSource);
+
 	int groupId = keeper->state.current_group;
 
 	NodeAddress upstreamNode = { 0 };
-	ReplicationSource replicationSource = { 0 };
 
 	char slotName[MAXCONNINFO] = { 0 };
 
@@ -1308,11 +1309,12 @@ fsm_fast_forward(Keeper *keeper)
 
 	if (!standby_fetch_missing_wal(postgres))
 	{
-		log_error("Failed to fetch WAL bytes from standby node %d (%s:%d), "
+		log_error("Failed to fetch WAL bytes from standby node %d \"%s\" (%s:%d), "
 				  "see above for details",
-				  replicationSource.primaryNode.nodeId,
-				  replicationSource.primaryNode.host,
-				  replicationSource.primaryNode.port);
+				  upstream->primaryNode.nodeId,
+				  upstream->primaryNode.name,
+				  upstream->primaryNode.host,
+				  upstream->primaryNode.port);
 		return false;
 	}
 

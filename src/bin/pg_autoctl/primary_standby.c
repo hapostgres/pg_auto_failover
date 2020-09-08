@@ -733,6 +733,8 @@ standby_init_replication_source(LocalPostgresServer *postgres,
 
 	if (primaryNode != NULL)
 	{
+		upstream->primaryNode.nodeId = primaryNode->nodeId;
+
 		strlcpy(upstream->primaryNode.name,
 				primaryNode->name, _POSIX_HOST_NAME_MAX);
 
@@ -1207,8 +1209,9 @@ standby_fetch_missing_wal(LocalPostgresServer *postgres)
 	char currentLSN[PG_LSN_MAXLENGTH] = { 0 };
 	bool hasReachedLSN = false;
 
-	log_info("Fetching WAL from upstream node %d (%s:%d) up to LSN %s",
+	log_info("Fetching WAL from upstream node %d \"%s\" (%s:%d) up to LSN %s",
 			 upstreamNode->nodeId,
+			 upstreamNode->name,
 			 upstreamNode->host,
 			 upstreamNode->port,
 			 replicationSource->targetLSN);
@@ -1216,9 +1219,10 @@ standby_fetch_missing_wal(LocalPostgresServer *postgres)
 	/* apply new replication source to fetch missing WAL bits */
 	if (!standby_restart_with_current_replication_source(postgres))
 	{
-		log_error("Failed to setup replication from upstream node %d (%s:%d), "
-				  "see above for details",
+		log_error("Failed to setup replication "
+				  "from upstream node %d \"%s\" (%s:%d), see above for details",
 				  upstreamNode->nodeId,
+				  upstreamNode->name,
 				  upstreamNode->host,
 				  upstreamNode->port);
 	}
