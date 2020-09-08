@@ -36,11 +36,16 @@
 
 static bool keepRunning = true;
 
+/* list of hooks to run at reload time */
+KeeperReloadFunction KeeperReloadHooks[] = {
+	&keeper_reload_configuration,
+	NULL
+};
+
 static bool keeper_node_active(Keeper *keeper);
 static bool is_network_healthy(Keeper *keeper);
 static bool in_network_partition(KeeperStateData *keeperState, uint64_t now,
 								 int networkPartitionTimeout);
-static void reload_configuration(Keeper *keeper, bool postgresNotRunningIsOk);
 
 
 /*
@@ -279,9 +284,7 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		 */
 		if (asked_to_reload || firstLoop)
 		{
-			bool postgresNotRunningIsOk = firstLoop;
-
-			(void) reload_configuration(keeper, postgresNotRunningIsOk);
+			(void) keeper_call_reload_hooks(keeper, firstLoop);
 		}
 
 		if (asked_to_stop)
@@ -767,76 +770,4 @@ in_network_partition(KeeperStateData *keeperState, uint64_t now,
 		   keeperState->last_secondary_contact > 0 &&
 		   networkPartitionTimeout < monitor_contact_lag &&
 		   networkPartitionTimeout < secondary_contact_lag;
-}
-
-
-/*
- * reload_configuration reads the supposedly new configuration file and
- * integrates accepted new values into the current setup.
- */
-static void
-reload_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
-{
-	KeeperConfig *config = &(keeper->config);
-
-	if (file_exists(config->pathnames.config))
-	{
-		KeeperConfig newConfig = { 0 };
-
-		bool missingPgdataIsOk = true;
-		bool pgIsNotRunningIsOk = true;
-		bool monitorDisabledIsOk = false;
-
-		/*
-		 * Set the same configuration and state file as the current config.
-		 */
-		strlcpy(newConfig.pathnames.config, config->pathnames.config, MAXPGPATH);
-		strlcpy(newConfig.pathnames.state, config->pathnames.state, MAXPGPATH);
-
-		/* disconnect to the current monitor if we're connected */
-		(void) pgsql_finish(&(keeper->monitor.pgsql));
-
-		if (keeper_config_read_file(&newConfig,
-									missingPgdataIsOk,
-									pgIsNotRunningIsOk,
-									monitorDisabledIsOk) &&
-			keeper_config_accept_new(keeper, &newConfig))
-		{
-			/*
-			 * The keeper->config changed, not the keeper->postgres, but the
-			 * main loop takes care of updating it at each loop anyway, so we
-			 * don't have to take care of that now.
-			 */
-			log_info("Reloaded the new configuration from \"%s\"",
-					 config->pathnames.config);
-
-			/*
-			 * The new configuration might impact the Postgres setup, such as
-			 * when changing the SSL file paths.
-			 */
-			if (!keeper_ensure_configuration(keeper, postgresNotRunningIsOk))
-			{
-				log_warn("Failed to reload pg_autoctl configuration, "
-						 "see above for details");
-			}
-		}
-		else
-		{
-			log_warn("Failed to read configuration file \"%s\", "
-					 "continuing with the same configuration.",
-					 config->pathnames.config);
-		}
-
-		/* we're done the the newConfig now */
-		keeper_config_destroy(&newConfig);
-	}
-	else
-	{
-		log_warn("Configuration file \"%s\" does not exists, "
-				 "continuing with the same configuration.",
-				 config->pathnames.config);
-	}
-
-	/* we're done reloading now. */
-	asked_to_reload = 0;
 }

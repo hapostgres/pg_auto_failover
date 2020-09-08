@@ -22,6 +22,7 @@
 #include "pghba.h"
 #include "pgsetup.h"
 #include "primary_standby.h"
+#include "signals.h"
 #include "state.h"
 
 
@@ -1964,4 +1965,94 @@ keeper_config_accept_new(Keeper *keeper, KeeperConfig *newConfig)
 	/* we can change any SSL related setup options at runtime */
 	return config_accept_new_ssloptions(&(config->pgSetup),
 										&(newConfig->pgSetup));
+}
+
+
+/*
+ * reload_configuration reads the supposedly new configuration file and
+ * integrates accepted new values into the current setup.
+ */
+bool
+keeper_reload_configuration(Keeper *keeper, bool firstLoop)
+{
+	KeeperConfig *config = &(keeper->config);
+	bool postgresNotRunningIsOk = firstLoop;
+
+	if (file_exists(config->pathnames.config))
+	{
+		KeeperConfig newConfig = { 0 };
+
+		bool missingPgdataIsOk = true;
+		bool pgIsNotRunningIsOk = true;
+		bool monitorDisabledIsOk = false;
+
+		/*
+		 * Set the same configuration and state file as the current config.
+		 */
+		strlcpy(newConfig.pathnames.config, config->pathnames.config, MAXPGPATH);
+		strlcpy(newConfig.pathnames.state, config->pathnames.state, MAXPGPATH);
+
+		/* disconnect to the current monitor if we're connected */
+		(void) pgsql_finish(&(keeper->monitor.pgsql));
+
+		if (keeper_config_read_file(&newConfig,
+									missingPgdataIsOk,
+									pgIsNotRunningIsOk,
+									monitorDisabledIsOk) &&
+			keeper_config_accept_new(keeper, &newConfig))
+		{
+			/*
+			 * The keeper->config changed, not the keeper->postgres, but the
+			 * main loop takes care of updating it at each loop anyway, so we
+			 * don't have to take care of that now.
+			 */
+			log_info("Reloaded the new configuration from \"%s\"",
+					 config->pathnames.config);
+
+			/*
+			 * The new configuration might impact the Postgres setup, such as
+			 * when changing the SSL file paths.
+			 */
+			if (!keeper_ensure_configuration(keeper, postgresNotRunningIsOk))
+			{
+				log_warn("Failed to reload pg_autoctl configuration, "
+						 "see above for details");
+			}
+		}
+		else
+		{
+			log_warn("Failed to read configuration file \"%s\", "
+					 "continuing with the same configuration.",
+					 config->pathnames.config);
+		}
+
+		/* we're done the the newConfig now */
+		keeper_config_destroy(&newConfig);
+	}
+	else
+	{
+		log_warn("Configuration file \"%s\" does not exists, "
+				 "continuing with the same configuration.",
+				 config->pathnames.config);
+	}
+
+	return true;
+}
+
+
+/*
+ * keeper_call_reload_hooks loops over the KeeperReloadHooks
+ * reloadFunctionArray and calls each hook in turn.
+ */
+void
+keeper_call_reload_hooks(Keeper *keeper, bool firstLoop)
+{
+	for (int index = 0; KeeperReloadHooks[index]; index++)
+	{
+		/* at the moment we ignore the return values from the reload hooks */
+		(void) (*KeeperReloadHooks[index])(keeper, firstLoop);
+	}
+
+	/* we're done reloading now. */
+	asked_to_reload = 0;
 }
