@@ -83,9 +83,9 @@
               edge [hc,out=-90,in=45] (c.north east)
               edge [hc,out=-90,in=45] node[right,near start] {Health checks} (d.north east)
 
-        (a)   edge [sr] node[right]  {\textit{Streaming}} (b)
-              edge [sr]                                   (c)
-              edge [sr] node[left] {\textit{Replication}} (d);
+        (a)   edge [sr]  (b)
+              edge [sr] node[left,near start]  {\textit{Streaming}} node[right,near start] {\textit{Replication}} (c)
+              edge [sr]  (d);
 
 \end{tikzpicture}
 
