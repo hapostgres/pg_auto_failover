@@ -198,10 +198,9 @@ bool
 monitor_service_run(Monitor *monitor)
 {
 	MonitorConfig *mconfig = &(monitor->config);
-	MonitorExtensionVersion version = { 0 };
-	char *channels[] = { "log", "state", NULL };
-	char postgresUri[MAXCONNINFO];
+	char postgresUri[MAXCONNINFO] = { 0 };
 
+	bool firstLoop = true;
 	LocalPostgresServer postgres = { 0 };
 
 	/* Initialize our local connection to the monitor */
@@ -214,41 +213,19 @@ monitor_service_run(Monitor *monitor)
 	/* Now get the the Monitor URI to display it to the user, and move along */
 	if (monitor_config_get_postgres_uri(mconfig, postgresUri, MAXCONNINFO))
 	{
-		log_info("pg_auto_failover monitor is ready at %s", postgresUri);
+		log_info("Managing the monitor at %s", postgresUri);
 	}
 
 	(void) local_postgres_init(&postgres, &(monitor->config.pgSetup));
-
-	if (!ensure_postgres_service_is_running(&postgres))
-	{
-		log_error("Failed to ensure Postgres is running, "
-				  "see above for details.");
-		return false;
-	}
-
-	/* Check version compatibility. */
-	if (!monitor_ensure_extension_version(monitor, &version))
-	{
-		/* errors have already been logged */
-		return false;
-	}
-
-	if (!monitor_ensure_configuration(monitor))
-	{
-		log_fatal("Failed to apply the current monitor configuration, "
-				  "see above for details");
-		exit(EXIT_CODE_MONITOR);
-	}
-
-	log_info("Contacting the monitor to LISTEN to its events.");
-	pgsql_listen(&(monitor->pgsql), channels);
 
 	/*
 	 * Main loop for notifications.
 	 */
 	for (;;)
 	{
-		if (asked_to_reload)
+		bool pgIsNotRunningIsOk = true;
+
+		if (asked_to_reload || firstLoop)
 		{
 			(void) reload_configuration(monitor);
 		}
@@ -258,12 +235,20 @@ monitor_service_run(Monitor *monitor)
 			break;
 		}
 
-		if (!monitor_get_notifications(monitor))
+		/*
+		 * On the first loop we don't expect Postgres to be running, and on
+		 * following loops it should be all fine. That said, at any point in
+		 * time, if Postgres is not running now is a good time to make sure
+		 * it's running.
+		 *
+		 * Also, whenever Postgres has been restarted, we should check about
+		 * the version in the shared object library and maybe upgrade the
+		 * extension SQL definitions to match.
+		 */
+		if (!pg_setup_is_ready(&(postgres.postgresSetup), pgIsNotRunningIsOk))
 		{
-			log_warn("Re-establishing connection. We might miss notifications.");
-			pgsql_finish(&(monitor->pgsql));
+			MonitorExtensionVersion version = { 0 };
 
-			/* We got disconnected, ensure that Postgres is running again */
 			if (!ensure_postgres_service_is_running(&postgres))
 			{
 				log_error("Failed to ensure Postgres is running, "
@@ -274,18 +259,44 @@ monitor_service_run(Monitor *monitor)
 			/* Check version compatibility. */
 			if (!monitor_ensure_extension_version(monitor, &version))
 			{
-				/* errors have already been logged */
+				/* maybe we failed to connect to the monitor */
+				if (monitor->pgsql.status != PG_CONNECTION_OK)
+				{
+					/* leave some time to the monitor before we try again */
+					sleep(PG_AUTOCTL_MONITOR_SLEEP_TIME);
+
+					if (firstLoop)
+					{
+						firstLoop = false;
+					}
+					continue;
+				}
+
+				/* or maybe we failed to update the extension altogether */
 				return false;
 			}
+		}
 
-			/* Get back to our infinite LISTEN loop */
-			pgsql_listen(&(monitor->pgsql), channels);
+		if (firstLoop)
+		{
+			log_info("Contacting the monitor to LISTEN to its events.");
+		}
 
-			/* skip sleeping */
+		if (!monitor_get_notifications(monitor,
+
+		                               /* we want the time in milliseconds */
+									   PG_AUTOCTL_MONITOR_SLEEP_TIME * 1000))
+		{
+			log_warn("Re-establishing connection. We might miss notifications.");
+			pgsql_finish(&(monitor->pgsql));
+
 			continue;
 		}
 
-		sleep(PG_AUTOCTL_MONITOR_SLEEP_TIME);
+		if (firstLoop)
+		{
+			firstLoop = false;
+		}
 	}
 
 	pgsql_finish(&(monitor->pgsql));
@@ -364,7 +375,7 @@ monitor_ensure_configuration(Monitor *monitor)
 	LocalPostgresServer postgres = { 0 };
 	PostgresSetup *pgSetupReload = &(postgres.postgresSetup);
 	bool missingPgdataIsOk = false;
-	bool pgIsNotRunningIsOk = false;
+	bool pgIsNotRunningIsOk = true;
 
 	if (!monitor_add_postgres_default_settings(monitor))
 	{
@@ -391,15 +402,18 @@ monitor_ensure_configuration(Monitor *monitor)
 	strlcpy(pgSetupReload->dbname, "template1", NAMEDATALEN);
 	local_postgres_init(&postgres, pgSetupReload);
 
-	if (!pgsql_reload_conf(&(postgres.sqlClient)))
+	if (pg_setup_is_ready(&(postgres.postgresSetup), pgIsNotRunningIsOk))
 	{
-		log_warn("Failed to reload Postgres configuration after "
-				 "reloading pg_autoctl configuration, "
-				 "see above for details");
-		return false;
-	}
+		if (!pgsql_reload_conf(&(postgres.sqlClient)))
+		{
+			log_warn("Failed to reload Postgres configuration after "
+					 "reloading pg_autoctl configuration, "
+					 "see above for details");
+			return false;
+		}
 
-	pgsql_finish(&(postgres.sqlClient));
+		pgsql_finish(&(postgres.sqlClient));
+	}
 
 	return true;
 }

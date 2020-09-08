@@ -23,6 +23,8 @@ extern volatile sig_atomic_t asked_to_quit;      /* SIGQUIT */
 }
 
 void set_signal_handlers(bool exitOnQuit);
+bool block_signals(sigset_t *mask, sigset_t *orig_mask);
+void unblock_signals(sigset_t *orig_mask);
 void catch_reload(int sig);
 void catch_int(int sig);
 void catch_term(int sig);

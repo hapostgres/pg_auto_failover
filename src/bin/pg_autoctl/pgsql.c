@@ -34,7 +34,8 @@ static void pgAutoCtlDebugNoticeProcessor(void *arg, const char *message);
 static PGconn * pgsql_open_connection(PGSQL *pgsql);
 static bool pgsql_retry_open_connection(PGSQL *pgsql, uint64_t startTime);
 static bool is_response_ok(PGresult *result);
-static bool clear_results(PGconn *connection);
+static bool clear_results(PGSQL *pgsql);
+static void pgsql_handle_notifications(PGSQL *pgsql);
 static bool pgsql_alter_system_set(PGSQL *pgsql, GUC setting);
 static bool pgsql_get_current_setting(PGSQL *pgsql, char *settingName,
 									  char **currentValue);
@@ -815,7 +816,7 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 		}
 
 		PQclear(result);
-		clear_results(connection);
+		clear_results(pgsql);
 		pgsql_finish(pgsql);
 
 		return false;
@@ -827,7 +828,7 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 	}
 
 	PQclear(result);
-	clear_results(connection);
+	clear_results(pgsql);
 
 	return true;
 }
@@ -852,13 +853,33 @@ is_response_ok(PGresult *result)
  * If an error is returned it returns false.
  */
 static bool
-clear_results(PGconn *connection)
+clear_results(PGSQL *pgsql)
 {
+	PGconn *connection = pgsql->connection;
 	bool success = true;
+
+	/*
+	 * Per Postgres documentation: You should, however, remember to check
+	 * PQnotifies after each PQgetResult or PQexec, to see if any
+	 * notifications came in during the processing of the command.
+	 *
+	 * Before calling clear_results(), we called PQexecParams().
+	 */
+	(void) pgsql_handle_notifications(pgsql);
 
 	while (true)
 	{
 		PGresult *result = PQgetResult(connection);
+
+		/*
+		 * Per Postgres documentation: You should, however, remember to check
+		 * PQnotifies after each PQgetResult or PQexec, to see if any
+		 * notifications came in during the processing of the command.
+		 *
+		 * Here, we just called PQgetResult().
+		 */
+		(void) pgsql_handle_notifications(pgsql);
+
 		if (result == NULL)
 		{
 			break;
@@ -874,6 +895,46 @@ clear_results(PGconn *connection)
 	}
 
 	return success;
+}
+
+
+/*
+ * pgsql_handle_notifications check PQnotifies when a PGSQL notificationChannel
+ * has been set. Then if the parsed notification is from the
+ * notificationGroupId we set notificationReceived and also log the
+ * notification.
+ *
+ * This allow another part of the code to later know that some notifications
+ * have been received.
+ */
+static void
+pgsql_handle_notifications(PGSQL *pgsql)
+{
+	PGconn *connection = pgsql->connection;
+	PGnotify *notify;
+
+	if (pgsql->notificationProcessFunction == NULL)
+	{
+		return;
+	}
+
+	PQconsumeInput(connection);
+	while ((notify = PQnotifies(connection)) != NULL)
+	{
+		log_trace("pgsql_handle_notifications: \"%s\"", notify->extra);
+
+		if ((*pgsql->notificationProcessFunction)(pgsql->notificationGroupId,
+												  pgsql->notificationNodeId,
+												  notify->relname,
+												  notify->extra))
+		{
+			/* mark that we received some notifications */
+			pgsql->notificationReceived = true;
+		}
+
+		PQfreemem(notify);
+		PQconsumeInput(connection);
+	}
 }
 
 
@@ -1679,14 +1740,14 @@ pgsql_create_database(PGSQL *pgsql, const char *dbname, const char *owner)
 			log_error("Failed to create database \"%s\"[%s]: %s",
 					  dbname, sqlstate, PQerrorMessage(connection));
 			PQclear(result);
-			clear_results(connection);
+			clear_results(pgsql);
 			pgsql_finish(pgsql);
 			return false;
 		}
 	}
 
 	PQclear(result);
-	clear_results(connection);
+	clear_results(pgsql);
 
 	return true;
 }
@@ -1741,13 +1802,13 @@ pgsql_create_extension(PGSQL *pgsql, const char *name)
 		log_error("Failed to create extension \"%s\"[%s]: %s",
 				  name, sqlstate, PQerrorMessage(connection));
 		PQclear(result);
-		clear_results(connection);
+		clear_results(pgsql);
 		pgsql_finish(pgsql);
 		return false;
 	}
 
 	PQclear(result);
-	clear_results(connection);
+	clear_results(pgsql);
 
 	return true;
 }
@@ -1877,14 +1938,14 @@ pgsql_create_user(PGSQL *pgsql, const char *userName, const char *password,
 			log_error("Failed to create user \"%s\"[%s]: %s",
 					  userName, sqlstate, PQerrorMessage(connection));
 			PQclear(result);
-			clear_results(connection);
+			clear_results(pgsql);
 			pgsql_finish(pgsql);
 			return false;
 		}
 	}
 
 	PQclear(result);
-	clear_results(connection);
+	clear_results(pgsql);
 
 	/* restore the normal notice message processing, if needed. */
 	PQsetNoticeProcessor(connection, previousNoticeProcessor, NULL);
@@ -2430,13 +2491,13 @@ pgsql_listen(PGSQL *pgsql, char *channels[])
 			log_error("Failed to LISTEN \"%s\": %s",
 					  channels[i], PQerrorMessage(connection));
 			PQclear(result);
-			clear_results(connection);
+			clear_results(pgsql);
 
 			return false;
 		}
 
 		PQclear(result);
-		clear_results(connection);
+		clear_results(pgsql);
 	}
 
 	return true;
@@ -2511,13 +2572,13 @@ pgsql_alter_extension_update_to(PGSQL *pgsql,
 		log_error("Error %s while running Postgres query: %s: %s",
 				  sqlstate, command, PQerrorMessage(connection));
 		PQclear(result);
-		clear_results(connection);
+		clear_results(pgsql);
 		pgsql_finish(pgsql);
 		return false;
 	}
 
 	PQclear(result);
-	clear_results(connection);
+	clear_results(pgsql);
 
 	return true;
 }

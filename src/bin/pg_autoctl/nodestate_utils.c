@@ -380,3 +380,35 @@ nodestateHealthToString(int health)
 		}
 	}
 }
+
+
+/*
+ * nodestate_log logs a CurrentNodeState, usually that comes from a
+ * notification message we parse.
+ */
+void
+nodestate_log(CurrentNodeState *nodeState, int logLevel, int nodeId)
+{
+	if (nodeState->node.nodeId == nodeId)
+	{
+		log_level(logLevel,
+				  "New state for this node (node %d, \"%s\") (%s:%d): %s ➜ %s",
+				  nodeState->node.nodeId,
+				  nodeState->node.name,
+				  nodeState->node.host,
+				  nodeState->node.port,
+				  NodeStateToString(nodeState->reportedState),
+				  NodeStateToString(nodeState->goalState));
+	}
+	else
+	{
+		log_level(logLevel,
+				  "New state for node %d \"%s\" (%s:%d): %s ➜ %s",
+				  nodeState->node.nodeId,
+				  nodeState->node.name,
+				  nodeState->node.host,
+				  nodeState->node.port,
+				  NodeStateToString(nodeState->reportedState),
+				  NodeStateToString(nodeState->goalState));
+	}
+}

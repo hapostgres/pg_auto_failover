@@ -2994,16 +2994,54 @@ monitor_stop_maintenance(Monitor *monitor, int nodeId)
  * of notifications received from the previous calls loop.
  */
 bool
-monitor_get_notifications(Monitor *monitor)
+monitor_get_notifications(Monitor *monitor, int timeoutMs)
 {
 	PGconn *connection = monitor->pgsql.connection;
 	PGnotify *notify;
+
+	char *channels[] = { "state", "log", NULL };
+
+	int ret;
 	int sock;
+
+	sigset_t mask;
+	sigset_t orig_mask;
+
+	/* we have milliseconds, we want seconds and nanoseconds separately */
+	int seconds = timeoutMs / 1000;
+	int nanosecs = 1000 * 1000 * (timeoutMs % 1000);
+	struct timespec timeout = { .tv_sec = seconds, .tv_nsec = nanosecs };
+
 	fd_set input_mask;
 
-	if (connection == NULL)
+	/* block signals now: process them as if received during the pselect call */
+	if (!block_signals(&mask, &orig_mask))
+	{
+		return false;
+	}
+
+	if (asked_to_stop || asked_to_stop_fast || asked_to_reload || asked_to_quit)
+	{
+		/* restore signal masks (un block them) now */
+		(void) unblock_signals(&orig_mask);
+		return false;
+	}
+
+	if (!pgsql_listen(&(monitor->pgsql), channels))
+	{
+		/* restore signal masks (un block them) now */
+		(void) unblock_signals(&orig_mask);
+
+		return false;
+	}
+
+	if (monitor->pgsql.connection == NULL)
 	{
 		log_warn("Lost connection.");
+
+		/* restore signal masks (un block them) now */
+		(void) unblock_signals(&orig_mask);
+
 		return false;
 	}
 
@@ -3013,19 +3051,28 @@ monitor_get_notifications(Monitor *monitor)
 	 *
 	 * https://www.postgresql.org/docs/current/libpq-example.html#LIBPQ-EXAMPLE-2
 	 */
-	sock = PQsocket(connection);
+	sock = PQsocket(monitor->pgsql.connection);
 
 	if (sock < 0)
 	{
+		/* restore signal masks (un block them) now */
+		(void) unblock_signals(&orig_mask);
+
 		return false;   /* shouldn't happen */
 	}
+
 	FD_ZERO(&input_mask);
 	FD_SET(sock, &input_mask);
 
-	if (select(sock + 1, &input_mask, NULL, NULL, NULL) < 0)
+	ret = pselect(sock + 1, &input_mask, NULL, NULL, &timeout, &orig_mask);
+
+	/* restore signal masks (un block them) now that pselect() is done */
+	(void) unblock_signals(&orig_mask);
+
+	if (ret < 0)
 	{
 		/* it might be interrupted by a signal we know how to handle */
-		if (asked_to_reload || asked_to_stop || asked_to_stop_fast)
+		if (errno == EINTR)
 		{
 			return true;
 		}
@@ -3034,6 +3081,12 @@ monitor_get_notifications(Monitor *monitor)
 			log_warn("Failed to get monitor notifications: select(): %m");
 			return false;
 		}
+	}
+
+	if (ret == 0)
+	{
+		/* we reached the timeout */
+		return true;
 	}
 
 	/* Now check for input */
@@ -3048,17 +3101,12 @@ monitor_get_notifications(Monitor *monitor)
 		{
 			CurrentNodeState nodeState = { 0 };
 
-			log_debug("received \"%s\"", notify->extra);
+			log_trace("received \"%s\"", notify->extra);
 
 			/* errors are logged by parse_state_notification_message */
 			if (parse_state_notification_message(&nodeState, notify->extra))
 			{
-				log_info("New state for node %d (%s:%d): %s ➜ %s",
-						 nodeState.node.nodeId,
-						 nodeState.node.host,
-						 nodeState.node.port,
-						 NodeStateToString(nodeState.reportedState),
-						 NodeStateToString(nodeState.goalState));
+				(void) nodestate_log(&nodeState, LOG_INFO, 0);
 			}
 		}
 		else
@@ -3140,8 +3188,16 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 
 		if (select(sock + 1, &input_mask, NULL, NULL, NULL) < 0)
 		{
-			log_warn("select() failed: %m");
-			return false;
+			/* it might be interrupted by a signal we know how to handle */
+			if (errno == EINTR)
+			{
+				return true;
+			}
+			else
+			{
+				log_warn("select() failed: %m");
+				return false;
+			}
 		}
 
 		/* Now check for input */
@@ -3342,8 +3398,16 @@ monitor_wait_until_some_node_reported_state(Monitor *monitor,
 
 		if (select(sock + 1, &input_mask, NULL, NULL, NULL) < 0)
 		{
-			log_warn("select() failed: %m");
-			return false;
+			/* stop when receiving a signal */
+			if (errno == EINTR)
+			{
+				return true;
+			}
+			else
+			{
+				log_warn("select() failed: %m");
+				return false;
+			}
 		}
 
 		/* Now check for input */
