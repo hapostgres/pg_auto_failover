@@ -456,6 +456,9 @@ AS 'MODULE_PATHNAME', $$perform_promotion$$;
 comment on function pgautofailover.perform_promotion(text,text)
         is 'manually failover from the primary to the given node';
 
+grant execute on function pgautofailover.perform_promotion(text,text)
+   to autoctl_node;
+
 CREATE FUNCTION pgautofailover.start_maintenance(node_id int)
 RETURNS bool LANGUAGE C STRICT SECURITY DEFINER
 AS 'MODULE_PATHNAME', $$start_maintenance$$;

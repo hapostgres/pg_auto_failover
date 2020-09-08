@@ -76,6 +76,15 @@ ALTER TABLE pgautofailover.formation
       ALTER COLUMN number_sync_standbys
        SET DEFAULT 0;
 
+--
+-- The default used to be 1, now it's zero. Change it for people who left
+-- the default (everybody, most certainly, because this used to have no
+-- impact).
+--
+UPDATE pgautofailover.formation
+   SET number_sync_standbys = 0
+ WHERE number_sync_standbys = 1;
+
 ALTER TABLE pgautofailover.formation
         ADD CHECK (kind IN ('pgsql', 'citus'));
 
@@ -478,6 +487,9 @@ AS 'MODULE_PATHNAME', $$perform_promotion$$;
 
 comment on function pgautofailover.perform_promotion(text,text)
         is 'manually failover from the primary to the given node';
+
+grant execute on function pgautofailover.perform_promotion(text,text)
+   to autoctl_node;
 
 DROP FUNCTION pgautofailover.start_maintenance(text, int);
 DROP FUNCTION pgautofailover.stop_maintenance(text, int);
