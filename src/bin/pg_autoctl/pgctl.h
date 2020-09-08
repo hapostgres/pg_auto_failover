@@ -50,6 +50,7 @@ bool pg_ctl_initdb(const char *pg_ctl, const char *pgdata);
 bool pg_ctl_postgres(const char *pg_ctl, const char *pgdata, int pgport,
 					 char *listen_addresses);
 bool pg_log_startup(const char *pgdata, int logLevel);
+bool pg_log_recovery_setup(const char *pgdata, int logLevel);
 bool pg_ctl_stop(const char *pg_ctl, const char *pgdata);
 int pg_ctl_status(const char *pg_ctl, const char *pgdata, bool log_output);
 bool pg_ctl_promote(const char *pg_ctl, const char *pgdata);

@@ -1252,6 +1252,59 @@ pg_log_startup(const char *pgdata, int logLevel)
 
 	closedir(logDir);
 
+	/* now add the contents of the recovery configuration */
+	(void) pg_log_recovery_setup(pgdata, logLevel);
+
+	return true;
+}
+
+
+/*
+ * pg_log_recovery_setup logs the current Postgres recovery settings from
+ * either the recovery.conf file or the standby setup. In case things go wrong
+ * in the Postgres version detection mechanism, or upgrades, or clean-up, this
+ * logs all the configuration files found rather than only those we expect we
+ * should find.
+ */
+bool
+pg_log_recovery_setup(const char *pgdata, int logLevel)
+{
+	char *filenames[] = {
+		"recovery.conf",
+		"standby.signal",
+		AUTOCTL_STANDBY_CONF_FILENAME,
+		NULL
+	};
+
+	for (int i = 0; filenames[i] != NULL; i++)
+	{
+		char recoveryConfPath[MAXPGPATH] = { 0 };
+		char *fileContents;
+		long fileSize;
+
+		join_path_components(recoveryConfPath, pgdata, "recovery.conf");
+
+		if (file_exists(recoveryConfPath))
+		{
+			if (!read_file(recoveryConfPath, &fileContents, &fileSize))
+			{
+				/* errors have already been logged */
+				continue;
+			}
+
+			if (fileSize > 0)
+			{
+				log_debug("Configuration file \"%s\":\n%s",
+						  recoveryConfPath, fileContents);
+			}
+			else
+			{
+				log_debug("Configuration file \"%s\" is empty",
+						  recoveryConfPath);
+			}
+		}
+	}
+
 	return true;
 }
 
