@@ -500,15 +500,12 @@ ensure_default_settings_file_exists(const char *configFilePath,
 		}
 
 		log_info("Contents of \"%s\" have changed, overwriting", configFilePath);
-		log_debug("Overwriting file \"%s\" with content:\n%s",
-				  configFilePath, defaultConfContents->data);
 		free(currentDefaultConfContents);
 	}
 	else
 	{
-		log_debug("Configuration file \"%s\" doesn't exists yet, "
-				  "creating with content:\n%s",
-				  configFilePath, defaultConfContents->data);
+		log_debug("Configuration file \"%s\" doesn't exists yet, creating",
+				  configFilePath);
 	}
 
 	if (!write_file(defaultConfContents->data,
@@ -518,6 +515,9 @@ ensure_default_settings_file_exists(const char *configFilePath,
 		destroyPQExpBuffer(defaultConfContents);
 		return false;
 	}
+
+	log_debug("Wrote file \"%s\" with content:\n%s",
+			  configFilePath, defaultConfContents->data);
 
 	destroyPQExpBuffer(defaultConfContents);
 
