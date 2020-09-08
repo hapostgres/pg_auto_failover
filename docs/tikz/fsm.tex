@@ -1,3 +1,13 @@
+% Fix for: https://tex.stackexchange.com/a/386772/43228
+\RequirePackage{shellesc}                % implement \write18
+
+\RequirePackage{pdftexcmds}              % fake \pdfshellescape so
+\makeatletter                            % standalone knows about it
+  \let\pdfshellescape\pdf@shellescape
+\makeatother
+
+% Fix for: https://tex.stackexchange.com/a/315027/43228
+\RequirePackage{luatex85}
 \documentclass[border=10pt,12pt,convert={density=600,outext=.png}]{standalone}
 
 \usepackage{tikz}
@@ -15,7 +25,7 @@
 
  %%\draw [help lines] (-10,0) grid (10,20);
 
-  
+
  \graph [
    tree layout,
    grow=right,
@@ -41,7 +51,7 @@
           "catching up" -> secondary [circle,draw=black,circle,fill=violet!30];
           primary -> "join primary" ;
           primary -> "wait primary" ;
-          
+
           primary -> draining [fill=red!30];
           draining -> demoted [fill=red!30];
           primary -> demoted ;
@@ -56,7 +66,7 @@
           "apply settings" -> primary ;
           "apply settings" -> draining ;
           "apply settings" -> demoted ;
-          "apply settings" -> "demote timeout" ; 
+          "apply settings" -> "demote timeout" ;
           "apply settings" -> primary ;
 
            primary -> "prepare maintenance" [fill=blue!10];
@@ -95,7 +105,7 @@
 
         };
 \end{tikzpicture}
-        
+
 \end{document}
 
 

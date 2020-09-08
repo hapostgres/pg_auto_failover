@@ -1,3 +1,5 @@
+% Fix for: https://tex.stackexchange.com/a/315027/43228
+\RequirePackage{luatex85}
 \documentclass[border=10pt,12pt]{standalone}
 
 \usepackage{pgf}
@@ -17,7 +19,7 @@
     minimum height=2.5cm,minimum width=4cm]
 
   %% \draw [help lines] (-10,0) grid (10,20);
-  
+
   \node  (p)   at (0,18)   [primary]       {\textbf{Primary}};
   \node  (s)   at (0,12)   [standby]       {\textbf{Secondary}};
   \node  (app) at (-6,15)  [app]           {Application};
