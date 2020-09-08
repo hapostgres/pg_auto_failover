@@ -68,3 +68,8 @@ chain involves the following software:
 
 Current TeX distributions should include luatex and tikz for you already.
 One such distribution is TexLive and is widely available.
+
+#### For Ubuntu
+```
+sudo apt-get install latexmk texlive texlive-luatex texlive-latex-extra poppler-utils
+```

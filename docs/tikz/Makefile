@@ -16,7 +16,7 @@ clean:
 	rm -rf $(PNG)
 
 %.pdf: %.tex
-	latexmk -pdflua $< $@
+	latexmk -lualatex --interaction=nonstopmode -shell-escape $< $@
 	latexmk -c
 
 %.png: %.pdf

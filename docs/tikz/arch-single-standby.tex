@@ -1,3 +1,5 @@
+% Fix for: https://tex.stackexchange.com/a/315027/43228
+\RequirePackage{luatex85}
 \documentclass[border=10pt,12pt]{standalone}
 
 \usepackage{pgf}
@@ -7,26 +9,30 @@
 \begin{document}
 
 \begin{tikzpicture}[>=stealth',bend angle=45,auto,rounded corners]
+  \tikzstyle{app}=[circle,thick,draw=blue!65,fill=white,text=black!90,line width=0.25em]
 
-  \tikzstyle{app}=[circle,thick,draw=blue!75,fill=white,line width=0.25em]
-  \tikzstyle{primary}=[rectangle,color=white,draw=blue!75,fill=blue!75,
-    minimum height=2.5cm,minimum width=4cm]
-  \tikzstyle{standby}=[draw=blue!35,fill=blue!35,
-    minimum height=2.5cm,minimum width=4cm]
-  \tikzstyle{monitor}=[draw=green!35,fill=green!75,
-    minimum height=2.5cm,minimum width=4cm]
+  \tikzstyle{primary}=[rectangle split,rectangle split parts=4,
+    text=white,draw=white,fill=blue!65,
+    minimum height=3cm,minimum width=4cm]
+
+  \tikzstyle{standby}=[rectangle split,rectangle split parts=3,
+    text=white,draw=white,fill=blue!25,text=black!90,
+    minimum height=1.75cm,minimum width=4cm]
+
+  \tikzstyle{monitor}=[draw=green!35,fill=green!35,text=black!90,
+    minimum height=1.5cm,minimum width=3cm]
 
   %% \draw [help lines] (-10,0) grid (10,20);
-  
+
   \node  (p)   at (0,18)   [primary]       {\textbf{Primary}};
   \node  (s)   at (0,12)   [standby]       {\textbf{Secondary}};
   \node  (app) at (-6,15)  [app]           {Application};
   \node  (m)   at (6,15)   [monitor]       {\textbf{Monitor}};
 
-  \tikzstyle{sql}=[->,color=blue!75,line width=0.15em]
-  \tikzstyle{sqlf}=[->,color=blue!35,line width=0.15em,loosely dashed]
-  \tikzstyle{sr}=[>->,line width=0.15em]
-  \tikzstyle{hc}=[<->,color=green!75,line width=0.15em,dotted]
+  \tikzstyle{sql}=[->,color=blue!60,text=black!90,line width=0.15em]
+  \tikzstyle{sqlf}=[->,color=blue!35,text=black!90,line width=0.15em,loosely dashed]
+  \tikzstyle{sr}=[>->,color=black!70,text=black!90,line width=0.15em]
+  \tikzstyle{hc}=[<->,color=green!50,text=black!90,line width=0.15em,dotted]
 
   \path (app.north east) edge [sql,out=90,in=180]   node {SQL} (p)
         (app.south east) edge [sqlf,out=-90,in=180] node[below] {SQL (fallback)} (s)
