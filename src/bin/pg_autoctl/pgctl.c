@@ -499,7 +499,9 @@ ensure_default_settings_file_exists(const char *configFilePath,
 			return true;
 		}
 
-		log_warn("Contents of \"%s\" have changed, overwriting", configFilePath);
+		log_info("Contents of \"%s\" have changed, overwriting", configFilePath);
+		log_debug("Overwriting file \"%s\" with content:\n%s",
+				  configFilePath, defaultConfContents->data);
 		free(currentDefaultConfContents);
 	}
 	else
