@@ -881,6 +881,51 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 		return true;
 	}
 
+	/*
+	 * when a secondary node has been removed during registration, or when
+	 * there's no visible reason to not be a primary rather than either
+	 * wait_primary or join_primary
+	 *
+	 *    join_primary ➜ primary
+	 */
+	if (IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
+		IsCurrentState(primaryNode, REPLICATION_STATE_JOIN_PRIMARY))
+	{
+		ListCell *nodeCell = NULL;
+		bool allSecondariesAreGood = true;
+
+		foreach(nodeCell, otherNodesGroupList)
+		{
+			AutoFailoverNode *otherNode = (AutoFailoverNode *) lfirst(nodeCell);
+
+			allSecondariesAreGood = allSecondariesAreGood &&
+									IsCurrentState(otherNode,
+												   REPLICATION_STATE_SECONDARY) &&
+									IsHealthy(otherNode);
+
+			if (!allSecondariesAreGood)
+			{
+				break;
+			}
+		}
+
+		if (allSecondariesAreGood)
+		{
+			char message[BUFSIZE] = { 0 };
+
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of node %d \"%s\" (%s:%d) back to primary",
+				primaryNode->nodeId,
+				primaryNode->nodeName,
+				primaryNode->nodeHost,
+				primaryNode->nodePort);
+
+			AssignGoalState(primaryNode, REPLICATION_STATE_PRIMARY, message);
+
+			return true;
+		}
+	}
 	return false;
 }
 

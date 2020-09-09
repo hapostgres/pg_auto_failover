@@ -376,6 +376,12 @@ fsm_disable_replication(Keeper *keeper)
 {
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
+	if (!ensure_postgres_service_is_running(postgres))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
 	if (!primary_disable_synchronous_replication(postgres))
 	{
 		log_error("Failed to disable replication because disabling synchronous "
