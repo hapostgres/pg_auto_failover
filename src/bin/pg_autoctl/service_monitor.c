@@ -280,6 +280,7 @@ monitor_service_run(Monitor *monitor)
 		if (firstLoop)
 		{
 			log_info("Contacting the monitor to LISTEN to its events.");
+			firstLoop = false;
 		}
 
 		if (!monitor_get_notifications(monitor,
@@ -291,11 +292,6 @@ monitor_service_run(Monitor *monitor)
 			pgsql_finish(&(monitor->pgsql));
 
 			continue;
-		}
-
-		if (firstLoop)
-		{
-			firstLoop = false;
 		}
 	}
 

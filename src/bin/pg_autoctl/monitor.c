@@ -3004,8 +3004,8 @@ monitor_get_notifications(Monitor *monitor, int timeoutMs)
 	int ret;
 	int sock;
 
-	sigset_t mask;
-	sigset_t orig_mask;
+	sigset_t sig_mask;
+	sigset_t sig_mask_orig;
 
 	/* we have milliseconds, we want seconds and nanoseconds separately */
 	int seconds = timeoutMs / 1000;
@@ -3015,22 +3015,26 @@ monitor_get_notifications(Monitor *monitor, int timeoutMs)
 	fd_set input_mask;
 
 	/* block signals now: process them as if received during the pselect call */
-	if (!block_signals(&mask, &orig_mask))
+	if (!block_signals(&sig_mask, &sig_mask_orig))
 	{
 		return false;
 	}
 
+	/*
+	 * Check if we received signals just before blocking them. If that's the
+	 * case we can stop now.
+	 */
 	if (asked_to_stop || asked_to_stop_fast || asked_to_reload || asked_to_quit)
 	{
 		/* restore signal masks (un block them) now */
-		(void) unblock_signals(&orig_mask);
+		(void) unblock_signals(&sig_mask_orig);
 		return false;
 	}
 
 	if (!pgsql_listen(&(monitor->pgsql), channels))
 	{
 		/* restore signal masks (un block them) now */
-		(void) unblock_signals(&orig_mask);
+		(void) unblock_signals(&sig_mask_orig);
 
 		return false;
 	}
@@ -3040,7 +3044,7 @@ monitor_get_notifications(Monitor *monitor, int timeoutMs)
 		log_warn("Lost connection.");
 
 		/* restore signal masks (un block them) now */
-		(void) unblock_signals(&orig_mask);
+		(void) unblock_signals(&sig_mask_orig);
 
 		return false;
 	}
@@ -3056,7 +3060,7 @@ monitor_get_notifications(Monitor *monitor, int timeoutMs)
 	if (sock < 0)
 	{
 		/* restore signal masks (un block them) now */
-		(void) unblock_signals(&orig_mask);
+		(void) unblock_signals(&sig_mask_orig);
 
 		return false;   /* shouldn't happen */
 	}
@@ -3064,10 +3068,10 @@ monitor_get_notifications(Monitor *monitor, int timeoutMs)
 	FD_ZERO(&input_mask);
 	FD_SET(sock, &input_mask);
 
-	ret = pselect(sock + 1, &input_mask, NULL, NULL, &timeout, &orig_mask);
+	ret = pselect(sock + 1, &input_mask, NULL, NULL, &timeout, &sig_mask_orig);
 
 	/* restore signal masks (un block them) now that pselect() is done */
-	(void) unblock_signals(&orig_mask);
+	(void) unblock_signals(&sig_mask_orig);
 
 	if (ret < 0)
 	{
