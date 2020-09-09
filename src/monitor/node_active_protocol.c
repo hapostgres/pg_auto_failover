@@ -554,21 +554,6 @@ JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 
 			initialState = REPLICATION_STATE_WAIT_STANDBY;
 
-			/*
-			 * We can only accept a single WAIT_STANDBY at a time, because of
-			 * the way the FSM works. When the primary reports a goalState of
-			 * WAIT_PRIMARY, we can advance the WAIT_STANDBY node to CATCHING
-			 * UP. The FSM protocol and decision making is per state, and we
-			 * wouldn't know which standby to advance if there were more than
-			 * one in state WAIT_STANDBY at any given time.
-			 *
-			 * As a consequence, if the primary node is already in WAIT_PRIMARY
-			 * or in JOIN_PRIMARY state, then we can't accept a new standby
-			 * yet. Only one new standby at a time.
-			 *
-			 * We detect the situation here and report error code 55006 so that
-			 * pg_autoctl knows to retry registering.
-			 */
 			primaryNode =
 				GetPrimaryNodeInGroup(
 					formation->formationId,
@@ -577,9 +562,8 @@ JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 			if (primaryNode == NULL)
 			{
 				/*
-				 * We have list_length(groupNodeList) >= 1 and yet we don't
-				 * have any node that is in a writable state: this means the
-				 * primary node was assigned SINGLE but did not report yet.
+				 * We might be in the middle of a failover or some situation
+				 * where there is no known primary at the moment.
 				 */
 				ereport(ERROR,
 						(errcode(ERRCODE_OBJECT_IN_USE),
@@ -589,49 +573,16 @@ JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 								currentNodeState->groupId),
 						 errhint("Retry registering in a moment")));
 			}
+		}
 
-			/*
-			 * We can only accept a single new standby at a time. Spend some
-			 * cycles on grabbing more information for a user-friendly report.
-			 */
-			if (IsInWaitOrJoinState(primaryNode))
-			{
-				const char *primaryState =
-					ReplicationStateGetName(primaryNode->reportedState);
-
-				AutoFailoverNode *standbyNode =
-					FindFailoverNewStandbyNode(groupNodeList);
-
-				/* race condition: the standby might be SECONDARY already */
-				if (standbyNode != NULL)
-				{
-					ereport(ERROR,
-							(errcode(ERRCODE_OBJECT_IN_USE),
-							 errmsg("primary node %s:%d is already in state %s",
-									primaryNode->nodeHost,
-									primaryNode->nodePort,
-									primaryState),
-							 errdetail("Only one standby can be registered "
-									   "at a time in pg_auto_failover, and "
-									   "node %d (%s:%d) is currently being "
-									   "registered.",
-									   standbyNode->nodeId,
-									   standbyNode->nodeHost,
-									   standbyNode->nodePort),
-							 errhint("Retry registering in a moment")));
-				}
-				else
-				{
-					/* sadly we don't have details in that case */
-					ereport(ERROR,
-							(errcode(ERRCODE_OBJECT_IN_USE),
-							 errmsg("primary node %s:%d is already in state %s",
-									primaryNode->nodeHost,
-									primaryNode->nodePort,
-									primaryState),
-							 errhint("Retry registering in a moment")));
-				}
-			}
+		/* formation->opt_secondary is false */
+		else
+		{
+			ereport(ERROR,
+					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					 errmsg("Formation \"%s\" does not allow secondary nodes",
+							formation->formationId),
+					 errhint("use pg_autoctl enable secondary")));
 		}
 	}
 	else
