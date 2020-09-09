@@ -52,6 +52,70 @@ set_signal_handlers(bool exitOnQuit)
 
 
 /*
+ * mask_signals prepares a pselect() call by masking all the signals we handle
+ * in this part of the code, to avoid race conditions with setting our atomic
+ * variables at signal handling.
+ */
+bool
+block_signals(sigset_t *mask, sigset_t *orig_mask)
+{
+	int signals[] = { SIGHUP, SIGINT, SIGTERM, SIGQUIT, -1 };
+
+	if (sigemptyset(mask) == -1)
+	{
+		/* man sigemptyset sayth: No errors are defined. */
+		log_error("sigemptyset: %m");
+		return false;
+	}
+
+	for (int i = 0; signals[i] != -1; i++)
+	{
+		/*
+		 * The sigaddset() function may fail if:
+		 *
+		 * EINVAL The value of the signo argument is an invalid or unsupported
+		 *        signal number
+		 *
+		 * This should never happen given the manual set of signals we are
+		 * processing here in this loop.
+		 */
+		if (sigaddset(mask, signals[i]) == -1)
+		{
+			log_error("sigaddset: %m");
+			return false;
+		}
+	}
+
+	if (sigprocmask(SIG_BLOCK, mask, orig_mask) == -1)
+	{
+		log_error("Failed to block signals: sigprocmask: %m");
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * unblock_signals calls sigprocmask to re-establish the normal signal mask, in
+ * order to allow our code to handle signals again.
+ *
+ * If we fail to unblock signals, then we won't be able to react to any
+ * interruption, reload, or shutdown sequence, and we'd rather exit now.
+ */
+void
+unblock_signals(sigset_t *orig_mask)
+{
+	/* restore signal masks (un block them) now */
+	if (sigprocmask(SIG_SETMASK, orig_mask, NULL) == -1)
+	{
+		log_fatal("Failed to restore signals: sigprocmask: %m");
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+}
+
+
+/*
  * catch_reload receives the SIGHUP signal.
  */
 void

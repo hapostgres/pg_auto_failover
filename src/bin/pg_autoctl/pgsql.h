@@ -104,6 +104,11 @@ typedef enum
 	PG_CONNECTION_BAD
 } PGConnStatus;
 
+/* notification processing */
+typedef bool (*ProcessNotificationFunction)(int notificationGroupId,
+											int notificationNodeId,
+											char *channel, char *payload);
+
 typedef struct PGSQL
 {
 	ConnectionType connectionType;
@@ -111,6 +116,11 @@ typedef struct PGSQL
 	PGconn *connection;
 	ConnectionRetryPolicy retryPolicy;
 	PGConnStatus status;
+
+	ProcessNotificationFunction notificationProcessFunction;
+	int notificationGroupId;
+	int notificationNodeId;
+	bool notificationReceived;
 } PGSQL;
 
 

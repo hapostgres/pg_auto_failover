@@ -604,12 +604,8 @@ cli_do_monitor_parse_notification(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	log_info("New state for %s:%d in formation \"%s\": %s/%s",
-			 nodeState.node.host,
-			 nodeState.node.port,
-			 nodeState.formation,
-			 NodeStateToString(nodeState.reportedState),
-			 NodeStateToString(nodeState.goalState));
+	/* log the notification just parsed */
+	(void) nodestate_log(&nodeState, LOG_INFO, 0);
 
 	json_object_set_string(root, "name", nodeState.node.name);
 	json_object_set_string(root, "hostname", nodeState.node.host);
