@@ -1092,6 +1092,42 @@ typedef struct ReplicationSlotMaintainContext
 
 
 /*
+ * pgsql_replication_slot_exists checks that a replication slot with the given
+ * slotName exists on the Postgres server.
+ */
+bool
+pgsql_replication_slot_exists(PGSQL *pgsql, const char *slotName,
+							  bool *slotExists)
+{
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BOOL, false };
+	char *sql =
+		"SELECT bool 't' FROM pg_replication_slots WHERE slot_name = $1";
+	int paramCount = 1;
+	Oid paramTypes[1] = { TEXTOID };
+	const char *paramValues[1] = { slotName };
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &parseSingleValueResult))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	if (!context.parsedOk)
+	{
+		log_error("Failed to check if the replication slot \"%s\" exists",
+				  slotName);
+		return false;
+	}
+
+	*slotExists = context.boolVal;
+
+	return true;
+}
+
+
+/*
  * pgsql_create_replication_slot tries to create a replication slot on the
  * database identified by a connection string. It's implemented as CREATE IF
  * NOT EXISTS so that it's idempotent and can be retried easily.

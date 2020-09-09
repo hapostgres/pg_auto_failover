@@ -362,6 +362,48 @@ primary_has_replica(LocalPostgresServer *postgres, char *userName, bool *hasStan
 
 
 /*
+ * upstream_has_replication_slot checks whether the upstream server already has
+ * created our replication slot.
+ */
+bool
+upstream_has_replication_slot(ReplicationSource *upstream,
+							  PostgresSetup *pgSetup,
+							  bool *hasReplicationSlot)
+{
+	NodeAddress *primaryNode = &(upstream->primaryNode);
+
+	PostgresSetup upstreamSetup = { 0 };
+	PGSQL upstreamClient = { 0 };
+	char connectionString[MAXCONNINFO] = { 0 };
+
+	/* prepare a PostgresSetup that allows preparing a connection string */
+	strlcpy(upstreamSetup.username, PG_AUTOCTL_REPLICA_USERNAME, NAMEDATALEN);
+	strlcpy(upstreamSetup.dbname, pgSetup->dbname, NAMEDATALEN);
+	strlcpy(upstreamSetup.pghost, primaryNode->host, _POSIX_HOST_NAME_MAX);
+	upstreamSetup.pgport = primaryNode->port;
+	upstreamSetup.ssl = pgSetup->ssl;
+
+	pg_setup_get_local_connection_string(&upstreamSetup, connectionString);
+
+	if (!pgsql_init(&upstreamClient, connectionString, PGSQL_CONN_UPSTREAM))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	if (!pgsql_replication_slot_exists(&upstreamClient,
+									   upstream->slotName,
+									   hasReplicationSlot))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
  * primary_create_replication_slot (re)creates a replication slot. The
  * replication slot will not have its LSN initialized until first use. The
  * return value indicates whether the operation was successful.
@@ -766,6 +808,23 @@ standby_init_database(LocalPostgresServer *postgres,
 	}
 	else
 	{
+		/*
+		 * pg_basebackup has this bug where it will copy over the whole PGDATA
+		 * contents even if the WAL receiver subprocess fails early, typically
+		 * when the replication slot does not exists on the target connection.
+		 *
+		 * We want to protect against this case here, so we manually check that
+		 * the replication exists before calling pg_basebackup.
+		 */
+		bool hasReplicationSlot = false;
+
+		if (!upstream_has_replication_slot(upstream,
+										   pgSetup,
+										   &hasReplicationSlot))
+		{
+			return false;
+		}
+
 		if (!pg_basebackup(pgSetup->pgdata, pgSetup->pg_ctl, upstream))
 		{
 			return false;

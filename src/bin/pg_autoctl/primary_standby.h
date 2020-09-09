@@ -62,6 +62,9 @@ bool ensure_postgres_service_is_stopped(LocalPostgresServer *postgres);
 
 bool primary_has_replica(LocalPostgresServer *postgres, char *userName,
 						 bool *hasStandby);
+bool upstream_has_replication_slot(ReplicationSource *upstream,
+								   PostgresSetup *pgSetup,
+								   bool *hasReplicationSlot);
 bool primary_create_replication_slot(LocalPostgresServer *postgres,
 									 char *replicationSlotName);
 bool primary_drop_replication_slot(LocalPostgresServer *postgres,

@@ -56,7 +56,8 @@ typedef enum
 {
 	PGSQL_CONN_LOCAL = 0,
 	PGSQL_CONN_MONITOR,
-	PGSQL_CONN_COORDINATOR
+	PGSQL_CONN_COORDINATOR,
+	PGSQL_CONN_UPSTREAM
 } ConnectionType;
 
 
@@ -256,6 +257,8 @@ bool pgsql_check_postgresql_settings(PGSQL *pgsql, bool isCitusInstanceKind,
 bool pgsql_check_monitor_settings(PGSQL *pgsql, bool *settings_are_ok);
 bool pgsql_is_in_recovery(PGSQL *pgsql, bool *is_in_recovery);
 bool pgsql_reload_conf(PGSQL *pgsql);
+bool pgsql_replication_slot_exists(PGSQL *pgsql, const char *slotName,
+								   bool *slotExists);
 bool pgsql_create_replication_slot(PGSQL *pgsql, const char *slotName);
 bool pgsql_drop_replication_slot(PGSQL *pgsql, const char *slotName);
 bool postgres_sprintf_replicationSlotName(int nodeId, char *slotName, int size);
