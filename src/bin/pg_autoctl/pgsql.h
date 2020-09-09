@@ -248,6 +248,7 @@ void pgsql_set_init_retry_policy(PGSQL *pgsql);
 void pgsql_set_interactive_retry_policy(PGSQL *pgsql);
 void pgsql_finish(PGSQL *pgsql);
 void parseSingleValueResult(void *ctx, PGresult *result);
+void fetchedRows(void *ctx, PGresult *result);
 bool pgsql_execute(PGSQL *pgsql, const char *sql);
 bool pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 							   const Oid *paramTypes, const char **paramValues,
@@ -264,8 +265,8 @@ bool pgsql_drop_replication_slot(PGSQL *pgsql, const char *slotName);
 bool postgres_sprintf_replicationSlotName(int nodeId, char *slotName, int size);
 bool pgsql_set_synchronous_standby_names(PGSQL *pgsql,
 										 char *synchronous_standby_names);
-bool pgsql_replication_slot_drop_removed(PGSQL *pgsql,
-										 NodeAddressArray *nodeArray);
+bool pgsql_replication_slot_create_and_drop(PGSQL *pgsql,
+											NodeAddressArray *nodeArray);
 bool pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray);
 bool postgres_sprintf_replicationSlotName(int nodeId, char *slotName, int size);
 bool pgsql_enable_synchronous_replication(PGSQL *pgsql);

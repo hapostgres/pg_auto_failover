@@ -71,8 +71,8 @@ bool primary_drop_replication_slot(LocalPostgresServer *postgres,
 								   char *replicationSlotName);
 bool primary_drop_replication_slots(LocalPostgresServer *postgres);
 bool primary_set_synchronous_standby_names(LocalPostgresServer *postgres);
-bool postgres_replication_slot_drop_removed(LocalPostgresServer *postgres,
-											NodeAddressArray *nodeArray);
+bool postgres_replication_slot_create_and_drop(LocalPostgresServer *postgres,
+											   NodeAddressArray *nodeArray);
 bool postgres_replication_slot_maintain(LocalPostgresServer *postgres,
 										NodeAddressArray *nodeArray);
 bool primary_enable_synchronous_replication(LocalPostgresServer *postgres);

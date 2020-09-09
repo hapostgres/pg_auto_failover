@@ -102,6 +102,21 @@ parseSingleValueResult(void *ctx, PGresult *result)
 
 
 /*
+ * fetchedRows is a pgsql_execute_with_params callback function that sets a
+ * SingleValueResultContext->intVal to PQntuples(result), that is how many rows
+ * are fetched by the query.
+ */
+void
+fetchedRows(void *ctx, PGresult *result)
+{
+	SingleValueResultContext *context = (SingleValueResultContext *) ctx;
+
+	context->parsedOk = true;
+	context->intVal = PQntuples(result);
+}
+
+
+/*
  * pgsql_init initializes a PGSQL struct to connect to the given database
  * URL or connection string.
  */
@@ -1100,15 +1115,14 @@ pgsql_replication_slot_exists(PGSQL *pgsql, const char *slotName,
 							  bool *slotExists)
 {
 	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BOOL, false };
-	char *sql =
-		"SELECT bool 't' FROM pg_replication_slots WHERE slot_name = $1";
+	char *sql = "SELECT 1 FROM pg_replication_slots WHERE slot_name = $1";
 	int paramCount = 1;
 	Oid paramTypes[1] = { TEXTOID };
 	const char *paramValues[1] = { slotName };
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
-								   &context, &parseSingleValueResult))
+								   &context, &fetchedRows))
 	{
 		/* errors have already been logged */
 		return false;
@@ -1121,7 +1135,8 @@ pgsql_replication_slot_exists(PGSQL *pgsql, const char *slotName,
 		return false;
 	}
 
-	*slotExists = context.boolVal;
+	/* we receive 0 rows in the result when the slot does not exist yet */
+	*slotExists = context.intVal == 1;
 
 	return true;
 }
@@ -1276,8 +1291,9 @@ BuildNodesArrayValues(NodeAddressArray *nodeArray,
 
 
 /*
- * pgsql_replication_slot_drop_removed drop replication slots that belong to
- * nodes that have been removed. We call that function on the primary, where
+ * pgsql_replication_slot_create_and_drop drops replication slots that belong
+ * to nodes that have been removed, and creates replication slots for nodes
+ * that have been newly registered. We call that function on the primary, where
  * the slots are maintained by the replication protocol.
  *
  * On the standby nodes, we advance the slots ourselves and use the other
@@ -1285,7 +1301,7 @@ BuildNodesArrayValues(NodeAddressArray *nodeArray,
  * advance).
  */
 bool
-pgsql_replication_slot_drop_removed(PGSQL *pgsql, NodeAddressArray *nodeArray)
+pgsql_replication_slot_create_and_drop(PGSQL *pgsql, NodeAddressArray *nodeArray)
 {
 	int bytes;
 	char sql[2 * BUFSIZE] = { 0 };

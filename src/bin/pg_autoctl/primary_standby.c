@@ -445,19 +445,20 @@ primary_drop_replication_slot(LocalPostgresServer *postgres,
 
 
 /*
- * postgres_replication_slot_drop_removed drops the replication slots that
- * belong to dropped nodes on a primary server.
+ * postgres_replication_slot_create_and_drop drops the replication slots that
+ * belong to dropped nodes on a primary server, and creates replication slots
+ * for newly created nodes on the monitor.
  */
 bool
-postgres_replication_slot_drop_removed(LocalPostgresServer *postgres,
-									   NodeAddressArray *nodeArray)
+postgres_replication_slot_create_and_drop(LocalPostgresServer *postgres,
+										  NodeAddressArray *nodeArray)
 {
 	bool result = false;
 	PGSQL *pgsql = &(postgres->sqlClient);
 
 	log_trace("postgres_replication_slot_drop_removed");
 
-	result = pgsql_replication_slot_drop_removed(pgsql, nodeArray);
+	result = pgsql_replication_slot_create_and_drop(pgsql, nodeArray);
 
 	pgsql_finish(pgsql);
 	return result;
@@ -822,11 +823,26 @@ standby_init_database(LocalPostgresServer *postgres,
 										   pgSetup,
 										   &hasReplicationSlot))
 		{
+			/* errors have already been logged */
 			return false;
 		}
 
-		if (!pg_basebackup(pgSetup->pgdata, pgSetup->pg_ctl, upstream))
+		if (hasReplicationSlot)
 		{
+			if (!pg_basebackup(pgSetup->pgdata, pgSetup->pg_ctl, upstream))
+			{
+				return false;
+			}
+		}
+		else
+		{
+			log_error("The replication slot \"%s\" has not been created "
+					  "on the primary node %d \"%s\" (%s:%d) yet",
+					  upstream->slotName,
+					  upstream->primaryNode.nodeId,
+					  upstream->primaryNode.name,
+					  upstream->primaryNode.host,
+					  upstream->primaryNode.port);
 			return false;
 		}
 	}

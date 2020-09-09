@@ -393,7 +393,7 @@ fsm_disable_replication(Keeper *keeper)
 	bzero((void *) postgres->standbyTargetLSN, PG_LSN_MAXLENGTH);
 
 	/* when a standby has been removed, remove its replication slot */
-	return keeper_drop_replication_slots_for_removed_nodes(keeper);
+	return keeper_create_and_drop_replication_slots(keeper);
 }
 
 
