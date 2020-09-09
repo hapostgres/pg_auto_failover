@@ -3162,6 +3162,15 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 	while (!applySettingsTransitionDone)
 	{
 		/* Sleep until something happens on the connection. */
+		sigset_t sig_mask;
+		sigset_t sig_mask_orig;
+
+		/* we have milliseconds, we want seconds and nanoseconds separately */
+		int seconds = PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT;
+		int nanosecs = 0;
+		struct timespec timeout = { .tv_sec = seconds, .tv_nsec = nanosecs };
+
+		int ret;
 		int sock;
 		fd_set input_mask;
 		PGnotify *notify;
@@ -3187,10 +3196,37 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 		{
 			return false;   /* shouldn't happen */
 		}
+
+		/* block signals now: process them as if received during pselect() */
+		if (!block_signals(&sig_mask, &sig_mask_orig))
+		{
+			return false;
+		}
+
+		/*
+		 * Check if we received signals just before blocking them. If that's
+		 * the case we can stop now.
+		 */
+		if (asked_to_stop || asked_to_stop_fast ||
+			asked_to_reload || asked_to_quit)
+		{
+			/* restore signal masks (un block them) now */
+			(void) unblock_signals(&sig_mask_orig);
+			return false;
+		}
+
 		FD_ZERO(&input_mask);
 		FD_SET(sock, &input_mask);
 
-		if (select(sock + 1, &input_mask, NULL, NULL, NULL) < 0)
+		ret = pselect(sock + 1,
+					  &input_mask, NULL, NULL,
+					  &timeout,
+					  &sig_mask_orig);
+
+		/* restore signal masks (un block them) now that pselect() is done */
+		(void) unblock_signals(&sig_mask_orig);
+
+		if (ret < 0)
 		{
 			/* it might be interrupted by a signal we know how to handle */
 			if (errno == EINTR)
@@ -3199,9 +3235,15 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 			}
 			else
 			{
-				log_warn("select() failed: %m");
+				log_warn("Failed to get monitor notifications: select(): %m");
 				return false;
 			}
+		}
+
+		if (ret == 0)
+		{
+			log_error("Failed to receive monitor's notifications");
+			break;
 		}
 
 		/* Now check for input */
@@ -3372,8 +3414,18 @@ monitor_wait_until_some_node_reported_state(Monitor *monitor,
 	while (!failoverIsDone)
 	{
 		/* Sleep until something happens on the connection. */
+		sigset_t sig_mask;
+		sigset_t sig_mask_orig;
+
+		/* we have milliseconds, we want seconds and nanoseconds separately */
+		int seconds = PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT;
+		int nanosecs = 0;
+		struct timespec timeout = { .tv_sec = seconds, .tv_nsec = nanosecs };
+
+		int ret;
 		int sock;
 		fd_set input_mask;
+
 		PGnotify *notify;
 
 		uint64_t now = time(NULL);
@@ -3397,21 +3449,54 @@ monitor_wait_until_some_node_reported_state(Monitor *monitor,
 			log_error("Failed to get the connection socket with PQsocket()");
 			return false;   /* shouldn't happen */
 		}
+
+		/* block signals now: process them as if received during pselect() */
+		if (!block_signals(&sig_mask, &sig_mask_orig))
+		{
+			return false;
+		}
+
+		/*
+		 * Check if we received signals just before blocking them. If that's
+		 * the case we can stop now.
+		 */
+		if (asked_to_stop || asked_to_stop_fast ||
+			asked_to_reload || asked_to_quit)
+		{
+			/* restore signal masks (un block them) now */
+			(void) unblock_signals(&sig_mask_orig);
+			return false;
+		}
+
 		FD_ZERO(&input_mask);
 		FD_SET(sock, &input_mask);
 
-		if (select(sock + 1, &input_mask, NULL, NULL, NULL) < 0)
+		ret = pselect(sock + 1,
+					  &input_mask, NULL, NULL,
+					  &timeout,
+					  &sig_mask_orig);
+
+		/* restore signal masks (un block them) now that pselect() is done */
+		(void) unblock_signals(&sig_mask_orig);
+
+		if (ret < 0)
 		{
-			/* stop when receiving a signal */
+			/* it might be interrupted by a signal we know how to handle */
 			if (errno == EINTR)
 			{
 				return true;
 			}
 			else
 			{
-				log_warn("select() failed: %m");
+				log_warn("Failed to get monitor notifications: select(): %m");
 				return false;
 			}
+		}
+
+		if (ret == 0)
+		{
+			log_error("Failed to receive monitor's notifications");
+			break;
 		}
 
 		/* Now check for input */
