@@ -189,7 +189,28 @@ def test_012_can_write_during_maintenance():
     node3.run_sql_query("INSERT INTO t1 VALUES (5), (6)")
     node3.run_sql_query("CHECKPOINT")
 
-def test_013_disable_maintenance():
+def test_013_add_standby():
+    global node4
+
+    node4 = cluster.create_datanode("/tmp/multi_maintenance/node4")
+    node4.create()
+    node4.run()
+
+    assert node4.wait_until_state(target_state="secondary")
+    assert node3.wait_until_state(target_state="primary")
+    assert node2.wait_until_state(target_state="maintenance")
+    assert node1.wait_until_state(target_state="maintenance")
+
+    assert node3.has_needed_replication_slots()
+    assert node4.has_needed_replication_slots()
+
+    # the formation number_sync_standbys is expected to not be changed
+    eq_(node3.get_number_sync_standbys(), 0)
+
+    # make sure we reached primary on node1 before next tests
+    assert node3.wait_until_state(target_state="primary")
+
+def test_014_disable_maintenance():
     print()
     # make sure node2 is still in maintenance, then disable maintenance
     print("Disabling maintenance on node2")
@@ -210,33 +231,10 @@ def test_013_disable_maintenance():
     print("Node 3:  %s" %
           node3.run_sql_query("show synchronous_standby_names")[0][0])
 
-def test_014_set_number_sync_standby_to_one():
+def test_015_set_number_sync_standby_to_one():
     node3.set_number_sync_standbys(1)
     eq_(node3.get_number_sync_standbys(), 1)
 
-    assert node3.wait_until_state(target_state="primary")
-
-def test_015_add_standby():
-    global node4
-
-    node4 = cluster.create_datanode("/tmp/multi_maintenance/node4")
-    node4.create()
-    node4.run()
-
-    assert node4.wait_until_state(target_state="secondary")
-    assert node3.wait_until_state(target_state="primary")
-    assert node2.wait_until_state(target_state="secondary")
-    assert node1.wait_until_state(target_state="secondary")
-
-    assert node1.has_needed_replication_slots()
-    assert node2.has_needed_replication_slots()
-    assert node3.has_needed_replication_slots()
-    assert node4.has_needed_replication_slots()
-
-    # the formation number_sync_standbys is expected to be set to 1 now
-    assert node3.get_number_sync_standbys() == 1
-
-    # make sure we reached primary on node1 before next tests
     assert node3.wait_until_state(target_state="primary")
 
 def test_016_two_standbys_in_maintenance():
