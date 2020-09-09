@@ -24,6 +24,8 @@ USE_PGXS = 1
 
 DEFAULT_CFLAGS = -std=c99 -D_GNU_SOURCE -g
 DEFAULT_CFLAGS += $(shell $(PG_CONFIG) --cflags)
+DEFAULT_CFLAGS += -Wno-declaration-after-statement
+
 override CFLAGS := $(DEFAULT_CFLAGS) $(CFLAGS)
 
 include $(PGXS)

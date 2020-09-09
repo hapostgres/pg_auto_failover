@@ -79,6 +79,8 @@ PG_FUNCTION_INFO_V1(synchronous_standby_names);
 Datum
 register_node(PG_FUNCTION_ARGS)
 {
+	checkPgAutoFailoverVersion();
+
 	text *formationIdText = PG_GETARG_TEXT_P(0);
 	char *formationId = text_to_cstring(formationIdText);
 
@@ -115,8 +117,6 @@ register_node(PG_FUNCTION_ARGS)
 	HeapTuple resultTuple = NULL;
 	Datum values[6];
 	bool isNulls[6];
-
-	checkPgAutoFailoverVersion();
 
 	currentNodeState.nodeId = -1;
 	currentNodeState.groupId = currentGroupId;
@@ -343,6 +343,8 @@ register_node(PG_FUNCTION_ARGS)
 Datum
 node_active(PG_FUNCTION_ARGS)
 {
+	checkPgAutoFailoverVersion();
+
 	text *formationIdText = PG_GETARG_TEXT_P(0);
 	char *formationId = text_to_cstring(formationIdText);
 
@@ -365,8 +367,6 @@ node_active(PG_FUNCTION_ARGS)
 	HeapTuple resultTuple = NULL;
 	Datum values[5];
 	bool isNulls[5];
-
-	checkPgAutoFailoverVersion();
 
 	currentNodeState.nodeId = currentNodeId;
 	currentNodeState.groupId = currentGroupId;
@@ -660,6 +660,8 @@ AssignGroupId(AutoFailoverFormation *formation, char *nodeHost, int nodePort,
 Datum
 get_primary(PG_FUNCTION_ARGS)
 {
+	checkPgAutoFailoverVersion();
+
 	text *formationIdText = PG_GETARG_TEXT_P(0);
 	char *formationId = text_to_cstring(formationIdText);
 	int32 groupId = PG_GETARG_INT32(1);
@@ -672,8 +674,6 @@ get_primary(PG_FUNCTION_ARGS)
 	HeapTuple resultTuple = NULL;
 	Datum values[4];
 	bool isNulls[4];
-
-	checkPgAutoFailoverVersion();
 
 	primaryNode = GetPrimaryOrDemotedNodeInGroup(formationId, groupId);
 	if (primaryNode == NULL)
@@ -716,6 +716,8 @@ get_nodes(PG_FUNCTION_ARGS)
 	FuncCallContext *funcctx;
 	get_nodes_fctx *fctx;
 	MemoryContext oldcontext;
+
+	checkPgAutoFailoverVersion();
 
 	/* stuff done only on the first call of the function */
 	if (SRF_IS_FIRSTCALL())
@@ -831,6 +833,8 @@ get_other_nodes(PG_FUNCTION_ARGS)
 	FuncCallContext *funcctx;
 	get_nodes_fctx *fctx;
 	MemoryContext oldcontext;
+
+	checkPgAutoFailoverVersion();
 
 	/* stuff done only on the first call of the function */
 	if (SRF_IS_FIRSTCALL())
@@ -955,11 +959,11 @@ remove_node(PG_FUNCTION_ARGS)
 Datum
 remove_node_by_nodeid(PG_FUNCTION_ARGS)
 {
+	checkPgAutoFailoverVersion();
+
 	int32 nodeId = PG_GETARG_INT32(0);
 
 	AutoFailoverNode *currentNode = NULL;
-
-	checkPgAutoFailoverVersion();
 
 	currentNode = GetAutoFailoverNodeById(nodeId);
 
@@ -973,13 +977,13 @@ remove_node_by_nodeid(PG_FUNCTION_ARGS)
 Datum
 remove_node_by_host(PG_FUNCTION_ARGS)
 {
+	checkPgAutoFailoverVersion();
+
 	text *nodeHostText = PG_GETARG_TEXT_P(0);
 	char *nodeHost = text_to_cstring(nodeHostText);
 	int32 nodePort = PG_GETARG_INT32(1);
 
 	AutoFailoverNode *currentNode = NULL;
-
-	checkPgAutoFailoverVersion();
 
 	currentNode = GetAutoFailoverNode(nodeHost, nodePort);
 
@@ -1138,6 +1142,8 @@ RemoveNode(AutoFailoverNode *currentNode)
 Datum
 perform_failover(PG_FUNCTION_ARGS)
 {
+	checkPgAutoFailoverVersion();
+
 	text *formationIdText = PG_GETARG_TEXT_P(0);
 	char *formationId = text_to_cstring(formationIdText);
 	int32 groupId = PG_GETARG_INT32(1);
@@ -1147,8 +1153,6 @@ perform_failover(PG_FUNCTION_ARGS)
 	AutoFailoverNode *primaryNode = NULL;
 
 	char message[BUFSIZE] = { 0 };
-
-	checkPgAutoFailoverVersion();
 
 	LockFormation(formationId, ShareLock);
 	LockNodeGroup(formationId, groupId, ExclusiveLock);
@@ -1297,6 +1301,8 @@ perform_failover(PG_FUNCTION_ARGS)
 Datum
 perform_promotion(PG_FUNCTION_ARGS)
 {
+	checkPgAutoFailoverVersion();
+
 	text *formationIdText = PG_GETARG_TEXT_P(0);
 	char *formationId = text_to_cstring(formationIdText);
 
@@ -1307,8 +1313,6 @@ perform_promotion(PG_FUNCTION_ARGS)
 	int totalNodesCount = 0;
 
 	AutoFailoverNode *currentNode = NULL;
-
-	checkPgAutoFailoverVersion();
 
 	currentNode = GetAutoFailoverNodeByName(formationId, nodeName);
 
@@ -1451,6 +1455,8 @@ perform_promotion(PG_FUNCTION_ARGS)
 Datum
 start_maintenance(PG_FUNCTION_ARGS)
 {
+	checkPgAutoFailoverVersion();
+
 	int32 nodeId = PG_GETARG_INT32(0);
 
 	AutoFailoverNode *currentNode = NULL;
@@ -1467,8 +1473,6 @@ start_maintenance(PG_FUNCTION_ARGS)
 	int secondaryNodesCount = 0;
 
 	char message[BUFSIZE];
-
-	checkPgAutoFailoverVersion();
 
 	currentNode = GetAutoFailoverNodeById(nodeId);
 	if (currentNode == NULL)
@@ -1679,14 +1683,14 @@ start_maintenance(PG_FUNCTION_ARGS)
 Datum
 stop_maintenance(PG_FUNCTION_ARGS)
 {
+	checkPgAutoFailoverVersion();
+
 	int32 nodeId = PG_GETARG_INT32(0);
 
 	AutoFailoverNode *currentNode = NULL;
 	AutoFailoverNode *primaryNode = NULL;
 
 	char message[BUFSIZE];
-
-	checkPgAutoFailoverVersion();
 
 	currentNode = GetAutoFailoverNodeById(nodeId);
 	if (currentNode == NULL)
@@ -1745,6 +1749,8 @@ stop_maintenance(PG_FUNCTION_ARGS)
 Datum
 set_node_candidate_priority(PG_FUNCTION_ARGS)
 {
+	checkPgAutoFailoverVersion();
+
 	text *formationIdText = PG_GETARG_TEXT_P(0);
 	char *formationId = text_to_cstring(formationIdText);
 
@@ -1759,8 +1765,6 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 	ListCell *nodeCell = NULL;
 	int nodesCount = 0;
 	int nonZeroCandidatePriorityNodeCount = 0;
-
-	checkPgAutoFailoverVersion();
 
 	currentNode = GetAutoFailoverNodeByName(formationId, nodeName);
 
@@ -1893,6 +1897,8 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 Datum
 set_node_replication_quorum(PG_FUNCTION_ARGS)
 {
+	checkPgAutoFailoverVersion();
+
 	text *formationIdText = PG_GETARG_TEXT_P(0);
 	char *formationId = text_to_cstring(formationIdText);
 
@@ -1904,8 +1910,6 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 	AutoFailoverNode *currentNode = NULL;
 	List *nodesGroupList = NIL;
 	int nodesCount = 0;
-
-	checkPgAutoFailoverVersion();
 
 	currentNode = GetAutoFailoverNodeByName(formationId, nodeName);
 
@@ -2044,14 +2048,14 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 Datum
 update_node_metadata(PG_FUNCTION_ARGS)
 {
+	checkPgAutoFailoverVersion();
+
 	int32 nodeid = 0;
 	char *nodeName = NULL;
 	char *nodeHost = NULL;
 	int32 nodePort = 0;
 
 	AutoFailoverNode *currentNode = NULL;
-
-	checkPgAutoFailoverVersion();
 
 	if (PG_ARGISNULL(0))
 	{
@@ -2122,6 +2126,8 @@ update_node_metadata(PG_FUNCTION_ARGS)
 Datum
 synchronous_standby_names(PG_FUNCTION_ARGS)
 {
+	checkPgAutoFailoverVersion();
+
 	text *formationIdText = PG_GETARG_TEXT_P(0);
 	char *formationId = text_to_cstring(formationIdText);
 
@@ -2134,8 +2140,6 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 
 	List *nodesGroupList = AutoFailoverNodeGroup(formationId, groupId);
 	int nodesCount = list_length(nodesGroupList);
-
-	checkPgAutoFailoverVersion();
 
 	/*
 	 * When there's no nodes registered yet, there's no pg_autoctl process that
