@@ -892,24 +892,25 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 		IsCurrentState(primaryNode, REPLICATION_STATE_JOIN_PRIMARY))
 	{
 		ListCell *nodeCell = NULL;
-		bool allSecondariesAreGood = true;
+		bool allSecondariesAreHealthy = true;
 
 		foreach(nodeCell, otherNodesGroupList)
 		{
 			AutoFailoverNode *otherNode = (AutoFailoverNode *) lfirst(nodeCell);
 
-			allSecondariesAreGood = allSecondariesAreGood &&
-									IsCurrentState(otherNode,
-												   REPLICATION_STATE_SECONDARY) &&
-									IsHealthy(otherNode);
+			allSecondariesAreHealthy =
+				allSecondariesAreHealthy &&
+				IsCurrentState(otherNode,
+							   REPLICATION_STATE_SECONDARY) &&
+				IsHealthy(otherNode);
 
-			if (!allSecondariesAreGood)
+			if (!allSecondariesAreHealthy)
 			{
 				break;
 			}
 		}
 
-		if (allSecondariesAreGood)
+		if (allSecondariesAreHealthy)
 		{
 			char message[BUFSIZE] = { 0 };
 

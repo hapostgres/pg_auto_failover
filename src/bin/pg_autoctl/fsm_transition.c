@@ -414,15 +414,6 @@ fsm_disable_replication(Keeper *keeper)
 bool
 fsm_resume_as_primary(Keeper *keeper)
 {
-	LocalPostgresServer *postgres = &(keeper->postgres);
-
-	if (!ensure_postgres_service_is_running(postgres))
-	{
-		log_error("Failed to promote postgres because the server could not "
-				  "be started before promotion, see above for details");
-		return false;
-	}
-
 	if (!fsm_disable_replication(keeper))
 	{
 		log_error("Failed to disable synchronous replication in order to "
