@@ -695,7 +695,7 @@ monitor_register_node(Monitor *monitor, char *formation,
 					  uint64_t system_identifier,
 					  char *dbname, int desiredGroupId, NodeState initialState,
 					  PgInstanceKind kind, int candidatePriority, bool quorum,
-					  ConnectionRetryPolicy *retryPolicy,
+					  bool *mayRetry,
 					  MonitorAssignedState *assignedState)
 {
 	PGSQL *pgsql = &monitor->pgsql;
@@ -728,32 +728,13 @@ monitor_register_node(Monitor *monitor, char *formation,
 								   paramCount, paramTypes, paramValues,
 								   &parseContext, parseNodeState))
 	{
-		if (strcmp(parseContext.sqlstate, STR_ERRCODE_OBJECT_IN_USE) == 0 &&
-			!pgsql_retry_policy_expired(retryPolicy))
+		if (strcmp(parseContext.sqlstate, STR_ERRCODE_OBJECT_IN_USE) == 0)
 		{
-			int sleepTimeMs =
-				pgsql_compute_connection_retry_sleep_time(retryPolicy);
-
-			log_warn("Failed to register node %s:%d in group %d of "
-					 "formation \"%s\" with initial state \"%s\" "
-					 "because the monitor is already registering another "
-					 "standby, retrying in %d ms",
-					 host, port, desiredGroupId, formation, nodeStateString,
-					 sleepTimeMs);
-
-			/* we have milliseconds, pg_usleep() wants microseconds */
-			(void) pg_usleep(sleepTimeMs * 1000);
-
-			return monitor_register_node(monitor, formation, name, host, port,
-										 system_identifier,
-										 dbname, desiredGroupId, initialState,
-										 kind, candidatePriority, quorum,
-										 retryPolicy,
-										 assignedState);
+			*mayRetry = true;
+			return false;
 		}
 		else if (strcmp(parseContext.sqlstate,
-						STR_ERRCODE_EXCLUSION_VIOLATION) == 0 &&
-				 !pgsql_retry_policy_expired(retryPolicy))
+						STR_ERRCODE_EXCLUSION_VIOLATION) == 0)
 		{
 			/* *INDENT-OFF* */
 			log_error("Failed to register node %s:%d in "
@@ -3017,8 +2998,7 @@ parseCoordinatorNode(void *ctx, PGresult *result)
  * the next call to node_active().
  */
 bool
-monitor_start_maintenance(Monitor *monitor, int nodeId,
-						  ConnectionRetryPolicy *retryPolicy)
+monitor_start_maintenance(Monitor *monitor, int nodeId, bool *mayRetry)
 {
 	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BOOL, false };
 	PGSQL *pgsql = &monitor->pgsql;
@@ -3033,24 +3013,16 @@ monitor_start_maintenance(Monitor *monitor, int nodeId,
 								   paramCount, paramTypes, paramValues,
 								   &context, &parseSingleValueResult))
 	{
-		if (monitor_retryable_error(context.sqlstate) &&
-			!pgsql_retry_policy_expired(retryPolicy))
+		if (monitor_retryable_error(context.sqlstate))
 		{
-			int sleepTimeMs =
-				pgsql_compute_connection_retry_sleep_time(retryPolicy);
-
-			log_warn("Failed to start_maintenance of node %d on the monitor, "
-					 "retrying in %d ms.",
-					 nodeId, sleepTimeMs);
-
-			/* we have milliseconds, pg_usleep() wants microseconds */
-			(void) pg_usleep(sleepTimeMs * 1000);
-
-			return monitor_start_maintenance(monitor, nodeId, retryPolicy);
+			*mayRetry = true;
 		}
-
-		log_error("Failed to start_maintenance of node %d from the monitor",
-				  nodeId);
+		else
+		{
+			/* when we may retry then it's up to the caller to handle errors */
+			log_error("Failed to start_maintenance of node %d from the monitor",
+					  nodeId);
+		}
 
 		return false;
 	}
@@ -3072,8 +3044,7 @@ monitor_start_maintenance(Monitor *monitor, int nodeId,
  * the next call to node_active().
  */
 bool
-monitor_stop_maintenance(Monitor *monitor, int nodeId,
-						 ConnectionRetryPolicy *retryPolicy)
+monitor_stop_maintenance(Monitor *monitor, int nodeId, bool *mayRetry)
 {
 	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BOOL, false };
 	PGSQL *pgsql = &monitor->pgsql;
@@ -3088,24 +3059,17 @@ monitor_stop_maintenance(Monitor *monitor, int nodeId,
 								   paramCount, paramTypes, paramValues,
 								   &context, &parseSingleValueResult))
 	{
-		if (monitor_retryable_error(context.sqlstate) &&
-			!pgsql_retry_policy_expired(retryPolicy))
+		if (monitor_retryable_error(context.sqlstate))
 		{
-			int sleepTimeMs =
-				pgsql_compute_connection_retry_sleep_time(retryPolicy);
-
-			log_warn("Failed to stop_maintenance of node %d on the monitor, "
-					 "retrying in %d ms.",
-					 nodeId, sleepTimeMs);
-
-			/* we have milliseconds, pg_usleep() wants microseconds */
-			(void) pg_usleep(sleepTimeMs * 1000);
-
-			return monitor_stop_maintenance(monitor, nodeId, retryPolicy);
+			*mayRetry = true;
+		}
+		else
+		{
+			/* when we may retry then it's up to the caller to handle errors */
+			log_error("Failed to stop_maintenance of node %d from the monitor",
+					  nodeId);
 		}
 
-		log_error("Failed to stop_maintenance of node %d from the monitor",
-				  nodeId);
 		return false;
 	}
 

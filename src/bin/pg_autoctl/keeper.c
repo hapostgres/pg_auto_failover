@@ -1246,55 +1246,95 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 		return false;
 	}
 
-	/* use a special connection retry policy for initialisation */
-	(void) pgsql_set_init_retry_policy(&(keeper->monitor.pgsql.retryPolicy));
-
-	/*
-	 * When registering to the monitor, we get assigned a nodeId, that we keep
-	 * preciously in our state file. We need to have a local version of the
-	 * nodeId that is the same one as on the monitor.
-	 *
-	 * In particular, if we fail to update our local state file, we should
-	 * cancel our registration, because there's no way we can re-discover our
-	 * nodeId later.
-	 *
-	 * We register to the monitor in a SQL transaction that we only COMMIT
-	 * after we have updated our local state file. If we fail to do so, we
-	 * ROLLBACK the transaction, and thus we are not registered to the monitor
-	 * and may try again. If we are disconnected halfway through the
-	 * registration (process killed, crash, etc), then the server issues a
-	 * ROLLBACK for us upon disconnection.
-	 */
-	if (!pgsql_execute(&(monitor->pgsql), "BEGIN"))
-	{
-		log_error("Failed to open a SQL transaction to register this node");
-
-		unlink_file(config->pathnames.state);
-		return false;
-	}
 
 	/*
 	 * We implement a specific retry policy for cases where we have a transient
 	 * error on the monitor, such as OBJECT_IN_USE which indicates that another
 	 * standby is concurfrently being added to the same group.
 	 */
-	if (!monitor_register_node(monitor,
-							   config->formation,
-							   config->name,
-							   config->hostname,
-							   config->pgSetup.pgport,
-							   config->pgSetup.control.system_identifier,
-							   config->pgSetup.dbname,
-							   config->groupId,
-							   initialState,
-							   config->pgSetup.pgKind,
-							   config->pgSetup.settings.candidatePriority,
-							   config->pgSetup.settings.replicationQuorum,
-							   &retryPolicy,
-							   &assignedState))
+	(void) pgsql_set_init_retry_policy(&(keeper->monitor.pgsql.retryPolicy));
+
+	while (!pgsql_retry_policy_expired(&retryPolicy))
 	{
-		/* errors have already been logged, remove state file */
-		goto rollback;
+		bool mayRetry = false;
+		int sleepTimeMs = 0;
+
+		/*
+		 * When registering to the monitor, we get assigned a nodeId, that we
+		 * keep preciously in our state file. We need to have a local version
+		 * of the nodeId that is the same one as on the monitor.
+		 *
+		 * In particular, if we fail to update our local state file, we should
+		 * cancel our registration, because there's no way we can re-discover
+		 * our nodeId later.
+		 *
+		 * We register to the monitor in a SQL transaction that we only COMMIT
+		 * after we have updated our local state file. If we fail to do so, we
+		 * ROLLBACK the transaction, and thus we are not registered to the
+		 * monitor and may try again. If we are disconnected halfway through
+		 * the registration (process killed, crash, etc), then the server
+		 * issues a ROLLBACK for us upon disconnection.
+		 */
+		if (!pgsql_execute(&(monitor->pgsql), "BEGIN"))
+		{
+			log_error("Failed to open a SQL transaction to register this node");
+
+			unlink_file(config->pathnames.state);
+			return false;
+		}
+
+		if (monitor_register_node(monitor,
+								  config->formation,
+								  config->name,
+								  config->hostname,
+								  config->pgSetup.pgport,
+								  config->pgSetup.control.system_identifier,
+								  config->pgSetup.dbname,
+								  config->groupId,
+								  initialState,
+								  config->pgSetup.pgKind,
+								  config->pgSetup.settings.candidatePriority,
+								  config->pgSetup.settings.replicationQuorum,
+								  &mayRetry,
+								  &assignedState))
+		{
+			/* registration was successful, break out of the retry loop */
+			break;
+		}
+
+		if (!mayRetry)
+		{
+			/* errors have already been logged, remove state file */
+			goto rollback;
+		}
+
+		sleepTimeMs = pgsql_compute_connection_retry_sleep_time(&retryPolicy);
+
+		log_warn("Failed to register node %s:%d in group %d of "
+				 "formation \"%s\" with initial state \"%s\" "
+				 "because the monitor is already registering another "
+				 "standby, retrying in %d ms",
+				 config->hostname,
+				 config->pgSetup.pgport,
+				 config->groupId,
+				 config->formation,
+				 NodeStateToString(initialState),
+				 sleepTimeMs);
+
+		/*
+		 * The current transaction is dead: we caugth an ERROR from the
+		 * call to pgautofailover.register_node().
+		 */
+		if (!pgsql_execute(&(monitor->pgsql), "ROLLBACK"))
+		{
+			log_error("Failed to ROLLBACK failed register_node transaction "
+					  " on the monitor, see above for details.");
+			pgsql_finish(&(monitor->pgsql));
+			return false;
+		}
+
+		/* we have milliseconds, pg_usleep() wants microseconds */
+		(void) pg_usleep(sleepTimeMs * 1000);
 	}
 
 	/* initialize FSM state from monitor's answer */

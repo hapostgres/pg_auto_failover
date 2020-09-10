@@ -324,6 +324,12 @@ pgsql_retry_policy_expired(ConnectionRetryPolicy *retryPolicy)
 		return true;
 	}
 
+	/* set the first retry time when it's not been set previously */
+	if (retryPolicy->startTime == 0)
+	{
+		retryPolicy->startTime = now;
+	}
+
 	/*
 	 * We stop retrying as soon as we have spent all of our time budget or all
 	 * of our attempts count budget, whichever comes first.
