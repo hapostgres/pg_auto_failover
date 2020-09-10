@@ -1046,6 +1046,8 @@ RemoveNode(AutoFailoverNode *currentNode)
 	ListCell *nodeCell = NULL;
 	AutoFailoverNode *firstStandbyNode = NULL;
 
+	char message[BUFSIZE] = { 0 };
+
 	if (currentNode == NULL)
 	{
 		return false;
@@ -1096,6 +1098,16 @@ RemoveNode(AutoFailoverNode *currentNode)
 
 	/* time to actually remove the current node */
 	RemoveAutoFailoverNode(currentNode);
+
+	LogAndNotifyMessage(
+		message, BUFSIZE,
+		"Removing node %d \"%s\" (%s:%d) from formation \"%s\" and group %d",
+		currentNode->nodeId,
+		currentNode->nodeName,
+		currentNode->nodeHost,
+		currentNode->nodePort,
+		currentNode->formationId,
+		currentNode->groupId);
 
 	/* now proceed with the failover, starting with the first standby */
 	if (currentNodeIsPrimary)
