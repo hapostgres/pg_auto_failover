@@ -101,6 +101,55 @@ static void parseExtensionVersion(void *ctx, PGresult *result);
 static bool prepare_connection_to_current_system_user(Monitor *source,
 													  Monitor *target);
 
+
+/*
+ * We have several function that consume monitor notification in different
+ * ways. They all have many things in common:
+ *
+ * - they need to call pselect() and take care of signal processing and race
+ *   conditions
+ *
+ * - they need to filter out some of the notifications
+ *
+ * - they need to process the notifications that have not been filtered out.
+ *
+ * Both the filtering and the processing are specific to each top-level
+ * function that needs to consumer monitor's notifications.
+ */
+typedef void (*NotificationProcessingFunction)(void *context,
+											   CurrentNodeState *nodeState);
+
+typedef struct LogNotificationContext
+{
+	int logLevel;
+} LogNotificationContext;
+
+
+typedef struct ApplySettingsNotificationContext
+{
+	char *formation;
+	bool applySettingsTransitionInProgress;
+	bool applySettingsTransitionDone;
+} ApplySettingsNotificationContext;
+
+
+typedef struct WaitUntilStateNotificationContext
+{
+	char *formation;
+	int groupId;
+	NodeAddressHeaders *headers;
+	NodeState targetState;
+	bool failoverIsDone;
+	bool firstLoop;
+} WaitUntilStateNotificationContext;
+
+static bool monitor_process_notifications(Monitor *monitor,
+										  int timeoutMs,
+										  char *channels[],
+										  void *NotificationContext,
+										  NotificationProcessingFunction processor);
+
+
 /*
  * monitor_init initializes a Monitor struct to connect to the given
  * database URL.
@@ -2982,10 +3031,11 @@ monitor_stop_maintenance(Monitor *monitor, int nodeId)
 
 
 /*
- * monitor_get_notifications listens to notifications from the monitor.
+ * monitor_process_notifications listens to notifications from the monitor and
+ * calls a specific processing function for each notification received.
  *
- * Use the select(2) facility to check if something is ready to be read on the
- * PQconn socket for us. When it's the case, return the next notification
+ * We use the pselect(2) facility to check if something is ready to be read on
+ * the PQconn socket for us. When it's the case, return the next notification
  * message from the "state" channel. Other channel messages are sent to the log
  * directly.
  *
@@ -2993,13 +3043,15 @@ monitor_stop_maintenance(Monitor *monitor, int nodeId)
  * it's expected that the caller keeps polling the results to drain the queue
  * of notifications received from the previous calls loop.
  */
-bool
-monitor_get_notifications(Monitor *monitor, int timeoutMs)
+static bool
+monitor_process_notifications(Monitor *monitor,
+							  int timeoutMs,
+							  char *channels[],
+							  void *notificationContext,
+							  NotificationProcessingFunction processor)
 {
 	PGconn *connection = monitor->pgsql.connection;
 	PGnotify *notify;
-
-	char *channels[] = { "state", "log", NULL };
 
 	int ret;
 	int sock;
@@ -3110,7 +3162,7 @@ monitor_get_notifications(Monitor *monitor, int timeoutMs)
 			/* errors are logged by parse_state_notification_message */
 			if (parse_state_notification_message(&nodeState, notify->extra))
 			{
-				(void) nodestate_log(&nodeState, LOG_INFO, 0);
+				(void) (*processor)(notificationContext, &nodeState);
 			}
 		}
 		else
@@ -3124,6 +3176,104 @@ monitor_get_notifications(Monitor *monitor, int timeoutMs)
 	}
 
 	return true;
+}
+
+
+/*
+ * monitor_log_notifications is a Notification Processing Function that gets
+ * all the notifications from the monitor and append them to our logs.
+ */
+static void
+monitor_log_notifications(void *context, CurrentNodeState *nodeState)
+{
+	LogNotificationContext *ctx = (LogNotificationContext *) context;
+
+	nodestate_log(nodeState, ctx->logLevel, 0);
+}
+
+
+/*
+ * monitor_get_notifications listens to notifications from the monitor and logs
+ * them all.
+ */
+bool
+monitor_get_notifications(Monitor *monitor, int timeoutMs)
+{
+	char *channels[] = { "state", "log", NULL };
+	LogNotificationContext context = { LOG_INFO };
+
+	return monitor_process_notifications(monitor,
+										 timeoutMs,
+										 channels,
+										 (void *) &context,
+										 &monitor_log_notifications);
+}
+
+
+/*
+ * monitor_notification_process_apply_settings is a Notification Processing
+ * Function that maintains the context (which is a
+ * ApplySettingsNotificationContext actually) from notifications that are
+ * received from the monitor_process_notifications function.
+ */
+static void
+monitor_notification_process_apply_settings(void *context,
+											CurrentNodeState *nodeState)
+{
+	ApplySettingsNotificationContext *ctx =
+		(ApplySettingsNotificationContext *) context;
+
+	/* filter notifications for our own formation */
+	if (strcmp(nodeState->formation, ctx->formation) != 0)
+	{
+		return;
+	}
+
+	if (nodeState->reportedState == PRIMARY_STATE &&
+		nodeState->goalState == APPLY_SETTINGS_STATE)
+	{
+		ctx->applySettingsTransitionInProgress = true;
+
+		log_debug("step 1/4: primary node %d (%s:%d) is assigned \"%s\"",
+				  nodeState->node.nodeId,
+				  nodeState->node.host,
+				  nodeState->node.port,
+				  NodeStateToString(nodeState->goalState));
+	}
+	else if (nodeState->reportedState == APPLY_SETTINGS_STATE &&
+			 nodeState->goalState == APPLY_SETTINGS_STATE)
+	{
+		ctx->applySettingsTransitionInProgress = true;
+
+		log_debug("step 2/4: primary node %d (%s:%d) reported \"%s\"",
+				  nodeState->node.nodeId,
+				  nodeState->node.host,
+				  nodeState->node.port,
+				  NodeStateToString(nodeState->reportedState));
+	}
+	else if (nodeState->reportedState == APPLY_SETTINGS_STATE &&
+			 nodeState->goalState == PRIMARY_STATE)
+	{
+		ctx->applySettingsTransitionInProgress = true;
+
+		log_debug("step 3/4: primary node %d (%s:%d) is assigned \"%s\"",
+				  nodeState->node.nodeId,
+				  nodeState->node.host,
+				  nodeState->node.port,
+				  NodeStateToString(nodeState->goalState));
+	}
+	else if (ctx->applySettingsTransitionInProgress &&
+			 nodeState->reportedState == PRIMARY_STATE &&
+			 nodeState->goalState == PRIMARY_STATE)
+	{
+		ctx->applySettingsTransitionDone = true;
+
+		log_debug("step 4/4: primary node %d (%s:%d) reported \"%s\"",
+				  nodeState->node.nodeId,
+				  nodeState->node.host,
+				  nodeState->node.port,
+				  NodeStateToString(nodeState->reportedState));
+	}
 }
 
 
@@ -3145,8 +3295,12 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 											const char *formation)
 {
 	PGconn *connection = monitor->pgsql.connection;
-	bool applySettingsTransitionInProgress = false;
-	bool applySettingsTransitionDone = false;
+	ApplySettingsNotificationContext context = {
+		(char *) formation,
+		false,
+		false
+	};
+	char *channels[] = { "state", "log", NULL };
 
 	uint64_t start = time(NULL);
 
@@ -3159,13 +3313,8 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 	log_info("Waiting for the settings to have been applied to "
 			 "the monitor and primary node");
 
-	while (!applySettingsTransitionDone)
+	while (!context.applySettingsTransitionDone)
 	{
-		/* Sleep until something happens on the connection. */
-		int sock;
-		fd_set input_mask;
-		PGnotify *notify;
-
 		uint64_t now = time(NULL);
 
 		if ((now - start) > PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT)
@@ -3175,127 +3324,77 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 			break;
 		}
 
-		/*
-		 * It looks like we are violating modularity of the code, when we are
-		 * following Postgres documentation and examples:
-		 *
-		 * https://www.postgresql.org/docs/current/libpq-example.html#LIBPQ-EXAMPLE-2
-		 */
-		sock = PQsocket(connection);
-
-		if (sock < 0)
+		if (!monitor_process_notifications(
+				monitor,
+				PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT * 1000,
+				channels,
+				(void *) &context,
+				&monitor_notification_process_apply_settings))
 		{
-			return false;   /* shouldn't happen */
-		}
-		FD_ZERO(&input_mask);
-		FD_SET(sock, &input_mask);
-
-		if (select(sock + 1, &input_mask, NULL, NULL, NULL) < 0)
-		{
-			/* it might be interrupted by a signal we know how to handle */
-			if (errno == EINTR)
-			{
-				return true;
-			}
-			else
-			{
-				log_warn("select() failed: %m");
-				return false;
-			}
-		}
-
-		/* Now check for input */
-		PQconsumeInput(connection);
-		while ((notify = PQnotifies(connection)) != NULL)
-		{
-			CurrentNodeState nodeState = { 0 };
-
-			uint64_t now = time(NULL);
-
-			if ((now - start) > PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT)
-			{
-				/* errors are handled in the main loop */
-				break;
-			}
-
-			if (strcmp(notify->relname, "state") != 0)
-			{
-				log_warn("%s: %s", notify->relname, notify->extra);
-				continue;
-			}
-
-			log_debug("received \"%s\"", notify->extra);
-
-			/* errors are logged by parse_state_notification_message */
-			if (!parse_state_notification_message(&nodeState, notify->extra))
-			{
-				log_warn("Failed to parse notification message \"%s\"",
-						 notify->extra);
-				continue;
-			}
-
-			/* filter notifications for our own formation */
-			if (strcmp(nodeState.formation, formation) != 0)
-			{
-				continue;
-			}
-
-			if (nodeState.reportedState == PRIMARY_STATE &&
-				nodeState.goalState == APPLY_SETTINGS_STATE)
-			{
-				applySettingsTransitionInProgress = true;
-
-				log_debug("step 1/4: primary node %d (%s:%d) is assigned \"%s\"",
-						  nodeState.node.nodeId,
-						  nodeState.node.host,
-						  nodeState.node.port,
-						  NodeStateToString(nodeState.goalState));
-			}
-			else if (nodeState.reportedState == APPLY_SETTINGS_STATE &&
-					 nodeState.goalState == APPLY_SETTINGS_STATE)
-			{
-				applySettingsTransitionInProgress = true;
-
-				log_debug("step 2/4: primary node %d (%s:%d) reported \"%s\"",
-						  nodeState.node.nodeId,
-						  nodeState.node.host,
-						  nodeState.node.port,
-						  NodeStateToString(nodeState.reportedState));
-			}
-			else if (nodeState.reportedState == APPLY_SETTINGS_STATE &&
-					 nodeState.goalState == PRIMARY_STATE)
-			{
-				applySettingsTransitionInProgress = true;
-
-				log_debug("step 3/4: primary node %d (%s:%d) is assigned \"%s\"",
-						  nodeState.node.nodeId,
-						  nodeState.node.host,
-						  nodeState.node.port,
-						  NodeStateToString(nodeState.goalState));
-			}
-			else if (applySettingsTransitionInProgress &&
-					 nodeState.reportedState == PRIMARY_STATE &&
-					 nodeState.goalState == PRIMARY_STATE)
-			{
-				applySettingsTransitionDone = true;
-
-				log_debug("step 4/4: primary node %d (%s:%d) reported \"%s\"",
-						  nodeState.node.nodeId,
-						  nodeState.node.host,
-						  nodeState.node.port,
-						  NodeStateToString(nodeState.reportedState));
-			}
-
-			/* prepare next iteration */
-			PQfreemem(notify);
-			PQconsumeInput(connection);
+			/* errors have already been logged */
+			break;
 		}
 	}
 
 	/* disconnect from monitor */
 	pgsql_finish(&monitor->pgsql);
 
-	return applySettingsTransitionDone;
+	return context.applySettingsTransitionDone;
+}
+
+
+/*
+ * monitor_check_report_state is Notification Processing Function that
+ */
+static void
+monitor_check_report_state(void *context, CurrentNodeState *nodeState)
+{
+	WaitUntilStateNotificationContext *ctx =
+		(WaitUntilStateNotificationContext *) context;
+
+	uint64_t now = time(NULL);
+	char timestring[MAXCTIMESIZE] = { 0 };
+	char hostport[BUFSIZE] = { 0 };
+	char composedId[BUFSIZE] = { 0 };
+
+	/* filter notifications for our own formation */
+	if (strcmp(nodeState->formation, ctx->formation) != 0 ||
+		nodeState->groupId != ctx->groupId)
+	{
+		return;
+	}
+
+	/* format the current time to be user-friendly */
+	epoch_to_string(now, timestring);
+
+	/* "Wed Jun 30 21:49:08 1993" -> "21:49:08" */
+	timestring[11 + 8] = '\0';
+
+	(void) nodestatePrepareNode(ctx->headers,
+								&(nodeState->node),
+								ctx->groupId,
+								hostport,
+								composedId);
+
+	fformat(stdout, "%8s | %*s | %*s | %*s | %19s | %19s\n",
+			timestring + 11,
+			ctx->headers->maxNameSize, nodeState->node.name,
+			ctx->headers->maxNodeSize, composedId,
+			ctx->headers->maxHostSize, hostport,
+			NodeStateToString(nodeState->reportedState),
+			NodeStateToString(nodeState->goalState));
+
+	if (nodeState->goalState == ctx->targetState &&
+		nodeState->reportedState == ctx->targetState &&
+		!ctx->firstLoop)
+	{
+		ctx->failoverIsDone = true;
+	}
+
+	if (ctx->firstLoop)
+	{
+		ctx->firstLoop = false;
+	}
 }
 
 
@@ -3319,11 +3418,18 @@ monitor_wait_until_some_node_reported_state(Monitor *monitor,
 	NodeAddressArray nodesArray = { 0 };
 	NodeAddressHeaders headers = { 0 };
 
-	bool failoverIsDone = false;
+	WaitUntilStateNotificationContext context = {
+		(char *) formation,
+		groupId,
+		&headers,
+		targetState,
+		false,                  /* failoverIsDone */
+		true                    /* firstLoop */
+	};
+
+	char *channels[] = { "state", NULL };
 
 	uint64_t start = time(NULL);
-
-	bool firstLoop = true;
 
 	if (connection == NULL)
 	{
@@ -3369,13 +3475,8 @@ monitor_wait_until_some_node_reported_state(Monitor *monitor,
 			headers.maxHostSize, headers.hostSeparatorHeader,
 			"-------------------", "-------------------");
 
-	while (!failoverIsDone)
+	while (!context.failoverIsDone)
 	{
-		/* Sleep until something happens on the connection. */
-		int sock;
-		fd_set input_mask;
-		PGnotify *notify;
-
 		uint64_t now = time(NULL);
 
 		if ((now - start) > PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT)
@@ -3384,120 +3485,22 @@ monitor_wait_until_some_node_reported_state(Monitor *monitor,
 			break;
 		}
 
-		/*
-		 * It looks like we are violating modularity of the code, when we are
-		 * following Postgres documentation and examples:
-		 *
-		 * https://www.postgresql.org/docs/current/libpq-example.html#LIBPQ-EXAMPLE-2
-		 */
-		sock = PQsocket(connection);
-
-		if (sock < 0)
+		if (!monitor_process_notifications(
+				monitor,
+				PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT * 1000,
+				channels,
+				(void *) &context,
+				&monitor_check_report_state))
 		{
-			log_error("Failed to get the connection socket with PQsocket()");
-			return false;   /* shouldn't happen */
-		}
-		FD_ZERO(&input_mask);
-		FD_SET(sock, &input_mask);
-
-		if (select(sock + 1, &input_mask, NULL, NULL, NULL) < 0)
-		{
-			/* stop when receiving a signal */
-			if (errno == EINTR)
-			{
-				return true;
-			}
-			else
-			{
-				log_warn("select() failed: %m");
-				return false;
-			}
-		}
-
-		/* Now check for input */
-		PQconsumeInput(connection);
-		while ((notify = PQnotifies(connection)) != NULL)
-		{
-			CurrentNodeState nodeState = { 0 };
-
-			uint64_t now = time(NULL);
-			char timestring[MAXCTIMESIZE];
-
-			char hostport[BUFSIZE] = { 0 };
-			char composedId[BUFSIZE] = { 0 };
-
-			if ((now - start) > PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT)
-			{
-				/* errors are handled in the main loop */
-				break;
-			}
-
-			if (strcmp(notify->relname, "state") != 0)
-			{
-				log_warn("%s: %s", notify->relname, notify->extra);
-				continue;
-			}
-
-			log_debug("received \"%s\"", notify->extra);
-
-			/* errors are logged by parse_state_notification_message */
-			if (!parse_state_notification_message(&nodeState, notify->extra))
-			{
-				log_warn("Failed to parse notification message \"%s\"",
-						 notify->extra);
-				continue;
-			}
-
-			/* filter notifications for our own formation */
-			if (strcmp(nodeState.formation, formation) != 0 ||
-				nodeState.groupId != groupId)
-			{
-				continue;
-			}
-
-			/* format the current time to be user-friendly */
-			epoch_to_string(now, timestring);
-
-			/* "Wed Jun 30 21:49:08 1993" -> "21:49:08" */
-			timestring[11 + 8] = '\0';
-
-			(void) nodestatePrepareNode(&headers,
-										&(nodeState.node),
-										groupId,
-										hostport,
-										composedId);
-
-			fformat(stdout, "%8s | %*s | %*s | %*s | %19s | %19s\n",
-					timestring + 11,
-					headers.maxNameSize, nodeState.node.name,
-					headers.maxNodeSize, composedId,
-					headers.maxHostSize, hostport,
-					NodeStateToString(nodeState.reportedState),
-					NodeStateToString(nodeState.goalState));
-
-			if (nodeState.goalState == targetState &&
-				nodeState.reportedState == targetState &&
-				!firstLoop)
-			{
-				failoverIsDone = true;
-				break;
-			}
-
-			if (firstLoop)
-			{
-				firstLoop = false;
-			}
-
-			/* prepare next iteration */
-			PQfreemem(notify);
-			PQconsumeInput(connection);
+			/* errors have already been logged */
+			break;
 		}
 	}
 
 	/* disconnect from monitor */
 	pgsql_finish(&monitor->pgsql);
 
-	return failoverIsDone;
+	return context.failoverIsDone;
 }
 
 
