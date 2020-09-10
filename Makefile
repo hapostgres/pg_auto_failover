@@ -93,6 +93,57 @@ $(PDF):
 $(FSM): bin
 	PG_AUTOCTL_DEBUG=1 ./src/bin/pg_autoctl/pg_autoctl do fsm gv | dot -Tpng > $@
 
+cluster: install
+	killall --exact pg_autoctl || true
+	rm -rf monitor node1 node2 node3 ~/.config/pg_autoctl/ ~/.local/share/pg_autoctl/ /tmp/pg_autoctl/
+	tmux \
+		set-option -g default-shell /bin/bash \; \
+		new -s pgautofailover \; \
+		send-keys 'export PGDATA=monitor' Enter \; \
+		send-keys 'pg_autoctl create monitor --ssl-self-signed --auth trust --pgport 5500 --run' Enter \; \
+		split-window -h \; \
+		send-keys 'export PGDATA=node1' Enter \; \
+		send-keys 'sleep 1' Enter \; \
+		send-keys 'pg_autoctl create postgres --monitor $$(pg_autoctl show uri --pgdata monitor --monitor) --pgport 5501 --ssl-self-signed --auth trust' Enter \; \
+		send-keys 'pg_autoctl run' Enter \; \
+		split-window -v \; \
+		send-keys 'export PGDATA=node2' Enter \; \
+		send-keys 'sleep 3' Enter \; \
+		send-keys 'pg_autoctl create postgres --monitor $$(pg_autoctl show uri --pgdata monitor --monitor) --pgport 5502 --ssl-self-signed --auth trust' Enter \; \
+		send-keys 'pg_autoctl run' Enter \; \
+		select-pane -L \; \
+		split-window -v \; \
+		send-keys 'watch -n 0.2 "pg_autoctl show state --pgdata monitor"' Enter
+	killall --exact pg_autoctl || true
+
+cluster3: install
+	killall --exact pg_autoctl || true
+	rm -rf monitor node1 node2 node3 ~/.config/pg_autoctl/ ~/.local/share/pg_autoctl/ /tmp/pg_autoctl/
+	tmux \
+		set-option -g default-shell /bin/bash \; \
+		new -s pgautofailover \; \
+		send-keys 'export PGDATA=monitor' Enter \; \
+		send-keys 'pg_autoctl create monitor --ssl-self-signed --auth trust --pgport 5500 --run' Enter \; \
+		split-window -h \; \
+		send-keys 'export PGDATA=node1' Enter \; \
+		send-keys 'sleep 1' Enter \; \
+		send-keys 'pg_autoctl create postgres --monitor $$(pg_autoctl show uri --pgdata monitor --monitor) --pgport 5501 --ssl-self-signed --auth trust' Enter \; \
+		send-keys 'pg_autoctl run' Enter \; \
+		split-window -v \; \
+		send-keys 'export PGDATA=node2' Enter \; \
+		send-keys 'sleep 3' Enter \; \
+		send-keys 'pg_autoctl create postgres --monitor $$(pg_autoctl show uri --pgdata monitor --monitor) --pgport 5502 --ssl-self-signed --auth trust' Enter \; \
+		send-keys 'pg_autoctl run' Enter \; \
+		split-window -v \; \
+		send-keys 'export PGDATA=node3' Enter \; \
+		send-keys 'sleep 6' Enter \; \
+		send-keys 'pg_autoctl create postgres --monitor $$(pg_autoctl show uri --pgdata monitor --monitor) --pgport 5503 --ssl-self-signed --auth trust' Enter \; \
+		send-keys 'pg_autoctl run' Enter \; \
+		select-pane -L \; \
+		split-window -v \; \
+		send-keys 'watch -n 0.2 "pg_autoctl show state --pgdata monitor"' Enter
+	killall --exact pg_autoctl || true
+
 .PHONY: all clean check install docs
 .PHONY: monitor clean-monitor check-monitor install-monitor
 .PHONY: bin clean-bin install-bin
