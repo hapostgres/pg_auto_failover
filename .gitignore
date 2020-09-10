@@ -47,3 +47,6 @@ pgautofailover--?.?.sql
 # Exclude generated PDF and PNG files for the graphics
 docs/tikz/*.pdf
 docs/tikz/*.png
+
+# Exclude our demo/test tmux directory
+tmux/
