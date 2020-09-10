@@ -3047,7 +3047,7 @@ static bool
 monitor_process_notifications(Monitor *monitor,
 							  int timeoutMs,
 							  char *channels[],
-							  void *NotificationContext,
+							  void *notificationContext,
 							  NotificationProcessingFunction processor)
 {
 	PGconn *connection = monitor->pgsql.connection;
@@ -3162,7 +3162,7 @@ monitor_process_notifications(Monitor *monitor,
 			/* errors are logged by parse_state_notification_message */
 			if (parse_state_notification_message(&nodeState, notify->extra))
 			{
-				(void) (*processor)(NotificationContext, &nodeState);
+				(void) (*processor)(notificationContext, &nodeState);
 			}
 		}
 		else
