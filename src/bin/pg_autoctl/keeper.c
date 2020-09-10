@@ -955,7 +955,7 @@ keeper_create_and_drop_replication_slots(Keeper *keeper)
 	LocalPostgresServer *postgres = &(keeper->postgres);
 	NodeAddressArray *otherNodesArray = &(keeper->otherNodes);
 
-	log_trace("keeper_drop_replication_slots_for_removed_nodes");
+	log_trace("keeper_create_and_drop_replication_slots");
 
 	if (!postgres_replication_slot_create_and_drop(postgres, otherNodesArray))
 	{

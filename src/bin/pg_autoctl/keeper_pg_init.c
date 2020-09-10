@@ -685,7 +685,7 @@ wait_until_primary_has_created_our_replication_slot(Keeper *keeper,
 
 		++tries;
 
-		if (!!hasReplicationSlot && tries == 3)
+		if (!hasReplicationSlot && tries == 3)
 		{
 			log_info("Still waiting for the to create our replication slot");
 			log_warn("Please make sure that the primary node is currently "

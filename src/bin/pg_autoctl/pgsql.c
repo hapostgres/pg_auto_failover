@@ -1117,7 +1117,7 @@ pgsql_replication_slot_exists(PGSQL *pgsql, const char *slotName,
 	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BOOL, false };
 	char *sql = "SELECT 1 FROM pg_replication_slots WHERE slot_name = $1";
 	int paramCount = 1;
-	Oid paramTypes[1] = { TEXTOID };
+	Oid paramTypes[1] = { NAMEOID };
 	const char *paramValues[1] = { slotName };
 
 	if (!pgsql_execute_with_params(pgsql, sql,

@@ -383,6 +383,10 @@ upstream_has_replication_slot(ReplicationSource *upstream,
 	upstreamSetup.pgport = primaryNode->port;
 	upstreamSetup.ssl = pgSetup->ssl;
 
+	/*
+	 * Build the connection string as if to a local node, but we tweaked the
+	 * pgsetup to target the primary node by changing its pghost and pgport.
+	 */
 	pg_setup_get_local_connection_string(&upstreamSetup, connectionString);
 
 	if (!pgsql_init(&upstreamClient, connectionString, PGSQL_CONN_UPSTREAM))

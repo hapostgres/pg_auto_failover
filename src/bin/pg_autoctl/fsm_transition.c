@@ -366,7 +366,7 @@ fsm_init_primary(Keeper *keeper)
  * single.
  *
  *    disable_synchronous_replication
- * && keeper_drop_replication_slots_for_removed_nodes
+ * && keeper_create_and_drop_replication_slots
  *
  * TODO: We currently use a separate session for each step. We should use
  * a single connection.
@@ -403,7 +403,7 @@ fsm_disable_replication(Keeper *keeper)
  *
  *    start_postgres
  * && disable_synchronous_replication
- * && keeper_drop_replication_slots_for_removed_nodes
+ * && keeper_create_and_drop_replication_slots
  *
  * So we reuse fsm_disable_replication() here, rather than copy/pasting the same
  * bits code in the fsm_resume_as_primary() function body. If the definition of
@@ -1115,7 +1115,7 @@ fsm_restart_standby(Keeper *keeper)
  * && add_standby_to_hba
  * && create_replication_slot
  * && disable_synchronous_replication
- * && keeper_drop_replication_slots_for_removed_nodes
+ * && keeper_create_and_drop_replication_slots
  *
  * Note that the HBA and slot maintenance are done eagerly in the main keeper
  * loop as soon as a new node is added to the group, so we don't need to handle
