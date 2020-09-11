@@ -29,6 +29,7 @@ typedef struct TmuxOptions
 	char root[MAXPGPATH];
 	int firstPort;
 	int nodes;
+	char layout[BUFSIZE];
 } TmuxOptions;
 
 static TmuxOptions tmuxOptions = { 0 };
@@ -51,6 +52,7 @@ cli_do_tmux_script_getopts(int argc, char **argv)
 		{ "root", required_argument, NULL, 'D' },
 		{ "first-port", required_argument, NULL, 'p' },
 		{ "nodes", required_argument, NULL, 'n' },
+		{ "layout", required_argument, NULL, 'l' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
@@ -63,7 +65,8 @@ cli_do_tmux_script_getopts(int argc, char **argv)
 	/* set our defaults */
 	options.nodes = 2;
 	options.firstPort = 5500;
-	strlcpy(options.root, "/tmp/pgaf/tmux", MAXPGPATH);
+	strlcpy(options.root, "/tmp/pgaf/tmux", sizeof(options.root));
+	strlcpy(options.layout, "even-vertical", sizeof(options.layout));
 
 	/*
 	 * The only command lines that are using keeper_cli_getopt_pgdata are
@@ -108,6 +111,13 @@ cli_do_tmux_script_getopts(int argc, char **argv)
 					errors++;
 				}
 				log_trace("--nodes %d", options.nodes);
+				break;
+			}
+
+			case 'l':
+			{
+				strlcpy(options.layout, optarg, MAXPGPATH);
+				log_trace("--layout %s", options.layout);
 				break;
 			}
 
@@ -358,6 +368,9 @@ cli_do_tmux_script(int argc, char **argv)
 
 	tmux_add_xdg_environment(script, root);
 	tmux_add_send_keys_command(script, "export PGDATA=\"%s/monitor\"", root);
+
+	/* now select our target layout */
+	tmux_add_command(script, "select-layout %s", options.layout);
 
 	/* memory allocation could have failed while building string */
 	if (PQExpBufferBroken(script))

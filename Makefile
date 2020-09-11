@@ -24,6 +24,8 @@ endif
 PG_AUTOCTL = PG_AUTOCTL_DEBUG=1 ./src/bin/pg_autoctl/pg_autoctl
 TMUX_TOP_DIR = ./tmux
 TMUX_SCRIPT = ./tmux/script.tmux
+
+TMUX_LAYOUT ?= even-vertical	# could be "tiled"
 NODES ?= 2
 
 all: monitor bin ;
@@ -99,7 +101,10 @@ $(FSM): bin
 
 $(TMUX_SCRIPT): bin
 	mkdir -p $(TMUX_TOP_DIR)
-	$(PG_AUTOCTL) do tmux script --root $(TMUX_TOP_DIR) --nodes $(NODES) > $@
+	$(PG_AUTOCTL) do tmux script \
+         --root $(TMUX_TOP_DIR)  \
+         --nodes $(NODES)        \
+         --layout $(TMUX_LAYOUT) > $@
 
 tmux-script: $(TMUX_SCRIPT) ;
 
