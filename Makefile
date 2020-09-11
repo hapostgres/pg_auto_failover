@@ -25,6 +25,7 @@ PG_AUTOCTL = PG_AUTOCTL_DEBUG=1 ./src/bin/pg_autoctl/pg_autoctl
 TMUX_TOP_DIR = ./tmux
 TMUX_SCRIPT = ./tmux/script.tmux
 
+TMUX_EXTRA_COMMANDS ?= ""
 TMUX_LAYOUT ?= even-vertical	# could be "tiled"
 NODES ?= 2
 

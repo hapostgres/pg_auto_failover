@@ -22,6 +22,7 @@
 #include "cli_root.h"
 #include "commandline.h"
 #include "config.h"
+#include "env_utils.h"
 #include "string_utils.h"
 
 
@@ -395,6 +396,28 @@ cli_do_tmux_script(int argc, char **argv)
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
-	fformat(stdout, "%s\n", script->data);
+	fformat(stdout, "%s", script->data);
 	destroyPQExpBuffer(script);
+
+	if (env_exists("TMUX_EXTRA_COMMANDS"))
+	{
+		char extra_commands[BUFSIZE] = { 0 };
+
+		char *extraLines[BUFSIZE];
+		int lineCount = 0;
+		int lineNumber = 0;
+
+		if (!get_env_copy("TMUX_EXTRA_COMMANDS", extra_commands, BUFSIZE))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+
+		lineCount = splitLines(extra_commands, extraLines, BUFSIZE);
+
+		for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
+		{
+			fformat(stdout, "%s\n", extraLines[lineNumber]);
+		}
+	}
 }
