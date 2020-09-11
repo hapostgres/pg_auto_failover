@@ -361,8 +361,16 @@ cli_do_tmux_script(int argc, char **argv)
 		tmux_add_command(script, "split-window -v");
 		tmux_add_command(script, "select-layout even-vertical");
 
-		/* allow some time for each previous node to be ready */
-		tmux_add_send_keys_command(script, "sleep %d", 3 * (i + 1));
+		/* ensure that the first node is always the primary */
+		if (i == 0)
+		{
+			tmux_add_send_keys_command(script, "sleep %d", 3);
+		}
+		else
+		{
+			tmux_add_send_keys_command(script, "sleep %d", 6);
+		}
+
 		tmux_pg_autoctl_create(script, root, pgport++, "postgres", name);
 		tmux_add_send_keys_command(script, "pg_autoctl run");
 	}
