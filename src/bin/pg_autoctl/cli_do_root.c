@@ -234,7 +234,9 @@ CommandLine do_tmux_script =
 	make_command("script",
 				 "Produce a tmux script for a demo or a test case",
 				 "[option ...]",
-				 KEEPER_CLI_WORKER_SETUP_OPTIONS,
+				 "  --root          path where to create a cluster\n" \
+				 "  --first-port    first Postgres port to use (5500)\n" \
+				 "  --nodes         number of Postgres nodes to create (2)",
 				 cli_do_tmux_script_getopts,
 				 cli_do_tmux_script);
 

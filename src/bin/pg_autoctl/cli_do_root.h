@@ -88,6 +88,7 @@ void keeper_cli_promote_standby(int argc, char **argv);
 void keeper_cli_receiwal(int argc, char **argv);
 void keeper_cli_identify_system(int argc, char **argv);
 
+/* src/bin/pg_autoctl/cli_do_tmux.c */
 int cli_do_tmux_script_getopts(int argc, char **argv);
 void cli_do_tmux_script(int argc, char **argv);
 
