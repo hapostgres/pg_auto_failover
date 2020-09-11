@@ -352,6 +352,13 @@ cli_do_tmux_script(int argc, char **argv)
 							   pg_autoctl_argv0,
 							   options.root);
 
+	/* add a window for interactive pg_autoctl commands */
+	tmux_add_command(script, "split-window -v");
+	tmux_add_command(script, "select-layout even-vertical");
+
+	tmux_add_xdg_environment(script, root);
+	tmux_add_send_keys_command(script, "export PGDATA=\"%s/monitor\"", root);
+
 	/* memory allocation could have failed while building string */
 	if (PQExpBufferBroken(script))
 	{
