@@ -62,14 +62,17 @@ bool ensure_postgres_service_is_stopped(LocalPostgresServer *postgres);
 
 bool primary_has_replica(LocalPostgresServer *postgres, char *userName,
 						 bool *hasStandby);
+bool upstream_has_replication_slot(ReplicationSource *upstream,
+								   PostgresSetup *pgSetup,
+								   bool *hasReplicationSlot);
 bool primary_create_replication_slot(LocalPostgresServer *postgres,
 									 char *replicationSlotName);
 bool primary_drop_replication_slot(LocalPostgresServer *postgres,
 								   char *replicationSlotName);
 bool primary_drop_replication_slots(LocalPostgresServer *postgres);
 bool primary_set_synchronous_standby_names(LocalPostgresServer *postgres);
-bool postgres_replication_slot_drop_removed(LocalPostgresServer *postgres,
-											NodeAddressArray *nodeArray);
+bool postgres_replication_slot_create_and_drop(LocalPostgresServer *postgres,
+											   NodeAddressArray *nodeArray);
 bool postgres_replication_slot_maintain(LocalPostgresServer *postgres,
 										NodeAddressArray *nodeArray);
 bool primary_enable_synchronous_replication(LocalPostgresServer *postgres);

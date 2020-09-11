@@ -203,7 +203,11 @@ keeper_ensure_current_state(Keeper *keeper)
 		 *   timeout.postgresql_fails_to_start_timeout (default 20s)
 		 *   timeout.postgresql_fails_to_start_retries (default 3 times)
 		 */
+		case SINGLE_STATE:
 		case PRIMARY_STATE:
+		case WAIT_PRIMARY_STATE:
+		case JOIN_PRIMARY_STATE:
+		case APPLY_SETTINGS_STATE:
 		{
 			if (!keeper_ensure_postgres_is_running(keeper, true))
 			{
@@ -212,20 +216,7 @@ keeper_ensure_current_state(Keeper *keeper)
 			}
 
 			/* when a standby has been removed, remove its replication slot */
-			return keeper_drop_replication_slots_for_removed_nodes(keeper);
-		}
-
-		case SINGLE_STATE:
-		{
-			/* a single node does not need to maintain retries attempts */
-			if (!keeper_ensure_postgres_is_running(keeper, false))
-			{
-				/* errors have already been logged */
-				return false;
-			}
-
-			/* when a standby has been removed, remove its replication slot */
-			return keeper_drop_replication_slots_for_removed_nodes(keeper);
+			return keeper_create_and_drop_replication_slots(keeper);
 		}
 
 		/*
@@ -234,7 +225,6 @@ keeper_ensure_current_state(Keeper *keeper)
 		 * is taking care of that, or because we're in the middle of changing
 		 * the replication upstream node.
 		 */
-		case WAIT_PRIMARY_STATE:
 		case PREP_PROMOTION_STATE:
 		case STOP_REPLICATION_STATE:
 		{
@@ -952,20 +942,22 @@ keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 
 
 /*
- * keeper_drop_replication_slots_for_removed_nodes drops replication slots that
- * we have on the local Postgres instance when the node is not registered on
- * the monitor anymore (after a pgautofailover.remove_node() has been issued,
- * maybe with the command `pg_autoctl drop node [ --destroy ]`).
+ * keeper_create_and_drop_replication_slots drops replication slots that we
+ * have on the local Postgres instance when the node is not registered on the
+ * monitor anymore (after a pgautofailover.remove_node() has been issued, maybe
+ * with the command `pg_autoctl drop node [ --destroy ]`); and creates
+ * replication slots for nodes that have been recently registered on the
+ * monitor.
  */
 bool
-keeper_drop_replication_slots_for_removed_nodes(Keeper *keeper)
+keeper_create_and_drop_replication_slots(Keeper *keeper)
 {
 	LocalPostgresServer *postgres = &(keeper->postgres);
 	NodeAddressArray *otherNodesArray = &(keeper->otherNodes);
 
-	log_trace("keeper_drop_replication_slots_for_removed_nodes");
+	log_trace("keeper_create_and_drop_replication_slots");
 
-	if (!postgres_replication_slot_drop_removed(postgres, otherNodesArray))
+	if (!postgres_replication_slot_create_and_drop(postgres, otherNodesArray))
 	{
 		log_error("Failed to maintain replication slots on the local Postgres "
 				  "instance, see above for details");

@@ -48,6 +48,9 @@ static bool keeper_pg_init_and_register_primary(Keeper *keeper);
 static bool reach_initial_state(Keeper *keeper);
 static bool wait_until_primary_is_ready(Keeper *config,
 										MonitorAssignedState *assignedState);
+static bool wait_until_primary_has_created_our_replication_slot(Keeper *keeper,
+																MonitorAssignedState *
+																assignedState);
 static bool keeper_pg_init_node_active(Keeper *keeper);
 
 /*
@@ -595,6 +598,100 @@ wait_until_primary_is_ready(Keeper *keeper,
 		log_error("Failed to update keepers's state");
 		return false;
 	}
+
+	/* Now make sure the replication slot has been created on the primary */
+	return wait_until_primary_has_created_our_replication_slot(keeper,
+															   assignedState);
+}
+
+
+/*
+ * wait_until_primary_has_created_our_replication_slot loops over querying the
+ * primary server until it has created our replication slot.
+ *
+ * When assigned CATCHINGUP_STATE, in some cases the primary might not be ready
+ * yet. That might happen when all the other standby nodes are in maintenance
+ * and the primary is already in the WAIT_PRIMARY state.
+ */
+static bool
+wait_until_primary_has_created_our_replication_slot(Keeper *keeper,
+													MonitorAssignedState *assignedState)
+{
+	int errors = 0, tries = 0;
+	bool firstLoop = true;
+
+	Monitor *monitor = &(keeper->monitor);
+	KeeperConfig *config = &(keeper->config);
+	LocalPostgresServer *postgres = &(keeper->postgres);
+	ReplicationSource *upstream = &(postgres->replicationSource);
+	NodeAddress *primaryNode = &(postgres->replicationSource.primaryNode);
+
+	bool hasReplicationSlot = false;
+
+	if (!monitor_get_primary(monitor,
+							 config->formation,
+							 assignedState->groupId,
+							 &(postgres->replicationSource.primaryNode)))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	if (!standby_init_replication_source(postgres,
+										 primaryNode,
+										 PG_AUTOCTL_REPLICA_USERNAME,
+										 config->replication_password,
+										 config->replication_slot_name,
+										 config->maximum_backup_rate,
+										 config->backupDirectory,
+										 NULL, /* no targetLSN */
+										 config->pgSetup.ssl,
+										 assignedState->nodeId))
+	{
+		/* can't happen at the moment */
+		return false;
+	}
+
+	do {
+		if (firstLoop)
+		{
+			firstLoop = false;
+		}
+		else
+		{
+			sleep(PG_AUTOCTL_KEEPER_SLEEP_TIME);
+		}
+
+		if (!upstream_has_replication_slot(upstream,
+										   &(config->pgSetup),
+										   &hasReplicationSlot))
+		{
+			++errors;
+
+			log_warn("Failed to contact the primary node %d \"%s\" (%s:%d)",
+					 primaryNode->nodeId,
+					 primaryNode->name,
+					 primaryNode->host,
+					 primaryNode->port);
+
+			if (errors > 5)
+			{
+				log_error("Failed to contact the primary 5 times in a row now, "
+						  "so we stop trying. You can do `pg_autoctl create` "
+						  "to retry and finish the local setup");
+				return false;
+			}
+		}
+
+		++tries;
+
+		if (!hasReplicationSlot && tries == 3)
+		{
+			log_info("Still waiting for the to create our replication slot");
+			log_warn("Please make sure that the primary node is currently "
+					 "running `pg_autoctl run` and contacting the monitor.");
+		}
+	} while (!hasReplicationSlot);
 
 	return true;
 }

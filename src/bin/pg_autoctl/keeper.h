@@ -47,7 +47,7 @@ bool keeper_start_postgres(Keeper *keeper);
 bool keeper_restart_postgres(Keeper *keeper);
 bool keeper_should_ensure_current_state_before_transition(Keeper *keeper);
 bool keeper_ensure_postgres_is_running(Keeper *keeper, bool updateRetries);
-bool keeper_drop_replication_slots_for_removed_nodes(Keeper *keeper);
+bool keeper_create_and_drop_replication_slots(Keeper *keeper);
 bool keeper_maintain_replication_slots(Keeper *keeper);
 bool keeper_ensure_current_state(Keeper *keeper);
 bool keeper_create_self_signed_cert(Keeper *keeper);

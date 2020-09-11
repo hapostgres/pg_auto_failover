@@ -102,6 +102,21 @@ parseSingleValueResult(void *ctx, PGresult *result)
 
 
 /*
+ * fetchedRows is a pgsql_execute_with_params callback function that sets a
+ * SingleValueResultContext->intVal to PQntuples(result), that is how many rows
+ * are fetched by the query.
+ */
+void
+fetchedRows(void *ctx, PGresult *result)
+{
+	SingleValueResultContext *context = (SingleValueResultContext *) ctx;
+
+	context->parsedOk = true;
+	context->intVal = PQntuples(result);
+}
+
+
+/*
  * pgsql_init initializes a PGSQL struct to connect to the given database
  * URL or connection string.
  */
@@ -1092,6 +1107,42 @@ typedef struct ReplicationSlotMaintainContext
 
 
 /*
+ * pgsql_replication_slot_exists checks that a replication slot with the given
+ * slotName exists on the Postgres server.
+ */
+bool
+pgsql_replication_slot_exists(PGSQL *pgsql, const char *slotName,
+							  bool *slotExists)
+{
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BOOL, false };
+	char *sql = "SELECT 1 FROM pg_replication_slots WHERE slot_name = $1";
+	int paramCount = 1;
+	Oid paramTypes[1] = { NAMEOID };
+	const char *paramValues[1] = { slotName };
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &fetchedRows))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	if (!context.parsedOk)
+	{
+		log_error("Failed to check if the replication slot \"%s\" exists",
+				  slotName);
+		return false;
+	}
+
+	/* we receive 0 rows in the result when the slot does not exist yet */
+	*slotExists = context.intVal == 1;
+
+	return true;
+}
+
+
+/*
  * pgsql_create_replication_slot tries to create a replication slot on the
  * database identified by a connection string. It's implemented as CREATE IF
  * NOT EXISTS so that it's idempotent and can be retried easily.
@@ -1240,8 +1291,9 @@ BuildNodesArrayValues(NodeAddressArray *nodeArray,
 
 
 /*
- * pgsql_replication_slot_drop_removed drop replication slots that belong to
- * nodes that have been removed. We call that function on the primary, where
+ * pgsql_replication_slot_create_and_drop drops replication slots that belong
+ * to nodes that have been removed, and creates replication slots for nodes
+ * that have been newly registered. We call that function on the primary, where
  * the slots are maintained by the replication protocol.
  *
  * On the standby nodes, we advance the slots ourselves and use the other
@@ -1249,7 +1301,7 @@ BuildNodesArrayValues(NodeAddressArray *nodeArray,
  * advance).
  */
 bool
-pgsql_replication_slot_drop_removed(PGSQL *pgsql, NodeAddressArray *nodeArray)
+pgsql_replication_slot_create_and_drop(PGSQL *pgsql, NodeAddressArray *nodeArray)
 {
 	int bytes;
 	char sql[2 * BUFSIZE] = { 0 };
