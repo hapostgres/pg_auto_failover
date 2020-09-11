@@ -15,6 +15,7 @@
 
 #include "postgres_fe.h"
 #include "pqexpbuffer.h"
+#include "snprintf.h"
 
 #include "cli_common.h"
 #include "cli_do_root.h"
@@ -34,6 +35,20 @@ typedef struct TmuxOptions
 
 static TmuxOptions tmuxOptions = { 0 };
 
+
+static void tmux_add_command(PQExpBuffer script, const char *fmt, ...)
+__attribute__((format(printf, 2, 3)));
+
+static void tmux_add_send_keys_command(PQExpBuffer script, const char *fmt, ...)
+__attribute__((format(printf, 2, 3)));
+
+static void tmux_add_xdg_environment(PQExpBuffer script, const char *root);
+
+static void tmux_pg_autoctl_create(PQExpBuffer script,
+								   const char *root,
+								   int pgport,
+								   const char *role,
+								   const char *name);
 
 /*
  * cli_print_version_getopts parses the CLI options for the pg_autoctl version
@@ -359,8 +374,7 @@ cli_do_tmux_script(int argc, char **argv)
 	tmux_add_send_keys_command(script, "export PGDATA=\"%s/monitor\"", root);
 	tmux_add_send_keys_command(script,
 							   "watch -n 0.2 %s show state",
-							   pg_autoctl_argv0,
-							   options.root);
+							   pg_autoctl_argv0);
 
 	/* add a window for interactive pg_autoctl commands */
 	tmux_add_command(script, "split-window -v");
