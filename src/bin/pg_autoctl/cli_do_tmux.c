@@ -364,11 +364,21 @@ cli_do_tmux_script(int argc, char **argv)
 		/* ensure that the first node is always the primary */
 		if (i == 0)
 		{
-			tmux_add_send_keys_command(script, "sleep %d", 3);
+			/* on the primary, wait until the monitor is ready */
+			tmux_add_send_keys_command(script, "sleep 1");
+			tmux_add_send_keys_command(script,
+									   "%s do pgsetup wait --pgdata %s/monitor",
+									   pg_autoctl_argv0,
+									   options.root);
 		}
 		else
 		{
-			tmux_add_send_keys_command(script, "sleep %d", 6);
+			/* on the other nodes, wait until the primary is ready */
+			tmux_add_send_keys_command(script, "sleep 2");
+			tmux_add_send_keys_command(script,
+									   "%s do pgsetup wait --pgdata %s/node1",
+									   pg_autoctl_argv0,
+									   options.root);
 		}
 
 		tmux_pg_autoctl_create(script, root, pgport++, "postgres", name);
