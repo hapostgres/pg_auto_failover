@@ -164,19 +164,10 @@ CommandLine do_standby_promote =
 				 keeper_cli_keeper_setup_getopts,
 				 keeper_cli_promote_standby);
 
-CommandLine do_standby_receivewal =
-	make_command("receivewal",
-				 "Receivewal in the PGDATA/pg_wal directory",
-				 " host port endpos",
-				 KEEPER_CLI_WORKER_SETUP_OPTIONS,
-				 keeper_cli_keeper_setup_getopts,
-				 keeper_cli_receiwal);
-
 CommandLine *do_standby[] = {
 	&do_standby_init,
 	&do_standby_rewind,
 	&do_standby_promote,
-	&do_standby_receivewal,
 	NULL
 };
 
