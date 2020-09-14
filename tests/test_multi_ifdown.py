@@ -131,7 +131,10 @@ def test_008_failover():
 
     # now we should be able to continue with the failover, and fetch missing
     # WAL bits from node2
-    node3.wait_until_pg_is_running()
+    if not node3.wait_until_pg_is_running():
+        # the hard-coded timeout is 30s, allow it twice
+        assert node3.wait_until_pg_is_running()
+
     assert node2.has_needed_replication_slots()
     assert node3.has_needed_replication_slots()
 
