@@ -1519,6 +1519,16 @@ pg_setup_standby_mode(uint32_t pg_control_version,
 		return false;
 	}
 
+	/*
+	 * Check our primary_conninfo connection string by attempting to connect in
+	 * replication mode and issuing a IDENTIFY_SYSTEM command.
+	 */
+	if (!pgctl_identify_system(replicationSource))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
 	if (pg_control_version < 1200)
 	{
 		/*
@@ -2019,6 +2029,69 @@ prepare_conninfo_sslmode(PQExpBuffer buffer, SSLOptions sslOptions)
 		{
 			appendPQExpBuffer(buffer, " sslrootcert=%s", sslOptions.caFile);
 		}
+	}
+
+	return true;
+}
+
+
+/*
+ * pgctl_identify_system connects with replication=1 to our target node and run
+ * the IDENTIFY_SYSTEM command to check that HBA is ready.
+ */
+bool
+pgctl_identify_system(ReplicationSource *replicationSource)
+{
+	NodeAddress *primaryNode = &(replicationSource->primaryNode);
+
+	char primaryConnInfo[MAXCONNINFO] = { 0 };
+	char primaryConnInfoReplication[MAXCONNINFO] = { 0 };
+	PGSQL replicationClient = { 0 };
+	int len = 0;
+
+	/* sometimes we don't have a primary, just pretend everything is fine */
+	if (IS_EMPTY_STRING_BUFFER(primaryNode->host))
+	{
+		return true;
+	}
+
+	if (!prepare_primary_conninfo(primaryConnInfo,
+								  MAXCONNINFO,
+								  primaryNode->host,
+								  primaryNode->port,
+								  replicationSource->userName,
+								  NULL, /* no database */
+								  replicationSource->password,
+								  replicationSource->applicationName,
+								  replicationSource->sslOptions,
+								  false)) /* no need for escaping */
+	{
+		/* errors have already been logged. */
+		return false;
+	}
+
+	len = sformat(primaryConnInfoReplication, MAXCONNINFO,
+				  "%s replication=1",
+				  primaryConnInfo);
+
+	if (len >= MAXCONNINFO)
+	{
+		log_warn("Failed to call IDENTIFY_SYSTEM: primary_conninfo too large");
+		return false;
+	}
+
+	if (!pgsql_init(&replicationClient,
+					primaryConnInfoReplication,
+					PGSQL_CONN_UPSTREAM))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	if (!pgsql_identify_system(&replicationClient))
+	{
+		/* errors have already been logged */
+		return false;
 	}
 
 	return true;

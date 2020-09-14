@@ -47,6 +47,7 @@ extern CommandLine *do_primary_hba_commands[];
 extern CommandLine do_primary_hba_setup;
 
 extern CommandLine do_primary_defaults;
+extern CommandLine do_primary_identify_system;
 
 extern CommandLine do_primary_;
 extern CommandLine *do_primary[];
@@ -85,6 +86,7 @@ void keeper_cli_init_standby(int argc, char **argv);
 void keeper_cli_rewind_old_primary(int argc, char **argv);
 void keeper_cli_promote_standby(int argc, char **argv);
 void keeper_cli_receiwal(int argc, char **argv);
+void keeper_cli_identify_system(int argc, char **argv);
 
 
 #endif  /* CLI_DO_ROOT_H */

@@ -118,11 +118,20 @@ CommandLine do_primary_defaults =
 				 keeper_cli_keeper_setup_getopts,
 				 keeper_cli_add_default_settings);
 
+CommandLine do_primary_identify_system =
+	make_command("identify",
+				 "Run the IDENTIFY_SYSTEM replication command on given host",
+				 " host port",
+				 KEEPER_CLI_WORKER_SETUP_OPTIONS,
+				 keeper_cli_keeper_setup_getopts,
+				 keeper_cli_identify_system);
+
 CommandLine *do_primary[] = {
 	&do_primary_slot_,
 	&do_primary_syncrep_,
 	&do_primary_adduser,
 	&do_primary_defaults,
+	&do_primary_identify_system,
 	NULL
 };
 
