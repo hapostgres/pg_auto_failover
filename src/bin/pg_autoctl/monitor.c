@@ -728,7 +728,8 @@ monitor_register_node(Monitor *monitor, char *formation,
 								   paramCount, paramTypes, paramValues,
 								   &parseContext, parseNodeState))
 	{
-		if (strcmp(parseContext.sqlstate, STR_ERRCODE_OBJECT_IN_USE) == 0)
+		if (monitor_retryable_error(parseContext.sqlstate) ||
+			strcmp(parseContext.sqlstate, STR_ERRCODE_OBJECT_IN_USE) == 0)
 		{
 			*mayRetry = true;
 			return false;

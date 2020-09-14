@@ -1250,7 +1250,7 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 	/*
 	 * We implement a specific retry policy for cases where we have a transient
 	 * error on the monitor, such as OBJECT_IN_USE which indicates that another
-	 * standby is concurfrently being added to the same group.
+	 * standby is concurrently being added to the same group.
 	 */
 	(void) pgsql_set_init_retry_policy(&(keeper->monitor.pgsql.retryPolicy));
 
