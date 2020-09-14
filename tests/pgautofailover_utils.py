@@ -1385,8 +1385,9 @@ class PGAutoCtl():
                   (self.datadir, self.run_proc.pid))
 
             try:
-                pgid = os.getpgid(self.run_proc.pid)
-                os.killpg(pgid, signal.SIGTERM)
+                # pgid = os.getpgid(self.run_proc.pid)
+                # os.killpg(pgid, signal.SIGTERM)
+                os.kill(self.run_proc.pid, signal.SIGTERM)
 
                 return self.pgnode.cluster.communicate(self, COMMAND_TIMEOUT)
 
