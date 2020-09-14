@@ -98,9 +98,9 @@ pgtuning_prepare_guc_settings(GUC *settings, char *config, size_t size)
 			log_error("Failed to compute memory settings, using defaults");
 			return false;
 		}
-	}
 
-	(void) pgtuning_log_settings(&tuning, LOG_DEBUG);
+		(void) pgtuning_log_settings(&tuning, LOG_DEBUG);
+	}
 
 	return pgtuning_edit_guc_settings(settings, &tuning, config, size);
 }

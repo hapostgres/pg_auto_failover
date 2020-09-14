@@ -747,7 +747,6 @@ pg_basebackup(const char *pgdata,
 	}
 	setenv("PGAPPNAME", replicationSource->applicationName, 1);
 
-	/* we ignore the length returned by prepare_primary_conninfo... */
 	if (!prepare_primary_conninfo(primaryConnInfo,
 								  MAXCONNINFO,
 								  primaryNode->host,
@@ -869,7 +868,6 @@ pg_rewind(const char *pgdata,
 		setenv("PGPASSWORD", replicationSource->password, 1);
 	}
 
-	/* we ignore the length returned by prepare_primary_conninfo... */
 	if (!prepare_primary_conninfo(primaryConnInfo,
 								  MAXCONNINFO,
 								  primaryNode->host,
@@ -1282,7 +1280,7 @@ pg_log_recovery_setup(const char *pgdata, int logLevel)
 		char *fileContents;
 		long fileSize;
 
-		join_path_components(recoveryConfPath, pgdata, "recovery.conf");
+		join_path_components(recoveryConfPath, pgdata, filenames[i]);
 
 		if (file_exists(recoveryConfPath))
 		{
@@ -1684,7 +1682,9 @@ prepare_recovery_settings(const char *pgdata,
 	/* when reaching REPORT_LSN we set recovery with no primary conninfo */
 	if (!IS_EMPTY_STRING_BUFFER(primaryNode->host))
 	{
-		/* we ignore the length returned by prepare_primary_conninfo... */
+		log_debug("prepare_recovery_settings: primary node %s:%d",
+				  primaryNode->host, primaryNode->port);
+
 		if (!prepare_primary_conninfo(primaryConnInfo,
 									  MAXCONNINFO,
 									  primaryNode->host,
@@ -1699,6 +1699,10 @@ prepare_recovery_settings(const char *pgdata,
 			/* errors have already been logged. */
 			return false;
 		}
+	}
+	else
+	{
+		log_debug("prepare_recovery_settings: no primary node!");
 	}
 
 	/*
