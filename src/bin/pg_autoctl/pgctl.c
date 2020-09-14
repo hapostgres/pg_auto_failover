@@ -952,11 +952,18 @@ pg_receivewal(const char *pgdata,
 	char command[BUFSIZE];
 	int commandSize = 0;
 
+	/* put the received WAL bits, if any, in backupdir/wal */
+	sformat(pg_wal, sizeof(pg_wal), "%s/wal", replicationSource->backupDir);
+
+	log_debug("mkdir -p \"%s\"", pg_wal);
+	if (!ensure_empty_dir(pg_wal, 0700))
+	{
+		/* errors have already been logged. */
+		return false;
+	}
+
 	/* call pg_receivewal */
 	path_in_same_directory(pg_ctl, "pg_receivewal", pg_receivewal);
-
-	/* put the received WAL bits, if any, in $PGDATA/pg_wal */
-	sformat(pg_wal, sizeof(pg_wal), "%s/pg_wal", pgdata);
 
 	setenv("PGCONNECT_TIMEOUT", POSTGRES_CONNECT_TIMEOUT, 1);
 
@@ -1510,34 +1517,6 @@ pg_setup_standby_mode(uint32_t pg_control_version,
 				  "pg_controldata \"%s\"",
 				  pg_control_version, pgdata);
 		return false;
-	}
-
-	/*
-	 * Check that we can actually connect to the primary with the given primary
-	 * conninfo setting. For that we use pg_receivewal, which knows about the
-	 * Postgres replication protocol and will match the HBA rules that we need
-	 * on the server side.
-	 *
-	 * Target LSN 0/1 (which we already have) to test the replication
-	 * connection without actually doing anything else.
-	 *
-	 * pg_receivewal --endpos feature was introduced in Postgres 11, so we skip
-	 * that connection string testing in Postgres 10.
-	 */
-	if (pg_control_version >= 1100)
-	{
-		NodeAddress *primaryNode = &(replicationSource->primaryNode);
-
-		if (!IS_EMPTY_STRING_BUFFER(primaryNode->host) &&
-			!pg_receivewal(pgdata, pg_ctl, replicationSource, "0/1", LOG_DEBUG))
-		{
-			log_fatal("Failed to connect to the upstream server %d (%s:%d) "
-					  "for replication, see above for details",
-					  primaryNode->nodeId,
-					  primaryNode->host,
-					  primaryNode->port);
-			return false;
-		}
 	}
 
 	if (pg_control_version < 1200)
