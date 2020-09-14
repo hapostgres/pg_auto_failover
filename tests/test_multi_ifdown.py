@@ -125,6 +125,8 @@ def test_008_failover():
     print("Injecting failure of node1")
     node1.fail()
 
+    assert node2.has_needed_replication_slots()
+
     # have node2 re-join the network and hopefully reconnect etc
     print("Reconnecting node3 (ifconfig up)")
     node3.ifup()
@@ -135,7 +137,6 @@ def test_008_failover():
         # the hard-coded timeout is 30s, allow it twice
         assert node3.wait_until_pg_is_running()
 
-    assert node2.has_needed_replication_slots()
     assert node3.has_needed_replication_slots()
 
     assert node3.wait_until_state(target_state="wait_primary", timeout=120)
