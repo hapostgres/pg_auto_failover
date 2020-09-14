@@ -3497,7 +3497,7 @@ monitor_wait_for_state_change(Monitor *monitor,
 		(char *) formation,
 		groupId,
 		nodeId,
-		false					/* stateHasChanged */
+		false                   /* stateHasChanged */
 	};
 
 	char *channels[] = { "state", NULL };
