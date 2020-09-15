@@ -1747,6 +1747,8 @@ pg_cleanup_standby_mode(uint32_t pg_control_version,
 
 		join_path_components(recoveryConfPath, pgdata, "recovery.conf");
 
+		log_debug("pg_cleanup_standby_mode: rm \"%s\"", recoveryConfPath);
+
 		if (!unlink_file(recoveryConfPath))
 		{
 			/* errors have already been logged */
@@ -1763,6 +1765,8 @@ pg_cleanup_standby_mode(uint32_t pg_control_version,
 							 pgdata,
 							 AUTOCTL_STANDBY_CONF_FILENAME);
 
+		log_debug("pg_cleanup_standby_mode: rm \"%s\"", signalFilePath);
+
 		if (!unlink_file(signalFilePath))
 		{
 			/* errors have already been logged */
@@ -1770,6 +1774,8 @@ pg_cleanup_standby_mode(uint32_t pg_control_version,
 		}
 
 		/* empty out the standby configuration file */
+		log_debug("pg_cleanup_standby_mode: > \"%s\"", standbyConfigFilePath);
+
 		if (!write_file("", 0, standbyConfigFilePath))
 		{
 			/* write_file logs I/O error */
