@@ -1,4 +1,4 @@
-FROM debian:buster-slim
+FROM debian:bullseye-slim
 
 ENV PGDATA /var/lib/postgresql/data
 
@@ -20,11 +20,13 @@ RUN apt-get update \
     make \
     openssl \
     pipenv \
-    postgresql-11 \
-    postgresql-server-dev-11 \
-    python-nose \
+    postgresql-12 \
+    postgresql-server-dev-12 \
+    python3-nose \
     python3 \
-    python3-setuptools \
+	python3-setuptools \
+	python3-psycopg2 \
+	python3-pyroute2 \
     sudo \
     && rm -rf /var/lib/apt/lists/*
 
@@ -34,9 +36,6 @@ RUN echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
 WORKDIR /usr/src/pg_auto_failover
 
-COPY tests/Pipfile* tests/
-RUN PIPENV_PIPFILE=tests/Pipfile pipenv install --system --deploy
-
 COPY Makefile ./
 COPY ./src/ ./src
 RUN make -s clean && make -s install -j8
@@ -44,4 +43,4 @@ RUN make -s clean && make -s install -j8
 COPY ./tests/ ./tests
 
 USER docker
-ENV PATH $PATH:/usr/lib/postgresql/11/bin
+ENV PATH $PATH:/usr/lib/postgresql/12/bin

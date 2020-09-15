@@ -60,7 +60,7 @@ install-bin: bin
 
 test:
 	sudo -E env "PATH=${PATH}" USER=$(shell whoami) \
-		`which nosetests`			\
+		`which nosetests3`			\
 		--verbose				\
 		--nocapture				\
 		--stop					\
