@@ -133,12 +133,12 @@ def test_008_failover():
     # WAL bits from node2
     assert node3.wait_until_pg_is_running()
 
-    assert node3.has_needed_replication_slots()
-    assert node2.has_needed_replication_slots()
-
     assert node3.wait_until_state(target_state="wait_primary", timeout=120)
     assert node2.wait_until_state(target_state="secondary")
     assert node3.wait_until_state(target_state="primary")
+
+    assert node3.has_needed_replication_slots()
+    assert node2.has_needed_replication_slots()
 
 def test_009_read_from_new_primary():
     results = node3.run_sql_query("SELECT count(*) FROM t1")
@@ -234,6 +234,7 @@ def test_015_finalize_failover_after_most_advanced_secondary_gets_back():
     node3.ifup()    # old primary, now secondary
 
     # and, node2 should finally become the primary without losing any data
+    print()
     assert node2.wait_until_state(target_state="wait_primary")
 
     print("%s" % monitor.pg_autoctl.err)
