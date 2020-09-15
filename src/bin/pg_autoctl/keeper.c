@@ -171,6 +171,17 @@ keeper_should_ensure_current_state_before_transition(Keeper *keeper)
 		return false;
 	}
 
+	if (keeperState->current_role == SECONDARY_STATE &&
+		keeperState->assigned_role != SECONDARY_STATE)
+	{
+		/*
+		 * We might have a different primary server to reconnect to, or be
+		 * asked to report lsn, etc. Ensuring the secondary state does not
+		 * sound productive there.
+		 */
+		return false;
+	}
+
 	/* in all other cases, yes please ensure the current state */
 	return true;
 }
