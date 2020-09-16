@@ -22,12 +22,14 @@ else
 endif
 
 PG_AUTOCTL = PG_AUTOCTL_DEBUG=1 ./src/bin/pg_autoctl/pg_autoctl
-TMUX_TOP_DIR = ./tmux
-TMUX_SCRIPT = ./tmux/script.tmux
+
+NODES ?= 2
+FIRST_PGPORT ?= 5500
 
 TMUX_EXTRA_COMMANDS ?= ""
 TMUX_LAYOUT ?= even-vertical	# could be "tiled"
-NODES ?= 2
+TMUX_TOP_DIR = ./tmux
+TMUX_SCRIPT = ./tmux/script-$(FIRST_PGPORT).tmux
 
 all: monitor bin ;
 
@@ -102,9 +104,10 @@ $(FSM): bin
 
 $(TMUX_SCRIPT): bin
 	mkdir -p $(TMUX_TOP_DIR)
-	$(PG_AUTOCTL) do tmux script \
-         --root $(TMUX_TOP_DIR)  \
-         --nodes $(NODES)        \
+	$(PG_AUTOCTL) do tmux script      \
+         --root $(TMUX_TOP_DIR)       \
+         --first-pgport $(FIRST_PGPORT)  \
+         --nodes $(NODES)             \
          --layout $(TMUX_LAYOUT) > $@
 
 tmux-script: $(TMUX_SCRIPT) ;
@@ -113,7 +116,9 @@ tmux-clean:
 	pkill pg_autoctl || true
 	rm -rf $(TMUX_TOP_DIR)
 
-cluster: install tmux-clean $(TMUX_SCRIPT)
+cluster: install
+	$(MAKE) tmux-clean
+	$(MAKE) tmux-script
 	mkdir -p $(TMUX_TOP_DIR)/run
 	tmux start-server \; source-file $(TMUX_SCRIPT)
 	pkill pg_autoctl || true
@@ -122,3 +127,4 @@ cluster: install tmux-clean $(TMUX_SCRIPT)
 .PHONY: monitor clean-monitor check-monitor install-monitor
 .PHONY: bin clean-bin install-bin
 .PHONY: build-test run-test
+.PHONY: tmux-clean cluster

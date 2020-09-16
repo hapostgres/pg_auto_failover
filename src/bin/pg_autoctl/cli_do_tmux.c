@@ -66,7 +66,7 @@ cli_do_tmux_script_getopts(int argc, char **argv)
 
 	static struct option long_options[] = {
 		{ "root", required_argument, NULL, 'D' },
-		{ "first-port", required_argument, NULL, 'p' },
+		{ "first-pgport", required_argument, NULL, 'p' },
 		{ "nodes", required_argument, NULL, 'n' },
 		{ "layout", required_argument, NULL, 'l' },
 		{ "version", no_argument, NULL, 'V' },
@@ -339,14 +339,18 @@ cli_do_tmux_script(int argc, char **argv)
 
 	int pgport = options.firstPort;
 
+	char sessionName[BUFSIZE] = { 0 };
+
 	if (script == NULL)
 	{
 		log_error("Failed to allocate memory");
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
+	sformat(sessionName, BUFSIZE, "pgautofailover-%d", options.firstPort);
+
 	tmux_add_command(script, "set-option -g default-shell /bin/bash");
-	tmux_add_command(script, "new -s pgautofailover");
+	tmux_add_command(script, "new-session -s %s", sessionName);
 
 	/* start a monitor */
 	tmux_pg_autoctl_create(script, root, pgport++, "monitor", "monitor");
@@ -365,7 +369,7 @@ cli_do_tmux_script(int argc, char **argv)
 		if (i == 0)
 		{
 			/* on the primary, wait until the monitor is ready */
-			tmux_add_send_keys_command(script, "sleep 1");
+			tmux_add_send_keys_command(script, "sleep 2");
 			tmux_add_send_keys_command(script,
 									   "%s do pgsetup wait --pgdata %s/monitor",
 									   pg_autoctl_argv0,
