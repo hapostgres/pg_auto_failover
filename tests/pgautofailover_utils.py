@@ -814,6 +814,17 @@ class DataNode(PGNode):
         self.state = json.loads(out)
         return self.state['state']['nodeId']
 
+    def get_local_state(self):
+        """
+        Fetch the assigned_state from the pg_autoctl state file.
+        """
+        command = PGAutoCtl(self)
+        out, err, ret = command.execute("get node id", 'do', 'fsm', 'state')
+
+        self.state = json.loads(out)
+        return (self.state['state']['current_role'],
+                self.state['state']['assigned_role'])
+
     def get_nodename(self, nodeId=None):
         """
         Fetch the node name from the monitor, given its nodeid

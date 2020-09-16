@@ -201,13 +201,40 @@ def test_020_multiple_manual_failover_verify_replication_slots():
     assert node2.has_needed_replication_slots()
     assert node3.has_needed_replication_slots()
 
-def test_021_drop_primary():
-    node2.drop()
-    assert not node2.pg_is_running()
-    assert node3.wait_until_state(target_state="single")
-
-def test_022_stop_postgres_monitor():
+def test_021_stop_postgres_monitor():
     original_state = node3.get_state()
     monitor.stop_postgres()
     monitor.wait_until_pg_is_running()
+    print()
     assert node3.wait_until_state(target_state=original_state)
+
+def test_022_fail_secondary_and_monitor():
+    print()
+    assert node2.wait_until_state(target_state="primary")
+    assert node3.wait_until_state(target_state="secondary")
+
+    node3.fail()
+    monitor.fail()
+
+    time.sleep(2)
+    assert not node3.pg_is_running()
+    assert not monitor.pg_is_running()
+
+    # wait for network partition detection to kick-in, allow some head-room
+    time.sleep(45)
+
+    eq_(node2.get_local_state(), ('demote_timeout', 'demote_timeout'))
+    assert not node2.pg_is_running()
+
+def test_023_restart_all():
+    monitor.run()
+    node3.run()
+
+    assert node2.wait_until_pg_is_running()
+    assert node2.wait_until_state("primary")
+    assert node3.wait_until_state("secondary")
+
+def test_024_drop_primary():
+    node2.drop()
+    assert not node2.pg_is_running()
+    assert node3.wait_until_state(target_state="single")
