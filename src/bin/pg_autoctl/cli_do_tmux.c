@@ -45,11 +45,16 @@ __attribute__((format(printf, 2, 3)));
 
 static void tmux_add_xdg_environment(PQExpBuffer script, const char *root);
 
-static void tmux_pg_autoctl_create(PQExpBuffer script,
-								   const char *root,
-								   int pgport,
-								   const char *role,
-								   const char *name);
+static void tmux_pg_autoctl_create_monitor(PQExpBuffer script,
+										   const char *root,
+										   int pgport,
+										   bool setXDG);
+
+static void tmux_pg_autoctl_create_postgres(PQExpBuffer script,
+											const char *root,
+											int pgport,
+											const char *name,
+											bool setXDG);
 
 /*
  * cli_print_version_getopts parses the CLI options for the pg_autoctl version
@@ -275,88 +280,105 @@ tmux_add_xdg_environment(PQExpBuffer script, const char *root)
 
 
 /*
- * tmux_pg_autoctl_create appends a pg_autoctl create command to the given
- * script buffer, and also the commands to set PGDATA and PGPORT.
+ * tmux_pg_autoctl_create_monitor appends a pg_autoctl create monitor command
+ * to the given script buffer, and also the commands to set PGDATA and PGPORT.
  */
 static void
-tmux_pg_autoctl_create(PQExpBuffer script,
-					   const char *root,
-					   int pgport,
-					   const char *role,
-					   const char *name)
+tmux_pg_autoctl_create_monitor(PQExpBuffer script,
+							   const char *root,
+							   int pgport,
+							   bool setXDG)
 {
 	char *pg_ctl_opts = "--hostname localhost --ssl-self-signed --auth trust";
 
-	tmux_add_xdg_environment(script, root);
+	if (setXDG)
+	{
+		tmux_add_xdg_environment(script, root);
+	}
+
 	tmux_add_send_keys_command(script, "export PGPORT=%d", pgport);
 
 	/* the monitor is always named monitor, and does not need --monitor */
-	if (strcmp(role, "monitor") == 0)
-	{
-		tmux_add_send_keys_command(script, "export PGDATA=\"%s/monitor\"", root);
+	tmux_add_send_keys_command(script, "export PGDATA=\"%s/monitor\"", root);
 
-		tmux_add_send_keys_command(script,
-								   "%s create %s %s --run",
-								   pg_autoctl_argv0,
-								   role,
-								   pg_ctl_opts);
-	}
-	else
-	{
-		char monitor[BUFSIZE] = { 0 };
-
-		sformat(monitor, sizeof(monitor),
-				"$(%s show uri --pgdata %s/monitor --monitor)",
-				pg_autoctl_argv0,
-				root);
-
-		tmux_add_send_keys_command(script,
-								   "export PGDATA=\"%s/%s\"",
-								   root,
-								   name);
-
-		tmux_add_send_keys_command(script,
-								   "%s create %s %s --monitor %s --run",
-								   pg_autoctl_argv0,
-								   role,
-								   pg_ctl_opts,
-								   monitor);
-	}
+	tmux_add_send_keys_command(script,
+							   "%s create monitor %s --run",
+							   pg_autoctl_argv0,
+							   pg_ctl_opts);
 }
 
 
 /*
- * keeper_cli_tmux_script generates a tmux script to run a test case or a demo
- * for pg_auto_failover easily.
+ * tmux_pg_autoctl_create_postgres appends a pg_autoctl create postgres command
+ * to the given script buffer, and also the commands to set PGDATA and PGPORT.
  */
-void
-cli_do_tmux_script(int argc, char **argv)
+static void
+tmux_pg_autoctl_create_postgres(PQExpBuffer script,
+								const char *root,
+								int pgport,
+								const char *name,
+								bool setXDG)
 {
-	TmuxOptions options = tmuxOptions;
+	char monitor[BUFSIZE] = { 0 };
+	char *pg_ctl_opts = "--hostname localhost --ssl-self-signed --auth trust";
 
-	char *root = options.root;
-	PQExpBuffer script = createPQExpBuffer();
-
-	int pgport = options.firstPort;
-
-	char sessionName[BUFSIZE] = { 0 };
-
-	if (script == NULL)
+	if (setXDG)
 	{
-		log_error("Failed to allocate memory");
-		exit(EXIT_CODE_INTERNAL_ERROR);
+		tmux_add_xdg_environment(script, root);
 	}
 
-	sformat(sessionName, BUFSIZE, "pgautofailover-%d", options.firstPort);
+	tmux_add_send_keys_command(script, "export PGPORT=%d", pgport);
+
+
+	sformat(monitor, sizeof(monitor),
+			"$(%s show uri --pgdata %s/monitor --monitor)",
+			pg_autoctl_argv0,
+			root);
+
+	tmux_add_send_keys_command(script,
+							   "export PGDATA=\"%s/%s\"",
+							   root,
+							   name);
+
+	tmux_add_send_keys_command(script,
+							   "%s create postgres %s "
+							   "--monitor %s --name %s --run",
+							   pg_autoctl_argv0,
+							   pg_ctl_opts,
+							   monitor,
+							   name);
+}
+
+
+/*
+ * prepare_tmux_script prepares a script for a tmux session with the given
+ * nodes, root directory, first pgPort, and layout.
+ *
+ * This script can be saved to disk and used later, or used straight away for
+ * an interactive session. When used for interactive session, then the XDG
+ * environment variables are set in the main pg_autoctl process (running this
+ * code), and inherited in all the shells in the tmux sessions thereafter.
+ *
+ * As a result in that case we don't need to include the XDG environment
+ * settings in the tmux script itself.
+ */
+static void
+prepare_tmux_script(TmuxOptions *options, PQExpBuffer script, bool setXDG)
+{
+	char *root = options->root;
+	int pgport = options->firstPort;
+	char sessionName[BUFSIZE] = { 0 };
+
+	sformat(sessionName, BUFSIZE, "pgautofailover-%d", options->firstPort);
 
 	tmux_add_command(script, "set-option -g default-shell /bin/bash");
 	tmux_add_command(script, "new-session -s %s", sessionName);
 
 	/* start a monitor */
-	tmux_pg_autoctl_create(script, root, pgport++, "monitor", "monitor");
+	tmux_pg_autoctl_create_monitor(script, root, pgport++, setXDG);
 
 	/* start the Postgres nodes, using the monitor URI */
-	for (int i = 0; i < options.nodes; i++)
+	for (int i = 0; i < options->nodes; i++)
 	{
 		char name[NAMEDATALEN] = { 0 };
 
@@ -373,7 +395,7 @@ cli_do_tmux_script(int argc, char **argv)
 			tmux_add_send_keys_command(script,
 									   "%s do pgsetup wait --pgdata %s/monitor",
 									   pg_autoctl_argv0,
-									   options.root);
+									   root);
 		}
 		else
 		{
@@ -382,10 +404,10 @@ cli_do_tmux_script(int argc, char **argv)
 			tmux_add_send_keys_command(script,
 									   "%s do pgsetup wait --pgdata %s/node1",
 									   pg_autoctl_argv0,
-									   options.root);
+									   root);
 		}
 
-		tmux_pg_autoctl_create(script, root, pgport++, "postgres", name);
+		tmux_pg_autoctl_create_postgres(script, root, pgport++, name, setXDG);
 		tmux_add_send_keys_command(script, "pg_autoctl run");
 	}
 
@@ -407,19 +429,7 @@ cli_do_tmux_script(int argc, char **argv)
 	tmux_add_send_keys_command(script, "export PGDATA=\"%s/monitor\"", root);
 
 	/* now select our target layout */
-	tmux_add_command(script, "select-layout %s", options.layout);
-
-	/* memory allocation could have failed while building string */
-	if (PQExpBufferBroken(script))
-	{
-		log_error("Failed to allocate memory");
-		destroyPQExpBuffer(script);
-
-		exit(EXIT_CODE_INTERNAL_ERROR);
-	}
-
-	fformat(stdout, "%s", script->data);
-	destroyPQExpBuffer(script);
+	tmux_add_command(script, "select-layout %s", options->layout);
 
 	if (env_exists("TMUX_EXTRA_COMMANDS"))
 	{
@@ -439,7 +449,41 @@ cli_do_tmux_script(int argc, char **argv)
 
 		for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
 		{
-			fformat(stdout, "%s\n", extraLines[lineNumber]);
+			appendPQExpBuffer(script, "%s\n", extraLines[lineNumber]);
 		}
 	}
+}
+
+
+/*
+ * keeper_cli_tmux_script generates a tmux script to run a test case or a demo
+ * for pg_auto_failover easily.
+ */
+void
+cli_do_tmux_script(int argc, char **argv)
+{
+	TmuxOptions options = tmuxOptions;
+	PQExpBuffer script = createPQExpBuffer();
+
+	if (script == NULL)
+	{
+		log_error("Failed to allocate memory");
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	/* prepare the tmux script */
+	(void) prepare_tmux_script(&options, script, true);
+
+	/* memory allocation could have failed while building string */
+	if (PQExpBufferBroken(script))
+	{
+		log_error("Failed to allocate memory");
+		destroyPQExpBuffer(script);
+
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	fformat(stdout, "%s", script->data);
+
+	destroyPQExpBuffer(script);
 }
