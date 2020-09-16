@@ -230,6 +230,27 @@ CommandLine do_pgsetup_commands =
 					 "Manage a local Postgres setup", NULL, NULL,
 					 NULL, do_pgsetup);
 
+CommandLine do_tmux_script =
+	make_command("script",
+				 "Produce a tmux script for a demo or a test case",
+				 "[option ...]",
+				 "  --root          path where to create a cluster\n" \
+				 "  --first-port    first Postgres port to use (5500)\n" \
+				 "  --nodes         number of Postgres nodes to create (2)",
+				 cli_do_tmux_script_getopts,
+				 cli_do_tmux_script);
+
+CommandLine *do_tmux[] = {
+	&do_tmux_script,
+	NULL
+};
+
+CommandLine do_tmux_commands =
+	make_command_set("tmux",
+					 "set of facilities to handle tmux interactive sessions",
+					 NULL, NULL, NULL, do_tmux);
+
+
 CommandLine *do_subcommands[] = {
 	&do_monitor_commands,
 	&do_fsm_commands,
@@ -239,6 +260,7 @@ CommandLine *do_subcommands[] = {
 	&do_pgsetup_commands,
 	&do_service_postgres_ctl_commands,
 	&do_service_commands,
+	&do_tmux_commands,
 	NULL
 };
 

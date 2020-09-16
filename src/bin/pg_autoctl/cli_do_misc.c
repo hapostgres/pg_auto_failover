@@ -14,9 +14,11 @@
 #include <signal.h>
 
 #include "postgres_fe.h"
+#include "pqexpbuffer.h"
 
 #include "cli_common.h"
 #include "cli_do_root.h"
+#include "cli_root.h"
 #include "commandline.h"
 #include "config.h"
 #include "defaults.h"
