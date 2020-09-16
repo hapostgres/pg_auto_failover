@@ -27,12 +27,11 @@
 #define ERRCODE_DUPLICATE_DATABASE "42P04"
 
 static char * connectionTypeToString(ConnectionType connectionType);
-static int pgsql_compute_connection_retry_sleep_time(PGSQL *pgsql);
 static void log_connection_error(PGconn *connection, int logLevel);
 static void pgAutoCtlDefaultNoticeProcessor(void *arg, const char *message);
 static void pgAutoCtlDebugNoticeProcessor(void *arg, const char *message);
 static PGconn * pgsql_open_connection(PGSQL *pgsql);
-static bool pgsql_retry_open_connection(PGSQL *pgsql, uint64_t startTime);
+static bool pgsql_retry_open_connection(PGSQL *pgsql);
 static bool is_response_ok(PGresult *result);
 static bool clear_results(PGSQL *pgsql);
 static void pgsql_handle_notifications(PGSQL *pgsql);
@@ -128,7 +127,7 @@ pgsql_init(PGSQL *pgsql, char *url, ConnectionType connectionType)
 	pgsql->connection = NULL;
 
 	/* set our default retry policy for interactive commands */
-	(void) pgsql_set_interactive_retry_policy(pgsql);
+	(void) pgsql_set_interactive_retry_policy(&(pgsql->retryPolicy));
 
 	if (validate_connection_string(url))
 	{
@@ -150,26 +149,19 @@ pgsql_init(PGSQL *pgsql, char *url, ConnectionType connectionType)
  * cap our exponential backoff with decorrelated jitter computation.
  */
 void
-pgsql_set_retry_policy(PGSQL *pgsql,
+pgsql_set_retry_policy(ConnectionRetryPolicy *retryPolicy,
 					   int maxT,
 					   int maxR,
 					   int maxSleepTime,
 					   int baseSleepTime)
 {
-	pgsql->retryPolicy.maxT = maxT;
-	pgsql->retryPolicy.maxR = maxR;
-	pgsql->retryPolicy.maxSleepTime = maxSleepTime;
-	pgsql->retryPolicy.baseSleepTime = baseSleepTime;
+	retryPolicy->maxT = maxT;
+	retryPolicy->maxR = maxR;
+	retryPolicy->maxSleepTime = maxSleepTime;
+	retryPolicy->baseSleepTime = baseSleepTime;
 
 	/* initialize a seed for our random number generator */
 	pg_srand48(time(0));
-
-	log_debug("pgsql_set_retry_policy(\"%s\"): maxT=%d maxR=%d cap=%d base=%d",
-			  pgsql->connectionString,
-			  pgsql->retryPolicy.maxT,
-			  pgsql->retryPolicy.maxR,
-			  pgsql->retryPolicy.maxSleepTime,
-			  pgsql->retryPolicy.baseSleepTime);
 }
 
 
@@ -181,9 +173,9 @@ pgsql_set_retry_policy(PGSQL *pgsql,
  * This is the retry policy that prevails in the main keeper loop.
  */
 void
-pgsql_set_main_loop_retry_policy(PGSQL *pgsql)
+pgsql_set_main_loop_retry_policy(ConnectionRetryPolicy *retryPolicy)
 {
-	(void) pgsql_set_retry_policy(pgsql,
+	(void) pgsql_set_retry_policy(retryPolicy,
 								  POSTGRES_PING_RETRY_TIMEOUT,
 								  0, /* do not retry by default */
 								  POSTGRES_PING_RETRY_CAP_SLEEP_TIME,
@@ -202,9 +194,9 @@ pgsql_set_main_loop_retry_policy(PGSQL *pgsql)
  * it's ready. In that case we want to retry for a long time.
  */
 void
-pgsql_set_init_retry_policy(PGSQL *pgsql)
+pgsql_set_init_retry_policy(ConnectionRetryPolicy *retryPolicy)
 {
-	(void) pgsql_set_retry_policy(pgsql,
+	(void) pgsql_set_retry_policy(retryPolicy,
 								  POSTGRES_PING_RETRY_TIMEOUT,
 								  -1, /* unbounded number of attempts */
 								  POSTGRES_PING_RETRY_CAP_SLEEP_TIME,
@@ -218,13 +210,35 @@ pgsql_set_init_retry_policy(PGSQL *pgsql)
  * of attempts, and up to 2 seconds of sleep time in between attempts.
  */
 void
-pgsql_set_interactive_retry_policy(PGSQL *pgsql)
+pgsql_set_interactive_retry_policy(ConnectionRetryPolicy *retryPolicy)
 {
-	(void) pgsql_set_retry_policy(pgsql,
+	(void) pgsql_set_retry_policy(retryPolicy,
 								  pgconnect_timeout,
 								  -1, /* unbounded number of attempts */
 								  POSTGRES_PING_RETRY_CAP_SLEEP_TIME,
 								  POSTGRES_PING_RETRY_BASE_SLEEP_TIME);
+}
+
+
+/*
+ * pgsql_set_monitor_interactive_retry_policy sets the retry policy to 15 mins
+ * of total retrying time, unbounded number of attemps, and up to 5 seconds of
+ * sleep time in between attemps, starting at 1 second for the first retry.
+ *
+ * We use this policy in interactive commands when connecting to the monitor,
+ * such as when doing pg_autoctl enable|disable maintenance.
+ */
+void
+pgsql_set_monitor_interactive_retry_policy(ConnectionRetryPolicy *retryPolicy)
+{
+	int cap = 5 * 1000;         /* sleep up to 5s between attempts */
+	int sleepTime = 1 * 1000;   /* first retry happens after 1 second */
+
+	(void) pgsql_set_retry_policy(retryPolicy,
+								  POSTGRES_PING_RETRY_TIMEOUT,
+								  -1, /* unbounded number of attempts */
+								  cap,
+								  sleepTime);
 }
 
 
@@ -240,8 +254,8 @@ pgsql_set_interactive_retry_policy(PGSQL *pgsql)
  * pgsql_compute_connection_retry_sleep_time returns how much time to sleep
  * this time, in milliseconds.
  */
-static int
-pgsql_compute_connection_retry_sleep_time(PGSQL *pgsql)
+int
+pgsql_compute_connection_retry_sleep_time(ConnectionRetryPolicy *retryPolicy)
 {
 	/*
 	 * https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/
@@ -282,16 +296,55 @@ pgsql_compute_connection_retry_sleep_time(PGSQL *pgsql)
 	 * time spent, something we care to optimize for even when it means more
 	 * work on the monitor side.
 	 */
-	int previousSleepTime = pgsql->retryPolicy.sleepTime;
-	int sleepTime = random_between(pgsql->retryPolicy.baseSleepTime,
-								   previousSleepTime * 3);
+	int previousSleepTime = retryPolicy->sleepTime;
+	int sleepTime =
+		random_between(retryPolicy->baseSleepTime, previousSleepTime * 3);
 
-	pgsql->retryPolicy.sleepTime =
-		min(pgsql->retryPolicy.maxSleepTime, sleepTime);
+	retryPolicy->sleepTime = min(retryPolicy->maxSleepTime, sleepTime);
 
-	++(pgsql->retryPolicy.attempts);
+	++(retryPolicy->attempts);
 
-	return pgsql->retryPolicy.sleepTime;
+	return retryPolicy->sleepTime;
+}
+
+
+/*
+ * pgsql_retry_policy_expired returns true when we should stop retrying, either
+ * per the policy (maxR / maxT) or because we received a signal that we have to
+ * obey.
+ */
+bool
+pgsql_retry_policy_expired(ConnectionRetryPolicy *retryPolicy)
+{
+	uint64_t now = time(NULL);
+
+	/* Any signal is reason enough to break out from this retry loop. */
+	if (asked_to_quit || asked_to_stop || asked_to_stop_fast || asked_to_reload)
+	{
+		return true;
+	}
+
+	/* set the first retry time when it's not been set previously */
+	if (retryPolicy->startTime == 0)
+	{
+		retryPolicy->startTime = now;
+	}
+
+	/*
+	 * We stop retrying as soon as we have spent all of our time budget or all
+	 * of our attempts count budget, whichever comes first.
+	 *
+	 * maxR = 0 (zero) means no retry at all, checked before the loop
+	 * maxR < 0 (zero) means unlimited number of retries
+	 */
+	if ((now - retryPolicy->startTime) >= retryPolicy->maxT ||
+		(retryPolicy->maxR > 0 &&
+		 retryPolicy->attempts >= retryPolicy->maxR))
+	{
+		return true;
+	}
+
+	return false;
 }
 
 
@@ -441,7 +494,9 @@ pgsql_open_connection(PGSQL *pgsql)
 		 * If we reach this part of the code, the connectionType is not LOCAL
 		 * and the retryPolicy has a non-zero maximum retry count. Let's retry!
 		 */
-		if (!pgsql_retry_open_connection(pgsql, startTime))
+		pgsql->retryPolicy.startTime = startTime;
+
+		if (!pgsql_retry_open_connection(pgsql))
 		{
 			/* errors have already been logged */
 			return NULL;
@@ -464,8 +519,8 @@ pgsql_open_connection(PGSQL *pgsql)
  * is ready to accept connections, and then connects to it and returns true
  * when it could connect, false otherwise.
  */
-bool
-pgsql_retry_open_connection(PGSQL *pgsql, uint64_t startTime)
+static bool
+pgsql_retry_open_connection(PGSQL *pgsql)
 {
 	bool connectionOk = false;
 
@@ -487,28 +542,11 @@ pgsql_retry_open_connection(PGSQL *pgsql, uint64_t startTime)
 	while (!connectionOk)
 	{
 		int sleep = 0;
-		uint64_t now = time(NULL);
 
-		/* Any signal is reason enough to break out from this retry loop. */
-		if (asked_to_quit ||
-			asked_to_stop ||
-			asked_to_stop_fast ||
-			asked_to_reload)
+		if (pgsql_retry_policy_expired(&(pgsql->retryPolicy)))
 		{
-			break;
-		}
+			uint64_t now = time(NULL);
 
-		/*
-		 * We stop retrying as soon as we have spent all of our time budget or
-		 * all of our attempts count budget, whichever comes first.
-		 *
-		 * maxR = 0 (zero) means no retry at all, checked before the loop
-		 * maxR < 0 (zero) means unlimited number of retries
-		 */
-		if ((now - startTime) >= pgsql->retryPolicy.maxT ||
-			(pgsql->retryPolicy.maxR > 0 &&
-			 pgsql->retryPolicy.attempts >= pgsql->retryPolicy.maxR))
-		{
 			(void) log_connection_error(pgsql->connection, LOG_ERROR);
 			pgsql->status = PG_CONNECTION_BAD;
 			pgsql_finish(pgsql);
@@ -518,7 +556,7 @@ pgsql_retry_open_connection(PGSQL *pgsql, uint64_t startTime)
 					  "pg_autoctl stops retrying now",
 					  pgsql->connectionString,
 					  pgsql->retryPolicy.attempts,
-					  (int) (now - startTime));
+					  (int) (now - pgsql->retryPolicy.startTime));
 
 			return false;
 		}
@@ -527,7 +565,7 @@ pgsql_retry_open_connection(PGSQL *pgsql, uint64_t startTime)
 		 * Now compute how much time to wait for this round, and increment how
 		 * many times we tried to connect already.
 		 */
-		sleep = pgsql_compute_connection_retry_sleep_time(pgsql);
+		sleep = pgsql_compute_connection_retry_sleep_time(&(pgsql->retryPolicy));
 
 		/* we have milliseconds, pg_usleep() wants microseconds */
 		(void) pg_usleep(sleep * 1000);
@@ -570,7 +608,7 @@ pgsql_retry_open_connection(PGSQL *pgsql, uint64_t startTime)
 							 "after %d attempts in %d seconds.",
 							 pgsql->connectionString,
 							 pgsql->retryPolicy.attempts,
-							 (int) (now - startTime));
+							 (int) (now - pgsql->retryPolicy.startTime));
 				}
 				else
 				{
@@ -648,7 +686,7 @@ pgsql_retry_open_connection(PGSQL *pgsql, uint64_t startTime)
 						"connection request).",
 						pgsql->connectionString,
 						pgsql->retryPolicy.attempts,
-						(int) (now - startTime));
+						(int) (now - pgsql->retryPolicy.startTime));
 				}
 				break;
 			}

@@ -24,6 +24,14 @@
 #include "string_utils.h"
 
 #define STR_ERRCODE_OBJECT_IN_USE "55006"
+#define STR_ERRCODE_EXCLUSION_VIOLATION "23P01"
+
+#define STR_ERRCODE_SERIALIZATION_FAILURE "40001"
+#define STR_ERRCODE_STATEMENT_COMPLETION_UNKNOWN "40003"
+#define STR_ERRCODE_DEADLOCK_DETECTED "40P01"
+
+#define STR_ERRCODE_CLASS_INSUFFICIENT_RESOURCES "53"
+#define STR_ERRCODE_CLASS_PROGRAM_LIMIT_EXCEEDED "54"
 
 typedef struct NodeAddressParseContext
 {
@@ -190,6 +198,43 @@ monitor_local_init(Monitor *monitor)
 	}
 
 	return true;
+}
+
+
+/*
+ * monitor_retryable_error returns true when we may retry our query. That's
+ * mostly useful to CLI entry points such as pg_autoctl enable|disable
+ * maintenance where it's better if we can retry in those rare cases.
+ */
+bool
+monitor_retryable_error(const char *sqlstate)
+{
+	if (strcmp(sqlstate, STR_ERRCODE_SERIALIZATION_FAILURE) == 0)
+	{
+		return true;
+	}
+
+	if (strcmp(sqlstate, STR_ERRCODE_STATEMENT_COMPLETION_UNKNOWN) == 0)
+	{
+		return true;
+	}
+
+	if (strcmp(sqlstate, STR_ERRCODE_DEADLOCK_DETECTED) == 0)
+	{
+		return true;
+	}
+
+	if (strncmp(sqlstate, STR_ERRCODE_CLASS_INSUFFICIENT_RESOURCES, 2) == 0)
+	{
+		return true;
+	}
+
+	if (strncmp(sqlstate, STR_ERRCODE_CLASS_PROGRAM_LIMIT_EXCEEDED, 2) == 0)
+	{
+		return true;
+	}
+
+	return false;
 }
 
 
@@ -650,6 +695,7 @@ monitor_register_node(Monitor *monitor, char *formation,
 					  uint64_t system_identifier,
 					  char *dbname, int desiredGroupId, NodeState initialState,
 					  PgInstanceKind kind, int candidatePriority, bool quorum,
+					  bool *mayRetry,
 					  MonitorAssignedState *assignedState)
 {
 	PGSQL *pgsql = &monitor->pgsql;
@@ -682,23 +728,14 @@ monitor_register_node(Monitor *monitor, char *formation,
 								   paramCount, paramTypes, paramValues,
 								   &parseContext, parseNodeState))
 	{
-		if (strcmp(parseContext.sqlstate, STR_ERRCODE_OBJECT_IN_USE) == 0)
+		if (monitor_retryable_error(parseContext.sqlstate) ||
+			strcmp(parseContext.sqlstate, STR_ERRCODE_OBJECT_IN_USE) == 0)
 		{
-			log_warn("Failed to register node %s:%d in group %d of "
-					 "formation \"%s\" with initial state \"%s\" "
-					 "because the monitor is already registering another "
-					 "standby, retrying in %ds",
-					 host, port, desiredGroupId, formation, nodeStateString,
-					 PG_AUTOCTL_KEEPER_SLEEP_TIME);
-
-			sleep(PG_AUTOCTL_KEEPER_SLEEP_TIME);
-			return monitor_register_node(monitor, formation, name, host, port,
-										 system_identifier,
-										 dbname, desiredGroupId, initialState,
-										 kind, candidatePriority, quorum,
-										 assignedState);
+			*mayRetry = true;
+			return false;
 		}
-		else if (strcmp(parseContext.sqlstate, "23P01") == 0)
+		else if (strcmp(parseContext.sqlstate,
+						STR_ERRCODE_EXCLUSION_VIOLATION) == 0)
 		{
 			/* *INDENT-OFF* */
 			log_error("Failed to register node %s:%d in "
@@ -2962,7 +2999,7 @@ parseCoordinatorNode(void *ctx, PGresult *result)
  * the next call to node_active().
  */
 bool
-monitor_start_maintenance(Monitor *monitor, int nodeId)
+monitor_start_maintenance(Monitor *monitor, int nodeId, bool *mayRetry)
 {
 	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BOOL, false };
 	PGSQL *pgsql = &monitor->pgsql;
@@ -2977,8 +3014,17 @@ monitor_start_maintenance(Monitor *monitor, int nodeId)
 								   paramCount, paramTypes, paramValues,
 								   &context, &parseSingleValueResult))
 	{
-		log_error("Failed to start_maintenance of node %d from the monitor",
-				  nodeId);
+		if (monitor_retryable_error(context.sqlstate))
+		{
+			*mayRetry = true;
+		}
+		else
+		{
+			/* when we may retry then it's up to the caller to handle errors */
+			log_error("Failed to start_maintenance of node %d from the monitor",
+					  nodeId);
+		}
+
 		return false;
 	}
 
@@ -2999,7 +3045,7 @@ monitor_start_maintenance(Monitor *monitor, int nodeId)
  * the next call to node_active().
  */
 bool
-monitor_stop_maintenance(Monitor *monitor, int nodeId)
+monitor_stop_maintenance(Monitor *monitor, int nodeId, bool *mayRetry)
 {
 	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BOOL, false };
 	PGSQL *pgsql = &monitor->pgsql;
@@ -3014,8 +3060,17 @@ monitor_stop_maintenance(Monitor *monitor, int nodeId)
 								   paramCount, paramTypes, paramValues,
 								   &context, &parseSingleValueResult))
 	{
-		log_error("Failed to stop_maintenance of node %d from the monitor",
-				  nodeId);
+		if (monitor_retryable_error(context.sqlstate))
+		{
+			*mayRetry = true;
+		}
+		else
+		{
+			/* when we may retry then it's up to the caller to handle errors */
+			log_error("Failed to stop_maintenance of node %d from the monitor",
+					  nodeId);
+		}
+
 		return false;
 	}
 

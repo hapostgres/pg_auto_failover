@@ -437,6 +437,8 @@ cli_enable_maintenance(int argc, char **argv)
 
 	char *channels[] = { "state", NULL };
 
+	ConnectionRetryPolicy retryPolicy = { 0 };
+
 	keeper.config = keeperOptions;
 
 	(void) exit_unless_role_is_keeper(&(keeper.config));
@@ -483,12 +485,40 @@ cli_enable_maintenance(int argc, char **argv)
 		}
 	}
 
-	if (!monitor_start_maintenance(&(keeper.monitor),
-								   keeper.state.current_node_id))
+	/*
+	 * Set a retry policy for cases when we have a transient error on the
+	 * monitor.
+	 */
+	(void) pgsql_set_monitor_interactive_retry_policy(&retryPolicy);
+
+	while (!pgsql_retry_policy_expired(&retryPolicy))
 	{
-		log_fatal("Failed to start maintenance from the monitor, "
-				  "see above for details");
-		exit(EXIT_CODE_MONITOR);
+		int nodeId = keeper.state.current_node_id;
+		bool mayRetry = false;
+		int sleepTimeMs = 0;
+
+		if (monitor_start_maintenance(&(keeper.monitor), nodeId, &mayRetry))
+		{
+			/* start_maintenance was successful, break out of the retry loop */
+			break;
+		}
+
+		if (!mayRetry)
+		{
+			log_fatal("Failed to enable maintenance of node %d "
+					  "on the monitor, see above for details",
+					  nodeId);
+			exit(EXIT_CODE_MONITOR);
+		}
+
+		sleepTimeMs = pgsql_compute_connection_retry_sleep_time(&retryPolicy);
+
+		log_warn("Failed to enable maintenance of node %d on the monitor, "
+				 "retrying in %d ms.",
+				 nodeId, sleepTimeMs);
+
+		/* we have milliseconds, pg_usleep() wants microseconds */
+		(void) pg_usleep(sleepTimeMs * 1000);
 	}
 
 	if (keeper.state.current_role == MAINTENANCE_STATE)
@@ -525,6 +555,8 @@ cli_disable_maintenance(int argc, char **argv)
 
 	char *channels[] = { "state", NULL };
 
+	ConnectionRetryPolicy retryPolicy = { 0 };
+
 	keeper.config = keeperOptions;
 
 	(void) exit_unless_role_is_keeper(&(keeper.config));
@@ -557,12 +589,40 @@ cli_disable_maintenance(int argc, char **argv)
 		exit(EXIT_CODE_MONITOR);
 	}
 
-	if (!monitor_stop_maintenance(&(keeper.monitor),
-								  keeper.state.current_node_id))
+	/*
+	 * Set a retry policy for cases when we have a transient error on the
+	 * monitor.
+	 */
+	(void) pgsql_set_monitor_interactive_retry_policy(&retryPolicy);
+
+	while (!pgsql_retry_policy_expired(&retryPolicy))
 	{
-		log_fatal("Failed to stop maintenance from the monitor, "
-				  "see above for details");
-		exit(EXIT_CODE_MONITOR);
+		int nodeId = keeper.state.current_node_id;
+		bool mayRetry = false;
+		int sleepTimeMs = 0;
+
+		if (monitor_stop_maintenance(&(keeper.monitor), nodeId, &mayRetry))
+		{
+			/* stop_maintenance was successful, break out of the retry loop */
+			break;
+		}
+
+		if (!mayRetry)
+		{
+			log_fatal("Failed to disable maintenance of node %d "
+					  "on the monitor, see above for details",
+					  nodeId);
+			exit(EXIT_CODE_MONITOR);
+		}
+
+		sleepTimeMs = pgsql_compute_connection_retry_sleep_time(&retryPolicy);
+
+		log_warn("Failed to disable maintenance of node %d on the monitor, "
+				 "retrying in %d ms.",
+				 nodeId, sleepTimeMs);
+
+		/* we have milliseconds, pg_usleep() wants microseconds */
+		(void) pg_usleep(sleepTimeMs * 1000);
 	}
 
 	if (!monitor_wait_until_some_node_reported_state(

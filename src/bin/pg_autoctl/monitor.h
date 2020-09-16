@@ -54,6 +54,8 @@ bool monitor_init(Monitor *monitor, char *url);
 bool monitor_local_init(Monitor *monitor);
 void monitor_finish(Monitor *monitor);
 
+bool monitor_retryable_error(const char *sqlstate);
+
 void printNodeHeader(int maxHostNameSize);
 void printNodeEntry(NodeAddress *node);
 
@@ -91,6 +93,7 @@ bool monitor_register_node(Monitor *monitor,
 						   PgInstanceKind kind,
 						   int candidatePriority,
 						   bool quorum,
+						   bool *mayRetry,
 						   MonitorAssignedState *assignedState);
 bool monitor_node_active(Monitor *monitor,
 						 char *formation, int nodeId,
@@ -167,8 +170,8 @@ bool monitor_set_node_system_identifier(Monitor *monitor,
 										int nodeId,
 										uint64_t system_identifier);
 
-bool monitor_start_maintenance(Monitor *monitor, int nodeId);
-bool monitor_stop_maintenance(Monitor *monitor, int nodeId);
+bool monitor_start_maintenance(Monitor *monitor, int nodeId, bool *mayRetry);
+bool monitor_stop_maintenance(Monitor *monitor, int nodeId, bool *mayRetry);
 
 bool monitor_get_notifications(Monitor *monitor, int timeoutMs);
 bool monitor_wait_until_primary_applied_settings(Monitor *monitor,

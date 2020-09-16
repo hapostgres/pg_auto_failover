@@ -442,9 +442,11 @@ get_pgpid(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk)
 
 	if (!file_exists(pidfile))
 	{
-		log_level(logLevel,
-				  "Failed get postmaster pid, file \"%s\" does not exists",
-				  pidfile);
+		if (!pgIsNotRunningIsOk)
+		{
+			log_error("Failed get postmaster pid, file \"%s\" does not exists",
+					  pidfile);
+		}
 		return false;
 	}
 
