@@ -220,21 +220,39 @@ def test_022_fail_secondary_and_monitor():
     assert not node3.pg_is_running()
     assert not monitor.pg_is_running()
 
+def test_023_detect_network_partition():
     # wait for network partition detection to kick-in, allow some head-room
-    time.sleep(45)
+    timeout = 60
+    demoted = False
 
-    eq_(node2.get_local_state(), ('demote_timeout', 'demote_timeout'))
+    while not demoted and timeout > 0:
+        states = node2.get_local_state()
+        demoted = states == ('demote_timeout', 'demote_timeout')
+
+        if demoted:
+            break
+
+        time.sleep(1)
+        timeout -= 1
+
+    if node2.pg_is_running() or timeout <= 0:
+        node2.print_debug_logs()
+
     assert not node2.pg_is_running()
 
-def test_023_restart_all():
+def test_024_restart_all():
+    print()
     monitor.run()
     node3.run()
 
+    assert monitor.wait_until_pg_is_running()
+    assert node3.wait_until_pg_is_running()
     assert node2.wait_until_pg_is_running()
+
     assert node2.wait_until_state("primary")
     assert node3.wait_until_state("secondary")
 
-def test_024_drop_primary():
+def test_025_drop_primary():
     node2.drop()
     assert not node2.pg_is_running()
     assert node3.wait_until_state(target_state="single")
