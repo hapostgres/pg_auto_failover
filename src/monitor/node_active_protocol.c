@@ -993,9 +993,12 @@ RemoveNode(AutoFailoverNode *currentNode)
 {
 	bool currentNodeIsPrimary = false;
 
+	AutoFailoverFormation *formation = NULL;
 	List *otherNodesGroupList = NIL;
 	ListCell *nodeCell = NULL;
 	AutoFailoverNode *firstStandbyNode = NULL;
+
+	int countSyncStandbys = 0;
 
 	char message[BUFSIZE] = { 0 };
 
@@ -1005,6 +1008,8 @@ RemoveNode(AutoFailoverNode *currentNode)
 	}
 
 	LockFormation(currentNode->formationId, ExclusiveLock);
+
+	formation = GetFormation(currentNode->formationId);
 
 	/* when removing the primary, initiate a failover */
 	currentNodeIsPrimary = CanTakeWritesInState(currentNode->goalState);
@@ -1059,6 +1064,47 @@ RemoveNode(AutoFailoverNode *currentNode)
 		currentNode->nodePort,
 		currentNode->formationId,
 		currentNode->groupId);
+
+	/*
+	 * Adjust number-sync-standbys if necessary.
+	 *
+	 * otherNodesGroupList is the list of all the remaining nodes, and that
+	 * includes the current primary, which might be setup with replication
+	 * quorum set to true (and probably is).
+	 */
+	countSyncStandbys = CountSyncStandbys(otherNodesGroupList) - 1;
+
+	LogAndNotifyMessage(message, BUFSIZE,
+						"CountSyncStandbys: %d", countSyncStandbys);
+
+	if (countSyncStandbys < (formation->number_sync_standbys + 1))
+	{
+		formation->number_sync_standbys = countSyncStandbys - 1;
+
+		if (formation->number_sync_standbys < 0)
+		{
+			formation->number_sync_standbys = 0;
+		}
+
+		if (!SetFormationNumberSyncStandbys(formation->formationId,
+											formation->number_sync_standbys))
+		{
+			ereport(ERROR,
+					(errmsg("couldn't set the formation \"%s\" "
+							"number_sync_standbys to %d now that a "
+							"standby node has been removed",
+							currentNode->formationId,
+							formation->number_sync_standbys)));
+		}
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting number_sync_standbys to %d for formation \"%s\" "
+			"now that we have %d standby nodes set with replication-quorum.",
+			formation->number_sync_standbys,
+			formation->formationId,
+			countSyncStandbys);
+	}
 
 	/* now proceed with the failover, starting with the first standby */
 	if (currentNodeIsPrimary)
