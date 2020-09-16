@@ -1641,7 +1641,7 @@ monitor_print_state(Monitor *monitor, char *formation, int group)
 		{
 			sql =
 				"SELECT * FROM pgautofailover.current_state($1) "
-				"ORDER BY node_id";
+				"ORDER BY nodename";
 
 			paramCount = 1;
 			paramTypes[0] = TEXTOID;
@@ -1654,7 +1654,7 @@ monitor_print_state(Monitor *monitor, char *formation, int group)
 		{
 			sql =
 				"SELECT * FROM pgautofailover.current_state($1,$2) "
-				"ORDER BY node_id";
+				"ORDER BY nodename";
 
 			groupStr = intToString(group);
 

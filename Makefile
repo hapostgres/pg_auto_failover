@@ -28,8 +28,8 @@ FIRST_PGPORT ?= 5500
 
 TMUX_EXTRA_COMMANDS ?= ""
 TMUX_LAYOUT ?= even-vertical	# could be "tiled"
-TMUX_TOP_DIR = ./tmux
-TMUX_SCRIPT = ./tmux/script-$(FIRST_PGPORT).tmux
+TMUX_TOP_DIR = $(PWD)/tmux
+TMUX_SCRIPT = $(TMUX_TOP_DIR)/script-$(FIRST_PGPORT).tmux
 
 all: monitor bin ;
 

@@ -316,11 +316,12 @@ tmux_pg_autoctl_create(PQExpBuffer script,
 								   name);
 
 		tmux_add_send_keys_command(script,
-								   "%s create %s %s --monitor %s --run",
+								   "%s create %s %s --monitor %s --name %s --run",
 								   pg_autoctl_argv0,
 								   role,
 								   pg_ctl_opts,
-								   monitor);
+								   monitor,
+								   name);
 	}
 }
 
@@ -371,7 +372,7 @@ cli_do_tmux_script(int argc, char **argv)
 			/* on the primary, wait until the monitor is ready */
 			tmux_add_send_keys_command(script, "sleep 2");
 			tmux_add_send_keys_command(script,
-									   "%s do pgsetup wait --pgdata %s/monitor",
+									   "PG_AUTOCTL_DEBUG=1 %s do pgsetup wait --pgdata %s/monitor",
 									   pg_autoctl_argv0,
 									   options.root);
 		}
@@ -380,7 +381,7 @@ cli_do_tmux_script(int argc, char **argv)
 			/* on the other nodes, wait until the primary is ready */
 			tmux_add_send_keys_command(script, "sleep 2");
 			tmux_add_send_keys_command(script,
-									   "%s do pgsetup wait --pgdata %s/node1",
+									   "PG_AUTOCTL_DEBUG=1 %s do pgsetup wait --pgdata %s/node1",
 									   pg_autoctl_argv0,
 									   options.root);
 		}
@@ -405,6 +406,7 @@ cli_do_tmux_script(int argc, char **argv)
 
 	tmux_add_xdg_environment(script, root);
 	tmux_add_send_keys_command(script, "export PGDATA=\"%s/monitor\"", root);
+	tmux_add_send_keys_command(script, "cd \"%s\"", root);
 
 	/* now select our target layout */
 	tmux_add_command(script, "select-layout %s", options.layout);
