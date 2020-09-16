@@ -491,33 +491,36 @@ keeper_cli_promote_standby(int argc, char **argv)
 
 
 /*
- * keeper_cli_receiwal allows to run pg_receivewal targetting the current
- * primary conninfo of a standby node, either to check that the connection
- * makes sense, or to actually start a sub-process receiving WAL.
+ * keeper_cli_identify_system connects to a Postgres server using the
+ * replication protocol to run the IDENTIFY_SYSTEM command.
+ *
+ * The IDENTIFY_SYSTEM replication command requests the server to identify
+ * itself. We use this command mostly to ensure that we can establish a
+ * replication connection to the upstream/primary server, which means that the
+ * HBA setup is good to go.
+ *
+ * See https://www.postgresql.org/docs/12/protocol-replication.html for more
+ * information about the replication protocol and commands.
  */
 void
-keeper_cli_receiwal(int argc, char **argv)
+keeper_cli_identify_system(int argc, char **argv)
 {
 	const bool missing_pgdata_is_ok = true;
 	const bool pg_not_running_is_ok = true;
 
 	KeeperConfig config = keeperOptions;
-	LocalPostgresServer postgres = { 0 };
-	PostgresSetup *pgSetup = &(postgres.postgresSetup);
+	ReplicationSource replicationSource = { 0 };
 	int hostLength = 0;
 
-	char *targetLSN = NULL;
-
-	if (argc != 3)
+	if (argc != 2)
 	{
-		commandline_print_usage(&do_standby_init, stderr);
+		commandline_print_usage(&do_primary_identify_system, stderr);
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
 	keeper_config_init(&config, missing_pgdata_is_ok, pg_not_running_is_ok);
-	local_postgres_init(&postgres, &(config.pgSetup));
 
-	hostLength = strlcpy(postgres.replicationSource.primaryNode.host, argv[0],
+	hostLength = strlcpy(replicationSource.primaryNode.host, argv[0],
 						 _POSIX_HOST_NAME_MAX);
 	if (hostLength >= _POSIX_HOST_NAME_MAX)
 	{
@@ -527,39 +530,18 @@ keeper_cli_receiwal(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!stringToInt(argv[1], &(postgres.replicationSource.primaryNode.port)))
+	if (!stringToInt(argv[1], &(replicationSource.primaryNode.port)))
 	{
 		log_fatal("Argument is not a valid port number: \"%s\"", argv[1]);
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	targetLSN = argv[2];
+	strlcpy(replicationSource.applicationName, "pg_autoctl", MAXCONNINFO);
+	strlcpy(replicationSource.userName, PG_AUTOCTL_REPLICA_USERNAME, NAMEDATALEN);
 
-	if (!standby_init_replication_source(&postgres,
-										 NULL, /* primaryNode is done */
-										 PG_AUTOCTL_REPLICA_USERNAME,
-										 config.replication_password,
-										 config.replication_slot_name,
-										 config.maximum_backup_rate,
-										 config.backupDirectory,
-										 targetLSN,
-										 config.pgSetup.ssl,
-										 0))
+	if (!pgctl_identify_system(&replicationSource))
 	{
-		/* can't happen at the moment */
-		exit(EXIT_CODE_INTERNAL_ERROR);
-	}
-
-	if (!pg_receivewal(pgSetup->pgdata,
-					   pgSetup->pg_ctl,
-					   &(postgres.replicationSource),
-					   targetLSN,
-					   LOG_INFO))
-	{
-		log_fatal("Failed to connect to the upstream server %s:%d "
-				  "for replication, see above for details",
-				  postgres.replicationSource.primaryNode.host,
-				  postgres.replicationSource.primaryNode.port);
+		/* errors have already been logged */
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 }

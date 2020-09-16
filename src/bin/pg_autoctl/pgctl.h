@@ -45,11 +45,6 @@ bool pg_basebackup(const char *pgdata,
 bool pg_rewind(const char *pgdata,
 			   const char *pg_ctl,
 			   ReplicationSource *replicationSource);
-bool pg_receivewal(const char *pgdata,
-				   const char *pg_ctl,
-				   ReplicationSource *replicationSource,
-				   char *targetLSN,
-				   int logLevel);
 
 bool pg_ctl_initdb(const char *pg_ctl, const char *pgdata);
 bool pg_ctl_postgres(const char *pg_ctl, const char *pgdata, int pgport,
@@ -68,6 +63,8 @@ bool pg_cleanup_standby_mode(uint32_t pg_control_version,
 							 const char *pg_ctl,
 							 const char *pgdata,
 							 PGSQL *pgsql);
+
+bool pgctl_identify_system(ReplicationSource *replicationSource);
 
 bool pg_is_running(const char *pg_ctl, const char *pgdata);
 bool pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *hostname);

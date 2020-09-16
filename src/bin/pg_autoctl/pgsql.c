@@ -43,6 +43,7 @@ static void parsePgMetadata(void *ctx, PGresult *result);
 static void parsePgReachedTargetLSN(void *ctx, PGresult *result);
 static void parseReplicationSlotMaintain(void *ctx, PGresult *result);
 static void parsePgReachedTargetLSN(void *ctx, PGresult *result);
+static void parseIdentifySystem(void *ctx, PGresult *result);
 
 
 /*
@@ -2204,7 +2205,7 @@ pgsql_get_postgres_metadata(PGSQL *pgsql,
 		" coalesce(rep.sync_state, '') as sync_state,"
 		" case when pg_is_in_recovery()"
 		" then coalesce(pg_last_wal_receive_lsn(), pg_last_wal_replay_lsn())"
-		" else pg_current_wal_lsn()"
+		" else pg_current_wal_flush_lsn()"
 		" end as current_lsn,"
 		" pg_control_version, catalog_version_no, system_identifier"
 		" from (values(1)) as dummy"
@@ -2494,6 +2495,130 @@ parsePgReachedTargetLSN(void *ctx, PGresult *result)
 	{
 		context->currentLSN[0] = '\0';
 	}
+
+	context->parsedOk = true;
+}
+
+
+typedef struct IdentifySystem
+{
+	char sqlstate[6];
+	bool parsedOk;
+	uint64_t system_identifier;
+	int timeline;
+	char xlogpos[PG_LSN_MAXLENGTH];
+	char dbname[NAMEDATALEN];
+} IdentifySystem;
+
+
+/*
+ * pgsql_identify_system connects to the given pgsql client and issue the
+ * replication command IDENTIFY_SYSTEM. The pgsql connection string should
+ * contain the 'replication=1' parameter.
+ */
+bool
+pgsql_identify_system(PGSQL *pgsql)
+{
+	IdentifySystem context = { 0 };
+	char *sql = "IDENTIFY_SYSTEM";
+
+	PGconn *connection = NULL;
+	PGresult *result = NULL;
+
+	connection = pgsql_open_connection(pgsql);
+	if (connection == NULL)
+	{
+		/* error message was logged in pgsql_open_connection */
+		return false;
+	}
+
+	/* extended query protocol not supported in a replication connection */
+	result = PQexec(connection, sql);
+
+	if (!is_response_ok(result))
+	{
+		log_error("Failed to IDENTIFY_SYSTEM: %s", PQerrorMessage(connection));
+		PQclear(result);
+		clear_results(pgsql);
+
+		PQfinish(connection);
+
+		return false;
+	}
+
+	(void) parseIdentifySystem((void *) &context, result);
+
+	PQclear(result);
+	clear_results(pgsql);
+	PQfinish(connection);
+
+	if (!context.parsedOk)
+	{
+		log_error("Failed to get result from IDENTIFY_SYSTEM");
+		return false;
+	}
+
+	log_debug("IDENTIFY_SYSTEM: system identifier %" PRIu64 ", "
+															"timeline %d, xlogpos %s",
+			  context.system_identifier,
+			  context.timeline,
+			  context.xlogpos);
+
+	return true;
+}
+
+
+/*
+ * parsePgMetadata parses the result from a PostgreSQL query fetching
+ * two columns from pg_stat_replication: sync_state and currentLSN.
+ */
+static void
+parseIdentifySystem(void *ctx, PGresult *result)
+{
+	IdentifySystem *context = (IdentifySystem *) ctx;
+	char *value = NULL;
+
+	if (PQnfields(result) != 4)
+	{
+		log_error("Query returned %d columns, expected 4", PQnfields(result));
+		context->parsedOk = false;
+		return;
+	}
+
+	if (PQntuples(result) == 0)
+	{
+		log_debug("parseIdentifySystem: query returned no rows");
+		context->parsedOk = false;
+		return;
+	}
+	if (PQntuples(result) != 1)
+	{
+		log_error("Query returned %d rows, expected 1", PQntuples(result));
+		context->parsedOk = false;
+		return;
+	}
+
+	value = PQgetvalue(result, 0, 0);
+	if (!stringToUInt64(value, &(context->system_identifier)))
+	{
+		log_error("Failed to parse system_identifier \"%s\"", value);
+		context->parsedOk = false;
+		return;
+	}
+
+	value = PQgetvalue(result, 0, 1);
+	if (!stringToInt(value, &(context->timeline)))
+	{
+		log_error("Failed to parse timeline \"%s\"", value);
+		context->parsedOk = false;
+		return;
+	}
+
+	value = PQgetvalue(result, 0, 2);
+	strlcpy(context->xlogpos, value, PG_LSN_MAXLENGTH);
+
+	value = PQgetvalue(result, 0, 3);
+	strlcpy(context->dbname, value, NAMEDATALEN);
 
 	context->parsedOk = true;
 }
