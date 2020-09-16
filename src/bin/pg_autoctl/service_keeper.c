@@ -43,6 +43,7 @@ KeeperReloadFunction KeeperReloadHooks[] = {
 };
 
 static bool keeper_node_active(Keeper *keeper);
+static void check_for_network_partitions(Keeper *keeper);
 static bool is_network_healthy(Keeper *keeper);
 static bool in_network_partition(KeeperStateData *keeperState, uint64_t now,
 								 int networkPartitionTimeout);
@@ -569,6 +570,12 @@ keeper_node_active(Keeper *keeper)
 		 */
 		if (monitor->pgsql.status != PG_CONNECTION_OK)
 		{
+			/*
+			 * Check whether we're likely to be in a network partition. That
+			 * will cause the assigned_role to become demoted.
+			 */
+			(void) check_for_network_partitions(keeper);
+
 			return false;
 		}
 
@@ -628,22 +635,7 @@ keeper_node_active(Keeper *keeper)
 		 * Check whether we're likely to be in a network partition.
 		 * That will cause the assigned_role to become demoted.
 		 */
-		if (keeperState->current_role == PRIMARY_STATE)
-		{
-			log_warn("Checking for network partitions...");
-
-			if (!is_network_healthy(keeper))
-			{
-				keeperState->assigned_role = DEMOTE_TIMEOUT_STATE;
-
-				log_info("Network in not healthy, switching to state %s",
-						 NodeStateToString(keeperState->assigned_role));
-			}
-			else
-			{
-				log_info("Network is healthy");
-			}
-		}
+		(void) check_for_network_partitions(keeper);
 
 		return false;
 	}
@@ -698,6 +690,34 @@ keeper_node_active(Keeper *keeper)
 	}
 
 	return true;
+}
+
+
+/*
+ * check_for_network_partitions checks whether we're likely to be in a network
+ * partition. That will cause the assigned_role to become demoted.
+ */
+static void
+check_for_network_partitions(Keeper *keeper)
+{
+	KeeperStateData *keeperState = &(keeper->state);
+
+	if (keeperState->current_role == PRIMARY_STATE)
+	{
+		log_warn("Checking for network partitions...");
+
+		if (!is_network_healthy(keeper))
+		{
+			keeperState->assigned_role = DEMOTE_TIMEOUT_STATE;
+
+			log_info("Network in not healthy, switching to state %s",
+					 NodeStateToString(keeperState->assigned_role));
+		}
+		else
+		{
+			log_info("Network is healthy");
+		}
+	}
 }
 
 
