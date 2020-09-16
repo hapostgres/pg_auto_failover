@@ -128,6 +128,8 @@ GetFormation(const char *formationId)
 Datum
 create_formation(PG_FUNCTION_ARGS)
 {
+	checkPgAutoFailoverVersion();
+
 	text *formationIdText = PG_GETARG_TEXT_P(0);
 	char *formationId = text_to_cstring(formationIdText);
 	text *formationKindText = PG_GETARG_TEXT_P(1);
@@ -157,6 +159,8 @@ create_formation(PG_FUNCTION_ARGS)
 Datum
 drop_formation(PG_FUNCTION_ARGS)
 {
+	checkPgAutoFailoverVersion();
+
 	text *formationIdText = PG_GETARG_TEXT_P(0);
 	char *formationId = text_to_cstring(formationIdText);
 
@@ -175,6 +179,8 @@ drop_formation(PG_FUNCTION_ARGS)
 Datum
 enable_secondary(PG_FUNCTION_ARGS)
 {
+	checkPgAutoFailoverVersion();
+
 	text *formationIdText = PG_GETARG_TEXT_P(0);
 	char *formationId = text_to_cstring(formationIdText);
 
@@ -192,6 +198,8 @@ enable_secondary(PG_FUNCTION_ARGS)
 Datum
 disable_secondary(PG_FUNCTION_ARGS)
 {
+	checkPgAutoFailoverVersion();
+
 	text *formationIdText = PG_GETARG_TEXT_P(0);
 	char *formationId = text_to_cstring(formationIdText);
 
@@ -536,6 +544,8 @@ IsCitusFormation(AutoFailoverFormation *formation)
 Datum
 set_formation_number_sync_standbys(PG_FUNCTION_ARGS)
 {
+	checkPgAutoFailoverVersion();
+
 	text *formationIdText = PG_GETARG_TEXT_P(0);
 	char *formationId = text_to_cstring(formationIdText);
 	int number_sync_standbys = PG_GETARG_INT32(1);

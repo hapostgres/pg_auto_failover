@@ -713,11 +713,11 @@ typedef struct get_nodes_fctx
 Datum
 get_nodes(PG_FUNCTION_ARGS)
 {
+	checkPgAutoFailoverVersion();
+
 	FuncCallContext *funcctx;
 	get_nodes_fctx *fctx;
 	MemoryContext oldcontext;
-
-	checkPgAutoFailoverVersion();
 
 	/* stuff done only on the first call of the function */
 	if (SRF_IS_FIRSTCALL())
@@ -830,11 +830,11 @@ get_other_node(PG_FUNCTION_ARGS)
 Datum
 get_other_nodes(PG_FUNCTION_ARGS)
 {
+	checkPgAutoFailoverVersion();
+
 	FuncCallContext *funcctx;
 	get_nodes_fctx *fctx;
 	MemoryContext oldcontext;
-
-	checkPgAutoFailoverVersion();
 
 	/* stuff done only on the first call of the function */
 	if (SRF_IS_FIRSTCALL())
