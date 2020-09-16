@@ -1405,9 +1405,11 @@ pg_setup_standby_mode(uint32_t pg_control_version,
 	 * Check our primary_conninfo connection string by attempting to connect in
 	 * replication mode and issuing a IDENTIFY_SYSTEM command.
 	 */
-	if (!pgctl_identify_system(replicationSource))
+	if (!IS_EMPTY_STRING_BUFFER(replicationSource->primaryNode.host) &&
+		!pgctl_identify_system(replicationSource))
 	{
-		/* errors have already been logged */
+		log_error("Failed to setup standby mode: can't connect to the primary. "
+				  "See above for details");
 		return false;
 	}
 
@@ -1931,12 +1933,6 @@ pgctl_identify_system(ReplicationSource *replicationSource)
 	PGSQL replicationClient = { 0 };
 	int len = 0;
 
-	/* sometimes we don't have a primary, just pretend everything is fine */
-	if (IS_EMPTY_STRING_BUFFER(primaryNode->host))
-	{
-		return true;
-	}
-
 	if (!prepare_primary_conninfo(primaryConnInfo,
 								  MAXCONNINFO,
 								  primaryNode->host,
@@ -1952,6 +1948,15 @@ pgctl_identify_system(ReplicationSource *replicationSource)
 		return false;
 	}
 
+	/*
+	 * Per https://www.postgresql.org/docs/12/protocol-replication.html:
+	 *
+	 * To initiate streaming replication, the frontend sends the replication
+	 * parameter in the startup message. A Boolean value of true (or on, yes,
+	 * 1) tells the backend to go into physical replication walsender mode,
+	 * wherein a small set of replication commands, shown below, can be issued
+	 * instead of SQL statements.
+	 */
 	len = sformat(primaryConnInfoReplication, MAXCONNINFO,
 				  "%s replication=1",
 				  primaryConnInfo);

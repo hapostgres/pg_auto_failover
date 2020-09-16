@@ -493,6 +493,14 @@ keeper_cli_promote_standby(int argc, char **argv)
 /*
  * keeper_cli_identify_system connects to a Postgres server using the
  * replication protocol to run the IDENTIFY_SYSTEM command.
+ *
+ * The IDENTIFY_SYSTEM replication command requests the server to identify
+ * itself. We use this command mostly to ensure that we can establish a
+ * replication connection to the upstream/primary server, which means that the
+ * HBA setup is good to go.
+ *
+ * See https://www.postgresql.org/docs/12/protocol-replication.html for more
+ * information about the replication protocol and commands.
  */
 void
 keeper_cli_identify_system(int argc, char **argv)
