@@ -234,14 +234,39 @@ CommandLine do_tmux_script =
 	make_command("script",
 				 "Produce a tmux script for a demo or a test case",
 				 "[option ...]",
-				 "  --root          path where to create a cluster\n" \
-				 "  --first-port    first Postgres port to use (5500)\n" \
-				 "  --nodes         number of Postgres nodes to create (2)",
+				 "  --root          path where to create a cluster\n"
+				 "  --first-pgport  first Postgres port to use (5500)\n"
+				 "  --nodes         number of Postgres nodes to create (2)"
+				 "  --layout        tmux layout to use (even-vertical)",
 				 cli_do_tmux_script_getopts,
 				 cli_do_tmux_script);
 
+CommandLine do_tmux_session =
+	make_command("session",
+				 "Run a a tmux session for a demo or a test case",
+				 "[option ...]",
+				 "  --root          path where to create a cluster\n"
+				 "  --first-pgport  first Postgres port to use (5500)\n"
+				 "  --nodes         number of Postgres nodes to create (2)"
+				 "  --layout        tmux layout to use (even-vertical)",
+				 cli_do_tmux_script_getopts,
+				 cli_do_tmux_session);
+
+CommandLine do_tmux_stop =
+	make_command("stop",
+				 "Stop pg_autoctl processed that belong to a tmux session ",
+				 "[option ...]",
+				 "  --root          path where to create a cluster\n"
+				 "  --first-pgport  first Postgres port to use (5500)\n"
+				 "  --nodes         number of Postgres nodes to create (2)"
+				 "  --layout        tmux layout to use (even-vertical)",
+				 cli_do_tmux_script_getopts,
+				 cli_do_tmux_stop);
+
 CommandLine *do_tmux[] = {
 	&do_tmux_script,
+	&do_tmux_session,
+	&do_tmux_stop,
 	NULL
 };
 
