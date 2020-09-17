@@ -474,12 +474,9 @@ HealthCheckWorkerMain(Datum arg)
 		struct timeval currentTime = { 0, 0 };
 		struct timeval roundEndTime = { 0, 0 };
 		int timeout = 0;
-		List *nodeHealthList = NIL;
-		List *healthCheckList = NIL;
 
 		gettimeofday(&currentTime, NULL);
 		roundEndTime = AddTimeMillis(currentTime, HealthCheckPeriod);
-
 
 		if (!foundPgAutoFailoverExtension)
 		{
@@ -494,10 +491,14 @@ HealthCheckWorkerMain(Datum arg)
 
 		if (foundPgAutoFailoverExtension)
 		{
-			nodeHealthList = LoadNodeHealthList();
-			healthCheckList = CreateHealthChecks(nodeHealthList);
+			List *nodeHealthList = LoadNodeHealthList();
 
-			DoHealthChecks(healthCheckList);
+			if (nodeHealthList != NIL)
+			{
+				List *healthCheckList = CreateHealthChecks(nodeHealthList);
+
+				DoHealthChecks(healthCheckList);
+			}
 
 			MemoryContextReset(healthCheckContext);
 		}
