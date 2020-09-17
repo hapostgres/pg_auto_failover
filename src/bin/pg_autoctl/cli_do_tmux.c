@@ -913,6 +913,8 @@ cli_do_tmux_wait(int argc, char **argv)
 
 	if (strcmp(nodeName, "monitor") == 0)
 	{
+		int timeout = 30;
+		bool ready = false;
 		Program program;
 		char pgdata[MAXPGPATH] = { 0 };
 
@@ -921,12 +923,43 @@ cli_do_tmux_wait(int argc, char **argv)
 		/* leave some time for initdb and stuff */
 		sleep(2);
 
-		program = run_program(pg_autoctl_argv0,
-							  "do", "pgsetup", "wait",
-							  "--pgdata", pgdata,
-							  NULL);
+		program = run_program(pg_autoctl_program, "do", "pgsetup", "wait",
+							  "--pgdata", pgdata, NULL);
 
 		if (program.returnCode != 0)
+		{
+			char command[BUFSIZE];
+
+			(void) snprintf_program_command_line(&program, command, BUFSIZE);
+
+			log_error("%s [%d]", command, program.returnCode);
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+
+		log_info("Postgres is running at \"%s\"", pgdata);
+
+		/* Postgres is running on the monitor, is it ready though? */
+		while (!ready && timeout > 0)
+		{
+			char command[BUFSIZE];
+
+			Program showUri = run_program(pg_autoctl_program,
+										  "show", "uri", "--monitor",
+										  "--pgdata", pgdata, NULL);
+
+			(void) snprintf_program_command_line(&showUri, command, BUFSIZE);
+			log_info("%s [%d]", command, showUri.returnCode);
+
+			ready = showUri.returnCode == 0;
+			--timeout;
+
+			if (ready)
+			{
+				log_info("The monitor is ready at: %s", showUri.stdOut);
+			}
+		}
+
+		if (!ready)
 		{
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
