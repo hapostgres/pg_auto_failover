@@ -93,5 +93,6 @@ int cli_do_tmux_script_getopts(int argc, char **argv);
 void cli_do_tmux_script(int argc, char **argv);
 void cli_do_tmux_session(int argc, char **argv);
 void cli_do_tmux_stop(int argc, char **argv);
+void cli_do_tmux_wait(int argc, char **argv);
 
 #endif  /* CLI_DO_ROOT_H */

@@ -73,6 +73,7 @@ static void tmux_pg_autoctl_create_postgres(PQExpBuffer script,
 static bool tmux_start_server(const char *root, const char *scriptName);
 static bool pg_autoctl_stop(const char *root, const char *name);
 static bool tmux_stop_pg_autoctl(TmuxOptions *options);
+static void tmux_process_options(TmuxOptions *options);
 
 
 /*
@@ -276,6 +277,9 @@ tmux_add_send_keys_command(PQExpBuffer script, const char *fmt, ...)
 static bool
 tmux_prepare_XDG_environment(const char *root)
 {
+	log_info("Preparing XDG setting for self-contained session in \"%s\"",
+			 root);
+
 	for (int i = 0; xdg[i][0] != NULL; i++)
 	{
 		char *var = xdg[i][0];
@@ -429,6 +433,8 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script, bool setXDG)
 	int pgport = options->firstPort;
 	char sessionName[BUFSIZE] = { 0 };
 
+	char previousName[NAMEDATALEN] = { 0 };
+
 	sformat(sessionName, BUFSIZE, "pgautofailover-%d", options->firstPort);
 
 	tmux_add_command(script, "set-option -g default-shell /bin/bash");
@@ -438,6 +444,8 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script, bool setXDG)
 	tmux_pg_autoctl_create_monitor(script, root, pgport++, setXDG);
 
 	/* start the Postgres nodes, using the monitor URI */
+	sformat(previousName, sizeof(previousName), "monitor");
+
 	for (int i = 0; i < options->nodes; i++)
 	{
 		char name[NAMEDATALEN] = { 0 };
@@ -447,28 +455,20 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script, bool setXDG)
 		tmux_add_command(script, "split-window -v");
 		tmux_add_command(script, "select-layout even-vertical");
 
-		/* ensure that the first node is always the primary */
-		if (i == 0)
-		{
-			/* on the primary, wait until the monitor is ready */
-			tmux_add_send_keys_command(script, "sleep 2");
-			tmux_add_send_keys_command(script,
-									   "%s do pgsetup wait --pgdata %s/monitor",
-									   pg_autoctl_argv0,
-									   root);
-		}
-		else
-		{
-			/* on the other nodes, wait until the primary is ready */
-			tmux_add_send_keys_command(script, "sleep 2");
-			tmux_add_send_keys_command(script,
-									   "%s do pgsetup wait --pgdata %s/node1",
-									   pg_autoctl_argv0,
-									   root);
-		}
+		/*
+		 * Force node ordering to easy debugging of interactive sessions: each
+		 * node waits until the previous one has been started or registered.
+		 */
+		tmux_add_send_keys_command(script,
+								   "%s do tmux wait --root %s %s",
+								   pg_autoctl_argv0,
+								   options->root,
+								   previousName);
 
 		tmux_pg_autoctl_create_postgres(script, root, pgport++, name, setXDG);
 		tmux_add_send_keys_command(script, "pg_autoctl run");
+
+		strlcpy(previousName, name, sizeof(previousName));
 	}
 
 	/* add a window for pg_autoctl show state */
@@ -700,6 +700,29 @@ tmux_kill_session(TmuxOptions *options)
 
 
 /*
+ * tmux_process_options processes the tmux commands options. The main activity
+ * here is to ensure that the "root" directory exists and normalize its
+ * internal pathname in the options structure.
+ */
+static void
+tmux_process_options(TmuxOptions *options)
+{
+	log_debug("mkdir -p \"%s\"", options->root);
+	if (!ensure_empty_dir(options->root, 0700))
+	{
+		/* errors have already been logged. */
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	if (!normalize_filename(options->root, options->root, sizeof(options->root)))
+	{
+		/* errors have already been logged. */
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+}
+
+
+/*
  * keeper_cli_tmux_script generates a tmux script to run a test case or a demo
  * for pg_auto_failover easily.
  */
@@ -708,6 +731,14 @@ cli_do_tmux_script(int argc, char **argv)
 {
 	TmuxOptions options = tmuxOptions;
 	PQExpBuffer script = createPQExpBuffer();
+
+	(void) tmux_process_options(&options);
+
+	/* prepare the XDG environment */
+	if (!tmux_prepare_XDG_environment(options.root))
+	{
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
 
 	if (script == NULL)
 	{
@@ -752,18 +783,7 @@ cli_do_tmux_session(int argc, char **argv)
 	 * Write the script to "script-${first-pgport}.tmux" file in the root
 	 * directory.
 	 */
-	log_debug("mkdir -p \"%s\"", options.root);
-	if (!ensure_empty_dir(options.root, 0700))
-	{
-		/* errors have already been logged. */
-		exit(EXIT_CODE_INTERNAL_ERROR);
-	}
-
-	if (!normalize_filename(options.root, options.root, sizeof(options.root)))
-	{
-		/* errors have already been logged. */
-		exit(EXIT_CODE_INTERNAL_ERROR);
-	}
+	(void) tmux_process_options(&options);
 
 	/*
 	 * Prepare the tmux script.
@@ -833,6 +853,8 @@ cli_do_tmux_stop(int argc, char **argv)
 {
 	TmuxOptions options = tmuxOptions;
 
+	(void) tmux_process_options(&options);
+
 	/* prepare the XDG environment */
 	if (!tmux_prepare_XDG_environment(options.root))
 	{
@@ -842,5 +864,81 @@ cli_do_tmux_stop(int argc, char **argv)
 	if (!tmux_stop_pg_autoctl(&options))
 	{
 		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+}
+
+
+/*
+ * cli_do_tmux_wait waits until given node name has been registered. When the
+ * target node name is the "monitor" just wait until Postgres is running.
+ */
+void
+cli_do_tmux_wait(int argc, char **argv)
+{
+	TmuxOptions options = tmuxOptions;
+	char nodeName[NAMEDATALEN] = { 0 };
+
+	(void) tmux_process_options(&options);
+
+	/* prepare the XDG environment */
+	if (!tmux_prepare_XDG_environment(options.root))
+	{
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	if (argc != 1)
+	{
+		log_fatal("Expected one argument for the target node name");
+	}
+	strlcpy(nodeName, argv[0], sizeof(nodeName));
+
+	if (strcmp(nodeName, "monitor") == 0)
+	{
+		Program program;
+		char pgdata[MAXPGPATH] = { 0 };
+
+		sformat(pgdata, sizeof(pgdata), "%s/%s", options.root, nodeName);
+
+		/* leave some time for initdb and stuff */
+		sleep(2);
+
+		program = run_program(pg_autoctl_argv0,
+							  "do", "pgsetup", "wait",
+							  "--pgdata", pgdata,
+							  NULL);
+
+		if (program.returnCode != 0)
+		{
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+	}
+	else
+	{
+		/*
+		 * Not a monitor node: only wait until the node has been registered to
+		 * the monitor. We know that the node has been registered when a state
+		 * file exists.
+		 */
+		int timeout = 10;
+		char pgdata[MAXPGPATH] = { 0 };
+		ConfigFilePaths pathnames = { 0 };
+
+		sformat(pgdata, sizeof(pgdata), "%s/%s", options.root, nodeName);
+
+		if (!keeper_config_set_pathnames_from_pgdata(&pathnames, pgdata))
+		{
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+
+		while (!file_exists(pathnames.state) && timeout > 0)
+		{
+			sleep(1);
+			--timeout;
+		}
+
+		if (!file_exists(pathnames.state))
+		{
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
 	}
 }
