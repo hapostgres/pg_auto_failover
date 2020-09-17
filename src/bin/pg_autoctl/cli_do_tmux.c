@@ -61,14 +61,12 @@ static bool tmux_prepare_XDG_environment(const char *root);
 
 static void tmux_pg_autoctl_create_monitor(PQExpBuffer script,
 										   const char *root,
-										   int pgport,
-										   bool setXDG);
+										   int pgport);
 
 static void tmux_pg_autoctl_create_postgres(PQExpBuffer script,
 											const char *root,
 											int pgport,
-											const char *name,
-											bool setXDG);
+											const char *name);
 
 static bool tmux_start_server(const char *root, const char *scriptName);
 static bool pg_autoctl_stop(const char *root, const char *name);
@@ -362,16 +360,11 @@ tmux_add_xdg_environment(PQExpBuffer script, const char *root)
 static void
 tmux_pg_autoctl_create_monitor(PQExpBuffer script,
 							   const char *root,
-							   int pgport,
-							   bool setXDG)
+							   int pgport)
 {
 	char *pg_ctl_opts = "--hostname localhost --ssl-self-signed --auth trust";
 
-	if (setXDG)
-	{
-		tmux_add_xdg_environment(script, root);
-	}
-
+	tmux_add_xdg_environment(script, root);
 	tmux_add_send_keys_command(script, "export PGPORT=%d", pgport);
 
 	/* the monitor is always named monitor, and does not need --monitor */
@@ -392,19 +385,13 @@ static void
 tmux_pg_autoctl_create_postgres(PQExpBuffer script,
 								const char *root,
 								int pgport,
-								const char *name,
-								bool setXDG)
+								const char *name)
 {
 	char monitor[BUFSIZE] = { 0 };
 	char *pg_ctl_opts = "--hostname localhost --ssl-self-signed --auth trust";
 
-	if (setXDG)
-	{
-		tmux_add_xdg_environment(script, root);
-	}
-
+	tmux_add_xdg_environment(script, root);
 	tmux_add_send_keys_command(script, "export PGPORT=%d", pgport);
-
 
 	sformat(monitor, sizeof(monitor),
 			"$(%s show uri --pgdata %s/monitor --monitor)",
@@ -429,17 +416,9 @@ tmux_pg_autoctl_create_postgres(PQExpBuffer script,
 /*
  * prepare_tmux_script prepares a script for a tmux session with the given
  * nodes, root directory, first pgPort, and layout.
- *
- * This script can be saved to disk and used later, or used straight away for
- * an interactive session. When used for interactive session, then the XDG
- * environment variables are set in the main pg_autoctl process (running this
- * code), and inherited in all the shells in the tmux sessions thereafter.
- *
- * As a result in that case we don't need to include the XDG environment
- * settings in the tmux script itself.
  */
 static void
-prepare_tmux_script(TmuxOptions *options, PQExpBuffer script, bool setXDG)
+prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 {
 	char *root = options->root;
 	int pgport = options->firstPort;
@@ -453,7 +432,7 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script, bool setXDG)
 	tmux_add_command(script, "new-session -s %s", sessionName);
 
 	/* start a monitor */
-	tmux_pg_autoctl_create_monitor(script, root, pgport++, setXDG);
+	tmux_pg_autoctl_create_monitor(script, root, pgport++);
 
 	/* start the Postgres nodes, using the monitor URI */
 	sformat(previousName, sizeof(previousName), "monitor");
@@ -472,12 +451,12 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script, bool setXDG)
 		 * node waits until the previous one has been started or registered.
 		 */
 		tmux_add_send_keys_command(script,
-								   "%s do tmux wait --root %s %s -vv",
+								   "%s do tmux wait --root %s %s",
 								   pg_autoctl_argv0,
 								   options->root,
 								   previousName);
 
-		tmux_pg_autoctl_create_postgres(script, root, pgport++, name, setXDG);
+		tmux_pg_autoctl_create_postgres(script, root, pgport++, name);
 		tmux_add_send_keys_command(script, "pg_autoctl run");
 
 		strlcpy(previousName, name, sizeof(previousName));
@@ -487,10 +466,7 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script, bool setXDG)
 	tmux_add_command(script, "split-window -v");
 	tmux_add_command(script, "select-layout even-vertical");
 
-	if (setXDG)
-	{
-		tmux_add_xdg_environment(script, root);
-	}
+	tmux_add_xdg_environment(script, root);
 	tmux_add_send_keys_command(script, "export PGDATA=\"%s/monitor\"", root);
 	tmux_add_send_keys_command(script,
 							   "watch -n 0.2 %s show state",
@@ -759,7 +735,7 @@ cli_do_tmux_script(int argc, char **argv)
 	}
 
 	/* prepare the tmux script */
-	(void) prepare_tmux_script(&options, script, true);
+	(void) prepare_tmux_script(&options, script);
 
 	/* memory allocation could have failed while building string */
 	if (PQExpBufferBroken(script))
@@ -812,7 +788,7 @@ cli_do_tmux_session(int argc, char **argv)
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
-	(void) prepare_tmux_script(&options, script, false);
+	(void) prepare_tmux_script(&options, script);
 
 	/* memory allocation could have failed while building string */
 	if (PQExpBufferBroken(script))
