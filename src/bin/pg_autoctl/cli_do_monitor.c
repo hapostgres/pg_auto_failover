@@ -551,6 +551,7 @@ cli_do_monitor_version(int argc, char **argv)
 	KeeperConfig config = keeperOptions;
 	Monitor monitor = { 0 };
 	MonitorExtensionVersion version = { 0 };
+	LocalPostgresServer postgres = { 0 };
 
 	if (!monitor_init_from_pgsetup(&monitor, &config.pgSetup))
 	{
@@ -558,8 +559,10 @@ cli_do_monitor_version(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
+	(void) local_postgres_init(&postgres, &(monitor.config.pgSetup));
+
 	/* Check version compatibility */
-	if (!monitor_ensure_extension_version(&monitor, &version))
+	if (!monitor_ensure_extension_version(&monitor, &postgres, &version))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_MONITOR);

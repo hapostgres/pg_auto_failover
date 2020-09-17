@@ -20,6 +20,7 @@
 #include "nodestate_utils.h"
 #include "parsing.h"
 #include "pgsql.h"
+#include "primary_standby.h"
 #include "signals.h"
 #include "string_utils.h"
 
@@ -3886,6 +3887,7 @@ monitor_extension_update(Monitor *monitor, const char *targetVersion)
  */
 bool
 monitor_ensure_extension_version(Monitor *monitor,
+								 LocalPostgresServer *postgres,
 								 MonitorExtensionVersion *version)
 {
 	const char *extensionVersion = PG_AUTOCTL_EXTENSION_VERSION;
@@ -3966,7 +3968,23 @@ monitor_ensure_extension_version(Monitor *monitor,
 				 PG_AUTOCTL_MONITOR_EXTENSION_NAME,
 				 version->installedVersion);
 
-		return true;
+		/*
+		 * Now that we have done the ALTER EXTENSION UPDATE, our background
+		 * workers on the monitor have been started with the new shared library
+		 * object and the old SQL definitions. Let's restart Postgres so that
+		 * the background workers have a chance of a fresh start with an SQL
+		 * schema that matches the expectations of the shared library code.
+		 */
+		log_info("Restarting Postgres on the monitor");
+
+		if (!ensure_postgres_service_is_stopped(postgres))
+		{
+			log_error("Failed to restart Postgres on the monitor after "
+					  "an extension update");
+			return false;
+		}
+
+		return ensure_postgres_service_is_running(postgres);
 	}
 
 	/* just mention we checked, and it's ok */
