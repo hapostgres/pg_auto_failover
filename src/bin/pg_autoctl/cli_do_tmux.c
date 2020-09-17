@@ -286,6 +286,8 @@ tmux_prepare_XDG_environment(const char *root)
 		char *dir = xdg[i][1];
 		char *env = (char *) malloc(MAXPGPATH * sizeof(char));
 
+		char targetPath[MAXPGPATH] = { 0 };
+
 		if (env == NULL)
 		{
 			log_fatal("Failed to malloc MAXPGPATH bytes: %m");
@@ -295,9 +297,9 @@ tmux_prepare_XDG_environment(const char *root)
 		sformat(env, MAXPGPATH, "%s/%s", root, dir);
 
 		log_debug("mkdir -p \"%s\"", env);
-		if (!ensure_empty_dir(env, 0700))
+		if (pg_mkdir_p(env, 0700) == -1)
 		{
-			/* errors have already been logged */
+			log_error("mkdir -p \"%s\": %m", env);
 			return false;
 		}
 
@@ -313,6 +315,16 @@ tmux_prepare_XDG_environment(const char *root)
 		{
 			log_error("Failed to set environment variable %s to \"%s\": %m",
 					  var, env);
+		}
+
+		/* also create our actual target directory for our files */
+		sformat(targetPath, sizeof(targetPath), "%s/pg_config/%s", env, root);
+
+		log_debug("mkdir -p \"%s\"", targetPath);
+		if (pg_mkdir_p(targetPath, 0700) == -1)
+		{
+			log_error("mkdir -p \"%s\": %m", targetPath);
+			return false;
 		}
 	}
 
@@ -460,7 +472,7 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script, bool setXDG)
 		 * node waits until the previous one has been started or registered.
 		 */
 		tmux_add_send_keys_command(script,
-								   "%s do tmux wait --root %s %s",
+								   "%s do tmux wait --root %s %s -vv",
 								   pg_autoctl_argv0,
 								   options->root,
 								   previousName);
@@ -533,12 +545,6 @@ tmux_start_server(const char *root, const char *scriptName)
 
 	char tmux[MAXPGPATH] = { 0 };
 	char command[BUFSIZE] = { 0 };
-
-	/* prepare the XDG environment */
-	if (!tmux_prepare_XDG_environment(root))
-	{
-		return false;
-	}
 
 	if (setenv("PG_AUTOCTL_DEBUG", "1", 1) != 0)
 	{
@@ -707,18 +713,24 @@ tmux_kill_session(TmuxOptions *options)
 static void
 tmux_process_options(TmuxOptions *options)
 {
+	log_debug("tmux_process_options");
 	log_debug("mkdir -p \"%s\"", options->root);
-	if (!ensure_empty_dir(options->root, 0700))
+
+	if (pg_mkdir_p(options->root, 0700) == -1)
+	{
+		log_fatal("mkdir -p \"%s\": %m", options->root);
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	log_debug("normalize_filename \"%s\"", options->root);
+
+	if (!normalize_filename(options->root, options->root, MAXPGPATH))
 	{
 		/* errors have already been logged. */
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
-	if (!normalize_filename(options->root, options->root, sizeof(options->root)))
-	{
-		/* errors have already been logged. */
-		exit(EXIT_CODE_INTERNAL_ERROR);
-	}
+	log_debug("Real path for root directory: \"%s\"", options->root);
 }
 
 
@@ -784,6 +796,12 @@ cli_do_tmux_session(int argc, char **argv)
 	 * directory.
 	 */
 	(void) tmux_process_options(&options);
+
+	/* prepare the XDG environment */
+	if (!tmux_prepare_XDG_environment(options.root))
+	{
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
 
 	/*
 	 * Prepare the tmux script.
@@ -889,6 +907,7 @@ cli_do_tmux_wait(int argc, char **argv)
 	if (argc != 1)
 	{
 		log_fatal("Expected one argument for the target node name");
+		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 	strlcpy(nodeName, argv[0], sizeof(nodeName));
 
@@ -919,16 +938,21 @@ cli_do_tmux_wait(int argc, char **argv)
 		 * the monitor. We know that the node has been registered when a state
 		 * file exists.
 		 */
-		int timeout = 10;
+		int timeout = 60;
 		char pgdata[MAXPGPATH] = { 0 };
 		ConfigFilePaths pathnames = { 0 };
 
 		sformat(pgdata, sizeof(pgdata), "%s/%s", options.root, nodeName);
 
+		log_info("Waiting for a node state file for PGDATA \"%s\"", pgdata);
+
 		if (!keeper_config_set_pathnames_from_pgdata(&pathnames, pgdata))
 		{
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
+
+		log_info("Waiting for creation of a state file at \"%s\"",
+				 pathnames.state);
 
 		while (!file_exists(pathnames.state) && timeout > 0)
 		{
