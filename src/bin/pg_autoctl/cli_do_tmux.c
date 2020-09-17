@@ -540,6 +540,12 @@ tmux_start_server(const char *root, const char *scriptName)
 		return false;
 	}
 
+	if (setenv("PG_AUTOCTL_DEBUG", "1", 1) != 0)
+	{
+		log_error("Failed to set environment PG_AUTOCTL_DEBUG: %m");
+		return false;
+	}
+
 	if (!search_path_first("tmux", tmux))
 	{
 		log_fatal("Failed to find program tmux in PATH");
