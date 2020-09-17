@@ -1132,11 +1132,15 @@ standby_follow_new_primary(LocalPostgresServer *postgres)
 
 	log_info("Follow new primary %s:%d", primaryNode->host, primaryNode->port);
 
-	if (!pgctl_identify_system(replicationSource))
+	/* when we have a primary, only proceed if we can reach it */
+	if (!IS_EMPTY_STRING_BUFFER(replicationSource->primaryNode.host))
 	{
-		log_error("Failed to establish a replication connection "
-				  "to the new primary, see above for details");
-		return false;
+		if (!pgctl_identify_system(replicationSource))
+		{
+			log_error("Failed to establish a replication connection "
+					  "to the new primary, see above for details");
+			return false;
+		}
 	}
 
 	/* cleanup our existing standby setup, including postgresql.auto.conf */
@@ -1292,11 +1296,15 @@ standby_restart_with_current_replication_source(LocalPostgresServer *postgres)
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	ReplicationSource *replicationSource = &(postgres->replicationSource);
 
-	if (!pgctl_identify_system(replicationSource))
+	/* when we have a primary, only proceed if we can reach it */
+	if (!IS_EMPTY_STRING_BUFFER(replicationSource->primaryNode.host))
 	{
-		log_error("Failed to establish a replication connection "
-				  "to the primary node, see above for details");
-		return false;
+		if (!pgctl_identify_system(replicationSource))
+		{
+			log_error("Failed to establish a replication connection "
+					  "to the primary node, see above for details");
+			return false;
+		}
 	}
 
 	/* cleanup our existing standby setup, including postgresql.auto.conf */
