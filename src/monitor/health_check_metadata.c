@@ -83,6 +83,7 @@ LoadNodeHealthList(void)
 		 */
 		if (spiStatus != SPI_OK_SELECT)
 		{
+			EndSPITransaction();
 			return NIL;
 		}
 
