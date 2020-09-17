@@ -493,9 +493,6 @@ HealthCheckWorkerMain(Datum arg)
 		{
 			List *nodeHealthList = LoadNodeHealthList();
 
-			elog(NOTICE, "HealthCheckWorkerMain loaded %d nodes",
-				 list_length(nodeHealthList));
-
 			if (nodeHealthList != NIL)
 			{
 				List *healthCheckList = CreateHealthChecks(nodeHealthList);
