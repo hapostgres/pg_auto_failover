@@ -741,49 +741,6 @@ grant execute on function
    to autoctl_node;
 
 
-CREATE OR REPLACE FUNCTION pgautofailover.adjust_number_sync_standbys()
-  RETURNS trigger
-  LANGUAGE 'plpgsql'
-AS $$
-declare
-  standby_count integer := null;
-  number_sync_standbys integer := null;
-begin
-   select count(*) - 1
-     into standby_count
-     from pgautofailover.node
-    where formationid = old.formationid;
-
-   select formation.number_sync_standbys
-     into number_sync_standbys
-     from pgautofailover.formation
-    where formation.formationid = old.formationid;
-
-  if number_sync_standbys > 1
-  then
-    -- we must have number_sync_standbys + 1 <= standby_count
-    if (number_sync_standbys + 1) > standby_count
-    then
-      update pgautofailover.formation
-         set number_sync_standbys = greatest(standby_count - 1, 1)
-       where formation.formationid = old.formationid;
-    end if;
-  end if;
-
-  return old;
-end
-$$;
-
-comment on function pgautofailover.adjust_number_sync_standbys()
-        is 'adjust formation number_sync_standbys when removing a node, if needed';
-
-CREATE TRIGGER adjust_number_sync_standbys
-         AFTER DELETE
-            ON pgautofailover.node
-           FOR EACH ROW
-       EXECUTE PROCEDURE pgautofailover.adjust_number_sync_standbys();
-
-
 CREATE FUNCTION pgautofailover.formation_settings
  (
     IN formation_id         text default 'default',
