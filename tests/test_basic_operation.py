@@ -201,26 +201,18 @@ def test_020_multiple_manual_failover_verify_replication_slots():
     assert node2.has_needed_replication_slots()
     assert node3.has_needed_replication_slots()
 
-def test_021_stop_postgres_monitor():
-    original_state = node3.get_state()
-    monitor.stop_postgres()
-    monitor.wait_until_pg_is_running()
-    print()
-    assert node3.wait_until_state(target_state=original_state)
-
-def test_022_fail_secondary_and_monitor():
+#
+# Now test network partition detection. Cut the primary out of the network
+# by means of `ifconfig down` on its virtual network interface, and then
+# after 30s the primary should demote itself, and the monitor should
+# failover to the secondary.
+#
+def test_021_ifdown_primary():
     print()
     assert node2.wait_until_state(target_state="primary")
-    assert node3.wait_until_state(target_state="secondary")
+    node2.ifdown()
 
-    node3.fail()
-    monitor.fail()
-
-    time.sleep(2)
-    assert not node3.pg_is_running()
-    assert not monitor.pg_is_running()
-
-def test_023_detect_network_partition():
+def test_022_detect_network_partition():
     # wait for network partition detection to kick-in, allow some head-room
     timeout = 60
     demoted = False
@@ -238,21 +230,26 @@ def test_023_detect_network_partition():
     if node2.pg_is_running() or timeout <= 0:
         node2.print_debug_logs()
 
-    assert not node2.pg_is_running()
-
-def test_024_restart_all():
     print()
-    monitor.run()
-    node3.run()
+    assert not node2.pg_is_running()
+    assert node3.wait_until_state(target_state="wait_primary")
 
-    assert monitor.wait_until_pg_is_running()
-    assert node3.wait_until_pg_is_running()
+def test_023_ifup_old_primary():
+    print()
+    node2.ifup()
+
     assert node2.wait_until_pg_is_running()
+    assert node2.wait_until_state("secondary")
+    assert node3.wait_until_state("primary")
 
-    assert node2.wait_until_state("primary")
-    assert node3.wait_until_state("secondary")
+def test_024_stop_postgres_monitor():
+    original_state = node3.get_state()
+    monitor.stop_postgres()
+    monitor.wait_until_pg_is_running()
+    print()
+    assert node3.wait_until_state(target_state=original_state)
 
 def test_025_drop_primary():
-    node2.drop()
-    assert not node2.pg_is_running()
-    assert node3.wait_until_state(target_state="single")
+    node3.drop()
+    assert not node3.pg_is_running()
+    assert node2.wait_until_state(target_state="single")
