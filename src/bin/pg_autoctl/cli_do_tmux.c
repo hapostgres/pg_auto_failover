@@ -28,6 +28,8 @@
 #include "config.h"
 #include "env_utils.h"
 #include "log.h"
+#include "pidfile.h"
+#include "signals.h"
 #include "string_utils.h"
 
 #include "runprogram.h"
@@ -69,7 +71,7 @@ static void tmux_pg_autoctl_create_postgres(PQExpBuffer script,
 											const char *name);
 
 static bool tmux_start_server(const char *root, const char *scriptName);
-static bool pg_autoctl_stop(const char *root, const char *name);
+static bool pg_autoctl_getpid(const char *pgdata, pid_t *pid);
 static bool tmux_stop_pg_autoctl(TmuxOptions *options);
 static void tmux_process_options(TmuxOptions *options);
 
@@ -564,45 +566,20 @@ tmux_start_server(const char *root, const char *scriptName)
 
 
 /*
- * pg_autoctl_stop calls pg_autoctl stop --pgdata ${root}/${name}
+ * pg_autoctl_signal sends the given signal to the pg_autoctl process that is
+ * running for the given PGDATA localtion.
  */
 static bool
-pg_autoctl_stop(const char *root, const char *name)
+pg_autoctl_getpid(const char *pgdata, pid_t *pid)
 {
-	Program program;
-	char command[BUFSIZE] = { 0 };
-	char pgdata[MAXPGPATH] = { 0 };
+	ConfigFilePaths pathnames = { 0 };
 
-	bool success = true;
-
-	sformat(pgdata, sizeof(pgdata), "%s/%s", root, name);
-
-	program = run_program(pg_autoctl_argv0, "stop", "--pgdata", pgdata, NULL);
-
-	(void) snprintf_program_command_line(&program, command, BUFSIZE);
-	log_info("%s", command);
-
-	if (program.stdErr != NULL)
+	if (!keeper_config_set_pathnames_from_pgdata(&pathnames, pgdata))
 	{
-		char *errorLines[BUFSIZE];
-		int lineCount = splitLines(program.stdErr, errorLines, BUFSIZE);
-		int lineNumber = 0;
-
-		for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
-		{
-			fformat(stderr, "%s\n", errorLines[lineNumber]);
-		}
+		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
-	if (program.returnCode != 0)
-	{
-		success = false;
-		log_warn("Failed to stop pg_autoctl for \"%s\"", pgdata);
-	}
-
-	free_program(&program);
-
-	return success;
+	return read_pidfile(pathnames.pid, pid);
 }
 
 
@@ -615,18 +592,65 @@ tmux_stop_pg_autoctl(TmuxOptions *options)
 {
 	bool success = true;
 
-	/* first stop all the nodes */
-	for (int i = 0; i < options->nodes; i++)
+	int signals[] = { SIGTERM, SIGINT, SIGQUIT };
+	int signalsCount = sizeof(signals) / sizeof(signals[0]);
+
+	/* signal processes using increasing levels of urge to quit now */
+	for (int s = 0; s < signalsCount; s++)
 	{
-		char name[NAMEDATALEN] = { 0 };
+		bool countRunning = options->nodes;
 
-		sformat(name, sizeof(name), "node%d", i + 1);
+		for (int i = 0; i <= options->nodes; i++)
+		{
+			pid_t pid = 0;
+			char name[MAXPGPATH] = { 0 };
+			char pgdata[MAXPGPATH] = { 0 };
 
-		success = success && pg_autoctl_stop(options->root, name);
+			if (i == options->nodes)
+			{
+				sformat(name, sizeof(name), "monitor");
+			}
+			else
+			{
+				sformat(name, sizeof(name), "node%d", i + 1);
+			}
+
+			sformat(pgdata, sizeof(pgdata), "%s/%s", options->root, name);
+
+			if (!pg_autoctl_getpid(pgdata, &pid))
+			{
+				/* we don't have a pid */
+				log_warn("No pidfile for pg_autoctl for node \"%s\"", name);
+				--countRunning;
+				continue;
+			}
+
+			if (kill(pid, 0) == -1 && errno == ESRCH)
+			{
+				log_info("Pid %d for node \"%s\" is not running anymore",
+						 pid, name);
+				--countRunning;
+			}
+			else
+			{
+				log_info("Sending signal %s to pid %d for node \"%s\"",
+						 signal_to_string(signals[s]), pid, name);
+
+				if (kill(pid, signals[s]) != 0)
+				{
+					log_info("Failed to send %s to pid %d",
+							 signal_to_string(signals[s]), pid);
+				}
+			}
+		}
+
+		if (countRunning == 0)
+		{
+			break;
+		}
+
+		sleep(1);
 	}
-
-	/* and then the monitor */
-	success = success && pg_autoctl_stop(options->root, "monitor");
 
 	return success;
 }
