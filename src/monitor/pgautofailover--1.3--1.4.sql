@@ -792,5 +792,7 @@ $$;
 comment on function pgautofailover.formation_settings(text)
         is 'get the current replication settings a formation';
 
+drop function pgautofailover.adjust_number_sync_standbys() cascade;
+
 DROP TABLE pgautofailover.node_upgrade_old;
 DROP TABLE pgautofailover.event_upgrade_old;
