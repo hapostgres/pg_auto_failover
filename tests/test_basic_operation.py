@@ -201,13 +201,55 @@ def test_020_multiple_manual_failover_verify_replication_slots():
     assert node2.has_needed_replication_slots()
     assert node3.has_needed_replication_slots()
 
-def test_021_drop_primary():
-    node2.drop()
-    assert not node2.pg_is_running()
-    assert node3.wait_until_state(target_state="single")
+#
+# Now test network partition detection. Cut the primary out of the network
+# by means of `ifconfig down` on its virtual network interface, and then
+# after 30s the primary should demote itself, and the monitor should
+# failover to the secondary.
+#
+def test_021_ifdown_primary():
+    print()
+    assert node2.wait_until_state(target_state="primary")
+    node2.ifdown()
 
-def test_022_stop_postgres_monitor():
+def test_022_detect_network_partition():
+    # wait for network partition detection to kick-in, allow some head-room
+    timeout = 60
+    demoted = False
+
+    while not demoted and timeout > 0:
+        states = node2.get_local_state()
+        demoted = states == ('demote_timeout', 'demote_timeout')
+
+        if demoted:
+            break
+
+        time.sleep(1)
+        timeout -= 1
+
+    if node2.pg_is_running() or timeout <= 0:
+        node2.print_debug_logs()
+
+    print()
+    assert not node2.pg_is_running()
+    assert node3.wait_until_state(target_state="wait_primary")
+
+def test_023_ifup_old_primary():
+    print()
+    node2.ifup()
+
+    assert node2.wait_until_pg_is_running()
+    assert node2.wait_until_state("secondary")
+    assert node3.wait_until_state("primary")
+
+def test_024_stop_postgres_monitor():
     original_state = node3.get_state()
     monitor.stop_postgres()
     monitor.wait_until_pg_is_running()
+    print()
     assert node3.wait_until_state(target_state=original_state)
+
+def test_025_drop_primary():
+    node3.drop()
+    assert not node3.pg_is_running()
+    assert node2.wait_until_state(target_state="single")
