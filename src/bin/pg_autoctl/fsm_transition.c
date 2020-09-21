@@ -158,14 +158,6 @@ fsm_init_primary(Keeper *keeper)
 			return false;
 		}
 	}
-	else if (initState->pgInitState >= PRE_INIT_STATE_RUNNING)
-	{
-		log_error("PostgreSQL is already running at \"%s\", refusing to "
-				  "initialize a new cluster on-top of the current one.",
-				  pgSetup->pgdata);
-
-		return false;
-	}
 
 	/*
 	 * When the PostgreSQL instance either did not exist, or did exist but was
