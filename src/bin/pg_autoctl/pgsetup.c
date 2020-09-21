@@ -852,7 +852,18 @@ pg_setup_pgdata_exists(PostgresSetup *pgSetup)
 		return false;
 	}
 
-	return pgSetup->control.system_identifier != 0;
+	/*
+	 * Now that we know that PGDATA exists, let's grab the system identifier if
+	 * we don't have it already.
+	 */
+	if (pgSetup->control.system_identifier == 0)
+	{
+		bool missingPgdataIsOk = false;
+
+		return pg_controldata(pgSetup, missingPgdataIsOk);
+	}
+
+	return true;
 }
 
 
