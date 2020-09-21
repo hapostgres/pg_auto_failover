@@ -58,9 +58,12 @@ __attribute__((format(printf, 2, 3)));
 static void tmux_add_send_keys_command(PQExpBuffer script, const char *fmt, ...)
 __attribute__((format(printf, 2, 3)));
 
+static bool tmux_has_session(const char *sessionName);
 static void tmux_add_new_session(PQExpBuffer script,
 								 const char *root, int pgport);
-static bool tmux_prepare_XDG_environment(const char *root);
+
+static bool tmux_prepare_XDG_environment(const char *root,
+										 bool createDirectories);
 
 static void tmux_pg_autoctl_create_monitor(PQExpBuffer script,
 										   const char *root,
@@ -75,6 +78,7 @@ static bool tmux_start_server(const char *root, const char *scriptName);
 static bool pg_autoctl_getpid(const char *pgdata, pid_t *pid);
 static bool tmux_stop_pg_autoctl(TmuxOptions *options);
 static void tmux_process_options(TmuxOptions *options);
+static void tmux_cleanup_stale_directory(TmuxOptions *options);
 
 
 /*
@@ -276,7 +280,7 @@ tmux_add_send_keys_command(PQExpBuffer script, const char *fmt, ...)
  * process tree.
  */
 static bool
-tmux_prepare_XDG_environment(const char *root)
+tmux_prepare_XDG_environment(const char *root, bool createDirectories)
 {
 	log_info("Preparing XDG setting for self-contained session in \"%s\"",
 			 root);
@@ -287,8 +291,6 @@ tmux_prepare_XDG_environment(const char *root)
 		char *dir = xdg[i][1];
 		char *env = (char *) malloc(MAXPGPATH * sizeof(char));
 
-		char targetPath[MAXPGPATH] = { 0 };
-
 		if (env == NULL)
 		{
 			log_fatal("Failed to malloc MAXPGPATH bytes: %m");
@@ -297,11 +299,14 @@ tmux_prepare_XDG_environment(const char *root)
 
 		sformat(env, MAXPGPATH, "%s/%s", root, dir);
 
-		log_debug("mkdir -p \"%s\"", env);
-		if (pg_mkdir_p(env, 0700) == -1)
+		if (createDirectories)
 		{
-			log_error("mkdir -p \"%s\": %m", env);
-			return false;
+			log_debug("mkdir -p \"%s\"", env);
+			if (pg_mkdir_p(env, 0700) == -1)
+			{
+				log_error("mkdir -p \"%s\": %m", env);
+				return false;
+			}
 		}
 
 		if (!normalize_filename(env, env, MAXPGPATH))
@@ -319,13 +324,19 @@ tmux_prepare_XDG_environment(const char *root)
 		}
 
 		/* also create our actual target directory for our files */
-		sformat(targetPath, sizeof(targetPath), "%s/pg_config/%s", env, root);
-
-		log_debug("mkdir -p \"%s\"", targetPath);
-		if (pg_mkdir_p(targetPath, 0700) == -1)
+		if (createDirectories)
 		{
-			log_error("mkdir -p \"%s\": %m", targetPath);
-			return false;
+			char targetPath[MAXPGPATH] = { 0 };
+
+			sformat(targetPath, sizeof(targetPath),
+					"%s/pg_config/%s", env, root);
+
+			log_debug("mkdir -p \"%s\"", targetPath);
+			if (pg_mkdir_p(targetPath, 0700) == -1)
+			{
+				log_error("mkdir -p \"%s\": %m", targetPath);
+				return false;
+			}
 		}
 	}
 
@@ -474,6 +485,11 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 
 	tmux_add_send_keys_command(script, "export PGDATA=\"%s/monitor\"", root);
 	tmux_add_send_keys_command(script,
+							   "%s do tmux wait --root %s %s",
+							   pg_autoctl_argv0,
+							   options->root,
+							   "monitor");
+	tmux_add_send_keys_command(script,
 							   "watch -n 0.2 %s show state",
 							   pg_autoctl_argv0);
 
@@ -620,7 +636,7 @@ tmux_stop_pg_autoctl(TmuxOptions *options)
 			if (!pg_autoctl_getpid(pgdata, &pid))
 			{
 				/* we don't have a pid */
-				log_warn("No pidfile for pg_autoctl for node \"%s\"", name);
+				log_info("No pidfile for pg_autoctl for node \"%s\"", name);
 				--countRunning;
 				continue;
 			}
@@ -649,10 +665,71 @@ tmux_stop_pg_autoctl(TmuxOptions *options)
 			break;
 		}
 
+		/* sleep enough time that the processes might already be dead */
 		sleep(1);
 	}
 
 	return success;
+}
+
+
+/*
+ * tmux_has_session runs the command `tmux has-session -f sessionName`.
+ */
+static bool
+tmux_has_session(const char *sessionName)
+{
+	Program program;
+	int returnCode;
+
+	char tmux[MAXPGPATH] = { 0 };
+	char command[BUFSIZE] = { 0 };
+
+	if (!search_path_first("tmux", tmux))
+	{
+		log_fatal("Failed to find program tmux in PATH");
+		return false;
+	}
+
+	program = run_program(tmux, "has-session", "-t", sessionName, NULL);
+	returnCode = program.returnCode;
+
+	(void) snprintf_program_command_line(&program, command, BUFSIZE);
+	log_debug("%s", command);
+
+	if (program.stdOut)
+	{
+		char *outLines[BUFSIZE] = { 0 };
+		int lineCount = splitLines(program.stdOut, outLines, BUFSIZE);
+		int lineNumber = 0;
+
+		for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
+		{
+			log_info("tmux has-session: %s", outLines[lineNumber]);
+		}
+	}
+
+	if (program.stdErr)
+	{
+		char *errLines[BUFSIZE] = { 0 };
+		int lineCount = splitLines(program.stdOut, errLines, BUFSIZE);
+		int lineNumber = 0;
+
+		for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
+		{
+			log_error("tmux has-session: %s", errLines[lineNumber]);
+		}
+	}
+
+	free_program(&program);
+
+	/*
+	 * From tmux has-session manual page:
+	 *
+	 * Report an error and exit with 1 if the specified session does not exist.
+	 * If it does exist, exit with 0.
+	 */
+	return returnCode == 0;
 }
 
 
@@ -672,6 +749,12 @@ tmux_kill_session(TmuxOptions *options)
 
 	sformat(sessionName, BUFSIZE, "pgautofailover-%d", options->firstPort);
 
+	if (!tmux_has_session(sessionName))
+	{
+		log_info("Tmux session \"%s\" does not exists", sessionName);
+		return true;
+	}
+
 	if (!search_path_first("tmux", tmux))
 	{
 		log_fatal("Failed to find program tmux in PATH");
@@ -685,12 +768,26 @@ tmux_kill_session(TmuxOptions *options)
 
 	if (program.stdOut)
 	{
-		fformat(stdout, "%s", program.stdOut);
+		char *outLines[BUFSIZE] = { 0 };
+		int lineCount = splitLines(program.stdOut, outLines, BUFSIZE);
+		int lineNumber = 0;
+
+		for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
+		{
+			log_info("tmux kill-session: %s", outLines[lineNumber]);
+		}
 	}
 
 	if (program.stdErr)
 	{
-		fformat(stderr, "%s", program.stdErr);
+		char *errLines[BUFSIZE] = { 0 };
+		int lineCount = splitLines(program.stdErr, errLines, BUFSIZE);
+		int lineNumber = 0;
+
+		for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
+		{
+			log_error("tmux kill-session: %s", errLines[lineNumber]);
+		}
 	}
 
 	if (program.returnCode != 0)
@@ -735,6 +832,52 @@ tmux_process_options(TmuxOptions *options)
 
 
 /*
+ * tmux_cleanup_stale_directory cleans-up the pg_autoctl processes and then the
+ * root directory of a tmux session, and then kills the tmux session.
+ */
+static void
+tmux_cleanup_stale_directory(TmuxOptions *options)
+{
+	if (!directory_exists(options->root))
+	{
+		log_info("Directory \"%s\" does not exists, nothing to clean-up",
+				 options->root);
+		return;
+	}
+
+	if (!normalize_filename(options->root, options->root, MAXPGPATH))
+	{
+		/* errors have already been logged. */
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	/* prepare the XDG environment */
+	if (!tmux_prepare_XDG_environment(options->root, false))
+	{
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	log_info("Checking for stale pg_autoctl process in \"%s\"", options->root);
+	(void) tmux_stop_pg_autoctl(options);
+
+	log_info("Removing stale directory: rm -rf \"%s\"", options->root);
+	if (!rmtree(options->root, true))
+	{
+		log_error("Failed to remove directory \"%s\": %m", options->root);
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	log_info("Checking for stale tmux session \"pgautofailover-%d\"",
+			 options->firstPort);
+
+	if (!tmux_kill_session(options))
+	{
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+}
+
+
+/*
  * keeper_cli_tmux_script generates a tmux script to run a test case or a demo
  * for pg_auto_failover easily.
  */
@@ -747,7 +890,7 @@ cli_do_tmux_script(int argc, char **argv)
 	(void) tmux_process_options(&options);
 
 	/* prepare the XDG environment */
-	if (!tmux_prepare_XDG_environment(options.root))
+	if (!tmux_prepare_XDG_environment(options.root, true))
 	{
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
@@ -792,13 +935,18 @@ cli_do_tmux_session(int argc, char **argv)
 	bool success = true;
 
 	/*
+	 * We need to make sure we start from a clean slate.
+	 */
+	(void) tmux_cleanup_stale_directory(&options);
+
+	/*
 	 * Write the script to "script-${first-pgport}.tmux" file in the root
 	 * directory.
 	 */
 	(void) tmux_process_options(&options);
 
 	/* prepare the XDG environment */
-	if (!tmux_prepare_XDG_environment(options.root))
+	if (!tmux_prepare_XDG_environment(options.root, true))
 	{
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
@@ -863,7 +1011,7 @@ cli_do_tmux_session(int argc, char **argv)
 
 
 /*
- * cli_do_tmux_stop runs pg_autoctl stop on all the pg_autoctl process that
+ * cli_do_tmux_stop send termination signals on all the pg_autoctl process that
  * might be running in a tmux session.
  */
 void
@@ -874,7 +1022,7 @@ cli_do_tmux_stop(int argc, char **argv)
 	(void) tmux_process_options(&options);
 
 	/* prepare the XDG environment */
-	if (!tmux_prepare_XDG_environment(options.root))
+	if (!tmux_prepare_XDG_environment(options.root, false))
 	{
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
@@ -883,6 +1031,19 @@ cli_do_tmux_stop(int argc, char **argv)
 	{
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
+}
+
+
+/*
+ * cli_do_tmux_clean cleans-up the pg_autoctl processes and then the root
+ * directory of a tmux session, and then kills the tmux session.
+ */
+void
+cli_do_tmux_clean(int argc, char **argv)
+{
+	TmuxOptions options = tmuxOptions;
+
+	(void) tmux_cleanup_stale_directory(&options);
 }
 
 
@@ -899,7 +1060,7 @@ cli_do_tmux_wait(int argc, char **argv)
 	(void) tmux_process_options(&options);
 
 	/* prepare the XDG environment */
-	if (!tmux_prepare_XDG_environment(options.root))
+	if (!tmux_prepare_XDG_environment(options.root, false))
 	{
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
@@ -991,9 +1152,12 @@ cli_do_tmux_wait(int argc, char **argv)
 			   !file_exists(pathnames.init) &&
 			   timeout > 0)
 		{
+			fformat(stderr, ".");
 			sleep(1);
 			--timeout;
 		}
+
+		fformat(stderr, "\n");
 
 		if (!file_exists(pathnames.state))
 		{

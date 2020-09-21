@@ -255,13 +255,23 @@ CommandLine do_tmux_session =
 
 CommandLine do_tmux_stop =
 	make_command("stop",
-				 "Stop pg_autoctl processed that belong to a tmux session ",
+				 "Stop pg_autoctl processes that belong to a tmux session ",
 				 "[option ...]",
 				 "  --root          path where to create a cluster\n"
 				 "  --first-pgport  first Postgres port to use (5500)\n"
 				 "  --nodes         number of Postgres nodes to create (2)",
 				 cli_do_tmux_script_getopts,
 				 cli_do_tmux_stop);
+
+CommandLine do_tmux_clean =
+	make_command("clean",
+				 "Clean-up a tmux session processes and root dir",
+				 "[option ...]",
+				 "  --root          path where to create a cluster\n"
+				 "  --first-pgport  first Postgres port to use (5500)\n"
+				 "  --nodes         number of Postgres nodes to create (2)",
+				 cli_do_tmux_script_getopts,
+				 cli_do_tmux_clean);
 
 CommandLine do_tmux_wait =
 	make_command("wait",
@@ -278,6 +288,7 @@ CommandLine *do_tmux[] = {
 	&do_tmux_session,
 	&do_tmux_stop,
 	&do_tmux_wait,
+	&do_tmux_clean,
 	NULL
 };
 

@@ -117,7 +117,6 @@ tmux-clean:
 	rm -rf $(TMUX_TOP_DIR)
 
 cluster: install
-	rm -rf $(TMUX_TOP_DIR)
 	$(PG_AUTOCTL) do tmux session        \
          --root $(TMUX_TOP_DIR)          \
          --first-pgport $(FIRST_PGPORT)  \
