@@ -499,14 +499,13 @@ ensure_default_settings_file_exists(const char *configFilePath,
 			return true;
 		}
 
-		log_warn("Contents of \"%s\" have changed, overwriting", configFilePath);
+		log_info("Contents of \"%s\" have changed, overwriting", configFilePath);
 		free(currentDefaultConfContents);
 	}
 	else
 	{
-		log_debug("Configuration file \"%s\" doesn't exists yet, "
-				  "creating with content:\n%s",
-				  configFilePath, defaultConfContents->data);
+		log_debug("Configuration file \"%s\" doesn't exists yet, creating",
+				  configFilePath);
 	}
 
 	if (!write_file(defaultConfContents->data,
@@ -516,6 +515,9 @@ ensure_default_settings_file_exists(const char *configFilePath,
 		destroyPQExpBuffer(defaultConfContents);
 		return false;
 	}
+
+	log_debug("Wrote file \"%s\" with content:\n%s",
+			  configFilePath, defaultConfContents->data);
 
 	destroyPQExpBuffer(defaultConfContents);
 
@@ -745,7 +747,6 @@ pg_basebackup(const char *pgdata,
 	}
 	setenv("PGAPPNAME", replicationSource->applicationName, 1);
 
-	/* we ignore the length returned by prepare_primary_conninfo... */
 	if (!prepare_primary_conninfo(primaryConnInfo,
 								  MAXCONNINFO,
 								  primaryNode->host,
@@ -867,7 +868,6 @@ pg_rewind(const char *pgdata,
 		setenv("PGPASSWORD", replicationSource->password, 1);
 	}
 
-	/* we ignore the length returned by prepare_primary_conninfo... */
 	if (!prepare_primary_conninfo(primaryConnInfo,
 								  MAXCONNINFO,
 								  primaryNode->host,
@@ -1250,6 +1250,59 @@ pg_log_startup(const char *pgdata, int logLevel)
 
 	closedir(logDir);
 
+	/* now add the contents of the recovery configuration */
+	(void) pg_log_recovery_setup(pgdata, logLevel);
+
+	return true;
+}
+
+
+/*
+ * pg_log_recovery_setup logs the current Postgres recovery settings from
+ * either the recovery.conf file or the standby setup. In case things go wrong
+ * in the Postgres version detection mechanism, or upgrades, or clean-up, this
+ * logs all the configuration files found rather than only those we expect we
+ * should find.
+ */
+bool
+pg_log_recovery_setup(const char *pgdata, int logLevel)
+{
+	char *filenames[] = {
+		"recovery.conf",
+		"standby.signal",
+		AUTOCTL_STANDBY_CONF_FILENAME,
+		NULL
+	};
+
+	for (int i = 0; filenames[i] != NULL; i++)
+	{
+		char recoveryConfPath[MAXPGPATH] = { 0 };
+		char *fileContents;
+		long fileSize;
+
+		join_path_components(recoveryConfPath, pgdata, filenames[i]);
+
+		if (file_exists(recoveryConfPath))
+		{
+			if (!read_file(recoveryConfPath, &fileContents, &fileSize))
+			{
+				/* errors have already been logged */
+				continue;
+			}
+
+			if (fileSize > 0)
+			{
+				log_debug("Configuration file \"%s\":\n%s",
+						  recoveryConfPath, fileContents);
+			}
+			else
+			{
+				log_debug("Configuration file \"%s\" is empty",
+						  recoveryConfPath);
+			}
+		}
+	}
+
 	return true;
 }
 
@@ -1629,7 +1682,9 @@ prepare_recovery_settings(const char *pgdata,
 	/* when reaching REPORT_LSN we set recovery with no primary conninfo */
 	if (!IS_EMPTY_STRING_BUFFER(primaryNode->host))
 	{
-		/* we ignore the length returned by prepare_primary_conninfo... */
+		log_debug("prepare_recovery_settings: primary node %s:%d",
+				  primaryNode->host, primaryNode->port);
+
 		if (!prepare_primary_conninfo(primaryConnInfo,
 									  MAXCONNINFO,
 									  primaryNode->host,
@@ -1644,6 +1699,10 @@ prepare_recovery_settings(const char *pgdata,
 			/* errors have already been logged. */
 			return false;
 		}
+	}
+	else
+	{
+		log_debug("prepare_recovery_settings: no primary node!");
 	}
 
 	/*
@@ -1688,6 +1747,8 @@ pg_cleanup_standby_mode(uint32_t pg_control_version,
 
 		join_path_components(recoveryConfPath, pgdata, "recovery.conf");
 
+		log_debug("pg_cleanup_standby_mode: rm \"%s\"", recoveryConfPath);
+
 		if (!unlink_file(recoveryConfPath))
 		{
 			/* errors have already been logged */
@@ -1704,6 +1765,8 @@ pg_cleanup_standby_mode(uint32_t pg_control_version,
 							 pgdata,
 							 AUTOCTL_STANDBY_CONF_FILENAME);
 
+		log_debug("pg_cleanup_standby_mode: rm \"%s\"", signalFilePath);
+
 		if (!unlink_file(signalFilePath))
 		{
 			/* errors have already been logged */
@@ -1711,6 +1774,8 @@ pg_cleanup_standby_mode(uint32_t pg_control_version,
 		}
 
 		/* empty out the standby configuration file */
+		log_debug("pg_cleanup_standby_mode: > \"%s\"", standbyConfigFilePath);
+
 		if (!write_file("", 0, standbyConfigFilePath))
 		{
 			/* write_file logs I/O error */

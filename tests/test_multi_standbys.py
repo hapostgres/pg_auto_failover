@@ -136,8 +136,13 @@ def test_006_number_sync_standbys_trigger():
 
     # there's no state change to instruct us that the replication slot
     # maintenance is now done, so we have to wait for awhile instead.
-    # pg_autoctl connects to the monitor every 5s, so let's sleep 6s
+
+    node1.pg_autoctl.sighup() # wake up from the 10s node_active delay
+    node2.pg_autoctl.sighup() # wake up from the 10s node_active delay
+    node3.pg_autoctl.sighup() # wake up from the 10s node_active delay
+
     time.sleep(6)
+
     assert node1.has_needed_replication_slots()
     assert node2.has_needed_replication_slots()
     assert node3.has_needed_replication_slots()

@@ -970,9 +970,9 @@ pg_setup_is_ready(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk)
 
 		log_debug("postmaster status is \"%s\", retrying in %ds.",
 				  pmStatusToString(pgSetup->pm_status),
-				  PG_AUTOCTL_KEEPER_SLEEP_TIME);
+				  PG_AUTOCTL_KEEPER_RETRY_TIME_MS);
 
-		pg_usleep(PG_AUTOCTL_KEEPER_SLEEP_TIME * 1000 * 1000);
+		pg_usleep(PG_AUTOCTL_KEEPER_RETRY_TIME_MS * 1000);
 	}
 
 	if (pgSetup->pm_status != POSTMASTER_STATUS_UNKNOWN)

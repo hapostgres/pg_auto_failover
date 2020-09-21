@@ -74,6 +74,7 @@ static bool WalDifferenceWithin(AutoFailoverNode *secondaryNode,
 								int64 delta);
 static bool IsHealthy(AutoFailoverNode *pgAutoFailoverNode);
 static bool IsUnhealthy(AutoFailoverNode *pgAutoFailoverNode);
+static bool IsReporting(AutoFailoverNode *pgAutoFailoverNode);
 
 /* GUC variables */
 int EnableSyncXlogThreshold = DEFAULT_XLOG_SEG_SIZE;
@@ -1138,8 +1139,12 @@ BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
 			continue;
 		}
 
-		/* skip unhealthy nodes to avoid having to wait for them to report */
-		if (IsUnhealthy(node))
+		/*
+		 * Skip unhealthy nodes to avoid having to wait for them to report,
+		 * unless the node is unhealthy because Postgres is down, but
+		 * pg_autoctl is still reporting.
+		 */
+		if (IsUnhealthy(node) && !IsReporting(node))
 		{
 			elog(LOG,
 				 "Skipping candidate node %d (%s:%d), which is unhealthy",
@@ -1656,6 +1661,31 @@ IsUnhealthy(AutoFailoverNode *pgAutoFailoverNode)
 
 	/* clues show that everything is fine, the node is not unhealthy */
 	return false;
+}
+
+
+/*
+ * IsReporting returns whether the given node has reported recently, within the
+ * UnhealthyTimeoutMs interval.
+ */
+static bool
+IsReporting(AutoFailoverNode *pgAutoFailoverNode)
+{
+	TimestampTz now = GetCurrentTimestamp();
+
+	if (pgAutoFailoverNode == NULL)
+	{
+		return false;
+	}
+
+	if (TimestampDifferenceExceeds(pgAutoFailoverNode->reportTime,
+								   now,
+								   UnhealthyTimeoutMs))
+	{
+		return false;
+	}
+
+	return true;
 }
 
 

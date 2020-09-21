@@ -6,6 +6,8 @@ TEST_CONTAINER_NAME = pg_auto_failover-test
 DOCKER_RUN_OPTS = --cap-add=SYS_ADMIN --cap-add=NET_ADMIN -ti --rm
 PDF = ./docs/_build/latex/pg_auto_failover.pdf
 
+NOSETESTS = $(shell which nosetests3 || which nosetests)
+
 # Tests for multiple standbys
 MULTI_SB_TESTS = $(basename $(notdir $(wildcard tests/test*_multi*)))
 
@@ -60,7 +62,7 @@ install-bin: bin
 
 test:
 	sudo -E env "PATH=${PATH}" USER=$(shell whoami) \
-		`which nosetests`			\
+		$(NOSETESTS)			\
 		--verbose				\
 		--nocapture				\
 		--stop					\

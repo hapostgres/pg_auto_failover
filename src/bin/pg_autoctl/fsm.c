@@ -119,7 +119,7 @@
 	"Start following a primary"
 
 #define COMMENT_SECONDARY_TO_WAIT_MAINTENANCE \
-	"Waiting for the primary to be disable sync replication before " \
+	"Waiting for the primary to disable sync replication before " \
 	"going to maintenance."
 
 #define COMMENT_SECONDARY_TO_MAINTENANCE \
