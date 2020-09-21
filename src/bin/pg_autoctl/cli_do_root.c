@@ -232,11 +232,11 @@ CommandLine do_pgsetup_commands =
 
 CommandLine do_tmux_script =
 	make_command("script",
-				 "Produce a tmux script for a demo or a test case",
+				 "Produce a tmux script for a demo or a test case (debug only)",
 				 "[option ...]",
 				 "  --root          path where to create a cluster\n"
 				 "  --first-pgport  first Postgres port to use (5500)\n"
-				 "  --nodes         number of Postgres nodes to create (2)"
+				 "  --nodes         number of Postgres nodes to create (2)\n"
 				 "  --layout        tmux layout to use (even-vertical)",
 				 cli_do_tmux_script_getopts,
 				 cli_do_tmux_script);
@@ -247,7 +247,7 @@ CommandLine do_tmux_session =
 				 "[option ...]",
 				 "  --root          path where to create a cluster\n"
 				 "  --first-pgport  first Postgres port to use (5500)\n"
-				 "  --nodes         number of Postgres nodes to create (2)"
+				 "  --nodes         number of Postgres nodes to create (2)\n"
 				 "  --layout        tmux layout to use (even-vertical)",
 				 cli_do_tmux_script_getopts,
 				 cli_do_tmux_session);
