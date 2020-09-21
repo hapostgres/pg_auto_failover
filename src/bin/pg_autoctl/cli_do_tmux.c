@@ -58,7 +58,8 @@ __attribute__((format(printf, 2, 3)));
 static void tmux_add_send_keys_command(PQExpBuffer script, const char *fmt, ...)
 __attribute__((format(printf, 2, 3)));
 
-static void tmux_add_xdg_environment(PQExpBuffer script, const char *root);
+static void tmux_add_new_session(PQExpBuffer script,
+								 const char *root, int pgport);
 static bool tmux_prepare_XDG_environment(const char *root);
 
 static void tmux_pg_autoctl_create_monitor(PQExpBuffer script,
@@ -333,13 +334,17 @@ tmux_prepare_XDG_environment(const char *root)
 
 
 /*
- * tmux_add_xdg_environment appends the XDG environment that makes the test
- * target self-contained, as a series of tmux send-keys commands, to the given
- * script buffer.
+ * tmux_add_new_session appends a new-session command with the
+ * update-environment options for our XDG settings, as a series of tmux
+ * send-keys commands, to the given script buffer.
  */
 static void
-tmux_add_xdg_environment(PQExpBuffer script, const char *root)
+tmux_add_new_session(PQExpBuffer script, const char *root, int pgport)
 {
+	char sessionName[BUFSIZE] = { 0 };
+
+	sformat(sessionName, BUFSIZE, "pgautofailover-%d", pgport);
+
 	/*
 	 * For demo/tests purposes, arrange a self-contained setup where everything
 	 * is to be found in the given options.root directory.
@@ -347,11 +352,11 @@ tmux_add_xdg_environment(PQExpBuffer script, const char *root)
 	for (int i = 0; xdg[i][0] != NULL; i++)
 	{
 		char *var = xdg[i][0];
-		char *dir = xdg[i][1];
 
-		tmux_add_send_keys_command(script,
-								   "export %s=\"%s/%s\"", var, root, dir);
+		tmux_add_command(script, "set-option update-environment %s", var);
 	}
+
+	tmux_add_command(script, "new-session -s %s", sessionName);
 }
 
 
@@ -366,7 +371,6 @@ tmux_pg_autoctl_create_monitor(PQExpBuffer script,
 {
 	char *pg_ctl_opts = "--hostname localhost --ssl-self-signed --auth trust";
 
-	tmux_add_xdg_environment(script, root);
 	tmux_add_send_keys_command(script, "export PGPORT=%d", pgport);
 
 	/* the monitor is always named monitor, and does not need --monitor */
@@ -392,7 +396,6 @@ tmux_pg_autoctl_create_postgres(PQExpBuffer script,
 	char monitor[BUFSIZE] = { 0 };
 	char *pg_ctl_opts = "--hostname localhost --ssl-self-signed --auth trust";
 
-	tmux_add_xdg_environment(script, root);
 	tmux_add_send_keys_command(script, "export PGPORT=%d", pgport);
 
 	sformat(monitor, sizeof(monitor),
@@ -431,7 +434,8 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 	sformat(sessionName, BUFSIZE, "pgautofailover-%d", options->firstPort);
 
 	tmux_add_command(script, "set-option -g default-shell /bin/bash");
-	tmux_add_command(script, "new-session -s %s", sessionName);
+
+	(void) tmux_add_new_session(script, root, pgport);
 
 	/* start a monitor */
 	tmux_pg_autoctl_create_monitor(script, root, pgport++);
@@ -468,7 +472,6 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 	tmux_add_command(script, "split-window -v");
 	tmux_add_command(script, "select-layout even-vertical");
 
-	tmux_add_xdg_environment(script, root);
 	tmux_add_send_keys_command(script, "export PGDATA=\"%s/monitor\"", root);
 	tmux_add_send_keys_command(script,
 							   "watch -n 0.2 %s show state",
@@ -477,9 +480,6 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 	/* add a window for interactive pg_autoctl commands */
 	tmux_add_command(script, "split-window -v");
 	tmux_add_command(script, "select-layout even-vertical");
-
-	/* seems that we need to inconditionnaly set the XDG env in this one */
-	tmux_add_xdg_environment(script, root);
 	tmux_add_send_keys_command(script, "cd \"%s\"", root);
 	tmux_add_send_keys_command(script, "export PGDATA=\"%s/monitor\"", root);
 
