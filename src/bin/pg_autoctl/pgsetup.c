@@ -830,8 +830,9 @@ pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 
 
 /*
- * pg_setup_pgdata_exists returns true when the pg_controldata probe was
- * susccessful.
+ * pg_setup_pgdata_exists returns true when PGDATA exists, hosts a
+ * global/pg_control file (so that it looks like a Postgres cluster) and when
+ * the pg_controldata probe was successful.
  */
 bool
 pg_setup_pgdata_exists(PostgresSetup *pgSetup)
@@ -852,7 +853,21 @@ pg_setup_pgdata_exists(PostgresSetup *pgSetup)
 		return false;
 	}
 
-	return pgSetup->control.system_identifier != 0;
+	/*
+	 * Now that we know that PGDATA exists, let's grab the system identifier if
+	 * we don't have it already.
+	 */
+	if (pgSetup->control.system_identifier == 0)
+	{
+		bool missingPgdataIsOk = false;
+
+		/* errors are logged from within pg_controldata */
+		(void) pg_controldata(pgSetup, missingPgdataIsOk);
+
+		return pgSetup->control.system_identifier != 0;
+	}
+
+	return true;
 }
 
 
