@@ -614,7 +614,7 @@ tmux_stop_pg_autoctl(TmuxOptions *options)
 	/* signal processes using increasing levels of urge to quit now */
 	for (int s = 0; s < signalsCount; s++)
 	{
-		bool countRunning = options->nodes;
+		int countRunning = options->nodes + 1;
 
 		for (int i = 0; i <= options->nodes; i++)
 		{
