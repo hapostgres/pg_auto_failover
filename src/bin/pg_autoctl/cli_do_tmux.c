@@ -1137,6 +1137,7 @@ cli_do_tmux_wait(int argc, char **argv)
 		 * file exists.
 		 */
 		int timeout = 60;
+		int countDots = 0;
 		char pgdata[MAXPGPATH] = { 0 };
 		ConfigFilePaths pathnames = { 0 };
 
@@ -1144,27 +1145,48 @@ cli_do_tmux_wait(int argc, char **argv)
 
 		log_info("Waiting for a node state file for PGDATA \"%s\"", pgdata);
 
-		if (!keeper_config_set_pathnames_from_pgdata(&pathnames, pgdata))
+		while (timeout > 0)
 		{
-			exit(EXIT_CODE_INTERNAL_ERROR);
-		}
+			if (IS_EMPTY_STRING_BUFFER(pathnames.state))
+			{
+				if (keeper_config_set_pathnames_from_pgdata(&pathnames,
+															pgdata))
+				{
+					log_info("Waiting for creation of a state file at \"%s\"",
+							 pathnames.state);
+				}
+			}
 
-		log_info("Waiting for creation of a state file at \"%s\"",
-				 pathnames.state);
+			if (file_exists(pathnames.state))
+			{
+				KeeperStateData keeperState = { 0 };
 
-		while (!file_exists(pathnames.state) &&
-			   !file_exists(pathnames.init) &&
-			   timeout > 0)
-		{
+				if (keeper_state_read(&keeperState, pathnames.state))
+				{
+					if (keeperState.assigned_role > INIT_STATE)
+					{
+						break;
+					}
+				}
+			}
+
 			fformat(stderr, ".");
+			++countDots;
+
 			sleep(1);
 			--timeout;
 		}
 
-		fformat(stderr, "\n");
+		if (countDots > 0)
+		{
+			fformat(stderr, "\n");
+		}
 
+		/* we might have reached the timeout */
 		if (!file_exists(pathnames.state))
 		{
+			log_fatal("Reached timeout while waiting for state file \"%s\"",
+					  pathnames.state);
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 	}
