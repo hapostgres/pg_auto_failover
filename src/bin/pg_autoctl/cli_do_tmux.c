@@ -329,7 +329,11 @@ tmux_prepare_XDG_environment(const char *root, bool createDirectories)
 			char targetPath[MAXPGPATH] = { 0 };
 
 			sformat(targetPath, sizeof(targetPath),
-					"%s/pg_config/%s", env, root);
+					"%s/pg_config/%s",
+					env,
+
+			        /* skip first / in the root directory */
+					root[0] == '/' ? root + 1 : root);
 
 			log_debug("mkdir -p \"%s\"", targetPath);
 			if (pg_mkdir_p(targetPath, 0700) == -1)
