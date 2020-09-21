@@ -987,7 +987,9 @@ cli_do_tmux_wait(int argc, char **argv)
 		log_info("Waiting for creation of a state file at \"%s\"",
 				 pathnames.state);
 
-		while (!file_exists(pathnames.state) && timeout > 0)
+		while (!file_exists(pathnames.state) &&
+			   !file_exists(pathnames.init) &&
+			   timeout > 0)
 		{
 			sleep(1);
 			--timeout;
