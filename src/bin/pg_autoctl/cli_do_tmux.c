@@ -62,6 +62,7 @@ static bool tmux_has_session(const char *tmux_path, const char *sessionName);
 static void tmux_add_new_session(PQExpBuffer script,
 								 const char *root, int pgport);
 
+static void tmux_add_xdg_environment(PQExpBuffer script, const char *root);
 static bool tmux_prepare_XDG_environment(const char *root,
 										 bool createDirectories);
 
@@ -276,6 +277,28 @@ tmux_add_send_keys_command(PQExpBuffer script, const char *fmt, ...)
 
 
 /*
+ * tmux_add_xdg_environment sets the environment variables that we need for the
+ * whole session to be self-contained in the given root directory.
+ */
+static void
+tmux_add_xdg_environment(PQExpBuffer script, const char *root)
+{
+	/*
+	 * For demo/tests purposes, arrange a self-contained setup where everything
+	 * is to be found in the given options.root directory.
+	 */
+	for (int i = 0; xdg[i][0] != NULL; i++)
+	{
+		char *var = xdg[i][0];
+		char *dir = xdg[i][1];
+
+		tmux_add_send_keys_command(script,
+								   "export %s=\"%s/%s\"", var, root, dir);
+	}
+}
+
+
+/*
  * tmux_prepare_XDG_environment set XDG environment variables in the current
  * process tree.
  */
@@ -453,6 +476,7 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 	(void) tmux_add_new_session(script, root, pgport);
 
 	/* start a monitor */
+	(void) tmux_add_xdg_environment(script, root);
 	tmux_pg_autoctl_create_monitor(script, root, pgport++);
 
 	/* start the Postgres nodes, using the monitor URI */
@@ -466,6 +490,8 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 
 		tmux_add_command(script, "split-window -v");
 		tmux_add_command(script, "select-layout even-vertical");
+
+		(void) tmux_add_xdg_environment(script, root);
 
 		/*
 		 * Force node ordering to easy debugging of interactive sessions: each
@@ -487,6 +513,7 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 	tmux_add_command(script, "split-window -v");
 	tmux_add_command(script, "select-layout even-vertical");
 
+	(void) tmux_add_xdg_environment(script, root);
 	tmux_add_send_keys_command(script, "export PGDATA=\"%s/monitor\"", root);
 	tmux_add_send_keys_command(script,
 							   "%s do tmux wait --root %s %s",
@@ -500,6 +527,7 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 	/* add a window for interactive pg_autoctl commands */
 	tmux_add_command(script, "split-window -v");
 	tmux_add_command(script, "select-layout even-vertical");
+	(void) tmux_add_xdg_environment(script, root);
 	tmux_add_send_keys_command(script, "cd \"%s\"", root);
 	tmux_add_send_keys_command(script, "export PGDATA=\"%s/monitor\"", root);
 
