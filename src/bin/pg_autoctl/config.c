@@ -159,7 +159,7 @@ SetConfigFilePath(ConfigFilePaths *pathnames, const char *pgdata)
 		{
 			log_error("Failed to build our configuration file pathname, "
 					  "see above.");
-			exit(EXIT_CODE_INTERNAL_ERROR);
+			return false;
 		}
 	}
 
@@ -188,7 +188,7 @@ SetStateFilePath(ConfigFilePaths *pathnames, const char *pgdata)
 		{
 			log_error("Failed to build pg_autoctl state file pathname, "
 					  "see above.");
-			exit(EXIT_CODE_INTERNAL_ERROR);
+			return false;
 		}
 	}
 	log_trace("SetStateFilePath: \"%s\"", pathnames->state);
@@ -203,7 +203,7 @@ SetStateFilePath(ConfigFilePaths *pathnames, const char *pgdata)
 		{
 			log_error("Failed to build pg_autoctl init state file pathname, "
 					  "see above.");
-			exit(EXIT_CODE_INTERNAL_ERROR);
+			return false;
 		}
 	}
 	log_trace("SetKeeperStateFilePath: \"%s\"", pathnames->init);
@@ -228,7 +228,7 @@ SetPidFilePath(ConfigFilePaths *pathnames, const char *pgdata)
 		{
 			log_error("Failed to build pg_autoctl pid file pathname, "
 					  "see above.");
-			exit(EXIT_CODE_INTERNAL_ERROR);
+			return false;
 		}
 	}
 

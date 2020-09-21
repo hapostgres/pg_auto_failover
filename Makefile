@@ -117,11 +117,11 @@ tmux-clean:
 	rm -rf $(TMUX_TOP_DIR)
 
 cluster: install
-	$(MAKE) tmux-clean
-	$(MAKE) tmux-script
-	mkdir -p $(TMUX_TOP_DIR)/run
-	tmux start-server \; source-file $(TMUX_SCRIPT)
-	pkill pg_autoctl || true
+	$(PG_AUTOCTL) do tmux session        \
+         --root $(TMUX_TOP_DIR)          \
+         --first-pgport $(FIRST_PGPORT)  \
+         --nodes $(NODES)                \
+         --layout $(TMUX_LAYOUT)
 
 .PHONY: all clean check install docs
 .PHONY: monitor clean-monitor check-monitor install-monitor

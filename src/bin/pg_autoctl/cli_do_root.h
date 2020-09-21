@@ -91,5 +91,9 @@ void keeper_cli_identify_system(int argc, char **argv);
 /* src/bin/pg_autoctl/cli_do_tmux.c */
 int cli_do_tmux_script_getopts(int argc, char **argv);
 void cli_do_tmux_script(int argc, char **argv);
+void cli_do_tmux_session(int argc, char **argv);
+void cli_do_tmux_stop(int argc, char **argv);
+void cli_do_tmux_clean(int argc, char **argv);
+void cli_do_tmux_wait(int argc, char **argv);
 
 #endif  /* CLI_DO_ROOT_H */

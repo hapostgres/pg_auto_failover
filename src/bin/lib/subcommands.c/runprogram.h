@@ -39,6 +39,7 @@ typedef struct
 	int returnCode;
 
 	bool capture;               /* do we capture output, or redirect it? */
+	bool tty;					/* do we share our tty? */
 
 	/* register a function to process output as it appears */
 	void (*processBuffer)(const char *buffer, bool error);
@@ -89,6 +90,7 @@ run_program(const char *program, ...)
 	prog.error = 0;
 	prog.setsid = false;
 	prog.capture = true;
+	prog.tty = false;
 	prog.processBuffer = NULL;
 	prog.stdOutFd = -1;
 	prog.stdErrFd = -1;
@@ -142,6 +144,7 @@ initialize_program(char **args, bool setsid)
 
 	/* this could be changed by the caller before calling execute_program */
 	prog.capture = true;
+	prog.tty = false;
 	prog.processBuffer = NULL;
 	prog.stdOutFd = -1;
 	prog.stdErrFd = -1;
@@ -170,7 +173,7 @@ initialize_program(char **args, bool setsid)
 
 /*
  * Run given program with its args, by doing the fork()/exec() dance, and also
- * capture the subprocess output by installing pipes. We accimulate the output
+ * capture the subprocess output by installing pipes. We accumulate the output
  * into a PQExpBuffer when prog->capture is true.
  */
 void
@@ -218,39 +221,42 @@ execute_subprogram(Program *prog)
 		{
 			/* fork succeeded, in child */
 
-			/*
-			 * We redirect /dev/null into stdIn rather than closing stdin,
-			 * because apparently closing it may cause undefined behavior if
-			 * any read was to happen.
-			 */
-			int stdIn = open(DEV_NULL, O_RDONLY);
-
-			if (stdIn == -1)
+			if (prog->tty == false)
 			{
-				(void) exit_internal_error();
-			}
+				/*
+				 * We redirect /dev/null into stdIn rather than closing stdin,
+				 * because apparently closing it may cause undefined behavior
+				 * if any read was to happen.
+				 */
+				int stdIn = open(DEV_NULL, O_RDONLY);
 
-			(void) dup2_or_exit(stdIn, STDIN_FILENO);
-			(void) close_or_exit(stdIn);
+				if (stdIn == -1)
+				{
+					(void) exit_internal_error();
+				}
 
-			/*
-			 * Prepare either for capture the output in pipes, or redirect to
-			 * the given open file descriptors.
-			 */
-			if (prog->capture)
-			{
-				(void) dup2_or_exit(outpipe[1], STDOUT_FILENO);
-				(void) dup2(errpipe[1], STDERR_FILENO);
+				(void) dup2_or_exit(stdIn, STDIN_FILENO);
+				(void) close_or_exit(stdIn);
 
-				(void) close_or_exit(outpipe[0]);
-				(void) close_or_exit(outpipe[1]);
-				(void) close_or_exit(errpipe[0]);
-				(void) close_or_exit(errpipe[1]);
-			}
-			else
-			{
-				(void) dup2_or_exit(prog->stdOutFd, STDOUT_FILENO);
-				(void) dup2_or_exit(prog->stdErrFd, STDERR_FILENO);
+				/*
+				 * Prepare either for capture the output in pipes, or redirect
+				 * to the given open file descriptors.
+				 */
+				if (prog->capture)
+				{
+					(void) dup2_or_exit(outpipe[1], STDOUT_FILENO);
+					(void) dup2(errpipe[1], STDERR_FILENO);
+
+					(void) close_or_exit(outpipe[0]);
+					(void) close_or_exit(outpipe[1]);
+					(void) close_or_exit(errpipe[0]);
+					(void) close_or_exit(errpipe[1]);
+				}
+				else
+				{
+					(void) dup2_or_exit(prog->stdOutFd, STDOUT_FILENO);
+					(void) dup2_or_exit(prog->stdErrFd, STDERR_FILENO);
+				}
 			}
 
 			/*
@@ -306,32 +312,39 @@ execute_subprogram(Program *prog)
  * routine is not supposed to ever return, so in case when something goes
  * wrong, it exits the current process, which is assumed to be a sub-process
  * started with fork().
+ *
+ * When prog->tty is true we want to share the parent's program tty with the
+ * subprocess, and then we refrain from doing any redirection of stdin, stdout,
+ * or stderr.
  */
 void
 execute_program(Program *prog)
 {
-	/*
-	 * We redirect /dev/null into stdIn rather than closing stdin, because
-	 * apparently closing it may cause undefined behavior if any read was to
-	 * happen.
-	 */
-	int stdIn = open(DEV_NULL, O_RDONLY);
-
 	if (prog->capture)
 	{
 		fprintf(stderr, "BUG: can't execute_program and capture the output");
 		return;
 	}
 
-	/* Flush stdio channels just before dup, to avoid double-output problems */
-	fflush(stdout);
-	fflush(stderr);
+	if (prog->tty == false)
+	{
+		/*
+		 * We redirect /dev/null into stdIn rather than closing stdin, because
+		 * apparently closing it may cause undefined behavior if any read was
+		 * to happen.
+		 */
+		int stdIn = open(DEV_NULL, O_RDONLY);
 
-	(void) dup2_or_exit(stdIn, STDIN_FILENO);
-	(void) close_or_exit(stdIn);
+		/* Avoid double-output problems */
+		fflush(stdout);
+		fflush(stderr);
 
-	(void) dup2_or_exit(prog->stdOutFd, STDOUT_FILENO);
-	(void) dup2_or_exit(prog->stdErrFd, STDERR_FILENO);
+		(void) dup2_or_exit(stdIn, STDIN_FILENO);
+		(void) close_or_exit(stdIn);
+
+		(void) dup2_or_exit(prog->stdOutFd, STDOUT_FILENO);
+		(void) dup2_or_exit(prog->stdErrFd, STDERR_FILENO);
+	}
 
 	/*
 	 * When asked to do so, before creating the child process, we call
