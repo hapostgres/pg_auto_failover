@@ -323,7 +323,7 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 			(void) keeper_call_reload_hooks(keeper, firstLoop);
 		}
 
-		if (asked_to_stop)
+		if (asked_to_stop || asked_to_stop_fast || asked_to_quit)
 		{
 			break;
 		}
