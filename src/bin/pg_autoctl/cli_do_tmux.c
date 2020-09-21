@@ -58,7 +58,7 @@ __attribute__((format(printf, 2, 3)));
 static void tmux_add_send_keys_command(PQExpBuffer script, const char *fmt, ...)
 __attribute__((format(printf, 2, 3)));
 
-static bool tmux_has_session(const char *sessionName);
+static bool tmux_has_session(const char *tmux_path, const char *sessionName);
 static void tmux_add_new_session(PQExpBuffer script,
 								 const char *root, int pgport);
 
@@ -681,21 +681,13 @@ tmux_stop_pg_autoctl(TmuxOptions *options)
  * tmux_has_session runs the command `tmux has-session -f sessionName`.
  */
 static bool
-tmux_has_session(const char *sessionName)
+tmux_has_session(const char *tmux_path, const char *sessionName)
 {
 	Program program;
 	int returnCode;
-
-	char tmux[MAXPGPATH] = { 0 };
 	char command[BUFSIZE] = { 0 };
 
-	if (!search_path_first("tmux", tmux))
-	{
-		log_fatal("Failed to find program tmux in PATH");
-		return false;
-	}
-
-	program = run_program(tmux, "has-session", "-t", sessionName, NULL);
+	program = run_program(tmux_path, "has-session", "-t", sessionName, NULL);
 	returnCode = program.returnCode;
 
 	(void) snprintf_program_command_line(&program, command, BUFSIZE);
@@ -753,16 +745,16 @@ tmux_kill_session(TmuxOptions *options)
 
 	sformat(sessionName, BUFSIZE, "pgautofailover-%d", options->firstPort);
 
-	if (!tmux_has_session(sessionName))
-	{
-		log_info("Tmux session \"%s\" does not exists", sessionName);
-		return true;
-	}
-
 	if (!search_path_first("tmux", tmux))
 	{
 		log_fatal("Failed to find program tmux in PATH");
 		return false;
+	}
+
+	if (!tmux_has_session(tmux, sessionName))
+	{
+		log_info("Tmux session \"%s\" does not exists", sessionName);
+		return true;
 	}
 
 	program = run_program(tmux, "kill-session", "-t", sessionName, NULL);
