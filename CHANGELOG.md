@@ -54,9 +54,10 @@ The main changes of this release are:
 * Compute some memory/cpu Postgres tuning for the host [#335]
 * Provide a better pg_auto_failover upgrade experience [#296]
 * Add support for building against Postgres 13 [#312]
-
-#### Removed
-* The option --nodename is replaced by the option --hostname [#273]
+* Allow registering multiple standbys concurrently [#395]
+* Implement a retry policy for deadlocks and other transient failures [#359]
+* Implement support for interactive tmux sessions [#409]
+* Use monitor notifications to wake up from sleep in the main keeper loop [#387]
 
 #### Changed
 * Make pg_autoctl the parent process for Postgres [#265, #267, #284]
