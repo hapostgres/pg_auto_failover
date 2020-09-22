@@ -75,14 +75,25 @@ LoadNodeHealthList(void)
 		pgstat_report_activity(STATE_RUNNING, query.data);
 
 		spiStatus = SPI_execute(query.data, false, 0);
-		Assert(spiStatus == SPI_OK_SELECT);
+
+		/*
+		 * When we start the monitor during an upgrade (from 1.3 to 1.4), the
+		 * background worker might be reading the 1.3 pgautofailover catalogs
+		 * still, where the "nodehost" column does not exists.
+		 */
+		if (spiStatus != SPI_OK_SELECT)
+		{
+			EndSPITransaction();
+			return NIL;
+		}
 
 		oldContext = MemoryContextSwitchTo(upperContext);
 
 		for (uint64 rowNumber = 0; rowNumber < SPI_processed; rowNumber++)
 		{
 			HeapTuple heapTuple = SPI_tuptable->vals[rowNumber];
-			NodeHealth *nodeHealth = TupleToNodeHealth(heapTuple, SPI_tuptable->tupdesc);
+			NodeHealth *nodeHealth =
+				TupleToNodeHealth(heapTuple, SPI_tuptable->tupdesc);
 			nodeHealthList = lappend(nodeHealthList, nodeHealth);
 		}
 

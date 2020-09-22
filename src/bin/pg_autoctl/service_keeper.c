@@ -42,7 +42,7 @@ KeeperReloadFunction KeeperReloadHooks[] = {
 	NULL
 };
 
-static bool keeper_node_active(Keeper *keeper);
+static bool keeper_node_active(Keeper *keeper, bool doInit);
 static void check_for_network_partitions(Keeper *keeper);
 static bool is_network_healthy(Keeper *keeper);
 static bool in_network_partition(KeeperStateData *keeperState, uint64_t now,
@@ -261,6 +261,7 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 	bool doSleep = false;
 	bool couldContactMonitor = false;
 	bool firstLoop = true;
+	bool doInit = true;
 	bool warnedOnCurrentIteration = false;
 	bool warnedOnPreviousIteration = false;
 
@@ -322,7 +323,7 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 			(void) keeper_call_reload_hooks(keeper, firstLoop);
 		}
 
-		if (asked_to_stop)
+		if (asked_to_stop || asked_to_stop_fast || asked_to_quit)
 		{
 			break;
 		}
@@ -379,7 +380,7 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		 * data structure accordingy, refreshing our cache of other nodes if
 		 * needed.
 		 */
-		couldContactMonitorThisRound = keeper_node_active(keeper);
+		couldContactMonitorThisRound = keeper_node_active(keeper, doInit);
 
 		if (!couldContactMonitor && couldContactMonitorThisRound && !firstLoop)
 		{
@@ -513,6 +514,12 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 			firstLoop = false;
 		}
 
+		/* if we failed to contact the monitor, we must re-try the init steps */
+		if (doInit && couldContactMonitorThisRound)
+		{
+			doInit = false;
+		}
+
 		/* advance the warnings "counters" */
 		if (warnedOnPreviousIteration)
 		{
@@ -541,7 +548,7 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
  * needed.
  */
 static bool
-keeper_node_active(Keeper *keeper)
+keeper_node_active(Keeper *keeper, bool doInit)
 {
 	KeeperConfig *config = &(keeper->config);
 	KeeperStateData *keeperState = &(keeper->state);
@@ -623,6 +630,20 @@ keeper_node_active(Keeper *keeper)
 		 * extension version.
 		 */
 		exit(EXIT_CODE_MONITOR);
+	}
+
+	if (doInit)
+	{
+		PostgresSetup *pgSetup = &(postgres->postgresSetup);
+		uint64_t system_identifier = pgSetup->control.system_identifier;
+
+		if (!monitor_set_group_system_identifier(monitor,
+												 keeperState->current_group,
+												 system_identifier))
+		{
+			/* errors have already been logged */
+			return false;
+		}
 	}
 
 	/* We used to output that in INFO every 5s, which is too much chatter */

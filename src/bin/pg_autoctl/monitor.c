@@ -20,6 +20,7 @@
 #include "nodestate_utils.h"
 #include "parsing.h"
 #include "pgsql.h"
+#include "primary_standby.h"
 #include "signals.h"
 #include "string_utils.h"
 
@@ -88,6 +89,7 @@ typedef struct MonitorExtensionVersionParseContext
 	MonitorExtensionVersion *version;
 	bool parsedOK;
 } MonitorExtensionVersionParseContext;
+
 
 static int MaxHostNameSizeInNodesArray(NodeAddressArray *nodesArray);
 static bool parseNode(PGresult *result, int rowNumber, NodeAddress *node);
@@ -2981,6 +2983,65 @@ monitor_set_node_system_identifier(Monitor *monitor,
 
 
 /*
+ * monitor_set_group_system_identifier sets the node's sysidentifier column on
+ * the monitor for all nodes in the same group, when the current sysidentifier
+ * they have is zero. That's needed after an upgrade from 1.3 to 1.4.
+ */
+bool
+monitor_set_group_system_identifier(Monitor *monitor,
+									int groupId,
+									uint64_t system_identifier)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT * FROM pgautofailover.set_group_system_identifier($1, $2)";
+	int paramCount = 2;
+	Oid paramTypes[2] = { INT8OID, INT8OID };
+	const char *paramValues[2];
+
+	SingleValueResultContext context = { 0 };
+
+	paramValues[0] = intToString(groupId).strValue;
+	paramValues[1] = intToString(system_identifier).strValue;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &fetchedRows))
+	{
+		log_error("Failed to set_group_system_identifier for group %d "
+				  "from the monitor", groupId);
+		return false;
+	}
+
+	/* disconnect from PostgreSQL now */
+	pgsql_finish(&monitor->pgsql);
+
+	if (!context.parsedOk)
+	{
+		/* *INDENT-OFF* */
+		log_error(
+			"Failed to set sysidentifier to \"%" PRIu64 "\" "
+			"for nodes in group %d "
+			"on the monitor because it returned an unexpected result. "
+			"See previous line for details.",
+			system_identifier, groupId);
+
+		/* *INDENT-ON* */
+		return false;
+	}
+
+	if (context.intVal > 0)
+	{
+		log_info("Updated system identifier of %d nodes in group %d "
+				 "to the local node value \"%" PRIu64 "\"",
+				 context.intVal, groupId, system_identifier);
+	}
+
+	return true;
+}
+
+
+/*
  * parseCoordinatorNode parses a hostname and a port from the libpq result and
  * writes it to the NodeAddressParseContext pointed to by ctx. This is about
  * the same as parseNode: the only difference is that an empty result set is
@@ -3793,6 +3854,21 @@ monitor_extension_update(Monitor *monitor, const char *targetVersion)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 
+	/*
+	 * When upgrading to version 1.4 we now require btree_gist. It does not
+	 * seem like Postgres knows how to handle changes in extension control
+	 * requires, so let's do that manually here.
+	 */
+	if (strcmp(targetVersion, "1.4") == 0)
+	{
+		if (!pgsql_create_extension(pgsql, "btree_gist"))
+		{
+			log_error("Failed to create extension \"btree_gist\", "
+					  "required by \"pgautofailover\" extension version 1.4");
+			return false;
+		}
+	}
+
 	return pgsql_alter_extension_update_to(pgsql,
 										   PG_AUTOCTL_MONITOR_EXTENSION_NAME,
 										   targetVersion);
@@ -3811,6 +3887,7 @@ monitor_extension_update(Monitor *monitor, const char *targetVersion)
  */
 bool
 monitor_ensure_extension_version(Monitor *monitor,
+								 LocalPostgresServer *postgres,
 								 MonitorExtensionVersion *version)
 {
 	const char *extensionVersion = PG_AUTOCTL_EXTENSION_VERSION;
@@ -3891,7 +3968,26 @@ monitor_ensure_extension_version(Monitor *monitor,
 				 PG_AUTOCTL_MONITOR_EXTENSION_NAME,
 				 version->installedVersion);
 
-		return true;
+		/*
+		 * Now that we have done the ALTER EXTENSION UPDATE, our background
+		 * workers on the monitor have been started with the new shared library
+		 * object and the old SQL definitions. Let's restart Postgres so that
+		 * the background workers have a chance of a fresh start with an SQL
+		 * schema that matches the expectations of the shared library code.
+		 */
+		log_info("Restarting Postgres on the monitor");
+
+		/* avoid spurious error messages about losing our connection */
+		pgsql_finish(&(monitor->pgsql));
+
+		if (!ensure_postgres_service_is_stopped(postgres))
+		{
+			log_error("Failed to restart Postgres on the monitor after "
+					  "an extension update");
+			return false;
+		}
+
+		return ensure_postgres_service_is_running(postgres);
 	}
 
 	/* just mention we checked, and it's ok */

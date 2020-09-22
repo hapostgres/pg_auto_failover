@@ -200,10 +200,30 @@ cli_create_config(Keeper *keeper, KeeperConfig *config)
 
 		if (file_exists(config->pathnames.state) && !config->monitorDisabled)
 		{
+			/*
+			 * Handle the node metadata options: --name, --hostname, --pgport.
+			 *
+			 * When those options have been used, then the configuration file
+			 * has been merged with the command line values, and we can update
+			 * the metadata for this node on the monitor.
+			 */
 			if (!keeper_set_node_metadata(keeper, &oldConfig))
 			{
 				/* errors have already been logged */
 				exit(EXIT_CODE_MONITOR);
+			}
+
+			/*
+			 * Now, at 1.3 to 1.4 upgrade, the monitor assigns a new name to
+			 * pg_autoctl nodes, which did not use to have a name before. In
+			 * that case, and then pg_autoctl run has been used without
+			 * options, our name might be empty here. We then need to fetch it
+			 * from the monitor.
+			 */
+			if (!keeper_update_nodename_from_monitor(keeper))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_CONFIG);
 			}
 		}
 	}

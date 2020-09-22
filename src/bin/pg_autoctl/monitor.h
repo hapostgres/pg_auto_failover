@@ -14,6 +14,7 @@
 
 #include "pgsql.h"
 #include "monitor_config.h"
+#include "primary_standby.h"
 #include "state.h"
 
 /* the monitor manages a postgres server running the pgautofailover extension */
@@ -175,6 +176,9 @@ bool monitor_update_node_metadata(Monitor *monitor,
 bool monitor_set_node_system_identifier(Monitor *monitor,
 										int nodeId,
 										uint64_t system_identifier);
+bool monitor_set_group_system_identifier(Monitor *monitor,
+										 int groupId,
+										 uint64_t system_identifier);
 
 bool monitor_start_maintenance(Monitor *monitor, int nodeId, bool *mayRetry);
 bool monitor_stop_maintenance(Monitor *monitor, int nodeId, bool *mayRetry);
@@ -197,6 +201,7 @@ bool monitor_get_extension_version(Monitor *monitor,
 								   MonitorExtensionVersion *version);
 bool monitor_extension_update(Monitor *monitor, const char *targetVersion);
 bool monitor_ensure_extension_version(Monitor *monitor,
+									  LocalPostgresServer *postgres,
 									  MonitorExtensionVersion *version);
 
 

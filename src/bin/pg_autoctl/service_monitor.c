@@ -257,7 +257,7 @@ monitor_service_run(Monitor *monitor)
 			}
 
 			/* Check version compatibility. */
-			if (!monitor_ensure_extension_version(monitor, &version))
+			if (!monitor_ensure_extension_version(monitor, &postgres, &version))
 			{
 				/* maybe we failed to connect to the monitor */
 				if (monitor->pgsql.status != PG_CONNECTION_OK)

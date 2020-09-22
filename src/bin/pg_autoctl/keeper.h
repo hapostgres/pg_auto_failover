@@ -62,6 +62,7 @@ bool keeper_update_group_hba(Keeper *keeper, NodeAddressArray *diffNodesArray);
 bool keeper_refresh_other_nodes(Keeper *keeper, bool forceCacheInvalidation);
 
 bool keeper_set_node_metadata(Keeper *keeper, KeeperConfig *oldConfig);
+bool keeper_update_nodename_from_monitor(Keeper *keeper);
 bool keeper_config_accept_new(Keeper *keeper, KeeperConfig *newConfig);
 
 
