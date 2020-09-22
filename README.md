@@ -300,6 +300,7 @@ the [Security TechCenter](https://technet.microsoft.com/en-us/security/default).
 * [Hadi Moshayedi](https://github.com/pykello)
 * [Lukas Fittl](https://github.com/lfittl)
 * [Murat Tuncer](https://github.com/mtuncer)
+* [Jelte Fennema](https://github.com/JelteF)
 
 ## License
 
