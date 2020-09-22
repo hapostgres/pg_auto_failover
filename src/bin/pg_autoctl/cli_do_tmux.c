@@ -498,6 +498,7 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 		 * node waits until the previous one has been started or registered.
 		 */
 		tmux_add_send_keys_command(script,
+								   "PG_AUTOCTL_DEBUG=1 "
 								   "%s do tmux wait --root %s %s",
 								   pg_autoctl_argv0,
 								   options->root,
@@ -516,6 +517,7 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 	(void) tmux_add_xdg_environment(script, root);
 	tmux_add_send_keys_command(script, "export PGDATA=\"%s/monitor\"", root);
 	tmux_add_send_keys_command(script,
+							   "PG_AUTOCTL_DEBUG=1 "
 							   "%s do tmux wait --root %s %s",
 							   pg_autoctl_argv0,
 							   options->root,
