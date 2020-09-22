@@ -3977,6 +3977,9 @@ monitor_ensure_extension_version(Monitor *monitor,
 		 */
 		log_info("Restarting Postgres on the monitor");
 
+		/* avoid spurious error messages about losing our connection */
+		pgsql_finish(&(monitor->pgsql));
+
 		if (!ensure_postgres_service_is_stopped(postgres))
 		{
 			log_error("Failed to restart Postgres on the monitor after "
