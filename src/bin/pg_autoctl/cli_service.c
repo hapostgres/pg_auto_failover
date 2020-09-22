@@ -176,7 +176,7 @@ cli_keeper_run(int argc, char **argv)
 	 *
 	 * When those options have been used, then the configuration file has been
 	 * merged with the command line values, and we can update the metadata for
-	 * this node to the monitor.
+	 * this node on the monitor.
 	 */
 	if (!keeper_set_node_metadata(&keeper, &oldConfig))
 	{
@@ -190,42 +190,10 @@ cli_keeper_run(int argc, char **argv)
 	 * pg_autoctl run has been used without options, our name might be empty
 	 * here. We then need to fetch it from the monitor.
 	 */
-	if (IS_EMPTY_STRING_BUFFER(config->name))
+	if (!keeper_update_nodename_from_monitor(&keeper))
 	{
-		NodeAddressArray nodesArray = { 0 };
-
-		if (!monitor_get_nodes(monitor,
-							   config->formation,
-							   keeper.state.current_group,
-							   &nodesArray))
-		{
-			/* errors have already been logged */
-			exit(EXIT_CODE_MONITOR);
-		}
-
-		/*
-		 * We could also add a WHERE clause to the SQL query, but we don't
-		 * expect that many nodes anyway.
-		 */
-		for (int index = 0; index < nodesArray.count; index++)
-		{
-			NodeAddress *node = &(nodesArray.nodes[index]);
-
-			if (node->nodeId == keeper.state.current_node_id)
-			{
-				log_info("Node name on the monitor is now \"%s\"", node->name);
-
-				strlcpy(config->name, node->name, _POSIX_HOST_NAME_MAX);
-
-				if (!keeper_config_write_file(config))
-				{
-					/* errors have already been logged */
-					exit(EXIT_CODE_BAD_CONFIG);
-				}
-
-				break;
-			}
-		}
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
 	/* we don't keep a connection to the monitor in this process */

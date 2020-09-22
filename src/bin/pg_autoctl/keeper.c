@@ -1806,6 +1806,75 @@ keeper_set_node_metadata(Keeper *keeper, KeeperConfig *oldConfig)
 
 
 /*
+ * When upgrading from 1.3 to 1.4 the monitor assigns a new name to pg_autoctl
+ * nodes, which did not use to have a name before. In that case, and then
+ * pg_autoctl run has been used without options, our name might be empty here.
+ * We then need to fetch it from the monitor.
+ */
+bool
+keeper_update_nodename_from_monitor(Keeper *keeper)
+{
+	Monitor *monitor = &(keeper->monitor);
+	KeeperConfig *config = &(keeper->config);
+
+	char *formation = config->formation;
+	int groupId, nodeId;
+
+	NodeAddressArray nodesArray = { 0 };
+
+	if (!IS_EMPTY_STRING_BUFFER(config->name))
+	{
+		return true;
+	}
+
+	/* ensure the keeper state have been loaded already */
+	if (!keeper_load_state(keeper))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	groupId = keeper->state.current_group;
+	nodeId = keeper->state.current_node_id;
+
+	log_info("Getting nodes from the monitor for group %d in formation \"%s\"",
+			 groupId, formation);
+
+	if (!monitor_get_nodes(monitor, formation, groupId, &nodesArray))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/*
+	 * We could also add a WHERE clause to the SQL query in monitor_get_nodes,
+	 * but we don't expect that many nodes anyway.
+	 */
+	for (int index = 0; index < nodesArray.count; index++)
+	{
+		NodeAddress *node = &(nodesArray.nodes[index]);
+
+		if (node->nodeId == nodeId)
+		{
+			log_info("Node name on the monitor is now \"%s\"", node->name);
+
+			strlcpy(config->name, node->name, _POSIX_HOST_NAME_MAX);
+
+			if (!keeper_config_write_file(config))
+			{
+				/* errors have already been logged */
+				return false;
+			}
+
+			break;
+		}
+	}
+
+	return true;
+}
+
+
+/*
  * keeper_config_accept_new returns true when we can accept to RELOAD our
  * current config into the new one that's been editing.
  */
