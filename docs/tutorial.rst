@@ -23,11 +23,11 @@ let's create a virtual network.
 .. code-block:: bash
 
    az group create \
-       --name ha-demo-dim \
+       --name ha-demo \
        --location eastus
 
    az network vnet create \
-       --resource-group ha-demo-dim \
+       --resource-group ha-demo \
        --name ha-demo-net \
        --address-prefix 10.0.0.0/16
 
@@ -38,11 +38,11 @@ security group and a subnet.
 .. code-block:: bash
 
    az network nsg create \
-       --resource-group ha-demo-dim \
+       --resource-group ha-demo \
        --name ha-demo-nsg
 
    az network nsg rule create \
-       --resource-group ha-demo-dim \
+       --resource-group ha-demo \
        --nsg-name ha-demo-nsg \
        --name ha-demo-ssh-and-pg \
        --access allow \
@@ -55,7 +55,7 @@ security group and a subnet.
        --destination-port-ranges 22 5432
 
    az network vnet subnet create \
-       --resource-group ha-demo-dim \
+       --resource-group ha-demo \
        --vnet-name ha-demo-net \
        --name ha-demo-subnet \
        --address-prefixes 10.0.1.0/24 \
@@ -71,7 +71,7 @@ them in parallel:
    for node in monitor a b app
    do
    az vm create \
-       --resource-group ha-demo-dim \
+       --resource-group ha-demo \
        --name ha-demo-${node} \
        --vnet-name ha-demo-net \
        --subnet ha-demo-subnet \
@@ -91,7 +91,7 @@ function to retrieve their IP addresses:
   # run this in your local shell as well
 
   vm_ip () {
-    az vm list-ip-addresses -g ha-demo-dim -n ha-demo-$1 -o tsv \
+    az vm list-ip-addresses -g ha-demo -n ha-demo-$1 -o tsv \
       --query '[] [] .virtualMachine.network.publicIpAddresses[0].ipAddress'
   }
 
@@ -139,7 +139,7 @@ nodes. It will help us run and observe PostgreSQL.
   for node in monitor a b app
   do
   az vm run-command invoke \
-     --resource-group ha-demo-dim \
+     --resource-group ha-demo \
      --name ha-demo-${node} \
      --command-id RunShellScript \
      --scripts \
@@ -411,7 +411,7 @@ In another terminal we’ll turn off the virtual server.
 .. code-block:: bash
 
    az vm stop \
-     --resource-group ha-demo-dim \
+     --resource-group ha-demo \
      --name ha-demo-b
 
 After a number of failed attempts to talk to node B, the monitor determines
@@ -447,7 +447,7 @@ Run this command to bring node B back online:
 .. code-block:: bash
 
    az vm start \
-     --resource-group ha-demo-dim \
+     --resource-group ha-demo \
      --name ha-demo-b
 
 Now the next time the keeper retries its health check, it brings the node back.
