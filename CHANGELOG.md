@@ -1,4 +1,4 @@
-### pg_auto_failover v1.4.0 (September 2, 2020) ###
+### pg_auto_failover v1.4.0 (September 23, 2020) ###
 
 The main focus of this release is the new capability of pg_auto_failover to
 manage any number of standby nodes, where it used to manage only a single
