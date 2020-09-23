@@ -146,7 +146,7 @@ nodes. It will help us run and observe PostgreSQL.
         "curl https://install.citusdata.com/community/deb.sh | sudo bash" \
         "sudo apt-get install -q -y postgresql-common" \
         "echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf" \
-        "sudo apt-get install -q -y postgresql-11-auto-failover-1.3" \
+        "sudo apt-get install -q -y postgresql-11-auto-failover-1.4" \
         "sudo usermod -a -G postgres ha-admin" &
   done
   wait
@@ -214,7 +214,7 @@ We’ll create the primary database using the ``pg_autoctl create`` subcommand.
        --ssl-self-signed \
        --username ha-admin \
        --dbname appdb \
-       --nodename ha-demo-a.internal.cloudapp.net \
+       --hostname ha-demo-a.internal.cloudapp.net \
        --pgctl /usr/lib/postgresql/11/bin/pg_ctl \
        --monitor 'postgres://autoctl_node@ha-demo-monitor.internal.cloudapp.net/pg_auto_failover?sslmode=require'
 
@@ -263,7 +263,7 @@ Next connect to node B and do the same process. We'll do both steps at once:
        --ssl-self-signed \
        --username ha-admin \
        --dbname appdb \
-       --nodename ha-demo-b.internal.cloudapp.net \
+       --hostname ha-demo-b.internal.cloudapp.net \
        --pgctl /usr/lib/postgresql/11/bin/pg_ctl \
        --monitor 'postgres://autoctl_node@ha-demo-monitor.internal.cloudapp.net/pg_auto_failover?sslmode=require'
 
@@ -319,10 +319,10 @@ states it has assigned them:
 
    ssh -l ha-admin `vm_ip monitor` pg_autoctl show state --pgdata monitor
 
-                              Name |   Port | Group |  Node |     Current State |    Assigned State
-   --------------------------------+--------+-------+-------+-------------------+------------------
-   ha-demo-a.internal.cloudapp.net |   5432 |     0 |     1 |           primary |           primary
-   ha-demo-b.internal.cloudapp.net |   5432 |     0 |     2 |         secondary |         secondary
+     Name |  Node |                            Host:Port |       LSN | Reachable |       Current State |      Assigned State
+   -------+-------+--------------------------------------+-----------+-----------+---------------------+--------------------
+   node_1 |     1 | ha-demo-a.internal.cloudapp.net:5432 | 0/3000060 |       yes |             primary |             primary
+   node_2 |     2 | ha-demo-b.internal.cloudapp.net:5432 | 0/3000060 |       yes |           secondary |           secondary
 
 
 This looks good. We can add data to the primary, and later see it appear in the
@@ -374,12 +374,6 @@ and query the data, this time from node B.
    ssh -l ha-admin -t `vm_ip monitor` \
      pg_autoctl perform switchover --pgdata monitor
 
-   # watch the progress
-   ssh -t -l ha-admin `vm_ip monitor` -- \
-     watch -n 1 -d pg_autoctl show state --pgdata monitor
-
-   # press CTRL-C to stop watching
-
 Once node B is marked "primary" (or "wait_primary") we can connect and verify
 that the data is still present:
 
@@ -394,8 +388,7 @@ It shows
 
 .. code-block:: bash
 
-  .
-    count
+    count
   ---------
    1000000
 
@@ -427,11 +420,10 @@ promotes node A to be the new primary.
 
 .. code-block:: bash
 
-   .
-                              Name |   Port | Group |  Node |     Current State |    Assigned State
-   --------------------------------+--------+-------+-------+-------------------+------------------
-   ha-demo-a.internal.cloudapp.net |   5432 |     0 |     1 |      wait_primary |      wait_primary
-   ha-demo-b.internal.cloudapp.net |   5432 |     0 |     2 |           demoted |        catchingup
+     Name |  Node |                            Host:Port |       LSN | Reachable |       Current State |      Assigned State
+   -------+-------+--------------------------------------+-----------+-----------+---------------------+--------------------
+   node_1 |     1 | ha-demo-a.internal.cloudapp.net:5432 | 0/6D4E068 |       yes |        wait_primary |        wait_primary
+   node_2 |     2 | ha-demo-b.internal.cloudapp.net:5432 | 0/6D4E000 |       yes |             demoted |          catchingup
 
 Node A cannot be considered in full "primary" state since there is no secondary
 present, but it can still serve client requests. It is marked as "wait_primary"
@@ -464,11 +456,10 @@ A. Once that's done, B becomes a secondary, and A is now a full primary again.
 
 .. code-block:: bash
 
-   .
-                              Name |   Port | Group |  Node |     Current State |    Assigned State
-   --------------------------------+--------+-------+-------+-------------------+------------------
-   ha-demo-a.internal.cloudapp.net |   5432 |     0 |     1 |           primary |           primary
-   ha-demo-b.internal.cloudapp.net |   5432 |     0 |     2 |         secondary |         secondary
+     Name |  Node |                            Host:Port |        LSN | Reachable |       Current State |      Assigned State
+   -------+-------+--------------------------------------+------------+-----------+---------------------+--------------------
+   node_1 |     1 | ha-demo-a.internal.cloudapp.net:5432 | 0/12000738 |       yes |             primary |             primary
+   node_2 |     2 | ha-demo-b.internal.cloudapp.net:5432 | 0/12000738 |       yes |           secondary |           secondary
 
 What's more, if we connect directly to the database again, all two million rows
 are still present.
@@ -483,7 +474,6 @@ It shows
 
 .. code-block:: bash
 
-  .
-    count
+    count
   ---------
    2000000
