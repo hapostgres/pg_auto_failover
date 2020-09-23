@@ -31,7 +31,8 @@
  * src/port/snprintf.c
  */
 
-#include "c.h"
+#include "postgres_fe.h"
+#include "snprintf.h"
 
 #include <math.h>
 

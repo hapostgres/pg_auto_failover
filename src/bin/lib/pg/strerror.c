@@ -12,7 +12,8 @@
  *
  *-------------------------------------------------------------------------
  */
-#include "c.h"
+#include "postgres_fe.h"
+#include "snprintf.h"
 
 /*
  * Within this file, "strerror" means the platform's function not pg_strerror,
