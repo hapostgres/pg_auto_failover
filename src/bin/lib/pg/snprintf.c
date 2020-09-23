@@ -338,6 +338,11 @@ static void leading_pad(int zpad, int signvalue, int *padlen,
 						PrintfTarget *target);
 static void trailing_pad(int padlen, PrintfTarget *target);
 
+
+/*
+ * While Postgres sources do it the smart way and check HAVE_STRCHRNUL from the
+ * auto-configure output, we just use the Postgres version of strchrnul here.
+ */
 static inline const char *
 pg_strchrnul(const char *s, int c)
 {
