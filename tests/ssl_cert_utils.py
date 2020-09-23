@@ -100,3 +100,10 @@ class SSLCert():
                               "-CA", self.rootCert, "-CAkey", self.rootKey,
                               "-CAcreateserial", "-out", self.crt])
         assert(p.wait() == 0)
+
+        print("openssl verify -CAfile %s %s" % (self.rootCert, self.crt))
+        p = subprocess.Popen(["sudo", "-E", '-u', os.getenv("USER"),
+                              'env', 'PATH=' + os.getenv("PATH"),
+                              "openssl", "verify", "-show_chain",
+                              "-CAfile", self.rootCert, self.crt])
+        assert(p.wait() == 0)
