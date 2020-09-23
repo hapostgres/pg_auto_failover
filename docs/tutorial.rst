@@ -23,11 +23,11 @@ let's create a virtual network.
 .. code-block:: bash
 
    az group create \
-       --name ha-demo \
+       --name ha-demo-dim \
        --location eastus
 
    az network vnet create \
-       --resource-group ha-demo \
+       --resource-group ha-demo-dim \
        --name ha-demo-net \
        --address-prefix 10.0.0.0/16
 
@@ -38,11 +38,11 @@ security group and a subnet.
 .. code-block:: bash
 
    az network nsg create \
-       --resource-group ha-demo \
+       --resource-group ha-demo-dim \
        --name ha-demo-nsg
 
    az network nsg rule create \
-       --resource-group ha-demo \
+       --resource-group ha-demo-dim \
        --nsg-name ha-demo-nsg \
        --name ha-demo-ssh-and-pg \
        --access allow \
@@ -55,7 +55,7 @@ security group and a subnet.
        --destination-port-ranges 22 5432
 
    az network vnet subnet create \
-       --resource-group ha-demo \
+       --resource-group ha-demo-dim \
        --vnet-name ha-demo-net \
        --name ha-demo-subnet \
        --address-prefixes 10.0.1.0/24 \
@@ -71,7 +71,7 @@ them in parallel:
    for node in monitor a b app
    do
    az vm create \
-       --resource-group ha-demo \
+       --resource-group ha-demo-dim \
        --name ha-demo-${node} \
        --vnet-name ha-demo-net \
        --subnet ha-demo-subnet \
@@ -91,7 +91,7 @@ function to retrieve their IP addresses:
   # run this in your local shell as well
 
   vm_ip () {
-    az vm list-ip-addresses -g ha-demo -n ha-demo-$1 -o tsv \
+    az vm list-ip-addresses -g ha-demo-dim -n ha-demo-$1 -o tsv \
       --query '[] [] .virtualMachine.network.publicIpAddresses[0].ipAddress'
   }
 
@@ -139,14 +139,14 @@ nodes. It will help us run and observe PostgreSQL.
   for node in monitor a b app
   do
   az vm run-command invoke \
-     --resource-group ha-demo \
+     --resource-group ha-demo-dim \
      --name ha-demo-${node} \
      --command-id RunShellScript \
      --scripts \
         "curl https://install.citusdata.com/community/deb.sh | sudo bash" \
         "sudo apt-get install -q -y postgresql-common" \
         "echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf" \
-        "sudo apt-get install -q -y postgresql-11-auto-failover-1.3" \
+        "sudo apt-get install -q -y postgresql-11-auto-failover-1.4" \
         "sudo usermod -a -G postgres ha-admin" &
   done
   wait
@@ -214,7 +214,7 @@ We’ll create the primary database using the ``pg_autoctl create`` subcommand.
        --ssl-self-signed \
        --username ha-admin \
        --dbname appdb \
-       --nodename ha-demo-a.internal.cloudapp.net \
+       --hostname ha-demo-a.internal.cloudapp.net \
        --pgctl /usr/lib/postgresql/11/bin/pg_ctl \
        --monitor 'postgres://autoctl_node@ha-demo-monitor.internal.cloudapp.net/pg_auto_failover?sslmode=require'
 
@@ -263,7 +263,7 @@ Next connect to node B and do the same process. We'll do both steps at once:
        --ssl-self-signed \
        --username ha-admin \
        --dbname appdb \
-       --nodename ha-demo-b.internal.cloudapp.net \
+       --hostname ha-demo-b.internal.cloudapp.net \
        --pgctl /usr/lib/postgresql/11/bin/pg_ctl \
        --monitor 'postgres://autoctl_node@ha-demo-monitor.internal.cloudapp.net/pg_auto_failover?sslmode=require'
 
@@ -319,10 +319,10 @@ states it has assigned them:
 
    ssh -l ha-admin `vm_ip monitor` pg_autoctl show state --pgdata monitor
 
-                              Name |   Port | Group |  Node |     Current State |    Assigned State
-   --------------------------------+--------+-------+-------+-------------------+------------------
-   ha-demo-a.internal.cloudapp.net |   5432 |     0 |     1 |           primary |           primary
-   ha-demo-b.internal.cloudapp.net |   5432 |     0 |     2 |         secondary |         secondary
+     Name |  Node |                            Host:Port |       LSN | Reachable |       Current State |      Assigned State
+   -------+-------+--------------------------------------+-----------+-----------+---------------------+--------------------
+   node_1 |     1 | ha-demo-a.internal.cloudapp.net:5432 | 0/3000060 |       yes |             primary |             primary
+   node_2 |     2 | ha-demo-b.internal.cloudapp.net:5432 | 0/3000060 |       yes |           secondary |           secondary
 
 
 This looks good. We can add data to the primary, and later see it appear in the
@@ -374,12 +374,6 @@ and query the data, this time from node B.
    ssh -l ha-admin -t `vm_ip monitor` \
      pg_autoctl perform switchover --pgdata monitor
 
-   # watch the progress
-   ssh -t -l ha-admin `vm_ip monitor` -- \
-     watch -n 1 -d pg_autoctl show state --pgdata monitor
-
-   # press CTRL-C to stop watching
-
 Once node B is marked "primary" (or "wait_primary") we can connect and verify
 that the data is still present:
 
@@ -394,8 +388,7 @@ It shows
 
 .. code-block:: bash
 
-  .
-    count
+    count
   ---------
    1000000
 
@@ -418,7 +411,7 @@ In another terminal we’ll turn off the virtual server.
 .. code-block:: bash
 
    az vm stop \
-     --resource-group ha-demo \
+     --resource-group ha-demo-dim \
      --name ha-demo-b
 
 After a number of failed attempts to talk to node B, the monitor determines
@@ -427,11 +420,10 @@ promotes node A to be the new primary.
 
 .. code-block:: bash
 
-   .
-                              Name |   Port | Group |  Node |     Current State |    Assigned State
-   --------------------------------+--------+-------+-------+-------------------+------------------
-   ha-demo-a.internal.cloudapp.net |   5432 |     0 |     1 |      wait_primary |      wait_primary
-   ha-demo-b.internal.cloudapp.net |   5432 |     0 |     2 |           demoted |        catchingup
+     Name |  Node |                            Host:Port |       LSN | Reachable |       Current State |      Assigned State
+   -------+-------+--------------------------------------+-----------+-----------+---------------------+--------------------
+   node_1 |     1 | ha-demo-a.internal.cloudapp.net:5432 | 0/6D4E068 |       yes |        wait_primary |        wait_primary
+   node_2 |     2 | ha-demo-b.internal.cloudapp.net:5432 | 0/6D4E000 |       yes |             demoted |          catchingup
 
 Node A cannot be considered in full "primary" state since there is no secondary
 present, but it can still serve client requests. It is marked as "wait_primary"
@@ -455,7 +447,7 @@ Run this command to bring node B back online:
 .. code-block:: bash
 
    az vm start \
-     --resource-group ha-demo \
+     --resource-group ha-demo-dim \
      --name ha-demo-b
 
 Now the next time the keeper retries its health check, it brings the node back.
@@ -464,11 +456,10 @@ A. Once that's done, B becomes a secondary, and A is now a full primary again.
 
 .. code-block:: bash
 
-   .
-                              Name |   Port | Group |  Node |     Current State |    Assigned State
-   --------------------------------+--------+-------+-------+-------------------+------------------
-   ha-demo-a.internal.cloudapp.net |   5432 |     0 |     1 |           primary |           primary
-   ha-demo-b.internal.cloudapp.net |   5432 |     0 |     2 |         secondary |         secondary
+     Name |  Node |                            Host:Port |        LSN | Reachable |       Current State |      Assigned State
+   -------+-------+--------------------------------------+------------+-----------+---------------------+--------------------
+   node_1 |     1 | ha-demo-a.internal.cloudapp.net:5432 | 0/12000738 |       yes |             primary |             primary
+   node_2 |     2 | ha-demo-b.internal.cloudapp.net:5432 | 0/12000738 |       yes |           secondary |           secondary
 
 What's more, if we connect directly to the database again, all two million rows
 are still present.
@@ -483,7 +474,6 @@ It shows
 
 .. code-block:: bash
 
-  .
-    count
+    count
   ---------
    2000000
