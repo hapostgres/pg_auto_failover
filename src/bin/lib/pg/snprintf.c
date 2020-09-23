@@ -2,7 +2,7 @@
  * Copyright (c) 1983, 1995, 1996 Eric P. Allman
  * Copyright (c) 1988, 1993
  *	The Regents of the University of California.  All rights reserved.
- * Portions Copyright (c) 1996-2019, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2020, PostgreSQL Global Development Group
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,11 +31,7 @@
  * src/port/snprintf.c
  */
 
-#include "postgres_fe.h"
-
-#ifndef USE_REPL_SNPRINTF
-
-#include "snprintf.h"
+#include "c.h"
 
 #include <math.h>
 
@@ -341,13 +337,36 @@ static void leading_pad(int zpad, int signvalue, int *padlen,
 						PrintfTarget *target);
 static void trailing_pad(int padlen, PrintfTarget *target);
 
+/*
+ * If strchrnul exists (it's a glibc-ism), it's a good bit faster than the
+ * equivalent manual loop.  If it doesn't exist, provide a replacement.
+ *
+ * Note: glibc declares this as returning "char *", but that would require
+ * casting away const internally, so we don't follow that detail.
+ */
+#ifndef HAVE_STRCHRNUL
+
 static inline const char *
-pg_strchrnul(const char *s, int c)
+strchrnul(const char *s, int c)
 {
 	while (*s != '\0' && *s != c)
 		s++;
 	return s;
 }
+
+#else
+
+/*
+ * glibc's <string.h> declares strchrnul only if _GNU_SOURCE is defined.
+ * While we typically use that on glibc platforms, configure will set
+ * HAVE_STRCHRNUL whether it's used or not.  Fill in the missing declaration
+ * so that this file will compile cleanly with or without _GNU_SOURCE.
+ */
+#ifndef _GNU_SOURCE
+extern char *strchrnul(const char *s, int c);
+#endif
+
+#endif							/* HAVE_STRCHRNUL */
 
 
 /*
@@ -392,7 +411,7 @@ dopr(PrintfTarget *target, const char *format, va_list args)
 		if (*format != '%')
 		{
 			/* Scan to next '%' or end of string */
-			const char *next_pct = pg_strchrnul(format + 1, '%');
+			const char *next_pct = strchrnul(format + 1, '%');
 
 			/* Dump literal data we just scanned over */
 			dostr(format, next_pct - format, target);
@@ -1033,7 +1052,7 @@ fmtint(long long value, char type, int forcesign, int leftjust,
 	}
 
 	/* disable MSVC warning about applying unary minus to an unsigned value */
-#if _MSC_VER
+#ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable: 4146)
 #endif
@@ -1042,7 +1061,7 @@ fmtint(long long value, char type, int forcesign, int leftjust,
 		uvalue = -(unsigned long long) value;
 	else
 		uvalue = (unsigned long long) value;
-#if _MSC_VER
+#ifdef _MSC_VER
 #pragma warning(pop)
 #endif
 
@@ -1208,16 +1227,14 @@ fmtfloat(double value, char type, int forcesign, int leftjust,
 		{
 			/* pad before exponent */
 			dostr(convert, epos - convert, target);
-			if (zeropadlen > 0)
-				dopr_outchmulti('0', zeropadlen, target);
+			dopr_outchmulti('0', zeropadlen, target);
 			dostr(epos, vallen - (epos - convert), target);
 		}
 		else
 		{
 			/* no exponent, pad after the digits */
 			dostr(convert, vallen, target);
-			if (zeropadlen > 0)
-				dopr_outchmulti('0', zeropadlen, target);
+			dopr_outchmulti('0', zeropadlen, target);
 		}
 	}
 	else
@@ -1494,5 +1511,3 @@ trailing_pad(int padlen, PrintfTarget *target)
 	if (padlen < 0)
 		dopr_outchmulti(' ', -padlen, target);
 }
-
-#endif	/* USE_REPL_SNPRINTF */

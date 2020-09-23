@@ -3,7 +3,7 @@
  * strerror.c
  *	  Replacements for standard strerror() and strerror_r() functions
  *
- * Portions Copyright (c) 1996-2019, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2020, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -12,11 +12,7 @@
  *
  *-------------------------------------------------------------------------
  */
-#include "postgres_fe.h"
-
-#include "snprintf.h"
-
-#ifndef USE_REPL_SNPRINTF
+#include "c.h"
 
 /*
  * Within this file, "strerror" means the platform's function not pg_strerror,
@@ -324,5 +320,3 @@ win32_socket_strerror(int errnum, char *buf, size_t buflen)
 }
 
 #endif							/* WIN32 */
-
-#endif	/* USE_REPL_SNPRINTF */
