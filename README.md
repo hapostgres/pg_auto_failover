@@ -41,7 +41,7 @@ the _replication quorum_ of Postgres.
 ## Dependencies
 
 At runtime, pg_auto_failover depends on only Postgres. Postgres versions 10,
-11, and 12 are currently supported.
+11, 12, and 13 are currently supported.
 
 At buildtime. pg_auto_failover depends on Postgres server development
 package like any other Postgres extensions (the server development package
