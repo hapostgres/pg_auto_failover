@@ -1,7 +1,7 @@
 .. _tutorial:
 
-pg_auto_failover Tutorial
-=========================
+pg_auto_failover Tutorial: Part I
+=================================
 
 In this guide we’ll create a primary and secondary Postgres node and set
 up pg_auto_failover to replicate data between them. We’ll simulate failure in

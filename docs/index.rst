@@ -13,6 +13,7 @@ Welcome to pg_auto_failover's documentation!
    intro
    how-to
    tutorial
+   tutorial-part-2
    architecture
    architecture-multi-standby
    failover-state-machine
