@@ -1540,19 +1540,32 @@ IsBeingPromoted(AutoFailoverNode *node)
  * CandidateNodeIsReadyToStreamWAL returns whether a newly selected candidate
  * node, possibly still being promoted, is ready for the other standby nodes is
  * REPORT_LSN to already use the new primary as an upstream node.
+ *
+ * We're okay with making progress when the selected candidate is on the
+ * expected path of FAST_FORWARD to PREPARE_PROMOTION to STOP_REPLICATION to
+ * WAIT_PRIMARY to PRIMARY. We want to allow matching intermediate states (when
+ * reportedState and goalState are not the same), and we also want to prevent
+ * matching other FSM paths.
+ *
+ * Finally, FAST_FORWARD is a little too soon, so we skip that.
  */
 bool
 CandidateNodeIsReadyToStreamWAL(AutoFailoverNode *node)
 {
 	return node != NULL &&
-		   (node->reportedState == REPLICATION_STATE_STOP_REPLICATION ||
-			node->goalState == REPLICATION_STATE_STOP_REPLICATION
+		   (((node->reportedState == REPLICATION_STATE_PREPARE_PROMOTION &&
+			  node->goalState == REPLICATION_STATE_STOP_REPLICATION)) ||
 
-			|| node->reportedState == REPLICATION_STATE_WAIT_PRIMARY ||
-			node->goalState == REPLICATION_STATE_WAIT_PRIMARY
+			(node->reportedState == REPLICATION_STATE_STOP_REPLICATION &&
+			 (node->goalState == REPLICATION_STATE_STOP_REPLICATION ||
+			  node->goalState == REPLICATION_STATE_WAIT_PRIMARY)) ||
 
-			|| node->reportedState == REPLICATION_STATE_PRIMARY ||
-			node->goalState == REPLICATION_STATE_PRIMARY);
+			(node->reportedState == REPLICATION_STATE_WAIT_PRIMARY &&
+			 (node->goalState == REPLICATION_STATE_WAIT_PRIMARY ||
+			  node->goalState == REPLICATION_STATE_PRIMARY)) ||
+
+			(node->reportedState == REPLICATION_STATE_PRIMARY &&
+			 node->goalState == REPLICATION_STATE_PRIMARY));
 }
 
 
