@@ -1222,9 +1222,8 @@ ProceedWithMSFailover(AutoFailoverNode *activeNode,
 	 * as soon as it's ready.
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_REPORT_LSN) &&
-		(IsCurrentState(candidateNode, REPLICATION_STATE_PREPARE_PROMOTION) ||
-		 IsCurrentState(candidateNode, REPLICATION_STATE_STOP_REPLICATION) ||
-		 IsCurrentState(candidateNode, REPLICATION_STATE_WAIT_PRIMARY)))
+		(IsBeingPromoted(candidateNode) ||
+		 IsCurrentState(candidateNode, REPLICATION_STATE_PRIMARY)))
 	{
 		char message[BUFSIZE];
 
