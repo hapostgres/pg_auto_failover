@@ -19,7 +19,7 @@ pg_auto_failover monitor. The ``pg_autoctl create`` command honors the
 running. If Postgres is detected, the new node is registered in SINGLE mode,
 bypassing the monitor's role assignment policy.
 
-Upgrading pg_auto_failover, from versions 1.4 onwward
+Upgrading pg_auto_failover, from versions 1.4 onward
 -----------------------------------------------------
 
 When upgrading a pg_auto_failover setup, the procedure is different on the
