@@ -131,10 +131,13 @@ secondary nodes in maintenance. The procedure then looks like the following:
 	   sudo systemctl status pgautofailover
 	   sudo journalctl -u pgautofailover
 
-	 At this point it is expected that the ``pg_autoctl`` logs show that an
-	 upgrade has been performed by using the ``ALTER EXTENSION
-	 pgautofailover UPDATE TO ...`` command. The monitor is ready with the
+	 At this point it is expected that the ``pgautofailover`` extension on the monitor has been upgraded.
+	 To verify, execute `psql -p <database port, 5432 by default> -t -X -A -c "select extversion from pg_extension where extname='pgautofailover';" -d pg_auto_failover`. If it shows the new version number, the monitor is ready with the
 	 new version of pg_auto_failover.
+	 
+	 Note: It is possible that you have to restart the monitor twice to reliably upgrade
+	 an upgraded extension, see the [github issue](https://github.com/citusdata/pg_auto_failover/issues/434) for more details.
+	 For newer versions of pg_auto_failover this issue should not be present as the upgrading mechanism has been improved.
 
   4. Restart ``pg_autoctl`` on all Postgres nodes on the cluster.
 
