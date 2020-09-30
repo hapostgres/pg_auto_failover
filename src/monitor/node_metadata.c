@@ -1537,6 +1537,23 @@ IsBeingPromoted(AutoFailoverNode *node)
 
 
 /*
+ * CandidateNodeIsReadyToStreamWAL returns whether a newly selected candidate
+ * node, possibly still being promoted, is ready for the other standby nodes is
+ * REPORT_LSN to already use the new primary as an upstream node.
+ */
+bool
+CandidateNodeIsReadyToStreamWAL(AutoFailoverNode *node)
+{
+	return node != NULL &&
+		   (node->reportedState == REPLICATION_STATE_STOP_REPLICATION ||
+			node->goalState == REPLICATION_STATE_STOP_REPLICATION
+
+			|| node->reportedState == REPLICATION_STATE_WAIT_PRIMARY ||
+			node->goalState == REPLICATION_STATE_WAIT_PRIMARY);
+}
+
+
+/*
  * IsParticipatingInPromotion returns whether a node is currently participating
  * in a promotion, either as a candidate that IsBeingPromoted, or as a
  * "support" node that is reporting its LSN or re-joining as a secondary.
