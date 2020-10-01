@@ -307,6 +307,39 @@ CommandLine do_tmux_commands =
 					 NULL, NULL, NULL, do_tmux);
 
 
+CommandLine do_azure_create_region =
+	make_command("region",
+				 "Create an azure region",
+				 "[option ...]",
+				 "  --prefix    azure group name prefix (ha-demo)\n"
+				 "  --name      name to use for referencing the region\n"
+				 "  --location  azure location where to create a resource group\n"
+				 "  --monitor   should we create a monitor in the region (false)\n"
+				 "  --nodes     number of Postgres nodes to create (2)\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_create_region);
+
+CommandLine *do_azure_create[] = {
+	&do_azure_create_region,
+	NULL
+};
+
+CommandLine do_azure_create_commands =
+	make_command_set("create",
+					 "create azure resources for a pg_auto_failover demo",
+					 NULL, NULL, NULL, do_azure_create);
+
+CommandLine *do_azure[] = {
+	&do_azure_create_commands,
+	NULL
+};
+
+CommandLine do_azure_commands =
+	make_command_set("azure",
+					 "manage a set of azure resources for a pg_auto_failover demo",
+					 NULL, NULL, NULL, do_azure);
+
+
 CommandLine *do_subcommands[] = {
 	&do_monitor_commands,
 	&do_fsm_commands,
@@ -317,6 +350,7 @@ CommandLine *do_subcommands[] = {
 	&do_service_postgres_ctl_commands,
 	&do_service_commands,
 	&do_tmux_commands,
+	&do_azure_commands,
 	NULL
 };
 
