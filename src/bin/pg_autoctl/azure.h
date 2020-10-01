@@ -54,7 +54,7 @@ bool azure_create_vms(int count,
 bool azure_provision_vm(const char *group, const char *name);
 bool azure_provision_vms(int count, const char *group);
 
-bool azure_create_region(const char *group,
+bool azure_create_region(const char *prefix,
 						 const char *name,
 						 const char *location,
 						 int cidr,

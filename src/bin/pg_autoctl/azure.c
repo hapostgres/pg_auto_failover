@@ -485,7 +485,17 @@ azure_create_nsg_rule(const char *group,
 	args[argsIndex++] = "--destination-address-prefix";
 	args[argsIndex++] = dryRun ? "\"*\"" : "*";
 	args[argsIndex++] = "--destination-port-ranges";
-	args[argsIndex++] = (char *) ports;
+
+	if (dryRun)
+	{
+		char quotedPortsString[BUFSIZE] = { 0 };
+		sformat(quotedPortsString, BUFSIZE, "\"%s\"", ports);
+		args[argsIndex++] = (char *) quotedPortsString;
+	}
+	else
+	{
+		args[argsIndex++] = (char *) ports;
+	}
 	args[argsIndex++] = NULL;
 
 	program = initialize_program(args, false);
@@ -746,7 +756,7 @@ azure_provision_vms(int count, const char *group)
  * being run.
  */
 bool
-azure_create_region(const char *group,
+azure_create_region(const char *prefix,
 					const char *name,
 					const char *location,
 					int cidr,
@@ -767,7 +777,7 @@ azure_create_region(const char *group,
 	/*
 	 * First create the resource group in the target location.
 	 */
-	sformat(groupName, sizeof(groupName), "%s-%s", group, name);
+	sformat(groupName, sizeof(groupName), "%s-%s", prefix, name);
 
 	if (!azure_create_group(groupName, location))
 	{

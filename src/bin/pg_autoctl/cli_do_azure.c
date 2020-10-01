@@ -37,11 +37,9 @@
 
 typedef struct AzureOptions
 {
-	char group[NAMEDATALEN];
+	char prefix[NAMEDATALEN];
 	char name[NAMEDATALEN];
 	char location[NAMEDATALEN];
-
-	char config[MAXPGPATH];
 
 	int nodes;
 	int cidr;
@@ -72,7 +70,7 @@ cli_do_azure_getopts(int argc, char **argv)
 	AzureOptions options = { 0 };
 
 	static struct option long_options[] = {
-		{ "group", required_argument, NULL, 'g' },
+		{ "prefix", required_argument, NULL, 'p' },
 		{ "name", required_argument, NULL, 'n' },
 		{ "location", required_argument, NULL, 'l' },
 		{ "nodes", required_argument, NULL, 'N' },
@@ -98,7 +96,7 @@ cli_do_azure_getopts(int argc, char **argv)
 	options.all = false;
 	options.watch = false;
 
-	strlcpy(options.group, "ha-demo", sizeof(options.group));
+	strlcpy(options.prefix, "ha-demo", sizeof(options.prefix));
 
 	/*
 	 * The only command lines that are using keeper_cli_getopt_pgdata are
@@ -115,11 +113,11 @@ cli_do_azure_getopts(int argc, char **argv)
 	{
 		switch (c)
 		{
-			/* { "group", required_argument, NULL, 'g' }, */
-			case 'g':
+			/* { "prefix", required_argument, NULL, 'p' }, */
+			case 'p':
 			{
-				strlcpy(options.group, optarg, NAMEDATALEN);
-				log_trace("--group %s", options.group);
+				strlcpy(options.prefix, optarg, NAMEDATALEN);
+				log_trace("--prefix %s", options.prefix);
 				break;
 			}
 
@@ -266,10 +264,10 @@ cli_do_azure_getopts(int argc, char **argv)
 		}
 	}
 
-	if (IS_EMPTY_STRING_BUFFER(options.group))
+	if (IS_EMPTY_STRING_BUFFER(options.prefix))
 	{
 		++errors;
-		log_fatal("--group is a mandatory option");
+		log_fatal("--prefix is a mandatory option");
 	}
 
 	if (IS_EMPTY_STRING_BUFFER(options.location))
@@ -354,7 +352,7 @@ cli_do_azure_create_region(int argc, char **argv)
 {
 	AzureOptions options = azureOptions;
 
-	if (!azure_create_region(options.group,
+	if (!azure_create_region(options.prefix,
 							 options.name,
 							 options.location,
 							 options.cidr,
