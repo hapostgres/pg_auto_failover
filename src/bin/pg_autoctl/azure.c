@@ -598,19 +598,46 @@ azure_create_vm(const char *group,
 
 
 /*
+ * azure_prepare_node_name is a utility function that prepares a node name to
+ * use for a VM in our pg_auto_failover deployment in a target Azure region.
+ *
+ * In the resource group "ha-demo-dim-paris" when creating a monitor (index 0)
+ * and 2 VMs we would have the following names:
+ *
+ *   - ha-demo-dim-paris-monitor
+ *   - ha-demo-dim-paris-a
+ *   - ha-demo-dim-paris-a
+ */
+static void
+azure_prepare_node_name(const char *group, int index, char *name, size_t size)
+{
+	char vmsuffix[] = "abcdefghijklmnopqrstuvwxyz";
+
+	if (index == 0)
+	{
+		sformat(name, size, "%s-monitor", group);
+	}
+	else
+	{
+		sformat(name, size, "%s-%c", group, vmsuffix[index - 1]);
+	}
+}
+
+
+/*
  * azure_create_vms creates several azure virtual machine in parallel and waits
  * until all the commands have finished.
  */
 bool
 azure_create_vms(int count,
+				 bool monitor,
 				 const char *group,
 				 const char *vnet,
 				 const char *subnet,
 				 const char *image,
 				 const char *username)
 {
-	char vmsuffix[] = "abcdefghijklmnopqrstuvwxyz";
-	pid_t pidArray[26] = { 0 };
+	pid_t pidArray[27] = { 0 }; /* 26 nodes + the monitor */
 
 	/* we read from left to right, have the smaller number on the left */
 	if (26 < count)
@@ -619,10 +646,18 @@ azure_create_vms(int count,
 		return false;
 	}
 
-	for (int index = 0; index < count; index++)
+	/* index == 0 for the monitor, then 1..count for the other nodes */
+	for (int index = 0; index <= count; index++)
 	{
 		char vmName[BUFSIZE] = { 0 };
-		sformat(vmName, BUFSIZE, "%s-%c", group, vmsuffix[index]);
+
+		/* skip index 0 when we're not creating a monitor */
+		if (index == 0 && !monitor)
+		{
+			continue;
+		}
+
+		(void) azure_prepare_node_name(group, index, vmName, sizeof(vmName));
 
 		pidArray[index] =
 			azure_create_vm(group, vmName, vnet, subnet, image, username);
@@ -706,9 +741,8 @@ azure_provision_vm(const char *group, const char *name)
  * waits until all the commands have finished.
  */
 bool
-azure_provision_vms(int count, const char *group)
+azure_provision_vms(int count, bool monitor, const char *group)
 {
-	char vmsuffix[] = "abcdefghijklmnopqrstuvwxyz";
 	pid_t pidArray[26] = { 0 };
 
 	/* we read from left to right, have the smaller number on the left */
@@ -718,10 +752,18 @@ azure_provision_vms(int count, const char *group)
 		return false;
 	}
 
-	for (int index = 0; index < count; index++)
+	/* index == 0 for the monitor, then 1..count for the other nodes */
+	for (int index = 0; index <= count; index++)
 	{
 		char vmName[BUFSIZE] = { 0 };
-		sformat(vmName, BUFSIZE, "%s-%c", group, vmsuffix[index]);
+
+		/* skip index 0 when we're not creating a monitor */
+		if (index == 0 && !monitor)
+		{
+			continue;
+		}
+
+		(void) azure_prepare_node_name(group, index, vmName, sizeof(vmName));
 
 		pidArray[index] = azure_provision_vm(group, vmName);
 	}
@@ -760,6 +802,7 @@ azure_create_region(const char *prefix,
 					const char *name,
 					const char *location,
 					int cidr,
+					bool monitor,
 					int nodes)
 {
 	char groupName[BUFSIZE] = { 0 };
@@ -853,7 +896,7 @@ azure_create_region(const char *prefix,
 	/*
 	 * Now is time to create the virtual machines.
 	 */
-	if (nodes > 0)
+	if (monitor || nodes > 0)
 	{
 		/*
 		 * Here we run the following commands:
@@ -878,6 +921,7 @@ azure_create_region(const char *prefix,
 		 *   structures in the target shell (we don't require a specific one).
 		 */
 		if (!azure_create_vms(nodes,
+							  monitor,
 							  groupName,
 							  vnetName,
 							  subnetName,
@@ -888,7 +932,7 @@ azure_create_region(const char *prefix,
 			return false;
 		}
 
-		if (!azure_provision_vms(nodes, groupName))
+		if (!azure_provision_vms(nodes, monitor, groupName))
 		{
 			/* errors have already been logged */
 			return false;

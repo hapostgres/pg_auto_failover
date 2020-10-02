@@ -45,6 +45,7 @@ bool azure_create_vm(const char *group,
 					 const char *username);
 
 bool azure_create_vms(int count,
+					  bool monitor,
 					  const char *group,
 					  const char *vnet,
 					  const char *subnet,
@@ -52,12 +53,13 @@ bool azure_create_vms(int count,
 					  const char *username);
 
 bool azure_provision_vm(const char *group, const char *name);
-bool azure_provision_vms(int count, const char *group);
+bool azure_provision_vms(int count, bool monitor, const char *group);
 
 bool azure_create_region(const char *prefix,
 						 const char *name,
 						 const char *location,
 						 int cidr,
+						 bool monitor,
 						 int nodes);
 
 
