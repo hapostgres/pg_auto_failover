@@ -1300,6 +1300,13 @@ run_ssh_command(const char *username,
 
 	(void) snprintf_program_command_line(&program, ssh_command, BUFSIZE);
 
+	if (dryRun)
+	{
+		appendPQExpBuffer(azureScript, "\n%s", ssh_command);
+
+		return true;
+	}
+
 	log_info("%s", ssh_command);
 
 	(void) execute_subprogram(&program);
@@ -1516,19 +1523,19 @@ azure_create_region(const char *prefix,
 	/*
 	 * Now is time to create the virtual machines.
 	 */
-	return azure_create_nodes(prefix, region, monitor, nodes);
+	return azure_provision_nodes(prefix, region, monitor, nodes);
 }
 
 
 /*
- * azure_create_nodes creates the pg_autoctl VM nodes that we need, and
+ * azure_provision_nodes creates the pg_autoctl VM nodes that we need, and
  * provision them with our provisioning script.
  */
 bool
-azure_create_nodes(const char *prefix,
-				   const char *region,
-				   bool monitor,
-				   int nodes)
+azure_provision_nodes(const char *prefix,
+					  const char *region,
+					  bool monitor,
+					  int nodes)
 {
 	AzureRegionResources azRegion = { 0 };
 
@@ -1571,6 +1578,136 @@ azure_create_nodes(const char *prefix,
 		}
 
 		if (!azure_provision_vms(&azRegion))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+	}
+
+	return true;
+}
+
+
+/*
+ * azure_create_nodes run the pg_autoctl commands that create our nodes, and
+ * then register them with systemd on the remote VMs.
+ */
+bool
+azure_create_nodes(const char *prefix,
+				   const char *region,
+				   bool monitor,
+				   int nodes)
+{
+	AzureRegionResources azRegion = { 0 };
+
+	(void) azure_prepare_region(prefix, region, monitor, nodes, &azRegion);
+
+	if (!azure_fetch_ip_addresses(azRegion.group, azRegion.vmArray))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	if (monitor)
+	{
+		char *create_monitor =
+			"pg_autoctl create monitor "
+			"--auth trust "
+			"--ssl-self-signed "
+			"--pgdata /home/ha-admin/monitor "
+			"--pgctl /usr/lib/postgresql/11/bin/pg_ctl";
+
+		char *systemd =
+			"pg_autoctl -q show systemd --pgdata /home/ha-admin/monitor "
+			"> pgautofailover.service; "
+			"sudo mv pgautofailover.service /etc/systemd/system; "
+			"sudo systemctl daemon-reload; "
+			"sudo systemctl enable pgautofailover; "
+			"sudo systemctl start pgautofailover";
+
+		bool tty = false;
+		char *host = azRegion.vmArray[0].public;
+
+		/* the monitor is always at index 0 in the vmArray */
+		if (!run_ssh_command("ha-admin", host, tty, create_monitor))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
+		if (!run_ssh_command("ha-admin", host, tty, systemd))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+	}
+
+	/*
+	 * Now prepare all the other nodes, one at a time, so that we have a the
+	 * primary, etc. It could also be all at once, but one at a time is good
+	 * for a tutorial.
+	 */
+	for (int index = 1; index <= azRegion.nodes; index++)
+	{
+		char *create_postgres_prefix =
+			"pg_autoctl create postgres "
+			"--pgctl /usr/lib/postgresql/11/bin/pg_ctl "
+			"--pgdata /home/ha-admin/pgdata "
+			"--auth trust "
+			"--ssl-self-signed "
+			"--username ha-admin "
+			"--dbname appdb ";
+
+		char create_postgres[BUFSIZE] = { 0 };
+
+		char *systemd =
+			"pg_autoctl -q show systemd --pgdata /home/ha-admin/pgdata "
+			"> pgautofailover.service; "
+			"sudo mv pgautofailover.service /etc/systemd/system; "
+			"sudo systemctl daemon-reload; "
+			"sudo systemctl enable pgautofailover; "
+			"sudo systemctl start pgautofailover";
+
+		bool tty = false;
+		char *host = azRegion.vmArray[index].public;
+
+		sformat(create_postgres, BUFSIZE,
+				"%s "
+				"--hostname %s "
+				"--name %s-%c "
+				"--monitor 'postgres://autoctl_node@%s/pg_auto_failover?sslmode=require'",
+				create_postgres_prefix,
+				azRegion.vmArray[index].private,
+				azRegion.region,
+				'a' + index - 1,
+				azRegion.vmArray[0].private);
+
+		/* the monitor is always at index 0 in the vmArray */
+		if (!run_ssh_command("ha-admin", host, tty, create_postgres))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
+		if (!run_ssh_command("ha-admin", host, tty, systemd))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+	}
+
+	/*
+	 * Show the current state.
+	 */
+	if (monitor && nodes > 0)
+	{
+		bool tty = true;
+		char *host = azRegion.vmArray[0].public;
+
+		if (!run_ssh_command("ha-admin", host, tty,
+							 "watch -n 0.2 "
+							 "pg_autoctl show state "
+							 "--pgdata /home/ha-admin/monitor"))
 		{
 			/* errors have already been logged */
 			return false;

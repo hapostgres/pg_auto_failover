@@ -93,6 +93,11 @@ bool azure_create_region(const char *prefix,
 						 bool monitor,
 						 int nodes);
 
+bool azure_provision_nodes(const char *prefix,
+						   const char *region,
+						   bool monitor,
+						   int nodes);
+
 bool azure_create_nodes(const char *prefix,
 						const char *region,
 						bool monitor,
