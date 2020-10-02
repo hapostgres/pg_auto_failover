@@ -373,6 +373,27 @@ cli_do_azure_create_region(int argc, char **argv)
 
 
 /*
+ * cli_do_azure_create_nodes creates the pg_autoctl services in an Azure
+ * region that's been created and provisionned before.
+ */
+void
+cli_do_azure_create_nodes(int argc, char **argv)
+{
+	AzureOptions options = azureOptions;
+
+	if (!azure_create_nodes(options.prefix,
+							options.name,
+							options.monitor,
+							options.nodes))
+	{
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	(void) outputAzureScript();
+}
+
+
+/*
  * cli_do_azure_create_service creates the pg_autoctl services in an Azure
  * region that's been created and provisionned before.
  */
@@ -440,6 +461,29 @@ cli_do_azure_ssh(int argc, char **argv)
 	}
 
 	if (!azure_ssh(options.prefix, options.name, argv[0]))
+	{
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+}
+
+
+/*
+ * cli_do_azure_ssh starts an ssh command to the given Azure VM in a specific
+ * prefix and region name.
+ */
+void
+cli_do_azure_show_state(int argc, char **argv)
+{
+	AzureOptions options = azureOptions;
+	char *pg_autoctl_command =
+		options.watch
+		? "watch -n 0.2 pg_autoctl show state --pgdata ./monitor"
+		: "pg_autoctl show state --pgdata ./monitor";
+
+	if (!azure_ssh_command(options.prefix, options.name,
+						   "monitor",
+						   options.watch, /* tty is needed for watch */
+						   pg_autoctl_command))
 	{
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}

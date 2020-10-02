@@ -319,6 +319,17 @@ CommandLine do_azure_create_region =
 				 cli_do_azure_getopts,
 				 cli_do_azure_create_region);
 
+CommandLine do_azure_create_nodes =
+	make_command("nodes",
+				 "Create and provision our VM nodes in an azure region",
+				 "[option ...]",
+				 "  --prefix    azure group name prefix (ha-demo)\n"
+				 "  --name      name to use for referencing the region\n"
+				 "  --monitor   should we create a monitor in the region (false)\n"
+				 "  --nodes     number of Postgres nodes to create (2)\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_create_nodes);
+
 CommandLine do_azure_create_services =
 	make_command("services",
 				 "Create pg_autoctl services in a target azure region",
@@ -332,6 +343,7 @@ CommandLine do_azure_create_services =
 
 CommandLine *do_azure_create[] = {
 	&do_azure_create_region,
+	&do_azure_create_nodes,
 	&do_azure_create_services,
 	NULL
 };
@@ -350,8 +362,19 @@ CommandLine do_azure_show_ips =
 				 cli_do_azure_getopts,
 				 cli_do_azure_show_ips);
 
+CommandLine do_azure_show_state =
+	make_command("state",
+				 "Connect to the monitor node to show the current state",
+				 "[option ...]",
+				 "  --prefix    azure group name prefix (ha-demo)\n"
+				 "  --name      name to use for referencing the region\n"
+				 "  --watch     run the command again every 0.2s\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_show_state);
+
 CommandLine *do_azure_show[] = {
 	&do_azure_show_ips,
+	&do_azure_show_state,
 	NULL
 };
 
