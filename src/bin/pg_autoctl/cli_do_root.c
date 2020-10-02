@@ -309,7 +309,7 @@ CommandLine do_tmux_commands =
 
 CommandLine do_azure_create_region =
 	make_command("region",
-				 "Create an azure region",
+				 "Create an azure region: resource group, network, VMs",
 				 "[option ...]",
 				 "  --prefix    azure group name prefix (ha-demo)\n"
 				 "  --name      name to use for referencing the region\n"

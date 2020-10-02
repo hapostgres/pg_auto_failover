@@ -964,6 +964,96 @@ azure_resource_list(const char *group)
 
 
 /*
+ * azure_fetch_resource_list fetches existing resource names for a short list
+ * of known objects in a target azure resource group.
+ */
+static bool
+azure_fetch_resource_list(const char *group, AzureRegionResources *azRegion)
+{
+	char *args[16];
+	int argsIndex = 0;
+	bool success = true;
+
+	Program program;
+
+	char query[BUFSIZE] = { 0 };
+
+	char command[BUFSIZE] = { 0 };
+
+	sformat(query, BUFSIZE,
+			"[?resourceGroup=='%s'].{ name: name, resourceType: type }",
+			group);
+
+	args[argsIndex++] = azureCLI;
+	args[argsIndex++] = "resource";
+	args[argsIndex++] = "list";
+	args[argsIndex++] = "--output";
+	args[argsIndex++] = "json";
+	args[argsIndex++] = "--query";
+	args[argsIndex++] = (char *) query;
+	args[argsIndex++] = NULL;
+
+	program = initialize_program(args, false);
+
+	(void) snprintf_program_command_line(&program, command, sizeof(command));
+
+	log_info("Fetching resources that might already exist from a previous run");
+	log_info("%s", command);
+
+	(void) execute_subprogram(&program);
+	success = program.returnCode == 0;
+
+	if (success)
+	{
+		JSON_Value *js = json_parse_string(program.stdOut);
+		JSON_Array *jsArray = json_value_get_array(js);
+		int count = json_array_get_count(jsArray);
+
+		for (int index = 0; index < count; index++)
+		{
+			JSON_Object *jsObj = json_array_get_object(jsArray, index);
+
+			char *name = (char *) json_object_get_string(jsObj, "name");
+			char *type = (char *) json_object_get_string(jsObj, "resourceType");
+
+			if (streq(type, "Microsoft.Network/virtualNetworks"))
+			{
+				strlcpy(azRegion->vnet, name, sizeof(azRegion->vnet));
+
+				log_debug("Found existing vnet \"%s\"", azRegion->vnet);
+			}
+			else if (streq(type, "Microsoft.Network/networkSecurityGroups"))
+			{
+				strlcpy(azRegion->nsg, name, sizeof(azRegion->nsg));
+
+				log_debug("Found existing nsg \"%s\"", azRegion->nsg);
+			}
+			else if (streq(type, "Microsoft.Compute/virtualMachines"))
+			{
+				int index = azure_node_index_from_name(group, name);
+
+				strlcpy(azRegion->vmArray[index].name, name, NAMEDATALEN);
+
+				log_debug("Found existing VM[%d] \"%s\"", index, name);
+			}
+			else
+			{
+				log_debug("Unknown resource type: \"%s\" with name \"%s\"",
+						  type, name);
+			}
+		}
+	}
+	else
+	{
+		(void) log_program_output(&program, LOG_INFO, LOG_ERROR);
+	}
+	free_program(&program);
+
+	return success;
+}
+
+
+/*
  * azure_show_ip_addresses shows public and private IP addresses for our list
  * of nodes created in a specific resource group.
  *
@@ -1323,12 +1413,25 @@ azure_create_region(const char *prefix,
 					int nodes)
 {
 	AzureRegionResources azRegion = { 0 };
+	AzureRegionResources azRegionFound = { 0 };
 
 	char vnetPrefix[BUFSIZE] = { 0 };
 	char subnetPrefix[BUFSIZE] = { 0 };
 	char ipAddress[BUFSIZE] = { 0 };
 
 	(void) azure_prepare_region(prefix, region, nodes, monitor, &azRegion);
+
+	/*
+	 * Fetch Azure objects that might have already been created in the target
+	 * resource group, we're going to re-use them, allowing the command to be
+	 * run several times in a row and then "fix itself", or at least continue
+	 * from where it failed.
+	 */
+	if (!azure_fetch_resource_list(azRegion.group, &azRegionFound))
+	{
+		/* errors have already been logged */
+		return false;
+	}
 
 	/*
 	 * First create the resource group in the target location.
@@ -1345,10 +1448,18 @@ azure_create_region(const char *prefix,
 	sformat(vnetPrefix, sizeof(vnetPrefix), "10.%d.0.0/16", cidr);
 	sformat(subnetPrefix, sizeof(subnetPrefix), "10.%d.%d.0/24", cidr, cidr);
 
-	if (!azure_create_vnet(azRegion.group, azRegion.vnet, vnetPrefix))
+	if (IS_EMPTY_STRING_BUFFER(azRegionFound.vnet))
 	{
-		/* errors have already been logged */
-		return false;
+		if (!azure_create_vnet(azRegion.group, azRegion.vnet, vnetPrefix))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+	}
+	else
+	{
+		log_info("Skipping creation of vnet \"%s\" which already exist",
+				 azRegion.vnet);
 	}
 
 	/*
@@ -1363,10 +1474,18 @@ azure_create_region(const char *prefix,
 	/*
 	 * Create the network security group.
 	 */
-	if (!azure_create_nsg(azRegion.group, azRegion.nsg))
+	if (IS_EMPTY_STRING_BUFFER(azRegionFound.nsg))
 	{
-		/* errors have already been logged */
-		return false;
+		if (!azure_create_nsg(azRegion.group, azRegion.nsg))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+	}
+	else
+	{
+		log_info("Skipping creation of nsg \"%s\" which already exist",
+				 azRegion.nsg);
 	}
 
 	/*
