@@ -38,7 +38,7 @@
 typedef struct AzureOptions
 {
 	char prefix[NAMEDATALEN];
-	char name[NAMEDATALEN];
+	char region[NAMEDATALEN];
 	char location[NAMEDATALEN];
 
 	int nodes;
@@ -71,7 +71,7 @@ cli_do_azure_getopts(int argc, char **argv)
 
 	static struct option long_options[] = {
 		{ "prefix", required_argument, NULL, 'p' },
-		{ "name", required_argument, NULL, 'n' },
+		{ "region", required_argument, NULL, 'r' },
 		{ "location", required_argument, NULL, 'l' },
 		{ "nodes", required_argument, NULL, 'N' },
 		{ "monitor", no_argument, NULL, 'M' },
@@ -121,11 +121,11 @@ cli_do_azure_getopts(int argc, char **argv)
 				break;
 			}
 
-			/* { "name", required_argument, NULL, 'n' }, */
-			case 'n':
+			/* { "region", required_argument, NULL, 'r' }, */
+			case 'r':
 			{
-				strlcpy(options.name, optarg, NAMEDATALEN);
-				log_trace("--name %s", options.name);
+				strlcpy(options.region, optarg, NAMEDATALEN);
+				log_trace("--region %s", options.region);
 				break;
 			}
 
@@ -353,7 +353,7 @@ cli_do_azure_create_region(int argc, char **argv)
 	}
 
 	if (!azure_create_region(options.prefix,
-							 options.name,
+							 options.region,
 							 options.location,
 							 options.cidr,
 							 options.monitor,
@@ -382,7 +382,7 @@ cli_do_azure_create_nodes(int argc, char **argv)
 	AzureOptions options = azureOptions;
 
 	if (!azure_create_nodes(options.prefix,
-							options.name,
+							options.region,
 							options.monitor,
 							options.nodes))
 	{
@@ -403,7 +403,7 @@ cli_do_azure_create_service(int argc, char **argv)
 	AzureOptions options = azureOptions;
 
 	if (!azure_create_service(options.prefix,
-							  options.name,
+							  options.region,
 							  options.monitor,
 							  options.nodes))
 	{
@@ -422,7 +422,7 @@ cli_do_azure_ls(int argc, char **argv)
 {
 	AzureOptions options = azureOptions;
 
-	if (!azure_ls(options.prefix, options.name))
+	if (!azure_ls(options.prefix, options.region))
 	{
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
@@ -438,7 +438,7 @@ cli_do_azure_show_ips(int argc, char **argv)
 {
 	AzureOptions options = azureOptions;
 
-	if (!azure_show_ips(options.prefix, options.name))
+	if (!azure_show_ips(options.prefix, options.region))
 	{
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
@@ -460,7 +460,7 @@ cli_do_azure_ssh(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!azure_ssh(options.prefix, options.name, argv[0]))
+	if (!azure_ssh(options.prefix, options.region, argv[0]))
 	{
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
@@ -480,7 +480,7 @@ cli_do_azure_show_state(int argc, char **argv)
 		? "watch -n 0.2 pg_autoctl show state --pgdata ./monitor"
 		: "pg_autoctl show state --pgdata ./monitor";
 
-	if (!azure_ssh_command(options.prefix, options.name,
+	if (!azure_ssh_command(options.prefix, options.region,
 						   "monitor",
 						   options.watch, /* tty is needed for watch */
 						   pg_autoctl_command))
