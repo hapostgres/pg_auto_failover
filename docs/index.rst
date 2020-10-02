@@ -20,6 +20,7 @@ Welcome to pg_auto_failover's documentation!
    install
    security
    ref/reference
+   ref/reference-do
    ref/configuration
    operations
    faq
