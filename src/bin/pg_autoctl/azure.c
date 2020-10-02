@@ -1387,7 +1387,7 @@ azure_create_region(const char *prefix,
 	if (!azure_create_subnet(azRegion.group,
 							 azRegion.vnet,
 							 azRegion.subnet,
-							 azRegion.subnet,
+							 subnetPrefix,
 							 azRegion.nsg))
 	{
 		/* errors have already been logged */
