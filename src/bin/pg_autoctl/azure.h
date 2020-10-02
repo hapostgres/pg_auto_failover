@@ -65,6 +65,7 @@ bool azure_create_region(const char *prefix,
 
 bool azure_create_service(const char *prefix,
 						  const char *name,
+						  bool monitor,
 						  int nodes);
 
 #endif  /* AZURE_H */

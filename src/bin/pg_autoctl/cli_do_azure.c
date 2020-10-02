@@ -356,6 +356,7 @@ cli_do_azure_create_region(int argc, char **argv)
 							 options.name,
 							 options.location,
 							 options.cidr,
+							 options.monitor,
 							 options.nodes))
 	{
 		exit(EXIT_CODE_INTERNAL_ERROR);
@@ -363,6 +364,27 @@ cli_do_azure_create_region(int argc, char **argv)
 
 	/* that's for testing only */
 	if (false && !azure_psleep(options.nodes, true))
+	{
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	(void) outputAzureScript();
+}
+
+
+/*
+ * do_azure_create_service creates the pg_autoctl services in an Azure region
+ * that's been created and provisionned before.
+ */
+void
+cli_do_azure_create_service(int argc, char **argv)
+{
+	AzureOptions options = azureOptions;
+
+	if (!azure_create_service(options.prefix,
+							  options.name,
+							  options.monitor,
+							  options.nodes))
 	{
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}

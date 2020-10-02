@@ -100,5 +100,6 @@ void cli_do_tmux_wait(int argc, char **argv);
 /* src/bin/pg_autoctl_cli_do_azure.c */
 int cli_do_azure_getopts(int argc, char **argv);
 void cli_do_azure_create_region(int argc, char **argv);
+void cli_do_azure_create_service(int argc, char **argv);
 
 #endif  /* CLI_DO_ROOT_H */

@@ -319,8 +319,20 @@ CommandLine do_azure_create_region =
 				 cli_do_azure_getopts,
 				 cli_do_azure_create_region);
 
+CommandLine do_azure_create_services =
+	make_command("services",
+				 "Create pg_autoctl services in a target azure region",
+				 "[option ...]",
+				 "  --prefix    azure group name prefix (ha-demo)\n"
+				 "  --name      name to use for referencing the region\n"
+				 "  --monitor   should we create a monitor in the region (false)\n"
+				 "  --nodes     number of Postgres nodes to create (2)\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_create_service);
+
 CommandLine *do_azure_create[] = {
 	&do_azure_create_region,
+	&do_azure_create_services,
 	NULL
 };
 

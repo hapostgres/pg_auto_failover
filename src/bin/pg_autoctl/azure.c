@@ -953,3 +953,16 @@ azure_create_region(const char *prefix,
 
 	return true;
 }
+
+
+/*
+ * azure_create_service creates the pg_autoctl services on the target nodes
+ */
+bool
+azure_create_service(const char *prefix,
+					 const char *name,
+					 bool monitor,
+					 int nodes)
+{
+	return true;
+}
