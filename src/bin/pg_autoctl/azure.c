@@ -36,6 +36,13 @@
 #include "runprogram.h"
 
 
+typedef struct AzureVMipAddresses
+{
+	char name[NAMEDATALEN];
+	char public[BUFSIZE];
+	char private[BUFSIZE];
+} AzureVMipAddresses;
+
 char azureCLI[MAXPGPATH] = { 0 };
 
 static int azure_run_command(Program *program);
@@ -581,6 +588,48 @@ azure_prepare_node_name(const char *group, int index, char *name, size_t size)
 
 
 /*
+ * azure_node_index_from_name is the complement to azure_prepare_node_name.
+ * Given a VM name such as ha-demo-dim-paris-monitor or ha-demo-dim-paris-a,
+ * the function returns respectively 0 and 1, which is the array index where we
+ * want to find information about the VM (name, IP addresses, etc) in an array
+ * of VMs.
+ */
+static int
+azure_node_index_from_name(const char *group, const char *name)
+{
+	int groupNameLen = strlen(group);
+	char *ptr;
+
+	if (strncmp(name, group, groupNameLen) != 0 ||
+		strlen(name) < (groupNameLen + 1))
+	{
+		log_error("VM name \"%s\" does not start with group name \"%s\"",
+				  name, group);
+		return -1;
+	}
+
+	/* skip group name and dash: ha-demo-dim-paris- */
+	ptr = (char *) name + groupNameLen + 1;
+
+	if (strcmp(ptr, "monitor") == 0)
+	{
+		return 0;
+	}
+	else
+	{
+		if (strlen(ptr) != 1)
+		{
+			log_error("Failed to parse VM index from name \"%s\"", name);
+			return -1;
+		}
+
+		/* 'a' is 1, 'b' is 2, etc */
+		return *ptr - 'a' + 1;
+	}
+}
+
+
+/*
  * azure_create_vm creates a Virtual Machine in our azure resource group.
  */
 bool
@@ -806,6 +855,8 @@ azure_provision_vms(int count, bool monitor, const char *group)
 
 /*
  * azure_resource_list runs the command azure resource list.
+ *
+ *  az resource list --output table --query  "[?resourceGroup=='ha-demo-dim-paris'].{ name: name, flavor: kind, resourceType: type, region: location }"
  */
 bool
 azure_resource_list(const char *group)
@@ -854,6 +905,348 @@ azure_resource_list(const char *group)
 	free_program(&program);
 
 	return success;
+}
+
+
+/*
+ * azure_show_ip_addresses shows public and private IP addresses for our list
+ * of nodes created in a specific resource group.
+ *
+ *   az vm list-ip-addresses -g ha-demo-dim-paris --query '[] [] . { name: virtualMachine.name, "public address": virtualMachine.network.publicIpAddresses[0].ipAddress, "private address": virtualMachine.network.privateIpAddresses[0] }' -o table
+ */
+bool
+azure_show_ip_addresses(const char *group)
+{
+	char *args[16];
+	int argsIndex = 0;
+	bool success = true;
+
+	Program program;
+
+	char query[BUFSIZE] = { 0 };
+
+	char command[BUFSIZE] = { 0 };
+
+	sformat(query, BUFSIZE,
+			"[] [] . { name: virtualMachine.name, "
+			"\"public address\": "
+			"virtualMachine.network.publicIpAddresses[0].ipAddress, "
+			"\"private address\": "
+			"virtualMachine.network.privateIpAddresses[0] }");
+
+	args[argsIndex++] = azureCLI;
+	args[argsIndex++] = "vm";
+	args[argsIndex++] = "list-ip-addresses";
+	args[argsIndex++] = "--resource-group";
+	args[argsIndex++] = (char *) group;
+	args[argsIndex++] = "--query";
+	args[argsIndex++] = (char *) query;
+	args[argsIndex++] = "-o";
+	args[argsIndex++] = "table";
+	args[argsIndex++] = NULL;
+
+	program = initialize_program(args, false);
+
+	(void) snprintf_program_command_line(&program, command, sizeof(command));
+
+	log_info("%s", command);
+
+	(void) execute_subprogram(&program);
+	success = program.returnCode == 0;
+
+	if (success)
+	{
+		fformat(stdout, "%s", program.stdOut);
+	}
+	else
+	{
+		(void) log_program_output(&program, LOG_INFO, LOG_ERROR);
+	}
+	free_program(&program);
+
+	return success;
+}
+
+
+/*
+ * azure_fetch_ip_addresses fetches IP address (both public and private) for
+ * VMs created in an Azure resource group, and fill-in the given array.
+ */
+static bool
+azure_fetch_ip_addresses(const char *group, AzureVMipAddresses *addresses)
+{
+	char *args[16];
+	int argsIndex = 0;
+	bool success = true;
+
+	Program program;
+
+	char query[BUFSIZE] = { 0 };
+
+	char command[BUFSIZE] = { 0 };
+
+	sformat(query, BUFSIZE,
+			"[] [] . { name: virtualMachine.name, "
+			"\"public address\": "
+			"virtualMachine.network.publicIpAddresses[0].ipAddress, "
+			"\"private address\": "
+			"virtualMachine.network.privateIpAddresses[0] }");
+
+	args[argsIndex++] = azureCLI;
+	args[argsIndex++] = "vm";
+	args[argsIndex++] = "list-ip-addresses";
+	args[argsIndex++] = "--resource-group";
+	args[argsIndex++] = (char *) group;
+	args[argsIndex++] = "--query";
+	args[argsIndex++] = (char *) query;
+	args[argsIndex++] = "-o";
+	args[argsIndex++] = "json";
+	args[argsIndex++] = NULL;
+
+	program = initialize_program(args, false);
+
+	(void) snprintf_program_command_line(&program, command, sizeof(command));
+
+	log_info("%s", command);
+
+	(void) execute_subprogram(&program);
+	success = program.returnCode == 0;
+
+	if (success)
+	{
+		JSON_Value *js = json_parse_string(program.stdOut);
+		JSON_Array *jsArray = json_value_get_array(js);
+		int count = json_array_get_count(jsArray);
+
+		for (int index = 0; index < count; index++)
+		{
+			JSON_Object *jsObj = json_array_get_object(jsArray, index);
+			char *str = NULL;
+			int vmIndex = -1;
+
+			str = (char *) json_object_get_string(jsObj, "name");
+
+			vmIndex = azure_node_index_from_name(group, str);
+
+			if (vmIndex == -1)
+			{
+				/* errors have already been logged */
+				return false;
+			}
+
+			strlcpy(addresses[vmIndex].name, str, NAMEDATALEN);
+
+			str = (char *) json_object_get_string(jsObj, "private address");
+			strlcpy(addresses[vmIndex].private, str, BUFSIZE);
+
+			str = (char *) json_object_get_string(jsObj, "public address");
+			strlcpy(addresses[vmIndex].public, str, BUFSIZE);
+
+			log_debug(
+				"Parsed VM %d as \"%s\" with public IP %s and private IP %s",
+				vmIndex,
+				addresses[vmIndex].name,
+				addresses[vmIndex].public,
+				addresses[vmIndex].private);
+		}
+	}
+	else
+	{
+		(void) log_program_output(&program, LOG_INFO, LOG_ERROR);
+	}
+	free_program(&program);
+
+	return success;
+}
+
+
+/*
+ * run_ssh runs the ssh command to the specified IP address as the given
+ * username, sharing the current terminal tty.
+ */
+static bool
+run_ssh(const char *username, const char *ip)
+{
+	char *args[16];
+	int argsIndex = 0;
+
+	Program program;
+
+	char ssh[MAXPGPATH] = { 0 };
+	char command[BUFSIZE] = { 0 };
+
+	if (!search_path_first("ssh", ssh))
+	{
+		log_fatal("Failed to find program ssh in PATH");
+		return false;
+	}
+
+	args[argsIndex++] = ssh;
+	args[argsIndex++] = "-o";
+	args[argsIndex++] = "StrictHostKeyChecking=no";
+	args[argsIndex++] = "-o";
+	args[argsIndex++] = "UserKnownHostsFile /dev/null";
+	args[argsIndex++] = "-l";
+	args[argsIndex++] = (char *) username;
+	args[argsIndex++] = (char *) ip;
+	args[argsIndex++] = NULL;
+
+	program = initialize_program(args, false);
+
+	program.capture = false;    /* don't capture output */
+	program.tty = true;         /* allow sharing the parent's tty */
+
+	(void) snprintf_program_command_line(&program, command, sizeof(command));
+
+	log_info("%s", command);
+
+	(void) execute_subprogram(&program);
+
+	return true;
+}
+
+
+/*
+ * run_ssh_command runs the given command on the remote machine given by ip
+ * address, as the given username.
+ */
+static bool
+run_ssh_command(const char *username,
+				const char *ip,
+				bool tty,
+				const char *command)
+{
+	char *args[16];
+	int argsIndex = 0;
+
+	Program program;
+
+	char ssh[MAXPGPATH] = { 0 };
+	char ssh_command[BUFSIZE] = { 0 };
+
+	if (!search_path_first("ssh", ssh))
+	{
+		log_fatal("Failed to find program ssh in PATH");
+		return false;
+	}
+
+	args[argsIndex++] = ssh;
+
+	if (tty)
+	{
+		args[argsIndex++] = "-t";
+	}
+
+	args[argsIndex++] = "-o";
+	args[argsIndex++] = "StrictHostKeyChecking=no";
+	args[argsIndex++] = "-o";
+	args[argsIndex++] = "UserKnownHostsFile /dev/null";
+	args[argsIndex++] = "-l";
+	args[argsIndex++] = (char *) username;
+	args[argsIndex++] = (char *) ip;
+	args[argsIndex++] = "--";
+	args[argsIndex++] = (char *) command;
+	args[argsIndex++] = NULL;
+
+	program = initialize_program(args, false);
+
+	program.capture = false;    /* don't capture output */
+	program.tty = true;         /* allow sharing the parent's tty */
+
+	(void) snprintf_program_command_line(&program, ssh_command, BUFSIZE);
+
+	log_info("%s", ssh_command);
+
+	(void) execute_subprogram(&program);
+
+	return true;
+}
+
+
+/*
+ * azure_fetch_vm_addresses fetches a given VM addresses.
+ */
+static bool
+azure_fetch_vm_addresses(const char *group, const char *vm,
+						 AzureVMipAddresses *addresses)
+{
+	char groupName[BUFSIZE] = { 0 };
+	char vmName[BUFSIZE] = { 0 };
+	int vmIndex = -1;
+
+	AzureVMipAddresses vmAddresses[27] = { 0 };
+
+	sformat(vmName, sizeof(vmName), "%s-%s", group, vm);
+
+	vmIndex = azure_node_index_from_name(group, vmName);
+
+	if (vmIndex == -1)
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/*
+	 * It takes as much time fetching all the IP addresses at once compared to
+	 * fetching a single IP address, so we always fetch them all internally.
+	 */
+	if (!azure_fetch_ip_addresses(group, vmAddresses))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	if (IS_EMPTY_STRING_BUFFER(vmAddresses[vmIndex].name))
+	{
+		log_error(
+			"Failed to find Virtual Machine \"%s\" in resource group \"%s\"",
+			vmName, groupName);
+		return false;
+	}
+
+	/* copy the structure wholesale to the target address */
+	*addresses = vmAddresses[vmIndex];
+
+	return true;
+}
+
+
+/*
+ * azure_vm_ssh runs an ssh command to the given VM public IP address.
+ */
+bool
+azure_vm_ssh(const char *group, const char *vm)
+{
+	AzureVMipAddresses addresses = { 0 };
+
+	if (!azure_fetch_vm_addresses(group, vm, &addresses))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	return run_ssh("ha-admin", addresses.public);
+}
+
+
+/*
+ * azure_vm_ssh runs an ssh command to the given VM public IP address.
+ */
+bool
+azure_vm_ssh_command(const char *group,
+					 const char *vm,
+					 bool tty,
+					 const char *command)
+{
+	AzureVMipAddresses addresses = { 0 };
+
+	if (!azure_fetch_vm_addresses(group, vm, &addresses))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	return run_ssh_command("ha-admin", addresses.public, tty, command);
 }
 
 
@@ -1022,7 +1415,7 @@ azure_create_service(const char *prefix,
 
 
 /*
- * azure_ls lists the azure resources we created in a specific region.
+ * azure_ls lists the azure resources we created in a specific resource group.
  */
 bool
 azure_ls(const char *prefix, const char *name)
@@ -1032,4 +1425,35 @@ azure_ls(const char *prefix, const char *name)
 	sformat(groupName, sizeof(groupName), "%s-%s", prefix, name);
 
 	return azure_resource_list(groupName);
+}
+
+
+/*
+ * azure_show_ips shows the azure ip addresses for the VMs we created in a
+ * specific resource group.
+ */
+bool
+azure_show_ips(const char *prefix, const char *name)
+{
+	char groupName[BUFSIZE] = { 0 };
+
+	sformat(groupName, sizeof(groupName), "%s-%s", prefix, name);
+
+	return azure_show_ip_addresses(groupName);
+}
+
+
+/*
+ * azure_ssh runs the ssh -l ha-admin <public ip address> command for given
+ * node in given azure group, identified as usual with a prefix and a name.
+ */
+bool
+azure_ssh(const char *prefix, const char *name, const char *vm)
+{
+	char groupName[BUFSIZE] = { 0 };
+
+	sformat(groupName, sizeof(groupName), "%s-%s", prefix, name);
+
+	/* return azure_vm_ssh_command(groupName, vm, true, "watch date -R"); */
+	return azure_vm_ssh(groupName, vm);
 }

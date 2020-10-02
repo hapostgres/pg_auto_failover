@@ -341,6 +341,25 @@ CommandLine do_azure_create_commands =
 					 "create azure resources for a pg_auto_failover demo",
 					 NULL, NULL, NULL, do_azure_create);
 
+CommandLine do_azure_show_ips =
+	make_command("ips",
+				 "Show public and private IP addresses for selected VMs",
+				 "[option ...]",
+				 "  --prefix    azure group name prefix (ha-demo)\n"
+				 "  --name      name to use for referencing the region\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_show_ips);
+
+CommandLine *do_azure_show[] = {
+	&do_azure_show_ips,
+	NULL
+};
+
+CommandLine do_azure_show_commands =
+	make_command_set("show",
+					 "show azure resources for a pg_auto_failover demo",
+					 NULL, NULL, NULL, do_azure_show);
+
 CommandLine do_azure_ls =
 	make_command("ls",
 				 "List resources in a given azure region",
@@ -350,9 +369,20 @@ CommandLine do_azure_ls =
 				 cli_do_azure_getopts,
 				 cli_do_azure_ls);
 
+CommandLine do_azure_ssh =
+	make_command("ssh",
+				 "Runs ssh -l ha-admin <public ip address> for a given VM name",
+				 "--prefix prefix --name region <vm name>",
+				 "  --prefix    azure group name prefix (ha-demo)\n"
+				 "  --name      name to use for referencing the region\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_ssh);
+
 CommandLine *do_azure[] = {
 	&do_azure_create_commands,
+	&do_azure_show_commands,
 	&do_azure_ls,
+	&do_azure_ssh,
 	NULL
 };
 

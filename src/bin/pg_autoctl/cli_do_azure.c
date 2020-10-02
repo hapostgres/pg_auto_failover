@@ -405,6 +405,42 @@ cli_do_azure_ls(int argc, char **argv)
 	{
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
+}
 
-	(void) outputAzureScript();
+
+/*
+ * cli_do_azure_show_ips lists Azure ip addresses assigned to created VMs in a
+ * specific region.
+ */
+void
+cli_do_azure_show_ips(int argc, char **argv)
+{
+	AzureOptions options = azureOptions;
+
+	if (!azure_show_ips(options.prefix, options.name))
+	{
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+}
+
+
+/*
+ * cli_do_azure_ssh starts an ssh command to the given Azure VM in a specific
+ * prefix and region name.
+ */
+void
+cli_do_azure_ssh(int argc, char **argv)
+{
+	AzureOptions options = azureOptions;
+
+	if (argc != 1)
+	{
+		(void) commandline_print_usage(&do_azure_ssh, stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (!azure_ssh(options.prefix, options.name, argv[0]))
+	{
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
 }

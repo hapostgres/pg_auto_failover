@@ -57,6 +57,12 @@ bool azure_provision_vm(const char *group, const char *name);
 bool azure_provision_vms(int count, bool monitor, const char *group);
 
 bool azure_resource_list(const char *group);
+bool azure_show_ip_addresses(const char *group);
+bool azure_vm_ssh(const char *group, const char *vm);
+bool azure_vm_ssh_command(const char *group,
+						  const char *vm,
+						  bool tty,
+						  const char *command);
 
 bool azure_create_region(const char *prefix,
 						 const char *name,
@@ -71,5 +77,7 @@ bool azure_create_service(const char *prefix,
 						  int nodes);
 
 bool azure_ls(const char *prefix, const char *name);
+bool azure_show_ips(const char *prefix, const char *name);
+bool azure_ssh(const char *prefix, const char *name, const char *vm);
 
 #endif  /* AZURE_H */
