@@ -56,6 +56,25 @@ __EOF__
 chmod +x .git/hooks/pre-commit
 ```
 
+### Running tests
+
+The integration tests are written using Python and the
+[nose](https://nose.readthedocs.io/en/latest/index.html) testing framework.
+They are run in a docker container, so you need
+[docker](https://docs.docker.com/get-docker/) installed locally.
+
+```bash
+make run-test
+```
+
+You can filter the tests you are running with the `TEST` environment variable.
+
+```bash
+make TEST=multi run-test       # runs tests matching tests/test_multi*
+make TEST=single run-test      # runs tests _not_ matching tests/test_multi*
+make TEST=test_auth run-test   # runs tests/test_auth.py
+```
+
 ### Producing the documentation diagrams
 
 The diagrams are TikZ sources, which means they're edited with your usual
