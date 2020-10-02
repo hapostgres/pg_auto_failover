@@ -128,6 +128,8 @@ azure_start_command(Program *program)
 	pid_t fpid;
 	char command[BUFSIZE] = { 0 };
 
+	IntString semIdString = intToString(log_semaphore.semId);
+
 	(void) snprintf_program_command_line(program, command, sizeof(command));
 
 	if (dryRun)
@@ -138,11 +140,12 @@ azure_start_command(Program *program)
 		return 0;
 	}
 
-	log_info("%s &", command);
-
 	/* Flush stdio channels just before fork, to avoid double-output problems */
 	fflush(stdout);
 	fflush(stderr);
+
+	/* we want to use the same logs semaphore in the sub-processes */
+	setenv(PG_AUTOCTL_LOG_SEMAPHORE, semIdString.strValue, 1);
 
 	/* time to create the node_active sub-process */
 	fpid = fork();
@@ -160,6 +163,16 @@ azure_start_command(Program *program)
 			/* child process runs the command */
 			int returnCode;
 
+			/* initialize the semaphore used for locking log output */
+			if (!semaphore_init(&log_semaphore))
+			{
+				exit(EXIT_CODE_INTERNAL_ERROR);
+			}
+
+			/* set our logging facility to use our semaphore as a lock */
+			(void) log_set_udata(&log_semaphore);
+			(void) log_set_lock(&semaphore_log_lock_function);
+
 			(void) execute_subprogram(program);
 			returnCode = program->returnCode;
 
@@ -169,10 +182,12 @@ azure_start_command(Program *program)
 				free_program(program);
 
 				/* the parent will have to use exit status */
+				(void) semaphore_finish(&log_semaphore);
 				exit(EXIT_CODE_INTERNAL_ERROR);
 			}
 
 			free_program(program);
+			(void) semaphore_finish(&log_semaphore);
 			exit(EXIT_CODE_QUIT);
 		}
 
@@ -438,7 +453,7 @@ azure_create_nsg(const char *group, const char *name)
 
 	program = initialize_program(args, false);
 
-	log_info("Create network nsg \"%s\"", name);
+	log_info("Creating network nsg \"%s\"", name);
 
 	return azure_run_command(&program) == 0;
 }
@@ -451,8 +466,7 @@ bool
 azure_create_nsg_rule(const char *group,
 					  const char *nsgName,
 					  const char *name,
-					  const char *ipAddress,
-					  const char *ports)
+					  const char *ipAddress)
 {
 	char *args[28];
 	int argsIndex = 0;
@@ -475,7 +489,7 @@ azure_create_nsg_rule(const char *group,
 	args[argsIndex++] = "--protocol";
 	args[argsIndex++] = "Tcp";
 	args[argsIndex++] = "--direction";
-	args[argsIndex++] = "Inbound ";
+	args[argsIndex++] = "Inbound";
 	args[argsIndex++] = "--priority";
 	args[argsIndex++] = "100";
 	args[argsIndex++] = "--source-address-prefixes";
@@ -485,22 +499,13 @@ azure_create_nsg_rule(const char *group,
 	args[argsIndex++] = "--destination-address-prefix";
 	args[argsIndex++] = dryRun ? "\"*\"" : "*";
 	args[argsIndex++] = "--destination-port-ranges";
-
-	if (dryRun)
-	{
-		char quotedPortsString[BUFSIZE] = { 0 };
-		sformat(quotedPortsString, BUFSIZE, "\"%s\"", ports);
-		args[argsIndex++] = (char *) quotedPortsString;
-	}
-	else
-	{
-		args[argsIndex++] = (char *) ports;
-	}
+	args[argsIndex++] = "22";
+	args[argsIndex++] = "5432";
 	args[argsIndex++] = NULL;
 
 	program = initialize_program(args, false);
 
-	log_info("Create network nsg rules \"%s\" for our IP address \"%s\" "
+	log_info("Creating network nsg rules \"%s\" for our IP address \"%s\" "
 			 "for ports 22 and 5432", name, ipAddress);
 
 	return azure_run_command(&program) == 0;
@@ -524,6 +529,7 @@ azure_create_subnet(const char *group,
 
 	args[argsIndex++] = azureCLI;
 	args[argsIndex++] = "network";
+	args[argsIndex++] = "vnet";
 	args[argsIndex++] = "subnet";
 	args[argsIndex++] = "create";
 	args[argsIndex++] = "--resource-group";
@@ -544,56 +550,6 @@ azure_create_subnet(const char *group,
 			 name, prefixes);
 
 	return azure_run_command(&program) == 0;
-}
-
-
-/*
- * azure_create_vm creates a Virtual Machine in our azure resource group.
- */
-bool
-azure_create_vm(const char *group,
-				const char *name,
-				const char *vnet,
-				const char *subnet,
-				const char *image,
-				const char *username)
-{
-	char *args[26];
-	int argsIndex = 0;
-
-	Program program;
-
-	char publicIpAddressName[BUFSIZE] = { 0 };
-
-	sformat(publicIpAddressName, BUFSIZE, "%s-ip", name);
-
-	args[argsIndex++] = azureCLI;
-	args[argsIndex++] = "vm";
-	args[argsIndex++] = "create";
-	args[argsIndex++] = "--resource-group";
-	args[argsIndex++] = (char *) group;
-	args[argsIndex++] = "--name";
-	args[argsIndex++] = (char *) name;
-	args[argsIndex++] = "--vnet-name";
-	args[argsIndex++] = (char *) vnet;
-	args[argsIndex++] = "--subnet";
-	args[argsIndex++] = (char *) subnet;
-	args[argsIndex++] = "--nsg ha-demo-nsg";
-	args[argsIndex++] = "--public-ip-address";
-	args[argsIndex++] = (char *) publicIpAddressName;
-	args[argsIndex++] = "--image";
-	args[argsIndex++] = (char *) image;
-	args[argsIndex++] = "--admin-username";
-	args[argsIndex++] = (char *) username;
-	args[argsIndex++] = "--generate-ssh-keys";
-	args[argsIndex++] = NULL;
-
-	program = initialize_program(args, false);
-
-	log_info("Creating %s virtual machine \"%s\" with user \"%s\"",
-			 image, name, username);
-
-	return azure_start_command(&program);
 }
 
 
@@ -625,6 +581,58 @@ azure_prepare_node_name(const char *group, int index, char *name, size_t size)
 
 
 /*
+ * azure_create_vm creates a Virtual Machine in our azure resource group.
+ */
+bool
+azure_create_vm(const char *group,
+				const char *name,
+				const char *vnet,
+				const char *subnet,
+				const char *nsg,
+				const char *image,
+				const char *username)
+{
+	char *args[26];
+	int argsIndex = 0;
+
+	Program program;
+
+	char publicIpAddressName[BUFSIZE] = { 0 };
+
+	sformat(publicIpAddressName, BUFSIZE, "%s-ip", name);
+
+	args[argsIndex++] = azureCLI;
+	args[argsIndex++] = "vm";
+	args[argsIndex++] = "create";
+	args[argsIndex++] = "--resource-group";
+	args[argsIndex++] = (char *) group;
+	args[argsIndex++] = "--name";
+	args[argsIndex++] = (char *) name;
+	args[argsIndex++] = "--vnet-name";
+	args[argsIndex++] = (char *) vnet;
+	args[argsIndex++] = "--subnet";
+	args[argsIndex++] = (char *) subnet;
+	args[argsIndex++] = "--nsg";
+	args[argsIndex++] = (char *) nsg;
+	args[argsIndex++] = "--public-ip-address";
+	args[argsIndex++] = (char *) publicIpAddressName;
+	args[argsIndex++] = "--image";
+	args[argsIndex++] = (char *) image;
+	args[argsIndex++] = "--admin-username";
+	args[argsIndex++] = (char *) username;
+	args[argsIndex++] = "--generate-ssh-keys";
+	args[argsIndex++] = NULL;
+
+	program = initialize_program(args, false);
+
+	log_info("Creating %s virtual machine \"%s\" with user \"%s\"",
+			 image, name, username);
+
+	return azure_start_command(&program);
+}
+
+
+/*
  * azure_create_vms creates several azure virtual machine in parallel and waits
  * until all the commands have finished.
  */
@@ -634,6 +642,7 @@ azure_create_vms(int count,
 				 const char *group,
 				 const char *vnet,
 				 const char *subnet,
+				 const char *nsg,
 				 const char *image,
 				 const char *username)
 {
@@ -645,6 +654,10 @@ azure_create_vms(int count,
 		log_error("pg_autoctl only supports up to 26 VMs per region");
 		return false;
 	}
+
+	log_info("Creating Virtual Machines for %s%d Postgres nodes, in parallel",
+			 monitor ? "a monitor and " : " ",
+			 count);
 
 	/* index == 0 for the monitor, then 1..count for the other nodes */
 	for (int index = 0; index <= count; index++)
@@ -660,7 +673,7 @@ azure_create_vms(int count,
 		(void) azure_prepare_node_name(group, index, vmName, sizeof(vmName));
 
 		pidArray[index] =
-			azure_create_vm(group, vmName, vnet, subnet, image, username);
+			azure_create_vm(group, vmName, vnet, subnet, nsg, image, username);
 	}
 
 	/* now wait for the child processes to be done */
@@ -730,7 +743,7 @@ azure_provision_vm(const char *group, const char *name)
 
 	program = initialize_program(args, false);
 
-	log_info("Provisionnning Virtual Machine \"%s\"", name);
+	log_info("Provisioning Virtual Machine \"%s\"", name);
 
 	return azure_start_command(&program);
 }
@@ -751,6 +764,9 @@ azure_provision_vms(int count, bool monitor, const char *group)
 		log_error("pg_autoctl only supports up to 26 VMs per region");
 		return false;
 	}
+
+	log_info("Provisioning %d Virtual Machines in parallel",
+			 monitor ? count + 1 : count);
 
 	/* index == 0 for the monitor, then 1..count for the other nodes */
 	for (int index = 0; index <= count; index++)
@@ -815,7 +831,6 @@ azure_create_region(const char *prefix,
 	char subnetPrefix[BUFSIZE] = { 0 };
 
 	char ipAddress[BUFSIZE] = { 0 };
-	char *ports = "22 5432";
 
 	/*
 	 * First create the resource group in the target location.
@@ -870,11 +885,7 @@ azure_create_region(const char *prefix,
 	/*
 	 * Create the network security rules for SSH and Postgres protocols.
 	 */
-	if (!azure_create_nsg_rule(groupName,
-							   nsgName,
-							   nsgRuleName,
-							   ipAddress,
-							   ports))
+	if (!azure_create_nsg_rule(groupName, nsgName, nsgRuleName, ipAddress))
 	{
 		/* errors have already been logged */
 		return false;
@@ -925,6 +936,7 @@ azure_create_region(const char *prefix,
 							  groupName,
 							  vnetName,
 							  subnetName,
+							  nsgName,
 							  "debian",
 							  "ha-admin"))
 		{

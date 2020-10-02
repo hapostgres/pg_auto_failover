@@ -28,8 +28,7 @@ bool azure_create_nsg(const char *group, const char *name);
 bool azure_create_nsg_rule(const char *group,
 						   const char *nsgName,
 						   const char *name,
-						   const char *prefixes,
-						   const char *ports);
+						   const char *prefixes);
 
 bool azure_create_subnet(const char *group,
 						 const char *vnet,
@@ -41,6 +40,7 @@ bool azure_create_vm(const char *group,
 					 const char *name,
 					 const char *vnet,
 					 const char *subnet,
+					 const char *nsg,
 					 const char *image,
 					 const char *username);
 
@@ -49,6 +49,7 @@ bool azure_create_vms(int count,
 					  const char *group,
 					  const char *vnet,
 					  const char *subnet,
+					  const char *nsg,
 					  const char *image,
 					  const char *username);
 
@@ -62,5 +63,8 @@ bool azure_create_region(const char *prefix,
 						 bool monitor,
 						 int nodes);
 
+bool azure_create_service(const char *prefix,
+						  const char *name,
+						  int nodes);
 
 #endif  /* AZURE_H */
