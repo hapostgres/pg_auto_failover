@@ -341,8 +341,18 @@ CommandLine do_azure_create_commands =
 					 "create azure resources for a pg_auto_failover demo",
 					 NULL, NULL, NULL, do_azure_create);
 
+CommandLine do_azure_ls =
+	make_command("ls",
+				 "List resources in a given azure region",
+				 "[option ...]",
+				 "  --prefix    azure group name prefix (ha-demo)\n"
+				 "  --name      name to use for referencing the region\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_ls);
+
 CommandLine *do_azure[] = {
 	&do_azure_create_commands,
+	&do_azure_ls,
 	NULL
 };
 

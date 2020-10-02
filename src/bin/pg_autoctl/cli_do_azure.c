@@ -270,12 +270,6 @@ cli_do_azure_getopts(int argc, char **argv)
 		log_fatal("--prefix is a mandatory option");
 	}
 
-	if (IS_EMPTY_STRING_BUFFER(options.location))
-	{
-		++errors;
-		log_fatal("--location is a mandatory option");
-	}
-
 	if (IS_EMPTY_STRING_BUFFER(azureCLI))
 	{
 		if (!search_path_first("az", azureCLI))
@@ -352,6 +346,12 @@ cli_do_azure_create_region(int argc, char **argv)
 {
 	AzureOptions options = azureOptions;
 
+	if (IS_EMPTY_STRING_BUFFER(options.location))
+	{
+		log_fatal("--location is a mandatory option");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
 	if (!azure_create_region(options.prefix,
 							 options.name,
 							 options.location,
@@ -373,8 +373,8 @@ cli_do_azure_create_region(int argc, char **argv)
 
 
 /*
- * do_azure_create_service creates the pg_autoctl services in an Azure region
- * that's been created and provisionned before.
+ * cli_do_azure_create_service creates the pg_autoctl services in an Azure
+ * region that's been created and provisionned before.
  */
 void
 cli_do_azure_create_service(int argc, char **argv)
@@ -385,6 +385,23 @@ cli_do_azure_create_service(int argc, char **argv)
 							  options.name,
 							  options.monitor,
 							  options.nodes))
+	{
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	(void) outputAzureScript();
+}
+
+
+/*
+ * cli_do_azure_ls lists Azure resources created in the target region.
+ */
+void
+cli_do_azure_ls(int argc, char **argv)
+{
+	AzureOptions options = azureOptions;
+
+	if (!azure_ls(options.prefix, options.name))
 	{
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}

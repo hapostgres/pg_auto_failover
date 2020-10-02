@@ -56,6 +56,8 @@ bool azure_create_vms(int count,
 bool azure_provision_vm(const char *group, const char *name);
 bool azure_provision_vms(int count, bool monitor, const char *group);
 
+bool azure_resource_list(const char *group);
+
 bool azure_create_region(const char *prefix,
 						 const char *name,
 						 const char *location,
@@ -67,5 +69,7 @@ bool azure_create_service(const char *prefix,
 						  const char *name,
 						  bool monitor,
 						  int nodes);
+
+bool azure_ls(const char *prefix, const char *name);
 
 #endif  /* AZURE_H */

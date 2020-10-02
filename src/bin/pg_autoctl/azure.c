@@ -805,6 +805,59 @@ azure_provision_vms(int count, bool monitor, const char *group)
 
 
 /*
+ * azure_resource_list runs the command azure resource list.
+ */
+bool
+azure_resource_list(const char *group)
+{
+	char *args[16];
+	int argsIndex = 0;
+	bool success = true;
+
+	Program program;
+
+	char query[BUFSIZE] = { 0 };
+
+	char command[BUFSIZE] = { 0 };
+
+	sformat(query, BUFSIZE,
+			"[?resourceGroup=='%s']"
+			".{ name: name, flavor: kind, resourceType: type, region: location }",
+			group);
+
+	args[argsIndex++] = azureCLI;
+	args[argsIndex++] = "resource";
+	args[argsIndex++] = "list";
+	args[argsIndex++] = "--output";
+	args[argsIndex++] = "table";
+	args[argsIndex++] = "--query";
+	args[argsIndex++] = (char *) query;
+	args[argsIndex++] = NULL;
+
+	program = initialize_program(args, false);
+
+	(void) snprintf_program_command_line(&program, command, sizeof(command));
+
+	log_info("%s", command);
+
+	(void) execute_subprogram(&program);
+	success = program.returnCode == 0;
+
+	if (success)
+	{
+		fformat(stdout, "%s", program.stdOut);
+	}
+	else
+	{
+		(void) log_program_output(&program, LOG_INFO, LOG_ERROR);
+	}
+	free_program(&program);
+
+	return success;
+}
+
+
+/*
  * azure_create_region creates a region on Azure and prepares it for
  * pg_auto_failover demo/QA activities.
  *
@@ -965,4 +1018,18 @@ azure_create_service(const char *prefix,
 					 int nodes)
 {
 	return true;
+}
+
+
+/*
+ * azure_ls lists the azure resources we created in a specific region.
+ */
+bool
+azure_ls(const char *prefix, const char *name)
+{
+	char groupName[BUFSIZE] = { 0 };
+
+	sformat(groupName, sizeof(groupName), "%s-%s", prefix, name);
+
+	return azure_resource_list(groupName);
 }
