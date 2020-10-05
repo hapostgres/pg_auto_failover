@@ -946,10 +946,11 @@ start_rsync_command(const char *username,
 
 	/* use our usual ssh options even when using it through rsync */
 	sformat(essh, sizeof(essh),
-			"%s -o '%s' -o '%s'",
+			"%s -o '%s' -o '%s' -o '%s'",
 			ssh,
 			"StrictHostKeyChecking=no",
-			"UserKnownHostsFile /dev/null");
+			"UserKnownHostsFile /dev/null",
+			"LogLevel=quiet");
 
 	/* we need the rsync remote as one string */
 	sformat(rsync_remote, sizeof(rsync_remote),
@@ -1623,6 +1624,8 @@ run_ssh(const char *username, const char *ip)
 	args[argsIndex++] = "StrictHostKeyChecking=no";
 	args[argsIndex++] = "-o";
 	args[argsIndex++] = "UserKnownHostsFile /dev/null";
+	args[argsIndex++] = "-o";
+	args[argsIndex++] = "LogLevel=quiet";
 	args[argsIndex++] = "-l";
 	args[argsIndex++] = (char *) username;
 	args[argsIndex++] = (char *) ip;
@@ -1678,6 +1681,8 @@ run_ssh_command(const char *username,
 	args[argsIndex++] = "StrictHostKeyChecking=no";
 	args[argsIndex++] = "-o";
 	args[argsIndex++] = "UserKnownHostsFile /dev/null";
+	args[argsIndex++] = "-o";
+	args[argsIndex++] = "LogLevel=quiet";
 	args[argsIndex++] = "-l";
 	args[argsIndex++] = (char *) username;
 	args[argsIndex++] = (char *) ip;
