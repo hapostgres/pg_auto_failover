@@ -421,7 +421,7 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		 * the monitor asked us to stop serving queries, in order to ensure
 		 * consistency.
 		 *
-		 * Only enfore current state when we have a recent enough version of
+		 * Only enforce current state when we have a recent enough version of
 		 * it, meaning that we could contact the monitor.
 		 *
 		 * We need to prevent the keeper from restarting PostgreSQL at boot

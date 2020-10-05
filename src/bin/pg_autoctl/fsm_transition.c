@@ -617,7 +617,7 @@ fsm_enable_sync_rep(Keeper *keeper)
 /*
  * fsm_apply_settings is used when a pg_auto_failover setting has changed, such
  * as number_sync_standbys or node priorities and replication quorum
- * properties.
+ * properties, or when a standby node has been removed/appears.
  *
  * So we have to fetch the current synchronous_standby_names setting value from
  * the monitor and apply it (reload) to the current node.

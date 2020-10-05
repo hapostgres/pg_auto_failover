@@ -313,7 +313,7 @@ KeeperFSMTransition KeeperFSM[] = {
 
 	/*
 	 * Applying new replication/cluster settings (per node replication quorum,
-	 * candidate priorities, or per formation number_sync_standbys) means we
+	 * candidate priorities, removing/adding a standby node, or per formation number_sync_standbys) means we
 	 * have to fetch the new value for synchronous_standby_names from the
 	 * monitor.
 	 */

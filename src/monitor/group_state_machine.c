@@ -785,7 +785,7 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 	 *   secondary ➜ catchingup
 	 *     primary ➜ wait_primary
 	 *
-	 * We only swith the primary to wait_primary when there's no healthy
+	 * We only switch the primary to wait_primary when there's no healthy
 	 * secondary anymore. In other cases, there's by definition at least one
 	 * candidate for failover.
 	 */

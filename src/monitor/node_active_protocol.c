@@ -1129,6 +1129,14 @@ RemoveNode(AutoFailoverNode *currentNode)
 		if (primaryNode)
 		{
 			(void) ProceedGroupState(primaryNode);
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of %s:%d to apply_settings "
+				"after removing standby node %s:%d from formation %s.",
+				primaryNode->nodeHost, primaryNode->nodePort,
+				currentNode->nodeHost, currentNode->nodePort,
+				formation->formationId);
+			SetNodeGoalState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS, message);
 		}
 	}
 
