@@ -1073,13 +1073,18 @@ azure_build_pg_autoctl(AzureRegionResources *azRegion)
 	pid_t pidArray[MAX_VMS_PER_REGION] = { 0 };
 
 	char *buildCommand =
-		"make -C pg_auto_failover -s clean all && "
-		"sudo make BINDIR=/usr/local/bin -C pg_auto_failover install";
+		"make PG_CONFIG=/usr/lib/postgresql/11/bin/pg_config "
+		"-C pg_auto_failover -s clean all "
+		" && "
+		"sudo make PG_CONFIG=/usr/lib/postgresql/11/bin/pg_config "
+		"BINDIR=/usr/local/bin -C pg_auto_failover install";
 
 	log_info("Building pg_auto_failover from sources on %d Azure VMs",
 			 azRegion->nodes +
 			 (azRegion->monitor ? 1 : 0) +
 			 (azRegion->appNode ? 1 : 0));
+
+	log_info("%s", buildCommand);
 
 	/* index == 0 for the monitor, then 1..count for the other nodes */
 	for (int index = 0; index <= azRegion->nodes; index++)
