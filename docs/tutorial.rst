@@ -36,6 +36,163 @@ When the setup is done, the following machines are deployed and ready:
     service, from where we're going to create some SQL activity using the
     ``psql`` command from Postgres.
 
+.. _script_single_nodes:
+
+Install the "pg_autoctl" executable
+-----------------------------------
+
+This guide uses Debian Linux, but similar steps will work on other
+distributions. All that differs are the packages and paths. See :ref:`install`.
+
+The pg_auto_failover system is distributed as a single ``pg_autoctl`` binary
+with subcommands to initialize and manage a replicated PostgreSQL service.
+We’ll install the binary with the operating system package manager on all
+nodes. It will help us run and observe PostgreSQL.
+
+.. code-block:: bash
+
+  for node in monitor a b app
+  do
+  az vm run-command invoke \
+     --resource-group ha-demo \
+     --name ha-demo-${node} \
+     --command-id RunShellScript \
+     --scripts \
+        "curl https://install.citusdata.com/community/deb.sh | sudo bash" \
+        "sudo apt-get install -q -y postgresql-common" \
+        "echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf" \
+        "sudo apt-get install -q -y postgresql-11-auto-failover-1.4" \
+        "sudo usermod -a -G postgres ha-admin" &
+  done
+  wait
+
+Run a monitor
+-------------
+
+The pg_auto_failover monitor is the first component to run. It periodically
+attempts to contact the other nodes and watches their health. It also
+maintains global state that “keepers” on each node consult to determine their
+own roles in the system.
+
+.. code-block:: bash
+
+   # on the monitor virtual machine
+
+   ssh -l ha-admin `vm_ip monitor` -- \
+     pg_autoctl create monitor \
+       --auth trust \
+       --ssl-self-signed \
+       --pgdata monitor \
+       --pgctl /usr/lib/postgresql/11/bin/pg_ctl
+
+This command initializes a PostgreSQL cluster at the location pointed
+by the ``--pgdata`` option. When ``--pgdata`` is omitted, ``pg_autoctl``
+attempts to use the ``PGDATA`` environment variable. If a PostgreSQL
+instance had already existing in the destination directory, this command
+would have configured it to serve as a monitor.
+
+``pg_auto_failover``, installs the ``pgautofailover`` Postgres extension, and
+grants access to a new ``autoctl_node`` user.
+
+In the Quick Start we use ``--auth trust`` to avoid complex security settings.
+The Postgres `trust authentication method`__ is not considered a reasonable
+choice for production environments. Consider either using the ``--skip-pg-hba``
+option or ``--auth scram-sha-256`` and then setting up passwords yourself.
+
+__ https://www.postgresql.org/docs/current/auth-trust.html_
+
+At this point the monitor is created. Now we'll install it as a service with
+systemd so that it will resume if the VM restarts.
+
+.. code-block:: bash
+
+   ssh -l ha-admin `vm_ip monitor` << CMD
+     pg_autoctl -q show systemd --pgdata ~ha-admin/monitor > pgautofailover.service
+     sudo mv pgautofailover.service /etc/systemd/system
+     sudo systemctl daemon-reload
+     sudo systemctl enable pgautofailover
+     sudo systemctl start pgautofailover
+   CMD
+
+
+Bring up the nodes
+------------------
+
+We’ll create the primary database using the ``pg_autoctl create`` subcommand.
+
+.. code-block:: bash
+
+   ssh -l ha-admin `vm_ip a` -- \
+     pg_autoctl create postgres \
+       --pgdata ha \
+       --auth trust \
+       --ssl-self-signed \
+       --username ha-admin \
+       --dbname appdb \
+       --hostname ha-demo-a.internal.cloudapp.net \
+       --pgctl /usr/lib/postgresql/11/bin/pg_ctl \
+       --monitor 'postgres://autoctl_node@ha-demo-monitor.internal.cloudapp.net/pg_auto_failover?sslmode=require'
+
+Notice the user and database name in the monitor connection string -- these
+are what monitor init created. We also give it the path to pg_ctl so that the
+keeper will use the correct version of pg_ctl in future even if other versions
+of postgres are installed on the system.
+
+In the example above, the keeper creates a primary database. It chooses to set
+up node A as primary because the monitor reports there are no other nodes in
+the system yet. This is one example of how the keeper is state-based: it makes
+observations and then adjusts its state, in this case from "init" to "single."
+
+Also add a setting to trust connections from our "application" VM:
+
+.. code-block:: bash
+
+   ssh -l ha-admin `vm_ip a` << CMD
+     echo 'hostssl "appdb" "ha-admin" ha-demo-app.internal.cloudapp.net trust' \
+       >> ~ha-admin/ha/pg_hba.conf
+   CMD
+
+At this point the monitor and primary node are created and running. Next we
+need to run the keeper. It’s an independent process so that it can continue
+operating even if the PostgreSQL process goes terminates on the node. We'll
+install it as a service with systemd so that it will resume if the VM restarts.
+
+.. code-block:: bash
+
+   ssh -l ha-admin `vm_ip a` << CMD
+     pg_autoctl -q show systemd --pgdata ~ha-admin/ha > pgautofailover.service
+     sudo mv pgautofailover.service /etc/systemd/system
+     sudo systemctl daemon-reload
+     sudo systemctl enable pgautofailover
+     sudo systemctl start pgautofailover
+   CMD
+
+Next connect to node B and do the same process. We'll do both steps at once:
+
+.. code-block:: bash
+
+   ssh -l ha-admin `vm_ip b` -- \
+     pg_autoctl create postgres \
+       --pgdata ha \
+       --auth trust \
+       --ssl-self-signed \
+       --username ha-admin \
+       --dbname appdb \
+       --hostname ha-demo-b.internal.cloudapp.net \
+       --pgctl /usr/lib/postgresql/11/bin/pg_ctl \
+       --monitor 'postgres://autoctl_node@ha-demo-monitor.internal.cloudapp.net/pg_auto_failover?sslmode=require'
+
+   ssh -l ha-admin `vm_ip b` << CMD
+     pg_autoctl -q show systemd --pgdata ~ha-admin/ha > pgautofailover.service
+     sudo mv pgautofailover.service /etc/systemd/system
+     sudo systemctl daemon-reload
+     sudo systemctl enable pgautofailover
+     sudo systemctl start pgautofailover
+   CMD
+
+It discovers from the monitor that a primary exists, and then switches its own
+state to be a hot standby and begins streaming WAL contents from the primary.
+
 Node communication
 ------------------
 
