@@ -1719,19 +1719,6 @@ azure_create_nodes(const char *prefix,
 
 
 /*
- * azure_create_service creates the pg_autoctl services on the target nodes
- */
-bool
-azure_create_service(const char *prefix,
-					 const char *name,
-					 bool monitor,
-					 int nodes)
-{
-	return true;
-}
-
-
-/*
  * azure_ls lists the azure resources we created in a specific resource group.
  */
 bool

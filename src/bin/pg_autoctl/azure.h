@@ -103,11 +103,6 @@ bool azure_create_nodes(const char *prefix,
 						bool monitor,
 						int nodes);
 
-bool azure_create_service(const char *prefix,
-						  const char *name,
-						  bool monitor,
-						  int nodes);
-
 bool azure_ls(const char *prefix, const char *name);
 bool azure_show_ips(const char *prefix, const char *name);
 bool azure_ssh(const char *prefix, const char *name, const char *vm);

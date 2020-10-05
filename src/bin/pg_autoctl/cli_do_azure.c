@@ -394,27 +394,6 @@ cli_do_azure_create_nodes(int argc, char **argv)
 
 
 /*
- * cli_do_azure_create_service creates the pg_autoctl services in an Azure
- * region that's been created and provisionned before.
- */
-void
-cli_do_azure_create_service(int argc, char **argv)
-{
-	AzureOptions options = azureOptions;
-
-	if (!azure_create_service(options.prefix,
-							  options.region,
-							  options.monitor,
-							  options.nodes))
-	{
-		exit(EXIT_CODE_INTERNAL_ERROR);
-	}
-
-	(void) outputAzureScript();
-}
-
-
-/*
  * cli_do_azure_ls lists Azure resources created in the target region.
  */
 void
