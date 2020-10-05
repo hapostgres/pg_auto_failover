@@ -1070,6 +1070,22 @@ SELECT reportedstate
 
         return out.strip()
 
+    def get_synchronous_standby_names_local(self):
+        """
+            Gets number sync standbys  via pg_autoctl
+        """
+        query = "select current_setting('synchronous_standby_names')"
+
+        result = self.run_sql_query(query)
+        return result[0][0]
+
+    def print_synchronous_standby_names(self):
+        print("synchronous_standby_names       = '%s'\nsynchronous_standby_names_local = '%s'" %
+              (self.get_synchronous_standby_names(),
+               self.get_synchronous_standby_names_local())
+              )
+        return
+
     def list_replication_slot_names(self):
         """
             Returns a list of the replication slot names on the local Postgres.

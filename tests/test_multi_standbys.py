@@ -111,20 +111,21 @@ def test_005_number_sync_standbys():
     print("set number_sync_standbys = 2")
     assert node1.set_number_sync_standbys(2)
     assert node1.get_number_sync_standbys() == 2
-    print("synchronous_standby_names = '%s'" %
-          node1.get_synchronous_standby_names())
+    node1.print_synchronous_standby_names()
+    assert node1.get_synchronous_standby_names() == node1.get_synchronous_standby_names_local()
 
     print("set number_sync_standbys = 0")
     assert node1.set_number_sync_standbys(0)
     assert node1.get_number_sync_standbys() == 0
-    print("synchronous_standby_names = '%s'" %
-          node1.get_synchronous_standby_names())
+    node1.print_synchronous_standby_names()
+    assert node1.get_synchronous_standby_names() == node1.get_synchronous_standby_names_local()
 
     print("set number_sync_standbys = 1")
     assert node1.set_number_sync_standbys(1)
     assert node1.get_number_sync_standbys() == 1
-    print("synchronous_standby_names = '%s'" %
-          node1.get_synchronous_standby_names())
+    node1.print_synchronous_standby_names()
+    assert node1.get_synchronous_standby_names() == node1.get_synchronous_standby_names_local()
+
 
 def test_006_number_sync_standbys_trigger():
     assert node1.set_number_sync_standbys(2)
@@ -133,6 +134,8 @@ def test_006_number_sync_standbys_trigger():
     node4.drop()
     assert node1.get_number_sync_standbys() == 1
     assert node1.wait_until_state(target_state="primary")
+    node1.print_synchronous_standby_names()
+    assert node1.get_synchronous_standby_names() == node1.get_synchronous_standby_names_local()
 
     # there's no state change to instruct us that the replication slot
     # maintenance is now done, so we have to wait for awhile instead.
