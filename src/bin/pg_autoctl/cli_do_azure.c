@@ -43,6 +43,7 @@ typedef struct AzureOptions
 
 	int nodes;
 	int cidr;
+	bool appNode;
 	bool monitor;
 	bool all;
 	bool watch;
@@ -75,6 +76,7 @@ cli_do_azure_getopts(int argc, char **argv)
 		{ "location", required_argument, NULL, 'l' },
 		{ "nodes", required_argument, NULL, 'N' },
 		{ "monitor", no_argument, NULL, 'M' },
+		{ "no-app", no_argument, NULL, 'n' },
 		{ "all", no_argument, NULL, 'A' },
 		{ "script", no_argument, NULL, 'S' },
 		{ "watch", no_argument, NULL, 'T' },
@@ -92,6 +94,7 @@ cli_do_azure_getopts(int argc, char **argv)
 	/* set our defaults */
 	options.cidr = 11;          /* 10.11.0.0/16 and 10.11.11.0/24 */
 	options.nodes = 2;
+	options.appNode = true;
 	options.monitor = false;
 	options.all = false;
 	options.watch = false;
@@ -182,6 +185,14 @@ cli_do_azure_getopts(int argc, char **argv)
 			{
 				options.monitor = true;
 				log_trace("--monitor");
+				break;
+			}
+
+			/* { "no-app", no_argument, NULL, 'n' }, */
+			case 'n':
+			{
+				options.appNode = false;
+				log_trace("--no-app");
 				break;
 			}
 
@@ -357,6 +368,7 @@ cli_do_azure_create_region(int argc, char **argv)
 							 options.location,
 							 options.cidr,
 							 options.monitor,
+							 options.appNode,
 							 options.nodes))
 	{
 		exit(EXIT_CODE_INTERNAL_ERROR);
@@ -384,6 +396,7 @@ cli_do_azure_create_nodes(int argc, char **argv)
 	if (!azure_create_nodes(options.prefix,
 							options.region,
 							options.monitor,
+							options.appNode,
 							options.nodes))
 	{
 		exit(EXIT_CODE_INTERNAL_ERROR);

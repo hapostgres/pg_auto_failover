@@ -20,7 +20,7 @@ extern bool dryRun;
 extern PQExpBuffer azureScript;
 extern char azureCLI[MAXPGPATH];
 
-#define MAX_VMS_PER_REGION 27   /* monitor, then [a-z] */
+#define MAX_VMS_PER_REGION 28   /* monitor, then pg ndoes [a-z], then app */
 
 typedef struct AzureVMipAddresses
 {
@@ -42,6 +42,7 @@ typedef struct AzureRegionResources
 	char subnet[BUFSIZE];
 
 	bool monitor;               /* do we want a monitor in that region? */
+	bool appNode;               /* do we create an application node? */
 	int nodes;                  /* node count */
 
 	AzureVMipAddresses vmArray[MAX_VMS_PER_REGION];
@@ -91,16 +92,19 @@ bool azure_create_region(const char *prefix,
 						 const char *location,
 						 int cidr,
 						 bool monitor,
+						 bool appNode,
 						 int nodes);
 
 bool azure_provision_nodes(const char *prefix,
 						   const char *region,
 						   bool monitor,
+						   bool appNode,
 						   int nodes);
 
 bool azure_create_nodes(const char *prefix,
 						const char *region,
 						bool monitor,
+						bool appNode,
 						int nodes);
 
 bool azure_ls(const char *prefix, const char *name);

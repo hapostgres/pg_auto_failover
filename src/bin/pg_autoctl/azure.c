@@ -38,7 +38,7 @@
 char azureCLI[MAXPGPATH] = { 0 };
 
 static void azure_prepare_region(const char *prefix, const char *region,
-								 bool monitor, int nodes,
+								 bool monitor, bool appNode, int nodes,
 								 AzureRegionResources *azRegion);
 
 static int azure_run_command(Program *program);
@@ -566,7 +566,7 @@ azure_create_subnet(const char *group,
  */
 static void
 azure_prepare_region(const char *prefix, const char *region,
-					 bool monitor, int nodes,
+					 bool monitor, bool appNode, int nodes,
 					 AzureRegionResources *azRegion)
 {
 	/*
@@ -590,6 +590,7 @@ azure_prepare_region(const char *prefix, const char *region,
 			"%s-subnet", azRegion->group);
 
 	azRegion->monitor = monitor;
+	azRegion->appNode = appNode;
 	azRegion->nodes = nodes;
 }
 
@@ -598,12 +599,13 @@ azure_prepare_region(const char *prefix, const char *region,
  * azure_prepare_node_name is a utility function that prepares a node name to
  * use for a VM in our pg_auto_failover deployment in a target Azure region.
  *
- * In the resource group "ha-demo-dim-paris" when creating a monitor (index 0)
- * and 2 VMs we would have the following names:
+ * In the resource group "ha-demo-dim-paris" when creating a monitor (index 0),
+ * an app VM (index 27), and 2 pg nodes VMs we would have the following names:
  *
- *   - ha-demo-dim-paris-monitor
- *   - ha-demo-dim-paris-a
- *   - ha-demo-dim-paris-a
+ *   -  [0] ha-demo-dim-paris-monitor
+ *   -  [1] ha-demo-dim-paris-a
+ *   -  [2] ha-demo-dim-paris-b
+ *   - [27] ha-demo-dim-paris-app
  */
 static void
 azure_prepare_node(AzureRegionResources *azRegion, int index)
@@ -615,6 +617,13 @@ azure_prepare_node(AzureRegionResources *azRegion, int index)
 		sformat(azRegion->vmArray[index].name,
 				sizeof(azRegion->vmArray[index].name),
 				"%s-monitor",
+				azRegion->group);
+	}
+	else if (index == MAX_VMS_PER_REGION - 1)
+	{
+		sformat(azRegion->vmArray[index].name,
+				sizeof(azRegion->vmArray[index].name),
+				"%s-app",
 				azRegion->group);
 	}
 	else
@@ -652,9 +661,21 @@ azure_node_index_from_name(const char *group, const char *name)
 	/* skip group name and dash: ha-demo-dim-paris- */
 	ptr = (char *) name + groupNameLen + 1;
 
+	/*
+	 * ha-demo-dim-paris-monitor is always index 0
+	 * ha-demo-dim-paris-app     is always index 27 (last in the array)
+	 * ha-demo-dim-paris-a       is index 1
+	 * ha-demo-dim-paris-b       is index 2
+	 * ...
+	 * ha-demo-dim-paris-z       is index 26
+	 */
 	if (strcmp(ptr, "monitor") == 0)
 	{
 		return 0;
+	}
+	else if (strcmp(ptr, "app") == 0)
+	{
+		return MAX_VMS_PER_REGION - 1;
 	}
 	else
 	{
@@ -751,8 +772,9 @@ azure_create_vms(AzureRegionResources *azRegion,
 			continue;
 		}
 
-		/* skip VMs that already exist */
-		if (!IS_EMPTY_STRING_BUFFER(azRegion->vmArray[index].name) &&
+		/* skip VMs that already exist, unless --script is used */
+		if (!dryRun &&
+			!IS_EMPTY_STRING_BUFFER(azRegion->vmArray[index].name) &&
 			!IS_EMPTY_STRING_BUFFER(azRegion->vmArray[index].public) &&
 			!IS_EMPTY_STRING_BUFFER(azRegion->vmArray[index].private))
 		{
@@ -762,6 +784,20 @@ azure_create_vms(AzureRegionResources *azRegion,
 					 azRegion->vmArray[index].public);
 			continue;
 		}
+
+		(void) azure_prepare_node(azRegion, index);
+
+		pidArray[index] = azure_create_vm(azRegion,
+										  azRegion->vmArray[index].name,
+										  image,
+										  username);
+		++pending;
+	}
+
+	/* also create the application node VM when asked to */
+	if (azRegion->appNode)
+	{
+		int index = MAX_VMS_PER_REGION - 1;
 
 		(void) azure_prepare_node(azRegion, index);
 
@@ -861,6 +897,7 @@ azure_provision_vm(const char *group, const char *name)
 bool
 azure_provision_vms(AzureRegionResources *azRegion)
 {
+	int pending = 0;
 	pid_t pidArray[MAX_VMS_PER_REGION] = { 0 };
 
 	/* we read from left to right, have the smaller number on the left */
@@ -871,7 +908,9 @@ azure_provision_vms(AzureRegionResources *azRegion)
 	}
 
 	log_info("Provisioning %d Virtual Machines in parallel",
-			 azRegion->monitor ? azRegion->nodes + 1 : azRegion->nodes);
+			 azRegion->nodes +
+			 azRegion->monitor ? 1 : 0 +
+			 azRegion->appNode ? 1 : 0);
 
 	/* index == 0 for the monitor, then 1..count for the other nodes */
 	for (int index = 0; index <= azRegion->nodes; index++)
@@ -886,6 +925,20 @@ azure_provision_vms(AzureRegionResources *azRegion)
 
 		pidArray[index] = azure_provision_vm(azRegion->group,
 											 azRegion->vmArray[index].name);
+
+		++pending;
+	}
+
+	/* also provision the application node VM when asked to */
+	if (azRegion->appNode)
+	{
+		int index = MAX_VMS_PER_REGION - 1;
+
+		(void) azure_prepare_node(azRegion, index);
+
+		pidArray[index] = azure_provision_vm(azRegion->group,
+											 azRegion->vmArray[index].name);
+		++pending;
 	}
 
 	/* now wait for the child processes to be done */
@@ -899,7 +952,7 @@ azure_provision_vms(AzureRegionResources *azRegion)
 		{
 			log_fatal("Failed to provision all %d azure VMs, "
 					  "see above for details",
-					  azRegion->nodes);
+					  pending);
 			return false;
 		}
 	}
@@ -1417,6 +1470,7 @@ azure_create_region(const char *prefix,
 					const char *location,
 					int cidr,
 					bool monitor,
+					bool appNode,
 					int nodes)
 {
 	AzureRegionResources azRegion = { 0 };
@@ -1426,7 +1480,8 @@ azure_create_region(const char *prefix,
 	char subnetPrefix[BUFSIZE] = { 0 };
 	char ipAddress[BUFSIZE] = { 0 };
 
-	(void) azure_prepare_region(prefix, region, nodes, monitor, &azRegion);
+	(void) azure_prepare_region(prefix, region, monitor, appNode, nodes,
+								&azRegion);
 
 	/*
 	 * Fetch Azure objects that might have already been created in the target
@@ -1434,10 +1489,13 @@ azure_create_region(const char *prefix,
 	 * run several times in a row and then "fix itself", or at least continue
 	 * from where it failed.
 	 */
-	if (!azure_fetch_resource_list(azRegion.group, &azRegionFound))
+	if (!dryRun)
 	{
-		/* errors have already been logged */
-		return false;
+		if (!azure_fetch_resource_list(azRegion.group, &azRegionFound))
+		{
+			/* errors have already been logged */
+			return false;
+		}
 	}
 
 	/*
@@ -1455,7 +1513,8 @@ azure_create_region(const char *prefix,
 	sformat(vnetPrefix, sizeof(vnetPrefix), "10.%d.0.0/16", cidr);
 	sformat(subnetPrefix, sizeof(subnetPrefix), "10.%d.%d.0/24", cidr, cidr);
 
-	if (IS_EMPTY_STRING_BUFFER(azRegionFound.vnet))
+	/* never skip a step when --script is used */
+	if (dryRun || IS_EMPTY_STRING_BUFFER(azRegionFound.vnet))
 	{
 		if (!azure_create_vnet(azRegion.group, azRegion.vnet, vnetPrefix))
 		{
@@ -1481,7 +1540,7 @@ azure_create_region(const char *prefix,
 	/*
 	 * Create the network security group.
 	 */
-	if (IS_EMPTY_STRING_BUFFER(azRegionFound.nsg))
+	if (dryRun || IS_EMPTY_STRING_BUFFER(azRegionFound.nsg))
 	{
 		if (!azure_create_nsg(azRegion.group, azRegion.nsg))
 		{
@@ -1523,7 +1582,7 @@ azure_create_region(const char *prefix,
 	/*
 	 * Now is time to create the virtual machines.
 	 */
-	return azure_provision_nodes(prefix, region, monitor, nodes);
+	return azure_provision_nodes(prefix, region, monitor, appNode, nodes);
 }
 
 
@@ -1535,11 +1594,13 @@ bool
 azure_provision_nodes(const char *prefix,
 					  const char *region,
 					  bool monitor,
+					  bool appNode,
 					  int nodes)
 {
 	AzureRegionResources azRegion = { 0 };
 
-	(void) azure_prepare_region(prefix, region, monitor, nodes, &azRegion);
+	(void) azure_prepare_region(prefix, region, monitor, appNode, nodes,
+								&azRegion);
 
 	if (!azure_fetch_ip_addresses(azRegion.group, azRegion.vmArray))
 	{
@@ -1596,11 +1657,13 @@ bool
 azure_create_nodes(const char *prefix,
 				   const char *region,
 				   bool monitor,
+				   bool appNode,
 				   int nodes)
 {
 	AzureRegionResources azRegion = { 0 };
 
-	(void) azure_prepare_region(prefix, region, monitor, nodes, &azRegion);
+	(void) azure_prepare_region(prefix, region, monitor, appNode, nodes,
+								&azRegion);
 
 	if (!azure_fetch_ip_addresses(azRegion.group, azRegion.vmArray))
 	{
