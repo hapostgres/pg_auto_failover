@@ -475,7 +475,7 @@ azure_create_nsg_rule(const char *group,
 					  const char *name,
 					  const char *ipAddress)
 {
-	char *args[28];
+	char *args[38];
 	int argsIndex = 0;
 
 	Program program;
