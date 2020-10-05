@@ -76,8 +76,8 @@ bool azure_create_vms(AzureRegionResources *azRegion,
 					  const char *image,
 					  const char *username);
 
-bool azure_provision_vm(const char *group, const char *name);
-bool azure_provision_vms(AzureRegionResources *azRegion);
+bool azure_provision_vm(const char *group, const char *name, bool fromSource);
+bool azure_provision_vms(AzureRegionResources *azRegion, bool fromSource);
 
 bool azure_resource_list(const char *group);
 bool azure_show_ip_addresses(const char *group);
@@ -91,12 +91,14 @@ bool azure_create_region(const char *prefix,
 						 const char *region,
 						 const char *location,
 						 int cidr,
+						 bool fromSource,
 						 bool monitor,
 						 bool appNode,
 						 int nodes);
 
 bool azure_provision_nodes(const char *prefix,
 						   const char *region,
+						   bool fromSource,
 						   bool monitor,
 						   bool appNode,
 						   int nodes);
@@ -112,5 +114,11 @@ bool azure_show_ips(const char *prefix, const char *name);
 bool azure_ssh(const char *prefix, const char *name, const char *vm);
 bool azure_ssh_command(const char *prefix, const char *name, const char *vm,
 					   bool tty, const char *command);
+
+bool azure_sync_source_dir(const char *prefix,
+						   const char *region,
+						   bool monitor,
+						   bool appNode,
+						   int nodes);
 
 #endif  /* AZURE_H */

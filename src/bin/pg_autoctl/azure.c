@@ -45,6 +45,34 @@ static int azure_run_command(Program *program);
 static pid_t azure_start_command(Program *program);
 static bool azure_wait_for_commands(int count, pid_t pidArray[]);
 
+static bool run_ssh(const char *username, const char *ip);
+
+static bool run_ssh_command(const char *username,
+							const char *ip,
+							bool tty,
+							const char *command);
+
+static bool start_ssh_command(const char *username,
+							  const char *ip,
+							  const char *command);
+
+static bool azure_git_toplevel(char *srcDir, size_t size);
+
+static bool start_rsync_command(const char *username,
+								const char *ip,
+								const char *srcDir);
+
+static bool azure_fetch_ip_addresses(const char *group,
+									 AzureVMipAddresses *vmArray);
+
+static bool azure_rsync_vms(AzureRegionResources *azRegion);
+
+static bool azure_fetch_resource_list(const char *group,
+									  AzureRegionResources *azRegion);
+
+static bool azure_fetch_vm_addresses(const char *group, const char *vm,
+									 AzureVMipAddresses *addresses);
+
 
 /* log_program_output logs the output of the given program. */
 static void
@@ -182,6 +210,10 @@ azure_start_command(Program *program)
 
 			(void) execute_subprogram(program);
 			returnCode = program->returnCode;
+
+			log_debug("Command %s exited with return code %d",
+					  program->args[0],
+					  returnCode);
 
 			if (returnCode != 0)
 			{
@@ -799,13 +831,26 @@ azure_create_vms(AzureRegionResources *azRegion,
 	{
 		int index = MAX_VMS_PER_REGION - 1;
 
-		(void) azure_prepare_node(azRegion, index);
+		if (!dryRun &&
+			!IS_EMPTY_STRING_BUFFER(azRegion->vmArray[index].name) &&
+			!IS_EMPTY_STRING_BUFFER(azRegion->vmArray[index].public) &&
+			!IS_EMPTY_STRING_BUFFER(azRegion->vmArray[index].private))
+		{
+			log_info("Skipping creation of VM \"%s\", "
+					 "which already exists with public IP address %s",
+					 azRegion->vmArray[index].name,
+					 azRegion->vmArray[index].public);
+		}
+		else
+		{
+			(void) azure_prepare_node(azRegion, index);
 
-		pidArray[index] = azure_create_vm(azRegion,
-										  azRegion->vmArray[index].name,
-										  image,
-										  username);
-		++pending;
+			pidArray[index] = azure_create_vm(azRegion,
+											  azRegion->vmArray[index].name,
+											  image,
+											  username);
+			++pending;
+		}
 	}
 
 	/* now wait for the child processes to be done */
@@ -829,18 +874,277 @@ azure_create_vms(AzureRegionResources *azRegion,
 
 
 /*
+ * azure_git_toplevel calls `git rev-parse --show-toplevel` and uses the result
+ * as the directory to rsync to our VMs when provisionning from sources.
+ */
+static bool
+azure_git_toplevel(char *srcDir, size_t size)
+{
+	Program program;
+	char git[MAXPGPATH] = { 0 };
+
+	if (!search_path_first("git", git))
+	{
+		log_fatal("Failed to find program git in PATH");
+		return false;
+	}
+
+	program = run_program(git, "rev-parse", "--show-toplevel", NULL);
+
+	if (program.returnCode != 0)
+	{
+		(void) log_program_output(&program, LOG_INFO, LOG_ERROR);
+		free_program(&program);
+		return false;
+	}
+	else
+	{
+		char *outLines[BUFSIZE];
+
+		/* git rev-parse --show-toplevel outputs a single line */
+		splitLines(program.stdOut, outLines, BUFSIZE);
+		strlcpy(srcDir, outLines[0], size);
+
+		free_program(&program);
+
+		return true;
+	}
+}
+
+
+/*
+ * start_rsync_command is used to sync our local source directory with a remote
+ * place on a target VM.
+ */
+static bool
+start_rsync_command(const char *username,
+					const char *ip,
+					const char *srcDir)
+{
+	char *args[16];
+	int argsIndex = 0;
+
+	Program program;
+
+	char ssh[MAXPGPATH] = { 0 };
+	char essh[MAXPGPATH] = { 0 };
+	char rsync[MAXPGPATH] = { 0 };
+	char sourceDir[MAXPGPATH] = { 0 };
+	char rsync_remote[MAXPGPATH] = { 0 };
+
+	if (!search_path_first("rsync", rsync))
+	{
+		log_fatal("Failed to find program rsync in PATH");
+		return false;
+	}
+
+	if (!search_path_first("ssh", ssh))
+	{
+		log_fatal("Failed to find program ssh in PATH");
+		return false;
+	}
+
+	/* use our usual ssh options even when using it through rsync */
+	sformat(essh, sizeof(essh),
+			"%s -o '%s' -o '%s'",
+			ssh,
+			"StrictHostKeyChecking=no",
+			"UserKnownHostsFile /dev/null");
+
+	/* we need the rsync remote as one string */
+	sformat(rsync_remote, sizeof(rsync_remote),
+			"%s@%s:/home/%s/pg_auto_failover/",
+			username, ip, username);
+
+	/* we need to ensure that the source directory terminates with a "/" */
+	if (strcmp(strrchr(srcDir, '/'), "/") != 0)
+	{
+		sformat(sourceDir, sizeof(sourceDir), "%s/", srcDir);
+	}
+	else
+	{
+		strlcpy(sourceDir, srcDir, sizeof(sourceDir));
+	}
+
+	args[argsIndex++] = rsync;
+	args[argsIndex++] = "-a";
+	args[argsIndex++] = "-e";
+	args[argsIndex++] = essh;
+	args[argsIndex++] = "--exclude='.git'";
+	args[argsIndex++] = "--exclude='*.o'";
+	args[argsIndex++] = "--exclude='*.deps'";
+	args[argsIndex++] = "--exclude='./src/bin/pg_autoctl/pg_autoctl'";
+	args[argsIndex++] = sourceDir;
+	args[argsIndex++] = rsync_remote;
+	args[argsIndex++] = NULL;
+
+	program = initialize_program(args, false);
+
+	return azure_start_command(&program);
+}
+
+
+/*
+ * azure_rsync_vms runs the rsync command for target VMs in parallel.
+ */
+static bool
+azure_rsync_vms(AzureRegionResources *azRegion)
+{
+	int pending = 0;
+	pid_t pidArray[MAX_VMS_PER_REGION] = { 0 };
+
+	char srcDir[MAXPGPATH] = { 0 };
+
+	if (!azure_git_toplevel(srcDir, sizeof(srcDir)))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	log_info("Syncing local directory \"%s\" to %d Azure VMs",
+			 srcDir,
+			 azRegion->nodes +
+			 (azRegion->monitor ? 1 : 0) +
+			 (azRegion->appNode ? 1 : 0));
+
+	/* index == 0 for the monitor, then 1..count for the other nodes */
+	for (int index = 0; index <= azRegion->nodes; index++)
+	{
+		/* skip index 0 when we're not creating a monitor */
+		if (index == 0 && !azRegion->monitor)
+		{
+			continue;
+		}
+
+		(void) azure_prepare_node(azRegion, index);
+
+		pidArray[index] =
+			start_rsync_command("ha-admin",
+								azRegion->vmArray[index].public,
+								srcDir);
+
+		++pending;
+	}
+
+	/* also provision the application node VM when asked to */
+	if (azRegion->appNode)
+	{
+		int index = MAX_VMS_PER_REGION - 1;
+
+		(void) azure_prepare_node(azRegion, index);
+
+		pidArray[index] =
+			start_rsync_command("ha-admin",
+								azRegion->vmArray[index].public,
+								srcDir);
+
+		++pending;
+	}
+
+	/* now wait for the child processes to be done */
+	if (dryRun)
+	{
+		appendPQExpBuffer(azureScript, "\nwait");
+	}
+	else
+	{
+		if (!azure_wait_for_commands(pending, pidArray))
+		{
+			log_fatal("Failed to provision all %d azure VMs, "
+					  "see above for details",
+					  pending);
+			return false;
+		}
+	}
+
+	return true;
+}
+
+
+/*
+ * azure_build_pg_autoctl runs `make all` then `make install` on all the target
+ * VMs in parallel, using an ssh command line.
+ */
+static bool
+azure_build_pg_autoctl(AzureRegionResources *azRegion)
+{
+	int pending = 0;
+	pid_t pidArray[MAX_VMS_PER_REGION] = { 0 };
+
+	char *buildCommand =
+		"make -C pg_auto_failover -s clean all && "
+		"sudo make BINDIR=/usr/local/bin -C pg_auto_failover install";
+
+	log_info("Building pg_auto_failover from sources on %d Azure VMs",
+			 azRegion->nodes +
+			 (azRegion->monitor ? 1 : 0) +
+			 (azRegion->appNode ? 1 : 0));
+
+	/* index == 0 for the monitor, then 1..count for the other nodes */
+	for (int index = 0; index <= azRegion->nodes; index++)
+	{
+		/* skip index 0 when we're not creating a monitor */
+		if (index == 0 && !azRegion->monitor)
+		{
+			continue;
+		}
+
+		(void) azure_prepare_node(azRegion, index);
+
+		pidArray[index] =
+			start_ssh_command("ha-admin",
+							  azRegion->vmArray[index].public,
+							  buildCommand);
+		++pending;
+	}
+
+	/* also provision the application node VM when asked to */
+	if (azRegion->appNode)
+	{
+		int index = MAX_VMS_PER_REGION - 1;
+
+		(void) azure_prepare_node(azRegion, index);
+
+		pidArray[index] =
+			start_ssh_command("ha-admin",
+							  azRegion->vmArray[index].public,
+							  buildCommand);
+		++pending;
+	}
+
+	/* now wait for the child processes to be done */
+	if (dryRun)
+	{
+		appendPQExpBuffer(azureScript, "\nwait");
+	}
+	else
+	{
+		if (!azure_wait_for_commands(pending, pidArray))
+		{
+			log_fatal("Failed to provision all %d azure VMs, "
+					  "see above for details",
+					  pending);
+			return false;
+		}
+	}
+
+	return true;
+}
+
+
+/*
  * azure_provision_vm runs the command `az vm run-command invoke` with our
  * provisioning script.
  */
 bool
-azure_provision_vm(const char *group, const char *name)
+azure_provision_vm(const char *group, const char *name, bool fromSource)
 {
 	char *args[26];
 	int argsIndex = 0;
 
 	Program program;
 
-	const char *scripts[] =
+	const char *scriptsFromPackage[] =
 	{
 		"curl https://install.citusdata.com/community/deb.sh | sudo bash",
 		"sudo apt-get install -q -y postgresql-common",
@@ -850,6 +1154,25 @@ azure_provision_vm(const char *group, const char *name)
 		"sudo usermod -a -G postgres ha-admin",
 		NULL
 	};
+
+	const char *scriptsFromSource[] =
+	{
+		"curl https://install.citusdata.com/community/deb.sh | sudo bash",
+		"sudo apt-get install -q -y postgresql-common",
+		"echo 'create_main_cluster = false' "
+		"| sudo tee -a /etc/postgresql-common/createcluster.conf",
+		"sudo apt-get build-dep -q -y postgresql-11",
+
+		/* we don't have deb-src for pg_auto_failover packages */
+		"sudo apt-get install -q -y postgresql-server-dev-all libkrb5-dev",
+		"sudo apt-get install -q -y postgresql-11 rsync",
+		"sudo usermod -a -G postgres ha-admin",
+		NULL
+	};
+
+	char **scripts =
+		fromSource ? (char **) scriptsFromSource : (char **) scriptsFromPackage;
+
 	char *quotedScripts[10][BUFSIZE] = { 0 };
 
 	args[argsIndex++] = azureCLI;
@@ -895,7 +1218,7 @@ azure_provision_vm(const char *group, const char *name)
  * waits until all the commands have finished.
  */
 bool
-azure_provision_vms(AzureRegionResources *azRegion)
+azure_provision_vms(AzureRegionResources *azRegion, bool fromSource)
 {
 	int pending = 0;
 	pid_t pidArray[MAX_VMS_PER_REGION] = { 0 };
@@ -909,8 +1232,8 @@ azure_provision_vms(AzureRegionResources *azRegion)
 
 	log_info("Provisioning %d Virtual Machines in parallel",
 			 azRegion->nodes +
-			 azRegion->monitor ? 1 : 0 +
-			 azRegion->appNode ? 1 : 0);
+			 (azRegion->monitor ? 1 : 0) +
+			 (azRegion->appNode ? 1 : 0));
 
 	/* index == 0 for the monitor, then 1..count for the other nodes */
 	for (int index = 0; index <= azRegion->nodes; index++)
@@ -924,7 +1247,8 @@ azure_provision_vms(AzureRegionResources *azRegion)
 		(void) azure_prepare_node(azRegion, index);
 
 		pidArray[index] = azure_provision_vm(azRegion->group,
-											 azRegion->vmArray[index].name);
+											 azRegion->vmArray[index].name,
+											 fromSource);
 
 		++pending;
 	}
@@ -937,7 +1261,8 @@ azure_provision_vms(AzureRegionResources *azRegion)
 		(void) azure_prepare_node(azRegion, index);
 
 		pidArray[index] = azure_provision_vm(azRegion->group,
-											 azRegion->vmArray[index].name);
+											 azRegion->vmArray[index].name,
+											 fromSource);
 		++pending;
 	}
 
@@ -948,7 +1273,7 @@ azure_provision_vms(AzureRegionResources *azRegion)
 	}
 	else
 	{
-		if (!azure_wait_for_commands(azRegion->nodes, pidArray))
+		if (!azure_wait_for_commands(pending, pidArray))
 		{
 			log_fatal("Failed to provision all %d azure VMs, "
 					  "see above for details",
@@ -1058,9 +1383,20 @@ azure_fetch_resource_list(const char *group, AzureRegionResources *azRegion)
 
 	if (success)
 	{
-		JSON_Value *js = json_parse_string(program.stdOut);
+		/* parson insists on having fresh heap allocated memory, apparently */
+		char *jsonString = strdup(program.stdOut);
+		JSON_Value *js = json_parse_string(jsonString);
 		JSON_Array *jsArray = json_value_get_array(js);
 		int count = json_array_get_count(jsArray);
+
+		if (js == NULL)
+		{
+			log_error("Failed to parse JSON string: %s", program.stdOut);
+			return false;
+		}
+
+		log_info("Found %d Azure resources already created in group \"%s\"",
+				 count, group);
 
 		for (int index = 0; index < count; index++)
 		{
@@ -1073,13 +1409,13 @@ azure_fetch_resource_list(const char *group, AzureRegionResources *azRegion)
 			{
 				strlcpy(azRegion->vnet, name, sizeof(azRegion->vnet));
 
-				log_debug("Found existing vnet \"%s\"", azRegion->vnet);
+				log_info("Found existing vnet \"%s\"", azRegion->vnet);
 			}
 			else if (streq(type, "Microsoft.Network/networkSecurityGroups"))
 			{
 				strlcpy(azRegion->nsg, name, sizeof(azRegion->nsg));
 
-				log_debug("Found existing nsg \"%s\"", azRegion->nsg);
+				log_info("Found existing nsg \"%s\"", azRegion->nsg);
 			}
 			else if (streq(type, "Microsoft.Compute/virtualMachines"))
 			{
@@ -1087,14 +1423,17 @@ azure_fetch_resource_list(const char *group, AzureRegionResources *azRegion)
 
 				strlcpy(azRegion->vmArray[index].name, name, NAMEDATALEN);
 
-				log_debug("Found existing VM[%d] \"%s\"", index, name);
+				log_info("Found existing VM \"%s\"", name);
 			}
 			else
 			{
+				/* ignore the resource Type listed */
 				log_debug("Unknown resource type: \"%s\" with name \"%s\"",
 						  type, name);
 			}
 		}
+
+		free(jsonString);
 	}
 	else
 	{
@@ -1369,6 +1708,58 @@ run_ssh_command(const char *username,
 
 
 /*
+ * start_ssh_command starts the given command on the remote machine given by ip
+ * address, as the given username.
+ */
+static bool
+start_ssh_command(const char *username,
+				  const char *ip,
+				  const char *command)
+{
+	char *args[16];
+	int argsIndex = 0;
+
+	Program program;
+
+	char ssh[MAXPGPATH] = { 0 };
+	char ssh_command[BUFSIZE] = { 0 };
+
+	if (!search_path_first("ssh", ssh))
+	{
+		log_fatal("Failed to find program ssh in PATH");
+		return false;
+	}
+
+	args[argsIndex++] = ssh;
+	args[argsIndex++] = "-o";
+	args[argsIndex++] = "StrictHostKeyChecking=no";
+	args[argsIndex++] = "-o";
+	args[argsIndex++] = "UserKnownHostsFile /dev/null";
+	args[argsIndex++] = "-o";
+	args[argsIndex++] = "LogLevel=quiet";
+	args[argsIndex++] = "-l";
+	args[argsIndex++] = (char *) username;
+	args[argsIndex++] = (char *) ip;
+	args[argsIndex++] = "--";
+	args[argsIndex++] = (char *) command;
+	args[argsIndex++] = NULL;
+
+	program = initialize_program(args, false);
+
+	(void) snprintf_program_command_line(&program, ssh_command, BUFSIZE);
+
+	if (dryRun)
+	{
+		appendPQExpBuffer(azureScript, "\n%s", ssh_command);
+
+		return true;
+	}
+
+	return azure_start_command(&program);
+}
+
+
+/*
  * azure_fetch_vm_addresses fetches a given VM addresses.
  */
 static bool
@@ -1469,6 +1860,7 @@ azure_create_region(const char *prefix,
 					const char *region,
 					const char *location,
 					int cidr,
+					bool fromSource,
 					bool monitor,
 					bool appNode,
 					int nodes)
@@ -1582,7 +1974,12 @@ azure_create_region(const char *prefix,
 	/*
 	 * Now is time to create the virtual machines.
 	 */
-	return azure_provision_nodes(prefix, region, monitor, appNode, nodes);
+	return azure_provision_nodes(prefix,
+								 region,
+								 fromSource,
+								 monitor,
+								 appNode,
+								 nodes);
 }
 
 
@@ -1593,6 +1990,7 @@ azure_create_region(const char *prefix,
 bool
 azure_provision_nodes(const char *prefix,
 					  const char *region,
+					  bool fromSource,
 					  bool monitor,
 					  bool appNode,
 					  int nodes)
@@ -1638,10 +2036,27 @@ azure_provision_nodes(const char *prefix,
 			return false;
 		}
 
-		if (!azure_provision_vms(&azRegion))
+		if (!azure_provision_vms(&azRegion, fromSource))
 		{
 			/* errors have already been logged */
 			return false;
+		}
+
+		/*
+		 * When provisioning from sources, after the OS related steps in
+		 * azure_provision_vms, we still need to upload our local sources (this
+		 * requires rsync to have been installed in the previous step), and to
+		 * build our software from same sources.
+		 */
+		if (fromSource)
+		{
+			if (!azure_rsync_vms(&azRegion))
+			{
+				/* errors have already been logged */
+				return false;
+			}
+
+			return azure_build_pg_autoctl(&azRegion);
 		}
 	}
 
@@ -1840,4 +2255,35 @@ azure_ssh_command(const char *prefix, const char *name, const char *vm,
 	sformat(groupName, sizeof(groupName), "%s-%s", prefix, name);
 
 	return azure_vm_ssh_command(groupName, vm, tty, command);
+}
+
+
+/*
+ * azure_sync_source_dir runs rsync in parallel to all the created VMs.
+ */
+bool
+azure_sync_source_dir(const char *prefix,
+					  const char *region,
+					  bool monitor,
+					  bool appNode,
+					  int nodes)
+{
+	AzureRegionResources azRegion = { 0 };
+
+	(void) azure_prepare_region(prefix, region, monitor, appNode, nodes,
+								&azRegion);
+
+	if (!azure_fetch_ip_addresses(azRegion.group, azRegion.vmArray))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	if (!azure_rsync_vms(&azRegion))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	return azure_build_pg_autoctl(&azRegion);
 }

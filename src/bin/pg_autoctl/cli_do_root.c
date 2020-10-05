@@ -377,24 +377,36 @@ CommandLine do_azure_ls =
 				 "List resources in a given azure region",
 				 "[option ...]",
 				 "  --prefix    azure group name prefix (ha-demo)\n"
-				 "  --name      name to use for referencing the region\n",
+				 "  --region    name to use for referencing the region\n",
 				 cli_do_azure_getopts,
 				 cli_do_azure_ls);
 
 CommandLine do_azure_ssh =
 	make_command("ssh",
 				 "Runs ssh -l ha-admin <public ip address> for a given VM name",
-				 "--prefix prefix --name region <vm name>",
+				 "[option ...]",
 				 "  --prefix    azure group name prefix (ha-demo)\n"
-				 "  --name      name to use for referencing the region\n",
+				 "  --region    name to use for referencing the region\n",
 				 cli_do_azure_getopts,
 				 cli_do_azure_ssh);
+
+CommandLine do_azure_sync =
+	make_command("sync",
+				 "Rsync pg_auto_failover sources on all the target region VMs",
+				 "[option ...]",
+				 "  --prefix    azure group name prefix (ha-demo)\n"
+				 "  --region    region to use for referencing the region\n"
+				 "  --monitor   should we create a monitor in the region (false)\n"
+				 "  --nodes     number of Postgres nodes to create (2)\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_rsync);
 
 CommandLine *do_azure[] = {
 	&do_azure_create_commands,
 	&do_azure_show_commands,
 	&do_azure_ls,
 	&do_azure_ssh,
+	&do_azure_sync,
 	NULL
 };
 

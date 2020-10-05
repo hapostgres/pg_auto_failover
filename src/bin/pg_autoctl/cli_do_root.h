@@ -106,6 +106,7 @@ void cli_do_azure_create_nodes(int argc, char **argv);
 void cli_do_azure_ls(int argc, char **argv);
 void cli_do_azure_show_ips(int argc, char **argv);
 void cli_do_azure_ssh(int argc, char **argv);
+void cli_do_azure_rsync(int argc, char **argv);
 void cli_do_azure_show_state(int argc, char **argv);
 
 #endif  /* CLI_DO_ROOT_H */

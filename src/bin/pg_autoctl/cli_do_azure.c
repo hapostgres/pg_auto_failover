@@ -43,6 +43,7 @@ typedef struct AzureOptions
 
 	int nodes;
 	int cidr;
+	bool fromSource;
 	bool appNode;
 	bool monitor;
 	bool all;
@@ -74,6 +75,7 @@ cli_do_azure_getopts(int argc, char **argv)
 		{ "prefix", required_argument, NULL, 'p' },
 		{ "region", required_argument, NULL, 'r' },
 		{ "location", required_argument, NULL, 'l' },
+		{ "from-source", no_argument, NULL, 's' },
 		{ "nodes", required_argument, NULL, 'N' },
 		{ "monitor", no_argument, NULL, 'M' },
 		{ "no-app", no_argument, NULL, 'n' },
@@ -94,6 +96,7 @@ cli_do_azure_getopts(int argc, char **argv)
 	/* set our defaults */
 	options.cidr = 11;          /* 10.11.0.0/16 and 10.11.11.0/24 */
 	options.nodes = 2;
+	options.fromSource = false;
 	options.appNode = true;
 	options.monitor = false;
 	options.all = false;
@@ -193,6 +196,14 @@ cli_do_azure_getopts(int argc, char **argv)
 			{
 				options.appNode = false;
 				log_trace("--no-app");
+				break;
+			}
+
+			/* { "from-source", required_argument, NULL, 's' }, */
+			case 's':
+			{
+				options.fromSource = true;
+				log_trace("--from-source");
 				break;
 			}
 
@@ -367,6 +378,7 @@ cli_do_azure_create_region(int argc, char **argv)
 							 options.region,
 							 options.location,
 							 options.cidr,
+							 options.fromSource,
 							 options.monitor,
 							 options.appNode,
 							 options.nodes))
@@ -453,6 +465,26 @@ cli_do_azure_ssh(int argc, char **argv)
 	}
 
 	if (!azure_ssh(options.prefix, options.region, argv[0]))
+	{
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+}
+
+
+/*
+ * cli_do_azure_rsync uses rsync to upload the current sources to all the
+ * created VMs in the target region.
+ */
+void
+cli_do_azure_rsync(int argc, char **argv)
+{
+	AzureOptions options = azureOptions;
+
+	if (!azure_sync_source_dir(options.prefix,
+							   options.region,
+							   options.monitor,
+							   options.appNode,
+							   options.nodes))
 	{
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
