@@ -1062,7 +1062,7 @@ SELECT reportedstate
 
     def get_synchronous_standby_names(self):
         """
-            Gets number sync standbys  via pg_autoctl
+            Gets synchronous standby names via pg_autoctl
         """
         command = PGAutoCtl(self)
         out, err, ret = command.execute("get synchronous_standby_names",
@@ -1072,7 +1072,7 @@ SELECT reportedstate
 
     def get_synchronous_standby_names_local(self):
         """
-            Gets number sync standbys  via pg_autoctl
+            Gets synchronous standby names via sql query on data node
         """
         query = "select current_setting('synchronous_standby_names')"
 
