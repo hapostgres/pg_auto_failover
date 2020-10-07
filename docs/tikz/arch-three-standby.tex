@@ -1,7 +1,8 @@
 % Fix for: https://tex.stackexchange.com/a/315027/43228
 \RequirePackage{luatex85}
-\documentclass[border=10pt,12pt]{standalone}
+\documentclass[border=10pt,17pt]{standalone}
 
+\usepackage{cfr-lm}
 \usepackage{pgf}
 \usepackage{tikz}
 \usetikzlibrary{arrows,shapes,snakes}
@@ -9,37 +10,59 @@
 
 \begin{document}
 
+\definecolor{pbox}{HTML}{0078D4} % MS blue
+\definecolor{ptxt}{HTML}{FFFFFF} % white
+
+\definecolor{sbox}{HTML}{50E6FF} % MS cyan
+\definecolor{stxt}{HTML}{2F2F2F} % off-black
+
+\definecolor{mbox}{HTML}{9BF00B} % MS light green
+\definecolor{mtxt}{HTML}{2F2F2F} % off-black
+
+\definecolor{apbox}{HTML}{0078D4} % MS blue
+\definecolor{aptxt}{HTML}{2F2F2F} % off-black
+
+%% sans-serif fonts, large by default, and bold too
+\sffamily
+\sbweight
+\large
+
 \begin{tikzpicture}[>=stealth',auto,rounded corners]
 
-  \tikzstyle{app}=[circle,thick,draw=blue!65,fill=white,text=black!90,line width=0.25em]
+  \tikzstyle{app}=[circle,thick,
+	  text=aptxt,draw=apbox,fill=white,
+	  line width=0.25em,minimum size=4cm]
 
-  \tikzstyle{primary}=[rectangle split,rectangle split parts=4,
-    text=white,draw=white,fill=blue!65,
-    minimum height=3cm,minimum width=4cm]
+  \tikzstyle{node}=[rectangle,minimum height=2.5cm,minimum width=4cm]
 
-  \tikzstyle{standby}=[rectangle split,rectangle split parts=3,
-    text=white,draw=white,fill=blue!25,text=black!90,
-    minimum height=1.75cm,minimum width=4cm]
+  \tikzstyle{mpnode}=[rectangle split,rectangle split parts=3,
+	  text width=6.5cm,align=center,
+	  rectangle split part align={center, center, left},
+	  minimum height=2.5cm,minimum width=4cm,inner sep=0.5cm]
 
-  \tikzstyle{monitor}=[draw=green!35,fill=green!35,text=black!90,
-    minimum height=1.5cm,minimum width=3cm]
+  \tikzstyle{primary}=[mpnode,text=ptxt,draw=pbox,
+  	  rectangle split part fill={pbox,pbox,white}]
 
+  \tikzstyle{standby}=[mpnode,text=stxt,draw=sbox,
+	  rectangle split part fill={sbox,sbox,white}]
+
+  \tikzstyle{monitor}=[node,text=mtxt,draw=mbox,fill=mbox]
 
   %% \draw [help lines] (-10,0) grid (10,20);
 
-  \node  (a)   at (0,17)   [primary]
-         {Node A
+  \node (flegend) at (0,18) {\textbf{\textt{number\_sync\_standby = 2}}} ;
+
+  \node  (a)   at (0,15)   [primary]
+         {\textbf{Node A}
            \nodepart{second}
            \textbf{Primary}
-           \nodepart{third}
-           \texttt{number\_sync\_standby = 2}
-           \nodepart[align=left]{fourth}
+           \nodepart[text=stxt]{third}
            \texttt{replication quorum = true} \\
            \texttt{candidate priority = 50}
          };
 
-  \node  (b)   at (-7,12)  [standby,text width=5.5cm,align=center]
-         {Node B
+  \node  (b)   at (-7,2)  [standby]
+         {\textbf{Node B}
            \nodepart{second}
            \textbf{Secondary}
            \nodepart[align=left]{third}
@@ -47,8 +70,8 @@
            \texttt{candidate priority = 50}
          };
 
-  \node  (c)   at (0,12)   [standby,text width=5.5cm,align=center]
-         {Node C
+  \node  (c)   at (0,8)   [standby]
+         {\textbf{Node C}
            \nodepart{second}
            \textbf{Secondary}
            \nodepart[align=left]{third}
@@ -56,8 +79,8 @@
            \texttt{candidate priority = 50}
          };
 
-  \node  (d)   at (7,12)   [standby,text width=5.5cm,align=center]
-         {Node D
+  \node  (d)   at (7,2)   [standby]
+         {\textbf{Node D}
            \nodepart{second}
            \textbf{Secondary}
            \nodepart[align=left]{third}
@@ -65,8 +88,8 @@
            \texttt{candidate priority = 50}
          };
 
-  \node  (app) at (-6,18)  [app]        {Application};
-  \node  (m)   at (6,18)   [monitor]    {Monitor};
+  \node  (app) at (-8,18)  [app]        {Application};
+  \node  (m)   at (8,18)   [monitor]    {Monitor};
 
   \tikzstyle{sql}=[->,color=blue!60,text=black!90,line width=0.15em]
   \tikzstyle{sqlf}=[->,color=blue!35,text=black!90,line width=0.15em,loosely dashed]
@@ -76,10 +99,10 @@
   \path (app) edge [sql,out=0,in=180]  node[below,near start] {SQL} (a)
               edge [sqlf,out=-90,in=135]  node[left,near start] {SQL (fallback)} (b.north west)
               edge [sqlf,out=-90,in=135]  (c.north west)
-              edge [sqlf,out=-90,in=135]  (d.north west)
+              edge [sqlf,out=-90,in=180]  (d.west)
 
         (m)   edge [hc,out=-90,in=0] (a)
-              edge [hc,out=-90,in=45] (b.north east)
+              edge [hc,out=-90,in=0] (b.east)
               edge [hc,out=-90,in=45] (c.north east)
               edge [hc,out=-90,in=45] node[right,near start] {Health checks} (d.north east)
 
