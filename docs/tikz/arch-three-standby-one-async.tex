@@ -22,11 +22,12 @@
 \definecolor{apbox}{HTML}{0078D4} % MS blue
 \definecolor{aptxt}{HTML}{2F2F2F} % off-black
 
-\definecolor{async}{HTML}{FAFAFA} % very light grey
+\definecolor{async}{HTML}{EBEFF5} % very light grey
 
 %% sans-serif fonts, large by default, and bold too
 \sffamily
 \sbweight
+\bfseries
 \large
 
 \begin{tikzpicture}[>=stealth',auto,rounded corners]
@@ -38,14 +39,14 @@
   \tikzstyle{node}=[rectangle,minimum height=2.5cm,minimum width=4cm]
 
   \tikzstyle{mpnode}=[rectangle split,rectangle split parts=3,
-	  text width=6.5cm,align=center,
+	  align=center,
 	  rectangle split part align={center, center, left},
 	  minimum height=2.5cm,minimum width=4cm,inner sep=0.5cm]
 
-  \tikzstyle{primary}=[mpnode,text=ptxt,draw=pbox,
+  \tikzstyle{primary}=[mpnode,text=ptxt,draw=white,
   	  rectangle split part fill={pbox,pbox,white}]
 
-  \tikzstyle{standby}=[mpnode,text=stxt,draw=sbox,
+  \tikzstyle{standby}=[mpnode,text=stxt,draw=white,
 	  rectangle split part fill={sbox,sbox,white}]
 
   \tikzstyle{monitor}=[node,text=mtxt,draw=mbox,fill=mbox]
@@ -55,43 +56,43 @@
   \node (flegend) at (0,18) {\textbf{\textt{number\_sync\_standby = 1}}} ;
 
   \node  (a)   at (0,15)   [primary]
-         {\textbf{Node A}
+         {\textbf{\normalsize Node A}
            \nodepart{second}
-           \textbf{Primary}
+           \textbf{\Large Primary}
            \nodepart[text=stxt]{third}
            \texttt{replication quorum = true} \\
            \texttt{candidate priority = 50}
          };
 
   \node  (b)   at (-7,2)  [standby]
-         {\textbf{Node B}
+         {\textbf{\normalsize Node B}
            \nodepart{second}
-           \textbf{Secondary}
+           \textbf{\Large Secondary}
            \nodepart[align=left]{third}
            \texttt{replication quorum = true} \\
            \texttt{candidate priority = 50}
          };
 
   \node  (c)   at (0,8)   [standby,rectangle split part fill={sbox,sbox,async}]
-         {\textbf{Node C}
+         {\textbf{\normalsize Node C}
            \nodepart{second}
-           \textbf{Secondary}
+           \textbf{\Large Secondary}
            \nodepart[align=left]{third}
 		   \textbf{\texttt{replication quorum = false}} \\
 		   \textbf{\texttt{candidate priority = 0}}
          };
 
   \node  (d)   at (7,2)   [standby]
-         {\textbf{Node D}
+         {\textbf{\normalsize Node D}
            \nodepart{second}
-           \textbf{Secondary}
+           \textbf{\Large Secondary}
            \nodepart[align=left]{third}
            \texttt{replication quorum = true} \\
            \texttt{candidate priority = 50}
          };
 
-  \node  (app) at (-8,18)  [app]        {Application};
-  \node  (m)   at (8,18)   [monitor]    {Monitor};
+  \node  (app) at (-8,18)  [app]        {\Large Application};
+  \node  (m)   at (8,18)   [monitor]    {\Large Monitor};
 
   \tikzstyle{sql}=[->,color=blue!60,text=black!90,line width=0.15em]
   \tikzstyle{sqlf}=[->,color=blue!35,text=black!90,line width=0.15em,loosely dashed]
@@ -108,7 +109,7 @@
               edge [hc,out=-90,in=45] node[right,near start] {Health checks} (d.north east)
 
         (a)   edge [sr]  (b)
-              edge [sr] node[left,near start]  {\textit{Streaming}} node[right,near start] {\textit{Replication}} (c)
+              edge [sr] node[left,near start]  {Streaming} node[right,near start] {Replication} (c)
               edge [sr]  (d);
 
 \end{tikzpicture}
