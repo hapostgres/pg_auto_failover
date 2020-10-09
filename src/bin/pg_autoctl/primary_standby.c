@@ -400,9 +400,11 @@ upstream_has_replication_slot(ReplicationSource *upstream,
 									   hasReplicationSlot))
 	{
 		/* errors have already been logged */
+		PQfinish(upstreamClient.connection);
 		return false;
 	}
 
+	PQfinish(upstreamClient.connection);
 	return true;
 }
 
