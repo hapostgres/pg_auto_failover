@@ -21,6 +21,9 @@
 
   %% \draw [help lines] (-10,0) grid (10,20);
 
+  \tikzstyle{primary}=[node,text=ptxt,fill=pbox,draw=white]
+  \tikzstyle{standby}=[node,text=stxt,fill=sbox,draw=white]
+
   \node  (p)   at (0,18)   [primary]       {\textbf{Primary}};
   \node  (s)   at (0,12)   [standby]       {\textbf{Secondary}};
   \node  (app) at (-6,15)  [app]           {\textbf{Application}};
