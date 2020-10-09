@@ -1,4 +1,4 @@
-SRC = $(wildcard *.tex)
+SRC = $(wildcard arch*.tex fsm.tex)
 PDF = $(SRC:.tex=.pdf)
 SVG = $(SRC:.tex=.svg)
 PNG = $(SRC:.tex=.png)
@@ -15,7 +15,7 @@ clean:
 	rm -rf $(SVG)
 	rm -rf $(PNG)
 
-%.pdf: %.tex
+%.pdf: %.tex common.tex
 	latexmk -lualatex --interaction=nonstopmode -shell-escape $< $@
 	latexmk -c
 

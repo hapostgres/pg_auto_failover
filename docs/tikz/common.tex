@@ -1,0 +1,37 @@
+\definecolor{pbox}{HTML}{0078D4} % MS blue
+\definecolor{ptxt}{HTML}{FFFFFF} % white
+
+\definecolor{sbox}{HTML}{50E6FF} % MS cyan
+\definecolor{stxt}{HTML}{2F2F2F} % off-black
+
+\definecolor{mbox}{HTML}{9BF00B} % MS light green
+\definecolor{mtxt}{HTML}{2F2F2F} % off-black
+
+\definecolor{apbox}{HTML}{0078D4} % MS blue
+\definecolor{aptxt}{HTML}{2F2F2F} % off-black
+
+\definecolor{async}{HTML}{EBEFF5} % very light grey
+
+\tikzstyle{app}=[circle,thick,
+	text=aptxt,draw=apbox,fill=white,
+	line width=0.25em,minimum size=4cm]
+
+\tikzstyle{node}=[rectangle,minimum height=2.5cm,minimum width=4cm]
+
+\tikzstyle{mpnode}=[rectangle split,rectangle split parts=3,
+	align=center,
+	rectangle split part align={center, center, left},
+	minimum height=2.5cm,minimum width=4cm,inner sep=0.5cm]
+
+\tikzstyle{primary}=[mpnode,text=ptxt,draw=white,
+  	rectangle split part fill={pbox,pbox,white}]
+
+\tikzstyle{standby}=[mpnode,text=stxt,draw=white,
+	rectangle split part fill={sbox,sbox,white}]
+
+\tikzstyle{monitor}=[node,text=mtxt,draw=mbox,fill=mbox]
+
+\tikzstyle{sql}=[->,color=pbox,text=stxt,line width=0.15em]
+\tikzstyle{sqlf}=[->,color=sbox,text=stxt,line width=0.15em,loosely dashed]
+\tikzstyle{sr}=[>->,color=stxt,text=stxt,line width=0.15em]
+\tikzstyle{hc}=[<->,color=mbox,text=mtxt,line width=0.15em,dotted]

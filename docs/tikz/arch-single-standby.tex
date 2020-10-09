@@ -9,18 +9,6 @@
 
 \begin{document}
 
-\definecolor{pbox}{HTML}{0078D4} % MS blue
-\definecolor{ptxt}{HTML}{FFFFFF} % white
-
-\definecolor{sbox}{HTML}{50E6FF} % MS cyan
-\definecolor{stxt}{HTML}{2F2F2F} % off-black
-
-\definecolor{mbox}{HTML}{9BF00B} % MS light green
-\definecolor{mtxt}{HTML}{2F2F2F} % off-black
-
-\definecolor{apbox}{HTML}{0078D4} % MS blue
-\definecolor{aptxt}{HTML}{2F2F2F} % off-black
-
 %% sans-serif fonts, large by default, and bold too
 \sffamily
 \sbweight
@@ -29,15 +17,7 @@
 
 \begin{tikzpicture}[>=stealth',bend angle=45,auto,rounded corners]
 
-  \tikzstyle{app}=[circle,thick,
-	  text=aptxt,draw=apbox,fill=white,
-	  line width=0.25em,minimum size=4cm]
-
-  \tikzstyle{node}=[rectangle,minimum height=2.5cm,minimum width=4cm]
-
-  \tikzstyle{primary}=[node,text=ptxt,draw=pbox,fill=pbox]
-  \tikzstyle{standby}=[node,text=stxt,draw=sbox,fill=sbox]
-  \tikzstyle{monitor}=[node,text=mtxt,draw=mbox,fill=mbox]
+  \input{common.tex}
 
   %% \draw [help lines] (-10,0) grid (10,20);
 
@@ -45,11 +25,6 @@
   \node  (s)   at (0,12)   [standby]       {\textbf{Secondary}};
   \node  (app) at (-6,15)  [app]           {\textbf{Application}};
   \node  (m)   at (6,15)   [monitor]       {\textbf{Monitor}};
-
-  \tikzstyle{sql}=[->,color=blue!60,text=black!90,line width=0.15em]
-  \tikzstyle{sqlf}=[->,color=blue!35,text=black!90,line width=0.15em,loosely dashed]
-  \tikzstyle{sr}=[>->,color=black!70,text=black!90,line width=0.15em]
-  \tikzstyle{hc}=[<->,color=green!50,text=black!90,line width=0.15em,dotted]
 
   \path (app.north east) edge [sql,out=90,in=180]   node {SQL} (p)
         (app.south east) edge [sqlf,out=-90,in=180] node[below] {SQL (fallback)} (s)
