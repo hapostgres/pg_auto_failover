@@ -121,6 +121,8 @@ def test_008_set_sync_async():
     assert node2.set_replication_quorum("true")  # primary
     assert node3.set_replication_quorum("false") # secondary
 
+    assert node3.set_candidate_priority(0)
+
     assert node2.wait_until_state(target_state="primary")
 
 def test_009_add_sync_standby():
