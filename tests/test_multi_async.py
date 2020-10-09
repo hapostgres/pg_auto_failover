@@ -10,6 +10,7 @@ monitor = None
 node1 = None
 node2 = None
 node3 = None
+node4 = None
 
 def setup_module():
     global cluster
@@ -106,3 +107,72 @@ def test_006_async_failover():
 def test_007_read_from_new_primary():
     results = node2.run_sql_query("SELECT * FROM t1")
     assert results == [(1,), (2,), (3,), (4,)]
+
+#
+# The next tests prepare a test-case where at promotion time an async
+# standby is first driven to SECONDARY, and then other sync standby nodes in
+# REPORT_LSN move forward. We had a bug where the REPORT_LSN nodes would be
+# stuck with the primary node being in the WAIT_PRIMARY/PRIMARY state.
+#
+def test_008_set_sync_async():
+    print()
+
+    assert node1.set_replication_quorum("true")  # secondary
+    assert node2.set_replication_quorum("true")  # primary
+    assert node3.set_replication_quorum("false") # secondary
+
+    assert node2.wait_until_state(target_state="primary")
+
+def test_009_add_sync_standby():
+    global node4
+
+    node4 = cluster.create_datanode("/tmp/multi_async/node4")
+    node4.create()
+    node4.run()
+
+    assert node1.wait_until_state(target_state="secondary")
+    assert node2.wait_until_state(target_state="primary")
+    assert node3.wait_until_state(target_state="secondary")
+    assert node4.wait_until_state(target_state="secondary")
+
+    assert node1.has_needed_replication_slots()
+    assert node2.has_needed_replication_slots()
+    assert node3.has_needed_replication_slots()
+    assert node4.has_needed_replication_slots()
+
+    # the formation number_sync_standbys is expected to be incremented, we
+    # now have two standby nodes that participate in the replication quorum
+    # (node1 and node4)
+    eq_(node2.get_number_sync_standbys(), 1)
+
+    # make sure we reached primary on node1 before next tests
+    assert node2.wait_until_state(target_state="primary")
+
+def test_010_promote_node1():
+    print()
+    print("Calling pgautofailover.perform_promotion(node1) on the monitor")
+
+    # we don't use node1.perform_promotion() here because using the
+    # pg_autoctl client means we would lsiten to notification and get back
+    # to the rest of the code when the promotion is all over with
+    #
+    # we need to take control way before that, so just trigger the failover
+    # and get back to controling our test case.
+    q = "select pgautofailover.perform_promotion('default', 'node_1')"
+    monitor.run_sql_query(q)
+
+def test_011_ifdown_node4_at_reportlsn():
+    print()
+    assert node4.wait_until_state(target_state="report_lsn")
+    node4.ifdown()
+
+    assert node3.wait_until_state(target_state="secondary")
+
+def test_012_ifup_node4():
+    node4.ifup()
+
+    print()
+    assert node3.wait_until_state(target_state="secondary")
+    assert node4.wait_until_state(target_state="secondary")
+    assert node1.wait_until_state(target_state="primary")
+    assert node2.wait_until_state(target_state="secondary")
