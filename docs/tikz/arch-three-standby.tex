@@ -1,7 +1,8 @@
 % Fix for: https://tex.stackexchange.com/a/315027/43228
 \RequirePackage{luatex85}
-\documentclass[border=10pt,12pt]{standalone}
+\documentclass[border=10pt,17pt]{standalone}
 
+\usepackage{cfr-lm}
 \usepackage{pgf}
 \usepackage{tikz}
 \usetikzlibrary{arrows,shapes,snakes}
@@ -9,83 +10,72 @@
 
 \begin{document}
 
+%% sans-serif fonts, large by default, and bold too
+\sffamily
+\sbweight
+\bfseries
+\large
+
 \begin{tikzpicture}[>=stealth',auto,rounded corners]
 
-  \tikzstyle{app}=[circle,thick,draw=blue!65,fill=white,text=black!90,line width=0.25em]
-
-  \tikzstyle{primary}=[rectangle split,rectangle split parts=4,
-    text=white,draw=white,fill=blue!65,
-    minimum height=3cm,minimum width=4cm]
-
-  \tikzstyle{standby}=[rectangle split,rectangle split parts=3,
-    text=white,draw=white,fill=blue!25,text=black!90,
-    minimum height=1.75cm,minimum width=4cm]
-
-  \tikzstyle{monitor}=[draw=green!35,fill=green!35,text=black!90,
-    minimum height=1.5cm,minimum width=3cm]
-
+  \input{common.tex}
 
   %% \draw [help lines] (-10,0) grid (10,20);
 
-  \node  (a)   at (0,17)   [primary]
-         {Node A
+  \node (flegend) at (0,18) {\textbf{\textt{number\_sync\_standby = 2}}} ;
+
+  \node  (a)   at (0,15)   [primary]
+         {\textbf{\normalsize Node A}
            \nodepart{second}
-           \textbf{Primary}
-           \nodepart{third}
-           \texttt{number\_sync\_standby = 2}
-           \nodepart[align=left]{fourth}
+           \textbf{\Large Primary}
+           \nodepart[text=stxt]{third}
            \texttt{replication quorum = true} \\
            \texttt{candidate priority = 50}
          };
 
-  \node  (b)   at (-7,12)  [standby,text width=5.5cm,align=center]
-         {Node B
+  \node  (b)   at (-7,2)  [standby]
+         {\textbf{\normalsize Node B}
            \nodepart{second}
-           \textbf{Secondary}
+           \textbf{\Large Secondary}
            \nodepart[align=left]{third}
            \texttt{replication quorum = true} \\
            \texttt{candidate priority = 50}
          };
 
-  \node  (c)   at (0,12)   [standby,text width=5.5cm,align=center]
-         {Node C
+  \node  (c)   at (0,8)   [standby]
+         {\textbf{\normalsize Node C}
            \nodepart{second}
-           \textbf{Secondary}
+           \textbf{\Large Secondary}
            \nodepart[align=left]{third}
            \texttt{replication quorum = true} \\
            \texttt{candidate priority = 50}
          };
 
-  \node  (d)   at (7,12)   [standby,text width=5.5cm,align=center]
-         {Node D
+  \node  (d)   at (7,2)   [standby]
+         {\textbf{\normalsize Node D}
            \nodepart{second}
-           \textbf{Secondary}
+           \textbf{\Large Secondary}
            \nodepart[align=left]{third}
            \texttt{replication quorum = true} \\
            \texttt{candidate priority = 50}
          };
 
-  \node  (app) at (-6,18)  [app]        {Application};
-  \node  (m)   at (6,18)   [monitor]    {Monitor};
-
-  \tikzstyle{sql}=[->,color=blue!60,text=black!90,line width=0.15em]
-  \tikzstyle{sqlf}=[->,color=blue!35,text=black!90,line width=0.15em,loosely dashed]
-  \tikzstyle{sr}=[>->,color=black!70,text=black!90,line width=0.15em]
-  \tikzstyle{hc}=[<->,color=green!50,text=black!90,line width=0.15em,dotted]
+  \node  (app) at (-8,18)  [app]        {\Large Application};
+  \node  (m)   at (8,18)   [monitor]    {\Large Monitor};
 
   \path (app) edge [sql,out=0,in=180]  node[below,near start] {SQL} (a)
               edge [sqlf,out=-90,in=135]  node[left,near start] {SQL (fallback)} (b.north west)
               edge [sqlf,out=-90,in=135]  (c.north west)
-              edge [sqlf,out=-90,in=135]  (d.north west)
+              edge [sqlf,out=-90,in=180]  (d.west)
 
         (m)   edge [hc,out=-90,in=0] (a)
-              edge [hc,out=-90,in=45] (b.north east)
+              edge [hc,out=-90,in=0] (b.east)
               edge [hc,out=-90,in=45] (c.north east)
               edge [hc,out=-90,in=45] node[right,near start] {Health checks} (d.north east)
 
-        (a)   edge [sr]  (b)
-              edge [sr] node[left,near start]  {\textit{Streaming}} node[right,near start] {\textit{Replication}} (c)
-              edge [sr]  (d);
+        (a.south west) edge [sr] (b)
+        (a) edge [sr] node[left,near start]  {Streaming} node[right,near start] {Replication} (c)
+        (a.south east) edge [sr] (d);
 
 \end{tikzpicture}
 

@@ -1,24 +1,21 @@
-% Fix for: https://tex.stackexchange.com/a/386772/43228
-\RequirePackage{shellesc}                % implement \write18
-
-\RequirePackage{pdftexcmds}              % fake \pdfshellescape so
-\makeatletter                            % standalone knows about it
-  \let\pdfshellescape\pdf@shellescape
-\makeatother
-
 % Fix for: https://tex.stackexchange.com/a/315027/43228
 \RequirePackage{luatex85}
-\documentclass[border=10pt,12pt,convert={density=600,outext=.png}]{standalone}
+\documentclass[border=10pt,12pt]{standalone}
 
+\usepackage{cfr-lm}
+\usepackage{pgf}
 \usepackage{tikz}
-\usetikzlibrary{external}
-\usetikzlibrary{backgrounds}
 \usetikzlibrary {graphs,graphdrawing}
 \usegdlibrary {force,circular,layered,trees,routing}
 
 \begin{document}
 
-\begin{tikzpicture} [rounded corners]
+%% sans-serif fonts, large by default, and bold too
+\sffamily
+\sbweight
+\large
+
+\begin{tikzpicture}[rounded corners]
  %%\graph [layered layout, sibling distance=8mm, level distance=8mm]
  %% \graph [simple necklace layout, node distance=4mm, nodes={circle,draw}]
   %% \graph [simple necklace layout, node distance=4mm]
@@ -107,5 +104,3 @@
 \end{tikzpicture}
 
 \end{document}
-
-
