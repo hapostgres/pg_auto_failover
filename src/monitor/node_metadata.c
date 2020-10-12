@@ -1526,7 +1526,8 @@ IsBeingPromoted(AutoFailoverNode *node)
 {
 	return node != NULL &&
 		   ((node->reportedState == REPLICATION_STATE_REPORT_LSN &&
-			 node->goalState == REPLICATION_STATE_PREPARE_PROMOTION) ||
+			 (node->goalState == REPLICATION_STATE_FAST_FORWARD ||
+			  node->goalState == REPLICATION_STATE_PREPARE_PROMOTION)) ||
 
 			(node->reportedState == REPLICATION_STATE_FAST_FORWARD &&
 			 (node->goalState == REPLICATION_STATE_FAST_FORWARD ||
