@@ -1517,22 +1517,32 @@ StateBelongsToPrimary(ReplicationState state)
 /*
  * IsBeingPromoted returns whether a standby node is going through the process
  * of a promotion.
+ *
+ * We need to recognize a node going though the FSM even before it has reached
+ * a stable state (where reportedState and goalState are the same).
  */
 bool
 IsBeingPromoted(AutoFailoverNode *node)
 {
 	return node != NULL &&
-		   (node->reportedState == REPLICATION_STATE_FAST_FORWARD ||
-			node->goalState == REPLICATION_STATE_FAST_FORWARD
+		   ((node->reportedState == REPLICATION_STATE_REPORT_LSN &&
+			 node->goalState == REPLICATION_STATE_PREPARE_PROMOTION) ||
 
-			|| node->reportedState == REPLICATION_STATE_PREPARE_PROMOTION ||
-			node->goalState == REPLICATION_STATE_PREPARE_PROMOTION
+			(node->reportedState == REPLICATION_STATE_FAST_FORWARD &&
+			 (node->goalState == REPLICATION_STATE_FAST_FORWARD ||
+			  node->goalState == REPLICATION_STATE_PREPARE_PROMOTION)) ||
 
-			|| node->reportedState == REPLICATION_STATE_STOP_REPLICATION ||
-			node->goalState == REPLICATION_STATE_STOP_REPLICATION
+			(node->reportedState == REPLICATION_STATE_PREPARE_PROMOTION &&
+			 (node->goalState == REPLICATION_STATE_PREPARE_PROMOTION ||
+			  node->goalState == REPLICATION_STATE_STOP_REPLICATION)) ||
 
-			|| node->reportedState == REPLICATION_STATE_WAIT_PRIMARY ||
-			node->goalState == REPLICATION_STATE_WAIT_PRIMARY);
+			(node->reportedState == REPLICATION_STATE_STOP_REPLICATION &&
+			 (node->goalState == REPLICATION_STATE_STOP_REPLICATION ||
+			  node->goalState == REPLICATION_STATE_WAIT_PRIMARY)) ||
+
+			(node->reportedState == REPLICATION_STATE_WAIT_PRIMARY &&
+			 (node->goalState == REPLICATION_STATE_WAIT_PRIMARY ||
+			  node->goalState == REPLICATION_STATE_PRIMARY)));
 }
 
 
