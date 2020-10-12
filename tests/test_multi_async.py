@@ -155,7 +155,7 @@ def test_010_promote_node1():
     print("Calling pgautofailover.perform_promotion(node1) on the monitor")
 
     # we don't use node1.perform_promotion() here because using the
-    # pg_autoctl client means we would lsiten to notification and get back
+    # pg_autoctl client means we would listen to notification and get back
     # to the rest of the code when the promotion is all over with
     #
     # we need to take control way before that, so just trigger the failover
