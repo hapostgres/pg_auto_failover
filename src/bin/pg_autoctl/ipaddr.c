@@ -44,65 +44,68 @@ bool
 fetchLocalIPAddress(char *localIpAddress, int size,
 					const char *serviceName, int servicePort)
 {
-	char buffer[INET_ADDRSTRLEN];
-	const char *ipAddr;
-	struct sockaddr_in name;
-	socklen_t namelen = sizeof(name);
-	int err = -1;
+	struct addrinfo *result;
+	struct addrinfo hints;
 
-	struct sockaddr_in serv;
+	/*
+	 * the hints struct is used to tell getaddrinfo what kind of 
+	 * results we want. In this case we want the IPv4 addresses
+	 * of local TCP socket(s)
+	 */
 
-	int sock = socket(AF_INET, SOCK_DGRAM, 0);
+	memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_INET; /* we only want IPv4 */
+    hints.ai_socktype = SOCK_STREAM; /* we only want TCP sockets */
 
-	/*Socket could not be created */
-	if (sock < 0)
-	{
-		log_warn("Failed to create a socket: %m");
-		return false;
-	}
-
-	memset(&serv, 0, sizeof(serv));
-	serv.sin_family = AF_INET;
-	serv.sin_addr.s_addr = inet_addr(serviceName);
-	serv.sin_port = htons(servicePort);
-
-	err = connect(sock, (const struct sockaddr *) &serv, sizeof(serv));
-	if (err < 0)
-	{
-		if (env_found_empty("PG_REGRESS_SOCK_DIR"))
-		{
-			/*
-			 * In test environment, in case of no internet access, just use the
-			 * address of the non-loopback network interface.
-			 */
-			return fetchIPAddressFromInterfaceList(localIpAddress, size);
+	/* did we get a serviceName? */
+	if(!(*serviceName)){
+		/* try to get local hostname automagically */
+		char *local_hostname;
+		size_t hostname_len;
+		if(!gethostname(&local_hostname, hostname_len)){
+			log_warn("Failed to get local hostname");
+			return false;
 		}
-		else
-		{
-			log_warn("Failed to connect: %m");
+		/* then lookup the IP of that hostname */
+		if(!getaddrinfo(local_hostname, NULL, &hints, &result)){
+			log_warn("Failed to get IPv4 address for hostname: %s", local_hostname);
 			return false;
 		}
 	}
+	else {
+		/* 
+		 * use the serviceName to get the IP address of a socket suitable
+		 * for that service
+		 */
+		 if(!getaddrinfo(NULL, serviceName, &hints, &result)){
+			 log_warn("Failed to get IPv4 address for service name: %s", serviceName);
+			 return false;
+		 }
+	}
 
-	err = getsockname(sock, (struct sockaddr *) &name, &namelen);
-	if (err < 0)
-	{
-		log_warn("Failed to get IP address from socket: %m");
+	if(!result){
+		/* something went wrong here */
+		log_warn("Getaddrinfo() returned an empty result");
 		return false;
 	}
+	else {
+		/*
+		 * getaddrinfo() initializes an addrinfo struct "result" which contains a pointer
+		 * to a linked list of sockaddr structs. We want only the first IP address
+		 * returned (right?) so we fetch the head of the linked list and convert it
+		 * to a string with a little two-step to convert the format from sockaddr to
+		 * sockaddr_in.
+		 */
+		struct sockaddr_in *pip = (struct sockaddr_in *)result->ai_addr;
+		struct in_addr *ipAddress = &(pip->sin_addr);
 
-	ipAddr = inet_ntop(AF_INET, &name.sin_addr, buffer, INET_ADDRSTRLEN);
-
-	if (ipAddr != NULL)
-	{
-		sformat(localIpAddress, size, "%s", buffer);
+		/* Now convert it to string format in dotted decimal notation */
+		inet_ntop(AF_INET, ipAddress, localIpAddress, sizeof(localIpAddress));
+		freeaddrinfo(result);
+		/*
+		 * TODO: Allow IPv6 addresses also
+		 */		
 	}
-	else
-	{
-		log_warn("Failed to determine local ip address: %m");
-	}
-	close(sock);
-
 	return ipAddr != NULL;
 }
 
