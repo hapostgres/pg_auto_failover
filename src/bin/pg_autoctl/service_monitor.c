@@ -224,6 +224,7 @@ monitor_service_run(Monitor *monitor)
 	for (;;)
 	{
 		bool pgIsNotRunningIsOk = true;
+		PostgresSetup *pgSetup = &(postgres.postgresSetup);
 
 		if (asked_to_reload || firstLoop)
 		{
@@ -245,7 +246,28 @@ monitor_service_run(Monitor *monitor)
 		 * the version in the shared object library and maybe upgrade the
 		 * extension SQL definitions to match.
 		 */
-		if (!pg_setup_is_ready(&(postgres.postgresSetup), pgIsNotRunningIsOk))
+		if (firstLoop)
+		{
+			/* if Postgres is running, it can't be our sub-process, stop it */
+			if (pg_setup_is_ready(pgSetup, pgIsNotRunningIsOk))
+			{
+				log_info("Postgres is already running for \"%s\" with pid %d, "
+						 "which is not a sub-process of pg_autoctl, "
+						 "restarting Postgres",
+						 pgSetup->pgdata,
+						 pgSetup->pidFile.pid);
+
+				if (!ensure_postgres_service_is_stopped(&postgres))
+				{
+					log_fatal("Failed to stop Postgres pid %d, "
+							  "see above for details",
+							  pgSetup->pidFile.pid);
+					return false;
+				}
+			}
+		}
+
+		if (!pg_setup_is_ready(pgSetup, pgIsNotRunningIsOk))
 		{
 			MonitorExtensionVersion version = { 0 };
 
