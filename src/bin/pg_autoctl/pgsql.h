@@ -196,6 +196,8 @@ typedef enum
  */
 #define SQLSTATE_LENGTH 6
 
+#define STR_ERRCODE_CLASS_CONNECTION_EXCEPTION "08"
+
 typedef struct AbstractResultContext
 {
 	char sqlstate[SQLSTATE_LENGTH];
