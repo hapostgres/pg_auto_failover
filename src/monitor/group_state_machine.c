@@ -648,9 +648,15 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 *
 	 * As there's no action to implement on the new selected primary for that
 	 * step, we can make progress as soon as we want to.
+	 *
+	 * The primary could be in one of those states:
+	 *  - wait_primary/wait_primary
+	 *  - wait_primary/primary
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_JOIN_SECONDARY) &&
-		IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY))
+		primaryNode->reportedState == REPLICATION_STATE_WAIT_PRIMARY &&
+		(primaryNode->goalState == REPLICATION_STATE_WAIT_PRIMARY ||
+		 primaryNode->goalState == REPLICATION_STATE_PRIMARY))
 	{
 		char message[BUFSIZE];
 
