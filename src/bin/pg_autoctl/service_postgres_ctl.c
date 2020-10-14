@@ -40,7 +40,8 @@ static bool ensure_postgres_status_stopped(LocalPostgresServer *postgres,
 										   Service *service);
 
 static bool ensure_postgres_status_running(LocalPostgresServer *postgres,
-										   Service *service);
+										   Service *service,
+										   bool ensurePostgresSubprocess);
 
 
 /*
@@ -402,7 +403,12 @@ ensure_postgres_status(LocalPostgresServer *postgres, Service *service)
 
 		case PG_EXPECTED_STATUS_RUNNING:
 		{
-			return ensure_postgres_status_running(postgres, service);
+			return ensure_postgres_status_running(postgres, service, false);
+		}
+
+		case PG_EXPECTED_STATUS_RUNNING_AS_SUBPROCESS:
+		{
+			return ensure_postgres_status_running(postgres, service, true);
 		}
 	}
 
@@ -427,7 +433,7 @@ ensure_postgres_status_stopped(LocalPostgresServer *postgres, Service *service)
 		/* service_postgres_stop() logs about stopping Postgres */
 		log_debug("pg_autoctl: stop postgres (pid %d)", service->pid);
 
-		return service_postgres_stop((void *) service);
+		return service_postgres_stop(service);
 	}
 	return true;
 }
@@ -437,20 +443,42 @@ ensure_postgres_status_stopped(LocalPostgresServer *postgres, Service *service)
  * ensure_postgres_status_running ensures that Postgres is running.
  */
 static bool
-ensure_postgres_status_running(LocalPostgresServer *postgres, Service *service)
+ensure_postgres_status_running(LocalPostgresServer *postgres, Service *service,
+							   bool ensurePostgresSubprocess)
 {
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 
 	/* we might still be starting-up */
 	bool pgIsNotRunningIsOk = true;
 	bool pgIsRunning = pg_setup_is_ready(pgSetup, pgIsNotRunningIsOk);
+	bool restartPostgres = false;
 
 	log_trace("ensure_postgres_status_running: %s",
 			  pgIsRunning ? "running" : "not running");
 
 	if (pgIsRunning)
 	{
-		return true;
+		if (ensurePostgresSubprocess && pgSetup->pidFile.pid != service->pid)
+		{
+			restartPostgres = true;
+
+			log_warn("Postgres is already running with pid %d, "
+					 "which is not a sub-process of pg_autoctl, "
+					 "restarting Postgres",
+					 pgSetup->pidFile.pid);
+
+			if (!service_postgres_stop(service))
+			{
+				log_fatal("Failed to stop Postgres pid %d, "
+						  "see above for details",
+						  pgSetup->pidFile.pid);
+				return false;
+			}
+		}
+		else
+		{
+			return true;
+		}
 	}
 
 	if (service_postgres_start(service->context, &(service->pid)))
@@ -460,6 +488,15 @@ ensure_postgres_status_running(LocalPostgresServer *postgres, Service *service)
 			log_warn("PostgreSQL was not running, restarted with pid %d",
 					 pgSetup->pidFile.pid);
 		}
+
+		if (restartPostgres)
+		{
+			log_warn("PostgreSQL had to be stopped and restarted, "
+					 "it is now running as a subprocess of pg_autoctl, "
+					 "with pid %d",
+					 pgSetup->pidFile.pid);
+		}
+
 		return true;
 	}
 	else

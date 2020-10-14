@@ -840,6 +840,11 @@ ExpectedPostgresStatusToString(ExpectedPostgresStatus pgExpectedStatus)
 		{
 			return "Postgres should be running";
 		}
+
+		case PG_EXPECTED_STATUS_RUNNING_AS_SUBPROCESS:
+		{
+			return "Postgres should be running as a pg_autoctl subprocess";
+		}
 	}
 
 	/* make compiler happy */
@@ -870,6 +875,20 @@ keeper_set_postgres_state_running(KeeperStatePostgres *pgStatus,
 								  const char *filename)
 {
 	pgStatus->pgExpectedStatus = PG_EXPECTED_STATUS_RUNNING;
+
+	return keeper_postgres_state_update(pgStatus, filename);
+}
+
+
+/*
+ * keeper_set_postgres_state_running updates the Postgres expected status file
+ * to running as subprocess.
+ */
+bool
+keeper_set_postgres_state_running_as_subprocess(KeeperStatePostgres *pgStatus,
+												const char *filename)
+{
+	pgStatus->pgExpectedStatus = PG_EXPECTED_STATUS_RUNNING_AS_SUBPROCESS;
 
 	return keeper_postgres_state_update(pgStatus, filename);
 }

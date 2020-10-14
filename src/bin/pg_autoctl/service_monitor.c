@@ -200,6 +200,7 @@ monitor_service_run(Monitor *monitor)
 	MonitorConfig *mconfig = &(monitor->config);
 	char postgresUri[MAXCONNINFO] = { 0 };
 
+	bool loggedAboutListening = false;
 	bool firstLoop = true;
 	LocalPostgresServer postgres = { 0 };
 
@@ -250,56 +251,29 @@ monitor_service_run(Monitor *monitor)
 		 */
 		if (firstLoop)
 		{
-			pid_t pgServicePid = 0;
-			char pgServicePidFile[MAXPGPATH] = { 0 };
-
-			(void) get_service_pidfile(mconfig->pathnames.pid,
-									   "postgres",
-									   pgServicePidFile);
-
-			/*
-			 * If Postgres is running, and it's not our sub-process, stop it
-			 * now, and restart it in the next code block, to ensure that
-			 * Postgres is our sub-process, an invariant that allows us to
-			 * upgrade our pgautofailover extension when that's needed, etc.
-			 *
-			 * When we read a non-stale pid from the service pidfile, we
-			 * consider that the Postgres that is running is a legit
-			 * sub-process of pg_autoctl. The pid file contains the pid of the
-			 * "pg_autoctl: start/stop postgres" process (the Postgres
-			 * controler), and the pgSetup->pidFile.pid contains the pid of
-			 * "postgres" itself, so we don't go as far as comparing them here.
-			 *
-			 * One case we must pay attention to is when restarting the
-			 * listener service (pg_autoctl do service restart listener), we
-			 * don't want to force a restart of Postgres itself at that point.
-			 */
-			if (pg_setup_is_ready(pgSetup, pgIsNotRunningIsOk) &&
-				!read_pidfile(pgServicePidFile, &pgServicePid))
+			if (!ensure_postgres_service_is_running_as_subprocess(&postgres))
 			{
-				log_info("Postgres is already running for \"%s\" with pid %d, "
-						 "which is not a sub-process of pg_autoctl, "
-						 "restarting Postgres",
-						 pgSetup->pgdata,
-						 pgSetup->pidFile.pid);
-
-				if (!ensure_postgres_service_is_stopped(&postgres))
-				{
-					log_fatal("Failed to stop Postgres pid %d, "
-							  "see above for details",
-							  pgSetup->pidFile.pid);
-					return false;
-				}
+				log_error("Failed to ensure Postgres is running "
+						  "as a pg_autoctl subprocess, "
+						  "see above for details.");
+				return false;
 			}
+
+			/* leave some time for Postgres to start before we try again */
+			sleep(PG_AUTOCTL_MONITOR_RETRY_TIME);
+
+			firstLoop = false;
+			continue;
 		}
 
 		if (!pg_setup_is_ready(pgSetup, pgIsNotRunningIsOk))
 		{
 			MonitorExtensionVersion version = { 0 };
 
-			if (!ensure_postgres_service_is_running(&postgres))
+			if (!ensure_postgres_service_is_running_as_subprocess(&postgres))
 			{
-				log_error("Failed to ensure Postgres is running, "
+				log_error("Failed to ensure Postgres is running "
+						  "as a pg_autoctl subprocess, "
 						  "see above for details.");
 				return false;
 			}
@@ -311,7 +285,7 @@ monitor_service_run(Monitor *monitor)
 				if (monitor->pgsql.status != PG_CONNECTION_OK)
 				{
 					/* leave some time to the monitor before we try again */
-					sleep(PG_AUTOCTL_MONITOR_SLEEP_TIME);
+					sleep(PG_AUTOCTL_MONITOR_RETRY_TIME);
 
 					if (firstLoop)
 					{
@@ -325,10 +299,10 @@ monitor_service_run(Monitor *monitor)
 			}
 		}
 
-		if (firstLoop)
+		if (!loggedAboutListening)
 		{
 			log_info("Contacting the monitor to LISTEN to its events.");
-			firstLoop = false;
+			loggedAboutListening = true;
 		}
 
 		if (!monitor_get_notifications(monitor,

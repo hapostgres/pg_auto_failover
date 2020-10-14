@@ -23,6 +23,8 @@
 #include "state.h"
 
 
+static bool local_postgres_wait_until_ready(LocalPostgresServer *postgres);
+
 static void local_postgres_update_pg_failures_tracking(LocalPostgresServer *postgres,
 													   bool pgIsRunning);
 
@@ -261,30 +263,19 @@ local_postgres_update(LocalPostgresServer *postgres, bool postgresNotRunningIsOk
 
 
 /*
- * ensure_postgres_service_is_running signals the Postgres controller service
- * that Postgres is expected to be running, by updating the expectedPgStatus
- * file to the proper values, and then wait until Postgres is running before
- * returning true in case of success.
+ * local_postgres_wait_until_ready waits until Postgres is running and updates
+ * our failure tracking counters for the Postgres service accordingly.
  */
-bool
-ensure_postgres_service_is_running(LocalPostgresServer *postgres)
+static bool
+local_postgres_wait_until_ready(LocalPostgresServer *postgres)
 {
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
-	LocalExpectedPostgresStatus *pgStatus = &(postgres->expectedPgStatus);
 
 	int timeout = 10;       /* wait for Postgres for 10s */
 	bool pgIsRunning = pg_is_running(pgSetup->pg_ctl, pgSetup->pgdata);
 
-	log_trace("ensure_postgres_service_is_running: Postgres %s in \"%s\"",
+	log_trace("local_postgres_wait_until_ready: Postgres %s in \"%s\"",
 			  pgIsRunning ? "is running" : "is not running", pgSetup->pgdata);
-
-	/* update our data structure in-memory, then on-disk */
-	if (!keeper_set_postgres_state_running(&(pgStatus->state),
-										   pgStatus->pgStatusPath))
-	{
-		/* errors have already been logged */
-		return false;
-	}
 
 	if (!pgIsRunning)
 	{
@@ -300,7 +291,7 @@ ensure_postgres_service_is_running(LocalPostgresServer *postgres)
 			/* update pgSetup cache with new Postgres pid and all */
 			local_postgres_init(postgres, pgSetup);
 
-			log_debug("ensure_postgres_service_is_running: Postgres is running "
+			log_debug("local_postgres_wait_until_ready: Postgres is running "
 					  "with pid %d", pgSetup->pidFile.pid);
 		}
 		else
@@ -311,6 +302,53 @@ ensure_postgres_service_is_running(LocalPostgresServer *postgres)
 	}
 
 	return pgIsRunning;
+}
+
+
+/*
+ * ensure_postgres_service_is_running signals the Postgres controller service
+ * that Postgres is expected to be running, by updating the expectedPgStatus
+ * file to the proper values, and then wait until Postgres is running before
+ * returning true in case of success.
+ */
+bool
+ensure_postgres_service_is_running(LocalPostgresServer *postgres)
+{
+	LocalExpectedPostgresStatus *pgStatus = &(postgres->expectedPgStatus);
+
+	/* update our data structure in-memory, then on-disk */
+	if (!keeper_set_postgres_state_running(&(pgStatus->state),
+										   pgStatus->pgStatusPath))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	return local_postgres_wait_until_ready(postgres);
+}
+
+
+/*
+ * ensure_postgres_service_is_running_as_subprocess signals the Postgres
+ * controller service that Postgres is expected to be running as a subprocess
+ * of pg_autoctl, by updating the expectedPgStatus file to the proper values,
+ * and then wait until Postgres is running before returning true in case of
+ * success.
+ */
+bool
+ensure_postgres_service_is_running_as_subprocess(LocalPostgresServer *postgres)
+{
+	LocalExpectedPostgresStatus *pgStatus = &(postgres->expectedPgStatus);
+
+	/* update our data structure in-memory, then on-disk */
+	if (!keeper_set_postgres_state_running_as_subprocess(&(pgStatus->state),
+														 pgStatus->pgStatusPath))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	return local_postgres_wait_until_ready(postgres);
 }
 
 

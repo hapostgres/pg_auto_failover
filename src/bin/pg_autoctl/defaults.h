@@ -73,6 +73,7 @@
 #define PG_AUTOCTL_KEEPER_SLEEP_TIME 1      /* seconds */
 #define PG_AUTOCTL_KEEPER_RETRY_TIME_MS 350 /* milliseconds */
 #define PG_AUTOCTL_MONITOR_SLEEP_TIME 10 /* seconds */
+#define PG_AUTOCTL_MONITOR_RETRY_TIME 1  /* seconds */
 
 #define PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT 60
 

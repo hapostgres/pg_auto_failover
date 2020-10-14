@@ -58,6 +58,7 @@ void local_postgres_finish(LocalPostgresServer *postgres);
 bool local_postgres_update(LocalPostgresServer *postgres,
 						   bool postgresNotRunningIsOk);
 bool ensure_postgres_service_is_running(LocalPostgresServer *postgres);
+bool ensure_postgres_service_is_running_as_subprocess(LocalPostgresServer *postgres);
 bool ensure_postgres_service_is_stopped(LocalPostgresServer *postgres);
 
 bool primary_has_replica(LocalPostgresServer *postgres, char *userName,

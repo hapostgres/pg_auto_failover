@@ -130,6 +130,9 @@ service_postgres_stop(Service *service)
 		return false;
 	}
 
+	/* cache invalidation */
+	service->pid = 0;
+
 	return true;
 }
 
