@@ -7,6 +7,7 @@
  *
  */
 #include <time.h>
+#include <unistd.h>
 
 #include "postgres_fe.h"
 
@@ -338,7 +339,10 @@ ensure_postgres_service_is_running(LocalPostgresServer *postgres)
 bool
 ensure_postgres_service_is_running_as_subprocess(LocalPostgresServer *postgres)
 {
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	LocalExpectedPostgresStatus *pgStatus = &(postgres->expectedPgStatus);
+
+	bool pgIsRunning = pg_is_running(pgSetup->pg_ctl, pgSetup->pgdata);
 
 	/* update our data structure in-memory, then on-disk */
 	if (!keeper_set_postgres_state_running_as_subprocess(&(pgStatus->state),
@@ -346,6 +350,21 @@ ensure_postgres_service_is_running_as_subprocess(LocalPostgresServer *postgres)
 	{
 		/* errors have already been logged */
 		return false;
+	}
+
+	/*
+	 * If Postgres was already running before we wrote a new expected status
+	 * file, then the Postgres controller might be up to stop and then restart
+	 * Postgres. This happens when the already running Postgres is not a
+	 * subprocess of this pg_autoctl process, and only the controller has the
+	 * right information to check that (child process pid for "postgres").
+	 *
+	 * Because we are lacking information, we just wait for some time before
+	 * checking if Postgres is running (again)
+	 */
+	if (pgIsRunning)
+	{
+		sleep(PG_AUTOCTL_KEEPER_SLEEP_TIME);
 	}
 
 	return local_postgres_wait_until_ready(postgres);

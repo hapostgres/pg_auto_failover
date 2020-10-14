@@ -222,7 +222,7 @@ monitor_service_run(Monitor *monitor)
 	/*
 	 * Main loop for notifications.
 	 */
-	for (;;)
+	for (;; firstLoop = false)
 	{
 		bool pgIsNotRunningIsOk = true;
 		PostgresSetup *pgSetup = &(postgres.postgresSetup);
@@ -249,24 +249,7 @@ monitor_service_run(Monitor *monitor)
 		 * the version in the shared object library and maybe upgrade the
 		 * extension SQL definitions to match.
 		 */
-		if (firstLoop)
-		{
-			if (!ensure_postgres_service_is_running_as_subprocess(&postgres))
-			{
-				log_error("Failed to ensure Postgres is running "
-						  "as a pg_autoctl subprocess, "
-						  "see above for details.");
-				return false;
-			}
-
-			/* leave some time for Postgres to start before we try again */
-			sleep(PG_AUTOCTL_MONITOR_RETRY_TIME);
-
-			firstLoop = false;
-			continue;
-		}
-
-		if (!pg_setup_is_ready(pgSetup, pgIsNotRunningIsOk))
+		if (firstLoop || !pg_setup_is_ready(pgSetup, pgIsNotRunningIsOk))
 		{
 			MonitorExtensionVersion version = { 0 };
 
@@ -286,11 +269,6 @@ monitor_service_run(Monitor *monitor)
 				{
 					/* leave some time to the monitor before we try again */
 					sleep(PG_AUTOCTL_MONITOR_RETRY_TIME);
-
-					if (firstLoop)
-					{
-						firstLoop = false;
-					}
 					continue;
 				}
 
