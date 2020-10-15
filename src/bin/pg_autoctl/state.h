@@ -169,7 +169,8 @@ typedef enum
 {
 	PG_EXPECTED_STATUS_UNKNOWN = 0,
 	PG_EXPECTED_STATUS_STOPPED,
-	PG_EXPECTED_STATUS_RUNNING
+	PG_EXPECTED_STATUS_RUNNING,
+	PG_EXPECTED_STATUS_RUNNING_AS_SUBPROCESS
 } ExpectedPostgresStatus;
 
 /*
@@ -219,6 +220,8 @@ bool keeper_set_postgres_state_unknown(KeeperStatePostgres *pgStatus,
 									   const char *filename);
 bool keeper_set_postgres_state_running(KeeperStatePostgres *pgStatus,
 									   const char *filename);
+bool keeper_set_postgres_state_running_as_subprocess(KeeperStatePostgres *pgStatus,
+													 const char *filename);
 bool keeper_set_postgres_state_stopped(KeeperStatePostgres *pgStatus,
 									   const char *filename);
 bool keeper_postgres_state_update(KeeperStatePostgres *pgStatus,

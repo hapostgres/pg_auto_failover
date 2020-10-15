@@ -245,7 +245,11 @@ def test_023_ifup_old_primary():
 def test_024_stop_postgres_monitor():
     original_state = node3.get_state()
     monitor.stop_postgres()
-    monitor.wait_until_pg_is_running()
+
+    # allow trying twice to make Travis CI stable
+    if not monitor.wait_until_pg_is_running():
+        assert monitor.wait_until_pg_is_running()
+
     print()
     assert node3.wait_until_state(target_state=original_state)
 

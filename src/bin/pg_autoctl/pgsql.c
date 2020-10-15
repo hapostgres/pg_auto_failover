@@ -869,6 +869,13 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 			strlcpy(ctx->sqlstate, sqlstate, SQLSTATE_LENGTH);
 		}
 
+		/* if we get a connection exception, track that */
+		if (sqlstate &&
+			strncmp(sqlstate, STR_ERRCODE_CLASS_CONNECTION_EXCEPTION, 2) == 0)
+		{
+			pgsql->status = PG_CONNECTION_BAD;
+		}
+
 		PQclear(result);
 		clear_results(pgsql);
 		pgsql_finish(pgsql);

@@ -200,6 +200,7 @@ monitor_service_run(Monitor *monitor)
 	MonitorConfig *mconfig = &(monitor->config);
 	char postgresUri[MAXCONNINFO] = { 0 };
 
+	bool loggedAboutListening = false;
 	bool firstLoop = true;
 	LocalPostgresServer postgres = { 0 };
 
@@ -221,9 +222,10 @@ monitor_service_run(Monitor *monitor)
 	/*
 	 * Main loop for notifications.
 	 */
-	for (;;)
+	for (;; firstLoop = false)
 	{
 		bool pgIsNotRunningIsOk = true;
+		PostgresSetup *pgSetup = &(postgres.postgresSetup);
 
 		if (asked_to_reload || firstLoop)
 		{
@@ -232,6 +234,8 @@ monitor_service_run(Monitor *monitor)
 
 		if (asked_to_stop || asked_to_stop_fast)
 		{
+			log_info("Listener service received signal %s, terminating",
+					 signal_to_string(get_current_signal(SIGTERM)));
 			break;
 		}
 
@@ -245,13 +249,14 @@ monitor_service_run(Monitor *monitor)
 		 * the version in the shared object library and maybe upgrade the
 		 * extension SQL definitions to match.
 		 */
-		if (!pg_setup_is_ready(&(postgres.postgresSetup), pgIsNotRunningIsOk))
+		if (firstLoop || !pg_setup_is_ready(pgSetup, pgIsNotRunningIsOk))
 		{
 			MonitorExtensionVersion version = { 0 };
 
-			if (!ensure_postgres_service_is_running(&postgres))
+			if (!ensure_postgres_service_is_running_as_subprocess(&postgres))
 			{
-				log_error("Failed to ensure Postgres is running, "
+				log_error("Failed to ensure Postgres is running "
+						  "as a pg_autoctl subprocess, "
 						  "see above for details.");
 				return false;
 			}
@@ -263,12 +268,7 @@ monitor_service_run(Monitor *monitor)
 				if (monitor->pgsql.status != PG_CONNECTION_OK)
 				{
 					/* leave some time to the monitor before we try again */
-					sleep(PG_AUTOCTL_MONITOR_SLEEP_TIME);
-
-					if (firstLoop)
-					{
-						firstLoop = false;
-					}
+					sleep(PG_AUTOCTL_MONITOR_RETRY_TIME);
 					continue;
 				}
 
@@ -277,10 +277,10 @@ monitor_service_run(Monitor *monitor)
 			}
 		}
 
-		if (firstLoop)
+		if (!loggedAboutListening)
 		{
 			log_info("Contacting the monitor to LISTEN to its events.");
-			firstLoop = false;
+			loggedAboutListening = true;
 		}
 
 		if (!monitor_get_notifications(monitor,
