@@ -29,5 +29,8 @@ bool findHostnameLocalAddress(const char *hostname,
 bool findHostnameFromLocalIpAddress(char *localIpAddress,
 									char *hostname, int size);
 
+bool resolveHostnameForwardAndReverse(const char *hostname,
+									  char *ipaddr, int size);
+
 
 #endif /* __IPADDRH__ */

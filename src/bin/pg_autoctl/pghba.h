@@ -45,4 +45,6 @@ bool pghba_enable_lan_cidr(PGSQL *pgsql,
 						   const char *authenticationScheme,
 						   const char *pgdata);
 
+bool pghba_check_hostname(const char *hostname);
+
 #endif /* PGHBA_H */
