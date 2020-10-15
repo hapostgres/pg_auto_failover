@@ -691,12 +691,15 @@ pghba_check_hostname(const char *hostname)
 	{
 		/* warn users about possible DNS misconfiguration */
 		log_warn("Failed to resolve hostname \"%s\" to an IP address that "
-				 "resolves batck to the hostname on a reverse DNS lookup.",
+				 "resolves back to the hostname on a reverse DNS lookup.",
 				 hostname);
 
 		log_warn("Postgres might deny connection attempts from \"%s\", "
 				 "even with the new HBA rules.",
 				 hostname);
+
+		log_warn("Hint: correct setup of HBA with host names requires proper "
+				 "reverse DNS setup. You might want to use IP addresses.");
 
 		return false;
 	}

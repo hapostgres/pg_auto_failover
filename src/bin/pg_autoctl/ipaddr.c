@@ -598,9 +598,8 @@ findHostnameFromLocalIpAddress(char *localIpAddress, char *hostname, int size)
 
 /*
  * resolveHostnameForwardAndReverse returns true when we could do a forward DNS
- * lookup for the hostname, and then a reverse DNS lookup, and the reverse DNS
- * lookup returns a single IP address that is the same as the forward lookup
- * returned.
+ * lookup for the hostname and one of the IP addresses from the lookup resolves
+ * back to the hostname when doing a reverse-DNS lookup from it.
  *
  * When Postgres runs the DNS checks in the HBA implementation, the client IP
  * address is looked-up in a reverse DNS query, and that name is compared to
