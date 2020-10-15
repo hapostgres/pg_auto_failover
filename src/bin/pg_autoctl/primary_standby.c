@@ -988,8 +988,11 @@ primary_rewind_to_standby(LocalPostgresServer *postgres)
 	NodeAddress *primaryNode = &(replicationSource->primaryNode);
 
 	log_trace("primary_rewind_to_standby");
-	log_info("Rewinding PostgreSQL to follow new primary %s:%d",
-			 primaryNode->host, primaryNode->port);
+	log_info("Rewinding PostgreSQL to follow new primary node %d \"%s\" (%s:%d)",
+			 primaryNode->nodeId,
+			 primaryNode->name,
+			 primaryNode->host,
+			 primaryNode->port);
 
 	if (!ensure_postgres_service_is_stopped(postgres))
 	{
@@ -1194,7 +1197,11 @@ standby_follow_new_primary(LocalPostgresServer *postgres)
 	ReplicationSource *replicationSource = &(postgres->replicationSource);
 	NodeAddress *primaryNode = &(replicationSource->primaryNode);
 
-	log_info("Follow new primary %s:%d", primaryNode->host, primaryNode->port);
+	log_info("Follow new primary node %d \"%s\" (%s:%d)",
+			 primaryNode->nodeId,
+			 primaryNode->name,
+			 primaryNode->host,
+			 primaryNode->port);
 
 	/* when we have a primary, only proceed if we can reach it */
 	if (!IS_EMPTY_STRING_BUFFER(replicationSource->primaryNode.host))

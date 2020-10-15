@@ -307,8 +307,8 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 			return false;
 		}
 
-		log_debug("pghba_ensure_host_rules_exist: %d %s:%d",
-				  node->nodeId, node->host, node->port);
+		log_debug("pghba_ensure_host_rules_exist: %d \"%s\" (%s:%d)",
+				  node->nodeId, node->name, node->host, node->port);
 
 		if (!SKIP_HBA(authenticationScheme))
 		{
@@ -364,8 +364,8 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 			return false;
 		}
 
-		log_info("Ensuring HBA rules for node %d (%s:%d)",
-				 node->nodeId, node->host, node->port);
+		log_info("Ensuring HBA rules for node %d \"%s\" (%s:%d)",
+				 node->nodeId, node->name, node->host, node->port);
 
 		hbaLines[0] = hbaLineReplicationBuffer;
 		hbaLines[1] = hbaLineDatabaseBuffer;

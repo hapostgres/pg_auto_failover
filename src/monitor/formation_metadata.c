@@ -593,9 +593,10 @@ set_formation_number_sync_standbys(PG_FUNCTION_ARGS)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("cannot set number_sync_standbys when current "
-						"goal state for primary node %d (%s:%d) is \"%s\", "
+						"goal state for primary node %d \"%s\" (%s:%d) is \"%s\", "
 						"and current reported state is \"%s\"",
 						primaryNode->nodeId,
+						primaryNode->nodeName,
 						primaryNode->nodeHost,
 						primaryNode->nodePort,
 						ReplicationStateGetName(primaryNode->goalState),
@@ -629,9 +630,12 @@ set_formation_number_sync_standbys(PG_FUNCTION_ARGS)
 	/* and now ask the primary to change its settings */
 	LogAndNotifyMessage(
 		message, BUFSIZE,
-		"Setting goal state of %s:%d to apply_settings "
+		"Setting goal state of node %d \"%s\" (%s:%d) to apply_settings "
 		"after updating number_sync_standbys to %d for formation %s.",
-		primaryNode->nodeHost, primaryNode->nodePort,
+		primaryNode->nodeId,
+		primaryNode->nodeName,
+		primaryNode->nodeHost,
+		primaryNode->nodePort,
 		formation->number_sync_standbys,
 		formation->formationId);
 
