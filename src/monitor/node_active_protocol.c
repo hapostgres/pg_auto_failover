@@ -2226,9 +2226,6 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 		}
 		else
 		{
-			bool allTheSamePriority =
-				AllNodesHaveSameCandidatePriority(syncStandbyNodesGroupList);
-
 			/*
 			 * We accept number_sync_standbys to be set to zero to enable our
 			 * failover trade-off, but won't send a synchronous_standby_names
@@ -2243,10 +2240,7 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 			ListCell *nodeCell = NULL;
 			bool firstNode = true;
 
-			appendStringInfo(sbnames,
-							 "%s %d (",
-							 allTheSamePriority ? "ANY" : "FIRST",
-							 number_sync_standbys);
+			appendStringInfo(sbnames, "ANY %d (", number_sync_standbys);
 
 			foreach(nodeCell, syncStandbyNodesGroupList)
 			{

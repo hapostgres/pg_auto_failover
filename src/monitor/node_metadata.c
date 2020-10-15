@@ -758,30 +758,6 @@ CountSyncStandbys(List *groupNodeList)
 
 
 /*
- * AllNodesHaveSameCandidatePriority returns true when all the nodes in the
- * given list have the same candidate priority.
- */
-bool
-AllNodesHaveSameCandidatePriority(List *groupNodeList)
-{
-	ListCell *nodeCell = NULL;
-	int candidatePriority =
-		((AutoFailoverNode *) linitial(groupNodeList))->candidatePriority;
-
-	foreach(nodeCell, groupNodeList)
-	{
-		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
-
-		if (node->candidatePriority != candidatePriority)
-		{
-			return false;
-		}
-	}
-	return true;
-}
-
-
-/*
  * GetAutoFailoverNode returns a single AutoFailover node by hostname and port.
  */
 AutoFailoverNode *
