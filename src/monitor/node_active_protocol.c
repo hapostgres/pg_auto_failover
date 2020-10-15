@@ -1108,22 +1108,6 @@ RemoveNode(AutoFailoverNode *currentNode)
 			formation->number_sync_standbys,
 			formation->formationId,
 			countSyncStandbys);
-
-		AutoFailoverNode *primaryNode =
-			GetPrimaryNodeInGroup(currentNode->formationId,
-								  currentNode->groupId);
-
-		if (primaryNode)
-		{
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Setting goal state of %s:%d to apply_settings "
-				"after removing standby node %s:%d from formation %s.",
-				primaryNode->nodeHost, primaryNode->nodePort,
-				currentNode->nodeHost, currentNode->nodePort,
-				formation->formationId);
-			SetNodeGoalState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS, message);
-		}
 	}
 
 	/* now proceed with the failover, starting with the first standby */
@@ -1145,6 +1129,12 @@ RemoveNode(AutoFailoverNode *currentNode)
 		if (primaryNode)
 		{
 			(void) ProceedGroupState(primaryNode);
+			if (primaryNode->goalState == primaryNode->reportedState)
+			{
+				const char *message = "whatever";
+				SetNodeGoalState(primaryNode,
+								 REPLICATION_STATE_APPLY_SETTINGS, message);
+			}
 		}
 	}
 

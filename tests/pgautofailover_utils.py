@@ -964,6 +964,26 @@ SELECT reportedstate
         command.execute("drop node", 'drop', 'node')
         return True
 
+    def do_fsm_assign(self, target_state):
+        """
+        Runs `pg_autoctl do fsm assign` on a node
+
+        :return:
+        """
+        command = PGAutoCtl(self)
+        command.execute("do fsm assign", 'do', 'fsm', 'assign', target_state)
+        return True
+
+    def do_fsm_step(self):
+        """
+        Runs `pg_autoctl do fsm step` on a node
+
+        :return:
+        """
+        command = PGAutoCtl(self)
+        command.execute("do fsm step", 'do', 'fsm', 'step')
+        return True
+
     def set_metadata(self, name=None, host=None, port=None):
         """
             Sets node metadata via pg_autoctl

@@ -318,6 +318,11 @@ KeeperFSMTransition KeeperFSM[] = {
 	 * monitor.
 	 */
 	{ PRIMARY_STATE, APPLY_SETTINGS_STATE, COMMENT_PRIMARY_TO_APPLY_SETTINGS, &fsm_apply_settings },
+//	{ SINGLE_STATE, APPLY_SETTINGS_STATE, COMMENT_PRIMARY_TO_APPLY_SETTINGS, &fsm_apply_settings },
+	// TODO - add other transitions
+	// TODO - we beleive in `wait_primary` and `join_primary` as valid transitions like above
+	// Still don't feel good about `single` -- need explaination from Dimitri
+
 	{ APPLY_SETTINGS_STATE, PRIMARY_STATE, COMMENT_APPLY_SETTINGS_TO_PRIMARY, NULL },
 
 	/*

@@ -1005,6 +1005,8 @@ cli_drop_node(int argc, char **argv)
 				exit(EXIT_CODE_BAD_ARGS);
 			}
 
+			/* TODO: Maybe update settings on primary? */
+
 			/* pg_autoctl drop node on the monitor drops another node */
 			(void) cli_drop_node_from_monitor(&config,
 											  config.hostname,

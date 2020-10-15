@@ -101,7 +101,7 @@ def test_004_add_three_standbys():
     assert node3.has_needed_replication_slots()
     assert node4.has_needed_replication_slots()
 
-def test_005_number_sync_standbys():
+def test_005_number_sync_standbys_and_standby_names():
     print()
 
     assert node1.get_number_sync_standbys() == 1
@@ -178,6 +178,7 @@ def test_009_failover():
     assert node2.wait_until_state(target_state="primary")
     assert node3.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="secondary")
+    eq_(node2.get_synchronous_standby_names(), node2.get_synchronous_standby_names_local())
 
     assert node1.has_needed_replication_slots()
     assert node2.has_needed_replication_slots()
@@ -203,9 +204,21 @@ def test_012_fail_primary():
 
     assert node1.wait_until_state(target_state="primary")
     assert node3.wait_until_state(target_state="secondary")
+    eq_(node1.get_synchronous_standby_names(), node1.get_synchronous_standby_names_local())
 
 def test_013_remove_old_primary():
     node2.drop()
 
     assert node1.wait_until_state(target_state="primary")
     assert node3.wait_until_state(target_state="secondary")
+
+def test_014_update_sync_standby_names_when_adding_and_removing_a_standby_at_same_time():
+    cluster.create_datanode("/tmp/multi_standby/node5")
+    cluster.create_datanode("/tmp/multi_standby/node6")
+    node1.do_fsm_assign(target_state="join_primary")
+    node1.do_fsm_step()
+    print(monitor.get_other_nodes(node1.nodeid))
+    # assert node1.wait_until_state(target_state="join_primary")
+    node3.drop()
+    # assert node1.wait_until_state(target_state="primary")
+    eq_(node1.get_synchronous_standby_names(), node1.get_synchronous_standby_names_local())
