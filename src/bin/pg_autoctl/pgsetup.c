@@ -440,17 +440,7 @@ get_pgpid(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk)
 
 	join_path_components(pidfile, pgSetup->pgdata, "postmaster.pid");
 
-	if (!file_exists(pidfile))
-	{
-		if (!pgIsNotRunningIsOk)
-		{
-			log_error("Failed get postmaster pid, file \"%s\" does not exists",
-					  pidfile);
-		}
-		return false;
-	}
-
-	if (!read_file(pidfile, &contents, &fileSize))
+	if (!read_file_if_exists(pidfile, &contents, &fileSize))
 	{
 		log_level(logLevel, "Failed to open file \"%s\": %m", pidfile);
 

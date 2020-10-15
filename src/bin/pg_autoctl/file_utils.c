@@ -25,6 +25,11 @@
 #include "file_utils.h"
 #include "log.h"
 
+static bool read_file_internal(FILE *fileStream,
+							   const char *filePath,
+							   char **contents,
+							   long *fileSize);
+
 /*
  * file_exists returns true if the given filename is known to exist
  * on the file system or false if it does not exists or in case of
@@ -231,6 +236,36 @@ append_to_file(char *data, long fileSize, const char *filePath)
 
 
 /*
+ * read_file_if_exists is a utility function that reads the contents of a file
+ * using our logging library to report errors. ENOENT is not considered worth
+ * of a log message in this function, and we still return false in that case.
+ *
+ * If successful, the function returns true and fileSize points to the number
+ * of bytes that were read and contents points to a buffer containing the entire
+ * contents of the file. This buffer should be freed by the caller.
+ */
+bool
+read_file_if_exists(const char *filePath, char **contents, long *fileSize)
+{
+	FILE *fileStream = NULL;
+
+	/* open a file */
+	fileStream = fopen_read_only(filePath);
+
+	if (fileStream == NULL)
+	{
+		if (errno != ENOENT)
+		{
+			log_error("Failed to open file \"%s\": %m", filePath);
+		}
+		return false;
+	}
+
+	return read_file_internal(fileStream, filePath, contents, fileSize);
+}
+
+
+/*
  * read_file is a utility function that reads the contents of a file using our
  * logging library to report errors.
  *
@@ -241,7 +276,6 @@ append_to_file(char *data, long fileSize, const char *filePath)
 bool
 read_file(const char *filePath, char **contents, long *fileSize)
 {
-	char *data = NULL;
 	FILE *fileStream = NULL;
 
 	/* open a file */
@@ -251,6 +285,20 @@ read_file(const char *filePath, char **contents, long *fileSize)
 		log_error("Failed to open file \"%s\": %m", filePath);
 		return false;
 	}
+
+	return read_file_internal(fileStream, filePath, contents, fileSize);
+}
+
+
+/*
+ * read_file_internal is shared by both read_file and read_file_if_exists
+ * functions.
+ */
+static bool
+read_file_internal(FILE *fileStream,
+				   const char *filePath, char **contents, long *fileSize)
+{
+	char *data = NULL;
 
 	/* get the file size */
 	if (fseek(fileStream, 0, SEEK_END) != 0)
