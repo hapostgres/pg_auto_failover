@@ -62,7 +62,7 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 		/* try to get local hostname automagically */
 		char *local_hostname;
 		size_t hostname_len;
-		if(!gethostname(&local_hostname, hostname_len)){
+		if(!gethostname(local_hostname, hostname_len)){
 			log_warn("Failed to get local hostname");
 			return false;
 		}
@@ -106,7 +106,7 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 		 * TODO: Allow IPv6 addresses also
 		 */		
 	}
-	return ipAddr != NULL;
+	return 0;
 }
 
 
