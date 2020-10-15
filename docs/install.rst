@@ -99,7 +99,7 @@ itself as in the previous case:
   sudo yum install -y pg-auto-failover14_12
 
   # confirm installation
-  /usr/pgsql-11/bin/pg_autoctl --version
+  /usr/pgsql-12/bin/pg_autoctl --version
 
 __ https://packagecloud.io/citusdata/community/install#manual-rpm
 
