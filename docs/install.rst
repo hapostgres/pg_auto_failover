@@ -77,7 +77,7 @@ __ https://packagecloud.io/citusdata/community/install#bash
   sudo yum install -y pg-auto-failover14_12
 
   # confirm installation
-  /usr/pgsql-11/bin/pg_autoctl --version
+  /usr/pgsql-12/bin/pg_autoctl --version
 
 Manual installation
 ~~~~~~~~~~~~~~~~~~~
