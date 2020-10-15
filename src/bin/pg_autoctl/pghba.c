@@ -188,15 +188,7 @@ pghba_ensure_host_rule_exists(const char *hbaFilePath,
 	 *
 	 * HBA & DNS is hard.
 	 */
-	if (!pghba_check_hostname(host))
-	{
-		log_warn(
-			"Failed to resolve hostname \"%s\" to an IP address that "
-			"resolves batck to the hostname on a reverse DNS lookup.",
-			host);
-		log_warn("Postgres might deny connection attempts from \"%s\", "
-				 "even with the new HBA rules.", host);
-	}
+	(void) pghba_check_hostname(host);
 
 	/* build the new postgresql.conf contents */
 	newHbaContents = createPQExpBuffer();
@@ -329,15 +321,7 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 			 *
 			 * HBA & DNS is hard.
 			 */
-			if (!pghba_check_hostname(node->host))
-			{
-				log_warn(
-					"Failed to resolve hostname \"%s\" to an IP address that "
-					"resolves batck to the hostname on a reverse DNS lookup.",
-					node->host);
-				log_warn("Postgres might deny connection attempts from \"%s\", "
-						 "even with the new HBA rules.", node->host);
-			}
+			(void) pghba_check_hostname(node->host);
 		}
 
 		if (!pghba_append_rule_to_buffer(hbaLineReplicationBuffer,
@@ -705,6 +689,15 @@ pghba_check_hostname(const char *hostname)
 
 	if (!resolveHostnameForwardAndReverse(hostname, ipaddr, sizeof(ipaddr)))
 	{
+		/* warn users about possible DNS misconfiguration */
+		log_warn("Failed to resolve hostname \"%s\" to an IP address that "
+				 "resolves batck to the hostname on a reverse DNS lookup.",
+				 hostname);
+
+		log_warn("Postgres might deny connection attempts from \"%s\", "
+				 "even with the new HBA rules.",
+				 hostname);
+
 		return false;
 	}
 
