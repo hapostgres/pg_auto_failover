@@ -35,6 +35,7 @@ static void cli_show_ipaddr(int argc, char **argv);
 static void cli_show_cidr(int argc, char **argv);
 static void cli_show_lookup(int argc, char **argv);
 static void cli_show_hostname(int argc, char **argv);
+static void cli_show_reverse(int argc, char **argv);
 
 static CommandLine do_show_ipaddr_command =
 	make_command("ipaddr",
@@ -57,11 +58,17 @@ static CommandLine do_show_hostname_command =
 				 "Print this node's default hostname", "", "",
 				 NULL, cli_show_hostname);
 
+static CommandLine do_show_reverse_command =
+	make_command("reverse",
+				 "Lookup given hostname and check reverse DNS setup", "", "",
+				 NULL, cli_show_reverse);
+
 CommandLine *do_show_subcommands[] = {
 	&do_show_ipaddr_command,
 	&do_show_cidr_command,
 	&do_show_lookup_command,
 	&do_show_hostname_command,
+	&do_show_reverse_command,
 	NULL
 };
 
@@ -231,4 +238,47 @@ cli_show_hostname(int argc, char **argv)
 	log_debug("cli_show_hostname: ip %s", localIpAddress);
 
 	fformat(stdout, "%s\n", hostname);
+}
+
+
+/*
+ * cli_show_reverse does a forward DNS lookup of the given hostname, and then a
+ * reverse DNS lookup for every of the forward DNS results. Success is reached
+ * when at last one of the IP addresses from the forward lookup resolves back
+ * to the given hostname.
+ */
+static void
+cli_show_reverse(int argc, char **argv)
+{
+	char ipaddr[BUFSIZE] = { 0 };
+
+	char *hostname;
+	IPType ipType = IPTYPE_NONE;
+
+	if (argc != 1)
+	{
+		commandline_print_usage(&do_show_reverse_command, stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	hostname = argv[0];
+	ipType = ip_address_type(hostname);
+
+	if (ipType != IPTYPE_NONE)
+	{
+		log_error("Hostname must not be an IP address");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (!resolveHostnameForwardAndReverse(hostname, ipaddr, sizeof(ipaddr)))
+	{
+		log_fatal("Failed to find an IP address for hostname \"%s\" that "
+				  "matches hostname again in a reverse-DNS lookup.",
+				  hostname);
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	log_info("Hostname \"%s\" resolves to IP address %s and back",
+			 hostname,
+			 ipaddr);
 }

@@ -180,6 +180,16 @@ pghba_ensure_host_rule_exists(const char *hbaFilePath,
 		return true;
 	}
 
+	/*
+	 * When using a hostname in the HBA host field, Postgres is very picky
+	 * about the matching rules. We have an opportunity here to check the same
+	 * DNS and reverse DNS rules as Postgres, and warn our users when we see
+	 * something that we know Postgres won't be happy with.
+	 *
+	 * HBA & DNS is hard.
+	 */
+	(void) pghba_check_hostname(host);
+
 	/* build the new postgresql.conf contents */
 	newHbaContents = createPQExpBuffer();
 	if (newHbaContents == NULL)
@@ -299,6 +309,20 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 
 		log_debug("pghba_ensure_host_rules_exist: %d %s:%d",
 				  node->nodeId, node->host, node->port);
+
+		if (!SKIP_HBA(authenticationScheme))
+		{
+			/*
+			 * When using a hostname in the HBA host field, Postgres is very
+			 * picky about the matching rules. We have an opportunity here to
+			 * check the same DNS and reverse DNS rules as Postgres, and warn
+			 * our users when we see something that we know Postgres won't be
+			 * happy with.
+			 *
+			 * HBA & DNS is hard.
+			 */
+			(void) pghba_check_hostname(node->host);
+		}
 
 		if (!pghba_append_rule_to_buffer(hbaLineReplicationBuffer,
 										 ssl,
@@ -622,5 +646,65 @@ pghba_enable_lan_cidr(PGSQL *pgsql,
 		log_error("Failed to reload PostgreSQL configuration for new HBA rule");
 		return false;
 	}
+	return true;
+}
+
+
+/*
+ * hba_check_hostname returns true when the DNS setting looks compatible with
+ * Postgres expectations for an HBA hostname entry.
+ *
+ * https://www.postgresql.org/docs/current/auth-pg-hba-conf.html
+ *
+ * If a host name is specified (anything that is not an IP address range or a
+ * special key word is treated as a host name), that name is compared with the
+ * result of a reverse name resolution of the client's IP address (e.g.,
+ * reverse DNS lookup, if DNS is used). Host name comparisons are case
+ * insensitive. If there is a match, then a forward name resolution (e.g.,
+ * forward DNS lookup) is performed on the host name to check whether any of
+ * the addresses it resolves to are equal to the client's IP address. If both
+ * directions match, then the entry is considered to match. (The host name that
+ * is used in pg_hba.conf should be the one that address-to-name resolution of
+ * the client's IP address returns, otherwise the line won't be matched. Some
+ * host name databases allow associating an IP address with multiple host
+ * names, but the operating system will only return one host name when asked to
+ * resolve an IP address.)
+ */
+bool
+pghba_check_hostname(const char *hostname)
+{
+	char ipaddr[BUFSIZE] = { 0 };
+
+	/*
+	 * IP addresses do not require any DNS properties/lookups. Also hostname
+	 * won't contain a '/' character, but CIDR notations would, such as
+	 * 1.2.3.4/32 or ::1/128. We don't want to trust ip_address_type() value of
+	 * IPTYPE_NONE when we find a '/' character in the hostname.
+	 *
+	 */
+	if (strchr(hostname, '/') || ip_address_type(hostname) != IPTYPE_NONE)
+	{
+		return true;
+	}
+
+	if (!resolveHostnameForwardAndReverse(hostname, ipaddr, sizeof(ipaddr)))
+	{
+		/* warn users about possible DNS misconfiguration */
+		log_warn("Failed to resolve hostname \"%s\" to an IP address that "
+				 "resolves back to the hostname on a reverse DNS lookup.",
+				 hostname);
+
+		log_warn("Postgres might deny connection attempts from \"%s\", "
+				 "even with the new HBA rules.",
+				 hostname);
+
+		log_warn("Hint: correct setup of HBA with host names requires proper "
+				 "reverse DNS setup. You might want to use IP addresses.");
+
+		return false;
+	}
+
+	log_debug("pghba_check_hostname: \"%s\" <-> %s", hostname, ipaddr);
+
 	return true;
 }

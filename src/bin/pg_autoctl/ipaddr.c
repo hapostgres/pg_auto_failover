@@ -594,3 +594,94 @@ findHostnameFromLocalIpAddress(char *localIpAddress, char *hostname, int size)
 
 	return true;
 }
+
+
+/*
+ * resolveHostnameForwardAndReverse returns true when we could do a forward DNS
+ * lookup for the hostname and one of the IP addresses from the lookup resolves
+ * back to the hostname when doing a reverse-DNS lookup from it.
+ *
+ * When Postgres runs the DNS checks in the HBA implementation, the client IP
+ * address is looked-up in a reverse DNS query, and that name is compared to
+ * the hostname in the HBA file. Then, a forward DNS query is performed on the
+ * hostname, and one of the IP addresses returned must match with the client IP
+ * address.
+ *
+ *  client ip -- reverse dns lookup --> hostname
+ *   hostname -- forward dns lookup --> { ... client ip ... }
+ *
+ * At this point we don't have a client IP address. That said, the Postgres
+ * check will always fail if we fail to get our hostname back from at least one
+ * of the IP addresses that our hostname forward-DNS query returns.
+ */
+bool
+resolveHostnameForwardAndReverse(const char *hostname, char *ipaddr, int size)
+{
+	int error;
+	struct addrinfo *lookup, *ai;
+
+	bool foundHostnameFromAddress = false;
+
+	error = getaddrinfo(hostname, NULL, 0, &lookup);
+	if (error != 0)
+	{
+		log_warn("Failed to resolve DNS name \"%s\": %s",
+				 hostname, gai_strerror(error));
+		return false;
+	}
+
+	/* loop over the forward DNS results for hostname */
+	for (ai = lookup; ai; ai = ai->ai_next)
+	{
+		int ret;
+		char hbuf[NI_MAXHOST] = { 0 };
+
+		if (ai->ai_family == AF_INET)
+		{
+			struct sockaddr_in *ip = (struct sockaddr_in *) ai->ai_addr;
+
+			if (inet_ntop(AF_INET, (void *) &(ip->sin_addr), ipaddr, size) == NULL)
+			{
+				log_debug("Failed to determine local ip address: %m");
+				continue;
+			}
+		}
+		else if (ai->ai_family == AF_INET6)
+		{
+			struct sockaddr_in6 *ip = (struct sockaddr_in6 *) ai->ai_addr;
+
+			if (inet_ntop(AF_INET6, (void *) &(ip->sin6_addr), ipaddr, size) == NULL)
+			{
+				log_debug("Failed to determine local ip address: %m");
+				continue;
+			}
+		}
+		else
+		{
+			/* Highly unexpected */
+			log_debug("Non supported ai_family %d", ai->ai_family);
+			continue;
+		}
+
+		/* now reverse lookup (NI_NAMEREQD) the address with getnameinfo() */
+		ret = getnameinfo(ai->ai_addr, ai->ai_addrlen,
+						  hbuf, sizeof(hbuf), NULL, 0, NI_NAMEREQD);
+
+		if (ret != 0)
+		{
+			log_debug("Failed to resolve hostname from address \"%s\": %s",
+					  ipaddr, gai_strerror(ret));
+			continue;
+		}
+
+		/* compare reverse-DNS lookup result with our hostname */
+		if (strcmp(hbuf, hostname) == 0)
+		{
+			foundHostnameFromAddress = true;
+			break;
+		}
+	}
+	freeaddrinfo(lookup);
+
+	return foundHostnameFromAddress;
+}
