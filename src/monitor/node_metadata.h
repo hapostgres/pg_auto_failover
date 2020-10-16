@@ -89,6 +89,16 @@ typedef enum SyncState
  */
 #define MAX_USER_DEFINED_CANDIDATE_PRIORITY 100
 
+
+/*
+ * Use the same output format each time we are notifying and logging about an
+ * AutoFailoverNode, for consistency. Well, apart when registering, where we
+ * don't have the node id and/or the node name yet.
+ */
+#define NODE_FORMAT "node %d \"%s\" (%s:%d)"
+#define NODE_FORMAT_ARGS(node) \
+	node->nodeId, node->nodeName, node->nodeHost, node->nodePort
+
 /*
  * AutoFailoverNode represents a Postgres node that is being tracked by the
  * pg_auto_failover monitor.
