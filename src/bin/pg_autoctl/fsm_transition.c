@@ -1392,7 +1392,7 @@ fsm_follow_new_primary(Keeper *keeper)
 	if (!standby_follow_new_primary(postgres))
 	{
 		log_error("Failed to change standby setup to follow new primary "
-				  "node %d \"%s\" at %s:%d, see above for details",
+				  "node %d \"%s\" (%s:%d), see above for details",
 				  replicationSource->primaryNode.nodeId,
 				  replicationSource->primaryNode.name,
 				  replicationSource->primaryNode.host,
