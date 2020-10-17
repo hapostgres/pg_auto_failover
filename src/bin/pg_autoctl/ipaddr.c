@@ -48,47 +48,55 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 	struct addrinfo hints;
 
 	/*
-	 * the hints struct is used to tell getaddrinfo what kind of 
+	 * the hints struct is used to tell getaddrinfo what kind of
 	 * results we want. In this case we want the IPv4 addresses
 	 * of local TCP socket(s)
 	 */
 
 	memset(&hints, 0, sizeof hints);
-    hints.ai_family = AF_INET; /* we only want IPv4 */
-    hints.ai_socktype = SOCK_STREAM; /* we only want TCP sockets */
+	hints.ai_family = AF_INET; /* we only want IPv4 */
+	hints.ai_socktype = SOCK_STREAM; /* we only want TCP sockets */
 
 	/* did we get a serviceName? */
-	if(!(*serviceName)){
+	if (!(*serviceName))
+	{
 		/* try to get local hostname automagically */
 		char *local_hostname;
-		
-		if(!gethostname(local_hostname, sizeof(*local_hostname))){
+
+		if (!gethostname(local_hostname, sizeof(*local_hostname)))
+		{
 			log_warn("Failed to get local hostname");
 			return false;
 		}
+
 		/* then lookup the IP of that hostname */
-		if(!getaddrinfo(local_hostname, NULL, &hints, &result)){
+		if (!getaddrinfo(local_hostname, NULL, &hints, &result))
+		{
 			log_warn("Failed to get IPv4 address for hostname: %s", local_hostname);
 			return false;
 		}
 	}
-	else {
-		/* 
+	else
+	{
+		/*
 		 * use the serviceName to get the IP address of a socket suitable
 		 * for that service
 		 */
-		 if(!getaddrinfo(NULL, serviceName, &hints, &result)){
-			 log_warn("Failed to get IPv4 address for service name: %s", serviceName);
-			 return false;
-		 }
+		if (!getaddrinfo(NULL, serviceName, &hints, &result))
+		{
+			log_warn("Failed to get IPv4 address for service name: %s", serviceName);
+			return false;
+		}
 	}
 
-	if(!result){
+	if (!result)
+	{
 		/* something went wrong here */
 		log_warn("Getaddrinfo() returned an empty result");
 		return false;
 	}
-	else {
+	else
+	{
 		/*
 		 * getaddrinfo() initializes an addrinfo struct "result" which contains a pointer
 		 * to a linked list of sockaddr structs. We want only the first IP address
@@ -96,14 +104,15 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 		 * to a string with a little two-step to convert the format from sockaddr to
 		 * sockaddr_in.
 		 */
-		struct in_addr *ipAddress = &(((struct sockaddr_in *)result->ai_addr)->sin_addr);
+		struct in_addr *ipAddress = &(((struct sockaddr_in *) result->ai_addr)->sin_addr);
 
 		/* Now convert it to string format in dotted decimal notation */
 		inet_ntop(AF_INET, ipAddress, localIpAddress, sizeof(localIpAddress));
 		freeaddrinfo(result);
+
 		/*
 		 * TODO: Allow IPv6 addresses also
-		 */		
+		 */
 	}
 	return 0;
 }
