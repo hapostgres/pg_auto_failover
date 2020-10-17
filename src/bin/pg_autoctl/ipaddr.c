@@ -61,8 +61,8 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 	if(!(*serviceName)){
 		/* try to get local hostname automagically */
 		char *local_hostname;
-		size_t hostname_len;
-		if(!gethostname(&local_hostname, hostname_len)){
+		
+		if(!gethostname(&local_hostname, sizeof(*local_hostname))){
 			log_warn("Failed to get local hostname");
 			return false;
 		}
@@ -96,8 +96,7 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 		 * to a string with a little two-step to convert the format from sockaddr to
 		 * sockaddr_in.
 		 */
-		struct sockaddr_in *pip = (struct sockaddr_in *)result->ai_addr;
-		struct in_addr *ipAddress = &(pip->sin_addr);
+		struct in_addr *ipAddress = &(((struct sockaddr_in *)result->ai_addr)->sin_addr);
 
 		/* Now convert it to string format in dotted decimal notation */
 		inet_ntop(AF_INET, ipAddress, localIpAddress, sizeof(localIpAddress));
