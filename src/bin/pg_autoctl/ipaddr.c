@@ -105,7 +105,7 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 		 * TODO: Allow IPv6 addresses also
 		 */		
 	}
-	return ipAddr != NULL;
+	return 0;
 }
 
 
