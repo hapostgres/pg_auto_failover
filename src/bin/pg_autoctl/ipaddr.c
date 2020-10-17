@@ -62,7 +62,7 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 		/* try to get local hostname automagically */
 		char *local_hostname;
 		
-		if(!gethostname(&local_hostname, sizeof(*local_hostname))){
+		if(!gethostname(local_hostname, sizeof(*local_hostname))){
 			log_warn("Failed to get local hostname");
 			return false;
 		}
