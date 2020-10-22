@@ -744,7 +744,7 @@ bool
 pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 									 char *connectionString)
 {
-	char pg_regress_sock_dir[MAXPGPATH];
+	char pg_regress_sock_dir[MAXPGPATH] = { 0 };
 	bool pg_regress_sock_dir_exists = env_exists("PG_REGRESS_SOCK_DIR");
 	PQExpBuffer connStringBuffer = createPQExpBuffer();
 

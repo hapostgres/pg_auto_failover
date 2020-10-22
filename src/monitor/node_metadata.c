@@ -703,6 +703,11 @@ GroupListSyncStandbys(List *groupNodeList)
 	ListCell *nodeCell = NULL;
 	List *syncStandbyNodesList = NIL;
 
+	if (groupNodeList == NIL)
+	{
+		return NIL;
+	}
+
 	#if (PG_VERSION_NUM >= 130000)
 	List *sortedNodeList = list_copy(groupNodeList);
 	list_sort(sortedNodeList, pgautofailover_node_candidate_priority_compare);
