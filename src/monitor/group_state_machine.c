@@ -1093,7 +1093,8 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 				message, BUFSIZE,
 				"Failover still in progress after all %d candidate nodes "
 				"reported their LSN and we failed to select one of them; "
-				"activeNode is %d \"%s\" (%s:%d) and reported state \"%s\"",
+				"activeNode is " NODE_FORMAT
+				" and reported state \"%s\"",
 				candidateList.candidateCount,
 				NODE_FORMAT_ARGS(activeNode),
 				ReplicationStateGetName(activeNode->reportedState));
