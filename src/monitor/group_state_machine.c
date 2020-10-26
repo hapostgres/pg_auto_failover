@@ -1519,7 +1519,7 @@ PromoteSelectedNode(AutoFailoverNode *selectedNode,
 			LogAndNotifyMessage(
 				message, BUFSIZE,
 				"Setting goal state of " NODE_FORMAT
-				" to fast_forward and %d nodes reported their LSN position.",
+				" to fast_forward after %d nodes reported their LSN position.",
 				NODE_FORMAT_ARGS(selectedNode),
 				candidateList->candidateCount);
 		}
