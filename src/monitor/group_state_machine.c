@@ -1190,7 +1190,7 @@ BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
 				message, BUFSIZE,
 				"Setting goal state of " NODE_FORMAT
 				" to report_lsn to find the failover candidate",
-				node->nodeId, node->nodeName, node->nodeHost, node->nodePort);
+				NODE_FORMAT_ARGS(node));
 
 			AssignGoalState(node, REPLICATION_STATE_REPORT_LSN, message);
 
