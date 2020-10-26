@@ -1402,7 +1402,8 @@ SelectFailoverCandidateNode(CandidateList *candidateList,
 
 			LogAndNotifyMessage(
 				message, BUFSIZE,
-				"The selected candidate %d \"%s\" (%s:%d) needs to fetch missing "
+				"The selected candidate " NODE_FORMAT
+				" needs to fetch missing "
 				"WAL to reach LSN %X/%X (from current reported LSN %X/%X) "
 				"and none of the most advanced standby nodes are healthy "
 				"at the moment.",
