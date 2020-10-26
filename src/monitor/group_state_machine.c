@@ -485,8 +485,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 			message, BUFSIZE,
 			"Setting goal state of " NODE_FORMAT
 			" to demote_timeout and " NODE_FORMAT
-			" to stop_replication "
-			"after " NODE_FORMAT
+			" to stop_replication after " NODE_FORMAT
 			" converged to prepare_promotion.",
 			NODE_FORMAT_ARGS(primaryNode),
 			NODE_FORMAT_ARGS(activeNode),
