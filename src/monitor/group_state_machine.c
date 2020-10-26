@@ -1154,7 +1154,7 @@ BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
 		{
 			elog(LOG,
 				 "Skipping candidate " NODE_FORMAT ", which is unhealthy",
-				 node->nodeId, node->nodeName, node->nodeHost, node->nodePort);
+				 NODE_FORMAT_ARGS(node));
 
 			continue;
 		}
