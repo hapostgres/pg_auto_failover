@@ -548,13 +548,16 @@ fsm_enable_sync_rep(Keeper *keeper)
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	PGSQL *pgsql = &(postgres->sqlClient);
 
+	bool forceCacheInvalidation = true;
+
 	/*
 	 * First, we need to fetch and apply the synchronous_standby_names setting
 	 * value from the monitor...
 	 */
-	if (!fsm_apply_settings(keeper))
+	if (!keeper_refresh_standby_names(keeper, forceCacheInvalidation))
 	{
-		/* errors have already been logged */
+		log_error("Failed to update synchronous_standby_names from monitor's "
+				  "current value");
 		return false;
 	}
 
@@ -621,27 +624,28 @@ fsm_enable_sync_rep(Keeper *keeper)
  *
  * So we have to fetch the current synchronous_standby_names setting value from
  * the monitor and apply it (reload) to the current node.
+ *
+ * Starting in 1.4.1 we don't assign APPLY_SETTINGS anymore and we should be
+ * able to remove this function and the state altogether. That said, an upgrade
+ * might happen while the primary is in the APPLY_SETTINGS state, so we keep
+ * the code around just for that case.
  */
 bool
 fsm_apply_settings(Keeper *keeper)
 {
-	Monitor *monitor = &(keeper->monitor);
 	KeeperConfig *config = &(keeper->config);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
 	/* get synchronous_standby_names value from the monitor */
 	if (!config->monitorDisabled)
 	{
-		if (!monitor_synchronous_standby_names(
-				monitor,
-				config->formation,
-				keeper->state.current_group,
-				postgres->synchronousStandbyNames,
-				sizeof(postgres->synchronousStandbyNames)))
+		bool forceCacheInvalidation = true;
+
+		/* apply settings is all about synchronous_standby_names */
+		if (!keeper_refresh_standby_names(keeper, forceCacheInvalidation))
 		{
-			log_error("Failed to enable synchronous replication because "
-					  "we failed to get the synchronous_standby_names value "
-					  "from the monitor, see above for details");
+			log_error("Failed to update synchronous_standby_names "
+					  "from the monitor");
 			return false;
 		}
 	}

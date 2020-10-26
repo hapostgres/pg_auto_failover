@@ -1856,14 +1856,10 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to apply_settings after updating " NODE_FORMAT
+			"Updating " NODE_FORMAT
 			" candidate priority to %d.",
-			NODE_FORMAT_ARGS(primaryNode),
 			NODE_FORMAT_ARGS(currentNode),
 			currentNode->candidatePriority);
-
-		SetNodeGoalState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS, message);
 	}
 
 	PG_RETURN_BOOL(true);
@@ -2000,14 +1996,9 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to apply_settings after updating replication quorum to %s for "
-			NODE_FORMAT,
-			NODE_FORMAT_ARGS(primaryNode),
+			"Updating replication quorum to %s for " NODE_FORMAT,
 			currentNode->replicationQuorum ? "true" : "false",
 			NODE_FORMAT_ARGS(currentNode));
-
-		SetNodeGoalState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS, message);
 	}
 
 	PG_RETURN_BOOL(true);

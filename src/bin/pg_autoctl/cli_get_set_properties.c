@@ -686,33 +686,6 @@ static bool
 set_node_candidate_priority(Keeper *keeper, int candidatePriority)
 {
 	KeeperConfig *config = &(keeper->config);
-	NodeAddressArray nodesArray = { 0 };
-
-	/*
-	 * There might be some race conditions here, but it's all to be
-	 * user-friendly so in the worst case we're going to be less friendly that
-	 * we could have.
-	 */
-	if (!monitor_get_nodes(&(keeper->monitor),
-						   config->formation,
-						   config->groupId,
-						   &nodesArray))
-	{
-		/* ignore the error, just don't wait in that case */
-		log_warn("Failed to get_nodes() on the monitor");
-	}
-
-	/* listen for state changes BEFORE we apply new settings */
-	if (nodesArray.count > 1)
-	{
-		char *channels[] = { "state", NULL };
-
-		if (!pgsql_listen(&(keeper->monitor.pgsql), channels))
-		{
-			log_error("Failed to listen to state changes from the monitor");
-			return false;
-		}
-	}
 
 	if (!monitor_set_node_candidate_priority(&(keeper->monitor),
 											 config->formation,
@@ -722,18 +695,6 @@ set_node_candidate_priority(Keeper *keeper, int candidatePriority)
 		log_error("Failed to set \"candidate-priority\" to \"%d\".",
 				  candidatePriority);
 		return false;
-	}
-
-	/* now wait until the primary actually applied the new setting */
-	if (nodesArray.count > 1)
-	{
-		if (!monitor_wait_until_primary_applied_settings(
-				&(keeper->monitor),
-				config->formation))
-		{
-			log_error("Failed to wait until the new setting has been applied");
-			return false;
-		}
 	}
 
 	return true;
@@ -749,33 +710,6 @@ static bool
 set_node_replication_quorum(Keeper *keeper, bool replicationQuorum)
 {
 	KeeperConfig *config = &(keeper->config);
-	NodeAddressArray nodesArray = { 0 };
-
-	/*
-	 * There might be some race conditions here, but it's all to be
-	 * user-friendly so in the worst case we're going to be less friendly that
-	 * we could have.
-	 */
-	if (!monitor_get_nodes(&(keeper->monitor),
-						   config->formation,
-						   config->groupId,
-						   &nodesArray))
-	{
-		/* ignore the error, just don't wait in that case */
-		log_warn("Failed to get_nodes() on the monitor");
-	}
-
-	/* listen for state changes BEFORE we apply new settings */
-	if (nodesArray.count > 1)
-	{
-		char *channels[] = { "state", NULL };
-
-		if (!pgsql_listen(&(keeper->monitor.pgsql), channels))
-		{
-			log_error("Failed to listen to state changes from the monitor");
-			return false;
-		}
-	}
 
 	if (!monitor_set_node_replication_quorum(&(keeper->monitor),
 											 config->formation,
@@ -785,18 +719,6 @@ set_node_replication_quorum(Keeper *keeper, bool replicationQuorum)
 		log_error("Failed to set \"replication-quorum\" to \"%s\".",
 				  boolToString(replicationQuorum));
 		return false;
-	}
-
-	/* now wait until the primary actually applied the new setting */
-	if (nodesArray.count > 1)
-	{
-		if (!monitor_wait_until_primary_applied_settings(
-				&(keeper->monitor),
-				config->formation))
-		{
-			log_error("Failed to wait until the new setting has been applied");
-			return false;
-		}
 	}
 
 	return true;
@@ -814,31 +736,6 @@ set_formation_number_sync_standbys(Monitor *monitor,
 								   int groupId,
 								   int numberSyncStandbys)
 {
-	NodeAddressArray nodesArray = { 0 };
-
-	/*
-	 * There might be some race conditions here, but it's all to be
-	 * user-friendly so in the worst case we're going to be less friendly that
-	 * we could have.
-	 */
-	if (!monitor_get_nodes(monitor, formation, groupId, &nodesArray))
-	{
-		/* ignore the error, just don't wait in that case */
-		log_warn("Failed to get_nodes() on the monitor");
-	}
-
-	/* listen for state changes BEFORE we apply new settings */
-	if (nodesArray.count > 1)
-	{
-		char *channels[] = { "state", NULL };
-
-		if (!pgsql_listen(&(monitor->pgsql), channels))
-		{
-			log_error("Failed to listen to state changes from the monitor");
-			return false;
-		}
-	}
-
 	/* set the new number_sync_standbys value */
 	if (!monitor_set_formation_number_sync_standbys(
 			monitor,
@@ -848,19 +745,6 @@ set_formation_number_sync_standbys(Monitor *monitor,
 		log_error("Failed to set \"number-sync-standbys\" to \"%d\".",
 				  numberSyncStandbys);
 		return false;
-	}
-
-
-	/* now wait until the primary actually applied the new setting */
-	if (nodesArray.count > 1)
-	{
-		if (!monitor_wait_until_primary_applied_settings(
-				monitor,
-				formation))
-		{
-			log_error("Failed to wait until the new setting has been applied");
-			return false;
-		}
 	}
 
 	return true;

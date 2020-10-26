@@ -712,6 +712,14 @@ keeper_node_active(Keeper *keeper, bool doInit)
 		return false;
 	}
 
+	/* maybe update our synchronous_standby_names settings */
+	if (!keeper_refresh_standby_names(keeper, forceCacheInvalidation))
+	{
+		log_error("Failed to update synchronous_standby_names from monitor's "
+				  "current value");
+		return false;
+	}
+
 	/*
 	 * Also update the groupId and replication slot name in the
 	 * configuration file.

@@ -875,6 +875,10 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 	/*
 	 * when a node has changed its replication settings:
 	 *     apply_settings ➜ primary
+	 *
+	 * Note: starting in 1.4.1 we never assign APPLY_SETTINGS anymore. An
+	 * upgrade could still happen while the primary is in the APPLY_SETTINGS
+	 * state and we still want to reach PRIMARY in that case.
 	 */
 	if (IsCurrentState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS))
 	{

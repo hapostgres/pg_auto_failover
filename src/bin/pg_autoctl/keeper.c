@@ -1576,6 +1576,51 @@ keeper_update_group_hba(Keeper *keeper, NodeAddressArray *diffNodesArray)
 
 
 /*
+ * keeper_refresh_standby_names fetches the current value for the
+ * synchronous_standby_names Postgres settings, from the monitor, and when it's
+ * different from the cached value, applies it.
+ */
+bool
+keeper_refresh_standby_names(Keeper *keeper, bool forceCacheInvalidation)
+{
+	Monitor *monitor = &(keeper->monitor);
+	KeeperConfig *config = &(keeper->config);
+	LocalPostgresServer *postgres = &(keeper->postgres);
+
+	char synchronousStandbyNames[BUFSIZE] = { 0 };
+
+	log_trace("keeper_refresh_standby_names");
+
+	if (!monitor_synchronous_standby_names(
+			monitor,
+			config->formation,
+			keeper->state.current_group,
+			synchronousStandbyNames,
+			sizeof(synchronousStandbyNames)))
+	{
+		log_error("Failed to get synchronous_standby_names value "
+				  "from the monitor, see above for details");
+		return false;
+	}
+
+	if (forceCacheInvalidation ||
+		strneq(synchronousStandbyNames, postgres->synchronousStandbyNames))
+	{
+		/* update our cached value with the one from the monitor */
+		strlcpy(postgres->synchronousStandbyNames,
+				synchronousStandbyNames,
+				sizeof(postgres->synchronousStandbyNames));
+
+		/* update the value on Postgres */
+		return primary_set_synchronous_standby_names(postgres);
+	}
+
+	/* no need to invalidate our cache, we're all good */
+	return true;
+}
+
+
+/*
  * keeper_refresh_other_nodes call pgautofailover.get_other_nodes on the
  * monitor and refreshes the keeper otherNodes array with fresh information,
  * including each node's LSN position.

@@ -184,8 +184,6 @@ bool monitor_start_maintenance(Monitor *monitor, int nodeId, bool *mayRetry);
 bool monitor_stop_maintenance(Monitor *monitor, int nodeId, bool *mayRetry);
 
 bool monitor_get_notifications(Monitor *monitor, int timeoutMs);
-bool monitor_wait_until_primary_applied_settings(Monitor *monitor,
-												 const char *formation);
 bool monitor_wait_until_some_node_reported_state(Monitor *monitor,
 												 const char *formation,
 												 int groupId,

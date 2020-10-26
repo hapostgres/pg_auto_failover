@@ -25,10 +25,7 @@ typedef struct Keeper
 	KeeperStateData state;
 	Monitor monitor;
 
-	/*
-	 * When running without monitor, we need a place to stash the otherNodes
-	 * information. This is necessary in some transitions.
-	 */
+	/* Local cache of the other nodes list, fetched from the monitor */
 	NodeAddressArray otherNodes;
 
 	/* Only useful during the initialization of the Keeper */
@@ -59,6 +56,7 @@ bool keeper_remove(Keeper *keeper, KeeperConfig *config,
 bool keeper_check_monitor_extension_version(Keeper *keeper);
 bool keeper_state_as_json(Keeper *keeper, char *json, int size);
 bool keeper_update_group_hba(Keeper *keeper, NodeAddressArray *diffNodesArray);
+bool keeper_refresh_standby_names(Keeper *keeper, bool forceCacheInvalidation);
 bool keeper_refresh_other_nodes(Keeper *keeper, bool forceCacheInvalidation);
 
 bool keeper_set_node_metadata(Keeper *keeper, KeeperConfig *oldConfig);

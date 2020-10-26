@@ -625,16 +625,14 @@ set_formation_number_sync_standbys(PG_FUNCTION_ARGS)
 	success = SetFormationNumberSyncStandbys(formationId, number_sync_standbys);
 
 	/* and now ask the primary to change its settings */
-	LogAndNotifyMessage(
-		message, BUFSIZE,
-		"Setting goal state of " NODE_FORMAT
-		" to apply_settings "
-		"after updating number_sync_standbys to %d for formation %s.",
-		NODE_FORMAT_ARGS(primaryNode),
-		formation->number_sync_standbys,
-		formation->formationId);
-
-	SetNodeGoalState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS, message);
+	if (success)
+	{
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Updating number_sync_standbys to %d for formation %s.",
+			formation->number_sync_standbys,
+			formation->formationId);
+	}
 
 	PG_RETURN_BOOL(success);
 }
