@@ -312,7 +312,7 @@ keeper_cli_pgsetup_wait_until_ready(int argc, char **argv)
 
 
 /*
- * keeper_cli_pgsetup_startup_logs logs the Postgre startup logs.
+ * keeper_cli_pgsetup_startup_logs logs the Postgres startup logs.
  */
 void
 keeper_cli_pgsetup_startup_logs(int argc, char **argv)
