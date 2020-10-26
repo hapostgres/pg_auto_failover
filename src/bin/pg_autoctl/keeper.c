@@ -1587,9 +1587,31 @@ keeper_refresh_standby_names(Keeper *keeper, bool forceCacheInvalidation)
 	KeeperConfig *config = &(keeper->config);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
+	KeeperStateData *keeperState = &(keeper->state);
+
 	char synchronousStandbyNames[BUFSIZE] = { 0 };
 
 	log_trace("keeper_refresh_standby_names");
+
+	/*
+	 * We only refresh synchronous_standby_names on a primary node.
+	 */
+	switch (keeperState->current_role)
+	{
+		case SINGLE_STATE:
+		case PRIMARY_STATE:
+		case WAIT_PRIMARY_STATE:
+		case JOIN_PRIMARY_STATE:
+		{
+			/* setting synchronous_standby_names only happens when a primary */
+			break;
+		}
+
+		default:
+
+			/* bypass getting synchronous_standby_names */
+			return true;
+	}
 
 	if (!monitor_synchronous_standby_names(
 			monitor,
