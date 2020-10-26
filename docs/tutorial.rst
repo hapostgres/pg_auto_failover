@@ -95,6 +95,13 @@ function to retrieve their IP addresses:
       --query '[] [] .virtualMachine.network.publicIpAddresses[0].ipAddress'
   }
 
+  # for convenience with ssh
+
+  for node in monitor a b app
+  do
+  ssh-keyscan -H `vm_ip $node` >> ~/.ssh/known_hosts
+  done
+
 Let's review what we created so far.
 
 .. code-block:: bash
@@ -143,10 +150,11 @@ nodes. It will help us run and observe PostgreSQL.
      --name ha-demo-${node} \
      --command-id RunShellScript \
      --scripts \
+        "sudo touch /home/ha-admin/.hushlogin" \
         "curl https://install.citusdata.com/community/deb.sh | sudo bash" \
-        "sudo apt-get install -q -y postgresql-common" \
+        "sudo DEBIAN_FRONTEND=noninteractive apt-get install -q -y postgresql-common" \
         "echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf" \
-        "sudo apt-get install -q -y postgresql-11-auto-failover-1.4" \
+        "sudo DEBIAN_FRONTEND=noninteractive apt-get install -q -y postgresql-11-auto-failover-1.4" \
         "sudo usermod -a -G postgres ha-admin" &
   done
   wait
@@ -191,7 +199,7 @@ systemd so that it will resume if the VM restarts.
 
 .. code-block:: bash
 
-   ssh -l ha-admin `vm_ip monitor` << CMD
+   ssh -T -l ha-admin `vm_ip monitor` << CMD
      pg_autoctl -q show systemd --pgdata ~ha-admin/monitor > pgautofailover.service
      sudo mv pgautofailover.service /etc/systemd/system
      sudo systemctl daemon-reload
@@ -232,7 +240,7 @@ Also add a setting to trust connections from our "application" VM:
 
 .. code-block:: bash
 
-   ssh -l ha-admin `vm_ip a` << CMD
+   ssh -T -l ha-admin `vm_ip a` << CMD
      echo 'hostssl "appdb" "ha-admin" ha-demo-app.internal.cloudapp.net trust' \
        >> ~ha-admin/ha/pg_hba.conf
    CMD
@@ -244,7 +252,7 @@ install it as a service with systemd so that it will resume if the VM restarts.
 
 .. code-block:: bash
 
-   ssh -l ha-admin `vm_ip a` << CMD
+   ssh -T -l ha-admin `vm_ip a` << CMD
      pg_autoctl -q show systemd --pgdata ~ha-admin/ha > pgautofailover.service
      sudo mv pgautofailover.service /etc/systemd/system
      sudo systemctl daemon-reload
@@ -267,7 +275,7 @@ Next connect to node B and do the same process. We'll do both steps at once:
        --pgctl /usr/lib/postgresql/11/bin/pg_ctl \
        --monitor 'postgres://autoctl_node@ha-demo-monitor.internal.cloudapp.net/pg_auto_failover?sslmode=require'
 
-   ssh -l ha-admin `vm_ip b` << CMD
+   ssh -T -l ha-admin `vm_ip b` << CMD
      pg_autoctl -q show systemd --pgdata ~ha-admin/ha > pgautofailover.service
      sudo mv pgautofailover.service /etc/systemd/system
      sudo systemctl daemon-reload
@@ -358,8 +366,8 @@ That will be the primary server.
    # connect to database via psql on the app vm and
    # create a table with a million rows
    ssh -l ha-admin -t `vm_ip app` -- \
-     psql "\"$APP_DB_URI\"" \
-       -c "\"CREATE TABLE foo AS SELECT generate_series(1,1000000) bar;\""
+     psql "'$APP_DB_URI'" \
+       -c "'CREATE TABLE foo AS SELECT generate_series(1,1000000) bar;'"
 
 Cause a failover
 ----------------
@@ -381,8 +389,8 @@ that the data is still present:
 
    # connect to database via psql on the app vm
    ssh -l ha-admin -t `vm_ip app` -- \
-     psql "\"$APP_DB_URI\"" \
-       -c "\"SELECT count(*) FROM foo;\""
+     psql "'$APP_DB_URI'" \
+       -c "'SELECT count(*) FROM foo;'"
 
 It shows
 
@@ -436,8 +444,8 @@ Let's add some data while B is offline.
    # notice how $APP_DB_URI continues to work no matter which node
    # is serving as primary
    ssh -l ha-admin -t `vm_ip app` -- \
-     psql "\"$APP_DB_URI\"" \
-       -c "\"INSERT INTO foo SELECT generate_series(1000001, 2000000);\""
+     psql "'$APP_DB_URI'" \
+       -c "'INSERT INTO foo SELECT generate_series(1000001, 2000000);'"
 
 Resurrect node B
 ----------------
@@ -467,8 +475,8 @@ are still present.
 .. code-block:: bash
 
    ssh -l ha-admin -t `vm_ip app` -- \
-     psql "\"$APP_DB_URI\"" \
-       -c "\"SELECT count(*) FROM foo;\""
+     psql "'$APP_DB_URI'" \
+       -c "'SELECT count(*) FROM foo;'"
 
 It shows
 
