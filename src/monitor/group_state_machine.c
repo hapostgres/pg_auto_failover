@@ -115,9 +115,9 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of node %d (%s:%d) to single "
-			"as there is no other node.",
-			activeNode->nodeId, activeNode->nodeHost, activeNode->nodePort);
+			"Setting goal state of " NODE_FORMAT
+			" to single as there is no other node.",
+			NODE_FORMAT_ARGS(activeNode));
 
 		/* other node may have been removed */
 		AssignGoalState(activeNode, REPLICATION_STATE_SINGLE, message);
@@ -160,8 +160,9 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 				(errmsg("ProceedGroupState couldn't find the primary node "
 						"in formation \"%s\", group %d",
 						formationId, groupId),
-				 errdetail("activeNode is %s:%d in state %s",
-						   activeNode->nodeHost, activeNode->nodePort,
+				 errdetail("activeNode is " NODE_FORMAT
+						   " in state %s",
+						   NODE_FORMAT_ARGS(activeNode),
 						   ReplicationStateGetName(activeNode->goalState))));
 	}
 
@@ -175,11 +176,9 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 			LogAndNotifyMessage(
 				message, BUFSIZE,
-				"Setting goal state of node %d (%s:%d) to draining "
-				"after it became unhealthy.",
-				primaryNode->nodeId,
-				primaryNode->nodeHost,
-				primaryNode->nodePort);
+				"Setting goal state of " NODE_FORMAT
+				" to draining after it became unhealthy.",
+				NODE_FORMAT_ARGS(primaryNode));
 
 			AssignGoalState(primaryNode, REPLICATION_STATE_DRAINING, message);
 		}
@@ -215,14 +214,11 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of node %d (%s:%d) to secondary "
-			"after node %d (%s:%d) got selected as the failover candidate.",
-			activeNode->nodeId,
-			activeNode->nodeHost,
-			activeNode->nodePort,
-			primaryNode->nodeId,
-			primaryNode->nodeHost,
-			primaryNode->nodePort);
+			"Setting goal state of " NODE_FORMAT
+			" to secondary after " NODE_FORMAT
+			" got selected as the failover candidate.",
+			NODE_FORMAT_ARGS(activeNode),
+			NODE_FORMAT_ARGS(primaryNode));
 
 		AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
 		AssignGoalState(primaryNode, REPLICATION_STATE_PRIMARY, message);
@@ -242,14 +238,11 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of node %d (%s:%d) to secondary "
-			"after node %d (%s:%d) got selected as the failover candidate.",
-			activeNode->nodeId,
-			activeNode->nodeHost,
-			activeNode->nodePort,
-			primaryNode->nodeId,
-			primaryNode->nodeHost,
-			primaryNode->nodePort);
+			"Setting goal state of " NODE_FORMAT
+			" to secondary after " NODE_FORMAT
+			" got selected as the failover candidate.",
+			NODE_FORMAT_ARGS(activeNode),
+			NODE_FORMAT_ARGS(primaryNode));
 
 		AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
 
@@ -266,8 +259,9 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of node %d (%s:%d) to prepare_promotion",
-			activeNode->nodeId, activeNode->nodeHost, activeNode->nodePort);
+			"Setting goal state of " NODE_FORMAT
+			" to prepare_promotion",
+			NODE_FORMAT_ARGS(activeNode));
 
 		AssignGoalState(activeNode, REPLICATION_STATE_PREPARE_PROMOTION, message);
 
@@ -296,10 +290,11 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of node %d (%s:%d) to catchingup "
-			"after node %d (%s:%d) converged to wait_primary.",
-			activeNode->nodeId, activeNode->nodeHost, activeNode->nodePort,
-			primaryNode->nodeId, primaryNode->nodeHost, primaryNode->nodePort);
+			"Setting goal state of " NODE_FORMAT
+			" to catchingup after " NODE_FORMAT
+			" converged to wait_primary.",
+			NODE_FORMAT_ARGS(activeNode),
+			NODE_FORMAT_ARGS(primaryNode));
 
 		/* start replication */
 		AssignGoalState(activeNode, REPLICATION_STATE_CATCHINGUP, message);
@@ -323,11 +318,13 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of node %d (%s:%d) to primary and "
-			"node %d (%s:%d) to secondary after node %d (%s:%d) caught up.",
-			primaryNode->nodeId, primaryNode->nodeHost, primaryNode->nodePort,
-			activeNode->nodeId, activeNode->nodeHost, activeNode->nodePort,
-			activeNode->nodeId, activeNode->nodeHost, activeNode->nodePort);
+			"Setting goal state of " NODE_FORMAT
+			" to primary and " NODE_FORMAT
+			" to secondary after " NODE_FORMAT
+			" caught up.",
+			NODE_FORMAT_ARGS(primaryNode),
+			NODE_FORMAT_ARGS(activeNode),
+			NODE_FORMAT_ARGS(activeNode));
 
 		/* node is ready for promotion */
 		AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
@@ -352,12 +349,14 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of node %d (%s:%d) to draining "
-			"and node %d (%s:%d) to prepare_promotion "
-			"after node %d (%s:%d) became unhealthy.",
-			primaryNode->nodeId, primaryNode->nodeHost, primaryNode->nodePort,
-			activeNode->nodeId, activeNode->nodeHost, activeNode->nodePort,
-			primaryNode->nodeId, primaryNode->nodeHost, primaryNode->nodePort);
+			"Setting goal state of " NODE_FORMAT
+			" to draining and " NODE_FORMAT
+			" to prepare_promotion "
+			"after " NODE_FORMAT
+			" became unhealthy.",
+			NODE_FORMAT_ARGS(primaryNode),
+			NODE_FORMAT_ARGS(activeNode),
+			NODE_FORMAT_ARGS(primaryNode));
 
 		/* keep reading until no more records are available */
 		AssignGoalState(activeNode, REPLICATION_STATE_PREPARE_PROMOTION, message);
@@ -380,10 +379,11 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of %s:%d to maintenance "
-			"after %s:%d converged to wait_primary.",
-			activeNode->nodeHost, activeNode->nodePort,
-			primaryNode->nodeHost, primaryNode->nodePort);
+			"Setting goal state of " NODE_FORMAT
+			" to maintenance after " NODE_FORMAT
+			" converged to wait_primary.",
+			NODE_FORMAT_ARGS(activeNode),
+			NODE_FORMAT_ARGS(primaryNode));
 
 		/* secondary reached maintenance */
 		AssignGoalState(activeNode, REPLICATION_STATE_MAINTENANCE, message);
@@ -403,10 +403,11 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of %s:%d to maintenance "
-			"after %s:%d converged to wait_primary.",
-			activeNode->nodeHost, activeNode->nodePort,
-			primaryNode->nodeHost, primaryNode->nodePort);
+			"Setting goal state of " NODE_FORMAT
+			" to maintenance after " NODE_FORMAT
+			" converged to wait_primary.",
+			NODE_FORMAT_ARGS(activeNode),
+			NODE_FORMAT_ARGS(primaryNode));
 
 		/* secondary reached maintenance */
 		AssignGoalState(activeNode, REPLICATION_STATE_MAINTENANCE, message);
@@ -428,10 +429,11 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of %s:%d to stop_replication "
-			"after %s:%d converged to prepare_maintenance.",
-			activeNode->nodeHost, activeNode->nodePort,
-			primaryNode->nodeHost, primaryNode->nodePort);
+			"Setting goal state of " NODE_FORMAT
+			" to stop_replication after " NODE_FORMAT
+			" converged to prepare_maintenance.",
+			NODE_FORMAT_ARGS(activeNode),
+			NODE_FORMAT_ARGS(primaryNode));
 
 		/* promote the secondary */
 		AssignGoalState(activeNode, REPLICATION_STATE_STOP_REPLICATION, message);
@@ -450,11 +452,11 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of node %d (%s:%d) to wait_primary "
-			"and node %d (%s:%d) to demoted "
-			"after the coordinator metadata was updated.",
-			activeNode->nodeId, activeNode->nodeHost, activeNode->nodePort,
-			primaryNode->nodeId, primaryNode->nodeHost, primaryNode->nodePort);
+			"Setting goal state of " NODE_FORMAT
+			" to wait_primary and " NODE_FORMAT
+			" to demoted after the coordinator metadata was updated.",
+			NODE_FORMAT_ARGS(activeNode),
+			NODE_FORMAT_ARGS(primaryNode));
 
 		/* node is now taking writes */
 		AssignGoalState(activeNode, REPLICATION_STATE_WAIT_PRIMARY, message);
@@ -481,12 +483,13 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of node %d (%s:%d) to demote_timeout "
-			"and node %d (%s:%d) to stop_replication "
-			"after node %d (%s:%d) converged to prepare_promotion.",
-			primaryNode->nodeId, primaryNode->nodeHost, primaryNode->nodePort,
-			activeNode->nodeId, activeNode->nodeHost, activeNode->nodePort,
-			activeNode->nodeId, activeNode->nodeHost, activeNode->nodePort);
+			"Setting goal state of " NODE_FORMAT
+			" to demote_timeout and " NODE_FORMAT
+			" to stop_replication after " NODE_FORMAT
+			" converged to prepare_promotion.",
+			NODE_FORMAT_ARGS(primaryNode),
+			NODE_FORMAT_ARGS(activeNode),
+			NODE_FORMAT_ARGS(activeNode));
 
 		/* perform promotion to stop replication */
 		AssignGoalState(activeNode, REPLICATION_STATE_STOP_REPLICATION, message);
@@ -508,10 +511,11 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of and node %d (%s:%d) to wait_primary "
-			"after node %d (%s:%d) converged to prepare_promotion.",
-			activeNode->nodeId, activeNode->nodeHost, activeNode->nodePort,
-			activeNode->nodeId, activeNode->nodeHost, activeNode->nodePort);
+			"Setting goal state of and " NODE_FORMAT
+			" to wait_primary after " NODE_FORMAT
+			" converged to prepare_promotion.",
+			NODE_FORMAT_ARGS(activeNode),
+			NODE_FORMAT_ARGS(activeNode));
 
 		/* perform promotion to stop replication */
 		AssignGoalState(activeNode, REPLICATION_STATE_WAIT_PRIMARY, message);
@@ -531,10 +535,11 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of %s:%d to wait_primary and %s:%d to "
-			"maintenance.",
-			activeNode->nodeHost, activeNode->nodePort,
-			primaryNode->nodeHost, primaryNode->nodePort);
+			"Setting goal state of " NODE_FORMAT
+			" to wait_primary and " NODE_FORMAT
+			" to maintenance.",
+			NODE_FORMAT_ARGS(activeNode),
+			NODE_FORMAT_ARGS(primaryNode));
 
 		/* node is now taking writes */
 		AssignGoalState(activeNode, REPLICATION_STATE_WAIT_PRIMARY, message);
@@ -557,10 +562,11 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of node %d (%s:%d) to wait_primary "
-			"and node %d (%s:%d) to demoted after the demote timeout expired.",
-			activeNode->nodeId, activeNode->nodeHost, activeNode->nodePort,
-			primaryNode->nodeId, primaryNode->nodeHost, primaryNode->nodePort);
+			"Setting goal state of " NODE_FORMAT
+			" to wait_primary and " NODE_FORMAT
+			" to demoted after the demote timeout expired.",
+			NODE_FORMAT_ARGS(activeNode),
+			NODE_FORMAT_ARGS(primaryNode));
 
 		/* node is now taking writes */
 		AssignGoalState(activeNode, REPLICATION_STATE_WAIT_PRIMARY, message);
@@ -582,11 +588,11 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of node %d (%s:%d) to wait_primary "
-			"and %d (%s:%d) to demoted "
-			"after the coordinator metadata was updated.",
-			activeNode->nodeId, activeNode->nodeHost, activeNode->nodePort,
-			primaryNode->nodeId, primaryNode->nodeHost, primaryNode->nodePort);
+			"Setting goal state of " NODE_FORMAT
+			" to wait_primary and " NODE_FORMAT
+			" to demoted after the coordinator metadata was updated.",
+			NODE_FORMAT_ARGS(activeNode),
+			NODE_FORMAT_ARGS(primaryNode));
 
 		/* node is now taking writes */
 		AssignGoalState(activeNode, REPLICATION_STATE_WAIT_PRIMARY, message);
@@ -608,10 +614,11 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of node %d (%s:%d) to catchingup after it "
-			"converged to demotion and node %d (%s:%d) converged to primary.",
-			activeNode->nodeId, activeNode->nodeHost, activeNode->nodePort,
-			primaryNode->nodeId, primaryNode->nodeHost, primaryNode->nodePort);
+			"Setting goal state of " NODE_FORMAT
+			" to catchingup after it converged to demotion and " NODE_FORMAT
+			" converged to primary.",
+			NODE_FORMAT_ARGS(activeNode),
+			NODE_FORMAT_ARGS(primaryNode));
 
 		/* it's safe to rejoin as a secondary */
 		AssignGoalState(activeNode, REPLICATION_STATE_CATCHINGUP, message);
@@ -631,10 +638,11 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of node %d (%s:%d) to catchingup after it "
-			"converged to demotion and node %d (%s:%d) converged to wait_primary.",
-			activeNode->nodeId, activeNode->nodeHost, activeNode->nodePort,
-			primaryNode->nodeId, primaryNode->nodeHost, primaryNode->nodePort);
+			"Setting goal state of " NODE_FORMAT
+			" to catchingup after it converged to demotion and " NODE_FORMAT
+			" converged to wait_primary.",
+			NODE_FORMAT_ARGS(activeNode),
+			NODE_FORMAT_ARGS(primaryNode));
 
 		/* it's safe to rejoin as a secondary */
 		AssignGoalState(activeNode, REPLICATION_STATE_CATCHINGUP, message);
@@ -662,10 +670,11 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of node %d (%s:%d) to secondary "
-			"and node %d (%s:%d) to primary after it converged to wait_primary.",
-			activeNode->nodeId, activeNode->nodeHost, activeNode->nodePort,
-			primaryNode->nodeId, primaryNode->nodeHost, primaryNode->nodePort);
+			"Setting goal state of " NODE_FORMAT
+			" to secondary and " NODE_FORMAT
+			" to primary after it converged to wait_primary.",
+			NODE_FORMAT_ARGS(activeNode),
+			NODE_FORMAT_ARGS(primaryNode));
 
 		/* it's safe to rejoin as a secondary */
 		AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
@@ -688,10 +697,11 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of node %d (%s:%d) to secondary "
-			"after node %d (%s:%d) converged to primary.",
-			activeNode->nodeId, activeNode->nodeHost, activeNode->nodePort,
-			primaryNode->nodeId, primaryNode->nodeHost, primaryNode->nodePort);
+			"Setting goal state of " NODE_FORMAT
+			" to secondary after " NODE_FORMAT
+			" converged to primary.",
+			NODE_FORMAT_ARGS(activeNode),
+			NODE_FORMAT_ARGS(primaryNode));
 
 		/* it's safe to rejoin as a secondary */
 		AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
@@ -730,14 +740,11 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 
 				LogAndNotifyMessage(
 					message, BUFSIZE,
-					"Setting goal state of %d (%s:%d) to wait_primary "
-					"after node %d (%s:%d) joined.",
-					primaryNode->nodeId,
-					primaryNode->nodeHost,
-					primaryNode->nodePort,
-					otherNode->nodeId,
-					otherNode->nodeHost,
-					otherNode->nodePort);
+					"Setting goal state of " NODE_FORMAT
+					" to wait_primary after " NODE_FORMAT
+					" joined.",
+					NODE_FORMAT_ARGS(primaryNode),
+					NODE_FORMAT_ARGS(otherNode));
 
 				/* prepare replication slot and pg_hba.conf */
 				AssignGoalState(primaryNode,
@@ -767,14 +774,11 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 
 				LogAndNotifyMessage(
 					message, BUFSIZE,
-					"Setting goal state of node %d (%s:%d) to join_primary "
-					"after node %d (%s:%d) joined.",
-					primaryNode->nodeId,
-					primaryNode->nodeHost,
-					primaryNode->nodePort,
-					otherNode->nodeId,
-					otherNode->nodeHost,
-					otherNode->nodePort);
+					"Setting goal state of " NODE_FORMAT
+					" to join_primary after " NODE_FORMAT
+					" joined.",
+					NODE_FORMAT_ARGS(primaryNode),
+					NODE_FORMAT_ARGS(otherNode));
 
 				/* prepare replication slot and pg_hba.conf */
 				AssignGoalState(primaryNode,
@@ -815,9 +819,9 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 
 				LogAndNotifyMessage(
 					message, BUFSIZE,
-					"Setting goal state of node %d (%s:%d) to catchingup "
-					"after it became unhealthy.",
-					otherNode->nodeId, otherNode->nodeHost, otherNode->nodePort);
+					"Setting goal state of " NODE_FORMAT
+					" to catchingup after it became unhealthy.",
+					NODE_FORMAT_ARGS(otherNode));
 
 				/* other node is behind, no longer eligible for promotion */
 				AssignGoalState(otherNode,
@@ -855,11 +859,10 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 
 				LogAndNotifyMessage(
 					message, BUFSIZE,
-					"Setting goal state of node %d (%s:%d) to wait_primary "
-					"now that none of the standbys are healthy anymore.",
-					primaryNode->nodeId,
-					primaryNode->nodeHost,
-					primaryNode->nodePort);
+					"Setting goal state of " NODE_FORMAT
+					" to wait_primary now that none of the standbys"
+					" are healthy anymore.",
+					NODE_FORMAT_ARGS(primaryNode));
 
 				AssignGoalState(primaryNode,
 								REPLICATION_STATE_WAIT_PRIMARY, message);
@@ -879,9 +882,9 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of node %d (%s:%d) to primary "
-			"after it applied replication properties change.",
-			primaryNode->nodeId, primaryNode->nodeHost, primaryNode->nodePort);
+			"Setting goal state of " NODE_FORMAT
+			" to primary after it applied replication properties change.",
+			NODE_FORMAT_ARGS(primaryNode));
 
 		AssignGoalState(primaryNode, REPLICATION_STATE_PRIMARY, message);
 
@@ -923,11 +926,9 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 
 			LogAndNotifyMessage(
 				message, BUFSIZE,
-				"Setting goal state of node %d \"%s\" (%s:%d) back to primary",
-				primaryNode->nodeId,
-				primaryNode->nodeName,
-				primaryNode->nodeHost,
-				primaryNode->nodePort);
+				"Setting goal state of " NODE_FORMAT
+				" back to primary",
+				NODE_FORMAT_ARGS(primaryNode));
 
 			AssignGoalState(primaryNode, REPLICATION_STATE_PRIMARY, message);
 
@@ -972,10 +973,8 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 	 */
 	if (nodeBeingPromoted != NULL)
 	{
-		elog(LOG, "Found candidate node %d (%s:%d)",
-			 nodeBeingPromoted->nodeId,
-			 nodeBeingPromoted->nodeHost,
-			 nodeBeingPromoted->nodePort);
+		elog(LOG, "Found candidate " NODE_FORMAT,
+			 NODE_FORMAT_ARGS(nodeBeingPromoted));
 
 		return ProceedWithMSFailover(activeNode, nodeBeingPromoted);
 	}
@@ -1020,10 +1019,11 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 			message, BUFSIZE,
 			"Failover still in progress after %d nodes reported their LSN "
 			"and we are waiting for %d nodes to report, "
-			"activeNode is %d (%s:%d) and reported state \"%s\"",
+			"activeNode is " NODE_FORMAT
+			" and reported state \"%s\"",
 			candidateList.candidateCount,
 			candidateList.missingNodesCount,
-			activeNode->nodeId, activeNode->nodeHost, activeNode->nodePort,
+			NODE_FORMAT_ARGS(activeNode),
 			ReplicationStateGetName(activeNode->reportedState));
 
 		return false;
@@ -1064,12 +1064,11 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 			LogAndNotifyMessage(
 				message, BUFSIZE,
 				"The current most advanced reported LSN is %X/%X, "
-				"as reported by node %d (%s:%d) and %d other nodes",
+				"as reported by " NODE_FORMAT
+				" and %d other nodes",
 				(uint32) (mostAdvancedNode->reportedLSN >> 32),
 				(uint32) mostAdvancedNode->reportedLSN,
-				mostAdvancedNode->nodeId,
-				mostAdvancedNode->nodeHost,
-				mostAdvancedNode->nodePort,
+				NODE_FORMAT_ARGS(mostAdvancedNode),
 				list_length(mostAdvancedNodeList) - 1);
 		}
 		else
@@ -1094,9 +1093,10 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 				message, BUFSIZE,
 				"Failover still in progress after all %d candidate nodes "
 				"reported their LSN and we failed to select one of them; "
-				"activeNode is %d (%s:%d) and reported state \"%s\"",
+				"activeNode is " NODE_FORMAT
+				" and reported state \"%s\"",
 				candidateList.candidateCount,
-				activeNode->nodeId, activeNode->nodeHost, activeNode->nodePort,
+				NODE_FORMAT_ARGS(activeNode),
 				ReplicationStateGetName(activeNode->reportedState));
 
 			return false;
@@ -1139,9 +1139,9 @@ BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
 		if (StateBelongsToPrimary(node->goalState))
 		{
 			elog(LOG,
-				 "Skipping candidate node %d (%s:%d), "
-				 "which is a primary (old or new)",
-				 node->nodeId, node->nodeHost, node->nodePort);
+				 "Skipping candidate " NODE_FORMAT
+				 ", which is a primary (old or new)",
+				 NODE_FORMAT_ARGS(node));
 			continue;
 		}
 
@@ -1153,8 +1153,8 @@ BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
 		if (IsUnhealthy(node) && !IsReporting(node))
 		{
 			elog(LOG,
-				 "Skipping candidate node %d (%s:%d), which is unhealthy",
-				 node->nodeId, node->nodeHost, node->nodePort);
+				 "Skipping candidate " NODE_FORMAT ", which is unhealthy",
+				 NODE_FORMAT_ARGS(node));
 
 			continue;
 		}
@@ -1188,9 +1188,9 @@ BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
 
 			LogAndNotifyMessage(
 				message, BUFSIZE,
-				"Setting goal state of node %d (%s:%d) to report_lsn "
-				"to find the failover candidate",
-				node->nodeId, node->nodeHost, node->nodePort);
+				"Setting goal state of " NODE_FORMAT
+				" to report_lsn to find the failover candidate",
+				NODE_FORMAT_ARGS(node));
 
 			AssignGoalState(node, REPLICATION_STATE_REPORT_LSN, message);
 
@@ -1234,14 +1234,11 @@ ProceedWithMSFailover(AutoFailoverNode *activeNode,
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of node %d (%s:%d) to join_secondary "
-			"after node %d (%s:%d) got selected as the failover candidate.",
-			activeNode->nodeId,
-			activeNode->nodeHost,
-			activeNode->nodePort,
-			candidateNode->nodeId,
-			candidateNode->nodeHost,
-			candidateNode->nodePort);
+			"Setting goal state of " NODE_FORMAT
+			" to join_secondary after " NODE_FORMAT
+			" got selected as the failover candidate.",
+			NODE_FORMAT_ARGS(activeNode),
+			NODE_FORMAT_ARGS(candidateNode));
 
 		AssignGoalState(activeNode, REPLICATION_STATE_JOIN_SECONDARY, message);
 
@@ -1314,20 +1311,17 @@ SelectFailoverCandidateNode(CandidateList *candidateList,
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"One of the most advanced standby node in the group "
-			"is node %d (%s:%d) "
+			"One of the most advanced standby nodes in the group "
+			"is " NODE_FORMAT
 			"with reported LSN %X/%X, which is more than "
 			"pgautofailover.enable_sync_wal_log_threshold (%d) behind "
-			"the primary node %d (%s:%d), which has reported %X/%X",
-			mostAdvancedNode->nodeId,
-			mostAdvancedNode->nodeHost,
-			mostAdvancedNode->nodePort,
+			"the primary " NODE_FORMAT
+			", which has reported %X/%X",
+			NODE_FORMAT_ARGS(mostAdvancedNode),
 			(uint32) (mostAdvancedNode->reportedLSN >> 32),
 			(uint32) mostAdvancedNode->reportedLSN,
 			PromoteXlogThreshold,
-			primaryNode->nodeId,
-			primaryNode->nodeHost,
-			primaryNode->nodePort,
+			NODE_FORMAT_ARGS(primaryNode),
 			(uint32) (primaryNode->reportedLSN >> 32),
 			(uint32) primaryNode->reportedLSN);
 
@@ -1350,9 +1344,9 @@ SelectFailoverCandidateNode(CandidateList *candidateList,
 
 			LogAndNotifyMessage(
 				message, BUFSIZE,
-				"Not selecting failover candidate node %d (%s:%d) "
+				"Not selecting failover candidate " NODE_FORMAT
 				"because it is unhealthy",
-				node->nodeId, node->nodeHost, node->nodePort);
+				NODE_FORMAT_ARGS(node));
 
 			continue;
 		}
@@ -1408,13 +1402,12 @@ SelectFailoverCandidateNode(CandidateList *candidateList,
 
 			LogAndNotifyMessage(
 				message, BUFSIZE,
-				"The selected candidate %d (%s:%d) needs to fetch missing "
+				"The selected candidate " NODE_FORMAT
+				" needs to fetch missing "
 				"WAL to reach LSN %X/%X (from current reported LSN %X/%X) "
 				"and none of the most advanced standby nodes are healthy "
 				"at the moment.",
-				selectedNode->nodeId,
-				selectedNode->nodeHost,
-				selectedNode->nodePort,
+				NODE_FORMAT_ARGS(selectedNode),
 				(uint32) (mostAdvancedNode->reportedLSN >> 32),
 				(uint32) mostAdvancedNode->reportedLSN,
 				(uint32) (selectedNode->reportedLSN >> 32),
@@ -1467,12 +1460,9 @@ PromoteSelectedNode(AutoFailoverNode *selectedNode,
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Updating candidate priority back to %d for node %d \"%s\" (%s:%d)",
+			"Updating candidate priority back to %d for " NODE_FORMAT,
 			selectedNode->candidatePriority,
-			selectedNode->nodeId,
-			selectedNode->nodeName,
-			selectedNode->nodeHost,
-			selectedNode->nodePort);
+			NODE_FORMAT_ARGS(selectedNode));
 
 		NotifyStateChange(selectedNode, message);
 	}
@@ -1485,26 +1475,20 @@ PromoteSelectedNode(AutoFailoverNode *selectedNode,
 		{
 			LogAndNotifyMessage(
 				message, BUFSIZE,
-				"Setting goal state of node %d (%s:%d) to prepare_promotion "
-				"after node %d (%s:%d) became unhealthy "
-				"and %d nodes reported their LSN position.",
-				selectedNode->nodeId,
-				selectedNode->nodeHost,
-				selectedNode->nodePort,
-				primaryNode->nodeId,
-				primaryNode->nodeHost,
-				primaryNode->nodePort,
+				"Setting goal state of " NODE_FORMAT
+				"to prepare_promotion after " NODE_FORMAT
+				" became unhealthy and %d nodes reported their LSN position.",
+				NODE_FORMAT_ARGS(selectedNode),
+				NODE_FORMAT_ARGS(primaryNode),
 				candidateList->candidateCount);
 		}
 		else
 		{
 			LogAndNotifyMessage(
 				message, BUFSIZE,
-				"Setting goal state of node %d (%s:%d) to prepare_promotion "
-				"and %d nodes reported their LSN position.",
-				selectedNode->nodeId,
-				selectedNode->nodeHost,
-				selectedNode->nodePort,
+				"Setting goal state of " NODE_FORMAT
+				" to prepare_promotion and %d nodes reported their LSN position.",
+				NODE_FORMAT_ARGS(selectedNode),
 				candidateList->candidateCount);
 		}
 
@@ -1523,26 +1507,20 @@ PromoteSelectedNode(AutoFailoverNode *selectedNode,
 		{
 			LogAndNotifyMessage(
 				message, BUFSIZE,
-				"Setting goal state of node %d (%s:%d) to fast_forward "
-				"after node %d (%s:%d) became unhealthy "
-				"and %d nodes reported their LSN position.",
-				selectedNode->nodeId,
-				selectedNode->nodeHost,
-				selectedNode->nodePort,
-				primaryNode->nodeId,
-				primaryNode->nodeHost,
-				primaryNode->nodePort,
+				"Setting goal state of " NODE_FORMAT
+				" to fast_forward after " NODE_FORMAT
+				" became unhealthy and %d nodes reported their LSN position.",
+				NODE_FORMAT_ARGS(selectedNode),
+				NODE_FORMAT_ARGS(primaryNode),
 				candidateList->candidateCount);
 		}
 		else
 		{
 			LogAndNotifyMessage(
 				message, BUFSIZE,
-				"Setting goal state of node %d (%s:%d) to fast_forward "
-				"and %d nodes reported their LSN position.",
-				selectedNode->nodeId,
-				selectedNode->nodeHost,
-				selectedNode->nodePort,
+				"Setting goal state of " NODE_FORMAT
+				" to fast_forward after %d nodes reported their LSN position.",
+				NODE_FORMAT_ARGS(selectedNode),
 				candidateList->candidateCount);
 		}
 

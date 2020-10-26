@@ -181,6 +181,8 @@ cli_do_monitor_get_primary_node(int argc, char **argv)
 
 		json_object_set_string(root, "formation", config.formation);
 		json_object_set_number(root, "groupId", (double) config.groupId);
+		json_object_set_number(root, "nodeId", (double) primaryNode.nodeId);
+		json_object_set_string(root, "name", primaryNode.name);
 		json_object_set_string(root, "host", primaryNode.host);
 		json_object_set_number(root, "port", (double) primaryNode.port);
 

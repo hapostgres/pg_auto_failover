@@ -3402,8 +3402,9 @@ monitor_notification_process_apply_settings(void *context,
 	{
 		ctx->applySettingsTransitionInProgress = true;
 
-		log_debug("step 1/4: primary node %d (%s:%d) is assigned \"%s\"",
+		log_debug("step 1/4: primary node %d \"%s\" (%s:%d) is assigned \"%s\"",
 				  nodeState->node.nodeId,
+				  nodeState->node.name,
 				  nodeState->node.host,
 				  nodeState->node.port,
 				  NodeStateToString(nodeState->goalState));
@@ -3413,8 +3414,9 @@ monitor_notification_process_apply_settings(void *context,
 	{
 		ctx->applySettingsTransitionInProgress = true;
 
-		log_debug("step 2/4: primary node %d (%s:%d) reported \"%s\"",
+		log_debug("step 2/4: primary node %d \"%s\" (%s:%d) reported \"%s\"",
 				  nodeState->node.nodeId,
+				  nodeState->node.name,
 				  nodeState->node.host,
 				  nodeState->node.port,
 				  NodeStateToString(nodeState->reportedState));
@@ -3424,8 +3426,9 @@ monitor_notification_process_apply_settings(void *context,
 	{
 		ctx->applySettingsTransitionInProgress = true;
 
-		log_debug("step 3/4: primary node %d (%s:%d) is assigned \"%s\"",
+		log_debug("step 3/4: primary node %d \"%s\" (%s:%d) is assigned \"%s\"",
 				  nodeState->node.nodeId,
+				  nodeState->node.name,
 				  nodeState->node.host,
 				  nodeState->node.port,
 				  NodeStateToString(nodeState->goalState));
@@ -3436,8 +3439,9 @@ monitor_notification_process_apply_settings(void *context,
 	{
 		ctx->applySettingsTransitionDone = true;
 
-		log_debug("step 4/4: primary node %d (%s:%d) reported \"%s\"",
+		log_debug("step 4/4: primary node %d \"%s\" (%s:%d) reported \"%s\"",
 				  nodeState->node.nodeId,
+				  nodeState->node.name,
 				  nodeState->node.host,
 				  nodeState->node.port,
 				  NodeStateToString(nodeState->reportedState));
