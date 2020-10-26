@@ -1141,7 +1141,7 @@ BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
 			elog(LOG,
 				 "Skipping candidate " NODE_FORMAT
 				 ", which is a primary (old or new)",
-				 node->nodeId, node->nodeName, node->nodeHost, node->nodePort);
+				 NODE_FORMAT_ARGS(node));
 			continue;
 		}
 
