@@ -860,8 +860,8 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 				LogAndNotifyMessage(
 					message, BUFSIZE,
 					"Setting goal state of " NODE_FORMAT
-					" to wait_primary now that none of the standbys "
-					"are healthy anymore.",
+					" to wait_primary now that none of the standbys"
+					" are healthy anymore.",
 					NODE_FORMAT_ARGS(primaryNode));
 
 				AssignGoalState(primaryNode,
