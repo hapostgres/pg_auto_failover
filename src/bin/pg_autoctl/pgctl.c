@@ -528,7 +528,7 @@ ensure_default_settings_file_exists(const char *configFilePath,
 /*
  * prepare_guc_settings_from_pgsetup replaces some of the given GUC settings
  * with dynamic values found in the pgSetup argument, and prepare them in the
- * expected format for a postgresq.conf file in the given PQExpBuffer.
+ * expected format for a postgresql.conf file in the given PQExpBuffer.
  *
  * While most of our settings are handle in a static way and thus known at
  * compile time, some of them can be provided by our users, such as
