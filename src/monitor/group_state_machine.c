@@ -1019,7 +1019,8 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 			message, BUFSIZE,
 			"Failover still in progress after %d nodes reported their LSN "
 			"and we are waiting for %d nodes to report, "
-			"activeNode is %d \"%s\" (%s:%d) and reported state \"%s\"",
+			"activeNode is " NODE_FORMAT
+			" and reported state \"%s\"",
 			candidateList.candidateCount,
 			candidateList.missingNodesCount,
 			NODE_FORMAT_ARGS(activeNode),
