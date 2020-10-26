@@ -51,7 +51,8 @@ ReadPrimaryHostAddress(char **primaryName, char **primaryPort)
 	options = PQconninfoParse(connInfo, &errorMessage);
 	if (options == NULL)
 	{
-		free(connInfo);
+		pfree(connInfo);
+		return -1;
 	}
 
 	for (currentOption = options; currentOption->keyword != NULL; currentOption++)

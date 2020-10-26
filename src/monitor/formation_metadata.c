@@ -656,6 +656,13 @@ FormationNumSyncStandbyIsValid(AutoFailoverFormation *formation,
 	List *standbyNodesGroupList = NIL;
 	int count = 0;
 
+	if (formation == NULL)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("the given formation must not be NULL")));
+	}
+
 	standbyNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
 
 	foreach(nodeCell, standbyNodesGroupList)
@@ -744,6 +751,13 @@ AutoFailoverFormationGetDatum(FunctionCallInfo fcinfo, AutoFailoverFormation *fo
 	HeapTuple resultTuple = NULL;
 	Datum values[5];
 	bool isNulls[5];
+
+	if (formation == NULL)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("the given formation must not be NULL")));
+	}
 
 	memset(values, 0, sizeof(values));
 	memset(isNulls, false, sizeof(isNulls));
