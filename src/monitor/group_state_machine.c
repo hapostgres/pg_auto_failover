@@ -1311,7 +1311,7 @@ SelectFailoverCandidateNode(CandidateList *candidateList,
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"One of the most advanced standby node in the group "
+			"One of the most advanced standby nodes in the group "
 			"is " NODE_FORMAT
 			"with reported LSN %X/%X, which is more than "
 			"pgautofailover.enable_sync_wal_log_threshold (%d) behind "
