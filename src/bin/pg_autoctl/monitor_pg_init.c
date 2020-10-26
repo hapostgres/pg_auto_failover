@@ -189,6 +189,18 @@ monitor_install(const char *hostname,
 	pg_setup_get_local_connection_string(&pgSetup, connInfo);
 	pgsql_init(&postgres.sqlClient, connInfo, PGSQL_CONN_LOCAL);
 
+	/*
+	 * Ensure our extension "pgautofailvover" is available in the server
+	 * extension dir used to create the Postgres instance.
+	 */
+	if (!find_extension_control_file(pgSetup.pg_ctl,
+									 PG_AUTOCTL_MONITOR_EXTENSION_NAME))
+	{
+		log_error("Failed to find extension control file for \"%s\"",
+				  PG_AUTOCTL_MONITOR_EXTENSION_NAME);
+		return false;
+	}
+
 	if (!pgsql_create_extension(&postgres.sqlClient,
 								PG_AUTOCTL_MONITOR_EXTENSION_NAME))
 	{
