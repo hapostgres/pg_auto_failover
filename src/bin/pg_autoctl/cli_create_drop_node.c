@@ -709,7 +709,6 @@ cli_create_monitor_config(Monitor *monitor, MonitorConfig *config)
 		if (IS_EMPTY_STRING_BUFFER(config->hostname))
 		{
 			char monitorHostname[_POSIX_HOST_NAME_MAX] = { 0 };
-			int monitorPort = pgsetup_get_pgport();
 
 			if (!ipaddrGetLocalHostname(monitorHostname,
 										sizeof(monitorHostname)))
@@ -717,8 +716,6 @@ cli_create_monitor_config(Monitor *monitor, MonitorConfig *config)
 				strlcpy(monitorHostname,
 						DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME,
 						_POSIX_HOST_NAME_MAX);
-
-				monitorPort = DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT;
 
 				if (!discover_hostname((char *) (&config->hostname),
 									   _POSIX_HOST_NAME_MAX,
