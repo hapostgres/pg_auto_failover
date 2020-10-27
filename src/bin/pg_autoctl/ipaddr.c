@@ -11,6 +11,7 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <ifaddrs.h>
+#include <limits.h>
 #include <netdb.h>
 #include <net/if.h>
 #include <netinet/in.h>
@@ -99,11 +100,14 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 			return false;
 		}
 
+		/* connect timeout can be quite long by default */
+		log_info("Attempting to connect to %s (port %d)", addr, servicePort);
+
 		err = connect(sock, ai->ai_addr, ai->ai_addrlen);
 
 		if (err < 0)
 		{
-			log_debug("Failed to connect to %s: %m", addr);
+			log_warn("Failed to connect to %s: %m", addr);
 		}
 		else
 		{
@@ -749,6 +753,45 @@ ipaddr_sockaddr_to_string(struct addrinfo *ai, char *ipaddr, size_t size)
 		log_debug("Non supported ai_family %d", ai->ai_family);
 		return false;
 	}
+
+	return true;
+}
+
+
+/*
+ * ipaddrGetLocalHostname uses gethostname(3) to get the current machine
+ * hostname. We only use the result from gethostname(3) when in turn we can
+ * resolve the result to an IP address that is present on the local machine.
+ *
+ * Failing to match the hostname to a local IP address, we then use the default
+ * lookup service name and port instead (we would then connect to a google
+ * provided DNS service to see what is the default network interface/source
+ * address to connect to a remote endpoint; to avoid any of that process just
+ * using pg_autoctl with the --hostname option).
+ */
+bool
+ipaddrGetLocalHostname(char *hostname, size_t size)
+{
+	char localIpAddress[BUFSIZE] = { 0 };
+	char hostnameCandidate[_POSIX_HOST_NAME_MAX] = { 0 };
+
+	if (gethostname(hostnameCandidate, sizeof(hostnameCandidate)) == -1)
+	{
+		log_warn("Failed to get local hostname: %m");
+		return false;
+	}
+
+	log_debug("ipaddrGetLocalHostname: \"%s\"", hostnameCandidate);
+
+	/* do a lookup of the host name and see that we get a local address back */
+	if (!findHostnameLocalAddress(hostnameCandidate, localIpAddress, BUFSIZE))
+	{
+		log_warn("Failed to get a local IP address for hostname \"%s\"",
+				 hostnameCandidate);
+		return false;
+	}
+
+	strlcpy(hostname, hostnameCandidate, size);
 
 	return true;
 }

@@ -28,6 +28,7 @@
 #include "monitor.h"
 #include "monitor_config.h"
 #include "pgctl.h"
+#include "pgsetup.h"
 #include "primary_standby.h"
 
 
@@ -207,16 +208,37 @@ cli_show_hostname(int argc, char **argv)
 	char hostname[_POSIX_HOST_NAME_MAX];
 
 	char monitorHostname[_POSIX_HOST_NAME_MAX];
-	int monitorPort = 0;
+	int monitorPort = pgsetup_get_pgport();
 
+	/*
+	 * When no argument is used, use hostname(3) and 5432, as we would for a
+	 * monitor (pg_autoctl create monitor).
+	 */
 	if (argc == 0)
 	{
-		strlcpy(monitorHostname,
-				DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME,
-				_POSIX_HOST_NAME_MAX);
+		if (!ipaddrGetLocalHostname(monitorHostname, sizeof(hostname)))
+		{
+			/* use the default host/port to find the default local IP address */
+			strlcpy(monitorHostname,
+					DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME,
+					_POSIX_HOST_NAME_MAX);
 
-		monitorPort = DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT;
+			monitorPort = DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT;
+		}
+
+		/* we found our hostname(3), use the default pg port */
+		log_info("Using local hostname \"%s\" and port %d",
+				 monitorHostname,
+				 monitorPort);
+
+		fformat(stdout, "%s\n", monitorHostname);
+		exit(EXIT_CODE_QUIT);
 	}
+
+	/*
+	 * When one argument is given, it is expected to be the monitor Postgres
+	 * connection string, and we then act as a keeper node.
+	 */
 	else if (argc == 1)
 	{
 		if (!hostname_from_uri(argv[0],

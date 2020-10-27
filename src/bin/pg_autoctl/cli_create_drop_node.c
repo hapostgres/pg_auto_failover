@@ -31,6 +31,7 @@
 #include "monitor_config.h"
 #include "monitor_pg_init.h"
 #include "pgctl.h"
+#include "pghba.h"
 #include "pidfile.h"
 #include "primary_standby.h"
 #include "service_keeper.h"
@@ -60,8 +61,6 @@ static void cli_drop_node_from_monitor(KeeperConfig *config,
 									   const char *hostname,
 									   int port);
 
-static bool discover_hostname(char *hostname, int size,
-							  const char *monitorHostname, int monitorPort);
 static void check_hostname(const char *hostname);
 
 CommandLine create_monitor_command =
@@ -709,14 +708,28 @@ cli_create_monitor_config(Monitor *monitor, MonitorConfig *config)
 		/* Take care of the --hostname */
 		if (IS_EMPTY_STRING_BUFFER(config->hostname))
 		{
-			if (!discover_hostname((char *) (&config->hostname),
-								   _POSIX_HOST_NAME_MAX,
-								   DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME,
-								   DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT))
+			char monitorHostname[_POSIX_HOST_NAME_MAX] = { 0 };
+			int monitorPort = pgsetup_get_pgport();
+
+			if (!ipaddrGetLocalHostname(monitorHostname,
+										sizeof(monitorHostname)))
 			{
-				log_fatal("Failed to auto-detect the hostname of this machine, "
-						  "please provide one via --hostname");
-				exit(EXIT_CODE_BAD_ARGS);
+				strlcpy(monitorHostname,
+						DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME,
+						_POSIX_HOST_NAME_MAX);
+
+				monitorPort = DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT;
+
+				if (!discover_hostname((char *) (&config->hostname),
+									   _POSIX_HOST_NAME_MAX,
+									   DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME,
+									   DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT))
+				{
+					log_fatal("Failed to auto-detect the hostname "
+							  "of this machine, please provide one "
+							  "via --hostname");
+					exit(EXIT_CODE_BAD_ARGS);
+				}
 			}
 		}
 		else
@@ -1258,7 +1271,7 @@ check_or_discover_hostname(KeeperConfig *config)
  * it... in that case we use PG_AUTOCTL_DEFAULT_SERVICE_NAME and PORT, which
  * are the Google DNS service: 8.8.8.8:53, expected to be reachable.
  */
-static bool
+bool
 discover_hostname(char *hostname, int size,
 				  const char *monitorHostname, int monitorPort)
 {
@@ -1351,5 +1364,8 @@ check_hostname(const char *hostname)
 					 "interfaces, automated pg_hba.conf setup might fail.",
 					 hostname);
 		}
+
+		/* use pghba_check_hostname for log diagnostics */
+		(void) pghba_check_hostname(hostname);
 	}
 }
