@@ -362,23 +362,24 @@ pg_auto_failover_default_settings_file_exists(PostgresSetup *pgSetup)
 	char *contents = NULL;
 	long size = 0L;
 
+	bool fileExistsWithContent = false;
+
 	join_path_components(pgAutoFailoverDefaultsConfigPath,
 						 pgSetup->pgdata,
 						 AUTOCTL_DEFAULTS_CONF_FILENAME);
 
 
 	/* make sure the file exists and is not empty (race conditions) */
-	if (!file_exists(pgAutoFailoverDefaultsConfigPath))
+	if (!read_file_if_exists(pgAutoFailoverDefaultsConfigPath, &contents, &size))
 	{
 		return false;
 	}
 
-	if (!read_file(pgAutoFailoverDefaultsConfigPath, &contents, &size))
-	{
-		return false;
-	}
+	/* we don't actually need the contents here */
+	free(contents);
+	fileExistsWithContent = size > 0;
 
-	return contents > 0;
+	return fileExistsWithContent;
 }
 
 
@@ -1139,6 +1140,8 @@ pg_log_startup(const char *pgdata, int logLevel)
 		{
 			log_level(logLevel, "%s", lines[lineNumber]);
 		}
+
+		free(fileContents);
 	}
 
 	/*
@@ -1244,6 +1247,8 @@ pg_log_startup(const char *pgdata, int logLevel)
 						log_level(logLevel, "%s", lines[lineNumber]);
 					}
 				}
+
+				free(fileContents);
 			}
 		}
 	}
@@ -1300,6 +1305,8 @@ pg_log_recovery_setup(const char *pgdata, int logLevel)
 				log_debug("Configuration file \"%s\" is empty",
 						  recoveryConfPath);
 			}
+
+			free(fileContents);
 		}
 	}
 

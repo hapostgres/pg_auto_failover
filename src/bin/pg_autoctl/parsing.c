@@ -97,9 +97,10 @@ regexp_first_match(const char *string, const char *regex)
 		int finish = m[1].rm_eo;
 		int length = finish - start + 1;
 		char *result = (char *) malloc(length * sizeof(char));
+
 		if (result == NULL)
 		{
-			log_error("Failed to allocate memory, probably because it's all used");
+			log_error(ALLOCATION_FAILED_ERROR);
 			return NULL;
 		}
 

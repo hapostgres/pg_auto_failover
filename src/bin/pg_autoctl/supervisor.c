@@ -897,9 +897,12 @@ supervisor_find_service_pid(const char *pidfile,
 		{
 			*separator = '\0';
 			stringToInt(fileLines[lineNumber], pid);
+			free(fileContents);
 			return true;
 		}
 	}
+
+	free(fileContents);
 
 	return false;
 }
