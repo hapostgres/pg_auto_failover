@@ -307,12 +307,7 @@ read_service_pidfile_version_strings(const char *pidfile,
 	int lineCount = 0;
 	int lineNumber;
 
-	if (!file_exists(pidfile))
-	{
-		return false;
-	}
-
-	if (!read_file(pidfile, &fileContents, &fileSize))
+	if (!read_file_if_exists(pidfile, &fileContents, &fileSize))
 	{
 		return false;
 	}
@@ -332,10 +327,13 @@ read_service_pidfile_version_strings(const char *pidfile,
 		/* extension version string, comes later in the file */
 		if (pidLine == PIDFILE_LINE_EXTENSION_VERSION)
 		{
+			free(fileContents);
 			strlcpy(extensionVersionString, fileLines[lineNumber], BUFSIZE);
 			return true;
 		}
 	}
+
+	free(fileContents);
 
 	return false;
 }
@@ -362,12 +360,7 @@ pidfile_as_json(JSON_Value *js, const char *pidfile, bool includeStatus)
 	int lineCount = 0;
 	int lineNumber;
 
-	if (!file_exists(pidfile))
-	{
-		exit(EXIT_CODE_INTERNAL_ERROR);
-	}
-
-	if (!read_file(pidfile, &fileContents, &fileSize))
+	if (!read_file_if_exists(pidfile, &fileContents, &fileSize))
 	{
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
@@ -504,4 +497,6 @@ pidfile_as_json(JSON_Value *js, const char *pidfile, bool includeStatus)
 	}
 
 	json_object_set_value(jsobj, "services", jsServices);
+
+	free(fileContents);
 }

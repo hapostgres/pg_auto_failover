@@ -157,4 +157,8 @@
  */
 #define FOPEN_FLAGS_A O_APPEND | O_RDWR | O_CREAT
 
+
+/* when malloc fails, what do we tell our users */
+#define ALLOCATION_FAILED_ERROR "Failed to allocate memory: %m"
+
 #endif /* DEFAULTS_H */

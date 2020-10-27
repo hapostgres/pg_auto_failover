@@ -316,7 +316,7 @@ tmux_prepare_XDG_environment(const char *root, bool createDirectories)
 
 		if (env == NULL)
 		{
-			log_fatal("Failed to malloc MAXPGPATH bytes: %m");
+			log_fatal(ALLOCATION_FAILED_ERROR);
 			return false;
 		}
 

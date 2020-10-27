@@ -328,6 +328,7 @@ read_file_internal(FILE *fileStream,
 	if (data == NULL)
 	{
 		log_error("Failed to allocate %ld bytes", *fileSize);
+		log_error(ALLOCATION_FAILED_ERROR);
 		fclose(fileStream);
 		return false;
 	}
@@ -595,7 +596,7 @@ search_path(const char *filename, char ***result)
 	*result = malloc(pathListLength * sizeof(char *));
 	if (!*result)
 	{
-		log_error("Failed to allocate memory, probably because it's all used");
+		log_error(ALLOCATION_FAILED_ERROR);
 		return 0;
 	}
 
@@ -603,7 +604,7 @@ search_path(const char *filename, char ***result)
 	stringSpace = malloc(pathListLength * MAXPGPATH);
 	if (!stringSpace)
 	{
-		log_error("Failed to allocate memory, probably because it's all used");
+		log_error(ALLOCATION_FAILED_ERROR);
 		free(*result);
 		return 0;
 	}

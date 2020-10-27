@@ -20,6 +20,7 @@
 #include "env_utils.h"
 #include "lock_utils.h"
 #include "log.h"
+#include "pidfile.h"
 #include "string_utils.h"
 
 
@@ -180,8 +181,6 @@ semaphore_cleanup(const char *pidfile)
 	char *fileLines[BUFSIZE] = { 0 };
 	int lineCount = 0;
 
-	char semIdString[BUFSIZE] = { 0 };
-
 	if (!file_exists(pidfile))
 	{
 		return false;
@@ -194,14 +193,21 @@ semaphore_cleanup(const char *pidfile)
 
 	lineCount = splitLines(fileContents, fileLines, BUFSIZE);
 
-	if (lineCount < 2)
+	if (lineCount < PIDFILE_LINE_SEM_ID)
 	{
+		log_debug("Failed to cleanup the semaphore from stale pid file \"%s\": "
+				  "it contains %d lines, semaphore id is expected in line %d",
+				  pidfile,
+				  lineCount,
+				  PIDFILE_LINE_SEM_ID);
+		free(fileContents);
 		return false;
 	}
 
-	if (!stringToInt(semIdString, &(semaphore.semId)))
+	if (!stringToInt(fileLines[PIDFILE_LINE_SEM_ID], &(semaphore.semId)))
 	{
 		/* errors have already been logged */
+		free(fileContents);
 		return false;
 	}
 

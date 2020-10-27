@@ -1525,6 +1525,8 @@ fprint_file_contents(const char *filename)
 	if (read_file(filename, &contents, &size))
 	{
 		fformat(stdout, "%s\n", contents);
+		free(contents);
+
 		return true;
 	}
 	else

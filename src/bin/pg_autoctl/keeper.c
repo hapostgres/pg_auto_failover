@@ -851,6 +851,8 @@ keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 
 		char upstreamConfPath[MAXPGPATH] = { 0 };
 
+		bool replicationSettingsHaveChanged = false;
+
 		char *currentConfContents = NULL;
 		long currentConfSize = 0L;
 
@@ -882,6 +884,7 @@ keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 							 pgSetup->pgdata,
 							 relativeConfPathName);
 
+		/* to check if replicationSettingsHaveChanged, read current file */
 		if (file_exists(upstreamConfPath))
 		{
 			if (!read_file(upstreamConfPath,
@@ -927,8 +930,17 @@ keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 			return false;
 		}
 
-		if (currentConfContents == NULL ||
-			strcmp(newConfContents, currentConfContents) != 0)
+		replicationSettingsHaveChanged =
+			currentConfContents == NULL ||
+			strcmp(newConfContents, currentConfContents) != 0;
+
+		if (currentConfContents != NULL)
+		{
+			free(currentConfContents);
+		}
+		free(newConfContents);
+
+		if (replicationSettingsHaveChanged)
 		{
 			log_info("Replication settings at \"%s\" have changed, "
 					 "restarting Postgres", upstreamConfPath);
