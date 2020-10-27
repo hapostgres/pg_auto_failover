@@ -63,8 +63,16 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 
 	memset(&serv, 0, sizeof(serv));
 	serv.sin_family = AF_INET;
-	serv.sin_addr.s_addr = inet_addr(serviceName);
 	serv.sin_port = htons(servicePort);
+	serv.sin_addr.s_addr = inet_addr(serviceName);
+
+	if (serv.sin_addr.s_addr == INADDR_NONE)
+	{
+		log_error("Failed to parse dotted IPv4 address \"%s\": %m", serviceName);
+		return false;
+	}
+
+	log_info("fetchLocalIPAddress: \"%s\"", serviceName);
 
 	err = connect(sock, (const struct sockaddr *) &serv, sizeof(serv));
 	if (err < 0)

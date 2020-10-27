@@ -55,7 +55,8 @@ static CommandLine do_show_lookup_command =
 
 static CommandLine do_show_hostname_command =
 	make_command("hostname",
-				 "Print this node's default hostname", "", "",
+				 "Print this node's default hostname",
+				 "[postgres://monitor/uri]", "",
 				 NULL, cli_show_hostname);
 
 static CommandLine do_show_reverse_command =
@@ -205,10 +206,40 @@ cli_show_hostname(int argc, char **argv)
 	char localIpAddress[BUFSIZE];
 	char hostname[_POSIX_HOST_NAME_MAX];
 
+	char monitorHostname[_POSIX_HOST_NAME_MAX];
+	int monitorPort = 0;
+
+	if (argc == 0)
+	{
+		strlcpy(monitorHostname,
+				DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME,
+				_POSIX_HOST_NAME_MAX);
+
+		monitorPort = DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT;
+	}
+	else if (argc == 1)
+	{
+		if (!hostname_from_uri(argv[0],
+							   monitorHostname, _POSIX_HOST_NAME_MAX,
+							   &monitorPort))
+		{
+			log_fatal("Failed to determine monitor hostname when parsing "
+					  "Postgres URI \"%s\"", argv[0]);
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+	}
+	else
+	{
+		commandline_print_usage(&do_show_hostname_command, stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	log_info("Using monitor hostname \"%s\" and port %d",
+			 monitorHostname,
+			 monitorPort);
+
 	/* fetch the default local address used when connecting remotely */
-	if (!fetchLocalIPAddress(ipAddr, BUFSIZE,
-							 DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME,
-							 DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT))
+	if (!fetchLocalIPAddress(ipAddr, BUFSIZE, monitorHostname, monitorPort))
 	{
 		log_warn("Failed to determine network configuration.");
 		exit(EXIT_CODE_INTERNAL_ERROR);
