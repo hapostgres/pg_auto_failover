@@ -227,16 +227,16 @@ cli_show_hostname(int argc, char **argv)
 					  "Postgres URI \"%s\"", argv[0]);
 			exit(EXIT_CODE_BAD_ARGS);
 		}
+
+		log_info("Using monitor hostname \"%s\" and port %d",
+				 monitorHostname,
+				 monitorPort);
 	}
 	else
 	{
 		commandline_print_usage(&do_show_hostname_command, stderr);
 		exit(EXIT_CODE_BAD_ARGS);
 	}
-
-	log_info("Using monitor hostname \"%s\" and port %d",
-			 monitorHostname,
-			 monitorPort);
 
 	/* fetch the default local address used when connecting remotely */
 	if (!fetchLocalIPAddress(ipAddr, BUFSIZE, monitorHostname, monitorPort))

@@ -25,16 +25,20 @@
 
 #include "postgres_fe.h"
 
+#include "defaults.h"
 #include "env_utils.h"
 #include "file_utils.h"
 #include "ipaddr.h"
 #include "log.h"
+#include "string_utils.h"
 
 static unsigned int countSetBits(unsigned int n);
 static unsigned int countSetBitsv6(unsigned char *addr);
 static bool ipv4eq(struct sockaddr_in *a, struct sockaddr_in *b);
 static bool ipv6eq(struct sockaddr_in6 *a, struct sockaddr_in6 *b);
 static bool fetchIPAddressFromInterfaceList(char *localIpAddress, int size);
+static bool ipaddr_sockaddr_to_string(struct addrinfo *ai,
+									  char *ipaddr, size_t size);
 
 /*
  * Connect in UDP to a known DNS server on the external network, and grab our
@@ -50,32 +54,68 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 	socklen_t namelen = sizeof(name);
 	int err = -1;
 
-	struct sockaddr_in serv;
+	struct addrinfo *lookup;
+	struct addrinfo *ai;
+	struct addrinfo hints;
 
-	int sock = socket(AF_INET, SOCK_DGRAM, 0);
+	int error = 0;
+	bool couldConnect = false;
 
-	/*Socket could not be created */
-	if (sock < 0)
+	int sock;
+
+
+	/* prepare getaddrinfo hints for name resolution or IP address parsing */
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = PF_UNSPEC;     /* accept any family as supported by OS */
+	hints.ai_socktype = SOCK_STREAM; /* we only want TCP sockets */
+	hints.ai_protocol = IPPROTO_TCP; /* we only want TCP sockets */
+
+	error = getaddrinfo(serviceName,
+						intToString(servicePort).strValue,
+						&hints,
+						&lookup);
+	if (error != 0)
 	{
-		log_warn("Failed to create a socket: %m");
+		log_warn("Failed to parse host name or IP address \"%s\": %s",
+				 serviceName, gai_strerror(error));
 		return false;
 	}
 
-	memset(&serv, 0, sizeof(serv));
-	serv.sin_family = AF_INET;
-	serv.sin_port = htons(servicePort);
-	serv.sin_addr.s_addr = inet_addr(serviceName);
-
-	if (serv.sin_addr.s_addr == INADDR_NONE)
+	for (ai = lookup; ai; ai = ai->ai_next)
 	{
-		log_error("Failed to parse dotted IPv4 address \"%s\": %m", serviceName);
-		return false;
+		char addr[BUFSIZE] = { 0 };
+
+		if (!ipaddr_sockaddr_to_string(ai, addr, sizeof(addr)))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
+		sock = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+
+		if (sock < 0)
+		{
+			log_warn("Failed to create a socket: %m");
+			return false;
+		}
+
+		err = connect(sock, ai->ai_addr, ai->ai_addrlen);
+
+		if (err < 0)
+		{
+			log_debug("Failed to connect to %s: %m", addr);
+		}
+		else
+		{
+			/* found a getaddrinfo() result we could use to connect */
+			couldConnect = true;
+			break;
+		}
 	}
 
-	log_info("fetchLocalIPAddress: \"%s\"", serviceName);
+	freeaddrinfo(lookup);
 
-	err = connect(sock, (const struct sockaddr *) &serv, sizeof(serv));
-	if (err < 0)
+	if (!couldConnect)
 	{
 		if (env_found_empty("PG_REGRESS_SOCK_DIR"))
 		{
@@ -87,7 +127,9 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 		}
 		else
 		{
-			log_warn("Failed to connect: %m");
+			log_warn("Failed to connect to any of the IP addresses for "
+					 "monitor hostname \"%s\" and port %d",
+					 serviceName, servicePort);
 			return false;
 		}
 	}
@@ -644,30 +686,9 @@ resolveHostnameForwardAndReverse(const char *hostname, char *ipaddr, int size)
 		int ret;
 		char hbuf[NI_MAXHOST] = { 0 };
 
-		if (ai->ai_family == AF_INET)
+		if (!ipaddr_sockaddr_to_string(ai, hbuf, sizeof(hbuf)))
 		{
-			struct sockaddr_in *ip = (struct sockaddr_in *) ai->ai_addr;
-
-			if (inet_ntop(AF_INET, (void *) &(ip->sin_addr), ipaddr, size) == NULL)
-			{
-				log_debug("Failed to determine local ip address: %m");
-				continue;
-			}
-		}
-		else if (ai->ai_family == AF_INET6)
-		{
-			struct sockaddr_in6 *ip = (struct sockaddr_in6 *) ai->ai_addr;
-
-			if (inet_ntop(AF_INET6, (void *) &(ip->sin6_addr), ipaddr, size) == NULL)
-			{
-				log_debug("Failed to determine local ip address: %m");
-				continue;
-			}
-		}
-		else
-		{
-			/* Highly unexpected */
-			log_debug("Non supported ai_family %d", ai->ai_family);
+			/* errors have already been logged */
 			continue;
 		}
 
@@ -692,4 +713,42 @@ resolveHostnameForwardAndReverse(const char *hostname, char *ipaddr, int size)
 	freeaddrinfo(lookup);
 
 	return foundHostnameFromAddress;
+}
+
+
+/*
+ * ipaddr_sockaddr_to_string converts a binary socket address to its string
+ * representation using inet_ntop(3).
+ */
+static bool
+ipaddr_sockaddr_to_string(struct addrinfo *ai, char *ipaddr, size_t size)
+{
+	if (ai->ai_family == AF_INET)
+	{
+		struct sockaddr_in *ip = (struct sockaddr_in *) ai->ai_addr;
+
+		if (inet_ntop(AF_INET, (void *) &(ip->sin_addr), ipaddr, size) == NULL)
+		{
+			log_debug("Failed to determine local ip address: %m");
+			return false;
+		}
+	}
+	else if (ai->ai_family == AF_INET6)
+	{
+		struct sockaddr_in6 *ip = (struct sockaddr_in6 *) ai->ai_addr;
+
+		if (inet_ntop(AF_INET6, (void *) &(ip->sin6_addr), ipaddr, size) == NULL)
+		{
+			log_debug("Failed to determine local ip address: %m");
+			return false;
+		}
+	}
+	else
+	{
+		/* Highly unexpected */
+		log_debug("Non supported ai_family %d", ai->ai_family);
+		return false;
+	}
+
+	return true;
 }
