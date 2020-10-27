@@ -327,8 +327,8 @@ read_service_pidfile_version_strings(const char *pidfile,
 		/* extension version string, comes later in the file */
 		if (pidLine == PIDFILE_LINE_EXTENSION_VERSION)
 		{
-			free(fileContents);
 			strlcpy(extensionVersionString, fileLines[lineNumber], BUFSIZE);
+			free(fileContents);
 			return true;
 		}
 	}

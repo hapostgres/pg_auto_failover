@@ -909,6 +909,7 @@ keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 											 state->current_node_id))
 		{
 			/* can't happen at the moment */
+			free(currentConfContents);
 			return false;
 		}
 
@@ -920,6 +921,7 @@ keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 		{
 			log_error("Failed to setup Postgres as a standby after primary "
 					  "connection settings change");
+			free(currentConfContents);
 			return false;
 		}
 
@@ -927,6 +929,7 @@ keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 		if (!read_file(upstreamConfPath, &newConfContents, &newConfSize))
 		{
 			/* errors have already been logged */
+			free(currentConfContents);
 			return false;
 		}
 
@@ -934,10 +937,7 @@ keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 			currentConfContents == NULL ||
 			strcmp(newConfContents, currentConfContents) != 0;
 
-		if (currentConfContents != NULL)
-		{
-			free(currentConfContents);
-		}
+		free(currentConfContents);
 		free(newConfContents);
 
 		if (replicationSettingsHaveChanged)

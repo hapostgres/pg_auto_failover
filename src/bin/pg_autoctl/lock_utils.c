@@ -211,6 +211,8 @@ semaphore_cleanup(const char *pidfile)
 		return false;
 	}
 
+	free(fileContents);
+
 	log_trace("Read semaphore id %d from stale pidfile", semaphore.semId);
 
 	return semaphore_unlink(&semaphore);
