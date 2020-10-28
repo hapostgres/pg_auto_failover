@@ -216,7 +216,13 @@ cli_show_hostname(int argc, char **argv)
 	 */
 	if (argc == 0)
 	{
-		if (!ipaddrGetLocalHostname(monitorHostname, sizeof(hostname)))
+		if (ipaddrGetLocalHostname(monitorHostname, sizeof(hostname)))
+		{
+			/* we found our hostname(3), use the default pg port */
+			fformat(stdout, "%s\n", monitorHostname);
+			exit(EXIT_CODE_QUIT);
+		}
+		else
 		{
 			/* use the default host/port to find the default local IP address */
 			strlcpy(monitorHostname,
@@ -225,14 +231,6 @@ cli_show_hostname(int argc, char **argv)
 
 			monitorPort = DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT;
 		}
-
-		/* we found our hostname(3), use the default pg port */
-		log_info("Using local hostname \"%s\" and port %d",
-				 monitorHostname,
-				 monitorPort);
-
-		fformat(stdout, "%s\n", monitorHostname);
-		exit(EXIT_CODE_QUIT);
 	}
 
 	/*
