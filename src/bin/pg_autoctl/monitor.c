@@ -3865,10 +3865,28 @@ monitor_extension_update(Monitor *monitor, const char *targetVersion)
 	 */
 	if (strcmp(targetVersion, "1.4") == 0)
 	{
-		if (!pgsql_create_extension(pgsql, "btree_gist"))
+		/*
+		 * Ensure "btree_gist" is available in the server extension dir used to
+		 * create the Postgres instance.
+		 */
+		char *btreeGistExtName = "btree_gist";
+
+		if (!find_extension_control_file(monitor->config.pgSetup.pg_ctl,
+										 btreeGistExtName))
 		{
-			log_error("Failed to create extension \"btree_gist\", "
-					  "required by \"pgautofailover\" extension version 1.4");
+			log_error("Failed to find extension control file for \"%s\"",
+					  btreeGistExtName);
+			log_info("You might have to install a PostgreSQL contrib package");
+			return false;
+		}
+
+
+		if (!pgsql_create_extension(pgsql, btreeGistExtName))
+		{
+			log_error("Failed to create extension \"%s\" "
+					  "required by \"%s\" extension version 1.4",
+					  btreeGistExtName,
+					  PG_AUTOCTL_MONITOR_EXTENSION_NAME);
 			return false;
 		}
 	}
