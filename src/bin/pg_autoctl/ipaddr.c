@@ -40,6 +40,8 @@ static bool ipv6eq(struct sockaddr_in6 *a, struct sockaddr_in6 *b);
 static bool fetchIPAddressFromInterfaceList(char *localIpAddress, int size);
 static bool ipaddr_sockaddr_to_string(struct addrinfo *ai,
 									  char *ipaddr, size_t size);
+static bool ipaddr_getsockname(int sock, char *ipaddr, size_t size);
+
 
 /*
  * Connect in UDP to a known DNS server on the external network, and grab our
@@ -49,12 +51,6 @@ bool
 fetchLocalIPAddress(char *localIpAddress, int size,
 					const char *serviceName, int servicePort)
 {
-	char buffer[INET_ADDRSTRLEN];
-	const char *ipAddr;
-	struct sockaddr_in name;
-	socklen_t namelen = sizeof(name);
-	int err = -1;
-
 	struct addrinfo *lookup;
 	struct addrinfo *ai;
 	struct addrinfo hints;
@@ -84,6 +80,7 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 
 	for (ai = lookup; ai; ai = ai->ai_next)
 	{
+		int err = -1;
 		char addr[BUFSIZE] = { 0 };
 
 		if (!ipaddr_sockaddr_to_string(ai, addr, sizeof(addr)))
@@ -101,7 +98,7 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 		}
 
 		/* connect timeout can be quite long by default */
-		log_info("Attempting to connect to %s (port %d)", addr, servicePort);
+		log_info("Connecting to %s (port %d)", addr, servicePort);
 
 		err = connect(sock, ai->ai_addr, ai->ai_addrlen);
 
@@ -138,26 +135,16 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 		}
 	}
 
-	err = getsockname(sock, (struct sockaddr *) &name, &namelen);
-	if (err < 0)
+	if (!ipaddr_getsockname(sock, localIpAddress, size))
 	{
-		log_warn("Failed to get IP address from socket: %m");
+		/* errors have already been logged */
+		close(sock);
 		return false;
 	}
 
-	ipAddr = inet_ntop(AF_INET, &name.sin_addr, buffer, INET_ADDRSTRLEN);
-
-	if (ipAddr != NULL)
-	{
-		sformat(localIpAddress, size, "%s", buffer);
-	}
-	else
-	{
-		log_warn("Failed to determine local ip address: %m");
-	}
 	close(sock);
 
-	return ipAddr != NULL;
+	return true;
 }
 
 
@@ -751,6 +738,54 @@ ipaddr_sockaddr_to_string(struct addrinfo *ai, char *ipaddr, size_t size)
 	{
 		/* Highly unexpected */
 		log_debug("Non supported ai_family %d", ai->ai_family);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * ipaddr_getsockname gets the IP address "name" from a connected socket.
+ */
+static bool
+ipaddr_getsockname(int sock, char *ipaddr, size_t size)
+{
+	struct sockaddr_storage address = { 0 };
+	socklen_t sockaddrlen = sizeof(address);
+
+	int err = -1;
+
+	err = getsockname(sock, (struct sockaddr *) (&address), &sockaddrlen);
+	if (err < 0)
+	{
+		log_warn("Failed to get IP address from socket: %m");
+		return false;
+	}
+
+	if (address.ss_family == AF_INET)
+	{
+		struct sockaddr_in *ip = (struct sockaddr_in *) &address;
+
+		if (inet_ntop(AF_INET, (void *) &(ip->sin_addr), ipaddr, size) == NULL)
+		{
+			log_debug("Failed to determine local ip address: %m");
+			return false;
+		}
+	}
+	else if (address.ss_family == AF_INET6)
+	{
+		struct sockaddr_in6 *ip = (struct sockaddr_in6 *) &address;
+
+		if (inet_ntop(AF_INET6, (void *) &(ip->sin6_addr), ipaddr, size) == NULL)
+		{
+			log_debug("Failed to determine local ip address: %m");
+			return false;
+		}
+	}
+	else
+	{
+		log_debug("Non supported ss_family %d", address.ss_family);
 		return false;
 	}
 
