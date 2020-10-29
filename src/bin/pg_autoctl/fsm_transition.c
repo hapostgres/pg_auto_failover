@@ -672,6 +672,13 @@ fsm_start_postgres(Keeper *keeper)
 		return false;
 	}
 
+	/* fetch synchronous_standby_names setting from the monitor */
+	if (!fsm_apply_settings(keeper))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
 	return true;
 }
 

@@ -964,6 +964,26 @@ SELECT reportedstate
         command.execute("drop node", 'drop', 'node')
         return True
 
+    def do_fsm_assign(self, target_state):
+        """
+        Runs `pg_autoctl do fsm assign` on a node
+
+        :return:
+        """
+        command = PGAutoCtl(self)
+        command.execute("do fsm assign", 'do', 'fsm', 'assign', target_state)
+        return True
+
+    def do_fsm_step(self):
+        """
+        Runs `pg_autoctl do fsm step` on a node
+
+        :return:
+        """
+        command = PGAutoCtl(self)
+        command.execute("do fsm step", 'do', 'fsm', 'step')
+        return True
+
     def set_metadata(self, name=None, host=None, port=None):
         """
             Sets node metadata via pg_autoctl
@@ -1062,13 +1082,30 @@ SELECT reportedstate
 
     def get_synchronous_standby_names(self):
         """
-            Gets number sync standbys  via pg_autoctl
+            Gets synchronous standby names  via pg_autoctl
         """
         command = PGAutoCtl(self)
         out, err, ret = command.execute("get synchronous_standby_names",
                                         'show', 'standby-names')
 
         return out.strip()
+
+    def get_synchronous_standby_names_local(self):
+         """
+             Gets synchronous standby names via sql query on data node
+         """
+         query = "select current_setting('synchronous_standby_names')"
+
+         result = self.run_sql_query(query)
+         return result[0][0]
+
+    def print_synchronous_standby_names(self):
+        monitorStandbyNames = self.get_synchronous_standby_names()
+        localStandbyNames = self.get_synchronous_standby_names_local()
+
+        print("synchronous_standby_names       = '%s'" % monitorStandbyNames)
+        print("synchronous_standby_names_local = '%s'" % localStandbyNames)
+        return
 
     def list_replication_slot_names(self):
         """
