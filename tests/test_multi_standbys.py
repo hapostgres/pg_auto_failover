@@ -11,7 +11,6 @@ node2 = None
 node3 = None
 node4 = None
 node5 = None
-node6 = None
 
 def setup_module():
     global cluster
@@ -226,21 +225,28 @@ def test_013_remove_old_primary():
     assert node1.wait_until_state(target_state="primary")
     assert node3.wait_until_state(target_state="secondary")
 
-def test_014_update_standby_names_when_adding_and_removing_a_standby():
+def test_014_update_sync_standby_names_when_adding_and_removing_a_standby_at_same_time():
     global node5
-    global node6
-
     node5 = cluster.create_datanode("/tmp/multi_standby/node5")
-    node6 = cluster.create_datanode("/tmp/multi_standby/node6")
 
-    node1.do_fsm_assign(target_state="join_primary")
-    node1.do_fsm_step()
+    # Helpful aliases
+    primary = node1
+    new_secondary = node5
 
-    print(monitor.get_other_nodes(node1.nodeid))
+    # Push the primary into JOIN_PRIMARY state by adding a new secondary.
+    new_secondary.create()
+    new_secondary.run()
 
-    # assert node1.wait_until_state(target_state="join_primary")
+    # XXX This suffers from a race condition: the primary may switch away from
+    # JOIN_PRIMARY before we are able to wait for it, in which case we'll fail
+    # the test.
+    assert primary.wait_until_state(target_state="join_primary")
+
+    # Drop another secondary.
     node3.drop()
+    assert primary.wait_until_state(target_state="primary")
 
-    # assert node1.wait_until_state(target_state="primary")
-    eq_(node1.get_synchronous_standby_names(),
-        node1.get_synchronous_standby_names_local())
+    monitor_sync_standbys = primary.get_synchronous_standby_names()
+    primary_sync_standbys = primary.get_synchronous_standby_names_local()
+
+    eq_(monitor_sync_standbys, primary_sync_standbys)
