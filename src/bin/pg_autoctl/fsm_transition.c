@@ -146,16 +146,19 @@ fsm_init_primary(Keeper *keeper)
 			return false;
 		}
 
-		/*
-		 * We have a new system_identifier, we need to publish it now.
-		 */
-		if (!monitor_set_node_system_identifier(
-				monitor,
-				keeper->state.current_node_id,
-				pgSetup->control.system_identifier))
+		if (!config->monitorDisabled)
 		{
-			log_error("Failed to update the new node system_identifier");
-			return false;
+			/*
+			 * We have a new system_identifier, we need to publish it now.
+			 */
+			if (!monitor_set_node_system_identifier(
+					monitor,
+					keeper->state.current_node_id,
+					pgSetup->control.system_identifier))
+			{
+				log_error("Failed to update the new node system_identifier");
+				return false;
+			}
 		}
 	}
 	else if (initState->pgInitState >= PRE_INIT_STATE_RUNNING)
