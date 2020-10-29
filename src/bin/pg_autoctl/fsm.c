@@ -317,7 +317,7 @@ KeeperFSMTransition KeeperFSM[] = {
 	 * have to fetch the new value for synchronous_standby_names from the
 	 * monitor.
 	 */
-	{ PRIMARY_STATE, APPLY_SETTINGS_STATE, COMMENT_PRIMARY_TO_APPLY_SETTINGS, &fsm_apply_settings },
+	{ PRIMARY_STATE, APPLY_SETTINGS_STATE, COMMENT_PRIMARY_TO_APPLY_SETTINGS, NULL },
 	{ APPLY_SETTINGS_STATE, PRIMARY_STATE, COMMENT_APPLY_SETTINGS_TO_PRIMARY, &fsm_apply_settings },
 
 	{ APPLY_SETTINGS_STATE, SINGLE_STATE, COMMENT_PRIMARY_TO_SINGLE, &fsm_disable_replication },
