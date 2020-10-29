@@ -1121,7 +1121,32 @@ RemoveNode(AutoFailoverNode *currentNode)
 
 		if (primaryNode)
 		{
+			ReplicationState goalState = primaryNode->goalState;
+
 			(void) ProceedGroupState(primaryNode);
+
+			/*
+			 * When the removal of a secondary node has no impact on the
+			 * primary node state, we still need to change the replication
+			 * settings to adjust to the possibly new
+			 * synchronous_standby_names, so we force APPLY_SETTINGS in that
+			 * case.
+			 */
+			if (primaryNode->goalState == goalState &&
+				goalState != REPLICATION_STATE_APPLY_SETTINGS)
+			{
+				LogAndNotifyMessage(
+					message, BUFSIZE,
+					"Setting goal state of " NODE_FORMAT
+					" to apply_settings after removing standby " NODE_FORMAT
+					" from formation %s.",
+					NODE_FORMAT_ARGS(primaryNode),
+					NODE_FORMAT_ARGS(currentNode),
+					formation->formationId);
+
+				SetNodeGoalState(primaryNode,
+								 REPLICATION_STATE_APPLY_SETTINGS, message);
+			}
 		}
 	}
 
