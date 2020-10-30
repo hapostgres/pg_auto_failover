@@ -65,10 +65,10 @@ def test_004_init_secondary():
 
     assert node2.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")
+    eq_(node1.get_synchronous_standby_names_local(), '*')
 
     assert node1.has_needed_replication_slots()
     assert node2.has_needed_replication_slots()
-    eq_(node1.get_synchronous_standby_names_local(), '*')
 
 def test_005_read_from_secondary():
     results = node2.run_sql_query("SELECT * FROM t1")
@@ -138,10 +138,12 @@ def test_011_writes_to_node2_succeed():
 
 def test_012_start_node1_again():
     node1.run()
+
     assert node2.wait_until_state(target_state="primary")
+    eq_(node2.get_synchronous_standby_names_local(), '*')
+
     assert node1.wait_until_state(target_state="secondary")
 
-    eq_(node2.get_synchronous_standby_names_local(), '*')
 
 def test_013_read_from_new_secondary():
     results = node1.run_sql_query("SELECT * FROM t1 ORDER BY a")
@@ -209,12 +211,13 @@ def test_020_multiple_manual_failover_verify_replication_slots():
     print("Calling pg_autoctl perform promotion on node 2")
     node2.perform_promotion()
     assert node2.wait_until_state(target_state="primary")
+    eq_(node2.get_synchronous_standby_names_local(), '*')
+
     assert node3.wait_until_state(target_state="secondary")
 
     assert node2.has_needed_replication_slots()
     assert node3.has_needed_replication_slots()
 
-    eq_(node2.get_synchronous_standby_names_local(), '*')
 
 #
 # Now test network partition detection. Cut the primary out of the network
@@ -225,6 +228,7 @@ def test_020_multiple_manual_failover_verify_replication_slots():
 def test_021_ifdown_primary():
     print()
     assert node2.wait_until_state(target_state="primary")
+    eq_(node2.get_synchronous_standby_names_local(), '*')
     node2.ifdown()
 
 def test_022_detect_network_partition():
@@ -248,6 +252,7 @@ def test_022_detect_network_partition():
     print()
     assert not node2.pg_is_running()
     assert node3.wait_until_state(target_state="wait_primary")
+    eq_(node3.get_synchronous_standby_names_local(), '')
 
 def test_023_ifup_old_primary():
     print()
