@@ -68,6 +68,7 @@ def test_004_init_secondary():
 
     assert node1.has_needed_replication_slots()
     assert node2.has_needed_replication_slots()
+    eq_(node1.get_synchronous_standby_names_local(), '*')
 
 def test_005_read_from_secondary():
     results = node2.run_sql_query("SELECT * FROM t1")
@@ -96,6 +97,8 @@ def test_007b_maintenance_primary_allow_failover():
     assert node1.wait_until_state(target_state="secondary")
     assert node2.wait_until_state(target_state="primary")
 
+    eq_(node2.get_synchronous_standby_names_local(), '*')
+
 def test_008_maintenance_secondary():
     print()
     print("Enabling maintenance on node2")
@@ -111,12 +114,16 @@ def test_008_maintenance_secondary():
     assert node1.wait_until_state(target_state="secondary")
     assert node2.wait_until_state(target_state="primary")
 
+    eq_(node2.get_synchronous_standby_names_local(), '*')
+
 # the rest of the tests expect node1 to be primary, make it so
 def test_009_failback():
     print()
     monitor.failover()
     assert node2.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")
+
+    eq_(node1.get_synchronous_standby_names_local(), '*')
 
 def test_010_fail_primary():
     print()
@@ -133,6 +140,8 @@ def test_012_start_node1_again():
     node1.run()
     assert node2.wait_until_state(target_state="primary")
     assert node1.wait_until_state(target_state="secondary")
+
+    eq_(node2.get_synchronous_standby_names_local(), '*')
 
 def test_013_read_from_new_secondary():
     results = node1.run_sql_query("SELECT * FROM t1 ORDER BY a")
@@ -173,6 +182,8 @@ def test_019_run_secondary():
     assert node2.has_needed_replication_slots()
     assert node3.has_needed_replication_slots()
 
+    eq_(node2.get_synchronous_standby_names_local(), '*')
+
 # In previous versions of pg_auto_failover we removed the replication slot
 # on the secondary after failover. Now, we instead maintain the replication
 # slot's replay_lsn thanks for the monitor tracking of the nodes' LSN
@@ -193,6 +204,8 @@ def test_020_multiple_manual_failover_verify_replication_slots():
     assert node2.has_needed_replication_slots()
     assert node3.has_needed_replication_slots()
 
+    eq_(node3.get_synchronous_standby_names_local(), '*')
+
     print("Calling pg_autoctl perform promotion on node 2")
     node2.perform_promotion()
     assert node2.wait_until_state(target_state="primary")
@@ -200,6 +213,8 @@ def test_020_multiple_manual_failover_verify_replication_slots():
 
     assert node2.has_needed_replication_slots()
     assert node3.has_needed_replication_slots()
+
+    eq_(node2.get_synchronous_standby_names_local(), '*')
 
 #
 # Now test network partition detection. Cut the primary out of the network
@@ -241,6 +256,8 @@ def test_023_ifup_old_primary():
     assert node2.wait_until_pg_is_running()
     assert node2.wait_until_state("secondary")
     assert node3.wait_until_state("primary")
+
+    eq_(node3.get_synchronous_standby_names_local(), '*')
 
 def test_024_stop_postgres_monitor():
     original_state = node3.get_state()
