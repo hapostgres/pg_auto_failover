@@ -1516,7 +1516,8 @@ IsBeingPromoted(AutoFailoverNode *node)
 
 			(node->reportedState == REPLICATION_STATE_PREPARE_PROMOTION &&
 			 (node->goalState == REPLICATION_STATE_PREPARE_PROMOTION ||
-			  node->goalState == REPLICATION_STATE_STOP_REPLICATION)) ||
+			  node->goalState == REPLICATION_STATE_STOP_REPLICATION ||
+			  node->goalState == REPLICATION_STATE_WAIT_PRIMARY)) ||
 
 			(node->reportedState == REPLICATION_STATE_STOP_REPLICATION &&
 			 (node->goalState == REPLICATION_STATE_STOP_REPLICATION ||
@@ -1545,8 +1546,9 @@ bool
 CandidateNodeIsReadyToStreamWAL(AutoFailoverNode *node)
 {
 	return node != NULL &&
-		   (((node->reportedState == REPLICATION_STATE_PREPARE_PROMOTION &&
-			  node->goalState == REPLICATION_STATE_STOP_REPLICATION)) ||
+		   ((node->reportedState == REPLICATION_STATE_PREPARE_PROMOTION &&
+			 (node->goalState == REPLICATION_STATE_STOP_REPLICATION ||
+			  node->goalState == REPLICATION_STATE_WAIT_PRIMARY)) ||
 
 			(node->reportedState == REPLICATION_STATE_STOP_REPLICATION &&
 			 (node->goalState == REPLICATION_STATE_STOP_REPLICATION ||
