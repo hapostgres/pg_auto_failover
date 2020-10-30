@@ -1541,7 +1541,7 @@ cli_node_metadata_getopts(int argc, char **argv)
 	options.postgresql_restart_failure_timeout = -1;
 	options.postgresql_restart_failure_max_retries = -1;
 
-	strlcpy(options.formation, "default", NAMEDATALEN);
+	/* do not set a default formation, it should be found in the config file */
 
 	optind = 0;
 

@@ -20,9 +20,13 @@ def test_000_create_monitor():
     monitor.wait_until_pg_is_running()
     monitor.set_user_password("autoctl_node", "autoctl_node_password")
 
+    monitor.create_formation("auth", kind="pgsql", secondary=True)
+
 def test_001_init_primary():
     global node1
-    node1 = cluster.create_datanode("/tmp/auth/node1", authMethod="md5")
+    node1 = cluster.create_datanode("/tmp/auth/node1",
+                                    authMethod="md5",
+                                    formation="auth")
     node1.create()
     node1.config_set("replication.password", "streaming_password")
     node1.run()
@@ -39,7 +43,9 @@ def test_002_create_t1():
 
 def test_003_init_secondary():
     global node2
-    node2 = cluster.create_datanode("/tmp/auth/node2", authMethod="md5")
+    node2 = cluster.create_datanode("/tmp/auth/node2",
+                                    authMethod="md5",
+                                    formation="auth")
 
     os.putenv('PGPASSWORD', "streaming_password")
     node2.create()
