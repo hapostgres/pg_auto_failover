@@ -1479,6 +1479,66 @@ cli_common_pgsetup_init(ConfigFilePaths *pathnames, PostgresSetup *pgSetup)
 
 
 /*
+ * cli_common_set_formation reads the formation name from the configuration
+ * file where it's not been given on the command line. When the local node is a
+ * monitor, the target formation should be found on the command line with the
+ * option --formation, otherwise we default to FORMATION_DEFAULT.
+ */
+bool
+cli_common_ensure_formation(KeeperConfig *options)
+{
+	/* if --formation has been used, we're good */
+	if (!IS_EMPTY_STRING_BUFFER(options->formation))
+	{
+		return true;
+	}
+
+	switch (ProbeConfigurationFileRole(options->pathnames.config))
+	{
+		case PG_AUTOCTL_ROLE_MONITOR:
+		{
+			/* on a monitor node, default to using the "default" formation */
+			strlcpy(options->formation,
+					FORMATION_DEFAULT,
+					sizeof(options->formation));
+			break;
+		}
+
+		case PG_AUTOCTL_ROLE_KEEPER:
+		{
+			KeeperConfig config = { 0 };
+			bool monitorDisabledIsOk = true;
+
+			/* copy the pathnames to our temporary config struct */
+			config.pathnames = options->pathnames;
+
+			if (!keeper_config_read_file_skip_pgsetup(&config,
+													  monitorDisabledIsOk))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
+
+			strlcpy(options->formation,
+					config.formation,
+					sizeof(options->formation));
+
+			log_debug("Using --formation \"%s\"", options->formation);
+			break;
+		}
+
+		default:
+		{
+			log_fatal("Unrecognized configuration file \"%s\"",
+					  options->pathnames.config);
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+	}
+	return true;
+}
+
+
+/*
  * cli_pg_autoctl_reload signals the pg_autoctl process to reload its
  * configuration by sending it the SIGHUP signal.
  */
@@ -1702,8 +1762,6 @@ cli_get_name_getopts(int argc, char **argv)
 	options.postgresql_restart_failure_timeout = -1;
 	options.postgresql_restart_failure_max_retries = -1;
 
-	strlcpy(options.formation, "default", NAMEDATALEN);
-
 	optind = 0;
 
 	/*
@@ -1812,6 +1870,13 @@ cli_get_name_getopts(int argc, char **argv)
 
 	/* now that we have the command line parameters, prepare the options */
 	(void) prepare_keeper_options(&options);
+
+	/* ensure --formation, or get it from the configuration file */
+	if (!cli_common_ensure_formation(&options))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
 
 	/* publish our option parsing in the global variable */
 	keeperOptions = options;
