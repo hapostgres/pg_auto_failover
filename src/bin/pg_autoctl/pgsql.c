@@ -1627,14 +1627,26 @@ pgsql_set_password(PGSQL *pgsql, const char *userName, const char *password)
 	char *escapedUsername = NULL;
 	char *escapedPassword = NULL;
 	bool success = true;
+	bool needsClose = false;
 
-	/* open a connection upfront since it is needed by PQescape functions */
-	connection = pgsql_open_connection(pgsql);
+	/*
+	 * Open a connection upfront since it is needed by PQescape functions. If
+	 * the connection is already open, we won't close it here, to enable
+	 * BEGIN/COMMIT workflows by callers.
+	 */
+	connection = pgsql->connection;
 	if (connection == NULL)
 	{
-		/* error message was logged in pgsql_open_connection */
-		return false;
+		connection = pgsql_open_connection(pgsql);
+		if (connection == NULL)
+		{
+			/* error message was logged in pgsql_open_connection */
+			return false;
+		}
+
+		needsClose = true;
 	}
+
 	escapedUsername = PQescapeIdentifier(connection, userName, strlen(userName));
 	if (escapedUsername == NULL)
 	{
@@ -1677,7 +1689,10 @@ cleanup:
 	{
 		PQfreemem(escapedPassword);
 	}
-	pgsql_finish(pgsql);
+	if (needsClose)
+	{
+		pgsql_finish(pgsql);
+	}
 	return success;
 }
 

@@ -29,7 +29,6 @@ def test_001_init_primary():
 
     node1.wait_until_pg_is_running()
     node1.set_user_password("pgautofailover_monitor", "monitor_password")
-    node1.set_user_password("pgautofailover_replicator", "streaming_password")
 
     assert node1.wait_until_state(target_state="single")
 

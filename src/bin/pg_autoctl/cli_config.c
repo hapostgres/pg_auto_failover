@@ -36,9 +36,12 @@ static void cli_monitor_config_get(int argc, char **argv);
 
 static void cli_config_set(int argc, char **argv);
 static void cli_keeper_config_set(int argc, char **argv);
-static bool cli_keeper_config_validate_replication(KeeperConfig *config, PGSQL *pgsql);
-static bool cli_keeper_config_validate_and_commit(KeeperConfig *config, const char *key,
+static bool cli_keeper_config_validate_and_commit(KeeperConfig *config,
+												  const char *key,
 												  char *value);
+static bool cli_keeper_config_validate_and_commit_replication_primary(Keeper *keeper);
+static bool cli_keeper_config_validate_replication_secondary(Keeper *keeper,
+															 NodeAddress *primary);
 static void cli_monitor_config_set(int argc, char **argv);
 
 static CommandLine config_check =
@@ -636,94 +639,99 @@ cli_config_set(int argc, char **argv)
 
 
 /*
- * cli_keeper_config_validate_replication validates the act of setting the
- * value of "replication.password" on a given primary or secondary.
+ * cli_keeper_config_validate_and_commit_replication_primary checks that ALTER
+ * USER PASSWORD succeeds on a primary with the current replication
+ * configuration, then writes the configuration to disk. If the configuration
+ * write fails, the ALTER USER will be rolled back. If the primary is not
+ * running, validation is skipped (and this function returns true).
  */
 static bool
-cli_keeper_config_validate_replication(KeeperConfig *config, PGSQL *pgsql)
+cli_keeper_config_validate_and_commit_replication_primary(Keeper *keeper)
 {
-	Keeper keeper = { 0 };
-	NodeAddress primary = { 0 };
-	bool primaryUnreachable;
+	KeeperConfig *config = &keeper->config;
+	PGSQL *pgsql = &keeper->postgres.sqlClient;
+	bool success = false;
 
-	if (!keeper_init(&keeper, config))
-	{
-		/* already logged */
-		return false;
-	}
 
-	/* get the primary info to populate the replication source */
-	if (!monitor_get_primary(&keeper.monitor,
-							 config->formation,
-							 keeper.state.current_group,
-							 &primary))
+	/* Skip validation if the primary isn't running. */
+	if (!pg_is_running(config->pgSetup.pg_ctl, config->pgSetup.pgdata))
 	{
-		log_warn("Failed to contact monitor to get primary conninfo, skipping "
-				 "replication.password validation");
+		log_warn("Failed to connect to the primary, skipping password "
+				 "validation");
+
+		if (!keeper_config_write_file(config))
+		{
+			log_error("Failed to write pg_autoctl configuration file \"%s\"",
+					  config->pathnames.config);
+			return false;
+		}
+
 		return true;
 	}
 
 	/*
-	 * We can check if we are validating against a primary by comparing our
-	 * local nodeId with the nodeId from the primary info obtained from the
-	 * monitor.
+	 * Validate the replication password in a transaction block by setting
+	 * the password using ALTER USER PASSWORD. The transaction block will
+	 * encapsulate the subsequent change to the config file as well and we
+	 * ROLLBACK/COMMIT depending on whether both the ALTER and the config
+	 * file update are successful.
 	 */
-	if (primary.nodeId == keeper.state.current_node_id)
+	if (!pgsql_execute(pgsql, "BEGIN"))
 	{
-		/* we are the primary */
-		PGSQL *pgsql_primary = &keeper.postgres.sqlClient;
-
-		/* Skip validation if the primary isn't running. */
-		if (!pg_is_running(config->pgSetup.pg_ctl, config->pgSetup.pgdata))
-		{
-			log_warn("Failed to connect to the primary, skipping password "
-					 "validation");
-			return true;
-		}
-
-		/*
-		 * Validate the replication password in a transaction block by setting
-		 * the password using ALTER USER PASSWORD. The transaction block will
-		 * encapsulate the subsequent change to the config file as well and we
-		 * ROLLBACK/COMMIT depending on whether both the ALTER and the config
-		 * file update are successful.
-		 */
-		if (!pgsql_execute(pgsql_primary, "BEGIN"))
-		{
-			log_error("Failed to open a SQL transaction to update the "
-					  "replication password");
-			pgsql_finish(pgsql_primary);
-			return false;
-		}
-
-		if (!pgsql_set_password(pgsql_primary,
-								PG_AUTOCTL_REPLICA_USERNAME,
-								config->replication_password))
-		{
-			/*
-			 * We can safely disconnect without an explicit ROLLBACK in the
-			 * caller.
-			 */
-			log_error("Failed to set replication password, see above for details");
-			pgsql_finish(pgsql_primary);
-			return false;
-		}
-
-		/*
-		 * Copy the SQL connection state to the caller, for later
-		 * COMMIT/ROLLBACK.
-		 */
-		*pgsql = keeper.postgres.sqlClient;
-
-		return true;
+		log_error("Failed to open a SQL transaction to update the "
+				  "replication password");
+		goto finish;
 	}
 
+	if (!pgsql_set_password(pgsql,
+							PG_AUTOCTL_REPLICA_USERNAME,
+							config->replication_password))
+	{
+		log_error("Failed to set replication password, see above for details");
+		goto finish;
+	}
+
+	/* write the new configuration settings to file */
+	if (!keeper_config_write_file(config))
+	{
+		log_error("Failed to write pg_autoctl configuration file \"%s\"",
+				  config->pathnames.config);
+		goto finish;
+	}
+
+	if (!pgsql_execute(pgsql, "COMMIT"))
+	{
+		log_error("Failed to COMMIT replication password update transaction "
+				  "on the primary, see above for details.");
+		goto finish;
+	}
+
+	success = true;
+
+finish:
+	pgsql_finish(pgsql); /* will implicitly ROLLBACK in failure cases */
+	return success;
+}
+
+
+/*
+ * cli_keeper_config_validate_replication_secondary checks that the current
+ * replication configuration can be used to connect to the primary. If the
+ * primary cannot be contacted, validation is skipped (and this function
+ * returns true).
+ */
+static bool
+cli_keeper_config_validate_replication_secondary(Keeper *keeper, NodeAddress *primary)
+{
+	KeeperConfig *config = &keeper->config;
+	bool primaryUnreachable;
+
 	(void) postgres_sprintf_replicationSlotName(
-		primary.nodeId,
+		primary->nodeId,
 		config->replication_slot_name,
 		sizeof(config->replication_slot_name));
-	if (!standby_init_replication_source(&keeper.postgres,
-										 &primary,
+	if (!standby_init_replication_source(&keeper->postgres,
+										 primary,
 										 PG_AUTOCTL_REPLICA_USERNAME,
 										 config->replication_password,
 										 config->replication_slot_name,
@@ -731,13 +739,13 @@ cli_keeper_config_validate_replication(KeeperConfig *config, PGSQL *pgsql)
 										 config->backupDirectory,
 										 NULL, /* no targetLSN */
 										 config->pgSetup.ssl,
-										 keeper.state.current_node_id))
+										 keeper->state.current_node_id))
 	{
 		/* can't happen at the moment */
 		return false;
 	}
 
-	if (!pgctl_identify_system(&keeper.postgres.replicationSource, &primaryUnreachable))
+	if (!pgctl_identify_system(&keeper->postgres.replicationSource, &primaryUnreachable))
 	{
 		if (primaryUnreachable)
 		{
@@ -756,59 +764,61 @@ cli_keeper_config_validate_replication(KeeperConfig *config, PGSQL *pgsql)
 
 
 /*
- * cli_keeper_config_validate_and_commit sets the config value in memory,
- * runs any required validation, writes the updated config value to the config
- * file and then follows up with a COMMIT/ROLLBACK if the aforementioned steps
- * were performed inside a transaction boundary.
+ * cli_keeper_config_validate_and_commit runs any required validation and writes
+ * the updated configuration to disk.
  */
 static bool
 cli_keeper_config_validate_and_commit(KeeperConfig *config, const char *key, char *value)
 {
-	PGSQL pgsql = { 0 };
-	bool success = true;
+	Keeper keeper = { 0 };
+	NodeAddress primary = { 0 };
 
-	if (!keeper_config_set_setting(config, key, value))
+	if (!keeper_init(&keeper, config))
 	{
-		/* we already logged about it */
+		/* already logged */
 		return false;
 	}
 
-	if (keeper_config_setting_requires_validation(key) &&
-		!cli_keeper_config_validate_replication(config, &pgsql))
+	/* get the primary info from the monitor */
+	if (!monitor_get_primary(&keeper.monitor,
+							 config->formation,
+							 keeper.state.current_group,
+							 &primary))
 	{
-		/* we already logged about it */
+		log_warn("Failed to contact monitor to get primary conninfo, skipping "
+				 "replication.password validation");
+		goto write;
+	}
+
+	/*
+	 * We can check if we are validating against a primary by comparing our
+	 * local nodeId with the nodeId from the primary info obtained from the
+	 * monitor.
+	 */
+	if (keeper.state.current_node_id == primary.nodeId)
+	{
+		/*
+		 * The primary case handles the configuration write itself. Return
+		 * directly.
+		 */
+		return cli_keeper_config_validate_and_commit_replication_primary(&keeper);
+	}
+
+	if (!cli_keeper_config_validate_replication_secondary(&keeper, &primary))
+	{
+		/* already logged */
 		return false;
 	}
 
-	/* first write the new configuration settings to file */
+write:
 	if (!keeper_config_write_file(config))
 	{
 		log_error("Failed to write pg_autoctl configuration file \"%s\"",
 				  config->pathnames.config);
-		success = false;
+		return false;
 	}
 
-	/*
-	 * COMMIT/ROLLBACK any temporary state changes to the database. A
-	 * COMMIT/ROLLBACK would have been necessary if the validation step
-	 * initiated a transaction. In this case, we use the same client to perform
-	 * the command as the one that started the transaction.
-	 */
-	if (pgsql.connection != NULL)
-	{
-		char *cmd = success ? "COMMIT" : "ROLLBACK";
-
-		if (!pgsql_execute(&pgsql, cmd))
-		{
-			log_error("Failed to %s replication password update transaction "
-					  "on the primary, see above for details.", cmd);
-			success = false;
-		}
-
-		pgsql_finish(&pgsql);
-	}
-
-	return success;
+	return true;
 }
 
 
@@ -830,9 +840,30 @@ cli_keeper_config_set(int argc, char **argv)
 		/* we print out the value that we parsed, as a double-check */
 		char value[BUFSIZE];
 
-		if (!cli_keeper_config_validate_and_commit(&config, argv[0], argv[1]))
+		if (!keeper_config_set_setting(&config,
+									   argv[0],
+									   argv[1]))
 		{
 			/* we already logged about it */
+			exit(EXIT_CODE_BAD_CONFIG);
+		}
+
+		/* first write the new configuration settings to file */
+		if (keeper_config_setting_requires_validation(argv[0]))
+		{
+			if (!cli_keeper_config_validate_and_commit(&config,
+													   argv[0],
+													   argv[1]))
+			{
+				/* we already logged about it */
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
+		}
+		else if (!keeper_config_write_file(&config))
+		{
+			log_fatal("Failed to write pg_autoctl configuration file \"%s\", "
+					  "see above for details",
+					  config.pathnames.config);
 			exit(EXIT_CODE_BAD_CONFIG);
 		}
 
