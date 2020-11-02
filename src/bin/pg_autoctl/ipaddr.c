@@ -44,8 +44,13 @@ static bool ipaddr_getsockname(int sock, char *ipaddr, size_t size);
 
 
 /*
- * Connect in UDP to a known DNS server on the external network, and grab our
- * local IP address from the established socket.
+ * Connect to given serviceName and servicePort in TCP in order to determine
+ * which local IP address has been used to connect. That local IP address is
+ * then the one we use for the default --hostname value, when not provided.
+ *
+ * On a keeper, we use the monitor hostname as the serviceName. On the monitor,
+ * we use DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME to discover the local default
+ * outbound IP address.
  */
 bool
 fetchLocalIPAddress(char *localIpAddress, int size,
@@ -128,9 +133,19 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 		}
 		else
 		{
-			log_warn("Failed to connect to any of the IP addresses for "
-					 "monitor hostname \"%s\" and port %d",
-					 serviceName, servicePort);
+			if (strcmp(DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME, serviceName) == 0)
+			{
+				log_warn("Failed to connect to \"%s\" on port %d "
+						 "to discover this machine hostname, "
+						 "please use --hostname",
+						 serviceName, servicePort);
+			}
+			else
+			{
+				log_warn("Failed to connect to any of the IP addresses for "
+						 "monitor hostname \"%s\" and port %d",
+						 serviceName, servicePort);
+			}
 			return false;
 		}
 	}
