@@ -49,9 +49,14 @@ def test_003_init_secondary():
     assert node2.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")
 
+    eq_(node1.get_synchronous_standby_names_local(), '*')
+
 def test_004_failover():
     print()
     print("Calling pgautofailover.failover() on the monitor")
     cluster.monitor.failover()
+
     assert node2.wait_until_state(target_state="primary")
+    eq_(node2.get_synchronous_standby_names_local(), '*')
+
     assert node1.wait_until_state(target_state="secondary")

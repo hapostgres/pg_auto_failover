@@ -2178,7 +2178,7 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 
 		if (secondaryNode != NULL &&
 			secondaryNode->replicationQuorum &&
-			IsCurrentState(secondaryNode, REPLICATION_STATE_SECONDARY))
+			secondaryNode->goalState == REPLICATION_STATE_SECONDARY)
 		{
 			/* enable synchronous replication */
 			PG_RETURN_TEXT_P(cstring_to_text("*"));
