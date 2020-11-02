@@ -185,4 +185,7 @@ int cli_node_metadata_getopts(int argc, char **argv);
 int cli_get_name_getopts(int argc, char **argv);
 void cli_ensure_node_name(Keeper *keeper);
 
+bool discover_hostname(char *hostname, int size,
+					   const char *monitorHostname, int monitorPort);
+
 #endif  /* CLI_COMMON_H */
