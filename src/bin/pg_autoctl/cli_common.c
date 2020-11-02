@@ -1479,7 +1479,7 @@ cli_common_pgsetup_init(ConfigFilePaths *pathnames, PostgresSetup *pgSetup)
 
 
 /*
- * cli_common_set_formation reads the formation name from the configuration
+ * cli_common_ensure_formation reads the formation name from the configuration
  * file where it's not been given on the command line. When the local node is a
  * monitor, the target formation should be found on the command line with the
  * option --formation, otherwise we default to FORMATION_DEFAULT.
