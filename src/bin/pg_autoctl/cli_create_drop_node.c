@@ -130,8 +130,10 @@ CommandLine drop_node_command =
  * configuration file.
  */
 bool
-cli_create_config(Keeper *keeper, KeeperConfig *config)
+cli_create_config(Keeper *keeper)
 {
+	KeeperConfig *config = &(keeper->config);
+
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
 	bool monitorDisabledIsOk = true;
@@ -327,17 +329,17 @@ cli_create_postgres(int argc, char **argv)
 
 	keeper.config = keeperOptions;
 
-	if (read_pidfile(keeper.config.pathnames.pid, &pid))
+	if (read_pidfile(config->pathnames.pid, &pid))
 	{
 		log_fatal("pg_autoctl is already running with pid %d", pid);
 		exit(EXIT_CODE_BAD_STATE);
 	}
 
-	if (!file_exists(keeper.config.pathnames.config))
+	if (!file_exists(config->pathnames.config))
 	{
 		/* pg_autoctl create postgres: mark ourselves as a standalone node */
-		keeper.config.pgSetup.pgKind = NODE_KIND_STANDALONE;
-		strlcpy(keeper.config.nodeKind, "standalone", NAMEDATALEN);
+		config->pgSetup.pgKind = NODE_KIND_STANDALONE;
+		strlcpy(config->nodeKind, "standalone", NAMEDATALEN);
 
 		if (!check_or_discover_hostname(config))
 		{
@@ -346,7 +348,7 @@ cli_create_postgres(int argc, char **argv)
 		}
 	}
 
-	if (!cli_create_config(&keeper, config))
+	if (!cli_create_config(&keeper))
 	{
 		log_error("Failed to initialize our configuration, see above.");
 		exit(EXIT_CODE_BAD_CONFIG);
