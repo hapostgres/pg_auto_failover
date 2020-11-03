@@ -575,6 +575,13 @@ cli_create_node_getopts(int argc, char **argv,
 				  "use either --monitor postgresql://... or --disable-monitor");
 		exit(EXIT_CODE_BAD_ARGS);
 	}
+	else if (createAndRun && options->monitorDisabled)
+	{
+		/* Likewise, --run does not make sense; it'll be ignored. */
+		log_fatal("--run is not supported with --disable-monitor. Use "
+				  "`pg_autoctl do fsm ...` to control the node after creation.");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
 	else if (options->monitorDisabled)
 	{
 		/*

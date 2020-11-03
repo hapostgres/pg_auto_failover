@@ -64,7 +64,7 @@ static CommandLine fsm_gv =
 static CommandLine fsm_assign =
 	make_command("assign",
 				 "Assign a new goal state to the keeper",
-				 CLI_PGDATA_USAGE "<goal state> [ <host> <port> ]",
+				 CLI_PGDATA_USAGE "<goal state> [ <id> <host> <port> ]",
 				 CLI_PGDATA_OPTION,
 				 cli_getopt_pgdata,
 				 cli_do_fsm_assign);
@@ -282,21 +282,21 @@ cli_do_fsm_assign(int argc, char **argv)
 
 			keeper.otherNodes.count = 1;
 
-			goalState = NodeStateFromString(argv[1]);
+			goalState = NodeStateFromString(argv[0]);
 
 			/* now prepare id, host, and port in keeper.otherNodes */
-			if (!stringToInt(argv[2], &otherNode->nodeId))
+			if (!stringToInt(argv[1], &otherNode->nodeId))
 			{
-				log_error("Failed to parse otherNode id \"%s\"", argv[2]);
+				log_error("Failed to parse otherNode id \"%s\"", argv[1]);
 				exit(EXIT_CODE_INTERNAL_ERROR);
 			}
 
-			strlcpy(otherNode->host, argv[3], _POSIX_HOST_NAME_MAX);
+			strlcpy(otherNode->host, argv[2], _POSIX_HOST_NAME_MAX);
 
-			if (!stringToInt(argv[4], &otherNode->port))
+			if (!stringToInt(argv[3], &otherNode->port))
 			{
 				log_error(
-					"Failed to parse otherNode port number \"%s\"", argv[4]);
+					"Failed to parse otherNode port number \"%s\"", argv[3]);
 				exit(EXIT_CODE_INTERNAL_ERROR);
 			}
 			break;
