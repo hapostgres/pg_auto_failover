@@ -178,6 +178,7 @@ void cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy);
 char * logLevelToString(int logLevel);
 
 bool cli_common_pgsetup_init(ConfigFilePaths *pathnames, PostgresSetup *pgSetup);
+bool cli_common_ensure_formation(KeeperConfig *options);
 
 bool cli_pg_autoctl_reload(const char *pidfile);
 
