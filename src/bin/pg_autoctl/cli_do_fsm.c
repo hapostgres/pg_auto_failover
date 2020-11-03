@@ -320,13 +320,6 @@ cli_do_fsm_assign(int argc, char **argv)
 	/* assign the new state */
 	keeper.state.assigned_role = goalState;
 
-	/* roll the state machine */
-	if (!keeper_fsm_reach_assigned_state(&keeper))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_STATE);
-	}
-
 	if (!keeper_store_state(&keeper))
 	{
 		/* errors have already been logged */

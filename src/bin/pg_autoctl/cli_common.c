@@ -575,13 +575,6 @@ cli_create_node_getopts(int argc, char **argv,
 				  "use either --monitor postgresql://... or --disable-monitor");
 		exit(EXIT_CODE_BAD_ARGS);
 	}
-	else if (createAndRun && options->monitorDisabled)
-	{
-		/* Likewise, --run does not make sense; it'll be ignored. */
-		log_fatal("--run is not supported with --disable-monitor. Use "
-				  "`pg_autoctl do fsm ...` to control the node after creation.");
-		exit(EXIT_CODE_BAD_ARGS);
-	}
 	else if (options->monitorDisabled)
 	{
 		/*
@@ -1250,29 +1243,47 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 	}
 
 	/* only keeper_remove when we still have a state file around */
-	if (file_exists(config->pathnames.state))
+	if (!config->monitorDisabled)
 	{
-		bool ignoreMonitorErrors = true;
-
-		/* keeper_remove uses log_info() to explain what's happening */
-		if (!keeper_remove(&keeper, config, ignoreMonitorErrors))
+		if (file_exists(config->pathnames.state))
 		{
-			log_fatal("Failed to remove local node from the pg_auto_failover "
-					  "monitor, see above for details");
+			bool ignoreMonitorErrors = true;
 
-			exit(EXIT_CODE_BAD_STATE);
+			/* keeper_remove uses log_info() to explain what's happening */
+			if (!keeper_remove(&keeper, config, ignoreMonitorErrors))
+			{
+				log_fatal("Failed to remove local node from the pg_auto_failover "
+						  "monitor, see above for details");
+
+				exit(EXIT_CODE_BAD_STATE);
+			}
+
+			log_info("Removed pg_autoctl node at \"%s\" from the monitor and "
+					 "removed the state file \"%s\"",
+					 config->pgSetup.pgdata,
+					 config->pathnames.state);
 		}
-
-		log_info("Removed pg_autoctl node at \"%s\" from the monitor and "
-				 "removed the state file \"%s\"",
-				 config->pgSetup.pgdata,
-				 config->pathnames.state);
+		else
+		{
+			log_warn("Skipping node removal from the monitor: "
+					 "state file \"%s\" does not exist",
+					 config->pathnames.state);
+		}
 	}
 	else
 	{
-		log_warn("Skipping node removal from the monitor: "
-				 "state file \"%s\" does not exist",
-				 config->pathnames.state);
+		/* when the monitor is disabled, just remove the state files */
+		if (!unlink_file(config->pathnames.init))
+		{
+			log_error("Failed to remove state init file \"%s\"",
+					  config->pathnames.init);
+		}
+
+		if (!unlink_file(config->pathnames.state))
+		{
+			log_error("Failed to remove state file \"%s\"",
+					  config->pathnames.state);
+		}
 	}
 
 	/*

@@ -986,7 +986,7 @@ cli_drop_node(int argc, char **argv)
 
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
-	bool monitorDisabledIsOk = false;
+	bool monitorDisabledIsOk = true;
 
 	/*
 	 * The configuration file is the last bit we remove, so we don't have to

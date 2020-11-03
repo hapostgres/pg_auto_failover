@@ -43,7 +43,6 @@
  */
 bool keeperInitWarnings = false;
 
-static bool keeper_pg_init_fsm(Keeper *keeper);
 static bool keeper_pg_init_and_register_primary(Keeper *keeper);
 static bool reach_initial_state(Keeper *keeper);
 static bool wait_until_primary_is_ready(Keeper *config,
@@ -68,27 +67,7 @@ keeper_pg_init(Keeper *keeper)
 	log_trace("keeper_pg_init: monitor is %s",
 			  config->monitorDisabled ? "disabled" : "enabled");
 
-	if (config->monitorDisabled)
-	{
-		return keeper_pg_init_fsm(keeper);
-	}
-	else
-	{
-		return service_keeper_init(keeper);
-	}
-}
-
-
-/*
- * keeper_pg_init_fsm initializes the keeper's local FSM and does nothing more.
- * It's only intended to be used when we are not using a monitor, which means
- * we're going to expose our FSM driving as an HTTP API, and sit there waiting
- * for orders from another software.
- */
-static bool
-keeper_pg_init_fsm(Keeper *keeper)
-{
-	return keeper_init_fsm(keeper);
+	return service_keeper_init(keeper);
 }
 
 
@@ -127,6 +106,11 @@ keeper_pg_init_and_register(Keeper *keeper)
 	bool postgresInstanceIsRunning = pg_setup_is_running(pgSetup);
 	PostgresRole postgresRole = pg_setup_role(pgSetup);
 	bool postgresInstanceIsPrimary = postgresRole == POSTGRES_ROLE_PRIMARY;
+
+	if (config->monitorDisabled)
+	{
+		return keeper_init_fsm(keeper);
+	}
 
 	if (postgresInstanceExists)
 	{

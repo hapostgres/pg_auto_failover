@@ -412,6 +412,12 @@ keeper_update_pg_state(Keeper *keeper)
 
 	log_debug("Update local PostgreSQL state");
 
+	/* when running with --disable-monitor, we might get here early */
+	if (keeperState->current_role == INIT_STATE)
+	{
+		return true;
+	}
+
 	*pgSetup = config->pgSetup;
 
 	/* reinitialize the replication state values each time we update */
@@ -2118,7 +2124,7 @@ keeper_reload_configuration(Keeper *keeper, bool firstLoop)
 
 		bool missingPgdataIsOk = true;
 		bool pgIsNotRunningIsOk = true;
-		bool monitorDisabledIsOk = false;
+		bool monitorDisabledIsOk = true;
 
 		/*
 		 * Set the same configuration and state file as the current config.
