@@ -1071,9 +1071,6 @@ RemoveNode(AutoFailoverNode *currentNode)
 	 */
 	countSyncStandbys = CountSyncStandbys(otherNodesGroupList) - 1;
 
-	LogAndNotifyMessage(message, BUFSIZE,
-						"CountSyncStandbys: %d", countSyncStandbys);
-
 	if (countSyncStandbys < (formation->number_sync_standbys + 1))
 	{
 		formation->number_sync_standbys = countSyncStandbys - 1;
