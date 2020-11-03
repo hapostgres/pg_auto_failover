@@ -810,7 +810,8 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 		{
 			AutoFailoverNode *otherNode = (AutoFailoverNode *) lfirst(nodeCell);
 
-			if (IsCurrentState(otherNode, REPLICATION_STATE_SECONDARY) &&
+			/* even if the node is on its way to being a secondary... */
+			if (otherNode->goalState == REPLICATION_STATE_SECONDARY &&
 				IsUnhealthy(otherNode))
 			{
 				char message[BUFSIZE];
