@@ -724,16 +724,16 @@ cli_create_monitor_config(Monitor *monitor)
 		/* Take care of the --hostname */
 		if (IS_EMPTY_STRING_BUFFER(config->hostname))
 		{
-			char monitorHostname[_POSIX_HOST_NAME_MAX] = { 0 };
-
-			if (!ipaddrGetLocalHostname(monitorHostname,
-										sizeof(monitorHostname)))
+			if (!ipaddrGetLocalHostname(config->hostname,
+										sizeof(config->hostname)))
 			{
+				char monitorHostname[_POSIX_HOST_NAME_MAX] = { 0 };
+
 				strlcpy(monitorHostname,
 						DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME,
 						_POSIX_HOST_NAME_MAX);
 
-				if (!discover_hostname((char *) (&config->hostname),
+				if (!discover_hostname((char *) &(config->hostname),
 									   _POSIX_HOST_NAME_MAX,
 									   DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME,
 									   DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT))
