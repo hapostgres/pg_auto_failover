@@ -95,7 +95,7 @@ cli_perform_failover_getopts(int argc, char **argv)
 	options.postgresql_restart_failure_timeout = -1;
 	options.postgresql_restart_failure_max_retries = -1;
 
-	strlcpy(options.formation, "default", NAMEDATALEN);
+	/* do not set a default formation, it should be found in the config file */
 
 	optind = 0;
 
@@ -192,6 +192,20 @@ cli_perform_failover_getopts(int argc, char **argv)
 
 	cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
 
+	if (!keeper_config_set_pathnames_from_pgdata(&(options.pathnames),
+												 options.pgSetup.pgdata))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	/* ensure --formation, or get it from the configuration file */
+	if (!cli_common_ensure_formation(&options))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
 	keeperOptions = options;
 
 	return optind;
@@ -234,7 +248,9 @@ cli_perform_failover(int argc, char **argv)
 	if (groupsCount == 0)
 	{
 		/* nothing to be done here */
-		log_fatal("The monitor currently has no Postgres nodes registered");
+		log_fatal("The monitor currently has no Postgres nodes "
+				  "registered in formation \"%s\"",
+				  config.formation);
 		exit(EXIT_CODE_BAD_STATE);
 	}
 

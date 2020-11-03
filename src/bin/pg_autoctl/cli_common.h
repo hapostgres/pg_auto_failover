@@ -178,11 +178,15 @@ void cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy);
 char * logLevelToString(int logLevel);
 
 bool cli_common_pgsetup_init(ConfigFilePaths *pathnames, PostgresSetup *pgSetup);
+bool cli_common_ensure_formation(KeeperConfig *options);
 
 bool cli_pg_autoctl_reload(const char *pidfile);
 
 int cli_node_metadata_getopts(int argc, char **argv);
 int cli_get_name_getopts(int argc, char **argv);
 void cli_ensure_node_name(Keeper *keeper);
+
+bool discover_hostname(char *hostname, int size,
+					   const char *monitorHostname, int monitorPort);
 
 #endif  /* CLI_COMMON_H */
