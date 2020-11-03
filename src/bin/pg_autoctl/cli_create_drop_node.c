@@ -393,6 +393,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 		{ NULL, 0, NULL, 0 }
 	};
 
+
 	/* hard-coded defaults */
 	options.pgSetup.pgport = pgsetup_get_pgport();
 
@@ -618,8 +619,19 @@ cli_create_monitor_getopts(int argc, char **argv)
 	cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
 
 	/*
+	 * We support two modes of operations here:
+	 *   - configuration exists already, we need PGDATA
+	 *   - configuration doesn't exist already, we need PGDATA, and more
+	 */
+	if (!monitor_config_set_pathnames_from_pgdata(&options))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	/*
 	 * We require the user to specify an authentication mechanism, or to use
-	 * ---skip-pg-hba. Our documentation tutorial will use --auth trust, and we
+	 * --skip-pg-hba. Our documentation tutorial will use --auth trust, and we
 	 * should make it obvious that this is not the right choice for production.
 	 */
 	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.authMethod))
@@ -678,8 +690,10 @@ cli_create_monitor_getopts(int argc, char **argv)
  * when people change their mind or fix an error in the previous command).
  */
 static bool
-cli_create_monitor_config(Monitor *monitor, MonitorConfig *config)
+cli_create_monitor_config(Monitor *monitor)
 {
+	MonitorConfig *config = &(monitor->config);
+
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
 
@@ -789,24 +803,13 @@ cli_create_monitor(int argc, char **argv)
 
 	monitor.config = monitorOptions;
 
-	/*
-	 * We support two modes of operations here:
-	 *   - configuration exists already, we need PGDATA
-	 *   - configuration doesn't exist already, we need PGDATA, and more
-	 */
-	if (!monitor_config_set_pathnames_from_pgdata(config))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_ARGS);
-	}
-
 	if (read_pidfile(config->pathnames.pid, &pid))
 	{
 		log_fatal("pg_autoctl is already running with pid %d", pid);
 		exit(EXIT_CODE_BAD_STATE);
 	}
 
-	if (!cli_create_monitor_config(&monitor, config))
+	if (!cli_create_monitor_config(&monitor))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_CONFIG);
