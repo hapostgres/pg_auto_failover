@@ -296,9 +296,9 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		}
 		else if (doSleep && config->monitorDisabled)
 		{
-			int timeoutMs = PG_AUTOCTL_KEEPER_SLEEP_TIME * 1000 * 1000;
+			int timeoutUs = PG_AUTOCTL_KEEPER_SLEEP_TIME * 1000 * 1000;
 
-			pg_usleep(timeoutMs);
+			pg_usleep(timeoutUs);
 		}
 
 		doSleep = true;
