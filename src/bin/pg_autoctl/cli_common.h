@@ -165,7 +165,7 @@ bool monitor_init_from_pgsetup(Monitor *monitor, PostgresSetup *pgSetup);
 void exit_unless_role_is_keeper(KeeperConfig *kconfig);
 
 /* cli_create_drop_node.c */
-bool cli_create_config(Keeper *keeper, KeeperConfig *config);
+bool cli_create_config(Keeper *keeper);
 void cli_create_pg(Keeper *keeper);
 bool check_or_discover_hostname(KeeperConfig *config);
 void keeper_cli_destroy_node(int argc, char **argv);
