@@ -608,10 +608,15 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	/*
 	 * when a new primary is ready:
 	 *  demoted -> catchingup
+	 *
+	 * We accept to move from demoted to catching up as soon as the primary
+	 * node is has reported either wait_primary or join_primary, and even when
+	 * it's already transitioning to primary, thanks to another standby
+	 * concurrently making progress.
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_DEMOTED) &&
-		primaryNode->reportedState == REPLICATION_STATE_WAIT_PRIMARY &&
-		(primaryNode->goalState == REPLICATION_STATE_WAIT_PRIMARY ||
+		((primaryNode->reportedState == REPLICATION_STATE_WAIT_PRIMARY ||
+		  primaryNode->reportedState == REPLICATION_STATE_JOIN_PRIMARY) &&
 		 primaryNode->goalState == REPLICATION_STATE_PRIMARY))
 	{
 		char message[BUFSIZE];
@@ -683,6 +688,12 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 		/* it's safe to rejoin as a secondary */
 		AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
 
+		/*
+		 * The state PRIMARY embeds the assumption that it's possible to
+		 * failover. A node with candidate Priority of zero can not be the
+		 * target of a failover, so might reach SECONDARY without allowing to
+		 * get out of WAIT_PRIMARY or JOIN_PRIMARY state.
+		 */
 		if (activeNode->candidatePriority > 0)
 		{
 			AssignGoalState(primaryNode, REPLICATION_STATE_PRIMARY, message);
