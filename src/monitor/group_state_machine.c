@@ -608,7 +608,9 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 *  demoted -> catchingup
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_DEMOTED) &&
-		IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY))
+		primaryNode->reportedState == REPLICATION_STATE_WAIT_PRIMARY &&
+		(primaryNode->goalState == REPLICATION_STATE_WAIT_PRIMARY ||
+		 primaryNode->goalState == REPLICATION_STATE_PRIMARY))
 	{
 		char message[BUFSIZE];
 
@@ -678,9 +680,9 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		/* it's safe to rejoin as a secondary */
 		AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
-		AssignGoalState(primaryNode, REPLICATION_STATE_PRIMARY, message);
 
-		return true;
+		/* compute next step for the primary depending on node settings */
+		return ProceedGroupStateForPrimaryNode(primaryNode);
 	}
 
 	/*
@@ -908,6 +910,12 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 		foreach(nodeCell, otherNodesGroupList)
 		{
 			AutoFailoverNode *otherNode = (AutoFailoverNode *) lfirst(nodeCell);
+
+			/* skip nodes that are not failover candidates */
+			if (otherNode->candidatePriority == 0)
+			{
+				continue;
+			}
 
 			allSecondariesAreHealthy =
 				allSecondariesAreHealthy &&
