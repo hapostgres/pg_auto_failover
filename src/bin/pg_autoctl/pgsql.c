@@ -917,7 +917,6 @@ static bool
 clear_results(PGSQL *pgsql)
 {
 	PGconn *connection = pgsql->connection;
-	bool success = true;
 
 	/*
 	 * Per Postgres documentation: You should, however, remember to check
@@ -949,13 +948,16 @@ clear_results(PGSQL *pgsql)
 		if (!is_response_ok(result))
 		{
 			log_error("Failure from Postgres: %s", PQerrorMessage(connection));
-			success = false;
+
+			PQclear(result);
+			pgsql_finish(pgsql);
+			return false;
 		}
 
 		PQclear(result);
 	}
 
-	return success;
+	return true;
 }
 
 
