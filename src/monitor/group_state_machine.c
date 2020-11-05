@@ -397,7 +397,9 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 *  join_primary -> primary
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_WAIT_MAINTENANCE) &&
-		IsCurrentState(primaryNode, REPLICATION_STATE_JOIN_PRIMARY))
+		primaryNode->reportedState == REPLICATION_STATE_JOIN_PRIMARY &&
+		(primaryNode->goalState == REPLICATION_STATE_JOIN_PRIMARY ||
+		 primaryNode->goalState == REPLICATION_STATE_PRIMARY))
 	{
 		char message[BUFSIZE];
 
@@ -681,8 +683,12 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 		/* it's safe to rejoin as a secondary */
 		AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
 
-		/* compute next step for the primary depending on node settings */
-		return ProceedGroupStateForPrimaryNode(primaryNode);
+		if (activeNode->candidatePriority > 0)
+		{
+			AssignGoalState(primaryNode, REPLICATION_STATE_PRIMARY, message);
+		}
+
+		return true;
 	}
 
 	/*
@@ -899,6 +905,7 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 	 * there's no visible reason to not be a primary rather than either
 	 * wait_primary or join_primary
 	 *
+	 *    wait_primary ➜ primary
 	 *    join_primary ➜ primary
 	 */
 	if (IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
@@ -919,8 +926,7 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 
 			allSecondariesAreHealthy =
 				allSecondariesAreHealthy &&
-				IsCurrentState(otherNode,
-							   REPLICATION_STATE_SECONDARY) &&
+				otherNode->goalState == REPLICATION_STATE_SECONDARY &&
 				IsHealthy(otherNode);
 
 			if (!allSecondariesAreHealthy)
@@ -935,8 +941,7 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 
 			LogAndNotifyMessage(
 				message, BUFSIZE,
-				"Setting goal state of " NODE_FORMAT
-				" back to primary",
+				"Setting goal state of " NODE_FORMAT " to primary",
 				NODE_FORMAT_ARGS(primaryNode));
 
 			AssignGoalState(primaryNode, REPLICATION_STATE_PRIMARY, message);

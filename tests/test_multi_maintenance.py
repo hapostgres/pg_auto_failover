@@ -185,6 +185,8 @@ def test_011_all_to_maintenance():
     print("Node 3:  '%s'" %
           node3.run_sql_query("show synchronous_standby_names")[0][0])
 
+    eq_(node3.get_synchronous_standby_names_local(), '')
+
 def test_012_can_write_during_maintenance():
     node3.run_sql_query("INSERT INTO t1 VALUES (5), (6)")
     node3.run_sql_query("CHECKPOINT")
