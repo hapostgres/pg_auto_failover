@@ -314,15 +314,21 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 		IsHealthy(activeNode) &&
 		WalDifferenceWithin(activeNode, primaryNode, EnableSyncXlogThreshold))
 	{
+		ReplicationState primaryGoalState =
+			IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY)
+			? REPLICATION_STATE_APPLY_SETTINGS
+			: REPLICATION_STATE_PRIMARY;
+
 		char message[BUFSIZE];
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
 			"Setting goal state of " NODE_FORMAT
-			" to primary and " NODE_FORMAT
+			" to %s and " NODE_FORMAT
 			" to secondary after " NODE_FORMAT
 			" caught up.",
 			NODE_FORMAT_ARGS(primaryNode),
+			ReplicationStateGetName(primaryGoalState),
 			NODE_FORMAT_ARGS(activeNode),
 			NODE_FORMAT_ARGS(activeNode));
 
@@ -330,7 +336,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 		AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
 
 		/* other node can enable synchronous commit */
-		AssignGoalState(primaryNode, REPLICATION_STATE_PRIMARY, message);
+		AssignGoalState(primaryNode, primaryGoalState, message);
 
 		return true;
 	}
