@@ -306,6 +306,13 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 * when secondary caught up:
 	 *      catchingup -> secondary
 	 *  + wait_primary -> primary
+	 *
+	 * When we have multiple standby nodes and one of them is joining, or
+	 * re-joining after maintenance, we have to edit the replication setting
+	 * synchronous_standby_names on the primary. The transition from another
+	 * state to PRIMARY includes that edit. If the primary already is in the
+	 * primary state, we assign APPLY_SETTINGS to it to make sure its
+	 * repication settings are updated now.
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_CATCHINGUP) &&
 		(IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
