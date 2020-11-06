@@ -669,6 +669,11 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 * The primary could be in one of those states:
 	 *  - wait_primary/wait_primary
 	 *  - wait_primary/primary
+	 *
+	 * This transition also happens when a former primary node has been
+	 * demoted, and a multiple standbys has taken effect, we have a new primary
+	 * being promoted, and several standby nodes following the new primary.
+	 *
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_JOIN_SECONDARY) &&
 		primaryNode->reportedState == REPLICATION_STATE_WAIT_PRIMARY &&
