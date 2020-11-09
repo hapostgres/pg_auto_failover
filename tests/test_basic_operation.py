@@ -233,7 +233,7 @@ def test_021_ifdown_primary():
 
 def test_022_detect_network_partition():
     # wait for network partition detection to kick-in, allow some head-room
-    timeout = 60
+    timeout = 90
     demoted = False
 
     while not demoted and timeout > 0:
@@ -248,6 +248,7 @@ def test_022_detect_network_partition():
 
     if node2.pg_is_running() or timeout <= 0:
         node2.print_debug_logs()
+        raise Exception("test failed: node2 didn't stop running in 90s")
 
     print()
     assert not node2.pg_is_running()
