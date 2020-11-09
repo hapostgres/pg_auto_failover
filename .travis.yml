@@ -22,8 +22,6 @@ matrix:
     - env: PGVERSION=11 TEST=multi
     - env: PGVERSION=12 TEST=multi
     - env: PGVERSION=13 TEST=multi
-    - env: PGVERSION=13 TEST=single
-    - env: PGVERSION=13 TEST=multi
     - env: LINTING=true
 before_install:
   - git clone -b v0.7.18 --depth 1 https://github.com/citusdata/tools.git
