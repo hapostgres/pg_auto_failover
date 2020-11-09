@@ -394,7 +394,7 @@ The other commands accept the same set of options.
   usage: pg_autoctl create postgres
 
     --pgctl           path to pg_ctl
-    --pgdata          path to data director
+    --pgdata          path to data directory
     --pghost          PostgreSQL's hostname
     --pgport          PostgreSQL's port number
     --listen          PostgreSQL's listen_addresses

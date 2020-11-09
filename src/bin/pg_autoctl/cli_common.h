@@ -42,7 +42,7 @@ extern int ssl_flag;
 
 #define KEEPER_CLI_WORKER_SETUP_OPTIONS \
 	"  --pgctl           path to pg_ctl\n" \
-	"  --pgdata          path to data director\n" \
+	"  --pgdata          path to data directory\n" \
 	"  --pghost          PostgreSQL's hostname\n" \
 	"  --pgport          PostgreSQL's port number\n" \
 	"  --listen          PostgreSQL's listen_addresses\n" \
@@ -58,7 +58,7 @@ extern int ssl_flag;
 
 #define KEEPER_CLI_NON_WORKER_SETUP_OPTIONS \
 	"  --pgctl           path to pg_ctl\n" \
-	"  --pgdata          path to data director\n" \
+	"  --pgdata          path to data directory\n" \
 	"  --pghost          PostgreSQL's hostname\n" \
 	"  --pgport          PostgreSQL's port number\n" \
 	"  --listen          PostgreSQL's listen_addresses\n" \

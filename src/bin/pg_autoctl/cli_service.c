@@ -56,7 +56,7 @@ CommandLine service_stop_command =
 	make_command("stop",
 				 "signal the pg_autoctl service for it to stop",
 				 " [ --pgdata --fast --immediate ]",
-				 "  --pgdata      path to data director \n"
+				 "  --pgdata      path to data directory \n"
 				 "  --fast        fast shutdown mode for the keeper \n"
 				 "  --immediate   immediate shutdown mode for the keeper \n",
 				 cli_getopt_pgdata_and_mode,
