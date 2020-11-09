@@ -2160,7 +2160,7 @@ keeper_reload_configuration(Keeper *keeper, bool firstLoop)
 					 config->pathnames.config);
 		}
 
-		/* we're done the the newConfig now */
+		/* we're done the newConfig now */
 		keeper_config_destroy(&newConfig);
 	}
 	else

@@ -725,7 +725,7 @@ cli_common_get_set_pgdata_or_exit(PostgresSetup *pgSetup)
 	}
 	else
 	{
-		/* from now on on want PGDATA set in the environment */
+		/* from now on want PGDATA set in the environment */
 		setenv("PGDATA", pgSetup->pgdata, 1);
 	}
 }
