@@ -375,11 +375,27 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		CHECK_FOR_FAST_SHUTDOWN;
 
 		/*
-		 * Call the node_active function on the monitor and update the keeper
-		 * data structure accordingy, refreshing our cache of other nodes if
-		 * needed.
+		 * If the monitor is disabled, read the list of other nodes from our
+		 * file on-disk at config->pathnames.nodes. The following command can
+		 * be used to fill-in that file:
+		 *
+		 *  $ pg_autoctl do fsm nodes set nodes.json
 		 */
-		if (!config->monitorDisabled)
+		if (config->monitorDisabled)
+		{
+			if (!keeper_read_nodes_from_file(keeper))
+			{
+				/* errors have already been logged, pass */
+				(void) 0;
+			}
+		}
+
+		/*
+		 * If the monitor is not disabled, call the node_active function on the
+		 * monitor and update the keeper data structure accordingy, refreshing
+		 * our cache of other nodes if needed.
+		 */
+		else
 		{
 			couldContactMonitorThisRound = keeper_node_active(keeper, doInit);
 

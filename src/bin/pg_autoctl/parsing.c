@@ -35,6 +35,8 @@ static bool parse_controldata_field_lsn(const char *controlDataString,
 
 static bool parse_bool_with_len(const char *value, size_t len, bool *result);
 
+static int nodeAddressCmpByNodeId(const void *a, const void *b);
+
 #define RE_MATCH_COUNT 10
 
 
@@ -676,6 +678,103 @@ buildPostgresURIfromPieces(URIParams *uriParams, char *pguri)
 					uriParams->parameters.values[index]);
 		}
 	}
+
+	return true;
+}
+
+
+/*
+ * nodeAddressCmpByNodeId sorts two given nodeAddress by comparing their
+ * nodeId. We use this function to be able to qsort() an array of nodes, such
+ * as when parsing from a JSON file.
+ */
+static int
+nodeAddressCmpByNodeId(const void *a, const void *b)
+{
+	NodeAddress *nodeA = (NodeAddress *) a;
+	NodeAddress *nodeB = (NodeAddress *) b;
+
+	return nodeA->nodeId - nodeB->nodeId;
+}
+
+
+/*
+ * parseNodesArrayFromFile parses a Nodes Array from a JSON file, that contains
+ * an array of JSON object with the following properties: node_id, node_lsn,
+ * node_host, node_name, node_port, and potentially node_is_primary.
+ */
+bool
+parseNodesArray(const char *nodesJSON, NodeAddressArray *nodesArray)
+{
+	JSON_Value *json = NULL;
+	JSON_Array *jsArray = NULL;
+	JSON_Value *template =
+		json_parse_string("[{"
+						  "\"node_id\": 0,"
+						  "\"node_lsn\": \"\","
+						  "\"node_name\": \"\","
+						  "\"node_host\": \"\","
+						  "\"node_port\": 0,"
+						  "\"node_is_primary\": false"
+						  "}]");
+	int len = -1;
+
+	json = json_parse_string(nodesJSON);
+
+	/* validate the JSON input as an array of object with required fields */
+	if (json_validate(template, json) == JSONFailure)
+	{
+		log_error("Failed to parse nodes array which is expected "
+				  "to contain a JSON Array of Objects with properties "
+				  "[{node_id:number, node_name:string, "
+				  "node_host:string, node_port:nuumber, node_lsn:string, "
+				  "node_is_primary:boolean}, ...]");
+		return false;
+	}
+
+	jsArray = json_value_get_array(json);
+	len = json_array_get_count(jsArray);
+
+	if (NODE_ARRAY_MAX_COUNT < len)
+	{
+		log_error("Failed to parse nodes array which contains "
+				  "%d nodes: pg_autoctl supports up to %d nodes",
+				  len,
+				  NODE_ARRAY_MAX_COUNT);
+		return false;
+	}
+
+	nodesArray->count = len;
+
+	for (int i = 0; i < len; i++)
+	{
+		NodeAddress *node = &(nodesArray->nodes[i]);
+		JSON_Object *jsObj = json_array_get_object(jsArray, i);
+
+		node->nodeId = (int) json_object_get_number(jsObj, "node_id");
+
+		strlcpy(node->name,
+				json_object_get_string(jsObj, "node_name"),
+				sizeof(node->name));
+
+		strlcpy(node->host,
+				json_object_get_string(jsObj, "node_host"),
+				sizeof(node->host));
+
+		node->port = (int) json_object_get_number(jsObj, "node_port");
+
+		strlcpy(node->lsn,
+				json_object_get_string(jsObj, "node_lsn"),
+				sizeof(node->lsn));
+
+		node->isPrimary = json_object_get_boolean(jsObj, "node_is_primary");
+	}
+
+	/* now ensure the array is sorted by nodeId */
+	(void) qsort(nodesArray->nodes,
+				 len,
+				 sizeof(NodeAddress),
+				 nodeAddressCmpByNodeId);
 
 	return true;
 }

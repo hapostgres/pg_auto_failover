@@ -19,6 +19,7 @@
 #include "file_utils.h"
 #include "keeper.h"
 #include "keeper_config.h"
+#include "parsing.h"
 #include "pghba.h"
 #include "pgsetup.h"
 #include "primary_standby.h"
@@ -2195,4 +2196,37 @@ keeper_call_reload_hooks(Keeper *keeper, bool firstLoop)
 
 	/* we're done reloading now. */
 	asked_to_reload = 0;
+}
+
+
+/*
+ * keeper_read_nodes_from_file read the keeper->config.pathnames.nodes file (a
+ * JSON Array of Nodes with id, name, host, port, lsn, and is_primary) and
+ * fills in the internal keeper otherNodes array. Use that function when the
+ * monitor is disabled.
+ */
+bool
+keeper_read_nodes_from_file(Keeper *keeper)
+{
+	KeeperConfig *config = &(keeper->config);
+
+	char *contents = NULL;
+	long size = 0L;
+
+	if (!read_file_if_exists(config->pathnames.nodes, &contents, &size))
+	{
+		log_error("Failed to read nodes array from file \"%s\"",
+				  config->pathnames.nodes);
+		return false;
+	}
+
+	/* now parse the nodes JSON file */
+	if (!parseNodesArray(contents, &(keeper->otherNodes)))
+	{
+		log_error("Failed to read nodes array from file \"%s\"",
+				  config->pathnames.nodes);
+		return false;
+	}
+
+	return true;
 }

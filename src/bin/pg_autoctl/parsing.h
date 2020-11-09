@@ -76,4 +76,6 @@ bool parse_pguri_info_key_vals(const char *pguri,
 
 bool buildPostgresURIfromPieces(URIParams *uriParams, char *pguri);
 
+bool parseNodesArray(const char *nodesJSON, NodeAddressArray *nodesArray);
+
 #endif /* PARSING_H */

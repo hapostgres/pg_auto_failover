@@ -412,3 +412,87 @@ nodestate_log(CurrentNodeState *nodeState, int logLevel, int nodeId)
 				  NodeStateToString(nodeState->goalState));
 	}
 }
+
+
+/*
+ * MaxHostNameSizeInNodesArray returns the greatest node name length in the
+ * given array of nodes.
+ */
+int
+MaxHostNameSizeInNodesArray(NodeAddressArray *nodesArray)
+{
+	int maxHostNameSize = 0;
+	int i = 0;
+
+	for (i = 0; i < nodesArray->count; i++)
+	{
+		NodeAddress node = nodesArray->nodes[i];
+
+		if (strlen(node.host) > maxHostNameSize)
+		{
+			maxHostNameSize = strlen(node.host);
+		}
+	}
+
+	return maxHostNameSize;
+}
+
+
+/*
+ * printCurrentState loops over pgautofailover.current_state() results and prints
+ * them, one per line.
+ */
+void
+printNodeArray(NodeAddressArray *nodesArray)
+{
+	int nodesArrayIndex = 0;
+	int maxHostNameSize = 5;    /* strlen("Name") + 1, the header */
+
+	/*
+	 * Dynamically adjust our display output to the length of the longer
+	 * hostname in the result set
+	 */
+	maxHostNameSize = MaxHostNameSizeInNodesArray(nodesArray);
+
+	(void) printNodeHeader(maxHostNameSize);
+
+	for (nodesArrayIndex = 0; nodesArrayIndex < nodesArray->count; nodesArrayIndex++)
+	{
+		NodeAddress *node = &(nodesArray->nodes[nodesArrayIndex]);
+
+		printNodeEntry(node);
+	}
+
+	fformat(stdout, "\n");
+}
+
+
+/*
+ * printNodeHeader pretty prints a header for a node list.
+ */
+void
+printNodeHeader(int maxHostNameSize)
+{
+	char nameSeparatorHeader[BUFSIZE] = { 0 };
+
+	(void) prepareHostNameSeparator(nameSeparatorHeader, maxHostNameSize);
+
+	fformat(stdout, "%3s | %*s | %6s | %18s | %8s\n",
+			"ID", maxHostNameSize, "Host", "Port", "LSN", "Primary?");
+
+	fformat(stdout, "%3s-+-%*s-+-%6s-+-%18s-+-%8s\n",
+			"---", maxHostNameSize, nameSeparatorHeader, "------",
+			"------------------", "--------");
+}
+
+
+/*
+ * printNodeEntry pretty prints a node.
+ */
+void
+printNodeEntry(NodeAddress *node)
+{
+	fformat(stdout, "%3d | %s | %6d | %18s | %8s\n",
+			node->nodeId, node->host, node->port, node->lsn,
+			node->isPrimary ? "yes" : "no");
+}
