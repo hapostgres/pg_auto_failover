@@ -306,6 +306,13 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 * when secondary caught up:
 	 *      catchingup -> secondary
 	 *  + wait_primary -> primary
+	 *
+	 * When we have multiple standby nodes and one of them is joining, or
+	 * re-joining after maintenance, we have to edit the replication setting
+	 * synchronous_standby_names on the primary. The transition from another
+	 * state to PRIMARY includes that edit. If the primary already is in the
+	 * primary state, we assign APPLY_SETTINGS to it to make sure its
+	 * repication settings are updated now.
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_CATCHINGUP) &&
 		(IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
@@ -314,15 +321,21 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 		IsHealthy(activeNode) &&
 		WalDifferenceWithin(activeNode, primaryNode, EnableSyncXlogThreshold))
 	{
+		ReplicationState primaryGoalState =
+			IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY)
+			? REPLICATION_STATE_APPLY_SETTINGS
+			: REPLICATION_STATE_PRIMARY;
+
 		char message[BUFSIZE];
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
 			"Setting goal state of " NODE_FORMAT
-			" to primary and " NODE_FORMAT
+			" to %s and " NODE_FORMAT
 			" to secondary after " NODE_FORMAT
 			" caught up.",
 			NODE_FORMAT_ARGS(primaryNode),
+			ReplicationStateGetName(primaryGoalState),
 			NODE_FORMAT_ARGS(activeNode),
 			NODE_FORMAT_ARGS(activeNode));
 
@@ -330,7 +343,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 		AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
 
 		/* other node can enable synchronous commit */
-		AssignGoalState(primaryNode, REPLICATION_STATE_PRIMARY, message);
+		AssignGoalState(primaryNode, primaryGoalState, message);
 
 		return true;
 	}
@@ -397,7 +410,9 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 *  join_primary -> primary
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_WAIT_MAINTENANCE) &&
-		IsCurrentState(primaryNode, REPLICATION_STATE_JOIN_PRIMARY))
+		primaryNode->reportedState == REPLICATION_STATE_JOIN_PRIMARY &&
+		(primaryNode->goalState == REPLICATION_STATE_JOIN_PRIMARY ||
+		 primaryNode->goalState == REPLICATION_STATE_PRIMARY))
 	{
 		char message[BUFSIZE];
 
@@ -606,9 +621,16 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	/*
 	 * when a new primary is ready:
 	 *  demoted -> catchingup
+	 *
+	 * We accept to move from demoted to catching up as soon as the primary
+	 * node is has reported either wait_primary or join_primary, and even when
+	 * it's already transitioning to primary, thanks to another standby
+	 * concurrently making progress.
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_DEMOTED) &&
-		IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY))
+		((primaryNode->reportedState == REPLICATION_STATE_WAIT_PRIMARY ||
+		  primaryNode->reportedState == REPLICATION_STATE_JOIN_PRIMARY) &&
+		 primaryNode->goalState == REPLICATION_STATE_PRIMARY))
 	{
 		char message[BUFSIZE];
 
@@ -660,6 +682,11 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 * The primary could be in one of those states:
 	 *  - wait_primary/wait_primary
 	 *  - wait_primary/primary
+	 *
+	 * This transition also happens when a former primary node has been
+	 * demoted, and a multiple standbys has taken effect, we have a new primary
+	 * being promoted, and several standby nodes following the new primary.
+	 *
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_JOIN_SECONDARY) &&
 		primaryNode->reportedState == REPLICATION_STATE_WAIT_PRIMARY &&
@@ -678,7 +705,17 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		/* it's safe to rejoin as a secondary */
 		AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
-		AssignGoalState(primaryNode, REPLICATION_STATE_PRIMARY, message);
+
+		/*
+		 * The state PRIMARY embeds the assumption that it's possible to
+		 * failover. A node with candidate Priority of zero can not be the
+		 * target of a failover, so might reach SECONDARY without allowing to
+		 * get out of WAIT_PRIMARY or JOIN_PRIMARY state.
+		 */
+		if (activeNode->candidatePriority > 0)
+		{
+			AssignGoalState(primaryNode, REPLICATION_STATE_PRIMARY, message);
+		}
 
 		return true;
 	}
@@ -810,8 +847,15 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 		{
 			AutoFailoverNode *otherNode = (AutoFailoverNode *) lfirst(nodeCell);
 
-			/* even if the node is on its way to being a secondary... */
+			/*
+			 * We force secondary nodes to catching-up even if the node is on
+			 * its way to being a secondary... unless it is currently in the
+			 * join_secondary state, because reportLSN -> join_secondary
+			 * transition stops Postgres, waiting for the new primary to be
+			 * available.
+			 */
 			if (otherNode->goalState == REPLICATION_STATE_SECONDARY &&
+				otherNode->reportedState != REPLICATION_STATE_JOIN_SECONDARY &&
 				IsUnhealthy(otherNode))
 			{
 				char message[BUFSIZE];
@@ -897,6 +941,7 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 	 * there's no visible reason to not be a primary rather than either
 	 * wait_primary or join_primary
 	 *
+	 *    wait_primary ➜ primary
 	 *    join_primary ➜ primary
 	 */
 	if (IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
@@ -909,10 +954,15 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 		{
 			AutoFailoverNode *otherNode = (AutoFailoverNode *) lfirst(nodeCell);
 
+			/* skip nodes that are not failover candidates */
+			if (otherNode->candidatePriority == 0)
+			{
+				continue;
+			}
+
 			allSecondariesAreHealthy =
 				allSecondariesAreHealthy &&
-				IsCurrentState(otherNode,
-							   REPLICATION_STATE_SECONDARY) &&
+				otherNode->goalState == REPLICATION_STATE_SECONDARY &&
 				IsHealthy(otherNode);
 
 			if (!allSecondariesAreHealthy)
@@ -927,8 +977,7 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 
 			LogAndNotifyMessage(
 				message, BUFSIZE,
-				"Setting goal state of " NODE_FORMAT
-				" back to primary",
+				"Setting goal state of " NODE_FORMAT " to primary",
 				NODE_FORMAT_ARGS(primaryNode));
 
 			AssignGoalState(primaryNode, REPLICATION_STATE_PRIMARY, message);
