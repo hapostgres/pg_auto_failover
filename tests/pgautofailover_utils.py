@@ -1115,8 +1115,12 @@ SELECT reportedstate
             + "where slot_name ~ '^pgautofailover_standby_' " \
             + " and slot_type = 'physical'"
 
-        result = self.run_sql_query(query)
-        return [row[0] for row in result]
+        try:
+            result = self.run_sql_query(query)
+            return [row[0] for row in result]
+        except Exception as e:
+            self.print_debug_logs()
+            raise e
 
     def has_needed_replication_slots(self):
         """

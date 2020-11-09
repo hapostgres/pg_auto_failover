@@ -46,6 +46,8 @@ def test_002_add_standby():
     # make sure we reached primary on node1 before next tests
     assert node1.wait_until_state(target_state="primary")
 
+    eq_(node1.get_synchronous_standby_names_local(), '*')
+
 def test_003_add_standby():
     global node3
 
@@ -62,7 +64,9 @@ def test_003_add_standby():
     assert node3.has_needed_replication_slots()
 
     # the formation number_sync_standbys is expected to be set to 1 now
-    assert node1.get_number_sync_standbys() == 1
+    eq_(node1.get_number_sync_standbys(), 1)
+    eq_(node1.get_synchronous_standby_names_local(),
+        'ANY 1 (pgautofailover_standby_2, pgautofailover_standby_3)')
 
     # make sure we reached primary on node1 before next tests
     assert node1.wait_until_state(target_state="primary")
@@ -91,8 +95,12 @@ def test_005_set_candidate_priorities():
     assert node3.wait_until_state(target_state="secondary")
 
     # node2 should still be "sync"
-    assert node1.get_number_sync_standbys() == 1
-    assert node2.get_replication_quorum()
+    eq_(node2.get_replication_quorum(), True)
+
+    # other replication settings should still be the same as before
+    eq_(node1.get_number_sync_standbys(), 1)
+    eq_(node1.get_synchronous_standby_names_local(),
+        'ANY 1 (pgautofailover_standby_3, pgautofailover_standby_2)')
 
     # also let's see synchronous_standby_names here
     print("Monitor: %s" % node1.get_synchronous_standby_names())
@@ -109,10 +117,16 @@ def test_006_maintenance_and_failover():
     # assigned and goal state must be the same
     assert node1.wait_until_state(target_state="primary")
 
+    eq_(node1.get_synchronous_standby_names_local(),
+        'ANY 1 (pgautofailover_standby_3)')
+
     print("Calling pgautofailover.failover() on the monitor")
     monitor.failover()
     assert node3.wait_until_state(target_state="primary")
     assert node1.wait_until_state(target_state="secondary")
+
+    eq_(node3.get_synchronous_standby_names_local(),
+        'ANY 1 (pgautofailover_standby_1)')
 
     print("Disabling maintenance on node2, should connect to the new primary")
     node2.disable_maintenance()
@@ -129,6 +143,11 @@ def test_006_maintenance_and_failover():
     print("%s:\n%s" % (fn, open(fn).read()))
 
     assert node2.wait_until_state(target_state="secondary")
+    assert node3.wait_until_state(target_state="primary")
+
+    # when the node is back, it should be listed again in sync standby names
+    eq_(node3.get_synchronous_standby_names_local(),
+        'ANY 1 (pgautofailover_standby_1, pgautofailover_standby_2)')
 
     assert node1.has_needed_replication_slots()
     assert node2.has_needed_replication_slots()

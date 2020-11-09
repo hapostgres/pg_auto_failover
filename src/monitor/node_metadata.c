@@ -213,7 +213,8 @@ AutoFailoverNodeGroup(char *formationId, int groupId)
 
 	const char *selectQuery =
 		SELECT_ALL_FROM_AUTO_FAILOVER_NODE_TABLE
-		" WHERE formationid = $1 AND groupid = $2";
+		" WHERE formationid = $1 AND groupid = $2"
+		" ORDER BY nodeid";
 
 	SPI_connect();
 

@@ -306,6 +306,13 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 * when secondary caught up:
 	 *      catchingup -> secondary
 	 *  + wait_primary -> primary
+	 *
+	 * When we have multiple standby nodes and one of them is joining, or
+	 * re-joining after maintenance, we have to edit the replication setting
+	 * synchronous_standby_names on the primary. The transition from another
+	 * state to PRIMARY includes that edit. If the primary already is in the
+	 * primary state, we assign APPLY_SETTINGS to it to make sure its
+	 * repication settings are updated now.
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_CATCHINGUP) &&
 		(IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
@@ -314,15 +321,21 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 		IsHealthy(activeNode) &&
 		WalDifferenceWithin(activeNode, primaryNode, EnableSyncXlogThreshold))
 	{
+		ReplicationState primaryGoalState =
+			IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY)
+			? REPLICATION_STATE_APPLY_SETTINGS
+			: REPLICATION_STATE_PRIMARY;
+
 		char message[BUFSIZE];
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
 			"Setting goal state of " NODE_FORMAT
-			" to primary and " NODE_FORMAT
+			" to %s and " NODE_FORMAT
 			" to secondary after " NODE_FORMAT
 			" caught up.",
 			NODE_FORMAT_ARGS(primaryNode),
+			ReplicationStateGetName(primaryGoalState),
 			NODE_FORMAT_ARGS(activeNode),
 			NODE_FORMAT_ARGS(activeNode));
 
@@ -330,7 +343,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 		AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
 
 		/* other node can enable synchronous commit */
-		AssignGoalState(primaryNode, REPLICATION_STATE_PRIMARY, message);
+		AssignGoalState(primaryNode, primaryGoalState, message);
 
 		return true;
 	}
@@ -834,8 +847,15 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 		{
 			AutoFailoverNode *otherNode = (AutoFailoverNode *) lfirst(nodeCell);
 
-			/* even if the node is on its way to being a secondary... */
+			/*
+			 * We force secondary nodes to catching-up even if the node is on
+			 * its way to being a secondary... unless it is currently in the
+			 * join_secondary state, because reportLSN -> join_secondary
+			 * transition stops Postgres, waiting for the new primary to be
+			 * available.
+			 */
 			if (otherNode->goalState == REPLICATION_STATE_SECONDARY &&
+				otherNode->reportedState != REPLICATION_STATE_JOIN_SECONDARY &&
 				IsUnhealthy(otherNode))
 			{
 				char message[BUFSIZE];
