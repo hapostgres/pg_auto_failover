@@ -240,7 +240,7 @@ def test_015_finalize_failover_after_most_advanced_secondary_gets_back():
 
     # and, node2 should finally become the primary without losing any data
     print()
-    assert node2.wait_until_state(target_state="wait_primary")
+    assert node2.wait_until_state(target_state="primary")
 
     print("%s" % monitor.pg_autoctl.err)
 
