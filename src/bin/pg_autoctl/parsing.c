@@ -685,8 +685,8 @@ buildPostgresURIfromPieces(URIParams *uriParams, char *pguri)
 
 /*
  * nodeAddressCmpByNodeId sorts two given nodeAddress by comparing their
- * nodeId. We use this function to be able to qsort() an array of nodes, such
- * as when parsing from a JSON file.
+ * nodeId. We use this function to be able to pg_qsort() an array of nodes,
+ * such as when parsing from a JSON file.
  */
 static int
 nodeAddressCmpByNodeId(const void *a, const void *b)
@@ -771,10 +771,10 @@ parseNodesArray(const char *nodesJSON, NodeAddressArray *nodesArray)
 	}
 
 	/* now ensure the array is sorted by nodeId */
-	(void) qsort(nodesArray->nodes,
-				 len,
-				 sizeof(NodeAddress),
-				 nodeAddressCmpByNodeId);
+	(void) pg_qsort(nodesArray->nodes,
+					len,
+					sizeof(NodeAddress),
+					nodeAddressCmpByNodeId);
 
 	return true;
 }
