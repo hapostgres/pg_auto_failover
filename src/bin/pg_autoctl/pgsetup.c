@@ -900,7 +900,7 @@ pg_setup_is_ready(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk)
 	 *
 	 * This makes sure we enter the main loop and attempt to read the
 	 * postmaster.pid file at least once: if Postgres was stopped, then the
-	 * file that we've read previously might not exists any-more.
+	 * file that we've read previously might not exists anymore.
 	 */
 	pgSetup->pm_status = POSTMASTER_STATUS_UNKNOWN;
 

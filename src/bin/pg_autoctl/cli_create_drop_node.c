@@ -85,7 +85,7 @@ CommandLine create_postgres_command =
 		"Initialize a pg_auto_failover standalone postgres node",
 		"",
 		"  --pgctl           path to pg_ctl\n"
-		"  --pgdata          path to data director\n"
+		"  --pgdata          path to data directory\n"
 		"  --pghost          PostgreSQL's hostname\n"
 		"  --pgport          PostgreSQL's port number\n"
 		"  --listen          PostgreSQL's listen_addresses\n"

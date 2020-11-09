@@ -1526,7 +1526,7 @@ PromoteSelectedNode(AutoFailoverNode *selectedNode,
 			LogAndNotifyMessage(
 				message, BUFSIZE,
 				"Setting goal state of " NODE_FORMAT
-				"to prepare_promotion after " NODE_FORMAT
+				" to prepare_promotion after " NODE_FORMAT
 				" became unhealthy and %d nodes reported their LSN position.",
 				NODE_FORMAT_ARGS(selectedNode),
 				NODE_FORMAT_ARGS(primaryNode),
