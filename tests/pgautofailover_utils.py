@@ -1445,7 +1445,7 @@ class PGAutoCtl():
         """
         Read all data from the Unix PIPE
 
-        This call is idempotent. If it is called a second time after a earlier
+        This call is idempotent. If it is called a second time after an earlier
         successful call, then it returns the results from when the process
         exited originally.
         """

@@ -211,7 +211,7 @@ monitor_service_run(Monitor *monitor)
 		exit(EXIT_CODE_MONITOR);
 	}
 
-	/* Now get the the Monitor URI to display it to the user, and move along */
+	/* Now get the Monitor URI to display it to the user, and move along */
 	if (monitor_config_get_postgres_uri(mconfig, postgresUri, MAXCONNINFO))
 	{
 		log_info("Managing the monitor at %s", postgresUri);

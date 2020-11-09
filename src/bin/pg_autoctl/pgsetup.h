@@ -158,7 +158,7 @@ typedef struct SSLOptions
 /*
  * In the PostgresSetup structure, we use pghost either as socket directory
  * name or as a hostname. We could use MAXPGPATH rather than
- * _POSIX_HOST_NAME_MAX chars in that name, but then again the the hostname is
+ * _POSIX_HOST_NAME_MAX chars in that name, but then again the hostname is
  * part of a connection string that must be held in MAXCONNINFO.
  *
  * If you want to change pghost[_POSIX_HOST_NAME_MAX], keep that in mind!

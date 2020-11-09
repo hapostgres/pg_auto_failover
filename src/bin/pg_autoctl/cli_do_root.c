@@ -243,7 +243,7 @@ CommandLine do_tmux_script =
 
 CommandLine do_tmux_session =
 	make_command("session",
-				 "Run a a tmux session for a demo or a test case",
+				 "Run a tmux session for a demo or a test case",
 				 "[option ...]",
 				 "  --root          path where to create a cluster\n"
 				 "  --first-pgport  first Postgres port to use (5500)\n"

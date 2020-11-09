@@ -1003,7 +1003,7 @@ environments::
 
   pg_autoctl do tmux
     script   Produce a tmux script for a demo or a test case (debug only)
-    session  Run a a tmux session for a demo or a test case
+    session  Run a tmux session for a demo or a test case
     stop     Stop pg_autoctl processes that belong to a tmux session
     wait     Wait until a given node has been registered on the monitor
     clean    Clean-up a tmux session processes and root dir

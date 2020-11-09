@@ -165,7 +165,7 @@ node metadata. Specifically we need the nodes state to be in sync with what
 each ``pg_autoctl`` process has received the last time they could contact
 the monitor, before it has been unavailable.
 
-Baring that, the way forward is to register your nodes again to the new
+Barring that, the way forward is to register your nodes again to the new
 monitor. To be able to register again, we need to have a clean initial local
 state on every node, and the ``pg_autoctl drop node`` command achieves that.
 

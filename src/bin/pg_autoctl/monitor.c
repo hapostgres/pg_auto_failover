@@ -3898,10 +3898,10 @@ monitor_extension_update(Monitor *monitor, const char *targetVersion)
 
 
 /*
- * monitor_ensure_extension_version checks that we are running a extension
+ * monitor_ensure_extension_version checks that we are running an extension
  * version on the monitor that we are compatible with in pg_autoctl. If that's
  * not the case, we blindly try to update the extension version on the monitor
- * to the target version we have in our default.h.
+ * to the target version we have in our defaults.h.
  *
  * NOTE: we don't check here if the update is an upgrade or a downgrade, we
  * rely on the extension's update path to be free of downgrade paths (such as
