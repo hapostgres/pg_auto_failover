@@ -847,8 +847,15 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 		{
 			AutoFailoverNode *otherNode = (AutoFailoverNode *) lfirst(nodeCell);
 
-			/* even if the node is on its way to being a secondary... */
+			/*
+			 * We force secondary nodes to catching-up even if the node is on
+			 * its way to being a secondary... unless it is currently in the
+			 * join_secondary state, because reportLSN -> join_secondary
+			 * transition stops Postgres, waiting for the new primary to be
+			 * available.
+			 */
 			if (otherNode->goalState == REPLICATION_STATE_SECONDARY &&
+				otherNode->reportedState != REPLICATION_STATE_JOIN_SECONDARY &&
 				IsUnhealthy(otherNode))
 			{
 				char message[BUFSIZE];
