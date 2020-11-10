@@ -2343,6 +2343,8 @@ keeper_get_most_advanced_standby(Keeper *keeper, NodeAddress *upstreamNode)
 					  "from the monitor, see above for details");
 			return false;
 		}
+
+		return true;
 	}
 	else
 	{
