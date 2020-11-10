@@ -9,7 +9,8 @@ PDF = ./docs/_build/latex/pg_auto_failover.pdf
 NOSETESTS = $(shell which nosetests3 || which nosetests)
 
 # Tests for multiple standbys
-MULTI_SB_TESTS = $(basename $(notdir $(wildcard tests/test*_multi*)))
+MULTI_SB_TESTS  = $(basename $(notdir $(wildcard tests/test*_multi*)))
+MULTI_SB_TESTS += $(basename $(notdir $(wildcard tests/test*_disabled*)))
 
 # TEST indicates the testfile to run
 TEST ?=
@@ -18,7 +19,7 @@ ifeq ($(TEST),)
 else ifeq ($(TEST),multi)
 	TEST_ARGUMENT = --where=tests --tests=$(MULTI_SB_TESTS)
 else ifeq ($(TEST),single)
-	TEST_ARGUMENT = --where=tests --exclude='_multi_'
+	TEST_ARGUMENT = --where=tests --exclude='_multi_' --exclude='disabled'
 else
 	TEST_ARGUMENT = $(TEST:%=tests/%.py)
 endif
