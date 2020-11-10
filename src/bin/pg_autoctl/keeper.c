@@ -2291,6 +2291,8 @@ keeper_get_primary(Keeper *keeper, NodeAddress *primaryNode)
 					  "see above for details");
 			return false;
 		}
+
+		return true;
 	}
 	else
 	{

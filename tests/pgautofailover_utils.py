@@ -723,6 +723,7 @@ class DataNode(PGNode):
         self.group = group
         self.listen_flag = listen_flag
         self.formation = formation
+        self.monitorDisabled = None
 
     def create(self, run=False, level='-v', name=None, host=None, port=None,
                candidatePriority=None, replicationQuorum=None,
