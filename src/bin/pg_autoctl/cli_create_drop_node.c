@@ -193,38 +193,42 @@ cli_create_config(Keeper *keeper)
 		 * arguments. After all, they may change their mind of have just
 		 * realized that the --pgport they wanted to use is already in use.
 		 */
-		if (!monitor_init(monitor, config->monitor_pguri))
+		if (!config->monitorDisabled)
 		{
-			/* errors have already been logged */
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-
-		if (file_exists(config->pathnames.state) && !config->monitorDisabled)
-		{
-			/*
-			 * Handle the node metadata options: --name, --hostname, --pgport.
-			 *
-			 * When those options have been used, then the configuration file
-			 * has been merged with the command line values, and we can update
-			 * the metadata for this node on the monitor.
-			 */
-			if (!keeper_set_node_metadata(keeper, &oldConfig))
+			if (!monitor_init(monitor, config->monitor_pguri))
 			{
 				/* errors have already been logged */
-				exit(EXIT_CODE_MONITOR);
+				exit(EXIT_CODE_BAD_ARGS);
 			}
 
-			/*
-			 * Now, at 1.3 to 1.4 upgrade, the monitor assigns a new name to
-			 * pg_autoctl nodes, which did not use to have a name before. In
-			 * that case, and then pg_autoctl run has been used without
-			 * options, our name might be empty here. We then need to fetch it
-			 * from the monitor.
-			 */
-			if (!keeper_update_nodename_from_monitor(keeper))
+			if (file_exists(config->pathnames.state))
 			{
-				/* errors have already been logged */
-				exit(EXIT_CODE_BAD_CONFIG);
+				/*
+				 * Handle the node metadata options: --name, --hostname,
+				 * --pgport.
+				 *
+				 * When those options have been used, then the configuration
+				 * file has been merged with the command line values, and we
+				 * can update the metadata for this node on the monitor.
+				 */
+				if (!keeper_set_node_metadata(keeper, &oldConfig))
+				{
+					/* errors have already been logged */
+					exit(EXIT_CODE_MONITOR);
+				}
+
+				/*
+				 * Now, at 1.3 to 1.4 upgrade, the monitor assigns a new name to
+				 * pg_autoctl nodes, which did not use to have a name before. In
+				 * that case, and then pg_autoctl run has been used without
+				 * options, our name might be empty here. We then need to fetch
+				 * it from the monitor.
+				 */
+				if (!keeper_update_nodename_from_monitor(keeper))
+				{
+					/* errors have already been logged */
+					exit(EXIT_CODE_BAD_CONFIG);
+				}
 			}
 		}
 	}
@@ -286,6 +290,7 @@ cli_create_postgres_getopts(int argc, char **argv)
 		{ "formation", required_argument, NULL, 'f' },
 		{ "monitor", required_argument, NULL, 'm' },
 		{ "disable-monitor", no_argument, NULL, 'M' },
+		{ "node-id", required_argument, NULL, 'I' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
@@ -306,7 +311,7 @@ cli_create_postgres_getopts(int argc, char **argv)
 
 	int optind =
 		cli_create_node_getopts(argc, argv, long_options,
-								"C:D:H:p:l:U:A:Sd:a:n:f:m:MRVvqhP:r:xsN",
+								"C:D:H:p:l:U:A:Sd:a:n:f:m:MI:RVvqhP:r:xsN",
 								&options);
 
 	/* publish our option parsing in the global variable */

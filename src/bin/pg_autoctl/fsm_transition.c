@@ -719,7 +719,6 @@ bool
 fsm_stop_postgres_and_setup_standby(Keeper *keeper)
 {
 	LocalPostgresServer *postgres = &(keeper->postgres);
-	Monitor *monitor = &(keeper->monitor);
 	ReplicationSource *upstream = &(postgres->replicationSource);
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	KeeperConfig *config = &(keeper->config);
@@ -742,22 +741,11 @@ fsm_stop_postgres_and_setup_standby(Keeper *keeper)
 	}
 
 	/* get the primary node to follow */
-	if (!config->monitorDisabled)
+	if (!keeper_get_primary(keeper, &(postgres->replicationSource.primaryNode)))
 	{
-		if (!monitor_get_primary(monitor,
-								 config->formation,
-								 keeper->state.current_group,
-								 &(postgres->replicationSource.primaryNode)))
-		{
-			log_error("Failed to initialize standby because get the primary node "
-					  "from the monitor failed, see above for details");
-			return false;
-		}
-	}
-	else
-	{
-		/* copy information from keeper->otherNodes into replicationSource */
-		primaryNode = &(keeper->otherNodes.nodes[0]);
+		log_error("Failed to initialize standby for lack of a primary node, "
+				  "see above for details");
+		return false;
 	}
 
 	/* prepare a standby setup */
@@ -858,26 +846,16 @@ fsm_init_standby(Keeper *keeper)
 	Monitor *monitor = &(keeper->monitor);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
-	int groupId = keeper->state.current_group;
 	NodeAddress *primaryNode = NULL;
 
 	bool skipBaseBackup = false;
 
 	/* get the primary node to follow */
-	if (!config->monitorDisabled)
+	if (!keeper_get_primary(keeper, &(postgres->replicationSource.primaryNode)))
 	{
-		if (!monitor_get_primary(monitor, config->formation, groupId,
-								 &(postgres->replicationSource.primaryNode)))
-		{
-			log_error("Failed to initialize standby because get the primary node "
-					  "from the monitor failed, see above for details");
-			return false;
-		}
-	}
-	else
-	{
-		/* copy information from keeper->otherNodes into replicationSource */
-		primaryNode = &(keeper->otherNodes.nodes[0]);
+		log_error("Failed to initialize standby for lack of a primary node, "
+				  "see above for details");
+		return false;
 	}
 
 	if (!standby_init_replication_source(postgres,
@@ -929,13 +907,16 @@ fsm_init_standby(Keeper *keeper)
 	/*
 	 * Publish our possibly new system_identifier now.
 	 */
-	if (!monitor_set_node_system_identifier(
-			monitor,
-			keeper->state.current_node_id,
-			postgres->postgresSetup.control.system_identifier))
+	if (!config->monitorDisabled)
 	{
-		log_error("Failed to update the new node system_identifier");
-		return false;
+		if (!monitor_set_node_system_identifier(
+				monitor,
+				keeper->state.current_node_id,
+				postgres->postgresSetup.control.system_identifier))
+		{
+			log_error("Failed to update the new node system_identifier");
+			return false;
+		}
 	}
 
 	/* ensure the SSL setup is synced with the keeper config */
@@ -958,28 +939,16 @@ bool
 fsm_rewind_or_init(Keeper *keeper)
 {
 	KeeperConfig *config = &(keeper->config);
-	Monitor *monitor = &(keeper->monitor);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
-	int groupId = keeper->state.current_group;
 	NodeAddress *primaryNode = NULL;
 
 	/* get the primary node to follow */
-	if (!config->monitorDisabled)
+	if (!keeper_get_primary(keeper, &(postgres->replicationSource.primaryNode)))
 	{
-		if (!monitor_get_primary(monitor, config->formation, groupId,
-								 &(postgres->replicationSource.primaryNode)))
-		{
-			log_error("Failed to initialize standby because pg_autoctl "
-					  "failed to get the primary node from the monitor, "
-					  "see above for details");
-			return false;
-		}
-	}
-	else
-	{
-		/* copy information from keeper->otherNodes into replicationSource */
-		primaryNode = &(keeper->otherNodes.nodes[0]);
+		log_error("Failed to initialize standby for lack of a primary node, "
+				  "see above for details");
+		return false;
 	}
 
 	if (!standby_init_replication_source(postgres,
@@ -1266,31 +1235,20 @@ bool
 fsm_fast_forward(Keeper *keeper)
 {
 	KeeperConfig *config = &(keeper->config);
-	Monitor *monitor = &(keeper->monitor);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	ReplicationSource *upstream = &(postgres->replicationSource);
-
-	int groupId = keeper->state.current_group;
 
 	NodeAddress upstreamNode = { 0 };
 
 	char slotName[MAXCONNINFO] = { 0 };
 
-	if (!config->monitorDisabled)
+	/* get the primary node to follow */
+	if (!keeper_get_most_advanced_standby(keeper, &upstreamNode))
 	{
-		if (!monitor_get_most_advanced_standby(monitor,
-											   config->formation,
-											   groupId,
-											   &upstreamNode))
-		{
-			/* errors have already been logged */
-			return false;
-		}
-	}
-	else
-	{
-		upstreamNode = keeper->otherNodes.nodes[0];
+		log_error("Failed to fast forward from the most advanced standby node, "
+				  "see above for details");
+		return false;
 	}
 
 	/*
@@ -1370,16 +1328,13 @@ bool
 fsm_follow_new_primary(Keeper *keeper)
 {
 	KeeperConfig *config = &(keeper->config);
-	Monitor *monitor = &(keeper->monitor);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 	ReplicationSource *replicationSource = &(postgres->replicationSource);
-	int groupId = keeper->state.current_group;
 
 	/* get the primary node to follow */
-	if (!monitor_get_primary(monitor, config->formation, groupId,
-							 &(replicationSource->primaryNode)))
+	if (!keeper_get_primary(keeper, &(postgres->replicationSource.primaryNode)))
 	{
-		log_error("Failed to get the primary node from the monitor, "
+		log_error("Failed to initialize standby for lack of a primary node, "
 				  "see above for details");
 		return false;
 	}

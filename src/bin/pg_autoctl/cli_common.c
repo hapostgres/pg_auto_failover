@@ -37,6 +37,9 @@ bool createAndRun = false;
 bool outputJSON = false;
 int ssl_flag = 0;
 
+/* stores --node-id, only used with --disable-monitor */
+int monitorDisabledNodeId = -1;
+
 static void stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathnames,
 													   PostgresSetup *pgSetup);
 
@@ -61,6 +64,7 @@ static void stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathname
  *		{ "formation", required_argument, NULL, 'f' },
  *		{ "group", required_argument, NULL, 'g' },
  *		{ "monitor", required_argument, NULL, 'm' },
+ *		{ "node-id", required_argument, NULL, 'I' },
  *		{ "disable-monitor", no_argument, NULL, 'M' },
  *		{ "version", no_argument, NULL, 'V' },
  *		{ "verbose", no_argument, NULL, 'v' },
@@ -281,6 +285,19 @@ cli_common_keeper_getopts(int argc, char **argv,
 				break;
 			}
 
+			case 'I':
+			{
+				/* { "node-id", required_argument, NULL, 'I' }, */
+				if (!stringToInt(optarg, &monitorDisabledNodeId))
+				{
+					log_fatal("--node-id argument is not a valid ID: \"%s\"",
+							  optarg);
+					exit(EXIT_CODE_BAD_ARGS);
+				}
+				log_trace("--node-id %d", monitorDisabledNodeId);
+				break;
+			}
+
 			case 'P':
 			{
 				/* { "candidate-priority", required_argument, NULL, 'P'} */
@@ -440,6 +457,19 @@ cli_common_keeper_getopts(int argc, char **argv,
 				break;
 			}
 		}
+	}
+
+	/* check --disable-monitor and --node-id */
+	if (LocalOptionConfig.monitorDisabled && monitorDisabledNodeId == -1)
+	{
+		log_fatal("When using --disable-monitor, also use --node-id");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (!LocalOptionConfig.monitorDisabled && monitorDisabledNodeId != -1)
+	{
+		log_fatal("Option --node-id is only accepted with --disable-monitor");
+		exit(EXIT_CODE_BAD_ARGS);
 	}
 
 	if (errors > 0)

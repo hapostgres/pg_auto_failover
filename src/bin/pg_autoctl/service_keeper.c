@@ -213,7 +213,7 @@ service_keeper_node_active_init(Keeper *keeper)
 	 * function cli_service_run calls into keeper_init(): we know that we could
 	 * read a keeper state file.
 	 */
-	if (!config->monitorDisabled && file_exists(config->pathnames.init))
+	if (file_exists(config->pathnames.init))
 	{
 		log_warn("The `pg_autoctl create` did not complete, completing now.");
 
@@ -383,10 +383,16 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		 */
 		if (config->monitorDisabled)
 		{
-			if (!keeper_read_nodes_from_file(keeper))
+			/* force cache invalidation when reaching WAIT_STANDBY */
+			bool forceCacheInvalidation =
+				keeperState->current_role == WAIT_STANDBY_STATE;
+
+			/* maybe update our cached list of other nodes */
+			if (!keeper_refresh_other_nodes(keeper, forceCacheInvalidation))
 			{
-				/* errors have already been logged, pass */
-				(void) 0;
+				/* we will try again... */
+				log_warn("Failed to update our list of other nodes");
+				continue;
 			}
 		}
 
@@ -510,12 +516,21 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		CHECK_FOR_FAST_SHUTDOWN;
 
 		/*
-		 * Even if a transition failed, we still write the state file to update
-		 * timestamps used for the network partition checks.
+		 * Write the current (changed) state to disk.
+		 *
+		 * When using a monitor, even if a transition failed, we still write
+		 * the state file to update timestamps used for the network partition
+		 * checks.
+		 *
+		 * When the monitor is disabled, only write the state to disk when we
+		 * just successfully implemented a state change.
 		 */
-		if (!keeper_store_state(keeper))
+		if (!config->monitorDisabled || (needStateChange && !transitionFailed))
 		{
-			transitionFailed = true;
+			if (!keeper_store_state(keeper))
+			{
+				transitionFailed = true;
+			}
 		}
 
 		if ((needStateChange ||

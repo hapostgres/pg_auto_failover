@@ -255,6 +255,8 @@ class PGNode:
         """
         Runs "pg_autoctl run"
         """
+        self.name = name
+
         self.pg_autoctl = PGAutoCtl(self)
         self.pg_autoctl.run(name=name, host=host, port=port)
 
@@ -564,7 +566,8 @@ class PGNode:
             logs += node.logs()
         print(logs)
 
-        if self.cluster.monitor.pg_autoctl:
+        # we might be running with the monitor disabled
+        if self.cluster.monitor and self.cluster.monitor.pg_autoctl:
             print("%s" % self.cluster.monitor.pg_autoctl.err)
 
     def enable_ssl(self, sslMode=None, sslSelfSigned=None,
@@ -722,7 +725,8 @@ class DataNode(PGNode):
         self.formation = formation
 
     def create(self, run=False, level='-v', name=None, host=None, port=None,
-               candidatePriority=None, replicationQuorum=None):
+               candidatePriority=None, replicationQuorum=None,
+               monitorDisabled=False, nodeId=None):
         """
         Runs "pg_autoctl create"
         """
@@ -735,6 +739,9 @@ class DataNode(PGNode):
         if sockdir and sockdir != "":
             pghost = sockdir
 
+        if monitorDisabled:
+            self.monitorDisabled = True
+
         # don't pass --hostname to Postgres nodes in order to exercise the
         # automatic detection of the hostname.
         create_args = ['create', self.role.command(), level,
@@ -742,8 +749,10 @@ class DataNode(PGNode):
                        '--pghost', pghost,
                        '--pgport', str(self.port),
                        '--pgctl', shutil.which('pg_ctl'),
-                       '--auth', self.authMethod,
-                       '--monitor', self.monitor.connection_string()]
+                       '--auth', self.authMethod]
+
+        if not self.monitorDisabled:
+            create_args += ['--monitor', self.monitor.connection_string()]
 
         if self.sslMode:
             create_args += ['--ssl-mode', self.sslMode]
@@ -770,6 +779,7 @@ class DataNode(PGNode):
             create_args += ['--formation', self.formation]
 
         if name:
+            self.name = name
             create_args += ["--name", name]
 
         if host:
@@ -783,6 +793,11 @@ class DataNode(PGNode):
 
         if replicationQuorum is not None:
             create_args += ["--replication-quorum", str(replicationQuorum)]
+
+        if self.monitorDisabled:
+            assert nodeId is not None
+            create_args += ["--disable-monitor"]
+            create_args += ["--node-id", str(nodeId)]
 
         if run:
             create_args += ['--run']
@@ -814,16 +829,64 @@ class DataNode(PGNode):
         self.state = json.loads(out)
         return self.state['state']['nodeId']
 
+    def jsDict(self, lsn="0/1", isPrimary=False):
+        """
+        Returns a python dict with the information to fill-in a JSON
+        representation of the node.
+        """
+        return {"node_id": self.get_nodeid(),
+                "node_name": self.name,
+                "node_host": str(self.vnode.address),
+                "node_port": self.port,
+                "node_lsn": lsn,
+                "node_is_primary": isPrimary}
+
     def get_local_state(self):
         """
         Fetch the assigned_state from the pg_autoctl state file.
         """
         command = PGAutoCtl(self)
-        out, err, ret = command.execute("get node id", 'do', 'fsm', 'state')
+        out, err, ret = command.execute("get node id", '-vv', 'do', 'fsm', 'state')
 
         self.state = json.loads(out)
         return (self.state['state']['current_role'],
                 self.state['state']['assigned_role'])
+
+    def wait_until_local_state(self, target_state,
+                               timeout=STATE_CHANGE_TIMEOUT,
+                               sleep_time=POLLING_INTERVAL):
+        """
+        Waits until this data node reaches the target state, and then
+        returns True. The target state is compared to the local state as
+        parsed from reading the FSM state file.
+        """
+        prev_state = None
+        wait_until = dt.datetime.now() + dt.timedelta(seconds=timeout)
+        while wait_until > dt.datetime.now():
+            self.cluster.sleep(sleep_time)
+
+            (current_state, assigned_state) = self.get_local_state()
+
+            # only log the state if it has changed
+            if current_state != prev_state:
+                if current_state == target_state:
+                    print("state of %s is '%s', done waiting" %
+                          (self.datadir, current_state))
+                else:
+                    print("state of %s is '%s', waiting for '%s' ..." %
+                          (self.datadir, current_state, target_state))
+
+            if current_state == target_state:
+                return True
+
+            prev_state = current_state
+
+        print("%s didn't reach %s after %d seconds" %
+              (self.datadir, target_state, timeout))
+        error_msg = (f"{self.datadir} failed to reach {target_state} "
+                     f"after {timeout} seconds\n")
+        self.print_debug_logs()
+        raise Exception(error_msg)
 
     def get_nodename(self, nodeId=None):
         """
@@ -919,11 +982,12 @@ SELECT reportedstate
         """
         Returns the current list of events from the monitor.
         """
-        last_events_query = "select eventtime, nodename, " \
-            "reportedstate, goalstate, " \
-            "reportedrepstate, reportedlsn, description " \
-            "from pgautofailover.last_events('default', count => 20)"
-        return self.monitor.get_events()
+        if self.monitor:
+            last_events_query = "select eventtime, nodename, " \
+                "reportedstate, goalstate, " \
+                "reportedrepstate, reportedlsn, description " \
+                "from pgautofailover.last_events('default', count => 20)"
+            return self.monitor.get_events()
 
     def enable_maintenance(self, allowFailover=False):
         """
@@ -971,7 +1035,28 @@ SELECT reportedstate
         :return:
         """
         command = PGAutoCtl(self)
-        command.execute("do fsm assign", 'do', 'fsm', 'assign', target_state)
+        command.execute("do fsm assign",
+                        '-vv', 'do', 'fsm', 'assign', target_state)
+        return True
+
+    def do_fsm_nodes_set(self, nodesArray):
+        """
+        Runs `pg_autoctl do fsm nodes set` on a node
+
+        :return:
+        """
+        filename = "/tmp/nodes.json"
+
+        with open(filename, "w") as nodesFile:
+            nodesFile.write(json.dumps(nodesArray))
+
+        print("%s: %s" % (filename, open(filename, "r").read()))
+
+        command = PGAutoCtl(self)
+        out, err, ret = command.execute("do fsm nodes set",
+                                        'do', 'fsm', 'nodes', 'set', filename)
+        print("%s" % out)
+
         return True
 
     def do_fsm_step(self):

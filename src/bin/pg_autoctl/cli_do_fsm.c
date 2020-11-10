@@ -458,15 +458,13 @@ cli_do_fsm_get_nodes(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	if (!keeper_read_nodes_from_file(&keeper))
+	if (!keeper_read_nodes_from_file(&keeper, &(keeper.otherNodes)))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
 	(void) printNodeArray(&(keeper.otherNodes));
-
-	exit(EXIT_CODE_INTERNAL_ERROR);
 }
 
 
@@ -521,8 +519,17 @@ cli_do_fsm_set_nodes(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
+	/* now read keeper's state */
+	if (!keeper_init(&keeper, config))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
 	/* now parse the nodes JSON file */
-	if (!parseNodesArray(contents, &(keeper.otherNodes)))
+	if (!parseNodesArray(contents,
+						 &(keeper.otherNodes),
+						 keeper.state.current_node_id))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_INTERNAL_ERROR);
@@ -538,6 +545,4 @@ cli_do_fsm_set_nodes(int argc, char **argv)
 	}
 
 	(void) printNodeArray(&(keeper.otherNodes));
-
-	exit(EXIT_CODE_INTERNAL_ERROR);
 }

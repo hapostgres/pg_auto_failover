@@ -31,6 +31,8 @@ extern bool outputJSON;
 
 extern int ssl_flag;
 
+extern int monitorDisabledNodeId;
+
 #define KEEPER_CLI_SSL_OPTIONS \
 	"  --ssl-self-signed setup network encryption using self signed certificates (does NOT protect against MITM)\n" \
 	"  --ssl-mode        use that sslmode in connection strings\n" \

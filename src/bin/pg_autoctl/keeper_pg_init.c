@@ -107,11 +107,6 @@ keeper_pg_init_and_register(Keeper *keeper)
 	PostgresRole postgresRole = pg_setup_role(pgSetup);
 	bool postgresInstanceIsPrimary = postgresRole == POSTGRES_ROLE_PRIMARY;
 
-	if (config->monitorDisabled)
-	{
-		return keeper_init_fsm(keeper);
-	}
-
 	if (postgresInstanceExists)
 	{
 		if (!keeper_ensure_pg_configuration_files_in_pgdata(config))
@@ -148,6 +143,16 @@ keeper_pg_init_and_register(Keeper *keeper)
 			exit(EXIT_CODE_QUIT);
 		}
 		return createAndRun;
+	}
+
+	/*
+	 * When the monitor is disabled, we're almost done. All that is left is
+	 * creating a state file with our nodeId as from the --node-id parameter.
+	 * The value is found in the global variable monitorDisabledNodeId.
+	 */
+	if (config->monitorDisabled)
+	{
+		return keeper_init_fsm(keeper);
 	}
 
 	/*
@@ -366,7 +371,14 @@ keeper_pg_init_continue(Keeper *keeper)
 		return unlink_file(config->pathnames.init);
 	}
 
-	return reach_initial_state(keeper);
+	if (config->monitorDisabled)
+	{
+		return true;
+	}
+	else
+	{
+		return reach_initial_state(keeper);
+	}
 }
 
 
@@ -615,7 +627,6 @@ wait_until_primary_has_created_our_replication_slot(Keeper *keeper,
 	int errors = 0, tries = 0;
 	bool firstLoop = true;
 
-	Monitor *monitor = &(keeper->monitor);
 	KeeperConfig *config = &(keeper->config);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 	ReplicationSource *upstream = &(postgres->replicationSource);
@@ -623,10 +634,7 @@ wait_until_primary_has_created_our_replication_slot(Keeper *keeper,
 
 	bool hasReplicationSlot = false;
 
-	if (!monitor_get_primary(monitor,
-							 config->formation,
-							 assignedState->groupId,
-							 &(postgres->replicationSource.primaryNode)))
+	if (!keeper_get_primary(keeper, &(postgres->replicationSource.primaryNode)))
 	{
 		/* errors have already been logged */
 		return false;

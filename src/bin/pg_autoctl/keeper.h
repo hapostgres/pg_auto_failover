@@ -84,6 +84,8 @@ extern KeeperReloadFunction KeeperReloadHooks[];
 void keeper_call_reload_hooks(Keeper *keeper, bool firstLoop);
 bool keeper_reload_configuration(Keeper *keeper, bool firstLoop);
 
-bool keeper_read_nodes_from_file(Keeper *keeper);
+bool keeper_read_nodes_from_file(Keeper *keeper, NodeAddressArray *nodesArray);
+bool keeper_get_primary(Keeper *keeper, NodeAddress *primaryNode);
+bool keeper_get_most_advanced_standby(Keeper *keeper, NodeAddress *primaryNode);
 
 #endif /* KEEPER_H */

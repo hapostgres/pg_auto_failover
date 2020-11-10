@@ -15,6 +15,7 @@
 
 #include "parson.h"
 
+#include "cli_common.h"
 #include "env_utils.h"
 #include "file_utils.h"
 #include "keeper.h"
@@ -755,7 +756,6 @@ keeper_create_self_signed_cert(Keeper *keeper)
 bool
 keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 {
-	Monitor *monitor = &(keeper->monitor);
 	KeeperConfig *config = &(keeper->config);
 	KeeperStateData *state = &(keeper->state);
 	LocalPostgresServer *postgres = &(keeper->postgres);
@@ -831,12 +831,15 @@ keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 		}
 	}
 
-	if (!monitor_init(&(keeper->monitor), config->monitor_pguri))
+	if (!config->monitorDisabled)
 	{
-		/* we tested already in keeper_config_accept_new, but... */
-		log_warn("Failed to contact the monitor because its "
-				 "URL is invalid, see above for details");
-		return false;
+		if (!monitor_init(&(keeper->monitor), config->monitor_pguri))
+		{
+			/* we tested already in keeper_config_accept_new, but... */
+			log_warn("Failed to contact the monitor because its "
+					 "URL is invalid, see above for details");
+			return false;
+		}
 	}
 
 	/*
@@ -869,15 +872,9 @@ keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 		/* do we have the primaryNode already? */
 		if (IS_EMPTY_STRING_BUFFER(upstream->primaryNode.host))
 		{
-			log_debug("keeper_update_primary_conninfo: monitor_get_primary()");
-
-			if (!monitor_get_primary(monitor,
-									 config->formation,
-									 state->current_group,
-									 &(upstream->primaryNode)))
+			if (!keeper_get_primary(keeper, &(upstream->primaryNode)))
 			{
-				log_error("Failed to update primary_conninfo because getting "
-						  "the primary node from the monitor failed, "
+				log_error("Failed to update primary_conninfo, "
 						  "see above for details");
 				return false;
 			}
@@ -1006,12 +1003,12 @@ keeper_create_and_drop_replication_slots(Keeper *keeper)
 bool
 keeper_maintain_replication_slots(Keeper *keeper)
 {
-	Monitor *monitor = &(keeper->monitor);
 	PostgresSetup *pgSetup = &(keeper->postgres.postgresSetup);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
 	/* do we bypass the whole operation? */
 	bool bypass = false;
+	bool forceCacheInvalidation = false;
 
 	/*
 	 * We would like to maintain replication slots on the standby nodes in a
@@ -1082,10 +1079,11 @@ keeper_maintain_replication_slots(Keeper *keeper)
 		return true;
 	}
 
-	if (!monitor_get_other_nodes(monitor, keeper->state.current_node_id,
-								 ANY_STATE, &(keeper->otherNodes)))
+	if (!keeper_refresh_other_nodes(keeper, forceCacheInvalidation))
 	{
-		/* errors have already been logged */
+		log_error("Failed to maintain replication slots on the local Postgres "
+				  "instance, due to failure to refresh list of other nodes, "
+				  "see above for details");
 		return false;
 	}
 
@@ -1166,7 +1164,7 @@ keeper_init_fsm(Keeper *keeper)
 
 	/* fake the initial state provided at monitor registration time */
 	MonitorAssignedState assignedState = {
-		.nodeId = -1,
+		.nodeId = monitorDisabledNodeId,
 		.groupId = -1,
 		.state = INIT_STATE
 	};
@@ -1560,6 +1558,12 @@ keeper_update_group_hba(Keeper *keeper, NodeAddressArray *diffNodesArray)
 		return true;
 	}
 
+	/* early exit when we have not created $PGDATA yet */
+	if (!pg_setup_pgdata_exists(postgresSetup))
+	{
+		return true;
+	}
+
 	sformat(hbaFilePath, MAXPGPATH, "%s/pg_hba.conf", postgresSetup->pgdata);
 
 	if (!pghba_ensure_host_rules_exist(hbaFilePath,
@@ -1609,6 +1613,7 @@ bool
 keeper_refresh_other_nodes(Keeper *keeper, bool forceCacheInvalidation)
 {
 	Monitor *monitor = &(keeper->monitor);
+	KeeperConfig *config = &(keeper->config);
 
 	NodeAddressArray *otherNodesArray = &(keeper->otherNodes);
 	NodeAddressArray newNodesArray = { 0 };
@@ -1618,10 +1623,21 @@ keeper_refresh_other_nodes(Keeper *keeper, bool forceCacheInvalidation)
 
 	log_trace("keeper_refresh_other_nodes");
 
-	if (!monitor_get_other_nodes(monitor, nodeId, ANY_STATE, &newNodesArray))
+	if (config->monitorDisabled)
 	{
-		log_error("Failed to get_other_nodes() on the monitor");
-		return false;
+		if (!keeper_read_nodes_from_file(keeper, &newNodesArray))
+		{
+			log_error("Failed to get other nodes, see above for details");
+			return false;
+		}
+	}
+	else
+	{
+		if (!monitor_get_other_nodes(monitor, nodeId, ANY_STATE, &newNodesArray))
+		{
+			log_error("Failed to get_other_nodes() on the monitor");
+			return false;
+		}
 	}
 
 	/* compute nodes that need an HBA change (new ones, new hostnames) */
@@ -2206,12 +2222,27 @@ keeper_call_reload_hooks(Keeper *keeper, bool firstLoop)
  * monitor is disabled.
  */
 bool
-keeper_read_nodes_from_file(Keeper *keeper)
+keeper_read_nodes_from_file(Keeper *keeper, NodeAddressArray *nodesArray)
 {
 	KeeperConfig *config = &(keeper->config);
+	KeeperStateData *state = &(keeper->state);
 
 	char *contents = NULL;
 	long size = 0L;
+
+	/* refrain from reading the nodes list when in the INIT state */
+	if (state->current_role == INIT_STATE)
+	{
+		return true;
+	}
+
+	/* if the file does not exists, we're done */
+	if (!file_exists(config->pathnames.nodes))
+	{
+		log_debug("Nodes files \"%s\" does not exists, done processing",
+				  config->pathnames.nodes);
+		return true;
+	}
 
 	if (!read_file_if_exists(config->pathnames.nodes, &contents, &size))
 	{
@@ -2221,12 +2252,133 @@ keeper_read_nodes_from_file(Keeper *keeper)
 	}
 
 	/* now parse the nodes JSON file */
-	if (!parseNodesArray(contents, &(keeper->otherNodes)))
+	if (!parseNodesArray(contents, nodesArray, state->current_node_id))
 	{
-		log_error("Failed to read nodes array from file \"%s\"",
+		log_debug("Failed to parse JSON nodes array:\n%s", contents);
+		log_error("Failed to parse nodes array from file \"%s\"",
 				  config->pathnames.nodes);
 		return false;
 	}
 
 	return true;
+}
+
+
+/*
+ * keeper_get_primary fetches the current primary Node in the group, either by
+ * connecting to the monitor and using the pgautofailover.get_primary() API
+ * there, or by scanning through the keeper->otherNodes array for the first
+ * node with isPrimary true.
+ *
+ * In both cases, there might not be a primary node identified at the moment,
+ * in which case we return false.
+ */
+bool
+keeper_get_primary(Keeper *keeper, NodeAddress *primaryNode)
+{
+	KeeperConfig *config = &(keeper->config);
+
+	if (!config->monitorDisabled)
+	{
+		Monitor *monitor = &(keeper->monitor);
+
+		if (!monitor_get_primary(monitor,
+								 config->formation,
+								 keeper->state.current_group,
+								 primaryNode))
+		{
+			log_error("Failed to get the primary node from the monitor, "
+					  "see above for details");
+			return false;
+		}
+	}
+	else
+	{
+		for (int i = 0; i < keeper->otherNodes.count; i++)
+		{
+			NodeAddress *node = &(keeper->otherNodes.nodes[i]);
+
+			if (node->isPrimary)
+			{
+				/* copy the node address details into primaryNode */
+				*primaryNode = *node;
+				return true;
+			}
+		}
+
+		log_error("Failed to get the primary node from the current list "
+				  "of other nodes, refresh the list with the command: "
+				  "pg_autoctl do fsm nodes set");
+		return false;
+	}
+
+	return false;
+}
+
+
+/*
+ * keeper_get_most_advanced_standby fetches the current most advanded standby
+ * node in the group, either by connecting to the monitor and using the
+ * pgautofailover.get_most_advanced_standby() API there, or by scanning through
+ * the keeper->otherNodes array.
+ */
+bool
+keeper_get_most_advanced_standby(Keeper *keeper, NodeAddress *upstreamNode)
+{
+	KeeperConfig *config = &(keeper->config);
+	int groupId = keeper->state.current_group;
+
+	if (!config->monitorDisabled)
+	{
+		Monitor *monitor = &(keeper->monitor);
+
+		if (!monitor_get_most_advanced_standby(monitor,
+											   config->formation,
+											   groupId,
+											   upstreamNode))
+		{
+			log_error("Failed to get the most advanced standby node "
+					  "from the monitor, see above for details");
+			return false;
+		}
+	}
+	else
+	{
+		NodeAddress *mostAdvandedStandbyNode = NULL;
+		uint64_t mostAdvandedLSN = 0;
+
+		for (int i = 0; i < keeper->otherNodes.count; i++)
+		{
+			NodeAddress *node = &(keeper->otherNodes.nodes[i]);
+			uint64_t nodeLSN = 0;
+
+			if (!parseLSN(node->lsn, &nodeLSN))
+			{
+				log_error("Failed to parse node %d \"%s\" LSN position \"%s\"",
+						  node->nodeId, node->name, node->lsn);
+				return false;
+			}
+
+			if (mostAdvandedStandbyNode == NULL ||
+				nodeLSN > mostAdvandedLSN)
+			{
+				mostAdvandedStandbyNode = node;
+				mostAdvandedLSN = nodeLSN;
+			}
+		}
+
+		if (mostAdvandedStandbyNode == NULL)
+		{
+			log_error("Failed to get the most avdanced standby node "
+					  "from the current list of other nodes, "
+					  "refresh the list with the command: "
+					  "pg_autoctl do fsm nodes set");
+			return false;
+		}
+
+		*upstreamNode = *mostAdvandedStandbyNode;
+		return true;
+	}
+
+	return false;
 }
