@@ -91,9 +91,8 @@ bool nodestateAsJSON(CurrentNodeState *nodeState, JSON_Value *js);
 char * nodestateHealthToString(int health);
 void nodestate_log(CurrentNodeState *nodeState, int logLevel, int nodeId);
 
-int MaxHostNameSizeInNodesArray(NodeAddressArray *nodesArray);
-void printNodeHeader(int maxHostNameSize);
-void printNodeEntry(NodeAddress *node);
 void printNodeArray(NodeAddressArray *nodesArray);
+void printNodeHeader(NodeAddressHeaders *headers);
+void printNodeEntry(NodeAddressHeaders *headers, NodeAddress *node);
 
 #endif /* NODESTATE_H */

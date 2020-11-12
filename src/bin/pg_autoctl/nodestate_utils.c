@@ -415,52 +415,27 @@ nodestate_log(CurrentNodeState *nodeState, int logLevel, int nodeId)
 
 
 /*
- * MaxHostNameSizeInNodesArray returns the greatest node name length in the
- * given array of nodes.
- */
-int
-MaxHostNameSizeInNodesArray(NodeAddressArray *nodesArray)
-{
-	int maxHostNameSize = 0;
-	int i = 0;
-
-	for (i = 0; i < nodesArray->count; i++)
-	{
-		NodeAddress node = nodesArray->nodes[i];
-
-		if (strlen(node.host) > maxHostNameSize)
-		{
-			maxHostNameSize = strlen(node.host);
-		}
-	}
-
-	return maxHostNameSize;
-}
-
-
-/*
  * printCurrentState loops over pgautofailover.current_state() results and prints
  * them, one per line.
  */
 void
 printNodeArray(NodeAddressArray *nodesArray)
 {
-	int nodesArrayIndex = 0;
-	int maxHostNameSize = 5;    /* strlen("Name") + 1, the header */
+	NodeAddressHeaders headers = { 0 };
 
-	/*
-	 * Dynamically adjust our display output to the length of the longer
-	 * hostname in the result set
-	 */
-	maxHostNameSize = MaxHostNameSizeInNodesArray(nodesArray);
+	/* We diplsay nodes all from the same group and don't have their groupId */
+	(void) nodeAddressArrayPrepareHeaders(&headers,
+										  nodesArray,
+										  0,
+										  NODE_KIND_STANDALONE);
 
-	(void) printNodeHeader(maxHostNameSize);
+	(void) printNodeHeader(&headers);
 
-	for (nodesArrayIndex = 0; nodesArrayIndex < nodesArray->count; nodesArrayIndex++)
+	for (int index = 0; index < nodesArray->count; index++)
 	{
-		NodeAddress *node = &(nodesArray->nodes[nodesArrayIndex]);
+		NodeAddress *node = &(nodesArray->nodes[index]);
 
-		printNodeEntry(node);
+		printNodeEntry(&headers, node);
 	}
 
 	fformat(stdout, "\n");
@@ -471,17 +446,19 @@ printNodeArray(NodeAddressArray *nodesArray)
  * printNodeHeader pretty prints a header for a node list.
  */
 void
-printNodeHeader(int maxHostNameSize)
+printNodeHeader(NodeAddressHeaders *headers)
 {
-	char nameSeparatorHeader[BUFSIZE] = { 0 };
+	fformat(stdout, "%*s | %*s | %*s | %18s | %8s\n",
+			headers->maxNameSize, "Name",
+			headers->maxNodeSize, "Node",
+			headers->maxHostSize, "Host:Port",
+			"LSN",
+			"Primary?");
 
-	(void) prepareHostNameSeparator(nameSeparatorHeader, maxHostNameSize);
-
-	fformat(stdout, "%3s | %*s | %6s | %18s | %8s\n",
-			"ID", maxHostNameSize, "Host", "Port", "LSN", "Primary?");
-
-	fformat(stdout, "%3s-+-%*s-+-%6s-+-%18s-+-%8s\n",
-			"---", maxHostNameSize, nameSeparatorHeader, "------",
+	fformat(stdout, "%*s-+-%*s-+-%*s-+-%18s-+-%8s\n",
+			headers->maxNameSize, headers->nameSeparatorHeader,
+			headers->maxNodeSize, headers->nodeSeparatorHeader,
+			headers->maxHostSize, headers->hostSeparatorHeader,
 			"------------------", "--------");
 }
 
@@ -490,9 +467,17 @@ printNodeHeader(int maxHostNameSize)
  * printNodeEntry pretty prints a node.
  */
 void
-printNodeEntry(NodeAddress *node)
+printNodeEntry(NodeAddressHeaders *headers, NodeAddress *node)
 {
-	fformat(stdout, "%3d | %s | %6d | %18s | %8s\n",
-			node->nodeId, node->host, node->port, node->lsn,
+	char hostport[BUFSIZE] = { 0 };
+	char composedId[BUFSIZE] = { 0 };
+
+	(void) nodestatePrepareNode(headers, node, 0, hostport, composedId);
+
+	fformat(stdout, "%*s | %*s | %*s | %18s | %8s\n",
+			headers->maxNameSize, node->name,
+			headers->maxNodeSize, composedId,
+			headers->maxHostSize, hostport,
+			node->lsn,
 			node->isPrimary ? "yes" : "no");
 }
