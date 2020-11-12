@@ -848,5 +848,20 @@ parseNodesArray(const char *nodesJSON,
 					sizeof(NodeAddress),
 					nodeAddressCmpByNodeId);
 
+	/* check that every node id is unique in our array */
+	for (int i = 0; i < (nodesArray->count - 1); i++)
+	{
+		int currentNodeId = nodesArray->nodes[i].nodeId;
+		int nextNodeId = nodesArray->nodes[i + 1].nodeId;
+
+		if (currentNodeId == nextNodeId)
+		{
+			log_error("Failed to parse nodes array: more than one node "
+					  "is listed with the same nodeId %d",
+					  currentNodeId);
+			return false;
+		}
+	}
+
 	return true;
 }
