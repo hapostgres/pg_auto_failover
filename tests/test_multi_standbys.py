@@ -225,22 +225,3 @@ def test_013_remove_old_primary():
 
     assert node1.wait_until_state(target_state="primary")
     assert node3.wait_until_state(target_state="secondary")
-
-def test_014_update_standby_names_when_adding_and_removing_a_standby():
-    global node5
-    global node6
-
-    node5 = cluster.create_datanode("/tmp/multi_standby/node5")
-    node6 = cluster.create_datanode("/tmp/multi_standby/node6")
-
-    node1.do_fsm_assign(target_state="join_primary")
-    node1.do_fsm_step()
-
-    print(monitor.get_other_nodes(node1.nodeid))
-
-    # assert node1.wait_until_state(target_state="join_primary")
-    node3.drop()
-
-    # assert node1.wait_until_state(target_state="primary")
-    eq_(node1.get_synchronous_standby_names(),
-        node1.get_synchronous_standby_names_local())
