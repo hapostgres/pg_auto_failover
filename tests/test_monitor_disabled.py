@@ -7,6 +7,7 @@ import json
 cluster = None
 node1 = None
 node2 = None
+node3 = None
 
 def setup_module():
     global cluster
@@ -38,23 +39,53 @@ def test_004_init_secondary():
 def test_005_fsm_nodes_set():
     nodesArray = [node1.jsDict("0/1", True), node2.jsDict("0/1", False)]
 
-    print()
     node1.do_fsm_nodes_set(nodesArray)
     node2.do_fsm_nodes_set(nodesArray)
 
 def test_006_init_to_wait_standby():
-    print()
     node2.do_fsm_assign("wait_standby")
 
 def test_007_catchingup():
-    print()
     node1.do_fsm_assign("wait_primary")
-
     node2.do_fsm_assign("catchingup")
 
 def test_008_secondary():
-    print()
     node1.do_fsm_assign("primary")
     node2.do_fsm_assign("secondary")
 
+    eq_(node1.get_synchronous_standby_names_local(), '*')
+
+def test_009_init_secondary():
+    global node3
+    node3 = cluster.create_datanode("/tmp/no-monitor/node3")
+    node3.create(monitorDisabled=True, host=str(node3.vnode.address), nodeId=3)
+    node3.run(name="c")
+
+def test_010_fsm_nodes_set():
+    LSN1 = node1.run_sql_query("select pg_current_wal_flush_lsn()")[0][0]
+    LSN2 = node2.run_sql_query("select pg_last_wal_receive_lsn()")[0][0]
+    nodesArray = [node1.jsDict(LSN1, True),
+                  node2.jsDict(LSN2, False),
+                  node3.jsDict("0/1", False)]
+
+    node1.do_fsm_nodes_set(nodesArray)
+    node2.do_fsm_nodes_set(nodesArray)
+    node3.do_fsm_nodes_set(nodesArray)
+
+def test_011_init_to_wait_standby():
+    node1.do_fsm_assign("join_primary")
+    node3.do_fsm_assign("wait_standby")
+
+    eq_(node1.get_synchronous_standby_names_local(), '*')
+
+def test_012_catchingup():
+    node3.do_fsm_assign("catchingup")
+
+    eq_(node1.get_synchronous_standby_names_local(), '*')
+
+def test_013_secondary():
+    node3.do_fsm_assign("secondary")
+    node1.do_fsm_assign("primary")
+
+    # no monitor: use the generic value '*'
     eq_(node1.get_synchronous_standby_names_local(), '*')

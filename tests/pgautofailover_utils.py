@@ -1015,13 +1015,9 @@ SELECT reportedstate
         with open(filename, "w") as nodesFile:
             nodesFile.write(json.dumps(nodesArray))
 
-        print("%s: %s" % (filename, open(filename, "r").read()))
-
         command = PGAutoCtl(self)
         out, err, ret = command.execute("do fsm nodes set",
                                         'do', 'fsm', 'nodes', 'set', filename)
-        print("%s" % out)
-
         return True
 
     def do_fsm_step(self):
