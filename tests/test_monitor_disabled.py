@@ -24,7 +24,6 @@ def test_001_init_primary():
 def test_002_init_to_single():
     print()
     node1.do_fsm_assign("single")
-    node1.wait_until_local_state("single")
 
 def test_003_create_t1():
     node1.run_sql_query("CREATE TABLE t1(a int)")
@@ -46,22 +45,16 @@ def test_005_fsm_nodes_set():
 def test_006_init_to_wait_standby():
     print()
     node2.do_fsm_assign("wait_standby")
-    node2.wait_until_local_state("wait_standby")
 
 def test_007_catchingup():
     print()
     node1.do_fsm_assign("wait_primary")
-    node1.wait_until_local_state("wait_primary")
 
     node2.do_fsm_assign("catchingup")
-    node2.wait_until_local_state("catchingup")
 
 def test_008_secondary():
     print()
     node1.do_fsm_assign("primary")
     node2.do_fsm_assign("secondary")
-
-    node1.wait_until_local_state("primary")
-    node2.wait_until_local_state("secondary")
 
     eq_(node1.get_synchronous_standby_names_local(), '*')

@@ -853,42 +853,6 @@ class DataNode(PGNode):
         return (self.state['state']['current_role'],
                 self.state['state']['assigned_role'])
 
-    def wait_until_local_state(self, target_state,
-                               timeout=STATE_CHANGE_TIMEOUT,
-                               sleep_time=POLLING_INTERVAL):
-        """
-        Waits until this data node reaches the target state, and then
-        returns True. The target state is compared to the local state as
-        parsed from reading the FSM state file.
-        """
-        prev_state = None
-        wait_until = dt.datetime.now() + dt.timedelta(seconds=timeout)
-        while wait_until > dt.datetime.now():
-            self.cluster.sleep(sleep_time)
-
-            (current_state, assigned_state) = self.get_local_state()
-
-            # only log the state if it has changed
-            if current_state != prev_state:
-                if current_state == target_state:
-                    print("state of %s is '%s', done waiting" %
-                          (self.datadir, current_state))
-                else:
-                    print("state of %s is '%s', waiting for '%s' ..." %
-                          (self.datadir, current_state, target_state))
-
-            if current_state == target_state:
-                return True
-
-            prev_state = current_state
-
-        print("%s didn't reach %s after %d seconds" %
-              (self.datadir, target_state, timeout))
-        error_msg = (f"{self.datadir} failed to reach {target_state} "
-                     f"after {timeout} seconds\n")
-        self.print_debug_logs()
-        raise Exception(error_msg)
-
     def get_nodename(self, nodeId=None):
         """
         Fetch the node name from the monitor, given its nodeid

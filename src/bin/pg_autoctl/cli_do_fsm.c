@@ -11,6 +11,7 @@
 #include <errno.h>
 #include <inttypes.h>
 #include <getopt.h>
+#include <time.h>
 
 #include "postgres_fe.h"
 
@@ -291,6 +292,10 @@ cli_do_fsm_assign(int argc, char **argv)
 	bool pgIsNotRunningIsOk = true;
 	bool monitorDisabledIsOk = true;
 
+	int timeout = 30;
+	int attempts = 0;
+	uint64_t startTime = time(NULL);
+
 	if (!keeper_config_read_file(&config,
 								 missingPgdataIsOk,
 								 pgIsNotRunningIsOk,
@@ -300,47 +305,19 @@ cli_do_fsm_assign(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	switch (argc)
+	if (argc != 1)
 	{
-		case 1:
-		{
-			goalState = NodeStateFromString(argv[0]);
-			break;
-		}
+		log_error("USAGE: do fsm state <goal state>");
+		commandline_help(stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
 
-		case 4:
-		{
-			/* we just accept a single standby at a time here */
-			NodeAddress *otherNode = &(keeper.otherNodes.nodes[0]);
+	goalState = NodeStateFromString(argv[0]);
 
-			keeper.otherNodes.count = 1;
-
-			goalState = NodeStateFromString(argv[0]);
-
-			/* now prepare id, host, and port in keeper.otherNodes */
-			if (!stringToInt(argv[1], &otherNode->nodeId))
-			{
-				log_error("Failed to parse otherNode id \"%s\"", argv[1]);
-				exit(EXIT_CODE_INTERNAL_ERROR);
-			}
-
-			strlcpy(otherNode->host, argv[2], _POSIX_HOST_NAME_MAX);
-
-			if (!stringToInt(argv[3], &otherNode->port))
-			{
-				log_error(
-					"Failed to parse otherNode port number \"%s\"", argv[3]);
-				exit(EXIT_CODE_INTERNAL_ERROR);
-			}
-			break;
-		}
-
-		default:
-		{
-			log_error("USAGE: do fsm state <goal state> [<id> <host> <port>]");
-			commandline_help(stderr);
-			exit(EXIT_CODE_BAD_ARGS);
-		}
+	if (goalState == NO_STATE)
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
 	}
 
 	/* now read keeper's state */
@@ -356,6 +333,38 @@ cli_do_fsm_assign(int argc, char **argv)
 	if (!keeper_store_state(&keeper))
 	{
 		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_STATE);
+	}
+
+	/* loop over reading the state until assigned state has been reached */
+	for (attempts = 0; keeper.state.current_role != goalState; attempts++)
+	{
+		uint64_t now = time(NULL);
+
+		if (!keeper_load_state(&keeper))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_STATE);
+		}
+
+		/* we're done if we reach the timeout */
+		if ((now - startTime) >= timeout)
+		{
+			break;
+		}
+
+		/* sleep 100 ms in between state file probes */
+		pg_usleep(100 * 1000);
+	}
+
+	if (keeper.state.current_role != goalState)
+	{
+		uint64_t now = time(NULL);
+
+		log_warn("Failed to reach goal state \"%s\" in %d attempts and %ds",
+				 NodeStateToString(goalState),
+				 attempts,
+				 (int) (now - startTime));
 		exit(EXIT_CODE_BAD_STATE);
 	}
 
