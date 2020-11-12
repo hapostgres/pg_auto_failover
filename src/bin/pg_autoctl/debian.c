@@ -605,7 +605,13 @@ comment_out_configuration_parameters(const char *srcConfPath,
 	 * need to check for patterns for NAME = VALUE and NAME=VALUE
 	 */
 	char *targetVariableExpression =
-		"(data_directory|hba_file|ident_file|include_dir)( *)=";
+		"("
+		"data_directory"
+		"|hba_file"
+		"|ident_file"
+		"|include_dir"
+		"|stats_temp_directory"
+		")( *)=";
 
 	/* open a file */
 	fileStream = fopen_read_only(srcConfPath);

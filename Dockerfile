@@ -44,3 +44,4 @@ COPY ./tests/ ./tests
 
 USER docker
 ENV PATH $PATH:/usr/lib/postgresql/12/bin
+ENV PGVERSION 12
