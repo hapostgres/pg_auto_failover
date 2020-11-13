@@ -165,39 +165,42 @@ cli_keeper_run(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	if (!monitor_init(monitor, config->monitor_pguri))
+	if (!config->monitorDisabled)
 	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_ARGS);
-	}
+		if (!monitor_init(monitor, config->monitor_pguri))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
 
-	/*
-	 * Handle the pg_autoctl run options: --name, --hostname, --pgport.
-	 *
-	 * When those options have been used, then the configuration file has been
-	 * merged with the command line values, and we can update the metadata for
-	 * this node on the monitor.
-	 */
-	if (!keeper_set_node_metadata(&keeper, &oldConfig))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_MONITOR);
-	}
+		/*
+		 * Handle the pg_autoctl run options: --name, --hostname, --pgport.
+		 *
+		 * When those options have been used, then the configuration file has
+		 * been merged with the command line values, and we can update the
+		 * metadata for this node on the monitor.
+		 */
+		if (!keeper_set_node_metadata(&keeper, &oldConfig))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_MONITOR);
+		}
 
-	/*
-	 * Now, at 1.3 to 1.4 upgrade, the monitor assigns a new name to pg_autoctl
-	 * nodes, which did not use to have a name before. In that case, and then
-	 * pg_autoctl run has been used without options, our name might be empty
-	 * here. We then need to fetch it from the monitor.
-	 */
-	if (!keeper_update_nodename_from_monitor(&keeper))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_CONFIG);
-	}
+		/*
+		 * Now, at 1.3 to 1.4 upgrade, the monitor assigns a new name to
+		 * pg_autoctl nodes, which did not use to have a name before. In that
+		 * case, and then pg_autoctl run has been used without options, our
+		 * name might be empty here. We then need to fetch it from the monitor.
+		 */
+		if (!keeper_update_nodename_from_monitor(&keeper))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_CONFIG);
+		}
 
-	/* we don't keep a connection to the monitor in this process */
-	pgsql_finish(&(monitor->pgsql));
+		/* we don't keep a connection to the monitor in this process */
+		pgsql_finish(&(monitor->pgsql));
+	}
 
 	/* initialize our local Postgres instance representation */
 	(void) local_postgres_init(postgres, pgSetup);

@@ -412,3 +412,72 @@ nodestate_log(CurrentNodeState *nodeState, int logLevel, int nodeId)
 				  NodeStateToString(nodeState->goalState));
 	}
 }
+
+
+/*
+ * printCurrentState loops over pgautofailover.current_state() results and prints
+ * them, one per line.
+ */
+void
+printNodeArray(NodeAddressArray *nodesArray)
+{
+	NodeAddressHeaders headers = { 0 };
+
+	/* We diplsay nodes all from the same group and don't have their groupId */
+	(void) nodeAddressArrayPrepareHeaders(&headers,
+										  nodesArray,
+										  0,
+										  NODE_KIND_STANDALONE);
+
+	(void) printNodeHeader(&headers);
+
+	for (int index = 0; index < nodesArray->count; index++)
+	{
+		NodeAddress *node = &(nodesArray->nodes[index]);
+
+		printNodeEntry(&headers, node);
+	}
+
+	fformat(stdout, "\n");
+}
+
+
+/*
+ * printNodeHeader pretty prints a header for a node list.
+ */
+void
+printNodeHeader(NodeAddressHeaders *headers)
+{
+	fformat(stdout, "%*s | %*s | %*s | %18s | %8s\n",
+			headers->maxNameSize, "Name",
+			headers->maxNodeSize, "Node",
+			headers->maxHostSize, "Host:Port",
+			"LSN",
+			"Primary?");
+
+	fformat(stdout, "%*s-+-%*s-+-%*s-+-%18s-+-%8s\n",
+			headers->maxNameSize, headers->nameSeparatorHeader,
+			headers->maxNodeSize, headers->nodeSeparatorHeader,
+			headers->maxHostSize, headers->hostSeparatorHeader,
+			"------------------", "--------");
+}
+
+
+/*
+ * printNodeEntry pretty prints a node.
+ */
+void
+printNodeEntry(NodeAddressHeaders *headers, NodeAddress *node)
+{
+	char hostport[BUFSIZE] = { 0 };
+	char composedId[BUFSIZE] = { 0 };
+
+	(void) nodestatePrepareNode(headers, node, 0, hostport, composedId);
+
+	fformat(stdout, "%*s | %*s | %*s | %18s | %8s\n",
+			headers->maxNameSize, node->name,
+			headers->maxNodeSize, composedId,
+			headers->maxHostSize, hostport,
+			node->lsn,
+			node->isPrimary ? "yes" : "no");
+}

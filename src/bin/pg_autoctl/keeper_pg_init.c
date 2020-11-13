@@ -43,7 +43,6 @@
  */
 bool keeperInitWarnings = false;
 
-static bool keeper_pg_init_fsm(Keeper *keeper);
 static bool keeper_pg_init_and_register_primary(Keeper *keeper);
 static bool reach_initial_state(Keeper *keeper);
 static bool wait_until_primary_is_ready(Keeper *config,
@@ -68,27 +67,7 @@ keeper_pg_init(Keeper *keeper)
 	log_trace("keeper_pg_init: monitor is %s",
 			  config->monitorDisabled ? "disabled" : "enabled");
 
-	if (config->monitorDisabled)
-	{
-		return keeper_pg_init_fsm(keeper);
-	}
-	else
-	{
-		return service_keeper_init(keeper);
-	}
-}
-
-
-/*
- * keeper_pg_init_fsm initializes the keeper's local FSM and does nothing more.
- * It's only intended to be used when we are not using a monitor, which means
- * we're going to expose our FSM driving as an HTTP API, and sit there waiting
- * for orders from another software.
- */
-static bool
-keeper_pg_init_fsm(Keeper *keeper)
-{
-	return keeper_init_fsm(keeper);
+	return service_keeper_init(keeper);
 }
 
 
@@ -164,6 +143,16 @@ keeper_pg_init_and_register(Keeper *keeper)
 			exit(EXIT_CODE_QUIT);
 		}
 		return createAndRun;
+	}
+
+	/*
+	 * When the monitor is disabled, we're almost done. All that is left is
+	 * creating a state file with our nodeId as from the --node-id parameter.
+	 * The value is found in the global variable monitorDisabledNodeId.
+	 */
+	if (config->monitorDisabled)
+	{
+		return keeper_init_fsm(keeper);
 	}
 
 	/*
@@ -382,7 +371,14 @@ keeper_pg_init_continue(Keeper *keeper)
 		return unlink_file(config->pathnames.init);
 	}
 
-	return reach_initial_state(keeper);
+	if (config->monitorDisabled)
+	{
+		return true;
+	}
+	else
+	{
+		return reach_initial_state(keeper);
+	}
 }
 
 
@@ -631,7 +627,6 @@ wait_until_primary_has_created_our_replication_slot(Keeper *keeper,
 	int errors = 0, tries = 0;
 	bool firstLoop = true;
 
-	Monitor *monitor = &(keeper->monitor);
 	KeeperConfig *config = &(keeper->config);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 	ReplicationSource *upstream = &(postgres->replicationSource);
@@ -639,10 +634,7 @@ wait_until_primary_has_created_our_replication_slot(Keeper *keeper,
 
 	bool hasReplicationSlot = false;
 
-	if (!monitor_get_primary(monitor,
-							 config->formation,
-							 assignedState->groupId,
-							 &(postgres->replicationSource.primaryNode)))
+	if (!keeper_get_primary(keeper, &(postgres->replicationSource.primaryNode)))
 	{
 		/* errors have already been logged */
 		return false;

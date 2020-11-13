@@ -11,6 +11,7 @@
 #include <errno.h>
 #include <inttypes.h>
 #include <getopt.h>
+#include <time.h>
 
 #include "postgres_fe.h"
 
@@ -20,6 +21,7 @@
 #include "fsm.h"
 #include "keeper_config.h"
 #include "keeper.h"
+#include "parsing.h"
 #include "pgctl.h"
 #include "state.h"
 #include "string_utils.h"
@@ -31,6 +33,9 @@ static void cli_do_fsm_list(int argc, char **argv);
 static void cli_do_fsm_gv(int argc, char **argv);
 static void cli_do_fsm_assign(int argc, char **argv);
 static void cli_do_fsm_step(int argc, char **argv);
+
+static void cli_do_fsm_get_nodes(int argc, char **argv);
+static void cli_do_fsm_set_nodes(int argc, char **argv);
 
 static CommandLine fsm_init =
 	make_command("init",
@@ -64,7 +69,7 @@ static CommandLine fsm_gv =
 static CommandLine fsm_assign =
 	make_command("assign",
 				 "Assign a new goal state to the keeper",
-				 CLI_PGDATA_USAGE "<goal state> [ <id> <host> <port> ]",
+				 CLI_PGDATA_USAGE "<goal state>",
 				 CLI_PGDATA_OPTION,
 				 cli_getopt_pgdata,
 				 cli_do_fsm_assign);
@@ -77,6 +82,34 @@ static CommandLine fsm_step =
 				 cli_getopt_pgdata,
 				 cli_do_fsm_step);
 
+static CommandLine fsm_nodes_get =
+	make_command("get",
+				 "Get the list of nodes from file (see --disable-monitor)",
+				 CLI_PGDATA_USAGE,
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
+				 cli_do_fsm_get_nodes);
+
+static CommandLine fsm_nodes_set =
+	make_command("set",
+				 "Set the list of nodes to file (see --disable-monitor)",
+				 CLI_PGDATA_USAGE "</path/to/input/nodes.json>",
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
+				 cli_do_fsm_set_nodes);
+
+
+static CommandLine *fsm_nodes_[] = {
+	&fsm_nodes_get,
+	&fsm_nodes_set,
+	NULL
+};
+
+CommandLine fsm_nodes =
+	make_command_set("nodes",
+					 "Manually manage the keeper's nodes list", NULL, NULL,
+					 NULL, fsm_nodes_);
+
 static CommandLine *fsm[] = {
 	&fsm_init,
 	&fsm_state,
@@ -84,6 +117,7 @@ static CommandLine *fsm[] = {
 	&fsm_gv,
 	&fsm_assign,
 	&fsm_step,
+	&fsm_nodes,
 	NULL
 };
 
@@ -258,6 +292,10 @@ cli_do_fsm_assign(int argc, char **argv)
 	bool pgIsNotRunningIsOk = true;
 	bool monitorDisabledIsOk = true;
 
+	int timeout = 30;
+	int attempts = 0;
+	uint64_t startTime = time(NULL);
+
 	if (!keeper_config_read_file(&config,
 								 missingPgdataIsOk,
 								 pgIsNotRunningIsOk,
@@ -267,47 +305,19 @@ cli_do_fsm_assign(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	switch (argc)
+	if (argc != 1)
 	{
-		case 1:
-		{
-			goalState = NodeStateFromString(argv[0]);
-			break;
-		}
+		log_error("USAGE: do fsm state <goal state>");
+		commandline_help(stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
 
-		case 4:
-		{
-			/* we just accept a single standby at a time here */
-			NodeAddress *otherNode = &(keeper.otherNodes.nodes[0]);
+	goalState = NodeStateFromString(argv[0]);
 
-			keeper.otherNodes.count = 1;
-
-			goalState = NodeStateFromString(argv[0]);
-
-			/* now prepare id, host, and port in keeper.otherNodes */
-			if (!stringToInt(argv[1], &otherNode->nodeId))
-			{
-				log_error("Failed to parse otherNode id \"%s\"", argv[1]);
-				exit(EXIT_CODE_INTERNAL_ERROR);
-			}
-
-			strlcpy(otherNode->host, argv[2], _POSIX_HOST_NAME_MAX);
-
-			if (!stringToInt(argv[3], &otherNode->port))
-			{
-				log_error(
-					"Failed to parse otherNode port number \"%s\"", argv[3]);
-				exit(EXIT_CODE_INTERNAL_ERROR);
-			}
-			break;
-		}
-
-		default:
-		{
-			log_error("USAGE: do fsm state <goal state> [<id> <host> <port>]");
-			commandline_help(stderr);
-			exit(EXIT_CODE_BAD_ARGS);
-		}
+	if (goalState == NO_STATE)
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
 	}
 
 	/* now read keeper's state */
@@ -320,16 +330,41 @@ cli_do_fsm_assign(int argc, char **argv)
 	/* assign the new state */
 	keeper.state.assigned_role = goalState;
 
-	/* roll the state machine */
-	if (!keeper_fsm_reach_assigned_state(&keeper))
+	if (!keeper_store_state(&keeper))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_STATE);
 	}
 
-	if (!keeper_store_state(&keeper))
+	/* loop over reading the state until assigned state has been reached */
+	for (attempts = 0; keeper.state.current_role != goalState; attempts++)
 	{
-		/* errors have already been logged */
+		uint64_t now = time(NULL);
+
+		if (!keeper_load_state(&keeper))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_STATE);
+		}
+
+		/* we're done if we reach the timeout */
+		if ((now - startTime) >= timeout)
+		{
+			break;
+		}
+
+		/* sleep 100 ms in between state file probes */
+		pg_usleep(100 * 1000);
+	}
+
+	if (keeper.state.current_role != goalState)
+	{
+		uint64_t now = time(NULL);
+
+		log_warn("Failed to reach goal state \"%s\" in %d attempts and %ds",
+				 NodeStateToString(goalState),
+				 attempts,
+				 (int) (now - startTime));
 		exit(EXIT_CODE_BAD_STATE);
 	}
 
@@ -398,4 +433,125 @@ cli_do_fsm_step(int argc, char **argv)
 		log_warn("This command does not support JSON output at the moment");
 	}
 	fformat(stdout, "%s ➜ %s\n", oldRole, newRole);
+}
+
+
+/*
+ * cli_do_fsm_get_nodes displays the list of nodes parsed from the nodes file
+ * on-disk. A nodes file is only used when running with --disable-monitor.
+ */
+static void
+cli_do_fsm_get_nodes(int argc, char **argv)
+{
+	Keeper keeper = { 0 };
+	KeeperConfig *config = &(keeper.config);
+
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = true;
+
+	*config = keeperOptions;
+
+	if (!keeper_config_read_file(config,
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (!config->monitorDisabled)
+	{
+		log_fatal("The monitor is not disabled, there's no nodes file");
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (!keeper_read_nodes_from_file(&keeper, &(keeper.otherNodes)))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	(void) printNodeArray(&(keeper.otherNodes));
+}
+
+
+/*
+ * cli_do_fsm_set_nodes parses the list of nodes parsed from the nodes file
+ * on-disk. A JSON array of nodes objects is expected. A nodes file is only
+ * used when running with --disable-monitor.
+ */
+static void
+cli_do_fsm_set_nodes(int argc, char **argv)
+{
+	Keeper keeper = { 0 };
+	KeeperConfig *config = &(keeper.config);
+
+	char nodesArrayInputFile[MAXPGPATH] = { 0 };
+	char *contents = NULL;
+	long size = 0L;
+
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = true;
+
+	*config = keeperOptions;
+
+	if (!keeper_config_read_file(config,
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (!config->monitorDisabled)
+	{
+		log_fatal("The monitor is not disabled, there's no nodes file");
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (argc != 1)
+	{
+		commandline_print_usage(&fsm_nodes_set, stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	strlcpy(nodesArrayInputFile, argv[0], sizeof(nodesArrayInputFile));
+
+	if (!read_file_if_exists(nodesArrayInputFile, &contents, &size))
+	{
+		log_error("Failed to read nodes array from file \"%s\"",
+				  nodesArrayInputFile);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	/* now read keeper's state */
+	if (!keeper_init(&keeper, config))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	/* now parse the nodes JSON file */
+	if (!parseNodesArray(contents,
+						 &(keeper.otherNodes),
+						 keeper.state.current_node_id))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	/* parsing is successful, so let's copy that file to the expected path */
+	if (!write_file(contents, size, config->pathnames.nodes))
+	{
+		log_error("Failed to write input nodes file \"%s\" to \"%s\"",
+				  nodesArrayInputFile,
+				  config->pathnames.nodes);
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	(void) printNodeArray(&(keeper.otherNodes));
 }

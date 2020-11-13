@@ -244,7 +244,7 @@ local_postgres_update(LocalPostgresServer *postgres, bool postgresNotRunningIsOk
 {
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	PostgresSetup newPgSetup = { 0 };
-	bool missingPgdataIsOk = false;
+	bool missingPgdataIsOk = true;
 
 	/* in case a connection is still established, now is time to close */
 	(void) local_postgres_finish(postgres);
