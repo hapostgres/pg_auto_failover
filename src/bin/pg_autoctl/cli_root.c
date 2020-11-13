@@ -26,6 +26,7 @@ CommandLine *create_subcommands[] = {
 	&create_monitor_command,
 	&create_postgres_command,
 	&create_formation_command,
+	&create_pgbouncer_command,
 	NULL
 };
 

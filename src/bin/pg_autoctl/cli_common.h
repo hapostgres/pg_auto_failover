@@ -78,6 +78,8 @@ extern int monitorDisabledNodeId;
 
 #define CLI_PGDATA_USAGE " [ --pgdata ] [ --json ] "
 
+/* cli_pgbouncer */
+extern CommandLine create_pgbouncer_command;
 
 /* cli_do.c */
 extern CommandLine do_commands;
