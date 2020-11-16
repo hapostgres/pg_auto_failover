@@ -29,9 +29,10 @@
 #define PG_CTL_STATUS_NOT_RUNNING 3
 
 bool pg_controldata(PostgresSetup *pgSetup, bool missing_ok);
+bool set_pg_ctl_from_PG_CONFIG(PostgresSetup *pgSetup);
 int config_find_pg_ctl(PostgresSetup *pgSetup);
 bool find_extension_control_file(const char *pg_ctl, const char *extName);
-char * pg_ctl_version(const char *pg_ctl_path);
+bool pg_ctl_version(PostgresSetup *pgSetup);
 
 bool pg_add_auto_failover_default_settings(PostgresSetup *pgSetup,
 										   char *configFilePath,

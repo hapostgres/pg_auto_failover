@@ -89,18 +89,16 @@ pg_setup_init(PostgresSetup *pgSetup,
 			/* we might not have fetched the version yet */
 			if (IS_EMPTY_STRING_BUFFER(pgSetup->pg_version))
 			{
-				char *version = pg_ctl_version(options->pg_ctl);
-
-				if (version == NULL)
+				/* also cache the version in options */
+				if (!pg_ctl_version(options))
 				{
 					/* we already logged about it */
 					return false;
 				}
 
-				/* also cache the version in options */
-				strlcpy(options->pg_version, version, PG_VERSION_STRING_MAX);
-				strlcpy(pgSetup->pg_version, version, PG_VERSION_STRING_MAX);
-				free(version);
+				strlcpy(pgSetup->pg_version,
+						options->pg_version,
+						sizeof(pgSetup->pg_version));
 
 				log_debug("pg_setup_init: %s version %s",
 						  pgSetup->pg_ctl, pgSetup->pg_version);
