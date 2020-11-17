@@ -148,6 +148,9 @@ set_pg_ctl_from_config_bindir(PostgresSetup *pgSetup, const char *pg_config)
 	bindir = lines[0];
 	join_path_components(pg_ctl, bindir, "pg_ctl");
 
+	/* we're now done with the Program and its output */
+	free_program(&prog);
+
 	if (!file_exists(pg_ctl))
 	{
 		log_error("Failed to find pg_ctl at \"%s\" from PG_CONFIG at \"%s\"",
