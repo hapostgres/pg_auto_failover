@@ -33,6 +33,7 @@ bool set_pg_ctl_from_PG_CONFIG(PostgresSetup *pgSetup);
 int config_find_pg_ctl(PostgresSetup *pgSetup);
 bool find_extension_control_file(const char *pg_ctl, const char *extName);
 bool pg_ctl_version(PostgresSetup *pgSetup);
+bool set_pg_ctl_from_config_bindir(PostgresSetup *pgSetup, const char *pg_config);
 
 bool pg_add_auto_failover_default_settings(PostgresSetup *pgSetup,
 										   char *configFilePath,

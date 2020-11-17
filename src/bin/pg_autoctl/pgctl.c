@@ -115,6 +115,54 @@ pg_ctl_version(PostgresSetup *pgSetup)
 
 
 /*
+ * set_pg_ctl_from_PG_CONFIG sets given pgSetup->pg_ctl to the pg_ctl binary
+ * installed in the bindir of the target Postgres installation:
+ *
+ *  $(${PG_CONFIG} --bindir)/pg_ctl
+ */
+bool
+set_pg_ctl_from_config_bindir(PostgresSetup *pgSetup, const char *pg_config)
+{
+	char pg_ctl[MAXPGPATH] = { 0 };
+	Program prog = run_program(pg_config, "--bindir", NULL);
+
+	char *bindir;
+	char *lines[1];
+
+	if (prog.returnCode != 0)
+	{
+		errno = prog.error;
+		log_error("Failed to run \"pg_config --bindir\" using program \"%s\": %m",
+				  pg_config);
+		free_program(&prog);
+		return false;
+	}
+
+	if (splitLines(prog.stdOut, lines, 1) != 1)
+	{
+		log_error("Unable to parse output from pg_config --bindir");
+		free_program(&prog);
+		return false;
+	}
+
+	bindir = lines[0];
+	join_path_components(pg_ctl, bindir, "pg_ctl");
+
+	if (!file_exists(pg_ctl))
+	{
+		log_error("Failed to find pg_ctl at \"%s\" from PG_CONFIG at \"%s\"",
+				  pgSetup->pg_ctl,
+				  pg_config);
+		return false;
+	}
+
+	strlcpy(pgSetup->pg_ctl, pg_ctl, sizeof(pgSetup->pg_ctl));
+
+	return true;
+}
+
+
+/*
  * Read some of the information from pg_controldata output.
  */
 bool
@@ -216,7 +264,11 @@ set_pg_ctl_from_PG_CONFIG(PostgresSetup *pgSetup)
 		return false;
 	}
 
-	(void) path_in_same_directory(PG_CONFIG, "pg_ctl", pgSetup->pg_ctl);
+	if (!set_pg_ctl_from_config_bindir(pgSetup, PG_CONFIG))
+	{
+		/* errors have already been logged */
+		return false;
+	}
 
 	if (!pg_ctl_version(pgSetup))
 	{
