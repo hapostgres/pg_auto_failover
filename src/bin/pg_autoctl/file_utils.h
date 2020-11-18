@@ -24,6 +24,21 @@
 #endif
 
 
+/*
+ * In order to avoid dynamic memory allocations and tracking when searching the
+ * PATH environment, we pre-allocate 1024 paths entries. That should be way
+ * more than enough for all situations, and only costs 1024*1024 = 1MB of
+ * memory.
+ */
+typedef struct SearchPath
+{
+	int total;
+	int found;
+	char entries[1024][MAXPGPATH];
+	char matches[1024][MAXPGPATH];
+} SearchPath;
+
+
 bool file_exists(const char *filename);
 bool directory_exists(const char *path);
 bool ensure_empty_dir(const char *dirname, int mode);
@@ -42,8 +57,7 @@ void path_in_same_directory(const char *basePath,
 							char *destinationPath);
 
 bool search_path_first(const char *filename, char *result);
-int search_path(const char *filename, char ***result);
-void search_path_destroy_result(char **result);
+bool search_path(const char *filename, SearchPath *result);
 bool unlink_file(const char *filename);
 bool set_program_absolute_path(char *program, int size);
 bool normalize_filename(const char *filename, char *dst, int size);

@@ -176,6 +176,14 @@ CommandLine do_standby_ =
 					 "Manage a PostgreSQL standby server", NULL, NULL,
 					 NULL, do_standby);
 
+CommandLine do_pgsetup_pg_ctl =
+	make_command("pg_ctl",
+				 "Find a non-ambiguous pg_ctl program and Postgres version",
+				 "[option ...]",
+				 KEEPER_CLI_WORKER_SETUP_OPTIONS,
+				 keeper_cli_keeper_setup_getopts,
+				 keeper_cli_pgsetup_pg_ctl);
+
 CommandLine do_pgsetup_discover =
 	make_command("discover",
 				 "Discover local PostgreSQL instance, if any",
@@ -217,6 +225,7 @@ CommandLine do_pgsetup_tune =
 				 keeper_cli_pgsetup_tune);
 
 CommandLine *do_pgsetup[] = {
+	&do_pgsetup_pg_ctl,
 	&do_pgsetup_discover,
 	&do_pgsetup_is_ready,
 	&do_pgsetup_wait_until_ready,

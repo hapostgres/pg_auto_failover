@@ -267,6 +267,13 @@ set_pg_ctl_from_PG_CONFIG(PostgresSetup *pgSetup)
 		return false;
 	}
 
+	if (!file_exists(PG_CONFIG))
+	{
+		log_error("Failed to find a file for PG_CONFIG environment value \"%s\"",
+				  PG_CONFIG);
+		return false;
+	}
+
 	if (!set_pg_ctl_from_config_bindir(pgSetup, PG_CONFIG))
 	{
 		/* errors have already been logged */
@@ -302,71 +309,86 @@ set_pg_ctl_from_PG_CONFIG(PostgresSetup *pgSetup)
 bool
 set_pg_ctl_from_pg_config(PostgresSetup *pgSetup)
 {
-	char **pg_configs = NULL;
-	int pg_configs_count = search_path("pg_config", &pg_configs);
+	SearchPath pg_configs = { 0 };
 
-	bool success = false;
-
-	if (pg_configs_count == 0)
+	if (!search_path("pg_config", &pg_configs))
 	{
-		if (!set_pg_ctl_from_config_bindir(pgSetup, pg_configs[0]))
+		return false;
+	}
+
+	switch (pg_configs.found)
+	{
+		case 0:
 		{
-			/* errors have already been logged */
+			log_warn("Failed to find either pg_ctl or pg_config in PATH");
 			return false;
 		}
 
-		if (!pg_ctl_version(pgSetup))
+		case 1:
 		{
-			log_fatal("Failed to get version info from %s --version",
-					  pgSetup->pg_ctl);
-			return false;
-		}
-
-		log_debug("Found pg_ctl for PostgreSQL %s at %s from pg_config "
-				  "found in PATH at \"%s\"",
-				  pgSetup->pg_version, pgSetup->pg_ctl, pg_configs[0]);
-
-		success = true;
-	}
-	else if (pg_configs_count == 0)
-	{
-		log_warn("Failed to find either pg_ctl pg_config in PATH");
-	}
-	else
-	{
-		for (int i = 0; i < pg_configs_count; i++)
-		{
-			PostgresSetup currentPgSetup = { 0 };
-
-			strlcpy(currentPgSetup.pg_ctl, pg_configs[i], MAXPGPATH);
-
-			if (!pg_ctl_version(&currentPgSetup))
+			if (!set_pg_ctl_from_config_bindir(pgSetup, pg_configs.matches[0]))
 			{
-				/*
-				 * Because of this it's possible that there's now only a single
-				 * working version of pg_ctl found in PATH. If that's the case
-				 * we will still not use that by default, since the users
-				 * intention is unclear. They might have wanted to use the
-				 * version of pg_ctl that we could not parse the version string
-				 * for. So we warn and continue, the user should make their
-				 * intention clear by using the --pg_ctl option (or changing
-				 * PATH).
-				 */
-				log_warn("Failed to get version info from %s --version",
-						 currentPgSetup.pg_ctl);
-				continue;
+				/* errors have already been logged */
+				return false;
 			}
 
-			log_info("Found %s for pg version %s",
-					 currentPgSetup.pg_ctl,
-					 currentPgSetup.pg_version);
+			if (!pg_ctl_version(pgSetup))
+			{
+				log_fatal("Failed to get version info from %s --version",
+						  pgSetup->pg_ctl);
+				return false;
+			}
+
+			log_debug("Found pg_ctl for PostgreSQL %s at %s from pg_config "
+					  "found in PATH at \"%s\"",
+					  pgSetup->pg_version,
+					  pgSetup->pg_ctl,
+					  pg_configs.matches[0]);
+
+			return true;
 		}
-		log_info("HINT: export PG_CONFIG to a specific pg_config entry");
+
+		default:
+		{
+			log_info("Found more than one pg_config entry in current PATH:");
+
+			for (int i = 0; i < pg_configs.found; i++)
+			{
+				PostgresSetup currentPgSetup = { 0 };
+
+				strlcpy(currentPgSetup.pg_ctl,
+						pg_configs.matches[i],
+						sizeof(currentPgSetup.pg_ctl));
+
+				if (!pg_ctl_version(&currentPgSetup))
+				{
+					/*
+					 * Because of this it's possible that there's now only a
+					 * single working version of pg_ctl found in PATH. If
+					 * that's the case we will still not use that by default,
+					 * since the users intention is unclear. They might have
+					 * wanted to use the version of pg_ctl that we could not
+					 * parse the version string for. So we warn and continue,
+					 * the user should make their intention clear by using the
+					 * --pg_ctl option (or changing PATH).
+					 */
+					log_warn("Failed to get version info from %s --version",
+							 currentPgSetup.pg_ctl);
+					continue;
+				}
+
+				log_info("Found \"%s\" for pg version %s",
+						 currentPgSetup.pg_ctl,
+						 currentPgSetup.pg_version);
+			}
+
+			log_info("HINT: export PG_CONFIG to a specific pg_config entry");
+
+			return false;
+		}
 	}
 
-	search_path_destroy_result(pg_configs);
-
-	return success;
+	return false;
 }
 
 
@@ -379,10 +401,7 @@ set_pg_ctl_from_pg_config(PostgresSetup *pgSetup)
 bool
 config_find_pg_ctl(PostgresSetup *pgSetup)
 {
-	char **pg_ctls = NULL;
-	int n = -1;
-
-	bool success = false;
+	SearchPath pg_ctls = { 0 };
 
 	pgSetup->pg_ctl[0] = '\0';
 	pgSetup->pg_version[0] = '\0';
@@ -398,71 +417,95 @@ config_find_pg_ctl(PostgresSetup *pgSetup)
 	}
 
 	/* no PG_CONFIG. let's use the more classic approach with PATH instead */
-	n = search_path("pg_ctl", &pg_ctls);
-
-	if (n == 1)
+	if (!search_path("pg_ctl", &pg_ctls))
 	{
-		char *program = pg_ctls[0];
+		return false;
+	}
+
+	if (pg_ctls.found == 1)
+	{
+		char *program = pg_ctls.matches[0];
 
 		strlcpy(pgSetup->pg_ctl, program, MAXPGPATH);
 
 		if (!pg_ctl_version(pgSetup))
 		{
-			log_fatal("Failed to get version info from %s --version",
+			log_fatal("Failed to get version info from \"%s\" --version",
 					  pgSetup->pg_ctl);
 			return 0;
 		}
 
-		log_debug("Found pg_ctl for PostgreSQL %s at %s",
+		log_debug("Found pg_ctl for PostgreSQL %s at \"%s\"",
 				  pgSetup->pg_version,
 				  pgSetup->pg_ctl);
 
-		success = true;
-	}
-	else if (n == 0)
-	{
-		log_debug("Failed to find pg_ctl in PATH, now looking for pg_config");
-
-		if (set_pg_ctl_from_pg_config(pgSetup))
-		{
-			success = true;
-		}
+		return true;
 	}
 	else
 	{
-		for (int i = 0; i < n; i++)
+		/*
+		 * Then, first look for pg_config --bindir with pg_config in PATH,
+		 * we might have a single entry there, as is the case on a typical
+		 * debian/ubuntu packaging, in /usr/bin/pg_config installed from
+		 * the postgresql-common package.
+		 */
+		PostgresSetup pgSetupFromPgConfig = { 0 };
+
+		log_debug("Failed to find pg_ctl in PATH, looking for pg_config");
+
+		if (set_pg_ctl_from_pg_config(&pgSetupFromPgConfig))
+		{
+			strlcpy(pgSetup->pg_ctl,
+					pgSetupFromPgConfig.pg_ctl,
+					sizeof(pgSetup->pg_ctl));
+
+			strlcpy(pgSetup->pg_version,
+					pgSetupFromPgConfig.pg_version,
+					sizeof(pgSetup->pg_version));
+			return true;
+		}
+
+		/*
+		 * We failed to find a single pg_config in $PATH, error out and
+		 * complain about the situation with enough details that the user
+		 * can understand our struggle in picking a Postgres major version
+		 * for them.
+		 */
+		log_info("Found more than one pg_ctl entry in current PATH, "
+				 "and failed to find a single pg_config entry in current PATH");
+
+		for (int i = 0; i < pg_ctls.found; i++)
 		{
 			PostgresSetup currentPgSetup = { 0 };
 
-			strlcpy(currentPgSetup.pg_ctl, pg_ctls[i], MAXPGPATH);
+			strlcpy(currentPgSetup.pg_ctl, pg_ctls.matches[i], MAXPGPATH);
 
 			if (!pg_ctl_version(&currentPgSetup))
 			{
 				/*
-				 * Because of this it's possible that there's now only a single
-				 * working version of pg_ctl found in PATH. If that's the case
-				 * we will still not use that by default, since the users
-				 * intention is unclear. They might have wanted to use the
-				 * version of pg_ctl that we could not parse the version string
-				 * for. So we warn and continue, the user should make their
-				 * intention clear by using the --pg_ctl option (or changing
-				 * PATH).
+				 * Because of this it's possible that there's now only a
+				 * single working version of pg_ctl found in PATH. If
+				 * that's the case we will still not use that by default,
+				 * since the users intention is unclear. They might have
+				 * wanted to use the version of pg_ctl that we could not
+				 * parse the version string for. So we warn and continue,
+				 * the user should make their intention clear by using the
+				 * --pg_ctl option (or setting PG_CONFIG, or PATH).
 				 */
-				log_warn("Failed to get version info from %s --version",
+				log_warn("Failed to get version info from \"%s\" --version",
 						 currentPgSetup.pg_ctl);
 				continue;
 			}
 
-			log_info("Found %s for pg version %s",
+			log_info("Found \"%s\" for pg version %s",
 					 currentPgSetup.pg_ctl,
 					 currentPgSetup.pg_version);
 		}
+
 		log_error("Found several pg_ctl in PATH, please provide --pgctl");
+
+		return false;
 	}
-
-	search_path_destroy_result(pg_ctls);
-
-	return success;
 }
 
 

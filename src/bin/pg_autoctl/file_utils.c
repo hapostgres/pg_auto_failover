@@ -538,15 +538,16 @@ path_in_same_directory(const char *basePath, const char *fileName,
 bool
 search_path_first(const char *filename, char *result)
 {
-	char **paths = NULL;
-	int n = search_path(filename, &paths);
-	if (n < 1)
+	SearchPath paths = { 0 };
+
+	if (!search_path(filename, &paths))
 	{
 		log_error("Failed to find %s command in your PATH", filename);
 		return false;
 	}
-	strlcpy(result, paths[0], MAXPGPATH);
-	search_path_destroy_result(paths);
+
+	strlcpy(result, paths.matches[0], MAXPGPATH);
+
 	return true;
 }
 
@@ -561,59 +562,28 @@ search_path_first(const char *filename, char *result)
  *
  * The caller should free the result by calling search_path_destroy_result().
  */
-int
-search_path(const char *filename, char ***result)
+bool
+search_path(const char *filename, SearchPath *result)
 {
-	char *stringSpace = NULL;
-	char *path = NULL;
-	int pathListLength = 0;
-	int resultSize = 0;
-	int pathIndex = 0;
+	char *path;
+	char pathlist[MAXPATHSIZE] = { 0 };
+
+	/* we didn't count nor find anything yet */
+	result->total = 0;
+	result->found = 0;
 
 	/* Create a copy of pathlist, because we modify it here. */
-	char pathlist[MAXPATHSIZE];
-	if (!get_env_copy("PATH", pathlist, MAXPATHSIZE))
+	if (!get_env_copy("PATH", pathlist, sizeof(pathlist)))
 	{
-		return 0;
-	}
-
-
-	for (pathIndex = 0; pathlist[pathIndex] != '\0'; pathIndex++)
-	{
-		if (IS_PATH_VAR_SEP(pathlist[pathIndex]))
-		{
-			pathListLength++;
-		}
-	}
-
-	if (pathListLength == 0)
-	{
-		*result = NULL;
-		return 0;
-	}
-
-	/* allocate array of pointers */
-	*result = malloc(pathListLength * sizeof(char *));
-	if (!*result)
-	{
-		log_error(ALLOCATION_FAILED_ERROR);
-		return 0;
-	}
-
-	/* allocate memory to store the strings */
-	stringSpace = malloc(pathListLength * MAXPGPATH);
-	if (!stringSpace)
-	{
-		log_error(ALLOCATION_FAILED_ERROR);
-		free(*result);
-		return 0;
+		/* errors have already been logged */
+		return false;
 	}
 
 	path = pathlist;
 
 	while (path != NULL)
 	{
-		char candidate[MAXPGPATH];
+		char candidate[MAXPGPATH] = { 0 };
 		char *sep = first_path_var_separator(path);
 
 		/* split path on current token, null-terminating string at separator */
@@ -622,59 +592,20 @@ search_path(const char *filename, char ***result)
 			*sep = '\0';
 		}
 
-		join_path_components(candidate, path, filename);
-		canonicalize_path(candidate);
+		strlcpy(result->entries[result->total++], path, MAXPGPATH);
+
+		(void) join_path_components(candidate, path, filename);
+		(void) canonicalize_path(candidate);
 
 		if (file_exists(candidate))
 		{
-			char *destinationString = stringSpace + resultSize * MAXPGPATH;
-			bool duplicated = false;
-			strlcpy(destinationString, candidate, MAXPGPATH);
-
-			for (int i = 0; i < resultSize; i++)
-			{
-				if (strcmp((*result)[i], destinationString) == 0)
-				{
-					duplicated = true;
-					break;
-				}
-			}
-
-			if (!duplicated)
-			{
-				(*result)[resultSize] = destinationString;
-				resultSize++;
-			}
+			strlcpy(result->matches[result->found++], candidate, MAXPGPATH);
 		}
 
 		path = (sep == NULL ? NULL : sep + 1);
 	}
 
-	if (resultSize == 0)
-	{
-		/* we won't return a string to the caller, free it now */
-		free(stringSpace);
-
-		free(*result);
-		*result = NULL;
-	}
-
-
-	return resultSize;
-}
-
-
-/*
- * Frees the space allocated by search_path().
- */
-void
-search_path_destroy_result(char **result)
-{
-	if (result != NULL)
-	{
-		free(result[0]);
-	}
-	free(result);
+	return true;
 }
 
 
@@ -768,8 +699,7 @@ set_program_absolute_path(char *program, int size)
 		 * Now either return pg_autoctl_argv0 when that's an absolute filename,
 		 * or search for it in the PATH otherwise.
 		 */
-		char **pathEntries = NULL;
-		int n;
+		SearchPath paths = { 0 };
 
 		if (pg_autoctl_argv0[0] == '/')
 		{
@@ -777,9 +707,7 @@ set_program_absolute_path(char *program, int size)
 			return true;
 		}
 
-		n = search_path(pg_autoctl_argv0, &pathEntries);
-
-		if (n < 1)
+		if (!search_path(pg_autoctl_argv0, &paths))
 		{
 			log_error("Failed to find \"%s\" in PATH environment",
 					  pg_autoctl_argv0);
@@ -788,9 +716,8 @@ set_program_absolute_path(char *program, int size)
 		else
 		{
 			log_debug("Found \"%s\" in PATH at \"%s\"",
-					  pg_autoctl_argv0, pathEntries[0]);
-			strlcpy(program, pathEntries[0], size);
-			search_path_destroy_result(pathEntries);
+					  pg_autoctl_argv0, paths.matches[0]);
+			strlcpy(program, paths.matches[0], size);
 
 			return true;
 		}

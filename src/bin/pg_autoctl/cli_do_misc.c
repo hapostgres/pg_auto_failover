@@ -22,6 +22,7 @@
 #include "commandline.h"
 #include "config.h"
 #include "defaults.h"
+#include "env_utils.h"
 #include "file_utils.h"
 #include "fsm.h"
 #include "keeper_config.h"
@@ -218,6 +219,54 @@ keeper_cli_create_replication_user(int argc, char **argv)
 		log_fatal("Failed to create the database user that a pg_auto_failover "
 				  " standby uses for replication, see above for details");
 		exit(EXIT_CODE_PGSQL);
+	}
+}
+
+
+/*
+ * keeper_cli_pgsetup_pg_ctl implements the CLI to find a suitable pg_ctl entry
+ * from either the PG_CONFIG environment variable, or the PATH, then either
+ * finding a single pg_ctl entry or falling back to a single pg_config entry
+ * that we then use with pg_config --bindir.
+ */
+void
+keeper_cli_pgsetup_pg_ctl(int argc, char **argv)
+{
+	bool success = true;
+
+	PostgresSetup pgSetupMonitor = { 0 }; /* find first entry */
+	PostgresSetup pgSetupKeeper = { 0 };  /* find non ambiguous entry */
+
+	char PG_CONFIG[MAXPGPATH] = { 0 };
+
+	if (env_exists("PG_CONFIG") &&
+		get_env_copy("PG_CONFIG", PG_CONFIG, sizeof(PG_CONFIG)))
+	{
+		log_info("Environment variable PG_CONFIG is set to \"%s\"", PG_CONFIG);
+	}
+
+	if (config_find_pg_ctl(&pgSetupKeeper))
+	{
+		log_info("`pg_autoctl create postgres` would use \"%s\" for Postgres %s",
+				 pgSetupKeeper.pg_ctl, pgSetupKeeper.pg_version);
+	}
+	else
+	{
+		log_fatal("pg_autoctl create postgres would fail to find pg_ctl");
+		success = false;
+	}
+
+	/*
+	 * This function EXITs when it's not happy, so we do it last:
+	 */
+	(void) set_first_pgctl(&pgSetupMonitor);
+
+	log_info("`pg_autoctl create monitor` would use \"%s\" for Postgres %s",
+			 pgSetupMonitor.pg_ctl, pgSetupMonitor.pg_version);
+
+	if (!success)
+	{
+		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 }
 
