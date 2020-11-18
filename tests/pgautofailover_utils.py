@@ -295,11 +295,21 @@ class PGNode:
             except psycopg2.ProgrammingError:
                 return None
 
-    def pg_config_get(self, setting):
+    def pg_config_get(self, settings):
         """
-        Returns the current value of the given postgres setting"
+        Returns the current value of the given postgres settings"
         """
-        return self.run_sql_query(f"SHOW {setting}")[0][0]
+        if isinstance(settings, str):
+            return self.run_sql_query(f"SHOW {setting}")[0][0]
+
+        else:
+            # we have a list of settings to grab
+            s = {}
+            q = "select name, setting from pg_settings where name = any(%s)"
+            for name, setting in self.run_sql_query(q, settings):
+                s[name] = setting
+
+            return s
 
     def set_user_password(self, username, password):
         """
@@ -649,7 +659,20 @@ class PGNode:
             key = os.path.join(self.datadir, "server.key")
             crt = os.path.join(self.datadir, "server.crt")
 
-        eq_(self.pg_config_get('ssl'), ssl)
+        # grab all the settings we want to check in a single round-trip
+        pg_settings_names = ['ssl',
+                             'ssl_ciphers',
+                             'ssl_key_file',
+                             'ssl_cert_file',
+                             'ssl_crl_file',
+                             'ssl_ca_file']
+
+        if self.pgmajor() >= 12:
+            pg_settings_names += ['primary_conninfo']
+
+        pg_settings = self.pg_config_get(pg_settings_names)
+
+        eq_(pg_settings['ssl'], ssl)
         eq_(self.config_get("ssl.sslmode"), sslmode)
 
         expected_ciphers = (
@@ -666,15 +689,7 @@ class PGNode:
         # TODO: also do this for monitor once we can have superuser access to
         # the monitor
         if not monitor:
-            eq_(self.pg_config_get("ssl_ciphers"), expected_ciphers)
-
-        def check_conn_string(conn_string):
-            print("checking connstring =", conn_string)
-            assert f"sslmode={sslmode}" in conn_string
-            if rootCert:
-                assert f"sslrootcert={rootCert}" in conn_string
-            if crl:
-                assert f"sslcrl={crl}" in conn_string
+            eq_(pg_settings["ssl_ciphers"], expected_ciphers)
 
         monitor_uri = self.get_monitor_uri()
         self.check_conn_string_ssl(monitor_uri, sslmode)
@@ -695,14 +710,14 @@ class PGNode:
                 continue
             assert os.path.isfile(file_path)
             print("checking", pg_setting)
-            eq_(self.pg_config_get(pg_setting), file_path)
+            eq_(pg_settings[pg_setting], file_path)
             eq_(self.config_get(autoctl_setting), file_path)
 
         if monitor or primary:
             return
 
         if self.pgmajor() >= 12:
-            check_conn_string(self.pg_config_get('primary_conninfo'))
+            self.check_conn_string_ssl(pg_settings["primary_conninfo"], sslmode)
 
 
 class DataNode(PGNode):

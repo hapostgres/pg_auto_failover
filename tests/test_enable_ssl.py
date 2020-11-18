@@ -219,5 +219,9 @@ def test_014_enable_ssl_require_primary():
                      sslServerCert = node1Cert.crt,
                      sslMode="require")
     node1.run()
-    node1.wait_until_pg_is_running()
+
+    # to avoid flackyness here, we allow a second run/timeout of waiting
+    if not node1.wait_until_pg_is_running():
+        assert node1.wait_until_pg_is_running()
+
     node1.check_ssl("on", "require", primary=True)
