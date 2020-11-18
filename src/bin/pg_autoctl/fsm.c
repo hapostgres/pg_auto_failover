@@ -135,7 +135,7 @@
 #define COMMENT_PRIMARY_TO_APPLY_SETTINGS \
 	"Apply new pg_auto_failover settings (synchronous_standby_names)"
 
-# define COMMENT_APPLY_SETTINGS_TO_PRIMARY \
+#define COMMENT_APPLY_SETTINGS_TO_PRIMARY \
 	"Back to primary state after having applied new pg_auto_failover settings"
 
 #define COMMENT_SECONDARY_TO_REPORT_LSN \
@@ -261,6 +261,7 @@ KeeperFSMTransition KeeperFSM[] = {
 	{ PRIMARY_STATE, JOIN_PRIMARY_STATE, COMMENT_PRIMARY_TO_JOIN_PRIMARY, &fsm_prepare_replication },
 	{ PRIMARY_STATE, WAIT_PRIMARY_STATE, COMMENT_PRIMARY_TO_WAIT_PRIMARY, &fsm_disable_sync_rep },
 	{ JOIN_PRIMARY_STATE, WAIT_PRIMARY_STATE, COMMENT_PRIMARY_TO_WAIT_PRIMARY, &fsm_disable_sync_rep },
+	{ WAIT_PRIMARY_STATE, JOIN_PRIMARY_STATE, COMMENT_PRIMARY_TO_JOIN_PRIMARY, &fsm_prepare_replication },
 
 	/*
 	 * Situation is getting back to normal on the primary
@@ -317,8 +318,12 @@ KeeperFSMTransition KeeperFSM[] = {
 	 * have to fetch the new value for synchronous_standby_names from the
 	 * monitor.
 	 */
-	{ PRIMARY_STATE, APPLY_SETTINGS_STATE, COMMENT_PRIMARY_TO_APPLY_SETTINGS, &fsm_apply_settings },
-	{ APPLY_SETTINGS_STATE, PRIMARY_STATE, COMMENT_APPLY_SETTINGS_TO_PRIMARY, NULL },
+	{ PRIMARY_STATE, APPLY_SETTINGS_STATE, COMMENT_PRIMARY_TO_APPLY_SETTINGS, NULL },
+	{ APPLY_SETTINGS_STATE, PRIMARY_STATE, COMMENT_APPLY_SETTINGS_TO_PRIMARY, &fsm_apply_settings },
+
+	{ APPLY_SETTINGS_STATE, SINGLE_STATE, COMMENT_PRIMARY_TO_SINGLE, &fsm_disable_replication },
+	{ APPLY_SETTINGS_STATE, WAIT_PRIMARY_STATE, COMMENT_PRIMARY_TO_WAIT_PRIMARY, &fsm_disable_sync_rep },
+	{ APPLY_SETTINGS_STATE, JOIN_PRIMARY_STATE, COMMENT_PRIMARY_TO_JOIN_PRIMARY, &fsm_prepare_replication },
 
 	/*
 	 * In case of multiple standbys, failover begins with reporting current LSN

@@ -167,7 +167,11 @@ keeper_state_write(KeeperStateData *keeperState, const char *filename)
 		return false;
 	}
 
-	close(fd);
+	if (close(fd) != 0)
+	{
+		log_fatal("Failed to close file \"%s\": %m", tempFileName);
+		return false;
+	}
 
 	log_debug("rename \"%s\" to \"%s\"", tempFileName, filename);
 

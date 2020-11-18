@@ -35,6 +35,8 @@ static bool parse_controldata_field_lsn(const char *controlDataString,
 
 static bool parse_bool_with_len(const char *value, size_t len, bool *result);
 
+static int nodeAddressCmpByNodeId(const void *a, const void *b);
+
 #define RE_MATCH_COUNT 10
 
 
@@ -97,9 +99,10 @@ regexp_first_match(const char *string, const char *regex)
 		int finish = m[1].rm_eo;
 		int length = finish - start + 1;
 		char *result = (char *) malloc(length * sizeof(char));
+
 		if (result == NULL)
 		{
-			log_error("Failed to allocate memory, probably because it's all used");
+			log_error(ALLOCATION_FAILED_ERROR);
 			return NULL;
 		}
 
@@ -673,6 +676,190 @@ buildPostgresURIfromPieces(URIParams *uriParams, char *pguri)
 					pguri,
 					uriParams->parameters.keywords[index],
 					uriParams->parameters.values[index]);
+		}
+	}
+
+	return true;
+}
+
+
+/*
+ * nodeAddressCmpByNodeId sorts two given nodeAddress by comparing their
+ * nodeId. We use this function to be able to pg_qsort() an array of nodes,
+ * such as when parsing from a JSON file.
+ */
+static int
+nodeAddressCmpByNodeId(const void *a, const void *b)
+{
+	NodeAddress *nodeA = (NodeAddress *) a;
+	NodeAddress *nodeB = (NodeAddress *) b;
+
+	return nodeA->nodeId - nodeB->nodeId;
+}
+
+
+/*
+ * parseLSN is based on the Postgres code for pg_lsn_in_internal found at
+ * src/backend/utils/adt/pg_lsn.c in the Postgres source repository. In the
+ * pg_auto_failover context we don't need to typedef uint64 XLogRecPtr; so we
+ * just use uint64_t internally.
+ */
+#define MAXPG_LSNCOMPONENT 8
+
+bool
+parseLSN(const char *str, uint64_t *lsn)
+{
+	int len1,
+		len2;
+	uint32 id,
+		   off;
+
+	/* Sanity check input format. */
+	len1 = strspn(str, "0123456789abcdefABCDEF");
+	if (len1 < 1 || len1 > MAXPG_LSNCOMPONENT || str[len1] != '/')
+	{
+		return false;
+	}
+
+	len2 = strspn(str + len1 + 1, "0123456789abcdefABCDEF");
+	if (len2 < 1 || len2 > MAXPG_LSNCOMPONENT || str[len1 + 1 + len2] != '\0')
+	{
+		return false;
+	}
+
+	/* Decode result. */
+	id = (uint32) strtoul(str, NULL, 16);
+	off = (uint32) strtoul(str + len1 + 1, NULL, 16);
+	*lsn = ((uint64) id << 32) | off;
+
+	return true;
+}
+
+
+/*
+ * parseNodesArrayFromFile parses a Nodes Array from a JSON file, that contains
+ * an array of JSON object with the following properties: node_id, node_lsn,
+ * node_host, node_name, node_port, and potentially node_is_primary.
+ */
+bool
+parseNodesArray(const char *nodesJSON,
+				NodeAddressArray *nodesArray,
+				int nodeId)
+{
+	JSON_Value *json = NULL;
+	JSON_Array *jsArray = NULL;
+	JSON_Value *template =
+		json_parse_string("[{"
+						  "\"node_id\": 0,"
+						  "\"node_lsn\": \"\","
+						  "\"node_name\": \"\","
+						  "\"node_host\": \"\","
+						  "\"node_port\": 0,"
+						  "\"node_is_primary\": false"
+						  "}]");
+	int len = -1;
+	int nodesArrayIndex = 0;
+	int primaryCount = 0;
+
+	json = json_parse_string(nodesJSON);
+
+	/* validate the JSON input as an array of object with required fields */
+	if (json_validate(template, json) == JSONFailure)
+	{
+		log_error("Failed to parse nodes array which is expected "
+				  "to contain a JSON Array of Objects with properties "
+				  "[{node_id:number, node_name:string, "
+				  "node_host:string, node_port:number, node_lsn:string, "
+				  "node_is_primary:boolean}, ...]");
+		return false;
+	}
+
+	jsArray = json_value_get_array(json);
+	len = json_array_get_count(jsArray);
+
+	if (NODE_ARRAY_MAX_COUNT < len)
+	{
+		log_error("Failed to parse nodes array which contains "
+				  "%d nodes: pg_autoctl supports up to %d nodes",
+				  len,
+				  NODE_ARRAY_MAX_COUNT);
+		return false;
+	}
+
+	nodesArray->count = len;
+
+	for (int i = 0; i < len; i++)
+	{
+		NodeAddress *node = &(nodesArray->nodes[nodesArrayIndex]);
+		JSON_Object *jsObj = json_array_get_object(jsArray, i);
+
+		int jsNodeId = (int) json_object_get_number(jsObj, "node_id");
+		uint64_t lsn = 0;
+
+		/* we install the keeper.otherNodes array, so skip ourselves */
+		if (jsNodeId == nodeId)
+		{
+			--(nodesArray->count);
+			continue;
+		}
+
+		node->nodeId = jsNodeId;
+
+		strlcpy(node->name,
+				json_object_get_string(jsObj, "node_name"),
+				sizeof(node->name));
+
+		strlcpy(node->host,
+				json_object_get_string(jsObj, "node_host"),
+				sizeof(node->host));
+
+		node->port = (int) json_object_get_number(jsObj, "node_port");
+
+		strlcpy(node->lsn,
+				json_object_get_string(jsObj, "node_lsn"),
+				sizeof(node->lsn));
+
+		if (!parseLSN(node->lsn, &lsn))
+		{
+			log_error("Failed to parse nodes array LSN value \"%s\"", node->lsn);
+			return false;
+		}
+
+		node->isPrimary = json_object_get_boolean(jsObj, "node_is_primary");
+
+		if (node->isPrimary)
+		{
+			++primaryCount;
+
+			if (primaryCount > 1)
+			{
+				log_error("Failed to parse nodes array: more than one node "
+						  "is listed with \"node_is_primary\" true.");
+				return false;
+			}
+		}
+
+		++nodesArrayIndex;
+	}
+
+	/* now ensure the array is sorted by nodeId */
+	(void) pg_qsort(nodesArray->nodes,
+					nodesArray->count,
+					sizeof(NodeAddress),
+					nodeAddressCmpByNodeId);
+
+	/* check that every node id is unique in our array */
+	for (int i = 0; i < (nodesArray->count - 1); i++)
+	{
+		int currentNodeId = nodesArray->nodes[i].nodeId;
+		int nextNodeId = nodesArray->nodes[i + 1].nodeId;
+
+		if (currentNodeId == nextNodeId)
+		{
+			log_error("Failed to parse nodes array: more than one node "
+					  "is listed with the same nodeId %d",
+					  currentNodeId);
+			return false;
 		}
 	}
 

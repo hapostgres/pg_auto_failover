@@ -135,10 +135,15 @@ def test_008_failover():
 
     assert node3.wait_until_state(target_state="wait_primary", timeout=120)
     assert node2.wait_until_state(target_state="secondary")
-    assert node3.wait_until_state(target_state="primary")
+
+    # node 2 has candidate priority of 0, can't be used to reach primary
+    #assert node3.wait_until_state(target_state="primary")
 
     assert node3.has_needed_replication_slots()
     assert node2.has_needed_replication_slots()
+
+    # as we don't have
+    eq_(node3.get_synchronous_standby_names_local(), '')
 
 def test_009_read_from_new_primary():
     results = node3.run_sql_query("SELECT count(*) FROM t1")
@@ -235,7 +240,7 @@ def test_015_finalize_failover_after_most_advanced_secondary_gets_back():
 
     # and, node2 should finally become the primary without losing any data
     print()
-    assert node2.wait_until_state(target_state="wait_primary")
+    assert node2.wait_until_state(target_state="primary")
 
     print("%s" % monitor.pg_autoctl.err)
 

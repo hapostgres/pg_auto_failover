@@ -63,9 +63,6 @@ void monitor_finish(Monitor *monitor);
 
 bool monitor_retryable_error(const char *sqlstate);
 
-void printNodeHeader(int maxHostNameSize);
-void printNodeEntry(NodeAddress *node);
-
 bool monitor_get_nodes(Monitor *monitor, char *formation, int groupId,
 					   NodeAddressArray *nodeArray);
 bool monitor_print_nodes(Monitor *monitor, char *formation, int groupId);
@@ -79,7 +76,6 @@ bool monitor_print_other_nodes(Monitor *monitor,
 bool monitor_print_other_nodes_as_json(Monitor *monitor,
 									   int myNodeId,
 									   NodeState currentState);
-void printNodeArray(NodeAddressArray *nodesArray);
 
 bool monitor_get_primary(Monitor *monitor, char *formation, int groupId,
 						 NodeAddress *node);

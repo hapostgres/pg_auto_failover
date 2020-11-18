@@ -91,7 +91,6 @@ typedef struct MonitorExtensionVersionParseContext
 } MonitorExtensionVersionParseContext;
 
 
-static int MaxHostNameSizeInNodesArray(NodeAddressArray *nodesArray);
 static bool parseNode(PGresult *result, int rowNumber, NodeAddress *node);
 static void parseNodeResult(void *ctx, PGresult *result);
 static void parseNodeArray(void *ctx, PGresult *result);
@@ -1503,90 +1502,6 @@ parseNodeArray(void *ctx, PGresult *result)
 
 
 /*
- * MaxHostNameSizeInNodesArray returns the greatest node name length in the
- * given array of nodes.
- */
-static int
-MaxHostNameSizeInNodesArray(NodeAddressArray *nodesArray)
-{
-	int maxHostNameSize = 0;
-	int i = 0;
-
-	for (i = 0; i < nodesArray->count; i++)
-	{
-		NodeAddress node = nodesArray->nodes[i];
-
-		if (strlen(node.host) > maxHostNameSize)
-		{
-			maxHostNameSize = strlen(node.host);
-		}
-	}
-
-	return maxHostNameSize;
-}
-
-
-/*
- * printCurrentState loops over pgautofailover.current_state() results and prints
- * them, one per line.
- */
-void
-printNodeArray(NodeAddressArray *nodesArray)
-{
-	int nodesArrayIndex = 0;
-	int maxHostNameSize = 5;    /* strlen("Name") + 1, the header */
-
-	/*
-	 * Dynamically adjust our display output to the length of the longer
-	 * hostname in the result set
-	 */
-	maxHostNameSize = MaxHostNameSizeInNodesArray(nodesArray);
-
-	(void) printNodeHeader(maxHostNameSize);
-
-	for (nodesArrayIndex = 0; nodesArrayIndex < nodesArray->count; nodesArrayIndex++)
-	{
-		NodeAddress *node = &(nodesArray->nodes[nodesArrayIndex]);
-
-		printNodeEntry(node);
-	}
-
-	fformat(stdout, "\n");
-}
-
-
-/*
- * printNodeHeader pretty prints a header for a node list.
- */
-void
-printNodeHeader(int maxHostNameSize)
-{
-	char nameSeparatorHeader[BUFSIZE] = { 0 };
-
-	(void) prepareHostNameSeparator(nameSeparatorHeader, maxHostNameSize);
-
-	fformat(stdout, "%3s | %*s | %6s | %18s | %8s\n",
-			"ID", maxHostNameSize, "Host", "Port", "LSN", "Primary?");
-
-	fformat(stdout, "%3s-+-%*s-+-%6s-+-%18s-+-%8s\n",
-			"---", maxHostNameSize, nameSeparatorHeader, "------",
-			"------------------", "--------");
-}
-
-
-/*
- * printNodeEntry pretty prints a node.
- */
-void
-printNodeEntry(NodeAddress *node)
-{
-	fformat(stdout, "%3d | %s | %6d | %18s | %8s\n",
-			node->nodeId, node->host, node->port, node->lsn,
-			node->isPrimary ? "yes" : "no");
-}
-
-
-/*
  * parseNodeState parses a node state coming back from a call to
  * register_node or node_active.
  */
@@ -1701,7 +1616,7 @@ monitor_print_state(Monitor *monitor, char *formation, int group)
 		{
 			sql =
 				"SELECT * FROM pgautofailover.current_state($1) "
-				"ORDER BY node_id";
+				"ORDER BY group_id, node_id";
 
 			paramCount = 1;
 			paramTypes[0] = TEXTOID;
@@ -1714,7 +1629,7 @@ monitor_print_state(Monitor *monitor, char *formation, int group)
 		{
 			sql =
 				"SELECT * FROM pgautofailover.current_state($1,$2) "
-				"ORDER BY node_id";
+				"ORDER BY group_id, node_id";
 
 			groupStr = intToString(group);
 
@@ -3402,8 +3317,9 @@ monitor_notification_process_apply_settings(void *context,
 	{
 		ctx->applySettingsTransitionInProgress = true;
 
-		log_debug("step 1/4: primary node %d (%s:%d) is assigned \"%s\"",
+		log_debug("step 1/4: primary node %d \"%s\" (%s:%d) is assigned \"%s\"",
 				  nodeState->node.nodeId,
+				  nodeState->node.name,
 				  nodeState->node.host,
 				  nodeState->node.port,
 				  NodeStateToString(nodeState->goalState));
@@ -3413,8 +3329,9 @@ monitor_notification_process_apply_settings(void *context,
 	{
 		ctx->applySettingsTransitionInProgress = true;
 
-		log_debug("step 2/4: primary node %d (%s:%d) reported \"%s\"",
+		log_debug("step 2/4: primary node %d \"%s\" (%s:%d) reported \"%s\"",
 				  nodeState->node.nodeId,
+				  nodeState->node.name,
 				  nodeState->node.host,
 				  nodeState->node.port,
 				  NodeStateToString(nodeState->reportedState));
@@ -3424,8 +3341,9 @@ monitor_notification_process_apply_settings(void *context,
 	{
 		ctx->applySettingsTransitionInProgress = true;
 
-		log_debug("step 3/4: primary node %d (%s:%d) is assigned \"%s\"",
+		log_debug("step 3/4: primary node %d \"%s\" (%s:%d) is assigned \"%s\"",
 				  nodeState->node.nodeId,
+				  nodeState->node.name,
 				  nodeState->node.host,
 				  nodeState->node.port,
 				  NodeStateToString(nodeState->goalState));
@@ -3436,8 +3354,9 @@ monitor_notification_process_apply_settings(void *context,
 	{
 		ctx->applySettingsTransitionDone = true;
 
-		log_debug("step 4/4: primary node %d (%s:%d) reported \"%s\"",
+		log_debug("step 4/4: primary node %d \"%s\" (%s:%d) reported \"%s\"",
 				  nodeState->node.nodeId,
+				  nodeState->node.name,
 				  nodeState->node.host,
 				  nodeState->node.port,
 				  NodeStateToString(nodeState->reportedState));
@@ -3861,10 +3780,28 @@ monitor_extension_update(Monitor *monitor, const char *targetVersion)
 	 */
 	if (strcmp(targetVersion, "1.4") == 0)
 	{
-		if (!pgsql_create_extension(pgsql, "btree_gist"))
+		/*
+		 * Ensure "btree_gist" is available in the server extension dir used to
+		 * create the Postgres instance.
+		 */
+		char *btreeGistExtName = "btree_gist";
+
+		if (!find_extension_control_file(monitor->config.pgSetup.pg_ctl,
+										 btreeGistExtName))
 		{
-			log_error("Failed to create extension \"btree_gist\", "
-					  "required by \"pgautofailover\" extension version 1.4");
+			log_error("Failed to find extension control file for \"%s\"",
+					  btreeGistExtName);
+			log_info("You might have to install a PostgreSQL contrib package");
+			return false;
+		}
+
+
+		if (!pgsql_create_extension(pgsql, btreeGistExtName))
+		{
+			log_error("Failed to create extension \"%s\" "
+					  "required by \"%s\" extension version 1.4",
+					  btreeGistExtName,
+					  PG_AUTOCTL_MONITOR_EXTENSION_NAME);
 			return false;
 		}
 	}
@@ -3876,10 +3813,10 @@ monitor_extension_update(Monitor *monitor, const char *targetVersion)
 
 
 /*
- * monitor_ensure_extension_version checks that we are running a extension
+ * monitor_ensure_extension_version checks that we are running an extension
  * version on the monitor that we are compatible with in pg_autoctl. If that's
  * not the case, we blindly try to update the extension version on the monitor
- * to the target version we have in our default.h.
+ * to the target version we have in our defaults.h.
  *
  * NOTE: we don't check here if the update is an upgrade or a downgrade, we
  * rely on the extension's update path to be free of downgrade paths (such as

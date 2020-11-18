@@ -255,6 +255,8 @@ class PGNode:
         """
         Runs "pg_autoctl run"
         """
+        self.name = name
+
         self.pg_autoctl = PGAutoCtl(self)
         self.pg_autoctl.run(name=name, host=host, port=port)
 
@@ -564,7 +566,8 @@ class PGNode:
             logs += node.logs()
         print(logs)
 
-        if self.cluster.monitor.pg_autoctl:
+        # we might be running with the monitor disabled
+        if self.cluster.monitor and self.cluster.monitor.pg_autoctl:
             print("%s" % self.cluster.monitor.pg_autoctl.err)
 
     def enable_ssl(self, sslMode=None, sslSelfSigned=None,
@@ -720,9 +723,11 @@ class DataNode(PGNode):
         self.group = group
         self.listen_flag = listen_flag
         self.formation = formation
+        self.monitorDisabled = None
 
     def create(self, run=False, level='-v', name=None, host=None, port=None,
-               candidatePriority=None, replicationQuorum=None):
+               candidatePriority=None, replicationQuorum=None,
+               monitorDisabled=False, nodeId=None):
         """
         Runs "pg_autoctl create"
         """
@@ -735,6 +740,9 @@ class DataNode(PGNode):
         if sockdir and sockdir != "":
             pghost = sockdir
 
+        if monitorDisabled:
+            self.monitorDisabled = True
+
         # don't pass --hostname to Postgres nodes in order to exercise the
         # automatic detection of the hostname.
         create_args = ['create', self.role.command(), level,
@@ -742,8 +750,10 @@ class DataNode(PGNode):
                        '--pghost', pghost,
                        '--pgport', str(self.port),
                        '--pgctl', shutil.which('pg_ctl'),
-                       '--auth', self.authMethod,
-                       '--monitor', self.monitor.connection_string()]
+                       '--auth', self.authMethod]
+
+        if not self.monitorDisabled:
+            create_args += ['--monitor', self.monitor.connection_string()]
 
         if self.sslMode:
             create_args += ['--ssl-mode', self.sslMode]
@@ -770,6 +780,7 @@ class DataNode(PGNode):
             create_args += ['--formation', self.formation]
 
         if name:
+            self.name = name
             create_args += ["--name", name]
 
         if host:
@@ -783,6 +794,11 @@ class DataNode(PGNode):
 
         if replicationQuorum is not None:
             create_args += ["--replication-quorum", str(replicationQuorum)]
+
+        if self.monitorDisabled:
+            assert nodeId is not None
+            create_args += ["--disable-monitor"]
+            create_args += ["--node-id", str(nodeId)]
 
         if run:
             create_args += ['--run']
@@ -814,12 +830,24 @@ class DataNode(PGNode):
         self.state = json.loads(out)
         return self.state['state']['nodeId']
 
+    def jsDict(self, lsn="0/1", isPrimary=False):
+        """
+        Returns a python dict with the information to fill-in a JSON
+        representation of the node.
+        """
+        return {"node_id": self.get_nodeid(),
+                "node_name": self.name,
+                "node_host": str(self.vnode.address),
+                "node_port": self.port,
+                "node_lsn": lsn,
+                "node_is_primary": isPrimary}
+
     def get_local_state(self):
         """
         Fetch the assigned_state from the pg_autoctl state file.
         """
         command = PGAutoCtl(self)
-        out, err, ret = command.execute("get node id", 'do', 'fsm', 'state')
+        out, err, ret = command.execute("get node id", '-vv', 'do', 'fsm', 'state')
 
         self.state = json.loads(out)
         return (self.state['state']['current_role'],
@@ -919,11 +947,12 @@ SELECT reportedstate
         """
         Returns the current list of events from the monitor.
         """
-        last_events_query = "select eventtime, nodename, " \
-            "reportedstate, goalstate, " \
-            "reportedrepstate, reportedlsn, description " \
-            "from pgautofailover.last_events('default', count => 20)"
-        return self.monitor.get_events()
+        if self.monitor:
+            last_events_query = "select eventtime, nodename, " \
+                "reportedstate, goalstate, " \
+                "reportedrepstate, reportedlsn, description " \
+                "from pgautofailover.last_events('default', count => 20)"
+            return self.monitor.get_events()
 
     def enable_maintenance(self, allowFailover=False):
         """
@@ -962,6 +991,43 @@ SELECT reportedstate
         """
         command = PGAutoCtl(self)
         command.execute("drop node", 'drop', 'node')
+        return True
+
+    def do_fsm_assign(self, target_state):
+        """
+        Runs `pg_autoctl do fsm assign` on a node
+
+        :return:
+        """
+        command = PGAutoCtl(self)
+        command.execute("do fsm assign",
+                        '-vv', 'do', 'fsm', 'assign', target_state)
+        return True
+
+    def do_fsm_nodes_set(self, nodesArray):
+        """
+        Runs `pg_autoctl do fsm nodes set` on a node
+
+        :return:
+        """
+        filename = "/tmp/nodes.json"
+
+        with open(filename, "w") as nodesFile:
+            nodesFile.write(json.dumps(nodesArray))
+
+        command = PGAutoCtl(self)
+        out, err, ret = command.execute("do fsm nodes set",
+                                        'do', 'fsm', 'nodes', 'set', filename)
+        return True
+
+    def do_fsm_step(self):
+        """
+        Runs `pg_autoctl do fsm step` on a node
+
+        :return:
+        """
+        command = PGAutoCtl(self)
+        command.execute("do fsm step", 'do', 'fsm', 'step')
         return True
 
     def set_metadata(self, name=None, host=None, port=None):
@@ -1062,13 +1128,30 @@ SELECT reportedstate
 
     def get_synchronous_standby_names(self):
         """
-            Gets number sync standbys  via pg_autoctl
+            Gets synchronous standby names  via pg_autoctl
         """
         command = PGAutoCtl(self)
         out, err, ret = command.execute("get synchronous_standby_names",
                                         'show', 'standby-names')
 
         return out.strip()
+
+    def get_synchronous_standby_names_local(self):
+         """
+             Gets synchronous standby names via sql query on data node
+         """
+         query = "select current_setting('synchronous_standby_names')"
+
+         result = self.run_sql_query(query)
+         return result[0][0]
+
+    def print_synchronous_standby_names(self):
+        monitorStandbyNames = self.get_synchronous_standby_names()
+        localStandbyNames = self.get_synchronous_standby_names_local()
+
+        print("synchronous_standby_names       = '%s'" % monitorStandbyNames)
+        print("synchronous_standby_names_local = '%s'" % localStandbyNames)
+        return
 
     def list_replication_slot_names(self):
         """
@@ -1078,8 +1161,12 @@ SELECT reportedstate
             + "where slot_name ~ '^pgautofailover_standby_' " \
             + " and slot_type = 'physical'"
 
-        result = self.run_sql_query(query)
-        return [row[0] for row in result]
+        try:
+            result = self.run_sql_query(query)
+            return [row[0] for row in result]
+        except Exception as e:
+            self.print_debug_logs()
+            raise e
 
     def has_needed_replication_slots(self):
         """
@@ -1404,7 +1491,7 @@ class PGAutoCtl():
         """
         Read all data from the Unix PIPE
 
-        This call is idempotent. If it is called a second time after a earlier
+        This call is idempotent. If it is called a second time after an earlier
         successful call, then it returns the results from when the process
         exited originally.
         """

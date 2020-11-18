@@ -213,7 +213,8 @@ AutoFailoverNodeGroup(char *formationId, int groupId)
 
 	const char *selectQuery =
 		SELECT_ALL_FROM_AUTO_FAILOVER_NODE_TABLE
-		" WHERE formationid = $1 AND groupid = $2";
+		" WHERE formationid = $1 AND groupid = $2"
+		" ORDER BY nodeid";
 
 	SPI_connect();
 
@@ -702,6 +703,11 @@ GroupListSyncStandbys(List *groupNodeList)
 {
 	ListCell *nodeCell = NULL;
 	List *syncStandbyNodesList = NIL;
+
+	if (groupNodeList == NIL)
+	{
+		return NIL;
+	}
 
 	#if (PG_VERSION_NUM >= 130000)
 	List *sortedNodeList = list_copy(groupNodeList);
@@ -1511,7 +1517,8 @@ IsBeingPromoted(AutoFailoverNode *node)
 
 			(node->reportedState == REPLICATION_STATE_PREPARE_PROMOTION &&
 			 (node->goalState == REPLICATION_STATE_PREPARE_PROMOTION ||
-			  node->goalState == REPLICATION_STATE_STOP_REPLICATION)) ||
+			  node->goalState == REPLICATION_STATE_STOP_REPLICATION ||
+			  node->goalState == REPLICATION_STATE_WAIT_PRIMARY)) ||
 
 			(node->reportedState == REPLICATION_STATE_STOP_REPLICATION &&
 			 (node->goalState == REPLICATION_STATE_STOP_REPLICATION ||
@@ -1540,8 +1547,9 @@ bool
 CandidateNodeIsReadyToStreamWAL(AutoFailoverNode *node)
 {
 	return node != NULL &&
-		   (((node->reportedState == REPLICATION_STATE_PREPARE_PROMOTION &&
-			  node->goalState == REPLICATION_STATE_STOP_REPLICATION)) ||
+		   ((node->reportedState == REPLICATION_STATE_PREPARE_PROMOTION &&
+			 (node->goalState == REPLICATION_STATE_STOP_REPLICATION ||
+			  node->goalState == REPLICATION_STATE_WAIT_PRIMARY)) ||
 
 			(node->reportedState == REPLICATION_STATE_STOP_REPLICATION &&
 			 (node->goalState == REPLICATION_STATE_STOP_REPLICATION ||

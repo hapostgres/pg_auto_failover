@@ -31,6 +31,8 @@ extern bool outputJSON;
 
 extern int ssl_flag;
 
+extern int monitorDisabledNodeId;
+
 #define KEEPER_CLI_SSL_OPTIONS \
 	"  --ssl-self-signed setup network encryption using self signed certificates (does NOT protect against MITM)\n" \
 	"  --ssl-mode        use that sslmode in connection strings\n" \
@@ -42,7 +44,7 @@ extern int ssl_flag;
 
 #define KEEPER_CLI_WORKER_SETUP_OPTIONS \
 	"  --pgctl           path to pg_ctl\n" \
-	"  --pgdata          path to data director\n" \
+	"  --pgdata          path to data directory\n" \
 	"  --pghost          PostgreSQL's hostname\n" \
 	"  --pgport          PostgreSQL's port number\n" \
 	"  --listen          PostgreSQL's listen_addresses\n" \
@@ -58,7 +60,7 @@ extern int ssl_flag;
 
 #define KEEPER_CLI_NON_WORKER_SETUP_OPTIONS \
 	"  --pgctl           path to pg_ctl\n" \
-	"  --pgdata          path to data director\n" \
+	"  --pgdata          path to data directory\n" \
 	"  --pghost          PostgreSQL's hostname\n" \
 	"  --pgport          PostgreSQL's port number\n" \
 	"  --listen          PostgreSQL's listen_addresses\n" \
@@ -165,7 +167,7 @@ bool monitor_init_from_pgsetup(Monitor *monitor, PostgresSetup *pgSetup);
 void exit_unless_role_is_keeper(KeeperConfig *kconfig);
 
 /* cli_create_drop_node.c */
-bool cli_create_config(Keeper *keeper, KeeperConfig *config);
+bool cli_create_config(Keeper *keeper);
 void cli_create_pg(Keeper *keeper);
 bool check_or_discover_hostname(KeeperConfig *config);
 void keeper_cli_destroy_node(int argc, char **argv);
@@ -178,11 +180,15 @@ void cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy);
 char * logLevelToString(int logLevel);
 
 bool cli_common_pgsetup_init(ConfigFilePaths *pathnames, PostgresSetup *pgSetup);
+bool cli_common_ensure_formation(KeeperConfig *options);
 
 bool cli_pg_autoctl_reload(const char *pidfile);
 
 int cli_node_metadata_getopts(int argc, char **argv);
 int cli_get_name_getopts(int argc, char **argv);
 void cli_ensure_node_name(Keeper *keeper);
+
+bool discover_hostname(char *hostname, int size,
+					   const char *monitorHostname, int monitorPort);
 
 #endif  /* CLI_COMMON_H */

@@ -328,6 +328,7 @@ read_file_internal(FILE *fileStream,
 	if (data == NULL)
 	{
 		log_error("Failed to allocate %ld bytes", *fileSize);
+		log_error(ALLOCATION_FAILED_ERROR);
 		fclose(fileStream);
 		return false;
 	}
@@ -595,7 +596,7 @@ search_path(const char *filename, char ***result)
 	*result = malloc(pathListLength * sizeof(char *));
 	if (!*result)
 	{
-		log_error("Failed to allocate memory, probably because it's all used");
+		log_error(ALLOCATION_FAILED_ERROR);
 		return 0;
 	}
 
@@ -603,7 +604,7 @@ search_path(const char *filename, char ***result)
 	stringSpace = malloc(pathListLength * MAXPGPATH);
 	if (!stringSpace)
 	{
-		log_error("Failed to allocate memory, probably because it's all used");
+		log_error(ALLOCATION_FAILED_ERROR);
 		free(*result);
 		return 0;
 	}
@@ -920,7 +921,7 @@ init_ps_buffer(int argc, char **argv)
 	{
 		if (i == 0 || end_of_area + 1 == argv[i])
 		{
-			end_of_area = argv[i] + strlen(argv[i]);
+			end_of_area = argv[i] + strlen(argv[i]); /* lgtm[cpp/tainted-arithmetic] */
 		}
 	}
 
@@ -932,7 +933,7 @@ init_ps_buffer(int argc, char **argv)
 	}
 
 	ps_buffer = argv[0];
-	last_status_len = ps_buffer_size = end_of_area - argv[0];
+	last_status_len = ps_buffer_size = end_of_area - argv[0]; /* lgtm[cpp/tainted-arithmetic] */
 
 #else
 	ps_buffer = NULL;
@@ -960,7 +961,7 @@ set_ps_title(const char *title)
 	n = sformat(ps_buffer, ps_buffer_size, "%s", title);
 
 	/* pad our process title string */
-	for (int i = n; i < ps_buffer_size; i++)
+	for (size_t i = n; i < ps_buffer_size; i++)
 	{
 		*(ps_buffer + i) = '\0';
 	}

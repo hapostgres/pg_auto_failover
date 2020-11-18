@@ -37,6 +37,7 @@ typedef struct ConfigFilePaths
 	char state[MAXPGPATH];  /* ~/.local/share/pg_autoctl/${PGDATA}/pg_autoctl.state */
 	char pid[MAXPGPATH];    /* /tmp/${PGDATA}/pg_autoctl.pid */
 	char init[MAXPGPATH];   /* /tmp/${PGDATA}/pg_autoctl.init */
+	char nodes[MAXPGPATH];  /* ~/.local/share/pg_autoctl/${PGDATA}/nodes.json */
 	char systemd[MAXPGPATH];    /* ~/.config/systemd/user/pgautofailover.service */
 } ConfigFilePaths;
 
@@ -69,6 +70,7 @@ bool build_xdg_path(char *dst, XDGResourceType xdgType,
 
 bool SetConfigFilePath(ConfigFilePaths *pathnames, const char *pgdata);
 bool SetStateFilePath(ConfigFilePaths *pathnames, const char *pgdata);
+bool SetNodesFilePath(ConfigFilePaths *pathnames, const char *pgdata);
 bool SetPidFilePath(ConfigFilePaths *pathnames, const char *pgdata);
 
 pgAutoCtlNodeRole ProbeConfigurationFileRole(const char *filename);

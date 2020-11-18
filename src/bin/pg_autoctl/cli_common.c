@@ -37,6 +37,9 @@ bool createAndRun = false;
 bool outputJSON = false;
 int ssl_flag = 0;
 
+/* stores --node-id, only used with --disable-monitor */
+int monitorDisabledNodeId = -1;
+
 static void stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathnames,
 													   PostgresSetup *pgSetup);
 
@@ -61,6 +64,7 @@ static void stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathname
  *		{ "formation", required_argument, NULL, 'f' },
  *		{ "group", required_argument, NULL, 'g' },
  *		{ "monitor", required_argument, NULL, 'm' },
+ *		{ "node-id", required_argument, NULL, 'I' },
  *		{ "disable-monitor", no_argument, NULL, 'M' },
  *		{ "version", no_argument, NULL, 'V' },
  *		{ "verbose", no_argument, NULL, 'v' },
@@ -281,6 +285,19 @@ cli_common_keeper_getopts(int argc, char **argv,
 				break;
 			}
 
+			case 'I':
+			{
+				/* { "node-id", required_argument, NULL, 'I' }, */
+				if (!stringToInt(optarg, &monitorDisabledNodeId))
+				{
+					log_fatal("--node-id argument is not a valid ID: \"%s\"",
+							  optarg);
+					exit(EXIT_CODE_BAD_ARGS);
+				}
+				log_trace("--node-id %d", monitorDisabledNodeId);
+				break;
+			}
+
 			case 'P':
 			{
 				/* { "candidate-priority", required_argument, NULL, 'P'} */
@@ -440,6 +457,19 @@ cli_common_keeper_getopts(int argc, char **argv,
 				break;
 			}
 		}
+	}
+
+	/* check --disable-monitor and --node-id */
+	if (LocalOptionConfig.monitorDisabled && monitorDisabledNodeId == -1)
+	{
+		log_fatal("When using --disable-monitor, also use --node-id");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (!LocalOptionConfig.monitorDisabled && monitorDisabledNodeId != -1)
+	{
+		log_fatal("Option --node-id is only accepted with --disable-monitor");
+		exit(EXIT_CODE_BAD_ARGS);
 	}
 
 	if (errors > 0)
@@ -718,7 +748,7 @@ cli_common_get_set_pgdata_or_exit(PostgresSetup *pgSetup)
 	}
 	else
 	{
-		/* from now on on want PGDATA set in the environment */
+		/* from now on want PGDATA set in the environment */
 		setenv("PGDATA", pgSetup->pgdata, 1);
 	}
 }
@@ -912,23 +942,24 @@ prepare_keeper_options(KeeperConfig *options)
 void
 set_first_pgctl(PostgresSetup *pgSetup)
 {
-	char *version = NULL;
+	/* first, use PG_CONFIG when it exists in the environment */
+	if (set_pg_ctl_from_PG_CONFIG(pgSetup))
+	{
+		return;
+	}
+
+	/* then, use PATH and fetch the first entry there for the monitor */
 	if (!search_path_first("pg_ctl", pgSetup->pg_ctl))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_ARGS);
 	}
-	version = pg_ctl_version(pgSetup->pg_ctl);
 
-	if (version == NULL)
+	if (!pg_ctl_version(pgSetup))
 	{
 		/* errors have been logged in pg_ctl_version */
 		exit(EXIT_CODE_PGCTL);
 	}
-
-	strlcpy(pgSetup->pg_version, version, PG_VERSION_STRING_MAX);
-
-	free(version);
 }
 
 
@@ -1243,29 +1274,47 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 	}
 
 	/* only keeper_remove when we still have a state file around */
-	if (file_exists(config->pathnames.state))
+	if (!config->monitorDisabled)
 	{
-		bool ignoreMonitorErrors = true;
-
-		/* keeper_remove uses log_info() to explain what's happening */
-		if (!keeper_remove(&keeper, config, ignoreMonitorErrors))
+		if (file_exists(config->pathnames.state))
 		{
-			log_fatal("Failed to remove local node from the pg_auto_failover "
-					  "monitor, see above for details");
+			bool ignoreMonitorErrors = true;
 
-			exit(EXIT_CODE_BAD_STATE);
+			/* keeper_remove uses log_info() to explain what's happening */
+			if (!keeper_remove(&keeper, config, ignoreMonitorErrors))
+			{
+				log_fatal("Failed to remove local node from the pg_auto_failover "
+						  "monitor, see above for details");
+
+				exit(EXIT_CODE_BAD_STATE);
+			}
+
+			log_info("Removed pg_autoctl node at \"%s\" from the monitor and "
+					 "removed the state file \"%s\"",
+					 config->pgSetup.pgdata,
+					 config->pathnames.state);
 		}
-
-		log_info("Removed pg_autoctl node at \"%s\" from the monitor and "
-				 "removed the state file \"%s\"",
-				 config->pgSetup.pgdata,
-				 config->pathnames.state);
+		else
+		{
+			log_warn("Skipping node removal from the monitor: "
+					 "state file \"%s\" does not exist",
+					 config->pathnames.state);
+		}
 	}
 	else
 	{
-		log_warn("Skipping node removal from the monitor: "
-				 "state file \"%s\" does not exist",
-				 config->pathnames.state);
+		/* when the monitor is disabled, just remove the state files */
+		if (!unlink_file(config->pathnames.init))
+		{
+			log_error("Failed to remove state init file \"%s\"",
+					  config->pathnames.init);
+		}
+
+		if (!unlink_file(config->pathnames.state))
+		{
+			log_error("Failed to remove state file \"%s\"",
+					  config->pathnames.state);
+		}
 	}
 
 	/*
@@ -1479,6 +1528,66 @@ cli_common_pgsetup_init(ConfigFilePaths *pathnames, PostgresSetup *pgSetup)
 
 
 /*
+ * cli_common_ensure_formation reads the formation name from the configuration
+ * file where it's not been given on the command line. When the local node is a
+ * monitor, the target formation should be found on the command line with the
+ * option --formation, otherwise we default to FORMATION_DEFAULT.
+ */
+bool
+cli_common_ensure_formation(KeeperConfig *options)
+{
+	/* if --formation has been used, we're good */
+	if (!IS_EMPTY_STRING_BUFFER(options->formation))
+	{
+		return true;
+	}
+
+	switch (ProbeConfigurationFileRole(options->pathnames.config))
+	{
+		case PG_AUTOCTL_ROLE_MONITOR:
+		{
+			/* on a monitor node, default to using the "default" formation */
+			strlcpy(options->formation,
+					FORMATION_DEFAULT,
+					sizeof(options->formation));
+			break;
+		}
+
+		case PG_AUTOCTL_ROLE_KEEPER:
+		{
+			KeeperConfig config = { 0 };
+			bool monitorDisabledIsOk = true;
+
+			/* copy the pathnames to our temporary config struct */
+			config.pathnames = options->pathnames;
+
+			if (!keeper_config_read_file_skip_pgsetup(&config,
+													  monitorDisabledIsOk))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
+
+			strlcpy(options->formation,
+					config.formation,
+					sizeof(options->formation));
+
+			log_debug("Using --formation \"%s\"", options->formation);
+			break;
+		}
+
+		default:
+		{
+			log_fatal("Unrecognized configuration file \"%s\"",
+					  options->pathnames.config);
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+	}
+	return true;
+}
+
+
+/*
  * cli_pg_autoctl_reload signals the pg_autoctl process to reload its
  * configuration by sending it the SIGHUP signal.
  */
@@ -1541,7 +1650,7 @@ cli_node_metadata_getopts(int argc, char **argv)
 	options.postgresql_restart_failure_timeout = -1;
 	options.postgresql_restart_failure_max_retries = -1;
 
-	strlcpy(options.formation, "default", NAMEDATALEN);
+	/* do not set a default formation, it should be found in the config file */
 
 	optind = 0;
 
@@ -1702,8 +1811,6 @@ cli_get_name_getopts(int argc, char **argv)
 	options.postgresql_restart_failure_timeout = -1;
 	options.postgresql_restart_failure_max_retries = -1;
 
-	strlcpy(options.formation, "default", NAMEDATALEN);
-
 	optind = 0;
 
 	/*
@@ -1812,6 +1919,13 @@ cli_get_name_getopts(int argc, char **argv)
 
 	/* now that we have the command line parameters, prepare the options */
 	(void) prepare_keeper_options(&options);
+
+	/* ensure --formation, or get it from the configuration file */
+	if (!cli_common_ensure_formation(&options))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
 
 	/* publish our option parsing in the global variable */
 	keeperOptions = options;

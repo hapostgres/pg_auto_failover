@@ -241,6 +241,13 @@ keeper_config_set_pathnames_from_pgdata(ConfigFilePaths *pathnames,
 		return false;
 	}
 
+	if (!SetNodesFilePath(pathnames, pgdata))
+	{
+		log_fatal("Failed to set pid filename from PGDATA \"%s\","
+				  " see above for details.", pgdata);
+		return false;
+	}
+
 	if (!SetPidFilePath(pathnames, pgdata))
 	{
 		log_fatal("Failed to set pid filename from PGDATA \"%s\","

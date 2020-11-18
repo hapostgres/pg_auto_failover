@@ -200,7 +200,7 @@ supervisor_loop(Supervisor *supervisor)
 		}
 		else
 		{
-			/* avoid buzy looping on waitpid(WNOHANG) */
+			/* avoid busy looping on waitpid(WNOHANG) */
 			pg_usleep(100 * 1000); /* 100 ms */
 		}
 
@@ -897,9 +897,12 @@ supervisor_find_service_pid(const char *pidfile,
 		{
 			*separator = '\0';
 			stringToInt(fileLines[lineNumber], pid);
+			free(fileContents);
 			return true;
 		}
 	}
+
+	free(fileContents);
 
 	return false;
 }

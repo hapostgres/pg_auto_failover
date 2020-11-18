@@ -28,6 +28,7 @@
 #include "monitor.h"
 #include "monitor_config.h"
 #include "pgctl.h"
+#include "pgsetup.h"
 #include "primary_standby.h"
 
 
@@ -55,7 +56,8 @@ static CommandLine do_show_lookup_command =
 
 static CommandLine do_show_hostname_command =
 	make_command("hostname",
-				 "Print this node's default hostname", "", "",
+				 "Print this node's default hostname",
+				 "[postgres://monitor/uri]", "",
 				 NULL, cli_show_hostname);
 
 static CommandLine do_show_reverse_command =
@@ -205,10 +207,59 @@ cli_show_hostname(int argc, char **argv)
 	char localIpAddress[BUFSIZE];
 	char hostname[_POSIX_HOST_NAME_MAX];
 
+	char monitorHostname[_POSIX_HOST_NAME_MAX];
+	int monitorPort = pgsetup_get_pgport();
+
+	/*
+	 * When no argument is used, use hostname(3) and 5432, as we would for a
+	 * monitor (pg_autoctl create monitor).
+	 */
+	if (argc == 0)
+	{
+		if (ipaddrGetLocalHostname(monitorHostname, sizeof(hostname)))
+		{
+			/* we found our hostname(3), use the default pg port */
+			fformat(stdout, "%s\n", monitorHostname);
+			exit(EXIT_CODE_QUIT);
+		}
+		else
+		{
+			/* use the default host/port to find the default local IP address */
+			strlcpy(monitorHostname,
+					DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME,
+					_POSIX_HOST_NAME_MAX);
+
+			monitorPort = DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT;
+		}
+	}
+
+	/*
+	 * When one argument is given, it is expected to be the monitor Postgres
+	 * connection string, and we then act as a keeper node.
+	 */
+	else if (argc == 1)
+	{
+		if (!hostname_from_uri(argv[0],
+							   monitorHostname, _POSIX_HOST_NAME_MAX,
+							   &monitorPort))
+		{
+			log_fatal("Failed to determine monitor hostname when parsing "
+					  "Postgres URI \"%s\"", argv[0]);
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		log_info("Using monitor hostname \"%s\" and port %d",
+				 monitorHostname,
+				 monitorPort);
+	}
+	else
+	{
+		commandline_print_usage(&do_show_hostname_command, stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
 	/* fetch the default local address used when connecting remotely */
-	if (!fetchLocalIPAddress(ipAddr, BUFSIZE,
-							 DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME,
-							 DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT))
+	if (!fetchLocalIPAddress(ipAddr, BUFSIZE, monitorHostname, monitorPort))
 	{
 		log_warn("Failed to determine network configuration.");
 		exit(EXIT_CODE_INTERNAL_ERROR);

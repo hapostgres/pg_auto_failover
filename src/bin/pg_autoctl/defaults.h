@@ -108,6 +108,7 @@
 #define KEEPER_PID_FILENAME "pg_autoctl.pid"
 #define KEEPER_INIT_STATE_FILENAME "pg_autoctl.init"
 #define KEEPER_POSTGRES_STATE_FILENAME "pg_autoctl.pg"
+#define KEEPER_NODES_FILENAME "nodes.json"
 
 #define KEEPER_SYSTEMD_SERVICE "pgautofailover"
 #define KEEPER_SYSTEMD_FILENAME "pgautofailover.service"
@@ -156,5 +157,9 @@
  * This opens the file in append mode and creates it if it doesn't exist.
  */
 #define FOPEN_FLAGS_A O_APPEND | O_RDWR | O_CREAT
+
+
+/* when malloc fails, what do we tell our users */
+#define ALLOCATION_FAILED_ERROR "Failed to allocate memory: %m"
 
 #endif /* DEFAULTS_H */

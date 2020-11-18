@@ -89,18 +89,16 @@ pg_setup_init(PostgresSetup *pgSetup,
 			/* we might not have fetched the version yet */
 			if (IS_EMPTY_STRING_BUFFER(pgSetup->pg_version))
 			{
-				char *version = pg_ctl_version(options->pg_ctl);
-
-				if (version == NULL)
+				/* also cache the version in options */
+				if (!pg_ctl_version(options))
 				{
 					/* we already logged about it */
 					return false;
 				}
 
-				/* also cache the version in options */
-				strlcpy(options->pg_version, version, PG_VERSION_STRING_MAX);
-				strlcpy(pgSetup->pg_version, version, PG_VERSION_STRING_MAX);
-				free(version);
+				strlcpy(pgSetup->pg_version,
+						options->pg_version,
+						sizeof(pgSetup->pg_version));
 
 				log_debug("pg_setup_init: %s version %s",
 						  pgSetup->pg_ctl, pgSetup->pg_version);
@@ -744,7 +742,7 @@ bool
 pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 									 char *connectionString)
 {
-	char pg_regress_sock_dir[MAXPGPATH];
+	char pg_regress_sock_dir[MAXPGPATH] = { 0 };
 	bool pg_regress_sock_dir_exists = env_exists("PG_REGRESS_SOCK_DIR");
 	PQExpBuffer connStringBuffer = createPQExpBuffer();
 
@@ -900,7 +898,7 @@ pg_setup_is_ready(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk)
 	 *
 	 * This makes sure we enter the main loop and attempt to read the
 	 * postmaster.pid file at least once: if Postgres was stopped, then the
-	 * file that we've read previously might not exists any-more.
+	 * file that we've read previously might not exists anymore.
 	 */
 	pgSetup->pm_status = POSTMASTER_STATUS_UNKNOWN;
 

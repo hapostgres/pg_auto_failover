@@ -82,29 +82,86 @@ static bool pg_write_standby_signal(const char *pgdata,
 
 
 /*
- * Get pg_ctl --version output.
- *
- * The caller should free the return value if not NULL.
+ * Get pg_ctl --version output in pgSetup->pg_version.
  */
-char *
-pg_ctl_version(const char *pg_ctl_path)
+bool
+pg_ctl_version(PostgresSetup *pgSetup)
 {
 	char *version;
-	Program prog = run_program(pg_ctl_path, "--version", NULL);
+	Program prog = run_program(pgSetup->pg_ctl, "--version", NULL);
 
 	if (prog.returnCode != 0)
 	{
 		errno = prog.error;
 		log_error("Failed to run \"pg_ctl --version\" using program \"%s\": %m",
-				  pg_ctl_path);
+				  pgSetup->pg_ctl);
 		free_program(&prog);
-		return NULL;
+		return false;
 	}
 
 	version = parse_version_number(prog.stdOut);
 	free_program(&prog);
 
-	return version;
+	if (version == NULL)
+	{
+		return false;
+	}
+
+	strlcpy(pgSetup->pg_version, version, PG_VERSION_STRING_MAX);
+	free(version);
+
+	return true;
+}
+
+
+/*
+ * set_pg_ctl_from_PG_CONFIG sets given pgSetup->pg_ctl to the pg_ctl binary
+ * installed in the bindir of the target Postgres installation:
+ *
+ *  $(${PG_CONFIG} --bindir)/pg_ctl
+ */
+bool
+set_pg_ctl_from_config_bindir(PostgresSetup *pgSetup, const char *pg_config)
+{
+	char pg_ctl[MAXPGPATH] = { 0 };
+	Program prog = run_program(pg_config, "--bindir", NULL);
+
+	char *bindir;
+	char *lines[1];
+
+	if (prog.returnCode != 0)
+	{
+		errno = prog.error;
+		log_error("Failed to run \"pg_config --bindir\" using program \"%s\": %m",
+				  pg_config);
+		free_program(&prog);
+		return false;
+	}
+
+	if (splitLines(prog.stdOut, lines, 1) != 1)
+	{
+		log_error("Unable to parse output from pg_config --bindir");
+		free_program(&prog);
+		return false;
+	}
+
+	bindir = lines[0];
+	join_path_components(pg_ctl, bindir, "pg_ctl");
+
+	/* we're now done with the Program and its output */
+	free_program(&prog);
+
+	if (!file_exists(pg_ctl))
+	{
+		log_error("Failed to find pg_ctl at \"%s\" from PG_CONFIG at \"%s\"",
+				  pgSetup->pg_ctl,
+				  pg_config);
+		return false;
+	}
+
+	strlcpy(pgSetup->pg_ctl, pg_ctl, sizeof(pgSetup->pg_ctl));
+
+	return true;
 }
 
 
@@ -186,6 +243,51 @@ pg_controldata(PostgresSetup *pgSetup, bool missing_ok)
 
 
 /*
+ * set_pg_ctl_from_PG_CONFIG sets the path to pg_ctl following the exported
+ * environment variable PG_CONFIG, when it is found in the environment.
+ *
+ * Postgres developer environments often define PG_CONFIG in the environment to
+ * build extensions for a specific version of Postgres. Let's use the hint here
+ * too.
+ */
+bool
+set_pg_ctl_from_PG_CONFIG(PostgresSetup *pgSetup)
+{
+	char PG_CONFIG[MAXPGPATH] = { 0 };
+
+	if (!env_exists("PG_CONFIG"))
+	{
+		/* then we don't use PG_CONFIG to find pg_ctl */
+		return false;
+	}
+
+	if (!get_env_copy("PG_CONFIG", PG_CONFIG, sizeof(PG_CONFIG)))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	if (!set_pg_ctl_from_config_bindir(pgSetup, PG_CONFIG))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	if (!pg_ctl_version(pgSetup))
+	{
+		log_fatal("Failed to get version info from %s --version",
+				  pgSetup->pg_ctl);
+		return false;
+	}
+
+	log_debug("Found pg_ctl for PostgreSQL %s at %s following PG_CONFIG",
+			  pgSetup->pg_version, pgSetup->pg_ctl);
+
+	return true;
+}
+
+
+/*
  * Find "pg_ctl" programs in the PATH. If a single one exists, set its absolute
  * location in pg_ctl, and the PostgreSQL version number in pg_version.
  *
@@ -195,27 +297,40 @@ int
 config_find_pg_ctl(PostgresSetup *pgSetup)
 {
 	char **pg_ctls = NULL;
-	int n = search_path("pg_ctl", &pg_ctls);
+	int n = -1;
 
 	pgSetup->pg_ctl[0] = '\0';
 	pgSetup->pg_version[0] = '\0';
 
+	/*
+	 * Postgres developer environments often define PG_CONFIG in the
+	 * environment to build extensions for a specific version of Postgres.
+	 * Let's use the hint here too.
+	 */
+	if (set_pg_ctl_from_PG_CONFIG(pgSetup))
+	{
+		return 1;
+	}
+
+	/* no PG_CONFIG. let's use the more classic approach with PATH instead */
+	n = search_path("pg_ctl", &pg_ctls);
+
 	if (n == 1)
 	{
 		char *program = pg_ctls[0];
-		char *version = pg_ctl_version(program);
-		if (version == NULL)
+
+		strlcpy(pgSetup->pg_ctl, program, MAXPGPATH);
+
+		if (!pg_ctl_version(pgSetup))
 		{
-			log_fatal("Failed to get version info from %s --version", program);
+			log_fatal("Failed to get version info from %s --version",
+					  pgSetup->pg_ctl);
 			return 0;
 		}
 
-		log_debug("Found pg_ctl for PostgreSQL %s at %s", version, program);
-
-		strlcpy(pgSetup->pg_ctl, program, MAXPGPATH);
-		strlcpy(pgSetup->pg_version, version, PG_VERSION_STRING_MAX);
-
-		free(version);
+		log_debug("Found pg_ctl for PostgreSQL %s at %s",
+				  pgSetup->pg_version,
+				  pgSetup->pg_ctl);
 	}
 	else if (n == 0)
 	{
@@ -225,9 +340,11 @@ config_find_pg_ctl(PostgresSetup *pgSetup)
 	{
 		for (int i = 0; i < n; i++)
 		{
-			char *program = pg_ctls[i];
-			char *version = pg_ctl_version(program);
-			if (version == NULL)
+			PostgresSetup currentPgSetup = { 0 };
+
+			strlcpy(currentPgSetup.pg_ctl, pg_ctls[i], MAXPGPATH);
+
+			if (!pg_ctl_version(&currentPgSetup))
 			{
 				/*
 				 * Because of this it's possible that there's now only a single
@@ -239,12 +356,14 @@ config_find_pg_ctl(PostgresSetup *pgSetup)
 				 * intention clear by using the --pg_ctl option (or changing
 				 * PATH).
 				 */
-				log_warn("Failed to get version info from %s --version", program);
+				log_warn("Failed to get version info from %s --version",
+						 currentPgSetup.pg_ctl);
 				continue;
 			}
 
-			log_info("Found %s for pg version %s", program, version);
-			free(version);
+			log_info("Found %s for pg version %s",
+					 currentPgSetup.pg_ctl,
+					 currentPgSetup.pg_version);
 		}
 	}
 
@@ -362,23 +481,24 @@ pg_auto_failover_default_settings_file_exists(PostgresSetup *pgSetup)
 	char *contents = NULL;
 	long size = 0L;
 
+	bool fileExistsWithContent = false;
+
 	join_path_components(pgAutoFailoverDefaultsConfigPath,
 						 pgSetup->pgdata,
 						 AUTOCTL_DEFAULTS_CONF_FILENAME);
 
 
 	/* make sure the file exists and is not empty (race conditions) */
-	if (!file_exists(pgAutoFailoverDefaultsConfigPath))
+	if (!read_file_if_exists(pgAutoFailoverDefaultsConfigPath, &contents, &size))
 	{
 		return false;
 	}
 
-	if (!read_file(pgAutoFailoverDefaultsConfigPath, &contents, &size))
-	{
-		return false;
-	}
+	/* we don't actually need the contents here */
+	free(contents);
+	fileExistsWithContent = size > 0;
 
-	return contents > 0;
+	return fileExistsWithContent;
 }
 
 
@@ -1139,6 +1259,8 @@ pg_log_startup(const char *pgdata, int logLevel)
 		{
 			log_level(logLevel, "%s", lines[lineNumber]);
 		}
+
+		free(fileContents);
 	}
 
 	/*
@@ -1244,6 +1366,8 @@ pg_log_startup(const char *pgdata, int logLevel)
 						log_level(logLevel, "%s", lines[lineNumber]);
 					}
 				}
+
+				free(fileContents);
 			}
 		}
 	}
@@ -1300,6 +1424,8 @@ pg_log_recovery_setup(const char *pgdata, int logLevel)
 				log_debug("Configuration file \"%s\" is empty",
 						  recoveryConfPath);
 			}
+
+			free(fileContents);
 		}
 	}
 
@@ -1682,8 +1808,11 @@ prepare_recovery_settings(const char *pgdata,
 	/* when reaching REPORT_LSN we set recovery with no primary conninfo */
 	if (!IS_EMPTY_STRING_BUFFER(primaryNode->host))
 	{
-		log_debug("prepare_recovery_settings: primary node %s:%d",
-				  primaryNode->host, primaryNode->port);
+		log_debug("prepare_recovery_settings: primary node %d \"%s\" (%s:%d)",
+				  primaryNode->nodeId,
+				  primaryNode->name,
+				  primaryNode->host,
+				  primaryNode->port);
 
 		if (!prepare_primary_conninfo(primaryConnInfo,
 									  MAXCONNINFO,

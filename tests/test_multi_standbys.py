@@ -10,6 +10,8 @@ node1 = None
 node2 = None
 node3 = None
 node4 = None
+node5 = None
+node6 = None
 
 def setup_module():
     global cluster
@@ -111,27 +113,38 @@ def test_005_number_sync_standbys():
     print("set number_sync_standbys = 2")
     assert node1.set_number_sync_standbys(2)
     assert node1.get_number_sync_standbys() == 2
-    print("synchronous_standby_names = '%s'" %
-          node1.get_synchronous_standby_names())
+
+    node1.print_synchronous_standby_names()
+    eq_(node1.get_synchronous_standby_names(),
+        node1.get_synchronous_standby_names_local())
 
     print("set number_sync_standbys = 0")
     assert node1.set_number_sync_standbys(0)
     assert node1.get_number_sync_standbys() == 0
-    print("synchronous_standby_names = '%s'" %
-          node1.get_synchronous_standby_names())
+
+    node1.print_synchronous_standby_names()
+    eq_(node1.get_synchronous_standby_names(),
+        node1.get_synchronous_standby_names_local())
 
     print("set number_sync_standbys = 1")
     assert node1.set_number_sync_standbys(1)
     assert node1.get_number_sync_standbys() == 1
-    print("synchronous_standby_names = '%s'" %
-          node1.get_synchronous_standby_names())
+
+    node1.print_synchronous_standby_names()
+    eq_(node1.get_synchronous_standby_names(),
+        node1.get_synchronous_standby_names_local())
 
 def test_006_number_sync_standbys_trigger():
     assert node1.set_number_sync_standbys(2)
     assert node1.get_number_sync_standbys() == 2
 
     node4.drop()
-    assert node1.get_number_sync_standbys() == 1
+
+    # check synchronous_standby_names
+    node1.print_synchronous_standby_names()
+    eq_(node1.get_synchronous_standby_names(),
+        node1.get_synchronous_standby_names_local())
+
     assert node1.wait_until_state(target_state="primary")
 
     # there's no state change to instruct us that the replication slot
@@ -176,6 +189,9 @@ def test_009_failover():
     assert node3.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="secondary")
 
+    eq_(node2.get_synchronous_standby_names(),
+        node2.get_synchronous_standby_names_local())
+
     assert node1.has_needed_replication_slots()
     assert node2.has_needed_replication_slots()
     assert node3.has_needed_replication_slots()
@@ -200,6 +216,9 @@ def test_012_fail_primary():
 
     assert node1.wait_until_state(target_state="primary")
     assert node3.wait_until_state(target_state="secondary")
+
+    eq_(node1.get_synchronous_standby_names(),
+        node1.get_synchronous_standby_names_local())
 
 def test_013_remove_old_primary():
     node2.drop()

@@ -440,10 +440,8 @@ NodeActive(char *formationId, AutoFailoverNodeState *currentNodeState)
 			{
 				LogAndNotifyMessage(
 					message, BUFSIZE,
-					"Node %d (%s:%d) reported new state \"%s\" with LSN %X/%X",
-					pgAutoFailoverNode->nodeId,
-					pgAutoFailoverNode->nodeHost,
-					pgAutoFailoverNode->nodePort,
+					NODE_FORMAT " reported new state \"%s\" with LSN %X/%X",
+					NODE_FORMAT_ARGS(pgAutoFailoverNode),
 					ReplicationStateGetName(currentNodeState->replicationState),
 					(uint32) (pgAutoFailoverNode->reportedLSN >> 32),
 					(uint32) pgAutoFailoverNode->reportedLSN);
@@ -452,10 +450,8 @@ NodeActive(char *formationId, AutoFailoverNodeState *currentNodeState)
 			{
 				LogAndNotifyMessage(
 					message, BUFSIZE,
-					"Node %d (%s:%d) reported new state \"%s\"",
-					pgAutoFailoverNode->nodeId,
-					pgAutoFailoverNode->nodeHost,
-					pgAutoFailoverNode->nodePort,
+					NODE_FORMAT " reported new state \"%s\"",
+					NODE_FORMAT_ARGS(pgAutoFailoverNode),
 					ReplicationStateGetName(currentNodeState->replicationState));
 			}
 
@@ -1048,9 +1044,9 @@ RemoveNode(AutoFailoverNode *currentNode)
 
 			LogAndNotifyMessage(
 				message, BUFSIZE,
-				"Setting goal state of node %d (%s:%d) to report_lsn "
-				"after primary node removal.",
-				node->nodeId, node->nodeHost, node->nodePort);
+				"Setting goal state of " NODE_FORMAT
+				" to report_lsn after primary node removal.",
+				NODE_FORMAT_ARGS(node));
 
 			SetNodeGoalState(node, REPLICATION_STATE_REPORT_LSN, message);
 		}
@@ -1061,11 +1057,8 @@ RemoveNode(AutoFailoverNode *currentNode)
 
 	LogAndNotifyMessage(
 		message, BUFSIZE,
-		"Removing node %d \"%s\" (%s:%d) from formation \"%s\" and group %d",
-		currentNode->nodeId,
-		currentNode->nodeName,
-		currentNode->nodeHost,
-		currentNode->nodePort,
+		"Removing " NODE_FORMAT " from formation \"%s\" and group %d",
+		NODE_FORMAT_ARGS(currentNode),
 		currentNode->formationId,
 		currentNode->groupId);
 
@@ -1077,9 +1070,6 @@ RemoveNode(AutoFailoverNode *currentNode)
 	 * quorum set to true (and probably is).
 	 */
 	countSyncStandbys = CountSyncStandbys(otherNodesGroupList) - 1;
-
-	LogAndNotifyMessage(message, BUFSIZE,
-						"CountSyncStandbys: %d", countSyncStandbys);
 
 	if (countSyncStandbys < (formation->number_sync_standbys + 1))
 	{
@@ -1128,7 +1118,32 @@ RemoveNode(AutoFailoverNode *currentNode)
 
 		if (primaryNode)
 		{
+			ReplicationState goalState = primaryNode->goalState;
+
 			(void) ProceedGroupState(primaryNode);
+
+			/*
+			 * When the removal of a secondary node has no impact on the
+			 * primary node state, we still need to change the replication
+			 * settings to adjust to the possibly new
+			 * synchronous_standby_names, so we force APPLY_SETTINGS in that
+			 * case.
+			 */
+			if (primaryNode->goalState == goalState &&
+				goalState != REPLICATION_STATE_APPLY_SETTINGS)
+			{
+				LogAndNotifyMessage(
+					message, BUFSIZE,
+					"Setting goal state of " NODE_FORMAT
+					" to apply_settings after removing standby " NODE_FORMAT
+					" from formation %s.",
+					NODE_FORMAT_ARGS(primaryNode),
+					NODE_FORMAT_ARGS(currentNode),
+					formation->formationId);
+
+				SetNodeGoalState(primaryNode,
+								 REPLICATION_STATE_APPLY_SETTINGS, message);
+			}
 		}
 	}
 
@@ -1196,11 +1211,9 @@ perform_failover(PG_FUNCTION_ARGS)
 			ereport(ERROR,
 					(errmsg("couldn't find the standby node in "
 							"formation \"%s\", group %d with primary node "
-							"%d (%s:%d)",
+							NODE_FORMAT,
 							formationId, groupId,
-							primaryNode->nodeId,
-							primaryNode->nodeHost,
-							primaryNode->nodePort)));
+							NODE_FORMAT_ARGS(primaryNode))));
 		}
 
 		secondaryNode = linitial(standbyNodesGroupList);
@@ -1211,12 +1224,12 @@ perform_failover(PG_FUNCTION_ARGS)
 				ReplicationStateGetName(secondaryNode->goalState);
 
 			ereport(ERROR,
-					(errmsg("standby node %d (%s:%d) is in state \"%s\", which "
-							"prevents the node for being a failover candidate",
-							secondaryNode->nodeId,
-							secondaryNode->nodeHost,
-							secondaryNode->nodePort,
-							secondaryState)));
+					(errmsg(
+						 "standby " NODE_FORMAT
+						 " is in state \"%s\", "
+						 "which prevents the node for being a failover candidate",
+						 NODE_FORMAT_ARGS(secondaryNode),
+						 secondaryState)));
 		}
 
 		/*
@@ -1232,18 +1245,16 @@ perform_failover(PG_FUNCTION_ARGS)
 			ereport(ERROR,
 					(errmsg(
 						 "cannot fail over: primary node is not in a stable state"),
-					 errdetail("node %d (%s:%d) has reported state \"%s\" and "
+					 errdetail(NODE_FORMAT
+							   "has reported state \"%s\" and "
 							   "is assigned state \"%s\", "
-							   "and node %d (%s:%d) has reported state \"%s\" "
+							   "and " NODE_FORMAT
+							   "has reported state \"%s\" "
 							   "and is assigned state \"%s\"",
-							   primaryNode->nodeId,
-							   primaryNode->nodeHost,
-							   primaryNode->nodePort,
+							   NODE_FORMAT_ARGS(primaryNode),
 							   ReplicationStateGetName(primaryNode->reportedState),
 							   ReplicationStateGetName(primaryNode->goalState),
-							   secondaryNode->nodeId,
-							   secondaryNode->nodeHost,
-							   secondaryNode->nodePort,
+							   NODE_FORMAT_ARGS(secondaryNode),
 							   ReplicationStateGetName(secondaryNode->reportedState),
 							   ReplicationStateGetName(secondaryNode->goalState)),
 					 errhint("a stable state must be observed to "
@@ -1252,15 +1263,11 @@ perform_failover(PG_FUNCTION_ARGS)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of node %d (%s:%d) to draining "
-			"and node %d (%s:%d) to prepare_promotion "
-			"after a user-initiated failover.",
-			primaryNode->nodeId,
-			primaryNode->nodeHost,
-			primaryNode->nodePort,
-			secondaryNode->nodeId,
-			secondaryNode->nodeHost,
-			secondaryNode->nodePort);
+			"Setting goal state of " NODE_FORMAT
+			" to draining and " NODE_FORMAT
+			" to prepare_promotion after a user-initiated failover.",
+			NODE_FORMAT_ARGS(primaryNode),
+			NODE_FORMAT_ARGS(secondaryNode));
 
 		SetNodeGoalState(primaryNode,
 						 REPLICATION_STATE_DRAINING, message);
@@ -1277,11 +1284,9 @@ perform_failover(PG_FUNCTION_ARGS)
 		/* so we have at least one candidate, let's get started */
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of node %d (%s:%d) at LSN %X/%X to draining "
-			"after a user-initiated failover.",
-			primaryNode->nodeId,
-			primaryNode->nodeHost,
-			primaryNode->nodePort,
+			"Setting goal state of " NODE_FORMAT
+			"at LSN %X/%X to draining after a user-initiated failover.",
+			NODE_FORMAT_ARGS(primaryNode),
 			(uint32) (primaryNode->reportedLSN >> 32),
 			(uint32) primaryNode->reportedLSN);
 
@@ -1417,12 +1422,9 @@ perform_promotion(PG_FUNCTION_ARGS)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Updating candidate priority to %d for node %d \"%s\" (%s:%d)",
+			"Updating candidate priority to %d for " NODE_FORMAT,
 			currentNode->candidatePriority,
-			currentNode->nodeId,
-			currentNode->nodeName,
-			currentNode->nodeHost,
-			currentNode->nodePort);
+			NODE_FORMAT_ARGS(currentNode));
 
 		NotifyStateChange(currentNode, message);
 
@@ -1587,9 +1589,10 @@ start_maintenance(PG_FUNCTION_ARGS)
 		 */
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of node %d (%s:%d) to prepare_maintenance "
+			"Setting goal state of " NODE_FORMAT
+			" to prepare_maintenance "
 			"after a user-initiated start_maintenance call.",
-			currentNode->nodeId, currentNode->nodeHost, currentNode->nodePort);
+			NODE_FORMAT_ARGS(currentNode));
 
 		SetNodeGoalState(currentNode,
 						 REPLICATION_STATE_PREPARE_MAINTENANCE, message);
@@ -1603,11 +1606,12 @@ start_maintenance(PG_FUNCTION_ARGS)
 			 */
 			LogAndNotifyMessage(
 				message, BUFSIZE,
-				"Setting goal state of %s:%d to prepare_maintenance "
-				"and %s:%d to prepare_promotion "
+				"Setting goal state of " NODE_FORMAT
+				" to prepare_maintenance and " NODE_FORMAT
+				" to prepare_promotion "
 				"after a user-initiated start_maintenance call.",
-				currentNode->nodeHost, currentNode->nodePort,
-				otherNode->nodeHost, otherNode->nodePort);
+				NODE_FORMAT_ARGS(currentNode),
+				NODE_FORMAT_ARGS(otherNode));
 
 			SetNodeGoalState(otherNode,
 							 REPLICATION_STATE_PREPARE_PROMOTION, message);
@@ -1641,11 +1645,13 @@ start_maintenance(PG_FUNCTION_ARGS)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of %s:%d to %s and %s:%d to "
-			"wait_maintenance after a user-initiated start_maintenance call.",
-			primaryNode->nodeHost, primaryNode->nodePort,
+			"Setting goal state of " NODE_FORMAT
+			" to %s and " NODE_FORMAT
+			" to wait_maintenance "
+			"after a user-initiated start_maintenance call.",
+			NODE_FORMAT_ARGS(primaryNode),
 			ReplicationStateGetName(primaryGoalState),
-			currentNode->nodeHost, currentNode->nodePort);
+			NODE_FORMAT_ARGS(currentNode));
 
 		SetNodeGoalState(primaryNode, primaryGoalState, message);
 		SetNodeGoalState(currentNode, REPLICATION_STATE_WAIT_MAINTENANCE, message);
@@ -1655,17 +1661,13 @@ start_maintenance(PG_FUNCTION_ARGS)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("cannot start maintenance: current state for "
-						"node %d (%s:%d) is \"%s\", "
-						"expected \"secondary\" or \"catchingup\", "
-						"and current state for primary node %d (%s:%d) "
+						NODE_FORMAT
+						" is \"%s\", expected \"secondary\" or \"catchingup\", "
+						"and current state for primary " NODE_FORMAT
 						"is \"%s\" ➜ \"%s\" ",
-						currentNode->nodeId,
-						currentNode->nodeHost,
-						currentNode->nodePort,
+						NODE_FORMAT_ARGS(currentNode),
 						ReplicationStateGetName(currentNode->reportedState),
-						primaryNode->nodeId,
-						primaryNode->nodeHost,
-						primaryNode->nodePort,
+						NODE_FORMAT_ARGS(primaryNode),
 						ReplicationStateGetName(primaryNode->reportedState),
 						ReplicationStateGetName(primaryNode->goalState))));
 	}
@@ -1706,8 +1708,9 @@ stop_maintenance(PG_FUNCTION_ARGS)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("cannot stop maintenance when current state for "
-						"node %s:%d is not \"maintenance\"",
-						currentNode->nodeHost, currentNode->nodePort),
+						NODE_FORMAT
+						" is not \"maintenance\"",
+						NODE_FORMAT_ARGS(currentNode)),
 				 errdetail("Current reported state is \"%s\" and "
 						   "assigned state is \"%s\"",
 						   ReplicationStateGetName(currentNode->reportedState),
@@ -1733,9 +1736,9 @@ stop_maintenance(PG_FUNCTION_ARGS)
 
 	LogAndNotifyMessage(
 		message, BUFSIZE,
-		"Setting goal state of %s:%d to catchingup  "
-		"after a user-initiated stop_maintenance call.",
-		currentNode->nodeHost, currentNode->nodePort);
+		"Setting goal state of " NODE_FORMAT
+		" to catchingup  after a user-initiated stop_maintenance call.",
+		NODE_FORMAT_ARGS(currentNode));
 
 	SetNodeGoalState(currentNode, REPLICATION_STATE_CATCHINGUP, message);
 
@@ -1837,11 +1840,9 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Updating candidate priority to %d for node %d (%s:%d)",
+			"Updating candidate priority to %d for " NODE_FORMAT,
 			currentNode->candidatePriority,
-			currentNode->nodeId,
-			currentNode->nodeHost,
-			currentNode->nodePort);
+			NODE_FORMAT_ARGS(currentNode));
 
 		NotifyStateChange(currentNode, message);
 	}
@@ -1866,10 +1867,9 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 			ereport(ERROR,
 					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 					 errmsg("cannot set candidate priority when current state "
-							"for primary node %d (%s:%d) is \"%s\"",
-							primaryNode->nodeId,
-							primaryNode->nodeHost,
-							primaryNode->nodePort,
+							"for primary " NODE_FORMAT
+							" is \"%s\"",
+							NODE_FORMAT_ARGS(primaryNode),
 							ReplicationStateGetName(primaryNode->reportedState)),
 					 errdetail("The primary node so must be in state \"primary\" "
 							   "to be able to apply configuration changes to "
@@ -1878,10 +1878,11 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of node %d (%s:%d) to apply_settings "
-			"after updating node %d (%s:%d) candidate priority to %d.",
-			primaryNode->nodeId, primaryNode->nodeHost, primaryNode->nodePort,
-			currentNode->nodeId, currentNode->nodeHost, currentNode->nodePort,
+			"Setting goal state of " NODE_FORMAT
+			" to apply_settings after updating " NODE_FORMAT
+			" candidate priority to %d.",
+			NODE_FORMAT_ARGS(primaryNode),
+			NODE_FORMAT_ARGS(currentNode),
 			currentNode->candidatePriority);
 
 		SetNodeGoalState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS, message);
@@ -1983,12 +1984,9 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Updating replicationQuorum to %s for node %d \"%s\" (%s:%d)",
+			"Updating replicationQuorum to %s for " NODE_FORMAT,
 			currentNode->replicationQuorum ? "true" : "false",
-			currentNode->nodeId,
-			currentNode->nodeName,
-			currentNode->nodeHost,
-			currentNode->nodePort);
+			NODE_FORMAT_ARGS(currentNode));
 
 		NotifyStateChange(currentNode, message);
 	}
@@ -2013,8 +2011,9 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 			ereport(ERROR,
 					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 					 errmsg("cannot set replication quorum when current state "
-							"for primary node %s:%d is \"%s\"",
-							primaryNode->nodeHost, primaryNode->nodePort,
+							"for primary " NODE_FORMAT
+							" is \"%s\"",
+							NODE_FORMAT_ARGS(primaryNode),
 							ReplicationStateGetName(primaryNode->reportedState)),
 					 errdetail("The primary node so must be in state \"primary\" "
 							   "to be able to apply configuration changes to "
@@ -2023,13 +2022,12 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of node %d \"%s\" (%s:%d) to apply_settings "
-			"after updating replication quorum to %s for node %d \"%s\" (%s:%d).",
-			primaryNode->nodeId, primaryNode->nodeName,
-			primaryNode->nodeHost, primaryNode->nodePort,
+			"Setting goal state of " NODE_FORMAT
+			" to apply_settings after updating replication quorum to %s for "
+			NODE_FORMAT,
+			NODE_FORMAT_ARGS(primaryNode),
 			currentNode->replicationQuorum ? "true" : "false",
-			currentNode->nodeId, currentNode->nodeName,
-			currentNode->nodeHost, currentNode->nodePort);
+			NODE_FORMAT_ARGS(currentNode));
 
 		SetNodeGoalState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS, message);
 	}
@@ -2177,7 +2175,7 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 
 		if (secondaryNode != NULL &&
 			secondaryNode->replicationQuorum &&
-			IsCurrentState(secondaryNode, REPLICATION_STATE_SECONDARY))
+			secondaryNode->goalState == REPLICATION_STATE_SECONDARY)
 		{
 			/* enable synchronous replication */
 			PG_RETURN_TEXT_P(cstring_to_text("*"));
