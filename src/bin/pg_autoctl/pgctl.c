@@ -288,16 +288,101 @@ set_pg_ctl_from_PG_CONFIG(PostgresSetup *pgSetup)
 
 
 /*
+ * set_pg_ctl_from_pg_config sets the path to pg_ctl by using pg_config
+ * --bindir when there is a single pg_config found in the PATH.
+ *
+ * When using debian/ubuntu packaging then pg_config is installed as part as
+ * the postgresql-common package in /usr/bin, whereas pg_ctl is installed in a
+ * major version dependent location such as /usr/lib/postgresql/12/bin, and
+ * those locations are not included in the PATH.
+ *
+ * So when we can't find pg_ctl anywhere in the PATH, we look for pg_config
+ * instead, and then use pg_config --bindir to discover the pg_ctl we can use.
+ */
+bool
+set_pg_ctl_from_pg_config(PostgresSetup *pgSetup)
+{
+	char **pg_configs = NULL;
+	int pg_configs_count = search_path("pg_config", &pg_configs);
+
+	bool success = false;
+
+	if (pg_configs_count == 0)
+	{
+		if (!set_pg_ctl_from_config_bindir(pgSetup, pg_configs[0]))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
+		if (!pg_ctl_version(pgSetup))
+		{
+			log_fatal("Failed to get version info from %s --version",
+					  pgSetup->pg_ctl);
+			return false;
+		}
+
+		log_debug("Found pg_ctl for PostgreSQL %s at %s from pg_config "
+				  "found in PATH at \"%s\"",
+				  pgSetup->pg_version, pgSetup->pg_ctl, pg_configs[0]);
+
+		success = true;
+	}
+	else if (pg_configs_count == 0)
+	{
+		log_warn("Failed to find either pg_ctl pg_config in PATH");
+	}
+	else
+	{
+		for (int i = 0; i < pg_configs_count; i++)
+		{
+			PostgresSetup currentPgSetup = { 0 };
+
+			strlcpy(currentPgSetup.pg_ctl, pg_configs[i], MAXPGPATH);
+
+			if (!pg_ctl_version(&currentPgSetup))
+			{
+				/*
+				 * Because of this it's possible that there's now only a single
+				 * working version of pg_ctl found in PATH. If that's the case
+				 * we will still not use that by default, since the users
+				 * intention is unclear. They might have wanted to use the
+				 * version of pg_ctl that we could not parse the version string
+				 * for. So we warn and continue, the user should make their
+				 * intention clear by using the --pg_ctl option (or changing
+				 * PATH).
+				 */
+				log_warn("Failed to get version info from %s --version",
+						 currentPgSetup.pg_ctl);
+				continue;
+			}
+
+			log_info("Found %s for pg version %s",
+					 currentPgSetup.pg_ctl,
+					 currentPgSetup.pg_version);
+		}
+		log_info("HINT: export PG_CONFIG to a specific pg_config entry");
+	}
+
+	search_path_destroy_result(pg_configs);
+
+	return success;
+}
+
+
+/*
  * Find "pg_ctl" programs in the PATH. If a single one exists, set its absolute
  * location in pg_ctl, and the PostgreSQL version number in pg_version.
  *
  * Returns how many "pg_ctl" programs have been found in the PATH.
  */
-int
+bool
 config_find_pg_ctl(PostgresSetup *pgSetup)
 {
 	char **pg_ctls = NULL;
 	int n = -1;
+
+	bool success = false;
 
 	pgSetup->pg_ctl[0] = '\0';
 	pgSetup->pg_version[0] = '\0';
@@ -309,7 +394,7 @@ config_find_pg_ctl(PostgresSetup *pgSetup)
 	 */
 	if (set_pg_ctl_from_PG_CONFIG(pgSetup))
 	{
-		return 1;
+		return true;
 	}
 
 	/* no PG_CONFIG. let's use the more classic approach with PATH instead */
@@ -331,54 +416,17 @@ config_find_pg_ctl(PostgresSetup *pgSetup)
 		log_debug("Found pg_ctl for PostgreSQL %s at %s",
 				  pgSetup->pg_version,
 				  pgSetup->pg_ctl);
+
+		success = true;
 	}
 	else if (n == 0)
 	{
-		/*
-		 * When using debian/ubuntu packaging then pg_config is installed as
-		 * part as the postgresql-common package in /usr/bin, whereas pg_ctl is
-		 * installed in a major version dependent location such as
-		 * /usr/lib/postgresql/12/bin, and those locations are not included in
-		 * the PATH.
-		 *
-		 * So when we can't find pg_ctl anywhere in the PATH, we look for
-		 * pg_config instead, and then use pg_config --bindir to discover the
-		 * pg_ctl we can use.
-		 */
-
-		char **pg_configs = NULL;
-		int pg_configs_count = search_path("pg_config", &pg_configs);
-
 		log_debug("Failed to find pg_ctl in PATH, now looking for pg_config");
 
-		if (pg_configs_count == 1)
+		if (set_pg_ctl_from_pg_config(pgSetup))
 		{
-			if (!set_pg_ctl_from_config_bindir(pgSetup, pg_configs[0]))
-			{
-				/* errors have already been logged */
-				return false;
-			}
-
-			if (!pg_ctl_version(pgSetup))
-			{
-				log_fatal("Failed to get version info from %s --version",
-						  pgSetup->pg_ctl);
-				return false;
-			}
-
-			log_debug("Found pg_ctl for PostgreSQL %s at %s from pg_config "
-					  "found in PATH at \"%s\"",
-					  pgSetup->pg_version, pgSetup->pg_ctl, pg_configs[0]);
-
-			/* set our return value to 1 in that case, indicating success */
-			n = pg_configs_count;
+			success = true;
 		}
-		else
-		{
-			log_warn("Failed to find either pg_ctl or pg_config in PATH");
-		}
-
-		search_path_destroy_result(pg_configs);
 	}
 	else
 	{
@@ -409,11 +457,12 @@ config_find_pg_ctl(PostgresSetup *pgSetup)
 					 currentPgSetup.pg_ctl,
 					 currentPgSetup.pg_version);
 		}
+		log_error("Found several pg_ctl in PATH, please provide --pgctl");
 	}
 
 	search_path_destroy_result(pg_ctls);
 
-	return n;
+	return success;
 }
 
 

@@ -106,17 +106,10 @@ pg_setup_init(PostgresSetup *pgSetup,
 		}
 		else
 		{
-			int count_of_pg_ctl = config_find_pg_ctl(pgSetup);
-
-			if (count_of_pg_ctl != 1)
+			if (!config_find_pg_ctl(pgSetup))
 			{
 				/* config_find_pg_ctl already logged errors */
 				errors++;
-			}
-
-			if (count_of_pg_ctl > 1)
-			{
-				log_error("Found several pg_ctl in PATH, please provide --pgctl");
 			}
 		}
 	}
