@@ -1375,7 +1375,7 @@ SelectFailoverCandidateNode(CandidateList *candidateList,
 			(uint32) (primaryNode->reportedLSN >> 32),
 			(uint32) primaryNode->reportedLSN);
 
-		return false;
+		return NULL;
 	}
 
 	/*

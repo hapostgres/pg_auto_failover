@@ -942,23 +942,24 @@ prepare_keeper_options(KeeperConfig *options)
 void
 set_first_pgctl(PostgresSetup *pgSetup)
 {
-	char *version = NULL;
+	/* first, use PG_CONFIG when it exists in the environment */
+	if (set_pg_ctl_from_PG_CONFIG(pgSetup))
+	{
+		return;
+	}
+
+	/* then, use PATH and fetch the first entry there for the monitor */
 	if (!search_path_first("pg_ctl", pgSetup->pg_ctl))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_ARGS);
 	}
-	version = pg_ctl_version(pgSetup->pg_ctl);
 
-	if (version == NULL)
+	if (!pg_ctl_version(pgSetup))
 	{
 		/* errors have been logged in pg_ctl_version */
 		exit(EXIT_CODE_PGCTL);
 	}
-
-	strlcpy(pgSetup->pg_version, version, PG_VERSION_STRING_MAX);
-
-	free(version);
 }
 
 
