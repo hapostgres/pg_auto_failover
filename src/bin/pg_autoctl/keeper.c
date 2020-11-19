@@ -2130,10 +2130,22 @@ keeper_config_accept_new(Keeper *keeper, KeeperConfig *newConfig)
  * integrates accepted new values into the current setup.
  */
 bool
-keeper_reload_configuration(Keeper *keeper, bool firstLoop)
+keeper_reload_configuration(Keeper *keeper, bool firstLoop, bool doInit)
 {
 	KeeperConfig *config = &(keeper->config);
 	bool postgresNotRunningIsOk = firstLoop;
+
+	/*
+	 * This function implements changes that we want to see before calling the
+	 * monitor for the first time, when called as part as the firstLoop. The
+	 * function is called again at the end of the loop, once the monitor has
+	 * been called, and we're happy to decline then: the job has already been
+	 * done in full the first time.
+	 */
+	if (firstLoop && !doInit)
+	{
+		return true;
+	}
 
 	if (file_exists(config->pathnames.config))
 	{
@@ -2202,12 +2214,12 @@ keeper_reload_configuration(Keeper *keeper, bool firstLoop)
  * reloadFunctionArray and calls each hook in turn.
  */
 void
-keeper_call_reload_hooks(Keeper *keeper, bool firstLoop)
+keeper_call_reload_hooks(Keeper *keeper, bool firstLoop, bool doInit)
 {
 	for (int index = 0; KeeperReloadHooks[index]; index++)
 	{
 		/* at the moment we ignore the return values from the reload hooks */
-		(void) (*KeeperReloadHooks[index])(keeper, firstLoop);
+		(void) (*KeeperReloadHooks[index])(keeper, firstLoop, doInit);
 	}
 
 	/* we're done reloading now. */
