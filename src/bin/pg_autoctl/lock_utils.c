@@ -27,7 +27,7 @@
 /*
  * See man semctl(2)
  */
-#if !defined(__APPLE__)
+#if defined(__linux__)
 union semun
 {
 	int val;
