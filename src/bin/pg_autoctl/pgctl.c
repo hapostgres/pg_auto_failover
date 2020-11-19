@@ -432,7 +432,7 @@ config_find_pg_ctl(PostgresSetup *pgSetup)
 		{
 			log_fatal("Failed to get version info from \"%s\" --version",
 					  pgSetup->pg_ctl);
-			return 0;
+			return false;
 		}
 
 		log_debug("Found pg_ctl for PostgreSQL %s at \"%s\"",

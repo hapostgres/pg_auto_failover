@@ -540,7 +540,7 @@ search_path_first(const char *filename, char *result)
 {
 	SearchPath paths = { 0 };
 
-	if (!search_path(filename, &paths))
+	if (!search_path(filename, &paths) || paths.found == 0)
 	{
 		log_error("Failed to find %s command in your PATH", filename);
 		return false;
