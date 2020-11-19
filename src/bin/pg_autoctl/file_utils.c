@@ -700,7 +700,7 @@ set_program_absolute_path(char *program, int size)
 			return true;
 		}
 
-		if (!search_path(pg_autoctl_argv0, &paths))
+		if (!search_path(pg_autoctl_argv0, &paths) || paths.found == 0)
 		{
 			log_error("Failed to find \"%s\" in PATH environment",
 					  pg_autoctl_argv0);
