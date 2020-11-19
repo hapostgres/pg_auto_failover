@@ -2342,8 +2342,9 @@ pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *hostname)
 	Program program;
 	char subject[BUFSIZE] = { 0 };
 	int size = 0;
-	char openssl[MAXPGPATH];
-	if (!search_path_first("openssl", openssl))
+	char openssl[MAXPGPATH] = { 0 };
+
+	if (!search_path_first("openssl", openssl, LOG_ERROR))
 	{
 		/* errors have already been logged */
 		return false;

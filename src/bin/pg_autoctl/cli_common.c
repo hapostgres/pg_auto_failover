@@ -949,7 +949,7 @@ set_first_pgctl(PostgresSetup *pgSetup)
 	}
 
 	/* then, use PATH and fetch the first entry there for the monitor */
-	if (search_path_first("pg_ctl", pgSetup->pg_ctl))
+	if (search_path_first("pg_ctl", pgSetup->pg_ctl, LOG_WARN))
 	{
 		if (!pg_ctl_version(pgSetup))
 		{

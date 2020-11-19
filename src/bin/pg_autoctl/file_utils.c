@@ -536,13 +536,13 @@ path_in_same_directory(const char *basePath, const char *fileName,
  * in PATH.
  */
 bool
-search_path_first(const char *filename, char *result)
+search_path_first(const char *filename, char *result, int logLevel)
 {
 	SearchPath paths = { 0 };
 
 	if (!search_path(filename, &paths) || paths.found == 0)
 	{
-		log_error("Failed to find %s command in your PATH", filename);
+		log_level(logLevel, "Failed to find %s command in your PATH", filename);
 		return false;
 	}
 
@@ -553,14 +553,10 @@ search_path_first(const char *filename, char *result)
 
 
 /*
- * Searches all the directories in the PATH environment variable for
- * the given filename. Returns number of occurrences, and allocates
- * and returns the path for each of the occurrences in the given result
- * pointer.
- *
- * If the result size is 0, then *result is set to NULL.
- *
- * The caller should free the result by calling search_path_destroy_result().
+ * Searches all the directories in the PATH environment variable for the given
+ * filename. Returns number of occurrences and each match found with its
+ * fullname, including the given filename, in the given pre-allocated
+ * SearchPath result.
  */
 bool
 search_path(const char *filename, SearchPath *result)
@@ -569,7 +565,6 @@ search_path(const char *filename, SearchPath *result)
 	char pathlist[MAXPATHSIZE] = { 0 };
 
 	/* we didn't count nor find anything yet */
-	result->total = 0;
 	result->found = 0;
 
 	/* Create a copy of pathlist, because we modify it here. */
@@ -591,8 +586,6 @@ search_path(const char *filename, SearchPath *result)
 		{
 			*sep = '\0';
 		}
-
-		strlcpy(result->entries[result->total++], path, MAXPGPATH);
 
 		(void) join_path_components(candidate, path, filename);
 		(void) canonicalize_path(candidate);

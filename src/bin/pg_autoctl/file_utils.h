@@ -32,9 +32,7 @@
  */
 typedef struct SearchPath
 {
-	int total;
 	int found;
-	char entries[1024][MAXPGPATH];
 	char matches[1024][MAXPGPATH];
 } SearchPath;
 
@@ -56,7 +54,7 @@ void path_in_same_directory(const char *basePath,
 							const char *fileName,
 							char *destinationPath);
 
-bool search_path_first(const char *filename, char *result);
+bool search_path_first(const char *filename, char *result, int logLevel);
 bool search_path(const char *filename, SearchPath *result);
 bool unlink_file(const char *filename);
 bool set_program_absolute_path(char *program, int size);
