@@ -949,17 +949,25 @@ set_first_pgctl(PostgresSetup *pgSetup)
 	}
 
 	/* then, use PATH and fetch the first entry there for the monitor */
-	if (!search_path_first("pg_ctl", pgSetup->pg_ctl))
+	if (search_path_first("pg_ctl", pgSetup->pg_ctl, LOG_WARN))
 	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_ARGS);
+		if (!pg_ctl_version(pgSetup))
+		{
+			/* errors have been logged in pg_ctl_version */
+			exit(EXIT_CODE_PGCTL);
+		}
+
+		return;
 	}
 
-	if (!pg_ctl_version(pgSetup))
+	/* then, use PATH and fetch pg_config --bindir from there */
+	if (set_pg_ctl_from_pg_config(pgSetup))
 	{
-		/* errors have been logged in pg_ctl_version */
-		exit(EXIT_CODE_PGCTL);
+		return;
 	}
+
+	/* at this point we don't have any other ways to find a pg_ctl */
+	exit(EXIT_CODE_PGCTL);
 }
 
 

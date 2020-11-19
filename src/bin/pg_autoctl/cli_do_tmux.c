@@ -580,7 +580,7 @@ tmux_start_server(const char *root, const char *scriptName)
 		return false;
 	}
 
-	if (!search_path_first("tmux", tmux))
+	if (!search_path_first("tmux", tmux, LOG_ERROR))
 	{
 		log_fatal("Failed to find program tmux in PATH");
 		return false;
@@ -775,7 +775,7 @@ tmux_kill_session(TmuxOptions *options)
 
 	sformat(sessionName, BUFSIZE, "pgautofailover-%d", options->firstPort);
 
-	if (!search_path_first("tmux", tmux))
+	if (!search_path_first("tmux", tmux, LOG_ERROR))
 	{
 		log_fatal("Failed to find program tmux in PATH");
 		return false;
