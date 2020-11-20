@@ -37,10 +37,12 @@
 static bool keepRunning = true;
 
 /* list of hooks to run at reload time */
-KeeperReloadFunction KeeperReloadHooks[] = {
+KeeperReloadFunction KeeperReloadHooksArray[] = {
 	&keeper_reload_configuration,
 	NULL
 };
+
+KeeperReloadFunction *KeeperReloadHooks = KeeperReloadHooksArray;
 
 static bool keeper_node_active(Keeper *keeper, bool doInit);
 static void check_for_network_partitions(Keeper *keeper);
@@ -316,7 +318,7 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		 */
 		if (asked_to_reload || firstLoop)
 		{
-			(void) keeper_call_reload_hooks(keeper, firstLoop);
+			(void) keeper_call_reload_hooks(keeper, firstLoop, doInit);
 		}
 
 		if (asked_to_stop || asked_to_stop_fast || asked_to_quit)
@@ -556,6 +558,27 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		if (doInit && couldContactMonitorThisRound)
 		{
 			doInit = false;
+		}
+
+		/*
+		 * On the first loop, we might have reload-time actions to implement
+		 * before and after having contacted the monitor. For instance,
+		 * contacting the monitor might show that we're not a primary anymore
+		 * after having been DEMOTED during a failover, while this node was
+		 * rebooting or something.
+		 *
+		 * So in some cases, we want to do two rounds of start-up reload:
+		 *
+		 *   reload-hook(firstLoop => true, doInit => true)
+		 *   reload-hook(firstLoop => true, doInit => false)
+		 *
+		 * Later SIGHUP signal processing will trigger a call to our reload
+		 * hooks with both firstLoop and doInit false, and that's handled
+		 * earlier in this loop.
+		 */
+		if (firstLoop)
+		{
+			(void) keeper_call_reload_hooks(keeper, firstLoop, doInit);
 		}
 
 		/* advance the warnings "counters" */
