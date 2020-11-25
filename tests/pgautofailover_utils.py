@@ -1206,8 +1206,8 @@ SELECT reportedstate
         current_slots.sort()
 
         if set(expected_slots) == set(current_slots):
-            print("slots list on %s is %s, as expected" %
-                  (self.datadir, current_slots))
+            # print("slots list on %s is %s, as expected" %
+            #       (self.datadir, current_slots))
             return True
 
         self.print_debug_logs()

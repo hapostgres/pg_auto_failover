@@ -169,8 +169,19 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	/* Multiple Standby failover is handled in its own function. */
 	if (nodesCount > 2 && IsUnhealthy(primaryNode))
 	{
-		/* stop replication from the primary and proceed with replacement */
-		if (IsInPrimaryState(primaryNode))
+		/*
+		 * The WAIT_PRIMARY state encodes the fact that we know there is no
+		 * failover candidate, so there's no point in orchestrating a failover,
+		 * even though the primary node is currently not available.
+		 *
+		 * To be in the WAIT_PRIMARY means that the other nodes are all either
+		 * unhealty or with candidate priority set to zero.
+		 *
+		 * Otherwise stop replication from the primary and proceed with
+		 * candidate election for primary replacement.
+		 */
+		if (IsInPrimaryState(primaryNode) &&
+			!IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY))
 		{
 			char message[BUFSIZE] = { 0 };
 
@@ -356,6 +367,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	if (IsCurrentState(activeNode, REPLICATION_STATE_SECONDARY) &&
 		IsInPrimaryState(primaryNode) &&
 		IsUnhealthy(primaryNode) && IsHealthy(activeNode) &&
+		activeNode->candidatePriority > 0 &&
 		WalDifferenceWithin(activeNode, primaryNode, PromoteXlogThreshold))
 	{
 		char message[BUFSIZE];
@@ -1029,7 +1041,7 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 	/*
 	 * If a failover is in progress, continue driving it.
 	 */
-	if (nodeBeingPromoted != NULL)
+	if (nodeBeingPromoted != NULL && IsHealthy(nodeBeingPromoted))
 	{
 		elog(LOG, "Found candidate " NODE_FORMAT,
 			 NODE_FORMAT_ARGS(nodeBeingPromoted));
