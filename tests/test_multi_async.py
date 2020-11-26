@@ -187,7 +187,17 @@ def test_013_drop_node4():
     assert node2.wait_until_state(target_state="secondary")
     assert node3.wait_until_state(target_state="secondary")
 
-def test_014_fail_node1():
+#
+# A series of test where we fail primary and candidate secondary node and
+# all is left is a secondary that is not a candidate for failover.
+#
+# In the first series 014_0xx the demoted primary comes back first and can't
+# be chosen as a new primary because it might have missed some transactions.
+#
+# In the second series 015_0xx the wait_primary node comes up first and
+# should remain in wait_primary.
+#
+def test_014_001_fail_node1():
     node1.fail()
 
     assert node2.wait_until_state(target_state="wait_primary")
@@ -197,13 +207,13 @@ def test_014_fail_node1():
     eq_(node2.get_synchronous_standby_names(), ssn)
     eq_(node2.get_synchronous_standby_names_local(), ssn)
 
-def test_015_stop_primary():
+def test_014_002_stop_primary():
     node2.fail()
 
     print()
     assert node3.wait_until_state(target_state="report_lsn")
 
-def test_016_restart_node1():
+def test_014_003_restart_node1():
     node1.run()
 
     # node1 used to be primary, now demoted, and meanwhile node2 was primary
@@ -211,7 +221,7 @@ def test_016_restart_node1():
     assert node1.wait_until_state(target_state="demoted")
     assert node3.wait_until_state(target_state="report_lsn")
 
-def test_017_restart_node2():
+def test_014_004_restart_node2():
     node2.run()
 
     assert node2.wait_until_state(target_state="wait_primary")
@@ -219,4 +229,38 @@ def test_017_restart_node2():
     assert node3.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="secondary")
 
+    assert node2.wait_until_state(target_state="primary")
+
+def test_015_001_fail_node1():
+    node1.fail()
+
+    assert node2.wait_until_state(target_state="wait_primary")
+    assert node3.wait_until_state(target_state="secondary")
+
+    ssn = ""
+    eq_(node2.get_synchronous_standby_names(), ssn)
+    eq_(node2.get_synchronous_standby_names_local(), ssn)
+
+def test_015_002_stop_primary():
+    node2.fail()
+
+    print()
+    assert node3.wait_until_state(target_state="report_lsn")
+
+def test_015_003_restart_node2():
+    node2.run()
+
+    # node1 used to be primary, now demoted, and meanwhile node2 was primary
+    # so we can't decide to promote node1 now, it's stuck demoted
+    assert node2.wait_until_state(target_state="wait_primary")
+    assert node3.wait_until_state(target_state="secondary")
+
+    time.sleep(5)
+    assert not node2.get_state() == 'primary'
+
+def test_015_004_restart_node2():
+    node1.run()
+
+    assert node3.wait_until_state(target_state="secondary")
+    assert node1.wait_until_state(target_state="secondary")
     assert node2.wait_until_state(target_state="primary")
