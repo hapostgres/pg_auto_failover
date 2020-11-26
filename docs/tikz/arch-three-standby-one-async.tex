@@ -65,6 +65,7 @@
 
   \path (app) edge [sql,out=0,in=180]  node[below,near start] {SQL} (a)
               edge [sqlf,out=-90,in=135]  node[left,near start] {SQL (fallback)} (b.north west)
+              edge [sqlf,out=-90,in=135]  (c.north west)
               edge [sqlf,out=-90,in=180]  (d.west)
 
         (m)   edge [hc,out=-90,in=0] (a)
