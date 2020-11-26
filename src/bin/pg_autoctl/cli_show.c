@@ -703,6 +703,7 @@ cli_show_standby_names(int argc, char **argv)
 	KeeperConfig config = keeperOptions;
 	Monitor monitor = { 0 };
 	char synchronous_standby_names[BUFSIZE] = { 0 };
+	pgAutoCtlNodeRole role = PG_AUTOCTL_ROLE_UNKNOWN;
 
 	/* change the default group when it's not been given on the command */
 	if (config.groupId == -1)
@@ -714,6 +715,19 @@ cli_show_standby_names(int argc, char **argv)
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	role = ProbeConfigurationFileRole(config.pathnames.config);
+
+	if (role == PG_AUTOCTL_ROLE_KEEPER)
+	{
+		bool monitorDisabledIsOk = false;
+
+		if (!keeper_config_read_file_skip_pgsetup(&config, monitorDisabledIsOk))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_CONFIG);
+		}
 	}
 
 	if (!monitor_synchronous_standby_names(
