@@ -654,7 +654,9 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 *  demoted -> catchingup
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_DEMOTED) &&
-		IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY))
+		(IsCurrentState(primaryNode, REPLICATION_STATE_JOIN_PRIMARY) ||
+		 IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
+		 IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY)))
 	{
 		char message[BUFSIZE];
 
@@ -662,9 +664,10 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 			message, BUFSIZE,
 			"Setting goal state of " NODE_FORMAT
 			" to catchingup after it converged to demotion and " NODE_FORMAT
-			" converged to wait_primary.",
+			" converged to %s.",
 			NODE_FORMAT_ARGS(activeNode),
-			NODE_FORMAT_ARGS(primaryNode));
+			NODE_FORMAT_ARGS(primaryNode),
+			ReplicationStateGetName(primaryNode->reportedState));
 
 		/* it's safe to rejoin as a secondary */
 		AssignGoalState(activeNode, REPLICATION_STATE_CATCHINGUP, message);
