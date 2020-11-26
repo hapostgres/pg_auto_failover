@@ -210,15 +210,20 @@ register_node(PG_FUNCTION_ARGS)
 						nodeHost, nodePort, expectedDBName,
 						formationId)));
 	}
-
-	if (pgAutoFailoverNode == NULL)
+	else
 	{
-		/* that's a bug, really, maybe we could use an Assert() instead */
-		ereport(ERROR,
-				(errmsg("couldn't find the newly registered node %s:%d "
-						"in formation \"%s\", group %d",
-						nodeHost, nodePort,
-						formationId, currentNodeState.groupId)));
+		char message[BUFSIZE] = { 0 };
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Registering " NODE_FORMAT
+			" to formation \"%s\" "
+			"with replication quorum %s and candidate priority %d [%d]",
+			NODE_FORMAT_ARGS(pgAutoFailoverNode),
+			pgAutoFailoverNode->formationId,
+			pgAutoFailoverNode->replicationQuorum ? "true" : "false",
+			pgAutoFailoverNode->candidatePriority,
+			currentNodeState.candidatePriority);
 	}
 
 	/*
