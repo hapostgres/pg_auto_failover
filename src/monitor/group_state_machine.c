@@ -957,8 +957,13 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 		{
 			AutoFailoverNode *otherNode = (AutoFailoverNode *) lfirst(nodeCell);
 
-			/* skip nodes that are not failover candidates */
-			if (otherNode->candidatePriority == 0)
+			/*
+			 * Skip nodes that are not failover candidates, and avoid ping-pong
+			 * bewtween JOIN_PRIMARY and PRIMARY while setting up a node
+			 * registered with --candidate-priority 0.
+			 */
+			if (otherNode->candidatePriority == 0 &&
+				!IsCurrentState(otherNode, REPLICATION_STATE_WAIT_STANDBY))
 			{
 				continue;
 			}
