@@ -1040,8 +1040,14 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 
 	/*
 	 * If a failover is in progress, continue driving it.
+	 *
+	 * The currently selected node might not be marked healthy at this time
+	 * because in REPORT_LSN we shut Postgres down. We still should proceed
+	 * with the previously selected node in that case.
 	 */
-	if (nodeBeingPromoted != NULL && IsHealthy(nodeBeingPromoted))
+	if (nodeBeingPromoted != NULL &&
+		(nodeBeingPromoted->reportedState == REPLICATION_STATE_REPORT_LSN ||
+		 IsHealthy(nodeBeingPromoted)))
 	{
 		elog(LOG, "Found candidate " NODE_FORMAT,
 			 NODE_FORMAT_ARGS(nodeBeingPromoted));
