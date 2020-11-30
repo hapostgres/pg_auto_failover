@@ -295,9 +295,9 @@ class PGNode:
                     return result
                 except psycopg2.ProgrammingError:
                     return None
-        except Exception as e:
+        except:
             self.print_debug_logs()
-            raise Exception(e)
+            raise
 
     def pg_config_get(self, settings):
         """
