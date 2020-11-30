@@ -219,7 +219,8 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_REPORT_LSN) &&
 		(IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
-		 IsCurrentState(primaryNode, REPLICATION_STATE_JOIN_PRIMARY)))
+		 IsCurrentState(primaryNode, REPLICATION_STATE_JOIN_PRIMARY)) &&
+		IsHealthy(primaryNode))
 	{
 		char message[BUFSIZE];
 
@@ -243,7 +244,8 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 *
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_REPORT_LSN) &&
-		IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY))
+		IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY) &&
+		IsHealthy(primaryNode))
 	{
 		char message[BUFSIZE];
 
