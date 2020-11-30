@@ -1085,15 +1085,46 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 	 * The currently selected node might not be marked healthy at this time
 	 * because in REPORT_LSN we shut Postgres down. We still should proceed
 	 * with the previously selected node in that case.
+	 *
+	 * Also pay attention that Postgres might be running again, as reported by
+	 * the pg_autoctl node-active protocol, while our health checks have not
+	 * picked-up on that fact yet. The IsHealthy() check requires both checks
+	 * to be all-green, finding the candidate is okay with only one of those
+	 * being good: we really need to avoid having two candidates at the same
+	 * time.
 	 */
-	if (nodeBeingPromoted != NULL &&
-		(nodeBeingPromoted->reportedState == REPLICATION_STATE_REPORT_LSN ||
-		 IsHealthy(nodeBeingPromoted)))
+	if (nodeBeingPromoted != NULL)
 	{
-		elog(LOG, "Found candidate " NODE_FORMAT,
-			 NODE_FORMAT_ARGS(nodeBeingPromoted));
+		char message[BUFSIZE] = { 0 };
 
-		return ProceedWithMSFailover(activeNode, nodeBeingPromoted);
+		List *knownUnreachableStates =
+			list_make2_int(REPLICATION_STATE_REPORT_LSN,
+						   REPLICATION_STATE_PREPARE_PROMOTION);
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Active " NODE_FORMAT
+			" found failover candidate " NODE_FORMAT
+			" being promoted, it reported state \"%s\"",
+			NODE_FORMAT_ARGS(activeNode),
+			NODE_FORMAT_ARGS(nodeBeingPromoted),
+			ReplicationStateGetName(nodeBeingPromoted->reportedState));
+
+		/*
+		 * In state REPORT_LSN we stop Postgres. In the transition from
+		 * REPORT_LSN to PREPARE_PROMOTION we do not start Postgres yet, we
+		 * only restart Postgres when reaching STOP_REPLICATION, and we set
+		 * default_transaction_read_only to on.
+		 */
+		if (IsStateIn(nodeBeingPromoted->reportedState, knownUnreachableStates) ||
+			nodeBeingPromoted->pgIsRunning ||
+			IsHealthy(nodeBeingPromoted))
+		{
+			elog(LOG, "Found candidate " NODE_FORMAT,
+				 NODE_FORMAT_ARGS(nodeBeingPromoted));
+
+			return ProceedWithMSFailover(activeNode, nodeBeingPromoted);
+		}
 	}
 
 	/*

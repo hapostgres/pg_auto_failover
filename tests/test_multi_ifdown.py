@@ -221,6 +221,9 @@ def test_014_secondary_reports_lsn():
     # and the candidate for failover as accessible
     # which means that node2 will not be able to fetch wal
     # and blocked until the other secondary is up
+    assert node1.wait_until_state(target_state="secondary")
+    assert node3.wait_until_state(target_state="primary")
+
     node3.ifdown()    # primary
     node1.ifdown()    # most advanced standby
     node2.ifup()      # failover candidate
@@ -240,7 +243,7 @@ def test_015_finalize_failover_after_most_advanced_secondary_gets_back():
 
     # and, node2 should finally become the primary without losing any data
     print()
-    assert node2.wait_until_state(target_state="primary")
+    assert node2.wait_until_state(target_state="wait_primary")
 
     print("%s" % monitor.pg_autoctl.err)
 
