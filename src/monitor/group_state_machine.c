@@ -329,9 +329,10 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 			message, BUFSIZE,
 			"Setting goal state of " NODE_FORMAT
 			" to catchingup after " NODE_FORMAT
-			" converged to wait_primary.",
+			" converged to %s.",
 			NODE_FORMAT_ARGS(activeNode),
-			NODE_FORMAT_ARGS(primaryNode));
+			NODE_FORMAT_ARGS(primaryNode),
+			ReplicationStateGetName(primaryNode->reportedState));
 
 		/* start replication */
 		AssignGoalState(activeNode, REPLICATION_STATE_CATCHINGUP, message);
@@ -1101,6 +1102,12 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 			list_make2_int(REPLICATION_STATE_REPORT_LSN,
 						   REPLICATION_STATE_PREPARE_PROMOTION);
 
+		/* activeNode might be the failover candidate, proceed already */
+		if (nodeBeingPromoted->nodeId == activeNode->nodeId)
+		{
+			return ProceedWithMSFailover(activeNode, nodeBeingPromoted);
+		}
+
 		LogAndNotifyMessage(
 			message, BUFSIZE,
 			"Active " NODE_FORMAT
@@ -1117,7 +1124,6 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 		 * default_transaction_read_only to on.
 		 */
 		if (IsStateIn(nodeBeingPromoted->reportedState, knownUnreachableStates) ||
-			nodeBeingPromoted->pgIsRunning ||
 			IsHealthy(nodeBeingPromoted))
 		{
 			elog(LOG, "Found candidate " NODE_FORMAT,
