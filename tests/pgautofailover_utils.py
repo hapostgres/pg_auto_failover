@@ -286,14 +286,18 @@ class PGNode:
         Runs the given sql query with the given arguments in this postgres node
         and returns the results. Returns None if there are no results to fetch.
         """
-        with psycopg2.connect(self.connection_string()) as conn:
-            cur = conn.cursor()
-            cur.execute(query, args)
-            try:
-                result = cur.fetchall()
-                return result
-            except psycopg2.ProgrammingError:
-                return None
+        try:
+            with psycopg2.connect(self.connection_string()) as conn:
+                cur = conn.cursor()
+                cur.execute(query, args)
+                try:
+                    result = cur.fetchall()
+                    return result
+                except psycopg2.ProgrammingError:
+                    return None
+        except:
+             self.print_debug_logs()
+             raise
 
     def pg_config_get(self, settings):
         """
