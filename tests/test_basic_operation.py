@@ -75,31 +75,48 @@ def test_005_read_from_secondary():
     assert results == [(1,), (2,)]
 
 @raises(Exception)
-def test_006_writes_to_node2_fail():
+def test_006_001_writes_to_node2_fail():
     node2.run_sql_query("INSERT INTO t1 VALUES (3)")
 
-@raises(Exception)
-def test_007a_maintenance_primary():
+def test_006_002_read_from_secondary():
+    results = node2.run_sql_query("SELECT * FROM t1")
+    assert results == [(1,), (2,)]
+
+def test_007_001_wait_until_primary():
     assert node1.wait_until_state(target_state="primary")
+
+@raises(Exception)
+def test_007_002_maintenance_primary():
     node1.enable_maintenance()  # without --allow-failover, that fails
 
-def test_007b_maintenance_primary_allow_failover():
+def test_007_003_maintenance_primary():
+    assert node1.wait_until_state(target_state="primary")
+
+def test_007_004_maintenance_primary_allow_failover():
     print()
     print("Enabling maintenance on node1, allowing failover")
-    assert node1.wait_until_state(target_state="primary")
     node1.enable_maintenance(allowFailover=True)
+
     assert node1.wait_until_state(target_state="maintenance")
     assert node2.wait_until_state(target_state="wait_primary")
 
+    ssn = ''
+    eq_(node2.get_synchronous_standby_names_local(), ssn)
+    eq_(node2.get_synchronous_standby_names(), ssn)
+
+def test_007_005_disable_maintenance():
+    print()
     print("Disabling maintenance on node1")
     node1.disable_maintenance()
     assert node1.wait_until_pg_is_running()
     assert node1.wait_until_state(target_state="secondary")
     assert node2.wait_until_state(target_state="primary")
 
-    eq_(node2.get_synchronous_standby_names_local(), '*')
+    ssn = '*'
+    eq_(node2.get_synchronous_standby_names_local(), ssn)
+    eq_(node2.get_synchronous_standby_names(), ssn)
 
-def test_008_maintenance_secondary():
+def test_008_001_enable_maintenance_secondary():
     print()
     print("Enabling maintenance on node2")
     assert node2.wait_until_state(target_state="primary")
@@ -108,13 +125,17 @@ def test_008_maintenance_secondary():
     node1.stop_postgres()
     node2.run_sql_query("INSERT INTO t1 VALUES (3)")
 
+def test_008_002_disable_maintenance_secondary():
+    print()
     print("Disabling maintenance on node2")
     node1.disable_maintenance()
     assert node1.wait_until_pg_is_running()
     assert node1.wait_until_state(target_state="secondary")
     assert node2.wait_until_state(target_state="primary")
 
-    eq_(node2.get_synchronous_standby_names_local(), '*')
+    ssn = '*'
+    eq_(node2.get_synchronous_standby_names_local(), ssn)
+    eq_(node2.get_synchronous_standby_names(), ssn)
 
 # the rest of the tests expect node1 to be primary, make it so
 def test_009_failback():

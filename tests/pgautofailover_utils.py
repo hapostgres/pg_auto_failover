@@ -286,18 +286,14 @@ class PGNode:
         Runs the given sql query with the given arguments in this postgres node
         and returns the results. Returns None if there are no results to fetch.
         """
-        try:
-            with psycopg2.connect(self.connection_string()) as conn:
-                cur = conn.cursor()
-                cur.execute(query, args)
-                try:
-                    result = cur.fetchall()
-                    return result
-                except psycopg2.ProgrammingError:
-                    return None
-        except:
-             self.print_debug_logs()
-             raise
+        with psycopg2.connect(self.connection_string()) as conn:
+            cur = conn.cursor()
+            cur.execute(query, args)
+            try:
+                result = cur.fetchall()
+                return result
+            except psycopg2.ProgrammingError:
+                return None
 
     def pg_config_get(self, settings):
         """
@@ -955,6 +951,7 @@ SELECT reportedstate
  WHERE nodeid=%s and groupid=%s
 """,
             self.nodeid, self.group)
+
         if len(results) == 0:
             raise Exception("node %s in group %s not found on the monitor" %
                             (self.nodeid, self.group))
@@ -1487,12 +1484,7 @@ class PGAutoCtl():
         Kills the keeper by sending a SIGTERM to keeper's process group.
         """
         if self.run_proc and self.run_proc.pid:
-            print("Terminating pg_autoctl process for %s [%d]" %
-                  (self.datadir, self.run_proc.pid))
-
             try:
-                # pgid = os.getpgid(self.run_proc.pid)
-                # os.killpg(pgid, signal.SIGTERM)
                 os.kill(self.run_proc.pid, signal.SIGTERM)
 
                 return self.pgnode.cluster.communicate(self, COMMAND_TIMEOUT)
@@ -1503,7 +1495,6 @@ class PGAutoCtl():
                       (self.datadir, e))
                 return None, None
         else:
-            print("pg_autoctl process for %s is not running" % self.datadir)
             return None, None
 
     def communicate(self, timeout=COMMAND_TIMEOUT):
