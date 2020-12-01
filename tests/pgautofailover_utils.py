@@ -951,6 +951,7 @@ SELECT reportedstate
  WHERE nodeid=%s and groupid=%s
 """,
             self.nodeid, self.group)
+
         if len(results) == 0:
             raise Exception("node %s in group %s not found on the monitor" %
                             (self.nodeid, self.group))
@@ -1206,8 +1207,8 @@ SELECT reportedstate
         current_slots.sort()
 
         if set(expected_slots) == set(current_slots):
-            print("slots list on %s is %s, as expected" %
-                  (self.datadir, current_slots))
+            # print("slots list on %s is %s, as expected" %
+            #       (self.datadir, current_slots))
             return True
 
         self.print_debug_logs()
@@ -1483,12 +1484,7 @@ class PGAutoCtl():
         Kills the keeper by sending a SIGTERM to keeper's process group.
         """
         if self.run_proc and self.run_proc.pid:
-            print("Terminating pg_autoctl process for %s [%d]" %
-                  (self.datadir, self.run_proc.pid))
-
             try:
-                # pgid = os.getpgid(self.run_proc.pid)
-                # os.killpg(pgid, signal.SIGTERM)
                 os.kill(self.run_proc.pid, signal.SIGTERM)
 
                 return self.pgnode.cluster.communicate(self, COMMAND_TIMEOUT)
@@ -1499,7 +1495,6 @@ class PGAutoCtl():
                       (self.datadir, e))
                 return None, None
         else:
-            print("pg_autoctl process for %s is not running" % self.datadir)
             return None, None
 
     def communicate(self, timeout=COMMAND_TIMEOUT):
