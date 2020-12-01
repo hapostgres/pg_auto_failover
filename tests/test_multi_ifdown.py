@@ -241,15 +241,9 @@ def test_015_finalize_failover_after_most_advanced_secondary_gets_back():
     node1.ifup()    # old most advanced secondary, now secondary
     node3.ifup()    # old primary, now secondary
 
-    # and, node2 should finally become the primary without losing any data
-    print()
-    assert node2.wait_until_state(target_state="wait_primary")
-
-    print("%s" % monitor.pg_autoctl.err)
-
-    results = node2.run_sql_query("SELECT count(*) FROM t1")
-    eq_(results, [(10006,)])
-
     assert node1.wait_until_state(target_state="secondary")
     assert node3.wait_until_state(target_state="secondary")
     assert node2.wait_until_state(target_state="primary")
+
+    results = node2.run_sql_query("SELECT count(*) FROM t1")
+    eq_(results, [(10006,)])

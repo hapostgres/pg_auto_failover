@@ -1082,17 +1082,6 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 
 	/*
 	 * If a failover is in progress, continue driving it.
-	 *
-	 * The currently selected node might not be marked healthy at this time
-	 * because in REPORT_LSN we shut Postgres down. We still should proceed
-	 * with the previously selected node in that case.
-	 *
-	 * Also pay attention that Postgres might be running again, as reported by
-	 * the pg_autoctl node-active protocol, while our health checks have not
-	 * picked-up on that fact yet. The IsHealthy() check requires both checks
-	 * to be all-green, finding the candidate is okay with only one of those
-	 * being good: we really need to avoid having two candidates at the same
-	 * time.
 	 */
 	if (nodeBeingPromoted != NULL)
 	{
@@ -1118,10 +1107,14 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 			ReplicationStateGetName(nodeBeingPromoted->reportedState));
 
 		/*
-		 * In state REPORT_LSN we stop Postgres. In the transition from
-		 * REPORT_LSN to PREPARE_PROMOTION we do not start Postgres yet, we
-		 * only restart Postgres when reaching STOP_REPLICATION, and we set
-		 * default_transaction_read_only to on.
+		 *
+		 * The currently selected node might not be marked healthy at this time
+		 * because in REPORT_LSN we shut Postgres down. We still should proceed
+		 * with the previously selected node in that case.
+		 *
+		 * We really need to avoid having two candidates at the same time, and
+		 * again, at prepare_promotion point Postgres might not have been
+		 * started yet.
 		 */
 		if (IsStateIn(nodeBeingPromoted->reportedState, knownUnreachableStates) ||
 			IsHealthy(nodeBeingPromoted))
