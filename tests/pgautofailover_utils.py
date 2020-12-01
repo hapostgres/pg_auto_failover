@@ -545,9 +545,9 @@ class PGNode:
     def logs(self):
         log_string = ""
         if self.running():
-            out, err = self.stop_pg_autoctl()
-            log_string += f"STDOUT OF PG_AUTOCTL FOR {self.datadir}:\n{out}\n"
-            log_string += f"STDERR OF PG_AUTOCTL FOR {self.datadir}:\n{err}\n"
+            out, err, ret = self.stop_pg_autoctl()
+            log_string += f"STDOUT OF PG_AUTOCTL FOR {self.datadir}:\n"
+            log_string += f"{self.pg_autoctl.cmd}\n{out}\n"
 
         pglogs = self.get_postgres_logs()
         log_string += f"POSTGRES LOGS FOR {self.datadir}:\n{pglogs}\n"
@@ -794,6 +794,9 @@ class DataNode(PGNode):
         if self.formation:
             create_args += ['--formation', self.formation]
 
+        if self.group:
+             create_args += ['--group', str(self.group)]
+
         if name:
             self.name = name
             create_args += ["--name", name]
@@ -804,8 +807,8 @@ class DataNode(PGNode):
         if port:
             create_args += ["--pgport", port]
 
-        if candidatePriority:
-            create_args += ["--candidate-priority", candidatePriority]
+        if candidatePriority is not None:
+            create_args += ["--candidate-priority", str(candidatePriority)]
 
         if replicationQuorum is not None:
             create_args += ["--replication-quorum", str(replicationQuorum)]
@@ -817,8 +820,6 @@ class DataNode(PGNode):
 
         if run:
             create_args += ['--run']
-
-        print("pg_autoctl %s" % " ".join(create_args))
 
         # when run is requested pg_autoctl does not terminate
         # therefore we do not wait for process to complete
@@ -1291,9 +1292,9 @@ class MonitorNode(PGNode):
         Cleans up processes and files created for this monitor node.
         """
         if self.pg_autoctl:
-            out, err = self.pg_autoctl.stop()
+            out, err, ret = self.pg_autoctl.stop()
 
-            if out or err:
+            if ret != 0:
                 print()
                 print("Monitor logs:\n%s\n%s\n" % (out, err))
 
@@ -1425,6 +1426,7 @@ class PGAutoCtl():
         self.last_returncode = None
         self.out = ""
         self.err = ""
+        self.cmd = ""
 
         if argv:
             self.command = [self.program] + argv
@@ -1448,17 +1450,19 @@ class PGAutoCtl():
         if port:
             self.command += ["--pgport", port]
 
+        self.cmd = " ".join(self.command)
+
         if self.run_proc:
             self.run_proc.release()
 
         self.run_proc = self.vnode.run_unmanaged(self.command)
-        print("pg_autoctl run [%d]" % self.run_proc.pid)
 
     def execute(self, name, *args, timeout=COMMAND_TIMEOUT):
         """
         Execute a single pg_autoctl command, wait for its completion.
         """
         self.set_command(*args)
+        self.cmd = " ".join(self.command)
         with self.vnode.run(self.command) as proc:
             try:
                 out, err = self.pgnode.cluster.communicate(proc, timeout)
@@ -1493,9 +1497,9 @@ class PGAutoCtl():
                 self.run_proc = None
                 print("Failed to terminate pg_autoctl for %s: %s" %
                       (self.datadir, e))
-                return None, None
+                return None, None, -1
         else:
-            return None, None
+            return None, None, 0
 
     def communicate(self, timeout=COMMAND_TIMEOUT):
         """
@@ -1513,17 +1517,18 @@ class PGAutoCtl():
         # The process exited, so let's clean this process up. Calling
         # communicate again would otherwise cause an "Invalid file object"
         # error.
+        ret = self.run_proc.returncode
         self.run_proc.release()
         self.run_proc = None
 
-        return self.out, self.err
+        return self.out, self.err, ret
 
     def consume_output(self, secs):
         """
         Read available lines from the process for some given seconds
         """
         try:
-            self.out, self.err = self.communicate(timeout=secs)
+            self.out, self.err, ret = self.communicate(timeout=secs)
         except subprocess.TimeoutExpired:
             # all good, we'll comme back
             pass
