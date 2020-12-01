@@ -1107,7 +1107,6 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 			ReplicationStateGetName(nodeBeingPromoted->reportedState));
 
 		/*
-		 *
 		 * The currently selected node might not be marked healthy at this time
 		 * because in REPORT_LSN we shut Postgres down. We still should proceed
 		 * with the previously selected node in that case.
