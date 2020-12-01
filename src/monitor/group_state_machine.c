@@ -914,8 +914,12 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 	 * We only swith the primary to wait_primary when there's no healthy
 	 * secondary anymore. In other cases, there's by definition at least one
 	 * candidate for failover.
+	 *
+	 * Also we might lose a standby node while already in WAIT_PRIMARY, when
+	 * all the left standby nodes are assigned a candidatePriority of zero.
 	 */
-	if (IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY))
+	if (IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY) ||
+		IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY))
 	{
 		int failoverCandidateCount = otherNodesCount;
 		ListCell *nodeCell = NULL;
