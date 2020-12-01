@@ -918,12 +918,12 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 	 * all the left standby nodes are assigned a candidatePriority of zero.
 	 */
 	if (IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY) ||
-		IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY))
+		IsCurrentState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS))
 	{
 		int failoverCandidateCount = otherNodesCount;
-		ListCell *nodeCell = NULL;
 		AutoFailoverFormation *formation =
 			GetFormation(primaryNode->formationId);
+		ListCell *nodeCell = NULL;
 
 		foreach(nodeCell, otherNodesGroupList)
 		{
@@ -959,6 +959,11 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 				/* also not a candidate */
 				--failoverCandidateCount;
 			}
+			else if (!IsCurrentState(otherNode, REPLICATION_STATE_SECONDARY))
+			{
+				/* also not a candidate at this time */
+				--failoverCandidateCount;
+			}
 
 			/*
 			 * Disable synchronous replication to maintain availability.
@@ -979,41 +984,61 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 			 * does not change the configured trade-offs. Writes are blocked
 			 * until one of the two defective standby nodes is available again.
 			 */
-			if (formation->number_sync_standbys == 0 &&
-				failoverCandidateCount == 0)
+			if (failoverCandidateCount == 0)
 			{
-				char message[BUFSIZE];
+				ReplicationState primaryGoalState =
+					formation->number_sync_standbys == 0
+					? REPLICATION_STATE_WAIT_PRIMARY
+					: REPLICATION_STATE_PRIMARY;
 
-				LogAndNotifyMessage(
-					message, BUFSIZE,
-					"Setting goal state of " NODE_FORMAT
-					" to wait_primary now that none of the standbys"
-					" are healthy anymore.",
-					NODE_FORMAT_ARGS(primaryNode));
+				if (primaryNode->goalState != primaryGoalState)
+				{
+					char message[BUFSIZE] = { 0 };
 
-				AssignGoalState(primaryNode,
-								REPLICATION_STATE_WAIT_PRIMARY, message);
+					LogAndNotifyMessage(
+						message, BUFSIZE,
+						"Setting goal state of " NODE_FORMAT
+						" to %s now that none of the standbys"
+						" are healthy anymore.",
+						NODE_FORMAT_ARGS(primaryNode),
+						ReplicationStateGetName(primaryGoalState));
+
+					AssignGoalState(primaryNode, primaryGoalState, message);
+				}
 			}
 		}
 
-		return true;
-	}
+		/*
+		 * when a node has changed its replication settings:
+		 *     apply_settings ➜ primary
+		 *
+		 * Even when we don't currently have healthy standby nodes to failover
+		 * to, if the number_sync_standbys is greater than zero that means the
+		 * user wants to block writes on the primary, and we do that by
+		 * switching to the primary state after having applied replication
+		 * settings. Think
+		 *
+		 *  $ pg_autoctl set formation number-sync-standbys 1
+		 *
+		 * during an incident to stop the amount of potential data loss.
+		 *
+		 * When we reach that part of the code, we know that
+		 * failoverCandidateCount > 0 and so we can target PRIMARY.
+		 */
+		if (IsCurrentState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS))
+		{
+			char message[BUFSIZE] = { 0 };
 
-	/*
-	 * when a node has changed its replication settings:
-	 *     apply_settings ➜ primary
-	 */
-	if (IsCurrentState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS))
-	{
-		char message[BUFSIZE];
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of " NODE_FORMAT
+				" to primary after it applied replication properties change.",
+				NODE_FORMAT_ARGS(primaryNode));
 
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to primary after it applied replication properties change.",
-			NODE_FORMAT_ARGS(primaryNode));
+			AssignGoalState(primaryNode, REPLICATION_STATE_PRIMARY, message);
 
-		AssignGoalState(primaryNode, REPLICATION_STATE_PRIMARY, message);
+			return true;
+		}
 
 		return true;
 	}

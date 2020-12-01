@@ -557,7 +557,6 @@ set_formation_number_sync_standbys(PG_FUNCTION_ARGS)
 						errmsg("unknown formation \"%s\"", formationId)));
 	}
 
-
 	LockFormation(formationId, ExclusiveLock);
 
 	if (number_sync_standbys < 0)
@@ -579,7 +578,16 @@ set_formation_number_sync_standbys(PG_FUNCTION_ARGS)
 						"group %d", formation->formationId, groupId)));
 	}
 
-	if (!IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY))
+	/*
+	 * We require a stable group state to apply new formation settings.
+	 *
+	 * The classic stable state is of course both reported and goal state being
+	 * "primary". That said, when number_sync_standbys is zero (0) and the
+	 * standby nodes are unavailable, then another stable state is when both
+	 * reported and goal state are "wait_primary".
+	 */
+	if (!IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY) &&
+		!IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY))
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -590,6 +598,7 @@ set_formation_number_sync_standbys(PG_FUNCTION_ARGS)
 						ReplicationStateGetName(primaryNode->goalState),
 						ReplicationStateGetName(primaryNode->reportedState)),
 				 errdetail("The primary node so must be in state \"primary\" "
+						   "or \"wait_primary\" "
 						   "to be able to apply configuration changes to "
 						   "its synchronous_standby_names setting")));
 	}

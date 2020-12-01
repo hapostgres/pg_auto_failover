@@ -3344,8 +3344,10 @@ monitor_notification_process_apply_settings(void *context,
 				  NodeStateToString(nodeState->goalState));
 	}
 	else if (ctx->applySettingsTransitionInProgress &&
-			 nodeState->reportedState == PRIMARY_STATE &&
-			 nodeState->goalState == PRIMARY_STATE)
+			 ((nodeState->reportedState == PRIMARY_STATE &&
+			   nodeState->goalState == PRIMARY_STATE) ||
+			  (nodeState->reportedState == WAIT_PRIMARY_STATE &&
+			   nodeState->goalState == WAIT_PRIMARY_STATE)))
 	{
 		ctx->applySettingsTransitionDone = true;
 
