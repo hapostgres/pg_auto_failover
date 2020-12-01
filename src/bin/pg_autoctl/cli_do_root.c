@@ -285,7 +285,7 @@ CommandLine do_tmux_clean =
 CommandLine do_tmux_wait =
 	make_command("wait",
 				 "Wait until a given node has been registered on the monitor",
-				 "[option ...] nodename",
+				 "[option ...] nodename [ targetState ]",
 				 "  --root          path where to create a cluster\n"
 				 "  --first-pgport  first Postgres port to use (5500)\n"
 				 "  --nodes         number of Postgres nodes to create (2)",
