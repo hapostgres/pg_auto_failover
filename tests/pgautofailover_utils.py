@@ -1193,8 +1193,8 @@ SELECT reportedstate, goalstate
         command = PGAutoCtl(self)
         out, err, ret = command.execute("get synchronous_standby_names",
                                         'show', 'standby-names')
-
-        return out.strip()
+        # strip spaces and single-quotes from the output
+        return out.strip("' \n\r\t")
 
     def get_synchronous_standby_names_local(self):
          """
