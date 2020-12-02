@@ -755,7 +755,8 @@ cli_show_standby_names(int argc, char **argv)
 	}
 	else
 	{
-		(void) fformat(stdout, "%s\n", synchronous_standby_names);
+		/* current synchronous_standby_names might be an empty string */
+		(void) fformat(stdout, "'%s'\n", synchronous_standby_names);
 	}
 }
 
