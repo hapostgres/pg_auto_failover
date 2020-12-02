@@ -315,7 +315,35 @@ def test_016_003_restart_node3():
     node3.run()
 
     assert node3.wait_until_assigned_state(target_state="secondary")
-    assert node1.wait_until_assigned_state(target_state="wait_primary")
+    assert node1.wait_until_state(target_state="wait_primary")
 
     time.sleep(5)
     assert not node1.get_state().assigned == 'primary'
+
+def test_016_004_restart_node2():
+    node2.run()
+
+    assert node3.wait_until_state(target_state="secondary")
+    assert node2.wait_until_state(target_state="secondary")
+    assert node1.wait_until_state(target_state="primary")
+
+#
+# When a node with candidate-priority zero (here, node3) fails while the
+# primary node (here, node1) is already in wait_primary, the non-candidate
+# node (here, node3) should still be assigned catchingup.
+#
+def test_017_001_fail_node2():
+    node2.fail()
+    assert node1.wait_until_state(target_state="wait_primary")
+
+def test_017_002_fail_node3():
+    node3.fail()
+    assert node3.wait_until_assigned_state(target_state="catchingup")
+
+def test_017_003_restart_nodes():
+    node3.run()
+    node2.run()
+
+    assert node3.wait_until_state(target_state="secondary")
+    assert node2.wait_until_state(target_state="secondary")
+    assert node1.wait_until_state(target_state="primary")
