@@ -2569,7 +2569,13 @@ monitor_print_formation_settings(Monitor *monitor, char *formation)
 {
 	MonitorAssignedStateParseContext context = { 0 };
 	PGSQL *pgsql = &monitor->pgsql;
-	char *sql = "select * from pgautofailover.formation_settings($1)";
+	char *sql =
+		"select context, group_id, node_id, nodename, setting, value "
+		" from pgautofailover.formation_settings($1)"
+		" order by case context when 'formation' then 0 "
+		" when 'primary' then 1 "
+		" when 'node' then 2 else 3 end, "
+		" setting, group_id, node_id";
 	int paramCount = 1;
 	Oid paramTypes[1] = { TEXTOID };
 	const char *paramValues[1] = { formation };
