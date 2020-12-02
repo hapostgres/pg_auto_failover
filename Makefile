@@ -27,6 +27,8 @@ endif
 PG_AUTOCTL = PG_AUTOCTL_DEBUG=1 ./src/bin/pg_autoctl/pg_autoctl
 
 NODES ?= 2
+NODES_ASYNC ?= 0
+NODES_SYNC_SB ?= -1
 FIRST_PGPORT ?= 5500
 
 TMUX_EXTRA_COMMANDS ?= ""
@@ -107,10 +109,12 @@ $(FSM): bin
 
 $(TMUX_SCRIPT): bin
 	mkdir -p $(TMUX_TOP_DIR)
-	$(PG_AUTOCTL) do tmux script      \
-         --root $(TMUX_TOP_DIR)       \
-         --first-pgport $(FIRST_PGPORT)  \
-         --nodes $(NODES)             \
+	$(PG_AUTOCTL) do tmux script          \
+         --root $(TMUX_TOP_DIR)           \
+         --first-pgport $(FIRST_PGPORT)   \
+         --nodes $(NODES)                 \
+         --async-nodes $(NODES_ASYNC)     \
+         --sync-standbys $(NODES_SYNC_SB) \
          --layout $(TMUX_LAYOUT) > $@
 
 tmux-script: $(TMUX_SCRIPT) ;
@@ -120,10 +124,12 @@ tmux-clean:
 	rm -rf $(TMUX_TOP_DIR)
 
 cluster: install
-	$(PG_AUTOCTL) do tmux session        \
-         --root $(TMUX_TOP_DIR)          \
-         --first-pgport $(FIRST_PGPORT)  \
-         --nodes $(NODES)                \
+	$(PG_AUTOCTL) do tmux session         \
+         --root $(TMUX_TOP_DIR)           \
+         --first-pgport $(FIRST_PGPORT)   \
+         --nodes $(NODES)                 \
+         --async-nodes $(NODES_ASYNC)     \
+         --sync-standbys $(NODES_SYNC_SB) \
          --layout $(TMUX_LAYOUT)
 
 .PHONY: all clean check install docs
