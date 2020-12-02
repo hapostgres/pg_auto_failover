@@ -657,7 +657,7 @@ tmux_start_server(const char *root, const char *scriptName)
 
 /*
  * pg_autoctl_getpid get the pid of the pg_autoctl process that is running for
- * the given PGDATA localtion.
+ * the given PGDATA location.
  */
 bool
 pg_autoctl_getpid(const char *pgdata, pid_t *pid)
