@@ -289,7 +289,7 @@ def test_015_003_restart_node1():
     assert node3.wait_until_state(target_state="secondary")
 
     time.sleep(5)
-    assert not node1.get_state() == 'primary'
+    assert not node1.get_state().assigned == 'primary'
 
 def test_015_004_restart_node2():
     node2.run()
@@ -297,3 +297,25 @@ def test_015_004_restart_node2():
     assert node3.wait_until_state(target_state="secondary")
     assert node2.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")
+
+#
+# When after loosing both secondary nodes, the one that's back online has
+# candidate priority set to zero, then we should remain in wait_primary
+# state.
+#
+def test_016_001_fail_node3():
+    node3.fail()
+    assert node3.wait_until_assigned_state(target_state="catchingup")
+
+def test_016_002_fail_node2():
+    node2.fail()
+    assert node1.wait_until_state(target_state="wait_primary")
+
+def test_016_003_restart_node3():
+    node3.run()
+
+    assert node3.wait_until_assigned_state(target_state="secondary")
+    assert node1.wait_until_assigned_state(target_state="wait_primary")
+
+    time.sleep(5)
+    assert not node1.get_state().assigned == 'primary'

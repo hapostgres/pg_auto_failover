@@ -359,29 +359,51 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 		IsHealthy(activeNode) &&
 		WalDifferenceWithin(activeNode, primaryNode, EnableSyncXlogThreshold))
 	{
-		ReplicationState primaryGoalState =
-			IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY)
-			? REPLICATION_STATE_APPLY_SETTINGS
-			: REPLICATION_STATE_PRIMARY;
+		/*
+		 * The state PRIMARY embeds the assumption that it's possible to
+		 * failover. A node with candidate Priority of zero can not be the
+		 * target of a failover, so might reach SECONDARY without allowing to
+		 * get out of WAIT_PRIMARY or JOIN_PRIMARY state.
+		 */
+		if (activeNode->candidatePriority > 0)
+		{
+			ReplicationState primaryGoalState =
+				IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY)
+				? REPLICATION_STATE_APPLY_SETTINGS
+				: REPLICATION_STATE_PRIMARY;
 
-		char message[BUFSIZE];
+			char message[BUFSIZE] = { 0 };
 
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to %s and " NODE_FORMAT
-			" to secondary after " NODE_FORMAT
-			" caught up.",
-			NODE_FORMAT_ARGS(primaryNode),
-			ReplicationStateGetName(primaryGoalState),
-			NODE_FORMAT_ARGS(activeNode),
-			NODE_FORMAT_ARGS(activeNode));
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of " NODE_FORMAT
+				" to %s and " NODE_FORMAT
+				" to secondary after " NODE_FORMAT
+				" caught up.",
+				NODE_FORMAT_ARGS(primaryNode),
+				ReplicationStateGetName(primaryGoalState),
+				NODE_FORMAT_ARGS(activeNode),
+				NODE_FORMAT_ARGS(activeNode));
 
-		/* node is ready for promotion */
-		AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
+			/* node is ready for promotion */
+			AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
 
-		/* other node can enable synchronous commit */
-		AssignGoalState(primaryNode, primaryGoalState, message);
+			/* other node can enable synchronous commit */
+			AssignGoalState(primaryNode, primaryGoalState, message);
+		}
+		else
+		{
+			char message[BUFSIZE] = { 0 };
+
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of " NODE_FORMAT
+				" to secondary after it caught up.",
+				NODE_FORMAT_ARGS(activeNode));
+
+			/* node is ready for promotion, though not a candidate */
+			AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
+		}
 
 		return true;
 	}

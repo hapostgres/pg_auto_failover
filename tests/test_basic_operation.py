@@ -287,7 +287,7 @@ def test_023_ifup_old_primary():
     eq_(node3.get_synchronous_standby_names_local(), '*')
 
 def test_024_stop_postgres_monitor():
-    original_state = node3.get_state()
+    original_state = node3.get_state().reported
     monitor.stop_postgres()
 
     # allow trying twice to make Travis CI stable

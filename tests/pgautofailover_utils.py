@@ -7,6 +7,7 @@ import network
 import psycopg2
 import subprocess
 import datetime as dt
+from collections import namedtuple
 from nose.tools import eq_
 from enum import Enum
 import json
@@ -17,6 +18,8 @@ COMMAND_TIMEOUT = network.COMMAND_TIMEOUT
 POLLING_INTERVAL = 0.1
 STATE_CHANGE_TIMEOUT = 90
 PGVERSION = os.getenv("PGVERSION", "11")
+
+NodeState = namedtuple('NodeState', 'reported assigned')
 
 class Role(Enum):
     Monitor = 1
@@ -917,7 +920,7 @@ class DataNode(PGNode):
         while wait_until > dt.datetime.now():
             self.cluster.sleep(sleep_time)
 
-            current_state = self.get_state()
+            current_state, assigned_state = self.get_state()
 
             # only log the state if it has changed
             if current_state != prev_state:
@@ -940,6 +943,43 @@ class DataNode(PGNode):
         self.print_debug_logs()
         raise Exception(error_msg)
 
+    def wait_until_assigned_state(self, target_state,
+                                  timeout=STATE_CHANGE_TIMEOUT,
+                                  sleep_time=POLLING_INTERVAL):
+        """
+        Waits until this data node is assigned the target state. Typically used
+        when the node has been stopped or failed and we want to check the
+        monitor FSM.
+        """
+        prev_state = None
+        wait_until = dt.datetime.now() + dt.timedelta(seconds=timeout)
+
+        while wait_until > dt.datetime.now():
+            self.cluster.sleep(sleep_time)
+
+            current_state, assigned_state = self.get_state()
+
+            # only log the state if it has changed
+            if assigned_state != prev_state:
+                if assigned_state == target_state:
+                    print("assigned state of %s is '%s', done waiting" %
+                          (self.datadir, assigned_state))
+                else:
+                    print("assigned state of %s is '%s', waiting for '%s' ..." %
+                          (self.datadir, assigned_state, target_state))
+
+            if assigned_state == target_state:
+                return True
+
+            prev_state = assigned_state
+
+        print("%s didn't reach %s after %d seconds" %
+              (self.datadir, target_state, timeout))
+        error_msg = (f"{self.datadir} failed to reach {target_state} "
+                     f"after {timeout} seconds\n")
+        self.print_debug_logs()
+        raise Exception(error_msg)
+
     def get_state(self):
         """
         Returns the current state of the data node. This is done by querying the
@@ -947,7 +987,7 @@ class DataNode(PGNode):
         """
         results = self.monitor.run_sql_query(
             """
-SELECT reportedstate
+SELECT reportedstate, goalstate
   FROM pgautofailover.node
  WHERE nodeid=%s and groupid=%s
 """,
@@ -957,8 +997,11 @@ SELECT reportedstate
             raise Exception("node %s in group %s not found on the monitor" %
                             (self.nodeid, self.group))
         else:
-            return results[0][0]
-        return results
+            res = NodeState(results[0][0], results[0][1])
+            return res
+
+        # default case, unclean when reached
+        return NodeState(None, None)
 
     def get_events(self):
         """
