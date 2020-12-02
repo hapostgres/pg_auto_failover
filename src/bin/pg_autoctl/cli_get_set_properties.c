@@ -632,6 +632,12 @@ cli_set_formation_number_sync_standbys(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
+	/* change the default group when it is still unknown */
+	if (config.groupId == -1)
+	{
+		config.groupId = 0;
+	}
+
 	if (!set_formation_number_sync_standbys(&monitor,
 											config.formation,
 											config.groupId,
