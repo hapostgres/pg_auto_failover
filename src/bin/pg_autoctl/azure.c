@@ -332,7 +332,7 @@ azure_psleep(int count, bool force)
 
 	bool saveDryRun = dryRun;
 
-	if (!search_path_first("sleep", sleep))
+	if (!search_path_first("sleep", sleep, LOG_ERROR))
 	{
 		log_fatal("Failed to find program sleep in PATH");
 		return false;
@@ -384,7 +384,7 @@ azure_get_remote_ip(char *ipAddress, size_t ipAddressSize)
 	Program program;
 	char curl[MAXPGPATH] = { 0 };
 
-	if (!search_path_first("curl", curl))
+	if (!search_path_first("curl", curl, LOG_ERROR))
 	{
 		log_fatal("Failed to find program curl in PATH");
 		return false;
@@ -883,7 +883,7 @@ azure_git_toplevel(char *srcDir, size_t size)
 	Program program;
 	char git[MAXPGPATH] = { 0 };
 
-	if (!search_path_first("git", git))
+	if (!search_path_first("git", git, LOG_ERROR))
 	{
 		log_fatal("Failed to find program git in PATH");
 		return false;
@@ -932,13 +932,13 @@ start_rsync_command(const char *username,
 	char sourceDir[MAXPGPATH] = { 0 };
 	char rsync_remote[MAXPGPATH] = { 0 };
 
-	if (!search_path_first("rsync", rsync))
+	if (!search_path_first("rsync", rsync, LOG_ERROR))
 	{
 		log_fatal("Failed to find program rsync in PATH");
 		return false;
 	}
 
-	if (!search_path_first("ssh", ssh))
+	if (!search_path_first("ssh", ssh, LOG_ERROR))
 	{
 		log_fatal("Failed to find program ssh in PATH");
 		return false;
@@ -1618,7 +1618,7 @@ run_ssh(const char *username, const char *ip)
 	char ssh[MAXPGPATH] = { 0 };
 	char command[BUFSIZE] = { 0 };
 
-	if (!search_path_first("ssh", ssh))
+	if (!search_path_first("ssh", ssh, LOG_ERROR))
 	{
 		log_fatal("Failed to find program ssh in PATH");
 		return false;
@@ -1669,7 +1669,7 @@ run_ssh_command(const char *username,
 	char ssh[MAXPGPATH] = { 0 };
 	char ssh_command[BUFSIZE] = { 0 };
 
-	if (!search_path_first("ssh", ssh))
+	if (!search_path_first("ssh", ssh, LOG_ERROR))
 	{
 		log_fatal("Failed to find program ssh in PATH");
 		return false;
@@ -1734,7 +1734,7 @@ start_ssh_command(const char *username,
 	char ssh[MAXPGPATH] = { 0 };
 	char ssh_command[BUFSIZE] = { 0 };
 
-	if (!search_path_first("ssh", ssh))
+	if (!search_path_first("ssh", ssh, LOG_ERROR))
 	{
 		log_fatal("Failed to find program ssh in PATH");
 		return false;

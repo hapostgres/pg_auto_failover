@@ -294,7 +294,7 @@ cli_do_azure_getopts(int argc, char **argv)
 
 	if (IS_EMPTY_STRING_BUFFER(azureCLI))
 	{
-		if (!search_path_first("az", azureCLI))
+		if (!search_path_first("az", azureCLI, LOG_ERROR))
 		{
 			++errors;
 			log_fatal("Failed to find program \"%s\" in PATH", "az");
