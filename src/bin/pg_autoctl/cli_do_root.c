@@ -307,6 +307,117 @@ CommandLine do_tmux_commands =
 					 NULL, NULL, NULL, do_tmux);
 
 
+CommandLine do_azure_create_region =
+	make_command("region",
+				 "Create an azure region: resource group, network, VMs",
+				 "[option ...]",
+				 "  --prefix    azure group name prefix (ha-demo)\n"
+				 "  --region    name to use for referencing the region\n"
+				 "  --location  azure location where to create a resource group\n"
+				 "  --monitor   should we create a monitor in the region (false)\n"
+				 "  --nodes     number of Postgres nodes to create (2)\n"
+				 "  --script    output a shell script instead of creating resources\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_create_region);
+
+CommandLine do_azure_create_nodes =
+	make_command("nodes",
+				 "Provision our pre-created VM with pg_autoctl Postgres nodes",
+				 "[option ...]",
+				 "  --prefix    azure group name prefix (ha-demo)\n"
+				 "  --region    name to use for referencing the region\n"
+				 "  --monitor   should we create a monitor in the region (false)\n"
+				 "  --nodes     number of Postgres nodes to create (2)\n"
+				 "  --script    output a shell script instead of creating resources\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_create_nodes);
+
+
+CommandLine *do_azure_create[] = {
+	&do_azure_create_region,
+	&do_azure_create_nodes,
+	NULL
+};
+
+CommandLine do_azure_create_commands =
+	make_command_set("create",
+					 "create azure resources for a pg_auto_failover demo",
+					 NULL, NULL, NULL, do_azure_create);
+
+CommandLine do_azure_show_ips =
+	make_command("ips",
+				 "Show public and private IP addresses for selected VMs",
+				 "[option ...]",
+				 "  --prefix    azure group name prefix (ha-demo)\n"
+				 "  --region    name to use for referencing the region\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_show_ips);
+
+CommandLine do_azure_show_state =
+	make_command("state",
+				 "Connect to the monitor node to show the current state",
+				 "[option ...]",
+				 "  --prefix    azure group name prefix (ha-demo)\n"
+				 "  --region    name to use for referencing the region\n"
+				 "  --watch     run the command again every 0.2s\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_show_state);
+
+CommandLine *do_azure_show[] = {
+	&do_azure_show_ips,
+	&do_azure_show_state,
+	NULL
+};
+
+CommandLine do_azure_show_commands =
+	make_command_set("show",
+					 "show azure resources for a pg_auto_failover demo",
+					 NULL, NULL, NULL, do_azure_show);
+
+CommandLine do_azure_ls =
+	make_command("ls",
+				 "List resources in a given azure region",
+				 "[option ...]",
+				 "  --prefix    azure group name prefix (ha-demo)\n"
+				 "  --region    name to use for referencing the region\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_ls);
+
+CommandLine do_azure_ssh =
+	make_command("ssh",
+				 "Runs ssh -l ha-admin <public ip address> for a given VM name",
+				 "[option ...]",
+				 "  --prefix    azure group name prefix (ha-demo)\n"
+				 "  --region    name to use for referencing the region\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_ssh);
+
+CommandLine do_azure_sync =
+	make_command("sync",
+				 "Rsync pg_auto_failover sources on all the target region VMs",
+				 "[option ...]",
+				 "  --prefix    azure group name prefix (ha-demo)\n"
+				 "  --region    region to use for referencing the region\n"
+				 "  --monitor   should we create a monitor in the region (false)\n"
+				 "  --nodes     number of Postgres nodes to create (2)\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_rsync);
+
+CommandLine *do_azure[] = {
+	&do_azure_create_commands,
+	&do_azure_show_commands,
+	&do_azure_ls,
+	&do_azure_ssh,
+	&do_azure_sync,
+	NULL
+};
+
+CommandLine do_azure_commands =
+	make_command_set("azure",
+					 "manage a set of azure resources for a pg_auto_failover demo",
+					 NULL, NULL, NULL, do_azure);
+
+
 CommandLine *do_subcommands[] = {
 	&do_monitor_commands,
 	&do_fsm_commands,
@@ -317,6 +428,7 @@ CommandLine *do_subcommands[] = {
 	&do_service_postgres_ctl_commands,
 	&do_service_commands,
 	&do_tmux_commands,
+	&do_azure_commands,
 	NULL
 };
 

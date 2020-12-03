@@ -60,6 +60,8 @@ extern CommandLine do_standby_promote;
 
 extern CommandLine do_discover;
 
+extern CommandLine do_azure_ssh;
+
 extern CommandLine do_commands;
 extern CommandLine *do_subcommands[];
 
@@ -96,5 +98,15 @@ void cli_do_tmux_session(int argc, char **argv);
 void cli_do_tmux_stop(int argc, char **argv);
 void cli_do_tmux_clean(int argc, char **argv);
 void cli_do_tmux_wait(int argc, char **argv);
+
+/* src/bin/pg_autoctl_cli_do_azure.c */
+int cli_do_azure_getopts(int argc, char **argv);
+void cli_do_azure_create_region(int argc, char **argv);
+void cli_do_azure_create_nodes(int argc, char **argv);
+void cli_do_azure_ls(int argc, char **argv);
+void cli_do_azure_show_ips(int argc, char **argv);
+void cli_do_azure_ssh(int argc, char **argv);
+void cli_do_azure_rsync(int argc, char **argv);
+void cli_do_azure_show_state(int argc, char **argv);
 
 #endif  /* CLI_DO_ROOT_H */
