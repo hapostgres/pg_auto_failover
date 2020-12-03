@@ -40,6 +40,9 @@ static bool supervisor_loop(Supervisor *supervisor);
 static bool supervisor_find_service(Supervisor *supervisor, pid_t pid,
 									Service **result);
 
+static bool supervisor_find_disabled_service(Supervisor *supervisor, pid_t pid,
+											 Service **result);
+
 static void supervisor_stop_subprocesses(Supervisor *supervisor);
 
 static void supervisor_stop_other_services(Supervisor *supervisor, pid_t pid);
@@ -56,9 +59,17 @@ static bool supervisor_restart_service(Supervisor *supervisor,
 									   Service *service,
 									   int status);
 
+static void supervisor_handle_failed_restart(Supervisor *supervisor,
+											 Service *service,
+											 int status);
+
 static bool supervisor_may_restart(Service *service);
 
 static bool supervisor_update_pidfile(Supervisor *supervisor);
+
+static int supervisor_enable_services(Supervisor *supervisor);
+
+static int supervisor_disable_services(Supervisor *supervisor);
 
 
 /*
@@ -98,6 +109,12 @@ supervisor_start(Service services[], int serviceCount, const char *pidfile)
 		Service *service = &(services[serviceIndex]);
 		bool started = false;
 
+		if (service->enabled != SV_ENABLED)
+		{
+			log_info("Skipping not enabled pg_autoctl %s service", service->name);
+			continue;
+		}
+
 		log_debug("Starting pg_autoctl %s service", service->name);
 
 		started = (*service->startFunction)(service->context, &(service->pid));
@@ -124,6 +141,10 @@ supervisor_start(Service services[], int serviceCount, const char *pidfile)
 
 			for (idx = serviceIndex - 1; idx > 0; idx--)
 			{
+				if (services[idx].enabled != SV_ENABLED)
+				{
+					continue;
+				}
 				if (kill(services[idx].pid, SIGQUIT) != 0)
 				{
 					log_error("Failed to send SIGQUIT to service %s with pid %d",
@@ -194,6 +215,37 @@ supervisor_loop(Supervisor *supervisor)
 			(void) supervisor_reload_services(supervisor);
 		}
 
+		if (asked_to_enable)
+		{
+			int enabled = 0;
+			log_info("pg_autoctl received a signal to, "
+					 "enable non active services");
+
+			enabled = supervisor_enable_services(supervisor);
+			if (enabled)
+			{
+				/* reset firstLoop to avoid looping on waitpid() below */
+				firstLoop = true;
+				subprocessCount += enabled;
+			}
+		}
+
+		if (asked_to_disable)
+		{
+			int disabled = 0;
+			log_info("pg_autoctl received a signal to, "
+					 "disable active services");
+
+			disabled = supervisor_disable_services(supervisor);
+			if (disabled)
+			{
+				/*
+				 * waitpid will fire and that should be fine
+				 */
+				subprocessCount -= disabled;
+			}
+		}
+
 		if (firstLoop)
 		{
 			firstLoop = false;
@@ -214,7 +266,7 @@ supervisor_loop(Supervisor *supervisor)
 				if (errno == ECHILD)
 				{
 					/* no more childrens */
-					if (asked_to_stop || asked_to_stop_fast || asked_to_quit)
+					if (supervisor->shutdownSequenceInProgress)
 					{
 						/* off we go */
 						log_info("Internal subprocesses are done, stopping");
@@ -257,6 +309,13 @@ supervisor_loop(Supervisor *supervisor)
 			{
 				Service *dead = NULL;
 
+				/* if this is a disabled service which just exited, do nothing */
+				if (supervisor_find_disabled_service(supervisor, pid, &dead))
+				{
+					log_info("Disabled service %s exited", dead->name);
+					break;
+				}
+
 				/* map the dead child pid to the known dead internal service */
 				if (!supervisor_find_service(supervisor, pid, &dead))
 				{
@@ -268,11 +327,13 @@ supervisor_loop(Supervisor *supervisor)
 				--subprocessCount;
 
 				/* apply the service restart policy */
-				if (supervisor_restart_service(supervisor, dead, status))
+				if (!supervisor_restart_service(supervisor, dead, status))
 				{
-					++subprocessCount;
+					supervisor_handle_failed_restart(supervisor, dead, status);
+					break;
 				}
 
+				++subprocessCount;
 				break;
 			}
 		}
@@ -280,6 +341,33 @@ supervisor_loop(Supervisor *supervisor)
 
 	/* we track in the main loop if it's a cleanExit or not */
 	return supervisor->cleanExit;
+}
+
+
+/*
+ * supervisor_find_service loops over the SubProcess array to find given pid
+ * which matches only a disabled service
+ */
+static bool
+supervisor_find_disabled_service(Supervisor *supervisor, pid_t pid, Service **result)
+{
+	int serviceCount = supervisor->serviceCount;
+	int serviceIndex = 0;
+
+	for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
+	{
+		if (supervisor->services[serviceIndex].enabled != SV_DISABLED)
+		{
+			continue;
+		}
+		if (pid == supervisor->services[serviceIndex].pid)
+		{
+			*result = &(supervisor->services[serviceIndex]);
+			return true;
+		}
+	}
+
+	return false;
 }
 
 
@@ -295,6 +383,10 @@ supervisor_find_service(Supervisor *supervisor, pid_t pid, Service **result)
 
 	for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
 	{
+		if (supervisor->services[serviceIndex].enabled != SV_ENABLED)
+		{
+			continue;
+		}
 		if (pid == supervisor->services[serviceIndex].pid)
 		{
 			*result = &(supervisor->services[serviceIndex]);
@@ -318,6 +410,11 @@ supervisor_reload_services(Supervisor *supervisor)
 	for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
 	{
 		Service *service = &(supervisor->services[serviceIndex]);
+
+		if (service->enabled != SV_ENABLED)
+		{
+			continue;
+		}
 
 		log_info("Reloading service \"%s\" by signaling pid %d with SIGHUP",
 				 service->name, service->pid);
@@ -349,6 +446,11 @@ supervisor_stop_subprocesses(Supervisor *supervisor)
 	{
 		Service *service = &(supervisor->services[serviceIndex]);
 
+		if (service->enabled != SV_ENABLED)
+		{
+			continue;
+		}
+
 		if (kill(service->pid, signal) != 0)
 		{
 			log_error("Failed to send signal %s to service %s with pid %d",
@@ -379,6 +481,10 @@ supervisor_stop_other_services(Supervisor *supervisor, pid_t pid)
 		for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
 		{
 			Service *service = &(supervisor->services[serviceIndex]);
+			if (service->enabled != SV_ENABLED)
+			{
+				continue;
+			}
 
 			if (service->pid != pid)
 			{
@@ -614,8 +720,190 @@ supervisor_shutdown_sequence(Supervisor *supervisor)
 
 
 /*
+ * supervisor_enable_services enables any disabled services defined in the
+ * supervisor.
+ *
+ * Returns the number of successfully enabled services.
+ */
+static int
+supervisor_enable_services(Supervisor *supervisor)
+{
+	Service *service = supervisor->services;
+	int numEnabled = 0;
+	int serviceIndex;
+
+	asked_to_enable = 0;
+
+	for (serviceIndex = 0;
+		 serviceIndex < supervisor->serviceCount;
+		 serviceIndex++, service++)
+	{
+		if (service->enabled == SV_DISABLED)
+		{
+			bool started;
+
+			log_debug("Attempting to enable %s", service->name);
+
+			started = (*service->startFunction)(service->context, &(service->pid));
+
+			if (started)
+			{
+				/* XXX: CLOCK_MONOTONIC ? */
+				uint64_t now = time(NULL);
+
+				RestartCounters *counters = &(service->restartCounters);
+
+				/* Mark the service as enabled and disableable*/
+				service->enabled = SV_ENABLED;
+				service->canDisable = true;
+
+				/* Populate the restart counters */
+				counters->count = 1;
+				counters->position = 0;
+				counters->startTime[counters->position] = now;
+
+				log_info("Started pg_autoctl %s service with pid %d",
+						 service->name, service->pid);
+
+				numEnabled++;
+			}
+			else
+			{
+				log_error("Failed to start service %s, "
+						  "check the error logs and retry",
+						  service->name);
+			}
+		}
+	}
+
+	return numEnabled;
+}
+
+
+/*
+ * supervisor_disable_services disables any enabled services defined in the
+ * supervisor.
+ *
+ * Returns the number of successfully disabled services.
+ */
+static int
+supervisor_disable_services(Supervisor *supervisor)
+{
+	Service *service = supervisor->services;
+	int disabled = 0;
+	int serviceIndex;
+
+	asked_to_disable = 0;
+
+	for (serviceIndex = 0;
+		 serviceIndex < supervisor->serviceCount;
+		 serviceIndex++, service++)
+	{
+		if (service->canDisable && service->enabled == SV_ENABLED)
+		{
+			log_info("Got called to disable %s", service->name);
+
+			if (kill(service->pid, SIGUSR2) != 0)
+			{
+				log_error("Failed to send signal SIGUSR2 to service %s with pid %d",
+						  service->name,
+						  service->pid);
+				continue;
+			}
+
+			service->enabled = SV_DISABLED;
+			disabled++;
+		}
+	}
+
+	return disabled;
+}
+
+
+/*
+ * supervisor_handle_failed_restart decides what action to take when a service
+ * has failed to restart. Currently one of the three can happen:
+ *	* continue running the rest of the services
+ *	* exit the whole program with a happy code
+ *	* exit the whole program with failed code
+ *
+ * The function can be greatly simplified. It is intentionally left a bit
+ * verbose for the benefit of readability.
+ */
+static void
+supervisor_handle_failed_restart(Supervisor *supervisor, Service *service,
+								 int status)
+{
+	int returnCode = WEXITSTATUS(status);
+
+	/*
+	 * If we are already going handling a shutdown, then do not update it
+	 */
+	if (supervisor->shutdownSequenceInProgress)
+	{
+		log_trace("supervisor_handle_failed_restart: shutdownSequenceInProgress");
+		return;
+	}
+
+	/*
+	 * No need to act, the service should not have restarted. IF that
+	 * service was enabled, then also disable it.
+	 */
+	if (service->policy == RP_TEMPORARY)
+	{
+		if (service->canDisable && service->enabled == SV_ENABLED)
+		{
+			service->enabled = SV_DISABLED;
+		}
+		return;
+	}
+
+	/*
+	 * If a transient service and exited normally then we are happy. If it was
+	 * an enabled service, then disable it but continue running the rest of the
+	 * services, otherwise, shutdown all the services with a happy code.
+	 */
+	if (service->policy == RP_TRANSIENT && returnCode == EXIT_CODE_QUIT)
+	{
+		if (service->canDisable && service->enabled == SV_ENABLED)
+		{
+			service->enabled = SV_DISABLED;
+		}
+		else
+		{
+			supervisor->cleanExit = true;
+			supervisor->shutdownSequenceInProgress = true;
+			(void) supervisor_stop_other_services(supervisor, service->pid);
+		}
+		return;
+	}
+
+	/*
+	 * There are no more happy exit code scenarios. Either disable the failed
+	 * service or shutdown everything
+	 */
+	if (service->canDisable && service->enabled == SV_ENABLED)
+	{
+		/* If we can disable that service, then do so */
+		log_error("Failed to restart service %s, disabling it",
+				  service->name);
+		service->enabled = SV_DISABLED;
+	}
+	else
+	{
+		/* exit with a non-zero exit code, and process with shutdown sequence */
+		supervisor->cleanExit = false;
+		supervisor->shutdownSequenceInProgress = true;
+		(void) supervisor_stop_other_services(supervisor, service->pid);
+	}
+}
+
+
+/*
  * supervisor_restart_service restarts given service and maintains its MaxR and
  * MaxT counters.
+ *
+ * Returns true when the service has successfully restarted or false.
  */
 static bool
 supervisor_restart_service(Supervisor *supervisor, Service *service, int status)
@@ -658,7 +946,7 @@ supervisor_restart_service(Supervisor *supervisor, Service *service, int status)
 	 */
 	if (service->policy == RP_TEMPORARY)
 	{
-		return true;
+		return false;
 	}
 
 	/*
@@ -677,12 +965,6 @@ supervisor_restart_service(Supervisor *supervisor, Service *service, int status)
 	}
 	else
 	{
-		/* exit with a non-zero exit code, and process with shutdown sequence */
-		supervisor->cleanExit = false;
-		supervisor->shutdownSequenceInProgress = true;
-
-		(void) supervisor_stop_other_services(supervisor, service->pid);
-
 		return false;
 	}
 
@@ -701,12 +983,6 @@ supervisor_restart_service(Supervisor *supervisor, Service *service, int status)
 	 */
 	if (service->policy == RP_TRANSIENT && returnCode == EXIT_CODE_QUIT)
 	{
-		/* exit with a happy exit code, and process with shutdown sequence */
-		supervisor->cleanExit = true;
-		supervisor->shutdownSequenceInProgress = true;
-
-		(void) supervisor_stop_other_services(supervisor, service->pid);
-
 		return false;
 	}
 
@@ -723,12 +999,6 @@ supervisor_restart_service(Supervisor *supervisor, Service *service, int status)
 	{
 		log_fatal("Failed to restart service %s", service->name);
 
-		/* exit with a non-zero exit code, and process with shutdown sequence */
-		supervisor->cleanExit = false;
-		supervisor->shutdownSequenceInProgress = true;
-
-		(void) supervisor_stop_other_services(supervisor, service->pid);
-
 		return false;
 	}
 
@@ -736,6 +1006,9 @@ supervisor_restart_service(Supervisor *supervisor, Service *service, int status)
 	 * Now we have restarted the service, it has a new PID and we need to
 	 * update our PID file with the new information. Failing to update the PID
 	 * file is a fatal error: the `pg_autoctl restart` command can't work then.
+	 *
+	 * This is the only case where we decide to start a shutdown sequence since
+	 * this is unrecoverabled error independed of the service.
 	 */
 	if (!supervisor_update_pidfile(supervisor))
 	{
@@ -744,7 +1017,6 @@ supervisor_restart_service(Supervisor *supervisor, Service *service, int status)
 
 		supervisor->cleanExit = false;
 		supervisor->shutdownSequenceInProgress = true;
-
 		(void) supervisor_stop_subprocesses(supervisor);
 
 		return false;
@@ -837,6 +1109,12 @@ supervisor_update_pidfile(Supervisor *supervisor)
 	for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
 	{
 		Service *service = &(supervisor->services[serviceIndex]);
+
+		/* XXX: we might want to write the status here */
+		if (service->enabled != SV_ENABLED)
+		{
+			continue;
+		}
 
 		/* one line per service, pid space name */
 		appendPQExpBuffer(content, "%d %s\n", service->pid, service->name);

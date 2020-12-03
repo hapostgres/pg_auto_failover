@@ -362,14 +362,23 @@ write_ini_to_stream(FILE *stream, IniOption *optionList)
 			{
 				fformat(stream, "\n");
 			}
+
 			currentSection = (char *) option->section;
-			fformat(stream, "[%s]\n", currentSection);
+			if (currentSection)
+			{
+				fformat(stream, "[%s]\n", currentSection);
+			}
 		}
 
 		switch (option->type)
 		{
 			case INI_INT_T:
 			{
+				if (*option->intValue == -1)
+				{
+					break;
+				}
+
 				fformat(stream, "%s = %d\n",
 						option->name, *(option->intValue));
 				break;

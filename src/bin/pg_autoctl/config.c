@@ -267,6 +267,57 @@ SetPidFilePath(ConfigFilePaths *pathnames, const char *pgdata)
 
 
 /*
+ * SetPgbouncerFilePath sets config.pathnames.pgbouncer
+ */
+bool
+SetPgbouncerFilePath(ConfigFilePaths *pathnames, const char *pgdata)
+{
+	if (IS_EMPTY_STRING_BUFFER(pathnames->pgbouncer))
+	{
+		if (!build_xdg_path(pathnames->pgbouncer,
+							XDG_CONFIG,
+							pgdata,
+							"pgbouncer.ini"))
+		{
+			log_error("Failed to build pgbouncer.ini file pathname, "
+					  "see above.");
+			return false;
+		}
+	}
+
+	log_trace("SetPgbouncerFilePath: \"%s\"", pathnames->pgbouncer);
+
+	return true;
+}
+
+
+/*
+ * SetPgbouncerRunTimeFilePath sets config.pathnames.pgbouncerRunTime
+ */
+bool
+SetPgbouncerRunTimeFilePath(ConfigFilePaths *pathnames, const char *pgdata)
+{
+	if (IS_EMPTY_STRING_BUFFER(pathnames->pgbouncerRunTime))
+	{
+		if (!build_xdg_path(pathnames->pgbouncerRunTime,
+							XDG_RUNTIME,
+							pgdata,
+							"pgbouncer.ini"))
+		{
+			log_error("Failed to build pgbouncer.ini file pathname, "
+					  "see above.");
+			return false;
+		}
+	}
+
+	log_trace("SetPgbouncerRunTimeFilePath: \"%s\"",
+			  pathnames->pgbouncerRunTime);
+
+	return true;
+}
+
+
+/*
  * ProbeConfigurationFileRole opens a configuration file at given filename and
  * probes the pg_autoctl role it belongs to: either a monitor or a keeper.
  *

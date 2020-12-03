@@ -50,6 +50,11 @@ typedef enum
 	RP_TRANSIENT
 } RestartPolicy;
 
+typedef enum
+{
+	SV_ENABLED = 0,
+	SV_DISABLED
+} ServiceEnabled;
 
 /*
  * Supervisor restart strategy.
@@ -93,6 +98,10 @@ typedef struct RestartCounters
  * seen by the supervisor.
  *
  * In particular, services may be started more than once when they fail.
+ *
+ * Also a service may get started or stopped at any point depending on the
+ * ServiceEnabled value.
+ * For a service to be disabled, it has to have the canDisable flag set.
  */
 typedef struct Service
 {
@@ -101,6 +110,8 @@ typedef struct Service
 	pid_t pid;                          /* Service PID */
 	bool (*startFunction)(void *context, pid_t *pid);
 	void *context;             /* Service Context (Monitor or Keeper struct) */
+	ServiceEnabled enabled;    /* Is the service enabled? Default yes */
+	bool canDisable;           /* Can we disable the service? Default no */
 	RestartCounters restartCounters;
 } Service;
 

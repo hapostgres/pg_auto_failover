@@ -39,6 +39,8 @@ typedef struct ConfigFilePaths
 	char init[MAXPGPATH];   /* /tmp/${PGDATA}/pg_autoctl.init */
 	char nodes[MAXPGPATH];  /* ~/.local/share/pg_autoctl/${PGDATA}/nodes.json */
 	char systemd[MAXPGPATH];    /* ~/.config/systemd/user/pgautofailover.service */
+	char pgbouncer[MAXPGPATH];  /* ~/.config/pg_autoctl/${PGDATA}/pgbouncer.ini */
+	char pgbouncerRunTime[MAXPGPATH];  /* /tmp/${PGDATA}/pgbouncer.ini */
 } ConfigFilePaths;
 
 /*
@@ -72,6 +74,9 @@ bool SetConfigFilePath(ConfigFilePaths *pathnames, const char *pgdata);
 bool SetStateFilePath(ConfigFilePaths *pathnames, const char *pgdata);
 bool SetNodesFilePath(ConfigFilePaths *pathnames, const char *pgdata);
 bool SetPidFilePath(ConfigFilePaths *pathnames, const char *pgdata);
+bool SetPgbouncerFilePath(ConfigFilePaths *pathnames, const char *pgdata);
+bool SetPgbouncerRunTimeFilePath(ConfigFilePaths *pathnames,
+								 const char *pgdata);
 
 pgAutoCtlNodeRole ProbeConfigurationFileRole(const char *filename);
 

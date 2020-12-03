@@ -3,6 +3,7 @@
  *     Implementation of pg_autoctl enable and disable CLI sub-commands.
  *     Current features that can be enabled and their scope are:
  *      - secondary (scope: formation)
+ *      - pgbouncer (scope: XXX)
  *
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
@@ -20,7 +21,9 @@
 #include "log.h"
 #include "monitor.h"
 #include "parsing.h"
+#include "pgbouncer_config.h"
 #include "pgsetup.h"
+#include "pidfile.h"
 
 bool allowFailover = false;
 
@@ -35,6 +38,10 @@ static void cli_disable_maintenance(int argc, char **argv);
 static int cli_ssl_getopts(int argc, char **argv);
 static void cli_enable_ssl(int argc, char **argv);
 static void cli_disable_ssl(int argc, char **argv);
+
+static int cli_pgbouncer_getopts(int argc, char **argv);
+static void cli_enable_pgbouncer(int argc, char **argv);
+static void cli_disable_pgbouncer(int argc, char **argv);
 
 static bool update_ssl_configuration(LocalPostgresServer *postgres,
 									 const char *hostname);
@@ -93,10 +100,30 @@ static CommandLine disable_ssl_command =
 				 cli_getopt_pgdata,
 				 cli_disable_ssl);
 
+static CommandLine enable_pgbouncer_command =
+	make_command("pgbouncer",
+				 "Enable a pgbouncer instance to point to primary of the formation",
+				 "[ --pgdata --config --help ]",
+				 CLI_PGDATA_OPTION
+				 "  --config     pgbouncer config file (required)\n"
+				 "  --help       show this message \n",
+				 cli_pgbouncer_getopts,
+				 cli_enable_pgbouncer);
+
+static CommandLine disable_pgbouncer_command =
+	make_command("pgbouncer",
+				 "Disable a running pgbouncer instance on the formation",
+				 "[ --pgdata --help ]",
+				 CLI_PGDATA_OPTION
+				 "  --help       show this message \n",
+				 cli_pgbouncer_getopts,
+				 cli_disable_pgbouncer);
+
 static CommandLine *enable_subcommands[] = {
 	&enable_secondary_command,
 	&enable_maintenance_command,
 	&enable_ssl_command,
+	&enable_pgbouncer_command,
 	NULL
 };
 
@@ -104,6 +131,7 @@ static CommandLine *disable_subcommands[] = {
 	&disable_secondary_command,
 	&disable_maintenance_command,
 	&disable_ssl_command,
+	&disable_pgbouncer_command,
 	NULL
 };
 
@@ -1199,4 +1227,188 @@ cli_disable_ssl(int argc, char **argv)
 	}
 
 	(void) cli_enable_ssl(argc, argv);
+}
+
+
+/*
+ * pgbouncer related section
+ */
+static PgbouncerConfig pgbouncerConfig;
+
+static int
+cli_pgbouncer_getopts(int argc, char **argv)
+{
+	PgbouncerConfig options = { 0 };
+
+	int c;
+	int errors = 0;
+	int option_index = 0;
+
+	static struct option long_options[] = {
+		{ "pgdata", required_argument, NULL, 'D' },
+		{ "config", required_argument, NULL, 'c' },
+		{ "help", no_argument, NULL, 'h' },
+		{ NULL, 0, NULL, 0 }
+	};
+
+	/* set default values for our options, when we have some */
+	optind = 0;
+
+	while ((c = getopt_long(argc, argv, "D:c:h",
+							long_options, &option_index)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(options.pgSetup.pgdata, optarg, MAXPGPATH);
+				log_trace("--pgdata %s", options.pgSetup.pgdata);
+				break;
+			}
+
+			case 'c':
+			{
+				if (options.userSuppliedConfig[0] != '\0')
+				{
+					log_error("--config only allowed once, already got %s",
+							  options.userSuppliedConfig);
+					exit(EXIT_CODE_BAD_ARGS);
+				}
+
+				if (strlcpy(options.userSuppliedConfig,
+							optarg,
+							sizeof(options.userSuppliedConfig)) >=
+					sizeof(options.userSuppliedConfig))
+				{
+					log_error("config file too long, greater than  %ld",
+							  sizeof(options.userSuppliedConfig) - 1);
+					exit(EXIT_CODE_BAD_ARGS);
+				}
+
+				log_trace("--config %s", options.userSuppliedConfig);
+				break;
+			}
+
+			case 'h':
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_QUIT);
+				break;
+			}
+
+			default:
+			{
+				/* getopt_long already wrote an error message */
+				errors++;
+			}
+		}
+	}
+
+	if (errors > 0)
+	{
+		commandline_help(stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
+
+	/* Initialize the Non User supplied options */
+	if (!pgbouncer_config_init(&options, options.pgSetup.pgdata))
+	{
+		/* It has already logged why */
+		commandline_help(stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	/* Set our global variable to pass the info around */
+	pgbouncerConfig = options;
+
+	return optind;
+}
+
+
+static void
+cli_enable_pgbouncer(int argc, char **argv)
+{
+	PgbouncerConfig config = pgbouncerConfig;
+	pid_t pid = 0;
+
+	/*
+	 * Admittedly this is the wrong layer to perform option validatation at.
+	 * However by doing it here, it is possible to use the same options function
+	 * for both enable and disable cases.
+	 *
+	 * Validate --config options
+	 *
+	 */
+	if (config.userSuppliedConfig[0] == '\0')
+	{
+		log_error("Option --config is mandatory");
+
+		pgbouncer_config_destroy(&config);
+		commandline_help(stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (!file_exists(config.userSuppliedConfig))
+	{
+		log_error("Missing mandatory --config file %s", config.userSuppliedConfig);
+
+		pgbouncer_config_destroy(&config);
+		commandline_help(stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	/* pgbouncer cannot be enabled for a non active node */
+	if (!read_pidfile(config.pathnames.pid, &pid))
+	{
+		log_fatal("Cannot enable pgbouncer on a non pg_autoctl managed node");
+
+		pgbouncer_config_destroy(&config);
+		exit(EXIT_CODE_BAD_STATE);
+	}
+
+	/*
+	 * Read the user supplied configuration and then write it in a template that
+	 * we will manage. Configuration keys pointing to files, are specially
+	 * handled by us during write time. These two functions know which keys to
+	 * read and how.
+	 */
+	if (!pgbouncer_config_read_user_supplied_ini(&config) ||
+		!pgbouncer_config_write_template(&config))
+	{
+		/* It has already logged why */
+		pgbouncer_config_destroy(&config);
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (!cli_pg_autoctl_enable_services(config.pathnames.pid))
+	{
+		/* It has already logged why */
+		pgbouncer_config_destroy(&config);
+		exit(EXIT_CODE_RELOAD);
+	}
+
+	pgbouncer_config_destroy(&config);
+}
+
+
+static void
+cli_disable_pgbouncer(int argc, char **argv)
+{
+	PgbouncerConfig config = pgbouncerConfig;
+	pid_t pid = 0;
+
+	/* pgbouncer can not be enabled for a non active node */
+	if (!read_pidfile(config.pathnames.pid, &pid))
+	{
+		log_fatal("pg_autofailover is not running");
+		exit(EXIT_CODE_BAD_STATE);
+	}
+
+	if (!cli_pg_autoctl_disable_services(config.pathnames.pid))
+	{
+		/* It has already logged why */
+		exit(EXIT_CODE_RELOAD);
+	}
 }

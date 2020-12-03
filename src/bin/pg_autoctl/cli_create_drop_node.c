@@ -30,6 +30,7 @@
 #include "monitor.h"
 #include "monitor_config.h"
 #include "monitor_pg_init.h"
+#include "pgbouncer_config.h"
 #include "pgctl.h"
 #include "pghba.h"
 #include "pidfile.h"
@@ -99,6 +100,7 @@ CommandLine create_postgres_command =
 		"  --skip-pg-hba     skip editing pg_hba.conf rules\n"
 		"  --candidate-priority    priority of the node to be promoted to become primary\n"
 		"  --replication-quorum    true if node participates in write quorum\n"
+		"  --enable-pgbouncer      enable pgbouncer with this configuration file\n"
 		KEEPER_CLI_SSL_OPTIONS,
 		cli_create_postgres_getopts,
 		cli_create_postgres);
@@ -306,12 +308,13 @@ cli_create_postgres_getopts(int argc, char **argv)
 		{ "ssl-crl-file", required_argument, &ssl_flag, SSL_CRL_FILE_FLAG },
 		{ "server-cert", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG },
 		{ "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG },
+		{ "enable-pgbouncer", required_argument, NULL, 'B' },
 		{ NULL, 0, NULL, 0 }
 	};
 
 	int optind =
 		cli_create_node_getopts(argc, argv, long_options,
-								"C:D:H:p:l:U:A:Sd:a:n:f:m:MI:RVvqhP:r:xsN",
+								"C:D:H:p:l:U:A:Sd:a:n:f:m:MI:RVvqhP:r:xsNB:",
 								&options);
 
 	/* publish our option parsing in the global variable */
@@ -357,6 +360,51 @@ cli_create_postgres(int argc, char **argv)
 	{
 		log_error("Failed to initialize our configuration, see above.");
 		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	/*
+	 * Best effort attempt to start a pgbouncer service, if it fails continue
+	 * with the creating the node
+	 */
+	if (!IS_EMPTY_STRING_BUFFER(config->pgbouncerUserConfig))
+	{
+		PgbouncerConfig pgConfig = { 0 };
+
+		if (!file_exists(config->pgbouncerUserConfig))
+		{
+			log_warn("Could not find pgbouncer configuration file %s",
+					 config->pgbouncerUserConfig);
+			log_warn("skipping enabling of pgbouncer service");
+			config->pgbouncerUserConfig[0] = '\0';
+			goto done;
+		}
+
+		strlcpy(pgConfig.userSuppliedConfig, config->pgbouncerUserConfig,
+				sizeof(pgConfig.userSuppliedConfig));
+
+		if (!pgbouncer_config_init(&pgConfig, config->pgSetup.pgdata))
+		{
+			log_warn("skipping enabling of pgbouncer service");
+			config->pgbouncerUserConfig[0] = '\0';
+			goto done;
+		}
+
+		/*
+		 * Read the user supplied configuration and then write it in a template that
+		 * we will manage. Configuration keys pointing to files, are specially
+		 * handled by us during write time. These two functions know which keys to
+		 * read and how.
+		 */
+		if (!pgbouncer_config_read_user_supplied_ini(&pgConfig) ||
+			!pgbouncer_config_write_template(&pgConfig))
+		{
+			/* It has already logged why */
+			log_warn("Skipping enabling of pgbouncer service");
+			config->pgbouncerUserConfig[0] = '\0';
+			goto done;
+		}
+done:
+		pgbouncer_config_destroy(&pgConfig);
 	}
 
 	cli_create_pg(&keeper);

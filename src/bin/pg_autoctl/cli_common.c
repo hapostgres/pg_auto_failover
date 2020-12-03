@@ -80,6 +80,7 @@ static void stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathname
  *      { "server-cert", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG },
  *      { "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG },
  *      { "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG },
+ *      { "enable-pgbouncer", required_argument, NULL, 'B' },
  *		{ NULL, 0, NULL, 0 }
  *	};
  *
@@ -385,6 +386,16 @@ cli_common_keeper_getopts(int argc, char **argv,
 				break;
 			}
 
+			case 'B':
+			{
+				/* { "enable-pgbouncer", required_argument, NULL, 'B' }, */
+				strlcpy(LocalOptionConfig.pgbouncerUserConfig, optarg,
+						MAXPGPATH);
+				log_trace("--enable-pgbouncer %s",
+						  LocalOptionConfig.pgbouncerUserConfig);
+				break;
+			}
+
 			case 's':
 			{
 				/* { "ssl-self-signed", no_argument, NULL, 's' }, */
@@ -534,6 +545,7 @@ cli_common_keeper_getopts(int argc, char **argv,
  *      { "server-crt", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG },
  *      { "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG },
  *      { "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG },
+ *      { "enable-pgbouncer", required_argument, NULL, 'B' },
  *		{ NULL, 0, NULL, 0 }
  *	};
  *
@@ -1617,6 +1629,69 @@ cli_pg_autoctl_reload(const char *pidfile)
 		if (kill(pid, SIGHUP) != 0)
 		{
 			log_error("Failed to send SIGHUP to the pg_autoctl's pid %d: %m",
+					  pid);
+			return false;
+		}
+	}
+
+	return true;
+}
+
+
+/*
+ * cli_pg_autoctl_enable_services signals the pg_autoctl to enable any
+ * services it has registered as enableable by sending it a SIGUSR1 signal.
+ */
+bool
+cli_pg_autoctl_enable_services(const char *pidfile)
+{
+	pid_t pid;
+
+	if (read_pidfile(pidfile, &pid))
+	{
+		if (pid <= 0)
+		{
+			log_error("Failed to enable services pg_autoctl: "
+					  "pid file \"%s\" contains negative-or-zero pid %d",
+					  pidfile, pid);
+			return false;
+		}
+
+		if (kill(pid, SIGUSR1) != 0)
+		{
+			log_error("Failed to send SIGUSR1 to the pg_autoctl's pid %d: %m",
+					  pid);
+			return false;
+		}
+	}
+
+	return true;
+}
+
+
+/*
+ * cli_pg_autoctl_disable_services signals the pg_autoctl to disable any
+ * services it has registered as enableable and are enabled by sending it
+ * a SIGUSR2 signal.
+ */
+bool
+cli_pg_autoctl_disable_services(const char *pidfile)
+{
+	pid_t pid;
+
+	if (read_pidfile(pidfile, &pid))
+	{
+		if (pid <= 0)
+		{
+			log_error("Failed to disable services pg_autoctl: "
+					  "pid file \"%s\" contains negative-or-zero pid %d",
+					  pidfile, pid);
+			return false;
+		}
+
+		if (kill(pid, SIGUSR2) != 0)
+		{
+			log_error("Failed to send SIGUSR2 to the pg_autoctl's pid %d: %m",
 					  pid);
 			return false;
 		}

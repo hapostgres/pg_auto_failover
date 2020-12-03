@@ -27,6 +27,7 @@
 #include "state.h"
 #include "service_keeper.h"
 #include "service_keeper_init.h"
+#include "service_pgbouncer.h"
 #include "service_postgres_ctl.h"
 #include "signals.h"
 #include "string_utils.h"
@@ -57,6 +58,15 @@ service_keeper_init(Keeper *keeper)
 			-1,
 			&service_keeper_init_start,
 			(void *) keeper
+		},
+		{
+			"pgbouncer",
+			RP_PERMANENT,
+			-1,
+			&service_pgbouncer_start,
+			(void *) keeper,
+			SV_DISABLED,
+			true,
 		}
 	};
 
@@ -66,6 +76,13 @@ service_keeper_init(Keeper *keeper)
 	if (createAndRun)
 	{
 		strlcpy(subprocesses[1].name, SERVICE_NAME_KEEPER, NAMEDATALEN);
+	}
+
+	/* when using pg_autctl create database --enable-pgbouncer, do it */
+	if (!IS_EMPTY_STRING_BUFFER(keeper->config.pgbouncerUserConfig))
+	{
+		log_info("Enabling pgbouncer service");
+		subprocesses[2].enabled = SV_ENABLED;
 	}
 
 	return supervisor_start(subprocesses, subprocessesCount, pidfile);
