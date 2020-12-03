@@ -93,6 +93,8 @@ bool azure_create_subnet(const char *group,
 						 const char *prefixes,
 						 const char *nsg);
 
+bool az_group_delete(const char *group);
+
 bool azure_create_vm(AzureRegionResources *azRegion,
 					 const char *name,
 					 const char *image,
@@ -114,6 +116,7 @@ bool azure_vm_ssh_command(const char *group,
 						  const char *command);
 
 bool azure_create_region(AzureRegionResources *azRegion);
+bool azure_drop_region(AzureRegionResources *azRegion);
 bool azure_provision_nodes(AzureRegionResources *azRegion);
 bool azure_create_nodes(AzureRegionResources *azRegion);
 

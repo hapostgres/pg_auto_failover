@@ -589,6 +589,33 @@ azure_create_subnet(const char *group,
 
 
 /*
+ * az_group_delete runs the command az group delete.
+ */
+bool
+az_group_delete(const char *group)
+{
+	char *args[16];
+	int argsIndex = 0;
+
+	Program program;
+
+	args[argsIndex++] = azureCLI;
+	args[argsIndex++] = "group";
+	args[argsIndex++] = "delete";
+	args[argsIndex++] = "--name";
+	args[argsIndex++] = (char *) group;
+	args[argsIndex++] = "--yes";
+	args[argsIndex++] = NULL;
+
+	program = initialize_program(args, false);
+
+	log_info("Deleting azure resource group \"%s\"", group);
+
+	return azure_run_command(&program) == 0;
+}
+
+
+/*
  * azure_prepare_node_name is a utility function that prepares a node name to
  * use for a VM in our pg_auto_failover deployment in a target Azure region.
  *
@@ -1927,6 +1954,16 @@ azure_create_region(AzureRegionResources *azRegion)
 	 * Now is time to create the virtual machines.
 	 */
 	return azure_provision_nodes(azRegion);
+}
+
+
+/*
+ * azure_drop_region runs the command az group delete --name ... --yes
+ */
+bool
+azure_drop_region(AzureRegionResources *azRegion)
+{
+	return az_group_delete(azRegion->group);
 }
 
 

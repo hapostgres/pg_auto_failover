@@ -401,9 +401,27 @@ cli_do_azure_create_region(int argc, char **argv)
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
-	/* that's for testing only */
-	if (false && !azure_psleep(azOptions.nodes, true))
+	(void) outputAzureScript();
+}
+
+
+/*
+ * cli_do_azure_drop_region drops the azure resource group that has been
+ * created to host the azure resources in use for the environment.
+ */
+void
+cli_do_azure_drop_region(int argc, char **argv)
+{
+	if (!azure_drop_region(&azRegion))
 	{
+		log_warn("Configuration file \"%s\" has not been deleted",
+				 azRegion.filename);
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	if (!unlink_file(azRegion.filename))
+	{
+		log_fatal("Failed to remove azure configuration file");
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 

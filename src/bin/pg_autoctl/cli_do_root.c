@@ -344,6 +344,19 @@ CommandLine do_azure_create_commands =
 					 "create azure resources for a pg_auto_failover demo",
 					 NULL, NULL, NULL, do_azure_create);
 
+CommandLine do_azure_drop =
+	make_command("drop",
+				 "Drop an azure region: resource group, network, VMs",
+				 "[option ...]",
+				 "  --prefix    azure group name prefix (ha-demo)\n"
+				 "  --region    name to use for referencing the region\n"
+				 "  --location  azure location where to create a resource group\n"
+				 "  --monitor   should we create a monitor in the region (false)\n"
+				 "  --nodes     number of Postgres nodes to create (2)\n"
+				 "  --script    output a shell script instead of creating resources\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_drop_region);
+
 CommandLine do_azure_show_ips =
 	make_command("ips",
 				 "Show public and private IP addresses for selected VMs",
@@ -406,6 +419,7 @@ CommandLine do_azure_sync =
 CommandLine *do_azure[] = {
 	&do_azure_create_commands,
 	&do_azure_show_commands,
+	&do_azure_drop,
 	&do_azure_ls,
 	&do_azure_ssh,
 	&do_azure_sync,
