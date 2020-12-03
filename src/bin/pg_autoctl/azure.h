@@ -118,6 +118,10 @@ bool azure_vm_ssh_command(const char *group,
 bool azure_create_region(AzureRegionResources *azRegion);
 bool azure_drop_region(AzureRegionResources *azRegion);
 bool azure_provision_nodes(AzureRegionResources *azRegion);
+
+bool azure_deploy_monitor(AzureRegionResources *azRegion);
+bool azure_deploy_postgres(AzureRegionResources *azRegion, int vmIndex);
+
 bool azure_create_nodes(AzureRegionResources *azRegion);
 
 bool azure_ls(AzureRegionResources *azRegion);
