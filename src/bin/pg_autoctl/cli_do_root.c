@@ -315,7 +315,8 @@ CommandLine do_azure_create_region =
 				 "  --region    name to use for referencing the region\n"
 				 "  --location  azure location where to create a resource group\n"
 				 "  --monitor   should we create a monitor in the region (false)\n"
-				 "  --nodes     number of Postgres nodes to create (2)\n",
+				 "  --nodes     number of Postgres nodes to create (2)\n"
+				 "  --script    output a shell script instead of creating resources\n",
 				 cli_do_azure_getopts,
 				 cli_do_azure_create_region);
 
@@ -326,7 +327,8 @@ CommandLine do_azure_create_nodes =
 				 "  --prefix    azure group name prefix (ha-demo)\n"
 				 "  --region    name to use for referencing the region\n"
 				 "  --monitor   should we create a monitor in the region (false)\n"
-				 "  --nodes     number of Postgres nodes to create (2)\n",
+				 "  --nodes     number of Postgres nodes to create (2)\n"
+				 "  --script    output a shell script instead of creating resources\n",
 				 cli_do_azure_getopts,
 				 cli_do_azure_create_nodes);
 
