@@ -22,6 +22,7 @@
 #include "snprintf.h"
 
 #include "azure.h"
+#include "azure_config.h"
 #include "cli_common.h"
 #include "cli_do_root.h"
 #include "cli_root.h"
@@ -35,22 +36,8 @@
 
 #include "runprogram.h"
 
-typedef struct AzureOptions
-{
-	char prefix[NAMEDATALEN];
-	char region[NAMEDATALEN];
-	char location[NAMEDATALEN];
-
-	int nodes;
-	int cidr;
-	bool fromSource;
-	bool appNode;
-	bool monitor;
-	bool all;
-	bool watch;
-} AzureOptions;
-
-static AzureOptions azureOptions = { 0 };
+static AzureOptions azOptions = { 0 };
+static AzureRegionResources azRegion = { 0 };
 
 bool dryRun = false;
 PQExpBuffer azureScript = NULL;
@@ -321,6 +308,49 @@ cli_do_azure_getopts(int argc, char **argv)
 	}
 
 	/*
+	 * From command line options parsing, prepare a AzureRegionResources in our
+	 * static place.
+	 *
+	 * If a configuration file exists already, it takes precendence, because we
+	 * have probably already created all the resources on Azure and deployed
+	 * things there.
+	 *
+	 * If no configuration file exists already, we create one filled with the
+	 * options given in the command line.
+	 */
+	(void) azure_config_prepare(&options, &azRegion);
+
+	if (file_exists(azRegion.filename))
+	{
+		log_info("Reading configuration from \"%s\"", azRegion.filename);
+
+		if (!azure_config_read_file(&azRegion))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_CONFIG);
+		}
+
+		/* maybe late we will merge new options in the pre-existing file */
+		log_warn("Ignoring command line options, "
+				 "configuration file takes precedence");
+	}
+	else
+	{
+		if (!azure_config_write_file(&azRegion))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+	}
+
+	/* when a configuration file already exists, it provides the location */
+	if (IS_EMPTY_STRING_BUFFER(azRegion.location))
+	{
+		log_fatal("--location is a mandatory option");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	/*
 	 * In --script mode (or dry run) we generate a script with the commands we
 	 * would run instead of actually running them.
 	 */
@@ -339,7 +369,7 @@ cli_do_azure_getopts(int argc, char **argv)
 	}
 
 	/* publish parsed options */
-	azureOptions = options;
+	azOptions = options;
 
 	return optind;
 }
@@ -366,28 +396,13 @@ outputAzureScript()
 void
 cli_do_azure_create_region(int argc, char **argv)
 {
-	AzureOptions options = azureOptions;
-
-	if (IS_EMPTY_STRING_BUFFER(options.location))
-	{
-		log_fatal("--location is a mandatory option");
-		exit(EXIT_CODE_BAD_ARGS);
-	}
-
-	if (!azure_create_region(options.prefix,
-							 options.region,
-							 options.location,
-							 options.cidr,
-							 options.fromSource,
-							 options.monitor,
-							 options.appNode,
-							 options.nodes))
+	if (!azure_create_region(&azRegion))
 	{
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
 	/* that's for testing only */
-	if (false && !azure_psleep(options.nodes, true))
+	if (false && !azure_psleep(azOptions.nodes, true))
 	{
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
@@ -403,13 +418,7 @@ cli_do_azure_create_region(int argc, char **argv)
 void
 cli_do_azure_create_nodes(int argc, char **argv)
 {
-	AzureOptions options = azureOptions;
-
-	if (!azure_create_nodes(options.prefix,
-							options.region,
-							options.monitor,
-							options.appNode,
-							options.nodes))
+	if (!azure_create_nodes(&azRegion))
 	{
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
@@ -424,9 +433,7 @@ cli_do_azure_create_nodes(int argc, char **argv)
 void
 cli_do_azure_ls(int argc, char **argv)
 {
-	AzureOptions options = azureOptions;
-
-	if (!azure_ls(options.prefix, options.region))
+	if (!azure_ls(&azRegion))
 	{
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
@@ -440,9 +447,7 @@ cli_do_azure_ls(int argc, char **argv)
 void
 cli_do_azure_show_ips(int argc, char **argv)
 {
-	AzureOptions options = azureOptions;
-
-	if (!azure_show_ips(options.prefix, options.region))
+	if (!azure_show_ips(&azRegion))
 	{
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
@@ -456,15 +461,13 @@ cli_do_azure_show_ips(int argc, char **argv)
 void
 cli_do_azure_ssh(int argc, char **argv)
 {
-	AzureOptions options = azureOptions;
-
 	if (argc != 1)
 	{
 		(void) commandline_print_usage(&do_azure_ssh, stderr);
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!azure_ssh(options.prefix, options.region, argv[0]))
+	if (!azure_ssh(&azRegion, argv[0]))
 	{
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
@@ -478,13 +481,7 @@ cli_do_azure_ssh(int argc, char **argv)
 void
 cli_do_azure_rsync(int argc, char **argv)
 {
-	AzureOptions options = azureOptions;
-
-	if (!azure_sync_source_dir(options.prefix,
-							   options.region,
-							   options.monitor,
-							   options.appNode,
-							   options.nodes))
+	if (!azure_sync_source_dir(&azRegion))
 	{
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
@@ -498,15 +495,14 @@ cli_do_azure_rsync(int argc, char **argv)
 void
 cli_do_azure_show_state(int argc, char **argv)
 {
-	AzureOptions options = azureOptions;
 	char *pg_autoctl_command =
-		options.watch
+		azOptions.watch
 		? "watch -n 0.2 pg_autoctl show state --pgdata ./monitor"
 		: "pg_autoctl show state --pgdata ./monitor";
 
-	if (!azure_ssh_command(options.prefix, options.region,
+	if (!azure_ssh_command(&azRegion,
 						   "monitor",
-						   options.watch, /* tty is needed for watch */
+						   azOptions.watch, /* tty is needed for watch */
 						   pg_autoctl_command))
 	{
 		exit(EXIT_CODE_INTERNAL_ERROR);

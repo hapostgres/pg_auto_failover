@@ -37,10 +37,6 @@
 
 char azureCLI[MAXPGPATH] = { 0 };
 
-static void azure_prepare_region(const char *prefix, const char *region,
-								 bool monitor, bool appNode, int nodes,
-								 AzureRegionResources *azRegion);
-
 static int azure_run_command(Program *program);
 static pid_t azure_start_command(Program *program);
 static bool azure_wait_for_commands(int count, pid_t pidArray[]);
@@ -593,41 +589,6 @@ azure_create_subnet(const char *group,
 
 
 /*
- * azure_prepare_network_names prepares the names we use for the different
- * Azure network objects that we need: vnet, nsg, nsgrule, subnet.
- */
-static void
-azure_prepare_region(const char *prefix, const char *region,
-					 bool monitor, bool appNode, int nodes,
-					 AzureRegionResources *azRegion)
-{
-	/*
-	 * First create the resource group in the target location.
-	 */
-	strlcpy(azRegion->prefix, prefix, sizeof(azRegion->prefix));
-	strlcpy(azRegion->region, region, sizeof(azRegion->region));
-	sformat(azRegion->group, sizeof(azRegion->group), "%s-%s", prefix, region);
-
-	/*
-	 * Prepare our Azure object names from the group objects: vnet, subnet,
-	 * nsg, nsg rule.
-	 */
-	sformat(azRegion->vnet, sizeof(azRegion->vnet), "%s-net", azRegion->group);
-	sformat(azRegion->nsg, sizeof(azRegion->nsg), "%s-nsg", azRegion->group);
-
-	sformat(azRegion->rule, sizeof(azRegion->rule),
-			"%s-ssh-and-pg", azRegion->group);
-
-	sformat(azRegion->subnet, sizeof(azRegion->subnet),
-			"%s-subnet", azRegion->group);
-
-	azRegion->monitor = monitor;
-	azRegion->appNode = appNode;
-	azRegion->nodes = nodes;
-}
-
-
-/*
  * azure_prepare_node_name is a utility function that prepares a node name to
  * use for a VM in our pg_auto_failover deployment in a target Azure region.
  *
@@ -827,7 +788,7 @@ azure_create_vms(AzureRegionResources *azRegion,
 	}
 
 	/* also create the application node VM when asked to */
-	if (azRegion->appNode)
+	if (azRegion->appNodes > 0)
 	{
 		int index = MAX_VMS_PER_REGION - 1;
 
@@ -1005,8 +966,8 @@ azure_rsync_vms(AzureRegionResources *azRegion)
 	log_info("Syncing local directory \"%s\" to %d Azure VMs",
 			 srcDir,
 			 azRegion->nodes +
-			 (azRegion->monitor ? 1 : 0) +
-			 (azRegion->appNode ? 1 : 0));
+			 azRegion->monitor +
+			 azRegion->appNodes);
 
 	/* index == 0 for the monitor, then 1..count for the other nodes */
 	for (int index = 0; index <= azRegion->nodes; index++)
@@ -1028,7 +989,7 @@ azure_rsync_vms(AzureRegionResources *azRegion)
 	}
 
 	/* also provision the application node VM when asked to */
-	if (azRegion->appNode)
+	if (azRegion->appNodes > 0)
 	{
 		int index = MAX_VMS_PER_REGION - 1;
 
@@ -1081,8 +1042,8 @@ azure_build_pg_autoctl(AzureRegionResources *azRegion)
 
 	log_info("Building pg_auto_failover from sources on %d Azure VMs",
 			 azRegion->nodes +
-			 (azRegion->monitor ? 1 : 0) +
-			 (azRegion->appNode ? 1 : 0));
+			 azRegion->monitor +
+			 azRegion->appNodes);
 
 	log_info("%s", buildCommand);
 
@@ -1105,7 +1066,7 @@ azure_build_pg_autoctl(AzureRegionResources *azRegion)
 	}
 
 	/* also provision the application node VM when asked to */
-	if (azRegion->appNode)
+	if (azRegion->appNodes > 0)
 	{
 		int index = MAX_VMS_PER_REGION - 1;
 
@@ -1238,8 +1199,8 @@ azure_provision_vms(AzureRegionResources *azRegion, bool fromSource)
 
 	log_info("Provisioning %d Virtual Machines in parallel",
 			 azRegion->nodes +
-			 (azRegion->monitor ? 1 : 0) +
-			 (azRegion->appNode ? 1 : 0));
+			 azRegion->monitor +
+			 azRegion->appNodes);
 
 	/* index == 0 for the monitor, then 1..count for the other nodes */
 	for (int index = 0; index <= azRegion->nodes; index++)
@@ -1260,7 +1221,7 @@ azure_provision_vms(AzureRegionResources *azRegion, bool fromSource)
 	}
 
 	/* also provision the application node VM when asked to */
-	if (azRegion->appNode)
+	if (azRegion->appNodes > 0)
 	{
 		int index = MAX_VMS_PER_REGION - 1;
 
@@ -1866,24 +1827,9 @@ azure_vm_ssh_command(const char *group,
  * being run.
  */
 bool
-azure_create_region(const char *prefix,
-					const char *region,
-					const char *location,
-					int cidr,
-					bool fromSource,
-					bool monitor,
-					bool appNode,
-					int nodes)
+azure_create_region(AzureRegionResources *azRegion)
 {
-	AzureRegionResources azRegion = { 0 };
 	AzureRegionResources azRegionFound = { 0 };
-
-	char vnetPrefix[BUFSIZE] = { 0 };
-	char subnetPrefix[BUFSIZE] = { 0 };
-	char ipAddress[BUFSIZE] = { 0 };
-
-	(void) azure_prepare_region(prefix, region, monitor, appNode, nodes,
-								&azRegion);
 
 	/*
 	 * Fetch Azure objects that might have already been created in the target
@@ -1893,7 +1839,7 @@ azure_create_region(const char *prefix,
 	 */
 	if (!dryRun)
 	{
-		if (!azure_fetch_resource_list(azRegion.group, &azRegionFound))
+		if (!azure_fetch_resource_list(azRegion->group, &azRegionFound))
 		{
 			/* errors have already been logged */
 			return false;
@@ -1903,22 +1849,18 @@ azure_create_region(const char *prefix,
 	/*
 	 * First create the resource group in the target location.
 	 */
-	if (!azure_create_group(azRegion.group, location))
+	if (!azure_create_group(azRegion->group, azRegion->location))
 	{
 		/* errors have already been logged */
 		return false;
 	}
 
-	/*
-	 * Prepare vnet and subnet IP addresses prefixes.
-	 */
-	sformat(vnetPrefix, sizeof(vnetPrefix), "10.%d.0.0/16", cidr);
-	sformat(subnetPrefix, sizeof(subnetPrefix), "10.%d.%d.0/24", cidr, cidr);
-
 	/* never skip a step when --script is used */
 	if (dryRun || IS_EMPTY_STRING_BUFFER(azRegionFound.vnet))
 	{
-		if (!azure_create_vnet(azRegion.group, azRegion.vnet, vnetPrefix))
+		if (!azure_create_vnet(azRegion->group,
+							   azRegion->vnet,
+							   azRegion->vnetPrefix))
 		{
 			/* errors have already been logged */
 			return false;
@@ -1927,13 +1869,13 @@ azure_create_region(const char *prefix,
 	else
 	{
 		log_info("Skipping creation of vnet \"%s\" which already exist",
-				 azRegion.vnet);
+				 azRegion->vnet);
 	}
 
 	/*
 	 * Get our IP address as seen by the outside world.
 	 */
-	if (!azure_get_remote_ip(ipAddress, sizeof(ipAddress)))
+	if (!azure_get_remote_ip(azRegion->ipAddress, sizeof(azRegion->ipAddress)))
 	{
 		/* errors have already been logged */
 		return false;
@@ -1944,7 +1886,7 @@ azure_create_region(const char *prefix,
 	 */
 	if (dryRun || IS_EMPTY_STRING_BUFFER(azRegionFound.nsg))
 	{
-		if (!azure_create_nsg(azRegion.group, azRegion.nsg))
+		if (!azure_create_nsg(azRegion->group, azRegion->nsg))
 		{
 			/* errors have already been logged */
 			return false;
@@ -1953,16 +1895,16 @@ azure_create_region(const char *prefix,
 	else
 	{
 		log_info("Skipping creation of nsg \"%s\" which already exist",
-				 azRegion.nsg);
+				 azRegion->nsg);
 	}
 
 	/*
 	 * Create the network security rules for SSH and Postgres protocols.
 	 */
-	if (!azure_create_nsg_rule(azRegion.group,
-							   azRegion.nsg,
-							   azRegion.rule,
-							   ipAddress))
+	if (!azure_create_nsg_rule(azRegion->group,
+							   azRegion->nsg,
+							   azRegion->rule,
+							   azRegion->ipAddress))
 	{
 		/* errors have already been logged */
 		return false;
@@ -1971,11 +1913,11 @@ azure_create_region(const char *prefix,
 	/*
 	 * Create the network subnet using previous network security group.
 	 */
-	if (!azure_create_subnet(azRegion.group,
-							 azRegion.vnet,
-							 azRegion.subnet,
-							 subnetPrefix,
-							 azRegion.nsg))
+	if (!azure_create_subnet(azRegion->group,
+							 azRegion->vnet,
+							 azRegion->subnet,
+							 azRegion->subnetPrefix,
+							 azRegion->nsg))
 	{
 		/* errors have already been logged */
 		return false;
@@ -1984,12 +1926,7 @@ azure_create_region(const char *prefix,
 	/*
 	 * Now is time to create the virtual machines.
 	 */
-	return azure_provision_nodes(prefix,
-								 region,
-								 fromSource,
-								 monitor,
-								 appNode,
-								 nodes);
+	return azure_provision_nodes(azRegion);
 }
 
 
@@ -1998,25 +1935,15 @@ azure_create_region(const char *prefix,
  * provision them with our provisioning script.
  */
 bool
-azure_provision_nodes(const char *prefix,
-					  const char *region,
-					  bool fromSource,
-					  bool monitor,
-					  bool appNode,
-					  int nodes)
+azure_provision_nodes(AzureRegionResources *azRegion)
 {
-	AzureRegionResources azRegion = { 0 };
-
-	(void) azure_prepare_region(prefix, region, monitor, appNode, nodes,
-								&azRegion);
-
-	if (!azure_fetch_ip_addresses(azRegion.group, azRegion.vmArray))
+	if (!azure_fetch_ip_addresses(azRegion->group, azRegion->vmArray))
 	{
 		/* errors have already been logged */
 		return false;
 	}
 
-	if (monitor || nodes > 0)
+	if (azRegion->monitor > 0 || azRegion->nodes > 0)
 	{
 		/*
 		 * Here we run the following commands:
@@ -2040,13 +1967,13 @@ azure_provision_nodes(const char *prefix,
 		 *   naive script as shown above, for lack of known advanced control
 		 *   structures in the target shell (we don't require a specific one).
 		 */
-		if (!azure_create_vms(&azRegion, "debian", "ha-admin"))
+		if (!azure_create_vms(azRegion, "debian", "ha-admin"))
 		{
 			/* errors have already been logged */
 			return false;
 		}
 
-		if (!azure_provision_vms(&azRegion, fromSource))
+		if (!azure_provision_vms(azRegion, azRegion->fromSource))
 		{
 			/* errors have already been logged */
 			return false;
@@ -2058,15 +1985,15 @@ azure_provision_nodes(const char *prefix,
 		 * requires rsync to have been installed in the previous step), and to
 		 * build our software from same sources.
 		 */
-		if (fromSource)
+		if (azRegion->fromSource)
 		{
-			if (!azure_rsync_vms(&azRegion))
+			if (!azure_rsync_vms(azRegion))
 			{
 				/* errors have already been logged */
 				return false;
 			}
 
-			return azure_build_pg_autoctl(&azRegion);
+			return azure_build_pg_autoctl(azRegion);
 		}
 	}
 
@@ -2079,24 +2006,15 @@ azure_provision_nodes(const char *prefix,
  * then register them with systemd on the remote VMs.
  */
 bool
-azure_create_nodes(const char *prefix,
-				   const char *region,
-				   bool monitor,
-				   bool appNode,
-				   int nodes)
+azure_create_nodes(AzureRegionResources *azRegion)
 {
-	AzureRegionResources azRegion = { 0 };
-
-	(void) azure_prepare_region(prefix, region, monitor, appNode, nodes,
-								&azRegion);
-
-	if (!azure_fetch_ip_addresses(azRegion.group, azRegion.vmArray))
+	if (!azure_fetch_ip_addresses(azRegion->group, azRegion->vmArray))
 	{
 		/* errors have already been logged */
 		return false;
 	}
 
-	if (monitor)
+	if (azRegion->monitor > 0)
 	{
 		char *create_monitor =
 			"pg_autoctl create monitor "
@@ -2114,7 +2032,7 @@ azure_create_nodes(const char *prefix,
 			"sudo systemctl start pgautofailover";
 
 		bool tty = false;
-		char *host = azRegion.vmArray[0].public;
+		char *host = azRegion->vmArray[0].public;
 
 		/* the monitor is always at index 0 in the vmArray */
 		if (!run_ssh_command("ha-admin", host, tty, create_monitor))
@@ -2135,7 +2053,7 @@ azure_create_nodes(const char *prefix,
 	 * primary, etc. It could also be all at once, but one at a time is good
 	 * for a tutorial.
 	 */
-	for (int index = 1; index <= azRegion.nodes; index++)
+	for (int index = 1; index <= azRegion->nodes; index++)
 	{
 		char *create_postgres_prefix =
 			"pg_autoctl create postgres "
@@ -2157,7 +2075,7 @@ azure_create_nodes(const char *prefix,
 			"sudo systemctl start pgautofailover";
 
 		bool tty = false;
-		char *host = azRegion.vmArray[index].public;
+		char *host = azRegion->vmArray[index].public;
 
 		sformat(create_postgres, BUFSIZE,
 				"%s "
@@ -2165,10 +2083,10 @@ azure_create_nodes(const char *prefix,
 				"--name %s-%c "
 				"--monitor 'postgres://autoctl_node@%s/pg_auto_failover?sslmode=require'",
 				create_postgres_prefix,
-				azRegion.vmArray[index].private,
-				azRegion.region,
+				azRegion->vmArray[index].private,
+				azRegion->region,
 				'a' + index - 1,
-				azRegion.vmArray[0].private);
+				azRegion->vmArray[0].private);
 
 		/* the monitor is always at index 0 in the vmArray */
 		if (!run_ssh_command("ha-admin", host, tty, create_postgres))
@@ -2187,10 +2105,10 @@ azure_create_nodes(const char *prefix,
 	/*
 	 * Show the current state.
 	 */
-	if (monitor && nodes > 0)
+	if (azRegion->monitor > 0 && azRegion->nodes > 0)
 	{
 		bool tty = true;
-		char *host = azRegion.vmArray[0].public;
+		char *host = azRegion->vmArray[0].public;
 
 		if (!run_ssh_command("ha-admin", host, tty,
 							 "watch -n 0.2 "
@@ -2210,13 +2128,9 @@ azure_create_nodes(const char *prefix,
  * azure_ls lists the azure resources we created in a specific resource group.
  */
 bool
-azure_ls(const char *prefix, const char *name)
+azure_ls(AzureRegionResources *azRegion)
 {
-	char groupName[BUFSIZE] = { 0 };
-
-	sformat(groupName, sizeof(groupName), "%s-%s", prefix, name);
-
-	return azure_resource_list(groupName);
+	return azure_resource_list(azRegion->group);
 }
 
 
@@ -2225,13 +2139,9 @@ azure_ls(const char *prefix, const char *name)
  * specific resource group.
  */
 bool
-azure_show_ips(const char *prefix, const char *name)
+azure_show_ips(AzureRegionResources *azRegion)
 {
-	char groupName[BUFSIZE] = { 0 };
-
-	sformat(groupName, sizeof(groupName), "%s-%s", prefix, name);
-
-	return azure_show_ip_addresses(groupName);
+	return azure_show_ip_addresses(azRegion->group);
 }
 
 
@@ -2240,14 +2150,10 @@ azure_show_ips(const char *prefix, const char *name)
  * node in given azure group, identified as usual with a prefix and a name.
  */
 bool
-azure_ssh(const char *prefix, const char *name, const char *vm)
+azure_ssh(AzureRegionResources *azRegion, const char *vm)
 {
-	char groupName[BUFSIZE] = { 0 };
-
-	sformat(groupName, sizeof(groupName), "%s-%s", prefix, name);
-
 	/* return azure_vm_ssh_command(groupName, vm, true, "watch date -R"); */
-	return azure_vm_ssh(groupName, vm);
+	return azure_vm_ssh(azRegion->group, vm);
 }
 
 
@@ -2257,14 +2163,10 @@ azure_ssh(const char *prefix, const char *name, const char *vm)
  * name.
  */
 bool
-azure_ssh_command(const char *prefix, const char *name, const char *vm,
-				  bool tty, const char *command)
+azure_ssh_command(AzureRegionResources *azRegion,
+				  const char *vm, bool tty, const char *command)
 {
-	char groupName[BUFSIZE] = { 0 };
-
-	sformat(groupName, sizeof(groupName), "%s-%s", prefix, name);
-
-	return azure_vm_ssh_command(groupName, vm, tty, command);
+	return azure_vm_ssh_command(azRegion->group, vm, tty, command);
 }
 
 
@@ -2272,28 +2174,19 @@ azure_ssh_command(const char *prefix, const char *name, const char *vm,
  * azure_sync_source_dir runs rsync in parallel to all the created VMs.
  */
 bool
-azure_sync_source_dir(const char *prefix,
-					  const char *region,
-					  bool monitor,
-					  bool appNode,
-					  int nodes)
+azure_sync_source_dir(AzureRegionResources *azRegion)
 {
-	AzureRegionResources azRegion = { 0 };
-
-	(void) azure_prepare_region(prefix, region, monitor, appNode, nodes,
-								&azRegion);
-
-	if (!azure_fetch_ip_addresses(azRegion.group, azRegion.vmArray))
+	if (!azure_fetch_ip_addresses(azRegion->group, azRegion->vmArray))
 	{
 		/* errors have already been logged */
 		return false;
 	}
 
-	if (!azure_rsync_vms(&azRegion))
+	if (!azure_rsync_vms(azRegion))
 	{
 		/* errors have already been logged */
 		return false;
 	}
 
-	return azure_build_pg_autoctl(&azRegion);
+	return azure_build_pg_autoctl(azRegion);
 }

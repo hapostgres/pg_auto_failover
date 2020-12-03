@@ -13,12 +13,31 @@
 
 #include <stdbool.h>
 
+#include "postgres_fe.h"
+#include "pqexpbuffer.h"
+
 #include "defaults.h"
 
 /* global variables from azure.c */
 extern bool dryRun;
 extern PQExpBuffer azureScript;
 extern char azureCLI[MAXPGPATH];
+
+/* command line parsing */
+typedef struct AzureOptions
+{
+	char prefix[NAMEDATALEN];
+	char region[NAMEDATALEN];
+	char location[NAMEDATALEN];
+
+	int nodes;
+	int cidr;
+	bool fromSource;
+	bool appNode;
+	bool monitor;
+	bool all;
+	bool watch;
+} AzureOptions;
 
 #define MAX_VMS_PER_REGION 28   /* monitor, then pg ndoes [a-z], then app */
 
@@ -29,21 +48,28 @@ typedef struct AzureVMipAddresses
 	char private[BUFSIZE];
 } AzureVMipAddresses;
 
-
 typedef struct AzureRegionResources
 {
-	char prefix[NAMEDATALEN];
-	char region[NAMEDATALEN];
-	char group[NAMEDATALEN];
+	char filename[MAXPGPATH];   /* on-disk configuration file path */
+	char prefix[NAMEDATALEN];   /* ha-demo-dim- */
+	char region[NAMEDATALEN];   /* nickname, such as paris */
+	char location[NAMEDATALEN]; /* francecentral, eastus, etc */
 
-	char vnet[BUFSIZE];
-	char nsg[BUFSIZE];
-	char rule[BUFSIZE];
-	char subnet[BUFSIZE];
+	char group[NAMEDATALEN];    /* ha-demo-dim-paris */
+	char vnet[BUFSIZE];         /* ha-demo-dim-paris-vnet */
+	char nsg[BUFSIZE];          /* ha-demo-dim-paris-nsg */
+	char rule[BUFSIZE];         /* ha-demo-dim-paris-ssh-and-pg */
+	char subnet[BUFSIZE];       /* ha-demo-dim-paris-subnet */
 
-	bool monitor;               /* do we want a monitor in that region? */
-	bool appNode;               /* do we create an application node? */
+	char vnetPrefix[BUFSIZE];   /* 10.%d.0.0/16 */
+	char subnetPrefix[BUFSIZE]; /* 10.%d.%d.0/24 */
+	char ipAddress[BUFSIZE];    /* our IP address as seen from the outside */
+
+	int monitor;                /* do we want a monitor in that region? */
+	int appNodes;               /* application nodes count */
 	int nodes;                  /* node count */
+
+	bool fromSource;
 
 	AzureVMipAddresses vmArray[MAX_VMS_PER_REGION];
 } AzureRegionResources;
@@ -87,38 +113,16 @@ bool azure_vm_ssh_command(const char *group,
 						  bool tty,
 						  const char *command);
 
-bool azure_create_region(const char *prefix,
-						 const char *region,
-						 const char *location,
-						 int cidr,
-						 bool fromSource,
-						 bool monitor,
-						 bool appNode,
-						 int nodes);
+bool azure_create_region(AzureRegionResources *azRegion);
+bool azure_provision_nodes(AzureRegionResources *azRegion);
+bool azure_create_nodes(AzureRegionResources *azRegion);
 
-bool azure_provision_nodes(const char *prefix,
-						   const char *region,
-						   bool fromSource,
-						   bool monitor,
-						   bool appNode,
-						   int nodes);
+bool azure_ls(AzureRegionResources *azRegion);
+bool azure_show_ips(AzureRegionResources *azRegion);
+bool azure_ssh(AzureRegionResources *azRegion, const char *vm);
+bool azure_ssh_command(AzureRegionResources *azRegion,
+					   const char *vm, bool tty, const char *command);
 
-bool azure_create_nodes(const char *prefix,
-						const char *region,
-						bool monitor,
-						bool appNode,
-						int nodes);
-
-bool azure_ls(const char *prefix, const char *name);
-bool azure_show_ips(const char *prefix, const char *name);
-bool azure_ssh(const char *prefix, const char *name, const char *vm);
-bool azure_ssh_command(const char *prefix, const char *name, const char *vm,
-					   bool tty, const char *command);
-
-bool azure_sync_source_dir(const char *prefix,
-						   const char *region,
-						   bool monitor,
-						   bool appNode,
-						   int nodes);
+bool azure_sync_source_dir(AzureRegionResources *azRegion);
 
 #endif  /* AZURE_H */
