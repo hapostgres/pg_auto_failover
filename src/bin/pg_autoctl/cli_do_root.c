@@ -312,7 +312,7 @@ CommandLine do_azure_create_region =
 				 "Create an azure region: resource group, network, VMs",
 				 "[option ...]",
 				 "  --prefix    azure group name prefix (ha-demo)\n"
-				 "  --name      name to use for referencing the region\n"
+				 "  --region    name to use for referencing the region\n"
 				 "  --location  azure location where to create a resource group\n"
 				 "  --monitor   should we create a monitor in the region (false)\n"
 				 "  --nodes     number of Postgres nodes to create (2)\n",
@@ -324,7 +324,7 @@ CommandLine do_azure_create_nodes =
 				 "Create and provision our VM nodes in an azure region",
 				 "[option ...]",
 				 "  --prefix    azure group name prefix (ha-demo)\n"
-				 "  --name      name to use for referencing the region\n"
+				 "  --region    name to use for referencing the region\n"
 				 "  --monitor   should we create a monitor in the region (false)\n"
 				 "  --nodes     number of Postgres nodes to create (2)\n",
 				 cli_do_azure_getopts,
@@ -347,7 +347,7 @@ CommandLine do_azure_show_ips =
 				 "Show public and private IP addresses for selected VMs",
 				 "[option ...]",
 				 "  --prefix    azure group name prefix (ha-demo)\n"
-				 "  --name      name to use for referencing the region\n",
+				 "  --region    name to use for referencing the region\n",
 				 cli_do_azure_getopts,
 				 cli_do_azure_show_ips);
 
@@ -356,7 +356,7 @@ CommandLine do_azure_show_state =
 				 "Connect to the monitor node to show the current state",
 				 "[option ...]",
 				 "  --prefix    azure group name prefix (ha-demo)\n"
-				 "  --name      name to use for referencing the region\n"
+				 "  --region    name to use for referencing the region\n"
 				 "  --watch     run the command again every 0.2s\n",
 				 cli_do_azure_getopts,
 				 cli_do_azure_show_state);
