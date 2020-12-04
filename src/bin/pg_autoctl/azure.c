@@ -1173,7 +1173,9 @@ azure_prepare_target_versions(KeyVal *env)
  * azure_prepare_debian_command prepares the debian command to install our
  * target pg_auto_failover package on the Azure VMs.
  *
- *   sudo apt-get install -q -y postgresql-13-auto-failover-1.4=1.4.1-1
+ *   sudo apt-get install -q -y                 \
+ *      postgresql-13-auto-failover-1.4=1.4.1-1 \
+ *      pg-auto-failover-cli-1.4=1.4.0-1
  *
  * We are using environment variables to fill in the actual version numbers,
  * and we hard-code some defaults in case the environment has not be provided
@@ -1192,8 +1194,12 @@ azure_prepare_debian_install_command(char *command, size_t size)
 	}
 
 	sformat(command, size,
-			"sudo apt-get install -q -y postgresql-%s-auto-failover-%s=%s",
+			"sudo apt-get install -q -y "
+			" postgresql-%s-auto-failover-%s=%s"
+			" pg-auto-failover-cli-%s=%s",
 			env.values[0],      /* AZ_PG_VERSION */
+			env.values[1],      /* AZ_PGAF_DEB_VERSION */
+			env.values[2],      /* AZ_PGAF_DEB_REVISION */
 			env.values[1],      /* AZ_PGAF_DEB_VERSION */
 			env.values[2]);     /* AZ_PGAF_DEB_REVISION */
 
@@ -1378,6 +1384,8 @@ azure_provision_vms(AzureRegionResources *azRegion, bool fromSource)
 	int pending = 0;
 	pid_t pidArray[MAX_VMS_PER_REGION] = { 0 };
 
+	char aptGetInstall[BUFSIZE] = { 0 };
+
 	/* we read from left to right, have the smaller number on the left */
 	if (26 < azRegion->nodes)
 	{
@@ -1389,6 +1397,14 @@ azure_provision_vms(AzureRegionResources *azRegion, bool fromSource)
 			 azRegion->nodes +
 			 azRegion->monitor +
 			 azRegion->appNodes);
+
+	if (!azure_prepare_debian_install_command(aptGetInstall, BUFSIZE))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	log_info("Using: %s", aptGetInstall);
 
 	/* index == 0 for the monitor, then 1..count for the other nodes */
 	for (int index = 0; index <= azRegion->nodes; index++)
