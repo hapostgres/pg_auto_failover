@@ -29,6 +29,8 @@
 #include "config.h"
 #include "env_utils.h"
 #include "log.h"
+#include "parsing.h"
+#include "pgsql.h"
 #include "pidfile.h"
 #include "signals.h"
 #include "string_utils.h"
@@ -1124,6 +1126,147 @@ azure_build_pg_autoctl(AzureRegionResources *azRegion)
 
 
 /*
+ * azure_prepare_target_versions prepares the environment variables that we
+ * need to grasp for provisioning our target Azure VMs. We use the following
+ * environment variables:
+ *
+ *   AZ_PG_VERSION ?= 13
+ *   AZ_PGAF_VERSION ?= 1.4.1
+ *   AZ_PGAF_DEB_VERSION ?= 1.4
+ */
+static bool
+azure_prepare_target_versions(KeyVal *env)
+{
+	char *keywords[] = {
+		"AZ_PG_VERSION", "AZ_PGAF_VERSION", "AZ_PGAF_DEB_VERSION"
+	};
+
+	/* set our static set of 3 variables from the environment */
+	env->count = 3;
+
+	/* default values */
+	sformat(env->values[0], MAXCONNINFO, "13");   /* AZ_PG_VERSION */
+	sformat(env->values[1], MAXCONNINFO, "1.4.1"); /* AZ_PGAF_VERSION */
+	sformat(env->values[2], MAXCONNINFO, "1.4");      /* AZ_PGAF_DEB_VERSION */
+
+	for (int i = 0; i < 3; i++)
+	{
+		/* install the environment variable name as the keyword */
+		strlcpy(env->keywords[i], keywords[i], MAXCONNINFO);
+
+		/* pick values from the environment when they exist */
+		if (env_exists(env->keywords[i]))
+		{
+			if (!get_env_copy(env->keywords[i], env->values[i], MAXCONNINFO))
+			{
+				/* errors have already been logged */
+				return false;
+			}
+		}
+	}
+
+	return true;
+}
+
+
+/*
+ * azure_prepare_debian_command prepares the debian command to install our
+ * target pg_auto_failover package on the Azure VMs.
+ *
+ *   sudo apt-get install -q -y postgresql-13-auto-failover-1.4=1.4.1
+ *
+ * We are using environment variables to fill in the actual version numbers,
+ * and we hard-code some defaults in case the environment has not be provided
+ * for.
+ */
+static bool
+azure_prepare_debian_install_command(char *command, size_t size)
+{
+	/* re-use our generic data structure from Postgres URI parsing */
+	KeyVal env = { 0 };
+
+	if (!azure_prepare_target_versions(&env))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	sformat(command, size,
+			"sudo apt-get install -q -y postgresql-%s-auto-failover-%s=%s",
+			env.values[0],      /* AZ_PG_VERSION */
+			env.values[2],      /* AZ_PGAF_DEB_VERSION */
+			env.values[1]);     /* AZ_PGAF_VERSION */
+
+	return true;
+}
+
+
+/*
+ * azure_prepare_debian_install_postgres_command prepares the debian command to
+ * install our target Postgres version when building from sources.
+ *
+ *   sudo apt-get build-dep -q -y postgresql-11
+ */
+static bool
+azure_prepare_debian_install_postgres_command(char *command, size_t size)
+{
+	/* re-use our generic data structure from Postgres URI parsing */
+	KeyVal env = { 0 };
+
+	if (!azure_prepare_target_versions(&env))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	sformat(command, size,
+			"sudo apt-get build-dep -q -y postgresql-%s",
+
+	        /* AZ_PG_VERSION */
+			env.values[0]);
+
+	return true;
+}
+
+
+/*
+ * azure_prepare_debian_build_dep_postgres_command_command prepares the debian
+ * command to install our target Postgres version when building from sources.
+ *
+ * As we don't have deb-src for pg_auto_failover packages, we do the list
+ * manually, and we add also rsync to be able to push sources from the local
+ * git repository.
+ *
+ *   sudo apt-get install -q -y \
+ *      postgresql-server-dev-all libkrb5-dev postgresql-11 rsync
+ */
+static bool
+azure_prepare_debian_build_dep_postgres_command(char *command, size_t size)
+{
+	/* re-use our generic data structure from Postgres URI parsing */
+	KeyVal env = { 0 };
+
+	if (!azure_prepare_target_versions(&env))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	sformat(command, size,
+			"sudo apt-get install -q -y "
+			"postgresql-server-dev-all "
+			"postgresql-%s "
+			"libkrb5-dev "
+			"rsync ",
+
+	        /* AZ_PG_VERSION */
+			env.values[0]);
+
+	return true;
+}
+
+
+/*
  * azure_provision_vm runs the command `az vm run-command invoke` with our
  * provisioning script.
  */
@@ -1135,13 +1278,17 @@ azure_provision_vm(const char *group, const char *name, bool fromSource)
 
 	Program program;
 
+	char aptGetInstall[BUFSIZE] = { 0 };
+	char aptGetInstallPostgres[BUFSIZE] = { 0 };
+	char aptGetBuildDepPostgres[BUFSIZE] = { 0 };
+
 	const char *scriptsFromPackage[] =
 	{
 		"curl https://install.citusdata.com/community/deb.sh | sudo bash",
 		"sudo apt-get install -q -y postgresql-common",
 		"echo 'create_main_cluster = false' "
 		"| sudo tee -a /etc/postgresql-common/createcluster.conf",
-		"sudo apt-get install -q -y postgresql-11-auto-failover-1.4",
+		aptGetInstall,
 		"sudo usermod -a -G postgres ha-admin",
 		NULL
 	};
@@ -1152,11 +1299,8 @@ azure_provision_vm(const char *group, const char *name, bool fromSource)
 		"sudo apt-get install -q -y postgresql-common",
 		"echo 'create_main_cluster = false' "
 		"| sudo tee -a /etc/postgresql-common/createcluster.conf",
-		"sudo apt-get build-dep -q -y postgresql-11",
-
-		/* we don't have deb-src for pg_auto_failover packages */
-		"sudo apt-get install -q -y postgresql-server-dev-all libkrb5-dev",
-		"sudo apt-get install -q -y postgresql-11 rsync",
+		aptGetInstallPostgres,
+		aptGetBuildDepPostgres,
 		"sudo usermod -a -G postgres ha-admin",
 		NULL
 	};
@@ -1165,6 +1309,26 @@ azure_provision_vm(const char *group, const char *name, bool fromSource)
 		fromSource ? (char **) scriptsFromSource : (char **) scriptsFromPackage;
 
 	char *quotedScripts[10][BUFSIZE] = { 0 };
+
+	if (!azure_prepare_debian_install_command(aptGetInstall, BUFSIZE))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	if (!azure_prepare_debian_install_postgres_command(aptGetInstallPostgres,
+													   BUFSIZE))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	if (!azure_prepare_debian_build_dep_postgres_command(aptGetBuildDepPostgres,
+														 BUFSIZE))
+	{
+		/* errors have already been logged */
+		return false;
+	}
 
 	args[argsIndex++] = azureCLI;
 	args[argsIndex++] = "vm";
@@ -1534,6 +1698,13 @@ azure_fetch_ip_addresses(const char *group, AzureVMipAddresses *vmArray)
 	program = initialize_program(args, false);
 
 	(void) snprintf_program_command_line(&program, command, sizeof(command));
+
+	if (dryRun)
+	{
+		appendPQExpBuffer(azureScript, "\n%s", command);
+
+		return true;
+	}
 
 	log_info("%s", command);
 

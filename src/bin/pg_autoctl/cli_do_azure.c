@@ -492,6 +492,8 @@ cli_do_azure_deploy(int argc, char **argv)
 	{
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
+
+	(void) outputAzureScript();
 }
 
 

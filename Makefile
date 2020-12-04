@@ -40,6 +40,19 @@ AZURE_PREFIX ?= ha-demo-$(shell whoami)
 AZURE_REGION ?= paris
 AZURE_LOCATION ?= francecentral
 
+# Pick a version of Postgres and pg_auto_failover packages to install
+# in our target Azure VMs when provisionning
+#
+#  sudo apt-get install -q -y postgresql-13-auto-failover-1.4=1.4.1
+#  postgresql-${AZ_PG_VERSION}-auto-failover-${AZ_PGAF_DEB_VERSION}=${AZ_PGAF_VERSION}
+AZ_PG_VERSION ?= 13
+AZ_PGAF_VERSION ?= 1.4.1
+AZ_PGAF_DEB_VERSION ?= 1.4
+
+export AZURE_PG_VERSION
+export AZURE_PGAF_VERSION
+export AZURE_PGAF_DEB_VERSION
+
 all: monitor bin ;
 
 install: install-monitor install-bin ;
