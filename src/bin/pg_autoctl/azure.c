@@ -1932,27 +1932,52 @@ azure_create_region(AzureRegionResources *azRegion)
 
 	/*
 	 * Create the network security rules for SSH and Postgres protocols.
+	 *
+	 * Some objects won't show up in the list from azure_fetch_resource_list
+	 * and it would be quite surprising that we find everything but those, so
+	 * we skip their creation even though we don't see them in azRegionFound.
 	 */
-	if (!azure_create_nsg_rule(azRegion->group,
-							   azRegion->nsg,
-							   azRegion->rule,
-							   azRegion->ipAddress))
+	if (dryRun || IS_EMPTY_STRING_BUFFER(azRegionFound.nsg))
 	{
-		/* errors have already been logged */
-		return false;
+		if (!azure_create_nsg_rule(azRegion->group,
+								   azRegion->nsg,
+								   azRegion->rule,
+								   azRegion->ipAddress))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+	}
+	else
+	{
+		log_info("Skipping creation of nsg rule \"%s\", "
+				 "because nsg \"%s\" already exists",
+				 azRegion->rule,
+				 azRegion->nsg);
 	}
 
 	/*
 	 * Create the network subnet using previous network security group.
 	 */
-	if (!azure_create_subnet(azRegion->group,
-							 azRegion->vnet,
-							 azRegion->subnet,
-							 azRegion->subnetPrefix,
-							 azRegion->nsg))
+	if (dryRun || IS_EMPTY_STRING_BUFFER(azRegionFound.vnet))
 	{
-		/* errors have already been logged */
-		return false;
+		if (!azure_create_subnet(azRegion->group,
+								 azRegion->vnet,
+								 azRegion->subnet,
+								 azRegion->subnetPrefix,
+								 azRegion->nsg))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+	}
+	else
+	{
+		log_info("Skipping creation of subnet \"%s\" for prefix \"%s\", "
+				 "because vnet \"%s\" already exists",
+				 azRegion->subnet,
+				 azRegion->subnetPrefix,
+				 azRegion->vnet);
 	}
 
 	/*
