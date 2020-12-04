@@ -150,12 +150,17 @@ cluster: install
          --sync-standbys $(NODES_SYNC_SB) \
          --layout $(TMUX_LAYOUT)
 
+
 azcluster: all
 	$(PG_AUTOCTL) do azure create         \
          --prefix $(AZURE_PREFIX)         \
          --region $(AZURE_REGION)         \
          --location $(AZURE_LOCATION)     \
          --nodes $(NODES)
+
+# make azcluster has been done before, just re-attach
+az: all
+	$(PG_AUTOCTL) do azure tmux session
 
 azdrop: all
 	$(PG_AUTOCTL) do azure drop
@@ -165,4 +170,4 @@ azdrop: all
 .PHONY: bin clean-bin install-bin
 .PHONY: build-test run-test
 .PHONY: tmux-clean cluster
-.PHONY: azcluster azdrop
+.PHONY: azcluster azdrop az
