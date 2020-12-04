@@ -17,6 +17,7 @@
 #include "pqexpbuffer.h"
 
 #include "defaults.h"
+#include "parsing.h"
 
 /* global variables from azure.c */
 extern bool dryRun;
@@ -104,6 +105,7 @@ bool azure_create_vms(AzureRegionResources *azRegion,
 					  const char *image,
 					  const char *username);
 
+bool azure_prepare_target_versions(KeyVal *env);
 bool azure_provision_vm(const char *group, const char *name, bool fromSource);
 bool azure_provision_vms(AzureRegionResources *azRegion, bool fromSource);
 

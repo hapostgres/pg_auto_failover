@@ -1134,7 +1134,7 @@ azure_build_pg_autoctl(AzureRegionResources *azRegion)
  *   AZ_PGAF_DEB_VERSION ?= 1.4
  *   AZ_PGAF_DEB_REVISION ?= 1.4.1-1
  */
-static bool
+bool
 azure_prepare_target_versions(KeyVal *env)
 {
 	char *keywords[] = {

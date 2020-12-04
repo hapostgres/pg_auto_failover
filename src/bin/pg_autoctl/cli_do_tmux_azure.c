@@ -32,6 +32,7 @@
 #include "config.h"
 #include "env_utils.h"
 #include "log.h"
+#include "parsing.h"
 #include "pidfile.h"
 #include "signals.h"
 #include "string_utils.h"
@@ -109,12 +110,38 @@ tmux_azure_systemctl_status(PQExpBuffer script,
 
 
 /*
+ * tmux_add_environment appends the export VAR=value commands that we need to
+ * set the environment for pg_autoctl do azure deploy in the shell windows.
+ */
+static void
+tmux_azure_add_environment(PQExpBuffer script, KeyVal *env)
+{
+	for (int i = 0; i < env->count; i++)
+	{
+		tmux_add_send_keys_command(script,
+								   "export %s=%s",
+								   env->keywords[i],
+								   env->values[i]);
+	}
+}
+
+
+/*
  * prepare_tmux_script prepares a script for a tmux session with the given
  * azure region resources.
  */
 static void
 prepare_tmux_azure_script(AzureRegionResources *azRegion, PQExpBuffer script)
 {
+	KeyVal env = { 0 };
+
+	/* fetch environment and defaults for versions */
+	if (!azure_prepare_target_versions(&env))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
 	tmux_add_command(script, "set-option -g default-shell /bin/bash");
 
 	tmux_azure_new_session(script, azRegion);
@@ -131,6 +158,7 @@ prepare_tmux_azure_script(AzureRegionResources *azRegion, PQExpBuffer script)
 			tmux_add_command(script, "select-layout even-vertical");
 		}
 
+		tmux_azure_add_environment(script, &env);
 		tmux_azure_deploy(script, azRegion, vmName);
 		tmux_azure_ssh(script, azRegion, vmName);
 		tmux_azure_systemctl_status(script, azRegion);
