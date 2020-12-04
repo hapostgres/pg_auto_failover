@@ -99,15 +99,19 @@ void cli_do_tmux_stop(int argc, char **argv);
 void cli_do_tmux_clean(int argc, char **argv);
 void cli_do_tmux_wait(int argc, char **argv);
 
-/* src/bin/pg_autoctl_cli_do_azure.c */
+/* src/bin/pg_autoctl/cli_do_azure.c */
 int cli_do_azure_getopts(int argc, char **argv);
+void cli_do_azure_create_environment(int argc, char **argv);
 void cli_do_azure_create_region(int argc, char **argv);
 void cli_do_azure_drop_region(int argc, char **argv);
+void cli_do_azure_deploy(int argc, char **argv);
 void cli_do_azure_create_nodes(int argc, char **argv);
 void cli_do_azure_ls(int argc, char **argv);
 void cli_do_azure_show_ips(int argc, char **argv);
 void cli_do_azure_ssh(int argc, char **argv);
 void cli_do_azure_rsync(int argc, char **argv);
 void cli_do_azure_show_state(int argc, char **argv);
+void cli_do_azure_tmux_session(int argc, char **argv);
+void cli_do_azure_tmux_kill(int argc, char **argv);
 
 #endif  /* CLI_DO_ROOT_H */

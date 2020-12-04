@@ -58,9 +58,6 @@ static bool start_rsync_command(const char *username,
 								const char *ip,
 								const char *srcDir);
 
-static bool azure_fetch_ip_addresses(const char *group,
-									 AzureVMipAddresses *vmArray);
-
 static bool azure_rsync_vms(AzureRegionResources *azRegion);
 
 static bool azure_fetch_resource_list(const char *group,
@@ -1503,7 +1500,7 @@ azure_show_ip_addresses(const char *group)
  * azure_fetch_ip_addresses fetches IP address (both public and private) for
  * VMs created in an Azure resource group, and fill-in the given array.
  */
-static bool
+bool
 azure_fetch_ip_addresses(const char *group, AzureVMipAddresses *vmArray)
 {
 	char *args[16];
@@ -1770,7 +1767,15 @@ azure_fetch_vm_addresses(const char *group, const char *vm,
 
 	AzureVMipAddresses vmAddresses[MAX_VMS_PER_REGION] = { 0 };
 
-	sformat(vmName, sizeof(vmName), "%s-%s", group, vm);
+	/* if the vmName is already complete, just use it already */
+	if (strstr(vm, group) == NULL)
+	{
+		sformat(vmName, sizeof(vmName), "%s-%s", group, vm);
+	}
+	else
+	{
+		sformat(vmName, sizeof(vmName), "%s", vm);
+	}
 
 	vmIndex = azure_node_index_from_name(group, vmName);
 
@@ -2175,6 +2180,43 @@ azure_create_nodes(AzureRegionResources *azRegion)
 	}
 
 	return success;
+}
+
+
+/*
+ * azure_deploy_vm deploys a vm given by name ("monitor", "a", ...).
+ */
+bool
+azure_deploy_vm(AzureRegionResources *azRegion, const char *vmName)
+{
+	int vmIndex = -1;
+
+	if (!azure_fetch_ip_addresses(azRegion->group, azRegion->vmArray))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	vmIndex = azure_node_index_from_name(azRegion->group, vmName);
+
+	switch (vmIndex)
+	{
+		case -1:
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
+		case 0:
+		{
+			return azure_deploy_monitor(azRegion);
+		}
+
+		default:
+		{
+			return azure_deploy_postgres(azRegion, vmIndex);
+		}
+	}
 }
 
 

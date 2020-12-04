@@ -64,7 +64,7 @@ cli_do_azure_getopts(int argc, char **argv)
 		{ "location", required_argument, NULL, 'l' },
 		{ "from-source", no_argument, NULL, 's' },
 		{ "nodes", required_argument, NULL, 'N' },
-		{ "monitor", no_argument, NULL, 'M' },
+		{ "no-monitor", no_argument, NULL, 'M' },
 		{ "no-app", no_argument, NULL, 'n' },
 		{ "all", no_argument, NULL, 'A' },
 		{ "script", no_argument, NULL, 'S' },
@@ -85,7 +85,7 @@ cli_do_azure_getopts(int argc, char **argv)
 	options.nodes = 2;
 	options.fromSource = false;
 	options.appNode = true;
-	options.monitor = false;
+	options.monitor = true;
 	options.all = false;
 	options.watch = false;
 
@@ -170,11 +170,11 @@ cli_do_azure_getopts(int argc, char **argv)
 				break;
 			}
 
-			/* { "monitor", no_argument, NULL, 'M' }, */
+			/* { "no-monitor", no_argument, NULL, 'M' }, */
 			case 'M':
 			{
-				options.monitor = true;
-				log_trace("--monitor");
+				options.monitor = false;
+				log_trace("--no-monitor");
 				break;
 			}
 
@@ -390,6 +390,45 @@ outputAzureScript()
 
 
 /*
+ * cli_do_azure_create_environment creates an Azure region with some nodes and
+ * network rules for a demo or QA context of pg_auto_failover, then provision
+ * those VMs with the needed software, and then create pg_auto_failover nodes
+ * from that, in a tmux session for interactive QA.
+ */
+void
+cli_do_azure_create_environment(int argc, char **argv)
+{
+	/*
+	 * azure_create_region creates the resources we need (VMs, network, access
+	 * rules, etc) and then provision the VMs with the needed software.
+	 */
+	if (!azure_create_region(&azRegion))
+	{
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	/*
+	 * tmux_azure_start_or_attach_session then creates a tmux session with a
+	 * shell window for each VM in the Azure resource group, and in each
+	 * session in parallel runs the pg_autoctl create commands, and then add
+	 * the setup to systemd.
+	 *
+	 * Another tmux window is created to run pg_autoctl show state in a watch
+	 * loop.
+	 *
+	 * An extra window is created for interactive tinkering with the QA
+	 * environment thus provided.
+	 */
+	if (!tmux_azure_start_or_attach_session(&azRegion))
+	{
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	(void) outputAzureScript();
+}
+
+
+/*
  * cli_do_azure_create_region creates an Azure region with some nodes and
  * network rules for a demo or QA context of pg_auto_failover.
  */
@@ -426,6 +465,26 @@ cli_do_azure_drop_region(int argc, char **argv)
 	}
 
 	(void) outputAzureScript();
+}
+
+
+/*
+ * cli_do_azure_deploy deploys the pg_autoctl services in the target VM, given
+ * by name (such as "monitor" or "a" or "b", etc).
+ */
+void
+cli_do_azure_deploy(int argc, char **argv)
+{
+	if (argc != 1)
+	{
+		(void) commandline_print_usage(&do_azure_ssh, stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (!azure_deploy_vm(&azRegion, argv[0]))
+	{
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
 }
 
 
@@ -522,6 +581,34 @@ cli_do_azure_show_state(int argc, char **argv)
 						   "monitor",
 						   azOptions.watch, /* tty is needed for watch */
 						   pg_autoctl_command))
+	{
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+}
+
+
+/*
+ * cli_do_azure_tmux_session starts or re-attach to a tmux session from where
+ * to control the VMs in the QA environment on Azure.
+ */
+void
+cli_do_azure_tmux_session(int argc, char **argv)
+{
+	if (!tmux_azure_start_or_attach_session(&azRegion))
+	{
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+}
+
+
+/*
+ * cli_do_azure_tmux_session starts or re-attach to a tmux session from where
+ * to control the VMs in the QA environment on Azure.
+ */
+void
+cli_do_azure_tmux_kill(int argc, char **argv)
+{
+	if (!tmux_azure_kill_session(&azRegion))
 	{
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}

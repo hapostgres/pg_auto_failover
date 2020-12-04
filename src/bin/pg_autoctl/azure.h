@@ -107,6 +107,9 @@ bool azure_create_vms(AzureRegionResources *azRegion,
 bool azure_provision_vm(const char *group, const char *name, bool fromSource);
 bool azure_provision_vms(AzureRegionResources *azRegion, bool fromSource);
 
+bool azure_fetch_ip_addresses(const char *group,
+							  AzureVMipAddresses *vmArray);
+
 bool azure_resource_list(const char *group);
 bool azure_show_ip_addresses(const char *group);
 bool azure_vm_ssh(const char *group, const char *vm);
@@ -121,6 +124,7 @@ bool azure_provision_nodes(AzureRegionResources *azRegion);
 
 bool azure_deploy_monitor(AzureRegionResources *azRegion);
 bool azure_deploy_postgres(AzureRegionResources *azRegion, int vmIndex);
+bool azure_deploy_vm(AzureRegionResources *azRegion, const char *vmName);
 
 bool azure_create_nodes(AzureRegionResources *azRegion);
 
@@ -131,5 +135,9 @@ bool azure_ssh_command(AzureRegionResources *azRegion,
 					   const char *vm, bool tty, const char *command);
 
 bool azure_sync_source_dir(AzureRegionResources *azRegion);
+
+/* src/bin/pg_autoctl/cli_do_tmux_azure.c */
+bool tmux_azure_start_or_attach_session(AzureRegionResources *azRegion);
+bool tmux_azure_kill_session(AzureRegionResources *azRegion);
 
 #endif  /* AZURE_H */
