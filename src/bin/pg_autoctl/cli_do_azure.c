@@ -407,6 +407,8 @@ cli_do_azure_create_environment(int argc, char **argv)
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
+	(void) outputAzureScript();
+
 	/*
 	 * tmux_azure_start_or_attach_session then creates a tmux session with a
 	 * shell window for each VM in the Azure resource group, and in each
@@ -423,8 +425,6 @@ cli_do_azure_create_environment(int argc, char **argv)
 	{
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
-
-	(void) outputAzureScript();
 }
 
 
