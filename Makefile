@@ -36,6 +36,10 @@ TMUX_LAYOUT ?= even-vertical	# could be "tiled"
 TMUX_TOP_DIR = ./tmux
 TMUX_SCRIPT = ./tmux/script-$(FIRST_PGPORT).tmux
 
+AZURE_PREFIX ?= ha-demo-$(shell whoami)
+AZURE_REGION ?= paris
+AZURE_LOCATION ?= francecentral
+
 all: monitor bin ;
 
 install: install-monitor install-bin ;
@@ -133,8 +137,19 @@ cluster: install
          --sync-standbys $(NODES_SYNC_SB) \
          --layout $(TMUX_LAYOUT)
 
+azcluster: all
+	$(PG_AUTOCTL) do azure create         \
+         --prefix $(AZURE_PREFIX)         \
+         --region $(AZURE_REGION)         \
+         --location $(AZURE_LOCATION)     \
+         --nodes $(NODES)
+
+azdrop: all
+	$(PG_AUTOCTL) do azure drop
+
 .PHONY: all clean check install docs
 .PHONY: monitor clean-monitor check-monitor install-monitor
 .PHONY: bin clean-bin install-bin
 .PHONY: build-test run-test
 .PHONY: tmux-clean cluster
+.PHONY: azcluster azdrop
