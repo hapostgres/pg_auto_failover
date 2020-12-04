@@ -333,6 +333,11 @@ cli_do_azure_getopts(int argc, char **argv)
 		/* maybe late we will merge new options in the pre-existing file */
 		log_warn("Ignoring command line options, "
 				 "configuration file takes precedence");
+
+		log_info("Using --prefix \"%s\" --region \"%s\" --location \"%s\"",
+				 azRegion.prefix,
+				 azRegion.region,
+				 azRegion.location);
 	}
 	else
 	{
