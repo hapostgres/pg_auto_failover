@@ -169,7 +169,7 @@ prepare_tmux_azure_script(AzureRegionResources *azRegion, PQExpBuffer script)
 	tmux_add_command(script, "select-layout even-vertical");
 
 	tmux_add_send_keys_command(script,
-							   "%s do azure show state",
+							   "%s do azure show state --watch",
 							   pg_autoctl_argv0);
 
 	/* add a window for interactive pg_autoctl commands */
