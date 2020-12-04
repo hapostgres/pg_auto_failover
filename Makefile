@@ -46,12 +46,12 @@ AZURE_LOCATION ?= francecentral
 #  sudo apt-get install -q -y postgresql-13-auto-failover-1.4=1.4.1
 #  postgresql-${AZ_PG_VERSION}-auto-failover-${AZ_PGAF_DEB_VERSION}=${AZ_PGAF_VERSION}
 AZ_PG_VERSION ?= 13
-AZ_PGAF_VERSION ?= 1.4.1
 AZ_PGAF_DEB_VERSION ?= 1.4
+AZ_PGAF_DEB_REVISION ?= 1.4.1-1
 
-export AZURE_PG_VERSION
-export AZURE_PGAF_VERSION
-export AZURE_PGAF_DEB_VERSION
+export AZ_PG_VERSION
+export AZ_PGAF_DEB_VERSION
+export AZ_PGAF_DEB_REVISION
 
 all: monitor bin ;
 

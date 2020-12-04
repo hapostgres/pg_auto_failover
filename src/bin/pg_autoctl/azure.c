@@ -1131,14 +1131,14 @@ azure_build_pg_autoctl(AzureRegionResources *azRegion)
  * environment variables:
  *
  *   AZ_PG_VERSION ?= 13
- *   AZ_PGAF_VERSION ?= 1.4.1
  *   AZ_PGAF_DEB_VERSION ?= 1.4
+ *   AZ_PGAF_DEB_REVISION ?= 1.4.1-1
  */
 static bool
 azure_prepare_target_versions(KeyVal *env)
 {
 	char *keywords[] = {
-		"AZ_PG_VERSION", "AZ_PGAF_VERSION", "AZ_PGAF_DEB_VERSION"
+		"AZ_PG_VERSION", "AZ_PGAF_DEB_VERSION", "AZ_PGAF_DEB_REVISION"
 	};
 
 	/* set our static set of 3 variables from the environment */
@@ -1146,8 +1146,8 @@ azure_prepare_target_versions(KeyVal *env)
 
 	/* default values */
 	sformat(env->values[0], MAXCONNINFO, "13");   /* AZ_PG_VERSION */
-	sformat(env->values[1], MAXCONNINFO, "1.4.1"); /* AZ_PGAF_VERSION */
-	sformat(env->values[2], MAXCONNINFO, "1.4");      /* AZ_PGAF_DEB_VERSION */
+	sformat(env->values[1], MAXCONNINFO, "1.4"); /* AZ_PGAF_DEB_VERSION */
+	sformat(env->values[2], MAXCONNINFO, "1.4.1-1"); /* AZ_PGAF_DEB_REVISION */
 
 	for (int i = 0; i < 3; i++)
 	{
@@ -1173,7 +1173,7 @@ azure_prepare_target_versions(KeyVal *env)
  * azure_prepare_debian_command prepares the debian command to install our
  * target pg_auto_failover package on the Azure VMs.
  *
- *   sudo apt-get install -q -y postgresql-13-auto-failover-1.4=1.4.1
+ *   sudo apt-get install -q -y postgresql-13-auto-failover-1.4=1.4.1-1
  *
  * We are using environment variables to fill in the actual version numbers,
  * and we hard-code some defaults in case the environment has not be provided
@@ -1194,8 +1194,8 @@ azure_prepare_debian_install_command(char *command, size_t size)
 	sformat(command, size,
 			"sudo apt-get install -q -y postgresql-%s-auto-failover-%s=%s",
 			env.values[0],      /* AZ_PG_VERSION */
-			env.values[2],      /* AZ_PGAF_DEB_VERSION */
-			env.values[1]);     /* AZ_PGAF_VERSION */
+			env.values[1],      /* AZ_PGAF_DEB_VERSION */
+			env.values[2]);     /* AZ_PGAF_DEB_REVISION */
 
 	return true;
 }
