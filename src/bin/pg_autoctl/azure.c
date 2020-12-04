@@ -2262,12 +2262,8 @@ azure_provision_nodes(AzureRegionResources *azRegion)
 bool
 azure_deploy_monitor(AzureRegionResources *azRegion)
 {
-	char *create_monitor =
-		"pg_autoctl create monitor "
-		"--auth trust "
-		"--ssl-self-signed "
-		"--pgdata /home/ha-admin/monitor "
-		"--pgctl /usr/lib/postgresql/11/bin/pg_ctl";
+	KeyVal env = { 0 };
+	char create_monitor[BUFSIZE] = { 0 };
 
 	char *systemd =
 		"pg_autoctl -q show systemd --pgdata /home/ha-admin/monitor "
@@ -2279,6 +2275,23 @@ azure_deploy_monitor(AzureRegionResources *azRegion)
 
 	bool tty = false;
 	char *host = azRegion->vmArray[0].public;
+
+	if (!azure_prepare_target_versions(&env))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/* build pg_autoctl create monitor command with target Postgres version  */
+	sformat(create_monitor, sizeof(create_monitor),
+			"pg_autoctl create monitor "
+			"--auth trust "
+			"--ssl-self-signed "
+			"--pgdata /home/ha-admin/monitor "
+			"--pgctl /usr/lib/postgresql/%s/bin/pg_ctl",
+
+	        /* AZ_PG_VERSION */
+			env.values[0]);
 
 	if (azRegion->monitor == 0)
 	{
@@ -2311,15 +2324,7 @@ azure_deploy_monitor(AzureRegionResources *azRegion)
 bool
 azure_deploy_postgres(AzureRegionResources *azRegion, int vmIndex)
 {
-	char *create_postgres_prefix =
-		"pg_autoctl create postgres "
-		"--pgctl /usr/lib/postgresql/11/bin/pg_ctl "
-		"--pgdata /home/ha-admin/pgdata "
-		"--auth trust "
-		"--ssl-self-signed "
-		"--username ha-admin "
-		"--dbname appdb ";
-
+	KeyVal env = { 0 };
 	char create_postgres[BUFSIZE] = { 0 };
 
 	char *systemd =
@@ -2333,12 +2338,28 @@ azure_deploy_postgres(AzureRegionResources *azRegion, int vmIndex)
 	bool tty = false;
 	char *host = azRegion->vmArray[vmIndex].public;
 
-	sformat(create_postgres, BUFSIZE,
-			"%s "
+	if (!azure_prepare_target_versions(&env))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/* build pg_autoctl create monitor command with target Postgres version  */
+	sformat(create_postgres, sizeof(create_postgres),
+			"pg_autoctl create postgres "
+			"--pgctl /usr/lib/postgresql/%s/bin/pg_ctl "
+			"--pgdata /home/ha-admin/pgdata "
+			"--auth trust "
+			"--ssl-self-signed "
+			"--username ha-admin "
+			"--dbname appdb "
 			"--hostname %s "
 			"--name %s-%c "
-			"--monitor 'postgres://autoctl_node@%s/pg_auto_failover?sslmode=require'",
-			create_postgres_prefix,
+			"--monitor "
+			"'postgres://autoctl_node@%s/pg_auto_failover?sslmode=require'",
+
+	        /* AZ_PG_VERSION */
+			env.values[0],
 			azRegion->vmArray[vmIndex].private,
 			azRegion->region,
 			'a' + vmIndex - 1,
