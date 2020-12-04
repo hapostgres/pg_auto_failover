@@ -463,6 +463,8 @@ cli_do_azure_drop_region(int argc, char **argv)
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
+	log_info("Removing azure configuration file \"%s\"", azRegion.filename);
+
 	if (!unlink_file(azRegion.filename))
 	{
 		log_fatal("Failed to remove azure configuration file");
