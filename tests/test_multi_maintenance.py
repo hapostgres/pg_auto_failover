@@ -132,20 +132,18 @@ def test_006_maintenance_and_failover():
     # assigned and goal state must be the same
     assert node1.wait_until_state(target_state="primary")
 
-    eq_(
-        node1.get_synchronous_standby_names_local(),
-        "ANY 1 (pgautofailover_standby_3)",
-    )
+    ssn = "ANY 1 (pgautofailover_standby_3)"
+    eq_(node1.get_synchronous_standby_names(), ssn)
+    eq_(node1.get_synchronous_standby_names_local(), ssn)
 
     print("Calling pgautofailover.failover() on the monitor")
     monitor.failover()
     assert node3.wait_until_state(target_state="primary")
     assert node1.wait_until_state(target_state="secondary")
 
-    eq_(
-        node3.get_synchronous_standby_names_local(),
-        "ANY 1 (pgautofailover_standby_1)",
-    )
+    ssn = "ANY 1 (pgautofailover_standby_1)"
+    eq_(node3.get_synchronous_standby_names(), ssn)
+    eq_(node3.get_synchronous_standby_names_local(), ssn)
 
     print("Disabling maintenance on node2, should connect to the new primary")
     node2.disable_maintenance()
@@ -165,10 +163,9 @@ def test_006_maintenance_and_failover():
     assert node3.wait_until_state(target_state="primary")
 
     # when the node is back, it should be listed again in sync standby names
-    eq_(
-        node3.get_synchronous_standby_names_local(),
-        "ANY 1 (pgautofailover_standby_1, pgautofailover_standby_2)",
-    )
+    ssn = "ANY 1 (pgautofailover_standby_1, pgautofailover_standby_2)"
+    eq_(node3.get_synchronous_standby_names(), ssn)
+    eq_(node3.get_synchronous_standby_names_local(), ssn)
 
     assert node1.has_needed_replication_slots()
     assert node2.has_needed_replication_slots()
@@ -227,13 +224,9 @@ def test_011_all_to_maintenance():
     assert node3.wait_until_state(target_state="wait_primary")
 
     # also let's see synchronous_standby_names here
-    print("Monitor: '%s'" % node3.get_synchronous_standby_names())
-    print(
-        "Node 3:  '%s'"
-        % node3.run_sql_query("show synchronous_standby_names")[0][0]
-    )
-
-    eq_(node3.get_synchronous_standby_names_local(), "")
+    ssn = ""
+    eq_(node3.get_synchronous_standby_names(), ssn)
+    eq_(node3.get_synchronous_standby_names_local(), ssn)
 
 
 def test_012_can_write_during_maintenance():

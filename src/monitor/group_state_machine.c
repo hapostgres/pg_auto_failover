@@ -922,7 +922,9 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 			 * does not change the configured trade-offs. Writes are blocked
 			 * until one of the two defective standby nodes is available again.
 			 */
-			if (failoverCandidateCount == 0 && waitStandbyNodeCount == 0)
+			if (!IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) &&
+				failoverCandidateCount == 0 &&
+				waitStandbyNodeCount == 0)
 			{
 				ReplicationState primaryGoalState =
 					formation->number_sync_standbys == 0
