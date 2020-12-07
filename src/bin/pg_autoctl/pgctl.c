@@ -87,7 +87,6 @@ static bool pg_write_standby_signal(const char *pgdata,
 bool
 pg_ctl_version(PostgresSetup *pgSetup)
 {
-	char *version;
 	Program prog = run_program(pgSetup->pg_ctl, "--version", NULL);
 
 	if (prog.returnCode != 0)
@@ -99,7 +98,7 @@ pg_ctl_version(PostgresSetup *pgSetup)
 		return false;
 	}
 
-	version = parse_version_number(prog.stdOut);
+	char *version = parse_version_number(prog.stdOut);
 	free_program(&prog);
 
 	if (version == NULL)
@@ -126,7 +125,6 @@ set_pg_ctl_from_config_bindir(PostgresSetup *pgSetup, const char *pg_config)
 	char pg_ctl[MAXPGPATH] = { 0 };
 	Program prog = run_program(pg_config, "--bindir", NULL);
 
-	char *bindir;
 	char *lines[1];
 
 	if (prog.returnCode != 0)
@@ -145,7 +143,7 @@ set_pg_ctl_from_config_bindir(PostgresSetup *pgSetup, const char *pg_config)
 		return false;
 	}
 
-	bindir = lines[0];
+	char *bindir = lines[0];
 	join_path_components(pg_ctl, bindir, "pg_ctl");
 
 	/* we're now done with the Program and its output */
@@ -173,7 +171,6 @@ pg_controldata(PostgresSetup *pgSetup, bool missing_ok)
 {
 	char globalControlPath[MAXPGPATH] = { 0 };
 	char pg_controldata_path[MAXPGPATH] = { 0 };
-	Program prog;
 
 	if (pgSetup->pgdata[0] == '\0' || pgSetup->pg_ctl[0] == '\0')
 	{
@@ -200,7 +197,7 @@ pg_controldata(PostgresSetup *pgSetup, bool missing_ok)
 
 	/* We parse the output of pg_controldata, make sure it's as expected */
 	setenv("LANG", "C", 1);
-	prog = run_program(pg_controldata_path, pgSetup->pgdata, NULL);
+	Program prog = run_program(pg_controldata_path, pgSetup->pgdata, NULL);
 
 	if (prog.returnCode == 0)
 	{
@@ -522,13 +519,12 @@ find_extension_control_file(const char *pg_ctl, const char *extName)
 	char *share_dir;
 	char extension_control_file_name[MAXPGPATH] = { 0 };
 	char *lines[1];
-	Program prog;
 
 	log_debug("Checking if the %s extension is installed", extName);
 
 	path_in_same_directory(pg_ctl, "pg_config", pg_config_path);
 
-	prog = run_program(pg_config_path, "--sharedir", NULL);
+	Program prog = run_program(pg_config_path, "--sharedir", NULL);
 
 	if (prog.returnCode == 0)
 	{
@@ -617,7 +613,6 @@ pg_auto_failover_default_settings_file_exists(PostgresSetup *pgSetup)
 	char *contents = NULL;
 	long size = 0L;
 
-	bool fileExistsWithContent = false;
 
 	join_path_components(pgAutoFailoverDefaultsConfigPath,
 						 pgSetup->pgdata,
@@ -632,7 +627,7 @@ pg_auto_failover_default_settings_file_exists(PostgresSetup *pgSetup)
 
 	/* we don't actually need the contents here */
 	free(contents);
-	fileExistsWithContent = size > 0;
+	bool fileExistsWithContent = size > 0;
 
 	return fileExistsWithContent;
 }
@@ -647,10 +642,8 @@ pg_include_config(const char *configFilePath,
 				  const char *configIncludeLine,
 				  const char *configIncludeComment)
 {
-	char *includeLine = NULL;
 	char *currentConfContents = NULL;
 	long currentConfSize = 0L;
-	PQExpBuffer newConfContents = NULL;
 
 	/* read the current postgresql.conf contents */
 	if (!read_file(configFilePath, &currentConfContents, &currentConfSize))
@@ -659,7 +652,7 @@ pg_include_config(const char *configFilePath,
 	}
 
 	/* find the include 'postgresql-auto-failover.conf' line */
-	includeLine = strstr(currentConfContents, configIncludeLine);
+	char *includeLine = strstr(currentConfContents, configIncludeLine);
 
 	if (includeLine != NULL && (includeLine == currentConfContents ||
 								includeLine[-1] == '\n'))
@@ -674,7 +667,7 @@ pg_include_config(const char *configFilePath,
 	log_debug("Adding %s to \"%s\"", configIncludeLine, configFilePath);
 
 	/* build the new postgresql.conf contents */
-	newConfContents = createPQExpBuffer();
+	PQExpBuffer newConfContents = createPQExpBuffer();
 	if (newConfContents == NULL)
 	{
 		log_error("Failed to allocate memory");
@@ -973,7 +966,6 @@ pg_basebackup(const char *pgdata,
 			  ReplicationSource *replicationSource)
 {
 	int returnCode;
-	Program program;
 	char pg_basebackup[MAXPGPATH];
 
 	NodeAddress *primaryNode = &(replicationSource->primaryNode);
@@ -983,7 +975,6 @@ pg_basebackup(const char *pgdata,
 	int argsIndex = 0;
 
 	char command[BUFSIZE];
-	int commandSize = 0;
 
 	log_debug("mkdir -p \"%s\"", replicationSource->backupDir);
 	if (!ensure_empty_dir(replicationSource->backupDir, 0700))
@@ -1040,11 +1031,11 @@ pg_basebackup(const char *pgdata,
 	 * pg_basebackup subprogram is not intended to be its own session leader,
 	 * but remain a sub-process in the same group as pg_autoctl.
 	 */
-	program = initialize_program(args, false);
+	Program program = initialize_program(args, false);
 	program.processBuffer = &processBufferCallback;
 
 	/* log the exact command line we're using */
-	commandSize = snprintf_program_command_line(&program, command, BUFSIZE);
+	int commandSize = snprintf_program_command_line(&program, command, BUFSIZE);
 
 	if (commandSize >= BUFSIZE)
 	{
@@ -1102,7 +1093,6 @@ pg_rewind(const char *pgdata,
 		  ReplicationSource *replicationSource)
 {
 	int returnCode;
-	Program program;
 	char pg_rewind[MAXPGPATH] = { 0 };
 
 	NodeAddress *primaryNode = &(replicationSource->primaryNode);
@@ -1112,7 +1102,6 @@ pg_rewind(const char *pgdata,
 	int argsIndex = 0;
 
 	char command[BUFSIZE];
-	int commandSize = 0;
 
 	/* call pg_rewind*/
 	path_in_same_directory(pg_ctl, "pg_rewind", pg_rewind);
@@ -1152,11 +1141,11 @@ pg_rewind(const char *pgdata,
 	 * pg_rewind subprogram is not intended to be its own session leader, but
 	 * remain a sub-process in the same group as pg_autoctl.
 	 */
-	program = initialize_program(args, false);
+	Program program = initialize_program(args, false);
 	program.processBuffer = &processBufferCallback;
 
 	/* log the exact command line we're using */
-	commandSize = snprintf_program_command_line(&program, command, BUFSIZE);
+	int commandSize = snprintf_program_command_line(&program, command, BUFSIZE);
 
 	if (commandSize >= BUFSIZE)
 	{
@@ -1223,22 +1212,19 @@ log_program_output(Program prog, int outLogLevel, int errorLogLevel)
 bool
 pg_ctl_initdb(const char *pg_ctl, const char *pgdata)
 {
-	Program program;
-	bool success = false;
-
 	/* initdb takes time, so log about the operation BEFORE doing it */
 	log_info("Initialising a PostgreSQL cluster at \"%s\"", pgdata);
 	log_info("%s initdb -s -D %s --option '--auth=trust'", pg_ctl, pgdata);
 
-	program = run_program(pg_ctl, "initdb",
-						  "--silent",
-						  "--pgdata", pgdata,
+	Program program = run_program(pg_ctl, "initdb",
+								  "--silent",
+								  "--pgdata", pgdata,
 
-	                      /* avoid warning message */
-						  "--option", "'--auth=trust'",
-						  NULL);
+	                              /* avoid warning message */
+								  "--option", "'--auth=trust'",
+								  NULL);
 
-	success = program.returnCode == 0;
+	bool success = program.returnCode == 0;
 
 	if (program.returnCode != 0)
 	{
@@ -1273,10 +1259,8 @@ bool
 pg_ctl_postgres(const char *pg_ctl, const char *pgdata, int pgport,
 				char *listen_addresses)
 {
-	Program program;
 	char postgres[MAXPGPATH];
 	char logfile[MAXPGPATH];
-	int logFileDescriptor = -1;
 
 	char *args[12];
 	int argsIndex = 0;
@@ -1284,7 +1268,6 @@ pg_ctl_postgres(const char *pg_ctl, const char *pgdata, int pgport,
 	char env_pg_regress_sock_dir[MAXPGPATH];
 
 	char command[BUFSIZE];
-	int commandSize = 0;
 
 	/* call postgres directly */
 	path_in_same_directory(pg_ctl, "postgres", postgres);
@@ -1324,10 +1307,10 @@ pg_ctl_postgres(const char *pg_ctl, const char *pgdata, int pgport,
 	 * postgres subprogram is not intended to be its own session leader, but
 	 * remain a sub-process in the same group as pg_autoctl.
 	 */
-	program = initialize_program(args, false);
+	Program program = initialize_program(args, false);
 
 	/* we want to redirect the output to logfile */
-	logFileDescriptor = open(logfile, FOPEN_FLAGS_W, 0644);
+	int logFileDescriptor = open(logfile, FOPEN_FLAGS_W, 0644);
 
 	if (logFileDescriptor == -1)
 	{
@@ -1339,7 +1322,7 @@ pg_ctl_postgres(const char *pg_ctl, const char *pgdata, int pgport,
 	program.stdErrFd = logFileDescriptor;
 
 	/* log the exact command line we're using */
-	commandSize = snprintf_program_command_line(&program, command, BUFSIZE);
+	int commandSize = snprintf_program_command_line(&program, command, BUFSIZE);
 
 	if (commandSize >= BUFSIZE)
 	{
@@ -1375,9 +1358,7 @@ pg_log_startup(const char *pgdata, int logLevel)
 	int pathLogLevel = logLevel <= LOG_DEBUG ? LOG_DEBUG : LOG_WARN;
 
 	struct stat pgStartupStat;
-	int64_t pgStartupMtime = 0;
 
-	DIR *logDir = NULL;
 	struct dirent *logFileDirEntry = NULL;
 
 	/* prepare startup.log file in PGDATA */
@@ -1429,10 +1410,10 @@ pg_log_startup(const char *pgdata, int logLevel)
 				  pgStartupPath);
 		return false;
 	}
-	pgStartupMtime = ST_MTIME_S(pgStartupStat);
+	int64_t pgStartupMtime = ST_MTIME_S(pgStartupStat);
 
 	/* open and scan through the Postgres log directory */
-	logDir = opendir(pgLogDirPath);
+	DIR *logDir = opendir(pgLogDirPath);
 
 	if (logDir == NULL)
 	{
@@ -1445,7 +1426,6 @@ pg_log_startup(const char *pgdata, int logLevel)
 	{
 		char pgLogFilePath[MAXPGPATH] = { 0 };
 		struct stat pgLogFileStat;
-		int64_t pgLogFileMtime = 0;
 
 		/* our logFiles are regular files, skip . and .. and others */
 		if (logFileDirEntry->d_type != DT_REG)
@@ -1465,7 +1445,7 @@ pg_log_startup(const char *pgdata, int logLevel)
 					  pgLogFilePath);
 			return false;
 		}
-		pgLogFileMtime = ST_MTIME_S(pgLogFileStat);
+		int64_t pgLogFileMtime = ST_MTIME_S(pgLogFileStat);
 
 		/*
 		 * Compare modification times and only add to our logs the content
@@ -1577,19 +1557,16 @@ pg_log_recovery_setup(const char *pgdata, int logLevel)
 bool
 pg_ctl_stop(const char *pg_ctl, const char *pgdata)
 {
-	Program program;
-	int status = 0;
-	bool pgdata_exists = false;
 	const bool log_output = true;
 
 	log_info("%s --pgdata %s --wait stop --mode fast", pg_ctl, pgdata);
 
-	program = run_program(pg_ctl,
-						  "--pgdata", pgdata,
-						  "--wait",
-						  "stop",
-						  "--mode", "fast",
-						  NULL);
+	Program program = run_program(pg_ctl,
+								  "--pgdata", pgdata,
+								  "--wait",
+								  "stop",
+								  "--mode", "fast",
+								  NULL);
 
 	/*
 	 * Case 1. "pg_ctl stop" was successful, so we could stop the PostgreSQL
@@ -1605,7 +1582,7 @@ pg_ctl_stop(const char *pg_ctl, const char *pgdata)
 	 * Case 2. The data directory doesn't exist. So we assume PostgreSQL is
 	 * not running, so stopping the PostgreSQL server was successful.
 	 */
-	pgdata_exists = directory_exists(pgdata);
+	bool pgdata_exists = directory_exists(pgdata);
 	if (!pgdata_exists)
 	{
 		log_info("pgdata \"%s\" does not exists, consider this as PostgreSQL "
@@ -1623,7 +1600,7 @@ pg_ctl_stop(const char *pg_ctl, const char *pgdata)
 	 * See https://www.postgresql.org/docs/current/static/app-pg-ctl.html
 	 */
 
-	status = pg_ctl_status(pg_ctl, pgdata, log_output);
+	int status = pg_ctl_status(pg_ctl, pgdata, log_output);
 	if (status == PG_CTL_STATUS_NOT_RUNNING)
 	{
 		log_info("pg_ctl stop failed, but PostgreSQL is not running anyway");
@@ -2133,7 +2110,6 @@ prepare_primary_conninfo(char *primaryConnInfo,
 {
 	int size = 0;
 	char escaped[BUFSIZE];
-	PQExpBuffer buffer = NULL;
 
 	if (IS_EMPTY_STRING_BUFFER(primaryHost))
 	{
@@ -2144,7 +2120,7 @@ prepare_primary_conninfo(char *primaryConnInfo,
 		return true;
 	}
 
-	buffer = createPQExpBuffer();
+	PQExpBuffer buffer = createPQExpBuffer();
 
 	/* application_name shows up in pg_stat_replication on the primary */
 	appendPQExpBuffer(buffer, "application_name=%s", applicationName);
@@ -2261,7 +2237,6 @@ pgctl_identify_system(ReplicationSource *replicationSource)
 	char primaryConnInfo[MAXCONNINFO] = { 0 };
 	char primaryConnInfoReplication[MAXCONNINFO] = { 0 };
 	PGSQL replicationClient = { 0 };
-	int len = 0;
 
 	if (!prepare_primary_conninfo(primaryConnInfo,
 								  MAXCONNINFO,
@@ -2287,9 +2262,9 @@ pgctl_identify_system(ReplicationSource *replicationSource)
 	 * wherein a small set of replication commands, shown below, can be issued
 	 * instead of SQL statements.
 	 */
-	len = sformat(primaryConnInfoReplication, MAXCONNINFO,
-				  "%s replication=1",
-				  primaryConnInfo);
+	int len = sformat(primaryConnInfoReplication, MAXCONNINFO,
+					  "%s replication=1",
+					  primaryConnInfo);
 
 	if (len >= MAXCONNINFO)
 	{
@@ -2339,9 +2314,7 @@ pg_is_running(const char *pg_ctl, const char *pgdata)
 bool
 pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *hostname)
 {
-	Program program;
 	char subject[BUFSIZE] = { 0 };
-	int size = 0;
 	char openssl[MAXPGPATH] = { 0 };
 
 	if (!search_path_first("openssl", openssl, LOG_ERROR))
@@ -2356,8 +2329,8 @@ pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *hostname)
 		return false;
 	}
 
-	size = sformat(pgSetup->ssl.serverKey, MAXPGPATH,
-				   "%s/server.key", pgSetup->pgdata);
+	int size = sformat(pgSetup->ssl.serverKey, MAXPGPATH,
+					   "%s/server.key", pgSetup->pgdata);
 
 	if (size == -1 || size > MAXPGPATH)
 	{
@@ -2395,13 +2368,13 @@ pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *hostname)
 			 pgSetup->ssl.serverKey,
 			 subject);
 
-	program = run_program(openssl,
-						  "req", "-new", "-x509", "-days", "365",
-						  "-nodes", "-text",
-						  "-out", pgSetup->ssl.serverCert,
-						  "-keyout", pgSetup->ssl.serverKey,
-						  "-subj", subject,
-						  NULL);
+	Program program = run_program(openssl,
+								  "req", "-new", "-x509", "-days", "365",
+								  "-nodes", "-text",
+								  "-out", pgSetup->ssl.serverCert,
+								  "-keyout", pgSetup->ssl.serverKey,
+								  "-subj", subject,
+								  NULL);
 
 	if (program.returnCode != 0)
 	{

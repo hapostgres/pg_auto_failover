@@ -90,14 +90,13 @@ bool
 service_keeper_start(void *context, pid_t *pid)
 {
 	Keeper *keeper = (Keeper *) context;
-	pid_t fpid;
 
 	/* Flush stdio channels just before fork, to avoid double-output problems */
 	fflush(stdout);
 	fflush(stderr);
 
 	/* time to create the node_active sub-process */
-	fpid = fork();
+	pid_t fpid = fork();
 
 	switch (fpid)
 	{
@@ -141,8 +140,6 @@ service_keeper_start(void *context, pid_t *pid)
 void
 service_keeper_runprogram(Keeper *keeper)
 {
-	Program program;
-
 	char *args[12];
 	int argsIndex = 0;
 
@@ -172,7 +169,7 @@ service_keeper_runprogram(Keeper *keeper)
 	args[argsIndex] = NULL;
 
 	/* we do not want to call setsid() when running this program. */
-	program = initialize_program(args, false);
+	Program program = initialize_program(args, false);
 
 	program.capture = false;    /* redirect output, don't capture */
 	program.stdOutFd = STDOUT_FILENO;

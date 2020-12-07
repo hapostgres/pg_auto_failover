@@ -96,11 +96,10 @@ supervisor_start(Service services[], int serviceCount, const char *pidfile)
 	for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
 	{
 		Service *service = &(services[serviceIndex]);
-		bool started = false;
 
 		log_debug("Starting pg_autoctl %s service", service->name);
 
-		started = (*service->startFunction)(service->context, &(service->pid));
+		bool started = (*service->startFunction)(service->context, &(service->pid));
 
 		if (started)
 		{
@@ -624,7 +623,6 @@ supervisor_restart_service(Supervisor *supervisor, Service *service, int status)
 	int returnCode = WEXITSTATUS(status);
 	uint64_t now = time(NULL);
 	int logLevel = LOG_ERROR;
-	bool restarted = false;
 
 	RestartCounters *counters = &(service->restartCounters);
 
@@ -717,7 +715,7 @@ supervisor_restart_service(Supervisor *supervisor, Service *service, int status)
 	 * too.
 	 */
 	log_info("Restarting service %s", service->name);
-	restarted = (*service->startFunction)(service->context, &(service->pid));
+	bool restarted = (*service->startFunction)(service->context, &(service->pid));
 
 	if (!restarted)
 	{
@@ -765,7 +763,6 @@ supervisor_may_restart(Service *service)
 	uint64_t now = time(NULL);
 	RestartCounters *counters = &(service->restartCounters);
 	int position = counters->position;
-	uint64_t oldestRestartTime = 0;
 
 	char timestring[BUFSIZE] = { 0 };
 
@@ -791,7 +788,7 @@ supervisor_may_restart(Service *service)
 	 * one:
 	 */
 	position = (position + 1) % SUPERVISOR_SERVICE_MAX_RETRY;
-	oldestRestartTime = counters->startTime[position];
+	uint64_t oldestRestartTime = counters->startTime[position];
 
 	if ((now - oldestRestartTime) <= SUPERVISOR_SERVICE_MAX_TIME)
 	{
@@ -819,7 +816,6 @@ supervisor_update_pidfile(Supervisor *supervisor)
 	int serviceIndex = 0;
 	PQExpBuffer content = createPQExpBuffer();
 
-	bool success = false;
 
 	if (content == NULL)
 	{
@@ -842,7 +838,7 @@ supervisor_update_pidfile(Supervisor *supervisor)
 		appendPQExpBuffer(content, "%d %s\n", service->pid, service->name);
 	}
 
-	success = write_file(content->data, content->len, supervisor->pidfile);
+	bool success = write_file(content->data, content->len, supervisor->pidfile);
 	destroyPQExpBuffer(content);
 
 	return success;
@@ -861,7 +857,6 @@ supervisor_find_service_pid(const char *pidfile,
 	long fileSize = 0L;
 	char *fileContents = NULL;
 	char *fileLines[BUFSIZE] = { 0 };
-	int lineCount = 0;
 	int lineNumber;
 
 	if (!file_exists(pidfile))
@@ -874,7 +869,7 @@ supervisor_find_service_pid(const char *pidfile,
 		return false;
 	}
 
-	lineCount = splitLines(fileContents, fileLines, BUFSIZE);
+	int lineCount = splitLines(fileContents, fileLines, BUFSIZE);
 
 	for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
 	{

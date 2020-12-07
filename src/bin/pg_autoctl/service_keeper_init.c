@@ -83,14 +83,13 @@ service_keeper_init_start(void *context, pid_t *pid)
 	Keeper *keeper = (Keeper *) context;
 	KeeperConfig *config = &(keeper->config);
 
-	pid_t fpid = -1;
 
 	/* Flush stdio channels just before fork, to avoid double-output problems */
 	fflush(stdout);
 	fflush(stderr);
 
 	/* time to create the node_active sub-process */
-	fpid = fork();
+	pid_t fpid = fork();
 
 	switch (fpid)
 	{

@@ -286,7 +286,6 @@ cli_do_fsm_assign(int argc, char **argv)
 	Keeper keeper = { 0 };
 	KeeperConfig config = keeperOptions;
 	char keeperStateJSON[BUFSIZE];
-	NodeState goalState = NO_STATE;
 
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
@@ -312,7 +311,7 @@ cli_do_fsm_assign(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	goalState = NodeStateFromString(argv[0]);
+	NodeState goalState = NodeStateFromString(argv[0]);
 
 	if (goalState == NO_STATE)
 	{
@@ -386,8 +385,6 @@ static void
 cli_do_fsm_step(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
-	const char *oldRole = NULL;
-	const char *newRole = NULL;
 
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
@@ -418,7 +415,7 @@ cli_do_fsm_step(int argc, char **argv)
 		exit(EXIT_CODE_PGCTL);
 	}
 
-	oldRole = NodeStateToString(keeper.state.current_role);
+	const char *oldRole = NodeStateToString(keeper.state.current_role);
 
 	if (!keeper_fsm_step(&keeper))
 	{
@@ -426,7 +423,7 @@ cli_do_fsm_step(int argc, char **argv)
 		exit(EXIT_CODE_BAD_STATE);
 	}
 
-	newRole = NodeStateToString(keeper.state.assigned_role);
+	const char *newRole = NodeStateToString(keeper.state.assigned_role);
 
 	if (outputJSON)
 	{

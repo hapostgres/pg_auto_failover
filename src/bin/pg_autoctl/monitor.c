@@ -1040,7 +1040,6 @@ parseNodeReplicationSettings(void *ctx, PGresult *result)
 {
 	NodeReplicationSettingsParseContext *context =
 		(NodeReplicationSettingsParseContext *) ctx;
-	char *value = NULL;
 	int errors = 0;
 
 	if (PQntuples(result) != 1)
@@ -1057,7 +1056,7 @@ parseNodeReplicationSettings(void *ctx, PGresult *result)
 		return;
 	}
 
-	value = PQgetvalue(result, 0, 0);
+	char *value = PQgetvalue(result, 0, 0);
 	if (!stringToInt(value, &context->candidatePriority))
 	{
 		log_error("Invalid failover candidate priority \"%s\" "
@@ -1363,9 +1362,6 @@ monitor_perform_promotion(Monitor *monitor, char *formation, char *name)
 static bool
 parseNode(PGresult *result, int rowNumber, NodeAddress *node)
 {
-	char *value = NULL;
-	int length = 0;
-
 	if (PQgetisnull(result, rowNumber, 0) ||
 		PQgetisnull(result, rowNumber, 1) ||
 		PQgetisnull(result, rowNumber, 2) ||
@@ -1375,7 +1371,7 @@ parseNode(PGresult *result, int rowNumber, NodeAddress *node)
 		return false;
 	}
 
-	value = PQgetvalue(result, rowNumber, 0);
+	char *value = PQgetvalue(result, rowNumber, 0);
 	node->nodeId = strtol(value, NULL, 0);
 	if (node->nodeId == 0)
 	{
@@ -1384,7 +1380,7 @@ parseNode(PGresult *result, int rowNumber, NodeAddress *node)
 	}
 
 	value = PQgetvalue(result, rowNumber, 1);
-	length = strlcpy(node->name, value, _POSIX_HOST_NAME_MAX);
+	int length = strlcpy(node->name, value, _POSIX_HOST_NAME_MAX);
 	if (length >= _POSIX_HOST_NAME_MAX)
 	{
 		log_error("Node name \"%s\" returned by monitor is %d characters, "
@@ -1510,7 +1506,6 @@ parseNodeState(void *ctx, PGresult *result)
 {
 	MonitorAssignedStateParseContext *context =
 		(MonitorAssignedStateParseContext *) ctx;
-	char *value = NULL;
 	int errors = 0;
 
 	if (PQntuples(result) != 1)
@@ -1531,7 +1526,7 @@ parseNodeState(void *ctx, PGresult *result)
 		return;
 	}
 
-	value = PQgetvalue(result, 0, 0);
+	char *value = PQgetvalue(result, 0, 0);
 
 	if (!stringToInt(value, &context->assignedState->nodeId))
 	{
@@ -1672,8 +1667,6 @@ static bool
 parseCurrentNodeState(PGresult *result, int rowNumber,
 					  CurrentNodeState *nodeState)
 {
-	char *value = NULL;
-	int length = 0;
 	int colNumber = 0;
 	int errors = 0;
 
@@ -1705,8 +1698,8 @@ parseCurrentNodeState(PGresult *result, int rowNumber,
 	 * We need the groupId to parse the formation kind into a nodeKind, so we
 	 * begin at column 1 and get back to column 0 later, after column 4.
 	 */
-	value = PQgetvalue(result, rowNumber, 1);
-	length = strlcpy(nodeState->node.name, value, _POSIX_HOST_NAME_MAX);
+	char *value = PQgetvalue(result, rowNumber, 1);
+	int length = strlcpy(nodeState->node.name, value, _POSIX_HOST_NAME_MAX);
 	if (length >= _POSIX_HOST_NAME_MAX)
 	{
 		log_error("Node name \"%s\" returned by monitor is %d characters, "
@@ -2972,8 +2965,6 @@ static void
 parseCoordinatorNode(void *ctx, PGresult *result)
 {
 	NodeAddressParseContext *context = (NodeAddressParseContext *) ctx;
-	char *value = NULL;
-	int hostLength = 0;
 
 	/* no rows, set the node to NULL, return */
 	if (PQntuples(result) == 0)
@@ -3005,8 +2996,8 @@ parseCoordinatorNode(void *ctx, PGresult *result)
 		return;
 	}
 
-	value = PQgetvalue(result, 0, 0);
-	hostLength = strlcpy(context->node->host, value, _POSIX_HOST_NAME_MAX);
+	char *value = PQgetvalue(result, 0, 0);
+	int hostLength = strlcpy(context->node->host, value, _POSIX_HOST_NAME_MAX);
 	if (hostLength >= _POSIX_HOST_NAME_MAX)
 	{
 		log_error("Hostname \"%s\" returned by monitor is %d characters, "
@@ -3142,8 +3133,6 @@ monitor_process_notifications(Monitor *monitor,
 	PGconn *connection = monitor->pgsql.connection;
 	PGnotify *notify;
 
-	int ret;
-	int sock;
 
 	sigset_t sig_mask;
 	sigset_t sig_mask_orig;
@@ -3196,7 +3185,7 @@ monitor_process_notifications(Monitor *monitor,
 	 *
 	 * https://www.postgresql.org/docs/current/libpq-example.html#LIBPQ-EXAMPLE-2
 	 */
-	sock = PQsocket(monitor->pgsql.connection);
+	int sock = PQsocket(monitor->pgsql.connection);
 
 	if (sock < 0)
 	{
@@ -3209,7 +3198,7 @@ monitor_process_notifications(Monitor *monitor,
 	FD_ZERO(&input_mask);
 	FD_SET(sock, &input_mask);
 
-	ret = pselect(sock + 1, &input_mask, NULL, NULL, &timeout, &sig_mask_orig);
+	int ret = pselect(sock + 1, &input_mask, NULL, NULL, &timeout, &sig_mask_orig);
 
 	/* restore signal masks (un block them) now that pselect() is done */
 	(void) unblock_signals(&sig_mask_orig);
@@ -3719,8 +3708,6 @@ parseExtensionVersion(void *ctx, PGresult *result)
 	MonitorExtensionVersionParseContext *context =
 		(MonitorExtensionVersionParseContext *) ctx;
 
-	char *value = NULL;
-	int length = -1;
 
 	/* we have rows: we accept only one */
 	if (PQntuples(result) != 1)
@@ -3745,8 +3732,8 @@ parseExtensionVersion(void *ctx, PGresult *result)
 		return;
 	}
 
-	value = PQgetvalue(result, 0, 0);
-	length = strlcpy(context->version->defaultVersion, value, BUFSIZE);
+	char *value = PQgetvalue(result, 0, 0);
+	int length = strlcpy(context->version->defaultVersion, value, BUFSIZE);
 	if (length >= BUFSIZE)
 	{
 		log_error("default_version \"%s\" returned by monitor is %d characters, "

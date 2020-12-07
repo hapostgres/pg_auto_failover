@@ -337,7 +337,6 @@ cli_do_monitor_get_coordinator(int argc, char **argv)
 static void
 cli_do_monitor_register_node(int argc, char **argv)
 {
-	NodeState initialState = NO_STATE;
 	Keeper keeper = { 0 };
 	KeeperConfig config = keeperOptions;
 
@@ -351,7 +350,7 @@ cli_do_monitor_register_node(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	initialState = NodeStateFromString(argv[0]);
+	NodeState initialState = NodeStateFromString(argv[0]);
 
 	/*
 	 * On the keeper's side we should only accept to register a local node to

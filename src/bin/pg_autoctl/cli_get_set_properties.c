@@ -437,7 +437,6 @@ cli_set_node_candidate_priority(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
 
-	int candidatePriority = -1;
 
 	keeper.config = keeperOptions;
 
@@ -450,7 +449,7 @@ cli_set_node_candidate_priority(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	candidatePriority = strtol(argv[0], NULL, 10);
+	int candidatePriority = strtol(argv[0], NULL, 10);
 
 	if (errno == EINVAL || candidatePriority < 0 || candidatePriority > 100)
 	{
@@ -605,7 +604,6 @@ cli_set_formation_number_sync_standbys(int argc, char **argv)
 	KeeperConfig config = keeperOptions;
 	Monitor monitor = { 0 };
 
-	int numberSyncStandbys = -1;
 
 	char synchronous_standby_names[BUFSIZE] = { 0 };
 
@@ -618,7 +616,7 @@ cli_set_formation_number_sync_standbys(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	numberSyncStandbys = strtol(argv[0], NULL, 10);
+	int numberSyncStandbys = strtol(argv[0], NULL, 10);
 	if (errno == EINVAL || numberSyncStandbys < 0)
 	{
 		log_error("number-sync-standbys value %s is not valid."
