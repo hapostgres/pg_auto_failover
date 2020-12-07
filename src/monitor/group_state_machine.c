@@ -1168,7 +1168,7 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 			message, BUFSIZE,
 			"Active " NODE_FORMAT
 			" found failover candidate " NODE_FORMAT
-			" being promoted, it reported state \"%s\"",
+			" being promoted: it reported state \"%s\"",
 			NODE_FORMAT_ARGS(activeNode),
 			NODE_FORMAT_ARGS(nodeBeingPromoted),
 			ReplicationStateGetName(nodeBeingPromoted->reportedState));
