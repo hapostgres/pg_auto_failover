@@ -1737,6 +1737,73 @@ keeper_state_as_json(Keeper *keeper, char *json, int size)
 	return len < size;
 }
 
+bool
+keeper_ensure_monitor_hba(Keeper *keeper)
+{
+	KeeperConfig *config = &keeper->config;
+	LocalPostgresServer *postgres = &keeper->postgres;
+	PostgresSetup *pgSetup = &postgres->postgresSetup;
+	char monitorHostname[_POSIX_HOST_NAME_MAX];
+	char hbaFilePath[MAXPGPATH];
+	int monitorPort = 0;
+	char *authMethod = pg_setup_get_auth_method(pgSetup);
+
+	if (!ensure_postgres_service_is_running(postgres))
+	{
+		log_error("Failed to initialize postgres as primary because "
+					"starting postgres failed, see above for details");
+		return false;
+	}
+	if (!hostname_from_uri(config->monitor_pguri,
+						 monitorHostname, _POSIX_HOST_NAME_MAX,
+						 &monitorPort))
+	{
+		/* developer error, this should never happen */
+		log_fatal("BUG: monitor_pguri should be validated before calling "
+				"keeper_ensure_monitor_hba");
+		return false;
+	}
+	if (pgSetup->hbaLevel >= HBA_EDIT_MINIMAL)
+	{
+		authMethod = "trust";
+	}
+
+	if (!pgsql_get_hba_file_path(&postgres->sqlClient, hbaFilePath, MAXPGPATH))
+	{
+		log_error("Failed to set the pg_hba rule for monitor: couldn't get "
+					"hba_file from local postgres server");
+		return false;
+	}
+
+	if (!pghba_ensure_host_rule_exists(hbaFilePath,
+										pgSetup->ssl.active,
+										HBA_DATABASE_ALL,
+										NULL,
+										PG_AUTOCTL_HEALTH_USERNAME,
+										monitorHostname,
+										authMethod,
+										pgSetup->hbaLevel))
+	{
+		log_error("Failed to set the pg_hba rule for monitor");
+		return false;
+	}
+
+	if (!pghba_ensure_host_rule_exists(hbaFilePath,
+										pgSetup->ssl.active,
+										HBA_DATABASE_DBNAME,
+										pgSetup->dbname,
+										pg_setup_get_username(pgSetup),
+										config->hostname,
+										pg_setup_get_auth_method(pgSetup),
+										pgSetup->hbaLevel))
+	{
+		log_error("Failed to edit \"%s\" to grant connections to \"%s\", "
+					"see above for details", hbaFilePath, config->hostname);
+		return false;
+	}
+
+	return true;
+}
 
 /*
  * keeper_update_group_hba updates updates the HBA file to ensure we have two
@@ -1753,6 +1820,11 @@ keeper_update_group_hba(Keeper *keeper, NodeAddressArray *diffNodesArray)
 	char hbaFilePath[MAXPGPATH] = { 0 };
 	char *authMethod = pg_setup_get_auth_method(postgresSetup);
 
+	if (!keeper_ensure_monitor_hba(keeper))
+	{
+		log_error("Failed to add hba rule for the monitor");
+		return false;
+	}
 	/* early exit when we're alone in the group */
 	if (diffNodesArray->count == 0)
 	{
