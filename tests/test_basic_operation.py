@@ -9,17 +9,21 @@ node1 = None
 node2 = None
 node3 = None
 
+
 def setup_module():
     global cluster
     cluster = pgautofailover.Cluster()
 
+
 def teardown_module():
     cluster.destroy()
+
 
 def test_000_create_monitor():
     global monitor
     monitor = cluster.create_monitor("/tmp/basic/monitor")
     monitor.run()
+
 
 def test_001_init_primary():
     global node1
@@ -43,13 +47,16 @@ def test_001_init_primary():
     time.sleep(2)
     eq_(node1.get_nodename(), "a")
 
+
 def test_002_stop_postgres():
     node1.stop_postgres()
     assert node1.wait_until_pg_is_running()
 
+
 def test_003_create_t1():
     node1.run_sql_query("CREATE TABLE t1(a int)")
     node1.run_sql_query("INSERT INTO t1 VALUES (1), (2)")
+
 
 def test_004_init_secondary():
     global node2
@@ -65,32 +72,39 @@ def test_004_init_secondary():
 
     assert node2.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")
-    eq_(node1.get_synchronous_standby_names_local(), '*')
+    eq_(node1.get_synchronous_standby_names_local(), "*")
 
     assert node1.has_needed_replication_slots()
     assert node2.has_needed_replication_slots()
+
 
 def test_005_read_from_secondary():
     results = node2.run_sql_query("SELECT * FROM t1")
     assert results == [(1,), (2,)]
 
+
 @raises(Exception)
 def test_006_001_writes_to_node2_fail():
     node2.run_sql_query("INSERT INTO t1 VALUES (3)")
+
 
 def test_006_002_read_from_secondary():
     results = node2.run_sql_query("SELECT * FROM t1")
     assert results == [(1,), (2,)]
 
+
 def test_007_001_wait_until_primary():
     assert node1.wait_until_state(target_state="primary")
+
 
 @raises(Exception)
 def test_007_002_maintenance_primary():
     node1.enable_maintenance()  # without --allow-failover, that fails
 
+
 def test_007_003_maintenance_primary():
     assert node1.wait_until_state(target_state="primary")
+
 
 def test_007_004_maintenance_primary_allow_failover():
     print()
@@ -100,9 +114,10 @@ def test_007_004_maintenance_primary_allow_failover():
     assert node1.wait_until_state(target_state="maintenance")
     assert node2.wait_until_state(target_state="wait_primary")
 
-    ssn = ''
+    ssn = ""
     eq_(node2.get_synchronous_standby_names_local(), ssn)
     eq_(node2.get_synchronous_standby_names(), ssn)
+
 
 def test_007_005_disable_maintenance():
     print()
@@ -112,9 +127,10 @@ def test_007_005_disable_maintenance():
     assert node1.wait_until_state(target_state="secondary")
     assert node2.wait_until_state(target_state="primary")
 
-    ssn = '*'
+    ssn = "*"
     eq_(node2.get_synchronous_standby_names_local(), ssn)
     eq_(node2.get_synchronous_standby_names(), ssn)
+
 
 def test_008_001_enable_maintenance_secondary():
     print()
@@ -125,6 +141,7 @@ def test_008_001_enable_maintenance_secondary():
     node1.stop_postgres()
     node2.run_sql_query("INSERT INTO t1 VALUES (3)")
 
+
 def test_008_002_disable_maintenance_secondary():
     print()
     print("Disabling maintenance on node2")
@@ -133,9 +150,10 @@ def test_008_002_disable_maintenance_secondary():
     assert node1.wait_until_state(target_state="secondary")
     assert node2.wait_until_state(target_state="primary")
 
-    ssn = '*'
+    ssn = "*"
     eq_(node2.get_synchronous_standby_names_local(), ssn)
     eq_(node2.get_synchronous_standby_names(), ssn)
+
 
 # the rest of the tests expect node1 to be primary, make it so
 def test_009_failback():
@@ -144,7 +162,8 @@ def test_009_failback():
     assert node2.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")
 
-    eq_(node1.get_synchronous_standby_names_local(), '*')
+    eq_(node1.get_synchronous_standby_names_local(), "*")
+
 
 def test_010_fail_primary():
     print()
@@ -152,16 +171,18 @@ def test_010_fail_primary():
     node1.fail()
     assert node2.wait_until_state(target_state="wait_primary")
 
+
 def test_011_writes_to_node2_succeed():
     node2.run_sql_query("INSERT INTO t1 VALUES (4)")
     results = node2.run_sql_query("SELECT * FROM t1 ORDER BY a")
     assert results == [(1,), (2,), (3,), (4,)]
 
+
 def test_012_start_node1_again():
     node1.run()
 
     assert node2.wait_until_state(target_state="primary")
-    eq_(node2.get_synchronous_standby_names_local(), '*')
+    eq_(node2.get_synchronous_standby_names_local(), "*")
 
     assert node1.wait_until_state(target_state="secondary")
 
@@ -170,13 +191,16 @@ def test_013_read_from_new_secondary():
     results = node1.run_sql_query("SELECT * FROM t1 ORDER BY a")
     assert results == [(1,), (2,), (3,), (4,)]
 
+
 @raises(Exception)
 def test_014_writes_to_node1_fail():
     node1.run_sql_query("INSERT INTO t1 VALUES (3)")
 
+
 def test_015_fail_secondary():
     node1.fail()
     assert node2.wait_until_state(target_state="wait_primary")
+
 
 def test_016_drop_secondary():
     node1.run()
@@ -188,14 +212,17 @@ def test_016_drop_secondary():
     # replication slot list should be empty now
     assert node2.has_needed_replication_slots()
 
+
 def test_017_add_new_secondary():
     global node3
     node3 = cluster.create_datanode("/tmp/basic/node3")
     node3.create()
 
+
 @raises(Exception)
 def test_018_cant_failover_yet():
     monitor.failover()
+
 
 def test_019_run_secondary():
     node3.run()
@@ -205,7 +232,8 @@ def test_019_run_secondary():
     assert node2.has_needed_replication_slots()
     assert node3.has_needed_replication_slots()
 
-    eq_(node2.get_synchronous_standby_names_local(), '*')
+    eq_(node2.get_synchronous_standby_names_local(), "*")
+
 
 # In previous versions of pg_auto_failover we removed the replication slot
 # on the secondary after failover. Now, we instead maintain the replication
@@ -227,12 +255,12 @@ def test_020_multiple_manual_failover_verify_replication_slots():
     assert node2.has_needed_replication_slots()
     assert node3.has_needed_replication_slots()
 
-    eq_(node3.get_synchronous_standby_names_local(), '*')
+    eq_(node3.get_synchronous_standby_names_local(), "*")
 
     print("Calling pg_autoctl perform promotion on node 2")
     node2.perform_promotion()
     assert node2.wait_until_state(target_state="primary")
-    eq_(node2.get_synchronous_standby_names_local(), '*')
+    eq_(node2.get_synchronous_standby_names_local(), "*")
 
     assert node3.wait_until_state(target_state="secondary")
 
@@ -249,8 +277,9 @@ def test_020_multiple_manual_failover_verify_replication_slots():
 def test_021_ifdown_primary():
     print()
     assert node2.wait_until_state(target_state="primary")
-    eq_(node2.get_synchronous_standby_names_local(), '*')
+    eq_(node2.get_synchronous_standby_names_local(), "*")
     node2.ifdown()
+
 
 def test_022_detect_network_partition():
     # wait for network partition detection to kick-in, allow some head-room
@@ -259,7 +288,7 @@ def test_022_detect_network_partition():
 
     while not demoted and timeout > 0:
         states = node2.get_local_state()
-        demoted = states == ('demote_timeout', 'demote_timeout')
+        demoted = states == ("demote_timeout", "demote_timeout")
 
         if demoted:
             break
@@ -274,7 +303,8 @@ def test_022_detect_network_partition():
     print()
     assert not node2.pg_is_running()
     assert node3.wait_until_state(target_state="wait_primary")
-    eq_(node3.get_synchronous_standby_names_local(), '')
+    eq_(node3.get_synchronous_standby_names_local(), "")
+
 
 def test_023_ifup_old_primary():
     print()
@@ -284,7 +314,8 @@ def test_023_ifup_old_primary():
     assert node2.wait_until_state("secondary")
     assert node3.wait_until_state("primary")
 
-    eq_(node3.get_synchronous_standby_names_local(), '*')
+    eq_(node3.get_synchronous_standby_names_local(), "*")
+
 
 def test_024_stop_postgres_monitor():
     original_state = node3.get_state().reported
@@ -296,6 +327,7 @@ def test_024_stop_postgres_monitor():
 
     print()
     assert node3.wait_until_state(target_state=original_state)
+
 
 def test_025_drop_primary():
     node3.drop()

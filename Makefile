@@ -73,6 +73,7 @@ test:
 
 indent:
 	citus_indent
+	black .
 
 docs: $(FSM)
 	$(MAKE) -C docs html

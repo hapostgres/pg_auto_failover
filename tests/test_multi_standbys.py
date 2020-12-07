@@ -13,12 +13,15 @@ node4 = None
 node5 = None
 node6 = None
 
+
 def setup_module():
     global cluster
     cluster = pgautofailover.Cluster()
 
+
 def teardown_module():
     cluster.destroy()
+
 
 def test_000_create_monitor():
     global monitor
@@ -26,12 +29,14 @@ def test_000_create_monitor():
     monitor.run()
     monitor.wait_until_pg_is_running()
 
+
 def test_001_init_primary():
     global node1
     node1 = cluster.create_datanode("/tmp/multi_standby/node1")
     node1.create()
     node1.run()
     assert node1.wait_until_state(target_state="single")
+
 
 def test_002_candidate_priority():
     assert node1.get_candidate_priority() == 50
@@ -41,6 +46,7 @@ def test_002_candidate_priority():
 
     assert node1.set_candidate_priority(99)
     assert node1.get_candidate_priority() == 99
+
 
 def test_003_replication_quorum():
     assert node1.get_replication_quorum()
@@ -53,6 +59,7 @@ def test_003_replication_quorum():
 
     assert node1.set_replication_quorum("true")
     assert node1.get_replication_quorum()
+
 
 def test_004_add_three_standbys():
     # the next test wants to set number_sync_standbys to 2
@@ -103,6 +110,7 @@ def test_004_add_three_standbys():
     assert node3.has_needed_replication_slots()
     assert node4.has_needed_replication_slots()
 
+
 def test_005_number_sync_standbys():
     print()
 
@@ -115,24 +123,31 @@ def test_005_number_sync_standbys():
     assert node1.get_number_sync_standbys() == 2
 
     node1.print_synchronous_standby_names()
-    eq_(node1.get_synchronous_standby_names(),
-        node1.get_synchronous_standby_names_local())
+    eq_(
+        node1.get_synchronous_standby_names(),
+        node1.get_synchronous_standby_names_local(),
+    )
 
     print("set number_sync_standbys = 0")
     assert node1.set_number_sync_standbys(0)
     assert node1.get_number_sync_standbys() == 0
 
     node1.print_synchronous_standby_names()
-    eq_(node1.get_synchronous_standby_names(),
-        node1.get_synchronous_standby_names_local())
+    eq_(
+        node1.get_synchronous_standby_names(),
+        node1.get_synchronous_standby_names_local(),
+    )
 
     print("set number_sync_standbys = 1")
     assert node1.set_number_sync_standbys(1)
     assert node1.get_number_sync_standbys() == 1
 
     node1.print_synchronous_standby_names()
-    eq_(node1.get_synchronous_standby_names(),
-        node1.get_synchronous_standby_names_local())
+    eq_(
+        node1.get_synchronous_standby_names(),
+        node1.get_synchronous_standby_names_local(),
+    )
+
 
 def test_006_number_sync_standbys_trigger():
     assert node1.set_number_sync_standbys(2)
@@ -142,17 +157,19 @@ def test_006_number_sync_standbys_trigger():
 
     # check synchronous_standby_names
     node1.print_synchronous_standby_names()
-    eq_(node1.get_synchronous_standby_names(),
-        node1.get_synchronous_standby_names_local())
+    eq_(
+        node1.get_synchronous_standby_names(),
+        node1.get_synchronous_standby_names_local(),
+    )
 
     assert node1.wait_until_state(target_state="primary")
 
     # there's no state change to instruct us that the replication slot
     # maintenance is now done, so we have to wait for awhile instead.
 
-    node1.pg_autoctl.sighup() # wake up from the 10s node_active delay
-    node2.pg_autoctl.sighup() # wake up from the 10s node_active delay
-    node3.pg_autoctl.sighup() # wake up from the 10s node_active delay
+    node1.pg_autoctl.sighup()  # wake up from the 10s node_active delay
+    node2.pg_autoctl.sighup()  # wake up from the 10s node_active delay
+    node3.pg_autoctl.sighup()  # wake up from the 10s node_active delay
 
     time.sleep(6)
 
@@ -160,10 +177,12 @@ def test_006_number_sync_standbys_trigger():
     assert node2.has_needed_replication_slots()
     assert node3.has_needed_replication_slots()
 
+
 def test_007_create_t1():
     node1.run_sql_query("CREATE TABLE t1(a int)")
     node1.run_sql_query("INSERT INTO t1 VALUES (1), (2)")
     node1.run_sql_query("CHECKPOINT")
+
 
 @raises(Exception)
 def test_008a_set_candidate_priorities_to_zero():
@@ -171,15 +190,17 @@ def test_008a_set_candidate_priorities_to_zero():
     node1.set_candidate_priority(0)
     node2.set_candidate_priority(0)
 
+
 def test_008b_set_candidate_priorities():
     # set priorities in a way that we know the candidate: node2
-    node1.set_candidate_priority(90) # current primary
+    node1.set_candidate_priority(90)  # current primary
     node2.set_candidate_priority(90)
     node3.set_candidate_priority(70)
 
     # when we set candidate priority we go to join_primary then primary
     print()
     assert node1.wait_until_state(target_state="primary")
+
 
 def test_009_failover():
     print()
@@ -189,17 +210,21 @@ def test_009_failover():
     assert node3.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="secondary")
 
-    eq_(node2.get_synchronous_standby_names(),
-        node2.get_synchronous_standby_names_local())
+    eq_(
+        node2.get_synchronous_standby_names(),
+        node2.get_synchronous_standby_names_local(),
+    )
 
     assert node1.has_needed_replication_slots()
     assert node2.has_needed_replication_slots()
     assert node3.has_needed_replication_slots()
 
+
 def test_010_read_from_nodes():
     assert node1.run_sql_query("SELECT * FROM t1") == [(1,), (2,)]
     assert node2.run_sql_query("SELECT * FROM t1") == [(1,), (2,)]
     assert node3.run_sql_query("SELECT * FROM t1") == [(1,), (2,)]
+
 
 def test_011_write_into_new_primary():
     node2.run_sql_query("INSERT INTO t1 VALUES (3), (4)")
@@ -209,6 +234,7 @@ def test_011_write_into_new_primary():
     # generate more WAL trafic for replication
     node2.run_sql_query("CHECKPOINT")
 
+
 def test_012_fail_primary():
     print()
     print("Failing current primary node 2")
@@ -217,8 +243,11 @@ def test_012_fail_primary():
     assert node1.wait_until_state(target_state="primary")
     assert node3.wait_until_state(target_state="secondary")
 
-    eq_(node1.get_synchronous_standby_names(),
-        node1.get_synchronous_standby_names_local())
+    eq_(
+        node1.get_synchronous_standby_names(),
+        node1.get_synchronous_standby_names_local(),
+    )
+
 
 def test_013_remove_old_primary():
     node2.drop()

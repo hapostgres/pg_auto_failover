@@ -7,12 +7,15 @@ cluster = None
 node1 = None
 node2 = None
 
+
 def setup_module():
     global cluster
     cluster = pgautofailover.Cluster()
 
+
 def teardown_module():
     cluster.destroy()
+
 
 def test_000_create_monitor():
     monitor = cluster.create_monitor("/tmp/auth/monitor", authMethod="md5")
@@ -22,11 +25,12 @@ def test_000_create_monitor():
 
     monitor.create_formation("auth", kind="pgsql", secondary=True)
 
+
 def test_001_init_primary():
     global node1
-    node1 = cluster.create_datanode("/tmp/auth/node1",
-                                    authMethod="md5",
-                                    formation="auth")
+    node1 = cluster.create_datanode(
+        "/tmp/auth/node1", authMethod="md5", formation="auth"
+    )
     node1.create()
     node1.config_set("replication.password", "streaming_password")
     node1.run()
@@ -37,17 +41,19 @@ def test_001_init_primary():
 
     assert node1.wait_until_state(target_state="single")
 
+
 def test_002_create_t1():
     node1.run_sql_query("CREATE TABLE t1(a int)")
     node1.run_sql_query("INSERT INTO t1 VALUES (1), (2)")
 
+
 def test_003_init_secondary():
     global node2
-    node2 = cluster.create_datanode("/tmp/auth/node2",
-                                    authMethod="md5",
-                                    formation="auth")
+    node2 = cluster.create_datanode(
+        "/tmp/auth/node2", authMethod="md5", formation="auth"
+    )
 
-    os.putenv('PGPASSWORD', "streaming_password")
+    os.putenv("PGPASSWORD", "streaming_password")
     node2.create()
     node2.config_set("replication.password", "streaming_password")
 
@@ -55,13 +61,14 @@ def test_003_init_secondary():
     assert node2.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")
 
-    eq_(node1.get_synchronous_standby_names_local(), '*')
+    eq_(node1.get_synchronous_standby_names_local(), "*")
+
 
 def test_004_failover():
     print()
     print("Calling pgautofailover.failover() on the monitor")
     cluster.monitor.failover(formation="auth")
     assert node2.wait_until_state(target_state="primary")
-    eq_(node2.get_synchronous_standby_names_local(), '*')
+    eq_(node2.get_synchronous_standby_names_local(), "*")
 
     assert node1.wait_until_state(target_state="secondary")

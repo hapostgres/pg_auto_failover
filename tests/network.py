@@ -41,6 +41,7 @@ class VirtualLAN:
     bridge.
     TODO: explain more details and add an example.
     """
+
     def __init__(self, namePrefix, subnet):
         ipnet = ipaddress.ip_network(subnet)
         self.availableHosts = ipnet.hosts()
@@ -48,7 +49,7 @@ class VirtualLAN:
         self.namePrefix = namePrefix
         self.nodes = []
         # create the bridge
-        self.bridgeName = ("%s-br" % (namePrefix, ))
+        self.bridgeName = "%s-br" % (namePrefix,)
         self.bridgeAddress = next(self.availableHosts)
         self._add_bridge(self.bridgeName, self.bridgeAddress, self.prefixLen)
         # Don't pass bridged IPv4 traffic to iptables' chains, so namespaces
@@ -96,11 +97,17 @@ class VirtualLAN:
         _remove_interface_if_exists(name)
 
         with IPRoute() as ipr:
-            ipr.link('add', ifname=name, kind='bridge')
+            ipr.link("add", ifname=name, kind="bridge")
 
         with IPDB() as ipdb:
             with ipdb.interfaces[name] as bridge:
-                bridge.add_ip('%s/%d' % (address, prefixLen, ))
+                bridge.add_ip(
+                    "%s/%d"
+                    % (
+                        address,
+                        prefixLen,
+                    )
+                )
                 bridge.up()
 
     def _add_interface_to_bridge(self, bridge, interface):
@@ -113,8 +120,9 @@ class VirtualLAN:
         with IPRoute() as ipr:
             bridge_idx = ipr.link_lookup(ifname=bridge)[0]
             interface_idx = ipr.link_lookup(ifname=interface)[0]
-            ipr.link('set', index=interface_idx, master=bridge_idx)
-            ipr.link('set', index=interface_idx, state='up')
+            ipr.link("set", index=interface_idx, master=bridge_idx)
+            ipr.link("set", index=interface_idx, state="up")
+
 
 class VirtualNode:
     """
@@ -122,6 +130,7 @@ class VirtualNode:
 
     Internally, this corresponds to a Linux network namespace.
     """
+
     def __init__(self, namespace, address, prefixLen):
         self.namespace = namespace
         self.address = address
@@ -146,13 +155,23 @@ class VirtualNode:
         a context manager that returns NSOpen object to control the process.
         NSOpen has the same API as subprocess.POpen.
         """
-        sudo_command = ['sudo', '-E', '-u', user,
-                        'env', 'PATH=' + os.getenv("PATH")] + command
-        return managed_nspopen(self.namespace, sudo_command,
-                               stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE,
-                               universal_newlines=True,
-                               start_new_session=True)
+        sudo_command = [
+            "sudo",
+            "-E",
+            "-u",
+            user,
+            "env",
+            "PATH=" + os.getenv("PATH"),
+        ] + command
+        return managed_nspopen(
+            self.namespace,
+            sudo_command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+            start_new_session=True,
+        )
 
     def run_unmanaged(self, command, user=os.getenv("USER")):
         """
@@ -162,13 +181,23 @@ class VirtualNode:
         general you should prefer using run, where this is done automatically
         by the context manager.
         """
-        sudo_command = ['sudo', '-E', '-u', user,
-                        'env', 'PATH=' + os.getenv("PATH")] + command
-        return NSPopen(self.namespace, sudo_command,
-                       stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                       stderr=subprocess.PIPE,
-                       universal_newlines=True,
-                       start_new_session=True)
+        sudo_command = [
+            "sudo",
+            "-E",
+            "-u",
+            user,
+            "env",
+            "PATH=" + os.getenv("PATH"),
+        ] + command
+        return NSPopen(
+            self.namespace,
+            sudo_command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+            start_new_session=True,
+        )
 
     def run_and_wait(self, command, name, timeout=COMMAND_TIMEOUT):
         """
@@ -179,13 +208,17 @@ class VirtualNode:
             try:
                 out, err = proc.communicate(timeout=timeout)
                 if proc.returncode > 0:
-                    raise Exception("%s failed, out: %s\n, err: %s" % (name, out, err))
+                    raise Exception(
+                        "%s failed, out: %s\n, err: %s" % (name, out, err)
+                    )
                 return out, err
             except subprocess.TimeoutExpired:
                 proc.kill()
                 out, err = proc.communicate()
-                raise Exception("%s timed out after %d seconds. out: %s\n, err: %s" \
-                                % (name, timeout, out, err))
+                raise Exception(
+                    "%s timed out after %d seconds. out: %s\n, err: %s"
+                    % (name, timeout, out, err)
+                )
 
     def _add_namespace(self, name, address, netmaskLength):
         """
@@ -204,18 +237,24 @@ class VirtualNode:
 
         # Create the veth pair and set one endpoint to the namespace.
         with IPRoute() as ipr:
-            ipr.link('add', ifname=veth_name, kind='veth', peer=self.vethPeer)
+            ipr.link("add", ifname=veth_name, kind="veth", peer=self.vethPeer)
             idx = ipr.link_lookup(ifname=veth_name)[0]
-            ipr.link('set', index=idx, net_ns_fd=name)
+            ipr.link("set", index=idx, net_ns_fd=name)
 
         # Assign address to the veth interface and bring it up.
         with IPDB(nl=NetNS(name)) as ipdb:
             with ipdb.interfaces[veth_name] as veth:
-                veth.add_ip('%s/%d' % (address, netmaskLength, ))
+                veth.add_ip(
+                    "%s/%d"
+                    % (
+                        address,
+                        netmaskLength,
+                    )
+                )
                 veth.up()
 
             # Bring the loopback interface up.
-            with ipdb.interfaces['lo'] as lo:
+            with ipdb.interfaces["lo"] as lo:
                 lo.up()
 
     def _remove_namespace_if_exists(self, name):
@@ -235,7 +274,7 @@ class VirtualNode:
         """
         with IPRoute() as ipr:
             # bring it down
-            ipr.link('set', ifname=self.vethPeer, state='down')
+            ipr.link("set", ifname=self.vethPeer, state="down")
 
     def ifup(self):
         """
@@ -243,7 +282,7 @@ class VirtualNode:
         """
         with IPRoute() as ipr:
             # bring it up
-            ipr.link('set', ifname=self.vethPeer, state='up')
+            ipr.link("set", ifname=self.vethPeer, state="up")
 
 
 def _remove_interface_if_exists(name):
@@ -255,11 +294,11 @@ def _remove_interface_if_exists(name):
     with IPRoute() as ipr:
         # bring it down
         try:
-            ipr.link('set', ifname=name, state='down')
+            ipr.link("set", ifname=name, state="down")
         except netlink.exceptions.NetlinkError:
             pass
         # remove it
         try:
-            ipr.link('del', ifname=name)
+            ipr.link("del", ifname=name)
         except netlink.exceptions.NetlinkError:
             pass
