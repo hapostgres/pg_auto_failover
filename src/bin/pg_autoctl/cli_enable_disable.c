@@ -495,7 +495,6 @@ cli_enable_maintenance(int argc, char **argv)
 	{
 		int nodeId = keeper.state.current_node_id;
 		bool mayRetry = false;
-		int sleepTimeMs = 0;
 
 		if (monitor_start_maintenance(&(keeper.monitor), nodeId, &mayRetry))
 		{
@@ -511,7 +510,7 @@ cli_enable_maintenance(int argc, char **argv)
 			exit(EXIT_CODE_MONITOR);
 		}
 
-		sleepTimeMs = pgsql_compute_connection_retry_sleep_time(&retryPolicy);
+		int sleepTimeMs = pgsql_compute_connection_retry_sleep_time(&retryPolicy);
 
 		log_warn("Failed to enable maintenance of node %d on the monitor, "
 				 "retrying in %d ms.",
@@ -599,7 +598,6 @@ cli_disable_maintenance(int argc, char **argv)
 	{
 		int nodeId = keeper.state.current_node_id;
 		bool mayRetry = false;
-		int sleepTimeMs = 0;
 
 		if (monitor_stop_maintenance(&(keeper.monitor), nodeId, &mayRetry))
 		{
@@ -615,7 +613,7 @@ cli_disable_maintenance(int argc, char **argv)
 			exit(EXIT_CODE_MONITOR);
 		}
 
-		sleepTimeMs = pgsql_compute_connection_retry_sleep_time(&retryPolicy);
+		int sleepTimeMs = pgsql_compute_connection_retry_sleep_time(&retryPolicy);
 
 		log_warn("Failed to disable maintenance of node %d on the monitor, "
 				 "retrying in %d ms.",

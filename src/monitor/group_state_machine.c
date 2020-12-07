@@ -95,7 +95,6 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	int groupId = activeNode->groupId;
 
 	AutoFailoverFormation *formation = GetFormation(formationId);
-	AutoFailoverNode *primaryNode = NULL;
 
 	List *nodesGroupList = AutoFailoverNodeGroup(formationId, groupId);
 	int nodesCount = list_length(nodesGroupList);
@@ -135,7 +134,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 		return ProceedGroupStateForPrimaryNode(activeNode);
 	}
 
-	primaryNode = GetPrimaryOrDemotedNodeInGroup(formationId, groupId);
+	AutoFailoverNode *primaryNode = GetPrimaryOrDemotedNodeInGroup(formationId, groupId);
 
 	/*
 	 * We want to have a primaryNode around for most operations, but also need
@@ -1213,7 +1212,6 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 			ListMostAdvancedStandbyNodes(nodesGroupList);
 
 		/* select a node to failover to */
-		AutoFailoverNode *selectedNode = NULL;
 
 		/*
 		 * standbyNodesGroupList contains at least 2 nodes: we're in the
@@ -1248,7 +1246,7 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 			ereport(ERROR, (errmsg("BUG: mostAdvancedNodeList is empty")));
 		}
 
-		selectedNode =
+		AutoFailoverNode *selectedNode =
 			SelectFailoverCandidateNode(&candidateList, primaryNode);
 
 		/* we might not have a selected candidate for failover yet */
@@ -1727,18 +1725,13 @@ static bool
 WalDifferenceWithin(AutoFailoverNode *secondaryNode,
 					AutoFailoverNode *otherNode, int64 delta)
 {
-	int64 walDifference = 0;
-	XLogRecPtr secondaryLsn = 0;
-	XLogRecPtr otherNodeLsn = 0;
-
-
 	if (secondaryNode == NULL || otherNode == NULL)
 	{
 		return true;
 	}
 
-	secondaryLsn = secondaryNode->reportedLSN;
-	otherNodeLsn = otherNode->reportedLSN;
+	XLogRecPtr secondaryLsn = secondaryNode->reportedLSN;
+	XLogRecPtr otherNodeLsn = otherNode->reportedLSN;
 
 	if (secondaryLsn == 0 || otherNodeLsn == 0)
 	{
@@ -1746,7 +1739,7 @@ WalDifferenceWithin(AutoFailoverNode *secondaryNode,
 		return false;
 	}
 
-	walDifference = Abs(otherNodeLsn - secondaryLsn);
+	int64 walDifference = Abs(otherNodeLsn - secondaryLsn);
 
 	return walDifference <= delta;
 }
@@ -1851,7 +1844,6 @@ static bool
 IsDrainTimeExpired(AutoFailoverNode *pgAutoFailoverNode)
 {
 	bool drainTimeExpired = false;
-	TimestampTz now = 0;
 
 	if (pgAutoFailoverNode == NULL ||
 		pgAutoFailoverNode->goalState != REPLICATION_STATE_DEMOTE_TIMEOUT)
@@ -1859,7 +1851,7 @@ IsDrainTimeExpired(AutoFailoverNode *pgAutoFailoverNode)
 		return false;
 	}
 
-	now = GetCurrentTimestamp();
+	TimestampTz now = GetCurrentTimestamp();
 	if (TimestampDifferenceExceeds(pgAutoFailoverNode->stateChangeTime,
 								   now,
 								   DrainTimeoutMs))

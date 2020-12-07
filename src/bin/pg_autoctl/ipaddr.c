@@ -60,7 +60,6 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 	struct addrinfo *ai;
 	struct addrinfo hints;
 
-	int error = 0;
 	bool couldConnect = false;
 
 	int sock;
@@ -72,10 +71,10 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 	hints.ai_socktype = SOCK_STREAM; /* we only want TCP sockets */
 	hints.ai_protocol = IPPROTO_TCP; /* we only want TCP sockets */
 
-	error = getaddrinfo(serviceName,
-						intToString(servicePort).strValue,
-						&hints,
-						&lookup);
+	int error = getaddrinfo(serviceName,
+							intToString(servicePort).strValue,
+							&hints,
+							&lookup);
 	if (error != 0)
 	{
 		log_warn("Failed to parse host name or IP address \"%s\": %s",
@@ -85,7 +84,6 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 
 	for (ai = lookup; ai; ai = ai->ai_next)
 	{
-		int err = -1;
 		char addr[BUFSIZE] = { 0 };
 
 		if (!ipaddr_sockaddr_to_string(ai, addr, sizeof(addr)))
@@ -105,7 +103,7 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 		/* connect timeout can be quite long by default */
 		log_info("Connecting to %s (port %d)", addr, servicePort);
 
-		err = connect(sock, ai->ai_addr, ai->ai_addrlen);
+		int err = connect(sock, ai->ai_addr, ai->ai_addrlen);
 
 		if (err < 0)
 		{
@@ -464,12 +462,11 @@ ipv6eq(struct sockaddr_in6 *a, struct sockaddr_in6 *b)
 bool
 findHostnameLocalAddress(const char *hostname, char *localIpAddress, int size)
 {
-	int error;
 	struct addrinfo *dns_lookup_addr;
 	struct addrinfo *dns_addr;
 	struct ifaddrs *ifaddrList, *ifaddr;
 
-	error = getaddrinfo(hostname, NULL, 0, &dns_lookup_addr);
+	int error = getaddrinfo(hostname, NULL, 0, &dns_lookup_addr);
 	if (error != 0)
 	{
 		log_warn("Failed to resolve DNS name \"%s\": %s",
@@ -615,12 +612,11 @@ ip_address_type(const char *hostname)
 bool
 findHostnameFromLocalIpAddress(char *localIpAddress, char *hostname, int size)
 {
-	int ret = 0;
 	char hbuf[NI_MAXHOST];
 	struct addrinfo *lookup, *ai;
 
 	/* parse ipv4 or ipv6 address using getaddrinfo() */
-	ret = getaddrinfo(localIpAddress, NULL, 0, &lookup);
+	int ret = getaddrinfo(localIpAddress, NULL, 0, &lookup);
 	if (ret != 0)
 	{
 		log_warn("Failed to resolve DNS name \"%s\": %s",
@@ -673,12 +669,11 @@ findHostnameFromLocalIpAddress(char *localIpAddress, char *hostname, int size)
 bool
 resolveHostnameForwardAndReverse(const char *hostname, char *ipaddr, int size)
 {
-	int error;
 	struct addrinfo *lookup, *ai;
 
 	bool foundHostnameFromAddress = false;
 
-	error = getaddrinfo(hostname, NULL, 0, &lookup);
+	int error = getaddrinfo(hostname, NULL, 0, &lookup);
 	if (error != 0)
 	{
 		log_warn("Failed to resolve DNS name \"%s\": %s",
@@ -689,7 +684,6 @@ resolveHostnameForwardAndReverse(const char *hostname, char *ipaddr, int size)
 	/* loop over the forward DNS results for hostname */
 	for (ai = lookup; ai; ai = ai->ai_next)
 	{
-		int ret;
 		char hbuf[NI_MAXHOST] = { 0 };
 
 		if (!ipaddr_sockaddr_to_string(ai, hbuf, sizeof(hbuf)))
@@ -699,8 +693,8 @@ resolveHostnameForwardAndReverse(const char *hostname, char *ipaddr, int size)
 		}
 
 		/* now reverse lookup (NI_NAMEREQD) the address with getnameinfo() */
-		ret = getnameinfo(ai->ai_addr, ai->ai_addrlen,
-						  hbuf, sizeof(hbuf), NULL, 0, NI_NAMEREQD);
+		int ret = getnameinfo(ai->ai_addr, ai->ai_addrlen,
+							  hbuf, sizeof(hbuf), NULL, 0, NI_NAMEREQD);
 
 		if (ret != 0)
 		{
@@ -769,9 +763,8 @@ ipaddr_getsockname(int sock, char *ipaddr, size_t size)
 	struct sockaddr_storage address = { 0 };
 	socklen_t sockaddrlen = sizeof(address);
 
-	int err = -1;
 
-	err = getsockname(sock, (struct sockaddr *) (&address), &sockaddrlen);
+	int err = getsockname(sock, (struct sockaddr *) (&address), &sockaddrlen);
 	if (err < 0)
 	{
 		log_warn("Failed to get IP address from socket: %m");

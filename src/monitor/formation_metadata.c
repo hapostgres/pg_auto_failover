@@ -61,15 +61,14 @@ GetFormation(const char *formationId)
 		CStringGetTextDatum(formationId), /* formationid */
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
-	int spiStatus = 0;
 
 	const char *selectQuery =
 		"SELECT * FROM " AUTO_FAILOVER_FORMATION_TABLE " WHERE formationId = $1";
 
 	SPI_connect();
 
-	spiStatus = SPI_execute_with_args(selectQuery, argCount, argTypes, argValues,
-									  NULL, false, 1);
+	int spiStatus = SPI_execute_with_args(selectQuery, argCount, argTypes, argValues,
+										  NULL, false, 1);
 	if (spiStatus != SPI_OK_SELECT)
 	{
 		elog(ERROR, "could not select from " AUTO_FAILOVER_FORMATION_TABLE);
@@ -138,14 +137,12 @@ create_formation(PG_FUNCTION_ARGS)
 	Name formationDBNameName = PG_GETARG_NAME(2);
 	bool formationOptionSecondary = PG_GETARG_BOOL(3);
 	int formationNumberSyncStandbys = PG_GETARG_INT32(4);
-	AutoFailoverFormation *formation = NULL;
-	Datum resultDatum = 0;
 
 	AddFormation(formationId, formationKind, formationDBNameName,
 				 formationOptionSecondary, formationNumberSyncStandbys);
 
-	formation = GetFormation(formationId);
-	resultDatum = AutoFailoverFormationGetDatum(fcinfo, formation);
+	AutoFailoverFormation *formation = GetFormation(formationId);
+	Datum resultDatum = AutoFailoverFormationGetDatum(fcinfo, formation);
 
 	PG_RETURN_DATUM(resultDatum);
 }
@@ -239,7 +236,6 @@ AddFormation(const char *formationId,
 	};
 
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
-	int spiStatus = 0;
 
 	const char *insertQuery =
 		"INSERT INTO " AUTO_FAILOVER_FORMATION_TABLE
@@ -248,8 +244,8 @@ AddFormation(const char *formationId,
 
 	SPI_connect();
 
-	spiStatus = SPI_execute_with_args(insertQuery, argCount, argTypes,
-									  argValues, NULL, false, 0);
+	int spiStatus = SPI_execute_with_args(insertQuery, argCount, argTypes,
+										  argValues, NULL, false, 0);
 
 	if (spiStatus != SPI_OK_INSERT)
 	{
@@ -277,16 +273,15 @@ RemoveFormation(const char *formationId)
 	};
 
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
-	int spiStatus = 0;
 
 	const char *deleteQuery =
 		"DELETE FROM " AUTO_FAILOVER_FORMATION_TABLE " WHERE formationid = $1";
 
 	SPI_connect();
 
-	spiStatus = SPI_execute_with_args(deleteQuery,
-									  argCount, argTypes, argValues,
-									  NULL, false, 0);
+	int spiStatus = SPI_execute_with_args(deleteQuery,
+										  argCount, argTypes, argValues,
+										  NULL, false, 0);
 
 	if (spiStatus != SPI_OK_DELETE)
 	{
@@ -325,7 +320,6 @@ SetFormationKind(const char *formationId, FormationKind kind)
 		CStringGetTextDatum(formationId)                  /* formationId */
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
-	int spiStatus = 0;
 
 	const char *updateQuery =
 		"UPDATE " AUTO_FAILOVER_FORMATION_TABLE
@@ -334,9 +328,9 @@ SetFormationKind(const char *formationId, FormationKind kind)
 
 	SPI_connect();
 
-	spiStatus = SPI_execute_with_args(updateQuery,
-									  argCount, argTypes, argValues,
-									  NULL, false, 0);
+	int spiStatus = SPI_execute_with_args(updateQuery,
+										  argCount, argTypes, argValues,
+										  NULL, false, 0);
 	if (spiStatus != SPI_OK_UPDATE)
 	{
 		elog(ERROR, "could not update " AUTO_FAILOVER_FORMATION_TABLE);
@@ -362,7 +356,6 @@ SetFormationDBName(const char *formationId, const char *dbname)
 		CStringGetTextDatum(formationId)     /* formationId */
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
-	int spiStatus = 0;
 
 	const char *updateQuery =
 		"UPDATE " AUTO_FAILOVER_FORMATION_TABLE
@@ -371,9 +364,9 @@ SetFormationDBName(const char *formationId, const char *dbname)
 
 	SPI_connect();
 
-	spiStatus = SPI_execute_with_args(updateQuery,
-									  argCount, argTypes, argValues,
-									  NULL, false, 0);
+	int spiStatus = SPI_execute_with_args(updateQuery,
+										  argCount, argTypes, argValues,
+										  NULL, false, 0);
 	if (spiStatus != SPI_OK_UPDATE)
 	{
 		elog(ERROR, "could not update " AUTO_FAILOVER_FORMATION_TABLE);
@@ -403,7 +396,6 @@ SetFormationOptSecondary(const char *formationId, bool optSecondary)
 		CStringGetTextDatum(formationId)     /* formationId */
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
-	int spiStatus = 0;
 
 	const char *updateQuery =
 		"UPDATE " AUTO_FAILOVER_FORMATION_TABLE
@@ -412,9 +404,9 @@ SetFormationOptSecondary(const char *formationId, bool optSecondary)
 
 	SPI_connect();
 
-	spiStatus = SPI_execute_with_args(updateQuery,
-									  argCount, argTypes, argValues,
-									  NULL, false, 0);
+	int spiStatus = SPI_execute_with_args(updateQuery,
+										  argCount, argTypes, argValues,
+										  NULL, false, 0);
 	if (spiStatus != SPI_OK_UPDATE)
 	{
 		elog(ERROR, "could not update " AUTO_FAILOVER_FORMATION_TABLE);
@@ -550,14 +542,12 @@ set_formation_number_sync_standbys(PG_FUNCTION_ARGS)
 	char *formationId = text_to_cstring(formationIdText);
 	int number_sync_standbys = PG_GETARG_INT32(1);
 
-	AutoFailoverNode *primaryNode = NULL;
 	AutoFailoverFormation *formation = GetFormation(formationId);
 
 	/* at the moment, only test with the number of standbys in group 0 */
 	int groupId = 0;
 	int standbyCount = 0;
 
-	bool success = false;
 
 	char message[BUFSIZE] = { 0 };
 
@@ -579,7 +569,8 @@ set_formation_number_sync_standbys(PG_FUNCTION_ARGS)
 				 errdetail("A non-negative integer is expected")));
 	}
 
-	primaryNode = GetPrimaryNodeInGroup(formation->formationId, groupId);
+	AutoFailoverNode *primaryNode = GetPrimaryNodeInGroup(formation->formationId,
+														  groupId);
 
 	if (primaryNode == NULL)
 	{
@@ -622,7 +613,7 @@ set_formation_number_sync_standbys(PG_FUNCTION_ARGS)
 	}
 
 	/* SetFormationNumberSyncStandbys reports ERROR when returning false */
-	success = SetFormationNumberSyncStandbys(formationId, number_sync_standbys);
+	bool success = SetFormationNumberSyncStandbys(formationId, number_sync_standbys);
 
 	/* and now ask the primary to change its settings */
 	LogAndNotifyMessage(
@@ -652,7 +643,6 @@ FormationNumSyncStandbyIsValid(AutoFailoverFormation *formation,
 							   int *standbyCount)
 {
 	ListCell *nodeCell = NULL;
-	List *standbyNodesGroupList = NIL;
 	int count = 0;
 
 	if (formation == NULL)
@@ -662,7 +652,7 @@ FormationNumSyncStandbyIsValid(AutoFailoverFormation *formation,
 				 errmsg("the given formation must not be NULL")));
 	}
 
-	standbyNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
+	List *standbyNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
 
 	foreach(nodeCell, standbyNodesGroupList)
 	{
@@ -711,7 +701,6 @@ SetFormationNumberSyncStandbys(const char *formationId, int numberSyncStandbys)
 		CStringGetTextDatum(formationId)      /* formationId */
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
-	int spiStatus = 0;
 
 	const char *updateQuery =
 		"UPDATE " AUTO_FAILOVER_FORMATION_TABLE
@@ -720,9 +709,9 @@ SetFormationNumberSyncStandbys(const char *formationId, int numberSyncStandbys)
 
 	SPI_connect();
 
-	spiStatus = SPI_execute_with_args(updateQuery,
-									  argCount, argTypes, argValues,
-									  NULL, false, 0);
+	int spiStatus = SPI_execute_with_args(updateQuery,
+										  argCount, argTypes, argValues,
+										  NULL, false, 0);
 	SPI_finish();
 
 	if (spiStatus != SPI_OK_UPDATE)
@@ -743,11 +732,8 @@ SetFormationNumberSyncStandbys(const char *formationId, int numberSyncStandbys)
 Datum
 AutoFailoverFormationGetDatum(FunctionCallInfo fcinfo, AutoFailoverFormation *formation)
 {
-	Datum resultDatum = 0;
 	TupleDesc resultDescriptor = NULL;
-	TypeFuncClass resultTypeClass = 0;
 
-	HeapTuple resultTuple = NULL;
 	Datum values[5];
 	bool isNulls[5];
 
@@ -767,14 +753,14 @@ AutoFailoverFormationGetDatum(FunctionCallInfo fcinfo, AutoFailoverFormation *fo
 	values[3] = BoolGetDatum(formation->opt_secondary);
 	values[4] = Int32GetDatum(formation->number_sync_standbys);
 
-	resultTypeClass = get_call_result_type(fcinfo, NULL, &resultDescriptor);
+	TypeFuncClass resultTypeClass = get_call_result_type(fcinfo, NULL, &resultDescriptor);
 	if (resultTypeClass != TYPEFUNC_COMPOSITE)
 	{
 		ereport(ERROR, (errmsg("return type must be a row type")));
 	}
 
-	resultTuple = heap_form_tuple(resultDescriptor, values, isNulls);
-	resultDatum = HeapTupleGetDatum(resultTuple);
+	HeapTuple resultTuple = heap_form_tuple(resultDescriptor, values, isNulls);
+	Datum resultDatum = HeapTupleGetDatum(resultTuple);
 
 	PG_RETURN_DATUM(resultDatum);
 }

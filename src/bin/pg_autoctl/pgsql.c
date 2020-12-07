@@ -541,8 +541,6 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 
 	while (!connectionOk)
 	{
-		int sleep = 0;
-
 		if (pgsql_retry_policy_expired(&(pgsql->retryPolicy)))
 		{
 			uint64_t now = time(NULL);
@@ -565,7 +563,7 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 		 * Now compute how much time to wait for this round, and increment how
 		 * many times we tried to connect already.
 		 */
-		sleep = pgsql_compute_connection_retry_sleep_time(&(pgsql->retryPolicy));
+		int sleep = pgsql_compute_connection_retry_sleep_time(&(pgsql->retryPolicy));
 
 		/* we have milliseconds, pg_usleep() wants microseconds */
 		(void) pg_usleep(sleep * 1000);
@@ -791,11 +789,9 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 						  const Oid *paramTypes, const char **paramValues,
 						  void *context, ParsePostgresResultCB *parseFun)
 {
-	PGconn *connection = NULL;
-	PGresult *result = NULL;
 	char debugParameters[BUFSIZE] = { 0 };
 
-	connection = pgsql_open_connection(pgsql);
+	PGconn *connection = pgsql_open_connection(pgsql);
 	if (connection == NULL)
 	{
 		return false;
@@ -836,8 +832,8 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 		log_debug("%s", debugParameters);
 	}
 
-	result = PQexecParams(connection, sql,
-						  paramCount, paramTypes, paramValues, NULL, NULL, 0);
+	PGresult *result = PQexecParams(connection, sql,
+									paramCount, paramTypes, paramValues, NULL, NULL, 0);
 	if (!is_response_ok(result))
 	{
 		char *sqlstate = PQresultErrorField(result, PG_DIAG_SQLSTATE);
@@ -1322,9 +1318,7 @@ BuildNodesArrayValues(NodeAddressArray *nodeArray,
 	}
 	else
 	{
-		int bytes = 0;
-
-		bytes = sformat(values, size, "values %s", buffer);
+		int bytes = sformat(values, size, "values %s", buffer);
 
 		if (bytes > size)
 		{
@@ -1351,7 +1345,6 @@ BuildNodesArrayValues(NodeAddressArray *nodeArray,
 bool
 pgsql_replication_slot_create_and_drop(PGSQL *pgsql, NodeAddressArray *nodeArray)
 {
-	int bytes;
 	char sql[2 * BUFSIZE] = { 0 };
 	char values[BUFSIZE] = { 0 };
 
@@ -1395,7 +1388,7 @@ pgsql_replication_slot_create_and_drop(PGSQL *pgsql, NodeAddressArray *nodeArray
 										   values, BUFSIZE);
 
 	/* add the computed ($1,$2), ... string to the query "template" */
-	bytes = sformat(sql, 2 * BUFSIZE, sqlTemplate, values);
+	int bytes = sformat(sql, 2 * BUFSIZE, sqlTemplate, values);
 
 	if (bytes > 2 * BUFSIZE)
 	{
@@ -1421,7 +1414,6 @@ pgsql_replication_slot_create_and_drop(PGSQL *pgsql, NodeAddressArray *nodeArray
 bool
 pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray)
 {
-	int bytes;
 	char sql[2 * BUFSIZE] = { 0 };
 	char values[BUFSIZE] = { 0 };
 
@@ -1466,7 +1458,7 @@ pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray)
 										   values, BUFSIZE);
 
 	/* add the computed ($1,$2), ... string to the query "template" */
-	bytes = sformat(sql, 2 * BUFSIZE, sqlTemplate, values);
+	int bytes = sformat(sql, 2 * BUFSIZE, sqlTemplate, values);
 
 	if (bytes > 2 * BUFSIZE)
 	{
@@ -1707,7 +1699,6 @@ bool
 pgsql_get_hba_file_path(PGSQL *pgsql, char *hbaFilePath, int maxPathLength)
 {
 	char *configValue = NULL;
-	int hbaFilePathLength = 0;
 
 	if (!pgsql_get_current_setting(pgsql, "hba_file", &configValue))
 	{
@@ -1715,7 +1706,7 @@ pgsql_get_hba_file_path(PGSQL *pgsql, char *hbaFilePath, int maxPathLength)
 		return false;
 	}
 
-	hbaFilePathLength = strlcpy(hbaFilePath, configValue, maxPathLength);
+	int hbaFilePathLength = strlcpy(hbaFilePath, configValue, maxPathLength);
 
 	if (hbaFilePathLength >= maxPathLength)
 	{
@@ -1777,11 +1768,9 @@ pgsql_create_database(PGSQL *pgsql, const char *dbname, const char *owner)
 {
 	char command[BUFSIZE];
 	char *escapedDBName, *escapedOwner;
-	PGconn *connection = NULL;
-	PGresult *result = NULL;
 
 	/* open a connection upfront since it is needed by PQescape functions */
-	connection = pgsql_open_connection(pgsql);
+	PGconn *connection = pgsql_open_connection(pgsql);
 	if (connection == NULL)
 	{
 		/* error message was logged in pgsql_open_connection */
@@ -1820,7 +1809,7 @@ pgsql_create_database(PGSQL *pgsql, const char *dbname, const char *owner)
 	PQfreemem(escapedDBName);
 	PQfreemem(escapedOwner);
 
-	result = PQexec(connection, command);
+	PGresult *result = PQexec(connection, command);
 
 	if (!is_response_ok(result))
 	{
@@ -1860,12 +1849,9 @@ bool
 pgsql_create_extension(PGSQL *pgsql, const char *name)
 {
 	char command[BUFSIZE];
-	char *escapedIdentifier;
-	PGconn *connection = NULL;
-	PGresult *result = NULL;
 
 	/* open a connection upfront since it is needed by PQescape functions */
-	connection = pgsql_open_connection(pgsql);
+	PGconn *connection = pgsql_open_connection(pgsql);
 	if (connection == NULL)
 	{
 		/* error message was logged in pgsql_open_connection */
@@ -1873,7 +1859,7 @@ pgsql_create_extension(PGSQL *pgsql, const char *name)
 	}
 
 	/* escape the dbname */
-	escapedIdentifier = PQescapeIdentifier(connection, name, strlen(name));
+	char *escapedIdentifier = PQescapeIdentifier(connection, name, strlen(name));
 	if (escapedIdentifier == NULL)
 	{
 		log_error("Failed to create extension \"%s\": %s", name,
@@ -1888,7 +1874,7 @@ pgsql_create_extension(PGSQL *pgsql, const char *name)
 	PQfreemem(escapedIdentifier);
 	log_debug("Running command on Postgres: %s;", command);
 
-	result = PQexec(connection, command);
+	PGresult *result = PQexec(connection, command);
 
 	if (!is_response_ok(result))
 	{
@@ -1925,14 +1911,8 @@ bool
 pgsql_create_user(PGSQL *pgsql, const char *userName, const char *password,
 				  bool login, bool superuser, bool replication, int connlimit)
 {
-	PGconn *connection = NULL;
-	PGresult *result = NULL;
-	PQExpBuffer query = NULL;
-	char *escapedIdentifier = NULL;
-	PQnoticeProcessor previousNoticeProcessor = NULL;
-
 	/* open a connection upfront since it is needed by PQescape functions */
-	connection = pgsql_open_connection(pgsql);
+	PGconn *connection = pgsql_open_connection(pgsql);
 	if (connection == NULL)
 	{
 		/* error message was logged in pgsql_open_connection */
@@ -1940,8 +1920,8 @@ pgsql_create_user(PGSQL *pgsql, const char *userName, const char *password,
 	}
 
 	/* escape the username */
-	query = createPQExpBuffer();
-	escapedIdentifier = PQescapeIdentifier(connection, userName, strlen(userName));
+	PQExpBuffer query = createPQExpBuffer();
+	char *escapedIdentifier = PQescapeIdentifier(connection, userName, strlen(userName));
 	if (escapedIdentifier == NULL)
 	{
 		log_error("Failed to create user \"%s\": %s", userName,
@@ -2014,10 +1994,10 @@ pgsql_create_user(PGSQL *pgsql, const char *userName, const char *password,
 	 * NOTICE:  not propagating CREATE ROLE/USER commands to worker nodes
 	 * HINT:  Connect to worker nodes directly...
 	 */
-	previousNoticeProcessor =
+	PQnoticeProcessor previousNoticeProcessor =
 		PQsetNoticeProcessor(connection, &pgAutoCtlDebugNoticeProcessor, NULL);
 
-	result = PQexec(connection, query->data);
+	PGresult *result = PQexec(connection, query->data);
 	destroyPQExpBuffer(query);
 
 	if (!is_response_ok(result))
@@ -2176,7 +2156,6 @@ hostname_from_uri(const char *pguri,
 bool
 validate_connection_string(const char *connectionString)
 {
-	PQconninfoOption *connInfo = NULL;
 	char *errorMessage = NULL;
 
 	int length = strlen(connectionString);
@@ -2188,7 +2167,7 @@ validate_connection_string(const char *connectionString)
 		return false;
 	}
 
-	connInfo = PQconninfoParse(connectionString, &errorMessage);
+	PQconninfoOption *connInfo = PQconninfoParse(connectionString, &errorMessage);
 	if (connInfo == NULL)
 	{
 		log_error("Failed to parse connection string \"%s\": %s ",
@@ -2569,10 +2548,8 @@ pgsql_identify_system(PGSQL *pgsql)
 	IdentifySystem context = { 0 };
 	char *sql = "IDENTIFY_SYSTEM";
 
-	PGconn *connection = NULL;
-	PGresult *result = NULL;
 
-	connection = pgsql_open_connection(pgsql);
+	PGconn *connection = pgsql_open_connection(pgsql);
 	if (connection == NULL)
 	{
 		/* error message was logged in pgsql_open_connection */
@@ -2580,7 +2557,7 @@ pgsql_identify_system(PGSQL *pgsql)
 	}
 
 	/* extended query protocol not supported in a replication connection */
-	result = PQexec(connection, sql);
+	PGresult *result = PQexec(connection, sql);
 
 	if (!is_response_ok(result))
 	{
@@ -2623,7 +2600,6 @@ static void
 parseIdentifySystem(void *ctx, PGresult *result)
 {
 	IdentifySystem *context = (IdentifySystem *) ctx;
-	char *value = NULL;
 
 	if (PQnfields(result) != 4)
 	{
@@ -2645,7 +2621,7 @@ parseIdentifySystem(void *ctx, PGresult *result)
 		return;
 	}
 
-	value = PQgetvalue(result, 0, 0);
+	char *value = PQgetvalue(result, 0, 0);
 	if (!stringToUInt64(value, &(context->system_identifier)))
 	{
 		log_error("Failed to parse system_identifier \"%s\"", value);
@@ -2679,12 +2655,11 @@ parseIdentifySystem(void *ctx, PGresult *result)
 bool
 pgsql_listen(PGSQL *pgsql, char *channels[])
 {
-	PGconn *connection = NULL;
 	PGresult *result = NULL;
 	char sql[BUFSIZE];
 
 	/* open a connection upfront since it is needed by PQescape functions */
-	connection = pgsql_open_connection(pgsql);
+	PGconn *connection = pgsql_open_connection(pgsql);
 	if (connection == NULL)
 	{
 		/* error message was logged in pgsql_open_connection */
@@ -2735,14 +2710,11 @@ bool
 pgsql_alter_extension_update_to(PGSQL *pgsql,
 								const char *extname, const char *version)
 {
-	int n = 0;
 	char command[BUFSIZE];
 	char *escapedIdentifier, *escapedVersion;
-	PGconn *connection = NULL;
-	PGresult *result = NULL;
 
 	/* open a connection upfront since it is needed by PQescape functions */
-	connection = pgsql_open_connection(pgsql);
+	PGconn *connection = pgsql_open_connection(pgsql);
 	if (connection == NULL)
 	{
 		/* error message was logged in pgsql_open_connection */
@@ -2771,8 +2743,8 @@ pgsql_alter_extension_update_to(PGSQL *pgsql,
 	}
 
 	/* now build the SQL command */
-	n = sformat(command, BUFSIZE, "ALTER EXTENSION %s UPDATE TO %s",
-				escapedIdentifier, escapedVersion);
+	int n = sformat(command, BUFSIZE, "ALTER EXTENSION %s UPDATE TO %s",
+					escapedIdentifier, escapedVersion);
 
 	if (n >= BUFSIZE)
 	{
@@ -2787,7 +2759,7 @@ pgsql_alter_extension_update_to(PGSQL *pgsql,
 
 	log_debug("Running command on Postgres: %s;", command);
 
-	result = PQexec(connection, command);
+	PGresult *result = PQexec(connection, command);
 
 	if (!is_response_ok(result))
 	{

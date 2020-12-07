@@ -66,7 +66,6 @@ file_exists(const char *filename)
 bool
 directory_exists(const char *path)
 {
-	bool result = false;
 	struct stat info;
 
 	if (!file_exists(path))
@@ -80,7 +79,7 @@ directory_exists(const char *path)
 		return false;
 	}
 
-	result = (info.st_mode & S_IFMT) == S_IFDIR;
+	bool result = (info.st_mode & S_IFMT) == S_IFDIR;
 	return result;
 }
 
@@ -137,14 +136,13 @@ FILE *
 fopen_with_umask(const char *filePath, const char *modes, int flags, mode_t umask)
 {
 	int fileDescriptor = open(filePath, flags, umask);
-	FILE *fileStream = NULL;
 	if (fileDescriptor == -1)
 	{
 		log_error("Failed to open file \"%s\": %m", filePath);
 		return NULL;
 	}
 
-	fileStream = fdopen(fileDescriptor, modes);
+	FILE *fileStream = fdopen(fileDescriptor, modes);
 	if (fileStream == NULL)
 	{
 		log_error("Failed to open file \"%s\": %m", filePath);
@@ -247,10 +245,8 @@ append_to_file(char *data, long fileSize, const char *filePath)
 bool
 read_file_if_exists(const char *filePath, char **contents, long *fileSize)
 {
-	FILE *fileStream = NULL;
-
 	/* open a file */
-	fileStream = fopen_read_only(filePath);
+	FILE *fileStream = fopen_read_only(filePath);
 
 	if (fileStream == NULL)
 	{
@@ -276,10 +272,8 @@ read_file_if_exists(const char *filePath, char **contents, long *fileSize)
 bool
 read_file(const char *filePath, char **contents, long *fileSize)
 {
-	FILE *fileStream = NULL;
-
 	/* open a file */
-	fileStream = fopen_read_only(filePath);
+	FILE *fileStream = fopen_read_only(filePath);
 	if (fileStream == NULL)
 	{
 		log_error("Failed to open file \"%s\": %m", filePath);
@@ -298,8 +292,6 @@ static bool
 read_file_internal(FILE *fileStream,
 				   const char *filePath, char **contents, long *fileSize)
 {
-	char *data = NULL;
-
 	/* get the file size */
 	if (fseek(fileStream, 0, SEEK_END) != 0)
 	{
@@ -324,7 +316,7 @@ read_file_internal(FILE *fileStream,
 	}
 
 	/* read the contents */
-	data = malloc(*fileSize + 1);
+	char *data = malloc(*fileSize + 1);
 	if (data == NULL)
 	{
 		log_error("Failed to allocate %ld bytes", *fileSize);
@@ -431,7 +423,6 @@ duplicate_file(char *sourcePath, char *destinationPath)
 	char *fileContents;
 	long fileSize;
 	struct stat sourceFileStat;
-	bool foundError = false;
 
 	if (!read_file(sourcePath, &fileContents, &fileSize))
 	{
@@ -446,7 +437,7 @@ duplicate_file(char *sourcePath, char *destinationPath)
 		return false;
 	}
 
-	foundError = !write_file(fileContents, fileSize, destinationPath);
+	bool foundError = !write_file(fileContents, fileSize, destinationPath);
 
 	free(fileContents);
 
@@ -561,7 +552,6 @@ search_path_first(const char *filename, char *result, int logLevel)
 bool
 search_path(const char *filename, SearchPath *result)
 {
-	char *path;
 	char pathlist[MAXPATHSIZE] = { 0 };
 
 	/* we didn't count nor find anything yet */
@@ -574,7 +564,7 @@ search_path(const char *filename, SearchPath *result)
 		return false;
 	}
 
-	path = pathlist;
+	char *path = pathlist;
 
 	while (path != NULL)
 	{
@@ -773,7 +763,6 @@ normalize_filename(const char *filename, char *dst, int size)
 int
 fformat(FILE *stream, const char *fmt, ...)
 {
-	int len;
 	va_list args;
 
 	if (stream == NULL || fmt == NULL)
@@ -783,7 +772,7 @@ fformat(FILE *stream, const char *fmt, ...)
 	}
 
 	va_start(args, fmt);
-	len = pg_vfprintf(stream, fmt, args);
+	int len = pg_vfprintf(stream, fmt, args);
 	va_end(args);
 	return len;
 }
@@ -795,7 +784,6 @@ fformat(FILE *stream, const char *fmt, ...)
 int
 sformat(char *str, size_t count, const char *fmt, ...)
 {
-	int len;
 	va_list args;
 
 	if (str == NULL || fmt == NULL)
@@ -805,7 +793,7 @@ sformat(char *str, size_t count, const char *fmt, ...)
 	}
 
 	va_start(args, fmt);
-	len = pg_vsnprintf(str, count, fmt, args);
+	int len = pg_vsnprintf(str, count, fmt, args);
 	va_end(args);
 
 	if (len >= count)
@@ -870,15 +858,13 @@ init_ps_buffer(int argc, char **argv)
 void
 set_ps_title(const char *title)
 {
-	int n;
-
 	if (ps_buffer == NULL)
 	{
 		/* noop */
 		return;
 	}
 
-	n = sformat(ps_buffer, ps_buffer_size, "%s", title);
+	int n = sformat(ps_buffer, ps_buffer_size, "%s", title);
 
 	/* pad our process title string */
 	for (size_t i = n; i < ps_buffer_size; i++)

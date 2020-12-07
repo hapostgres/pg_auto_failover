@@ -139,16 +139,13 @@ cli_show_cidr(int argc, char **argv)
 static void
 cli_show_lookup(int argc, char **argv)
 {
-	char *hostname;
-	IPType ipType = IPTYPE_NONE;
-
 	if (argc != 1)
 	{
 		commandline_print_usage(&do_show_lookup_command, stderr);
 		exit(EXIT_CODE_BAD_ARGS);
 	}
-	hostname = argv[0];
-	ipType = ip_address_type(hostname);
+	char *hostname = argv[0];
+	IPType ipType = ip_address_type(hostname);
 
 	if (ipType == IPTYPE_NONE)
 	{
@@ -303,8 +300,6 @@ cli_show_reverse(int argc, char **argv)
 {
 	char ipaddr[BUFSIZE] = { 0 };
 
-	char *hostname;
-	IPType ipType = IPTYPE_NONE;
 
 	if (argc != 1)
 	{
@@ -312,8 +307,8 @@ cli_show_reverse(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	hostname = argv[0];
-	ipType = ip_address_type(hostname);
+	char *hostname = argv[0];
+	IPType ipType = ip_address_type(hostname);
 
 	if (ipType != IPTYPE_NONE)
 	{

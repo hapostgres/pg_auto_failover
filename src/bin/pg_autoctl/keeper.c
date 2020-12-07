@@ -861,7 +861,6 @@ keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 
 		char upstreamConfPath[MAXPGPATH] = { 0 };
 
-		bool replicationSettingsHaveChanged = false;
 
 		char *currentConfContents = NULL;
 		long currentConfSize = 0L;
@@ -937,7 +936,7 @@ keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 			return false;
 		}
 
-		replicationSettingsHaveChanged =
+		bool replicationSettingsHaveChanged =
 			currentConfContents == NULL ||
 			strcmp(newConfContents, currentConfContents) != 0;
 
@@ -1274,7 +1273,6 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 	while (!pgsql_retry_policy_expired(&retryPolicy))
 	{
 		bool mayRetry = false;
-		int sleepTimeMs = 0;
 
 		/*
 		 * When registering to the monitor, we get assigned a nodeId, that we
@@ -1325,7 +1323,7 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 			goto rollback;
 		}
 
-		sleepTimeMs = pgsql_compute_connection_retry_sleep_time(&retryPolicy);
+		int sleepTimeMs = pgsql_compute_connection_retry_sleep_time(&retryPolicy);
 
 		log_warn("Failed to register node %s:%d in group %d of "
 				 "formation \"%s\" with initial state \"%s\" "
@@ -1516,8 +1514,6 @@ keeper_state_as_json(Keeper *keeper, char *json, int size)
 
 	JSON_Object *jsRoot = json_value_get_object(js);
 
-	char *serialized_string = NULL;
-	int len;
 
 	pg_setup_as_json(&(keeper->postgres.postgresSetup), jsPostgres);
 	keeperStateAsJSON(&(keeper->state), jsKeeperState);
@@ -1525,9 +1521,9 @@ keeper_state_as_json(Keeper *keeper, char *json, int size)
 	json_object_set_value(jsRoot, "postgres", jsPostgres);
 	json_object_set_value(jsRoot, "state", jsKeeperState);
 
-	serialized_string = json_serialize_to_string_pretty(js);
+	char *serialized_string = json_serialize_to_string_pretty(js);
 
-	len = strlcpy(json, serialized_string, size);
+	int len = strlcpy(json, serialized_string, size);
 
 	json_free_serialized_string(serialized_string);
 	json_value_free(js);
@@ -1779,7 +1775,6 @@ keeper_set_node_metadata(Keeper *keeper, KeeperConfig *oldConfig)
 {
 	KeeperConfig *config = &(keeper->config);
 	KeeperStateData keeperState = { 0 };
-	int nodeId = -1;
 
 	if (!keeper_state_read(&keeperState, keeper->config.pathnames.state))
 	{
@@ -1787,7 +1782,7 @@ keeper_set_node_metadata(Keeper *keeper, KeeperConfig *oldConfig)
 		return false;
 	}
 
-	nodeId = keeperState.current_node_id;
+	int nodeId = keeperState.current_node_id;
 
 	if (streq(oldConfig->name, config->name) &&
 		streq(oldConfig->hostname, config->hostname) &&

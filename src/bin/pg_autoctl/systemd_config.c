@@ -78,7 +78,6 @@
 void
 systemd_config_init(SystemdServiceConfig *config, const char *pgdata)
 {
-	struct passwd *pw;
 	char *user = pg_setup_get_username(&(config->pgSetup));
 	IniOption systemdOptions[] = SET_INI_OPTIONS_ARRAY(config);
 
@@ -92,7 +91,7 @@ systemd_config_init(SystemdServiceConfig *config, const char *pgdata)
 	 * like that, at all. Let's assign WorkingDirectory to a safe place, like
 	 * the HOME of the USER running the service.
 	 */
-	pw = getpwnam(user);
+	struct passwd *pw = getpwnam(user);
 	if (pw)
 	{
 		log_debug("username found in passwd: %s's HOME is \"%s\"",

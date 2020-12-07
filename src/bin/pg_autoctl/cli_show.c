@@ -703,7 +703,6 @@ cli_show_standby_names(int argc, char **argv)
 	KeeperConfig config = keeperOptions;
 	Monitor monitor = { 0 };
 	char synchronous_standby_names[BUFSIZE] = { 0 };
-	pgAutoCtlNodeRole role = PG_AUTOCTL_ROLE_UNKNOWN;
 
 	/* change the default group when it's not been given on the command */
 	if (config.groupId == -1)
@@ -717,7 +716,7 @@ cli_show_standby_names(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	role = ProbeConfigurationFileRole(config.pathnames.config);
+	pgAutoCtlNodeRole role = ProbeConfigurationFileRole(config.pathnames.config);
 
 	if (role == PG_AUTOCTL_ROLE_KEEPER)
 	{
@@ -1304,9 +1303,8 @@ static void
 cli_show_file(int argc, char **argv)
 {
 	KeeperConfig config = keeperOptions;
-	pgAutoCtlNodeRole role = PG_AUTOCTL_ROLE_UNKNOWN;
 
-	role = ProbeConfigurationFileRole(config.pathnames.config);
+	pgAutoCtlNodeRole role = ProbeConfigurationFileRole(config.pathnames.config);
 
 	switch (showFileOptions.selection)
 	{
@@ -1314,7 +1312,6 @@ cli_show_file(int argc, char **argv)
 		{
 			if (outputJSON)
 			{
-				char *serialized_string = NULL;
 				JSON_Value *js = json_value_init_object();
 				JSON_Object *root = json_value_get_object(js);
 
@@ -1328,7 +1325,7 @@ cli_show_file(int argc, char **argv)
 
 				json_object_set_string(root, "pid", config.pathnames.pid);
 
-				serialized_string = json_serialize_to_string_pretty(js);
+				char *serialized_string = json_serialize_to_string_pretty(js);
 
 				fformat(stdout, "%s\n", serialized_string);
 

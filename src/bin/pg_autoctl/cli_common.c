@@ -1240,10 +1240,8 @@ keeper_cli_print_version(int argc, char **argv)
 void
 cli_pprint_json(JSON_Value *js)
 {
-	char *serialized_string;
-
 	/* output our nice JSON object, pretty printed please */
-	serialized_string = json_serialize_to_string_pretty(js);
+	char *serialized_string = json_serialize_to_string_pretty(js);
 	fformat(stdout, "%s\n", serialized_string);
 
 	/* free intermediate memory */

@@ -318,19 +318,17 @@ bool
 monitor_config_write_file(MonitorConfig *config)
 {
 	const char *filePath = config->pathnames.config;
-	bool success = false;
-	FILE *fileStream = NULL;
 
 	log_trace("monitor_config_write_file \"%s\"", filePath);
 
-	fileStream = fopen_with_umask(filePath, "w", FOPEN_FLAGS_W, 0644);
+	FILE *fileStream = fopen_with_umask(filePath, "w", FOPEN_FLAGS_W, 0644);
 	if (fileStream == NULL)
 	{
 		/* errors have already been logged */
 		return false;
 	}
 
-	success = monitor_config_write(fileStream, config);
+	bool success = monitor_config_write(fileStream, config);
 
 	if (fclose(fileStream) == EOF)
 	{

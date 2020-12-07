@@ -334,7 +334,6 @@ int
 keeper_cli_keeper_setup_getopts(int argc, char **argv)
 {
 	KeeperConfig options = { 0 };
-	int optind;
 
 	SSLCommandLineOptions sslCommandLineOptions = SSL_CLI_UNKNOWN;
 
@@ -380,11 +379,11 @@ keeper_cli_keeper_setup_getopts(int argc, char **argv)
 	 */
 	unsetenv("POSIXLY_CORRECT");
 
-	optind = cli_common_keeper_getopts(argc, argv,
-									   long_options,
-									   "C:D:H:p:l:U:A:Sd:n:f:m:MRVvqhP:r:xsN",
-									   &options,
-									   &sslCommandLineOptions);
+	int optind = cli_common_keeper_getopts(argc, argv,
+										   long_options,
+										   "C:D:H:p:l:U:A:Sd:n:f:m:MRVvqhP:r:xsN",
+										   &options,
+										   &sslCommandLineOptions);
 
 	/* publish our option parsing in the global variable */
 	keeperOptions = options;

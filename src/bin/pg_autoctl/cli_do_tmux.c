@@ -581,7 +581,6 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 		char extra_commands[BUFSIZE] = { 0 };
 
 		char *extraLines[BUFSIZE];
-		int lineCount = 0;
 		int lineNumber = 0;
 
 		if (!get_env_copy("TMUX_EXTRA_COMMANDS", extra_commands, BUFSIZE))
@@ -590,7 +589,7 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 
-		lineCount = splitLines(extra_commands, extraLines, BUFSIZE);
+		int lineCount = splitLines(extra_commands, extraLines, BUFSIZE);
 
 		for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
 		{
@@ -606,8 +605,6 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 bool
 tmux_start_server(const char *root, const char *scriptName)
 {
-	Program program;
-
 	char *args[8];
 	int argsIndex = 0;
 
@@ -639,7 +636,7 @@ tmux_start_server(const char *root, const char *scriptName)
 	args[argsIndex] = NULL;
 
 	/* we do not want to call setsid() when running this program. */
-	program = initialize_program(args, false);
+	Program program = initialize_program(args, false);
 
 	program.capture = false;    /* don't capture output */
 	program.tty = true;         /* allow sharing the parent's tty */
@@ -753,11 +750,10 @@ tmux_stop_pg_autoctl(TmuxOptions *options)
 bool
 tmux_has_session(const char *tmux_path, const char *sessionName)
 {
-	Program program;
 	int returnCode;
 	char command[BUFSIZE] = { 0 };
 
-	program = run_program(tmux_path, "has-session", "-t", sessionName, NULL);
+	Program program = run_program(tmux_path, "has-session", "-t", sessionName, NULL);
 	returnCode = program.returnCode;
 
 	(void) snprintf_program_command_line(&program, command, BUFSIZE);
@@ -806,7 +802,6 @@ tmux_has_session(const char *tmux_path, const char *sessionName)
 bool
 tmux_kill_session(TmuxOptions *options)
 {
-	Program program;
 	char tmux[MAXPGPATH] = { 0 };
 	char command[BUFSIZE] = { 0 };
 	char sessionName[BUFSIZE] = { 0 };
@@ -827,7 +822,7 @@ tmux_kill_session(TmuxOptions *options)
 		return true;
 	}
 
-	program = run_program(tmux, "kill-session", "-t", sessionName, NULL);
+	Program program = run_program(tmux, "kill-session", "-t", sessionName, NULL);
 
 	(void) snprintf_program_command_line(&program, command, BUFSIZE);
 	log_info("%s", command);
@@ -1167,7 +1162,6 @@ cli_do_tmux_wait(int argc, char **argv)
 	{
 		int timeout = 30;
 		bool ready = false;
-		Program program;
 		char pgdata[MAXPGPATH] = { 0 };
 
 		sformat(pgdata, sizeof(pgdata), "%s/%s", options.root, nodeName);
@@ -1175,8 +1169,8 @@ cli_do_tmux_wait(int argc, char **argv)
 		/* leave some time for initdb and stuff */
 		sleep(2);
 
-		program = run_program(pg_autoctl_program, "do", "pgsetup", "wait",
-							  "--pgdata", pgdata, NULL);
+		Program program = run_program(pg_autoctl_program, "do", "pgsetup", "wait",
+									  "--pgdata", pgdata, NULL);
 
 		if (program.returnCode != 0)
 		{

@@ -47,17 +47,15 @@ char *
 regexp_first_match(const char *string, const char *regex)
 {
 	regex_t compiledRegex;
-	int status = 0;
 
 	regmatch_t m[RE_MATCH_COUNT];
-	int matchStatus;
 
 	if (string == NULL)
 	{
 		return NULL;
 	}
 
-	status = regcomp(&compiledRegex, regex, REG_EXTENDED | REG_NEWLINE);
+	int status = regcomp(&compiledRegex, regex, REG_EXTENDED | REG_NEWLINE);
 
 	if (status != 0)
 	{
@@ -85,7 +83,7 @@ regexp_first_match(const char *string, const char *regex)
 	 * regexec returns 0 if the regular expression matches; otherwise, it
 	 * returns a nonzero value.
 	 */
-	matchStatus = regexec(&compiledRegex, string, RE_MATCH_COUNT, m, 0);
+	int matchStatus = regexec(&compiledRegex, string, RE_MATCH_COUNT, m, 0);
 	regfree(&compiledRegex);
 
 	/* We're interested into 1. re matches 2. captured at least one group */
@@ -171,10 +169,9 @@ parse_controldata_field_uint32(const char *controlDataString,
 							   uint32_t *dest)
 {
 	char regex[BUFSIZE];
-	char *match;
 
 	sformat(regex, BUFSIZE, "^%s: *([0-9]+)$", fieldName);
-	match = regexp_first_match(controlDataString, regex);
+	char *match = regexp_first_match(controlDataString, regex);
 
 	if (match == NULL)
 	{
@@ -204,10 +201,9 @@ parse_controldata_field_uint64(const char *controlDataString,
 							   uint64_t *dest)
 {
 	char regex[BUFSIZE];
-	char *match;
 
 	sformat(regex, BUFSIZE, "^%s: *([0-9]+)$", fieldName);
-	match = regexp_first_match(controlDataString, regex);
+	char *match = regexp_first_match(controlDataString, regex);
 
 	if (match == NULL)
 	{
@@ -237,10 +233,9 @@ parse_controldata_field_lsn(const char *controlDataString,
 							char lsn[])
 {
 	char regex[BUFSIZE];
-	char *match;
 
 	sformat(regex, BUFSIZE, "^%s: *([0-9A-F]+/[0-9A-F]+)$", fieldName);
-	match = regexp_first_match(controlDataString, regex);
+	char *match = regexp_first_match(controlDataString, regex);
 
 	if (match == NULL)
 	{
@@ -264,8 +259,6 @@ bool
 parse_state_notification_message(CurrentNodeState *nodeState,
 								 const char *message)
 {
-	char *str;
-	double number;
 	JSON_Value *json = json_parse_string(message);
 	JSON_Object *jsobj = json_value_get_object(json);
 
@@ -277,7 +270,7 @@ parse_state_notification_message(CurrentNodeState *nodeState,
 		return false;
 	}
 
-	str = (char *) json_object_get_string(jsobj, "type");
+	char *str = (char *) json_object_get_string(jsobj, "type");
 
 	if (strcmp(str, "state") != 0)
 	{
@@ -296,7 +289,7 @@ parse_state_notification_message(CurrentNodeState *nodeState,
 	}
 	strlcpy(nodeState->formation, str, sizeof(nodeState->formation));
 
-	number = json_object_get_number(jsobj, "groupId");
+	double number = json_object_get_number(jsobj, "groupId");
 	nodeState->groupId = (int) number;
 
 	number = json_object_get_number(jsobj, "nodeId");
@@ -746,8 +739,6 @@ parseNodesArray(const char *nodesJSON,
 				NodeAddressArray *nodesArray,
 				int nodeId)
 {
-	JSON_Value *json = NULL;
-	JSON_Array *jsArray = NULL;
 	JSON_Value *template =
 		json_parse_string("[{"
 						  "\"node_id\": 0,"
@@ -757,11 +748,10 @@ parseNodesArray(const char *nodesJSON,
 						  "\"node_port\": 0,"
 						  "\"node_is_primary\": false"
 						  "}]");
-	int len = -1;
 	int nodesArrayIndex = 0;
 	int primaryCount = 0;
 
-	json = json_parse_string(nodesJSON);
+	JSON_Value *json = json_parse_string(nodesJSON);
 
 	/* validate the JSON input as an array of object with required fields */
 	if (json_validate(template, json) == JSONFailure)
@@ -774,8 +764,8 @@ parseNodesArray(const char *nodesJSON,
 		return false;
 	}
 
-	jsArray = json_value_get_array(json);
-	len = json_array_get_count(jsArray);
+	JSON_Array *jsArray = json_value_get_array(json);
+	int len = json_array_get_count(jsArray);
 
 	if (NODE_ARRAY_MAX_COUNT < len)
 	{

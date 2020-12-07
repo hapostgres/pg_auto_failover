@@ -34,7 +34,6 @@
 void
 LogAndNotifyMessage(char *message, size_t size, const char *fmt, ...)
 {
-	int n;
 	va_list args;
 
 	va_start(args, fmt);
@@ -45,7 +44,7 @@ LogAndNotifyMessage(char *message, size_t size, const char *fmt, ...)
 	 * do not write before the allocated buffer.
 	 *
 	 */
-	n = vsnprintf(message, size - 2, fmt, args); /* IGNORE-BANNED */
+	int n = vsnprintf(message, size - 2, fmt, args); /* IGNORE-BANNED */
 	va_end(args);
 
 	if (n < 0)
@@ -67,13 +66,12 @@ LogAndNotifyMessage(char *message, size_t size, const char *fmt, ...)
 int64
 NotifyStateChange(AutoFailoverNode *node, char *description)
 {
-	int64 eventid;
 	StringInfo payload = makeStringInfo();
 
 	/*
 	 * Insert the event in our events table.
 	 */
-	eventid = InsertEvent(node, description);
+	int64 eventid = InsertEvent(node, description);
 
 	/* build a json object from the notification pieces */
 	appendStringInfoChar(payload, '{');
@@ -157,7 +155,6 @@ InsertEvent(AutoFailoverNode *node, char *description)
 	};
 
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
-	int spiStatus = 0;
 	int64 eventId = 0;
 
 	const char *insertQuery =
@@ -170,18 +167,17 @@ InsertEvent(AutoFailoverNode *node, char *description)
 
 	SPI_connect();
 
-	spiStatus = SPI_execute_with_args(insertQuery, argCount, argTypes,
-									  argValues, NULL, false, 0);
+	int spiStatus = SPI_execute_with_args(insertQuery, argCount, argTypes,
+										  argValues, NULL, false, 0);
 
 	if (spiStatus == SPI_OK_INSERT_RETURNING && SPI_processed > 0)
 	{
 		bool isNull = false;
-		Datum eventIdDatum = 0;
 
-		eventIdDatum = SPI_getbinval(SPI_tuptable->vals[0],
-									 SPI_tuptable->tupdesc,
-									 1,
-									 &isNull);
+		Datum eventIdDatum = SPI_getbinval(SPI_tuptable->vals[0],
+										   SPI_tuptable->tupdesc,
+										   1,
+										   &isNull);
 
 		eventId = DatumGetInt64(eventIdDatum);
 	}
