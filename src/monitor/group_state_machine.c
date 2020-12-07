@@ -215,48 +215,27 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 * when report_lsn and the promotion has been done already:
 	 *      report_lsn -> secondary
 	 *
+	 *
+	 * Let the main primary loop account for allSecondariesAreHealthy and only
+	 * then decide to assign PRIMARY to the primaryNode.
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_REPORT_LSN) &&
 		(IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
 		 IsCurrentState(primaryNode, REPLICATION_STATE_JOIN_PRIMARY)) &&
 		IsHealthy(primaryNode))
 	{
-		/*
-		 * The state PRIMARY embeds the assumption that it's possible to
-		 * failover. A node with candidate Priority of zero can not be the
-		 * target of a failover, so might reach SECONDARY without allowing to
-		 * get out of WAIT_PRIMARY or JOIN_PRIMARY state.
-		 */
-		if (activeNode->candidatePriority > 0)
-		{
-			char message[BUFSIZE] = { 0 };
+		char message[BUFSIZE] = { 0 };
 
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Setting goal state of " NODE_FORMAT
-				" to secondary after " NODE_FORMAT
-				" got selected as the failover candidate.",
-				NODE_FORMAT_ARGS(activeNode),
-				NODE_FORMAT_ARGS(primaryNode));
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of " NODE_FORMAT
+			" to secondary after " NODE_FORMAT
+			" converged to %s and has been marked healthy.",
+			NODE_FORMAT_ARGS(activeNode),
+			NODE_FORMAT_ARGS(primaryNode),
+			ReplicationStateGetName(primaryNode->reportedState));
 
-			AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
-			AssignGoalState(primaryNode, REPLICATION_STATE_PRIMARY, message);
-		}
-		else
-		{
-			char message[BUFSIZE] = { 0 };
-
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Setting goal state of " NODE_FORMAT
-				" to secondary after " NODE_FORMAT
-				" converged to %s and has been marked healthy.",
-				NODE_FORMAT_ARGS(activeNode),
-				NODE_FORMAT_ARGS(primaryNode),
-				ReplicationStateGetName(primaryNode->reportedState));
-
-			AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
-		}
+		AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
 
 		return true;
 	}
@@ -358,51 +337,16 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 		IsHealthy(activeNode) &&
 		WalDifferenceWithin(activeNode, primaryNode, EnableSyncXlogThreshold))
 	{
-		/*
-		 * The state PRIMARY embeds the assumption that it's possible to
-		 * failover. A node with candidate Priority of zero can not be the
-		 * target of a failover, so might reach SECONDARY without allowing to
-		 * get out of WAIT_PRIMARY or JOIN_PRIMARY state.
-		 */
-		if (activeNode->candidatePriority > 0)
-		{
-			ReplicationState primaryGoalState =
-				IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY)
-				? REPLICATION_STATE_APPLY_SETTINGS
-				: REPLICATION_STATE_PRIMARY;
+		char message[BUFSIZE] = { 0 };
 
-			char message[BUFSIZE] = { 0 };
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of " NODE_FORMAT
+			" to secondary after it caught up.",
+			NODE_FORMAT_ARGS(activeNode));
 
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Setting goal state of " NODE_FORMAT
-				" to %s and " NODE_FORMAT
-				" to secondary after " NODE_FORMAT
-				" caught up.",
-				NODE_FORMAT_ARGS(primaryNode),
-				ReplicationStateGetName(primaryGoalState),
-				NODE_FORMAT_ARGS(activeNode),
-				NODE_FORMAT_ARGS(activeNode));
-
-			/* node is ready for promotion */
-			AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
-
-			/* other node can enable synchronous commit */
-			AssignGoalState(primaryNode, primaryGoalState, message);
-		}
-		else
-		{
-			char message[BUFSIZE] = { 0 };
-
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Setting goal state of " NODE_FORMAT
-				" to secondary after it caught up.",
-				NODE_FORMAT_ARGS(activeNode));
-
-			/* node is ready for promotion, though not a candidate */
-			AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
-		}
+		/* node is ready for promotion */
+		AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
 
 		return true;
 	}
@@ -756,44 +700,18 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 		(primaryNode->goalState == REPLICATION_STATE_WAIT_PRIMARY ||
 		 primaryNode->goalState == REPLICATION_STATE_PRIMARY))
 	{
-		/*
-		 * The state PRIMARY embeds the assumption that it's possible to
-		 * failover. A node with candidate Priority of zero can not be the
-		 * target of a failover, so might reach SECONDARY without allowing to
-		 * get out of WAIT_PRIMARY or JOIN_PRIMARY state.
-		 */
-		if (activeNode->candidatePriority > 0)
-		{
-			char message[BUFSIZE] = { 0 };
+		char message[BUFSIZE] = { 0 };
 
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Setting goal state of " NODE_FORMAT
-				" to secondary and " NODE_FORMAT
-				" to primary after it converged to wait_primary.",
-				NODE_FORMAT_ARGS(activeNode),
-				NODE_FORMAT_ARGS(primaryNode));
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of " NODE_FORMAT
+			" to secondary after " NODE_FORMAT
+			" converged to wait_primary.",
+			NODE_FORMAT_ARGS(activeNode),
+			NODE_FORMAT_ARGS(primaryNode));
 
-			/* it's safe to rejoin as a secondary */
-			AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
-
-			AssignGoalState(primaryNode, REPLICATION_STATE_PRIMARY, message);
-		}
-		else
-		{
-			char message[BUFSIZE] = { 0 };
-
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Setting goal state of " NODE_FORMAT
-				" to secondary after " NODE_FORMAT
-				" converged to wait_primary.",
-				NODE_FORMAT_ARGS(activeNode),
-				NODE_FORMAT_ARGS(primaryNode));
-
-			/* it's safe to rejoin as a secondary */
-			AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
-		}
+		/* it's safe to rejoin as a secondary */
+		AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
 
 		return true;
 	}
@@ -921,6 +839,7 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 		IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
 		IsCurrentState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS))
 	{
+		int potentialCandidateCount = otherNodesCount;
 		int failoverCandidateCount = otherNodesCount;
 		int waitStandbyNodeCount = 0;
 		AutoFailoverFormation *formation =
@@ -974,8 +893,9 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 			}
 			else if (otherNode->candidatePriority == 0)
 			{
-				/* also not a candidate */
+				/* neither a potential not an actual candidate */
 				--failoverCandidateCount;
+				--potentialCandidateCount;
 			}
 			else if (!IsCurrentState(otherNode, REPLICATION_STATE_SECONDARY))
 			{
@@ -1016,14 +936,39 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 					LogAndNotifyMessage(
 						message, BUFSIZE,
 						"Setting goal state of " NODE_FORMAT
-						" to %s because none of the standby candidate nodes"
+						" to %s because none of the %d standby candidate nodes"
 						" are healthy at the moment.",
 						NODE_FORMAT_ARGS(primaryNode),
-						ReplicationStateGetName(primaryGoalState));
+						ReplicationStateGetName(primaryGoalState),
+						potentialCandidateCount);
 
 					AssignGoalState(primaryNode, primaryGoalState, message);
+
+					return true;
 				}
 			}
+		}
+
+		/*
+		 * when a node is wait_primary and has at least one healthy candidate
+		 * secondary
+		 *     wait_primary ➜ primary
+		 */
+		if (IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) &&
+			failoverCandidateCount > 0)
+		{
+			char message[BUFSIZE] = { 0 };
+
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of " NODE_FORMAT
+				" to primary now that at least one"
+				" secondary candidate node is healthy.",
+				NODE_FORMAT_ARGS(primaryNode));
+
+			AssignGoalState(primaryNode, REPLICATION_STATE_PRIMARY, message);
+
+			return true;
 		}
 
 		/*
@@ -1041,17 +986,31 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 		 * during an incident to stop the amount of potential data loss.
 		 *
 		 * When we reach that part of the code, we know that
-		 * failoverCandidateCount > 0 and so we can target PRIMARY.
+		 * failoverCandidateCount > 0 and so we can target PRIMARY... unless we
+		 * have been applying setting changes while in wait_primary and with
+		 * standby being added (waitStandbyNodeCount > 0)
 		 */
 		if (IsCurrentState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS))
 		{
 			char message[BUFSIZE] = { 0 };
 
+			ReplicationState primaryGoalState = REPLICATION_STATE_PRIMARY;
+
+			if (waitStandbyNodeCount > 0 && failoverCandidateCount == 0)
+			{
+				primaryGoalState = REPLICATION_STATE_WAIT_PRIMARY;
+			}
+			else if (waitStandbyNodeCount > 0 && failoverCandidateCount > 0)
+			{
+				primaryGoalState = REPLICATION_STATE_JOIN_PRIMARY;
+			}
+
 			LogAndNotifyMessage(
 				message, BUFSIZE,
 				"Setting goal state of " NODE_FORMAT
-				" to primary after it applied replication properties change.",
-				NODE_FORMAT_ARGS(primaryNode));
+				" to %s after it applied replication properties change.",
+				NODE_FORMAT_ARGS(primaryNode),
+				ReplicationStateGetName(primaryGoalState));
 
 			AssignGoalState(primaryNode, REPLICATION_STATE_PRIMARY, message);
 
