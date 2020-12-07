@@ -102,12 +102,10 @@ def test_005_set_candidate_priorities():
     assert node2.get_replication_quorum()
 
     # also let's see synchronous_standby_names here
-    print("Monitor: %s" % node1.get_synchronous_standby_names())
-    print(
-        "Node 1:  %s"
-        % node1.run_sql_query("show synchronous_standby_names")[0][0]
-    )
-
+    # remember to sort by candidate priority then name
+    ssn = "ANY 1 (pgautofailover_standby_3, pgautofailover_standby_2)"
+    eq_(node1.get_synchronous_standby_names(), ssn)
+    eq_(node1.get_synchronous_standby_names_local(), ssn)
 
 def test_006_ifdown_node3():
     node3.ifdown()
@@ -156,8 +154,12 @@ def test_008_failover():
     assert node3.has_needed_replication_slots()
     assert node2.has_needed_replication_slots()
 
-    # as we don't have
-    eq_(node3.get_synchronous_standby_names_local(), "")
+    # when in wait_primary state we should block writes when:
+    assert node3.get_number_sync_standbys() == 1
+
+    ssn = "ANY 1 (pgautofailover_standby_1, pgautofailover_standby_2)"
+    eq_(node3.get_synchronous_standby_names(), ssn)
+    eq_(node3.get_synchronous_standby_names_local(), ssn)
 
 
 def test_009_read_from_new_primary():
