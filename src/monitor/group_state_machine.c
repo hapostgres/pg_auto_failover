@@ -954,6 +954,7 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 			 * available.
 			 */
 			if (otherNode->goalState == REPLICATION_STATE_SECONDARY &&
+				otherNode->reportedState != REPLICATION_STATE_REPORT_LSN &&
 				otherNode->reportedState != REPLICATION_STATE_JOIN_SECONDARY &&
 				IsUnhealthy(otherNode))
 			{
@@ -1015,8 +1016,8 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 					LogAndNotifyMessage(
 						message, BUFSIZE,
 						"Setting goal state of " NODE_FORMAT
-						" to %s now that none of the standby candidate nodes"
-						" are healthy anymore.",
+						" to %s because none of the standby candidate nodes"
+						" are healthy at the moment.",
 						NODE_FORMAT_ARGS(primaryNode),
 						ReplicationStateGetName(primaryGoalState));
 
