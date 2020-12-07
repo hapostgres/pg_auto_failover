@@ -918,9 +918,11 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 	 * all the left standby nodes are assigned a candidatePriority of zero.
 	 */
 	if (IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY) ||
+		IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
 		IsCurrentState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS))
 	{
 		int failoverCandidateCount = otherNodesCount;
+		int waitStandbyNodeCount = 0;
 		AutoFailoverFormation *formation =
 			GetFormation(primaryNode->formationId);
 		ListCell *nodeCell = NULL;
@@ -928,6 +930,21 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 		foreach(nodeCell, otherNodesGroupList)
 		{
 			AutoFailoverNode *otherNode = (AutoFailoverNode *) lfirst(nodeCell);
+
+			/*
+			 * When we are in WAIT_PRIMARY state, we might have one or more
+			 * standby nodes in the WAIT_STANDBY or CATCHINGUP state.
+			 *
+			 * If we have zero candidates for failover and all the standby
+			 * nodes are still in the WAIT_STANDBY/CATCHINGUP states, it's too
+			 * early to move to PRIMARY, of course.
+			 */
+			if (otherNode->reportedState == REPLICATION_STATE_WAIT_STANDBY &&
+				(otherNode->goalState == REPLICATION_STATE_CATCHINGUP ||
+				 otherNode->goalState == REPLICATION_STATE_CATCHINGUP))
+			{
+				++waitStandbyNodeCount;
+			}
 
 			/*
 			 * We force secondary nodes to catching-up even if the node is on
@@ -984,7 +1001,7 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 			 * does not change the configured trade-offs. Writes are blocked
 			 * until one of the two defective standby nodes is available again.
 			 */
-			if (failoverCandidateCount == 0)
+			if (failoverCandidateCount == 0 && waitStandbyNodeCount == 0)
 			{
 				ReplicationState primaryGoalState =
 					formation->number_sync_standbys == 0
@@ -998,7 +1015,7 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 					LogAndNotifyMessage(
 						message, BUFSIZE,
 						"Setting goal state of " NODE_FORMAT
-						" to %s now that none of the standbys"
+						" to %s now that none of the standby candidate nodes"
 						" are healthy anymore.",
 						NODE_FORMAT_ARGS(primaryNode),
 						ReplicationStateGetName(primaryGoalState));
