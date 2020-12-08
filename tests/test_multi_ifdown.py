@@ -108,6 +108,7 @@ def test_005_set_candidate_priorities():
     eq_(node1.get_synchronous_standby_names(), ssn)
     eq_(node1.get_synchronous_standby_names_local(), ssn)
 
+
 def test_006_ifdown_node3():
     node3.ifdown()
 
@@ -158,7 +159,7 @@ def test_008_failover():
     # when in wait_primary state we should not block writes when:
     assert node3.get_number_sync_standbys() == 1
 
-    ssn = ''
+    ssn = ""
     eq_(node3.get_synchronous_standby_names(), ssn)
     eq_(node3.get_synchronous_standby_names_local(), ssn)
 

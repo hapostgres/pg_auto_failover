@@ -80,6 +80,7 @@ def test_004_001_add_three_standbys():
     # with one standby, we have number_sync_standbys set to 0 still
     assert node1.get_number_sync_standbys() == 0
 
+
 def test_004_002_add_three_standbys():
     global node3
 
@@ -104,6 +105,7 @@ def test_004_002_add_three_standbys():
     # the formation number_sync_standbys is expected to be set to 1 now
     assert node1.get_number_sync_standbys() == 1
 
+
 def test_004_003_add_three_standbys():
     global node4
 
@@ -122,6 +124,7 @@ def test_004_003_add_three_standbys():
     assert node2.has_needed_replication_slots()
     assert node3.has_needed_replication_slots()
     assert node4.has_needed_replication_slots()
+
 
 def test_005_number_sync_standbys():
     print()
@@ -280,6 +283,7 @@ def test_014_001_fail_set_properties():
     assert node2.get_replication_quorum()
     assert node3.get_replication_quorum()
 
+
 def test_014_002_fail_two_standby_nodes():
     node2.fail()
     node3.fail()
@@ -294,6 +298,7 @@ def test_014_002_fail_two_standby_nodes():
     eq_(node1.get_synchronous_standby_names(), ssn)
     eq_(node1.get_synchronous_standby_names_local(), ssn)
 
+
 def test_014_003_unblock_writes():
     node1.set_number_sync_standbys(0)
 
@@ -304,6 +309,7 @@ def test_014_003_unblock_writes():
     ssn = ""
     eq_(node1.get_synchronous_standby_names(), ssn)
     eq_(node1.get_synchronous_standby_names_local(), ssn)
+
 
 def test_014_004_restart_nodes():
     node3.run()
@@ -317,6 +323,7 @@ def test_014_004_restart_nodes():
     eq_(node1.get_synchronous_standby_names(), ssn)
     eq_(node1.get_synchronous_standby_names_local(), ssn)
 
+
 #
 # Now if number-sync-standbys is zero already, then when we lose all the
 # standby nodes the primary is assigned wait_primary to unblock writes
@@ -325,6 +332,7 @@ def test_015_001_set_properties():
     node1.wait_until_state(target_state="primary")
 
     eq_(node1.get_number_sync_standbys(), 0)
+
 
 def test_015_002_fail_two_standby_nodes():
     node2.fail()
@@ -337,6 +345,7 @@ def test_015_002_fail_two_standby_nodes():
     eq_(node1.get_synchronous_standby_names(), ssn)
     eq_(node1.get_synchronous_standby_names_local(), ssn)
 
+
 def test_015_restart_nodes():
     node3.run()
     node2.run()
@@ -348,6 +357,7 @@ def test_015_restart_nodes():
     ssn = "ANY 1 (pgautofailover_standby_2, pgautofailover_standby_3)"
     eq_(node1.get_synchronous_standby_names(), ssn)
     eq_(node1.get_synchronous_standby_names_local(), ssn)
+
 
 def test_016_remove_old_primary():
     node2.drop()

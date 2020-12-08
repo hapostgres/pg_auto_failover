@@ -156,8 +156,10 @@ def test_006_maintenance_and_failover():
     conf = open(fn).read()
 
     if primary_conninfo_ipaddr not in conf:
-        raise Exception("Primary ip address %s not found in %s:\n%s" %
-                        (primary_conninfo_ipaddr, fn, conf))
+        raise Exception(
+            "Primary ip address %s not found in %s:\n%s"
+            % (primary_conninfo_ipaddr, fn, conf)
+        )
 
     assert node1.wait_until_state(target_state="secondary")
     assert node2.wait_until_state(target_state="secondary")
