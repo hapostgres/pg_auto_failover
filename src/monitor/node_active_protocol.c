@@ -432,7 +432,7 @@ NodeActive(char *formationId, AutoFailoverNodeState *currentNodeState)
 			{
 				LogAndNotifyMessage(
 					message, BUFSIZE,
-					"New state was reported by " NODE_FORMAT
+					"New state is reported by " NODE_FORMAT
 					" with LSN %X/%X: %s",
 					NODE_FORMAT_ARGS(pgAutoFailoverNode),
 					(uint32) (pgAutoFailoverNode->reportedLSN >> 32),
@@ -443,7 +443,7 @@ NodeActive(char *formationId, AutoFailoverNodeState *currentNodeState)
 			{
 				LogAndNotifyMessage(
 					message, BUFSIZE,
-					"New state was reported by " NODE_FORMAT
+					"New state is reported by " NODE_FORMAT
 					": \"%s\"",
 					NODE_FORMAT_ARGS(pgAutoFailoverNode),
 					ReplicationStateGetName(currentNodeState->replicationState));
