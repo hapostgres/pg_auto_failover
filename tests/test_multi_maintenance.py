@@ -109,17 +109,10 @@ def test_005_set_candidate_priorities():
 
     # other replication settings should still be the same as before
     eq_(node1.get_number_sync_standbys(), 1)
-    eq_(
-        node1.get_synchronous_standby_names_local(),
-        "ANY 1 (pgautofailover_standby_3, pgautofailover_standby_2)",
-    )
 
-    # also let's see synchronous_standby_names here
-    print("Monitor: %s" % node1.get_synchronous_standby_names())
-    print(
-        "Node 1:  %s"
-        % node1.run_sql_query("show synchronous_standby_names")[0][0]
-    )
+    ssn = "ANY 1 (pgautofailover_standby_3, pgautofailover_standby_2)"
+    eq_(node1.get_synchronous_standby_names(), ssn)
+    eq_(node1.get_synchronous_standby_names_local(), ssn)
 
 
 def test_006_maintenance_and_failover():
@@ -132,7 +125,8 @@ def test_006_maintenance_and_failover():
     # assigned and goal state must be the same
     assert node1.wait_until_state(target_state="primary")
 
-    ssn = "ANY 1 (pgautofailover_standby_3)"
+    # ssn is not changed during maintenance operations
+    ssn = "ANY 1 (pgautofailover_standby_3, pgautofailover_standby_2)"
     eq_(node1.get_synchronous_standby_names(), ssn)
     eq_(node1.get_synchronous_standby_names_local(), ssn)
 
@@ -141,7 +135,8 @@ def test_006_maintenance_and_failover():
     assert node3.wait_until_state(target_state="primary")
     assert node1.wait_until_state(target_state="secondary")
 
-    ssn = "ANY 1 (pgautofailover_standby_1)"
+    # now that node3 is primary, synchronous_standby_names has changed
+    ssn = "ANY 1 (pgautofailover_standby_1, pgautofailover_standby_2)"
     eq_(node3.get_synchronous_standby_names(), ssn)
     eq_(node3.get_synchronous_standby_names_local(), ssn)
 
@@ -149,7 +144,8 @@ def test_006_maintenance_and_failover():
     node2.disable_maintenance()
 
     # allow manual checking of primary_conninfo
-    print("current primary is node3 at %s" % str(node3.vnode.address))
+    primary_conninfo_ipaddr = str(node3.vnode.address)
+    print("current primary is node3 at %s" % primary_conninfo_ipaddr)
 
     if node2.pgmajor() < 12:
         fn = "recovery.conf"
@@ -157,13 +153,17 @@ def test_006_maintenance_and_failover():
         fn = "postgresql-auto-failover-standby.conf"
 
     fn = os.path.join(node2.datadir, fn)
-    print("%s:\n%s" % (fn, open(fn).read()))
+    conf = open(fn).read()
 
+    if primary_conninfo_ipaddr not in conf:
+        raise Exception("Primary ip address %s not found in %s:\n%s" %
+                        (primary_conninfo_ipaddr, fn, conf))
+
+    assert node1.wait_until_state(target_state="secondary")
     assert node2.wait_until_state(target_state="secondary")
     assert node3.wait_until_state(target_state="primary")
 
-    # when the node is back, it should be listed again in sync standby names
-    ssn = "ANY 1 (pgautofailover_standby_1, pgautofailover_standby_2)"
+    # ssn is not changed during maintenance operations
     eq_(node3.get_synchronous_standby_names(), ssn)
     eq_(node3.get_synchronous_standby_names_local(), ssn)
 
