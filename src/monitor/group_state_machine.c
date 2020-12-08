@@ -648,7 +648,6 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		/* it's safe to rejoin as a secondary */
 		AssignGoalState(activeNode, REPLICATION_STATE_CATCHINGUP, message);
-		AssignGoalState(primaryNode, REPLICATION_STATE_JOIN_PRIMARY, message);
 
 		return true;
 	}
