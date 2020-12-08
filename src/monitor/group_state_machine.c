@@ -1756,11 +1756,36 @@ WalDifferenceWithin(AutoFailoverNode *secondaryNode,
 static bool
 IsHealthy(AutoFailoverNode *pgAutoFailoverNode)
 {
+	TimestampTz now = GetCurrentTimestamp();
+	int nodeActiveCallsFrequencyMs = 1 * 1000; /* keeper sleep time */
+
 	if (pgAutoFailoverNode == NULL)
 	{
 		return false;
 	}
 
+	/*
+	 * If the keeper has been reporting that Postgres is running after our last
+	 * background check run, and within the node-active protocol client-time
+	 * sleep time (1 second), then trust pg_autoctl node reporting: we might be
+	 * out of a network split or node-local failure mode, and our background
+	 * checks might not have run yet to clarify that "back to good" situation.
+	 *
+	 * In any case, the pg_autoctl node-active process could connect to the
+	 * monitor, so there is no network split at this time.
+	 */
+	if (pgAutoFailoverNode->health == NODE_HEALTH_BAD &&
+		TimestampDifferenceExceeds(pgAutoFailoverNode->healthCheckTime,
+								   pgAutoFailoverNode->reportTime,
+								   0) &&
+		TimestampDifferenceExceeds(pgAutoFailoverNode->reportTime,
+								   now,
+								   nodeActiveCallsFrequencyMs))
+	{
+		return pgAutoFailoverNode->pgIsRunning;
+	}
+
+	/* nominal case: trust background checks + reported Postgres state */
 	return pgAutoFailoverNode->health == NODE_HEALTH_GOOD &&
 		   pgAutoFailoverNode->pgIsRunning == true;
 }
