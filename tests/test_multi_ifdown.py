@@ -42,6 +42,7 @@ def test_002_add_standby():
     node2.create()
     node2.run()
 
+    assert node2.wait_until_pg_is_running()
     assert node2.wait_until_state(target_state="secondary")
 
     assert node1.has_needed_replication_slots()
@@ -154,10 +155,10 @@ def test_008_failover():
     assert node3.has_needed_replication_slots()
     assert node2.has_needed_replication_slots()
 
-    # when in wait_primary state we should block writes when:
+    # when in wait_primary state we should not block writes when:
     assert node3.get_number_sync_standbys() == 1
 
-    ssn = "ANY 1 (pgautofailover_standby_1, pgautofailover_standby_2)"
+    ssn = ''
     eq_(node3.get_synchronous_standby_names(), ssn)
     eq_(node3.get_synchronous_standby_names_local(), ssn)
 
@@ -177,6 +178,11 @@ def test_010_start_node1_again():
     assert node1.has_needed_replication_slots()
     assert node2.has_needed_replication_slots()
     assert node3.has_needed_replication_slots()
+
+    # now that we're back to primary, check we have sync rep again
+    ssn = "ANY 1 (pgautofailover_standby_1, pgautofailover_standby_2)"
+    eq_(node3.get_synchronous_standby_names(), ssn)
+    eq_(node3.get_synchronous_standby_names_local(), ssn)
 
 
 # test_011_XXX, test_012_XXX, test_013_XXX, test_014_XXX and test_015_XXX
