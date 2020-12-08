@@ -1234,7 +1234,6 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 			candidateList.mostAdvancedNodesGroupList = mostAdvancedNodeList;
 			candidateList.mostAdvancedReportedLSN = mostAdvancedNode->reportedLSN;
 
-			/* TODO: should we keep that message in the production release? */
 			LogAndNotifyMessage(
 				message, BUFSIZE,
 				"The current most advanced reported LSN is %X/%X, "
