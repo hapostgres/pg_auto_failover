@@ -63,11 +63,13 @@ void tmux_pg_autoctl_create_postgres(PQExpBuffer script,
 									 bool replicationQuorum,
 									 int candidatePriority);
 
-bool tmux_start_server(const char *root, const char *scriptName);
+bool tmux_start_server(const char *scriptName);
 bool pg_autoctl_getpid(const char *pgdata, pid_t *pid);
 
 bool tmux_has_session(const char *tmux_path, const char *sessionName);
+bool tmux_attach_session(const char *tmux_path, const char *sessionName);
 bool tmux_kill_session(TmuxOptions *options);
+bool tmux_kill_session_by_name(const char *sessionName);
 
 void tmux_process_options(TmuxOptions *options);
 void tmux_cleanup_stale_directory(TmuxOptions *options);

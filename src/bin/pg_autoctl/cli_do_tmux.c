@@ -603,7 +603,7 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
  * tmux_start_server starts a tmux session with the given script.
  */
 bool
-tmux_start_server(const char *root, const char *scriptName)
+tmux_start_server(const char *scriptName)
 {
 	char *args[8];
 	int argsIndex = 0;
@@ -637,6 +637,47 @@ tmux_start_server(const char *root, const char *scriptName)
 
 	/* we do not want to call setsid() when running this program. */
 	Program program = initialize_program(args, false);
+
+	program.capture = false;    /* don't capture output */
+	program.tty = true;         /* allow sharing the parent's tty */
+
+	/* log the exact command line we're using */
+	(void) snprintf_program_command_line(&program, command, BUFSIZE);
+	log_info("%s", command);
+
+	(void) execute_subprogram(&program);
+
+	/* we only get there when the tmux session is done */
+	return true;
+}
+
+
+/*
+ * tmux_attach_session_by_name runs the command:
+ *   tmux attach-session -t sessionName
+ */
+bool
+tmux_attach_session(const char *tmux_path, const char *sessionName)
+{
+	Program program;
+
+	char *args[8];
+	int argsIndex = 0;
+
+	char command[BUFSIZE] = { 0 };
+
+	/*
+	 * Run the tmux command with our script:
+	 *   tmux start-server \; source-file ${scriptName}
+	 */
+	args[argsIndex++] = (char *) tmux_path;
+	args[argsIndex++] = "attach-session";
+	args[argsIndex++] = "-t";
+	args[argsIndex++] = (char *) sessionName;
+	args[argsIndex] = NULL;
+
+	/* we do not want to call setsid() when running this program. */
+	program = initialize_program(args, false);
 
 	program.capture = false;    /* don't capture output */
 	program.tty = true;         /* allow sharing the parent's tty */
@@ -802,13 +843,24 @@ tmux_has_session(const char *tmux_path, const char *sessionName)
 bool
 tmux_kill_session(TmuxOptions *options)
 {
-	char tmux[MAXPGPATH] = { 0 };
-	char command[BUFSIZE] = { 0 };
 	char sessionName[BUFSIZE] = { 0 };
 
-	bool success = true;
-
 	sformat(sessionName, BUFSIZE, "pgautofailover-%d", options->firstPort);
+
+	return tmux_kill_session_by_name(sessionName);
+}
+
+
+/*
+ * tmux_kill_session_by_name kills a tmux session of the given name.
+ */
+bool
+tmux_kill_session_by_name(const char *sessionName)
+{
+	char tmux[MAXPGPATH] = { 0 };
+	char command[BUFSIZE] = { 0 };
+
+	bool success = true;
 
 	if (!search_path_first("tmux", tmux, LOG_ERROR))
 	{
@@ -1051,7 +1103,7 @@ cli_do_tmux_session(int argc, char **argv)
 	/*
 	 * Start a tmux session from the script.
 	 */
-	if (!tmux_start_server(options.root, scriptName))
+	if (!tmux_start_server(scriptName))
 	{
 		success = false;
 		log_fatal("Failed to start the tmux session, see above for details");

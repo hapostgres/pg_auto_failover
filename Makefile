@@ -36,6 +36,23 @@ TMUX_LAYOUT ?= even-vertical	# could be "tiled"
 TMUX_TOP_DIR = ./tmux
 TMUX_SCRIPT = ./tmux/script-$(FIRST_PGPORT).tmux
 
+AZURE_PREFIX ?= ha-demo-$(shell whoami)
+AZURE_REGION ?= paris
+AZURE_LOCATION ?= francecentral
+
+# Pick a version of Postgres and pg_auto_failover packages to install
+# in our target Azure VMs when provisionning
+#
+#  sudo apt-get install -q -y postgresql-13-auto-failover-1.4=1.4.1
+#  postgresql-${AZ_PG_VERSION}-auto-failover-${AZ_PGAF_DEB_VERSION}=${AZ_PGAF_VERSION}
+AZ_PG_VERSION ?= 13
+AZ_PGAF_DEB_VERSION ?= 1.4
+AZ_PGAF_DEB_REVISION ?= 1.4.1-1
+
+export AZ_PG_VERSION
+export AZ_PGAF_DEB_VERSION
+export AZ_PGAF_DEB_REVISION
+
 all: monitor bin ;
 
 install: install-monitor install-bin ;
@@ -133,8 +150,24 @@ cluster: install
          --sync-standbys $(NODES_SYNC_SB) \
          --layout $(TMUX_LAYOUT)
 
+
+azcluster: all
+	$(PG_AUTOCTL) do azure create         \
+         --prefix $(AZURE_PREFIX)         \
+         --region $(AZURE_REGION)         \
+         --location $(AZURE_LOCATION)     \
+         --nodes $(NODES)
+
+# make azcluster has been done before, just re-attach
+az: all
+	$(PG_AUTOCTL) do azure tmux session
+
+azdrop: all
+	$(PG_AUTOCTL) do azure drop
+
 .PHONY: all clean check install docs
 .PHONY: monitor clean-monitor check-monitor install-monitor
 .PHONY: bin clean-bin install-bin
 .PHONY: build-test run-test
 .PHONY: tmux-clean cluster
+.PHONY: azcluster azdrop az

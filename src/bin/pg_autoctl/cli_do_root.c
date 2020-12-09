@@ -306,6 +306,196 @@ CommandLine do_tmux_commands =
 					 "set of facilities to handle tmux interactive sessions",
 					 NULL, NULL, NULL, do_tmux);
 
+/*
+ * pg_autoctl do azure ...
+ *
+ * Set of commands to prepare and control a full QA environment running in
+ * Azure VMs, provisionned either from our packages or from local source code.
+ */
+CommandLine do_azure_provision_region =
+	make_command("region",
+				 "Provision an azure region: resource group, network, VMs",
+				 "[option ...]",
+				 "  --prefix    azure group name prefix (ha-demo)\n"
+				 "  --region    name to use for referencing the region\n"
+				 "  --location  azure location where to create a resource group\n"
+				 "  --monitor   should we create a monitor in the region (false)\n"
+				 "  --nodes     number of Postgres nodes to create (2)\n"
+				 "  --script    output a shell script instead of creating resources\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_create_region);
+
+CommandLine do_azure_provision_nodes =
+	make_command("nodes",
+				 "Provision our pre-created VM with pg_autoctl Postgres nodes",
+				 "[option ...]",
+				 "  --prefix    azure group name prefix (ha-demo)\n"
+				 "  --region    name to use for referencing the region\n"
+				 "  --monitor   should we create a monitor in the region (false)\n"
+				 "  --nodes     number of Postgres nodes to create (2)\n"
+				 "  --script    output a shell script instead of creating resources\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_create_nodes);
+
+
+CommandLine *do_azure_provision[] = {
+	&do_azure_provision_region,
+	&do_azure_provision_nodes,
+	NULL
+};
+
+CommandLine do_azure_provision_commands =
+	make_command_set("provision",
+					 "provision azure resources for a pg_auto_failover demo",
+					 NULL, NULL, NULL, do_azure_provision);
+
+CommandLine do_azure_create =
+	make_command("create",
+				 "Create an azure QA environment",
+				 "[option ...]",
+				 "  --prefix      azure group name prefix (ha-demo)\n"
+				 "  --region      name to use for referencing the region\n"
+				 "  --location    azure location to use for the resources\n"
+				 "  --nodes       number of Postgres nodes to create (2)\n"
+				 "  --script      output a script instead of creating resources\n"
+				 "  --no-monitor  do not create the pg_autoctl monitor node\n"
+				 "  --no-app      do not create the application node\n"
+				 "  --cidr        use the 10.CIDR.CIDR.0/24 subnet (11)\n"
+				 "  --from-source provision pg_auto_failover from sources\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_create_environment);
+
+CommandLine do_azure_drop =
+	make_command("drop",
+				 "Drop an azure QA environment: resource group, network, VMs",
+				 "[option ...]",
+				 "  --prefix    azure group name prefix (ha-demo)\n"
+				 "  --region    name to use for referencing the region\n"
+				 "  --location  azure location where to create a resource group\n"
+				 "  --monitor   should we create a monitor in the region (false)\n"
+				 "  --nodes     number of Postgres nodes to create (2)\n"
+				 "  --script    output a shell script instead of creating resources\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_drop_region);
+
+CommandLine do_azure_deploy =
+	make_command("deploy",
+				 "Deploy a pg_autoctl VMs, given by name",
+				 "[option ...] vmName",
+				 "",
+				 cli_do_azure_getopts,
+				 cli_do_azure_deploy);
+
+CommandLine do_azure_show_ips =
+	make_command("ips",
+				 "Show public and private IP addresses for selected VMs",
+				 "[option ...]",
+				 "  --prefix    azure group name prefix (ha-demo)\n"
+				 "  --region    name to use for referencing the region\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_show_ips);
+
+CommandLine do_azure_show_state =
+	make_command("state",
+				 "Connect to the monitor node to show the current state",
+				 "[option ...]",
+				 "  --prefix    azure group name prefix (ha-demo)\n"
+				 "  --region    name to use for referencing the region\n"
+				 "  --watch     run the command again every 0.2s\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_show_state);
+
+CommandLine *do_azure_show[] = {
+	&do_azure_show_ips,
+	&do_azure_show_state,
+	NULL
+};
+
+CommandLine do_azure_show_commands =
+	make_command_set("show",
+					 "show azure resources for a pg_auto_failover demo",
+					 NULL, NULL, NULL, do_azure_show);
+
+CommandLine do_azure_ls =
+	make_command("ls",
+				 "List resources in a given azure region",
+				 "[option ...]",
+				 "  --prefix    azure group name prefix (ha-demo)\n"
+				 "  --region    name to use for referencing the region\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_ls);
+
+CommandLine do_azure_ssh =
+	make_command("ssh",
+				 "Runs ssh -l ha-admin <public ip address> for a given VM name",
+				 "[option ...]",
+				 "  --prefix    azure group name prefix (ha-demo)\n"
+				 "  --region    name to use for referencing the region\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_ssh);
+
+CommandLine do_azure_sync =
+	make_command("sync",
+				 "Rsync pg_auto_failover sources on all the target region VMs",
+				 "[option ...]",
+				 "  --prefix    azure group name prefix (ha-demo)\n"
+				 "  --region    region to use for referencing the region\n"
+				 "  --monitor   should we create a monitor in the region (false)\n"
+				 "  --nodes     number of Postgres nodes to create (2)\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_rsync);
+
+CommandLine do_azure_tmux_session =
+	make_command("session",
+				 "Create or attach a tmux session for the created Azure VMs",
+				 "[option ...]",
+				 "  --prefix    azure group name prefix (ha-demo)\n"
+				 "  --region    region to use for referencing the region\n"
+				 "  --monitor   should we create a monitor in the region (false)\n"
+				 "  --nodes     number of Postgres nodes to create (2)\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_tmux_session);
+
+CommandLine do_azure_tmux_kill =
+	make_command("kill",
+				 "Kill an existing tmux session for Azure VMs",
+				 "[option ...]",
+				 "  --prefix    azure group name prefix (ha-demo)\n"
+				 "  --region    region to use for referencing the region\n"
+				 "  --monitor   should we create a monitor in the region (false)\n"
+				 "  --nodes     number of Postgres nodes to create (2)\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_tmux_kill);
+
+CommandLine *do_azure_tmux[] = {
+	&do_azure_tmux_session,
+	&do_azure_tmux_kill,
+	NULL
+};
+
+CommandLine do_azure_tmux_commands =
+	make_command_set("tmux",
+					 "Run a tmux session with an Azure setup for QA/testing",
+					 NULL, NULL, NULL, do_azure_tmux);
+
+CommandLine *do_azure[] = {
+	&do_azure_provision_commands,
+	&do_azure_tmux_commands,
+	&do_azure_show_commands,
+	&do_azure_deploy,
+	&do_azure_create,
+	&do_azure_drop,
+	&do_azure_ls,
+	&do_azure_ssh,
+	&do_azure_sync,
+	NULL
+};
+
+CommandLine do_azure_commands =
+	make_command_set("azure",
+					 "manage a set of azure resources for a pg_auto_failover demo",
+					 NULL, NULL, NULL, do_azure);
+
 
 CommandLine *do_subcommands[] = {
 	&do_monitor_commands,
@@ -317,6 +507,7 @@ CommandLine *do_subcommands[] = {
 	&do_service_postgres_ctl_commands,
 	&do_service_commands,
 	&do_tmux_commands,
+	&do_azure_commands,
 	NULL
 };
 
