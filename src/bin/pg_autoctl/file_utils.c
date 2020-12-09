@@ -593,6 +593,73 @@ search_path(const char *filename, SearchPath *result)
 
 
 /*
+ * search_path_deduplicate_symlinks traverse the SearchPath result obtained by
+ * calling the search_path() function and removes entries that are pointing to
+ * the same binary on-disk.
+ *
+ * In modern debian installations, for instance, we have /bin -> /usr/bin; and
+ * then we might find pg_config both in /bin/pg_config and /usr/bin/pg_config
+ * although it's only been installed once, and both are the same file.
+ *
+ * We use realpath() to deduplicate entries, and keep the entry that is not a
+ * symbolic link.
+ */
+bool
+search_path_deduplicate_symlinks(SearchPath *results, SearchPath *dedup)
+{
+	if (results->found < 2)
+	{
+		/* copy our results over to dedup and be done already */
+		*dedup = *results;
+		return true;
+	}
+
+	/* now re-initialize the target structure dedup */
+	dedup->found = 0;
+
+	for (int rIndex = 0; rIndex < results->found; rIndex++)
+	{
+		bool alreadyThere = false;
+
+		char *currentPath = results->matches[rIndex];
+		char currentRealPath[MAXPGPATH] = { 0 };
+
+		if (realpath(currentPath, currentRealPath) == NULL)
+		{
+			log_error("Failed to normalize file name \"%s\": %m", currentPath);
+			return false;
+		}
+
+		/* add-in the realpath to dedup, unless it's already in there */
+		if (dedup->found == 0)
+		{
+			alreadyThere = false;
+		}
+		else
+		{
+			for (int dIndex = 0; dIndex < dedup->found; dIndex++)
+			{
+				if (strcmp(dedup->matches[dIndex], currentRealPath) == 0)
+				{
+					alreadyThere = true;
+
+					log_debug("dedup: skipping \"%s\"", currentPath);
+					break;
+				}
+			}
+		}
+
+		if (!alreadyThere)
+		{
+			strlcpy(dedup->matches[dedup->found++], currentRealPath, MAXPGPATH);
+		}
+	}
+
+	return true;
+}
+
+
+/*
  * unlink_state_file calls unlink(2) on the state file to make sure we don't
  * leave a lingering state on-disk.
  */
