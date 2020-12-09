@@ -840,7 +840,6 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 	{
 		int potentialCandidateCount = otherNodesCount;
 		int failoverCandidateCount = otherNodesCount;
-		int waitStandbyNodeCount = 0;
 		AutoFailoverFormation *formation =
 			GetFormation(primaryNode->formationId);
 		ListCell *nodeCell = NULL;
@@ -850,25 +849,10 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 			AutoFailoverNode *otherNode = (AutoFailoverNode *) lfirst(nodeCell);
 
 			/*
-			 * When we are in WAIT_PRIMARY state, we might have one or more
-			 * standby nodes in the WAIT_STANDBY or CATCHINGUP state.
-			 *
-			 * If we have zero candidates for failover and all the standby
-			 * nodes are still in the WAIT_STANDBY/CATCHINGUP states, it's too
-			 * early to move to PRIMARY, of course.
-			 */
-			if (otherNode->reportedState == REPLICATION_STATE_WAIT_STANDBY &&
-				(otherNode->goalState == REPLICATION_STATE_CATCHINGUP ||
-				 otherNode->goalState == REPLICATION_STATE_CATCHINGUP))
-			{
-				++waitStandbyNodeCount;
-			}
-
-			/*
 			 * We force secondary nodes to catching-up even if the node is on
 			 * its way to being a secondary... unless it is currently in the
-			 * join_secondary state, because reportLSN -> join_secondary
-			 * transition stops Postgres, waiting for the new primary to be
+			 * reportLSN or join_secondary state, because in those states
+			 * Postgres is stopped, waiting for the new primary to be
 			 * available.
 			 */
 			if (otherNode->goalState == REPLICATION_STATE_SECONDARY &&
@@ -922,8 +906,7 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 			 * until one of the two defective standby nodes is available again.
 			 */
 			if (!IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) &&
-				failoverCandidateCount == 0 &&
-				waitStandbyNodeCount == 0)
+				failoverCandidateCount == 0)
 			{
 				ReplicationState primaryGoalState =
 					formation->number_sync_standbys == 0
@@ -974,6 +957,7 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 
 		/*
 		 * when a node has changed its replication settings:
+		 *     apply_settings ➜ wait_primary
 		 *     apply_settings ➜ primary
 		 *
 		 * Even when we don't currently have healthy standby nodes to failover
@@ -986,25 +970,15 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 		 *
 		 * during an incident to stop the amount of potential data loss.
 		 *
-		 * When we reach that part of the code, we know that
-		 * failoverCandidateCount > 0 and so we can target PRIMARY... unless we
-		 * have been applying setting changes while in wait_primary and with
-		 * standby being added (waitStandbyNodeCount > 0)
 		 */
 		if (IsCurrentState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS))
 		{
 			char message[BUFSIZE] = { 0 };
 
-			ReplicationState primaryGoalState = REPLICATION_STATE_PRIMARY;
-
-			if (waitStandbyNodeCount > 0 && failoverCandidateCount == 0)
-			{
-				primaryGoalState = REPLICATION_STATE_WAIT_PRIMARY;
-			}
-			else if (waitStandbyNodeCount > 0 && failoverCandidateCount > 0)
-			{
-				primaryGoalState = REPLICATION_STATE_JOIN_PRIMARY;
-			}
+			ReplicationState primaryGoalState =
+				failoverCandidateCount == 0
+				? REPLICATION_STATE_WAIT_PRIMARY
+				: REPLICATION_STATE_PRIMARY;
 
 			LogAndNotifyMessage(
 				message, BUFSIZE,
@@ -1026,11 +1000,9 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 	 * there's no visible reason to not be a primary rather than either
 	 * wait_primary or join_primary
 	 *
-	 *    wait_primary ➜ primary
 	 *    join_primary ➜ primary
 	 */
-	if (IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
-		IsCurrentState(primaryNode, REPLICATION_STATE_JOIN_PRIMARY))
+	if (IsCurrentState(primaryNode, REPLICATION_STATE_JOIN_PRIMARY))
 	{
 		ListCell *nodeCell = NULL;
 		bool allSecondariesAreHealthy = true;
