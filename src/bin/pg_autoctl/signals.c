@@ -25,8 +25,7 @@ volatile sig_atomic_t asked_to_stop = 0;      /* SIGTERM */
 volatile sig_atomic_t asked_to_stop_fast = 0; /* SIGINT */
 volatile sig_atomic_t asked_to_reload = 0;    /* SIGHUP */
 volatile sig_atomic_t asked_to_quit = 0;      /* SIGQUIT */
-volatile sig_atomic_t asked_to_enable = 0;    /* SIGUSR1 */
-volatile sig_atomic_t asked_to_disable = 0;   /* SIGUSR2 */
+volatile sig_atomic_t asked_to_handle_dynamic = 0;    /* SIGUSR1 */
 
 /*
  * set_signal_handlers sets our signal handlers for the 4 signals that we
@@ -41,8 +40,7 @@ set_signal_handlers(bool exitOnQuit)
 	pqsignal(SIGHUP, catch_reload);
 	pqsignal(SIGINT, catch_int);
 	pqsignal(SIGTERM, catch_term);
-	pqsignal(SIGUSR1, catch_enable);
-	pqsignal(SIGUSR2, catch_disable);
+	pqsignal(SIGUSR1, catch_dynamic);
 
 	if (exitOnQuit)
 	{
@@ -165,24 +163,13 @@ catch_quit(int sig)
 
 
 /*
- * catch_enable receives the SIGUSR1 signal.
+ * catch_dynamic receives the SIGUSR1 signal.
  */
 void
-catch_enable(int sig)
+catch_dynamic(int sig)
 {
-	asked_to_enable = 1;
-	pqsignal(sig, catch_enable);
-}
-
-
-/*
- * catch_disable receives the SIGUSR2 signal.
- */
-void
-catch_disable(int sig)
-{
-	asked_to_disable = 1;
-	pqsignal(sig, catch_disable);
+	asked_to_handle_dynamic = 1;
+	pqsignal(sig, catch_dynamic);
 }
 
 
@@ -216,13 +203,9 @@ get_current_signal(int defaultSignal)
 	{
 		return SIGTERM;
 	}
-	else if (asked_to_enable)
+	else if (asked_to_handle_dynamic)
 	{
 		return SIGUSR1;
-	}
-	else if (asked_to_disable)
-	{
-		return SIGUSR2;
 	}
 
 	/* no termination signal to process at this time, return the default */
@@ -239,8 +222,7 @@ get_current_signal(int defaultSignal)
  * have received SIGINT we may upgrade to SIGQUIT, but we won't downgrade to
  * SIGTERM.
  *
- * User defined signals have the lowest priority. Between them, prioritize
- * SIGUSR2 (disable) over SIGUSR1.
+ * User defined signals have the lowest priority and be returned last.
  */
 int
 pick_stronger_signal(int sig1, int sig2)
@@ -256,10 +238,6 @@ pick_stronger_signal(int sig1, int sig2)
 	else if (sig1 == SIGTERM || sig2 == SIGTERM)
 	{
 		return SIGTERM;
-	}
-	else if (sig1 == SIGUSR2 || sig2 == SIGUSR2)
-	{
-		return SIGUSR2;
 	}
 
 	return SIGUSR1;
@@ -293,6 +271,11 @@ signal_to_string(int signal)
 		case SIGHUP:
 		{
 			return "SIGHUP";
+		}
+
+		case SIGUSR1:
+		{
+			return "SIGUSR1";
 		}
 
 		default:

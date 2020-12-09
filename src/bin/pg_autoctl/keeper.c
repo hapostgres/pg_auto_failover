@@ -2210,6 +2210,43 @@ keeper_reload_configuration(Keeper *keeper, bool firstLoop, bool doInit)
 
 
 /*
+ * reread_services reads the supposedly new services section from the configuration file and
+ * integrates accepted new values into the current setup.
+ */
+bool
+keeper_reread_services(Keeper *keeper)
+{
+	KeeperConfig *config = &(keeper->config);
+	KeeperConfig newConfig = { 0 };
+
+	if (!file_exists(config->pathnames.config))
+	{
+		log_error("Missing configuration file %s", config->pathnames.config);
+		return false;
+	}
+
+	/*
+	 * Set the same configuration and state file as the current config.
+	 */
+	strlcpy(newConfig.pathnames.config, config->pathnames.config, MAXPGPATH);
+	strlcpy(newConfig.pathnames.state, config->pathnames.state, MAXPGPATH);
+
+	if (!keeper_config_read_file(&newConfig,
+								 true, /* missingPgdataIsOk */
+								 true, /* pgIsNotRunningIsOk */
+								 true /* monitorDisabledIsOk */))
+	{
+		log_error("Failed to read new config");
+		return false;
+	}
+
+	/* update the configuration value */
+	strlcpy(config->pgbouncer, newConfig.pgbouncer, MAXPGPATH);
+	return true;
+}
+
+
+/*
  * keeper_call_reload_hooks loops over the KeeperReloadHooks
  * reloadFunctionArray and calls each hook in turn.
  */

@@ -18,8 +18,7 @@ extern volatile sig_atomic_t asked_to_stop;      /* SIGTERM */
 extern volatile sig_atomic_t asked_to_stop_fast; /* SIGINT */
 extern volatile sig_atomic_t asked_to_reload;    /* SIGHUP */
 extern volatile sig_atomic_t asked_to_quit;      /* SIGQUIT */
-extern volatile sig_atomic_t asked_to_enable;    /* SIGUSR1 */
-extern volatile sig_atomic_t asked_to_disable;   /* SIGUSR2 */
+extern volatile sig_atomic_t asked_to_handle_dynamic;    /* SIGUSR1 */
 
 #define CHECK_FOR_FAST_SHUTDOWN { if (asked_to_stop_fast) { break; } \
 }
@@ -32,8 +31,7 @@ void catch_int(int sig);
 void catch_term(int sig);
 void catch_quit(int sig);
 void catch_quit_and_exit(int sig);
-void catch_enable(int sig);
-void catch_disable(int sig);
+void catch_dynamic(int sig);
 
 int get_current_signal(int defaultSignal);
 int pick_stronger_signal(int sig1, int sig2);

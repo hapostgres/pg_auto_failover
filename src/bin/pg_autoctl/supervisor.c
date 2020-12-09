@@ -34,14 +34,27 @@
 #include "signals.h"
 #include "string_utils.h"
 
+/*
+ * A static struct to loop seamlessly through the active services in a
+ * supervisor struct. Those can be either 'static' or 'dynamic'.
+ */
+typedef struct Supervisor_it
+{
+	Supervisor *supervisor;
+	Service *services;
+	int count;
+	int index;
+} Supervisor_it;
+
 static bool supervisor_init(Supervisor *supervisor);
 static bool supervisor_loop(Supervisor *supervisor);
 
 static bool supervisor_find_service(Supervisor *supervisor, pid_t pid,
 									Service **result);
 
-static bool supervisor_find_disabled_service(Supervisor *supervisor, pid_t pid,
-											 Service **result);
+static bool supervisor_find_recently_removed_dynamic(Supervisor *supervisor,
+													 pid_t pid,
+													 Service **result);
 
 static void supervisor_stop_subprocesses(Supervisor *supervisor);
 
@@ -67,9 +80,216 @@ static bool supervisor_may_restart(Service *service);
 
 static bool supervisor_update_pidfile(Supervisor *supervisor);
 
-static int supervisor_enable_services(Supervisor *supervisor);
+static int supervisor_handle_dynamic(Supervisor *supervisor);
 
-static int supervisor_disable_services(Supervisor *supervisor);
+
+/*
+ * supervisor_it_* implement a helper to loop through the active services in a
+ * supervisor struct. They can be used either on their own, or via the helper
+ * macro foreach_supervised_service(). See there for an example of use.
+ */
+static inline Service *
+supervisor_it_get(Supervisor_it *sit)
+{
+	if (sit->index < sit->count)
+	{
+		return &sit->services[sit->index];
+	}
+
+	return NULL;
+}
+
+
+static inline Service *
+supervisor_it_first(Supervisor_it *sit, Supervisor *supervisor)
+{
+	*sit = (Supervisor_it) {
+		.supervisor = supervisor,
+		.services = supervisor->services,
+		.count = supervisor->serviceCount,
+		.index = 0,
+	};
+
+	return supervisor_it_get(sit);
+}
+
+
+static inline Service *
+supervisor_it_next(Supervisor_it *sit)
+{
+	sit->index++;
+
+	/* if we are done with the static services, move to the dynamic */
+	if (sit->index >= sit->count &&
+		sit->services == sit->supervisor->services)
+	{
+		sit->services = sit->supervisor->dynamicServices.services;
+		sit->count = sit->supervisor->dynamicServices.serviceCount;
+		sit->index = 0;
+	}
+
+	return supervisor_it_get(sit);
+}
+
+
+#define foreach_supervised_service(it, supervisor, service) \
+	for ((service) = supervisor_it_first((it), (supervisor)); \
+		 (service) != NULL; \
+		 (service) = supervisor_it_next(it))
+
+
+/*
+ * supervisor_add_dynamic starts the service and if successfull, adds it to the
+ * dynamicService array.
+ *
+ * Since the services are largely discoverable by name, the name has to be
+ * unique. If it is not, then the service is not started and the function
+ * returns false.
+ * Also since the service runs under supervision, there must be space for it to
+ * be added to the supervisor's dynamic services array. If there is not, then
+ * the service is not started and the function returns false.
+ *
+ * Returns true if successfully starts the service.
+ */
+bool
+supervisor_add_dynamic(Supervisor *supervisor, Service *service)
+{
+	Service *dynamicService;
+	int serviceIndex = supervisor->dynamicServices.serviceCount;
+	bool started;
+
+	if (supervisor_service_exists(supervisor, service->name))
+	{
+		log_error("Service %s already exists under supervision",
+				  service->name);
+		return false;
+	}
+
+	/* 0-based */
+	if (serviceIndex >= (MAXDYNSERVICES - 1))
+	{
+		log_error("Reached maximum permitted number of dynamic services, "
+				  "service %s is not added",
+				  service->name);
+		return false;
+	}
+
+	started = (*service->startFunction)(service->context, &(service->pid));
+
+	if (started)
+	{
+		uint64_t now = time(NULL);
+		RestartCounters *counters = &(service->restartCounters);
+
+		counters->count = 1;
+		counters->position = 0;
+		counters->startTime[counters->position] = now;
+
+		log_info("Started pg_autoctl %s service with pid %d",
+				 service->name, service->pid);
+	}
+	else
+	{
+		log_error("Failed to start pg_autoctl %s service",
+				  service->name);
+		return false;
+	}
+
+	/*
+	 * IGNORE-BANNED fits here because we want to take ownership of the service.
+	 * We copy to an address that we own from a non overlapping address.
+	 */
+	dynamicService = &supervisor->dynamicServices.services[serviceIndex];
+	memcpy(dynamicService, service, sizeof(*service)); /* IGNORE-BANNED */
+	supervisor->dynamicServices.serviceCount++;
+
+	return true;
+}
+
+
+/*
+ * supervisor_remove_dynamic stops a running dynamic service with serviceName.
+ * Once the service is stopped, then it is removed from the dynamicService array
+ * and supervisor_loop can largely forget about it.
+ *
+ * However, it will get notified during waitpid, so we add this service to the
+ * recentlyRemoved array and we will hold it there until it is requested via
+ * supervisor_find_recently_removed_dynamic() which subsequently removes it.
+ *
+ * Returns true if the service is stopped and removed from the dynamicService
+ * array, false otherwise.
+ */
+bool
+supervisor_remove_dynamic(Supervisor *supervisor, const char *serviceName)
+{
+	Service *dynamicService = NULL;
+	int serviceCount = supervisor->dynamicServices.serviceCount;
+	int serviceIndex;
+
+	/* Find it in the dynamic array */
+	for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
+	{
+		Service *service = &supervisor->dynamicServices.services[serviceIndex];
+
+		if (!strncmp(service->name, serviceName, strlen(serviceName)))
+		{
+			dynamicService = service;
+			break;
+		}
+	}
+
+	/* It was not found, nothing to do. */
+	if (!dynamicService)
+	{
+		return false;
+	}
+
+	/*
+	 * Since we are going to signal the service, we have to make certain that we
+	 * will not error out in the supervisor_loop on the waitpid() response. So
+	 * after killing the service and removing it from the dynamicService array,
+	 * we add it to the recentlyRemoved array to find it again later.
+	 */
+	if (!kill(dynamicService->pid, SIGTERM))
+	{
+		log_info("Service %s with %d did not receive signal",
+				 dynamicService->name, dynamicService->pid);
+	}
+
+	log_info("Stopped pg_autoctl %s service with pid %d",
+			 dynamicService->name, dynamicService->pid);
+
+	/*
+	 * Remove the dynamic Service from the array by swapping it out with the
+	 * last element in the array and bringing the array count down by one
+	 */
+	supervisor->dynamicServices.services[serviceIndex] =
+		supervisor->dynamicServices.services[serviceCount - 1];
+	supervisor->dynamicServices.serviceCount--;
+
+	/*
+	 * Finally add the dynamic service to the recently removed array.
+	 *
+	 * If we reached the end of this array, start again at the beginning. This
+	 * is a loosely held array and we do not fuss too much.
+	 */
+	if (supervisor->dynamicRecentlyRemoved.serviceCount == MAXDYNSERVICES)
+	{
+		supervisor->dynamicRecentlyRemoved.serviceCount = 0;
+	}
+
+	/*
+	 * IGNORE-BANNED fits here because we want to take ownership of the service.
+	 * We copy to an address that we own from a non overlapping address.
+	 */
+	memcpy(&supervisor->dynamicRecentlyRemoved.services[    /* IGNORE-BANNED */
+			   supervisor->dynamicRecentlyRemoved.serviceCount],
+		   dynamicService,
+		   sizeof(*dynamicService));
+	supervisor->dynamicRecentlyRemoved.serviceCount++;
+
+	return true;
+}
 
 
 /*
@@ -77,12 +297,24 @@ static int supervisor_disable_services(Supervisor *supervisor);
  * them.
  */
 bool
-supervisor_start(Service services[], int serviceCount, const char *pidfile)
+supervisor_start(Service services[], int serviceCount, const char *pidfile,
+				 int (*dynamicHandler)(Supervisor *, void *),
+				 void *dynamicHandlerArg)
 {
 	int serviceIndex = 0;
 	bool success = true;
 
-	Supervisor supervisor = { services, serviceCount, { 0 }, -1 };
+	Supervisor supervisor = {
+		.services = services,
+		.serviceCount = serviceCount,
+		.pidfile = { 0 },
+		.pid = -1,
+		.dynamicServices = { 0 },
+		.dynamicRecentlyRemoved = { 0 },
+		.dynamicHandler = dynamicHandler,
+		.dynamicHandlerArg = dynamicHandlerArg,
+	};
+
 
 	/* copy the pidfile over to our supervisor structure */
 	strlcpy(supervisor.pidfile, pidfile, MAXPGPATH);
@@ -108,12 +340,6 @@ supervisor_start(Service services[], int serviceCount, const char *pidfile)
 	{
 		Service *service = &(services[serviceIndex]);
 		bool started = false;
-
-		if (service->enabled != SV_ENABLED)
-		{
-			log_info("Skipping not enabled pg_autoctl %s service", service->name);
-			continue;
-		}
 
 		log_debug("Starting pg_autoctl %s service", service->name);
 
@@ -141,10 +367,6 @@ supervisor_start(Service services[], int serviceCount, const char *pidfile)
 
 			for (idx = serviceIndex - 1; idx > 0; idx--)
 			{
-				if (services[idx].enabled != SV_ENABLED)
-				{
-					continue;
-				}
 				if (kill(services[idx].pid, SIGQUIT) != 0)
 				{
 					log_error("Failed to send SIGQUIT to service %s with pid %d",
@@ -175,6 +397,14 @@ supervisor_start(Service services[], int serviceCount, const char *pidfile)
 		return false;
 	}
 
+	/*
+	 * Let the dynamic handler decide about dynamic services
+	 */
+	if (dynamicHandler)
+	{
+		dynamicHandler(&supervisor, dynamicHandlerArg);
+	}
+
 	/* now supervise sub-processes and implement retry strategy */
 	if (!supervisor_loop(&supervisor))
 	{
@@ -195,8 +425,9 @@ supervisor_start(Service services[], int serviceCount, const char *pidfile)
 static bool
 supervisor_loop(Supervisor *supervisor)
 {
-	int subprocessCount = supervisor->serviceCount;
 	bool firstLoop = true;
+	int subprocessCount = supervisor->serviceCount +
+						  supervisor->dynamicServices.serviceCount;
 
 	/* wait until all subprocesses are done */
 	while (subprocessCount > 0)
@@ -215,34 +446,34 @@ supervisor_loop(Supervisor *supervisor)
 			(void) supervisor_reload_services(supervisor);
 		}
 
-		if (asked_to_enable)
+		if (asked_to_handle_dynamic)
 		{
-			int enabled = 0;
+			int changed = 0;
 			log_info("pg_autoctl received a signal to, "
-					 "enable non active services");
+					 "handle dynamic services");
 
-			enabled = supervisor_enable_services(supervisor);
-			if (enabled)
-			{
-				/* reset firstLoop to avoid looping on waitpid() below */
-				firstLoop = true;
-				subprocessCount += enabled;
-			}
-		}
-
-		if (asked_to_disable)
-		{
-			int disabled = 0;
-			log_info("pg_autoctl received a signal to, "
-					 "disable active services");
-
-			disabled = supervisor_disable_services(supervisor);
-			if (disabled)
+			changed = supervisor_handle_dynamic(supervisor);
+			if (changed != 0)
 			{
 				/*
-				 * waitpid will fire and that should be fine
+				 * We do not know if services where started or stopped. If
+				 * services where stopped we need to substract the number of
+				 * toggled from the running one. In that case we have to be
+				 * certain that we do not substract more than the subprocesses
+				 * already running. IF we do, then this is a dev error and we
+				 * should fail.
 				 */
-				subprocessCount -= disabled;
+				if ((subprocessCount + changed) < 0)
+				{
+					log_fatal("BUG: dev error, toggled off more subprocess than"
+							  " running at the moment");
+
+					supervisor->cleanExit = false;
+					supervisor->shutdownSequenceInProgress = true;
+					supervisor_stop_subprocesses(supervisor);
+					break;
+				}
+				subprocessCount += changed;
 			}
 		}
 
@@ -309,10 +540,12 @@ supervisor_loop(Supervisor *supervisor)
 			{
 				Service *dead = NULL;
 
-				/* if this is a disabled service which just exited, do nothing */
-				if (supervisor_find_disabled_service(supervisor, pid, &dead))
+				/* if this is a dynamic service which just exited, do nothing */
+				if (supervisor_find_recently_removed_dynamic(supervisor,
+															 pid,
+															 &dead))
 				{
-					log_info("Disabled service %s exited", dead->name);
+					log_info("Removed service %s exited", dead->name);
 					break;
 				}
 
@@ -345,24 +578,28 @@ supervisor_loop(Supervisor *supervisor)
 
 
 /*
- * supervisor_find_service loops over the SubProcess array to find given pid
- * which matches only a disabled service
+ * supervisor_find_recently_removed_dynamic is responsible for finding a
+ * recently removed dynamic service in the dynamicRecentlyRemoved array. If the
+ * service if found, then it is removed from this array.
  */
 static bool
-supervisor_find_disabled_service(Supervisor *supervisor, pid_t pid, Service **result)
+supervisor_find_recently_removed_dynamic(Supervisor *supervisor, pid_t pid,
+										 Service **result)
 {
-	int serviceCount = supervisor->serviceCount;
-	int serviceIndex = 0;
+	Service *recentlyRemoved = supervisor->dynamicRecentlyRemoved.services;
+	int serviceCount = supervisor->dynamicRecentlyRemoved.serviceCount;
+	int serviceIndex;
 
 	for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
 	{
-		if (supervisor->services[serviceIndex].enabled != SV_DISABLED)
+		Service *service = &recentlyRemoved[serviceIndex];
+		if (service->pid == pid)
 		{
-			continue;
-		}
-		if (pid == supervisor->services[serviceIndex].pid)
-		{
-			*result = &(supervisor->services[serviceIndex]);
+			*result = service;
+
+			/* Now that the service is found, remove it from the array */
+			recentlyRemoved[serviceIndex] = recentlyRemoved[serviceCount - 1];
+			supervisor->dynamicRecentlyRemoved.serviceCount--;
 			return true;
 		}
 	}
@@ -378,18 +615,14 @@ supervisor_find_disabled_service(Supervisor *supervisor, pid_t pid, Service **re
 static bool
 supervisor_find_service(Supervisor *supervisor, pid_t pid, Service **result)
 {
-	int serviceCount = supervisor->serviceCount;
-	int serviceIndex = 0;
+	Supervisor_it sit;
+	Service *service;
 
-	for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
+	foreach_supervised_service(&sit, supervisor, service)
 	{
-		if (supervisor->services[serviceIndex].enabled != SV_ENABLED)
+		if (pid == service->pid)
 		{
-			continue;
-		}
-		if (pid == supervisor->services[serviceIndex].pid)
-		{
-			*result = &(supervisor->services[serviceIndex]);
+			*result = service;
 			return true;
 		}
 	}
@@ -404,18 +637,11 @@ supervisor_find_service(Supervisor *supervisor, pid_t pid, Service **result)
 static void
 supervisor_reload_services(Supervisor *supervisor)
 {
-	int serviceCount = supervisor->serviceCount;
-	int serviceIndex = 0;
+	Supervisor_it sit;
+	Service *service;
 
-	for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
+	foreach_supervised_service(&sit, supervisor, service)
 	{
-		Service *service = &(supervisor->services[serviceIndex]);
-
-		if (service->enabled != SV_ENABLED)
-		{
-			continue;
-		}
-
 		log_info("Reloading service \"%s\" by signaling pid %d with SIGHUP",
 				 service->name, service->pid);
 
@@ -438,19 +664,12 @@ supervisor_reload_services(Supervisor *supervisor)
 static void
 supervisor_stop_subprocesses(Supervisor *supervisor)
 {
+	Supervisor_it sit;
+	Service *service;
 	int signal = get_current_signal(SIGTERM);
-	int serviceCount = supervisor->serviceCount;
-	int serviceIndex = 0;
 
-	for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
+	foreach_supervised_service(&sit, supervisor, service)
 	{
-		Service *service = &(supervisor->services[serviceIndex]);
-
-		if (service->enabled != SV_ENABLED)
-		{
-			continue;
-		}
-
 		if (kill(service->pid, signal) != 0)
 		{
 			log_error("Failed to send signal %s to service %s with pid %d",
@@ -467,9 +686,9 @@ supervisor_stop_subprocesses(Supervisor *supervisor)
 static void
 supervisor_stop_other_services(Supervisor *supervisor, pid_t pid)
 {
+	Supervisor_it sit;
+	Service *service;
 	int signal = get_current_signal(SIGTERM);
-	int serviceCount = supervisor->serviceCount;
-	int serviceIndex = 0;
 
 	/*
 	 * In case of unexpected stop (bug), we stop the other processes too.
@@ -478,14 +697,8 @@ supervisor_stop_other_services(Supervisor *supervisor, pid_t pid)
 	 */
 	if (!(asked_to_stop || asked_to_stop_fast))
 	{
-		for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
+		foreach_supervised_service(&sit, supervisor, service)
 		{
-			Service *service = &(supervisor->services[serviceIndex]);
-			if (service->enabled != SV_ENABLED)
-			{
-				continue;
-			}
-
 			if (service->pid != pid)
 			{
 				if (kill(service->pid, signal) != 0)
@@ -720,103 +933,31 @@ supervisor_shutdown_sequence(Supervisor *supervisor)
 
 
 /*
- * supervisor_enable_services enables any disabled services defined in the
- * supervisor.
+ * supervisor_handle_dynamic calls the dynamic handler if exits. It is the
+ * handler's responsibility to add or remove dynamic services using the provided
+ * api.
  *
- * Returns the number of successfully enabled services.
+ * Returns the net number of successfully added and removed services. This
+ * number can be negative if more services have been removed than added.
  */
 static int
-supervisor_enable_services(Supervisor *supervisor)
+supervisor_handle_dynamic(Supervisor *supervisor)
 {
-	Service *service = supervisor->services;
-	int numEnabled = 0;
-	int serviceIndex;
+	int numChanged = 0;
 
-	asked_to_enable = 0;
-
-	for (serviceIndex = 0;
-		 serviceIndex < supervisor->serviceCount;
-		 serviceIndex++, service++)
+	/*
+	 * here we call the dyn function if defined, which should return the
+	 * diff of number of services affected, e.g. 1 started => 1, 1 stopped =>
+	 * -1, 2 started and 3 stopped => -1 etc
+	 */
+	if (supervisor->dynamicHandler)
 	{
-		if (service->enabled == SV_DISABLED)
-		{
-			bool started;
-
-			log_debug("Attempting to enable %s", service->name);
-
-			started = (*service->startFunction)(service->context, &(service->pid));
-
-			if (started)
-			{
-				/* XXX: CLOCK_MONOTONIC ? */
-				uint64_t now = time(NULL);
-
-				RestartCounters *counters = &(service->restartCounters);
-
-				/* Mark the service as enabled and disableable*/
-				service->enabled = SV_ENABLED;
-				service->canDisable = true;
-
-				/* Populate the restart counters */
-				counters->count = 1;
-				counters->position = 0;
-				counters->startTime[counters->position] = now;
-
-				log_info("Started pg_autoctl %s service with pid %d",
-						 service->name, service->pid);
-
-				numEnabled++;
-			}
-			else
-			{
-				log_error("Failed to start service %s, "
-						  "check the error logs and retry",
-						  service->name);
-			}
-		}
+		numChanged = supervisor->dynamicHandler(supervisor,
+												supervisor->dynamicHandlerArg);
 	}
 
-	return numEnabled;
-}
-
-
-/*
- * supervisor_disable_services disables any enabled services defined in the
- * supervisor.
- *
- * Returns the number of successfully disabled services.
- */
-static int
-supervisor_disable_services(Supervisor *supervisor)
-{
-	Service *service = supervisor->services;
-	int disabled = 0;
-	int serviceIndex;
-
-	asked_to_disable = 0;
-
-	for (serviceIndex = 0;
-		 serviceIndex < supervisor->serviceCount;
-		 serviceIndex++, service++)
-	{
-		if (service->canDisable && service->enabled == SV_ENABLED)
-		{
-			log_info("Got called to disable %s", service->name);
-
-			if (kill(service->pid, SIGUSR2) != 0)
-			{
-				log_error("Failed to send signal SIGUSR2 to service %s with pid %d",
-						  service->name,
-						  service->pid);
-				continue;
-			}
-
-			service->enabled = SV_DISABLED;
-			disabled++;
-		}
-	}
-
-	return disabled;
+	asked_to_handle_dynamic = 0;
+	return numChanged;
 }
 
 
@@ -827,6 +968,8 @@ supervisor_disable_services(Supervisor *supervisor)
  *	* exit the whole program with a happy code
  *	* exit the whole program with failed code
  *
+ * The action is depended on whether the service is held in the dynamic array.
+ *
  * The function can be greatly simplified. It is intentionally left a bit
  * verbose for the benefit of readability.
  */
@@ -835,6 +978,8 @@ supervisor_handle_failed_restart(Supervisor *supervisor, Service *service,
 								 int status)
 {
 	int returnCode = WEXITSTATUS(status);
+	bool isDynamic = false;
+
 
 	/*
 	 * If we are already going handling a shutdown, then do not update it
@@ -846,28 +991,45 @@ supervisor_handle_failed_restart(Supervisor *supervisor, Service *service,
 	}
 
 	/*
-	 * No need to act, the service should not have restarted. IF that
-	 * service was enabled, then also disable it.
+	 * Loop through the dynamic service array and if it found, then mark it
+	 */
+	for (int serviceIndex = 0;
+		 serviceIndex < supervisor->dynamicServices.serviceCount;
+		 serviceIndex++)
+	{
+		Service *dynamic = &supervisor->dynamicServices.services[serviceIndex];
+
+		if (!strncmp(dynamic->name, service->name, strlen(service->name)))
+		{
+			isDynamic = true;
+			break;
+		}
+	}
+
+	/*
+	 * No need to act, the service should not have restarted.
+	 *
+	 * If a dynamic service, then asked its handler to remove it.
 	 */
 	if (service->policy == RP_TEMPORARY)
 	{
-		if (service->canDisable && service->enabled == SV_ENABLED)
+		if (isDynamic)
 		{
-			service->enabled = SV_DISABLED;
+			(void) supervisor_remove_dynamic(supervisor, service->name);
 		}
 		return;
 	}
 
 	/*
 	 * If a transient service and exited normally then we are happy. If it was
-	 * an enabled service, then disable it but continue running the rest of the
+	 * a dyanmic service, then remove it  but continue running the rest of the
 	 * services, otherwise, shutdown all the services with a happy code.
 	 */
 	if (service->policy == RP_TRANSIENT && returnCode == EXIT_CODE_QUIT)
 	{
-		if (service->canDisable && service->enabled == SV_ENABLED)
+		if (isDynamic)
 		{
-			service->enabled = SV_DISABLED;
+			(void) supervisor_remove_dynamic(supervisor, service->name);
 		}
 		else
 		{
@@ -882,12 +1044,12 @@ supervisor_handle_failed_restart(Supervisor *supervisor, Service *service,
 	 * There are no more happy exit code scenarios. Either disable the failed
 	 * service or shutdown everything
 	 */
-	if (service->canDisable && service->enabled == SV_ENABLED)
+
+	if (isDynamic)
 	{
-		/* If we can disable that service, then do so */
 		log_error("Failed to restart service %s, disabling it",
 				  service->name);
-		service->enabled = SV_DISABLED;
+		(void) supervisor_remove_dynamic(supervisor, service->name);
 	}
 	else
 	{
@@ -1087,8 +1249,8 @@ supervisor_may_restart(Service *service)
 static bool
 supervisor_update_pidfile(Supervisor *supervisor)
 {
-	int serviceCount = supervisor->serviceCount;
-	int serviceIndex = 0;
+	Supervisor_it sit;
+	Service *service;
 	PQExpBuffer content = createPQExpBuffer();
 
 	bool success = false;
@@ -1106,16 +1268,9 @@ supervisor_update_pidfile(Supervisor *supervisor)
 	}
 
 	/* now add a line per service  */
-	for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
+
+	foreach_supervised_service(&sit, supervisor, service)
 	{
-		Service *service = &(supervisor->services[serviceIndex]);
-
-		/* XXX: we might want to write the status here */
-		if (service->enabled != SV_ENABLED)
-		{
-			continue;
-		}
-
 		/* one line per service, pid space name */
 		appendPQExpBuffer(content, "%d %s\n", service->pid, service->name);
 	}
@@ -1181,6 +1336,24 @@ supervisor_find_service_pid(const char *pidfile,
 	}
 
 	free(fileContents);
+
+	return false;
+}
+
+
+bool
+supervisor_service_exists(Supervisor *supervisor, const char *serviceName)
+{
+	Supervisor_it sit;
+	Service *service;
+
+	foreach_supervised_service(&sit, supervisor, service)
+	{
+		if (!strncmp(service->name, serviceName, strlen(serviceName)))
+		{
+			return true;
+		}
+	}
 
 	return false;
 }

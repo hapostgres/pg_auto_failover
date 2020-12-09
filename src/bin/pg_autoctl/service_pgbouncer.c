@@ -85,6 +85,7 @@ service_pbouncer_setup_config(Keeper *keeper)
 {
 	KeeperConfig *keeperConfig = &(keeper->config);
 	PgbouncerConfig *pgbouncerConfig;
+	Monitor monitor = { 0 };
 	NodeAddress primary = { 0 };
 
 	pgbouncerConfig = calloc(1, sizeof(*pgbouncerConfig));
@@ -93,6 +94,41 @@ service_pbouncer_setup_config(Keeper *keeper)
 		/* This is not recoverable */
 		log_fatal("malloc failed %m");
 		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	/*
+	 * Make certain that we have the latest configuration and that the postgres
+	 * is done been setting up
+	 */
+	if (!keeper_config_read_file(keeperConfig,
+								 true, /* missingPgdataIsOk */
+								 true, /* pgIsNotRunningIsOk */
+								 true /* monitorDisabledIsOk */))
+	{
+		/* It has already logged why */
+		return NULL;
+	}
+
+	/*
+	 * Poor mans' synchronisation:
+	 *
+	 * Currently pgbouncer can only run as a subprocess of a postgres node. Make
+	 * certain that the node is running. If not, spin a bit in case this is
+	 * still starting, otherwise fail.
+	 */
+	if (!pg_setup_is_ready(&keeperConfig->pgSetup, true /* postgresNotRunningIsOk */))
+	{
+		/* Spin a bit otherwise fail */
+		int retries = 10;
+		do {
+			pg_usleep(100000L);
+		} while (!pg_setup_is_ready(&keeperConfig->pgSetup, true) && --retries > 0);
+
+		if (!pg_setup_is_ready(&keeperConfig->pgSetup, true))
+		{
+			log_error("Cannot start pgbouncer service, pg set up is not ready");
+			return false;
+		}
 	}
 
 	/*
@@ -113,13 +149,23 @@ service_pbouncer_setup_config(Keeper *keeper)
 			sizeof(keeperConfig->formation));
 	pgbouncerConfig->groupId = keeperConfig->groupId;
 
-	if (!keeper_get_primary(keeper, &primary))
+	if (!monitor_init(&monitor, keeperConfig->monitor_pguri))
 	{
-		log_error("Failed to get primary for current formation and group.");
+		/* It has already logged why */
 		free(pgbouncerConfig);
 		return NULL;
 	}
-	pgsql_finish(&(keeper->monitor.pgsql));
+
+	if (!monitor_get_primary(&monitor, keeperConfig->formation,
+							 keeperConfig->groupId, &primary))
+	{
+		/* It has already logged why */
+		pgsql_finish(&(monitor.pgsql));
+		free(pgbouncerConfig);
+		return NULL;
+	}
+
+	pgsql_finish(&(monitor.pgsql));
 	pgbouncerConfig->pgSetup = keeperConfig->pgSetup;
 	pgbouncerConfig->primary = primary;
 
@@ -141,7 +187,6 @@ service_pgbouncer_start(void *context, pid_t *pid)
 	PgbouncerConfig *pgbouncerConfig;
 	IntString semIdString;
 	pid_t fpid;
-
 	semIdString = intToString(log_semaphore.semId);
 	setenv(PG_AUTOCTL_DEBUG, "1", 1);
 	setenv(PG_AUTOCTL_LOG_SEMAPHORE, semIdString.strValue, 1);
@@ -168,13 +213,13 @@ service_pgbouncer_start(void *context, pid_t *pid)
 			if (!pgbouncerConfig)
 			{
 				/* It has already logged why */
-				return false;
+				exit(EXIT_CODE_INTERNAL_ERROR);
 			}
 			if (!pgbouncer_config_write_runtime(pgbouncerConfig))
 			{
 				/* It has already logged why */
 				free(pgbouncerConfig);
-				return false;
+				exit(EXIT_CODE_INTERNAL_ERROR);
 			}
 
 			pgbouncerPid = service_pgbouncer_launch(pgbouncerConfig);
@@ -184,7 +229,7 @@ service_pgbouncer_start(void *context, pid_t *pid)
 			free(pgbouncerConfig);
 
 			if (asked_to_stop_fast || asked_to_stop ||
-				asked_to_quit || asked_to_disable)
+				asked_to_quit)
 			{
 				log_info("Stopped pgbouncer manager service");
 				exit(EXIT_CODE_QUIT);
@@ -197,9 +242,23 @@ service_pgbouncer_start(void *context, pid_t *pid)
 		default:
 		{
 			/* fork succeeded, in parent */
+			pid_t wpid;
+			int status;
+
+			wpid = waitpid(fpid, &status, WNOHANG);
+
+			if (wpid != 0)
+			{
+				/* Something went wrong with our child */
+				log_error("pg_autoctl pgbouncer manager process failed in subprocess %d",
+						  fpid);
+				return false;
+			}
+
 			log_debug("pg_autoctl pgbouncer manager process started in subprocess %d",
 					  fpid);
 			*pid = fpid;
+
 			return true;
 		}
 	}
@@ -353,13 +412,6 @@ service_pgbouncer_manager_loop(void *context, pid_t ppid)
 			break;
 		}
 
-		if (asked_to_disable)
-		{
-			log_info("Asked to disable the service");
-			kill(ppid, SIGINT);
-			break;
-		}
-
 		if (!pgsql_listen(&(monitor.pgsql), channels) ||
 			!monitor_wait_for_state_change(&monitor,
 										   config->formation,
@@ -393,13 +445,6 @@ service_pgbouncer_manager_loop(void *context, pid_t ppid)
 			if (asked_to_stop_fast || asked_to_stop || asked_to_quit)
 			{
 				kill(ppid, SIGQUIT);
-				break;
-			}
-
-			if (asked_to_disable)
-			{
-				log_info("Asked to disable the service");
-				kill(ppid, SIGINT);
 				break;
 			}
 

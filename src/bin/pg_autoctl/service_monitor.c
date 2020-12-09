@@ -68,7 +68,8 @@ start_monitor(Monitor *monitor)
 
 	return supervisor_start(subprocesses,
 							subprocessesCount,
-							config->pathnames.pid);
+							config->pathnames.pid,
+							NULL, NULL);
 }
 
 

@@ -78,7 +78,7 @@ start_keeper(Keeper *keeper)
 
 	int subprocessesCount = sizeof(subprocesses) / sizeof(subprocesses[0]);
 
-	return supervisor_start(subprocesses, subprocessesCount, pidfile);
+	return supervisor_start(subprocesses, subprocessesCount, pidfile, NULL, NULL);
 }
 
 

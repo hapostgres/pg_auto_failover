@@ -171,6 +171,11 @@
 							&(config->postgresql_restart_failure_max_retries), \
 							POSTGRESQL_FAILS_TO_START_RETRIES)
 
+#define OPTION_PGBOUNCER_SERVICE(config) \
+	make_strbuf_option_default("services", "pgbouncer", "enable-pgbouncer", \
+							   false, MAXPGPATH, \
+							   config->pgbouncer, "disabled")
+
 #define SET_INI_OPTIONS_ARRAY(config) \
 	{ \
 		OPTION_AUTOCTL_ROLE(config), \
@@ -204,6 +209,7 @@
 		OPTION_TIMEOUT_PREPARE_PROMOTION_WALRECEIVER(config), \
 		OPTION_TIMEOUT_POSTGRESQL_RESTART_FAILURE_TIMEOUT(config), \
 		OPTION_TIMEOUT_POSTGRESQL_RESTART_FAILURE_MAX_RETRIES(config), \
+		OPTION_PGBOUNCER_SERVICE(config), \
 		INI_OPTION_LAST \
 	}
 

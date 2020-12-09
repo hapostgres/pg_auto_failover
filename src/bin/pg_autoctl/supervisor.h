@@ -33,6 +33,11 @@
 #define SERVICE_NAME_MONITOR_INIT "monitor-init"
 
 /*
+ * Other service names are sted in this section.
+ */
+#define SERVICE_NAME_PGBOUNCER "pgbouncer"
+
+/*
  * Our supervisor process may retart a service sub-process when it quits,
  * depending on the exit status and the restart policy that has been choosen:
  *
@@ -49,12 +54,6 @@ typedef enum
 	RP_TEMPORARY,
 	RP_TRANSIENT
 } RestartPolicy;
-
-typedef enum
-{
-	SV_ENABLED = 0,
-	SV_DISABLED
-} ServiceEnabled;
 
 /*
  * Supervisor restart strategy.
@@ -99,9 +98,16 @@ typedef struct RestartCounters
  *
  * In particular, services may be started more than once when they fail.
  *
- * Also a service may get started or stopped at any point depending on the
- * ServiceEnabled value.
- * For a service to be disabled, it has to have the canDisable flag set.
+ * A supervisor can also work with an array of "dynamic services". Those differ
+ * from the array described above as they can be added or removed at any point.
+ * Even if a dynamic service has been added during start up, it will be started
+ * after the static services have been started succefully.
+ * Another difference is when a dynanic service has exhausted it's restart
+ * attempts, the supervisor will choose to stop this particular service instead
+ * of shutting down.
+ *
+ * What differenciates the two different kinds of services, is their location in
+ * the supervisor struct. They look indentical otherwise.
  */
 typedef struct Service
 {
@@ -110,8 +116,6 @@ typedef struct Service
 	pid_t pid;                          /* Service PID */
 	bool (*startFunction)(void *context, pid_t *pid);
 	void *context;             /* Service Context (Monitor or Keeper struct) */
-	ServiceEnabled enabled;    /* Is the service enabled? Default yes */
-	bool canDisable;           /* Can we disable the service? Default no */
 	RestartCounters restartCounters;
 } Service;
 
@@ -119,18 +123,48 @@ typedef struct Supervisor
 {
 	Service *services;
 	int serviceCount;
+
 	char pidfile[MAXPGPATH];
 	pid_t pid;
 	bool cleanExit;
 	bool shutdownSequenceInProgress;
 	int shutdownSignal;
 	int stoppingLoopCounter;
+
+	/* dynamic handler function */
+	int (*dynamicHandler)(struct Supervisor *, void *);
+	void *dynamicHandlerArg;    /* dynamic handler private data */
+
+	/*
+	 * Anonymous struct holding active dynamic services.
+	 * Do not access directly.
+	 */
+	struct
+	{
+		Service services[MAXDYNSERVICES];
+		int serviceCount;
+	} dynamicServices;
+
+	/*
+	 * Anonymous struct holding recently removed dynamic services.
+	 * Do not access directly.
+	 */
+	struct
+	{
+		Service services[MAXDYNSERVICES];
+		int serviceCount;
+	} dynamicRecentlyRemoved;
 } Supervisor;
 
-
-bool supervisor_start(Service services[], int serviceCount, const char *pidfile);
+bool supervisor_start(Service services[], int serviceCount, const char *pidfile,
+					  int (*dynamicHandler)(Supervisor *, void *),
+					  void *dynamicHandlerArg);
 
 bool supervisor_stop(Supervisor *supervisor);
+
+bool supervisor_service_exists(Supervisor *supervisor, const char *serviceName);
+bool supervisor_add_dynamic(Supervisor *supervisor, Service *service);
+bool supervisor_remove_dynamic(Supervisor *supervisor, const char *serviceName);
 
 bool supervisor_find_service_pid(const char *pidfile,
 								 const char *serviceName,

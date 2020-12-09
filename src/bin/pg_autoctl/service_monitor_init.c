@@ -79,7 +79,8 @@ service_monitor_init(Monitor *monitor)
 
 	if (!supervisor_start(subprocesses,
 						  subprocessesCount,
-						  config->pathnames.pid))
+						  config->pathnames.pid,
+						  NULL, NULL))
 	{
 		/* errors have already been logged */
 		return false;

@@ -391,6 +391,7 @@ cli_common_keeper_getopts(int argc, char **argv,
 				/* { "enable-pgbouncer", required_argument, NULL, 'B' }, */
 				strlcpy(LocalOptionConfig.pgbouncerUserConfig, optarg,
 						MAXPGPATH);
+				strlcpy(LocalOptionConfig.pgbouncer, "enabled", MAXPGPATH);
 				log_trace("--enable-pgbouncer %s",
 						  LocalOptionConfig.pgbouncerUserConfig);
 				break;
@@ -1639,11 +1640,11 @@ cli_pg_autoctl_reload(const char *pidfile)
 
 
 /*
- * cli_pg_autoctl_enable_services signals the pg_autoctl to enable any
- * services it has registered as enableable by sending it a SIGUSR1 signal.
+ * cli_pg_autoctl_handle_dynamic signals the pg_autoctl to handle any dynamic
+ * services based on its configuration
  */
 bool
-cli_pg_autoctl_enable_services(const char *pidfile)
+cli_pg_autoctl_handle_dynamic(const char *pidfile)
 {
 	pid_t pid;
 
@@ -1651,7 +1652,7 @@ cli_pg_autoctl_enable_services(const char *pidfile)
 	{
 		if (pid <= 0)
 		{
-			log_error("Failed to enable services pg_autoctl: "
+			log_error("Failed to handle dynamic services pg_autoctl: "
 					  "pid file \"%s\" contains negative-or-zero pid %d",
 					  pidfile, pid);
 			return false;
@@ -1660,38 +1661,6 @@ cli_pg_autoctl_enable_services(const char *pidfile)
 		if (kill(pid, SIGUSR1) != 0)
 		{
 			log_error("Failed to send SIGUSR1 to the pg_autoctl's pid %d: %m",
-					  pid);
-			return false;
-		}
-	}
-
-	return true;
-}
-
-
-/*
- * cli_pg_autoctl_disable_services signals the pg_autoctl to disable any
- * services it has registered as enableable and are enabled by sending it
- * a SIGUSR2 signal.
- */
-bool
-cli_pg_autoctl_disable_services(const char *pidfile)
-{
-	pid_t pid;
-
-	if (read_pidfile(pidfile, &pid))
-	{
-		if (pid <= 0)
-		{
-			log_error("Failed to disable services pg_autoctl: "
-					  "pid file \"%s\" contains negative-or-zero pid %d",
-					  pidfile, pid);
-			return false;
-		}
-
-		if (kill(pid, SIGUSR2) != 0)
-		{
-			log_error("Failed to send SIGUSR2 to the pg_autoctl's pid %d: %m",
 					  pid);
 			return false;
 		}

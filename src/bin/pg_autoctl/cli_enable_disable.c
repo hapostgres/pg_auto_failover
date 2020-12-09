@@ -1235,6 +1235,112 @@ cli_disable_ssl(int argc, char **argv)
  */
 static PgbouncerConfig pgbouncerConfig;
 
+
+static bool
+pgbouncer_enable_in_keeper_config(const PgbouncerConfig *pgbouncerConfig)
+{
+	KeeperConfig kconfig = { 0 };
+	const char *key = "services.pgbouncer";
+	const char *value = "enabled";
+	char retrievedValue[MAXPGPATH];
+
+	if (!keeper_config_set_pathnames_from_pgdata(&kconfig.pathnames,
+												 pgbouncerConfig->pgSetup.pgdata))
+	{
+		return false;
+	}
+
+	if (!keeper_config_set_setting(&kconfig,
+								   key,
+								   (char *) value))
+	{
+		/* we already logged about it */
+		keeper_config_destroy(&kconfig);
+		return false;
+	}
+
+	/* first write the new configuration settings to file */
+	if (!keeper_config_write_file(&kconfig))
+	{
+		log_fatal("Failed to write pg_autoctl configuration file \"%s\", "
+				  "see above for details",
+				  kconfig.pathnames.config);
+		return false;
+	}
+
+	/* now read the value from just written file */
+	if (keeper_config_get_setting(&kconfig,
+								  key,
+								  retrievedValue,
+								  BUFSIZE))
+	{
+		fformat(stdout, "%s\n", retrievedValue);
+	}
+	else
+	{
+		log_error("Failed to lookup option %s", key);
+		keeper_config_destroy(&kconfig);
+		return false;
+	}
+
+	keeper_config_destroy(&kconfig);
+	return true;
+}
+
+
+static bool
+pgbouncer_disable_in_keeper_config(const PgbouncerConfig *pgbouncerConfig)
+{
+	KeeperConfig kconfig = { 0 };
+	const char *key = "services.pgbouncer";
+	const char *value = "disabled";
+	char retrievedValue[MAXPGPATH];
+
+	if (!keeper_config_set_pathnames_from_pgdata(&kconfig.pathnames,
+												 pgbouncerConfig->pgSetup.pgdata))
+	{
+		log_error("Failed to set up required state");
+		return false;
+	}
+
+	if (!keeper_config_set_setting(&kconfig,
+								   key,
+								   (char *) value))
+	{
+		/* we already logged about it */
+		keeper_config_destroy(&kconfig);
+		return false;
+	}
+
+	/* first write the new configuration settings to file */
+	if (!keeper_config_write_file(&kconfig))
+	{
+		log_fatal("Failed to write pg_autoctl configuration file \"%s\", "
+				  "see above for details",
+				  kconfig.pathnames.config);
+		return false;
+	}
+
+	/* now read the value from just written file */
+	if (keeper_config_get_setting(&kconfig,
+								  key,
+								  retrievedValue,
+								  BUFSIZE))
+	{
+		fformat(stdout, "%s\n", retrievedValue);
+	}
+	else
+	{
+		log_error("Failed to lookup option %s", key);
+		keeper_config_destroy(&kconfig);
+		return false;
+	}
+
+	keeper_config_destroy(&kconfig);
+	return true;
+}
+
+
 static int
 cli_pgbouncer_getopts(int argc, char **argv)
 {
@@ -1382,11 +1488,18 @@ cli_enable_pgbouncer(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	if (!cli_pg_autoctl_enable_services(config.pathnames.pid))
+	if (!pgbouncer_enable_in_keeper_config(&config))
 	{
 		/* It has already logged why */
 		pgbouncer_config_destroy(&config);
-		exit(EXIT_CODE_RELOAD);
+		exit(EXIT_CODE_BAD_STATE);
+	}
+
+	if (!cli_pg_autoctl_handle_dynamic(config.pathnames.pid))
+	{
+		/* It has already logged why */
+		pgbouncer_config_destroy(&config);
+		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
 	pgbouncer_config_destroy(&config);
@@ -1406,9 +1519,16 @@ cli_disable_pgbouncer(int argc, char **argv)
 		exit(EXIT_CODE_BAD_STATE);
 	}
 
-	if (!cli_pg_autoctl_disable_services(config.pathnames.pid))
+	if (!pgbouncer_disable_in_keeper_config(&config))
 	{
 		/* It has already logged why */
-		exit(EXIT_CODE_RELOAD);
+		pgbouncer_config_destroy(&config);
+		exit(EXIT_CODE_BAD_STATE);
+	}
+
+	if (!cli_pg_autoctl_handle_dynamic(config.pathnames.pid))
+	{
+		/* It has already logged why */
+		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 }

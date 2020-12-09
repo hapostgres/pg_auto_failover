@@ -50,8 +50,11 @@ typedef struct KeeperConfig
 	int postgresql_restart_failure_timeout;
 	int postgresql_restart_failure_max_retries;
 
-	/* Enable pgbouncer */
+	/* pgbouncer transient value, not kept in state*/
 	char pgbouncerUserConfig[MAXPGPATH];
+
+	/* Services */
+	char pgbouncer[MAXPGPATH];
 } KeeperConfig;
 
 #define PG_AUTOCTL_MONITOR_IS_DISABLED(config) \
