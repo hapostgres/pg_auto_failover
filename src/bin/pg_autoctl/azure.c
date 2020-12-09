@@ -100,9 +100,9 @@ log_program_output(Program *prog, int outLogLevel, int errorLogLevel)
 
 
 /*
- * run_az_command runs a command line using the azure CLI command, and when
- * azureScript is true instead of running the command it only shows the command
- * it would run as the output of the pg_autoctl command.
+ * azure_run_command runs a command line using the azure CLI command, and when
+ * dryRun is true instead of running the command it only shows the command it
+ * would run as the output of the pg_autoctl command.
  */
 static int
 azure_run_command(Program *program)
