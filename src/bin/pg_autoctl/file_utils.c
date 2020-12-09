@@ -615,7 +615,7 @@ search_path_deduplicate_symlinks(SearchPath *results, SearchPath *dedup)
 		bool alreadyThere = false;
 
 		char *currentPath = results->matches[rIndex];
-		char currentRealPath[MAXPGPATH] = { 0 };
+		char currentRealPath[PATH_MAX] = { 0 };
 
 		if (realpath(currentPath, currentRealPath) == NULL)
 		{
@@ -637,7 +637,22 @@ search_path_deduplicate_symlinks(SearchPath *results, SearchPath *dedup)
 
 		if (!alreadyThere)
 		{
-			strlcpy(dedup->matches[dedup->found++], currentRealPath, MAXPGPATH);
+			int bytesWritten =
+				strlcpy(dedup->matches[dedup->found++],
+						currentRealPath,
+						MAXPGPATH);
+
+			if (bytesWritten >= MAXPGPATH)
+			{
+				log_error(
+					"Real path \"%s\" is %d bytes long, and pg_autoctl "
+					"is limited to handling paths of %d bytes long, maximum",
+					currentRealPath,
+					(int) strlen(currentRealPath),
+					MAXPGPATH);
+
+				return false;
+			}
 		}
 	}
 
