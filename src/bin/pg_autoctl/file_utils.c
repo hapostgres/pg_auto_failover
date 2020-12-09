@@ -607,13 +607,6 @@ search_path(const char *filename, SearchPath *result)
 bool
 search_path_deduplicate_symlinks(SearchPath *results, SearchPath *dedup)
 {
-	if (results->found < 2)
-	{
-		/* copy our results over to dedup and be done already */
-		*dedup = *results;
-		return true;
-	}
-
 	/* now re-initialize the target structure dedup */
 	dedup->found = 0;
 
@@ -631,21 +624,14 @@ search_path_deduplicate_symlinks(SearchPath *results, SearchPath *dedup)
 		}
 
 		/* add-in the realpath to dedup, unless it's already in there */
-		if (dedup->found == 0)
+		for (int dIndex = 0; dIndex < dedup->found; dIndex++)
 		{
-			alreadyThere = false;
-		}
-		else
-		{
-			for (int dIndex = 0; dIndex < dedup->found; dIndex++)
+			if (strcmp(dedup->matches[dIndex], currentRealPath) == 0)
 			{
-				if (strcmp(dedup->matches[dIndex], currentRealPath) == 0)
-				{
-					alreadyThere = true;
+				alreadyThere = true;
 
-					log_debug("dedup: skipping \"%s\"", currentPath);
-					break;
-				}
+				log_debug("dedup: skipping \"%s\"", currentPath);
+				break;
 			}
 		}
 

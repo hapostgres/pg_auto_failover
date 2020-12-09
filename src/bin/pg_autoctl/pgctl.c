@@ -306,10 +306,18 @@ set_pg_ctl_from_PG_CONFIG(PostgresSetup *pgSetup)
 bool
 set_pg_ctl_from_pg_config(PostgresSetup *pgSetup)
 {
+	SearchPath all_pg_configs = { 0 };
 	SearchPath pg_configs = { 0 };
 
-	if (!search_path("pg_config", &pg_configs))
+	if (!search_path("pg_config", &all_pg_configs))
 	{
+		return false;
+	}
+
+	if (!search_path_deduplicate_symlinks(&all_pg_configs, &pg_configs))
+	{
+		log_error("Failed to resolve symlinks found in PATH entries, "
+				  "see above for details");
 		return false;
 	}
 
