@@ -987,7 +987,7 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 				NODE_FORMAT_ARGS(primaryNode),
 				ReplicationStateGetName(primaryGoalState));
 
-			AssignGoalState(primaryNode, REPLICATION_STATE_PRIMARY, message);
+			AssignGoalState(primaryNode, primaryGoalState, message);
 
 			return true;
 		}
