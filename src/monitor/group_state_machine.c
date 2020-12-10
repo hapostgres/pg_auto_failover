@@ -134,7 +134,8 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 		return ProceedGroupStateForPrimaryNode(activeNode);
 	}
 
-	AutoFailoverNode *primaryNode = GetPrimaryOrDemotedNodeInGroup(formationId, groupId);
+	AutoFailoverNode *primaryNode =
+		GetPrimaryOrDemotedNodeInGroup(formationId, groupId);
 
 	/*
 	 * We want to have a primaryNode around for most operations, but also need
