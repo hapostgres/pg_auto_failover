@@ -596,6 +596,9 @@ read_into_buf(Program *prog, int filedes, PQExpBuffer buffer, bool error)
 
 	if (bytes > 0)
 	{
+		/* terminate the buffer after the length we read bytes */
+		temp_buffer[bytes] = '\0';
+
 		appendPQExpBufferStr(buffer, temp_buffer);
 
 		if (prog->processBuffer)
