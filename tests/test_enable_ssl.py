@@ -2,6 +2,7 @@ import pgautofailover_utils as pgautofailover
 import ssl_cert_utils as cert
 import subprocess
 import os
+import time
 
 cluster = None
 monitor = None
@@ -284,13 +285,14 @@ def test_014_enable_ssl_require_primary():
     )
     node1Cert.create_signed_certificate(cluster.cert)
 
-    node1.stop_pg_autoctl()
     node1.enable_ssl(
         sslServerKey=node1Cert.key,
         sslServerCert=node1Cert.crt,
         sslMode="require",
     )
-    node1.run()
+
+    node1.pg_autoctl.sighup()
+    time.sleep(6)
 
     # to avoid flackyness here, we allow a second run/timeout of waiting
     if not node1.wait_until_pg_is_running():

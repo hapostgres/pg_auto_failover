@@ -153,6 +153,18 @@ typedef struct WaitUntilStateNotificationContext
 } WaitUntilStateNotificationContext;
 
 
+typedef struct WaitUntilNodeStateNotificationContext
+{
+	char *formation;
+	int groupId;
+	int nodeId;
+	NodeAddressHeaders *headers;
+	NodeState targetState;
+	bool done;
+	bool firstLoop;
+} WaitUntilNodeStateNotificationContext;
+
+
 typedef struct WaitForStateChangeNotificationContext
 {
 	char *formation;
@@ -3344,8 +3356,10 @@ monitor_notification_process_apply_settings(void *context,
 				  NodeStateToString(nodeState->goalState));
 	}
 	else if (ctx->applySettingsTransitionInProgress &&
-			 nodeState->reportedState == PRIMARY_STATE &&
-			 nodeState->goalState == PRIMARY_STATE)
+			 ((nodeState->reportedState == PRIMARY_STATE &&
+			   nodeState->goalState == PRIMARY_STATE) ||
+			  (nodeState->reportedState == WAIT_PRIMARY_STATE &&
+			   nodeState->goalState == WAIT_PRIMARY_STATE)))
 	{
 		ctx->applySettingsTransitionDone = true;
 
@@ -3500,7 +3514,65 @@ monitor_wait_for_state_change(Monitor *monitor,
 
 
 /*
- * monitor_check_report_state is Notification Processing Function that
+ * monitor_report_state_print_headers fetches other nodes array on the monitor
+ * and prints a table array on stdout to prepare for notifications output.
+ */
+static void
+monitor_report_state_print_headers(Monitor *monitor,
+								   const char *formation,
+								   int groupId,
+								   PgInstanceKind nodeKind,
+								   NodeAddressArray *nodesArray,
+								   NodeAddressHeaders *headers)
+{
+	log_info("Listening monitor notifications about state changes "
+			 "in formation \"%s\" and group %d",
+			 formation, groupId);
+	log_info("Following table displays times when notifications are received");
+
+	if (!monitor_get_nodes(monitor,
+						   (char *) formation,
+						   groupId,
+						   nodesArray))
+	{
+		/* ignore the error, use an educated guess for the max size */
+		log_warn("Failed to get_nodes() on the monitor");
+
+		headers->maxNameSize = 25;
+		headers->maxHostSize = 25;
+		headers->maxNodeSize = 5;
+	}
+
+	(void) nodeAddressArrayPrepareHeaders(headers,
+										  nodesArray,
+										  groupId,
+										  nodeKind);
+
+	fformat(stdout, "%8s | %*s | %*s | %*s | %19s | %19s\n",
+			"Time",
+			headers->maxNameSize, "Name",
+			headers->maxNodeSize, "Node",
+			headers->maxHostSize, "Host:Port",
+			"Current State",
+			"Assigned State");
+
+	fformat(stdout, "%8s-+-%*s-+-%*s-+-%*s-+-%19s-+-%19s\n",
+			"--------",
+			headers->maxNameSize, headers->nameSeparatorHeader,
+			headers->maxNodeSize, headers->nodeSeparatorHeader,
+			headers->maxHostSize, headers->hostSeparatorHeader,
+			"-------------------", "-------------------");
+}
+
+
+/*
+ * monitor_check_report_state is Notification Processing Function that gets all
+ * the notifications from our group from the monitor and reports them in a
+ * table-like output to stdout.
+ *
+ * The function also maintains the context->failoverIsDone to signal to its
+ * caller that the wait is over. We reach failoverIsDone when one of the nodes
+ * in the context's group reaches the given targetState.
  */
 static void
 monitor_check_report_state(void *context, CurrentNodeState *nodeState)
@@ -3593,43 +3665,8 @@ monitor_wait_until_some_node_reported_state(Monitor *monitor,
 		return false;
 	}
 
-	log_info("Listening monitor notifications about state changes "
-			 "in formation \"%s\" and group %d",
-			 formation, groupId);
-	log_info("Following table displays times when notifications are received");
-
-	if (!monitor_get_nodes(monitor,
-						   (char *) formation,
-						   groupId,
-						   &nodesArray))
-	{
-		/* ignore the error, use an educated guess for the max size */
-		log_warn("Failed to get_nodes() on the monitor");
-
-		headers.maxNameSize = 25;
-		headers.maxHostSize = 25;
-		headers.maxNodeSize = 5;
-	}
-
-	(void) nodeAddressArrayPrepareHeaders(&headers,
-										  &nodesArray,
-										  groupId,
-										  nodeKind);
-
-	fformat(stdout, "%8s | %*s | %*s | %*s | %19s | %19s\n",
-			"Time",
-			headers.maxNameSize, "Name",
-			headers.maxNodeSize, "Node",
-			headers.maxHostSize, "Host:Port",
-			"Current State",
-			"Assigned State");
-
-	fformat(stdout, "%8s-+-%*s-+-%*s-+-%*s-+-%19s-+-%19s\n",
-			"--------",
-			headers.maxNameSize, headers.nameSeparatorHeader,
-			headers.maxNodeSize, headers.nodeSeparatorHeader,
-			headers.maxHostSize, headers.hostSeparatorHeader,
-			"-------------------", "-------------------");
+	(void) monitor_report_state_print_headers(monitor, formation, groupId,
+											  nodeKind, &nodesArray, &headers);
 
 	while (!context.failoverIsDone)
 	{
@@ -3657,6 +3694,140 @@ monitor_wait_until_some_node_reported_state(Monitor *monitor,
 	pgsql_finish(&monitor->pgsql);
 
 	return context.failoverIsDone;
+}
+
+
+/*
+ * monitor_check_report_state is Notification Processing Function that gets all
+ * the notifications from our group from the monitor and reports them in a
+ * table-like output to stdout.
+ *
+ * The function also maintains the context->failoverIsDone to signal to its
+ * caller that the wait is over. We reach failoverIsDone when one of the nodes
+ * in the context's group reaches the given targetState.
+ */
+static void
+monitor_check_node_report_state(void *context, CurrentNodeState *nodeState)
+{
+	WaitUntilNodeStateNotificationContext *ctx =
+		(WaitUntilNodeStateNotificationContext *) context;
+
+	uint64_t now = time(NULL);
+	char timestring[MAXCTIMESIZE] = { 0 };
+	char hostport[BUFSIZE] = { 0 };
+	char composedId[BUFSIZE] = { 0 };
+
+	/* filter notifications for our own formation */
+	if (strcmp(nodeState->formation, ctx->formation) != 0 ||
+		nodeState->groupId != ctx->groupId)
+	{
+		return;
+	}
+
+	/* format the current time to be user-friendly */
+	epoch_to_string(now, timestring);
+
+	/* "Wed Jun 30 21:49:08 1993" -> "21:49:08" */
+	timestring[11 + 8] = '\0';
+
+	(void) nodestatePrepareNode(ctx->headers,
+								&(nodeState->node),
+								ctx->groupId,
+								hostport,
+								composedId);
+
+	fformat(stdout, "%8s | %*s | %*s | %*s | %19s | %19s\n",
+			timestring + 11,
+			ctx->headers->maxNameSize, nodeState->node.name,
+			ctx->headers->maxNodeSize, composedId,
+			ctx->headers->maxHostSize, hostport,
+			NodeStateToString(nodeState->reportedState),
+			NodeStateToString(nodeState->goalState));
+
+	if (nodeState->goalState == ctx->targetState &&
+		nodeState->reportedState == ctx->targetState &&
+		!ctx->firstLoop)
+	{
+		ctx->done = true;
+	}
+
+	if (ctx->firstLoop)
+	{
+		ctx->firstLoop = false;
+	}
+}
+
+
+/*
+ * monitor_wait_until_some_node_reported_state receives notifications and
+ * watches for a new node to be reported with the given targetState.
+ *
+ * If we lose the monitor connection while watching for the transition steps
+ * then we stop watching. It's a best effort attempt at having the CLI be
+ * useful for its user, the main one being the test suite.
+ */
+bool
+monitor_wait_until_node_reported_state(Monitor *monitor,
+									   const char *formation,
+									   int groupId,
+									   int nodeId,
+									   PgInstanceKind nodeKind,
+									   NodeState targetState)
+{
+	PGconn *connection = monitor->pgsql.connection;
+
+	NodeAddressArray nodesArray = { 0 };
+	NodeAddressHeaders headers = { 0 };
+
+	WaitUntilNodeStateNotificationContext context = {
+		(char *) formation,
+		groupId,
+		nodeId,
+		&headers,
+		targetState,
+		false,                  /* done */
+		true                    /* firstLoop */
+	};
+
+	char *channels[] = { "state", NULL };
+
+	uint64_t start = time(NULL);
+
+	if (connection == NULL)
+	{
+		log_warn("Lost connection.");
+		return false;
+	}
+
+	(void) monitor_report_state_print_headers(monitor, formation, groupId,
+											  nodeKind, &nodesArray, &headers);
+
+	while (!context.done)
+	{
+		uint64_t now = time(NULL);
+
+		if ((now - start) > PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT)
+		{
+			log_error("Failed to receive monitor's notifications");
+			break;
+		}
+
+		if (!monitor_process_notifications(
+				monitor,
+				PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT * 1000,
+				channels,
+				(void *) &context,
+				&monitor_check_node_report_state))
+		{
+			/* errors have already been logged */
+			break;
+		}
+	}
+
+	/* disconnect from monitor */
+	pgsql_finish(&monitor->pgsql);
+
+	return context.done;
 }
 
 
