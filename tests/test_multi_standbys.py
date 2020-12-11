@@ -346,7 +346,28 @@ def test_015_002_fail_two_standby_nodes():
     eq_(node1.get_synchronous_standby_names_local(), ssn)
 
 
-def test_015_restart_nodes():
+def test_015_003_set_properties():
+    # stop the data leak by re-implementing sync rep
+    #
+    # the primary is now expected to be in apply_settings/primary, and fail
+    # to reach primary, which causes the set number-sync-standbys command to
+    # fail.
+    #
+    # instead of using the command line (which waits for 60s and fail),
+    # let's use the monitor SQL API instead
+    q = "select pgautofailover.set_formation_number_sync_standbys('default', 1)"
+    monitor.run_sql_query(q)
+
+    assert node1.wait_until_assigned_state(target_state="primary")
+
+    eq_(node1.get_number_sync_standbys(), 1)
+
+    ssn = "ANY 1 (pgautofailover_standby_2, pgautofailover_standby_3)"
+    eq_(node1.get_synchronous_standby_names(), ssn)
+    eq_(node1.get_synchronous_standby_names_local(), ssn)
+
+
+def test_015_004_restart_nodes():
     node3.run()
     node2.run()
 
