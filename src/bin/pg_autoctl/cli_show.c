@@ -95,6 +95,16 @@ CommandLine show_state_command =
 				 cli_show_state_getopts,
 				 cli_show_state);
 
+CommandLine show_settings_command =
+	make_command("settings",
+				 "Print replication settings for a formation from the monitor",
+				 " [ --pgdata ] [ --json ] [ --formation ] ",
+				 "  --pgdata      path to data directory\n"
+				 "  --json        output data in the JSON format\n"
+				 "  --formation   pg_auto_failover formation\n",
+				 cli_get_name_getopts,
+				 cli_get_formation_settings);
+
 CommandLine show_standby_names_command =
 	make_command("standby-names",
 				 "Prints synchronous_standby_names for a given group",
