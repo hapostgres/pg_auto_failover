@@ -122,9 +122,11 @@ When creating a node it is possible to use the ``--candidate-priority`` and
 the ``--replication-quorum`` options to set the replication properties as
 required by your choice of Postgres architecture.
 
-To review the current replication settings of a formation, use the following
-command::
+To review the current replication settings of a formation, use one of the
+two following commands, which are convenient aliases (the same command with
+two ways to invoke it)::
 
+  $ pg_autoctl show settings
   $ pg_autoctl get formation settings
 
 It is also possible to edit those replication settings at any time while
