@@ -306,10 +306,18 @@ set_pg_ctl_from_PG_CONFIG(PostgresSetup *pgSetup)
 bool
 set_pg_ctl_from_pg_config(PostgresSetup *pgSetup)
 {
+	SearchPath all_pg_configs = { 0 };
 	SearchPath pg_configs = { 0 };
 
-	if (!search_path("pg_config", &pg_configs))
+	if (!search_path("pg_config", &all_pg_configs))
 	{
+		return false;
+	}
+
+	if (!search_path_deduplicate_symlinks(&all_pg_configs, &pg_configs))
+	{
+		log_error("Failed to resolve symlinks found in PATH entries, "
+				  "see above for details");
 		return false;
 	}
 
@@ -398,6 +406,7 @@ set_pg_ctl_from_pg_config(PostgresSetup *pgSetup)
 bool
 config_find_pg_ctl(PostgresSetup *pgSetup)
 {
+	SearchPath all_pg_ctls = { 0 };
 	SearchPath pg_ctls = { 0 };
 
 	pgSetup->pg_ctl[0] = '\0';
@@ -414,8 +423,15 @@ config_find_pg_ctl(PostgresSetup *pgSetup)
 	}
 
 	/* no PG_CONFIG. let's use the more classic approach with PATH instead */
-	if (!search_path("pg_ctl", &pg_ctls))
+	if (!search_path("pg_ctl", &all_pg_ctls))
 	{
+		return false;
+	}
+
+	if (!search_path_deduplicate_symlinks(&all_pg_ctls, &pg_ctls))
+	{
+		log_error("Failed to resolve symlinks found in PATH entries, "
+				  "see above for details");
 		return false;
 	}
 
@@ -448,7 +464,16 @@ config_find_pg_ctl(PostgresSetup *pgSetup)
 		 */
 		PostgresSetup pgSetupFromPgConfig = { 0 };
 
-		log_debug("Failed to find pg_ctl in PATH, looking for pg_config");
+		if (pg_ctls.found == 0)
+		{
+			log_debug("Failed to find pg_ctl in PATH, looking for pg_config");
+		}
+		else
+		{
+			log_debug("Found %d entries for pg_ctl in PATH, "
+					  "looking for pg_config",
+					  pg_ctls.found);
+		}
 
 		if (set_pg_ctl_from_pg_config(&pgSetupFromPgConfig))
 		{

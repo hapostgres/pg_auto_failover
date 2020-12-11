@@ -56,6 +56,7 @@ void path_in_same_directory(const char *basePath,
 
 bool search_path_first(const char *filename, char *result, int logLevel);
 bool search_path(const char *filename, SearchPath *result);
+bool search_path_deduplicate_symlinks(SearchPath *results, SearchPath *dedup);
 bool unlink_file(const char *filename);
 bool set_program_absolute_path(char *program, int size);
 bool normalize_filename(const char *filename, char *dst, int size);

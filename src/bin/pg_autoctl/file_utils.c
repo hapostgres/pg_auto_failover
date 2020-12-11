@@ -593,6 +593,74 @@ search_path(const char *filename, SearchPath *result)
 
 
 /*
+ * search_path_deduplicate_symlinks traverse the SearchPath result obtained by
+ * calling the search_path() function and removes entries that are pointing to
+ * the same binary on-disk.
+ *
+ * In modern debian installations, for instance, we have /bin -> /usr/bin; and
+ * then we might find pg_config both in /bin/pg_config and /usr/bin/pg_config
+ * although it's only been installed once, and both are the same file.
+ *
+ * We use realpath() to deduplicate entries, and keep the entry that is not a
+ * symbolic link.
+ */
+bool
+search_path_deduplicate_symlinks(SearchPath *results, SearchPath *dedup)
+{
+	/* now re-initialize the target structure dedup */
+	dedup->found = 0;
+
+	for (int rIndex = 0; rIndex < results->found; rIndex++)
+	{
+		bool alreadyThere = false;
+
+		char *currentPath = results->matches[rIndex];
+		char currentRealPath[PATH_MAX] = { 0 };
+
+		if (realpath(currentPath, currentRealPath) == NULL)
+		{
+			log_error("Failed to normalize file name \"%s\": %m", currentPath);
+			return false;
+		}
+
+		/* add-in the realpath to dedup, unless it's already in there */
+		for (int dIndex = 0; dIndex < dedup->found; dIndex++)
+		{
+			if (strcmp(dedup->matches[dIndex], currentRealPath) == 0)
+			{
+				alreadyThere = true;
+
+				log_debug("dedup: skipping \"%s\"", currentPath);
+				break;
+			}
+		}
+
+		if (!alreadyThere)
+		{
+			int bytesWritten =
+				strlcpy(dedup->matches[dedup->found++],
+						currentRealPath,
+						MAXPGPATH);
+
+			if (bytesWritten >= MAXPGPATH)
+			{
+				log_error(
+					"Real path \"%s\" is %d bytes long, and pg_autoctl "
+					"is limited to handling paths of %d bytes long, maximum",
+					currentRealPath,
+					(int) strlen(currentRealPath),
+					MAXPGPATH);
+
+				return false;
+			}
+		}
+	}
+
+	return true;
+}
+
+
+/*
  * unlink_state_file calls unlink(2) on the state file to make sure we don't
  * leave a lingering state on-disk.
  */
