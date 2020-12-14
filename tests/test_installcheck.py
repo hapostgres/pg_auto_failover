@@ -4,6 +4,7 @@ from nose.tools import *
 import subprocess
 import shutil
 import os
+import os.path
 
 cluster = None
 node1 = None
@@ -39,13 +40,19 @@ def test_001_add_hba_entry():
 
 
 def test_002_make_installcheck():
+    # support both the local Dockerfile and also Travis build environments
+    if "TRAVIS_BUILD_DIR" in os.environ:
+        topdir = os.environ["TRAVIS_BUILD_DIR"]
+    else:
+        topdir = "/usr/src/pg_auto_failover"
+
     p = subprocess.Popen(
         [
             "sudo",
             shutil.which("chmod"),
             "-R",
             "go+w",
-            "/usr/src/pg_auto_failover/src/monitor",
+            os.path.join(topdir, "src/monitor"),
         ]
     )
     assert p.wait() == 0
@@ -61,13 +68,13 @@ def test_002_make_installcheck():
             "PGHOST=" + str(cluster.monitor.vnode.address),
             "make",
             "-C",
-            "/usr/src/pg_auto_failover/src/monitor",
+            os.path.join(topdir, "src/monitor"),
             "installcheck",
         ]
     )
 
     if p.wait() != 0:
-        diff = "/usr/src/pg_auto_failover/src/monitor/regression.diffs"
+        diff = os.path.join(topdir, "src/monitor/regression.diffs")
         with open(diff, "r") as d:
             print("%s" % d.read())
 
