@@ -30,9 +30,9 @@ PDF = ./docs/_build/latex/pg_auto_failover.pdf
 # Command line with DEBUG facilities
 PG_AUTOCTL = PG_AUTOCTL_DEBUG=1 ./src/bin/pg_autoctl/pg_autoctl
 
-# make cluster arguments
-NODES ?= 2
-NODES_ASYNC ?= 0
+NODES ?= 2						# total count of Postgres nodes
+NODES_ASYNC ?= 0				# count of replication-quorum false nodes
+NODES_PRIOS ?= 50				# either "50", or "50,50", or "50,50,0" etc
 NODES_SYNC_SB ?= -1
 FIRST_PGPORT ?= 5500
 
@@ -148,21 +148,25 @@ $(TMUX_SCRIPT): bin
          --first-pgport $(FIRST_PGPORT)   \
          --nodes $(NODES)                 \
          --async-nodes $(NODES_ASYNC)     \
+         --node-priorities $(NODES_PRIOS) \
          --sync-standbys $(NODES_SYNC_SB) \
          --layout $(TMUX_LAYOUT) > $@
 
 tmux-script: $(TMUX_SCRIPT) ;
 
 tmux-clean:
-	pkill pg_autoctl || true
-	rm -rf $(TMUX_TOP_DIR)
+	$(PG_AUTOCTL) do tmux clean           \
+         --root $(TMUX_TOP_DIR)           \
+         --first-pgport $(FIRST_PGPORT)   \
+         --nodes $(NODES)
 
-cluster: install
+cluster: install tmux-clean
 	$(PG_AUTOCTL) do tmux session         \
          --root $(TMUX_TOP_DIR)           \
          --first-pgport $(FIRST_PGPORT)   \
          --nodes $(NODES)                 \
          --async-nodes $(NODES_ASYNC)     \
+         --node-priorities $(NODES_PRIOS) \
          --sync-standbys $(NODES_SYNC_SB) \
          --layout $(TMUX_LAYOUT)
 

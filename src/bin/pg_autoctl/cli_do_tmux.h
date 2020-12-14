@@ -26,17 +26,38 @@
 #include "signals.h"
 #include "string_utils.h"
 
+#define MAX_NODES 12
+
 typedef struct TmuxOptions
 {
 	char root[MAXPGPATH];
 	int firstPort;
 	int nodes;                  /* number of nodes per groups, total */
 	int asyncNodes;             /* number of async nodes, within the total */
+	int priorities[MAX_NODES];  /* node priorities */
 	int numSync;                /* number-sync-standbys */
 	char layout[BUFSIZE];
 } TmuxOptions;
 
+typedef struct TmuxNode
+{
+	char name[NAMEDATALEN];
+	int pgport;
+	bool replicationQuorum;
+	int candidatePriority;
+} TmuxNode;
+
+typedef struct TmuxNodeArray
+{
+	int count;                  /* array actual size */
+	int numSync;                /* number-sync-standbys */
+	TmuxNode nodes[MAX_NODES];
+} TmuxNodeArray;
+
 extern TmuxOptions tmuxOptions;
+extern TmuxNodeArray tmuxNodeArray;
+
+bool parseCandidatePriorities(char *prioritiesString, int *priorities);
 
 void tmux_add_command(PQExpBuffer script, const char *fmt, ...)
 __attribute__((format(printf, 2, 3)));
