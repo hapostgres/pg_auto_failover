@@ -122,6 +122,7 @@ extern CommandLine service_status_command;
 extern CommandLine show_uri_command;
 extern CommandLine show_events_command;
 extern CommandLine show_state_command;
+extern CommandLine show_settings_command;
 extern CommandLine show_file_command;
 extern CommandLine show_standby_names_command;
 
@@ -190,5 +191,8 @@ void cli_ensure_node_name(Keeper *keeper);
 
 bool discover_hostname(char *hostname, int size,
 					   const char *monitorHostname, int monitorPort);
+
+/* cli_get_set_properties.c */
+void cli_get_formation_settings(int argc, char **argv);
 
 #endif  /* CLI_COMMON_H */
