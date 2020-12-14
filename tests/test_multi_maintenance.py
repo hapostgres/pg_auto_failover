@@ -51,7 +51,7 @@ def test_002_add_standby():
     # make sure we reached primary on node1 before next tests
     assert node1.wait_until_state(target_state="primary")
 
-    eq_(node1.get_synchronous_standby_names_local(), "*")
+    node1.check_synchronous_standby_names(ssn="*")
 
 
 def test_003_add_standby():
@@ -71,10 +71,9 @@ def test_003_add_standby():
 
     # the formation number_sync_standbys is expected to be set to 1 now
     eq_(node1.get_number_sync_standbys(), 1)
-    eq_(
-        node1.get_synchronous_standby_names_local(),
-        "ANY 1 (pgautofailover_standby_2, pgautofailover_standby_3)",
-    )
+
+    ssn = "ANY 1 (pgautofailover_standby_2, pgautofailover_standby_3)"
+    node1.check_synchronous_standby_names(ssn)
 
     # make sure we reached primary on node1 before next tests
     assert node1.wait_until_state(target_state="primary")
@@ -111,8 +110,7 @@ def test_005_set_candidate_priorities():
     eq_(node1.get_number_sync_standbys(), 1)
 
     ssn = "ANY 1 (pgautofailover_standby_3, pgautofailover_standby_2)"
-    eq_(node1.get_synchronous_standby_names(), ssn)
-    eq_(node1.get_synchronous_standby_names_local(), ssn)
+    node1.check_synchronous_standby_names(ssn)
 
 
 def test_006_maintenance_and_failover():
@@ -137,8 +135,7 @@ def test_006_maintenance_and_failover():
 
     # now that node3 is primary, synchronous_standby_names has changed
     ssn = "ANY 1 (pgautofailover_standby_1, pgautofailover_standby_2)"
-    eq_(node3.get_synchronous_standby_names(), ssn)
-    eq_(node3.get_synchronous_standby_names_local(), ssn)
+    node3.check_synchronous_standby_names(ssn)
 
     print("Disabling maintenance on node2, should connect to the new primary")
     node2.disable_maintenance()
@@ -166,8 +163,7 @@ def test_006_maintenance_and_failover():
     assert node3.wait_until_state(target_state="primary")
 
     # ssn is not changed during maintenance operations
-    eq_(node3.get_synchronous_standby_names(), ssn)
-    eq_(node3.get_synchronous_standby_names_local(), ssn)
+    node3.check_synchronous_standby_names(ssn)
 
     assert node1.has_needed_replication_slots()
     assert node2.has_needed_replication_slots()
@@ -226,9 +222,7 @@ def test_011_all_to_maintenance():
     assert node3.wait_until_state(target_state="wait_primary")
 
     # also let's see synchronous_standby_names here
-    ssn = ""
-    eq_(node3.get_synchronous_standby_names(), ssn)
-    eq_(node3.get_synchronous_standby_names_local(), ssn)
+    node3.check_synchronous_standby_names(ssn="")
 
 
 def test_012_can_write_during_maintenance():

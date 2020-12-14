@@ -241,9 +241,7 @@ def test_014_001_fail_node1():
     assert node2.wait_until_state(target_state="wait_primary", timeout=120)
     assert node3.wait_until_state(target_state="secondary")
 
-    ssn = ""
-    eq_(node2.get_synchronous_standby_names(), ssn)
-    eq_(node2.get_synchronous_standby_names_local(), ssn)
+    node2.check_synchronous_standby_names(ssn="")
 
 
 def test_014_002_stop_new_primary_node2():
@@ -301,9 +299,7 @@ def test_015_001_fail_node2():
     assert node1.wait_until_state(target_state="wait_primary", timeout=120)
     assert node3.wait_until_state(target_state="secondary")
 
-    ssn = ""
-    eq_(node1.get_synchronous_standby_names(), ssn)
-    eq_(node1.get_synchronous_standby_names_local(), ssn)
+    node1.check_synchronous_standby_names(ssn="")
 
 
 def test_015_002_stop_new_primary_node1():

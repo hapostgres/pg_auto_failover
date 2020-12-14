@@ -1427,6 +1427,13 @@ SELECT reportedstate, goalstate
         result = self.run_sql_query(query)
         return result[0][0]
 
+    def check_synchronous_standby_names(self, ssn):
+        """
+        Checks both monitor a local synchronous_standby_names do match ssn.
+        """
+        eq_(self.get_synchronous_standby_names_local(), ssn)
+        eq_(self.get_synchronous_standby_names(), ssn)
+
     def print_synchronous_standby_names(self):
         monitorStandbyNames = self.get_synchronous_standby_names()
         localStandbyNames = self.get_synchronous_standby_names_local()

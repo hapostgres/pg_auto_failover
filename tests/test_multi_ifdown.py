@@ -105,8 +105,7 @@ def test_005_set_candidate_priorities():
     # also let's see synchronous_standby_names here
     # remember to sort by candidate priority then name
     ssn = "ANY 1 (pgautofailover_standby_3, pgautofailover_standby_2)"
-    eq_(node1.get_synchronous_standby_names(), ssn)
-    eq_(node1.get_synchronous_standby_names_local(), ssn)
+    node1.check_synchronous_standby_names(ssn)
 
 
 def test_006_ifdown_node3():
@@ -158,10 +157,7 @@ def test_008_failover():
 
     # when in wait_primary state we should not block writes when:
     assert node3.get_number_sync_standbys() == 1
-
-    ssn = ""
-    eq_(node3.get_synchronous_standby_names(), ssn)
-    eq_(node3.get_synchronous_standby_names_local(), ssn)
+    node3.check_synchronous_standby_names(ssn="")
 
 
 def test_009_read_from_new_primary():
@@ -182,8 +178,7 @@ def test_010_start_node1_again():
 
     # now that we're back to primary, check we have sync rep again
     ssn = "ANY 1 (pgautofailover_standby_1, pgautofailover_standby_2)"
-    eq_(node3.get_synchronous_standby_names(), ssn)
-    eq_(node3.get_synchronous_standby_names_local(), ssn)
+    node3.check_synchronous_standby_names(ssn)
 
 
 # test_011_XXX, test_012_XXX, test_013_XXX, test_014_XXX and test_015_XXX
