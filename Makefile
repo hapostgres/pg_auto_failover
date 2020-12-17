@@ -2,7 +2,8 @@
 # Licensed under the PostgreSQL License.
 
 FSM = docs/fsm.png
-TEST_CONTAINER_NAME = pg_auto_failover-test
+CONTAINER_NAME = pg_auto_failover
+TEST_CONTAINER_NAME = pg_auto_failover_test
 DOCKER_RUN_OPTS = --cap-add=SYS_ADMIN --cap-add=NET_ADMIN -ti --rm
 PDF = ./docs/_build/latex/pg_auto_failover.pdf
 
@@ -95,18 +96,28 @@ indent:
 docs: $(FSM)
 	$(MAKE) -C docs html
 
-build-test:
-	docker build				\
+build:
+	docker build				    \
 		$(DOCKER_BUILD_OPTS)		\
+		-t $(CONTAINER_NAME)	    \
+		.
+
+interactive-test:
+	docker run --name $(CONTAINER_NAME) --rm -ti $(CONTAINER_NAME)
+
+
+build-test:
+	docker build				    \
+		$(DOCKER_BUILD_OPTS)		\
+		--target build-test         \
 		-t $(TEST_CONTAINER_NAME)	\
 		.
 
-
 run-test: build-test
-	docker run					\
-		--name $(TEST_CONTAINER_NAME)		\
-		$(DOCKER_RUN_OPTS)			\
-		$(TEST_CONTAINER_NAME)			\
+	docker run					                \
+		--name $(TEST_CONTAINER_NAME)		    \
+		$(DOCKER_RUN_OPTS)			            \
+		$(TEST_CONTAINER_NAME)			        \
 		make -C /usr/src/pg_auto_failover test	\
 		TEST='${TEST}'
 

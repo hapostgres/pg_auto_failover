@@ -35,6 +35,12 @@
 
 #include "runprogram.h"
 
+char *tmux_banner[] = {
+	"# to quit tmux: type either C-b d or `tmux detach`",
+	"# to test failover: pg_autoctl perform failover",
+	NULL
+};
+
 TmuxOptions tmuxOptions = { 0 };
 
 char *xdg[][3] = {
@@ -618,6 +624,11 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 		{
 			appendPQExpBuffer(script, "%s\n", extraLines[lineNumber]);
 		}
+	}
+
+	for (int i = 0; tmux_banner[i] != NULL; i++)
+	{
+		tmux_add_send_keys_command(script, "%s", tmux_banner[i]);
 	}
 }
 
