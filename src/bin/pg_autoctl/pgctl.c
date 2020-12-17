@@ -532,6 +532,121 @@ config_find_pg_ctl(PostgresSetup *pgSetup)
 
 
 /*
+ * find_pg_config_from_pg_ctl finds the path to pg_config from the known path
+ * to pg_ctl. If that exists, we first use the pg_config binary found in the
+ * same directory as the pg_ctl binary itself.
+ *
+ * Otherwise, we have a look at the PG_CONFIG environment variable.
+ *
+ * Finally, we search in the PATH list for all the matches, and for each of
+ * them we run pg_config --bindir, and if that's the directory where we have
+ * our known pg_ctl, that's our pg_config.
+ *
+ * Rationale: when using debian, the postgresql-common package installs a
+ * single entry for pg_config in /usr/bin/pg_config, and that's the system
+ * default.
+ *
+ * A version specific file path found in /usr/lib/postgresql/11/bin/pg_config
+ * when installing Postgres 11 is installed from the package
+ * postgresql-server-dev-11.
+ *
+ * There is no single default entry for pg_ctl, that said, so we are using the
+ * specific path /usr/lib/postgresql/11/bin/pg_config here.
+ *
+ * So depending on what packages have been deployed on this specific debian
+ * instance, we might or might not find a pg_config binary in the same
+ * directory as pg_ctl.
+ *
+ * Note that we could register the full path to whatever pg_config version we
+ * use at pg_autoctl create time, but in most cases that is going to be
+ * /usr/bin/pg_config, and it will point to a new pg_ctl (version 13 for
+ * instance) when you apt-get upgrade your debian testing distribution and it
+ * just migrated from Postgres 11 to Postgres 13 (bullseye cycle just did that
+ * in december 2020).
+ *
+ * Either package libpq-dev or postgresql-server-dev-11 (or another version)
+ * must be isntalled for this to work.
+ */
+bool
+find_pg_config_from_pg_ctl(const char *pg_ctl, char *pg_config, size_t size)
+{
+	char pg_config_path[MAXPGPATH] = { 0 };
+
+	/*
+	 * 1. try pg_ctl directory
+	 */
+	path_in_same_directory(pg_ctl, "pg_config", pg_config_path);
+
+	if (file_exists(pg_config_path))
+	{
+		log_debug("find_pg_config_from_pg_ctl: \"%s\" "
+				  "in same directory as pg_ctl",
+				  pg_config_path);
+		strlcpy(pg_config, pg_config_path, size);
+		return true;
+	}
+
+	/*
+	 * 2. try PG_CONFIG from the environment, and check pg_config --bindir
+	 */
+	if (env_exists("PG_CONFIG"))
+	{
+		PostgresSetup pgSetup = { 0 };
+		char PG_CONFIG[MAXPGPATH] = { 0 };
+
+		/* check that the pg_config we found relates to the given pg_ctl */
+		if (get_env_copy("PG_CONFIG", PG_CONFIG, sizeof(PG_CONFIG)) &&
+			file_exists(PG_CONFIG) &&
+			set_pg_ctl_from_config_bindir(&pgSetup, pg_config_path) &&
+			strcmp(pgSetup.pg_ctl, pg_ctl) == 0)
+		{
+			log_debug("find_pg_config_from_pg_ctl: \"%s\" "
+					  "from PG_CONFIG environment variable",
+					  pg_config_path);
+			strlcpy(pg_config, pg_config_path, size);
+			return true;
+		}
+	}
+
+	/*
+	 * 3. search our PATH for pg_config entries and keep the first one that
+	 *    relates to our known pg_ctl.
+	 */
+	SearchPath all_pg_configs = { 0 };
+	SearchPath pg_configs = { 0 };
+
+	if (!search_path("pg_config", &all_pg_configs))
+	{
+		return false;
+	}
+
+	if (!search_path_deduplicate_symlinks(&all_pg_configs, &pg_configs))
+	{
+		log_error("Failed to resolve symlinks found in PATH entries, "
+				  "see above for details");
+		return false;
+	}
+
+	for (int i = 0; i < pg_configs.found; i++)
+	{
+		PostgresSetup pgSetup = { 0 };
+
+		if (set_pg_ctl_from_config_bindir(&pgSetup, pg_configs.matches[i]) &&
+			strcmp(pgSetup.pg_ctl, pg_ctl) == 0)
+		{
+			log_debug("find_pg_config_from_pg_ctl: \"%s\" "
+					  "from PATH search",
+					  pg_configs.matches[i]);
+			strlcpy(pg_config, pg_configs.matches[i], size);
+			return true;
+		}
+	}
+
+	return false;
+}
+
+
+/*
  * find_extension_control_file ensures that the extension is present in the
  * given Postgres installation. This does the equivalent of:
  * ls -l $(pg_config --sharedir)/extension/pg_stat_statements.control
@@ -547,7 +662,11 @@ find_extension_control_file(const char *pg_ctl, const char *extName)
 
 	log_debug("Checking if the %s extension is installed", extName);
 
-	path_in_same_directory(pg_ctl, "pg_config", pg_config_path);
+	if (!find_pg_config_from_pg_ctl(pg_ctl, pg_config_path, MAXPGPATH))
+	{
+		/* errors have already been logged */
+		return false;
+	}
 
 	Program prog = run_program(pg_config_path, "--sharedir", NULL);
 

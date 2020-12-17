@@ -69,6 +69,7 @@ RUN apt-get update \
     lsof \
     psutils \
     postgresql-common \
+    libpq-dev \
 	&& rm -rf /var/lib/apt/lists/*
 
 # install Postgres 13 (current in bullseye), bypass initdb of a "main" cluster
