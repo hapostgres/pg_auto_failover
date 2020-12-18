@@ -1,5 +1,7 @@
 FROM debian:buster-slim as build-test
 
+ENV PGVERSION 11
+
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
     build-essential \
@@ -30,13 +32,13 @@ RUN apt-get update \
     lsof \
     psutils \
     postgresql-common \
-    postgresql-server-dev-11 \
+    postgresql-server-dev-${PGVERSION} \
 	&& rm -rf /var/lib/apt/lists/*
 
-# install Postgres 13 (current in bullseye), bypass initdb of a "main" cluster
+# install Postgres 11 (current in bullseye), bypass initdb of a "main" cluster
 RUN echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf
 RUN apt-get update\
-	&& apt-get install -y --no-install-recommends postgresql-11 \
+	&& apt-get install -y --no-install-recommends postgresql-${PGVERSION} \
 	&& rm -rf /var/lib/apt/lists/*
 
 RUN adduser --disabled-password --gecos '' docker
@@ -53,12 +55,13 @@ RUN make -s clean && make -s install -j8
 COPY ./tests/ ./tests
 
 USER docker
-ENV PATH /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/postgresql/11/bin
-ENV PGVERSION 11
+ENV PATH /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/postgresql/${PGVERSION}/bin
 ENV PG_AUTOCTL_DEBUG 1
 
 
 FROM debian:stable-slim as run
+
+ENV PGVERSION 11
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
@@ -72,10 +75,10 @@ RUN apt-get update \
     libpq-dev \
 	&& rm -rf /var/lib/apt/lists/*
 
-# install Postgres 13 (current in bullseye), bypass initdb of a "main" cluster
+# install Postgres 11 (current in bullseye), bypass initdb of a "main" cluster
 RUN echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf
 RUN apt-get update\
-	&& apt-get install -y --no-install-recommends postgresql-11 \
+	&& apt-get install -y --no-install-recommends postgresql-${PGVERSION} \
 	&& rm -rf /var/lib/apt/lists/*
 
 RUN adduser --disabled-password --gecos '' docker
@@ -83,13 +86,12 @@ RUN adduser docker sudo
 RUN adduser docker postgres
 RUN echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
-COPY --from=build-test /usr/lib/postgresql/11/lib/pgautofailover.so /usr/lib/postgresql/11/lib
-COPY --from=build-test /usr/share/postgresql/11/extension/pgautofailover* /usr/share/postgresql/11/extension/
-COPY --from=build-test /usr/lib/postgresql/11/bin/pg_autoctl /usr/local/bin
+COPY --from=build-test /usr/lib/postgresql/${PGVERSION}/lib/pgautofailover.so /usr/lib/postgresql/${PGVERSION}/lib
+COPY --from=build-test /usr/share/postgresql/${PGVERSION}/extension/pgautofailover* /usr/share/postgresql/${PGVERSION}/extension/
+COPY --from=build-test /usr/lib/postgresql/${PGVERSION}/bin/pg_autoctl /usr/local/bin
 
 USER docker
-ENV PATH /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/postgresql/11/bin
-ENV PGVERSION 11
+ENV PATH /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/postgresql/${PGVERSION}/bin
 ENV PG_AUTOCTL_DEBUG 1
 
 CMD pg_autoctl do tmux session --nodes 3

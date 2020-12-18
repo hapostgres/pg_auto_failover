@@ -36,7 +36,7 @@
 #include "runprogram.h"
 
 char *tmux_banner[] = {
-	"# to quit tmux: type either C-b d or `tmux detach`",
+	"# to quit tmux: type either `Ctrl+b d` or `tmux detach`",
 	"# to test failover: pg_autoctl perform failover",
 	NULL
 };
