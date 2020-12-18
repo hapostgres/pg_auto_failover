@@ -114,9 +114,7 @@ def test_007_004_maintenance_primary_allow_failover():
     assert node1.wait_until_state(target_state="maintenance")
     assert node2.wait_until_state(target_state="wait_primary")
 
-    ssn = ""
-    eq_(node2.get_synchronous_standby_names_local(), ssn)
-    eq_(node2.get_synchronous_standby_names(), ssn)
+    node2.check_synchronous_standby_names(ssn="")
 
 
 def test_007_005_disable_maintenance():
@@ -127,9 +125,7 @@ def test_007_005_disable_maintenance():
     assert node1.wait_until_state(target_state="secondary")
     assert node2.wait_until_state(target_state="primary")
 
-    ssn = "*"
-    eq_(node2.get_synchronous_standby_names_local(), ssn)
-    eq_(node2.get_synchronous_standby_names(), ssn)
+    node2.check_synchronous_standby_names(ssn="*")
 
 
 def test_008_001_enable_maintenance_secondary():
@@ -150,9 +146,7 @@ def test_008_002_disable_maintenance_secondary():
     assert node1.wait_until_state(target_state="secondary")
     assert node2.wait_until_state(target_state="primary")
 
-    ssn = "*"
-    eq_(node2.get_synchronous_standby_names_local(), ssn)
-    eq_(node2.get_synchronous_standby_names(), ssn)
+    node2.check_synchronous_standby_names(ssn="*")
 
 
 # the rest of the tests expect node1 to be primary, make it so
