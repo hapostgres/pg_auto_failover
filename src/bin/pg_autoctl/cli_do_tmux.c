@@ -35,6 +35,12 @@
 
 #include "runprogram.h"
 
+char *tmux_banner[] = {
+	"# to quit tmux: type either `Ctrl+b d` or `tmux detach`",
+	"# to test failover: pg_autoctl perform failover",
+	NULL
+};
+
 TmuxOptions tmuxOptions = { 0 };
 
 char *xdg[][3] = {
@@ -272,22 +278,43 @@ tmux_add_send_keys_command(PQExpBuffer script, const char *fmt, ...)
 
 /*
  * tmux_add_xdg_environment sets the environment variables that we need for the
- * whole session to be self-contained in the given root directory.
+ * whole session to be self-contained in the given root directory. The
+ * implementation of this function relies on the fact that the tmux script has
+ * been prepared with tmux set-environment commands, per tmux_setenv.
  */
 void
-tmux_add_xdg_environment(PQExpBuffer script, const char *root)
+tmux_add_xdg_environment(PQExpBuffer script)
 {
-	/*
-	 * For demo/tests purposes, arrange a self-contained setup where everything
-	 * is to be found in the given options.root directory.
-	 */
+	tmux_add_send_keys_command(script, "eval $(tmux show-environment -s)");
+}
+
+
+/*
+ * tmux_setenv adds setenv commands to the tmux script.
+ */
+void
+tmux_setenv(PQExpBuffer script, const char *sessionName, const char *root)
+{
+	char PATH[BUFSIZE] = { 0 };
+
+	if (!get_env_copy("PATH", PATH, sizeof(PATH)))
+	{
+		log_fatal("Failed to get PATH from the environment");
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	tmux_add_command(script, "set-environment -t %s PATH %s", sessionName, PATH);
+
 	for (int i = 0; xdg[i][0] != NULL; i++)
 	{
 		char *var = xdg[i][0];
 		char *dir = xdg[i][1];
 
-		tmux_add_send_keys_command(script,
-								   "export %s=\"%s/%s\"", var, root, dir);
+		tmux_add_command(script, "set-environment -t %s %s \"%s/%s\"",
+						 sessionName,
+						 var,
+						 root,
+						 dir);
 	}
 }
 
@@ -381,12 +408,13 @@ tmux_add_new_session(PQExpBuffer script, const char *root, int pgport)
 	 * For demo/tests purposes, arrange a self-contained setup where everything
 	 * is to be found in the given options.root directory.
 	 */
-	for (int i = 0; xdg[i][0] != NULL; i++)
-	{
-		char *var = xdg[i][0];
 
-		tmux_add_command(script, "set-option update-environment %s", var);
-	}
+	/* for (int i = 0; xdg[i][0] != NULL; i++) */
+	/* { */
+	/*  char *var = xdg[i][0]; */
+
+	/*  tmux_add_command(script, "set-option update-environment %s", var); */
+	/* } */
 
 	tmux_add_command(script, "new-session -s %s", sessionName);
 }
@@ -475,9 +503,10 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 	tmux_add_command(script, "set-option -g default-shell /bin/bash");
 
 	(void) tmux_add_new_session(script, root, pgport);
+	(void) tmux_setenv(script, sessionName, root);
 
 	/* start a monitor */
-	(void) tmux_add_xdg_environment(script, root);
+	(void) tmux_add_xdg_environment(script);
 	tmux_pg_autoctl_create_monitor(script, root, pgport++);
 
 	/* start the Postgres nodes, using the monitor URI */
@@ -495,7 +524,7 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 		tmux_add_command(script, "split-window -v");
 		tmux_add_command(script, "select-layout even-vertical");
 
-		(void) tmux_add_xdg_environment(script, root);
+		(void) tmux_add_xdg_environment(script);
 
 		/*
 		 * Force node ordering to easy debugging of interactive sessions: each
@@ -527,7 +556,7 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 	tmux_add_command(script, "split-window -v");
 	tmux_add_command(script, "select-layout even-vertical");
 
-	(void) tmux_add_xdg_environment(script, root);
+	(void) tmux_add_xdg_environment(script);
 	tmux_add_send_keys_command(script, "export PGDATA=\"%s/monitor\"", root);
 	tmux_add_send_keys_command(script,
 							   "PG_AUTOCTL_DEBUG=1 "
@@ -542,7 +571,7 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 	/* add a window for interactive pg_autoctl commands */
 	tmux_add_command(script, "split-window -v");
 	tmux_add_command(script, "select-layout even-vertical");
-	(void) tmux_add_xdg_environment(script, root);
+	(void) tmux_add_xdg_environment(script);
 	tmux_add_send_keys_command(script, "export PGDATA=\"%s/monitor\"", root);
 
 	if (options->numSync != -1)
@@ -596,6 +625,11 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 			appendPQExpBuffer(script, "%s\n", extraLines[lineNumber]);
 		}
 	}
+
+	for (int i = 0; tmux_banner[i] != NULL; i++)
+	{
+		tmux_add_send_keys_command(script, "%s", tmux_banner[i]);
+	}
 }
 
 
@@ -628,7 +662,7 @@ tmux_start_server(const char *scriptName)
 	 *   tmux start-server \; source-file ${scriptName}
 	 */
 	args[argsIndex++] = (char *) tmux;
-	args[argsIndex++] = "-v";
+	args[argsIndex++] = "-u";
 	args[argsIndex++] = "start-server";
 	args[argsIndex++] = ";";
 	args[argsIndex++] = "source-file";
