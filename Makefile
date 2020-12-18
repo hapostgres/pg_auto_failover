@@ -4,7 +4,7 @@
 FSM = docs/fsm.png
 CONTAINER_NAME = pg_auto_failover
 TEST_CONTAINER_NAME = pg_auto_failover_test
-DOCKER_RUN_OPTS = --cap-add=SYS_ADMIN --cap-add=NET_ADMIN -ti --rm
+DOCKER_RUN_OPTS = --privileged  -ti --rm
 PDF = ./docs/_build/latex/pg_auto_failover.pdf
 
 NOSETESTS = $(shell which nosetests3 || which nosetests)
