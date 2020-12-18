@@ -1,11 +1,8 @@
 # Copyright (c) Microsoft Corporation. All rights reserved.
 # Licensed under the PostgreSQL License.
 
-FSM = docs/fsm.png
-CONTAINER_NAME = pg_auto_failover
 TEST_CONTAINER_NAME = pg_auto_failover_test
 DOCKER_RUN_OPTS = --privileged  -ti --rm
-PDF = ./docs/_build/latex/pg_auto_failover.pdf
 
 NOSETESTS = $(shell which nosetests3 || which nosetests)
 
@@ -25,8 +22,14 @@ else
 	TEST_ARGUMENT = $(TEST:%=tests/%.py)
 endif
 
+# Documentation and images
+FSM = docs/fsm.png
+PDF = ./docs/_build/latex/pg_auto_failover.pdf
+
+# Command line with DEBUG facilities
 PG_AUTOCTL = PG_AUTOCTL_DEBUG=1 ./src/bin/pg_autoctl/pg_autoctl
 
+# make cluster arguments
 NODES ?= 2
 NODES_ASYNC ?= 0
 NODES_SYNC_SB ?= -1
@@ -37,6 +40,7 @@ TMUX_LAYOUT ?= even-vertical	# could be "tiled"
 TMUX_TOP_DIR = ./tmux
 TMUX_SCRIPT = ./tmux/script-$(FIRST_PGPORT).tmux
 
+# make azcluster arguments
 AZURE_PREFIX ?= ha-demo-$(shell whoami)
 AZURE_REGION ?= paris
 AZURE_LOCATION ?= francecentral

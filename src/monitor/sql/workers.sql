@@ -17,11 +17,11 @@ select *
                                     node_kind => 'coordinator');
 
 select *
-  from pgautofailover.set_node_system_identifier(3, 6862008014275870855);
+  from pgautofailover.set_node_system_identifier(4, 6862008014275870855);
 
 -- coordinator_1 reports single
 select *
-  from pgautofailover.node_active('citus', 3, 0,
+  from pgautofailover.node_active('citus', 4, 0,
                                   current_group_role => 'single');
 
 -- register first worker
