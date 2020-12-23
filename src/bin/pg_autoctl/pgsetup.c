@@ -1934,4 +1934,7 @@ pgsetup_hba_level_to_string(HBAEditLevel hbaLevel)
 		case HBA_EDIT_UNKNOWN:
 			return "unknown";
 	}
+
+	log_error("BUG: hbaLevel %d is unknown", hbaLevel);
+	return "unknown";
 }
