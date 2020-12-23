@@ -319,6 +319,9 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 			return false;
 		}
 
+		log_debug("pghba_ensure_host_rules_exist: %d \"%s\" (%s:%d)",
+				  node->nodeId, node->name, node->host, node->port);
+
 		if (hbaLevel >= HBA_EDIT_MINIMAL)
 		{
 			/*
