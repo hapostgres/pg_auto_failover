@@ -667,8 +667,11 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 			{
 				uint64_t now = time(NULL);
 
-				if (lastWarningMessage != PQPING_NO_RESPONSE ||
-					(now - lastWarningTime) > 30)
+				/* no message at all the first 30s */
+
+				if ((now - pgsql->retryPolicy.startTime) > 30 &&
+					(lastWarningMessage != PQPING_NO_RESPONSE ||
+					 (now - lastWarningTime) > 30))
 				{
 					lastWarningMessage = PQPING_NO_RESPONSE;
 					lastWarningTime = now;
