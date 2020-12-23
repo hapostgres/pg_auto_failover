@@ -63,6 +63,12 @@ pg_setup_init(PostgresSetup *pgSetup,
 	pgSetup->control = options->control;
 
 	/*
+	 * Also make sure that we keep the hbaLevel to edit.
+	 */
+	pgSetup->hbaLevel = options->hbaLevel;
+	strlcpy(pgSetup->hbaLevelStr, options->hbaLevelStr, NAMEDATALEN);
+
+	/*
 	 * Make sure that we keep the SSL options too.
 	 */
 	pgSetup->ssl.active = options->ssl.active;
@@ -1368,8 +1374,7 @@ pg_setup_get_auth_method(PostgresSetup *pgSetup)
 bool
 pg_setup_skip_hba_edits(PostgresSetup *pgSetup)
 {
-	return !IS_EMPTY_STRING_BUFFER(pgSetup->authMethod) &&
-		   strcmp(pgSetup->authMethod, SKIP_HBA_AUTH_METHOD) == 0;
+	return pgSetup->hbaLevel == HBA_EDIT_SKIP;
 }
 
 
@@ -1872,4 +1877,61 @@ pg_setup_standby_slot_supported(PostgresSetup *pgSetup, int logLevel)
 			  pgSetup->control.pg_control_version);
 
 	return false;
+}
+
+
+/*
+ * pgsetup_parse_hba_level parses a string that represents an HBAEditLevel
+ * value.
+ */
+HBAEditLevel
+pgsetup_parse_hba_level(const char *level)
+{
+	HBAEditLevel enumArray[] = {
+		HBA_EDIT_SKIP,
+		HBA_EDIT_MINIMAL,
+		HBA_EDIT_APP
+	};
+
+	char *levelArray[] = { "skip", "minimal", "app", NULL };
+
+	for (int i = 0; levelArray[i] != NULL; i++)
+	{
+		if (strcmp(level, levelArray[i]) == 0)
+		{
+			return enumArray[i];
+		}
+	}
+
+	return HBA_EDIT_UNKNOWN;
+}
+
+
+/*
+ * pgsetup_hba_level_to_string returns the string representation of an
+ * hbaLevel enum value.
+ */
+char *
+pgsetup_hba_level_to_string(HBAEditLevel hbaLevel)
+{
+	switch (hbaLevel)
+	{
+		case HBA_EDIT_SKIP:
+		{
+			return "skip";
+		}
+
+		case HBA_EDIT_MINIMAL:
+		{
+			return "minimal";
+		}
+
+		case HBA_EDIT_APP:
+		{
+			return "app";
+		}
+
+		case HBA_EDIT_UNKNOWN:
+			return "unknown";
+	}
 }

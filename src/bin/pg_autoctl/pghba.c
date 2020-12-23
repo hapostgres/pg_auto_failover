@@ -21,6 +21,7 @@
 #include "parsing.h"
 #include "pgctl.h"
 #include "pghba.h"
+#include "pgsetup.h"
 #include "log.h"
 
 
@@ -106,7 +107,8 @@ pghba_ensure_host_rule_exists(const char *hbaFilePath,
 							  const char *database,
 							  const char *username,
 							  const char *host,
-							  const char *authenticationScheme)
+							  const char *authenticationScheme,
+							  HBAEditLevel hbaLevel)
 {
 	char *currentHbaContents = NULL;
 	long currentHbaSize = 0L;
@@ -165,11 +167,11 @@ pghba_ensure_host_rule_exists(const char *hbaFilePath,
 	}
 
 	/*
-	 * When the authentication method is "skip", the option --skip-pg-hba has
-	 * been used. In that case, we still WARN about the HBA rule that we need,
-	 * so that users can review their HBA settings and provisioning.
+	 * When the option --skip-pg-hba has been used, we still WARN about the HBA
+	 * rule that we need, so that users can review their HBA settings and
+	 * provisioning.
 	 */
-	if (SKIP_HBA(authenticationScheme))
+	if (hbaLevel <= HBA_EDIT_SKIP)
 	{
 		log_warn("Skipping HBA edits (per --skip-pg-hba) for rule: %s",
 				 hbaLineBuffer->data);
@@ -248,7 +250,8 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 							  bool ssl,
 							  const char *database,
 							  const char *username,
-							  const char *authenticationScheme)
+							  const char *authenticationScheme,
+							  HBAEditLevel hbaLevel)
 {
 	PQExpBuffer newHbaContents = createPQExpBuffer();
 	char *currentHbaContents = NULL;
@@ -308,7 +311,7 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 		log_debug("pghba_ensure_host_rules_exist: %d \"%s\" (%s:%d)",
 				  node->nodeId, node->name, node->host, node->port);
 
-		if (!SKIP_HBA(authenticationScheme))
+		if (hbaLevel >= HBA_EDIT_MINIMAL)
 		{
 			/*
 			 * When using a hostname in the HBA host field, Postgres is very
@@ -391,12 +394,11 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 			}
 
 			/*
-			 * When the authentication method is "skip", the option
-			 * --skip-pg-hba has been used. In that case, we still WARN about
+			 * When the option --skip-pg-hba has been used, we still WARN about
 			 * the HBA rule that we need, so that users can review their HBA
 			 * settings and provisioning.
 			 */
-			if (SKIP_HBA(authenticationScheme))
+			if ((hbaLevel <= HBA_EDIT_SKIP))
 			{
 				log_warn("Skipping HBA edits (per --skip-pg-hba) for rule: %s",
 						 hbaLineBuffer->data);
@@ -571,6 +573,7 @@ pghba_enable_lan_cidr(PGSQL *pgsql,
 					  const char *hostname,
 					  const char *username,
 					  const char *authenticationScheme,
+					  HBAEditLevel hbaLevel,
 					  const char *pgdata)
 {
 	char hbaFilePath[MAXPGPATH];
@@ -580,7 +583,7 @@ pghba_enable_lan_cidr(PGSQL *pgsql,
 	/* Compute the CIDR notation for our hostname */
 	if (!findHostnameLocalAddress(hostname, ipAddr, BUFSIZE))
 	{
-		int logLevel = SKIP_HBA(authenticationScheme) ? LOG_WARN : LOG_FATAL;
+		int logLevel = hbaLevel <= HBA_EDIT_SKIP ? LOG_WARN : LOG_FATAL;
 
 		log_level(logLevel,
 				  "Failed to find IP address for hostname \"%s\", "
@@ -588,7 +591,7 @@ pghba_enable_lan_cidr(PGSQL *pgsql,
 				  hostname);
 
 		/* when --skip-pg-hba is used, we don't mind the failure here */
-		return SKIP_HBA(authenticationScheme) ? true : false;
+		return hbaLevel == HBA_EDIT_SKIP;
 	}
 
 	if (!fetchLocalCIDR(ipAddr, cidr, BUFSIZE))
@@ -597,7 +600,7 @@ pghba_enable_lan_cidr(PGSQL *pgsql,
 				 "IP address \"%s\", skipping HBA settings", ipAddr);
 
 		/* when --skip-pg-hba is used, we don't mind the failure here */
-		return SKIP_HBA(authenticationScheme) ? true : false;
+		return hbaLevel == HBA_EDIT_SKIP;
 	}
 
 	log_debug("HBA: adding CIDR from hostname \"%s\"", hostname);
@@ -627,7 +630,9 @@ pghba_enable_lan_cidr(PGSQL *pgsql,
 	 * the user with the specific rule we are skipping here.
 	 */
 	if (!pghba_ensure_host_rule_exists(hbaFilePath, ssl, databaseType, database,
-									   username, cidr, authenticationScheme))
+									   username, cidr,
+									   authenticationScheme,
+									   hbaLevel))
 	{
 		log_error("Failed to add the local network to PostgreSQL HBA file: "
 				  "couldn't modify the pg_hba file");
@@ -638,7 +643,7 @@ pghba_enable_lan_cidr(PGSQL *pgsql,
 	 * pgdata is given when PostgreSQL is not yet running, don't reload then...
 	 */
 	if (pgdata == NULL &&
-		!SKIP_HBA(authenticationScheme) &&
+		hbaLevel >= HBA_EDIT_MINIMAL &&
 		!pgsql_reload_conf(pgsql))
 	{
 		log_error("Failed to reload PostgreSQL configuration for new HBA rule");

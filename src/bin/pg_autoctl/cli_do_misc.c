@@ -188,6 +188,7 @@ keeper_cli_create_monitor_user(int argc, char **argv)
 									  PG_AUTOCTL_HEALTH_PASSWORD,
 									  monitorHostname,
 									  "trust",
+									  HBA_EDIT_MINIMAL,
 									  connlimit))
 	{
 		log_fatal("Failed to create the database user that the pg_auto_failover "

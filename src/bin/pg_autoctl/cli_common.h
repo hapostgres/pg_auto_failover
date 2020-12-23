@@ -22,6 +22,7 @@ extern MonitorConfig monitorOptions;
 extern KeeperConfig keeperOptions;
 extern bool createAndRun;
 extern bool outputJSON;
+extern bool openAppHBAonLAN;
 
 #define SSL_CA_FILE_FLAG 1      /* root public certificate */
 #define SSL_CRL_FILE_FLAG 2     /* certificates revocation list */

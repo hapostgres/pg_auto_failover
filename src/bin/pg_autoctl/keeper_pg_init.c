@@ -748,11 +748,33 @@ create_database_and_extension(Keeper *keeper)
 									   pgSetup->dbname,
 									   pg_setup_get_username(pgSetup),
 									   config->hostname,
-									   pg_setup_get_auth_method(pgSetup)))
+									   pg_setup_get_auth_method(pgSetup),
+									   pgSetup->hbaLevel))
 	{
 		log_error("Failed to edit \"%s\" to grant connections to \"%s\", "
 				  "see above for details", hbaFilePath, config->hostname);
 		return false;
+	}
+
+	/*
+	 * When --pg-hba-lan is used, we also open the local network CIDR
+	 * connections for the given --username and --dbname.
+	 */
+	if (pgSetup->hbaLevel == HBA_EDIT_APP)
+	{
+		if (!pghba_enable_lan_cidr(&keeper->postgres.sqlClient,
+								   keeper->config.pgSetup.ssl.active,
+								   HBA_DATABASE_DBNAME,
+								   keeper->config.pgSetup.dbname,
+								   keeper->config.hostname,
+								   pg_setup_get_username(pgSetup),
+								   pg_setup_get_auth_method(pgSetup),
+								   pgSetup->hbaLevel,
+								   pgSetup->pgdata))
+		{
+			log_error("Failed to grant local network connections in HBA");
+			return false;
+		}
 	}
 
 	/*
@@ -771,7 +793,8 @@ create_database_and_extension(Keeper *keeper)
 										   NULL, /* all: no database name */
 										   NULL, /* no username, "all" */
 										   pgSetup->pghost,
-										   "trust"))
+										   "trust",
+										   HBA_EDIT_MINIMAL))
 		{
 			log_error("Failed to edit \"%s\" to grant connections to \"%s\", "
 					  "see above for details", hbaFilePath, pgSetup->pghost);
@@ -941,6 +964,7 @@ create_database_and_extension(Keeper *keeper)
 								   config->hostname,
 								   pg_setup_get_username(pgSetup),
 								   pg_setup_get_auth_method(pgSetup),
+								   pgSetup->hbaLevel,
 								   NULL))
 		{
 			log_error("Failed to grant local network connections in HBA");

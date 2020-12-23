@@ -220,6 +220,7 @@ monitor_install(const char *hostname,
 							   hostname,
 							   PG_AUTOCTL_MONITOR_USERNAME,
 							   pg_setup_get_auth_method(&pgSetup),
+							   pgSetup.hbaLevel,
 							   NULL))
 	{
 		log_warn("Failed to grant connection to local network.");

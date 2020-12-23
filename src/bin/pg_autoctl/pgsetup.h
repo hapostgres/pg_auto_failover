@@ -127,6 +127,22 @@ typedef struct NodeReplicationSettings
 	bool replicationQuorum;     /* true if participates in write quorum */
 } NodeReplicationSettings;
 
+
+/*
+ * How much should we edit the Postgres HBA file?
+ *
+ * The default value is HBA_EDIT_MINIMAL and pg_autoctl then add entries for
+ * the monitor to be able to connect to the local node, and an entry for the
+ * other nodes to be able to connect with streaming replication privileges.
+ */
+typedef enum
+{
+	HBA_EDIT_UNKNOWN = 0,
+	HBA_EDIT_SKIP,
+	HBA_EDIT_MINIMAL,
+	HBA_EDIT_APP,
+} HBAEditLevel;
+
 /*
  * pg_auto_failover also support SSL settings.
  */
@@ -175,6 +191,8 @@ typedef struct pg_setup
 	char listen_addresses[MAXPGPATH];       /* listen_addresses */
 	int proxyport;                          /* Proxy port */
 	char authMethod[NAMEDATALEN];           /* auth method, defaults to trust */
+	char hbaLevelStr[NAMEDATALEN];          /* user choice of HBA editing */
+	HBAEditLevel hbaLevel;                  /* user choice of HBA editing */
 	PostmasterStatus pm_status;             /* Postmaster status */
 	bool is_in_recovery;                    /* select pg_is_in_recovery() */
 	PostgresControlData control;            /* pg_controldata pgdata */
@@ -212,9 +230,6 @@ char * pmStatusToString(PostmasterStatus pm_status);
 
 char * pg_setup_get_username(PostgresSetup *pgSetup);
 
-#define SKIP_HBA(authMethod) \
-	(strncmp(authMethod, SKIP_HBA_AUTH_METHOD, strlen(SKIP_HBA_AUTH_METHOD)) == 0)
-
 char * pg_setup_get_auth_method(PostgresSetup *pgSetup);
 bool pg_setup_skip_hba_edits(PostgresSetup *pgSetup);
 
@@ -230,5 +245,7 @@ char * pgsetup_sslmode_to_string(SSLMode sslMode);
 
 bool pg_setup_standby_slot_supported(PostgresSetup *pgSetup, int logLevel);
 
+HBAEditLevel pgsetup_parse_hba_level(const char *level);
+char * pgsetup_hba_level_to_string(HBAEditLevel hbaLevel);
 
 #endif /* PGSETUP_H */

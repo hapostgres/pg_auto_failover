@@ -35,6 +35,7 @@
 KeeperConfig keeperOptions;
 bool createAndRun = false;
 bool outputJSON = false;
+bool openAppHBAonLAN = false;
 int ssl_flag = 0;
 
 /* stores --node-id, only used with --disable-monitor */
@@ -57,7 +58,8 @@ static void stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathname
  *		{ "proxyport", required_argument, NULL, 'y' },
  *		{ "username", required_argument, NULL, 'U' },
  *		{ "auth", required_argument, NULL, 'A' },
- *		{ "skip-pg-hba", required_argument, NULL, 'S' },
+ *		{ "skip-pg-hba", no_argument, NULL, 'S' },
+ *		{ "pg-hba-lan", no_argument, NULL, 'L' },
  *		{ "dbname", required_argument, NULL, 'd' },
  *		{ "name", required_argument, NULL, 'a' },
  *		{ "hostname", required_argument, NULL, 'n' },
@@ -211,10 +213,38 @@ cli_common_keeper_getopts(int argc, char **argv,
 					log_error("Please use either --auth or --skip-pg-hba");
 				}
 
+				/* force default authentication method then */
 				strlcpy(LocalOptionConfig.pgSetup.authMethod,
-						SKIP_HBA_AUTH_METHOD,
+						DEFAULT_AUTH_METHOD,
 						NAMEDATALEN);
+
+				strlcpy(LocalOptionConfig.pgSetup.hbaLevelStr,
+						pgsetup_hba_level_to_string(HBA_EDIT_SKIP),
+						sizeof(LocalOptionConfig.pgSetup.hbaLevelStr));
+
+				LocalOptionConfig.pgSetup.hbaLevel = HBA_EDIT_SKIP;
+
 				log_trace("--skip-pg-hba");
+				break;
+			}
+
+			case 'L':
+			{
+				/* { "pg-hba-lan", required_argument, NULL, 'L' }, */
+				if (LocalOptionConfig.pgSetup.hbaLevel != HBA_EDIT_UNKNOWN &&
+					LocalOptionConfig.pgSetup.hbaLevel != HBA_EDIT_APP)
+				{
+					errors++;
+					log_error("Please use either --skip-pg-hba or --pg-hba-lan");
+				}
+
+				strlcpy(LocalOptionConfig.pgSetup.hbaLevelStr,
+						pgsetup_hba_level_to_string(HBA_EDIT_APP),
+						sizeof(LocalOptionConfig.pgSetup.hbaLevelStr));
+
+				LocalOptionConfig.pgSetup.hbaLevel = HBA_EDIT_APP;
+
+				log_trace("--pg-hba-lan");
 				break;
 			}
 
@@ -478,6 +508,12 @@ cli_common_keeper_getopts(int argc, char **argv,
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
+	/* the default HBA editing level is MINIMAL, time to install it */
+	if (LocalOptionConfig.pgSetup.hbaLevel == HBA_EDIT_UNKNOWN)
+	{
+		LocalOptionConfig.pgSetup.hbaLevel = HBA_EDIT_MINIMAL;
+	}
+
 	/*
 	 * Now, all commands need PGDATA validation.
 	 */
@@ -513,7 +549,8 @@ cli_common_keeper_getopts(int argc, char **argv,
  *		{ "proxyport", required_argument, NULL, 'y' },
  *		{ "username", required_argument, NULL, 'U' },
  *		{ "auth", required_argument, NULL, 'A' },
- *		{ "skip-pg-hba", required_argument, NULL, 'S' },
+ *		{ "skip-pg-hba", no_argument, NULL, 'S' },
+ *		{ "pg-hba-lan", no_argument, NULL, 'L' },
  *		{ "dbname", required_argument, NULL, 'd' },
  *		{ "hostname", required_argument, NULL, 'n' },
  *		{ "formation", required_argument, NULL, 'f' },
