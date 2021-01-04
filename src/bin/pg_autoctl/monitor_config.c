@@ -195,6 +195,9 @@ monitor_config_init(MonitorConfig *config,
 	/* A part of the monitor's pgSetup is hard-coded. */
 	strlcpy(config->pgSetup.dbname, PG_AUTOCTL_MONITOR_DBNAME, NAMEDATALEN);
 	strlcpy(config->pgSetup.username, PG_AUTOCTL_MONITOR_USERNAME, NAMEDATALEN);
+
+	strlcpy(config->pgSetup.hbaLevelStr, "app", NAMEDATALEN);
+	config->pgSetup.hbaLevel = HBA_EDIT_APP;
 }
 
 
