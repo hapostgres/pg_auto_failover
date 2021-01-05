@@ -23,7 +23,7 @@ typedef enum
 IPType ip_address_type(const char *hostname);
 bool fetchLocalIPAddress(char *localIpAddress, int size,
 						 const char *serviceName, int servicePort,
-						 bool *mayRetry);
+						 int logLevel, bool *mayRetry);
 bool fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size);
 bool findHostnameLocalAddress(const char *hostname,
 							  char *localIpAddress, int size);

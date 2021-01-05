@@ -55,7 +55,7 @@ static bool ipaddr_getsockname(int sock, char *ipaddr, size_t size);
 bool
 fetchLocalIPAddress(char *localIpAddress, int size,
 					const char *serviceName, int servicePort,
-					bool *mayRetry)
+					int logLevel, bool *mayRetry)
 {
 	struct addrinfo *lookup;
 	struct addrinfo *ai;
@@ -109,7 +109,7 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 
 		if (err < 0)
 		{
-			log_warn("Failed to connect to %s: %m", addr);
+			log_level(logLevel, "Failed to connect to %s: %m", addr);
 		}
 		else
 		{
@@ -137,16 +137,18 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 
 			if (strcmp(DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME, serviceName) == 0)
 			{
-				log_warn("Failed to connect to \"%s\" on port %d "
-						 "to discover this machine hostname, "
-						 "please use --hostname",
-						 serviceName, servicePort);
+				log_level(logLevel,
+						  "Failed to connect to \"%s\" on port %d "
+						  "to discover this machine hostname, "
+						  "please use --hostname",
+						  serviceName, servicePort);
 			}
 			else
 			{
-				log_warn("Failed to connect to any of the IP addresses for "
-						 "monitor hostname \"%s\" and port %d",
-						 serviceName, servicePort);
+				log_level(logLevel,
+						  "Failed to connect to any of the IP addresses for "
+						  "monitor hostname \"%s\" and port %d",
+						  serviceName, servicePort);
 			}
 			return false;
 		}

@@ -93,7 +93,7 @@ cli_show_ipaddr(int argc, char **argv)
 	if (!fetchLocalIPAddress(ipAddr, BUFSIZE,
 							 DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME,
 							 DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT,
-							 &mayRetry))
+							 LOG_WARN, &mayRetry))
 	{
 		log_warn("Failed to determine network configuration.");
 		exit(EXIT_CODE_INTERNAL_ERROR);
@@ -118,7 +118,7 @@ cli_show_cidr(int argc, char **argv)
 	if (!fetchLocalIPAddress(ipAddr, BUFSIZE,
 							 DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME,
 							 DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT,
-							 &mayRetry))
+							 LOG_WARN, &mayRetry))
 	{
 		log_warn("Failed to determine network configuration.");
 		exit(EXIT_CODE_INTERNAL_ERROR);
@@ -264,7 +264,7 @@ cli_show_hostname(int argc, char **argv)
 	/* fetch the default local address used when connecting remotely */
 	if (!fetchLocalIPAddress(ipAddr, BUFSIZE,
 							 monitorHostname, monitorPort,
-							 &mayRetry))
+							 LOG_WARN, &mayRetry))
 	{
 		log_warn("Failed to determine network configuration.");
 		exit(EXIT_CODE_INTERNAL_ERROR);

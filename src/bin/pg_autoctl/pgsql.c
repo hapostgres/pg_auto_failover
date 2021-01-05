@@ -612,19 +612,23 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 				{
 					uint64_t now = time(NULL);
 
-					lastWarningMessage = PQPING_OK;
-					lastWarningTime = now;
+					if (lastWarningMessage != PQPING_OK ||
+						(now - lastWarningTime) > 30)
+					{
+						(void) log_connection_error(pgsql->connection, LOG_WARN);
 
-					(void) log_connection_error(pgsql->connection, LOG_WARN);
+						log_warn("Failed to connect after successful "
+								 "ping, please verify authentication "
+								 "and logs on the server at \"%s\"",
+								 pgsql->connectionString);
+
+						log_warn("Authentication might have failed on the "
+								 "Postgres server due to missing HBA rules.");
+					}
 					pgsql_finish(pgsql);
 
-					log_warn("Failed to connect after successful "
-							 "ping, please verify authentication "
-							 "and logs on the server at \"%s\"",
-							 pgsql->connectionString);
-
-					log_warn("Authentication might have failed on the Postgres "
-							 "server due to missing HBA rules.");
+					lastWarningMessage = PQPING_OK;
+					lastWarningTime = now;
 				}
 				break;
 			}
@@ -651,6 +655,10 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 						"crash recovery).",
 						pgsql->connectionString);
 				}
+
+				lastWarningMessage = PQPING_REJECT;
+				lastWarningTime = now;
+
 				break;
 			}
 
@@ -689,6 +697,10 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 						pgsql->retryPolicy.attempts,
 						(int) (now - pgsql->retryPolicy.startTime));
 				}
+
+				lastWarningMessage = PQPING_NO_RESPONSE;
+				lastWarningTime = now;
+
 				break;
 			}
 

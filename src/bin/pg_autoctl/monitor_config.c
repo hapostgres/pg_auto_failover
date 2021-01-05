@@ -475,7 +475,7 @@ monitor_config_get_postgres_uri(MonitorConfig *config, char *connectionString,
 		if (!fetchLocalIPAddress(host, BUFSIZE,
 								 DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME,
 								 DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT,
-								 &mayRetry))
+								 LOG_WARN, &mayRetry))
 		{
 			/* error is already logged */
 			return false;

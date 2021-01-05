@@ -1305,10 +1305,11 @@ discover_hostname(char *hostname, int size,
 	while (!pgsql_retry_policy_expired(&retryPolicy))
 	{
 		bool mayRetry = false;
+		int logLevel = retryPolicy.attempts == 0 ? LOG_WARN : LOG_DEBUG;
 
 		/* fetch our local address among the network interfaces */
 		if (fetchLocalIPAddress(ipAddr, BUFSIZE, monitorHostname, monitorPort,
-								&mayRetry))
+								logLevel, &mayRetry))
 		{
 			/* success: break out of the retry loop */
 			break;
