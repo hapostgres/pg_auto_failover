@@ -1305,11 +1305,10 @@ discover_hostname(char *hostname, int size,
 	while (!pgsql_retry_policy_expired(&retryPolicy))
 	{
 		bool mayRetry = false;
-		int logLevel = retryPolicy.attempts == 0 ? LOG_WARN : LOG_DEBUG;
 
 		/* fetch our local address among the network interfaces */
 		if (fetchLocalIPAddress(ipAddr, BUFSIZE, monitorHostname, monitorPort,
-								logLevel, &mayRetry))
+								LOG_DEBUG, &mayRetry))
 		{
 			/* success: break out of the retry loop */
 			break;
@@ -1399,6 +1398,7 @@ check_hostname(const char *hostname)
 	else
 	{
 		char cidr[BUFSIZE];
+		char ipaddr[BUFSIZE];
 
 		if (!fetchLocalCIDR(hostname, cidr, BUFSIZE))
 		{
@@ -1408,6 +1408,6 @@ check_hostname(const char *hostname)
 		}
 
 		/* use pghba_check_hostname for log diagnostics */
-		(void) pghba_check_hostname(hostname);
+		(void) pghba_check_hostname(hostname, ipaddr, sizeof(ipaddr));
 	}
 }

@@ -31,6 +31,7 @@
 #include "file_utils.h"
 #include "ipaddr.h"
 #include "log.h"
+#include "pgsetup.h"
 #include "string_utils.h"
 
 static unsigned int countSetBits(unsigned int n);
@@ -687,16 +688,28 @@ resolveHostnameForwardAndReverse(const char *hostname, char *ipaddr, int size)
 		return false;
 	}
 
+	/* when everything fails, we return a proper empty string buffer */
+	bzero((void *) ipaddr, size);
+
 	/* loop over the forward DNS results for hostname */
 	for (ai = lookup; ai; ai = ai->ai_next)
 	{
+		char candidateIPAddr[BUFSIZE] = { 0 };
 		char hbuf[NI_MAXHOST] = { 0 };
 
-		if (!ipaddr_sockaddr_to_string(ai, hbuf, sizeof(hbuf)))
+		if (!ipaddr_sockaddr_to_string(ai, candidateIPAddr, BUFSIZE))
 		{
 			/* errors have already been logged */
 			continue;
 		}
+
+		/* keep the first IP address of the list */
+		if (IS_EMPTY_STRING_BUFFER(ipaddr))
+		{
+			strlcpy(ipaddr, candidateIPAddr, size);
+		}
+
+		log_debug("%s has address %s", hostname, candidateIPAddr);
 
 		/* now reverse lookup (NI_NAMEREQD) the address with getnameinfo() */
 		int ret = getnameinfo(ai->ai_addr, ai->ai_addrlen,
@@ -708,6 +721,9 @@ resolveHostnameForwardAndReverse(const char *hostname, char *ipaddr, int size)
 					  ipaddr, gai_strerror(ret));
 			continue;
 		}
+
+		log_debug("reverse lookup for \"%s\" gives \"%s\" first",
+				  candidateIPAddr, hbuf);
 
 		/* compare reverse-DNS lookup result with our hostname */
 		if (strcmp(hbuf, hostname) == 0)

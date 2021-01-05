@@ -114,10 +114,28 @@ pghba_ensure_host_rule_exists(const char *hbaFilePath,
 	long currentHbaSize = 0L;
 	PQExpBuffer hbaLineBuffer = createPQExpBuffer();
 
+	char ipaddr[BUFSIZE] = { 0 };
+
 	if (hbaLineBuffer == NULL)
 	{
 		log_error("Failed to allocate memory");
 		return false;
+	}
+
+	/*
+	 * When using a hostname in the HBA host field, Postgres is very picky
+	 * about the matching rules. We have an opportunity here to check the same
+	 * DNS and reverse DNS rules as Postgres, and warn our users when we see
+	 * something that we know Postgres won't be happy with.
+	 *
+	 * HBA & DNS is hard.
+	 */
+	bool useHostname = pghba_check_hostname(host, ipaddr, sizeof(ipaddr));
+
+	if (!useHostname)
+	{
+		log_warn("Using IP address \"%s\" in HBA file "
+				 "instead of hostname \"%s\"", ipaddr, host);
 	}
 
 	if (!pghba_append_rule_to_buffer(hbaLineBuffer,
@@ -125,7 +143,7 @@ pghba_ensure_host_rule_exists(const char *hbaFilePath,
 									 databaseType,
 									 database,
 									 username,
-									 host,
+									 useHostname ? host : ipaddr,
 									 authenticationScheme))
 	{
 		/* errors have already been logged */
@@ -179,16 +197,6 @@ pghba_ensure_host_rule_exists(const char *hbaFilePath,
 		free(currentHbaContents);
 		return true;
 	}
-
-	/*
-	 * When using a hostname in the HBA host field, Postgres is very picky
-	 * about the matching rules. We have an opportunity here to check the same
-	 * DNS and reverse DNS rules as Postgres, and warn our users when we see
-	 * something that we know Postgres won't be happy with.
-	 *
-	 * HBA & DNS is hard.
-	 */
-	(void) pghba_check_hostname(host);
 
 	/* build the new postgresql.conf contents */
 	PQExpBuffer newHbaContents = createPQExpBuffer();
@@ -285,6 +293,9 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 		int hbaLinesIndex = 0;
 		PQExpBuffer hbaLines[3] = { 0 };
 
+		bool useHostname = true;
+		char ipaddr[BUFSIZE] = { 0 };
+
 		/* done with the new HBA line buffers (and safe to call on NULL) */
 		destroyPQExpBuffer(hbaLineReplicationBuffer);
 		destroyPQExpBuffer(hbaLineDatabaseBuffer);
@@ -308,9 +319,6 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 			return false;
 		}
 
-		log_debug("pghba_ensure_host_rules_exist: %d \"%s\" (%s:%d)",
-				  node->nodeId, node->name, node->host, node->port);
-
 		if (hbaLevel >= HBA_EDIT_MINIMAL)
 		{
 			/*
@@ -322,15 +330,28 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 			 *
 			 * HBA & DNS is hard.
 			 */
-			(void) pghba_check_hostname(node->host);
+			useHostname =
+				pghba_check_hostname(node->host, ipaddr, sizeof(ipaddr));
+
+			if (!useHostname)
+			{
+				log_warn("Using IP address \"%s\" in HBA file "
+						 "instead of hostname \"%s\"", ipaddr, node->host);
+			}
 		}
+
+		log_debug("pghba_ensure_host_rules_exist: %d \"%s\" (%s:%d)",
+				  node->nodeId,
+				  node->name,
+				  useHostname ? node->host : ipaddr,
+				  node->port);
 
 		if (!pghba_append_rule_to_buffer(hbaLineReplicationBuffer,
 										 ssl,
 										 HBA_DATABASE_REPLICATION,
 										 NULL,
 										 username,
-										 node->host,
+										 useHostname ? node->host : ipaddr,
 										 authenticationScheme))
 		{
 			/* errors have already been logged */
@@ -350,7 +371,7 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 										 HBA_DATABASE_DBNAME,
 										 database,
 										 username,
-										 node->host,
+										 useHostname ? node->host : ipaddr,
 										 authenticationScheme))
 		{
 			/* errors have already been logged */
@@ -366,7 +387,10 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 		}
 
 		log_info("Ensuring HBA rules for node %d \"%s\" (%s:%d)",
-				 node->nodeId, node->name, node->host, node->port);
+				 node->nodeId,
+				 node->name,
+				 useHostname ? node->host : ipaddr,
+				 node->port);
 
 		hbaLines[0] = hbaLineReplicationBuffer;
 		hbaLines[1] = hbaLineDatabaseBuffer;
@@ -674,10 +698,8 @@ pghba_enable_lan_cidr(PGSQL *pgsql,
  * resolve an IP address.)
  */
 bool
-pghba_check_hostname(const char *hostname)
+pghba_check_hostname(const char *hostname, char *ipaddr, size_t size)
 {
-	char ipaddr[BUFSIZE] = { 0 };
-
 	/*
 	 * IP addresses do not require any DNS properties/lookups. Also hostname
 	 * won't contain a '/' character, but CIDR notations would, such as
@@ -690,7 +712,7 @@ pghba_check_hostname(const char *hostname)
 		return true;
 	}
 
-	if (!resolveHostnameForwardAndReverse(hostname, ipaddr, sizeof(ipaddr)))
+	if (!resolveHostnameForwardAndReverse(hostname, ipaddr, size))
 	{
 		/* warn users about possible DNS misconfiguration */
 		log_warn("Failed to resolve hostname \"%s\" to an IP address that "

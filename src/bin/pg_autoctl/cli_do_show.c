@@ -329,6 +329,7 @@ cli_show_reverse(int argc, char **argv)
 		log_fatal("Failed to find an IP address for hostname \"%s\" that "
 				  "matches hostname again in a reverse-DNS lookup.",
 				  hostname);
+		log_info("Continuing with IP address \"%s\"", ipaddr);
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
