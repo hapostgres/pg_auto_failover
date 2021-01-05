@@ -155,6 +155,24 @@ monitor_install(const char *hostname,
 
 	(void) local_postgres_init(&postgres, &pgSetup);
 
+	/*
+	 * Now allow nodes on the same network to connect to pg_auto_failover
+	 * database.
+	 */
+	if (!pghba_enable_lan_cidr(&postgres.sqlClient,
+							   pgSetup.ssl.active,
+							   HBA_DATABASE_DBNAME,
+							   PG_AUTOCTL_MONITOR_DBNAME,
+							   hostname,
+							   PG_AUTOCTL_MONITOR_USERNAME,
+							   pg_setup_get_auth_method(&pgSetup),
+							   pgSetup.hbaLevel,
+							   pgSetup.pgdata))
+	{
+		log_warn("Failed to grant connection to local network.");
+		return false;
+	}
+
 	if (!ensure_postgres_service_is_running(&postgres))
 	{
 		log_error("Failed to install pg_auto_failover in the monitor's "
@@ -206,24 +224,6 @@ monitor_install(const char *hostname,
 	{
 		log_error("Failed to create extension %s",
 				  PG_AUTOCTL_MONITOR_EXTENSION_NAME);
-		return false;
-	}
-
-	/*
-	 * Now allow nodes on the same network to connect to pg_auto_failover
-	 * database.
-	 */
-	if (!pghba_enable_lan_cidr(&postgres.sqlClient,
-							   pgSetup.ssl.active,
-							   HBA_DATABASE_DBNAME,
-							   PG_AUTOCTL_MONITOR_DBNAME,
-							   hostname,
-							   PG_AUTOCTL_MONITOR_USERNAME,
-							   pg_setup_get_auth_method(&pgSetup),
-							   pgSetup.hbaLevel,
-							   NULL))
-	{
-		log_warn("Failed to grant connection to local network.");
 		return false;
 	}
 
