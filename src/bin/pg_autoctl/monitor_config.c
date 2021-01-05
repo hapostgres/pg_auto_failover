@@ -470,9 +470,12 @@ monitor_config_get_postgres_uri(MonitorConfig *config, char *connectionString,
 		 * PostgreSQL server to open it up to the local area network, e.g.
 		 * 129.168.1.0/23, so it should just work here.
 		 */
+		bool mayRetry = false;
+
 		if (!fetchLocalIPAddress(host, BUFSIZE,
 								 DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME,
-								 DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT))
+								 DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT,
+								 &mayRetry))
 		{
 			/* error is already logged */
 			return false;

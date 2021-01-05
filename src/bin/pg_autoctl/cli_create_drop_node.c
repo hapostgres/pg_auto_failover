@@ -1297,12 +1297,40 @@ discover_hostname(char *hostname, int size,
 	char localIpAddr[BUFSIZE];
 	char hostnameCandidate[_POSIX_HOST_NAME_MAX];
 
-	/* fetch our local address among the network interfaces */
-	if (!fetchLocalIPAddress(ipAddr, BUFSIZE, monitorHostname, monitorPort))
+	ConnectionRetryPolicy retryPolicy = { 0 };
+
+	/* retry connecting to the monitor when it's not available */
+	(void) pgsql_set_monitor_interactive_retry_policy(&retryPolicy);
+
+	while (!pgsql_retry_policy_expired(&retryPolicy))
 	{
-		log_fatal("Failed to find a local IP address, "
-				  "please provide --hostname.");
-		return false;
+		bool mayRetry = false;
+
+		/* fetch our local address among the network interfaces */
+		if (fetchLocalIPAddress(ipAddr, BUFSIZE, monitorHostname, monitorPort,
+								&mayRetry))
+		{
+			/* success: break out of the retry loop */
+			break;
+		}
+
+		if (!mayRetry)
+		{
+			log_fatal("Failed to find a local IP address, "
+					  "please provide --hostname.");
+			return false;
+		}
+
+		int sleepTimeMs =
+			pgsql_compute_connection_retry_sleep_time(&retryPolicy);
+
+		log_warn("Failed to connect to \"%s\" on port %d "
+				 "to discover this machine hostname, "
+				 "retrying in %d ms.",
+				 monitorHostname, monitorPort, sleepTimeMs);
+
+		/* we have milliseconds, pg_usleep() wants microseconds */
+		(void) pg_usleep(sleepTimeMs * 1000);
 	}
 
 	/* from there on we can take the ipAddr as the default --hostname */

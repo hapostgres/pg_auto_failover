@@ -54,7 +54,8 @@ static bool ipaddr_getsockname(int sock, char *ipaddr, size_t size);
  */
 bool
 fetchLocalIPAddress(char *localIpAddress, int size,
-					const char *serviceName, int servicePort)
+					const char *serviceName, int servicePort,
+					bool *mayRetry)
 {
 	struct addrinfo *lookup;
 	struct addrinfo *ai;
@@ -64,6 +65,7 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 
 	int sock;
 
+	*mayRetry = false;
 
 	/* prepare getaddrinfo hints for name resolution or IP address parsing */
 	memset(&hints, 0, sizeof(hints));
@@ -131,6 +133,8 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 		}
 		else
 		{
+			*mayRetry = true;
+
 			if (strcmp(DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME, serviceName) == 0)
 			{
 				log_warn("Failed to connect to \"%s\" on port %d "
