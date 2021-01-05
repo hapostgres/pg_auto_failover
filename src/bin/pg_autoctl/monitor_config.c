@@ -196,8 +196,11 @@ monitor_config_init(MonitorConfig *config,
 	strlcpy(config->pgSetup.dbname, PG_AUTOCTL_MONITOR_DBNAME, NAMEDATALEN);
 	strlcpy(config->pgSetup.username, PG_AUTOCTL_MONITOR_USERNAME, NAMEDATALEN);
 
-	strlcpy(config->pgSetup.hbaLevelStr, "app", NAMEDATALEN);
-	config->pgSetup.hbaLevel = HBA_EDIT_APP;
+	if (config->pgSetup.hbaLevel == HBA_EDIT_UNKNOWN)
+	{
+		strlcpy(config->pgSetup.hbaLevelStr, "app", NAMEDATALEN);
+		config->pgSetup.hbaLevel = HBA_EDIT_APP;
+	}
 }
 
 

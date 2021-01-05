@@ -63,10 +63,19 @@ pg_setup_init(PostgresSetup *pgSetup,
 	pgSetup->control = options->control;
 
 	/*
-	 * Also make sure that we keep the hbaLevel to edit.
+	 * Also make sure that we keep the hbaLevel to edit. Remember that
+	 * --skip-pg-hba is registered in the config as --auth skip.
 	 */
-	pgSetup->hbaLevel = options->hbaLevel;
-	strlcpy(pgSetup->hbaLevelStr, options->hbaLevelStr, NAMEDATALEN);
+	if (strcmp(options->authMethod, "skip") == 0)
+	{
+		pgSetup->hbaLevel = HBA_EDIT_SKIP;
+		strlcpy(pgSetup->hbaLevelStr, options->authMethod, NAMEDATALEN);
+	}
+	else
+	{
+		pgSetup->hbaLevel = options->hbaLevel;
+		strlcpy(pgSetup->hbaLevelStr, options->hbaLevelStr, NAMEDATALEN);
+	}
 
 	/*
 	 * Make sure that we keep the SSL options too.
