@@ -456,6 +456,9 @@ pgsql_open_connection(PGSQL *pgsql)
 	/* we implement our own retry strategy */
 	setenv("PGCONNECT_TIMEOUT", POSTGRES_CONNECT_TIMEOUT, 1);
 
+	/* register our starting time */
+	pgsql->retryPolicy.startTime = startTime;
+
 	/* Make a connection to the database */
 	pgsql->connection = PQconnectdb(pgsql->connectionString);
 
@@ -494,8 +497,6 @@ pgsql_open_connection(PGSQL *pgsql)
 		 * If we reach this part of the code, the connectionType is not LOCAL
 		 * and the retryPolicy has a non-zero maximum retry count. Let's retry!
 		 */
-		pgsql->retryPolicy.startTime = startTime;
-
 		if (!pgsql_retry_open_connection(pgsql))
 		{
 			/* errors have already been logged */
