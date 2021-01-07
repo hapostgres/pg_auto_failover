@@ -42,7 +42,8 @@ static void demoapp_process_perform_switchover(DemoAppOptions *demoAppOptions);
  * URI to use in the demo application.
  */
 bool
-demoapp_grab_formation_uri(DemoAppOptions *options, char *pguri, size_t size)
+demoapp_grab_formation_uri(DemoAppOptions *options, char *pguri, size_t size,
+						   bool *mayRetry)
 {
 	Monitor monitor = { 0 };
 
@@ -53,19 +54,43 @@ demoapp_grab_formation_uri(DemoAppOptions *options, char *pguri, size_t size)
 	ssl.sslMode = sslMode;
 	strlcpy(ssl.sslModeStr, sslModeStr, SSL_MODE_STRLEN);
 
+	*mayRetry = false;
+
 	if (!monitor_init(&monitor, options->monitor_pguri))
 	{
 		/* errors have already been logged */
 		return false;
 	}
 
+	/* allow lots of retries to connect to the monitor at startup */
+	pgsql_set_monitor_interactive_retry_policy(&(monitor.pgsql.retryPolicy));
+
 	if (!monitor_formation_uri(&monitor, options->formation, &ssl, pguri, size))
 	{
-		log_fatal("Failed to grab the Postgres URI "
+		int groupsCount = 0;
+
+		if (!monitor_count_groups(&monitor, options->formation, &groupsCount))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
+		if (groupsCount >= 0)
+		{
+			*mayRetry = true;
+		}
+
+		log_level(*mayRetry ? LOG_ERROR : LOG_FATAL,
+				  "Failed to grab the Postgres URI "
 				  "to connect to formation \"%s\", see above for details",
 				  options->formation);
+
+		pgsql_finish(&(monitor.pgsql));
+
 		return false;
 	}
+
+	pgsql_finish(&(monitor.pgsql));
 
 	return true;
 }
@@ -327,6 +352,8 @@ demoapp_process_perform_switchover(DemoAppOptions *demoAppOptions)
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
+	pgsql_set_monitor_interactive_retry_policy(&(monitor.pgsql.retryPolicy));
+
 	if (demoAppOptions->duration <= 15)
 	{
 		log_error("Use a --duration of at least 15s for a failover to happen");
@@ -334,7 +361,7 @@ demoapp_process_perform_switchover(DemoAppOptions *demoAppOptions)
 	}
 
 	log_info("Failover client is started, will failover in 10s "
-			 "and every 30s after that");
+			 "and every 20s after that");
 
 	while (!durationElapsed)
 	{
@@ -346,8 +373,8 @@ demoapp_process_perform_switchover(DemoAppOptions *demoAppOptions)
 			break;
 		}
 
-		/* once every 30s period we do a failover at the 10s mark */
-		if ((((int) (now - startTime)) % 30) != 10)
+		/* once every 20s period we do a failover at the 10s mark */
+		if ((((int) (now - startTime)) % 20) != 10)
 		{
 			pg_usleep(500);
 			continue;
@@ -359,14 +386,18 @@ demoapp_process_perform_switchover(DemoAppOptions *demoAppOptions)
 		if (!pgsql_listen(&(monitor.pgsql), channels))
 		{
 			log_error("Failed to listen to state changes from the monitor");
-			exit(EXIT_CODE_MONITOR);
+			pgsql_finish(&(monitor.pgsql));
+			continue;
 		}
 
 		if (!monitor_perform_failover(&monitor, formation, groupId))
 		{
 			log_fatal("Failed to perform failover/switchover, "
 					  "see above for details");
-			exit(EXIT_CODE_MONITOR);
+
+			/* skip this round entirely and continue */
+			sleep(1);
+			continue;
 		}
 
 		/* process state changes notification until we have a new primary */
@@ -377,7 +408,7 @@ demoapp_process_perform_switchover(DemoAppOptions *demoAppOptions)
 														 PRIMARY_STATE))
 		{
 			log_error("Failed to wait until a new primary has been notified");
-			exit(EXIT_CODE_INTERNAL_ERROR);
+			continue;
 		}
 	}
 }

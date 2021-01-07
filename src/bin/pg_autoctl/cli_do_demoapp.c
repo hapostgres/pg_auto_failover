@@ -327,10 +327,37 @@ cli_demo_run(int argc, char **argv)
 {
 	char pguri[MAXCONNINFO] = { 0 };
 
-	if (!demoapp_grab_formation_uri(&demoAppOptions, pguri, sizeof(pguri)))
+	ConnectionRetryPolicy retryPolicy = { 0 };
+
+	/* retry connecting to the monitor when it's not available */
+	(void) pgsql_set_monitor_interactive_retry_policy(&retryPolicy);
+
+	while (!pgsql_retry_policy_expired(&retryPolicy))
 	{
+		bool mayRetry = false;
+
+		if (demoapp_grab_formation_uri(&demoAppOptions, pguri, sizeof(pguri),
+									   &mayRetry))
+		{
+			/* success: break out of the retry loop */
+			break;
+		}
+
 		/* errors have already been logged */
-		exit(EXIT_CODE_INTERNAL_ERROR);
+		if (!mayRetry)
+		{
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+
+		int sleepTimeMs =
+			pgsql_compute_connection_retry_sleep_time(&retryPolicy);
+
+		/* we have milliseconds, pg_usleep() wants microseconds */
+		log_info("Retrying to grab formation \"%s\" URI in %dms",
+				 demoAppOptions.formation,
+				 sleepTimeMs);
+
+		(void) pg_usleep(sleepTimeMs * 1000);
 	}
 
 	log_info("Using application connection string \"%s\"", pguri);
@@ -359,9 +386,11 @@ cli_demo_run(int argc, char **argv)
 static void
 cli_demo_uri(int argc, char **argv)
 {
+	bool mayRetry = false;
 	char pguri[MAXCONNINFO] = { 0 };
 
-	if (!demoapp_grab_formation_uri(&demoAppOptions, pguri, sizeof(pguri)))
+	if (!demoapp_grab_formation_uri(&demoAppOptions, pguri, sizeof(pguri),
+									&mayRetry))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_INTERNAL_ERROR);
@@ -380,11 +409,13 @@ static void
 cli_demo_ping(int argc, char **argv)
 {
 	PGSQL pgsql = { 0 };
+	bool mayRetry = false;
 	char pguri[MAXCONNINFO] = { 0 };
 
 	bool is_in_recovery = false;
 
-	if (!demoapp_grab_formation_uri(&demoAppOptions, pguri, sizeof(pguri)))
+	if (!demoapp_grab_formation_uri(&demoAppOptions, pguri, sizeof(pguri),
+									&mayRetry))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_INTERNAL_ERROR);
@@ -428,9 +459,11 @@ cli_demo_ping(int argc, char **argv)
 static void
 cli_demo_summary(int argc, char **argv)
 {
+	bool mayRetry = false;
 	char pguri[MAXCONNINFO] = { 0 };
 
-	if (!demoapp_grab_formation_uri(&demoAppOptions, pguri, sizeof(pguri)))
+	if (!demoapp_grab_formation_uri(&demoAppOptions, pguri, sizeof(pguri),
+									&mayRetry))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_INTERNAL_ERROR);

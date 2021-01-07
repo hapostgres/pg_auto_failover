@@ -15,7 +15,8 @@
 #include "cli_do_demoapp.h"
 
 bool demoapp_grab_formation_uri(DemoAppOptions *options,
-								char *pguri, size_t size);
+								char *pguri, size_t size,
+								bool *mayRetry);
 void demoapp_set_retry_policy(PGSQL *pgsql);
 bool demoapp_prepare_schema(const char *pguri);
 bool demoapp_run(const char *pguri, DemoAppOptions *demoAppOptions);
