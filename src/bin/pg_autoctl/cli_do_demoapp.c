@@ -36,6 +36,7 @@ static int cli_do_demoapp_getopts(int argc, char **argv);
 static void cli_demo_run(int argc, char **argv);
 static void cli_demo_uri(int argc, char **argv);
 static void cli_demo_ping(int argc, char **argv);
+static void cli_demo_summary(int argc, char **argv);
 
 static CommandLine do_demo_run_command =
 	make_command("run",
@@ -70,10 +71,22 @@ static CommandLine do_demo_ping_command =
 				 "  --duration  Duration of the demo app, in seconds (30)\n",
 				 cli_do_demoapp_getopts, cli_demo_ping);
 
+static CommandLine do_demo_summary_command =
+	make_command("summary",
+				 "Display a summary of the previous demo app run",
+				 "[option ...]",
+				 "  --monitor   Postgres URI of the pg_auto_failover monitor\n"
+				 "  --formation Formation to use (default)\n"
+				 "  --username  PostgreSQL's username\n"
+				 "  --clients   How many client processes to use (1)\n"
+				 "  --duration  Duration of the demo app, in seconds (30)\n",
+				 cli_do_demoapp_getopts, cli_demo_summary);
+
 CommandLine *do_demo_subcommands[] = {
 	&do_demo_run_command,
 	&do_demo_uri_command,
 	&do_demo_ping_command,
+	&do_demo_summary_command,
 	NULL
 };
 
@@ -391,4 +404,27 @@ cli_demo_ping(int argc, char **argv)
 
 	log_info("Target Postgres is not in recovery, "
 			 "as expected from a primary node");
+}
+
+
+/*
+ * cli_demo_summary prints the summary of the previous demo app run.
+ */
+static void
+cli_demo_summary(int argc, char **argv)
+{
+	char pguri[MAXCONNINFO] = { 0 };
+
+	if (!demoapp_grab_formation_uri(&demoAppOptions, pguri, sizeof(pguri)))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	log_info("Using application connection string \"%s\"", pguri);
+	log_info("Using Postgres user PGUSER \"%s\"", demoAppOptions.username);
+
+	(void) demoapp_print_summary(pguri,
+								 demoAppOptions.clientsCount,
+								 demoAppOptions.duration);
 }

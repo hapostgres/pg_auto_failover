@@ -99,7 +99,7 @@ demoapp_prepare_schema(const char *pguri)
 		"drop schema if exists demo cascade",
 		"create schema demo",
 		"create table demo.tracking(ts timestamptz default now(), "
-		"id integer, attempts integer, us bigint, recovery bool)",
+		"id integer, retries integer, us bigint, recovery bool)",
 		NULL
 	};
 
@@ -361,7 +361,7 @@ demoapp_start_client(const char *pguri, int clientId, int totalDuration)
 		}
 
 		char *sql =
-			"insert into demo.tracking(id, attempts, us, recovery) "
+			"insert into demo.tracking(id, retries, us, recovery) "
 			"values($1, $2, $3, $4)";
 
 		const Oid paramTypes[4] = { INT4OID, INT4OID, INT8OID, BOOLOID };
@@ -400,7 +400,7 @@ demoapp_print_summary(const char *pguri, int clientsCount, int duration)
 		"case when id is not null then format('Client %s', id) "
 		"else ('All Clients Combined') end as \"Client\", "
 		"count(*) as \"Connections\", "
-		"sum(attempts) as \"Retries\", "
+		"sum(retries) as \"Retries\", "
 		"round(min(us)/1000.0, 3) as \"Min Connect Time (ms)\", "
 		"round(max(us)/1000.0, 3) as max, "
 		"round((" P95 ")::numeric, 3) as p95, "
