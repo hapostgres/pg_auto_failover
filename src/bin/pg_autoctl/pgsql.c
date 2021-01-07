@@ -806,8 +806,10 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 						  void *context, ParsePostgresResultCB *parseFun)
 {
 	char debugParameters[BUFSIZE] = { 0 };
+	PGresult *result = NULL;
 
 	PGconn *connection = pgsql_open_connection(pgsql);
+
 	if (connection == NULL)
 	{
 		return false;
@@ -848,8 +850,17 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 		log_debug("%s", debugParameters);
 	}
 
-	PGresult *result = PQexecParams(connection, sql,
-									paramCount, paramTypes, paramValues, NULL, NULL, 0);
+	if (paramCount == 0)
+	{
+		result = PQexec(connection, sql);
+	}
+	else
+	{
+		result = PQexecParams(connection, sql,
+							  paramCount, paramTypes, paramValues,
+							  NULL, NULL, 0);
+	}
+
 	if (!is_response_ok(result))
 	{
 		char *sqlstate = PQresultErrorField(result, PG_DIAG_SQLSTATE);
