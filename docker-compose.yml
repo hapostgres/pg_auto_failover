@@ -58,7 +58,7 @@ services:
     "--run"]
     expose:
       - 5432
-  node4:
+  demo-app:
     image: citusdata/pg_auto_failover:demo
     environment:
       PGDATA: /tmp/pgaf
