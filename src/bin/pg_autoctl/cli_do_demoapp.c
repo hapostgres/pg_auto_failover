@@ -44,6 +44,7 @@ static CommandLine do_demo_run_command =
 				 "[option ...]",
 				 "  --monitor   Postgres URI of the pg_auto_failover monitor\n"
 				 "  --formation Formation to use (default)\n"
+				 "  --group     Group Id to failover (0)\n" \
 				 "  --username  PostgreSQL's username\n"
 				 "  --clients   How many client processes to use (1)\n"
 				 "  --duration  Duration of the demo app, in seconds (30)\n",
@@ -55,6 +56,7 @@ static CommandLine do_demo_uri_command =
 				 "[option ...]",
 				 "  --monitor   Postgres URI of the pg_auto_failover monitor\n"
 				 "  --formation Formation to use (default)\n"
+				 "  --group     Group Id to failover (0)\n" \
 				 "  --username  PostgreSQL's username\n"
 				 "  --clients   How many client processes to use (1)\n"
 				 "  --duration  Duration of the demo app, in seconds (30)\n",
@@ -66,6 +68,7 @@ static CommandLine do_demo_ping_command =
 				 "[option ...]",
 				 "  --monitor   Postgres URI of the pg_auto_failover monitor\n"
 				 "  --formation Formation to use (default)\n"
+				 "  --group     Group Id to failover (0)\n" \
 				 "  --username  PostgreSQL's username\n"
 				 "  --clients   How many client processes to use (1)\n"
 				 "  --duration  Duration of the demo app, in seconds (30)\n",
@@ -77,6 +80,7 @@ static CommandLine do_demo_summary_command =
 				 "[option ...]",
 				 "  --monitor   Postgres URI of the pg_auto_failover monitor\n"
 				 "  --formation Formation to use (default)\n"
+				 "  --group     Group Id to failover (0)\n" \
 				 "  --username  PostgreSQL's username\n"
 				 "  --clients   How many client processes to use (1)\n"
 				 "  --duration  Duration of the demo app, in seconds (30)\n",
@@ -112,6 +116,7 @@ cli_do_demoapp_getopts(int argc, char **argv)
 	static struct option long_options[] = {
 		{ "monitor", required_argument, NULL, 'm' },
 		{ "formation", required_argument, NULL, 'f' },
+		{ "group", required_argument, NULL, 'g' },
 		{ "username", required_argument, NULL, 'U' },
 		{ "clients", required_argument, NULL, 'c' },
 		{ "duration", required_argument, NULL, 't' },
@@ -125,6 +130,7 @@ cli_do_demoapp_getopts(int argc, char **argv)
 	optind = 0;
 
 	/* set our defaults */
+	options.groupId = 0;
 	options.clientsCount = 1;
 	options.duration = 30;
 	strlcpy(options.formation, "default", sizeof(options.formation));
@@ -163,6 +169,19 @@ cli_do_demoapp_getopts(int argc, char **argv)
 				/* { "formation", required_argument, NULL, 'f' } */
 				strlcpy(options.formation, optarg, NAMEDATALEN);
 				log_trace("--formation %s", options.formation);
+				break;
+			}
+
+			case 'g':
+			{
+				/* { "group", required_argument, NULL, 'g' } */
+				if (!stringToInt(optarg, &options.groupId))
+				{
+					log_fatal("--group argument is not a valid group ID: \"%s\"",
+							  optarg);
+					exit(EXIT_CODE_BAD_ARGS);
+				}
+				log_trace("--group %d", options.groupId);
 				break;
 			}
 
@@ -323,17 +342,13 @@ cli_demo_run(int argc, char **argv)
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
-	if (!demoapp_run(pguri,
-					 demoAppOptions.clientsCount,
-					 demoAppOptions.duration))
+	if (!demoapp_run(pguri, &demoAppOptions))
 	{
 		log_fatal("Failed to run the demo application");
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
-	(void) demoapp_print_summary(pguri,
-								 demoAppOptions.clientsCount,
-								 demoAppOptions.duration);
+	(void) demoapp_print_summary(pguri, &demoAppOptions);
 }
 
 
@@ -424,7 +439,5 @@ cli_demo_summary(int argc, char **argv)
 	log_info("Using application connection string \"%s\"", pguri);
 	log_info("Using Postgres user PGUSER \"%s\"", demoAppOptions.username);
 
-	(void) demoapp_print_summary(pguri,
-								 demoAppOptions.clientsCount,
-								 demoAppOptions.duration);
+	(void) demoapp_print_summary(pguri, &demoAppOptions);
 }

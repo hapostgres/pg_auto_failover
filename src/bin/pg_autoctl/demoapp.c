@@ -25,7 +25,9 @@
 
 #include "runprogram.h"
 
-static void demoapp_start_client(const char *pguri, int clientId, int duration);
+static void demoapp_start_client(const char *pguri,
+								 int clientId,
+								 DemoAppOptions *demoAppOptions);
 
 static bool demoapp_wait_for_clients(pid_t clientsPidArray[],
 									 int startedClientsCount);
@@ -33,6 +35,7 @@ static bool demoapp_wait_for_clients(pid_t clientsPidArray[],
 static void demoapp_terminate_clients(pid_t clientsPidArray[],
 									  int startedClientsCount);
 
+static void demoapp_process_perform_switchover(DemoAppOptions *demoAppOptions);
 
 /*
  * demoapp_grab_formation_uri connects to the monitor and grabs the formation
@@ -75,8 +78,8 @@ demoapp_grab_formation_uri(DemoAppOptions *options, char *pguri, size_t size)
 void
 demoapp_set_retry_policy(PGSQL *pgsql)
 {
-	int cap = 5 * 1000;         /* sleep up to 5s between attempts */
-	int sleepTime = 300;    /* first retry happens after 300ms */
+	int cap = 200;         /* sleep up to 200s between attempts */
+	int sleepTime = 500;   /* first retry happens after 500ms */
 
 	(void) pgsql_set_retry_policy(&(pgsql->retryPolicy),
 								  60, /* maxT */
@@ -99,7 +102,7 @@ demoapp_prepare_schema(const char *pguri)
 		"drop schema if exists demo cascade",
 		"create schema demo",
 		"create table demo.tracking(ts timestamptz default now(), "
-		"id integer, retries integer, us bigint, recovery bool)",
+		"client integer, loop integer, retries integer, us bigint, recovery bool)",
 		NULL
 	};
 
@@ -128,10 +131,11 @@ demoapp_prepare_schema(const char *pguri)
  * each sub-process implements a very simple INSERT INTO in a loop.
  */
 bool
-demoapp_run(const char *pguri, int clientsCount, int duration)
+demoapp_run(const char *pguri, DemoAppOptions *demoAppOptions)
 {
+	int clientsCount = demoAppOptions->clientsCount;
 	int startedClientsCount = 0;
-	pid_t clientsPidArray[MAX_CLIENTS_COUNT] = { 0 };
+	pid_t clientsPidArray[MAX_CLIENTS_COUNT + 1] = { 0 };
 
 	IntString semIdString = intToString(log_semaphore.semId);
 
@@ -145,7 +149,7 @@ demoapp_run(const char *pguri, int clientsCount, int duration)
 	/* we want to use the same logs semaphore in the sub-processes */
 	setenv(PG_AUTOCTL_LOG_SEMAPHORE, semIdString.strValue, 1);
 
-	for (int i = 0; i < clientsCount; i++)
+	for (int index = 0; index <= clientsCount; index++)
 	{
 		pid_t fpid = fork();
 
@@ -153,7 +157,7 @@ demoapp_run(const char *pguri, int clientsCount, int duration)
 		{
 			case -1:
 			{
-				log_error("Failed to fork client %d", i);
+				log_error("Failed to fork client %d", index);
 
 				(void) demoapp_terminate_clients(clientsPidArray,
 												 startedClientsCount);
@@ -173,7 +177,16 @@ demoapp_run(const char *pguri, int clientsCount, int duration)
 				(void) log_set_udata(&log_semaphore);
 				(void) log_set_lock(&semaphore_log_lock_function);
 
-				(void) demoapp_start_client(pguri, i, duration);
+				if (index == 0)
+				{
+					(void) demoapp_process_perform_switchover(demoAppOptions);
+				}
+				else
+				{
+					(void) demoapp_start_client(pguri, index, demoAppOptions);
+				}
+
+
 				(void) semaphore_finish(&log_semaphore);
 				exit(EXIT_CODE_QUIT);
 			}
@@ -181,7 +194,7 @@ demoapp_run(const char *pguri, int clientsCount, int duration)
 			default:
 			{
 				/* fork succeeded, in parent */
-				clientsPidArray[i] = fpid;
+				clientsPidArray[index] = fpid;
 				++startedClientsCount;
 			}
 		}
@@ -293,6 +306,84 @@ demoapp_terminate_clients(pid_t clientsPidArray[], int startedClientsCount)
 
 
 /*
+ * demoapp_perform_switchover performs a switchover while the demo application
+ * is running, once in a while
+ */
+static void
+demoapp_process_perform_switchover(DemoAppOptions *demoAppOptions)
+{
+	Monitor monitor = { 0 };
+	char *channels[] = { "state", NULL };
+
+	char *formation = demoAppOptions->formation;
+	int groupId = demoAppOptions->groupId;
+
+	bool durationElapsed = false;
+	uint64_t startTime = time(NULL);
+
+	if (!monitor_init(&monitor, demoAppOptions->monitor_pguri))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	if (demoAppOptions->duration <= 15)
+	{
+		log_error("Use a --duration of at least 15s for a failover to happen");
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	log_info("Failover client is started, will failover in 10s "
+			 "and every 30s after that");
+
+	while (!durationElapsed)
+	{
+		uint64_t now = time(NULL);
+
+		if ((now - startTime) > demoAppOptions->duration)
+		{
+			durationElapsed = true;
+			break;
+		}
+
+		/* once every 30s period we do a failover at the 10s mark */
+		if ((((int) (now - startTime)) % 30) != 10)
+		{
+			pg_usleep(500);
+			continue;
+		}
+
+		log_info("pg_autoctl perform failover");
+
+		/* start listening to the state changes before we perform_failover */
+		if (!pgsql_listen(&(monitor.pgsql), channels))
+		{
+			log_error("Failed to listen to state changes from the monitor");
+			exit(EXIT_CODE_MONITOR);
+		}
+
+		if (!monitor_perform_failover(&monitor, formation, groupId))
+		{
+			log_fatal("Failed to perform failover/switchover, "
+					  "see above for details");
+			exit(EXIT_CODE_MONITOR);
+		}
+
+		/* process state changes notification until we have a new primary */
+		if (!monitor_wait_until_some_node_reported_state(&monitor,
+														 formation,
+														 groupId,
+														 NODE_KIND_UNKNOWN,
+														 PRIMARY_STATE))
+		{
+			log_error("Failed to wait until a new primary has been notified");
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+	}
+}
+
+
+/*
  * http://c-faq.com/lib/randrange.html
  */
 #define random_between(M, N) \
@@ -304,13 +395,16 @@ demoapp_terminate_clients(pid_t clientsPidArray[], int startedClientsCount)
  * some latency information.
  */
 static void
-demoapp_start_client(const char *pguri, int clientId, int totalDuration)
+demoapp_start_client(const char *pguri, int clientId,
+					 DemoAppOptions *demoAppOptions)
 {
 	uint64_t startTime = time(NULL);
 	bool durationElapsed = false;
 	bool firstLoop = true;
 
-	while (!durationElapsed)
+	uint64_t previousLogLineTime = 0;
+
+	for (int index = 0; !durationElapsed; index++)
 	{
 		PGSQL pgsql = { 0 };
 		bool is_in_recovery = false;
@@ -327,7 +421,7 @@ demoapp_start_client(const char *pguri, int clientId, int totalDuration)
 			pg_usleep(sleepTimeMs * 1000);
 		}
 
-		if ((now - startTime) > totalDuration)
+		if ((now - startTime) > demoAppOptions->duration)
 		{
 			durationElapsed = true;
 			break;
@@ -348,9 +442,17 @@ demoapp_start_client(const char *pguri, int clientId, int totalDuration)
 
 		if (pgsql.retryPolicy.attempts == 0)
 		{
-			log_info("Client %d connected in %5.3f ms",
-					 clientId,
-					 INSTR_TIME_GET_MILLISEC(duration));
+			/* log every 2s max, to avoid filling in the logs */
+			if (previousLogLineTime == 0 ||
+				(now - previousLogLineTime) >= 10)
+			{
+				log_info("Client %d connected in %5.3f ms in loop %d",
+						 clientId,
+						 INSTR_TIME_GET_MILLISEC(duration),
+						 index);
+
+				previousLogLineTime = now;
+			}
 		}
 		else
 		{
@@ -358,21 +460,24 @@ demoapp_start_client(const char *pguri, int clientId, int totalDuration)
 					 clientId,
 					 pgsql.retryPolicy.attempts,
 					 INSTR_TIME_GET_MILLISEC(duration));
+
+			previousLogLineTime = now;
 		}
 
 		char *sql =
-			"insert into demo.tracking(id, retries, us, recovery) "
-			"values($1, $2, $3, $4)";
+			"insert into demo.tracking(client, loop, retries, us, recovery) "
+			"values($1, $2, $3, $4, $5)";
 
-		const Oid paramTypes[4] = { INT4OID, INT4OID, INT8OID, BOOLOID };
-		const char *paramValues[4] = { 0 };
+		const Oid paramTypes[5] = { INT4OID, INT4OID, INT8OID, INT8OID, BOOLOID };
+		const char *paramValues[5] = { 0 };
 
 		paramValues[0] = intToString(clientId).strValue;
-		paramValues[1] = intToString(pgsql.retryPolicy.attempts).strValue;
-		paramValues[2] = intToString(INSTR_TIME_GET_MICROSEC(duration)).strValue;
-		paramValues[3] = is_in_recovery ? "true" : "false";
+		paramValues[1] = intToString(index).strValue;
+		paramValues[2] = intToString(pgsql.retryPolicy.attempts).strValue;
+		paramValues[3] = intToString(INSTR_TIME_GET_MICROSEC(duration)).strValue;
+		paramValues[4] = is_in_recovery ? "true" : "false";
 
-		if (!pgsql_execute_with_params(&pgsql, sql, 4, paramTypes, paramValues,
+		if (!pgsql_execute_with_params(&pgsql, sql, 5, paramTypes, paramValues,
 									   NULL, NULL))
 		{
 			/* errors have already been logged */
@@ -391,13 +496,15 @@ demoapp_start_client(const char *pguri, int clientId, int totalDuration)
  * demoapp_print_summary prints a summar of what happened during the run.
  */
 void
-demoapp_print_summary(const char *pguri, int clientsCount, int duration)
+demoapp_print_summary(const char *pguri, DemoAppOptions *demoAppOptions)
 {
 	char psql[MAXPGPATH] = { 0 };
 
 	const char *sql =
+
+		/* *INDENT-OFF* */
 		"select "
-		"case when id is not null then format('Client %s', id) "
+		"case when client is not null then format('Client %s', client) "
 		"else ('All Clients Combined') end as \"Client\", "
 		"count(*) as \"Connections\", "
 		"sum(retries) as \"Retries\", "
@@ -405,11 +512,12 @@ demoapp_print_summary(const char *pguri, int clientsCount, int duration)
 		"round(max(us)/1000.0, 3) as max, "
 		"round((" P95 ")::numeric, 3) as p95, "
 					  "round((" P99 ")::numeric, 3) as p99 "
-									"from demo.tracking "
-									"group by rollup(id) "
-									"order by id nulls last;";
+		"from demo.tracking "
+		"group by rollup(client) "
+		"order by client nulls last;";
+		/* *INDENT-ON* */
 
-	char *args[16];
+		char *args[16];
 	int argsIndex = 0;
 
 	/* we shell-out to psql so that we don't have to compute headers */
@@ -420,7 +528,7 @@ demoapp_print_summary(const char *pguri, int clientsCount, int duration)
 	}
 
 	log_info("Summary for the demo app running with %d clients for %ds",
-			 clientsCount, duration);
+			 demoAppOptions->clientsCount, demoAppOptions->duration);
 
 	args[argsIndex++] = psql;
 	args[argsIndex++] = "--no-psqlrc";

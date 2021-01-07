@@ -18,7 +18,7 @@ bool demoapp_grab_formation_uri(DemoAppOptions *options,
 								char *pguri, size_t size);
 void demoapp_set_retry_policy(PGSQL *pgsql);
 bool demoapp_prepare_schema(const char *pguri);
-bool demoapp_run(const char *pguri, int clientsCount, int duration);
-void demoapp_print_summary(const char *pguri, int clientsCount, int duration);
+bool demoapp_run(const char *pguri, DemoAppOptions *demoAppOptions);
+void demoapp_print_summary(const char *pguri, DemoAppOptions *demoAppOptions);
 
 #endif /* DEMOAPP_H */

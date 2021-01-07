@@ -33,6 +33,7 @@ typedef struct DemoAppOptions
 	char monitor_pguri[MAXCONNINFO];
 	char formation[NAMEDATALEN];
 	char username[NAMEDATALEN];
+	int groupId;
 
 	int clientsCount;
 	int duration;
