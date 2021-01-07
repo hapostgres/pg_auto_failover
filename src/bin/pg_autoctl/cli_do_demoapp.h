@@ -26,17 +26,18 @@
 #include "signals.h"
 #include "string_utils.h"
 
+#define MAX_CLIENTS_COUNT 128
+
 typedef struct DemoAppOptions
 {
 	char monitor_pguri[MAXCONNINFO];
 	char formation[NAMEDATALEN];
 	char username[NAMEDATALEN];
 
-	int workersCount;
+	int clientsCount;
 	int duration;
 } DemoAppOptions;
 
 extern DemoAppOptions demoAppOptions;
-
 
 #endif  /* CLI_DO_DEMOAPP_H */

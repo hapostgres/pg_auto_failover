@@ -44,7 +44,7 @@ static CommandLine do_demo_run_command =
 				 "  --monitor   Postgres URI of the pg_auto_failover monitor\n"
 				 "  --formation Formation to use (default)\n"
 				 "  --username  PostgreSQL's username\n"
-				 "  --workers   How many worker processes to use (1)\n"
+				 "  --clients   How many client processes to use (1)\n"
 				 "  --duration  Duration of the demo app, in seconds (30)\n",
 				 cli_do_demoapp_getopts, cli_demo_run);
 
@@ -55,7 +55,7 @@ static CommandLine do_demo_uri_command =
 				 "  --monitor   Postgres URI of the pg_auto_failover monitor\n"
 				 "  --formation Formation to use (default)\n"
 				 "  --username  PostgreSQL's username\n"
-				 "  --workers   How many worker processes to use (1)\n"
+				 "  --clients   How many client processes to use (1)\n"
 				 "  --duration  Duration of the demo app, in seconds (30)\n",
 				 cli_do_demoapp_getopts, cli_demo_uri);
 
@@ -66,7 +66,7 @@ static CommandLine do_demo_ping_command =
 				 "  --monitor   Postgres URI of the pg_auto_failover monitor\n"
 				 "  --formation Formation to use (default)\n"
 				 "  --username  PostgreSQL's username\n"
-				 "  --workers   How many worker processes to use (1)\n"
+				 "  --clients   How many client processes to use (1)\n"
 				 "  --duration  Duration of the demo app, in seconds (30)\n",
 				 cli_do_demoapp_getopts, cli_demo_ping);
 
@@ -100,7 +100,7 @@ cli_do_demoapp_getopts(int argc, char **argv)
 		{ "monitor", required_argument, NULL, 'm' },
 		{ "formation", required_argument, NULL, 'f' },
 		{ "username", required_argument, NULL, 'U' },
-		{ "workers", required_argument, NULL, 'w' },
+		{ "clients", required_argument, NULL, 'c' },
 		{ "duration", required_argument, NULL, 't' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
@@ -112,7 +112,7 @@ cli_do_demoapp_getopts(int argc, char **argv)
 	optind = 0;
 
 	/* set our defaults */
-	options.workersCount = 1;
+	options.clientsCount = 1;
 	options.duration = 30;
 	strlcpy(options.formation, "default", sizeof(options.formation));
 
@@ -161,16 +161,26 @@ cli_do_demoapp_getopts(int argc, char **argv)
 				break;
 			}
 
-			case 'w':
+			case 'c':
 			{
-				/* { "workers", required_argument, NULL, 'w' }, */
-				if (!stringToInt(optarg, &options.workersCount))
+				/* { "clients", required_argument, NULL, 'c' }, */
+				if (!stringToInt(optarg, &options.clientsCount))
 				{
-					log_error("Failed to parse --workers number \"%s\"",
+					log_error("Failed to parse --clients number \"%s\"",
 							  optarg);
 					errors++;
 				}
-				log_trace("--workers %d", options.workersCount);
+
+				if (options.clientsCount < 1 ||
+					options.clientsCount > MAX_CLIENTS_COUNT)
+				{
+					log_error("Unsupported value for --clients: %d must be "
+							  "at least 1 and maximum %d",
+							  options.clientsCount,
+							  MAX_CLIENTS_COUNT);
+				}
+
+				log_trace("--clients %d", options.clientsCount);
 				break;
 			}
 
@@ -283,7 +293,34 @@ cli_do_demoapp_getopts(int argc, char **argv)
 static void
 cli_demo_run(int argc, char **argv)
 {
-	exit(EXIT_CODE_INTERNAL_ERROR);
+	char pguri[MAXCONNINFO] = { 0 };
+
+	if (!demoapp_grab_formation_uri(&demoAppOptions, pguri, sizeof(pguri)))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	log_info("Using application connection string \"%s\"", pguri);
+	log_info("Using Postgres user PGUSER \"%s\"", demoAppOptions.username);
+
+	if (!demoapp_prepare_schema(pguri))
+	{
+		log_fatal("Failed to install the demo application schema");
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	if (!demoapp_run(pguri,
+					 demoAppOptions.clientsCount,
+					 demoAppOptions.duration))
+	{
+		log_fatal("Failed to run the demo application");
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	(void) demoapp_print_summary(pguri,
+								 demoAppOptions.clientsCount,
+								 demoAppOptions.duration);
 }
 
 
@@ -336,16 +373,22 @@ cli_demo_ping(int argc, char **argv)
 		exit(EXIT_CODE_PGSQL);
 	}
 
-	uint64_t now = time(NULL);
-	log_info("Connected after %d attempt(s)", pgsql.retryPolicy.attempts + 1);
-	log_info("Connected after %ds", (int) (now - pgsql.retryPolicy.startTime));
+	instr_time duration;
 
-	log_level(is_in_recovery ? LOG_ERROR : LOG_INFO,
-			  "Target Postgres %s in recovery",
-			  is_in_recovery ? "is" : "is not");
+	INSTR_TIME_SET_CURRENT(duration);
+	INSTR_TIME_SUBTRACT(duration, pgsql.retryPolicy.startTime);
+
+	log_info("Connected after %d attempt(s) in %g ms",
+			 pgsql.retryPolicy.attempts + 1,
+			 INSTR_TIME_GET_MILLISEC(duration));
 
 	if (is_in_recovery)
 	{
+		log_error("Failed to connect to a primary node: "
+				  "Postgres is in recovery");
 		exit(EXIT_CODE_PGSQL);
 	}
+
+	log_info("Target Postgres is not in recovery, "
+			 "as expected from a primary node");
 }
