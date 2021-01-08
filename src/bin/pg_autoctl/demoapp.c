@@ -529,6 +529,7 @@ demoapp_start_client(const char *pguri, int clientId,
 void
 demoapp_print_summary(const char *pguri, DemoAppOptions *demoAppOptions)
 {
+	char cat[MAXPGPATH] = { 0 };
 	char psql[MAXPGPATH] = { 0 };
 
 	const char *sql =
@@ -557,6 +558,16 @@ demoapp_print_summary(const char *pguri, DemoAppOptions *demoAppOptions)
 		log_fatal("Failed to find program psql in PATH");
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
+
+	/* we use /bin/cat as our PAGER */
+	if (!search_path_first("cat", cat, LOG_ERROR))
+	{
+		log_fatal("Failed to find program cat in PATH");
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	/* set our PAGER to be just cat */
+	setenv("PAGER", cat, 1);
 
 	log_info("Summary for the demo app running with %d clients for %ds",
 			 demoAppOptions->clientsCount, demoAppOptions->duration);
