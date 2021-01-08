@@ -42,12 +42,14 @@ static CommandLine do_demo_run_command =
 	make_command("run",
 				 "Run the pg_auto_failover demo application",
 				 "[option ...]",
-				 "  --monitor   Postgres URI of the pg_auto_failover monitor\n"
-				 "  --formation Formation to use (default)\n"
-				 "  --group     Group Id to failover (0)\n" \
-				 "  --username  PostgreSQL's username\n"
-				 "  --clients   How many client processes to use (1)\n"
-				 "  --duration  Duration of the demo app, in seconds (30)\n",
+				 "  --monitor        Postgres URI of the pg_auto_failover monitor\n"
+				 "  --formation      Formation to use (default)\n"
+				 "  --group          Group Id to failover (0)\n"
+				 "  --username       PostgreSQL's username\n"
+				 "  --clients        How many client processes to use (1)\n"
+				 "  --duration       Duration of the demo app, in seconds (30)\n"
+				 "  --first-failover Timing of the first failover (10)\n"
+				 "  --failover-freq  Seconds between subsequent failovers (45)\n",
 				 cli_do_demoapp_getopts, cli_demo_run);
 
 static CommandLine do_demo_uri_command =
@@ -120,6 +122,8 @@ cli_do_demoapp_getopts(int argc, char **argv)
 		{ "username", required_argument, NULL, 'U' },
 		{ "clients", required_argument, NULL, 'c' },
 		{ "duration", required_argument, NULL, 't' },
+		{ "first-failover", required_argument, NULL, 'F' },
+		{ "failover-freq", required_argument, NULL, 'Q' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
@@ -133,6 +137,8 @@ cli_do_demoapp_getopts(int argc, char **argv)
 	options.groupId = 0;
 	options.clientsCount = 1;
 	options.duration = 30;
+	options.firstFailover = 10;
+	options.failoverFreq = 45;
 	strlcpy(options.formation, "default", sizeof(options.formation));
 
 	/*
@@ -228,6 +234,33 @@ cli_do_demoapp_getopts(int argc, char **argv)
 				log_trace("--duration %d", options.duration);
 				break;
 			}
+
+			case 'F':
+			{
+				/* { "first-failover", required_argument, NULL, 'F' }, */
+				if (!stringToInt(optarg, &options.firstFailover))
+				{
+					log_error("Failed to parse --first-failover number \"%s\"",
+							  optarg);
+					errors++;
+				}
+				log_trace("--first-failover %d", options.firstFailover);
+				break;
+			}
+
+			case 'Q':
+			{
+				/* { "failover-freq", required_argument, NULL, 'Q' }, */
+				if (!stringToInt(optarg, &options.failoverFreq))
+				{
+					log_error("Failed to parse --failover-freq number \"%s\"",
+							  optarg);
+					errors++;
+				}
+				log_trace("--failover-freq %d", options.failoverFreq);
+				break;
+			}
+
 
 			case 'h':
 			{

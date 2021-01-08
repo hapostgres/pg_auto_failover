@@ -27,6 +27,12 @@
 
 static void demoapp_set_retry_policy(PGSQL *pgsql, int cap, int sleepTime);
 
+static bool demoapp_register_client(const char *pguri,
+									int clientId, int retrySleep, int retryCap);
+
+static bool demoapp_update_client_failovers(const char *pguri,
+											int clientId, int failovers);
+
 static void demoapp_start_client(const char *pguri,
 								 int clientId,
 								 DemoAppOptions *demoAppOptions);
@@ -127,11 +133,13 @@ demoapp_prepare_schema(const char *pguri)
 		"create schema demo",
 		"create table demo.tracking(ts timestamptz default now(), "
 		"client integer, loop integer, retries integer, us bigint, recovery bool)",
+		"create table demo.client(client integer, pid integer, "
+		"retry_sleep_ms integer, retry_cap_ms integer, failover_count integer)",
 		NULL
 	};
 
 	/* use the retry policy for a REMOTE node */
-	pgsql_init(&pgsql, (char *) pguri, PGSQL_CONN_MONITOR);
+	pgsql_init(&pgsql, (char *) pguri, PGSQL_CONN_APP);
 
 	demoapp_set_retry_policy(&pgsql,
 							 DEMO_DEFAULT_RETRY_CAP_TIME,
@@ -351,18 +359,22 @@ demoapp_process_perform_switchover(DemoAppOptions *demoAppOptions)
 
 	pgsql_set_monitor_interactive_retry_policy(&(monitor.pgsql.retryPolicy));
 
-	if (demoAppOptions->duration <= 15)
+	if (demoAppOptions->duration <= (demoAppOptions->firstFailover + 10))
 	{
-		log_error("Use a --duration of at least 15s for a failover to happen");
+		log_error("Use a --duration of at least %ds for a failover to happen",
+				  demoAppOptions->firstFailover + 10);
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
-	log_info("Failover client is started, will failover in 10s "
-			 "and every 20s after that");
+	log_info("Failover client is started, will failover in %ds "
+			 "and every %ds after that",
+			 demoAppOptions->firstFailover,
+			 demoAppOptions->failoverFreq);
 
 	while (!durationElapsed)
 	{
 		uint64_t now = time(NULL);
+		int currentSecond = (int) (now - startTime);
 
 		if ((now - startTime) > demoAppOptions->duration)
 		{
@@ -370,8 +382,19 @@ demoapp_process_perform_switchover(DemoAppOptions *demoAppOptions)
 			break;
 		}
 
-		/* once every 20s period we do a failover at the 10s mark */
-		if ((((int) (now - startTime)) % 20) != 10)
+		/*
+		 * skip failover unless conditions are right:
+		 *
+		 * - current second is firstFailover (--first-failover 10)
+		 *
+		 * - we went past firstFailover already and current second is a
+		 *   multiple of the failover frequency (failover every failoverFreq
+		 *   seconds after the first failover).
+		 */
+		if (currentSecond != demoAppOptions->firstFailover ||
+			(currentSecond > demoAppOptions->firstFailover &&
+			 ((currentSecond - demoAppOptions->firstFailover) %
+			  demoAppOptions->failoverFreq) != 0))
 		{
 			pg_usleep(500);
 			continue;
@@ -408,6 +431,81 @@ demoapp_process_perform_switchover(DemoAppOptions *demoAppOptions)
 			continue;
 		}
 	}
+}
+
+
+/*
+ * demoapp_register_client registers a client with its retry policy
+ */
+static bool
+demoapp_register_client(const char *pguri,
+						int clientId, int retrySleep, int retryCap)
+{
+	PGSQL pgsql = { 0 };
+
+	char *sql =
+		"insert into demo.client(client, pid, retry_sleep_ms, retry_cap_ms) "
+		"values($1, $2, $3, $4)";
+
+	const Oid paramTypes[4] = { INT4OID, INT4OID, INT4OID, INT4OID };
+	const char *paramValues[4] = { 0 };
+
+	paramValues[0] = intToString(clientId).strValue;
+	paramValues[1] = intToString(getpid()).strValue;
+	paramValues[2] = intToString(retrySleep).strValue;
+	paramValues[3] = intToString(retryCap).strValue;
+
+	pgsql_init(&pgsql, (char *) pguri, PGSQL_CONN_APP);
+
+	demoapp_set_retry_policy(&pgsql,
+							 DEMO_DEFAULT_RETRY_CAP_TIME,
+							 DEMO_DEFAULT_RETRY_SLEEP_TIME);
+
+	if (!pgsql_execute_with_params(&pgsql, sql, 4, paramTypes, paramValues,
+								   NULL, NULL))
+	{
+		/* errors have already been logged */
+		pgsql_finish(&pgsql);
+		return false;
+	}
+
+	pgsql_finish(&pgsql);
+	return true;
+}
+
+
+/*
+ * demoapp_update_client_failovers registers how many failovers a client faced
+ */
+static bool
+demoapp_update_client_failovers(const char *pguri, int clientId, int failovers)
+{
+	PGSQL pgsql = { 0 };
+
+	char *sql = "update demo.client set failover_count = $2 where client = $1";
+
+	const Oid paramTypes[2] = { INT4OID, INT4OID };
+	const char *paramValues[2] = { 0 };
+
+	paramValues[0] = intToString(clientId).strValue;
+	paramValues[1] = intToString(failovers).strValue;
+
+	pgsql_init(&pgsql, (char *) pguri, PGSQL_CONN_APP);
+
+	demoapp_set_retry_policy(&pgsql,
+							 DEMO_DEFAULT_RETRY_CAP_TIME,
+							 DEMO_DEFAULT_RETRY_SLEEP_TIME);
+
+	if (!pgsql_execute_with_params(&pgsql, sql, 2, paramTypes, paramValues,
+								   NULL, NULL))
+	{
+		/* errors have already been logged */
+		pgsql_finish(&pgsql);
+		return false;
+	}
+
+	pgsql_finish(&pgsql);
+	return true;
 }
 
 
@@ -454,6 +552,12 @@ demoapp_start_client(const char *pguri, int clientId,
 			 retrySleepTime,
 			 retryCap);
 
+	if (!demoapp_register_client(pguri, clientId, retrySleepTime, retryCap))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
 	for (int index = 0; !durationElapsed; index++)
 	{
 		PGSQL pgsql = { 0 };
@@ -478,7 +582,7 @@ demoapp_start_client(const char *pguri, int clientId,
 		}
 
 		/* use the retry policy for a REMOTE node */
-		pgsql_init(&pgsql, (char *) pguri, PGSQL_CONN_MONITOR);
+		pgsql_init(&pgsql, (char *) pguri, PGSQL_CONN_APP);
 		demoapp_set_retry_policy(&pgsql, retryCap, retrySleepTime);
 
 		if (!pgsql_is_in_recovery(&pgsql, &is_in_recovery))
@@ -567,16 +671,26 @@ demoapp_start_client(const char *pguri, int clientId,
 		pgsql_finish(&pgsql);
 	}
 
+	if (!demoapp_update_client_failovers(pguri, clientId, failovers))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
 	log_info("Client %d connected on first attempt %d times "
 			 "with a maximum connection time of %d ms",
 			 clientId, directs, maxConnectionTimeNoRetry);
 
+	log_info("Client %d is using a retry policy with initial sleep time %d ms "
+			 "and a retry time capped at %d ms",
+			 clientId,
+			 retrySleepTime,
+			 retryCap);
+
 	log_info("Client %d attempted to connect during a failover %d times "
 			 "with a maximum connection time of %d ms and a total number "
-			 "of %d retries with retry policy initial sleep time of %d ms "
-			 "and retry time capped to %d ms",
-			 clientId, failovers, maxConnectionTimeWithRetries, retries,
-			 retrySleepTime, retryCap);
+			 "of %d retries",
+			 clientId, failovers, maxConnectionTimeWithRetries, retries);
 }
 
 
@@ -595,18 +709,28 @@ demoapp_print_summary(const char *pguri, DemoAppOptions *demoAppOptions)
 	const char *sql =
 
 		/* *INDENT-OFF* */
-		"select "
-		"case when client is not null then format('Client %s', client) "
-		"else ('All Clients Combined') end as \"Client\", "
-		"count(*) as \"Connections\", "
-		"sum(retries) as \"Retries\", "
-		"round(min(us)/1000.0, 3) as \"Min Connect Time (ms)\", "
+		"with stats as( "
+		"select client, "
+		"count(*) as conn, "
+		"sum(retries), "
+		"round(min(us)/1000.0, 3) as min, "
 		"round(max(us)/1000.0, 3) as max, "
 		"round((" P95 ")::numeric, 3) as p95, "
 					  "round((" P99 ")::numeric, 3) as p99 "
 		"from demo.tracking "
 		"group by rollup(client) "
-		"order by client nulls last;";
+		") "
+		"select "
+		"case when client is not null then format('Client %s', client) "
+		"else ('All Clients Combined') end as \"Client\", "
+		"conn as \"Connections\", "
+		"failover_count as \"Failovers\", "
+		"retry_sleep_ms as \"Retry Sleep (ms)\", "
+		"retry_cap_ms as \"Retry Cap (ms)\", "
+		"sum as \"Retries\", "
+		"min as \"Min Connect Time (ms)\", max, p95, p99 "
+		"from stats left join demo.client using(client) "
+		"order by client nulls last";
 		/* *INDENT-ON* */
 
 		char *args[16];

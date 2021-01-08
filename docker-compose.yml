@@ -68,4 +68,6 @@ services:
     "--username", "ad",
     "--clients", "10",
     "--duration", "125",
+    "--first-failover", "45",
+    "--failover-freq", "30",
     "--monitor", "postgresql://autoctl_node@monitor/pg_auto_failover"]
