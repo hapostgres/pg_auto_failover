@@ -25,6 +25,8 @@
 
 #include "runprogram.h"
 
+static void demoapp_set_retry_policy(PGSQL *pgsql, int cap, int sleepTime);
+
 static void demoapp_start_client(const char *pguri,
 								 int clientId,
 								 DemoAppOptions *demoAppOptions);
@@ -100,12 +102,9 @@ demoapp_grab_formation_uri(DemoAppOptions *options, char *pguri, size_t size,
  * demoapp_set_retry_policy sets a retry policy that is suitable for a demo
  * client application.
  */
-void
-demoapp_set_retry_policy(PGSQL *pgsql)
+static void
+demoapp_set_retry_policy(PGSQL *pgsql, int cap, int sleepTime)
 {
-	int cap = 200;         /* sleep up to 200s between attempts */
-	int sleepTime = 500;   /* first retry happens after 500ms */
-
 	(void) pgsql_set_retry_policy(&(pgsql->retryPolicy),
 								  60, /* maxT */
 								  -1, /* unbounded maxR */
@@ -133,7 +132,10 @@ demoapp_prepare_schema(const char *pguri)
 
 	/* use the retry policy for a REMOTE node */
 	pgsql_init(&pgsql, (char *) pguri, PGSQL_CONN_MONITOR);
-	demoapp_set_retry_policy(&pgsql);
+
+	demoapp_set_retry_policy(&pgsql,
+							 DEMO_DEFAULT_RETRY_CAP_TIME,
+							 DEMO_DEFAULT_RETRY_SLEEP_TIME);
 
 	for (int i = 0; ddls[i] != NULL; i++)
 	{
@@ -436,6 +438,22 @@ demoapp_start_client(const char *pguri, int clientId,
 	int maxConnectionTimeNoRetry = 0;
 	int maxConnectionTimeWithRetries = 0;
 
+	int retryCap = 200;         /* sleep up to 200ms between attempts */
+	int retrySleepTime = 500;   /* first retry happens after 500 ms */
+
+	/* initialize a seed for our random number generator */
+	pg_srand48(((unsigned int) (getpid() ^ time(NULL))));
+
+	/* pick a random retry policy for this client */
+	retryCap = random_between(50, 500);
+	retrySleepTime = random_between(500, 1500);
+
+	log_info("Client %d is using a retry policy with initial sleep time %d ms "
+			 "and a retry time capped at %d ms",
+			 clientId,
+			 retrySleepTime,
+			 retryCap);
+
 	for (int index = 0; !durationElapsed; index++)
 	{
 		PGSQL pgsql = { 0 };
@@ -461,7 +479,7 @@ demoapp_start_client(const char *pguri, int clientId,
 
 		/* use the retry policy for a REMOTE node */
 		pgsql_init(&pgsql, (char *) pguri, PGSQL_CONN_MONITOR);
-		demoapp_set_retry_policy(&pgsql);
+		demoapp_set_retry_policy(&pgsql, retryCap, retrySleepTime);
 
 		if (!pgsql_is_in_recovery(&pgsql, &is_in_recovery))
 		{
@@ -487,8 +505,21 @@ demoapp_start_client(const char *pguri, int clientId,
 			if (previousLogLineTime == 0 ||
 				(now - previousLogLineTime) >= 10)
 			{
-				log_info("Client %d connected %d times in less than %d ms",
-						 clientId, directs, maxConnectionTimeNoRetry);
+				if (failovers == 0)
+				{
+					log_info("Client %d connected %d times in less than %d ms, "
+							 "before first failover",
+							 clientId, directs, maxConnectionTimeNoRetry);
+				}
+				else
+				{
+					log_info("Client %d connected %d times in less than %d ms, "
+							 "after %d failover(s)",
+							 clientId,
+							 directs,
+							 maxConnectionTimeNoRetry,
+							 failovers);
+				}
 
 				previousLogLineTime = now;
 			}
@@ -542,8 +573,10 @@ demoapp_start_client(const char *pguri, int clientId,
 
 	log_info("Client %d attempted to connect during a failover %d times "
 			 "with a maximum connection time of %d ms and a total number "
-			 "of %d retries with current retry policy",
-			 clientId, failovers, maxConnectionTimeWithRetries, retries);
+			 "of %d retries with retry policy initial sleep time of %d ms "
+			 "and retry time capped to %d ms",
+			 clientId, failovers, maxConnectionTimeWithRetries, retries,
+			 retrySleepTime, retryCap);
 }
 
 
