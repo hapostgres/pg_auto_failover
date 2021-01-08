@@ -286,12 +286,7 @@ demoapp_wait_for_clients(pid_t clientsPidArray[], int startedClientsCount)
 				{
 					if (clientsPidArray[index] == pid)
 					{
-						if (returnCode == 0)
-						{
-							log_info("Client %d (pid %d) is done now.",
-									 index, pid);
-						}
-						else
+						if (returnCode != 0)
 						{
 							log_error("Client %d (pid %d) exited with code %d",
 									  index, pid, returnCode);
@@ -435,6 +430,12 @@ demoapp_start_client(const char *pguri, int clientId,
 
 	uint64_t previousLogLineTime = 0;
 
+	int directs = 0;
+	int retries = 0;
+	int failovers = 0;
+	int maxConnectionTimeNoRetry = 0;
+	int maxConnectionTimeWithRetries = 0;
+
 	for (int index = 0; !durationElapsed; index++)
 	{
 		PGSQL pgsql = { 0 };
@@ -473,26 +474,43 @@ demoapp_start_client(const char *pguri, int clientId,
 
 		if (pgsql.retryPolicy.attempts == 0)
 		{
+			++directs;
+
+			/* we could connect without retries, everything is fine */
+			if (maxConnectionTimeNoRetry == 0 ||
+				INSTR_TIME_GET_MILLISEC(duration) > maxConnectionTimeNoRetry)
+			{
+				maxConnectionTimeNoRetry = INSTR_TIME_GET_MILLISEC(duration);
+			}
+
 			/* log every 2s max, to avoid filling in the logs */
 			if (previousLogLineTime == 0 ||
 				(now - previousLogLineTime) >= 10)
 			{
-				log_info("Client %d connected in %5.3f ms in loop %d",
-						 clientId,
-						 INSTR_TIME_GET_MILLISEC(duration),
-						 index);
+				log_info("Client %d connected %d times in less than %d ms",
+						 clientId, directs, maxConnectionTimeNoRetry);
 
 				previousLogLineTime = now;
 			}
 		}
 		else
 		{
-			log_info("Client %d connected after %d attempts in %5.3fms",
+			/* we had to retry connecting, a failover is in progress */
+			++failovers;
+			retries += pgsql.retryPolicy.attempts;
+
+			if (maxConnectionTimeWithRetries == 0 ||
+				INSTR_TIME_GET_MILLISEC(duration) > maxConnectionTimeWithRetries)
+			{
+				maxConnectionTimeWithRetries = INSTR_TIME_GET_MILLISEC(duration);
+			}
+
+			log_info("Client %d attempted to connect during a failover, "
+					 "and had to attempt %d times which took %5.3f ms with "
+					 "the current retry policy",
 					 clientId,
 					 pgsql.retryPolicy.attempts,
 					 INSTR_TIME_GET_MILLISEC(duration));
-
-			previousLogLineTime = now;
 		}
 
 		char *sql =
@@ -517,6 +535,15 @@ demoapp_start_client(const char *pguri, int clientId,
 		/* the idea is to reconnect every time */
 		pgsql_finish(&pgsql);
 	}
+
+	log_info("Client %d connected on first attempt %d times "
+			 "with a maximum connection time of %d ms",
+			 clientId, directs, maxConnectionTimeNoRetry);
+
+	log_info("Client %d attempted to connect during a failover %d times "
+			 "with a maximum connection time of %d ms and a total number "
+			 "of %d retries with current retry policy",
+			 clientId, failovers, maxConnectionTimeWithRetries, retries);
 }
 
 

@@ -546,6 +546,8 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 	PGPing lastWarningMessage = PQPING_OK;
 	instr_time lastWarningTime;
 
+	int failedAfterPingOKCount = 0;
+
 	INSTR_TIME_SET_ZERO(lastWarningTime);
 
 	log_warn("Failed to connect to \"%s\", retrying until "
@@ -645,13 +647,17 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 					INSTR_TIME_SET_CURRENT(durationSinceLastWarning);
 					INSTR_TIME_SUBTRACT(durationSinceLastWarning, lastWarningTime);
 
-					if (lastWarningMessage != PQPING_OK ||
-						SHOULD_WARN_AGAIN(durationSinceLastWarning))
+					/* during failover we might ping a node that's not ready */
+					++failedAfterPingOKCount;
+
+					if (failedAfterPingOKCount > 0 &&
+						(lastWarningMessage != PQPING_OK ||
+						 SHOULD_WARN_AGAIN(durationSinceLastWarning)))
 					{
 						lastWarningMessage = PQPING_OK;
 						INSTR_TIME_SET_CURRENT(lastWarningTime);
 
-						(void) log_connection_error(pgsql->connection, LOG_WARN);
+						(void) log_connection_error(pgsql->connection, LOG_DEBUG);
 
 						log_warn("Failed to connect after successful "
 								 "ping, please verify authentication "
