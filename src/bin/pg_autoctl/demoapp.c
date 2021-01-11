@@ -8,8 +8,11 @@
  */
 #include <inttypes.h>
 #include <limits.h>
-#include <sys/select.h>
 #include <signal.h>
+#include <stdio.h>
+#include <sys/ioctl.h>
+#include <sys/select.h>
+#include <termios.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -44,6 +47,11 @@ static void demoapp_terminate_clients(pid_t clientsPidArray[],
 									  int startedClientsCount);
 
 static void demoapp_process_perform_switchover(DemoAppOptions *demoAppOptions);
+
+static int demoapp_get_terminal_columns(void);
+
+static void demoapp_psql(const char *pguri, const char *sql);
+
 
 /*
  * demoapp_grab_formation_uri connects to the monitor and grabs the formation
@@ -694,6 +702,44 @@ demoapp_start_client(const char *pguri, int clientId,
 }
 
 
+/*
+ * demoapp_print_histogram prints an histogram of the distribution of the
+ * connection timings measured throughout the testing.
+ */
+void
+demoapp_print_histogram(const char *pguri, DemoAppOptions *demoAppOptions)
+{
+	const char *sqlFormatString =
+
+		/* *INDENT-OFF* */
+		"with minmax as ( select min(us), max(us) from demo.tracking ), "
+		"histogram as ( "
+		"select width_bucket(us, min, max, 18) as bucket, "
+		"round(min(us)/1000.0, 3) as min, "
+		"round(max(us)/1000.0, 3) as max, "
+		"count(*) as freq "
+		"from demo.tracking, minmax "
+		"group by bucket "
+		"order by bucket "
+		") "
+		"select min as \"Min Connect Time (ms)\", max, freq, "
+        "repeat('▒', "
+		"(freq::float / max(freq) over() * %d)::int "
+        ") as bar "
+		"from histogram; ";
+		/* *INDENT-ON* */
+
+		/* the first columns take up 45 columns already, use what's remaining */
+		int cols = demoapp_get_terminal_columns() - 45;
+
+	char sql[BUFSIZE] = { 0 };
+
+	sformat(sql, sizeof(sql), sqlFormatString, cols);
+
+	(void) demoapp_psql(pguri, sql);
+}
+
+
 #define P95 "percentile_cont(0.95) within group (order by us::float8) / 1000.0"
 #define P99 "percentile_cont(0.99) within group (order by us::float8) / 1000.0"
 
@@ -703,9 +749,6 @@ demoapp_start_client(const char *pguri, int clientId,
 void
 demoapp_print_summary(const char *pguri, DemoAppOptions *demoAppOptions)
 {
-	char cat[MAXPGPATH] = { 0 };
-	char psql[MAXPGPATH] = { 0 };
-
 	const char *sql =
 
 		/* *INDENT-OFF* */
@@ -716,7 +759,7 @@ demoapp_print_summary(const char *pguri, DemoAppOptions *demoAppOptions)
 		"round(min(us)/1000.0, 3) as min, "
 		"round(max(us)/1000.0, 3) as max, "
 		"round((" P95 ")::numeric, 3) as p95, "
-					  "round((" P99 ")::numeric, 3) as p99 "
+		"round((" P99 ")::numeric, 3) as p99 "
 		"from demo.tracking "
 		"group by rollup(client) "
 		") "
@@ -733,7 +776,44 @@ demoapp_print_summary(const char *pguri, DemoAppOptions *demoAppOptions)
 		"order by client nulls last";
 		/* *INDENT-ON* */
 
-		char *args[16];
+		log_info("Summary for the demo app running with %d clients for %ds",
+				 demoAppOptions->clientsCount, demoAppOptions->duration);
+
+	(void) demoapp_psql(pguri, sql);
+}
+
+
+/*
+ * demoapp_get_terminal_columns gets the current terminal window width.
+ */
+static int
+demoapp_get_terminal_columns()
+{
+	struct winsize ws;
+
+	if (ioctl(STDIN_FILENO, TIOCGWINSZ, &ws) == -1)
+	{
+		log_error("Failed to get terminal width: %m");
+
+		/* default terminal width is 78 (less than the magic 80) */
+		return 78;
+	}
+
+	return ws.ws_col;
+}
+
+
+/*
+ * demoapp_psql calls psql to display the results of a given SQL query, in a
+ * way that we don't have to compute the headers for the output.
+ */
+static void
+demoapp_psql(const char *pguri, const char *sql)
+{
+	char cat[MAXPGPATH] = { 0 };
+	char psql[MAXPGPATH] = { 0 };
+
+	char *args[16];
 	int argsIndex = 0;
 
 	/* we shell-out to psql so that we don't have to compute headers */
@@ -752,9 +832,6 @@ demoapp_print_summary(const char *pguri, DemoAppOptions *demoAppOptions)
 
 	/* set our PAGER to be just cat */
 	setenv("PAGER", cat, 1);
-
-	log_info("Summary for the demo app running with %d clients for %ds",
-			 demoAppOptions->clientsCount, demoAppOptions->duration);
 
 	args[argsIndex++] = psql;
 	args[argsIndex++] = "--no-psqlrc";

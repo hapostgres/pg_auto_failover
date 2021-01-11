@@ -408,7 +408,8 @@ cli_demo_run(int argc, char **argv)
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
-	(void) demoapp_print_summary(pguri, &demoAppOptions);
+	/* show the historgram now, avoid the fully detailed summary */
+	(void) demoapp_print_histogram(pguri, &demoAppOptions);
 }
 
 
@@ -506,4 +507,5 @@ cli_demo_summary(int argc, char **argv)
 	log_info("Using Postgres user PGUSER \"%s\"", demoAppOptions.username);
 
 	(void) demoapp_print_summary(pguri, &demoAppOptions);
+	(void) demoapp_print_histogram(pguri, &demoAppOptions);
 }
