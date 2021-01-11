@@ -86,7 +86,7 @@ parseCandidatePriority(char *priorityString, int pIndex, int *priorities)
 
 
 /*
- * parseCandidatePriority parses the --node-priorities options on the command
+ * parseCandidatePriorities parses the --node-priorities options on the command
  * line and fills-in an array of nodes.
  *
  *   --node-priorities 50:       all node have 50
@@ -742,10 +742,13 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 	if (options->numSync != -1)
 	{
 		/*
-		 * We need to wait until the first node is PRIMARY before we can go on
-		 * and change formation settings with pg_autoctl set formation ...
+		 * We need to wait until the first node is either WAIT_PRIMARY or
+		 * PRIMARY before we can go on and change formation settings with
+		 *   pg_autoctl set formation ...
 		 */
 		char firstNode[NAMEDATALEN] = { 0 };
+		NodeState targetPrimaryState =
+			options->numSync == 0 ? WAIT_PRIMARY_STATE : PRIMARY_STATE;
 
 		sformat(firstNode, sizeof(firstNode), "node%d", 1);
 
@@ -755,7 +758,7 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 								   pg_autoctl_argv0,
 								   options->root,
 								   firstNode,
-								   NodeStateToString(WAIT_PRIMARY_STATE));
+								   NodeStateToString(targetPrimaryState));
 
 		/* PGDATA has just been exported, rely on it */
 		tmux_add_send_keys_command(script,
