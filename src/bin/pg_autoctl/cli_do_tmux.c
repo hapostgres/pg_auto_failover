@@ -42,6 +42,7 @@ char *tmux_banner[] = {
 };
 
 TmuxOptions tmuxOptions = { 0 };
+TmuxNodeArray tmuxNodeArray = { 0 };
 
 char *xdg[][3] = {
 	{ "XDG_DATA_HOME", "share" },
@@ -52,6 +53,141 @@ char *xdg[][3] = {
 
 static void prepare_tmux_script(TmuxOptions *options, PQExpBuffer script);
 static bool tmux_stop_pg_autoctl(TmuxOptions *options);
+static bool parseCandidatePriority(char *priorityString,
+								   int pIndex, int *priorities);
+static bool prepareTmuxNodeArray(TmuxOptions *options, TmuxNodeArray *nodeArray);
+
+
+/*
+ * parseCandidatePriority parses a single candidate priority item into given
+ * index in the priorities integer array of MAX_NODES capacity
+ */
+static bool
+parseCandidatePriority(char *priorityString, int pIndex, int *priorities)
+{
+	if (MAX_NODES <= pIndex)
+	{
+		log_error("Failed to parse --node-priorities: "
+				  "pg_autoctl do tmux session supports up to %d nodes",
+				  MAX_NODES);
+		return false;
+	}
+
+	if (!stringToInt(priorityString, &(priorities[pIndex])))
+	{
+		log_error("Failed to parse --node-priorities \"%s\"", priorityString);
+		return false;
+	}
+
+	log_trace("parseCandidatePriorities[%d] = %d", pIndex, priorities[pIndex]);
+
+	return true;
+}
+
+
+/*
+ * parseCandidatePriorities parses the --node-priorities options on the command
+ * line and fills-in an array of nodes.
+ *
+ *   --node-priorities 50:       all node have 50
+ *   --node-priorities 50,50,0:  3+ nodes, first two have 50, then 0
+ */
+bool
+parseCandidatePriorities(char *prioritiesString, int *priorities)
+{
+	char sep = ',';
+	char *ptr = prioritiesString;
+	char *previous = prioritiesString;
+
+	int pIndex = 0;
+
+	if (strcmp(prioritiesString, "") == 0)
+	{
+		/* fill-in the priorities array with default values (50) */
+		for (int i = 0; i < MAX_NODES; i++)
+		{
+			priorities[i] = FAILOVER_NODE_CANDIDATE_PRIORITY;
+		}
+		return true;
+	}
+
+	while ((ptr = strchr(ptr, sep)) != NULL)
+	{
+		*ptr = '\0';
+
+		if (!parseCandidatePriority(previous, pIndex++, priorities))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
+		previous = ++ptr;
+	}
+
+	/* there is no separator left, parse the end of the option string */
+	if (!parseCandidatePriority(previous, pIndex++, priorities))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/* mark final entry in the array; remember that pIndex > 0 here */
+	for (int i = pIndex; i < MAX_NODES; i++)
+	{
+		priorities[i] = priorities[i - 1];
+	}
+
+	return true;
+}
+
+
+/*
+ * prepareTmuxNodeArray expands the command line options into an array of
+ * nodes, where each node name and properties have been computed.
+ */
+bool
+prepareTmuxNodeArray(TmuxOptions *options, TmuxNodeArray *nodeArray)
+{
+	/* first pgport is for the monitor */
+	int pgport = options->firstPort + 1;
+
+	/* make sure we initialize our nodes array */
+	nodeArray->count = 0;
+	nodeArray->numSync = options->numSync;
+
+	for (int i = 0; i < options->nodes; i++)
+	{
+		TmuxNode *node = &(nodeArray->nodes[i]);
+
+		sformat(node->name, sizeof(node->name), "node%d", i + 1);
+
+		node->pgport = pgport++;
+
+		/* the first nodes are sync, then async, threshold is asyncNodes */
+		node->replicationQuorum = i < (options->nodes - options->asyncNodes);
+
+		/* node priorities have been expanded correctly in the options */
+		node->candidatePriority = options->priorities[i];
+
+		++(nodeArray->count);
+	}
+
+
+	/* some useful debug information */
+	for (int i = 0; i < options->nodes; i++)
+	{
+		TmuxNode *node = &(nodeArray->nodes[i]);
+
+		log_debug("prepareTmuxNodeArray[%d]: %s %d %s %d",
+				  i,
+				  node->name,
+				  node->pgport,
+				  node->replicationQuorum ? "true" : "false",
+				  node->candidatePriority);
+	}
+
+	return true;
+}
 
 
 /*
@@ -72,6 +208,7 @@ cli_do_tmux_script_getopts(int argc, char **argv)
 		{ "first-pgport", required_argument, NULL, 'p' },
 		{ "nodes", required_argument, NULL, 'n' },
 		{ "async-nodes", required_argument, NULL, 'a' },
+		{ "node-priorities", required_argument, NULL, 'P' },
 		{ "sync-standbys", required_argument, NULL, 's' },
 		{ "layout", required_argument, NULL, 'l' },
 		{ "version", no_argument, NULL, 'V' },
@@ -90,6 +227,12 @@ cli_do_tmux_script_getopts(int argc, char **argv)
 	options.numSync = -1;       /* use pg_autoctl defaults */
 	strlcpy(options.root, "/tmp/pgaf/tmux", sizeof(options.root));
 	strlcpy(options.layout, "even-vertical", sizeof(options.layout));
+
+	if (!parseCandidatePriorities("", options.priorities))
+	{
+		log_error("BUG: failed to initialize candidate priorities");
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
 
 	/*
 	 * The only command lines that are using keeper_cli_getopt_pgdata are
@@ -133,6 +276,15 @@ cli_do_tmux_script_getopts(int argc, char **argv)
 							  optarg);
 					errors++;
 				}
+
+				if (MAX_NODES < options.nodes)
+				{
+					log_error("pg_autoctl do tmux session supports up to %d "
+							  "nodes, and --nodes %d has been asked for",
+							  MAX_NODES, options.nodes);
+					errors++;
+				}
+
 				log_trace("--nodes %d", options.nodes);
 				break;
 			}
@@ -146,6 +298,22 @@ cli_do_tmux_script_getopts(int argc, char **argv)
 					errors++;
 				}
 				log_trace("--async-nodes %d", options.asyncNodes);
+				break;
+			}
+
+			case 'P':
+			{
+				char priorities[BUFSIZE] = { 0 };
+
+				/* parsing mangles the string, keep a copy */
+				strlcpy(priorities, optarg, sizeof(priorities));
+
+				if (!parseCandidatePriorities(priorities, options.priorities))
+				{
+					log_error("Failed to parse --node-priorities \"%s\"",
+							  optarg);
+					errors++;
+				}
 				break;
 			}
 
@@ -221,6 +389,12 @@ cli_do_tmux_script_getopts(int argc, char **argv)
 				break;
 			}
 		}
+	}
+
+	if (!prepareTmuxNodeArray(&options, &tmuxNodeArray))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
 	}
 
 	if (errors > 0)
@@ -512,14 +686,9 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 	/* start the Postgres nodes, using the monitor URI */
 	sformat(previousName, sizeof(previousName), "monitor");
 
-	for (int i = 0; i < options->nodes; i++)
+	for (int i = 0; i < tmuxNodeArray.count; i++)
 	{
-		char name[NAMEDATALEN] = { 0 };
-
-		bool replicationQuorum = true;
-		int candidatePriority = 50;
-
-		sformat(name, sizeof(name), "node%d", i + 1);
+		TmuxNode *node = &(tmuxNodeArray.nodes[i]);
 
 		tmux_add_command(script, "split-window -v");
 		tmux_add_command(script, "select-layout even-vertical");
@@ -537,19 +706,15 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 								   options->root,
 								   previousName);
 
-		/* the first nodes are sync, then async, threshold is asyncNodes */
-		if ((options->nodes - options->asyncNodes) <= i)
-		{
-			replicationQuorum = false;
-			candidatePriority = 0;
-		}
-
-		tmux_pg_autoctl_create_postgres(script, root, pgport++, name,
-										replicationQuorum,
-										candidatePriority);
+		tmux_pg_autoctl_create_postgres(script,
+										root,
+										node->pgport,
+										node->name,
+										node->replicationQuorum,
+										node->candidatePriority);
 		tmux_add_send_keys_command(script, "pg_autoctl run");
 
-		strlcpy(previousName, name, sizeof(previousName));
+		strlcpy(previousName, node->name, sizeof(previousName));
 	}
 
 	/* add a window for pg_autoctl show state */
@@ -577,10 +742,13 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 	if (options->numSync != -1)
 	{
 		/*
-		 * We need to wait until the first node is PRIMARY before we can go on
-		 * and change formation settings with pg_autoctl set formation ...
+		 * We need to wait until the first node is either WAIT_PRIMARY or
+		 * PRIMARY before we can go on and change formation settings with
+		 *   pg_autoctl set formation ...
 		 */
 		char firstNode[NAMEDATALEN] = { 0 };
+		NodeState targetPrimaryState =
+			options->numSync == 0 ? WAIT_PRIMARY_STATE : PRIMARY_STATE;
 
 		sformat(firstNode, sizeof(firstNode), "node%d", 1);
 
@@ -590,7 +758,7 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 								   pg_autoctl_argv0,
 								   options->root,
 								   firstNode,
-								   NodeStateToString(PRIMARY_STATE));
+								   NodeStateToString(targetPrimaryState));
 
 		/* PGDATA has just been exported, rely on it */
 		tmux_add_send_keys_command(script,
