@@ -1722,7 +1722,8 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 	ListCell *nodeCell = NULL;
 	int nonZeroCandidatePriorityNodeCount = 0;
 
-	AutoFailoverNode *currentNode = GetAutoFailoverNodeByName(formationId, nodeName);
+	AutoFailoverNode *currentNode =
+		GetAutoFailoverNodeByName(formationId, nodeName);
 
 	if (currentNode == NULL)
 	{
@@ -1748,7 +1749,7 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 							   MAX_USER_DEFINED_CANDIDATE_PRIORITY)));
 	}
 
-	if (candidatePriority == 0)
+	if (candidatePriority == 0 && currentNode->candidatePriority != 0)
 	{
 		/*
 		 * We need to ensure we have at least two nodes with a non-zero
@@ -1862,7 +1863,8 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 	bool replicationQuorum = PG_GETARG_BOOL(2);
 
 
-	AutoFailoverNode *currentNode = GetAutoFailoverNodeByName(formationId, nodeName);
+	AutoFailoverNode *currentNode =
+		GetAutoFailoverNodeByName(formationId, nodeName);
 
 	if (currentNode == NULL)
 	{
