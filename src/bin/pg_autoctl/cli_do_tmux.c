@@ -303,7 +303,7 @@ tmux_setenv(PQExpBuffer script, const char *sessionName, const char *root)
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
-	tmux_add_command(script, "set-environment -t %s PATH %s", sessionName, PATH);
+	tmux_add_command(script, "set-environment -t %s PATH \"%s\"", sessionName, PATH);
 
 	for (int i = 0; xdg[i][0] != NULL; i++)
 	{
