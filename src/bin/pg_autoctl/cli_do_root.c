@@ -572,7 +572,7 @@ keeper_cli_keeper_setup_getopts(int argc, char **argv)
 
 	int optind = cli_common_keeper_getopts(argc, argv,
 										   long_options,
-										   "C:D:H:p:l:U:A:Sd:n:f:m:MRVvqhP:r:xsN",
+										   "C:D:H:p:l:U:A:SLd:n:f:m:MRVvqhP:r:xsN",
 										   &options,
 										   &sslCommandLineOptions);
 

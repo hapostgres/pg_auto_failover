@@ -32,7 +32,6 @@
 #define DEFAULT_DATABASE_NAME "postgres"
 #define DEFAULT_USERNAME "postgres"
 #define DEFAULT_AUTH_METHOD "trust"
-#define SKIP_HBA_AUTH_METHOD "skip"
 #define REPLICATION_SLOT_NAME_DEFAULT "pgautofailover_standby"
 #define REPLICATION_SLOT_NAME_PATTERN "^pgautofailover_standby_"
 #define REPLICATION_PASSWORD_DEFAULT NULL

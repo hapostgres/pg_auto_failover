@@ -683,7 +683,8 @@ postgres_add_default_settings(LocalPostgresServer *postgres)
  */
 bool
 primary_create_user_with_hba(LocalPostgresServer *postgres, char *userName,
-							 char *password, char *hostname, char *authMethod,
+							 char *password, char *hostname,
+							 char *authMethod, HBAEditLevel hbaLevel,
 							 int connlimit)
 {
 	PGSQL *pgsql = &(postgres->sqlClient);
@@ -715,7 +716,8 @@ primary_create_user_with_hba(LocalPostgresServer *postgres, char *userName,
 									   NULL,
 									   userName,
 									   hostname,
-									   authMethod))
+									   authMethod,
+									   hbaLevel))
 	{
 		log_error("Failed to set the pg_hba rule for user \"%s\"", userName);
 		return false;

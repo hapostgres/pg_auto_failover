@@ -98,6 +98,10 @@
 	make_strbuf_option("postgresql", "auth_method", "auth", \
 					   false, MAXPGPATH, config->pgSetup.authMethod)
 
+#define OPTION_POSTGRESQL_HBA_LEVEL(config) \
+	make_strbuf_option("postgresql", "hba_level", NULL, \
+					   false, MAXPGPATH, config->pgSetup.hbaLevelStr)
+
 #define OPTION_SSL_ACTIVE(config) \
 	make_int_option_default("ssl", "active", NULL, \
 							false, &(config->pgSetup.ssl.active), 0)
@@ -396,6 +400,18 @@ keeper_config_read_file_skip_pgsetup(KeeperConfig *config,
 			return false;
 		}
 	}
+
+	/*
+	 * Turn the configuration string for hbaLevel into our enum value.
+	 */
+	if (IS_EMPTY_STRING_BUFFER(config->pgSetup.hbaLevelStr))
+	{
+		strlcpy(config->pgSetup.hbaLevelStr, "minimal", NAMEDATALEN);
+	}
+
+	/* set the ENUM value for hbaLevel */
+	config->pgSetup.hbaLevel =
+		pgsetup_parse_hba_level(config->pgSetup.hbaLevelStr);
 
 	/*
 	 * Required for grandfathering old clusters that don't have sslmode

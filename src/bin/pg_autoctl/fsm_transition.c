@@ -244,7 +244,6 @@ fsm_init_primary(Keeper *keeper)
 		char monitorHostname[_POSIX_HOST_NAME_MAX];
 		int monitorPort = 0;
 		int connlimit = 1;
-		char *authMethod = pg_setup_get_auth_method(pgSetup);
 
 		if (!hostname_from_uri(config->monitor_pguri,
 							   monitorHostname, _POSIX_HOST_NAME_MAX,
@@ -265,21 +264,13 @@ fsm_init_primary(Keeper *keeper)
 		 * hard-coded password PG_AUTOCTL_HEALTH_PASSWORD. The idea is to avoid
 		 * leaking information from the passfile, environment variable, or
 		 * other places.
-		 *
-		 * Still, when --skip-pg-hba option has been used, we skip creating the
-		 * HBA entirely and to do that we keep the "skip" authentication method
-		 * in use. Otherwise we override it to "trust".
 		 */
-		if (!SKIP_HBA(authMethod))
-		{
-			authMethod = "trust";
-		}
-
 		if (!primary_create_user_with_hba(postgres,
 										  PG_AUTOCTL_HEALTH_USERNAME,
 										  PG_AUTOCTL_HEALTH_PASSWORD,
 										  monitorHostname,
-										  authMethod,
+										  "trust",
+										  pgSetup->hbaLevel,
 										  connlimit))
 		{
 			log_error(
@@ -319,7 +310,10 @@ fsm_init_primary(Keeper *keeper)
 									   keeper->config.pgSetup.ssl.active,
 									   HBA_DATABASE_ALL, NULL,
 									   keeper->config.hostname,
-									   NULL, DEFAULT_AUTH_METHOD, NULL))
+									   NULL,
+									   DEFAULT_AUTH_METHOD,
+									   HBA_EDIT_MINIMAL,
+									   NULL))
 			{
 				log_error("Failed to grant local network connections in HBA");
 				return false;

@@ -646,7 +646,10 @@ tmux_pg_autoctl_create_postgres(PQExpBuffer script,
 
 	tmux_add_send_keys_command(script,
 							   "%s create postgres %s "
-							   "--monitor %s --name %s "
+							   "--monitor %s "
+							   "--name %s "
+							   "--dbname demo "
+							   "--pg-hba-lan "
 							   "--replication-quorum %s "
 							   "--candidate-priority %d "
 							   "--run",

@@ -424,6 +424,7 @@ The other commands accept the same set of options.
     --monitor         pg_auto_failover Monitor Postgres URL
     --auth            authentication method for connections from monitor
     --skip-pg-hba     skip editing pg_hba.conf rules
+    --pg-hba-lan      edit pg_hba.conf rules for --dbname in detected LAN
     --candidate-priority    priority of the node to be promoted to become primary
     --replication-quorum    true if node participates in write quorum
     --ssl-self-signed setup network encryption using self signed certificates (does NOT protect against MITM)

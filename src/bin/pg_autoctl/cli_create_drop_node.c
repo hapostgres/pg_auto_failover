@@ -97,9 +97,10 @@ CommandLine create_postgres_command =
 		"  --monitor         pg_auto_failover Monitor Postgres URL\n"
 		"  --auth            authentication method for connections from monitor\n"
 		"  --skip-pg-hba     skip editing pg_hba.conf rules\n"
+		"  --pg-hba-lan      edit pg_hba.conf rules for --dbname in detected LAN\n"
+		KEEPER_CLI_SSL_OPTIONS
 		"  --candidate-priority    priority of the node to be promoted to become primary\n"
-		"  --replication-quorum    true if node participates in write quorum\n"
-		KEEPER_CLI_SSL_OPTIONS,
+		"  --replication-quorum    true if node participates in write quorum\n",
 		cli_create_postgres_getopts,
 		cli_create_postgres);
 
@@ -284,6 +285,7 @@ cli_create_postgres_getopts(int argc, char **argv)
 		{ "username", required_argument, NULL, 'U' },
 		{ "auth", required_argument, NULL, 'A' },
 		{ "skip-pg-hba", no_argument, NULL, 'S' },
+		{ "pg-hba-lan", no_argument, NULL, 'L' },
 		{ "dbname", required_argument, NULL, 'd' },
 		{ "name", required_argument, NULL, 'a' },
 		{ "hostname", required_argument, NULL, 'n' },
@@ -311,7 +313,7 @@ cli_create_postgres_getopts(int argc, char **argv)
 
 	int optind =
 		cli_create_node_getopts(argc, argv, long_options,
-								"C:D:H:p:l:U:A:Sd:a:n:f:m:MI:RVvqhP:r:xsN",
+								"C:D:H:p:l:U:A:SLd:a:n:f:m:MI:RVvqhP:r:xsN",
 								&options);
 
 	/* publish our option parsing in the global variable */
@@ -470,9 +472,13 @@ cli_create_monitor_getopts(int argc, char **argv)
 					log_error("Please use either --auth or --skip-pg-hba");
 				}
 
+				/* force default authentication method then */
 				strlcpy(options.pgSetup.authMethod,
-						SKIP_HBA_AUTH_METHOD,
+						DEFAULT_AUTH_METHOD,
 						NAMEDATALEN);
+
+				options.pgSetup.hbaLevel = HBA_EDIT_SKIP;
+
 				log_trace("--skip-pg-hba");
 				break;
 			}
@@ -1291,12 +1297,40 @@ discover_hostname(char *hostname, int size,
 	char localIpAddr[BUFSIZE];
 	char hostnameCandidate[_POSIX_HOST_NAME_MAX];
 
-	/* fetch our local address among the network interfaces */
-	if (!fetchLocalIPAddress(ipAddr, BUFSIZE, monitorHostname, monitorPort))
+	ConnectionRetryPolicy retryPolicy = { 0 };
+
+	/* retry connecting to the monitor when it's not available */
+	(void) pgsql_set_monitor_interactive_retry_policy(&retryPolicy);
+
+	while (!pgsql_retry_policy_expired(&retryPolicy))
 	{
-		log_fatal("Failed to find a local IP address, "
-				  "please provide --hostname.");
-		return false;
+		bool mayRetry = false;
+
+		/* fetch our local address among the network interfaces */
+		if (fetchLocalIPAddress(ipAddr, BUFSIZE, monitorHostname, monitorPort,
+								LOG_DEBUG, &mayRetry))
+		{
+			/* success: break out of the retry loop */
+			break;
+		}
+
+		if (!mayRetry)
+		{
+			log_fatal("Failed to find a local IP address, "
+					  "please provide --hostname.");
+			return false;
+		}
+
+		int sleepTimeMs =
+			pgsql_compute_connection_retry_sleep_time(&retryPolicy);
+
+		log_warn("Failed to connect to \"%s\" on port %d "
+				 "to discover this machine hostname, "
+				 "retrying in %d ms.",
+				 monitorHostname, monitorPort, sleepTimeMs);
+
+		/* we have milliseconds, pg_usleep() wants microseconds */
+		(void) pg_usleep(sleepTimeMs * 1000);
 	}
 
 	/* from there on we can take the ipAddr as the default --hostname */
@@ -1364,6 +1398,7 @@ check_hostname(const char *hostname)
 	else
 	{
 		char cidr[BUFSIZE];
+		char ipaddr[BUFSIZE];
 
 		if (!fetchLocalCIDR(hostname, cidr, BUFSIZE))
 		{
@@ -1373,6 +1408,6 @@ check_hostname(const char *hostname)
 		}
 
 		/* use pghba_check_hostname for log diagnostics */
-		(void) pghba_check_hostname(hostname);
+		(void) pghba_check_hostname(hostname, ipaddr, sizeof(ipaddr));
 	}
 }

@@ -1567,7 +1567,8 @@ keeper_update_group_hba(Keeper *keeper, NodeAddressArray *diffNodesArray)
 									   postgresSetup->ssl.active,
 									   postgresSetup->dbname,
 									   PG_AUTOCTL_REPLICA_USERNAME,
-									   authMethod))
+									   authMethod,
+									   postgresSetup->hbaLevel))
 	{
 		log_error("Failed to edit HBA file \"%s\" to update rules to current "
 				  "list of nodes registered on the monitor",

@@ -88,10 +88,12 @@ static void
 cli_show_ipaddr(int argc, char **argv)
 {
 	char ipAddr[BUFSIZE];
+	bool mayRetry = false;
 
 	if (!fetchLocalIPAddress(ipAddr, BUFSIZE,
 							 DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME,
-							 DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT))
+							 DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT,
+							 LOG_WARN, &mayRetry))
 	{
 		log_warn("Failed to determine network configuration.");
 		exit(EXIT_CODE_INTERNAL_ERROR);
@@ -111,10 +113,12 @@ cli_show_cidr(int argc, char **argv)
 {
 	char ipAddr[BUFSIZE];
 	char cidr[BUFSIZE];
+	bool mayRetry = false;
 
 	if (!fetchLocalIPAddress(ipAddr, BUFSIZE,
 							 DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME,
-							 DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT))
+							 DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT,
+							 LOG_WARN, &mayRetry))
 	{
 		log_warn("Failed to determine network configuration.");
 		exit(EXIT_CODE_INTERNAL_ERROR);
@@ -207,6 +211,8 @@ cli_show_hostname(int argc, char **argv)
 	char monitorHostname[_POSIX_HOST_NAME_MAX];
 	int monitorPort = pgsetup_get_pgport();
 
+	bool mayRetry = false;
+
 	/*
 	 * When no argument is used, use hostname(3) and 5432, as we would for a
 	 * monitor (pg_autoctl create monitor).
@@ -256,7 +262,9 @@ cli_show_hostname(int argc, char **argv)
 	}
 
 	/* fetch the default local address used when connecting remotely */
-	if (!fetchLocalIPAddress(ipAddr, BUFSIZE, monitorHostname, monitorPort))
+	if (!fetchLocalIPAddress(ipAddr, BUFSIZE,
+							 monitorHostname, monitorPort,
+							 LOG_WARN, &mayRetry))
 	{
 		log_warn("Failed to determine network configuration.");
 		exit(EXIT_CODE_INTERNAL_ERROR);
@@ -321,6 +329,7 @@ cli_show_reverse(int argc, char **argv)
 		log_fatal("Failed to find an IP address for hostname \"%s\" that "
 				  "matches hostname again in a reverse-DNS lookup.",
 				  hostname);
+		log_info("Continuing with IP address \"%s\"", ipaddr);
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
