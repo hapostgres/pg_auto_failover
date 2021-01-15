@@ -1899,7 +1899,7 @@ pgsetup_parse_hba_level(const char *level)
 	HBAEditLevel enumArray[] = {
 		HBA_EDIT_SKIP,
 		HBA_EDIT_MINIMAL,
-		HBA_EDIT_APP
+		HBA_EDIT_LAN
 	};
 
 	char *levelArray[] = { "skip", "minimal", "app", NULL };
@@ -1935,7 +1935,7 @@ pgsetup_hba_level_to_string(HBAEditLevel hbaLevel)
 			return "minimal";
 		}
 
-		case HBA_EDIT_APP:
+		case HBA_EDIT_LAN:
 		{
 			return "app";
 		}

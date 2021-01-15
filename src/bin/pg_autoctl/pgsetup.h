@@ -140,7 +140,7 @@ typedef enum
 	HBA_EDIT_UNKNOWN = 0,
 	HBA_EDIT_SKIP,
 	HBA_EDIT_MINIMAL,
-	HBA_EDIT_APP,
+	HBA_EDIT_LAN,
 } HBAEditLevel;
 
 /*

@@ -760,7 +760,7 @@ create_database_and_extension(Keeper *keeper)
 	 * When --pg-hba-lan is used, we also open the local network CIDR
 	 * connections for the given --username and --dbname.
 	 */
-	if (pgSetup->hbaLevel == HBA_EDIT_APP)
+	if (pgSetup->hbaLevel == HBA_EDIT_LAN)
 	{
 		if (!pghba_enable_lan_cidr(&keeper->postgres.sqlClient,
 								   keeper->config.pgSetup.ssl.active,

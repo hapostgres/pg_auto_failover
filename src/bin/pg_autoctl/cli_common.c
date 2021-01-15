@@ -232,17 +232,17 @@ cli_common_keeper_getopts(int argc, char **argv,
 			{
 				/* { "pg-hba-lan", required_argument, NULL, 'L' }, */
 				if (LocalOptionConfig.pgSetup.hbaLevel != HBA_EDIT_UNKNOWN &&
-					LocalOptionConfig.pgSetup.hbaLevel != HBA_EDIT_APP)
+					LocalOptionConfig.pgSetup.hbaLevel != HBA_EDIT_LAN)
 				{
 					errors++;
 					log_error("Please use either --skip-pg-hba or --pg-hba-lan");
 				}
 
 				strlcpy(LocalOptionConfig.pgSetup.hbaLevelStr,
-						pgsetup_hba_level_to_string(HBA_EDIT_APP),
+						pgsetup_hba_level_to_string(HBA_EDIT_LAN),
 						sizeof(LocalOptionConfig.pgSetup.hbaLevelStr));
 
-				LocalOptionConfig.pgSetup.hbaLevel = HBA_EDIT_APP;
+				LocalOptionConfig.pgSetup.hbaLevel = HBA_EDIT_LAN;
 
 				log_trace("--pg-hba-lan");
 				break;

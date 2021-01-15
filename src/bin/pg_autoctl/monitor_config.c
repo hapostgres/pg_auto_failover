@@ -199,7 +199,7 @@ monitor_config_init(MonitorConfig *config,
 	if (config->pgSetup.hbaLevel == HBA_EDIT_UNKNOWN)
 	{
 		strlcpy(config->pgSetup.hbaLevelStr, "app", NAMEDATALEN);
-		config->pgSetup.hbaLevel = HBA_EDIT_APP;
+		config->pgSetup.hbaLevel = HBA_EDIT_LAN;
 	}
 }
 
