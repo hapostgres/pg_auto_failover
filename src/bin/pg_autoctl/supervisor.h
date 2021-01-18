@@ -93,6 +93,17 @@ typedef struct RestartCounters
  * seen by the supervisor.
  *
  * In particular, services may be started more than once when they fail.
+ *
+ * A supervisor can also work with an array of "dynamic services". Those differ
+ * from the array described above as they can be added or removed at any point.
+ * Even if a dynamic service has been added during start up, it will be started
+ * after the static services have been started succefully.
+ * Another difference is when a dynanic service has exhausted it's restart
+ * attempts, the supervisor will choose to stop this particular service instead
+ * of shutting down.
+ *
+ * What differenciates the two different kinds of services, is their location in
+ * the supervisor struct. They look indentical otherwise.
  */
 typedef struct Service
 {
@@ -108,18 +119,48 @@ typedef struct Supervisor
 {
 	Service *services;
 	int serviceCount;
+
 	char pidfile[MAXPGPATH];
 	pid_t pid;
 	bool cleanExit;
 	bool shutdownSequenceInProgress;
 	int shutdownSignal;
 	int stoppingLoopCounter;
+
+	/* dynamic handler function */
+	int (*dynamicHandler)(struct Supervisor *, void *);
+	void *dynamicHandlerArg;    /* dynamic handler private data */
+
+	/*
+	 * Anonymous struct holding active dynamic services.
+	 * Do not access directly.
+	 */
+	struct
+	{
+		Service services[MAXDYNSERVICES];
+		int serviceCount;
+	} dynamicServices;
+
+	/*
+	 * Anonymous struct holding recently removed dynamic services.
+	 * Do not access directly.
+	 */
+	struct
+	{
+		Service services[MAXDYNSERVICES];
+		int serviceCount;
+	} dynamicRecentlyRemoved;
 } Supervisor;
 
-
-bool supervisor_start(Service services[], int serviceCount, const char *pidfile);
+bool supervisor_start(Service services[], int serviceCount, const char *pidfile,
+					  int (*dynamicHandler)(Supervisor *, void *),
+					  void *dynamicHandlerArg);
 
 bool supervisor_stop(Supervisor *supervisor);
+
+bool supervisor_service_exists(Supervisor *supervisor, const char *serviceName);
+bool supervisor_add_dynamic(Supervisor *supervisor, Service *service);
+bool supervisor_remove_dynamic(Supervisor *supervisor, const char *serviceName);
 
 bool supervisor_find_service_pid(const char *pidfile,
 								 const char *serviceName,

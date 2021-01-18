@@ -65,6 +65,8 @@ bool keeper_set_node_metadata(Keeper *keeper, KeeperConfig *oldConfig);
 bool keeper_update_nodename_from_monitor(Keeper *keeper);
 bool keeper_config_accept_new(Keeper *keeper, KeeperConfig *newConfig);
 
+bool keeper_reread_services(Keeper *keeper);
+
 
 /*
  * When receiving a SIGHUP signal, the keeper knows how to reload its current

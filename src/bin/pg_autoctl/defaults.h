@@ -101,6 +101,9 @@
 /* buffersize that is needed for results of ctime_r */
 #define MAXCTIMESIZE 26
 
+/* maximum number of dynamic services under supervision */
+#define MAXDYNSERVICES 8
+
 #define AWAIT_PROMOTION_SLEEP_TIME_MS 1000
 
 #define KEEPER_CONFIGURATION_FILENAME "pg_autoctl.cfg"

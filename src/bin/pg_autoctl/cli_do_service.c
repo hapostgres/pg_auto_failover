@@ -387,7 +387,7 @@ cli_do_service_pgcontroller(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	if (!supervisor_start(subprocesses, subprocessesCount, pathnames.pid))
+	if (!supervisor_start(subprocesses, subprocessesCount, pathnames.pid, NULL, NULL))
 	{
 		log_fatal("Failed to start the supervisor, see above for details");
 		exit(EXIT_CODE_INTERNAL_ERROR);

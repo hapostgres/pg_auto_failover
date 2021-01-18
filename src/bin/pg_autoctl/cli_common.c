@@ -1625,6 +1625,37 @@ cli_pg_autoctl_reload(const char *pidfile)
 
 
 /*
+ * cli_pg_autoctl_handle_dynamic signals the pg_autoctl to handle any dynamic
+ * services based on its configuration
+ */
+bool
+cli_pg_autoctl_handle_dynamic(const char *pidfile)
+{
+	pid_t pid;
+
+	if (read_pidfile(pidfile, &pid))
+	{
+		if (pid <= 0)
+		{
+			log_error("Failed to handle dynamic services pg_autoctl: "
+					  "pid file \"%s\" contains negative-or-zero pid %d",
+					  pidfile, pid);
+			return false;
+		}
+
+		if (kill(pid, SIGUSR1) != 0)
+		{
+			log_error("Failed to send SIGUSR1 to the pg_autoctl's pid %d: %m",
+					  pid);
+			return false;
+		}
+	}
+
+	return true;
+}
+
+
+/*
  * cli_node_metadata_getopts parses the command line options for the
  * pg_autoctl set node metadata command.
  */

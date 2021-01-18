@@ -25,6 +25,7 @@ volatile sig_atomic_t asked_to_stop = 0;      /* SIGTERM */
 volatile sig_atomic_t asked_to_stop_fast = 0; /* SIGINT */
 volatile sig_atomic_t asked_to_reload = 0;    /* SIGHUP */
 volatile sig_atomic_t asked_to_quit = 0;      /* SIGQUIT */
+volatile sig_atomic_t asked_to_handle_dynamic = 0;    /* SIGUSR1 */
 
 /*
  * set_signal_handlers sets our signal handlers for the 4 signals that we
@@ -39,6 +40,7 @@ set_signal_handlers(bool exitOnQuit)
 	pqsignal(SIGHUP, catch_reload);
 	pqsignal(SIGINT, catch_int);
 	pqsignal(SIGTERM, catch_term);
+	pqsignal(SIGUSR1, catch_dynamic);
 
 	if (exitOnQuit)
 	{
@@ -161,6 +163,17 @@ catch_quit(int sig)
 
 
 /*
+ * catch_dynamic receives the SIGUSR1 signal.
+ */
+void
+catch_dynamic(int sig)
+{
+	asked_to_handle_dynamic = 1;
+	pqsignal(sig, catch_dynamic);
+}
+
+
+/*
  * quit_and_exit exit(EXIT_CODE_QUIT) upon receiving the SIGQUIT signal.
  */
 void
@@ -190,6 +203,10 @@ get_current_signal(int defaultSignal)
 	{
 		return SIGTERM;
 	}
+	else if (asked_to_handle_dynamic)
+	{
+		return SIGUSR1;
+	}
 
 	/* no termination signal to process at this time, return the default */
 	return defaultSignal;
@@ -204,6 +221,8 @@ get_current_signal(int defaultSignal)
  * received and processed SIGQUIT we want to stay at this signal level. Once we
  * have received SIGINT we may upgrade to SIGQUIT, but we won't downgrade to
  * SIGTERM.
+ *
+ * User defined signals have the lowest priority and are returned last.
  */
 int
 pick_stronger_signal(int sig1, int sig2)
@@ -216,10 +235,12 @@ pick_stronger_signal(int sig1, int sig2)
 	{
 		return SIGINT;
 	}
-	else
+	else if (sig1 == SIGTERM || sig2 == SIGTERM)
 	{
 		return SIGTERM;
 	}
+
+	return SIGUSR1;
 }
 
 
@@ -250,6 +271,11 @@ signal_to_string(int signal)
 		case SIGHUP:
 		{
 			return "SIGHUP";
+		}
+
+		case SIGUSR1:
+		{
+			return "SIGUSR1";
 		}
 
 		default:

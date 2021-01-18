@@ -32,6 +32,32 @@
 #include "string_utils.h"
 #include "supervisor.h"
 
+/*
+ * service_keeper_handle_dynamic enables or disables dynamic services based on
+ * its configuration.
+ *
+ * Currenty no such services are present in the configuration
+ *
+ * Returns the number of services, positive when added, negative when removed.
+ */
+static int
+service_keeper_handle_dynamic(Supervisor *supervisor, void *arg)
+{
+	Keeper *keeper = (Keeper *) arg;
+	Service service = { 0 };
+
+	/*
+	 * Do not bother to figure out if the value has changed, just read the
+	 * latest and act. Keeps the code much simpler.
+	 */
+	(void) keeper_reread_services(keeper);
+
+	/*
+	 * Nothing else to be done for now since no services have been configured
+	 */
+	return 0;
+}
+
 
 /*
  * service_keeper_init defines and start services needed during the
@@ -66,9 +92,11 @@ service_keeper_init(Keeper *keeper)
 	if (createAndRun)
 	{
 		strlcpy(subprocesses[1].name, SERVICE_NAME_KEEPER, NAMEDATALEN);
+		return supervisor_start(subprocesses, subprocessesCount, pidfile,
+								&service_keeper_handle_dynamic, (void *) keeper);
 	}
 
-	return supervisor_start(subprocesses, subprocessesCount, pidfile);
+	return supervisor_start(subprocesses, subprocessesCount, pidfile, NULL, NULL);
 }
 
 
