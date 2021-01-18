@@ -1,3 +1,39 @@
+### pg_auto_failover v1.4.1 (December 3, 2020) ###
+
+This is a bugfix release for v1.4.0
+
+#### Added
+* Implement HBA hostname DNS checks, and warn users when needed. [#458]
+* Make it obvious when an extension is missing. [#475]
+
+#### Changed
+* Refrain from using FIRST %d in synchronous_standby_names. [#461]
+* Always use node id and node name in messages. [#462]
+
+#### Fixed
+* Force closing the connection used to check replication slots. [#451]
+* Fix when to ProceedWithMSFailover after a candidate is selected. [#439]
+* Ensure that the monitor owns the Postgres (sub-)process. [#455]
+* Avoid a race condition between file_exists() and read_file(). [#460]
+* Review memory/malloc errors and potential leaks. [#478]
+* Review APPLY_SETTINGS transitions in cases including node removal. [#480]
+* Fix when we switch synchronous_standby_names to '*'. [#488]
+* Fix hostname discovery [#479]
+* Fix non default formation [#489]
+* Review when to assign catching-up on unhealthy secondary. [#493]
+* Fix race conditions in multiple-standby Group FSM for failover. [#499]
+* Fix synchronous_standby_names when disabling maintenance. [#502]
+* Fix debian stats temp directory [#504]
+* Use PG_CONFIG has a hint to choose one of multiple Postgres versions. [#510]
+* Fix build for *BSD [#519]
+* Refrain from considering a WAIT_STANDBY node unhealthy. [#524]
+* Allow a DEMOTED primary to come back to a new wait/join/primary. [#524]
+* Fix pg_autoctl show standby-names. [#524]
+* Fix unhealthy nodes processing when wait_primary. [#521]
+* Fix FSM when a non-candidate node is back online. [#533]
+* Fix assigning catchingup to unhealthy secondaries. [#534]
+* Fix pg_autoctl set formation number-sync-standbys log output. [#536]
+
 ### pg_auto_failover v1.4.0 (September 23, 2020) ###
 
 The main focus of this release is the new capability of pg_auto_failover to

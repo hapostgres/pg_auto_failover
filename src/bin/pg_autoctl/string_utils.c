@@ -48,7 +48,6 @@ bool
 stringToInt(const char *str, int *number)
 {
 	char *endptr;
-	long long int n;
 
 	if (str == NULL)
 	{
@@ -62,7 +61,7 @@ stringToInt(const char *str, int *number)
 
 	errno = 0;
 
-	n = strtoll(str, &endptr, 10);
+	long long int n = strtoll(str, &endptr, 10);
 
 	if (str == endptr)
 	{
@@ -95,7 +94,6 @@ bool
 stringToInt64(const char *str, int64_t *number)
 {
 	char *endptr;
-	long long int n;
 
 	if (str == NULL)
 	{
@@ -109,7 +107,7 @@ stringToInt64(const char *str, int64_t *number)
 
 	errno = 0;
 
-	n = strtoll(str, &endptr, 10);
+	long long int n = strtoll(str, &endptr, 10);
 
 	if (str == endptr)
 	{
@@ -142,7 +140,6 @@ bool
 stringToUInt(const char *str, unsigned int *number)
 {
 	char *endptr;
-	unsigned long long n = 0;
 
 	if (str == NULL)
 	{
@@ -155,7 +152,7 @@ stringToUInt(const char *str, unsigned int *number)
 	}
 
 	errno = 0;
-	n = strtoull(str, &endptr, 10);
+	unsigned long long n = strtoull(str, &endptr, 10);
 
 	if (str == endptr)
 	{
@@ -188,7 +185,6 @@ bool
 stringToUInt64(const char *str, uint64_t *number)
 {
 	char *endptr;
-	unsigned long long n = 0;
 
 	if (str == NULL)
 	{
@@ -201,7 +197,7 @@ stringToUInt64(const char *str, uint64_t *number)
 	}
 
 	errno = 0;
-	n = strtoull(str, &endptr, 10);
+	unsigned long long n = strtoull(str, &endptr, 10);
 
 	if (str == endptr)
 	{
@@ -234,7 +230,6 @@ bool
 stringToShort(const char *str, short *number)
 {
 	char *endptr;
-	long long int n;
 
 	if (str == NULL)
 	{
@@ -248,7 +243,7 @@ stringToShort(const char *str, short *number)
 
 	errno = 0;
 
-	n = strtoll(str, &endptr, 10);
+	long long int n = strtoll(str, &endptr, 10);
 
 	if (str == endptr)
 	{
@@ -281,7 +276,6 @@ bool
 stringToUShort(const char *str, unsigned short *number)
 {
 	char *endptr;
-	unsigned long long n = 0;
 
 	if (str == NULL)
 	{
@@ -294,7 +288,7 @@ stringToUShort(const char *str, unsigned short *number)
 	}
 
 	errno = 0;
-	n = strtoull(str, &endptr, 10);
+	unsigned long long n = strtoull(str, &endptr, 10);
 
 	if (str == endptr)
 	{
@@ -327,7 +321,6 @@ bool
 stringToInt32(const char *str, int32_t *number)
 {
 	char *endptr;
-	long long int n;
 
 	if (str == NULL)
 	{
@@ -341,7 +334,7 @@ stringToInt32(const char *str, int32_t *number)
 
 	errno = 0;
 
-	n = strtoll(str, &endptr, 10);
+	long long int n = strtoll(str, &endptr, 10);
 
 	if (str == endptr)
 	{
@@ -374,7 +367,6 @@ bool
 stringToUInt32(const char *str, uint32_t *number)
 {
 	char *endptr;
-	unsigned long long n = 0;
 
 	if (str == NULL)
 	{
@@ -387,7 +379,7 @@ stringToUInt32(const char *str, uint32_t *number)
 	}
 
 	errno = 0;
-	n = strtoull(str, &endptr, 10);
+	unsigned long long n = strtoull(str, &endptr, 10);
 
 	if (str == endptr)
 	{

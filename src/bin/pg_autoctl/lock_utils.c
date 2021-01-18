@@ -27,7 +27,7 @@
 /*
  * See man semctl(2)
  */
-#if !defined(__APPLE__)
+#if defined(__linux__)
 union semun
 {
 	int val;
@@ -179,7 +179,6 @@ semaphore_cleanup(const char *pidfile)
 	long fileSize = 0L;
 	char *fileContents = NULL;
 	char *fileLines[BUFSIZE] = { 0 };
-	int lineCount = 0;
 
 	if (!file_exists(pidfile))
 	{
@@ -191,7 +190,7 @@ semaphore_cleanup(const char *pidfile)
 		return false;
 	}
 
-	lineCount = splitLines(fileContents, fileLines, BUFSIZE);
+	int lineCount = splitLines(fileContents, fileLines, BUFSIZE);
 
 	if (lineCount < PIDFILE_LINE_SEM_ID)
 	{

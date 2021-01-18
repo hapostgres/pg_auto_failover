@@ -60,6 +60,8 @@ extern CommandLine do_standby_promote;
 
 extern CommandLine do_discover;
 
+extern CommandLine do_azure_ssh;
+
 extern CommandLine do_commands;
 extern CommandLine *do_subcommands[];
 
@@ -72,6 +74,7 @@ void keeper_cli_drop_replication_slot(int argc, char **argv);
 void keeper_cli_enable_synchronous_replication(int argc, char **argv);
 void keeper_cli_disable_synchronous_replication(int argc, char **argv);
 
+void keeper_cli_pgsetup_pg_ctl(int argc, char **argv);
 void keeper_cli_pgsetup_discover(int argc, char **argv);
 void keeper_cli_pgsetup_is_ready(int argc, char **argv);
 void keeper_cli_pgsetup_wait_until_ready(int argc, char **argv);
@@ -95,5 +98,20 @@ void cli_do_tmux_session(int argc, char **argv);
 void cli_do_tmux_stop(int argc, char **argv);
 void cli_do_tmux_clean(int argc, char **argv);
 void cli_do_tmux_wait(int argc, char **argv);
+
+/* src/bin/pg_autoctl/cli_do_azure.c */
+int cli_do_azure_getopts(int argc, char **argv);
+void cli_do_azure_create_environment(int argc, char **argv);
+void cli_do_azure_create_region(int argc, char **argv);
+void cli_do_azure_drop_region(int argc, char **argv);
+void cli_do_azure_deploy(int argc, char **argv);
+void cli_do_azure_create_nodes(int argc, char **argv);
+void cli_do_azure_ls(int argc, char **argv);
+void cli_do_azure_show_ips(int argc, char **argv);
+void cli_do_azure_ssh(int argc, char **argv);
+void cli_do_azure_rsync(int argc, char **argv);
+void cli_do_azure_show_state(int argc, char **argv);
+void cli_do_azure_tmux_session(int argc, char **argv);
+void cli_do_azure_tmux_kill(int argc, char **argv);
 
 #endif  /* CLI_DO_ROOT_H */

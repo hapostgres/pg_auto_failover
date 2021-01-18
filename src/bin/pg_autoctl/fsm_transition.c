@@ -64,7 +64,6 @@ fsm_init_primary(Keeper *keeper)
 	KeeperStateInit *initState = &(keeper->initState);
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	bool postgresInstanceExists = pg_setup_pgdata_exists(pgSetup);
-	bool pgInstanceIsOurs = false;
 
 	log_info("Initialising postgres as a primary");
 
@@ -103,7 +102,7 @@ fsm_init_primary(Keeper *keeper)
 		}
 	}
 
-	pgInstanceIsOurs =
+	bool pgInstanceIsOurs =
 		initState->pgInitState == PRE_INIT_STATE_EMPTY ||
 		initState->pgInitState == PRE_INIT_STATE_EXISTS;
 
@@ -146,16 +145,19 @@ fsm_init_primary(Keeper *keeper)
 			return false;
 		}
 
-		/*
-		 * We have a new system_identifier, we need to publish it now.
-		 */
-		if (!monitor_set_node_system_identifier(
-				monitor,
-				keeper->state.current_node_id,
-				pgSetup->control.system_identifier))
+		if (!config->monitorDisabled)
 		{
-			log_error("Failed to update the new node system_identifier");
-			return false;
+			/*
+			 * We have a new system_identifier, we need to publish it now.
+			 */
+			if (!monitor_set_node_system_identifier(
+					monitor,
+					keeper->state.current_node_id,
+					pgSetup->control.system_identifier))
+			{
+				log_error("Failed to update the new node system_identifier");
+				return false;
+			}
 		}
 	}
 	else if (initState->pgInitState >= PRE_INIT_STATE_RUNNING)
@@ -242,7 +244,6 @@ fsm_init_primary(Keeper *keeper)
 		char monitorHostname[_POSIX_HOST_NAME_MAX];
 		int monitorPort = 0;
 		int connlimit = 1;
-		char *authMethod = pg_setup_get_auth_method(pgSetup);
 
 		if (!hostname_from_uri(config->monitor_pguri,
 							   monitorHostname, _POSIX_HOST_NAME_MAX,
@@ -263,21 +264,13 @@ fsm_init_primary(Keeper *keeper)
 		 * hard-coded password PG_AUTOCTL_HEALTH_PASSWORD. The idea is to avoid
 		 * leaking information from the passfile, environment variable, or
 		 * other places.
-		 *
-		 * Still, when --skip-pg-hba option has been used, we skip creating the
-		 * HBA entirely and to do that we keep the "skip" authentication method
-		 * in use. Otherwise we override it to "trust".
 		 */
-		if (!SKIP_HBA(authMethod))
-		{
-			authMethod = "trust";
-		}
-
 		if (!primary_create_user_with_hba(postgres,
 										  PG_AUTOCTL_HEALTH_USERNAME,
 										  PG_AUTOCTL_HEALTH_PASSWORD,
 										  monitorHostname,
-										  authMethod,
+										  "trust",
+										  pgSetup->hbaLevel,
 										  connlimit))
 		{
 			log_error(
@@ -317,7 +310,10 @@ fsm_init_primary(Keeper *keeper)
 									   keeper->config.pgSetup.ssl.active,
 									   HBA_DATABASE_ALL, NULL,
 									   keeper->config.hostname,
-									   NULL, DEFAULT_AUTH_METHOD, NULL))
+									   NULL,
+									   DEFAULT_AUTH_METHOD,
+									   HBA_EDIT_MINIMAL,
+									   NULL))
 			{
 				log_error("Failed to grant local network connections in HBA");
 				return false;
@@ -716,7 +712,6 @@ bool
 fsm_stop_postgres_and_setup_standby(Keeper *keeper)
 {
 	LocalPostgresServer *postgres = &(keeper->postgres);
-	Monitor *monitor = &(keeper->monitor);
 	ReplicationSource *upstream = &(postgres->replicationSource);
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	KeeperConfig *config = &(keeper->config);
@@ -739,22 +734,11 @@ fsm_stop_postgres_and_setup_standby(Keeper *keeper)
 	}
 
 	/* get the primary node to follow */
-	if (!config->monitorDisabled)
+	if (!keeper_get_primary(keeper, &(postgres->replicationSource.primaryNode)))
 	{
-		if (!monitor_get_primary(monitor,
-								 config->formation,
-								 keeper->state.current_group,
-								 &(postgres->replicationSource.primaryNode)))
-		{
-			log_error("Failed to initialize standby because get the primary node "
-					  "from the monitor failed, see above for details");
-			return false;
-		}
-	}
-	else
-	{
-		/* copy information from keeper->otherNodes into replicationSource */
-		primaryNode = &(keeper->otherNodes.nodes[0]);
+		log_error("Failed to initialize standby for lack of a primary node, "
+				  "see above for details");
+		return false;
 	}
 
 	/* prepare a standby setup */
@@ -855,26 +839,15 @@ fsm_init_standby(Keeper *keeper)
 	Monitor *monitor = &(keeper->monitor);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
-	int groupId = keeper->state.current_group;
 	NodeAddress *primaryNode = NULL;
 
-	bool skipBaseBackup = false;
 
 	/* get the primary node to follow */
-	if (!config->monitorDisabled)
+	if (!keeper_get_primary(keeper, &(postgres->replicationSource.primaryNode)))
 	{
-		if (!monitor_get_primary(monitor, config->formation, groupId,
-								 &(postgres->replicationSource.primaryNode)))
-		{
-			log_error("Failed to initialize standby because get the primary node "
-					  "from the monitor failed, see above for details");
-			return false;
-		}
-	}
-	else
-	{
-		/* copy information from keeper->otherNodes into replicationSource */
-		primaryNode = &(keeper->otherNodes.nodes[0]);
+		log_error("Failed to initialize standby for lack of a primary node, "
+				  "see above for details");
+		return false;
 	}
 
 	if (!standby_init_replication_source(postgres,
@@ -902,8 +875,8 @@ fsm_init_standby(Keeper *keeper)
 	 * remove our init file: then we need to pg_basebackup again to init a
 	 * standby.
 	 */
-	skipBaseBackup = file_exists(keeper->config.pathnames.init) &&
-					 keeper->initState.pgInitState == PRE_INIT_STATE_EXISTS;
+	bool skipBaseBackup = file_exists(keeper->config.pathnames.init) &&
+						  keeper->initState.pgInitState == PRE_INIT_STATE_EXISTS;
 
 	if (!standby_init_database(postgres, config->hostname, skipBaseBackup))
 	{
@@ -926,13 +899,16 @@ fsm_init_standby(Keeper *keeper)
 	/*
 	 * Publish our possibly new system_identifier now.
 	 */
-	if (!monitor_set_node_system_identifier(
-			monitor,
-			keeper->state.current_node_id,
-			postgres->postgresSetup.control.system_identifier))
+	if (!config->monitorDisabled)
 	{
-		log_error("Failed to update the new node system_identifier");
-		return false;
+		if (!monitor_set_node_system_identifier(
+				monitor,
+				keeper->state.current_node_id,
+				postgres->postgresSetup.control.system_identifier))
+		{
+			log_error("Failed to update the new node system_identifier");
+			return false;
+		}
 	}
 
 	/* ensure the SSL setup is synced with the keeper config */
@@ -955,28 +931,16 @@ bool
 fsm_rewind_or_init(Keeper *keeper)
 {
 	KeeperConfig *config = &(keeper->config);
-	Monitor *monitor = &(keeper->monitor);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
-	int groupId = keeper->state.current_group;
 	NodeAddress *primaryNode = NULL;
 
 	/* get the primary node to follow */
-	if (!config->monitorDisabled)
+	if (!keeper_get_primary(keeper, &(postgres->replicationSource.primaryNode)))
 	{
-		if (!monitor_get_primary(monitor, config->formation, groupId,
-								 &(postgres->replicationSource.primaryNode)))
-		{
-			log_error("Failed to initialize standby because pg_autoctl "
-					  "failed to get the primary node from the monitor, "
-					  "see above for details");
-			return false;
-		}
-	}
-	else
-	{
-		/* copy information from keeper->otherNodes into replicationSource */
-		primaryNode = &(keeper->otherNodes.nodes[0]);
+		log_error("Failed to initialize standby for lack of a primary node, "
+				  "see above for details");
+		return false;
 	}
 
 	if (!standby_init_replication_source(postgres,
@@ -1263,31 +1227,20 @@ bool
 fsm_fast_forward(Keeper *keeper)
 {
 	KeeperConfig *config = &(keeper->config);
-	Monitor *monitor = &(keeper->monitor);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	ReplicationSource *upstream = &(postgres->replicationSource);
-
-	int groupId = keeper->state.current_group;
 
 	NodeAddress upstreamNode = { 0 };
 
 	char slotName[MAXCONNINFO] = { 0 };
 
-	if (!config->monitorDisabled)
+	/* get the primary node to follow */
+	if (!keeper_get_most_advanced_standby(keeper, &upstreamNode))
 	{
-		if (!monitor_get_most_advanced_standby(monitor,
-											   config->formation,
-											   groupId,
-											   &upstreamNode))
-		{
-			/* errors have already been logged */
-			return false;
-		}
-	}
-	else
-	{
-		upstreamNode = keeper->otherNodes.nodes[0];
+		log_error("Failed to fast forward from the most advanced standby node, "
+				  "see above for details");
+		return false;
 	}
 
 	/*
@@ -1367,16 +1320,13 @@ bool
 fsm_follow_new_primary(Keeper *keeper)
 {
 	KeeperConfig *config = &(keeper->config);
-	Monitor *monitor = &(keeper->monitor);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 	ReplicationSource *replicationSource = &(postgres->replicationSource);
-	int groupId = keeper->state.current_group;
 
 	/* get the primary node to follow */
-	if (!monitor_get_primary(monitor, config->formation, groupId,
-							 &(replicationSource->primaryNode)))
+	if (!keeper_get_primary(keeper, &(postgres->replicationSource.primaryNode)))
 	{
-		log_error("Failed to get the primary node from the monitor, "
+		log_error("Failed to initialize standby for lack of a primary node, "
 				  "see above for details");
 		return false;
 	}

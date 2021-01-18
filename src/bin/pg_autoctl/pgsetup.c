@@ -50,7 +50,6 @@ pg_setup_init(PostgresSetup *pgSetup,
 			  bool missing_pgdata_is_ok,
 			  bool pg_is_not_running_is_ok)
 {
-	bool pgIsReady = false;
 	int errors = 0;
 
 	/*
@@ -62,6 +61,21 @@ pg_setup_init(PostgresSetup *pgSetup,
 	 * Also make sure that we keep the pg_controldata results if we have them.
 	 */
 	pgSetup->control = options->control;
+
+	/*
+	 * Also make sure that we keep the hbaLevel to edit. Remember that
+	 * --skip-pg-hba is registered in the config as --auth skip.
+	 */
+	if (strcmp(options->authMethod, "skip") == 0)
+	{
+		pgSetup->hbaLevel = HBA_EDIT_SKIP;
+		strlcpy(pgSetup->hbaLevelStr, options->authMethod, NAMEDATALEN);
+	}
+	else
+	{
+		pgSetup->hbaLevel = options->hbaLevel;
+		strlcpy(pgSetup->hbaLevelStr, options->hbaLevelStr, NAMEDATALEN);
+	}
 
 	/*
 	 * Make sure that we keep the SSL options too.
@@ -89,18 +103,16 @@ pg_setup_init(PostgresSetup *pgSetup,
 			/* we might not have fetched the version yet */
 			if (IS_EMPTY_STRING_BUFFER(pgSetup->pg_version))
 			{
-				char *version = pg_ctl_version(options->pg_ctl);
-
-				if (version == NULL)
+				/* also cache the version in options */
+				if (!pg_ctl_version(options))
 				{
 					/* we already logged about it */
 					return false;
 				}
 
-				/* also cache the version in options */
-				strlcpy(options->pg_version, version, PG_VERSION_STRING_MAX);
-				strlcpy(pgSetup->pg_version, version, PG_VERSION_STRING_MAX);
-				free(version);
+				strlcpy(pgSetup->pg_version,
+						options->pg_version,
+						sizeof(pgSetup->pg_version));
 
 				log_debug("pg_setup_init: %s version %s",
 						  pgSetup->pg_ctl, pgSetup->pg_version);
@@ -108,17 +120,10 @@ pg_setup_init(PostgresSetup *pgSetup,
 		}
 		else
 		{
-			int count_of_pg_ctl = config_find_pg_ctl(pgSetup);
-
-			if (count_of_pg_ctl != 1)
+			if (!config_find_pg_ctl(pgSetup))
 			{
 				/* config_find_pg_ctl already logged errors */
 				errors++;
-			}
-
-			if (count_of_pg_ctl > 1)
-			{
-				log_error("Found several pg_ctl in PATH, please provide --pgctl");
 			}
 		}
 	}
@@ -212,7 +217,7 @@ pg_setup_init(PostgresSetup *pgSetup,
 	 * Read the postmaster.pid file to find out pid, port and unix socket
 	 * directory of a running PostgreSQL instance.
 	 */
-	pgIsReady = pg_setup_is_ready(pgSetup, pg_is_not_running_is_ok);
+	bool pgIsReady = pg_setup_is_ready(pgSetup, pg_is_not_running_is_ok);
 
 	if (!pgIsReady && !pg_is_not_running_is_ok)
 	{
@@ -542,8 +547,6 @@ read_pg_pidfile(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk, int maxRetries)
 
 	for (lineno = 1; lineno <= LOCK_FILE_LINE_PM_STATUS; lineno++)
 	{
-		int lineLength = -1;
-
 		if (fgets(line, sizeof(line), fp) == NULL)
 		{
 			/* later lines are added during start-up, will appear later */
@@ -575,7 +578,7 @@ read_pg_pidfile(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk, int maxRetries)
 			}
 		}
 
-		lineLength = strlen(line);
+		int lineLength = strlen(line);
 
 		/* chomp the ending Newline (\n) */
 		if (lineLength > 0)
@@ -900,7 +903,7 @@ pg_setup_is_ready(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk)
 	 *
 	 * This makes sure we enter the main loop and attempt to read the
 	 * postmaster.pid file at least once: if Postgres was stopped, then the
-	 * file that we've read previously might not exists any-more.
+	 * file that we've read previously might not exists anymore.
 	 */
 	pgSetup->pm_status = POSTMASTER_STATUS_UNKNOWN;
 
@@ -1319,8 +1322,6 @@ pg_setup_role(PostgresSetup *pgSetup)
 char *
 pg_setup_get_username(PostgresSetup *pgSetup)
 {
-	uid_t uid;
-	struct passwd *pw;
 	char userEnv[NAMEDATALEN];
 
 	/* use a configured username if provided */
@@ -1332,8 +1333,8 @@ pg_setup_get_username(PostgresSetup *pgSetup)
 	log_trace("username not configured");
 
 	/* use the passwd file to find the username, same as whoami */
-	uid = geteuid();
-	pw = getpwuid(uid);
+	uid_t uid = geteuid();
+	struct passwd *pw = getpwuid(uid);
 	if (pw)
 	{
 		log_trace("username found in passwd: %s", pw->pw_name);
@@ -1382,8 +1383,7 @@ pg_setup_get_auth_method(PostgresSetup *pgSetup)
 bool
 pg_setup_skip_hba_edits(PostgresSetup *pgSetup)
 {
-	return !IS_EMPTY_STRING_BUFFER(pgSetup->authMethod) &&
-		   strcmp(pgSetup->authMethod, SKIP_HBA_AUTH_METHOD) == 0;
+	return pgSetup->hbaLevel == HBA_EDIT_SKIP;
 }
 
 
@@ -1886,4 +1886,64 @@ pg_setup_standby_slot_supported(PostgresSetup *pgSetup, int logLevel)
 			  pgSetup->control.pg_control_version);
 
 	return false;
+}
+
+
+/*
+ * pgsetup_parse_hba_level parses a string that represents an HBAEditLevel
+ * value.
+ */
+HBAEditLevel
+pgsetup_parse_hba_level(const char *level)
+{
+	HBAEditLevel enumArray[] = {
+		HBA_EDIT_SKIP,
+		HBA_EDIT_MINIMAL,
+		HBA_EDIT_LAN
+	};
+
+	char *levelArray[] = { "skip", "minimal", "app", NULL };
+
+	for (int i = 0; levelArray[i] != NULL; i++)
+	{
+		if (strcmp(level, levelArray[i]) == 0)
+		{
+			return enumArray[i];
+		}
+	}
+
+	return HBA_EDIT_UNKNOWN;
+}
+
+
+/*
+ * pgsetup_hba_level_to_string returns the string representation of an
+ * hbaLevel enum value.
+ */
+char *
+pgsetup_hba_level_to_string(HBAEditLevel hbaLevel)
+{
+	switch (hbaLevel)
+	{
+		case HBA_EDIT_SKIP:
+		{
+			return "skip";
+		}
+
+		case HBA_EDIT_MINIMAL:
+		{
+			return "minimal";
+		}
+
+		case HBA_EDIT_LAN:
+		{
+			return "app";
+		}
+
+		case HBA_EDIT_UNKNOWN:
+			return "unknown";
+	}
+
+	log_error("BUG: hbaLevel %d is unknown", hbaLevel);
+	return "unknown";
 }

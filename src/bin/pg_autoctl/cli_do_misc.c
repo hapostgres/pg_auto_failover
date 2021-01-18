@@ -22,6 +22,7 @@
 #include "commandline.h"
 #include "config.h"
 #include "defaults.h"
+#include "env_utils.h"
 #include "file_utils.h"
 #include "fsm.h"
 #include "keeper_config.h"
@@ -158,7 +159,6 @@ keeper_cli_create_monitor_user(int argc, char **argv)
 	LocalPostgresServer postgres = { 0 };
 	bool missingPgdataOk = false;
 	bool postgresNotRunningOk = false;
-	int urlLength = 0;
 	char monitorHostname[_POSIX_HOST_NAME_MAX];
 	int monitorPort = 0;
 	int connlimit = 1;
@@ -166,7 +166,7 @@ keeper_cli_create_monitor_user(int argc, char **argv)
 	keeper_config_init(&config, missingPgdataOk, postgresNotRunningOk);
 	local_postgres_init(&postgres, &(config.pgSetup));
 
-	urlLength = strlcpy(config.monitor_pguri, argv[0], MAXCONNINFO);
+	int urlLength = strlcpy(config.monitor_pguri, argv[0], MAXCONNINFO);
 	if (urlLength >= MAXCONNINFO)
 	{
 		log_fatal("Monitor URL \"%s\" given in command line is %d characters, "
@@ -188,6 +188,7 @@ keeper_cli_create_monitor_user(int argc, char **argv)
 									  PG_AUTOCTL_HEALTH_PASSWORD,
 									  monitorHostname,
 									  "trust",
+									  HBA_EDIT_MINIMAL,
 									  connlimit))
 	{
 		log_fatal("Failed to create the database user that the pg_auto_failover "
@@ -218,6 +219,54 @@ keeper_cli_create_replication_user(int argc, char **argv)
 		log_fatal("Failed to create the database user that a pg_auto_failover "
 				  " standby uses for replication, see above for details");
 		exit(EXIT_CODE_PGSQL);
+	}
+}
+
+
+/*
+ * keeper_cli_pgsetup_pg_ctl implements the CLI to find a suitable pg_ctl entry
+ * from either the PG_CONFIG environment variable, or the PATH, then either
+ * finding a single pg_ctl entry or falling back to a single pg_config entry
+ * that we then use with pg_config --bindir.
+ */
+void
+keeper_cli_pgsetup_pg_ctl(int argc, char **argv)
+{
+	bool success = true;
+
+	PostgresSetup pgSetupMonitor = { 0 }; /* find first entry */
+	PostgresSetup pgSetupKeeper = { 0 };  /* find non ambiguous entry */
+
+	char PG_CONFIG[MAXPGPATH] = { 0 };
+
+	if (env_exists("PG_CONFIG") &&
+		get_env_copy("PG_CONFIG", PG_CONFIG, sizeof(PG_CONFIG)))
+	{
+		log_info("Environment variable PG_CONFIG is set to \"%s\"", PG_CONFIG);
+	}
+
+	if (config_find_pg_ctl(&pgSetupKeeper))
+	{
+		log_info("`pg_autoctl create postgres` would use \"%s\" for Postgres %s",
+				 pgSetupKeeper.pg_ctl, pgSetupKeeper.pg_version);
+	}
+	else
+	{
+		log_fatal("pg_autoctl create postgres would fail to find pg_ctl");
+		success = false;
+	}
+
+	/*
+	 * This function EXITs when it's not happy, so we do it last:
+	 */
+	(void) set_first_pgctl(&pgSetupMonitor);
+
+	log_info("`pg_autoctl create monitor` would use \"%s\" for Postgres %s",
+			 pgSetupMonitor.pg_ctl, pgSetupMonitor.pg_version);
+
+	if (!success)
+	{
+		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 }
 
@@ -259,7 +308,6 @@ void
 keeper_cli_pgsetup_is_ready(int argc, char **argv)
 {
 	PostgresSetup pgSetup = { 0 };
-	bool pgIsReady = false;
 	bool pgIsNotRunningIsOk = false;
 
 	if (!pg_setup_init(&pgSetup, &keeperOptions.pgSetup, true, true))
@@ -269,7 +317,7 @@ keeper_cli_pgsetup_is_ready(int argc, char **argv)
 
 	log_debug("Initialized pgSetup, now calling pg_setup_is_ready()");
 
-	pgIsReady = pg_setup_is_ready(&pgSetup, pgIsNotRunningIsOk);
+	bool pgIsReady = pg_setup_is_ready(&pgSetup, pgIsNotRunningIsOk);
 
 	log_info("Postgres status is: \"%s\"", pmStatusToString(pgSetup.pm_status));
 
@@ -290,7 +338,6 @@ keeper_cli_pgsetup_wait_until_ready(int argc, char **argv)
 {
 	int timeout = 30;
 	PostgresSetup pgSetup = { 0 };
-	bool pgIsReady = false;
 
 	if (!pg_setup_init(&pgSetup, &keeperOptions.pgSetup, true, true))
 	{
@@ -299,7 +346,7 @@ keeper_cli_pgsetup_wait_until_ready(int argc, char **argv)
 
 	log_debug("Initialized pgSetup, now calling pg_setup_wait_until_is_ready()");
 
-	pgIsReady = pg_setup_wait_until_is_ready(&pgSetup, timeout, LOG_INFO);
+	bool pgIsReady = pg_setup_wait_until_is_ready(&pgSetup, timeout, LOG_INFO);
 
 	log_info("Postgres status is: \"%s\"", pmStatusToString(pgSetup.pm_status));
 
@@ -362,7 +409,6 @@ keeper_cli_init_standby(int argc, char **argv)
 
 	KeeperConfig config = keeperOptions;
 	LocalPostgresServer postgres = { 0 };
-	int hostLength = 0;
 
 	if (argc != 2)
 	{
@@ -373,8 +419,8 @@ keeper_cli_init_standby(int argc, char **argv)
 	keeper_config_init(&config, missing_pgdata_is_ok, pg_not_running_is_ok);
 	local_postgres_init(&postgres, &(config.pgSetup));
 
-	hostLength = strlcpy(postgres.replicationSource.primaryNode.host, argv[0],
-						 _POSIX_HOST_NAME_MAX);
+	int hostLength = strlcpy(postgres.replicationSource.primaryNode.host, argv[0],
+							 _POSIX_HOST_NAME_MAX);
 	if (hostLength >= _POSIX_HOST_NAME_MAX)
 	{
 		log_fatal("Hostname \"%s\" given in command line is %d characters, "
@@ -419,7 +465,6 @@ keeper_cli_rewind_old_primary(int argc, char **argv)
 {
 	const bool missing_pgdata_is_ok = false;
 	const bool pg_not_running_is_ok = true;
-	int hostLength = 0;
 
 	KeeperConfig config = keeperOptions;
 	LocalPostgresServer postgres = { 0 };
@@ -433,8 +478,8 @@ keeper_cli_rewind_old_primary(int argc, char **argv)
 	keeper_config_init(&config, missing_pgdata_is_ok, pg_not_running_is_ok);
 	local_postgres_init(&postgres, &(config.pgSetup));
 
-	hostLength = strlcpy(postgres.replicationSource.primaryNode.host, argv[0],
-						 _POSIX_HOST_NAME_MAX);
+	int hostLength = strlcpy(postgres.replicationSource.primaryNode.host, argv[0],
+							 _POSIX_HOST_NAME_MAX);
 	if (hostLength >= _POSIX_HOST_NAME_MAX)
 	{
 		log_fatal("Hostname \"%s\" given in command line is %d characters, "
@@ -512,7 +557,6 @@ keeper_cli_identify_system(int argc, char **argv)
 
 	KeeperConfig config = keeperOptions;
 	ReplicationSource replicationSource = { 0 };
-	int hostLength = 0;
 
 	if (argc != 2)
 	{
@@ -522,8 +566,8 @@ keeper_cli_identify_system(int argc, char **argv)
 
 	keeper_config_init(&config, missing_pgdata_is_ok, pg_not_running_is_ok);
 
-	hostLength = strlcpy(replicationSource.primaryNode.host, argv[0],
-						 _POSIX_HOST_NAME_MAX);
+	int hostLength = strlcpy(replicationSource.primaryNode.host, argv[0],
+							 _POSIX_HOST_NAME_MAX);
 	if (hostLength >= _POSIX_HOST_NAME_MAX)
 	{
 		log_fatal("Hostname \"%s\" given in command line is %d characters, "

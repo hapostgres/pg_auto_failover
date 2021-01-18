@@ -244,7 +244,7 @@ local_postgres_update(LocalPostgresServer *postgres, bool postgresNotRunningIsOk
 {
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	PostgresSetup newPgSetup = { 0 };
-	bool missingPgdataIsOk = false;
+	bool missingPgdataIsOk = true;
 
 	/* in case a connection is still established, now is time to close */
 	(void) local_postgres_finish(postgres);
@@ -406,12 +406,11 @@ ensure_postgres_service_is_stopped(LocalPostgresServer *postgres)
 bool
 primary_has_replica(LocalPostgresServer *postgres, char *userName, bool *hasStandby)
 {
-	bool result = false;
 	PGSQL *pgsql = &(postgres->sqlClient);
 
 	log_trace("primary_has_replica");
 
-	result = pgsql_has_replica(pgsql, userName, hasStandby);
+	bool result = pgsql_has_replica(pgsql, userName, hasStandby);
 
 	pgsql_finish(pgsql);
 	return result;
@@ -476,11 +475,10 @@ primary_create_replication_slot(LocalPostgresServer *postgres,
 								char *replicationSlotName)
 {
 	PGSQL *pgsql = &(postgres->sqlClient);
-	bool result = false;
 
 	log_trace("primary_create_replication_slot(%s)", replicationSlotName);
 
-	result = pgsql_create_replication_slot(pgsql, replicationSlotName);
+	bool result = pgsql_create_replication_slot(pgsql, replicationSlotName);
 
 	pgsql_finish(pgsql);
 	return result;
@@ -495,12 +493,11 @@ bool
 primary_drop_replication_slot(LocalPostgresServer *postgres,
 							  char *replicationSlotName)
 {
-	bool result = false;
 	PGSQL *pgsql = &(postgres->sqlClient);
 
 	log_trace("primary_drop_replication_slot");
 
-	result = pgsql_drop_replication_slot(pgsql, replicationSlotName);
+	bool result = pgsql_drop_replication_slot(pgsql, replicationSlotName);
 
 	pgsql_finish(pgsql);
 	return result;
@@ -516,12 +513,11 @@ bool
 postgres_replication_slot_create_and_drop(LocalPostgresServer *postgres,
 										  NodeAddressArray *nodeArray)
 {
-	bool result = false;
 	PGSQL *pgsql = &(postgres->sqlClient);
 
 	log_trace("postgres_replication_slot_drop_removed");
 
-	result = pgsql_replication_slot_create_and_drop(pgsql, nodeArray);
+	bool result = pgsql_replication_slot_create_and_drop(pgsql, nodeArray);
 
 	pgsql_finish(pgsql);
 	return result;
@@ -536,12 +532,11 @@ bool
 postgres_replication_slot_maintain(LocalPostgresServer *postgres,
 								   NodeAddressArray *nodeArray)
 {
-	bool result = false;
 	PGSQL *pgsql = &(postgres->sqlClient);
 
 	log_trace("postgres_replication_slot_maintain");
 
-	result = pgsql_replication_slot_maintain(pgsql, nodeArray);
+	bool result = pgsql_replication_slot_maintain(pgsql, nodeArray);
 
 	pgsql_finish(pgsql);
 	return result;
@@ -555,13 +550,12 @@ postgres_replication_slot_maintain(LocalPostgresServer *postgres,
 bool
 primary_set_synchronous_standby_names(LocalPostgresServer *postgres)
 {
-	bool result = false;
 	PGSQL *pgsql = &(postgres->sqlClient);
 
 	log_info("Setting synchronous_standby_names to '%s'",
 			 postgres->synchronousStandbyNames);
 
-	result =
+	bool result =
 		pgsql_set_synchronous_standby_names(pgsql,
 											postgres->synchronousStandbyNames);
 
@@ -577,12 +571,11 @@ primary_set_synchronous_standby_names(LocalPostgresServer *postgres)
 bool
 primary_enable_synchronous_replication(LocalPostgresServer *postgres)
 {
-	bool result = false;
 	PGSQL *pgsql = &(postgres->sqlClient);
 
 	log_trace("primary_enable_synchronous_replication");
 
-	result = pgsql_enable_synchronous_replication(pgsql);
+	bool result = pgsql_enable_synchronous_replication(pgsql);
 
 	pgsql_finish(pgsql);
 	return result;
@@ -596,12 +589,11 @@ primary_enable_synchronous_replication(LocalPostgresServer *postgres)
 bool
 primary_disable_synchronous_replication(LocalPostgresServer *postgres)
 {
-	bool result = false;
 	PGSQL *pgsql = &(postgres->sqlClient);
 
 	log_trace("primary_disable_synchronous_replication");
 
-	result = pgsql_disable_synchronous_replication(pgsql);
+	bool result = pgsql_disable_synchronous_replication(pgsql);
 
 	pgsql_finish(pgsql);
 	return result;
@@ -691,7 +683,8 @@ postgres_add_default_settings(LocalPostgresServer *postgres)
  */
 bool
 primary_create_user_with_hba(LocalPostgresServer *postgres, char *userName,
-							 char *password, char *hostname, char *authMethod,
+							 char *password, char *hostname,
+							 char *authMethod, HBAEditLevel hbaLevel,
 							 int connlimit)
 {
 	PGSQL *pgsql = &(postgres->sqlClient);
@@ -723,7 +716,8 @@ primary_create_user_with_hba(LocalPostgresServer *postgres, char *userName,
 									   NULL,
 									   userName,
 									   hostname,
-									   authMethod))
+									   authMethod,
+									   hbaLevel))
 	{
 		log_error("Failed to set the pg_hba rule for user \"%s\"", userName);
 		return false;
@@ -750,7 +744,6 @@ primary_create_replication_user(LocalPostgresServer *postgres,
 								char *replicationUsername,
 								char *replicationPassword)
 {
-	bool result = false;
 	PGSQL *pgsql = &(postgres->sqlClient);
 	bool login = true;
 	bool superuser = true;
@@ -759,8 +752,8 @@ primary_create_replication_user(LocalPostgresServer *postgres,
 
 	log_trace("primary_create_replication_user");
 
-	result = pgsql_create_user(pgsql, replicationUsername, replicationPassword,
-							   login, superuser, replication, connlimit);
+	bool result = pgsql_create_user(pgsql, replicationUsername, replicationPassword,
+									login, superuser, replication, connlimit);
 
 	pgsql_finish(pgsql);
 
@@ -1122,13 +1115,12 @@ standby_promote(LocalPostgresServer *postgres)
 bool
 check_postgresql_settings(LocalPostgresServer *postgres, bool *settings_are_ok)
 {
-	bool result = false;
 	PGSQL *pgsql = &(postgres->sqlClient);
 	bool isCitusInstanceKind = IS_CITUS_INSTANCE_KIND(postgres->pgKind);
 
-	result = pgsql_check_postgresql_settings(pgsql,
-											 isCitusInstanceKind,
-											 settings_are_ok);
+	bool result = pgsql_check_postgresql_settings(pgsql,
+												  isCitusInstanceKind,
+												  settings_are_ok);
 
 	pgsql_finish(pgsql);
 	return result;

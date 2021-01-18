@@ -495,7 +495,6 @@ cli_enable_maintenance(int argc, char **argv)
 	{
 		int nodeId = keeper.state.current_node_id;
 		bool mayRetry = false;
-		int sleepTimeMs = 0;
 
 		if (monitor_start_maintenance(&(keeper.monitor), nodeId, &mayRetry))
 		{
@@ -511,7 +510,7 @@ cli_enable_maintenance(int argc, char **argv)
 			exit(EXIT_CODE_MONITOR);
 		}
 
-		sleepTimeMs = pgsql_compute_connection_retry_sleep_time(&retryPolicy);
+		int sleepTimeMs = pgsql_compute_connection_retry_sleep_time(&retryPolicy);
 
 		log_warn("Failed to enable maintenance of node %d on the monitor, "
 				 "retrying in %d ms.",
@@ -527,10 +526,11 @@ cli_enable_maintenance(int argc, char **argv)
 		exit(EXIT_CODE_QUIT);
 	}
 
-	if (!monitor_wait_until_some_node_reported_state(
+	if (!monitor_wait_until_node_reported_state(
 			&(keeper.monitor),
 			keeper.config.formation,
 			keeper.config.groupId,
+			keeper.state.current_node_id,
 			keeper.config.pgSetup.pgKind,
 			MAINTENANCE_STATE))
 	{
@@ -599,7 +599,6 @@ cli_disable_maintenance(int argc, char **argv)
 	{
 		int nodeId = keeper.state.current_node_id;
 		bool mayRetry = false;
-		int sleepTimeMs = 0;
 
 		if (monitor_stop_maintenance(&(keeper.monitor), nodeId, &mayRetry))
 		{
@@ -615,7 +614,7 @@ cli_disable_maintenance(int argc, char **argv)
 			exit(EXIT_CODE_MONITOR);
 		}
 
-		sleepTimeMs = pgsql_compute_connection_retry_sleep_time(&retryPolicy);
+		int sleepTimeMs = pgsql_compute_connection_retry_sleep_time(&retryPolicy);
 
 		log_warn("Failed to disable maintenance of node %d on the monitor, "
 				 "retrying in %d ms.",
@@ -625,12 +624,13 @@ cli_disable_maintenance(int argc, char **argv)
 		(void) pg_usleep(sleepTimeMs * 1000);
 	}
 
-	if (!monitor_wait_until_some_node_reported_state(
+	if (!monitor_wait_until_node_reported_state(
 			&(keeper.monitor),
 			keeper.config.formation,
 			keeper.config.groupId,
+			keeper.state.current_node_id,
 			keeper.config.pgSetup.pgKind,
-			PRIMARY_STATE))
+			SECONDARY_STATE))
 	{
 		log_error("Failed to wait until a node reached the secondary state");
 		exit(EXIT_CODE_MONITOR);

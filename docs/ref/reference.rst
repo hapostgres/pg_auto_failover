@@ -67,6 +67,7 @@ keeper::
       uri            Show the postgres uri to use to connect to pg_auto_failover nodes
       events         Prints monitor's state of nodes in a given formation and group
       state          Prints monitor's state of nodes in a given formation and group
+      settings       Print replication settings for a formation from the monitor
       standby-names  Prints synchronous_standby_names for a given group
       file           List pg_autoctl internal files (config, state, pid)
       systemd        Print systemd service file for this node
@@ -322,6 +323,23 @@ LSN position is then the `Latest checkpoint location` as taken from the
 output of the ``pg_controldata`` command, and might be an earlier location
 than the most recent one sent to the monitor.
 
+pg_autoctl show settings
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+This command allows to review all the replication settings of a given
+formation (defaults to `'default'` as usual)::
+
+   pg_autoctl get formation settings --help
+   pg_autoctl get formation settings: get replication settings for a formation from the monitor
+   usage: pg_autoctl get formation settings  [ --pgdata ] [ --json ] [ --formation ]
+
+     --pgdata      path to data directory
+     --json        output data in the JSON format
+     --formation   pg_auto_failover formation
+
+See :ref:`pg_autoctl_get_formation_settings` for details. Both commands are
+aliases.
+
 pg_autoctl show file
 ^^^^^^^^^^^^^^^^^^^^
 
@@ -394,7 +412,7 @@ The other commands accept the same set of options.
   usage: pg_autoctl create postgres
 
     --pgctl           path to pg_ctl
-    --pgdata          path to data director
+    --pgdata          path to data directory
     --pghost          PostgreSQL's hostname
     --pgport          PostgreSQL's port number
     --listen          PostgreSQL's listen_addresses
@@ -406,6 +424,7 @@ The other commands accept the same set of options.
     --monitor         pg_auto_failover Monitor Postgres URL
     --auth            authentication method for connections from monitor
     --skip-pg-hba     skip editing pg_hba.conf rules
+    --pg-hba-lan      edit pg_hba.conf rules for --dbname in detected LAN
     --candidate-priority    priority of the node to be promoted to become primary
     --replication-quorum    true if node participates in write quorum
     --ssl-self-signed setup network encryption using self signed certificates (does NOT protect against MITM)
@@ -518,6 +537,8 @@ Replication Settings
 The following commands allow to get and set the replication settings of
 pg_auto_failover nodes. See :ref:`architecture_setup` for details about
 those settings.
+
+.. _pg_autoctl_get_formation_settings:
 
 pg_autoctl get formation settings
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -1003,7 +1024,7 @@ environments::
 
   pg_autoctl do tmux
     script   Produce a tmux script for a demo or a test case (debug only)
-    session  Run a a tmux session for a demo or a test case
+    session  Run a tmux session for a demo or a test case
     stop     Stop pg_autoctl processes that belong to a tmux session
     wait     Wait until a given node has been registered on the monitor
     clean    Clean-up a tmux session processes and root dir

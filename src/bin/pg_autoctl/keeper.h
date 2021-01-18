@@ -76,12 +76,16 @@ bool keeper_config_accept_new(Keeper *keeper, KeeperConfig *newConfig);
  * running, we also call the ReloadHook functions when entering our main loop
  * the first time.
  */
-typedef bool (*KeeperReloadFunction)(Keeper *keeper, bool firstLoop);
+typedef bool (*KeeperReloadFunction)(Keeper *keeper, bool firstLoop, bool doInit);
 
 /* src/bin/pg_autoctl/service_keeper.c */
-extern KeeperReloadFunction KeeperReloadHooks[];
+extern KeeperReloadFunction *KeeperReloadHooks;
 
-void keeper_call_reload_hooks(Keeper *keeper, bool firstLoop);
-bool keeper_reload_configuration(Keeper *keeper, bool firstLoop);
+void keeper_call_reload_hooks(Keeper *keeper, bool firstLoop, bool doInit);
+bool keeper_reload_configuration(Keeper *keeper, bool firstLoop, bool doInit);
+
+bool keeper_read_nodes_from_file(Keeper *keeper, NodeAddressArray *nodesArray);
+bool keeper_get_primary(Keeper *keeper, NodeAddress *primaryNode);
+bool keeper_get_most_advanced_standby(Keeper *keeper, NodeAddress *primaryNode);
 
 #endif /* KEEPER_H */

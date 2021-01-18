@@ -14,7 +14,7 @@
 #define PG_AUTOCTL_STATE_VERSION 1
 
 /* additional version information for printing version on CLI */
-#define PG_AUTOCTL_VERSION "1.4"
+#define PG_AUTOCTL_VERSION "1.4.1"
 
 /* version of the extension that we requite to talk to on the monitor */
 #define PG_AUTOCTL_EXTENSION_VERSION "1.4"
@@ -32,7 +32,6 @@
 #define DEFAULT_DATABASE_NAME "postgres"
 #define DEFAULT_USERNAME "postgres"
 #define DEFAULT_AUTH_METHOD "trust"
-#define SKIP_HBA_AUTH_METHOD "skip"
 #define REPLICATION_SLOT_NAME_DEFAULT "pgautofailover_standby"
 #define REPLICATION_SLOT_NAME_PATTERN "^pgautofailover_standby_"
 #define REPLICATION_PASSWORD_DEFAULT NULL
@@ -108,6 +107,7 @@
 #define KEEPER_PID_FILENAME "pg_autoctl.pid"
 #define KEEPER_INIT_STATE_FILENAME "pg_autoctl.init"
 #define KEEPER_POSTGRES_STATE_FILENAME "pg_autoctl.pg"
+#define KEEPER_NODES_FILENAME "nodes.json"
 
 #define KEEPER_SYSTEMD_SERVICE "pgautofailover"
 #define KEEPER_SYSTEMD_FILENAME "pgautofailover.service"

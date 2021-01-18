@@ -80,14 +80,13 @@ bool
 service_monitor_start(void *context, pid_t *pid)
 {
 	Monitor *monitor = (Monitor *) context;
-	pid_t fpid;
 
 	/* Flush stdio channels just before fork, to avoid double-output problems */
 	fflush(stdout);
 	fflush(stderr);
 
 	/* time to create the node_active sub-process */
-	fpid = fork();
+	pid_t fpid = fork();
 
 	switch (fpid)
 	{
@@ -131,8 +130,6 @@ service_monitor_start(void *context, pid_t *pid)
 void
 service_monitor_runprogram(Monitor *monitor)
 {
-	Program program;
-
 	char *args[12];
 	int argsIndex = 0;
 
@@ -174,7 +171,7 @@ service_monitor_runprogram(Monitor *monitor)
 	args[argsIndex] = NULL;
 
 	/* we do not want to call setsid() when running this program. */
-	program = initialize_program(args, false);
+	Program program = initialize_program(args, false);
 
 	program.capture = false;    /* redirect output, don't capture */
 	program.stdOutFd = STDOUT_FILENO;
@@ -211,7 +208,7 @@ monitor_service_run(Monitor *monitor)
 		exit(EXIT_CODE_MONITOR);
 	}
 
-	/* Now get the the Monitor URI to display it to the user, and move along */
+	/* Now get the Monitor URI to display it to the user, and move along */
 	if (monitor_config_get_postgres_uri(mconfig, postgresUri, MAXCONNINFO))
 	{
 		log_info("Managing the monitor at %s", postgresUri);

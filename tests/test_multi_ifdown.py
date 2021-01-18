@@ -10,18 +10,22 @@ node1 = None
 node2 = None
 node3 = None
 
+
 def setup_module():
     global cluster
     cluster = pgautofailover.Cluster()
 
+
 def teardown_module():
     cluster.destroy()
+
 
 def test_000_create_monitor():
     global monitor
     monitor = cluster.create_monitor("/tmp/multi_ifdown/monitor")
     monitor.run()
     monitor.wait_until_pg_is_running()
+
 
 def test_001_init_primary():
     global node1
@@ -30,6 +34,7 @@ def test_001_init_primary():
     node1.run()
     assert node1.wait_until_state(target_state="single")
 
+
 def test_002_add_standby():
     global node2
 
@@ -37,6 +42,7 @@ def test_002_add_standby():
     node2.create()
     node2.run()
 
+    assert node2.wait_until_pg_is_running()
     assert node2.wait_until_state(target_state="secondary")
 
     assert node1.has_needed_replication_slots()
@@ -44,6 +50,7 @@ def test_002_add_standby():
 
     # make sure we reached primary on node1 before next tests
     assert node1.wait_until_state(target_state="primary")
+
 
 def test_003_add_standby():
     global node3
@@ -66,6 +73,7 @@ def test_003_add_standby():
     # make sure we reached primary on node1 before next tests
     assert node1.wait_until_state(target_state="primary")
 
+
 def test_004_write_into_primary():
     node1.run_sql_query("CREATE TABLE t1(a int)")
     node1.run_sql_query("INSERT INTO t1 VALUES (1), (2), (3), (4)")
@@ -74,12 +82,13 @@ def test_004_write_into_primary():
     results = node1.run_sql_query("SELECT * FROM t1")
     assert results == [(1,), (2,), (3,), (4,)]
 
+
 def test_005_set_candidate_priorities():
     print()
     assert node1.wait_until_state(target_state="primary")
 
     # set priorities in a way that we know the candidate: node3
-    node1.set_candidate_priority(90) # current primary
+    node1.set_candidate_priority(90)  # current primary
     node2.set_candidate_priority(0)  # not a candidate anymore
     node3.set_candidate_priority(90)
 
@@ -94,16 +103,19 @@ def test_005_set_candidate_priorities():
     assert node2.get_replication_quorum()
 
     # also let's see synchronous_standby_names here
-    print("Monitor: %s" % node1.get_synchronous_standby_names())
-    print("Node 1:  %s" %
-          node1.run_sql_query("show synchronous_standby_names")[0][0])
+    # remember to sort by candidate priority then name
+    ssn = "ANY 1 (pgautofailover_standby_3, pgautofailover_standby_2)"
+    node1.check_synchronous_standby_names(ssn)
+
 
 def test_006_ifdown_node3():
     node3.ifdown()
 
+
 def test_007_insert_rows():
     node1.run_sql_query(
-        "INSERT INTO t1 SELECT x+10 FROM generate_series(1, 10000) as gs(x)")
+        "INSERT INTO t1 SELECT x+10 FROM generate_series(1, 10000) as gs(x)"
+    )
     node1.run_sql_query("CHECKPOINT")
 
     lsn1 = node1.run_sql_query("select pg_current_wal_lsn()")[0][0]
@@ -120,6 +132,7 @@ def test_007_insert_rows():
 
     eq_(lsn1, lsn2)
 
+
 def test_008_failover():
     print()
     print("Injecting failure of node1")
@@ -135,14 +148,22 @@ def test_008_failover():
 
     assert node3.wait_until_state(target_state="wait_primary", timeout=120)
     assert node2.wait_until_state(target_state="secondary")
-    assert node3.wait_until_state(target_state="primary")
+
+    # node 2 has candidate priority of 0, can't be used to reach primary
+    # assert node3.wait_until_state(target_state="primary")
 
     assert node3.has_needed_replication_slots()
     assert node2.has_needed_replication_slots()
 
+    # when in wait_primary state we should not block writes when:
+    assert node3.get_number_sync_standbys() == 1
+    node3.check_synchronous_standby_names(ssn="")
+
+
 def test_009_read_from_new_primary():
     results = node3.run_sql_query("SELECT count(*) FROM t1")
     assert results == [(10004,)]
+
 
 def test_010_start_node1_again():
     node1.run()
@@ -154,6 +175,11 @@ def test_010_start_node1_again():
     assert node1.has_needed_replication_slots()
     assert node2.has_needed_replication_slots()
     assert node3.has_needed_replication_slots()
+
+    # now that we're back to primary, check we have sync rep again
+    ssn = "ANY 1 (pgautofailover_standby_1, pgautofailover_standby_2)"
+    node3.check_synchronous_standby_names(ssn)
+
 
 # test_011_XXX, test_012_XXX, test_013_XXX, test_014_XXX and test_015_XXX
 # are meant to test the scenario when the most advanced secondary
@@ -167,6 +193,7 @@ def test_011_prepare_candidate_priorities():
     assert node1.get_candidate_priority() == 90
     assert node3.get_candidate_priority() == 90
 
+
 def test_012_prepare_replication_quorums():
     # for the purpose of this test, we need one node
     # async, to allow that we should decrement the sync stanbys
@@ -179,6 +206,7 @@ def test_012_prepare_replication_quorums():
     # others should be sync
     assert node1.get_replication_quorum()
     assert node3.get_replication_quorum()
+
 
 def test_013_secondary_gets_behind_primary():
     # make sure that node2 gets behind of the primary
@@ -196,7 +224,7 @@ def test_013_secondary_gets_behind_primary():
     print("%s " % lsn1, end="", flush=True)
 
     # ensure the monitor received this lsn
-    node1.pg_autoctl.sighup() # wake up from the 10s node_active delay
+    node1.pg_autoctl.sighup()  # wake up from the 10s node_active delay
     time.sleep(1)
 
     q = "select reportedlsn from pgautofailover.node where nodeid = 1"
@@ -211,14 +239,18 @@ def test_013_secondary_gets_behind_primary():
 
     eq_(lsn1, lsn1m)
 
+
 def test_014_secondary_reports_lsn():
     # make the primary and mostAdvanced secondary inaccessible
     # and the candidate for failover as accessible
     # which means that node2 will not be able to fetch wal
     # and blocked until the other secondary is up
-    node3.ifdown()    # primary
-    node1.ifdown()    # most advanced standby
-    node2.ifup()      # failover candidate
+    assert node1.wait_until_state(target_state="secondary")
+    assert node3.wait_until_state(target_state="primary")
+
+    node3.ifdown()  # primary
+    node1.ifdown()  # most advanced standby
+    node2.ifup()  # failover candidate
 
     print()
     print("Calling pgautofailover.failover() on the monitor")
@@ -227,21 +259,16 @@ def test_014_secondary_reports_lsn():
     # node2 reports its LSN while others are inaccessible
     assert node2.wait_until_state(target_state="report_lsn")
 
+
 def test_015_finalize_failover_after_most_advanced_secondary_gets_back():
     # when they are accessible again, both should become
     # secondaries
-    node1.ifup()    # old most advanced secondary, now secondary
-    node3.ifup()    # old primary, now secondary
-
-    # and, node2 should finally become the primary without losing any data
-    print()
-    assert node2.wait_until_state(target_state="wait_primary")
-
-    print("%s" % monitor.pg_autoctl.err)
-
-    results = node2.run_sql_query("SELECT count(*) FROM t1")
-    eq_(results, [(10006,)])
+    node1.ifup()  # old most advanced secondary, now secondary
+    node3.ifup()  # old primary, now secondary
 
     assert node1.wait_until_state(target_state="secondary")
     assert node3.wait_until_state(target_state="secondary")
     assert node2.wait_until_state(target_state="primary")
+
+    results = node2.run_sql_query("SELECT count(*) FROM t1")
+    eq_(results, [(10006,)])

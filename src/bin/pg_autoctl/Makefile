@@ -39,6 +39,7 @@ DEFAULT_CFLAGS += -Wall
 DEFAULT_CFLAGS += -Werror=implicit-int
 DEFAULT_CFLAGS += -Werror=implicit-function-declaration
 DEFAULT_CFLAGS += -Werror=return-type
+DEFAULT_CFLAGS += -Wno-declaration-after-statement
 
 # Needed for OSX
 DEFAULT_CFLAGS += -Wno-missing-braces

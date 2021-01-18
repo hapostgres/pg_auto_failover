@@ -66,7 +66,6 @@ file_exists(const char *filename)
 bool
 directory_exists(const char *path)
 {
-	bool result = false;
 	struct stat info;
 
 	if (!file_exists(path))
@@ -80,7 +79,7 @@ directory_exists(const char *path)
 		return false;
 	}
 
-	result = (info.st_mode & S_IFMT) == S_IFDIR;
+	bool result = (info.st_mode & S_IFMT) == S_IFDIR;
 	return result;
 }
 
@@ -137,14 +136,13 @@ FILE *
 fopen_with_umask(const char *filePath, const char *modes, int flags, mode_t umask)
 {
 	int fileDescriptor = open(filePath, flags, umask);
-	FILE *fileStream = NULL;
 	if (fileDescriptor == -1)
 	{
 		log_error("Failed to open file \"%s\": %m", filePath);
 		return NULL;
 	}
 
-	fileStream = fdopen(fileDescriptor, modes);
+	FILE *fileStream = fdopen(fileDescriptor, modes);
 	if (fileStream == NULL)
 	{
 		log_error("Failed to open file \"%s\": %m", filePath);
@@ -247,10 +245,8 @@ append_to_file(char *data, long fileSize, const char *filePath)
 bool
 read_file_if_exists(const char *filePath, char **contents, long *fileSize)
 {
-	FILE *fileStream = NULL;
-
 	/* open a file */
-	fileStream = fopen_read_only(filePath);
+	FILE *fileStream = fopen_read_only(filePath);
 
 	if (fileStream == NULL)
 	{
@@ -276,10 +272,8 @@ read_file_if_exists(const char *filePath, char **contents, long *fileSize)
 bool
 read_file(const char *filePath, char **contents, long *fileSize)
 {
-	FILE *fileStream = NULL;
-
 	/* open a file */
-	fileStream = fopen_read_only(filePath);
+	FILE *fileStream = fopen_read_only(filePath);
 	if (fileStream == NULL)
 	{
 		log_error("Failed to open file \"%s\": %m", filePath);
@@ -298,8 +292,6 @@ static bool
 read_file_internal(FILE *fileStream,
 				   const char *filePath, char **contents, long *fileSize)
 {
-	char *data = NULL;
-
 	/* get the file size */
 	if (fseek(fileStream, 0, SEEK_END) != 0)
 	{
@@ -324,7 +316,7 @@ read_file_internal(FILE *fileStream,
 	}
 
 	/* read the contents */
-	data = malloc(*fileSize + 1);
+	char *data = malloc(*fileSize + 1);
 	if (data == NULL)
 	{
 		log_error("Failed to allocate %ld bytes", *fileSize);
@@ -431,7 +423,6 @@ duplicate_file(char *sourcePath, char *destinationPath)
 	char *fileContents;
 	long fileSize;
 	struct stat sourceFileStat;
-	bool foundError = false;
 
 	if (!read_file(sourcePath, &fileContents, &fileSize))
 	{
@@ -446,7 +437,7 @@ duplicate_file(char *sourcePath, char *destinationPath)
 		return false;
 	}
 
-	foundError = !write_file(fileContents, fileSize, destinationPath);
+	bool foundError = !write_file(fileContents, fileSize, destinationPath);
 
 	free(fileContents);
 
@@ -536,84 +527,48 @@ path_in_same_directory(const char *basePath, const char *fileName,
  * in PATH.
  */
 bool
-search_path_first(const char *filename, char *result)
+search_path_first(const char *filename, char *result, int logLevel)
 {
-	char **paths = NULL;
-	int n = search_path(filename, &paths);
-	if (n < 1)
+	SearchPath paths = { 0 };
+
+	if (!search_path(filename, &paths) || paths.found == 0)
 	{
-		log_error("Failed to find %s command in your PATH", filename);
+		log_level(logLevel, "Failed to find %s command in your PATH", filename);
 		return false;
 	}
-	strlcpy(result, paths[0], MAXPGPATH);
-	search_path_destroy_result(paths);
+
+	strlcpy(result, paths.matches[0], MAXPGPATH);
+
 	return true;
 }
 
 
 /*
- * Searches all the directories in the PATH environment variable for
- * the given filename. Returns number of occurrences, and allocates
- * and returns the path for each of the occurrences in the given result
- * pointer.
- *
- * If the result size is 0, then *result is set to NULL.
- *
- * The caller should free the result by calling search_path_destroy_result().
+ * Searches all the directories in the PATH environment variable for the given
+ * filename. Returns number of occurrences and each match found with its
+ * fullname, including the given filename, in the given pre-allocated
+ * SearchPath result.
  */
-int
-search_path(const char *filename, char ***result)
+bool
+search_path(const char *filename, SearchPath *result)
 {
-	char *stringSpace = NULL;
-	char *path = NULL;
-	int pathListLength = 0;
-	int resultSize = 0;
-	int pathIndex = 0;
+	char pathlist[MAXPATHSIZE] = { 0 };
+
+	/* we didn't count nor find anything yet */
+	result->found = 0;
 
 	/* Create a copy of pathlist, because we modify it here. */
-	char pathlist[MAXPATHSIZE];
-	if (!get_env_copy("PATH", pathlist, MAXPATHSIZE))
+	if (!get_env_copy("PATH", pathlist, sizeof(pathlist)))
 	{
-		return 0;
+		/* errors have already been logged */
+		return false;
 	}
 
-
-	for (pathIndex = 0; pathlist[pathIndex] != '\0'; pathIndex++)
-	{
-		if (IS_PATH_VAR_SEP(pathlist[pathIndex]))
-		{
-			pathListLength++;
-		}
-	}
-
-	if (pathListLength == 0)
-	{
-		*result = NULL;
-		return 0;
-	}
-
-	/* allocate array of pointers */
-	*result = malloc(pathListLength * sizeof(char *));
-	if (!*result)
-	{
-		log_error(ALLOCATION_FAILED_ERROR);
-		return 0;
-	}
-
-	/* allocate memory to store the strings */
-	stringSpace = malloc(pathListLength * MAXPGPATH);
-	if (!stringSpace)
-	{
-		log_error(ALLOCATION_FAILED_ERROR);
-		free(*result);
-		return 0;
-	}
-
-	path = pathlist;
+	char *path = pathlist;
 
 	while (path != NULL)
 	{
-		char candidate[MAXPGPATH];
+		char candidate[MAXPGPATH] = { 0 };
 		char *sep = first_path_var_separator(path);
 
 		/* split path on current token, null-terminating string at separator */
@@ -622,59 +577,86 @@ search_path(const char *filename, char ***result)
 			*sep = '\0';
 		}
 
-		join_path_components(candidate, path, filename);
-		canonicalize_path(candidate);
+		(void) join_path_components(candidate, path, filename);
+		(void) canonicalize_path(candidate);
 
 		if (file_exists(candidate))
 		{
-			char *destinationString = stringSpace + resultSize * MAXPGPATH;
-			bool duplicated = false;
-			strlcpy(destinationString, candidate, MAXPGPATH);
-
-			for (int i = 0; i < resultSize; i++)
-			{
-				if (strcmp((*result)[i], destinationString) == 0)
-				{
-					duplicated = true;
-					break;
-				}
-			}
-
-			if (!duplicated)
-			{
-				(*result)[resultSize] = destinationString;
-				resultSize++;
-			}
+			strlcpy(result->matches[result->found++], candidate, MAXPGPATH);
 		}
 
 		path = (sep == NULL ? NULL : sep + 1);
 	}
 
-	if (resultSize == 0)
-	{
-		/* we won't return a string to the caller, free it now */
-		free(stringSpace);
-
-		free(*result);
-		*result = NULL;
-	}
-
-
-	return resultSize;
+	return true;
 }
 
 
 /*
- * Frees the space allocated by search_path().
+ * search_path_deduplicate_symlinks traverse the SearchPath result obtained by
+ * calling the search_path() function and removes entries that are pointing to
+ * the same binary on-disk.
+ *
+ * In modern debian installations, for instance, we have /bin -> /usr/bin; and
+ * then we might find pg_config both in /bin/pg_config and /usr/bin/pg_config
+ * although it's only been installed once, and both are the same file.
+ *
+ * We use realpath() to deduplicate entries, and keep the entry that is not a
+ * symbolic link.
  */
-void
-search_path_destroy_result(char **result)
+bool
+search_path_deduplicate_symlinks(SearchPath *results, SearchPath *dedup)
 {
-	if (result != NULL)
+	/* now re-initialize the target structure dedup */
+	dedup->found = 0;
+
+	for (int rIndex = 0; rIndex < results->found; rIndex++)
 	{
-		free(result[0]);
+		bool alreadyThere = false;
+
+		char *currentPath = results->matches[rIndex];
+		char currentRealPath[PATH_MAX] = { 0 };
+
+		if (realpath(currentPath, currentRealPath) == NULL)
+		{
+			log_error("Failed to normalize file name \"%s\": %m", currentPath);
+			return false;
+		}
+
+		/* add-in the realpath to dedup, unless it's already in there */
+		for (int dIndex = 0; dIndex < dedup->found; dIndex++)
+		{
+			if (strcmp(dedup->matches[dIndex], currentRealPath) == 0)
+			{
+				alreadyThere = true;
+
+				log_debug("dedup: skipping \"%s\"", currentPath);
+				break;
+			}
+		}
+
+		if (!alreadyThere)
+		{
+			int bytesWritten =
+				strlcpy(dedup->matches[dedup->found++],
+						currentRealPath,
+						MAXPGPATH);
+
+			if (bytesWritten >= MAXPGPATH)
+			{
+				log_error(
+					"Real path \"%s\" is %d bytes long, and pg_autoctl "
+					"is limited to handling paths of %d bytes long, maximum",
+					currentRealPath,
+					(int) strlen(currentRealPath),
+					MAXPGPATH);
+
+				return false;
+			}
+		}
 	}
-	free(result);
+
+	return true;
 }
 
 
@@ -768,8 +750,7 @@ set_program_absolute_path(char *program, int size)
 		 * Now either return pg_autoctl_argv0 when that's an absolute filename,
 		 * or search for it in the PATH otherwise.
 		 */
-		char **pathEntries = NULL;
-		int n;
+		SearchPath paths = { 0 };
 
 		if (pg_autoctl_argv0[0] == '/')
 		{
@@ -777,9 +758,7 @@ set_program_absolute_path(char *program, int size)
 			return true;
 		}
 
-		n = search_path(pg_autoctl_argv0, &pathEntries);
-
-		if (n < 1)
+		if (!search_path(pg_autoctl_argv0, &paths) || paths.found == 0)
 		{
 			log_error("Failed to find \"%s\" in PATH environment",
 					  pg_autoctl_argv0);
@@ -788,9 +767,8 @@ set_program_absolute_path(char *program, int size)
 		else
 		{
 			log_debug("Found \"%s\" in PATH at \"%s\"",
-					  pg_autoctl_argv0, pathEntries[0]);
-			strlcpy(program, pathEntries[0], size);
-			search_path_destroy_result(pathEntries);
+					  pg_autoctl_argv0, paths.matches[0]);
+			strlcpy(program, paths.matches[0], size);
 
 			return true;
 		}
@@ -853,7 +831,6 @@ normalize_filename(const char *filename, char *dst, int size)
 int
 fformat(FILE *stream, const char *fmt, ...)
 {
-	int len;
 	va_list args;
 
 	if (stream == NULL || fmt == NULL)
@@ -863,7 +840,7 @@ fformat(FILE *stream, const char *fmt, ...)
 	}
 
 	va_start(args, fmt);
-	len = pg_vfprintf(stream, fmt, args);
+	int len = pg_vfprintf(stream, fmt, args);
 	va_end(args);
 	return len;
 }
@@ -875,7 +852,6 @@ fformat(FILE *stream, const char *fmt, ...)
 int
 sformat(char *str, size_t count, const char *fmt, ...)
 {
-	int len;
 	va_list args;
 
 	if (str == NULL || fmt == NULL)
@@ -885,7 +861,7 @@ sformat(char *str, size_t count, const char *fmt, ...)
 	}
 
 	va_start(args, fmt);
-	len = pg_vsnprintf(str, count, fmt, args);
+	int len = pg_vsnprintf(str, count, fmt, args);
 	va_end(args);
 
 	if (len >= count)
@@ -950,15 +926,13 @@ init_ps_buffer(int argc, char **argv)
 void
 set_ps_title(const char *title)
 {
-	int n;
-
 	if (ps_buffer == NULL)
 	{
 		/* noop */
 		return;
 	}
 
-	n = sformat(ps_buffer, ps_buffer_size, "%s", title);
+	int n = sformat(ps_buffer, ps_buffer_size, "%s", title);
 
 	/* pad our process title string */
 	for (size_t i = n; i < ps_buffer_size; i++)

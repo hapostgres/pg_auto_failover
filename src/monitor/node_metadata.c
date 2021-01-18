@@ -57,7 +57,6 @@ AllAutoFailoverNodes(char *formationId)
 {
 	List *nodeList = NIL;
 	MemoryContext callerContext = CurrentMemoryContext;
-	MemoryContext spiContext = NULL;
 
 	Oid argTypes[] = {
 		TEXTOID /* formationid */
@@ -67,7 +66,6 @@ AllAutoFailoverNodes(char *formationId)
 		CStringGetTextDatum(formationId)  /* formationid */
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
-	int spiStatus = 0;
 	uint64 rowNumber = 0;
 
 	const char *selectQuery =
@@ -75,14 +73,14 @@ AllAutoFailoverNodes(char *formationId)
 
 	SPI_connect();
 
-	spiStatus = SPI_execute_with_args(selectQuery, argCount, argTypes, argValues,
-									  NULL, false, 0);
+	int spiStatus = SPI_execute_with_args(selectQuery, argCount, argTypes, argValues,
+										  NULL, false, 0);
 	if (spiStatus != SPI_OK_SELECT)
 	{
 		elog(ERROR, "could not select from " AUTO_FAILOVER_NODE_TABLE);
 	}
 
-	spiContext = MemoryContextSwitchTo(callerContext);
+	MemoryContext spiContext = MemoryContextSwitchTo(callerContext);
 
 	for (rowNumber = 0; rowNumber < SPI_processed; rowNumber++)
 	{
@@ -107,7 +105,6 @@ AllAutoFailoverNodes(char *formationId)
 AutoFailoverNode *
 TupleToAutoFailoverNode(TupleDesc tupleDescriptor, HeapTuple heapTuple)
 {
-	AutoFailoverNode *pgAutoFailoverNode = NULL;
 	bool isNull = false;
 
 	Datum formationId = heap_getattr(heapTuple,
@@ -161,7 +158,8 @@ TupleToAutoFailoverNode(TupleDesc tupleDescriptor, HeapTuple heapTuple)
 	Oid goalStateOid = DatumGetObjectId(goalState);
 	Oid reportedStateOid = DatumGetObjectId(reportedState);
 
-	pgAutoFailoverNode = (AutoFailoverNode *) palloc0(sizeof(AutoFailoverNode));
+	AutoFailoverNode *pgAutoFailoverNode = (AutoFailoverNode *) palloc0(
+		sizeof(AutoFailoverNode));
 	pgAutoFailoverNode->formationId = TextDatumGetCString(formationId);
 	pgAutoFailoverNode->nodeId = DatumGetInt32(nodeId);
 	pgAutoFailoverNode->groupId = DatumGetInt32(groupId);
@@ -196,7 +194,6 @@ AutoFailoverNodeGroup(char *formationId, int groupId)
 {
 	List *nodeList = NIL;
 	MemoryContext callerContext = CurrentMemoryContext;
-	MemoryContext spiContext = NULL;
 
 	Oid argTypes[] = {
 		TEXTOID, /* formationid */
@@ -208,23 +205,23 @@ AutoFailoverNodeGroup(char *formationId, int groupId)
 		Int32GetDatum(groupId)            /* groupid */
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
-	int spiStatus = 0;
 	uint64 rowNumber = 0;
 
 	const char *selectQuery =
 		SELECT_ALL_FROM_AUTO_FAILOVER_NODE_TABLE
-		" WHERE formationid = $1 AND groupid = $2";
+		" WHERE formationid = $1 AND groupid = $2"
+		" ORDER BY nodeid";
 
 	SPI_connect();
 
-	spiStatus = SPI_execute_with_args(selectQuery, argCount, argTypes, argValues,
-									  NULL, false, 0);
+	int spiStatus = SPI_execute_with_args(selectQuery, argCount, argTypes, argValues,
+										  NULL, false, 0);
 	if (spiStatus != SPI_OK_SELECT)
 	{
 		elog(ERROR, "could not select from " AUTO_FAILOVER_NODE_TABLE);
 	}
 
-	spiContext = MemoryContextSwitchTo(callerContext);
+	MemoryContext spiContext = MemoryContextSwitchTo(callerContext);
 
 	for (rowNumber = 0; rowNumber < SPI_processed; rowNumber++)
 	{
@@ -251,7 +248,6 @@ List *
 AutoFailoverOtherNodesList(AutoFailoverNode *pgAutoFailoverNode)
 {
 	ListCell *nodeCell = NULL;
-	List *groupNodeList = NIL;
 	List *otherNodesList = NIL;
 
 	if (pgAutoFailoverNode == NULL)
@@ -259,8 +255,8 @@ AutoFailoverOtherNodesList(AutoFailoverNode *pgAutoFailoverNode)
 		return NIL;
 	}
 
-	groupNodeList = AutoFailoverNodeGroup(pgAutoFailoverNode->formationId,
-										  pgAutoFailoverNode->groupId);
+	List *groupNodeList = AutoFailoverNodeGroup(pgAutoFailoverNode->formationId,
+												pgAutoFailoverNode->groupId);
 
 	foreach(nodeCell, groupNodeList)
 	{
@@ -286,7 +282,6 @@ AutoFailoverOtherNodesListInState(AutoFailoverNode *pgAutoFailoverNode,
 								  ReplicationState currentState)
 {
 	ListCell *nodeCell = NULL;
-	List *groupNodeList = NIL;
 	List *otherNodesList = NIL;
 
 	if (pgAutoFailoverNode == NULL)
@@ -294,8 +289,8 @@ AutoFailoverOtherNodesListInState(AutoFailoverNode *pgAutoFailoverNode,
 		return NIL;
 	}
 
-	groupNodeList = AutoFailoverNodeGroup(pgAutoFailoverNode->formationId,
-										  pgAutoFailoverNode->groupId);
+	List *groupNodeList = AutoFailoverNodeGroup(pgAutoFailoverNode->formationId,
+												pgAutoFailoverNode->groupId);
 
 	foreach(nodeCell, groupNodeList)
 	{
@@ -321,10 +316,9 @@ AutoFailoverNode *
 GetPrimaryNodeInGroup(char *formationId, int32 groupId)
 {
 	AutoFailoverNode *writableNode = NULL;
-	List *groupNodeList = NIL;
 	ListCell *nodeCell = NULL;
 
-	groupNodeList = AutoFailoverNodeGroup(formationId, groupId);
+	List *groupNodeList = AutoFailoverNodeGroup(formationId, groupId);
 
 	foreach(nodeCell, groupNodeList)
 	{
@@ -349,10 +343,9 @@ AutoFailoverNode *
 GetNodeToFailoverFromInGroup(char *formationId, int32 groupId)
 {
 	AutoFailoverNode *failoverNode = NULL;
-	List *groupNodeList = NIL;
 	ListCell *nodeCell = NULL;
 
-	groupNodeList = AutoFailoverNodeGroup(formationId, groupId);
+	List *groupNodeList = AutoFailoverNodeGroup(formationId, groupId);
 
 	foreach(nodeCell, groupNodeList)
 	{
@@ -383,10 +376,9 @@ AutoFailoverNode *
 GetPrimaryOrDemotedNodeInGroup(char *formationId, int32 groupId)
 {
 	AutoFailoverNode *primaryNode = NULL;
-	List *groupNodeList = NIL;
 	ListCell *nodeCell = NULL;
 
-	groupNodeList = AutoFailoverNodeGroup(formationId, groupId);
+	List *groupNodeList = AutoFailoverNodeGroup(formationId, groupId);
 
 	/* first find a node that is writable */
 	foreach(nodeCell, groupNodeList)
@@ -721,12 +713,6 @@ GroupListSyncStandbys(List *groupNodeList)
 	{
 		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
 
-		if (IsInMaintenance(node))
-		{
-			/* skip nodes in maintenance from the current sync standby list */
-			continue;
-		}
-
 		if (node->replicationQuorum)
 		{
 			syncStandbyNodesList = lappend(syncStandbyNodesList, node);
@@ -781,7 +767,6 @@ GetAutoFailoverNode(char *nodeHost, int nodePort)
 		Int32GetDatum(nodePort)        /* nodeport */
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
-	int spiStatus = 0;
 
 	const char *selectQuery =
 		SELECT_ALL_FROM_AUTO_FAILOVER_NODE_TABLE
@@ -789,8 +774,8 @@ GetAutoFailoverNode(char *nodeHost, int nodePort)
 
 	SPI_connect();
 
-	spiStatus = SPI_execute_with_args(selectQuery, argCount, argTypes, argValues,
-									  NULL, false, 1);
+	int spiStatus = SPI_execute_with_args(selectQuery, argCount, argTypes, argValues,
+										  NULL, false, 1);
 	if (spiStatus != SPI_OK_SELECT)
 	{
 		elog(ERROR, "could not select from " AUTO_FAILOVER_NODE_TABLE);
@@ -834,7 +819,6 @@ GetAutoFailoverNodeById(int nodeId)
 		Int32GetDatum(nodeId)           /* nodeId */
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
-	int spiStatus = 0;
 
 	const char *selectQuery =
 		SELECT_ALL_FROM_AUTO_FAILOVER_NODE_TABLE
@@ -842,8 +826,8 @@ GetAutoFailoverNodeById(int nodeId)
 
 	SPI_connect();
 
-	spiStatus = SPI_execute_with_args(selectQuery, argCount, argTypes, argValues,
-									  NULL, false, 1);
+	int spiStatus = SPI_execute_with_args(selectQuery, argCount, argTypes, argValues,
+										  NULL, false, 1);
 	if (spiStatus != SPI_OK_SELECT)
 	{
 		elog(ERROR, "could not select from " AUTO_FAILOVER_NODE_TABLE);
@@ -887,7 +871,6 @@ GetAutoFailoverNodeByName(char *formationId, char *nodeName)
 		CStringGetTextDatum(nodeName)     /* nodename */
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
-	int spiStatus = 0;
 
 	const char *selectQuery =
 		SELECT_ALL_FROM_AUTO_FAILOVER_NODE_TABLE
@@ -895,8 +878,8 @@ GetAutoFailoverNodeByName(char *formationId, char *nodeName)
 
 	SPI_connect();
 
-	spiStatus = SPI_execute_with_args(selectQuery, argCount, argTypes, argValues,
-									  NULL, false, 1);
+	int spiStatus = SPI_execute_with_args(selectQuery, argCount, argTypes, argValues,
+										  NULL, false, 1);
 	if (spiStatus != SPI_OK_SELECT)
 	{
 		elog(ERROR, "could not select from " AUTO_FAILOVER_NODE_TABLE);
@@ -1001,7 +984,6 @@ AddAutoFailoverNode(char *formationId,
 	};
 
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
-	int spiStatus = 0;
 	int nodeId = 0;
 
 	/*
@@ -1033,19 +1015,18 @@ AddAutoFailoverNode(char *formationId,
 
 	SPI_connect();
 
-	spiStatus = SPI_execute_with_args(insertQuery, argCount,
-									  argTypes, argValues, argNulls,
-									  false, 0);
+	int spiStatus = SPI_execute_with_args(insertQuery, argCount,
+										  argTypes, argValues, argNulls,
+										  false, 0);
 
 	if (spiStatus == SPI_OK_INSERT_RETURNING && SPI_processed > 0)
 	{
 		bool isNull = false;
-		Datum nodeIdDatum = 0;
 
-		nodeIdDatum = SPI_getbinval(SPI_tuptable->vals[0],
-									SPI_tuptable->tupdesc,
-									1,
-									&isNull);
+		Datum nodeIdDatum = SPI_getbinval(SPI_tuptable->vals[0],
+										  SPI_tuptable->tupdesc,
+										  1,
+										  &isNull);
 
 		nodeId = DatumGetInt32(nodeIdDatum);
 	}
@@ -1082,7 +1063,6 @@ SetNodeGoalState(AutoFailoverNode *pgAutoFailoverNode,
 		Int32GetDatum(pgAutoFailoverNode->nodeId) /* nodeid */
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
-	int spiStatus = 0;
 
 	const char *updateQuery =
 		"UPDATE " AUTO_FAILOVER_NODE_TABLE
@@ -1091,9 +1071,9 @@ SetNodeGoalState(AutoFailoverNode *pgAutoFailoverNode,
 
 	SPI_connect();
 
-	spiStatus = SPI_execute_with_args(updateQuery,
-									  argCount, argTypes, argValues,
-									  NULL, false, 0);
+	int spiStatus = SPI_execute_with_args(updateQuery,
+										  argCount, argTypes, argValues,
+										  NULL, false, 0);
 	if (spiStatus != SPI_OK_UPDATE)
 	{
 		elog(ERROR, "could not update " AUTO_FAILOVER_NODE_TABLE);
@@ -1147,7 +1127,6 @@ ReportAutoFailoverNodeState(char *nodeHost, int nodePort,
 		Int32GetDatum(nodePort)               /* nodeport */
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
-	int spiStatus = 0;
 
 	const char *updateQuery =
 		"UPDATE " AUTO_FAILOVER_NODE_TABLE
@@ -1159,9 +1138,9 @@ ReportAutoFailoverNodeState(char *nodeHost, int nodePort,
 
 	SPI_connect();
 
-	spiStatus = SPI_execute_with_args(updateQuery,
-									  argCount, argTypes, argValues,
-									  NULL, false, 0);
+	int spiStatus = SPI_execute_with_args(updateQuery,
+										  argCount, argTypes, argValues,
+										  NULL, false, 0);
 
 	if (spiStatus != SPI_OK_UPDATE)
 	{
@@ -1199,7 +1178,6 @@ ReportAutoFailoverNodeHealth(char *nodeHost, int nodePort,
 		Int32GetDatum(nodePort)         /* nodeport */
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
-	int spiStatus = 0;
 
 	const char *updateQuery =
 		"UPDATE " AUTO_FAILOVER_NODE_TABLE
@@ -1209,9 +1187,9 @@ ReportAutoFailoverNodeHealth(char *nodeHost, int nodePort,
 
 	SPI_connect();
 
-	spiStatus = SPI_execute_with_args(updateQuery,
-									  argCount, argTypes, argValues,
-									  NULL, false, 0);
+	int spiStatus = SPI_execute_with_args(updateQuery,
+										  argCount, argTypes, argValues,
+										  NULL, false, 0);
 
 	if (spiStatus != SPI_OK_UPDATE)
 	{
@@ -1249,7 +1227,6 @@ ReportAutoFailoverNodeReplicationSetting(int nodeid, char *nodeHost, int nodePor
 		Int32GetDatum(nodePort)               /* nodeport */
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
-	int spiStatus = 0;
 
 	const char *updateQuery =
 		"UPDATE " AUTO_FAILOVER_NODE_TABLE " SET "
@@ -1258,9 +1235,9 @@ ReportAutoFailoverNodeReplicationSetting(int nodeid, char *nodeHost, int nodePor
 
 	SPI_connect();
 
-	spiStatus = SPI_execute_with_args(updateQuery,
-									  argCount, argTypes, argValues,
-									  NULL, false, 0);
+	int spiStatus = SPI_execute_with_args(updateQuery,
+										  argCount, argTypes, argValues,
+										  NULL, false, 0);
 
 	if (spiStatus != SPI_OK_UPDATE)
 	{
@@ -1297,7 +1274,6 @@ UpdateAutoFailoverNodeMetadata(int nodeid,
 		Int32GetDatum(nodePort)               /* nodeport */
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
-	int spiStatus = 0;
 
 	const char *updateQuery =
 		"UPDATE " AUTO_FAILOVER_NODE_TABLE
@@ -1306,9 +1282,9 @@ UpdateAutoFailoverNodeMetadata(int nodeid,
 
 	SPI_connect();
 
-	spiStatus = SPI_execute_with_args(updateQuery,
-									  argCount, argTypes, argValues,
-									  NULL, false, 0);
+	int spiStatus = SPI_execute_with_args(updateQuery,
+										  argCount, argTypes, argValues,
+										  NULL, false, 0);
 
 	if (spiStatus != SPI_OK_UPDATE)
 	{
@@ -1335,7 +1311,6 @@ RemoveAutoFailoverNode(AutoFailoverNode *pgAutoFailoverNode)
 		Int32GetDatum(pgAutoFailoverNode->nodeId)        /* nodeId */
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
-	int spiStatus = 0;
 
 	const char *deleteQuery =
 		"DELETE FROM " AUTO_FAILOVER_NODE_TABLE
@@ -1343,9 +1318,9 @@ RemoveAutoFailoverNode(AutoFailoverNode *pgAutoFailoverNode)
 
 	SPI_connect();
 
-	spiStatus = SPI_execute_with_args(deleteQuery,
-									  argCount, argTypes, argValues,
-									  NULL, false, 0);
+	int spiStatus = SPI_execute_with_args(deleteQuery,
+										  argCount, argTypes, argValues,
+										  NULL, false, 0);
 
 	if (spiStatus != SPI_OK_DELETE)
 	{

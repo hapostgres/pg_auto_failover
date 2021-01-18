@@ -16,7 +16,6 @@
 static bool get_node_replication_settings(NodeReplicationSettings *settings);
 static void cli_get_node_replication_quorum(int argc, char **argv);
 static void cli_get_node_candidate_priority(int argc, char **argv);
-static void cli_get_formation_settings(int argc, char **argv);
 static void cli_get_formation_number_sync_standbys(int argc, char **argv);
 
 static void cli_set_node_replication_quorum(int argc, char **argv);
@@ -295,7 +294,7 @@ cli_get_node_candidate_priority(int argc, char **argv)
  * cli_get_formation_settings function prints the replication settings for a
  * given formation.
  */
-static void
+void
 cli_get_formation_settings(int argc, char **argv)
 {
 	KeeperConfig config = keeperOptions;
@@ -437,7 +436,6 @@ cli_set_node_candidate_priority(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
 
-	int candidatePriority = -1;
 
 	keeper.config = keeperOptions;
 
@@ -450,7 +448,7 @@ cli_set_node_candidate_priority(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	candidatePriority = strtol(argv[0], NULL, 10);
+	int candidatePriority = strtol(argv[0], NULL, 10);
 
 	if (errno == EINVAL || candidatePriority < 0 || candidatePriority > 100)
 	{
@@ -605,7 +603,6 @@ cli_set_formation_number_sync_standbys(int argc, char **argv)
 	KeeperConfig config = keeperOptions;
 	Monitor monitor = { 0 };
 
-	int numberSyncStandbys = -1;
 
 	char synchronous_standby_names[BUFSIZE] = { 0 };
 
@@ -618,7 +615,7 @@ cli_set_formation_number_sync_standbys(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	numberSyncStandbys = strtol(argv[0], NULL, 10);
+	int numberSyncStandbys = strtol(argv[0], NULL, 10);
 	if (errno == EINVAL || numberSyncStandbys < 0)
 	{
 		log_error("number-sync-standbys value %s is not valid."
@@ -630,6 +627,12 @@ cli_set_formation_number_sync_standbys(int argc, char **argv)
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	/* change the default group when it is still unknown */
+	if (config.groupId == -1)
+	{
+		config.groupId = 0;
 	}
 
 	if (!set_formation_number_sync_standbys(&monitor,

@@ -95,6 +95,16 @@ CommandLine show_state_command =
 				 cli_show_state_getopts,
 				 cli_show_state);
 
+CommandLine show_settings_command =
+	make_command("settings",
+				 "Print replication settings for a formation from the monitor",
+				 " [ --pgdata ] [ --json ] [ --formation ] ",
+				 "  --pgdata      path to data directory\n"
+				 "  --json        output data in the JSON format\n"
+				 "  --formation   pg_auto_failover formation\n",
+				 cli_get_name_getopts,
+				 cli_get_formation_settings);
+
 CommandLine show_standby_names_command =
 	make_command("standby-names",
 				 "Prints synchronous_standby_names for a given group",
@@ -180,8 +190,6 @@ cli_show_state_getopts(int argc, char **argv)
 	options.prepare_promotion_walreceiver = -1;
 	options.postgresql_restart_failure_timeout = -1;
 	options.postgresql_restart_failure_max_retries = -1;
-
-	strlcpy(options.formation, "default", NAMEDATALEN);
 
 	optind = 0;
 
@@ -306,6 +314,13 @@ cli_show_state_getopts(int argc, char **argv)
 
 	if (!keeper_config_set_pathnames_from_pgdata(&(options.pathnames),
 												 options.pgSetup.pgdata))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	/* ensure --formation, or get it from the configuration file */
+	if (!cli_common_ensure_formation(&options))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_ARGS);
@@ -564,7 +579,7 @@ cli_show_standby_names_getopts(int argc, char **argv)
 	options.postgresql_restart_failure_timeout = -1;
 	options.postgresql_restart_failure_max_retries = -1;
 
-	strlcpy(options.formation, "default", NAMEDATALEN);
+	/* do not set a default formation, it should be found in the config file */
 
 	optind = 0;
 
@@ -668,6 +683,20 @@ cli_show_standby_names_getopts(int argc, char **argv)
 
 	cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
 
+	if (!keeper_config_set_pathnames_from_pgdata(&(options.pathnames),
+												 options.pgSetup.pgdata))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	/* ensure --formation, or get it from the configuration file */
+	if (!cli_common_ensure_formation(&options))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
 	keeperOptions = options;
 
 	return optind;
@@ -697,6 +726,19 @@ cli_show_standby_names(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
+	pgAutoCtlNodeRole role = ProbeConfigurationFileRole(config.pathnames.config);
+
+	if (role == PG_AUTOCTL_ROLE_KEEPER)
+	{
+		bool monitorDisabledIsOk = false;
+
+		if (!keeper_config_read_file_skip_pgsetup(&config, monitorDisabledIsOk))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_CONFIG);
+		}
+	}
+
 	if (!monitor_synchronous_standby_names(
 			&monitor,
 			config.formation,
@@ -722,7 +764,8 @@ cli_show_standby_names(int argc, char **argv)
 	}
 	else
 	{
-		(void) fformat(stdout, "%s\n", synchronous_standby_names);
+		/* current synchronous_standby_names might be an empty string */
+		(void) fformat(stdout, "'%s'\n", synchronous_standby_names);
 	}
 }
 
@@ -1270,9 +1313,8 @@ static void
 cli_show_file(int argc, char **argv)
 {
 	KeeperConfig config = keeperOptions;
-	pgAutoCtlNodeRole role = PG_AUTOCTL_ROLE_UNKNOWN;
 
-	role = ProbeConfigurationFileRole(config.pathnames.config);
+	pgAutoCtlNodeRole role = ProbeConfigurationFileRole(config.pathnames.config);
 
 	switch (showFileOptions.selection)
 	{
@@ -1280,7 +1322,6 @@ cli_show_file(int argc, char **argv)
 		{
 			if (outputJSON)
 			{
-				char *serialized_string = NULL;
 				JSON_Value *js = json_value_init_object();
 				JSON_Object *root = json_value_get_object(js);
 
@@ -1294,7 +1335,7 @@ cli_show_file(int argc, char **argv)
 
 				json_object_set_string(root, "pid", config.pathnames.pid);
 
-				serialized_string = json_serialize_to_string_pretty(js);
+				char *serialized_string = json_serialize_to_string_pretty(js);
 
 				fformat(stdout, "%s\n", serialized_string);
 

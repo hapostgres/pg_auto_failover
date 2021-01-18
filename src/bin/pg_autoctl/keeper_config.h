@@ -22,8 +22,8 @@ typedef struct KeeperConfig
 	/* in-memory configuration related variables */
 	ConfigFilePaths pathnames;
 
-	/* who's in charge? pg_auto_failover monitor, or HTTP API? */
-	bool monitorDisabled;       /* default is 0, which means enabled */
+	/* who's in charge? pg_auto_failover monitor, or a control plane? */
+	bool monitorDisabled;
 
 	/* pg_autoctl setup */
 	char role[NAMEDATALEN];

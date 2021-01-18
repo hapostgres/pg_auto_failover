@@ -213,6 +213,34 @@ SetStateFilePath(ConfigFilePaths *pathnames, const char *pgdata)
 
 
 /*
+ * SetNodesFilePath sets config.pathnames.nodes from our PGDATA value, and
+ * using the XDG Base Directory Specification for a data file. Per specs at:
+ *
+ *   https://standards.freedesktop.org/basedir-spec/basedir-spec-latest.html
+ *
+ */
+bool
+SetNodesFilePath(ConfigFilePaths *pathnames, const char *pgdata)
+{
+	if (IS_EMPTY_STRING_BUFFER(pathnames->nodes))
+	{
+		if (!build_xdg_path(pathnames->nodes,
+							XDG_DATA,
+							pgdata,
+							KEEPER_NODES_FILENAME))
+		{
+			log_error("Failed to build pg_autoctl state file pathname, "
+					  "see above.");
+			return false;
+		}
+	}
+	log_trace("SetNodesFilePath: \"%s\"", pathnames->nodes);
+
+	return true;
+}
+
+
+/*
  * SetPidFilePath sets config.pathnames.pidfile from our PGDATA value, and
  * using the XDG Base Directory Specification for a runtime file.
  */

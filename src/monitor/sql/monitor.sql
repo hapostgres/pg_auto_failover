@@ -38,7 +38,7 @@ select *
   from pgautofailover.node_active('default', 2, 0,
                                   current_group_role => 'wait_standby');
 
--- attempt to register node_3 now fails because node_1 is still in wait_primary
+-- register node_3 concurrently to node2 (probably) doing pg_basebackup
 select *
   from pgautofailover.register_node('default', 'localhost', 9879, 'postgres');
 
@@ -59,6 +59,7 @@ select * from pgautofailover.get_primary();
 select * from pgautofailover.get_primary('default', 0);
 select * from pgautofailover.get_other_nodes(1);
 
+-- remove the primary node
 select pgautofailover.remove_node(1);
 
 table pgautofailover.formation;
@@ -70,13 +71,6 @@ select formationid, nodeid, groupid, nodehost, nodeport,
 
 select *
   from pgautofailover.set_node_system_identifier(2, 6852685710417058800);
-
--- node_2 reports catchingup and gets assigned single, now alone
-select *
-  from pgautofailover.node_active('default', 2, 0,
-                                  current_group_role => 'catchingup');
-
-select * from pgautofailover.node_active('default', 2, 0);
 
 -- should fail as there's no primary at this point
 select pgautofailover.perform_failover();

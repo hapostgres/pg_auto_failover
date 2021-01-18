@@ -101,14 +101,13 @@ service_monitor_init_start(void *context, pid_t *pid)
 	MonitorConfig *config = &monitor->config;
 	PostgresSetup *pgSetup = &config->pgSetup;
 
-	pid_t fpid;
 
 	/* Flush stdio channels just before fork, to avoid double-output problems */
 	fflush(stdout);
 	fflush(stderr);
 
 	/* time to create the node_active sub-process */
-	fpid = fork();
+	pid_t fpid = fork();
 
 	switch (fpid)
 	{
