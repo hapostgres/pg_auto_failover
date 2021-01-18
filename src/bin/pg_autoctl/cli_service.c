@@ -415,6 +415,7 @@ cli_service_stop(int argc, char **argv)
 	{
 		log_fatal("Failed to read the keeper's PID at \"%s\"",
 				  keeper.config.pathnames.pid);
+		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 }
 
