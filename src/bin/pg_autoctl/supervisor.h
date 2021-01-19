@@ -158,10 +158,13 @@ bool supervisor_start(Service services[], int serviceCount, const char *pidfile,
 
 bool supervisor_stop(Supervisor *supervisor);
 
-bool supervisor_service_exists(Supervisor *supervisor, const char *serviceName);
-bool supervisor_add_dynamic(Supervisor *supervisor, Service *service);
-bool supervisor_remove_dynamic(Supervisor *supervisor, const char *serviceName);
+bool supervisor_dynamic_service_enable(Supervisor *supervisor,
+									   Service *service);
 
+bool supervisor_dynamic_service_disable(Supervisor *supervisor,
+										const char *serviceName);
+
+bool supervisor_service_exists(Supervisor *supervisor, const char *serviceName);
 bool supervisor_find_service_pid(const char *pidfile,
 								 const char *serviceName,
 								 pid_t *pid);

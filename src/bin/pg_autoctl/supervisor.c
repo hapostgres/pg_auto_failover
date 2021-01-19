@@ -52,9 +52,11 @@ static bool supervisor_loop(Supervisor *supervisor);
 static bool supervisor_find_service(Supervisor *supervisor, pid_t pid,
 									Service **result);
 
-static bool supervisor_find_recently_removed_dynamic(Supervisor *supervisor,
-													 pid_t pid,
-													 Service **result);
+static void supervisor_dynamic_handle(Supervisor *supervisor, int *diffCount);
+
+static bool supervisor_dynamic_remove_terminated_service(Supervisor *supervisor,
+														 pid_t pid,
+														 Service **result);
 
 static void supervisor_stop_subprocesses(Supervisor *supervisor);
 
@@ -79,8 +81,6 @@ static void supervisor_handle_failed_restart(Supervisor *supervisor,
 static bool supervisor_may_restart(Service *service);
 
 static bool supervisor_update_pidfile(Supervisor *supervisor);
-
-static void supervisor_handle_dynamic(Supervisor *supervisor, int *diffCount);
 
 
 /*
@@ -140,8 +140,8 @@ supervisor_it_next(Supervisor_it *sit)
 
 
 /*
- * supervisor_add_dynamic starts the service and if successfull, adds it to the
- * dynamicService array.
+ * supervisor_dynamic_service_enable starts the service and if successfull, adds
+ * it to the dynamicService array.
  *
  * Since the services are largely discoverable by name, the name has to be
  * unique. If it is not, then the service is not started and the function
@@ -155,7 +155,7 @@ supervisor_it_next(Supervisor_it *sit)
  * Returns true if successfully starts the service.
  */
 bool
-supervisor_add_dynamic(Supervisor *supervisor, Service *service)
+supervisor_dynamic_service_enable(Supervisor *supervisor, Service *service)
 {
 	Service *dynamicService;
 	sigset_t sig_mask;
@@ -236,19 +236,21 @@ supervisor_add_dynamic(Supervisor *supervisor, Service *service)
 
 
 /*
- * supervisor_remove_dynamic stops a running dynamic service with serviceName.
- * Once the service is stopped, then it is removed from the dynamicService array
+ * supervisor_dynamic_service_disable stops the running dynamic service with
+ * serviceName.
+ * Once the service is stopped, it is also removed from the dynamicService array
  * and supervisor_loop can largely forget about it.
  *
  * However, it will get notified during waitpid, so we add this service to the
  * recentlyRemoved array and we will hold it there until it is requested via
- * supervisor_find_recently_removed_dynamic() which subsequently removes it.
+ * supervisor_dynamic_remove_terminated_service() which subsequently removes it.
  *
  * Returns true if the service is stopped and removed from the dynamicService
  * array, false otherwise.
  */
 bool
-supervisor_remove_dynamic(Supervisor *supervisor, const char *serviceName)
+supervisor_dynamic_service_disable(Supervisor *supervisor,
+								   const char *serviceName)
 {
 	Service *dynamicService = NULL;
 	int serviceCount = supervisor->dynamicServices.serviceCount;
@@ -484,7 +486,7 @@ supervisor_loop(Supervisor *supervisor)
 			log_info("pg_autoctl received a signal to, "
 					 "handle dynamic services");
 
-			supervisor_handle_dynamic(supervisor, &diffCount);
+			supervisor_dynamic_handle(supervisor, &diffCount);
 			if (diffCount != 0)
 			{
 				/*
@@ -573,9 +575,9 @@ supervisor_loop(Supervisor *supervisor)
 				Service *dead = NULL;
 
 				/* if this is a dynamic service which just exited, do nothing */
-				if (supervisor_find_recently_removed_dynamic(supervisor,
-															 pid,
-															 &dead))
+				if (supervisor_dynamic_remove_terminated_service(supervisor,
+																 pid,
+																&dead))
 				{
 					log_info("Removed service %s exited", dead->name);
 					break;
@@ -610,13 +612,15 @@ supervisor_loop(Supervisor *supervisor)
 
 
 /*
- * supervisor_find_recently_removed_dynamic is responsible for finding a
- * recently removed dynamic service in the dynamicRecentlyRemoved array. If the
- * service if found, then it is removed from this array.
+ * supervisor_dynamic_remove_terminated_service is responsible for removing
+ * a terminated dynamic service from the dynamicRecentlyRemoved array.
+ * If the service is found, it is recorded in the **result argument.
+ *
+ * Returns true if the service is removed, false otherwise.
  */
 static bool
-supervisor_find_recently_removed_dynamic(Supervisor *supervisor, pid_t pid,
-										 Service **result)
+supervisor_dynamic_remove_terminated_service(Supervisor *supervisor, pid_t pid,
+											 Service **result)
 {
 	Service *recentlyRemoved = supervisor->dynamicRecentlyRemoved.services;
 	int serviceCount = supervisor->dynamicRecentlyRemoved.serviceCount;
@@ -965,7 +969,7 @@ supervisor_shutdown_sequence(Supervisor *supervisor)
 
 
 /*
- * supervisor_handle_dynamic calls the dynamic handler if exits. It is the
+ * supervisor_dynamic_handle calls the dynamic handler if exits. It is the
  * handler's responsibility to add or remove dynamic services using the provided
  * api. The last argument, passed from our caller down to the dynamicHandler
  * function, will contain the net difference of succefully added and removed
@@ -974,7 +978,7 @@ supervisor_shutdown_sequence(Supervisor *supervisor)
  * Returns void.
  */
 static void
-supervisor_handle_dynamic(Supervisor *supervisor, int *diffCount)
+supervisor_dynamic_handle(Supervisor *supervisor, int *diffCount)
 {
 	/*
 	 * Call the dynamic function if defined. The last argument, diffCount
@@ -1039,27 +1043,29 @@ supervisor_handle_failed_restart(Supervisor *supervisor, Service *service,
 	/*
 	 * No need to act, the service should not have restarted.
 	 *
-	 * If a dynamic service, then asked its handler to remove it.
+	 * If a dynamic service, then ask its handler to disable it.
 	 */
 	if (service->policy == RP_TEMPORARY)
 	{
 		if (isDynamic)
 		{
-			(void) supervisor_remove_dynamic(supervisor, service->name);
+			(void) supervisor_dynamic_service_disable(supervisor,
+													  service->name);
 		}
 		return;
 	}
 
 	/*
 	 * If a transient service and exited normally then we are happy. If it was
-	 * a dyanmic service, then remove it  but continue running the rest of the
+	 * a dyanmic service, then remove it but continue running the rest of the
 	 * services, otherwise, shutdown all the services with a happy code.
 	 */
 	if (service->policy == RP_TRANSIENT && returnCode == EXIT_CODE_QUIT)
 	{
 		if (isDynamic)
 		{
-			(void) supervisor_remove_dynamic(supervisor, service->name);
+			(void) supervisor_dynamic_service_disable(supervisor,
+													  service->name);
 		}
 		else
 		{
@@ -1072,14 +1078,13 @@ supervisor_handle_failed_restart(Supervisor *supervisor, Service *service,
 
 	/*
 	 * There are no more happy exit code scenarios. Either disable the failed
-	 * service or shutdown everything
+	 * service or shutdown everything.
 	 */
-
 	if (isDynamic)
 	{
 		log_error("Failed to restart service %s, disabling it",
 				  service->name);
-		(void) supervisor_remove_dynamic(supervisor, service->name);
+		(void) supervisor_dynamic_service_disable(supervisor, service->name);
 	}
 	else
 	{
