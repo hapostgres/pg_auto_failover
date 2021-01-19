@@ -128,7 +128,7 @@ typedef struct Supervisor
 	int stoppingLoopCounter;
 
 	/* dynamic handler function */
-	int (*dynamicHandler)(struct Supervisor *, void *);
+	void (*dynamicHandler)(struct Supervisor *, void *, int *);
 	void *dynamicHandlerArg;    /* dynamic handler private data */
 
 	/*
@@ -153,7 +153,7 @@ typedef struct Supervisor
 } Supervisor;
 
 bool supervisor_start(Service services[], int serviceCount, const char *pidfile,
-					  int (*dynamicHandler)(Supervisor *, void *),
+					  void (*dynamicHandler)(Supervisor *, void *, int *),
 					  void *dynamicHandlerArg);
 
 bool supervisor_stop(Supervisor *supervisor);

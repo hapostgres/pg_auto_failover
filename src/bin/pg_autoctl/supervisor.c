@@ -80,7 +80,7 @@ static bool supervisor_may_restart(Service *service);
 
 static bool supervisor_update_pidfile(Supervisor *supervisor);
 
-static int supervisor_handle_dynamic(Supervisor *supervisor);
+static void supervisor_handle_dynamic(Supervisor *supervisor, int *diffCount);
 
 
 /*
@@ -326,7 +326,7 @@ supervisor_remove_dynamic(Supervisor *supervisor, const char *serviceName)
  */
 bool
 supervisor_start(Service services[], int serviceCount, const char *pidfile,
-				 int (*dynamicHandler)(Supervisor *, void *),
+				 void (*dynamicHandler)(Supervisor *, void *, int *),
 				 void *dynamicHandlerArg)
 {
 	int serviceIndex = 0;
@@ -429,7 +429,12 @@ supervisor_start(Service services[], int serviceCount, const char *pidfile,
 	 */
 	if (dynamicHandler)
 	{
-		dynamicHandler(&supervisor, dynamicHandlerArg);
+		/*
+		 * Here we do not need to track how many dynamic services were added,
+		 * supervisor_loop() will keep track of them.
+		 */
+		int ignoreDiff;
+		dynamicHandler(&supervisor, dynamicHandlerArg, &ignoreDiff);
 	}
 
 	/* now supervise sub-processes and implement retry strategy */
@@ -475,12 +480,12 @@ supervisor_loop(Supervisor *supervisor)
 
 		if (asked_to_handle_dynamic)
 		{
-			int changed = 0;
+			int diffCount = 0;
 			log_info("pg_autoctl received a signal to, "
 					 "handle dynamic services");
 
-			changed = supervisor_handle_dynamic(supervisor);
-			if (changed != 0)
+			supervisor_handle_dynamic(supervisor, &diffCount);
+			if (diffCount != 0)
 			{
 				/*
 				 * We do not know if services where started or stopped. If
@@ -490,7 +495,7 @@ supervisor_loop(Supervisor *supervisor)
 				 * already running. IF we do, then this is a dev error and we
 				 * should fail.
 				 */
-				if ((subprocessCount + changed) < 0)
+				if ((subprocessCount + diffCount) < 0)
 				{
 					log_fatal("BUG: dev error, toggled off more subprocess than"
 							  " running at the moment");
@@ -500,7 +505,7 @@ supervisor_loop(Supervisor *supervisor)
 					supervisor_stop_subprocesses(supervisor);
 					break;
 				}
-				subprocessCount += changed;
+				subprocessCount += diffCount;
 			}
 		}
 
@@ -962,29 +967,27 @@ supervisor_shutdown_sequence(Supervisor *supervisor)
 /*
  * supervisor_handle_dynamic calls the dynamic handler if exits. It is the
  * handler's responsibility to add or remove dynamic services using the provided
- * api.
+ * api. The last argument, passed from our caller down to the dynamicHandler
+ * function, will contain the net difference of succefully added and removed
+ * services.
  *
- * Returns the net number of successfully added and removed services. This
- * number can be negative if more services have been removed than added.
+ * Returns void.
  */
-static int
-supervisor_handle_dynamic(Supervisor *supervisor)
+static void
+supervisor_handle_dynamic(Supervisor *supervisor, int *diffCount)
 {
-	int numChanged = 0;
-
 	/*
-	 * here we call the dyn function if defined, which should return the
-	 * diff of number of services affected, e.g. 1 started => 1, 1 stopped =>
-	 * -1, 2 started and 3 stopped => -1 etc
+	 * Call the dynamic function if defined. The last argument, diffCount
+	 * contains the of count of services affected, e.g. 1 started => 1,
+	 * 1 stopped => -1, 2 started and 3 stopped => -1 etc
 	 */
 	if (supervisor->dynamicHandler)
 	{
-		numChanged = supervisor->dynamicHandler(supervisor,
-												supervisor->dynamicHandlerArg);
+		supervisor->dynamicHandler(supervisor, supervisor->dynamicHandlerArg,
+								   diffCount);
 	}
 
 	asked_to_handle_dynamic = 0;
-	return numChanged;
 }
 
 

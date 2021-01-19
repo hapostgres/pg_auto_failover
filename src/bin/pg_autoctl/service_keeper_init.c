@@ -36,15 +36,16 @@
  * service_keeper_handle_dynamic enables or disables dynamic services based on
  * its configuration.
  *
- * Currenty no such services are present in the configuration
- *
- * Returns the number of services, positive when added, negative when removed.
+ * Records the number of services, positive when added, negative when removed,
+ * in its last argument, diffCount.
  */
-static int
-service_keeper_handle_dynamic(Supervisor *supervisor, void *arg)
+static void
+service_keeper_handle_dynamic(Supervisor *supervisor, void *arg, int *diffCount)
 {
 	Keeper *keeper = (Keeper *) arg;
 	Service service = { 0 };
+
+	*diffCount = 0;
 
 	/*
 	 * Do not bother to figure out if the value has changed, just read the
@@ -55,7 +56,6 @@ service_keeper_handle_dynamic(Supervisor *supervisor, void *arg)
 	/*
 	 * Nothing else to be done for now since no services have been configured
 	 */
-	return 0;
 }
 
 
