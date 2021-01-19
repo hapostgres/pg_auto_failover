@@ -43,7 +43,6 @@ static void
 service_keeper_handle_dynamic(Supervisor *supervisor, void *arg, int *diffCount)
 {
 	Keeper *keeper = (Keeper *) arg;
-	Service service = { 0 };
 
 	*diffCount = 0;
 
