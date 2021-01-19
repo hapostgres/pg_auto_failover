@@ -578,7 +578,7 @@ supervisor_loop(Supervisor *supervisor)
 				/* if this is a dynamic service which just exited, do nothing */
 				if (supervisor_dynamic_remove_terminated_service(supervisor,
 																 pid,
-																&dead))
+																 &dead))
 				{
 					log_info("Removed service %s exited", dead->name);
 					break;
