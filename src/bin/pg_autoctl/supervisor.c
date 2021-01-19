@@ -173,9 +173,10 @@ supervisor_dynamic_service_enable(Supervisor *supervisor, Service *service)
 	/* 0-based */
 	if (serviceIndex >= (MAXDYNSERVICES - 1))
 	{
-		log_error("Reached maximum permitted number of dynamic services, "
-				  "service %s is not added",
-				  service->name);
+		log_error("Failed to start dynamic service \"%s\": pg_autoctl supports"
+				  " up to %d dynamic services and all the slots are used"
+				  " already",
+				  service->name, MAXDYNSERVICES);
 		return false;
 	}
 
