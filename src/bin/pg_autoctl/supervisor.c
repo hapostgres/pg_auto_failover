@@ -124,8 +124,8 @@ supervisor_it_next(Supervisor_it *sit)
 	if (sit->index >= sit->count &&
 		sit->services == sit->supervisor->services)
 	{
-		sit->services = sit->supervisor->dynamicServices.services;
-		sit->count = sit->supervisor->dynamicServices.serviceCount;
+		sit->services = sit->supervisor->dynamicServicesEnabled.services;
+		sit->count = sit->supervisor->dynamicServicesEnabled.serviceCount;
 		sit->index = 0;
 	}
 
@@ -160,7 +160,7 @@ supervisor_dynamic_service_enable(Supervisor *supervisor, Service *service)
 	Service *dynamicService;
 	sigset_t sig_mask;
 	sigset_t sig_mask_orig;
-	int serviceIndex = supervisor->dynamicServices.serviceCount;
+	int serviceIndex = supervisor->dynamicServicesEnabled.serviceCount;
 	bool started;
 
 	if (supervisor_service_exists(supervisor, service->name))
@@ -226,9 +226,9 @@ supervisor_dynamic_service_enable(Supervisor *supervisor, Service *service)
 	 * IGNORE-BANNED fits here because we want to take ownership of the service.
 	 * We copy to an address that we own from a non overlapping address.
 	 */
-	dynamicService = &supervisor->dynamicServices.services[serviceIndex];
+	dynamicService = &supervisor->dynamicServicesEnabled.services[serviceIndex];
 	memcpy(dynamicService, service, sizeof(*service)); /* IGNORE-BANNED */
-	supervisor->dynamicServices.serviceCount++;
+	supervisor->dynamicServicesEnabled.serviceCount++;
 
 	(void) unblock_signals(&sig_mask_orig);
 
@@ -254,13 +254,13 @@ supervisor_dynamic_service_disable(Supervisor *supervisor,
 								   const char *serviceName)
 {
 	Service *dynamicService = NULL;
-	int serviceCount = supervisor->dynamicServices.serviceCount;
+	int serviceCount = supervisor->dynamicServicesEnabled.serviceCount;
 	int serviceIndex;
 
 	/* Find it in the dynamic array */
 	for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
 	{
-		Service *service = &supervisor->dynamicServices.services[serviceIndex];
+		Service *service = &supervisor->dynamicServicesEnabled.services[serviceIndex];
 
 		if (!strncmp(service->name, serviceName, strlen(serviceName)))
 		{
@@ -294,9 +294,9 @@ supervisor_dynamic_service_disable(Supervisor *supervisor,
 	 * Remove the dynamic Service from the array by swapping it out with the
 	 * last element in the array and bringing the array count down by one
 	 */
-	supervisor->dynamicServices.services[serviceIndex] =
-		supervisor->dynamicServices.services[serviceCount - 1];
-	supervisor->dynamicServices.serviceCount--;
+	supervisor->dynamicServicesEnabled.services[serviceIndex] =
+		supervisor->dynamicServicesEnabled.services[serviceCount - 1];
+	supervisor->dynamicServicesEnabled.serviceCount--;
 
 	/*
 	 * Finally add the dynamic service to the recently removed array.
@@ -304,20 +304,20 @@ supervisor_dynamic_service_disable(Supervisor *supervisor,
 	 * If we reached the end of this array, start again at the beginning. This
 	 * is a loosely held array and we do not fuss too much.
 	 */
-	if (supervisor->dynamicRecentlyRemoved.serviceCount == MAXDYNSERVICES)
+	if (supervisor->dynamicServicesDisabled.serviceCount == MAXDYNSERVICES)
 	{
-		supervisor->dynamicRecentlyRemoved.serviceCount = 0;
+		supervisor->dynamicServicesDisabled.serviceCount = 0;
 	}
 
 	/*
 	 * IGNORE-BANNED fits here because we want to take ownership of the service.
 	 * We copy to an address that we own from a non overlapping address.
 	 */
-	memcpy(&supervisor->dynamicRecentlyRemoved.services[    /* IGNORE-BANNED */
-			   supervisor->dynamicRecentlyRemoved.serviceCount],
+	memcpy(&supervisor->dynamicServicesDisabled.services[    /* IGNORE-BANNED */
+			   supervisor->dynamicServicesDisabled.serviceCount],
 		   dynamicService,
 		   sizeof(*dynamicService));
-	supervisor->dynamicRecentlyRemoved.serviceCount++;
+	supervisor->dynamicServicesDisabled.serviceCount++;
 
 	return true;
 }
@@ -340,8 +340,8 @@ supervisor_start(Service services[], int serviceCount, const char *pidfile,
 		.serviceCount = serviceCount,
 		.pidfile = { 0 },
 		.pid = -1,
-		.dynamicServices = { 0 },
-		.dynamicRecentlyRemoved = { 0 },
+		.dynamicServicesEnabled = { 0 },
+		.dynamicServicesDisabled = { 0 },
 		.dynamicHandler = dynamicHandler,
 		.dynamicHandlerArg = dynamicHandlerArg,
 	};
@@ -462,7 +462,7 @@ supervisor_loop(Supervisor *supervisor)
 {
 	bool firstLoop = true;
 	int subprocessCount = supervisor->serviceCount +
-						  supervisor->dynamicServices.serviceCount;
+						  supervisor->dynamicServicesEnabled.serviceCount;
 
 	/* wait until all subprocesses are done */
 	while (subprocessCount > 0)
@@ -614,7 +614,7 @@ supervisor_loop(Supervisor *supervisor)
 
 /*
  * supervisor_dynamic_remove_terminated_service is responsible for removing
- * a terminated dynamic service from the dynamicRecentlyRemoved array.
+ * a terminated dynamic service from the dynamicServicesDisabled array.
  * If the service is found, it is recorded in the **result argument.
  *
  * Returns true if the service is removed, false otherwise.
@@ -623,8 +623,8 @@ static bool
 supervisor_dynamic_remove_terminated_service(Supervisor *supervisor, pid_t pid,
 											 Service **result)
 {
-	Service *recentlyRemoved = supervisor->dynamicRecentlyRemoved.services;
-	int serviceCount = supervisor->dynamicRecentlyRemoved.serviceCount;
+	Service *recentlyRemoved = supervisor->dynamicServicesDisabled.services;
+	int serviceCount = supervisor->dynamicServicesDisabled.serviceCount;
 	int serviceIndex;
 
 	for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
@@ -636,7 +636,7 @@ supervisor_dynamic_remove_terminated_service(Supervisor *supervisor, pid_t pid,
 
 			/* Now that the service is found, remove it from the array */
 			recentlyRemoved[serviceIndex] = recentlyRemoved[serviceCount - 1];
-			supervisor->dynamicRecentlyRemoved.serviceCount--;
+			supervisor->dynamicServicesDisabled.serviceCount--;
 			return true;
 		}
 	}
@@ -1029,10 +1029,10 @@ supervisor_handle_failed_restart(Supervisor *supervisor, Service *service,
 	 * Loop through the dynamic service array and if it found, then mark it
 	 */
 	for (int serviceIndex = 0;
-		 serviceIndex < supervisor->dynamicServices.serviceCount;
+		 serviceIndex < supervisor->dynamicServicesEnabled.serviceCount;
 		 serviceIndex++)
 	{
-		Service *dynamic = &supervisor->dynamicServices.services[serviceIndex];
+		Service *dynamic = &supervisor->dynamicServicesEnabled.services[serviceIndex];
 
 		if (!strncmp(dynamic->name, service->name, strlen(service->name)))
 		{

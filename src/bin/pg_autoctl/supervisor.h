@@ -127,29 +127,20 @@ typedef struct Supervisor
 	int shutdownSignal;
 	int stoppingLoopCounter;
 
-	/* dynamic handler function */
+	/* dynamic services section */
 	void (*dynamicHandler)(struct Supervisor *, void *, int *);
 	void *dynamicHandlerArg;    /* dynamic handler private data */
 
 	/*
-	 * Anonymous struct holding active dynamic services.
-	 * Do not access directly.
+	 * dynamicServices is a nested struct used internally by the supervisor in
+	 * order to hold information about the currently running dynamic services
+	 * under it's control and the ones that are pending termination.
 	 */
-	struct
+	struct dynamicServices
 	{
 		Service services[MAXDYNSERVICES];
 		int serviceCount;
-	} dynamicServices;
-
-	/*
-	 * Anonymous struct holding recently removed dynamic services.
-	 * Do not access directly.
-	 */
-	struct
-	{
-		Service services[MAXDYNSERVICES];
-		int serviceCount;
-	} dynamicRecentlyRemoved;
+	} dynamicServicesEnabled, dynamicServicesDisabled;
 } Supervisor;
 
 bool supervisor_start(Service services[], int serviceCount, const char *pidfile,
