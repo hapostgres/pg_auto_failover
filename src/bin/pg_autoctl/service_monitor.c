@@ -44,30 +44,29 @@ start_monitor(Monitor *monitor)
 	MonitorConfig *config = &(monitor->config);
 	PostgresSetup *pgSetup = &(config->pgSetup);
 	LocalPostgresServer postgres = { 0 };
-
-	Service subprocesses[] = {
-		{
-			SERVICE_NAME_POSTGRES,
-			RP_PERMANENT,
-			-1,
-			&service_postgres_ctl_start
+	ServiceArray services = {
+		.array = {
+			{
+				SERVICE_NAME_POSTGRES,
+				RP_PERMANENT,
+				-1,
+				&service_postgres_ctl_start
+			},
+			{
+				SERVICE_NAME_MONITOR,
+				RP_PERMANENT,
+				-1,
+				&service_monitor_start,
+				(void *) monitor
+			},
 		},
-		{
-			SERVICE_NAME_MONITOR,
-			RP_PERMANENT,
-			-1,
-			&service_monitor_start,
-			(void *) monitor
-		}
+		.serviceCount = 2,
 	};
-
-	int subprocessesCount = sizeof(subprocesses) / sizeof(subprocesses[0]);
 
 	/* initialize our local Postgres instance representation */
 	(void) local_postgres_init(&postgres, pgSetup);
 
-	return supervisor_start(subprocesses,
-							subprocessesCount,
+	return supervisor_start(services,
 							config->pathnames.pid,
 							NULL, NULL);
 }

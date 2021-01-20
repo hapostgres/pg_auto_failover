@@ -106,8 +106,8 @@ supervisor_it_first(Supervisor_it *sit, Supervisor *supervisor)
 {
 	*sit = (Supervisor_it) {
 		.supervisor = supervisor,
-		.services = supervisor->services,
-		.count = supervisor->serviceCount,
+		.services = supervisor->services.array,
+		.count = supervisor->services.serviceCount,
 		.index = 0,
 	};
 
@@ -122,9 +122,9 @@ supervisor_it_next(Supervisor_it *sit)
 
 	/* if we are done with the static services, move to the dynamic */
 	if (sit->index >= sit->count &&
-		sit->services == sit->supervisor->services)
+		sit->services == sit->supervisor->services.array)
 	{
-		sit->services = sit->supervisor->dynamicServicesEnabled.services;
+		sit->services = sit->supervisor->dynamicServicesEnabled.array;
 		sit->count = sit->supervisor->dynamicServicesEnabled.serviceCount;
 		sit->index = 0;
 	}
@@ -140,8 +140,8 @@ supervisor_it_next(Supervisor_it *sit)
 
 
 /*
- * supervisor_dynamic_service_enable starts the service and if successfull, adds
- * it to the dynamicService array.
+ * supervisor_enable_dynamic_service starts the service and if successfull, adds
+ * it to the dynamicServicesEnabled array.
  *
  * Since the services are largely discoverable by name, the name has to be
  * unique. If it is not, then the service is not started and the function
@@ -155,7 +155,7 @@ supervisor_it_next(Supervisor_it *sit)
  * Returns true if successfully starts the service.
  */
 bool
-supervisor_dynamic_service_enable(Supervisor *supervisor, Service *service)
+supervisor_enable_dynamic_service(Supervisor *supervisor, Service *service)
 {
 	Service *dynamicService;
 	sigset_t sig_mask;
@@ -165,18 +165,18 @@ supervisor_dynamic_service_enable(Supervisor *supervisor, Service *service)
 
 	if (supervisor_service_exists(supervisor, service->name))
 	{
-		log_error("Service %s already exists under supervision",
-				  service->name);
+		log_error("Service %s already exists under supervision with PID %d",
+				  service->name, service->pid);
 		return false;
 	}
 
 	/* 0-based */
-	if (serviceIndex >= (MAXDYNSERVICES - 1))
+	if (serviceIndex >= (MAX_SERVICES - 1))
 	{
 		log_error("Failed to start dynamic service \"%s\": pg_autoctl supports"
 				  " up to %d dynamic services and all the slots are used"
 				  " already",
-				  service->name, MAXDYNSERVICES);
+				  service->name, MAX_SERVICES);
 		return false;
 	}
 
@@ -226,7 +226,7 @@ supervisor_dynamic_service_enable(Supervisor *supervisor, Service *service)
 	 * IGNORE-BANNED fits here because we want to take ownership of the service.
 	 * We copy to an address that we own from a non overlapping address.
 	 */
-	dynamicService = &supervisor->dynamicServicesEnabled.services[serviceIndex];
+	dynamicService = &supervisor->dynamicServicesEnabled.array[serviceIndex];
 	memcpy(dynamicService, service, sizeof(*service)); /* IGNORE-BANNED */
 	supervisor->dynamicServicesEnabled.serviceCount++;
 
@@ -237,7 +237,7 @@ supervisor_dynamic_service_enable(Supervisor *supervisor, Service *service)
 
 
 /*
- * supervisor_dynamic_service_disable stops the running dynamic service with
+ * supervisor_disable_dynamic_service stops the running dynamic service with
  * serviceName.
  * Once the service is stopped, it is also removed from the dynamicService array
  * and supervisor_loop can largely forget about it.
@@ -250,7 +250,7 @@ supervisor_dynamic_service_enable(Supervisor *supervisor, Service *service)
  * array, false otherwise.
  */
 bool
-supervisor_dynamic_service_disable(Supervisor *supervisor,
+supervisor_disable_dynamic_service(Supervisor *supervisor,
 								   const char *serviceName)
 {
 	Service *dynamicService = NULL;
@@ -260,7 +260,7 @@ supervisor_dynamic_service_disable(Supervisor *supervisor,
 	/* Find it in the dynamic array */
 	for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
 	{
-		Service *service = &supervisor->dynamicServicesEnabled.services[serviceIndex];
+		Service *service = &supervisor->dynamicServicesEnabled.array[serviceIndex];
 
 		if (!strncmp(service->name, serviceName, strlen(serviceName)))
 		{
@@ -281,7 +281,7 @@ supervisor_dynamic_service_disable(Supervisor *supervisor,
 	 * after killing the service and removing it from the dynamicService array,
 	 * we add it to the recentlyRemoved array to find it again later.
 	 */
-	if (!kill(dynamicService->pid, SIGTERM))
+	if (kill(dynamicService->pid, SIGTERM) != 0)
 	{
 		log_info("Service %s with %d did not receive signal",
 				 dynamicService->name, dynamicService->pid);
@@ -294,8 +294,8 @@ supervisor_dynamic_service_disable(Supervisor *supervisor,
 	 * Remove the dynamic Service from the array by swapping it out with the
 	 * last element in the array and bringing the array count down by one
 	 */
-	supervisor->dynamicServicesEnabled.services[serviceIndex] =
-		supervisor->dynamicServicesEnabled.services[serviceCount - 1];
+	supervisor->dynamicServicesEnabled.array[serviceIndex] =
+		supervisor->dynamicServicesEnabled.array[serviceCount - 1];
 	supervisor->dynamicServicesEnabled.serviceCount--;
 
 	/*
@@ -304,7 +304,7 @@ supervisor_dynamic_service_disable(Supervisor *supervisor,
 	 * If we reached the end of this array, start again at the beginning. This
 	 * is a loosely held array and we do not fuss too much.
 	 */
-	if (supervisor->dynamicServicesDisabled.serviceCount == MAXDYNSERVICES)
+	if (supervisor->dynamicServicesDisabled.serviceCount == MAX_SERVICES)
 	{
 		supervisor->dynamicServicesDisabled.serviceCount = 0;
 	}
@@ -313,7 +313,7 @@ supervisor_dynamic_service_disable(Supervisor *supervisor,
 	 * IGNORE-BANNED fits here because we want to take ownership of the service.
 	 * We copy to an address that we own from a non overlapping address.
 	 */
-	memcpy(&supervisor->dynamicServicesDisabled.services[    /* IGNORE-BANNED */
+	memcpy(&supervisor->dynamicServicesDisabled.array[    /* IGNORE-BANNED */
 			   supervisor->dynamicServicesDisabled.serviceCount],
 		   dynamicService,
 		   sizeof(*dynamicService));
@@ -328,7 +328,7 @@ supervisor_dynamic_service_disable(Supervisor *supervisor,
  * them.
  */
 bool
-supervisor_start(Service services[], int serviceCount, const char *pidfile,
+supervisor_start(ServiceArray services, const char *pidfile,
 				 void (*dynamicHandler)(Supervisor *, void *, int *),
 				 void *dynamicHandlerArg)
 {
@@ -337,7 +337,6 @@ supervisor_start(Service services[], int serviceCount, const char *pidfile,
 
 	Supervisor supervisor = {
 		.services = services,
-		.serviceCount = serviceCount,
 		.pidfile = { 0 },
 		.pid = -1,
 		.dynamicServicesEnabled = { 0 },
@@ -367,9 +366,11 @@ supervisor_start(Service services[], int serviceCount, const char *pidfile,
 	 * services we managed to start before, in reverse order of starting-up,
 	 * and stop here.
 	 */
-	for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
+	for (serviceIndex = 0;
+		 serviceIndex < services.serviceCount;
+		 serviceIndex++)
 	{
-		Service *service = &(services[serviceIndex]);
+		Service *service = &(services.array[serviceIndex]);
 
 		log_debug("Starting pg_autoctl %s service", service->name);
 
@@ -397,10 +398,10 @@ supervisor_start(Service services[], int serviceCount, const char *pidfile,
 
 			for (idx = serviceIndex - 1; idx > 0; idx--)
 			{
-				if (kill(services[idx].pid, SIGQUIT) != 0)
+				if (kill(services.array[idx].pid, SIGQUIT) != 0)
 				{
 					log_error("Failed to send SIGQUIT to service %s with pid %d",
-							  services[idx].name, services[idx].pid);
+							  services.array[idx].name, services.array[idx].pid);
 				}
 			}
 
@@ -461,7 +462,7 @@ static bool
 supervisor_loop(Supervisor *supervisor)
 {
 	bool firstLoop = true;
-	int subprocessCount = supervisor->serviceCount +
+	int subprocessCount = supervisor->services.serviceCount +
 						  supervisor->dynamicServicesEnabled.serviceCount;
 
 	/* wait until all subprocesses are done */
@@ -623,7 +624,7 @@ static bool
 supervisor_dynamic_remove_terminated_service(Supervisor *supervisor, pid_t pid,
 											 Service **result)
 {
-	Service *recentlyRemoved = supervisor->dynamicServicesDisabled.services;
+	Service *recentlyRemoved = supervisor->dynamicServicesDisabled.array;
 	int serviceCount = supervisor->dynamicServicesDisabled.serviceCount;
 	int serviceIndex;
 
@@ -1032,7 +1033,7 @@ supervisor_handle_failed_restart(Supervisor *supervisor, Service *service,
 		 serviceIndex < supervisor->dynamicServicesEnabled.serviceCount;
 		 serviceIndex++)
 	{
-		Service *dynamic = &supervisor->dynamicServicesEnabled.services[serviceIndex];
+		Service *dynamic = &supervisor->dynamicServicesEnabled.array[serviceIndex];
 
 		if (!strncmp(dynamic->name, service->name, strlen(service->name)))
 		{
@@ -1050,7 +1051,7 @@ supervisor_handle_failed_restart(Supervisor *supervisor, Service *service,
 	{
 		if (isDynamic)
 		{
-			(void) supervisor_dynamic_service_disable(supervisor,
+			(void) supervisor_disable_dynamic_service(supervisor,
 													  service->name);
 		}
 		return;
@@ -1065,7 +1066,7 @@ supervisor_handle_failed_restart(Supervisor *supervisor, Service *service,
 	{
 		if (isDynamic)
 		{
-			(void) supervisor_dynamic_service_disable(supervisor,
+			(void) supervisor_disable_dynamic_service(supervisor,
 													  service->name);
 		}
 		else
@@ -1085,7 +1086,7 @@ supervisor_handle_failed_restart(Supervisor *supervisor, Service *service,
 	{
 		log_error("Failed to restart service %s, disabling it",
 				  service->name);
-		(void) supervisor_dynamic_service_disable(supervisor, service->name);
+		(void) supervisor_disable_dynamic_service(supervisor, service->name);
 	}
 	else
 	{

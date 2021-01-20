@@ -45,29 +45,29 @@ service_monitor_init(Monitor *monitor)
 	MonitorConfig *config = &monitor->config;
 	PostgresSetup *pgSetup = &config->pgSetup;
 	LocalPostgresServer postgres = { 0 };
-
-	Service subprocesses[] = {
-		{
-			SERVICE_NAME_POSTGRES,
-			RP_PERMANENT,
-			-1,
-			&service_postgres_ctl_start
+	ServiceArray services = {
+		.array = {
+			{
+				SERVICE_NAME_POSTGRES,
+				RP_PERMANENT,
+				-1,
+				&service_postgres_ctl_start
+			},
+			{
+				SERVICE_NAME_MONITOR_INIT,
+				createAndRun ? RP_PERMANENT : RP_TRANSIENT,
+				-1,
+				&service_monitor_init_start,
+				(void *) monitor
+			},
 		},
-		{
-			SERVICE_NAME_MONITOR_INIT,
-			createAndRun ? RP_PERMANENT : RP_TRANSIENT,
-			-1,
-			&service_monitor_init_start,
-			(void *) monitor
-		}
+		.serviceCount = 2,
 	};
-
-	int subprocessesCount = sizeof(subprocesses) / sizeof(subprocesses[0]);
 
 	/* when using pg_autoctl create monitor --run, use "listener" */
 	if (createAndRun)
 	{
-		strlcpy(subprocesses[1].name, SERVICE_NAME_MONITOR, NAMEDATALEN);
+		strlcpy(services.array[1].name, SERVICE_NAME_MONITOR, NAMEDATALEN);
 	}
 
 	/* We didn't create our target username/dbname yet */
@@ -77,8 +77,7 @@ service_monitor_init(Monitor *monitor)
 	/* initialize our local Postgres instance representation */
 	(void) local_postgres_init(&postgres, pgSetup);
 
-	if (!supervisor_start(subprocesses,
-						  subprocessesCount,
+	if (!supervisor_start(services,
 						  config->pathnames.pid,
 						  NULL, NULL))
 	{

@@ -115,10 +115,18 @@ typedef struct Service
 	RestartCounters restartCounters;
 } Service;
 
+/*
+ * Helper struct for an array of services
+ */
+typedef struct ServiceArray
+{
+	int serviceCount;
+	Service array[MAX_SERVICES];
+} ServiceArray;
+
 typedef struct Supervisor
 {
-	Service *services;
-	int serviceCount;
+	ServiceArray services;
 
 	char pidfile[MAXPGPATH];
 	pid_t pid;
@@ -131,28 +139,20 @@ typedef struct Supervisor
 	void (*dynamicHandler)(struct Supervisor *, void *, int *);
 	void *dynamicHandlerArg;    /* dynamic handler private data */
 
-	/*
-	 * dynamicServices is a nested struct used internally by the supervisor in
-	 * order to hold information about the currently running dynamic services
-	 * under it's control and the ones that are pending termination.
-	 */
-	struct dynamicServices
-	{
-		Service services[MAXDYNSERVICES];
-		int serviceCount;
-	} dynamicServicesEnabled, dynamicServicesDisabled;
+	ServiceArray dynamicServicesEnabled; /* currently enabled dynamic services */
+	ServiceArray dynamicServicesDisabled; /* internal accounting */
 } Supervisor;
 
-bool supervisor_start(Service services[], int serviceCount, const char *pidfile,
+bool supervisor_start(ServiceArray services, const char *pidfile,
 					  void (*dynamicHandler)(Supervisor *, void *, int *),
 					  void *dynamicHandlerArg);
 
 bool supervisor_stop(Supervisor *supervisor);
 
-bool supervisor_dynamic_service_enable(Supervisor *supervisor,
+bool supervisor_enable_dynamic_service(Supervisor *supervisor,
 									   Service *service);
 
-bool supervisor_dynamic_service_disable(Supervisor *supervisor,
+bool supervisor_disable_dynamic_service(Supervisor *supervisor,
 										const char *serviceName);
 
 bool supervisor_service_exists(Supervisor *supervisor, const char *serviceName);

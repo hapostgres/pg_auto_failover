@@ -2235,7 +2235,10 @@ keeper_reread_services(Keeper *keeper)
 		return false;
 	}
 
-	/* update the configuration values (None at present) */
+#if 0
+	/* update the configuration values */
+	strlcpy(config->pgbouncer, newConfig.pgbouncer, MAXPGPATH);
+#endif
 	return true;
 }
 
