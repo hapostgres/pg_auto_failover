@@ -370,7 +370,7 @@ supervisor_start(ServiceArray services, const char *pidfile,
 		 serviceIndex < services.serviceCount;
 		 serviceIndex++)
 	{
-		Service *service = &(services.array[serviceIndex]);
+		Service *service = &(supervisor.services.array[serviceIndex]);
 
 		log_debug("Starting pg_autoctl %s service", service->name);
 
@@ -398,10 +398,11 @@ supervisor_start(ServiceArray services, const char *pidfile,
 
 			for (idx = serviceIndex - 1; idx > 0; idx--)
 			{
-				if (kill(services.array[idx].pid, SIGQUIT) != 0)
+				if (kill(supervisor.services.array[idx].pid, SIGQUIT) != 0)
 				{
 					log_error("Failed to send SIGQUIT to service %s with pid %d",
-							  services.array[idx].name, services.array[idx].pid);
+							  supervisor.services.array[idx].name,
+							  supervisor.services.array[idx].pid);
 				}
 			}
 
