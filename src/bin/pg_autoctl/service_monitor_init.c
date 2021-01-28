@@ -49,11 +49,13 @@ service_monitor_init(Monitor *monitor)
 		.array = {
 			{
 				SERVICE_NAME_POSTGRES,
+				SERVICE_NAME_POSTGRES,
 				RP_PERMANENT,
 				-1,
 				&service_postgres_ctl_start
 			},
 			{
+				SERVICE_NAME_MONITOR_INIT,
 				SERVICE_NAME_MONITOR_INIT,
 				createAndRun ? RP_PERMANENT : RP_TRANSIENT,
 				-1,
@@ -67,6 +69,7 @@ service_monitor_init(Monitor *monitor)
 	/* when using pg_autoctl create monitor --run, use "listener" */
 	if (createAndRun)
 	{
+		strlcpy(services.array[1].role, SERVICE_NAME_MONITOR, NAMEDATALEN);
 		strlcpy(services.array[1].name, SERVICE_NAME_MONITOR, NAMEDATALEN);
 	}
 
@@ -79,7 +82,7 @@ service_monitor_init(Monitor *monitor)
 
 	if (!supervisor_start(services,
 						  config->pathnames.pid,
-						  NULL, NULL))
+						  false /* allowDynamic */))
 	{
 		/* errors have already been logged */
 		return false;

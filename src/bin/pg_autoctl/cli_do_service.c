@@ -370,6 +370,7 @@ cli_do_service_pgcontroller(int argc, char **argv)
 		.array = {
 			{
 				"postgres",
+				"postgres",
 				RP_PERMANENT,
 				-1,
 				&service_postgres_ctl_start
@@ -389,7 +390,7 @@ cli_do_service_pgcontroller(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	if (!supervisor_start(services, pathnames.pid, NULL, NULL))
+	if (!supervisor_start(services, pathnames.pid, false /* allowDynamic */))
 	{
 		log_fatal("Failed to start the supervisor, see above for details");
 		exit(EXIT_CODE_INTERNAL_ERROR);

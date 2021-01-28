@@ -48,11 +48,13 @@ start_monitor(Monitor *monitor)
 		.array = {
 			{
 				SERVICE_NAME_POSTGRES,
+				SERVICE_NAME_POSTGRES,
 				RP_PERMANENT,
 				-1,
 				&service_postgres_ctl_start
 			},
 			{
+				SERVICE_NAME_MONITOR,
 				SERVICE_NAME_MONITOR,
 				RP_PERMANENT,
 				-1,
@@ -68,7 +70,7 @@ start_monitor(Monitor *monitor)
 
 	return supervisor_start(services,
 							config->pathnames.pid,
-							NULL, NULL);
+							false /* allowDynamic */);
 }
 
 

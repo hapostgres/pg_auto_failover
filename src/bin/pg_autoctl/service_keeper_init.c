@@ -32,31 +32,6 @@
 #include "string_utils.h"
 #include "supervisor.h"
 
-/*
- * service_keeper_handle_dynamic enables or disables dynamic services based on
- * its configuration.
- *
- * Records the number of services, positive when added, negative when removed,
- * in its last argument, diffCount.
- */
-static void
-service_keeper_handle_dynamic(Supervisor *supervisor, void *arg, int *diffCount)
-{
-	Keeper *keeper = (Keeper *) arg;
-
-	*diffCount = 0;
-
-	/*
-	 * Do not bother to figure out if the value has changed, just read the
-	 * latest and act. Keeps the code much simpler.
-	 */
-	(void) keeper_reread_services(keeper);
-
-	/*
-	 * Nothing else to be done for now since no services have been configured
-	 */
-}
-
 
 /*
  * service_keeper_init defines and start services needed during the
@@ -72,11 +47,13 @@ service_keeper_init(Keeper *keeper)
 		.array = {
 			{
 				SERVICE_NAME_POSTGRES,
+				SERVICE_NAME_POSTGRES,
 				RP_PERMANENT,
 				-1,
 				&service_postgres_ctl_start,
 			},
 			{
+				SERVICE_NAME_KEEPER_INIT,
 				SERVICE_NAME_KEEPER_INIT,
 				createAndRun ? RP_PERMANENT : RP_TRANSIENT,
 				-1,
@@ -90,12 +67,12 @@ service_keeper_init(Keeper *keeper)
 	/* when using pg_autoctl create monitor --run, use "node-active" */
 	if (createAndRun)
 	{
+		strlcpy(services.array[1].role, SERVICE_NAME_KEEPER, NAMEDATALEN);
 		strlcpy(services.array[1].name, SERVICE_NAME_KEEPER, NAMEDATALEN);
-		return supervisor_start(services, pidfile,
-								&service_keeper_handle_dynamic, (void *) keeper);
+		return supervisor_start(services, pidfile, true /* allowDynamic */);
 	}
 
-	return supervisor_start(services, pidfile, NULL, NULL);
+	return supervisor_start(services, pidfile, false /* allowDynamic */);
 }
 
 

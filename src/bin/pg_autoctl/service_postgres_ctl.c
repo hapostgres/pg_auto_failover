@@ -176,6 +176,7 @@ service_postgres_ctl_loop(LocalPostgresServer *postgres)
 	 */
 	Service postgresService = {
 		SERVICE_NAME_POSTGRES,
+		SERVICE_NAME_POSTGRES,
 		RP_PERMANENT,           /* actually micro-managed in this loop */
 		-1,
 		&service_postgres_start,

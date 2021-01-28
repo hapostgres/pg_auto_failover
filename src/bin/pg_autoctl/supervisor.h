@@ -107,6 +107,7 @@ typedef struct RestartCounters
  */
 typedef struct Service
 {
+	char role[NAMEDATALEN];             /* Service role for the user */
 	char name[NAMEDATALEN];             /* Service name for the user */
 	RestartPolicy policy;               /* Should we restart the service? */
 	pid_t pid;                          /* Service PID */
@@ -136,26 +137,17 @@ typedef struct Supervisor
 	int stoppingLoopCounter;
 
 	/* dynamic services section */
-	void (*dynamicHandler)(struct Supervisor *, void *, int *);
-	void *dynamicHandlerArg;    /* dynamic handler private data */
+	bool const allowDynamic;    /* can dynamic services be added/removed? */
 
 	ServiceArray dynamicServicesEnabled; /* currently enabled dynamic services */
 	ServiceArray dynamicServicesDisabled; /* internal accounting */
 } Supervisor;
 
 bool supervisor_start(ServiceArray services, const char *pidfile,
-					  void (*dynamicHandler)(Supervisor *, void *, int *),
-					  void *dynamicHandlerArg);
+					  bool allowDynamic);
 
 bool supervisor_stop(Supervisor *supervisor);
 
-bool supervisor_enable_dynamic_service(Supervisor *supervisor,
-									   Service *service);
-
-bool supervisor_disable_dynamic_service(Supervisor *supervisor,
-										const char *serviceName);
-
-bool supervisor_service_exists(Supervisor *supervisor, const char *serviceName);
 bool supervisor_find_service_pid(const char *pidfile,
 								 const char *serviceName,
 								 pid_t *pid);

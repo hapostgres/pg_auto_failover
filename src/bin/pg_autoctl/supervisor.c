@@ -20,6 +20,7 @@
 
 #include "cli_root.h"
 #include "defaults.h"
+#include "dynamic_services_config.h"
 #include "env_utils.h"
 #include "fsm.h"
 #include "keeper.h"
@@ -54,9 +55,18 @@ static bool supervisor_find_service(Supervisor *supervisor, pid_t pid,
 
 static void supervisor_dynamic_handle(Supervisor *supervisor, int *diffCount);
 
+static bool supervisor_enable_dynamic_service(Supervisor *supervisor,
+											  Service *service);
+
+static bool supervisor_disable_dynamic_service(Supervisor *supervisor,
+											   const char *serviceName);
+
 static bool supervisor_dynamic_remove_terminated_service(Supervisor *supervisor,
 														 pid_t pid,
 														 Service **result);
+
+static bool supervisor_service_exists(Supervisor *supervisor,
+									  const char *serviceName);
 
 static void supervisor_stop_subprocesses(Supervisor *supervisor);
 
@@ -328,9 +338,7 @@ supervisor_disable_dynamic_service(Supervisor *supervisor,
  * them.
  */
 bool
-supervisor_start(ServiceArray services, const char *pidfile,
-				 void (*dynamicHandler)(Supervisor *, void *, int *),
-				 void *dynamicHandlerArg)
+supervisor_start(ServiceArray services, const char *pidfile, bool allowDynamic)
 {
 	int serviceIndex = 0;
 	bool success = true;
@@ -339,10 +347,9 @@ supervisor_start(ServiceArray services, const char *pidfile,
 		.services = services,
 		.pidfile = { 0 },
 		.pid = -1,
+		.allowDynamic = allowDynamic,
 		.dynamicServicesEnabled = { 0 },
 		.dynamicServicesDisabled = { 0 },
-		.dynamicHandler = dynamicHandler,
-		.dynamicHandlerArg = dynamicHandlerArg,
 	};
 
 
@@ -430,19 +437,9 @@ supervisor_start(ServiceArray services, const char *pidfile,
 	}
 
 	/*
-	 * Let the dynamic handler decide about dynamic services
+	 * now supervise sub-processes, enable or disable dynamic services and
+	 * implement retry strategy
 	 */
-	if (dynamicHandler)
-	{
-		/*
-		 * Here we do not need to track how many dynamic services were added,
-		 * supervisor_loop() will keep track of them.
-		 */
-		int ignoreDiff;
-		dynamicHandler(&supervisor, dynamicHandlerArg, &ignoreDiff);
-	}
-
-	/* now supervise sub-processes and implement retry strategy */
 	if (!supervisor_loop(&supervisor))
 	{
 		log_fatal("Something went wrong in sub-process supervision, "
@@ -483,40 +480,40 @@ supervisor_loop(Supervisor *supervisor)
 			(void) supervisor_reload_services(supervisor);
 		}
 
-		if (asked_to_handle_dynamic)
+		if (firstLoop || asked_to_handle_dynamic)
 		{
-			int diffCount = 0;
-			log_info("pg_autoctl received a signal to, "
-					 "handle dynamic services");
-
-			supervisor_dynamic_handle(supervisor, &diffCount);
-			if (diffCount != 0)
+			if (supervisor->allowDynamic && asked_to_handle_dynamic)
 			{
-				/*
-				 * We do not know if services where started or stopped. If
-				 * services where stopped we need to substract the number of
-				 * toggled from the running one. In that case we have to be
-				 * certain that we do not substract more than the subprocesses
-				 * already running. IF we do, then this is a dev error and we
-				 * should fail.
-				 */
-				if ((subprocessCount + diffCount) < 0)
+				int diffCount = 0;
+				log_info("pg_autoctl received a signal to, "
+						 "handle dynamic services");
+
+				supervisor_dynamic_handle(supervisor, &diffCount);
+				if (diffCount != 0)
 				{
-					log_fatal("BUG: dev error, toggled off more subprocess than"
-							  " running at the moment");
+					/*
+					 * We do not know if services where started or stopped. If
+					 * services where stopped we need to substract the number of
+					 * toggled from the running one. In that case we have to be
+					 * certain that we do not substract more than the subprocesses
+					 * already running. IF we do, then this is a dev error and we
+					 * should fail.
+					 */
+					if ((subprocessCount + diffCount) < 0)
+					{
+						log_fatal("BUG: dev error, toggled off more subprocess than"
+								  " running at the moment");
 
-					supervisor->cleanExit = false;
-					supervisor->shutdownSequenceInProgress = true;
-					supervisor_stop_subprocesses(supervisor);
-					break;
+						supervisor->cleanExit = false;
+						supervisor->shutdownSequenceInProgress = true;
+						supervisor_stop_subprocesses(supervisor);
+						break;
+					}
+					subprocessCount += diffCount;
 				}
-				subprocessCount += diffCount;
 			}
-		}
-
-		if (firstLoop)
-		{
 			firstLoop = false;
+			asked_to_handle_dynamic = false;
 		}
 		else
 		{
@@ -972,29 +969,92 @@ supervisor_shutdown_sequence(Supervisor *supervisor)
 
 
 /*
- * supervisor_dynamic_handle calls the dynamic handler if exits. It is the
- * handler's responsibility to add or remove dynamic services using the provided
- * api. The last argument, passed from our caller down to the dynamicHandler
- * function, will contain the net difference of succefully added and removed
- * services.
+ * supervisor_dynamic_handle enables and disables dynamic services based on
+ * configuration.
  *
- * Returns void.
+ * It asks the dynamic configuration for a list of enabled services (see
+ * dynamic_services_read_config() for details). Then it enables the services
+ * in that list and it disables any running services not present in that list.
+ *
+ * The net sum of newly enabled services and disabled services is recorded in
+ * the user provided diffCount.
  */
 static void
 supervisor_dynamic_handle(Supervisor *supervisor, int *diffCount)
 {
+	ServiceArray enabledServices = { 0 };
+	int affectedServices = 0;
+
 	/*
 	 * Call the dynamic function if defined. The last argument, diffCount
 	 * contains the of count of services affected, e.g. 1 started => 1,
 	 * 1 stopped => -1, 2 started and 3 stopped => -1 etc
 	 */
-	if (supervisor->dynamicHandler)
+
+	/* Nothing to be done */
+	if (supervisor->allowDynamic != true)
 	{
-		supervisor->dynamicHandler(supervisor, supervisor->dynamicHandlerArg,
-								   diffCount);
+		return;
 	}
 
-	asked_to_handle_dynamic = 0;
+	if (!dynamic_services_read_config(&enabledServices))
+	{
+		/* It was already logged why IFF it is an error */
+		return;
+	}
+
+	/*
+	 * Loop over the services that were explicitly set as enabled in the
+	 * configuration and enable them in the supervisor. Also known as wax-on.
+	 */
+	for (int serviceIndex = 0;
+		 serviceIndex < enabledServices.serviceCount;
+		 serviceIndex++)
+	{
+		Service *service = &(enabledServices.array[serviceIndex]);
+		if (supervisor_enable_dynamic_service(supervisor, service))
+		{
+			affectedServices++;
+		}
+	}
+
+	/*
+	 * Loop over the enabled services under supervision and try to find them in
+	 * the array populated by the configuration. If a service is not found, it
+	 * means that it has to be disabled. Also known as wax-off.
+	 */
+	for (int serviceIndex = 0;
+		 serviceIndex < supervisor->dynamicServicesEnabled.serviceCount;
+		 serviceIndex++)
+	{
+		Service *service = &(enabledServices.array[serviceIndex]);
+		bool found = false;
+
+		/* double loop but small numbers */
+		for (int enabledIndex = 0;
+			 enabledIndex < enabledServices.serviceCount;
+			 enabledIndex++)
+		{
+			Service *enabled = &(enabledServices.array[serviceIndex]);
+			if (strcmp(service->name, enabled->name) == 0)
+			{
+				found = true;
+				break;
+			}
+		}
+
+		if (found == false)
+		{
+			/* safe to remove because dynamicServicesEnabled.serviceCount changes accordingly */
+			if (supervisor_disable_dynamic_service(supervisor, service->name))
+			{
+				affectedServices--;
+			}
+		}
+	}
+
+	/* Unnessacerary to do it like that yet helps to keep the compiler happy */
+	*diffCount = affectedServices;
 }
 
 
@@ -1318,6 +1378,24 @@ supervisor_update_pidfile(Supervisor *supervisor)
 }
 
 
+static bool
+supervisor_service_exists(Supervisor *supervisor, const char *serviceName)
+{
+	Supervisor_it sit;
+	Service *service;
+
+	foreach_supervised_service(&sit, supervisor, service)
+	{
+		if (!strncmp(service->name, serviceName, strlen(serviceName)))
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+
 /*
  * supervisor_find_service_pid reads the pidfile contents and process it line
  * by line to find the pid of the given service name.
@@ -1371,24 +1449,6 @@ supervisor_find_service_pid(const char *pidfile,
 	}
 
 	free(fileContents);
-
-	return false;
-}
-
-
-bool
-supervisor_service_exists(Supervisor *supervisor, const char *serviceName)
-{
-	Supervisor_it sit;
-	Service *service;
-
-	foreach_supervised_service(&sit, supervisor, service)
-	{
-		if (!strncmp(service->name, serviceName, strlen(serviceName)))
-		{
-			return true;
-		}
-	}
 
 	return false;
 }

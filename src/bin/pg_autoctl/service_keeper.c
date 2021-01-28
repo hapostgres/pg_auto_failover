@@ -63,11 +63,13 @@ start_keeper(Keeper *keeper)
 		.array = {
 			{
 				SERVICE_NAME_POSTGRES,
+				SERVICE_NAME_POSTGRES,
 				RP_PERMANENT,
 				-1,
 				&service_postgres_ctl_start
 			},
 			{
+				SERVICE_NAME_KEEPER,
 				SERVICE_NAME_KEEPER,
 				RP_PERMANENT,
 				-1,
@@ -78,7 +80,7 @@ start_keeper(Keeper *keeper)
 		.serviceCount = 2,
 	};
 
-	return supervisor_start(services, pidfile, NULL, NULL);
+	return supervisor_start(services, pidfile, false /* allowDynamic */);
 }
 
 
