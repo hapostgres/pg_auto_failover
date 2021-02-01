@@ -170,7 +170,7 @@ cli_show_state_getopts(int argc, char **argv)
 
 	static struct option long_options[] = {
 		{ "pgdata", required_argument, NULL, 'D' },
-		{ "monitor", no_argument, NULL, 'm' },
+		{ "monitor", required_argument, NULL, 'm' },
 		{ "formation", required_argument, NULL, 'f' },
 		{ "group", required_argument, NULL, 'g' },
 		{ "count", required_argument, NULL, 'n' },
@@ -202,6 +202,19 @@ cli_show_state_getopts(int argc, char **argv)
 			{
 				strlcpy(options.pgSetup.pgdata, optarg, MAXPGPATH);
 				log_trace("--pgdata %s", options.pgSetup.pgdata);
+				break;
+			}
+
+			case 'm':
+			{
+				if (!validate_connection_string(optarg))
+				{
+					log_fatal("Failed to parse --monitor connection string, "
+							  "see above for details.");
+					exit(EXIT_CODE_BAD_ARGS);
+				}
+				strlcpy(options.monitor_pguri, optarg, MAXCONNINFO);
+				log_trace("--monitor %s", options.monitor_pguri);
 				break;
 			}
 
@@ -310,13 +323,25 @@ cli_show_state_getopts(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
-
-	if (!keeper_config_set_pathnames_from_pgdata(&(options.pathnames),
-												 options.pgSetup.pgdata))
+	/* when we have a monitor URI we don't need PGDATA */
+	if (IS_EMPTY_STRING_BUFFER(options.monitor_pguri))
 	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_ARGS);
+		cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
+
+		if (!keeper_config_set_pathnames_from_pgdata(&(options.pathnames),
+													 options.pgSetup.pgdata))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_CONFIG);
+		}
+	}
+	else
+	{
+		if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
+		{
+			log_warn("Given --monitor URI, the --pgdata option is ignored");
+			log_info("Using monitor URI \"%s\"", options.monitor_pguri);
+		}
 	}
 
 	/* ensure --formation, or get it from the configuration file */
@@ -342,10 +367,21 @@ cli_show_events(int argc, char **argv)
 	KeeperConfig config = keeperOptions;
 	Monitor monitor = { 0 };
 
-	if (!monitor_init_from_pgsetup(&monitor, &config.pgSetup))
+	if (!IS_EMPTY_STRING_BUFFER(config.monitor_pguri))
 	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_ARGS);
+		if (!monitor_init(&monitor, config.monitor_pguri))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+	}
+	else
+	{
+		if (!monitor_init_from_pgsetup(&monitor, &config.pgSetup))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
 	}
 
 	if (outputJSON)
@@ -390,10 +426,21 @@ cli_show_state(int argc, char **argv)
 		exit(EXIT_CODE_QUIT);
 	}
 
-	if (!monitor_init_from_pgsetup(&monitor, &config.pgSetup))
+	if (!IS_EMPTY_STRING_BUFFER(config.monitor_pguri))
 	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_ARGS);
+		if (!monitor_init(&monitor, config.monitor_pguri))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+	}
+	else
+	{
+		if (!monitor_init_from_pgsetup(&monitor, &config.pgSetup))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
 	}
 
 	if (outputJSON)
@@ -783,7 +830,7 @@ cli_show_uri_getopts(int argc, char **argv)
 
 	static struct option long_options[] = {
 		{ "pgdata", required_argument, NULL, 'D' },
-		{ "monitor", no_argument, NULL, 'm' },
+		{ "monitor", required_argument, NULL, 'm' },
 		{ "formation", required_argument, NULL, 'f' },
 		{ "json", no_argument, NULL, 'J' },
 		{ "version", no_argument, NULL, 'V' },
@@ -817,8 +864,14 @@ cli_show_uri_getopts(int argc, char **argv)
 
 			case 'm':
 			{
-				showUriOptions.monitorOnly = true;
-				log_trace("--monitor");
+				if (!validate_connection_string(optarg))
+				{
+					log_fatal("Failed to parse --monitor connection string, "
+							  "see above for details.");
+					exit(EXIT_CODE_BAD_ARGS);
+				}
+				strlcpy(options.monitor_pguri, optarg, MAXCONNINFO);
+				log_trace("--monitor %s", options.monitor_pguri);
 				break;
 			}
 
@@ -826,6 +879,12 @@ cli_show_uri_getopts(int argc, char **argv)
 			{
 				strlcpy(showUriOptions.formation, optarg, NAMEDATALEN);
 				log_trace("--formation %s", showUriOptions.formation);
+
+				if (strcmp(showUriOptions.formation, "monitor") == 0)
+				{
+					showUriOptions.monitorOnly = true;
+				}
+
 				break;
 			}
 
@@ -892,20 +951,25 @@ cli_show_uri_getopts(int argc, char **argv)
 		}
 	}
 
-	if (showUriOptions.monitorOnly &&
-		!IS_EMPTY_STRING_BUFFER(showUriOptions.formation))
+	/* when we have a monitor URI we don't need PGDATA */
+	if (IS_EMPTY_STRING_BUFFER(options.monitor_pguri))
 	{
-		log_fatal("Please use either --monitor or --formation, not both");
-		exit(EXIT_CODE_BAD_ARGS);
+		cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
+
+		if (!keeper_config_set_pathnames_from_pgdata(&(options.pathnames),
+													 options.pgSetup.pgdata))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_CONFIG);
+		}
 	}
-
-	cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
-
-	if (!keeper_config_set_pathnames_from_pgdata(&(options.pathnames),
-												 options.pgSetup.pgdata))
+	else
 	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_CONFIG);
+		if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
+		{
+			log_warn("Given --monitor URI, the --pgdata option is ignored");
+			log_info("Using monitor URI \"%s\"", options.monitor_pguri);
+		}
 	}
 
 	keeperOptions = options;
@@ -915,16 +979,18 @@ cli_show_uri_getopts(int argc, char **argv)
 
 
 /*
- * cli_show_uri prints the URI to connect to with psql.
+ * cli_show_uri_monitor_init_from_config initialises a Monitor instance so that
+ * we can connect to the monitor and grab information from there. The
+ * KeeperConfig instance might belong to a monitor node or to a keeper role.
+ *
+ * The SSLOptions are read from the configuration file and used to compute the
+ * target connection strings.
  */
 static void
-cli_show_uri(int argc, char **argv)
+cli_show_uri_monitor_init_from_config(KeeperConfig *kconfig,
+									  Monitor *monitor, SSLOptions *ssl)
 {
-	KeeperConfig kconfig = keeperOptions;
-	Monitor monitor = { 0 };
-	SSLOptions *ssl = NULL;
-
-	switch (ProbeConfigurationFileRole(kconfig.pathnames.config))
+	switch (ProbeConfigurationFileRole(kconfig->pathnames.config))
 	{
 		case PG_AUTOCTL_ROLE_MONITOR:
 		{
@@ -935,7 +1001,7 @@ cli_show_uri(int argc, char **argv)
 			char connInfo[MAXCONNINFO];
 
 			if (!monitor_config_init_from_pgsetup(&mconfig,
-												  &kconfig.pgSetup,
+												  &(kconfig->pgSetup),
 												  missingPgdataIsOk,
 												  pgIsNotRunningIsOk))
 			{
@@ -949,12 +1015,13 @@ cli_show_uri(int argc, char **argv)
 				exit(EXIT_CODE_BAD_CONFIG);
 			}
 
-			if (!monitor_init(&monitor, connInfo))
+			if (!monitor_init(monitor, connInfo))
 			{
 				/* errors have already been logged */
 				exit(EXIT_CODE_BAD_CONFIG);
 			}
-			ssl = &(mconfig.pgSetup.ssl);
+
+			*ssl = mconfig.pgSetup.ssl;
 
 			break;
 		}
@@ -963,28 +1030,67 @@ cli_show_uri(int argc, char **argv)
 		{
 			bool monitorDisabledIsOk = false;
 
-			if (!keeper_config_read_file_skip_pgsetup(&kconfig,
+			if (!keeper_config_read_file_skip_pgsetup(kconfig,
 													  monitorDisabledIsOk))
 			{
 				/* errors have already been logged */
 				exit(EXIT_CODE_BAD_CONFIG);
 			}
 
-			if (!monitor_init(&monitor, kconfig.monitor_pguri))
+			if (!monitor_init(monitor, kconfig->monitor_pguri))
 			{
 				/* errors have already been logged */
 				exit(EXIT_CODE_BAD_CONFIG);
 			}
-			ssl = &(kconfig.pgSetup.ssl);
+
+			*ssl = kconfig->pgSetup.ssl;
 			break;
 		}
 
 		default:
 		{
 			log_fatal("Unrecognized configuration file \"%s\"",
-					  kconfig.pathnames.config);
+					  kconfig->pathnames.config);
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
+	}
+}
+
+
+/*
+ * cli_show_uri prints the URI to connect to with psql.
+ */
+static void
+cli_show_uri(int argc, char **argv)
+{
+	KeeperConfig kconfig = keeperOptions;
+	Monitor monitor = { 0 };
+	SSLOptions ssl = { 0 };
+
+	/*
+	 * We are given either --monitor postgres://uri or --pgdata; in the first
+	 * case we just connect to that URI, in the second case we read the monitor
+	 * URI's from the local configuration file.
+	 */
+	if (!IS_EMPTY_STRING_BUFFER(kconfig.monitor_pguri))
+	{
+		if (!monitor_init(&monitor, kconfig.monitor_pguri))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		/* cook the sslmode=prefer bits */
+		ssl.active = true;
+		ssl.sslMode = SSL_MODE_PREFER;
+		strlcpy(ssl.sslModeStr,
+				pgsetup_sslmode_to_string(ssl.sslMode),
+				sizeof(ssl.sslModeStr));
+	}
+	else
+	{
+		/* read the monitor URI from the configuration file */
+		(void) cli_show_uri_monitor_init_from_config(&kconfig, &monitor, &ssl);
 	}
 
 	if (showUriOptions.monitorOnly)
@@ -993,11 +1099,13 @@ cli_show_uri(int argc, char **argv)
 	}
 	else if (!IS_EMPTY_STRING_BUFFER(showUriOptions.formation))
 	{
-		(void) print_formation_uri(ssl, &monitor, showUriOptions.formation, stdout);
+		(void) print_formation_uri(&ssl, &monitor,
+								   showUriOptions.formation,
+								   stdout);
 	}
 	else
 	{
-		(void) print_all_uri(ssl, &monitor, stdout);
+		(void) print_all_uri(&ssl, &monitor, stdout);
 	}
 }
 
