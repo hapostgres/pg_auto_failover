@@ -31,15 +31,16 @@ static void keeper_cli_formation_drop(int argc, char **argv);
 CommandLine create_formation_command =
 	make_command("formation",
 				 "Create a new formation on the pg_auto_failover monitor",
-				 " [ --pgdata --formation --kind --dbname --with-secondary " \
-				 "--without-secondary ] ",
-				 "  --pgdata               path to data directory	 \n" \
-				 "  --formation            name of the formation to create \n" \
-				 "  --kind                 formation kind, either \"pgsql\" or \"citus\" \n" \
-				 "  --dbname               name for postgres database to use in this formation \n" \
-				 "  --enable-secondary     create a formation that has multiple nodes that can be \n" \
-				 "                         used for fail over when others have issues \n" \
-				 "  --disable-secondary    create a citus formation without nodes to fail over to \n" \
+				 " [ --pgdata --monitor --formation --kind --dbname "
+				 " --with-secondary --without-secondary ] ",
+				 "  --pgdata      path to data directory\n"
+				 "  --monitor     pg_auto_failover Monitor Postgres URL\n"
+				 "  --formation   name of the formation to create \n"
+				 "  --kind        formation kind, either \"pgsql\" or \"citus\"\n"
+				 "  --dbname      name for postgres database to use in this formation \n"
+				 "  --enable-secondary     create a formation that has multiple nodes that can be \n"
+				 "                         used for fail over when others have issues \n"
+				 "  --disable-secondary    create a citus formation without nodes to fail over to \n"
 				 "  --number-sync-standbys minimum number of standbys to confirm write \n",
 				 keeper_cli_formation_create_getopts,
 				 keeper_cli_formation_create);
@@ -49,6 +50,7 @@ CommandLine drop_formation_command =
 				 "Drop a formation on the pg_auto_failover monitor",
 				 " [ --pgdata --formation ]",
 				 "  --pgdata      path to data directory	 \n" \
+				 "  --monitor     pg_auto_failover Monitor Postgres URL\n"
 				 "  --formation   name of the formation to drop \n",
 				 keeper_cli_formation_getopts,
 				 keeper_cli_formation_drop);
@@ -67,6 +69,7 @@ keeper_cli_formation_getopts(int argc, char **argv)
 
 	static struct option long_options[] = {
 		{ "pgdata", required_argument, NULL, 'D' },
+		{ "monitor", required_argument, NULL, 'm' },
 		{ "formation", required_argument, NULL, 'f' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
@@ -86,6 +89,19 @@ keeper_cli_formation_getopts(int argc, char **argv)
 			{
 				strlcpy(options.pgSetup.pgdata, optarg, MAXPGPATH);
 				log_trace("--pgdata %s", options.pgSetup.pgdata);
+				break;
+			}
+
+			case 'm':
+			{
+				if (!validate_connection_string(optarg))
+				{
+					log_fatal("Failed to parse --monitor connection string, "
+							  "see above for details.");
+					exit(EXIT_CODE_BAD_ARGS);
+				}
+				strlcpy(options.monitor_pguri, optarg, MAXCONNINFO);
+				log_trace("--monitor %s", options.monitor_pguri);
 				break;
 			}
 
@@ -157,7 +173,19 @@ keeper_cli_formation_getopts(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
+	/* when we have a monitor URI we don't need PGDATA */
+	if (IS_EMPTY_STRING_BUFFER(options.monitor_pguri))
+	{
+		cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
+	}
+	else
+	{
+		if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
+		{
+			log_warn("Given --monitor URI, the --pgdata option is ignored");
+			log_info("Using monitor URI \"%s\"", options.monitor_pguri);
+		}
+	}
 
 	/* publish our option parsing in the global variable */
 	formationOptions = options;
@@ -180,6 +208,7 @@ keeper_cli_formation_create_getopts(int argc, char **argv)
 
 	static struct option long_options[] = {
 		{ "pgdata", required_argument, NULL, 'D' },
+		{ "monitor", required_argument, NULL, 'm' },
 		{ "formation", required_argument, NULL, 'f' },
 		{ "kind", required_argument, NULL, 'k' },
 		{ "dbname", required_argument, NULL, 'd' },
@@ -207,6 +236,19 @@ keeper_cli_formation_create_getopts(int argc, char **argv)
 			{
 				strlcpy(options.pgSetup.pgdata, optarg, MAXPGPATH);
 				log_trace("--pgdata %s", options.pgSetup.pgdata);
+				break;
+			}
+
+			case 'm':
+			{
+				if (!validate_connection_string(optarg))
+				{
+					log_fatal("Failed to parse --monitor connection string, "
+							  "see above for details.");
+					exit(EXIT_CODE_BAD_ARGS);
+				}
+				strlcpy(options.monitor_pguri, optarg, MAXCONNINFO);
+				log_trace("--monitor %s", options.monitor_pguri);
 				break;
 			}
 
@@ -316,7 +358,19 @@ keeper_cli_formation_create_getopts(int argc, char **argv)
 		}
 	}
 
-	cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
+	/* when we have a monitor URI we don't need PGDATA */
+	if (IS_EMPTY_STRING_BUFFER(options.monitor_pguri))
+	{
+		cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
+	}
+	else
+	{
+		if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
+		{
+			log_warn("Given --monitor URI, the --pgdata option is ignored");
+			log_info("Using monitor URI \"%s\"", options.monitor_pguri);
+		}
+	}
 
 	if (IS_EMPTY_STRING_BUFFER(options.formation) ||
 		IS_EMPTY_STRING_BUFFER(options.formationKind))
@@ -350,10 +404,21 @@ keeper_cli_formation_create(int argc, char **argv)
 	FormationConfig config = formationOptions;
 	Monitor monitor = { 0 };
 
-	if (!monitor_init_from_pgsetup(&monitor, &config.pgSetup))
+	if (IS_EMPTY_STRING_BUFFER(config.monitor_pguri))
 	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_ARGS);
+		if (!monitor_init_from_pgsetup(&monitor, &config.pgSetup))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+	}
+	else
+	{
+		if (!monitor_init(&monitor, config.monitor_pguri))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
 	}
 
 	if (!monitor_create_formation(&monitor,
@@ -388,10 +453,21 @@ keeper_cli_formation_drop(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!monitor_init_from_pgsetup(&monitor, &config.pgSetup))
+	if (IS_EMPTY_STRING_BUFFER(config.monitor_pguri))
 	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_ARGS);
+		if (!monitor_init_from_pgsetup(&monitor, &config.pgSetup))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+	}
+	else
+	{
+		if (!monitor_init(&monitor, config.monitor_pguri))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
 	}
 
 	if (!monitor_drop_formation(&monitor, config.formation))
