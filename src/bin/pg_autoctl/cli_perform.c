@@ -205,7 +205,15 @@ cli_perform_failover_getopts(int argc, char **argv)
 	}
 
 	/* when we have a monitor URI we don't need PGDATA */
-	if (IS_EMPTY_STRING_BUFFER(options.monitor_pguri))
+	if (cli_use_monitor_option(&options))
+	{
+		if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
+		{
+			log_warn("Given --monitor URI, the --pgdata option is ignored");
+			log_info("Connecting to monitor at \"%s\"", options.monitor_pguri);
+		}
+	}
+	else
 	{
 		cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
 
@@ -214,14 +222,6 @@ cli_perform_failover_getopts(int argc, char **argv)
 		{
 			/* errors have already been logged */
 			exit(EXIT_CODE_BAD_ARGS);
-		}
-	}
-	else
-	{
-		if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
-		{
-			log_warn("Given --monitor URI, the --pgdata option is ignored");
-			log_info("Connecting to monitor at \"%s\"", options.monitor_pguri);
 		}
 	}
 

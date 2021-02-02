@@ -324,7 +324,15 @@ cli_show_state_getopts(int argc, char **argv)
 	}
 
 	/* when we have a monitor URI we don't need PGDATA */
-	if (IS_EMPTY_STRING_BUFFER(options.monitor_pguri))
+	if (cli_use_monitor_option(&options))
+	{
+		if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
+		{
+			log_warn("Given --monitor URI, the --pgdata option is ignored");
+			log_info("Connecting to monitor at \"%s\"", options.monitor_pguri);
+		}
+	}
+	else
 	{
 		cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
 
@@ -333,14 +341,6 @@ cli_show_state_getopts(int argc, char **argv)
 		{
 			/* errors have already been logged */
 			exit(EXIT_CODE_BAD_CONFIG);
-		}
-	}
-	else
-	{
-		if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
-		{
-			log_warn("Given --monitor URI, the --pgdata option is ignored");
-			log_info("Connecting to monitor at \"%s\"", options.monitor_pguri);
 		}
 	}
 
@@ -367,22 +367,7 @@ cli_show_events(int argc, char **argv)
 	KeeperConfig config = keeperOptions;
 	Monitor monitor = { 0 };
 
-	if (!IS_EMPTY_STRING_BUFFER(config.monitor_pguri))
-	{
-		if (!monitor_init(&monitor, config.monitor_pguri))
-		{
-			/* errors have already been logged */
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-	}
-	else
-	{
-		if (!monitor_init_from_pgsetup(&monitor, &config.pgSetup))
-		{
-			/* errors have already been logged */
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-	}
+	(void) cli_monitor_init_from_option_or_config(&monitor, &config);
 
 	if (outputJSON)
 	{
@@ -426,22 +411,7 @@ cli_show_state(int argc, char **argv)
 		exit(EXIT_CODE_QUIT);
 	}
 
-	if (!IS_EMPTY_STRING_BUFFER(config.monitor_pguri))
-	{
-		if (!monitor_init(&monitor, config.monitor_pguri))
-		{
-			/* errors have already been logged */
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-	}
-	else
-	{
-		if (!monitor_init_from_pgsetup(&monitor, &config.pgSetup))
-		{
-			/* errors have already been logged */
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-	}
+	(void) cli_monitor_init_from_option_or_config(&monitor, &config);
 
 	if (outputJSON)
 	{
@@ -743,7 +713,15 @@ cli_show_standby_names_getopts(int argc, char **argv)
 	}
 
 	/* when we have a monitor URI we don't need PGDATA */
-	if (IS_EMPTY_STRING_BUFFER(options.monitor_pguri))
+	if (cli_use_monitor_option(&options))
+	{
+		if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
+		{
+			log_warn("Given --monitor URI, the --pgdata option is ignored");
+			log_info("Connecting to monitor at \"%s\"", options.monitor_pguri);
+		}
+	}
+	else
 	{
 		cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
 
@@ -752,14 +730,6 @@ cli_show_standby_names_getopts(int argc, char **argv)
 		{
 			/* errors have already been logged */
 			exit(EXIT_CODE_BAD_ARGS);
-		}
-	}
-	else
-	{
-		if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
-		{
-			log_warn("Given --monitor URI, the --pgdata option is ignored");
-			log_info("Connecting to monitor at \"%s\"", options.monitor_pguri);
 		}
 	}
 
@@ -959,7 +929,15 @@ cli_show_uri_getopts(int argc, char **argv)
 	}
 
 	/* when we have a monitor URI we don't need PGDATA */
-	if (IS_EMPTY_STRING_BUFFER(options.monitor_pguri))
+	if (cli_use_monitor_option(&options))
+	{
+		if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
+		{
+			log_warn("Given --monitor URI, the --pgdata option is ignored");
+			log_info("Connecting to monitor at \"%s\"", options.monitor_pguri);
+		}
+	}
+	else
 	{
 		cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
 
@@ -968,14 +946,6 @@ cli_show_uri_getopts(int argc, char **argv)
 		{
 			/* errors have already been logged */
 			exit(EXIT_CODE_BAD_CONFIG);
-		}
-	}
-	else
-	{
-		if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
-		{
-			log_warn("Given --monitor URI, the --pgdata option is ignored");
-			log_info("Connecting to monitor at \"%s\"", options.monitor_pguri);
 		}
 	}
 

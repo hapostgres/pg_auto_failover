@@ -361,15 +361,15 @@ keeper_cli_formation_create_getopts(int argc, char **argv)
 	/* when we have a monitor URI we don't need PGDATA */
 	if (IS_EMPTY_STRING_BUFFER(options.monitor_pguri))
 	{
-		cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
-	}
-	else
-	{
 		if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 		{
 			log_warn("Given --monitor URI, the --pgdata option is ignored");
 			log_info("Connecting to monitor at \"%s\"", options.monitor_pguri);
 		}
+	}
+	else
+	{
+		cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
 	}
 
 	if (IS_EMPTY_STRING_BUFFER(options.formation) ||

@@ -1987,17 +1987,17 @@ cli_get_name_getopts(int argc, char **argv)
 
 	/* now that we have the command line parameters, prepare the options */
 	/* when we have a monitor URI we don't need PGDATA */
-	if (IS_EMPTY_STRING_BUFFER(options.monitor_pguri))
-	{
-		(void) prepare_keeper_options(&options);
-	}
-	else
+	if (cli_use_monitor_option(&options))
 	{
 		if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 		{
 			log_warn("Given --monitor URI, the --pgdata option is ignored");
 			log_info("Connecting to monitor at \"%s\"", options.monitor_pguri);
 		}
+	}
+	else
+	{
+		(void) prepare_keeper_options(&options);
 	}
 
 	/* ensure --formation, or get it from the configuration file */
@@ -2011,6 +2011,29 @@ cli_get_name_getopts(int argc, char **argv)
 	keeperOptions = options;
 
 	return optind;
+}
+
+
+/*
+ * cli_use_monitor_option returns true when the --monitor option should be
+ * used, or when PG_AUTOCTL_MONITOR has been set in the environment. In that
+ * case the options->monitor_pguri is also set to the value found in the
+ * environment.
+ */
+bool
+cli_use_monitor_option(KeeperConfig *options)
+{
+	if (IS_EMPTY_STRING_BUFFER(options->monitor_pguri))
+	{
+		if (get_env_copy(PG_AUTOCTL_MONITOR,
+						 options->monitor_pguri,
+						 sizeof(options->monitor_pguri)))
+		{
+			return true;
+		}
+	}
+
+	return false;
 }
 
 

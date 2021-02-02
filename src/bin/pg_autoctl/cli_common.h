@@ -189,6 +189,7 @@ bool cli_pg_autoctl_reload(const char *pidfile);
 
 int cli_node_metadata_getopts(int argc, char **argv);
 int cli_get_name_getopts(int argc, char **argv);
+bool cli_use_monitor_option(KeeperConfig *options);
 void cli_monitor_init_from_option_or_config(Monitor *monitor,
 											KeeperConfig *kconfig);
 void cli_ensure_node_name(Keeper *keeper);
