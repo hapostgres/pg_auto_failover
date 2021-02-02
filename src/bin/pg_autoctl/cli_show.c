@@ -340,7 +340,7 @@ cli_show_state_getopts(int argc, char **argv)
 		if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 		{
 			log_warn("Given --monitor URI, the --pgdata option is ignored");
-			log_info("Using monitor URI \"%s\"", options.monitor_pguri);
+			log_info("Connecting to monitor at \"%s\"", options.monitor_pguri);
 		}
 	}
 
@@ -608,6 +608,7 @@ cli_show_standby_names_getopts(int argc, char **argv)
 
 	static struct option long_options[] = {
 		{ "pgdata", required_argument, NULL, 'D' },
+		{ "monitor", required_argument, NULL, 'm' },
 		{ "formation", required_argument, NULL, 'f' },
 		{ "group", required_argument, NULL, 'g' },
 		{ "json", no_argument, NULL, 'J' },
@@ -639,6 +640,19 @@ cli_show_standby_names_getopts(int argc, char **argv)
 			{
 				strlcpy(options.pgSetup.pgdata, optarg, MAXPGPATH);
 				log_trace("--pgdata %s", options.pgSetup.pgdata);
+				break;
+			}
+
+			case 'm':
+			{
+				if (!validate_connection_string(optarg))
+				{
+					log_fatal("Failed to parse --monitor connection string, "
+							  "see above for details.");
+					exit(EXIT_CODE_BAD_ARGS);
+				}
+				strlcpy(options.monitor_pguri, optarg, MAXCONNINFO);
+				log_trace("--monitor %s", options.monitor_pguri);
 				break;
 			}
 
@@ -728,13 +742,25 @@ cli_show_standby_names_getopts(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
-
-	if (!keeper_config_set_pathnames_from_pgdata(&(options.pathnames),
-												 options.pgSetup.pgdata))
+	/* when we have a monitor URI we don't need PGDATA */
+	if (IS_EMPTY_STRING_BUFFER(options.monitor_pguri))
 	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_ARGS);
+		cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
+
+		if (!keeper_config_set_pathnames_from_pgdata(&(options.pathnames),
+													 options.pgSetup.pgdata))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+	}
+	else
+	{
+		if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
+		{
+			log_warn("Given --monitor URI, the --pgdata option is ignored");
+			log_info("Connecting to monitor at \"%s\"", options.monitor_pguri);
+		}
 	}
 
 	/* ensure --formation, or get it from the configuration file */
@@ -761,30 +787,9 @@ cli_show_standby_names(int argc, char **argv)
 	Monitor monitor = { 0 };
 	char synchronous_standby_names[BUFSIZE] = { 0 };
 
-	/* change the default group when it's not been given on the command */
-	if (config.groupId == -1)
-	{
-		config.groupId = 0;
-	}
+	(void) cli_monitor_init_from_option_or_config(&monitor, &config);
 
-	if (!monitor_init_from_pgsetup(&monitor, &config.pgSetup))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_ARGS);
-	}
-
-	pgAutoCtlNodeRole role = ProbeConfigurationFileRole(config.pathnames.config);
-
-	if (role == PG_AUTOCTL_ROLE_KEEPER)
-	{
-		bool monitorDisabledIsOk = false;
-
-		if (!keeper_config_read_file_skip_pgsetup(&config, monitorDisabledIsOk))
-		{
-			/* errors have already been logged */
-			exit(EXIT_CODE_BAD_CONFIG);
-		}
-	}
+	(void) cli_set_groupId(&monitor, &config);
 
 	if (!monitor_synchronous_standby_names(
 			&monitor,
@@ -803,6 +808,8 @@ cli_show_standby_names(int argc, char **argv)
 		JSON_Value *js = json_value_init_object();
 		JSON_Object *jsObj = json_value_get_object(js);
 
+		json_object_set_string(jsObj, "formation", config.formation);
+		json_object_set_number(jsObj, "group", (double) config.groupId);
 		json_object_set_string(jsObj,
 							   "synchronous_standby_names",
 							   synchronous_standby_names);
@@ -968,7 +975,7 @@ cli_show_uri_getopts(int argc, char **argv)
 		if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 		{
 			log_warn("Given --monitor URI, the --pgdata option is ignored");
-			log_info("Using monitor URI \"%s\"", options.monitor_pguri);
+			log_info("Connecting to monitor at \"%s\"", options.monitor_pguri);
 		}
 	}
 

@@ -167,6 +167,7 @@ void set_first_pgctl(PostgresSetup *pgSetup);
 bool monitor_init_from_pgsetup(Monitor *monitor, PostgresSetup *pgSetup);
 
 void exit_unless_role_is_keeper(KeeperConfig *kconfig);
+void cli_set_groupId(Monitor *monitor, KeeperConfig *kconfig);
 
 /* cli_create_drop_node.c */
 bool cli_create_config(Keeper *keeper);
@@ -188,6 +189,8 @@ bool cli_pg_autoctl_reload(const char *pidfile);
 
 int cli_node_metadata_getopts(int argc, char **argv);
 int cli_get_name_getopts(int argc, char **argv);
+void cli_monitor_init_from_option_or_config(Monitor *monitor,
+											KeeperConfig *kconfig);
 void cli_ensure_node_name(Keeper *keeper);
 
 bool discover_hostname(char *hostname, int size,

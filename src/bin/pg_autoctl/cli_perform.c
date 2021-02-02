@@ -78,6 +78,7 @@ cli_perform_failover_getopts(int argc, char **argv)
 
 	static struct option long_options[] = {
 		{ "pgdata", required_argument, NULL, 'D' },
+		{ "monitor", required_argument, NULL, 'm' },
 		{ "formation", required_argument, NULL, 'f' },
 		{ "group", required_argument, NULL, 'g' },
 		{ "version", no_argument, NULL, 'V' },
@@ -108,6 +109,19 @@ cli_perform_failover_getopts(int argc, char **argv)
 			{
 				strlcpy(options.pgSetup.pgdata, optarg, MAXPGPATH);
 				log_trace("--pgdata %s", options.pgSetup.pgdata);
+				break;
+			}
+
+			case 'm':
+			{
+				if (!validate_connection_string(optarg))
+				{
+					log_fatal("Failed to parse --monitor connection string, "
+							  "see above for details.");
+					exit(EXIT_CODE_BAD_ARGS);
+				}
+				strlcpy(options.monitor_pguri, optarg, MAXCONNINFO);
+				log_trace("--monitor %s", options.monitor_pguri);
 				break;
 			}
 
@@ -190,13 +204,25 @@ cli_perform_failover_getopts(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
-
-	if (!keeper_config_set_pathnames_from_pgdata(&(options.pathnames),
-												 options.pgSetup.pgdata))
+	/* when we have a monitor URI we don't need PGDATA */
+	if (IS_EMPTY_STRING_BUFFER(options.monitor_pguri))
 	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_ARGS);
+		cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
+
+		if (!keeper_config_set_pathnames_from_pgdata(&(options.pathnames),
+													 options.pgSetup.pgdata))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+	}
+	else
+	{
+		if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
+		{
+			log_warn("Given --monitor URI, the --pgdata option is ignored");
+			log_info("Connecting to monitor at \"%s\"", options.monitor_pguri);
+		}
 	}
 
 	/* ensure --formation, or get it from the configuration file */
@@ -221,91 +247,12 @@ cli_perform_failover(int argc, char **argv)
 {
 	KeeperConfig config = keeperOptions;
 	Monitor monitor = { 0 };
-	int groupsCount = 0;
-	PgInstanceKind nodeKind = NODE_KIND_UNKNOWN;
 
 	char *channels[] = { "state", NULL };
 
-	if (!keeper_config_set_pathnames_from_pgdata(&config.pathnames,
-												 config.pgSetup.pgdata))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_CONFIG);
-	}
+	(void) cli_monitor_init_from_option_or_config(&monitor, &config);
 
-	if (!monitor_init_from_pgsetup(&monitor, &config.pgSetup))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_ARGS);
-	}
-
-	if (!monitor_count_groups(&monitor, config.formation, &groupsCount))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_MONITOR);
-	}
-
-	if (groupsCount == 0)
-	{
-		/* nothing to be done here */
-		log_fatal("The monitor currently has no Postgres nodes "
-				  "registered in formation \"%s\"",
-				  config.formation);
-		exit(EXIT_CODE_BAD_STATE);
-	}
-
-	/*
-	 * When --group was not given, we may proceed when there is only one
-	 * possible target group in the formation, which is the case with Postgres
-	 * standalone setups.
-	 */
-	if (config.groupId == -1)
-	{
-		/*
-		 * When --group is not given and we have a keeper node, we can grab a
-		 * default from the configuration file.
-		 */
-		pgAutoCtlNodeRole role =
-			ProbeConfigurationFileRole(config.pathnames.config);
-
-		if (role == PG_AUTOCTL_ROLE_KEEPER)
-		{
-			const bool missingPgdataIsOk = true;
-			const bool pgIsNotRunningIsOk = true;
-			const bool monitorDisabledIsOk = false;
-
-			if (!keeper_config_read_file(&config,
-										 missingPgdataIsOk,
-										 pgIsNotRunningIsOk,
-										 monitorDisabledIsOk))
-			{
-				/* errors have already been logged */
-				exit(EXIT_CODE_BAD_CONFIG);
-			}
-
-			log_info("Targetting group %d in formation \"%s\"",
-					 config.groupId,
-					 config.formation);
-
-			nodeKind = config.pgSetup.pgKind;
-		}
-		else
-		{
-			if (groupsCount == 1)
-			{
-				/* we have only one group, it's group number zero, proceed */
-				config.groupId = 0;
-				nodeKind = NODE_KIND_STANDALONE;
-			}
-			else
-			{
-				log_error("Please use the --group option to target a "
-						  "specific group in formation \"%s\"",
-						  config.formation);
-				exit(EXIT_CODE_BAD_ARGS);
-			}
-		}
-	}
+	(void) cli_set_groupId(&monitor, &config);
 
 	/* start listening to the state changes before we call perform_failover */
 	if (!pgsql_listen(&(monitor.pgsql), channels))
@@ -325,7 +272,7 @@ cli_perform_failover(int argc, char **argv)
 	if (!monitor_wait_until_some_node_reported_state(&monitor,
 													 config.formation,
 													 config.groupId,
-													 nodeKind,
+													 config.pgSetup.pgKind,
 													 PRIMARY_STATE))
 	{
 		log_error("Failed to wait until a new primary has been notified");
@@ -353,11 +300,7 @@ cli_perform_promotion(int argc, char **argv)
 
 	keeper.config = keeperOptions;
 
-	if (!monitor_init_from_pgsetup(monitor, &keeper.config.pgSetup))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_ARGS);
-	}
+	(void) cli_monitor_init_from_option_or_config(monitor, config);
 
 	/* grab --name from either the command options or the configuration file */
 	(void) cli_ensure_node_name(&keeper);

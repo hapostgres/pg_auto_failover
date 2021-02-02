@@ -183,7 +183,7 @@ keeper_cli_formation_getopts(int argc, char **argv)
 		if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 		{
 			log_warn("Given --monitor URI, the --pgdata option is ignored");
-			log_info("Using monitor URI \"%s\"", options.monitor_pguri);
+			log_info("Connecting to monitor at \"%s\"", options.monitor_pguri);
 		}
 	}
 
@@ -368,7 +368,7 @@ keeper_cli_formation_create_getopts(int argc, char **argv)
 		if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 		{
 			log_warn("Given --monitor URI, the --pgdata option is ignored");
-			log_info("Using monitor URI \"%s\"", options.monitor_pguri);
+			log_info("Connecting to monitor at \"%s\"", options.monitor_pguri);
 		}
 	}
 
