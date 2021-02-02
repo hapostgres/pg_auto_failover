@@ -1991,11 +1991,12 @@ cli_get_name_getopts(int argc, char **argv)
 	{
 		if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 		{
-			log_warn("Given --monitor URI, the --pgdata option is ignored");
 			log_info("Connecting to monitor at \"%s\"", options.monitor_pguri);
 		}
 	}
-	else
+
+	/* when --pgdata is given, still initialise our pathnames */
+	if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 	{
 		(void) prepare_keeper_options(&options);
 	}
@@ -2029,6 +2030,8 @@ cli_use_monitor_option(KeeperConfig *options)
 						 options->monitor_pguri,
 						 sizeof(options->monitor_pguri)))
 		{
+			log_debug("Using environment PG_AUTOCTL_MONITOR \"%s\"",
+					  options->monitor_pguri);
 			return true;
 		}
 	}

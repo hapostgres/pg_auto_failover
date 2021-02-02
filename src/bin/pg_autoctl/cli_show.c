@@ -335,7 +335,11 @@ cli_show_state_getopts(int argc, char **argv)
 	else
 	{
 		cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
+	}
 
+	/* when --pgdata is given, still initialise our pathnames */
+	if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
+	{
 		if (!keeper_config_set_pathnames_from_pgdata(&(options.pathnames),
 													 options.pgSetup.pgdata))
 		{
@@ -724,12 +728,16 @@ cli_show_standby_names_getopts(int argc, char **argv)
 	else
 	{
 		cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
+	}
 
+	/* when --pgdata is given, still initialise our pathnames */
+	if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
+	{
 		if (!keeper_config_set_pathnames_from_pgdata(&(options.pathnames),
 													 options.pgSetup.pgdata))
 		{
 			/* errors have already been logged */
-			exit(EXIT_CODE_BAD_ARGS);
+			exit(EXIT_CODE_BAD_CONFIG);
 		}
 	}
 
@@ -940,7 +948,11 @@ cli_show_uri_getopts(int argc, char **argv)
 	else
 	{
 		cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
+	}
 
+	/* when --pgdata is given, still initialise our pathnames */
+	if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
+	{
 		if (!keeper_config_set_pathnames_from_pgdata(&(options.pathnames),
 													 options.pgSetup.pgdata))
 		{
