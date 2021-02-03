@@ -146,6 +146,7 @@ register_node(PG_FUNCTION_ARGS)
 		{
 			/* first node in the list, let's switch to citus */
 			SetFormationKind(formationId, expectedFormationKind);
+			formation->kind = expectedFormationKind;
 		}
 		else
 		{
