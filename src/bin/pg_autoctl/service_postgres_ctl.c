@@ -284,6 +284,7 @@ service_postgres_ctl_loop(LocalPostgresServer *postgres)
 							  "see above for details.");
 
 					/* maybe next round will have better luck? */
+					pg_usleep(100 * 1000);  /* 100ms */
 					continue;
 				}
 
@@ -322,6 +323,8 @@ service_postgres_ctl_loop(LocalPostgresServer *postgres)
 			{
 				*pgSetup = newPgSetup;
 			}
+
+			pg_usleep(100 * 1000);  /* 100ms */
 			continue;
 		}
 
@@ -343,6 +346,7 @@ service_postgres_ctl_loop(LocalPostgresServer *postgres)
 			if (!keeper_postgres_state_read(pgStatus, filename))
 			{
 				/* errors have already been logged, will try again */
+				pg_usleep(100 * 1000);  /* 100ms */
 				continue;
 			}
 
