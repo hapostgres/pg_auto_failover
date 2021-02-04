@@ -2159,6 +2159,7 @@ keeper_reload_configuration(Keeper *keeper, bool firstLoop, bool doInit)
 
 		/* disconnect to the current monitor if we're connected */
 		(void) pgsql_finish(&(keeper->monitor.pgsql));
+		(void) pgsql_finish(&(keeper->monitor.notificationClient));
 
 		if (keeper_config_read_file(&newConfig,
 									missingPgdataIsOk,

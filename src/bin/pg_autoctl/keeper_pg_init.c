@@ -546,6 +546,7 @@ wait_until_primary_is_ready(Keeper *keeper,
 			KeeperStateData *keeperState = &(keeper->state);
 			int timeoutMs = PG_AUTOCTL_KEEPER_SLEEP_TIME * 1000;
 
+			(void) pgsql_listen(&(monitor->notificationClient), &((char *){ 0 }));
 			bool groupStateHasChanged = false;
 
 			(void) monitor_wait_for_state_change(monitor,
@@ -554,6 +555,7 @@ wait_until_primary_is_ready(Keeper *keeper,
 												 keeperState->current_node_id,
 												 timeoutMs,
 												 &groupStateHasChanged);
+			pgsql_finish(&(monitor->notificationClient));
 		}
 
 		if (!monitor_node_active(&(keeper->monitor),

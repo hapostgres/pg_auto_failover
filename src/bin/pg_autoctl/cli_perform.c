@@ -308,7 +308,7 @@ cli_perform_failover(int argc, char **argv)
 	}
 
 	/* start listening to the state changes before we call perform_failover */
-	if (!pgsql_listen(&(monitor.pgsql), channels))
+	if (!pgsql_listen(&(monitor.notificationClient), channels))
 	{
 		log_error("Failed to listen to state changes from the monitor");
 		exit(EXIT_CODE_MONITOR);
@@ -372,7 +372,7 @@ cli_perform_promotion(int argc, char **argv)
 	}
 
 	/* start listening to the state changes before we call perform_promotion */
-	if (!pgsql_listen(&(monitor->pgsql), channels))
+	if (!pgsql_listen(&(monitor->notificationClient), channels))
 	{
 		log_error("Failed to listen to state changes from the monitor");
 		exit(EXIT_CODE_MONITOR);
