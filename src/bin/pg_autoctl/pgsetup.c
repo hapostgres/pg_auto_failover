@@ -460,14 +460,19 @@ get_pgpid(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk)
 	{
 		/* yeah, that happens (race condition, kind of) */
 		log_debug("The PID file \"%s\" is empty", pidfile);
+		free(contents);
 		return false;
 	}
 	else if (splitLines(contents, lines, 1) != 1 ||
 			 !stringToInt(lines[0], &pid))
 	{
 		log_warn("Invalid data in PID file \"%s\"", pidfile);
+		free(contents);
 		return false;
 	}
+
+	free(contents);
+	contents = NULL;
 
 	/* postmaster PID (or negative of a standalone backend's PID) */
 	if (pid < 0)
@@ -764,6 +769,7 @@ pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 		!get_env_copy("PG_REGRESS_SOCK_DIR", pg_regress_sock_dir, MAXPGPATH))
 	{
 		/* errors have already been logged */
+		destroyPQExpBuffer(connStringBuffer);
 		return false;
 	}
 
@@ -816,8 +822,11 @@ pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 				  "long, pg_autoctl only supports connection strings up to "
 				  " %d bytes",
 				  connStringBuffer->data, connStringBuffer->len, MAXCONNINFO);
+		destroyPQExpBuffer(connStringBuffer);
+		return false;
 	}
 
+	destroyPQExpBuffer(connStringBuffer);
 	return true;
 }
 

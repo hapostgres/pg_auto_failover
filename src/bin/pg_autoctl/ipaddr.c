@@ -537,9 +537,11 @@ findHostnameLocalAddress(const char *hostname, char *localIpAddress, int size)
 								  size) == NULL)
 					{
 						log_warn("Failed to determine local ip address: %m");
+						freeifaddrs(ifaddrList);
 						return false;
 					}
 
+					freeifaddrs(ifaddrList);
 					return true;
 				}
 			}
@@ -565,15 +567,18 @@ findHostnameLocalAddress(const char *hostname, char *localIpAddress, int size)
 					{
 						/* check size >= INET6_ADDRSTRLEN */
 						log_warn("Failed to determine local ip address: %m");
+						freeifaddrs(ifaddrList);
 						return false;
 					}
 
+					freeifaddrs(ifaddrList);
 					return true;
 				}
 			}
 		}
 	}
 
+	freeifaddrs(ifaddrList);
 	freeaddrinfo(dns_lookup_addr);
 	return false;
 }
