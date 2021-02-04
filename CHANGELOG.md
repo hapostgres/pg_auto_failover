@@ -1,3 +1,23 @@
+### pg_auto_failover v1.4.2 (February 3, 2021) ###
+
+This is a bugfix release for v1.4 series
+
+#### Added
+* Implement pg_autoctl do azure commands (QA tooling). [#544]
+* pg autoctl show settings. [#549]
+* Improve docker images (build, release). [#556]
+* Run monitor extension test suite in the CI. [#553]
+* Implement pg_autoctl create postgres --pg-hba-lan option. [#561]
+
+#### Fixed
+* Deduplicate PATH entries, following symlinks. [#547]
+* Review consequences of pg_autoctl set formation number-sync-standbys 0. [#535]
+* Fix bytes mangling opportunity. [#550]
+* Allow setting replication settings to their current value. [#570]
+* Fix the return code when stop the node that is started by pg_autoctl. [#572]
+* Set formation kind when expected. [#577]
+* Fix retry loops with wait time to stop using 100% CPU. [#578]
+
 ### pg_auto_failover v1.4.1 (December 3, 2020) ###
 
 This is a bugfix release for v1.4.0
