@@ -267,6 +267,7 @@ parse_state_notification_message(CurrentNodeState *nodeState,
 	if (json_type(json) != JSONObject)
 	{
 		log_error("Failed to parse JSON notification message: \"%s\"", message);
+		json_value_free(json);
 		return false;
 	}
 
@@ -276,6 +277,7 @@ parse_state_notification_message(CurrentNodeState *nodeState,
 	{
 		log_error("Failed to parse JSOBJ notification state message: "
 				  "jsobj object type is not \"state\" as expected");
+		json_value_free(json);
 		return false;
 	}
 
@@ -285,6 +287,7 @@ parse_state_notification_message(CurrentNodeState *nodeState,
 	{
 		log_error("Failed to parse formation in JSON "
 				  "notification message \"%s\"", message);
+		json_value_free(json);
 		return false;
 	}
 	strlcpy(nodeState->formation, str, sizeof(nodeState->formation));
@@ -301,6 +304,7 @@ parse_state_notification_message(CurrentNodeState *nodeState,
 	{
 		log_error("Failed to parse node name in JSON "
 				  "notification message \"%s\"", message);
+		json_value_free(json);
 		return false;
 	}
 	strlcpy(nodeState->node.name, str, sizeof(nodeState->node.name));
@@ -311,6 +315,7 @@ parse_state_notification_message(CurrentNodeState *nodeState,
 	{
 		log_error("Failed to parse node host in JSON "
 				  "notification message \"%s\"", message);
+		json_value_free(json);
 		return false;
 	}
 	strlcpy(nodeState->node.host, str, sizeof(nodeState->node.host));
@@ -324,6 +329,7 @@ parse_state_notification_message(CurrentNodeState *nodeState,
 	{
 		log_error("Failed to parse reportedState in JSON "
 				  "notification message \"%s\"", message);
+		json_value_free(json);
 		return false;
 	}
 	nodeState->reportedState = NodeStateFromString(str);
@@ -334,6 +340,7 @@ parse_state_notification_message(CurrentNodeState *nodeState,
 	{
 		log_error("Failed to parse goalState in JSON "
 				  "notification message \"%s\"", message);
+		json_value_free(json);
 		return false;
 	}
 	nodeState->goalState = NodeStateFromString(str);
@@ -356,9 +363,11 @@ parse_state_notification_message(CurrentNodeState *nodeState,
 	{
 		log_error("Failed to parse health in JSON "
 				  "notification message \"%s\"", message);
+		json_value_free(json);
 		return false;
 	}
 
+	json_value_free(json);
 	return true;
 }
 
@@ -761,6 +770,8 @@ parseNodesArray(const char *nodesJSON,
 				  "[{node_id:number, node_name:string, "
 				  "node_host:string, node_port:number, node_lsn:string, "
 				  "node_is_primary:boolean}, ...]");
+		json_value_free(template);
+		json_value_free(json);
 		return false;
 	}
 
@@ -773,6 +784,8 @@ parseNodesArray(const char *nodesJSON,
 				  "%d nodes: pg_autoctl supports up to %d nodes",
 				  len,
 				  NODE_ARRAY_MAX_COUNT);
+		json_value_free(template);
+		json_value_free(json);
 		return false;
 	}
 
@@ -812,6 +825,8 @@ parseNodesArray(const char *nodesJSON,
 		if (!parseLSN(node->lsn, &lsn))
 		{
 			log_error("Failed to parse nodes array LSN value \"%s\"", node->lsn);
+			json_value_free(template);
+			json_value_free(json);
 			return false;
 		}
 
@@ -825,12 +840,17 @@ parseNodesArray(const char *nodesJSON,
 			{
 				log_error("Failed to parse nodes array: more than one node "
 						  "is listed with \"node_is_primary\" true.");
+				json_value_free(template);
+				json_value_free(json);
 				return false;
 			}
 		}
 
 		++nodesArrayIndex;
 	}
+
+	json_value_free(template);
+	json_value_free(json);
 
 	/* now ensure the array is sorted by nodeId */
 	(void) pg_qsort(nodesArray->nodes,

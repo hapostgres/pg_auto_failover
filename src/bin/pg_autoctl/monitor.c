@@ -416,6 +416,10 @@ monitor_print_nodes_as_json(Monitor *monitor, char *formation, int groupId)
 		log_error("Failed to get the nodes from the monitor while running "
 				  "\"%s\" with formation %s and group %d",
 				  sql, formation, groupId);
+		if (context.strVal)
+		{
+			free(context.strVal);
+		}
 		return false;
 	}
 
@@ -429,10 +433,15 @@ monitor_print_nodes_as_json(Monitor *monitor, char *formation, int groupId)
 				  "it returned an unexpected result. "
 				  "See previous line for details.",
 				  sql, formation, groupId);
+		if (context.strVal)
+		{
+			free(context.strVal);
+		}
 		return false;
 	}
 
 	fformat(stdout, "%s\n", context.strVal);
+	free(context.strVal);
 
 	return true;
 }
@@ -559,6 +568,10 @@ monitor_print_other_nodes_as_json(Monitor *monitor,
 	{
 		log_error("Failed to get the other nodes from the monitor while running "
 				  "\"%s\" with node id %d", sql, myNodeId);
+		if (context.strVal)
+		{
+			free(context.strVal);
+		}
 		return false;
 	}
 
@@ -571,10 +584,15 @@ monitor_print_other_nodes_as_json(Monitor *monitor,
 				  "\"%s\" with node id %d because it returned an "
 				  "unexpected result. See previous line for details.",
 				  sql, myNodeId);
+		if (context.strVal)
+		{
+			free(context.strVal);
+		}
 		return false;
 	}
 
 	fformat(stdout, "%s\n", context.strVal);
+	free(context.strVal);
 
 	return true;
 }
@@ -1977,10 +1995,15 @@ monitor_print_state_as_json(Monitor *monitor, char *formation, int group)
 	{
 		log_error("Failed to parse current state from the monitor");
 		log_error("%s", context.strVal);
+		if (context.strVal)
+		{
+			free(context.strVal);
+		}
 		return false;
 	}
 
 	fformat(stdout, "%s\n", context.strVal);
+	free(context.strVal);
 
 	return true;
 }
@@ -2142,10 +2165,15 @@ monitor_print_last_events_as_json(Monitor *monitor,
 	{
 		log_error("Failed to parse %d last events from the monitor", count);
 		log_error("%s", context.strVal);
+		if (context.strVal)
+		{
+			free(context.strVal);
+		}
 		return false;
 	}
 
 	fformat(stream, "%s\n", context.strVal);
+	free(context.strVal);
 
 	return true;
 }
@@ -2379,6 +2407,10 @@ monitor_formation_uri(Monitor *monitor,
 	if (!context.parsedOk)
 	{
 		/* errors have already been logged */
+		if (context.strVal)
+		{
+			free(context.strVal);
+		}
 		return false;
 	}
 
@@ -2386,10 +2418,15 @@ monitor_formation_uri(Monitor *monitor,
 	{
 		log_error("Formation \"%s\" currently has no nodes in group 0",
 				  formation);
+		if (context.strVal)
+		{
+			free(context.strVal);
+		}
 		return false;
 	}
 
 	strlcpy(connectionString, context.strVal, size);
+	free(context.strVal);
 
 	/* disconnect from PostgreSQL now */
 	pgsql_finish(&monitor->pgsql);
@@ -2490,6 +2527,10 @@ monitor_print_every_formation_uri_as_json(Monitor *monitor,
 	if (!context.parsedOk)
 	{
 		/* errors have already been logged */
+		if (context.strVal)
+		{
+			free(context.strVal);
+		}
 		return false;
 	}
 
@@ -2497,6 +2538,7 @@ monitor_print_every_formation_uri_as_json(Monitor *monitor,
 	pgsql_finish(&monitor->pgsql);
 
 	fformat(stream, "%s\n", context.strVal);
+	free(context.strVal);
 
 	return true;
 }
@@ -2752,10 +2794,15 @@ monitor_print_formation_settings_as_json(Monitor *monitor, char *formation)
 	{
 		log_error("Failed to parse formation settings from the monitor "
 				  "for formation \"%s\"", formation);
+		if (context.strVal)
+		{
+			free(context.strVal);
+		}
 		return false;
 	}
 
 	fformat(stdout, "%s\n", context.strVal);
+	free(context.strVal);
 
 	return true;
 }
@@ -2794,6 +2841,10 @@ monitor_synchronous_standby_names(Monitor *monitor,
 		log_error("Failed to get the synchronous_standby_names setting value "
 				  " from the monitor for formation %s and group %d",
 				  formation, groupId);
+		if (context.strVal)
+		{
+			free(context.strVal);
+		}
 		return false;
 	}
 
@@ -2803,10 +2854,15 @@ monitor_synchronous_standby_names(Monitor *monitor,
 				  " from the monitor for formation %s and group %d,"
 				  "see above for details",
 				  formation, groupId);
+		if (context.strVal)
+		{
+			free(context.strVal);
+		}
 		return false;
 	}
 
 	strlcpy(synchronous_standby_names, context.strVal, size);
+	free(context.strVal);
 
 	return true;
 }
