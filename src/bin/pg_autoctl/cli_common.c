@@ -1405,8 +1405,6 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 		log_info("HINT: to completely remove your local Postgres instance and "
 				 "setup, consider `pg_autoctl drop node --destroy`");
 	}
-
-	keeper_config_destroy(config);
 }
 
 
