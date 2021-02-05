@@ -2034,9 +2034,9 @@ keeper_config_accept_new(Keeper *keeper, KeeperConfig *newConfig)
 				 "used to be \"%s\"",
 				 newConfig->maximum_backup_rate, config->maximum_backup_rate);
 
-		/* note: strneq checks args are not NULL, it's safe to proceed */
-		free(config->maximum_backup_rate);
-		config->maximum_backup_rate = strdup(newConfig->maximum_backup_rate);
+		strlcpy(config->maximum_backup_rate,
+				newConfig->maximum_backup_rate,
+				MAXIMUM_BACKUP_RATE_LEN);
 	}
 
 	/*
@@ -2190,9 +2190,6 @@ keeper_reload_configuration(Keeper *keeper, bool firstLoop, bool doInit)
 					 "continuing with the same configuration.",
 					 config->pathnames.config);
 		}
-
-		/* we're done the newConfig now */
-		keeper_config_destroy(&newConfig);
 	}
 	else
 	{

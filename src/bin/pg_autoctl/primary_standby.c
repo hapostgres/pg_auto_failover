@@ -804,7 +804,9 @@ standby_init_replication_source(LocalPostgresServer *postgres,
 	}
 
 	strlcpy(upstream->slotName, slotName, MAXCONNINFO);
-	strlcpy(upstream->maximumBackupRate, maximumBackupRate, MAXCONNINFO);
+	strlcpy(upstream->maximumBackupRate,
+			maximumBackupRate,
+			MAXIMUM_BACKUP_RATE_LEN);
 	strlcpy(upstream->backupDir, backupDirectory, MAXCONNINFO);
 
 	if (targetLSN != NULL)

@@ -14,6 +14,7 @@
 #include <stdbool.h>
 
 #include "config.h"
+#include "defaults.h"
 #include "pgctl.h"
 #include "pgsql.h"
 
@@ -40,7 +41,7 @@ typedef struct KeeperConfig
 	/* PostgreSQL replication / tooling setup */
 	char replication_slot_name[MAXCONNINFO];
 	char replication_password[MAXCONNINFO];
-	char *maximum_backup_rate;
+	char maximum_backup_rate[MAXIMUM_BACKUP_RATE_LEN];
 	char backupDirectory[MAXPGPATH];
 
 	/* pg_autoctl timeouts */
@@ -84,7 +85,6 @@ bool keeper_config_set_setting(KeeperConfig *config,
 
 bool keeper_config_merge_options(KeeperConfig *config, KeeperConfig *options);
 bool keeper_config_update(KeeperConfig *config, int nodeId, int groupId);
-void keeper_config_destroy(KeeperConfig *config);
 bool keeper_config_update_with_absolute_pgdata(KeeperConfig *config);
 
 #endif /* KEEPER_CONFIG_H */
