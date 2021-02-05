@@ -133,8 +133,9 @@
 							   REPLICATION_PASSWORD_DEFAULT)
 
 #define OPTION_REPLICATION_MAXIMUM_BACKUP_RATE(config) \
-	make_string_option_default("replication", "maximum_backup_rate", NULL, \
-							   false, &config->maximum_backup_rate, \
+	make_strbuf_option_default("replication", "maximum_backup_rate", NULL, \
+							   false, MAXIMUM_BACKUP_RATE_LEN, \
+							   config->maximum_backup_rate, \
 							   MAXIMUM_BACKUP_RATE)
 
 #define OPTION_REPLICATION_BACKUP_DIR(config) \
@@ -681,19 +682,6 @@ keeper_config_update(KeeperConfig *config, int nodeId, int groupId)
 			  config->backupDirectory);
 
 	return keeper_config_write_file(config);
-}
-
-
-/*
- * keeper_config_destroy frees memory that may be dynamically allocated.
- */
-void
-keeper_config_destroy(KeeperConfig *config)
-{
-	if (config->maximum_backup_rate != NULL)
-	{
-		free(config->maximum_backup_rate);
-	}
 }
 
 

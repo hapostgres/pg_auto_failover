@@ -164,7 +164,7 @@ typedef struct ReplicationSource
 	char userName[NAMEDATALEN];
 	char slotName[MAXCONNINFO];
 	char password[MAXCONNINFO];
-	char maximumBackupRate[MAXCONNINFO];
+	char maximumBackupRate[MAXIMUM_BACKUP_RATE_LEN];
 	char backupDir[MAXCONNINFO];
 	char applicationName[MAXCONNINFO];
 	char targetLSN[PG_LSN_MAXLENGTH];
