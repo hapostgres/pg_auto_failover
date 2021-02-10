@@ -1,5 +1,6 @@
 name: "Dynamic matrix test"
 pr: none
+trigger: none
 jobs:
   - job: generator
     steps:
