@@ -6,6 +6,8 @@ name: "Single line demo"
 trigger:
 - main
 
+pr: none
+
 pool:
   vmImage: 'ubuntu-latest'
 
