@@ -1,3 +1,4 @@
+name: "Static matrix test"
 trigger:
   - none
 jobs:
