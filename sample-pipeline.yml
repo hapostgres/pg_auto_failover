@@ -1,0 +1,126 @@
+trigger:
+  - '*'
+
+pool:
+  name: Default
+
+variables:
+  image_name: mcr.microsoft.com/businesscentral/sandbox
+  container_name: Build
+  company_name: My Company
+  user_name: admin
+  password: P@ssword1
+  license_file: C:\Users\james.pearson.TECMAN\Desktop\Licence.flf
+
+stages:
+  - stage: build
+    displayName: Build
+    jobs:
+      - job: Build
+        pool:
+          name: Default
+        steps:
+          - task: PowerShell@1
+            displayName: Create build container
+            inputs:
+              scriptType: inlineScript
+              inlineScript: >
+                Import-Module navcontainerhelper;
+                $Credential = [PSCredential]::new('$(user_name)',(ConvertTo-SecureString '$(password)' -AsPlainText -Force));
+                New-NavContainer -accept_eula -accept_outdated -containerName '$(container_name)' -auth NavUserPassword -credential $Credential -image $(image_name) -licenseFile $(license_file) -doNotExportObjectsToText -restart no -shortcuts None -useBestContainerOS -includeTestToolkit -includeTestLibrariesOnly -updateHosts
+
+          - task: PowerShell@1
+            displayName: Copy source into container folder
+            inputs:
+              scriptType: inlineScript
+              inlineScript: >
+                $SourceDir = 'C:\ProgramData\NavContainerHelper\Extensions\$(container_name)\Source';
+                New-Item $SourceDir -ItemType Directory;
+                Copy-Item '$(Build.SourcesDirectory)\*' $SourceDir -Recurse -Force;
+
+          - task: PowerShell@1
+            displayName: Compile app
+            inputs:
+              scriptType: inlineScript
+              inlineScript: >
+                Import-Module navcontainerhelper;
+                $SourceDir = 'C:\ProgramData\NavContainerHelper\Extensions\$(container_name)\Source';
+                $Credential = [PSCredential]::new('$(user_name)',(ConvertTo-SecureString '$(password)' -AsPlainText -Force));
+                Compile-AppInNavContainer -containerName '$(container_name)' -appProjectFolder $SourceDir -credential $Credential -AzureDevOps -FailOn 'error';
+
+          - task: PowerShell@1
+            displayName: Copy app into build artifacts staging folder
+            inputs:
+              scriptType: inlineScript
+              inlineScript: >
+                $SourceDir = 'C:\ProgramData\NavContainerHelper\Extensions\$(container_name)\Source';
+                Copy-Item "$SourceDir\output\*.app" '$(Build.ArtifactStagingDirectory)'
+
+          - task: PowerShell@1
+            displayName: Publish and install app into container
+            inputs:
+              scriptType: inlineScript
+              inlineScript: >
+                Import-Module navcontainerhelper;
+                Get-ChildItem '$(Build.ArtifactStagingDirectory)' | % {Publish-NavContainerApp '$(container_name)' -appFile $_.FullName -skipVerification -sync -install}
+
+          - task: PowerShell@1
+            displayName: Run tests
+            inputs:
+              scriptType: inlineScript
+              inlineScript: >
+                $Credential = [PSCredential]::new('$(user_name)',(ConvertTo-SecureString '$(password)' -AsPlainText -Force));
+                $BuildHelperPath = 'C:\ProgramData\NavContainerHelper\Extensions\$(container_name)\My\BuildHelper.app';
+                Download-File 'https://github.com/CleverDynamics/al-build-helper/raw/master/Clever%20Dynamics_Build%20Helper_BC14.app' $BuildHelperPath;
+                Publish-NavContainerApp $(container_name) -appFile $BuildHelperPath -sync -install;
+                $Url = "http://{0}:7047/NAV/WS/{1}/Codeunit/AutomatedTestMgt" -f (Get-NavContainerIpAddress -containerName '$(container_name)'), '$(company_name)';
+                $AutomatedTestMgt = New-WebServiceProxy -Uri $Url -Credential $Credential;
+                $AutomatedTestMgt.GetTests('DEFAULT',50100,50199);
+
+                Import-Module navcontainerhelper;
+                $ResultPath = 'C:\ProgramData\NavContainerHelper\Extensions\$(container_name)\my\Results.xml';
+                Run-TestsInBcContainer -containerName '$(container_name)' -companyName '$(company_name)' -credential $Credential -detailed -AzureDevOps warning -XUnitResultFileName $ResultPath -debugMode
+
+          - task: PublishTestResults@2
+            displayName: Upload test results
+            inputs:
+              failTaskOnFailedTests: true
+              testResultsFormat: XUnit
+              testResultsFiles: '*.xml'
+              searchFolder: C:\ProgramData\NavContainerHelper\Extensions\$(container_name)\my
+
+          - task: PublishBuildArtifacts@1
+            displayName: Publish build artifacts
+            inputs:
+              ArtifactName: App Package
+              PathtoPublish: $(Build.ArtifactStagingDirectory)
+
+          - task: PowerShell@1
+            displayName: Remove build container
+            inputs:
+              scriptType: inlineScript
+              inlineScript: >
+                Import-Module navcontainerhelper;
+                Remove-NavContainer $(container_name)
+            condition: always()
+  - stage: Release
+    displayName: Release
+    condition: and(succeeded(), eq(variables['build.sourceBranch'], 'refs/heads/master'))
+    jobs:
+      - deployment:
+        displayName: Release
+        pool:
+          name: Default
+        environment: Release
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: PowerShell@1
+                  displayName: Copy artifacts to release directory
+                  inputs:
+                    scriptType: inlineScript
+                    inlineScript: >
+                      $Path = Split-Path '$(System.ArtifactsDirectory)' -Parent;
+                      $Artifact = "$Path\App Package\*.app";
+                      Copy-Item $Artifact 'C:\Release\';

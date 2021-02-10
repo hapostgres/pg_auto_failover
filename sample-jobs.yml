@@ -1,0 +1,18 @@
+jobs:
+  - job: A
+    steps:
+      - script: exit 1
+
+  - job: B
+    dependsOn: A
+    condition: failed()
+    steps:
+      - script: echo this will run when A fails
+
+  - job: C
+    dependsOn:
+      - A
+      - B
+    condition: succeeded('B')
+    steps:
+      - script: echo this will run when B runs and succeeds
