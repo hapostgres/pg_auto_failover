@@ -767,9 +767,9 @@ demoapp_print_summary(const char *pguri, DemoAppOptions *demoAppOptions)
 		"case when client is not null then format('Client %s', client) "
 		"else ('All Clients Combined') end as \"Client\", "
 		"conn as \"Connections\", "
-		"failover_count as \"Failovers\", "
-		"retry_sleep_ms as \"Retry Sleep (ms)\", "
-		"retry_cap_ms as \"Retry Cap (ms)\", "
+		/* "failover_count as \"Failovers\", " */
+		/* "retry_sleep_ms as \"Retry Sleep (ms)\", " */
+		/* "retry_cap_ms as \"Retry Cap (ms)\", " */
 		"sum as \"Retries\", "
 		"min as \"Min Connect Time (ms)\", max, p95, p99 "
 		"from stats left join demo.client using(client) "
