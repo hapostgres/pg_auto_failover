@@ -1,6 +1,6 @@
 trigger: none
 schedules:
-  - cron: "20 7 * * Mon-Fri"
+  - cron: "25 7 * * Mon-Fri"
     displayName: M-F 3:00 AM (UTC) daily build
     branches:
       include:
