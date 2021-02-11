@@ -1,10 +1,6 @@
 schedules:
   - cron: "0 7 * * Mon-Fri"
     displayName: M-F 7:00 AM (UTC) daily build
-    branches:
-      include:
-        - main
-        - /releases/*
   - cron: "0 9 * * Sun"
     displayName: Sunday 9:00 AM (UTC) weekly latest version build
     branches:
