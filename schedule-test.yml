@@ -1,4 +1,4 @@
-trigger:none
+trigger: none
 schedules:
   - cron: "15 7 * * Mon-Fri"
     displayName: M-F 3:00 AM (UTC) daily build
