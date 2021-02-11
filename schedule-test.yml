@@ -1,0 +1,29 @@
+schedules:
+  - cron: "0 3 * * Mon-Fri"
+    displayName: M-F 3:00 AM (UTC) daily build
+    branches:
+      include:
+        - main
+        - /releases/*
+  - cron: "0 3 * * Sun"
+    displayName: Sunday 3:00 AM (UTC) weekly latest version build
+    branches:
+      include:
+        - /releases/lastversion
+    always: true
+jobs:
+  - job: Test
+    strategy:
+      maxParallel: 2
+      matrix:
+        US_IE:
+          Location: US
+          Browser: IE
+        US_Chrome:
+          Location: US
+          Browser: Chrome
+        Europe_Chrome:
+          Location: Europe
+          Browser: Chrome
+    steps:
+      - script: echo $(Location) # echos A or B depending on which leg is running
