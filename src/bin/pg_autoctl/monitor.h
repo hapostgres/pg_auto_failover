@@ -26,6 +26,7 @@ typedef struct Monitor
 
 typedef struct MonitorAssignedState
 {
+	char name[_POSIX_HOST_NAME_MAX];
 	int nodeId;
 	int groupId;
 	NodeState state;
