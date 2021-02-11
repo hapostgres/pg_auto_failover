@@ -188,8 +188,12 @@ CREATE TABLE pgautofailover.archiver
 CREATE TABLE pgautofailover.archiver_policy
  (
     formationid          text not null default 'default',
-    opt_archive_local    bool default 'yes',
-    opt_archive_remote   bool default 'no',
+    opt_archive_local    bool not null default 'yes',
+
+    opt_archive_remote   bool not null default 'no',
+    archive_command      text, -- wal-g wal-push /path/to/archive
+    backup_command       text, -- wal-g backup-push /backup/directory/path
+
     apply_delay          interval not null default '6 hours',
     backup_interval      interval not null default '6 hours',
     backup_max_count     integer not null default 10,
@@ -205,12 +209,16 @@ INSERT INTO pgautofailover.archiver_policy
             ('default', DEFAULT, DEFAULT);
 
 --
--- A standby node that is handled by the pg_autoctl archiver
+-- A standby node that is handled by the pg_autoctl archiver.
+--
+-- The nodeid is the nodeid of the archiver_node, which exists in the
+-- pgautofailover.node table, and the archiver then runs an archiving
+-- process that takes care of a local standby and an archive command as per
+-- the archiver_policy setup.
 --
 CREATE TABLE pgautofailover.archiver_node
  (
     archiver             bigint not null,
-    -- formation/group instead of nodeid
     nodeid               bigserial not null,
     nodeport             int not null,
     reportedlsn          pg_lsn not null default '0/0',

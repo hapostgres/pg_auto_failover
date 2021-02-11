@@ -62,6 +62,7 @@ GUC monitor_default_settings[] = {
 
 
 static bool check_monitor_settings(PostgresSetup pgSetup);
+static bool monitor_self_register(PostgresSetup *pgSetup, const char *hostname);
 
 
 /*
@@ -242,6 +243,15 @@ monitor_install(const char *hostname,
 		}
 	}
 
+	/*
+	 * Now register the monitor to itself.
+	 */
+	if (!monitor_self_register(&pgSetup, hostname))
+	{
+		log_fatal("Failed to register the monitor node to itself");
+		return false;
+	}
+
 	pgsql_finish(&postgres.sqlClient);
 
 	log_info("Your pg_auto_failover monitor instance is now ready on port %d.",
@@ -345,6 +355,81 @@ monitor_add_postgres_default_settings(Monitor *monitor)
 				  "write the new postgresql.conf, see above for details",
 				  configFilePath);
 		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * monitor_self_register registers the monitor to its own metadata, as a node
+ * in the "monitor" formation.
+ */
+static bool
+monitor_self_register(PostgresSetup *pgSetup, const char *hostname)
+{
+	Monitor monitor = { 0 };
+	MonitorAssignedState assignedState = { 0 };
+
+	char connInfo[MAXCONNINFO] = { 0 };
+
+	bool pg_is_in_recovery;
+	char syncState[PGSR_SYNC_STATE_MAXLENGTH] = { 0 };
+	char currentLSN[PG_LSN_MAXLENGTH] = { 0 };
+
+	pg_setup_get_local_connection_string(pgSetup, connInfo);
+	pgsql_init(&(monitor.pgsql), connInfo, PGSQL_CONN_LOCAL);
+
+	if (!pgsql_get_postgres_metadata(&(monitor.pgsql),
+									 &pg_is_in_recovery,
+									 syncState,
+									 currentLSN,
+									 &(pgSetup->control)))
+	{
+		log_error("Failed to update the local Postgres metadata");
+		return false;
+	}
+
+	ConnectionRetryPolicy retryPolicy = { 0 };
+	char *formationid = "monitor";
+	char *nodename = "monitor";
+
+	(void) pgsql_set_monitor_interactive_retry_policy(&retryPolicy);
+
+	while (!pgsql_retry_policy_expired(&retryPolicy))
+	{
+		bool mayRetry = false;
+
+		if (monitor_register_node(&monitor,
+								  formationid,
+								  nodename,
+								  (char *) hostname,
+								  pgSetup->pgport,
+								  pgSetup->control.system_identifier,
+								  PG_AUTOCTL_MONITOR_DBNAME,
+								  0,
+								  SINGLE_STATE,
+								  NODE_KIND_STANDALONE,
+								  FAILOVER_NODE_CANDIDATE_PRIORITY,
+								  FAILOVER_NODE_REPLICATION_QUORUM,
+								  &mayRetry,
+								  &assignedState))
+		{
+			/* registration was successful, break out of the retry loop */
+			break;
+		}
+
+		if (!mayRetry)
+		{
+			log_fatal("Failed to register the monitor node to itself");
+			return false;
+		}
+
+		int sleepTimeMs =
+			pgsql_compute_connection_retry_sleep_time(&retryPolicy);
+
+		/* we have milliseconds, pg_usleep() wants microseconds */
+		(void) pg_usleep(sleepTimeMs * 1000);
 	}
 
 	return true;
