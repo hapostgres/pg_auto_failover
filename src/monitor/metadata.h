@@ -20,6 +20,7 @@
 #define AUTO_FAILOVER_SCHEMA_NAME "pgautofailover"
 #define AUTO_FAILOVER_FORMATION_TABLE "pgautofailover.formation"
 #define AUTO_FAILOVER_NODE_TABLE "pgautofailover.node"
+#define AUTO_FAILOVER_ARCHIVER_TABLE "pgautofailover.archiver"
 #define AUTO_FAILOVER_EVENT_TABLE "pgautofailover.event"
 #define REPLICATION_STATE_TYPE_NAME "replication_state"
 

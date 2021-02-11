@@ -55,8 +55,8 @@ CREATE TABLE pgautofailover.formation
     CHECK (kind IN ('pgsql', 'citus'))
  );
 
-insert into pgautofailover.formation (formationid)
-     values ('monitor'), ('default');
+insert into pgautofailover.formation (formationid, dbname)
+     values ('monitor', 'pg_auto_failover'), ('default', DEFAULT);
 
 CREATE FUNCTION pgautofailover.create_formation
  (
@@ -188,15 +188,21 @@ CREATE TABLE pgautofailover.archiver
 CREATE TABLE pgautofailover.archiver_policy
  (
     formationid          text not null default 'default',
-    backup_interval      interval not null default '1 day',
-    backup_max_count     integer not null default 3,
-    backup_max_age       interval not null default '1 week',
+    opt_archive_local    bool default 'yes',
+    opt_archive_remote   bool default 'no',
+    apply_delay          interval not null default '6 hours',
+    backup_interval      interval not null default '6 hours',
+    backup_max_count     integer not null default 10,
+    backup_max_age       interval not null default '2 days',
 
     PRIMARY KEY (formationid),
     FOREIGN KEY (formationid) REFERENCES pgautofailover.formation(formationid)
  );
 
-INSERT INTO pgautofailover.archiver_policy DEFAULT VALUES;
+INSERT INTO pgautofailover.archiver_policy
+            (formationid, opt_archive_local, apply_delay)
+     VALUES ('monitor', 'no', '0s'),
+            ('default', DEFAULT, DEFAULT);
 
 --
 -- A standby node that is handled by the pg_autoctl archiver
@@ -204,6 +210,7 @@ INSERT INTO pgautofailover.archiver_policy DEFAULT VALUES;
 CREATE TABLE pgautofailover.archiver_node
  (
     archiver             bigint not null,
+    -- formation/group instead of nodeid
     nodeid               bigserial not null,
     nodeport             int not null,
     reportedlsn          pg_lsn not null default '0/0',
@@ -213,7 +220,7 @@ CREATE TABLE pgautofailover.archiver_node
 
     FOREIGN KEY (archiver) REFERENCES pgautofailover.archiver(nodeid),
     FOREIGN KEY (nodeid) REFERENCES pgautofailover.node(nodeid)
-);
+ );
 
 --
 -- A basebackup for a Postgres node, taken from one of the known archiver nodes
@@ -222,6 +229,10 @@ CREATE TABLE pgautofailover.basebackup
  (
     archiver              bigint not null,
     nodeid                bigserial not null,
+
+    filename              text not null,
+    filesize              bigint not null,
+    md5                   uuid not null,
 
     -- parsed from the backup_label file
     start_wal_location    pg_lsn not null,
@@ -236,7 +247,7 @@ CREATE TABLE pgautofailover.basebackup
 
     FOREIGN KEY (archiver) REFERENCES pgautofailover.archiver(nodeid),
     FOREIGN KEY (archiver, nodeid)
-     REFERENCES pgautofailover.archiver_node(archiver, nodeid)
+    REFERENCES pgautofailover.archiver_node(archiver, nodeid)
  );
 
 --
@@ -340,6 +351,21 @@ AS 'MODULE_PATHNAME', $$register_node$$;
 
 grant execute on function
       pgautofailover.register_node(text,text,int,name,text,bigint,int,pgautofailover.replication_state,text, int, bool)
+   to autoctl_node;
+
+
+CREATE FUNCTION pgautofailover.register_archiver
+ (
+    IN node_host            text,
+    IN node_name            text default '',
+   OUT assigned_node_id     int,
+   OUT assigned_node_name   text
+ )
+RETURNS record LANGUAGE C STRICT SECURITY DEFINER
+AS 'MODULE_PATHNAME', $$register_archiver$$;
+
+grant execute on function
+      pgautofailover.register_archiver(text,text)
    to autoctl_node;
 
 
