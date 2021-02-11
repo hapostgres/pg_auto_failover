@@ -619,8 +619,6 @@ supervisor_shutdown_sequence(Supervisor *supervisor)
 static bool
 supervisor_restart_service(Supervisor *supervisor, Service *service, int status)
 {
-	char *verb = WIFEXITED(status) ? "exited" : "failed";
-	int returnCode = WEXITSTATUS(status);
 	uint64_t now = time(NULL);
 	int logLevel = LOG_ERROR;
 
@@ -643,13 +641,34 @@ supervisor_restart_service(Supervisor *supervisor, Service *service, int status)
 	}
 
 	/* when a sub-process has quit and we're not shutting down, warn about it */
-	else if (returnCode == EXIT_CODE_QUIT)
+	else if (WIFEXITED(status) && WEXITSTATUS(status) == EXIT_CODE_QUIT)
 	{
 		logLevel = LOG_WARN;
 	}
 
-	log_level(logLevel, "pg_autoctl service %s %s with exit status %d",
-			  service->name, verb, returnCode);
+	if (WIFEXITED(status))
+	{
+		int returnCode = WEXITSTATUS(status);
+
+		log_level(logLevel, "pg_autoctl service %s exited with exit status %d",
+				  service->name, returnCode);
+	}
+	else if (WIFSIGNALED(status))
+	{
+		int signal = WTERMSIG(status);
+
+		log_level(logLevel,
+				  "pg_autoctl service %s exited after receiving signal %s",
+				  service->name, strsignal(signal));
+	}
+	else if (WIFSTOPPED(status))
+	{
+		/* well that's unexpected, we're not using WUNTRACED */
+		log_level(logLevel,
+				  "pg_autoctl service %s has been stopped and can be restarted",
+				  service->name);
+		return false;
+	}
 
 	/*
 	 * We don't restart temporary processes at all: we're done already.
@@ -697,7 +716,9 @@ supervisor_restart_service(Supervisor *supervisor, Service *service, int status)
 	 *  pg_autoctl create monitor
 	 *  pg_autoctl create postgres
 	 */
-	if (service->policy == RP_TRANSIENT && returnCode == EXIT_CODE_QUIT)
+	if (service->policy == RP_TRANSIENT &&
+		WIFEXITED(status) &&
+		WEXITSTATUS(status) == EXIT_CODE_QUIT)
 	{
 		/* exit with a happy exit code, and process with shutdown sequence */
 		supervisor->cleanExit = true;
