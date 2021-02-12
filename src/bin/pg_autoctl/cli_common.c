@@ -1991,12 +1991,15 @@ cli_get_name_getopts(int argc, char **argv)
 	{
 		if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 		{
+			log_warn("Given --monitor URI, the --pgdata option is ignored");
 			log_info("Connecting to monitor at \"%s\"", options.monitor_pguri);
+
+			/* the rest of the program needs pgdata actually empty */
+			bzero((void *) options.pgSetup.pgdata,
+				  sizeof(options.pgSetup.pgdata));
 		}
 	}
-
-	/* when --pgdata is given, still initialise our pathnames */
-	if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
+	else
 	{
 		(void) prepare_keeper_options(&options);
 	}
@@ -2024,16 +2027,37 @@ cli_get_name_getopts(int argc, char **argv)
 bool
 cli_use_monitor_option(KeeperConfig *options)
 {
-	if (IS_EMPTY_STRING_BUFFER(options->monitor_pguri))
+	/* if --monitor is used, then use it */
+	if (!IS_EMPTY_STRING_BUFFER(options->monitor_pguri))
 	{
-		if (get_env_copy(PG_AUTOCTL_MONITOR,
-						 options->monitor_pguri,
-						 sizeof(options->monitor_pguri)))
-		{
-			log_debug("Using environment PG_AUTOCTL_MONITOR \"%s\"",
-					  options->monitor_pguri);
-			return true;
-		}
+		return true;
+	}
+
+	/* otherwise, have a look at the PG_AUTOCTL_MONITOR environment variable */
+	if (env_exists(PG_AUTOCTL_MONITOR) &&
+		get_env_copy(PG_AUTOCTL_MONITOR,
+					 options->monitor_pguri,
+					 sizeof(options->monitor_pguri)))
+	{
+		log_debug("Using environment PG_AUTOCTL_MONITOR \"%s\"",
+				  options->monitor_pguri);
+		return true;
+	}
+
+	/*
+	 * Still nothing? well don't use --monitor then.
+	 *
+	 * Now, on commands that are compatible with using just a monitor and no
+	 * local pg_autoctl node, we want to include an error message about the
+	 * lack of a --monitor when we also lack --pgdata.
+	 */
+	if (IS_EMPTY_STRING_BUFFER(options->pgSetup.pgdata) &&
+		!env_exists("PGDATA"))
+	{
+		log_error("Failed to get value for environment variable '%s', "
+				  "which is unset", PG_AUTOCTL_MONITOR);
+		log_warn("This command also supports the --monitor option, which "
+				 "is not used here");
 	}
 
 	return false;

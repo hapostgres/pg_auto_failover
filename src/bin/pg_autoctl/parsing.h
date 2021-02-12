@@ -76,6 +76,8 @@ bool parse_pguri_info_key_vals(const char *pguri,
 
 bool buildPostgresURIfromPieces(URIParams *uriParams, char *pguri);
 
+bool parse_pguri_ssl_settings(const char *pguri, SSLOptions *ssl);
+
 bool parseLSN(const char *str, uint64_t *lsn);
 bool parseNodesArray(const char *nodesJSON,
 					 NodeAddressArray *nodesArray,

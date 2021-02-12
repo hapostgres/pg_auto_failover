@@ -24,6 +24,7 @@
 #include "monitor_pg_init.h"
 #include "monitor.h"
 #include "nodestate_utils.h"
+#include "parsing.h"
 #include "pgctl.h"
 #include "pghba.h"
 #include "pgsetup.h"
@@ -1069,12 +1070,11 @@ cli_show_uri(int argc, char **argv)
 			exit(EXIT_CODE_BAD_ARGS);
 		}
 
-		/* cook the sslmode=prefer bits */
-		ssl.active = true;
-		ssl.sslMode = SSL_MODE_PREFER;
-		strlcpy(ssl.sslModeStr,
-				pgsetup_sslmode_to_string(ssl.sslMode),
-				sizeof(ssl.sslModeStr));
+		if (!parse_pguri_ssl_settings(kconfig.monitor_pguri, &ssl))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
 	}
 	else
 	{
