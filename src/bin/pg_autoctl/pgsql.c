@@ -447,11 +447,6 @@ log_connection_error(PGconn *connection, int logLevel)
 static PGconn *
 pgsql_open_connection(PGSQL *pgsql)
 {
-	instr_time startTime;
-
-	INSTR_TIME_SET_CURRENT(startTime);
-	INSTR_TIME_SET_ZERO(pgsql->retryPolicy.connectTime);
-
 	/* we might be connected already */
 	if (pgsql->connection != NULL)
 	{
@@ -464,7 +459,8 @@ pgsql_open_connection(PGSQL *pgsql)
 	setenv("PGCONNECT_TIMEOUT", POSTGRES_CONNECT_TIMEOUT, 1);
 
 	/* register our starting time */
-	pgsql->retryPolicy.startTime = startTime;
+	INSTR_TIME_SET_CURRENT(pgsql->retryPolicy.startTime);
+	INSTR_TIME_SET_ZERO(pgsql->retryPolicy.connectTime);
 
 	/* Make a connection to the database */
 	pgsql->connection = PQconnectdb(pgsql->connectionString);
