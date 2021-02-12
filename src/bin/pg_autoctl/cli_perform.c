@@ -212,6 +212,9 @@ cli_perform_failover_getopts(int argc, char **argv)
 			log_warn("Given --monitor URI, the --pgdata option is ignored");
 			log_info("Connecting to monitor at \"%s\"", options.monitor_pguri);
 		}
+
+		/* the rest of the program needs pgdata actually empty */
+		bzero((void *) options.pgSetup.pgdata, sizeof(options.pgSetup.pgdata));
 	}
 	else
 	{
