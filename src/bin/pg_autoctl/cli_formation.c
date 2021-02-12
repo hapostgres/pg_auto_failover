@@ -22,11 +22,13 @@
 
 static FormationConfig formationOptions;
 
+static bool cli_formation_use_monitor_option(FormationConfig *options);
 static int keeper_cli_formation_getopts(int argc, char **argv);
 static int keeper_cli_formation_create_getopts(int argc, char **argv);
 
 static void keeper_cli_formation_create(int argc, char **argv);
 static void keeper_cli_formation_drop(int argc, char **argv);
+
 
 CommandLine create_formation_command =
 	make_command("formation",
@@ -54,6 +56,55 @@ CommandLine drop_formation_command =
 				 "  --formation   name of the formation to drop \n",
 				 keeper_cli_formation_getopts,
 				 keeper_cli_formation_drop);
+
+
+/*
+ * cli_formation_use_monitor_option returns true when the --monitor option
+ * should be used, or when PG_AUTOCTL_MONITOR has been set in the environment.
+ * In that case the options->monitor_pguri is also set to the value found in
+ * the environment.
+ *
+ * See cli_use_monitor_option() for the general KeeperConfig version of the
+ * same function.
+ */
+static bool
+cli_formation_use_monitor_option(FormationConfig *options)
+{
+	/* if --monitor is used, then use it */
+	if (!IS_EMPTY_STRING_BUFFER(options->monitor_pguri))
+	{
+		return true;
+	}
+
+	/* otherwise, have a look at the PG_AUTOCTL_MONITOR environment variable */
+	if (env_exists(PG_AUTOCTL_MONITOR) &&
+		get_env_copy(PG_AUTOCTL_MONITOR,
+					 options->monitor_pguri,
+					 sizeof(options->monitor_pguri)))
+	{
+		log_debug("Using environment PG_AUTOCTL_MONITOR \"%s\"",
+				  options->monitor_pguri);
+		return true;
+	}
+
+	/*
+	 * Still nothing? well don't use --monitor then.
+	 *
+	 * Now, on commands that are compatible with using just a monitor and no
+	 * local pg_autoctl node, we want to include an error message about the
+	 * lack of a --monitor when we also lack --pgdata.
+	 */
+	if (IS_EMPTY_STRING_BUFFER(options->pgSetup.pgdata) &&
+		!env_exists("PGDATA"))
+	{
+		log_error("Failed to get value for environment variable '%s', "
+				  "which is unset", PG_AUTOCTL_MONITOR);
+		log_warn("This command also supports the --monitor option, which "
+				 "is not used here");
+	}
+
+	return false;
+}
 
 
 /*
@@ -174,17 +225,21 @@ keeper_cli_formation_getopts(int argc, char **argv)
 	}
 
 	/* when we have a monitor URI we don't need PGDATA */
-	if (IS_EMPTY_STRING_BUFFER(options.monitor_pguri))
-	{
-		cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
-	}
-	else
+	if (cli_formation_use_monitor_option(&options))
 	{
 		if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 		{
 			log_warn("Given --monitor URI, the --pgdata option is ignored");
 			log_info("Connecting to monitor at \"%s\"", options.monitor_pguri);
+
+			/* the rest of the program needs pgdata actually empty */
+			bzero((void *) options.pgSetup.pgdata,
+				  sizeof(options.pgSetup.pgdata));
 		}
+	}
+	else
+	{
+		cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
 	}
 
 	/* publish our option parsing in the global variable */
@@ -359,12 +414,16 @@ keeper_cli_formation_create_getopts(int argc, char **argv)
 	}
 
 	/* when we have a monitor URI we don't need PGDATA */
-	if (IS_EMPTY_STRING_BUFFER(options.monitor_pguri))
+	if (cli_formation_use_monitor_option(&options))
 	{
 		if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 		{
 			log_warn("Given --monitor URI, the --pgdata option is ignored");
 			log_info("Connecting to monitor at \"%s\"", options.monitor_pguri);
+
+			/* the rest of the program needs pgdata actually empty */
+			bzero((void *) options.pgSetup.pgdata,
+				  sizeof(options.pgSetup.pgdata));
 		}
 	}
 	else

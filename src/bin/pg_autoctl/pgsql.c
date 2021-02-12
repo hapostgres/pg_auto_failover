@@ -60,6 +60,13 @@ parseSingleValueResult(void *ctx, PGresult *result)
 	{
 		char *value = PQgetvalue(result, 0, 0);
 
+		/* this function is never used when we expect NULL values */
+		if (PQgetisnull(result, 0, 0))
+		{
+			context->parsedOk = false;
+			return;
+		}
+
 		switch (context->resultType)
 		{
 			case PGSQL_RESULT_BOOL:
