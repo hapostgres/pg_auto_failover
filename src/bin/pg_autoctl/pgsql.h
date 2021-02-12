@@ -15,6 +15,7 @@
 #include <stdbool.h>
 
 #include "libpq-fe.h"
+#include "portability/instr_time.h"
 
 #include "defaults.h"
 #include "pgsetup.h"
@@ -57,7 +58,8 @@ typedef enum
 	PGSQL_CONN_LOCAL = 0,
 	PGSQL_CONN_MONITOR,
 	PGSQL_CONN_COORDINATOR,
-	PGSQL_CONN_UPSTREAM
+	PGSQL_CONN_UPSTREAM,
+	PGSQL_CONN_APP
 } ConnectionType;
 
 
@@ -87,7 +89,8 @@ typedef struct ConnectionRetryPolicy
 	int baseSleepTime;          /* in millisecond, base time to sleep for */
 	int sleepTime;              /* in millisecond, time waited for last round */
 
-	uint64_t startTime;         /* time of the first attempt */
+	instr_time startTime;       /* time of the first attempt */
+	instr_time connectTime;     /* time of successful connection */
 	int attempts;               /* how many attempts have been made so far */
 } ConnectionRetryPolicy;
 

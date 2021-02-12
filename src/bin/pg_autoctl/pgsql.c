@@ -13,6 +13,7 @@
 #include "postgres_fe.h"
 #include "libpq-fe.h"
 #include "pqexpbuffer.h"
+#include "portability/instr_time.h"
 
 #include "cli_root.h"
 #include "defaults.h"
@@ -316,7 +317,7 @@ pgsql_compute_connection_retry_sleep_time(ConnectionRetryPolicy *retryPolicy)
 bool
 pgsql_retry_policy_expired(ConnectionRetryPolicy *retryPolicy)
 {
-	uint64_t now = time(NULL);
+	instr_time duration;
 
 	/* Any signal is reason enough to break out from this retry loop. */
 	if (asked_to_quit || asked_to_stop || asked_to_stop_fast || asked_to_reload)
@@ -325,10 +326,13 @@ pgsql_retry_policy_expired(ConnectionRetryPolicy *retryPolicy)
 	}
 
 	/* set the first retry time when it's not been set previously */
-	if (retryPolicy->startTime == 0)
+	if (INSTR_TIME_IS_ZERO(retryPolicy->startTime))
 	{
-		retryPolicy->startTime = now;
+		INSTR_TIME_SET_CURRENT(retryPolicy->startTime);
 	}
+
+	INSTR_TIME_SET_CURRENT(duration);
+	INSTR_TIME_SUBTRACT(duration, retryPolicy->startTime);
 
 	/*
 	 * We stop retrying as soon as we have spent all of our time budget or all
@@ -337,7 +341,7 @@ pgsql_retry_policy_expired(ConnectionRetryPolicy *retryPolicy)
 	 * maxR = 0 (zero) means no retry at all, checked before the loop
 	 * maxR < 0 (zero) means unlimited number of retries
 	 */
-	if ((now - retryPolicy->startTime) >= retryPolicy->maxT ||
+	if ((INSTR_TIME_GET_MILLISEC(duration) >= (retryPolicy->maxT * 1000)) ||
 		(retryPolicy->maxR > 0 &&
 		 retryPolicy->attempts >= retryPolicy->maxR))
 	{
@@ -443,8 +447,6 @@ log_connection_error(PGconn *connection, int logLevel)
 static PGconn *
 pgsql_open_connection(PGSQL *pgsql)
 {
-	uint64_t startTime = time(NULL);
-
 	/* we might be connected already */
 	if (pgsql->connection != NULL)
 	{
@@ -455,6 +457,10 @@ pgsql_open_connection(PGSQL *pgsql)
 
 	/* we implement our own retry strategy */
 	setenv("PGCONNECT_TIMEOUT", POSTGRES_CONNECT_TIMEOUT, 1);
+
+	/* register our starting time */
+	INSTR_TIME_SET_CURRENT(pgsql->retryPolicy.startTime);
+	INSTR_TIME_SET_ZERO(pgsql->retryPolicy.connectTime);
 
 	/* Make a connection to the database */
 	pgsql->connection = PQconnectdb(pgsql->connectionString);
@@ -477,6 +483,8 @@ pgsql_open_connection(PGSQL *pgsql)
 		if (pgsql->connectionType == PGSQL_CONN_LOCAL ||
 			pgsql->retryPolicy.maxR == 0)
 		{
+			INSTR_TIME_SET_CURRENT(pgsql->retryPolicy.connectTime);
+
 			(void) log_connection_error(pgsql->connection, LOG_ERROR);
 
 			log_error("Failed to connect to %s database at \"%s\", "
@@ -494,8 +502,6 @@ pgsql_open_connection(PGSQL *pgsql)
 		 * If we reach this part of the code, the connectionType is not LOCAL
 		 * and the retryPolicy has a non-zero maximum retry count. Let's retry!
 		 */
-		pgsql->retryPolicy.startTime = startTime;
-
 		if (!pgsql_retry_open_connection(pgsql))
 		{
 			/* errors have already been logged */
@@ -503,6 +509,7 @@ pgsql_open_connection(PGSQL *pgsql)
 		}
 	}
 
+	INSTR_TIME_SET_CURRENT(pgsql->retryPolicy.connectTime);
 	pgsql->status = PG_CONNECTION_OK;
 
 	/* set the libpq notice receiver to integrate notifications as warnings. */
@@ -515,6 +522,14 @@ pgsql_open_connection(PGSQL *pgsql)
 
 
 /*
+ * Refrain from warning too often. The user certainly wants to know that we are
+ * still trying to connect, though warning several times a second is not going
+ * to help anyone. A good trade-off seems to be a warning every 30s.
+ */
+#define SHOULD_WARN_AGAIN(duration) \
+	(INSTR_TIME_GET_MILLISEC(duration) > 30000)
+
+/*
  * pgsql_retry_open_connection loops over a PQping call until the remote server
  * is ready to accept connections, and then connects to it and returns true
  * when it could connect, false otherwise.
@@ -525,7 +540,9 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 	bool connectionOk = false;
 
 	PGPing lastWarningMessage = PQPING_OK;
-	uint64_t lastWarningTime = 0;
+	instr_time lastWarningTime;
+
+	INSTR_TIME_SET_ZERO(lastWarningTime);
 
 	log_warn("Failed to connect to \"%s\", retrying until "
 			 "the server is ready", pgsql->connectionString);
@@ -543,18 +560,21 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 	{
 		if (pgsql_retry_policy_expired(&(pgsql->retryPolicy)))
 		{
-			uint64_t now = time(NULL);
+			instr_time duration;
+
+			INSTR_TIME_SET_CURRENT(duration);
+			INSTR_TIME_SUBTRACT(duration, pgsql->retryPolicy.startTime);
 
 			(void) log_connection_error(pgsql->connection, LOG_ERROR);
 			pgsql->status = PG_CONNECTION_BAD;
 			pgsql_finish(pgsql);
 
 			log_error("Failed to connect to \"%s\" "
-					  "after %d attempts in %d seconds, "
+					  "after %d attempts in %d ms, "
 					  "pg_autoctl stops retrying now",
 					  pgsql->connectionString,
 					  pgsql->retryPolicy.attempts,
-					  (int) (now - pgsql->retryPolicy.startTime));
+					  (int) INSTR_TIME_GET_MILLISEC(duration));
 
 			return false;
 		}
@@ -563,7 +583,8 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 		 * Now compute how much time to wait for this round, and increment how
 		 * many times we tried to connect already.
 		 */
-		int sleep = pgsql_compute_connection_retry_sleep_time(&(pgsql->retryPolicy));
+		int sleep =
+			pgsql_compute_connection_retry_sleep_time(&(pgsql->retryPolicy));
 
 		/* we have milliseconds, pg_usleep() wants microseconds */
 		(void) pg_usleep(sleep * 1000);
@@ -597,38 +618,45 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 
 				if (PQstatus(pgsql->connection) == CONNECTION_OK)
 				{
-					uint64_t now = time(NULL);
+					instr_time duration;
+
+					INSTR_TIME_SET_CURRENT(duration);
 
 					connectionOk = true;
 					pgsql->status = PG_CONNECTION_OK;
+					pgsql->retryPolicy.connectTime = duration;
+
+					INSTR_TIME_SUBTRACT(duration, pgsql->retryPolicy.startTime);
 
 					log_info("Successfully connected to \"%s\" "
-							 "after %d attempts in %d seconds.",
+							 "after %d attempts in %d ms.",
 							 pgsql->connectionString,
 							 pgsql->retryPolicy.attempts,
-							 (int) (now - pgsql->retryPolicy.startTime));
+							 (int) INSTR_TIME_GET_MILLISEC(duration));
 				}
 				else
 				{
-					uint64_t now = time(NULL);
+					instr_time durationSinceLastWarning;
+
+					INSTR_TIME_SET_CURRENT(durationSinceLastWarning);
+					INSTR_TIME_SUBTRACT(durationSinceLastWarning, lastWarningTime);
 
 					if (lastWarningMessage != PQPING_OK ||
-						(now - lastWarningTime) > 30)
+						SHOULD_WARN_AGAIN(durationSinceLastWarning))
 					{
-						(void) log_connection_error(pgsql->connection, LOG_WARN);
+						lastWarningMessage = PQPING_OK;
+						INSTR_TIME_SET_CURRENT(lastWarningTime);
 
-						log_warn("Failed to connect after successful "
-								 "ping, please verify authentication "
-								 "and logs on the server at \"%s\"",
-								 pgsql->connectionString);
+						/*
+						 * Only show details when that's the last attempt,
+						 * otherwise accept that this may happen as a transient
+						 * state.
+						 */
+						(void) log_connection_error(pgsql->connection, LOG_DEBUG);
 
-						log_warn("Authentication might have failed on the "
-								 "Postgres server due to missing HBA rules.");
+						log_warn("Failed to connect after successful ping");
 					}
 					pgsql_finish(pgsql);
-
-					lastWarningMessage = PQPING_OK;
-					lastWarningTime = now;
 				}
 				break;
 			}
@@ -641,13 +669,16 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 			 */
 			case PQPING_REJECT:
 			{
-				uint64_t now = time(NULL);
+				instr_time durationSinceLastWarning;
+
+				INSTR_TIME_SET_CURRENT(durationSinceLastWarning);
+				INSTR_TIME_SUBTRACT(durationSinceLastWarning, lastWarningTime);
 
 				if (lastWarningMessage != PQPING_REJECT ||
-					(now - lastWarningTime) > 30)
+					SHOULD_WARN_AGAIN(durationSinceLastWarning))
 				{
 					lastWarningMessage = PQPING_REJECT;
-					lastWarningTime = now;
+					INSTR_TIME_SET_CURRENT(lastWarningTime);
 
 					log_warn(
 						"The server at \"%s\" is running but is in a state "
@@ -655,9 +686,6 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 						"crash recovery).",
 						pgsql->connectionString);
 				}
-
-				lastWarningMessage = PQPING_REJECT;
-				lastWarningTime = now;
 
 				break;
 			}
@@ -673,20 +701,26 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 			 */
 			case PQPING_NO_RESPONSE:
 			{
-				uint64_t now = time(NULL);
+				instr_time durationSinceStart, durationSinceLastWarning;
 
-				/* no message at all the first 30s */
+				INSTR_TIME_SET_CURRENT(durationSinceStart);
+				INSTR_TIME_SUBTRACT(durationSinceStart,
+									pgsql->retryPolicy.startTime);
 
-				if ((now - pgsql->retryPolicy.startTime) > 30 &&
+				INSTR_TIME_SET_CURRENT(durationSinceLastWarning);
+				INSTR_TIME_SUBTRACT(durationSinceLastWarning, lastWarningTime);
+
+				/* no message at all the first 30s: 30000ms */
+				if (SHOULD_WARN_AGAIN(durationSinceStart) &&
 					(lastWarningMessage != PQPING_NO_RESPONSE ||
-					 (now - lastWarningTime) > 30))
+					 SHOULD_WARN_AGAIN(durationSinceLastWarning)))
 				{
 					lastWarningMessage = PQPING_NO_RESPONSE;
-					lastWarningTime = now;
+					INSTR_TIME_SET_CURRENT(lastWarningTime);
 
 					log_warn(
 						"The server at \"%s\" could not be contacted "
-						"after %d attempts in %d seconds. "
+						"after %d attempts in %d ms (milliseconds). "
 						"This might indicate that the server is not running, "
 						"or that there is something wrong with the given "
 						"connection parameters (for example, wrong port "
@@ -695,11 +729,8 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 						"connection request).",
 						pgsql->connectionString,
 						pgsql->retryPolicy.attempts,
-						(int) (now - pgsql->retryPolicy.startTime));
+						(int) INSTR_TIME_GET_MILLISEC(durationSinceStart));
 				}
-
-				lastWarningMessage = PQPING_NO_RESPONSE;
-				lastWarningTime = now;
 
 				break;
 			}
@@ -724,6 +755,8 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 
 	if (!connectionOk && pgsql->connection != NULL)
 	{
+		INSTR_TIME_SET_CURRENT(pgsql->retryPolicy.connectTime);
+
 		(void) log_connection_error(pgsql->connection, LOG_ERROR);
 		pgsql->status = PG_CONNECTION_BAD;
 		pgsql_finish(pgsql);
@@ -805,8 +838,10 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 						  void *context, ParsePostgresResultCB *parseFun)
 {
 	char debugParameters[BUFSIZE] = { 0 };
+	PGresult *result = NULL;
 
 	PGconn *connection = pgsql_open_connection(pgsql);
+
 	if (connection == NULL)
 	{
 		return false;
@@ -847,8 +882,17 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 		log_debug("%s", debugParameters);
 	}
 
-	PGresult *result = PQexecParams(connection, sql,
-									paramCount, paramTypes, paramValues, NULL, NULL, 0);
+	if (paramCount == 0)
+	{
+		result = PQexec(connection, sql);
+	}
+	else
+	{
+		result = PQexecParams(connection, sql,
+							  paramCount, paramTypes, paramValues,
+							  NULL, NULL, 0);
+	}
+
 	if (!is_response_ok(result))
 	{
 		char *sqlstate = PQresultErrorField(result, PG_DIAG_SQLSTATE);

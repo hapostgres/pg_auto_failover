@@ -303,7 +303,7 @@ CommandLine *do_tmux[] = {
 
 CommandLine do_tmux_commands =
 	make_command_set("tmux",
-					 "set of facilities to handle tmux interactive sessions",
+					 "Set of facilities to handle tmux interactive sessions",
 					 NULL, NULL, NULL, do_tmux);
 
 /*
@@ -493,7 +493,7 @@ CommandLine *do_azure[] = {
 
 CommandLine do_azure_commands =
 	make_command_set("azure",
-					 "manage a set of azure resources for a pg_auto_failover demo",
+					 "Manage a set of Azure resources for a pg_auto_failover demo",
 					 NULL, NULL, NULL, do_azure);
 
 
@@ -508,12 +508,13 @@ CommandLine *do_subcommands[] = {
 	&do_service_commands,
 	&do_tmux_commands,
 	&do_azure_commands,
+	&do_demo_commands,
 	NULL
 };
 
 CommandLine do_commands =
 	make_command_set("do",
-					 "Manually operate the keeper", NULL, NULL,
+					 "Internal commands and internal QA tooling", NULL, NULL,
 					 NULL, do_subcommands);
 
 
