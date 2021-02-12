@@ -359,6 +359,12 @@ demoapp_process_perform_switchover(DemoAppOptions *demoAppOptions)
 	bool durationElapsed = false;
 	uint64_t startTime = time(NULL);
 
+	if (!demoAppOptions->doFailover)
+	{
+		log_info("This demo run uses --no-failover");
+		exit(EXIT_CODE_QUIT);
+	}
+
 	if (!monitor_init(&monitor, demoAppOptions->monitor_pguri))
 	{
 		/* errors have already been logged */

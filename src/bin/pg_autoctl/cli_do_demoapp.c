@@ -122,6 +122,7 @@ cli_do_demoapp_getopts(int argc, char **argv)
 		{ "username", required_argument, NULL, 'U' },
 		{ "clients", required_argument, NULL, 'c' },
 		{ "duration", required_argument, NULL, 't' },
+		{ "no-failover", no_argument, NULL, 'N' },
 		{ "first-failover", required_argument, NULL, 'F' },
 		{ "failover-freq", required_argument, NULL, 'Q' },
 		{ "version", no_argument, NULL, 'V' },
@@ -139,6 +140,7 @@ cli_do_demoapp_getopts(int argc, char **argv)
 	options.duration = 30;
 	options.firstFailover = 10;
 	options.failoverFreq = 45;
+	options.doFailover = true;
 	strlcpy(options.formation, "default", sizeof(options.formation));
 
 	/*
@@ -175,6 +177,14 @@ cli_do_demoapp_getopts(int argc, char **argv)
 				/* { "formation", required_argument, NULL, 'f' } */
 				strlcpy(options.formation, optarg, NAMEDATALEN);
 				log_trace("--formation %s", options.formation);
+				break;
+			}
+
+			case 'N':
+			{
+				/* { "no-failover", no_argument, NULL, 'N' }, */
+				options.doFailover = false;
+				log_trace("--no-failover");
 				break;
 			}
 

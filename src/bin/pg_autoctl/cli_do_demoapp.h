@@ -39,6 +39,7 @@ typedef struct DemoAppOptions
 	int duration;
 	int firstFailover;
 	int failoverFreq;
+	bool doFailover;
 } DemoAppOptions;
 
 extern DemoAppOptions demoAppOptions;
