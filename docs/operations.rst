@@ -361,6 +361,33 @@ The monitor reports every state change decision to a LISTEN/NOTIFY channel
 named ``state``. PostgreSQL logs on the monitor are also stored in a table,
 ``pgautofailover.event``, and broadcast by NOTIFY in the channel ``log``.
 
+.. _replacing_monitor_online:
+
+Replacing the monitor online
+----------------------------
+
+When the monitor node is not available anymore, it is possible to create a
+new monitor node and then switch existing nodes to a new monitor by using
+the following commands.
+
+  1. On every node, disable the monitor while ``pg_autoctl`` is still running::
+
+	   $ pg_autoctl disable monitor --force
+
+  2. Create a new monitor node::
+
+	   $ pg_autoctl create monitor ...
+
+  3. On every node, starting with the latest (current) Postgres primary node
+     for each group, enable the monitor online again::
+
+	   $ pg_autoctl enable monitor --monitor postgresql://...
+
+This operation relies on the fact that a ``pg_autoctl`` can be operated
+without a monitor, and when reconnecting to a new monitor, this process
+reset the parts of the node state that comes from the monitor, such as the
+node identifier.
+
 Trouble-Shooting Guide
 ----------------------
 
