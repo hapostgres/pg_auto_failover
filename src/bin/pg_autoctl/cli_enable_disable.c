@@ -22,7 +22,8 @@
 #include "parsing.h"
 #include "pgsetup.h"
 
-bool allowFailover = false;
+static bool allowFailover = false;
+static bool optForce = false;
 
 static int cli_secondary_getopts(int argc, char **argv);
 static void cli_enable_secondary(int argc, char **argv);
@@ -35,6 +36,11 @@ static void cli_disable_maintenance(int argc, char **argv);
 static int cli_ssl_getopts(int argc, char **argv);
 static void cli_enable_ssl(int argc, char **argv);
 static void cli_disable_ssl(int argc, char **argv);
+
+static int cli_enable_monitor_getopts(int argc, char **argv);
+static int cli_disable_monitor_getopts(int argc, char **argv);
+static void cli_enable_monitor(int argc, char **argv);
+static void cli_disable_monitor(int argc, char **argv);
 
 static bool update_ssl_configuration(LocalPostgresServer *postgres,
 									 const char *hostname);
@@ -93,10 +99,31 @@ static CommandLine disable_ssl_command =
 				 cli_getopt_pgdata,
 				 cli_disable_ssl);
 
+
+static CommandLine enable_monitor_command =
+	make_command("monitor",
+				 "Enable a monitor for this node to be orchestrated from",
+				 " [ --pgdata --monitor --allow-failover ] ",
+				 "  --pgdata      path to data directory\n"
+				 "  --monitor     Postgres URI to connect to the monitor\n"
+				 "  --allow-failover Allow failover if the monitor asks for it\n",
+				 cli_enable_monitor_getopts,
+				 cli_enable_monitor);
+
+static CommandLine disable_monitor_command =
+	make_command("monitor",
+				 "Disable the monitor for this node",
+				 " [ --pgdata --force ] ",
+				 "  --pgdata      path to data directory\n"
+				 "  --force       force unregistering from the monitor\n",
+				 cli_disable_monitor_getopts,
+				 cli_disable_monitor);
+
 static CommandLine *enable_subcommands[] = {
 	&enable_secondary_command,
 	&enable_maintenance_command,
 	&enable_ssl_command,
+	&enable_monitor_command,
 	NULL
 };
 
@@ -104,6 +131,7 @@ static CommandLine *disable_subcommands[] = {
 	&disable_secondary_command,
 	&disable_maintenance_command,
 	&disable_ssl_command,
+	&disable_monitor_command,
 	NULL
 };
 
@@ -1199,4 +1227,541 @@ cli_disable_ssl(int argc, char **argv)
 	}
 
 	(void) cli_enable_ssl(argc, argv);
+}
+
+
+/*
+ * cli_enable_monitor_getopts parses the command line options for the
+ * command `pg_autoctl enable monitor`.
+ */
+static int
+cli_enable_monitor_getopts(int argc, char **argv)
+{
+	KeeperConfig options = { 0 };
+	int c, option_index = 0, errors = 0;
+	int verboseCount = 0;
+
+	static struct option long_options[] = {
+		{ "pgdata", required_argument, NULL, 'D' },
+		{ "monitor", required_argument, NULL, 'm' },
+		{ "allow-failover", no_argument, NULL, 'A' },
+		{ "version", no_argument, NULL, 'V' },
+		{ "verbose", no_argument, NULL, 'v' },
+		{ "quiet", no_argument, NULL, 'q' },
+		{ "help", no_argument, NULL, 'h' },
+		{ NULL, 0, NULL, 0 }
+	};
+
+	/* set default values for our options, when we have some */
+	options.groupId = -1;
+	options.network_partition_timeout = -1;
+	options.prepare_promotion_catchup = -1;
+	options.prepare_promotion_walreceiver = -1;
+	options.postgresql_restart_failure_timeout = -1;
+	options.postgresql_restart_failure_max_retries = -1;
+
+	options.pgSetup.settings.candidatePriority =
+		FAILOVER_NODE_CANDIDATE_PRIORITY;
+	options.pgSetup.settings.replicationQuorum =
+		FAILOVER_NODE_REPLICATION_QUORUM;
+
+	/* do not set a default formation, it should be found in the config file */
+
+	optind = 0;
+
+	while ((c = getopt_long(argc, argv, "D:m:AVvqh",
+							long_options, &option_index)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(options.pgSetup.pgdata, optarg, MAXPGPATH);
+				log_trace("--pgdata %s", options.pgSetup.pgdata);
+				break;
+			}
+
+			case 'm':
+			{
+				if (!validate_connection_string(optarg))
+				{
+					log_fatal("Failed to parse --monitor connection string, "
+							  "see above for details.");
+					exit(EXIT_CODE_BAD_ARGS);
+				}
+				strlcpy(options.monitor_pguri, optarg, MAXCONNINFO);
+				log_trace("--monitor %s", options.monitor_pguri);
+				break;
+			}
+
+			case 'A':
+			{
+				allowFailover = true;
+				log_trace("--allow-failover");
+				break;
+			}
+
+			case 'P':
+			{
+				/* { "candidate-priority", required_argument, NULL, 'P'} */
+				int candidatePriority = strtol(optarg, NULL, 10);
+				if (errno == EINVAL ||
+					candidatePriority < 0 ||
+					candidatePriority > 100)
+				{
+					log_fatal("--candidate-priority argument is not valid."
+							  " Valid values are integers from 0 to 100. ");
+					exit(EXIT_CODE_BAD_ARGS);
+				}
+
+				options.pgSetup.settings.candidatePriority = candidatePriority;
+				log_trace("--candidate-priority %d", candidatePriority);
+				break;
+			}
+
+			case 'r':
+			{
+				/* { "replication-quorum", required_argument, NULL, 'r'} */
+				bool replicationQuorum = false;
+
+				if (!parse_bool(optarg, &replicationQuorum))
+				{
+					log_fatal("--replication-quorum argument is not valid."
+							  " Valid values are \"true\" or \"false\".");
+					exit(EXIT_CODE_BAD_ARGS);
+				}
+
+				options.pgSetup.settings.replicationQuorum = replicationQuorum;
+				log_trace("--replication-quorum %s",
+						  boolToString(replicationQuorum));
+				break;
+			}
+
+			case 'V':
+			{
+				/* keeper_cli_print_version prints version and exits. */
+				keeper_cli_print_version(argc, argv);
+				break;
+			}
+
+			case 'v':
+			{
+				++verboseCount;
+				switch (verboseCount)
+				{
+					case 1:
+					{
+						log_set_level(LOG_INFO);
+						break;
+					}
+
+					case 2:
+					{
+						log_set_level(LOG_DEBUG);
+						break;
+					}
+
+					default:
+					{
+						log_set_level(LOG_TRACE);
+						break;
+					}
+				}
+				break;
+			}
+
+			case 'q':
+			{
+				log_set_level(LOG_ERROR);
+				break;
+			}
+
+			case 'h':
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_QUIT);
+				break;
+			}
+
+			default:
+			{
+				/* getopt_long already wrote an error message */
+				errors++;
+			}
+		}
+	}
+
+	if (errors > 0)
+	{
+		commandline_help(stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
+
+	if (!keeper_config_set_pathnames_from_pgdata(&(options.pathnames),
+												 options.pgSetup.pgdata))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	keeperOptions = options;
+
+	return optind;
+}
+
+
+/*
+ * cli_enable_monitor enables a monitor (again?) on a pg_autoctl node where it
+ * currently is setup without a monitor.
+ */
+static void
+cli_enable_monitor(int argc, char **argv)
+{
+	Keeper keeper = { 0 };
+	Monitor *monitor = &(keeper.monitor);
+	KeeperConfig *config = &(keeper.config);
+
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = true;
+
+	keeper.config = keeperOptions;
+
+	(void) exit_unless_role_is_keeper(&(keeper.config));
+
+	if (!keeper_config_read_file(config,
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (!config->monitorDisabled)
+	{
+		log_fatal("Failed to enable monitor \"%s\": "
+				  "the monitor is already enabled",
+				  config->monitor_pguri);
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	/* copy the CLI --monitor option to the monitor config now */
+	strlcpy(config->monitor_pguri, keeperOptions.monitor_pguri, MAXCONNINFO);
+	config->monitorDisabled = false;
+
+	if (!keeper_init(&keeper, &keeper.config))
+	{
+		log_fatal("Failed to initialize keeper, see above for details");
+		exit(EXIT_CODE_KEEPER);
+	}
+
+	if (!monitor_init(monitor, config->monitor_pguri))
+	{
+		log_fatal("Failed to initialize the monitor connection, "
+				  "see above for details.");
+		exit(EXIT_CODE_MONITOR);
+	}
+
+	/*
+	 * Now register to the new monitor from this "client-side" process, and
+	 * then signal the background pg_autoctl service for this node (if any) to
+	 * reload its configuration so that it starts calling node_active() to the
+	 * new monitor.
+	 */
+	if (!keeper_register_again(&keeper))
+	{
+		exit(EXIT_CODE_MONITOR);
+	}
+
+	/*
+	 * Now that we have registered again, reload the background process (if any
+	 * is running) so that it connects to the monitor for the node_active
+	 * protocol.
+	 */
+	if (!keeper_config_write_file(config))
+	{
+		log_fatal("Failed to write pg_autoctl configuration file \"%s\", "
+				  "see above for details",
+				  keeper.config.pathnames.config);
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	/* time to reload the running pg_autoctl service, when it's running */
+	if (file_exists(keeper.config.pathnames.pid))
+	{
+		bool reloadedService =
+			cli_pg_autoctl_reload(keeper.config.pathnames.pid);
+
+		if (!reloadedService)
+		{
+			log_fatal("Failed to reload the pg_autoctl service");
+		}
+	}
+}
+
+
+/*
+ * cli_disable_monitor_getopts parses the command line options for the
+ * command `pg_autoctl disable monitor`.
+ */
+static int
+cli_disable_monitor_getopts(int argc, char **argv)
+{
+	KeeperConfig options = { 0 };
+	int c, option_index = 0, errors = 0;
+	int verboseCount = 0;
+
+	static struct option long_options[] = {
+		{ "pgdata", required_argument, NULL, 'D' },
+		{ "force", no_argument, NULL, 'F' },
+		{ "version", no_argument, NULL, 'V' },
+		{ "verbose", no_argument, NULL, 'v' },
+		{ "quiet", no_argument, NULL, 'q' },
+		{ "help", no_argument, NULL, 'h' },
+		{ NULL, 0, NULL, 0 }
+	};
+
+	/* set default values for our options, when we have some */
+	options.groupId = -1;
+	options.network_partition_timeout = -1;
+	options.prepare_promotion_catchup = -1;
+	options.prepare_promotion_walreceiver = -1;
+	options.postgresql_restart_failure_timeout = -1;
+	options.postgresql_restart_failure_max_retries = -1;
+
+	/* do not set a default formation, it should be found in the config file */
+
+	optind = 0;
+
+	while ((c = getopt_long(argc, argv, "D:FVvqh",
+							long_options, &option_index)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(options.pgSetup.pgdata, optarg, MAXPGPATH);
+				log_trace("--pgdata %s", options.pgSetup.pgdata);
+				break;
+			}
+
+			case 'F':
+			{
+				optForce = true;
+				log_trace("--force");
+				break;
+			}
+
+			case 'V':
+			{
+				/* keeper_cli_print_version prints version and exits. */
+				keeper_cli_print_version(argc, argv);
+				break;
+			}
+
+			case 'v':
+			{
+				++verboseCount;
+				switch (verboseCount)
+				{
+					case 1:
+					{
+						log_set_level(LOG_INFO);
+						break;
+					}
+
+					case 2:
+					{
+						log_set_level(LOG_DEBUG);
+						break;
+					}
+
+					default:
+					{
+						log_set_level(LOG_TRACE);
+						break;
+					}
+				}
+				break;
+			}
+
+			case 'q':
+			{
+				log_set_level(LOG_ERROR);
+				break;
+			}
+
+			case 'h':
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_QUIT);
+				break;
+			}
+
+			default:
+			{
+				/* getopt_long already wrote an error message */
+				errors++;
+			}
+		}
+	}
+
+	if (errors > 0)
+	{
+		commandline_help(stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
+
+	if (!keeper_config_set_pathnames_from_pgdata(&(options.pathnames),
+												 options.pgSetup.pgdata))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	keeperOptions = options;
+
+	return optind;
+}
+
+
+/*
+ * cli_disable_monitor disables the monitor on a running pg_autoctl node. This
+ * is useful when the monitor has been lost and a maintenance operation has to
+ * register the node to a new monitor without stopping Postgres.
+ */
+static void
+cli_disable_monitor(int argc, char **argv)
+{
+	Keeper keeper = { 0 };
+	Monitor *monitor = &(keeper.monitor);
+	KeeperConfig *config = &(keeper.config);
+
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = false;
+
+	keeper.config = keeperOptions;
+
+	(void) exit_unless_role_is_keeper(&(keeper.config));
+
+	if (!keeper_config_read_file(&(keeper.config),
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (!keeper_init(&keeper, &keeper.config))
+	{
+		log_fatal("Failed to initialize keeper, see above for details");
+		exit(EXIT_CODE_KEEPER);
+	}
+
+	if (!monitor_init(monitor, keeper.config.monitor_pguri))
+	{
+		log_fatal("Failed to initialize the monitor connection, "
+				  "see above for details.");
+		exit(EXIT_CODE_MONITOR);
+	}
+
+	/*
+	 * Unless --force has been used, we only disable the monitor when the
+	 * current node has not been registered. When --force is used, we remove
+	 * our registration from the monitor first.
+	 */
+	NodeAddressArray nodesArray = { 0 };
+	int nodeIndex = 0;
+
+	/*
+	 * There might be some race conditions here, but it's all to be
+	 * user-friendly so in the worst case we're going to be less friendly that
+	 * we could have.
+	 */
+	if (!monitor_get_nodes(monitor,
+						   config->formation,
+						   config->groupId,
+						   &nodesArray))
+	{
+		/* ignore the error, just don't wait in that case */
+		log_warn("Failed to get_nodes() on the monitor");
+		log_info("Failed to contact the monitor, disabling it as requested");
+	}
+
+	for (nodeIndex = 0; nodeIndex < nodesArray.count; nodeIndex++)
+	{
+		if (nodesArray.nodes[nodeIndex].nodeId == keeper.state.current_node_id)
+		{
+			/* we found our node, exit */
+			break;
+		}
+	}
+
+	/* --force, and we found the node */
+	if (optForce && nodeIndex < nodesArray.count)
+	{
+		log_info("Removing node %d \"%s\" (%s:%d) from monitor",
+				 nodesArray.nodes[nodeIndex].nodeId,
+				 nodesArray.nodes[nodeIndex].name,
+				 nodesArray.nodes[nodeIndex].host,
+				 nodesArray.nodes[nodeIndex].port);
+
+		if (!monitor_remove(monitor,
+							nodesArray.nodes[nodeIndex].host,
+							nodesArray.nodes[nodeIndex].port))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_MONITOR);
+		}
+	}
+
+	/* node was found on the monitor, but --force not provided */
+	else if (nodeIndex < nodesArray.count)
+	{
+		log_info("Found node %d \"%s\" (%s:%d) on the monitor",
+				 nodesArray.nodes[nodeIndex].nodeId,
+				 nodesArray.nodes[nodeIndex].name,
+				 nodesArray.nodes[nodeIndex].host,
+				 nodesArray.nodes[nodeIndex].port);
+		log_fatal("Use --force to remove the node from the monitor");
+		exit(EXIT_CODE_BAD_STATE);
+	}
+
+	/*
+	 * Now either we didn't find the node on the monitor, or we just removed it
+	 * from there. In either case, we can proceed with disabling the monitor
+	 * from the node setup, and removing the local state file.
+	 */
+	strlcpy(config->monitor_pguri,
+			PG_AUTOCTL_MONITOR_DISABLED,
+			sizeof(config->monitor_pguri));
+
+	config->monitorDisabled = true;
+
+	if (!keeper_config_write_file(config))
+	{
+		log_fatal("Failed to write pg_autoctl configuration file \"%s\", "
+				  "see above for details",
+				  keeper.config.pathnames.config);
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	/* time to reload the running pg_autoctl service, when it's running */
+	if (file_exists(keeper.config.pathnames.pid))
+	{
+		bool reloadedService =
+			cli_pg_autoctl_reload(keeper.config.pathnames.pid);
+
+		if (!reloadedService)
+		{
+			log_fatal("Failed to reload the pg_autoctl service");
+		}
+	}
 }
