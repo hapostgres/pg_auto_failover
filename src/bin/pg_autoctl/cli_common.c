@@ -1583,6 +1583,19 @@ cli_common_ensure_formation(KeeperConfig *options)
 		return true;
 	}
 
+	/*
+	 * When --monitor has been used rather than --pgdata, we are operating at a
+	 * distance and we don't expect a configuration file to exist.
+	 */
+	if (IS_EMPTY_STRING_BUFFER(options->pgSetup.pgdata))
+	{
+		strlcpy(options->formation,
+				FORMATION_DEFAULT,
+				sizeof(options->formation));
+
+		return true;
+	}
+
 	switch (ProbeConfigurationFileRole(options->pathnames.config))
 	{
 		case PG_AUTOCTL_ROLE_MONITOR:
@@ -1834,6 +1847,7 @@ cli_get_name_getopts(int argc, char **argv)
 
 	static struct option long_options[] = {
 		{ "pgdata", required_argument, NULL, 'D' },
+		{ "monitor", required_argument, NULL, 'm' },
 		{ "formation", required_argument, NULL, 'f' },
 		{ "name", required_argument, NULL, 'a' },
 		{ "json", no_argument, NULL, 'J' },
@@ -1873,6 +1887,19 @@ cli_get_name_getopts(int argc, char **argv)
 			{
 				strlcpy(options.pgSetup.pgdata, optarg, MAXPGPATH);
 				log_trace("--pgdata %s", options.pgSetup.pgdata);
+				break;
+			}
+
+			case 'm':
+			{
+				if (!validate_connection_string(optarg))
+				{
+					log_fatal("Failed to parse --monitor connection string, "
+							  "see above for details.");
+					exit(EXIT_CODE_BAD_ARGS);
+				}
+				strlcpy(options.monitor_pguri, optarg, MAXCONNINFO);
+				log_trace("--monitor %s", options.monitor_pguri);
 				break;
 			}
 
@@ -1959,7 +1986,23 @@ cli_get_name_getopts(int argc, char **argv)
 	}
 
 	/* now that we have the command line parameters, prepare the options */
-	(void) prepare_keeper_options(&options);
+	/* when we have a monitor URI we don't need PGDATA */
+	if (cli_use_monitor_option(&options))
+	{
+		if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
+		{
+			log_warn("Given --monitor URI, the --pgdata option is ignored");
+			log_info("Connecting to monitor at \"%s\"", options.monitor_pguri);
+
+			/* the rest of the program needs pgdata actually empty */
+			bzero((void *) options.pgSetup.pgdata,
+				  sizeof(options.pgSetup.pgdata));
+		}
+	}
+	else
+	{
+		(void) prepare_keeper_options(&options);
+	}
 
 	/* ensure --formation, or get it from the configuration file */
 	if (!cli_common_ensure_formation(&options))
@@ -1976,6 +2019,79 @@ cli_get_name_getopts(int argc, char **argv)
 
 
 /*
+ * cli_use_monitor_option returns true when the --monitor option should be
+ * used, or when PG_AUTOCTL_MONITOR has been set in the environment. In that
+ * case the options->monitor_pguri is also set to the value found in the
+ * environment.
+ */
+bool
+cli_use_monitor_option(KeeperConfig *options)
+{
+	/* if --monitor is used, then use it */
+	if (!IS_EMPTY_STRING_BUFFER(options->monitor_pguri))
+	{
+		return true;
+	}
+
+	/* otherwise, have a look at the PG_AUTOCTL_MONITOR environment variable */
+	if (env_exists(PG_AUTOCTL_MONITOR) &&
+		get_env_copy(PG_AUTOCTL_MONITOR,
+					 options->monitor_pguri,
+					 sizeof(options->monitor_pguri)))
+	{
+		log_debug("Using environment PG_AUTOCTL_MONITOR \"%s\"",
+				  options->monitor_pguri);
+		return true;
+	}
+
+	/*
+	 * Still nothing? well don't use --monitor then.
+	 *
+	 * Now, on commands that are compatible with using just a monitor and no
+	 * local pg_autoctl node, we want to include an error message about the
+	 * lack of a --monitor when we also lack --pgdata.
+	 */
+	if (IS_EMPTY_STRING_BUFFER(options->pgSetup.pgdata) &&
+		!env_exists("PGDATA"))
+	{
+		log_error("Failed to get value for environment variable '%s', "
+				  "which is unset", PG_AUTOCTL_MONITOR);
+		log_warn("This command also supports the --monitor option, which "
+				 "is not used here");
+	}
+
+	return false;
+}
+
+
+/*
+ * cli_monitor_init_from_option_or_config initialises a monitor connection
+ * either from the --monitor Postgres URI given on the command line, or from
+ * the configuration file of the local node (monitor or keeper).
+ */
+void
+cli_monitor_init_from_option_or_config(Monitor *monitor, KeeperConfig *kconfig)
+{
+	if (IS_EMPTY_STRING_BUFFER(kconfig->monitor_pguri))
+	{
+		if (!monitor_init_from_pgsetup(monitor, &(kconfig->pgSetup)))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_CONFIG);
+		}
+	}
+	else
+	{
+		if (!monitor_init(monitor, kconfig->monitor_pguri))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+	}
+}
+
+
+/*
  * cli_ensure_node_name ensures that we have a node name to continue with,
  * either from the command line itself, or from the configuration file when
  * we're dealing with a keeper node.
@@ -1983,31 +2099,38 @@ cli_get_name_getopts(int argc, char **argv)
 void
 cli_ensure_node_name(Keeper *keeper)
 {
+	/* if we have a --name option, we're done already */
+	if (!IS_EMPTY_STRING_BUFFER(keeper->config.name))
+	{
+		return;
+	}
+
+	/* we might have --monitor instead of --pgdata */
+	if (IS_EMPTY_STRING_BUFFER(keeper->config.pgSetup.pgdata))
+	{
+		log_fatal("Please use either --name or --pgdata "
+				  "to target a specific node");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
 	switch (ProbeConfigurationFileRole(keeper->config.pathnames.config))
 	{
 		case PG_AUTOCTL_ROLE_MONITOR:
 		{
-			if (IS_EMPTY_STRING_BUFFER(keeper->config.name))
-			{
-				log_fatal("Please use --name to target a specific node");
-				exit(EXIT_CODE_BAD_ARGS);
-			}
+			log_fatal("Please use --name to target a specific node");
+			exit(EXIT_CODE_BAD_ARGS);
 			break;
 		}
 
 		case PG_AUTOCTL_ROLE_KEEPER:
 		{
-			/* when --name has not been used, fetch it from the config */
-			if (IS_EMPTY_STRING_BUFFER(keeper->config.name))
-			{
-				bool monitorDisabledIsOk = false;
+			bool monitorDisabledIsOk = false;
 
-				if (!keeper_config_read_file_skip_pgsetup(&(keeper->config),
-														  monitorDisabledIsOk))
-				{
-					/* errors have already been logged */
-					exit(EXIT_CODE_BAD_CONFIG);
-				}
+			if (!keeper_config_read_file_skip_pgsetup(&(keeper->config),
+													  monitorDisabledIsOk))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_CONFIG);
 			}
 			break;
 		}
@@ -2017,6 +2140,100 @@ cli_ensure_node_name(Keeper *keeper)
 			log_fatal("Unrecognized configuration file \"%s\"",
 					  keeper->config.pathnames.config);
 			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+	}
+}
+
+
+/*
+ * cli_set_groupId sets the kconfig.groupId depending on the --group argument
+ * given on the command line, and if that was not given then figures it out:
+ *
+ * - it could be that we have a single group in the formation, in that case
+ *   --group must be zero, so we set it that way,
+ *
+ * - we may have a local keeper node setup thanks to --pgdata, in that case
+ *   read the configuration file and grab the groupId from there.
+ */
+void
+cli_set_groupId(Monitor *monitor, KeeperConfig *kconfig)
+{
+	int groupsCount = 0;
+
+	if (!monitor_count_groups(monitor, kconfig->formation, &groupsCount))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_MONITOR);
+	}
+
+	if (groupsCount == 0)
+	{
+		/* nothing to be done here */
+		log_fatal("The monitor currently has no Postgres nodes "
+				  "registered in formation \"%s\"",
+				  kconfig->formation);
+		exit(EXIT_CODE_BAD_STATE);
+	}
+
+	/*
+	 * When --group was not given, we may proceed when there is only one
+	 * possible target group in the formation, which is the case with Postgres
+	 * standalone setups.
+	 */
+	if (kconfig->groupId == -1)
+	{
+		/*
+		 * When --group is not given and we have a keeper node, we can grab a
+		 * default from the configuration file. We have to support the usage
+		 * either --monitor or --pgdata. We have a local keeper node/role only
+		 * when we have been given --pgdata.
+		 */
+		if (!IS_EMPTY_STRING_BUFFER(kconfig->pgSetup.pgdata))
+		{
+			pgAutoCtlNodeRole role =
+				ProbeConfigurationFileRole(kconfig->pathnames.config);
+
+			if (role == PG_AUTOCTL_ROLE_KEEPER)
+			{
+				const bool missingPgdataIsOk = true;
+				const bool pgIsNotRunningIsOk = true;
+				const bool monitorDisabledIsOk = false;
+
+				if (!keeper_config_read_file(kconfig,
+											 missingPgdataIsOk,
+											 pgIsNotRunningIsOk,
+											 monitorDisabledIsOk))
+				{
+					/* errors have already been logged */
+					exit(EXIT_CODE_BAD_CONFIG);
+				}
+
+				log_info("Targetting group %d in formation \"%s\"",
+						 kconfig->groupId,
+						 kconfig->formation);
+			}
+		}
+	}
+
+	/*
+	 * We tried to see if we have a local keeper configuration to grab the
+	 * groupId from, what if we don't have a local setup, or the local setup is
+	 * not a keeper role.
+	 */
+	if (kconfig->groupId == -1)
+	{
+		if (groupsCount == 1)
+		{
+			/* we have only one group, it's group number zero, proceed */
+			kconfig->groupId = 0;
+			kconfig->pgSetup.pgKind = NODE_KIND_STANDALONE;
+		}
+		else
+		{
+			log_error("Please use the --group option to target a "
+					  "specific group in formation \"%s\"",
+					  kconfig->formation);
+			exit(EXIT_CODE_BAD_ARGS);
 		}
 	}
 }

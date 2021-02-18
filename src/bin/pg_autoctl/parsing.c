@@ -686,6 +686,74 @@ buildPostgresURIfromPieces(URIParams *uriParams, char *pguri)
 
 
 /*
+ * parse_pguri_ssl_settings parses SSL settings from a Postgres connection
+ * string. Given the following connection string
+ *
+ *  "postgres://autoctl_node@localhost:5500/pg_auto_failover?sslmode=prefer"
+ *
+ * we then have an ssl->active = 1, ssl->sslMode = SSL_MODE_PREFER, etc.
+ */
+bool
+parse_pguri_ssl_settings(const char *pguri, SSLOptions *ssl)
+{
+	URIParams params = { 0 };
+	KeyVal overrides = { 0 };
+
+	/* initialize SSL Params values */
+	if (!parse_pguri_info_key_vals(pguri, &overrides, &params))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	for (int index = 0; index < params.parameters.count; index++)
+	{
+		char *key = params.parameters.keywords[index];
+		char *val = params.parameters.values[index];
+
+		if (streq(key, "sslmode"))
+		{
+			ssl->sslMode = pgsetup_parse_sslmode(val);
+			strlcpy(ssl->sslModeStr, val, sizeof(ssl->sslModeStr));
+
+			if (ssl->sslMode > SSL_MODE_DISABLE)
+			{
+				ssl->active = true;
+			}
+		}
+		else if (streq(key, "sslrootcert"))
+		{
+			strlcpy(ssl->caFile, val, sizeof(ssl->caFile));
+		}
+		else if (streq(key, "sslcrl"))
+		{
+			strlcpy(ssl->crlFile, val, sizeof(ssl->crlFile));
+		}
+		else if (streq(key, "sslcert"))
+		{
+			strlcpy(ssl->serverCert, val, sizeof(ssl->serverCert));
+		}
+		else if (streq(key, "sslkey"))
+		{
+			strlcpy(ssl->serverKey, val, sizeof(ssl->serverKey));
+		}
+	}
+
+	/* cook-in defaults when the parsed URL contains no SSL settings */
+	if (ssl->sslMode == SSL_MODE_UNKNOWN)
+	{
+		ssl->active = true;
+		ssl->sslMode = SSL_MODE_PREFER;
+		strlcpy(ssl->sslModeStr,
+				pgsetup_sslmode_to_string(ssl->sslMode),
+				sizeof(ssl->sslModeStr));
+	}
+
+	return true;
+}
+
+
+/*
  * nodeAddressCmpByNodeId sorts two given nodeAddress by comparing their
  * nodeId. We use this function to be able to pg_qsort() an array of nodes,
  * such as when parsing from a JSON file.

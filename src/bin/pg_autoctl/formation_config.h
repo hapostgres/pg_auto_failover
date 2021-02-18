@@ -16,6 +16,8 @@
 typedef struct FormationConfig
 {
 	/* pg_auto_failover formation setup */
+	char monitor_pguri[MAXCONNINFO];
+
 	char formation[NAMEDATALEN];
 	char formationKind[NAMEDATALEN];
 	char dbname[NAMEDATALEN];

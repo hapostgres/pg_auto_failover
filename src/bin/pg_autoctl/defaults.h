@@ -26,6 +26,9 @@
 /* environment variable for containing the id of the logging semaphore */
 #define PG_AUTOCTL_LOG_SEMAPHORE "PG_AUTOCTL_LOG_SEMAPHORE"
 
+/* environment variable for --monitor, when used instead of --pgdata */
+#define PG_AUTOCTL_MONITOR "PG_AUTOCTL_MONITOR"
+
 /* default values for the pg_autoctl settings */
 #define POSTGRES_PORT 5432
 #define POSTGRES_DEFAULT_LISTEN_ADDRESSES "*"

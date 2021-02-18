@@ -733,7 +733,7 @@ class PGNode:
         """
         command = PGAutoCtl(self)
         out, err, ret = command.execute(
-            "show uri --monitor", "show", "uri", "--monitor"
+            "show uri --monitor", "show", "uri", "--formation", "monitor"
         )
         return out
 
