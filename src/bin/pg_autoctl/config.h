@@ -18,12 +18,16 @@
 
 #define KEEPER_ROLE "keeper"
 #define MONITOR_ROLE "monitor"
+#define ARCHIVER_ROLE "archiver"
+#define NODE_ARCHIVER_ROLE "node_archiver"
 
 typedef enum
 {
 	PG_AUTOCTL_ROLE_UNKNOWN,
 	PG_AUTOCTL_ROLE_MONITOR,
-	PG_AUTOCTL_ROLE_KEEPER
+	PG_AUTOCTL_ROLE_KEEPER,
+	PG_AUTOCTL_ROLE_ARCHIVER,
+	PG_AUTOCTL_ROLE_NODE_ARCHIVER
 } pgAutoCtlNodeRole;
 
 typedef struct MinimalConfig

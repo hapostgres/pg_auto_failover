@@ -43,6 +43,8 @@ extern CommandLine *root_subcommands_with_debug[];
 extern CommandLine root;
 extern CommandLine *root_subcommands[];
 
+extern CommandLine archiver_commands;
+
 int root_options(int argc, char **argv);
 
 

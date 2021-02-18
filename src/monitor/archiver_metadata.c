@@ -41,7 +41,7 @@ Datum AutoFailoverArchiverGetDatum(FunctionCallInfo fcinfo,
  * otherwise.
  */
 AutoFailoverArchiver *
-GetArchiver(int nodeId)
+GetArchiver(int archiverId)
 {
 	AutoFailoverArchiver *archiver = NULL;
 	MemoryContext callerContext = CurrentMemoryContext;
@@ -51,13 +51,13 @@ GetArchiver(int nodeId)
 	};
 
 	Datum argValues[] = {
-		Int32GetDatum(nodeId), /* nodeId */
+		Int32GetDatum(archiverId), /* archiverId */
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
 
 	const char *selectQuery =
 		"SELECT * FROM " AUTO_FAILOVER_ARCHIVER_TABLE
-		" WHERE nodeId = $1";
+		" WHERE archiverId = $1";
 
 	SPI_connect();
 
@@ -76,8 +76,8 @@ GetArchiver(int nodeId)
 		HeapTuple heapTuple = SPI_tuptable->vals[0];
 		bool isNull = false;
 
-		Datum nodeId =
-			heap_getattr(heapTuple, Anum_pgautofailover_archiver_nodeid,
+		Datum archiverId =
+			heap_getattr(heapTuple, Anum_pgautofailover_archiver_archiverid,
 						 tupleDescriptor, &isNull);
 		Datum nodeName =
 			heap_getattr(heapTuple, Anum_pgautofailover_archiver_nodename,
@@ -89,7 +89,7 @@ GetArchiver(int nodeId)
 		archiver =
 			(AutoFailoverArchiver *) palloc0(sizeof(AutoFailoverArchiver));
 
-		archiver->nodeId = DatumGetInt64(nodeId);
+		archiver->archiverId = DatumGetInt64(archiverId);
 		archiver->nodeName = TextDatumGetCString(nodeName);
 		archiver->nodeHost = TextDatumGetCString(nodeHost);
 
@@ -135,18 +135,18 @@ AddArchiver(const char *nodeName, const char *nodeHost)
 
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
 
-	int nodeId = 0;
+	int archiverId = 0;
 
 	const char *insertQuery =
-		"WITH seq(nodeid) AS "
-		"(SELECT nextval('pgautofailover.archiver_nodeid_seq'::regclass)) "
+		"WITH seq(id) AS "
+		"(SELECT nextval('pgautofailover.archiver_archverid_seq'::regclass)) "
 		"INSERT INTO " AUTO_FAILOVER_ARCHIVER_TABLE
 		" (nodename, nodehost) "
 		"SELECT "
-		"case when $1 is null then format('archiver_%s', seq.nodeid) else $1 end"
+		"case when $1 is null then format('archiver_%s', seq.id) else $1 end"
 		", $2 "
 		"FROM seq "
-		"RETURNING nodeid";
+		"RETURNING archiverid";
 
 	SPI_connect();
 
@@ -158,12 +158,12 @@ AddArchiver(const char *nodeName, const char *nodeHost)
 	{
 		bool isNull = false;
 
-		Datum nodeIdDatum = SPI_getbinval(SPI_tuptable->vals[0],
-										  SPI_tuptable->tupdesc,
-										  1,
-										  &isNull);
+		Datum archiverIdDatum = SPI_getbinval(SPI_tuptable->vals[0],
+											  SPI_tuptable->tupdesc,
+											  1,
+											  &isNull);
 
-		nodeId = DatumGetInt32(nodeIdDatum);
+		archiverId = DatumGetInt32(archiverIdDatum);
 	}
 	else
 	{
@@ -172,7 +172,7 @@ AddArchiver(const char *nodeName, const char *nodeHost)
 
 	SPI_finish();
 
-	return nodeId;
+	return archiverId;
 }
 
 
@@ -185,11 +185,11 @@ void
 RemoveArchiver(AutoFailoverArchiver *archiver)
 {
 	Oid argTypes[] = {
-		INT4OID  /* nodeId */
+		INT4OID  /* archiverId */
 	};
 
 	Datum argValues[] = {
-		Int32GetDatum(archiver->nodeId) /* nodeId */
+		Int32GetDatum(archiver->archiverId) /* archiverId */
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
 
@@ -236,7 +236,7 @@ AutoFailoverArchiverGetDatum(FunctionCallInfo fcinfo,
 	memset(values, 0, sizeof(values));
 	memset(isNulls, false, sizeof(isNulls));
 
-	values[0] = Int32GetDatum(archiver->nodeId);
+	values[0] = Int32GetDatum(archiver->archiverId);
 	values[1] = CStringGetTextDatum(archiver->nodeName);
 	values[2] = CStringGetTextDatum(archiver->nodeHost);
 

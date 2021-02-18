@@ -230,4 +230,13 @@ bool keeper_postgres_state_read(KeeperStatePostgres *pgStatus,
 								const char *filename);
 
 
+/*
+ * Handling of an archiver state.
+ */
+typedef struct ArchiverState
+{
+	int pg_autoctl_state_version;
+	int archiver_node_id;
+} ArchiverState;
+
 #endif /* STATE_H */

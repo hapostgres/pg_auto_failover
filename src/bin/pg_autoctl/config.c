@@ -302,6 +302,14 @@ ProbeConfigurationFileRole(const char *filename)
 	{
 		return PG_AUTOCTL_ROLE_KEEPER;
 	}
+	else if (strcmp(config.role, ARCHIVER_ROLE) == 0)
+	{
+		return PG_AUTOCTL_ROLE_ARCHIVER;
+	}
+	else if (strcmp(config.role, NODE_ARCHIVER_ROLE) == 0)
+	{
+		return PG_AUTOCTL_ROLE_NODE_ARCHIVER;
+	}
 	else
 	{
 		log_fatal("Failed to recognize configuration file setting for "

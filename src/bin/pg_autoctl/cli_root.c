@@ -26,6 +26,7 @@ CommandLine *create_subcommands[] = {
 	&create_monitor_command,
 	&create_postgres_command,
 	&create_formation_command,
+	&create_archiver_command,
 	NULL
 };
 
@@ -88,6 +89,7 @@ CommandLine *root_subcommands_with_debug[] = {
 	&show_commands_with_debug,
 	&enable_commands,
 	&disable_commands,
+	&archiver_commands,
 	&get_commands,
 	&set_commands,
 	&perform_commands,
@@ -115,6 +117,7 @@ CommandLine *root_subcommands[] = {
 	&show_commands,
 	&enable_commands,
 	&disable_commands,
+	&archiver_commands,
 	&get_commands,
 	&set_commands,
 	&perform_commands,

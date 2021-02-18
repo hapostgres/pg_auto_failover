@@ -1513,7 +1513,7 @@ cli_show_file(int argc, char **argv)
 							break;
 						}
 
-						case PG_AUTOCTL_ROLE_UNKNOWN:
+						default:
 						{
 							log_fatal("Unknown node role %d", role);
 							exit(EXIT_CODE_BAD_CONFIG);

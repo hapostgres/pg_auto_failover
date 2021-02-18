@@ -93,6 +93,9 @@ extern CommandLine drop_node_command;
 extern CommandLine drop_monitor_command;
 extern CommandLine destroy_command;
 
+/* cli_archiver.c */
+extern CommandLine create_archiver_command;
+
 /* cli_get_set_properties.c */
 extern CommandLine get_commands;
 extern CommandLine set_commands;

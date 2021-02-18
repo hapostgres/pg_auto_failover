@@ -178,15 +178,23 @@ CREATE TABLE pgautofailover.event
 --
 CREATE TABLE pgautofailover.archiver
  (
-    nodeid               bigserial,
+    archiverid           bigserial,
     nodename             text not null,
     nodehost             text not null,
 
-    PRIMARY KEY (nodeid)
+    PRIMARY KEY (archiverid)
  );
 
+--
+-- A pg_auto_failover archiver can be registered to handle many formation. A
+-- single formation can also be taken care of by more than one archiver
+-- (redundancy). When more than one archiver is active for a single given
+-- formation, archivers may have different archiving policies. That's also
+-- useful for migrating to new archivers and policies.
+--
 CREATE TABLE pgautofailover.archiver_policy
  (
+    archiverid           bigint not null,
     formationid          text not null default 'default',
     opt_archive_local    bool not null default 'yes',
 
@@ -199,34 +207,31 @@ CREATE TABLE pgautofailover.archiver_policy
     backup_max_count     integer not null default 10,
     backup_max_age       interval not null default '2 days',
 
-    PRIMARY KEY (formationid),
+    PRIMARY KEY (archiverid, formationid),
+
+    FOREIGN KEY (archiverid) REFERENCES pgautofailover.archiver(archiverid),
     FOREIGN KEY (formationid) REFERENCES pgautofailover.formation(formationid)
  );
 
-INSERT INTO pgautofailover.archiver_policy
-            (formationid, opt_archive_local, apply_delay)
-     VALUES ('monitor', 'no', '0s'),
-            ('default', DEFAULT, DEFAULT);
-
 --
--- A standby node that is handled by the pg_autoctl archiver.
+-- A pg_auto_failover archiver handles N formation/groups, and for each of
+-- them it run an archiver_node, which is a full pg_auto_failover node
+-- (can't be a candidate for failover though). The archiver_node table is an
+-- association table between the archiver and the node.
 --
--- The nodeid is the nodeid of the archiver_node, which exists in the
--- pgautofailover.node table, and the archiver then runs an archiving
--- process that takes care of a local standby and an archive command as per
--- the archiver_policy setup.
+-- A single pg_auto_failover archiver can archive several nodes.
+--
+-- A single pgautofailover.node can be archived by more than one archiver at
+-- the same time. That's useful for archiver migrations and redundancy.
 --
 CREATE TABLE pgautofailover.archiver_node
  (
-    archiver             bigint not null,
-    nodeid               bigserial not null,
-    nodeport             int not null,
-    reportedlsn          pg_lsn not null default '0/0',
+    archiverid           bigint not null,
+    nodeid               bigint not null,
 
-    PRIMARY KEY (archiver, nodeid),
-    UNIQUE (nodeport),
+    PRIMARY KEY (archiverid, nodeid),
 
-    FOREIGN KEY (archiver) REFERENCES pgautofailover.archiver(nodeid),
+    FOREIGN KEY (archiverid) REFERENCES pgautofailover.archiver(archiverid),
     FOREIGN KEY (nodeid) REFERENCES pgautofailover.node(nodeid)
  );
 
@@ -235,8 +240,8 @@ CREATE TABLE pgautofailover.archiver_node
 --
 CREATE TABLE pgautofailover.basebackup
  (
-    archiver              bigint not null,
-    nodeid                bigserial not null,
+    archiverid            bigint not null,
+    nodeid                bigint not null,
 
     filename              text not null,
     filesize              bigint not null,
@@ -251,11 +256,12 @@ CREATE TABLE pgautofailover.basebackup
     label                 text not null,
     start_timeline        int not null,
 
-    PRIMARY KEY (archiver, nodeid, start_wal_location),
+    PRIMARY KEY (archiverid, nodeid, start_wal_location),
+    UNIQUE(archiverid, nodeid, filename),
 
-    FOREIGN KEY (archiver) REFERENCES pgautofailover.archiver(nodeid),
-    FOREIGN KEY (archiver, nodeid)
-    REFERENCES pgautofailover.archiver_node(archiver, nodeid)
+    FOREIGN KEY (archiverid) REFERENCES pgautofailover.archiver(archiverid),
+    FOREIGN KEY (archiverid, nodeid)
+    REFERENCES pgautofailover.archiver_node(archiverid, nodeid)
  );
 
 --
@@ -263,18 +269,18 @@ CREATE TABLE pgautofailover.basebackup
 --
 CREATE TABLE pgautofailover.wal_file
  (
-    archiver              bigint not null,
-    nodeid                bigserial not null,
+    archiverid            bigint not null,
+    nodeid                bigint not null,
 
     filename              text not null,
     filesize              bigint not null,
     md5                   uuid not null,
 
-    PRIMARY KEY(archiver, nodeid, filename),
+    PRIMARY KEY(archiverid, nodeid, filename),
 
-    FOREIGN KEY (archiver) REFERENCES pgautofailover.archiver(nodeid),
-    FOREIGN KEY (archiver, nodeid)
-     REFERENCES pgautofailover.archiver_node(archiver, nodeid)
+    FOREIGN KEY (archiverid) REFERENCES pgautofailover.archiver(archiverid),
+    FOREIGN KEY (archiverid, nodeid)
+     REFERENCES pgautofailover.archiver_node(archiverid, nodeid)
  );
 
 

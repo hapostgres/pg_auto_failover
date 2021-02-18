@@ -19,7 +19,7 @@
 
 /* column indexes for pgautofailover.archiver */
 #define Natts_pgautofailover_archiver 3
-#define Anum_pgautofailover_archiver_nodeid 1
+#define Anum_pgautofailover_archiver_archiverid 1
 #define Anum_pgautofailover_archiver_nodename 2
 #define Anum_pgautofailover_archiver_nodehost 3
 
@@ -28,13 +28,13 @@
  */
 typedef struct AutoFailoverArchiver
 {
-	int nodeId;
+	int archiverId;
 	char *nodeName;
 	char *nodeHost;
 } AutoFailoverArchiver;
 
 
-AutoFailoverArchiver * GetArchiver(int nodeId);
+AutoFailoverArchiver * GetArchiver(int archiverId);
 AutoFailoverArchiver * GetArchiverByHost(const char *nodeHost);
 int AddArchiver(const char *nodeHost, const char *nodeName);
 void RemoveArchiver(AutoFailoverArchiver *archiver);

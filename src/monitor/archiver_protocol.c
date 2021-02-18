@@ -56,12 +56,12 @@ register_archiver(PG_FUNCTION_ARGS)
 	 * empty string (''), and results in the code here assigning a default
 	 * archiver name.
 	 */
-	int nodeId =
+	int archiverId =
 		AddArchiver(
 			strcmp(nodeName, "") == 0 ? NULL : nodeName,
 			nodeHost);
 
-	AutoFailoverArchiver *archiver = GetArchiver(nodeId);
+	AutoFailoverArchiver *archiver = GetArchiver(archiverId);
 
 	if (archiver == NULL)
 	{
@@ -79,7 +79,7 @@ register_archiver(PG_FUNCTION_ARGS)
 		LogAndNotifyMessage(
 			message, BUFSIZE,
 			"Registering archiver %d \"%s\" (\"%s\")",
-			archiver->nodeId, archiver->nodeName, archiver->nodeHost);
+			archiver->archiverId, archiver->nodeName, archiver->nodeHost);
 	}
 
 	TupleDesc resultDescriptor = NULL;
@@ -89,7 +89,7 @@ register_archiver(PG_FUNCTION_ARGS)
 	memset(values, 0, sizeof(values));
 	memset(isNulls, false, sizeof(isNulls));
 
-	values[0] = Int32GetDatum(archiver->nodeId);
+	values[0] = Int32GetDatum(archiver->archiverId);
 	values[1] = CStringGetTextDatum(archiver->nodeName);
 
 	TypeFuncClass resultTypeClass =
