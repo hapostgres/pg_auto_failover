@@ -1390,10 +1390,9 @@ parseNode(PGresult *result, int rowNumber, NodeAddress *node)
 {
 	if (PQgetisnull(result, rowNumber, 0) ||
 		PQgetisnull(result, rowNumber, 1) ||
-		PQgetisnull(result, rowNumber, 2) ||
-		PQgetisnull(result, rowNumber, 3))
+		PQgetisnull(result, rowNumber, 2))
 	{
-		log_error("NodeId, nodename, hostname or port returned by monitor is NULL");
+		log_error("NodeId, nodename, or hostname returned by monitor is NULL");
 		return false;
 	}
 
@@ -1426,12 +1425,21 @@ parseNode(PGresult *result, int rowNumber, NodeAddress *node)
 		return false;
 	}
 
-	value = PQgetvalue(result, rowNumber, 3);
-
-	if (!stringToInt(value, &node->port) || node->port == 0)
+	if (PQnfields(result) >= 4)
 	{
-		log_error("Invalid port number \"%s\" returned by monitor", value);
-		return false;
+		if (PQgetisnull(result, rowNumber, 3))
+		{
+			log_error("Port number returned by monitor is NULL");
+			return false;
+		}
+
+		value = PQgetvalue(result, rowNumber, 3);
+
+		if (!stringToInt(value, &node->port) || node->port == 0)
+		{
+			log_error("Invalid port number \"%s\" returned by monitor", value);
+			return false;
+		}
 	}
 
 	/*
@@ -1468,9 +1476,9 @@ parseNodeResult(void *ctx, PGresult *result)
 		return;
 	}
 
-	if (PQnfields(result) != 4)
+	if (PQnfields(result) != 3 && PQnfields(result) != 4)
 	{
-		log_error("Query returned %d columns, expected 3", PQnfields(result));
+		log_error("Query returned %d columns, expected 4", PQnfields(result));
 		context->parsedOK = false;
 		return;
 	}
@@ -4221,6 +4229,48 @@ prepare_connection_to_current_system_user(Monitor *source, Monitor *target)
 	}
 
 	PQconninfoFree(conninfo);
+
+	return true;
+}
+
+
+/*
+ * monitor_register_archiver calls pgautofailer.monitor_register_archiver on
+ * the monitor.
+ */
+bool
+monitor_register_archiver(Monitor *monitor, char *name, char *host,
+						  NodeAddress *node)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql = "SELECT * FROM pgautofailover.register_archiver($1, $2)";
+
+	int paramCount = 2;
+	Oid paramTypes[2] = { TEXTOID, TEXTOID };
+	const char *paramValues[2];
+
+	NodeAddressParseContext parseContext = { { 0 }, node, false };
+
+	paramValues[0] = name;
+	paramValues[1] = host;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &parseContext, parseNodeResult))
+	{
+		log_error("Failed to register archiver \"%s\" (\"%s\") to the monitor",
+				  name, host);
+		return false;
+	}
+
+	if (!parseContext.parsedOK)
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	log_info("Registered archiver \"%s\" %d (\"%s\") on the monitor",
+			 node->name, node->nodeId, node->host);
 
 	return true;
 }

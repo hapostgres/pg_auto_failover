@@ -16,13 +16,15 @@
 
 #include "postgres_fe.h"
 
+#include "archiver.h"
+#include "archiver_config.h"
 #include "cli_common.h"
 #include "commandline.h"
 #include "env_utils.h"
 #include "defaults.h"
 #include "ini_file.h"
-#include "archiver.h"
-#include "archiver_config.h"
+#include "ipaddr.h"
+#include "pidfile.h"
 
 /* #include "service_archiver.h" */
 /* #include "service_archiver_init.h" */
@@ -55,6 +57,7 @@ CreateArchiverNodeOpts createArchiveNodeOptions = { 0 };
 AddArchiverNodeOpts addArchiverNodeOptions = { 0 };
 
 static int cli_create_archiver_getopts(int argc, char **argv);
+static bool cli_create_archiver_config(Archiver *archiver);
 static void cli_create_archiver(int argc, char **argv);
 
 static int cli_archiver_node_getopts(int argc, char **argv);
@@ -578,10 +581,101 @@ cli_create_archiver_getopts(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
+	if (!archiver_config_set_pathnames_from_directory(&options))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
 	/* publish our option parsing in the global variable */
 	archiverOptions = options;
 
 	return optind;
+}
+
+
+/*
+ * cli_create_archiver_config takes care of the archiver configuration, either
+ * creating it from scratch or merging the pg_autoctl create archiver command
+ * line arguments and options with the pre-existing configuration file (for
+ * when people change their mind or fix an error in the previous command).
+ */
+static bool
+cli_create_archiver_config(Archiver *archiver)
+{
+	ArchiverConfig *config = &(archiver->config);
+
+	if (file_exists(config->pathnames.config))
+	{
+		ArchiverConfig options = archiver->config;
+
+		if (!archiver_config_read_file(config))
+		{
+			log_fatal("Failed to read configuration file \"%s\"",
+					  config->pathnames.config);
+			exit(EXIT_CODE_BAD_CONFIG);
+		}
+
+		/*
+		 * Now that we have loaded the configuration file, apply the command
+		 * line options on top of it, giving them priority over the config.
+		 */
+		if (!archiver_config_merge_options(config, &options))
+		{
+			/* errors have been logged already */
+			exit(EXIT_CODE_BAD_CONFIG);
+		}
+	}
+	else
+	{
+		/* take care of the --hostname */
+		if (IS_EMPTY_STRING_BUFFER(config->hostname))
+		{
+			if (!ipaddrGetLocalHostname(config->hostname,
+										sizeof(config->hostname)))
+			{
+				if (!discover_hostname((char *) &(config->hostname),
+									   sizeof(config->hostname),
+									   DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME,
+									   DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT))
+				{
+					log_fatal("Failed to auto-detect the hostname "
+							  "of this machine, please provide one "
+							  "via --hostname");
+					exit(EXIT_CODE_BAD_ARGS);
+				}
+			}
+		}
+		else
+		{
+			/*
+			 * When provided with a --hostname option, we run some checks on
+			 * the user provided value based on Postgres usage for the hostname
+			 * in its HBA setup. Both forward and reverse DNS needs to return
+			 * meaningful values for the connections to be granted when using a
+			 * hostname.
+			 *
+			 * That said network setup is something complex and we don't
+			 * pretend we are able to avoid any and all false negatives in our
+			 * checks, so we only WARN when finding something that might be
+			 * fishy, and proceed with the setup of the local node anyway.
+			 */
+			(void) check_hostname(config->hostname);
+		}
+
+		/* set our ArchiverConfig from the command line options now. */
+		(void) archiver_config_init(config);
+
+		/* and write our brand new setup to file */
+		if (!archiver_config_write_file(config))
+		{
+			log_fatal("Failed to write the archiver's configuration file, "
+					  "see above");
+			exit(EXIT_CODE_BAD_CONFIG);
+		}
+	}
+
+	return true;
 }
 
 
@@ -592,8 +686,39 @@ cli_create_archiver_getopts(int argc, char **argv)
 static void
 cli_create_archiver(int argc, char **argv)
 {
-	log_fatal("Not yet implemented");
-	exit(EXIT_CODE_INTERNAL_ERROR);
+	pid_t pid = 0;
+	Archiver archiver = { 0 };
+	Monitor *monitor = &(archiver.monitor);
+	ArchiverConfig *config = &(archiver.config);
+
+	NodeAddress node = { 0 };
+
+	archiver.config = archiverOptions;
+
+	if (read_pidfile(config->pathnames.pid, &pid))
+	{
+		log_fatal("pg_autoctl is already running with pid %d", pid);
+		exit(EXIT_CODE_BAD_STATE);
+	}
+
+	if (!cli_create_archiver_config(&archiver))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (!archiver_monitor_init(&archiver))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_MONITOR);
+	}
+
+	if (!monitor_register_archiver(monitor, config->name, config->hostname,
+								   &node))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_MONITOR);
+	}
 }
 
 

@@ -199,6 +199,7 @@ void cli_ensure_node_name(Keeper *keeper);
 
 bool discover_hostname(char *hostname, int size,
 					   const char *monitorHostname, int monitorPort);
+void check_hostname(const char *hostname);
 
 /* cli_get_set_properties.c */
 void cli_get_formation_settings(int argc, char **argv);

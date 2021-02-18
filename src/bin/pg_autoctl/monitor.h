@@ -207,5 +207,7 @@ bool monitor_ensure_extension_version(Monitor *monitor,
 									  LocalPostgresServer *postgres,
 									  MonitorExtensionVersion *version);
 
+bool monitor_register_archiver(Monitor *monitor, char *name, char *host,
+							   NodeAddress *node);
 
 #endif /* MONITOR_H */

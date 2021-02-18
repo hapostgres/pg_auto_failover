@@ -139,10 +139,10 @@ AddArchiver(const char *nodeName, const char *nodeHost)
 
 	const char *insertQuery =
 		"WITH seq(id) AS "
-		"(SELECT nextval('pgautofailover.archiver_archverid_seq'::regclass)) "
+		"(SELECT nextval('pgautofailover.archiver_archiverid_seq'::regclass)) "
 		"INSERT INTO " AUTO_FAILOVER_ARCHIVER_TABLE
-		" (nodename, nodehost) "
-		"SELECT "
+		" (archiverid, nodename, nodehost) "
+		"SELECT seq.id, "
 		"case when $1 is null then format('archiver_%s', seq.id) else $1 end"
 		", $2 "
 		"FROM seq "

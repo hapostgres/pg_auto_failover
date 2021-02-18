@@ -61,8 +61,6 @@ static void cli_drop_node_from_monitor(KeeperConfig *config,
 									   const char *hostname,
 									   int port);
 
-static void check_hostname(const char *hostname);
-
 CommandLine create_monitor_command =
 	make_command(
 		"monitor",
@@ -1379,7 +1377,7 @@ discover_hostname(char *hostname, int size,
  * file and then compares the IP addresses obtained to the client IP address,
  * and refuses the connection where there's no match.
  */
-static void
+void
 check_hostname(const char *hostname)
 {
 	char localIpAddress[INET_ADDRSTRLEN];

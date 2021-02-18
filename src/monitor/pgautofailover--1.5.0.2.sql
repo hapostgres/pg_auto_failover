@@ -182,7 +182,9 @@ CREATE TABLE pgautofailover.archiver
     nodename             text not null,
     nodehost             text not null,
 
-    PRIMARY KEY (archiverid)
+    PRIMARY KEY (archiverid),
+    UNIQUE (nodename),
+    UNIQUE (nodehost)
  );
 
 --
@@ -373,7 +375,8 @@ CREATE FUNCTION pgautofailover.register_archiver
     IN node_host            text,
     IN node_name            text default '',
    OUT assigned_node_id     int,
-   OUT assigned_node_name   text
+   OUT assigned_node_name   text,
+   OUT assigned_node_host   text
  )
 RETURNS record LANGUAGE C STRICT SECURITY DEFINER
 AS 'MODULE_PATHNAME', $$register_archiver$$;

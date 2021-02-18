@@ -45,6 +45,7 @@ typedef struct FormationArray
 typedef struct Archiver
 {
 	ArchiverConfig config;
+	Monitor monitor;
 	ArchiverState state;
 
 	/* formations registration */
@@ -67,6 +68,7 @@ typedef struct AddArchiverNodeOpts
 	int groupId;
 } AddArchiverNodeOpts;
 
-bool archiver_init(Archiver *keeper, ArchiverConfig *config);
+
+bool archiver_monitor_init(Archiver *archiver);
 
 #endif /* ARCHIVER_H */

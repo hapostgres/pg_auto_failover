@@ -83,14 +83,15 @@ register_archiver(PG_FUNCTION_ARGS)
 	}
 
 	TupleDesc resultDescriptor = NULL;
-	Datum values[6];
-	bool isNulls[6];
+	Datum values[3];
+	bool isNulls[3];
 
 	memset(values, 0, sizeof(values));
 	memset(isNulls, false, sizeof(isNulls));
 
 	values[0] = Int32GetDatum(archiver->archiverId);
 	values[1] = CStringGetTextDatum(archiver->nodeName);
+	values[2] = CStringGetTextDatum(archiver->nodeHost);
 
 	TypeFuncClass resultTypeClass =
 		get_call_result_type(fcinfo, NULL, &resultDescriptor);
