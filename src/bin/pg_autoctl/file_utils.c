@@ -24,6 +24,7 @@
 #include "env_utils.h"
 #include "file_utils.h"
 #include "log.h"
+#include "rmtree.h"
 
 static bool read_file_internal(FILE *fileStream,
 							   const char *filePath,

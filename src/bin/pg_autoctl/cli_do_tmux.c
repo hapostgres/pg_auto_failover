@@ -32,6 +32,7 @@
 #include "pidfile.h"
 #include "signals.h"
 #include "string_utils.h"
+#include "rmtree.h"
 
 #include "runprogram.h"
 

@@ -30,6 +30,7 @@
 #include "pgtuning.h"
 #include "signals.h"
 #include "string_utils.h"
+#include "rmtree.h"
 
 #define RUN_PROGRAM_IMPLEMENTATION
 #include "runprogram.h"

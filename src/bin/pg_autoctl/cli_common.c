@@ -30,6 +30,7 @@
 #include "pidfile.h"
 #include "state.h"
 #include "string_utils.h"
+#include "rmtree.h"
 
 /* handle command line options for our setup. */
 KeeperConfig keeperOptions;
