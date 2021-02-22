@@ -28,7 +28,7 @@
  *	doesn't really have to say anything more, but most do.)
  */
 bool
-rmtree(const char *path, bool rmtopdir)
+rm_tree(const char *path, bool rmtopdir)
 {
 	bool		result = true;
 	char		pathbuf[MAXPGPATH];
@@ -75,7 +75,7 @@ rmtree(const char *path, bool rmtopdir)
 		if (S_ISDIR(statbuf.st_mode))
 		{
 			/* call ourselves recursively for a directory */
-			if (!rmtree(pathbuf, true))
+			if (!rm_tree(pathbuf, true))
 			{
 				/* we already reported the error */
 				result = false;

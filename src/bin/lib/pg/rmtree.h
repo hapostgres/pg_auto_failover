@@ -1,8 +1,8 @@
-#ifndef PG_RMTREE_H
-#define PG_RMTREE_H
+#ifndef RMTREE_H
+#define RMTREE_H
 
 #include "postgres_fe.h"
 
-bool rmtree(const char *path, bool rmtopdir);
+bool rm_tree(const char *path, bool rmtopdir);
 
-#endif	/* PG_RMTREE_H */
+#endif	/* RMTREE_H */

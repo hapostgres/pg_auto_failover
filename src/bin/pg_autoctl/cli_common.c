@@ -1433,7 +1433,7 @@ stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathnames,
 	{
 		log_info("Removing \"%s\"", pgSetup->pgdata);
 
-		if (!rmtree(pgSetup->pgdata, true))
+		if (!rm_tree(pgSetup->pgdata, true))
 		{
 			log_error("Failed to remove directory \"%s\": %m", pgSetup->pgdata);
 			exit(EXIT_CODE_INTERNAL_ERROR);

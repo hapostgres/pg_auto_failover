@@ -98,7 +98,7 @@ ensure_empty_dir(const char *dirname, int mode)
 
 	if (directory_exists(dirname))
 	{
-		if (!rmtree(dirname, true))
+		if (!rm_tree(dirname, true))
 		{
 			log_error("Failed to remove directory \"%s\": %m", dirname);
 			return false;

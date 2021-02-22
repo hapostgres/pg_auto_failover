@@ -1190,7 +1190,7 @@ tmux_cleanup_stale_directory(TmuxOptions *options)
 	(void) tmux_stop_pg_autoctl(options);
 
 	log_info("Removing stale directory: rm -rf \"%s\"", options->root);
-	if (!rmtree(options->root, true))
+	if (!rm_tree(options->root, true))
 	{
 		log_error("Failed to remove directory \"%s\": %m", options->root);
 		exit(EXIT_CODE_INTERNAL_ERROR);

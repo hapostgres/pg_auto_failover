@@ -1206,7 +1206,7 @@ pg_basebackup(const char *pgdata,
 	/* replace $pgdata with the backup directory */
 	if (directory_exists(pgdata))
 	{
-		if (!rmtree(pgdata, true))
+		if (!rm_tree(pgdata, true))
 		{
 			log_error("Failed to remove directory \"%s\": %m", pgdata);
 			return false;
