@@ -70,7 +70,8 @@ void tmux_add_new_session(PQExpBuffer script,
 						  const char *root, int pgport);
 
 void tmux_add_xdg_environment(PQExpBuffer script);
-void tmux_setenv(PQExpBuffer script, const char *sessionName, const char *root);
+void tmux_setenv(PQExpBuffer script,
+				 const char *sessionName, const char *root, int firstPort);
 bool tmux_prepare_XDG_environment(const char *root,
 								  bool createDirectories);
 

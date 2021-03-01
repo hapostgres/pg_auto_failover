@@ -2085,7 +2085,6 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 
 	AutoFailoverFormation *formation = GetFormation(formationId);
 
-
 	List *nodesGroupList = AutoFailoverNodeGroup(formationId, groupId);
 	int nodesCount = list_length(nodesGroupList);
 
@@ -2095,7 +2094,10 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 	 */
 	if (nodesCount == 0)
 	{
-		PG_RETURN_NULL();
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+				 errmsg("no nodes found in group %d of formation \"%s\"",
+						groupId, formationId)));
 	}
 
 	/* when we have a SINGLE node we disable synchronous replication */

@@ -201,14 +201,11 @@ static bool
 get_node_replication_settings(NodeReplicationSettings *settings)
 {
 	Keeper keeper = { 0 };
+	Monitor *monitor = &(keeper.monitor);
 
 	keeper.config = keeperOptions;
 
-	if (!monitor_init_from_pgsetup(&keeper.monitor, &keeper.config.pgSetup))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_CONFIG);
-	}
+	(void) cli_monitor_init_from_option_or_config(monitor, &(keeper.config));
 
 	/* grab --name from either the command options or the configuration file */
 	(void) cli_ensure_node_name(&keeper);
@@ -300,11 +297,7 @@ cli_get_formation_settings(int argc, char **argv)
 	KeeperConfig config = keeperOptions;
 	Monitor monitor = { 0 };
 
-	if (!monitor_init_from_pgsetup(&monitor, &config.pgSetup))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_CONFIG);
-	}
+	(void) cli_monitor_init_from_option_or_config(&monitor, &config);
 
 	if (outputJSON)
 	{
@@ -334,11 +327,7 @@ cli_get_formation_number_sync_standbys(int argc, char **argv)
 	Monitor monitor = { 0 };
 	int numberSyncStandbys = 0;
 
-	if (!monitor_init_from_pgsetup(&monitor, &config.pgSetup))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_CONFIG);
-	}
+	(void) cli_monitor_init_from_option_or_config(&monitor, &config);
 
 	if (!monitor_get_formation_number_sync_standbys(&monitor,
 													config.formation,
@@ -373,6 +362,7 @@ static void
 cli_set_node_replication_quorum(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
+	Monitor *monitor = &(keeper.monitor);
 	bool replicationQuorum = false;
 
 	keeper.config = keeperOptions;
@@ -394,11 +384,7 @@ cli_set_node_replication_quorum(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!monitor_init_from_pgsetup(&keeper.monitor, &keeper.config.pgSetup))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_CONFIG);
-	}
+	(void) cli_monitor_init_from_option_or_config(monitor, &(keeper.config));
 
 	/* grab --name from either the command options or the configuration file */
 	(void) cli_ensure_node_name(&keeper);
@@ -435,7 +421,7 @@ static void
 cli_set_node_candidate_priority(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
-
+	Monitor *monitor = &(keeper.monitor);
 
 	keeper.config = keeperOptions;
 
@@ -457,11 +443,7 @@ cli_set_node_candidate_priority(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!monitor_init_from_pgsetup(&keeper.monitor, &keeper.config.pgSetup))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_CONFIG);
-	}
+	(void) cli_monitor_init_from_option_or_config(monitor, &(keeper.config));
 
 	/* grab --name from either the command options or the configuration file */
 	(void) cli_ensure_node_name(&keeper);
@@ -603,7 +585,6 @@ cli_set_formation_number_sync_standbys(int argc, char **argv)
 	KeeperConfig config = keeperOptions;
 	Monitor monitor = { 0 };
 
-
 	char synchronous_standby_names[BUFSIZE] = { 0 };
 
 	if (argc != 1)
@@ -623,11 +604,7 @@ cli_set_formation_number_sync_standbys(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!monitor_init_from_pgsetup(&monitor, &config.pgSetup))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_CONFIG);
-	}
+	(void) cli_monitor_init_from_option_or_config(&monitor, &config);
 
 	/* change the default group when it is still unknown */
 	if (config.groupId == -1)

@@ -467,9 +467,11 @@ tmux_add_xdg_environment(PQExpBuffer script)
  * tmux_setenv adds setenv commands to the tmux script.
  */
 void
-tmux_setenv(PQExpBuffer script, const char *sessionName, const char *root)
+tmux_setenv(PQExpBuffer script,
+			const char *sessionName, const char *root, int firstPort)
 {
 	char PATH[BUFSIZE] = { 0 };
+	char monitor_pguri[MAXCONNINFO] = { 0 };
 
 	if (!get_env_copy("PATH", PATH, sizeof(PATH)))
 	{
@@ -477,7 +479,17 @@ tmux_setenv(PQExpBuffer script, const char *sessionName, const char *root)
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
-	tmux_add_command(script, "set-environment -t %s PATH \"%s\"", sessionName, PATH);
+	tmux_add_command(script,
+					 "set-environment -t %s PATH \"%s\"", sessionName, PATH);
+
+	sformat(monitor_pguri, sizeof(monitor_pguri),
+			"postgres://autoctl_node@localhost:%d/pg_auto_failover?sslmode=prefer",
+			firstPort);
+
+	tmux_add_command(script,
+					 "set-environment -t %s PG_AUTOCTL_MONITOR \"%s\"",
+					 sessionName,
+					 monitor_pguri);
 
 	for (int i = 0; xdg[i][0] != NULL; i++)
 	{
@@ -635,7 +647,7 @@ tmux_pg_autoctl_create_postgres(PQExpBuffer script,
 	tmux_add_send_keys_command(script, "export PGPORT=%d", pgport);
 
 	sformat(monitor, sizeof(monitor),
-			"$(%s show uri --pgdata %s/monitor --monitor)",
+			"$(%s show uri --pgdata %s/monitor --formation monitor)",
 			pg_autoctl_argv0,
 			root);
 
@@ -680,7 +692,7 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 	tmux_add_command(script, "set-option -g default-shell /bin/bash");
 
 	(void) tmux_add_new_session(script, root, pgport);
-	(void) tmux_setenv(script, sessionName, root);
+	(void) tmux_setenv(script, sessionName, root, options->firstPort);
 
 	/* start a monitor */
 	(void) tmux_add_xdg_environment(script);
@@ -715,7 +727,6 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 										node->name,
 										node->replicationQuorum,
 										node->candidatePriority);
-		tmux_add_send_keys_command(script, "pg_autoctl run");
 
 		strlcpy(previousName, node->name, sizeof(previousName));
 	}
@@ -740,7 +751,6 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 	tmux_add_command(script, "split-window -v");
 	tmux_add_command(script, "select-layout even-vertical");
 	(void) tmux_add_xdg_environment(script);
-	tmux_add_send_keys_command(script, "export PGDATA=\"%s/monitor\"", root);
 
 	if (options->numSync != -1)
 	{

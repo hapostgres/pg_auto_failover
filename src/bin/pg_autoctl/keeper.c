@@ -1581,7 +1581,8 @@ keeper_update_group_hba(Keeper *keeper, NodeAddressArray *diffNodesArray)
 	 * edited the HBA and it's going to take effect at next restart of
 	 * Postgres, so we're good here.
 	 */
-	if (pg_setup_is_running(postgresSetup))
+	if (postgresSetup->hbaLevel > HBA_EDIT_SKIP &&
+		pg_setup_is_running(postgresSetup))
 	{
 		if (!pgsql_reload_conf(pgsql))
 		{

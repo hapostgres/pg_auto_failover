@@ -26,6 +26,9 @@ extern CommandLine do_service_postgres_ctl_commands;
 /* src/bin/pg_autoctl/cli_do_show.c */
 extern CommandLine do_show_commands;
 
+/* src/bin/pg_autoctl/cli_do_demo.c */
+extern CommandLine do_demo_commands;
+
 /* src/bin/pg_autoctl/cli_do_root.c */
 extern CommandLine do_primary_adduser;
 extern CommandLine *do_primary_adduser_subcommands[];
@@ -60,6 +63,7 @@ extern CommandLine do_standby_promote;
 
 extern CommandLine do_discover;
 
+/* src/bin/pg_autoctl/cli_do_azure.c */
 extern CommandLine do_azure_ssh;
 
 extern CommandLine do_commands;
