@@ -1352,6 +1352,9 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 		(void) pg_usleep(sleepTimeMs * 1000);
 	}
 
+	/* we might have been assigned a new name */
+	strlcpy(config->name, assignedState.name, sizeof(config->name));
+
 	/* initialize FSM state from monitor's answer */
 	log_info("Writing keeper state file at \"%s\"", config->pathnames.state);
 
