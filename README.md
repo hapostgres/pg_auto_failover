@@ -117,7 +117,7 @@ install the `pg_autoctl` binary command in the directory pointed to by
 
 Once the building and installation is done, follow those steps:
 
-  1. Install a run a monitor
+  1. Install and run a monitor
 
      ~~~ bash
 	 $ export PGDATA=./monitor
