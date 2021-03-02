@@ -56,17 +56,21 @@ def test_005_drop_monitor():
     cluster.monitor = None
 
 
-def test_006a_disable_monitor_node1():
+def test_006a_disable_monitor_node2():
+    node2.disable_monitor()
+
+
+def test_006b_disable_monitor_node1():
     node1.disable_monitor()
 
 
-def test_006b_disable_monitor_node2():
-    node2.disable_monitor()
+def test_006c_write_to_primary():
+    node1.run_sql_query("INSERT INTO t1 VALUES (3)")
 
 
 def test_007_read_from_secondary():
     results = node2.run_sql_query("SELECT * FROM t1 ORDER BY a")
-    assert results == [(1,), (2,)]
+    assert results == [(1,), (2,), (3,)]
 
 
 def test_008_create_new_monitor():
@@ -77,15 +81,18 @@ def test_008_create_new_monitor():
 
 def test_009a_enable_monitor_node1():
     node1.enable_monitor(newmonitor)
+    assert node1.wait_until_state(target_state="single")
 
 
-def test_009b_enable_monitor_node1():
+def test_009b_enable_monitor_node2():
     node2.enable_monitor(newmonitor)
+    assert node2.wait_until_state(target_state="catchingup")
+    assert node1.wait_until_state(target_state="wait_primary")
 
 
 def test_010_wait_until_state():
-    assert node2.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")
+    assert node2.wait_until_state(target_state="secondary")
 
 
 def test_011_failover():
@@ -101,4 +108,4 @@ def test_011_failover():
 
 def test_012_read_from_secondary():
     results = node1.run_sql_query("SELECT * FROM t1 ORDER BY a")
-    assert results == [(1,), (2,)]
+    assert results == [(1,), (2,), (3,)]

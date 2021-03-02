@@ -1269,7 +1269,6 @@ SELECT reportedstate, goalstate
             "enable monitor",
             "enable",
             "monitor",
-            "--monitor",
             monitor.connection_string(),
         )
 
@@ -1285,6 +1284,7 @@ SELECT reportedstate, goalstate
         command = PGAutoCtl(self)
         command.execute("disable monitor", "disable", "monitor", "--force")
 
+        self.monitor = None
         self.monitorDisabled = True
 
     def drop(self):

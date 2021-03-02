@@ -51,7 +51,7 @@ As a result, here is the standard upgrade plan for pg_auto_failover:
   1. Upgrade the pg_auto_failover package on the all the nodes, monitor
      included.
 
-	 When using a debian based OS, this looks like the following command when 
+	 When using a debian based OS, this looks like the following command when
 	 from 1.4 to 1.5::
 
 	   sudo apt-get remove pg-auto-failover-cli-enterprise-1.4 postgresql-11-auto-failover-enterprise-1.4
@@ -370,15 +370,20 @@ When the monitor node is not available anymore, it is possible to create a
 new monitor node and then switch existing nodes to a new monitor by using
 the following commands.
 
-  1. On every node, disable the monitor while ``pg_autoctl`` is still running::
+  1. Apply the STONITH approach on the old monitor to make sure this node is
+     not going to show up again during the procedure. This step is sometimes
+     refered to as “fencing”.
+
+  2. On every node, ending with the (current) Postgres primary node for each
+     group, disable the monitor while ``pg_autoctl`` is still running::
 
 	   $ pg_autoctl disable monitor --force
 
-  2. Create a new monitor node::
+  3. Create a new monitor node::
 
 	   $ pg_autoctl create monitor ...
 
-  3. On every node, starting with the latest (current) Postgres primary node
+  4. On every node, starting with the latest (current) Postgres primary node
      for each group, enable the monitor online again::
 
 	   $ pg_autoctl enable monitor --monitor postgresql://...

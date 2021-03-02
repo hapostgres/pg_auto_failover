@@ -103,10 +103,9 @@ static CommandLine disable_ssl_command =
 static CommandLine enable_monitor_command =
 	make_command("monitor",
 				 "Enable a monitor for this node to be orchestrated from",
-				 " [ --pgdata --monitor --allow-failover ] ",
-				 "  --pgdata      path to data directory\n"
-				 "  --monitor     Postgres URI to connect to the monitor\n"
-				 "  --allow-failover Allow failover if the monitor asks for it\n",
+				 " [ --pgdata --allow-failover ] "
+				 "postgres://autoctl_node@new.monitor.add.ress/pg_auto_failover",
+				 "  --pgdata      path to data directory\n",
 				 cli_enable_monitor_getopts,
 				 cli_enable_monitor);
 
@@ -1243,7 +1242,6 @@ cli_enable_monitor_getopts(int argc, char **argv)
 
 	static struct option long_options[] = {
 		{ "pgdata", required_argument, NULL, 'D' },
-		{ "monitor", required_argument, NULL, 'm' },
 		{ "allow-failover", no_argument, NULL, 'A' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
@@ -1265,9 +1263,17 @@ cli_enable_monitor_getopts(int argc, char **argv)
 	options.pgSetup.settings.replicationQuorum =
 		FAILOVER_NODE_REPLICATION_QUORUM;
 
-	/* do not set a default formation, it should be found in the config file */
-
 	optind = 0;
+
+	/*
+	 * The only command lines that are using keeper_cli_getopt_pgdata are
+	 * terminal ones: they don't accept subcommands. In that case our option
+	 * parsing can happen in any order and we don't need getopt_long to behave
+	 * in a POSIXLY_CORRECT way.
+	 *
+	 * The unsetenv() call allows getopt_long() to reorder arguments for us.
+	 */
+	unsetenv("POSIXLY_CORRECT");
 
 	while ((c = getopt_long(argc, argv, "D:m:AVvqh",
 							long_options, &option_index)) != -1)
@@ -1281,59 +1287,10 @@ cli_enable_monitor_getopts(int argc, char **argv)
 				break;
 			}
 
-			case 'm':
-			{
-				if (!validate_connection_string(optarg))
-				{
-					log_fatal("Failed to parse --monitor connection string, "
-							  "see above for details.");
-					exit(EXIT_CODE_BAD_ARGS);
-				}
-				strlcpy(options.monitor_pguri, optarg, MAXCONNINFO);
-				log_trace("--monitor %s", options.monitor_pguri);
-				break;
-			}
-
 			case 'A':
 			{
 				allowFailover = true;
 				log_trace("--allow-failover");
-				break;
-			}
-
-			case 'P':
-			{
-				/* { "candidate-priority", required_argument, NULL, 'P'} */
-				int candidatePriority = strtol(optarg, NULL, 10);
-				if (errno == EINVAL ||
-					candidatePriority < 0 ||
-					candidatePriority > 100)
-				{
-					log_fatal("--candidate-priority argument is not valid."
-							  " Valid values are integers from 0 to 100. ");
-					exit(EXIT_CODE_BAD_ARGS);
-				}
-
-				options.pgSetup.settings.candidatePriority = candidatePriority;
-				log_trace("--candidate-priority %d", candidatePriority);
-				break;
-			}
-
-			case 'r':
-			{
-				/* { "replication-quorum", required_argument, NULL, 'r'} */
-				bool replicationQuorum = false;
-
-				if (!parse_bool(optarg, &replicationQuorum))
-				{
-					log_fatal("--replication-quorum argument is not valid."
-							  " Valid values are \"true\" or \"false\".");
-					exit(EXIT_CODE_BAD_ARGS);
-				}
-
-				options.pgSetup.settings.replicationQuorum = replicationQuorum;
-				log_trace("--replication-quorum %s",
-						  boolToString(replicationQuorum));
 				break;
 			}
 
@@ -1443,13 +1400,31 @@ cli_enable_monitor(int argc, char **argv)
 	if (!config->monitorDisabled)
 	{
 		log_fatal("Failed to enable monitor \"%s\": "
-				  "the monitor is already enabled",
+				  "there is already a monitor enabled",
 				  config->monitor_pguri);
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	/* copy the CLI --monitor option to the monitor config now */
-	strlcpy(config->monitor_pguri, keeperOptions.monitor_pguri, MAXCONNINFO);
+	/*
+	 * Parse monitor Postgres URI expected as the first (only) argument.
+	 */
+	if (argc != 1)
+	{
+		log_fatal("Failed to parse new monitor URI as an argument.");
+		commandline_print_usage(&enable_monitor_command, stderr);
+
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	strlcpy(config->monitor_pguri, argv[0], MAXCONNINFO);
+
+	if (!validate_connection_string(config->monitor_pguri))
+	{
+		log_fatal("Failed to parse the new monitor connection string, "
+				  "see above for details.");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
 	config->monitorDisabled = false;
 
 	if (!keeper_init(&keeper, &keeper.config))
@@ -1479,7 +1454,8 @@ cli_enable_monitor(int argc, char **argv)
 	/*
 	 * Now that we have registered again, reload the background process (if any
 	 * is running) so that it connects to the monitor for the node_active
-	 * protocol.
+	 * protocol. When we reload the background process, we need the
+	 * configuration file to have been updated first on-disk:
 	 */
 	if (!keeper_config_write_file(config))
 	{
@@ -1690,9 +1666,18 @@ cli_disable_monitor(int argc, char **argv)
 						   config->groupId,
 						   &nodesArray))
 	{
-		/* ignore the error, just don't wait in that case */
-		log_warn("Failed to get_nodes() on the monitor");
-		log_info("Failed to contact the monitor, disabling it as requested");
+		if (optForce)
+		{
+			/* ignore the error, just don't wait in that case */
+			log_warn("Failed to get_nodes() on the monitor");
+			log_info("Failed to contact the monitor, disabling it as requested");
+		}
+		else
+		{
+			log_warn("Failed to get_nodes() on the monitor");
+			log_fatal("Failed to contact the monitor, use --force to continue");
+			exit(EXIT_CODE_MONITOR);
+		}
 	}
 
 	for (nodeIndex = 0; nodeIndex < nodesArray.count; nodeIndex++)
@@ -1704,34 +1689,37 @@ cli_disable_monitor(int argc, char **argv)
 		}
 	}
 
-	/* --force, and we found the node */
-	if (optForce && nodeIndex < nodesArray.count)
+	/* did we find the local node on the monitor? */
+	if (nodeIndex < nodesArray.count)
 	{
-		log_info("Removing node %d \"%s\" (%s:%d) from monitor",
-				 nodesArray.nodes[nodeIndex].nodeId,
-				 nodesArray.nodes[nodeIndex].name,
-				 nodesArray.nodes[nodeIndex].host,
-				 nodesArray.nodes[nodeIndex].port);
-
-		if (!monitor_remove(monitor,
-							nodesArray.nodes[nodeIndex].host,
-							nodesArray.nodes[nodeIndex].port))
+		if (optForce)
 		{
-			/* errors have already been logged */
-			exit(EXIT_CODE_MONITOR);
-		}
-	}
+			/* --force, and we found the node */
+			log_info("Removing node %d \"%s\" (%s:%d) from monitor",
+					 nodesArray.nodes[nodeIndex].nodeId,
+					 nodesArray.nodes[nodeIndex].name,
+					 nodesArray.nodes[nodeIndex].host,
+					 nodesArray.nodes[nodeIndex].port);
 
-	/* node was found on the monitor, but --force not provided */
-	else if (nodeIndex < nodesArray.count)
-	{
-		log_info("Found node %d \"%s\" (%s:%d) on the monitor",
-				 nodesArray.nodes[nodeIndex].nodeId,
-				 nodesArray.nodes[nodeIndex].name,
-				 nodesArray.nodes[nodeIndex].host,
-				 nodesArray.nodes[nodeIndex].port);
-		log_fatal("Use --force to remove the node from the monitor");
-		exit(EXIT_CODE_BAD_STATE);
+			if (!monitor_remove(monitor,
+								nodesArray.nodes[nodeIndex].host,
+								nodesArray.nodes[nodeIndex].port))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_MONITOR);
+			}
+		}
+		else
+		{
+			/* node was found on the monitor, but --force not provided */
+			log_info("Found node %d \"%s\" (%s:%d) on the monitor",
+					 nodesArray.nodes[nodeIndex].nodeId,
+					 nodesArray.nodes[nodeIndex].name,
+					 nodesArray.nodes[nodeIndex].host,
+					 nodesArray.nodes[nodeIndex].port);
+			log_fatal("Use --force to remove the node from the monitor");
+			exit(EXIT_CODE_BAD_STATE);
+		}
 	}
 
 	/*
