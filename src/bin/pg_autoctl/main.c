@@ -55,7 +55,7 @@ main(int argc, char **argv)
 	 * Since PG 12, we need to call pg_logging_init before any calls to pg_log_*
 	 * otherwise, we get a segfault. Although we doesn't use pg_log_* directly,
 	 * functions from the common library such as rmtree do use them.
-	 * Logging change introduced in PG 12: https://git.io/JqvcN
+	 * Logging change introduced in PG 12: https://git.postgresql.org/cgit/postgresql.git/commit/?id=cc8d41511721d25d557fc02a46c053c0a602fed0
 	 */
 	#if (PG_VERSION_NUM >= 120000)
 	pg_logging_init(argv[0]);
