@@ -1571,7 +1571,7 @@ keeper_update_group_hba(Keeper *keeper, NodeAddressArray *diffNodesArray)
 									   postgresSetup->dbname,
 									   PG_AUTOCTL_REPLICA_USERNAME,
 									   authMethod,
-									   postgresSetup->hbaLevel))
+									   keeper->config.pgSetup.hbaLevel))
 	{
 		log_error("Failed to edit HBA file \"%s\" to update rules to current "
 				  "list of nodes registered on the monitor",
@@ -1584,7 +1584,7 @@ keeper_update_group_hba(Keeper *keeper, NodeAddressArray *diffNodesArray)
 	 * edited the HBA and it's going to take effect at next restart of
 	 * Postgres, so we're good here.
 	 */
-	if (postgresSetup->hbaLevel > HBA_EDIT_SKIP &&
+	if (keeper->config.pgSetup.hbaLevel >= HBA_EDIT_MINIMAL &&
 		pg_setup_is_running(postgresSetup))
 	{
 		if (!pgsql_reload_conf(pgsql))

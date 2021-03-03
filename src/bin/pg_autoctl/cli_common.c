@@ -193,7 +193,7 @@ cli_common_keeper_getopts(int argc, char **argv,
 			case 'A':
 			{
 				/* { "auth", required_argument, NULL, 'A' }, */
-				if (!IS_EMPTY_STRING_BUFFER(LocalOptionConfig.pgSetup.authMethod))
+				if (LocalOptionConfig.pgSetup.hbaLevel == HBA_EDIT_SKIP)
 				{
 					errors++;
 					log_error("Please use either --auth or --skip-pg-hba");
@@ -201,6 +201,15 @@ cli_common_keeper_getopts(int argc, char **argv,
 
 				strlcpy(LocalOptionConfig.pgSetup.authMethod, optarg, NAMEDATALEN);
 				log_trace("--auth %s", LocalOptionConfig.pgSetup.authMethod);
+
+				if (LocalOptionConfig.pgSetup.hbaLevel == HBA_EDIT_UNKNOWN)
+				{
+					strlcpy(LocalOptionConfig.pgSetup.hbaLevelStr,
+							pgsetup_hba_level_to_string(HBA_EDIT_MINIMAL),
+							sizeof(LocalOptionConfig.pgSetup.hbaLevelStr));
+
+					LocalOptionConfig.pgSetup.hbaLevel = HBA_EDIT_MINIMAL;
+				}
 				break;
 			}
 
@@ -231,8 +240,7 @@ cli_common_keeper_getopts(int argc, char **argv,
 			case 'L':
 			{
 				/* { "pg-hba-lan", required_argument, NULL, 'L' }, */
-				if (LocalOptionConfig.pgSetup.hbaLevel != HBA_EDIT_UNKNOWN &&
-					LocalOptionConfig.pgSetup.hbaLevel != HBA_EDIT_LAN)
+				if (LocalOptionConfig.pgSetup.hbaLevel == HBA_EDIT_SKIP)
 				{
 					errors++;
 					log_error("Please use either --skip-pg-hba or --pg-hba-lan");
@@ -511,6 +519,10 @@ cli_common_keeper_getopts(int argc, char **argv,
 	/* the default HBA editing level is MINIMAL, time to install it */
 	if (LocalOptionConfig.pgSetup.hbaLevel == HBA_EDIT_UNKNOWN)
 	{
+		strlcpy(LocalOptionConfig.pgSetup.hbaLevelStr,
+				pgsetup_hba_level_to_string(HBA_EDIT_MINIMAL),
+				sizeof(LocalOptionConfig.pgSetup.hbaLevelStr));
+
 		LocalOptionConfig.pgSetup.hbaLevel = HBA_EDIT_MINIMAL;
 	}
 
