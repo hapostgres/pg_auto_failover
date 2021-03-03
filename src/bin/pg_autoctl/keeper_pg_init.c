@@ -536,6 +536,8 @@ wait_until_primary_is_ready(Keeper *keeper,
 
 	/* wait until the primary is ready for us to pg_basebackup */
 	do {
+		bool groupStateHasChanged = false;
+
 		if (firstLoop)
 		{
 			firstLoop = false;
@@ -545,8 +547,6 @@ wait_until_primary_is_ready(Keeper *keeper,
 			Monitor *monitor = &(keeper->monitor);
 			KeeperStateData *keeperState = &(keeper->state);
 			int timeoutMs = PG_AUTOCTL_KEEPER_SLEEP_TIME * 1000;
-
-			bool groupStateHasChanged = false;
 
 			(void) monitor_wait_for_state_change(monitor,
 												 keeper->config.formation,
@@ -579,7 +579,12 @@ wait_until_primary_is_ready(Keeper *keeper,
 				return false;
 			}
 		}
-		++tries;
+
+		/* if state has changed, we didn't wait for a full timeout */
+		if (!groupStateHasChanged)
+		{
+			++tries;
+		}
 
 		if (tries == 3)
 		{
