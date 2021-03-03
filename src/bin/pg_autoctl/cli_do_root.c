@@ -300,7 +300,7 @@ CommandLine do_tmux_wait =
 				 "  --async-nodes     number of async nodes within nodes (0)\n"
 				 "  --node-priorities list of nodes priorities (50)\n"
 				 "  --sync-standbys   number-sync-standbys to set (0 or 1)\n"
-				 "  --skip-hba        use --skip-hba when creating nodes\n"
+				 "  --skip-pg-hba     use --skip-pg-hba when creating nodes\n"
 				 "  --layout          tmux layout to use (even-vertical)",
 				 cli_do_tmux_script_getopts,
 				 cli_do_tmux_wait);
