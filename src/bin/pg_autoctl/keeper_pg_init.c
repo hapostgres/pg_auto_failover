@@ -630,18 +630,18 @@ wait_until_primary_has_created_our_replication_slot(Keeper *keeper,
 	KeeperConfig *config = &(keeper->config);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 	ReplicationSource *upstream = &(postgres->replicationSource);
-	NodeAddress *primaryNode = &(postgres->replicationSource.primaryNode);
+	NodeAddress primaryNode = { 0 };
 
 	bool hasReplicationSlot = false;
 
-	if (!keeper_get_primary(keeper, &(postgres->replicationSource.primaryNode)))
+	if (!keeper_get_primary(keeper, &primaryNode))
 	{
 		/* errors have already been logged */
 		return false;
 	}
 
 	if (!standby_init_replication_source(postgres,
-										 primaryNode,
+										 &primaryNode,
 										 PG_AUTOCTL_REPLICA_USERNAME,
 										 config->replication_password,
 										 config->replication_slot_name,
@@ -672,10 +672,10 @@ wait_until_primary_has_created_our_replication_slot(Keeper *keeper,
 			++errors;
 
 			log_warn("Failed to contact the primary node %d \"%s\" (%s:%d)",
-					 primaryNode->nodeId,
-					 primaryNode->name,
-					 primaryNode->host,
-					 primaryNode->port);
+					 primaryNode.nodeId,
+					 primaryNode.name,
+					 primaryNode.host,
+					 primaryNode.port);
 
 			if (errors > 5)
 			{
