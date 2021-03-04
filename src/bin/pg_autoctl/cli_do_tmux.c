@@ -210,6 +210,7 @@ cli_do_tmux_script_getopts(int argc, char **argv)
 		{ "async-nodes", required_argument, NULL, 'a' },
 		{ "node-priorities", required_argument, NULL, 'P' },
 		{ "sync-standbys", required_argument, NULL, 's' },
+		{ "skip-pg-hba", required_argument, NULL, 'S' },
 		{ "layout", required_argument, NULL, 'l' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
@@ -225,6 +226,7 @@ cli_do_tmux_script_getopts(int argc, char **argv)
 	options.nodes = 2;
 	options.asyncNodes = 0;
 	options.numSync = -1;       /* use pg_autoctl defaults */
+	options.skipHBA = false;
 	strlcpy(options.root, "/tmp/pgaf/tmux", sizeof(options.root));
 	strlcpy(options.layout, "even-vertical", sizeof(options.layout));
 
@@ -326,6 +328,13 @@ cli_do_tmux_script_getopts(int argc, char **argv)
 					errors++;
 				}
 				log_trace("--sync-standbys %d", options.numSync);
+				break;
+			}
+
+			case 'S':
+			{
+				options.skipHBA = true;
+				log_trace("--skip-pg-hba");
 				break;
 			}
 
@@ -613,9 +622,13 @@ tmux_add_new_session(PQExpBuffer script, const char *root, int pgport)
 void
 tmux_pg_autoctl_create_monitor(PQExpBuffer script,
 							   const char *root,
-							   int pgport)
+							   int pgport,
+							   bool skipHBA)
 {
-	char *pg_ctl_opts = "--hostname localhost --ssl-self-signed --auth trust";
+	char *pg_ctl_opts =
+		skipHBA
+		? "--hostname localhost --ssl-self-signed --skip-pg-hba"
+		: "--hostname localhost --ssl-self-signed --auth trust";
 
 	tmux_add_send_keys_command(script, "export PGPORT=%d", pgport);
 
@@ -639,10 +652,14 @@ tmux_pg_autoctl_create_postgres(PQExpBuffer script,
 								int pgport,
 								const char *name,
 								bool replicationQuorum,
-								int candidatePriority)
+								int candidatePriority,
+								bool skipHBA)
 {
 	char monitor[BUFSIZE] = { 0 };
-	char *pg_ctl_opts = "--hostname localhost --ssl-self-signed --auth trust";
+	char *pg_ctl_opts =
+		skipHBA
+		? "--hostname localhost --ssl-self-signed --skip-pg-hba"
+		: "--hostname localhost --ssl-self-signed --auth trust --pg-hba-lan";
 
 	tmux_add_send_keys_command(script, "export PGPORT=%d", pgport);
 
@@ -661,7 +678,6 @@ tmux_pg_autoctl_create_postgres(PQExpBuffer script,
 							   "--monitor %s "
 							   "--name %s "
 							   "--dbname demo "
-							   "--pg-hba-lan "
 							   "--replication-quorum %s "
 							   "--candidate-priority %d "
 							   "--run",
@@ -696,7 +712,7 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 
 	/* start a monitor */
 	(void) tmux_add_xdg_environment(script);
-	tmux_pg_autoctl_create_monitor(script, root, pgport++);
+	tmux_pg_autoctl_create_monitor(script, root, pgport++, options->skipHBA);
 
 	/* start the Postgres nodes, using the monitor URI */
 	sformat(previousName, sizeof(previousName), "monitor");
@@ -726,7 +742,8 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 										node->pgport,
 										node->name,
 										node->replicationQuorum,
-										node->candidatePriority);
+										node->candidatePriority,
+										options->skipHBA);
 
 		strlcpy(previousName, node->name, sizeof(previousName));
 	}

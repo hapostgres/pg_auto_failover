@@ -243,10 +243,14 @@ CommandLine do_tmux_script =
 	make_command("script",
 				 "Produce a tmux script for a demo or a test case (debug only)",
 				 "[option ...]",
-				 "  --root          path where to create a cluster\n"
-				 "  --first-pgport  first Postgres port to use (5500)\n"
-				 "  --nodes         number of Postgres nodes to create (2)\n"
-				 "  --layout        tmux layout to use (even-vertical)",
+				 "  --root            path where to create a cluster\n"
+				 "  --first-pgport    first Postgres port to use (5500)\n"
+				 "  --nodes           number of Postgres nodes to create (2)\n"
+				 "  --async-nodes     number of async nodes within nodes (0)\n"
+				 "  --node-priorities list of nodes priorities (50)\n"
+				 "  --sync-standbys   number-sync-standbys to set (0 or 1)\n"
+				 "  --skip-pg-hba     use --skip-pg-hba when creating nodes\n"
+				 "  --layout          tmux layout to use (even-vertical)",
 				 cli_do_tmux_script_getopts,
 				 cli_do_tmux_script);
 
@@ -254,10 +258,14 @@ CommandLine do_tmux_session =
 	make_command("session",
 				 "Run a tmux session for a demo or a test case",
 				 "[option ...]",
-				 "  --root          path where to create a cluster\n"
-				 "  --first-pgport  first Postgres port to use (5500)\n"
-				 "  --nodes         number of Postgres nodes to create (2)\n"
-				 "  --layout        tmux layout to use (even-vertical)",
+				 "  --root            path where to create a cluster\n"
+				 "  --first-pgport    first Postgres port to use (5500)\n"
+				 "  --nodes           number of Postgres nodes to create (2)\n"
+				 "  --async-nodes     number of async nodes within nodes (0)\n"
+				 "  --node-priorities list of nodes priorities (50)\n"
+				 "  --sync-standbys   number-sync-standbys to set (0 or 1)\n"
+				 "  --skip-pg-hba     use --skip-pg-hba when creating nodes\n"
+				 "  --layout          tmux layout to use (even-vertical)",
 				 cli_do_tmux_script_getopts,
 				 cli_do_tmux_session);
 
@@ -286,9 +294,14 @@ CommandLine do_tmux_wait =
 	make_command("wait",
 				 "Wait until a given node has been registered on the monitor",
 				 "[option ...] nodename [ targetState ]",
-				 "  --root          path where to create a cluster\n"
-				 "  --first-pgport  first Postgres port to use (5500)\n"
-				 "  --nodes         number of Postgres nodes to create (2)",
+				 "  --root            path where to create a cluster\n"
+				 "  --first-pgport    first Postgres port to use (5500)\n"
+				 "  --nodes           number of Postgres nodes to create (2)\n"
+				 "  --async-nodes     number of async nodes within nodes (0)\n"
+				 "  --node-priorities list of nodes priorities (50)\n"
+				 "  --sync-standbys   number-sync-standbys to set (0 or 1)\n"
+				 "  --skip-pg-hba     use --skip-pg-hba when creating nodes\n"
+				 "  --layout          tmux layout to use (even-vertical)",
 				 cli_do_tmux_script_getopts,
 				 cli_do_tmux_wait);
 
