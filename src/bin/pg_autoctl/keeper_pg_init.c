@@ -536,6 +536,8 @@ wait_until_primary_is_ready(Keeper *keeper,
 
 	/* wait until the primary is ready for us to pg_basebackup */
 	do {
+		bool groupStateHasChanged = false;
+
 		if (firstLoop)
 		{
 			firstLoop = false;
@@ -545,8 +547,6 @@ wait_until_primary_is_ready(Keeper *keeper,
 			Monitor *monitor = &(keeper->monitor);
 			KeeperStateData *keeperState = &(keeper->state);
 			int timeoutMs = PG_AUTOCTL_KEEPER_SLEEP_TIME * 1000;
-
-			bool groupStateHasChanged = false;
 
 			(void) monitor_wait_for_state_change(monitor,
 												 keeper->config.formation,
@@ -579,7 +579,12 @@ wait_until_primary_is_ready(Keeper *keeper,
 				return false;
 			}
 		}
-		++tries;
+
+		/* if state has changed, we didn't wait for a full timeout */
+		if (!groupStateHasChanged)
+		{
+			++tries;
+		}
 
 		if (tries == 3)
 		{
@@ -630,18 +635,18 @@ wait_until_primary_has_created_our_replication_slot(Keeper *keeper,
 	KeeperConfig *config = &(keeper->config);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 	ReplicationSource *upstream = &(postgres->replicationSource);
-	NodeAddress *primaryNode = &(postgres->replicationSource.primaryNode);
+	NodeAddress primaryNode = { 0 };
 
 	bool hasReplicationSlot = false;
 
-	if (!keeper_get_primary(keeper, &(postgres->replicationSource.primaryNode)))
+	if (!keeper_get_primary(keeper, &primaryNode))
 	{
 		/* errors have already been logged */
 		return false;
 	}
 
 	if (!standby_init_replication_source(postgres,
-										 primaryNode,
+										 &primaryNode,
 										 PG_AUTOCTL_REPLICA_USERNAME,
 										 config->replication_password,
 										 config->replication_slot_name,
@@ -672,10 +677,10 @@ wait_until_primary_has_created_our_replication_slot(Keeper *keeper,
 			++errors;
 
 			log_warn("Failed to contact the primary node %d \"%s\" (%s:%d)",
-					 primaryNode->nodeId,
-					 primaryNode->name,
-					 primaryNode->host,
-					 primaryNode->port);
+					 primaryNode.nodeId,
+					 primaryNode.name,
+					 primaryNode.host,
+					 primaryNode.port);
 
 			if (errors > 5)
 			{

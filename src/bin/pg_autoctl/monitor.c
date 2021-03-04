@@ -51,7 +51,6 @@ typedef struct NodeAddressArrayParseContext
 typedef struct MonitorAssignedStateParseContext
 {
 	char sqlstate[SQLSTATE_LENGTH];
-	char name[_POSIX_HOST_NAME_MAX];
 	MonitorAssignedState *assignedState;
 	bool parsedOK;
 } MonitorAssignedStateParseContext;
@@ -801,7 +800,7 @@ monitor_register_node(Monitor *monitor, char *formation,
 	};
 	const char *paramValues[11];
 	MonitorAssignedStateParseContext parseContext =
-	{ { 0 }, { 0 }, assignedState, false };
+	{ { 0 }, assignedState, false };
 	const char *nodeStateString = NodeStateToString(initialState);
 
 	paramValues[0] = formation;
@@ -861,12 +860,9 @@ monitor_register_node(Monitor *monitor, char *formation,
 		return false;
 	}
 
-	/* update the caller's name with the result from the monitor */
-	strlcpy(name, parseContext.name, _POSIX_HOST_NAME_MAX);
-
 	log_info("Registered node %d (%s:%d) with name \"%s\" in formation \"%s\", "
 			 "group %d, state \"%s\"",
-			 assignedState->nodeId, host, port, name,
+			 assignedState->nodeId, host, port, assignedState->name,
 			 formation, assignedState->groupId,
 			 NodeStateToString(assignedState->state));
 
@@ -897,7 +893,7 @@ monitor_node_active(Monitor *monitor,
 	};
 	const char *paramValues[7];
 	MonitorAssignedStateParseContext parseContext =
-	{ { 0 }, { 0 }, assignedState, false };
+	{ { 0 }, assignedState, false };
 	const char *nodeStateString = NodeStateToString(currentState);
 
 	paramValues[0] = formation;
@@ -1609,7 +1605,9 @@ parseNodeState(void *ctx, PGresult *result)
 	if (PQnfields(result) == 6)
 	{
 		value = PQgetvalue(result, 0, 5);
-		strlcpy(context->name, value, _POSIX_HOST_NAME_MAX);
+		strlcpy(context->assignedState->name,
+				value,
+				sizeof(context->assignedState->name));
 	}
 
 	/* if we reach this line, then we're good. */
