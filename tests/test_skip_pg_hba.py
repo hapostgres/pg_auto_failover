@@ -162,19 +162,34 @@ def test_003_init_secondary():
     assert node1.wait_until_state(target_state="primary")
 
 
-def test_004_hba_have_not_been_edited():
+def test_004a_hba_have_not_been_edited():
     eq_(False, editedHBA(node1.datadir))
     eq_(False, editedHBA(node2.datadir))
 
 
-def test_005_pg_autoctl_conf_skip_hba():
+def test_004b_pg_autoctl_conf_skip_hba():
     eq_("skip", node1.config_get("postgresql.hba_level"))
     eq_("skip", node2.config_get("postgresql.hba_level"))
 
 
-def test_006_failover():
+def test_005_failover():
     print()
     print("Calling pgautofailover.failover() on the monitor")
     cluster.monitor.failover()
     assert node2.wait_until_state(target_state="primary")
     assert node1.wait_until_state(target_state="secondary")
+
+
+def test_006_restart_secondary():
+    node1.stop_pg_autoctl()
+    node1.run()
+
+
+def test_006a_hba_have_not_been_edited():
+    eq_(False, editedHBA(node1.datadir))
+    eq_(False, editedHBA(node2.datadir))
+
+
+def test_006b_pg_autoctl_conf_skip_hba():
+    eq_("skip", node1.config_get("postgresql.hba_level"))
+    eq_("skip", node2.config_get("postgresql.hba_level"))
