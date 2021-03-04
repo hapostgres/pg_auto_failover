@@ -35,6 +35,7 @@ NODES_ASYNC ?= 0				# count of replication-quorum false nodes
 NODES_PRIOS ?= 50				# either "50", or "50,50", or "50,50,0" etc
 NODES_SYNC_SB ?= -1
 FIRST_PGPORT ?= 5500
+CLUSTER_OPTS = ""			# could be "--skip-pg-hba"
 
 TMUX_EXTRA_COMMANDS ?= ""
 TMUX_LAYOUT ?= even-vertical	# could be "tiled"
@@ -150,7 +151,8 @@ $(TMUX_SCRIPT): bin
          --async-nodes $(NODES_ASYNC)     \
          --node-priorities $(NODES_PRIOS) \
          --sync-standbys $(NODES_SYNC_SB) \
-         --layout $(TMUX_LAYOUT) > $@
+         $(CLUSTER_OPTS)                  \
+		 --layout $(TMUX_LAYOUT) > $@
 
 tmux-script: $(TMUX_SCRIPT) ;
 
@@ -168,6 +170,7 @@ cluster: install tmux-clean
          --async-nodes $(NODES_ASYNC)     \
          --node-priorities $(NODES_PRIOS) \
          --sync-standbys $(NODES_SYNC_SB) \
+         $(CLUSTER_OPTS)                  \
          --layout $(TMUX_LAYOUT)
 
 

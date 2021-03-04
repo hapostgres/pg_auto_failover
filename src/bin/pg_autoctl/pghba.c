@@ -267,6 +267,7 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 	char *includeLine = NULL;
 
 	int nodeIndex = 0;
+	int hbaLinesAdded = 0;
 
 	PQExpBuffer hbaLineReplicationBuffer = NULL;
 	PQExpBuffer hbaLineDatabaseBuffer = NULL;
@@ -386,7 +387,8 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 			return false;
 		}
 
-		log_info("Ensuring HBA rules for node %d \"%s\" (%s:%d)",
+		log_info("%s HBA rules for node %d \"%s\" (%s:%d)",
+				 hbaLevel < HBA_EDIT_MINIMAL ? "Checking for" : "Ensuring",
 				 node->nodeId,
 				 node->name,
 				 useHostname ? node->host : ipaddr,
@@ -422,17 +424,21 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 			 * the HBA rule that we need, so that users can review their HBA
 			 * settings and provisioning.
 			 */
-			if ((hbaLevel <= HBA_EDIT_SKIP))
+			if (hbaLevel < HBA_EDIT_MINIMAL)
 			{
 				log_warn("Skipping HBA edits (per --skip-pg-hba) for rule: %s",
 						 hbaLineBuffer->data);
-
-				continue;
 			}
+			else
+			{
+				/* now append the line to the new HBA file contents */
+				log_info("Adding HBA rule: %s", hbaLineBuffer->data);
 
-			/* now append the line to the new HBA file contents */
-			appendPQExpBufferStr(newHbaContents, hbaLineBuffer->data);
-			appendPQExpBufferStr(newHbaContents, HBA_LINE_COMMENT "\n");
+				appendPQExpBufferStr(newHbaContents, hbaLineBuffer->data);
+				appendPQExpBufferStr(newHbaContents, HBA_LINE_COMMENT "\n");
+
+				++hbaLinesAdded;
+			}
 		}
 	}
 
@@ -451,12 +457,17 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 		return false;
 	}
 
-	/* write the new pg_hba.conf */
-	if (!write_file(newHbaContents->data, newHbaContents->len, hbaFilePath))
+	/* write the new pg_hba.conf, unless --skip-pg-hba has been used */
+	if (hbaLevel >= HBA_EDIT_MINIMAL && hbaLinesAdded > 0)
 	{
-		/* write_file logs an error */
-		destroyPQExpBuffer(newHbaContents);
-		return false;
+		log_info("Writing new HBA rules in \"%s\"", hbaFilePath);
+
+		if (!write_file(newHbaContents->data, newHbaContents->len, hbaFilePath))
+		{
+			/* write_file logs an error */
+			destroyPQExpBuffer(newHbaContents);
+			return false;
+		}
 	}
 
 	destroyPQExpBuffer(newHbaContents);

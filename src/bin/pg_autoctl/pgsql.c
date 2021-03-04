@@ -1752,6 +1752,8 @@ pgsql_reload_conf(PGSQL *pgsql)
 {
 	char *sql = "SELECT pg_reload_conf()";
 
+	log_info("Reloading Postgres configuration and HBA rules");
+
 	return pgsql_execute(pgsql, sql);
 }
 
