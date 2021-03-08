@@ -130,7 +130,12 @@ pghba_ensure_host_rule_exists(const char *hbaFilePath,
 	 *
 	 * HBA & DNS is hard.
 	 */
-	bool useHostname = pghba_check_hostname(host, ipaddr, sizeof(ipaddr));
+	bool useHostname = false;
+
+	if (!pghba_check_hostname(host, ipaddr, sizeof(ipaddr), &useHostname))
+	{
+		/* errors have already been logged (DNS failure) */
+	}
 
 	if (!useHostname)
 	{
@@ -331,8 +336,11 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 			 *
 			 * HBA & DNS is hard.
 			 */
-			useHostname =
-				pghba_check_hostname(node->host, ipaddr, sizeof(ipaddr));
+			if (!pghba_check_hostname(node->host, ipaddr, sizeof(ipaddr),
+									  &useHostname))
+			{
+				/* errors have already been logged (DNS failure) */
+			}
 
 			if (!useHostname)
 			{
@@ -709,7 +717,8 @@ pghba_enable_lan_cidr(PGSQL *pgsql,
  * resolve an IP address.)
  */
 bool
-pghba_check_hostname(const char *hostname, char *ipaddr, size_t size)
+pghba_check_hostname(const char *hostname,
+					 char *ipaddr, size_t size, bool *useHostname)
 {
 	/*
 	 * IP addresses do not require any DNS properties/lookups. Also hostname
@@ -720,27 +729,43 @@ pghba_check_hostname(const char *hostname, char *ipaddr, size_t size)
 	 */
 	if (strchr(hostname, '/') || ip_address_type(hostname) != IPTYPE_NONE)
 	{
+		*useHostname = true;
 		return true;
 	}
 
-	if (!resolveHostnameForwardAndReverse(hostname, ipaddr, size))
+	bool foundHostnameFromAddress = false;
+
+	if (!resolveHostnameForwardAndReverse(hostname, ipaddr, size,
+										  &foundHostnameFromAddress))
 	{
-		/* warn users about possible DNS misconfiguration */
-		log_warn("Failed to resolve hostname \"%s\" to an IP address that "
-				 "resolves back to the hostname on a reverse DNS lookup.",
-				 hostname);
-
-		log_warn("Postgres might deny connection attempts from \"%s\", "
-				 "even with the new HBA rules.",
-				 hostname);
-
-		log_warn("Hint: correct setup of HBA with host names requires proper "
-				 "reverse DNS setup. You might want to use IP addresses.");
-
+		/* errors have already been logged (DNS failure) */
+		*useHostname = true;
 		return false;
 	}
 
-	log_debug("pghba_check_hostname: \"%s\" <-> %s", hostname, ipaddr);
+	if (foundHostnameFromAddress)
+	{
+		*useHostname = true;
 
+		log_debug("pghba_check_hostname: \"%s\" <-> %s", hostname, ipaddr);
+
+		return true;
+	}
+
+	*useHostname = false;
+
+	/* warn users about possible DNS misconfiguration */
+	log_warn("Failed to resolve hostname \"%s\" to an IP address that "
+			 "resolves back to the hostname on a reverse DNS lookup.",
+			 hostname);
+
+	log_warn("Postgres might deny connection attempts from \"%s\", "
+			 "even with the new HBA rules.",
+			 hostname);
+
+	log_warn("Hint: correct setup of HBA with host names requires proper "
+			 "reverse DNS setup. You might want to use IP addresses.");
+
+	/* we could successfully check that we should not use the hostname */
 	return true;
 }
