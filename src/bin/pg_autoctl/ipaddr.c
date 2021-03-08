@@ -679,13 +679,15 @@ findHostnameFromLocalIpAddress(char *localIpAddress, char *hostname, int size)
  * of the IP addresses that our hostname forward-DNS query returns.
  */
 bool
-resolveHostnameForwardAndReverse(const char *hostname, char *ipaddr, int size)
+resolveHostnameForwardAndReverse(const char *hostname, char *ipaddr, int size,
+								 bool *foundHostnameFromAddress)
 {
 	struct addrinfo *lookup, *ai;
 
-	bool foundHostnameFromAddress = false;
+	*foundHostnameFromAddress = false;
 
 	int error = getaddrinfo(hostname, NULL, 0, &lookup);
+
 	if (error != 0)
 	{
 		log_warn("Failed to resolve DNS name \"%s\": %s",
@@ -733,13 +735,13 @@ resolveHostnameForwardAndReverse(const char *hostname, char *ipaddr, int size)
 		/* compare reverse-DNS lookup result with our hostname */
 		if (strcmp(hbuf, hostname) == 0)
 		{
-			foundHostnameFromAddress = true;
+			*foundHostnameFromAddress = true;
 			break;
 		}
 	}
 	freeaddrinfo(lookup);
 
-	return foundHostnameFromAddress;
+	return true;
 }
 
 

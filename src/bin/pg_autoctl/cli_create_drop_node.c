@@ -1397,8 +1397,8 @@ check_hostname(const char *hostname)
 	}
 	else
 	{
-		char cidr[BUFSIZE];
-		char ipaddr[BUFSIZE];
+		char cidr[BUFSIZE] = { 0 };
+		char ipaddr[BUFSIZE] = { 0 };
 
 		if (!fetchLocalCIDR(hostname, cidr, BUFSIZE))
 		{
@@ -1407,7 +1407,9 @@ check_hostname(const char *hostname)
 					 hostname);
 		}
 
+		bool useHostname = false;
+
 		/* use pghba_check_hostname for log diagnostics */
-		(void) pghba_check_hostname(hostname, ipaddr, sizeof(ipaddr));
+		(void) pghba_check_hostname(hostname, ipaddr, BUFSIZE, &useHostname);
 	}
 }
