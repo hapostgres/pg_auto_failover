@@ -27,7 +27,11 @@
 #define ERRCODE_DUPLICATE_OBJECT "42710"
 #define ERRCODE_DUPLICATE_DATABASE "42P04"
 
-static char * connectionTypeToString(ConnectionType connectionType);
+#define ERRCODE_INVALID_OBJECT_DEFINITION "42P17"
+#define ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE "55000"
+#define ERRCODE_OBJECT_IN_USE "55006"
+
+static char * ConnectionTypeToString(ConnectionType connectionType);
 static void log_connection_error(PGconn *connection, int logLevel);
 static void pgAutoCtlDefaultNoticeProcessor(void *arg, const char *message);
 static void pgAutoCtlDebugNoticeProcessor(void *arg, const char *message);
@@ -360,39 +364,17 @@ pgsql_retry_policy_expired(ConnectionRetryPolicy *retryPolicy)
 
 
 /*
- * Finish a PGSQL client connection.
- */
-void
-pgsql_finish(PGSQL *pgsql)
-{
-	if (pgsql->connection != NULL)
-	{
-		log_debug("Disconnecting from \"%s\"", pgsql->connectionString);
-		PQfinish(pgsql->connection);
-		pgsql->connection = NULL;
-
-		/*
-		 * When we fail to connect, on the way out we call pgsql_finish to
-		 * reset the connection to NULL. We still want the callers to be able
-		 * to inquire about our connection status, so refrain to reset the
-		 * status.
-		 */
-	}
-}
-
-
-/*
  * connectionTypeToString transforms a connectionType in a string to be used in
  * a user facing message.
  */
 static char *
-connectionTypeToString(ConnectionType connectionType)
+ConnectionTypeToString(ConnectionType connectionType)
 {
 	switch (connectionType)
 	{
 		case PGSQL_CONN_LOCAL:
 		{
-			return "local Postgres";
+			return "local";
 		}
 
 		case PGSQL_CONN_MONITOR:
@@ -405,10 +387,39 @@ connectionTypeToString(ConnectionType connectionType)
 			return "coordinator";
 		}
 
+		case PGSQL_CONN_UPSTREAM:
+		{
+			return "upstream";
+		}
+
 		default:
 		{
 			return "unknown connection type";
 		}
+	}
+}
+
+
+/*
+ * Finish a PGSQL client connection.
+ */
+void
+pgsql_finish(PGSQL *pgsql)
+{
+	if (pgsql->connection != NULL)
+	{
+		log_debug("Disconnecting from [%s] \"%s\"",
+				  ConnectionTypeToString(pgsql->connectionType),
+				  pgsql->connectionString);
+		PQfinish(pgsql->connection);
+		pgsql->connection = NULL;
+
+		/*
+		 * When we fail to connect, on the way out we call pgsql_finish to
+		 * reset the connection to NULL. We still want the callers to be able
+		 * to inquire about our connection status, so refrain to reset the
+		 * status.
+		 */
 	}
 }
 
@@ -460,7 +471,9 @@ pgsql_open_connection(PGSQL *pgsql)
 		return pgsql->connection;
 	}
 
-	log_debug("Connecting to \"%s\"", pgsql->connectionString);
+	log_debug("Connecting to [%s] \"%s\"",
+			  ConnectionTypeToString(pgsql->connectionType),
+			  pgsql->connectionString);
 
 	/* we implement our own retry strategy */
 	setenv("PGCONNECT_TIMEOUT", POSTGRES_CONNECT_TIMEOUT, 1);
@@ -496,7 +509,7 @@ pgsql_open_connection(PGSQL *pgsql)
 
 			log_error("Failed to connect to %s database at \"%s\", "
 					  "see above for details",
-					  connectionTypeToString(pgsql->connectionType),
+					  ConnectionTypeToString(pgsql->connectionType),
 					  pgsql->connectionString);
 
 			pgsql->status = PG_CONNECTION_BAD;
@@ -920,8 +933,24 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 			log_error("%s %s", prefix, errorLines[lineNumber]);
 		}
 
-		log_error("SQL query: %s", sql);
-		log_error("SQL params: %s", debugParameters);
+		/*
+		 * The monitor uses those error codes in situations we know how to
+		 * handle, so if we have one of those, it's not a client-side error
+		 * with a badly formed SQL query etc.
+		 */
+		if (pgsql->connectionType == PGSQL_CONN_MONITOR &&
+			!(strcmp(sqlstate, ERRCODE_INVALID_OBJECT_DEFINITION) == 0 ||
+			  strcmp(sqlstate, ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE) == 0 ||
+			  strcmp(sqlstate, ERRCODE_OBJECT_IN_USE)))
+		{
+			log_error("SQL query: %s", sql);
+			log_error("SQL params: %s", debugParameters);
+		}
+		else
+		{
+			log_debug("SQL query: %s", sql);
+			log_debug("SQL params: %s", debugParameters);
+		}
 
 		/* now stash away the SQL STATE if any */
 		if (context && sqlstate)

@@ -54,8 +54,7 @@ bool keeper_create_self_signed_cert(Keeper *keeper);
 bool keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk);
 bool keeper_update_pg_state(Keeper *keeper);
 bool ReportPgIsRunning(Keeper *keeper);
-bool keeper_remove(Keeper *keeper, KeeperConfig *config,
-				   bool ignore_monitor_errors);
+bool keeper_remove(Keeper *keeper, KeeperConfig *config);
 bool keeper_check_monitor_extension_version(Keeper *keeper);
 bool keeper_state_as_json(Keeper *keeper, char *json, int size);
 bool keeper_update_group_hba(Keeper *keeper, NodeAddressArray *diffNodesArray);

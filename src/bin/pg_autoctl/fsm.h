@@ -70,6 +70,11 @@ bool fsm_follow_new_primary(Keeper *keeper);
 bool fsm_cleanup_and_resume_as_primary(Keeper *keeper);
 
 /*
+ * Extra helpers.
+ */
+bool prepare_replication(Keeper *keeper, NodeState otherNodeState);
+
+/*
  * Generic API to use the previous definitions.
  */
 void print_reachable_states(KeeperStateData *keeperState);

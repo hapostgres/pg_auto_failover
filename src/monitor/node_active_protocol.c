@@ -41,7 +41,7 @@ static AutoFailoverNodeState * NodeActive(char *formationId,
 										  AutoFailoverNodeState *currentNodeState);
 static void JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 									  char *nodeName, char *nodeHost, int nodePort,
-									  uint64 sysIdentifier,
+									  uint64 sysIdentifier, char *nodeCluster,
 									  AutoFailoverNodeState *currentNodeState);
 static int AssignGroupId(AutoFailoverFormation *formation,
 						 char *nodeHost, int nodePort,
@@ -105,6 +105,9 @@ register_node(PG_FUNCTION_ARGS)
 		FormationKindFromNodeKindString(nodeKind);
 	int candidatePriority = PG_GETARG_INT32(9);
 	bool replicationQuorum = PG_GETARG_BOOL(10);
+
+	text *nodeClusterText = PG_GETARG_TEXT_P(11);
+	char *nodeCluster = text_to_cstring(nodeClusterText);
 
 	AutoFailoverNodeState currentNodeState = { 0 };
 
@@ -192,6 +195,7 @@ register_node(PG_FUNCTION_ARGS)
 							  nodeHost,
 							  nodePort,
 							  sysIdentifier,
+							  nodeCluster,
 							  &currentNodeState);
 	LockNodeGroup(formationId, currentNodeState.groupId, ExclusiveLock);
 
@@ -491,7 +495,7 @@ NodeActive(char *formationId, AutoFailoverNodeState *currentNodeState)
 static void
 JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 						  char *nodeName, char *nodeHost, int nodePort,
-						  uint64 sysIdentifier,
+						  uint64 sysIdentifier, char *nodeCluster,
 						  AutoFailoverNodeState *currentNodeState)
 {
 	int groupId = -1;
@@ -594,7 +598,8 @@ JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 						initialState,
 						currentNodeState->replicationState,
 						currentNodeState->candidatePriority,
-						currentNodeState->replicationQuorum);
+						currentNodeState->replicationQuorum,
+						nodeCluster);
 
 	currentNodeState->groupId = groupId;
 }
@@ -972,8 +977,6 @@ static bool
 RemoveNode(AutoFailoverNode *currentNode)
 {
 	ListCell *nodeCell = NULL;
-
-
 	char message[BUFSIZE] = { 0 };
 
 	if (currentNode == NULL)
@@ -998,6 +1001,9 @@ RemoveNode(AutoFailoverNode *currentNode)
 	/* review the FSM for every other node, when removing the primary */
 	if (currentNodeIsPrimary)
 	{
+		int nodeCount = 0;
+		int candidates = 0;
+
 		foreach(nodeCell, otherNodesGroupList)
 		{
 			char message[BUFSIZE] = { 0 };
@@ -1008,6 +1014,13 @@ RemoveNode(AutoFailoverNode *currentNode)
 				/* shouldn't happen */
 				ereport(ERROR, (errmsg("BUG: node is NULL")));
 				continue;
+			}
+
+			++nodeCount;
+
+			if (node->candidatePriority > 0)
+			{
+				++candidates;
 			}
 
 			/* skip nodes that are currently in maintenance */
@@ -1023,6 +1036,21 @@ RemoveNode(AutoFailoverNode *currentNode)
 				NODE_FORMAT_ARGS(node));
 
 			SetNodeGoalState(node, REPLICATION_STATE_REPORT_LSN, message);
+		}
+
+		/*
+		 * Refuse to remove the primary node when there is no candidate, unless
+		 * the primary is the only node left of course.
+		 */
+		if (nodeCount > 0 && candidates == 0)
+		{
+			ereport(ERROR,
+					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					 errmsg("cannot remove current primary node " NODE_FORMAT,
+							NODE_FORMAT_ARGS(currentNode)),
+					 errdetail("At least one node with candidate priority "
+							   "greater than zero is needed to remove a "
+							   "primary node.")));
 		}
 	}
 
@@ -1504,9 +1532,9 @@ start_maintenance(PG_FUNCTION_ARGS)
 
 	/*
 	 * We need to always have at least formation->number_sync_standbys nodes in
-	 * the SECONDARY state, otherwise writes may be blocked on the primary. So
-	 * we refuse to put a node in maintenance when it would force blocking
-	 * writes.
+	 * the SECONDARY state participating in the quorum, otherwise writes may be
+	 * blocked on the primary. So we refuse to put a node in maintenance when
+	 * it would force blocking writes.
 	 */
 	List *secondaryNodesList =
 		AutoFailoverOtherNodesListInState(primaryNode,
@@ -1525,6 +1553,30 @@ start_maintenance(PG_FUNCTION_ARGS)
 						secondaryNodesCount,
 						formation->number_sync_standbys,
 						formation->formationId)));
+	}
+
+	/*
+	 * Because replication quorum and candidate priority are managed
+	 * separately, we also need another test to ensure that we have at least
+	 * one candidate to failover to.
+	 */
+	if (currentNode->candidatePriority > 0)
+	{
+		List *candidateNodesList =
+			AutoFailoverCandidateNodesListInState(currentNode,
+												  REPLICATION_STATE_SECONDARY);
+
+		int candidateNodesCount = list_length(candidateNodesList);
+
+		if (formation->number_sync_standbys > 0 &&
+			candidateNodesCount < 1)
+		{
+			ereport(ERROR,
+					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					 errmsg("cannot start maintenance: we would then have %d "
+							"node(s) that would be candidate for promotion",
+							candidateNodesCount)));
+		}
 	}
 
 	/*
@@ -1748,6 +1800,16 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 							   "expected an integer value between 0 and %d",
 							   candidatePriority,
 							   MAX_USER_DEFINED_CANDIDATE_PRIORITY)));
+	}
+
+	if (strcmp(currentNode->nodeCluster, "default") != 0 &&
+		candidatePriority != 0)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("invalid value for candidate_priority: "
+						"read-replica nodes in a citus cluster must always "
+						"have candidate priority set to zero")));
 	}
 
 	if (candidatePriority == 0 && currentNode->candidatePriority != 0)

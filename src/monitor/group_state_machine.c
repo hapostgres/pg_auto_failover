@@ -713,7 +713,8 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 		/* it's safe to rejoin as a secondary */
 		AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
 
-		return true;
+		/* compute next step for the primary depending on node settings */
+		return ProceedGroupStateForPrimaryNode(primaryNode);
 	}
 
 	/*

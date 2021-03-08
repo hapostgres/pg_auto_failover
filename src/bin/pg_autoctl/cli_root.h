@@ -34,6 +34,9 @@ extern CommandLine *create_subcommands[];
 extern CommandLine show_commands;
 extern CommandLine *show_subcommands[];
 
+extern CommandLine show_commands_with_debug;
+extern CommandLine *show_subcommands_with_debug[];
+
 extern CommandLine drop_commands;
 extern CommandLine *drop_subcommands[];
 

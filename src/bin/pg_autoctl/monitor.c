@@ -786,19 +786,20 @@ monitor_register_node(Monitor *monitor, char *formation,
 					  uint64_t system_identifier,
 					  char *dbname, int desiredGroupId, NodeState initialState,
 					  PgInstanceKind kind, int candidatePriority, bool quorum,
+					  char *citusClusterName,
 					  bool *mayRetry,
 					  MonitorAssignedState *assignedState)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
 		"SELECT * FROM pgautofailover.register_node($1, $2, $3, $4, $5, $6, $7, "
-		"$8::pgautofailover.replication_state, $9, $10, $11)";
-	int paramCount = 11;
-	Oid paramTypes[11] = {
+		"$8::pgautofailover.replication_state, $9, $10, $11, $12)";
+	int paramCount = 12;
+	Oid paramTypes[12] = {
 		TEXTOID, TEXTOID, INT4OID, NAMEOID, TEXTOID, INT8OID,
-		INT4OID, TEXTOID, TEXTOID, INT4OID, BOOLOID
+		INT4OID, TEXTOID, TEXTOID, INT4OID, BOOLOID, TEXTOID
 	};
-	const char *paramValues[11];
+	const char *paramValues[12];
 	MonitorAssignedStateParseContext parseContext =
 	{ { 0 }, assignedState, false };
 	const char *nodeStateString = NodeStateToString(initialState);
@@ -814,6 +815,10 @@ monitor_register_node(Monitor *monitor, char *formation,
 	paramValues[8] = nodeKindToString(kind);
 	paramValues[9] = intToString(candidatePriority).strValue;
 	paramValues[10] = quorum ? "true" : "false";
+	paramValues[11] =
+		IS_EMPTY_STRING_BUFFER(citusClusterName)
+		? DEFAULT_CITUS_CLUSTER_NAME
+		: citusClusterName;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
@@ -2375,6 +2380,7 @@ monitor_drop_formation(Monitor *monitor, char *formation)
 bool
 monitor_formation_uri(Monitor *monitor,
 					  const char *formation,
+					  const char *citusClusterName,
 					  const SSLOptions *ssl,
 					  char *connectionString,
 					  size_t size)
@@ -2382,15 +2388,17 @@ monitor_formation_uri(Monitor *monitor,
 	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_STRING, false };
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
-		"SELECT formation_uri FROM pgautofailover.formation_uri($1, $2, $3, $4)";
-	int paramCount = 4;
-	Oid paramTypes[4] = { TEXTOID, TEXTOID, TEXTOID, TEXTOID };
-	const char *paramValues[4] = { 0 };
+		"SELECT formation_uri "
+		"FROM pgautofailover.formation_uri($1, $2, $3, $4, $5)";
+	int paramCount = 5;
+	Oid paramTypes[5] = { TEXTOID, TEXTOID, TEXTOID, TEXTOID, TEXTOID };
+	const char *paramValues[5] = { 0 };
 
 	paramValues[0] = formation;
-	paramValues[1] = ssl->sslModeStr;
-	paramValues[2] = ssl->caFile;
-	paramValues[3] = ssl->crlFile;
+	paramValues[1] = citusClusterName;
+	paramValues[2] = ssl->sslModeStr;
+	paramValues[3] = ssl->caFile;
+	paramValues[4] = ssl->crlFile;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
@@ -2447,7 +2455,15 @@ monitor_print_every_formation_uri(Monitor *monitor, const SSLOptions *ssl)
 		" UNION ALL "
 		"SELECT 'formation', formationid, formation_uri "
 		"  FROM pgautofailover.formation, "
-		"       pgautofailover.formation_uri(formation.formationid, $2, $3, $4)";
+		"       pgautofailover.formation_uri"
+		"(formation.formationid, 'default', $2, $3, $4) "
+		" UNION ALL "
+		"SELECT 'read-replica', nodecluster, formation_uri "
+		"  FROM pgautofailover.formation "
+		"       JOIN pgautofailover.node using(formationid), "
+		"       pgautofailover.formation_uri"
+		"(formation.formationid, nodecluster, $2, $3, $4) "
+		" WHERE node.groupid = 0 and node.nodecluster <> 'default' ";
 
 	int paramCount = 4;
 	Oid paramTypes[4] = { TEXTOID, TEXTOID, TEXTOID, TEXTOID };
@@ -2500,7 +2516,15 @@ monitor_print_every_formation_uri_as_json(Monitor *monitor,
 		" UNION ALL "
 		"SELECT 'formation', formationid, formation_uri "
 		"  FROM pgautofailover.formation, "
-		"       pgautofailover.formation_uri(formation.formationid, $2, $3, $4)"
+		"       pgautofailover.formation_uri"
+		"(formation.formationid, 'default', $2, $3, $4)"
+		" UNION ALL "
+		"SELECT 'read-replica', nodecluster, formation_uri "
+		"  FROM pgautofailover.formation "
+		"       JOIN pgautofailover.node using(formationid), "
+		"       pgautofailover.formation_uri"
+		"(formation.formationid, nodecluster, $2, $3, $4) "
+		" WHERE node.groupid = 0 and node.nodecluster <> 'default' "
 		") "
 		"SELECT jsonb_pretty(jsonb_agg(row_to_json(formation))) FROM formation";
 
@@ -2583,10 +2607,10 @@ printFormationURI(void *ctx, PGresult *result)
 	/* create the visual separator for the formation name too */
 	(void) prepareHostNameSeparator(formationNameSeparator, maxFormationNameSize);
 
-	fformat(stdout, "%10s | %*s | %s\n",
+	fformat(stdout, "%12s | %*s | %s\n",
 			"Type", maxFormationNameSize, "Name", "Connection String");
-	fformat(stdout, "%10s-+-%*s-+-%s\n",
-			"----------", maxFormationNameSize, formationNameSeparator,
+	fformat(stdout, "%12s-+-%*s-+-%s\n",
+			"------------", maxFormationNameSize, formationNameSeparator,
 			"------------------------------");
 
 	for (currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
@@ -2595,7 +2619,7 @@ printFormationURI(void *ctx, PGresult *result)
 		char *name = PQgetvalue(result, currentTupleIndex, 1);
 		char *URI = PQgetvalue(result, currentTupleIndex, 2);
 
-		fformat(stdout, "%10s | %*s | %s\n",
+		fformat(stdout, "%12s | %*s | %s\n",
 				type, maxFormationNameSize, name, URI);
 	}
 	fformat(stdout, "\n");

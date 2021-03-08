@@ -89,6 +89,9 @@ pg_setup_init(PostgresSetup *pgSetup,
 	strlcpy(pgSetup->ssl.serverCert, options->ssl.serverCert, MAXPGPATH);
 	strlcpy(pgSetup->ssl.serverKey, options->ssl.serverKey, MAXPGPATH);
 
+	/* Also make sure we keep the citus specific clusterName option */
+	strlcpy(pgSetup->citusClusterName, options->citusClusterName, NAMEDATALEN);
+
 	/* check or find pg_ctl, unless we already have it */
 	if (IS_EMPTY_STRING_BUFFER(pgSetup->pg_ctl) ||
 		IS_EMPTY_STRING_BUFFER(pgSetup->pg_version))

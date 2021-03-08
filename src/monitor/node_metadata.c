@@ -154,6 +154,9 @@ TupleToAutoFailoverNode(TupleDesc tupleDescriptor, HeapTuple heapTuple)
 	Datum replicationQuorum = heap_getattr(heapTuple,
 										   Anum_pgautofailover_node_replication_quorum,
 										   tupleDescriptor, &isNull);
+	Datum nodeCluster = heap_getattr(heapTuple,
+									 Anum_pgautofailover_node_nodecluster,
+									 tupleDescriptor, &isNull);
 
 	Oid goalStateOid = DatumGetObjectId(goalState);
 	Oid reportedStateOid = DatumGetObjectId(reportedState);
@@ -180,6 +183,7 @@ TupleToAutoFailoverNode(TupleDesc tupleDescriptor, HeapTuple heapTuple)
 	pgAutoFailoverNode->reportedLSN = DatumGetLSN(reportedLSN);
 	pgAutoFailoverNode->candidatePriority = DatumGetInt32(candidatePriority);
 	pgAutoFailoverNode->replicationQuorum = DatumGetBool(replicationQuorum);
+	pgAutoFailoverNode->nodeCluster = TextDatumGetCString(nodeCluster);
 
 	return pgAutoFailoverNode;
 }
@@ -298,6 +302,42 @@ AutoFailoverOtherNodesListInState(AutoFailoverNode *pgAutoFailoverNode,
 
 		if (otherNode != NULL &&
 			otherNode->nodeId != pgAutoFailoverNode->nodeId &&
+			otherNode->goalState == currentState)
+		{
+			otherNodesList = lappend(otherNodesList, otherNode);
+		}
+	}
+
+	return otherNodesList;
+}
+
+
+/*
+ * AutoFailoverCandidateNodesList returns a list of all the other nodes in the
+ * same formation and group as the given one, with candidate priority > 0.
+ */
+List *
+AutoFailoverCandidateNodesListInState(AutoFailoverNode *pgAutoFailoverNode,
+									  ReplicationState currentState)
+{
+	ListCell *nodeCell = NULL;
+	List *otherNodesList = NIL;
+
+	if (pgAutoFailoverNode == NULL)
+	{
+		return NIL;
+	}
+
+	List *groupNodeList = AutoFailoverNodeGroup(pgAutoFailoverNode->formationId,
+												pgAutoFailoverNode->groupId);
+
+	foreach(nodeCell, groupNodeList)
+	{
+		AutoFailoverNode *otherNode = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (otherNode != NULL &&
+			otherNode->nodeId != pgAutoFailoverNode->nodeId &&
+			otherNode->candidatePriority > 0 &&
 			otherNode->goalState == currentState)
 		{
 			otherNodesList = lappend(otherNodesList, otherNode);
@@ -920,7 +960,8 @@ AddAutoFailoverNode(char *formationId,
 					ReplicationState goalState,
 					ReplicationState reportedState,
 					int candidatePriority,
-					bool replicationQuorum)
+					bool replicationQuorum,
+					char *nodeCluster)
 {
 	Oid goalStateOid = ReplicationStateGetEnum(goalState);
 	Oid reportedStateOid = ReplicationStateGetEnum(reportedState);
@@ -942,7 +983,8 @@ AddAutoFailoverNode(char *formationId,
 		replicationStateTypeOid, /* reportedstate */
 		INT4OID, /* candidate_priority */
 		BOOLOID,  /* replication_quorum */
-		TEXTOID   /* node name prefix */
+		TEXTOID,  /* node name prefix */
+		TEXTOID   /* nodecluster */
 	};
 
 	Datum argValues[] = {
@@ -956,7 +998,8 @@ AddAutoFailoverNode(char *formationId,
 		ObjectIdGetDatum(reportedStateOid), /* reportedstate */
 		Int32GetDatum(candidatePriority),   /* candidate_priority */
 		BoolGetDatum(replicationQuorum),    /* replication_quorum */
-		CStringGetTextDatum(prefix)         /* prefix */
+		CStringGetTextDatum(prefix),        /* prefix */
+		CStringGetTextDatum(nodeCluster)    /* nodecluster */
 	};
 
 	/*
@@ -980,7 +1023,8 @@ AddAutoFailoverNode(char *formationId,
 		' ',                            /* reportedstate */
 		' ',                            /* candidate_priority */
 		' ',                            /* replication_quorum */
-		' '                             /* prefix */
+		' ',                            /* prefix */
+		' '                             /* nodecluster */
 	};
 
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
@@ -1006,10 +1050,10 @@ AddAutoFailoverNode(char *formationId,
 		"INSERT INTO " AUTO_FAILOVER_NODE_TABLE
 		" (formationid, nodeid, groupid, nodename, nodehost, nodeport, "
 		" sysidentifier, goalstate, reportedstate, "
-		" candidatepriority, replicationquorum)"
+		" candidatepriority, replicationquorum, nodecluster)"
 		" SELECT $1, seq.nodeid, $2, "
 		" case when $3 is null then format('%s_%s', $11, seq.nodeid) else $3 end, "
-		" $4, $5, $6, $7, $8, $9, $10 "
+		" $4, $5, $6, $7, $8, $9, $10, $12 "
 		" FROM seq "
 		"RETURNING nodeid";
 

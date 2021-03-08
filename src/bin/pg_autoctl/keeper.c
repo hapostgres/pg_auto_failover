@@ -1310,6 +1310,7 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 								  config->pgSetup.pgKind,
 								  config->pgSetup.settings.candidatePriority,
 								  config->pgSetup.settings.replicationQuorum,
+								  config->pgSetup.citusClusterName,
 								  &mayRetry,
 								  &assignedState))
 		{
@@ -1439,7 +1440,7 @@ rollback:
  * local state file.
  */
 bool
-keeper_remove(Keeper *keeper, KeeperConfig *config, bool ignore_monitor_errors)
+keeper_remove(Keeper *keeper, KeeperConfig *config)
 {
 	int errors = 0;
 
@@ -1473,13 +1474,8 @@ keeper_remove(Keeper *keeper, KeeperConfig *config, bool ignore_monitor_errors)
 							config->hostname,
 							config->pgSetup.pgport))
 		{
-			/* we already logged about errors */
-			errors++;
-
-			if (!ignore_monitor_errors)
-			{
-				return false;
-			}
+			/* errors have already been logged */
+			return false;
 		}
 	}
 
