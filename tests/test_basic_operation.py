@@ -80,7 +80,7 @@ def test_004_init_secondary():
 
 def test_005_read_from_secondary():
     results = node2.run_sql_query("SELECT * FROM t1")
-    assert results == [(1,), (2,)]
+    eq_(results, [(1,), (2,)])
 
 
 @raises(Exception)
@@ -169,7 +169,7 @@ def test_010_fail_primary():
 def test_011_writes_to_node2_succeed():
     node2.run_sql_query("INSERT INTO t1 VALUES (4)")
     results = node2.run_sql_query("SELECT * FROM t1 ORDER BY a")
-    assert results == [(1,), (2,), (3,), (4,)]
+    eq_(results, [(1,), (2,), (3,), (4,)])
 
 
 def test_012_start_node1_again():
@@ -183,7 +183,7 @@ def test_012_start_node1_again():
 
 def test_013_read_from_new_secondary():
     results = node1.run_sql_query("SELECT * FROM t1 ORDER BY a")
-    assert results == [(1,), (2,), (3,), (4,)]
+    eq_(results, [(1,), (2,), (3,), (4,)])
 
 
 @raises(Exception)

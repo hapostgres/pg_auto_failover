@@ -644,6 +644,7 @@ class PGNode:
             out, err, ret = self.stop_pg_autoctl()
             log_string += f"STDOUT OF PG_AUTOCTL FOR {self.datadir}:\n"
             log_string += f"{self.pg_autoctl.cmd}\n{out}\n"
+            log_string += f"STDERR OF PG_AUTOCTL FOR {self.datadir}:\n{err}\n"
 
         pglogs = self.get_postgres_logs()
         log_string += f"POSTGRES LOGS FOR {self.datadir}:\n{pglogs}\n"
@@ -892,6 +893,8 @@ class DataNode(PGNode):
         replicationQuorum=None,
         monitorDisabled=False,
         nodeId=None,
+        citusSecondary=False,
+        citusClusterName="default",
     ):
         """
         Runs "pg_autoctl create"
@@ -971,6 +974,12 @@ class DataNode(PGNode):
 
         if replicationQuorum is not None:
             create_args += ["--replication-quorum", str(replicationQuorum)]
+
+        if citusSecondary is True:
+            create_args += ["--citus-secondary"]
+
+        if citusClusterName is not None and citusClusterName != "default":
+            create_args += ["--citus-cluster", citusClusterName]
 
         if self.monitorDisabled:
             assert nodeId is not None
@@ -1802,6 +1811,7 @@ class PGAutoCtl:
         """
         self.set_command(*args)
         self.cmd = " ".join(self.command)
+
         with self.vnode.run(self.command) as proc:
             try:
                 out, err = self.pgnode.cluster.communicate(proc, timeout)

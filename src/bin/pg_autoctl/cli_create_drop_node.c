@@ -300,7 +300,6 @@ cli_create_postgres_getopts(int argc, char **argv)
 		{ "candidate-priority", required_argument, NULL, 'P' },
 		{ "replication-quorum", required_argument, NULL, 'r' },
 		{ "run", no_argument, NULL, 'x' },
-		{ "help", no_argument, NULL, 0 },
 		{ "no-ssl", no_argument, NULL, 'N' },
 		{ "ssl-self-signed", no_argument, NULL, 's' },
 		{ "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG },

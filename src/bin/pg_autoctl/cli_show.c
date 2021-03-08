@@ -55,6 +55,7 @@ static void print_monitor_uri(Monitor *monitor, FILE *stream);
 static void print_formation_uri(SSLOptions *ssl,
 								Monitor *monitor,
 								const char *formation,
+								const char *citusClusterName,
 								FILE *stream);
 static void print_all_uri(SSLOptions *ssl,
 						  Monitor *monitor,
@@ -153,6 +154,7 @@ typedef struct ShowUriOptions
 {
 	bool monitorOnly;
 	char formation[NAMEDATALEN];
+	char citusClusterName[NAMEDATALEN];
 } ShowUriOptions;
 
 static ShowUriOptions showUriOptions = { 0 };
@@ -818,6 +820,7 @@ cli_show_uri_getopts(int argc, char **argv)
 		{ "pgdata", required_argument, NULL, 'D' },
 		{ "monitor", required_argument, NULL, 'm' },
 		{ "formation", required_argument, NULL, 'f' },
+		{ "citus-cluster", required_argument, NULL, 'Z' },
 		{ "json", no_argument, NULL, 'J' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
@@ -871,6 +874,13 @@ cli_show_uri_getopts(int argc, char **argv)
 					showUriOptions.monitorOnly = true;
 				}
 
+				break;
+			}
+
+			case 'Z':
+			{
+				strlcpy(showUriOptions.citusClusterName, optarg, NAMEDATALEN);
+				log_trace("--citus-cluster %s", showUriOptions.citusClusterName);
 				break;
 			}
 
@@ -951,8 +961,27 @@ cli_show_uri_getopts(int argc, char **argv)
 		cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
 	}
 
-	/* when --pgdata is given, still initialise our pathnames */
-	if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
+	/*
+	 * When --citus-cluster is used, but not --formation, then we assume
+	 * --formation default
+	 */
+	if (!IS_EMPTY_STRING_BUFFER(showUriOptions.citusClusterName) &&
+		IS_EMPTY_STRING_BUFFER(showUriOptions.formation))
+	{
+		strlcpy(showUriOptions.formation, FORMATION_DEFAULT, NAMEDATALEN);
+	}
+
+	/* use "default" citus cluster name when user didn't provide it */
+	if (IS_EMPTY_STRING_BUFFER(showUriOptions.citusClusterName))
+	{
+		strlcpy(showUriOptions.citusClusterName,
+				DEFAULT_CITUS_CLUSTER_NAME, NAMEDATALEN);
+	}
+
+	cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
+
+	if (!keeper_config_set_pathnames_from_pgdata(&(options.pathnames),
+												 options.pgSetup.pgdata))
 	{
 		if (!keeper_config_set_pathnames_from_pgdata(&(options.pathnames),
 													 options.pgSetup.pgdata))
@@ -1088,8 +1117,10 @@ cli_show_uri(int argc, char **argv)
 	}
 	else if (!IS_EMPTY_STRING_BUFFER(showUriOptions.formation))
 	{
-		(void) print_formation_uri(&ssl, &monitor,
+		(void) print_formation_uri(&ssl,
+								   &monitor,
 								   showUriOptions.formation,
+								   showUriOptions.citusClusterName,
 								   stdout);
 	}
 	else
@@ -1134,12 +1165,14 @@ static void
 print_formation_uri(SSLOptions *ssl,
 					Monitor *monitor,
 					const char *formation,
+					const char *citusClusterName,
 					FILE *stream)
 {
 	char postgresUri[MAXCONNINFO];
 
 	if (!monitor_formation_uri(monitor,
 							   formation,
+							   citusClusterName,
 							   ssl,
 							   postgresUri,
 							   MAXCONNINFO))

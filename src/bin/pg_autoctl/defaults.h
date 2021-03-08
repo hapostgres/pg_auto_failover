@@ -14,10 +14,10 @@
 #define PG_AUTOCTL_STATE_VERSION 1
 
 /* additional version information for printing version on CLI */
-#define PG_AUTOCTL_VERSION "1.4.2"
+#define PG_AUTOCTL_VERSION "1.5.0"
 
 /* version of the extension that we requite to talk to on the monitor */
-#define PG_AUTOCTL_EXTENSION_VERSION "1.4"
+#define PG_AUTOCTL_EXTENSION_VERSION "1.5.0.1"
 
 /* environment variable to use to make DEBUG facilities available */
 #define PG_AUTOCTL_DEBUG "PG_AUTOCTL_DEBUG"
@@ -84,6 +84,9 @@
 
 #define POSTGRESQL_FAILS_TO_START_TIMEOUT 20
 #define POSTGRESQL_FAILS_TO_START_RETRIES 3
+
+#define DEFAULT_CITUS_ROLE "primary"
+#define DEFAULT_CITUS_CLUSTER_NAME "default"
 
 #define FAILOVER_FORMATION_NUMBER_SYNC_STANDBYS 1
 #define FAILOVER_NODE_CANDIDATE_PRIORITY 50

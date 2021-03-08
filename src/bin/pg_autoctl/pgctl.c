@@ -1052,6 +1052,21 @@ prepare_guc_settings_from_pgsetup(const char *configFilePath,
 
 			appendPQExpBufferStr(config, "'\n");
 		}
+		else if (streq(setting->name, "citus.use_secondary_nodes"))
+		{
+			if (!IS_EMPTY_STRING_BUFFER(pgSetup->citusClusterName))
+			{
+				appendPQExpBuffer(config, "%s = 'always'\n", setting->name);
+			}
+		}
+		else if (streq(setting->name, "citus.cluster_name"))
+		{
+			if (!IS_EMPTY_STRING_BUFFER(pgSetup->citusClusterName))
+			{
+				appendPQExpBuffer(config, "%s = '%s'\n",
+								  setting->name, pgSetup->citusClusterName);
+			}
+		}
 		else if (setting->value != NULL &&
 				 !IS_EMPTY_STRING_BUFFER(setting->value))
 		{
