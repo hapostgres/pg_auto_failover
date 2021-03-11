@@ -538,14 +538,6 @@ read_from_pipes(Program *prog, pid_t childPid, int *outpipe, int *errpipe)
 		}
 	}
 
-	/*
-	 * Now we're done reading from both stdOut and stdErr of the child
-	 * process, so close the file descriptors and prepare the char *
-	 * strings output in our Program structure.
-	 */
-	close(outpipe[0]);
-	close(errpipe[0]);
-
 	if (outbuf->len > 0)
 	{
 		prog->stdOut = strndup(outbuf->data, outbuf->len);
@@ -561,6 +553,18 @@ read_from_pipes(Program *prog, pid_t childPid, int *outpipe, int *errpipe)
 
 	/* now, wait until the child process is done. */
 	(void) waitprogram(prog, childPid);
+
+	/*
+	 * Now we're done reading from both stdOut and stdErr of the child
+	 * process, so close the file descriptors and prepare the char *
+	 * strings output in our Program structure.
+	 *
+	 * We must close the pipe after the child process has exited,
+	 * or the program may be terminated by SIGPIPE, i.e. writing to
+	 * an closed pipe.
+	 */
+	close(outpipe[0]);
+	close(errpipe[0]);
 }
 
 
@@ -581,7 +585,20 @@ waitprogram(Program *prog, pid_t childPid)
 		}
 	} while (!WIFEXITED(status) && !WIFSIGNALED(status));
 
-	prog->returnCode = WEXITSTATUS(status);
+	if (WIFEXITED(status))
+	{
+		prog->returnCode = WEXITSTATUS(status);
+	}
+	else if (WIFSIGNALED(status))
+	{
+		int signo = WTERMSIG(status);
+		prog->returnCode = signo ? signo : -1;
+	}
+	else
+	{
+		log_fatal("unknown exit status: 0X%X", status);
+		prog->returnCode = -1;
+	}
 }
 
 
