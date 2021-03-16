@@ -1499,6 +1499,7 @@ keeper_register_again(Keeper *keeper)
 								  config->pgSetup.pgKind,
 								  config->pgSetup.settings.candidatePriority,
 								  config->pgSetup.settings.replicationQuorum,
+								  DEFAULT_CITUS_CLUSTER_NAME,
 								  &mayRetry,
 								  &assignedState))
 		{
