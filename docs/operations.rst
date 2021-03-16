@@ -383,8 +383,13 @@ the following commands.
 
 	   $ pg_autoctl create monitor ...
 
-  4. On every node, starting with the latest (current) Postgres primary node
-     for each group, enable the monitor online again::
+  4. On the current primary node first, so that it's registered first and as
+     a primary still, for each group in your formation(s), enable the
+     monitor online again::
+
+	   $ pg_autoctl enable monitor --monitor postgresql://...
+
+  5. On every other (secondary) node, enable the monitor online again::
 
 	   $ pg_autoctl enable monitor --monitor postgresql://...
 
