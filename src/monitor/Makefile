@@ -2,7 +2,7 @@
 # Licensed under the PostgreSQL License.
 
 EXTENSION = pgautofailover
-EXTVERSION = 1.5.0.1
+EXTVERSION = 1.5.0.2
 
 SRC_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 

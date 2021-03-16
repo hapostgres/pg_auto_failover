@@ -952,6 +952,7 @@ GetAutoFailoverNodeByName(char *formationId, char *nodeName)
 int
 AddAutoFailoverNode(char *formationId,
 					FormationKind formationKind,
+					int nodeId,
 					int groupId,
 					char *nodeName,
 					char *nodeHost,
@@ -974,6 +975,7 @@ AddAutoFailoverNode(char *formationId,
 
 	Oid argTypes[] = {
 		TEXTOID, /* formationid */
+		INT4OID, /* nodeid */
 		INT4OID, /* groupid */
 		TEXTOID, /* nodename */
 		TEXTOID, /* nodehost */
@@ -989,6 +991,7 @@ AddAutoFailoverNode(char *formationId,
 
 	Datum argValues[] = {
 		CStringGetTextDatum(formationId),   /* formationid */
+		Int32GetDatum(nodeId),              /* nodeid */
 		Int32GetDatum(groupId),             /* groupid */
 		nodeName == NULL ? (Datum) 0 : CStringGetTextDatum(nodeName),   /* nodename */
 		CStringGetTextDatum(nodeHost),      /* nodehost */
@@ -1014,6 +1017,7 @@ AddAutoFailoverNode(char *formationId,
 	 */
 	const char argNulls[] = {
 		' ',                            /* formationid */
+		' ',                            /* nodeid */
 		' ',                            /* groupid */
 		nodeName == NULL ? 'n' : ' ',   /* nodename */
 		' ',                            /* nodehost */
@@ -1028,7 +1032,7 @@ AddAutoFailoverNode(char *formationId,
 	};
 
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
-	int nodeId = 0;
+	int insertedNodeId = 0;
 
 	/*
 	 * The node name can be specified by the user as the --name argument at
@@ -1046,14 +1050,16 @@ AddAutoFailoverNode(char *formationId,
 
 	const char *insertQuery =
 		"WITH seq(nodeid) AS "
-		"(SELECT nextval('pgautofailover.node_nodeid_seq'::regclass)) "
+		"(SELECT case when $2 = -1 "
+		"  then nextval('pgautofailover.node_nodeid_seq'::regclass) "
+		"  else $2 end) "
 		"INSERT INTO " AUTO_FAILOVER_NODE_TABLE
 		" (formationid, nodeid, groupid, nodename, nodehost, nodeport, "
 		" sysidentifier, goalstate, reportedstate, "
 		" candidatepriority, replicationquorum, nodecluster)"
-		" SELECT $1, seq.nodeid, $2, "
-		" case when $3 is null then format('%s_%s', $11, seq.nodeid) else $3 end, "
-		" $4, $5, $6, $7, $8, $9, $10, $12 "
+		" SELECT $1, seq.nodeid, $3, "
+		" case when $4 is null then format('%s_%s', $12, seq.nodeid) else $4 end, "
+		" $5, $6, $7, $8, $9, $10, $11, $13 "
 		" FROM seq "
 		"RETURNING nodeid";
 
@@ -1072,16 +1078,35 @@ AddAutoFailoverNode(char *formationId,
 										  1,
 										  &isNull);
 
-		nodeId = DatumGetInt32(nodeIdDatum);
+		insertedNodeId = DatumGetInt32(nodeIdDatum);
 	}
 	else
 	{
 		elog(ERROR, "could not insert into " AUTO_FAILOVER_NODE_TABLE);
 	}
 
+	/* when a desired_node_id has been given, maintain the nodeid sequence */
+	if (nodeId != -1)
+	{
+		const char *setValQuery =
+			"SELECT setval('pgautofailover.node_nodeid_seq'::regclass, "
+			" max(nodeid)+1) "
+			" FROM " AUTO_FAILOVER_NODE_TABLE;
+
+		int spiStatus = SPI_execute_with_args(setValQuery,
+											  0, NULL, NULL, NULL,
+											  false, 0);
+
+		if (spiStatus != SPI_OK_SELECT)
+		{
+			elog(ERROR,
+				 "could not setval('pgautofailover.node_nodeid_seq'::regclass)");
+		}
+	}
+
 	SPI_finish();
 
-	return nodeId;
+	return insertedNodeId;
 }
 
 

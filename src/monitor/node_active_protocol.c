@@ -96,17 +96,18 @@ register_node(PG_FUNCTION_ARGS)
 
 	uint64 sysIdentifier = PG_GETARG_INT64(5);
 
-	int32 currentGroupId = PG_GETARG_INT32(6);
-	Oid currentReplicationStateOid = PG_GETARG_OID(7);
+	int32 currentNodeId = PG_GETARG_INT32(6);
+	int32 currentGroupId = PG_GETARG_INT32(7);
+	Oid currentReplicationStateOid = PG_GETARG_OID(8);
 
-	text *nodeKindText = PG_GETARG_TEXT_P(8);
+	text *nodeKindText = PG_GETARG_TEXT_P(9);
 	char *nodeKind = text_to_cstring(nodeKindText);
 	FormationKind expectedFormationKind =
 		FormationKindFromNodeKindString(nodeKind);
-	int candidatePriority = PG_GETARG_INT32(9);
-	bool replicationQuorum = PG_GETARG_BOOL(10);
+	int candidatePriority = PG_GETARG_INT32(10);
+	bool replicationQuorum = PG_GETARG_BOOL(11);
 
-	text *nodeClusterText = PG_GETARG_TEXT_P(11);
+	text *nodeClusterText = PG_GETARG_TEXT_P(12);
 	char *nodeCluster = text_to_cstring(nodeClusterText);
 
 	AutoFailoverNodeState currentNodeState = { 0 };
@@ -115,7 +116,7 @@ register_node(PG_FUNCTION_ARGS)
 	Datum values[6];
 	bool isNulls[6];
 
-	currentNodeState.nodeId = -1;
+	currentNodeState.nodeId = currentNodeId;
 	currentNodeState.groupId = currentGroupId;
 	currentNodeState.replicationState =
 		EnumGetReplicationState(currentReplicationStateOid);
@@ -590,6 +591,7 @@ JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 
 	AddAutoFailoverNode(formation->formationId,
 						formation->kind,
+						currentNodeState->nodeId,
 						groupId,
 						nodeName,
 						nodeHost,

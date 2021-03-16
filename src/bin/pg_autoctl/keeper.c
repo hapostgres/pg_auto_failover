@@ -1306,6 +1306,7 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 								  config->pgSetup.pgport,
 								  config->pgSetup.control.system_identifier,
 								  config->pgSetup.dbname,
+								  -1, /* desired nodeID */
 								  config->groupId,
 								  initialState,
 								  config->pgSetup.pgKind,
@@ -1494,6 +1495,7 @@ keeper_register_again(Keeper *keeper)
 								  config->pgSetup.pgport,
 								  config->pgSetup.control.system_identifier,
 								  config->pgSetup.dbname,
+								  keeper->state.current_node_id,
 								  config->groupId,
 								  initialState,
 								  config->pgSetup.pgKind,
