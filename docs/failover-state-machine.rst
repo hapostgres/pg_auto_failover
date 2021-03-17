@@ -65,6 +65,11 @@ all the other nodes.
 
    pg_auto_failover Finite State Machine diagram
 
+In the previous diagram we can see that we have a list of six states where
+the application can connect to a read-write Postgres service: ``single``,
+``wait_primary``, ``primary``, ``prepare_maintenance``, ``apply_settings``,
+and ``join_primary``.
+
 Init
 ^^^^
 

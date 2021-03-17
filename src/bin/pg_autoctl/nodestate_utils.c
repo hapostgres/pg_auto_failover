@@ -30,7 +30,7 @@ nodestatePrepareHeaders(CurrentNodeStateArray *nodesArray,
 	nodesArray->headers.maxNodeSize = 5;  /* "Node" */
 	nodesArray->headers.maxLSNSize = 3;   /* "LSN" */
 	nodesArray->headers.maxStateSize = MAX_NODE_STATE_LEN;
-	nodesArray->headers.maxHealthSize = strlen("Reachable");
+	nodesArray->headers.maxHealthSize = strlen("read-write *");
 
 	/*
 	 * Dynamically adjust our display output to the length of the longer
@@ -184,11 +184,11 @@ nodestateAdjustHeaders(NodeAddressHeaders *headers,
 	if (headers->maxHealthSize == 0)
 	{
 		/*
-		 * Reachable, which is longer than "unknown", "yes", and "no", so
-		 * that's all we use here, a static length actually. Which is good,
-		 * because a NodeAddress does not know its own health anyway.
+		 * Connection is one of "read-only", "read-write", or "unknown",
+		 * followed by a mark for the health check (*, !, or ?), so we need as
+		 * much space as the full sample "read-write *":
 		 */
-		headers->maxHealthSize = strlen("Reachable");
+		headers->maxHealthSize = strlen("read-write *");
 	}
 
 	if (nameLen > headers->maxNameSize)
@@ -224,7 +224,7 @@ nodestatePrintHeader(NodeAddressHeaders *headers)
 			headers->maxNodeSize, "Node",
 			headers->maxHostSize, "Host:Port",
 			headers->maxLSNSize, "LSN",
-			headers->maxHealthSize, "Reachable",
+			headers->maxHealthSize, "Connection",
 			headers->maxStateSize, "Current State",
 			headers->maxStateSize, "Assigned State");
 
@@ -249,6 +249,8 @@ nodestatePrintNodeState(NodeAddressHeaders *headers,
 {
 	char hostport[BUFSIZE] = { 0 };
 	char composedId[BUFSIZE] = { 0 };
+	char connection[BUFSIZE] = { 0 };
+	char healthChar = nodestateHealthToChar(nodeState->health);
 
 	(void) nodestatePrepareNode(headers,
 								&(nodeState->node),
@@ -256,12 +258,22 @@ nodestatePrintNodeState(NodeAddressHeaders *headers,
 								hostport,
 								composedId);
 
+	if (healthChar == ' ')
+	{
+		sformat(connection, BUFSIZE, "%s", nodestateConnectionType(nodeState));
+	}
+	else
+	{
+		sformat(connection, BUFSIZE, "%s %c",
+				nodestateConnectionType(nodeState), healthChar);
+	}
+
 	fformat(stdout, "%*s | %*s | %*s | %*s | %*s | %*s | %*s\n",
 			headers->maxNameSize, nodeState->node.name,
 			headers->maxNodeSize, composedId,
 			headers->maxHostSize, hostport,
 			headers->maxLSNSize, nodeState->node.lsn,
-			headers->maxHealthSize, nodestateHealthToString(nodeState->health),
+			headers->maxHealthSize, connection,
 			headers->maxStateSize, NodeStateToString(nodeState->reportedState),
 			headers->maxStateSize, NodeStateToString(nodeState->goalState));
 }
@@ -346,6 +358,9 @@ nodestateAsJSON(CurrentNodeState *nodeState, JSON_Value *js)
 	json_object_set_string(jsobj, "reachable",
 						   nodestateHealthToString(nodeState->health));
 
+	json_object_set_string(jsobj, "conntype",
+						   nodestateConnectionType(nodeState));
+
 	return true;
 }
 
@@ -379,6 +394,92 @@ nodestateHealthToString(int health)
 			return "unknown";
 		}
 	}
+}
+
+
+/*
+ * Transform the health column from a monitor into a single char.
+ */
+char
+nodestateHealthToChar(int health)
+{
+	switch (health)
+	{
+		case -1:
+		{
+			return '?';
+		}
+
+		case 0:
+		{
+			return '!';
+		}
+
+		case 1:
+		{
+			return ' ';
+		}
+
+		default:
+		{
+			log_error("BUG in nodestateHealthToString: health = %d", health);
+			return '-';
+		}
+	}
+}
+
+
+/*
+ * nodestateConnectionType returns one of "read-write" or "read-only".
+ */
+char *
+nodestateConnectionType(CurrentNodeState *nodeState)
+{
+	switch (nodeState->reportedState)
+	{
+		case SINGLE_STATE:
+		case PRIMARY_STATE:
+		case WAIT_PRIMARY_STATE:
+		case JOIN_PRIMARY_STATE:
+		case PREPARE_MAINTENANCE_STATE:
+		case APPLY_SETTINGS_STATE:
+		{
+			return "read-write";
+		}
+
+		case SECONDARY_STATE:
+		case CATCHINGUP_STATE:
+		case PREP_PROMOTION_STATE:
+		case STOP_REPLICATION_STATE:
+		case WAIT_MAINTENANCE_STATE:
+		case FAST_FORWARD_STATE:
+		case JOIN_SECONDARY_STATE:
+		{
+			return "read-only";
+		}
+
+		/* in those states Postgres is known to be stopped/down */
+		case NO_STATE:
+		case INIT_STATE:
+		case WAIT_STANDBY_STATE:
+		case DEMOTED_STATE:
+		case DEMOTE_TIMEOUT_STATE:
+		case DRAINING_STATE:
+		case MAINTENANCE_STATE:
+		case REPORT_LSN_STATE:
+		{
+			return "none";
+		}
+
+		case ANY_STATE:
+		{
+			return "unknown";
+		}
+
+			/* default: is intentionally left out to have compiler check */
+	}
+
+	return "unknown";
 }
 
 
