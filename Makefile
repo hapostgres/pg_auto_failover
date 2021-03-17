@@ -7,18 +7,45 @@ DOCKER_RUN_OPTS = --privileged  -ti --rm
 
 NOSETESTS = $(shell which nosetests3 || which nosetests)
 
+# Tests for the monitor
+TESTS_MONITOR  = test_extension_update
+TESTS_MONITOR += test_installcheck
+TESTS_MONITOR += test_monitor_disabled
+TESTS_MONITOR += test_replace_monitor
+
+# Tests for single standby
+TESTS_SINGLE  = test_auth
+TESTS_SINGLE += test_basic_operation
+TESTS_SINGLE += test_basic_operation_listen_flag
+TESTS_SINGLE += test_create_run
+TESTS_SINGLE += test_create_standby_with_pgdata
+TESTS_SINGLE += test_debian_clusters
+TESTS_SINGLE += test_ensure
+TESTS_SINGLE += test_skip_pg_hba
+
+# Tests for SSL
+TESTS_SSL  = test_enable_ssl
+TESTS_SSL += test_ssl_cert
+TESTS_SSL += test_ssl_self_signed
+
 # Tests for multiple standbys
-MULTI_SB_TESTS  = $(basename $(notdir $(wildcard tests/test*_multi*)))
-MULTI_SB_TESTS += $(basename $(notdir $(wildcard tests/test*_disabled*)))
+TESTS_MULTI  = test_multi_async
+TESTS_MULTI += test_multi_ifdown
+TESTS_MULTI += test_multi_maintenance
+TESTS_MULTI += test_multi_standbys
 
 # TEST indicates the testfile to run
 TEST ?=
 ifeq ($(TEST),)
 	TEST_ARGUMENT = --where=tests
 else ifeq ($(TEST),multi)
-	TEST_ARGUMENT = --where=tests --tests=$(MULTI_SB_TESTS)
+	TEST_ARGUMENT = --where=tests --tests=$(TESTS_MULTI)
 else ifeq ($(TEST),single)
-	TEST_ARGUMENT = --where=tests --exclude='_multi_' --exclude='disabled'
+	TEST_ARGUMENT = --where=tests --tests=$(TESTS_SINGLE)
+else ifeq ($(TEST),monitor)
+	TEST_ARGUMENT = --where=tests --tests=$(TESTS_MONITOR)
+else ifeq ($(TEST),ssl)
+	TEST_ARGUMENT = --where=tests --tests=$(TESTS_SSL)
 else
 	TEST_ARGUMENT = $(TEST:%=tests/%.py)
 endif
