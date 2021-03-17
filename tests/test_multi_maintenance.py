@@ -51,7 +51,9 @@ def test_002_add_standby():
     # make sure we reached primary on node1 before next tests
     assert node1.wait_until_state(target_state="primary")
 
-    node1.check_synchronous_standby_names(ssn="*")
+    node1.check_synchronous_standby_names(
+        ssn="ANY 1 (pgautofailover_standby_2)"
+    )
 
 
 def test_003_add_standby():
