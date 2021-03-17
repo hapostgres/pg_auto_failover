@@ -1617,22 +1617,6 @@ parseReplicationSlotMaintain(void *ctx, PGresult *result)
 
 
 /*
- * pgsql_enable_synchronous_replication enables synchronous replication
- * in Postgres such that all writes block post-commit until they are
- * replicated.
- */
-bool
-pgsql_enable_synchronous_replication(PGSQL *pgsql)
-{
-	GUC setting = { "synchronous_standby_names", "'*'" };
-
-	log_info("Enabling synchronous replication");
-
-	return pgsql_alter_system_set(pgsql, setting);
-}
-
-
-/*
  * pgsql_disable_synchronous_replication disables synchronous replication
  * in Postgres such that writes do not block if there is no replica.
  */

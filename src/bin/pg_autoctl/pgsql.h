@@ -281,7 +281,6 @@ bool pgsql_replication_slot_create_and_drop(PGSQL *pgsql,
 											NodeAddressArray *nodeArray);
 bool pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray);
 bool postgres_sprintf_replicationSlotName(int nodeId, char *slotName, int size);
-bool pgsql_enable_synchronous_replication(PGSQL *pgsql);
 bool pgsql_disable_synchronous_replication(PGSQL *pgsql);
 bool pgsql_set_default_transaction_mode_read_only(PGSQL *pgsql);
 bool pgsql_set_default_transaction_mode_read_write(PGSQL *pgsql);

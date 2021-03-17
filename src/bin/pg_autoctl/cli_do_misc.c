@@ -80,50 +80,6 @@ keeper_cli_drop_replication_slot(int argc, char **argv)
 
 
 /*
- * keeper_cli_enable_synchronous_replication implements the CLI to enable
- * synchronous replication on the primary.
- */
-void
-keeper_cli_enable_synchronous_replication(int argc, char **argv)
-{
-	KeeperConfig config = keeperOptions;
-	LocalPostgresServer postgres = { 0 };
-	bool missingPgdataOk = false;
-	bool pgNotRunningOk = false;
-
-	keeper_config_init(&config, missingPgdataOk, pgNotRunningOk);
-	local_postgres_init(&postgres, &(config.pgSetup));
-
-	if (!primary_enable_synchronous_replication(&postgres))
-	{
-		exit(EXIT_CODE_PGSQL);
-	}
-}
-
-
-/*
- * keeper_cli_disable_synchronous_replication implements the CLI to disable
- * synchronous replication on the primary.
- */
-void
-keeper_cli_disable_synchronous_replication(int argc, char **argv)
-{
-	KeeperConfig config = keeperOptions;
-	LocalPostgresServer postgres = { 0 };
-	bool missingPgdataOk = false;
-	bool pgNotRunningOk = false;
-
-	keeper_config_init(&config, missingPgdataOk, pgNotRunningOk);
-	local_postgres_init(&postgres, &(config.pgSetup));
-
-	if (!primary_disable_synchronous_replication(&postgres))
-	{
-		exit(EXIT_CODE_PGSQL);
-	}
-}
-
-
-/*
  * keeper_cli_add_defaults implements the CLI to add pg_auto_failover default
  * settings to postgresql.conf
  */

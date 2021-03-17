@@ -76,7 +76,6 @@ bool postgres_replication_slot_create_and_drop(LocalPostgresServer *postgres,
 											   NodeAddressArray *nodeArray);
 bool postgres_replication_slot_maintain(LocalPostgresServer *postgres,
 										NodeAddressArray *nodeArray);
-bool primary_enable_synchronous_replication(LocalPostgresServer *postgres);
 bool primary_disable_synchronous_replication(LocalPostgresServer *postgres);
 bool postgres_add_default_settings(LocalPostgresServer *postgres);
 bool primary_create_user_with_hba(LocalPostgresServer *postgres, char *userName,
