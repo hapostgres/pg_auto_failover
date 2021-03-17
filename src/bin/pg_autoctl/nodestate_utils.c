@@ -250,6 +250,7 @@ nodestatePrintNodeState(NodeAddressHeaders *headers,
 	char hostport[BUFSIZE] = { 0 };
 	char composedId[BUFSIZE] = { 0 };
 	char connection[BUFSIZE] = { 0 };
+	char healthChar = nodestateHealthToChar(nodeState->health);
 
 	(void) nodestatePrepareNode(headers,
 								&(nodeState->node),
@@ -257,10 +258,15 @@ nodestatePrintNodeState(NodeAddressHeaders *headers,
 								hostport,
 								composedId);
 
-
-	sformat(connection, BUFSIZE, "%s %c",
-			nodestateConnectionType(nodeState),
-			nodestateHealthToChar(nodeState->health));
+	if (healthChar == ' ')
+	{
+		sformat(connection, BUFSIZE, "%s", nodestateConnectionType(nodeState));
+	}
+	else
+	{
+		sformat(connection, BUFSIZE, "%s %c",
+				nodestateConnectionType(nodeState), healthChar);
+	}
 
 	fformat(stdout, "%*s | %*s | %*s | %*s | %*s | %*s | %*s\n",
 			headers->maxNameSize, nodeState->node.name,
@@ -411,7 +417,7 @@ nodestateHealthToChar(int health)
 
 		case 1:
 		{
-			return '*';
+			return ' ';
 		}
 
 		default:
