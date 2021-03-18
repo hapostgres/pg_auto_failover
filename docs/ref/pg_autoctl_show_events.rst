@@ -14,6 +14,7 @@ about state changes of the pg_auto_failover nodes managed by the monitor::
   usage: pg_autoctl show events  [ --pgdata --formation --group --count ]
 
   --pgdata      path to data directory
+  --monitor     pg_auto_failover Monitor Postgres URL
   --formation   formation to query, defaults to 'default'
   --group       group to query formation, defaults to all
   --count       how many events to fetch, defaults to 10
@@ -28,6 +29,13 @@ Options
   environment variable ``PGDATA``. Use ``--monitor`` to connect to a monitor
   from anywhere, rather than the monitor URI used by a local Postgres node
   managed with ``pg_autoctl``.
+
+--monitor
+
+  Postgres URI used to connect to the monitor. Must use the ``autoctl_node``
+  username and target the ``pg_auto_failover`` database name. It is possible
+  to show the Postgres URI from the monitor node using the command
+  :ref:`pg_autoctl_show_uri`.
 
 --formation
 
