@@ -200,6 +200,20 @@ man_pages = [
         [author],
         1,
     ),
+    (
+        "ref/pg_autoctl_show_events",
+        "pg_autoctl show events",
+        "pg_autoctl show events",
+        [author],
+        1,
+    ),
+    (
+        "ref/pg_autoctl_show_state",
+        "pg_autoctl show state",
+        "pg_autoctl show state",
+        [author],
+        1,
+    ),
     # ("ref/reference", "pg_autoctl", "pg_auto_failover agent", [author], 1),
     (
         "ref/configuration",

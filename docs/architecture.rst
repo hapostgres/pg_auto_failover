@@ -13,7 +13,7 @@ pg_auto_failover is designed to be able to handle a single PostgreSQL
 service using three nodes. In this setting, the system is resilient to
 losing any **one** of **three** nodes.
 
-.. figure:: ./tikz/arch-single-standby.svg
+.. figure:: ./tikz/arch-single-standby.pdf
    :alt: pg_auto_failover Architecture for a standalone PostgreSQL service
 
    pg_auto_failover Architecture for a standalone PostgreSQL service

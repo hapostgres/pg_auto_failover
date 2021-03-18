@@ -12,7 +12,7 @@ Architectures with two standby nodes
 When adding your second standby node with default settings, you get the
 following architecture:
 
-.. figure:: ./tikz/arch-multi-standby.svg
+.. figure:: ./tikz/arch-multi-standby.pdf
    :alt: pg_auto_failover architecture with two standby nodes
 
    pg_auto_failover architecture with two standby nodes
@@ -258,7 +258,7 @@ Sample architectures with three standby nodes
 When setting the three parameters above, it's possible to design very
 different Postgres architectures for your production needs.
 
-.. figure:: ./tikz/arch-three-standby.svg
+.. figure:: ./tikz/arch-three-standby.pdf
    :alt: pg_auto_failover architecture with three standby nodes
 
    pg_auto_failover architecture with three standby nodes
@@ -291,7 +291,7 @@ With this architecture diagram, here's the summary that we obtain::
 Sample architecture with three standby nodes, one async
 -------------------------------------------------------
 
-.. figure:: ./tikz/arch-three-standby-one-async.svg
+.. figure:: ./tikz/arch-three-standby-one-async.pdf
    :alt: pg_auto_failover architecture with three standby nodes, one async
 
    pg_auto_failover architecture with three standby nodes, one async

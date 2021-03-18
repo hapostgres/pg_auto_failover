@@ -9,9 +9,5 @@ have their own manual page.
    :caption: Manual Pages:
 
    pg_autoctl
-   pg_autoctl_create_monitor
-   pg_autoctl_create_postgres
-   pg_autoctl_create_formation
-   pg_autoctl_show_uri
-   pg_autoctl_show_events
-   pg_autoctl_show_state
+   pg_autoctl_create
+   pg_autoctl_show

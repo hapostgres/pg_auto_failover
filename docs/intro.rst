@@ -7,7 +7,7 @@ for a postgres clusters. It is optimised for simplicity and correctness.
 Single Standby Architecture
 ---------------------------
 
-.. figure:: ./tikz/arch-single-standby.svg
+.. figure:: ./tikz/arch-single-standby.pdf
    :alt: pg_auto_failover Architecture with a primary and a standby node
 
    pg_auto_failover architecture with a primary and a standby node
@@ -37,7 +37,7 @@ failover and switchover operations are not allowed, preventing data loss.
 Multiple Standby Architecture
 -----------------------------
 
-.. figure:: ./tikz/arch-multi-standby.svg
+.. figure:: ./tikz/arch-multi-standby.pdf
    :alt: pg_auto_failover Architecture for a standalone PostgreSQL service
 
    pg_auto_failover architecture with a primary and two standby nodes
@@ -55,7 +55,7 @@ your production setup.
 Multiple Standbys Architecture with 3 standby nodes, one async
 --------------------------------------------------------------
 
-.. figure:: ./tikz/arch-three-standby-one-async.svg
+.. figure:: ./tikz/arch-three-standby-one-async.pdf
    :alt: pg_auto_failover architecture with a primary and three standby nodes
 
    pg_auto_failover architecture with a primary and three standby nodes

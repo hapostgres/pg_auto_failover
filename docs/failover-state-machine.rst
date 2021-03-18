@@ -60,7 +60,7 @@ The following diagram shows the pg_auto_failover State Machine. It's missing
 links to the ``single`` state, which can always been reached when removing
 all the other nodes.
 
-.. figure:: ./tikz/fsm.svg
+.. figure:: ./tikz/fsm.pdf
    :alt: pg_auto_failover Finite State Machine diagram
 
    pg_auto_failover Finite State Machine diagram
