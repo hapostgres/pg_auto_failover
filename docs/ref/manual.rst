@@ -11,4 +11,5 @@ have their own manual page.
    pg_autoctl
    pg_autoctl_create
    pg_autoctl_drop
+   pg_autoctl_config
    pg_autoctl_show
