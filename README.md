@@ -1,7 +1,7 @@
 # pg_auto_failover
 
 [![Slack Status](http://slack.citusdata.com/badge.svg)](https://slack.citusdata.com)
-[![Documentation Status](https://readthedocs.org/projects/pg-auto-failover/badge/?version=latest)](https://pg-auto-failover.readthedocs.io/en/latest/?badge=latest)
+[![Documentation Status](https://readthedocs.org/projects/pg-auto-failover/badge/?version=latest)](https://pg-auto-failover.readthedocs.io/en/master/?badge=master)
 
 pg_auto_failover is an extension and service for PostgreSQL that monitors
 and manages automated failover for a Postgres cluster. It is optimized for
