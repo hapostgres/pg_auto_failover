@@ -2192,7 +2192,13 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 			secondaryNode->goalState == REPLICATION_STATE_SECONDARY)
 		{
 			/* enable synchronous replication */
-			PG_RETURN_TEXT_P(cstring_to_text("*"));
+			StringInfo sbnames = makeStringInfo();
+
+			appendStringInfo(sbnames,
+							 "ANY 1 (pgautofailover_standby_%d)",
+							 secondaryNode->nodeId);
+
+			PG_RETURN_TEXT_P(cstring_to_text(sbnames->data));
 		}
 		else
 		{

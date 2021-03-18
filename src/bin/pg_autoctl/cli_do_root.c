@@ -57,32 +57,6 @@ CommandLine do_primary_adduser =
 					 "Create users on primary", NULL, NULL,
 					 NULL, do_primary_adduser_subcommands);
 
-CommandLine do_primary_syncrep_enable =
-	make_command("enable",
-				 "Enable synchronous replication on the primary server",
-				 "",
-				 "",
-				 NULL, keeper_cli_enable_synchronous_replication);
-
-CommandLine do_primary_syncrep_disable =
-	make_command("disable",
-				 "Disable synchronous replication on the primary server",
-				 "",
-				 "",
-				 NULL, keeper_cli_disable_synchronous_replication);
-
-CommandLine *do_primary_syncrep[] = {
-	&do_primary_syncrep_enable,
-	&do_primary_syncrep_disable,
-	NULL
-};
-
-CommandLine do_primary_syncrep_ =
-	make_command_set("syncrep",
-					 "Manage the synchronous replication setting on the primary server",
-					 NULL, NULL,
-					 NULL, do_primary_syncrep);
-
 CommandLine do_primary_slot_create =
 	make_command("create",
 				 "Create a replication slot on the primary server",
@@ -128,7 +102,6 @@ CommandLine do_primary_identify_system =
 
 CommandLine *do_primary[] = {
 	&do_primary_slot_,
-	&do_primary_syncrep_,
 	&do_primary_adduser,
 	&do_primary_defaults,
 	&do_primary_identify_system,

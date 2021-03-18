@@ -569,24 +569,6 @@ primary_set_synchronous_standby_names(LocalPostgresServer *postgres)
 
 
 /*
- * primary_enable_synchronous_replication enables synchronous replication
- * on a primary postgres node.
- */
-bool
-primary_enable_synchronous_replication(LocalPostgresServer *postgres)
-{
-	PGSQL *pgsql = &(postgres->sqlClient);
-
-	log_trace("primary_enable_synchronous_replication");
-
-	bool result = pgsql_enable_synchronous_replication(pgsql);
-
-	pgsql_finish(pgsql);
-	return result;
-}
-
-
-/*
  * primary_disable_synchronous_replication disables synchronous replication
  * on a primary postgres node.
  */

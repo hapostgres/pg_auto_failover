@@ -72,7 +72,10 @@ def test_004_init_secondary():
 
     assert node2.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")
-    eq_(node1.get_synchronous_standby_names_local(), "*")
+    eq_(
+        node1.get_synchronous_standby_names_local(),
+        "ANY 1 (pgautofailover_standby_2)",
+    )
 
     assert node1.has_needed_replication_slots()
     assert node2.has_needed_replication_slots()
@@ -125,7 +128,9 @@ def test_007_005_disable_maintenance():
     assert node1.wait_until_state(target_state="secondary")
     assert node2.wait_until_state(target_state="primary")
 
-    node2.check_synchronous_standby_names(ssn="*")
+    node2.check_synchronous_standby_names(
+        ssn="ANY 1 (pgautofailover_standby_1)"
+    )
 
 
 def test_008_001_enable_maintenance_secondary():
@@ -146,7 +151,9 @@ def test_008_002_disable_maintenance_secondary():
     assert node1.wait_until_state(target_state="secondary")
     assert node2.wait_until_state(target_state="primary")
 
-    node2.check_synchronous_standby_names(ssn="*")
+    node2.check_synchronous_standby_names(
+        ssn="ANY 1 (pgautofailover_standby_1)"
+    )
 
 
 # the rest of the tests expect node1 to be primary, make it so
@@ -156,7 +163,10 @@ def test_009_failback():
     assert node2.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")
 
-    eq_(node1.get_synchronous_standby_names_local(), "*")
+    eq_(
+        node1.get_synchronous_standby_names_local(),
+        "ANY 1 (pgautofailover_standby_2)",
+    )
 
 
 def test_010_fail_primary():
@@ -176,7 +186,10 @@ def test_012_start_node1_again():
     node1.run()
 
     assert node2.wait_until_state(target_state="primary")
-    eq_(node2.get_synchronous_standby_names_local(), "*")
+    eq_(
+        node2.get_synchronous_standby_names_local(),
+        "ANY 1 (pgautofailover_standby_1)",
+    )
 
     assert node1.wait_until_state(target_state="secondary")
 
@@ -226,7 +239,10 @@ def test_019_run_secondary():
     assert node2.has_needed_replication_slots()
     assert node3.has_needed_replication_slots()
 
-    eq_(node2.get_synchronous_standby_names_local(), "*")
+    eq_(
+        node2.get_synchronous_standby_names_local(),
+        "ANY 1 (pgautofailover_standby_3)",
+    )
 
 
 # In previous versions of pg_auto_failover we removed the replication slot
@@ -249,12 +265,18 @@ def test_020_multiple_manual_failover_verify_replication_slots():
     assert node2.has_needed_replication_slots()
     assert node3.has_needed_replication_slots()
 
-    eq_(node3.get_synchronous_standby_names_local(), "*")
+    eq_(
+        node3.get_synchronous_standby_names_local(),
+        "ANY 1 (pgautofailover_standby_2)",
+    )
 
     print("Calling pg_autoctl perform promotion on node 2")
     node2.perform_promotion()
     assert node2.wait_until_state(target_state="primary")
-    eq_(node2.get_synchronous_standby_names_local(), "*")
+    eq_(
+        node2.get_synchronous_standby_names_local(),
+        "ANY 1 (pgautofailover_standby_3)",
+    )
 
     assert node3.wait_until_state(target_state="secondary")
 
@@ -271,7 +293,10 @@ def test_020_multiple_manual_failover_verify_replication_slots():
 def test_021_ifdown_primary():
     print()
     assert node2.wait_until_state(target_state="primary")
-    eq_(node2.get_synchronous_standby_names_local(), "*")
+    eq_(
+        node2.get_synchronous_standby_names_local(),
+        "ANY 1 (pgautofailover_standby_3)",
+    )
     node2.ifdown()
 
 
@@ -308,7 +333,10 @@ def test_023_ifup_old_primary():
     assert node2.wait_until_state("secondary")
     assert node3.wait_until_state("primary")
 
-    eq_(node3.get_synchronous_standby_names_local(), "*")
+    eq_(
+        node3.get_synchronous_standby_names_local(),
+        "ANY 1 (pgautofailover_standby_2)",
+    )
 
 
 def test_024_stop_postgres_monitor():

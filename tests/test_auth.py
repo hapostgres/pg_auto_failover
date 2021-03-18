@@ -61,7 +61,10 @@ def test_003_init_secondary():
     assert node2.wait_until_state(target_state="secondary")
     assert node1.wait_until_state(target_state="primary")
 
-    eq_(node1.get_synchronous_standby_names_local(), "*")
+    eq_(
+        node1.get_synchronous_standby_names_local(),
+        "ANY 1 (pgautofailover_standby_2)",
+    )
 
 
 def test_004_failover():
@@ -69,6 +72,9 @@ def test_004_failover():
     print("Calling pgautofailover.failover() on the monitor")
     cluster.monitor.failover(formation="auth")
     assert node2.wait_until_state(target_state="primary")
-    eq_(node2.get_synchronous_standby_names_local(), "*")
+    eq_(
+        node2.get_synchronous_standby_names_local(),
+        "ANY 1 (pgautofailover_standby_1)",
+    )
 
     assert node1.wait_until_state(target_state="secondary")
