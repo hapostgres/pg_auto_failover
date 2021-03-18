@@ -101,7 +101,10 @@ def test_011_failover():
     newmonitor.failover()
 
     assert node2.wait_until_state(target_state="primary")
-    eq_(node2.get_synchronous_standby_names_local(), "*")
+    eq_(
+        node2.get_synchronous_standby_names_local(),
+        "ANY 1 (pgautofailover_standby_1)",
+    )
 
     assert node1.wait_until_state(target_state="secondary")
 
