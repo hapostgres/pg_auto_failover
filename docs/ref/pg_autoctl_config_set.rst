@@ -32,8 +32,10 @@ Description
 -----------
 
 This commands allows to set a pg_autoctl configuration setting to a new
-value, and then reload the running ``pg_autoctl`` service, if any. Most
-settings are possible to change and can be reloaded online.
+value. Most settings are possible to change and can be reloaded online.
+
+Some of those commands can then be applied with a ``pg_autoctl reload``
+command to an already running process.
 
 Settings
 --------
