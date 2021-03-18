@@ -19,6 +19,7 @@ Welcome to pg_auto_failover's documentation!
    fault-tolerance
    install
    security
+   ref/manual
    ref/reference
    ref/configuration
    operations
