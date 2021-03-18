@@ -22,30 +22,30 @@ registered to the pg_auto_failover monitor::
 Options
 -------
 
-  --pgdata
+--pgdata
 
-    Location of the Postgres node being managed locally. Defaults to the
-    environment variable ``PGDATA``. Use ``--monitor`` to connect to a
-    monitor from anywhere, rather than the monitor URI used by a local
-    Postgres node managed with ``pg_autoctl``.
+  Location of the Postgres node being managed locally. Defaults to the
+  environment variable ``PGDATA``. Use ``--monitor`` to connect to a monitor
+  from anywhere, rather than the monitor URI used by a local Postgres node
+  managed with ``pg_autoctl``.
 
-  --formation
+--formation
 
-    List the events recorded for nodes in the given formation. Defaults to
-    ``default``.
+  List the events recorded for nodes in the given formation. Defaults to
+  ``default``.
 
-  --group
+--group
 
-    Limit output to a single group in the formation. Default to including
-    all groups registered in the target formation.
+  Limit output to a single group in the formation. Default to including all
+  groups registered in the target formation.
 
-  --local
+--local
 
-    Print the local state information without connecting to the monitor.
+  Print the local state information without connecting to the monitor.
 
-  --json
+--json
 
-    Output a JSON formated data instead of a table formatted list.
+  Output a JSON formated data instead of a table formatted list.
 
 Description
 -----------

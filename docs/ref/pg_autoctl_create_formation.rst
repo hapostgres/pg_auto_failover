@@ -37,56 +37,55 @@ Options
 
 The following options are available to ``pg_autoctl create formation``:
 
-  --pgdata
+--pgdata
 
-    Location where to initialize a Postgres database cluster, using either
-    ``pg_ctl initdb`` or ``pg_basebackup``. Defaults to the environment
-    variable ``PGDATA``.
+  Location where to initialize a Postgres database cluster, using either
+  ``pg_ctl initdb`` or ``pg_basebackup``. Defaults to the environment
+  variable ``PGDATA``.
 
-  --monitor
+--monitor
 
-    Postgres URI used to connect to the monitor. Must use the
-    ``autoctl_node`` username and target the ``pg_auto_failover`` database
-    name. It is possible to show the Postgres URI from the monitor node
-    using the command :ref:`pg_autoctl_show_uri`.
+  Postgres URI used to connect to the monitor. Must use the ``autoctl_node``
+  username and target the ``pg_auto_failover`` database name. It is possible
+  to show the Postgres URI from the monitor node using the command
+  :ref:`pg_autoctl_show_uri`.
 
-  --formation
+--formation
 
-    Name of the formation to create.
+  Name of the formation to create.
 
-  --kind
+--kind
 
-    A pg_auto_failover formation could be of kind ``pgsql`` or of kind
-    ``citus``. At the moment ``citus`` formation kinds are not managed in
-    the Open Source version of pg_auto_failover.
+  A pg_auto_failover formation could be of kind ``pgsql`` or of kind
+  ``citus``. At the moment ``citus`` formation kinds are not managed in the
+  Open Source version of pg_auto_failover.
 
-  --dbname
+--dbname
 
-    Name of the database to use in the formation, mostly useful to formation
-    kinds ``citus`` where the Citus extension is only installed in a single
-    target database.
+  Name of the database to use in the formation, mostly useful to formation
+  kinds ``citus`` where the Citus extension is only installed in a single
+  target database.
 
-  --enable-secondary
+--enable-secondary
 
-    The formation to be created allows using standby nodes. Defaults to
-    ``true``. Mostly useful for Citus formations.
+  The formation to be created allows using standby nodes. Defaults to
+  ``true``. Mostly useful for Citus formations.
 
-  --disable-secondary
+--disable-secondary
 
-    See ``--enable-secondary`` above.
+  See ``--enable-secondary`` above.
 
-  --number-sync-standby
+--number-sync-standby
 
-    Postgres streaming replication uses ``synchronous_standby_names`` to
-    setup how many standby nodes should have received a copy of the
-    transaction data. When using pg_auto_failover this setup is handled at
-    the formation level.
+  Postgres streaming replication uses ``synchronous_standby_names`` to setup
+  how many standby nodes should have received a copy of the transaction
+  data. When using pg_auto_failover this setup is handled at the formation
+  level.
 
-    Defaults to zero when creating the first two Postgres nodes in a
-    formation in the same group. When set to zero pg_auto_failover uses
-    synchronous replication only when a standby node is available: the idea
-    is to allow failover, this setting does not allow proper HA for
-    Postgres.
+  Defaults to zero when creating the first two Postgres nodes in a formation
+  in the same group. When set to zero pg_auto_failover uses synchronous
+  replication only when a standby node is available: the idea is to allow
+  failover, this setting does not allow proper HA for Postgres.
 
-    When adding a third node that participates in the quorum (one primary,
-    two secondaries), the setting is automatically changed from zero to one.
+  When adding a third node that participates in the quorum (one primary, two
+  secondaries), the setting is automatically changed from zero to one.

@@ -118,183 +118,181 @@ Options
 
 The following options are available to ``pg_autoctl create postgres``:
 
-  --pgctl
+--pgctl
 
-    Path to the ``pg_ctl`` tool to use for the version of PostgreSQL you
-    want to use.
+  Path to the ``pg_ctl`` tool to use for the version of PostgreSQL you want
+  to use.
 
-    Defaults to the ``pg_ctl`` found in the PATH when there is a single entry
-    for ``pg_ctl`` in the PATH. Check your setup using ``which -a pg_ctl``.
+  Defaults to the ``pg_ctl`` found in the PATH when there is a single entry
+  for ``pg_ctl`` in the PATH. Check your setup using ``which -a pg_ctl``.
 
-    When using an RPM based distribution such as RHEL or CentOS, the path
-    would usually be ``/usr/pgsql-13/bin/pg_ctl`` for Postgres 13.
+  When using an RPM based distribution such as RHEL or CentOS, the path
+  would usually be ``/usr/pgsql-13/bin/pg_ctl`` for Postgres 13.
 
-    When using a debian based distribution such as debian or ubuntu, the
-    path would usually be ``/usr/lib/postgresql/13/bin/pg_ctl`` for
-    Postgres 13. Those distributions also use the package
-    ``postgresql-common`` which provides ``/usr/bin/pg_config``. This tool
-    can be automatically used by ``pg_autoctl`` to discover the default
-    version of Postgres to use on your setup.
+  When using a debian based distribution such as debian or ubuntu, the path
+  would usually be ``/usr/lib/postgresql/13/bin/pg_ctl`` for Postgres 13.
+  Those distributions also use the package ``postgresql-common`` which
+  provides ``/usr/bin/pg_config``. This tool can be automatically used by
+  ``pg_autoctl`` to discover the default version of Postgres to use on your
+  setup.
 
-  --pgdata
+--pgdata
 
-    Location where to initialize a Postgres database cluster, using either
-    ``pg_ctl initdb`` or ``pg_basebackup``. Defaults to the environment
-    variable ``PGDATA``.
+  Location where to initialize a Postgres database cluster, using either
+  ``pg_ctl initdb`` or ``pg_basebackup``. Defaults to the environment
+  variable ``PGDATA``.
 
-  --pghost
+--pghost
 
-    Hostname to use when connecting to the local Postgres instance from the
-    ``pg_autoctl`` process. By default, this field is left blank in the
-    connection string, allowing to use Unix Domain Sockets with the default
-    path compiled in your ``libpq`` version, usually provided by the
-    Operating System. That would be ``/var/run/postgresql`` when using
-    debian or ubuntu.
+  Hostname to use when connecting to the local Postgres instance from the
+  ``pg_autoctl`` process. By default, this field is left blank in the
+  connection string, allowing to use Unix Domain Sockets with the default
+  path compiled in your ``libpq`` version, usually provided by the Operating
+  System. That would be ``/var/run/postgresql`` when using debian or ubuntu.
 
-  --pgport
+--pgport
 
-    Postgres port to use, defaults to 5432.
+  Postgres port to use, defaults to 5432.
 
-  --listen
+--listen
 
-    PostgreSQL's ``listen_addresses`` to setup. At the moment only one
-    address is supported in this command line option.
+  PostgreSQL's ``listen_addresses`` to setup. At the moment only one address
+  is supported in this command line option.
 
-  --username
+--username
 
-    PostgreSQL's username to use when connecting to the local Postgres
-    instance to manage it.
+  PostgreSQL's username to use when connecting to the local Postgres
+  instance to manage it.
 
-  --dbname
+--dbname
 
-    PostgreSQL's database name to use in your application. Defaults to being
-    the same as the ``--username``, or to ``postgres`` when none of those
-    options are used.
+  PostgreSQL's database name to use in your application. Defaults to being
+  the same as the ``--username``, or to ``postgres`` when none of those
+  options are used.
 
-  --name
+--name
 
-    Node name used on the monitor to refer to this node. The hostname is a
-    technical information, and given Postgres requirements on the HBA setup
-    and DNS resolution (both forward and reverse lookups), IP addresses are
-    often used for the hostname.
+  Node name used on the monitor to refer to this node. The hostname is a
+  technical information, and given Postgres requirements on the HBA setup
+  and DNS resolution (both forward and reverse lookups), IP addresses are
+  often used for the hostname.
 
-    The ``--name`` option allows using a user-friendly name for your
-    Postgres nodes.
+  The ``--name`` option allows using a user-friendly name for your Postgres
+  nodes.
 
-  --hostname
+--hostname
 
-    Hostname or IP address (both v4 and v6 are supported) to use from any
-    other node to connect to this node.
+  Hostname or IP address (both v4 and v6 are supported) to use from any
+  other node to connect to this node.
 
-    When not provided, a default value is computed by running the following
-    algorithm.
+  When not provided, a default value is computed by running the following
+  algorithm.
 
-      1. We get this machine's "public IP" by opening a connection to the
-         given monitor hostname or IP address. Then we get TCP/IP client
-         address that has been used to make that connection.
+    1. We get this machine's "public IP" by opening a connection to the
+       given monitor hostname or IP address. Then we get TCP/IP client
+       address that has been used to make that connection.
 
-      2. We then do a reverse DNS lookup on the IP address found in the
-         previous step to fetch a hostname for our local machine.
+    2. We then do a reverse DNS lookup on the IP address found in the
+       previous step to fetch a hostname for our local machine.
 
-      3. If the reverse DNS lookup is successful , then ``pg_autoctl`` does
-         a forward DNS lookup of that hostname.
+    3. If the reverse DNS lookup is successful , then ``pg_autoctl`` does a
+       forward DNS lookup of that hostname.
 
-    When the forward DNS lookup response in step 3. is an IP address found
-    in one of our local network interfaces, then ``pg_autoctl`` uses the
-    hostname found in step 2. as the default ``--hostname``. Otherwise it
-    uses the IP address found in step 1.
+  When the forward DNS lookup response in step 3. is an IP address found in
+  one of our local network interfaces, then ``pg_autoctl`` uses the hostname
+  found in step 2. as the default ``--hostname``. Otherwise it uses the IP
+  address found in step 1.
 
-    You may use the ``--hostname`` command line option to bypass the whole
-    DNS lookup based process and force the local node name to a fixed value.
+  You may use the ``--hostname`` command line option to bypass the whole DNS
+  lookup based process and force the local node name to a fixed value.
 
-  --formation
+--formation
 
-    Formation to register the node into on the monitor. Defaults to the
-    ``default`` formation, that is automatically created in the monitor in
-    the :ref:`pg_autoctl_create_monitor` command.
+  Formation to register the node into on the monitor. Defaults to the
+  ``default`` formation, that is automatically created in the monitor in the
+  :ref:`pg_autoctl_create_monitor` command.
 
-  --monitor
+--monitor
 
-    Postgres URI used to connect to the monitor. Must use the
-    ``autoctl_node`` username and target the ``pg_auto_failover`` database
-    name. It is possible to show the Postgres URI from the monitor node
-    using the command :ref:`pg_autoctl_show_uri`.
+  Postgres URI used to connect to the monitor. Must use the ``autoctl_node``
+  username and target the ``pg_auto_failover`` database name. It is possible
+  to show the Postgres URI from the monitor node using the command
+  :ref:`pg_autoctl_show_uri`.
 
-  --auth
+--auth
 
-    Authentication method used by ``pg_autoctl`` when editing the Postgres
-    HBA file to open connections to other nodes. No default value, must be
-    provided by the user. The value ``--trust`` is only a good choice for
-    testing and evaluation of pg_auto_failover, see :ref:`security` for more
-    information.
+  Authentication method used by ``pg_autoctl`` when editing the Postgres HBA
+  file to open connections to other nodes. No default value, must be
+  provided by the user. The value ``--trust`` is only a good choice for
+  testing and evaluation of pg_auto_failover, see :ref:`security` for more
+  information.
 
-  --skip-pg-hba
+--skip-pg-hba
 
-    When this option is used then ``pg_autoctl`` refrains from any editing
-    of the Postgres HBA file. Please note that editing the HBA file is still
-    needed so that other nodes can connect using either read privileges or
-    replication streaming privileges.
+  When this option is used then ``pg_autoctl`` refrains from any editing of
+  the Postgres HBA file. Please note that editing the HBA file is still
+  needed so that other nodes can connect using either read privileges or
+  replication streaming privileges.
 
-    When ``--skip-pg-hba`` is used, ``pg_autoctl`` still outputs the HBA
-    entries it needs in the logs, it only skips editing the HBA file.
+  When ``--skip-pg-hba`` is used, ``pg_autoctl`` still outputs the HBA
+  entries it needs in the logs, it only skips editing the HBA file.
 
-  --pg-hba-lan
+--pg-hba-lan
 
-    When this option is used ``pg_autoctl`` determines the local IP address
-    used to connect to the monitor, and retrieves its netmask, and uses that
-    to compute your local area network CIDR. This CIDR is then opened for
-    connections in the Postgres HBA rules.
+  When this option is used ``pg_autoctl`` determines the local IP address
+  used to connect to the monitor, and retrieves its netmask, and uses that
+  to compute your local area network CIDR. This CIDR is then opened for
+  connections in the Postgres HBA rules.
 
-    For instance, when the monitor resolves to ``192.168.0.1`` and your
-    local Postgres node uses an inferface with IP address
-    ``192.168.0.2/255.255.255.0`` to connect to the monitor, then the LAN
-    CIDR is computed to be ``192.168.0.0/24``.
+  For instance, when the monitor resolves to ``192.168.0.1`` and your local
+  Postgres node uses an inferface with IP address
+  ``192.168.0.2/255.255.255.0`` to connect to the monitor, then the LAN CIDR
+  is computed to be ``192.168.0.0/24``.
 
-  --candidate-priority
+--candidate-priority
 
-    Sets this node replication setting for candidate priority to the given
-    value (between 0 and 100) at node registration on the monitor. Defaults
-    to 50.
+  Sets this node replication setting for candidate priority to the given
+  value (between 0 and 100) at node registration on the monitor. Defaults
+  to 50.
 
-  --replication-quorum
+--replication-quorum
 
-    Sets this node replication setting for replication quorum to the given
-    value (either ``true`` or ``false``) at node registration on the
-    monitor. Defaults to ``true``, which enables synchronous replication.
+  Sets this node replication setting for replication quorum to the given
+  value (either ``true`` or ``false``) at node registration on the monitor.
+  Defaults to ``true``, which enables synchronous replication.
 
-  --run
+--run
 
-    Immediately run the ``pg_autoctl`` service after having created this
-    node.
+  Immediately run the ``pg_autoctl`` service after having created this node.
 
-  --ssl-self-signed
+--ssl-self-signed
 
-    Generate SSL self-signed certificates to provide network encryption.
-    This does not protect against man-in-the-middle kinds of attacks. See
-    :ref:`security` for more about our SSL settings.
+  Generate SSL self-signed certificates to provide network encryption. This
+  does not protect against man-in-the-middle kinds of attacks. See
+  :ref:`security` for more about our SSL settings.
 
-  --ssl-mode
+--ssl-mode
 
-    SSL Mode used by ``pg_autoctl`` when connecting to other nodes,
-    including when connecting for streaming replication.
+  SSL Mode used by ``pg_autoctl`` when connecting to other nodes,
+  including when connecting for streaming replication.
 
-  --ssl-ca-file
+--ssl-ca-file
 
-    Set the Postgres ``ssl_ca_file`` to that file path.
+  Set the Postgres ``ssl_ca_file`` to that file path.
 
-  --ssl-crl-file
+--ssl-crl-file
 
-    Set the Postgres ``ssl_crl_file`` to that file path.
+  Set the Postgres ``ssl_crl_file`` to that file path.
 
-  --no-ssl
+--no-ssl
 
-    Don't enable network encryption. This is not recommended, prefer
-    ``--ssl-self-signed``.
+  Don't enable network encryption. This is not recommended, prefer
+  ``--ssl-self-signed``.
 
-  --server-key
+--server-key
 
-    Set the Postgres ``ssl_key_file`` to that file path.
+  Set the Postgres ``ssl_key_file`` to that file path.
 
-  --server-cert
+--server-cert
 
-    Set the Postgres ``ssl_cert_file`` to that file path.
+  Set the Postgres ``ssl_cert_file`` to that file path.

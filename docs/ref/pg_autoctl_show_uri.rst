@@ -22,30 +22,30 @@ an application to connect to Postgres::
 Options
 -------
 
-  --pgdata
+--pgdata
 
-    Location of the Postgres node being managed locally. Defaults to the
-    environment variable ``PGDATA``. Use ``--monitor`` to connect to a
-    monitor from anywhere, rather than the monitor URI used by a local
-    Postgres node managed with ``pg_autoctl``.
+  Location of the Postgres node being managed locally. Defaults to the
+  environment variable ``PGDATA``. Use ``--monitor`` to connect to a monitor
+  from anywhere, rather than the monitor URI used by a local Postgres node
+  managed with ``pg_autoctl``.
 
-  --monitor
+--monitor
 
-    Postgres URI used to connect to the monitor. Must use the
-    ``autoctl_node`` username and target the ``pg_auto_failover`` database
-    name. It is possible to show the Postgres URI from the monitor node
-    using the command :ref:`pg_autoctl_show_uri`.
+  Postgres URI used to connect to the monitor. Must use the ``autoctl_node``
+  username and target the ``pg_auto_failover`` database name. It is possible
+  to show the Postgres URI from the monitor node using the command
+  :ref:`pg_autoctl_show_uri`.
 
-	Defaults to the value of the environment variable ``PG_AUTOCTL_MONITOR``.
+  Defaults to the value of the environment variable ``PG_AUTOCTL_MONITOR``.
 
-  --formation
+--formation
 
-    When ``--formation`` is used, lists the Postgres URIs of all known
-    formations on the monitor.
+  When ``--formation`` is used, lists the Postgres URIs of all known
+  formations on the monitor.
 
-  --json
+--json
 
-    Output a JSON formated data instead of a table formatted list.
+  Output a JSON formated data instead of a table formatted list.
 
 Examples
 --------
