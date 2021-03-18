@@ -97,19 +97,6 @@ create and manage Postgres nodes and the pg_auto_failover monitor node. The
 command is built with many sub-commands that each have their own manual
 page.
 
-Manual Pages for commands
--------------------------
-
-.. toctree::
-   :maxdepth: 1
-
-   pg_autoctl_create_monitor
-   pg_autoctl_create_postgres
-   pg_autoctl_create_formation
-   pg_autoctl_show_uri
-   pg_autoctl_show_events
-   pg_autoctl_show_state
-
 Help
 ----
 
