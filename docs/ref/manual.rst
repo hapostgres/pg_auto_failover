@@ -13,3 +13,7 @@ have their own manual page.
    pg_autoctl_drop
    pg_autoctl_config
    pg_autoctl_show
+   pg_autoctl_run
+   pg_autoctl_stop
+   pg_autoctl_reload
+   pg_autoctl_status
