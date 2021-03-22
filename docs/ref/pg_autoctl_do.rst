@@ -5,14 +5,26 @@ pg_autoctl do
 
 pg_autoctl do - Internal commands and internal QA tooling
 
-Synopsis
---------
+The debug commands for ``pg_autoctl`` are only available when the
+environment variable ``PG_AUTOCTL_DEBUG`` is set (to any value).
 
 When testing pg_auto_failover, it is helpful to be able to play with the
 local nodes using the same lower-level API as used by the pg_auto_failover
-Finite State Machine transitions. The low-level API is made available
-through the following ``pg_autoctl do`` commands, only available in debug
-environments::
+Finite State Machine transitions. Some commands could be useful in contexts
+other than pg_auto_failover development and QA work, so some documentation
+has been made available.
+
+.. toctree::
+   :maxdepth: 1
+
+   pg_autoctl_do_tmux
+   pg_autoctl_do_demo
+   pg_autoctl_do_service_restart
+   pg_autoctl_do_show
+   pg_autoctl_do_pgsetup
+
+The low-level API is made available through the following ``pg_autoctl do``
+commands, only available in debug environments::
 
     pg_autoctl do
     + monitor  Query a pg_auto_failover monitor
@@ -143,20 +155,3 @@ environments::
       uri      Grab the application connection string from the monitor
       ping     Attempt to connect to the application URI
       summary  Display a summary of the previous demo app run
-
-
-Description
------------
-
-The debug commands for ``pg_autoctl`` are only available when the
-environment variable ``PG_AUTOCTL_DEBUG`` is set (to any value).
-
-.. toctree::
-   :maxdepth: 1
-   :caption: See Also:
-
-   pg_autoctl_do_tmux
-   pg_autoctl_do_demo
-   pg_autoctl_do_service_restart
-   pg_autoctl_do_show
-   pg_autoctl_do_pgsetup
