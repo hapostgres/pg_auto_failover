@@ -959,6 +959,17 @@ cli_show_uri_getopts(int argc, char **argv)
 	else
 	{
 		cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
+
+		if (!keeper_config_set_pathnames_from_pgdata(&(options.pathnames),
+													 options.pgSetup.pgdata))
+		{
+			if (!keeper_config_set_pathnames_from_pgdata(&(options.pathnames),
+														 options.pgSetup.pgdata))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
+		}
 	}
 
 	/*
@@ -976,19 +987,6 @@ cli_show_uri_getopts(int argc, char **argv)
 	{
 		strlcpy(showUriOptions.citusClusterName,
 				DEFAULT_CITUS_CLUSTER_NAME, NAMEDATALEN);
-	}
-
-	cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
-
-	if (!keeper_config_set_pathnames_from_pgdata(&(options.pathnames),
-												 options.pgSetup.pgdata))
-	{
-		if (!keeper_config_set_pathnames_from_pgdata(&(options.pathnames),
-													 options.pgSetup.pgdata))
-		{
-			/* errors have already been logged */
-			exit(EXIT_CODE_BAD_CONFIG);
-		}
 	}
 
 	keeperOptions = options;
