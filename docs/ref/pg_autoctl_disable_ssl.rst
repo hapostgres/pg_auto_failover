@@ -1,7 +1,7 @@
 .. _pg_autoctl_disable_ssl:
 
 pg_autoctl disable ssl
-=====================
+======================
 
 pg_autoctl disable ssl - Disable SSL configuration on this node
 

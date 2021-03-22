@@ -119,8 +119,6 @@ uri`` can then be used to find the Postgres connection URI string to use as
 the ``--monitor`` option to the ``pg_autoctl create`` command for the other
 nodes of the formation.
 
-.. _pg_autoctl_create_monitor:
-
 pg_auto_failover Monitor
 ------------------------
 
@@ -383,8 +381,6 @@ pg_autoctl show systemd
 This command outputs a configuration unit that is suitable for registering
 ``pg_autoctl`` as a systemd service.
 
-.. _pg_autoctl_create_postgres:
-
 pg_auto_failover Postgres Node Initialization
 ---------------------------------------------
 
@@ -539,8 +535,6 @@ Replication Settings
 The following commands allow to get and set the replication settings of
 pg_auto_failover nodes. See :ref:`architecture_setup` for details about
 those settings.
-
-.. _pg_autoctl_get_formation_settings:
 
 pg_autoctl get formation settings
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

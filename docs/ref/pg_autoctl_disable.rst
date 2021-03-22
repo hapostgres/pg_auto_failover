@@ -1,7 +1,7 @@
 .. _pg_autoctl_disable:
 
 pg_autoctl disable
-===============
+==================
 
 pg_autoctl disable - Disable a feature on a formation
 

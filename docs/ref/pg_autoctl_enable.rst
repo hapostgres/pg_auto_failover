@@ -1,7 +1,7 @@
 .. _pg_autoctl_enable:
 
 pg_autoctl enable
-===============
+=================
 
 pg_autoctl enable - Enable a feature on a formation
 
