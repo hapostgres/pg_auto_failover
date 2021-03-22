@@ -257,6 +257,27 @@ man_pages = [
         1,
     ),
     (
+        "ref/pg_autoctl_show_file",
+        "pg_autoctl show file",
+        "pg_autoctl show file",
+        [author],
+        1,
+    ),
+    (
+        "ref/pg_autoctl_show_settings",
+        "pg_autoctl show settings",
+        "pg_autoctl show settings",
+        [author],
+        1,
+    ),
+    (
+        "ref/pg_autoctl_show_standby_names",
+        "pg_autoctl show standby-names",
+        "pg_autoctl show standby-names",
+        [author],
+        1,
+    ),
+    (
         "ref/pg_autoctl_enable_maintenance",
         "pg_autoctl enable maintenance",
         "pg_autoctl enable maintenance",
