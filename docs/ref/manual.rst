@@ -1,3 +1,5 @@
+.. _manual:
+
 Manual Pages
 ============
 
@@ -18,6 +20,7 @@ have their own manual page.
    pg_autoctl_get
    pg_autoctl_set
    pg_autoctl_perform
+   pg_autoctl_do
    pg_autoctl_run
    pg_autoctl_stop
    pg_autoctl_reload

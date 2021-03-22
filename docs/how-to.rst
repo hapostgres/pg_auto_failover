@@ -11,7 +11,7 @@ generally possible to use only some of the many ``pg_autoctl`` commands.
 This section of the documentation is a short introduction to the main
 commands that are useful when getting started with pg_auto_failover. More
 commands are available and help deal with a variety of situations, see the
-:ref:`reference` for the whole list.
+:ref:`manual` for the whole list.
 
 To understand which replication settings to use in your case, see
 :ref:`architecture_basics` section and then the

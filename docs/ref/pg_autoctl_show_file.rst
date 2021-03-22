@@ -39,6 +39,68 @@ Also, ``pg_config`` uses sub-directories that are specific to a given
 machine, which is very practical for testing and development purposes,
 though not advised for production setups.
 
+Configuration File
+^^^^^^^^^^^^^^^^^^
+
+The ``pg_autoctl`` configuration file for an instance serving the data
+directory at ``/data/pgsql`` is found at
+``~/.config/pg_autoctl/data/pgsql/pg_autoctl.cfg``, written in the INI
+format.
+
+It is possible to get the location of the configuration file by using the
+command ``pg_autoctl show file --config --pgdata /data/pgsql`` and to output
+its content by using the command ``pg_autoctl show
+file --config --contents --pgdata /data/pgsql``.
+
+See also :ref:`pg_autoctl_config_get` and :ref:`pg_autoctl_config_set`.
+
+State File
+^^^^^^^^^^
+
+The ``pg_autoctl`` state file for an instance serving the data directory at
+``/data/pgsql`` is found at
+``~/.local/share/pg_autoctl/data/pgsql/pg_autoctl.state``, written in a
+specific binary format.
+
+This file is not intended to be written by anything else than ``pg_autoctl``
+itself. In case of state corruption, see the trouble shooting section of the
+documentation.
+
+It is possible to get the location of the state file by using the command
+``pg_autoctl show file --state --pgdata /data/pgsql`` and to output its
+content by using the command ``pg_autoctl show
+file --state --contents --pgdata /data/pgsql``.
+
+Init State File
+^^^^^^^^^^^^^^^
+
+The ``pg_autoctl`` init state file for an instance serving the data
+directory at ``/data/pgsql`` is found at
+``~/.local/share/pg_autoctl/data/pgsql/pg_autoctl.init``, written in a
+specific binary format.
+
+This file is not intended to be written by anything else than ``pg_autoctl``
+itself. In case of state corruption, see the trouble shooting section of the
+documentation.
+
+This initialization state file only exists during the initialization of a
+pg_auto_failover node. In normal operations, this file does not exists.
+
+It is possible to get the location of the state file by using the command
+``pg_autoctl show file --init --pgdata /data/pgsql`` and to output its
+content by using the command ``pg_autoctl show
+file --init --contents --pgdata /data/pgsql``.
+
+PID File
+^^^^^^^^
+
+The ``pg_autoctl`` PID file for an instance serving the data directory at
+``/data/pgsql`` is found at ``/tmp/pg_autoctl/data/pgsql/pg_autoctl.pid``,
+written in a specific text format.
+
+The PID file is located in a temporary directory by default, or in the
+``XDG_RUNTIME_DIR`` directory when this is setup.
+
 Options
 -------
 

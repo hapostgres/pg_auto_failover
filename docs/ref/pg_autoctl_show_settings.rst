@@ -19,6 +19,49 @@ formation (defaults to `'default'` as usual)::
   --json        output data in the JSON format
   --formation   pg_auto_failover formation
 
+Description
+-----------
+
+See also :ref:`pg_autoctl_get_formation_settings` which is a synonym.
+
+The output contains setting and values that apply at different contexts, as
+shown here with a formation of four nodes, where ``node_4`` is not
+participating in the replication quorum and also not a candidate for
+failover::
+
+  $ pg_autoctl show settings
+     Context |    Name |                   Setting | Value
+   ----------+---------+---------------------------+-------------------------------------------------------------
+   formation | default |      number_sync_standbys | 1
+     primary |  node_1 | synchronous_standby_names | 'ANY 1 (pgautofailover_standby_3, pgautofailover_standby_2)'
+        node |  node_1 |        replication quorum | true
+        node |  node_2 |        replication quorum | true
+        node |  node_3 |        replication quorum | true
+        node |  node_4 |        replication quorum | false
+        node |  node_1 |        candidate priority | 50
+        node |  node_2 |        candidate priority | 50
+        node |  node_3 |        candidate priority | 50
+        node |  node_4 |        candidate priority | 0
+
+Three replication settings context are listed:
+
+  1. The `"formation"` context contains a single entry, the value of
+     ``number_sync_standbys`` for the target formation.
+
+  2. The `"primary"` context contains one entry per group of Postgres nodes
+     in the formation, and shows the current value of the
+     ``synchronous_standby_names`` Postgres setting as computed by the
+     monitor. It should match what's currently set on the primary node
+     unless while applying a change, as shown by the primary being in the
+     APPLY_SETTING state.
+
+  3. The `"node"` context contains two entry per nodes, one line shows the
+     replication quorum setting of nodes, and another line shows the
+     candidate priority of nodes.
+
+This command gives an overview of all the settings that apply to the current
+formation.
+
 Options
 -------
 
