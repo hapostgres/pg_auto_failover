@@ -158,3 +158,5 @@ environment variable ``PG_AUTOCTL_DEBUG`` is set (to any value).
    pg_autoctl_do_tmux
    pg_autoctl_do_demo
    pg_autoctl_do_service_restart
+   pg_autoctl_do_show
+   pg_autoctl_do_pgsetup
