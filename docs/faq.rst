@@ -165,26 +165,10 @@ node metadata. Specifically we need the nodes state to be in sync with what
 each ``pg_autoctl`` process has received the last time they could contact
 the monitor, before it has been unavailable.
 
-Barring that, the way forward is to register your nodes again to the new
-monitor. To be able to register again, we need to have a clean initial local
-state on every node, and the ``pg_autoctl drop node`` command achieves that.
+It is possible to register nodes that are currently running to a new monitor
+without restarting Postgres on the primary. For that, the procedure
+mentionned in :ref:`replacing_monitor_online` must be followed, using the
+following commands::
 
-.. warning::
-
-   This procedure includes a step where the Postgres service has to be
-   stopped and started again.
-
-On every Postgres node, starting with the current primary, remove the local node state and register the node
-again to the new running monitor::
-
-  # when running with systemd, stop the systemd service first
-  $ sudo systemctl stop pgautofailover
-
-  # drop node ignores connection error to the monitor, and stops Postgres
-  $ pg_autoctl drop node
-
-  # register again, and restart Postgres on the node
-  $ pg_autoctl create postgres --monitor <new monitor uri> <--same options --as the --first time>
-
-  # when running with systemd, now start the systemd service again
-  $ sudo systemctl start pgautofailover
+  $ pg_autoctl disable monitor
+  $ pg_autoctl enable monitor

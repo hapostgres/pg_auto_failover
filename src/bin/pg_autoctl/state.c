@@ -320,6 +320,8 @@ keeperStateAsJSON(KeeperStateData *keeperState, JSON_Value *js)
 	const char *current_role = NodeStateToString(keeperState->current_role);
 	const char *assigned_role = NodeStateToString(keeperState->assigned_role);
 
+	char timestring[MAXCTIMESIZE] = { 0 };
+
 	json_object_set_string(jsobj, "current_role", current_role);
 	json_object_set_string(jsobj, "assigned_role", assigned_role);
 
@@ -331,6 +333,17 @@ keeperStateAsJSON(KeeperStateData *keeperState, JSON_Value *js)
 
 	json_object_set_number(jsobj, "nodeId",
 						   (double) keeperState->current_node_id);
+
+	json_object_set_string(jsobj, "last_monitor_contact",
+						   epoch_to_string(keeperState->last_monitor_contact,
+										   timestring));
+
+	json_object_set_string(jsobj, "last_secondary_contact",
+						   epoch_to_string(keeperState->last_secondary_contact,
+										   timestring));
+
+	json_object_set_number(jsobj, "pgversion",
+						   (double) keeperState->pg_control_version);
 
 	return true;
 }

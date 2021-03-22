@@ -20,6 +20,7 @@
 #include "file_utils.h"
 #include "keeper.h"
 #include "keeper_config.h"
+#include "keeper_pg_init.h"
 #include "parsing.h"
 #include "pghba.h"
 #include "pgsetup.h"
@@ -1305,6 +1306,7 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 								  config->pgSetup.pgport,
 								  config->pgSetup.control.system_identifier,
 								  config->pgSetup.dbname,
+								  -1, /* desired nodeID */
 								  config->groupId,
 								  initialState,
 								  config->pgSetup.pgKind,
@@ -1432,6 +1434,210 @@ rollback:
 	pgsql_finish(&(monitor->pgsql));
 
 	return false;
+}
+
+
+/*
+ * keeper_register_again registers the given node again to a given monitor URI,
+ * possibly new. This function has been designed to be used from the "enable
+ * monitor" command, in such a scenario:
+ *
+ *   $ pg_autoctl disable monitor --force
+ *   $ pg_autoctl enable monitor --monitor postgresql://...
+ *
+ * The idea is that we have lost the monitor, and we want to re-register nodes
+ * to the new empty monitor, without having to stop pg_autoctl nor Postgres.
+ */
+bool
+keeper_register_again(Keeper *keeper)
+{
+	Monitor *monitor = &(keeper->monitor);
+	KeeperConfig *config = &(keeper->config);
+	PostgresSetup *pgSetup = &(config->pgSetup);
+
+	MonitorAssignedState assignedState = { 0 };
+	ConnectionRetryPolicy retryPolicy = { 0 };
+
+	bool registered = false;
+
+	(void) pgsql_set_monitor_interactive_retry_policy(&retryPolicy);
+
+	/* fetch local metadata for the registration (system_identifier) */
+	if (!pgsql_get_postgres_metadata(&(keeper->postgres.sqlClient),
+									 &pgSetup->is_in_recovery,
+									 keeper->postgres.pgsrSyncState,
+									 keeper->postgres.currentLSN,
+									 &(pgSetup->control)))
+	{
+		log_error("Failed to get the local Postgres metadata");
+		return false;
+	}
+
+	NodeState initialState =
+		pgSetup->is_in_recovery ? WAIT_STANDBY_STATE : SINGLE_STATE;
+
+	/*
+	 * Now register to the new monitor from this "client-side" process, and
+	 * then signal the background pg_autoctl service for this node (if any) to
+	 * reload its configuration so that it starts calling node_active() to the
+	 * new monitor.
+	 */
+	(void) pgsql_set_init_retry_policy(&(monitor->pgsql.retryPolicy));
+
+	while (!pgsql_retry_policy_expired(&retryPolicy))
+	{
+		bool mayRetry = false;
+
+		if (monitor_register_node(monitor,
+								  config->formation,
+								  config->name,
+								  config->hostname,
+								  config->pgSetup.pgport,
+								  config->pgSetup.control.system_identifier,
+								  config->pgSetup.dbname,
+								  keeper->state.current_node_id,
+								  config->groupId,
+								  initialState,
+								  config->pgSetup.pgKind,
+								  config->pgSetup.settings.candidatePriority,
+								  config->pgSetup.settings.replicationQuorum,
+								  DEFAULT_CITUS_CLUSTER_NAME,
+								  &mayRetry,
+								  &assignedState))
+		{
+			/* registration was successful, break out of the retry loop */
+			log_info("Successfully registered to the monitor with nodeId %d",
+					 assignedState.nodeId);
+			registered = true;
+			break;
+		}
+
+		if (!mayRetry)
+		{
+			/* game over */
+			break;
+		}
+
+		int sleepTimeMs =
+			pgsql_compute_connection_retry_sleep_time(&retryPolicy);
+
+		log_warn("Failed to register node %s:%d in group %d of "
+				 "formation \"%s\" with initial state \"%s\" "
+				 "because the monitor is already registering another "
+				 "standby, retrying in %d ms",
+				 config->hostname,
+				 config->pgSetup.pgport,
+				 config->groupId,
+				 config->formation,
+				 NodeStateToString(initialState),
+				 sleepTimeMs);
+
+		/* we have milliseconds, pg_usleep() wants microseconds */
+		(void) pg_usleep(sleepTimeMs * 1000);
+	}
+
+	if (!registered)
+	{
+		log_error("Failed to register to the monitor");
+		return false;
+	}
+
+	/*
+	 * If we have just registered the primary node as SINGLE, then we're good,
+	 * we may continue as before.
+	 */
+	if (assignedState.state == SINGLE_STATE)
+	{
+		/* now we have registered with a new nodeId, record that */
+		if (!keeper_update_state(keeper,
+								 assignedState.nodeId,
+								 assignedState.groupId,
+								 assignedState.state,
+								 true))
+		{
+			log_error("Failed to update keepers's state");
+			return false;
+		}
+
+		return true;
+	}
+
+	/*
+	 * We are now registered as a WAIT_STANDBY node.
+	 *
+	 * The local state file might still have it that we are a SECONDARY node
+	 * though, and is running with the monitor still disabled.
+	 *
+	 * Let's move to CATCHINGUP on the monitor and then assign that to the
+	 * local state file, so that when we signal the background running process
+	 * and it connects to the monitor, it continues without an interruption and
+	 * without a pg_basebackup either.
+	 *
+	 * Wait until the primary has moved and we're being assigned CATCHINGUP.
+	 */
+	int errors = 0, tries = 0;
+
+	do {
+		/* attempt to make progress every 300ms */
+		pg_usleep(300 * 1000);
+
+		if (!pgsql_get_postgres_metadata(&(keeper->postgres.sqlClient),
+										 &pgSetup->is_in_recovery,
+										 keeper->postgres.pgsrSyncState,
+										 keeper->postgres.currentLSN,
+										 &(pgSetup->control)))
+		{
+			log_error("Failed to get the local Postgres metadata");
+			return false;
+		}
+
+		if (!monitor_node_active(monitor,
+								 config->formation,
+								 assignedState.nodeId,
+								 assignedState.groupId,
+								 assignedState.state,
+								 ReportPgIsRunning(keeper),
+								 keeper->postgres.currentLSN,
+								 keeper->postgres.pgsrSyncState,
+								 &assignedState))
+		{
+			++errors;
+
+			log_warn("Failed to contact the monitor at \"%s\"",
+					 keeper->config.monitor_pguri);
+
+			if (errors > 5)
+			{
+				log_error("Failed to contact the monitor to publish our "
+						  "current state \"%s\".",
+						  NodeStateToString(assignedState.state));
+				return false;
+			}
+		}
+
+		++tries;
+
+		if (tries == 3)
+		{
+			log_info("Still waiting for the monitor to drive us to state \"%s\"",
+					 NodeStateToString(CATCHINGUP_STATE));
+			log_warn("Please make sure that the primary node is currently "
+					 "running `pg_autoctl run` and contacting the monitor.");
+		}
+	} while (assignedState.state != CATCHINGUP_STATE);
+
+	/* now we have registered with a new nodeId, record that */
+	if (!keeper_update_state(keeper,
+							 assignedState.nodeId,
+							 assignedState.groupId,
+							 assignedState.state,
+							 true))
+	{
+		log_error("Failed to update keepers's state");
+		return false;
+	}
+
+	return true;
 }
 
 
@@ -1938,18 +2144,33 @@ keeper_config_accept_new(Keeper *keeper, KeeperConfig *newConfig)
 	{
 		Monitor monitor = { 0 };
 
-		if (!monitor_init(&monitor, newConfig->monitor_pguri))
+		if (PG_AUTOCTL_MONITOR_IS_DISABLED(newConfig))
 		{
-			log_fatal("Failed to contact the monitor because its URL is invalid, "
-					  "see above for details");
-			return false;
+			config->monitorDisabled = true;
+
+			strlcpy(config->monitor_pguri,
+					PG_AUTOCTL_MONITOR_DISABLED,
+					sizeof(config->monitor_pguri));
+
+			log_info("Reloading configuration: the monitor has been disabled");
 		}
+		else
+		{
+			if (!monitor_init(&monitor, newConfig->monitor_pguri))
+			{
+				log_fatal("Failed to contact the monitor because "
+						  "its URL is invalid, see above for details");
+				return false;
+			}
 
-		log_info("Reloading configuration: monitor uri is now \"%s\"; "
-				 "used to be \"%s\"",
-				 newConfig->monitor_pguri, config->monitor_pguri);
+			log_info("Reloading configuration: monitor uri is now \"%s\"; "
+					 "used to be \"%s\"",
+					 newConfig->monitor_pguri, config->monitor_pguri);
 
-		strlcpy(config->monitor_pguri, newConfig->monitor_pguri, MAXCONNINFO);
+			config->monitorDisabled = false;
+			strlcpy(config->monitor_pguri, newConfig->monitor_pguri,
+					sizeof(config->monitor_pguri));
+		}
 	}
 
 	/*

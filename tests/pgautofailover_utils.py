@@ -1258,6 +1258,35 @@ SELECT reportedstate, goalstate
         command = PGAutoCtl(self)
         command.execute("perform promotion", "perform", "promotion")
 
+    def enable_monitor(self, monitor):
+        """
+        Disables the monitor on a pg_autoctl node
+
+        :return:
+        """
+        command = PGAutoCtl(self)
+        command.execute(
+            "enable monitor",
+            "enable",
+            "monitor",
+            monitor.connection_string(),
+        )
+
+        self.monitor = monitor
+        self.monitorDisabled = False
+
+    def disable_monitor(self):
+        """
+        Disables the monitor on a pg_autoctl node
+
+        :return:
+        """
+        command = PGAutoCtl(self)
+        command.execute("disable monitor", "disable", "monitor", "--force")
+
+        self.monitor = None
+        self.monitorDisabled = True
+
     def drop(self):
         """
         Drops a pg_autoctl node from its formation
@@ -1624,10 +1653,11 @@ class MonitorNode(PGNode):
         try:
             destroy = PGAutoCtl(self)
             destroy.execute(
-                "pg_autoctl node destroy", "drop", "monitor", "--destroy"
+                "pg_autoctl destroy monitor", "drop", "monitor", "--destroy"
             )
         except Exception as e:
             print(str(e))
+            raise
 
         try:
             os.remove(self.config_file_path())

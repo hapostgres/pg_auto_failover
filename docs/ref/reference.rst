@@ -76,11 +76,13 @@ keeper::
       secondary    Enable secondary nodes on a formation
       maintenance  Enable Postgres maintenance mode on this node
       ssl          Enable SSL configuration on this node
+      monitor      Enable a monitor for this node to be orchestrated from
 
     pg_autoctl disable
       secondary    Disable secondary nodes on a formation
       maintenance  Disable Postgres maintenance mode on this node
       ssl          Disable SSL configuration on this node
+      monitor      Disable the monitor for this node
 
     pg_autoctl get
     + node       get a node property from the pg_auto_failover monitor

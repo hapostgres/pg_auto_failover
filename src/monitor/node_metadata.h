@@ -176,6 +176,7 @@ extern AutoFailoverNode * TupleToAutoFailoverNode(TupleDesc tupleDescriptor,
 												  HeapTuple heapTuple);
 extern int AddAutoFailoverNode(char *formationId,
 							   FormationKind formationKind,
+							   int nodeId,
 							   int groupId,
 							   char *nodeName,
 							   char *nodeHost,
