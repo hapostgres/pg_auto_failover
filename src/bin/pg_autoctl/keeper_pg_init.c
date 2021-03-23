@@ -548,7 +548,9 @@ wait_until_primary_is_ready(Keeper *keeper,
 			KeeperStateData *keeperState = &(keeper->state);
 			int timeoutMs = PG_AUTOCTL_KEEPER_SLEEP_TIME * 1000;
 
-			(void) pgsql_listen(&(monitor->notificationClient), &((char *) { 0 }));
+			char *channels[] = { "state", NULL };
+
+			(void) pgsql_listen(&(monitor->notificationClient), channels);
 
 			(void) monitor_wait_for_state_change(monitor,
 												 keeper->config.formation,

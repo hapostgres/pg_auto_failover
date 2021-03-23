@@ -809,7 +809,9 @@ keeper_node_active(Keeper *keeper, bool doInit)
 	 * Finally make establish a connection for notifications in case it had
 	 * closed before
 	 */
-	(void) pgsql_listen(&(keeper->monitor.notificationClient), &((char *) { 0 }));
+	char *channels[] = { "state", NULL };
+
+	(void) pgsql_listen(&(keeper->monitor.notificationClient), channels);
 
 	return true;
 }
