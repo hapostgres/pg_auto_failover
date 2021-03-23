@@ -8,6 +8,10 @@ pg_autoctl do pgsetup - Manage a local Postgres setup
 Synopsis
 --------
 
+The main ``pg_autoctl`` commands implement low-level management tooling for
+a local Postgres instance. Some of the low-level Postgres commands can be
+used as their own tool in some cases.
+
 pg_autoctl do pgsetup provides the following commands::
 
     pg_autoctl do pgsetup
@@ -18,53 +22,13 @@ pg_autoctl do pgsetup provides the following commands::
       logs      Outputs the Postgres startup logs
       tune      Compute and log some Postgres tuning options
 
-Description
------------
-
-The main ``pg_autoctl`` commands implement low-level management tooling for
-a local Postgres instance. Some of the low-level Postgres commands can be
-used as their own tool in some cases.
-
 pg_autoctl do pgsetup pg_ctl
+----------------------------
 
-  In a similar way to ``which -a``, this commands scans your PATH for
-  ``pg_ctl`` commands. Then it runs the ``pg_ctl --version`` command and
-  parses the output to determine the version of Postgres that is available
-  in the path.
-
-pg_autoctl do pgsetup discover
-
-  Given a PGDATA or ``--pgdata`` option, the command discovers if a running
-  Postgres service matches the pg_autoctl setup, and prints the information
-  that ``pg_autoctl`` typically needs when managing a Postgres instance.
-
-pg_autoctl do pgsetup ready
-
-  Similar to the `pg_isready`__ command, though uses the Postgres
-  specifications found in the pg_autoctl node setup.
-
-  __ https://www.postgresql.org/docs/current/app-pg-isready.html
-
-pg_autoctl do pgsetup wait
-
-  When ``pg_autoctl do pgsetup ready`` would return false because Postgres
-  is not ready yet, this command continues probing every second for 30
-  seconds, and exists as soon as Postgres is ready.
-
-pg_autoctl do pgsetup logs
-
-  Outputs the Postgres logs from the most recent log file in the
-  ``PGDATA/log`` directory.
-
-pg_autoctl do pgsetup tune
-
-  Outputs the pg_autoclt automated tuning options. Depending on the number
-  of CPU and amount of RAM detected in the environment where it is run,
-  ``pg_autoctl`` can adjust some very basic Postgres tuning knobs to get
-  started.
-
-Examples
---------
+In a similar way to ``which -a``, this commands scans your PATH for
+``pg_ctl`` commands. Then it runs the ``pg_ctl --version`` command and
+parses the output to determine the version of Postgres that is available in
+the path.
 
 ::
 
@@ -72,6 +36,16 @@ Examples
    16:49:18 69684 INFO  Environment variable PG_CONFIG is set to "/Applications/Postgres.app//Contents/Versions/12/bin/pg_config"
    16:49:18 69684 INFO  `pg_autoctl create postgres` would use "/Applications/Postgres.app/Contents/Versions/12/bin/pg_ctl" for Postgres 12.3
    16:49:18 69684 INFO  `pg_autoctl create monitor` would use "/Applications/Postgres.app/Contents/Versions/12/bin/pg_ctl" for Postgres 12.3
+
+
+pg_autoctl do pgsetup discover
+------------------------------
+
+Given a PGDATA or ``--pgdata`` option, the command discovers if a running
+Postgres service matches the pg_autoctl setup, and prints the information
+that ``pg_autoctl`` typically needs when managing a Postgres instance.
+
+::
 
    $ pg_autoctl do pgsetup discover --pgdata node1
    pgdata:                /Users/dim/dev/MS/pg_auto_failover/tmux/node1
@@ -88,12 +62,42 @@ Examples
    Latest checkpoint LSN: 0/4059C18
    Postmaster status:     ready
 
+
+pg_autoctl do pgsetup ready
+---------------------------
+
+Similar to the `pg_isready`__ command, though uses the Postgres
+specifications found in the pg_autoctl node setup.
+
+__ https://www.postgresql.org/docs/current/app-pg-isready.html
+
+::
+
    $ pg_autoctl do pgsetup ready --pgdata node1
    16:50:08 70582 INFO  Postgres status is: "ready"
+
+
+pg_autoctl do pgsetup wait
+--------------------------
+
+When ``pg_autoctl do pgsetup ready`` would return false because Postgres is
+not ready yet, this command continues probing every second for 30 seconds,
+and exists as soon as Postgres is ready.
+
+::
 
    $ pg_autoctl do pgsetup wait --pgdata node1
    16:50:22 70829 INFO  Postgres is now serving PGDATA "/Users/dim/dev/MS/pg_auto_failover/tmux/node1" on port 5501 with pid 21029
    16:50:22 70829 INFO  Postgres status is: "ready"
+
+
+pg_autoctl do pgsetup logs
+--------------------------
+
+Outputs the Postgres logs from the most recent log file in the
+``PGDATA/log`` directory.
+
+::
 
    $ pg_autoctl do pgsetup logs --pgdata node1
    16:50:39 71126 WARN  Postgres logs from "/Users/dim/dev/MS/pg_auto_failover/tmux/node1/startup.log":
@@ -127,7 +131,23 @@ Examples
    16:50:39 71126 INFO  2021-03-22 16:23:39.497 CET [41635] LOG:  started streaming WAL from primary at 0/4000000 on timeline 4
 
 
-   $ pg_autoctl do pgsetup tune --pgdata node1
+pg_autoctl do pgsetup tune
+--------------------------
+
+Outputs the pg_autoclt automated tuning options. Depending on the number of
+CPU and amount of RAM detected in the environment where it is run,
+``pg_autoctl`` can adjust some very basic Postgres tuning knobs to get
+started.
+
+::
+
+   $ pg_autoctl do pgsetup tune --pgdata node1 -vv
+   13:25:25 77185 DEBUG pgtuning.c:85: Detected 12 CPUs and 16 GB total RAM on this server
+   13:25:25 77185 DEBUG pgtuning.c:225: Setting autovacuum_max_workers to 3
+   13:25:25 77185 DEBUG pgtuning.c:228: Setting shared_buffers to 4096 MB
+   13:25:25 77185 DEBUG pgtuning.c:231: Setting work_mem to 24 MB
+   13:25:25 77185 DEBUG pgtuning.c:235: Setting maintenance_work_mem to 512 MB
+   13:25:25 77185 DEBUG pgtuning.c:239: Setting effective_cache_size to 12 GB
    # basic tuning computed by pg_auto_failover
    track_functions = pl
    shared_buffers = '4096 MB'
