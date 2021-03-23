@@ -427,7 +427,8 @@ cli_show_state(int argc, char **argv)
 	 * When dealing with a keeper node with a disabled monitor, we force the
 	 * --local option.
 	 */
-	if (!IS_EMPTY_STRING_BUFFER(config.pgSetup.pgdata))
+	if (!IS_EMPTY_STRING_BUFFER(config.pgSetup.pgdata) &&
+		ProbeConfigurationFileRole(config.pathnames.config) == PG_AUTOCTL_ROLE_KEEPER)
 	{
 		bool missingPgdataIsOk = true;
 		bool pgIsNotRunningIsOk = true;
