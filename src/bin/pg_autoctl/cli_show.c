@@ -78,6 +78,7 @@ CommandLine show_events_command =
 				 "Prints monitor's state of nodes in a given formation and group",
 				 " [ --pgdata --formation --group --count ] ",
 				 "  --pgdata      path to data directory	 \n"
+				 "  --monitor     pg_auto_failover Monitor Postgres URL\n" \
 				 "  --formation   formation to query, defaults to 'default' \n"
 				 "  --group       group to query formation, defaults to all \n"
 				 "  --count       how many events to fetch, defaults to 10 \n"
@@ -90,6 +91,7 @@ CommandLine show_state_command =
 				 "Prints monitor's state of nodes in a given formation and group",
 				 " [ --pgdata --formation --group ] ",
 				 "  --pgdata      path to data directory	 \n"
+				 "  --monitor     show the monitor uri\n"
 				 "  --formation   formation to query, defaults to 'default' \n"
 				 "  --group       group to query formation, defaults to all \n"
 				 "  --local       show local data, do not connect to the monitor\n"
@@ -102,6 +104,7 @@ CommandLine show_settings_command =
 				 "Print replication settings for a formation from the monitor",
 				 " [ --pgdata ] [ --json ] [ --formation ] ",
 				 "  --pgdata      path to data directory\n"
+				 "  --monitor     pg_auto_failover Monitor Postgres URL\n"
 				 "  --json        output data in the JSON format\n"
 				 "  --formation   pg_auto_failover formation\n",
 				 cli_get_name_getopts,
@@ -112,6 +115,7 @@ CommandLine show_standby_names_command =
 				 "Prints synchronous_standby_names for a given group",
 				 " [ --pgdata ] --formation --group",
 				 "  --pgdata      path to data directory	 \n"
+				 "  --monitor     show the monitor uri\n"
 				 "  --formation   formation to query, defaults to 'default'\n"
 				 "  --group       group to query formation, defaults to all\n"
 				 "  --json        output data in the JSON format\n",
