@@ -97,11 +97,11 @@ class VirtualLAN:
         _remove_interface_if_exists(name)
 
         with NDB() as ndb:
-            (ndb
-             .interfaces
-             .create(ifname=name, kind="bridge", state='up')
-             .add_ip(address=address, prefixlen=prefixLen)
-             .commit())
+            (
+                ndb.interfaces.create(ifname=name, kind="bridge", state="up")
+                .add_ip(address=address, prefixlen=prefixLen)
+                .commit()
+            )
 
     def _add_interface_to_bridge(self, bridge, interface):
         """
@@ -111,14 +111,8 @@ class VirtualLAN:
         will be able to communicate with the other nodes in the virtual network.
         """
         with NDB() as ndb:
-            (ndb
-             .interfaces[bridge]
-             .add_port(interface)
-             .commit())
-            (ndb
-             .interfaces[interface]
-             .set(state='up')
-             .commit())
+            ndb.interfaces[bridge].add_port(interface).commit()
+            ndb.interfaces[interface].set(state="up").commit()
 
 
 class VirtualNode:
@@ -245,28 +239,29 @@ class VirtualNode:
             #
             # Create veth with a configured peer, it will be created
             # already in the netns
-            (ndb
-             .interfaces
-             .create(ifname=veth_name,
-                     kind="veth",
-                     peer={"ifname": self.vethPeer,
-                           "net_ns_fd": name},
-                     state="up")
-             .commit())
+            (
+                ndb.interfaces.create(
+                    ifname=veth_name,
+                    kind="veth",
+                    peer={"ifname": self.vethPeer, "net_ns_fd": name},
+                    state="up",
+                ).commit()
+            )
             #
             # .interfaces.wait() returns an interface object when
             # it becomes available on the specified source
-            (ndb
-             .interfaces
-             .wait(target=name, ifname=self.vethPeer)
-             .set(state="up")
-             .add_ip(address=address, prefixlen=netmaskLength)
-             .commit())
+            (
+                ndb.interfaces.wait(target=name, ifname=self.vethPeer)
+                .set(state="up")
+                .add_ip(address=address, prefixlen=netmaskLength)
+                .commit()
+            )
             #
-            (ndb
-             .interfaces[{"target": name, "ifname": "lo"}]
-             .set(state="up")
-             .commit())
+            (
+                ndb.interfaces[{"target": name, "ifname": "lo"}]
+                .set(state="up")
+                .commit()
+            )
 
     def _remove_namespace_if_exists(self, name):
         """
@@ -285,10 +280,7 @@ class VirtualNode:
         """
         with NDB() as ndb:
             # bring it down and wait until success
-            (ndb
-             .interfaces[self.vethPeer]
-             .set(state="down")
-             .commit())
+            ndb.interfaces[self.vethPeer].set(state="down").commit()
 
     def ifup(self):
         """
@@ -296,10 +288,7 @@ class VirtualNode:
         """
         with NDB() as ndb:
             # bring it up and wait until success
-            (ndb
-             .interfaces[self.vethPeer]
-             .set(state="up")
-             .commit())
+            ndb.interfaces[self.vethPeer].set(state="up").commit()
 
 
 def _remove_interface_if_exists(name):
@@ -309,13 +298,14 @@ def _remove_interface_if_exists(name):
     used for removing bridges too.
     """
     with NDB() as ndb:
-        if 'name' in ndb.interfaces:
+        if "name" in ndb.interfaces:
             try:
-                (ndb
-                 .interfaces[name]
-                 .set(state='down')
-                 .commit()
-                 .remove()
-                 .commit())
+                (
+                    ndb.interfaces[name]
+                    .set(state="down")
+                    .commit()
+                    .remove()
+                    .commit()
+                )
             except netlink.exceptions.NetlinkError:
                 pass
