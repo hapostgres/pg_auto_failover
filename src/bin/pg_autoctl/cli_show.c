@@ -413,6 +413,7 @@ cli_show_events(int argc, char **argv)
 static void
 cli_show_state(int argc, char **argv)
 {
+	int optionGroupId = keeperOptions.groupId;
 	KeeperConfig config = keeperOptions;
 	Monitor monitor = { 0 };
 
@@ -450,6 +451,13 @@ cli_show_state(int argc, char **argv)
 	}
 
 	(void) cli_monitor_init_from_option_or_config(&monitor, &config);
+
+	if (optionGroupId != -1 && config.groupId != optionGroupId)
+	{
+		log_error("--group %d does not match this node's group: %d",
+				  optionGroupId, config.groupId);
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
 
 	if (outputJSON)
 	{
