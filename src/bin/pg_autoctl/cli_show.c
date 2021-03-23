@@ -422,6 +422,33 @@ cli_show_state(int argc, char **argv)
 		exit(EXIT_CODE_QUIT);
 	}
 
+	/*
+	 * When dealing with a keeper node with a disabled monitor, we force the
+	 * --local option.
+	 */
+	if (!IS_EMPTY_STRING_BUFFER(config.pgSetup.pgdata))
+	{
+		bool missingPgdataIsOk = true;
+		bool pgIsNotRunningIsOk = true;
+		bool monitorDisabledIsOk = true;
+
+		if (!keeper_config_read_file(&config,
+									 missingPgdataIsOk,
+									 pgIsNotRunningIsOk,
+									 monitorDisabledIsOk))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_CONFIG);
+		}
+
+		if (config.monitorDisabled)
+		{
+			log_info("Monitor is disabled, showing --local state");
+			(void) cli_show_local_state();
+			exit(EXIT_CODE_QUIT);
+		}
+	}
+
 	(void) cli_monitor_init_from_option_or_config(&monitor, &config);
 
 	if (outputJSON)
