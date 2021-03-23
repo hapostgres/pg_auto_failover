@@ -99,7 +99,7 @@ class VirtualLAN:
         with NDB() as ndb:
             (
                 ndb.interfaces.create(ifname=name, kind="bridge", state="up")
-                .add_ip(address=address, prefixlen=prefixLen)
+                .add_ip(address=str(address), prefixlen=prefixLen)
                 .commit()
             )
 
@@ -253,7 +253,7 @@ class VirtualNode:
             (
                 ndb.interfaces.wait(target=name, ifname=self.vethPeer)
                 .set(state="up")
-                .add_ip(address=address, prefixlen=netmaskLength)
+                .add_ip(address=str(address), prefixlen=netmaskLength)
                 .commit()
             )
             #
