@@ -122,6 +122,7 @@ typedef struct PGSQL
 	PGconn *connection;
 	ConnectionRetryPolicy retryPolicy;
 	PGConnStatus status;
+	bool explicitTransactionOpened;
 
 	ProcessNotificationFunction notificationProcessFunction;
 	int notificationGroupId;
@@ -259,6 +260,10 @@ int pgsql_compute_connection_retry_sleep_time(ConnectionRetryPolicy *retryPolicy
 bool pgsql_retry_policy_expired(ConnectionRetryPolicy *retryPolicy);
 
 void pgsql_finish(PGSQL *pgsql);
+bool pgsql_begin(PGSQL *pgsql);
+bool pgsql_commit(PGSQL *pgsql);
+bool pgsql_rollback(PGSQL *pgsql);
+
 void parseSingleValueResult(void *ctx, PGresult *result);
 void fetchedRows(void *ctx, PGresult *result);
 bool pgsql_execute(PGSQL *pgsql, const char *sql);

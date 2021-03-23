@@ -287,7 +287,8 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 												 &groupStateHasChanged);
 
 			/* when no state change has been notified, close the connection */
-			if (!groupStateHasChanged)
+			if (!groupStateHasChanged &&
+				!keeper->monitor.pgsql.explicitTransactionOpened)
 			{
 				pgsql_finish(&(keeper->monitor.pgsql));
 			}
@@ -591,7 +592,11 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 	}
 
 	/* One last check that we do not have any connections open */
-	pgsql_finish(&(keeper->monitor.pgsql));
+	if (!keeper->monitor.pgsql.explicitTransactionOpened)
+	{
+		pgsql_finish(&(keeper->monitor.pgsql));
+	}
+
 	pgsql_finish(&(keeper->monitor.notificationClient));
 
 	return true;

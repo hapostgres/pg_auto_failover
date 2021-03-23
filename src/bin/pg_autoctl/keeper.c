@@ -1291,7 +1291,7 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 		 * the registration (process killed, crash, etc), then the server
 		 * issues a ROLLBACK for us upon disconnection.
 		 */
-		if (!pgsql_execute(&(monitor->pgsql), "BEGIN"))
+		if (!pgsql_begin(&(monitor->pgsql)))
 		{
 			log_error("Failed to open a SQL transaction to register this node");
 
@@ -1403,7 +1403,7 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 		goto rollback;
 	}
 
-	if (!pgsql_execute(&(monitor->pgsql), "COMMIT"))
+	if (!pgsql_commit(&(monitor->pgsql)))
 	{
 		log_error("Failed to COMMIT register_node transaction on the "
 				  "monitor, see above for details");
@@ -1426,7 +1426,7 @@ rollback:
 	 */
 	unlink_file(config->pathnames.state);
 
-	if (!pgsql_execute(&(monitor->pgsql), "ROLLBACK"))
+	if (!pgsql_rollback(&(monitor->pgsql)))
 	{
 		log_error("Failed to ROLLBACK failed register_node transaction "
 				  " on the monitor, see above for details.");

@@ -411,6 +411,14 @@ pgsql_finish(PGSQL *pgsql)
 		log_debug("Disconnecting from [%s] \"%s\"",
 				  ConnectionTypeToString(pgsql->connectionType),
 				  pgsql->connectionString);
+
+		/* warn when we have a transaction in progress */
+		if (pgsql->explicitTransactionOpened)
+		{
+			log_warn("Finishing a connection while there is a transaction "
+					 "in progress");
+		}
+
 		PQfinish(pgsql->connection);
 		pgsql->connection = NULL;
 
@@ -421,6 +429,80 @@ pgsql_finish(PGSQL *pgsql)
 		 * status.
 		 */
 	}
+}
+
+
+/*
+ * pgsql_begin executes the BEGIN; transaction control statement and registers
+ * the fact that a transaction is current opened in the PGSQL structure.
+ */
+bool
+pgsql_begin(PGSQL *pgsql)
+{
+	if (pgsql->explicitTransactionOpened)
+	{
+		log_error("BUG: pgsql_begin is called when a transaction "
+				  "has already been explicitely opened");
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	/*
+	 * Pretend our transction is already opened, simplifying the code in
+	 * pgsql_execute and pgsql_execute_with_params.
+	 */
+	pgsql->explicitTransactionOpened = true;
+
+	if (!pgsql_execute(pgsql, "BEGIN"))
+	{
+		pgsql->explicitTransactionOpened = false;
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * pgsql_commit commits the current transaction.
+ */
+bool
+pgsql_commit(PGSQL *pgsql)
+{
+	if (!pgsql->explicitTransactionOpened)
+	{
+		log_error("BUG: there is no transaction in progress");
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	if (!pgsql_execute(pgsql, "COMMIT"))
+	{
+		return false;
+	}
+
+	pgsql->explicitTransactionOpened = false;
+	return true;
+}
+
+
+/*
+ * pgsql_rollback executes a ROLLBACK and maintain explicitTransactionOpened.
+ */
+bool
+pgsql_rollback(PGSQL *pgsql)
+{
+	if (!pgsql->explicitTransactionOpened)
+	{
+		log_error("BUG: there is no transaction in progress");
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	if (!pgsql_execute(pgsql, "ROLLBACK"))
+	{
+		return false;
+	}
+
+	pgsql->explicitTransactionOpened = false;
+	return true;
 }
 
 
@@ -969,7 +1051,15 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 
 		PQclear(result);
 		clear_results(pgsql);
-		pgsql_finish(pgsql);
+
+		if (!pgsql->explicitTransactionOpened)
+		{
+			/*
+			 * Keep our transaction opened when we are doing multi statements
+			 * explicit transactions, otherwise, automatically clean it now.
+			 */
+			pgsql_finish(pgsql);
+		}
 
 		return false;
 	}
@@ -981,8 +1071,16 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 
 	PQclear(result);
 	clear_results(pgsql);
-	PQfinish(pgsql->connection);
-	pgsql->connection = NULL;
+
+	if (!pgsql->explicitTransactionOpened)
+	{
+		/*
+		 * Keep our transaction opened when we are doing multi statements
+		 * explicit transactions, otherwise, automatically clean it now.
+		 */
+		PQfinish(pgsql->connection);
+		pgsql->connection = NULL;
+	}
 
 	return true;
 }
