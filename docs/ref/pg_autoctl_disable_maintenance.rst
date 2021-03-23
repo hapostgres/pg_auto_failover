@@ -41,7 +41,7 @@ Examples
 
 ::
 
-   pg_autoctl show state
+   $ pg_autoctl show state
     Name |  Node |      Host:Port |       LSN |   Connection |       Current State |      Assigned State
    ------+-------+----------------+-----------+--------------+---------------------+--------------------
    node1 |     1 | localhost:5501 | 0/4000810 |   read-write |             primary |             primary

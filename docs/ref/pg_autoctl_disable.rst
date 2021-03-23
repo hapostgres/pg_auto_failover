@@ -11,3 +11,4 @@ pg_autoctl disable - Disable a feature on a formation
    pg_autoctl_disable_secondary
    pg_autoctl_disable_maintenance
    pg_autoctl_disable_ssl
+   pg_autoctl_disable_monitor

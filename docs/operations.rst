@@ -379,6 +379,7 @@ the following commands.
 
 	   $ pg_autoctl disable monitor --force
 
+
   3. Create a new monitor node::
 
 	   $ pg_autoctl create monitor ...
@@ -392,6 +393,9 @@ the following commands.
   5. On every other (secondary) node, enable the monitor online again::
 
 	   $ pg_autoctl enable monitor --monitor postgresql://...
+
+See :ref:`pg_autoctl_disable_monitor` and :ref:`pg_autoctl_enable_monitor`
+for details about those commands.
 
 This operation relies on the fact that a ``pg_autoctl`` can be operated
 without a monitor, and when reconnecting to a new monitor, this process

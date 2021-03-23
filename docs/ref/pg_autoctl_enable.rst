@@ -11,3 +11,4 @@ pg_autoctl enable - Enable a feature on a formation
    pg_autoctl_enable_secondary
    pg_autoctl_enable_maintenance
    pg_autoctl_enable_ssl
+   pg_autoctl_enable_monitor

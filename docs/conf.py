@@ -299,6 +299,13 @@ man_pages = [
         1,
     ),
     (
+        "ref/pg_autoctl_enable_monitor",
+        "pg_autoctl enable monitor",
+        "pg_autoctl enable monitor",
+        [author],
+        1,
+    ),
+    (
         "ref/pg_autoctl_disable_maintenance",
         "pg_autoctl disable maintenance",
         "pg_autoctl disable maintenance",
@@ -316,6 +323,13 @@ man_pages = [
         "ref/pg_autoctl_disable_ssl",
         "pg_autoctl disable ssl",
         "pg_autoctl disable ssl",
+        [author],
+        1,
+    ),
+    (
+        "ref/pg_autoctl_disable_monitor",
+        "pg_autoctl disable monitor",
+        "pg_autoctl disable monitor",
         [author],
         1,
     ),
