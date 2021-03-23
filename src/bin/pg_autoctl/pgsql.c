@@ -981,6 +981,8 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 
 	PQclear(result);
 	clear_results(pgsql);
+	PQfinish(pgsql->connection);
+	pgsql->connection = NULL;
 
 	return true;
 }

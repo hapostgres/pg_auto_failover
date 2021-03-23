@@ -505,7 +505,7 @@ cli_enable_maintenance(int argc, char **argv)
 	 */
 	if (keeper.state.current_role != MAINTENANCE_STATE)
 	{
-		if (!pgsql_listen(&(keeper.monitor.pgsql), channels))
+		if (!pgsql_listen(&(keeper.monitor.notificationClient), channels))
 		{
 			log_error("Failed to listen to state changes from the monitor");
 			exit(EXIT_CODE_MONITOR);
@@ -610,7 +610,7 @@ cli_disable_maintenance(int argc, char **argv)
 		exit(EXIT_CODE_MONITOR);
 	}
 
-	if (!pgsql_listen(&(keeper.monitor.pgsql), channels))
+	if (!pgsql_listen(&(keeper.monitor.notificationClient), channels))
 	{
 		log_error("Failed to listen to state changes from the monitor");
 		exit(EXIT_CODE_MONITOR);
