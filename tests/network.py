@@ -237,15 +237,17 @@ class VirtualNode:
             # ndb.interfaces[{"target": netns_name, "ifname": "lo"}]
             ndb.sources.add(netns=name)
             #
-            # Create veth with a configured peer, it will be created
-            # already in the netns
+            # Create veth
             (
                 ndb.interfaces.create(
                     ifname=veth_name,
                     kind="veth",
-                    peer={"ifname": self.vethPeer, "net_ns_fd": name},
+                    peer=self.vethPeer,
                     state="up",
-                ).commit()
+                )
+                .commit()
+                .set(net_ns_fd=name)
+                .commit()
             )
             #
             # .interfaces.wait() returns an interface object when
