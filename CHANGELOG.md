@@ -18,7 +18,7 @@ passing the URI to the monitor, same as with the other `pg_autoctl show
 commands`. To display the monitor connection string, use `pg_autoctl show
 uri --formation monitor` now.
 
-* Feature/zero config pg autoctl [#576]
+* Allow using --monitor uri for a lot of commands [#576]
 * Review pg_autoctl show state output, and docs. [#617]
 * Avoid using synchronous standby name wildcard [#629]
 
