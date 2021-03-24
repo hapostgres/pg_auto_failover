@@ -253,7 +253,7 @@ class VirtualNode:
             # .interfaces.wait() returns an interface object when
             # it becomes available on the specified source
             (
-                ndb.interfaces.wait(target=name, ifname=self.vethPeer)
+                ndb.interfaces.wait(target=name, ifname=veth_name)
                 .set(state="up")
                 .add_ip("%s/%s" % (address, netmaskLength))
                 .commit()
