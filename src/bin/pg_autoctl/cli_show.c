@@ -330,18 +330,25 @@ cli_show_state_getopts(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	/* when we have a monitor URI we don't need PGDATA */
-	if (cli_use_monitor_option(&options))
+	if (localState)
 	{
-		if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
-		{
-			log_warn("Given --monitor URI, the --pgdata option is ignored");
-			log_info("Connecting to monitor at \"%s\"", options.monitor_pguri);
-		}
+		cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
 	}
 	else
 	{
-		cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
+		/* when we have a monitor URI we don't need PGDATA */
+		if (cli_use_monitor_option(&options))
+		{
+			if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
+			{
+				log_warn("Given --monitor URI, the --pgdata option is ignored");
+				log_info("Connecting to monitor at \"%s\"", options.monitor_pguri);
+			}
+		}
+		else
+		{
+			cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
+		}
 	}
 
 	/* when --pgdata is given, still initialise our pathnames */
@@ -413,7 +420,6 @@ cli_show_events(int argc, char **argv)
 static void
 cli_show_state(int argc, char **argv)
 {
-	int optionGroupId = keeperOptions.groupId;
 	KeeperConfig config = keeperOptions;
 	Monitor monitor = { 0 };
 
@@ -453,13 +459,6 @@ cli_show_state(int argc, char **argv)
 
 	(void) cli_monitor_init_from_option_or_config(&monitor, &config);
 
-	if (optionGroupId != -1 && config.groupId != optionGroupId)
-	{
-		log_error("--group %d does not match this node's group: %d",
-				  optionGroupId, config.groupId);
-		exit(EXIT_CODE_BAD_CONFIG);
-	}
-
 	if (outputJSON)
 	{
 		if (!monitor_print_state_as_json(&monitor,
@@ -489,6 +488,7 @@ static void
 cli_show_local_state()
 {
 	KeeperConfig config = keeperOptions;
+	int optionGroupId = keeperOptions.groupId;
 
 	switch (ProbeConfigurationFileRole(config.pathnames.config))
 	{
@@ -520,6 +520,14 @@ cli_show_local_state()
 			if (!keeper_init(&keeper, &config))
 			{
 				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
+
+			/* ensure that --group makes sense then */
+			if (optionGroupId != -1 && config.groupId != optionGroupId)
+			{
+				log_error("--group %d does not match this node's group: %d",
+						  optionGroupId, config.groupId);
 				exit(EXIT_CODE_BAD_CONFIG);
 			}
 
