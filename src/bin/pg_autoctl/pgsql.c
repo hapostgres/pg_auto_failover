@@ -860,6 +860,7 @@ pgsql_begin(PGSQL *pgsql)
 	return pgsql_execute(pgsql, "BEGIN");
 }
 
+
 /*
  * pgsql_rollback is responsible for issuing a 'ROLLBACK' query to an already
  * opened transaction, usually via a previous pgsql_begin() command.
@@ -893,6 +894,7 @@ pgsql_rollback(PGSQL *pgsql)
 
 	return result;
 }
+
 
 /*
  * pgsql_commit is responsible for issuing a 'COMMIT' query to an already
@@ -2029,7 +2031,7 @@ pgsql_create_database(PGSQL *pgsql, const char *dbname, const char *owner)
 	clear_results(pgsql);
 	if (pgsql->connectionStatementType == PGSQL_CONNECTION_SINGLE_STATEMENT)
 	{
-			pgsql_finish(pgsql);
+		pgsql_finish(pgsql);
 	}
 
 	return true;
@@ -2091,7 +2093,7 @@ pgsql_create_extension(PGSQL *pgsql, const char *name)
 	clear_results(pgsql);
 	if (pgsql->connectionStatementType == PGSQL_CONNECTION_SINGLE_STATEMENT)
 	{
-			pgsql_finish(pgsql);
+		pgsql_finish(pgsql);
 	}
 
 	return true;
@@ -2226,7 +2228,7 @@ pgsql_create_user(PGSQL *pgsql, const char *userName, const char *password,
 	clear_results(pgsql);
 	if (pgsql->connectionStatementType == PGSQL_CONNECTION_SINGLE_STATEMENT)
 	{
-			pgsql_finish(pgsql);
+		pgsql_finish(pgsql);
 	}
 
 	/* restore the normal notice message processing, if needed. */

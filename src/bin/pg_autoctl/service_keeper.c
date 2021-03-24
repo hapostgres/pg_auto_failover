@@ -623,7 +623,7 @@ keeper_node_active(Keeper *keeper, bool doInit)
 	bool forceCacheInvalidation = false;
 	bool reportPgIsRunning = ReportPgIsRunning(keeper);
 
-	char *emptyChannelList = { NULL };
+	char *emptyChannelList[] = { NULL };
 
 	/*
 	 * First, connect to the monitor and check we're compatible with the
