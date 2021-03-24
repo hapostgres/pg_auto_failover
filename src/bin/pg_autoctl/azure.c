@@ -1131,8 +1131,8 @@ azure_build_pg_autoctl(AzureRegionResources *azRegion)
  * environment variables:
  *
  *   AZ_PG_VERSION ?= 13
- *   AZ_PGAF_DEB_VERSION ?= 1.4
- *   AZ_PGAF_DEB_REVISION ?= 1.4.2-1
+ *   AZ_PGAF_DEB_VERSION ?= 1.5
+ *   AZ_PGAF_DEB_REVISION ?= 1.5.1-1
  */
 bool
 azure_prepare_target_versions(KeyVal *env)
@@ -1146,8 +1146,8 @@ azure_prepare_target_versions(KeyVal *env)
 
 	/* default values */
 	sformat(env->values[0], MAXCONNINFO, "13");   /* AZ_PG_VERSION */
-	sformat(env->values[1], MAXCONNINFO, "1.4"); /* AZ_PGAF_DEB_VERSION */
-	sformat(env->values[2], MAXCONNINFO, "1.4.2-1"); /* AZ_PGAF_DEB_REVISION */
+	sformat(env->values[1], MAXCONNINFO, "1.5"); /* AZ_PGAF_DEB_VERSION */
+	sformat(env->values[2], MAXCONNINFO, "1.5.1-1"); /* AZ_PGAF_DEB_REVISION */
 
 	for (int i = 0; i < 3; i++)
 	{
@@ -1174,8 +1174,8 @@ azure_prepare_target_versions(KeyVal *env)
  * target pg_auto_failover package on the Azure VMs.
  *
  *   sudo apt-get install -q -y                 \
- *      postgresql-13-auto-failover-1.4=1.4.2-1 \
- *      pg-auto-failover-cli-1.4=1.4.2-1
+ *      postgresql-13-auto-failover-1.5=1.5.1-1 \
+ *      pg-auto-failover-cli-1.5=1.5.1-1
  *
  * We are using environment variables to fill in the actual version numbers,
  * and we hard-code some defaults in case the environment has not be provided
