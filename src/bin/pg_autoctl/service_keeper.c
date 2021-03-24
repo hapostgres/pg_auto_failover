@@ -623,7 +623,7 @@ keeper_node_active(Keeper *keeper, bool doInit)
 	bool forceCacheInvalidation = false;
 	bool reportPgIsRunning = ReportPgIsRunning(keeper);
 
-	char *emptyChannel[] = { 0 };
+	char *emptyChannelList = { NULL };
 
 	/*
 	 * First, connect to the monitor and check we're compatible with the
@@ -807,7 +807,7 @@ keeper_node_active(Keeper *keeper, bool doInit)
 	}
 
 	/* Finally establish a connection for notifications if none present */
-	(void) pgsql_listen(&(keeper->monitor.pgsql), emptyChannel);
+	(void) pgsql_listen(&(keeper->monitor.pgsql), emptyChannelList);
 
 	return true;
 }
