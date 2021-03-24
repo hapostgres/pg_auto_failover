@@ -30,7 +30,6 @@ uri --formation monitor` now.
 * Fix skip hba propagation [#588, #609]
 * Improve DNS lookup error handling. [#615]
 * Do not leak psycopg2 connections during testing [#628]
-*
 
 ### pg_auto_failover v1.4.2 (February 3, 2021) ###
 
