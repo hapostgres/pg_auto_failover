@@ -689,7 +689,7 @@ set_node_candidate_priority(Keeper *keeper, int candidatePriority)
 	{
 		char *channels[] = { "state", NULL };
 
-		if (!pgsql_listen(&(keeper->monitor.pgsql), channels))
+		if (!pgsql_listen(&(keeper->monitor.notificationClient), channels))
 		{
 			log_error("Failed to listen to state changes from the monitor");
 			return false;
@@ -752,7 +752,7 @@ set_node_replication_quorum(Keeper *keeper, bool replicationQuorum)
 	{
 		char *channels[] = { "state", NULL };
 
-		if (!pgsql_listen(&(keeper->monitor.pgsql), channels))
+		if (!pgsql_listen(&(keeper->monitor.notificationClient), channels))
 		{
 			log_error("Failed to listen to state changes from the monitor");
 			return false;
@@ -814,7 +814,7 @@ set_formation_number_sync_standbys(Monitor *monitor,
 	{
 		char *channels[] = { "state", NULL };
 
-		if (!pgsql_listen(&(monitor->pgsql), channels))
+		if (!pgsql_listen(&(monitor->notificationClient), channels))
 		{
 			log_error("Failed to listen to state changes from the monitor");
 			return false;
