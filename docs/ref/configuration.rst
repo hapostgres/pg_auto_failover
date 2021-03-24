@@ -108,7 +108,7 @@ pg_auto_failover Keeper Service
 -------------------------------
 
 For an introduction to the ``pg_autoctl`` commands relevant to the pg_auto_failover
-Keeper configuration, please see :ref:`pg_autoctl_configuration`.
+Keeper configuration, please see :ref:`pg_autoctl_config`.
 
 An example configuration file looks like the following::
 

@@ -78,6 +78,7 @@ CommandLine show_events_command =
 				 "Prints monitor's state of nodes in a given formation and group",
 				 " [ --pgdata --formation --group --count ] ",
 				 "  --pgdata      path to data directory	 \n"
+				 "  --monitor     pg_auto_failover Monitor Postgres URL\n" \
 				 "  --formation   formation to query, defaults to 'default' \n"
 				 "  --group       group to query formation, defaults to all \n"
 				 "  --count       how many events to fetch, defaults to 10 \n"
@@ -90,6 +91,7 @@ CommandLine show_state_command =
 				 "Prints monitor's state of nodes in a given formation and group",
 				 " [ --pgdata --formation --group ] ",
 				 "  --pgdata      path to data directory	 \n"
+				 "  --monitor     show the monitor uri\n"
 				 "  --formation   formation to query, defaults to 'default' \n"
 				 "  --group       group to query formation, defaults to all \n"
 				 "  --local       show local data, do not connect to the monitor\n"
@@ -102,6 +104,7 @@ CommandLine show_settings_command =
 				 "Print replication settings for a formation from the monitor",
 				 " [ --pgdata ] [ --json ] [ --formation ] ",
 				 "  --pgdata      path to data directory\n"
+				 "  --monitor     pg_auto_failover Monitor Postgres URL\n"
 				 "  --json        output data in the JSON format\n"
 				 "  --formation   pg_auto_failover formation\n",
 				 cli_get_name_getopts,
@@ -112,6 +115,7 @@ CommandLine show_standby_names_command =
 				 "Prints synchronous_standby_names for a given group",
 				 " [ --pgdata ] --formation --group",
 				 "  --pgdata      path to data directory	 \n"
+				 "  --monitor     show the monitor uri\n"
 				 "  --formation   formation to query, defaults to 'default'\n"
 				 "  --group       group to query formation, defaults to all\n"
 				 "  --json        output data in the JSON format\n",
@@ -326,18 +330,25 @@ cli_show_state_getopts(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	/* when we have a monitor URI we don't need PGDATA */
-	if (cli_use_monitor_option(&options))
+	if (localState)
 	{
-		if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
-		{
-			log_warn("Given --monitor URI, the --pgdata option is ignored");
-			log_info("Connecting to monitor at \"%s\"", options.monitor_pguri);
-		}
+		cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
 	}
 	else
 	{
-		cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
+		/* when we have a monitor URI we don't need PGDATA */
+		if (cli_use_monitor_option(&options))
+		{
+			if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
+			{
+				log_warn("Given --monitor URI, the --pgdata option is ignored");
+				log_info("Connecting to monitor at \"%s\"", options.monitor_pguri);
+			}
+		}
+		else
+		{
+			cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
+		}
 	}
 
 	/* when --pgdata is given, still initialise our pathnames */
@@ -418,6 +429,34 @@ cli_show_state(int argc, char **argv)
 		exit(EXIT_CODE_QUIT);
 	}
 
+	/*
+	 * When dealing with a keeper node with a disabled monitor, we force the
+	 * --local option.
+	 */
+	if (!IS_EMPTY_STRING_BUFFER(config.pgSetup.pgdata) &&
+		ProbeConfigurationFileRole(config.pathnames.config) == PG_AUTOCTL_ROLE_KEEPER)
+	{
+		bool missingPgdataIsOk = true;
+		bool pgIsNotRunningIsOk = true;
+		bool monitorDisabledIsOk = true;
+
+		if (!keeper_config_read_file(&config,
+									 missingPgdataIsOk,
+									 pgIsNotRunningIsOk,
+									 monitorDisabledIsOk))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_CONFIG);
+		}
+
+		if (config.monitorDisabled)
+		{
+			log_info("Monitor is disabled, showing --local state");
+			(void) cli_show_local_state();
+			exit(EXIT_CODE_QUIT);
+		}
+	}
+
 	(void) cli_monitor_init_from_option_or_config(&monitor, &config);
 
 	if (outputJSON)
@@ -449,6 +488,7 @@ static void
 cli_show_local_state()
 {
 	KeeperConfig config = keeperOptions;
+	int optionGroupId = keeperOptions.groupId;
 
 	switch (ProbeConfigurationFileRole(config.pathnames.config))
 	{
@@ -480,6 +520,14 @@ cli_show_local_state()
 			if (!keeper_init(&keeper, &config))
 			{
 				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
+
+			/* ensure that --group makes sense then */
+			if (optionGroupId != -1 && config.groupId != optionGroupId)
+			{
+				log_error("--group %d does not match this node's group: %d",
+						  optionGroupId, config.groupId);
 				exit(EXIT_CODE_BAD_CONFIG);
 			}
 
@@ -959,6 +1007,17 @@ cli_show_uri_getopts(int argc, char **argv)
 	else
 	{
 		cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
+
+		if (!keeper_config_set_pathnames_from_pgdata(&(options.pathnames),
+													 options.pgSetup.pgdata))
+		{
+			if (!keeper_config_set_pathnames_from_pgdata(&(options.pathnames),
+														 options.pgSetup.pgdata))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
+		}
 	}
 
 	/*
@@ -976,19 +1035,6 @@ cli_show_uri_getopts(int argc, char **argv)
 	{
 		strlcpy(showUriOptions.citusClusterName,
 				DEFAULT_CITUS_CLUSTER_NAME, NAMEDATALEN);
-	}
-
-	cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
-
-	if (!keeper_config_set_pathnames_from_pgdata(&(options.pathnames),
-												 options.pgSetup.pgdata))
-	{
-		if (!keeper_config_set_pathnames_from_pgdata(&(options.pathnames),
-													 options.pgSetup.pgdata))
-		{
-			/* errors have already been logged */
-			exit(EXIT_CODE_BAD_CONFIG);
-		}
 	}
 
 	keeperOptions = options;

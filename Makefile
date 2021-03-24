@@ -162,8 +162,10 @@ pdf: $(PDF)
 $(PDF):
 	$(MAKE) -s -C docs/tikz pdf
 	perl -pi -e 's/(^.. figure:: .*)\.svg/\1.pdf/' docs/*.rst
+	perl -pi -e 's/▒/~/g' docs/ref/pg_autoctl_do_demo.rst
 	$(MAKE) -s -C docs latexpdf
 	perl -pi -e 's/(^.. figure:: .*)\.pdf/\1.svg/' docs/*.rst
+	perl -pi -e 's/~/▒/g' docs/ref/pg_autoctl_do_demo.rst
 	ls -l $@
 
 $(FSM): bin
