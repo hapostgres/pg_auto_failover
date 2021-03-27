@@ -300,13 +300,10 @@ def _remove_interface_if_exists(name):
     used for removing bridges too.
     """
     with NDB() as ndb:
-        ifnames = [x.ifname for x in ndb.interfaces.dump().select("ifname")]
-        if name in ifnames:
+        if name in ndb.interfaces:
             try:
                 (
                     ndb.interfaces[name]
-                    .set(state="down")
-                    .commit()
                     .remove()
                     .commit()
                 )
