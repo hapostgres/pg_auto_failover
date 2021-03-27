@@ -302,10 +302,6 @@ def _remove_interface_if_exists(name):
     with NDB() as ndb:
         if name in ndb.interfaces:
             try:
-                (
-                    ndb.interfaces[name]
-                    .remove()
-                    .commit()
-                )
+                ndb.interfaces[name].remove().commit()
             except netlink.exceptions.NetlinkError:
                 pass
