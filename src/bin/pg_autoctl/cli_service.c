@@ -19,6 +19,7 @@
 #include "cli_common.h"
 #include "commandline.h"
 #include "defaults.h"
+#include "env_utils.h"
 #include "fsm.h"
 #include "keeper_config.h"
 #include "keeper.h"
@@ -285,6 +286,7 @@ cli_getopt_pgdata_and_mode(int argc, char **argv)
 		{ "pgdata", required_argument, NULL, 'D' },
 		{ "fast", no_argument, NULL, 'f' },
 		{ "immediate", no_argument, NULL, 'i' },
+		{ "sigkill", no_argument, NULL, '9' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
@@ -327,6 +329,26 @@ cli_getopt_pgdata_and_mode(int argc, char **argv)
 					exit(EXIT_CODE_BAD_ARGS);
 				}
 				stop_signal = SIGQUIT;
+				break;
+			}
+
+			case '9':
+			{
+				/* change the signal to send from SIGTERM to SIGKILL */
+				if (!env_exists(PG_AUTOCTL_DEBUG))
+				{
+					log_fatal("Option --sigkill is only available in debug "
+							  "environments");
+					exit(EXIT_CODE_BAD_ARGS);
+					break;
+				}
+
+				if (stop_signal != SIGTERM)
+				{
+					log_fatal("Please use either --fast or --immediate, not both");
+					exit(EXIT_CODE_BAD_ARGS);
+				}
+				stop_signal = SIGKILL;
 				break;
 			}
 
@@ -407,11 +429,29 @@ cli_service_stop(int argc, char **argv)
 
 	if (read_pidfile(keeper.config.pathnames.pid, &pid))
 	{
-		if (kill(pid, stop_signal) != 0)
+		/*
+		 * Send the signal to the top-level process only, except when using
+		 * --sigkill and then `kill -9`. The intend there is to trigger a crash
+		 * of Postgres and pg_autoctl and see how we recover from it. Target
+		 * the whole process group then.
+		 */
+		if (stop_signal == SIGKILL)
 		{
-			log_error("Failed to send %s to pg_autoctl pid %d: %m",
-					  strsignal(stop_signal), pid);
-			exit(EXIT_CODE_INTERNAL_ERROR);
+			if (killpg(pid, stop_signal) != 0)
+			{
+				log_error("Failed to send %s to pg_autoctl pid %d: %m",
+						  strsignal(stop_signal), pid);
+				exit(EXIT_CODE_INTERNAL_ERROR);
+			}
+		}
+		else
+		{
+			if (kill(pid, stop_signal) != 0)
+			{
+				log_error("Failed to send %s to pg_autoctl pid %d: %m",
+						  strsignal(stop_signal), pid);
+				exit(EXIT_CODE_INTERNAL_ERROR);
+			}
 		}
 	}
 	else
