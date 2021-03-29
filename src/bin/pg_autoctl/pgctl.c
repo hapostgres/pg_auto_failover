@@ -1449,7 +1449,7 @@ pg_ctl_initdb(const char *pg_ctl, const char *pgdata)
  */
 bool
 pg_ctl_postgres(const char *pg_ctl, const char *pgdata, int pgport,
-				char *listen_addresses)
+				char *listen_addresses, bool listen)
 {
 	char postgres[MAXPGPATH];
 	char logfile[MAXPGPATH];
@@ -1473,10 +1473,15 @@ pg_ctl_postgres(const char *pg_ctl, const char *pgdata, int pgport,
 	args[argsIndex++] = "-p";
 	args[argsIndex++] = (char *) intToString(pgport).strValue;
 
-	if (!IS_EMPTY_STRING_BUFFER(listen_addresses))
+	if (listen)
 	{
 		args[argsIndex++] = "-h";
 		args[argsIndex++] = (char *) listen_addresses;
+	}
+	else
+	{
+		args[argsIndex++] = "-h";
+		args[argsIndex++] = "";
 	}
 
 	if (env_exists("PG_REGRESS_SOCK_DIR"))

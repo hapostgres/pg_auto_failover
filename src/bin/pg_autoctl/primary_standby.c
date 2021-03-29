@@ -1143,7 +1143,10 @@ postgres_maybe_do_crash_recovery(LocalPostgresServer *postgres)
 				(void) pg_ctl_postgres(pgSetup->pg_ctl,
 									   pgSetup->pgdata,
 									   pgSetup->pgport,
-									   pgSetup->listen_addresses);
+
+				                       /* do not open the service just yet */
+									   pgSetup->listen_addresses,
+									   false);
 
 				/* unexpected */
 				log_fatal("BUG: returned from service_keeper_runprogram()");
