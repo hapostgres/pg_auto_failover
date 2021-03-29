@@ -211,11 +211,13 @@ the target user name as its CN, as per Postgres documentation for
 __ https://www.postgresql.org/docs/current/auth-cert.html
 
 For enabling the `cert` authentication method with pg_auto_failover, you
-need to prepare a client certificate for the user ``postgres`` and used by
-pg_autoctl when connecting to the monitor, to place in
-``~/.postgresql/postgresql.cert`` along with its key
+need to prepare a `Client Certificate`__ for the user ``postgres`` and used
+by pg_autoctl when connecting to the monitor, to place in
+``~/.postgresql/postgresql.crt`` along with its key
 ``~/.postgresql/postgresql.key``, in the home directory of the user that
 runs the pg_autoctl service (which defaults to ``postgres``).
+
+__ https://www.postgresql.org/docs/current/libpq-ssl.html#LIBPQ-SSL-CLIENTCERT
 
 Then you need to create a user name map as documented in Postgres page `User
 Name Maps`__ so that your certificate can be used to authenticate pg_autoctl
