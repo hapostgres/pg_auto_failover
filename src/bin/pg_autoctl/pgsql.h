@@ -328,6 +328,7 @@ bool pgsql_has_reached_target_lsn(PGSQL *pgsql, char *targetLSN,
 								  char *currentLSN, bool *hasReachedLSN);
 bool pgsql_identify_system(PGSQL *pgsql);
 bool pgsql_listen(PGSQL *pgsql, char *channels[]);
+bool pgsql_prepare_to_wait(PGSQL *pgsql);
 
 bool pgsql_alter_extension_update_to(PGSQL *pgsql,
 									 const char *extname, const char *version);

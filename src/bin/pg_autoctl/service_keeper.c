@@ -279,6 +279,8 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 
 			bool groupStateHasChanged = false;
 
+			/* establish a connection for notifications if none present */
+			(void) pgsql_prepare_to_wait(&(monitor->notificationClient));
 			(void) monitor_wait_for_state_change(monitor,
 												 config->formation,
 												 keeperState->current_group,
@@ -289,7 +291,7 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 			/* when no state change has been notified, close the connection */
 			if (!groupStateHasChanged &&
 				monitor->notificationClient.connectionStatementType ==
-				PGSQL_CONNECTION_SINGLE_STATEMENT)
+				PGSQL_CONNECTION_MULTI_STATEMENT)
 			{
 				pgsql_finish(&(monitor->notificationClient));
 			}
@@ -624,8 +626,6 @@ keeper_node_active(Keeper *keeper, bool doInit)
 	bool forceCacheInvalidation = false;
 	bool reportPgIsRunning = ReportPgIsRunning(keeper);
 
-	char *emptyChannelList[] = { NULL };
-
 	/*
 	 * First, connect to the monitor and check we're compatible with the
 	 * extension there. An upgrade on the monitor might have happened in
@@ -806,9 +806,6 @@ keeper_node_active(Keeper *keeper, bool doInit)
 			return false;
 		}
 	}
-
-	/* Finally establish a connection for notifications if none present */
-	(void) pgsql_listen(&(keeper->monitor.notificationClient), emptyChannelList);
 
 	return true;
 }

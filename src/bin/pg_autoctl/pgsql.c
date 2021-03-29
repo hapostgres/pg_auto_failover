@@ -2914,6 +2914,34 @@ pgsql_listen(PGSQL *pgsql, char *channels[])
 
 
 /*
+ * Preapre a multi statement connection which can later be used in wait for
+ * notification functions.
+ *
+ * Contrarry to pgsql_listen, this function, only prepares the connection and it
+ * is the user's responsibility to define which channels to listen to.
+ */
+bool
+pgsql_prepare_to_wait(PGSQL *pgsql)
+{
+	/*
+	 * mark the connection as multi statement since it is going to be used by
+	 * for processing notifications
+	 */
+	pgsql->connectionStatementType = PGSQL_CONNECTION_MULTI_STATEMENT;
+
+	/* open a connection upfront since it is needed by PQescape functions */
+	PGconn *connection = pgsql_open_connection(pgsql);
+	if (connection == NULL)
+	{
+		/* error message was logged in pgsql_open_connection */
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
  * pgsql_alter_extension_update_to executes ALTER EXTENSION ... UPDATE TO ...
  */
 bool
