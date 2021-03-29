@@ -1053,6 +1053,16 @@ postgres_maybe_do_crash_recovery(LocalPostgresServer *postgres)
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	ReplicationSource *replicationSource = &(postgres->replicationSource);
 
+	LocalExpectedPostgresStatus *pgStatus = &(postgres->expectedPgStatus);
+
+	/* update our service controller for Postgres to release control */
+	if (!keeper_set_postgres_state_unknown(&(pgStatus->state),
+										   pgStatus->pgStatusPath))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
 	/* we don't log the output for pg_ctl_status here */
 	int status = pg_ctl_status(pgSetup->pg_ctl, pgSetup->pgdata, false);
 
@@ -1099,9 +1109,9 @@ postgres_maybe_do_crash_recovery(LocalPostgresServer *postgres)
 				"immediate",
 				sizeof(crashRecoveryReplicationSource.targetLSN));
 
-		/* the default target action is "pause", we need "shutdown" here */
+		/* pause when reaching target to avoid creating a new local timeline */
 		strlcpy(crashRecoveryReplicationSource.targetAction,
-				"shutdown",
+				"pause",
 				sizeof(crashRecoveryReplicationSource.targetAction));
 
 		strlcpy(crashRecoveryReplicationSource.targetTimeline,
@@ -1156,11 +1166,47 @@ postgres_maybe_do_crash_recovery(LocalPostgresServer *postgres)
 			default:
 			{
 				/* wait until postgres crash recovery is done */
+				for (int attempts = 0;; attempts++)
+				{
+					int timeout = 30;
+
+					if (pg_setup_wait_until_is_ready(pgSetup, timeout, LOG_INFO))
+					{
+						break;
+					}
+				}
+
+				/* get Postgres current LSN after recovery, might be useful */
+				PGSQL *pgsql = &(postgres->sqlClient);
+
+				if (pgsql_get_postgres_metadata(pgsql,
+												&pgSetup->is_in_recovery,
+												postgres->pgsrSyncState,
+												postgres->currentLSN,
+												&(pgSetup->control)))
+				{
+					log_info("Postgres has finished crash recovery at LSN %s",
+							 postgres->currentLSN);
+				}
+				else
+				{
+					log_error("Failed to get Postgres metadata, continuing");
+				}
+
+
+				/*
+				 * Now stop Postgres by just killing our child process, and
+				 * wait until the child process has finished with waitpid().
+				 */
 				int wpid, status;
 
 				do {
-					/* check every 250ms if postgres is done now */
-					pg_usleep(250 * 1000);
+					if (kill(fpid, SIGTERM) != 0)
+					{
+						log_error("Failed to send SIGTERM to "
+								  "Postgres pid %d: %m", fpid);
+						return false;
+					}
 
 					wpid = waitpid(fpid, &status, WNOHANG);
 
@@ -1168,11 +1214,13 @@ postgres_maybe_do_crash_recovery(LocalPostgresServer *postgres)
 					{
 						log_warn("Failed to wait until Postgres is done: %m");
 					}
-				} while (wpid != fpid);
+
+					/* waitpid could be WIFSTOPPED, then try again */
+				} while (!(WIFEXITED(status) || !WIFSIGNALED(status)));
 
 				if (WIFEXITED(status) && WEXITSTATUS(status) == EXIT_CODE_QUIT)
 				{
-					log_info("Postgres has finished crash recovery.");
+					return true;
 				}
 				else if (WIFEXITED(status))
 				{
@@ -1184,21 +1232,11 @@ postgres_maybe_do_crash_recovery(LocalPostgresServer *postgres)
 
 					(void) pg_log_startup(pgSetup->pgdata, LOG_INFO);
 				}
-				else if (WIFSTOPPED(status))
+				else
 				{
-					log_error("Postgres process has been signaled and stopped");
-				}
-
-				if (!pg_controldata(pgSetup, missingPgdataIsOk))
-				{
-					/* errors have already been logged */
+					log_error("BUG: can't make sense of waitpid() exit code");
 					return false;
 				}
-
-				log_info("Postgres control state: %s",
-						 dbstateToString(pgSetup->control.state));
-				log_info("Latest checkpoint LSN: %s",
-						 pgSetup->control.latestCheckpointLSN);
 			}
 		}
 	}
