@@ -21,6 +21,9 @@
 #include "parsing.h"
 #include "string_utils.h"
 
+static bool parse_controldata_field_dbstate(const char *controlDataString,
+											DBState *state);
+
 static bool parse_controldata_field_uint32(const char *controlDataString,
 										   const char *fieldName,
 										   uint32_t *dest);
@@ -221,7 +224,9 @@ bool
 parse_controldata(PostgresControlData *pgControlData,
 				  const char *control_data_string)
 {
-	if (!parse_controldata_field_uint32(control_data_string,
+	if (!parse_controldata_field_dbstate(control_data_string,
+										 &(pgControlData->state)) ||
+		!parse_controldata_field_uint32(control_data_string,
 										"pg_control version number",
 										&(pgControlData->pg_control_version)) ||
 
@@ -240,6 +245,66 @@ parse_controldata(PostgresControlData *pgControlData,
 		log_error("Failed to parse pg_controldata output");
 		return false;
 	}
+	return true;
+}
+
+
+#define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
+
+/*
+ * parse_controldata_field_dbstate matches pg_controldata output for Database
+ * cluster state and fills in the value string as an enum value.
+ */
+static bool
+parse_controldata_field_dbstate(const char *controlDataString, DBState *state)
+{
+	char regex[BUFSIZE] = { 0 };
+
+	sformat(regex, BUFSIZE, "Database cluster state: *(.*)$");
+
+	char *match = regexp_first_match(controlDataString, regex);
+
+	if (match == NULL)
+	{
+		return false;
+	}
+
+	if (streq(match, "starting up"))
+	{
+		*state = DB_STARTUP;
+	}
+	else if (streq(match, "shut down"))
+	{
+		*state = DB_SHUTDOWNED;
+	}
+	else if (streq(match, "shut down in recovery"))
+	{
+		*state = DB_SHUTDOWNED_IN_RECOVERY;
+	}
+	else if (streq(match, "shutting down"))
+	{
+		*state = DB_SHUTDOWNING;
+	}
+	else if (streq(match, "in crash recovery"))
+	{
+		*state = DB_IN_CRASH_RECOVERY;
+	}
+	else if (streq(match, "in archive recovery"))
+	{
+		*state = DB_IN_ARCHIVE_RECOVERY;
+	}
+	else if (streq(match, "in production"))
+	{
+		*state = DB_IN_PRODUCTION;
+	}
+	else
+	{
+		log_error("Failed to parse database cluster state \"%s\"", match);
+		free(match);
+		return false;
+	}
+
+	free(match);
 	return true;
 }
 
@@ -339,8 +404,6 @@ parse_controldata_field_lsn(const char *controlDataString,
  * parse_notification_message parses pgautofailover state change notifications,
  * which are sent in the JSON format.
  */
-#define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
-
 bool
 parse_state_notification_message(CurrentNodeState *nodeState,
 								 const char *message)

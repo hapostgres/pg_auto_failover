@@ -59,7 +59,9 @@ static bool prepare_recovery_settings(const char *pgdata,
 									  ReplicationSource *replicationSource,
 									  char *primaryConnInfo,
 									  char *primarySlotName,
-									  char *targetLSN);
+									  char *targetLSN,
+									  char *targetAction,
+									  char *targetTimeline);
 
 static bool escape_recovery_conf_string(char *destination,
 										int destinationSize,
@@ -1048,6 +1050,18 @@ prepare_guc_settings_from_pgsetup(const char *configFilePath,
 								  setting->name, pgSetup->ssl.serverKey);
 			}
 		}
+		else if (streq(setting->name, "recovery_target_lsn"))
+		{
+			if (streq(setting->value, "'immediate'"))
+			{
+				appendPQExpBuffer(config, "recovery_target = 'immediate'\n");
+			}
+			else
+			{
+				appendPQExpBuffer(config, "%s = %s\n",
+								  setting->name, setting->value);
+			}
+		}
 		else if (streq(setting->name, "citus.node_conninfo"))
 		{
 			appendPQExpBuffer(config, "%s = '", setting->name);
@@ -1920,12 +1934,14 @@ pg_write_recovery_conf(const char *pgdata, ReplicationSource *replicationSource)
 	char primaryConnInfo[MAXCONNINFO] = { 0 };
 	char primarySlotName[MAXCONNINFO] = { 0 };
 	char targetLSN[PG_LSN_MAXLENGTH] = { 0 };
+	char targetAction[NAMEDATALEN] = { 0 };
+	char targetTimeline[NAMEDATALEN] = { 0 };
 
 	GUC recoverySettingsStandby[] = {
 		{ "standby_mode", "'on'" },
 		{ "primary_conninfo", (char *) primaryConnInfo },
 		{ "primary_slot_name", (char *) primarySlotName },
-		{ "recovery_target_timeline", "'latest'" },
+		{ "recovery_target_timeline", (char *) targetTimeline },
 		{ NULL, NULL }
 	};
 
@@ -1933,10 +1949,10 @@ pg_write_recovery_conf(const char *pgdata, ReplicationSource *replicationSource)
 		{ "standby_mode", "'on'" },
 		{ "primary_conninfo", (char *) primaryConnInfo },
 		{ "primary_slot_name", (char *) primarySlotName },
-		{ "recovery_target_timeline", "'latest'" },
+		{ "recovery_target_timeline", (char *) targetTimeline },
 		{ "recovery_target_lsn", (char *) targetLSN },
 		{ "recovery_target_inclusive", "'true'" },
-		{ "recovery_target_action", "'pause'" },
+		{ "recovery_target_action", (char *) targetAction },
 		{ NULL, NULL }
 	};
 
@@ -1955,7 +1971,9 @@ pg_write_recovery_conf(const char *pgdata, ReplicationSource *replicationSource)
 								   replicationSource,
 								   primaryConnInfo,
 								   primarySlotName,
-								   targetLSN))
+								   targetLSN,
+								   targetAction,
+								   targetTimeline))
 	{
 		/* errors have already been logged */
 		return false;
@@ -1986,21 +2004,23 @@ pg_write_standby_signal(const char *pgdata,
 	char primaryConnInfo[MAXCONNINFO] = { 0 };
 	char primarySlotName[MAXCONNINFO] = { 0 };
 	char targetLSN[PG_LSN_MAXLENGTH] = { 0 };
+	char targetAction[NAMEDATALEN] = { 0 };
+	char targetTimeline[NAMEDATALEN] = { 0 };
 
 	GUC recoverySettingsStandby[] = {
 		{ "primary_conninfo", (char *) primaryConnInfo },
 		{ "primary_slot_name", (char *) primarySlotName },
-		{ "recovery_target_timeline", "'latest'" },
+		{ "recovery_target_timeline", (char *) targetTimeline },
 		{ NULL, NULL }
 	};
 
 	GUC recoverySettingsTargetLSN[] = {
 		{ "primary_conninfo", (char *) primaryConnInfo },
 		{ "primary_slot_name", (char *) primarySlotName },
-		{ "recovery_target_timeline", "'latest'" },
+		{ "recovery_target_timeline", (char *) targetTimeline },
 		{ "recovery_target_lsn", (char *) targetLSN },
 		{ "recovery_target_inclusive", "'true'" },
-		{ "recovery_target_action", "'pause'" },
+		{ "recovery_target_action", targetAction },
 		{ NULL, NULL }
 	};
 
@@ -2017,7 +2037,9 @@ pg_write_standby_signal(const char *pgdata,
 								   replicationSource,
 								   primaryConnInfo,
 								   primarySlotName,
-								   targetLSN))
+								   targetLSN,
+								   targetAction,
+								   targetTimeline))
 	{
 		/* errors have already been logged */
 		return false;
@@ -2093,7 +2115,9 @@ prepare_recovery_settings(const char *pgdata,
 						  ReplicationSource *replicationSource,
 						  char *primaryConnInfo,
 						  char *primarySlotName,
-						  char *targetLSN)
+						  char *targetLSN,
+						  char *targetAction,
+						  char *targetTimeline)
 {
 	bool escape = true;
 	NodeAddress *primaryNode = &(replicationSource->primaryNode);
@@ -2137,11 +2161,33 @@ prepare_recovery_settings(const char *pgdata,
 				replicationSource->slotName);
 	}
 
+	/* The default target timeline is 'latest' */
+	if (IS_EMPTY_STRING_BUFFER(replicationSource->targetTimeline))
+	{
+		sformat(targetTimeline, NAMEDATALEN, "'latest'");
+	}
+	else
+	{
+		sformat(targetTimeline, NAMEDATALEN, "'%s'",
+				replicationSource->targetTimeline);
+	}
+
 	/* We use the targetLSN only when doing a WAL fast_forward operation */
 	if (!IS_EMPTY_STRING_BUFFER(replicationSource->targetLSN))
 	{
 		sformat(targetLSN, PG_LSN_MAXLENGTH, "'%s'",
 				replicationSource->targetLSN);
+	}
+
+	/* The default target Action is 'pause' */
+	if (IS_EMPTY_STRING_BUFFER(replicationSource->targetAction))
+	{
+		sformat(targetAction, NAMEDATALEN, "'pause'");
+	}
+	else
+	{
+		sformat(targetAction, NAMEDATALEN, "'%s'",
+				replicationSource->targetAction);
 	}
 
 	return true;

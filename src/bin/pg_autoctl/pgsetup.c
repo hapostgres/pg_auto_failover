@@ -700,6 +700,8 @@ fprintf_pg_setup(FILE *stream, PostgresSetup *pgSetup)
 	fformat(stream, "pid:                   %d\n", pgSetup->pidFile.pid);
 	fformat(stream, "is in recovery:        %s\n",
 			pgSetup->is_in_recovery ? "yes" : "no");
+	fformat(stream, "Control cluster state: %s\n",
+			dbstateToString(pgSetup->control.state));
 	fformat(stream, "Control Version:       %u\n",
 			pgSetup->control.pg_control_version);
 	fformat(stream, "Catalog Version:       %u\n",
@@ -1986,4 +1988,49 @@ pgsetup_hba_level_to_string(HBAEditLevel hbaLevel)
 
 	log_error("BUG: hbaLevel %d is unknown", hbaLevel);
 	return "unknown";
+}
+
+
+/*
+ * dbstateToString returns a string from a pgControlFile state enum.
+ */
+const char *
+dbstateToString(DBState state)
+{
+	switch (state)
+	{
+		case DB_STARTUP:
+		{
+			return _("starting up");
+		}
+
+		case DB_SHUTDOWNED:
+		{
+			return _("shut down");
+		}
+
+		case DB_SHUTDOWNED_IN_RECOVERY:
+		{
+			return _("shut down in recovery");
+		}
+
+		case DB_SHUTDOWNING:
+		{
+			return _("shutting down");
+		}
+
+		case DB_IN_CRASH_RECOVERY:
+		{
+			return _("in crash recovery");
+		}
+
+		case DB_IN_ARCHIVE_RECOVERY:
+		{
+			return _("in archive recovery");
+		}
+
+		case DB_IN_PRODUCTION:
+			return _("in production");
+	}
+	return _("unrecognized status code");
 }
