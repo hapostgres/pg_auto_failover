@@ -2657,7 +2657,7 @@ monitor_print_formation_settings(Monitor *monitor, char *formation)
 								   paramCount, paramTypes, paramValues,
 								   &context, &printFormationSettings))
 	{
-		log_error("Failed to retrieve current state from the monitor");
+		log_error("Failed to retrieve formation settings from the monitor");
 		return false;
 	}
 
@@ -2666,7 +2666,8 @@ monitor_print_formation_settings(Monitor *monitor, char *formation)
 
 	if (!context.parsedOK)
 	{
-		log_error("Failed to parse current state from the monitor");
+		log_error("Failed to parse formation settings from the monitor "
+				  "for formation \"%s\"", formation);
 		return false;
 	}
 
@@ -2693,6 +2694,13 @@ printFormationSettings(void *ctx, PGresult *result)
 	char nameSeparatorHeader[BUFSIZE] = { 0 };
 	char settingSeparatorHeader[BUFSIZE] = { 0 };
 	char valueSeparatorHeader[BUFSIZE] = { 0 };
+
+	if (nTuples == 0)
+	{
+		log_debug("Query returned 0 rows");
+		context->parsedOK = false;
+		return;
+	}
 
 	if (PQnfields(result) != 6)
 	{

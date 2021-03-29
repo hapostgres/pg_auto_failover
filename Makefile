@@ -77,11 +77,11 @@ AZURE_LOCATION ?= francecentral
 # Pick a version of Postgres and pg_auto_failover packages to install
 # in our target Azure VMs when provisionning
 #
-#  sudo apt-get install -q -y postgresql-13-auto-failover-1.4=1.4.1
+#  sudo apt-get install -q -y postgresql-13-auto-failover-1.5=1.5.1
 #  postgresql-${AZ_PG_VERSION}-auto-failover-${AZ_PGAF_DEB_VERSION}=${AZ_PGAF_VERSION}
 AZ_PG_VERSION ?= 13
-AZ_PGAF_DEB_VERSION ?= 1.4
-AZ_PGAF_DEB_REVISION ?= 1.4.2-1
+AZ_PGAF_DEB_VERSION ?= 1.5
+AZ_PGAF_DEB_REVISION ?= 1.5.1-1
 
 export AZ_PG_VERSION
 export AZ_PGAF_DEB_VERSION
@@ -162,8 +162,10 @@ pdf: $(PDF)
 $(PDF):
 	$(MAKE) -s -C docs/tikz pdf
 	perl -pi -e 's/(^.. figure:: .*)\.svg/\1.pdf/' docs/*.rst
+	perl -pi -e 's/▒/~/g' docs/ref/pg_autoctl_do_demo.rst
 	$(MAKE) -s -C docs latexpdf
 	perl -pi -e 's/(^.. figure:: .*)\.pdf/\1.svg/' docs/*.rst
+	perl -pi -e 's/~/▒/g' docs/ref/pg_autoctl_do_demo.rst
 	ls -l $@
 
 $(FSM): bin

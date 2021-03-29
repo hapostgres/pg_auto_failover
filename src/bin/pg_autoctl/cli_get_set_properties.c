@@ -333,6 +333,8 @@ cli_get_formation_number_sync_standbys(int argc, char **argv)
 													config.formation,
 													&numberSyncStandbys))
 	{
+		log_error("Failed to get number-sync-standbys for formation \"%s\"",
+				  config.formation);
 		exit(EXIT_CODE_MONITOR);
 	}
 
