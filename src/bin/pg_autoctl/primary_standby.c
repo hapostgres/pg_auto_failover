@@ -878,6 +878,15 @@ standby_init_database(LocalPostgresServer *postgres,
 
 		if (hasReplicationSlot)
 		{
+			/* first, make sure we can connect with "replication" */
+			if (!pgctl_identify_system(upstream))
+			{
+				log_error("Failed to connect to the primary with a replication "
+						  "connection string. See above for details");
+				return false;
+			}
+
+			/* now pg_basebackup from our upstream node */
 			if (!pg_basebackup(pgSetup->pgdata, pgSetup->pg_ctl, upstream))
 			{
 				return false;
