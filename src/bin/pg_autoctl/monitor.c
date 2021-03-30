@@ -4094,6 +4094,7 @@ monitor_ensure_extension_version(Monitor *monitor,
 					  "on the monitor, see above for details",
 					  PG_AUTOCTL_MONITOR_EXTENSION_NAME,
 					  extensionVersion);
+
 			/* explicitly close the dbOwner connection to the monitor */
 			pgsql_finish(&(dbOwnerMonitor.pgsql));
 			return false;
