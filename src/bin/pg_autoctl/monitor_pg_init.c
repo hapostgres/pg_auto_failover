@@ -199,9 +199,6 @@ monitor_install(const char *hostname,
 		return false;
 	}
 
-	/* we're done with that connection to "postgres" database */
-	pgsql_finish(&postgres.sqlClient);
-
 	/* now, connect to the newly created database to create our extension */
 	strlcpy(pgSetup.dbname, PG_AUTOCTL_MONITOR_DBNAME, NAMEDATALEN);
 	pg_setup_get_local_connection_string(&pgSetup, connInfo);
@@ -241,8 +238,6 @@ monitor_install(const char *hostname,
 			return false;
 		}
 	}
-
-	pgsql_finish(&postgres.sqlClient);
 
 	log_info("Your pg_auto_failover monitor instance is now ready on port %d.",
 			 pgSetup.pgport);

@@ -94,6 +94,20 @@ typedef struct ConnectionRetryPolicy
 	int attempts;               /* how many attempts have been made so far */
 } ConnectionRetryPolicy;
 
+/*
+ * Denote if the connetion is going to be used for one, or multiple statements.
+ * This is used by psql_* functions to know if a connection is to be closed
+ * after successful completion, or if the the connection is to be maintained
+ * open for further queries.
+ *
+ * A common use case for maintaining a connection open, is while wishing to open
+ * and maintain a transaction block. Another, is while listening for events.
+ */
+typedef enum
+{
+	PGSQL_CONNECTION_SINGLE_STATEMENT = 0,
+	PGSQL_CONNECTION_MULTI_STATEMENT
+} ConnectionStatementType;
 
 /*
  * Allow higher level code to distinguish between failure to connect to the
@@ -118,6 +132,7 @@ typedef bool (*ProcessNotificationFunction)(int notificationGroupId,
 typedef struct PGSQL
 {
 	ConnectionType connectionType;
+	ConnectionStatementType connectionStatementType;
 	char connectionString[MAXCONNINFO];
 	PGconn *connection;
 	ConnectionRetryPolicy retryPolicy;
@@ -261,6 +276,9 @@ bool pgsql_retry_policy_expired(ConnectionRetryPolicy *retryPolicy);
 void pgsql_finish(PGSQL *pgsql);
 void parseSingleValueResult(void *ctx, PGresult *result);
 void fetchedRows(void *ctx, PGresult *result);
+bool pgsql_begin(PGSQL *pgsql);
+bool pgsql_commit(PGSQL *pgsql);
+bool pgsql_rollback(PGSQL *pgsql);
 bool pgsql_execute(PGSQL *pgsql, const char *sql);
 bool pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 							   const Oid *paramTypes, const char **paramValues,
@@ -310,6 +328,7 @@ bool pgsql_has_reached_target_lsn(PGSQL *pgsql, char *targetLSN,
 								  char *currentLSN, bool *hasReachedLSN);
 bool pgsql_identify_system(PGSQL *pgsql);
 bool pgsql_listen(PGSQL *pgsql, char *channels[]);
+bool pgsql_prepare_to_wait(PGSQL *pgsql);
 
 bool pgsql_alter_extension_update_to(PGSQL *pgsql,
 									 const char *extname, const char *version);

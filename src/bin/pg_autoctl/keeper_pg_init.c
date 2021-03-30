@@ -548,12 +548,21 @@ wait_until_primary_is_ready(Keeper *keeper,
 			KeeperStateData *keeperState = &(keeper->state);
 			int timeoutMs = PG_AUTOCTL_KEEPER_SLEEP_TIME * 1000;
 
+			(void) pgsql_prepare_to_wait(&(monitor->notificationClient));
 			(void) monitor_wait_for_state_change(monitor,
 												 keeper->config.formation,
 												 keeperState->current_group,
 												 keeperState->current_node_id,
 												 timeoutMs,
 												 &groupStateHasChanged);
+
+			/* when no state change has been notified, close the connection */
+			if (!groupStateHasChanged &&
+				monitor->notificationClient.connectionStatementType ==
+				PGSQL_CONNECTION_MULTI_STATEMENT)
+			{
+				pgsql_finish(&(monitor->notificationClient));
+			}
 		}
 
 		if (!monitor_node_active(&(keeper->monitor),

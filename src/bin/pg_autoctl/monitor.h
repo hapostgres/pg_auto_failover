@@ -21,6 +21,7 @@
 typedef struct Monitor
 {
 	PGSQL pgsql;
+	PGSQL notificationClient;
 	MonitorConfig config;
 } Monitor;
 

@@ -421,6 +421,8 @@ pgsql_finish(PGSQL *pgsql)
 		 * status.
 		 */
 	}
+
+	pgsql->connectionStatementType = PGSQL_CONNECTION_SINGLE_STATEMENT;
 }
 
 
@@ -468,6 +470,13 @@ pgsql_open_connection(PGSQL *pgsql)
 	/* we might be connected already */
 	if (pgsql->connection != NULL)
 	{
+		if (pgsql->connectionStatementType != PGSQL_CONNECTION_MULTI_STATEMENT)
+		{
+			log_error("BUG: requested to open an already open connection in "
+					  "non PGSQL_CONNECTION_MULTI_STATEMENT mode");
+			pgsql_finish(pgsql);
+			return NULL;
+		}
 		return pgsql->connection;
 	}
 
@@ -832,6 +841,101 @@ pgAutoCtlDebugNoticeProcessor(void *arg, const char *message)
 
 
 /*
+ * pgsql_begin is responsible for opening a mutli statement connection and
+ * opening a transaction block by issuing a 'BEGIN' query.
+ */
+bool
+pgsql_begin(PGSQL *pgsql)
+{
+	PGconn *connection;
+
+	pgsql->connectionStatementType = PGSQL_CONNECTION_MULTI_STATEMENT;
+	connection = pgsql_open_connection(pgsql);
+	if (connection == NULL)
+	{
+		/* error message was logged in pgsql_open_connection */
+		return false;
+	}
+
+	return pgsql_execute(pgsql, "BEGIN");
+}
+
+
+/*
+ * pgsql_rollback is responsible for issuing a 'ROLLBACK' query to an already
+ * opened transaction, usually via a previous pgsql_begin() command.
+ *
+ * It closes the connection but leaves the error contents, if any, for the user
+ * to examine should it is wished for.
+ */
+bool
+pgsql_rollback(PGSQL *pgsql)
+{
+	bool result;
+
+	if (pgsql->connectionStatementType != PGSQL_CONNECTION_MULTI_STATEMENT ||
+		pgsql->connection == NULL)
+	{
+		log_error("BUG: call to pgsql_rollback without holding an open "
+				  "multi statement connection");
+		return false;
+	}
+
+	result = pgsql_execute(pgsql, "ROLLBACK");
+
+	/*
+	 * Connection might be be closed during the pgsql_execute(), notably in case
+	 * of error. Be explicit and close it regardless though.
+	 */
+	if (pgsql->connection)
+	{
+		pgsql_finish(pgsql);
+	}
+
+	return result;
+}
+
+
+/*
+ * pgsql_commit is responsible for issuing a 'COMMIT' query to an already
+ * opened transaction, usually via a previous pgsql_begin() command.
+ *
+ * It closes the connection but leaves the error contents, if any, for the user
+ * to examine should it is wished for.
+ */
+bool
+pgsql_commit(PGSQL *pgsql)
+{
+	bool result;
+
+	if (pgsql->connectionStatementType != PGSQL_CONNECTION_MULTI_STATEMENT ||
+		pgsql->connection == NULL)
+	{
+		log_error("BUG: call to pgsql_commit() without holding an open "
+				  "multi statement connection");
+		if (pgsql->connection)
+		{
+			pgsql_finish(pgsql);
+		}
+		return false;
+	}
+
+	result = pgsql_execute(pgsql, "COMMIT");
+
+	/*
+	 * Connection might be be closed during the pgsql_execute(), notably in case
+	 * of error. Be explicit and close it regardless though.
+	 */
+	if (pgsql->connection)
+	{
+		pgsql_finish(pgsql);
+	}
+
+	return result;
+}
+
+
+/*
  * pgsql_execute opens a connection, runs a given SQL command, and closes
  * the connection again.
  *
@@ -981,6 +1085,11 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 
 	PQclear(result);
 	clear_results(pgsql);
+	if (pgsql->connectionStatementType == PGSQL_CONNECTION_SINGLE_STATEMENT)
+	{
+		PQfinish(pgsql->connection);
+		pgsql->connection = NULL;
+	}
 
 	return true;
 }
@@ -1920,6 +2029,10 @@ pgsql_create_database(PGSQL *pgsql, const char *dbname, const char *owner)
 
 	PQclear(result);
 	clear_results(pgsql);
+	if (pgsql->connectionStatementType == PGSQL_CONNECTION_SINGLE_STATEMENT)
+	{
+		pgsql_finish(pgsql);
+	}
 
 	return true;
 }
@@ -1978,6 +2091,10 @@ pgsql_create_extension(PGSQL *pgsql, const char *name)
 
 	PQclear(result);
 	clear_results(pgsql);
+	if (pgsql->connectionStatementType == PGSQL_CONNECTION_SINGLE_STATEMENT)
+	{
+		pgsql_finish(pgsql);
+	}
 
 	return true;
 }
@@ -2109,6 +2226,10 @@ pgsql_create_user(PGSQL *pgsql, const char *userName, const char *password,
 
 	PQclear(result);
 	clear_results(pgsql);
+	if (pgsql->connectionStatementType == PGSQL_CONNECTION_SINGLE_STATEMENT)
+	{
+		pgsql_finish(pgsql);
+	}
 
 	/* restore the normal notice message processing, if needed. */
 	PQsetNoticeProcessor(connection, previousNoticeProcessor, NULL);
@@ -2741,6 +2862,12 @@ pgsql_listen(PGSQL *pgsql, char *channels[])
 	PGresult *result = NULL;
 	char sql[BUFSIZE];
 
+	/*
+	 * mark the connection as multi statement since it is going to be used by
+	 * for processing notifications
+	 */
+	pgsql->connectionStatementType = PGSQL_CONNECTION_MULTI_STATEMENT;
+
 	/* open a connection upfront since it is needed by PQescape functions */
 	PGconn *connection = pgsql_open_connection(pgsql);
 	if (connection == NULL)
@@ -2780,6 +2907,34 @@ pgsql_listen(PGSQL *pgsql, char *channels[])
 
 		PQclear(result);
 		clear_results(pgsql);
+	}
+
+	return true;
+}
+
+
+/*
+ * Preapre a multi statement connection which can later be used in wait for
+ * notification functions.
+ *
+ * Contrarry to pgsql_listen, this function, only prepares the connection and it
+ * is the user's responsibility to define which channels to listen to.
+ */
+bool
+pgsql_prepare_to_wait(PGSQL *pgsql)
+{
+	/*
+	 * mark the connection as multi statement since it is going to be used by
+	 * for processing notifications
+	 */
+	pgsql->connectionStatementType = PGSQL_CONNECTION_MULTI_STATEMENT;
+
+	/* open a connection upfront since it is needed by PQescape functions */
+	PGconn *connection = pgsql_open_connection(pgsql);
+	if (connection == NULL)
+	{
+		/* error message was logged in pgsql_open_connection */
+		return false;
 	}
 
 	return true;

@@ -279,6 +279,8 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 
 			bool groupStateHasChanged = false;
 
+			/* establish a connection for notifications if none present */
+			(void) pgsql_prepare_to_wait(&(monitor->notificationClient));
 			(void) monitor_wait_for_state_change(monitor,
 												 config->formation,
 												 keeperState->current_group,
@@ -287,9 +289,11 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 												 &groupStateHasChanged);
 
 			/* when no state change has been notified, close the connection */
-			if (!groupStateHasChanged)
+			if (!groupStateHasChanged &&
+				monitor->notificationClient.connectionStatementType ==
+				PGSQL_CONNECTION_MULTI_STATEMENT)
 			{
-				pgsql_finish(&(keeper->monitor.pgsql));
+				pgsql_finish(&(monitor->notificationClient));
 			}
 		}
 		else if (doSleep && config->monitorDisabled)
@@ -393,7 +397,6 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 				continue;
 			}
 		}
-
 		/*
 		 * If the monitor is not disabled, call the node_active function on the
 		 * monitor and update the keeper data structure accordingy, refreshing
@@ -589,6 +592,9 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 			warnedOnCurrentIteration = false;
 		}
 	}
+
+	/* One last check that we do not have any connections open */
+	pgsql_finish(&(keeper->monitor.pgsql));
 
 	return true;
 }
