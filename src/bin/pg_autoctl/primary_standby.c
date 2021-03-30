@@ -6,6 +6,7 @@
  * Licensed under the PostgreSQL License.
  *
  */
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
