@@ -4094,8 +4094,13 @@ monitor_ensure_extension_version(Monitor *monitor,
 					  "on the monitor, see above for details",
 					  PG_AUTOCTL_MONITOR_EXTENSION_NAME,
 					  extensionVersion);
+			/* explicitly close the dbOwner connection to the monitor */
+			pgsql_finish(&(dbOwnerMonitor.pgsql));
 			return false;
 		}
+
+		/* explicitly close the dbOwner connection to the monitor */
+		pgsql_finish(&(dbOwnerMonitor.pgsql));
 
 		if (!monitor_get_extension_version(monitor, version))
 		{
@@ -4206,6 +4211,9 @@ prepare_connection_to_current_system_user(Monitor *source, Monitor *target)
 		PQconninfoFree(conninfo);
 		return false;
 	}
+
+	/* Finally mark the connection as multi statement */
+	target->pgsql.connectionStatementType = PGSQL_CONNECTION_MULTI_STATEMENT;
 
 	PQconninfoFree(conninfo);
 
