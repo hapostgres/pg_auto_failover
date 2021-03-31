@@ -664,7 +664,7 @@ find_extension_control_file(const char *pg_ctl, const char *extName)
 
 	if (!find_pg_config_from_pg_ctl(pg_ctl, pg_config_path, MAXPGPATH))
 	{
-		/* errors have already been logged */
+		log_warn("Failed to find pg_config from pg_ctl at \"%s\"", pg_ctl);
 		return false;
 	}
 
@@ -691,7 +691,8 @@ find_extension_control_file(const char *pg_ctl, const char *extName)
 		join_path_components(extension_path, extension_path, extension_control_file_name);
 		if (!file_exists(extension_path))
 		{
-			log_error("Failed to find extension control file \"%s\"", extension_path);
+			log_error("Failed to find extension control file \"%s\"",
+					  extension_path);
 			free_program(&prog);
 			return false;
 		}
