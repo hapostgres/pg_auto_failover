@@ -3986,19 +3986,19 @@ monitor_extension_update(Monitor *monitor, const char *targetVersion)
 	{
 		/*
 		 * Ensure "btree_gist" is available in the server extension dir used to
-		 * create the Postgres instance.
+		 * create the Postgres instance. We only search for the control file to
+		 * offer better diagnostics in the logs in case the following CREATE
+		 * EXTENSION fails.
 		 */
 		char *btreeGistExtName = "btree_gist";
 
 		if (!find_extension_control_file(monitor->config.pgSetup.pg_ctl,
 										 btreeGistExtName))
 		{
-			log_error("Failed to find extension control file for \"%s\"",
-					  btreeGistExtName);
+			log_warn("Failed to find extension control file for \"%s\"",
+					 btreeGistExtName);
 			log_info("You might have to install a PostgreSQL contrib package");
-			return false;
 		}
-
 
 		if (!pgsql_create_extension(pgsql, btreeGistExtName))
 		{

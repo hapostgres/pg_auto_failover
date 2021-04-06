@@ -848,26 +848,28 @@ create_database_and_extension(Keeper *keeper)
 
 	/*
 	 * Ensure pg_stat_statements is available in the server extension dir used
-	 * to create the Postgres instance.
+	 * to create the Postgres instance. We only search for the control file to
+	 * offer better diagnostics in the logs in case the following CREATE
+	 * EXTENSION fails.
 	 */
 	if (!find_extension_control_file(config->pgSetup.pg_ctl,
 									 "pg_stat_statements"))
 	{
-		log_error("Failed to find extension control file for "
-				  "\"pg_stat_statements\"");
-		exit(EXIT_CODE_EXTENSION_MISSING);
+		log_warn("Failed to find extension control file for "
+				 "\"pg_stat_statements\"");
 	}
 
 	/*
 	 * Ensure citus extension is available in the server extension dir used to
-	 * create the Postgres instance.
+	 * create the Postgres instance. We only search for the control file to
+	 * offer better diagnostics in the logs in case the following CREATE
+	 * EXTENSION fails.
 	 */
 	if (IS_CITUS_INSTANCE_KIND(postgres->pgKind))
 	{
 		if (!find_extension_control_file(config->pgSetup.pg_ctl, "citus"))
 		{
-			log_error("Failed to find extension control file for \"citus\"");
-			exit(EXIT_CODE_EXTENSION_MISSING);
+			log_warn("Failed to find extension control file for \"citus\"");
 		}
 	}
 
