@@ -1046,7 +1046,7 @@ RemoveNode(AutoFailoverNode *currentNode)
 		 */
 		if (nodeCount > 0 && candidates == 0)
 		{
-			ereport(ERROR,
+			ereport(NOTICE,
 					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 					 errmsg("cannot remove current primary node " NODE_FORMAT,
 							NODE_FORMAT_ARGS(currentNode)),
@@ -1185,7 +1185,8 @@ perform_failover(PG_FUNCTION_ARGS)
 	}
 
 	/* get a current primary node that we can failover from (accepts writes) */
-	AutoFailoverNode *primaryNode = GetNodeToFailoverFromInGroup(formationId, groupId);
+	AutoFailoverNode *primaryNode =
+		GetNodeToFailoverFromInGroup(formationId, groupId);
 
 	if (primaryNode == NULL)
 	{
@@ -1246,11 +1247,11 @@ perform_failover(PG_FUNCTION_ARGS)
 					(errmsg(
 						 "cannot fail over: primary node is not in a stable state"),
 					 errdetail(NODE_FORMAT
-							   "has reported state \"%s\" and "
-							   "is assigned state \"%s\", "
-							   "and " NODE_FORMAT
-							   "has reported state \"%s\" "
-							   "and is assigned state \"%s\"",
+							   " has reported state \"%s\" and"
+							   " is assigned state \"%s\","
+							   " and " NODE_FORMAT
+							   " has reported state \"%s\""
+							   " and is assigned state \"%s\"",
 							   NODE_FORMAT_ARGS(primaryNode),
 							   ReplicationStateGetName(primaryNode->reportedState),
 							   ReplicationStateGetName(primaryNode->goalState),
@@ -1315,7 +1316,8 @@ perform_promotion(PG_FUNCTION_ARGS)
 	char *nodeName = text_to_cstring(nodeNameText);
 
 
-	AutoFailoverNode *currentNode = GetAutoFailoverNodeByName(formationId, nodeName);
+	AutoFailoverNode *currentNode =
+		GetAutoFailoverNodeByName(formationId, nodeName);
 
 	if (currentNode == NULL)
 	{
@@ -1352,7 +1354,8 @@ perform_promotion(PG_FUNCTION_ARGS)
 	 * would still be able to implement a failover given another secondary node
 	 * being around.
 	 */
-	if (!IsCurrentState(currentNode, REPLICATION_STATE_SECONDARY))
+	if (!IsCurrentState(currentNode, REPLICATION_STATE_SECONDARY) &&
+		!IsCurrentState(currentNode, REPLICATION_STATE_REPORT_LSN))
 	{
 		/* return false: no promotion is happening */
 		ereport(ERROR,
@@ -1398,16 +1401,7 @@ perform_promotion(PG_FUNCTION_ARGS)
 		 *  - when the node reaches WAIT_PRIMARY again, after promotion, reset
 		 *    its candidate priority.
 		 */
-		if (currentNode->candidatePriority == 0)
-		{
-			ereport(ERROR,
-					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-					 errmsg("cannot perform promotion: node %s in formation %s "
-							"has a candidate priority of 0 (zero).",
-							nodeName, formationId)));
-		}
-
-		currentNode->candidatePriority += MAX_USER_DEFINED_CANDIDATE_PRIORITY;
+		currentNode->candidatePriority += CANDIDATE_PRIORITY_INCREMENT;
 
 		ReportAutoFailoverNodeReplicationSetting(
 			currentNode->nodeId,
@@ -1836,11 +1830,13 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 
 		if (nonZeroCandidatePriorityNodeCount < 2)
 		{
-			ereport(ERROR,
+			ereport(NOTICE,
 					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-					 errmsg("cannot set candidate priority to zero, we must "
-							"have at least two nodes with non-zero candidate "
-							"priority to allow for a failover")));
+					 errmsg("setting candidate priority to zero, preventing "
+							"automated failover"),
+					 errdetail("Group %d in formation \"%s\" have no "
+							   "failover candidate.",
+							   currentNode->groupId, formationId)));
 		}
 	}
 
@@ -1873,15 +1869,32 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 			GetPrimaryNodeInGroup(currentNode->formationId,
 								  currentNode->groupId);
 
-		if (primaryNode == NULL)
+		/*
+		 * If we allow setting changes during APPLY_SETTINGS we open the door
+		 * for race conditions where we can't be sure that the latest changes
+		 * have been applied.
+		 *
+		 * If we don't currently have a primary node anyway, we can just
+		 * proceed with the change.
+		 */
+		if (primaryNode &&
+			!IsCurrentState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS))
 		{
-			ereport(ERROR,
-					(errmsg("couldn't find the primary node in "
-							"formation \"%s\", group %d",
-							currentNode->formationId, currentNode->groupId)));
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of " NODE_FORMAT
+				" to apply_settings after updating " NODE_FORMAT
+				" candidate priority to %d.",
+				NODE_FORMAT_ARGS(primaryNode),
+				NODE_FORMAT_ARGS(currentNode),
+				currentNode->candidatePriority);
+
+			SetNodeGoalState(primaryNode,
+							 REPLICATION_STATE_APPLY_SETTINGS, message);
 		}
 
-		if (!IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY))
+		/* if primaryNode is not NULL, then current state is APPLY_SETTINGS */
+		else if (primaryNode)
 		{
 			ereport(ERROR,
 					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -1889,22 +1902,10 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 							"for primary " NODE_FORMAT
 							" is \"%s\"",
 							NODE_FORMAT_ARGS(primaryNode),
-							ReplicationStateGetName(primaryNode->reportedState)),
-					 errdetail("The primary node so must be in state \"primary\" "
-							   "to be able to apply configuration changes to "
-							   "its synchronous_standby_names setting")));
+							ReplicationStateGetName(primaryNode->reportedState))));
 		}
 
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to apply_settings after updating " NODE_FORMAT
-			" candidate priority to %d.",
-			NODE_FORMAT_ARGS(primaryNode),
-			NODE_FORMAT_ARGS(currentNode),
-			currentNode->candidatePriority);
-
-		SetNodeGoalState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS, message);
+		/* other case is that we failed to find a primary node, proceed */
 	}
 
 	PG_RETURN_BOOL(true);

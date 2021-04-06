@@ -896,13 +896,13 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 			 * there's a single standby in the group, pg_auto_failover choice
 			 * is to maintain availability of the service, including writes.
 			 *
-			 * In the case when the user has setup a replication quorum of 2 or
+			 * In the case when the user has setup a replication quorum of 1 or
 			 * more, then pg_auto_failover does not get in the way. You get
 			 * what you ask for, which is a strong guarantee on durability.
 			 *
-			 * To have number_sync_standbys == 2, you need to have at least 3
+			 * To have number_sync_standbys == 1, you need to have at least 2
 			 * standby servers. To get to a point where writes are not possible
-			 * anymore, there needs to be a point in time where 2 of the 3
+			 * anymore, there needs to be a point in time where 2 of the 2
 			 * standby nodes are unavailable. In that case, pg_auto_failover
 			 * does not change the configured trade-offs. Writes are blocked
 			 * until one of the two defective standby nodes is available again.
@@ -911,7 +911,8 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 				failoverCandidateCount == 0)
 			{
 				ReplicationState primaryGoalState =
-					formation->number_sync_standbys == 0
+					formation->number_sync_standbys == 0 ||
+					potentialCandidateCount == 0
 					? REPLICATION_STATE_WAIT_PRIMARY
 					: REPLICATION_STATE_PRIMARY;
 
@@ -1596,7 +1597,7 @@ PromoteSelectedNode(AutoFailoverNode *selectedNode,
 	{
 		char message[BUFSIZE] = { 0 };
 
-		selectedNode->candidatePriority -= MAX_USER_DEFINED_CANDIDATE_PRIORITY;
+		selectedNode->candidatePriority -= CANDIDATE_PRIORITY_INCREMENT;
 
 		ReportAutoFailoverNodeReplicationSetting(
 			selectedNode->nodeId,

@@ -252,10 +252,26 @@ cli_perform_failover(int argc, char **argv)
 	Monitor monitor = { 0 };
 
 	char *channels[] = { "state", NULL };
-
 	(void) cli_monitor_init_from_option_or_config(&monitor, &config);
 
 	(void) cli_set_groupId(&monitor, &config);
+
+	NodeState targetState = PRIMARY_STATE;
+	int failoverCandidateCount = 0;
+
+	if (!monitor_count_failover_candidates(&monitor,
+										   config.formation,
+										   config.groupId,
+										   &failoverCandidateCount))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_MONITOR);
+	}
+
+	if (failoverCandidateCount == 0)
+	{
+		targetState = WAIT_PRIMARY_STATE;
+	}
 
 	/* start listening to the state changes before we call perform_failover */
 	if (!pgsql_listen(&(monitor.notificationClient), channels))
@@ -276,7 +292,7 @@ cli_perform_failover(int argc, char **argv)
 													 config.formation,
 													 config.groupId,
 													 config.pgSetup.pgKind,
-													 PRIMARY_STATE))
+													 targetState))
 	{
 		log_error("Failed to wait until a new primary has been notified");
 		exit(EXIT_CODE_INTERNAL_ERROR);
@@ -317,6 +333,23 @@ cli_perform_promotion(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
+	NodeState targetState = PRIMARY_STATE;
+	int failoverCandidateCount = 0;
+
+	if (!monitor_count_failover_candidates(monitor,
+										   config->formation,
+										   config->groupId,
+										   &failoverCandidateCount))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_MONITOR);
+	}
+
+	if (failoverCandidateCount == 0)
+	{
+		targetState = WAIT_PRIMARY_STATE;
+	}
+
 	/* start listening to the state changes before we call perform_promotion */
 	if (!pgsql_listen(&(monitor->notificationClient), channels))
 	{
@@ -336,7 +369,7 @@ cli_perform_promotion(int argc, char **argv)
 														 config->formation,
 														 groupId,
 														 nodeKind,
-														 PRIMARY_STATE))
+														 targetState))
 		{
 			log_error("Failed to wait until a new primary has been notified");
 			exit(EXIT_CODE_INTERNAL_ERROR);
