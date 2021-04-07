@@ -187,9 +187,8 @@ def test_007_create_t1():
     node1.run_sql_query("CHECKPOINT")
 
 
-@raises(Exception)
 def test_008a_set_candidate_priorities_to_zero():
-    # we need two nodes with non-zero candidate priority
+    # we allow manual setups where all nodes have candidate priority zero
     node1.set_candidate_priority(0)
     node2.set_candidate_priority(0)
 
