@@ -1095,7 +1095,16 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 
 		PQclear(result);
 		clear_results(pgsql);
-		pgsql_finish(pgsql);
+
+		/*
+		 * Multi statements might want to ROLLBACK and hold to the open
+		 * connection for a retry step.
+		 */
+		if (pgsql->connectionStatementType == PGSQL_CONNECTION_SINGLE_STATEMENT)
+		{
+			PQfinish(pgsql->connection);
+			pgsql->connection = NULL;
+		}
 
 		return false;
 	}
