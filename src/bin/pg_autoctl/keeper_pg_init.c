@@ -511,6 +511,12 @@ reach_initial_state(Keeper *keeper)
 			break;
 		}
 
+		case REPORT_LSN_STATE:
+		{
+			/* all the work is done in the INIT ➜ REPORT_LSN transition */
+			break;
+		}
+
 		default:
 
 			/* we don't support any other state at initialization time */

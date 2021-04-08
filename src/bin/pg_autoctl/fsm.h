@@ -69,6 +69,8 @@ bool fsm_prepare_cascade(Keeper *keeper);
 bool fsm_follow_new_primary(Keeper *keeper);
 bool fsm_cleanup_and_resume_as_primary(Keeper *keeper);
 
+bool fsm_init_from_standby(Keeper *keeper);
+
 /*
  * Extra helpers.
  */

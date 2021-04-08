@@ -868,7 +868,8 @@ standby_init_database(LocalPostgresServer *postgres,
 		 */
 		bool hasReplicationSlot = false;
 
-		if (!upstream_has_replication_slot(upstream,
+		if (!IS_EMPTY_STRING_BUFFER(upstream->slotName) &&
+			!upstream_has_replication_slot(upstream,
 										   pgSetup,
 										   &hasReplicationSlot))
 		{
@@ -876,7 +877,7 @@ standby_init_database(LocalPostgresServer *postgres,
 			return false;
 		}
 
-		if (hasReplicationSlot)
+		if (IS_EMPTY_STRING_BUFFER(upstream->slotName) || hasReplicationSlot)
 		{
 			/* first, make sure we can connect with "replication" */
 			if (!pgctl_identify_system(upstream))

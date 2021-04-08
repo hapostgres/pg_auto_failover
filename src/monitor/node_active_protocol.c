@@ -529,7 +529,8 @@ JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 		/* the node prefers a particular group */
 		groupId = currentNodeState->groupId;
 
-		List *groupNodeList = AutoFailoverNodeGroup(formation->formationId, groupId);
+		List *groupNodeList =
+			AutoFailoverNodeGroup(formation->formationId, groupId);
 
 		/*
 		 * Target group is empty: to make it simple to reason about the roles
@@ -546,17 +547,71 @@ JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 		{
 			initialState = REPLICATION_STATE_WAIT_STANDBY;
 
+			/* if we have a primary node, pg_basebackup from it */
 			AutoFailoverNode *primaryNode =
 				GetPrimaryNodeInGroup(
 					formation->formationId,
 					currentNodeState->groupId);
 
+			/* we might be in the middle of a failover */
+			List *nodesGroupList =
+				AutoFailoverNodeGroup(
+					formation->formationId,
+					currentNodeState->groupId);
+
+			/* if we don't have a primary, look for a node being promoted */
+			AutoFailoverNode *nodeBeingPromoted = NULL;
+
+			/* we might have an upstream node that's not a failover candidate */
+			bool foundUpstreamNode = false;
+
 			if (primaryNode == NULL)
 			{
-				/*
-				 * We might be in the middle of a failover or some situation
-				 * where there is no known primary at the moment.
-				 */
+				nodeBeingPromoted =
+					FindCandidateNodeBeingPromoted(
+						nodesGroupList);
+			}
+
+			/*
+			 * If we don't have a primary node and we also don't have a node
+			 * being promoted, it might be that all we have is a list of
+			 * nodes with candidatePriority zero.
+			 *
+			 * When that happens, those nodes are assigned REPORT_LSN, in case
+			 * a candidate could be promoted (and maybe fast-forwarded).
+			 *
+			 * If we find even a single node in REPORT_LSN and with candidate
+			 * priority zero, we have an upstream node for creating a new
+			 * node, that can then be promoted as the new primary.
+			 */
+			if (primaryNode == NULL && nodeBeingPromoted == NULL)
+			{
+				ListCell *nodeCell = NULL;
+
+				foreach(nodeCell, nodesGroupList)
+				{
+					AutoFailoverNode *node =
+						(AutoFailoverNode *) lfirst(nodeCell);
+
+					if (node->candidatePriority == 0 &&
+						IsCurrentState(node, REPLICATION_STATE_REPORT_LSN))
+					{
+						foundUpstreamNode = true;
+						break;
+					}
+				}
+
+				if (foundUpstreamNode)
+				{
+					initialState = REPLICATION_STATE_REPORT_LSN;
+				}
+			}
+
+			/*
+			 * If we can't figure it out, have the client handle the situation.
+			 */
+			if (!(primaryNode || nodeBeingPromoted || foundUpstreamNode))
+			{
 				ereport(ERROR,
 						(errcode(ERRCODE_OBJECT_IN_USE),
 						 errmsg("JoinAutoFailoverFormation couldn't find the "

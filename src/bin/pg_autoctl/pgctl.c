@@ -1189,8 +1189,14 @@ pg_basebackup(const char *pgdata,
 	args[argsIndex++] = "--max-rate";
 	args[argsIndex++] = replicationSource->maximumBackupRate;
 	args[argsIndex++] = "--wal-method=stream";
-	args[argsIndex++] = "--slot";
-	args[argsIndex++] = replicationSource->slotName;
+
+	/* we don't use a replication slot e.g. when upstream is a standby */
+	if (!IS_EMPTY_STRING_BUFFER(replicationSource->slotName))
+	{
+		args[argsIndex++] = "--slot";
+		args[argsIndex++] = replicationSource->slotName;
+	}
+
 	args[argsIndex] = NULL;
 
 	/*
