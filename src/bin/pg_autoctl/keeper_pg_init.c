@@ -27,6 +27,7 @@
 #include "pgsetup.h"
 #include "pgsql.h"
 #include "service_keeper_init.h"
+#include "signals.h"
 #include "state.h"
 
 
@@ -685,6 +686,11 @@ wait_until_primary_has_created_our_replication_slot(Keeper *keeper,
 	}
 
 	do {
+		if (asked_to_stop || asked_to_stop_fast || asked_to_quit)
+		{
+			return false;
+		}
+
 		if (firstLoop)
 		{
 			firstLoop = false;
