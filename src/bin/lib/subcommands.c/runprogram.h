@@ -592,7 +592,8 @@ waitprogram(Program *prog, pid_t childPid)
 	else if (WIFSIGNALED(status))
 	{
 		int signo = WTERMSIG(status);
-		prog->returnCode = signo ? signo : -1;
+		/* standard exit value with fatal error signal `n`: 128 + n */
+		prog->returnCode = 128 + signo;
 	}
 	else
 	{
