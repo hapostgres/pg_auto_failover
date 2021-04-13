@@ -25,7 +25,7 @@ RUN apt-get update \
     python3 \
 	python3-setuptools \
 	python3-psycopg2 \
-	python3-pyroute2 \
+    python3-pip \
     sudo \
     tmux \
     watch \
@@ -41,6 +41,7 @@ RUN apt-get update\
 	&& apt-get install -y --no-install-recommends postgresql-${PGVERSION} \
 	&& rm -rf /var/lib/apt/lists/*
 
+RUN pip3 install pyroute2>=0.5.17
 RUN adduser --disabled-password --gecos '' docker
 RUN adduser docker sudo
 RUN adduser docker postgres
