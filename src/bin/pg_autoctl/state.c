@@ -45,7 +45,6 @@ keeper_state_read(KeeperStateData *keeperState, const char *filename)
 {
 	char *content = NULL;
 	long fileSize;
-	int pg_autoctl_state_version = 0;
 
 	log_debug("Reading current state from \"%s\"", filename);
 
@@ -55,7 +54,7 @@ keeper_state_read(KeeperStateData *keeperState, const char *filename)
 		return false;
 	}
 
-	pg_autoctl_state_version =
+	int pg_autoctl_state_version =
 		((KeeperStateData *) content)->pg_autoctl_state_version;
 
 	if (fileSize >= sizeof(KeeperStateData) &&
@@ -96,7 +95,6 @@ keeper_state_is_readable(int pg_autoctl_state_version)
 bool
 keeper_state_write(KeeperStateData *keeperState, const char *filename)
 {
-	int fd;
 	char buffer[PG_AUTOCTL_KEEPER_STATE_FILE_SIZE];
 	char tempFileName[MAXPGPATH];
 
@@ -140,7 +138,7 @@ keeper_state_write(KeeperStateData *keeperState, const char *filename)
 	 */
 	memcpy(buffer, keeperState, sizeof(KeeperStateData)); /* IGNORE-BANNED */
 
-	fd = open(tempFileName, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
+	int fd = open(tempFileName, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
 	if (fd < 0)
 	{
 		log_fatal("Failed to create keeper state file \"%s\": %m",
@@ -167,7 +165,11 @@ keeper_state_write(KeeperStateData *keeperState, const char *filename)
 		return false;
 	}
 
-	close(fd);
+	if (close(fd) != 0)
+	{
+		log_fatal("Failed to close file \"%s\": %m", tempFileName);
+		return false;
+	}
 
 	log_debug("rename \"%s\" to \"%s\"", tempFileName, filename);
 
@@ -318,6 +320,8 @@ keeperStateAsJSON(KeeperStateData *keeperState, JSON_Value *js)
 	const char *current_role = NodeStateToString(keeperState->current_role);
 	const char *assigned_role = NodeStateToString(keeperState->assigned_role);
 
+	char timestring[MAXCTIMESIZE] = { 0 };
+
 	json_object_set_string(jsobj, "current_role", current_role);
 	json_object_set_string(jsobj, "assigned_role", assigned_role);
 
@@ -329,6 +333,17 @@ keeperStateAsJSON(KeeperStateData *keeperState, JSON_Value *js)
 
 	json_object_set_number(jsobj, "nodeId",
 						   (double) keeperState->current_node_id);
+
+	json_object_set_string(jsobj, "last_monitor_contact",
+						   epoch_to_string(keeperState->last_monitor_contact,
+										   timestring));
+
+	json_object_set_string(jsobj, "last_secondary_contact",
+						   epoch_to_string(keeperState->last_secondary_contact,
+										   timestring));
+
+	json_object_set_number(jsobj, "pgversion",
+						   (double) keeperState->pg_control_version);
 
 	return true;
 }
@@ -583,13 +598,12 @@ NodeStateFromString(const char *str)
 const char *
 epoch_to_string(uint64_t seconds, char *buffer)
 {
-	char *result = NULL;
 	if (seconds <= 0)
 	{
 		strlcpy(buffer, "0", MAXCTIMESIZE);
 		return buffer;
 	}
-	result = ctime_r((time_t *) &seconds, buffer);
+	char *result = ctime_r((time_t *) &seconds, buffer);
 
 	if (result == NULL)
 	{
@@ -683,7 +697,6 @@ keeper_init_state_create(KeeperStateInit *initState,
 static bool
 keeper_init_state_write(KeeperStateInit *initState, const char *filename)
 {
-	int fd;
 	char buffer[PG_AUTOCTL_KEEPER_STATE_FILE_SIZE] = { 0 };
 
 	memset(buffer, 0, PG_AUTOCTL_KEEPER_STATE_FILE_SIZE);
@@ -699,7 +712,7 @@ keeper_init_state_write(KeeperStateInit *initState, const char *filename)
 	 */
 	memcpy(buffer, initState, sizeof(KeeperStateInit)); /* IGNORE-BANNED */
 
-	fd = open(filename, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
+	int fd = open(filename, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
 	if (fd < 0)
 	{
 		log_fatal("Failed to create keeper init state file \"%s\": %m",
@@ -786,7 +799,6 @@ keeper_init_state_read(KeeperStateInit *initState, const char *filename)
 {
 	char *content = NULL;
 	long fileSize;
-	int pg_autoctl_state_version = 0;
 
 	log_debug("Reading current init state from \"%s\"", filename);
 
@@ -796,7 +808,7 @@ keeper_init_state_read(KeeperStateInit *initState, const char *filename)
 		return false;
 	}
 
-	pg_autoctl_state_version =
+	int pg_autoctl_state_version =
 		((KeeperStateInit *) content)->pg_autoctl_state_version;
 
 	if (fileSize >= sizeof(KeeperStateInit) &&
@@ -934,7 +946,6 @@ static bool
 keeper_postgres_state_write(KeeperStatePostgres *pgStatus,
 							const char *filename)
 {
-	int fd;
 	char buffer[PG_AUTOCTL_KEEPER_STATE_FILE_SIZE] = { 0 };
 
 	log_trace("keeper_postgres_state_write %s in %s",
@@ -954,7 +965,7 @@ keeper_postgres_state_write(KeeperStatePostgres *pgStatus,
 	 */
 	memcpy(buffer, pgStatus, sizeof(KeeperStatePostgres)); /* IGNORE-BANNED */
 
-	fd = open(filename, O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+	int fd = open(filename, O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
 	if (fd < 0)
 	{
 		log_fatal(
@@ -999,7 +1010,6 @@ keeper_postgres_state_read(KeeperStatePostgres *pgStatus, const char *filename)
 {
 	char *content = NULL;
 	long fileSize;
-	int pg_autoctl_state_version = 0;
 
 	if (!read_file(filename, &content, &fileSize))
 	{
@@ -1008,7 +1018,7 @@ keeper_postgres_state_read(KeeperStatePostgres *pgStatus, const char *filename)
 		return false;
 	}
 
-	pg_autoctl_state_version =
+	int pg_autoctl_state_version =
 		((KeeperStatePostgres *) content)->pg_autoctl_state_version;
 
 	if (fileSize >= sizeof(KeeperStateInit) &&

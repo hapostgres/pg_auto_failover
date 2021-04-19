@@ -98,6 +98,10 @@
 	make_strbuf_option("postgresql", "auth_method", "auth", \
 					   false, MAXPGPATH, config->pgSetup.authMethod)
 
+#define OPTION_POSTGRESQL_HBA_LEVEL(config) \
+	make_strbuf_option("postgresql", "hba_level", NULL, \
+					   false, MAXPGPATH, config->pgSetup.hbaLevelStr)
+
 #define OPTION_SSL_ACTIVE(config) \
 	make_int_option_default("ssl", "active", NULL, \
 							false, &(config->pgSetup.ssl.active), 0)
@@ -129,8 +133,9 @@
 							   REPLICATION_PASSWORD_DEFAULT)
 
 #define OPTION_REPLICATION_MAXIMUM_BACKUP_RATE(config) \
-	make_string_option_default("replication", "maximum_backup_rate", NULL, \
-							   false, &config->maximum_backup_rate, \
+	make_strbuf_option_default("replication", "maximum_backup_rate", NULL, \
+							   false, MAXIMUM_BACKUP_RATE_LEN, \
+							   config->maximum_backup_rate, \
 							   MAXIMUM_BACKUP_RATE)
 
 #define OPTION_REPLICATION_BACKUP_DIR(config) \
@@ -171,6 +176,15 @@
 							&(config->postgresql_restart_failure_max_retries), \
 							POSTGRESQL_FAILS_TO_START_RETRIES)
 
+#define OPTION_CITUS_ROLE(config) \
+	make_strbuf_option_default("citus", "role", NULL, false, NAMEDATALEN, \
+							   config->citusRoleStr, DEFAULT_CITUS_ROLE)
+
+#define OPTION_CITUS_CLUSTER_NAME(config) \
+	make_strbuf_option("citus", "cluster_name", "citus-cluster", \
+					   false, NAMEDATALEN, config->pgSetup.citusClusterName)
+
+
 #define SET_INI_OPTIONS_ARRAY(config) \
 	{ \
 		OPTION_AUTOCTL_ROLE(config), \
@@ -190,6 +204,7 @@
 		OPTION_POSTGRESQL_PROXY_PORT(config), \
 		OPTION_POSTGRESQL_LISTEN_ADDRESSES(config), \
 		OPTION_POSTGRESQL_AUTH_METHOD(config), \
+		OPTION_POSTGRESQL_HBA_LEVEL(config), \
 		OPTION_SSL_ACTIVE(config), \
 		OPTION_SSL_MODE(config), \
 		OPTION_SSL_CA_FILE(config), \
@@ -204,10 +219,14 @@
 		OPTION_TIMEOUT_PREPARE_PROMOTION_WALRECEIVER(config), \
 		OPTION_TIMEOUT_POSTGRESQL_RESTART_FAILURE_TIMEOUT(config), \
 		OPTION_TIMEOUT_POSTGRESQL_RESTART_FAILURE_MAX_RETRIES(config), \
+ \
+		OPTION_CITUS_ROLE(config), \
+		OPTION_CITUS_CLUSTER_NAME(config), \
 		INI_OPTION_LAST \
 	}
 
 static bool keeper_config_init_nodekind(KeeperConfig *config);
+static bool keeper_config_init_hbalevel(KeeperConfig *config);
 static bool keeper_config_set_backup_directory(KeeperConfig *config, int nodeId);
 
 
@@ -237,6 +256,13 @@ keeper_config_set_pathnames_from_pgdata(ConfigFilePaths *pathnames,
 	if (!SetStateFilePath(pathnames, pgdata))
 	{
 		log_fatal("Failed to set state filename from PGDATA \"%s\","
+				  " see above for details.", pgdata);
+		return false;
+	}
+
+	if (!SetNodesFilePath(pathnames, pgdata))
+	{
+		log_fatal("Failed to set pid filename from PGDATA \"%s\","
 				  " see above for details.", pgdata);
 		return false;
 	}
@@ -273,6 +299,13 @@ keeper_config_init(KeeperConfig *config,
 	if (!keeper_config_init_nodekind(config))
 	{
 		/* errors have already been logged. */
+		log_error("Please review your setup options per above messages");
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (!keeper_config_init_hbalevel(config))
+	{
+		log_error("Failed to initialize postgresql.hba_level");
 		log_error("Please review your setup options per above messages");
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
@@ -391,6 +424,19 @@ keeper_config_read_file_skip_pgsetup(KeeperConfig *config,
 	}
 
 	/*
+	 * Turn the configuration string for hbaLevel into our enum value.
+	 */
+	if (!keeper_config_init_hbalevel(config))
+	{
+		log_error("Failed to initialize postgresql.hba_level");
+		return false;
+	}
+
+	/* set the ENUM value for hbaLevel */
+	config->pgSetup.hbaLevel =
+		pgsetup_parse_hba_level(config->pgSetup.hbaLevelStr);
+
+	/*
 	 * Required for grandfathering old clusters that don't have sslmode
 	 * explicitely set
 	 */
@@ -402,6 +448,29 @@ keeper_config_read_file_skip_pgsetup(KeeperConfig *config,
 	/* set the ENUM value for sslMode */
 	config->pgSetup.ssl.sslMode =
 		pgsetup_parse_sslmode(config->pgSetup.ssl.sslModeStr);
+
+	/* now when that is provided, read the Citus Role and convert to enum */
+	if (IS_EMPTY_STRING_BUFFER(config->citusRoleStr))
+	{
+		config->citusRole = CITUS_ROLE_PRIMARY;
+	}
+	else
+	{
+		if (strcmp(config->citusRoleStr, "primary") == 0)
+		{
+			config->citusRole = CITUS_ROLE_PRIMARY;
+		}
+		else if (strcmp(config->citusRoleStr, "secondary") == 0)
+		{
+			config->citusRole = CITUS_ROLE_SECONDARY;
+		}
+		else
+		{
+			log_error("Failed to parse citus.role \"%s\": expected either "
+					  "\"primary\" or \"secondary\"", config->citusRoleStr);
+			return false;
+		}
+	}
 
 	if (!keeper_config_init_nodekind(config))
 	{
@@ -452,19 +521,17 @@ bool
 keeper_config_write_file(KeeperConfig *config)
 {
 	const char *filePath = config->pathnames.config;
-	bool success = false;
-	FILE *fileStream = NULL;
 
 	log_trace("keeper_config_write_file \"%s\"", filePath);
 
-	fileStream = fopen_with_umask(filePath, "w", FOPEN_FLAGS_W, 0644);
+	FILE *fileStream = fopen_with_umask(filePath, "w", FOPEN_FLAGS_W, 0644);
 	if (fileStream == NULL)
 	{
 		/* errors have already been logged */
 		return false;
 	}
 
-	success = keeper_config_write(fileStream, config);
+	bool success = keeper_config_write(fileStream, config);
 
 	if (fclose(fileStream) == EOF)
 	{
@@ -664,19 +731,6 @@ keeper_config_update(KeeperConfig *config, int nodeId, int groupId)
 
 
 /*
- * keeper_config_destroy frees memory that may be dynamically allocated.
- */
-void
-keeper_config_destroy(KeeperConfig *config)
-{
-	if (config->maximum_backup_rate != NULL)
-	{
-		free(config->maximum_backup_rate);
-	}
-}
-
-
-/*
  * keeper_config_init_nodekind initializes the config->nodeKind and
  * config->pgSetup.pgKind values from the configuration file or command line
  * options.
@@ -711,6 +765,30 @@ keeper_config_init_nodekind(KeeperConfig *config)
 			return false;
 		}
 	}
+	return true;
+}
+
+
+/*
+ * keeper_config_init_hbalevel initializes the config->pgSetup.hbaLevel and
+ * hbaLevelStr when no command line option switch has been used that places a
+ * value (see --auth, --skip-pg-hba, and --pg-hba-lan).
+ */
+static bool
+keeper_config_init_hbalevel(KeeperConfig *config)
+{
+	/*
+	 * Turn the configuration string for hbaLevel into our enum value.
+	 */
+	if (IS_EMPTY_STRING_BUFFER(config->pgSetup.hbaLevelStr))
+	{
+		strlcpy(config->pgSetup.hbaLevelStr, "minimal", NAMEDATALEN);
+	}
+
+	/* set the ENUM value for hbaLevel */
+	config->pgSetup.hbaLevel =
+		pgsetup_parse_hba_level(config->pgSetup.hbaLevelStr);
+
 	return true;
 }
 

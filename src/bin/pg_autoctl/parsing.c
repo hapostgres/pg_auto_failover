@@ -35,6 +35,8 @@ static bool parse_controldata_field_lsn(const char *controlDataString,
 
 static bool parse_bool_with_len(const char *value, size_t len, bool *result);
 
+static int nodeAddressCmpByNodeId(const void *a, const void *b);
+
 #define RE_MATCH_COUNT 10
 
 
@@ -45,17 +47,15 @@ char *
 regexp_first_match(const char *string, const char *regex)
 {
 	regex_t compiledRegex;
-	int status = 0;
 
 	regmatch_t m[RE_MATCH_COUNT];
-	int matchStatus;
 
 	if (string == NULL)
 	{
 		return NULL;
 	}
 
-	status = regcomp(&compiledRegex, regex, REG_EXTENDED | REG_NEWLINE);
+	int status = regcomp(&compiledRegex, regex, REG_EXTENDED | REG_NEWLINE);
 
 	if (status != 0)
 	{
@@ -83,7 +83,7 @@ regexp_first_match(const char *string, const char *regex)
 	 * regexec returns 0 if the regular expression matches; otherwise, it
 	 * returns a nonzero value.
 	 */
-	matchStatus = regexec(&compiledRegex, string, RE_MATCH_COUNT, m, 0);
+	int matchStatus = regexec(&compiledRegex, string, RE_MATCH_COUNT, m, 0);
 	regfree(&compiledRegex);
 
 	/* We're interested into 1. re matches 2. captured at least one group */
@@ -169,10 +169,9 @@ parse_controldata_field_uint32(const char *controlDataString,
 							   uint32_t *dest)
 {
 	char regex[BUFSIZE];
-	char *match;
 
 	sformat(regex, BUFSIZE, "^%s: *([0-9]+)$", fieldName);
-	match = regexp_first_match(controlDataString, regex);
+	char *match = regexp_first_match(controlDataString, regex);
 
 	if (match == NULL)
 	{
@@ -202,10 +201,9 @@ parse_controldata_field_uint64(const char *controlDataString,
 							   uint64_t *dest)
 {
 	char regex[BUFSIZE];
-	char *match;
 
 	sformat(regex, BUFSIZE, "^%s: *([0-9]+)$", fieldName);
-	match = regexp_first_match(controlDataString, regex);
+	char *match = regexp_first_match(controlDataString, regex);
 
 	if (match == NULL)
 	{
@@ -235,10 +233,9 @@ parse_controldata_field_lsn(const char *controlDataString,
 							char lsn[])
 {
 	char regex[BUFSIZE];
-	char *match;
 
 	sformat(regex, BUFSIZE, "^%s: *([0-9A-F]+/[0-9A-F]+)$", fieldName);
-	match = regexp_first_match(controlDataString, regex);
+	char *match = regexp_first_match(controlDataString, regex);
 
 	if (match == NULL)
 	{
@@ -262,8 +259,6 @@ bool
 parse_state_notification_message(CurrentNodeState *nodeState,
 								 const char *message)
 {
-	char *str;
-	double number;
 	JSON_Value *json = json_parse_string(message);
 	JSON_Object *jsobj = json_value_get_object(json);
 
@@ -272,15 +267,17 @@ parse_state_notification_message(CurrentNodeState *nodeState,
 	if (json_type(json) != JSONObject)
 	{
 		log_error("Failed to parse JSON notification message: \"%s\"", message);
+		json_value_free(json);
 		return false;
 	}
 
-	str = (char *) json_object_get_string(jsobj, "type");
+	char *str = (char *) json_object_get_string(jsobj, "type");
 
 	if (strcmp(str, "state") != 0)
 	{
 		log_error("Failed to parse JSOBJ notification state message: "
 				  "jsobj object type is not \"state\" as expected");
+		json_value_free(json);
 		return false;
 	}
 
@@ -290,11 +287,12 @@ parse_state_notification_message(CurrentNodeState *nodeState,
 	{
 		log_error("Failed to parse formation in JSON "
 				  "notification message \"%s\"", message);
+		json_value_free(json);
 		return false;
 	}
 	strlcpy(nodeState->formation, str, sizeof(nodeState->formation));
 
-	number = json_object_get_number(jsobj, "groupId");
+	double number = json_object_get_number(jsobj, "groupId");
 	nodeState->groupId = (int) number;
 
 	number = json_object_get_number(jsobj, "nodeId");
@@ -306,6 +304,7 @@ parse_state_notification_message(CurrentNodeState *nodeState,
 	{
 		log_error("Failed to parse node name in JSON "
 				  "notification message \"%s\"", message);
+		json_value_free(json);
 		return false;
 	}
 	strlcpy(nodeState->node.name, str, sizeof(nodeState->node.name));
@@ -316,6 +315,7 @@ parse_state_notification_message(CurrentNodeState *nodeState,
 	{
 		log_error("Failed to parse node host in JSON "
 				  "notification message \"%s\"", message);
+		json_value_free(json);
 		return false;
 	}
 	strlcpy(nodeState->node.host, str, sizeof(nodeState->node.host));
@@ -329,6 +329,7 @@ parse_state_notification_message(CurrentNodeState *nodeState,
 	{
 		log_error("Failed to parse reportedState in JSON "
 				  "notification message \"%s\"", message);
+		json_value_free(json);
 		return false;
 	}
 	nodeState->reportedState = NodeStateFromString(str);
@@ -339,6 +340,7 @@ parse_state_notification_message(CurrentNodeState *nodeState,
 	{
 		log_error("Failed to parse goalState in JSON "
 				  "notification message \"%s\"", message);
+		json_value_free(json);
 		return false;
 	}
 	nodeState->goalState = NodeStateFromString(str);
@@ -361,9 +363,11 @@ parse_state_notification_message(CurrentNodeState *nodeState,
 	{
 		log_error("Failed to parse health in JSON "
 				  "notification message \"%s\"", message);
+		json_value_free(json);
 		return false;
 	}
 
+	json_value_free(json);
 	return true;
 }
 
@@ -674,6 +678,266 @@ buildPostgresURIfromPieces(URIParams *uriParams, char *pguri)
 					pguri,
 					uriParams->parameters.keywords[index],
 					uriParams->parameters.values[index]);
+		}
+	}
+
+	return true;
+}
+
+
+/*
+ * parse_pguri_ssl_settings parses SSL settings from a Postgres connection
+ * string. Given the following connection string
+ *
+ *  "postgres://autoctl_node@localhost:5500/pg_auto_failover?sslmode=prefer"
+ *
+ * we then have an ssl->active = 1, ssl->sslMode = SSL_MODE_PREFER, etc.
+ */
+bool
+parse_pguri_ssl_settings(const char *pguri, SSLOptions *ssl)
+{
+	URIParams params = { 0 };
+	KeyVal overrides = { 0 };
+
+	/* initialize SSL Params values */
+	if (!parse_pguri_info_key_vals(pguri, &overrides, &params))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	for (int index = 0; index < params.parameters.count; index++)
+	{
+		char *key = params.parameters.keywords[index];
+		char *val = params.parameters.values[index];
+
+		if (streq(key, "sslmode"))
+		{
+			ssl->sslMode = pgsetup_parse_sslmode(val);
+			strlcpy(ssl->sslModeStr, val, sizeof(ssl->sslModeStr));
+
+			if (ssl->sslMode > SSL_MODE_DISABLE)
+			{
+				ssl->active = true;
+			}
+		}
+		else if (streq(key, "sslrootcert"))
+		{
+			strlcpy(ssl->caFile, val, sizeof(ssl->caFile));
+		}
+		else if (streq(key, "sslcrl"))
+		{
+			strlcpy(ssl->crlFile, val, sizeof(ssl->crlFile));
+		}
+		else if (streq(key, "sslcert"))
+		{
+			strlcpy(ssl->serverCert, val, sizeof(ssl->serverCert));
+		}
+		else if (streq(key, "sslkey"))
+		{
+			strlcpy(ssl->serverKey, val, sizeof(ssl->serverKey));
+		}
+	}
+
+	/* cook-in defaults when the parsed URL contains no SSL settings */
+	if (ssl->sslMode == SSL_MODE_UNKNOWN)
+	{
+		ssl->active = true;
+		ssl->sslMode = SSL_MODE_PREFER;
+		strlcpy(ssl->sslModeStr,
+				pgsetup_sslmode_to_string(ssl->sslMode),
+				sizeof(ssl->sslModeStr));
+	}
+
+	return true;
+}
+
+
+/*
+ * nodeAddressCmpByNodeId sorts two given nodeAddress by comparing their
+ * nodeId. We use this function to be able to pg_qsort() an array of nodes,
+ * such as when parsing from a JSON file.
+ */
+static int
+nodeAddressCmpByNodeId(const void *a, const void *b)
+{
+	NodeAddress *nodeA = (NodeAddress *) a;
+	NodeAddress *nodeB = (NodeAddress *) b;
+
+	return nodeA->nodeId - nodeB->nodeId;
+}
+
+
+/*
+ * parseLSN is based on the Postgres code for pg_lsn_in_internal found at
+ * src/backend/utils/adt/pg_lsn.c in the Postgres source repository. In the
+ * pg_auto_failover context we don't need to typedef uint64 XLogRecPtr; so we
+ * just use uint64_t internally.
+ */
+#define MAXPG_LSNCOMPONENT 8
+
+bool
+parseLSN(const char *str, uint64_t *lsn)
+{
+	int len1,
+		len2;
+	uint32 id,
+		   off;
+
+	/* Sanity check input format. */
+	len1 = strspn(str, "0123456789abcdefABCDEF");
+	if (len1 < 1 || len1 > MAXPG_LSNCOMPONENT || str[len1] != '/')
+	{
+		return false;
+	}
+
+	len2 = strspn(str + len1 + 1, "0123456789abcdefABCDEF");
+	if (len2 < 1 || len2 > MAXPG_LSNCOMPONENT || str[len1 + 1 + len2] != '\0')
+	{
+		return false;
+	}
+
+	/* Decode result. */
+	id = (uint32) strtoul(str, NULL, 16);
+	off = (uint32) strtoul(str + len1 + 1, NULL, 16);
+	*lsn = ((uint64) id << 32) | off;
+
+	return true;
+}
+
+
+/*
+ * parseNodesArrayFromFile parses a Nodes Array from a JSON file, that contains
+ * an array of JSON object with the following properties: node_id, node_lsn,
+ * node_host, node_name, node_port, and potentially node_is_primary.
+ */
+bool
+parseNodesArray(const char *nodesJSON,
+				NodeAddressArray *nodesArray,
+				int nodeId)
+{
+	JSON_Value *template =
+		json_parse_string("[{"
+						  "\"node_id\": 0,"
+						  "\"node_lsn\": \"\","
+						  "\"node_name\": \"\","
+						  "\"node_host\": \"\","
+						  "\"node_port\": 0,"
+						  "\"node_is_primary\": false"
+						  "}]");
+	int nodesArrayIndex = 0;
+	int primaryCount = 0;
+
+	JSON_Value *json = json_parse_string(nodesJSON);
+
+	/* validate the JSON input as an array of object with required fields */
+	if (json_validate(template, json) == JSONFailure)
+	{
+		log_error("Failed to parse nodes array which is expected "
+				  "to contain a JSON Array of Objects with properties "
+				  "[{node_id:number, node_name:string, "
+				  "node_host:string, node_port:number, node_lsn:string, "
+				  "node_is_primary:boolean}, ...]");
+		json_value_free(template);
+		json_value_free(json);
+		return false;
+	}
+
+	JSON_Array *jsArray = json_value_get_array(json);
+	int len = json_array_get_count(jsArray);
+
+	if (NODE_ARRAY_MAX_COUNT < len)
+	{
+		log_error("Failed to parse nodes array which contains "
+				  "%d nodes: pg_autoctl supports up to %d nodes",
+				  len,
+				  NODE_ARRAY_MAX_COUNT);
+		json_value_free(template);
+		json_value_free(json);
+		return false;
+	}
+
+	nodesArray->count = len;
+
+	for (int i = 0; i < len; i++)
+	{
+		NodeAddress *node = &(nodesArray->nodes[nodesArrayIndex]);
+		JSON_Object *jsObj = json_array_get_object(jsArray, i);
+
+		int jsNodeId = (int) json_object_get_number(jsObj, "node_id");
+		uint64_t lsn = 0;
+
+		/* we install the keeper.otherNodes array, so skip ourselves */
+		if (jsNodeId == nodeId)
+		{
+			--(nodesArray->count);
+			continue;
+		}
+
+		node->nodeId = jsNodeId;
+
+		strlcpy(node->name,
+				json_object_get_string(jsObj, "node_name"),
+				sizeof(node->name));
+
+		strlcpy(node->host,
+				json_object_get_string(jsObj, "node_host"),
+				sizeof(node->host));
+
+		node->port = (int) json_object_get_number(jsObj, "node_port");
+
+		strlcpy(node->lsn,
+				json_object_get_string(jsObj, "node_lsn"),
+				sizeof(node->lsn));
+
+		if (!parseLSN(node->lsn, &lsn))
+		{
+			log_error("Failed to parse nodes array LSN value \"%s\"", node->lsn);
+			json_value_free(template);
+			json_value_free(json);
+			return false;
+		}
+
+		node->isPrimary = json_object_get_boolean(jsObj, "node_is_primary");
+
+		if (node->isPrimary)
+		{
+			++primaryCount;
+
+			if (primaryCount > 1)
+			{
+				log_error("Failed to parse nodes array: more than one node "
+						  "is listed with \"node_is_primary\" true.");
+				json_value_free(template);
+				json_value_free(json);
+				return false;
+			}
+		}
+
+		++nodesArrayIndex;
+	}
+
+	json_value_free(template);
+	json_value_free(json);
+
+	/* now ensure the array is sorted by nodeId */
+	(void) pg_qsort(nodesArray->nodes,
+					nodesArray->count,
+					sizeof(NodeAddress),
+					nodeAddressCmpByNodeId);
+
+	/* check that every node id is unique in our array */
+	for (int i = 0; i < (nodesArray->count - 1); i++)
+	{
+		int currentNodeId = nodesArray->nodes[i].nodeId;
+		int nextNodeId = nodesArray->nodes[i + 1].nodeId;
+
+		if (currentNodeId == nextNodeId)
+		{
+			log_error("Failed to parse nodes array: more than one node "
+					  "is listed with the same nodeId %d",
+					  currentNodeId);
+			return false;
 		}
 	}
 

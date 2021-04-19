@@ -21,7 +21,8 @@ questions or comments.
 
 We format all our code using the coding conventions in the
 [citus_indent](https://github.com/citusdata/tools/tree/develop/uncrustify)
-tool. This tool uses uncrustify under the hood.
+tool. This tool uses uncrustify under the hood. To format the python test files
+we use [black](https://github.com/psf/black).
 
 ```bash
 # Uncrustify changes the way it formats code every release a bit. To make sure
@@ -38,11 +39,14 @@ cd ../..
 git clone https://github.com/citusdata/tools.git
 cd tools
 make uncrustify/.install
+
+# Be sure to add ~/.local/bin to PATH so you can find black
+pip install black --user
 ```
 
 After installing like this you can run the following before committing:
 ```bash
-citus_indent
+make indent
 ```
 
 You can also run the following to automatically format all the files that you
@@ -52,6 +56,7 @@ have changed before committing.
 cat > .git/hooks/pre-commit << __EOF__
 #!/bin/bash
 citus_indent --check --diff || { citus_indent --diff; exit 1; }
+black --check --quiet . || { black .; exit 1; }
 __EOF__
 chmod +x .git/hooks/pre-commit
 ```

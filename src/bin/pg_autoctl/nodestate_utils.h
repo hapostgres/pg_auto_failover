@@ -89,6 +89,12 @@ void prepareHostNameSeparator(char nameSeparatorHeader[], int size);
 bool nodestateAsJSON(CurrentNodeState *nodeState, JSON_Value *js);
 
 char * nodestateHealthToString(int health);
+char nodestateHealthToChar(int health);
+char * nodestateConnectionType(CurrentNodeState *nodeState);
 void nodestate_log(CurrentNodeState *nodeState, int logLevel, int nodeId);
+
+void printNodeArray(NodeAddressArray *nodesArray);
+void printNodeHeader(NodeAddressHeaders *headers);
+void printNodeEntry(NodeAddressHeaders *headers, NodeAddress *node);
 
 #endif /* NODESTATE_H */

@@ -19,27 +19,27 @@ select *
                                     desired_group_id => 0,
                                     node_kind => 'coordinator');
 -[ RECORD 1 ]---------------+--------------
-assigned_node_id            | 3
+assigned_node_id            | 4
 assigned_group_id           | 0
 assigned_group_state        | single
 assigned_candidate_priority | 100
 assigned_replication_quorum | t
-assigned_node_name          | coordinator_3
+assigned_node_name          | coordinator_4
 
 select *
-  from pgautofailover.set_node_system_identifier(3, 6862008014275870855);
+  from pgautofailover.set_node_system_identifier(4, 6862008014275870855);
 -[ RECORD 1 ]------------
-node_id   | 3
-node_name | coordinator_3
+node_id   | 4
+node_name | coordinator_4
 node_host | localhost
 node_port | 9876
 
 -- coordinator_1 reports single
 select *
-  from pgautofailover.node_active('citus', 3, 0,
+  from pgautofailover.node_active('citus', 4, 0,
                                   current_group_role => 'single');
 -[ RECORD 1 ]---------------+-------
-assigned_node_id            | 3
+assigned_node_id            | 4
 assigned_group_id           | 0
 assigned_group_state        | single
 assigned_candidate_priority | 100
@@ -52,10 +52,10 @@ select *
                                     desired_group_id => 1,
                                     node_kind => 'worker');
 -[ RECORD 1 ]---------------+---------
-assigned_node_id            | 4
+assigned_node_id            | 5
 assigned_group_id           | 1
 assigned_group_state        | single
 assigned_candidate_priority | 100
 assigned_replication_quorum | t
-assigned_node_name          | worker_4
+assigned_node_name          | worker_5
 

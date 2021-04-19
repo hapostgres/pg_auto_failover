@@ -609,11 +609,14 @@ waitprogram(Program *prog, pid_t childPid)
 static size_t
 read_into_buf(Program *prog, int filedes, PQExpBuffer buffer, bool error)
 {
-	char temp_buffer[BUFSIZE] = { 0 };
+	char temp_buffer[BUFSIZE+1] = { 0 };
 	size_t bytes = read(filedes, temp_buffer, BUFSIZE);
 
 	if (bytes > 0)
 	{
+		/* terminate the buffer after the length we read */
+		temp_buffer[bytes] = '\0';
+
 		appendPQExpBufferStr(buffer, temp_buffer);
 
 		if (prog->processBuffer)
@@ -643,7 +646,24 @@ snprintf_program_command_line(Program *prog, char *buffer, int size)
 
 	for (index = 0; prog->args[index] != NULL; index++)
 	{
-		int n = snprintf(currentPtr, remainingBytes, " %s", prog->args[index]);
+		int n;
+
+		/* replace an empty char buffer with '' */
+		if (prog->args[index][0] == '\0')
+		{
+			n = snprintf(currentPtr, remainingBytes, " ''");
+		}
+		/* single-quote are needed when argument contains special chars */
+		else if (strchr(prog->args[index], ' ') != NULL ||
+				 strchr(prog->args[index], '?') != NULL ||
+				 strchr(prog->args[index], '!') != NULL)
+		{
+			n = snprintf(currentPtr, remainingBytes, " '%s'", prog->args[index]);
+		}
+		else
+		{
+			n = snprintf(currentPtr, remainingBytes, " %s", prog->args[index]);
+		}
 
 		if (n >= remainingBytes)
 		{

@@ -37,10 +37,12 @@
 static bool keepRunning = true;
 
 /* list of hooks to run at reload time */
-KeeperReloadFunction KeeperReloadHooks[] = {
+KeeperReloadFunction KeeperReloadHooksArray[] = {
 	&keeper_reload_configuration,
 	NULL
 };
+
+KeeperReloadFunction *KeeperReloadHooks = KeeperReloadHooksArray;
 
 static bool keeper_node_active(Keeper *keeper, bool doInit);
 static void check_for_network_partitions(Keeper *keeper);
@@ -88,14 +90,13 @@ bool
 service_keeper_start(void *context, pid_t *pid)
 {
 	Keeper *keeper = (Keeper *) context;
-	pid_t fpid;
 
 	/* Flush stdio channels just before fork, to avoid double-output problems */
 	fflush(stdout);
 	fflush(stderr);
 
 	/* time to create the node_active sub-process */
-	fpid = fork();
+	pid_t fpid = fork();
 
 	switch (fpid)
 	{
@@ -139,8 +140,6 @@ service_keeper_start(void *context, pid_t *pid)
 void
 service_keeper_runprogram(Keeper *keeper)
 {
-	Program program;
-
 	char *args[12];
 	int argsIndex = 0;
 
@@ -170,7 +169,7 @@ service_keeper_runprogram(Keeper *keeper)
 	args[argsIndex] = NULL;
 
 	/* we do not want to call setsid() when running this program. */
-	program = initialize_program(args, false);
+	Program program = initialize_program(args, false);
 
 	program.capture = false;    /* redirect output, don't capture */
 	program.stdOutFd = STDOUT_FILENO;
@@ -196,7 +195,7 @@ service_keeper_node_active_init(Keeper *keeper)
 
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
-	bool monitorDisabledIsOk = false;
+	bool monitorDisabledIsOk = true;
 
 	if (!keeper_config_read_file(config,
 								 missingPgdataIsOk,
@@ -213,7 +212,7 @@ service_keeper_node_active_init(Keeper *keeper)
 	 * function cli_service_run calls into keeper_init(): we know that we could
 	 * read a keeper state file.
 	 */
-	if (!config->monitorDisabled && file_exists(config->pathnames.init))
+	if (file_exists(config->pathnames.init))
 	{
 		log_warn("The `pg_autoctl create` did not complete, completing now.");
 
@@ -228,16 +227,6 @@ service_keeper_node_active_init(Keeper *keeper)
 	{
 		log_fatal("Failed to initialize keeper, see above for details");
 		exit(EXIT_CODE_PGCTL);
-	}
-
-	if (config->monitorDisabled)
-	{
-		/*
-		 * At the moment, we have nothing to do here. Later we might want to
-		 * open an HTTPd service and wait for API calls.
-		 */
-		log_fatal("--disable-monitor disables pg_autoctl servives");
-		exit(EXIT_CODE_MONITOR);
 	}
 
 	return true;
@@ -256,7 +245,6 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 	KeeperConfig *config = &(keeper->config);
 	KeeperStateData *keeperState = &(keeper->state);
 	LocalPostgresServer *postgres = &(keeper->postgres);
-	PGSQL *pgsql = &(postgres->sqlClient);
 
 	bool doSleep = false;
 	bool couldContactMonitor = false;
@@ -285,12 +273,14 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		 * sleep for a while. As the monitor notifies every state change, we
 		 * can also interrupt our sleep as soon as we get the hint.
 		 */
-		if (doSleep)
+		if (doSleep && !config->monitorDisabled)
 		{
 			int timeoutMs = PG_AUTOCTL_KEEPER_SLEEP_TIME * 1000;
 
 			bool groupStateHasChanged = false;
 
+			/* establish a connection for notifications if none present */
+			(void) pgsql_prepare_to_wait(&(monitor->notificationClient));
 			(void) monitor_wait_for_state_change(monitor,
 												 config->formation,
 												 keeperState->current_group,
@@ -299,10 +289,18 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 												 &groupStateHasChanged);
 
 			/* when no state change has been notified, close the connection */
-			if (!groupStateHasChanged)
+			if (!groupStateHasChanged &&
+				monitor->notificationClient.connectionStatementType ==
+				PGSQL_CONNECTION_MULTI_STATEMENT)
 			{
-				pgsql_finish(&(keeper->monitor.pgsql));
+				pgsql_finish(&(monitor->notificationClient));
 			}
+		}
+		else if (doSleep && config->monitorDisabled)
+		{
+			int timeoutUs = PG_AUTOCTL_KEEPER_SLEEP_TIME * 1000 * 1000;
+
+			pg_usleep(timeoutUs);
 		}
 
 		doSleep = true;
@@ -320,7 +318,7 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		 */
 		if (asked_to_reload || firstLoop)
 		{
-			(void) keeper_call_reload_hooks(keeper, firstLoop);
+			(void) keeper_call_reload_hooks(keeper, firstLoop, doInit);
 		}
 
 		if (asked_to_stop || asked_to_stop_fast || asked_to_quit)
@@ -341,6 +339,9 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		 * a subsequent crash of the keeper would cause the states to become
 		 * inconsistent. By re-reading the file, we make sure the state on disk
 		 * on the keeper is consistent with the state on the monitor
+		 *
+		 * Also, when --disable-monitor is used, then we get our assigned state
+		 * by reading the state file, which is edited by an external process.
 		 */
 		if (!keeper_load_state(keeper))
 		{
@@ -376,24 +377,51 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		CHECK_FOR_FAST_SHUTDOWN;
 
 		/*
-		 * Call the node_active function on the monitor and update the keeper
-		 * data structure accordingy, refreshing our cache of other nodes if
-		 * needed.
+		 * If the monitor is disabled, read the list of other nodes from our
+		 * file on-disk at config->pathnames.nodes. The following command can
+		 * be used to fill-in that file:
+		 *
+		 *  $ pg_autoctl do fsm nodes set nodes.json
 		 */
-		couldContactMonitorThisRound = keeper_node_active(keeper, doInit);
-
-		if (!couldContactMonitor && couldContactMonitorThisRound && !firstLoop)
+		if (config->monitorDisabled)
 		{
-			/*
-			 * Last message the user saw in the output is the following, and so
-			 * we should say that we're back to the expected situation:
-			 *
-			 * Failed to get the goal state from the monitor
-			 */
-			log_info("Successfully got the goal state from the monitor");
-		}
+			/* force cache invalidation when reaching WAIT_STANDBY */
+			bool forceCacheInvalidation =
+				keeperState->current_role == WAIT_STANDBY_STATE;
 
-		couldContactMonitor = couldContactMonitorThisRound;
+			/* maybe update our cached list of other nodes */
+			if (!keeper_refresh_other_nodes(keeper, forceCacheInvalidation))
+			{
+				/* we will try again... */
+				log_warn("Failed to update our list of other nodes");
+				continue;
+			}
+		}
+		/*
+		 * If the monitor is not disabled, call the node_active function on the
+		 * monitor and update the keeper data structure accordingy, refreshing
+		 * our cache of other nodes if needed.
+		 */
+		else
+		{
+			couldContactMonitorThisRound = keeper_node_active(keeper, doInit);
+
+			if (!couldContactMonitor &&
+				couldContactMonitorThisRound &&
+				!firstLoop)
+			{
+				/*
+				 * Last message the user saw in the output is the following,
+				 * and so we should say that we're back to the expected
+				 * situation:
+				 *
+				 * Failed to get the goal state from the monitor
+				 */
+				log_info("Successfully got the goal state from the monitor");
+			}
+
+			couldContactMonitor = couldContactMonitorThisRound;
+		}
 
 		if (keeperState->assigned_role != keeperState->current_role)
 		{
@@ -464,7 +492,7 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 				transitionFailed = true;
 			}
 		}
-		else if (couldContactMonitor)
+		else if (couldContactMonitor || config->monitorDisabled)
 		{
 			if (!keeper_ensure_current_state(keeper))
 			{
@@ -484,20 +512,31 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		}
 
 		/* now is a good time to make sure we're closing our connections */
-		pgsql_finish(pgsql);
+		pgsql_finish(&(postgres->sqlClient));
 
 		CHECK_FOR_FAST_SHUTDOWN;
 
 		/*
-		 * Even if a transition failed, we still write the state file to update
-		 * timestamps used for the network partition checks.
+		 * Write the current (changed) state to disk.
+		 *
+		 * When using a monitor, even if a transition failed, we still write
+		 * the state file to update timestamps used for the network partition
+		 * checks.
+		 *
+		 * When the monitor is disabled, only write the state to disk when we
+		 * just successfully implemented a state change.
 		 */
-		if (!keeper_store_state(keeper))
+		if (!config->monitorDisabled || (needStateChange && !transitionFailed))
 		{
-			transitionFailed = true;
+			if (!keeper_store_state(keeper))
+			{
+				transitionFailed = true;
+			}
 		}
 
-		if ((needStateChange || monitor_has_received_notifications(monitor)) &&
+		if ((needStateChange ||
+			 (!config->monitorDisabled &&
+			  monitor_has_received_notifications(monitor))) &&
 			!transitionFailed)
 		{
 			/* cycle faster if we made a state transition */
@@ -520,6 +559,27 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 			doInit = false;
 		}
 
+		/*
+		 * On the first loop, we might have reload-time actions to implement
+		 * before and after having contacted the monitor. For instance,
+		 * contacting the monitor might show that we're not a primary anymore
+		 * after having been DEMOTED during a failover, while this node was
+		 * rebooting or something.
+		 *
+		 * So in some cases, we want to do two rounds of start-up reload:
+		 *
+		 *   reload-hook(firstLoop => true, doInit => true)
+		 *   reload-hook(firstLoop => true, doInit => false)
+		 *
+		 * Later SIGHUP signal processing will trigger a call to our reload
+		 * hooks with both firstLoop and doInit false, and that's handled
+		 * earlier in this loop.
+		 */
+		if (firstLoop)
+		{
+			(void) keeper_call_reload_hooks(keeper, firstLoop, doInit);
+		}
+
 		/* advance the warnings "counters" */
 		if (warnedOnPreviousIteration)
 		{
@@ -532,6 +592,9 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 			warnedOnCurrentIteration = false;
 		}
 	}
+
+	/* One last check that we do not have any connections open */
+	pgsql_finish(&(keeper->monitor.pgsql));
 
 	return true;
 }

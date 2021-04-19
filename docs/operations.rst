@@ -51,7 +51,7 @@ As a result, here is the standard upgrade plan for pg_auto_failover:
   1. Upgrade the pg_auto_failover package on the all the nodes, monitor
      included.
 
-	 When using a debian based OS, this looks like the following command when 
+	 When using a debian based OS, this looks like the following command when
 	 from 1.4 to 1.5::
 
 	   sudo apt-get remove pg-auto-failover-cli-enterprise-1.4 postgresql-11-auto-failover-enterprise-1.4
@@ -360,6 +360,47 @@ Monitoring pg_auto_failover in Production
 The monitor reports every state change decision to a LISTEN/NOTIFY channel
 named ``state``. PostgreSQL logs on the monitor are also stored in a table,
 ``pgautofailover.event``, and broadcast by NOTIFY in the channel ``log``.
+
+.. _replacing_monitor_online:
+
+Replacing the monitor online
+----------------------------
+
+When the monitor node is not available anymore, it is possible to create a
+new monitor node and then switch existing nodes to a new monitor by using
+the following commands.
+
+  1. Apply the STONITH approach on the old monitor to make sure this node is
+     not going to show up again during the procedure. This step is sometimes
+     refered to as “fencing”.
+
+  2. On every node, ending with the (current) Postgres primary node for each
+     group, disable the monitor while ``pg_autoctl`` is still running::
+
+	   $ pg_autoctl disable monitor --force
+
+
+  3. Create a new monitor node::
+
+	   $ pg_autoctl create monitor ...
+
+  4. On the current primary node first, so that it's registered first and as
+     a primary still, for each group in your formation(s), enable the
+     monitor online again::
+
+	   $ pg_autoctl enable monitor --monitor postgresql://...
+
+  5. On every other (secondary) node, enable the monitor online again::
+
+	   $ pg_autoctl enable monitor --monitor postgresql://...
+
+See :ref:`pg_autoctl_disable_monitor` and :ref:`pg_autoctl_enable_monitor`
+for details about those commands.
+
+This operation relies on the fact that a ``pg_autoctl`` can be operated
+without a monitor, and when reconnecting to a new monitor, this process
+reset the parts of the node state that comes from the monitor, such as the
+node identifier.
 
 Trouble-Shooting Guide
 ----------------------

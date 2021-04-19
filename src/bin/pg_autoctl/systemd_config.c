@@ -53,6 +53,10 @@
 	make_int_option_default("Service", "StartLimitBurst", NULL, true, \
 							&(config->StartLimitBurst), 20)
 
+#define OPTION_SYSTEMD_EXECRELOAD(config) \
+	make_strbuf_option_default("Service", "ExecReload", NULL, true, BUFSIZE, \
+							   config->ExecReload, "/usr/bin/pg_autoctl reload")
+
 #define OPTION_SYSTEMD_WANTEDBY(config) \
 	make_strbuf_option_default("Install", "WantedBy", NULL, true, BUFSIZE, \
 							   config->WantedBy, "multi-user.target")
@@ -66,6 +70,7 @@
 		OPTION_SYSTEMD_EXECSTART(config), \
 		OPTION_SYSTEMD_RESTART(config), \
 		OPTION_SYSTEMD_STARTLIMITBURST(config), \
+		OPTION_SYSTEMD_EXECRELOAD(config), \
 		OPTION_SYSTEMD_WANTEDBY(config), \
 		INI_OPTION_LAST \
 	}
@@ -78,7 +83,6 @@
 void
 systemd_config_init(SystemdServiceConfig *config, const char *pgdata)
 {
-	struct passwd *pw;
 	char *user = pg_setup_get_username(&(config->pgSetup));
 	IniOption systemdOptions[] = SET_INI_OPTIONS_ARRAY(config);
 
@@ -92,7 +96,7 @@ systemd_config_init(SystemdServiceConfig *config, const char *pgdata)
 	 * like that, at all. Let's assign WorkingDirectory to a safe place, like
 	 * the HOME of the USER running the service.
 	 */
-	pw = getpwnam(user);
+	struct passwd *pw = getpwnam(user);
 	if (pw)
 	{
 		log_debug("username found in passwd: %s's HOME is \"%s\"",
@@ -109,6 +113,7 @@ systemd_config_init(SystemdServiceConfig *config, const char *pgdata)
 
 	/* adjust the program to the current full path of argv[0] */
 	sformat(config->ExecStart, BUFSIZE, "%s run", pg_autoctl_program);
+	sformat(config->ExecReload, BUFSIZE, "%s reload", pg_autoctl_program);
 
 	if (!ini_validate_options(systemdOptions))
 	{

@@ -21,6 +21,7 @@
 #include "parsing.h"
 #include "pgctl.h"
 #include "pghba.h"
+#include "pgsetup.h"
 #include "log.h"
 
 
@@ -106,13 +107,14 @@ pghba_ensure_host_rule_exists(const char *hbaFilePath,
 							  const char *database,
 							  const char *username,
 							  const char *host,
-							  const char *authenticationScheme)
+							  const char *authenticationScheme,
+							  HBAEditLevel hbaLevel)
 {
 	char *currentHbaContents = NULL;
 	long currentHbaSize = 0L;
-	char *includeLine = NULL;
 	PQExpBuffer hbaLineBuffer = createPQExpBuffer();
-	PQExpBuffer newHbaContents = NULL;
+
+	char ipaddr[BUFSIZE] = { 0 };
 
 	if (hbaLineBuffer == NULL)
 	{
@@ -120,12 +122,33 @@ pghba_ensure_host_rule_exists(const char *hbaFilePath,
 		return false;
 	}
 
+	/*
+	 * When using a hostname in the HBA host field, Postgres is very picky
+	 * about the matching rules. We have an opportunity here to check the same
+	 * DNS and reverse DNS rules as Postgres, and warn our users when we see
+	 * something that we know Postgres won't be happy with.
+	 *
+	 * HBA & DNS is hard.
+	 */
+	bool useHostname = false;
+
+	if (!pghba_check_hostname(host, ipaddr, sizeof(ipaddr), &useHostname))
+	{
+		/* errors have already been logged (DNS failure) */
+	}
+
+	if (!useHostname)
+	{
+		log_warn("Using IP address \"%s\" in HBA file "
+				 "instead of hostname \"%s\"", ipaddr, host);
+	}
+
 	if (!pghba_append_rule_to_buffer(hbaLineBuffer,
 									 ssl,
 									 databaseType,
 									 database,
 									 username,
-									 host,
+									 useHostname ? host : ipaddr,
 									 authenticationScheme))
 	{
 		/* errors have already been logged */
@@ -149,7 +172,7 @@ pghba_ensure_host_rule_exists(const char *hbaFilePath,
 		return false;
 	}
 
-	includeLine = strstr(currentHbaContents, hbaLineBuffer->data);
+	char *includeLine = strstr(currentHbaContents, hbaLineBuffer->data);
 
 	/*
 	 * If the rule was found and it starts on a new line. We can
@@ -167,11 +190,11 @@ pghba_ensure_host_rule_exists(const char *hbaFilePath,
 	}
 
 	/*
-	 * When the authentication method is "skip", the option --skip-pg-hba has
-	 * been used. In that case, we still WARN about the HBA rule that we need,
-	 * so that users can review their HBA settings and provisioning.
+	 * When the option --skip-pg-hba has been used, we still WARN about the HBA
+	 * rule that we need, so that users can review their HBA settings and
+	 * provisioning.
 	 */
-	if (SKIP_HBA(authenticationScheme))
+	if (hbaLevel <= HBA_EDIT_SKIP)
 	{
 		log_warn("Skipping HBA edits (per --skip-pg-hba) for rule: %s",
 				 hbaLineBuffer->data);
@@ -180,18 +203,8 @@ pghba_ensure_host_rule_exists(const char *hbaFilePath,
 		return true;
 	}
 
-	/*
-	 * When using a hostname in the HBA host field, Postgres is very picky
-	 * about the matching rules. We have an opportunity here to check the same
-	 * DNS and reverse DNS rules as Postgres, and warn our users when we see
-	 * something that we know Postgres won't be happy with.
-	 *
-	 * HBA & DNS is hard.
-	 */
-	(void) pghba_check_hostname(host);
-
 	/* build the new postgresql.conf contents */
-	newHbaContents = createPQExpBuffer();
+	PQExpBuffer newHbaContents = createPQExpBuffer();
 	if (newHbaContents == NULL)
 	{
 		log_error("Failed to allocate memory");
@@ -250,7 +263,8 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 							  bool ssl,
 							  const char *database,
 							  const char *username,
-							  const char *authenticationScheme)
+							  const char *authenticationScheme,
+							  HBAEditLevel hbaLevel)
 {
 	PQExpBuffer newHbaContents = createPQExpBuffer();
 	char *currentHbaContents = NULL;
@@ -258,6 +272,7 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 	char *includeLine = NULL;
 
 	int nodeIndex = 0;
+	int hbaLinesAdded = 0;
 
 	PQExpBuffer hbaLineReplicationBuffer = NULL;
 	PQExpBuffer hbaLineDatabaseBuffer = NULL;
@@ -284,6 +299,9 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 		int hbaLinesIndex = 0;
 		PQExpBuffer hbaLines[3] = { 0 };
 
+		bool useHostname = true;
+		char ipaddr[BUFSIZE] = { 0 };
+
 		/* done with the new HBA line buffers (and safe to call on NULL) */
 		destroyPQExpBuffer(hbaLineReplicationBuffer);
 		destroyPQExpBuffer(hbaLineDatabaseBuffer);
@@ -307,10 +325,7 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 			return false;
 		}
 
-		log_debug("pghba_ensure_host_rules_exist: %d \"%s\" (%s:%d)",
-				  node->nodeId, node->name, node->host, node->port);
-
-		if (!SKIP_HBA(authenticationScheme))
+		if (hbaLevel >= HBA_EDIT_MINIMAL)
 		{
 			/*
 			 * When using a hostname in the HBA host field, Postgres is very
@@ -321,15 +336,31 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 			 *
 			 * HBA & DNS is hard.
 			 */
-			(void) pghba_check_hostname(node->host);
+			if (!pghba_check_hostname(node->host, ipaddr, sizeof(ipaddr),
+									  &useHostname))
+			{
+				/* errors have already been logged (DNS failure) */
+			}
+
+			if (!useHostname)
+			{
+				log_warn("Using IP address \"%s\" in HBA file "
+						 "instead of hostname \"%s\"", ipaddr, node->host);
+			}
 		}
+
+		log_debug("pghba_ensure_host_rules_exist: %d \"%s\" (%s:%d)",
+				  node->nodeId,
+				  node->name,
+				  useHostname ? node->host : ipaddr,
+				  node->port);
 
 		if (!pghba_append_rule_to_buffer(hbaLineReplicationBuffer,
 										 ssl,
 										 HBA_DATABASE_REPLICATION,
 										 NULL,
 										 username,
-										 node->host,
+										 useHostname ? node->host : ipaddr,
 										 authenticationScheme))
 		{
 			/* errors have already been logged */
@@ -349,7 +380,7 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 										 HBA_DATABASE_DBNAME,
 										 database,
 										 username,
-										 node->host,
+										 useHostname ? node->host : ipaddr,
 										 authenticationScheme))
 		{
 			/* errors have already been logged */
@@ -364,8 +395,12 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 			return false;
 		}
 
-		log_info("Ensuring HBA rules for node %d \"%s\" (%s:%d)",
-				 node->nodeId, node->name, node->host, node->port);
+		log_info("%s HBA rules for node %d \"%s\" (%s:%d)",
+				 hbaLevel < HBA_EDIT_MINIMAL ? "Checking for" : "Ensuring",
+				 node->nodeId,
+				 node->name,
+				 useHostname ? node->host : ipaddr,
+				 node->port);
 
 		hbaLines[0] = hbaLineReplicationBuffer;
 		hbaLines[1] = hbaLineDatabaseBuffer;
@@ -393,22 +428,25 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 			}
 
 			/*
-			 * When the authentication method is "skip", the option
-			 * --skip-pg-hba has been used. In that case, we still WARN about
+			 * When the option --skip-pg-hba has been used, we still WARN about
 			 * the HBA rule that we need, so that users can review their HBA
 			 * settings and provisioning.
 			 */
-			if (SKIP_HBA(authenticationScheme))
+			if (hbaLevel < HBA_EDIT_MINIMAL)
 			{
 				log_warn("Skipping HBA edits (per --skip-pg-hba) for rule: %s",
 						 hbaLineBuffer->data);
-
-				continue;
 			}
+			else
+			{
+				/* now append the line to the new HBA file contents */
+				log_info("Adding HBA rule: %s", hbaLineBuffer->data);
 
-			/* now append the line to the new HBA file contents */
-			appendPQExpBufferStr(newHbaContents, hbaLineBuffer->data);
-			appendPQExpBufferStr(newHbaContents, HBA_LINE_COMMENT "\n");
+				appendPQExpBufferStr(newHbaContents, hbaLineBuffer->data);
+				appendPQExpBufferStr(newHbaContents, HBA_LINE_COMMENT "\n");
+
+				++hbaLinesAdded;
+			}
 		}
 	}
 
@@ -427,12 +465,17 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 		return false;
 	}
 
-	/* write the new pg_hba.conf */
-	if (!write_file(newHbaContents->data, newHbaContents->len, hbaFilePath))
+	/* write the new pg_hba.conf, unless --skip-pg-hba has been used */
+	if (hbaLevel >= HBA_EDIT_MINIMAL && hbaLinesAdded > 0)
 	{
-		/* write_file logs an error */
-		destroyPQExpBuffer(newHbaContents);
-		return false;
+		log_info("Writing new HBA rules in \"%s\"", hbaFilePath);
+
+		if (!write_file(newHbaContents->data, newHbaContents->len, hbaFilePath))
+		{
+			/* write_file logs an error */
+			destroyPQExpBuffer(newHbaContents);
+			return false;
+		}
 	}
 
 	destroyPQExpBuffer(newHbaContents);
@@ -573,6 +616,7 @@ pghba_enable_lan_cidr(PGSQL *pgsql,
 					  const char *hostname,
 					  const char *username,
 					  const char *authenticationScheme,
+					  HBAEditLevel hbaLevel,
 					  const char *pgdata)
 {
 	char hbaFilePath[MAXPGPATH];
@@ -582,7 +626,7 @@ pghba_enable_lan_cidr(PGSQL *pgsql,
 	/* Compute the CIDR notation for our hostname */
 	if (!findHostnameLocalAddress(hostname, ipAddr, BUFSIZE))
 	{
-		int logLevel = SKIP_HBA(authenticationScheme) ? LOG_WARN : LOG_FATAL;
+		int logLevel = hbaLevel <= HBA_EDIT_SKIP ? LOG_WARN : LOG_FATAL;
 
 		log_level(logLevel,
 				  "Failed to find IP address for hostname \"%s\", "
@@ -590,7 +634,7 @@ pghba_enable_lan_cidr(PGSQL *pgsql,
 				  hostname);
 
 		/* when --skip-pg-hba is used, we don't mind the failure here */
-		return SKIP_HBA(authenticationScheme) ? true : false;
+		return hbaLevel == HBA_EDIT_SKIP;
 	}
 
 	if (!fetchLocalCIDR(ipAddr, cidr, BUFSIZE))
@@ -599,7 +643,7 @@ pghba_enable_lan_cidr(PGSQL *pgsql,
 				 "IP address \"%s\", skipping HBA settings", ipAddr);
 
 		/* when --skip-pg-hba is used, we don't mind the failure here */
-		return SKIP_HBA(authenticationScheme) ? true : false;
+		return hbaLevel == HBA_EDIT_SKIP;
 	}
 
 	log_debug("HBA: adding CIDR from hostname \"%s\"", hostname);
@@ -629,7 +673,9 @@ pghba_enable_lan_cidr(PGSQL *pgsql,
 	 * the user with the specific rule we are skipping here.
 	 */
 	if (!pghba_ensure_host_rule_exists(hbaFilePath, ssl, databaseType, database,
-									   username, cidr, authenticationScheme))
+									   username, cidr,
+									   authenticationScheme,
+									   hbaLevel))
 	{
 		log_error("Failed to add the local network to PostgreSQL HBA file: "
 				  "couldn't modify the pg_hba file");
@@ -640,7 +686,7 @@ pghba_enable_lan_cidr(PGSQL *pgsql,
 	 * pgdata is given when PostgreSQL is not yet running, don't reload then...
 	 */
 	if (pgdata == NULL &&
-		!SKIP_HBA(authenticationScheme) &&
+		hbaLevel >= HBA_EDIT_MINIMAL &&
 		!pgsql_reload_conf(pgsql))
 	{
 		log_error("Failed to reload PostgreSQL configuration for new HBA rule");
@@ -671,10 +717,9 @@ pghba_enable_lan_cidr(PGSQL *pgsql,
  * resolve an IP address.)
  */
 bool
-pghba_check_hostname(const char *hostname)
+pghba_check_hostname(const char *hostname,
+					 char *ipaddr, size_t size, bool *useHostname)
 {
-	char ipaddr[BUFSIZE] = { 0 };
-
 	/*
 	 * IP addresses do not require any DNS properties/lookups. Also hostname
 	 * won't contain a '/' character, but CIDR notations would, such as
@@ -684,27 +729,43 @@ pghba_check_hostname(const char *hostname)
 	 */
 	if (strchr(hostname, '/') || ip_address_type(hostname) != IPTYPE_NONE)
 	{
+		*useHostname = true;
 		return true;
 	}
 
-	if (!resolveHostnameForwardAndReverse(hostname, ipaddr, sizeof(ipaddr)))
+	bool foundHostnameFromAddress = false;
+
+	if (!resolveHostnameForwardAndReverse(hostname, ipaddr, size,
+										  &foundHostnameFromAddress))
 	{
-		/* warn users about possible DNS misconfiguration */
-		log_warn("Failed to resolve hostname \"%s\" to an IP address that "
-				 "resolves back to the hostname on a reverse DNS lookup.",
-				 hostname);
-
-		log_warn("Postgres might deny connection attempts from \"%s\", "
-				 "even with the new HBA rules.",
-				 hostname);
-
-		log_warn("Hint: correct setup of HBA with host names requires proper "
-				 "reverse DNS setup. You might want to use IP addresses.");
-
+		/* errors have already been logged (DNS failure) */
+		*useHostname = true;
 		return false;
 	}
 
-	log_debug("pghba_check_hostname: \"%s\" <-> %s", hostname, ipaddr);
+	if (foundHostnameFromAddress)
+	{
+		*useHostname = true;
 
+		log_debug("pghba_check_hostname: \"%s\" <-> %s", hostname, ipaddr);
+
+		return true;
+	}
+
+	*useHostname = false;
+
+	/* warn users about possible DNS misconfiguration */
+	log_warn("Failed to resolve hostname \"%s\" to an IP address that "
+			 "resolves back to the hostname on a reverse DNS lookup.",
+			 hostname);
+
+	log_warn("Postgres might deny connection attempts from \"%s\", "
+			 "even with the new HBA rules.",
+			 hostname);
+
+	log_warn("Hint: correct setup of HBA with host names requires proper "
+			 "reverse DNS setup. You might want to use IP addresses.");
+
+	/* we could successfully check that we should not use the hostname */
 	return true;
 }

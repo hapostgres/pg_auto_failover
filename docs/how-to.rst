@@ -11,7 +11,7 @@ generally possible to use only some of the many ``pg_autoctl`` commands.
 This section of the documentation is a short introduction to the main
 commands that are useful when getting started with pg_auto_failover. More
 commands are available and help deal with a variety of situations, see the
-:ref:`reference` for the whole list.
+:ref:`manual` for the whole list.
 
 To understand which replication settings to use in your case, see
 :ref:`architecture_basics` section and then the
@@ -122,9 +122,11 @@ When creating a node it is possible to use the ``--candidate-priority`` and
 the ``--replication-quorum`` options to set the replication properties as
 required by your choice of Postgres architecture.
 
-To review the current replication settings of a formation, use the following
-command::
+To review the current replication settings of a formation, use one of the
+two following commands, which are convenient aliases (the same command with
+two ways to invoke it)::
 
+  $ pg_autoctl show settings
   $ pg_autoctl get formation settings
 
 It is also possible to edit those replication settings at any time while

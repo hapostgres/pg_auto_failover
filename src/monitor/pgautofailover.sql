@@ -118,6 +118,7 @@ CREATE TABLE pgautofailover.node
     statechangetime      timestamptz not null default now(),
     candidatepriority	 int not null default 100,
     replicationquorum	 bool not null default true,
+    nodecluster          text not null default 'default',
 
     -- node names must be unique in a given formation
     UNIQUE (formationid, nodename),
@@ -235,11 +236,13 @@ CREATE FUNCTION pgautofailover.register_node
     IN dbname               name,
     IN node_name            text default '',
     IN sysidentifier        bigint default 0,
+    IN desired_node_id      int default -1,
     IN desired_group_id     int default -1,
     IN initial_group_role   pgautofailover.replication_state default 'init',
     IN node_kind            text default 'standalone',
     IN candidate_priority 	int default 100,
     IN replication_quorum	bool default true,
+    IN node_cluster         text default 'default',
    OUT assigned_node_id     int,
    OUT assigned_group_id    int,
    OUT assigned_group_state pgautofailover.replication_state,
@@ -251,7 +254,9 @@ RETURNS record LANGUAGE C STRICT SECURITY DEFINER
 AS 'MODULE_PATHNAME', $$register_node$$;
 
 grant execute on function
-      pgautofailover.register_node(text,text,int,name,text,bigint,int,pgautofailover.replication_state,text, int, bool)
+      pgautofailover.register_node(text,text,int,name,text,bigint,int,int,
+                                   pgautofailover.replication_state,text,
+                                   int,bool,text)
    to autoctl_node;
 
 
@@ -622,6 +627,7 @@ comment on function pgautofailover.current_state(text, int)
 CREATE FUNCTION pgautofailover.formation_uri
  (
     IN formation_id         text DEFAULT 'default',
+    IN cluster_name         text DEFAULT 'default',
     IN sslmode              text DEFAULT 'prefer',
     IN sslrootcert          text DEFAULT '',
     IN sslcrl               text DEFAULT ''
@@ -631,11 +637,15 @@ AS $$
     select case
            when string_agg(format('%s:%s', nodehost, nodeport),',') is not null
            then format(
-               'postgres://%s/%s?target_session_attrs=read-write&sslmode=%s%s%s',
+               'postgres://%s/%s?%ssslmode=%s%s%s',
                string_agg(format('%s:%s', nodehost, nodeport),','),
                -- as we join formation on node we get the same dbname for all
                -- entries, pick one.
                min(dbname),
+               case when cluster_name = 'default'
+                    then 'target_session_attrs=read-write&'
+                    else ''
+               end,
                min(sslmode),
                CASE WHEN min(sslrootcert) = ''
                    THEN ''
@@ -650,7 +660,8 @@ AS $$
       from pgautofailover.node as node
            join pgautofailover.formation using(formationid)
      where formationid = formation_id
-       and groupid = 0;
+       and groupid = 0
+       and nodecluster = cluster_name;
 $$;
 
 CREATE FUNCTION pgautofailover.enable_secondary

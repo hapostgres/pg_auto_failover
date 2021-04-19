@@ -116,7 +116,6 @@ LoadNodeHealthList(void)
 static bool
 HaMonitorHasBeenLoaded(void)
 {
-	bool extensionLoaded = false;
 	bool extensionPresent = false;
 	bool extensionScriptExecuted = true;
 
@@ -139,7 +138,7 @@ HaMonitorHasBeenLoaded(void)
 		}
 	}
 
-	extensionLoaded = extensionPresent && extensionScriptExecuted;
+	bool extensionLoaded = extensionPresent && extensionScriptExecuted;
 
 	return extensionLoaded;
 }
@@ -152,7 +151,6 @@ HaMonitorHasBeenLoaded(void)
 NodeHealth *
 TupleToNodeHealth(HeapTuple heapTuple, TupleDesc tupleDescriptor)
 {
-	NodeHealth *nodeHealth = NULL;
 	bool isNull = false;
 
 	Datum nodeIdDatum = SPI_getbinval(heapTuple, tupleDescriptor,
@@ -164,7 +162,7 @@ TupleToNodeHealth(HeapTuple heapTuple, TupleDesc tupleDescriptor)
 	Datum healthStateDatum = SPI_getbinval(heapTuple, tupleDescriptor,
 										   TLIST_NUM_HEALTH_STATUS, &isNull);
 
-	nodeHealth = palloc0(sizeof(NodeHealth));
+	NodeHealth *nodeHealth = palloc0(sizeof(NodeHealth));
 	nodeHealth->nodeId = DatumGetInt32(nodeIdDatum);
 	nodeHealth->nodeHost = TextDatumGetCString(nodeHostDatum);
 	nodeHealth->nodePort = DatumGetInt32(nodePortDatum);

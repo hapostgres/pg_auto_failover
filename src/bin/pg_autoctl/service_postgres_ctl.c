@@ -51,14 +51,12 @@ static bool ensure_postgres_status_running(LocalPostgresServer *postgres,
 bool
 service_postgres_ctl_start(void *context, pid_t *pid)
 {
-	pid_t fpid;
-
 	/* Flush stdio channels just before fork, to avoid double-output problems */
 	fflush(stdout);
 	fflush(stderr);
 
 	/* time to create the node_active sub-process */
-	fpid = fork();
+	pid_t fpid = fork();
 
 	switch (fpid)
 	{
@@ -99,8 +97,6 @@ service_postgres_ctl_start(void *context, pid_t *pid)
 void
 service_postgres_ctl_runprogram()
 {
-	Program program;
-
 	char *args[12];
 	int argsIndex = 0;
 
@@ -144,7 +140,7 @@ service_postgres_ctl_runprogram()
 	args[argsIndex] = NULL;
 
 	/* we do not want to call setsid() when running this program. */
-	program = initialize_program(args, false);
+	Program program = initialize_program(args, false);
 
 	program.capture = false;    /* redirect output, don't capture */
 	program.stdOutFd = STDOUT_FILENO;
@@ -193,7 +189,6 @@ service_postgres_ctl_loop(LocalPostgresServer *postgres)
 
 	for (;;)
 	{
-		pid_t pid;
 		int status;
 
 		/* we might have to reload, pass the signal down */
@@ -229,7 +224,7 @@ service_postgres_ctl_loop(LocalPostgresServer *postgres)
 		 * process and thus is responsible for calling waitpid() from time to
 		 * time.
 		 */
-		pid = waitpid(-1, &status, WNOHANG);
+		pid_t pid = waitpid(-1, &status, WNOHANG);
 
 		switch (pid)
 		{
@@ -289,6 +284,7 @@ service_postgres_ctl_loop(LocalPostgresServer *postgres)
 							  "see above for details.");
 
 					/* maybe next round will have better luck? */
+					pg_usleep(100 * 1000);  /* 100ms */
 					continue;
 				}
 
@@ -327,6 +323,8 @@ service_postgres_ctl_loop(LocalPostgresServer *postgres)
 			{
 				*pgSetup = newPgSetup;
 			}
+
+			pg_usleep(100 * 1000);  /* 100ms */
 			continue;
 		}
 
@@ -348,6 +346,7 @@ service_postgres_ctl_loop(LocalPostgresServer *postgres)
 			if (!keeper_postgres_state_read(pgStatus, filename))
 			{
 				/* errors have already been logged, will try again */
+				pg_usleep(100 * 1000);  /* 100ms */
 				continue;
 			}
 

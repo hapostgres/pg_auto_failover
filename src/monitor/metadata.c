@@ -86,23 +86,21 @@ pgAutoFailoverSchemaId(void)
 Oid
 pgAutoFailoverExtensionOwner(void)
 {
-	Relation pgExtension = NULL;
-	SysScanDesc scanDescriptor;
 	ScanKeyData scanKey[1];
 	bool indexOK = true;
-	HeapTuple extensionTuple = NULL;
 	Form_pg_extension extensionForm = NULL;
 	Oid extensionOwner = InvalidOid;
 
-	pgExtension = heap_open(ExtensionRelationId, AccessShareLock);
+	Relation pgExtension = heap_open(ExtensionRelationId, AccessShareLock);
 
 	ScanKeyInit(&scanKey[0], Anum_pg_extension_extname, BTEqualStrategyNumber,
 				F_NAMEEQ, CStringGetDatum(AUTO_FAILOVER_EXTENSION_NAME));
 
-	scanDescriptor = systable_beginscan(pgExtension, ExtensionNameIndexId, indexOK,
-										NULL, 1, scanKey);
+	SysScanDesc scanDescriptor = systable_beginscan(pgExtension, ExtensionNameIndexId,
+													indexOK,
+													NULL, 1, scanKey);
 
-	extensionTuple = systable_getnext(scanDescriptor);
+	HeapTuple extensionTuple = systable_getnext(scanDescriptor);
 
 	if (HeapTupleIsValid(extensionTuple))
 	{
@@ -188,7 +186,6 @@ checkPgAutoFailoverVersion()
 	char *installedVersion = NULL;
 	char *availableVersion = NULL;
 
-	int spiStatus = 0;
 	const int argCount = 1;
 	Oid argTypes[] = { TEXTOID };
 	Datum argValues[] = { CStringGetTextDatum(AUTO_FAILOVER_EXTENSION_NAME) };
@@ -205,8 +202,8 @@ checkPgAutoFailoverVersion()
 
 	SPI_connect();
 
-	spiStatus = SPI_execute_with_args(selectQuery, argCount, argTypes, argValues,
-									  NULL, false, 1);
+	int spiStatus = SPI_execute_with_args(selectQuery, argCount, argTypes, argValues,
+										  NULL, false, 1);
 	if (spiStatus != SPI_OK_SELECT)
 	{
 		elog(ERROR, "could not select from pg_catalog.pg_available_extensions");

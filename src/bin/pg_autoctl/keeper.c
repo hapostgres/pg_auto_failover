@@ -15,10 +15,13 @@
 
 #include "parson.h"
 
+#include "cli_common.h"
 #include "env_utils.h"
 #include "file_utils.h"
 #include "keeper.h"
 #include "keeper_config.h"
+#include "keeper_pg_init.h"
+#include "parsing.h"
 #include "pghba.h"
 #include "pgsetup.h"
 #include "primary_standby.h"
@@ -412,6 +415,12 @@ keeper_update_pg_state(Keeper *keeper)
 
 	log_debug("Update local PostgreSQL state");
 
+	/* when running with --disable-monitor, we might get here early */
+	if (keeperState->current_role == INIT_STATE)
+	{
+		return true;
+	}
+
 	*pgSetup = config->pgSetup;
 
 	/* reinitialize the replication state values each time we update */
@@ -748,7 +757,6 @@ keeper_create_self_signed_cert(Keeper *keeper)
 bool
 keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 {
-	Monitor *monitor = &(keeper->monitor);
 	KeeperConfig *config = &(keeper->config);
 	KeeperStateData *state = &(keeper->state);
 	LocalPostgresServer *postgres = &(keeper->postgres);
@@ -824,12 +832,15 @@ keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 		}
 	}
 
-	if (!monitor_init(&(keeper->monitor), config->monitor_pguri))
+	if (!config->monitorDisabled)
 	{
-		/* we tested already in keeper_config_accept_new, but... */
-		log_warn("Failed to contact the monitor because its "
-				 "URL is invalid, see above for details");
-		return false;
+		if (!monitor_init(&(keeper->monitor), config->monitor_pguri))
+		{
+			/* we tested already in keeper_config_accept_new, but... */
+			log_warn("Failed to contact the monitor because its "
+					 "URL is invalid, see above for details");
+			return false;
+		}
 	}
 
 	/*
@@ -851,7 +862,6 @@ keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 
 		char upstreamConfPath[MAXPGPATH] = { 0 };
 
-		bool replicationSettingsHaveChanged = false;
 
 		char *currentConfContents = NULL;
 		long currentConfSize = 0L;
@@ -862,15 +872,9 @@ keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 		/* do we have the primaryNode already? */
 		if (IS_EMPTY_STRING_BUFFER(upstream->primaryNode.host))
 		{
-			log_debug("keeper_update_primary_conninfo: monitor_get_primary()");
-
-			if (!monitor_get_primary(monitor,
-									 config->formation,
-									 state->current_group,
-									 &(upstream->primaryNode)))
+			if (!keeper_get_primary(keeper, &(upstream->primaryNode)))
 			{
-				log_error("Failed to update primary_conninfo because getting "
-						  "the primary node from the monitor failed, "
+				log_error("Failed to update primary_conninfo, "
 						  "see above for details");
 				return false;
 			}
@@ -933,7 +937,7 @@ keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 			return false;
 		}
 
-		replicationSettingsHaveChanged =
+		bool replicationSettingsHaveChanged =
 			currentConfContents == NULL ||
 			strcmp(newConfContents, currentConfContents) != 0;
 
@@ -999,12 +1003,12 @@ keeper_create_and_drop_replication_slots(Keeper *keeper)
 bool
 keeper_maintain_replication_slots(Keeper *keeper)
 {
-	Monitor *monitor = &(keeper->monitor);
 	PostgresSetup *pgSetup = &(keeper->postgres.postgresSetup);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
 	/* do we bypass the whole operation? */
 	bool bypass = false;
+	bool forceCacheInvalidation = false;
 
 	/*
 	 * We would like to maintain replication slots on the standby nodes in a
@@ -1075,10 +1079,11 @@ keeper_maintain_replication_slots(Keeper *keeper)
 		return true;
 	}
 
-	if (!monitor_get_other_nodes(monitor, keeper->state.current_node_id,
-								 ANY_STATE, &(keeper->otherNodes)))
+	if (!keeper_refresh_other_nodes(keeper, forceCacheInvalidation))
 	{
-		/* errors have already been logged */
+		log_error("Failed to maintain replication slots on the local Postgres "
+				  "instance, due to failure to refresh list of other nodes, "
+				  "see above for details");
 		return false;
 	}
 
@@ -1159,7 +1164,7 @@ keeper_init_fsm(Keeper *keeper)
 
 	/* fake the initial state provided at monitor registration time */
 	MonitorAssignedState assignedState = {
-		.nodeId = -1,
+		.nodeId = monitorDisabledNodeId,
 		.groupId = -1,
 		.state = INIT_STATE
 	};
@@ -1269,7 +1274,6 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 	while (!pgsql_retry_policy_expired(&retryPolicy))
 	{
 		bool mayRetry = false;
-		int sleepTimeMs = 0;
 
 		/*
 		 * When registering to the monitor, we get assigned a nodeId, that we
@@ -1287,7 +1291,7 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 		 * the registration (process killed, crash, etc), then the server
 		 * issues a ROLLBACK for us upon disconnection.
 		 */
-		if (!pgsql_execute(&(monitor->pgsql), "BEGIN"))
+		if (!pgsql_begin(&(monitor->pgsql)))
 		{
 			log_error("Failed to open a SQL transaction to register this node");
 
@@ -1302,11 +1306,13 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 								  config->pgSetup.pgport,
 								  config->pgSetup.control.system_identifier,
 								  config->pgSetup.dbname,
+								  -1, /* desired nodeID */
 								  config->groupId,
 								  initialState,
 								  config->pgSetup.pgKind,
 								  config->pgSetup.settings.candidatePriority,
 								  config->pgSetup.settings.replicationQuorum,
+								  config->pgSetup.citusClusterName,
 								  &mayRetry,
 								  &assignedState))
 		{
@@ -1320,7 +1326,7 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 			goto rollback;
 		}
 
-		sleepTimeMs = pgsql_compute_connection_retry_sleep_time(&retryPolicy);
+		int sleepTimeMs = pgsql_compute_connection_retry_sleep_time(&retryPolicy);
 
 		log_warn("Failed to register node %s:%d in group %d of "
 				 "formation \"%s\" with initial state \"%s\" "
@@ -1337,7 +1343,7 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 		 * The current transaction is dead: we caugth an ERROR from the
 		 * call to pgautofailover.register_node().
 		 */
-		if (!pgsql_execute(&(monitor->pgsql), "ROLLBACK"))
+		if (!pgsql_rollback(&(monitor->pgsql)))
 		{
 			log_error("Failed to ROLLBACK failed register_node transaction "
 					  " on the monitor, see above for details.");
@@ -1348,6 +1354,9 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 		/* we have milliseconds, pg_usleep() wants microseconds */
 		(void) pg_usleep(sleepTimeMs * 1000);
 	}
+
+	/* we might have been assigned a new name */
+	strlcpy(config->name, assignedState.name, sizeof(config->name));
 
 	/* initialize FSM state from monitor's answer */
 	log_info("Writing keeper state file at \"%s\"", config->pathnames.state);
@@ -1394,7 +1403,7 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 		goto rollback;
 	}
 
-	if (!pgsql_execute(&(monitor->pgsql), "COMMIT"))
+	if (!pgsql_commit(&(monitor->pgsql)))
 	{
 		log_error("Failed to COMMIT register_node transaction on the "
 				  "monitor, see above for details");
@@ -1417,7 +1426,7 @@ rollback:
 	 */
 	unlink_file(config->pathnames.state);
 
-	if (!pgsql_execute(&(monitor->pgsql), "ROLLBACK"))
+	if (!pgsql_rollback(&(monitor->pgsql)))
 	{
 		log_error("Failed to ROLLBACK failed register_node transaction "
 				  " on the monitor, see above for details.");
@@ -1429,11 +1438,215 @@ rollback:
 
 
 /*
+ * keeper_register_again registers the given node again to a given monitor URI,
+ * possibly new. This function has been designed to be used from the "enable
+ * monitor" command, in such a scenario:
+ *
+ *   $ pg_autoctl disable monitor --force
+ *   $ pg_autoctl enable monitor --monitor postgresql://...
+ *
+ * The idea is that we have lost the monitor, and we want to re-register nodes
+ * to the new empty monitor, without having to stop pg_autoctl nor Postgres.
+ */
+bool
+keeper_register_again(Keeper *keeper)
+{
+	Monitor *monitor = &(keeper->monitor);
+	KeeperConfig *config = &(keeper->config);
+	PostgresSetup *pgSetup = &(config->pgSetup);
+
+	MonitorAssignedState assignedState = { 0 };
+	ConnectionRetryPolicy retryPolicy = { 0 };
+
+	bool registered = false;
+
+	(void) pgsql_set_monitor_interactive_retry_policy(&retryPolicy);
+
+	/* fetch local metadata for the registration (system_identifier) */
+	if (!pgsql_get_postgres_metadata(&(keeper->postgres.sqlClient),
+									 &pgSetup->is_in_recovery,
+									 keeper->postgres.pgsrSyncState,
+									 keeper->postgres.currentLSN,
+									 &(pgSetup->control)))
+	{
+		log_error("Failed to get the local Postgres metadata");
+		return false;
+	}
+
+	NodeState initialState =
+		pgSetup->is_in_recovery ? WAIT_STANDBY_STATE : SINGLE_STATE;
+
+	/*
+	 * Now register to the new monitor from this "client-side" process, and
+	 * then signal the background pg_autoctl service for this node (if any) to
+	 * reload its configuration so that it starts calling node_active() to the
+	 * new monitor.
+	 */
+	(void) pgsql_set_init_retry_policy(&(monitor->pgsql.retryPolicy));
+
+	while (!pgsql_retry_policy_expired(&retryPolicy))
+	{
+		bool mayRetry = false;
+
+		if (monitor_register_node(monitor,
+								  config->formation,
+								  config->name,
+								  config->hostname,
+								  config->pgSetup.pgport,
+								  config->pgSetup.control.system_identifier,
+								  config->pgSetup.dbname,
+								  keeper->state.current_node_id,
+								  config->groupId,
+								  initialState,
+								  config->pgSetup.pgKind,
+								  config->pgSetup.settings.candidatePriority,
+								  config->pgSetup.settings.replicationQuorum,
+								  DEFAULT_CITUS_CLUSTER_NAME,
+								  &mayRetry,
+								  &assignedState))
+		{
+			/* registration was successful, break out of the retry loop */
+			log_info("Successfully registered to the monitor with nodeId %d",
+					 assignedState.nodeId);
+			registered = true;
+			break;
+		}
+
+		if (!mayRetry)
+		{
+			/* game over */
+			break;
+		}
+
+		int sleepTimeMs =
+			pgsql_compute_connection_retry_sleep_time(&retryPolicy);
+
+		log_warn("Failed to register node %s:%d in group %d of "
+				 "formation \"%s\" with initial state \"%s\" "
+				 "because the monitor is already registering another "
+				 "standby, retrying in %d ms",
+				 config->hostname,
+				 config->pgSetup.pgport,
+				 config->groupId,
+				 config->formation,
+				 NodeStateToString(initialState),
+				 sleepTimeMs);
+
+		/* we have milliseconds, pg_usleep() wants microseconds */
+		(void) pg_usleep(sleepTimeMs * 1000);
+	}
+
+	if (!registered)
+	{
+		log_error("Failed to register to the monitor");
+		return false;
+	}
+
+	/*
+	 * If we have just registered the primary node as SINGLE, then we're good,
+	 * we may continue as before.
+	 */
+	if (assignedState.state == SINGLE_STATE)
+	{
+		/* now we have registered with a new nodeId, record that */
+		if (!keeper_update_state(keeper,
+								 assignedState.nodeId,
+								 assignedState.groupId,
+								 assignedState.state,
+								 true))
+		{
+			log_error("Failed to update keepers's state");
+			return false;
+		}
+
+		return true;
+	}
+
+	/*
+	 * We are now registered as a WAIT_STANDBY node.
+	 *
+	 * The local state file might still have it that we are a SECONDARY node
+	 * though, and is running with the monitor still disabled.
+	 *
+	 * Let's move to CATCHINGUP on the monitor and then assign that to the
+	 * local state file, so that when we signal the background running process
+	 * and it connects to the monitor, it continues without an interruption and
+	 * without a pg_basebackup either.
+	 *
+	 * Wait until the primary has moved and we're being assigned CATCHINGUP.
+	 */
+	int errors = 0, tries = 0;
+
+	do {
+		/* attempt to make progress every 300ms */
+		pg_usleep(300 * 1000);
+
+		if (!pgsql_get_postgres_metadata(&(keeper->postgres.sqlClient),
+										 &pgSetup->is_in_recovery,
+										 keeper->postgres.pgsrSyncState,
+										 keeper->postgres.currentLSN,
+										 &(pgSetup->control)))
+		{
+			log_error("Failed to get the local Postgres metadata");
+			return false;
+		}
+
+		if (!monitor_node_active(monitor,
+								 config->formation,
+								 assignedState.nodeId,
+								 assignedState.groupId,
+								 assignedState.state,
+								 ReportPgIsRunning(keeper),
+								 keeper->postgres.currentLSN,
+								 keeper->postgres.pgsrSyncState,
+								 &assignedState))
+		{
+			++errors;
+
+			log_warn("Failed to contact the monitor at \"%s\"",
+					 keeper->config.monitor_pguri);
+
+			if (errors > 5)
+			{
+				log_error("Failed to contact the monitor to publish our "
+						  "current state \"%s\".",
+						  NodeStateToString(assignedState.state));
+				return false;
+			}
+		}
+
+		++tries;
+
+		if (tries == 3)
+		{
+			log_info("Still waiting for the monitor to drive us to state \"%s\"",
+					 NodeStateToString(CATCHINGUP_STATE));
+			log_warn("Please make sure that the primary node is currently "
+					 "running `pg_autoctl run` and contacting the monitor.");
+		}
+	} while (assignedState.state != CATCHINGUP_STATE);
+
+	/* now we have registered with a new nodeId, record that */
+	if (!keeper_update_state(keeper,
+							 assignedState.nodeId,
+							 assignedState.groupId,
+							 assignedState.state,
+							 true))
+	{
+		log_error("Failed to update keepers's state");
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
  * keeper_remove removes the local node from the monitor and then removes the
  * local state file.
  */
 bool
-keeper_remove(Keeper *keeper, KeeperConfig *config, bool ignore_monitor_errors)
+keeper_remove(Keeper *keeper, KeeperConfig *config)
 {
 	int errors = 0;
 
@@ -1467,13 +1680,8 @@ keeper_remove(Keeper *keeper, KeeperConfig *config, bool ignore_monitor_errors)
 							config->hostname,
 							config->pgSetup.pgport))
 		{
-			/* we already logged about errors */
-			errors++;
-
-			if (!ignore_monitor_errors)
-			{
-				return false;
-			}
+			/* errors have already been logged */
+			return false;
 		}
 	}
 
@@ -1511,8 +1719,6 @@ keeper_state_as_json(Keeper *keeper, char *json, int size)
 
 	JSON_Object *jsRoot = json_value_get_object(js);
 
-	char *serialized_string = NULL;
-	int len;
 
 	pg_setup_as_json(&(keeper->postgres.postgresSetup), jsPostgres);
 	keeperStateAsJSON(&(keeper->state), jsKeeperState);
@@ -1520,9 +1726,9 @@ keeper_state_as_json(Keeper *keeper, char *json, int size)
 	json_object_set_value(jsRoot, "postgres", jsPostgres);
 	json_object_set_value(jsRoot, "state", jsKeeperState);
 
-	serialized_string = json_serialize_to_string_pretty(js);
+	char *serialized_string = json_serialize_to_string_pretty(js);
 
-	len = strlcpy(json, serialized_string, size);
+	int len = strlcpy(json, serialized_string, size);
 
 	json_free_serialized_string(serialized_string);
 	json_value_free(js);
@@ -1553,6 +1759,12 @@ keeper_update_group_hba(Keeper *keeper, NodeAddressArray *diffNodesArray)
 		return true;
 	}
 
+	/* early exit when we have not created $PGDATA yet */
+	if (!pg_setup_pgdata_exists(postgresSetup))
+	{
+		return true;
+	}
+
 	sformat(hbaFilePath, MAXPGPATH, "%s/pg_hba.conf", postgresSetup->pgdata);
 
 	if (!pghba_ensure_host_rules_exist(hbaFilePath,
@@ -1560,7 +1772,8 @@ keeper_update_group_hba(Keeper *keeper, NodeAddressArray *diffNodesArray)
 									   postgresSetup->ssl.active,
 									   postgresSetup->dbname,
 									   PG_AUTOCTL_REPLICA_USERNAME,
-									   authMethod))
+									   authMethod,
+									   keeper->config.pgSetup.hbaLevel))
 	{
 		log_error("Failed to edit HBA file \"%s\" to update rules to current "
 				  "list of nodes registered on the monitor",
@@ -1573,7 +1786,8 @@ keeper_update_group_hba(Keeper *keeper, NodeAddressArray *diffNodesArray)
 	 * edited the HBA and it's going to take effect at next restart of
 	 * Postgres, so we're good here.
 	 */
-	if (pg_setup_is_running(postgresSetup))
+	if (keeper->config.pgSetup.hbaLevel >= HBA_EDIT_MINIMAL &&
+		pg_setup_is_running(postgresSetup))
 	{
 		if (!pgsql_reload_conf(pgsql))
 		{
@@ -1602,6 +1816,7 @@ bool
 keeper_refresh_other_nodes(Keeper *keeper, bool forceCacheInvalidation)
 {
 	Monitor *monitor = &(keeper->monitor);
+	KeeperConfig *config = &(keeper->config);
 
 	NodeAddressArray *otherNodesArray = &(keeper->otherNodes);
 	NodeAddressArray newNodesArray = { 0 };
@@ -1611,10 +1826,21 @@ keeper_refresh_other_nodes(Keeper *keeper, bool forceCacheInvalidation)
 
 	log_trace("keeper_refresh_other_nodes");
 
-	if (!monitor_get_other_nodes(monitor, nodeId, ANY_STATE, &newNodesArray))
+	if (config->monitorDisabled)
 	{
-		log_error("Failed to get_other_nodes() on the monitor");
-		return false;
+		if (!keeper_read_nodes_from_file(keeper, &newNodesArray))
+		{
+			log_error("Failed to get other nodes, see above for details");
+			return false;
+		}
+	}
+	else
+	{
+		if (!monitor_get_other_nodes(monitor, nodeId, ANY_STATE, &newNodesArray))
+		{
+			log_error("Failed to get_other_nodes() on the monitor");
+			return false;
+		}
 	}
 
 	/* compute nodes that need an HBA change (new ones, new hostnames) */
@@ -1756,7 +1982,6 @@ keeper_set_node_metadata(Keeper *keeper, KeeperConfig *oldConfig)
 {
 	KeeperConfig *config = &(keeper->config);
 	KeeperStateData keeperState = { 0 };
-	int nodeId = -1;
 
 	if (!keeper_state_read(&keeperState, keeper->config.pathnames.state))
 	{
@@ -1764,7 +1989,7 @@ keeper_set_node_metadata(Keeper *keeper, KeeperConfig *oldConfig)
 		return false;
 	}
 
-	nodeId = keeperState.current_node_id;
+	int nodeId = keeperState.current_node_id;
 
 	if (streq(oldConfig->name, config->name) &&
 		streq(oldConfig->hostname, config->hostname) &&
@@ -1919,18 +2144,33 @@ keeper_config_accept_new(Keeper *keeper, KeeperConfig *newConfig)
 	{
 		Monitor monitor = { 0 };
 
-		if (!monitor_init(&monitor, newConfig->monitor_pguri))
+		if (PG_AUTOCTL_MONITOR_IS_DISABLED(newConfig))
 		{
-			log_fatal("Failed to contact the monitor because its URL is invalid, "
-					  "see above for details");
-			return false;
+			config->monitorDisabled = true;
+
+			strlcpy(config->monitor_pguri,
+					PG_AUTOCTL_MONITOR_DISABLED,
+					sizeof(config->monitor_pguri));
+
+			log_info("Reloading configuration: the monitor has been disabled");
 		}
+		else
+		{
+			if (!monitor_init(&monitor, newConfig->monitor_pguri))
+			{
+				log_fatal("Failed to contact the monitor because "
+						  "its URL is invalid, see above for details");
+				return false;
+			}
 
-		log_info("Reloading configuration: monitor uri is now \"%s\"; "
-				 "used to be \"%s\"",
-				 newConfig->monitor_pguri, config->monitor_pguri);
+			log_info("Reloading configuration: monitor uri is now \"%s\"; "
+					 "used to be \"%s\"",
+					 newConfig->monitor_pguri, config->monitor_pguri);
 
-		strlcpy(config->monitor_pguri, newConfig->monitor_pguri, MAXCONNINFO);
+			config->monitorDisabled = false;
+			strlcpy(config->monitor_pguri, newConfig->monitor_pguri,
+					sizeof(config->monitor_pguri));
+		}
 	}
 
 	/*
@@ -2015,9 +2255,9 @@ keeper_config_accept_new(Keeper *keeper, KeeperConfig *newConfig)
 				 "used to be \"%s\"",
 				 newConfig->maximum_backup_rate, config->maximum_backup_rate);
 
-		/* note: strneq checks args are not NULL, it's safe to proceed */
-		free(config->maximum_backup_rate);
-		config->maximum_backup_rate = strdup(newConfig->maximum_backup_rate);
+		strlcpy(config->maximum_backup_rate,
+				newConfig->maximum_backup_rate,
+				MAXIMUM_BACKUP_RATE_LEN);
 	}
 
 	/*
@@ -2107,10 +2347,22 @@ keeper_config_accept_new(Keeper *keeper, KeeperConfig *newConfig)
  * integrates accepted new values into the current setup.
  */
 bool
-keeper_reload_configuration(Keeper *keeper, bool firstLoop)
+keeper_reload_configuration(Keeper *keeper, bool firstLoop, bool doInit)
 {
 	KeeperConfig *config = &(keeper->config);
 	bool postgresNotRunningIsOk = firstLoop;
+
+	/*
+	 * This function implements changes that we want to see before calling the
+	 * monitor for the first time, when called as part as the firstLoop. The
+	 * function is called again at the end of the loop, once the monitor has
+	 * been called, and we're happy to decline then: the job has already been
+	 * done in full the first time.
+	 */
+	if (firstLoop && !doInit)
+	{
+		return true;
+	}
 
 	if (file_exists(config->pathnames.config))
 	{
@@ -2118,7 +2370,7 @@ keeper_reload_configuration(Keeper *keeper, bool firstLoop)
 
 		bool missingPgdataIsOk = true;
 		bool pgIsNotRunningIsOk = true;
-		bool monitorDisabledIsOk = false;
+		bool monitorDisabledIsOk = true;
 
 		/*
 		 * Set the same configuration and state file as the current config.
@@ -2128,6 +2380,7 @@ keeper_reload_configuration(Keeper *keeper, bool firstLoop)
 
 		/* disconnect to the current monitor if we're connected */
 		(void) pgsql_finish(&(keeper->monitor.pgsql));
+		(void) pgsql_finish(&(keeper->monitor.notificationClient));
 
 		if (keeper_config_read_file(&newConfig,
 									missingPgdataIsOk,
@@ -2159,9 +2412,6 @@ keeper_reload_configuration(Keeper *keeper, bool firstLoop)
 					 "continuing with the same configuration.",
 					 config->pathnames.config);
 		}
-
-		/* we're done the the newConfig now */
-		keeper_config_destroy(&newConfig);
 	}
 	else
 	{
@@ -2179,14 +2429,187 @@ keeper_reload_configuration(Keeper *keeper, bool firstLoop)
  * reloadFunctionArray and calls each hook in turn.
  */
 void
-keeper_call_reload_hooks(Keeper *keeper, bool firstLoop)
+keeper_call_reload_hooks(Keeper *keeper, bool firstLoop, bool doInit)
 {
 	for (int index = 0; KeeperReloadHooks[index]; index++)
 	{
 		/* at the moment we ignore the return values from the reload hooks */
-		(void) (*KeeperReloadHooks[index])(keeper, firstLoop);
+		(void) (*KeeperReloadHooks[index])(keeper, firstLoop, doInit);
 	}
 
 	/* we're done reloading now. */
 	asked_to_reload = 0;
+}
+
+
+/*
+ * keeper_read_nodes_from_file read the keeper->config.pathnames.nodes file (a
+ * JSON Array of Nodes with id, name, host, port, lsn, and is_primary) and
+ * fills in the internal keeper otherNodes array. Use that function when the
+ * monitor is disabled.
+ */
+bool
+keeper_read_nodes_from_file(Keeper *keeper, NodeAddressArray *nodesArray)
+{
+	KeeperConfig *config = &(keeper->config);
+	KeeperStateData *state = &(keeper->state);
+
+	char *contents = NULL;
+	long size = 0L;
+
+	/* refrain from reading the nodes list when in the INIT state */
+	if (state->current_role == INIT_STATE)
+	{
+		return true;
+	}
+
+	/* if the file does not exists, we're done */
+	if (!file_exists(config->pathnames.nodes))
+	{
+		log_debug("Nodes files \"%s\" does not exists, done processing",
+				  config->pathnames.nodes);
+		return true;
+	}
+
+	if (!read_file_if_exists(config->pathnames.nodes, &contents, &size))
+	{
+		log_error("Failed to read nodes array from file \"%s\"",
+				  config->pathnames.nodes);
+		return false;
+	}
+
+	/* now parse the nodes JSON file */
+	if (!parseNodesArray(contents, nodesArray, state->current_node_id))
+	{
+		log_debug("Failed to parse JSON nodes array:\n%s", contents);
+		log_error("Failed to parse nodes array from file \"%s\"",
+				  config->pathnames.nodes);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * keeper_get_primary fetches the current primary Node in the group, either by
+ * connecting to the monitor and using the pgautofailover.get_primary() API
+ * there, or by scanning through the keeper->otherNodes array for the first
+ * node with isPrimary true.
+ *
+ * In both cases, there might not be a primary node identified at the moment,
+ * in which case we return false.
+ */
+bool
+keeper_get_primary(Keeper *keeper, NodeAddress *primaryNode)
+{
+	KeeperConfig *config = &(keeper->config);
+
+	if (!config->monitorDisabled)
+	{
+		Monitor *monitor = &(keeper->monitor);
+
+		if (!monitor_get_primary(monitor,
+								 config->formation,
+								 keeper->state.current_group,
+								 primaryNode))
+		{
+			log_error("Failed to get the primary node from the monitor, "
+					  "see above for details");
+			return false;
+		}
+
+		return true;
+	}
+	else
+	{
+		for (int i = 0; i < keeper->otherNodes.count; i++)
+		{
+			NodeAddress *node = &(keeper->otherNodes.nodes[i]);
+
+			if (node->isPrimary)
+			{
+				/* copy the node address details into primaryNode */
+				*primaryNode = *node;
+				return true;
+			}
+		}
+
+		log_error("Failed to get the primary node from the current list "
+				  "of other nodes, refresh the list with the command: "
+				  "pg_autoctl do fsm nodes set");
+		return false;
+	}
+
+	return false;
+}
+
+
+/*
+ * keeper_get_most_advanced_standby fetches the current most advanded standby
+ * node in the group, either by connecting to the monitor and using the
+ * pgautofailover.get_most_advanced_standby() API there, or by scanning through
+ * the keeper->otherNodes array.
+ */
+bool
+keeper_get_most_advanced_standby(Keeper *keeper, NodeAddress *upstreamNode)
+{
+	KeeperConfig *config = &(keeper->config);
+	int groupId = keeper->state.current_group;
+
+	if (!config->monitorDisabled)
+	{
+		Monitor *monitor = &(keeper->monitor);
+
+		if (!monitor_get_most_advanced_standby(monitor,
+											   config->formation,
+											   groupId,
+											   upstreamNode))
+		{
+			log_error("Failed to get the most advanced standby node "
+					  "from the monitor, see above for details");
+			return false;
+		}
+
+		return true;
+	}
+	else
+	{
+		NodeAddress *mostAdvandedStandbyNode = NULL;
+		uint64_t mostAdvandedLSN = 0;
+
+		for (int i = 0; i < keeper->otherNodes.count; i++)
+		{
+			NodeAddress *node = &(keeper->otherNodes.nodes[i]);
+			uint64_t nodeLSN = 0;
+
+			if (!parseLSN(node->lsn, &nodeLSN))
+			{
+				log_error("Failed to parse node %d \"%s\" LSN position \"%s\"",
+						  node->nodeId, node->name, node->lsn);
+				return false;
+			}
+
+			if (mostAdvandedStandbyNode == NULL ||
+				nodeLSN > mostAdvandedLSN)
+			{
+				mostAdvandedStandbyNode = node;
+				mostAdvandedLSN = nodeLSN;
+			}
+		}
+
+		if (mostAdvandedStandbyNode == NULL)
+		{
+			log_error("Failed to get the most avdanced standby node "
+					  "from the current list of other nodes, "
+					  "refresh the list with the command: "
+					  "pg_autoctl do fsm nodes set");
+			return false;
+		}
+
+		*upstreamNode = *mostAdvandedStandbyNode;
+		return true;
+	}
+
+	return false;
 }

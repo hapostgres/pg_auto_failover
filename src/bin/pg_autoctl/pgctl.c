@@ -82,29 +82,84 @@ static bool pg_write_standby_signal(const char *pgdata,
 
 
 /*
- * Get pg_ctl --version output.
- *
- * The caller should free the return value if not NULL.
+ * Get pg_ctl --version output in pgSetup->pg_version.
  */
-char *
-pg_ctl_version(const char *pg_ctl_path)
+bool
+pg_ctl_version(PostgresSetup *pgSetup)
 {
-	char *version;
-	Program prog = run_program(pg_ctl_path, "--version", NULL);
+	Program prog = run_program(pgSetup->pg_ctl, "--version", NULL);
 
 	if (prog.returnCode != 0)
 	{
 		errno = prog.error;
 		log_error("Failed to run \"pg_ctl --version\" using program \"%s\": %m",
-				  pg_ctl_path);
+				  pgSetup->pg_ctl);
 		free_program(&prog);
-		return NULL;
+		return false;
 	}
 
-	version = parse_version_number(prog.stdOut);
+	char *version = parse_version_number(prog.stdOut);
 	free_program(&prog);
 
-	return version;
+	if (version == NULL)
+	{
+		return false;
+	}
+
+	strlcpy(pgSetup->pg_version, version, PG_VERSION_STRING_MAX);
+	free(version);
+
+	return true;
+}
+
+
+/*
+ * set_pg_ctl_from_PG_CONFIG sets given pgSetup->pg_ctl to the pg_ctl binary
+ * installed in the bindir of the target Postgres installation:
+ *
+ *  $(${PG_CONFIG} --bindir)/pg_ctl
+ */
+bool
+set_pg_ctl_from_config_bindir(PostgresSetup *pgSetup, const char *pg_config)
+{
+	char pg_ctl[MAXPGPATH] = { 0 };
+	Program prog = run_program(pg_config, "--bindir", NULL);
+
+	char *lines[1];
+
+	if (prog.returnCode != 0)
+	{
+		errno = prog.error;
+		log_error("Failed to run \"pg_config --bindir\" using program \"%s\": %m",
+				  pg_config);
+		free_program(&prog);
+		return false;
+	}
+
+	if (splitLines(prog.stdOut, lines, 1) != 1)
+	{
+		log_error("Unable to parse output from pg_config --bindir");
+		free_program(&prog);
+		return false;
+	}
+
+	char *bindir = lines[0];
+	join_path_components(pg_ctl, bindir, "pg_ctl");
+
+	/* we're now done with the Program and its output */
+	free_program(&prog);
+
+	if (!file_exists(pg_ctl))
+	{
+		log_error("Failed to find pg_ctl at \"%s\" from PG_CONFIG at \"%s\"",
+				  pgSetup->pg_ctl,
+				  pg_config);
+		return false;
+	}
+
+	strlcpy(pgSetup->pg_ctl, pg_ctl, sizeof(pgSetup->pg_ctl));
+
+	return true;
 }
 
 
@@ -116,7 +171,6 @@ pg_controldata(PostgresSetup *pgSetup, bool missing_ok)
 {
 	char globalControlPath[MAXPGPATH] = { 0 };
 	char pg_controldata_path[MAXPGPATH] = { 0 };
-	Program prog;
 
 	if (pgSetup->pgdata[0] == '\0' || pgSetup->pg_ctl[0] == '\0')
 	{
@@ -143,7 +197,7 @@ pg_controldata(PostgresSetup *pgSetup, bool missing_ok)
 
 	/* We parse the output of pg_controldata, make sure it's as expected */
 	setenv("LANG", "C", 1);
-	prog = run_program(pg_controldata_path, pgSetup->pgdata, NULL);
+	Program prog = run_program(pg_controldata_path, pgSetup->pgdata, NULL);
 
 	if (prog.returnCode == 0)
 	{
@@ -186,71 +240,409 @@ pg_controldata(PostgresSetup *pgSetup, bool missing_ok)
 
 
 /*
+ * set_pg_ctl_from_PG_CONFIG sets the path to pg_ctl following the exported
+ * environment variable PG_CONFIG, when it is found in the environment.
+ *
+ * Postgres developer environments often define PG_CONFIG in the environment to
+ * build extensions for a specific version of Postgres. Let's use the hint here
+ * too.
+ */
+bool
+set_pg_ctl_from_PG_CONFIG(PostgresSetup *pgSetup)
+{
+	char PG_CONFIG[MAXPGPATH] = { 0 };
+
+	if (!env_exists("PG_CONFIG"))
+	{
+		/* then we don't use PG_CONFIG to find pg_ctl */
+		return false;
+	}
+
+	if (!get_env_copy("PG_CONFIG", PG_CONFIG, sizeof(PG_CONFIG)))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	if (!file_exists(PG_CONFIG))
+	{
+		log_error("Failed to find a file for PG_CONFIG environment value \"%s\"",
+				  PG_CONFIG);
+		return false;
+	}
+
+	if (!set_pg_ctl_from_config_bindir(pgSetup, PG_CONFIG))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	if (!pg_ctl_version(pgSetup))
+	{
+		log_fatal("Failed to get version info from %s --version",
+				  pgSetup->pg_ctl);
+		return false;
+	}
+
+	log_debug("Found pg_ctl for PostgreSQL %s at %s following PG_CONFIG",
+			  pgSetup->pg_version, pgSetup->pg_ctl);
+
+	return true;
+}
+
+
+/*
+ * set_pg_ctl_from_pg_config sets the path to pg_ctl by using pg_config
+ * --bindir when there is a single pg_config found in the PATH.
+ *
+ * When using debian/ubuntu packaging then pg_config is installed as part as
+ * the postgresql-common package in /usr/bin, whereas pg_ctl is installed in a
+ * major version dependent location such as /usr/lib/postgresql/12/bin, and
+ * those locations are not included in the PATH.
+ *
+ * So when we can't find pg_ctl anywhere in the PATH, we look for pg_config
+ * instead, and then use pg_config --bindir to discover the pg_ctl we can use.
+ */
+bool
+set_pg_ctl_from_pg_config(PostgresSetup *pgSetup)
+{
+	SearchPath all_pg_configs = { 0 };
+	SearchPath pg_configs = { 0 };
+
+	if (!search_path("pg_config", &all_pg_configs))
+	{
+		return false;
+	}
+
+	if (!search_path_deduplicate_symlinks(&all_pg_configs, &pg_configs))
+	{
+		log_error("Failed to resolve symlinks found in PATH entries, "
+				  "see above for details");
+		return false;
+	}
+
+	switch (pg_configs.found)
+	{
+		case 0:
+		{
+			log_warn("Failed to find either pg_ctl or pg_config in PATH");
+			return false;
+		}
+
+		case 1:
+		{
+			if (!set_pg_ctl_from_config_bindir(pgSetup, pg_configs.matches[0]))
+			{
+				/* errors have already been logged */
+				return false;
+			}
+
+			if (!pg_ctl_version(pgSetup))
+			{
+				log_fatal("Failed to get version info from %s --version",
+						  pgSetup->pg_ctl);
+				return false;
+			}
+
+			log_debug("Found pg_ctl for PostgreSQL %s at %s from pg_config "
+					  "found in PATH at \"%s\"",
+					  pgSetup->pg_version,
+					  pgSetup->pg_ctl,
+					  pg_configs.matches[0]);
+
+			return true;
+		}
+
+		default:
+		{
+			log_info("Found more than one pg_config entry in current PATH:");
+
+			for (int i = 0; i < pg_configs.found; i++)
+			{
+				PostgresSetup currentPgSetup = { 0 };
+
+				strlcpy(currentPgSetup.pg_ctl,
+						pg_configs.matches[i],
+						sizeof(currentPgSetup.pg_ctl));
+
+				if (!pg_ctl_version(&currentPgSetup))
+				{
+					/*
+					 * Because of this it's possible that there's now only a
+					 * single working version of pg_ctl found in PATH. If
+					 * that's the case we will still not use that by default,
+					 * since the users intention is unclear. They might have
+					 * wanted to use the version of pg_ctl that we could not
+					 * parse the version string for. So we warn and continue,
+					 * the user should make their intention clear by using the
+					 * --pg_ctl option (or changing PATH).
+					 */
+					log_warn("Failed to get version info from %s --version",
+							 currentPgSetup.pg_ctl);
+					continue;
+				}
+
+				log_info("Found \"%s\" for pg version %s",
+						 currentPgSetup.pg_ctl,
+						 currentPgSetup.pg_version);
+			}
+
+			log_info("HINT: export PG_CONFIG to a specific pg_config entry");
+
+			return false;
+		}
+	}
+
+	return false;
+}
+
+
+/*
  * Find "pg_ctl" programs in the PATH. If a single one exists, set its absolute
  * location in pg_ctl, and the PostgreSQL version number in pg_version.
  *
  * Returns how many "pg_ctl" programs have been found in the PATH.
  */
-int
+bool
 config_find_pg_ctl(PostgresSetup *pgSetup)
 {
-	char **pg_ctls = NULL;
-	int n = search_path("pg_ctl", &pg_ctls);
+	SearchPath all_pg_ctls = { 0 };
+	SearchPath pg_ctls = { 0 };
 
 	pgSetup->pg_ctl[0] = '\0';
 	pgSetup->pg_version[0] = '\0';
 
-	if (n == 1)
+	/*
+	 * Postgres developer environments often define PG_CONFIG in the
+	 * environment to build extensions for a specific version of Postgres.
+	 * Let's use the hint here too.
+	 */
+	if (set_pg_ctl_from_PG_CONFIG(pgSetup))
 	{
-		char *program = pg_ctls[0];
-		char *version = pg_ctl_version(program);
-		if (version == NULL)
-		{
-			log_fatal("Failed to get version info from %s --version", program);
-			return 0;
-		}
+		return true;
+	}
 
-		log_debug("Found pg_ctl for PostgreSQL %s at %s", version, program);
+	/* no PG_CONFIG. let's use the more classic approach with PATH instead */
+	if (!search_path("pg_ctl", &all_pg_ctls))
+	{
+		return false;
+	}
+
+	if (!search_path_deduplicate_symlinks(&all_pg_ctls, &pg_ctls))
+	{
+		log_error("Failed to resolve symlinks found in PATH entries, "
+				  "see above for details");
+		return false;
+	}
+
+	if (pg_ctls.found == 1)
+	{
+		char *program = pg_ctls.matches[0];
 
 		strlcpy(pgSetup->pg_ctl, program, MAXPGPATH);
-		strlcpy(pgSetup->pg_version, version, PG_VERSION_STRING_MAX);
 
-		free(version);
-	}
-	else if (n == 0)
-	{
-		log_warn("Failed to find pg_ctl in PATH");
+		if (!pg_ctl_version(pgSetup))
+		{
+			log_fatal("Failed to get version info from \"%s\" --version",
+					  pgSetup->pg_ctl);
+			return false;
+		}
+
+		log_debug("Found pg_ctl for PostgreSQL %s at \"%s\"",
+				  pgSetup->pg_version,
+				  pgSetup->pg_ctl);
+
+		return true;
 	}
 	else
 	{
-		for (int i = 0; i < n; i++)
+		/*
+		 * Then, first look for pg_config --bindir with pg_config in PATH,
+		 * we might have a single entry there, as is the case on a typical
+		 * debian/ubuntu packaging, in /usr/bin/pg_config installed from
+		 * the postgresql-common package.
+		 */
+		PostgresSetup pgSetupFromPgConfig = { 0 };
+
+		if (pg_ctls.found == 0)
 		{
-			char *program = pg_ctls[i];
-			char *version = pg_ctl_version(program);
-			if (version == NULL)
+			log_debug("Failed to find pg_ctl in PATH, looking for pg_config");
+		}
+		else
+		{
+			log_debug("Found %d entries for pg_ctl in PATH, "
+					  "looking for pg_config",
+					  pg_ctls.found);
+		}
+
+		if (set_pg_ctl_from_pg_config(&pgSetupFromPgConfig))
+		{
+			strlcpy(pgSetup->pg_ctl,
+					pgSetupFromPgConfig.pg_ctl,
+					sizeof(pgSetup->pg_ctl));
+
+			strlcpy(pgSetup->pg_version,
+					pgSetupFromPgConfig.pg_version,
+					sizeof(pgSetup->pg_version));
+			return true;
+		}
+
+		/*
+		 * We failed to find a single pg_config in $PATH, error out and
+		 * complain about the situation with enough details that the user
+		 * can understand our struggle in picking a Postgres major version
+		 * for them.
+		 */
+		log_info("Found more than one pg_ctl entry in current PATH, "
+				 "and failed to find a single pg_config entry in current PATH");
+
+		for (int i = 0; i < pg_ctls.found; i++)
+		{
+			PostgresSetup currentPgSetup = { 0 };
+
+			strlcpy(currentPgSetup.pg_ctl, pg_ctls.matches[i], MAXPGPATH);
+
+			if (!pg_ctl_version(&currentPgSetup))
 			{
 				/*
-				 * Because of this it's possible that there's now only a single
-				 * working version of pg_ctl found in PATH. If that's the case
-				 * we will still not use that by default, since the users
-				 * intention is unclear. They might have wanted to use the
-				 * version of pg_ctl that we could not parse the version string
-				 * for. So we warn and continue, the user should make their
-				 * intention clear by using the --pg_ctl option (or changing
-				 * PATH).
+				 * Because of this it's possible that there's now only a
+				 * single working version of pg_ctl found in PATH. If
+				 * that's the case we will still not use that by default,
+				 * since the users intention is unclear. They might have
+				 * wanted to use the version of pg_ctl that we could not
+				 * parse the version string for. So we warn and continue,
+				 * the user should make their intention clear by using the
+				 * --pg_ctl option (or setting PG_CONFIG, or PATH).
 				 */
-				log_warn("Failed to get version info from %s --version", program);
+				log_warn("Failed to get version info from \"%s\" --version",
+						 currentPgSetup.pg_ctl);
 				continue;
 			}
 
-			log_info("Found %s for pg version %s", program, version);
-			free(version);
+			log_info("Found \"%s\" for pg version %s",
+					 currentPgSetup.pg_ctl,
+					 currentPgSetup.pg_version);
+		}
+
+		log_error("Found several pg_ctl in PATH, please provide --pgctl");
+
+		return false;
+	}
+}
+
+
+/*
+ * find_pg_config_from_pg_ctl finds the path to pg_config from the known path
+ * to pg_ctl. If that exists, we first use the pg_config binary found in the
+ * same directory as the pg_ctl binary itself.
+ *
+ * Otherwise, we have a look at the PG_CONFIG environment variable.
+ *
+ * Finally, we search in the PATH list for all the matches, and for each of
+ * them we run pg_config --bindir, and if that's the directory where we have
+ * our known pg_ctl, that's our pg_config.
+ *
+ * Rationale: when using debian, the postgresql-common package installs a
+ * single entry for pg_config in /usr/bin/pg_config, and that's the system
+ * default.
+ *
+ * A version specific file path found in /usr/lib/postgresql/11/bin/pg_config
+ * when installing Postgres 11 is installed from the package
+ * postgresql-server-dev-11.
+ *
+ * There is no single default entry for pg_ctl, that said, so we are using the
+ * specific path /usr/lib/postgresql/11/bin/pg_config here.
+ *
+ * So depending on what packages have been deployed on this specific debian
+ * instance, we might or might not find a pg_config binary in the same
+ * directory as pg_ctl.
+ *
+ * Note that we could register the full path to whatever pg_config version we
+ * use at pg_autoctl create time, but in most cases that is going to be
+ * /usr/bin/pg_config, and it will point to a new pg_ctl (version 13 for
+ * instance) when you apt-get upgrade your debian testing distribution and it
+ * just migrated from Postgres 11 to Postgres 13 (bullseye cycle just did that
+ * in december 2020).
+ *
+ * Either package libpq-dev or postgresql-server-dev-11 (or another version)
+ * must be isntalled for this to work.
+ */
+bool
+find_pg_config_from_pg_ctl(const char *pg_ctl, char *pg_config, size_t size)
+{
+	char pg_config_path[MAXPGPATH] = { 0 };
+
+	/*
+	 * 1. try pg_ctl directory
+	 */
+	path_in_same_directory(pg_ctl, "pg_config", pg_config_path);
+
+	if (file_exists(pg_config_path))
+	{
+		log_debug("find_pg_config_from_pg_ctl: \"%s\" "
+				  "in same directory as pg_ctl",
+				  pg_config_path);
+		strlcpy(pg_config, pg_config_path, size);
+		return true;
+	}
+
+	/*
+	 * 2. try PG_CONFIG from the environment, and check pg_config --bindir
+	 */
+	if (env_exists("PG_CONFIG"))
+	{
+		PostgresSetup pgSetup = { 0 };
+		char PG_CONFIG[MAXPGPATH] = { 0 };
+
+		/* check that the pg_config we found relates to the given pg_ctl */
+		if (get_env_copy("PG_CONFIG", PG_CONFIG, sizeof(PG_CONFIG)) &&
+			file_exists(PG_CONFIG) &&
+			set_pg_ctl_from_config_bindir(&pgSetup, pg_config_path) &&
+			strcmp(pgSetup.pg_ctl, pg_ctl) == 0)
+		{
+			log_debug("find_pg_config_from_pg_ctl: \"%s\" "
+					  "from PG_CONFIG environment variable",
+					  pg_config_path);
+			strlcpy(pg_config, pg_config_path, size);
+			return true;
 		}
 	}
 
-	search_path_destroy_result(pg_ctls);
+	/*
+	 * 3. search our PATH for pg_config entries and keep the first one that
+	 *    relates to our known pg_ctl.
+	 */
+	SearchPath all_pg_configs = { 0 };
+	SearchPath pg_configs = { 0 };
 
-	return n;
+	if (!search_path("pg_config", &all_pg_configs))
+	{
+		return false;
+	}
+
+	if (!search_path_deduplicate_symlinks(&all_pg_configs, &pg_configs))
+	{
+		log_error("Failed to resolve symlinks found in PATH entries, "
+				  "see above for details");
+		return false;
+	}
+
+	for (int i = 0; i < pg_configs.found; i++)
+	{
+		PostgresSetup pgSetup = { 0 };
+
+		if (set_pg_ctl_from_config_bindir(&pgSetup, pg_configs.matches[i]) &&
+			strcmp(pgSetup.pg_ctl, pg_ctl) == 0)
+		{
+			log_debug("find_pg_config_from_pg_ctl: \"%s\" "
+					  "from PATH search",
+					  pg_configs.matches[i]);
+			strlcpy(pg_config, pg_configs.matches[i], size);
+			return true;
+		}
+	}
+
+	return false;
 }
 
 
@@ -267,13 +659,16 @@ find_extension_control_file(const char *pg_ctl, const char *extName)
 	char *share_dir;
 	char extension_control_file_name[MAXPGPATH] = { 0 };
 	char *lines[1];
-	Program prog;
 
 	log_debug("Checking if the %s extension is installed", extName);
 
-	path_in_same_directory(pg_ctl, "pg_config", pg_config_path);
+	if (!find_pg_config_from_pg_ctl(pg_ctl, pg_config_path, MAXPGPATH))
+	{
+		log_warn("Failed to find pg_config from pg_ctl at \"%s\"", pg_ctl);
+		return false;
+	}
 
-	prog = run_program(pg_config_path, "--sharedir", NULL);
+	Program prog = run_program(pg_config_path, "--sharedir", NULL);
 
 	if (prog.returnCode == 0)
 	{
@@ -296,7 +691,8 @@ find_extension_control_file(const char *pg_ctl, const char *extName)
 		join_path_components(extension_path, extension_path, extension_control_file_name);
 		if (!file_exists(extension_path))
 		{
-			log_error("Failed to find extension control file \"%s\"", extension_path);
+			log_error("Failed to find extension control file \"%s\"",
+					  extension_path);
 			free_program(&prog);
 			return false;
 		}
@@ -362,7 +758,6 @@ pg_auto_failover_default_settings_file_exists(PostgresSetup *pgSetup)
 	char *contents = NULL;
 	long size = 0L;
 
-	bool fileExistsWithContent = false;
 
 	join_path_components(pgAutoFailoverDefaultsConfigPath,
 						 pgSetup->pgdata,
@@ -377,7 +772,7 @@ pg_auto_failover_default_settings_file_exists(PostgresSetup *pgSetup)
 
 	/* we don't actually need the contents here */
 	free(contents);
-	fileExistsWithContent = size > 0;
+	bool fileExistsWithContent = size > 0;
 
 	return fileExistsWithContent;
 }
@@ -392,10 +787,8 @@ pg_include_config(const char *configFilePath,
 				  const char *configIncludeLine,
 				  const char *configIncludeComment)
 {
-	char *includeLine = NULL;
 	char *currentConfContents = NULL;
 	long currentConfSize = 0L;
-	PQExpBuffer newConfContents = NULL;
 
 	/* read the current postgresql.conf contents */
 	if (!read_file(configFilePath, &currentConfContents, &currentConfSize))
@@ -404,7 +797,7 @@ pg_include_config(const char *configFilePath,
 	}
 
 	/* find the include 'postgresql-auto-failover.conf' line */
-	includeLine = strstr(currentConfContents, configIncludeLine);
+	char *includeLine = strstr(currentConfContents, configIncludeLine);
 
 	if (includeLine != NULL && (includeLine == currentConfContents ||
 								includeLine[-1] == '\n'))
@@ -419,7 +812,7 @@ pg_include_config(const char *configFilePath,
 	log_debug("Adding %s to \"%s\"", configIncludeLine, configFilePath);
 
 	/* build the new postgresql.conf contents */
-	newConfContents = createPQExpBuffer();
+	PQExpBuffer newConfContents = createPQExpBuffer();
 	if (newConfContents == NULL)
 	{
 		log_error("Failed to allocate memory");
@@ -660,6 +1053,21 @@ prepare_guc_settings_from_pgsetup(const char *configFilePath,
 
 			appendPQExpBufferStr(config, "'\n");
 		}
+		else if (streq(setting->name, "citus.use_secondary_nodes"))
+		{
+			if (!IS_EMPTY_STRING_BUFFER(pgSetup->citusClusterName))
+			{
+				appendPQExpBuffer(config, "%s = 'always'\n", setting->name);
+			}
+		}
+		else if (streq(setting->name, "citus.cluster_name"))
+		{
+			if (!IS_EMPTY_STRING_BUFFER(pgSetup->citusClusterName))
+			{
+				appendPQExpBuffer(config, "%s = '%s'\n",
+								  setting->name, pgSetup->citusClusterName);
+			}
+		}
 		else if (setting->value != NULL &&
 				 !IS_EMPTY_STRING_BUFFER(setting->value))
 		{
@@ -718,7 +1126,6 @@ pg_basebackup(const char *pgdata,
 			  ReplicationSource *replicationSource)
 {
 	int returnCode;
-	Program program;
 	char pg_basebackup[MAXPGPATH];
 
 	NodeAddress *primaryNode = &(replicationSource->primaryNode);
@@ -728,7 +1135,6 @@ pg_basebackup(const char *pgdata,
 	int argsIndex = 0;
 
 	char command[BUFSIZE];
-	int commandSize = 0;
 
 	log_debug("mkdir -p \"%s\"", replicationSource->backupDir);
 	if (!ensure_empty_dir(replicationSource->backupDir, 0700))
@@ -785,11 +1191,11 @@ pg_basebackup(const char *pgdata,
 	 * pg_basebackup subprogram is not intended to be its own session leader,
 	 * but remain a sub-process in the same group as pg_autoctl.
 	 */
-	program = initialize_program(args, false);
+	Program program = initialize_program(args, false);
 	program.processBuffer = &processBufferCallback;
 
 	/* log the exact command line we're using */
-	commandSize = snprintf_program_command_line(&program, command, BUFSIZE);
+	int commandSize = snprintf_program_command_line(&program, command, BUFSIZE);
 
 	if (commandSize >= BUFSIZE)
 	{
@@ -847,7 +1253,6 @@ pg_rewind(const char *pgdata,
 		  ReplicationSource *replicationSource)
 {
 	int returnCode;
-	Program program;
 	char pg_rewind[MAXPGPATH] = { 0 };
 
 	NodeAddress *primaryNode = &(replicationSource->primaryNode);
@@ -857,7 +1262,6 @@ pg_rewind(const char *pgdata,
 	int argsIndex = 0;
 
 	char command[BUFSIZE];
-	int commandSize = 0;
 
 	/* call pg_rewind*/
 	path_in_same_directory(pg_ctl, "pg_rewind", pg_rewind);
@@ -897,11 +1301,11 @@ pg_rewind(const char *pgdata,
 	 * pg_rewind subprogram is not intended to be its own session leader, but
 	 * remain a sub-process in the same group as pg_autoctl.
 	 */
-	program = initialize_program(args, false);
+	Program program = initialize_program(args, false);
 	program.processBuffer = &processBufferCallback;
 
 	/* log the exact command line we're using */
-	commandSize = snprintf_program_command_line(&program, command, BUFSIZE);
+	int commandSize = snprintf_program_command_line(&program, command, BUFSIZE);
 
 	if (commandSize >= BUFSIZE)
 	{
@@ -968,22 +1372,19 @@ log_program_output(Program prog, int outLogLevel, int errorLogLevel)
 bool
 pg_ctl_initdb(const char *pg_ctl, const char *pgdata)
 {
-	Program program;
-	bool success = false;
-
 	/* initdb takes time, so log about the operation BEFORE doing it */
 	log_info("Initialising a PostgreSQL cluster at \"%s\"", pgdata);
 	log_info("%s initdb -s -D %s --option '--auth=trust'", pg_ctl, pgdata);
 
-	program = run_program(pg_ctl, "initdb",
-						  "--silent",
-						  "--pgdata", pgdata,
+	Program program = run_program(pg_ctl, "initdb",
+								  "--silent",
+								  "--pgdata", pgdata,
 
-	                      /* avoid warning message */
-						  "--option", "'--auth=trust'",
-						  NULL);
+	                              /* avoid warning message */
+								  "--option", "'--auth=trust'",
+								  NULL);
 
-	success = program.returnCode == 0;
+	bool success = program.returnCode == 0;
 
 	if (program.returnCode != 0)
 	{
@@ -1018,10 +1419,8 @@ bool
 pg_ctl_postgres(const char *pg_ctl, const char *pgdata, int pgport,
 				char *listen_addresses)
 {
-	Program program;
 	char postgres[MAXPGPATH];
 	char logfile[MAXPGPATH];
-	int logFileDescriptor = -1;
 
 	char *args[12];
 	int argsIndex = 0;
@@ -1029,7 +1428,6 @@ pg_ctl_postgres(const char *pg_ctl, const char *pgdata, int pgport,
 	char env_pg_regress_sock_dir[MAXPGPATH];
 
 	char command[BUFSIZE];
-	int commandSize = 0;
 
 	/* call postgres directly */
 	path_in_same_directory(pg_ctl, "postgres", postgres);
@@ -1069,10 +1467,10 @@ pg_ctl_postgres(const char *pg_ctl, const char *pgdata, int pgport,
 	 * postgres subprogram is not intended to be its own session leader, but
 	 * remain a sub-process in the same group as pg_autoctl.
 	 */
-	program = initialize_program(args, false);
+	Program program = initialize_program(args, false);
 
 	/* we want to redirect the output to logfile */
-	logFileDescriptor = open(logfile, FOPEN_FLAGS_W, 0644);
+	int logFileDescriptor = open(logfile, FOPEN_FLAGS_W, 0644);
 
 	if (logFileDescriptor == -1)
 	{
@@ -1084,7 +1482,7 @@ pg_ctl_postgres(const char *pg_ctl, const char *pgdata, int pgport,
 	program.stdErrFd = logFileDescriptor;
 
 	/* log the exact command line we're using */
-	commandSize = snprintf_program_command_line(&program, command, BUFSIZE);
+	int commandSize = snprintf_program_command_line(&program, command, BUFSIZE);
 
 	if (commandSize >= BUFSIZE)
 	{
@@ -1120,9 +1518,7 @@ pg_log_startup(const char *pgdata, int logLevel)
 	int pathLogLevel = logLevel <= LOG_DEBUG ? LOG_DEBUG : LOG_WARN;
 
 	struct stat pgStartupStat;
-	int64_t pgStartupMtime = 0;
 
-	DIR *logDir = NULL;
 	struct dirent *logFileDirEntry = NULL;
 
 	/* prepare startup.log file in PGDATA */
@@ -1174,10 +1570,10 @@ pg_log_startup(const char *pgdata, int logLevel)
 				  pgStartupPath);
 		return false;
 	}
-	pgStartupMtime = ST_MTIME_S(pgStartupStat);
+	int64_t pgStartupMtime = ST_MTIME_S(pgStartupStat);
 
 	/* open and scan through the Postgres log directory */
-	logDir = opendir(pgLogDirPath);
+	DIR *logDir = opendir(pgLogDirPath);
 
 	if (logDir == NULL)
 	{
@@ -1190,7 +1586,6 @@ pg_log_startup(const char *pgdata, int logLevel)
 	{
 		char pgLogFilePath[MAXPGPATH] = { 0 };
 		struct stat pgLogFileStat;
-		int64_t pgLogFileMtime = 0;
 
 		/* our logFiles are regular files, skip . and .. and others */
 		if (logFileDirEntry->d_type != DT_REG)
@@ -1210,7 +1605,7 @@ pg_log_startup(const char *pgdata, int logLevel)
 					  pgLogFilePath);
 			return false;
 		}
-		pgLogFileMtime = ST_MTIME_S(pgLogFileStat);
+		int64_t pgLogFileMtime = ST_MTIME_S(pgLogFileStat);
 
 		/*
 		 * Compare modification times and only add to our logs the content
@@ -1322,19 +1717,16 @@ pg_log_recovery_setup(const char *pgdata, int logLevel)
 bool
 pg_ctl_stop(const char *pg_ctl, const char *pgdata)
 {
-	Program program;
-	int status = 0;
-	bool pgdata_exists = false;
 	const bool log_output = true;
 
 	log_info("%s --pgdata %s --wait stop --mode fast", pg_ctl, pgdata);
 
-	program = run_program(pg_ctl,
-						  "--pgdata", pgdata,
-						  "--wait",
-						  "stop",
-						  "--mode", "fast",
-						  NULL);
+	Program program = run_program(pg_ctl,
+								  "--pgdata", pgdata,
+								  "--wait",
+								  "stop",
+								  "--mode", "fast",
+								  NULL);
 
 	/*
 	 * Case 1. "pg_ctl stop" was successful, so we could stop the PostgreSQL
@@ -1350,7 +1742,7 @@ pg_ctl_stop(const char *pg_ctl, const char *pgdata)
 	 * Case 2. The data directory doesn't exist. So we assume PostgreSQL is
 	 * not running, so stopping the PostgreSQL server was successful.
 	 */
-	pgdata_exists = directory_exists(pgdata);
+	bool pgdata_exists = directory_exists(pgdata);
 	if (!pgdata_exists)
 	{
 		log_info("pgdata \"%s\" does not exists, consider this as PostgreSQL "
@@ -1368,7 +1760,7 @@ pg_ctl_stop(const char *pg_ctl, const char *pgdata)
 	 * See https://www.postgresql.org/docs/current/static/app-pg-ctl.html
 	 */
 
-	status = pg_ctl_status(pg_ctl, pgdata, log_output);
+	int status = pg_ctl_status(pg_ctl, pgdata, log_output);
 	if (status == PG_CTL_STATUS_NOT_RUNNING)
 	{
 		log_info("pg_ctl stop failed, but PostgreSQL is not running anyway");
@@ -1878,7 +2270,6 @@ prepare_primary_conninfo(char *primaryConnInfo,
 {
 	int size = 0;
 	char escaped[BUFSIZE];
-	PQExpBuffer buffer = NULL;
 
 	if (IS_EMPTY_STRING_BUFFER(primaryHost))
 	{
@@ -1889,7 +2280,7 @@ prepare_primary_conninfo(char *primaryConnInfo,
 		return true;
 	}
 
-	buffer = createPQExpBuffer();
+	PQExpBuffer buffer = createPQExpBuffer();
 
 	/* application_name shows up in pg_stat_replication on the primary */
 	appendPQExpBuffer(buffer, "application_name=%s", applicationName);
@@ -2006,7 +2397,6 @@ pgctl_identify_system(ReplicationSource *replicationSource)
 	char primaryConnInfo[MAXCONNINFO] = { 0 };
 	char primaryConnInfoReplication[MAXCONNINFO] = { 0 };
 	PGSQL replicationClient = { 0 };
-	int len = 0;
 
 	if (!prepare_primary_conninfo(primaryConnInfo,
 								  MAXCONNINFO,
@@ -2032,9 +2422,9 @@ pgctl_identify_system(ReplicationSource *replicationSource)
 	 * wherein a small set of replication commands, shown below, can be issued
 	 * instead of SQL statements.
 	 */
-	len = sformat(primaryConnInfoReplication, MAXCONNINFO,
-				  "%s replication=1",
-				  primaryConnInfo);
+	int len = sformat(primaryConnInfoReplication, MAXCONNINFO,
+					  "%s replication=1",
+					  primaryConnInfo);
 
 	if (len >= MAXCONNINFO)
 	{
@@ -2084,11 +2474,10 @@ pg_is_running(const char *pg_ctl, const char *pgdata)
 bool
 pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *hostname)
 {
-	Program program;
 	char subject[BUFSIZE] = { 0 };
-	int size = 0;
-	char openssl[MAXPGPATH];
-	if (!search_path_first("openssl", openssl))
+	char openssl[MAXPGPATH] = { 0 };
+
+	if (!search_path_first("openssl", openssl, LOG_ERROR))
 	{
 		/* errors have already been logged */
 		return false;
@@ -2100,8 +2489,8 @@ pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *hostname)
 		return false;
 	}
 
-	size = sformat(pgSetup->ssl.serverKey, MAXPGPATH,
-				   "%s/server.key", pgSetup->pgdata);
+	int size = sformat(pgSetup->ssl.serverKey, MAXPGPATH,
+					   "%s/server.key", pgSetup->pgdata);
 
 	if (size == -1 || size > MAXPGPATH)
 	{
@@ -2139,13 +2528,13 @@ pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *hostname)
 			 pgSetup->ssl.serverKey,
 			 subject);
 
-	program = run_program(openssl,
-						  "req", "-new", "-x509", "-days", "365",
-						  "-nodes", "-text",
-						  "-out", pgSetup->ssl.serverCert,
-						  "-keyout", pgSetup->ssl.serverKey,
-						  "-subj", subject,
-						  NULL);
+	Program program = run_program(openssl,
+								  "req", "-new", "-x509", "-days", "365",
+								  "-nodes", "-text",
+								  "-out", pgSetup->ssl.serverCert,
+								  "-keyout", pgSetup->ssl.serverKey,
+								  "-subj", subject,
+								  NULL);
 
 	if (program.returnCode != 0)
 	{

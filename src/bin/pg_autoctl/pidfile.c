@@ -51,7 +51,6 @@ create_pidfile(const char *pidfile, pid_t pid)
 {
 	PQExpBuffer content = createPQExpBuffer();
 
-	bool success = false;
 
 	log_trace("create_pidfile(%d): \"%s\"", pid, pidfile);
 
@@ -77,7 +76,7 @@ create_pidfile(const char *pidfile, pid_t pid)
 		return false;
 	}
 
-	success = write_file(content->data, content->len, pidfile);
+	bool success = write_file(content->data, content->len, pidfile);
 	destroyPQExpBuffer(content);
 
 	return success;
@@ -304,7 +303,6 @@ read_service_pidfile_version_strings(const char *pidfile,
 	long fileSize = 0L;
 	char *fileContents = NULL;
 	char *fileLines[BUFSIZE] = { 0 };
-	int lineCount = 0;
 	int lineNumber;
 
 	if (!read_file_if_exists(pidfile, &fileContents, &fileSize))
@@ -312,7 +310,7 @@ read_service_pidfile_version_strings(const char *pidfile,
 		return false;
 	}
 
-	lineCount = splitLines(fileContents, fileLines, BUFSIZE);
+	int lineCount = splitLines(fileContents, fileLines, BUFSIZE);
 
 	for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
 	{
@@ -357,7 +355,6 @@ pidfile_as_json(JSON_Value *js, const char *pidfile, bool includeStatus)
 	long fileSize = 0L;
 	char *fileContents = NULL;
 	char *fileLines[BUFSIZE] = { 0 };
-	int lineCount = 0;
 	int lineNumber;
 
 	if (!read_file_if_exists(pidfile, &fileContents, &fileSize))
@@ -365,7 +362,7 @@ pidfile_as_json(JSON_Value *js, const char *pidfile, bool includeStatus)
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
-	lineCount = splitLines(fileContents, fileLines, BUFSIZE);
+	int lineCount = splitLines(fileContents, fileLines, BUFSIZE);
 
 	for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
 	{

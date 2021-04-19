@@ -29,6 +29,7 @@ typedef struct SystemdServiceConfig
 	char ExecStart[BUFSIZE];
 	char Restart[BUFSIZE];
 	int StartLimitBurst;
+	char ExecReload[BUFSIZE];
 
 	/* Install */
 	char WantedBy[BUFSIZE];

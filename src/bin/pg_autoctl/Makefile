@@ -39,10 +39,17 @@ DEFAULT_CFLAGS += -Wall
 DEFAULT_CFLAGS += -Werror=implicit-int
 DEFAULT_CFLAGS += -Werror=implicit-function-declaration
 DEFAULT_CFLAGS += -Werror=return-type
+DEFAULT_CFLAGS += -Wno-declaration-after-statement
 
 # Needed for OSX
 DEFAULT_CFLAGS += -Wno-missing-braces
 DEFAULT_CFLAGS += $(COMMON_LIBS)
+
+ifdef USE_SECURITY_FLAGS
+# Flags taken from: https://liquid.microsoft.com/Web/Object/Read/ms.security/Requirements/Microsoft.Security.SystemsADM.10203#guide
+SECURITY_CFLAGS=-fstack-protector-strong -D_FORTIFY_SOURCE=2 -O2 -z noexecstack -fpie -Wl,-pie -Wl,-z,relro -Wl,-z,now -Wformat -Wformat-security -Werror=format-security
+DEFAULT_CFLAGS += $(SECURITY_CFLAGS)
+endif
 
 override CFLAGS := $(DEFAULT_CFLAGS) $(CFLAGS)
 

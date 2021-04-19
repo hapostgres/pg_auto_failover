@@ -96,11 +96,10 @@ supervisor_start(Service services[], int serviceCount, const char *pidfile)
 	for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
 	{
 		Service *service = &(services[serviceIndex]);
-		bool started = false;
 
 		log_debug("Starting pg_autoctl %s service", service->name);
 
-		started = (*service->startFunction)(service->context, &(service->pid));
+		bool started = (*service->startFunction)(service->context, &(service->pid));
 
 		if (started)
 		{
@@ -200,7 +199,7 @@ supervisor_loop(Supervisor *supervisor)
 		}
 		else
 		{
-			/* avoid buzy looping on waitpid(WNOHANG) */
+			/* avoid busy looping on waitpid(WNOHANG) */
 			pg_usleep(100 * 1000); /* 100 ms */
 		}
 
@@ -620,11 +619,8 @@ supervisor_shutdown_sequence(Supervisor *supervisor)
 static bool
 supervisor_restart_service(Supervisor *supervisor, Service *service, int status)
 {
-	char *verb = WIFEXITED(status) ? "exited" : "failed";
-	int returnCode = WEXITSTATUS(status);
 	uint64_t now = time(NULL);
 	int logLevel = LOG_ERROR;
-	bool restarted = false;
 
 	RestartCounters *counters = &(service->restartCounters);
 
@@ -645,13 +641,34 @@ supervisor_restart_service(Supervisor *supervisor, Service *service, int status)
 	}
 
 	/* when a sub-process has quit and we're not shutting down, warn about it */
-	else if (returnCode == EXIT_CODE_QUIT)
+	else if (WIFEXITED(status) && WEXITSTATUS(status) == EXIT_CODE_QUIT)
 	{
 		logLevel = LOG_WARN;
 	}
 
-	log_level(logLevel, "pg_autoctl service %s %s with exit status %d",
-			  service->name, verb, returnCode);
+	if (WIFEXITED(status))
+	{
+		int returnCode = WEXITSTATUS(status);
+
+		log_level(logLevel, "pg_autoctl service %s exited with exit status %d",
+				  service->name, returnCode);
+	}
+	else if (WIFSIGNALED(status))
+	{
+		int signal = WTERMSIG(status);
+
+		log_level(logLevel,
+				  "pg_autoctl service %s exited after receiving signal %s",
+				  service->name, strsignal(signal));
+	}
+	else if (WIFSTOPPED(status))
+	{
+		/* well that's unexpected, we're not using WUNTRACED */
+		log_level(logLevel,
+				  "pg_autoctl service %s has been stopped and can be restarted",
+				  service->name);
+		return false;
+	}
 
 	/*
 	 * We don't restart temporary processes at all: we're done already.
@@ -699,7 +716,9 @@ supervisor_restart_service(Supervisor *supervisor, Service *service, int status)
 	 *  pg_autoctl create monitor
 	 *  pg_autoctl create postgres
 	 */
-	if (service->policy == RP_TRANSIENT && returnCode == EXIT_CODE_QUIT)
+	if (service->policy == RP_TRANSIENT &&
+		WIFEXITED(status) &&
+		WEXITSTATUS(status) == EXIT_CODE_QUIT)
 	{
 		/* exit with a happy exit code, and process with shutdown sequence */
 		supervisor->cleanExit = true;
@@ -717,7 +736,7 @@ supervisor_restart_service(Supervisor *supervisor, Service *service, int status)
 	 * too.
 	 */
 	log_info("Restarting service %s", service->name);
-	restarted = (*service->startFunction)(service->context, &(service->pid));
+	bool restarted = (*service->startFunction)(service->context, &(service->pid));
 
 	if (!restarted)
 	{
@@ -765,7 +784,6 @@ supervisor_may_restart(Service *service)
 	uint64_t now = time(NULL);
 	RestartCounters *counters = &(service->restartCounters);
 	int position = counters->position;
-	uint64_t oldestRestartTime = 0;
 
 	char timestring[BUFSIZE] = { 0 };
 
@@ -791,7 +809,7 @@ supervisor_may_restart(Service *service)
 	 * one:
 	 */
 	position = (position + 1) % SUPERVISOR_SERVICE_MAX_RETRY;
-	oldestRestartTime = counters->startTime[position];
+	uint64_t oldestRestartTime = counters->startTime[position];
 
 	if ((now - oldestRestartTime) <= SUPERVISOR_SERVICE_MAX_TIME)
 	{
@@ -819,7 +837,6 @@ supervisor_update_pidfile(Supervisor *supervisor)
 	int serviceIndex = 0;
 	PQExpBuffer content = createPQExpBuffer();
 
-	bool success = false;
 
 	if (content == NULL)
 	{
@@ -842,7 +859,7 @@ supervisor_update_pidfile(Supervisor *supervisor)
 		appendPQExpBuffer(content, "%d %s\n", service->pid, service->name);
 	}
 
-	success = write_file(content->data, content->len, supervisor->pidfile);
+	bool success = write_file(content->data, content->len, supervisor->pidfile);
 	destroyPQExpBuffer(content);
 
 	return success;
@@ -861,7 +878,6 @@ supervisor_find_service_pid(const char *pidfile,
 	long fileSize = 0L;
 	char *fileContents = NULL;
 	char *fileLines[BUFSIZE] = { 0 };
-	int lineCount = 0;
 	int lineNumber;
 
 	if (!file_exists(pidfile))
@@ -874,7 +890,7 @@ supervisor_find_service_pid(const char *pidfile,
 		return false;
 	}
 
-	lineCount = splitLines(fileContents, fileLines, BUFSIZE);
+	int lineCount = splitLines(fileContents, fileLines, BUFSIZE);
 
 	for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
 	{

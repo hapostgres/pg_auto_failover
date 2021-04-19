@@ -24,7 +24,6 @@
 bool
 read_ini_file(const char *filename, IniOption *optionList)
 {
-	ini_t *ini = NULL;
 	char *fileContents = NULL;
 	long fileSize = 0L;
 	IniOption *option;
@@ -36,7 +35,7 @@ read_ini_file(const char *filename, IniOption *optionList)
 	}
 
 	/* parse the content of the file as per INI syntax rules */
-	ini = ini_load(fileContents, NULL);
+	ini_t *ini = ini_load(fileContents, NULL);
 	free(fileContents);
 
 	/*
@@ -45,11 +44,10 @@ read_ini_file(const char *filename, IniOption *optionList)
 	 */
 	for (option = optionList; option->type != INI_END_T; option++)
 	{
-		int sectionIndex;
 		int optionIndex;
 		char *val;
 
-		sectionIndex = ini_find_section(ini, option->section, 0);
+		int sectionIndex = ini_find_section(ini, option->section, 0);
 
 		if (sectionIndex == INI_NOT_FOUND)
 		{
@@ -147,10 +145,9 @@ ini_validate_options(IniOption *optionList)
 
 	for (option = optionList; option->type != INI_END_T; option++)
 	{
-		int n;
 		char optionName[BUFSIZE];
 
-		n = sformat(optionName, BUFSIZE, "%s.%s", option->section, option->name);
+		int n = sformat(optionName, BUFSIZE, "%s.%s", option->section, option->name);
 
 		if (option->optName)
 		{
@@ -552,7 +549,6 @@ IniOption *
 lookup_ini_path_value(IniOption *optionList, const char *path)
 {
 	char *section_name, *option_name, *ptr;
-	IniOption *option;
 
 	/*
 	 * Split path into section/option.
@@ -569,7 +565,7 @@ lookup_ini_path_value(IniOption *optionList, const char *path)
 	option_name = section_name + (ptr - path) + 1; /* apply same offset */
 	*(option_name - 1) = '\0';                     /* split string at the dot */
 
-	option = lookup_ini_option(optionList, section_name, option_name);
+	IniOption *option = lookup_ini_option(optionList, section_name, option_name);
 
 	if (option == NULL)
 	{
@@ -656,8 +652,6 @@ bool
 ini_get_setting(const char *filename, IniOption *optionList,
 				const char *path, char *value, size_t size)
 {
-	IniOption *option = NULL;
-
 	log_debug("Reading configuration from \"%s\"", filename);
 
 	if (!read_ini_file(filename, optionList))
@@ -666,7 +660,7 @@ ini_get_setting(const char *filename, IniOption *optionList,
 		return false;
 	}
 
-	option = lookup_ini_path_value(optionList, path);
+	IniOption *option = lookup_ini_path_value(optionList, path);
 
 	if (option)
 	{

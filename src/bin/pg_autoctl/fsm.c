@@ -118,6 +118,9 @@
 #define COMMENT_INIT_TO_WAIT_STANDBY \
 	"Start following a primary"
 
+#define COMMENT_SECONARY_TO_WAIT_STANDBY \
+	"Registering to a new monitor"
+
 #define COMMENT_SECONDARY_TO_WAIT_MAINTENANCE \
 	"Waiting for the primary to disable sync replication before " \
 	"going to maintenance."
@@ -261,6 +264,7 @@ KeeperFSMTransition KeeperFSM[] = {
 	{ PRIMARY_STATE, JOIN_PRIMARY_STATE, COMMENT_PRIMARY_TO_JOIN_PRIMARY, &fsm_prepare_replication },
 	{ PRIMARY_STATE, WAIT_PRIMARY_STATE, COMMENT_PRIMARY_TO_WAIT_PRIMARY, &fsm_disable_sync_rep },
 	{ JOIN_PRIMARY_STATE, WAIT_PRIMARY_STATE, COMMENT_PRIMARY_TO_WAIT_PRIMARY, &fsm_disable_sync_rep },
+	{ WAIT_PRIMARY_STATE, JOIN_PRIMARY_STATE, COMMENT_PRIMARY_TO_JOIN_PRIMARY, &fsm_prepare_replication },
 
 	/*
 	 * Situation is getting back to normal on the primary
@@ -304,6 +308,12 @@ KeeperFSMTransition KeeperFSM[] = {
 	{ INIT_STATE, WAIT_STANDBY_STATE, COMMENT_INIT_TO_WAIT_STANDBY, NULL },
 
 	/*
+	 * When losing a monitor and then connecting to a new monitor as a
+	 * secondary, we need to be able to follow the init sequence again.
+	 */
+	{ SECONDARY_STATE, WAIT_STANDBY_STATE, COMMENT_SECONARY_TO_WAIT_STANDBY, NULL },
+
+	/*
 	 * In case of maintenance of the standby server, we stop PostgreSQL.
 	 */
 	{ SECONDARY_STATE, WAIT_MAINTENANCE_STATE, COMMENT_SECONDARY_TO_WAIT_MAINTENANCE, NULL },
@@ -318,7 +328,8 @@ KeeperFSMTransition KeeperFSM[] = {
 	 * monitor.
 	 */
 	{ PRIMARY_STATE, APPLY_SETTINGS_STATE, COMMENT_PRIMARY_TO_APPLY_SETTINGS, NULL },
-	{ APPLY_SETTINGS_STATE, PRIMARY_STATE, COMMENT_APPLY_SETTINGS_TO_PRIMARY, &fsm_apply_settings },
+	{ WAIT_PRIMARY_STATE, APPLY_SETTINGS_STATE, COMMENT_PRIMARY_TO_APPLY_SETTINGS, NULL },
+	{ APPLY_SETTINGS_STATE, PRIMARY_STATE, COMMENT_APPLY_SETTINGS_TO_PRIMARY, &fsm_enable_sync_rep },
 
 	{ APPLY_SETTINGS_STATE, SINGLE_STATE, COMMENT_PRIMARY_TO_SINGLE, &fsm_disable_replication },
 	{ APPLY_SETTINGS_STATE, WAIT_PRIMARY_STATE, COMMENT_PRIMARY_TO_WAIT_PRIMARY, &fsm_disable_sync_rep },

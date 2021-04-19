@@ -21,11 +21,13 @@
 typedef struct Monitor
 {
 	PGSQL pgsql;
+	PGSQL notificationClient;
 	MonitorConfig config;
 } Monitor;
 
 typedef struct MonitorAssignedState
 {
+	char name[_POSIX_HOST_NAME_MAX];
 	int nodeId;
 	int groupId;
 	NodeState state;
@@ -63,9 +65,6 @@ void monitor_finish(Monitor *monitor);
 
 bool monitor_retryable_error(const char *sqlstate);
 
-void printNodeHeader(int maxHostNameSize);
-void printNodeEntry(NodeAddress *node);
-
 bool monitor_get_nodes(Monitor *monitor, char *formation, int groupId,
 					   NodeAddressArray *nodeArray);
 bool monitor_print_nodes(Monitor *monitor, char *formation, int groupId);
@@ -79,7 +78,6 @@ bool monitor_print_other_nodes(Monitor *monitor,
 bool monitor_print_other_nodes_as_json(Monitor *monitor,
 									   int myNodeId,
 									   NodeState currentState);
-void printNodeArray(NodeAddressArray *nodesArray);
 
 bool monitor_get_primary(Monitor *monitor, char *formation, int groupId,
 						 NodeAddress *node);
@@ -95,11 +93,13 @@ bool monitor_register_node(Monitor *monitor,
 						   int port,
 						   uint64_t system_identifier,
 						   char *dbname,
+						   int desiredNodeId,
 						   int desiredGroupId,
 						   NodeState initialState,
 						   PgInstanceKind kind,
 						   int candidatePriority,
 						   bool quorum,
+						   char *citusClusterName,
 						   bool *mayRetry,
 						   MonitorAssignedState *assignedState);
 bool monitor_node_active(Monitor *monitor,
@@ -159,6 +159,7 @@ bool monitor_print_formation_settings_as_json(Monitor *monitor, char *formation)
 
 bool monitor_formation_uri(Monitor *monitor,
 						   const char *formation,
+						   const char *citusClusterName,
 						   const SSLOptions *ssl,
 						   char *connectionString,
 						   size_t size);
@@ -191,6 +192,12 @@ bool monitor_wait_until_some_node_reported_state(Monitor *monitor,
 												 int groupId,
 												 PgInstanceKind nodeKind,
 												 NodeState targetState);
+bool monitor_wait_until_node_reported_state(Monitor *monitor,
+											const char *formation,
+											int groupId,
+											int nodeId,
+											PgInstanceKind nodeKind,
+											NodeState targetState);
 bool monitor_wait_for_state_change(Monitor *monitor,
 								   const char *formation,
 								   int groupId,

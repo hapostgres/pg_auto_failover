@@ -23,7 +23,6 @@
 bool
 env_found_empty(const char *name)
 {
-	char *envvalue = NULL;
 	if (name == NULL || strlen(name) == 0)
 	{
 		log_error("Failed to get environment setting. "
@@ -36,7 +35,7 @@ env_found_empty(const char *name)
 	 * getenv is safe here because we never provide null argument,
 	 * and only check the value it's length.
 	 */
-	envvalue = getenv(name); /* IGNORE-BANNED */
+	char *envvalue = getenv(name); /* IGNORE-BANNED */
 	return envvalue != NULL && strlen(envvalue) == 0;
 }
 
@@ -74,9 +73,6 @@ bool
 get_env_copy_with_fallback(const char *name, char *result, int maxLength,
 						   const char *fallback)
 {
-	const char *envvalue = NULL;
-	size_t actualLength = 0;
-
 	if (name == NULL || strlen(name) == 0)
 	{
 		log_error("Failed to get environment setting. "
@@ -96,7 +92,7 @@ get_env_copy_with_fallback(const char *name, char *result, int maxLength,
 	 * getenv is safe here because we never provide null argument,
 	 * and copy out the result immediately.
 	 */
-	envvalue = getenv(name); /* IGNORE-BANNED */
+	const char *envvalue = getenv(name); /* IGNORE-BANNED */
 	if (envvalue == NULL)
 	{
 		envvalue = fallback;
@@ -108,7 +104,7 @@ get_env_copy_with_fallback(const char *name, char *result, int maxLength,
 		}
 	}
 
-	actualLength = strlcpy(result, envvalue, maxLength);
+	size_t actualLength = strlcpy(result, envvalue, maxLength);
 
 	/* uses >= to make sure the nullbyte fits */
 	if (actualLength >= maxLength)

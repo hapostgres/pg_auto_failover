@@ -31,6 +31,7 @@
 #include "monitor_config.h"
 #include "monitor_pg_init.h"
 #include "pgctl.h"
+#include "pghba.h"
 #include "pidfile.h"
 #include "primary_standby.h"
 #include "service_keeper.h"
@@ -60,8 +61,6 @@ static void cli_drop_node_from_monitor(KeeperConfig *config,
 									   const char *hostname,
 									   int port);
 
-static bool discover_hostname(char *hostname, int size,
-							  const char *monitorHostname, int monitorPort);
 static void check_hostname(const char *hostname);
 
 CommandLine create_monitor_command =
@@ -86,7 +85,7 @@ CommandLine create_postgres_command =
 		"Initialize a pg_auto_failover standalone postgres node",
 		"",
 		"  --pgctl           path to pg_ctl\n"
-		"  --pgdata          path to data director\n"
+		"  --pgdata          path to data directory\n"
 		"  --pghost          PostgreSQL's hostname\n"
 		"  --pgport          PostgreSQL's port number\n"
 		"  --listen          PostgreSQL's listen_addresses\n"
@@ -98,9 +97,10 @@ CommandLine create_postgres_command =
 		"  --monitor         pg_auto_failover Monitor Postgres URL\n"
 		"  --auth            authentication method for connections from monitor\n"
 		"  --skip-pg-hba     skip editing pg_hba.conf rules\n"
+		"  --pg-hba-lan      edit pg_hba.conf rules for --dbname in detected LAN\n"
+		KEEPER_CLI_SSL_OPTIONS
 		"  --candidate-priority    priority of the node to be promoted to become primary\n"
-		"  --replication-quorum    true if node participates in write quorum\n"
-		KEEPER_CLI_SSL_OPTIONS,
+		"  --replication-quorum    true if node participates in write quorum\n",
 		cli_create_postgres_getopts,
 		cli_create_postgres);
 
@@ -131,8 +131,10 @@ CommandLine drop_node_command =
  * configuration file.
  */
 bool
-cli_create_config(Keeper *keeper, KeeperConfig *config)
+cli_create_config(Keeper *keeper)
 {
+	KeeperConfig *config = &(keeper->config);
+
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
 	bool monitorDisabledIsOk = true;
@@ -192,38 +194,42 @@ cli_create_config(Keeper *keeper, KeeperConfig *config)
 		 * arguments. After all, they may change their mind of have just
 		 * realized that the --pgport they wanted to use is already in use.
 		 */
-		if (!monitor_init(monitor, config->monitor_pguri))
+		if (!config->monitorDisabled)
 		{
-			/* errors have already been logged */
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-
-		if (file_exists(config->pathnames.state) && !config->monitorDisabled)
-		{
-			/*
-			 * Handle the node metadata options: --name, --hostname, --pgport.
-			 *
-			 * When those options have been used, then the configuration file
-			 * has been merged with the command line values, and we can update
-			 * the metadata for this node on the monitor.
-			 */
-			if (!keeper_set_node_metadata(keeper, &oldConfig))
+			if (!monitor_init(monitor, config->monitor_pguri))
 			{
 				/* errors have already been logged */
-				exit(EXIT_CODE_MONITOR);
+				exit(EXIT_CODE_BAD_ARGS);
 			}
 
-			/*
-			 * Now, at 1.3 to 1.4 upgrade, the monitor assigns a new name to
-			 * pg_autoctl nodes, which did not use to have a name before. In
-			 * that case, and then pg_autoctl run has been used without
-			 * options, our name might be empty here. We then need to fetch it
-			 * from the monitor.
-			 */
-			if (!keeper_update_nodename_from_monitor(keeper))
+			if (file_exists(config->pathnames.state))
 			{
-				/* errors have already been logged */
-				exit(EXIT_CODE_BAD_CONFIG);
+				/*
+				 * Handle the node metadata options: --name, --hostname,
+				 * --pgport.
+				 *
+				 * When those options have been used, then the configuration
+				 * file has been merged with the command line values, and we
+				 * can update the metadata for this node on the monitor.
+				 */
+				if (!keeper_set_node_metadata(keeper, &oldConfig))
+				{
+					/* errors have already been logged */
+					exit(EXIT_CODE_MONITOR);
+				}
+
+				/*
+				 * Now, at 1.3 to 1.4 upgrade, the monitor assigns a new name to
+				 * pg_autoctl nodes, which did not use to have a name before. In
+				 * that case, and then pg_autoctl run has been used without
+				 * options, our name might be empty here. We then need to fetch
+				 * it from the monitor.
+				 */
+				if (!keeper_update_nodename_from_monitor(keeper))
+				{
+					/* errors have already been logged */
+					exit(EXIT_CODE_BAD_CONFIG);
+				}
 			}
 		}
 	}
@@ -279,12 +285,14 @@ cli_create_postgres_getopts(int argc, char **argv)
 		{ "username", required_argument, NULL, 'U' },
 		{ "auth", required_argument, NULL, 'A' },
 		{ "skip-pg-hba", no_argument, NULL, 'S' },
+		{ "pg-hba-lan", no_argument, NULL, 'L' },
 		{ "dbname", required_argument, NULL, 'd' },
 		{ "name", required_argument, NULL, 'a' },
 		{ "hostname", required_argument, NULL, 'n' },
 		{ "formation", required_argument, NULL, 'f' },
 		{ "monitor", required_argument, NULL, 'm' },
 		{ "disable-monitor", no_argument, NULL, 'M' },
+		{ "node-id", required_argument, NULL, 'I' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
@@ -292,7 +300,6 @@ cli_create_postgres_getopts(int argc, char **argv)
 		{ "candidate-priority", required_argument, NULL, 'P' },
 		{ "replication-quorum", required_argument, NULL, 'r' },
 		{ "run", no_argument, NULL, 'x' },
-		{ "help", no_argument, NULL, 0 },
 		{ "no-ssl", no_argument, NULL, 'N' },
 		{ "ssl-self-signed", no_argument, NULL, 's' },
 		{ "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG },
@@ -305,7 +312,7 @@ cli_create_postgres_getopts(int argc, char **argv)
 
 	int optind =
 		cli_create_node_getopts(argc, argv, long_options,
-								"C:D:H:p:l:U:A:Sd:a:n:f:m:MRVvqhP:r:xsN",
+								"C:D:H:p:l:U:A:SLd:a:n:f:m:MI:RVvqhP:r:xsN",
 								&options);
 
 	/* publish our option parsing in the global variable */
@@ -328,17 +335,17 @@ cli_create_postgres(int argc, char **argv)
 
 	keeper.config = keeperOptions;
 
-	if (read_pidfile(keeper.config.pathnames.pid, &pid))
+	if (read_pidfile(config->pathnames.pid, &pid))
 	{
 		log_fatal("pg_autoctl is already running with pid %d", pid);
 		exit(EXIT_CODE_BAD_STATE);
 	}
 
-	if (!file_exists(keeper.config.pathnames.config))
+	if (!file_exists(config->pathnames.config))
 	{
 		/* pg_autoctl create postgres: mark ourselves as a standalone node */
-		keeper.config.pgSetup.pgKind = NODE_KIND_STANDALONE;
-		strlcpy(keeper.config.nodeKind, "standalone", NAMEDATALEN);
+		config->pgSetup.pgKind = NODE_KIND_STANDALONE;
+		strlcpy(config->nodeKind, "standalone", NAMEDATALEN);
 
 		if (!check_or_discover_hostname(config))
 		{
@@ -347,7 +354,7 @@ cli_create_postgres(int argc, char **argv)
 		}
 	}
 
-	if (!cli_create_config(&keeper, config))
+	if (!cli_create_config(&keeper))
 	{
 		log_error("Failed to initialize our configuration, see above.");
 		exit(EXIT_CODE_BAD_CONFIG);
@@ -391,6 +398,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 		{ "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG },
 		{ NULL, 0, NULL, 0 }
 	};
+
 
 	/* hard-coded defaults */
 	options.pgSetup.pgport = pgsetup_get_pgport();
@@ -463,9 +471,13 @@ cli_create_monitor_getopts(int argc, char **argv)
 					log_error("Please use either --auth or --skip-pg-hba");
 				}
 
+				/* force default authentication method then */
 				strlcpy(options.pgSetup.authMethod,
-						SKIP_HBA_AUTH_METHOD,
+						DEFAULT_AUTH_METHOD,
 						NAMEDATALEN);
+
+				options.pgSetup.hbaLevel = HBA_EDIT_SKIP;
+
 				log_trace("--skip-pg-hba");
 				break;
 			}
@@ -617,8 +629,19 @@ cli_create_monitor_getopts(int argc, char **argv)
 	cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
 
 	/*
+	 * We support two modes of operations here:
+	 *   - configuration exists already, we need PGDATA
+	 *   - configuration doesn't exist already, we need PGDATA, and more
+	 */
+	if (!monitor_config_set_pathnames_from_pgdata(&options))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	/*
 	 * We require the user to specify an authentication mechanism, or to use
-	 * ---skip-pg-hba. Our documentation tutorial will use --auth trust, and we
+	 * --skip-pg-hba. Our documentation tutorial will use --auth trust, and we
 	 * should make it obvious that this is not the right choice for production.
 	 */
 	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.authMethod))
@@ -677,8 +700,10 @@ cli_create_monitor_getopts(int argc, char **argv)
  * when people change their mind or fix an error in the previous command).
  */
 static bool
-cli_create_monitor_config(Monitor *monitor, MonitorConfig *config)
+cli_create_monitor_config(Monitor *monitor)
 {
+	MonitorConfig *config = &(monitor->config);
+
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
 
@@ -709,14 +734,25 @@ cli_create_monitor_config(Monitor *monitor, MonitorConfig *config)
 		/* Take care of the --hostname */
 		if (IS_EMPTY_STRING_BUFFER(config->hostname))
 		{
-			if (!discover_hostname((char *) (&config->hostname),
-								   _POSIX_HOST_NAME_MAX,
-								   DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME,
-								   DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT))
+			if (!ipaddrGetLocalHostname(config->hostname,
+										sizeof(config->hostname)))
 			{
-				log_fatal("Failed to auto-detect the hostname of this machine, "
-						  "please provide one via --hostname");
-				exit(EXIT_CODE_BAD_ARGS);
+				char monitorHostname[_POSIX_HOST_NAME_MAX] = { 0 };
+
+				strlcpy(monitorHostname,
+						DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME,
+						_POSIX_HOST_NAME_MAX);
+
+				if (!discover_hostname((char *) &(config->hostname),
+									   _POSIX_HOST_NAME_MAX,
+									   DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME,
+									   DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT))
+				{
+					log_fatal("Failed to auto-detect the hostname "
+							  "of this machine, please provide one "
+							  "via --hostname");
+					exit(EXIT_CODE_BAD_ARGS);
+				}
 			}
 		}
 		else
@@ -777,24 +813,13 @@ cli_create_monitor(int argc, char **argv)
 
 	monitor.config = monitorOptions;
 
-	/*
-	 * We support two modes of operations here:
-	 *   - configuration exists already, we need PGDATA
-	 *   - configuration doesn't exist already, we need PGDATA, and more
-	 */
-	if (!monitor_config_set_pathnames_from_pgdata(config))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_ARGS);
-	}
-
 	if (read_pidfile(config->pathnames.pid, &pid))
 	{
 		log_fatal("pg_autoctl is already running with pid %d", pid);
 		exit(EXIT_CODE_BAD_STATE);
 	}
 
-	if (!cli_create_monitor_config(&monitor, config))
+	if (!cli_create_monitor_config(&monitor))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_CONFIG);
@@ -971,7 +996,7 @@ cli_drop_node(int argc, char **argv)
 
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
-	bool monitorDisabledIsOk = false;
+	bool monitorDisabledIsOk = true;
 
 	/*
 	 * The configuration file is the last bit we remove, so we don't have to
@@ -1258,7 +1283,7 @@ check_or_discover_hostname(KeeperConfig *config)
  * it... in that case we use PG_AUTOCTL_DEFAULT_SERVICE_NAME and PORT, which
  * are the Google DNS service: 8.8.8.8:53, expected to be reachable.
  */
-static bool
+bool
 discover_hostname(char *hostname, int size,
 				  const char *monitorHostname, int monitorPort)
 {
@@ -1271,12 +1296,40 @@ discover_hostname(char *hostname, int size,
 	char localIpAddr[BUFSIZE];
 	char hostnameCandidate[_POSIX_HOST_NAME_MAX];
 
-	/* fetch our local address among the network interfaces */
-	if (!fetchLocalIPAddress(ipAddr, BUFSIZE, monitorHostname, monitorPort))
+	ConnectionRetryPolicy retryPolicy = { 0 };
+
+	/* retry connecting to the monitor when it's not available */
+	(void) pgsql_set_monitor_interactive_retry_policy(&retryPolicy);
+
+	while (!pgsql_retry_policy_expired(&retryPolicy))
 	{
-		log_fatal("Failed to find a local IP address, "
-				  "please provide --hostname.");
-		return false;
+		bool mayRetry = false;
+
+		/* fetch our local address among the network interfaces */
+		if (fetchLocalIPAddress(ipAddr, BUFSIZE, monitorHostname, monitorPort,
+								LOG_DEBUG, &mayRetry))
+		{
+			/* success: break out of the retry loop */
+			break;
+		}
+
+		if (!mayRetry)
+		{
+			log_fatal("Failed to find a local IP address, "
+					  "please provide --hostname.");
+			return false;
+		}
+
+		int sleepTimeMs =
+			pgsql_compute_connection_retry_sleep_time(&retryPolicy);
+
+		log_warn("Failed to connect to \"%s\" on port %d "
+				 "to discover this machine hostname, "
+				 "retrying in %d ms.",
+				 monitorHostname, monitorPort, sleepTimeMs);
+
+		/* we have milliseconds, pg_usleep() wants microseconds */
+		(void) pg_usleep(sleepTimeMs * 1000);
 	}
 
 	/* from there on we can take the ipAddr as the default --hostname */
@@ -1343,7 +1396,8 @@ check_hostname(const char *hostname)
 	}
 	else
 	{
-		char cidr[BUFSIZE];
+		char cidr[BUFSIZE] = { 0 };
+		char ipaddr[BUFSIZE] = { 0 };
 
 		if (!fetchLocalCIDR(hostname, cidr, BUFSIZE))
 		{
@@ -1351,5 +1405,10 @@ check_hostname(const char *hostname)
 					 "interfaces, automated pg_hba.conf setup might fail.",
 					 hostname);
 		}
+
+		bool useHostname = false;
+
+		/* use pghba_check_hostname for log diagnostics */
+		(void) pghba_check_hostname(hostname, ipaddr, BUFSIZE, &useHostname);
 	}
 }

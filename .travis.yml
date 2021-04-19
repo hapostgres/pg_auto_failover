@@ -14,18 +14,23 @@ env:
 matrix:
   fast_finish: true
   include:
-    - env: PGVERSION=10 TEST=single
-    - env: PGVERSION=11 TEST=single
-    - env: PGVERSION=12 TEST=single
-    - env: PGVERSION=13 TEST=single
     - env: PGVERSION=10 TEST=multi
     - env: PGVERSION=11 TEST=multi
     - env: PGVERSION=12 TEST=multi
     - env: PGVERSION=13 TEST=multi
-    - env: LINTING=true
-  allow_failures:
+    - env: PGVERSION=10 TEST=single
+    - env: PGVERSION=11 TEST=single
+    - env: PGVERSION=12 TEST=single
     - env: PGVERSION=13 TEST=single
-    - env: PGVERSION=13 TEST=multi
+    - env: PGVERSION=10 TEST=ssl
+    - env: PGVERSION=11 TEST=ssl
+    - env: PGVERSION=12 TEST=ssl
+    - env: PGVERSION=13 TEST=ssl
+    - env: PGVERSION=10 TEST=monitor
+    - env: PGVERSION=11 TEST=monitor
+    - env: PGVERSION=12 TEST=monitor
+    - env: PGVERSION=13 TEST=monitor
+    - env: LINTING=true
 before_install:
   - git clone -b v0.7.18 --depth 1 https://github.com/citusdata/tools.git
   - sudo make -C tools install
@@ -39,8 +44,11 @@ before_install:
   - sudo apt-get install python3-pip
   - sudo pip3 install --upgrade pip
   - pip3 install --user pipenv
+  - pip3 install --user black
 install:
   - 'if [ -n "$LINTING" ]; then install_uncrustify; fi'
+  # cleanup uncrustify build files
+  - 'if [ -n "$LINTING" ]; then rm -rf uncrustify*; fi'
   - 'if [ -z "$LINTING" ]; then install_pg; fi'
   - 'if [ -z "$LINTING" ]; then install_custom_pg; fi'
   - PIPENV_PIPFILE="${TRAVIS_BUILD_DIR}"/tests/Pipfile pipenv install --system --deploy
@@ -49,6 +57,7 @@ install:
   - 'if [ -z "$LINTING" ]; then PATH=`pg_config --bindir`:$PATH which pg_ctl; fi'
 script:
   - 'if [ -n "$LINTING" ]; then citus_indent --check; fi'
+  - 'if [ -n "$LINTING" ]; then black --check .; fi'
   - 'if [ -n "$LINTING" ]; then ci/banned.h.sh; fi'
   - 'if [ -z "$LINTING" ]; then make -j5 CFLAGS=-Werror; fi'
   - 'if [ -z "$LINTING" ]; then sudo make install; fi'

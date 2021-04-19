@@ -195,9 +195,10 @@ priority in any pg_auto_failover formation. Otherwise no failover is possible.
 Auditing replication settings
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The command ``pg_autoctl get formation settings`` can be used to obtain a
-summary of all the replication settings currently in effect in a formation.
-Still using the first diagram on this page, we get the following summary::
+The command ``pg_autoctl get formation settings`` (also known as
+``pg_autoctl show settings``) can be used to obtain a summary of all the
+replication settings currently in effect in a formation. Still using the
+first diagram on this page, we get the following summary::
 
   $ pg_autoctl get formation settings
     Context |    Name |                   Setting | Value
@@ -273,7 +274,7 @@ Postgres service would be degraded to read-only.
 
 With this architecture diagram, here's the summary that we obtain::
 
-  $ pg_autoctl get formation settings
+  $ pg_autoctl show settings
     Context |    Name |                   Setting | Value
   ----------+---------+---------------------------+---------------------------------------------------------------------------------------
   formation | default |      number_sync_standbys | 2
@@ -316,7 +317,7 @@ is lost, or maybe for reporting needs on another application domain.
 
 With this architecture diagram, here's the summary that we obtain::
 
-  pg_autoctl get formation settings
+  pg_autoctl show settings
     Context |    Name |                   Setting | Value
   ----------+---------+---------------------------+-------------------------------------------------------------
   formation | default |      number_sync_standbys | 1

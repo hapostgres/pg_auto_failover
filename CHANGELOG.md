@@ -1,3 +1,92 @@
+### pg_auto_failover v1.5.1 (March 24, 2021) ###
+
+This release contains monitor schema changes, so the monitor extension gets
+a version bump from 1.4 to 1.5, and this is the first release in the 1.5
+series.
+
+#### Added
+* Add support for systemd ExecReload option. [#623]
+* Implement online enable/disable monitor support. [#591]
+* Add individual pages for the pg_autoctl commands. [#632]
+* Implement a demo application showing client-side reconnections. [#568]
+
+#### Changed
+
+The main change in the CLI is that `pg_autoctl show uri --monitor` does not
+display the connection string to the monitor anymore, instead it allows
+passing the URI to the monitor, same as with the other `pg_autoctl show
+commands`. To display the monitor connection string, use `pg_autoctl show
+uri --formation monitor` now.
+
+* Allow using --monitor uri for a lot of commands [#576]
+* Review pg_autoctl show state output, and docs. [#617]
+* Avoid using synchronous standby name wildcard [#629]
+
+#### Fixed
+* Fix supervisor messages about exited services. [#589]
+* Fix memory management issue in monitor_register_node. [#590]
+* Fix a buffer overlap instruction that macOs libc fails to process. [#610]
+* Add pg_logging_init for PG version 12 and above [#612]
+* Fix skip hba propagation [#588, #609]
+* Improve DNS lookup error handling. [#615]
+* Do not leak psycopg2 connections during testing [#628]
+
+### pg_auto_failover v1.4.2 (February 3, 2021) ###
+
+This is a bugfix release for v1.4 series
+
+#### Added
+* Implement pg_autoctl do azure commands (QA tooling). [#544]
+* pg autoctl show settings. [#549]
+* Improve docker images (build, release). [#556]
+* Run monitor extension test suite in the CI. [#553]
+* Implement pg_autoctl create postgres --pg-hba-lan option. [#561]
+
+#### Fixed
+* Deduplicate PATH entries, following symlinks. [#547]
+* Review consequences of pg_autoctl set formation number-sync-standbys 0. [#535]
+* Fix bytes mangling opportunity. [#550]
+* Allow setting replication settings to their current value. [#570]
+* Fix the return code when stop the node that is started by pg_autoctl. [#572]
+* Set formation kind when expected. [#577]
+* Fix retry loops with wait time to stop using 100% CPU. [#578]
+
+### pg_auto_failover v1.4.1 (December 3, 2020) ###
+
+This is a bugfix release for v1.4.0
+
+#### Added
+* Implement HBA hostname DNS checks, and warn users when needed. [#458]
+* Make it obvious when an extension is missing. [#475]
+
+#### Changed
+* Refrain from using FIRST %d in synchronous_standby_names. [#461]
+* Always use node id and node name in messages. [#462]
+
+#### Fixed
+* Force closing the connection used to check replication slots. [#451]
+* Fix when to ProceedWithMSFailover after a candidate is selected. [#439]
+* Ensure that the monitor owns the Postgres (sub-)process. [#455]
+* Avoid a race condition between file_exists() and read_file(). [#460]
+* Review memory/malloc errors and potential leaks. [#478]
+* Review APPLY_SETTINGS transitions in cases including node removal. [#480]
+* Fix when we switch synchronous_standby_names to '*'. [#488]
+* Fix hostname discovery [#479]
+* Fix non default formation [#489]
+* Review when to assign catching-up on unhealthy secondary. [#493]
+* Fix race conditions in multiple-standby Group FSM for failover. [#499]
+* Fix synchronous_standby_names when disabling maintenance. [#502]
+* Fix debian stats temp directory [#504]
+* Use PG_CONFIG has a hint to choose one of multiple Postgres versions. [#510]
+* Fix build for *BSD [#519]
+* Refrain from considering a WAIT_STANDBY node unhealthy. [#524]
+* Allow a DEMOTED primary to come back to a new wait/join/primary. [#524]
+* Fix pg_autoctl show standby-names. [#524]
+* Fix unhealthy nodes processing when wait_primary. [#521]
+* Fix FSM when a non-candidate node is back online. [#533]
+* Fix assigning catchingup to unhealthy secondaries. [#534]
+* Fix pg_autoctl set formation number-sync-standbys log output. [#536]
+
 ### pg_auto_failover v1.4.0 (September 23, 2020) ###
 
 The main focus of this release is the new capability of pg_auto_failover to

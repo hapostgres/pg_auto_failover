@@ -16,7 +16,6 @@
 static bool get_node_replication_settings(NodeReplicationSettings *settings);
 static void cli_get_node_replication_quorum(int argc, char **argv);
 static void cli_get_node_candidate_priority(int argc, char **argv);
-static void cli_get_formation_settings(int argc, char **argv);
 static void cli_get_formation_number_sync_standbys(int argc, char **argv);
 
 static void cli_set_node_replication_quorum(int argc, char **argv);
@@ -202,14 +201,11 @@ static bool
 get_node_replication_settings(NodeReplicationSettings *settings)
 {
 	Keeper keeper = { 0 };
+	Monitor *monitor = &(keeper.monitor);
 
 	keeper.config = keeperOptions;
 
-	if (!monitor_init_from_pgsetup(&keeper.monitor, &keeper.config.pgSetup))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_CONFIG);
-	}
+	(void) cli_monitor_init_from_option_or_config(monitor, &(keeper.config));
 
 	/* grab --name from either the command options or the configuration file */
 	(void) cli_ensure_node_name(&keeper);
@@ -295,17 +291,13 @@ cli_get_node_candidate_priority(int argc, char **argv)
  * cli_get_formation_settings function prints the replication settings for a
  * given formation.
  */
-static void
+void
 cli_get_formation_settings(int argc, char **argv)
 {
 	KeeperConfig config = keeperOptions;
 	Monitor monitor = { 0 };
 
-	if (!monitor_init_from_pgsetup(&monitor, &config.pgSetup))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_CONFIG);
-	}
+	(void) cli_monitor_init_from_option_or_config(&monitor, &config);
 
 	if (outputJSON)
 	{
@@ -335,16 +327,14 @@ cli_get_formation_number_sync_standbys(int argc, char **argv)
 	Monitor monitor = { 0 };
 	int numberSyncStandbys = 0;
 
-	if (!monitor_init_from_pgsetup(&monitor, &config.pgSetup))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_CONFIG);
-	}
+	(void) cli_monitor_init_from_option_or_config(&monitor, &config);
 
 	if (!monitor_get_formation_number_sync_standbys(&monitor,
 													config.formation,
 													&numberSyncStandbys))
 	{
+		log_error("Failed to get number-sync-standbys for formation \"%s\"",
+				  config.formation);
 		exit(EXIT_CODE_MONITOR);
 	}
 
@@ -374,6 +364,7 @@ static void
 cli_set_node_replication_quorum(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
+	Monitor *monitor = &(keeper.monitor);
 	bool replicationQuorum = false;
 
 	keeper.config = keeperOptions;
@@ -395,11 +386,7 @@ cli_set_node_replication_quorum(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!monitor_init_from_pgsetup(&keeper.monitor, &keeper.config.pgSetup))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_CONFIG);
-	}
+	(void) cli_monitor_init_from_option_or_config(monitor, &(keeper.config));
 
 	/* grab --name from either the command options or the configuration file */
 	(void) cli_ensure_node_name(&keeper);
@@ -436,8 +423,7 @@ static void
 cli_set_node_candidate_priority(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
-
-	int candidatePriority = -1;
+	Monitor *monitor = &(keeper.monitor);
 
 	keeper.config = keeperOptions;
 
@@ -450,7 +436,7 @@ cli_set_node_candidate_priority(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	candidatePriority = strtol(argv[0], NULL, 10);
+	int candidatePriority = strtol(argv[0], NULL, 10);
 
 	if (errno == EINVAL || candidatePriority < 0 || candidatePriority > 100)
 	{
@@ -459,11 +445,7 @@ cli_set_node_candidate_priority(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!monitor_init_from_pgsetup(&keeper.monitor, &keeper.config.pgSetup))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_CONFIG);
-	}
+	(void) cli_monitor_init_from_option_or_config(monitor, &(keeper.config));
 
 	/* grab --name from either the command options or the configuration file */
 	(void) cli_ensure_node_name(&keeper);
@@ -605,8 +587,6 @@ cli_set_formation_number_sync_standbys(int argc, char **argv)
 	KeeperConfig config = keeperOptions;
 	Monitor monitor = { 0 };
 
-	int numberSyncStandbys = -1;
-
 	char synchronous_standby_names[BUFSIZE] = { 0 };
 
 	if (argc != 1)
@@ -618,7 +598,7 @@ cli_set_formation_number_sync_standbys(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	numberSyncStandbys = strtol(argv[0], NULL, 10);
+	int numberSyncStandbys = strtol(argv[0], NULL, 10);
 	if (errno == EINVAL || numberSyncStandbys < 0)
 	{
 		log_error("number-sync-standbys value %s is not valid."
@@ -626,10 +606,12 @@ cli_set_formation_number_sync_standbys(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!monitor_init_from_pgsetup(&monitor, &config.pgSetup))
+	(void) cli_monitor_init_from_option_or_config(&monitor, &config);
+
+	/* change the default group when it is still unknown */
+	if (config.groupId == -1)
 	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_CONFIG);
+		config.groupId = 0;
 	}
 
 	if (!set_formation_number_sync_standbys(&monitor,
@@ -707,7 +689,7 @@ set_node_candidate_priority(Keeper *keeper, int candidatePriority)
 	{
 		char *channels[] = { "state", NULL };
 
-		if (!pgsql_listen(&(keeper->monitor.pgsql), channels))
+		if (!pgsql_listen(&(keeper->monitor.notificationClient), channels))
 		{
 			log_error("Failed to listen to state changes from the monitor");
 			return false;
@@ -770,7 +752,7 @@ set_node_replication_quorum(Keeper *keeper, bool replicationQuorum)
 	{
 		char *channels[] = { "state", NULL };
 
-		if (!pgsql_listen(&(keeper->monitor.pgsql), channels))
+		if (!pgsql_listen(&(keeper->monitor.notificationClient), channels))
 		{
 			log_error("Failed to listen to state changes from the monitor");
 			return false;
@@ -832,7 +814,7 @@ set_formation_number_sync_standbys(Monitor *monitor,
 	{
 		char *channels[] = { "state", NULL };
 
-		if (!pgsql_listen(&(monitor->pgsql), channels))
+		if (!pgsql_listen(&(monitor->notificationClient), channels))
 		{
 			log_error("Failed to listen to state changes from the monitor");
 			return false;

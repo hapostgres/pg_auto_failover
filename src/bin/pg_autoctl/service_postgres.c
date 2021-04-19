@@ -41,14 +41,13 @@ bool
 service_postgres_start(void *context, pid_t *pid)
 {
 	PostgresSetup *pgSetup = (PostgresSetup *) context;
-	pid_t fpid;
 
 	/* Flush stdio channels just before fork, to avoid double-output problems */
 	fflush(stdout);
 	fflush(stderr);
 
 	/* time to create the node_active sub-process */
-	fpid = fork();
+	pid_t fpid = fork();
 
 	switch (fpid)
 	{
@@ -79,7 +78,6 @@ service_postgres_start(void *context, pid_t *pid)
 		{
 			int timeout = 10;   /* wait for Postgres for 10s */
 			int logLevel = ++countPostgresStart == 1 ? LOG_INFO : LOG_DEBUG;
-			bool pgIsReady = false;
 
 			log_debug("pg_autoctl started postgres in subprocess %d", fpid);
 			*pid = fpid;
@@ -87,7 +85,7 @@ service_postgres_start(void *context, pid_t *pid)
 			/* we're starting postgres, reset the cached value for the pid */
 			pgSetup->pidFile.pid = 0;
 
-			pgIsReady =
+			bool pgIsReady =
 				pg_setup_wait_until_is_ready(pgSetup, timeout, logLevel);
 
 			/*

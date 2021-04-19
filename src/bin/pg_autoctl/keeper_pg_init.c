@@ -43,7 +43,6 @@
  */
 bool keeperInitWarnings = false;
 
-static bool keeper_pg_init_fsm(Keeper *keeper);
 static bool keeper_pg_init_and_register_primary(Keeper *keeper);
 static bool reach_initial_state(Keeper *keeper);
 static bool wait_until_primary_is_ready(Keeper *config,
@@ -68,27 +67,7 @@ keeper_pg_init(Keeper *keeper)
 	log_trace("keeper_pg_init: monitor is %s",
 			  config->monitorDisabled ? "disabled" : "enabled");
 
-	if (config->monitorDisabled)
-	{
-		return keeper_pg_init_fsm(keeper);
-	}
-	else
-	{
-		return service_keeper_init(keeper);
-	}
-}
-
-
-/*
- * keeper_pg_init_fsm initializes the keeper's local FSM and does nothing more.
- * It's only intended to be used when we are not using a monitor, which means
- * we're going to expose our FSM driving as an HTTP API, and sit there waiting
- * for orders from another software.
- */
-static bool
-keeper_pg_init_fsm(Keeper *keeper)
-{
-	return keeper_init_fsm(keeper);
+	return service_keeper_init(keeper);
 }
 
 
@@ -164,6 +143,16 @@ keeper_pg_init_and_register(Keeper *keeper)
 			exit(EXIT_CODE_QUIT);
 		}
 		return createAndRun;
+	}
+
+	/*
+	 * When the monitor is disabled, we're almost done. All that is left is
+	 * creating a state file with our nodeId as from the --node-id parameter.
+	 * The value is found in the global variable monitorDisabledNodeId.
+	 */
+	if (config->monitorDisabled)
+	{
+		return keeper_init_fsm(keeper);
 	}
 
 	/*
@@ -382,7 +371,14 @@ keeper_pg_init_continue(Keeper *keeper)
 		return unlink_file(config->pathnames.init);
 	}
 
-	return reach_initial_state(keeper);
+	if (config->monitorDisabled)
+	{
+		return true;
+	}
+	else
+	{
+		return reach_initial_state(keeper);
+	}
 }
 
 
@@ -540,6 +536,8 @@ wait_until_primary_is_ready(Keeper *keeper,
 
 	/* wait until the primary is ready for us to pg_basebackup */
 	do {
+		bool groupStateHasChanged = false;
+
 		if (firstLoop)
 		{
 			firstLoop = false;
@@ -550,14 +548,21 @@ wait_until_primary_is_ready(Keeper *keeper,
 			KeeperStateData *keeperState = &(keeper->state);
 			int timeoutMs = PG_AUTOCTL_KEEPER_SLEEP_TIME * 1000;
 
-			bool groupStateHasChanged = false;
-
+			(void) pgsql_prepare_to_wait(&(monitor->notificationClient));
 			(void) monitor_wait_for_state_change(monitor,
 												 keeper->config.formation,
 												 keeperState->current_group,
 												 keeperState->current_node_id,
 												 timeoutMs,
 												 &groupStateHasChanged);
+
+			/* when no state change has been notified, close the connection */
+			if (!groupStateHasChanged &&
+				monitor->notificationClient.connectionStatementType ==
+				PGSQL_CONNECTION_MULTI_STATEMENT)
+			{
+				pgsql_finish(&(monitor->notificationClient));
+			}
 		}
 
 		if (!monitor_node_active(&(keeper->monitor),
@@ -583,7 +588,12 @@ wait_until_primary_is_ready(Keeper *keeper,
 				return false;
 			}
 		}
-		++tries;
+
+		/* if state has changed, we didn't wait for a full timeout */
+		if (!groupStateHasChanged)
+		{
+			++tries;
+		}
 
 		if (tries == 3)
 		{
@@ -631,25 +641,21 @@ wait_until_primary_has_created_our_replication_slot(Keeper *keeper,
 	int errors = 0, tries = 0;
 	bool firstLoop = true;
 
-	Monitor *monitor = &(keeper->monitor);
 	KeeperConfig *config = &(keeper->config);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 	ReplicationSource *upstream = &(postgres->replicationSource);
-	NodeAddress *primaryNode = &(postgres->replicationSource.primaryNode);
+	NodeAddress primaryNode = { 0 };
 
 	bool hasReplicationSlot = false;
 
-	if (!monitor_get_primary(monitor,
-							 config->formation,
-							 assignedState->groupId,
-							 &(postgres->replicationSource.primaryNode)))
+	if (!keeper_get_primary(keeper, &primaryNode))
 	{
 		/* errors have already been logged */
 		return false;
 	}
 
 	if (!standby_init_replication_source(postgres,
-										 primaryNode,
+										 &primaryNode,
 										 PG_AUTOCTL_REPLICA_USERNAME,
 										 config->replication_password,
 										 config->replication_slot_name,
@@ -680,10 +686,10 @@ wait_until_primary_has_created_our_replication_slot(Keeper *keeper,
 			++errors;
 
 			log_warn("Failed to contact the primary node %d \"%s\" (%s:%d)",
-					 primaryNode->nodeId,
-					 primaryNode->name,
-					 primaryNode->host,
-					 primaryNode->port);
+					 primaryNode.nodeId,
+					 primaryNode.name,
+					 primaryNode.host,
+					 primaryNode.port);
 
 			if (errors > 5)
 			{
@@ -756,11 +762,33 @@ create_database_and_extension(Keeper *keeper)
 									   pgSetup->dbname,
 									   pg_setup_get_username(pgSetup),
 									   config->hostname,
-									   pg_setup_get_auth_method(pgSetup)))
+									   pg_setup_get_auth_method(pgSetup),
+									   pgSetup->hbaLevel))
 	{
 		log_error("Failed to edit \"%s\" to grant connections to \"%s\", "
 				  "see above for details", hbaFilePath, config->hostname);
 		return false;
+	}
+
+	/*
+	 * When --pg-hba-lan is used, we also open the local network CIDR
+	 * connections for the given --username and --dbname.
+	 */
+	if (pgSetup->hbaLevel == HBA_EDIT_LAN)
+	{
+		if (!pghba_enable_lan_cidr(&keeper->postgres.sqlClient,
+								   keeper->config.pgSetup.ssl.active,
+								   HBA_DATABASE_DBNAME,
+								   keeper->config.pgSetup.dbname,
+								   keeper->config.hostname,
+								   pg_setup_get_username(pgSetup),
+								   pg_setup_get_auth_method(pgSetup),
+								   pgSetup->hbaLevel,
+								   pgSetup->pgdata))
+		{
+			log_error("Failed to grant local network connections in HBA");
+			return false;
+		}
 	}
 
 	/*
@@ -779,7 +807,8 @@ create_database_and_extension(Keeper *keeper)
 										   NULL, /* all: no database name */
 										   NULL, /* no username, "all" */
 										   pgSetup->pghost,
-										   "trust"))
+										   "trust",
+										   HBA_EDIT_MINIMAL))
 		{
 			log_error("Failed to edit \"%s\" to grant connections to \"%s\", "
 					  "see above for details", hbaFilePath, pgSetup->pghost);
@@ -819,26 +848,28 @@ create_database_and_extension(Keeper *keeper)
 
 	/*
 	 * Ensure pg_stat_statements is available in the server extension dir used
-	 * to create the Postgres instance.
+	 * to create the Postgres instance. We only search for the control file to
+	 * offer better diagnostics in the logs in case the following CREATE
+	 * EXTENSION fails.
 	 */
 	if (!find_extension_control_file(config->pgSetup.pg_ctl,
 									 "pg_stat_statements"))
 	{
-		log_error("Failed to find extension control file for "
-				  "\"pg_stat_statements\"");
-		exit(EXIT_CODE_EXTENSION_MISSING);
+		log_warn("Failed to find extension control file for "
+				 "\"pg_stat_statements\"");
 	}
 
 	/*
 	 * Ensure citus extension is available in the server extension dir used to
-	 * create the Postgres instance.
+	 * create the Postgres instance. We only search for the control file to
+	 * offer better diagnostics in the logs in case the following CREATE
+	 * EXTENSION fails.
 	 */
 	if (IS_CITUS_INSTANCE_KIND(postgres->pgKind))
 	{
 		if (!find_extension_control_file(config->pgSetup.pg_ctl, "citus"))
 		{
-			log_error("Failed to find extension control file for \"citus\"");
-			exit(EXIT_CODE_EXTENSION_MISSING);
+			log_warn("Failed to find extension control file for \"citus\"");
 		}
 	}
 
@@ -949,6 +980,7 @@ create_database_and_extension(Keeper *keeper)
 								   config->hostname,
 								   pg_setup_get_username(pgSetup),
 								   pg_setup_get_auth_method(pgSetup),
+								   pgSetup->hbaLevel,
 								   NULL))
 		{
 			log_error("Failed to grant local network connections in HBA");

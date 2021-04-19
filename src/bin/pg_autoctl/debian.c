@@ -296,15 +296,12 @@ buildDebianDataAndConfDirectoryNames(PostgresSetup *pgSetup,
 									 DebianPathnames *debPathnames)
 {
 	char *pgmajor = strdup(pgSetup->pg_version);
-	char *dot;
 
 	char pgdata[MAXPGPATH];
 
 	char clusterDir[MAXPGPATH] = { 0 };
 	char versionDir[MAXPGPATH] = { 0 };
 
-	char *clusterDirName = NULL;
-	char *versionDirName = NULL;
 
 	/* we need to work with the absolute pathname of PGDATA */
 	if (!normalize_filename(pgSetup->pgdata, pgdata, MAXPGPATH))
@@ -321,11 +318,11 @@ buildDebianDataAndConfDirectoryNames(PostgresSetup *pgSetup,
 	get_parent_directory(versionDir);
 
 	/* get the names of our version and cluster directories */
-	clusterDirName = strdup(basename(clusterDir));
-	versionDirName = strdup(basename(versionDir));
+	char *clusterDirName = strdup(basename(clusterDir));
+	char *versionDirName = strdup(basename(versionDir));
 
 	/* transform pgversion "11.4" to "11" to get the major version part */
-	dot = strchr(pgmajor, '.');
+	char *dot = strchr(pgmajor, '.');
 
 	if (dot)
 	{
@@ -596,8 +593,6 @@ static bool
 comment_out_configuration_parameters(const char *srcConfPath,
 									 const char *dstConfPath)
 {
-	FILE *fileStream = NULL;
-	PQExpBuffer newConfContents = NULL;
 	char lineBuffer[BUFSIZE];
 
 	/*
@@ -605,17 +600,23 @@ comment_out_configuration_parameters(const char *srcConfPath,
 	 * need to check for patterns for NAME = VALUE and NAME=VALUE
 	 */
 	char *targetVariableExpression =
-		"(data_directory|hba_file|ident_file|include_dir)( *)=";
+		"("
+		"data_directory"
+		"|hba_file"
+		"|ident_file"
+		"|include_dir"
+		"|stats_temp_directory"
+		")( *)=";
 
 	/* open a file */
-	fileStream = fopen_read_only(srcConfPath);
+	FILE *fileStream = fopen_read_only(srcConfPath);
 	if (fileStream == NULL)
 	{
 		log_error("Failed to open file \"%s\": %m", srcConfPath);
 		return false;
 	}
 
-	newConfContents = createPQExpBuffer();
+	PQExpBuffer newConfContents = createPQExpBuffer();
 	if (newConfContents == NULL)
 	{
 		log_error("Failed to allocate memory");
