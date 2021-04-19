@@ -990,6 +990,19 @@ primary_rewind_to_standby(LocalPostgresServer *postgres)
 		return false;
 	}
 
+	/* first, make sure we can connect with "replication" */
+	if (!pgctl_identify_system(replicationSource))
+	{
+		log_error("Failed to connect to the primary node %d \"%s\" (%s:%d) "
+				  "with a replication connection string. "
+				  "See above for details",
+				  primaryNode->nodeId,
+				  primaryNode->name,
+				  primaryNode->host,
+				  primaryNode->port);
+		return false;
+	}
+
 	if (!pg_rewind(pgSetup->pgdata, pgSetup->pg_ctl, replicationSource))
 	{
 		log_error("Failed to rewind old data directory");

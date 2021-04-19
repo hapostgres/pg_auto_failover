@@ -68,6 +68,7 @@ def test_004_init_secondary():
 
     # now run the node and change its name again
     node2.run(name="b")
+    time.sleep(1)
     eq_(node2.get_nodename(), "b")
 
     assert node2.wait_until_state(target_state="secondary")

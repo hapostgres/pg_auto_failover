@@ -25,7 +25,7 @@ RUN apt-get update \
     python3 \
 	python3-setuptools \
 	python3-psycopg2 \
-    python3-pip \
+  python3-pip \
     sudo \
     tmux \
     watch \
