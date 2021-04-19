@@ -286,6 +286,7 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 	if (!read_file(hbaFilePath, &currentHbaContents, &currentHbaSize))
 	{
 		/* read_file logs an error */
+		destroyPQExpBuffer(newHbaContents);
 		return false;
 	}
 
@@ -317,6 +318,7 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 
 			/* done with the old pg_hba.conf contents */
 			free(currentHbaContents);
+			destroyPQExpBuffer(newHbaContents);
 
 			/* done with the new HBA line buffers */
 			destroyPQExpBuffer(hbaLineReplicationBuffer);
@@ -367,6 +369,7 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 
 			/* done with the old pg_hba.conf contents */
 			free(currentHbaContents);
+			destroyPQExpBuffer(newHbaContents);
 
 			/* done with the new HBA line buffers (and safe to call on NULL) */
 			destroyPQExpBuffer(hbaLineReplicationBuffer);
@@ -387,6 +390,7 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 
 			/* done with the old pg_hba.conf contents */
 			free(currentHbaContents);
+			destroyPQExpBuffer(newHbaContents);
 
 			/* done with the new HBA line buffers (and safe to call on NULL) */
 			destroyPQExpBuffer(hbaLineReplicationBuffer);
