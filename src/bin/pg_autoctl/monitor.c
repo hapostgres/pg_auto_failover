@@ -3458,6 +3458,20 @@ monitor_notification_process_apply_settings(void *context,
 				  nodeState->node.port,
 				  NodeStateToString(nodeState->reportedState));
 	}
+
+	/*
+	 * In some cases applying a new value for a replication setting will not go
+	 * through APPLY_SETTINGS. One such case is when changing candidate
+	 * priority to trigger a failover when all the available nodes have
+	 * candidate priority set to zero.
+	 */
+	if ((nodeState->reportedState == PRIMARY_STATE &&
+		 nodeState->reportedState == nodeState->goalState) ||
+		(nodeState->reportedState == WAIT_PRIMARY_STATE &&
+		 nodeState->reportedState == nodeState->goalState))
+	{
+		ctx->applySettingsTransitionDone = true;
+	}
 }
 
 
