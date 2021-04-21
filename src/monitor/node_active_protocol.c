@@ -2274,19 +2274,12 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 	 * General case now, we have multiple standbys each with a candidate
 	 * priority, and with replicationQuorum (bool: true or false).
 	 *
-	 *   - candidateNodesGroupList contains only nodes that have a
-	 *     candidatePriority greater than zero
+	 *   - syncStandbyNodesGroupList contains only nodes that participates in
+	 *     the replication quorum
 	 *
-	 *   - we skip nodes that have replicationQuorum set to false
-	 *
-	 *   - then we build synchronous_standby_names with one of the two
-	 *     following models:
+	 *   - then we build synchronous_standby_names with the following model:
 	 *
 	 *       ANY 1 (pgautofailover_standby_2, pgautofailover_standby_3)
-	 *       FIRST 1 (pgautofailover_standby_2, pgautofailover_standby_3)
-	 *
-	 *     We use ANY when all the standby nodes have the same
-	 *     candidatePriority, and we use FIRST otherwise.
 	 *
 	 *     The num_sync number is the formation number_sync_standbys property.
 	 */
