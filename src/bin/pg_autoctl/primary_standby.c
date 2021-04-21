@@ -868,7 +868,14 @@ standby_init_database(LocalPostgresServer *postgres,
 		 */
 		bool hasReplicationSlot = false;
 
-		if (!IS_EMPTY_STRING_BUFFER(upstream->slotName) &&
+		/*
+		 * When initialising from another standby (in REPORT_LSN, if there is
+		 * currently no primary node and no candidate node either), we don't
+		 * require a replication slot on the upstream node.
+		 */
+		bool needsReplicationSlot = !IS_EMPTY_STRING_BUFFER(upstream->slotName);
+
+		if (needsReplicationSlot &&
 			!upstream_has_replication_slot(upstream,
 										   pgSetup,
 										   &hasReplicationSlot))
@@ -877,7 +884,7 @@ standby_init_database(LocalPostgresServer *postgres,
 			return false;
 		}
 
-		if (IS_EMPTY_STRING_BUFFER(upstream->slotName) || hasReplicationSlot)
+		if (!needsReplicationSlot || hasReplicationSlot)
 		{
 			/* first, make sure we can connect with "replication" */
 			if (!pgctl_identify_system(upstream))

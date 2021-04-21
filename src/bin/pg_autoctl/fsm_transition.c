@@ -1395,7 +1395,7 @@ fsm_follow_new_primary(Keeper *keeper)
 
 
 /*
- * fsm_init_fast_forward creates a new node from existing nodes that are still
+ * fsm_init_from_standby creates a new node from existing nodes that are still
  * available but not setup to be a candidate for promotion.
  */
 bool
@@ -1409,7 +1409,7 @@ fsm_init_from_standby(Keeper *keeper)
 	/* get the primary node to follow */
 	if (!keeper_get_most_advanced_standby(keeper, &upstreamNode))
 	{
-		log_error("Failed to fast forward from the most advanced standby node, "
+		log_error("Failed to initialise from the most advanced standby node, "
 				  "see above for details");
 		return false;
 	}
