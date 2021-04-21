@@ -932,6 +932,7 @@ fsm_rewind_or_init(Keeper *keeper)
 {
 	KeeperConfig *config = &(keeper->config);
 	LocalPostgresServer *postgres = &(keeper->postgres);
+	ReplicationSource *upstream = &(postgres->replicationSource);
 
 	NodeAddress *primaryNode = NULL;
 
@@ -955,6 +956,19 @@ fsm_rewind_or_init(Keeper *keeper)
 										 keeper->state.current_node_id))
 	{
 		/* can't happen at the moment */
+		return false;
+	}
+
+	/* first, make sure we can connect with "replication" */
+	if (!pgctl_identify_system(upstream))
+	{
+		log_error("Failed to connect to the primary node %d \"%s\" (%s:%d) "
+				  "with a replication connection string. "
+				  "See above for details",
+				  primaryNode->nodeId,
+				  primaryNode->name,
+				  primaryNode->host,
+				  primaryNode->port);
 		return false;
 	}
 

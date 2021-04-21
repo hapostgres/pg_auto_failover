@@ -847,6 +847,7 @@ supervisor_update_pidfile(Supervisor *supervisor)
 	if (!prepare_pidfile_buffer(content, supervisor->pid))
 	{
 		/* errors have already been logged */
+		destroyPQExpBuffer(content);
 		return false;
 	}
 

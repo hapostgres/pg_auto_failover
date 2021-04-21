@@ -25,7 +25,7 @@ RUN apt-get update \
     python3 \
 	python3-setuptools \
 	python3-psycopg2 \
-	python3-pyroute2 \
+	python3-pip \
     sudo \
     tmux \
     watch \
@@ -34,6 +34,8 @@ RUN apt-get update \
     postgresql-common \
     postgresql-server-dev-${PGVERSION} \
 	&& rm -rf /var/lib/apt/lists/*
+
+RUN pip3 install pyroute2>=0.5.17
 
 # install Postgres 11 (current in bullseye), bypass initdb of a "main" cluster
 RUN echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf

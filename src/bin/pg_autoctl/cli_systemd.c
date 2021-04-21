@@ -137,6 +137,12 @@ cli_systemd_getopt(int argc, char **argv)
 
 	cli_common_get_set_pgdata_or_exit(&(options.pgSetup));
 
+	if (!pg_setup_set_absolute_pgdata(&(options.pgSetup)))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
 	if (!keeper_config_set_pathnames_from_pgdata(&options.pathnames,
 												 options.pgSetup.pgdata))
 	{
@@ -164,12 +170,12 @@ cli_systemd_cat_service_file(int argc, char **argv)
 	(void) systemd_config_init(&config, pgSetup.pgdata);
 
 	log_info("HINT: to complete a systemd integration, "
-			 "run the following commands:");
-	log_info("pg_autoctl -q show systemd --pgdata \"%s\" | sudo tee %s",
+			 "run the following commands (as root):");
+	log_info("pg_autoctl -q show systemd --pgdata \"%s\" | tee %s",
 			 config.pgSetup.pgdata, config.pathnames.systemd);
-	log_info("sudo systemctl daemon-reload");
-	log_info("sudo systemctl enable pgautofailover");
-	log_info("sudo systemctl start pgautofailover");
+	log_info("systemctl daemon-reload");
+	log_info("systemctl enable pgautofailover");
+	log_info("systemctl start pgautofailover");
 
 	if (!systemd_config_write(stdout, &config))
 	{

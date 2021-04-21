@@ -860,6 +860,12 @@ ensure_default_settings_file_exists(const char *configFilePath,
 {
 	PQExpBuffer defaultConfContents = createPQExpBuffer();
 
+	if (defaultConfContents == NULL)
+	{
+		log_error("Failed to allocate memory");
+		return false;
+	}
+
 	if (!prepare_guc_settings_from_pgsetup(configFilePath,
 										   defaultConfContents,
 										   settings,
@@ -867,6 +873,7 @@ ensure_default_settings_file_exists(const char *configFilePath,
 										   includeTuning))
 	{
 		/* errors have already been logged */
+		destroyPQExpBuffer(defaultConfContents);
 		return false;
 	}
 
@@ -2282,6 +2289,12 @@ prepare_primary_conninfo(char *primaryConnInfo,
 
 	PQExpBuffer buffer = createPQExpBuffer();
 
+	if (buffer == NULL)
+	{
+		log_error("Failed to allocate memory");
+		return false;
+	}
+
 	/* application_name shows up in pg_stat_replication on the primary */
 	appendPQExpBuffer(buffer, "application_name=%s", applicationName);
 	appendPQExpBuffer(buffer, " host=%s", primaryHost);
@@ -2302,6 +2315,7 @@ prepare_primary_conninfo(char *primaryConnInfo,
 	if (!prepare_conninfo_sslmode(buffer, sslOptions))
 	{
 		/* errors have already been logged */
+		destroyPQExpBuffer(buffer);
 		return false;
 	}
 
@@ -2330,6 +2344,7 @@ prepare_primary_conninfo(char *primaryConnInfo,
 			log_error("BUG: the escaped primary_conninfo requires %d bytes and "
 					  "pg_auto_failover only support up to %d bytes",
 					  size, primaryConnInfoSize);
+			destroyPQExpBuffer(buffer);
 			return false;
 		}
 	}
