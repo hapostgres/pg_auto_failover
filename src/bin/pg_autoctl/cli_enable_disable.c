@@ -1180,9 +1180,20 @@ update_monitor_connection_string(KeeperConfig *config)
 		return false;
 	}
 
+	char scrubbedConnectionString[MAXCONNINFO] = { 0 };
+	if (parse_and_scrub_connection_string(newPgURI, scrubbedConnectionString))
+	{
+		log_info("Trying to connect to monitor using connection string \"%s\"",
+				 scrubbedConnectionString);
+	}
+	else
+	{
+		log_error(
+			"Trying to connect to monitor using unparseable connection string \"%s\"",
+			newPgURI);
+		return false;
+	}
 
-	log_info("Trying to connect to monitor using connection string \"%s\"",
-			 newPgURI);
 
 	/*
 	 * Try to connect using the new connection string and don't update it if it
@@ -1197,7 +1208,7 @@ update_monitor_connection_string(KeeperConfig *config)
 	/* we have a new monitor URI with our new SSL parameters */
 	strlcpy(config->monitor_pguri, newPgURI, MAXCONNINFO);
 
-	log_info("Updating the monitor URI to \"%s\"", config->monitor_pguri);
+	log_info("Updating the monitor URI to \"%s\"", scrubbedConnectionString);
 
 	return true;
 }

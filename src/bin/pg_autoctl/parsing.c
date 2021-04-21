@@ -943,3 +943,73 @@ parseNodesArray(const char *nodesJSON,
 
 	return true;
 }
+
+
+/*
+ * uri_contains_password takes a Postgres connection string and checks to see if it contains a parameter
+ * called password. Returns true if a password keyword is present in the connection string.
+ */
+static bool
+uri_contains_password(const char *pguri)
+{
+	char *errmsg;
+	PQconninfoOption *conninfo, *option;
+
+	conninfo = PQconninfoParse(pguri, &errmsg);
+	if (conninfo == NULL)
+	{
+		log_error("Failed to parse pguri: %s", errmsg);
+
+		PQfreemem(errmsg);
+		return false;
+	}
+
+	/*
+	 * Look for a populated password connection parameter
+	 */
+	for (option = conninfo; option->keyword != NULL; option++)
+	{
+		if (
+			strcmp(option->keyword, "password") == 0 &&
+			option->val != NULL &&
+			!IS_EMPTY_STRING_BUFFER(option->val)
+			)
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+
+/*
+ * parse_and_scrub_connection_string takes a Postgres connection string and
+ * populates scrubbedPguri with the password replaced with **** for logging. The scrubbedPguri parameter
+ * should point to a memory area that has been allocated by the caller and has at least
+ * MAXCONNINFO bytes.
+ */
+bool
+parse_and_scrub_connection_string(const char *pguri, char *scrubbedPguri)
+{
+	URIParams uriParams = { 0 };
+	KeyVal overrides = { 0 };
+
+	if (uri_contains_password(pguri))
+	{
+		overrides = (KeyVal) {
+			.count = 1,
+			.keywords = { "password" },
+			.values = { "****" }
+		};
+	}
+
+	if (!parse_pguri_info_key_vals(pguri, &overrides, &uriParams))
+	{
+		return false;
+	}
+
+	buildPostgresURIfromPieces(&uriParams, scrubbedPguri);
+
+	return true;
+}

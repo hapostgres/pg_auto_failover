@@ -408,9 +408,12 @@ pgsql_finish(PGSQL *pgsql)
 {
 	if (pgsql->connection != NULL)
 	{
+		char scrubbedConnectionString[MAXCONNINFO] = { 0 };
+		parse_and_scrub_connection_string(pgsql->connectionString,
+										  scrubbedConnectionString);
 		log_debug("Disconnecting from [%s] \"%s\"",
 				  ConnectionTypeToString(pgsql->connectionType),
-				  pgsql->connectionString);
+				  scrubbedConnectionString);
 		PQfinish(pgsql->connection);
 		pgsql->connection = NULL;
 
@@ -480,9 +483,11 @@ pgsql_open_connection(PGSQL *pgsql)
 		return pgsql->connection;
 	}
 
+	char scrubbedConnectionString[MAXCONNINFO] = { 0 };
+	parse_and_scrub_connection_string(pgsql->connectionString, scrubbedConnectionString);
 	log_debug("Connecting to [%s] \"%s\"",
 			  ConnectionTypeToString(pgsql->connectionType),
-			  pgsql->connectionString);
+			  scrubbedConnectionString);
 
 	/* we implement our own retry strategy */
 	setenv("PGCONNECT_TIMEOUT", POSTGRES_CONNECT_TIMEOUT, 1);
@@ -573,8 +578,10 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 
 	INSTR_TIME_SET_ZERO(lastWarningTime);
 
+	char scrubbedConnectionString[MAXCONNINFO] = { 0 };
+	parse_and_scrub_connection_string(pgsql->connectionString, scrubbedConnectionString);
 	log_warn("Failed to connect to \"%s\", retrying until "
-			 "the server is ready", pgsql->connectionString);
+			 "the server is ready", scrubbedConnectionString);
 
 	/* should not happen */
 	if (pgsql->retryPolicy.maxR == 0)
@@ -601,7 +608,7 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 			log_error("Failed to connect to \"%s\" "
 					  "after %d attempts in %d ms, "
 					  "pg_autoctl stops retrying now",
-					  pgsql->connectionString,
+					  scrubbedConnectionString,
 					  pgsql->retryPolicy.attempts,
 					  (int) INSTR_TIME_GET_MILLISEC(duration));
 
@@ -619,7 +626,7 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 		(void) pg_usleep(sleep * 1000);
 
 		log_debug("PQping(%s): slept %d ms on attempt %d",
-				  pgsql->connectionString,
+				  scrubbedConnectionString,
 				  pgsql->retryPolicy.sleepTime,
 				  pgsql->retryPolicy.attempts);
 
@@ -659,7 +666,7 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 
 					log_info("Successfully connected to \"%s\" "
 							 "after %d attempts in %d ms.",
-							 pgsql->connectionString,
+							 scrubbedConnectionString,
 							 pgsql->retryPolicy.attempts,
 							 (int) INSTR_TIME_GET_MILLISEC(duration));
 				}
@@ -713,7 +720,7 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 						"The server at \"%s\" is running but is in a state "
 						"that disallows connections (startup, shutdown, or "
 						"crash recovery).",
-						pgsql->connectionString);
+						scrubbedConnectionString);
 				}
 
 				break;
@@ -756,7 +763,7 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 						"number), or that there is a network connectivity "
 						"problem (for example, a firewall blocking the "
 						"connection request).",
-						pgsql->connectionString,
+						scrubbedConnectionString,
 						pgsql->retryPolicy.attempts,
 						(int) INSTR_TIME_GET_MILLISEC(durationSinceStart));
 				}
@@ -776,7 +783,7 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 				lastWarningMessage = PQPING_NO_ATTEMPT;
 				log_debug("Failed to ping server \"%s\" because of "
 						  "client-side problems (no attempt were made)",
-						  pgsql->connectionString);
+						  scrubbedConnectionString);
 				break;
 			}
 		}
