@@ -1400,7 +1400,12 @@ perform_promotion(PG_FUNCTION_ARGS)
 	}
 
 	/*
-	 * If the node is not a primary, it needs to be in the SECONDARY state.
+	 * If the node is not a primary, it needs to be in the SECONDARY state or
+	 * in the REPORT_LSN state. In the case where none of the nodes are a
+	 * candidate for failover, and the primary has been lost, all the remaining
+	 * nodes are assigned REPORT_LSN, and we make it possible to then manually
+	 * promote one of them.
+	 *
 	 * When we call perform_failover() to implement the actual failover
 	 * orchestration, this condition is going to be checked again, but in a
 	 * different way.

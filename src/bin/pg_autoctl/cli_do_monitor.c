@@ -40,7 +40,7 @@
 
 static void cli_do_monitor_get_primary_node(int argc, char **argv);
 static void cli_do_monitor_get_other_nodes(int argc, char **argv);
-static void cli_do_monitor_get_failover_count(int argc, char **argv);
+static void cli_do_monitor_get_candidate_count(int argc, char **argv);
 static void cli_do_monitor_get_coordinator(int argc, char **argv);
 static void cli_do_monitor_register_node(int argc, char **argv);
 static void cli_do_monitor_node_active(int argc, char **argv);
@@ -70,7 +70,7 @@ static CommandLine monitor_get_candidate_count_command =
 				 CLI_PGDATA_USAGE,
 				 CLI_PGDATA_OPTION,
 				 cli_getopt_pgdata,
-				 cli_do_monitor_get_failover_count);
+				 cli_do_monitor_get_candidate_count);
 
 static CommandLine monitor_get_coordinator_command =
 	make_command("coordinator",
@@ -274,11 +274,11 @@ cli_do_monitor_get_other_nodes(int argc, char **argv)
 
 
 /*
- * cli_do_monitor_get_failover_count contacts the pg_auto_failover monitor and
+ * cli_do_monitor_get_candidate_count contacts the pg_auto_failover monitor and
  * retrieves the current count of failover candidate nodes.
  */
 static void
-cli_do_monitor_get_failover_count(int argc, char **argv)
+cli_do_monitor_get_candidate_count(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
 	KeeperConfig *config = &(keeper.config);

@@ -251,27 +251,12 @@ cli_perform_failover(int argc, char **argv)
 	KeeperConfig config = keeperOptions;
 	Monitor monitor = { 0 };
 
+	NodeState targetState = PRIMARY_STATE;
+
 	char *channels[] = { "state", NULL };
 	(void) cli_monitor_init_from_option_or_config(&monitor, &config);
 
 	(void) cli_set_groupId(&monitor, &config);
-
-	NodeState targetState = PRIMARY_STATE;
-	int failoverCandidateCount = 0;
-
-	if (!monitor_count_failover_candidates(&monitor,
-										   config.formation,
-										   config.groupId,
-										   &failoverCandidateCount))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_MONITOR);
-	}
-
-	if (failoverCandidateCount == 0)
-	{
-		targetState = WAIT_PRIMARY_STATE;
-	}
 
 	/* start listening to the state changes before we call perform_failover */
 	if (!pgsql_listen(&(monitor.notificationClient), channels))
@@ -311,6 +296,8 @@ cli_perform_promotion(int argc, char **argv)
 	Monitor *monitor = &(keeper.monitor);
 	KeeperConfig *config = &(keeper.config);
 
+	NodeState targetState = PRIMARY_STATE;
+
 	int groupId = 0;
 
 	PgInstanceKind nodeKind = NODE_KIND_UNKNOWN;
@@ -331,23 +318,6 @@ cli_perform_promotion(int argc, char **argv)
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_ARGS);
-	}
-
-	NodeState targetState = PRIMARY_STATE;
-	int failoverCandidateCount = 0;
-
-	if (!monitor_count_failover_candidates(monitor,
-										   config->formation,
-										   config->groupId,
-										   &failoverCandidateCount))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_MONITOR);
-	}
-
-	if (failoverCandidateCount == 0)
-	{
-		targetState = WAIT_PRIMARY_STATE;
 	}
 
 	/* start listening to the state changes before we call perform_promotion */
