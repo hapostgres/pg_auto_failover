@@ -2071,15 +2071,32 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 			GetPrimaryNodeInGroup(currentNode->formationId,
 								  currentNode->groupId);
 
-		if (primaryNode == NULL)
+		/*
+		 * If we allow setting changes during APPLY_SETTINGS we open the door
+		 * for race conditions where we can't be sure that the latest changes
+		 * have been applied.
+		 *
+		 * If we don't currently have a primary node anyway, we can just
+		 * proceed with the change.
+		 */
+		if (primaryNode &&
+			!IsCurrentState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS))
 		{
-			ereport(ERROR,
-					(errmsg("couldn't find the primary node in "
-							"formation \"%s\", group %d",
-							currentNode->formationId, currentNode->groupId)));
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of " NODE_FORMAT
+				" to apply_settings after updating " NODE_FORMAT
+				" replication quorum to %s.",
+				NODE_FORMAT_ARGS(primaryNode),
+				NODE_FORMAT_ARGS(currentNode),
+				currentNode->replicationQuorum ? "true" : "false");
+
+			SetNodeGoalState(primaryNode,
+							 REPLICATION_STATE_APPLY_SETTINGS, message);
 		}
 
-		if (!IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY))
+		/* if primaryNode is not NULL, then current state is APPLY_SETTINGS */
+		else if (primaryNode)
 		{
 			ereport(ERROR,
 					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -2087,22 +2104,10 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 							"for primary " NODE_FORMAT
 							" is \"%s\"",
 							NODE_FORMAT_ARGS(primaryNode),
-							ReplicationStateGetName(primaryNode->reportedState)),
-					 errdetail("The primary node so must be in state \"primary\" "
-							   "to be able to apply configuration changes to "
-							   "its synchronous_standby_names setting")));
+							ReplicationStateGetName(primaryNode->reportedState))));
 		}
 
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to apply_settings after updating replication quorum to %s for "
-			NODE_FORMAT,
-			NODE_FORMAT_ARGS(primaryNode),
-			currentNode->replicationQuorum ? "true" : "false",
-			NODE_FORMAT_ARGS(currentNode));
-
-		SetNodeGoalState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS, message);
+		/* other case is that we failed to find a primary node, proceed */
 	}
 
 	PG_RETURN_BOOL(true);
