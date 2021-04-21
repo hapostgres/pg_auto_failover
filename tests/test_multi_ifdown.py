@@ -149,15 +149,17 @@ def test_008_failover():
     assert node3.wait_until_state(target_state="wait_primary", timeout=120)
     assert node2.wait_until_state(target_state="secondary")
 
-    # node 2 has candidate priority of 0, can't be used to reach primary
-    # assert node3.wait_until_state(target_state="primary")
+    # node 2 has candidate priority of 0, can still be used to reach primary
+    assert node3.wait_until_state(target_state="primary")
 
     assert node3.has_needed_replication_slots()
     assert node2.has_needed_replication_slots()
 
     # when in wait_primary state we should not block writes when:
     assert node3.get_number_sync_standbys() == 1
-    node3.check_synchronous_standby_names(ssn="")
+
+    ssn = "ANY 1 (pgautofailover_standby_1, pgautofailover_standby_2)"
+    node3.check_synchronous_standby_names(ssn=ssn)
 
 
 def test_009_read_from_new_primary():
