@@ -246,6 +246,7 @@ keeper_ensure_current_state(Keeper *keeper)
 		}
 
 		case SECONDARY_STATE:
+		case REPORT_LSN_STATE:
 		{
 			bool updateRetries = false;
 
@@ -1074,7 +1075,7 @@ keeper_maintain_replication_slots(Keeper *keeper)
 	 */
 	if (bypass)
 	{
-		log_trace("Skipping replication slots on a secondary running %d",
+		log_debug("Skipping replication slots on a secondary running %d",
 				  pgSetup->control.pg_control_version);
 		return true;
 	}

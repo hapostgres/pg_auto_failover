@@ -454,6 +454,7 @@ nodestateConnectionType(CurrentNodeState *nodeState)
 		case WAIT_MAINTENANCE_STATE:
 		case FAST_FORWARD_STATE:
 		case JOIN_SECONDARY_STATE:
+		case REPORT_LSN_STATE:
 		{
 			return "read-only";
 		}
@@ -466,7 +467,6 @@ nodestateConnectionType(CurrentNodeState *nodeState)
 		case DEMOTE_TIMEOUT_STATE:
 		case DRAINING_STATE:
 		case MAINTENANCE_STATE:
-		case REPORT_LSN_STATE:
 		{
 			return "none";
 		}

@@ -40,6 +40,9 @@
 #include "state.h"
 
 
+static bool fsm_init_standby_from_upstream(Keeper *keeper);
+
+
 /*
  * fsm_init_primary initializes the postgres server as primary.
  *
@@ -829,41 +832,16 @@ fsm_checkpoint_and_stop_postgres(Keeper *keeper)
 
 
 /*
- * fsm_init_standby is used when the primary is now ready to accept a standby,
- * we're the standby.
+ * fsm_init_standby_from_upstream is the work horse for both fsm_init_standby
+ * and fsm_init_from_standby. The replication source must have been setup
+ * already.
  */
-bool
-fsm_init_standby(Keeper *keeper)
+static bool
+fsm_init_standby_from_upstream(Keeper *keeper)
 {
 	KeeperConfig *config = &(keeper->config);
 	Monitor *monitor = &(keeper->monitor);
 	LocalPostgresServer *postgres = &(keeper->postgres);
-
-	NodeAddress *primaryNode = NULL;
-
-
-	/* get the primary node to follow */
-	if (!keeper_get_primary(keeper, &(postgres->replicationSource.primaryNode)))
-	{
-		log_error("Failed to initialize standby for lack of a primary node, "
-				  "see above for details");
-		return false;
-	}
-
-	if (!standby_init_replication_source(postgres,
-										 primaryNode,
-										 PG_AUTOCTL_REPLICA_USERNAME,
-										 config->replication_password,
-										 config->replication_slot_name,
-										 config->maximum_backup_rate,
-										 config->backupDirectory,
-										 NULL, /* no targetLSN */
-										 config->pgSetup.ssl,
-										 keeper->state.current_node_id))
-	{
-		/* can't happen at the moment */
-		return false;
-	}
 
 	/*
 	 * At pg_autoctl create time when PGDATA already exists and we were
@@ -920,6 +898,46 @@ fsm_init_standby(Keeper *keeper)
 
 	/* now, in case we have an init state file around, remove it */
 	return unlink_file(config->pathnames.init);
+}
+
+
+/*
+ * fsm_init_standby is used when the primary is now ready to accept a standby,
+ * we're the standby.
+ */
+bool
+fsm_init_standby(Keeper *keeper)
+{
+	KeeperConfig *config = &(keeper->config);
+	LocalPostgresServer *postgres = &(keeper->postgres);
+
+	NodeAddress *primaryNode = NULL;
+
+
+	/* get the primary node to follow */
+	if (!keeper_get_primary(keeper, &(postgres->replicationSource.primaryNode)))
+	{
+		log_error("Failed to initialize standby for lack of a primary node, "
+				  "see above for details");
+		return false;
+	}
+
+	if (!standby_init_replication_source(postgres,
+										 primaryNode,
+										 PG_AUTOCTL_REPLICA_USERNAME,
+										 config->replication_password,
+										 config->replication_slot_name,
+										 config->maximum_backup_rate,
+										 config->backupDirectory,
+										 NULL, /* no targetLSN */
+										 config->pgSetup.ssl,
+										 keeper->state.current_node_id))
+	{
+		/* can't happen at the moment */
+		return false;
+	}
+
+	return fsm_init_standby_from_upstream(keeper);
 }
 
 
@@ -1373,4 +1391,43 @@ fsm_follow_new_primary(Keeper *keeper)
 
 	/* now, in case we have an init state file around, remove it */
 	return unlink_file(config->pathnames.init);
+}
+
+
+/*
+ * fsm_init_from_standby creates a new node from existing nodes that are still
+ * available but not setup to be a candidate for promotion.
+ */
+bool
+fsm_init_from_standby(Keeper *keeper)
+{
+	KeeperConfig *config = &(keeper->config);
+	LocalPostgresServer *postgres = &(keeper->postgres);
+
+	NodeAddress upstreamNode = { 0 };
+
+	/* get the primary node to follow */
+	if (!keeper_get_most_advanced_standby(keeper, &upstreamNode))
+	{
+		log_error("Failed to initialise from the most advanced standby node, "
+				  "see above for details");
+		return false;
+	}
+
+	if (!standby_init_replication_source(postgres,
+										 &upstreamNode,
+										 PG_AUTOCTL_REPLICA_USERNAME,
+										 config->replication_password,
+										 "", /* no replication slot */
+										 config->maximum_backup_rate,
+										 config->backupDirectory,
+										 upstreamNode.lsn,
+										 config->pgSetup.ssl,
+										 keeper->state.current_node_id))
+	{
+		/* can't happen at the moment */
+		return false;
+	}
+
+	return fsm_init_standby_from_upstream(keeper);
 }

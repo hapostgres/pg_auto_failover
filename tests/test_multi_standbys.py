@@ -187,14 +187,7 @@ def test_007_create_t1():
     node1.run_sql_query("CHECKPOINT")
 
 
-@raises(Exception)
-def test_008a_set_candidate_priorities_to_zero():
-    # we need two nodes with non-zero candidate priority
-    node1.set_candidate_priority(0)
-    node2.set_candidate_priority(0)
-
-
-def test_008b_set_candidate_priorities():
+def test_008_set_candidate_priorities():
     # set priorities in a way that we know the candidate: node2
     node1.set_candidate_priority(90)  # current primary
     node2.set_candidate_priority(90)
@@ -368,7 +361,56 @@ def test_015_004_restart_nodes():
     node1.check_synchronous_standby_names(ssn)
 
 
-def test_016_remove_old_primary():
+#
+# Now test a failover when all the nodes have candidate priority set to zero
+#
+def test_016_001_set_candidate_priorities_to_zero():
+    node1.set_candidate_priority(0)
+    node2.set_candidate_priority(0)
+    node3.set_candidate_priority(0)
+
+    # no candidate for failover, we're wait_primary
+    node1.wait_until_state(target_state="primary")
+
+
+def test_016_002_trigger_failover():
+    print()
+    print("Calling pgautofailover.failover() on the monitor")
+    monitor.failover()
+
+    assert node3.wait_until_state(target_state="report_lsn")
+    assert node2.wait_until_state(target_state="report_lsn")
+    assert node1.wait_until_state(target_state="draining")
+
+
+def test_016_003_set_candidate_priority_to_one():
+    node2.set_candidate_priority(1)
+
+    # no candidate for failover, we're wait_primary
+    node2.wait_until_state(target_state="primary")
+    node1.wait_until_state(target_state="secondary")
+    node3.wait_until_state(target_state="secondary")
+
+
+def test_016_004_reset_candidate_priority():
+    node2.set_candidate_priority(0)
+
+    node2.wait_until_state(target_state="primary")
+    node1.wait_until_state(target_state="secondary")
+    node3.wait_until_state(target_state="secondary")
+
+
+def test_016_005_perform_promotion():
+    print()
+    print("Calling pg_autoctl perform promotion on node 1")
+    node1.perform_promotion()
+
+    node1.wait_until_state(target_state="primary")
+    node2.wait_until_state(target_state="secondary")
+    node3.wait_until_state(target_state="secondary")
+
+
+def test_017_remove_old_primary():
     node2.drop()
 
     assert node1.wait_until_state(target_state="primary")

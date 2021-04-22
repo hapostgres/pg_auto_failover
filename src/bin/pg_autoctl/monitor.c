@@ -2592,6 +2592,54 @@ printFormationURI(void *ctx, PGresult *result)
 
 
 /*
+ * monitor_count_failover_candidates counts how many nodes in a given group are
+ * not currently in a primary state, and have candidatePriority > 0.
+ */
+bool
+monitor_count_failover_candidates(Monitor *monitor,
+								  char *formation, int groupId,
+								  int *failoverCandidateCount)
+{
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_INT, false };
+	PGSQL *pgsql = &monitor->pgsql;
+	char *sql =
+		"select count(node.candidatepriority) "
+		"       filter(where node.candidatepriority > 0) "
+		"       as failover_candidate_count "
+		"  from pgautofailover.get_nodes($1, $2) as gn "
+		"  join pgautofailover.node "
+		"    on node.nodeid = gn.node_id "
+		" where not node_is_primary";
+
+	int paramCount = 2;
+	Oid paramTypes[2] = { TEXTOID, INT4OID };
+	const char *paramValues[2] = { 0 };
+	IntString myGroupIdString = intToString(groupId);
+
+	paramValues[0] = formation;
+	paramValues[1] = myGroupIdString.strValue;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &parseSingleValueResult))
+	{
+		log_error("Failed to retrieve formation settings from the monitor");
+		return false;
+	}
+
+	if (!context.parsedOk)
+	{
+		log_error("Failed to parse query result from the monitor.");
+		return false;
+	}
+
+	*failoverCandidateCount = context.intVal;
+
+	return true;
+}
+
+
+/*
  * monitor_print_formation_settings calls the function
  * pgautofailover.formation_settings on the monitor, and prints a line of
  * output per state record obtained.
@@ -3409,6 +3457,20 @@ monitor_notification_process_apply_settings(void *context,
 				  nodeState->node.host,
 				  nodeState->node.port,
 				  NodeStateToString(nodeState->reportedState));
+	}
+
+	/*
+	 * In some cases applying a new value for a replication setting will not go
+	 * through APPLY_SETTINGS. One such case is when changing candidate
+	 * priority to trigger a failover when all the available nodes have
+	 * candidate priority set to zero.
+	 */
+	if ((nodeState->reportedState == PRIMARY_STATE &&
+		 nodeState->reportedState == nodeState->goalState) ||
+		(nodeState->reportedState == WAIT_PRIMARY_STATE &&
+		 nodeState->reportedState == nodeState->goalState))
+	{
+		ctx->applySettingsTransitionDone = true;
 	}
 }
 

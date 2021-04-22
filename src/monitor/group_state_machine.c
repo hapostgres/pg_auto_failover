@@ -840,8 +840,27 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 		IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
 		IsCurrentState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS))
 	{
-		int potentialCandidateCount = otherNodesCount;
-		int failoverCandidateCount = otherNodesCount;
+		/*
+		 * We count our nodes in different ways, because of special cases we
+		 * want to be able to address. We want to distinguish nodes that are in
+		 * the replication quorum, nodes that are secondary, and nodes that are
+		 * secondary but do not participate in the quorum.
+		 *
+		 * - replicationQuorumCount is the count of nodes with
+		 *   replicationQuorum true, whether or not those nodes are currently
+		 *   in the SECONDARY state.
+		 *
+		 * - secondaryNodesCount is the count of nodes that are currently in
+		 *   the SECONDARY state.
+		 *
+		 * - secondaryQuorumNodesCount is the count of nodes that are both
+		 *   setup to participate in the replication quorum and also currently
+		 *   in the SECONDARY state.
+		 */
+		int replicationQuorumCount = otherNodesCount;
+		int secondaryNodesCount = otherNodesCount;
+		int secondaryQuorumNodesCount = otherNodesCount;
+
 		AutoFailoverFormation *formation =
 			GetFormation(primaryNode->formationId);
 		ListCell *nodeCell = NULL;
@@ -864,7 +883,8 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 			{
 				char message[BUFSIZE];
 
-				--failoverCandidateCount;
+				--secondaryNodesCount;
+				--secondaryQuorumNodesCount;
 
 				LogAndNotifyMessage(
 					message, BUFSIZE,
@@ -876,62 +896,112 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 				AssignGoalState(otherNode,
 								REPLICATION_STATE_CATCHINGUP, message);
 			}
-			else if (otherNode->candidatePriority == 0)
-			{
-				/* neither a potential not an actual candidate */
-				--failoverCandidateCount;
-				--potentialCandidateCount;
-			}
 			else if (!IsCurrentState(otherNode, REPLICATION_STATE_SECONDARY))
 			{
-				/* also not a candidate at this time */
-				--failoverCandidateCount;
+				--secondaryNodesCount;
+				--secondaryQuorumNodesCount;
 			}
 
-			/*
-			 * Disable synchronous replication to maintain availability.
-			 *
-			 * Note that we implement here a trade-off between availability (of
-			 * writes) against durability of the written data. In the case when
-			 * there's a single standby in the group, pg_auto_failover choice
-			 * is to maintain availability of the service, including writes.
-			 *
-			 * In the case when the user has setup a replication quorum of 2 or
-			 * more, then pg_auto_failover does not get in the way. You get
-			 * what you ask for, which is a strong guarantee on durability.
-			 *
-			 * To have number_sync_standbys == 2, you need to have at least 3
-			 * standby servers. To get to a point where writes are not possible
-			 * anymore, there needs to be a point in time where 2 of the 3
-			 * standby nodes are unavailable. In that case, pg_auto_failover
-			 * does not change the configured trade-offs. Writes are blocked
-			 * until one of the two defective standby nodes is available again.
-			 */
-			if (!IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) &&
-				failoverCandidateCount == 0)
+			/* at this point we are left with nodes in SECONDARY state */
+			else if (IsCurrentState(otherNode, REPLICATION_STATE_SECONDARY) &&
+					 !otherNode->replicationQuorum)
 			{
-				ReplicationState primaryGoalState =
-					formation->number_sync_standbys == 0
-					? REPLICATION_STATE_WAIT_PRIMARY
-					: REPLICATION_STATE_PRIMARY;
+				--secondaryQuorumNodesCount;
+			}
 
-				if (primaryNode->goalState != primaryGoalState)
-				{
-					char message[BUFSIZE] = { 0 };
+			/* now separately count nodes setup with replication quorum */
+			if (!otherNode->replicationQuorum)
+			{
+				--replicationQuorumCount;
+			}
+		}
 
-					LogAndNotifyMessage(
-						message, BUFSIZE,
-						"Setting goal state of " NODE_FORMAT
-						" to %s because none of the %d standby candidate nodes"
-						" are healthy at the moment.",
-						NODE_FORMAT_ARGS(primaryNode),
-						ReplicationStateGetName(primaryGoalState),
-						potentialCandidateCount);
+		/*
+		 * Special case first: when given a setup where all the nodes are async
+		 * (replicationQuorumCount == 0) we allow the "primary" state in almost
+		 * all cases, knowing that synchronous_standby_names is still going to
+		 * be computed as ''.
+		 *
+		 * That said, if we don't have a single node in the SECONDARY state, we
+		 * still want to switch to WAIT_PRIMARY to show that something
+		 * unexpected is happening.
+		 */
+		if (replicationQuorumCount == 0)
+		{
+			Assert(formation->number_sync_standbys == 0);
 
-					AssignGoalState(primaryNode, primaryGoalState, message);
+			ReplicationState primaryGoalState =
+				secondaryNodesCount == 0
+				? REPLICATION_STATE_WAIT_PRIMARY
+				: REPLICATION_STATE_PRIMARY;
 
-					return true;
-				}
+			if (primaryNode->goalState != primaryGoalState)
+			{
+				char message[BUFSIZE] = { 0 };
+
+				LogAndNotifyMessage(
+					message, BUFSIZE,
+					"Setting goal state of " NODE_FORMAT
+					" to %s because none of the secondary nodes"
+					" are healthy at the moment.",
+					NODE_FORMAT_ARGS(primaryNode),
+					ReplicationStateGetName(primaryGoalState));
+
+				AssignGoalState(primaryNode, primaryGoalState, message);
+
+				return true;
+			}
+
+			/* when all nodes are async, we're done here */
+			return true;
+		}
+
+		/*
+		 * Disable synchronous replication to maintain availability.
+		 *
+		 * Note that we implement here a trade-off between availability (of
+		 * writes) against durability of the written data. In the case when
+		 * there's a single standby in the group, pg_auto_failover choice is to
+		 * maintain availability of the service, including writes.
+		 *
+		 * In the case when the user has setup a replication quorum of 1 or
+		 * more, then pg_auto_failover does not get in the way. You get what
+		 * you ask for, which is a strong guarantee on durability.
+		 *
+		 * To have number_sync_standbys == 1, you need to have at least 2
+		 * standby servers. To get to a point where writes are not possible
+		 * anymore, there needs to be a point in time where 2 of the 2 standby
+		 * nodes are unavailable. In that case, pg_auto_failover does not
+		 * change the configured trade-offs. Writes are blocked until one of
+		 * the two defective standby nodes is available again.
+		 */
+		if (!IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) &&
+			secondaryQuorumNodesCount == 0)
+		{
+			/*
+			 * Allow wait_primary when number_sync_standbys = 0, otherwise
+			 * block writes on the primary.
+			 */
+			ReplicationState primaryGoalState =
+				formation->number_sync_standbys == 0
+				? REPLICATION_STATE_WAIT_PRIMARY
+				: REPLICATION_STATE_PRIMARY;
+
+			if (primaryNode->goalState != primaryGoalState)
+			{
+				char message[BUFSIZE] = { 0 };
+
+				LogAndNotifyMessage(
+					message, BUFSIZE,
+					"Setting goal state of " NODE_FORMAT
+					" to %s because none of the standby nodes in the quorum"
+					" are healthy at the moment.",
+					NODE_FORMAT_ARGS(primaryNode),
+					ReplicationStateGetName(primaryGoalState));
+
+				AssignGoalState(primaryNode, primaryGoalState, message);
+
+				return true;
 			}
 		}
 
@@ -941,16 +1011,17 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 		 *     wait_primary ➜ primary
 		 */
 		if (IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) &&
-			failoverCandidateCount > 0)
+			secondaryQuorumNodesCount > 0)
 		{
 			char message[BUFSIZE] = { 0 };
 
 			LogAndNotifyMessage(
 				message, BUFSIZE,
 				"Setting goal state of " NODE_FORMAT
-				" to primary now that at least one"
-				" secondary candidate node is healthy.",
-				NODE_FORMAT_ARGS(primaryNode));
+				" to primary now that we have %d healthy "
+				" secondary nodes in the quorum.",
+				NODE_FORMAT_ARGS(primaryNode),
+				secondaryQuorumNodesCount);
 
 			AssignGoalState(primaryNode, REPLICATION_STATE_PRIMARY, message);
 
@@ -978,7 +1049,8 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 			char message[BUFSIZE] = { 0 };
 
 			ReplicationState primaryGoalState =
-				failoverCandidateCount == 0
+				formation->number_sync_standbys == 0 &&
+				secondaryQuorumNodesCount == 0
 				? REPLICATION_STATE_WAIT_PRIMARY
 				: REPLICATION_STATE_PRIMARY;
 
@@ -1596,7 +1668,7 @@ PromoteSelectedNode(AutoFailoverNode *selectedNode,
 	{
 		char message[BUFSIZE] = { 0 };
 
-		selectedNode->candidatePriority -= MAX_USER_DEFINED_CANDIDATE_PRIORITY;
+		selectedNode->candidatePriority -= CANDIDATE_PRIORITY_INCREMENT;
 
 		ReportAutoFailoverNodeReplicationSetting(
 			selectedNode->nodeId,

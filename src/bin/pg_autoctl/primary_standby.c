@@ -749,15 +749,15 @@ primary_create_replication_user(LocalPostgresServer *postgres,
 
 /*
  * standby_init_replication_source initializes a replication source structure
- * with given arguments. If the primaryNode is NULL, then the
+ * with given arguments. If the upstreamNode is NULL, then the
  * replicationSource.primary structure slot is not updated.
  *
  * Note that we just store the pointers to all those const char *arguments
- * here, expect for the primaryNode there's no copying involved.
+ * here, expect for the upstreamNode there's no copying involved.
  */
 bool
 standby_init_replication_source(LocalPostgresServer *postgres,
-								NodeAddress *primaryNode,
+								NodeAddress *upstreamNode,
 								const char *username,
 								const char *password,
 								const char *slotName,
@@ -769,17 +769,17 @@ standby_init_replication_source(LocalPostgresServer *postgres,
 {
 	ReplicationSource *upstream = &(postgres->replicationSource);
 
-	if (primaryNode != NULL)
+	if (upstreamNode != NULL)
 	{
-		upstream->primaryNode.nodeId = primaryNode->nodeId;
+		upstream->primaryNode.nodeId = upstreamNode->nodeId;
 
 		strlcpy(upstream->primaryNode.name,
-				primaryNode->name, _POSIX_HOST_NAME_MAX);
+				upstreamNode->name, _POSIX_HOST_NAME_MAX);
 
 		strlcpy(upstream->primaryNode.host,
-				primaryNode->host, _POSIX_HOST_NAME_MAX);
+				upstreamNode->host, _POSIX_HOST_NAME_MAX);
 
-		upstream->primaryNode.port = primaryNode->port;
+		upstream->primaryNode.port = upstreamNode->port;
 	}
 
 	strlcpy(upstream->userName, username, NAMEDATALEN);
@@ -868,7 +868,15 @@ standby_init_database(LocalPostgresServer *postgres,
 		 */
 		bool hasReplicationSlot = false;
 
-		if (!upstream_has_replication_slot(upstream,
+		/*
+		 * When initialising from another standby (in REPORT_LSN, if there is
+		 * currently no primary node and no candidate node either), we don't
+		 * require a replication slot on the upstream node.
+		 */
+		bool needsReplicationSlot = !IS_EMPTY_STRING_BUFFER(upstream->slotName);
+
+		if (needsReplicationSlot &&
+			!upstream_has_replication_slot(upstream,
 										   pgSetup,
 										   &hasReplicationSlot))
 		{
@@ -876,7 +884,7 @@ standby_init_database(LocalPostgresServer *postgres,
 			return false;
 		}
 
-		if (hasReplicationSlot)
+		if (!needsReplicationSlot || hasReplicationSlot)
 		{
 			/* first, make sure we can connect with "replication" */
 			if (!pgctl_identify_system(upstream))

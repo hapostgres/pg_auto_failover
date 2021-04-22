@@ -287,6 +287,7 @@ monitor_service_run(Monitor *monitor)
 		{
 			log_warn("Re-establishing connection. We might miss notifications.");
 			pgsql_finish(&(monitor->pgsql));
+			pgsql_finish(&(monitor->notificationClient));
 
 			continue;
 		}

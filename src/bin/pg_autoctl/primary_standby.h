@@ -86,7 +86,7 @@ bool primary_create_replication_user(LocalPostgresServer *postgres,
 									 char *replicationUser,
 									 char *replicationPassword);
 bool standby_init_replication_source(LocalPostgresServer *postgres,
-									 NodeAddress *primaryNode,
+									 NodeAddress *upstreamNode,
 									 const char *username,
 									 const char *password,
 									 const char *slotName,

@@ -166,6 +166,8 @@
 #define COMMENT_FAST_FORWARD_TO_PREP_PROMOTION \
 	"Got the missing WAL bytes, promoted"
 
+#define COMMENT_INIT_TO_REPORT_LSN \
+	"Creating a new node from a standby node that is not a candidate."
 
 /* *INDENT-OFF* */
 
@@ -348,6 +350,12 @@ KeeperFSMTransition KeeperFSM[] = {
 	{ REPORT_LSN_STATE, JOIN_SECONDARY_STATE, COMMENT_REPORT_LSN_TO_JOIN_SECONDARY, &fsm_checkpoint_and_stop_postgres },
 	{ REPORT_LSN_STATE, SECONDARY_STATE, COMMENT_REPORT_LSN_TO_JOIN_SECONDARY, &fsm_follow_new_primary },
 	{ JOIN_SECONDARY_STATE, SECONDARY_STATE, COMMENT_JOIN_SECONDARY_TO_SECONDARY, &fsm_follow_new_primary },
+
+	/*
+	 * When adding a new node and there is no primary, but there are existing
+	 * nodes that are not candidates for failover.
+	 */
+	{ INIT_STATE, REPORT_LSN_STATE, COMMENT_INIT_TO_REPORT_LSN, &fsm_init_from_standby },
 
 	/*
 	 * This is the end, my friend.

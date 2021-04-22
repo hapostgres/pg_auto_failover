@@ -27,6 +27,7 @@
 #include "pgsetup.h"
 #include "pgsql.h"
 #include "service_keeper_init.h"
+#include "signals.h"
 #include "state.h"
 
 
@@ -510,6 +511,12 @@ reach_initial_state(Keeper *keeper)
 			break;
 		}
 
+		case REPORT_LSN_STATE:
+		{
+			/* all the work is done in the INIT ➜ REPORT_LSN transition */
+			break;
+		}
+
 		default:
 
 			/* we don't support any other state at initialization time */
@@ -685,6 +692,11 @@ wait_until_primary_has_created_our_replication_slot(Keeper *keeper,
 	}
 
 	do {
+		if (asked_to_stop || asked_to_stop_fast || asked_to_quit)
+		{
+			return false;
+		}
+
 		if (firstLoop)
 		{
 			firstLoop = false;
