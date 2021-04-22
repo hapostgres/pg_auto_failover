@@ -159,6 +159,12 @@ parse_pg_version_string(const char *pg_version_string, int *pg_version)
 	int majorIdx = 0;
 	int minorIdx = 0;
 
+	if (pg_version_string == NULL)
+	{
+		log_debug("BUG: parse_pg_version_string got NULL");
+		return false;
+	}
+
 	for (int i = 0; pg_version_string[i] != '\0'; i++)
 	{
 		if (pg_version_string[i] == '.')
