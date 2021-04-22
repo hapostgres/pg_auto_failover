@@ -440,11 +440,13 @@ demoapp_process_perform_switchover(DemoAppOptions *demoAppOptions)
 		}
 
 		/* process state changes notification until we have a new primary */
-		if (!monitor_wait_until_some_node_reported_state(&monitor,
-														 formation,
-														 groupId,
-														 NODE_KIND_UNKNOWN,
-														 PRIMARY_STATE))
+		if (!monitor_wait_until_some_node_reported_state(
+				&monitor,
+				formation,
+				groupId,
+				NODE_KIND_UNKNOWN,
+				PRIMARY_STATE,
+				PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT))
 		{
 			log_error("Failed to wait until a new primary has been notified");
 			continue;

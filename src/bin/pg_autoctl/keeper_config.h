@@ -66,6 +66,7 @@ typedef struct KeeperConfig
 	int prepare_promotion_walreceiver;
 	int postgresql_restart_failure_timeout;
 	int postgresql_restart_failure_max_retries;
+	int listen_notifications_timeout;
 } KeeperConfig;
 
 #define PG_AUTOCTL_MONITOR_IS_DISABLED(config) \

@@ -176,6 +176,12 @@
 							&(config->postgresql_restart_failure_max_retries), \
 							POSTGRESQL_FAILS_TO_START_RETRIES)
 
+#define OPTION_TIMEOUT_LISTEN_NOTIFICATIONS(config) \
+	make_int_option_default("timeout", "listen_notifications_timeout", \
+							NULL, false, \
+							&(config->listen_notifications_timeout), \
+							PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT)
+
 #define OPTION_CITUS_ROLE(config) \
 	make_strbuf_option_default("citus", "role", NULL, false, NAMEDATALEN, \
 							   config->citusRoleStr, DEFAULT_CITUS_ROLE)
@@ -219,6 +225,7 @@
 		OPTION_TIMEOUT_PREPARE_PROMOTION_WALRECEIVER(config), \
 		OPTION_TIMEOUT_POSTGRESQL_RESTART_FAILURE_TIMEOUT(config), \
 		OPTION_TIMEOUT_POSTGRESQL_RESTART_FAILURE_MAX_RETRIES(config), \
+		OPTION_TIMEOUT_LISTEN_NOTIFICATIONS(config), \
  \
 		OPTION_CITUS_ROLE(config), \
 		OPTION_CITUS_CLUSTER_NAME(config), \
