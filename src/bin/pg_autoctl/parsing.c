@@ -526,7 +526,8 @@ parse_bool(const char *value, bool *result)
 bool
 parse_pguri_info_key_vals(const char *pguri,
 						  KeyVal *overrides,
-						  URIParams *uriParameters)
+						  URIParams *uriParameters,
+						  bool checkForCompleteURI)
 {
 	char *errmsg;
 	PQconninfoOption *conninfo, *option;
@@ -619,27 +620,34 @@ parse_pguri_info_key_vals(const char *pguri,
 	 * Display an error message per missing field, and only then return false
 	 * if we're missing any one of those.
 	 */
-	if (!foundHost)
+	if (checkForCompleteURI)
 	{
-		log_error("Failed to find hostname in the pguri \"%s\"", pguri);
-	}
+		if (!foundHost)
+		{
+			log_error("Failed to find hostname in the pguri \"%s\"", pguri);
+		}
 
-	if (!foundPort)
+		if (!foundPort)
+		{
+			log_error("Failed to find port in the pguri \"%s\"", pguri);
+		}
+
+		if (!foundUser)
+		{
+			log_error("Failed to find username in the pguri \"%s\"", pguri);
+		}
+
+		if (!foundDBName)
+		{
+			log_error("Failed to find dbname in the pguri \"%s\"", pguri);
+		}
+
+		return foundHost && foundPort && foundUser && foundDBName;
+	}
+	else
 	{
-		log_error("Failed to find port in the pguri \"%s\"", pguri);
+		return true;
 	}
-
-	if (!foundUser)
-	{
-		log_error("Failed to find username in the pguri \"%s\"", pguri);
-	}
-
-	if (!foundDBName)
-	{
-		log_error("Failed to find dbname in the pguri \"%s\"", pguri);
-	}
-
-	return foundHost && foundPort && foundUser && foundDBName;
 }
 
 
@@ -699,8 +707,13 @@ parse_pguri_ssl_settings(const char *pguri, SSLOptions *ssl)
 	URIParams params = { 0 };
 	KeyVal overrides = { 0 };
 
+	bool checkForCompleteURI = true;
+
 	/* initialize SSL Params values */
-	if (!parse_pguri_info_key_vals(pguri, &overrides, &params))
+	if (!parse_pguri_info_key_vals(pguri,
+								   &overrides,
+								   &params,
+								   checkForCompleteURI))
 	{
 		/* errors have already been logged */
 		return false;
@@ -985,9 +998,9 @@ uri_contains_password(const char *pguri)
 
 /*
  * parse_and_scrub_connection_string takes a Postgres connection string and
- * populates scrubbedPguri with the password replaced with **** for logging. The scrubbedPguri parameter
- * should point to a memory area that has been allocated by the caller and has at least
- * MAXCONNINFO bytes.
+ * populates scrubbedPguri with the password replaced with **** for logging.
+ * The scrubbedPguri parameter should point to a memory area that has been
+ * allocated by the caller and has at least MAXCONNINFO bytes.
  */
 bool
 parse_and_scrub_connection_string(const char *pguri, char *scrubbedPguri)
@@ -1004,7 +1017,12 @@ parse_and_scrub_connection_string(const char *pguri, char *scrubbedPguri)
 		};
 	}
 
-	if (!parse_pguri_info_key_vals(pguri, &overrides, &uriParams))
+	bool checkForCompleteURI = false;
+
+	if (!parse_pguri_info_key_vals(pguri,
+								   &overrides,
+								   &uriParams,
+								   checkForCompleteURI))
 	{
 		return false;
 	}

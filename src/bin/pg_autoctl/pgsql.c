@@ -409,8 +409,17 @@ pgsql_finish(PGSQL *pgsql)
 	if (pgsql->connection != NULL)
 	{
 		char scrubbedConnectionString[MAXCONNINFO] = { 0 };
-		parse_and_scrub_connection_string(pgsql->connectionString,
-										  scrubbedConnectionString);
+
+		if (!parse_and_scrub_connection_string(pgsql->connectionString,
+											   scrubbedConnectionString))
+		{
+			log_debug("Failed to scrub password from connection string");
+
+			strlcpy(scrubbedConnectionString,
+					pgsql->connectionString,
+					sizeof(scrubbedConnectionString));
+		}
+
 		log_debug("Disconnecting from [%s] \"%s\"",
 				  ConnectionTypeToString(pgsql->connectionType),
 				  scrubbedConnectionString);
@@ -484,7 +493,10 @@ pgsql_open_connection(PGSQL *pgsql)
 	}
 
 	char scrubbedConnectionString[MAXCONNINFO] = { 0 };
-	parse_and_scrub_connection_string(pgsql->connectionString, scrubbedConnectionString);
+
+	(void) parse_and_scrub_connection_string(pgsql->connectionString,
+											 scrubbedConnectionString);
+
 	log_debug("Connecting to [%s] \"%s\"",
 			  ConnectionTypeToString(pgsql->connectionType),
 			  scrubbedConnectionString);
@@ -579,7 +591,10 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 	INSTR_TIME_SET_ZERO(lastWarningTime);
 
 	char scrubbedConnectionString[MAXCONNINFO] = { 0 };
-	parse_and_scrub_connection_string(pgsql->connectionString, scrubbedConnectionString);
+
+	(void) parse_and_scrub_connection_string(pgsql->connectionString,
+											 scrubbedConnectionString);
+
 	log_warn("Failed to connect to \"%s\", retrying until "
 			 "the server is ready", scrubbedConnectionString);
 
