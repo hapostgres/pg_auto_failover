@@ -2606,7 +2606,7 @@ monitor_count_failover_candidates(Monitor *monitor,
 		"select count(node.candidatepriority) "
 		"       filter(where node.candidatepriority > 0) "
 		"       as failover_candidate_count "
-		"  from pgautofailover.get_nodes('default', 0) as gn "
+		"  from pgautofailover.get_nodes($1, $2) as gn "
 		"  join pgautofailover.node "
 		"    on node.nodeid = gn.node_id "
 		" where not node_is_primary";

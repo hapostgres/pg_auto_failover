@@ -251,9 +251,8 @@ cli_perform_failover(int argc, char **argv)
 	KeeperConfig config = keeperOptions;
 	Monitor monitor = { 0 };
 
-	NodeState targetState = PRIMARY_STATE;
-
 	char *channels[] = { "state", NULL };
+
 	(void) cli_monitor_init_from_option_or_config(&monitor, &config);
 
 	(void) cli_set_groupId(&monitor, &config);
@@ -277,7 +276,7 @@ cli_perform_failover(int argc, char **argv)
 													 config.formation,
 													 config.groupId,
 													 config.pgSetup.pgKind,
-													 targetState))
+													 PRIMARY_STATE))
 	{
 		log_error("Failed to wait until a new primary has been notified");
 		exit(EXIT_CODE_INTERNAL_ERROR);
@@ -295,8 +294,6 @@ cli_perform_promotion(int argc, char **argv)
 	Keeper keeper = { 0 };
 	Monitor *monitor = &(keeper.monitor);
 	KeeperConfig *config = &(keeper.config);
-
-	NodeState targetState = PRIMARY_STATE;
 
 	int groupId = 0;
 
@@ -339,7 +336,7 @@ cli_perform_promotion(int argc, char **argv)
 														 config->formation,
 														 groupId,
 														 nodeKind,
-														 targetState))
+														 PRIMARY_STATE))
 		{
 			log_error("Failed to wait until a new primary has been notified");
 			exit(EXIT_CODE_INTERNAL_ERROR);
