@@ -1144,6 +1144,7 @@ update_monitor_connection_string(KeeperConfig *config)
 		3, { "sslmode", "sslrootcert", "sslcrl" }, { 0 }
 	};
 
+	bool checkForCompleteURI = true;
 	char newPgURI[MAXCONNINFO] = { 0 };
 
 	/* initialize SSL Params values */
@@ -1156,7 +1157,8 @@ update_monitor_connection_string(KeeperConfig *config)
 
 	if (!parse_pguri_info_key_vals(config->monitor_pguri,
 								   &sslParams,
-								   &params))
+								   &params,
+								   checkForCompleteURI))
 	{
 		log_warn(
 			"The monitor SSL setup is ready and your current "

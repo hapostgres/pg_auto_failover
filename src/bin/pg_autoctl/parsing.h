@@ -72,7 +72,8 @@ typedef struct URIParams
 
 bool parse_pguri_info_key_vals(const char *pguri,
 							   KeyVal *overrides,
-							   URIParams *uriParameters);
+							   URIParams *uriParameters,
+							   bool checkForCompleteURI);
 
 bool buildPostgresURIfromPieces(URIParams *uriParams, char *pguri);
 
