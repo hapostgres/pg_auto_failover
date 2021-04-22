@@ -200,6 +200,7 @@ typedef struct pg_setup
 	PgInstanceKind pgKind;                  /* standalone/coordinator/worker */
 	NodeReplicationSettings settings;       /* node replication settings */
 	SSLOptions ssl;                         /* ssl options */
+	char citusClusterName[NAMEDATALEN];     /* citus.cluster_name */
 } PostgresSetup;
 
 #define IS_EMPTY_STRING_BUFFER(strbuf) (strbuf[0] == '\0')

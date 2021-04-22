@@ -7,18 +7,45 @@ DOCKER_RUN_OPTS = --privileged  -ti --rm
 
 NOSETESTS = $(shell which nosetests3 || which nosetests)
 
+# Tests for the monitor
+TESTS_MONITOR  = test_extension_update
+TESTS_MONITOR += test_installcheck
+TESTS_MONITOR += test_monitor_disabled
+TESTS_MONITOR += test_replace_monitor
+
+# Tests for single standby
+TESTS_SINGLE  = test_auth
+TESTS_SINGLE += test_basic_operation
+TESTS_SINGLE += test_basic_operation_listen_flag
+TESTS_SINGLE += test_create_run
+TESTS_SINGLE += test_create_standby_with_pgdata
+TESTS_SINGLE += test_debian_clusters
+TESTS_SINGLE += test_ensure
+TESTS_SINGLE += test_skip_pg_hba
+
+# Tests for SSL
+TESTS_SSL  = test_enable_ssl
+TESTS_SSL += test_ssl_cert
+TESTS_SSL += test_ssl_self_signed
+
 # Tests for multiple standbys
-MULTI_SB_TESTS  = $(basename $(notdir $(wildcard tests/test*_multi*)))
-MULTI_SB_TESTS += $(basename $(notdir $(wildcard tests/test*_disabled*)))
+TESTS_MULTI  = test_multi_async
+TESTS_MULTI += test_multi_ifdown
+TESTS_MULTI += test_multi_maintenance
+TESTS_MULTI += test_multi_standbys
 
 # TEST indicates the testfile to run
 TEST ?=
 ifeq ($(TEST),)
 	TEST_ARGUMENT = --where=tests
 else ifeq ($(TEST),multi)
-	TEST_ARGUMENT = --where=tests --tests=$(MULTI_SB_TESTS)
+	TEST_ARGUMENT = --where=tests --tests=$(TESTS_MULTI)
 else ifeq ($(TEST),single)
-	TEST_ARGUMENT = --where=tests --exclude='_multi_' --exclude='disabled'
+	TEST_ARGUMENT = --where=tests --tests=$(TESTS_SINGLE)
+else ifeq ($(TEST),monitor)
+	TEST_ARGUMENT = --where=tests --tests=$(TESTS_MONITOR)
+else ifeq ($(TEST),ssl)
+	TEST_ARGUMENT = --where=tests --tests=$(TESTS_SSL)
 else
 	TEST_ARGUMENT = $(TEST:%=tests/%.py)
 endif
@@ -35,6 +62,7 @@ NODES_ASYNC ?= 0				# count of replication-quorum false nodes
 NODES_PRIOS ?= 50				# either "50", or "50,50", or "50,50,0" etc
 NODES_SYNC_SB ?= -1
 FIRST_PGPORT ?= 5500
+CLUSTER_OPTS = ""			# could be "--skip-pg-hba"
 
 TMUX_EXTRA_COMMANDS ?= ""
 TMUX_LAYOUT ?= even-vertical	# could be "tiled"
@@ -49,11 +77,11 @@ AZURE_LOCATION ?= francecentral
 # Pick a version of Postgres and pg_auto_failover packages to install
 # in our target Azure VMs when provisionning
 #
-#  sudo apt-get install -q -y postgresql-13-auto-failover-1.4=1.4.1
+#  sudo apt-get install -q -y postgresql-13-auto-failover-1.5=1.5.1
 #  postgresql-${AZ_PG_VERSION}-auto-failover-${AZ_PGAF_DEB_VERSION}=${AZ_PGAF_VERSION}
 AZ_PG_VERSION ?= 13
-AZ_PGAF_DEB_VERSION ?= 1.4
-AZ_PGAF_DEB_REVISION ?= 1.4.2-1
+AZ_PGAF_DEB_VERSION ?= 1.5
+AZ_PGAF_DEB_REVISION ?= 1.5.1-1
 
 export AZ_PG_VERSION
 export AZ_PGAF_DEB_VERSION
@@ -134,8 +162,10 @@ pdf: $(PDF)
 $(PDF):
 	$(MAKE) -s -C docs/tikz pdf
 	perl -pi -e 's/(^.. figure:: .*)\.svg/\1.pdf/' docs/*.rst
+	perl -pi -e 's/▒/~/g' docs/ref/pg_autoctl_do_demo.rst
 	$(MAKE) -s -C docs latexpdf
 	perl -pi -e 's/(^.. figure:: .*)\.pdf/\1.svg/' docs/*.rst
+	perl -pi -e 's/~/▒/g' docs/ref/pg_autoctl_do_demo.rst
 	ls -l $@
 
 $(FSM): bin
@@ -150,7 +180,8 @@ $(TMUX_SCRIPT): bin
          --async-nodes $(NODES_ASYNC)     \
          --node-priorities $(NODES_PRIOS) \
          --sync-standbys $(NODES_SYNC_SB) \
-         --layout $(TMUX_LAYOUT) > $@
+         $(CLUSTER_OPTS)                  \
+		 --layout $(TMUX_LAYOUT) > $@
 
 tmux-script: $(TMUX_SCRIPT) ;
 
@@ -168,6 +199,7 @@ cluster: install tmux-clean
          --async-nodes $(NODES_ASYNC)     \
          --node-priorities $(NODES_PRIOS) \
          --sync-standbys $(NODES_SYNC_SB) \
+         $(CLUSTER_OPTS)                  \
          --layout $(TMUX_LAYOUT)
 
 

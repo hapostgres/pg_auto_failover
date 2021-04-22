@@ -72,11 +72,14 @@ typedef struct URIParams
 
 bool parse_pguri_info_key_vals(const char *pguri,
 							   KeyVal *overrides,
-							   URIParams *uriParameters);
+							   URIParams *uriParameters,
+							   bool checkForCompleteURI);
 
 bool buildPostgresURIfromPieces(URIParams *uriParams, char *pguri);
 
 bool parse_pguri_ssl_settings(const char *pguri, SSLOptions *ssl);
+
+bool parse_and_scrub_connection_string(const char *pguri, char *scrubbedPguri);
 
 bool parseLSN(const char *str, uint64_t *lsn);
 bool parseNodesArray(const char *nodesJSON,

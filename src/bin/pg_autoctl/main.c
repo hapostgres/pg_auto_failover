@@ -18,6 +18,9 @@
 #include "keeper_config.h"
 #include "lock_utils.h"
 #include "string_utils.h"
+#if (PG_VERSION_NUM >= 120000)
+#include "common/logging.h"
+#endif
 
 char pg_autoctl_argv0[MAXPGPATH];
 char pg_autoctl_program[MAXPGPATH];
@@ -47,6 +50,16 @@ main(int argc, char **argv)
 
 	/* set our logging infrastructure */
 	(void) set_logger();
+
+	/*
+	 * Since PG 12, we need to call pg_logging_init before any calls to pg_log_*
+	 * otherwise, we get a segfault. Although we don't use pg_log_* directly,
+	 * functions from the common library such as rmtree do use them.
+	 * Logging change introduced in PG 12: https://git.postgresql.org/cgit/postgresql.git/commit/?id=cc8d41511721d25d557fc02a46c053c0a602fed0
+	 */
+	#if (PG_VERSION_NUM >= 120000)
+	pg_logging_init(argv[0]);
+	#endif
 
 	/* register our logging clean-up atexit */
 	atexit(log_semaphore_unlink_atexit);

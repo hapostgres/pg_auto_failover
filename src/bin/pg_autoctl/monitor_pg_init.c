@@ -199,9 +199,6 @@ monitor_install(const char *hostname,
 		return false;
 	}
 
-	/* we're done with that connection to "postgres" database */
-	pgsql_finish(&postgres.sqlClient);
-
 	/* now, connect to the newly created database to create our extension */
 	strlcpy(pgSetup.dbname, PG_AUTOCTL_MONITOR_DBNAME, NAMEDATALEN);
 	pg_setup_get_local_connection_string(&pgSetup, connInfo);
@@ -209,14 +206,15 @@ monitor_install(const char *hostname,
 
 	/*
 	 * Ensure our extension "pgautofailvover" is available in the server
-	 * extension dir used to create the Postgres instance.
+	 * extension dir used to create the Postgres instance. We only search for
+	 * the control file to offer better diagnostics in the logs in case the
+	 * following CREATE EXTENSION fails.
 	 */
 	if (!find_extension_control_file(pgSetup.pg_ctl,
 									 PG_AUTOCTL_MONITOR_EXTENSION_NAME))
 	{
-		log_error("Failed to find extension control file for \"%s\"",
-				  PG_AUTOCTL_MONITOR_EXTENSION_NAME);
-		return false;
+		log_warn("Failed to find extension control file for \"%s\"",
+				 PG_AUTOCTL_MONITOR_EXTENSION_NAME);
 	}
 
 	if (!pgsql_create_extension(&postgres.sqlClient,
@@ -241,8 +239,6 @@ monitor_install(const char *hostname,
 			return false;
 		}
 	}
-
-	pgsql_finish(&postgres.sqlClient);
 
 	log_info("Your pg_auto_failover monitor instance is now ready on port %d.",
 			 pgSetup.pgport);

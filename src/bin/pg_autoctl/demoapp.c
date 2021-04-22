@@ -81,7 +81,12 @@ demoapp_grab_formation_uri(DemoAppOptions *options, char *pguri, size_t size,
 	/* allow lots of retries to connect to the monitor at startup */
 	pgsql_set_monitor_interactive_retry_policy(&(monitor.pgsql.retryPolicy));
 
-	if (!monitor_formation_uri(&monitor, options->formation, &ssl, pguri, size))
+	if (!monitor_formation_uri(&monitor,
+							   options->formation,
+							   "default",
+							   &ssl,
+							   pguri,
+							   size))
 	{
 		int groupsCount = 0;
 

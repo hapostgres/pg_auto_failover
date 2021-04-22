@@ -4,7 +4,7 @@ url = "https://pypi.python.org/simple"
 verify_ssl = true
 
 [packages]
-pyroute2 = "==0.5.3"
+pyroute2 = "==0.5.15"
 nose = "==1.3.7"
 psycopg2 = "==2.7.5"
 

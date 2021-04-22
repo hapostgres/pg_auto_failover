@@ -36,6 +36,7 @@ typedef struct TmuxOptions
 	int asyncNodes;             /* number of async nodes, within the total */
 	int priorities[MAX_NODES];  /* node priorities */
 	int numSync;                /* number-sync-standbys */
+	bool skipHBA;               /* do we want to use --skip-pg-hba? */
 	char layout[BUFSIZE];
 } TmuxOptions;
 
@@ -77,14 +78,16 @@ bool tmux_prepare_XDG_environment(const char *root,
 
 void tmux_pg_autoctl_create_monitor(PQExpBuffer script,
 									const char *root,
-									int pgport);
+									int pgport,
+									bool skipHBA);
 
 void tmux_pg_autoctl_create_postgres(PQExpBuffer script,
 									 const char *root,
 									 int pgport,
 									 const char *name,
 									 bool replicationQuorum,
-									 int candidatePriority);
+									 int candidatePriority,
+									 bool skipHBA);
 
 bool tmux_start_server(const char *scriptName);
 bool pg_autoctl_getpid(const char *pgdata, pid_t *pid);

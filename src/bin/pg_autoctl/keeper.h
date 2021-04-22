@@ -39,6 +39,7 @@ typedef struct Keeper
 bool keeper_init(Keeper *keeper, KeeperConfig *config);
 bool keeper_init_fsm(Keeper *keeper);
 bool keeper_register_and_init(Keeper *keeper, NodeState initialState);
+bool keeper_register_again(Keeper *keeper);
 bool keeper_load_state(Keeper *keeper);
 bool keeper_store_state(Keeper *keeper);
 bool keeper_update_state(Keeper *keeper, int node_id, int group_id, NodeState state,
@@ -54,8 +55,7 @@ bool keeper_create_self_signed_cert(Keeper *keeper);
 bool keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk);
 bool keeper_update_pg_state(Keeper *keeper);
 bool ReportPgIsRunning(Keeper *keeper);
-bool keeper_remove(Keeper *keeper, KeeperConfig *config,
-				   bool ignore_monitor_errors);
+bool keeper_remove(Keeper *keeper, KeeperConfig *config);
 bool keeper_check_monitor_extension_version(Keeper *keeper);
 bool keeper_state_as_json(Keeper *keeper, char *json, int size);
 bool keeper_update_group_hba(Keeper *keeper, NodeAddressArray *diffNodesArray);

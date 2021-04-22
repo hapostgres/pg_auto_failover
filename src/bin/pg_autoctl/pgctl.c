@@ -664,7 +664,7 @@ find_extension_control_file(const char *pg_ctl, const char *extName)
 
 	if (!find_pg_config_from_pg_ctl(pg_ctl, pg_config_path, MAXPGPATH))
 	{
-		/* errors have already been logged */
+		log_warn("Failed to find pg_config from pg_ctl at \"%s\"", pg_ctl);
 		return false;
 	}
 
@@ -691,7 +691,8 @@ find_extension_control_file(const char *pg_ctl, const char *extName)
 		join_path_components(extension_path, extension_path, extension_control_file_name);
 		if (!file_exists(extension_path))
 		{
-			log_error("Failed to find extension control file \"%s\"", extension_path);
+			log_error("Failed to find extension control file \"%s\"",
+					  extension_path);
 			free_program(&prog);
 			return false;
 		}
@@ -859,6 +860,12 @@ ensure_default_settings_file_exists(const char *configFilePath,
 {
 	PQExpBuffer defaultConfContents = createPQExpBuffer();
 
+	if (defaultConfContents == NULL)
+	{
+		log_error("Failed to allocate memory");
+		return false;
+	}
+
 	if (!prepare_guc_settings_from_pgsetup(configFilePath,
 										   defaultConfContents,
 										   settings,
@@ -866,6 +873,7 @@ ensure_default_settings_file_exists(const char *configFilePath,
 										   includeTuning))
 	{
 		/* errors have already been logged */
+		destroyPQExpBuffer(defaultConfContents);
 		return false;
 	}
 
@@ -1051,6 +1059,21 @@ prepare_guc_settings_from_pgsetup(const char *configFilePath,
 			}
 
 			appendPQExpBufferStr(config, "'\n");
+		}
+		else if (streq(setting->name, "citus.use_secondary_nodes"))
+		{
+			if (!IS_EMPTY_STRING_BUFFER(pgSetup->citusClusterName))
+			{
+				appendPQExpBuffer(config, "%s = 'always'\n", setting->name);
+			}
+		}
+		else if (streq(setting->name, "citus.cluster_name"))
+		{
+			if (!IS_EMPTY_STRING_BUFFER(pgSetup->citusClusterName))
+			{
+				appendPQExpBuffer(config, "%s = '%s'\n",
+								  setting->name, pgSetup->citusClusterName);
+			}
 		}
 		else if (setting->value != NULL &&
 				 !IS_EMPTY_STRING_BUFFER(setting->value))
@@ -2266,6 +2289,12 @@ prepare_primary_conninfo(char *primaryConnInfo,
 
 	PQExpBuffer buffer = createPQExpBuffer();
 
+	if (buffer == NULL)
+	{
+		log_error("Failed to allocate memory");
+		return false;
+	}
+
 	/* application_name shows up in pg_stat_replication on the primary */
 	appendPQExpBuffer(buffer, "application_name=%s", applicationName);
 	appendPQExpBuffer(buffer, " host=%s", primaryHost);
@@ -2286,6 +2315,7 @@ prepare_primary_conninfo(char *primaryConnInfo,
 	if (!prepare_conninfo_sslmode(buffer, sslOptions))
 	{
 		/* errors have already been logged */
+		destroyPQExpBuffer(buffer);
 		return false;
 	}
 
@@ -2314,6 +2344,7 @@ prepare_primary_conninfo(char *primaryConnInfo,
 			log_error("BUG: the escaped primary_conninfo requires %d bytes and "
 					  "pg_auto_failover only support up to %d bytes",
 					  size, primaryConnInfoSize);
+			destroyPQExpBuffer(buffer);
 			return false;
 		}
 	}

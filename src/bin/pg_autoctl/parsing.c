@@ -526,7 +526,8 @@ parse_bool(const char *value, bool *result)
 bool
 parse_pguri_info_key_vals(const char *pguri,
 						  KeyVal *overrides,
-						  URIParams *uriParameters)
+						  URIParams *uriParameters,
+						  bool checkForCompleteURI)
 {
 	char *errmsg;
 	PQconninfoOption *conninfo, *option;
@@ -619,27 +620,34 @@ parse_pguri_info_key_vals(const char *pguri,
 	 * Display an error message per missing field, and only then return false
 	 * if we're missing any one of those.
 	 */
-	if (!foundHost)
+	if (checkForCompleteURI)
 	{
-		log_error("Failed to find hostname in the pguri \"%s\"", pguri);
-	}
+		if (!foundHost)
+		{
+			log_error("Failed to find hostname in the pguri \"%s\"", pguri);
+		}
 
-	if (!foundPort)
+		if (!foundPort)
+		{
+			log_error("Failed to find port in the pguri \"%s\"", pguri);
+		}
+
+		if (!foundUser)
+		{
+			log_error("Failed to find username in the pguri \"%s\"", pguri);
+		}
+
+		if (!foundDBName)
+		{
+			log_error("Failed to find dbname in the pguri \"%s\"", pguri);
+		}
+
+		return foundHost && foundPort && foundUser && foundDBName;
+	}
+	else
 	{
-		log_error("Failed to find port in the pguri \"%s\"", pguri);
+		return true;
 	}
-
-	if (!foundUser)
-	{
-		log_error("Failed to find username in the pguri \"%s\"", pguri);
-	}
-
-	if (!foundDBName)
-	{
-		log_error("Failed to find dbname in the pguri \"%s\"", pguri);
-	}
-
-	return foundHost && foundPort && foundUser && foundDBName;
 }
 
 
@@ -699,8 +707,13 @@ parse_pguri_ssl_settings(const char *pguri, SSLOptions *ssl)
 	URIParams params = { 0 };
 	KeyVal overrides = { 0 };
 
+	bool checkForCompleteURI = true;
+
 	/* initialize SSL Params values */
-	if (!parse_pguri_info_key_vals(pguri, &overrides, &params))
+	if (!parse_pguri_info_key_vals(pguri,
+								   &overrides,
+								   &params,
+								   checkForCompleteURI))
 	{
 		/* errors have already been logged */
 		return false;
@@ -940,6 +953,81 @@ parseNodesArray(const char *nodesJSON,
 			return false;
 		}
 	}
+
+	return true;
+}
+
+
+/*
+ * uri_contains_password takes a Postgres connection string and checks to see if it contains a parameter
+ * called password. Returns true if a password keyword is present in the connection string.
+ */
+static bool
+uri_contains_password(const char *pguri)
+{
+	char *errmsg;
+	PQconninfoOption *conninfo, *option;
+
+	conninfo = PQconninfoParse(pguri, &errmsg);
+	if (conninfo == NULL)
+	{
+		log_error("Failed to parse pguri: %s", errmsg);
+
+		PQfreemem(errmsg);
+		return false;
+	}
+
+	/*
+	 * Look for a populated password connection parameter
+	 */
+	for (option = conninfo; option->keyword != NULL; option++)
+	{
+		if (
+			strcmp(option->keyword, "password") == 0 &&
+			option->val != NULL &&
+			!IS_EMPTY_STRING_BUFFER(option->val)
+			)
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+
+/*
+ * parse_and_scrub_connection_string takes a Postgres connection string and
+ * populates scrubbedPguri with the password replaced with **** for logging.
+ * The scrubbedPguri parameter should point to a memory area that has been
+ * allocated by the caller and has at least MAXCONNINFO bytes.
+ */
+bool
+parse_and_scrub_connection_string(const char *pguri, char *scrubbedPguri)
+{
+	URIParams uriParams = { 0 };
+	KeyVal overrides = { 0 };
+
+	if (uri_contains_password(pguri))
+	{
+		overrides = (KeyVal) {
+			.count = 1,
+			.keywords = { "password" },
+			.values = { "****" }
+		};
+	}
+
+	bool checkForCompleteURI = false;
+
+	if (!parse_pguri_info_key_vals(pguri,
+								   &overrides,
+								   &uriParams,
+								   checkForCompleteURI))
+	{
+		return false;
+	}
+
+	buildPostgresURIfromPieces(&uriParams, scrubbedPguri);
 
 	return true;
 }

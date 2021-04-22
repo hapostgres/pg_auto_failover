@@ -21,6 +21,7 @@
 typedef struct Monitor
 {
 	PGSQL pgsql;
+	PGSQL notificationClient;
 	MonitorConfig config;
 } Monitor;
 
@@ -92,11 +93,13 @@ bool monitor_register_node(Monitor *monitor,
 						   int port,
 						   uint64_t system_identifier,
 						   char *dbname,
+						   int desiredNodeId,
 						   int desiredGroupId,
 						   NodeState initialState,
 						   PgInstanceKind kind,
 						   int candidatePriority,
 						   bool quorum,
+						   char *citusClusterName,
 						   bool *mayRetry,
 						   MonitorAssignedState *assignedState);
 bool monitor_node_active(Monitor *monitor,
@@ -156,6 +159,7 @@ bool monitor_print_formation_settings_as_json(Monitor *monitor, char *formation)
 
 bool monitor_formation_uri(Monitor *monitor,
 						   const char *formation,
+						   const char *citusClusterName,
 						   const SSLOptions *ssl,
 						   char *connectionString,
 						   size_t size);

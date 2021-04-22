@@ -27,7 +27,11 @@
 #define ERRCODE_DUPLICATE_OBJECT "42710"
 #define ERRCODE_DUPLICATE_DATABASE "42P04"
 
-static char * connectionTypeToString(ConnectionType connectionType);
+#define ERRCODE_INVALID_OBJECT_DEFINITION "42P17"
+#define ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE "55000"
+#define ERRCODE_OBJECT_IN_USE "55006"
+
+static char * ConnectionTypeToString(ConnectionType connectionType);
 static void log_connection_error(PGconn *connection, int logLevel);
 static void pgAutoCtlDefaultNoticeProcessor(void *arg, const char *message);
 static void pgAutoCtlDebugNoticeProcessor(void *arg, const char *message);
@@ -360,39 +364,17 @@ pgsql_retry_policy_expired(ConnectionRetryPolicy *retryPolicy)
 
 
 /*
- * Finish a PGSQL client connection.
- */
-void
-pgsql_finish(PGSQL *pgsql)
-{
-	if (pgsql->connection != NULL)
-	{
-		log_debug("Disconnecting from \"%s\"", pgsql->connectionString);
-		PQfinish(pgsql->connection);
-		pgsql->connection = NULL;
-
-		/*
-		 * When we fail to connect, on the way out we call pgsql_finish to
-		 * reset the connection to NULL. We still want the callers to be able
-		 * to inquire about our connection status, so refrain to reset the
-		 * status.
-		 */
-	}
-}
-
-
-/*
  * connectionTypeToString transforms a connectionType in a string to be used in
  * a user facing message.
  */
 static char *
-connectionTypeToString(ConnectionType connectionType)
+ConnectionTypeToString(ConnectionType connectionType)
 {
 	switch (connectionType)
 	{
 		case PGSQL_CONN_LOCAL:
 		{
-			return "local Postgres";
+			return "local";
 		}
 
 		case PGSQL_CONN_MONITOR:
@@ -405,11 +387,54 @@ connectionTypeToString(ConnectionType connectionType)
 			return "coordinator";
 		}
 
+		case PGSQL_CONN_UPSTREAM:
+		{
+			return "upstream";
+		}
+
 		default:
 		{
 			return "unknown connection type";
 		}
 	}
+}
+
+
+/*
+ * Finish a PGSQL client connection.
+ */
+void
+pgsql_finish(PGSQL *pgsql)
+{
+	if (pgsql->connection != NULL)
+	{
+		char scrubbedConnectionString[MAXCONNINFO] = { 0 };
+
+		if (!parse_and_scrub_connection_string(pgsql->connectionString,
+											   scrubbedConnectionString))
+		{
+			log_debug("Failed to scrub password from connection string");
+
+			strlcpy(scrubbedConnectionString,
+					pgsql->connectionString,
+					sizeof(scrubbedConnectionString));
+		}
+
+		log_debug("Disconnecting from [%s] \"%s\"",
+				  ConnectionTypeToString(pgsql->connectionType),
+				  scrubbedConnectionString);
+		PQfinish(pgsql->connection);
+		pgsql->connection = NULL;
+
+		/*
+		 * When we fail to connect, on the way out we call pgsql_finish to
+		 * reset the connection to NULL. We still want the callers to be able
+		 * to inquire about our connection status, so refrain to reset the
+		 * status.
+		 */
+	}
+
+	pgsql->connectionStatementType = PGSQL_CONNECTION_SINGLE_STATEMENT;
 }
 
 
@@ -457,10 +482,24 @@ pgsql_open_connection(PGSQL *pgsql)
 	/* we might be connected already */
 	if (pgsql->connection != NULL)
 	{
+		if (pgsql->connectionStatementType != PGSQL_CONNECTION_MULTI_STATEMENT)
+		{
+			log_error("BUG: requested to open an already open connection in "
+					  "non PGSQL_CONNECTION_MULTI_STATEMENT mode");
+			pgsql_finish(pgsql);
+			return NULL;
+		}
 		return pgsql->connection;
 	}
 
-	log_debug("Connecting to \"%s\"", pgsql->connectionString);
+	char scrubbedConnectionString[MAXCONNINFO] = { 0 };
+
+	(void) parse_and_scrub_connection_string(pgsql->connectionString,
+											 scrubbedConnectionString);
+
+	log_debug("Connecting to [%s] \"%s\"",
+			  ConnectionTypeToString(pgsql->connectionType),
+			  scrubbedConnectionString);
 
 	/* we implement our own retry strategy */
 	setenv("PGCONNECT_TIMEOUT", POSTGRES_CONNECT_TIMEOUT, 1);
@@ -496,7 +535,7 @@ pgsql_open_connection(PGSQL *pgsql)
 
 			log_error("Failed to connect to %s database at \"%s\", "
 					  "see above for details",
-					  connectionTypeToString(pgsql->connectionType),
+					  ConnectionTypeToString(pgsql->connectionType),
 					  pgsql->connectionString);
 
 			pgsql->status = PG_CONNECTION_BAD;
@@ -551,8 +590,13 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 
 	INSTR_TIME_SET_ZERO(lastWarningTime);
 
+	char scrubbedConnectionString[MAXCONNINFO] = { 0 };
+
+	(void) parse_and_scrub_connection_string(pgsql->connectionString,
+											 scrubbedConnectionString);
+
 	log_warn("Failed to connect to \"%s\", retrying until "
-			 "the server is ready", pgsql->connectionString);
+			 "the server is ready", scrubbedConnectionString);
 
 	/* should not happen */
 	if (pgsql->retryPolicy.maxR == 0)
@@ -579,7 +623,7 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 			log_error("Failed to connect to \"%s\" "
 					  "after %d attempts in %d ms, "
 					  "pg_autoctl stops retrying now",
-					  pgsql->connectionString,
+					  scrubbedConnectionString,
 					  pgsql->retryPolicy.attempts,
 					  (int) INSTR_TIME_GET_MILLISEC(duration));
 
@@ -597,7 +641,7 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 		(void) pg_usleep(sleep * 1000);
 
 		log_debug("PQping(%s): slept %d ms on attempt %d",
-				  pgsql->connectionString,
+				  scrubbedConnectionString,
 				  pgsql->retryPolicy.sleepTime,
 				  pgsql->retryPolicy.attempts);
 
@@ -637,7 +681,7 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 
 					log_info("Successfully connected to \"%s\" "
 							 "after %d attempts in %d ms.",
-							 pgsql->connectionString,
+							 scrubbedConnectionString,
 							 pgsql->retryPolicy.attempts,
 							 (int) INSTR_TIME_GET_MILLISEC(duration));
 				}
@@ -691,7 +735,7 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 						"The server at \"%s\" is running but is in a state "
 						"that disallows connections (startup, shutdown, or "
 						"crash recovery).",
-						pgsql->connectionString);
+						scrubbedConnectionString);
 				}
 
 				break;
@@ -734,7 +778,7 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 						"number), or that there is a network connectivity "
 						"problem (for example, a firewall blocking the "
 						"connection request).",
-						pgsql->connectionString,
+						scrubbedConnectionString,
 						pgsql->retryPolicy.attempts,
 						(int) INSTR_TIME_GET_MILLISEC(durationSinceStart));
 				}
@@ -754,7 +798,7 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 				lastWarningMessage = PQPING_NO_ATTEMPT;
 				log_debug("Failed to ping server \"%s\" because of "
 						  "client-side problems (no attempt were made)",
-						  pgsql->connectionString);
+						  scrubbedConnectionString);
 				break;
 			}
 		}
@@ -815,6 +859,101 @@ pgAutoCtlDebugNoticeProcessor(void *arg, const char *message)
 	}
 
 	free(m);
+}
+
+
+/*
+ * pgsql_begin is responsible for opening a mutli statement connection and
+ * opening a transaction block by issuing a 'BEGIN' query.
+ */
+bool
+pgsql_begin(PGSQL *pgsql)
+{
+	PGconn *connection;
+
+	pgsql->connectionStatementType = PGSQL_CONNECTION_MULTI_STATEMENT;
+	connection = pgsql_open_connection(pgsql);
+	if (connection == NULL)
+	{
+		/* error message was logged in pgsql_open_connection */
+		return false;
+	}
+
+	return pgsql_execute(pgsql, "BEGIN");
+}
+
+
+/*
+ * pgsql_rollback is responsible for issuing a 'ROLLBACK' query to an already
+ * opened transaction, usually via a previous pgsql_begin() command.
+ *
+ * It closes the connection but leaves the error contents, if any, for the user
+ * to examine should it is wished for.
+ */
+bool
+pgsql_rollback(PGSQL *pgsql)
+{
+	bool result;
+
+	if (pgsql->connectionStatementType != PGSQL_CONNECTION_MULTI_STATEMENT ||
+		pgsql->connection == NULL)
+	{
+		log_error("BUG: call to pgsql_rollback without holding an open "
+				  "multi statement connection");
+		return false;
+	}
+
+	result = pgsql_execute(pgsql, "ROLLBACK");
+
+	/*
+	 * Connection might be be closed during the pgsql_execute(), notably in case
+	 * of error. Be explicit and close it regardless though.
+	 */
+	if (pgsql->connection)
+	{
+		pgsql_finish(pgsql);
+	}
+
+	return result;
+}
+
+
+/*
+ * pgsql_commit is responsible for issuing a 'COMMIT' query to an already
+ * opened transaction, usually via a previous pgsql_begin() command.
+ *
+ * It closes the connection but leaves the error contents, if any, for the user
+ * to examine should it is wished for.
+ */
+bool
+pgsql_commit(PGSQL *pgsql)
+{
+	bool result;
+
+	if (pgsql->connectionStatementType != PGSQL_CONNECTION_MULTI_STATEMENT ||
+		pgsql->connection == NULL)
+	{
+		log_error("BUG: call to pgsql_commit() without holding an open "
+				  "multi statement connection");
+		if (pgsql->connection)
+		{
+			pgsql_finish(pgsql);
+		}
+		return false;
+	}
+
+	result = pgsql_execute(pgsql, "COMMIT");
+
+	/*
+	 * Connection might be be closed during the pgsql_execute(), notably in case
+	 * of error. Be explicit and close it regardless though.
+	 */
+	if (pgsql->connection)
+	{
+		pgsql_finish(pgsql);
+	}
+
+	return result;
 }
 
 
@@ -920,8 +1059,24 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 			log_error("%s %s", prefix, errorLines[lineNumber]);
 		}
 
-		log_error("SQL query: %s", sql);
-		log_error("SQL params: %s", debugParameters);
+		/*
+		 * The monitor uses those error codes in situations we know how to
+		 * handle, so if we have one of those, it's not a client-side error
+		 * with a badly formed SQL query etc.
+		 */
+		if (pgsql->connectionType == PGSQL_CONN_MONITOR &&
+			!(strcmp(sqlstate, ERRCODE_INVALID_OBJECT_DEFINITION) == 0 ||
+			  strcmp(sqlstate, ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE) == 0 ||
+			  strcmp(sqlstate, ERRCODE_OBJECT_IN_USE)))
+		{
+			log_error("SQL query: %s", sql);
+			log_error("SQL params: %s", debugParameters);
+		}
+		else
+		{
+			log_debug("SQL query: %s", sql);
+			log_debug("SQL params: %s", debugParameters);
+		}
 
 		/* now stash away the SQL STATE if any */
 		if (context && sqlstate)
@@ -952,6 +1107,11 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 
 	PQclear(result);
 	clear_results(pgsql);
+	if (pgsql->connectionStatementType == PGSQL_CONNECTION_SINGLE_STATEMENT)
+	{
+		PQfinish(pgsql->connection);
+		pgsql->connection = NULL;
+	}
 
 	return true;
 }
@@ -1432,6 +1592,7 @@ pgsql_replication_slot_create_and_drop(PGSQL *pgsql, NodeAddressArray *nodeArray
 		"  WHERE nodes.slot_name IS NULL "
 		"    AND (   slot_name ~ '" REPLICATION_SLOT_NAME_PATTERN "' "
 		"         OR slot_name ~ '" REPLICATION_SLOT_NAME_DEFAULT "' )"
+		"    AND not active"
 		"    AND slot_type = 'physical'"
 		"), \n"
 		"created as ("
@@ -1494,6 +1655,7 @@ pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray)
 		"   FROM pg_replication_slots pgrs LEFT JOIN nodes USING(slot_name) "
 		"  WHERE nodes.slot_name IS NULL "
 		"    AND slot_name ~ '" REPLICATION_SLOT_NAME_PATTERN "' "
+		"    AND not active"
 		"    AND slot_type = 'physical'"
 		"), \n"
 		"advanced as ("
@@ -1584,22 +1746,6 @@ parseReplicationSlotMaintain(void *ctx, PGresult *result)
 	}
 
 	context->parsedOK = true;
-}
-
-
-/*
- * pgsql_enable_synchronous_replication enables synchronous replication
- * in Postgres such that all writes block post-commit until they are
- * replicated.
- */
-bool
-pgsql_enable_synchronous_replication(PGSQL *pgsql)
-{
-	GUC setting = { "synchronous_standby_names", "'*'" };
-
-	log_info("Enabling synchronous replication");
-
-	return pgsql_alter_system_set(pgsql, setting);
 }
 
 
@@ -1752,6 +1898,8 @@ pgsql_reload_conf(PGSQL *pgsql)
 {
 	char *sql = "SELECT pg_reload_conf()";
 
+	log_info("Reloading Postgres configuration and HBA rules");
+
 	return pgsql_execute(pgsql, sql);
 }
 
@@ -1903,6 +2051,10 @@ pgsql_create_database(PGSQL *pgsql, const char *dbname, const char *owner)
 
 	PQclear(result);
 	clear_results(pgsql);
+	if (pgsql->connectionStatementType == PGSQL_CONNECTION_SINGLE_STATEMENT)
+	{
+		pgsql_finish(pgsql);
+	}
 
 	return true;
 }
@@ -1961,6 +2113,10 @@ pgsql_create_extension(PGSQL *pgsql, const char *name)
 
 	PQclear(result);
 	clear_results(pgsql);
+	if (pgsql->connectionStatementType == PGSQL_CONNECTION_SINGLE_STATEMENT)
+	{
+		pgsql_finish(pgsql);
+	}
 
 	return true;
 }
@@ -2092,6 +2248,10 @@ pgsql_create_user(PGSQL *pgsql, const char *userName, const char *password,
 
 	PQclear(result);
 	clear_results(pgsql);
+	if (pgsql->connectionStatementType == PGSQL_CONNECTION_SINGLE_STATEMENT)
+	{
+		pgsql_finish(pgsql);
+	}
 
 	/* restore the normal notice message processing, if needed. */
 	PQsetNoticeProcessor(connection, previousNoticeProcessor, NULL);
@@ -2724,6 +2884,12 @@ pgsql_listen(PGSQL *pgsql, char *channels[])
 	PGresult *result = NULL;
 	char sql[BUFSIZE];
 
+	/*
+	 * mark the connection as multi statement since it is going to be used by
+	 * for processing notifications
+	 */
+	pgsql->connectionStatementType = PGSQL_CONNECTION_MULTI_STATEMENT;
+
 	/* open a connection upfront since it is needed by PQescape functions */
 	PGconn *connection = pgsql_open_connection(pgsql);
 	if (connection == NULL)
@@ -2763,6 +2929,34 @@ pgsql_listen(PGSQL *pgsql, char *channels[])
 
 		PQclear(result);
 		clear_results(pgsql);
+	}
+
+	return true;
+}
+
+
+/*
+ * Preapre a multi statement connection which can later be used in wait for
+ * notification functions.
+ *
+ * Contrarry to pgsql_listen, this function, only prepares the connection and it
+ * is the user's responsibility to define which channels to listen to.
+ */
+bool
+pgsql_prepare_to_wait(PGSQL *pgsql)
+{
+	/*
+	 * mark the connection as multi statement since it is going to be used by
+	 * for processing notifications
+	 */
+	pgsql->connectionStatementType = PGSQL_CONNECTION_MULTI_STATEMENT;
+
+	/* open a connection upfront since it is needed by PQescape functions */
+	PGconn *connection = pgsql_open_connection(pgsql);
+	if (connection == NULL)
+	{
+		/* error message was logged in pgsql_open_connection */
+		return false;
 	}
 
 	return true;

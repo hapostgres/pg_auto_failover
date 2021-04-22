@@ -176,6 +176,15 @@
 							&(config->postgresql_restart_failure_max_retries), \
 							POSTGRESQL_FAILS_TO_START_RETRIES)
 
+#define OPTION_CITUS_ROLE(config) \
+	make_strbuf_option_default("citus", "role", NULL, false, NAMEDATALEN, \
+							   config->citusRoleStr, DEFAULT_CITUS_ROLE)
+
+#define OPTION_CITUS_CLUSTER_NAME(config) \
+	make_strbuf_option("citus", "cluster_name", "citus-cluster", \
+					   false, NAMEDATALEN, config->pgSetup.citusClusterName)
+
+
 #define SET_INI_OPTIONS_ARRAY(config) \
 	{ \
 		OPTION_AUTOCTL_ROLE(config), \
@@ -195,6 +204,7 @@
 		OPTION_POSTGRESQL_PROXY_PORT(config), \
 		OPTION_POSTGRESQL_LISTEN_ADDRESSES(config), \
 		OPTION_POSTGRESQL_AUTH_METHOD(config), \
+		OPTION_POSTGRESQL_HBA_LEVEL(config), \
 		OPTION_SSL_ACTIVE(config), \
 		OPTION_SSL_MODE(config), \
 		OPTION_SSL_CA_FILE(config), \
@@ -209,10 +219,14 @@
 		OPTION_TIMEOUT_PREPARE_PROMOTION_WALRECEIVER(config), \
 		OPTION_TIMEOUT_POSTGRESQL_RESTART_FAILURE_TIMEOUT(config), \
 		OPTION_TIMEOUT_POSTGRESQL_RESTART_FAILURE_MAX_RETRIES(config), \
+ \
+		OPTION_CITUS_ROLE(config), \
+		OPTION_CITUS_CLUSTER_NAME(config), \
 		INI_OPTION_LAST \
 	}
 
 static bool keeper_config_init_nodekind(KeeperConfig *config);
+static bool keeper_config_init_hbalevel(KeeperConfig *config);
 static bool keeper_config_set_backup_directory(KeeperConfig *config, int nodeId);
 
 
@@ -285,6 +299,13 @@ keeper_config_init(KeeperConfig *config,
 	if (!keeper_config_init_nodekind(config))
 	{
 		/* errors have already been logged. */
+		log_error("Please review your setup options per above messages");
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (!keeper_config_init_hbalevel(config))
+	{
+		log_error("Failed to initialize postgresql.hba_level");
 		log_error("Please review your setup options per above messages");
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
@@ -405,9 +426,10 @@ keeper_config_read_file_skip_pgsetup(KeeperConfig *config,
 	/*
 	 * Turn the configuration string for hbaLevel into our enum value.
 	 */
-	if (IS_EMPTY_STRING_BUFFER(config->pgSetup.hbaLevelStr))
+	if (!keeper_config_init_hbalevel(config))
 	{
-		strlcpy(config->pgSetup.hbaLevelStr, "minimal", NAMEDATALEN);
+		log_error("Failed to initialize postgresql.hba_level");
+		return false;
 	}
 
 	/* set the ENUM value for hbaLevel */
@@ -426,6 +448,29 @@ keeper_config_read_file_skip_pgsetup(KeeperConfig *config,
 	/* set the ENUM value for sslMode */
 	config->pgSetup.ssl.sslMode =
 		pgsetup_parse_sslmode(config->pgSetup.ssl.sslModeStr);
+
+	/* now when that is provided, read the Citus Role and convert to enum */
+	if (IS_EMPTY_STRING_BUFFER(config->citusRoleStr))
+	{
+		config->citusRole = CITUS_ROLE_PRIMARY;
+	}
+	else
+	{
+		if (strcmp(config->citusRoleStr, "primary") == 0)
+		{
+			config->citusRole = CITUS_ROLE_PRIMARY;
+		}
+		else if (strcmp(config->citusRoleStr, "secondary") == 0)
+		{
+			config->citusRole = CITUS_ROLE_SECONDARY;
+		}
+		else
+		{
+			log_error("Failed to parse citus.role \"%s\": expected either "
+					  "\"primary\" or \"secondary\"", config->citusRoleStr);
+			return false;
+		}
+	}
 
 	if (!keeper_config_init_nodekind(config))
 	{
@@ -720,6 +765,30 @@ keeper_config_init_nodekind(KeeperConfig *config)
 			return false;
 		}
 	}
+	return true;
+}
+
+
+/*
+ * keeper_config_init_hbalevel initializes the config->pgSetup.hbaLevel and
+ * hbaLevelStr when no command line option switch has been used that places a
+ * value (see --auth, --skip-pg-hba, and --pg-hba-lan).
+ */
+static bool
+keeper_config_init_hbalevel(KeeperConfig *config)
+{
+	/*
+	 * Turn the configuration string for hbaLevel into our enum value.
+	 */
+	if (IS_EMPTY_STRING_BUFFER(config->pgSetup.hbaLevelStr))
+	{
+		strlcpy(config->pgSetup.hbaLevelStr, "minimal", NAMEDATALEN);
+	}
+
+	/* set the ENUM value for hbaLevel */
+	config->pgSetup.hbaLevel =
+		pgsetup_parse_hba_level(config->pgSetup.hbaLevelStr);
+
 	return true;
 }
 

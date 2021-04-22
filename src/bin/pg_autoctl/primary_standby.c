@@ -86,6 +86,8 @@ GUC citus_default_settings_pre_13[] = {
 	DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER_PRE_13,
 	{ "shared_preload_libraries", "'citus,pg_stat_statements'" },
 	{ "citus.node_conninfo", "'sslmode=prefer'" },
+	{ "citus.cluster_name", "'default'" },
+	{ "citus.use_secondary_nodes", "'never'" },
 	{ NULL, NULL }
 };
 
@@ -93,6 +95,8 @@ GUC citus_default_settings_13[] = {
 	DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER_13,
 	{ "shared_preload_libraries", "'citus,pg_stat_statements'" },
 	{ "citus.node_conninfo", "'sslmode=prefer'" },
+	{ "citus.cluster_name", "'default'" },
+	{ "citus.use_secondary_nodes", "'never'" },
 	{ NULL, NULL }
 };
 
@@ -565,24 +569,6 @@ primary_set_synchronous_standby_names(LocalPostgresServer *postgres)
 
 
 /*
- * primary_enable_synchronous_replication enables synchronous replication
- * on a primary postgres node.
- */
-bool
-primary_enable_synchronous_replication(LocalPostgresServer *postgres)
-{
-	PGSQL *pgsql = &(postgres->sqlClient);
-
-	log_trace("primary_enable_synchronous_replication");
-
-	bool result = pgsql_enable_synchronous_replication(pgsql);
-
-	pgsql_finish(pgsql);
-	return result;
-}
-
-
-/*
  * primary_disable_synchronous_replication disables synchronous replication
  * on a primary postgres node.
  */
@@ -892,6 +878,15 @@ standby_init_database(LocalPostgresServer *postgres,
 
 		if (hasReplicationSlot)
 		{
+			/* first, make sure we can connect with "replication" */
+			if (!pgctl_identify_system(upstream))
+			{
+				log_error("Failed to connect to the primary with a replication "
+						  "connection string. See above for details");
+				return false;
+			}
+
+			/* now pg_basebackup from our upstream node */
 			if (!pg_basebackup(pgSetup->pgdata, pgSetup->pg_ctl, upstream))
 			{
 				return false;
@@ -992,6 +987,19 @@ primary_rewind_to_standby(LocalPostgresServer *postgres)
 	if (!ensure_postgres_service_is_stopped(postgres))
 	{
 		log_error("Failed to stop postgres to do rewind");
+		return false;
+	}
+
+	/* first, make sure we can connect with "replication" */
+	if (!pgctl_identify_system(replicationSource))
+	{
+		log_error("Failed to connect to the primary node %d \"%s\" (%s:%d) "
+				  "with a replication connection string. "
+				  "See above for details",
+				  primaryNode->nodeId,
+				  primaryNode->name,
+				  primaryNode->host,
+				  primaryNode->port);
 		return false;
 	}
 

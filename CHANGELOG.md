@@ -1,3 +1,36 @@
+### pg_auto_failover v1.5.1 (March 24, 2021) ###
+
+This release contains monitor schema changes, so the monitor extension gets
+a version bump from 1.4 to 1.5, and this is the first release in the 1.5
+series.
+
+#### Added
+* Add support for systemd ExecReload option. [#623]
+* Implement online enable/disable monitor support. [#591]
+* Add individual pages for the pg_autoctl commands. [#632]
+* Implement a demo application showing client-side reconnections. [#568]
+
+#### Changed
+
+The main change in the CLI is that `pg_autoctl show uri --monitor` does not
+display the connection string to the monitor anymore, instead it allows
+passing the URI to the monitor, same as with the other `pg_autoctl show
+commands`. To display the monitor connection string, use `pg_autoctl show
+uri --formation monitor` now.
+
+* Allow using --monitor uri for a lot of commands [#576]
+* Review pg_autoctl show state output, and docs. [#617]
+* Avoid using synchronous standby name wildcard [#629]
+
+#### Fixed
+* Fix supervisor messages about exited services. [#589]
+* Fix memory management issue in monitor_register_node. [#590]
+* Fix a buffer overlap instruction that macOs libc fails to process. [#610]
+* Add pg_logging_init for PG version 12 and above [#612]
+* Fix skip hba propagation [#588, #609]
+* Improve DNS lookup error handling. [#615]
+* Do not leak psycopg2 connections during testing [#628]
+
 ### pg_auto_failover v1.4.2 (February 3, 2021) ###
 
 This is a bugfix release for v1.4 series
