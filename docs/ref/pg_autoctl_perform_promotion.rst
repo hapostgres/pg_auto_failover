@@ -16,6 +16,7 @@ pg_auto_promotion monitor and targets given node::
   --pgdata      path to data directory
   --formation   formation to target, defaults to 'default'
   --name        node name to target, defaults to current node
+  --wait        how many seconds to wait, default to 60
 
 Description
 -----------
@@ -50,6 +51,13 @@ Options
 --name
 
   Name of the node that should be elected as the new primary node.
+
+--wait
+
+  How many seconds to wait for notifications about the promotion. The
+  command stops when the promotion is finished (a node is primary), or when
+  the timeout has elapsed, whichever comes first. The value 0 (zero)
+  disables the timeout and allows the command to wait forever.
 
 Examples
 --------
