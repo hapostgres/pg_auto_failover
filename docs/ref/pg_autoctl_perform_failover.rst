@@ -16,6 +16,7 @@ pg_auto_failover monitor::
   --pgdata      path to data directory
   --formation   formation to target, defaults to 'default'
   --group       group to target, defaults to 0
+  --wait        how many seconds to wait, default to 60
 
 Description
 -----------
@@ -51,6 +52,13 @@ Options
 
   Postgres group to target for the operation. Defaults to ``0``, only Citus
   formations may have more than one group.
+
+--wait
+
+  How many seconds to wait for notifications about the promotion. The
+  command stops when the promotion is finished (a node is primary), or when
+  the timeout has elapsed, whichever comes first. The value 0 (zero)
+  disables the timeout and allows the command to wait forever.
 
 Examples
 --------

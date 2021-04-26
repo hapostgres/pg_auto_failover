@@ -3741,7 +3741,8 @@ monitor_wait_until_some_node_reported_state(Monitor *monitor,
 											const char *formation,
 											int groupId,
 											PgInstanceKind nodeKind,
-											NodeState targetState)
+											NodeState targetState,
+											int timeout)
 {
 	PGconn *connection = monitor->notificationClient.connection;
 
@@ -3767,22 +3768,37 @@ monitor_wait_until_some_node_reported_state(Monitor *monitor,
 		return false;
 	}
 
+	/* when timeout <= 0 we just never stop waiting */
+	if (timeout > 0)
+	{
+		log_info("Waiting %d secs for a notification with "
+				 "state \"%s\" in formation \"%s\" and group %d",
+				 timeout, NodeStateToString(targetState), formation, groupId);
+	}
+
 	(void) monitor_report_state_print_headers(monitor, formation, groupId,
 											  nodeKind, &nodesArray, &headers);
 
 	while (!context.failoverIsDone)
 	{
-		uint64_t now = time(NULL);
-
-		if ((now - start) > PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT)
+		/* when timeout <= 0 we just never stop waiting */
+		if (timeout > 0)
 		{
-			log_error("Failed to receive monitor's notifications");
-			break;
+			uint64_t now = time(NULL);
+
+			if ((now - start) > timeout)
+			{
+				log_error("Failed to receive monitor's notifications");
+				break;
+			}
 		}
+
+		int thisLoopTimeout =
+			timeout > 0 ? timeout : PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT;
 
 		if (!monitor_process_notifications(
 				monitor,
-				PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT * 1000,
+				thisLoopTimeout * 1000,
 				channels,
 				(void *) &context,
 				&monitor_check_report_state))

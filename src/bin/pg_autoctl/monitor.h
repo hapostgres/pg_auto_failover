@@ -195,7 +195,8 @@ bool monitor_wait_until_some_node_reported_state(Monitor *monitor,
 												 const char *formation,
 												 int groupId,
 												 PgInstanceKind nodeKind,
-												 NodeState targetState);
+												 NodeState targetState,
+												 int timeout);
 bool monitor_wait_until_node_reported_state(Monitor *monitor,
 											const char *formation,
 											int groupId,
