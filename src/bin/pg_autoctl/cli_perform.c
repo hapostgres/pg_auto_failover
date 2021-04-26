@@ -101,6 +101,8 @@ cli_perform_failover_getopts(int argc, char **argv)
 	options.prepare_promotion_walreceiver = -1;
 	options.postgresql_restart_failure_timeout = -1;
 	options.postgresql_restart_failure_max_retries = -1;
+	options.listen_notifications_timeout =
+		PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT;
 
 	/* do not set a default formation, it should be found in the config file */
 
@@ -336,6 +338,8 @@ cli_perform_promotion_getopts(int argc, char **argv)
 	options.prepare_promotion_walreceiver = -1;
 	options.postgresql_restart_failure_timeout = -1;
 	options.postgresql_restart_failure_max_retries = -1;
+	options.listen_notifications_timeout =
+		PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT;
 
 	optind = 0;
 
