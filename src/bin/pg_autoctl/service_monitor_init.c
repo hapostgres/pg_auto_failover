@@ -48,17 +48,19 @@ service_monitor_init(Monitor *monitor)
 
 	Service subprocesses[] = {
 		{
-			SERVICE_NAME_POSTGRES,
-			RP_PERMANENT,
-			-1,
-			&service_postgres_ctl_start
+			.name = SERVICE_NAME_POSTGRES,
+			.policy = RP_PERMANENT,
+			.leader = false,
+			.pid = -1,
+			.startFunction = &service_postgres_ctl_start
 		},
 		{
-			SERVICE_NAME_MONITOR_INIT,
-			createAndRun ? RP_PERMANENT : RP_TRANSIENT,
-			-1,
-			&service_monitor_init_start,
-			(void *) monitor
+			.name = SERVICE_NAME_MONITOR_INIT,
+			.policy = createAndRun ? RP_PERMANENT : RP_TRANSIENT,
+			.leader = true,
+			.pid = -1,
+			.startFunction = &service_monitor_init_start,
+			.context = (void *) monitor
 		}
 	};
 

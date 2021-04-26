@@ -71,6 +71,21 @@ typedef enum
 
 
 /*
+ * The keeper service state is registered in the state file so that at startup
+ * we can take athe right action(s), such as disabling maintenance if the
+ * shutdown sequence included enabling maintenance for the node.
+ */
+typedef enum
+{
+	SERVICE_STARTUP = 0,
+	SERVICE_SHUTDOWNED,
+	SERVICE_SHUTDOWNING,
+	SERVICE_SHUTDOWN_IN_MAINTENANCE,
+	SERVICE_RUNNING,
+} KeeperServiceState;
+
+
+/*
  * The Keeper's state is composed of information from three different sources:
  *  - the PostgreSQL instance we keep,
  *  - the pg_auto_failover Monitor, via the pgautofailover.node_active protocol,
@@ -119,7 +134,7 @@ typedef struct
 	NodeState current_role;
 	uint64_t last_secondary_contact;
 	int64_t xlog_lag;
-	int keeper_is_paused;
+	int service_state;
 } KeeperStateData;
 
 _Static_assert(sizeof(KeeperStateData) < PG_AUTOCTL_KEEPER_STATE_FILE_SIZE,
@@ -212,6 +227,8 @@ bool keeper_state_write(KeeperStateData *keeperState, const char *filename);
 void log_keeper_state(KeeperStateData *keeperState);
 void print_keeper_state(KeeperStateData *keeperState, FILE *fp);
 bool keeperStateAsJSON(KeeperStateData *keeperState, JSON_Value *js);
+
+char * ServiceStateToString(KeeperServiceState serviceState);
 
 void print_keeper_init_state(KeeperStateInit *initState, FILE *stream);
 char * PreInitPostgreInstanceStateToString(PreInitPostgreInstanceState pgInitState);

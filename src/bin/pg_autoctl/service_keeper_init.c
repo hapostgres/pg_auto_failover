@@ -46,17 +46,19 @@ service_keeper_init(Keeper *keeper)
 
 	Service subprocesses[] = {
 		{
-			SERVICE_NAME_POSTGRES,
-			RP_PERMANENT,
-			-1,
-			&service_postgres_ctl_start,
+			.name = SERVICE_NAME_POSTGRES,
+			.policy = RP_PERMANENT,
+			.leader = false,
+			.pid = -1,
+			.startFunction = &service_postgres_ctl_start,
 		},
 		{
-			SERVICE_NAME_KEEPER_INIT,
-			createAndRun ? RP_PERMANENT : RP_TRANSIENT,
-			-1,
-			&service_keeper_init_start,
-			(void *) keeper
+			.name = SERVICE_NAME_KEEPER_INIT,
+			.policy = createAndRun ? RP_PERMANENT : RP_TRANSIENT,
+			.leader = true,
+			.pid = -1,
+			.startFunction = &service_keeper_init_start,
+			.context = (void *) keeper
 		}
 	};
 

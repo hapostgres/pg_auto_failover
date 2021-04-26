@@ -368,10 +368,13 @@ cli_do_service_pgcontroller(int argc, char **argv)
 	LocalPostgresServer postgres = { 0 };
 
 	Service subprocesses[] = {
-		"postgres",
-		RP_PERMANENT,
-		-1,
-		&service_postgres_ctl_start
+		{
+			.name = "postgres",
+			.policy = RP_PERMANENT,
+			.leader = false,
+			.pid = -1,
+			.startFunction = &service_postgres_ctl_start
+		}
 	};
 
 	int subprocessesCount = sizeof(subprocesses) / sizeof(subprocesses[0]);

@@ -34,6 +34,9 @@
 #include "signals.h"
 #include "string_utils.h"
 
+static bool supervisor_stop_previous_services(Supervisor *supervisor,
+											  int serviceIndex);
+
 static bool supervisor_init(Supervisor *supervisor);
 static SupervisorExitMode supervisor_loop(Supervisor *supervisor);
 
@@ -71,7 +74,14 @@ supervisor_start(Service services[], int serviceCount, const char *pidfile)
 	int serviceIndex = 0;
 	bool success = true;
 
-	Supervisor supervisor = { services, serviceCount, { 0 }, -1 };
+	Supervisor supervisor = { 0 };
+
+	supervisor = (Supervisor) {
+		.services = services,
+		.serviceCount = serviceCount,
+		.pidfile = { 0 },
+		.pid = -1
+	};
 
 	/* copy the pidfile over to our supervisor structure */
 	strlcpy(supervisor.pidfile, pidfile, MAXPGPATH);
@@ -99,7 +109,30 @@ supervisor_start(Service services[], int serviceCount, const char *pidfile)
 
 		log_debug("Starting pg_autoctl %s service", service->name);
 
-		bool started = (*service->startFunction)(service->context, &(service->pid));
+		/* register the service leader */
+		if (service->leader)
+		{
+			if (supervisor.serviceLeader)
+			{
+				log_error("BUG: service \"%s\" can not be a service leader, "
+						  "service \"%s\" is already registered as a leader",
+						  service->name,
+						  supervisor.serviceLeader->name);
+
+				/* we return false always, even when successful */
+				(void) supervisor_stop_previous_services(&supervisor,
+														 serviceIndex);
+
+				return false;
+			}
+			else
+			{
+				supervisor.serviceLeader = service;
+			}
+		}
+
+		bool started =
+			(*service->startFunction)(service->context, &(service->pid));
 
 		if (started)
 		{
@@ -115,23 +148,8 @@ supervisor_start(Service services[], int serviceCount, const char *pidfile)
 		}
 		else
 		{
-			int idx = 0;
-
-			log_error("Failed to start service %s, "
-					  "stopping already started services and pg_autoctl",
-					  service->name);
-
-			for (idx = serviceIndex - 1; idx > 0; idx--)
-			{
-				if (kill(services[idx].pid, SIGQUIT) != 0)
-				{
-					log_error("Failed to send SIGQUIT to service %s with pid %d",
-							  services[idx].name, services[idx].pid);
-				}
-			}
-
-			/* we return false always, even if supervisor_stop is successful */
-			(void) supervisor_stop(&supervisor);
+			/* we return false always, even when successful */
+			(void) supervisor_stop_previous_services(&supervisor, serviceIndex);
 
 			return false;
 		}
@@ -180,6 +198,37 @@ supervisor_start(Service services[], int serviceCount, const char *pidfile)
 	}
 
 	return supervisor_stop(&supervisor) && success;
+}
+
+
+/*
+ * supervisor_stop_previous_services sends a stop signal to previously started
+ * services when we fail to start a service in the start-up array.
+ */
+static bool
+supervisor_stop_previous_services(Supervisor *supervisor, int serviceIndex)
+{
+	int idx = 0;
+	bool success = true;
+
+	log_error("Failed to start service %s, "
+			  "stopping already started services and pg_autoctl",
+			  supervisor->services[serviceIndex].name);
+
+	for (idx = serviceIndex - 1; idx > 0; idx--)
+	{
+		if (kill(supervisor->services[idx].pid, SIGQUIT) != 0)
+		{
+			log_error("Failed to send SIGQUIT to service %s with pid %d",
+					  supervisor->services[idx].name,
+					  supervisor->services[idx].pid);
+
+			success = false;
+		}
+	}
+
+	/* we return false always, even if supervisor_stop is successful */
+	return success && supervisor_stop(supervisor);
 }
 
 
@@ -284,10 +333,25 @@ supervisor_loop(Supervisor *supervisor)
 				/* one child process is no more */
 				--subprocessCount;
 
-				/* apply the service restart policy */
-				if (supervisor_restart_service(supervisor, dead, status))
+				/* we might see the termination of the leader service */
+				if (supervisor->shutdownSequenceInProgress)
 				{
-					++subprocessCount;
+					if (pid == supervisor->serviceLeader->pid)
+					{
+						log_info("Service leader with pid %d has terminated, "
+								 "now stopping other services",
+								 pid);
+
+						(void) supervisor_stop_other_services(supervisor, pid);
+					}
+				}
+				else
+				{
+					/* apply the service restart policy */
+					if (supervisor_restart_service(supervisor, dead, status))
+					{
+						++subprocessCount;
+					}
 				}
 
 				break;
@@ -362,14 +426,32 @@ supervisor_stop_subprocesses(Supervisor *supervisor)
 	int serviceCount = supervisor->serviceCount;
 	int serviceIndex = 0;
 
-	for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
+	/*
+	 * When we have a service leader, we only send SIGTERM to the leader first
+	 * and signal other services only when the leader has terminated.
+	 */
+	if (supervisor->serviceLeader)
 	{
-		Service *service = &(supervisor->services[serviceIndex]);
+		Service *service = supervisor->serviceLeader;
 
 		if (kill(service->pid, signal) != 0)
 		{
 			log_error("Failed to send signal %s to service %s with pid %d",
 					  strsignal(signal), service->name, service->pid);
+		}
+	}
+	else
+	{
+		/* no service leader, forward the SIGTERM signal to all services */
+		for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
+		{
+			Service *service = &(supervisor->services[serviceIndex]);
+
+			if (kill(service->pid, signal) != 0)
+			{
+				log_error("Failed to send signal %s to service %s with pid %d",
+						  strsignal(signal), service->name, service->pid);
+			}
 		}
 	}
 }

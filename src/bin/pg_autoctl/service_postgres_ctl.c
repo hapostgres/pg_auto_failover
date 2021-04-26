@@ -176,11 +176,12 @@ service_postgres_ctl_loop(LocalPostgresServer *postgres)
 	 * split-brain situations.
 	 */
 	Service postgresService = {
-		SERVICE_NAME_POSTGRES,
-		RP_PERMANENT,           /* actually micro-managed in this loop */
-		-1,
-		&service_postgres_start,
-		(void *) pgSetup
+		.name = SERVICE_NAME_POSTGRES,
+		.policy = RP_PERMANENT, /* actually micro-managed in this loop */
+		.leader = false,
+		.pid = -1,
+		.startFunction = &service_postgres_start,
+		.context = (void *) pgSetup
 	};
 
 	bool pgStatusPathIsReady = false;

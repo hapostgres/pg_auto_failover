@@ -224,6 +224,46 @@ keeper_state_create_file(const char *filename)
 
 
 /*
+ * ServiceStateToString transforms an enum value for type KeeperServiceState
+ * into a string for display.
+ */
+char *
+ServiceStateToString(KeeperServiceState serviceState)
+{
+	switch (serviceState)
+	{
+		case SERVICE_STARTUP:
+		{
+			return "starting up";
+		}
+
+		case SERVICE_SHUTDOWNED:
+		{
+			return "shut down";
+		}
+
+		case SERVICE_SHUTDOWNING:
+		{
+			return "shutting down";
+		}
+
+		case SERVICE_SHUTDOWN_IN_MAINTENANCE:
+		{
+			return "shut down in maintenance";
+		}
+
+		case SERVICE_RUNNING:
+		{
+			return "running";
+		}
+	}
+
+	log_error("BUG: ServiceStateToString(%d)", serviceState);
+	return "unknown";
+}
+
+
+/*
  * log_keeper_state dumps the current in memory state to the logs.
  */
 void
@@ -251,9 +291,11 @@ log_keeper_state(KeeperStateData *keeperState)
 	log_trace("state.last_secondary_contact: %s",
 			  epoch_to_string(keeperState->last_secondary_contact, timestring));
 
-	log_trace("state.xlog_lag : %" PRId64, keeperState->xlog_lag);
+	log_trace("state.xlog_lag: %" PRId64, keeperState->xlog_lag);
 
-	log_trace("state.keeper_is_paused: %d", keeperState->keeper_is_paused);
+	log_trace("state.service: %s",
+			  ServiceStateToString(keeperState->service_state));
+
 	log_trace("state.pg_version: %d", keeperState->pg_version);
 }
 
@@ -295,6 +337,9 @@ print_keeper_state(KeeperStateData *keeperState, FILE *stream)
 			keeperState->current_node_id);
 	fformat(stream, "nodes version:            %" PRIu64 "\n",
 			keeperState->current_nodes_version);
+
+	fformat(stream, "pg_autoctl service state: %s\n",
+			ServiceStateToString(keeperState->service_state));
 
 	/*
 	 * PostgreSQL bits.
