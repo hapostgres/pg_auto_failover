@@ -116,10 +116,95 @@ regexp_first_match(const char *string, const char *regex)
  * Parse the version number output from pg_ctl --version:
  *    pg_ctl (PostgreSQL) 10.3
  */
-char *
-parse_version_number(const char *version_string)
+bool
+parse_version_number(const char *version_string,
+					 char *pg_version_string,
+					 int *pg_version)
 {
-	return regexp_first_match(version_string, "([[:digit:].]+)");
+	char *match = regexp_first_match(version_string, "([[:digit:].]+)");
+
+	if (match == NULL)
+	{
+		log_error("Failed to parse Postgres version number \"%s\"",
+				  version_string);
+		return false;
+	}
+
+	/* first, copy the version number in our expected result string buffer */
+	strlcpy(pg_version_string, match, sizeof(pg_version_string));
+
+	if (!parse_pg_version_string(pg_version_string, pg_version))
+	{
+		/* errors have already been logged */
+		free(match);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * parse_pg_version_string parses a Postgres version string such as "12.6" into
+ * a single number in the same format as the pg_control_version, such as 1206.
+ */
+bool
+parse_pg_version_string(const char *pg_version_string, int *pg_version)
+{
+	/* now, parse the numbers into an integer, ala pg_control_version */
+	bool dotFound = false;
+	char major[INTSTRING_MAX_DIGITS] = { 0 };
+	char minor[INTSTRING_MAX_DIGITS] = { 0 };
+
+	int majorIdx = 0;
+	int minorIdx = 0;
+
+	if (pg_version_string == NULL)
+	{
+		log_debug("BUG: parse_pg_version_string got NULL");
+		return false;
+	}
+
+	for (int i = 0; pg_version_string[i] != '\0'; i++)
+	{
+		if (pg_version_string[i] == '.')
+		{
+			if (dotFound)
+			{
+				log_error("Failed to parse Postgres version number \"%s\"",
+						  pg_version_string);
+				return false;
+			}
+
+			dotFound = true;
+			continue;
+		}
+
+		if (dotFound)
+		{
+			minor[minorIdx++] = pg_version_string[i];
+		}
+		else
+		{
+			major[majorIdx++] = pg_version_string[i];
+		}
+	}
+
+	int maj = 0;
+	int min = 0;
+
+	if (!stringToInt(major, &maj) ||
+		!stringToInt(minor, &min))
+	{
+		log_error("Failed to parse Postgres version number \"%s\"",
+				  pg_version_string);
+		return false;
+	}
+
+	/* transform "12.6" into 1206, that is 12 * 100 + 6 */
+	*pg_version = (maj * 100) + min;
+
+	return true;
 }
 
 

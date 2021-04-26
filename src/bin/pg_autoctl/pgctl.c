@@ -88,6 +88,8 @@ bool
 pg_ctl_version(PostgresSetup *pgSetup)
 {
 	Program prog = run_program(pgSetup->pg_ctl, "--version", NULL);
+	char pg_version_string[PG_VERSION_STRING_MAX] = { 0 };
+	int pg_version = 0;
 
 	if (prog.returnCode != 0)
 	{
@@ -98,16 +100,15 @@ pg_ctl_version(PostgresSetup *pgSetup)
 		return false;
 	}
 
-	char *version = parse_version_number(prog.stdOut);
-	free_program(&prog);
-
-	if (version == NULL)
+	if (!parse_version_number(prog.stdOut, pg_version_string, &pg_version))
 	{
+		/* errors have already been logged */
+		free_program(&prog);
 		return false;
 	}
+	free_program(&prog);
 
-	strlcpy(pgSetup->pg_version, version, PG_VERSION_STRING_MAX);
-	free(version);
+	strlcpy(pgSetup->pg_version, pg_version_string, PG_VERSION_STRING_MAX);
 
 	return true;
 }

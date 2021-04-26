@@ -24,8 +24,9 @@
 
 #include "defaults.h"
 #include "env_utils.h"
-#include "pgctl.h"
 #include "log.h"
+#include "parsing.h"
+#include "pgctl.h"
 #include "signals.h"
 #include "string_utils.h"
 
@@ -683,9 +684,16 @@ read_pg_pidfile(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk, int maxRetries)
 void
 fprintf_pg_setup(FILE *stream, PostgresSetup *pgSetup)
 {
+	int pgversion = 0;
+
+	(void) parse_pg_version_string(pgSetup->pg_version, &pgversion);
+
 	fformat(stream, "pgdata:                %s\n", pgSetup->pgdata);
 	fformat(stream, "pg_ctl:                %s\n", pgSetup->pg_ctl);
-	fformat(stream, "pg_version:            %s\n", pgSetup->pg_version);
+
+	fformat(stream, "pg_version:            \"%s\" (%d)\n",
+			pgSetup->pg_version, pgversion);
+
 	fformat(stream, "pghost:                %s\n", pgSetup->pghost);
 	fformat(stream, "pgport:                %d\n", pgSetup->pgport);
 	fformat(stream, "proxyport:             %d\n", pgSetup->proxyport);
@@ -1853,31 +1861,42 @@ pgsetup_sslmode_to_string(SSLMode sslMode)
 bool
 pg_setup_standby_slot_supported(PostgresSetup *pgSetup, int logLevel)
 {
-	int major = pgSetup->control.pg_control_version / 100;
-	int minor = pgSetup->control.pg_control_version % 100;
+	int pg_version = 0;
+
+	if (!parse_pg_version_string(pgSetup->pg_version, &pg_version))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	int major = pg_version / 100;
+	int minor = pg_version % 100;
 
 	/* do we have Postgres 10 (or before, though we don't support that) */
-	if (pgSetup->control.pg_control_version < 1100)
+	if (pg_version < 1100)
 	{
-		log_trace("pg_setup_standby_slot_supported(%d): false",
-				  pgSetup->control.pg_control_version);
+		log_trace("pg_setup_standby_slot_supported(%d): false", pg_version);
 		return false;
 	}
 
 	/* Postgres 11.0 up to 11.8 included the bug */
-	if (pgSetup->control.pg_control_version >= 1100 &&
-		pgSetup->control.pg_control_version < 1109)
+	if (pg_version >= 1100 && pg_version < 1109)
 	{
 		log_level(logLevel,
 				  "Postgres %d.%d does not support replication slots "
 				  "on a standby node", major, minor);
 
 		return false;
+	}
+
+	/* Postgres 11.9 and up are good */
+	if (pg_version >= 1109 && pg_version < 1200)
+	{
+		return true;
 	}
 
 	/* Postgres 12.0 up to 12.3 included the bug */
-	if (pgSetup->control.pg_control_version >= 1200 &&
-		pgSetup->control.pg_control_version < 1204)
+	if (pg_version >= 1200 && pg_version < 1204)
 	{
 		log_level(logLevel,
 				  "Postgres %d.%d does not support replication slots "
@@ -1886,8 +1905,14 @@ pg_setup_standby_slot_supported(PostgresSetup *pgSetup, int logLevel)
 		return false;
 	}
 
+	/* Postgres 12.4 and up are good */
+	if (pg_version >= 1204 && pg_version < 1300)
+	{
+		return true;
+	}
+
 	/* Starting with Postgres 13, all versions are known to have the bug fix */
-	if (pgSetup->control.pg_control_version >= 1300)
+	if (pg_version >= 1300)
 	{
 		return true;
 	}
@@ -1895,7 +1920,7 @@ pg_setup_standby_slot_supported(PostgresSetup *pgSetup, int logLevel)
 	/* should not happen */
 	log_debug("BUG in pg_setup_standby_slot_supported(%d): "
 			  "unknown Postgres version, returning false",
-			  pgSetup->control.pg_control_version);
+			  pg_version);
 
 	return false;
 }
