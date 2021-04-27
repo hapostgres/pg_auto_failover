@@ -33,7 +33,7 @@ def test_000_create_monitor():
     # verify postgresql.conf is in data directory now
     assert os.path.exists(postgres_conf_path)
 
-    pgversion = pgautofailover.PGVERSION
+    pgversion = os.getenv("PGVERSION")
 
     p = subprocess.run(
         [
@@ -69,7 +69,7 @@ def test_001_custom_single():
     # verify postgresql.conf is in data directory now
     assert os.path.exists(postgres_conf_path)
 
-    pgversion = pgautofailover.PGVERSION
+    pgversion = os.getenv("PGVERSION")
 
     p = subprocess.run(
         [
