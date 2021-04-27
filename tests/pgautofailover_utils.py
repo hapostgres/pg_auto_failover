@@ -148,12 +148,17 @@ class Cluster:
         create_command = [
             "sudo",
             shutil.which("pg_createcluster"),
-            "-U",
+            "--user",
             os.getenv("USER"),
-            PGVERSION,
-            datadir,
+            "--group",
+            "postgres",
             "-p",
             str(port),
+            PGVERSION,
+            datadir,
+            "--",
+            "--auth-local",
+            "trust",
         ]
 
         print("%s" % " ".join(create_command))
@@ -1612,14 +1617,14 @@ class MonitorNode(PGNode):
         else:
             self.hostname = str(self.vnode.address)
 
-    def create(self, run=False):
+    def create(self, level="-v", run=False):
         """
         Initializes and runs the monitor process.
         """
         create_args = [
             "create",
             self.role.command(),
-            "-vv",
+            level,
             "--pgdata",
             self.datadir,
             "--pgport",

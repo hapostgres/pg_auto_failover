@@ -62,7 +62,7 @@ typedef struct debian_pathnames
 } DebianPathnames;
 
 
-bool keeper_ensure_pg_configuration_files_in_pgdata(KeeperConfig *config);
+bool keeper_ensure_pg_configuration_files_in_pgdata(PostgresSetup *pgSetup);
 
 
 #endif /* DEBIAN_H */

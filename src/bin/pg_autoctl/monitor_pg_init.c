@@ -13,6 +13,7 @@
 #include "postgres_fe.h"
 
 #include "cli_common.h"
+#include "debian.h"
 #include "defaults.h"
 #include "ipaddr.h"
 #include "log.h"
@@ -96,6 +97,14 @@ monitor_pg_init(Monitor *monitor)
 					  "is not supported.",
 					  pgSetup->pgdata, existingPgSetup.pidFile.port);
 
+			return false;
+		}
+
+		/* if we have a debian cluster, re-own the configuration files */
+		if (!keeper_ensure_pg_configuration_files_in_pgdata(&existingPgSetup))
+		{
+			log_fatal("Failed to setup your Postgres instance "
+					  "the PostgreSQL way, see above for details");
 			return false;
 		}
 	}

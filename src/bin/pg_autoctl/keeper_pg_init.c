@@ -110,7 +110,7 @@ keeper_pg_init_and_register(Keeper *keeper)
 
 	if (postgresInstanceExists)
 	{
-		if (!keeper_ensure_pg_configuration_files_in_pgdata(config))
+		if (!keeper_ensure_pg_configuration_files_in_pgdata(pgSetup))
 		{
 			log_fatal("Failed to setup your Postgres instance "
 					  "the PostgreSQL way, see above for details");
