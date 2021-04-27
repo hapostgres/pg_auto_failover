@@ -414,12 +414,12 @@ class PGNode:
         self.vnode.run_and_wait(passwd_command, name="user passwd")
         self.authenticatedUsers[username] = password
 
-    def stop_pg_autoctl(self):
+    def stop_pg_autoctl(self, signal=signal.SIGTERM):
         """
         Kills the keeper by sending a SIGTERM to keeper's process group.
         """
         if self.pg_autoctl:
-            return self.pg_autoctl.stop()
+            return self.pg_autoctl.stop(signal)
 
     def stop_postgres(self):
         """
@@ -524,7 +524,7 @@ class PGNode:
         Simulates a data node failure by terminating the keeper and stopping
         postgres.
         """
-        self.stop_pg_autoctl()
+        self.stop_pg_autoctl(signal=signal.SIGQUIT)
 
         # stopping pg_autoctl also stops Postgres, unless bugs.
         if self.pg_is_running():
@@ -653,7 +653,7 @@ class PGNode:
     def logs(self):
         log_string = ""
         if self.running():
-            out, err, ret = self.stop_pg_autoctl()
+            out, err, ret = self.stop_pg_autoctl(signal=signal.SIGINT)
             log_string += f"STDOUT OF PG_AUTOCTL FOR {self.datadir}:\n"
             log_string += f"{self.pg_autoctl.cmd}\n{out}\n"
             log_string += f"STDERR OF PG_AUTOCTL FOR {self.datadir}:\n{err}\n"
@@ -1106,8 +1106,7 @@ class DataNode(PGNode):
         """
         Cleans up processes and files created for this data node.
         """
-
-        self.stop_pg_autoctl()
+        self.stop_pg_autoctl(signal=signal.SIGQUIT)
 
         flags = ["--destroy"]
         if force:
@@ -1959,13 +1958,13 @@ class PGAutoCtl:
 
             return out, err, proc.returncode
 
-    def stop(self):
+    def stop(self, signal=signal.SIGTERM):
         """
         Kills the keeper by sending a SIGTERM to keeper's process group.
         """
         if self.run_proc and self.run_proc.pid:
             try:
-                os.kill(self.run_proc.pid, signal.SIGTERM)
+                os.kill(self.run_proc.pid, signal)
 
                 return self.pgnode.cluster.communicate(self, COMMAND_TIMEOUT)
 

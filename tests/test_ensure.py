@@ -3,6 +3,7 @@ from nose.tools import *
 
 import time
 import os.path
+import signal
 
 cluster = None
 node1 = None
@@ -56,8 +57,8 @@ def test_003_init_secondary():
 
 def test_004_demoted():
     print()
-    node1.stop_postgres()
-    node1.stop_pg_autoctl()
+    # stop fast, don't go to maintenance
+    node1.stop_pg_autoctl(signal=signal.SIGINT)
     # we need the pg_autoctl process to run to reach the state demoted,
     # otherwise the monitor assigns that state to node1 but we never reach
     # it
