@@ -101,5 +101,7 @@ def test_002_chmod_debian_data_directory():
     # we need to give the postgres group the w on the top-level directory
     pgversion = os.getenv("PGVERSION")
 
-    p = subprocess.Popen(["chmod", "g+w", "/var/lib/postgresql/%s" % pgversion])
+    p = subprocess.Popen(
+        ["chmod", "go+w", "/var/lib/postgresql/%s" % pgversion]
+    )
     assert p.wait() == 0
