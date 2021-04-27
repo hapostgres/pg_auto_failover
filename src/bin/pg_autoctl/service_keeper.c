@@ -385,7 +385,9 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		 */
 		if (asked_to_stop)
 		{
-			if (!shutdownSequenceInProgress || !couldStartMaintenanceAtShutdown)
+			if (keeperState->current_role != MAINTENANCE_STATE &&
+				(!shutdownSequenceInProgress ||
+				 !couldStartMaintenanceAtShutdown))
 			{
 				int nodeId = keeper->state.current_node_id;
 				bool mayRetry = false;
@@ -689,6 +691,7 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 			/* are we completely done? */
 			if (keeperState->assigned_role == MAINTENANCE_STATE &&
 				keeperState->current_role == keeperState->assigned_role &&
+				couldStartMaintenanceAtShutdown &&
 				reachedMaintenanceAtShutdown)
 			{
 				keepRunning = false;
@@ -772,7 +775,8 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 	/* One last check that we do not have any connections open */
 	pgsql_finish(&(keeper->monitor.pgsql));
 
-	if (keeperState->service_state == SERVICE_RUNNING)
+	if (keeperState->service_state == SERVICE_RUNNING ||
+		keeperState->service_state == SERVICE_SHUTDOWNING)
 	{
 		keeperState->service_state = SERVICE_SHUTDOWNED;
 	}
