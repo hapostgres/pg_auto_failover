@@ -99,5 +99,7 @@ def test_002_chmod_debian_data_directory():
     # drwx------ 20 docker   postgres ... /var/lib/postgresql/11/debian_node1
     #
     # we need to give the postgres group the w on the top-level directory
-    p = subprocess.Popen(["chmod", "g+w", "/var/lib/postgresql/11"])
+    pgversion = os.getenv("PGVERSION")
+
+    p = subprocess.Popen(["chmod", "g+w", "/var/lib/postgresql/%s" % pgversion])
     assert p.wait() == 0
