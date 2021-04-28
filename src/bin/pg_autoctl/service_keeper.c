@@ -423,10 +423,23 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		 */
 		if (asked_to_stop)
 		{
-			if (shutdownSequenceInProgress && couldStartMaintenanceAtShutdown)
+			/*
+			 * When the monitor is disabled, SIGTERM is the same as SIGINT.
+			 */
+			if (config->monitorDisabled)
+			{
+				shutdownSequenceInProgress = true;
+				keeperState->service_state = SERVICE_SHUTDOWNING;
+
+				break;
+			}
+			/* Shutdown Sequence in progress, and maintenance enabled */
+			else if (shutdownSequenceInProgress &&
+					 couldStartMaintenanceAtShutdown)
 			{
 				log_trace("Shutdown in progress");
 			}
+			/* Trigger the shutdown sequence and enable maintenance now */
 			else if (keeperState->current_role != MAINTENANCE_STATE &&
 					 keeperState->current_role != PREPARE_MAINTENANCE_STATE)
 			{
