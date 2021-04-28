@@ -370,12 +370,12 @@ def test_021_stop_maintenance():
     assert node4.wait_until_state(target_state="secondary")
 
 
-def test_022_set_priorities():
+def test_022_001_set_priorities():
     node1.set_candidate_priority(70)  # current primary
     node3.set_candidate_priority(90)  # candidate
 
 
-def test_023_stop_primary_to_maintenance():
+def test_022_002_stop_primary_to_maintenance():
     print()
     print("Stopping node1, shutting down to maintenance")
 
@@ -387,13 +387,73 @@ def test_023_stop_primary_to_maintenance():
     assert node3.wait_until_state(target_state="primary")
 
 
-def test_024_start_and_disable_maintenance():
+def test_022_003_start_and_disable_maintenance():
     print()
     print("Starting node1, getting out of maintenance")
 
     node1.run()
 
-    assert node1.wait_until_pg_is_running()
+    assert node1.wait_until_state(target_state="secondary")
+    assert node2.wait_until_state(target_state="secondary")
+    assert node4.wait_until_state(target_state="secondary")
+    assert node3.wait_until_state(target_state="primary")
+
+
+def test_023_001_stop_secondary_to_maintenance():
+    print()
+    print("Stopping node1, shutting down to maintenance")
+
+    node1.stop_pg_autoctl()
+
+    assert node1.wait_until_state(target_state="maintenance")
+    assert node2.wait_until_state(target_state="secondary")
+    assert node4.wait_until_state(target_state="secondary")
+    assert node3.wait_until_state(target_state="primary")
+
+
+def test_023_001_stop_secondary_to_maintenance():
+    print()
+    print("Stopping node1, shutting down to maintenance")
+
+    node1.stop_pg_autoctl()
+
+    assert node1.wait_until_state(target_state="maintenance")
+    assert node2.wait_until_state(target_state="secondary")
+    assert node4.wait_until_state(target_state="secondary")
+    assert node3.wait_until_state(target_state="primary")
+
+
+def test_023_002_disable_maintenance_while_stopped():
+    # we don't use node1.disable_maintenance() because it would wait until
+    # the maintenance state has been reached, and our service is not
+    # running, so that won't happen
+    q = """select pgautofailover.stop_maintenance(nodeid::integer)
+from pgautofailover.node
+where formationid = 'default' and nodename = 'node_1'"""
+    monitor.run_sql_query(q)
+
+
+def test_023_003_start_and_catchup():
+    node1.run()
+
+    assert node1.wait_until_state(target_state="secondary")
+    assert node2.wait_until_state(target_state="secondary")
+    assert node4.wait_until_state(target_state="secondary")
+    assert node3.wait_until_state(target_state="primary")
+
+
+def test_023_004_enable_maintenance():
+    node1.enable_maintenance()
+
+    assert node1.wait_until_state(target_state="maintenance")
+    assert node2.wait_until_state(target_state="secondary")
+    assert node4.wait_until_state(target_state="secondary")
+    assert node3.wait_until_state(target_state="primary")
+
+
+def test_023_004_disable_maintenance():
+    node1.disable_maintenance()
+
     assert node1.wait_until_state(target_state="secondary")
     assert node2.wait_until_state(target_state="secondary")
     assert node4.wait_until_state(target_state="secondary")

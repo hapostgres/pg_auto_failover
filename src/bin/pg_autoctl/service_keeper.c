@@ -663,10 +663,13 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		 * consider that our job with disabling maintenance at startup is done
 		 * already.
 		 */
+		bool assignedOneOfTheMaintenanceStates =
+			keeperState->assigned_role == MAINTENANCE_STATE ||
+			keeperState->assigned_role == PREPARE_MAINTENANCE_STATE ||
+			keeperState->assigned_role == WAIT_MAINTENANCE_STATE;
+
 		if (shouldDisableMaintenanceAtStartup &&
-			(keeperState->assigned_role != MAINTENANCE_STATE ||
-			 keeperState->assigned_role != PREPARE_MAINTENANCE_STATE ||
-			 keeperState->assigned_role != WAIT_MAINTENANCE_STATE))
+			!assignedOneOfTheMaintenanceStates)
 		{
 			shouldDisableMaintenanceAtStartup = false;
 		}
