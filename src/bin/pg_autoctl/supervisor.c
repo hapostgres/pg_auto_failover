@@ -481,11 +481,16 @@ supervisor_stop_other_services(Supervisor *supervisor, pid_t pid)
 
 			if (service->pid != pid)
 			{
-				if (kill(service->pid, signal) != 0)
+				/*
+				 * When the process has terminated already, kill(2) fails with
+				 * error set to ESRCH. As we want to terminate the process
+				 * anyway, this is not an error situation here.
+				 */
+				if (kill(service->pid, signal) != 0 && errno != ESRCH)
 				{
-					log_error("Failed to send signal %s to service %s with pid %d",
-							  signal_to_string(signal),
+					log_error("Failed to stop service %s with signal %s (pid %d)",
 							  service->name,
+							  signal_to_string(signal),
 							  service->pid);
 				}
 			}
