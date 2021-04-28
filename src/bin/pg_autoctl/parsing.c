@@ -226,6 +226,7 @@ parse_controldata(PostgresControlData *pgControlData,
 {
 	if (!parse_controldata_field_dbstate(control_data_string,
 										 &(pgControlData->state)) ||
+
 		!parse_controldata_field_uint32(control_data_string,
 										"pg_control version number",
 										&(pgControlData->pg_control_version)) ||

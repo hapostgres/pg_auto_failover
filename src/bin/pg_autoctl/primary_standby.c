@@ -1044,7 +1044,7 @@ primary_rewind_to_standby(LocalPostgresServer *postgres)
 
 
 /*
- * postgres_maybedo_crash_recovery implements a round of Postgres crash
+ * postgres_maybe_do_crash_recovery implements a round of Postgres crash
  * recovery for the local instance of Postgres when pg_rewind would otherwise
  * fail because of its internal checks.
  */
@@ -1154,9 +1154,9 @@ postgres_maybe_do_crash_recovery(LocalPostgresServer *postgres)
 				(void) pg_ctl_postgres(pgSetup->pg_ctl,
 									   pgSetup->pgdata,
 									   pgSetup->pgport,
+									   pgSetup->listen_addresses,
 
 				                       /* do not open the service just yet */
-									   pgSetup->listen_addresses,
 									   false);
 
 				/* unexpected */

@@ -2001,36 +2001,36 @@ dbstateToString(DBState state)
 	{
 		case DB_STARTUP:
 		{
-			return _("starting up");
+			return "starting up";
 		}
 
 		case DB_SHUTDOWNED:
 		{
-			return _("shut down");
+			return "shut down";
 		}
 
 		case DB_SHUTDOWNED_IN_RECOVERY:
 		{
-			return _("shut down in recovery");
+			return "shut down in recovery";
 		}
 
 		case DB_SHUTDOWNING:
 		{
-			return _("shutting down");
+			return "shutting down";
 		}
 
 		case DB_IN_CRASH_RECOVERY:
 		{
-			return _("in crash recovery");
+			return "in crash recovery";
 		}
 
 		case DB_IN_ARCHIVE_RECOVERY:
 		{
-			return _("in archive recovery");
+			return "in archive recovery";
 		}
 
 		case DB_IN_PRODUCTION:
-			return _("in production");
+			return "in production";
 	}
-	return _("unrecognized status code");
+	return "unrecognized status code";
 }
