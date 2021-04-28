@@ -234,15 +234,19 @@ keeper_cli_pgsetup_pg_ctl(int argc, char **argv)
 void
 keeper_cli_pgsetup_discover(int argc, char **argv)
 {
-	bool missingPgdataOk = true;
-	PostgresSetup pgSetup = { 0 };
+	ConfigFilePaths pathnames = { 0 };
+	LocalPostgresServer postgres = { 0 };
+	PostgresSetup *pgSetup = &(postgres.postgresSetup);
 
-	if (!pg_setup_init(&pgSetup, &keeperOptions.pgSetup, true, true))
+	if (!cli_common_pgsetup_init(&pathnames, pgSetup))
 	{
-		exit(EXIT_CODE_PGCTL);
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	if (!pg_controldata(&pgSetup, missingPgdataOk))
+	bool missingPgdataOk = true;
+
+	if (!pg_controldata(pgSetup, missingPgdataOk))
 	{
 		exit(EXIT_CODE_PGCTL);
 	}
@@ -252,7 +256,7 @@ keeper_cli_pgsetup_discover(int argc, char **argv)
 		fformat(stdout, "Node Name:          %s\n", keeperOptions.hostname);
 	}
 
-	fprintf_pg_setup(stdout, &pgSetup);
+	fprintf_pg_setup(stdout, pgSetup);
 }
 
 
@@ -263,19 +267,22 @@ keeper_cli_pgsetup_discover(int argc, char **argv)
 void
 keeper_cli_pgsetup_is_ready(int argc, char **argv)
 {
-	PostgresSetup pgSetup = { 0 };
-	bool pgIsNotRunningIsOk = false;
+	ConfigFilePaths pathnames = { 0 };
+	LocalPostgresServer postgres = { 0 };
+	PostgresSetup *pgSetup = &(postgres.postgresSetup);
 
-	if (!pg_setup_init(&pgSetup, &keeperOptions.pgSetup, true, true))
+	if (!cli_common_pgsetup_init(&pathnames, pgSetup))
 	{
-		exit(EXIT_CODE_PGCTL);
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
 	log_debug("Initialized pgSetup, now calling pg_setup_is_ready()");
 
-	bool pgIsReady = pg_setup_is_ready(&pgSetup, pgIsNotRunningIsOk);
+	bool pgIsNotRunningIsOk = false;
+	bool pgIsReady = pg_setup_is_ready(pgSetup, pgIsNotRunningIsOk);
 
-	log_info("Postgres status is: \"%s\"", pmStatusToString(pgSetup.pm_status));
+	log_info("Postgres status is: \"%s\"", pmStatusToString(pgSetup->pm_status));
 
 	if (pgIsReady)
 	{
@@ -293,18 +300,22 @@ void
 keeper_cli_pgsetup_wait_until_ready(int argc, char **argv)
 {
 	int timeout = 30;
-	PostgresSetup pgSetup = { 0 };
 
-	if (!pg_setup_init(&pgSetup, &keeperOptions.pgSetup, true, true))
+	ConfigFilePaths pathnames = { 0 };
+	LocalPostgresServer postgres = { 0 };
+	PostgresSetup *pgSetup = &(postgres.postgresSetup);
+
+	if (!cli_common_pgsetup_init(&pathnames, pgSetup))
 	{
-		exit(EXIT_CODE_PGCTL);
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
 	log_debug("Initialized pgSetup, now calling pg_setup_wait_until_is_ready()");
 
-	bool pgIsReady = pg_setup_wait_until_is_ready(&pgSetup, timeout, LOG_INFO);
+	bool pgIsReady = pg_setup_wait_until_is_ready(pgSetup, timeout, LOG_INFO);
 
-	log_info("Postgres status is: \"%s\"", pmStatusToString(pgSetup.pm_status));
+	log_info("Postgres status is: \"%s\"", pmStatusToString(pgSetup->pm_status));
 
 	if (pgIsReady)
 	{
@@ -320,16 +331,19 @@ keeper_cli_pgsetup_wait_until_ready(int argc, char **argv)
 void
 keeper_cli_pgsetup_startup_logs(int argc, char **argv)
 {
-	PostgresSetup pgSetup = { 0 };
+	ConfigFilePaths pathnames = { 0 };
+	LocalPostgresServer postgres = { 0 };
+	PostgresSetup *pgSetup = &(postgres.postgresSetup);
 
-	if (!pg_setup_init(&pgSetup, &keeperOptions.pgSetup, true, true))
+	if (!cli_common_pgsetup_init(&pathnames, pgSetup))
 	{
-		exit(EXIT_CODE_PGCTL);
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
 	log_debug("Initialized pgSetup, now calling pg_log_startup()");
 
-	if (!pg_log_startup(pgSetup.pgdata, LOG_INFO))
+	if (!pg_log_startup(pgSetup->pgdata, LOG_INFO))
 	{
 		exit(EXIT_CODE_PGCTL);
 	}
