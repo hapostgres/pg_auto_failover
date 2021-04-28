@@ -379,40 +379,17 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 			(void) keeper_call_reload_hooks(keeper, firstLoop, doInit);
 		}
 
-		/*
-		 * Upon receiving SIGTERM, start maintenance on the monitor, possibly
-		 * triggering a failover when the primary node is being shut down.
-		 */
-		if (asked_to_stop)
-		{
-			if (keeperState->current_role != MAINTENANCE_STATE &&
-				(!shutdownSequenceInProgress ||
-				 !couldStartMaintenanceAtShutdown))
-			{
-				int nodeId = keeper->state.current_node_id;
-				bool mayRetry = false;
-
-				log_info("Enabling maintenance on this node for shutdown");
-
-				if (monitor_start_maintenance(monitor, nodeId, &mayRetry))
-				{
-					couldStartMaintenanceAtShutdown = true;
-				}
-				else
-				{
-					/* warning: we're going to try again */
-					log_warn("Failed to start maintenance "
-							 "upon receiving SIGTERM");
-				}
-			}
-
-			keeperState->service_state = SERVICE_SHUTDOWNING;
-			shutdownSequenceInProgress = true;
-		}
-
 		if (asked_to_stop_fast || asked_to_quit)
 		{
-			keeperState->service_state = SERVICE_SHUTDOWNING;
+			/*
+			 * Refrain from editing service_state when shutdown is already in
+			 * progress.
+			 */
+			if (!shutdownSequenceInProgress)
+			{
+				shutdownSequenceInProgress = true;
+				keeperState->service_state = SERVICE_SHUTDOWNING;
+			}
 			break;
 		}
 
@@ -438,6 +415,48 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 			log_error("Failed to read keeper state file, retrying...");
 			CHECK_FOR_FAST_SHUTDOWN;
 			continue;
+		}
+
+		/*
+		 * Upon receiving SIGTERM, start maintenance on the monitor, possibly
+		 * triggering a failover when the primary node is being shut down.
+		 */
+		if (asked_to_stop)
+		{
+			if (shutdownSequenceInProgress && couldStartMaintenanceAtShutdown)
+			{
+				log_trace("Shutdown in progress");
+			}
+			else if (keeperState->current_role != MAINTENANCE_STATE &&
+					 keeperState->current_role != PREPARE_MAINTENANCE_STATE)
+			{
+				int nodeId = keeper->state.current_node_id;
+				bool mayRetry = false;
+
+				log_info("Enabling maintenance on this node for shutdown");
+
+				/*
+				 * Make sure that at restart, we get out of maintenance, even
+				 * if we later receive a stronger signal such as SIGINT
+				 * (asked_to_stop_fast) or SIGQUIT (asked_to_quit).
+				 */
+				keeperState->service_state = SERVICE_SHUTDOWN_IN_MAINTENANCE;
+
+				if (keeper_store_state(keeper) &&
+					monitor_start_maintenance(monitor, nodeId, &mayRetry))
+				{
+					couldStartMaintenanceAtShutdown = true;
+				}
+				else
+				{
+					/* warning: we're going to try again */
+					log_warn("Failed to start maintenance "
+							 "upon receiving SIGTERM");
+				}
+			}
+
+			/* in all cases, shutdown is now in progress */
+			shutdownSequenceInProgress = true;
 		}
 
 		if (firstLoop)
@@ -609,8 +628,16 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		 * we record this action in the Keeper State file. At startup, we then
 		 * disable maintenance again. We might have to retry disabling
 		 * maintenance should it fail.
+		 *
+		 * The shutdown sequence might also have been interrupted in
+		 * wait_maintenance state, in which case we want to first finish the
+		 * FSM transition to maintenance, and only later disable maintenance.
 		 */
-		if (shutdownInMaintenance && !disabledMaintenanceAtStartup)
+		if (shutdownInMaintenance &&
+			!disabledMaintenanceAtStartup &&
+			keeperState->assigned_role == MAINTENANCE_STATE &&
+			keeperState->current_role == keeperState->assigned_role &&
+			!needStateChange)
 		{
 			int nodeId = keeper->state.current_node_id;
 			bool mayRetry = false;
@@ -697,8 +724,6 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 				keepRunning = false;
 				log_info("Shutdown sequence complete: reached state \"%s\"",
 						 NodeStateToString(MAINTENANCE_STATE));
-
-				keeperState->service_state = SERVICE_SHUTDOWN_IN_MAINTENANCE;
 			}
 			/*
 			 * When reaching maintenance, we need another loop to call
@@ -775,7 +800,18 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 	/* One last check that we do not have any connections open */
 	pgsql_finish(&(keeper->monitor.pgsql));
 
-	if (keeperState->service_state == SERVICE_RUNNING ||
+	/*
+	 * When shutdown is already in progress, we might have a service_state set
+	 * to SERVICE_SHUTDOWN_IN_MAINTENANCE and we want to keep that. That said,
+	 * CHECK_FOR_FAST_SHUTDOWN is a straight break to this point at the end of
+	 * the loop, so the state might still be SERVICE_RUNNING.
+	 *
+	 * Other case is having receveived SIGINT (asked_to_stop_fast) and then we
+	 * registered SERVICE_SHUTDOWNING, and now is the time to clear that up and
+	 * set SERVICE_SHUTDOWNED instead.
+	 */
+	if (!shutdownSequenceInProgress ||
+		keeperState->service_state == SERVICE_RUNNING ||
 		keeperState->service_state == SERVICE_SHUTDOWNING)
 	{
 		keeperState->service_state = SERVICE_SHUTDOWNED;
