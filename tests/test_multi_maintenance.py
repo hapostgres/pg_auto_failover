@@ -368,3 +368,33 @@ def test_021_stop_maintenance():
 
     assert node2.wait_until_state(target_state="secondary")
     assert node4.wait_until_state(target_state="secondary")
+
+
+def test_022_set_priorities():
+    node1.set_candidate_priority(70)  # current primary
+    node3.set_candidate_priority(90)  # candidate
+
+
+def test_023_stop_primary_to_maintenance():
+    print()
+    print("Stopping node1, shutting down to maintenance")
+
+    node1.stop_pg_autoctl()
+
+    assert node1.wait_until_state(target_state="maintenance")
+    assert node2.wait_until_state(target_state="secondary")
+    assert node4.wait_until_state(target_state="secondary")
+    assert node3.wait_until_state(target_state="primary")
+
+
+def test_024_start_and_disable_maintenance():
+    print()
+    print("Starting node1, getting out of maintenance")
+
+    node1.run()
+
+    assert node1.wait_until_pg_is_running()
+    assert node1.wait_until_state(target_state="secondary")
+    assert node2.wait_until_state(target_state="secondary")
+    assert node4.wait_until_state(target_state="secondary")
+    assert node3.wait_until_state(target_state="primary")
