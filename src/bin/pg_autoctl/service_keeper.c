@@ -275,6 +275,7 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		keeperState->service_state == SERVICE_SHUTDOWN_IN_MAINTENANCE;
 
 	bool disabledMaintenanceAtStartup = false;
+	bool shouldDisableMaintenanceAtStartup = shutdownInMaintenance;
 
 	log_debug("pg_autoctl service is starting");
 
@@ -462,9 +463,13 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 				}
 				else
 				{
+					int timeoutUs = PG_AUTOCTL_KEEPER_SLEEP_TIME * 1000 * 1000;
+
 					/* warning: we're going to try again */
 					log_warn("Failed to start maintenance "
 							 "upon receiving SIGTERM");
+
+					pg_usleep(timeoutUs);
 				}
 			}
 
@@ -645,12 +650,32 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		 * The shutdown sequence might also have been interrupted in
 		 * wait_maintenance state, in which case we want to first finish the
 		 * FSM transition to maintenance, and only later disable maintenance.
+		 *
+		 * Finally we must also consider the following case:
+		 *
+		 *  pg_autoctl stop
+		 *  pg_autoctl disable maintenance
+		 *  pg_autoctl run
+		 *
+		 * The manual call to disable maintenance has the effect of the monitor
+		 * assigning CATCHINGUP to the node, and at startup we implement the
+		 * transition to there. We must remember that in this case we should
+		 * consider that our job with disabling maintenance at startup is done
+		 * already.
 		 */
-		if (shutdownInMaintenance &&
-			!disabledMaintenanceAtStartup &&
-			keeperState->assigned_role == MAINTENANCE_STATE &&
-			keeperState->current_role == keeperState->assigned_role &&
-			!needStateChange)
+		if (shouldDisableMaintenanceAtStartup &&
+			(keeperState->assigned_role != MAINTENANCE_STATE ||
+			 keeperState->assigned_role != PREPARE_MAINTENANCE_STATE ||
+			 keeperState->assigned_role != WAIT_MAINTENANCE_STATE))
+		{
+			shouldDisableMaintenanceAtStartup = false;
+		}
+		else if (shutdownInMaintenance &&
+				 shouldDisableMaintenanceAtStartup &&
+				 !disabledMaintenanceAtStartup &&
+				 keeperState->assigned_role == MAINTENANCE_STATE &&
+				 keeperState->current_role == keeperState->assigned_role &&
+				 !needStateChange)
 		{
 			int nodeId = keeper->state.current_node_id;
 			bool mayRetry = false;
