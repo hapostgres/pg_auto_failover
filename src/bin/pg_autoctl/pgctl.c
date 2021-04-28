@@ -1475,6 +1475,12 @@ pg_ctl_postgres(const char *pg_ctl, const char *pgdata, int pgport,
 
 	if (listen)
 	{
+		if (IS_EMPTY_STRING_BUFFER(listen_addresses))
+		{
+			log_error("BUG: pg_ctl_postgres is given an empty listen_addresses "
+					  "with argument listen set to true");
+			return false;
+		}
 		args[argsIndex++] = "-h";
 		args[argsIndex++] = (char *) listen_addresses;
 	}
