@@ -1511,6 +1511,8 @@ cli_do_tmux_wait(int argc, char **argv)
 			{
 				log_info("The monitor is ready at: %s", showUri.stdOut);
 			}
+
+			free_program(&showUri);
 		}
 
 		free_program(&program);
