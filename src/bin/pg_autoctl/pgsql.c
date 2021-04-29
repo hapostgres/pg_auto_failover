@@ -2257,13 +2257,16 @@ pgsql_create_user(PGSQL *pgsql, const char *userName, const char *password,
 
 	PQclear(result);
 	clear_results(pgsql);
+
 	if (pgsql->connectionStatementType == PGSQL_CONNECTION_SINGLE_STATEMENT)
 	{
 		pgsql_finish(pgsql);
 	}
-
-	/* restore the normal notice message processing, if needed. */
-	PQsetNoticeProcessor(connection, previousNoticeProcessor, NULL);
+	else
+	{
+		/* restore the normal notice message processing, if needed. */
+		PQsetNoticeProcessor(connection, previousNoticeProcessor, NULL);
+	}
 
 	return true;
 }
