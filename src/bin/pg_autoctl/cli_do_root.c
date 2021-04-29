@@ -223,7 +223,8 @@ CommandLine do_tmux_script =
 				 "  --node-priorities list of nodes priorities (50)\n"
 				 "  --sync-standbys   number-sync-standbys to set (0 or 1)\n"
 				 "  --skip-pg-hba     use --skip-pg-hba when creating nodes\n"
-				 "  --layout          tmux layout to use (even-vertical)",
+				 "  --layout          tmux layout to use (even-vertical)\n"
+				 "  --binpath         path to the pg_autoctl binary (current binary path)",
 				 cli_do_tmux_script_getopts,
 				 cli_do_tmux_script);
 
@@ -238,7 +239,8 @@ CommandLine do_tmux_session =
 				 "  --node-priorities list of nodes priorities (50)\n"
 				 "  --sync-standbys   number-sync-standbys to set (0 or 1)\n"
 				 "  --skip-pg-hba     use --skip-pg-hba when creating nodes\n"
-				 "  --layout          tmux layout to use (even-vertical)",
+				 "  --layout          tmux layout to use (even-vertical)\n"
+				 "  --binpath         path to the pg_autoctl binary (current binary path)",
 				 cli_do_tmux_script_getopts,
 				 cli_do_tmux_session);
 

@@ -31,6 +31,7 @@ RUN apt-get update \
     watch \
     lsof \
     psutils \
+	valgrind \
     postgresql-common \
     postgresql-server-dev-${PGVERSION} \
 	&& rm -rf /var/lib/apt/lists/*
