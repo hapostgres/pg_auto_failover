@@ -1491,12 +1491,21 @@ pgsql_drop_replication_slot(PGSQL *pgsql, const char *slotName)
  * We return how many parameters we filled in paramTypes and paramValues from
  * the nodeArray.
  */
+typedef struct nodesArraysValuesParams
+{
+	int count;
+	Oid types[NODE_ARRAY_MAX_COUNT * 2];
+	char *values[NODE_ARRAY_MAX_COUNT * 2];
+	char data[NODE_ARRAY_MAX_COUNT * 2][PG_LSN_MAXLENGTH];
+} nodesArraysValuesParams;
+
+
 static int
 BuildNodesArrayValues(NodeAddressArray *nodeArray,
-					  Oid *paramTypes, char **paramValues,
+					  nodesArraysValuesParams *sqlParams,
 					  char *values, int size)
 {
-	char buffer[BUFSIZE];
+	char buffer[BUFSIZE] = { 0 };
 	int nodeIndex = 0;
 	int paramIndex = 0;
 	int valuesIndex = 0;
@@ -1514,11 +1523,18 @@ BuildNodesArrayValues(NodeAddressArray *nodeArray,
 		int idParamIndex = paramIndex;
 		int lsnParamIndex = paramIndex + 1;
 
-		paramTypes[idParamIndex] = INT4OID;
-		paramValues[idParamIndex] = strdup(nodeIdString.strValue);
+		sqlParams->types[idParamIndex] = INT4OID;
 
-		paramTypes[lsnParamIndex] = LSNOID;
-		paramValues[lsnParamIndex] = node->lsn;
+		strlcpy(sqlParams->data[idParamIndex],
+				nodeIdString.strValue,
+				PG_LSN_MAXLENGTH);
+
+		sqlParams->values[idParamIndex] = sqlParams->data[idParamIndex];
+
+		sqlParams->types[lsnParamIndex] = LSNOID;
+		strlcpy(sqlParams->data[lsnParamIndex], node->lsn, PG_LSN_MAXLENGTH);
+
+		sqlParams->values[lsnParamIndex] = sqlParams->data[lsnParamIndex];
 
 		valuesIndex += sformat(buffer + valuesIndex, BUFSIZE - valuesIndex,
 							   "%s($%d, $%d%s)",
@@ -1542,6 +1558,8 @@ BuildNodesArrayValues(NodeAddressArray *nodeArray,
 		paramIndex += 2;
 	}
 
+	sqlParams->count = paramIndex;
+
 	/* when we didn't find any node to process, return our empty set */
 	if (paramIndex == 0)
 	{
@@ -1563,6 +1581,7 @@ BuildNodesArrayValues(NodeAddressArray *nodeArray,
 			return false;
 		}
 	}
+
 	return paramIndex;
 }
 
@@ -1615,13 +1634,10 @@ pgsql_replication_slot_create_and_drop(PGSQL *pgsql, NodeAddressArray *nodeArray
 		"SELECT 'drop', slot_name, NULL::pg_lsn FROM dropped";
 	/* *INDENT-ON* */
 
-	Oid paramTypes[NODE_ARRAY_MAX_COUNT * 2] = { 0 };
-	const char *paramValues[NODE_ARRAY_MAX_COUNT * 2] = { 0 };
+	nodesArraysValuesParams sqlParams = { 0 };
 	ReplicationSlotMaintainContext context = { 0 };
 
-	int paramCount = BuildNodesArrayValues(nodeArray,
-										   paramTypes, (char **) paramValues,
-										   values, BUFSIZE);
+	(void) BuildNodesArrayValues(nodeArray, &sqlParams, values, BUFSIZE);
 
 	/* add the computed ($1,$2), ... string to the query "template" */
 	int bytes = sformat(sql, 2 * BUFSIZE, sqlTemplate, values);
@@ -1635,7 +1651,9 @@ pgsql_replication_slot_create_and_drop(PGSQL *pgsql, NodeAddressArray *nodeArray
 	}
 
 	return pgsql_execute_with_params(pgsql, sql,
-									 paramCount, paramTypes, paramValues,
+									 sqlParams.count,
+									 sqlParams.types,
+									 (const char **) sqlParams.values,
 									 &context,
 									 parseReplicationSlotMaintain);
 }
@@ -1686,13 +1704,10 @@ pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray)
 		"SELECT 'advance', slot_name, end_lsn FROM advanced ";
 	/* *INDENT-ON* */
 
-	Oid paramTypes[NODE_ARRAY_MAX_COUNT * 2] = { 0 };
-	const char *paramValues[NODE_ARRAY_MAX_COUNT * 2] = { 0 };
+	nodesArraysValuesParams sqlParams = { 0 };
 	ReplicationSlotMaintainContext context = { 0 };
 
-	int paramCount = BuildNodesArrayValues(nodeArray,
-										   paramTypes, (char **) paramValues,
-										   values, BUFSIZE);
+	(void) BuildNodesArrayValues(nodeArray, &sqlParams, values, BUFSIZE);
 
 	/* add the computed ($1,$2), ... string to the query "template" */
 	int bytes = sformat(sql, 2 * BUFSIZE, sqlTemplate, values);
@@ -1706,7 +1721,9 @@ pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray)
 	}
 
 	return pgsql_execute_with_params(pgsql, sql,
-									 paramCount, paramTypes, paramValues,
+									 sqlParams.count,
+									 sqlParams.types,
+									 (const char **) sqlParams.values,
 									 &context,
 									 parseReplicationSlotMaintain);
 }
