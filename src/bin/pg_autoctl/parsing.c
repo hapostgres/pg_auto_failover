@@ -140,6 +140,7 @@ parse_version_number(const char *version_string,
 		return false;
 	}
 
+	free(match);
 	return true;
 }
 
