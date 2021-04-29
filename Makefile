@@ -200,7 +200,7 @@ tmux-clean:
          --first-pgport $(FIRST_PGPORT)   \
          --nodes $(NODES)
 
-cluster: install tmux-clean
+tmux-session:
 	$(PG_AUTOCTL) do tmux session         \
          --root $(TMUX_TOP_DIR)           \
          --first-pgport $(FIRST_PGPORT)   \
@@ -212,6 +212,14 @@ cluster: install tmux-clean
          --binpath $(BINPATH)             \
          --layout $(TMUX_LAYOUT)
 
+cluster: install tmux-clean tmux-session ;
+
+valgrind-session: build-test
+	docker run --rm -it $(TEST_CONTAINER_NAME) \
+	make -C /usr/src/pg_auto_failover \
+	     VALGRIND=1 \
+	     TMUX_TOP_DIR=/tmp/tmux \
+	     tmux-session
 
 azcluster: all
 	$(PG_AUTOCTL) do azure create         \
