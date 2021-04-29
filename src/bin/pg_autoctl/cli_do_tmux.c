@@ -855,7 +855,7 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
  * tmux_start_server starts a tmux session with the given script.
  */
 bool
-tmux_start_server(const char *scriptName)
+tmux_start_server(const char *scriptName, const char *binpath)
 {
 	char *args[8];
 	int argsIndex = 0;
@@ -866,6 +866,12 @@ tmux_start_server(const char *scriptName)
 	if (setenv("PG_AUTOCTL_DEBUG", "1", 1) != 0)
 	{
 		log_error("Failed to set environment PG_AUTOCTL_DEBUG: %m");
+		return false;
+	}
+
+	if (binpath && setenv("PG_AUTOCTL_DEBUG_BIN_PATH", binpath, 1) != 0)
+	{
+		log_error("Failed to set environment PG_AUTOCTL_DEBUG_BIN_PATH: %m");
 		return false;
 	}
 
@@ -1358,7 +1364,7 @@ cli_do_tmux_session(int argc, char **argv)
 	/*
 	 * Start a tmux session from the script.
 	 */
-	if (!tmux_start_server(scriptName))
+	if (!tmux_start_server(scriptName, options.binpath))
 	{
 		success = false;
 		log_fatal("Failed to start the tmux session, see above for details");

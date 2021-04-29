@@ -60,8 +60,8 @@ ifeq ($(VALGRIND),)
 	BINPATH = ./src/bin/pg_autoctl/pg_autoctl
 	PG_AUTOCTL = PG_AUTOCTL_DEBUG=1 ./src/bin/pg_autoctl/pg_autoctl
 else
-	BINPATH = ./src/tools/pg_autoctl.valgrind
-	PG_AUTOCTL = PG_AUTOCTL_DEBUG=1 ./src/tools/pg_autoctl.valgrind
+	BINPATH = $(abspath $(PWD))/src/tools/pg_autoctl.valgrind
+	PG_AUTOCTL = PG_AUTOCTL_DEBUG=1 PG_AUTOCTL_DEBUG_BIN_PATH="$(BINPATH)" ./src/tools/pg_autoctl.valgrind
 endif
 
 

@@ -253,7 +253,7 @@ tmux_azure_start_or_attach_session(AzureRegionResources *azRegion)
 			return false;
 		}
 
-		if (!tmux_start_server(scriptName))
+		if (!tmux_start_server(scriptName, NULL))
 		{
 			log_fatal("Failed to start the tmux session, see above for details");
 			destroyPQExpBuffer(script);
