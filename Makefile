@@ -55,7 +55,15 @@ FSM = docs/fsm.png
 PDF = ./docs/_build/latex/pg_auto_failover.pdf
 
 # Command line with DEBUG facilities
-PG_AUTOCTL = PG_AUTOCTL_DEBUG=1 ./src/bin/pg_autoctl/pg_autoctl
+VALGRIND ?=
+ifeq ($(VALGRIND),)
+	BINPATH = ./src/bin/pg_autoctl/pg_autoctl
+	PG_AUTOCTL = PG_AUTOCTL_DEBUG=1 ./src/bin/pg_autoctl/pg_autoctl
+else
+	BINPATH = ./src/tools/pg_autoctl.valgrind
+	PG_AUTOCTL = PG_AUTOCTL_DEBUG=1 ./src/tools/pg_autoctl.valgrind
+endif
+
 
 NODES ?= 2						# total count of Postgres nodes
 NODES_ASYNC ?= 0				# count of replication-quorum false nodes
@@ -181,6 +189,7 @@ $(TMUX_SCRIPT): bin
          --node-priorities $(NODES_PRIOS) \
          --sync-standbys $(NODES_SYNC_SB) \
          $(CLUSTER_OPTS)                  \
+         --binpath $(BINPATH)             \
 		 --layout $(TMUX_LAYOUT) > $@
 
 tmux-script: $(TMUX_SCRIPT) ;
@@ -200,6 +209,7 @@ cluster: install tmux-clean
          --node-priorities $(NODES_PRIOS) \
          --sync-standbys $(NODES_SYNC_SB) \
          $(CLUSTER_OPTS)                  \
+         --binpath $(BINPATH)             \
          --layout $(TMUX_LAYOUT)
 
 
