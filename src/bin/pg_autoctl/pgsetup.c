@@ -1342,7 +1342,7 @@ pg_setup_role(PostgresSetup *pgSetup)
 char *
 pg_setup_get_username(PostgresSetup *pgSetup)
 {
-	char userEnv[NAMEDATALEN];
+	char userEnv[NAMEDATALEN] = { 0 };
 
 	/* use a configured username if provided */
 	if (!IS_EMPTY_STRING_BUFFER(pgSetup->username))
@@ -1359,8 +1359,8 @@ pg_setup_get_username(PostgresSetup *pgSetup)
 	{
 		log_trace("username found in passwd: %s", pw->pw_name);
 
-		/* struct passwd is in thread shared space, return a copy */
-		return strdup(pw->pw_name);
+		strlcpy(pgSetup->username, pw->pw_name, sizeof(pgSetup->username));
+		return pgSetup->username;
 	}
 
 
@@ -1368,12 +1368,15 @@ pg_setup_get_username(PostgresSetup *pgSetup)
 	if (get_env_copy("USER", userEnv, NAMEDATALEN))
 	{
 		log_trace("username found in USER environment variable: %s", userEnv);
-		return strdup(userEnv);
+
+		strlcpy(pgSetup->username, userEnv, sizeof(pgSetup->username));
+		return pgSetup->username;
 	}
 
 	log_trace("username fallback to default: %s", DEFAULT_USERNAME);
+	strlcpy(pgSetup->username, DEFAULT_USERNAME, sizeof(pgSetup->username));
 
-	return DEFAULT_USERNAME;
+	return pgSetup->username;
 }
 
 
