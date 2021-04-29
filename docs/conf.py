@@ -109,8 +109,9 @@ html_theme = "sphinx_rtd_theme"
 
 # Add our custom CSS
 def setup(app):
-  app.add_css_file('css/citus.css')
-  app.add_css_file('css/pygments.css')
+    app.add_css_file("css/citus.css")
+    app.add_css_file("css/pygments.css")
+
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
