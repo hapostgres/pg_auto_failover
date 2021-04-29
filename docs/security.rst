@@ -157,9 +157,7 @@ case one solution is to use ``--skip-pg-hba`` and do the whole setup
 yourself.
 
 It is still possible to give the certificates to pg_auto_failover and have
-it handle the setup for you, including the creation of and signing of client
-certificates for the ``autoctl_node`` and ``pgautofailover_replication``
-users::
+it handle the Postgres setup for you::
 
   $ pg_autoctl create monitor --ssl-ca-file root.crt   \
                               --ssl-crl-file root.crl  \
@@ -183,8 +181,8 @@ users::
 The option ``--ssl-mode`` can be used to force connection strings used by
 ``pg_autoctl`` to contain your prefered ssl mode. It defaults to ``require``
 when using ``--ssl-self-signed`` and to ``allow`` when ``--no-ssl`` is used.
-Here, we set ``--ssl-mode`` to ``validate-ca`` which requires SSL Certificates
-Authentication, covered next.
+Here, we set ``--ssl-mode`` to ``verify-full`` which requires SSL
+Certificates Authentication, covered next.
 
 The default ``--ssl-mode`` when providing your own certificates (signed by
 your trusted CA) is then ``verify-full``. This setup applies to the client
