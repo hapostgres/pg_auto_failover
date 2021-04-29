@@ -939,6 +939,8 @@ tmux_attach_session(const char *tmux_path, const char *sessionName)
 	(void) execute_subprogram(&program);
 
 	/* we only get there when the tmux session is done */
+	free_program(&program);
+
 	return true;
 }
 
@@ -1481,6 +1483,7 @@ cli_do_tmux_wait(int argc, char **argv)
 			(void) snprintf_program_command_line(&program, command, BUFSIZE);
 
 			log_error("%s [%d]", command, program.returnCode);
+			free_program(&program);
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 
@@ -1509,6 +1512,7 @@ cli_do_tmux_wait(int argc, char **argv)
 
 		if (!ready)
 		{
+			free_program(&program);
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 	}
