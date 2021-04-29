@@ -588,9 +588,13 @@ tmux_prepare_XDG_environment(const char *root, bool createDirectories)
 			if (pg_mkdir_p(targetPath, 0700) == -1)
 			{
 				log_error("mkdir -p \"%s\": %m", targetPath);
+
+				free(env);
 				return false;
 			}
 		}
+
+		free(env);
 	}
 
 	return true;
