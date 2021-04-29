@@ -701,6 +701,8 @@ parse_pguri_info_key_vals(const char *pguri,
 		}
 	}
 
+	PQconninfoFree(conninfo);
+
 	/*
 	 * Display an error message per missing field, and only then return false
 	 * if we're missing any one of those.
