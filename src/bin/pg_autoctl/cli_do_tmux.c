@@ -894,7 +894,9 @@ tmux_start_server(const char *scriptName, const char *binpath)
 	args[argsIndex] = NULL;
 
 	/* we do not want to call setsid() when running this program. */
-	Program program = initialize_program(args, false);
+	Program program = { 0 };
+
+	(void) initialize_program(&program, args, false);
 
 	program.capture = false;    /* don't capture output */
 	program.tty = true;         /* allow sharing the parent's tty */
@@ -918,7 +920,7 @@ tmux_start_server(const char *scriptName, const char *binpath)
 bool
 tmux_attach_session(const char *tmux_path, const char *sessionName)
 {
-	Program program;
+	Program program = { 0 };
 
 	char *args[8];
 	int argsIndex = 0;
@@ -936,7 +938,7 @@ tmux_attach_session(const char *tmux_path, const char *sessionName)
 	args[argsIndex] = NULL;
 
 	/* we do not want to call setsid() when running this program. */
-	program = initialize_program(args, false);
+	(void) initialize_program(&program, args, false);
 
 	program.capture = false;    /* don't capture output */
 	program.tty = true;         /* allow sharing the parent's tty */

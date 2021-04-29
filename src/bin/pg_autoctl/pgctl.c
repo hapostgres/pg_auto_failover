@@ -1205,7 +1205,9 @@ pg_basebackup(const char *pgdata,
 	 * pg_basebackup subprogram is not intended to be its own session leader,
 	 * but remain a sub-process in the same group as pg_autoctl.
 	 */
-	Program program = initialize_program(args, false);
+	Program program = { 0 };
+
+	(void) initialize_program(&program, args, false);
 	program.processBuffer = &processBufferCallback;
 
 	/* log the exact command line we're using */
@@ -1315,7 +1317,9 @@ pg_rewind(const char *pgdata,
 	 * pg_rewind subprogram is not intended to be its own session leader, but
 	 * remain a sub-process in the same group as pg_autoctl.
 	 */
-	Program program = initialize_program(args, false);
+	Program program = { 0 };
+
+	(void) initialize_program(&program, args, false);
 	program.processBuffer = &processBufferCallback;
 
 	/* log the exact command line we're using */
@@ -1481,7 +1485,9 @@ pg_ctl_postgres(const char *pg_ctl, const char *pgdata, int pgport,
 	 * postgres subprogram is not intended to be its own session leader, but
 	 * remain a sub-process in the same group as pg_autoctl.
 	 */
-	Program program = initialize_program(args, false);
+	Program program = { 0 };
+
+	(void) initialize_program(&program, args, false);
 
 	/* we want to redirect the output to logfile */
 	int logFileDescriptor = open(logfile, FOPEN_FLAGS_W, 0644);
