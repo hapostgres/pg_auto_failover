@@ -554,6 +554,7 @@ tmux_prepare_XDG_environment(const char *root, bool createDirectories)
 			if (pg_mkdir_p(env, 0700) == -1)
 			{
 				log_error("mkdir -p \"%s\": %m", env);
+				free(env);
 				return false;
 			}
 		}
@@ -561,6 +562,7 @@ tmux_prepare_XDG_environment(const char *root, bool createDirectories)
 		if (!normalize_filename(env, env, MAXPGPATH))
 		{
 			/* errors have already been logged */
+			free(env);
 			return false;
 		}
 
@@ -588,9 +590,13 @@ tmux_prepare_XDG_environment(const char *root, bool createDirectories)
 			if (pg_mkdir_p(targetPath, 0700) == -1)
 			{
 				log_error("mkdir -p \"%s\": %m", targetPath);
+
+				free(env);
 				return false;
 			}
 		}
+
+		free(env);
 	}
 
 	return true;
@@ -894,6 +900,7 @@ tmux_start_server(const char *scriptName)
 	(void) execute_subprogram(&program);
 
 	/* we only get there when the tmux session is done */
+	free_program(&program);
 	return true;
 }
 
@@ -935,6 +942,8 @@ tmux_attach_session(const char *tmux_path, const char *sessionName)
 	(void) execute_subprogram(&program);
 
 	/* we only get there when the tmux session is done */
+	free_program(&program);
+
 	return true;
 }
 
@@ -1477,6 +1486,7 @@ cli_do_tmux_wait(int argc, char **argv)
 			(void) snprintf_program_command_line(&program, command, BUFSIZE);
 
 			log_error("%s [%d]", command, program.returnCode);
+			free_program(&program);
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 
@@ -1501,7 +1511,11 @@ cli_do_tmux_wait(int argc, char **argv)
 			{
 				log_info("The monitor is ready at: %s", showUri.stdOut);
 			}
+
+			free_program(&showUri);
 		}
+
+		free_program(&program);
 
 		if (!ready)
 		{

@@ -140,6 +140,7 @@ parse_version_number(const char *version_string,
 		return false;
 	}
 
+	free(match);
 	return true;
 }
 
@@ -701,6 +702,8 @@ parse_pguri_info_key_vals(const char *pguri,
 		}
 	}
 
+	PQconninfoFree(conninfo);
+
 	/*
 	 * Display an error message per missing field, and only then return false
 	 * if we're missing any one of those.
@@ -1044,8 +1047,9 @@ parseNodesArray(const char *nodesJSON,
 
 
 /*
- * uri_contains_password takes a Postgres connection string and checks to see if it contains a parameter
- * called password. Returns true if a password keyword is present in the connection string.
+ * uri_contains_password takes a Postgres connection string and checks to see
+ * if it contains a parameter called password. Returns true if a password
+ * keyword is present in the connection string.
  */
 static bool
 uri_contains_password(const char *pguri)
@@ -1067,16 +1071,16 @@ uri_contains_password(const char *pguri)
 	 */
 	for (option = conninfo; option->keyword != NULL; option++)
 	{
-		if (
-			strcmp(option->keyword, "password") == 0 &&
+		if (strcmp(option->keyword, "password") == 0 &&
 			option->val != NULL &&
-			!IS_EMPTY_STRING_BUFFER(option->val)
-			)
+			!IS_EMPTY_STRING_BUFFER(option->val))
 		{
+			PQconninfoFree(conninfo);
 			return true;
 		}
 	}
 
+	PQconninfoFree(conninfo);
 	return false;
 }
 
