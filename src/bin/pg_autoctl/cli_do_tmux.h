@@ -92,7 +92,7 @@ void tmux_pg_autoctl_create_postgres(PQExpBuffer script,
 									 int candidatePriority,
 									 bool skipHBA);
 
-bool tmux_start_server(const char *scriptName);
+bool tmux_start_server(const char *scriptName, const char *binpath);
 bool pg_autoctl_getpid(const char *pgdata, pid_t *pid);
 
 bool tmux_has_session(const char *tmux_path, const char *sessionName);

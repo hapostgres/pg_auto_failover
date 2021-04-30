@@ -121,13 +121,22 @@ main(int argc, char **argv)
 	 * hard-coded LOG_INFO as our log level. For now we won't see the log_debug
 	 * output, but as a developer you could always change the LOG_INFO to
 	 * LOG_DEBUG above and then see the message.
+	 *
+	 * When running pg_autoctl using valgrind we also want the subprocesses to
+	 * be run with valgrind. However, valgrind modifies the argv variables to
+	 * be the pg_autoctl binary, instead of the valgrind binary. So to make
+	 * sure subprocesses are spawned using valgrind, we allow overriding To
+	 * this program path detection using the PG_AUTOCTL_DEBUG_BIN_PATH
+	 * environment variable.
 	 */
 	strlcpy(pg_autoctl_argv0, argv[0], MAXPGPATH);
-
-	if (!set_program_absolute_path(pg_autoctl_program, MAXPGPATH))
+	if (!get_env_copy("PG_AUTOCTL_DEBUG_BIN_PATH", pg_autoctl_program, MAXPGPATH))
 	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_INTERNAL_ERROR);
+		if (!set_program_absolute_path(pg_autoctl_program, MAXPGPATH))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
 	}
 
 	if (!commandline_run(&command, argc, argv))
