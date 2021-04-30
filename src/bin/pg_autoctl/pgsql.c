@@ -1492,8 +1492,6 @@ pgsql_drop_replication_slot(PGSQL *pgsql, const char *slotName)
  * the nodeArray.
  */
 #define NODEID_MAX_LENGTH 20    /* should allow for bigint digits */
-#define NODES_ARRAYS_VALUES_MAXLENGTH \
-	(NODEID_MAX_LENGTH > PG_LSN_MAXLENGTH ? NODEID_MAX_LENGTH : PG_LSN_MAXLENGTH)
 
 typedef struct nodesArraysValuesParams
 {
