@@ -1491,16 +1491,20 @@ pgsql_drop_replication_slot(PGSQL *pgsql, const char *slotName)
  * We return how many parameters we filled in paramTypes and paramValues from
  * the nodeArray.
  */
+#define NODEID_MAX_LENGTH 20    /* should allow for bigint digits */
+#define NODES_ARRAYS_VALUES_MAXLENGTH \
+	(NODEID_MAX_LENGTH > PG_LSN_MAXLENGTH ? NODEID_MAX_LENGTH : PG_LSN_MAXLENGTH)
+
 typedef struct nodesArraysValuesParams
 {
 	int count;
 	Oid types[NODE_ARRAY_MAX_COUNT * 2];
 	char *values[NODE_ARRAY_MAX_COUNT * 2];
-	char data[NODE_ARRAY_MAX_COUNT * 2][PG_LSN_MAXLENGTH];
+	char data[NODE_ARRAY_MAX_COUNT * 2][NODES_ARRAYS_VALUES_MAXLENGTH];
 } nodesArraysValuesParams;
 
 
-static int
+static bool
 BuildNodesArrayValues(NodeAddressArray *nodeArray,
 					  nodesArraysValuesParams *sqlParams,
 					  char *values, int size)
@@ -1527,12 +1531,15 @@ BuildNodesArrayValues(NodeAddressArray *nodeArray,
 
 		strlcpy(sqlParams->data[idParamIndex],
 				nodeIdString.strValue,
-				PG_LSN_MAXLENGTH);
+				NODES_ARRAYS_VALUES_MAXLENGTH);
 
 		sqlParams->values[idParamIndex] = sqlParams->data[idParamIndex];
 
 		sqlParams->types[lsnParamIndex] = LSNOID;
-		strlcpy(sqlParams->data[lsnParamIndex], node->lsn, PG_LSN_MAXLENGTH);
+
+		strlcpy(sqlParams->data[lsnParamIndex],
+				node->lsn,
+				NODES_ARRAYS_VALUES_MAXLENGTH);
 
 		sqlParams->values[lsnParamIndex] = sqlParams->data[lsnParamIndex];
 
@@ -1558,6 +1565,7 @@ BuildNodesArrayValues(NodeAddressArray *nodeArray,
 		paramIndex += 2;
 	}
 
+	/* count how many parameters where appended to the VALUES() parts */
 	sqlParams->count = paramIndex;
 
 	/* when we didn't find any node to process, return our empty set */
@@ -1582,7 +1590,7 @@ BuildNodesArrayValues(NodeAddressArray *nodeArray,
 		}
 	}
 
-	return paramIndex;
+	return true;
 }
 
 
@@ -1637,7 +1645,11 @@ pgsql_replication_slot_create_and_drop(PGSQL *pgsql, NodeAddressArray *nodeArray
 	nodesArraysValuesParams sqlParams = { 0 };
 	ReplicationSlotMaintainContext context = { 0 };
 
-	(void) BuildNodesArrayValues(nodeArray, &sqlParams, values, BUFSIZE);
+	if (!BuildNodesArrayValues(nodeArray, &sqlParams, values, BUFSIZE))
+	{
+		/* errors have already been logged */
+		return false;
+	}
 
 	/* add the computed ($1,$2), ... string to the query "template" */
 	int bytes = sformat(sql, 2 * BUFSIZE, sqlTemplate, values);
@@ -1707,7 +1719,11 @@ pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray)
 	nodesArraysValuesParams sqlParams = { 0 };
 	ReplicationSlotMaintainContext context = { 0 };
 
-	(void) BuildNodesArrayValues(nodeArray, &sqlParams, values, BUFSIZE);
+	if (!BuildNodesArrayValues(nodeArray, &sqlParams, values, BUFSIZE))
+	{
+		/* errors have already been logged */
+		return false;
+	}
 
 	/* add the computed ($1,$2), ... string to the query "template" */
 	int bytes = sformat(sql, 2 * BUFSIZE, sqlTemplate, values);
