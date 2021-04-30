@@ -343,13 +343,13 @@ azure_psleep(int count, bool force)
 		char *args[3];
 		int argsIndex = 0;
 
-		Program program;
+		Program program = { 0 };
 
 		args[argsIndex++] = sleep;
 		args[argsIndex++] = "5";
 		args[argsIndex++] = NULL;
 
-		program = initialize_program(args, false);
+		(void) initialize_program(&program, args, false);
 
 		pidArray[i] = azure_start_command(&program);
 	}
@@ -413,7 +413,7 @@ azure_create_group(const char *name, const char *location)
 	char *args[16];
 	int argsIndex = 0;
 
-	Program program;
+	Program program = { 0 };
 
 	args[argsIndex++] = azureCLI;
 	args[argsIndex++] = "group";
@@ -424,7 +424,7 @@ azure_create_group(const char *name, const char *location)
 	args[argsIndex++] = (char *) location;
 	args[argsIndex++] = NULL;
 
-	program = initialize_program(args, false);
+	(void) initialize_program(&program, args, false);
 
 	log_info("Creating group \"%s\" in location \"%s\"", name, location);
 
@@ -441,7 +441,7 @@ azure_create_vnet(const char *group, const char *name, const char *prefix)
 	char *args[16];
 	int argsIndex = 0;
 
-	Program program;
+	Program program = { 0 };
 
 	args[argsIndex++] = azureCLI;
 	args[argsIndex++] = "network";
@@ -455,7 +455,7 @@ azure_create_vnet(const char *group, const char *name, const char *prefix)
 	args[argsIndex++] = (char *) prefix;
 	args[argsIndex++] = NULL;
 
-	program = initialize_program(args, false);
+	(void) initialize_program(&program, args, false);
 
 	log_info("Creating network vnet \"%s\" using address prefix \"%s\"",
 			 name, prefix);
@@ -473,7 +473,7 @@ azure_create_nsg(const char *group, const char *name)
 	char *args[16];
 	int argsIndex = 0;
 
-	Program program;
+	Program program = { 0 };
 
 	args[argsIndex++] = azureCLI;
 	args[argsIndex++] = "network";
@@ -485,7 +485,7 @@ azure_create_nsg(const char *group, const char *name)
 	args[argsIndex++] = (char *) name;
 	args[argsIndex++] = NULL;
 
-	program = initialize_program(args, false);
+	(void) initialize_program(&program, args, false);
 
 	log_info("Creating network nsg \"%s\"", name);
 
@@ -505,7 +505,7 @@ azure_create_nsg_rule(const char *group,
 	char *args[38];
 	int argsIndex = 0;
 
-	Program program;
+	Program program = { 0 };
 
 	args[argsIndex++] = azureCLI;
 	args[argsIndex++] = "network";
@@ -537,7 +537,7 @@ azure_create_nsg_rule(const char *group,
 	args[argsIndex++] = "5432";
 	args[argsIndex++] = NULL;
 
-	program = initialize_program(args, false);
+	(void) initialize_program(&program, args, false);
 
 	log_info("Creating network nsg rules \"%s\" for our IP address \"%s\" "
 			 "for ports 22 and 5432", name, ipAddress);
@@ -559,7 +559,7 @@ azure_create_subnet(const char *group,
 	char *args[16];
 	int argsIndex = 0;
 
-	Program program;
+	Program program = { 0 };
 
 	args[argsIndex++] = azureCLI;
 	args[argsIndex++] = "network";
@@ -578,7 +578,7 @@ azure_create_subnet(const char *group,
 	args[argsIndex++] = (char *) nsg;
 	args[argsIndex++] = NULL;
 
-	program = initialize_program(args, false);
+	(void) initialize_program(&program, args, false);
 
 	log_info("Creating network subnet \"%s\" using address prefix \"%s\"",
 			 name, prefixes);
@@ -596,7 +596,7 @@ az_group_delete(const char *group)
 	char *args[16];
 	int argsIndex = 0;
 
-	Program program;
+	Program program = { 0 };
 
 	args[argsIndex++] = azureCLI;
 	args[argsIndex++] = "group";
@@ -606,7 +606,7 @@ az_group_delete(const char *group)
 	args[argsIndex++] = "--yes";
 	args[argsIndex++] = NULL;
 
-	program = initialize_program(args, false);
+	(void) initialize_program(&program, args, false);
 
 	log_info("Deleting azure resource group \"%s\"", group);
 
@@ -722,7 +722,7 @@ azure_create_vm(AzureRegionResources *azRegion,
 	char *args[26];
 	int argsIndex = 0;
 
-	Program program;
+	Program program = { 0 };
 
 	char publicIpAddressName[BUFSIZE] = { 0 };
 
@@ -750,7 +750,7 @@ azure_create_vm(AzureRegionResources *azRegion,
 	args[argsIndex++] = "--generate-ssh-keys";
 	args[argsIndex++] = NULL;
 
-	program = initialize_program(args, false);
+	(void) initialize_program(&program, args, false);
 
 	log_info("Creating %s virtual machine \"%s\" with user \"%s\"",
 			 image, name, username);
@@ -911,7 +911,7 @@ start_rsync_command(const char *username,
 	char *args[16];
 	int argsIndex = 0;
 
-	Program program;
+	Program program = { 0 };
 
 	char ssh[MAXPGPATH] = { 0 };
 	char essh[MAXPGPATH] = { 0 };
@@ -966,7 +966,7 @@ start_rsync_command(const char *username,
 	args[argsIndex++] = rsync_remote;
 	args[argsIndex++] = NULL;
 
-	program = initialize_program(args, false);
+	(void) initialize_program(&program, args, false);
 
 	return azure_start_command(&program);
 }
@@ -1282,7 +1282,7 @@ azure_provision_vm(const char *group, const char *name, bool fromSource)
 	char *args[26];
 	int argsIndex = 0;
 
-	Program program;
+	Program program = { 0 };
 
 	char aptGetInstall[BUFSIZE] = { 0 };
 	char aptGetInstallPostgres[BUFSIZE] = { 0 };
@@ -1366,7 +1366,7 @@ azure_provision_vm(const char *group, const char *name, bool fromSource)
 
 	args[argsIndex++] = NULL;
 
-	program = initialize_program(args, false);
+	(void) initialize_program(&program, args, false);
 
 	log_info("Provisioning Virtual Machine \"%s\"", name);
 
@@ -1469,7 +1469,7 @@ azure_resource_list(const char *group)
 	int argsIndex = 0;
 	bool success = true;
 
-	Program program;
+	Program program = { 0 };
 
 	char query[BUFSIZE] = { 0 };
 
@@ -1489,7 +1489,7 @@ azure_resource_list(const char *group)
 	args[argsIndex++] = (char *) query;
 	args[argsIndex++] = NULL;
 
-	program = initialize_program(args, false);
+	(void) initialize_program(&program, args, false);
 
 	(void) snprintf_program_command_line(&program, command, sizeof(command));
 
@@ -1523,7 +1523,7 @@ azure_fetch_resource_list(const char *group, AzureRegionResources *azRegion)
 	int argsIndex = 0;
 	bool success = true;
 
-	Program program;
+	Program program = { 0 };
 
 	char query[BUFSIZE] = { 0 };
 
@@ -1542,7 +1542,7 @@ azure_fetch_resource_list(const char *group, AzureRegionResources *azRegion)
 	args[argsIndex++] = (char *) query;
 	args[argsIndex++] = NULL;
 
-	program = initialize_program(args, false);
+	(void) initialize_program(&program, args, false);
 
 	(void) snprintf_program_command_line(&program, command, sizeof(command));
 
@@ -1629,7 +1629,7 @@ azure_show_ip_addresses(const char *group)
 	int argsIndex = 0;
 	bool success = true;
 
-	Program program;
+	Program program = { 0 };
 
 	char query[BUFSIZE] = { 0 };
 
@@ -1653,7 +1653,7 @@ azure_show_ip_addresses(const char *group)
 	args[argsIndex++] = "table";
 	args[argsIndex++] = NULL;
 
-	program = initialize_program(args, false);
+	(void) initialize_program(&program, args, false);
 
 	(void) snprintf_program_command_line(&program, command, sizeof(command));
 
@@ -1687,7 +1687,7 @@ azure_fetch_ip_addresses(const char *group, AzureVMipAddresses *vmArray)
 	int argsIndex = 0;
 	bool success = true;
 
-	Program program;
+	Program program = { 0 };
 
 	char query[BUFSIZE] = { 0 };
 
@@ -1711,7 +1711,7 @@ azure_fetch_ip_addresses(const char *group, AzureVMipAddresses *vmArray)
 	args[argsIndex++] = "json";
 	args[argsIndex++] = NULL;
 
-	program = initialize_program(args, false);
+	(void) initialize_program(&program, args, false);
 
 	(void) snprintf_program_command_line(&program, command, sizeof(command));
 
@@ -1785,7 +1785,7 @@ run_ssh(const char *username, const char *ip)
 	char *args[16];
 	int argsIndex = 0;
 
-	Program program;
+	Program program = { 0 };
 
 	char ssh[MAXPGPATH] = { 0 };
 	char command[BUFSIZE] = { 0 };
@@ -1808,7 +1808,7 @@ run_ssh(const char *username, const char *ip)
 	args[argsIndex++] = (char *) ip;
 	args[argsIndex++] = NULL;
 
-	program = initialize_program(args, false);
+	(void) initialize_program(&program, args, false);
 
 	program.capture = false;    /* don't capture output */
 	program.tty = true;         /* allow sharing the parent's tty */
@@ -1836,7 +1836,7 @@ run_ssh_command(const char *username,
 	char *args[16];
 	int argsIndex = 0;
 
-	Program program;
+	Program program = { 0 };
 
 	char ssh[MAXPGPATH] = { 0 };
 	char ssh_command[BUFSIZE] = { 0 };
@@ -1867,7 +1867,7 @@ run_ssh_command(const char *username,
 	args[argsIndex++] = (char *) command;
 	args[argsIndex++] = NULL;
 
-	program = initialize_program(args, false);
+	(void) initialize_program(&program, args, false);
 
 	program.capture = false;    /* don't capture output */
 	program.tty = true;         /* allow sharing the parent's tty */
@@ -1901,7 +1901,7 @@ start_ssh_command(const char *username,
 	char *args[16];
 	int argsIndex = 0;
 
-	Program program;
+	Program program = { 0 };
 
 	char ssh[MAXPGPATH] = { 0 };
 	char ssh_command[BUFSIZE] = { 0 };
@@ -1926,7 +1926,7 @@ start_ssh_command(const char *username,
 	args[argsIndex++] = (char *) command;
 	args[argsIndex++] = NULL;
 
-	program = initialize_program(args, false);
+	(void) initialize_program(&program, args, false);
 
 	(void) snprintf_program_command_line(&program, ssh_command, BUFSIZE);
 

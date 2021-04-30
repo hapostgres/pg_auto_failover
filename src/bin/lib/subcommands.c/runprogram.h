@@ -52,7 +52,7 @@ typedef struct
 } Program;
 
 Program run_program(const char *program, ...);
-Program initialize_program(char **args, bool setsid);
+void initialize_program(Program *prog, char **args, bool setsid);
 void execute_subprogram(Program *prog);
 void execute_program(Program *prog);
 void free_program(Program *prog);
@@ -132,25 +132,27 @@ run_program(const char *program, ...)
  * caller to manipulate the structure for itself. Safe to change are program,
  * args and setsid structure slots.
  */
-Program
-initialize_program(char **args, bool setsid)
+void
+initialize_program(Program *prog, char **args, bool setsid)
 {
 	int argsIndex, nb_args = 0;
-	Program prog = { 0 };
 
-	prog.returnCode = -1;
-	prog.error = 0;
-	prog.setsid = setsid;
+	/* we want to have a deterministic starting point */
+	*prog = (Program) { 0 };
+
+	prog->returnCode = -1;
+	prog->error = 0;
+	prog->setsid = setsid;
 
 	/* this could be changed by the caller before calling execute_program */
-	prog.capture = true;
-	prog.tty = false;
-	prog.processBuffer = NULL;
-	prog.stdOutFd = -1;
-	prog.stdErrFd = -1;
+	prog->capture = true;
+	prog->tty = false;
+	prog->processBuffer = NULL;
+	prog->stdOutFd = -1;
+	prog->stdErrFd = -1;
 
-	prog.stdOut = NULL;
-	prog.stdErr = NULL;
+	prog->stdOut = NULL;
+	prog->stdErr = NULL;
 
 	for (argsIndex = 0; args[argsIndex] != NULL; argsIndex++)
 	{
@@ -158,16 +160,14 @@ initialize_program(char **args, bool setsid)
 	}
 
 	/* add another one nb_args for the terminating NULL entry */
-	prog.args = (char **) malloc(++nb_args * sizeof(char *));
-	memset(prog.args, 0, nb_args * sizeof(char *));
+	prog->args = (char **) malloc(++nb_args * sizeof(char *));
+	memset(prog->args, 0, nb_args * sizeof(char *));
 
 	for (argsIndex = 0; args[argsIndex] != NULL; argsIndex++)
 	{
-		prog.args[argsIndex] = strdup(args[argsIndex]);
+		prog->args[argsIndex] = strdup(args[argsIndex]);
 	}
-	prog.program = prog.args[0];
-
-	return prog;
+	prog->program = prog->args[0];
 }
 
 

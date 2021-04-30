@@ -171,7 +171,8 @@ service_monitor_runprogram(Monitor *monitor)
 	args[argsIndex] = NULL;
 
 	/* we do not want to call setsid() when running this program. */
-	Program program = initialize_program(args, false);
+	Program program = { 0 };
+	(void) initialize_program(&program, args, false);
 
 	program.capture = false;    /* redirect output, don't capture */
 	program.stdOutFd = STDOUT_FILENO;

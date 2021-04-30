@@ -855,7 +855,9 @@ demoapp_psql(const char *pguri, const char *sql)
 	args[argsIndex++] = NULL;
 
 	/* we do not want to call setsid() when running this program. */
-	Program program = initialize_program(args, false);
+	Program program = { 0 };
+
+	(void) initialize_program(&program, args, false);
 
 	program.capture = false;    /* don't capture output */
 	program.tty = true;         /* allow sharing the parent's tty */
