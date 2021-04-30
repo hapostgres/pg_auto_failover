@@ -1500,7 +1500,14 @@ typedef struct nodesArraysValuesParams
 	int count;
 	Oid types[NODE_ARRAY_MAX_COUNT * 2];
 	char *values[NODE_ARRAY_MAX_COUNT * 2];
-	char data[NODE_ARRAY_MAX_COUNT * 2][NODES_ARRAYS_VALUES_MAXLENGTH];
+
+	/*
+	 * Pre-allocate arrays for the data separately from the values array, which
+	 * needs to be a (const char **) thing rather than a (char [][]) thing,
+	 * because of the pgsql_execute_with_params and libpq APIs.
+	 */
+	char nodeIds[NODE_ARRAY_MAX_COUNT][NODEID_MAX_LENGTH];
+	char lsns[NODE_ARRAY_MAX_COUNT][PG_LSN_MAXLENGTH];
 } nodesArraysValuesParams;
 
 
@@ -1522,26 +1529,22 @@ BuildNodesArrayValues(NodeAddressArray *nodeArray,
 	for (nodeIndex = 0; nodeIndex < nodeArray->count; nodeIndex++)
 	{
 		NodeAddress *node = &(nodeArray->nodes[nodeIndex]);
-		IntString nodeIdString = intToString(node->nodeId);
+		char *nodeIdString = intToString(node->nodeId).strValue;
 
 		int idParamIndex = paramIndex;
 		int lsnParamIndex = paramIndex + 1;
 
 		sqlParams->types[idParamIndex] = INT4OID;
+		strlcpy(sqlParams->nodeIds[idParamIndex], nodeIdString, NODEID_MAX_LENGTH);
 
-		strlcpy(sqlParams->data[idParamIndex],
-				nodeIdString.strValue,
-				NODES_ARRAYS_VALUES_MAXLENGTH);
-
-		sqlParams->values[idParamIndex] = sqlParams->data[idParamIndex];
+		/* store the (char *) pointer to the data in values */
+		sqlParams->values[idParamIndex] = sqlParams->nodeIds[idParamIndex];
 
 		sqlParams->types[lsnParamIndex] = LSNOID;
+		strlcpy(sqlParams->lsns[lsnParamIndex], node->lsn, PG_LSN_MAXLENGTH);
 
-		strlcpy(sqlParams->data[lsnParamIndex],
-				node->lsn,
-				NODES_ARRAYS_VALUES_MAXLENGTH);
-
-		sqlParams->values[lsnParamIndex] = sqlParams->data[lsnParamIndex];
+		/* store the (char *) pointer to the data in values */
+		sqlParams->values[lsnParamIndex] = sqlParams->lsns[lsnParamIndex];
 
 		valuesIndex += sformat(buffer + valuesIndex, BUFSIZE - valuesIndex,
 							   "%s($%d, $%d%s)",
