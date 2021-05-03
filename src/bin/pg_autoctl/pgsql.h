@@ -171,6 +171,50 @@ typedef struct NodeAddressArray
 
 
 /*
+ * TimeLineHistoryEntry is taken from Postgres definitions and adapted to
+ * client-size code where we don't have all the necessary infrastruture. In
+ * particular we don't define a XLogRecPtr data type nor do we define a
+ * TimeLineID data type.
+ *
+ * Zero is used indicate an invalid pointer. Bootstrap skips the first possible
+ * WAL segment, initializing the first WAL page at WAL segment size, so no XLOG
+ * record can begin at zero.
+ */
+#define InvalidXLogRecPtr 0
+#define XLogRecPtrIsInvalid(r) ((r) == InvalidXLogRecPtr)
+
+#define PG_AUTOCTL_MAX_TIMELINES 1024
+
+typedef struct TimeLineHistoryEntry
+{
+	uint32_t tli;
+	uint64_t begin;         /* inclusive */
+	uint64_t end;           /* exclusive, InvalidXLogRecPtr means infinity */
+} TimeLineHistoryEntry;
+
+
+typedef struct TimeLineHistory
+{
+	int count;
+	TimeLineHistoryEntry history[PG_AUTOCTL_MAX_TIMELINES];
+} TimeLineHistory;
+
+
+/*
+ * The IdentifySystem contains information that is parsed from the
+ * IDENTIFY_SYSTEM replication command, and then the TIMELINE_HISTORY result.
+ */
+typedef struct IdentifySystem
+{
+	uint64_t identifier;
+	uint32_t timeline;
+	char xlogpos[PG_LSN_MAXLENGTH];
+	char dbname[NAMEDATALEN];
+	TimeLineHistory timelines;
+} IdentifySystem;
+
+
+/*
  * The replicationSource structure is used to pass the bits of a connection
  * string to the primary node around in several function calls. All the
  * information stored in there must fit in a connection string, so MAXCONNINFO
@@ -187,6 +231,7 @@ typedef struct ReplicationSource
 	char applicationName[MAXCONNINFO];
 	char targetLSN[PG_LSN_MAXLENGTH];
 	SSLOptions sslOptions;
+	IdentifySystem system;
 } ReplicationSource;
 
 
@@ -326,12 +371,15 @@ bool pgsql_one_slot_has_reached_target_lsn(PGSQL *pgsql,
 										   bool *hasReachedLSN);
 bool pgsql_has_reached_target_lsn(PGSQL *pgsql, char *targetLSN,
 								  char *currentLSN, bool *hasReachedLSN);
-bool pgsql_identify_system(PGSQL *pgsql);
+bool pgsql_identify_system(PGSQL *pgsql, IdentifySystem *system);
 bool pgsql_listen(PGSQL *pgsql, char *channels[]);
 bool pgsql_prepare_to_wait(PGSQL *pgsql);
 
 bool pgsql_alter_extension_update_to(PGSQL *pgsql,
 									 const char *extname, const char *version);
+
+bool parseTimeLineHistory(const char *filename, const char *content,
+						  IdentifySystem *system);
 
 
 #endif /* PGSQL_H */
