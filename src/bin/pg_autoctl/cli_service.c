@@ -345,7 +345,8 @@ cli_getopt_pgdata_and_mode(int argc, char **argv)
 
 				if (stop_signal != SIGTERM)
 				{
-					log_fatal("Please use either --fast or --immediate, not both");
+					log_fatal("Please use only one of either "
+							  " --sigkill, --fast or --immediate");
 					exit(EXIT_CODE_BAD_ARGS);
 				}
 				stop_signal = SIGKILL;
