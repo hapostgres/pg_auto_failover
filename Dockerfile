@@ -58,6 +58,9 @@ RUN make -s clean && make -s install -j8
 
 COPY ./tests/ ./tests
 
+COPY ./valgrind ./valgrind
+RUN chmod a+w ./valgrind
+
 USER docker
 ENV PATH /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/postgresql/${PGVERSION}/bin
 ENV PG_AUTOCTL_DEBUG 1

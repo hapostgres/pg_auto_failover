@@ -1,6 +1,8 @@
 # Copyright (c) Microsoft Corporation. All rights reserved.
 # Licensed under the PostgreSQL License.
 
+TOP := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+
 CONTAINER_NAME = pg_auto_failover
 TEST_CONTAINER_NAME = pg_auto_failover_test
 DOCKER_RUN_OPTS = --privileged  -ti --rm
@@ -60,7 +62,7 @@ ifeq ($(VALGRIND),)
 	BINPATH = ./src/bin/pg_autoctl/pg_autoctl
 	PG_AUTOCTL = PG_AUTOCTL_DEBUG=1 ./src/bin/pg_autoctl/pg_autoctl
 else
-	BINPATH = $(abspath $(PWD))/src/tools/pg_autoctl.valgrind
+	BINPATH = $(abspath $(TOP))/src/tools/pg_autoctl.valgrind
 	PG_AUTOCTL = PG_AUTOCTL_DEBUG=1 PG_AUTOCTL_DEBUG_BIN_PATH="$(BINPATH)" ./src/tools/pg_autoctl.valgrind
 endif
 
@@ -157,7 +159,6 @@ build-test:
 run-test: build-test
 	docker run					                \
 		--name $(TEST_CONTAINER_NAME)		    \
-		$(DOCKER_RUN_OPTS)			            \
 		$(TEST_CONTAINER_NAME)			        \
 		make -C /usr/src/pg_auto_failover test	\
 		TEST='${TEST}'
@@ -200,7 +201,7 @@ tmux-clean:
          --first-pgport $(FIRST_PGPORT)   \
          --nodes $(NODES)
 
-cluster: install tmux-clean
+tmux-session:
 	$(PG_AUTOCTL) do tmux session         \
          --root $(TMUX_TOP_DIR)           \
          --first-pgport $(FIRST_PGPORT)   \
@@ -212,6 +213,24 @@ cluster: install tmux-clean
          --binpath $(BINPATH)             \
          --layout $(TMUX_LAYOUT)
 
+cluster: install tmux-clean tmux-session ;
+
+valgrind-session: build-test
+	docker run                             \
+	    --name $(TEST_CONTAINER_NAME) 	   \
+		$(DOCKER_RUN_OPTS)			       \
+		$(TEST_CONTAINER_NAME)			   \
+	    make -C /usr/src/pg_auto_failover  \
+	     VALGRIND=1 					   \
+	     TMUX_TOP_DIR=/tmp/tmux 	       \
+		 NODES=$(NODES) 				   \
+		 NODES_ASYNC=$(NODES_ASYNC)        \
+		 NODES_PRIOS=$(NODES_PRIOS)        \
+		 NODES_SYNC_SB=$(NODES_SYNC_SB)    \
+		 CLUSTER_OPTS=$(CLUSTER_OPTS)      \
+		 TMUX_EXTRA_COMMANDS=$(TMUX_EXTRA_COMMANDS) \
+		 TMUX_LAYOUT=$(TMUX_LAYOUT)        \
+	     tmux-session
 
 azcluster: all
 	$(PG_AUTOCTL) do azure create         \
