@@ -1533,16 +1533,16 @@ BuildNodesArrayValues(NodeAddressArray *nodeArray,
 		int lsnParamIndex = paramIndex + 1;
 
 		sqlParams->types[idParamIndex] = INT4OID;
-		strlcpy(sqlParams->nodeIds[idParamIndex], nodeIdString, NODEID_MAX_LENGTH);
+		strlcpy(sqlParams->nodeIds[nodeIndex], nodeIdString, NODEID_MAX_LENGTH);
 
 		/* store the (char *) pointer to the data in values */
-		sqlParams->values[idParamIndex] = sqlParams->nodeIds[idParamIndex];
+		sqlParams->values[idParamIndex] = sqlParams->nodeIds[nodeIndex];
 
 		sqlParams->types[lsnParamIndex] = LSNOID;
-		strlcpy(sqlParams->lsns[lsnParamIndex], node->lsn, PG_LSN_MAXLENGTH);
+		strlcpy(sqlParams->lsns[nodeIndex], node->lsn, PG_LSN_MAXLENGTH);
 
 		/* store the (char *) pointer to the data in values */
-		sqlParams->values[lsnParamIndex] = sqlParams->lsns[lsnParamIndex];
+		sqlParams->values[lsnParamIndex] = sqlParams->lsns[nodeIndex];
 
 		valuesIndex += sformat(buffer + valuesIndex, BUFSIZE - valuesIndex,
 							   "%s($%d, $%d%s)",
