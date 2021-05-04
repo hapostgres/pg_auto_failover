@@ -2874,6 +2874,7 @@ pgsql_identify_system(PGSQL *pgsql, IdentifySystem *system)
 	if (!isContext.parsedOk)
 	{
 		log_error("Failed to get result from IDENTIFY_SYSTEM");
+		PQfinish(connection);
 		return false;
 	}
 
@@ -2904,18 +2905,17 @@ pgsql_identify_system(PGSQL *pgsql, IdentifySystem *system)
 		PQclear(result);
 		clear_results(pgsql);
 
-		/* now we're done with running SQL queries */
-		PQfinish(connection);
-
 		if (!hContext.parsedOk)
 		{
 			log_error("Failed to get result from TIMELINE_HISTORY");
+			PQfinish(connection);
 			return false;
 		}
 
 		if (!parseTimeLineHistory(hContext.filename, hContext.content, system))
 		{
 			/* errors have already been logged */
+			PQfinish(connection);
 			return false;
 		}
 
@@ -2928,6 +2928,9 @@ pgsql_identify_system(PGSQL *pgsql, IdentifySystem *system)
 				  (uint32_t) (current->begin >> 32),
 				  (uint32_t) current->begin);
 	}
+
+	/* now we're done with running SQL queries */
+	PQfinish(connection);
 
 	return true;
 }
