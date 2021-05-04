@@ -2878,53 +2878,56 @@ pgsql_identify_system(PGSQL *pgsql, IdentifySystem *system)
 	}
 
 	/* while at it, we also run the TIMELINE_HISTORY command */
-	TimelineHistoryResult hContext = { 0 };
-
-	char sql[BUFSIZE] = { 0 };
-	sformat(sql, sizeof(sql), "TIMELINE_HISTORY %d", system->timeline);
-
-	result = PQexec(connection, sql);
-
-	if (!is_response_ok(result))
+	if (system->timeline > 1)
 	{
-		log_error("Failed to request TIMELINE_HISTORY: %s",
-				  PQerrorMessage(connection));
+		TimelineHistoryResult hContext = { 0 };
+
+		char sql[BUFSIZE] = { 0 };
+		sformat(sql, sizeof(sql), "TIMELINE_HISTORY %d", system->timeline);
+
+		result = PQexec(connection, sql);
+
+		if (!is_response_ok(result))
+		{
+			log_error("Failed to request TIMELINE_HISTORY: %s",
+					  PQerrorMessage(connection));
+			PQclear(result);
+			clear_results(pgsql);
+
+			PQfinish(connection);
+
+			return false;
+		}
+
+		(void) parseTimelineHistoryResult((void *) &hContext, result);
+
 		PQclear(result);
 		clear_results(pgsql);
 
+		/* now we're done with running SQL queries */
 		PQfinish(connection);
 
-		return false;
+		if (!hContext.parsedOk)
+		{
+			log_error("Failed to get result from TIMELINE_HISTORY");
+			return false;
+		}
+
+		if (!parseTimeLineHistory(hContext.filename, hContext.content, system))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
+		TimeLineHistoryEntry *current =
+			&(system->timelines.history[system->timelines.count - 1]);
+
+		log_debug("TIMELINE_HISTORY: \"%s\", timeline %d started at %X/%X",
+				  hContext.filename,
+				  current->tli,
+				  (uint32_t) (current->begin >> 32),
+				  (uint32_t) current->begin);
 	}
-
-	(void) parseTimelineHistoryResult((void *) &hContext, result);
-
-	PQclear(result);
-	clear_results(pgsql);
-
-	/* now we're done with running SQL queries */
-	PQfinish(connection);
-
-	if (!hContext.parsedOk)
-	{
-		log_error("Failed to get result from TIMELINE_HISTORY");
-		return false;
-	}
-
-	if (!parseTimeLineHistory(hContext.filename, hContext.content, system))
-	{
-		/* errors have already been logged */
-		return false;
-	}
-
-	TimeLineHistoryEntry *current =
-		&(system->timelines.history[system->timelines.count - 1]);
-
-	log_debug("TIMELINE_HISTORY: \"%s\", timeline %d started at %X/%X",
-			  hContext.filename,
-			  current->tli,
-			  (uint32_t) (current->begin >> 32),
-			  (uint32_t) current->begin);
 
 	return true;
 }
