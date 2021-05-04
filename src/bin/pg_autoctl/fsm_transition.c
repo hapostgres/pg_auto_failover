@@ -1033,6 +1033,15 @@ fsm_rewind_or_init(Keeper *keeper)
 bool
 fsm_maintain_replication_slots(Keeper *keeper)
 {
+	LocalPostgresServer *postgres = &(keeper->postgres);
+
+	/* first. check that we're on the same timeline as the new primary */
+	if (!standby_check_timeline_with_upstream(postgres))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
 	return keeper_maintain_replication_slots(keeper);
 }
 
@@ -1390,7 +1399,14 @@ fsm_follow_new_primary(Keeper *keeper)
 	}
 
 	/* now, in case we have an init state file around, remove it */
-	return unlink_file(config->pathnames.init);
+	if (!unlink_file(config->pathnames.init))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/* finally, check that we're on the same timeline as the new primary */
+	return standby_check_timeline_with_upstream(postgres);
 }
 
 

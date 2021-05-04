@@ -2506,13 +2506,19 @@ pgsql_get_postgres_metadata(PGSQL *pgsql,
 		" then coalesce(pg_last_wal_receive_lsn(), pg_last_wal_replay_lsn())"
 		" else pg_current_wal_flush_lsn()"
 		" end as current_lsn,"
-		" pg_control_version, catalog_version_no, system_identifier"
+		" pg_control_version, catalog_version_no, system_identifier,"
+		" timeline_id"
 		" from (values(1)) as dummy"
 		" full outer join"
 		" (select pg_control_version, catalog_version_no, system_identifier "
 		"    from pg_control_system()"
 		" )"
-		" as control on true"
+		" as control_system on true"
+		" full outer join"
+		" (select timeline_id "
+		"    from pg_control_checkpoint()"
+		" )"
+		" as control_checkpoint on true"
 		" full outer join"
 		" ("
 		"   select sync_state"
@@ -2577,9 +2583,9 @@ parsePgMetadata(void *ctx, PGresult *result)
 	PgMetadata *context = (PgMetadata *) ctx;
 	char *value;
 
-	if (PQnfields(result) != 6)
+	if (PQnfields(result) != 7)
 	{
-		log_error("Query returned %d columns, expected 3", PQnfields(result));
+		log_error("Query returned %d columns, expected 7", PQnfields(result));
 		context->parsedOk = false;
 		return;
 	}
@@ -2635,6 +2641,14 @@ parsePgMetadata(void *ctx, PGresult *result)
 	if (!stringToUInt64(value, &(context->control.system_identifier)))
 	{
 		log_error("Failed to parse system_identifier \"%s\"", value);
+		context->parsedOk = true;
+		return;
+	}
+
+	value = PQgetvalue(result, 0, 6);
+	if (!stringToUInt(value, &(context->control.timeline_id)))
+	{
+		log_error("Failed to parse timeline_id \"%s\"", value);
 		context->parsedOk = true;
 		return;
 	}

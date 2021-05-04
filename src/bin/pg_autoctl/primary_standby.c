@@ -1456,3 +1456,91 @@ standby_cleanup_as_primary(LocalPostgresServer *postgres)
 
 	return true;
 }
+
+
+/*
+ * standby_check_timeline_with_upstream returns true when the current timeline
+ * on the local node (a standby) is the same as the timeline fetched on the
+ * upstream node setup in its replicationSource.
+ */
+bool
+standby_check_timeline_with_upstream(LocalPostgresServer *postgres)
+{
+	ReplicationSource *replicationSource = &(postgres->replicationSource);
+	NodeAddress *primaryNode = &(replicationSource->primaryNode);
+
+	/* pg_control_checkpoint() returns the local timeline, update it now */
+	if (!pgsql_checkpoint(&(postgres->sqlClient)))
+	{
+		log_warn("Failed to checkpoint before checking current timeline, "
+				 "will try again");
+		return false;
+	}
+
+	/* fetch timeline information from the upstream node */
+	if (!pgctl_identify_system(replicationSource))
+	{
+		log_error("Failed to establish a replication connection "
+				  "to the new primary, see above for details");
+		return false;
+	}
+
+	/* fetch most recent local metadata, including the timeline id. */
+	if (!pgsql_get_postgres_metadata(&(postgres->sqlClient),
+									 &(postgres->postgresSetup.is_in_recovery),
+									 postgres->pgsrSyncState,
+									 postgres->currentLSN,
+									 &(postgres->postgresSetup.control)))
+	{
+		log_error("Failed to update the local Postgres metadata");
+		return false;
+	}
+
+	uint32_t upstreamTimeline = replicationSource->system.timeline;
+	uint32_t localTimeline = postgres->postgresSetup.control.timeline_id;
+
+	/*
+	 * We only allow this transition when the standby node as caught-up with
+	 * the upstream timeline. As streaming replication is supposed to be a
+	 * clean history replay (no PITR shenanigans), it is never expected that
+	 * the local timeline would be greater than the timeline found on the
+	 * upstream node.
+	 */
+	if (upstreamTimeline < localTimeline)
+	{
+		log_error("Current timeline on upstream node %d \"%s\" (%s:%d) "
+				  "is %d, and current timeline on this standby node is %d",
+				  primaryNode->nodeId,
+				  primaryNode->name,
+				  primaryNode->host,
+				  primaryNode->port,
+				  upstreamTimeline,
+				  localTimeline);
+
+		return false;
+	}
+	else if (upstreamTimeline > localTimeline)
+	{
+		log_warn("Current timeline on upstream node %d \"%s\" (%s:%d) "
+				 "is %d, and current timeline on this standby node is still %d",
+				 primaryNode->nodeId,
+				 primaryNode->name,
+				 primaryNode->host,
+				 primaryNode->port,
+				 upstreamTimeline,
+				 localTimeline);
+
+		return false;
+	}
+	else if (upstreamTimeline == localTimeline)
+	{
+		log_info("Reached timeline %d, same as upstream node %d \"%s\" (%s:%d)",
+				 localTimeline,
+				 primaryNode->nodeId,
+				 primaryNode->name,
+				 primaryNode->host,
+				 primaryNode->port);
+	}
+
+	return upstreamTimeline == localTimeline;
+}
