@@ -1022,8 +1022,15 @@ remove_node_by_host(PG_FUNCTION_ARGS)
 	char *nodeHost = text_to_cstring(nodeHostText);
 	int32 nodePort = PG_GETARG_INT32(1);
 
-
 	AutoFailoverNode *currentNode = GetAutoFailoverNode(nodeHost, nodePort);
+
+	if (currentNode == NULL)
+	{
+		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						errmsg("couldn't find node with "
+							   "hostname \"%s\" and port %d",
+							   nodeHost, nodePort)));
+	}
 
 	PG_RETURN_BOOL(RemoveNode(currentNode));
 }
