@@ -130,13 +130,18 @@ main(int argc, char **argv)
 	 * environment variable.
 	 */
 	strlcpy(pg_autoctl_argv0, argv[0], MAXPGPATH);
-	if (!get_env_copy("PG_AUTOCTL_DEBUG_BIN_PATH", pg_autoctl_program, MAXPGPATH))
+	if (env_exists("PG_AUTOCTL_DEBUG_BIN_PATH"))
 	{
-		if (!set_program_absolute_path(pg_autoctl_program, MAXPGPATH))
+		if (!get_env_copy("PG_AUTOCTL_DEBUG_BIN_PATH", pg_autoctl_program, MAXPGPATH))
 		{
 			/* errors have already been logged */
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
+	}
+	else if (!set_program_absolute_path(pg_autoctl_program, MAXPGPATH))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
 	if (!commandline_run(&command, argc, argv))

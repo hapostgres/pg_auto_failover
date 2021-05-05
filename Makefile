@@ -195,13 +195,13 @@ $(TMUX_SCRIPT): bin
 
 tmux-script: $(TMUX_SCRIPT) ;
 
-tmux-clean:
+tmux-clean: bin
 	$(PG_AUTOCTL) do tmux clean           \
          --root $(TMUX_TOP_DIR)           \
          --first-pgport $(FIRST_PGPORT)   \
          --nodes $(NODES)
 
-tmux-session:
+tmux-session: bin
 	$(PG_AUTOCTL) do tmux session         \
          --root $(TMUX_TOP_DIR)           \
          --first-pgport $(FIRST_PGPORT)   \
@@ -213,7 +213,11 @@ tmux-session:
          --binpath $(BINPATH)             \
          --layout $(TMUX_LAYOUT)
 
-cluster: install tmux-clean tmux-session ;
+cluster: install tmux-clean
+	# This is explicitly not a target, otherwise when make uses multiple jobs
+	# tmux-clean and tmux-session can have a race condidition where tmux-clean
+	# removes the files that are just created by tmux-session.
+	$(MAKE) tmux-session
 
 valgrind-session: build-test
 	docker run                             \
