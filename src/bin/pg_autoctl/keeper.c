@@ -1677,9 +1677,9 @@ keeper_remove(Keeper *keeper, KeeperConfig *config)
 		 * we can call `pg_autoctl drop node` again when we removed the node
 		 * from the monitor already, but failed to remove the state file.
 		 */
-		if (!monitor_remove(&(keeper->monitor),
-							config->hostname,
-							config->pgSetup.pgport))
+		if (!monitor_remove_by_hostname(&(keeper->monitor),
+										config->hostname,
+										config->pgSetup.pgport))
 		{
 			/* errors have already been logged */
 			return false;

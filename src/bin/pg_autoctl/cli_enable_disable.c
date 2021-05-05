@@ -1714,9 +1714,10 @@ cli_disable_monitor(int argc, char **argv)
 					 nodesArray.nodes[nodeIndex].host,
 					 nodesArray.nodes[nodeIndex].port);
 
-			if (!monitor_remove(monitor,
-								nodesArray.nodes[nodeIndex].host,
-								nodesArray.nodes[nodeIndex].port))
+			if (!monitor_remove_by_hostname(
+					monitor,
+					nodesArray.nodes[nodeIndex].host,
+					nodesArray.nodes[nodeIndex].port))
 			{
 				/* errors have already been logged */
 				exit(EXIT_CODE_MONITOR);

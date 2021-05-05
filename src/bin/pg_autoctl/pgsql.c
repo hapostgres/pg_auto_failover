@@ -61,7 +61,9 @@ parseSingleValueResult(void *ctx, PGresult *result)
 {
 	SingleValueResultContext *context = (SingleValueResultContext *) ctx;
 
-	if (PQntuples(result) == 1)
+	context->ntuples = PQntuples(result);
+
+	if (context->ntuples == 1)
 	{
 		char *value = PQgetvalue(result, 0, 0);
 
