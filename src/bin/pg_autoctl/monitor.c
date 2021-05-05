@@ -2794,7 +2794,7 @@ monitor_print_formation_settings_as_json(Monitor *monitor, char *formation)
 		" ), "
 		" f(json) as "
 		" ( "
-		"   select row_to_json(settings) "
+		"   select jsonb_agg(row_to_json(settings)) "
 		"     from settings "
 		"    where context = 'formation' "
 		" ), "
