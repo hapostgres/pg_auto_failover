@@ -860,6 +860,7 @@ cli_drop_node_getopts(int argc, char **argv)
 
 	static struct option long_options[] = {
 		{ "pgdata", required_argument, NULL, 'D' },
+		{ "monitor", required_argument, NULL, 'm' },
 		{ "destroy", no_argument, NULL, 'd' },
 		{ "hostname", required_argument, NULL, 'n' },
 		{ "pgport", required_argument, NULL, 'p' },
@@ -881,6 +882,19 @@ cli_drop_node_getopts(int argc, char **argv)
 			{
 				strlcpy(options.pgSetup.pgdata, optarg, MAXPGPATH);
 				log_trace("--pgdata %s", options.pgSetup.pgdata);
+				break;
+			}
+
+			case 'm':
+			{
+				if (!validate_connection_string(optarg))
+				{
+					log_fatal("Failed to parse --monitor connection string, "
+							  "see above for details.");
+					exit(EXIT_CODE_BAD_ARGS);
+				}
+				strlcpy(options.monitor_pguri, optarg, MAXCONNINFO);
+				log_trace("--monitor %s", options.monitor_pguri);
 				break;
 			}
 
@@ -976,7 +990,23 @@ cli_drop_node_getopts(int argc, char **argv)
 	}
 
 	/* now that we have the command line parameters, prepare the options */
-	(void) prepare_keeper_options(&options);
+	/* when we have a monitor URI we don't need PGDATA */
+	if (cli_use_monitor_option(&options))
+	{
+		if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
+		{
+			log_warn("Given --monitor URI, the --pgdata option is ignored");
+			log_info("Connecting to monitor at \"%s\"", options.monitor_pguri);
+
+			/* the rest of the program needs pgdata actually empty */
+			bzero((void *) options.pgSetup.pgdata,
+				  sizeof(options.pgSetup.pgdata));
+		}
+	}
+	else
+	{
+		(void) prepare_keeper_options(&options);
+	}
 
 	/* publish our option parsing in the global variable */
 	keeperOptions = options;
@@ -994,81 +1024,74 @@ cli_drop_node(int argc, char **argv)
 {
 	KeeperConfig config = keeperOptions;
 
-	bool missingPgdataIsOk = true;
-	bool pgIsNotRunningIsOk = true;
-	bool monitorDisabledIsOk = true;
+	pgAutoCtlNodeRole localNodeRole =
+		IS_EMPTY_STRING_BUFFER(config.pgSetup.pgdata)
+		? PG_AUTOCTL_ROLE_UNKNOWN
+		: ProbeConfigurationFileRole(config.pathnames.config);
+
+	bool dropLocalNode =
+		!IS_EMPTY_STRING_BUFFER(config.pgSetup.pgdata) &&
+		localNodeRole == PG_AUTOCTL_ROLE_KEEPER;
 
 	/*
 	 * The configuration file is the last bit we remove, so we don't have to
 	 * implement "continue from previous failed attempt" when the configuration
 	 * file does not exists.
 	 */
-	if (!file_exists(config.pathnames.config))
+	if (dropLocalNode && !file_exists(config.pathnames.config))
 	{
 		log_error("Failed to find expected configuration file \"%s\"",
 				  config.pathnames.config);
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	/*
-	 * We are going to need to use the right pg_ctl binary to control the
-	 * Postgres cluster: pg_ctl stop.
-	 */
-	switch (ProbeConfigurationFileRole(config.pathnames.config))
+	if (dropLocalNode)
 	{
-		case PG_AUTOCTL_ROLE_MONITOR:
-		{
-			/*
-			 * Now check --hostname and --pgport and remove the entry on the
-			 * monitor.
-			 */
-			if (IS_EMPTY_STRING_BUFFER(config.hostname) ||
-				config.pgSetup.pgport == 0)
-			{
-				log_fatal("To remove a node from the monitor, both the "
-						  "--hostname and --pgport options are required");
-				exit(EXIT_CODE_BAD_ARGS);
-			}
+		bool missingPgdataIsOk = true;
+		bool pgIsNotRunningIsOk = true;
+		bool monitorDisabledIsOk = true;
 
-			/* pg_autoctl drop node on the monitor drops another node */
-			(void) cli_drop_node_from_monitor(&config,
-											  config.hostname,
-											  config.pgSetup.pgport);
-			return;
+		if (!IS_EMPTY_STRING_BUFFER(config.hostname) ||
+			config.pgSetup.pgport != 0)
+		{
+			log_fatal("Only dropping the local node is supported");
+			log_info("To drop another node, please use this command "
+					 "from the monitor itself.");
+			exit(EXIT_CODE_BAD_ARGS);
 		}
 
-		case PG_AUTOCTL_ROLE_KEEPER:
+		/* just read the keeper file in given KeeperConfig */
+		if (!keeper_config_read_file(&config,
+									 missingPgdataIsOk,
+									 pgIsNotRunningIsOk,
+									 monitorDisabledIsOk))
 		{
-			if (!IS_EMPTY_STRING_BUFFER(config.hostname) ||
-				config.pgSetup.pgport != 0)
-			{
-				log_fatal("Only dropping the local node is supported");
-				log_info("To drop another node, please use this command "
-						 "from the monitor itself.");
-				exit(EXIT_CODE_BAD_ARGS);
-			}
-
-			/* just read the keeper file in given KeeperConfig */
-			if (!keeper_config_read_file(&config,
-										 missingPgdataIsOk,
-										 pgIsNotRunningIsOk,
-										 monitorDisabledIsOk))
-			{
-				exit(EXIT_CODE_BAD_CONFIG);
-			}
-
-			/* drop the node and maybe destroy its PGDATA entirely. */
-			(void) cli_drop_local_node(&config, dropAndDestroy);
-
-			return;
-		}
-
-		default:
-		{
-			log_fatal("Unrecognized configuration file \"%s\"",
-					  config.pathnames.config);
 			exit(EXIT_CODE_BAD_CONFIG);
 		}
+
+		/* drop the node and maybe destroy its PGDATA entirely. */
+		(void) cli_drop_local_node(&config, dropAndDestroy);
+
+		return;
+	}
+	else
+	{
+		/*
+		 * Now check --hostname and --pgport and remove the entry on the
+		 * monitor.
+		 */
+		if (IS_EMPTY_STRING_BUFFER(config.hostname) ||
+			config.pgSetup.pgport == 0)
+		{
+			log_fatal("To remove a node from the monitor, both the "
+					  "--hostname and --pgport options are required");
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		/* pg_autoctl drop node on the monitor drops another node */
+		(void) cli_drop_node_from_monitor(&config,
+										  config.hostname,
+										  config.pgSetup.pgport);
 	}
 }
 
@@ -1158,27 +1181,8 @@ static void
 cli_drop_node_from_monitor(KeeperConfig *config, const char *hostname, int port)
 {
 	Monitor monitor = { 0 };
-	MonitorConfig mconfig = { 0 };
-	char connInfo[MAXCONNINFO] = { 0 };
 
-	bool missingPgdataIsOk = true;
-	bool pgIsNotRunningIsOk = true;
-
-	if (!monitor_config_init_from_pgsetup(&mconfig,
-										  &(config->pgSetup),
-										  missingPgdataIsOk,
-										  pgIsNotRunningIsOk))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_CONFIG);
-	}
-
-	/* expose the pgSetup in the given KeeperConfig */
-	config->pgSetup = mconfig.pgSetup;
-
-	/* prepare to connect to the monitor, locally */
-	pg_setup_get_local_connection_string(&(mconfig.pgSetup), connInfo);
-	monitor_init(&monitor, connInfo);
+	(void) cli_monitor_init_from_option_or_config(&monitor, config);
 
 	if (!monitor_remove(&monitor, (char *) hostname, port))
 	{
