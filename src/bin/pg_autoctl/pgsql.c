@@ -2507,18 +2507,16 @@ pgsql_get_postgres_metadata(PGSQL *pgsql,
 		" else pg_current_wal_flush_lsn()"
 		" end as current_lsn,"
 		" pg_control_version, catalog_version_no, system_identifier,"
-		" timeline_id"
+		" case when pg_is_in_recovery()"
+		" then (select received_tli from pg_stat_wal_receiver)"
+		" else (select timeline_id from pg_control_checkpoint()) "
+		" end as timeline_id "
 		" from (values(1)) as dummy"
 		" full outer join"
 		" (select pg_control_version, catalog_version_no, system_identifier "
 		"    from pg_control_system()"
 		" )"
-		" as control_system on true"
-		" full outer join"
-		" (select timeline_id "
-		"    from pg_control_checkpoint()"
-		" )"
-		" as control_checkpoint on true"
+		" as control on true"
 		" full outer join"
 		" ("
 		"   select sync_state"
@@ -2645,12 +2643,24 @@ parsePgMetadata(void *ctx, PGresult *result)
 		return;
 	}
 
-	value = PQgetvalue(result, 0, 6);
-	if (!stringToUInt(value, &(context->control.timeline_id)))
+	/*
+	 * On a standby node that doesn't have a primary_conninfo then we fail to
+	 * retrieve the received_tli from pg_stat_wal_receiver. We encode the NULL
+	 * we get in that case with a zero, which is not a value we expect.
+	 */
+	if (PQgetisnull(result, 0, 6))
 	{
-		log_error("Failed to parse timeline_id \"%s\"", value);
-		context->parsedOk = true;
-		return;
+		context->control.timeline_id = 0;
+	}
+	else
+	{
+		value = PQgetvalue(result, 0, 6);
+		if (!stringToUInt(value, &(context->control.timeline_id)))
+		{
+			log_error("Failed to parse timeline_id \"%s\"", value);
+			context->parsedOk = true;
+			return;
+		}
 	}
 
 	context->parsedOk = true;

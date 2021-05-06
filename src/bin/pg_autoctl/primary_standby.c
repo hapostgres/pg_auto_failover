@@ -1469,14 +1469,6 @@ standby_check_timeline_with_upstream(LocalPostgresServer *postgres)
 	ReplicationSource *replicationSource = &(postgres->replicationSource);
 	NodeAddress *primaryNode = &(replicationSource->primaryNode);
 
-	/* pg_control_checkpoint() returns the local timeline, update it now */
-	if (!pgsql_checkpoint(&(postgres->sqlClient)))
-	{
-		log_warn("Failed to checkpoint before checking current timeline, "
-				 "will try again");
-		return false;
-	}
-
 	/* fetch timeline information from the upstream node */
 	if (!pgctl_identify_system(replicationSource))
 	{
@@ -1498,6 +1490,14 @@ standby_check_timeline_with_upstream(LocalPostgresServer *postgres)
 
 	uint32_t upstreamTimeline = replicationSource->system.timeline;
 	uint32_t localTimeline = postgres->postgresSetup.control.timeline_id;
+
+	/* we might not be connected to the primary yet */
+	if (localTimeline == 0)
+	{
+		log_warn("Current received timeline is unknown, pg_autoctl will "
+				 "retry this transition.");
+		return false;
+	}
 
 	/*
 	 * We only allow this transition when the standby node as caught-up with
