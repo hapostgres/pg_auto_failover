@@ -1565,11 +1565,7 @@ IsBeingPromoted(AutoFailoverNode *node)
 
 			(node->reportedState == REPLICATION_STATE_STOP_REPLICATION &&
 			 (node->goalState == REPLICATION_STATE_STOP_REPLICATION ||
-			  node->goalState == REPLICATION_STATE_WAIT_PRIMARY)) ||
-
-			(node->reportedState == REPLICATION_STATE_WAIT_PRIMARY &&
-			 (node->goalState == REPLICATION_STATE_WAIT_PRIMARY ||
-			  node->goalState == REPLICATION_STATE_PRIMARY)));
+			  node->goalState == REPLICATION_STATE_WAIT_PRIMARY)));
 }
 
 

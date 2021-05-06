@@ -633,6 +633,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 * concurrently making progress.
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_DEMOTED) &&
+		IsHealthy(primaryNode) &&
 		((primaryNode->reportedState == REPLICATION_STATE_WAIT_PRIMARY ||
 		  primaryNode->reportedState == REPLICATION_STATE_JOIN_PRIMARY) &&
 		 primaryNode->goalState == REPLICATION_STATE_PRIMARY))
@@ -658,6 +659,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 *  demoted -> catchingup
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_DEMOTED) &&
+		IsHealthy(primaryNode) &&
 		(IsCurrentState(primaryNode, REPLICATION_STATE_JOIN_PRIMARY) ||
 		 IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
 		 IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY)))
