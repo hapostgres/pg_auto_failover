@@ -1028,46 +1028,28 @@ cli_drop_node_getopts(int argc, char **argv)
 	/*
 	 * pg_autoctl drop node can be used with one of those set of arguments:
 	 *   --pgdata ...                 # to drop the local node
+	 *   --pgdata <monitor>           # to drop any node from the monitor
 	 *   --formation ... --name ...   # address a node on the monitor
 	 *   --hostname ... --port ...    # address a node on the monitor
+	 *
+	 * We check about the PGDATA being related to a monitor or a keeper later,
+	 * here we focus on the optargs. Remember that --formation can be skipped
+	 * to mean "default", and --pgport can be skipped to mean either PGPORT
+	 * from the environment or just 5432.
 	 */
-	if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
+	if (!IS_EMPTY_STRING_BUFFER(options.name) &&
+		!IS_EMPTY_STRING_BUFFER(options.hostname))
 	{
-		if (!IS_EMPTY_STRING_BUFFER(options.formation) ||
-			!IS_EMPTY_STRING_BUFFER(options.name) ||
-			!IS_EMPTY_STRING_BUFFER(options.hostname) ||
-			options.pgSetup.pgport != 0)
-		{
-			log_fatal("pg_autoctl drop node can either drop the local node "
-					  "when given PGDATA or --pgdata, or drop another node "
-					  "from the monitor, using --formation and --name, or "
-					  "using --hostname and --pgport.");
-			log_fatal("Here, pgdata is set to \"%s\", so other options are "
-					  "not accepted", options.pgSetup.pgdata);
-
-			exit(EXIT_CODE_BAD_ARGS);
-		}
+		log_fatal("pg_autoctl drop node target can either be specified "
+				  "using [ --formation --name ], or "
+				  "using [ --hostname and --pgport ], but not both.");
+		exit(EXIT_CODE_BAD_ARGS);
 	}
-	else if (!IS_EMPTY_STRING_BUFFER(options.name))
+
+	/* use the "default" formation when not given */
+	if (IS_EMPTY_STRING_BUFFER(options.formation))
 	{
-		if (!IS_EMPTY_STRING_BUFFER(options.hostname) ||
-			options.pgSetup.pgport != 0)
-		{
-			log_fatal("pg_autoctl drop node can either drop the local node "
-					  "when given PGDATA or --pgdata, or drop another node "
-					  "from the monitor, using --formation and --name, or "
-					  "using --hostname and --pgport.");
-			log_fatal("Here, --name is set to \"%s\", so other options are "
-					  "not accepted", options.name);
-
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-
-		/* use the "default" formation when not given */
-		if (IS_EMPTY_STRING_BUFFER(options.formation))
-		{
-			strlcpy(options.formation, FORMATION_DEFAULT, NAMEDATALEN);
-		}
+		strlcpy(options.formation, FORMATION_DEFAULT, NAMEDATALEN);
 	}
 
 	/* publish our option parsing in the global variable */
