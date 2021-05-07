@@ -999,7 +999,9 @@ cli_drop_node_getopts(int argc, char **argv)
 		(!IS_EMPTY_STRING_BUFFER(options.hostname) ||
 		 options.pgSetup.pgport != 0))
 	{
-		log_error("Please use either --hostname and --pgport or --destroy");
+		log_error("Please use either [ --hostname --pgport ] "
+				  " or [ --formation --name ] to target a remote node, "
+				  " or --destroy to destroy the local node.");
 		log_info("Destroying a node is not supported from a distance");
 		exit(EXIT_CODE_BAD_ARGS);
 	}
