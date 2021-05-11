@@ -10,6 +10,7 @@
 #include <pwd.h>
 #include <stdbool.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "postgres_fe.h"
@@ -53,6 +54,10 @@
 	make_int_option_default("Service", "StartLimitBurst", NULL, true, \
 							&(config->StartLimitBurst), 20)
 
+#define OPTION_SYSTEMD_EXECRELOAD(config) \
+	make_strbuf_option_default("Service", "ExecReload", NULL, true, BUFSIZE, \
+							   config->ExecReload, "/usr/bin/pg_autoctl reload")
+
 #define OPTION_SYSTEMD_WANTEDBY(config) \
 	make_strbuf_option_default("Install", "WantedBy", NULL, true, BUFSIZE, \
 							   config->WantedBy, "multi-user.target")
@@ -66,6 +71,7 @@
 		OPTION_SYSTEMD_EXECSTART(config), \
 		OPTION_SYSTEMD_RESTART(config), \
 		OPTION_SYSTEMD_STARTLIMITBURST(config), \
+		OPTION_SYSTEMD_EXECRELOAD(config), \
 		OPTION_SYSTEMD_WANTEDBY(config), \
 		INI_OPTION_LAST \
 	}
@@ -78,7 +84,6 @@
 void
 systemd_config_init(SystemdServiceConfig *config, const char *pgdata)
 {
-	char *user = pg_setup_get_username(&(config->pgSetup));
 	IniOption systemdOptions[] = SET_INI_OPTIONS_ARRAY(config);
 
 	/* time to setup config->pathnames.systemd */
@@ -90,8 +95,24 @@ systemd_config_init(SystemdServiceConfig *config, const char *pgdata)
 	 * new directory, at pg_basebackup time. It turns out that systemd does not
 	 * like that, at all. Let's assign WorkingDirectory to a safe place, like
 	 * the HOME of the USER running the service.
+	 *
+	 * Also we expect to be running the service with the user that owns the
+	 * PGDATA directory, rather than the current user. After all, the command
+	 *
+	 *   $ pg_autoctl show systemd -q | sudo tee /etc/systemd/system/...
+	 *
+	 * Might be ran as root.
 	 */
-	struct passwd *pw = getpwnam(user);
+	struct stat pgdataStat;
+
+	if (stat(config->pgSetup.pgdata, &pgdataStat) != 0)
+	{
+		log_error("Failed to grab file stat(1) for \"%s\": %m",
+				  config->pgSetup.pgdata);
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	struct passwd *pw = getpwuid(pgdataStat.st_uid);
 	if (pw)
 	{
 		log_debug("username found in passwd: %s's HOME is \"%s\"",
@@ -103,11 +124,12 @@ systemd_config_init(SystemdServiceConfig *config, const char *pgdata)
 	sformat(config->EnvironmentPGDATA, BUFSIZE,
 			"'PGDATA=%s'", config->pgSetup.pgdata);
 
-	/* adjust the user to the current system user */
-	strlcpy(config->User, user, NAMEDATALEN);
+	/* adjust the user to the owner of PGDATA */
+	strlcpy(config->User, pw->pw_name, NAMEDATALEN);
 
 	/* adjust the program to the current full path of argv[0] */
 	sformat(config->ExecStart, BUFSIZE, "%s run", pg_autoctl_program);
+	sformat(config->ExecReload, BUFSIZE, "%s reload", pg_autoctl_program);
 
 	if (!ini_validate_options(systemdOptions))
 	{

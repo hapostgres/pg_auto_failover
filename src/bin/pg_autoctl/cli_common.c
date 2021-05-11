@@ -72,6 +72,8 @@ static void stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathname
  *		{ "verbose", no_argument, NULL, 'v' },
  *		{ "quiet", no_argument, NULL, 'q' },
  *		{ "help", no_argument, NULL, 'h' },
+ *		{ "secondary", no_argument, NULL, 'z' }
+ *      { "citus-cluster", required_argument, NULL, 'Z' },
  *		{ "candidate-priority", required_argument, NULL, 'P'},
  *		{ "replication-quorum", required_argument, NULL, 'r'},
  *		{ "help", no_argument, NULL, 0 },
@@ -105,11 +107,12 @@ cli_common_keeper_getopts(int argc, char **argv,
 	LocalOptionConfig.prepare_promotion_walreceiver = -1;
 	LocalOptionConfig.postgresql_restart_failure_timeout = -1;
 	LocalOptionConfig.postgresql_restart_failure_max_retries = -1;
-	LocalOptionConfig.pgSetup.settings.candidatePriority =
-		FAILOVER_NODE_CANDIDATE_PRIORITY;
+	LocalOptionConfig.pgSetup.settings.candidatePriority = -1;
 	LocalOptionConfig.pgSetup.settings.replicationQuorum =
 		FAILOVER_NODE_REPLICATION_QUORUM;
 
+	/* default to a "primary" in citus node_role terms */
+	LocalOptionConfig.citusRole = CITUS_ROLE_PRIMARY;
 
 	optind = 0;
 
@@ -182,6 +185,26 @@ cli_common_keeper_getopts(int argc, char **argv,
 				break;
 			}
 
+			case 'z':
+			{
+				/* { "secondary", no_argument, NULL, 'z' } */
+				strlcpy(LocalOptionConfig.citusRoleStr, "secondary", NAMEDATALEN);
+				LocalOptionConfig.citusRole = CITUS_ROLE_SECONDARY;
+				log_trace("--secondary");
+				break;
+			}
+
+			case 'Z':
+			{
+				/* { "citus-cluster", required_argument, NULL, 'Z' }, */
+				strlcpy(LocalOptionConfig.pgSetup.citusClusterName,
+						optarg,
+						NAMEDATALEN);
+				log_trace("--citus-cluster %s",
+						  LocalOptionConfig.pgSetup.citusClusterName);
+				break;
+			}
+
 			case 'U':
 			{
 				/* { "username", required_argument, NULL, 'U' } */
@@ -193,7 +216,7 @@ cli_common_keeper_getopts(int argc, char **argv,
 			case 'A':
 			{
 				/* { "auth", required_argument, NULL, 'A' }, */
-				if (!IS_EMPTY_STRING_BUFFER(LocalOptionConfig.pgSetup.authMethod))
+				if (LocalOptionConfig.pgSetup.hbaLevel == HBA_EDIT_SKIP)
 				{
 					errors++;
 					log_error("Please use either --auth or --skip-pg-hba");
@@ -201,6 +224,15 @@ cli_common_keeper_getopts(int argc, char **argv,
 
 				strlcpy(LocalOptionConfig.pgSetup.authMethod, optarg, NAMEDATALEN);
 				log_trace("--auth %s", LocalOptionConfig.pgSetup.authMethod);
+
+				if (LocalOptionConfig.pgSetup.hbaLevel == HBA_EDIT_UNKNOWN)
+				{
+					strlcpy(LocalOptionConfig.pgSetup.hbaLevelStr,
+							pgsetup_hba_level_to_string(HBA_EDIT_MINIMAL),
+							sizeof(LocalOptionConfig.pgSetup.hbaLevelStr));
+
+					LocalOptionConfig.pgSetup.hbaLevel = HBA_EDIT_MINIMAL;
+				}
 				break;
 			}
 
@@ -231,8 +263,7 @@ cli_common_keeper_getopts(int argc, char **argv,
 			case 'L':
 			{
 				/* { "pg-hba-lan", required_argument, NULL, 'L' }, */
-				if (LocalOptionConfig.pgSetup.hbaLevel != HBA_EDIT_UNKNOWN &&
-					LocalOptionConfig.pgSetup.hbaLevel != HBA_EDIT_LAN)
+				if (LocalOptionConfig.pgSetup.hbaLevel == HBA_EDIT_SKIP)
 				{
 					errors++;
 					log_error("Please use either --skip-pg-hba or --pg-hba-lan");
@@ -502,6 +533,41 @@ cli_common_keeper_getopts(int argc, char **argv,
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
+	/* check --secondary and --candidate-priority */
+	if (LocalOptionConfig.pgSetup.settings.candidatePriority == -1)
+	{
+		/* --candidate-priority has not been used */
+		if (LocalOptionConfig.citusRole == CITUS_ROLE_SECONDARY)
+		{
+			/* a Citus secondary can't be a target for failover */
+			LocalOptionConfig.pgSetup.settings.candidatePriority = 0;
+		}
+		else
+		{
+			/* here we install the default candidate priority */
+			LocalOptionConfig.pgSetup.settings.candidatePriority =
+				FAILOVER_NODE_CANDIDATE_PRIORITY;
+		}
+	}
+	else if (LocalOptionConfig.pgSetup.settings.candidatePriority > 0 &&
+			 LocalOptionConfig.citusRole == CITUS_ROLE_SECONDARY)
+	{
+		log_fatal("Citus does not support secondary roles that are "
+				  "also a candidate for failover: please use --secondary "
+				  "with --candidate-priority 0");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	/* a --secondary citus worker requires a cluster name */
+	if (LocalOptionConfig.citusRole == CITUS_ROLE_SECONDARY)
+	{
+		if (IS_EMPTY_STRING_BUFFER(LocalOptionConfig.pgSetup.citusClusterName))
+		{
+			log_fatal("When using --secondary, also use --citus-cluster");
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+	}
+
 	if (errors > 0)
 	{
 		commandline_help(stderr);
@@ -511,6 +577,10 @@ cli_common_keeper_getopts(int argc, char **argv,
 	/* the default HBA editing level is MINIMAL, time to install it */
 	if (LocalOptionConfig.pgSetup.hbaLevel == HBA_EDIT_UNKNOWN)
 	{
+		strlcpy(LocalOptionConfig.pgSetup.hbaLevelStr,
+				pgsetup_hba_level_to_string(HBA_EDIT_MINIMAL),
+				sizeof(LocalOptionConfig.pgSetup.hbaLevelStr));
+
 		LocalOptionConfig.pgSetup.hbaLevel = HBA_EDIT_MINIMAL;
 	}
 
@@ -561,6 +631,8 @@ cli_common_keeper_getopts(int argc, char **argv,
  *		{ "verbose", no_argument, NULL, 'v' },
  *		{ "quiet", no_argument, NULL, 'q' },
  *		{ "help", no_argument, NULL, 'h' },
+ *		{ "secondary", no_argument, NULL, 'z' },
+ *      { "citus-cluster", required_argument, NULL, 'Z' },
  *		{ "candidate-priority", required_argument, NULL, 'P'},
  *		{ "replication-quorum", required_argument, NULL, 'r'},
  *		{ "help", no_argument, NULL, 0 },
@@ -1241,12 +1313,14 @@ cli_print_version_getopts(int argc, char **argv)
 void
 keeper_cli_print_version(int argc, char **argv)
 {
+	const char *version = PG_AUTOCTL_VERSION;
+
 	if (outputJSON)
 	{
 		JSON_Value *js = json_value_init_object();
 		JSON_Object *root = json_value_get_object(js);
 
-		json_object_set_string(root, "pg_autoctl", PG_AUTOCTL_VERSION);
+		json_object_set_string(root, "pg_autoctl", version);
 		json_object_set_string(root,
 							   "pgautofailover", PG_AUTOCTL_EXTENSION_VERSION);
 		json_object_set_string(root, "pg_major", PG_MAJORVERSION);
@@ -1258,7 +1332,7 @@ keeper_cli_print_version(int argc, char **argv)
 	}
 	else
 	{
-		fformat(stdout, "pg_autoctl version %s\n", PG_AUTOCTL_VERSION);
+		fformat(stdout, "pg_autoctl version %s\n", version);
 		fformat(stdout,
 				"pg_autoctl extension version %s\n",
 				PG_AUTOCTL_EXTENSION_VERSION);
@@ -1321,10 +1395,8 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 	{
 		if (file_exists(config->pathnames.state))
 		{
-			bool ignoreMonitorErrors = true;
-
 			/* keeper_remove uses log_info() to explain what's happening */
-			if (!keeper_remove(&keeper, config, ignoreMonitorErrors))
+			if (!keeper_remove(&keeper, config))
 			{
 				log_fatal("Failed to remove local node from the pg_auto_failover "
 						  "monitor, see above for details");

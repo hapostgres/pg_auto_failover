@@ -307,7 +307,7 @@ static void
 cli_show_reverse(int argc, char **argv)
 {
 	char ipaddr[BUFSIZE] = { 0 };
-
+	bool foundHostnameFromAddress = false;
 
 	if (argc != 1)
 	{
@@ -324,7 +324,9 @@ cli_show_reverse(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!resolveHostnameForwardAndReverse(hostname, ipaddr, sizeof(ipaddr)))
+	if (!resolveHostnameForwardAndReverse(hostname, ipaddr, sizeof(ipaddr),
+										  &foundHostnameFromAddress) ||
+		!foundHostnameFromAddress)
 	{
 		log_fatal("Failed to find an IP address for hostname \"%s\" that "
 				  "matches hostname again in a reverse-DNS lookup.",

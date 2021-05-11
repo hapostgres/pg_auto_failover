@@ -1,4 +1,5 @@
 import pgautofailover_utils as pgautofailover
+from nose.tools import eq_
 
 import subprocess
 import os, os.path, time, shutil
@@ -41,21 +42,7 @@ def test_001_init_primary():
     shutil.copyfile(hba_path, "/tmp/pg_hba.debian.conf")
 
     # allow using unix domain sockets
-    p = subprocess.Popen(
-        [
-            "sudo",
-            "-E",
-            "-u",
-            os.getenv("USER"),
-            "env",
-            "PATH=" + os.getenv("PATH"),
-            "mkdir",
-            "-p",
-            "/tmp/socks/node1",
-        ]
-    )
-    assert p.wait(timeout=pgautofailover.COMMAND_TIMEOUT) == 0
-
+    pgautofailover.sudo_mkdir_p("/tmp/socks/node1")
     os.environ["PG_REGRESS_SOCK_DIR"] = "/tmp/socks/node1"
 
     # we need to give the hostname here, because our method to find it
@@ -107,21 +94,7 @@ def test_003_init_secondary():
     global node2
 
     # allow using unix domain sockets
-    p = subprocess.Popen(
-        [
-            "sudo",
-            "-E",
-            "-u",
-            os.getenv("USER"),
-            "env",
-            "PATH=" + os.getenv("PATH"),
-            "mkdir",
-            "-p",
-            "/tmp/socks/node2",
-        ]
-    )
-    assert p.wait() == 0
-
+    pgautofailover.sudo_mkdir_p("/tmp/socks/node2")
     os.environ["PG_REGRESS_SOCK_DIR"] = "/tmp/socks/node2"
 
     node2 = cluster.create_datanode("/tmp/skip/node2", authMethod="skip")
@@ -138,9 +111,34 @@ def test_003_init_secondary():
     assert node1.wait_until_state(target_state="primary")
 
 
-def test_004_failover():
+def test_004a_hba_have_not_been_edited():
+    eq_(False, node1.editedHBA())
+    eq_(False, node2.editedHBA())
+
+
+def test_004b_pg_autoctl_conf_skip_hba():
+    eq_("skip", node1.config_get("postgresql.hba_level"))
+    eq_("skip", node2.config_get("postgresql.hba_level"))
+
+
+def test_005_failover():
     print()
     print("Calling pgautofailover.failover() on the monitor")
     cluster.monitor.failover()
     assert node2.wait_until_state(target_state="primary")
     assert node1.wait_until_state(target_state="secondary")
+
+
+def test_006_restart_secondary():
+    node1.stop_pg_autoctl()
+    node1.run()
+
+
+def test_006a_hba_have_not_been_edited():
+    eq_(False, node1.editedHBA())
+    eq_(False, node2.editedHBA())
+
+
+def test_006b_pg_autoctl_conf_skip_hba():
+    eq_("skip", node1.config_get("postgresql.hba_level"))
+    eq_("skip", node2.config_get("postgresql.hba_level"))

@@ -115,7 +115,13 @@ goalstate     | wait_standby
 reportedstate | init
 
 table pgautofailover.formation;
--[ RECORD 1 ]--------+---------
+-[ RECORD 1 ]--------+-----------------
+formationid          | monitor
+kind                 | pgsql
+dbname               | pg_auto_failover
+opt_secondary        | t
+number_sync_standbys | 0
+-[ RECORD 2 ]--------+-----------------
 formationid          | default
 kind                 | pgsql
 dbname               | postgres
@@ -197,7 +203,13 @@ select pgautofailover.remove_node(1);
 remove_node | t
 
 table pgautofailover.formation;
--[ RECORD 1 ]--------+---------
+-[ RECORD 1 ]--------+-----------------
+formationid          | monitor
+kind                 | pgsql
+dbname               | pg_auto_failover
+opt_secondary        | t
+number_sync_standbys | 0
+-[ RECORD 2 ]--------+-----------------
 formationid          | default
 kind                 | pgsql
 dbname               | postgres

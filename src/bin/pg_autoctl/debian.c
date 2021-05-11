@@ -62,9 +62,8 @@ static bool disableAutoStart(PostgresConfigFiles *pgConfigFiles);
  * them from default location and modifies paths inside copied postgresql.conf.
  */
 bool
-keeper_ensure_pg_configuration_files_in_pgdata(KeeperConfig *config)
+keeper_ensure_pg_configuration_files_in_pgdata(PostgresSetup *pgSetup)
 {
-	PostgresSetup *pgSetup = &(config->pgSetup);
 	PostgresConfigFiles pgConfigFiles = { 0 };
 
 	if (!debian_find_postgres_configuration_files(pgSetup, &pgConfigFiles))

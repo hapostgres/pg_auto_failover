@@ -40,6 +40,7 @@
 
 static void cli_do_monitor_get_primary_node(int argc, char **argv);
 static void cli_do_monitor_get_other_nodes(int argc, char **argv);
+static void cli_do_monitor_get_candidate_count(int argc, char **argv);
 static void cli_do_monitor_get_coordinator(int argc, char **argv);
 static void cli_do_monitor_register_node(int argc, char **argv);
 static void cli_do_monitor_node_active(int argc, char **argv);
@@ -63,6 +64,14 @@ static CommandLine monitor_get_other_nodes_command =
 				 cli_getopt_pgdata,
 				 cli_do_monitor_get_other_nodes);
 
+static CommandLine monitor_get_candidate_count_command =
+	make_command("candidate-count",
+				 "Get the failover candidate count in the group",
+				 CLI_PGDATA_USAGE,
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
+				 cli_do_monitor_get_candidate_count);
+
 static CommandLine monitor_get_coordinator_command =
 	make_command("coordinator",
 				 "Get the coordinator node from the pg_auto_failover formation",
@@ -74,6 +83,7 @@ static CommandLine monitor_get_coordinator_command =
 static CommandLine *monitor_get_commands[] = {
 	&monitor_get_primary_command,
 	&monitor_get_other_nodes_command,
+	&monitor_get_candidate_count_command,
 	&monitor_get_coordinator_command,
 	NULL
 };
@@ -259,6 +269,76 @@ cli_do_monitor_get_other_nodes(int argc, char **argv)
 					  "see above for details");
 			exit(EXIT_CODE_MONITOR);
 		}
+	}
+}
+
+
+/*
+ * cli_do_monitor_get_candidate_count contacts the pg_auto_failover monitor and
+ * retrieves the current count of failover candidate nodes.
+ */
+static void
+cli_do_monitor_get_candidate_count(int argc, char **argv)
+{
+	Keeper keeper = { 0 };
+	KeeperConfig *config = &(keeper.config);
+	Monitor *monitor = &(keeper.monitor);
+
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = false;
+
+	keeper.config = keeperOptions;
+
+	if (!keeper_config_read_file(config,
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
+	{
+		/* errors have already been logged. */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	/* load the state file to get the node id */
+	if (!keeper_init(&keeper, config))
+	{
+		/* errors are logged in keeper_state_read */
+		exit(EXIT_CODE_BAD_STATE);
+	}
+
+	if (!monitor_init(monitor, config->monitor_pguri))
+	{
+		log_fatal("Failed to contact the monitor because its URL is invalid, "
+				  "see above for details");
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	int failoverCandidateCount = 0;
+
+	if (!monitor_count_failover_candidates(monitor,
+										   config->formation,
+										   config->groupId,
+										   &failoverCandidateCount))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_MONITOR);
+	}
+
+	if (outputJSON)
+	{
+		JSON_Value *js = json_value_init_object();
+		JSON_Object *root = json_value_get_object(js);
+
+		json_object_set_string(root, "formation", config->formation);
+		json_object_set_number(root, "groupId", (double) config->groupId);
+		json_object_set_number(root, "failoverCandidateCount",
+							   (double) failoverCandidateCount);
+
+		(void) cli_pprint_json(js);
+	}
+	else
+	{
+		fformat(stdout, "%d\n", failoverCandidateCount);
 	}
 }
 

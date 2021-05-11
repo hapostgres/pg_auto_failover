@@ -17,7 +17,12 @@
 #include "pgctl.h"
 
 char * regexp_first_match(const char *string, const char *re);
-char * parse_version_number(const char *version_string);
+
+bool parse_version_number(const char *version_string,
+						  char *pg_version_string,
+						  int *pg_version);
+
+bool parse_pg_version_string(const char *pg_version_string, int *pg_version);
 
 bool parse_controldata(PostgresControlData *pgControlData,
 					   const char *control_data_string);
@@ -72,11 +77,14 @@ typedef struct URIParams
 
 bool parse_pguri_info_key_vals(const char *pguri,
 							   KeyVal *overrides,
-							   URIParams *uriParameters);
+							   URIParams *uriParameters,
+							   bool checkForCompleteURI);
 
 bool buildPostgresURIfromPieces(URIParams *uriParams, char *pguri);
 
 bool parse_pguri_ssl_settings(const char *pguri, SSLOptions *ssl);
+
+bool parse_and_scrub_connection_string(const char *pguri, char *scrubbedPguri);
 
 bool parseLSN(const char *str, uint64_t *lsn);
 bool parseNodesArray(const char *nodesJSON,

@@ -44,6 +44,7 @@
 #define Anum_pgautofailover_node_statechangetime 17
 #define Anum_pgautofailover_node_candidate_priority 18
 #define Anum_pgautofailover_node_replication_quorum 19
+#define Anum_pgautofailover_node_nodecluster 20
 
 #define AUTO_FAILOVER_NODE_TABLE_ALL_COLUMNS \
 	"formationid, " \
@@ -64,7 +65,8 @@
 	"healthchecktime, " \
 	"statechangetime, " \
 	"candidatepriority, " \
-	"replicationquorum"
+	"replicationquorum, " \
+	"nodecluster"
 
 
 #define SELECT_ALL_FROM_AUTO_FAILOVER_NODE_TABLE \
@@ -88,6 +90,7 @@ typedef enum SyncState
  * candidate.
  */
 #define MAX_USER_DEFINED_CANDIDATE_PRIORITY 100
+#define CANDIDATE_PRIORITY_INCREMENT (MAX_USER_DEFINED_CANDIDATE_PRIORITY + 1)
 
 
 /*
@@ -124,6 +127,7 @@ typedef struct AutoFailoverNode
 	XLogRecPtr reportedLSN;
 	int candidatePriority;
 	bool replicationQuorum;
+	char *nodeCluster;
 } AutoFailoverNode;
 
 
@@ -147,6 +151,8 @@ extern List * AutoFailoverNodeGroup(char *formationId, int groupId);
 extern List * AutoFailoverOtherNodesList(AutoFailoverNode *pgAutoFailoverNode);
 extern List * AutoFailoverOtherNodesListInState(AutoFailoverNode *pgAutoFailoverNode,
 												ReplicationState currentState);
+extern List * AutoFailoverCandidateNodesListInState(AutoFailoverNode *pgAutoFailoverNode,
+													ReplicationState currentState);
 extern AutoFailoverNode * GetPrimaryNodeInGroup(char *formationId, int32 groupId);
 AutoFailoverNode * GetNodeToFailoverFromInGroup(char *formationId, int32 groupId);
 extern AutoFailoverNode * GetPrimaryOrDemotedNodeInGroup(char *formationId,
@@ -171,6 +177,7 @@ extern AutoFailoverNode * TupleToAutoFailoverNode(TupleDesc tupleDescriptor,
 												  HeapTuple heapTuple);
 extern int AddAutoFailoverNode(char *formationId,
 							   FormationKind formationKind,
+							   int nodeId,
 							   int groupId,
 							   char *nodeName,
 							   char *nodeHost,
@@ -179,7 +186,8 @@ extern int AddAutoFailoverNode(char *formationId,
 							   ReplicationState goalState,
 							   ReplicationState reportedState,
 							   int candidatePriority,
-							   bool replicationQuorum);
+							   bool replicationQuorum,
+							   char *nodeCluster);
 extern void SetNodeGoalState(AutoFailoverNode *pgAutoFailoverNode,
 							 ReplicationState goalState,
 							 const char *message);

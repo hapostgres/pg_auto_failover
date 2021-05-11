@@ -118,6 +118,9 @@
 #define COMMENT_INIT_TO_WAIT_STANDBY \
 	"Start following a primary"
 
+#define COMMENT_SECONARY_TO_WAIT_STANDBY \
+	"Registering to a new monitor"
+
 #define COMMENT_SECONDARY_TO_WAIT_MAINTENANCE \
 	"Waiting for the primary to disable sync replication before " \
 	"going to maintenance."
@@ -163,6 +166,8 @@
 #define COMMENT_FAST_FORWARD_TO_PREP_PROMOTION \
 	"Got the missing WAL bytes, promoted"
 
+#define COMMENT_INIT_TO_REPORT_LSN \
+	"Creating a new node from a standby node that is not a candidate."
 
 /* *INDENT-OFF* */
 
@@ -305,6 +310,12 @@ KeeperFSMTransition KeeperFSM[] = {
 	{ INIT_STATE, WAIT_STANDBY_STATE, COMMENT_INIT_TO_WAIT_STANDBY, NULL },
 
 	/*
+	 * When losing a monitor and then connecting to a new monitor as a
+	 * secondary, we need to be able to follow the init sequence again.
+	 */
+	{ SECONDARY_STATE, WAIT_STANDBY_STATE, COMMENT_SECONARY_TO_WAIT_STANDBY, NULL },
+
+	/*
 	 * In case of maintenance of the standby server, we stop PostgreSQL.
 	 */
 	{ SECONDARY_STATE, WAIT_MAINTENANCE_STATE, COMMENT_SECONDARY_TO_WAIT_MAINTENANCE, NULL },
@@ -339,6 +350,12 @@ KeeperFSMTransition KeeperFSM[] = {
 	{ REPORT_LSN_STATE, JOIN_SECONDARY_STATE, COMMENT_REPORT_LSN_TO_JOIN_SECONDARY, &fsm_checkpoint_and_stop_postgres },
 	{ REPORT_LSN_STATE, SECONDARY_STATE, COMMENT_REPORT_LSN_TO_JOIN_SECONDARY, &fsm_follow_new_primary },
 	{ JOIN_SECONDARY_STATE, SECONDARY_STATE, COMMENT_JOIN_SECONDARY_TO_SECONDARY, &fsm_follow_new_primary },
+
+	/*
+	 * When adding a new node and there is no primary, but there are existing
+	 * nodes that are not candidates for failover.
+	 */
+	{ INIT_STATE, REPORT_LSN_STATE, COMMENT_INIT_TO_REPORT_LSN, &fsm_init_from_standby },
 
 	/*
 	 * This is the end, my friend.

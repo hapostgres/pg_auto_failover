@@ -116,10 +116,96 @@ regexp_first_match(const char *string, const char *regex)
  * Parse the version number output from pg_ctl --version:
  *    pg_ctl (PostgreSQL) 10.3
  */
-char *
-parse_version_number(const char *version_string)
+bool
+parse_version_number(const char *version_string,
+					 char *pg_version_string,
+					 int *pg_version)
 {
-	return regexp_first_match(version_string, "([[:digit:].]+)");
+	char *match = regexp_first_match(version_string, "([[:digit:].]+)");
+
+	if (match == NULL)
+	{
+		log_error("Failed to parse Postgres version number \"%s\"",
+				  version_string);
+		return false;
+	}
+
+	/* first, copy the version number in our expected result string buffer */
+	strlcpy(pg_version_string, match, sizeof(pg_version_string));
+
+	if (!parse_pg_version_string(pg_version_string, pg_version))
+	{
+		/* errors have already been logged */
+		free(match);
+		return false;
+	}
+
+	free(match);
+	return true;
+}
+
+
+/*
+ * parse_pg_version_string parses a Postgres version string such as "12.6" into
+ * a single number in the same format as the pg_control_version, such as 1206.
+ */
+bool
+parse_pg_version_string(const char *pg_version_string, int *pg_version)
+{
+	/* now, parse the numbers into an integer, ala pg_control_version */
+	bool dotFound = false;
+	char major[INTSTRING_MAX_DIGITS] = { 0 };
+	char minor[INTSTRING_MAX_DIGITS] = { 0 };
+
+	int majorIdx = 0;
+	int minorIdx = 0;
+
+	if (pg_version_string == NULL)
+	{
+		log_debug("BUG: parse_pg_version_string got NULL");
+		return false;
+	}
+
+	for (int i = 0; pg_version_string[i] != '\0'; i++)
+	{
+		if (pg_version_string[i] == '.')
+		{
+			if (dotFound)
+			{
+				log_error("Failed to parse Postgres version number \"%s\"",
+						  pg_version_string);
+				return false;
+			}
+
+			dotFound = true;
+			continue;
+		}
+
+		if (dotFound)
+		{
+			minor[minorIdx++] = pg_version_string[i];
+		}
+		else
+		{
+			major[majorIdx++] = pg_version_string[i];
+		}
+	}
+
+	int maj = 0;
+	int min = 0;
+
+	if (!stringToInt(major, &maj) ||
+		!stringToInt(minor, &min))
+	{
+		log_error("Failed to parse Postgres version number \"%s\"",
+				  pg_version_string);
+		return false;
+	}
+
+	/* transform "12.6" into 1206, that is 12 * 100 + 6 */
+	*pg_version = (maj * 100) + min;
+
+	return true;
 }
 
 
@@ -526,7 +612,8 @@ parse_bool(const char *value, bool *result)
 bool
 parse_pguri_info_key_vals(const char *pguri,
 						  KeyVal *overrides,
-						  URIParams *uriParameters)
+						  URIParams *uriParameters,
+						  bool checkForCompleteURI)
 {
 	char *errmsg;
 	PQconninfoOption *conninfo, *option;
@@ -615,31 +702,40 @@ parse_pguri_info_key_vals(const char *pguri,
 		}
 	}
 
+	PQconninfoFree(conninfo);
+
 	/*
 	 * Display an error message per missing field, and only then return false
 	 * if we're missing any one of those.
 	 */
-	if (!foundHost)
+	if (checkForCompleteURI)
 	{
-		log_error("Failed to find hostname in the pguri \"%s\"", pguri);
-	}
+		if (!foundHost)
+		{
+			log_error("Failed to find hostname in the pguri \"%s\"", pguri);
+		}
 
-	if (!foundPort)
+		if (!foundPort)
+		{
+			log_error("Failed to find port in the pguri \"%s\"", pguri);
+		}
+
+		if (!foundUser)
+		{
+			log_error("Failed to find username in the pguri \"%s\"", pguri);
+		}
+
+		if (!foundDBName)
+		{
+			log_error("Failed to find dbname in the pguri \"%s\"", pguri);
+		}
+
+		return foundHost && foundPort && foundUser && foundDBName;
+	}
+	else
 	{
-		log_error("Failed to find port in the pguri \"%s\"", pguri);
+		return true;
 	}
-
-	if (!foundUser)
-	{
-		log_error("Failed to find username in the pguri \"%s\"", pguri);
-	}
-
-	if (!foundDBName)
-	{
-		log_error("Failed to find dbname in the pguri \"%s\"", pguri);
-	}
-
-	return foundHost && foundPort && foundUser && foundDBName;
 }
 
 
@@ -699,8 +795,13 @@ parse_pguri_ssl_settings(const char *pguri, SSLOptions *ssl)
 	URIParams params = { 0 };
 	KeyVal overrides = { 0 };
 
+	bool checkForCompleteURI = true;
+
 	/* initialize SSL Params values */
-	if (!parse_pguri_info_key_vals(pguri, &overrides, &params))
+	if (!parse_pguri_info_key_vals(pguri,
+								   &overrides,
+								   &params,
+								   checkForCompleteURI))
 	{
 		/* errors have already been logged */
 		return false;
@@ -940,6 +1041,82 @@ parseNodesArray(const char *nodesJSON,
 			return false;
 		}
 	}
+
+	return true;
+}
+
+
+/*
+ * uri_contains_password takes a Postgres connection string and checks to see
+ * if it contains a parameter called password. Returns true if a password
+ * keyword is present in the connection string.
+ */
+static bool
+uri_contains_password(const char *pguri)
+{
+	char *errmsg;
+	PQconninfoOption *conninfo, *option;
+
+	conninfo = PQconninfoParse(pguri, &errmsg);
+	if (conninfo == NULL)
+	{
+		log_error("Failed to parse pguri: %s", errmsg);
+
+		PQfreemem(errmsg);
+		return false;
+	}
+
+	/*
+	 * Look for a populated password connection parameter
+	 */
+	for (option = conninfo; option->keyword != NULL; option++)
+	{
+		if (strcmp(option->keyword, "password") == 0 &&
+			option->val != NULL &&
+			!IS_EMPTY_STRING_BUFFER(option->val))
+		{
+			PQconninfoFree(conninfo);
+			return true;
+		}
+	}
+
+	PQconninfoFree(conninfo);
+	return false;
+}
+
+
+/*
+ * parse_and_scrub_connection_string takes a Postgres connection string and
+ * populates scrubbedPguri with the password replaced with **** for logging.
+ * The scrubbedPguri parameter should point to a memory area that has been
+ * allocated by the caller and has at least MAXCONNINFO bytes.
+ */
+bool
+parse_and_scrub_connection_string(const char *pguri, char *scrubbedPguri)
+{
+	URIParams uriParams = { 0 };
+	KeyVal overrides = { 0 };
+
+	if (uri_contains_password(pguri))
+	{
+		overrides = (KeyVal) {
+			.count = 1,
+			.keywords = { "password" },
+			.values = { "****" }
+		};
+	}
+
+	bool checkForCompleteURI = false;
+
+	if (!parse_pguri_info_key_vals(pguri,
+								   &overrides,
+								   &uriParams,
+								   checkForCompleteURI))
+	{
+		return false;
+	}
+
+	buildPostgresURIfromPieces(&uriParams, scrubbedPguri);
 
 	return true;
 }

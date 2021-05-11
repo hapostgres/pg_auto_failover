@@ -81,7 +81,12 @@ demoapp_grab_formation_uri(DemoAppOptions *options, char *pguri, size_t size,
 	/* allow lots of retries to connect to the monitor at startup */
 	pgsql_set_monitor_interactive_retry_policy(&(monitor.pgsql.retryPolicy));
 
-	if (!monitor_formation_uri(&monitor, options->formation, &ssl, pguri, size))
+	if (!monitor_formation_uri(&monitor,
+							   options->formation,
+							   "default",
+							   &ssl,
+							   pguri,
+							   size))
 	{
 		int groupsCount = 0;
 
@@ -435,11 +440,13 @@ demoapp_process_perform_switchover(DemoAppOptions *demoAppOptions)
 		}
 
 		/* process state changes notification until we have a new primary */
-		if (!monitor_wait_until_some_node_reported_state(&monitor,
-														 formation,
-														 groupId,
-														 NODE_KIND_UNKNOWN,
-														 PRIMARY_STATE))
+		if (!monitor_wait_until_some_node_reported_state(
+				&monitor,
+				formation,
+				groupId,
+				NODE_KIND_UNKNOWN,
+				PRIMARY_STATE,
+				PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT))
 		{
 			log_error("Failed to wait until a new primary has been notified");
 			continue;
@@ -848,7 +855,9 @@ demoapp_psql(const char *pguri, const char *sql)
 	args[argsIndex++] = NULL;
 
 	/* we do not want to call setsid() when running this program. */
-	Program program = initialize_program(args, false);
+	Program program = { 0 };
+
+	(void) initialize_program(&program, args, false);
 
 	program.capture = false;    /* don't capture output */
 	program.tty = true;         /* allow sharing the parent's tty */

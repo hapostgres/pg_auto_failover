@@ -86,6 +86,8 @@ GUC citus_default_settings_pre_13[] = {
 	DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER_PRE_13,
 	{ "shared_preload_libraries", "'citus,pg_stat_statements'" },
 	{ "citus.node_conninfo", "'sslmode=prefer'" },
+	{ "citus.cluster_name", "'default'" },
+	{ "citus.use_secondary_nodes", "'never'" },
 	{ NULL, NULL }
 };
 
@@ -93,6 +95,8 @@ GUC citus_default_settings_13[] = {
 	DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER_13,
 	{ "shared_preload_libraries", "'citus,pg_stat_statements'" },
 	{ "citus.node_conninfo", "'sslmode=prefer'" },
+	{ "citus.cluster_name", "'default'" },
+	{ "citus.use_secondary_nodes", "'never'" },
 	{ NULL, NULL }
 };
 
@@ -565,24 +569,6 @@ primary_set_synchronous_standby_names(LocalPostgresServer *postgres)
 
 
 /*
- * primary_enable_synchronous_replication enables synchronous replication
- * on a primary postgres node.
- */
-bool
-primary_enable_synchronous_replication(LocalPostgresServer *postgres)
-{
-	PGSQL *pgsql = &(postgres->sqlClient);
-
-	log_trace("primary_enable_synchronous_replication");
-
-	bool result = pgsql_enable_synchronous_replication(pgsql);
-
-	pgsql_finish(pgsql);
-	return result;
-}
-
-
-/*
  * primary_disable_synchronous_replication disables synchronous replication
  * on a primary postgres node.
  */
@@ -763,15 +749,15 @@ primary_create_replication_user(LocalPostgresServer *postgres,
 
 /*
  * standby_init_replication_source initializes a replication source structure
- * with given arguments. If the primaryNode is NULL, then the
+ * with given arguments. If the upstreamNode is NULL, then the
  * replicationSource.primary structure slot is not updated.
  *
  * Note that we just store the pointers to all those const char *arguments
- * here, expect for the primaryNode there's no copying involved.
+ * here, expect for the upstreamNode there's no copying involved.
  */
 bool
 standby_init_replication_source(LocalPostgresServer *postgres,
-								NodeAddress *primaryNode,
+								NodeAddress *upstreamNode,
 								const char *username,
 								const char *password,
 								const char *slotName,
@@ -783,17 +769,17 @@ standby_init_replication_source(LocalPostgresServer *postgres,
 {
 	ReplicationSource *upstream = &(postgres->replicationSource);
 
-	if (primaryNode != NULL)
+	if (upstreamNode != NULL)
 	{
-		upstream->primaryNode.nodeId = primaryNode->nodeId;
+		upstream->primaryNode.nodeId = upstreamNode->nodeId;
 
 		strlcpy(upstream->primaryNode.name,
-				primaryNode->name, _POSIX_HOST_NAME_MAX);
+				upstreamNode->name, _POSIX_HOST_NAME_MAX);
 
 		strlcpy(upstream->primaryNode.host,
-				primaryNode->host, _POSIX_HOST_NAME_MAX);
+				upstreamNode->host, _POSIX_HOST_NAME_MAX);
 
-		upstream->primaryNode.port = primaryNode->port;
+		upstream->primaryNode.port = upstreamNode->port;
 	}
 
 	strlcpy(upstream->userName, username, NAMEDATALEN);
@@ -882,7 +868,15 @@ standby_init_database(LocalPostgresServer *postgres,
 		 */
 		bool hasReplicationSlot = false;
 
-		if (!upstream_has_replication_slot(upstream,
+		/*
+		 * When initialising from another standby (in REPORT_LSN, if there is
+		 * currently no primary node and no candidate node either), we don't
+		 * require a replication slot on the upstream node.
+		 */
+		bool needsReplicationSlot = !IS_EMPTY_STRING_BUFFER(upstream->slotName);
+
+		if (needsReplicationSlot &&
+			!upstream_has_replication_slot(upstream,
 										   pgSetup,
 										   &hasReplicationSlot))
 		{
@@ -890,8 +884,17 @@ standby_init_database(LocalPostgresServer *postgres,
 			return false;
 		}
 
-		if (hasReplicationSlot)
+		if (!needsReplicationSlot || hasReplicationSlot)
 		{
+			/* first, make sure we can connect with "replication" */
+			if (!pgctl_identify_system(upstream))
+			{
+				log_error("Failed to connect to the primary with a replication "
+						  "connection string. See above for details");
+				return false;
+			}
+
+			/* now pg_basebackup from our upstream node */
 			if (!pg_basebackup(pgSetup->pgdata, pgSetup->pg_ctl, upstream))
 			{
 				return false;
@@ -992,6 +995,19 @@ primary_rewind_to_standby(LocalPostgresServer *postgres)
 	if (!ensure_postgres_service_is_stopped(postgres))
 	{
 		log_error("Failed to stop postgres to do rewind");
+		return false;
+	}
+
+	/* first, make sure we can connect with "replication" */
+	if (!pgctl_identify_system(replicationSource))
+	{
+		log_error("Failed to connect to the primary node %d \"%s\" (%s:%d) "
+				  "with a replication connection string. "
+				  "See above for details",
+				  primaryNode->nodeId,
+				  primaryNode->name,
+				  primaryNode->host,
+				  primaryNode->port);
 		return false;
 	}
 

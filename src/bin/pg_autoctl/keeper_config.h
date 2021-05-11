@@ -18,6 +18,18 @@
 #include "pgctl.h"
 #include "pgsql.h"
 
+/*
+ * We support "primary" and "secondary" roles in Citus, when Citus support is
+ * enabled.
+ */
+typedef enum
+{
+	CITUS_ROLE_UNKNOWN = 0,
+	CITUS_ROLE_PRIMARY,
+	CITUS_ROLE_SECONDARY
+} CitusRole;
+
+
 typedef struct KeeperConfig
 {
 	/* in-memory configuration related variables */
@@ -44,12 +56,17 @@ typedef struct KeeperConfig
 	char maximum_backup_rate[MAXIMUM_BACKUP_RATE_LEN];
 	char backupDirectory[MAXPGPATH];
 
+	/* Citus specific options and settings */
+	char citusRoleStr[NAMEDATALEN];
+	CitusRole citusRole;
+
 	/* pg_autoctl timeouts */
 	int network_partition_timeout;
 	int prepare_promotion_catchup;
 	int prepare_promotion_walreceiver;
 	int postgresql_restart_failure_timeout;
 	int postgresql_restart_failure_max_retries;
+	int listen_notifications_timeout;
 } KeeperConfig;
 
 #define PG_AUTOCTL_MONITOR_IS_DISABLED(config) \

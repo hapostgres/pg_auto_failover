@@ -194,6 +194,12 @@ monitor_init(Monitor *monitor, char *url)
 		return false;
 	}
 
+	if (!pgsql_init(&monitor->notificationClient, url, PGSQL_CONN_MONITOR))
+	{
+		/* URL must be invalid, pgsql_init logged an error */
+		return false;
+	}
+
 	return true;
 }
 
@@ -205,12 +211,12 @@ monitor_init(Monitor *monitor, char *url)
 void
 monitor_setup_notifications(Monitor *monitor, int groupId, int nodeId)
 {
-	monitor->pgsql.notificationGroupId = groupId;
-	monitor->pgsql.notificationNodeId = nodeId;
-	monitor->pgsql.notificationReceived = false;
+	monitor->notificationClient.notificationGroupId = groupId;
+	monitor->notificationClient.notificationNodeId = nodeId;
+	monitor->notificationClient.notificationReceived = false;
 
 	/* install our notification handler */
-	monitor->pgsql.notificationProcessFunction =
+	monitor->notificationClient.notificationProcessFunction =
 		&monitor_process_state_notification;
 }
 
@@ -223,9 +229,9 @@ monitor_setup_notifications(Monitor *monitor, int groupId, int nodeId)
 bool
 monitor_has_received_notifications(Monitor *monitor)
 {
-	bool ret = monitor->pgsql.notificationReceived;
+	bool ret = monitor->notificationClient.notificationReceived;
 
-	monitor->pgsql.notificationReceived = false;
+	monitor->notificationClient.notificationReceived = false;
 
 	return ret;
 }
@@ -277,6 +283,12 @@ monitor_local_init(Monitor *monitor)
 	pg_setup_get_local_connection_string(pgSetup, connInfo);
 
 	if (!pgsql_init(&monitor->pgsql, connInfo, PGSQL_CONN_LOCAL))
+	{
+		/* URL must be invalid, pgsql_init logged an error */
+		return false;
+	}
+
+	if (!pgsql_init(&monitor->notificationClient, connInfo, PGSQL_CONN_LOCAL))
 	{
 		/* URL must be invalid, pgsql_init logged an error */
 		return false;
@@ -421,9 +433,6 @@ monitor_print_nodes_as_json(Monitor *monitor, char *formation, int groupId)
 		}
 		return false;
 	}
-
-	/* disconnect from PostgreSQL now */
-	pgsql_finish(&monitor->pgsql);
 
 	if (!context.parsedOk)
 	{
@@ -573,9 +582,6 @@ monitor_print_other_nodes_as_json(Monitor *monitor,
 		}
 		return false;
 	}
-
-	/* disconnect from PostgreSQL now */
-	pgsql_finish(&monitor->pgsql);
 
 	if (!context.parsedOk)
 	{
@@ -784,21 +790,25 @@ bool
 monitor_register_node(Monitor *monitor, char *formation,
 					  char *name, char *host, int port,
 					  uint64_t system_identifier,
-					  char *dbname, int desiredGroupId, NodeState initialState,
+					  char *dbname,
+					  int desiredNodeId,
+					  int desiredGroupId,
+					  NodeState initialState,
 					  PgInstanceKind kind, int candidatePriority, bool quorum,
+					  char *citusClusterName,
 					  bool *mayRetry,
 					  MonitorAssignedState *assignedState)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
 		"SELECT * FROM pgautofailover.register_node($1, $2, $3, $4, $5, $6, $7, "
-		"$8::pgautofailover.replication_state, $9, $10, $11)";
-	int paramCount = 11;
-	Oid paramTypes[11] = {
+		"$8, $9::pgautofailover.replication_state, $10, $11, $12, $13)";
+	int paramCount = 13;
+	Oid paramTypes[13] = {
 		TEXTOID, TEXTOID, INT4OID, NAMEOID, TEXTOID, INT8OID,
-		INT4OID, TEXTOID, TEXTOID, INT4OID, BOOLOID
+		INT4OID, INT4OID, TEXTOID, TEXTOID, INT4OID, BOOLOID, TEXTOID
 	};
-	const char *paramValues[11];
+	const char *paramValues[13];
 	MonitorAssignedStateParseContext parseContext =
 	{ { 0 }, assignedState, false };
 	const char *nodeStateString = NodeStateToString(initialState);
@@ -809,11 +819,16 @@ monitor_register_node(Monitor *monitor, char *formation,
 	paramValues[3] = dbname;
 	paramValues[4] = name == NULL ? "" : name;
 	paramValues[5] = intToString(system_identifier).strValue;
-	paramValues[6] = intToString(desiredGroupId).strValue;
-	paramValues[7] = nodeStateString;
-	paramValues[8] = nodeKindToString(kind);
-	paramValues[9] = intToString(candidatePriority).strValue;
-	paramValues[10] = quorum ? "true" : "false";
+	paramValues[6] = intToString(desiredNodeId).strValue;
+	paramValues[7] = intToString(desiredGroupId).strValue;
+	paramValues[8] = nodeStateString;
+	paramValues[9] = nodeKindToString(kind);
+	paramValues[10] = intToString(candidatePriority).strValue;
+	paramValues[11] = quorum ? "true" : "false";
+	paramValues[12] =
+		IS_EMPTY_STRING_BUFFER(citusClusterName)
+		? DEFAULT_CITUS_CLUSTER_NAME
+		: citusClusterName;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
@@ -1036,14 +1051,8 @@ monitor_get_node_replication_settings(Monitor *monitor,
 		log_error("Failed to retrieve node settings for node \"%s\".",
 				  settings->name);
 
-		/* disconnect from monitor */
-		pgsql_finish(&monitor->pgsql);
-
 		return false;
 	}
-
-	/* disconnect from monitor */
-	pgsql_finish(&monitor->pgsql);
 
 	if (!parseContext.parsedOK)
 	{
@@ -1139,9 +1148,6 @@ monitor_get_formation_number_sync_standbys(Monitor *monitor, char *formation,
 		log_error("Failed to retrieve settings for formation \"%s\".",
 				  formation);
 
-		/* disconnect from monitor */
-		pgsql_finish(&monitor->pgsql);
-
 		return false;
 	}
 
@@ -1184,10 +1190,6 @@ monitor_set_formation_number_sync_standbys(Monitor *monitor, char *formation,
 	{
 		log_error("Failed to update number-sync-standbys for formation \"%s\".",
 				  formation);
-
-		/* disconnect from monitor */
-		pgsql_finish(&monitor->pgsql);
-
 		return false;
 	}
 
@@ -1224,9 +1226,6 @@ monitor_remove(Monitor *monitor, char *host, int port)
 		log_error("Failed to remove node %s:%d from the monitor", host, port);
 		return false;
 	}
-
-	/* disconnect from PostgreSQL now */
-	pgsql_finish(&monitor->pgsql);
 
 	if (!context.parsedOk)
 	{
@@ -1682,9 +1681,6 @@ monitor_print_state(Monitor *monitor, char *formation, int group)
 		return false;
 	}
 
-	/* disconnect from PostgreSQL now */
-	pgsql_finish(&monitor->pgsql);
-
 	if (!context.parsedOK)
 	{
 		log_error("Failed to parse current state from the monitor");
@@ -1994,9 +1990,6 @@ monitor_print_state_as_json(Monitor *monitor, char *formation, int group)
 		return false;
 	}
 
-	/* disconnect from PostgreSQL now */
-	pgsql_finish(&monitor->pgsql);
-
 	if (!context.parsedOk)
 	{
 		log_error("Failed to parse current state from the monitor");
@@ -2083,9 +2076,6 @@ monitor_print_last_events(Monitor *monitor, char *formation, int group, int coun
 		return false;
 	}
 
-	/* disconnect from PostgreSQL now */
-	pgsql_finish(&monitor->pgsql);
-
 	if (!context.parsedOK)
 	{
 		return false;
@@ -2163,9 +2153,6 @@ monitor_print_last_events_as_json(Monitor *monitor,
 				  count);
 		return false;
 	}
-
-	/* disconnect from PostgreSQL now */
-	pgsql_finish(&monitor->pgsql);
 
 	if (!context.parsedOk)
 	{
@@ -2269,10 +2256,6 @@ monitor_create_formation(Monitor *monitor,
 		return false;
 	}
 
-	/* disconnect from PostgreSQL now */
-	pgsql_finish(&monitor->pgsql);
-
-
 	return true;
 }
 
@@ -2337,9 +2320,6 @@ monitor_disable_secondary_for_formation(Monitor *monitor, const char *formation)
 		return false;
 	}
 
-	/* disconnect from PostgreSQL now */
-	pgsql_finish(&monitor->pgsql);
-
 	return true;
 }
 
@@ -2368,9 +2348,6 @@ monitor_drop_formation(Monitor *monitor, char *formation)
 		return false;
 	}
 
-	/* disconnect from PostgreSQL now */
-	pgsql_finish(&monitor->pgsql);
-
 	return true;
 }
 
@@ -2383,6 +2360,7 @@ monitor_drop_formation(Monitor *monitor, char *formation)
 bool
 monitor_formation_uri(Monitor *monitor,
 					  const char *formation,
+					  const char *citusClusterName,
 					  const SSLOptions *ssl,
 					  char *connectionString,
 					  size_t size)
@@ -2390,15 +2368,17 @@ monitor_formation_uri(Monitor *monitor,
 	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_STRING, false };
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
-		"SELECT formation_uri FROM pgautofailover.formation_uri($1, $2, $3, $4)";
-	int paramCount = 4;
-	Oid paramTypes[4] = { TEXTOID, TEXTOID, TEXTOID, TEXTOID };
-	const char *paramValues[4] = { 0 };
+		"SELECT formation_uri "
+		"FROM pgautofailover.formation_uri($1, $2, $3, $4, $5)";
+	int paramCount = 5;
+	Oid paramTypes[5] = { TEXTOID, TEXTOID, TEXTOID, TEXTOID, TEXTOID };
+	const char *paramValues[5] = { 0 };
 
 	paramValues[0] = formation;
-	paramValues[1] = ssl->sslModeStr;
-	paramValues[2] = ssl->caFile;
-	paramValues[3] = ssl->crlFile;
+	paramValues[1] = citusClusterName;
+	paramValues[2] = ssl->sslModeStr;
+	paramValues[3] = ssl->caFile;
+	paramValues[4] = ssl->crlFile;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
@@ -2434,9 +2414,6 @@ monitor_formation_uri(Monitor *monitor,
 	strlcpy(connectionString, context.strVal, size);
 	free(context.strVal);
 
-	/* disconnect from PostgreSQL now */
-	pgsql_finish(&monitor->pgsql);
-
 	return true;
 }
 
@@ -2455,7 +2432,15 @@ monitor_print_every_formation_uri(Monitor *monitor, const SSLOptions *ssl)
 		" UNION ALL "
 		"SELECT 'formation', formationid, formation_uri "
 		"  FROM pgautofailover.formation, "
-		"       pgautofailover.formation_uri(formation.formationid, $2, $3, $4)";
+		"       pgautofailover.formation_uri"
+		"(formation.formationid, 'default', $2, $3, $4) "
+		" UNION ALL "
+		"SELECT 'read-replica', nodecluster, formation_uri "
+		"  FROM pgautofailover.formation "
+		"       JOIN pgautofailover.node using(formationid), "
+		"       pgautofailover.formation_uri"
+		"(formation.formationid, nodecluster, $2, $3, $4) "
+		" WHERE node.groupid = 0 and node.nodecluster <> 'default' ";
 
 	int paramCount = 4;
 	Oid paramTypes[4] = { TEXTOID, TEXTOID, TEXTOID, TEXTOID };
@@ -2483,9 +2468,6 @@ monitor_print_every_formation_uri(Monitor *monitor, const SSLOptions *ssl)
 		return false;
 	}
 
-	/* disconnect from PostgreSQL now */
-	pgsql_finish(&monitor->pgsql);
-
 	return true;
 }
 
@@ -2508,7 +2490,15 @@ monitor_print_every_formation_uri_as_json(Monitor *monitor,
 		" UNION ALL "
 		"SELECT 'formation', formationid, formation_uri "
 		"  FROM pgautofailover.formation, "
-		"       pgautofailover.formation_uri(formation.formationid, $2, $3, $4)"
+		"       pgautofailover.formation_uri"
+		"(formation.formationid, 'default', $2, $3, $4)"
+		" UNION ALL "
+		"SELECT 'read-replica', nodecluster, formation_uri "
+		"  FROM pgautofailover.formation "
+		"       JOIN pgautofailover.node using(formationid), "
+		"       pgautofailover.formation_uri"
+		"(formation.formationid, nodecluster, $2, $3, $4) "
+		" WHERE node.groupid = 0 and node.nodecluster <> 'default' "
 		") "
 		"SELECT jsonb_pretty(jsonb_agg(row_to_json(formation))) FROM formation";
 
@@ -2539,9 +2529,6 @@ monitor_print_every_formation_uri_as_json(Monitor *monitor,
 		}
 		return false;
 	}
-
-	/* disconnect from PostgreSQL now */
-	pgsql_finish(&monitor->pgsql);
 
 	fformat(stream, "%s\n", context.strVal);
 	free(context.strVal);
@@ -2591,10 +2578,10 @@ printFormationURI(void *ctx, PGresult *result)
 	/* create the visual separator for the formation name too */
 	(void) prepareHostNameSeparator(formationNameSeparator, maxFormationNameSize);
 
-	fformat(stdout, "%10s | %*s | %s\n",
+	fformat(stdout, "%12s | %*s | %s\n",
 			"Type", maxFormationNameSize, "Name", "Connection String");
-	fformat(stdout, "%10s-+-%*s-+-%s\n",
-			"----------", maxFormationNameSize, formationNameSeparator,
+	fformat(stdout, "%12s-+-%*s-+-%s\n",
+			"------------", maxFormationNameSize, formationNameSeparator,
 			"------------------------------");
 
 	for (currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
@@ -2603,12 +2590,60 @@ printFormationURI(void *ctx, PGresult *result)
 		char *name = PQgetvalue(result, currentTupleIndex, 1);
 		char *URI = PQgetvalue(result, currentTupleIndex, 2);
 
-		fformat(stdout, "%10s | %*s | %s\n",
+		fformat(stdout, "%12s | %*s | %s\n",
 				type, maxFormationNameSize, name, URI);
 	}
 	fformat(stdout, "\n");
 
 	context->parsedOK = true;
+}
+
+
+/*
+ * monitor_count_failover_candidates counts how many nodes in a given group are
+ * not currently in a primary state, and have candidatePriority > 0.
+ */
+bool
+monitor_count_failover_candidates(Monitor *monitor,
+								  char *formation, int groupId,
+								  int *failoverCandidateCount)
+{
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_INT, false };
+	PGSQL *pgsql = &monitor->pgsql;
+	char *sql =
+		"select count(node.candidatepriority) "
+		"       filter(where node.candidatepriority > 0) "
+		"       as failover_candidate_count "
+		"  from pgautofailover.get_nodes($1, $2) as gn "
+		"  join pgautofailover.node "
+		"    on node.nodeid = gn.node_id "
+		" where not node_is_primary";
+
+	int paramCount = 2;
+	Oid paramTypes[2] = { TEXTOID, INT4OID };
+	const char *paramValues[2] = { 0 };
+	IntString myGroupIdString = intToString(groupId);
+
+	paramValues[0] = formation;
+	paramValues[1] = myGroupIdString.strValue;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &parseSingleValueResult))
+	{
+		log_error("Failed to retrieve formation settings from the monitor");
+		return false;
+	}
+
+	if (!context.parsedOk)
+	{
+		log_error("Failed to parse query result from the monitor.");
+		return false;
+	}
+
+	*failoverCandidateCount = context.intVal;
+
+	return true;
 }
 
 
@@ -2637,16 +2672,14 @@ monitor_print_formation_settings(Monitor *monitor, char *formation)
 								   paramCount, paramTypes, paramValues,
 								   &context, &printFormationSettings))
 	{
-		log_error("Failed to retrieve current state from the monitor");
+		log_error("Failed to retrieve formation settings from the monitor");
 		return false;
 	}
 
-	/* disconnect from PostgreSQL now */
-	pgsql_finish(&monitor->pgsql);
-
 	if (!context.parsedOK)
 	{
-		log_error("Failed to parse current state from the monitor");
+		log_error("Failed to parse formation settings from the monitor "
+				  "for formation \"%s\"", formation);
 		return false;
 	}
 
@@ -2673,6 +2706,13 @@ printFormationSettings(void *ctx, PGresult *result)
 	char nameSeparatorHeader[BUFSIZE] = { 0 };
 	char settingSeparatorHeader[BUFSIZE] = { 0 };
 	char valueSeparatorHeader[BUFSIZE] = { 0 };
+
+	if (nTuples == 0)
+	{
+		log_debug("Query returned 0 rows");
+		context->parsedOK = false;
+		return;
+	}
 
 	if (PQnfields(result) != 6)
 	{
@@ -2762,7 +2802,7 @@ monitor_print_formation_settings_as_json(Monitor *monitor, char *formation)
 		" ), "
 		" f(json) as "
 		" ( "
-		"   select row_to_json(settings) "
+		"   select jsonb_agg(row_to_json(settings)) "
 		"     from settings "
 		"    where context = 'formation' "
 		" ), "
@@ -2792,9 +2832,6 @@ monitor_print_formation_settings_as_json(Monitor *monitor, char *formation)
 		log_error("Failed to retrieve current state from the monitor");
 		return false;
 	}
-
-	/* disconnect from PostgreSQL now */
-	pgsql_finish(&monitor->pgsql);
 
 	if (!context.parsedOk)
 	{
@@ -3001,9 +3038,6 @@ monitor_set_group_system_identifier(Monitor *monitor,
 		return false;
 	}
 
-	/* disconnect from PostgreSQL now */
-	pgsql_finish(&monitor->pgsql);
-
 	if (!context.parsedOk)
 	{
 		/* *INDENT-OFF* */
@@ -3204,7 +3238,7 @@ monitor_process_notifications(Monitor *monitor,
 							  void *notificationContext,
 							  NotificationProcessingFunction processor)
 {
-	PGconn *connection = monitor->pgsql.connection;
+	PGconn *connection = monitor->notificationClient.connection;
 	PGnotify *notify;
 
 
@@ -3235,7 +3269,7 @@ monitor_process_notifications(Monitor *monitor,
 		return false;
 	}
 
-	if (!pgsql_listen(&(monitor->pgsql), channels))
+	if (!pgsql_listen(&(monitor->notificationClient), channels))
 	{
 		/* restore signal masks (un block them) now */
 		(void) unblock_signals(&sig_mask_orig);
@@ -3243,7 +3277,7 @@ monitor_process_notifications(Monitor *monitor,
 		return false;
 	}
 
-	if (monitor->pgsql.connection == NULL)
+	if (monitor->notificationClient.connection == NULL)
 	{
 		log_warn("Lost connection.");
 
@@ -3259,7 +3293,7 @@ monitor_process_notifications(Monitor *monitor,
 	 *
 	 * https://www.postgresql.org/docs/current/libpq-example.html#LIBPQ-EXAMPLE-2
 	 */
-	int sock = PQsocket(monitor->pgsql.connection);
+	int sock = PQsocket(monitor->notificationClient.connection);
 
 	if (sock < 0)
 	{
@@ -3432,6 +3466,20 @@ monitor_notification_process_apply_settings(void *context,
 				  nodeState->node.port,
 				  NodeStateToString(nodeState->reportedState));
 	}
+
+	/*
+	 * In some cases applying a new value for a replication setting will not go
+	 * through APPLY_SETTINGS. One such case is when changing candidate
+	 * priority to trigger a failover when all the available nodes have
+	 * candidate priority set to zero.
+	 */
+	if ((nodeState->reportedState == PRIMARY_STATE &&
+		 nodeState->reportedState == nodeState->goalState) ||
+		(nodeState->reportedState == WAIT_PRIMARY_STATE &&
+		 nodeState->reportedState == nodeState->goalState))
+	{
+		ctx->applySettingsTransitionDone = true;
+	}
 }
 
 
@@ -3452,7 +3500,7 @@ bool
 monitor_wait_until_primary_applied_settings(Monitor *monitor,
 											const char *formation)
 {
-	PGconn *connection = monitor->pgsql.connection;
+	PGconn *connection = monitor->notificationClient.connection;
 	ApplySettingsNotificationContext context = {
 		(char *) formation,
 		false,
@@ -3495,7 +3543,7 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 	}
 
 	/* disconnect from monitor */
-	pgsql_finish(&monitor->pgsql);
+	pgsql_finish(&monitor->notificationClient);
 
 	return context.applySettingsTransitionDone;
 }
@@ -3542,7 +3590,7 @@ monitor_wait_for_state_change(Monitor *monitor,
 							  int timeoutMs,
 							  bool *stateHasChanged)
 {
-	PGconn *connection = monitor->pgsql.connection;
+	PGconn *connection = monitor->notificationClient.connection;
 
 	WaitForStateChangeNotificationContext context = {
 		(char *) formation,
@@ -3701,9 +3749,10 @@ monitor_wait_until_some_node_reported_state(Monitor *monitor,
 											const char *formation,
 											int groupId,
 											PgInstanceKind nodeKind,
-											NodeState targetState)
+											NodeState targetState,
+											int timeout)
 {
-	PGconn *connection = monitor->pgsql.connection;
+	PGconn *connection = monitor->notificationClient.connection;
 
 	NodeAddressArray nodesArray = { 0 };
 	NodeAddressHeaders headers = { 0 };
@@ -3727,22 +3776,37 @@ monitor_wait_until_some_node_reported_state(Monitor *monitor,
 		return false;
 	}
 
+	/* when timeout <= 0 we just never stop waiting */
+	if (timeout > 0)
+	{
+		log_info("Waiting %d secs for a notification with "
+				 "state \"%s\" in formation \"%s\" and group %d",
+				 timeout, NodeStateToString(targetState), formation, groupId);
+	}
+
 	(void) monitor_report_state_print_headers(monitor, formation, groupId,
 											  nodeKind, &nodesArray, &headers);
 
 	while (!context.failoverIsDone)
 	{
-		uint64_t now = time(NULL);
-
-		if ((now - start) > PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT)
+		/* when timeout <= 0 we just never stop waiting */
+		if (timeout > 0)
 		{
-			log_error("Failed to receive monitor's notifications");
-			break;
+			uint64_t now = time(NULL);
+
+			if ((now - start) > timeout)
+			{
+				log_error("Failed to receive monitor's notifications");
+				break;
+			}
 		}
+
+		int thisLoopTimeout =
+			timeout > 0 ? timeout : PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT;
 
 		if (!monitor_process_notifications(
 				monitor,
-				PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT * 1000,
+				thisLoopTimeout * 1000,
 				channels,
 				(void *) &context,
 				&monitor_check_report_state))
@@ -3753,7 +3817,7 @@ monitor_wait_until_some_node_reported_state(Monitor *monitor,
 	}
 
 	/* disconnect from monitor */
-	pgsql_finish(&monitor->pgsql);
+	pgsql_finish(&monitor->notificationClient);
 
 	return context.failoverIsDone;
 }
@@ -3836,7 +3900,7 @@ monitor_wait_until_node_reported_state(Monitor *monitor,
 									   PgInstanceKind nodeKind,
 									   NodeState targetState)
 {
-	PGconn *connection = monitor->pgsql.connection;
+	PGconn *connection = monitor->notificationClient.connection;
 
 	NodeAddressArray nodesArray = { 0 };
 	NodeAddressHeaders headers = { 0 };
@@ -3887,7 +3951,7 @@ monitor_wait_until_node_reported_state(Monitor *monitor,
 	}
 
 	/* disconnect from monitor */
-	pgsql_finish(&monitor->pgsql);
+	pgsql_finish(&monitor->notificationClient);
 
 	return context.done;
 }
@@ -4008,19 +4072,19 @@ monitor_extension_update(Monitor *monitor, const char *targetVersion)
 	{
 		/*
 		 * Ensure "btree_gist" is available in the server extension dir used to
-		 * create the Postgres instance.
+		 * create the Postgres instance. We only search for the control file to
+		 * offer better diagnostics in the logs in case the following CREATE
+		 * EXTENSION fails.
 		 */
 		char *btreeGistExtName = "btree_gist";
 
 		if (!find_extension_control_file(monitor->config.pgSetup.pg_ctl,
 										 btreeGistExtName))
 		{
-			log_error("Failed to find extension control file for \"%s\"",
-					  btreeGistExtName);
+			log_warn("Failed to find extension control file for \"%s\"",
+					 btreeGistExtName);
 			log_info("You might have to install a PostgreSQL contrib package");
-			return false;
 		}
-
 
 		if (!pgsql_create_extension(pgsql, btreeGistExtName))
 		{
@@ -4116,8 +4180,14 @@ monitor_ensure_extension_version(Monitor *monitor,
 					  "on the monitor, see above for details",
 					  PG_AUTOCTL_MONITOR_EXTENSION_NAME,
 					  extensionVersion);
+
+			/* explicitly close the dbOwner connection to the monitor */
+			pgsql_finish(&(dbOwnerMonitor.pgsql));
 			return false;
 		}
+
+		/* explicitly close the dbOwner connection to the monitor */
+		pgsql_finish(&(dbOwnerMonitor.pgsql));
 
 		if (!monitor_get_extension_version(monitor, version))
 		{
@@ -4142,6 +4212,7 @@ monitor_ensure_extension_version(Monitor *monitor,
 
 		/* avoid spurious error messages about losing our connection */
 		pgsql_finish(&(monitor->pgsql));
+		pgsql_finish(&(monitor->notificationClient));
 
 		if (!ensure_postgres_service_is_stopped(postgres))
 		{
@@ -4227,6 +4298,9 @@ prepare_connection_to_current_system_user(Monitor *source, Monitor *target)
 		PQconninfoFree(conninfo);
 		return false;
 	}
+
+	/* Finally mark the connection as multi statement */
+	target->pgsql.connectionStatementType = PGSQL_CONNECTION_MULTI_STATEMENT;
 
 	PQconninfoFree(conninfo);
 
