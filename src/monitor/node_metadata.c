@@ -448,8 +448,8 @@ GetPrimaryOrDemotedNodeInGroup(char *formationId, int32 groupId)
 		AutoFailoverNode *currentNode = (AutoFailoverNode *) lfirst(nodeCell);
 
 		if (StateBelongsToPrimary(currentNode->reportedState) &&
-			(IsBeingDemotedPrimary(primaryNode) == false ||
-			 IsDemotedPrimary(currentNode) == false))
+			(!IsBeingDemotedPrimary(primaryNode) ||
+			 !IsDemotedPrimary(currentNode)))
 		{
 			primaryNode = currentNode;
 		}

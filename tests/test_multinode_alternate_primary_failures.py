@@ -136,7 +136,7 @@ def test_005_001_fail_primary_again():
 
 
 def test_005_002_fail_primary_again():
-    # verify that node3 is primary and stop it
+    # verify that node1 is primary and stop it
     assert node1.get_state().assigned == "primary"
     node1.fail()
 
