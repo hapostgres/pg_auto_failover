@@ -23,7 +23,7 @@ def teardown_module():
 def test_000_create_monitor():
     global monitor
     monitor = cluster.create_monitor(
-        "/tmp/multinode_alternate_primary_failures/monitor"
+        "/tmp/multi_alternate_primary_failures/monitor"
     )
     monitor.run()
     monitor.wait_until_pg_is_running()
@@ -32,7 +32,7 @@ def test_000_create_monitor():
 def test_001_init_primary():
     global node1
     node1 = cluster.create_datanode(
-        "/tmp/multinode_alternate_primary_failures/node1"
+        "/tmp/multi_alternate_primary_failures/node1"
     )
     node1.create()
     node1.run()
@@ -43,7 +43,7 @@ def test_002_001_add_two_standbys():
     global node2
 
     node2 = cluster.create_datanode(
-        "/tmp/multinode_alternate_primary_failures/node2"
+        "/tmp/multi_alternate_primary_failures/node2"
     )
     node2.create()
     node2.run()
@@ -63,7 +63,7 @@ def test_002_002_add_two_standbys():
     global node3
 
     node3 = cluster.create_datanode(
-        "/tmp/multinode_alternate_primary_failures/node3"
+        "/tmp/multi_alternate_primary_failures/node3"
     )
     node3.create()
     node3.run()
