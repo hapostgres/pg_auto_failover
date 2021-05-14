@@ -131,8 +131,11 @@ def test_005_001_fail_primary_again():
     assert node3.get_state().assigned == "primary"
     node3.fail()
 
-    assert node3.wait_until_assigned_state(target_state="demoted")
-    assert node1.wait_until_assigned_state(target_state="primary")
+    assert node3.wait_until_assigned_state(
+        target_state="demote_timeout", timeout=120
+    )
+    assert node3.wait_until_assigned_state(target_state="demoted", timeout=120)
+    assert node1.wait_until_assigned_state(target_state="primary", timeout=120)
 
 
 def test_005_002_fail_primary_again():
@@ -140,8 +143,13 @@ def test_005_002_fail_primary_again():
     assert node1.get_state().assigned == "primary"
     node1.fail()
 
-    assert node1.wait_until_assigned_state(target_state="demoted")
-    assert node2.wait_until_assigned_state(target_state="wait_primary")
+    assert node1.wait_until_assigned_state(
+        target_state="demote_timeout", timeout=120
+    )
+    assert node1.wait_until_assigned_state(target_state="demoted", timeout=120)
+    assert node2.wait_until_assigned_state(
+        target_state="wait_primary", timeout=120
+    )
 
 
 def test_007_001_bring_up_first_failed_primary():
