@@ -136,6 +136,8 @@ def test_005_001_fail_primary_again():
     )
     assert node3.wait_until_assigned_state(target_state="demoted", timeout=120)
     assert node1.wait_until_assigned_state(target_state="primary", timeout=120)
+    assert node1.wait_until_state(target_state="primary", timeout=120)
+    assert node2.wait_until_state(target_state="secondary", timeout=120)
 
 
 def test_005_002_fail_primary_again():
@@ -152,7 +154,7 @@ def test_005_002_fail_primary_again():
     )
 
 
-def test_007_001_bring_up_first_failed_primary():
+def test_006_001_bring_up_first_failed_primary():
     # Restart node3
     node3.run()
     node3.wait_until_pg_is_running()
@@ -162,7 +164,7 @@ def test_007_001_bring_up_first_failed_primary():
     assert node2.wait_until_state(target_state="primary")
 
 
-def test_007_002_bring_up_first_failed_primary():
+def test_006_002_bring_up_first_failed_primary():
     # Restart node1
     node1.run()
     node1.wait_until_pg_is_running()
