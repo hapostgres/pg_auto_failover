@@ -438,15 +438,20 @@ GetPrimaryOrDemotedNodeInGroup(char *formationId, int32 groupId)
 		return primaryNode;
 	}
 
-	/* maybe we have a primary that is draining or has been demoted? */
+	/*
+	 * Maybe we have a primary that is draining or has been demoted?
+	 * In case there are more than one of those, choose the one that is
+	 * currently being demoted.
+	 */
 	foreach(nodeCell, groupNodeList)
 	{
 		AutoFailoverNode *currentNode = (AutoFailoverNode *) lfirst(nodeCell);
 
-		if (StateBelongsToPrimary(currentNode->reportedState))
+		if (StateBelongsToPrimary(currentNode->reportedState) &&
+			(!IsBeingDemotedPrimary(primaryNode) ||
+			 !IsDemotedPrimary(currentNode)))
 		{
 			primaryNode = currentNode;
-			break;
 		}
 	}
 
@@ -1536,6 +1541,34 @@ StateBelongsToPrimary(ReplicationState state)
 		   state == REPLICATION_STATE_DRAINING ||
 		   state == REPLICATION_STATE_DEMOTE_TIMEOUT ||
 		   state == REPLICATION_STATE_PREPARE_MAINTENANCE;
+}
+
+
+/*
+ * IsBeingDemotedPrimary returns true when a given node is currently going
+ * through a demotion.
+ */
+bool
+IsBeingDemotedPrimary(AutoFailoverNode *node)
+{
+	return node != NULL &&
+		   (node->reportedState == REPLICATION_STATE_PRIMARY &&
+			(node->goalState == REPLICATION_STATE_DRAINING ||
+			 node->goalState == REPLICATION_STATE_DEMOTE_TIMEOUT ||
+			 node->goalState == REPLICATION_STATE_PREPARE_MAINTENANCE));
+}
+
+
+/*
+ * IsDemotedPrimary returns true when a node has completed a process of
+ * demotion.
+ */
+bool
+IsDemotedPrimary(AutoFailoverNode *node)
+{
+	return node != NULL &&
+		   (node->reportedState == REPLICATION_STATE_PRIMARY &&
+			node->goalState == REPLICATION_STATE_DEMOTED);
 }
 
 

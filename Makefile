@@ -35,6 +35,7 @@ TESTS_MULTI  = test_multi_async
 TESTS_MULTI += test_multi_ifdown
 TESTS_MULTI += test_multi_maintenance
 TESTS_MULTI += test_multi_standbys
+TESTS_MULTI += test_multi_alternate_primary_failures
 
 # TEST indicates the testfile to run
 TEST ?=
