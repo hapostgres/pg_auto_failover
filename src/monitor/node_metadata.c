@@ -449,7 +449,7 @@ GetPrimaryOrDemotedNodeInGroup(char *formationId, int32 groupId)
 
 		if (StateBelongsToPrimary(currentNode->reportedState) &&
 			(IsBeingDemotedPrimary(primaryNode) == false ||
-			IsDemotedPrimary(currentNode) == false))
+			 IsDemotedPrimary(currentNode) == false))
 		{
 			primaryNode = currentNode;
 		}
@@ -1543,6 +1543,7 @@ StateBelongsToPrimary(ReplicationState state)
 		   state == REPLICATION_STATE_PREPARE_MAINTENANCE;
 }
 
+
 /*
  * IsBeingDemotedPrimary returns true when a given node is currently going
  * through a demotion.
@@ -1551,11 +1552,12 @@ bool
 IsBeingDemotedPrimary(AutoFailoverNode *node)
 {
 	return node != NULL &&
-			(node->reportedState == REPLICATION_STATE_PRIMARY &&
+		   (node->reportedState == REPLICATION_STATE_PRIMARY &&
 			(node->goalState == REPLICATION_STATE_DRAINING ||
 			 node->goalState == REPLICATION_STATE_DEMOTE_TIMEOUT ||
 			 node->goalState == REPLICATION_STATE_PREPARE_MAINTENANCE));
 }
+
 
 /*
  * IsDemotedPrimary returns true when a node has completed a process of
@@ -1565,9 +1567,10 @@ bool
 IsDemotedPrimary(AutoFailoverNode *node)
 {
 	return node != NULL &&
-			(node->reportedState == REPLICATION_STATE_PRIMARY &&
-			 node->goalState == REPLICATION_STATE_DEMOTED);
+		   (node->reportedState == REPLICATION_STATE_PRIMARY &&
+			node->goalState == REPLICATION_STATE_DEMOTED);
 }
+
 
 /*
  * IsBeingPromoted returns whether a standby node is going through the process

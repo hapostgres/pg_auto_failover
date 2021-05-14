@@ -22,22 +22,29 @@ def teardown_module():
 
 def test_000_create_monitor():
     global monitor
-    monitor = cluster.create_monitor("/tmp/multinode_alternate_primary_failures/monitor")
+    monitor = cluster.create_monitor(
+        "/tmp/multinode_alternate_primary_failures/monitor"
+    )
     monitor.run()
     monitor.wait_until_pg_is_running()
 
 
 def test_001_init_primary():
     global node1
-    node1 = cluster.create_datanode("/tmp/multinode_alternate_primary_failures/node1")
+    node1 = cluster.create_datanode(
+        "/tmp/multinode_alternate_primary_failures/node1"
+    )
     node1.create()
     node1.run()
     assert node1.wait_until_state(target_state="single")
 
+
 def test_002_001_add_two_standbys():
     global node2
 
-    node2 = cluster.create_datanode("/tmp/multinode_alternate_primary_failures/node2")
+    node2 = cluster.create_datanode(
+        "/tmp/multinode_alternate_primary_failures/node2"
+    )
     node2.create()
     node2.run()
 
@@ -55,7 +62,9 @@ def test_002_001_add_two_standbys():
 def test_002_002_add_two_standbys():
     global node3
 
-    node3 = cluster.create_datanode("/tmp/multinode_alternate_primary_failures/node3")
+    node3 = cluster.create_datanode(
+        "/tmp/multinode_alternate_primary_failures/node3"
+    )
     node3.create()
     node3.run()
 
@@ -81,6 +90,7 @@ def test_003_001_stop_primary():
     assert node1.wait_until_assigned_state(target_state="demoted")
     assert node2.wait_until_state(target_state="primary")
 
+
 def test_003_002_stop_primary():
     # verify that node2 is primary and stop it
     assert node2.get_state().assigned == "primary"
@@ -90,6 +100,7 @@ def test_003_002_stop_primary():
     assert node2.wait_until_assigned_state(target_state="demoted")
     assert node3.wait_until_state(target_state="wait_primary")
 
+
 def test_004_001_bringup_last_failed_primary():
     # Restart node2
     node2.run()
@@ -98,6 +109,7 @@ def test_004_001_bringup_last_failed_primary():
     # Now node 2 should become secondary
     assert node2.wait_until_state(target_state="secondary")
     assert node3.wait_until_state(target_state="primary")
+
 
 def test_004_002_bringup_last_failed_primary():
     # Restart node1
@@ -113,6 +125,7 @@ def test_004_002_bringup_last_failed_primary():
     assert node2.has_needed_replication_slots()
     assert node3.has_needed_replication_slots()
 
+
 def test_005_001_fail_primary_again():
     # verify that node3 is primary and stop it
     assert node3.get_state().assigned == "primary"
@@ -120,6 +133,7 @@ def test_005_001_fail_primary_again():
 
     assert node3.wait_until_assigned_state(target_state="demoted")
     assert node1.wait_until_assigned_state(target_state="primary")
+
 
 def test_005_002_fail_primary_again():
     # verify that node3 is primary and stop it
@@ -129,6 +143,7 @@ def test_005_002_fail_primary_again():
     assert node1.wait_until_assigned_state(target_state="demoted")
     assert node2.wait_until_assigned_state(target_state="wait_primary")
 
+
 def test_007_001_bring_up_first_failed_primary():
     # Restart node3
     node3.run()
@@ -137,6 +152,7 @@ def test_007_001_bring_up_first_failed_primary():
     # Now node 3 should become secondary
     assert node3.wait_until_state(target_state="secondary")
     assert node2.wait_until_state(target_state="primary")
+
 
 def test_007_002_bring_up_first_failed_primary():
     # Restart node1
