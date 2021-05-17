@@ -1377,6 +1377,25 @@ BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
 				 "Skipping candidate " NODE_FORMAT ", which is unhealthy",
 				 NODE_FORMAT_ARGS(node));
 
+			/*
+			 * When a secondary node is now down, and had already reported its
+			 * LSN, then it's not "missing": we have its LSN and are able to
+			 * continue with the election mechanism.
+			 *
+			 * Otherwise, we didn't get its LSN and this node might be the most
+			 * advanced LSN. Picking it now might lead to loosing commited data
+			 * that was reported to the client connection.
+			 *
+			 * Only the nodes that participate in the quorum are required to
+			 * report their LSN, because only those nodes are waited by
+			 * Postgres to report a commit to the client connection.
+			 */
+			if (node->replicationQuorum &&
+				node->reportedState != REPLICATION_STATE_REPORT_LSN)
+			{
+				++(candidateList->missingNodesCount);
+			}
+
 			continue;
 		}
 
