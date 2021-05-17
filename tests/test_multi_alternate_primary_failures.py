@@ -97,15 +97,14 @@ def test_003_002_stop_primary():
     assert node2.get_state().assigned == "primary"
     node2.fail()
 
-    # wait for node3 to become the new write node
-    assert node2.wait_until_assigned_state(target_state="demoted")
-    assert node3.wait_until_state(target_state="wait_primary")
+    # node3 can't be promoted when it's the only one reporting its LSN
+    assert node2.wait_until_assigned_state(target_state="draining")
+    assert node3.wait_until_state(target_state="report_lsn")
 
 
 def test_004_001_bringup_last_failed_primary():
     # Restart node2
     node2.run()
-    node2.wait_until_pg_is_running()
 
     # Now node 2 should become secondary
     assert node2.wait_until_state(target_state="secondary")

@@ -1357,7 +1357,9 @@ BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
 		}
 
 		/* skip old and new primary nodes (if a selection has been made) */
-		if (StateBelongsToPrimary(node->goalState))
+		if (IsInPrimaryState(node) ||
+			IsBeingDemotedPrimary(node) ||
+			IsDemotedPrimary(node))
 		{
 			elog(LOG,
 				 "Skipping candidate " NODE_FORMAT
@@ -1399,6 +1401,21 @@ BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
 			continue;
 		}
 
+		/*
+		 * When a failover is ongoing, a former primary node that has reached
+		 * DRAINING is not counted in the list of nodes that need to report
+		 * their LSN, and the node isn't a candidate for promotion either.
+		 */
+		if (IsReporting(node) &&
+			IsCurrentState(node, REPLICATION_STATE_DRAINING))
+		{
+			elog(LOG,
+				 "Skipping (former primary?) draining node " NODE_FORMAT,
+				 NODE_FORMAT_ARGS(node));
+
+			continue;
+		}
+
 		/* grab healthy standby nodes which have reached REPORT_LSN */
 		if (IsCurrentState(node, REPLICATION_STATE_REPORT_LSN))
 		{
@@ -1417,7 +1434,8 @@ BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
 
 		/*
 		 * Nodes in SECONDARY or CATCHINGUP states are candidates due to report
-		 * their LSN.
+		 * their LSN. Previous primary nodes that come back up online and just
+		 * reached DRAINING now are due to report their LSN too.
 		 */
 		if (IsStateIn(node->reportedState, secondaryStates) &&
 			IsStateIn(node->goalState, secondaryStates))
