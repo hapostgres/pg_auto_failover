@@ -56,7 +56,8 @@ CREATE TABLE pgautofailover.formation
  );
 
 insert into pgautofailover.formation (formationid, dbname)
-     values ('monitor', 'pg_auto_failover'), ('default', DEFAULT);
+     values ('monitor', 'pg_auto_failover'),
+            ('default', DEFAULT);
 
 CREATE FUNCTION pgautofailover.create_formation
  (
@@ -189,8 +190,8 @@ CREATE TABLE pgautofailover.archiver
  );
 
 --
--- A pg_auto_failover archiver can be registered to handle many formation. A
--- single formation can also be taken care of by more than one archiver
+-- A pg_auto_failover archiver can be registered to handle many formations.
+-- A single formation can also be taken care of by more than one archiver
 -- (redundancy). When more than one archiver is active for a single given
 -- formation, archivers may have different archiving policies. That's also
 -- useful for migrating to new archivers and policies.
@@ -199,11 +200,6 @@ CREATE TABLE pgautofailover.archiver_policy
  (
     archiverid           bigint not null,
     formationid          text not null default 'default',
-    opt_archive_local    bool not null default 'yes',
-
-    opt_archive_remote   bool not null default 'no',
-    archive_command      text, -- wal-g wal-push /path/to/archive
-    backup_command       text, -- wal-g backup-push /backup/directory/path
 
     apply_delay          interval not null default '6 hours',
     backup_interval      interval not null default '6 hours',
@@ -231,8 +227,10 @@ CREATE TABLE pgautofailover.archiver_node
  (
     archiverid           bigint not null,
     nodeid               bigint not null,
+    groupid              int not null,
 
     PRIMARY KEY (archiverid, nodeid),
+    UNIQUE (archiverid, groupid),
 
     FOREIGN KEY (archiverid) REFERENCES pgautofailover.archiver(archiverid),
     FOREIGN KEY (nodeid) REFERENCES pgautofailover.node(nodeid)
