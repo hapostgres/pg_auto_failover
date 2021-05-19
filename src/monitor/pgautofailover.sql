@@ -389,6 +389,20 @@ grant execute on function
    to autoctl_node;
 
 
+CREATE FUNCTION pgautofailover.remove_archiver
+ (
+   archiver_id int
+ )
+RETURNS bool LANGUAGE C STRICT SECURITY DEFINER
+AS 'MODULE_PATHNAME', $$remove_archiver_by_archiverid$$;
+
+comment on function pgautofailover.remove_node(int)
+        is 'remove a node from the monitor';
+
+grant execute on function pgautofailover.remove_node(int)
+   to autoctl_node;
+
+
 CREATE FUNCTION pgautofailover.node_active
  (
     IN formation_id           		text,

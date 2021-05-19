@@ -61,6 +61,9 @@ static void cli_drop_node_from_monitor(KeeperConfig *config,
 									   const char *hostname,
 									   int port);
 
+static int cli_drop_archiver_getopts(int argc, char **argv);
+static void cli_drop_archiver(int argc, char **argv);
+
 CommandLine create_monitor_command =
 	make_command(
 		"monitor",
@@ -121,6 +124,15 @@ CommandLine drop_node_command =
 				 "  --pgport      Postgres port of the node to remove",
 				 cli_drop_node_getopts,
 				 cli_drop_node);
+
+CommandLine drop_archiver_command =
+	make_command("archiver",
+				 "Drop an archiver from the pg_auto_failover monitor",
+				 "[ --directory --destroy ]",
+				 "  --directory   path to archiver directory\n"
+				 "  --destroy     also destroy all the archives",
+				 cli_drop_archiver_getopts,
+				 cli_drop_archiver);
 
 /*
  * cli_create_config manages the whole set of configuration parameters that

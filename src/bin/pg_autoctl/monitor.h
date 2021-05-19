@@ -218,5 +218,6 @@ bool monitor_ensure_extension_version(Monitor *monitor,
 
 bool monitor_register_archiver(Monitor *monitor, char *name, char *host,
 							   NodeAddress *node);
+bool monitor_drop_archiver(Monitor *monitor, int archiverId);
 
 #endif /* MONITOR_H */

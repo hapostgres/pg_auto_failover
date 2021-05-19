@@ -95,6 +95,7 @@ extern CommandLine destroy_command;
 
 /* cli_archiver.c */
 extern CommandLine create_archiver_command;
+extern CommandLine drop_archiver_command;
 
 /* cli_get_set_properties.c */
 extern CommandLine get_commands;

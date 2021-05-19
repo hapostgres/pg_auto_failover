@@ -27,6 +27,7 @@
 
 /* SQL-callable function declarations */
 PG_FUNCTION_INFO_V1(register_archiver);
+PG_FUNCTION_INFO_V1(remove_archiver_by_archiverid);
 
 /*
  * register_node adds a node to a given formation
@@ -110,4 +111,23 @@ register_archiver(PG_FUNCTION_ARGS)
 	Datum resultDatum = HeapTupleGetDatum(resultTuple);
 
 	PG_RETURN_DATUM(resultDatum);
+}
+
+
+/*
+ * remove_archiver_by_archiverid removes given archiver by id.
+ */
+Datum
+remove_archiver_by_archiverid(PG_FUNCTION_ARGS)
+{
+	checkPgAutoFailoverVersion();
+
+	int32 archiverId = PG_GETARG_INT32(0);
+
+	AutoFailoverArchiver *archiver = GetArchiver(archiverId);
+
+	/* elog(ERROR) when an error occurs */
+	RemoveArchiver(archiver);
+
+	PG_RETURN_BOOL(true);
 }

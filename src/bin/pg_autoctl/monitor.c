@@ -4309,8 +4309,8 @@ prepare_connection_to_current_system_user(Monitor *source, Monitor *target)
 
 
 /*
- * monitor_register_archiver calls pgautofailer.monitor_register_archiver on
- * the monitor.
+ * monitor_register_archiver calls pgautofailer.register_archiver on the
+ * monitor.
  */
 bool
 monitor_register_archiver(Monitor *monitor, char *name, char *host,
@@ -4345,6 +4345,38 @@ monitor_register_archiver(Monitor *monitor, char *name, char *host,
 
 	log_info("Registered archiver \"%s\" %d (\"%s\") on the monitor",
 			 node->name, node->nodeId, node->host);
+
+	return true;
+}
+
+
+/*
+ * monitor_drop_archiver calls pgautofailer.remove_archiver on
+ * the monitor.
+ */
+bool
+monitor_drop_archiver(Monitor *monitor, int archiverId)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql = "SELECT * FROM pgautofailover.remove_archiver($1)";
+
+	int paramCount = 1;
+	Oid paramTypes[1] = { INT4OID };
+	const char *paramValues[1];
+
+	NodeAddressParseContext parseContext = { { 0 }, node, false };
+
+	paramValues[0] = name;
+	paramValues[1] = host;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   NULL, NULL))
+	{
+		log_error("Failed to register archiver \"%s\" (\"%s\") to the monitor",
+				  name, host);
+		return false;
+	}
 
 	return true;
 }

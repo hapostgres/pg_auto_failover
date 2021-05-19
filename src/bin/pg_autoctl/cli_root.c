@@ -71,6 +71,7 @@ CommandLine *drop_subcommands[] = {
 	&drop_monitor_command,
 	&drop_node_command,
 	&drop_formation_command,
+	&drop_archiver_command,
 	NULL
 };
 

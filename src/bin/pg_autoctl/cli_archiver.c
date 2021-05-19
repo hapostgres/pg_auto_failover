@@ -60,6 +60,8 @@ static int cli_create_archiver_getopts(int argc, char **argv);
 static bool cli_create_archiver_config(Archiver *archiver);
 static void cli_create_archiver(int argc, char **argv);
 
+static void cli_drop_archiver(int argc, char **argv);
+
 static int cli_archiver_node_getopts(int argc, char **argv);
 static int cli_archiver_add_node_getopts(int argc, char **argv);
 
@@ -91,6 +93,18 @@ CommandLine create_archiver_command =
 		"  --name            name of this archiver\n",
 		cli_create_archiver_getopts,
 		cli_create_archiver);
+
+CommandLine drop_archiver_command =
+	make_command(
+		"archiver",
+		"Drops a pg_auto_failover archiver node",
+		" [ --directory --hostname --name ] ",
+		"  --directory       top-level directory where to handle archives\n"
+		"  --monitor         pg_auto_failover Monitor Postgres URL\n"
+		"  --hostname        hostname by which postgres is reachable\n"
+		"  --name            name of this archiver\n",
+		cli_create_archiver_getopts,
+		cli_drop_archiver);
 
 CommandLine archive_list_nodes_command =
 	make_command(
@@ -715,6 +729,41 @@ cli_create_archiver(int argc, char **argv)
 
 	if (!monitor_register_archiver(monitor, config->name, config->hostname,
 								   &node))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_MONITOR);
+	}
+}
+
+
+/*
+ * cli_drop_archiver drops an archiver node.
+ */
+static void
+cli_drop_archiver(int argc, char **argv)
+{
+	pid_t pid = 0;
+	Archiver archiver = { 0 };
+	Monitor *monitor = &(archiver.monitor);
+	ArchiverConfig *config = &(archiver.config);
+
+	NodeAddress node = { 0 };
+
+	archiver.config = archiverOptions;
+
+	if (read_pidfile(config->pathnames.pid, &pid))
+	{
+		log_fatal("pg_autoctl is already running with pid %d", pid);
+		exit(EXIT_CODE_BAD_STATE);
+	}
+
+	if (!archiver_monitor_init(&archiver))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_MONITOR);
+	}
+
+	if (!monitor_drop_archiver(monitor, archiver))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_MONITOR);
