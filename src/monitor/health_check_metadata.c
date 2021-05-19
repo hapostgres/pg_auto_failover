@@ -210,7 +210,7 @@ SetNodeHealthState(int nodeId,
 		pgstat_report_activity(STATE_RUNNING, query.data);
 
 		spiStatus = SPI_execute(query.data, false, 0);
-		Assert(spiStatus == SPI_OK_UPDATE);
+		Assert(spiStatus == SPI_OK_UPDATE_RETURNING);
 
 		if (healthState != previousHealthState)
 		{
