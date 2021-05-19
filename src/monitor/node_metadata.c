@@ -1552,7 +1552,7 @@ bool
 IsBeingDemotedPrimary(AutoFailoverNode *node)
 {
 	return node != NULL &&
-		   (node->reportedState == REPLICATION_STATE_PRIMARY &&
+		   (StateBelongsToPrimary(node->reportedState) &&
 			(node->goalState == REPLICATION_STATE_DRAINING ||
 			 node->goalState == REPLICATION_STATE_DEMOTE_TIMEOUT ||
 			 node->goalState == REPLICATION_STATE_PREPARE_MAINTENANCE));
@@ -1567,8 +1567,9 @@ bool
 IsDemotedPrimary(AutoFailoverNode *node)
 {
 	return node != NULL &&
-		   (node->reportedState == REPLICATION_STATE_PRIMARY &&
-			node->goalState == REPLICATION_STATE_DEMOTED);
+		   (node->goalState == REPLICATION_STATE_DEMOTED &&
+			(StateBelongsToPrimary(node->reportedState) ||
+			 node->reportedState == REPLICATION_STATE_DEMOTED));
 }
 
 
