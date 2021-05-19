@@ -82,6 +82,10 @@ register_archiver(PG_FUNCTION_ARGS)
 			archiver->archiverId, archiver->nodeName, archiver->nodeHost);
 	}
 
+	/* Always register the monitor node to all archiver nodes. */
+	AddMonitorToArchiver(archiver);
+
+	/* Now return our result tuple */
 	TupleDesc resultDescriptor = NULL;
 	Datum values[3];
 	bool isNulls[3];

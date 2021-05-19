@@ -20,8 +20,11 @@
 #define AUTO_FAILOVER_SCHEMA_NAME "pgautofailover"
 #define AUTO_FAILOVER_FORMATION_TABLE "pgautofailover.formation"
 #define AUTO_FAILOVER_NODE_TABLE "pgautofailover.node"
-#define AUTO_FAILOVER_ARCHIVER_TABLE "pgautofailover.archiver"
 #define AUTO_FAILOVER_EVENT_TABLE "pgautofailover.event"
+#define AUTO_FAILOVER_ARCHIVER_TABLE "pgautofailover.archiver"
+#define AUTO_FAILOVER_ARCHIVER_NODE_TABLE "pgautofailover.archiver_node"
+#define AUTO_FAILOVER_BASEBACKUP_TABLE "pgautofailover.basebackup"
+#define AUTO_FAILOVER_WAL_FILE_TABLE "pgautofailover.wal_file"
 #define REPLICATION_STATE_TYPE_NAME "replication_state"
 
 
