@@ -1384,9 +1384,10 @@ BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
 			 * LSN, then it's not "missing": we have its LSN and are able to
 			 * continue with the election mechanism.
 			 *
-			 * Otherwise, we didn't get its LSN and this node might be the most
-			 * advanced LSN. Picking it now might lead to loosing commited data
-			 * that was reported to the client connection.
+			 * Otherwise, we didn't get its LSN and this node might be (one of)
+			 * the most advanced LSN. Picking it now might lead to loosing
+			 * commited data that was reported to the client connection, if
+			 * this node is the only one with the most advanted LSN.
 			 *
 			 * Only the nodes that participate in the quorum are required to
 			 * report their LSN, because only those nodes are waited by
@@ -1434,8 +1435,7 @@ BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
 
 		/*
 		 * Nodes in SECONDARY or CATCHINGUP states are candidates due to report
-		 * their LSN. Previous primary nodes that come back up online and just
-		 * reached DRAINING now are due to report their LSN too.
+		 * their LSN.
 		 */
 		if (IsStateIn(node->reportedState, secondaryStates) &&
 			IsStateIn(node->goalState, secondaryStates))
