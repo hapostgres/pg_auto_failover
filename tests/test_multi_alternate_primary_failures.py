@@ -101,6 +101,10 @@ def test_003_002_stop_primary():
     assert node2.wait_until_assigned_state(target_state="draining")
     assert node3.wait_until_state(target_state="report_lsn")
 
+    # check that node3 stays at report_lsn and doesn't go to wait_primary
+    node3.sleep(5)
+    assert node3.wait_until_state(target_state="report_lsn")
+
 
 def test_004_001_bringup_last_failed_primary():
     # Restart node2
