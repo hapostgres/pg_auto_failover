@@ -41,3 +41,5 @@ void RemoveArchiver(AutoFailoverArchiver *archiver);
 
 bool AddArchiverNode(AutoFailoverArchiver *archiver, int nodeId, int groupId);
 bool AddMonitorToArchiver(AutoFailoverArchiver *archiver);
+
+bool AddArchiverPolicyForMonitor(AutoFailoverArchiver *archiver);

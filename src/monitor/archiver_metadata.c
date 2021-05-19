@@ -357,3 +357,58 @@ AddMonitorToArchiver(AutoFailoverArchiver *archiver)
 
 	return success;
 }
+
+
+/*
+ * AddArchiverPolicyForMonitor adds an all default entry to the table
+ * pgautofailover.archiver_policy for the monitor node.
+ */
+bool
+AddArchiverPolicyForMonitor(AutoFailoverArchiver *archiver)
+{
+	bool success = false;
+
+	Oid argTypes[] = {
+		INT4OID                 /* archiverId */
+	};
+
+	Datum argValues[] = {
+		Int32GetDatum(archiver->archiverId) /* archiverId */
+	};
+
+	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
+
+	const char *insertQuery =
+		"INSERT INTO " AUTO_FAILOVER_ARCHIVER_POLICY_TABLE
+		" (archiverid, formationid) "
+		" SELECT $1, formationid "
+		"   FROM " AUTO_FAILOVER_NODE_TABLE
+		"  WHERE formationid = 'monitor' AND nodename = 'monitor'";
+
+	SPI_connect();
+
+	int spiStatus = SPI_execute_with_args(insertQuery, argCount,
+										  argTypes, argValues, NULL,
+										  false, 0);
+
+	if (spiStatus == SPI_OK_INSERT)
+	{
+		if (SPI_processed == 1)
+		{
+			success = true;
+		}
+		else
+		{
+			elog(ERROR,
+				 "found more than one monitor node (%lu)", SPI_processed);
+		}
+	}
+	else
+	{
+		elog(ERROR, "could not insert into " AUTO_FAILOVER_ARCHIVER_TABLE);
+	}
+
+	SPI_finish();
+
+	return success;
+}

@@ -22,6 +22,7 @@
 #define AUTO_FAILOVER_NODE_TABLE "pgautofailover.node"
 #define AUTO_FAILOVER_EVENT_TABLE "pgautofailover.event"
 #define AUTO_FAILOVER_ARCHIVER_TABLE "pgautofailover.archiver"
+#define AUTO_FAILOVER_ARCHIVER_POLICY_TABLE "pgautofailover.archiver_policy"
 #define AUTO_FAILOVER_ARCHIVER_NODE_TABLE "pgautofailover.archiver_node"
 #define AUTO_FAILOVER_BASEBACKUP_TABLE "pgautofailover.basebackup"
 #define AUTO_FAILOVER_WAL_FILE_TABLE "pgautofailover.wal_file"

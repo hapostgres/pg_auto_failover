@@ -83,6 +83,7 @@ register_archiver(PG_FUNCTION_ARGS)
 	}
 
 	/* Always register the monitor node to all archiver nodes. */
+	AddArchiverPolicyForMonitor(archiver);
 	AddMonitorToArchiver(archiver);
 
 	/* Now return our result tuple */
