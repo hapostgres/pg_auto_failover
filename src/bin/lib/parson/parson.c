@@ -1,8 +1,8 @@
 /*
  SPDX-License-Identifier: MIT
 
- Parson 1.1.0 ( http://kgabis.github.com/parson/ )
- Copyright (c) 2012 - 2020 Krzysztof Gabis
+ Parson 1.1.2 ( http://kgabis.github.com/parson/ )
+ Copyright (c) 2012 - 2021 Krzysztof Gabis
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -742,6 +742,9 @@ static JSON_Value * parse_object_value(const char **string, size_t nesting) {
         new_key = get_quoted_string(string, &key_len);
         /* We do not support key names with embedded \0 chars */
         if (new_key == NULL || key_len != strlen(new_key)) {
+            if (new_key) {
+                parson_free(new_key);
+            }
             json_value_free(output_value);
             return NULL;
         }
@@ -960,7 +963,7 @@ static int json_serialize_to_buffer_r(const JSON_Value *value, char *buf, int le
                 if (is_pretty) {
                     APPEND_STRING(" ");
                 }
-                temp_value = json_object_get_value(object, key);
+                temp_value = json_object_get_value_at(object, i);
                 written = json_serialize_to_buffer_r(temp_value, buf, level+1, is_pretty, num_buf);
                 if (written < 0) {
                     return -1;
