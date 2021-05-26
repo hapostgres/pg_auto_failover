@@ -107,6 +107,7 @@ bool standby_follow_new_primary(LocalPostgresServer *postgres);
 bool standby_fetch_missing_wal(LocalPostgresServer *postgres);
 bool standby_restart_with_current_replication_source(LocalPostgresServer *postgres);
 bool standby_cleanup_as_primary(LocalPostgresServer *postgres);
+bool standby_check_timeline_with_upstream(LocalPostgresServer *postgres);
 
 
 #endif /* LOCAL_POSTGRES_H */

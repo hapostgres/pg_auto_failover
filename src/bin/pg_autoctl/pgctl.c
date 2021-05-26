@@ -2468,7 +2468,8 @@ pgctl_identify_system(ReplicationSource *replicationSource)
 		return false;
 	}
 
-	if (!pgsql_identify_system(&replicationClient))
+	if (!pgsql_identify_system(&replicationClient,
+							   &(replicationSource->system)))
 	{
 		/* errors have already been logged */
 		return false;
