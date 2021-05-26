@@ -384,8 +384,8 @@ RegisterHealthCheckWorker(DatabaseListEntry *db)
 		ereport(WARNING,
 				(errmsg(
 					 "failed to start worker for pg_auto_failover health checks in \"%s\"",
-					 db->dbname)),
-				errhint("You might need to increase max_worker_processes."));
+					 db->dbname),
+				errhint("You might need to increase max_worker_processes.")));
 		return NULL;
 	}
 
