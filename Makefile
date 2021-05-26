@@ -160,6 +160,7 @@ build-test:
 run-test: build-test
 	docker run					                \
 		--name $(TEST_CONTAINER_NAME)		    \
+		$(DOCKER_RUN_OPTS)			            \
 		$(TEST_CONTAINER_NAME)			        \
 		make -C /usr/src/pg_auto_failover test	\
 		TEST='${TEST}'

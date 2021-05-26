@@ -40,6 +40,7 @@ typedef struct pg_control_data
 	uint32_t catalog_version_no;        /* see catversion.h */
 	uint64_t system_identifier;
 	char latestCheckpointLSN[PG_LSN_MAXLENGTH];
+	uint32_t timeline_id;
 } PostgresControlData;
 
 /*

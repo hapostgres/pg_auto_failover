@@ -560,4 +560,26 @@ keeper_cli_identify_system(int argc, char **argv)
 		/* errors have already been logged */
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
+
+	IdentifySystem *system = &(replicationSource.system);
+
+	fformat(stdout, "Current timeline:  %d\n", system->timeline);
+	fformat(stdout, "Current WAL LSN:   %s\n", system->xlogpos);
+
+	for (int index = 0; index < system->timelines.count; index++)
+	{
+		TimeLineHistoryEntry *entry = &(system->timelines.history[index]);
+
+		char startLSN[PG_LSN_MAXLENGTH] = { 0 };
+
+		sformat(startLSN, sizeof(startLSN), "%X/%X",
+				(uint32_t) (entry->begin >> 32),
+				(uint32_t) entry->begin);
+
+		fformat(stdout, "Timeline %d:   %18s .. %X/%X\n",
+				entry->tli,
+				startLSN,
+				(uint32_t) (entry->end >> 32),
+				(uint32_t) entry->end);
+	}
 }
