@@ -105,7 +105,6 @@ typedef struct HealthCheckHelperDatabase
 	/* hash key: database to run on */
 	Oid dboid;
 	pid_t workerPid;
-	bool isActive;
 	BackgroundWorkerHandle *handle;
 } HealthCheckHelperDatabase;
 
@@ -262,7 +261,7 @@ HealthCheckWorkerLauncherMain(Datum arg)
 			HealthCheckHelperDatabase *dbData = hash_search(HealthCheckWorkerDBHash,
 															(void *) &entry->dboid,
 															HASH_ENTER, &isFound);
-			if (isFound && dbData->isActive)
+			if (isFound)
 			{
 				handle = dbData->handle;
 
@@ -275,19 +274,27 @@ HealthCheckWorkerLauncherMain(Datum arg)
 				 * actually running. Note that it is not possible to get
 				 * BGWH_NOT_YET_STARTED at this point, because this is not first
 				 * time we try to register the worker due to the isFound value
-				 * above, and we will WaitForBackgroundWorkerStartup after
-				 * registering before setting isActive to true. Thus we can only
-				 * get BGWH_STARTED or BGWH_STOPPED.
+				 * above. The HealthCheckWorkerDBHash only maintains verified
+				 * started entries. Thus we can only get BGWH_STARTED or
+				 * BGWH_STOPPED.
 				 *
 				 * NOTE: For PostgreSQL versions prior to 12, it is possible to
-				 * get erroneous results in GetBackgroundWorkerPid due to the
-				 * slot generation number being out of date. This is especially
-				 * true after signalling the Postmaster to reload the
-				 * configuration.
+				 * get erroneous results in GetBackgroundWorkerPid. In that
+				 * function, the handle we are providing is checked against a
+				 * localy held and maintained array. In affected versions, there
+				 * exists a window where our stored handle and that array to
+				 * have fallen out of sync. Such a window is more probable when
+				 * signalling the Postmaster e.g. to reload the configuration.
+				 *
+				 * When the entries are out of sync handle will be returned with
+				 * status BGWH_STOPPED and it will never be upgraded to
+				 * BGWH_STARTED, whereas in reality the bgworker is running and
+				 * most probably is healthy. From that moment onwards, we will
+				 * never be able to correctly assess the worker's status via the
+				 * provided API.
 				 */
 				if (GetBackgroundWorkerPid(handle, &pid) != BGWH_STARTED)
 				{
-					dbData->isActive = false;
 					#if (PG_VERSION_NUM >= 120000)
 					ereport(WARNING,
 							(errmsg(
@@ -302,6 +309,18 @@ HealthCheckWorkerLauncherMain(Datum arg)
 								 entry->dbname)));
 					#endif
 
+					/*
+					 * Now we know that either the worker has stopped or we
+					 * encountered the issue described in the NOTE above. We use
+					 * StopHealthCheckWorker to remove the entry from the
+					 * HealthCheckWorkerDBHash. That will force a retry in the
+					 * next scan of the databaselist. Furthermore, if the
+					 * status from GetBackgroundWorkerPid was not the correct
+					 * one, then StopHealthCheckWorker will also make certain
+					 * that the worker that we can no longer monitor correctly,
+					 * will be stopped. That will leave HealthCheckWorkerDBHash
+					 * in a consistent state.
+					 */
 					StopHealthCheckWorker(entry->dboid);
 				}
 
@@ -346,7 +365,6 @@ HealthCheckWorkerLauncherMain(Datum arg)
 				 */
 				if (WaitForBackgroundWorkerStartup(handle, &pid) == BGWH_STARTED)
 				{
-					dbData->isActive = true;
 					dbData->handle = handle;
 					ereport(LOG,
 							(errmsg(
@@ -362,6 +380,20 @@ HealthCheckWorkerLauncherMain(Datum arg)
 								 "health checks in \"%s\"",
 								 entry->dbname)));
 
+					/*
+					 * Similarly to the comment above, we either failed to start
+					 * the worker, or we encountered the issue described in the
+					 * NOTE. We use StopHealthCheckWorker to remove the entry
+					 * from the HealthCheckWorkerDBHash so that it will be
+					 * retried in the next databaselist scan. The call to kill()
+					 * the failed worker in StopHealthCheckWorker() will take
+					 * place only if the worker has actually started, in which
+					 * case it means that we encountered the issue described in
+					 * NOTE and we can no longer properly assess the state of
+					 * that worker. After the call to StopHealthCheckWorker, we
+					 * know that HealthCheckWorkerDBHash will contain only
+					 * started and able to monitor entries.
+					 */
 					StopHealthCheckWorker(entry->dboid);
 				}
 			}
