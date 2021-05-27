@@ -266,6 +266,8 @@ HealthCheckWorkerLauncherMain(Datum arg)
 			{
 				handle = dbData->handle;
 
+				LWLockRelease(&HealthCheckHelperControl->lock);
+
 				/*
 				 * This database has already been processed.
 				 *
@@ -276,22 +278,34 @@ HealthCheckWorkerLauncherMain(Datum arg)
 				 * above, and we will WaitForBackgroundWorkerStartup after
 				 * registering before setting isActive to true. Thus we can only
 				 * get BGWH_STARTED or BGWH_STOPPED.
+				 *
+				 * NOTE: For PostgreSQL versions prior to 12, it is possible to
+				 * get erroneous results in GetBackgroundWorkerPid due to the
+				 * slot generation number being out of date. This is especially
+				 * true after signalling the Postmaster to reload the
+				 * configuration.
 				 */
-				if (GetBackgroundWorkerPid(handle, &pid) == BGWH_STARTED)
-				{
-					LWLockRelease(&HealthCheckHelperControl->lock);
-					continue;
-				}
-				else
+				if (GetBackgroundWorkerPid(handle, &pid) != BGWH_STARTED)
 				{
 					dbData->isActive = false;
+					#if (PG_VERSION_NUM >= 120000)
 					ereport(WARNING,
 							(errmsg(
 								 "found stopped worker for pg_auto_failover "
 								 "health checks in \"%s\"",
 								 entry->dbname)));
-					pfree(handle);
+					#else
+					ereport(WARNING,
+							(errmsg(
+								 "stopping worker for pg_auto_failover "
+								 "health checks in \"%s\"",
+								 entry->dbname)));
+					#endif
+
+					StopHealthCheckWorker(entry->dboid);
 				}
+
+				continue;
 			}
 
 			/* register a worker for the entry database, in the background */
@@ -322,6 +336,13 @@ HealthCheckWorkerLauncherMain(Datum arg)
 				 * signaled to stop and we will exit further down. For good
 				 * measure though, do verify the process did actually start
 				 * before marking it as Active.
+				 *
+				 * NOTE: Since WaitForBackgroundWorkerStartup is internally
+				 * using GetBackgroundWorkerPid, it suffers from the same
+				 * symptoms as in the comment above for PostgreSQL versions
+				 * prior to 12. Since we do not want to mark it as Active
+				 * without really knowning, it is removed from the list and will
+				 * be readded on the next round.
 				 */
 				if (WaitForBackgroundWorkerStartup(handle, &pid) == BGWH_STARTED)
 				{
@@ -332,6 +353,16 @@ HealthCheckWorkerLauncherMain(Datum arg)
 								 "started worker for pg_auto_failover "
 								 "health checks in \"%s\"",
 								 entry->dbname)));
+				}
+				else
+				{
+					ereport(WARNING,
+							(errmsg(
+								 "failed to start worker for pg_auto_failover "
+								 "health checks in \"%s\"",
+								 entry->dbname)));
+
+					StopHealthCheckWorker(entry->dboid);
 				}
 			}
 		}
@@ -362,6 +393,9 @@ RegisterHealthCheckWorker(DatabaseListEntry *db)
 {
 	BackgroundWorker worker;
 	BackgroundWorkerHandle *handle;
+	StringInfo buf = NULL;
+
+	initStringInfo(buf);
 
 	memset(&worker, 0, sizeof(worker));
 
@@ -375,9 +409,11 @@ RegisterHealthCheckWorker(DatabaseListEntry *db)
 			sizeof(worker.bgw_library_name));
 	strlcpy(worker.bgw_function_name, "HealthCheckWorkerMain",
 			sizeof(worker.bgw_function_name));
-	snprintf(worker.bgw_name, sizeof(worker.bgw_name), "pg_auto_failover "
-													   "monitor healthcheck worker %s",
-			 db->dbname);
+	appendStringInfo(buf, "pg_auto_failover monitor healthcheck worker %s",
+					 db->dbname);
+	strlcpy(worker.bgw_name, buf->data,
+			sizeof(worker.bgw_name));
+	free(buf->data);
 
 	if (!RegisterDynamicBackgroundWorker(&worker, &handle))
 	{
@@ -385,7 +421,7 @@ RegisterHealthCheckWorker(DatabaseListEntry *db)
 				(errmsg(
 					 "failed to start worker for pg_auto_failover health checks in \"%s\"",
 					 db->dbname),
-				errhint("You might need to increase max_worker_processes.")));
+				 errhint("You might need to increase max_worker_processes.")));
 		return NULL;
 	}
 
