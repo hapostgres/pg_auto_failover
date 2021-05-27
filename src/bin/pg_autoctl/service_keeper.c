@@ -438,7 +438,7 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 			else if (shutdownSequenceInProgress &&
 					 couldStartMaintenanceAtShutdown)
 			{
-				log_trace("Shutdown in progress");
+				log_warn("Shutdown in progress");
 			}
 			/* Trigger the shutdown sequence and enable maintenance now */
 			else if (keeperState->current_role != MAINTENANCE_STATE &&
@@ -773,9 +773,25 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 			 * next iteration.
 			 */
 			else if (keeperState->assigned_role == MAINTENANCE_STATE &&
-					 keeperState->current_role == keeperState->assigned_role)
+					 keeperState->current_role == keeperState->assigned_role &&
+					 couldStartMaintenanceAtShutdown)
 			{
 				reachedMaintenanceAtShutdown = true;
+			}
+			/*
+			 * When we're already in the MAINTENANCE state, even though
+			 * couldStartMaintenanceAtShutdown is false, it means the local
+			 * node was already in maintenance, we can just shutdown now.
+			 */
+			else if (keeperState->assigned_role == MAINTENANCE_STATE &&
+					 keeperState->current_role == keeperState->assigned_role)
+			{
+				log_info("Shutdown sequence activated while in maintenance");
+
+				shutdownSequenceInProgress = true;
+				keeperState->service_state = SERVICE_SHUTDOWNING;
+
+				break;
 			}
 			/* shutdown still in progress (wait_maintenance, etc) */
 			else
