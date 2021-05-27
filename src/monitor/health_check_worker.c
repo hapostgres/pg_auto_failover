@@ -393,9 +393,9 @@ RegisterHealthCheckWorker(DatabaseListEntry *db)
 {
 	BackgroundWorker worker;
 	BackgroundWorkerHandle *handle;
-	StringInfo buf = NULL;
+	StringInfoData buf;
 
-	initStringInfo(buf);
+	initStringInfo(&buf);
 
 	memset(&worker, 0, sizeof(worker));
 
@@ -409,11 +409,10 @@ RegisterHealthCheckWorker(DatabaseListEntry *db)
 			sizeof(worker.bgw_library_name));
 	strlcpy(worker.bgw_function_name, "HealthCheckWorkerMain",
 			sizeof(worker.bgw_function_name));
-	appendStringInfo(buf, "pg_auto_failover monitor healthcheck worker %s",
+	appendStringInfo(&buf, "pg_auto_failover monitor healthcheck worker %s",
 					 db->dbname);
-	strlcpy(worker.bgw_name, buf->data,
+	strlcpy(worker.bgw_name, buf.data,
 			sizeof(worker.bgw_name));
-	free(buf->data);
 
 	if (!RegisterDynamicBackgroundWorker(&worker, &handle))
 	{
