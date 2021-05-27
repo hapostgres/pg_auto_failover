@@ -112,15 +112,21 @@ CommandLine drop_monitor_command =
 				 cli_drop_monitor);
 
 CommandLine drop_node_command =
-	make_command("node",
-				 "Drop a node from the pg_auto_failover monitor",
-				 "[ --pgdata --destroy --hostname --pgport ]",
-				 "  --pgdata      path to data directory\n"
-				 "  --destroy     also destroy Postgres database\n"
-				 "  --hostname    hostname to remove from the monitor\n"
-				 "  --pgport      Postgres port of the node to remove",
-				 cli_drop_node_getopts,
-				 cli_drop_node);
+	make_command(
+		"node",
+		"Drop a node from the pg_auto_failover monitor",
+		"[ [ --pgdata ] | "
+		"[ --monitor [ [ --hostname --pgport ] | [ --formation --name ] ] ] ] "
+		"[ --destroy ]",
+		"  --pgdata      path to data directory\n"
+		"  --monitor     pg_auto_failover Monitor Postgres URL\n"
+		"  --formation   pg_auto_failover formation\n"
+		"  --name        drop the node with the given node name\n"
+		"  --hostname    drop the node with given hostname and pgport\n"
+		"  --pgport      drop the node with given hostname and pgport\n"
+		"  --destroy     also destroy Postgres database\n",
+		cli_drop_node_getopts,
+		cli_drop_node);
 
 /*
  * cli_create_config manages the whole set of configuration parameters that
@@ -1030,7 +1036,7 @@ cli_drop_node_getopts(int argc, char **argv)
 	 *   --pgdata ...                 # to drop the local node
 	 *   --pgdata <monitor>           # to drop any node from the monitor
 	 *   --formation ... --name ...   # address a node on the monitor
-	 *   --hostname ... --port ...    # address a node on the monitor
+	 *   --hostname ... --pgport ...  # address a node on the monitor
 	 *
 	 * We check about the PGDATA being related to a monitor or a keeper later,
 	 * here we focus on the optargs. Remember that --formation can be skipped
@@ -1043,6 +1049,16 @@ cli_drop_node_getopts(int argc, char **argv)
 		log_fatal("pg_autoctl drop node target can either be specified "
 				  "using [ --formation --name ], or "
 				  "using [ --hostname and --pgport ], but not both.");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata) &&
+		(!IS_EMPTY_STRING_BUFFER(options.name) ||
+		 !IS_EMPTY_STRING_BUFFER(options.hostname)))
+	{
+		log_fatal("pg_autoctl drop node target is specified with --pgdata, "
+				  "options [ --formation --name ] or [ --hostname --pgport ] "
+				  "can not be used");
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
@@ -1121,6 +1137,16 @@ cli_drop_node(int argc, char **argv)
 	else
 	{
 		/* pg_autoctl drop node on the monitor drops another node */
+		if (IS_EMPTY_STRING_BUFFER(config.name) &&
+			IS_EMPTY_STRING_BUFFER(config.hostname))
+		{
+			log_fatal("pg_autoctl drop node target can either be specified "
+					  "using [ --formation --name ], or "
+					  "using [ --hostname and --pgport ], "
+					  "please use either one.");
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
 		(void) cli_drop_node_from_monitor(&config);
 	}
 }

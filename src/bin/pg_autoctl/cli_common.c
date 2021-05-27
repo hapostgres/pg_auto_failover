@@ -2109,7 +2109,8 @@ cli_use_monitor_option(KeeperConfig *options)
 	if (env_exists(PG_AUTOCTL_MONITOR) &&
 		get_env_copy(PG_AUTOCTL_MONITOR,
 					 options->monitor_pguri,
-					 sizeof(options->monitor_pguri)))
+					 sizeof(options->monitor_pguri)) &&
+		!IS_EMPTY_STRING_BUFFER(options->monitor_pguri))
 	{
 		log_debug("Using environment PG_AUTOCTL_MONITOR \"%s\"",
 				  options->monitor_pguri);
