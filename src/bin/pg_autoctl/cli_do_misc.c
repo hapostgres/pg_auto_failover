@@ -489,6 +489,42 @@ keeper_cli_rewind_old_primary(int argc, char **argv)
 
 
 void
+keeper_cli_maybe_do_crash_recovery(int argc, char **argv)
+{
+	const bool missing_pgdata_is_ok = false;
+	const bool pg_not_running_is_ok = true;
+
+	KeeperConfig config = keeperOptions;
+	LocalPostgresServer postgres = { 0 };
+
+	keeper_config_init(&config, missing_pgdata_is_ok, pg_not_running_is_ok);
+	local_postgres_init(&postgres, &(config.pgSetup));
+
+	if (!standby_init_replication_source(&postgres,
+										 NULL, /* primaryNode is done */
+										 PG_AUTOCTL_REPLICA_USERNAME,
+										 config.replication_password,
+										 config.replication_slot_name,
+										 config.maximum_backup_rate,
+										 config.backupDirectory,
+										 NULL, /* no targetLSN */
+										 config.pgSetup.ssl,
+										 0))
+	{
+		/* can't happen at the moment */
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	if (!postgres_maybe_do_crash_recovery(&postgres))
+	{
+		log_fatal("Failed to implement postgres crash recovery, "
+				  "see above for details");
+		exit(EXIT_CODE_PGSQL);
+	}
+}
+
+
+void
 keeper_cli_promote_standby(int argc, char **argv)
 {
 	const bool missing_pgdata_is_ok = false;

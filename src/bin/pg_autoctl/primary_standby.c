@@ -6,6 +6,7 @@
  * Licensed under the PostgreSQL License.
  *
  */
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -998,7 +999,14 @@ primary_rewind_to_standby(LocalPostgresServer *postgres)
 		return false;
 	}
 
-	/* first, make sure we can connect with "replication" */
+	if (!postgres_maybe_do_crash_recovery(postgres))
+	{
+		log_error("Failed to implement Postgres crash recovery "
+				  "before calling pg_rewind");
+		return false;
+	}
+
+	/* before pg_rewind, make sure we can connect with "replication" */
 	if (!pgctl_identify_system(replicationSource))
 	{
 		log_error("Failed to connect to the primary node %d \"%s\" (%s:%d) "
@@ -1008,7 +1016,6 @@ primary_rewind_to_standby(LocalPostgresServer *postgres)
 				  primaryNode->name,
 				  primaryNode->host,
 				  primaryNode->port);
-		return false;
 	}
 
 	if (!pg_rewind(pgSetup->pgdata, pgSetup->pg_ctl, replicationSource))
@@ -1030,6 +1037,209 @@ primary_rewind_to_standby(LocalPostgresServer *postgres)
 	{
 		log_error("Failed to start postgres after rewind");
 		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * postgres_maybe_do_crash_recovery implements a round of Postgres crash
+ * recovery for the local instance of Postgres when pg_rewind would otherwise
+ * fail because of its internal checks.
+ */
+bool
+postgres_maybe_do_crash_recovery(LocalPostgresServer *postgres)
+{
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+	ReplicationSource *replicationSource = &(postgres->replicationSource);
+
+	LocalExpectedPostgresStatus *pgStatus = &(postgres->expectedPgStatus);
+
+	/* update our service controller for Postgres to release control */
+	if (!keeper_set_postgres_state_unknown(&(pgStatus->state),
+										   pgStatus->pgStatusPath))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/* we don't log the output for pg_ctl_status here */
+	int status = pg_ctl_status(pgSetup->pg_ctl, pgSetup->pgdata, false);
+
+	if (status != PG_CTL_STATUS_NOT_RUNNING)
+	{
+		log_error("Failed to prepare for crash recovery: "
+				  "Postgres is not stopped");
+		return false;
+	}
+
+	/*
+	 * pg_rewind fails when the target cluster (meaning the local Postgres
+	 * instance) is either running or has not been shutdown correctly. Time to
+	 * use pg_controldata and see if the DBState there is to pg_rewind liking.
+	 */
+	const bool missingPgdataIsOk = false;
+
+	if (!pg_controldata(pgSetup, missingPgdataIsOk))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/*
+	 * We know that Postgres is not running thanks to pg_ctl_status, and we
+	 * just grabbed the output from pg_controldata. We can now implement the
+	 * same pre-condition checks as in Postgres pg_rewind.c.
+	 */
+	if (pgSetup->control.state != DB_SHUTDOWNED &&
+		pgSetup->control.state != DB_SHUTDOWNED_IN_RECOVERY)
+	{
+		/*
+		 * Before calling pg_rewind, attempt crash recovery on the Postgres
+		 * instance and then shutdown.
+		 */
+		ReplicationSource crashRecoveryReplicationSource = { 0 };
+
+		log_info("Postgres needs to enter crash recovery before pg_rewind.");
+
+		crashRecoveryReplicationSource = *replicationSource;
+
+		/* we target the earlier consistent state possible, or 'immediate' */
+		strlcpy(crashRecoveryReplicationSource.targetLSN,
+				"immediate",
+				sizeof(crashRecoveryReplicationSource.targetLSN));
+
+		/* pause when reaching target to avoid creating a new local timeline */
+		strlcpy(crashRecoveryReplicationSource.targetAction,
+				"pause",
+				sizeof(crashRecoveryReplicationSource.targetAction));
+
+		strlcpy(crashRecoveryReplicationSource.targetTimeline,
+				"current",
+				sizeof(crashRecoveryReplicationSource.targetTimeline));
+
+		if (!pg_setup_standby_mode(pgSetup->control.pg_control_version,
+								   pgSetup->pgdata,
+								   pgSetup->pg_ctl,
+								   &crashRecoveryReplicationSource))
+		{
+			log_error("Failed to setup for crash recovery "
+					  "in preparation for pg_rewind");
+			return false;
+		}
+
+		/*
+		 * Now that the configuration file is ready and asks for Postgres
+		 * shutdown when reaching crash recovery time, we start postgres as a
+		 * sub-process here and wait for it to terminate.
+		 */
+		fflush(stdout);
+		fflush(stderr);
+
+		/* time to create the node_active sub-process */
+		pid_t fpid = fork();
+
+		switch (fpid)
+		{
+			case -1:
+			{
+				log_error("Failed to fork the postgres supervisor process");
+				return false;
+			}
+
+			case 0:
+			{
+				/* execv() the postgres binary directly, as a sub-process */
+				(void) pg_ctl_postgres(pgSetup->pg_ctl,
+									   pgSetup->pgdata,
+									   pgSetup->pgport,
+									   pgSetup->listen_addresses,
+
+				                       /* do not open the service just yet */
+									   false);
+
+				/* unexpected */
+				log_fatal("BUG: returned from service_keeper_runprogram()");
+				exit(EXIT_CODE_INTERNAL_ERROR);
+			}
+
+			default:
+			{
+				/* wait until postgres crash recovery is done */
+				for (int attempts = 0;; attempts++)
+				{
+					int timeout = 30;
+
+					if (pg_setup_wait_until_is_ready(pgSetup, timeout, LOG_INFO))
+					{
+						break;
+					}
+				}
+
+				/* get Postgres current LSN after recovery, might be useful */
+				PGSQL *pgsql = &(postgres->sqlClient);
+
+				if (pgsql_get_postgres_metadata(pgsql,
+												&pgSetup->is_in_recovery,
+												postgres->pgsrSyncState,
+												postgres->currentLSN,
+												&(pgSetup->control)))
+				{
+					log_info("Postgres has finished crash recovery at LSN %s",
+							 postgres->currentLSN);
+				}
+				else
+				{
+					log_error("Failed to get Postgres metadata, continuing");
+				}
+
+
+				/*
+				 * Now stop Postgres by just killing our child process, and
+				 * wait until the child process has finished with waitpid().
+				 */
+				int wpid, status;
+
+				do {
+					if (kill(fpid, SIGTERM) != 0)
+					{
+						log_error("Failed to send SIGTERM to "
+								  "Postgres pid %d: %m", fpid);
+						return false;
+					}
+
+					wpid = waitpid(fpid, &status, WNOHANG);
+
+					if (wpid == -1)
+					{
+						log_warn("Failed to wait until Postgres is done: %m");
+					}
+
+					/* waitpid could be WIFSTOPPED, then try again */
+				} while (!(WIFEXITED(status) || !WIFSIGNALED(status)));
+
+				if (WIFEXITED(status) && WEXITSTATUS(status) == EXIT_CODE_QUIT)
+				{
+					return true;
+				}
+				else if (WIFEXITED(status))
+				{
+					int returnCode = WEXITSTATUS(status);
+
+					log_warn("Postgres has finished crash recovery with "
+							 "exit code %d",
+							 returnCode);
+
+					(void) pg_log_startup(pgSetup->pgdata, LOG_INFO);
+				}
+				else
+				{
+					log_error("BUG: can't make sense of waitpid() exit code");
+					return false;
+				}
+			}
+		}
 	}
 
 	return true;
