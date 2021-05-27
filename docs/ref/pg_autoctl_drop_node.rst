@@ -10,7 +10,7 @@ Synopsis
 
 This command drops a Postgres node from the pg_auto_failover monitor::
 
-  usage: pg_autoctl drop node [ [ --pgdata ] | [ --monitor [ [ --hostname --pgport ] | [ --formation --name ] ] ] ] [ --destroy ]
+  usage: pg_autoctl drop node [ [ [ --pgdata ] [ --destroy ] ] | [ --monitor [ [ --hostname --pgport ] | [ --formation --name ] ] ] ]
 
   --pgdata      path to data directory
   --monitor     pg_auto_failover Monitor Postgres URL

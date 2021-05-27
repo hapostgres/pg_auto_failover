@@ -115,9 +115,8 @@ CommandLine drop_node_command =
 	make_command(
 		"node",
 		"Drop a node from the pg_auto_failover monitor",
-		"[ [ --pgdata ] | "
-		"[ --monitor [ [ --hostname --pgport ] | [ --formation --name ] ] ] ] "
-		"[ --destroy ]",
+		"[ [ [ --pgdata ] [ --destroy ] ] | "
+		"[ --monitor [ [ --hostname --pgport ] | [ --formation --name ] ] ] ] ",
 		"  --pgdata      path to data directory\n"
 		"  --monitor     pg_auto_failover Monitor Postgres URL\n"
 		"  --formation   pg_auto_failover formation\n"
