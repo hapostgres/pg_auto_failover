@@ -105,7 +105,7 @@ typedef struct HealthCheckHelperDatabase
 	/* hash key: database to run on */
 	Oid dboid;
 	pid_t workerPid;
-	bool isActive;
+	BackgroundWorkerHandle *handle;
 } HealthCheckHelperDatabase;
 
 typedef struct DatabaseListEntry
@@ -127,7 +127,7 @@ static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
 /* private function declarations */
 static void pg_auto_failover_monitor_sigterm(SIGNAL_ARGS);
 static void pg_auto_failover_monitor_sighup(SIGNAL_ARGS);
-static BackgroundWorkerHandle * StartHealthCheckWorker(DatabaseListEntry *db);
+static BackgroundWorkerHandle * RegisterHealthCheckWorker(DatabaseListEntry *db);
 static List * BuildDatabaseList(void);
 static bool pgAutoFailoverExtensionExists(void);
 static List * CreateHealthChecks(List *nodeHealthList);
@@ -251,6 +251,7 @@ HealthCheckWorkerLauncherMain(Datum arg)
 		foreach(databaseListCell, databaseList)
 		{
 			int pid;
+			BackgroundWorkerHandle *handle = NULL;
 			DatabaseListEntry *entry =
 				(DatabaseListEntry *) lfirst(databaseListCell);
 			bool isFound = false;
@@ -260,15 +261,74 @@ HealthCheckWorkerLauncherMain(Datum arg)
 			HealthCheckHelperDatabase *dbData = hash_search(HealthCheckWorkerDBHash,
 															(void *) &entry->dboid,
 															HASH_ENTER, &isFound);
-			if (isFound && dbData->isActive)
+			if (isFound)
 			{
-				/* This database has already been processed */
+				handle = dbData->handle;
+
 				LWLockRelease(&HealthCheckHelperControl->lock);
+
+				/*
+				 * This database has already been processed.
+				 *
+				 * Perform a quick and inexpensive check to verify that it is
+				 * actually running. Note that it is not possible to get
+				 * BGWH_NOT_YET_STARTED at this point, because this is not first
+				 * time we try to register the worker due to the isFound value
+				 * above. The HealthCheckWorkerDBHash only maintains verified
+				 * started entries. Thus we can only get BGWH_STARTED or
+				 * BGWH_STOPPED.
+				 *
+				 * NOTE: For PostgreSQL versions prior to 12, it is possible to
+				 * get erroneous results in GetBackgroundWorkerPid. In that
+				 * function, the handle we are providing is checked against a
+				 * localy held and maintained array. In affected versions, there
+				 * exists a window where our stored handle and that array to
+				 * have fallen out of sync. Such a window is more probable when
+				 * signalling the Postmaster e.g. to reload the configuration.
+				 *
+				 * When the entries are out of sync handle will be returned with
+				 * status BGWH_STOPPED and it will never be upgraded to
+				 * BGWH_STARTED, whereas in reality the bgworker is running and
+				 * most probably is healthy. From that moment onwards, we will
+				 * never be able to correctly assess the worker's status via the
+				 * provided API.
+				 */
+				if (GetBackgroundWorkerPid(handle, &pid) != BGWH_STARTED)
+				{
+					#if (PG_VERSION_NUM >= 120000)
+					ereport(WARNING,
+							(errmsg(
+								 "found stopped worker for pg_auto_failover "
+								 "health checks in \"%s\"",
+								 entry->dbname)));
+					#else
+					ereport(WARNING,
+							(errmsg(
+								 "stopping worker for pg_auto_failover "
+								 "health checks in \"%s\"",
+								 entry->dbname)));
+					#endif
+
+					/*
+					 * Now we know that either the worker has stopped or we
+					 * encountered the issue described in the NOTE above. We use
+					 * StopHealthCheckWorker to remove the entry from the
+					 * HealthCheckWorkerDBHash. That will force a retry in the
+					 * next scan of the databaselist. Furthermore, if the
+					 * status from GetBackgroundWorkerPid was not the correct
+					 * one, then StopHealthCheckWorker will also make certain
+					 * that the worker that we can no longer monitor correctly,
+					 * will be stopped. That will leave HealthCheckWorkerDBHash
+					 * in a consistent state.
+					 */
+					StopHealthCheckWorker(entry->dboid);
+				}
+
 				continue;
 			}
 
-			/* start a worker for the entry database, in the background */
-			BackgroundWorkerHandle *handle = StartHealthCheckWorker(entry);
+			/* register a worker for the entry database, in the background */
+			handle = RegisterHealthCheckWorker(entry);
 			if (handle)
 			{
 				/*
@@ -276,7 +336,6 @@ HealthCheckWorkerLauncherMain(Datum arg)
 				 * pid.
 				 */
 				dbData->workerPid = 0;
-				dbData->isActive = true;
 			}
 
 			LWLockRelease(&HealthCheckHelperControl->lock);
@@ -288,8 +347,55 @@ HealthCheckWorkerLauncherMain(Datum arg)
 				 * complete its startup procedure: the per-database worker
 				 * takes the control lock in SHARED mode to edit its own PID in
 				 * its own entry in HealthCheckWorkerDBHash.
+				 *
+				 * WaitForBackgroundWorkerStartup will wait for worker to start;
+				 * thus, BGWH_NOT_YET_STARTED is never returned. However, if the
+				 * postmaster has died, it will give up and return
+				 * BGWH_POSTMASTER_DIED. In such a case the process will get
+				 * signaled to stop and we will exit further down. For good
+				 * measure though, do verify the process did actually start
+				 * before marking it as Active.
+				 *
+				 * NOTE: Since WaitForBackgroundWorkerStartup is internally
+				 * using GetBackgroundWorkerPid, it suffers from the same
+				 * symptoms as in the comment above for PostgreSQL versions
+				 * prior to 12. Since we do not want to mark it as Active
+				 * without really knowning, it is removed from the list and will
+				 * be readded on the next round.
 				 */
-				WaitForBackgroundWorkerStartup(handle, &pid);
+				if (WaitForBackgroundWorkerStartup(handle, &pid) == BGWH_STARTED)
+				{
+					dbData->handle = handle;
+					ereport(LOG,
+							(errmsg(
+								 "started worker for pg_auto_failover "
+								 "health checks in \"%s\"",
+								 entry->dbname)));
+				}
+				else
+				{
+					ereport(WARNING,
+							(errmsg(
+								 "failed to start worker for pg_auto_failover "
+								 "health checks in \"%s\"",
+								 entry->dbname)));
+
+					/*
+					 * Similarly to the comment above, we either failed to start
+					 * the worker, or we encountered the issue described in the
+					 * NOTE. We use StopHealthCheckWorker to remove the entry
+					 * from the HealthCheckWorkerDBHash so that it will be
+					 * retried in the next databaselist scan. The call to kill()
+					 * the failed worker in StopHealthCheckWorker() will take
+					 * place only if the worker has actually started, in which
+					 * case it means that we encountered the issue described in
+					 * NOTE and we can no longer properly assess the state of
+					 * that worker. After the call to StopHealthCheckWorker, we
+					 * know that HealthCheckWorkerDBHash will contain only
+					 * started and able to monitor entries.
+					 */
+					StopHealthCheckWorker(entry->dboid);
+				}
 			}
 		}
 
@@ -307,7 +413,7 @@ HealthCheckWorkerLauncherMain(Datum arg)
 
 
 /*
- * StartHealthCheckWorker registers a background worker in given target
+ * RegisterHealthCheckWorker registers a background worker in given target
  * database, and returns the background worker handle so that the caller can
  * wait until it is started.
  *
@@ -315,10 +421,13 @@ HealthCheckWorkerLauncherMain(Datum arg)
  * lock from the caller before waiting for the worker's start.
  */
 static BackgroundWorkerHandle *
-StartHealthCheckWorker(DatabaseListEntry *db)
+RegisterHealthCheckWorker(DatabaseListEntry *db)
 {
 	BackgroundWorker worker;
 	BackgroundWorkerHandle *handle;
+	StringInfoData buf;
+
+	initStringInfo(&buf);
 
 	memset(&worker, 0, sizeof(worker));
 
@@ -332,15 +441,18 @@ StartHealthCheckWorker(DatabaseListEntry *db)
 			sizeof(worker.bgw_library_name));
 	strlcpy(worker.bgw_function_name, "HealthCheckWorkerMain",
 			sizeof(worker.bgw_function_name));
-	strlcpy(worker.bgw_name, "pg_auto_failover monitor worker",
+	appendStringInfo(&buf, "pg_auto_failover monitor healthcheck worker %s",
+					 db->dbname);
+	strlcpy(worker.bgw_name, buf.data,
 			sizeof(worker.bgw_name));
 
 	if (!RegisterDynamicBackgroundWorker(&worker, &handle))
 	{
-		ereport(LOG,
+		ereport(WARNING,
 				(errmsg(
 					 "failed to start worker for pg_auto_failover health checks in \"%s\"",
-					 db->dbname)));
+					 db->dbname),
+				 errhint("You might need to increase max_worker_processes.")));
 		return NULL;
 	}
 
