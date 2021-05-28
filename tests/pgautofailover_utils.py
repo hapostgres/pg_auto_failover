@@ -1128,6 +1128,13 @@ class DataNode(PGNode):
         except FileNotFoundError:
             pass
 
+        # Remove self from the cluster if present so that future calls to
+        # cluster.destroy() will not emit errors for the already destroyed node
+        try:
+            self.cluster.datanodes.remove(self)
+        except ValueError:
+            pass
+
     def wait_until_state(
         self,
         target_state,
@@ -1705,6 +1712,10 @@ class MonitorNode(PGNode):
             os.remove(self.state_file_path())
         except FileNotFoundError:
             pass
+
+        # Set self to None in cluster to avoid errors in future calls to
+        # cluster.destroy()
+        self.cluster.monitor = None
 
     def create_formation(
         self, formation_name, kind="pgsql", secondary=None, dbname=None
