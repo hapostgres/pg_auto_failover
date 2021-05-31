@@ -1256,8 +1256,47 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 	 * So all the expected candidates did report their LSN, no node is missing.
 	 * Let's see about selecting a candidate for failover now, when we do have
 	 * candidates.
+	 *
+	 * To start the selection process, we require at least number_sync_standbys
+	 * nodes to have reported their LSN and be currently healthy, otherwise we
+	 * won't be able to maintain our guarantees: we would end-up with a node in
+	 * WAIT_PRIMARY state with all the writes blocked for lack of standby
+	 * nodes.
 	 */
-	if (candidateList.candidateCount > 0)
+	char *formationId = activeNode->formationId;
+	AutoFailoverFormation *formation = GetFormation(formationId);
+	int minCandidates = formation->number_sync_standbys + 1;
+
+	/* no candidates is a hard pass */
+	if (candidateList.candidateCount == 0)
+	{
+		return false;
+	}
+
+	/* not enough candidates to promote and then accept writes, pass */
+	else if (candidateList.candidateCount < minCandidates)
+	{
+		char message[BUFSIZE] = { 0 };
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Failover still in progress with %d candidates having reported "
+			"their LSN: %d nodes are required in the quorum to satisfy "
+			"number_sync_standbys = %d in formation \"%s\", "
+			"activeNode is " NODE_FORMAT
+			" and reported state \"%s\"",
+			candidateList.candidateCount,
+			minCandidates,
+			formation->number_sync_standbys,
+			formation->formationId,
+			NODE_FORMAT_ARGS(activeNode),
+			ReplicationStateGetName(activeNode->reportedState));
+
+		return false;
+	}
+
+	/* enough candidates to promote and then accept writes, let's do it! */
+	else
 	{
 		/* build the list of most advanced standby nodes, not ordered */
 		List *mostAdvancedNodeList =
@@ -1356,10 +1395,17 @@ BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
 			continue;
 		}
 
-		/* skip old and new primary nodes (if a selection has been made) */
-		if (IsInPrimaryState(node) ||
-			IsBeingDemotedPrimary(node) ||
-			IsDemotedPrimary(node))
+		/*
+		 * Skip old and new primary nodes (if a selection has been made).
+		 *
+		 * When a failover is ongoing, a former primary node that has reached
+		 * DRAINING and is reporting should be asked to report their LSN.
+		 */
+		if ((IsInPrimaryState(node) ||
+			 IsBeingDemotedPrimary(node) ||
+			 IsDemotedPrimary(node)) &&
+			!(IsCurrentState(node, REPLICATION_STATE_DRAINING) ||
+			  IsCurrentState(node, REPLICATION_STATE_DEMOTED)))
 		{
 			elog(LOG,
 				 "Skipping candidate " NODE_FORMAT
@@ -1402,21 +1448,6 @@ BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
 			continue;
 		}
 
-		/*
-		 * When a failover is ongoing, a former primary node that has reached
-		 * DRAINING is not counted in the list of nodes that need to report
-		 * their LSN, and the node isn't a candidate for promotion either.
-		 */
-		if (IsReporting(node) &&
-			IsCurrentState(node, REPLICATION_STATE_DRAINING))
-		{
-			elog(LOG,
-				 "Skipping (former primary?) draining node " NODE_FORMAT,
-				 NODE_FORMAT_ARGS(node));
-
-			continue;
-		}
-
 		/* grab healthy standby nodes which have reached REPORT_LSN */
 		if (IsCurrentState(node, REPLICATION_STATE_REPORT_LSN))
 		{
@@ -1437,8 +1468,10 @@ BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
 		 * Nodes in SECONDARY or CATCHINGUP states are candidates due to report
 		 * their LSN.
 		 */
-		if (IsStateIn(node->reportedState, secondaryStates) &&
-			IsStateIn(node->goalState, secondaryStates))
+		if ((IsStateIn(node->reportedState, secondaryStates) &&
+			 IsStateIn(node->goalState, secondaryStates)) ||
+			((IsCurrentState(node, REPLICATION_STATE_DRAINING) ||
+			  IsCurrentState(node, REPLICATION_STATE_DEMOTED))))
 		{
 			char message[BUFSIZE] = { 0 };
 
