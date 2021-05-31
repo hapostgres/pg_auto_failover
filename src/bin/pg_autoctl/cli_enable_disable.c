@@ -1270,6 +1270,7 @@ cli_enable_monitor_getopts(int argc, char **argv)
 	options.prepare_promotion_walreceiver = -1;
 	options.postgresql_restart_failure_timeout = -1;
 	options.postgresql_restart_failure_max_retries = -1;
+	options.listen_notifications_timeout = -1;
 
 	options.pgSetup.settings.candidatePriority =
 		FAILOVER_NODE_CANDIDATE_PRIORITY;
@@ -1520,6 +1521,7 @@ cli_disable_monitor_getopts(int argc, char **argv)
 	options.prepare_promotion_walreceiver = -1;
 	options.postgresql_restart_failure_timeout = -1;
 	options.postgresql_restart_failure_max_retries = -1;
+	options.listen_notifications_timeout = -1;
 
 	/* do not set a default formation, it should be found in the config file */
 

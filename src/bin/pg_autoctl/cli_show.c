@@ -197,6 +197,7 @@ cli_show_state_getopts(int argc, char **argv)
 	options.prepare_promotion_walreceiver = -1;
 	options.postgresql_restart_failure_timeout = -1;
 	options.postgresql_restart_failure_max_retries = -1;
+	options.listen_notifications_timeout = -1;
 
 	optind = 0;
 
@@ -655,6 +656,7 @@ cli_show_standby_names_getopts(int argc, char **argv)
 	options.prepare_promotion_walreceiver = -1;
 	options.postgresql_restart_failure_timeout = -1;
 	options.postgresql_restart_failure_max_retries = -1;
+	options.listen_notifications_timeout = -1;
 
 	/* do not set a default formation, it should be found in the config file */
 
@@ -888,6 +890,7 @@ cli_show_uri_getopts(int argc, char **argv)
 	options.prepare_promotion_walreceiver = -1;
 	options.postgresql_restart_failure_timeout = -1;
 	options.postgresql_restart_failure_max_retries = -1;
+	options.listen_notifications_timeout = -1;
 
 	optind = 0;
 

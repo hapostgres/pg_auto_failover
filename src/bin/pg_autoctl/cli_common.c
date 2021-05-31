@@ -104,6 +104,7 @@ cli_common_keeper_getopts(int argc, char **argv,
 	LocalOptionConfig.prepare_promotion_walreceiver = -1;
 	LocalOptionConfig.postgresql_restart_failure_timeout = -1;
 	LocalOptionConfig.postgresql_restart_failure_max_retries = -1;
+	LocalOptionConfig.listen_notifications_timeout = -1;
 	LocalOptionConfig.pgSetup.settings.candidatePriority = -1;
 	LocalOptionConfig.pgSetup.settings.replicationQuorum =
 		FAILOVER_NODE_REPLICATION_QUORUM;
@@ -1614,6 +1615,7 @@ cli_node_metadata_getopts(int argc, char **argv)
 	options.prepare_promotion_walreceiver = -1;
 	options.postgresql_restart_failure_timeout = -1;
 	options.postgresql_restart_failure_max_retries = -1;
+	options.listen_notifications_timeout = -1;
 
 	/* do not set a default formation, it should be found in the config file */
 
@@ -1776,6 +1778,7 @@ cli_get_name_getopts(int argc, char **argv)
 	options.prepare_promotion_walreceiver = -1;
 	options.postgresql_restart_failure_timeout = -1;
 	options.postgresql_restart_failure_max_retries = -1;
+	options.listen_notifications_timeout = -1;
 
 	optind = 0;
 

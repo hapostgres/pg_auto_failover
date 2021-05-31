@@ -2679,6 +2679,17 @@ keeper_config_accept_new(Keeper *keeper, KeeperConfig *newConfig)
 			newConfig->postgresql_restart_failure_max_retries;
 	}
 
+	if (newConfig->listen_notifications_timeout != config->listen_notifications_timeout)
+	{
+		log_info("Reloading configuration: timeout.listen_notifications_timeout "
+				 "is now %d; used to be %d",
+				 newConfig->listen_notifications_timeout,
+				 config->listen_notifications_timeout);
+
+		config->listen_notifications_timeout =
+			newConfig->listen_notifications_timeout;
+	}
+
 	/* we can change any SSL related setup options at runtime */
 	return config_accept_new_ssloptions(&(config->pgSetup),
 										&(newConfig->pgSetup));
