@@ -80,7 +80,8 @@ supervisor_start(Service services[], int serviceCount, const char *pidfile)
 		.services = services,
 		.serviceCount = serviceCount,
 		.pidfile = { 0 },
-		.pid = -1
+		.pid = -1,
+		.forceStopTimeout = PG_AUTOCTL_FORCE_STOP_TIMEOUT
 	};
 
 	/* copy the pidfile over to our supervisor structure */
@@ -671,6 +672,13 @@ supervisor_handle_signals(Supervisor *supervisor)
 static void
 supervisor_shutdown_sequence(Supervisor *supervisor)
 {
+	if (supervisor->stoppingLoopCounter == 0)
+	{
+		uint64_t now = time(NULL);
+
+		supervisor->stoppingLoopStartTime = now;
+	}
+
 	if (supervisor->stoppingLoopCounter == 1)
 	{
 		log_info("Waiting for subprocesses to terminate.");
@@ -699,16 +707,22 @@ supervisor_shutdown_sequence(Supervisor *supervisor)
 	if (supervisor->stoppingLoopCounter > 0 &&
 		supervisor->stoppingLoopCounter % 100 == 0)
 	{
-		log_info("pg_autoctl services are still running, "
-				 "signaling them with SIGINT.");
+		uint64_t now = time(NULL);
+		uint64_t elapsed = now - supervisor->stoppingLoopStartTime;
 
-		/* raise the signal from SIGTERM to SIGINT now */
-		supervisor->shutdownSignal =
-			pick_stronger_signal(supervisor->shutdownSignal, SIGINT);
-
-		if (!supervisor_signal_process_group(supervisor->shutdownSignal))
+		if (supervisor->forceStopTimeout < elapsed)
 		{
-			log_warn("Still waiting for subprocesses to terminate.");
+			log_info("pg_autoctl services are still running, "
+					 "signaling them with SIGINT.");
+
+			/* raise the signal from SIGTERM to SIGINT now */
+			supervisor->shutdownSignal =
+				pick_stronger_signal(supervisor->shutdownSignal, SIGINT);
+
+			if (!supervisor_signal_process_group(supervisor->shutdownSignal))
+			{
+				log_warn("Still waiting for subprocesses to terminate.");
+			}
 		}
 	}
 

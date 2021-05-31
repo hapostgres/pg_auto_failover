@@ -124,6 +124,8 @@ typedef struct Supervisor
 	bool shutdownSequenceInProgress;
 	int shutdownSignal;
 	int stoppingLoopCounter;
+	int forceStopTimeout;
+	uint64_t stoppingLoopStartTime;
 } Supervisor;
 
 
