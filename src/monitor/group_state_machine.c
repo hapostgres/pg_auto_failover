@@ -1373,7 +1373,18 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 
 /*
  * BuildCandidateList builds the list of current standby candidates that have
- * already reported their LSN, and sets
+ * already reported their LSN, and sets nodes that should be reporting to the
+ * REPORT_LSN goal state.
+ *
+ * A CandidateList keeps track of the list of candidate nodes, the list of most
+ * advanced nodes (in terms of LSN positions), and two counters, the count of
+ * candidate nodes (that's the length of the first list) and the count of nodes
+ * that are due to report their LSN but didn't yet, named the
+ * missingNodesCount.
+ *
+ * Managing the missingNodesCount allows a better message to be printed by the
+ * monitor and prevents early failover: when missingNodesCount > 0 then the
+ * caller for BuildCandidateList knows to refrain from any decision making.
  */
 static bool
 BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
@@ -1466,11 +1477,14 @@ BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
 
 		/*
 		 * Nodes in SECONDARY or CATCHINGUP states are candidates due to report
-		 * their LSN.
+		 * their LSN. Also old primary nodes in DEMOTED state are due to report
+		 * now. And also old primary nodes in DRAINING state, when the drain
+		 * timeout is over, are due to report.
 		 */
 		if ((IsStateIn(node->reportedState, secondaryStates) &&
 			 IsStateIn(node->goalState, secondaryStates)) ||
-			((IsCurrentState(node, REPLICATION_STATE_DRAINING) ||
+			(((IsCurrentState(node, REPLICATION_STATE_DRAINING) &&
+			   IsDrainTimeExpired(node)) ||
 			  IsCurrentState(node, REPLICATION_STATE_DEMOTED))))
 		{
 			char message[BUFSIZE] = { 0 };
@@ -1991,8 +2005,11 @@ IsDrainTimeExpired(AutoFailoverNode *pgAutoFailoverNode)
 {
 	bool drainTimeExpired = false;
 
+	List *drainingStates = list_make2_int(REPLICATION_STATE_DEMOTE_TIMEOUT,
+										  REPLICATION_STATE_DRAINING);
+
 	if (pgAutoFailoverNode == NULL ||
-		pgAutoFailoverNode->goalState != REPLICATION_STATE_DEMOTE_TIMEOUT)
+		!IsStateIn(pgAutoFailoverNode->goalState, drainingStates))
 	{
 		return false;
 	}

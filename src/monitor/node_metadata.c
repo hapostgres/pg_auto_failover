@@ -1208,7 +1208,8 @@ ReportAutoFailoverNodeState(char *nodeHost, int nodePort,
 		"reportedpgisrunning = $2, reportedrepstate = $3, "
 		"reportedlsn = CASE $4 WHEN '0/0'::pg_lsn THEN reportedlsn ELSE $4 END, "
 		"walreporttime = CASE $4 WHEN '0/0'::pg_lsn THEN walreporttime ELSE now() END, "
-		"statechangetime = now() WHERE nodehost = $5 AND nodeport = $6";
+		"statechangetime = CASE WHEN reportedstate <> $1 THEN now() ELSE statechangetime END "
+		"WHERE nodehost = $5 AND nodeport = $6";
 
 	SPI_connect();
 
