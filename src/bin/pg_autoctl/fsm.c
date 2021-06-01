@@ -241,6 +241,11 @@ KeeperFSMTransition KeeperFSM[] = {
 	{ DEMOTE_TIMEOUT_STATE, DEMOTED_STATE, COMMENT_DEMOTE_TIMEOUT_TO_DEMOTED,  &fsm_stop_postgres},
 
 	/*
+	 * wait_primary stops reporting, is (supposed) dead now
+	 */
+	{ WAIT_PRIMARY_STATE, DEMOTED_STATE, COMMENT_PRIMARY_TO_DEMOTED, &fsm_stop_postgres },
+
+	/*
 	 * was demoted after a failure, but standby was forcibly removed
 	 */
 	{ DEMOTED_STATE, SINGLE_STATE, COMMENT_DEMOTED_TO_SINGLE, &fsm_resume_as_primary },
