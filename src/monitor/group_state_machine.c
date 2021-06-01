@@ -1282,7 +1282,7 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 			message, BUFSIZE,
 			"Failover still in progress with %d candidates having reported "
 			"their LSN: %d nodes are required in the quorum to satisfy "
-			"number_sync_standbys = %d in formation \"%s\", "
+			"number_sync_standbys=%d in formation \"%s\", "
 			"activeNode is " NODE_FORMAT
 			" and reported state \"%s\"",
 			candidateList.candidateCount,
@@ -1483,8 +1483,7 @@ BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
 		 */
 		if ((IsStateIn(node->reportedState, secondaryStates) &&
 			 IsStateIn(node->goalState, secondaryStates)) ||
-			(((IsCurrentState(node, REPLICATION_STATE_DRAINING) &&
-			   IsDrainTimeExpired(node)) ||
+			((IsCurrentState(node, REPLICATION_STATE_DRAINING) ||
 			  IsCurrentState(node, REPLICATION_STATE_DEMOTED))))
 		{
 			char message[BUFSIZE] = { 0 };
@@ -2005,11 +2004,8 @@ IsDrainTimeExpired(AutoFailoverNode *pgAutoFailoverNode)
 {
 	bool drainTimeExpired = false;
 
-	List *drainingStates = list_make2_int(REPLICATION_STATE_DEMOTE_TIMEOUT,
-										  REPLICATION_STATE_DRAINING);
-
 	if (pgAutoFailoverNode == NULL ||
-		!IsStateIn(pgAutoFailoverNode->goalState, drainingStates))
+		pgAutoFailoverNode->goalState != REPLICATION_STATE_DEMOTE_TIMEOUT)
 	{
 		return false;
 	}
