@@ -38,6 +38,10 @@ def test_001_update_extension():
             WHERE name = 'pgautofailover'
         """
     )
+
+    if results[0][0] != "dummy":
+        cluster.monitor.print_debug_logs()
+
     eq_(results, [("dummy",)])
 
     del os.environ["PG_AUTOCTL_EXTENSION_VERSION"]
