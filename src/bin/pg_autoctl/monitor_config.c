@@ -637,3 +637,66 @@ monitor_config_accept_new(MonitorConfig *config, MonitorConfig *newConfig)
 	return config_accept_new_ssloptions(&(config->pgSetup),
 										&(newConfig->pgSetup));
 }
+
+
+/*
+ * monitor_config_print_from_file prints to stdout the contents of the given
+ * monitor configuration file, either in a human formatted way, or in pretty
+ * printed JSON.
+ */
+bool
+monitor_config_print_from_file(const char *pathname,
+							   bool outputContents,
+							   bool outputJSON)
+{
+	MonitorConfig mconfig = { 0 };
+
+	const bool missingPgdataIsOk = true;
+	const bool pgIsNotRunningIsOk = true;
+
+	strlcpy(mconfig.pathnames.config, pathname, MAXPGPATH);
+
+	if (!monitor_config_read_file(&mconfig,
+								  missingPgdataIsOk,
+								  pgIsNotRunningIsOk))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	if (outputJSON)
+	{
+		JSON_Value *js = json_value_init_object();
+
+		if (outputContents)
+		{
+			if (!monitor_config_to_json(&mconfig, js))
+			{
+				log_error("Failed to serialize configuration to JSON");
+				return false;
+			}
+		}
+		else
+		{
+			JSON_Object *jsObj = json_value_get_object(js);
+
+			json_object_set_string(jsObj, "pathname", pathname);
+		}
+
+		/* we have the config as a JSON object, print it out now */
+		(void) pprint_json(js);
+	}
+	else
+	{
+		if (outputContents)
+		{
+			return fprint_file_contents(pathname);
+		}
+		else
+		{
+			fformat(stdout, "%s\n", pathname);
+		}
+	}
+
+	return true;
+}

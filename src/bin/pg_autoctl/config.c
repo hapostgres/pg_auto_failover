@@ -308,7 +308,7 @@ ProbeConfigurationFileRole(const char *filename)
 	}
 	else if (strcmp(config.role, NODE_ARCHIVER_ROLE) == 0)
 	{
-		return PG_AUTOCTL_ROLE_NODE_ARCHIVER;
+		return PG_AUTOCTL_ROLE_ARCHIVER_NODE;
 	}
 	else
 	{

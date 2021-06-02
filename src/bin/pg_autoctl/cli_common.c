@@ -1328,7 +1328,7 @@ keeper_cli_print_version(int argc, char **argv)
 		json_object_set_string(root, "pg_version_str", PG_VERSION_STR);
 		json_object_set_number(root, "pg_version_num", (double) PG_VERSION_NUM);
 
-		(void) cli_pprint_json(js);
+		(void) pprint_json(js);
 	}
 	else
 	{
@@ -1341,23 +1341,6 @@ keeper_cli_print_version(int argc, char **argv)
 	}
 
 	exit(0);
-}
-
-
-/*
- * cli_pprint_json pretty prints the given JSON value to stdout and frees the
- * JSON related memory.
- */
-void
-cli_pprint_json(JSON_Value *js)
-{
-	/* output our nice JSON object, pretty printed please */
-	char *serialized_string = json_serialize_to_string_pretty(js);
-	fformat(stdout, "%s\n", serialized_string);
-
-	/* free intermediate memory */
-	json_free_serialized_string(serialized_string);
-	json_value_free(js);
 }
 
 

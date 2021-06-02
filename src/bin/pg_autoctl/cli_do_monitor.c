@@ -196,7 +196,7 @@ cli_do_monitor_get_primary_node(int argc, char **argv)
 		json_object_set_string(root, "host", primaryNode.host);
 		json_object_set_number(root, "port", (double) primaryNode.port);
 
-		(void) cli_pprint_json(js);
+		(void) pprint_json(js);
 	}
 	else
 	{
@@ -334,7 +334,7 @@ cli_do_monitor_get_candidate_count(int argc, char **argv)
 		json_object_set_number(root, "failoverCandidateCount",
 							   (double) failoverCandidateCount);
 
-		(void) cli_pprint_json(js);
+		(void) pprint_json(js);
 	}
 	else
 	{
@@ -398,7 +398,7 @@ cli_do_monitor_get_coordinator(int argc, char **argv)
 		json_object_set_string(root, "host", coordinatorNode.host);
 		json_object_set_number(root, "port", (double) coordinatorNode.port);
 
-		(void) cli_pprint_json(js);
+		(void) pprint_json(js);
 	}
 	else
 	{
@@ -510,7 +510,7 @@ cli_do_monitor_register_node(int argc, char **argv)
 		json_object_set_string(root, "assigned_role",
 							   NodeStateToString(keeper.state.assigned_role));
 
-		(void) cli_pprint_json(js);
+		(void) pprint_json(js);
 	}
 	else
 	{
@@ -603,7 +603,7 @@ cli_do_monitor_node_active(int argc, char **argv)
 							   "assigned_role",
 							   NodeStateToString(assignedState.state));
 
-		(void) cli_pprint_json(js);
+		(void) pprint_json(js);
 	}
 	else
 	{
@@ -700,5 +700,5 @@ cli_do_monitor_parse_notification(int argc, char **argv)
 	json_object_set_string(root, "goalState",
 						   NodeStateToString(nodeState.goalState));
 
-	(void) cli_pprint_json(js);
+	(void) pprint_json(js);
 }

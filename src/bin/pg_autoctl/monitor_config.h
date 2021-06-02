@@ -63,4 +63,8 @@ bool monitor_config_update_with_absolute_pgdata(MonitorConfig *config);
 
 bool monitor_config_accept_new(MonitorConfig *config, MonitorConfig *newConfig);
 
+bool monitor_config_print_from_file(const char *pathname,
+									bool outputContents,
+									bool outputJSON);
+
 #endif  /*  MONITOR_CONFIG_H */

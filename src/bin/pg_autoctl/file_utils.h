@@ -14,6 +14,8 @@
 
 #include "postgres_fe.h"
 
+#include "parson.h"
+
 #include <fcntl.h>
 
 
@@ -48,6 +50,8 @@ bool read_file(const char *filePath, char **contents, long *fileSize);
 bool read_file_if_exists(const char *filePath, char **contents, long *fileSize);
 bool move_file(char *sourcePath, char *destinationPath);
 bool duplicate_file(char *sourcePath, char *destinationPath);
+bool fprint_file_contents(const char *filename);
+void pprint_json(JSON_Value *js);
 bool create_symbolic_link(char *sourcePath, char *targetPath);
 
 void path_in_same_directory(const char *basePath,

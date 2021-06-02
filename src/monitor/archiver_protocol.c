@@ -126,6 +126,12 @@ remove_archiver_by_archiverid(PG_FUNCTION_ARGS)
 
 	AutoFailoverArchiver *archiver = GetArchiver(archiverId);
 
+	if (archiver == NULL)
+	{
+		ereport(ERROR,
+				(errmsg("couldn't find archiver with id %d", archiverId)));
+	}
+
 	/* elog(ERROR) when an error occurs */
 	RemoveArchiver(archiver);
 

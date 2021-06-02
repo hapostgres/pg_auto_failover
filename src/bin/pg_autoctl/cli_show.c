@@ -13,6 +13,8 @@
 
 #include "postgres_fe.h"
 
+#include "archiver_config.h"
+#include "archiver_state.h"
 #include "cli_common.h"
 #include "commandline.h"
 #include "defaults.h"
@@ -46,7 +48,7 @@ static void cli_show_standby_names(int argc, char **argv);
 
 static int cli_show_file_getopts(int argc, char **argv);
 static void cli_show_file(int argc, char **argv);
-static bool fprint_file_contents(const char *filename);
+static void print_file_list(KeeperConfig *config, pgAutoCtlNodeRole role);
 
 static int cli_show_uri_getopts(int argc, char **argv);
 static void cli_show_uri(int argc, char **argv);
@@ -586,7 +588,7 @@ cli_show_local_state()
 					/* can't happen */
 					exit(EXIT_CODE_INTERNAL_ERROR);
 				}
-				(void) cli_pprint_json(js);
+				(void) pprint_json(js);
 			}
 			else
 			{
@@ -843,7 +845,7 @@ cli_show_standby_names(int argc, char **argv)
 							   "synchronous_standby_names",
 							   synchronous_standby_names);
 
-		(void) cli_pprint_json(js);
+		(void) pprint_json(js);
 	}
 	else
 	{
@@ -1193,7 +1195,7 @@ print_monitor_uri(Monitor *monitor,
 							   "monitor",
 							   monitor->pgsql.connectionString);
 
-		(void) cli_pprint_json(js);
+		(void) pprint_json(js);
 	}
 	else
 	{
@@ -1238,7 +1240,7 @@ print_formation_uri(SSLOptions *ssl,
 
 		json_object_set_string(jsObj, formation, postgresUri);
 
-		(void) cli_pprint_json(js);
+		(void) pprint_json(js);
 	}
 	else
 	{
@@ -1490,127 +1492,65 @@ cli_show_file(int argc, char **argv)
 {
 	KeeperConfig config = keeperOptions;
 
-	pgAutoCtlNodeRole role = ProbeConfigurationFileRole(config.pathnames.config);
+	pgAutoCtlNodeRole role =
+		ProbeConfigurationFileRole(config.pathnames.config);
 
 	switch (showFileOptions.selection)
 	{
 		case SHOW_FILE_ALL:
 		{
-			if (outputJSON)
-			{
-				JSON_Value *js = json_value_init_object();
-				JSON_Object *root = json_value_get_object(js);
-
-				json_object_set_string(root, "config", config.pathnames.config);
-
-				if (role == PG_AUTOCTL_ROLE_KEEPER)
-				{
-					json_object_set_string(root, "state", config.pathnames.state);
-					json_object_set_string(root, "init", config.pathnames.init);
-				}
-
-				json_object_set_string(root, "pid", config.pathnames.pid);
-
-				char *serialized_string = json_serialize_to_string_pretty(js);
-
-				fformat(stdout, "%s\n", serialized_string);
-
-				json_free_serialized_string(serialized_string);
-				json_value_free(js);
-			}
-			else
-			{
-				fformat(stdout, "%7s | %s\n", "File", "Path");
-				fformat(stdout, "%7s-+-%15s\n", "-------", "---------------");
-
-				fformat(stdout, "%7s | %s\n", "Config", config.pathnames.config);
-
-				if (role == PG_AUTOCTL_ROLE_KEEPER)
-				{
-					fformat(stdout, "%7s | %s\n", "State", config.pathnames.state);
-					fformat(stdout, "%7s | %s\n", "Init", config.pathnames.init);
-				}
-				fformat(stdout, "%7s | %s\n", "Pid", config.pathnames.pid);
-				fformat(stdout, "\n");
-			}
+			print_file_list(&config, role);
 			break;
 		}
 
 		case SHOW_FILE_CONFIG:
 		{
-			if (showFileOptions.showFileContents)
+			switch (role)
 			{
-				if (outputJSON)
+				case PG_AUTOCTL_ROLE_MONITOR:
 				{
-					JSON_Value *js = json_value_init_object();
-
-					const bool missingPgdataIsOk = true;
-					const bool pgIsNotRunningIsOk = true;
-					bool monitorDisabledIsOk = true;
-
-					switch (role)
+					if (!monitor_config_print_from_file(
+							config.pathnames.config,
+							showFileOptions.showFileContents,
+							outputJSON))
 					{
-						case PG_AUTOCTL_ROLE_MONITOR:
-						{
-							MonitorConfig mconfig = { 0 };
-
-							mconfig.pathnames = config.pathnames;
-
-							if (!monitor_config_read_file(&mconfig,
-														  missingPgdataIsOk,
-														  pgIsNotRunningIsOk))
-							{
-								/* errors have already been logged */
-								exit(EXIT_CODE_BAD_CONFIG);
-							}
-
-							if (!monitor_config_to_json(&mconfig, js))
-							{
-								log_fatal(
-									"Failed to serialize configuration to JSON");
-								exit(EXIT_CODE_BAD_CONFIG);
-							}
-							break;
-						}
-
-						case PG_AUTOCTL_ROLE_KEEPER:
-						{
-							if (!keeper_config_read_file(&config,
-														 missingPgdataIsOk,
-														 pgIsNotRunningIsOk,
-														 monitorDisabledIsOk))
-							{
-								exit(EXIT_CODE_BAD_CONFIG);
-							}
-
-							if (!keeper_config_to_json(&config, js))
-							{
-								log_fatal(
-									"Failed to serialize configuration to JSON");
-								exit(EXIT_CODE_BAD_CONFIG);
-							}
-							break;
-						}
-
-						default:
-						{
-							log_fatal("Unknown node role %d", role);
-							exit(EXIT_CODE_BAD_CONFIG);
-						}
+						/* errors have already been logged */
+						exit(EXIT_CODE_BAD_CONFIG);
 					}
-
-					/* we have the config as a JSON object, print it out now */
-					(void) cli_pprint_json(js);
+					break;
 				}
-				else if (!fprint_file_contents(config.pathnames.config))
+
+				case PG_AUTOCTL_ROLE_KEEPER:
 				{
-					/* errors have already been logged */
+					if (!keeper_config_print_from_file(
+							config.pathnames.config,
+							showFileOptions.showFileContents,
+							outputJSON))
+					{
+						/* errors have already been logged */
+						exit(EXIT_CODE_BAD_CONFIG);
+					}
+					break;
+				}
+
+				case PG_AUTOCTL_ROLE_ARCHIVER:
+				{
+					if (!archiver_config_print_from_file(
+							config.pathnames.config,
+							showFileOptions.showFileContents,
+							outputJSON))
+					{
+						/* errors have already been logged */
+						exit(EXIT_CODE_BAD_CONFIG);
+					}
+					break;
+				}
+
+				default:
+				{
+					log_fatal("Unknown node role %d", role);
 					exit(EXIT_CODE_BAD_CONFIG);
 				}
-			}
-			else
-			{
-				fformat(stdout, "%s\n", config.pathnames.config);
 			}
 			break;
 		}
@@ -1623,33 +1563,39 @@ cli_show_file(int argc, char **argv)
 				exit(EXIT_CODE_BAD_ARGS);
 			}
 
-			if (showFileOptions.showFileContents)
+			switch (role)
 			{
-				KeeperStateData keeperState = { 0 };
-
-				if (keeper_state_read(&keeperState, config.pathnames.state))
+				case PG_AUTOCTL_ROLE_KEEPER:
 				{
-					if (outputJSON)
+					if (!print_keeper_state_from_file(
+							config.pathnames.state,
+							showFileOptions.showFileContents,
+							outputJSON))
 					{
-						JSON_Value *js = json_value_init_object();
+						/* errors have already been logged */
+						exit(EXIT_CODE_BAD_STATE);
+					}
+					break;
+				}
 
-						keeperStateAsJSON(&keeperState, js);
-						(void) cli_pprint_json(js);
-					}
-					else
-					{
-						(void) print_keeper_state(&keeperState, stdout);
-					}
-				}
-				else
+				case PG_AUTOCTL_ROLE_ARCHIVER:
 				{
-					/* errors have already been logged */
-					exit(EXIT_CODE_BAD_STATE);
+					if (!archiver_state_print_from_file(
+							config.pathnames.state,
+							showFileOptions.showFileContents,
+							outputJSON))
+					{
+						/* errors have already been logged */
+						exit(EXIT_CODE_BAD_STATE);
+					}
+					break;
 				}
-			}
-			else
-			{
-				fformat(stdout, "%s\n", config.pathnames.state);
+
+				default:
+				{
+					log_fatal("Unknown node role %d", role);
+					exit(EXIT_CODE_BAD_CONFIG);
+				}
 			}
 
 			break;
@@ -1657,32 +1603,20 @@ cli_show_file(int argc, char **argv)
 
 		case SHOW_FILE_INIT:
 		{
-			if (role == PG_AUTOCTL_ROLE_MONITOR)
+			if (role != PG_AUTOCTL_ROLE_KEEPER)
 			{
-				log_error("A monitor has not init state file");
+				log_error("Node role \"%s\" does not have an init state file",
+						  config.role);
 				exit(EXIT_CODE_BAD_ARGS);
 			}
 
-			if (showFileOptions.showFileContents)
+			if (!print_keeper_init_state_from_file(
+					config.pathnames.init,
+					showFileOptions.showFileContents,
+					outputJSON))
 			{
-				Keeper keeper = { 0 };
-
-				keeper.config = config;
-
-				if (keeper_init_state_read(&(keeper.initState),
-										   config.pathnames.init))
-				{
-					(void) print_keeper_init_state(&(keeper.initState), stdout);
-				}
-				else
-				{
-					/* errors have already been logged */
-					exit(EXIT_CODE_BAD_STATE);
-				}
-			}
-			else
-			{
-				fformat(stdout, "%s\n", config.pathnames.init);
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_STATE);
 			}
 
 			break;
@@ -1701,7 +1635,7 @@ cli_show_file(int argc, char **argv)
 										   config.pathnames.pid,
 										   includeStatus);
 
-					(void) cli_pprint_json(js);
+					(void) pprint_json(js);
 				}
 				else
 				{
@@ -1731,24 +1665,90 @@ cli_show_file(int argc, char **argv)
 
 
 /*
- * fprint_file_contents prints the content of the given filename to stdout.
+ * print_file_list prints a list of files used by this instance of pg_autoctl,
+ * as per the command:
+ *
+ *    pg_autoctl show file --pgdata ...
  */
-static bool
-fprint_file_contents(const char *filename)
+static void
+print_file_list(KeeperConfig *config, pgAutoCtlNodeRole role)
 {
-	char *contents = NULL;
-	long size = 0L;
-
-	if (read_file(filename, &contents, &size))
+	if (outputJSON)
 	{
-		fformat(stdout, "%s\n", contents);
-		free(contents);
+		JSON_Value *js = json_value_init_object();
+		JSON_Object *root = json_value_get_object(js);
 
-		return true;
+		json_object_set_string(root, "config", config->pathnames.config);
+
+		switch (role)
+		{
+			case PG_AUTOCTL_ROLE_MONITOR:
+			case PG_AUTOCTL_ROLE_UNKNOWN:
+			{
+				break;
+			}
+
+			case PG_AUTOCTL_ROLE_KEEPER:
+			{
+				json_object_set_string(root,
+									   "state", config->pathnames.state);
+				json_object_set_string(root,
+									   "init", config->pathnames.init);
+				break;
+			}
+
+			case PG_AUTOCTL_ROLE_ARCHIVER:
+			case PG_AUTOCTL_ROLE_ARCHIVER_NODE:
+			{
+				json_object_set_string(root,
+									   "state", config->pathnames.state);
+				break;
+			}
+		}
+
+		json_object_set_string(root, "pid", config->pathnames.pid);
+
+		char *serialized_string = json_serialize_to_string_pretty(js);
+
+		fformat(stdout, "%s\n", serialized_string);
+
+		json_free_serialized_string(serialized_string);
+		json_value_free(js);
 	}
 	else
 	{
-		/* errors have already been logged */
-		return false;
+		fformat(stdout, "%7s | %s\n", "File", "Path");
+		fformat(stdout, "%7s-+-%15s\n", "-------", "---------------");
+
+		fformat(stdout, "%7s | %s\n", "Config", config->pathnames.config);
+
+		switch (role)
+		{
+			case PG_AUTOCTL_ROLE_MONITOR:
+			case PG_AUTOCTL_ROLE_UNKNOWN:
+			{
+				break;
+			}
+
+			case PG_AUTOCTL_ROLE_KEEPER:
+			{
+				fformat(stdout,
+						"%7s | %s\n", "State", config->pathnames.state);
+				fformat(stdout,
+						"%7s | %s\n", "Init", config->pathnames.init);
+				break;
+			}
+
+			case PG_AUTOCTL_ROLE_ARCHIVER:
+			case PG_AUTOCTL_ROLE_ARCHIVER_NODE:
+			{
+				fformat(stdout,
+						"%7s | %s\n", "State", config->pathnames.state);
+				break;
+			}
+		}
+
+		fformat(stdout, "%7s | %s\n", "Pid", config->pathnames.pid);
+		fformat(stdout, "\n");
 	}
 }

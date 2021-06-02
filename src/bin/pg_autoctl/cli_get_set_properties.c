@@ -243,7 +243,7 @@ cli_get_node_replication_quorum(int argc, char **argv)
 								"replication-quorum",
 								settings.replicationQuorum);
 
-		(void) cli_pprint_json(js);
+		(void) pprint_json(js);
 	}
 	else
 	{
@@ -278,7 +278,7 @@ cli_get_node_candidate_priority(int argc, char **argv)
 							   "candidate-priority",
 							   (double) settings.candidatePriority);
 
-		(void) cli_pprint_json(js);
+		(void) pprint_json(js);
 	}
 	else
 	{
@@ -347,7 +347,7 @@ cli_get_formation_number_sync_standbys(int argc, char **argv)
 							   "number-sync-standbys",
 							   (double) numberSyncStandbys);
 
-		(void) cli_pprint_json(js);
+		(void) pprint_json(js);
 	}
 	else
 	{
@@ -406,7 +406,7 @@ cli_set_node_replication_quorum(int argc, char **argv)
 								"replication-quorum",
 								replicationQuorum);
 
-		(void) cli_pprint_json(js);
+		(void) pprint_json(js);
 	}
 	else
 	{
@@ -465,7 +465,7 @@ cli_set_node_candidate_priority(int argc, char **argv)
 							   "candidate-priority",
 							   (double) candidatePriority);
 
-		(void) cli_pprint_json(js);
+		(void) pprint_json(js);
 	}
 	else
 	{
@@ -572,7 +572,7 @@ cli_set_node_metadata(int argc, char **argv)
 			exit(EXIT_CODE_BAD_CONFIG);
 		}
 
-		(void) cli_pprint_json(js);
+		(void) pprint_json(js);
 	}
 }
 
@@ -650,7 +650,7 @@ cli_set_formation_number_sync_standbys(int argc, char **argv)
 								   synchronous_standby_names);
 		}
 
-		(void) cli_pprint_json(js);
+		(void) pprint_json(js);
 	}
 	else
 	{

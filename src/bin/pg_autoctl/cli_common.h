@@ -148,7 +148,6 @@ typedef enum
 void keeper_cli_help(int argc, char **argv);
 int cli_print_version_getopts(int argc, char **argv);
 void keeper_cli_print_version(int argc, char **argv);
-void cli_pprint_json(JSON_Value *js);
 
 void cli_common_get_set_pgdata_or_exit(PostgresSetup *pgSetup);
 

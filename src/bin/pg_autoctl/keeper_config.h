@@ -104,4 +104,8 @@ bool keeper_config_merge_options(KeeperConfig *config, KeeperConfig *options);
 bool keeper_config_update(KeeperConfig *config, int nodeId, int groupId);
 bool keeper_config_update_with_absolute_pgdata(KeeperConfig *config);
 
+bool keeper_config_print_from_file(const char *pathname,
+								   bool outputContents,
+								   bool ouputJSON);
+
 #endif /* KEEPER_CONFIG_H */

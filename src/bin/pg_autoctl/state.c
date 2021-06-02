@@ -364,6 +364,56 @@ print_keeper_init_state(KeeperStateInit *initState, FILE *stream)
 
 
 /*
+ * print_keeper_state_from_file prints to stdout the on-disk state found at
+ * given filename, either in a human formatted way, or in pretty-printed JSON.
+ */
+bool
+print_keeper_state_from_file(const char *filename,
+							 bool outputContents,
+							 bool outputJSON)
+{
+	KeeperStateData keeperState = { 0 };
+
+	if (!keeper_state_read(&keeperState, filename))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	if (outputJSON)
+	{
+		JSON_Value *js = json_value_init_object();
+
+		if (outputContents)
+		{
+			keeperStateAsJSON(&keeperState, js);
+		}
+		else
+		{
+			JSON_Object *jsObj = json_value_get_object(js);
+
+			json_object_set_string(jsObj, "pathname", filename);
+		}
+
+		(void) pprint_json(js);
+	}
+	else
+	{
+		if (outputContents)
+		{
+			return fprint_file_contents(filename);
+		}
+		else
+		{
+			fformat(stdout, "%s\n", filename);
+		}
+	}
+
+	return true;
+}
+
+
+/*
  * NodeStateToString converts a NodeState ENUM value into a string for use in
  * user reporting.
  */
@@ -826,6 +876,43 @@ keeper_init_state_read(KeeperStateInit *initState, const char *filename)
 			  "is broken or wrong version (%d)",
 			  filename, pg_autoctl_state_version);
 	return false;
+}
+
+
+/*
+ * print_keeper_init_state_from_file prints to stdout the on-disk init state
+ * found at given filename, either in a human formatted way, or in
+ * pretty-printed JSON.
+ */
+bool
+print_keeper_init_state_from_file(const char *filename,
+								  bool outputContents,
+								  bool outputJSON)
+{
+	Keeper keeper = { 0 };
+
+	if (outputJSON)
+	{
+		log_warn("Printing the init state in JSON is not supported yet");
+	}
+
+	if (outputContents)
+	{
+		if (!keeper_init_state_read(&(keeper.initState), filename))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
+		(void) print_keeper_init_state(&(keeper.initState), stdout);
+		return true;
+	}
+	else
+	{
+		fformat(stdout, "%s\n", filename);
+	}
+
+	return true;
 }
 
 

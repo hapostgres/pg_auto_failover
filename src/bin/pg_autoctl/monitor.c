@@ -4362,19 +4362,15 @@ monitor_drop_archiver(Monitor *monitor, int archiverId)
 
 	int paramCount = 1;
 	Oid paramTypes[1] = { INT4OID };
-	const char *paramValues[1];
+	const char *paramValues[1] = { 0 };
 
-	NodeAddressParseContext parseContext = { { 0 }, node, false };
-
-	paramValues[0] = name;
-	paramValues[1] = host;
+	paramValues[0] = intToString(archiverId).strValue;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
 								   NULL, NULL))
 	{
-		log_error("Failed to register archiver \"%s\" (\"%s\") to the monitor",
-				  name, host);
+		log_error("Failed to drop archiver %d from the monitor", archiverId);
 		return false;
 	}
 

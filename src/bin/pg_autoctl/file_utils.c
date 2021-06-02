@@ -482,6 +482,47 @@ duplicate_file(char *sourcePath, char *destinationPath)
 
 
 /*
+ * fprint_file_contents prints the content of the given filename to stdout.
+ */
+bool
+fprint_file_contents(const char *filename)
+{
+	char *contents = NULL;
+	long size = 0L;
+
+	if (read_file(filename, &contents, &size))
+	{
+		fformat(stdout, "%s\n", contents);
+		free(contents);
+
+		return true;
+	}
+	else
+	{
+		/* errors have already been logged */
+		return false;
+	}
+}
+
+
+/*
+ * pprint_json pretty prints the given JSON value to stdout and frees the
+ * JSON related memory.
+ */
+void
+pprint_json(JSON_Value *js)
+{
+	/* output our nice JSON object, pretty printed please */
+	char *serialized_string = json_serialize_to_string_pretty(js);
+	fformat(stdout, "%s\n", serialized_string);
+
+	/* free intermediate memory */
+	json_free_serialized_string(serialized_string);
+	json_value_free(js);
+}
+
+
+/*
  * create_symbolic_link creates a symbolic link to source path.
  */
 bool

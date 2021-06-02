@@ -550,6 +550,6 @@ cli_service_status(int argc, char **argv)
 		json_object_set_value(root, "postgres", jsPostgres);
 		json_object_set_value(root, "pg_autoctl", jsPGAutoCtl);
 
-		(void) cli_pprint_json(js);
+		(void) pprint_json(js);
 	}
 }

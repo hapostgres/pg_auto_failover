@@ -203,6 +203,11 @@ void log_keeper_state(KeeperStateData *keeperState);
 void print_keeper_state(KeeperStateData *keeperState, FILE *fp);
 bool keeperStateAsJSON(KeeperStateData *keeperState, JSON_Value *js);
 
+bool print_keeper_state_from_file(const char *filename,
+								  bool outputContents,
+								  bool outputJSON);
+
+
 void print_keeper_init_state(KeeperStateInit *initState, FILE *stream);
 char * PreInitPostgreInstanceStateToString(PreInitPostgreInstanceState pgInitState);
 
@@ -213,6 +218,11 @@ bool keeper_init_state_read(KeeperStateInit *initState, const char *filename);
 bool keeper_init_state_discover(KeeperStateInit *initState,
 								PostgresSetup *pgSetup,
 								const char *filename);
+
+bool print_keeper_init_state_from_file(const char *filename,
+									   bool outputContents,
+									   bool outputJSON);
+
 
 char * ExpectedPostgresStatusToString(ExpectedPostgresStatus pgExpectedStatus);
 
@@ -228,15 +238,5 @@ bool keeper_postgres_state_update(KeeperStatePostgres *pgStatus,
 								  const char *filename);
 bool keeper_postgres_state_read(KeeperStatePostgres *pgStatus,
 								const char *filename);
-
-
-/*
- * Handling of an archiver state.
- */
-typedef struct ArchiverState
-{
-	int pg_autoctl_state_version;
-	int archiver_node_id;
-} ArchiverState;
 
 #endif /* STATE_H */

@@ -10,8 +10,9 @@
 #ifndef ARCHIVER_H
 #define ARCHIVER_H
 
-#include "commandline.h"
 #include "archiver_config.h"
+#include "archiver_state.h"
+#include "commandline.h"
 #include "log.h"
 #include "monitor.h"
 #include "primary_standby.h"
@@ -46,7 +47,7 @@ typedef struct Archiver
 {
 	ArchiverConfig config;
 	Monitor monitor;
-	ArchiverState state;
+	ArchiverStateData state;
 
 	/* formations registration */
 	FormationArray formations;
@@ -70,5 +71,12 @@ typedef struct AddArchiverNodeOpts
 
 
 bool archiver_monitor_init(Archiver *archiver);
+bool archiver_register_and_init(Archiver *archiver);
+
+/* src/bin/pg_autoctl/archiver_state.c */
+bool archiver_load_state(Archiver *archiver);
+bool archiver_store_state(Archiver *archiver);
+bool archiver_update_state(Archiver *archiver, int archiverId);
+
 
 #endif /* ARCHIVER_H */

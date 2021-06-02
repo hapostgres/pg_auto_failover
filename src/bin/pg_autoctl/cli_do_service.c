@@ -473,7 +473,7 @@ cli_do_service_postgresctl_on(int argc, char **argv)
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 
-		(void) cli_pprint_json(js);
+		(void) pprint_json(js);
 	}
 }
 

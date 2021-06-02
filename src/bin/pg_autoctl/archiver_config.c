@@ -298,3 +298,60 @@ archiver_config_update_with_absolute_pgdata(ArchiverConfig *config)
 
 	return true;
 }
+
+
+/*
+ * archiver_config_print_from_file prints to stdout the contents of the given
+ * archiver configuration file, either in a human formatted way, or in pretty
+ * printed JSON.
+ */
+bool
+archiver_config_print_from_file(const char *pathname,
+								bool outputContents,
+								bool outputJSON)
+{
+	ArchiverConfig config = { 0 };
+
+	strlcpy(config.pathnames.config, pathname, MAXPGPATH);
+
+	if (!archiver_config_read_file(&config))
+	{
+		return false;
+	}
+
+	if (outputJSON)
+	{
+		JSON_Value *js = json_value_init_object();
+
+		if (outputContents)
+		{
+			if (!archiver_config_to_json(&config, js))
+			{
+				log_error("Failed to serialize configuration to JSON");
+				return false;
+			}
+		}
+		else
+		{
+			JSON_Object *jsObj = json_value_get_object(js);
+
+			json_object_set_string(jsObj, "pathname", pathname);
+		}
+
+		/* we have the config as a JSON object, print it out now */
+		(void) pprint_json(js);
+	}
+	else
+	{
+		if (outputContents)
+		{
+			return fprint_file_contents(pathname);
+		}
+		else
+		{
+			fformat(stdout, "%s\n", pathname);
+		}
+	}
+
+	return true;
+}

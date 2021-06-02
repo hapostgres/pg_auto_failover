@@ -53,4 +53,8 @@ bool archiver_config_set_setting(ArchiverConfig *config,
 
 bool archiver_config_update_with_absolute_pgdata(ArchiverConfig *config);
 
+bool archiver_config_print_from_file(const char *pathname,
+									 bool outputContents,
+									 bool outputJSON);
+
 #endif /* ARCHIVER_CONFIG_H */

@@ -13,6 +13,7 @@
 #include "postgres_fe.h"
 
 #include "defaults.h"
+#include "file_utils.h"
 #include "ini_file.h"
 #include "keeper.h"
 #include "keeper_config.h"
@@ -897,5 +898,67 @@ keeper_config_update_with_absolute_pgdata(KeeperConfig *config)
 			return false;
 		}
 	}
+	return true;
+}
+
+
+/*
+ * keeper_config_print_from_file prints to stdout the contents of the given
+ * keeper configuration file, either in a human formatted way, or in pretty
+ * printed JSON.
+ */
+bool
+keeper_config_print_from_file(const char *pathname,
+							  bool outputContents,
+							  bool outputJSON)
+{
+	KeeperConfig config = { 0 };
+
+	const bool missingPgdataIsOk = true;
+	const bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = true;
+
+	if (!keeper_config_read_file(&config,
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
+	{
+		return false;
+	}
+
+	if (outputJSON)
+	{
+		JSON_Value *js = json_value_init_object();
+
+		if (outputContents)
+		{
+			if (!keeper_config_to_json(&config, js))
+			{
+				log_error("Failed to serialize configuration to JSON");
+				return false;
+			}
+		}
+		else
+		{
+			JSON_Object *jsObj = json_value_get_object(js);
+
+			json_object_set_string(jsObj, "pathname", pathname);
+		}
+
+		/* we have the config as a JSON object, print it out now */
+		(void) pprint_json(js);
+	}
+	else
+	{
+		if (outputContents)
+		{
+			return fprint_file_contents(pathname);
+		}
+		else
+		{
+			fformat(stdout, "%s\n", pathname);
+		}
+	}
+
 	return true;
 }

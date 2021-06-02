@@ -56,10 +56,13 @@ ArchiverConfig archiverOptions = { 0 };
 CreateArchiverNodeOpts createArchiveNodeOptions = { 0 };
 AddArchiverNodeOpts addArchiverNodeOptions = { 0 };
 
+static bool dropAndDestroy = false;
+
 static int cli_create_archiver_getopts(int argc, char **argv);
 static bool cli_create_archiver_config(Archiver *archiver);
 static void cli_create_archiver(int argc, char **argv);
 
+static int cli_drop_archiver_getopts(int argc, char **argv);
 static void cli_drop_archiver(int argc, char **argv);
 
 static int cli_archiver_node_getopts(int argc, char **argv);
@@ -103,7 +106,7 @@ CommandLine drop_archiver_command =
 		"  --monitor         pg_auto_failover Monitor Postgres URL\n"
 		"  --hostname        hostname by which postgres is reachable\n"
 		"  --name            name of this archiver\n",
-		cli_create_archiver_getopts,
+		cli_drop_archiver_getopts,
 		cli_drop_archiver);
 
 CommandLine archive_list_nodes_command =
@@ -702,10 +705,7 @@ cli_create_archiver(int argc, char **argv)
 {
 	pid_t pid = 0;
 	Archiver archiver = { 0 };
-	Monitor *monitor = &(archiver.monitor);
 	ArchiverConfig *config = &(archiver.config);
-
-	NodeAddress node = { 0 };
 
 	archiver.config = archiverOptions;
 
@@ -721,18 +721,121 @@ cli_create_archiver(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	if (!archiver_monitor_init(&archiver))
+	if (!archiver_register_and_init(&archiver))
 	{
-		/* errors have already been logged */
 		exit(EXIT_CODE_MONITOR);
+	}
+}
+
+
+/*
+ * cli_drop_archiver_getopts parses the command line options necessary to drop
+ * or destroy a local pg_autoctl archiver.
+ */
+static int
+cli_drop_archiver_getopts(int argc, char **argv)
+{
+	ArchiverConfig options = { 0 };
+	int c, option_index = 0;
+	int verboseCount = 0;
+
+	static struct option long_options[] = {
+		{ "directory", required_argument, NULL, 'D' },
+		{ "destroy", no_argument, NULL, 'd' },
+		{ "version", no_argument, NULL, 'V' },
+		{ "verbose", no_argument, NULL, 'v' },
+		{ "quiet", no_argument, NULL, 'q' },
+		{ "help", no_argument, NULL, 'h' },
+		{ NULL, 0, NULL, 0 }
+	};
+
+	optind = 0;
+
+	while ((c = getopt_long(argc, argv, "D:dn:p:Vvqh",
+							long_options, &option_index)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(options.directory, optarg, MAXPGPATH);
+				log_trace("--directory %s", options.directory);
+				break;
+			}
+
+			case 'd':
+			{
+				dropAndDestroy = true;
+				log_trace("--destroy");
+				break;
+			}
+
+			case 'V':
+			{
+				/* keeper_cli_print_version prints version and exits. */
+				keeper_cli_print_version(argc, argv);
+				break;
+			}
+
+			case 'v':
+			{
+				++verboseCount;
+				switch (verboseCount)
+				{
+					case 1:
+					{
+						log_set_level(LOG_INFO);
+						break;
+					}
+
+					case 2:
+					{
+						log_set_level(LOG_DEBUG);
+						break;
+					}
+
+					default:
+					{
+						log_set_level(LOG_TRACE);
+						break;
+					}
+				}
+				break;
+			}
+
+			case 'q':
+			{
+				log_set_level(LOG_ERROR);
+				break;
+			}
+
+			case 'h':
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_QUIT);
+				break;
+			}
+
+			default:
+			{
+				/* getopt_long already wrote an error message */
+				commandline_help(stderr);
+				exit(EXIT_CODE_BAD_ARGS);
+				break;
+			}
+		}
 	}
 
-	if (!monitor_register_archiver(monitor, config->name, config->hostname,
-								   &node))
+	if (!archiver_config_set_pathnames_from_directory(&options))
 	{
 		/* errors have already been logged */
-		exit(EXIT_CODE_MONITOR);
+		exit(EXIT_CODE_BAD_ARGS);
 	}
+
+	/* publish our option parsing in the global variable */
+	archiverOptions = options;
+
+	return optind;
 }
 
 
@@ -747,8 +850,6 @@ cli_drop_archiver(int argc, char **argv)
 	Monitor *monitor = &(archiver.monitor);
 	ArchiverConfig *config = &(archiver.config);
 
-	NodeAddress node = { 0 };
-
 	archiver.config = archiverOptions;
 
 	if (read_pidfile(config->pathnames.pid, &pid))
@@ -757,13 +858,19 @@ cli_drop_archiver(int argc, char **argv)
 		exit(EXIT_CODE_BAD_STATE);
 	}
 
+	if (!archiver_config_read_file(config))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
 	if (!archiver_monitor_init(&archiver))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_MONITOR);
 	}
 
-	if (!monitor_drop_archiver(monitor, archiver))
+	if (!monitor_drop_archiver(monitor, archiver.state.archiverId))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_MONITOR);

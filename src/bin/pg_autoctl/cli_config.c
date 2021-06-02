@@ -145,7 +145,7 @@ cli_config_check(int argc, char **argv)
 				json_object_set_value(root, "postgres", jsPostgres);
 				json_object_set_value(root, "config", jsMConfig);
 
-				(void) cli_pprint_json(js);
+				(void) pprint_json(js);
 			}
 			else
 			{
@@ -204,7 +204,7 @@ cli_config_check(int argc, char **argv)
 				json_object_set_value(root, "postgres", jsPostgres);
 				json_object_set_value(root, "config", jsKConfig);
 
-				(void) cli_pprint_json(js);
+				(void) pprint_json(js);
 			}
 			else
 			{
@@ -461,7 +461,7 @@ cli_keeper_config_get(int argc, char **argv)
 						exit(EXIT_CODE_BAD_CONFIG);
 					}
 
-					(void) cli_pprint_json(js);
+					(void) pprint_json(js);
 				}
 				else
 				{
@@ -539,7 +539,7 @@ cli_monitor_config_get(int argc, char **argv)
 					exit(EXIT_CODE_BAD_CONFIG);
 				}
 
-				(void) cli_pprint_json(js);
+				(void) pprint_json(js);
 			}
 			else
 			{
