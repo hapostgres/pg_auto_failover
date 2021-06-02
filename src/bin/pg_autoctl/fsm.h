@@ -41,7 +41,7 @@ bool fsm_prepare_replication(Keeper *keeper);
 bool fsm_disable_replication(Keeper *keeper);
 bool fsm_resume_as_primary(Keeper *keeper);
 bool fsm_rewind_or_init(Keeper *keeper);
-bool fsm_maintain_replication_slots(Keeper *keeper);
+bool fsm_prepare_for_secondary(Keeper *keeper);
 
 bool fsm_init_standby(Keeper *keeper);
 bool fsm_promote_standby(Keeper *keeper);

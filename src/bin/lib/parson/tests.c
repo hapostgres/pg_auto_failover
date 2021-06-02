@@ -2,7 +2,7 @@
  SPDX-License-Identifier: MIT
 
  Parson ( http://kgabis.github.com/parson/ )
- Copyright (c) 2012 - 2020 Krzysztof Gabis
+ Copyright (c) 2012 - 2021 Krzysztof Gabis
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -587,6 +587,8 @@ void test_memory_leaks() {
     TEST(json_object_set_number(NULL, "lorem", 42) == JSONFailure);
     TEST(json_object_set_boolean(NULL, "lorem", 0) == JSONFailure);
     TEST(json_object_set_null(NULL, "lorem") == JSONFailure);
+
+    TEST(json_parse_string("{\"\\u0000\"") == NULL);
 
     TEST(malloc_count == 0);
 }

@@ -219,6 +219,8 @@ extern bool CanTakeWritesInState(ReplicationState state);
 extern bool CanInitiateFailover(ReplicationState state);
 extern bool StateBelongsToPrimary(ReplicationState state);
 extern bool IsBeingPromoted(AutoFailoverNode *node);
+extern bool IsBeingDemotedPrimary(AutoFailoverNode *node);
+extern bool IsDemotedPrimary(AutoFailoverNode *node);
 extern bool CandidateNodeIsReadyToStreamWAL(AutoFailoverNode *node);
 extern bool IsParticipatingInPromotion(AutoFailoverNode *node);
 extern bool IsInWaitOrJoinState(AutoFailoverNode *node);

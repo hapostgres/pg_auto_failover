@@ -237,7 +237,8 @@ def test_014_001_fail_node1():
 
     # first we have a 30s timeout for the monitor to decide that node1 is
     # down; then we have another 30s timeout at stop_replication waiting for
-    # demote_timout, so let's give it 120s there
+    # demote_timout, so let's give it 120s there and step in the middle first
+    assert node2.wait_until_state(target_state="stop_replication", timeout=120)
     assert node2.wait_until_state(target_state="wait_primary", timeout=120)
     assert node3.wait_until_state(target_state="secondary")
 

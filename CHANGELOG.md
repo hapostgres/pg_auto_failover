@@ -1,3 +1,42 @@
+### pg_auto_failover v1.5.2 (May 20, 2021) ###
+
+This is a bugfix release for the v1.5 series.
+
+In addition to bug fixes, this release also contains a lift of the
+restriction to always have at least two nodes with a non-zero candidate
+priority in a group. It is now possible to use pg_auto_failover and only
+have manual failover.
+
+If you're using the output from the command `pg_autoctl show settings
+--json` please notice that we changed the JSON format we use in the output.
+See #697 for details.
+
+#### Added
+* Check that a "replication" connection is possible before pg_rewind. [#665]
+* Allow manual promotion of nodes with candidate priority zero. [#661]
+* Implement a new configuration option listen_notifications_timeout. [#677]
+* Log monitor health changes as events. [#703]
+
+#### Changed
+* Use PGDATA owner for the systemd service file. [#666]
+* Remove logging of connection password in monitor string [#512]
+* Improve docs color contrast for accessibility [#674]
+* Fix pg_autoctl show settings --json output. [#697]
+
+#### Fixed
+* Docs: typo fix for Postgres client certificate file (postgresql.crt). [#652]
+* Plug connection leaks found during profiling [#582]
+* Review find_extension_control_file[) error handling. (#659]
+* Fix/identify system before pg basebackup [#658]
+* Fix a pipe issue and return code [#619]
+* Fix memory leak allocated by createPQExpBuffer() (#671]
+* Fix parsing pg version string for replication slots support on standby. [#676]
+* Fix/debian cluster for the monitor [#681]
+* Fix a memory leak in uri_contains_password. [#687]
+* Fix a memory leak in BuildNodesArrayValues. [#693]
+* Complete transition of a second [or greater) failed primary (#706]
+
+
 ### pg_auto_failover v1.5.1 (March 24, 2021) ###
 
 This release contains monitor schema changes, so the monitor extension gets

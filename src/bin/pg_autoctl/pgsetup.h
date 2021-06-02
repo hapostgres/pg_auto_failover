@@ -28,6 +28,20 @@
 #define PG_LSN_MAXLENGTH 18
 
 /*
+ * System status indicator. From postgres:src/include/catalog/pg_control.h
+ */
+typedef enum DBState
+{
+	DB_STARTUP = 0,
+	DB_SHUTDOWNED,
+	DB_SHUTDOWNED_IN_RECOVERY,
+	DB_SHUTDOWNING,
+	DB_IN_CRASH_RECOVERY,
+	DB_IN_ARCHIVE_RECOVERY,
+	DB_IN_PRODUCTION
+} DBState;
+
+/*
  * To be able to check if a minor upgrade should be scheduled, and to check for
  * system WAL compatiblity, we use some parts of the pg_controldata output.
  *
@@ -36,10 +50,12 @@
  */
 typedef struct pg_control_data
 {
+	uint64_t system_identifier;
 	uint32_t pg_control_version;        /* PG_CONTROL_VERSION */
 	uint32_t catalog_version_no;        /* see catversion.h */
-	uint64_t system_identifier;
+	DBState state;                      /* see enum above */
 	char latestCheckpointLSN[PG_LSN_MAXLENGTH];
+	uint32_t timeline_id;
 } PostgresControlData;
 
 /*
@@ -248,5 +264,6 @@ bool pg_setup_standby_slot_supported(PostgresSetup *pgSetup, int logLevel);
 
 HBAEditLevel pgsetup_parse_hba_level(const char *level);
 char * pgsetup_hba_level_to_string(HBAEditLevel hbaLevel);
+const char * dbstateToString(DBState state);
 
 #endif /* PGSETUP_H */

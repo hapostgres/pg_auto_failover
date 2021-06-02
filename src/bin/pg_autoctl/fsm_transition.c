@@ -1024,15 +1024,24 @@ fsm_rewind_or_init(Keeper *keeper)
 
 
 /*
- * fsm_maintain_replication_slots is used when going from CATCHINGUP to
- * SECONDARY, to create missing replication slots. We want to maintain a
- * replication slot for each of the other nodes in the system, so that we make
- * sure we have the WAL bytes around when a standby nodes has to follow a new
- * primary, after failover.
+ * fsm_prepare_for_secondary is used when going from CATCHINGUP to SECONDARY,
+ * to create missing replication slots. We want to maintain a replication slot
+ * for each of the other nodes in the system, so that we make sure we have the
+ * WAL bytes around when a standby nodes has to follow a new primary, after
+ * failover.
  */
 bool
-fsm_maintain_replication_slots(Keeper *keeper)
+fsm_prepare_for_secondary(Keeper *keeper)
 {
+	LocalPostgresServer *postgres = &(keeper->postgres);
+
+	/* first. check that we're on the same timeline as the new primary */
+	if (!standby_check_timeline_with_upstream(postgres))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
 	return keeper_maintain_replication_slots(keeper);
 }
 
@@ -1390,7 +1399,24 @@ fsm_follow_new_primary(Keeper *keeper)
 	}
 
 	/* now, in case we have an init state file around, remove it */
-	return unlink_file(config->pathnames.init);
+	if (!unlink_file(config->pathnames.init))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/*
+	 * Finally, check that we're on the same timeline as the new primary when
+	 * assigned secondary as a goal state. This transition function is also
+	 * used when going from secondary to catchingup, as the primary might have
+	 * changed also in that situation.
+	 */
+	if (keeper->state.assigned_role == SECONDARY_STATE)
+	{
+		return standby_check_timeline_with_upstream(postgres);
+	}
+
+	return true;
 }
 
 

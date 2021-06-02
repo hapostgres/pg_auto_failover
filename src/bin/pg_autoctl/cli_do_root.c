@@ -129,6 +129,14 @@ CommandLine do_standby_rewind =
 				 keeper_cli_keeper_setup_getopts,
 				 keeper_cli_rewind_old_primary);
 
+CommandLine do_standby_crash_recovery =
+	make_command("crash-recovery",
+				 "Setup postgres for crash-recovery and start postgres",
+				 " [ --pgdata ... ]",
+				 KEEPER_CLI_WORKER_SETUP_OPTIONS,
+				 keeper_cli_keeper_setup_getopts,
+				 keeper_cli_maybe_do_crash_recovery);
+
 CommandLine do_standby_promote =
 	make_command("promote",
 				 "Promote a standby server to become writable",
@@ -140,6 +148,7 @@ CommandLine do_standby_promote =
 CommandLine *do_standby[] = {
 	&do_standby_init,
 	&do_standby_rewind,
+	&do_standby_crash_recovery,
 	&do_standby_promote,
 	NULL
 };

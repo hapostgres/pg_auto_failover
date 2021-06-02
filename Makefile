@@ -35,6 +35,7 @@ TESTS_MULTI  = test_multi_async
 TESTS_MULTI += test_multi_ifdown
 TESTS_MULTI += test_multi_maintenance
 TESTS_MULTI += test_multi_standbys
+TESTS_MULTI += test_multi_alternate_primary_failures
 
 # TEST indicates the testfile to run
 TEST ?=
@@ -87,11 +88,11 @@ AZURE_LOCATION ?= francecentral
 # Pick a version of Postgres and pg_auto_failover packages to install
 # in our target Azure VMs when provisionning
 #
-#  sudo apt-get install -q -y postgresql-13-auto-failover-1.5=1.5.1
+#  sudo apt-get install -q -y postgresql-13-auto-failover-1.5=1.5.2
 #  postgresql-${AZ_PG_VERSION}-auto-failover-${AZ_PGAF_DEB_VERSION}=${AZ_PGAF_VERSION}
 AZ_PG_VERSION ?= 13
 AZ_PGAF_DEB_VERSION ?= 1.5
-AZ_PGAF_DEB_REVISION ?= 1.5.1-1
+AZ_PGAF_DEB_REVISION ?= 1.5.2-1
 
 export AZ_PG_VERSION
 export AZ_PGAF_DEB_VERSION
