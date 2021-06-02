@@ -14,6 +14,7 @@
 
 #include "postgres_fe.h"
 
+#include "archiver_config.h"
 #include "cli_common.h"
 #include "commandline.h"
 #include "defaults.h"
@@ -31,10 +32,12 @@ static void cli_config_check_connections(PostgresSetup *pgSetup,
 										 const char *monitor_pguri);
 
 static void cli_config_get(int argc, char **argv);
+static void cli_archiver_config_get(int argc, char **argv);
 static void cli_keeper_config_get(int argc, char **argv);
 static void cli_monitor_config_get(int argc, char **argv);
 
 static void cli_config_set(int argc, char **argv);
+static void cli_archiver_config_set(int argc, char **argv);
 static void cli_keeper_config_set(int argc, char **argv);
 static void cli_monitor_config_set(int argc, char **argv);
 
@@ -415,6 +418,12 @@ cli_config_get(int argc, char **argv)
 			break;
 		}
 
+		case PG_AUTOCTL_ROLE_ARCHIVER:
+		{
+			(void) cli_archiver_config_get(argc, argv);
+			break;
+		}
+
 		default:
 		{
 			log_fatal("Unrecognized configuration file \"%s\"",
@@ -583,6 +592,83 @@ cli_monitor_config_get(int argc, char **argv)
 
 
 /*
+ * keeper_cli_config_get returns the value of a given section.option, or prints
+ * out the whole file to stdout when no argument has been given.
+ */
+static void
+cli_archiver_config_get(int argc, char **argv)
+{
+	ArchiverConfig config = { 0 };
+	KeeperConfig kconfig = keeperOptions;
+
+	config.pathnames = kconfig.pathnames;
+
+	switch (argc)
+	{
+		case 0:
+		{
+			/* no argument, write the config out */
+			if (!archiver_config_read_file(&config))
+			{
+				exit(EXIT_CODE_PGCTL);
+			}
+			else
+			{
+				if (outputJSON)
+				{
+					JSON_Value *js = json_value_init_object();
+
+					if (!archiver_config_to_json(&config, js))
+					{
+						log_fatal("Failed to serialize configuration to JSON");
+						exit(EXIT_CODE_BAD_CONFIG);
+					}
+
+					(void) pprint_json(js);
+				}
+				else
+				{
+					archiver_config_write(stdout, &config);
+					fformat(stdout, "\n");
+				}
+			}
+
+			break;
+		}
+
+		case 1:
+		{
+			/* single argument, find the option and display its value */
+			char *path = argv[0];
+			char value[BUFSIZE];
+
+			if (archiver_config_get_setting(&config,
+											path,
+											value,
+											BUFSIZE))
+			{
+				fformat(stdout, "%s\n", value);
+			}
+			else
+			{
+				log_error("Failed to lookup option %s", path);
+				exit(EXIT_CODE_BAD_ARGS);
+			}
+
+			break;
+		}
+
+		default:
+		{
+			/* we only support 0 or 1 argument */
+			commandline_help(stderr);
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+	}
+}
+
+
+/*
  * cli_keeper_config_get retrieves the value of a given configuration value,
  * supporting either a Keeper or a Monitor configuration file.
  */
@@ -609,6 +695,12 @@ cli_config_set(int argc, char **argv)
 		case PG_AUTOCTL_ROLE_KEEPER:
 		{
 			(void) cli_keeper_config_set(argc, argv);
+			break;
+		}
+
+		case PG_AUTOCTL_ROLE_ARCHIVER:
+		{
+			(void) cli_archiver_config_set(argc, argv);
 			break;
 		}
 
@@ -728,6 +820,61 @@ cli_monitor_config_set(int argc, char **argv)
 									   argv[0],
 									   value,
 									   BUFSIZE))
+		{
+			fformat(stdout, "%s\n", value);
+		}
+		else
+		{
+			log_error("Failed to lookup option %s", argv[0]);
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+	}
+}
+
+
+/*
+ * cli_archiver_config_set sets the given option path to the given value.
+ */
+static void
+cli_archiver_config_set(int argc, char **argv)
+{
+	ArchiverConfig config = { 0 };
+	KeeperConfig kconfig = keeperOptions;
+
+	config.pathnames = kconfig.pathnames;
+
+	if (argc != 2)
+	{
+		log_error("Two arguments are expected, found %d", argc);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+	else
+	{
+		/* we print out the value that we parsed, as a double-check */
+		char value[BUFSIZE];
+
+		if (!archiver_config_set_setting(&config,
+										 argv[0],
+										 argv[1]))
+		{
+			/* we already logged about it */
+			exit(EXIT_CODE_BAD_CONFIG);
+		}
+
+		/* first write the new configuration settings to file */
+		if (!archiver_config_write_file(&config))
+		{
+			log_fatal("Failed to write pg_autoctl configuration file \"%s\", "
+					  "see above for details",
+					  config.pathnames.config);
+			exit(EXIT_CODE_BAD_CONFIG);
+		}
+
+		/* now read the value from just written file */
+		if (archiver_config_get_setting(&config,
+										argv[0],
+										value,
+										BUFSIZE))
 		{
 			fformat(stdout, "%s\n", value);
 		}
