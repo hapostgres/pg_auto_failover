@@ -22,7 +22,12 @@ bool parse_version_number(const char *version_string,
 						  char *pg_version_string,
 						  int *pg_version);
 
-bool parse_pg_version_string(const char *pg_version_string, int *pg_version);
+bool parse_dotted_version_string(const char *pg_version_string,
+								 int *pg_version);
+bool parse_pg_version_string(const char *pg_version_string,
+							 int *pg_version);
+bool parse_pgaf_extension_version_string(const char *version_string,
+										 int *version);
 
 bool parse_controldata(PostgresControlData *pgControlData,
 					   const char *control_data_string);
