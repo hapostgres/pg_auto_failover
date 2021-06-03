@@ -149,11 +149,12 @@ parse_version_number(const char *version_string,
 
 
 /*
- * parse_pg_version_string parses a Postgres version string such as "12.6" into
- * a single number in the same format as the pg_control_version, such as 1206.
+ * parse_dotted_version_string parses a major.minor dotted version string such
+ * as "12.6" into a single number in the same format as the pg_control_version,
+ * such as 1206.
  */
 bool
-parse_pg_version_string(const char *pg_version_string, int *pg_version)
+parse_dotted_version_string(const char *pg_version_string, int *pg_version)
 {
 	/* now, parse the numbers into an integer, ala pg_control_version */
 	bool dotFound = false;
@@ -209,6 +210,29 @@ parse_pg_version_string(const char *pg_version_string, int *pg_version)
 	*pg_version = (maj * 100) + min;
 
 	return true;
+}
+
+
+/*
+ * parse_pg_version_string parses a Postgres version string such as "12.6" into
+ * a single number in the same format as the pg_control_version, such as 1206.
+ */
+bool
+parse_pg_version_string(const char *pg_version_string, int *pg_version)
+{
+	return parse_dotted_version_string(pg_version_string, pg_version);
+}
+
+
+/*
+ * parse_pgaf_version_string parses a pg_auto_failover version string such as
+ * "1.4" into a single number in the same format as the pg_control_version,
+ * such as 104.
+ */
+bool
+parse_pgaf_extension_version_string(const char *version_string, int *version)
+{
+	return parse_dotted_version_string(version_string, version);
 }
 
 

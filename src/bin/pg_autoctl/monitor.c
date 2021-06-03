@@ -4054,13 +4054,22 @@ bool
 monitor_extension_update(Monitor *monitor, const char *targetVersion)
 {
 	PGSQL *pgsql = &monitor->pgsql;
+	int targetVersionNum = 0;
+
+	/* the test suite upgrades to a "dummy" version */
+	if (strcmp(targetVersion, "dummy") != 0 &&
+		!parse_pgaf_extension_version_string(targetVersion, &targetVersionNum))
+	{
+		/* errors have already been logged */
+		return false;
+	}
 
 	/*
 	 * When upgrading to version 1.4 we now require btree_gist. It does not
 	 * seem like Postgres knows how to handle changes in extension control
 	 * requires, so let's do that manually here.
 	 */
-	if (strcmp(targetVersion, "1.4") == 0)
+	if (targetVersionNum >= 104)
 	{
 		/*
 		 * Ensure "btree_gist" is available in the server extension dir used to
