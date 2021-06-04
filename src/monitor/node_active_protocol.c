@@ -70,11 +70,7 @@ PG_FUNCTION_INFO_V1(synchronous_standby_names);
 
 
 /*
- * register_node adds a node to a given formation
- *
- * At register time the monitor connects to the node to check that nodehost and
- * nodeport are valid, and it does a SELECT pg_is_in_recovery() to help decide
- * what initial role to attribute the entering node.
+ * register_node adds a node to a given formation.
  */
 Datum
 register_node(PG_FUNCTION_ARGS)
@@ -89,7 +85,7 @@ register_node(PG_FUNCTION_ARGS)
 	int32 nodePort = PG_GETARG_INT32(2);
 
 	Name dbnameName = PG_GETARG_NAME(3);
-	const char *expectedDBName = NameStr(*dbnameName);
+	char *expectedDBName = NameStr(*dbnameName);
 
 	text *nodeNameText = PG_GETARG_TEXT_P(4);
 	char *nodeName = text_to_cstring(nodeNameText);
@@ -102,8 +98,7 @@ register_node(PG_FUNCTION_ARGS)
 
 	text *nodeKindText = PG_GETARG_TEXT_P(9);
 	char *nodeKind = text_to_cstring(nodeKindText);
-	FormationKind expectedFormationKind =
-		FormationKindFromNodeKindString(nodeKind);
+
 	int candidatePriority = PG_GETARG_INT32(10);
 	bool replicationQuorum = PG_GETARG_BOOL(11);
 
@@ -112,10 +107,6 @@ register_node(PG_FUNCTION_ARGS)
 
 	AutoFailoverNodeState currentNodeState = { 0 };
 
-	TupleDesc resultDescriptor = NULL;
-	Datum values[6];
-	bool isNulls[6];
-
 	currentNodeState.nodeId = currentNodeId;
 	currentNodeState.groupId = currentGroupId;
 	currentNodeState.replicationState =
@@ -123,6 +114,74 @@ register_node(PG_FUNCTION_ARGS)
 	currentNodeState.reportedLSN = 0;
 	currentNodeState.candidatePriority = candidatePriority;
 	currentNodeState.replicationQuorum = replicationQuorum;
+
+	AutoFailoverNodeRegistration nodeRegistration = {
+		.formationId = formationId,
+		.currentNodeState = &currentNodeState,
+		.nodeName = nodeName,
+		.nodeHost = nodeHost,
+		.nodePort = nodePort,
+		.expectedDBName = expectedDBName,
+		.sysIdentifier = sysIdentifier,
+		.nodeKind = nodeKind,
+		.nodeCluster = nodeCluster,
+		.pgAutoFailoverNode = NULL
+	};
+
+	AutoFailoverNodeState *assignedNodeState = RegisterNode(&nodeRegistration);
+
+	/* keep the diff smaller */
+	AutoFailoverNode *pgAutoFailoverNode = nodeRegistration.pgAutoFailoverNode;
+
+	TupleDesc resultDescriptor = NULL;
+	Datum values[6];
+	bool isNulls[6];
+
+	memset(values, 0, sizeof(values));
+	memset(isNulls, false, sizeof(isNulls));
+
+	values[0] = Int32GetDatum(assignedNodeState->nodeId);
+	values[1] = Int32GetDatum(assignedNodeState->groupId);
+	values[2] = ObjectIdGetDatum(
+		ReplicationStateGetEnum(pgAutoFailoverNode->goalState));
+	values[3] = Int32GetDatum(assignedNodeState->candidatePriority);
+	values[4] = BoolGetDatum(assignedNodeState->replicationQuorum);
+	values[5] = CStringGetTextDatum(pgAutoFailoverNode->nodeName);
+
+	TypeFuncClass resultTypeClass =
+		get_call_result_type(fcinfo, NULL, &resultDescriptor);
+
+	if (resultTypeClass != TYPEFUNC_COMPOSITE)
+	{
+		ereport(ERROR, (errmsg("return type must be a row type")));
+	}
+
+	HeapTuple resultTuple = heap_form_tuple(resultDescriptor, values, isNulls);
+	Datum resultDatum = HeapTupleGetDatum(resultTuple);
+
+	PG_RETURN_DATUM(resultDatum);
+}
+
+
+/*
+ * RegisterNode adds a new node to a given formation and group.
+ */
+AutoFailoverNodeState *
+RegisterNode(AutoFailoverNodeRegistration *nodeRegistration)
+{
+	/* keep the diff smaller */
+	char *formationId = nodeRegistration->formationId;
+	AutoFailoverNodeState *currentNodeState = nodeRegistration->currentNodeState;
+	char *nodeName = nodeRegistration->nodeName;
+	char *nodeHost = nodeRegistration->nodeHost;
+	int32 nodePort = nodeRegistration->nodePort;
+	char *expectedDBName = nodeRegistration->expectedDBName;
+	uint64 sysIdentifier = nodeRegistration->sysIdentifier;
+	char *nodeKind = nodeRegistration->nodeKind;
+	char *nodeCluster = nodeRegistration->nodeCluster;
+
+	FormationKind expectedFormationKind =
+		FormationKindFromNodeKindString(nodeKind);
 
 	LockFormation(formationId, ExclusiveLock);
 
@@ -197,10 +256,15 @@ register_node(PG_FUNCTION_ARGS)
 							  nodePort,
 							  sysIdentifier,
 							  nodeCluster,
-							  &currentNodeState);
-	LockNodeGroup(formationId, currentNodeState.groupId, ExclusiveLock);
+							  currentNodeState);
+	LockNodeGroup(formationId, currentNodeState->groupId, ExclusiveLock);
 
-	AutoFailoverNode *pgAutoFailoverNode = GetAutoFailoverNode(nodeHost, nodePort);
+	nodeRegistration->pgAutoFailoverNode =
+		GetAutoFailoverNode(nodeHost, nodePort);
+
+	/* copy the pointer in a local variable to keep the diff small */
+	AutoFailoverNode *pgAutoFailoverNode = nodeRegistration->pgAutoFailoverNode;
+
 	if (pgAutoFailoverNode == NULL)
 	{
 		ereport(ERROR,
@@ -223,7 +287,33 @@ register_node(PG_FUNCTION_ARGS)
 			pgAutoFailoverNode->formationId,
 			pgAutoFailoverNode->replicationQuorum ? "true" : "false",
 			pgAutoFailoverNode->candidatePriority,
-			currentNodeState.candidatePriority);
+			currentNodeState->candidatePriority);
+	}
+
+	/*
+	 * Check that the state selected by the monitor matches the state required
+	 * by the keeper, if any. REPLICATION_STATE_INITIAL means the monitor can
+	 * pick whatever is needed now, depending on the groupId.
+	 *
+	 * The keeper might be confronted to an already existing Postgres instance
+	 * that is running as a primary (not in recovery), and so asking to
+	 * register as a SINGLE. Better error out than ask the keeper to remove
+	 * some unknown data.
+	 */
+	if (currentNodeState->replicationState != REPLICATION_STATE_INITIAL)
+	{
+		if (currentNodeState->replicationState != pgAutoFailoverNode->goalState)
+		{
+			const char *currentState =
+				ReplicationStateGetName(currentNodeState->replicationState);
+			const char *goalState =
+				ReplicationStateGetName(pgAutoFailoverNode->goalState);
+
+			ereport(ERROR,
+					(errmsg("node %s:%d can not be registered in state %s, "
+							"it should be in state %s",
+							nodeHost, nodePort, currentState, goalState)));
+		}
 	}
 
 	/*
@@ -236,7 +326,7 @@ register_node(PG_FUNCTION_ARGS)
 		formation->number_sync_standbys == 0)
 	{
 		AutoFailoverNode *primaryNode =
-			GetPrimaryNodeInGroup(formationId, currentNodeState.groupId);
+			GetPrimaryNodeInGroup(formationId, currentNodeState->groupId);
 		List *standbyNodesList = AutoFailoverOtherNodesList(primaryNode);
 		int syncStandbyNodeCount = CountSyncStandbys(standbyNodesList);
 
@@ -280,63 +370,18 @@ register_node(PG_FUNCTION_ARGS)
 		}
 	}
 
+	ProceedGroupState(pgAutoFailoverNode);
+
 	AutoFailoverNodeState *assignedNodeState =
 		(AutoFailoverNodeState *) palloc0(sizeof(AutoFailoverNodeState));
+
 	assignedNodeState->nodeId = pgAutoFailoverNode->nodeId;
 	assignedNodeState->groupId = pgAutoFailoverNode->groupId;
 	assignedNodeState->replicationState = pgAutoFailoverNode->goalState;
 	assignedNodeState->candidatePriority = pgAutoFailoverNode->candidatePriority;
 	assignedNodeState->replicationQuorum = pgAutoFailoverNode->replicationQuorum;
 
-	/*
-	 * Check that the state selected by the monitor matches the state required
-	 * by the keeper, if any. REPLICATION_STATE_INITIAL means the monitor can
-	 * pick whatever is needed now, depending on the groupId.
-	 *
-	 * The keeper might be confronted to an already existing Postgres instance
-	 * that is running as a primary (not in recovery), and so asking to
-	 * register as a SINGLE. Better error out than ask the keeper to remove
-	 * some unknown data.
-	 */
-	if (currentNodeState.replicationState != REPLICATION_STATE_INITIAL)
-	{
-		if (currentNodeState.replicationState != pgAutoFailoverNode->goalState)
-		{
-			const char *currentState =
-				ReplicationStateGetName(currentNodeState.replicationState);
-			const char *goalState =
-				ReplicationStateGetName(pgAutoFailoverNode->goalState);
-
-			ereport(ERROR,
-					(errmsg("node %s:%d can not be registered in state %s, "
-							"it should be in state %s",
-							nodeHost, nodePort, currentState, goalState)));
-		}
-	}
-
-	ProceedGroupState(pgAutoFailoverNode);
-
-	memset(values, 0, sizeof(values));
-	memset(isNulls, false, sizeof(isNulls));
-
-	values[0] = Int32GetDatum(assignedNodeState->nodeId);
-	values[1] = Int32GetDatum(assignedNodeState->groupId);
-	values[2] = ObjectIdGetDatum(
-		ReplicationStateGetEnum(pgAutoFailoverNode->goalState));
-	values[3] = Int32GetDatum(assignedNodeState->candidatePriority);
-	values[4] = BoolGetDatum(assignedNodeState->replicationQuorum);
-	values[5] = CStringGetTextDatum(pgAutoFailoverNode->nodeName);
-
-	TypeFuncClass resultTypeClass = get_call_result_type(fcinfo, NULL, &resultDescriptor);
-	if (resultTypeClass != TYPEFUNC_COMPOSITE)
-	{
-		ereport(ERROR, (errmsg("return type must be a row type")));
-	}
-
-	HeapTuple resultTuple = heap_form_tuple(resultDescriptor, values, isNulls);
-	Datum resultDatum = HeapTupleGetDatum(resultTuple);
-
-	PG_RETURN_DATUM(resultDatum);
+	return assignedNodeState;
 }
 
 

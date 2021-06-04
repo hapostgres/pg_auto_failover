@@ -33,8 +33,27 @@ typedef struct AutoFailoverNodeState
 } AutoFailoverNodeState;
 
 
+typedef struct AutoFailoverNodeRegistration
+{
+	char *formationId;
+	AutoFailoverNodeState *currentNodeState;
+	char *nodeName;
+	char *nodeHost;
+	int32 nodePort;
+	char *expectedDBName;
+	uint64 sysIdentifier;
+	char *nodeKind;
+	char *nodeCluster;
+	AutoFailoverNode *pgAutoFailoverNode;
+} AutoFailoverNodeRegistration;
+
+
 /* public function declarations */
 extern bool ProceedGroupState(AutoFailoverNode *activeNode);
+
+/* node_active_protocol.c */
+extern AutoFailoverNodeState * RegisterNode(
+	AutoFailoverNodeRegistration *nodeRegistration);
 
 /* GUCs */
 extern int EnableSyncXlogThreshold;
