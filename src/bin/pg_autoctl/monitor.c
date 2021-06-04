@@ -4318,7 +4318,7 @@ prepare_connection_to_current_system_user(Monitor *source, Monitor *target)
 
 
 /*
- * monitor_register_archiver calls pgautofailer.register_archiver on the
+ * monitor_register_archiver calls pgautofailover.register_archiver on the
  * monitor.
  */
 bool
@@ -4360,8 +4360,7 @@ monitor_register_archiver(Monitor *monitor, char *name, char *host,
 
 
 /*
- * monitor_drop_archiver calls pgautofailer.remove_archiver on
- * the monitor.
+ * monitor_drop_archiver calls pgautofailover.remove_archiver on the monitor.
  */
 bool
 monitor_drop_archiver(Monitor *monitor, int archiverId)
