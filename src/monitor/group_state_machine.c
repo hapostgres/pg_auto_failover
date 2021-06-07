@@ -41,10 +41,12 @@
  */
 typedef struct CandidateList
 {
+	int numberSyncStandbys;
 	List *candidateNodesGroupList;
 	List *mostAdvancedNodesGroupList;
 	XLogRecPtr mostAdvancedReportedLSN;
 	int candidateCount;
+	int quorumCandidateCount;
 	int missingNodesCount;
 } CandidateList;
 
@@ -1221,6 +1223,11 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 	 * different candidateNodesGroupList in which every node has reported their
 	 * LSN position, allowing progress to be made.
 	 */
+	char *formationId = activeNode->formationId;
+	AutoFailoverFormation *formation = GetFormation(formationId);
+
+	candidateList.numberSyncStandbys = formation->number_sync_standbys;
+
 	BuildCandidateList(nodesGroupList, &candidateList);
 
 	/*
@@ -1263,8 +1270,6 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 	 * WAIT_PRIMARY state with all the writes blocked for lack of standby
 	 * nodes.
 	 */
-	char *formationId = activeNode->formationId;
-	AutoFailoverFormation *formation = GetFormation(formationId);
 	int minCandidates = formation->number_sync_standbys + 1;
 
 	/* no candidates is a hard pass */
@@ -1274,7 +1279,7 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 	}
 
 	/* not enough candidates to promote and then accept writes, pass */
-	else if (candidateList.candidateCount < minCandidates)
+	else if (candidateList.quorumCandidateCount < minCandidates)
 	{
 		char message[BUFSIZE] = { 0 };
 
@@ -1285,7 +1290,7 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 			"number_sync_standbys=%d in formation \"%s\", "
 			"activeNode is " NODE_FORMAT
 			" and reported state \"%s\"",
-			candidateList.candidateCount,
+			candidateList.quorumCandidateCount,
 			minCandidates,
 			formation->number_sync_standbys,
 			formation->formationId,
@@ -1459,10 +1464,19 @@ BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
 			continue;
 		}
 
-		/* grab healthy standby nodes which have reached REPORT_LSN */
+		/*
+		 * Grab healthy standby nodes which have reached REPORT_LSN.
+		 */
 		if (IsCurrentState(node, REPLICATION_STATE_REPORT_LSN))
 		{
 			candidateNodesGroupList = lappend(candidateNodesGroupList, node);
+
+			/* when number_sync_standbys is zero, quorum isn't discriminant */
+			if (node->replicationQuorum ||
+				candidateList->numberSyncStandbys == 0)
+			{
+				++(candidateList->quorumCandidateCount);
+			}
 
 			continue;
 		}
@@ -1576,7 +1590,10 @@ static AutoFailoverNode *
 SelectFailoverCandidateNode(CandidateList *candidateList,
 							AutoFailoverNode *primaryNode)
 {
-	/* build the list of failover candidate nodes, ordered by priority */
+	/*
+	 * Build the list of failover candidate nodes, ordered by priority.
+	 * Nodes with candidatePriority == 0 are skipped in GroupListCandidates.
+	 */
 	List *sortedCandidateNodesGroupList =
 		GroupListCandidates(candidateList->candidateNodesGroupList);
 
