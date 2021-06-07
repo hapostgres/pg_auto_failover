@@ -13,6 +13,8 @@
 
 #include <getopt.h>
 
+#include "archiver.h"
+#include "archiver_config.h"
 #include "keeper.h"
 #include "keeper_config.h"
 #include "monitor.h"
@@ -202,5 +204,20 @@ void check_hostname(const char *hostname);
 
 /* cli_get_set_properties.c */
 void cli_get_formation_settings(int argc, char **argv);
+
+/* cli_archiver.c */
+extern ArchiverConfig archiverOptions;
+extern CreateArchiverNodeOpts createArchiveNodeOptions;
+extern AddArchiverNodeOpts addArchiverNodeOptions;
+
+#define ARCHIVER_CLI_OPTIONS \
+	"  --directory       top-level directory where to handle archives\n" \
+	"  --monitor         pg_auto_failover Monitor Postgres URL\n" \
+	"  --hostname        hostname by which postgres is reachable\n" \
+	"  --name            name of this archiver\n"
+
+#define ARCHIVER_CLI_USAGE " --monitor --directory [ --hostname --name ] "
+
+int cli_create_archiver_getopts(int argc, char **argv);
 
 #endif  /* CLI_COMMON_H */

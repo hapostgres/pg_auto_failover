@@ -57,4 +57,5 @@ bool archiver_config_print_from_file(const char *pathname,
 									 bool outputContents,
 									 bool outputJSON);
 
+
 #endif /* ARCHIVER_CONFIG_H */

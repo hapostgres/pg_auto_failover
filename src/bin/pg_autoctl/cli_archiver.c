@@ -35,21 +35,23 @@
  *
  *   pg_autoctl create archiver
  *
- *   pg_autoctl archive list nodes
- *   pg_autoctl archive add node --name
- *   pg_autoctl archive drop node --name
+ *   pg_autoctl archive create node --formation --group
+ *   pg_autoctl archive drop node --formation --group
  *
  *   # policy
  *   pg_autoctl archive get policy --apply-delay --backup-interval ...
  *   pg_autoctl archive set policy --apply-delay --backup-interval ...
  *
- *   pg_autoctl archive list schedule
- *   pg_autoctl archive list backups --node ...
- *   pg_autoctl archive list wal --node
- *   pg_autoctl archive list timelines --node
+ *   pg_autoctl archive show nodes
+ *   pg_autoctl archive show schedule
+ *   pg_autoctl archive show backups --formation --group
+ *   pg_autoctl archive show wal --formation --group
+ *   pg_autoctl archive show timelines --formation --group
  *
- *   pg_autoctl archive create backup --node ...
- *   pg_autoctl archive drop backup --node ...
+ *   pg_autoctl archive create backup --formation --group
+ *   pg_autoctl archive drop backup --formation --group
+ *
+ *   pg_autoctl archive wal %p
  */
 
 ArchiverConfig archiverOptions = { 0 };
@@ -58,8 +60,6 @@ AddArchiverNodeOpts addArchiverNodeOptions = { 0 };
 
 static bool dropAndDestroy = false;
 
-static int cli_create_archiver_getopts(int argc, char **argv);
-static bool cli_create_archiver_config(Archiver *archiver);
 static void cli_create_archiver(int argc, char **argv);
 
 static int cli_drop_archiver_getopts(int argc, char **argv);
@@ -68,7 +68,7 @@ static void cli_drop_archiver(int argc, char **argv);
 static int cli_archiver_node_getopts(int argc, char **argv);
 static int cli_archiver_add_node_getopts(int argc, char **argv);
 
-static void cli_archiver_list_nodes(int argc, char **argv);
+static void cli_archiver_show_nodes(int argc, char **argv);
 static void cli_archiver_add_node(int argc, char **argv);
 static void cli_archiver_drop_node(int argc, char **argv);
 
@@ -76,10 +76,10 @@ static void cli_archiver_get_policy(int argc, char **argv);
 static void cli_archiver_set_policy(int argc, char **argv);
 
 /*
- * static void cli_archiver_list_schedule(int argc, char **argv);
- * static void cli_archiver_list_backups(int argc, char **argv);
- * static void cli_archiver_list_wal(int argc, char **argv);
- * static void cli_archiver_list_timelines(int argc, char **argv);
+ * static void cli_archiver_show_schedule(int argc, char **argv);
+ * static void cli_archiver_show_backups(int argc, char **argv);
+ * static void cli_archiver_show_wal(int argc, char **argv);
+ * static void cli_archiver_show_timelines(int argc, char **argv);
  *
  * static void cli_archiver_create_backup(int argc, char **argv);
  * static void cli_archiver_drop_backup(int argc, char **argv);
@@ -109,14 +109,14 @@ CommandLine drop_archiver_command =
 		cli_drop_archiver_getopts,
 		cli_drop_archiver);
 
-CommandLine archive_list_nodes_command =
+CommandLine archive_show_nodes_command =
 	make_command(
 		"nodes",
 		"List archiver nodes managed by this pg_auto_failover archiver",
 		" [ --name ]",
 		"  --name            archiver node name\n",
 		cli_archiver_node_getopts,
-		cli_archiver_list_nodes);
+		cli_archiver_show_nodes);
 
 CommandLine archive_add_node_command =
 	make_command(
@@ -157,15 +157,15 @@ CommandLine archive_set_policy_command =
 		cli_archiver_set_policy);
 
 
-CommandLine *archiver_list[] = {
-	&archive_list_nodes_command,
+CommandLine *archiver_show[] = {
+	&archive_show_nodes_command,
 	NULL
 };
 
-CommandLine archiver_list_commands =
+CommandLine archiver_show_commands =
 	make_command_set("list",
 					 "list archiver nodes/schedule/resources",
-					 NULL, NULL, NULL, archiver_list);
+					 NULL, NULL, NULL, archiver_show);
 
 CommandLine *archiver_add[] = {
 	&archive_add_node_command,
@@ -230,7 +230,7 @@ CommandLine archiver_set_commands =
 
 CommandLine *archiver[] = {
 	&archiver_add_commands,
-	&archiver_list_commands,
+	&archiver_show_commands,
 	&archiver_get_commands,
 	&archiver_set_commands,
 	NULL
@@ -465,159 +465,12 @@ cli_archiver_add_node_getopts(int argc, char **argv)
 
 
 /*
- * cli_create_archiver_getopts parses the command line options necessary to
- * initialize a pg_auto_failover archiver node.
- */
-static int
-cli_create_archiver_getopts(int argc, char **argv)
-{
-	ArchiverConfig options = { 0 };
-	int c, option_index = 0, errors = 0;
-	int verboseCount = 0;
-
-	static struct option long_options[] = {
-		{ "directory", required_argument, NULL, 'D' },
-		{ "monitor", required_argument, NULL, 'm' },
-		{ "name", required_argument, NULL, 'a' },
-		{ "hostname", required_argument, NULL, 'n' },
-		{ NULL, 0, NULL, 0 }
-	};
-
-	optind = 0;
-
-	while ((c = getopt_long(argc, argv, "D:m:a:n:Vvqh",
-							long_options, &option_index)) != -1)
-	{
-		switch (c)
-		{
-			case 'D':
-			{
-				strlcpy(options.directory, optarg, MAXPGPATH);
-				log_trace("--directory %s", options.directory);
-				break;
-			}
-
-			case 'm':
-			{
-				if (!validate_connection_string(optarg))
-				{
-					log_fatal("Failed to parse --monitor connection string, "
-							  "see above for details.");
-					exit(EXIT_CODE_BAD_ARGS);
-				}
-				strlcpy(options.monitor_pguri, optarg, MAXCONNINFO);
-				log_trace("--monitor %s", options.monitor_pguri);
-				break;
-			}
-
-			case 'a':
-			{
-				strlcpy(options.name, optarg, _POSIX_HOST_NAME_MAX);
-				log_trace("--name %s", options.name);
-				break;
-			}
-
-			case 'n':
-			{
-				strlcpy(options.hostname, optarg, _POSIX_HOST_NAME_MAX);
-				log_trace("--hostname %s", options.hostname);
-				break;
-			}
-
-			case 'V':
-			{
-				/* keeper_cli_print_version prints version and exits. */
-				keeper_cli_print_version(argc, argv);
-				break;
-			}
-
-			case 'v':
-			{
-				++verboseCount;
-				switch (verboseCount)
-				{
-					case 1:
-					{
-						log_set_level(LOG_INFO);
-						break;
-					}
-
-					case 2:
-					{
-						log_set_level(LOG_DEBUG);
-						break;
-					}
-
-					default:
-					{
-						log_set_level(LOG_TRACE);
-						break;
-					}
-				}
-				break;
-			}
-
-			case 'q':
-			{
-				log_set_level(LOG_ERROR);
-				break;
-			}
-
-			case 'h':
-			{
-				commandline_help(stderr);
-				exit(EXIT_CODE_QUIT);
-				break;
-			}
-
-			default:
-			{
-				/* getopt_long already wrote an error message */
-				commandline_help(stderr);
-				exit(EXIT_CODE_BAD_ARGS);
-				break;
-			}
-		}
-	}
-
-	if (IS_EMPTY_STRING_BUFFER(options.directory))
-	{
-		log_fatal("The option --directory is mandatory");
-		++errors;
-	}
-
-	if (IS_EMPTY_STRING_BUFFER(options.monitor_pguri))
-	{
-		log_fatal("The option --monitor is mandatory");
-		++errors;
-	}
-
-	if (errors > 0)
-	{
-		commandline_help(stderr);
-		exit(EXIT_CODE_BAD_ARGS);
-	}
-
-	if (!archiver_config_set_pathnames_from_directory(&options))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_ARGS);
-	}
-
-	/* publish our option parsing in the global variable */
-	archiverOptions = options;
-
-	return optind;
-}
-
-
-/*
  * cli_create_archiver_config takes care of the archiver configuration, either
  * creating it from scratch or merging the pg_autoctl create archiver command
  * line arguments and options with the pre-existing configuration file (for
  * when people change their mind or fix an error in the previous command).
  */
-static bool
+bool
 cli_create_archiver_config(Archiver *archiver)
 {
 	ArchiverConfig *config = &(archiver->config);
@@ -879,7 +732,7 @@ cli_drop_archiver(int argc, char **argv)
 
 
 static void
-cli_archiver_list_nodes(int argc, char **argv)
+cli_archiver_show_nodes(int argc, char **argv)
 {
 	log_fatal("Not yet implemented");
 	exit(EXIT_CODE_INTERNAL_ERROR);
@@ -920,7 +773,7 @@ cli_archiver_set_policy(int argc, char **argv)
 
 /*
  * static void
- * cli_archiver_list_schedule(int argc, char **argv)
+ * cli_archiver_show_schedule(int argc, char **argv)
  * {
  *  log_fatal("Not yet implemented");
  *  exit(EXIT_CODE_INTERNAL_ERROR);
@@ -928,7 +781,7 @@ cli_archiver_set_policy(int argc, char **argv)
  *
  *
  * static void
- * cli_archiver_list_backups(int argc, char **argv)
+ * cli_archiver_show_backups(int argc, char **argv)
  * {
  *  log_fatal("Not yet implemented");
  *  exit(EXIT_CODE_INTERNAL_ERROR);
@@ -936,7 +789,7 @@ cli_archiver_set_policy(int argc, char **argv)
  *
  *
  * static void
- * cli_archiver_list_wal(int argc, char **argv)
+ * cli_archiver_show_wal(int argc, char **argv)
  * {
  *  log_fatal("Not yet implemented");
  *  exit(EXIT_CODE_INTERNAL_ERROR);
@@ -944,7 +797,7 @@ cli_archiver_set_policy(int argc, char **argv)
  *
  *
  * static void
- * cli_archiver_list_timelines(int argc, char **argv)
+ * cli_archiver_show_timelines(int argc, char **argv)
  * {
  *  log_fatal("Not yet implemented");
  *  exit(EXIT_CODE_INTERNAL_ERROR);

@@ -25,6 +25,8 @@
 #include "parson.h"
 #include "postgres_fe.h"
 
+#include "archiver.h"
+#include "archiver_config.h"
 #include "cli_common.h"
 #include "commandline.h"
 #include "defaults.h"
@@ -37,12 +39,15 @@
 #include "pgsetup.h"
 #include "pgsql.h"
 #include "state.h"
+#include "string_utils.h"
 
 static void cli_do_monitor_get_primary_node(int argc, char **argv);
 static void cli_do_monitor_get_other_nodes(int argc, char **argv);
 static void cli_do_monitor_get_candidate_count(int argc, char **argv);
 static void cli_do_monitor_get_coordinator(int argc, char **argv);
 static void cli_do_monitor_register_node(int argc, char **argv);
+static void cli_do_monitor_register_archiver(int argc, char **argv);
+static void cli_do_monitor_register_archiver_node(int argc, char **argv);
 static void cli_do_monitor_node_active(int argc, char **argv);
 static void cli_do_monitor_version(int argc, char **argv);
 static void cli_do_monitor_parse_notification(int argc, char **argv);
@@ -93,13 +98,41 @@ static CommandLine monitor_get_command =
 					 "Get information from the monitor", NULL, NULL,
 					 NULL, monitor_get_commands);
 
-static CommandLine monitor_register_command =
-	make_command("register",
+static CommandLine monitor_register_node_command =
+	make_command("node",
 				 "Register the current node with the monitor",
 				 CLI_PGDATA_USAGE "<initial state>",
 				 CLI_PGDATA_OPTION,
 				 cli_getopt_pgdata,
 				 cli_do_monitor_register_node);
+
+static CommandLine monitor_register_archiver_command =
+	make_command("archiver",
+				 "Register an archiver with the monitor",
+				 ARCHIVER_CLI_USAGE,
+				 ARCHIVER_CLI_OPTIONS,
+				 cli_create_archiver_getopts,
+				 cli_do_monitor_register_archiver);
+
+static CommandLine monitor_register_archiver_node_command =
+	make_command("archiver-node",
+				 "Register an archiver node with the monitor",
+				 ARCHIVER_CLI_USAGE " <archiverId> <formation> <group>",
+				 ARCHIVER_CLI_OPTIONS,
+				 cli_create_archiver_getopts,
+				 cli_do_monitor_register_archiver_node);
+
+static CommandLine *monitor_register_commands[] = {
+	&monitor_register_node_command,
+	&monitor_register_archiver_command,
+	&monitor_register_archiver_node_command,
+	NULL
+};
+
+static CommandLine monitor_register_command =
+	make_command_set("register",
+					 "Register a node to the monitor", NULL, NULL,
+					 NULL, monitor_register_commands);
 
 static CommandLine monitor_node_active_command =
 	make_command("active",
@@ -523,6 +556,107 @@ cli_do_monitor_register_node(int argc, char **argv)
 				keeper.state.current_node_id,
 				keeper.state.current_group,
 				NodeStateToString(keeper.state.assigned_role));
+	}
+}
+
+
+/*
+ * cli_do_monitor_register_archiver registers an archiver with the monitor.
+ */
+static void
+cli_do_monitor_register_archiver(int argc, char **argv)
+{
+	Archiver archiver = { 0 };
+
+	archiver.config = archiverOptions;
+
+	if (!cli_create_archiver_config(&archiver))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (!archiver_register_and_init(&archiver))
+	{
+		exit(EXIT_CODE_MONITOR);
+	}
+}
+
+
+/*
+ * cli_do_monitor_register_archiver_node registers an archiver node with the
+ * monitor, for an existing formation and group, and with an existing archiver.
+ */
+static void
+cli_do_monitor_register_archiver_node(int argc, char **argv)
+{
+	Archiver archiver = { 0 };
+	ArchiverConfig *config = &(archiver.config);
+
+	archiver.config = archiverOptions;
+
+	if (argc < 3)
+	{
+		commandline_print_usage(&monitor_register_archiver_node_command, stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	int archiverId = -1;
+	char formation[NAMEDATALEN] = { 0 };
+	int groupId = -1;
+
+	if (!stringToInt(argv[0], &archiverId))
+	{
+		log_fatal("Failed to parse archiverId \"%s\"", argv[0]);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	strlcpy(formation, argv[1], sizeof(formation));
+
+	if (strcmp(formation, "monitor") != 0)
+	{
+		log_error("Formation \"%s\" is the only supported one at the moment",
+				  "monitor");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (!stringToInt(argv[2], &groupId))
+	{
+		log_fatal("Failed to parse archiverId \"%s\"", argv[2]);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	/*
+	 * Now that we have parsed our three arguments, register an archiver node.
+	 */
+	if (!archiver_config_read_file(config))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (!archiver_load_state(&archiver))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_STATE);
+	}
+
+	if (!archiver_monitor_init(&archiver))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_MONITOR);
+	}
+
+	if (!archiver_node_register_and_init(&archiver,
+										 formation,
+										 groupId,
+										 "pg_auto_failover",
+										 pgsetup_get_pgport(),
+										 NODE_KIND_STANDALONE,
+										 false))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_MONITOR);
 	}
 }
 

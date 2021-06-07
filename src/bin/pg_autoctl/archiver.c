@@ -20,9 +20,33 @@
 #include "parsing.h"
 #include "string_utils.h"
 
+/*
+ * Process Tree:
+ *
+ * pg_autoctl run (archiver)
+ *   pg_autoctl do service archiver-node formation groupid
+ *     pg_autoctl do service node-active
+ *     pg_autoctl do service archiver-schedule formation groupid
+ *       pg_autoctl archive create backup
+ *       pg_autoctl archive prune
+ *     pg_autoctl do service postgres
+ *   ...
+ *   pg_autoctl do service archiver-node formation groupid
+ *   ...
+ *
+ * archive_command = 'pg_autoctl archive wal %p'
+ *
+ * Directories: (make it easy to rsync/rclone etc)
+ *
+ *  topdir = /var/lib/postgresql/archives
+ *
+ *   PGDATA   topdir/node/${formation}/${groupid}
+ *   PG_WAL   topdir/pg_wal/${formation}/${groupid}
+ *   BACKUP   topdir/backup/${formation}/${groupid}
+ */
 
 /*
- * archiver_monitor_int initialises a connection to the monitor.
+ * archiver_monitor_init initialises a connection to the monitor.
  */
 bool
 archiver_monitor_init(Archiver *archiver)
@@ -141,4 +165,49 @@ rollback:
 	pgsql_finish(&(monitor->pgsql));
 
 	return false;
+}
+
+
+/*
+ * archiver_node_register_and_init registers a archive (standby) node for the
+ * monitor. Every instance of an archiver is automatically activated for the
+ * monitor itself, so that we have copies around.
+ */
+bool
+archiver_node_register_and_init(Archiver *archiver,
+								char *formation,
+								int groupId,
+								char *dbname,
+								int pgport,
+								PgInstanceKind kind,
+								bool replicationQuorum)
+{
+	Monitor *monitor = &(archiver->monitor);
+
+	bool mayRetry = false;
+	MonitorAssignedState assignedState = { 0 };
+
+	if (!monitor_register_archiver_node(monitor,
+										archiver->state.archiverId,
+										formation,
+										"", /* the monitor assigns a name */
+										archiver->config.hostname,
+										pgport,
+										0, /* we don't have a sysIdentifier */
+										dbname,
+										-1, /* desiredNodeId */
+										groupId,
+										INIT_STATE,
+										kind,
+										replicationQuorum,
+										&mayRetry,
+										&assignedState))
+	{
+		log_error("Failed to register an archiver node for archiver %d "
+				  "in formation \"%s\" and group %d, see above for details.",
+				  archiver->state.archiverId, formation, groupId);
+		return false;
+	}
+
+	return true;
 }

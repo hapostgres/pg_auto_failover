@@ -220,4 +220,18 @@ bool monitor_register_archiver(Monitor *monitor, char *name, char *host,
 							   NodeAddress *node);
 bool monitor_drop_archiver(Monitor *monitor, int archiverId);
 
+bool monitor_register_archiver_node(Monitor *monitor,
+									int archiverId,
+									char *formation,
+									char *name, char *host, int port,
+									uint64_t system_identifier,
+									char *dbname,
+									int desiredNodeId,
+									int desiredGroupId,
+									NodeState initialState,
+									PgInstanceKind kind,
+									bool quorum,
+									bool *mayRetry,
+									MonitorAssignedState *assignedState);
+
 #endif /* MONITOR_H */

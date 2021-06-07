@@ -214,7 +214,7 @@ CREATE TABLE pgautofailover.archiver_policy
 
 --
 -- A pg_auto_failover archiver handles N formation/groups, and for each of
--- them it run an archiver_node, which is a full pg_auto_failover node
+-- them it runs an archiver_node, which is a full pg_auto_failover node
 -- (can't be a candidate for failover though). The archiver_node table is an
 -- association table between the archiver and the node.
 --
@@ -400,6 +400,38 @@ comment on function pgautofailover.remove_archiver(int)
         is 'remove a node from the monitor';
 
 grant execute on function pgautofailover.remove_archiver(int)
+   to autoctl_node;
+
+
+CREATE FUNCTION pgautofailover.register_archiver_node
+ (
+    IN archiver_id          int,
+    IN formation_id         text,
+    IN node_host            text,
+    IN node_port            int,
+    IN dbname               name,
+    IN node_name            text default '',
+    IN sysidentifier        bigint default 0,
+    IN desired_node_id      int default -1,
+    IN desired_group_id     int default 0,
+    IN initial_group_role   pgautofailover.replication_state default 'init',
+    IN node_kind            text default 'standalone',
+    IN replication_quorum	bool default false,
+   OUT assigned_node_id     int,
+   OUT assigned_group_id    int,
+   OUT assigned_group_state pgautofailover.replication_state,
+   OUT assigned_candidate_priority 	int,
+   OUT assigned_replication_quorum  bool,
+   OUT assigned_node_name   text
+ )
+RETURNS record LANGUAGE C STRICT SECURITY DEFINER
+AS 'MODULE_PATHNAME', $$register_archiver_node$$;
+
+grant execute on function
+      pgautofailover.register_archiver_node(int,
+                                            text,text,int,name,text,bigint,int,int,
+                                            pgautofailover.replication_state,text,
+                                            bool)
    to autoctl_node;
 
 

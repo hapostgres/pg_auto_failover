@@ -14,6 +14,7 @@
 
 #include "commandline.h"
 
+#include "archiver_config.h"
 #include "cli_common.h"
 #include "cli_root.h"
 #include "commandline.h"
@@ -2291,4 +2292,151 @@ cli_set_groupId(Monitor *monitor, KeeperConfig *kconfig)
 			exit(EXIT_CODE_BAD_ARGS);
 		}
 	}
+}
+
+
+/*
+ * cli_create_archiver_getopts parses the command line options necessary to
+ * initialize a pg_auto_failover archiver node.
+ */
+int
+cli_create_archiver_getopts(int argc, char **argv)
+{
+	ArchiverConfig options = { 0 };
+	int c, option_index = 0, errors = 0;
+	int verboseCount = 0;
+
+	static struct option long_options[] = {
+		{ "directory", required_argument, NULL, 'D' },
+		{ "monitor", required_argument, NULL, 'm' },
+		{ "name", required_argument, NULL, 'a' },
+		{ "hostname", required_argument, NULL, 'n' },
+		{ NULL, 0, NULL, 0 }
+	};
+
+	optind = 0;
+
+	while ((c = getopt_long(argc, argv, "D:m:a:n:Vvqh",
+							long_options, &option_index)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(options.directory, optarg, MAXPGPATH);
+				log_trace("--directory %s", options.directory);
+				break;
+			}
+
+			case 'm':
+			{
+				if (!validate_connection_string(optarg))
+				{
+					log_fatal("Failed to parse --monitor connection string, "
+							  "see above for details.");
+					exit(EXIT_CODE_BAD_ARGS);
+				}
+				strlcpy(options.monitor_pguri, optarg, MAXCONNINFO);
+				log_trace("--monitor %s", options.monitor_pguri);
+				break;
+			}
+
+			case 'a':
+			{
+				strlcpy(options.name, optarg, _POSIX_HOST_NAME_MAX);
+				log_trace("--name %s", options.name);
+				break;
+			}
+
+			case 'n':
+			{
+				strlcpy(options.hostname, optarg, _POSIX_HOST_NAME_MAX);
+				log_trace("--hostname %s", options.hostname);
+				break;
+			}
+
+			case 'V':
+			{
+				/* keeper_cli_print_version prints version and exits. */
+				keeper_cli_print_version(argc, argv);
+				break;
+			}
+
+			case 'v':
+			{
+				++verboseCount;
+				switch (verboseCount)
+				{
+					case 1:
+					{
+						log_set_level(LOG_INFO);
+						break;
+					}
+
+					case 2:
+					{
+						log_set_level(LOG_DEBUG);
+						break;
+					}
+
+					default:
+					{
+						log_set_level(LOG_TRACE);
+						break;
+					}
+				}
+				break;
+			}
+
+			case 'q':
+			{
+				log_set_level(LOG_ERROR);
+				break;
+			}
+
+			case 'h':
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_QUIT);
+				break;
+			}
+
+			default:
+			{
+				/* getopt_long already wrote an error message */
+				commandline_help(stderr);
+				exit(EXIT_CODE_BAD_ARGS);
+				break;
+			}
+		}
+	}
+
+	if (IS_EMPTY_STRING_BUFFER(options.directory))
+	{
+		log_fatal("The option --directory is mandatory");
+		++errors;
+	}
+
+	if (IS_EMPTY_STRING_BUFFER(options.monitor_pguri))
+	{
+		log_fatal("The option --monitor is mandatory");
+		++errors;
+	}
+
+	if (errors > 0)
+	{
+		commandline_help(stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (!archiver_config_set_pathnames_from_directory(&options))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	/* publish our option parsing in the global variable */
+	archiverOptions = options;
+
+	return optind;
 }

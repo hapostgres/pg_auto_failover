@@ -72,11 +72,20 @@ typedef struct AddArchiverNodeOpts
 
 bool archiver_monitor_init(Archiver *archiver);
 bool archiver_register_and_init(Archiver *archiver);
+bool archiver_node_register_and_init(Archiver *archiver,
+									 char *formation,
+									 int groupId,
+									 char *dbname,
+									 int pgport,
+									 PgInstanceKind kind,
+									 bool replicationQuorum);
 
 /* src/bin/pg_autoctl/archiver_state.c */
 bool archiver_load_state(Archiver *archiver);
 bool archiver_store_state(Archiver *archiver);
 bool archiver_update_state(Archiver *archiver, int archiverId);
 
+/* cli_archiver.c */
+bool cli_create_archiver_config(Archiver *archiver);
 
 #endif /* ARCHIVER_H */

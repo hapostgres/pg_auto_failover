@@ -294,26 +294,36 @@ ProbeConfigurationFileRole(const char *filename)
 
 	log_debug("ProbeConfigurationFileRole: %s", config.role);
 
-	if (strcmp(config.role, MONITOR_ROLE) == 0)
+	return NodeRoleFromString(config.role);
+}
+
+
+/*
+ * NodeRoleFromString parses a node role (such as "keeper") into our enum.
+ */
+pgAutoCtlNodeRole
+NodeRoleFromString(const char *role)
+{
+	if (strcmp(role, MONITOR_ROLE) == 0)
 	{
 		return PG_AUTOCTL_ROLE_MONITOR;
 	}
-	else if (strcmp(config.role, KEEPER_ROLE) == 0)
+	else if (strcmp(role, KEEPER_ROLE) == 0)
 	{
 		return PG_AUTOCTL_ROLE_KEEPER;
 	}
-	else if (strcmp(config.role, ARCHIVER_ROLE) == 0)
+	else if (strcmp(role, ARCHIVER_ROLE) == 0)
 	{
 		return PG_AUTOCTL_ROLE_ARCHIVER;
 	}
-	else if (strcmp(config.role, NODE_ARCHIVER_ROLE) == 0)
+	else if (strcmp(role, ARCHIVER_NODE_ROLE) == 0)
 	{
 		return PG_AUTOCTL_ROLE_ARCHIVER_NODE;
 	}
 	else
 	{
 		log_fatal("Failed to recognize configuration file setting for "
-				  "pg_autoctl.role: \"%s\"", config.role);
+				  "pg_autoctl.role: \"%s\"", role);
 
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
