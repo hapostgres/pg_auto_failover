@@ -292,18 +292,6 @@ def test_014_004_restart_node2():
 #   <up>
 #   secondary    primary      secondary
 #
-#   ~~~
-#
-#   secondary    primary      secondary
-#                <down>
-#   wait_primary demoted      secondary
-#   <down>
-#   demoted      demoted      report_lsn
-#   <up>
-#   wait_primary demoted      secondary
-#                <up>
-#   primary      secondary    secondary
-#
 def test_015_001_fail_primary_node1():
     node1.fail()
 
