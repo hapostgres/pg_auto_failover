@@ -212,21 +212,29 @@ SetNodeHealthState(int nodeId,
 		spiStatus = SPI_execute(query.data, false, 0);
 		Assert(spiStatus == SPI_OK_UPDATE_RETURNING);
 
-		if (healthState != previousHealthState)
+		/*
+		 * We should have 0 or 1 row impacted, because of pkey on nodeid. We
+		 * might have updated zero rows when a node is concurrently being
+		 * DELETEd, because of the default REPETEABLE READ isolation level.
+		 */
+		if (SPI_processed == 1)
 		{
-			HeapTuple heapTuple = SPI_tuptable->vals[0];
-			AutoFailoverNode *pgAutoFailoverNode =
-				TupleToAutoFailoverNode(SPI_tuptable->tupdesc, heapTuple);
+			if (healthState != previousHealthState)
+			{
+				HeapTuple heapTuple = SPI_tuptable->vals[0];
+				AutoFailoverNode *pgAutoFailoverNode =
+					TupleToAutoFailoverNode(SPI_tuptable->tupdesc, heapTuple);
 
-			char message[BUFSIZE] = { 0 };
+				char message[BUFSIZE] = { 0 };
 
-			LogAndNotifyMessage(message, sizeof(message),
-								"Node " NODE_FORMAT
-								" is marked as %s by the monitor",
-								NODE_FORMAT_ARGS(pgAutoFailoverNode),
-								healthState == 0 ? "unhealthy" : "healthy");
+				LogAndNotifyMessage(message, sizeof(message),
+									"Node " NODE_FORMAT
+									" is marked as %s by the monitor",
+									NODE_FORMAT_ARGS(pgAutoFailoverNode),
+									healthState == 0 ? "unhealthy" : "healthy");
 
-			NotifyStateChange(pgAutoFailoverNode, message);
+				NotifyStateChange(pgAutoFailoverNode, message);
+			}
 		}
 	}
 	else
