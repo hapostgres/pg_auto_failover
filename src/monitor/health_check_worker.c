@@ -218,7 +218,7 @@ InitializeHealthCheckWorker(void)
 void
 HealthCheckWorkerLauncherMain(Datum arg)
 {
-	MemoryContext originalContext;
+	MemoryContext originalContext = CurrentMemoryContext;
 
 	/* Establish signal handlers before unblocking signals. */
 	pqsignal(SIGHUP, pg_auto_failover_monitor_sighup);
