@@ -1051,16 +1051,6 @@ cli_drop_node_getopts(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata) &&
-		(!IS_EMPTY_STRING_BUFFER(options.name) ||
-		 !IS_EMPTY_STRING_BUFFER(options.hostname)))
-	{
-		log_fatal("pg_autoctl drop node target is specified with --pgdata, "
-				  "options [ --formation --name ] or [ --hostname --pgport ] "
-				  "can not be used");
-		exit(EXIT_CODE_BAD_ARGS);
-	}
-
 	/* use the "default" formation when not given */
 	if (IS_EMPTY_STRING_BUFFER(options.formation))
 	{
@@ -1113,7 +1103,19 @@ cli_drop_node(int argc, char **argv)
 		if (!IS_EMPTY_STRING_BUFFER(config.hostname) ||
 			config.pgSetup.pgport != 0)
 		{
-			log_fatal("Only dropping the local node is supported");
+			log_fatal("Only dropping the local node is supported, "
+					  "[ --hostname --pgport ] are not supported "
+					  "when --pgdata is used.");
+			log_info("To drop another node, please use this command "
+					 "from the monitor itself.");
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		if (!IS_EMPTY_STRING_BUFFER(config.name))
+		{
+			log_fatal("Only dropping the local node is supported"
+					  "[ --formation --name ] are not supported "
+					  "when --pgdata is used.");
 			log_info("To drop another node, please use this command "
 					 "from the monitor itself.");
 			exit(EXIT_CODE_BAD_ARGS);
