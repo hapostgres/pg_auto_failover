@@ -1285,10 +1285,10 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Failover still in progress with %d candidates having reported "
-			"their LSN: %d nodes are required in the quorum to satisfy "
-			"number_sync_standbys=%d in formation \"%s\", "
-			"activeNode is " NODE_FORMAT
+			"Failover still in progress with %d candidates that participate "
+			"in the quorum having reported their LSN: %d nodes are required "
+			"in the quorum to satisfy number_sync_standbys=%d in "
+			"formation \"%s\", activeNode is " NODE_FORMAT
 			" and reported state \"%s\"",
 			candidateList.quorumCandidateCount,
 			minCandidates,
