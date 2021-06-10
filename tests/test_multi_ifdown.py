@@ -44,6 +44,7 @@ def test_002_add_standby():
 
     assert node2.wait_until_pg_is_running()
     assert node2.wait_until_state(target_state="secondary")
+    assert node1.wait_until_state(target_state="primary")
 
     assert node1.has_needed_replication_slots()
     assert node2.has_needed_replication_slots()
