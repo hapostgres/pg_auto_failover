@@ -212,3 +212,49 @@ def test_005_004_bring_up_last_failed_primary():
     assert node1.wait_until_state(target_state="secondary")
     assert node3.get_state().assigned == "primary"
     assert node2.get_state().assigned == "secondary"
+
+
+#
+# In this test series , we have
+#
+#   node1         node2        node3
+#   secondary     secondary    primary
+#                              <down>
+#   primary       secondary    demoted
+#   <down>
+#                              <up>
+#   demoted       primary      secondary
+#   <up>
+#   secondary     primary      secondary
+#
+def test_006_001_fail_primary():
+    assert node3.get_state().assigned == "primary"
+    node3.fail()
+
+    print()
+    assert node3.wait_until_assigned_state(
+        target_state="demote_timeout", timeout=120
+    )
+    assert node3.wait_until_assigned_state(target_state="demoted", timeout=120)
+    assert node1.wait_until_assigned_state(target_state="primary", timeout=120)
+    assert node1.wait_until_state(target_state="primary", timeout=120)
+    assert node2.wait_until_state(target_state="secondary", timeout=120)
+
+
+def test_006_002_fail_new_primary():
+    assert node1.get_state().assigned == "primary"
+    node1.fail()
+    node3.run()
+
+    print()
+    assert node2.wait_until_state(target_state="primary", timeout=120)
+    assert node3.wait_until_state(target_state="secondary", timeout=120)
+
+
+def test_006_003_bringup_last_failed_primary():
+    node1.run()
+
+    print()
+    assert node1.wait_until_state(target_state="secondary", timeout=120)
+    assert node2.wait_until_state(target_state="primary", timeout=120)
+    assert node3.wait_until_state(target_state="secondary", timeout=120)

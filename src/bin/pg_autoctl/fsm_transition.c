@@ -983,10 +983,10 @@ fsm_rewind_or_init(Keeper *keeper)
 		log_error("Failed to connect to the primary node %d \"%s\" (%s:%d) "
 				  "with a replication connection string. "
 				  "See above for details",
-				  primaryNode->nodeId,
-				  primaryNode->name,
-				  primaryNode->host,
-				  primaryNode->port);
+				  upstream->primaryNode.nodeId,
+				  upstream->primaryNode.name,
+				  upstream->primaryNode.host,
+				  upstream->primaryNode.port);
 		return false;
 	}
 
