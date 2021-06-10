@@ -1113,7 +1113,7 @@ cli_drop_node(int argc, char **argv)
 
 		if (!IS_EMPTY_STRING_BUFFER(config.name))
 		{
-			log_fatal("Only dropping the local node is supported"
+			log_fatal("Only dropping the local node is supported, "
 					  "[ --formation --name ] are not supported "
 					  "when --pgdata is used.");
 			log_info("To drop another node, please use this command "
