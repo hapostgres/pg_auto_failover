@@ -57,9 +57,7 @@ static int cli_drop_node_getopts(int argc, char **argv);
 static void cli_drop_node(int argc, char **argv);
 static void cli_drop_monitor(int argc, char **argv);
 
-static void cli_drop_node_from_monitor(KeeperConfig *config,
-									   const char *hostname,
-									   int port);
+static void cli_drop_node_from_monitor(KeeperConfig *config);
 
 static void check_hostname(const char *hostname);
 
@@ -114,15 +112,20 @@ CommandLine drop_monitor_command =
 				 cli_drop_monitor);
 
 CommandLine drop_node_command =
-	make_command("node",
-				 "Drop a node from the pg_auto_failover monitor",
-				 "[ --pgdata --destroy --hostname --pgport ]",
-				 "  --pgdata      path to data directory\n"
-				 "  --destroy     also destroy Postgres database\n"
-				 "  --hostname    hostname to remove from the monitor\n"
-				 "  --pgport      Postgres port of the node to remove",
-				 cli_drop_node_getopts,
-				 cli_drop_node);
+	make_command(
+		"node",
+		"Drop a node from the pg_auto_failover monitor",
+		"[ [ [ --pgdata ] [ --destroy ] ] | "
+		"[ --monitor [ [ --hostname --pgport ] | [ --formation --name ] ] ] ] ",
+		"  --pgdata      path to data directory\n"
+		"  --monitor     pg_auto_failover Monitor Postgres URL\n"
+		"  --formation   pg_auto_failover formation\n"
+		"  --name        drop the node with the given node name\n"
+		"  --hostname    drop the node with given hostname and pgport\n"
+		"  --pgport      drop the node with given hostname and pgport\n"
+		"  --destroy     also destroy Postgres database\n",
+		cli_drop_node_getopts,
+		cli_drop_node);
 
 /*
  * cli_create_config manages the whole set of configuration parameters that
@@ -860,9 +863,12 @@ cli_drop_node_getopts(int argc, char **argv)
 
 	static struct option long_options[] = {
 		{ "pgdata", required_argument, NULL, 'D' },
+		{ "monitor", required_argument, NULL, 'm' },
 		{ "destroy", no_argument, NULL, 'd' },
 		{ "hostname", required_argument, NULL, 'n' },
 		{ "pgport", required_argument, NULL, 'p' },
+		{ "formation", required_argument, NULL, 'f' },
+		{ "name", required_argument, NULL, 'a' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
@@ -881,6 +887,19 @@ cli_drop_node_getopts(int argc, char **argv)
 			{
 				strlcpy(options.pgSetup.pgdata, optarg, MAXPGPATH);
 				log_trace("--pgdata %s", options.pgSetup.pgdata);
+				break;
+			}
+
+			case 'm':
+			{
+				if (!validate_connection_string(optarg))
+				{
+					log_fatal("Failed to parse --monitor connection string, "
+							  "see above for details.");
+					exit(EXIT_CODE_BAD_ARGS);
+				}
+				strlcpy(options.monitor_pguri, optarg, MAXCONNINFO);
+				log_trace("--monitor %s", options.monitor_pguri);
 				break;
 			}
 
@@ -907,6 +926,21 @@ cli_drop_node_getopts(int argc, char **argv)
 					exit(EXIT_CODE_BAD_ARGS);
 				}
 				log_trace("--pgport %d", options.pgSetup.pgport);
+				break;
+			}
+
+			case 'f':
+			{
+				strlcpy(options.formation, optarg, NAMEDATALEN);
+				log_trace("--formation %s", options.formation);
+				break;
+			}
+
+			case 'a':
+			{
+				/* { "name", required_argument, NULL, 'a' }, */
+				strlcpy(options.name, optarg, _POSIX_HOST_NAME_MAX);
+				log_trace("--name %s", options.name);
 				break;
 			}
 
@@ -970,13 +1004,58 @@ cli_drop_node_getopts(int argc, char **argv)
 		(!IS_EMPTY_STRING_BUFFER(options.hostname) ||
 		 options.pgSetup.pgport != 0))
 	{
-		log_error("Please use either --hostname and --pgport or ---destroy");
+		log_error("Please use either [ --hostname --pgport ] "
+				  " or [ --formation --name ] to target a remote node, "
+				  " or --destroy to destroy the local node.");
 		log_info("Destroying a node is not supported from a distance");
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
 	/* now that we have the command line parameters, prepare the options */
-	(void) prepare_keeper_options(&options);
+	/* when we have a monitor URI we don't need PGDATA */
+	if (cli_use_monitor_option(&options))
+	{
+		if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
+		{
+			log_warn("Given --monitor URI, the --pgdata option is ignored");
+			log_info("Connecting to monitor at \"%s\"", options.monitor_pguri);
+
+			/* the rest of the program needs pgdata actually empty */
+			bzero((void *) options.pgSetup.pgdata,
+				  sizeof(options.pgSetup.pgdata));
+		}
+	}
+	else
+	{
+		(void) prepare_keeper_options(&options);
+	}
+
+	/*
+	 * pg_autoctl drop node can be used with one of those set of arguments:
+	 *   --pgdata ...                 # to drop the local node
+	 *   --pgdata <monitor>           # to drop any node from the monitor
+	 *   --formation ... --name ...   # address a node on the monitor
+	 *   --hostname ... --pgport ...  # address a node on the monitor
+	 *
+	 * We check about the PGDATA being related to a monitor or a keeper later,
+	 * here we focus on the optargs. Remember that --formation can be skipped
+	 * to mean "default", and --pgport can be skipped to mean either PGPORT
+	 * from the environment or just 5432.
+	 */
+	if (!IS_EMPTY_STRING_BUFFER(options.name) &&
+		!IS_EMPTY_STRING_BUFFER(options.hostname))
+	{
+		log_fatal("pg_autoctl drop node target can either be specified "
+				  "using [ --formation --name ], or "
+				  "using [ --hostname and --pgport ], but not both.");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	/* use the "default" formation when not given */
+	if (IS_EMPTY_STRING_BUFFER(options.formation))
+	{
+		strlcpy(options.formation, FORMATION_DEFAULT, NAMEDATALEN);
+	}
 
 	/* publish our option parsing in the global variable */
 	keeperOptions = options;
@@ -994,81 +1073,82 @@ cli_drop_node(int argc, char **argv)
 {
 	KeeperConfig config = keeperOptions;
 
-	bool missingPgdataIsOk = true;
-	bool pgIsNotRunningIsOk = true;
-	bool monitorDisabledIsOk = true;
+	pgAutoCtlNodeRole localNodeRole =
+		IS_EMPTY_STRING_BUFFER(config.pgSetup.pgdata)
+		? PG_AUTOCTL_ROLE_UNKNOWN
+		: ProbeConfigurationFileRole(config.pathnames.config);
+
+	bool dropLocalNode =
+		!IS_EMPTY_STRING_BUFFER(config.pgSetup.pgdata) &&
+		localNodeRole == PG_AUTOCTL_ROLE_KEEPER;
 
 	/*
 	 * The configuration file is the last bit we remove, so we don't have to
 	 * implement "continue from previous failed attempt" when the configuration
 	 * file does not exists.
 	 */
-	if (!file_exists(config.pathnames.config))
+	if (dropLocalNode && !file_exists(config.pathnames.config))
 	{
 		log_error("Failed to find expected configuration file \"%s\"",
 				  config.pathnames.config);
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	/*
-	 * We are going to need to use the right pg_ctl binary to control the
-	 * Postgres cluster: pg_ctl stop.
-	 */
-	switch (ProbeConfigurationFileRole(config.pathnames.config))
+	if (dropLocalNode)
 	{
-		case PG_AUTOCTL_ROLE_MONITOR:
-		{
-			/*
-			 * Now check --hostname and --pgport and remove the entry on the
-			 * monitor.
-			 */
-			if (IS_EMPTY_STRING_BUFFER(config.hostname) ||
-				config.pgSetup.pgport == 0)
-			{
-				log_fatal("To remove a node from the monitor, both the "
-						  "--hostname and --pgport options are required");
-				exit(EXIT_CODE_BAD_ARGS);
-			}
+		bool missingPgdataIsOk = true;
+		bool pgIsNotRunningIsOk = true;
+		bool monitorDisabledIsOk = true;
 
-			/* pg_autoctl drop node on the monitor drops another node */
-			(void) cli_drop_node_from_monitor(&config,
-											  config.hostname,
-											  config.pgSetup.pgport);
-			return;
+		if (!IS_EMPTY_STRING_BUFFER(config.hostname) ||
+			config.pgSetup.pgport != 0)
+		{
+			log_fatal("Only dropping the local node is supported, "
+					  "[ --hostname --pgport ] are not supported "
+					  "when --pgdata is used.");
+			log_info("To drop another node, please use this command "
+					 "from the monitor itself.");
+			exit(EXIT_CODE_BAD_ARGS);
 		}
 
-		case PG_AUTOCTL_ROLE_KEEPER:
+		if (!IS_EMPTY_STRING_BUFFER(config.name))
 		{
-			if (!IS_EMPTY_STRING_BUFFER(config.hostname) ||
-				config.pgSetup.pgport != 0)
-			{
-				log_fatal("Only dropping the local node is supported");
-				log_info("To drop another node, please use this command "
-						 "from the monitor itself.");
-				exit(EXIT_CODE_BAD_ARGS);
-			}
-
-			/* just read the keeper file in given KeeperConfig */
-			if (!keeper_config_read_file(&config,
-										 missingPgdataIsOk,
-										 pgIsNotRunningIsOk,
-										 monitorDisabledIsOk))
-			{
-				exit(EXIT_CODE_BAD_CONFIG);
-			}
-
-			/* drop the node and maybe destroy its PGDATA entirely. */
-			(void) cli_drop_local_node(&config, dropAndDestroy);
-
-			return;
+			log_fatal("Only dropping the local node is supported, "
+					  "[ --formation --name ] are not supported "
+					  "when --pgdata is used.");
+			log_info("To drop another node, please use this command "
+					 "from the monitor itself.");
+			exit(EXIT_CODE_BAD_ARGS);
 		}
 
-		default:
+		/* just read the keeper file in given KeeperConfig */
+		if (!keeper_config_read_file(&config,
+									 missingPgdataIsOk,
+									 pgIsNotRunningIsOk,
+									 monitorDisabledIsOk))
 		{
-			log_fatal("Unrecognized configuration file \"%s\"",
-					  config.pathnames.config);
 			exit(EXIT_CODE_BAD_CONFIG);
 		}
+
+		/* drop the node and maybe destroy its PGDATA entirely. */
+		(void) cli_drop_local_node(&config, dropAndDestroy);
+
+		return;
+	}
+	else
+	{
+		/* pg_autoctl drop node on the monitor drops another node */
+		if (IS_EMPTY_STRING_BUFFER(config.name) &&
+			IS_EMPTY_STRING_BUFFER(config.hostname))
+		{
+			log_fatal("pg_autoctl drop node target can either be specified "
+					  "using [ --formation --name ], or "
+					  "using [ --hostname and --pgport ], "
+					  "please use either one.");
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		(void) cli_drop_node_from_monitor(&config);
 	}
 }
 
@@ -1151,39 +1231,47 @@ cli_drop_monitor(int argc, char **argv)
 
 
 /*
- * cli_drop_node_from_monitor calls pgautofailover.remove_node() on the
- * monitor for the given --hostname and --pgport.
+ * cli_drop_node_from_monitor calls pgautofailover.remove_node() on the monitor
+ * for the given --hostname and --pgport, or from the given --formation and
+ * --name.
  */
 static void
-cli_drop_node_from_monitor(KeeperConfig *config, const char *hostname, int port)
+cli_drop_node_from_monitor(KeeperConfig *config)
 {
 	Monitor monitor = { 0 };
-	MonitorConfig mconfig = { 0 };
-	char connInfo[MAXCONNINFO] = { 0 };
 
-	bool missingPgdataIsOk = true;
-	bool pgIsNotRunningIsOk = true;
+	(void) cli_monitor_init_from_option_or_config(&monitor, config);
 
-	if (!monitor_config_init_from_pgsetup(&mconfig,
-										  &(config->pgSetup),
-										  missingPgdataIsOk,
-										  pgIsNotRunningIsOk))
+	if (!IS_EMPTY_STRING_BUFFER(config->name))
 	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_CONFIG);
+		if (!monitor_remove_by_nodename(&monitor,
+										(char *) config->formation,
+										(char *) config->name))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_MONITOR);
+		}
 	}
-
-	/* expose the pgSetup in the given KeeperConfig */
-	config->pgSetup = mconfig.pgSetup;
-
-	/* prepare to connect to the monitor, locally */
-	pg_setup_get_local_connection_string(&(mconfig.pgSetup), connInfo);
-	monitor_init(&monitor, connInfo);
-
-	if (!monitor_remove(&monitor, (char *) hostname, port))
+	else if (!IS_EMPTY_STRING_BUFFER(config->hostname))
 	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_MONITOR);
+		int pgport =
+			config->pgSetup.pgport > 0
+			? config->pgSetup.pgport
+			: pgsetup_get_pgport();
+
+		if (!monitor_remove_by_hostname(&monitor,
+										(char *) config->hostname,
+										pgport))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_MONITOR);
+		}
+	}
+	else
+	{
+		log_fatal("BUG: cli_drop_node_from_monitor options contain "
+				  " neither --name nor --hostname");
+		exit(EXIT_CODE_BAD_ARGS);
 	}
 }
 

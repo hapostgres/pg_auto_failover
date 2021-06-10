@@ -121,7 +121,8 @@ bool monitor_get_formation_number_sync_standbys(Monitor *monitor, char *formatio
 bool monitor_set_formation_number_sync_standbys(Monitor *monitor, char *formation,
 												int numberSyncStandbys);
 
-bool monitor_remove(Monitor *monitor, char *host, int port);
+bool monitor_remove_by_hostname(Monitor *monitor, char *host, int port);
+bool monitor_remove_by_nodename(Monitor *monitor, char *formation, char *name);
 
 bool monitor_count_groups(Monitor *monitor, char *formation, int *groupsCount);
 bool monitor_get_groupId_from_name(Monitor *monitor,

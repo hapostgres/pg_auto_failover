@@ -274,6 +274,7 @@ typedef struct SingleValueResultContext
 	char sqlstate[SQLSTATE_LENGTH];
 	QueryResultType resultType;
 	bool parsedOk;
+	int ntuples;
 	bool boolVal;
 	int intVal;
 	uint64_t bigint;

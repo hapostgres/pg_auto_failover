@@ -1203,11 +1203,11 @@ monitor_set_formation_number_sync_standbys(Monitor *monitor, char *formation,
 
 
 /*
- * monitor_remove calls the pgautofailover.monitor_remove function on the
- * monitor.
+ * monitor_remove_by_hostname calls the pgautofailover.monitor_remove function
+ * on the monitor.
  */
 bool
-monitor_remove(Monitor *monitor, char *host, int port)
+monitor_remove_by_hostname(Monitor *monitor, char *host, int port)
 {
 	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BOOL, false };
 	PGSQL *pgsql = &monitor->pgsql;
@@ -1231,6 +1231,61 @@ monitor_remove(Monitor *monitor, char *host, int port)
 	{
 		log_error("Failed to remove node %s:%d from the monitor: "
 				  "could not parse monitor's result.", host, port);
+		return false;
+	}
+
+	/*
+	 * We ignore the return value of pgautofailover.remove_node:
+	 *  - if it's true, then the node has been removed
+	 *  - if it's false, then the node didn't exist in the first place
+	 *
+	 * The only case where we return false here is when we failed to run the
+	 * pgautofailover.remove_node function on the monitor, see above.
+	 */
+	return true;
+}
+
+
+/*
+ * monitor_remove_by_nodename calls the pgautofailover.monitor_remove function
+ * on the monitor.
+ */
+bool
+monitor_remove_by_nodename(Monitor *monitor, char *formation, char *name)
+{
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BOOL, false };
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT pgautofailover.remove_node(nodeid::int) "
+		"  FROM pgautofailover.node"
+		" WHERE formationid = $1 and nodename = $2";
+
+	int paramCount = 2;
+	Oid paramTypes[2] = { TEXTOID, TEXTOID };
+	const char *paramValues[2] = { formation, name };
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &parseSingleValueResult))
+	{
+		log_error("Failed to remove node \"%s\" in formation \"%s\" "
+				  "from the monitor", name, formation);
+		return false;
+	}
+
+	if (!context.parsedOk && context.ntuples == 0)
+	{
+		log_error("Failed to find node \"%s\" in formation \"%s\" "
+				  "on the monitor", name, formation);
+		log_error("Failed to remove node \"%s\" in formation \"%s\" "
+				  "from the monitor", name, formation);
+		return false;
+	}
+	else if (!context.parsedOk)
+	{
+		log_error("Failed to remove node \"%s\" in formation \"%s\" "
+				  "from the monitor: could not parse monitor's result.",
+				  name, formation);
 		return false;
 	}
 
