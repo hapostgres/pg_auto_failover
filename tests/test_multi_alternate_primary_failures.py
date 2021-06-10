@@ -97,19 +97,22 @@ def test_003_002_stop_primary():
     assert node2.get_state().assigned == "primary"
     node2.fail()
 
-    # wait for node3 to become the new write node
-    assert node2.wait_until_assigned_state(target_state="demoted")
-    assert node3.wait_until_state(target_state="wait_primary")
+    # node3 can't be promoted when it's the only one reporting its LSN
+    assert node2.wait_until_assigned_state(target_state="draining")
+    assert node3.wait_until_state(target_state="report_lsn")
+
+    # check that node3 stays at report_lsn and doesn't go to wait_primary
+    node3.sleep(5)
+    assert node3.wait_until_state(target_state="report_lsn")
 
 
 def test_004_001_bringup_last_failed_primary():
     # Restart node2
     node2.run()
-    node2.wait_until_pg_is_running()
 
-    # Now node 2 should become secondary
-    assert node2.wait_until_state(target_state="secondary")
-    assert node3.wait_until_state(target_state="primary")
+    # Now node 2 should become primary
+    assert node2.wait_until_state(target_state="primary")
+    assert node3.wait_until_state(target_state="secondary")
 
 
 def test_004_002_bringup_last_failed_primary():
@@ -119,8 +122,8 @@ def test_004_002_bringup_last_failed_primary():
 
     # Now node 1 should become secondary
     assert node1.wait_until_state(target_state="secondary")
-    assert node2.get_state().assigned == "secondary"
-    assert node3.get_state().assigned == "primary"
+    assert node2.get_state().assigned == "primary"
+    assert node3.get_state().assigned == "secondary"
 
     assert node1.has_needed_replication_slots()
     assert node2.has_needed_replication_slots()
@@ -128,17 +131,17 @@ def test_004_002_bringup_last_failed_primary():
 
 
 def test_005_001_fail_primary_again():
-    # verify that node3 is primary and stop it
-    assert node3.get_state().assigned == "primary"
-    node3.fail()
+    # verify that node2 is primary and stop it
+    assert node2.get_state().assigned == "primary"
+    node2.fail()
 
-    assert node3.wait_until_assigned_state(
+    assert node2.wait_until_assigned_state(
         target_state="demote_timeout", timeout=120
     )
-    assert node3.wait_until_assigned_state(target_state="demoted", timeout=120)
+    assert node2.wait_until_assigned_state(target_state="demoted", timeout=120)
     assert node1.wait_until_assigned_state(target_state="primary", timeout=120)
     assert node1.wait_until_state(target_state="primary", timeout=120)
-    assert node2.wait_until_state(target_state="secondary", timeout=120)
+    assert node3.wait_until_state(target_state="secondary", timeout=120)
 
 
 def test_005_002_fail_primary_again():
@@ -146,23 +149,18 @@ def test_005_002_fail_primary_again():
     assert node1.get_state().assigned == "primary"
     node1.fail()
 
-    assert node1.wait_until_assigned_state(
-        target_state="demote_timeout", timeout=120
-    )
-    assert node1.wait_until_assigned_state(target_state="demoted", timeout=120)
-    assert node2.wait_until_assigned_state(
-        target_state="wait_primary", timeout=120
-    )
+    assert node1.wait_until_assigned_state(target_state="draining")
+    assert node3.wait_until_assigned_state(target_state="report_lsn")
 
 
 def test_006_001_bring_up_first_failed_primary():
-    # Restart node3
-    node3.run()
-    node3.wait_until_pg_is_running()
+    # Restart node2
+    node2.run()
+    assert node2.wait_until_state(target_state="demoted")
 
-    # Now node 3 should become secondary
-    assert node3.wait_until_state(target_state="secondary")
-    assert node2.wait_until_state(target_state="primary")
+    # Now node 2 should become secondary
+    assert node2.wait_until_state(target_state="secondary")
+    assert node3.wait_until_state(target_state="primary")
 
 
 def test_006_002_bring_up_first_failed_primary():
@@ -172,5 +170,5 @@ def test_006_002_bring_up_first_failed_primary():
 
     # Now node 3 should become secondary
     assert node1.wait_until_state(target_state="secondary")
-    assert node3.get_state().assigned == "secondary"
-    assert node2.get_state().assigned == "primary"
+    assert node3.get_state().assigned == "primary"
+    assert node2.get_state().assigned == "secondary"

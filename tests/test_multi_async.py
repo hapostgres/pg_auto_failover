@@ -214,31 +214,35 @@ def test_013_drop_node4():
     assert node2.wait_until_state(target_state="secondary")
     assert node3.wait_until_state(target_state="secondary")
 
+    # we have only one standby participating in the quorum now
+    eq_(node1.get_number_sync_standbys(), 0)
+
 
 #
 # A series of test where we fail primary and candidate secondary node and
 # all is left is a secondary that is not a candidate for failover.
 #
-# In the first series 014_0xx the demoted primary comes back first and can't
-# be chosen as a new primary because it might have missed some transactions.
+# In the first series 014_0xx the demoted primary comes back first and needs
+# to fetch missing LSNs from node3 because it might have missed some
+# transactions.
 #
-#   node1     node2        node3
-#   primary   secondary    secondary
+#   node1         node2        node3
+#   primary       secondary    secondary
 #   <down>
-#   demoted   wait_primary secondary
-#             <down>
-#   demoted   demoted      report_lsn
+#   demoted       wait_primary secondary
+#                 <down>
+#   demoted       demoted      report_lsn
 #   <up>
-#   demoted   demoted      report_lsn
-#             <up>
-#   secondary primary      secondary
+#   wait_primary  demoted      secondary   (fast_forward → primary)
+#                 <up>
+#   primary       secondary    secondary
 #
 def test_014_001_fail_node1():
     node1.fail()
 
     # first we have a 30s timeout for the monitor to decide that node1 is
     # down; then we have another 30s timeout at stop_replication waiting for
-    # demote_timout, so let's give it 120s there and step in the middle first
+    # demote_timeout, so let's give it 120s there and step in the middle first
     assert node2.wait_until_state(target_state="stop_replication", timeout=120)
     assert node2.wait_until_state(target_state="wait_primary", timeout=120)
     assert node3.wait_until_state(target_state="secondary")
@@ -257,24 +261,20 @@ def test_014_003_restart_node1():
     node1.run()
 
     # node1 used to be primary, now demoted, and meanwhile node2 was primary
-    # so we can't decide to promote node1 now, it's stuck demoted
-    assert node1.wait_until_state(target_state="demoted")
-    assert node3.wait_until_state(target_state="report_lsn")
-
-    # ensure that node1 stays demoted
-    time.sleep(5)
-    assert node1.wait_until_state(target_state="demoted")
+    # node1 is assigned report_lsn and then is selected (only node with
+    # candidate priority > 0) ; and thus needs to go through fast_forward
+    assert node1.wait_until_state(target_state="fast_forward")
+    assert node1.wait_until_state(target_state="stop_replication")
+    assert node1.wait_until_state(target_state="wait_primary")
+    assert node3.wait_until_state(target_state="secondary")
 
 
 def test_014_004_restart_node2():
     node2.run()
 
-    assert node2.wait_until_state(target_state="wait_primary")
-
+    assert node2.wait_until_state(target_state="secondary")
     assert node3.wait_until_state(target_state="secondary")
-    assert node1.wait_until_state(target_state="secondary")
-
-    assert node2.wait_until_state(target_state="primary")
+    assert node1.wait_until_state(target_state="primary")
 
 
 #
@@ -282,53 +282,53 @@ def test_014_004_restart_node2():
 # nodes, first the new primary and then very old primary.
 #
 #   node1        node2        node3
-#   secondary    primary      secondary
-#                <down>
-#   wait_primary demoted      secondary
-#   <down>
-#   demoted      demoted      report_lsn
-#   <up>
-#   wait_primary demoted      secondary
-#                <up>
 #   primary      secondary    secondary
+#   <down>
+#   demoted      wait_primary secondary
+#                <down>
+#   demoted      demoted      report_lsn
+#                <up>
+#   demoted      wait_primary secondary
+#   <up>
+#   secondary    primary      secondary
 #
-def test_015_001_fail_node2():
-    node2.fail()
+def test_015_001_fail_primary_node1():
+    node1.fail()
 
     # first we have a 30s timeout for the monitor to decide that node1 is
     # down; then we have another 30s timeout at stop_replication waiting for
     # demote_timout, so let's give it 120s there
-    assert node1.wait_until_state(target_state="wait_primary", timeout=120)
+    assert node2.wait_until_state(target_state="wait_primary", timeout=120)
     assert node3.wait_until_state(target_state="secondary")
 
-    node1.check_synchronous_standby_names(ssn="")
+    node2.check_synchronous_standby_names(ssn="")
 
 
-def test_015_002_stop_new_primary_node1():
-    node1.fail()
+def test_015_002_fail_new_primary_node2():
+    node2.fail()
 
     print()
     assert node3.wait_until_state(target_state="report_lsn")
 
 
-def test_015_003_restart_node1():
-    node1.run()
+def test_015_003_restart_node2():
+    node2.run()
 
     # restart the previous primary, it re-joins as a (wannabe) primary
     # because the only secondary has candidatePriority = 0, it's wait_primary
-    assert node1.wait_until_state(target_state="wait_primary")
+    assert node2.wait_until_state(target_state="wait_primary")
     assert node3.wait_until_state(target_state="secondary")
 
     time.sleep(5)
-    assert not node1.get_state().assigned == "primary"
+    assert not node2.get_state().assigned == "primary"
 
 
-def test_015_004_restart_node2():
-    node2.run()
+def test_015_004_restart_node1():
+    node1.run()
 
     assert node3.wait_until_state(target_state="secondary")
-    assert node2.wait_until_state(target_state="secondary")
-    assert node1.wait_until_state(target_state="primary")
+    assert node2.wait_until_state(target_state="primary")
+    assert node1.wait_until_state(target_state="secondary")
 
 
 #
@@ -341,37 +341,37 @@ def test_016_001_fail_node3():
     assert node3.wait_until_assigned_state(target_state="catchingup")
 
 
-def test_016_002_fail_node2():
-    node2.fail()
-    assert node1.wait_until_state(target_state="wait_primary")
+def test_016_002_fail_node1():
+    node1.fail()
+    assert node2.wait_until_state(target_state="wait_primary")
 
 
 def test_016_003_restart_node3():
     node3.run()
 
     assert node3.wait_until_assigned_state(target_state="secondary")
-    assert node1.wait_until_state(target_state="wait_primary")
+    assert node2.wait_until_state(target_state="wait_primary")
 
     time.sleep(5)
-    assert not node1.get_state().assigned == "primary"
+    assert not node2.get_state().assigned == "primary"
 
 
-def test_016_004_restart_node2():
-    node2.run()
+def test_016_004_restart_node1():
+    node1.run()
 
     assert node3.wait_until_state(target_state="secondary")
-    assert node2.wait_until_state(target_state="secondary")
-    assert node1.wait_until_state(target_state="primary")
+    assert node2.wait_until_state(target_state="primary")
+    assert node1.wait_until_state(target_state="secondary")
 
 
 #
 # When a node with candidate-priority zero (here, node3) fails while the
-# primary node (here, node1) is already in wait_primary, the non-candidate
+# primary node (here, node2) is already in wait_primary, the non-candidate
 # node (here, node3) should still be assigned catchingup.
 #
-def test_017_001_fail_node2():
-    node2.fail()
-    assert node1.wait_until_state(target_state="wait_primary")
+def test_017_001_fail_node1():
+    node1.fail()
+    assert node2.wait_until_state(target_state="wait_primary")
 
 
 def test_017_002_fail_node3():
@@ -381,8 +381,8 @@ def test_017_002_fail_node3():
 
 def test_017_003_restart_nodes():
     node3.run()
-    node2.run()
+    node1.run()
 
     assert node3.wait_until_state(target_state="secondary")
-    assert node2.wait_until_state(target_state="secondary")
-    assert node1.wait_until_state(target_state="primary")
+    assert node2.wait_until_state(target_state="primary")
+    assert node1.wait_until_state(target_state="secondary")

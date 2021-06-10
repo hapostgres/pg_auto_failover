@@ -144,6 +144,12 @@
 #define COMMENT_SECONDARY_TO_REPORT_LSN \
 	"Reporting the last write-ahead log location received"
 
+#define COMMENT_DRAINING_TO_REPORT_LSN \
+	"Reporting the last write-ahead log location after draining"
+
+#define COMMENT_DEMOTED_TO_REPORT_LSN \
+	"Reporting the last write-ahead log location after being demoted"
+
 #define COMMENT_REPORT_LSN_TO_PREP_PROMOTION \
 	"Stop traffic to primary, " \
 	"wait for it to finish draining."
@@ -233,6 +239,11 @@ KeeperFSMTransition KeeperFSM[] = {
 	 */
 	{ DRAINING_STATE, DEMOTE_TIMEOUT_STATE, COMMENT_DRAINING_TO_DEMOTE_TIMEOUT, &fsm_stop_postgres },
 	{ DEMOTE_TIMEOUT_STATE, DEMOTED_STATE, COMMENT_DEMOTE_TIMEOUT_TO_DEMOTED,  &fsm_stop_postgres},
+
+	/*
+	 * wait_primary stops reporting, is (supposed) dead now
+	 */
+	{ WAIT_PRIMARY_STATE, DEMOTED_STATE, COMMENT_PRIMARY_TO_DEMOTED, &fsm_stop_postgres },
 
 	/*
 	 * was demoted after a failure, but standby was forcibly removed
@@ -350,6 +361,13 @@ KeeperFSMTransition KeeperFSM[] = {
 	{ REPORT_LSN_STATE, JOIN_SECONDARY_STATE, COMMENT_REPORT_LSN_TO_JOIN_SECONDARY, &fsm_checkpoint_and_stop_postgres },
 	{ REPORT_LSN_STATE, SECONDARY_STATE, COMMENT_REPORT_LSN_TO_JOIN_SECONDARY, &fsm_follow_new_primary },
 	{ JOIN_SECONDARY_STATE, SECONDARY_STATE, COMMENT_JOIN_SECONDARY_TO_SECONDARY, &fsm_follow_new_primary },
+
+	/*
+	 * When an old primary gets back online and reaches draining/draining, if a
+	 * failover is on-going then have it join the selection process.
+	 */
+	{ DRAINING_STATE, REPORT_LSN_STATE, COMMENT_DRAINING_TO_REPORT_LSN, &fsm_report_lsn },
+	{ DEMOTED_STATE, REPORT_LSN_STATE, COMMENT_DEMOTED_TO_REPORT_LSN, &fsm_report_lsn },
 
 	/*
 	 * When adding a new node and there is no primary, but there are existing

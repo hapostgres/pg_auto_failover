@@ -1208,7 +1208,8 @@ ReportAutoFailoverNodeState(char *nodeHost, int nodePort,
 		"reportedpgisrunning = $2, reportedrepstate = $3, "
 		"reportedlsn = CASE $4 WHEN '0/0'::pg_lsn THEN reportedlsn ELSE $4 END, "
 		"walreporttime = CASE $4 WHEN '0/0'::pg_lsn THEN walreporttime ELSE now() END, "
-		"statechangetime = now() WHERE nodehost = $5 AND nodeport = $6";
+		"statechangetime = CASE WHEN reportedstate <> $1 THEN now() ELSE statechangetime END "
+		"WHERE nodehost = $5 AND nodeport = $6";
 
 	SPI_connect();
 
@@ -1552,7 +1553,7 @@ bool
 IsBeingDemotedPrimary(AutoFailoverNode *node)
 {
 	return node != NULL &&
-		   (node->reportedState == REPLICATION_STATE_PRIMARY &&
+		   (StateBelongsToPrimary(node->reportedState) &&
 			(node->goalState == REPLICATION_STATE_DRAINING ||
 			 node->goalState == REPLICATION_STATE_DEMOTE_TIMEOUT ||
 			 node->goalState == REPLICATION_STATE_PREPARE_MAINTENANCE));
@@ -1567,8 +1568,9 @@ bool
 IsDemotedPrimary(AutoFailoverNode *node)
 {
 	return node != NULL &&
-		   (node->reportedState == REPLICATION_STATE_PRIMARY &&
-			node->goalState == REPLICATION_STATE_DEMOTED);
+		   (node->goalState == REPLICATION_STATE_DEMOTED &&
+			(StateBelongsToPrimary(node->reportedState) ||
+			 node->reportedState == REPLICATION_STATE_DEMOTED));
 }
 
 

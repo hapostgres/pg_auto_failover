@@ -189,7 +189,7 @@ def test_007_create_t1():
 
 def test_008_set_candidate_priorities():
     # set priorities in a way that we know the candidate: node2
-    node1.set_candidate_priority(90)  # current primary
+    node1.set_candidate_priority(80)  # current primary
     node2.set_candidate_priority(90)
     node3.set_candidate_priority(70)
 
@@ -234,6 +234,8 @@ def test_012_fail_primary():
     print("Failing current primary node 2")
     node2.fail()
 
+    # explicitely allow for the 30s timeout in stop_replication
+    assert node1.wait_until_state(target_state="stop_replication")
     assert node1.wait_until_state(target_state="primary")
     assert node3.wait_until_state(target_state="secondary")
 
@@ -380,7 +382,7 @@ def test_016_002_trigger_failover():
 
     assert node3.wait_until_state(target_state="report_lsn")
     assert node2.wait_until_state(target_state="report_lsn")
-    assert node1.wait_until_state(target_state="draining")
+    assert node1.wait_until_state(target_state="report_lsn")
 
 
 def test_016_003_set_candidate_priority_to_one():

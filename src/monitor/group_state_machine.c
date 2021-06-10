@@ -41,10 +41,12 @@
  */
 typedef struct CandidateList
 {
+	int numberSyncStandbys;
 	List *candidateNodesGroupList;
 	List *mostAdvancedNodesGroupList;
 	XLogRecPtr mostAdvancedReportedLSN;
 	int candidateCount;
+	int quorumCandidateCount;
 	int missingNodesCount;
 } CandidateList;
 
@@ -1221,6 +1223,11 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 	 * different candidateNodesGroupList in which every node has reported their
 	 * LSN position, allowing progress to be made.
 	 */
+	char *formationId = activeNode->formationId;
+	AutoFailoverFormation *formation = GetFormation(formationId);
+
+	candidateList.numberSyncStandbys = formation->number_sync_standbys;
+
 	BuildCandidateList(nodesGroupList, &candidateList);
 
 	/*
@@ -1256,8 +1263,45 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 	 * So all the expected candidates did report their LSN, no node is missing.
 	 * Let's see about selecting a candidate for failover now, when we do have
 	 * candidates.
+	 *
+	 * To start the selection process, we require at least number_sync_standbys
+	 * nodes to have reported their LSN and be currently healthy, otherwise we
+	 * won't be able to maintain our guarantees: we would end-up with a node in
+	 * WAIT_PRIMARY state with all the writes blocked for lack of standby
+	 * nodes.
 	 */
-	if (candidateList.candidateCount > 0)
+	int minCandidates = formation->number_sync_standbys + 1;
+
+	/* no candidates is a hard pass */
+	if (candidateList.candidateCount == 0)
+	{
+		return false;
+	}
+
+	/* not enough candidates to promote and then accept writes, pass */
+	else if (candidateList.quorumCandidateCount < minCandidates)
+	{
+		char message[BUFSIZE] = { 0 };
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Failover still in progress with %d candidates that participate "
+			"in the quorum having reported their LSN: %d nodes are required "
+			"in the quorum to satisfy number_sync_standbys=%d in "
+			"formation \"%s\", activeNode is " NODE_FORMAT
+			" and reported state \"%s\"",
+			candidateList.quorumCandidateCount,
+			minCandidates,
+			formation->number_sync_standbys,
+			formation->formationId,
+			NODE_FORMAT_ARGS(activeNode),
+			ReplicationStateGetName(activeNode->reportedState));
+
+		return false;
+	}
+
+	/* enough candidates to promote and then accept writes, let's do it! */
+	else
 	{
 		/* build the list of most advanced standby nodes, not ordered */
 		List *mostAdvancedNodeList =
@@ -1334,7 +1378,18 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 
 /*
  * BuildCandidateList builds the list of current standby candidates that have
- * already reported their LSN, and sets
+ * already reported their LSN, and sets nodes that should be reporting to the
+ * REPORT_LSN goal state.
+ *
+ * A CandidateList keeps track of the list of candidate nodes, the list of most
+ * advanced nodes (in terms of LSN positions), and two counters, the count of
+ * candidate nodes (that's the length of the first list) and the count of nodes
+ * that are due to report their LSN but didn't yet, named the
+ * missingNodesCount.
+ *
+ * Managing the missingNodesCount allows a better message to be printed by the
+ * monitor and prevents early failover: when missingNodesCount > 0 then the
+ * caller for BuildCandidateList knows to refrain from any decision making.
  */
 static bool
 BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
@@ -1356,8 +1411,17 @@ BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
 			continue;
 		}
 
-		/* skip old and new primary nodes (if a selection has been made) */
-		if (StateBelongsToPrimary(node->goalState))
+		/*
+		 * Skip old and new primary nodes (if a selection has been made).
+		 *
+		 * When a failover is ongoing, a former primary node that has reached
+		 * DRAINING and is reporting should be asked to report their LSN.
+		 */
+		if ((IsInPrimaryState(node) ||
+			 IsBeingDemotedPrimary(node) ||
+			 IsDemotedPrimary(node)) &&
+			!(IsCurrentState(node, REPLICATION_STATE_DRAINING) ||
+			  IsCurrentState(node, REPLICATION_STATE_DEMOTED)))
 		{
 			elog(LOG,
 				 "Skipping candidate " NODE_FORMAT
@@ -1377,13 +1441,42 @@ BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
 				 "Skipping candidate " NODE_FORMAT ", which is unhealthy",
 				 NODE_FORMAT_ARGS(node));
 
+			/*
+			 * When a secondary node is now down, and had already reported its
+			 * LSN, then it's not "missing": we have its LSN and are able to
+			 * continue with the election mechanism.
+			 *
+			 * Otherwise, we didn't get its LSN and this node might be (one of)
+			 * the most advanced LSN. Picking it now might lead to loosing
+			 * commited data that was reported to the client connection, if
+			 * this node is the only one with the most advanted LSN.
+			 *
+			 * Only the nodes that participate in the quorum are required to
+			 * report their LSN, because only those nodes are waited by
+			 * Postgres to report a commit to the client connection.
+			 */
+			if (node->replicationQuorum &&
+				node->reportedState != REPLICATION_STATE_REPORT_LSN)
+			{
+				++(candidateList->missingNodesCount);
+			}
+
 			continue;
 		}
 
-		/* grab healthy standby nodes which have reached REPORT_LSN */
+		/*
+		 * Grab healthy standby nodes which have reached REPORT_LSN.
+		 */
 		if (IsCurrentState(node, REPLICATION_STATE_REPORT_LSN))
 		{
 			candidateNodesGroupList = lappend(candidateNodesGroupList, node);
+
+			/* when number_sync_standbys is zero, quorum isn't discriminant */
+			if (node->replicationQuorum ||
+				candidateList->numberSyncStandbys == 0)
+			{
+				++(candidateList->quorumCandidateCount);
+			}
 
 			continue;
 		}
@@ -1398,10 +1491,14 @@ BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
 
 		/*
 		 * Nodes in SECONDARY or CATCHINGUP states are candidates due to report
-		 * their LSN.
+		 * their LSN. Also old primary nodes in DEMOTED state are due to report
+		 * now. And also old primary nodes in DRAINING state, when the drain
+		 * timeout is over, are due to report.
 		 */
-		if (IsStateIn(node->reportedState, secondaryStates) &&
-			IsStateIn(node->goalState, secondaryStates))
+		if ((IsStateIn(node->reportedState, secondaryStates) &&
+			 IsStateIn(node->goalState, secondaryStates)) ||
+			((IsCurrentState(node, REPLICATION_STATE_DRAINING) ||
+			  IsCurrentState(node, REPLICATION_STATE_DEMOTED))))
 		{
 			char message[BUFSIZE] = { 0 };
 
@@ -1493,7 +1590,10 @@ static AutoFailoverNode *
 SelectFailoverCandidateNode(CandidateList *candidateList,
 							AutoFailoverNode *primaryNode)
 {
-	/* build the list of failover candidate nodes, ordered by priority */
+	/*
+	 * Build the list of failover candidate nodes, ordered by priority.
+	 * Nodes with candidatePriority == 0 are skipped in GroupListCandidates.
+	 */
 	List *sortedCandidateNodesGroupList =
 		GroupListCandidates(candidateList->candidateNodesGroupList);
 
