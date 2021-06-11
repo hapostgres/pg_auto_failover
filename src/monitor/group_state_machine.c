@@ -1494,11 +1494,19 @@ BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
 		 * their LSN. Also old primary nodes in DEMOTED state are due to report
 		 * now. And also old primary nodes in DRAINING state, when the drain
 		 * timeout is over, are due to report.
+		 *
+		 * Finally, another interesting case for us here would be a node that
+		 * has been asked to re-join a newly elected primary, but the newly
+		 * elected primary has now failed and we're in the election process to
+		 * replace it. Then demoted/catchingup has been assigned, but there is
+		 * no primary to catch-up to anymore, join the REPORT_LSN crew.
 		 */
 		if ((IsStateIn(node->reportedState, secondaryStates) &&
 			 IsStateIn(node->goalState, secondaryStates)) ||
 			((IsCurrentState(node, REPLICATION_STATE_DRAINING) ||
-			  IsCurrentState(node, REPLICATION_STATE_DEMOTED))))
+			  IsCurrentState(node, REPLICATION_STATE_DEMOTED) ||
+			  (node->reportedState == REPLICATION_STATE_DEMOTED &&
+			   node->goalState == REPLICATION_STATE_CATCHINGUP))))
 		{
 			char message[BUFSIZE] = { 0 };
 
