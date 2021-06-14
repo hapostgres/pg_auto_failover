@@ -178,7 +178,7 @@ installcheck-i386:
 	pg_autoctl do pgsetup wait
 	$(MAKE) -C src/monitor installcheck
 
-run-installcheck-i368: build-i386
+run-installcheck-i386: build-i386
 	docker run --platform linux/386 --rm -it --privileged i386 make installcheck-i386
 
 man:

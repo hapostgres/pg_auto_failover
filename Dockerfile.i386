@@ -73,5 +73,3 @@ ENV PG_AUTOCTL_DEBUG 1
 
 ENV PGDATA /tmp/monitor
 RUN pg_autoctl create monitor --auth trust --no-ssl
-
-CMD make installcheck
