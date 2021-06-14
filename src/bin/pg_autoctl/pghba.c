@@ -351,7 +351,7 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 			}
 		}
 
-		log_debug("pghba_ensure_host_rules_exist: %d \"%s\" (%s:%d)",
+		log_debug("pghba_ensure_host_rules_exist: %" PRId64 " \"%s\" (%s:%d)",
 				  node->nodeId,
 				  node->name,
 				  useHostname ? node->host : ipaddr,
@@ -399,7 +399,7 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 			return false;
 		}
 
-		log_info("%s HBA rules for node %d \"%s\" (%s:%d)",
+		log_info("%s HBA rules for node %" PRId64 " \"%s\" (%s:%d)",
 				 hbaLevel < HBA_EDIT_MINIMAL ? "Checking for" : "Ensuring",
 				 node->nodeId,
 				 node->name,

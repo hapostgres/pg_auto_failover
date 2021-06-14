@@ -2144,7 +2144,8 @@ prepare_recovery_settings(const char *pgdata,
 	/* when reaching REPORT_LSN we set recovery with no primary conninfo */
 	if (!IS_EMPTY_STRING_BUFFER(primaryNode->host))
 	{
-		log_debug("prepare_recovery_settings: primary node %d \"%s\" (%s:%d)",
+		log_debug("prepare_recovery_settings: "
+				  "primary node %" PRId64 " \"%s\" (%s:%d)",
 				  primaryNode->nodeId,
 				  primaryNode->name,
 				  primaryNode->host,

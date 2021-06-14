@@ -1337,10 +1337,12 @@ pgsql_check_monitor_settings(PGSQL *pgsql, bool *settings_are_ok)
  * for given nodeId in the given slotName buffer of given size.
  */
 bool
-postgres_sprintf_replicationSlotName(int nodeId, char *slotName, int size)
+postgres_sprintf_replicationSlotName(int64_t nodeId, char *slotName, int size)
 {
 	int bytesWritten =
-		sformat(slotName, size, "%s_%d", REPLICATION_SLOT_NAME_DEFAULT, nodeId);
+		sformat(slotName, size, "%s_%" PRId64,
+				REPLICATION_SLOT_NAME_DEFAULT,
+				nodeId);
 
 	return bytesWritten <= size;
 }

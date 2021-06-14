@@ -1009,7 +1009,7 @@ parseLSN(const char *str, uint64_t *lsn)
 bool
 parseNodesArray(const char *nodesJSON,
 				NodeAddressArray *nodesArray,
-				int nodeId)
+				int64_t nodeId)
 {
 	JSON_Value *template =
 		json_parse_string("[{"

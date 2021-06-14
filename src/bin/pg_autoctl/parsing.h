@@ -94,6 +94,6 @@ bool parse_and_scrub_connection_string(const char *pguri, char *scrubbedPguri);
 bool parseLSN(const char *str, uint64_t *lsn);
 bool parseNodesArray(const char *nodesJSON,
 					 NodeAddressArray *nodesArray,
-					 int nodeId);
+					 int64_t nodeId);
 
 #endif /* PARSING_H */
