@@ -168,7 +168,7 @@ extern AutoFailoverNode * FindMostAdvancedStandby(List *groupNodeList);
 extern AutoFailoverNode * FindCandidateNodeBeingPromoted(List *groupNodeList);
 
 extern AutoFailoverNode * GetAutoFailoverNode(char *nodeHost, int nodePort);
-extern AutoFailoverNode * GetAutoFailoverNodeById(int nodeId);
+extern AutoFailoverNode * GetAutoFailoverNodeById(int64 nodeId);
 extern AutoFailoverNode * GetAutoFailoverNodeByName(char *formationId,
 													char *nodeName);
 extern AutoFailoverNode * OtherNodeInGroup(AutoFailoverNode *pgAutoFailoverNode);
@@ -177,7 +177,7 @@ extern AutoFailoverNode * TupleToAutoFailoverNode(TupleDesc tupleDescriptor,
 												  HeapTuple heapTuple);
 extern int AddAutoFailoverNode(char *formationId,
 							   FormationKind formationKind,
-							   int nodeId,
+							   int64 nodeId,
 							   int groupId,
 							   char *nodeName,
 							   char *nodeHost,
@@ -199,12 +199,12 @@ extern void ReportAutoFailoverNodeState(char *nodeHost, int nodePort,
 extern void ReportAutoFailoverNodeHealth(char *nodeHost, int nodePort,
 										 ReplicationState goalState,
 										 NodeHealthState health);
-extern void ReportAutoFailoverNodeReplicationSetting(int nodeid,
+extern void ReportAutoFailoverNodeReplicationSetting(int64 nodeid,
 													 char *nodeHost,
 													 int nodePort,
 													 int candidatePriority,
 													 bool replicationQuorum);
-extern void UpdateAutoFailoverNodeMetadata(int nodeid,
+extern void UpdateAutoFailoverNodeMetadata(int64 nodeid,
 										   char *nodeName,
 										   char *nodeHost,
 										   int nodePort);

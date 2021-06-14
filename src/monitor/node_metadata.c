@@ -164,7 +164,7 @@ TupleToAutoFailoverNode(TupleDesc tupleDescriptor, HeapTuple heapTuple)
 	AutoFailoverNode *pgAutoFailoverNode = (AutoFailoverNode *) palloc0(
 		sizeof(AutoFailoverNode));
 	pgAutoFailoverNode->formationId = TextDatumGetCString(formationId);
-	pgAutoFailoverNode->nodeId = DatumGetInt32(nodeId);
+	pgAutoFailoverNode->nodeId = DatumGetInt64(nodeId);
 	pgAutoFailoverNode->groupId = DatumGetInt32(groupId);
 	pgAutoFailoverNode->nodeName = TextDatumGetCString(nodeName);
 	pgAutoFailoverNode->nodeHost = TextDatumGetCString(nodeHost);
@@ -851,7 +851,7 @@ GetAutoFailoverNode(char *nodeHost, int nodePort)
  * This function returns NULL, when the node could not be found.
  */
 AutoFailoverNode *
-GetAutoFailoverNodeById(int nodeId)
+GetAutoFailoverNodeById(int64 nodeId)
 {
 	AutoFailoverNode *pgAutoFailoverNode = NULL;
 	MemoryContext callerContext = CurrentMemoryContext;
@@ -861,7 +861,7 @@ GetAutoFailoverNodeById(int nodeId)
 	};
 
 	Datum argValues[] = {
-		Int32GetDatum(nodeId)           /* nodeId */
+		Int64GetDatum(nodeId)           /* nodeId */
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
 
@@ -957,7 +957,7 @@ GetAutoFailoverNodeByName(char *formationId, char *nodeName)
 int
 AddAutoFailoverNode(char *formationId,
 					FormationKind formationKind,
-					int nodeId,
+					int64 nodeId,
 					int groupId,
 					char *nodeName,
 					char *nodeHost,
@@ -980,7 +980,7 @@ AddAutoFailoverNode(char *formationId,
 
 	Oid argTypes[] = {
 		TEXTOID, /* formationid */
-		INT4OID, /* nodeid */
+		INT8OID, /* nodeid */
 		INT4OID, /* groupid */
 		TEXTOID, /* nodename */
 		TEXTOID, /* nodehost */
@@ -996,7 +996,7 @@ AddAutoFailoverNode(char *formationId,
 
 	Datum argValues[] = {
 		CStringGetTextDatum(formationId),   /* formationid */
-		Int32GetDatum(nodeId),              /* nodeid */
+		Int64GetDatum(nodeId),              /* nodeid */
 		Int32GetDatum(groupId),             /* groupid */
 		nodeName == NULL ? (Datum) 0 : CStringGetTextDatum(nodeName),   /* nodename */
 		CStringGetTextDatum(nodeHost),      /* nodehost */
@@ -1037,7 +1037,7 @@ AddAutoFailoverNode(char *formationId,
 	};
 
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
-	int insertedNodeId = 0;
+	int64 insertedNodeId = 0;
 
 	/*
 	 * The node name can be specified by the user as the --name argument at
@@ -1083,7 +1083,7 @@ AddAutoFailoverNode(char *formationId,
 										  1,
 										  &isNull);
 
-		insertedNodeId = DatumGetInt32(nodeIdDatum);
+		insertedNodeId = DatumGetInt64(nodeIdDatum);
 	}
 	else
 	{
@@ -1129,12 +1129,12 @@ SetNodeGoalState(AutoFailoverNode *pgAutoFailoverNode,
 
 	Oid argTypes[] = {
 		replicationStateTypeOid, /* goalstate */
-		INT4OID  /* nodeid */
+		INT8OID  /* nodeid */
 	};
 
 	Datum argValues[] = {
 		ObjectIdGetDatum(goalStateOid),           /* goalstate */
-		Int32GetDatum(pgAutoFailoverNode->nodeId) /* nodeid */
+		Int64GetDatum(pgAutoFailoverNode->nodeId) /* nodeid */
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
 
@@ -1282,14 +1282,15 @@ ReportAutoFailoverNodeHealth(char *nodeHost, int nodePort,
  * We use SPI to automatically handle triggers, function calls, etc.
  */
 void
-ReportAutoFailoverNodeReplicationSetting(int nodeid, char *nodeHost, int nodePort,
+ReportAutoFailoverNodeReplicationSetting(int64 nodeid,
+										 char *nodeHost, int nodePort,
 										 int candidatePriority,
 										 bool replicationQuorum)
 {
 	Oid argTypes[] = {
 		INT4OID,                 /* candidate_priority */
 		BOOLOID,                 /* repliation_quorum */
-		INT4OID,                 /* nodeid */
+		INT8OID,                 /* nodeid */
 		TEXTOID,                 /* nodehost */
 		INT4OID                  /* nodeport */
 	};
@@ -1297,16 +1298,16 @@ ReportAutoFailoverNodeReplicationSetting(int nodeid, char *nodeHost, int nodePor
 	Datum argValues[] = {
 		Int32GetDatum(candidatePriority),     /* candidate_priority */
 		BoolGetDatum(replicationQuorum),      /* replication_quorum */
-		Int32GetDatum(nodeid),                /* nodeid */
+		Int64GetDatum(nodeid),                /* nodeid */
 		CStringGetTextDatum(nodeHost),        /* nodehost */
 		Int32GetDatum(nodePort)               /* nodeport */
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
 
 	const char *updateQuery =
-		"UPDATE " AUTO_FAILOVER_NODE_TABLE " SET "
-										   "candidatepriority = $1, replicationquorum = $2 "
-										   "WHERE nodeid = $3 and nodehost = $4 AND nodeport = $5";
+		"UPDATE " AUTO_FAILOVER_NODE_TABLE
+		"   SET candidatepriority = $1, replicationquorum = $2 "
+		" WHERE nodeid = $3 and nodehost = $4 AND nodeport = $5";
 
 	SPI_connect();
 
@@ -1330,20 +1331,20 @@ ReportAutoFailoverNodeReplicationSetting(int nodeid, char *nodeHost, int nodePor
  * We use SPI to automatically handle triggers, function calls, etc.
  */
 void
-UpdateAutoFailoverNodeMetadata(int nodeid,
+UpdateAutoFailoverNodeMetadata(int64 nodeid,
 							   char *nodeName,
 							   char *nodeHost,
 							   int nodePort)
 {
 	Oid argTypes[] = {
-		INT4OID,                 /* nodeid */
+		INT8OID,                 /* nodeid */
 		TEXTOID,                 /* nodename */
 		TEXTOID,                 /* nodehost */
 		INT4OID                  /* nodeport */
 	};
 
 	Datum argValues[] = {
-		Int32GetDatum(nodeid),                /* nodeid */
+		Int64GetDatum(nodeid),                /* nodeid */
 		CStringGetTextDatum(nodeName),        /* nodename */
 		CStringGetTextDatum(nodeHost),        /* nodehost */
 		Int32GetDatum(nodePort)               /* nodeport */
@@ -1379,11 +1380,11 @@ void
 RemoveAutoFailoverNode(AutoFailoverNode *pgAutoFailoverNode)
 {
 	Oid argTypes[] = {
-		INT4OID  /* nodeId */
+		INT8OID  /* nodeId */
 	};
 
 	Datum argValues[] = {
-		Int32GetDatum(pgAutoFailoverNode->nodeId)        /* nodeId */
+		Int64GetDatum(pgAutoFailoverNode->nodeId)        /* nodeId */
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
 
