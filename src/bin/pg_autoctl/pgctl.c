@@ -126,6 +126,14 @@ bool
 set_pg_ctl_from_config_bindir(PostgresSetup *pgSetup, const char *pg_config)
 {
 	char pg_ctl[MAXPGPATH] = { 0 };
+
+	if (!file_exists(pg_config))
+	{
+		log_debug("set_pg_ctl_from_config_bindir: file not found: \"%s\"",
+				  pg_config);
+		return false;
+	}
+
 	Program prog = run_program(pg_config, "--bindir", NULL);
 
 	char *lines[1];
@@ -600,7 +608,7 @@ find_pg_config_from_pg_ctl(const char *pg_ctl, char *pg_config, size_t size)
 		/* check that the pg_config we found relates to the given pg_ctl */
 		if (get_env_copy("PG_CONFIG", PG_CONFIG, sizeof(PG_CONFIG)) &&
 			file_exists(PG_CONFIG) &&
-			set_pg_ctl_from_config_bindir(&pgSetup, pg_config_path) &&
+			set_pg_ctl_from_config_bindir(&pgSetup, PG_CONFIG) &&
 			strcmp(pgSetup.pg_ctl, pg_ctl) == 0)
 		{
 			log_debug("find_pg_config_from_pg_ctl: \"%s\" "

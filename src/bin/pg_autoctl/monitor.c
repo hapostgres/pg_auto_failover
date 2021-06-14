@@ -4211,6 +4211,9 @@ monitor_ensure_extension_version(Monitor *monitor,
 				 extensionVersion,
 				 version->installedVersion);
 
+		/* we need to copy over the pg_ctl path and other pieces of setup. */
+		dbOwnerMonitor.config.pgSetup = monitor->config.pgSetup;
+
 		/*
 		 * Ok, let's try to update the extension then.
 		 *

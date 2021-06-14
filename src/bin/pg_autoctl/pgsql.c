@@ -3333,8 +3333,19 @@ pgsql_alter_extension_update_to(PGSQL *pgsql,
 	{
 		char *sqlstate = PQresultErrorField(result, PG_DIAG_SQLSTATE);
 
-		log_error("Error %s while running Postgres query: %s: %s",
-				  sqlstate, command, PQerrorMessage(connection));
+		log_error("Error %s while running Postgres query: %s:",
+				  sqlstate, command);
+
+		char *message = PQerrorMessage(connection);
+		char *errorLines[BUFSIZE];
+		int lineCount = splitLines(message, errorLines, BUFSIZE);
+		int lineNumber = 0;
+
+		for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
+		{
+			log_error("%s", errorLines[lineNumber]);
+		}
+
 		PQclear(result);
 		clear_results(pgsql);
 		pgsql_finish(pgsql);
