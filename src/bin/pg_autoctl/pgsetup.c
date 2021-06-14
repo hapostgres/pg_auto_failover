@@ -833,8 +833,10 @@ pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 	{
 		log_error("Failed to copy connection string \"%s\" which is %lu bytes "
 				  "long, pg_autoctl only supports connection strings up to "
-				  " %d bytes",
-				  connStringBuffer->data, connStringBuffer->len, MAXCONNINFO);
+				  " %lu bytes",
+				  connStringBuffer->data,
+				  (unsigned long) connStringBuffer->len,
+				  (unsigned long) MAXCONNINFO);
 		destroyPQExpBuffer(connStringBuffer);
 		return false;
 	}

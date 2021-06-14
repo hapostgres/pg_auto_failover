@@ -102,7 +102,10 @@ pg_ctl_version(PostgresSetup *pgSetup)
 		return false;
 	}
 
-	if (!parse_version_number(prog.stdOut, pg_version_string, &pg_version))
+	if (!parse_version_number(prog.stdOut,
+							  pg_version_string,
+							  PG_VERSION_STRING_MAX,
+							  &pg_version))
 	{
 		/* errors have already been logged */
 		free_program(&prog);

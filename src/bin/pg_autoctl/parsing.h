@@ -20,6 +20,7 @@ char * regexp_first_match(const char *string, const char *re);
 
 bool parse_version_number(const char *version_string,
 						  char *pg_version_string,
+						  size_t size,
 						  int *pg_version);
 
 bool parse_dotted_version_string(const char *pg_version_string,

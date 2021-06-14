@@ -106,6 +106,7 @@ AutoFailoverNode *
 TupleToAutoFailoverNode(TupleDesc tupleDescriptor, HeapTuple heapTuple)
 {
 	bool isNull = false;
+	bool sysIdentifierIsNull = false;
 
 	Datum formationId = heap_getattr(heapTuple,
 									 Anum_pgautofailover_node_formationid,
@@ -120,8 +121,9 @@ TupleToAutoFailoverNode(TupleDesc tupleDescriptor, HeapTuple heapTuple)
 								  tupleDescriptor, &isNull);
 	Datum nodePort = heap_getattr(heapTuple, Anum_pgautofailover_node_nodeport,
 								  tupleDescriptor, &isNull);
-	Datum sysIdentifier = heap_getattr(heapTuple, Anum_pgautofailover_node_sysidentifier,
-									   tupleDescriptor, &isNull);
+	Datum sysIdentifier = heap_getattr(heapTuple,
+									   Anum_pgautofailover_node_sysidentifier,
+									   tupleDescriptor, &sysIdentifierIsNull);
 	Datum goalState = heap_getattr(heapTuple, Anum_pgautofailover_node_goalstate,
 								   tupleDescriptor, &isNull);
 	Datum reportedState = heap_getattr(heapTuple,
@@ -169,7 +171,10 @@ TupleToAutoFailoverNode(TupleDesc tupleDescriptor, HeapTuple heapTuple)
 	pgAutoFailoverNode->nodeName = TextDatumGetCString(nodeName);
 	pgAutoFailoverNode->nodeHost = TextDatumGetCString(nodeHost);
 	pgAutoFailoverNode->nodePort = DatumGetInt32(nodePort);
-	pgAutoFailoverNode->sysIdentifier = DatumGetInt64(sysIdentifier);
+
+	pgAutoFailoverNode->sysIdentifier =
+		sysIdentifierIsNull ? 0 : DatumGetInt64(sysIdentifier);
+
 	pgAutoFailoverNode->goalState = EnumGetReplicationState(goalStateOid);
 	pgAutoFailoverNode->reportedState = EnumGetReplicationState(reportedStateOid);
 	pgAutoFailoverNode->pgIsRunning = DatumGetBool(pgIsRunning);
@@ -857,7 +862,7 @@ GetAutoFailoverNodeById(int64 nodeId)
 	MemoryContext callerContext = CurrentMemoryContext;
 
 	Oid argTypes[] = {
-		INT4OID  /* nodeId */
+		INT8OID  /* nodeId */
 	};
 
 	Datum argValues[] = {
@@ -871,7 +876,8 @@ GetAutoFailoverNodeById(int64 nodeId)
 
 	SPI_connect();
 
-	int spiStatus = SPI_execute_with_args(selectQuery, argCount, argTypes, argValues,
+	int spiStatus = SPI_execute_with_args(selectQuery,
+										  argCount, argTypes, argValues,
 										  NULL, false, 1);
 	if (spiStatus != SPI_OK_SELECT)
 	{

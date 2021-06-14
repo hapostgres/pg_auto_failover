@@ -1366,7 +1366,7 @@ pgsql_set_synchronous_standby_names(PGSQL *pgsql,
 				  "requires %lu bytes",
 				  synchronous_standby_names,
 				  BUFSIZE,
-				  strlen(synchronous_standby_names));
+				  (unsigned long) strlen(synchronous_standby_names));
 		return false;
 	}
 
@@ -3051,10 +3051,10 @@ parseTimelineHistoryResult(void *ctx, PGresult *result)
 
 	if (strlen(value) >= sizeof(context->content))
 	{
-		log_error("Received a timeline history file of %ld bytes, "
+		log_error("Received a timeline history file of %lu bytes, "
 				  "pg_autoctl is limited to files of up to %lu bytes.",
-				  strlen(value),
-				  sizeof(context->content));
+				  (unsigned long) strlen(value),
+				  (unsigned long) sizeof(context->content));
 		context->parsedOk = false;
 	}
 	strlcpy(context->content, value, sizeof(context->content));

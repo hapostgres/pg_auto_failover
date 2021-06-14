@@ -199,11 +199,11 @@ SetNodeHealthState(int64 nodeId,
 		appendStringInfo(&query,
 						 "UPDATE " AUTO_FAILOVER_NODE_TABLE
 						 "   SET health = %d, healthchecktime = now() "
-						 " WHERE nodeid = %ld "
+						 " WHERE nodeid = %lld "
 						 "   AND nodehost = %s AND nodeport = %d "
 						 " RETURNING node.*",
 						 healthState,
-						 nodeId,
+						 (long long) nodeId,
 						 quote_literal_cstr(nodeHost),
 						 nodePort);
 
