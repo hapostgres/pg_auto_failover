@@ -24,16 +24,16 @@ matrix:
     - env: PGVERSION=12 TEST=single
     - env: PGVERSION=13 TEST=single
     - env: PGVERSION=14 TEST=single
-    - env: PGVERSION=10 TEST=ssl
-    - env: PGVERSION=11 TEST=ssl
-    - env: PGVERSION=12 TEST=ssl
-    - env: PGVERSION=13 TEST=ssl
-    - env: PGVERSION=14 TEST=ssl
     - env: PGVERSION=10 TEST=monitor
     - env: PGVERSION=11 TEST=monitor
     - env: PGVERSION=12 TEST=monitor
     - env: PGVERSION=13 TEST=monitor
     - env: PGVERSION=14 TEST=monitor
+    - env: PGVERSION=10 TEST=ssl
+    - env: PGVERSION=11 TEST=ssl
+    - env: PGVERSION=12 TEST=ssl
+    - env: PGVERSION=13 TEST=ssl
+    - env: PGVERSION=14 TEST=ssl
     - env: LINTING=true
 before_install:
   - git clone -b v0.7.18 --depth 1 https://github.com/citusdata/tools.git
