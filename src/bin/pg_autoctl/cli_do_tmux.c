@@ -490,7 +490,22 @@ tmux_setenv(PQExpBuffer script,
 			const char *sessionName, const char *root, int firstPort)
 {
 	char PATH[BUFSIZE] = { 0 };
+	char PG_CONFIG[MAXPGPATH] = { 0 };
 	char monitor_pguri[MAXCONNINFO] = { 0 };
+
+	if (env_exists("PG_CONFIG"))
+	{
+		if (!get_env_copy("PG_CONFIG", PG_CONFIG, sizeof(PG_CONFIG)))
+		{
+			log_fatal("Failed to get PG_CONFIG from the environment");
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+
+		tmux_add_command(script,
+						 "set-environment -t %s PG_CONFIG \"%s\"",
+						 sessionName,
+						 PG_CONFIG);
+	}
 
 	if (!get_env_copy("PATH", PATH, sizeof(PATH)))
 	{

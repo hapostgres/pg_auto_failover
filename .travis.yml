@@ -18,18 +18,22 @@ matrix:
     - env: PGVERSION=11 TEST=multi
     - env: PGVERSION=12 TEST=multi
     - env: PGVERSION=13 TEST=multi
+    - env: PGVERSION=14 TEST=multi
     - env: PGVERSION=10 TEST=single
     - env: PGVERSION=11 TEST=single
     - env: PGVERSION=12 TEST=single
     - env: PGVERSION=13 TEST=single
-    - env: PGVERSION=10 TEST=ssl
-    - env: PGVERSION=11 TEST=ssl
-    - env: PGVERSION=12 TEST=ssl
-    - env: PGVERSION=13 TEST=ssl
+    - env: PGVERSION=14 TEST=single
     - env: PGVERSION=10 TEST=monitor
     - env: PGVERSION=11 TEST=monitor
     - env: PGVERSION=12 TEST=monitor
     - env: PGVERSION=13 TEST=monitor
+    - env: PGVERSION=14 TEST=monitor
+    - env: PGVERSION=10 TEST=ssl
+    - env: PGVERSION=11 TEST=ssl
+    - env: PGVERSION=12 TEST=ssl
+    - env: PGVERSION=13 TEST=ssl
+    - env: PGVERSION=14 TEST=ssl
     - env: LINTING=true
 before_install:
   - git clone -b v0.7.18 --depth 1 https://github.com/citusdata/tools.git
@@ -40,6 +44,8 @@ before_install:
   - pyenv versions
   - pyenv install -s 3.7
   - pyenv global 3.7
+  - sudo apt-get install liblz4-1
+  - sudo apt-get install liblz4-dev
   - sudo apt-get install bridge-utils
   - sudo apt-get install python3-pip
   - sudo pip3 install --upgrade pip

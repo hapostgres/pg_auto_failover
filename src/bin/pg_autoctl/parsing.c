@@ -195,6 +195,12 @@ parse_dotted_version_string(const char *pg_version_string, int *pg_version)
 		}
 	}
 
+	/* Postgres alpha/beta versions report version "14" instead of "14.0" */
+	if (!dotFound)
+	{
+		strlcpy(minor, "0", INTSTRING_MAX_DIGITS);
+	}
+
 	int maj = 0;
 	int min = 0;
 
