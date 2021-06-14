@@ -37,7 +37,7 @@ typedef enum
  */
 typedef struct NodeHealth
 {
-	int nodeId;
+	int64 nodeId;
 	char *nodeName;
 	char *nodeHost;
 	int nodePort;
@@ -59,7 +59,7 @@ extern void HealthCheckWorkerLauncherMain(Datum arg);
 extern List * LoadNodeHealthList(void);
 extern NodeHealth * TupleToNodeHealth(HeapTuple heapTuple,
 									  TupleDesc tupleDescriptor);
-extern void SetNodeHealthState(int nodeId,
+extern void SetNodeHealthState(int64 nodeId,
 							   char *nodeName,
 							   char *nodeHost,
 							   uint16 nodePort,

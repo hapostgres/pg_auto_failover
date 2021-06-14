@@ -109,7 +109,7 @@ typedef enum SyncState
 typedef struct AutoFailoverNode
 {
 	char *formationId;
-	int nodeId;
+	int64 nodeId;
 	int groupId;
 	char *nodeName;
 	char *nodeHost;

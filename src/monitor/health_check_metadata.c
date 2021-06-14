@@ -180,7 +180,7 @@ TupleToNodeHealth(HeapTuple heapTuple, TupleDesc tupleDescriptor)
  * SetNodeHealthState updates the health state of a node in the metadata.
  */
 void
-SetNodeHealthState(int nodeId,
+SetNodeHealthState(int64 nodeId,
 				   char *nodeName,
 				   char *nodeHost,
 				   uint16 nodePort,
