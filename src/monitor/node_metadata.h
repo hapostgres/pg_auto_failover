@@ -12,6 +12,8 @@
 
 #pragma once
 
+#include <inttypes.h>
+
 #include "access/xlogdefs.h"
 #include "datatype/timestamp.h"
 
@@ -98,7 +100,7 @@ typedef enum SyncState
  * AutoFailoverNode, for consistency. Well, apart when registering, where we
  * don't have the node id and/or the node name yet.
  */
-#define NODE_FORMAT "node %d \"%s\" (%s:%d)"
+#define NODE_FORMAT "node %ld \"%s\" (%s:%d)"
 #define NODE_FORMAT_ARGS(node) \
 	node->nodeId, node->nodeName, node->nodeHost, node->nodePort
 

@@ -2277,7 +2277,7 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 			StringInfo sbnames = makeStringInfo();
 
 			appendStringInfo(sbnames,
-							 "ANY 1 (pgautofailover_standby_%d)",
+							 "ANY 1 (pgautofailover_standby_%ld)",
 							 secondaryNode->nodeId);
 
 			PG_RETURN_TEXT_P(cstring_to_text(sbnames->data));
@@ -2340,7 +2340,7 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 				AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
 
 				appendStringInfo(sbnames,
-								 "%spgautofailover_standby_%d",
+								 "%spgautofailover_standby_%ld",
 								 firstNode ? "" : ", ",
 								 node->nodeId);
 
