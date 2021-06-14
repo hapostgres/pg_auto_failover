@@ -45,6 +45,7 @@ before_install:
   - pyenv install -s 3.7
   - pyenv global 3.7
   - sudo apt-get install bridge-utils
+  - sudo apt-get install liblz4-1
   - sudo apt-get install python3-pip
   - sudo pip3 install --upgrade pip
   - pip3 install --user pipenv
