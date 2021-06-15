@@ -981,10 +981,9 @@ fsm_rewind_or_init(Keeper *keeper)
 	/* first, make sure we can connect with "replication" */
 	if (!pgctl_identify_system(upstream))
 	{
-		log_error("Failed to connect to the primary node "
-				  "%" PRId64 " \"%s\" (%s:%d) "
-							 "with a replication connection string. "
-							 "See above for details",
+		log_error("Failed to connect to the primary node " NODE_FORMAT
+				  "with a replication connection string. "
+				  "See above for details",
 				  upstream->primaryNode.nodeId,
 				  upstream->primaryNode.name,
 				  upstream->primaryNode.host,
@@ -1312,8 +1311,8 @@ fsm_fast_forward(Keeper *keeper)
 
 	if (!standby_fetch_missing_wal(postgres))
 	{
-		log_error("Failed to fetch WAL bytes from standby node "
-				  "%" PRId64 " \"%s\" (%s:%d), see above for details",
+		log_error("Failed to fetch WAL bytes from standby node " NODE_FORMAT
+				  ", see above for details",
 				  upstream->primaryNode.nodeId,
 				  upstream->primaryNode.name,
 				  upstream->primaryNode.host,
@@ -1392,7 +1391,7 @@ fsm_follow_new_primary(Keeper *keeper)
 	if (!standby_follow_new_primary(postgres))
 	{
 		log_error("Failed to change standby setup to follow new primary "
-				  "node %" PRId64 " \"%s\" (%s:%d), see above for details",
+				  "node " NODE_FORMAT ", see above for details",
 				  replicationSource->primaryNode.nodeId,
 				  replicationSource->primaryNode.name,
 				  replicationSource->primaryNode.host,

@@ -505,8 +505,9 @@ monitor_get_other_nodes(Monitor *monitor,
 	if (!parseContext.parsedOK)
 	{
 		log_error("Failed to get the other nodes from the monitor while running "
-				  "\"%s\" with node id %" PRId64 " because it returned an "
-												 "unexpected result. See previous line for details.",
+				  "\"%s\" with node id %" PRId64
+				  " because it returned an unexpected result. "
+				  "See previous line for details.",
 				  sql, myNodeId);
 		return false;
 	}
@@ -588,8 +589,9 @@ monitor_print_other_nodes_as_json(Monitor *monitor,
 	if (!context.parsedOk)
 	{
 		log_error("Failed to get the other nodes from the monitor while running "
-				  "\"%s\" with node id %" PRId64 " because it returned an "
-												 "unexpected result. See previous line for details.",
+				  "\"%s\" with node id %" PRId64
+				  " because it returned an unexpected result. "
+				  "See previous line for details.",
 				  sql, myNodeId);
 		if (context.strVal)
 		{
@@ -647,8 +649,7 @@ monitor_get_primary(Monitor *monitor, char *formation, int groupId,
 	/* The monitor function pgautofailover.get_primary only returns 3 fields */
 	node->isPrimary = true;
 
-	log_debug("The primary node returned by the monitor is node "
-			  "%" PRId64 " \"%s\" (%s:%d)",
+	log_debug("The primary node returned by the monitor is node " NODE_FORMAT,
 			  node->nodeId, node->name, node->host, node->port);
 
 	return true;
@@ -762,8 +763,7 @@ monitor_get_most_advanced_standby(Monitor *monitor,
 	strlcpy(node->lsn, nodeArray.nodes[0].lsn, PG_LSN_MAXLENGTH);
 	node->isPrimary = nodeArray.nodes[0].isPrimary;
 
-	log_debug("The most advanced standby node is node "
-			  "%" PRId64 " \"%s\" (%s:%d)",
+	log_debug("The most advanced standby node is node " NODE_FORMAT,
 			  node->nodeId, node->name, node->host, node->port);
 
 	return true;
@@ -879,9 +879,9 @@ monitor_register_node(Monitor *monitor, char *formation,
 		return false;
 	}
 
-	log_info("Registered node %" PRId64 " (%s:%d) "
-										"with name \"%s\" in formation \"%s\", group %d, state \"%s\"",
-			 assignedState->nodeId, host, port, assignedState->name,
+	log_info("Registered node " NODE_FORMAT
+			 "in formation \"%s\", group %d, state \"%s\"",
+			 assignedState->nodeId, assignedState->name, host, port,
 			 formation, assignedState->groupId,
 			 NodeStateToString(assignedState->state));
 
@@ -3001,9 +3001,9 @@ monitor_update_node_metadata(Monitor *monitor,
 	if (!context.parsedOk)
 	{
 		log_error(
-			"Failed to set node %" PRId64 " metadata on the monitor "
-										  "because it returned an unexpected result. "
-										  "See previous line for details.",
+			"Failed to set node %" PRId64
+			" metadata on the monitor because it returned an unexpected result. "
+			"See previous line for details.",
 			nodeId);
 		return false;
 	}

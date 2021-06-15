@@ -531,8 +531,8 @@ cli_enable_maintenance(int argc, char **argv)
 
 		if (!mayRetry)
 		{
-			log_fatal("Failed to enable maintenance of node %" PRId64 " "
-																	  "on the monitor, see above for details",
+			log_fatal("Failed to enable maintenance of node %" PRId64
+					  " on the monitor, see above for details",
 					  nodeId);
 			exit(EXIT_CODE_MONITOR);
 		}
@@ -635,8 +635,8 @@ cli_disable_maintenance(int argc, char **argv)
 
 		if (!mayRetry)
 		{
-			log_fatal("Failed to disable maintenance of node %" PRId64 " "
-																	   "on the monitor, see above for details",
+			log_fatal("Failed to disable maintenance of node %" PRId64
+					  " on the monitor, see above for details",
 					  nodeId);
 			exit(EXIT_CODE_MONITOR);
 		}

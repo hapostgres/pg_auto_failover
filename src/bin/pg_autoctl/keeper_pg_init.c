@@ -712,8 +712,7 @@ wait_until_primary_has_created_our_replication_slot(Keeper *keeper,
 		{
 			++errors;
 
-			log_warn("Failed to contact the primary node "
-					 "%" PRId64 " \"%s\" (%s:%d)",
+			log_warn("Failed to contact the primary node " NODE_FORMAT,
 					 primaryNode.nodeId,
 					 primaryNode.name,
 					 primaryNode.host,
