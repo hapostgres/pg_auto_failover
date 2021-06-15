@@ -241,6 +241,7 @@ class Cluster:
                 pass
 
         self.flush_output()
+
         return proc.communicate(timeout=timeout - full_secs)
 
     def create_root_cert(self, directory, basename="root", CN="root"):
@@ -414,12 +415,12 @@ class PGNode:
         self.vnode.run_and_wait(passwd_command, name="user passwd")
         self.authenticatedUsers[username] = password
 
-    def stop_pg_autoctl(self, signal=signal.SIGTERM):
+    def stop_pg_autoctl(self, sig=signal.SIGTERM):
         """
         Kills the keeper by sending a SIGTERM to keeper's process group.
         """
         if self.pg_autoctl:
-            return self.pg_autoctl.stop(signal)
+            return self.pg_autoctl.stop(sig)
 
     def stop_postgres(self):
         """
@@ -524,7 +525,7 @@ class PGNode:
         Simulates a data node failure by terminating the keeper and stopping
         postgres.
         """
-        self.stop_pg_autoctl(signal=signal.SIGQUIT)
+        self.stop_pg_autoctl(sig=signal.SIGQUIT)
 
         # stopping pg_autoctl also stops Postgres, unless bugs.
         if self.pg_is_running():
@@ -653,7 +654,7 @@ class PGNode:
     def logs(self):
         log_string = ""
         if self.running():
-            out, err, ret = self.stop_pg_autoctl(signal=signal.SIGINT)
+            out, err, ret = self.stop_pg_autoctl(sig=signal.SIGINT)
             log_string += f"STDOUT OF PG_AUTOCTL FOR {self.datadir}:\n"
             log_string += f"{self.pg_autoctl.cmd}\n{out}\n"
             log_string += f"STDERR OF PG_AUTOCTL FOR {self.datadir}:\n{err}\n"
@@ -1106,7 +1107,7 @@ class DataNode(PGNode):
         """
         Cleans up processes and files created for this data node.
         """
-        self.stop_pg_autoctl(signal=signal.SIGQUIT)
+        self.stop_pg_autoctl(sig=signal.SIGQUIT)
 
         flags = ["--destroy"]
         if force:
@@ -1958,15 +1959,24 @@ class PGAutoCtl:
 
             return out, err, proc.returncode
 
-    def stop(self, signal=signal.SIGTERM):
+    def stop(self, sig=signal.SIGTERM):
         """
         Kills the keeper by sending a SIGTERM to keeper's process group.
         """
+        cluster = self.pgnode.cluster
+
         if self.run_proc and self.run_proc.pid:
             try:
-                os.kill(self.run_proc.pid, signal)
+                ret_poll = self.run_proc.poll()
+                if ret_poll is None:
+                    self.run_proc.send_signal(sig)
+                    return cluster.communicate(self, COMMAND_TIMEOUT)
 
-                return self.pgnode.cluster.communicate(self, COMMAND_TIMEOUT)
+                else:
+                    self.run_proc.release()
+                    self.run_proc = None
+
+                    return self.out, self.err, ret_poll
 
             except ProcessLookupError as e:
                 self.run_proc = None
@@ -1975,6 +1985,7 @@ class PGAutoCtl:
                     % (self.datadir, e)
                 )
                 return None, None, -1
+
         else:
             return None, None, 0
 
@@ -1989,12 +2000,18 @@ class PGAutoCtl:
         if not self.run_proc:
             return self.out, self.err
 
-        self.out, self.err = self.run_proc.communicate(timeout=timeout)
+        poll_ret = self.run_proc.poll()
 
-        # The process exited, so let's clean this process up. Calling
-        # communicate again would otherwise cause an "Invalid file object"
-        # error.
-        ret = self.run_proc.returncode
+        if poll_ret is None:
+            self.out, self.err = self.run_proc.communicate(timeout=timeout)
+
+            # The process exited, so let's clean this process up. Calling
+            # communicate again would otherwise cause an "Invalid file object"
+            # error.
+            ret = self.run_proc.returncode
+        else:
+            ret = poll_ret
+
         self.run_proc.release()
         self.run_proc = None
 
@@ -2043,6 +2060,12 @@ class PGAutoCtl:
 
         else:
             print("pg_autoctl process for %s is not running" % self.datadir)
+
+    def kill(self):
+        """
+        Expose self.run_proc.kill()
+        """
+        return self.run_proc.kill()
 
 
 def sudo_mkdir_p(directory):
