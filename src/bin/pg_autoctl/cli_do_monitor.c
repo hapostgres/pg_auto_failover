@@ -572,6 +572,7 @@ cli_do_monitor_node_active(int argc, char **argv)
 							 keeper.state.current_group,
 							 keeper.state.current_role,
 							 keeper.postgres.pgIsRunning,
+							 keeper.postgres.postgresSetup.control.timeline_id,
 							 keeper.postgres.currentLSN,
 							 keeper.postgres.pgsrSyncState,
 							 &assignedState))

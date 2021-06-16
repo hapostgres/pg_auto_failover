@@ -359,9 +359,11 @@ node_active(PG_FUNCTION_ARGS)
 	int32 currentGroupId = PG_GETARG_INT32(2);
 	Oid currentReplicationStateOid = PG_GETARG_OID(3);
 	bool currentPgIsRunning = PG_GETARG_BOOL(4);
-	XLogRecPtr currentLSN = PG_GETARG_LSN(5);
 
-	text *currentPgsrSyncStateText = PG_GETARG_TEXT_P(6);
+	int32 currentTLI = PG_GETARG_INT32(5);
+	XLogRecPtr currentLSN = PG_GETARG_LSN(6);
+
+	text *currentPgsrSyncStateText = PG_GETARG_TEXT_P(7);
 	char *currentPgsrSyncState = text_to_cstring(currentPgsrSyncStateText);
 
 	AutoFailoverNodeState currentNodeState = { 0 };
@@ -370,6 +372,7 @@ node_active(PG_FUNCTION_ARGS)
 	currentNodeState.groupId = currentGroupId;
 	currentNodeState.replicationState =
 		EnumGetReplicationState(currentReplicationStateOid);
+	currentNodeState.reportedTLI = currentTLI;
 	currentNodeState.reportedLSN = currentLSN;
 	currentNodeState.pgsrSyncState = SyncStateFromString(currentPgsrSyncState);
 	currentNodeState.pgIsRunning = currentPgIsRunning;
@@ -478,6 +481,7 @@ NodeActive(char *formationId, AutoFailoverNodeState *currentNodeState)
 									currentNodeState->replicationState,
 									currentNodeState->pgIsRunning,
 									currentNodeState->pgsrSyncState,
+									currentNodeState->reportedTLI,
 									currentNodeState->reportedLSN);
 	}
 

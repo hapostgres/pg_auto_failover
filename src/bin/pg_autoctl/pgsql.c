@@ -2488,7 +2488,8 @@ typedef struct PgMetadata
 bool
 pgsql_get_postgres_metadata(PGSQL *pgsql,
 							bool *pg_is_in_recovery,
-							char *pgsrSyncState, char *currentLSN,
+							char *pgsrSyncState,
+							char *currentLSN,
 							PostgresControlData *control)
 {
 	PgMetadata context = { 0 };

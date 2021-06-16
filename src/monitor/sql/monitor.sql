@@ -48,9 +48,10 @@ select formationid, nodename, goalstate, reportedstate
 table pgautofailover.formation;
 
 -- dump the pgautofailover.node table, omitting the timely columns
-select formationid, nodeid, groupid, nodehost, nodeport,
-       goalstate, reportedstate, reportedpgisrunning, reportedrepstate
-  from pgautofailover.node;
+  select formationid, nodeid, groupid, nodehost, nodeport,
+         goalstate, reportedstate, reportedpgisrunning, reportedrepstate
+    from pgautofailover.node
+order by nodeid;
 
 select * from pgautofailover.get_primary('unknown formation');
 select * from pgautofailover.get_primary(group_id => -10);
@@ -65,9 +66,10 @@ select pgautofailover.remove_node(1);
 table pgautofailover.formation;
 
 -- dump the pgautofailover.node table, omitting the timely columns
-select formationid, nodeid, groupid, nodehost, nodeport,
-       goalstate, reportedstate, reportedpgisrunning, reportedrepstate
-  from pgautofailover.node;
+  select formationid, nodeid, groupid, nodehost, nodeport,
+         goalstate, reportedstate, reportedpgisrunning, reportedrepstate
+    from pgautofailover.node
+order by nodeid;
 
 select *
   from pgautofailover.set_node_system_identifier(2, 6852685710417058800);

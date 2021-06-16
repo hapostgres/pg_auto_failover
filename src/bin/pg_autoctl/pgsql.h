@@ -159,6 +159,7 @@ typedef struct NodeAddress
 	char name[_POSIX_HOST_NAME_MAX];
 	char host[_POSIX_HOST_NAME_MAX];
 	int port;
+	int tli;
 	char lsn[PG_LSN_MAXLENGTH];
 	bool isPrimary;
 } NodeAddress;

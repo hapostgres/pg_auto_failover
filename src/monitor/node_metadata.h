@@ -39,14 +39,15 @@
 #define Anum_pgautofailover_node_reportedpgisrunning 10
 #define Anum_pgautofailover_node_reportedrepstate 11
 #define Anum_pgautofailover_node_reporttime 12
-#define Anum_pgautofailover_node_reportedLSN 13
-#define Anum_pgautofailover_node_walreporttime 14
-#define Anum_pgautofailover_node_health 15
-#define Anum_pgautofailover_node_healthchecktime 16
-#define Anum_pgautofailover_node_statechangetime 17
-#define Anum_pgautofailover_node_candidate_priority 18
-#define Anum_pgautofailover_node_replication_quorum 19
-#define Anum_pgautofailover_node_nodecluster 20
+#define Anum_pgautofailover_node_reportedTLI 13
+#define Anum_pgautofailover_node_reportedLSN 14
+#define Anum_pgautofailover_node_walreporttime 15
+#define Anum_pgautofailover_node_health 16
+#define Anum_pgautofailover_node_healthchecktime 17
+#define Anum_pgautofailover_node_statechangetime 18
+#define Anum_pgautofailover_node_candidate_priority 19
+#define Anum_pgautofailover_node_replication_quorum 20
+#define Anum_pgautofailover_node_nodecluster 21
 
 #define AUTO_FAILOVER_NODE_TABLE_ALL_COLUMNS \
 	"formationid, " \
@@ -61,6 +62,7 @@
 	"reportedpgisrunning, " \
 	"reportedrepstate, " \
 	"reporttime, " \
+	"reportedtli, " \
 	"reportedlsn, " \
 	"walreporttime, " \
 	"health, " \
@@ -126,6 +128,7 @@ typedef struct AutoFailoverNode
 	NodeHealthState health;
 	TimestampTz healthCheckTime;
 	TimestampTz stateChangeTime;
+	int reportedTLI;
 	XLogRecPtr reportedLSN;
 	int candidatePriority;
 	bool replicationQuorum;
@@ -197,6 +200,7 @@ extern void ReportAutoFailoverNodeState(char *nodeHost, int nodePort,
 										ReplicationState reportedState,
 										bool pgIsRunning,
 										SyncState pgSyncState,
+										int reportedTLI,
 										XLogRecPtr reportedLSN);
 extern void ReportAutoFailoverNodeHealth(char *nodeHost, int nodePort,
 										 ReplicationState goalState,

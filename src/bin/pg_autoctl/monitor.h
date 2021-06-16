@@ -107,7 +107,7 @@ bool monitor_register_node(Monitor *monitor,
 bool monitor_node_active(Monitor *monitor,
 						 char *formation, int64_t nodeId,
 						 int groupId, NodeState currentState,
-						 bool pgIsRunning,
+						 bool pgIsRunning, int currentTLI,
 						 char *currentLSN, char *pgsrSyncState,
 						 MonitorAssignedState *assignedState);
 bool monitor_get_node_replication_settings(Monitor *monitor,

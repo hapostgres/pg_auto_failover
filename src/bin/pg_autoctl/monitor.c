@@ -898,19 +898,20 @@ bool
 monitor_node_active(Monitor *monitor,
 					char *formation, int64_t nodeId,
 					int groupId, NodeState currentState,
-					bool pgIsRunning,
+					bool pgIsRunning, int currentTLI,
 					char *currentLSN, char *pgsrSyncState,
 					MonitorAssignedState *assignedState)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
 		"SELECT * FROM pgautofailover.node_active($1, $2, $3, "
-		"$4::pgautofailover.replication_state, $5, $6, $7)";
-	int paramCount = 7;
-	Oid paramTypes[7] = {
-		TEXTOID, INT8OID, INT4OID, TEXTOID, BOOLOID, LSNOID, TEXTOID
+		"$4::pgautofailover.replication_state, $5, $6, $7, $8)";
+	int paramCount = 8;
+	Oid paramTypes[8] = {
+		TEXTOID, INT8OID, INT4OID, TEXTOID,
+		BOOLOID, INT4OID, LSNOID, TEXTOID
 	};
-	const char *paramValues[7];
+	const char *paramValues[8];
 	MonitorAssignedStateParseContext parseContext =
 	{ { 0 }, assignedState, false };
 	const char *nodeStateString = NodeStateToString(currentState);
@@ -920,8 +921,9 @@ monitor_node_active(Monitor *monitor,
 	paramValues[2] = intToString(groupId).strValue;
 	paramValues[3] = nodeStateString;
 	paramValues[4] = pgIsRunning ? "true" : "false";
-	paramValues[5] = currentLSN;
-	paramValues[6] = pgsrSyncState;
+	paramValues[5] = intToString(currentTLI).strValue;
+	paramValues[6] = currentLSN;
+	paramValues[7] = pgsrSyncState;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
@@ -1755,7 +1757,7 @@ parseCurrentNodeState(PGresult *result, int rowNumber,
 	int errors = 0;
 
 	/* we don't expect any of the column to be NULL */
-	for (colNumber = 0; colNumber < 12; colNumber++)
+	for (colNumber = 0; colNumber < 13; colNumber++)
 	{
 		if (PQgetisnull(result, rowNumber, 0))
 		{
@@ -1776,8 +1778,9 @@ parseCurrentNodeState(PGresult *result, int rowNumber,
 	 *  7 - OUT assigned_group_state pgautofailover.replication_state,
 	 *  8 - OUT candidate_priority	 int,
 	 *  9 - OUT replication_quorum	 bool,
-	 * 10 - OUT reported_lsn         pg_lsn,
-	 * 11 - OUT health               integer
+	 * 10 - OUT reported_tli         int,
+	 * 11 - OUT reported_lsn         pg_lsn,
+	 * 12 - OUT health               integer
 	 *
 	 * We need the groupId to parse the formation kind into a nodeKind, so we
 	 * begin at column 1 and get back to column 0 later, after column 4.
@@ -1884,11 +1887,18 @@ parseCurrentNodeState(PGresult *result, int rowNumber,
 		nodeState->replicationQuorum = (*value) == 't';
 	}
 
-	/* we trust Postgres pg_lsn data type to fit in our PG_LSN_MAXLENGTH */
 	value = PQgetvalue(result, rowNumber, 10);
+	if (!stringToInt(value, &(nodeState->node.tli)))
+	{
+		log_error("Invalid timeline \"%s\" returned by monitor", value);
+		++errors;
+	}
+
+	/* we trust Postgres pg_lsn data type to fit in our PG_LSN_MAXLENGTH */
+	value = PQgetvalue(result, rowNumber, 11);
 	strlcpy(nodeState->node.lsn, value, PG_LSN_MAXLENGTH);
 
-	value = PQgetvalue(result, rowNumber, 11);
+	value = PQgetvalue(result, rowNumber, 12);
 	if (!stringToInt(value, &(nodeState->health)))
 	{
 		log_error("Invalid node health \"%s\" returned by monitor", value);
@@ -1921,9 +1931,9 @@ parseCurrentNodeStateArray(CurrentNodeStateArray *nodesArray, PGresult *result)
 	}
 
 	/* pgautofailover.current_state returns 11 columns */
-	if (PQnfields(result) != 12)
+	if (PQnfields(result) != 13)
 	{
-		log_error("Query returned %d columns, expected 12", PQnfields(result));
+		log_error("Query returned %d columns, expected 13", PQnfields(result));
 		return false;
 	}
 
@@ -3751,6 +3761,7 @@ monitor_check_report_state(void *context, CurrentNodeState *nodeState)
 	char timestring[MAXCTIMESIZE] = { 0 };
 	char hostport[BUFSIZE] = { 0 };
 	char composedId[BUFSIZE] = { 0 };
+	char tliLSN[BUFSIZE] = { 0 };
 
 	/* filter notifications for our own formation */
 	if (strcmp(nodeState->formation, ctx->formation) != 0 ||
@@ -3769,7 +3780,8 @@ monitor_check_report_state(void *context, CurrentNodeState *nodeState)
 								&(nodeState->node),
 								ctx->groupId,
 								hostport,
-								composedId);
+								composedId,
+								tliLSN);
 
 	fformat(stdout, "%8s | %*s | %*s | %*s | %19s | %19s\n",
 			timestring + 11,
@@ -3899,6 +3911,7 @@ monitor_check_node_report_state(void *context, CurrentNodeState *nodeState)
 	char timestring[MAXCTIMESIZE] = { 0 };
 	char hostport[BUFSIZE] = { 0 };
 	char composedId[BUFSIZE] = { 0 };
+	char tliLSN[BUFSIZE] = { 0 };
 
 	/* filter notifications for our own formation */
 	if (strcmp(nodeState->formation, ctx->formation) != 0 ||
@@ -3917,7 +3930,8 @@ monitor_check_node_report_state(void *context, CurrentNodeState *nodeState)
 								&(nodeState->node),
 								ctx->groupId,
 								hostport,
-								composedId);
+								composedId,
+								tliLSN);
 
 	fformat(stdout, "%8s | %*s | %*s | %*s | %19s | %19s\n",
 			timestring + 11,
