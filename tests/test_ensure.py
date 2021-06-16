@@ -58,7 +58,7 @@ def test_003_init_secondary():
 def test_004_demoted():
     print()
     # stop fast, don't go to maintenance
-    node1.stop_pg_autoctl(signal=signal.SIGINT)
+    node1.stop_pg_autoctl(sig=signal.SIGINT)
     # we need the pg_autoctl process to run to reach the state demoted,
     # otherwise the monitor assigns that state to node1 but we never reach
     # it
