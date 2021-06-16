@@ -685,9 +685,9 @@ pgautofailover_node_reportedlsn_compare(const void *a, const void *b)
 		return -1;
 	}
 
-	if (node1->reportedTLI > node2->reportedTLI ||
+	if (node1->reportedTLI < node2->reportedTLI ||
 		(node1->reportedTLI == node2->reportedTLI &&
-		 node1->reportedLSN > node2->reportedLSN))
+		 node1->reportedLSN < node2->reportedLSN))
 	{
 		return 1;
 	}
