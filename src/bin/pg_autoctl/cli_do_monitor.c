@@ -608,7 +608,7 @@ cli_do_monitor_node_active(int argc, char **argv)
 	else
 	{
 		fformat(stdout,
-				"%s/%d %s:%d %d:%d %s\n",
+				"%s/%d %s:%d %" PRId64 ":%d %s\n",
 				config.formation,
 				config.groupId,
 				config.hostname,

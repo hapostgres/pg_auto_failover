@@ -520,7 +520,7 @@ cli_enable_maintenance(int argc, char **argv)
 
 	while (!pgsql_retry_policy_expired(&retryPolicy))
 	{
-		int nodeId = keeper.state.current_node_id;
+		int64_t nodeId = keeper.state.current_node_id;
 		bool mayRetry = false;
 
 		if (monitor_start_maintenance(&(keeper.monitor), nodeId, &mayRetry))
@@ -531,16 +531,16 @@ cli_enable_maintenance(int argc, char **argv)
 
 		if (!mayRetry)
 		{
-			log_fatal("Failed to enable maintenance of node %d "
-					  "on the monitor, see above for details",
+			log_fatal("Failed to enable maintenance of node %" PRId64
+					  " on the monitor, see above for details",
 					  nodeId);
 			exit(EXIT_CODE_MONITOR);
 		}
 
 		int sleepTimeMs = pgsql_compute_connection_retry_sleep_time(&retryPolicy);
 
-		log_warn("Failed to enable maintenance of node %d on the monitor, "
-				 "retrying in %d ms.",
+		log_warn("Failed to enable maintenance of node %" PRId64
+				 " on the monitor, retrying in %d ms.",
 				 nodeId, sleepTimeMs);
 
 		/* we have milliseconds, pg_usleep() wants microseconds */
@@ -624,7 +624,7 @@ cli_disable_maintenance(int argc, char **argv)
 
 	while (!pgsql_retry_policy_expired(&retryPolicy))
 	{
-		int nodeId = keeper.state.current_node_id;
+		int64_t nodeId = keeper.state.current_node_id;
 		bool mayRetry = false;
 
 		if (monitor_stop_maintenance(&(keeper.monitor), nodeId, &mayRetry))
@@ -635,16 +635,16 @@ cli_disable_maintenance(int argc, char **argv)
 
 		if (!mayRetry)
 		{
-			log_fatal("Failed to disable maintenance of node %d "
-					  "on the monitor, see above for details",
+			log_fatal("Failed to disable maintenance of node %" PRId64
+					  " on the monitor, see above for details",
 					  nodeId);
 			exit(EXIT_CODE_MONITOR);
 		}
 
 		int sleepTimeMs = pgsql_compute_connection_retry_sleep_time(&retryPolicy);
 
-		log_warn("Failed to disable maintenance of node %d on the monitor, "
-				 "retrying in %d ms.",
+		log_warn("Failed to disable maintenance of node %" PRId64
+				 " on the monitor, retrying in %d ms.",
 				 nodeId, sleepTimeMs);
 
 		/* we have milliseconds, pg_usleep() wants microseconds */
@@ -1708,7 +1708,7 @@ cli_disable_monitor(int argc, char **argv)
 		if (optForce)
 		{
 			/* --force, and we found the node */
-			log_info("Removing node %d \"%s\" (%s:%d) from monitor",
+			log_info("Removing node %" PRId64 " \"%s\" (%s:%d) from monitor",
 					 nodesArray.nodes[nodeIndex].nodeId,
 					 nodesArray.nodes[nodeIndex].name,
 					 nodesArray.nodes[nodeIndex].host,
@@ -1726,7 +1726,7 @@ cli_disable_monitor(int argc, char **argv)
 		else
 		{
 			/* node was found on the monitor, but --force not provided */
-			log_info("Found node %d \"%s\" (%s:%d) on the monitor",
+			log_info("Found node %" PRId64 " \"%s\" (%s:%d) on the monitor",
 					 nodesArray.nodes[nodeIndex].nodeId,
 					 nodesArray.nodes[nodeIndex].name,
 					 nodesArray.nodes[nodeIndex].host,

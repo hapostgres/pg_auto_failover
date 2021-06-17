@@ -110,8 +110,11 @@ get_env_copy_with_fallback(const char *name, char *result, int maxLength,
 	if (actualLength >= maxLength)
 	{
 		log_error("Failed to copy value stored in %s environment setting, "
-				  "which is %ld long. pg_autoctl only supports %d bytes for "
-				  "this environment setting", name, actualLength, maxLength - 1);
+				  "which is %lu long. pg_autoctl only supports %lu bytes for "
+				  "this environment setting",
+				  name,
+				  (unsigned long) actualLength,
+				  (unsigned long) maxLength - 1);
 		return false;
 	}
 	return true;

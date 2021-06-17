@@ -96,7 +96,7 @@ register_node(PG_FUNCTION_ARGS)
 
 	uint64 sysIdentifier = PG_GETARG_INT64(5);
 
-	int32 currentNodeId = PG_GETARG_INT32(6);
+	int64 currentNodeId = PG_GETARG_INT64(6);
 	int32 currentGroupId = PG_GETARG_INT32(7);
 	Oid currentReplicationStateOid = PG_GETARG_OID(8);
 
@@ -111,10 +111,6 @@ register_node(PG_FUNCTION_ARGS)
 	char *nodeCluster = text_to_cstring(nodeClusterText);
 
 	AutoFailoverNodeState currentNodeState = { 0 };
-
-	TupleDesc resultDescriptor = NULL;
-	Datum values[6];
-	bool isNulls[6];
 
 	currentNodeState.nodeId = currentNodeId;
 	currentNodeState.groupId = currentGroupId;
@@ -316,10 +312,14 @@ register_node(PG_FUNCTION_ARGS)
 
 	ProceedGroupState(pgAutoFailoverNode);
 
+	TupleDesc resultDescriptor = NULL;
+	Datum values[6];
+	bool isNulls[6];
+
 	memset(values, 0, sizeof(values));
 	memset(isNulls, false, sizeof(isNulls));
 
-	values[0] = Int32GetDatum(assignedNodeState->nodeId);
+	values[0] = Int64GetDatum(assignedNodeState->nodeId);
 	values[1] = Int32GetDatum(assignedNodeState->groupId);
 	values[2] = ObjectIdGetDatum(
 		ReplicationStateGetEnum(pgAutoFailoverNode->goalState));
@@ -327,7 +327,9 @@ register_node(PG_FUNCTION_ARGS)
 	values[4] = BoolGetDatum(assignedNodeState->replicationQuorum);
 	values[5] = CStringGetTextDatum(pgAutoFailoverNode->nodeName);
 
-	TypeFuncClass resultTypeClass = get_call_result_type(fcinfo, NULL, &resultDescriptor);
+	TypeFuncClass resultTypeClass =
+		get_call_result_type(fcinfo, NULL, &resultDescriptor);
+
 	if (resultTypeClass != TYPEFUNC_COMPOSITE)
 	{
 		ereport(ERROR, (errmsg("return type must be a row type")));
@@ -353,7 +355,7 @@ node_active(PG_FUNCTION_ARGS)
 	text *formationIdText = PG_GETARG_TEXT_P(0);
 	char *formationId = text_to_cstring(formationIdText);
 
-	int32 currentNodeId = PG_GETARG_INT32(1);
+	int64 currentNodeId = PG_GETARG_INT64(1);
 	int32 currentGroupId = PG_GETARG_INT32(2);
 	Oid currentReplicationStateOid = PG_GETARG_OID(3);
 	bool currentPgIsRunning = PG_GETARG_BOOL(4);
@@ -364,10 +366,6 @@ node_active(PG_FUNCTION_ARGS)
 
 	AutoFailoverNodeState currentNodeState = { 0 };
 
-	TupleDesc resultDescriptor = NULL;
-	Datum values[5];
-	bool isNulls[5];
-
 	currentNodeState.nodeId = currentNodeId;
 	currentNodeState.groupId = currentGroupId;
 	currentNodeState.replicationState =
@@ -375,21 +373,29 @@ node_active(PG_FUNCTION_ARGS)
 	currentNodeState.reportedLSN = currentLSN;
 	currentNodeState.pgsrSyncState = SyncStateFromString(currentPgsrSyncState);
 	currentNodeState.pgIsRunning = currentPgIsRunning;
-	AutoFailoverNodeState *assignedNodeState = NodeActive(formationId, &currentNodeState);
+
+	AutoFailoverNodeState *assignedNodeState =
+		NodeActive(formationId, &currentNodeState);
 
 	Oid newReplicationStateOid =
 		ReplicationStateGetEnum(assignedNodeState->replicationState);
 
+	TupleDesc resultDescriptor = NULL;
+	Datum values[5];
+	bool isNulls[5];
+
 	memset(values, 0, sizeof(values));
 	memset(isNulls, false, sizeof(isNulls));
 
-	values[0] = Int32GetDatum(assignedNodeState->nodeId);
+	values[0] = Int64GetDatum(assignedNodeState->nodeId);
 	values[1] = Int32GetDatum(assignedNodeState->groupId);
 	values[2] = ObjectIdGetDatum(newReplicationStateOid);
 	values[3] = Int32GetDatum(assignedNodeState->candidatePriority);
 	values[4] = BoolGetDatum(assignedNodeState->replicationQuorum);
 
-	TypeFuncClass resultTypeClass = get_call_result_type(fcinfo, NULL, &resultDescriptor);
+	TypeFuncClass resultTypeClass =
+		get_call_result_type(fcinfo, NULL, &resultDescriptor);
+
 	if (resultTypeClass != TYPEFUNC_COMPOSITE)
 	{
 		ereport(ERROR, (errmsg("return type must be a row type")));
@@ -413,13 +419,14 @@ NodeActive(char *formationId, AutoFailoverNodeState *currentNodeState)
 
 	if (pgAutoFailoverNode == NULL)
 	{
-		ereport(ERROR, (errmsg("couldn't find node with nodeid %d",
-							   currentNodeState->nodeId)));
+		ereport(ERROR, (errmsg("couldn't find node with nodeid %lld",
+							   (long long) currentNodeState->nodeId)));
 	}
 	else if (strcmp(pgAutoFailoverNode->formationId, formationId) != 0)
 	{
-		ereport(ERROR, (errmsg("node %d does not belong to formation %s",
-							   currentNodeState->nodeId, formationId)));
+		ereport(ERROR, (errmsg("node %lld does not belong to formation %s",
+							   (long long) currentNodeState->nodeId,
+							   formationId)));
 	}
 	else
 	{
@@ -720,7 +727,9 @@ get_primary(PG_FUNCTION_ARGS)
 	Datum values[4];
 	bool isNulls[4];
 
-	AutoFailoverNode *primaryNode = GetPrimaryOrDemotedNodeInGroup(formationId, groupId);
+	AutoFailoverNode *primaryNode =
+		GetPrimaryOrDemotedNodeInGroup(formationId, groupId);
+
 	if (primaryNode == NULL)
 	{
 		ereport(ERROR, (errmsg("group has no writable node right now")));
@@ -729,7 +738,7 @@ get_primary(PG_FUNCTION_ARGS)
 	memset(values, 0, sizeof(values));
 	memset(isNulls, false, sizeof(isNulls));
 
-	values[0] = Int32GetDatum(primaryNode->nodeId);
+	values[0] = Int64GetDatum(primaryNode->nodeId);
 	values[1] = CStringGetTextDatum(primaryNode->nodeName);
 	values[2] = CStringGetTextDatum(primaryNode->nodeHost);
 	values[3] = Int32GetDatum(primaryNode->nodePort);
@@ -826,7 +835,7 @@ get_nodes(PG_FUNCTION_ARGS)
 		memset(values, 0, sizeof(values));
 		memset(isNulls, false, sizeof(isNulls));
 
-		values[0] = Int32GetDatum(node->nodeId);
+		values[0] = Int64GetDatum(node->nodeId);
 		values[1] = CStringGetTextDatum(node->nodeName);
 		values[2] = CStringGetTextDatum(node->nodeHost);
 		values[3] = Int32GetDatum(node->nodePort);
@@ -882,7 +891,7 @@ get_other_nodes(PG_FUNCTION_ARGS)
 	/* stuff done only on the first call of the function */
 	if (SRF_IS_FIRSTCALL())
 	{
-		int32 nodeId = PG_GETARG_INT32(0);
+		int64 nodeId = PG_GETARG_INT64(0);
 
 
 		checkPgAutoFailoverVersion();
@@ -905,7 +914,8 @@ get_other_nodes(PG_FUNCTION_ARGS)
 		AutoFailoverNode *activeNode = GetAutoFailoverNodeById(nodeId);
 		if (activeNode == NULL)
 		{
-			ereport(ERROR, (errmsg("node %d is not registered", nodeId)));
+			ereport(ERROR, (errmsg("node %lld is not registered",
+								   (long long) nodeId)));
 		}
 
 		if (PG_NARGS() == 1)
@@ -952,7 +962,7 @@ get_other_nodes(PG_FUNCTION_ARGS)
 		memset(values, 0, sizeof(values));
 		memset(isNulls, false, sizeof(isNulls));
 
-		values[0] = Int32GetDatum(node->nodeId);
+		values[0] = Int64GetDatum(node->nodeId);
 		values[1] = CStringGetTextDatum(node->nodeName);
 		values[2] = CStringGetTextDatum(node->nodeHost);
 		values[3] = Int32GetDatum(node->nodePort);
@@ -1001,14 +1011,15 @@ remove_node_by_nodeid(PG_FUNCTION_ARGS)
 {
 	checkPgAutoFailoverVersion();
 
-	int32 nodeId = PG_GETARG_INT32(0);
+	int64 nodeId = PG_GETARG_INT64(0);
 
 	AutoFailoverNode *currentNode = GetAutoFailoverNodeById(nodeId);
 
 	if (currentNode == NULL)
 	{
 		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-						errmsg("couldn't find node with nodeid %d", nodeId)));
+						errmsg("couldn't find node with nodeid %lld",
+							   (long long) nodeId)));
 	}
 
 	PG_RETURN_BOOL(RemoveNode(currentNode));
@@ -1521,7 +1532,7 @@ start_maintenance(PG_FUNCTION_ARGS)
 {
 	checkPgAutoFailoverVersion();
 
-	int32 nodeId = PG_GETARG_INT32(0);
+	int64 nodeId = PG_GETARG_INT64(0);
 
 	AutoFailoverNode *primaryNode = NULL;
 
@@ -1766,7 +1777,7 @@ stop_maintenance(PG_FUNCTION_ARGS)
 {
 	checkPgAutoFailoverVersion();
 
-	int32 nodeId = PG_GETARG_INT32(0);
+	int64 nodeId = PG_GETARG_INT64(0);
 
 
 	char message[BUFSIZE];
@@ -2143,7 +2154,7 @@ update_node_metadata(PG_FUNCTION_ARGS)
 {
 	checkPgAutoFailoverVersion();
 
-	int32 nodeid = 0;
+	int64 nodeid = 0;
 	char *nodeName = NULL;
 	char *nodeHost = NULL;
 	int32 nodePort = 0;
@@ -2156,14 +2167,15 @@ update_node_metadata(PG_FUNCTION_ARGS)
 	}
 	else
 	{
-		nodeid = PG_GETARG_INT32(0);
+		nodeid = PG_GETARG_INT64(0);
 	}
 
 	AutoFailoverNode *currentNode = GetAutoFailoverNodeById(nodeid);
 
 	if (currentNode == NULL)
 	{
-		ereport(ERROR, (errmsg("node %d is not registered", nodeid)));
+		ereport(ERROR, (errmsg("node %lld is not registered",
+							   (long long) nodeid)));
 	}
 
 	LockFormation(currentNode->formationId, ShareLock);
@@ -2275,8 +2287,8 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 			StringInfo sbnames = makeStringInfo();
 
 			appendStringInfo(sbnames,
-							 "ANY 1 (pgautofailover_standby_%d)",
-							 secondaryNode->nodeId);
+							 "ANY 1 (pgautofailover_standby_%lld)",
+							 (long long) secondaryNode->nodeId);
 
 			PG_RETURN_TEXT_P(cstring_to_text(sbnames->data));
 		}
@@ -2338,9 +2350,9 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 				AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
 
 				appendStringInfo(sbnames,
-								 "%spgautofailover_standby_%d",
+								 "%spgautofailover_standby_%lld",
 								 firstNode ? "" : ", ",
-								 node->nodeId);
+								 (long long) node->nodeId);
 
 				if (firstNode)
 				{

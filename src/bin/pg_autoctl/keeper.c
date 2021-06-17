@@ -102,7 +102,7 @@ keeper_store_state(Keeper *keeper)
  * it to disk.
  */
 bool
-keeper_update_state(Keeper *keeper, int node_id, int group_id,
+keeper_update_state(Keeper *keeper, int64_t node_id, int group_id,
 					NodeState state, bool update_last_monitor_contact)
 {
 	KeeperStateData *keeperState = &(keeper->state);
@@ -112,6 +112,22 @@ keeper_update_state(Keeper *keeper, int node_id, int group_id,
 	{
 		keeperState->last_monitor_contact = now;
 	}
+
+	/*
+	 * See state.h for details about why this test. We could migrate the state
+	 * nodeId to an int64_t, but that's a TODO item still at this point. It
+	 * would require being able to read the old state format on-disk and
+	 * convert automatically to the new one in-memory.
+	 */
+	if (node_id >= LONG_MAX)
+	{
+		log_fatal("Current node id does not fit in a 32 bits integer.");
+		log_info("Please report a bug to pg_auto_failover by opening "
+				 "an issue on Github project at "
+				 "https://github.com/citusdata/pg_auto_failover.");
+		return false;
+	}
+
 	keeperState->current_node_id = node_id;
 	keeperState->current_group = group_id;
 	keeperState->assigned_role = state;
@@ -1507,7 +1523,7 @@ keeper_register_again(Keeper *keeper)
 								  &assignedState))
 		{
 			/* registration was successful, break out of the retry loop */
-			log_info("Successfully registered to the monitor with nodeId %d",
+			log_info("Successfully registered to the monitor with nodeId %" PRId64,
 					 assignedState.nodeId);
 			registered = true;
 			break;
@@ -1823,7 +1839,7 @@ keeper_refresh_other_nodes(Keeper *keeper, bool forceCacheInvalidation)
 	NodeAddressArray newNodesArray = { 0 };
 	NodeAddressArray diffNodesArray = { 0 };
 
-	int nodeId = keeper->state.current_node_id;
+	int64_t nodeId = keeper->state.current_node_id;
 
 	log_trace("keeper_refresh_other_nodes");
 
@@ -1934,7 +1950,7 @@ diff_nodesArray(NodeAddressArray *previousNodesArray,
 			 */
 			if (!streq(currNode->host, prevNode->host))
 			{
-				log_debug("Node %d has a new hostname \"%s\"",
+				log_debug("Node %" PRId64 " has a new hostname \"%s\"",
 						  currNode->nodeId, currNode->host);
 
 				diffNodesArray->count++;
@@ -1990,7 +2006,7 @@ keeper_set_node_metadata(Keeper *keeper, KeeperConfig *oldConfig)
 		return false;
 	}
 
-	int nodeId = keeperState.current_node_id;
+	int64_t nodeId = keeperState.current_node_id;
 
 	if (streq(oldConfig->name, config->name) &&
 		streq(oldConfig->hostname, config->hostname) &&
@@ -2586,7 +2602,8 @@ keeper_get_most_advanced_standby(Keeper *keeper, NodeAddress *upstreamNode)
 
 			if (!parseLSN(node->lsn, &nodeLSN))
 			{
-				log_error("Failed to parse node %d \"%s\" LSN position \"%s\"",
+				log_error("Failed to parse node %" PRId64
+						  " \"%s\" LSN position \"%s\"",
 						  node->nodeId, node->name, node->lsn);
 				return false;
 			}

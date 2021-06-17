@@ -42,7 +42,7 @@ bool keeper_register_and_init(Keeper *keeper, NodeState initialState);
 bool keeper_register_again(Keeper *keeper);
 bool keeper_load_state(Keeper *keeper);
 bool keeper_store_state(Keeper *keeper);
-bool keeper_update_state(Keeper *keeper, int node_id, int group_id, NodeState state,
+bool keeper_update_state(Keeper *keeper, int64_t node_id, int group_id, NodeState state,
 						 bool update_last_monitor_contact);
 bool keeper_start_postgres(Keeper *keeper);
 bool keeper_restart_postgres(Keeper *keeper);

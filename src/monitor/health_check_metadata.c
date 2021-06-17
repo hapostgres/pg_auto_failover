@@ -166,7 +166,7 @@ TupleToNodeHealth(HeapTuple heapTuple, TupleDesc tupleDescriptor)
 										   TLIST_NUM_HEALTH_STATUS, &isNull);
 
 	NodeHealth *nodeHealth = palloc0(sizeof(NodeHealth));
-	nodeHealth->nodeId = DatumGetInt32(nodeIdDatum);
+	nodeHealth->nodeId = DatumGetInt64(nodeIdDatum);
 	nodeHealth->nodeName = TextDatumGetCString(nodeNameDatum);
 	nodeHealth->nodeHost = TextDatumGetCString(nodeHostDatum);
 	nodeHealth->nodePort = DatumGetInt32(nodePortDatum);
@@ -180,7 +180,7 @@ TupleToNodeHealth(HeapTuple heapTuple, TupleDesc tupleDescriptor)
  * SetNodeHealthState updates the health state of a node in the metadata.
  */
 void
-SetNodeHealthState(int nodeId,
+SetNodeHealthState(int64 nodeId,
 				   char *nodeName,
 				   char *nodeHost,
 				   uint16 nodePort,
@@ -199,11 +199,11 @@ SetNodeHealthState(int nodeId,
 		appendStringInfo(&query,
 						 "UPDATE " AUTO_FAILOVER_NODE_TABLE
 						 "   SET health = %d, healthchecktime = now() "
-						 " WHERE nodeid = %d "
+						 " WHERE nodeid = %lld "
 						 "   AND nodehost = %s AND nodeport = %d "
 						 " RETURNING node.*",
 						 healthState,
-						 nodeId,
+						 (long long) nodeId,
 						 quote_literal_cstr(nodeHost),
 						 nodePort);
 

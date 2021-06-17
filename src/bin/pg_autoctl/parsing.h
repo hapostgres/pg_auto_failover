@@ -20,6 +20,7 @@ char * regexp_first_match(const char *string, const char *re);
 
 bool parse_version_number(const char *version_string,
 						  char *pg_version_string,
+						  size_t size,
 						  int *pg_version);
 
 bool parse_dotted_version_string(const char *pg_version_string,
@@ -94,6 +95,6 @@ bool parse_and_scrub_connection_string(const char *pguri, char *scrubbedPguri);
 bool parseLSN(const char *str, uint64_t *lsn);
 bool parseNodesArray(const char *nodesJSON,
 					 NodeAddressArray *nodesArray,
-					 int nodeId);
+					 int64_t nodeId);
 
 #endif /* PARSING_H */

@@ -101,7 +101,7 @@ bool keeper_config_set_setting(KeeperConfig *config,
 							   char *value);
 
 bool keeper_config_merge_options(KeeperConfig *config, KeeperConfig *options);
-bool keeper_config_update(KeeperConfig *config, int nodeId, int groupId);
+bool keeper_config_update(KeeperConfig *config, int64_t nodeId, int groupId);
 bool keeper_config_update_with_absolute_pgdata(KeeperConfig *config);
 
 #endif /* KEEPER_CONFIG_H */
