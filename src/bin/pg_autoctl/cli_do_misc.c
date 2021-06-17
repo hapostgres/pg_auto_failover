@@ -88,13 +88,22 @@ keeper_cli_add_default_settings(int argc, char **argv)
 {
 	KeeperConfig config = keeperOptions;
 	LocalPostgresServer postgres = { 0 };
-	bool missingPgdataOk = false;
-	bool postgresNotRunningOk = false;
 
-	keeper_config_init(&config, missingPgdataOk, postgresNotRunningOk);
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = true;
+
+	if (!keeper_config_read_file(&config,
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
+	{
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
 	local_postgres_init(&postgres, &(config.pgSetup));
 
-	if (!postgres_add_default_settings(&postgres))
+	if (!postgres_add_default_settings(&postgres, config.hostname))
 	{
 		log_fatal("Failed to add the default settings for streaming replication "
 				  "used by pg_auto_failover to postgresql.conf, "

@@ -232,7 +232,7 @@ fsm_init_primary(Keeper *keeper)
 		return false;
 	}
 
-	if (!postgres_add_default_settings(postgres))
+	if (!postgres_add_default_settings(postgres, config->hostname))
 	{
 		log_error("Failed to initialize postgres as primary because "
 				  "adding default settings failed, see above for details");

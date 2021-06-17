@@ -343,7 +343,9 @@ monitor_add_postgres_default_settings(Monitor *monitor)
 		}
 	}
 
-	if (!pg_add_auto_failover_default_settings(pgSetup, configFilePath,
+	if (!pg_add_auto_failover_default_settings(pgSetup,
+											   config->hostname,
+											   configFilePath,
 											   monitor_default_settings))
 	{
 		log_error("Failed to add default settings to \"%s\": couldn't "

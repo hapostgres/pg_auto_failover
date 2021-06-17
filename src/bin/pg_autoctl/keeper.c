@@ -805,7 +805,7 @@ keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 	 * options being found in our pg_autoctl configuration file or for other
 	 * reasons.
 	 */
-	if (!postgres_add_default_settings(postgres))
+	if (!postgres_add_default_settings(postgres, config->hostname))
 	{
 		log_warn("Failed to edit Postgres configuration after "
 				 "reloading pg_autoctl configuration, "
