@@ -30,6 +30,7 @@
 #define ERRCODE_INVALID_OBJECT_DEFINITION "42P17"
 #define ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE "55000"
 #define ERRCODE_OBJECT_IN_USE "55006"
+#define ERRCODE_UNDEFINED_OBJECT "42704"
 
 static char * ConnectionTypeToString(ConnectionType connectionType);
 static void log_connection_error(PGconn *connection, int logLevel);
@@ -1070,7 +1071,8 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 		if (pgsql->connectionType == PGSQL_CONN_MONITOR &&
 			!(strcmp(sqlstate, ERRCODE_INVALID_OBJECT_DEFINITION) == 0 ||
 			  strcmp(sqlstate, ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE) == 0 ||
-			  strcmp(sqlstate, ERRCODE_OBJECT_IN_USE)))
+			  strcmp(sqlstate, ERRCODE_OBJECT_IN_USE) == 0 ||
+			  strcmp(sqlstate, ERRCODE_UNDEFINED_OBJECT) == 0))
 		{
 			log_error("SQL query: %s", sql);
 			log_error("SQL params: %s", debugParameters);

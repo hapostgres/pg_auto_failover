@@ -477,6 +477,11 @@ NodeStateToString(NodeState s)
 			return "join_secondary";
 		}
 
+		case DROPPED_STATE:
+		{
+			return "dropped";
+		}
+
 		case ANY_STATE:
 		{
 			return "#any state#";
@@ -578,6 +583,10 @@ NodeStateFromString(const char *str)
 	else if (strcmp(str, "join_secondary") == 0)
 	{
 		return JOIN_SECONDARY_STATE;
+	}
+	else if (strcmp(str, "dropped") == 0)
+	{
+		return DROPPED_STATE;
 	}
 	else
 	{

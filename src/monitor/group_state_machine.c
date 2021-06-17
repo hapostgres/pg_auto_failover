@@ -127,6 +127,27 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	}
 
 	/*
+	 * If the active node just reached the DROPPED state, proceed to remove it
+	 * from the pgautofailover.node table.
+	 */
+	if (IsCurrentState(activeNode, REPLICATION_STATE_DROPPED))
+	{
+		char message[BUFSIZE] = { 0 };
+
+		/* time to actually remove the current node */
+		RemoveAutoFailoverNode(activeNode);
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Removing " NODE_FORMAT " from formation \"%s\" and group %d",
+			NODE_FORMAT_ARGS(activeNode),
+			activeNode->formationId,
+			activeNode->groupId);
+
+		return true;
+	}
+
+	/*
 	 * We separate out the FSM for the primary server, because that one needs
 	 * to loop over every other node to take decisions. That induces some
 	 * complexity that is best managed in a specialized function.

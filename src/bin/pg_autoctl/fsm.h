@@ -71,6 +71,8 @@ bool fsm_cleanup_and_resume_as_primary(Keeper *keeper);
 
 bool fsm_init_from_standby(Keeper *keeper);
 
+bool fsm_drop_node(Keeper *keeper);
+
 /*
  * Extra helpers.
  */

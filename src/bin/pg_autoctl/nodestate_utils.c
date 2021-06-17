@@ -452,6 +452,7 @@ nodestateConnectionType(CurrentNodeState *nodeState)
 		/* in those states Postgres is known to be stopped/down */
 		case NO_STATE:
 		case INIT_STATE:
+		case DROPPED_STATE:
 		case WAIT_STANDBY_STATE:
 		case DEMOTED_STATE:
 		case DEMOTE_TIMEOUT_STATE:

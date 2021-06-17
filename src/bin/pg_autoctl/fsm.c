@@ -175,6 +175,10 @@
 #define COMMENT_INIT_TO_REPORT_LSN \
 	"Creating a new node from a standby node that is not a candidate."
 
+#define COMMENT_ANY_TO_DROPPED \
+	"This node is being dropped from the monitor"
+
+
 /* *INDENT-OFF* */
 
 /*
@@ -376,6 +380,11 @@ KeeperFSMTransition KeeperFSM[] = {
 	{ INIT_STATE, REPORT_LSN_STATE, COMMENT_INIT_TO_REPORT_LSN, &fsm_init_from_standby },
 
 	/*
+	 * Dropping a node is a two-step process
+	 */
+	{ ANY_STATE, DROPPED_STATE, COMMENT_ANY_TO_DROPPED, &fsm_drop_node },
+
+	/*
 	 * This is the end, my friend.
 	 */
 	{ NO_STATE, NO_STATE, NULL, NULL },
@@ -507,11 +516,21 @@ keeper_fsm_reach_assigned_state(Keeper *keeper)
 		{
 			bool ret = false;
 
-			log_info("FSM transition from \"%s\" to \"%s\"%s%s",
-					 NodeStateToString(transition.current),
-					 NodeStateToString(transition.assigned),
-					 transition.comment ? ": " : "",
-					 transition.comment ? transition.comment : "");
+			if (transition.current != ANY_STATE)
+			{
+				log_info("FSM transition from \"%s\" to \"%s\"%s%s",
+						 NodeStateToString(transition.current),
+						 NodeStateToString(transition.assigned),
+						 transition.comment ? ": " : "",
+						 transition.comment ? transition.comment : "");
+			}
+			else
+			{
+				log_info("FSM transition to \"%s\"%s%s",
+						 NodeStateToString(transition.assigned),
+						 transition.comment ? ": " : "",
+						 transition.comment ? transition.comment : "");
+			}
 
 			if (transition.transitionFunction)
 			{

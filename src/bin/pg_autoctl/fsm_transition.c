@@ -1458,3 +1458,15 @@ fsm_init_from_standby(Keeper *keeper)
 
 	return fsm_init_standby_from_upstream(keeper);
 }
+
+
+/*
+ * fsm_drop_node is called to finish dropping a node on the client side.
+ *
+ * Nothing to do here, really.
+ */
+bool
+fsm_drop_node(Keeper *keeper)
+{
+	return true;
+}

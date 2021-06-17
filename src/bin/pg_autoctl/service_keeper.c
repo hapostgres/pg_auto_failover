@@ -44,7 +44,7 @@ KeeperReloadFunction KeeperReloadHooksArray[] = {
 
 KeeperReloadFunction *KeeperReloadHooks = KeeperReloadHooksArray;
 
-static bool keeper_node_active(Keeper *keeper, bool doInit);
+static bool service_keeper_node_active(Keeper *keeper, bool doInit);
 static void check_for_network_partitions(Keeper *keeper);
 static bool is_network_healthy(Keeper *keeper);
 static bool in_network_partition(KeeperStateData *keeperState, uint64_t now,
@@ -254,12 +254,38 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 	bool warnedOnCurrentIteration = false;
 	bool warnedOnPreviousIteration = false;
 
+	bool nodeHasBeenDroppedFromTheMonitor = false;
+
 	log_debug("pg_autoctl service is starting");
 
 	/* setup our monitor client connection with our notification handler */
 	(void) monitor_setup_notifications(monitor,
 									   keeperState->current_group,
 									   keeperState->current_node_id);
+
+	/*
+	 * When pg_autoctl drop node is used from a distance, then this nodes
+	 * transitions to the DROPPED_STATE and shutdown cleanly. Now, if a dropped
+	 * node is restarted (by systemd, an interactive user, or another way) we
+	 * must realise the situation and refrain from entering our main loop.
+	 */
+	bool dropped = false;
+
+	if (keeper_node_has_been_dropped(keeper, &dropped) && dropped)
+	{
+		/* signal that it's time to shutdown everything */
+		log_fatal("This node with id %lld in formation \"%s\" and group %d "
+				  "has been dropped from the monitor",
+				  (long long) keeperState->current_node_id,
+				  config->formation,
+				  config->groupId);
+
+		log_info("To get rid of the configuration file and PGDATA directory, "
+				 "run pg_autoctl drop node --pgdata \"%s\" --destroy",
+				 config->pgSetup.pgdata);
+
+		exit(EXIT_CODE_FATAL);
+	}
 
 	while (keepRunning)
 	{
@@ -405,7 +431,8 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		 */
 		else
 		{
-			couldContactMonitorThisRound = keeper_node_active(keeper, doInit);
+			couldContactMonitorThisRound =
+				service_keeper_node_active(keeper, doInit);
 
 			if (!couldContactMonitor &&
 				couldContactMonitorThisRound &&
@@ -535,6 +562,25 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 			}
 		}
 
+		/*
+		 * If the node has been dropped, we exit the process... after having
+		 * done at least another round where we could contact the monitor to
+		 * report that we reached the assigned state.
+		 */
+		if ((couldContactMonitor || config->monitorDisabled) &&
+			keeperState->current_role == DROPPED_STATE &&
+			keeperState->current_role == keeperState->assigned_role)
+		{
+			if (nodeHasBeenDroppedFromTheMonitor)
+			{
+				keepRunning = false;
+			}
+			else
+			{
+				nodeHasBeenDroppedFromTheMonitor = true;
+			}
+		}
+
 		if ((needStateChange ||
 			 (!config->monitorDisabled &&
 			  monitor_has_received_notifications(monitor))) &&
@@ -597,6 +643,12 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 	/* One last check that we do not have any connections open */
 	pgsql_finish(&(keeper->monitor.pgsql));
 
+	if (nodeHasBeenDroppedFromTheMonitor)
+	{
+		/* signal that it's time to shutdown everything */
+		exit(EXIT_CODE_DROPPED);
+	}
+
 	return true;
 }
 
@@ -612,135 +664,19 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
  * needed.
  */
 static bool
-keeper_node_active(Keeper *keeper, bool doInit)
+service_keeper_node_active(Keeper *keeper, bool doInit)
 {
 	KeeperConfig *config = &(keeper->config);
 	KeeperStateData *keeperState = &(keeper->state);
-	Monitor *monitor = &(keeper->monitor);
-	LocalPostgresServer *postgres = &(keeper->postgres);
 
-	uint64_t now = time(NULL);
 	MonitorAssignedState assignedState = { 0 };
 
-	char expectedSlotName[BUFSIZE] = { 0 };
-
-	bool forceCacheInvalidation = false;
-	bool reportPgIsRunning = ReportPgIsRunning(keeper);
-
-	/*
-	 * First, connect to the monitor and check we're compatible with the
-	 * extension there. An upgrade on the monitor might have happened in
-	 * between loops here.
-	 *
-	 * Note that we don't need a very strong a guarantee about the version
-	 * number of the monitor extension, as we have other places in the code
-	 * that are protected against "suprises". The worst case would be a race
-	 * condition where the extension check passes, and then the monitor is
-	 * upgraded, and then we call node_active().
-	 *
-	 *  - The extension on the monitor is protected against running a version
-	 *    of the node_active (or any other) function that does not match with
-	 *    the SQL level version.
-	 *
-	 *  - Then, if we changed the API without changing the arguments, that
-	 *    means we changed what we may return. We are protected against changes
-	 *    in number of return values, so we're left with changes within the
-	 *    columns themselves. Basically that's a new state that we don't know
-	 *    how to handle. In that case we're going to fail to parse it, and at
-	 *    next attempt we're going to catch up with the new version number.
-	 *
-	 * All in all, the worst case is going to be one extra call before we
-	 * restart node active process, and an extra error message in the logs
-	 * during the live upgrade of pg_auto_failover.
-	 */
-	if (!keeper_check_monitor_extension_version(keeper))
-	{
-		/*
-		 * We could fail here for two different reasons:
-		 *
-		 * - if we failed to connect to the monitor (network split, monitor is
-		 *   in maintenance or being restarted, etc): in that case just return
-		 *   false and have the main loop handle the situation
-		 *
-		 * - if we could connect to the monitor and then failed to check that
-		 *   the version of the monitor is the one we expect, then we're not
-		 *   compatible with this monitor and that's a different story.
-		 */
-		if (monitor->pgsql.status != PG_CONNECTION_OK)
-		{
-			/*
-			 * Check whether we're likely to be in a network partition. That
-			 * will cause the assigned_role to become demoted.
-			 */
-			(void) check_for_network_partitions(keeper);
-
-			return false;
-		}
-
-		/*
-		 * Okay we're not compatible with the current version of the
-		 * pgautofailover extension on the monitor. The most plausible scenario
-		 * is that the monitor got update: we're still running e.g. 1.4 and the
-		 * monitor is running 1.5.
-		 *
-		 * In that case we exit, and because the keeper node-active service is
-		 * RP_PERMANENT the supervisor is going to restart this process. The
-		 * restart happens with fork() and exec(), so it uses the current
-		 * version of pg_autoctl binary on disk, which with luck has been
-		 * updated to e.g. 1.5 too.
-		 *
-		 * TL;DR: just exit now, have the service restarted by the supervisor
-		 * with the expected version of pg_autoctl that matches the monitor's
-		 * extension version.
-		 */
-		exit(EXIT_CODE_MONITOR);
-	}
-
-	if (doInit)
-	{
-		PostgresSetup *pgSetup = &(postgres->postgresSetup);
-		uint64_t system_identifier = pgSetup->control.system_identifier;
-
-		if (!monitor_set_group_system_identifier(monitor,
-												 keeperState->current_group,
-												 system_identifier))
-		{
-			/* errors have already been logged */
-			return false;
-		}
-	}
-
-	/* We used to output that in INFO every 5s, which is too much chatter */
-	log_debug("Calling node_active for node %s/%d/%d with current state: "
-			  "%s, "
-			  "PostgreSQL %s running, "
-			  "sync_state is \"%s\", "
-			  "current lsn is \"%s\".",
-			  config->formation,
-			  keeperState->current_node_id,
-			  keeperState->current_group,
-			  NodeStateToString(keeperState->current_role),
-			  reportPgIsRunning ? "is" : "is not",
-			  postgres->pgsrSyncState,
-			  postgres->currentLSN);
-
-
-	/* ensure we use the correct retry policy with the monitor */
-	(void) pgsql_set_main_loop_retry_policy(&(monitor->pgsql.retryPolicy));
+	uint64_t now = time(NULL);
 
 	/*
 	 * Report the current state to the monitor and get the assigned state.
 	 */
-	if (!monitor_node_active(monitor,
-							 config->formation,
-							 keeperState->current_node_id,
-							 keeperState->current_group,
-							 keeperState->current_role,
-							 reportPgIsRunning,
-							 postgres->postgresSetup.control.timeline_id,
-							 postgres->currentLSN,
-							 postgres->pgsrSyncState,
-							 &assignedState))
+	if (!keeper_node_active(keeper, doInit, &assignedState))
 	{
 		log_error("Failed to get the goal state from the monitor");
 
@@ -767,6 +703,14 @@ keeper_node_active(Keeper *keeper, bool doInit)
 	}
 
 	/* maybe update our cached list of other nodes */
+	if (keeperState->current_role == DROPPED_STATE &&
+		keeperState->current_role == keeperState->assigned_role)
+	{
+		return true;
+	}
+
+	bool forceCacheInvalidation = false;
+
 	if (!keeper_refresh_other_nodes(keeper, forceCacheInvalidation))
 	{
 		/*
@@ -781,6 +725,8 @@ keeper_node_active(Keeper *keeper, bool doInit)
 	 * Also update the groupId and replication slot name in the
 	 * configuration file.
 	 */
+	char expectedSlotName[BUFSIZE] = { 0 };
+
 	(void) postgres_sprintf_replicationSlotName(assignedState.nodeId,
 												expectedSlotName,
 												sizeof(expectedSlotName));

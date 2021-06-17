@@ -1116,6 +1116,207 @@ keeper_maintain_replication_slots(Keeper *keeper)
 
 
 /*
+ * keeper_node_active calls pgautofailover.node_active on the monitor.
+ */
+bool
+keeper_node_active(Keeper *keeper, bool doInit,
+				   MonitorAssignedState *assignedState)
+{
+	Monitor *monitor = &(keeper->monitor);
+	KeeperConfig *config = &(keeper->config);
+	KeeperStateData *keeperState = &(keeper->state);
+	LocalPostgresServer *postgres = &(keeper->postgres);
+
+	bool reportPgIsRunning = ReportPgIsRunning(keeper);
+
+	/*
+	 * First, connect to the monitor and check we're compatible with the
+	 * extension there. An upgrade on the monitor might have happened in
+	 * between loops here.
+	 *
+	 * Note that we don't need a very strong a guarantee about the version
+	 * number of the monitor extension, as we have other places in the code
+	 * that are protected against "suprises". The worst case would be a race
+	 * condition where the extension check passes, and then the monitor is
+	 * upgraded, and then we call node_active().
+	 *
+	 *  - The extension on the monitor is protected against running a version
+	 *    of the node_active (or any other) function that does not match with
+	 *    the SQL level version.
+	 *
+	 *  - Then, if we changed the API without changing the arguments, that
+	 *    means we changed what we may return. We are protected against changes
+	 *    in number of return values, so we're left with changes within the
+	 *    columns themselves. Basically that's a new state that we don't know
+	 *    how to handle. In that case we're going to fail to parse it, and at
+	 *    next attempt we're going to catch up with the new version number.
+	 *
+	 * All in all, the worst case is going to be one extra call before we
+	 * restart node active process, and an extra error message in the logs
+	 * during the live upgrade of pg_auto_failover.
+	 */
+	if (!keeper_check_monitor_extension_version(keeper))
+	{
+		/*
+		 * We could fail here for two different reasons:
+		 *
+		 * - if we failed to connect to the monitor (network split, monitor is
+		 *   in maintenance or being restarted, etc): in that case just return
+		 *   false and have the main loop handle the situation
+		 *
+		 * - if we could connect to the monitor and then failed to check that
+		 *   the version of the monitor is the one we expect, then we're not
+		 *   compatible with this monitor and that's a different story.
+		 */
+		if (monitor->pgsql.status != PG_CONNECTION_OK)
+		{
+			return false;
+		}
+
+		/*
+		 * Okay we're not compatible with the current version of the
+		 * pgautofailover extension on the monitor. The most plausible scenario
+		 * is that the monitor got update: we're still running e.g. 1.4 and the
+		 * monitor is running 1.5.
+		 *
+		 * In that case we exit, and because the keeper node-active service is
+		 * RP_PERMANENT the supervisor is going to restart this process. The
+		 * restart happens with fork() and exec(), so it uses the current
+		 * version of pg_autoctl binary on disk, which with luck has been
+		 * updated to e.g. 1.5 too.
+		 *
+		 * TL;DR: just exit now, have the service restarted by the supervisor
+		 * with the expected version of pg_autoctl that matches the monitor's
+		 * extension version.
+		 */
+		exit(EXIT_CODE_MONITOR);
+	}
+
+	if (doInit)
+	{
+		PostgresSetup *pgSetup = &(postgres->postgresSetup);
+		uint64_t system_identifier = pgSetup->control.system_identifier;
+
+		if (!monitor_set_group_system_identifier(monitor,
+												 keeperState->current_group,
+												 system_identifier))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+	}
+
+	/* We used to output that in INFO every 5s, which is too much chatter */
+	log_debug("Calling node_active for node %s/%d/%d with current state: "
+			  "%s, "
+			  "PostgreSQL %s running, "
+			  "sync_state is \"%s\", "
+			  "current lsn is \"%s\".",
+			  config->formation,
+			  keeperState->current_node_id,
+			  keeperState->current_group,
+			  NodeStateToString(keeperState->current_role),
+			  reportPgIsRunning ? "is" : "is not",
+			  postgres->pgsrSyncState,
+			  postgres->currentLSN);
+
+	/* ensure we use the correct retry policy with the monitor */
+	(void) pgsql_set_main_loop_retry_policy(&(monitor->pgsql.retryPolicy));
+
+	/*
+	 * Report the current state to the monitor and get the assigned state.
+	 */
+	return monitor_node_active(monitor,
+							   config->formation,
+							   keeperState->current_node_id,
+							   keeperState->current_group,
+							   keeperState->current_role,
+							   reportPgIsRunning,
+							   postgres->postgresSetup.control.timeline_id,
+							   postgres->currentLSN,
+							   postgres->pgsrSyncState,
+							   assignedState);
+}
+
+
+/*
+ * keeper_node_has_been_dropped checks if the local node is being dropped or
+ * has been dropped already from the monitor.
+ */
+bool
+keeper_node_has_been_dropped(Keeper *keeper, bool *dropped)
+{
+	Monitor *monitor = &(keeper->monitor);
+	KeeperConfig *config = &(keeper->config);
+	KeeperStateData *keeperState = &(keeper->state);
+
+	*dropped = false;
+
+	if (keeperState->assigned_role != DROPPED_STATE)
+	{
+		return true;
+	}
+
+	/* ensure we use the correct retry policy with the monitor */
+	(void) pgsql_set_main_loop_retry_policy(&(monitor->pgsql.retryPolicy));
+
+	/* check if the nodeid still exists on the monitor */
+	NodeAddressArray nodesArray = { 0 };
+
+	if (!monitor_find_node_by_nodeid(monitor,
+									 config->formation,
+									 config->groupId,
+									 keeperState->current_node_id,
+									 &nodesArray))
+	{
+		return false;
+	}
+
+	if (nodesArray.count == 0)
+	{
+		/* no node found with our nodeid, the drop has been successfull */
+		*dropped = true;
+		return true;
+	}
+	else if (nodesArray.count == 1)
+	{
+		/* we found the node on the monitor, report we're DROPPED */
+		bool doInit = false;
+		MonitorAssignedState assignedState = { 0 };
+
+		if (keeperState->current_role != DROPPED_STATE)
+		{
+			log_info("Reaching assigned state \"%s\"",
+					 NodeStateToString(keeperState->assigned_role));
+			keeperState->current_role = DROPPED_STATE;
+		}
+
+		if (!keeper_node_active(keeper, doInit, &assignedState))
+		{
+			log_error("Failed to report our local state \"%s\" to the monitor",
+					  NodeStateToString(keeperState->current_role));
+			return false;
+		}
+
+		if (keeperState->current_role == DROPPED_STATE &&
+			keeperState->current_role == keeperState->assigned_role)
+		{
+			*dropped = true;
+			return true;
+		}
+	}
+	else
+	{
+		log_error("BUG: monitor_find_node_by_nodeid returned %d nodes",
+				  nodesArray.count);
+		return false;
+	}
+
+	return false;
+}
+
+
+/*
  * keeper_check_monitor_extension_version checks that the monitor we connect to
  * has an extension version compatible with our expectations.
  */

@@ -69,7 +69,9 @@ AllAutoFailoverNodes(char *formationId)
 	uint64 rowNumber = 0;
 
 	const char *selectQuery =
-		SELECT_ALL_FROM_AUTO_FAILOVER_NODE_TABLE " WHERE formationid = $1";
+		SELECT_ALL_FROM_AUTO_FAILOVER_NODE_TABLE
+		" WHERE formationid = $1 "
+		"   AND goalstate <> 'dropped'";
 
 	SPI_connect();
 
@@ -221,7 +223,8 @@ AutoFailoverNodeGroup(char *formationId, int groupId)
 
 	const char *selectQuery =
 		SELECT_ALL_FROM_AUTO_FAILOVER_NODE_TABLE
-		" WHERE formationid = $1 AND groupid = $2"
+		"    WHERE formationid = $1 AND groupid = $2"
+		"      AND goalstate <> 'dropped'"
 		" ORDER BY nodeid";
 
 	SPI_connect();

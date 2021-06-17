@@ -219,5 +219,10 @@ bool monitor_ensure_extension_version(Monitor *monitor,
 									  LocalPostgresServer *postgres,
 									  MonitorExtensionVersion *version);
 
+bool monitor_find_node_by_nodeid(Monitor *monitor,
+								 const char *formation,
+								 int groupId,
+								 int64_t nodeId,
+								 NodeAddressArray *nodesArray);
 
 #endif /* MONITOR_H */
