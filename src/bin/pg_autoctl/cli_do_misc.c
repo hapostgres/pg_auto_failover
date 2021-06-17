@@ -220,6 +220,23 @@ keeper_cli_pgsetup_pg_ctl(int argc, char **argv)
 	log_info("`pg_autoctl create monitor` would use \"%s\" for Postgres %s",
 			 pgSetupMonitor.pg_ctl, pgSetupMonitor.pg_version);
 
+	/*
+	 * Now check that find_extension_control_file would be happy.
+	 */
+	if (find_extension_control_file(pgSetupMonitor.pg_ctl,
+									PG_AUTOCTL_MONITOR_EXTENSION_NAME))
+	{
+		log_info("Found the control file for extension \"%s\"",
+				 PG_AUTOCTL_MONITOR_EXTENSION_NAME);
+	}
+	else
+	{
+		log_fatal("pg_autoctl on the monitor would fail "
+				  "to find extension \"%s\"",
+				  PG_AUTOCTL_MONITOR_EXTENSION_NAME);
+		success = false;
+	}
+
 	if (!success)
 	{
 		exit(EXIT_CODE_INTERNAL_ERROR);

@@ -903,8 +903,8 @@ standby_init_database(LocalPostgresServer *postgres,
 		}
 		else
 		{
-			log_error("The replication slot \"%s\" has not been created "
-					  "on the primary node %d \"%s\" (%s:%d) yet",
+			log_error("The replication slot \"%s\" has not been created yet "
+					  "on the primary node " NODE_FORMAT,
 					  upstream->slotName,
 					  upstream->primaryNode.nodeId,
 					  upstream->primaryNode.name,
@@ -987,7 +987,7 @@ primary_rewind_to_standby(LocalPostgresServer *postgres)
 	NodeAddress *primaryNode = &(replicationSource->primaryNode);
 
 	log_trace("primary_rewind_to_standby");
-	log_info("Rewinding PostgreSQL to follow new primary node %d \"%s\" (%s:%d)",
+	log_info("Rewinding PostgreSQL to follow new primary node " NODE_FORMAT,
 			 primaryNode->nodeId,
 			 primaryNode->name,
 			 primaryNode->host,
@@ -1009,7 +1009,7 @@ primary_rewind_to_standby(LocalPostgresServer *postgres)
 	/* before pg_rewind, make sure we can connect with "replication" */
 	if (!pgctl_identify_system(replicationSource))
 	{
-		log_error("Failed to connect to the primary node %d \"%s\" (%s:%d) "
+		log_error("Failed to connect to the primary node " NODE_FORMAT
 				  "with a replication connection string. "
 				  "See above for details",
 				  primaryNode->nodeId,
@@ -1417,7 +1417,7 @@ standby_follow_new_primary(LocalPostgresServer *postgres)
 	ReplicationSource *replicationSource = &(postgres->replicationSource);
 	NodeAddress *primaryNode = &(replicationSource->primaryNode);
 
-	log_info("Follow new primary node %d \"%s\" (%s:%d)",
+	log_info("Follow new primary node " NODE_FORMAT,
 			 primaryNode->nodeId,
 			 primaryNode->name,
 			 primaryNode->host,
@@ -1495,7 +1495,8 @@ standby_fetch_missing_wal(LocalPostgresServer *postgres)
 	char currentLSN[PG_LSN_MAXLENGTH] = { 0 };
 	bool hasReachedLSN = false;
 
-	log_info("Fetching WAL from upstream node %d \"%s\" (%s:%d) up to LSN %s",
+	log_info("Fetching WAL from upstream node " NODE_FORMAT
+			 "up to LSN %s",
 			 upstreamNode->nodeId,
 			 upstreamNode->name,
 			 upstreamNode->host,
@@ -1506,7 +1507,8 @@ standby_fetch_missing_wal(LocalPostgresServer *postgres)
 	if (!standby_restart_with_current_replication_source(postgres))
 	{
 		log_error("Failed to setup replication "
-				  "from upstream node %d \"%s\" (%s:%d), see above for details",
+				  "from upstream node " NODE_FORMAT
+				  ", see above for details",
 				  upstreamNode->nodeId,
 				  upstreamNode->name,
 				  upstreamNode->host,
@@ -1718,8 +1720,8 @@ standby_check_timeline_with_upstream(LocalPostgresServer *postgres)
 	 */
 	if (upstreamTimeline < localTimeline)
 	{
-		log_error("Current timeline on upstream node %d \"%s\" (%s:%d) "
-				  "is %d, and current timeline on this standby node is %d",
+		log_error("Current timeline on upstream node " NODE_FORMAT
+				  " is %d, and current timeline on this standby node is %d",
 				  primaryNode->nodeId,
 				  primaryNode->name,
 				  primaryNode->host,
@@ -1731,8 +1733,8 @@ standby_check_timeline_with_upstream(LocalPostgresServer *postgres)
 	}
 	else if (upstreamTimeline > localTimeline)
 	{
-		log_warn("Current timeline on upstream node %d \"%s\" (%s:%d) "
-				 "is %d, and current timeline on this standby node is still %d",
+		log_warn("Current timeline on upstream node " NODE_FORMAT
+				 " is %d, and current timeline on this standby node is still %d",
 				 primaryNode->nodeId,
 				 primaryNode->name,
 				 primaryNode->host,
@@ -1744,7 +1746,7 @@ standby_check_timeline_with_upstream(LocalPostgresServer *postgres)
 	}
 	else if (upstreamTimeline == localTimeline)
 	{
-		log_info("Reached timeline %d, same as upstream node %d \"%s\" (%s:%d)",
+		log_info("Reached timeline %d, same as upstream node " NODE_FORMAT,
 				 localTimeline,
 				 primaryNode->nodeId,
 				 primaryNode->name,

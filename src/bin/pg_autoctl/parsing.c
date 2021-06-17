@@ -96,8 +96,8 @@ regexp_first_match(const char *string, const char *regex)
 	}
 	else
 	{
-		int start = m[1].rm_so;
-		int finish = m[1].rm_eo;
+		regoff_t start = m[1].rm_so;
+		regoff_t finish = m[1].rm_eo;
 		int length = finish - start + 1;
 		char *result = (char *) malloc(length * sizeof(char));
 
@@ -122,9 +122,10 @@ regexp_first_match(const char *string, const char *regex)
 bool
 parse_version_number(const char *version_string,
 					 char *pg_version_string,
+					 size_t size,
 					 int *pg_version)
 {
-	char *match = regexp_first_match(version_string, "([[:digit:].]+)");
+	char *match = regexp_first_match(version_string, "([0-9.]+)");
 
 	if (match == NULL)
 	{
@@ -134,7 +135,7 @@ parse_version_number(const char *version_string,
 	}
 
 	/* first, copy the version number in our expected result string buffer */
-	strlcpy(pg_version_string, match, sizeof(pg_version_string));
+	strlcpy(pg_version_string, match, size);
 
 	if (!parse_pg_version_string(pg_version_string, pg_version))
 	{
@@ -1009,7 +1010,7 @@ parseLSN(const char *str, uint64_t *lsn)
 bool
 parseNodesArray(const char *nodesJSON,
 				NodeAddressArray *nodesArray,
-				int nodeId)
+				int64_t nodeId)
 {
 	JSON_Value *template =
 		json_parse_string("[{"

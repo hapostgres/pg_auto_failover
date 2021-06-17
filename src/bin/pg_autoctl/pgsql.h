@@ -126,7 +126,7 @@ typedef enum
 
 /* notification processing */
 typedef bool (*ProcessNotificationFunction)(int notificationGroupId,
-											int notificationNodeId,
+											int64_t notificationNodeId,
 											char *channel, char *payload);
 
 typedef struct PGSQL
@@ -140,7 +140,7 @@ typedef struct PGSQL
 
 	ProcessNotificationFunction notificationProcessFunction;
 	int notificationGroupId;
-	int notificationNodeId;
+	int64_t notificationNodeId;
 	bool notificationReceived;
 } PGSQL;
 
@@ -155,7 +155,7 @@ typedef struct GUC
 /* network address of a node in an HA group */
 typedef struct NodeAddress
 {
-	int nodeId;
+	int64_t nodeId;
 	char name[_POSIX_HOST_NAME_MAX];
 	char host[_POSIX_HOST_NAME_MAX];
 	int port;
@@ -340,13 +340,12 @@ bool pgsql_replication_slot_exists(PGSQL *pgsql, const char *slotName,
 								   bool *slotExists);
 bool pgsql_create_replication_slot(PGSQL *pgsql, const char *slotName);
 bool pgsql_drop_replication_slot(PGSQL *pgsql, const char *slotName);
-bool postgres_sprintf_replicationSlotName(int nodeId, char *slotName, int size);
+bool postgres_sprintf_replicationSlotName(int64_t nodeId, char *slotName, int size);
 bool pgsql_set_synchronous_standby_names(PGSQL *pgsql,
 										 char *synchronous_standby_names);
 bool pgsql_replication_slot_create_and_drop(PGSQL *pgsql,
 											NodeAddressArray *nodeArray);
 bool pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray);
-bool postgres_sprintf_replicationSlotName(int nodeId, char *slotName, int size);
 bool pgsql_disable_synchronous_replication(PGSQL *pgsql);
 bool pgsql_set_default_transaction_mode_read_only(PGSQL *pgsql);
 bool pgsql_set_default_transaction_mode_read_write(PGSQL *pgsql);

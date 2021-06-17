@@ -22,7 +22,7 @@
  */
 typedef struct AutoFailoverNodeState
 {
-	int32 nodeId;
+	int64 nodeId;
 	int32 groupId;
 	ReplicationState replicationState;
 	XLogRecPtr reportedLSN;

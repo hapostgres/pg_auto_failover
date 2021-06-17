@@ -1337,10 +1337,12 @@ pgsql_check_monitor_settings(PGSQL *pgsql, bool *settings_are_ok)
  * for given nodeId in the given slotName buffer of given size.
  */
 bool
-postgres_sprintf_replicationSlotName(int nodeId, char *slotName, int size)
+postgres_sprintf_replicationSlotName(int64_t nodeId, char *slotName, int size)
 {
 	int bytesWritten =
-		sformat(slotName, size, "%s_%d", REPLICATION_SLOT_NAME_DEFAULT, nodeId);
+		sformat(slotName, size, "%s_%" PRId64,
+				REPLICATION_SLOT_NAME_DEFAULT,
+				nodeId);
 
 	return bytesWritten <= size;
 }
@@ -1364,7 +1366,7 @@ pgsql_set_synchronous_standby_names(PGSQL *pgsql,
 				  "requires %lu bytes",
 				  synchronous_standby_names,
 				  BUFSIZE,
-				  strlen(synchronous_standby_names));
+				  (unsigned long) strlen(synchronous_standby_names));
 		return false;
 	}
 
@@ -1535,7 +1537,7 @@ BuildNodesArrayValues(NodeAddressArray *nodeArray,
 		int idParamIndex = paramIndex;
 		int lsnParamIndex = paramIndex + 1;
 
-		sqlParams->types[idParamIndex] = INT4OID;
+		sqlParams->types[idParamIndex] = INT8OID;
 		strlcpy(sqlParams->nodeIds[nodeIndex], nodeIdString, NODEID_MAX_LENGTH);
 
 		/* store the (char *) pointer to the data in values */
@@ -3049,10 +3051,10 @@ parseTimelineHistoryResult(void *ctx, PGresult *result)
 
 	if (strlen(value) >= sizeof(context->content))
 	{
-		log_error("Received a timeline history file of %ld bytes, "
+		log_error("Received a timeline history file of %lu bytes, "
 				  "pg_autoctl is limited to files of up to %lu bytes.",
-				  strlen(value),
-				  sizeof(context->content));
+				  (unsigned long) strlen(value),
+				  (unsigned long) sizeof(context->content));
 		context->parsedOk = false;
 	}
 	strlcpy(context->content, value, sizeof(context->content));
@@ -3333,8 +3335,19 @@ pgsql_alter_extension_update_to(PGSQL *pgsql,
 	{
 		char *sqlstate = PQresultErrorField(result, PG_DIAG_SQLSTATE);
 
-		log_error("Error %s while running Postgres query: %s: %s",
-				  sqlstate, command, PQerrorMessage(connection));
+		log_error("Error %s while running Postgres query: %s:",
+				  sqlstate, command);
+
+		char *message = PQerrorMessage(connection);
+		char *errorLines[BUFSIZE];
+		int lineCount = splitLines(message, errorLines, BUFSIZE);
+		int lineNumber = 0;
+
+		for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
+		{
+			log_error("%s", errorLines[lineNumber]);
+		}
+
 		PQclear(result);
 		clear_results(pgsql);
 		pgsql_finish(pgsql);

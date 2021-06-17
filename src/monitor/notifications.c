@@ -11,6 +11,8 @@
  *-------------------------------------------------------------------------
  */
 
+#include <inttypes.h>
+
 #include "postgres.h"
 
 #include "metadata.h"
@@ -82,7 +84,7 @@ NotifyStateChange(AutoFailoverNode *node, char *description)
 	escape_json(payload, node->formationId);
 
 	appendStringInfo(payload, ", \"groupId\": %d", node->groupId);
-	appendStringInfo(payload, ", \"nodeId\": %d", node->nodeId);
+	appendStringInfo(payload, ", \"nodeId\": %lld", (long long) node->nodeId);
 
 	appendStringInfo(payload, ", \"name\": ");
 	escape_json(payload, node->nodeName);

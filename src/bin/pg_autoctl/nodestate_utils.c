@@ -6,6 +6,7 @@
  * Licensed under the PostgreSQL License.
  *
  */
+#include <inttypes.h>
 
 #include "file_utils.h"
 #include "log.h"
@@ -294,13 +295,13 @@ nodestatePrepareNode(NodeAddressHeaders *headers, NodeAddress *node,
 	{
 		case NODE_KIND_STANDALONE:
 		{
-			sformat(composedId, BUFSIZE, "%d", node->nodeId);
+			sformat(composedId, BUFSIZE, "%" PRId64, node->nodeId);
 			break;
 		}
 
 		default:
 		{
-			sformat(composedId, BUFSIZE, "%d/%d", groupId, node->nodeId);
+			sformat(composedId, BUFSIZE, "%d/%" PRId64, groupId, node->nodeId);
 			break;
 		}
 	}
@@ -488,12 +489,13 @@ nodestateConnectionType(CurrentNodeState *nodeState)
  * notification message we parse.
  */
 void
-nodestate_log(CurrentNodeState *nodeState, int logLevel, int nodeId)
+nodestate_log(CurrentNodeState *nodeState, int logLevel, int64_t nodeId)
 {
 	if (nodeState->node.nodeId == nodeId)
 	{
 		log_level(logLevel,
-				  "New state for this node (node %d, \"%s\") (%s:%d): %s ➜ %s",
+				  "New state for this node "
+				  "(node %" PRId64 ", \"%s\") (%s:%d): %s ➜ %s",
 				  nodeState->node.nodeId,
 				  nodeState->node.name,
 				  nodeState->node.host,
@@ -504,7 +506,7 @@ nodestate_log(CurrentNodeState *nodeState, int logLevel, int nodeId)
 	else
 	{
 		log_level(logLevel,
-				  "New state for node %d \"%s\" (%s:%d): %s ➜ %s",
+				  "New state for node %" PRId64 " \"%s\" (%s:%d): %s ➜ %s",
 				  nodeState->node.nodeId,
 				  nodeState->node.name,
 				  nodeState->node.host,

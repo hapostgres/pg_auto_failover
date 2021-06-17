@@ -12,6 +12,8 @@
 
 #pragma once
 
+#include <inttypes.h>
+
 #include "access/xlogdefs.h"
 #include "datatype/timestamp.h"
 
@@ -98,9 +100,9 @@ typedef enum SyncState
  * AutoFailoverNode, for consistency. Well, apart when registering, where we
  * don't have the node id and/or the node name yet.
  */
-#define NODE_FORMAT "node %d \"%s\" (%s:%d)"
+#define NODE_FORMAT "node %lld \"%s\" (%s:%d)"
 #define NODE_FORMAT_ARGS(node) \
-	node->nodeId, node->nodeName, node->nodeHost, node->nodePort
+	(long long) node->nodeId, node->nodeName, node->nodeHost, node->nodePort
 
 /*
  * AutoFailoverNode represents a Postgres node that is being tracked by the
@@ -109,7 +111,7 @@ typedef enum SyncState
 typedef struct AutoFailoverNode
 {
 	char *formationId;
-	int nodeId;
+	int64 nodeId;
 	int groupId;
 	char *nodeName;
 	char *nodeHost;
@@ -168,7 +170,7 @@ extern AutoFailoverNode * FindMostAdvancedStandby(List *groupNodeList);
 extern AutoFailoverNode * FindCandidateNodeBeingPromoted(List *groupNodeList);
 
 extern AutoFailoverNode * GetAutoFailoverNode(char *nodeHost, int nodePort);
-extern AutoFailoverNode * GetAutoFailoverNodeById(int nodeId);
+extern AutoFailoverNode * GetAutoFailoverNodeById(int64 nodeId);
 extern AutoFailoverNode * GetAutoFailoverNodeByName(char *formationId,
 													char *nodeName);
 extern AutoFailoverNode * OtherNodeInGroup(AutoFailoverNode *pgAutoFailoverNode);
@@ -177,7 +179,7 @@ extern AutoFailoverNode * TupleToAutoFailoverNode(TupleDesc tupleDescriptor,
 												  HeapTuple heapTuple);
 extern int AddAutoFailoverNode(char *formationId,
 							   FormationKind formationKind,
-							   int nodeId,
+							   int64 nodeId,
 							   int groupId,
 							   char *nodeName,
 							   char *nodeHost,
@@ -199,12 +201,12 @@ extern void ReportAutoFailoverNodeState(char *nodeHost, int nodePort,
 extern void ReportAutoFailoverNodeHealth(char *nodeHost, int nodePort,
 										 ReplicationState goalState,
 										 NodeHealthState health);
-extern void ReportAutoFailoverNodeReplicationSetting(int nodeid,
+extern void ReportAutoFailoverNodeReplicationSetting(int64 nodeid,
 													 char *nodeHost,
 													 int nodePort,
 													 int candidatePriority,
 													 bool replicationQuorum);
-extern void UpdateAutoFailoverNodeMetadata(int nodeid,
+extern void UpdateAutoFailoverNodeMetadata(int64 nodeid,
 										   char *nodeName,
 										   char *nodeHost,
 										   int nodePort);

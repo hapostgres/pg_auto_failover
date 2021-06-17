@@ -169,6 +169,18 @@ run-test: build-test
 		make -C /usr/src/pg_auto_failover test	\
 		TEST='${TEST}'
 
+build-i386:
+	docker build -t i386:latest -f Dockerfile.i386 .
+
+# expected to be run from within the i386 docker container
+installcheck-i386:
+	pg_autoctl run &
+	pg_autoctl do pgsetup wait
+	$(MAKE) -C src/monitor installcheck
+
+run-installcheck-i386: build-i386
+	docker run --platform linux/386 --rm -it --privileged i386 make installcheck-i386
+
 man:
 	$(MAKE) -C docs man
 
