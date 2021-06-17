@@ -114,7 +114,7 @@ pretty_print_bytes(char *buffer, size_t size, uint64_t bytes)
 {
 	const char *suffixes[7] = {
 		"B",                    /* Bytes */
-		"KB",                   /* Kilo */
+		"kB",                   /* Kilo */
 		"MB",                   /* Mega */
 		"GB",                   /* Giga */
 		"TB",                   /* Tera */
