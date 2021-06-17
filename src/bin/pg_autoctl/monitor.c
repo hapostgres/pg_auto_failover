@@ -477,7 +477,7 @@ monitor_get_other_nodes(Monitor *monitor,
 		"ORDER BY node_id";
 
 	int paramCount = currentState == ANY_STATE ? 1 : 2;
-	Oid paramTypes[2] = { INT4OID, TEXTOID };
+	Oid paramTypes[2] = { INT8OID, TEXTOID };
 	const char *paramValues[3] = { 0 };
 
 	NodeAddressArrayParseContext parseContext = { { 0 }, nodeArray, false };
@@ -562,7 +562,7 @@ monitor_print_other_nodes_as_json(Monitor *monitor,
 		"$3::pgautofailover.replication_state) as nodes";
 
 	int paramCount = currentState == ANY_STATE ? 2 : 1;
-	Oid paramTypes[2] = { INT4OID, TEXTOID };
+	Oid paramTypes[2] = { INT8OID, TEXTOID };
 	const char *paramValues[2] = { 0 };
 	IntString myNodeIdString = intToString(myNodeId);
 
@@ -810,7 +810,7 @@ monitor_register_node(Monitor *monitor, char *formation,
 	int paramCount = 13;
 	Oid paramTypes[13] = {
 		TEXTOID, TEXTOID, INT4OID, NAMEOID, TEXTOID, INT8OID,
-		INT4OID, INT4OID, TEXTOID, TEXTOID, INT4OID, BOOLOID, TEXTOID
+		INT8OID, INT4OID, TEXTOID, TEXTOID, INT4OID, BOOLOID, TEXTOID
 	};
 	const char *paramValues[13];
 	MonitorAssignedStateParseContext parseContext =
@@ -908,7 +908,7 @@ monitor_node_active(Monitor *monitor,
 		"$4::pgautofailover.replication_state, $5, $6, $7)";
 	int paramCount = 7;
 	Oid paramTypes[7] = {
-		TEXTOID, INT4OID, INT4OID, TEXTOID, BOOLOID, LSNOID, TEXTOID
+		TEXTOID, INT8OID, INT4OID, TEXTOID, BOOLOID, LSNOID, TEXTOID
 	};
 	const char *paramValues[7];
 	MonitorAssignedStateParseContext parseContext =
@@ -3191,7 +3191,7 @@ monitor_start_maintenance(Monitor *monitor, int64_t nodeId, bool *mayRetry)
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql = "SELECT pgautofailover.start_maintenance($1)";
 	int paramCount = 1;
-	Oid paramTypes[1] = { INT4OID };
+	Oid paramTypes[1] = { INT8OID };
 	const char *paramValues[1];
 
 	paramValues[0] = intToString(nodeId).strValue;
@@ -3239,7 +3239,7 @@ monitor_stop_maintenance(Monitor *monitor, int64_t nodeId, bool *mayRetry)
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql = "SELECT pgautofailover.stop_maintenance($1)";
 	int paramCount = 1;
-	Oid paramTypes[1] = { INT4OID };
+	Oid paramTypes[1] = { INT8OID };
 	const char *paramValues[1];
 
 	paramValues[0] = intToString(nodeId).strValue;

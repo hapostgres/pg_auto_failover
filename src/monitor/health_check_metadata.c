@@ -166,7 +166,7 @@ TupleToNodeHealth(HeapTuple heapTuple, TupleDesc tupleDescriptor)
 										   TLIST_NUM_HEALTH_STATUS, &isNull);
 
 	NodeHealth *nodeHealth = palloc0(sizeof(NodeHealth));
-	nodeHealth->nodeId = DatumGetInt32(nodeIdDatum);
+	nodeHealth->nodeId = DatumGetInt64(nodeIdDatum);
 	nodeHealth->nodeName = TextDatumGetCString(nodeNameDatum);
 	nodeHealth->nodeHost = TextDatumGetCString(nodeHostDatum);
 	nodeHealth->nodePort = DatumGetInt32(nodePortDatum);

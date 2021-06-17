@@ -1537,7 +1537,7 @@ BuildNodesArrayValues(NodeAddressArray *nodeArray,
 		int idParamIndex = paramIndex;
 		int lsnParamIndex = paramIndex + 1;
 
-		sqlParams->types[idParamIndex] = INT4OID;
+		sqlParams->types[idParamIndex] = INT8OID;
 		strlcpy(sqlParams->nodeIds[nodeIndex], nodeIdString, NODEID_MAX_LENGTH);
 
 		/* store the (char *) pointer to the data in values */
