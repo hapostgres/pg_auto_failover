@@ -134,6 +134,8 @@ comment on function pgautofailover.get_other_nodes(bigint)
 grant execute on function pgautofailover.get_other_nodes(bigint)
    to autoctl_node;
 
+DROP FUNCTION pgautofailover.get_other_nodes(int,pgautofailover.replication_state);
+
 CREATE FUNCTION pgautofailover.get_other_nodes
  (
     IN nodeid           bigint,
