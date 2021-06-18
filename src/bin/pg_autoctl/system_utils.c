@@ -82,7 +82,13 @@ get_system_info_bsd(SystemInfo *sysInfo)
 {
 	unsigned int ncpu = 0;      /* the API requires an integer here */
 	int ncpuMIB[2] = { CTL_HW, HW_NCPU };
-	int ramMIB[2] = { CTL_HW, HW_PHYSMEM };
+	#if defined(HW_MEMSIZE)
+	int ramMIB[2] = { CTL_HW, HW_MEMSIZE };   /* MacOS   */
+	#elif defined(HW_PHYSMEM64)
+	int ramMIB[2] = { CTL_HW, HW_PHYSMEM64 }; /* OpenBSD */
+	#else
+	int ramMIB[2] = { CTL_HW, HW_PHYSMEM };   /* FreeBSD */
+	#endif
 
 	size_t cpuSize = sizeof(ncpu);
 	size_t memSize = sizeof(sysInfo->totalram);
