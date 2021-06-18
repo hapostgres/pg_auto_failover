@@ -969,8 +969,6 @@ prepare_guc_settings_from_pgsetup(const char *configFilePath,
 	char tuning[BUFSIZE] = { 0 };
 	int settingIndex = 0;
 
-	log_debug("prepare_guc_settings_from_pgsetup: %s", hostname);
-
 	appendPQExpBufferStr(config, "# Settings by pg_auto_failover\n");
 
 	/* replace placeholder values with actual pgSetup values */
@@ -1112,7 +1110,11 @@ prepare_guc_settings_from_pgsetup(const char *configFilePath,
 		}
 		else if (streq(setting->name, "citus.local_hostname"))
 		{
-			appendPQExpBuffer(config, "%s = '%s'\n", setting->name, hostname);
+			if (hostname != NULL && !IS_EMPTY_STRING_BUFFER(hostname))
+			{
+				appendPQExpBuffer(config, "%s = '%s'\n",
+								  setting->name, hostname);
+			}
 		}
 		else if (setting->value != NULL &&
 				 !IS_EMPTY_STRING_BUFFER(setting->value))
