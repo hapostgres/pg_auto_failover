@@ -1123,7 +1123,8 @@ prepare_guc_settings_from_pgsetup(const char *configFilePath,
 							  setting->name,
 							  setting->value);
 		}
-		else if (setting->value == NULL)
+		else if (setting->value == NULL ||
+				 IS_EMPTY_STRING_BUFFER(setting->value))
 		{
 			/*
 			 * Our GUC entry has a NULL (or empty) value. Skip the setting.
