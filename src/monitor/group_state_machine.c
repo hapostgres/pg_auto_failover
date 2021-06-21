@@ -338,6 +338,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 		 IsCurrentState(primaryNode, REPLICATION_STATE_JOIN_PRIMARY) ||
 		 IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY)) &&
 		IsHealthy(activeNode) &&
+		activeNode->reportedTLI == primaryNode->reportedTLI &&
 		WalDifferenceWithin(activeNode, primaryNode, EnableSyncXlogThreshold))
 	{
 		char message[BUFSIZE] = { 0 };
@@ -1889,11 +1890,6 @@ WalDifferenceWithin(AutoFailoverNode *secondaryNode,
 	if (secondaryNode == NULL || otherNode == NULL)
 	{
 		return true;
-	}
-
-	if (secondaryNode->reportedTLI != otherNode->reportedTLI)
-	{
-		return false;
 	}
 
 	XLogRecPtr secondaryLsn = secondaryNode->reportedLSN;
