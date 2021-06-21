@@ -264,14 +264,20 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 									   keeperState->current_node_id);
 
 	/*
-	 * When pg_autoctl drop node is used from a distance, then this nodes
+	 * When pg_autoctl drop node is used from a distance, then this node
 	 * transitions to the DROPPED_STATE and shutdown cleanly. Now, if a dropped
 	 * node is restarted (by systemd, an interactive user, or another way) we
 	 * must realise the situation and refrain from entering our main loop.
 	 */
 	bool dropped = false;
 
-	if (keeper_node_has_been_dropped(keeper, &dropped) && dropped)
+	if (!keeper_node_has_been_dropped(keeper, &dropped))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	if (dropped)
 	{
 		/* signal that it's time to shutdown everything */
 		log_fatal("This node with id %lld in formation \"%s\" and group %d "

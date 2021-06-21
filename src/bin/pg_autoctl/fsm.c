@@ -415,9 +415,8 @@ keeper_fsm_step(Keeper *keeper)
 	 */
 	if (!keeper_update_pg_state(keeper))
 	{
-		log_error("Failed to update the keeper's state from the local "
-				  "PostgreSQL instance, see above for details.");
-		return false;
+		log_warn("Failed to update the keeper's state from the local "
+				 "PostgreSQL instance, see above for details.");
 	}
 
 	log_info("Calling node_active for node %s/%d/%d with current state: "

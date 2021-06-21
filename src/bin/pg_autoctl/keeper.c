@@ -18,6 +18,7 @@
 #include "cli_common.h"
 #include "env_utils.h"
 #include "file_utils.h"
+#include "fsm.h"
 #include "keeper.h"
 #include "keeper_config.h"
 #include "keeper_pg_init.h"
@@ -1252,6 +1253,12 @@ keeper_node_has_been_dropped(Keeper *keeper, bool *dropped)
 
 	*dropped = false;
 
+	if (!keeper_state_read(keeperState, config->pathnames.state))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
 	if (keeperState->assigned_role != DROPPED_STATE)
 	{
 		return true;
@@ -1269,8 +1276,15 @@ keeper_node_has_been_dropped(Keeper *keeper, bool *dropped)
 									 keeperState->current_node_id,
 									 &nodesArray))
 	{
+		log_error("Failed to query monitor to see if node id %d "
+				  "has been dropped already",
+				  keeperState->current_node_id);
 		return false;
 	}
+
+	log_debug("keeper_node_has_been_dropped: found %d node by id %d",
+			  nodesArray.count,
+			  keeperState->current_node_id);
 
 	if (nodesArray.count == 0)
 	{
@@ -1281,9 +1295,6 @@ keeper_node_has_been_dropped(Keeper *keeper, bool *dropped)
 	else if (nodesArray.count == 1)
 	{
 		/* we found the node on the monitor, report we're DROPPED */
-		bool doInit = false;
-		MonitorAssignedState assignedState = { 0 };
-
 		if (keeperState->current_role != DROPPED_STATE)
 		{
 			log_info("Reaching assigned state \"%s\"",
@@ -1291,10 +1302,9 @@ keeper_node_has_been_dropped(Keeper *keeper, bool *dropped)
 			keeperState->current_role = DROPPED_STATE;
 		}
 
-		if (!keeper_node_active(keeper, doInit, &assignedState))
+		if (!keeper_fsm_step(keeper))
 		{
-			log_error("Failed to report our local state \"%s\" to the monitor",
-					  NodeStateToString(keeperState->current_role));
+			/* errors have already been logged */
 			return false;
 		}
 

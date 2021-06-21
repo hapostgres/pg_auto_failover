@@ -177,7 +177,6 @@ void keeper_cli_destroy_node(int argc, char **argv);
 bool cli_getopt_ssl_flags(int ssl_flag, char *optarg, PostgresSetup *pgSetup);
 bool cli_getopt_accept_ssl_options(SSLCommandLineOptions newSSLOption,
 								   SSLCommandLineOptions currentSSLOptions);
-void cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy);
 
 char * logLevelToString(int logLevel);
 
