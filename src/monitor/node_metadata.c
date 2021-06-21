@@ -1222,7 +1222,7 @@ ReportAutoFailoverNodeState(char *nodeHost, int nodePort,
 		"UPDATE " AUTO_FAILOVER_NODE_TABLE
 		" SET reportedstate = $1, reporttime = now(), "
 		"reportedpgisrunning = $2, reportedrepstate = $3, "
-		"reportedtli = case $4 WHEN 0 THEN reportedtli ELSE $4 END, "
+		"reportedtli = CASE $4 WHEN 0 THEN reportedtli ELSE $4 END, "
 		"reportedlsn = CASE $5 WHEN '0/0'::pg_lsn THEN reportedlsn ELSE $5 END, "
 		"walreporttime = CASE $5 WHEN '0/0'::pg_lsn THEN walreporttime ELSE now() END, "
 		"statechangetime = CASE WHEN reportedstate <> $1 THEN now() ELSE statechangetime END "

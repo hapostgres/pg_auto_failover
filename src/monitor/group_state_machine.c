@@ -1878,7 +1878,9 @@ AssignGoalState(AutoFailoverNode *pgAutoFailoverNode,
 /*
  * WalDifferenceWithin returns whether the most recently reported relative log
  * position of the given nodes is within the specified bound. Returns false if
- * neither node has reported a relative xlog position
+ * neither node has reported a relative xlog position.
+ *
+ * Returns false when the nodes are not on the same reported timeline.
  */
 static bool
 WalDifferenceWithin(AutoFailoverNode *secondaryNode,
@@ -1887,6 +1889,11 @@ WalDifferenceWithin(AutoFailoverNode *secondaryNode,
 	if (secondaryNode == NULL || otherNode == NULL)
 	{
 		return true;
+	}
+
+	if (secondaryNode->reportedTLI != otherNode->reportedTLI)
+	{
+		return false;
 	}
 
 	XLogRecPtr secondaryLsn = secondaryNode->reportedLSN;
