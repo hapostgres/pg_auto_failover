@@ -18,7 +18,7 @@ ALTER TABLE pgautofailover.node_upgrade_old
 CREATE TABLE pgautofailover.node
  (
     formationid          text not null default 'default',
-    nodeid               bigserial,
+    nodeid               bigint not null DEFAULT nextval('pgautofailover.node_nodeid_seq'::regclass),
     groupid              int not null,
     nodename             text not null,
     nodehost             text not null,
