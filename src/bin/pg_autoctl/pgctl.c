@@ -46,11 +46,13 @@ static bool pg_include_config(const char *configFilePath,
 static bool ensure_default_settings_file_exists(const char *configFilePath,
 												GUC *settings,
 												PostgresSetup *pgSetup,
+												const char *hostname,
 												bool includeTuning);
 static bool prepare_guc_settings_from_pgsetup(const char *configFilePath,
 											  PQExpBuffer config,
 											  GUC *settings,
 											  PostgresSetup *pgSetup,
+											  const char *hostname,
 											  bool includeTuning);
 static void log_program_output(Program prog, int outLogLevel, int errorLogLevel);
 
@@ -731,7 +733,8 @@ find_extension_control_file(const char *pg_ctl, const char *extName)
  */
 bool
 pg_add_auto_failover_default_settings(PostgresSetup *pgSetup,
-									  char *configFilePath,
+									  const char *hostname,
+									  const char *configFilePath,
 									  GUC *settings)
 {
 	bool includeTuning = true;
@@ -750,6 +753,7 @@ pg_add_auto_failover_default_settings(PostgresSetup *pgSetup,
 	if (!ensure_default_settings_file_exists(pgAutoFailoverDefaultsConfigPath,
 											 settings,
 											 pgSetup,
+											 hostname,
 											 includeTuning))
 	{
 		return false;
@@ -870,6 +874,7 @@ static bool
 ensure_default_settings_file_exists(const char *configFilePath,
 									GUC *settings,
 									PostgresSetup *pgSetup,
+									const char *hostname,
 									bool includeTuning)
 {
 	PQExpBuffer defaultConfContents = createPQExpBuffer();
@@ -884,6 +889,7 @@ ensure_default_settings_file_exists(const char *configFilePath,
 										   defaultConfContents,
 										   settings,
 										   pgSetup,
+										   hostname,
 										   includeTuning))
 	{
 		/* errors have already been logged */
@@ -957,6 +963,7 @@ prepare_guc_settings_from_pgsetup(const char *configFilePath,
 								  PQExpBuffer config,
 								  GUC *settings,
 								  PostgresSetup *pgSetup,
+								  const char *hostname,
 								  bool includeTuning)
 {
 	char tuning[BUFSIZE] = { 0 };
@@ -1101,6 +1108,14 @@ prepare_guc_settings_from_pgsetup(const char *configFilePath,
 								  setting->name, pgSetup->citusClusterName);
 			}
 		}
+		else if (streq(setting->name, "citus.local_hostname"))
+		{
+			if (hostname != NULL && !IS_EMPTY_STRING_BUFFER(hostname))
+			{
+				appendPQExpBuffer(config, "%s = '%s'\n",
+								  setting->name, hostname);
+			}
+		}
 		else if (setting->value != NULL &&
 				 !IS_EMPTY_STRING_BUFFER(setting->value))
 		{
@@ -1108,7 +1123,8 @@ prepare_guc_settings_from_pgsetup(const char *configFilePath,
 							  setting->name,
 							  setting->value);
 		}
-		else
+		else if (setting->value == NULL ||
+				 IS_EMPTY_STRING_BUFFER(setting->value))
 		{
 			/*
 			 * Our GUC entry has a NULL (or empty) value. Skip the setting.
@@ -1121,6 +1137,13 @@ prepare_guc_settings_from_pgsetup(const char *configFilePath,
 			 * expected.
 			 */
 			log_debug("GUC setting \"%s\" has a NULL value", setting->name);
+		}
+		else
+		{
+			/* the GUC setting in the array has not been processed */
+			log_error("BUG: GUC settings \"%s\" has not been processed",
+					  setting->name);
+			return false;
 		}
 	}
 
@@ -2004,6 +2027,7 @@ pg_write_recovery_conf(const char *pgdata, ReplicationSource *replicationSource)
 	return ensure_default_settings_file_exists(recoveryConfPath,
 											   recoverySettings,
 											   NULL,
+											   NULL,
 											   includeTuning);
 }
 
@@ -2102,6 +2126,7 @@ pg_write_standby_signal(const char *pgdata,
 	 */
 	if (!ensure_default_settings_file_exists(standbyConfigFilePath,
 											 recoverySettings,
+											 NULL,
 											 NULL,
 											 includeTuning))
 	{

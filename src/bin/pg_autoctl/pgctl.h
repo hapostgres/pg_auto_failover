@@ -38,7 +38,8 @@ bool set_pg_ctl_from_config_bindir(PostgresSetup *pgSetup, const char *pg_config
 bool find_pg_config_from_pg_ctl(const char *pg_ctl, char *pg_config, size_t size);
 
 bool pg_add_auto_failover_default_settings(PostgresSetup *pgSetup,
-										   char *configFilePath,
+										   const char *hostname,
+										   const char *configFilePath,
 										   GUC *settings);
 
 bool pg_auto_failover_default_settings_file_exists(PostgresSetup *pgSetup);

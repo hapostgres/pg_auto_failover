@@ -93,6 +93,9 @@ typedef struct IniOption
 	{ INI_END_T, NULL, NULL, NULL, false, false, NULL, -1, -1, NULL, NULL, NULL }
 
 bool read_ini_file(const char *filename, IniOption *opts);
+bool parse_ini_buffer(const char *filename,
+					  char *fileContents,
+					  IniOption *optionList);
 bool ini_validate_options(IniOption *optionList);
 bool ini_set_option_value(IniOption *option, const char *value);
 bool ini_option_to_string(IniOption *option, char *dest, size_t size);

@@ -26,13 +26,26 @@ read_ini_file(const char *filename, IniOption *optionList)
 {
 	char *fileContents = NULL;
 	long fileSize = 0L;
-	IniOption *option;
 
 	/* read the current postgresql.conf contents */
 	if (!read_file(filename, &fileContents, &fileSize))
 	{
 		return false;
 	}
+
+	return parse_ini_buffer(filename, fileContents, optionList);
+}
+
+
+/*
+ * parse_ini_buffer parses the content of a config.ini file.
+ */
+bool
+parse_ini_buffer(const char *filename,
+				 char *fileContents,
+				 IniOption *optionList)
+{
+	IniOption *option;
 
 	/* parse the content of the file as per INI syntax rules */
 	ini_t *ini = ini_load(fileContents, NULL);

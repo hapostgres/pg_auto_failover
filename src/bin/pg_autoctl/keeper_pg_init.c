@@ -905,7 +905,7 @@ create_database_and_extension(Keeper *keeper)
 	 * shared_preload_libraries when dealing with a Citus worker or coordinator
 	 * node.
 	 */
-	if (!postgres_add_default_settings(&initPostgres))
+	if (!postgres_add_default_settings(&initPostgres, config->hostname))
 	{
 		log_error("Failed to add default settings to newly initialized "
 				  "PostgreSQL instance, see above for details");

@@ -89,6 +89,7 @@ GUC citus_default_settings_pre_13[] = {
 	{ "citus.node_conninfo", "'sslmode=prefer'" },
 	{ "citus.cluster_name", "'default'" },
 	{ "citus.use_secondary_nodes", "'never'" },
+	{ "citus.local_hostname", "'localhost'" },
 	{ NULL, NULL }
 };
 
@@ -98,6 +99,7 @@ GUC citus_default_settings_13[] = {
 	{ "citus.node_conninfo", "'sslmode=prefer'" },
 	{ "citus.cluster_name", "'default'" },
 	{ "citus.use_secondary_nodes", "'never'" },
+	{ "citus.local_hostname", "'localhost'" },
 	{ NULL, NULL }
 };
 
@@ -593,14 +595,17 @@ primary_disable_synchronous_replication(LocalPostgresServer *postgres)
  * settings related to streaming replication and running pg_auto_failover.
  */
 bool
-postgres_add_default_settings(LocalPostgresServer *postgres)
+postgres_add_default_settings(LocalPostgresServer *postgres,
+							  const char *hostname)
 {
 	PGSQL *pgsql = &(postgres->sqlClient);
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	char configFilePath[MAXPGPATH];
 	GUC *default_settings = NULL;
 
-	log_trace("postgres_add_default_settings");
+	log_trace("postgres_add_default_settings (%s) [%d]",
+			  nodeKindToString(postgres->pgKind),
+			  pgSetup->control.pg_control_version);
 
 	/* configFilePath = $PGDATA/postgresql.conf */
 	join_path_components(configFilePath, pgSetup->pgdata, "postgresql.conf");
@@ -652,6 +657,7 @@ postgres_add_default_settings(LocalPostgresServer *postgres)
 	}
 
 	if (!pg_add_auto_failover_default_settings(pgSetup,
+											   hostname,
 											   configFilePath,
 											   default_settings))
 	{
@@ -957,7 +963,7 @@ standby_init_database(LocalPostgresServer *postgres,
 	 * key and cert locations. By changing this before starting postgres these
 	 * new settings will automatically be applied.
 	 */
-	if (!postgres_add_default_settings(postgres))
+	if (!postgres_add_default_settings(postgres, hostname))
 	{
 		log_error("Failed to add default settings to the secondary, "
 				  "see above for details.");
