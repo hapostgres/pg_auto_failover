@@ -557,6 +557,9 @@ cli_show_local_state()
 					strlcpy(nodeState.node.lsn, "0/0", PG_LSN_MAXLENGTH);
 				}
 
+				nodeState.node.tli =
+					keeper.postgres.postgresSetup.control.timeline_id;
+
 				strlcpy(nodeState.node.lsn,
 						keeper.postgres.currentLSN,
 						PG_LSN_MAXLENGTH);
@@ -569,6 +572,7 @@ cli_show_local_state()
 					/* errors have already been logged, just continue */
 				}
 
+				nodeState.node.tli = config.pgSetup.control.timeline_id;
 				strlcpy(nodeState.node.lsn,
 						config.pgSetup.control.latestCheckpointLSN,
 						PG_LSN_MAXLENGTH);

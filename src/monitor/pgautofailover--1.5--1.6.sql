@@ -4,6 +4,96 @@
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
 \echo Use "CREATE EXTENSION pgautofailover" to load this file. \quit
 
+ALTER TABLE pgautofailover.node
+	RENAME TO node_upgrade_old;
+
+ALTER TABLE pgautofailover.node_upgrade_old
+      RENAME CONSTRAINT system_identifier_is_null_at_init_only
+                     TO system_identifier_is_null_at_init_only_old;
+
+ALTER TABLE pgautofailover.node_upgrade_old
+      RENAME CONSTRAINT same_system_identifier_within_group
+                     TO same_system_identifier_within_group_old;
+
+CREATE TABLE pgautofailover.node
+ (
+    formationid          text not null default 'default',
+    nodeid               bigint not null DEFAULT nextval('pgautofailover.node_nodeid_seq'::regclass),
+    groupid              int not null,
+    nodename             text not null,
+    nodehost             text not null,
+    nodeport             int not null,
+    sysidentifier        bigint,
+    goalstate            pgautofailover.replication_state not null default 'init',
+    reportedstate        pgautofailover.replication_state not null,
+    reportedpgisrunning  bool default true,
+    reportedrepstate     text default 'async',
+    reporttime           timestamptz not null default now(),
+    reportedtli          int not null default 1 check (reportedtli > 0),
+    reportedlsn          pg_lsn not null default '0/0',
+    walreporttime        timestamptz not null default now(),
+    health               integer not null default -1,
+    healthchecktime      timestamptz not null default now(),
+    statechangetime      timestamptz not null default now(),
+    candidatepriority	 int not null default 100,
+    replicationquorum	 bool not null default true,
+    nodecluster          text not null default 'default',
+
+    -- node names must be unique in a given formation
+    UNIQUE (formationid, nodename),
+    -- any nodehost:port can only be a unique node in the system
+    UNIQUE (nodehost, nodeport),
+    --
+    -- The EXCLUDE constraint only allows the same sysidentifier for all the
+    -- nodes in the same group. The system_identifier is a property that is
+    -- kept when implementing streaming replication and should be unique per
+    -- Postgres instance in all other cases.
+    --
+    -- We allow the sysidentifier column to be NULL when registering a new
+    -- primary server from scratch, because we have not done pg_ctl initdb
+    -- at the time we call the register_node() function.
+    --
+    CONSTRAINT system_identifier_is_null_at_init_only
+         CHECK (  (    sysidentifier IS NULL
+                   AND reportedstate in ('init', 'wait_standby', 'catchingup') )
+                OR sysidentifier IS NOT NULL),
+
+    CONSTRAINT same_system_identifier_within_group
+       EXCLUDE USING gist(formationid with =,
+                          groupid with =,
+                          sysidentifier with <>)
+    DEFERRABLE INITIALLY DEFERRED,
+
+    PRIMARY KEY (nodeid),
+    FOREIGN KEY (formationid) REFERENCES pgautofailover.formation(formationid)
+ )
+ -- we expect few rows and lots of UPDATE, let's benefit from HOT
+ WITH (fillfactor = 25);
+
+ALTER SEQUENCE pgautofailover.node_nodeid_seq OWNED BY pgautofailover.node.nodeid;
+
+INSERT INTO pgautofailover.node
+ (
+  formationid, nodeid, groupid, nodename, nodehost, nodeport, sysidentifier,
+  goalstate, reportedstate, reportedpgisrunning, reportedrepstate,
+  reporttime, reportedtli, reportedlsn, walreporttime,
+  health, healthchecktime, statechangetime,
+  candidatepriority, replicationquorum, nodecluster
+ )
+ SELECT formationid, nodeid, groupid,
+        nodename, nodehost, nodeport, sysidentifier,
+        goalstate, reportedstate, reportedpgisrunning, reportedrepstate, reporttime,
+        1 as reportedtli,
+        reportedlsn, walreporttime, health, healthchecktime, statechangetime,
+        candidatepriority, replicationquorum, nodecluster
+   FROM pgautofailover.node_upgrade_old;
+
+DROP TABLE pgautofailover.node_upgrade_old;
+
+GRANT SELECT ON ALL TABLES IN SCHEMA pgautofailover TO autoctl_node;
+
+
+
 DROP FUNCTION
      pgautofailover.register_node(text,text,int,name,text,bigint,int,int,
                                   pgautofailover.replication_state,text,
@@ -52,6 +142,7 @@ CREATE FUNCTION pgautofailover.node_active
     IN group_id       		        int,
     IN current_group_role     		pgautofailover.replication_state default 'init',
     IN current_pg_is_running  		bool default true,
+    IN current_tli			  		integer default 1,
     IN current_lsn			  		pg_lsn default '0/0',
     IN current_rep_state      		text default '',
    OUT assigned_node_id       		bigint,
@@ -65,7 +156,7 @@ AS 'MODULE_PATHNAME', $$node_active$$;
 
 grant execute on function
       pgautofailover.node_active(text,bigint,int,
-                          pgautofailover.replication_state,bool,pg_lsn,text)
+                          pgautofailover.replication_state,bool,int,pg_lsn,text)
    to autoctl_node;
 
 
@@ -230,3 +321,80 @@ begin
     return new;
 end
 $$;
+
+
+DROP FUNCTION pgautofailover.current_state(text);
+
+CREATE FUNCTION pgautofailover.current_state
+ (
+    IN formation_id         text default 'default',
+   OUT formation_kind       text,
+   OUT nodename             text,
+   OUT nodehost             text,
+   OUT nodeport             int,
+   OUT group_id             int,
+   OUT node_id              bigint,
+   OUT current_group_state  pgautofailover.replication_state,
+   OUT assigned_group_state pgautofailover.replication_state,
+   OUT candidate_priority	int,
+   OUT replication_quorum	bool,
+   OUT reported_tli         int,
+   OUT reported_lsn         pg_lsn,
+   OUT health               integer
+ )
+RETURNS SETOF record LANGUAGE SQL STRICT
+AS $$
+   select kind, nodename, nodehost, nodeport, groupid, nodeid,
+          reportedstate, goalstate,
+   		  candidatepriority, replicationquorum,
+          reportedtli, reportedlsn, health
+     from pgautofailover.node
+     join pgautofailover.formation using(formationid)
+    where formationid = formation_id
+ order by groupid, nodeid;
+$$;
+
+grant execute on function pgautofailover.current_state(text)
+   to autoctl_node;
+
+comment on function pgautofailover.current_state(text)
+        is 'get the current state of both nodes of a formation';
+
+DROP FUNCTION pgautofailover.current_state(text, int);
+
+CREATE FUNCTION pgautofailover.current_state
+ (
+    IN formation_id         text,
+    IN group_id             int,
+   OUT formation_kind       text,
+   OUT nodename             text,
+   OUT nodehost             text,
+   OUT nodeport             int,
+   OUT group_id             int,
+   OUT node_id              bigint,
+   OUT current_group_state  pgautofailover.replication_state,
+   OUT assigned_group_state pgautofailover.replication_state,
+   OUT candidate_priority	int,
+   OUT replication_quorum	bool,
+   OUT reported_tli         int,
+   OUT reported_lsn         pg_lsn,
+   OUT health               integer
+ )
+RETURNS SETOF record LANGUAGE SQL STRICT
+AS $$
+   select kind, nodename, nodehost, nodeport, groupid, nodeid,
+          reportedstate, goalstate,
+   		  candidatepriority, replicationquorum,
+          reportedtli, reportedlsn, health
+     from pgautofailover.node
+     join pgautofailover.formation using(formationid)
+    where formationid = formation_id
+      and groupid = group_id
+ order by groupid, nodeid;
+$$;
+
+grant execute on function pgautofailover.current_state(text, int)
+   to autoctl_node;
+
+comment on function pgautofailover.current_state(text, int)
+        is 'get the current state of both nodes of a group in a formation';

@@ -338,6 +338,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 		 IsCurrentState(primaryNode, REPLICATION_STATE_JOIN_PRIMARY) ||
 		 IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY)) &&
 		IsHealthy(activeNode) &&
+		activeNode->reportedTLI == primaryNode->reportedTLI &&
 		WalDifferenceWithin(activeNode, primaryNode, EnableSyncXlogThreshold))
 	{
 		char message[BUFSIZE] = { 0 };
@@ -1878,7 +1879,9 @@ AssignGoalState(AutoFailoverNode *pgAutoFailoverNode,
 /*
  * WalDifferenceWithin returns whether the most recently reported relative log
  * position of the given nodes is within the specified bound. Returns false if
- * neither node has reported a relative xlog position
+ * neither node has reported a relative xlog position.
+ *
+ * Returns false when the nodes are not on the same reported timeline.
  */
 static bool
 WalDifferenceWithin(AutoFailoverNode *secondaryNode,

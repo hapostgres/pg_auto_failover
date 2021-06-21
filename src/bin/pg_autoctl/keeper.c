@@ -1608,12 +1608,15 @@ keeper_register_again(Keeper *keeper)
 			return false;
 		}
 
+		int currentTLI = keeper->postgres.postgresSetup.control.timeline_id;
+
 		if (!monitor_node_active(monitor,
 								 config->formation,
 								 assignedState.nodeId,
 								 assignedState.groupId,
 								 assignedState.state,
 								 ReportPgIsRunning(keeper),
+								 currentTLI,
 								 keeper->postgres.currentLSN,
 								 keeper->postgres.pgsrSyncState,
 								 &assignedState))

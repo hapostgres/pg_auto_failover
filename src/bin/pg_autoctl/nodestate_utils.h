@@ -83,7 +83,9 @@ void nodestatePrintNodeState(NodeAddressHeaders *headers,
 							 CurrentNodeState *nodeState);
 
 void nodestatePrepareNode(NodeAddressHeaders *headers, NodeAddress *node,
-						  int groupId, char *hostport, char *composedId);
+						  int groupId, char *hostport,
+						  char *composedId, char *tliLSN);
+
 void prepareHostNameSeparator(char nameSeparatorHeader[], int size);
 
 bool nodestateAsJSON(CurrentNodeState *nodeState, JSON_Value *js);

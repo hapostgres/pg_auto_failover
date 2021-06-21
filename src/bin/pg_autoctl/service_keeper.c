@@ -737,6 +737,7 @@ keeper_node_active(Keeper *keeper, bool doInit)
 							 keeperState->current_group,
 							 keeperState->current_role,
 							 reportPgIsRunning,
+							 postgres->postgresSetup.control.timeline_id,
 							 postgres->currentLSN,
 							 postgres->pgsrSyncState,
 							 &assignedState))

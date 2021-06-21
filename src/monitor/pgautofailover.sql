@@ -111,6 +111,7 @@ CREATE TABLE pgautofailover.node
     reportedpgisrunning  bool default true,
     reportedrepstate     text default 'async',
     reporttime           timestamptz not null default now(),
+    reportedtli          int not null default 1 check (reportedtli > 0),
     reportedlsn          pg_lsn not null default '0/0',
     walreporttime        timestamptz not null default now(),
     health               integer not null default -1,
@@ -267,6 +268,7 @@ CREATE FUNCTION pgautofailover.node_active
     IN group_id       		        int,
     IN current_group_role     		pgautofailover.replication_state default 'init',
     IN current_pg_is_running  		bool default true,
+    IN current_tli			  		integer default 1,
     IN current_lsn			  		pg_lsn default '0/0',
     IN current_rep_state      		text default '',
    OUT assigned_node_id       		bigint,
@@ -280,7 +282,7 @@ AS 'MODULE_PATHNAME', $$node_active$$;
 
 grant execute on function
       pgautofailover.node_active(text,bigint,int,
-                          pgautofailover.replication_state,bool,pg_lsn,text)
+                          pgautofailover.replication_state,bool,int,pg_lsn,text)
    to autoctl_node;
 
 CREATE FUNCTION pgautofailover.get_nodes
@@ -572,6 +574,7 @@ CREATE FUNCTION pgautofailover.current_state
    OUT assigned_group_state pgautofailover.replication_state,
    OUT candidate_priority	int,
    OUT replication_quorum	bool,
+   OUT reported_tli         int,
    OUT reported_lsn         pg_lsn,
    OUT health               integer
  )
@@ -580,7 +583,7 @@ AS $$
    select kind, nodename, nodehost, nodeport, groupid, nodeid,
           reportedstate, goalstate,
    		  candidatepriority, replicationquorum,
-          reportedlsn, health
+          reportedtli, reportedlsn, health
      from pgautofailover.node
      join pgautofailover.formation using(formationid)
     where formationid = formation_id
@@ -604,6 +607,7 @@ CREATE FUNCTION pgautofailover.current_state
    OUT assigned_group_state pgautofailover.replication_state,
    OUT candidate_priority	int,
    OUT replication_quorum	bool,
+   OUT reported_tli         int,
    OUT reported_lsn         pg_lsn,
    OUT health               integer
  )
@@ -612,7 +616,7 @@ AS $$
    select kind, nodename, nodehost, nodeport, groupid, nodeid,
           reportedstate, goalstate,
    		  candidatepriority, replicationquorum,
-          reportedlsn, health
+          reportedtli, reportedlsn, health
      from pgautofailover.node
      join pgautofailover.formation using(formationid)
     where formationid = formation_id

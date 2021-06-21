@@ -428,6 +428,7 @@ keeper_fsm_step(Keeper *keeper)
 							 keeperState->current_group,
 							 keeperState->current_role,
 							 postgres->pgIsRunning,
+							 postgres->postgresSetup.control.timeline_id,
 							 postgres->currentLSN,
 							 postgres->pgsrSyncState,
 							 &assignedState))
