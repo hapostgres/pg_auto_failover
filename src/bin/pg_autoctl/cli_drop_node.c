@@ -685,10 +685,6 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 static void
 cli_drop_local_monitor(MonitorConfig *mconfig, bool dropAndDestroy)
 {
-	Monitor monitor = { 0 };
-
-	monitor.config = *mconfig;
-
 	/* stop the monitor service if it's still running */
 	pid_t pid = 0;
 
