@@ -1259,11 +1259,6 @@ keeper_node_has_been_dropped(Keeper *keeper, bool *dropped)
 		return false;
 	}
 
-	if (keeperState->assigned_role != DROPPED_STATE)
-	{
-		return true;
-	}
-
 	/* ensure we use the correct retry policy with the monitor */
 	(void) pgsql_set_main_loop_retry_policy(&(monitor->pgsql.retryPolicy));
 
@@ -1290,30 +1285,56 @@ keeper_node_has_been_dropped(Keeper *keeper, bool *dropped)
 	{
 		/* no node found with our nodeid, the drop has been successfull */
 		*dropped = true;
-		return true;
+
+		/* if the monitor doesn't know about us, we're as good as DROPPED */
+		uint64_t now = time(NULL);
+
+		keeperState->last_monitor_contact = now;
+		keeperState->current_role = DROPPED_STATE;
+		keeperState->assigned_role = DROPPED_STATE;
+
+		return keeper_store_state(keeper);
 	}
 	else if (nodesArray.count == 1)
 	{
-		/* we found the node on the monitor, report we're DROPPED */
-		if (keeperState->current_role != DROPPED_STATE)
+		bool doInit = false;
+		MonitorAssignedState assignedState = { 0 };
+
+		/* grab our assigned state from the monitor now */
+		if (!keeper_update_pg_state(keeper))
 		{
-			log_info("Reaching assigned state \"%s\"",
-					 NodeStateToString(keeperState->assigned_role));
-			keeperState->current_role = DROPPED_STATE;
+			log_warn("Failed to update the keeper's state from the local "
+					 "PostgreSQL instance.");
 		}
 
-		if (!keeper_fsm_step(keeper))
+		if (!keeper_node_active(keeper, doInit, &assignedState))
 		{
 			/* errors have already been logged */
 			return false;
 		}
 
-		if (keeperState->current_role == DROPPED_STATE &&
-			keeperState->current_role == keeperState->assigned_role)
+		if (keeperState->current_role != DROPPED_STATE &&
+			keeperState->assigned_role == DROPPED_STATE)
 		{
-			*dropped = true;
+			log_info("Reaching assigned state \"%s\"",
+					 NodeStateToString(keeperState->assigned_role));
+
+			if (!keeper_fsm_step(keeper))
+			{
+				/* errors have already been logged */
+				return false;
+			}
+
+			if (keeperState->current_role == DROPPED_STATE &&
+				keeperState->current_role == keeperState->assigned_role)
+			{
+				*dropped = true;
+			}
 			return true;
 		}
+
+		/* we did all the checks we're supposed to */
+		return true;
 	}
 	else
 	{

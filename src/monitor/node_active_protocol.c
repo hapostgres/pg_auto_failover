@@ -1098,7 +1098,8 @@ RemoveNode(AutoFailoverNode *currentNode)
 	 * When pgautofailover.remove_node() is called on a node that has already
 	 * reached the DROPPED state, we proceed to remove it.
 	 */
-	if (IsCurrentState(currentNode, REPLICATION_STATE_DROPPED))
+	if (IsCurrentState(currentNode, REPLICATION_STATE_DROPPED) ||
+		currentNode->goalState == REPLICATION_STATE_DROPPED)
 	{
 		/* time to actually remove the current node */
 		RemoveAutoFailoverNode(currentNode);
@@ -1109,21 +1110,6 @@ RemoveNode(AutoFailoverNode *currentNode)
 			NODE_FORMAT_ARGS(currentNode),
 			currentNode->formationId,
 			currentNode->groupId);
-
-		return true;
-	}
-
-	/*
-	 * When pgautofailover.remove_node() is called on a node that is currently
-	 * being removed, then we do nothing about it, it's all been done already.
-	 */
-	else if (currentNode->goalState == REPLICATION_STATE_DROPPED)
-	{
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Called pgautofailover.remove_node() on " NODE_FORMAT
-			" which is already being dropped.",
-			NODE_FORMAT_ARGS(currentNode));
 
 		return true;
 	}

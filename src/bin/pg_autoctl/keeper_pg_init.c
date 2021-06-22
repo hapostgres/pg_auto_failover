@@ -135,25 +135,11 @@ keeper_pg_init_and_register(Keeper *keeper)
 	if (file_exists(config->pathnames.state))
 	{
 		bool dropped = false;
-		KeeperStateData *keeperState = &(keeper->state);
 
-		if (!keeper_state_read(keeperState, config->pathnames.state))
-		{
-			/* errors have already been logged */
-			return false;
-		}
-
-		if (keeperState->assigned_role == DROPPED_STATE &&
-			keeperState->current_role == keeperState->assigned_role)
+		if (!keeper_node_has_been_dropped(keeper, &dropped) && dropped)
 		{
 			log_info("This node had been dropped previously, now trying to "
 					 "register it again");
-
-			if (!keeper_node_has_been_dropped(keeper, &dropped))
-			{
-				log_error("Failed to obtain a clean dropped-node state, "
-						  "see above for details");
-			}
 		}
 
 		/*

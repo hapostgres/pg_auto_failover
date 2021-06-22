@@ -565,7 +565,9 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 		exit(EXIT_CODE_BAD_STATE);
 	}
 
-	if (!config->monitorDisabled && keeperState->assigned_role != DROPPED_STATE)
+	if (!config->monitorDisabled &&
+		keeperState->current_role != DROPPED_STATE &&
+		keeperState->assigned_role == DROPPED_STATE)
 	{
 		log_info("Reaching assigned state \"%s\"",
 				 NodeStateToString(keeperState->assigned_role));
@@ -583,11 +585,12 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 
-		if (keeperState->current_role != DROPPED_STATE &&
+		if (keeperState->current_role != DROPPED_STATE ||
 			keeperState->current_role != keeperState->assigned_role)
 		{
-			log_fatal("Monitor assigned state \"%s\", where state \"%s\" "
-					  "is expected.",
+			log_fatal("Current state is \"%s\" and assigned state is \"%s\", "
+					  "where state \"%s\" is expected.",
+					  NodeStateToString(keeperState->current_role),
 					  NodeStateToString(keeperState->assigned_role),
 					  NodeStateToString(DROPPED_STATE));
 
