@@ -269,28 +269,31 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 	 * node is restarted (by systemd, an interactive user, or another way) we
 	 * must realise the situation and refrain from entering our main loop.
 	 */
-	bool dropped = false;
-
-	if (!keeper_node_has_been_dropped(keeper, &dropped))
+	if (!config->monitorDisabled)
 	{
-		/* errors have already been logged */
-		return false;
-	}
+		bool dropped = false;
 
-	if (dropped)
-	{
-		/* signal that it's time to shutdown everything */
-		log_fatal("This node with id %lld in formation \"%s\" and group %d "
-				  "has been dropped from the monitor",
-				  (long long) keeperState->current_node_id,
-				  config->formation,
-				  config->groupId);
+		if (!keeper_node_has_been_dropped(keeper, &dropped))
+		{
+			/* errors have already been logged */
+			return false;
+		}
 
-		log_info("To get rid of the configuration file and PGDATA directory, "
-				 "run pg_autoctl drop node --pgdata \"%s\" --destroy",
-				 config->pgSetup.pgdata);
+		if (dropped)
+		{
+			/* signal that it's time to shutdown everything */
+			log_fatal("This node with id %lld in formation \"%s\" and group %d "
+					  "has been dropped from the monitor",
+					  (long long) keeperState->current_node_id,
+					  config->formation,
+					  config->groupId);
 
-		exit(EXIT_CODE_FATAL);
+			log_info("To get rid of the configuration file and PGDATA directory, "
+					 "run pg_autoctl drop node --pgdata \"%s\" --destroy",
+					 config->pgSetup.pgdata);
+
+			exit(EXIT_CODE_FATAL);
+		}
 	}
 
 	while (keepRunning)
