@@ -362,9 +362,6 @@ cli_drop_node(int argc, char **argv)
 			exit(EXIT_CODE_BAD_CONFIG);
 		}
 
-		/* first drop the node from the monitor  */
-		(void) cli_drop_node_from_monitor(&config);
-
 		/* now drop the local node files, and maybe --destroy PGDATA */
 		(void) cli_drop_local_node(&config, dropAndDestroy);
 
@@ -473,54 +470,48 @@ cli_drop_monitor(int argc, char **argv)
 static void
 cli_drop_node_from_monitor(KeeperConfig *config)
 {
-	Keeper keeper = { 0 };
-	Monitor *monitor = &(keeper.monitor);
+	Monitor monitor = { 0 };
 
-	keeper.config = *config;
+	(void) cli_monitor_init_from_option_or_config(&monitor, config);
 
-	(void) cli_monitor_init_from_option_or_config(monitor, config);
-
-	bool dropped = false;
-
-	if (!keeper_node_has_been_dropped(&keeper, &dropped))
+	if (!IS_EMPTY_STRING_BUFFER(config->name))
 	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_INTERNAL_ERROR);
+		log_info("Removing node with name \"%s\" in formation \"%s\" "
+				 "from the monitor",
+				 config->name, config->formation);
+
+		if (!monitor_remove_by_nodename(&monitor,
+										(char *) config->formation,
+										(char *) config->name))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_MONITOR);
+		}
 	}
-
-	if (!dropped)
+	else if (!IS_EMPTY_STRING_BUFFER(config->hostname))
 	{
-		if (!IS_EMPTY_STRING_BUFFER(config->name))
-		{
-			if (!monitor_remove_by_nodename(monitor,
-											(char *) config->formation,
-											(char *) config->name))
-			{
-				/* errors have already been logged */
-				exit(EXIT_CODE_MONITOR);
-			}
-		}
-		else if (!IS_EMPTY_STRING_BUFFER(config->hostname))
-		{
-			int pgport =
-				config->pgSetup.pgport > 0
-				? config->pgSetup.pgport
-				: pgsetup_get_pgport();
+		int pgport =
+			config->pgSetup.pgport > 0
+			? config->pgSetup.pgport
+			: pgsetup_get_pgport();
 
-			if (!monitor_remove_by_hostname(monitor,
-											(char *) config->hostname,
-											pgport))
-			{
-				/* errors have already been logged */
-				exit(EXIT_CODE_MONITOR);
-			}
-		}
-		else
+		log_info("Removing node with hostname \"%s\" and port %d "
+				 "in formation \"%s\" from the monitor",
+				 config->hostname, pgport, config->formation);
+
+		if (!monitor_remove_by_hostname(&monitor,
+										(char *) config->hostname,
+										pgport))
 		{
-			log_fatal("BUG: cli_drop_node_from_monitor options contain "
-					  " neither --name nor --hostname");
-			exit(EXIT_CODE_BAD_ARGS);
+			/* errors have already been logged */
+			exit(EXIT_CODE_MONITOR);
 		}
+	}
+	else
+	{
+		log_fatal("BUG: cli_drop_node_from_monitor options contain "
+				  " neither --name nor --hostname");
+		exit(EXIT_CODE_BAD_ARGS);
 	}
 }
 
@@ -533,13 +524,15 @@ static void
 cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 {
 	Keeper keeper = { 0 };
-	KeeperStateData *keeperState = &(keeper.state);
 	Monitor *monitor = &(keeper.monitor);
+	KeeperStateData *keeperState = &(keeper.state);
 
 	keeper.config = *config;
 
+	(void) cli_monitor_init_from_option_or_config(monitor, config);
+
 	/*
-	 * First, when the pg_autoctl keeper service is still running, wait until
+	 * Now, when the pg_autoctl keeper service is still running, wait until
 	 * it has reached the DROPPED/DROPPED state on-disk and then exited.
 	 */
 	pid_t pid = 0;
@@ -562,7 +555,7 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 
 	/*
 	 * Now that the pg_autoctl keeper service is not running anymore, read the
-	 * state file and check that
+	 * state file and check that it has reached the DROPPED state.
 	 */
 	if (!keeper_state_read(keeperState, config->pathnames.state))
 	{
@@ -570,12 +563,13 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 		exit(EXIT_CODE_BAD_STATE);
 	}
 
-	(void) cli_monitor_init_from_option_or_config(monitor, config);
-
 	if (!config->monitorDisabled && keeperState->assigned_role != DROPPED_STATE)
 	{
 		log_info("Reaching assigned state \"%s\"",
 				 NodeStateToString(keeperState->assigned_role));
+
+		/* first drop the node from the monitor  */
+		(void) cli_drop_node_from_monitor(config);
 
 		/*
 		 * The pg_autoctl keeper service was not running, so that we need

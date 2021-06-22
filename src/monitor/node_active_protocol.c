@@ -815,7 +815,7 @@ get_nodes(PG_FUNCTION_ARGS)
 		{
 			int32 groupId = PG_GETARG_INT32(1);
 
-			fctx->nodesList = AutoFailoverNodeGroup(formationId, groupId);
+			fctx->nodesList = AutoFailoverAllNodesInGroup(formationId, groupId);
 		}
 
 		funcctx->user_fctx = fctx;

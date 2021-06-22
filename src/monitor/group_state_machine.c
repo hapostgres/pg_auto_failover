@@ -108,24 +108,6 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 						activeNode->formationId)));
 	}
 
-	/* when there's no other node anymore, not even one */
-	if (nodesCount == 1 &&
-		!IsCurrentState(activeNode, REPLICATION_STATE_SINGLE))
-	{
-		char message[BUFSIZE];
-
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to single as there is no other node.",
-			NODE_FORMAT_ARGS(activeNode));
-
-		/* other node may have been removed */
-		AssignGoalState(activeNode, REPLICATION_STATE_SINGLE, message);
-
-		return true;
-	}
-
 	/*
 	 * If the active node just reached the DROPPED state, proceed to remove it
 	 * from the pgautofailover.node table.
@@ -143,6 +125,30 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 			NODE_FORMAT_ARGS(activeNode),
 			activeNode->formationId,
 			activeNode->groupId);
+
+		return true;
+	}
+
+	/* node reports secondary/dropped */
+	if (activeNode->goalState == REPLICATION_STATE_DROPPED)
+	{
+		return true;
+	}
+
+	/* when there's no other node anymore, not even one */
+	if (nodesCount == 1 &&
+		!IsCurrentState(activeNode, REPLICATION_STATE_SINGLE))
+	{
+		char message[BUFSIZE];
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of " NODE_FORMAT
+			" to single as there is no other node.",
+			NODE_FORMAT_ARGS(activeNode));
+
+		/* other node may have been removed */
+		AssignGoalState(activeNode, REPLICATION_STATE_SINGLE, message);
 
 		return true;
 	}
