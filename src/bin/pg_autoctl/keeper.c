@@ -1477,12 +1477,19 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 	 * may fail if we have no permission to write to the state file directory
 	 * or the disk is full. In that case, we stop before having registered the
 	 * local PostgreSQL node to the monitor.
+	 *
+	 * When using pg_autoctl create postgres on-top of a previously dropped
+	 * node, we already have a state file around and we're going to use some of
+	 * its content.
 	 */
-	if (!keeper_state_create_file(config->pathnames.state))
+	if (!file_exists(config->pathnames.state))
 	{
-		log_fatal("Failed to create a state file prior to registering the "
-				  "node with the monitor, see above for details");
-		return false;
+		if (!keeper_state_create_file(config->pathnames.state))
+		{
+			log_fatal("Failed to create a state file prior to registering the "
+					  "node with the monitor, see above for details");
+			return false;
+		}
 	}
 
 	/* now that we have a state on-disk, finish init of the keeper instance */
@@ -1490,7 +1497,6 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 	{
 		return false;
 	}
-
 
 	/*
 	 * We implement a specific retry policy for cases where we have a transient
@@ -1534,7 +1540,7 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 								  config->pgSetup.pgport,
 								  config->pgSetup.control.system_identifier,
 								  config->pgSetup.dbname,
-								  -1, /* desired nodeID */
+								  keeper->state.current_node_id,
 								  config->groupId,
 								  initialState,
 								  config->pgSetup.pgKind,

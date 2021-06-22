@@ -127,23 +127,63 @@ keeper_pg_init_and_register(Keeper *keeper)
 		return keeper_pg_init_continue(keeper);
 	}
 
+	/*
+	 * If we have a state file, we're either running the same command again
+	 * (such as pg_autoctl create postgres --run ...) or maybe the user has
+	 * changed their mind after having done a pg_autoctl drop node.
+	 */
 	if (file_exists(config->pathnames.state))
 	{
-		if (createAndRun)
+		bool dropped = false;
+		KeeperStateData *keeperState = &(keeper->state);
+
+		if (!keeper_state_read(keeperState, config->pathnames.state))
 		{
-			if (!keeper_init(keeper, config))
+			/* errors have already been logged */
+			return false;
+		}
+
+		if (keeperState->assigned_role == DROPPED_STATE &&
+			keeperState->current_role == keeperState->assigned_role)
+		{
+			log_info("This node had been dropped previously, now trying to "
+					 "register it again");
+
+			if (!keeper_node_has_been_dropped(keeper, &dropped))
 			{
-				return false;
+				log_error("Failed to obtain a clean dropped-node state, "
+						  "see above for details");
 			}
 		}
-		else
+
+		/*
+		 * If the node has not been dropped previously, then the state file
+		 * indicates a second run of pg_autoctl create postgres command, and
+		 * when given --run we start the service normally.
+		 *
+		 * If dropped is true, the node has been dropped in the past and the
+		 * user is trying to cancel the pg_autoctl drop node command by doing a
+		 * pg_autoctl create postgres command again. Just continue then.
+		 */
+		if (!dropped)
 		{
-			log_fatal("The state file \"%s\" exists and "
-					  "there's no init in progress", config->pathnames.state);
-			log_info("HINT: use `pg_autoctl run` to start the service.");
-			exit(EXIT_CODE_QUIT);
+			if (createAndRun)
+			{
+				if (!keeper_init(keeper, config))
+				{
+					return false;
+				}
+			}
+			else
+			{
+				log_fatal("The state file \"%s\" exists and "
+						  "there's no init in progress",
+						  config->pathnames.state);
+				log_info("HINT: use `pg_autoctl run` to start the service.");
+				exit(EXIT_CODE_QUIT);
+			}
+			return createAndRun;
 		}
-		return createAndRun;
 	}
 
 	/*

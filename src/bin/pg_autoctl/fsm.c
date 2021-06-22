@@ -323,6 +323,7 @@ KeeperFSMTransition KeeperFSM[] = {
 	 * Just wait until primary is ready
 	 */
 	{ INIT_STATE, WAIT_STANDBY_STATE, COMMENT_INIT_TO_WAIT_STANDBY, NULL },
+	{ DROPPED_STATE, WAIT_STANDBY_STATE, COMMENT_INIT_TO_WAIT_STANDBY, NULL },
 
 	/*
 	 * When losing a monitor and then connecting to a new monitor as a

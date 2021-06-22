@@ -119,7 +119,7 @@ cli_create_config(Keeper *keeper)
 	if (file_exists(config->pathnames.config))
 	{
 		Monitor *monitor = &(keeper->monitor);
-		KeeperConfig options = *config;
+		KeeperConfig options = { 0 };
 		KeeperConfig oldConfig = { 0 };
 		PostgresSetup optionsFullPgSetup = { 0 };
 
@@ -134,6 +134,7 @@ cli_create_config(Keeper *keeper)
 		}
 
 		oldConfig = *config;
+		options = *config;
 
 		/*
 		 * Before merging command line options into the (maybe) pre-existing
