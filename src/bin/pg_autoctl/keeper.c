@@ -1313,8 +1313,21 @@ keeper_node_has_been_dropped(Keeper *keeper, bool *dropped)
 			return false;
 		}
 
-		if (keeperState->current_role != DROPPED_STATE &&
+		if (keeperState->current_role == DROPPED_STATE &&
 			keeperState->assigned_role == DROPPED_STATE)
+		{
+			*dropped = true;
+
+			uint64_t now = time(NULL);
+
+			keeperState->last_monitor_contact = now;
+			keeperState->current_role = DROPPED_STATE;
+			keeperState->assigned_role = DROPPED_STATE;
+
+			return keeper_store_state(keeper);
+		}
+		else if (keeperState->current_role != DROPPED_STATE &&
+				 keeperState->assigned_role == DROPPED_STATE)
 		{
 			log_info("Reaching assigned state \"%s\"",
 					 NodeStateToString(keeperState->assigned_role));
@@ -1333,7 +1346,7 @@ keeper_node_has_been_dropped(Keeper *keeper, bool *dropped)
 			return true;
 		}
 
-		/* we did all the checks we're supposed to */
+		/* we did all the checks we're supposed to, dropped is false */
 		return true;
 	}
 	else

@@ -567,7 +567,7 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 
 	if (!config->monitorDisabled &&
 		keeperState->current_role != DROPPED_STATE &&
-		keeperState->assigned_role == DROPPED_STATE)
+		keeperState->assigned_role != DROPPED_STATE)
 	{
 		log_info("Reaching assigned state \"%s\"",
 				 NodeStateToString(keeperState->assigned_role));
