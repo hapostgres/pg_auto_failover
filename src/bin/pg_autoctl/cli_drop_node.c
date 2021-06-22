@@ -52,6 +52,8 @@ static void cli_drop_monitor(int argc, char **argv);
 
 static void cli_drop_node_from_monitor(KeeperConfig *config);
 static void cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy);
+static void cli_drop_local_monitor(MonitorConfig *mconfig, bool dropAndDestroy);
+
 
 static void stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathnames,
 													   PostgresSetup *pgSetup);
@@ -440,7 +442,7 @@ cli_drop_monitor(int argc, char **argv)
 			}
 
 			/* drop the node and maybe destroy its PGDATA entirely. */
-			(void) cli_drop_local_node(&config, dropAndDestroy);
+			(void) cli_drop_local_monitor(&mconfig, dropAndDestroy);
 			return;
 		}
 
@@ -662,6 +664,85 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 		{
 			log_warn("Preserving Postgres Data Directory: \"%s\"",
 					 config->pgSetup.pgdata);
+		}
+
+		log_info("pg_autoctl drop node keeps your data and setup safe, "
+				 "you can still run Postgres or re-join a pg_auto_failover "
+				 "cluster later");
+		log_info("HINT: to completely remove your local Postgres instance and "
+				 "setup, consider `pg_autoctl drop node --destroy`");
+	}
+}
+
+
+/*
+ * cli_drop_local_monitor drops the local monitor files, maybe including the
+ * PGDATA directory (when --destroy has been used).
+ */
+static void
+cli_drop_local_monitor(MonitorConfig *mconfig, bool dropAndDestroy)
+{
+	Monitor monitor = { 0 };
+
+	monitor.config = *mconfig;
+
+	/* stop the monitor service if it's still running */
+	pid_t pid = 0;
+
+	if (read_pidfile(mconfig->pathnames.pid, &pid))
+	{
+		if (kill(pid, SIGQUIT) != 0)
+		{
+			log_error("Failed to send SIGQUIT to the keeper's pid %d: %m", pid);
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+
+		if (!wait_for_pid_to_exit(mconfig->pathnames.pid, 30, &pid))
+		{
+			log_fatal("Failed to stop the pg_autoctl process with pid %d", pid);
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+	}
+	else
+	{
+		/* if we can't read a pidfile that exists on-disk, fail early */
+		if (file_exists(mconfig->pathnames.pid))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_STATE);
+		}
+	}
+
+	/*
+	 * Either --destroy the whole Postgres cluster and configuration, or leave
+	 * enough behind us that it's possible to re-join a formation later.
+	 */
+	if (dropAndDestroy)
+	{
+		if (!unlink_file(mconfig->pathnames.state))
+		{
+			log_error("Failed to remove state file \"%s\"",
+					  mconfig->pathnames.state);
+		}
+
+		(void) stop_postgres_and_remove_pgdata_and_config(
+			&mconfig->pathnames,
+			&mconfig->pgSetup);
+	}
+	else
+	{
+		/*
+		 * Now give the whole picture to the user, who might have missed our
+		 * --destroy option and might want to use it now to start again with a
+		 * fresh environment.
+		 */
+		log_warn("Preserving configuration file: \"%s\"",
+				 mconfig->pathnames.config);
+
+		if (directory_exists(mconfig->pgSetup.pgdata))
+		{
+			log_warn("Preserving Postgres Data Directory: \"%s\"",
+					 mconfig->pgSetup.pgdata);
 		}
 
 		log_info("pg_autoctl drop node keeps your data and setup safe, "
