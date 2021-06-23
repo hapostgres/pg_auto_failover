@@ -51,7 +51,7 @@ a.skiplink {
   color: #4b4b4b;
 }
 
-.wy-menu-vertical li span.toctree-expand {
+.wy-menu-vertical li button.toctree-expand {
   color: #b3b3b3;
 }
 
