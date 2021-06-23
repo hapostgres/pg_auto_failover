@@ -65,7 +65,7 @@ select pgautofailover.remove_node(1);
 
 table pgautofailover.formation;
 
-select pgautofailover.remove_node(1);
+select pgautofailover.remove_node(1, force => 'true');
 
 -- dump the pgautofailover.node table, omitting the timely columns
   select formationid, nodeid, groupid, nodehost, nodeport,

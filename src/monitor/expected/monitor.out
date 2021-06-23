@@ -205,7 +205,7 @@ dbname               | postgres
 opt_secondary        | t
 number_sync_standbys | 0
 
-select pgautofailover.remove_node(1);
+select pgautofailover.remove_node(1, force => 'true');
 -[ RECORD 1 ]--
 remove_node | t
 

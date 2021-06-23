@@ -264,8 +264,8 @@ before being entirely removed from the monitor database.
 
 When a node reports reaching the dropped state, the monitor removes its
 entry. If a node is not reporting anymore, maybe because it's completely
-unavailable, then it's possible to run the ``pg_autoctl drop node`` a second
-time, and then the node entry is removed from the monitor.
+unavailable, then it's possible to run the ``pg_autoctl drop node --force``
+command, and then the node entry is removed from the monitor.
 
 Failover logic
 --------------

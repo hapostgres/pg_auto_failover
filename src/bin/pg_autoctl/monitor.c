@@ -1215,17 +1215,18 @@ monitor_set_formation_number_sync_standbys(Monitor *monitor, char *formation,
  * on the monitor.
  */
 bool
-monitor_remove_by_hostname(Monitor *monitor, char *host, int port)
+monitor_remove_by_hostname(Monitor *monitor, char *host, int port, bool force)
 {
 	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BOOL, false };
 	PGSQL *pgsql = &monitor->pgsql;
-	const char *sql = "SELECT pgautofailover.remove_node($1, $2)";
-	int paramCount = 2;
-	Oid paramTypes[2] = { TEXTOID, INT4OID };
-	const char *paramValues[2];
+	const char *sql = "SELECT pgautofailover.remove_node($1, $2, $3)";
+	int paramCount = 3;
+	Oid paramTypes[3] = { TEXTOID, INT4OID, BOOLOID };
+	const char *paramValues[3];
 
 	paramValues[0] = host;
 	paramValues[1] = intToString(port).strValue;
+	paramValues[2] = force ? "true" : "false";
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
@@ -1265,18 +1266,19 @@ monitor_remove_by_hostname(Monitor *monitor, char *host, int port)
  * on the monitor.
  */
 bool
-monitor_remove_by_nodename(Monitor *monitor, char *formation, char *name)
+monitor_remove_by_nodename(Monitor *monitor,
+						   char *formation, char *name, bool force)
 {
 	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BOOL, false };
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
-		"SELECT pgautofailover.remove_node(nodeid::int) "
+		"SELECT pgautofailover.remove_node(nodeid::int, $3) "
 		"  FROM pgautofailover.node"
 		" WHERE formationid = $1 and nodename = $2";
 
-	int paramCount = 2;
-	Oid paramTypes[2] = { TEXTOID, TEXTOID };
-	const char *paramValues[2] = { formation, name };
+	int paramCount = 3;
+	Oid paramTypes[3] = { TEXTOID, TEXTOID };
+	const char *paramValues[3] = { formation, name, force ? "true" : "false" };
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,

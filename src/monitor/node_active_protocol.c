@@ -47,7 +47,7 @@ static int AssignGroupId(AutoFailoverFormation *formation,
 						 char *nodeHost, int nodePort,
 						 ReplicationState *initialState);
 
-static bool RemoveNode(AutoFailoverNode *currentNode);
+static bool RemoveNode(AutoFailoverNode *currentNode, bool force);
 
 /* SQL-callable function declarations */
 PG_FUNCTION_INFO_V1(register_node);
@@ -1019,6 +1019,7 @@ remove_node_by_nodeid(PG_FUNCTION_ARGS)
 	checkPgAutoFailoverVersion();
 
 	int64 nodeId = PG_GETARG_INT64(0);
+	bool force = PG_GETARG_BOOL(1);
 
 	AutoFailoverNode *currentNode = GetAutoFailoverNodeById(nodeId);
 
@@ -1029,7 +1030,7 @@ remove_node_by_nodeid(PG_FUNCTION_ARGS)
 							   (long long) nodeId)));
 	}
 
-	PG_RETURN_BOOL(RemoveNode(currentNode));
+	PG_RETURN_BOOL(RemoveNode(currentNode, force));
 }
 
 
@@ -1044,6 +1045,7 @@ remove_node_by_host(PG_FUNCTION_ARGS)
 	text *nodeHostText = PG_GETARG_TEXT_P(0);
 	char *nodeHost = text_to_cstring(nodeHostText);
 	int32 nodePort = PG_GETARG_INT32(1);
+	bool force = PG_GETARG_BOOL(2);
 
 	AutoFailoverNode *currentNode = GetAutoFailoverNode(nodeHost, nodePort);
 
@@ -1055,13 +1057,13 @@ remove_node_by_host(PG_FUNCTION_ARGS)
 							   nodeHost, nodePort)));
 	}
 
-	PG_RETURN_BOOL(RemoveNode(currentNode));
+	PG_RETURN_BOOL(RemoveNode(currentNode, force));
 }
 
 
 /* RemoveNode removes the given node from the monitor. */
 static bool
-RemoveNode(AutoFailoverNode *currentNode)
+RemoveNode(AutoFailoverNode *currentNode, bool force)
 {
 	ListCell *nodeCell = NULL;
 	char message[BUFSIZE] = { 0 };
@@ -1098,8 +1100,7 @@ RemoveNode(AutoFailoverNode *currentNode)
 	 * When pgautofailover.remove_node() is called on a node that has already
 	 * reached the DROPPED state, we proceed to remove it.
 	 */
-	if (IsCurrentState(currentNode, REPLICATION_STATE_DROPPED) ||
-		currentNode->goalState == REPLICATION_STATE_DROPPED)
+	if (IsCurrentState(currentNode, REPLICATION_STATE_DROPPED) || force)
 	{
 		/* time to actually remove the current node */
 		RemoveAutoFailoverNode(currentNode);

@@ -19,6 +19,7 @@ This command drops a Postgres node from the pg_auto_failover monitor::
   --hostname    drop the node with given hostname and pgport
   --pgport      drop the node with given hostname and pgport
   --destroy     also destroy Postgres database
+  --force       force dropping the node from the monitor
 
 Description
 -----------
@@ -37,10 +38,10 @@ options ``--hostname`` and ``--pgport`` or the pair of options
 monitor database, and get it removed from the known list of nodes on the
 monitor.
 
-This operation is needed twice in a row for a node that doesn't exists
-anymore, because the node is supposed to be driven to the ``dropped`` state.
-When a node has been lost entirely, it's not going to be able to finish the
-procedure itself.
+Then option ``--force`` can be used when the target node to remove does not
+exist anymore. When a node has been lost entirely, it's not going to be able
+to finish the procedure itself, and it is then possible to instruct the
+monitor of the situation.
 
 Options
 -------
@@ -79,6 +80,14 @@ Options
   By default the ``pg_autoctl drop monitor`` commands does not remove the
   Postgres database for the monitor. When using ``--destroy``, the Postgres
   installation is also deleted.
+
+--force
+
+  By default a node is expected to reach the assigned state DROPPED when it
+  is removed from the monitor, and has the opportunity to implement clean-up
+  actions. When the target node to remove is not available anymore, it is
+  possible to use the option ``--force`` to immediately remove the node from
+  the monitor.
 
 Examples
 --------

@@ -254,15 +254,33 @@ DROP FUNCTION pgautofailover.remove_node(int);
 
 CREATE FUNCTION pgautofailover.remove_node
  (
-   node_id bigint
+   node_id bigint,
+   force   bool default 'false'
  )
 RETURNS bool LANGUAGE C STRICT SECURITY DEFINER
 AS 'MODULE_PATHNAME', $$remove_node_by_nodeid$$;
 
-comment on function pgautofailover.remove_node(bigint)
+comment on function pgautofailover.remove_node(bigint,bool)
         is 'remove a node from the monitor';
 
-grant execute on function pgautofailover.remove_node(bigint)
+grant execute on function pgautofailover.remove_node(bigint,bool)
+   to autoctl_node;
+
+DROP FUNCTION pgautofailover.remove_node(text,int);
+
+CREATE FUNCTION pgautofailover.remove_node
+ (
+   node_host text,
+   node_port int default 5432,
+   force     bool default 'false'
+ )
+RETURNS bool LANGUAGE C STRICT SECURITY DEFINER
+AS 'MODULE_PATHNAME', $$remove_node_by_host$$;
+
+comment on function pgautofailover.remove_node(text,int,bool)
+        is 'remove a node from the monitor';
+
+grant execute on function pgautofailover.remove_node(text,int,bool)
    to autoctl_node;
 
 DROP FUNCTION pgautofailover.start_maintenance(node_id int);

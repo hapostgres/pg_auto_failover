@@ -45,6 +45,7 @@
  * functions and their command implementation. We can't pass parameters around.
  */
 static bool dropAndDestroy = false;
+static bool dropForce = false;
 
 static int cli_drop_node_getopts(int argc, char **argv);
 static void cli_drop_node(int argc, char **argv);
@@ -80,7 +81,8 @@ CommandLine drop_node_command =
 		"  --name        drop the node with the given node name\n"
 		"  --hostname    drop the node with given hostname and pgport\n"
 		"  --pgport      drop the node with given hostname and pgport\n"
-		"  --destroy     also destroy Postgres database\n",
+		"  --destroy     also destroy Postgres database\n"
+		"  --force       force dropping the node from the monitor\n",
 		cli_drop_node_getopts,
 		cli_drop_node);
 
@@ -99,6 +101,7 @@ cli_drop_node_getopts(int argc, char **argv)
 		{ "pgdata", required_argument, NULL, 'D' },
 		{ "monitor", required_argument, NULL, 'm' },
 		{ "destroy", no_argument, NULL, 'd' },
+		{ "force", no_argument, NULL, 'F' },
 		{ "hostname", required_argument, NULL, 'n' },
 		{ "pgport", required_argument, NULL, 'p' },
 		{ "formation", required_argument, NULL, 'f' },
@@ -141,6 +144,13 @@ cli_drop_node_getopts(int argc, char **argv)
 			{
 				dropAndDestroy = true;
 				log_trace("--destroy");
+				break;
+			}
+
+			case 'F':
+			{
+				dropForce = true;
+				log_trace("--force");
 				break;
 			}
 
@@ -484,7 +494,8 @@ cli_drop_node_from_monitor(KeeperConfig *config)
 
 		if (!monitor_remove_by_nodename(&monitor,
 										(char *) config->formation,
-										(char *) config->name))
+										(char *) config->name,
+										dropForce))
 		{
 			/* errors have already been logged */
 			exit(EXIT_CODE_MONITOR);
@@ -503,7 +514,8 @@ cli_drop_node_from_monitor(KeeperConfig *config)
 
 		if (!monitor_remove_by_hostname(&monitor,
 										(char *) config->hostname,
-										pgport))
+										pgport,
+										dropForce))
 		{
 			/* errors have already been logged */
 			exit(EXIT_CODE_MONITOR);
