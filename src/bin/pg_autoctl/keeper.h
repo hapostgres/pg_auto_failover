@@ -53,7 +53,7 @@ bool keeper_maintain_replication_slots(Keeper *keeper);
 bool keeper_ensure_current_state(Keeper *keeper);
 bool keeper_create_self_signed_cert(Keeper *keeper);
 bool keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk);
-bool keeper_update_pg_state(Keeper *keeper);
+bool keeper_update_pg_state(Keeper *keeper, int logLevel);
 bool keeper_node_active(Keeper *keeper, bool doInit,
 						MonitorAssignedState *assignedState);
 bool keeper_node_has_been_dropped(Keeper *keeper, bool *dropped);

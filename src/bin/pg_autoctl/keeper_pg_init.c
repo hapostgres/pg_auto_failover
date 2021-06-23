@@ -998,7 +998,7 @@ create_database_and_extension(Keeper *keeper)
 	 * per the configuration settings, cleaning-up the local changes we made
 	 * before.
 	 */
-	if (!keeper_update_pg_state(keeper))
+	if (!keeper_update_pg_state(keeper, LOG_ERROR))
 	{
 		log_error("Failed to update the keeper's state from the local "
 				  "PostgreSQL instance, see above for details.");
@@ -1088,7 +1088,7 @@ keeper_pg_init_node_active(Keeper *keeper)
 		return false;
 	}
 
-	keeper_update_pg_state(keeper);
+	(void) keeper_update_pg_state(keeper, LOG_WARN);
 
 	if (!monitor_node_active(&(keeper->monitor),
 							 keeper->config.formation,

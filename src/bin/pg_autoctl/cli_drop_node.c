@@ -55,7 +55,9 @@ static void cli_drop_node_from_monitor(KeeperConfig *config);
 static void cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy);
 static void cli_drop_local_monitor(MonitorConfig *mconfig, bool dropAndDestroy);
 
-
+static void cli_drop_node_with_monitor_disabled(KeeperConfig *config,
+												bool dropAndDestroy);
+static void cli_drop_node_files_and_directories(KeeperConfig *config);
 static void stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathnames,
 													   PostgresSetup *pgSetup);
 
@@ -545,6 +547,30 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 
 	(void) cli_monitor_init_from_option_or_config(monitor, config);
 
+	if (config->monitorDisabled)
+	{
+		(void) cli_drop_node_with_monitor_disabled(config, dropAndDestroy);
+
+		/* make sure we're done now */
+		exit(EXIT_CODE_QUIT);
+	}
+
+	/*
+	 * First, read the state file and check that it has been assigned the
+	 * DROPPED state already.
+	 */
+	if (!keeper_state_read(keeperState, config->pathnames.state))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_STATE);
+	}
+
+	/* first drop the node from the monitor  */
+	if (keeperState->assigned_role != DROPPED_STATE)
+	{
+		(void) cli_drop_node_from_monitor(config);
+	}
+
 	/*
 	 * Now, when the pg_autoctl keeper service is still running, wait until
 	 * it has reached the DROPPED/DROPPED state on-disk and then exited.
@@ -568,49 +594,6 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 	}
 
 	/*
-	 * Now that the pg_autoctl keeper service is not running anymore, read the
-	 * state file and check that it has reached the DROPPED state.
-	 */
-	if (!keeper_state_read(keeperState, config->pathnames.state))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_STATE);
-	}
-
-	if (!config->monitorDisabled &&
-		keeperState->current_role != DROPPED_STATE &&
-		keeperState->assigned_role != DROPPED_STATE)
-	{
-		log_info("Reaching assigned state \"%s\"",
-				 NodeStateToString(keeperState->assigned_role));
-
-		/* first drop the node from the monitor  */
-		(void) cli_drop_node_from_monitor(config);
-
-		/*
-		 * The pg_autoctl keeper service was not running, so that we need
-		 * advance the FSM to reach the newly assigned state "DROPPED".
-		 */
-		if (!keeper_fsm_step(&keeper))
-		{
-			/* errors have already been logged */
-			exit(EXIT_CODE_INTERNAL_ERROR);
-		}
-
-		if (keeperState->current_role != DROPPED_STATE ||
-			keeperState->current_role != keeperState->assigned_role)
-		{
-			log_fatal("Current state is \"%s\" and assigned state is \"%s\", "
-					  "where state \"%s\" is expected.",
-					  NodeStateToString(keeperState->current_role),
-					  NodeStateToString(keeperState->assigned_role),
-					  NodeStateToString(DROPPED_STATE));
-
-			exit(EXIT_CODE_BAD_STATE);
-		}
-	}
-
-	/*
 	 * If the pg_autoctl keeper service was running at the beginning of this
 	 * pg_autoctl drop node command, it should have reached the local DROPPED
 	 * state already, and reported that to the monitor. But the process could
@@ -621,9 +604,7 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 	 */
 	bool dropped = false;
 
-	if (!config->monitorDisabled &&
-		keeper_node_has_been_dropped(&keeper, &dropped) &&
-		dropped)
+	if (keeper_node_has_been_dropped(&keeper, &dropped) && dropped)
 	{
 		log_info("This node with id %lld in formation \"%s\" and group %d "
 				 "has been dropped from the monitor",
@@ -648,22 +629,7 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 	 */
 	if (dropAndDestroy)
 	{
-		/* Now remove the state files */
-		if (!unlink_file(config->pathnames.init))
-		{
-			log_error("Failed to remove state init file \"%s\"",
-					  config->pathnames.init);
-		}
-
-		if (!unlink_file(config->pathnames.state))
-		{
-			log_error("Failed to remove state file \"%s\"",
-					  config->pathnames.state);
-		}
-
-		(void) stop_postgres_and_remove_pgdata_and_config(
-			&config->pathnames,
-			&config->pgSetup);
+		(void) cli_drop_node_files_and_directories(config);
 	}
 	else
 	{
@@ -687,6 +653,77 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 		log_info("HINT: to completely remove your local Postgres instance and "
 				 "setup, consider `pg_autoctl drop node --destroy`");
 	}
+}
+
+
+/*
+ * cli_drop_node_with_monitor_disabled implements pg_autoctl drop node for a
+ * node that runs without a pg_auto_failover monitor.
+ */
+static void
+cli_drop_node_with_monitor_disabled(KeeperConfig *config, bool dropAndDestroy)
+{
+	if (dropAndDestroy)
+	{
+		pid_t pid = 0;
+
+		/* first stop the pg_autoctl service if it's running */
+		if (read_pidfile(config->pathnames.pid, &pid))
+		{
+			if (kill(pid, SIGQUIT) != 0)
+			{
+				log_error(
+					"Failed to send SIGQUIT to the keeper's pid %d: %m",
+					pid);
+				exit(EXIT_CODE_INTERNAL_ERROR);
+			}
+
+			if (!wait_for_pid_to_exit(config->pathnames.pid, 30, &pid))
+			{
+				log_fatal(
+					"Failed to stop the pg_autoctl process with pid %d",
+					pid);
+				exit(EXIT_CODE_INTERNAL_ERROR);
+			}
+		}
+
+		(void) cli_drop_node_files_and_directories(config);
+	}
+	else
+	{
+		log_fatal("pg_autoctl drop node is not supported when "
+				  "the monitor is disabled");
+		log_info("Consider using the --destroy option");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	exit(EXIT_CODE_QUIT);
+}
+
+
+/*
+ * cli_drop_node_files_and_directories removes the state files, configuration
+ * files, and the PGDATA directory.
+ */
+static void
+cli_drop_node_files_and_directories(KeeperConfig *config)
+{
+	/* Now remove the state files */
+	if (!unlink_file(config->pathnames.init))
+	{
+		log_error("Failed to remove state init file \"%s\"",
+				  config->pathnames.init);
+	}
+
+	if (!unlink_file(config->pathnames.state))
+	{
+		log_error("Failed to remove state file \"%s\"",
+				  config->pathnames.state);
+	}
+
+	(void) stop_postgres_and_remove_pgdata_and_config(
+		&config->pathnames,
+		&config->pgSetup);
 }
 
 

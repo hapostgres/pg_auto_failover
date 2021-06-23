@@ -421,7 +421,7 @@ ReportPgIsRunning(Keeper *keeper)
  *  - We failed to obtain the replication state from pg_stat_replication
  */
 bool
-keeper_update_pg_state(Keeper *keeper)
+keeper_update_pg_state(Keeper *keeper, int logLevel)
 {
 	KeeperStateData *keeperState = &(keeper->state);
 	KeeperConfig *config = &(keeper->config);
@@ -493,13 +493,14 @@ keeper_update_pg_state(Keeper *keeper)
 										 postgres->currentLSN,
 										 &(pgSetup->control)))
 		{
-			log_error("Failed to update the local Postgres metadata");
+			log_level(logLevel, "Failed to update the local Postgres metadata");
 			return false;
 		}
 
 		if (!keeper_state_check_postgres(keeper, &(pgSetup->control)))
 		{
-			log_error("Failed to update the local Postgres metadata, "
+			log_level(logLevel,
+					  "Failed to update the local Postgres metadata, "
 					  "see above for details");
 			return false;
 		}
@@ -565,11 +566,13 @@ keeper_update_pg_state(Keeper *keeper)
 
 			if (IS_EMPTY_STRING_BUFFER(postgres->pgsrSyncState))
 			{
-				log_error("Failed to fetch current replication properties "
+				log_level(logLevel,
+						  "Failed to fetch current replication properties "
 						  "from standby node: no standby connected in "
 						  "pg_stat_replication.");
-				log_warn("HINT: check pg_autoctl and Postgres logs on "
-						 "standby nodes");
+				log_level(logLevel,
+						  "HINT: check pg_autoctl and Postgres logs on "
+						  "standby nodes");
 			}
 
 			return postgres->pgIsRunning &&
@@ -585,9 +588,10 @@ keeper_update_pg_state(Keeper *keeper)
 
 			if (!success)
 			{
-				log_warn("Postgres is %s and we are in state %s",
-						 postgres->pgIsRunning ? "running" : "not running",
-						 NodeStateToString(keeperState->current_role));
+				log_level(logLevel,
+						  "Postgres is %s and we are in state %s",
+						  postgres->pgIsRunning ? "running" : "not running",
+						  NodeStateToString(keeperState->current_role));
 			}
 			return success;
 		}
@@ -1301,11 +1305,7 @@ keeper_node_has_been_dropped(Keeper *keeper, bool *dropped)
 		MonitorAssignedState assignedState = { 0 };
 
 		/* grab our assigned state from the monitor now */
-		if (!keeper_update_pg_state(keeper))
-		{
-			log_warn("Failed to update the keeper's state from the local "
-					 "PostgreSQL instance.");
-		}
+		(void) keeper_update_pg_state(keeper, LOG_DEBUG);
 
 		if (!keeper_node_active(keeper, doInit, &assignedState))
 		{
@@ -1314,7 +1314,7 @@ keeper_node_has_been_dropped(Keeper *keeper, bool *dropped)
 		}
 
 		if (keeperState->current_role == DROPPED_STATE &&
-			keeperState->assigned_role == DROPPED_STATE)
+			assignedState.state == DROPPED_STATE)
 		{
 			*dropped = true;
 
@@ -1322,15 +1322,15 @@ keeper_node_has_been_dropped(Keeper *keeper, bool *dropped)
 
 			keeperState->last_monitor_contact = now;
 			keeperState->current_role = DROPPED_STATE;
-			keeperState->assigned_role = DROPPED_STATE;
+			keeperState->assigned_role = assignedState.state;
 
 			return keeper_store_state(keeper);
 		}
 		else if (keeperState->current_role != DROPPED_STATE &&
-				 keeperState->assigned_role == DROPPED_STATE)
+				 assignedState.state == DROPPED_STATE)
 		{
 			log_info("Reaching assigned state \"%s\"",
-					 NodeStateToString(keeperState->assigned_role));
+					 NodeStateToString(assignedState.state));
 
 			if (!keeper_fsm_step(keeper))
 			{
@@ -1342,6 +1342,19 @@ keeper_node_has_been_dropped(Keeper *keeper, bool *dropped)
 				keeperState->current_role == keeperState->assigned_role)
 			{
 				*dropped = true;
+
+				/*
+				 * Call node_active one last time now: after being assigned
+				 * DROPPED, we need to report we reached the state for the
+				 * monitor to actually drop this node.
+				 */
+				(void) keeper_update_pg_state(keeper, LOG_DEBUG);
+
+				if (!keeper_node_active(keeper, doInit, &assignedState))
+				{
+					/* errors have already been logged */
+					return false;
+				}
 			}
 			return true;
 		}

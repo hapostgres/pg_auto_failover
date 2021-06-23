@@ -414,11 +414,7 @@ keeper_fsm_step(Keeper *keeper)
 	 * as in the main loop: we continue with default WAL lag of -1 and an empty
 	 * string for pgsrSyncState.
 	 */
-	if (!keeper_update_pg_state(keeper))
-	{
-		log_warn("Failed to update the keeper's state from the local "
-				 "PostgreSQL instance, see above for details.");
-	}
+	(void) keeper_update_pg_state(keeper, LOG_DEBUG);
 
 	log_info("Calling node_active for node %s/%d/%d with current state: "
 			 "PostgreSQL is running is %s, "

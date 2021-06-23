@@ -1115,6 +1115,12 @@ RemoveNode(AutoFailoverNode *currentNode, bool force)
 		return true;
 	}
 
+	/* if the removal is already in progress, politely ignore the request */
+	if (currentNode->goalState == REPLICATION_STATE_DROPPED)
+	{
+		return true;
+	}
+
 	/* review the FSM for every other node, when removing the primary */
 	if (currentNodeIsPrimary)
 	{

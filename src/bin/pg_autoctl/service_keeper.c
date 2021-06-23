@@ -397,7 +397,7 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		 * Check for any changes in the local PostgreSQL instance, and update
 		 * our in-memory values for the replication WAL lag and sync_state.
 		 */
-		if (!keeper_update_pg_state(keeper))
+		if (!keeper_update_pg_state(keeper, LOG_WARN))
 		{
 			warnedOnCurrentIteration = true;
 			log_warn("Failed to update the keeper's state from the local "
