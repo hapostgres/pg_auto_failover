@@ -100,6 +100,7 @@ bool standby_init_database(LocalPostgresServer *postgres,
 						   const char *hostname,
 						   bool skipBaseBackup);
 bool primary_rewind_to_standby(LocalPostgresServer *postgres);
+bool secondary_rewind(LocalPostgresServer *postgres);
 bool postgres_maybe_do_crash_recovery(LocalPostgresServer *postgres);
 bool standby_promote(LocalPostgresServer *postgres);
 bool check_postgresql_settings(LocalPostgresServer *postgres,

@@ -862,6 +862,13 @@ standby_init_database(LocalPostgresServer *postgres,
 	{
 		log_info("Skipping base backup to use pre-existing PGDATA at \"%s\"",
 				 pgSetup->pgdata);
+
+		/* when skipping pg_basebackup, then pg_rewind might be needed */
+		if (!secondary_rewind(postgres))
+		{
+			/* errors have already been logged */
+			return false;
+		}
 	}
 	else
 	{
@@ -990,9 +997,45 @@ primary_rewind_to_standby(LocalPostgresServer *postgres)
 {
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	ReplicationSource *replicationSource = &(postgres->replicationSource);
-	NodeAddress *primaryNode = &(replicationSource->primaryNode);
 
 	log_trace("primary_rewind_to_standby");
+
+	if (!secondary_rewind(postgres))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	if (!pg_setup_standby_mode(pgSetup->control.pg_control_version,
+							   pgSetup->pgdata,
+							   pgSetup->pg_ctl,
+							   replicationSource))
+	{
+		log_error("Failed to setup Postgres as a standby, after rewind");
+		return false;
+	}
+
+	if (!ensure_postgres_service_is_running(postgres))
+	{
+		log_error("Failed to start postgres after rewind");
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * secondary_rewind calls pg_rewind on the secondary's server PGDATA. It does
+ * no setup, and doesn't restart the Postgres service.
+ */
+bool
+secondary_rewind(LocalPostgresServer *postgres)
+{
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+	ReplicationSource *replicationSource = &(postgres->replicationSource);
+	NodeAddress *primaryNode = &(replicationSource->primaryNode);
+
 	log_info("Rewinding PostgreSQL to follow new primary node " NODE_FORMAT,
 			 primaryNode->nodeId,
 			 primaryNode->name,
@@ -1027,21 +1070,6 @@ primary_rewind_to_standby(LocalPostgresServer *postgres)
 	if (!pg_rewind(pgSetup->pgdata, pgSetup->pg_ctl, replicationSource))
 	{
 		log_error("Failed to rewind old data directory");
-		return false;
-	}
-
-	if (!pg_setup_standby_mode(pgSetup->control.pg_control_version,
-							   pgSetup->pgdata,
-							   pgSetup->pg_ctl,
-							   replicationSource))
-	{
-		log_error("Failed to setup Postgres as a standby, after rewind");
-		return false;
-	}
-
-	if (!ensure_postgres_service_is_running(postgres))
-	{
-		log_error("Failed to start postgres after rewind");
 		return false;
 	}
 
