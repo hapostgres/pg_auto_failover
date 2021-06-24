@@ -69,7 +69,8 @@ AllAutoFailoverNodes(char *formationId)
 	uint64 rowNumber = 0;
 
 	const char *selectQuery =
-		SELECT_ALL_FROM_AUTO_FAILOVER_NODE_TABLE " WHERE formationid = $1";
+		SELECT_ALL_FROM_AUTO_FAILOVER_NODE_TABLE
+		" WHERE formationid = $1 ";
 
 	SPI_connect();
 
@@ -221,7 +222,63 @@ AutoFailoverNodeGroup(char *formationId, int groupId)
 
 	const char *selectQuery =
 		SELECT_ALL_FROM_AUTO_FAILOVER_NODE_TABLE
-		" WHERE formationid = $1 AND groupid = $2"
+		"    WHERE formationid = $1 AND groupid = $2"
+		"      AND goalstate <> 'dropped'"
+		" ORDER BY nodeid";
+
+	SPI_connect();
+
+	int spiStatus = SPI_execute_with_args(selectQuery, argCount, argTypes, argValues,
+										  NULL, false, 0);
+	if (spiStatus != SPI_OK_SELECT)
+	{
+		elog(ERROR, "could not select from " AUTO_FAILOVER_NODE_TABLE);
+	}
+
+	MemoryContext spiContext = MemoryContextSwitchTo(callerContext);
+
+	for (rowNumber = 0; rowNumber < SPI_processed; rowNumber++)
+	{
+		HeapTuple heapTuple = SPI_tuptable->vals[rowNumber];
+		AutoFailoverNode *pgAutoFailoverNode =
+			TupleToAutoFailoverNode(SPI_tuptable->tupdesc, heapTuple);
+
+		nodeList = lappend(nodeList, pgAutoFailoverNode);
+	}
+
+	MemoryContextSwitchTo(spiContext);
+
+	SPI_finish();
+
+	return nodeList;
+}
+
+
+/*
+ * AutoFailoverAllNodesInGroup returns all nodes in the given formation and
+ * group as a list, and includes nodes that are currently being dropped.
+ */
+List *
+AutoFailoverAllNodesInGroup(char *formationId, int groupId)
+{
+	List *nodeList = NIL;
+	MemoryContext callerContext = CurrentMemoryContext;
+
+	Oid argTypes[] = {
+		TEXTOID, /* formationid */
+		INT4OID  /* groupid */
+	};
+
+	Datum argValues[] = {
+		CStringGetTextDatum(formationId), /* formationid */
+		Int32GetDatum(groupId)            /* groupid */
+	};
+	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
+	uint64 rowNumber = 0;
+
+	const char *selectQuery =
+		SELECT_ALL_FROM_AUTO_FAILOVER_NODE_TABLE
+		"    WHERE formationid = $1 AND groupid = $2"
 		" ORDER BY nodeid";
 
 	SPI_connect();

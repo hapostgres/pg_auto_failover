@@ -30,6 +30,7 @@
 #define STR_ERRCODE_SERIALIZATION_FAILURE "40001"
 #define STR_ERRCODE_STATEMENT_COMPLETION_UNKNOWN "40003"
 #define STR_ERRCODE_DEADLOCK_DETECTED "40P01"
+#define STR_ERRCODE_UNDEFINED_OBJECT "42704"
 
 #define STR_ERRCODE_CLASS_INSUFFICIENT_RESOURCES "53"
 #define STR_ERRCODE_CLASS_PROGRAM_LIMIT_EXCEEDED "54"
@@ -1214,22 +1215,29 @@ monitor_set_formation_number_sync_standbys(Monitor *monitor, char *formation,
  * on the monitor.
  */
 bool
-monitor_remove_by_hostname(Monitor *monitor, char *host, int port)
+monitor_remove_by_hostname(Monitor *monitor, char *host, int port, bool force)
 {
 	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BOOL, false };
 	PGSQL *pgsql = &monitor->pgsql;
-	const char *sql = "SELECT pgautofailover.remove_node($1, $2)";
-	int paramCount = 2;
-	Oid paramTypes[2] = { TEXTOID, INT4OID };
-	const char *paramValues[2];
+	const char *sql = "SELECT pgautofailover.remove_node($1, $2, $3)";
+	int paramCount = 3;
+	Oid paramTypes[3] = { TEXTOID, INT4OID, BOOLOID };
+	const char *paramValues[3];
 
 	paramValues[0] = host;
 	paramValues[1] = intToString(port).strValue;
+	paramValues[2] = force ? "true" : "false";
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
 								   &context, &parseSingleValueResult))
 	{
+		/* if we fail to find the node we want to remove, we're good */
+		if (strcmp(context.sqlstate, STR_ERRCODE_UNDEFINED_OBJECT) == 0)
+		{
+			return true;
+		}
+
 		log_error("Failed to remove node %s:%d from the monitor", host, port);
 		return false;
 	}
@@ -1258,18 +1266,19 @@ monitor_remove_by_hostname(Monitor *monitor, char *host, int port)
  * on the monitor.
  */
 bool
-monitor_remove_by_nodename(Monitor *monitor, char *formation, char *name)
+monitor_remove_by_nodename(Monitor *monitor,
+						   char *formation, char *name, bool force)
 {
 	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BOOL, false };
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
-		"SELECT pgautofailover.remove_node(nodeid::int) "
+		"SELECT pgautofailover.remove_node(nodeid::int, $3) "
 		"  FROM pgautofailover.node"
 		" WHERE formationid = $1 and nodename = $2";
 
-	int paramCount = 2;
-	Oid paramTypes[2] = { TEXTOID, TEXTOID };
-	const char *paramValues[2] = { formation, name };
+	int paramCount = 3;
+	Oid paramTypes[3] = { TEXTOID, TEXTOID };
+	const char *paramValues[3] = { formation, name, force ? "true" : "false" };
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
@@ -4386,6 +4395,51 @@ prepare_connection_to_current_system_user(Monitor *source, Monitor *target)
 	target->pgsql.connectionStatementType = PGSQL_CONNECTION_MULTI_STATEMENT;
 
 	PQconninfoFree(conninfo);
+
+	return true;
+}
+
+
+/*
+ * monitor_find_node_by_nodeid probes the monitor's database to see if the
+ * given nodeid matches with an existing node. When found, the array contains
+ * one entry with the details of the node, otherwise the array is empty.
+ */
+bool
+monitor_find_node_by_nodeid(Monitor *monitor,
+							const char *formation,
+							int groupId,
+							int64_t nodeId,
+							NodeAddressArray *nodesArray)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT * FROM pgautofailover.get_nodes($1, $2) WHERE node_id = $3";
+	int paramCount = 3;
+	Oid paramTypes[3] = { TEXTOID, INT4OID, INT8OID };
+	const char *paramValues[3];
+
+	NodeAddressArrayParseContext parseContext = { { 0 }, nodesArray, false };
+
+	paramValues[0] = formation;
+	paramValues[1] = intToString(groupId).strValue;
+	paramValues[2] = intToString(nodeId).strValue;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &parseContext, parseNodeArray))
+	{
+		log_error("Failed to get nodes for group %d in formation \"%s\" "
+				  "from the monitor", groupId, formation);
+		return false;
+	}
+
+	if (!parseContext.parsedOK)
+	{
+		log_error("Failed to get nodes for group %d in formation \"%s\" "
+				  "from the monitor", groupId, formation);
+		return false;
+	}
 
 	return true;
 }

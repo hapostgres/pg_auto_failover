@@ -175,6 +175,10 @@
 #define COMMENT_INIT_TO_REPORT_LSN \
 	"Creating a new node from a standby node that is not a candidate."
 
+#define COMMENT_ANY_TO_DROPPED \
+	"This node is being dropped from the monitor"
+
+
 /* *INDENT-OFF* */
 
 /*
@@ -195,6 +199,7 @@ KeeperFSMTransition KeeperFSM[] = {
 	 * Started as a single, no nothing
 	 */
 	{ INIT_STATE, SINGLE_STATE, COMMENT_INIT_TO_SINGLE, &fsm_init_primary },
+	{ DROPPED_STATE, SINGLE_STATE, COMMENT_INIT_TO_SINGLE, &fsm_init_primary },
 
 
 	/*
@@ -319,6 +324,7 @@ KeeperFSMTransition KeeperFSM[] = {
 	 * Just wait until primary is ready
 	 */
 	{ INIT_STATE, WAIT_STANDBY_STATE, COMMENT_INIT_TO_WAIT_STANDBY, NULL },
+	{ DROPPED_STATE, WAIT_STANDBY_STATE, COMMENT_INIT_TO_WAIT_STANDBY, NULL },
 
 	/*
 	 * When losing a monitor and then connecting to a new monitor as a
@@ -376,6 +382,11 @@ KeeperFSMTransition KeeperFSM[] = {
 	{ INIT_STATE, REPORT_LSN_STATE, COMMENT_INIT_TO_REPORT_LSN, &fsm_init_from_standby },
 
 	/*
+	 * Dropping a node is a two-step process
+	 */
+	{ ANY_STATE, DROPPED_STATE, COMMENT_ANY_TO_DROPPED, &fsm_drop_node },
+
+	/*
 	 * This is the end, my friend.
 	 */
 	{ NO_STATE, NO_STATE, NULL, NULL },
@@ -404,23 +415,18 @@ keeper_fsm_step(Keeper *keeper)
 	 * as in the main loop: we continue with default WAL lag of -1 and an empty
 	 * string for pgsrSyncState.
 	 */
-	if (!keeper_update_pg_state(keeper))
-	{
-		log_error("Failed to update the keeper's state from the local "
-				  "PostgreSQL instance, see above for details.");
-		return false;
-	}
+	(void) keeper_update_pg_state(keeper, LOG_DEBUG);
 
-	log_info("Calling node_active for node %s/%d/%d with current state: "
-			 "PostgreSQL is running is %s, "
-			 "sync_state is \"%s\", "
-			 "latest WAL LSN is %s.",
-			 config->formation,
-			 keeperState->current_node_id,
-			 keeperState->current_group,
-			 postgres->pgIsRunning ? "true" : "false",
-			 postgres->pgsrSyncState,
-			 postgres->currentLSN);
+	log_debug("Calling node_active for node %s/%d/%d with current state: "
+			  "PostgreSQL is running is %s, "
+			  "sync_state is \"%s\", "
+			  "latest WAL LSN is %s.",
+			  config->formation,
+			  keeperState->current_node_id,
+			  keeperState->current_group,
+			  postgres->pgIsRunning ? "true" : "false",
+			  postgres->pgsrSyncState,
+			  postgres->currentLSN);
 
 	if (!monitor_node_active(monitor,
 							 config->formation,
@@ -507,11 +513,21 @@ keeper_fsm_reach_assigned_state(Keeper *keeper)
 		{
 			bool ret = false;
 
-			log_info("FSM transition from \"%s\" to \"%s\"%s%s",
-					 NodeStateToString(transition.current),
-					 NodeStateToString(transition.assigned),
-					 transition.comment ? ": " : "",
-					 transition.comment ? transition.comment : "");
+			if (transition.current != ANY_STATE)
+			{
+				log_info("FSM transition from \"%s\" to \"%s\"%s%s",
+						 NodeStateToString(transition.current),
+						 NodeStateToString(transition.assigned),
+						 transition.comment ? ": " : "",
+						 transition.comment ? transition.comment : "");
+			}
+			else
+			{
+				log_info("FSM transition to \"%s\"%s%s",
+						 NodeStateToString(transition.assigned),
+						 transition.comment ? ": " : "",
+						 transition.comment ? transition.comment : "");
+			}
 
 			if (transition.transitionFunction)
 			{

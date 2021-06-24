@@ -47,7 +47,7 @@ static int AssignGroupId(AutoFailoverFormation *formation,
 						 char *nodeHost, int nodePort,
 						 ReplicationState *initialState);
 
-static bool RemoveNode(AutoFailoverNode *currentNode);
+static bool RemoveNode(AutoFailoverNode *currentNode, bool force);
 
 /* SQL-callable function declarations */
 PG_FUNCTION_INFO_V1(register_node);
@@ -422,12 +422,14 @@ NodeActive(char *formationId, AutoFailoverNodeState *currentNodeState)
 
 	if (pgAutoFailoverNode == NULL)
 	{
-		ereport(ERROR, (errmsg("couldn't find node with nodeid %lld",
+		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+						errmsg("couldn't find node with nodeid %lld",
 							   (long long) currentNodeState->nodeId)));
 	}
 	else if (strcmp(pgAutoFailoverNode->formationId, formationId) != 0)
 	{
-		ereport(ERROR, (errmsg("node %lld does not belong to formation %s",
+		ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+						errmsg("node %lld does not belong to formation %s",
 							   (long long) currentNodeState->nodeId,
 							   formationId)));
 	}
@@ -813,7 +815,7 @@ get_nodes(PG_FUNCTION_ARGS)
 		{
 			int32 groupId = PG_GETARG_INT32(1);
 
-			fctx->nodesList = AutoFailoverNodeGroup(formationId, groupId);
+			fctx->nodesList = AutoFailoverAllNodesInGroup(formationId, groupId);
 		}
 
 		funcctx->user_fctx = fctx;
@@ -918,7 +920,8 @@ get_other_nodes(PG_FUNCTION_ARGS)
 		AutoFailoverNode *activeNode = GetAutoFailoverNodeById(nodeId);
 		if (activeNode == NULL)
 		{
-			ereport(ERROR, (errmsg("node %lld is not registered",
+			ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+							errmsg("node %lld is not registered",
 								   (long long) nodeId)));
 		}
 
@@ -1016,17 +1019,18 @@ remove_node_by_nodeid(PG_FUNCTION_ARGS)
 	checkPgAutoFailoverVersion();
 
 	int64 nodeId = PG_GETARG_INT64(0);
+	bool force = PG_GETARG_BOOL(1);
 
 	AutoFailoverNode *currentNode = GetAutoFailoverNodeById(nodeId);
 
 	if (currentNode == NULL)
 	{
-		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
 						errmsg("couldn't find node with nodeid %lld",
 							   (long long) nodeId)));
 	}
 
-	PG_RETURN_BOOL(RemoveNode(currentNode));
+	PG_RETURN_BOOL(RemoveNode(currentNode, force));
 }
 
 
@@ -1041,24 +1045,25 @@ remove_node_by_host(PG_FUNCTION_ARGS)
 	text *nodeHostText = PG_GETARG_TEXT_P(0);
 	char *nodeHost = text_to_cstring(nodeHostText);
 	int32 nodePort = PG_GETARG_INT32(1);
+	bool force = PG_GETARG_BOOL(2);
 
 	AutoFailoverNode *currentNode = GetAutoFailoverNode(nodeHost, nodePort);
 
 	if (currentNode == NULL)
 	{
-		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
 						errmsg("couldn't find node with "
 							   "hostname \"%s\" and port %d",
 							   nodeHost, nodePort)));
 	}
 
-	PG_RETURN_BOOL(RemoveNode(currentNode));
+	PG_RETURN_BOOL(RemoveNode(currentNode, force));
 }
 
 
 /* RemoveNode removes the given node from the monitor. */
 static bool
-RemoveNode(AutoFailoverNode *currentNode)
+RemoveNode(AutoFailoverNode *currentNode, bool force)
 {
 	ListCell *nodeCell = NULL;
 	char message[BUFSIZE] = { 0 };
@@ -1081,6 +1086,40 @@ RemoveNode(AutoFailoverNode *currentNode)
 	/* and the first other node to trigger our first FSM transition */
 	AutoFailoverNode *firstStandbyNode =
 		otherNodesGroupList == NIL ? NULL : linitial(otherNodesGroupList);
+
+	/*
+	 * To remove a node is a 2-step process.
+	 *
+	 *  1. pgautofailover.remove_node() sets the goal state to DROPPED
+	 *  2. pgautofailover.node_active() reports that the goal state is reached
+	 *
+	 * From the client side though, if a crash happens after having called the
+	 * node_active() function but before having stored the state, it might be
+	 * useful to call pgautofailover.remove_node() again.
+	 *
+	 * When pgautofailover.remove_node() is called on a node that has already
+	 * reached the DROPPED state, we proceed to remove it.
+	 */
+	if (IsCurrentState(currentNode, REPLICATION_STATE_DROPPED) || force)
+	{
+		/* time to actually remove the current node */
+		RemoveAutoFailoverNode(currentNode);
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Removing " NODE_FORMAT " from formation \"%s\" and group %d",
+			NODE_FORMAT_ARGS(currentNode),
+			currentNode->formationId,
+			currentNode->groupId);
+
+		return true;
+	}
+
+	/* if the removal is already in progress, politely ignore the request */
+	if (currentNode->goalState == REPLICATION_STATE_DROPPED)
+	{
+		return true;
+	}
 
 	/* review the FSM for every other node, when removing the primary */
 	if (currentNodeIsPrimary)
@@ -1138,15 +1177,20 @@ RemoveNode(AutoFailoverNode *currentNode)
 		}
 	}
 
-	/* time to actually remove the current node */
-	RemoveAutoFailoverNode(currentNode);
-
+	/*
+	 * Mark the node as being dropped, so that the pg_autoctl node-active
+	 * process can implement further actions at drop time.
+	 */
 	LogAndNotifyMessage(
 		message, BUFSIZE,
-		"Removing " NODE_FORMAT " from formation \"%s\" and group %d",
+		"Setting goal state of " NODE_FORMAT
+		" from formation \"%s\" and group %d to \"dropped\""
+		" to implement node removal.",
 		NODE_FORMAT_ARGS(currentNode),
 		currentNode->formationId,
 		currentNode->groupId);
+
+	SetNodeGoalState(currentNode, REPLICATION_STATE_DROPPED, message);
 
 	/*
 	 * Adjust number-sync-standbys if necessary.
@@ -1233,7 +1277,7 @@ RemoveNode(AutoFailoverNode *currentNode)
 		}
 	}
 
-	PG_RETURN_BOOL(true);
+	return true;
 }
 
 
@@ -1404,7 +1448,8 @@ perform_promotion(PG_FUNCTION_ARGS)
 	if (currentNode == NULL)
 	{
 		ereport(ERROR,
-				(errmsg("node \"%s\" is not registered in formation \"%s\"",
+				(errcode(ERRCODE_UNDEFINED_OBJECT),
+				 errmsg("node \"%s\" is not registered in formation \"%s\"",
 						nodeName, formationId)));
 	}
 
@@ -1864,7 +1909,8 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 	if (currentNode == NULL)
 	{
 		ereport(ERROR,
-				(errmsg("node \"%s\" is not registered in formation \"%s\"",
+				(errcode(ERRCODE_UNDEFINED_OBJECT),
+				 errmsg("node \"%s\" is not registered in formation \"%s\"",
 						nodeName, formationId)));
 	}
 
@@ -2022,7 +2068,8 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 	if (currentNode == NULL)
 	{
 		ereport(ERROR,
-				(errmsg("node \"%s\" is not registered in formation \"%s\"",
+				(errcode(ERRCODE_UNDEFINED_OBJECT),
+				 errmsg("node \"%s\" is not registered in formation \"%s\"",
 						nodeName, formationId)));
 	}
 
@@ -2178,7 +2225,8 @@ update_node_metadata(PG_FUNCTION_ARGS)
 
 	if (currentNode == NULL)
 	{
-		ereport(ERROR, (errmsg("node %lld is not registered",
+		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+						errmsg("node %lld is not registered",
 							   (long long) nodeid)));
 	}
 

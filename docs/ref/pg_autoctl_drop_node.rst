@@ -19,6 +19,7 @@ This command drops a Postgres node from the pg_auto_failover monitor::
   --hostname    drop the node with given hostname and pgport
   --pgport      drop the node with given hostname and pgport
   --destroy     also destroy Postgres database
+  --force       force dropping the node from the monitor
 
 Description
 -----------
@@ -36,6 +37,11 @@ options ``--hostname`` and ``--pgport`` or the pair of options
 ``--formation`` and ``--name`` to match the node registration record on the
 monitor database, and get it removed from the known list of nodes on the
 monitor.
+
+Then option ``--force`` can be used when the target node to remove does not
+exist anymore. When a node has been lost entirely, it's not going to be able
+to finish the procedure itself, and it is then possible to instruct the
+monitor of the situation.
 
 Options
 -------
@@ -75,20 +81,32 @@ Options
   Postgres database for the monitor. When using ``--destroy``, the Postgres
   installation is also deleted.
 
+--force
+
+  By default a node is expected to reach the assigned state DROPPED when it
+  is removed from the monitor, and has the opportunity to implement clean-up
+  actions. When the target node to remove is not available anymore, it is
+  possible to use the option ``--force`` to immediately remove the node from
+  the monitor.
+
 Examples
 --------
 
 ::
 
    $ pg_autoctl drop node --destroy --pgdata ./node3
-   17:49:42 12504 INFO  Removing local node from the pg_auto_failover monitor.
-   17:49:42 12504 INFO  Removing local node state file: "/Users/dim/dev/MS/pg_auto_failover/tmux/share/pg_autoctl/Users/dim/dev/MS/pg_auto_failover/tmux/node3/pg_autoctl.state"
-   17:49:42 12504 INFO  Removing local node init state file: "/Users/dim/dev/MS/pg_auto_failover/tmux/share/pg_autoctl/Users/dim/dev/MS/pg_auto_failover/tmux/node3/pg_autoctl.init"
-   17:49:42 12504 INFO  Removed pg_autoctl node at "/Users/dim/dev/MS/pg_auto_failover/tmux/node3" from the monitor and removed the state file "/Users/dim/dev/MS/pg_auto_failover/tmux/share/pg_autoctl/Users/dim/dev/MS/pg_auto_failover/tmux/node3/pg_autoctl.state"
-   17:49:42 12504 INFO  Stopping PostgreSQL at "/Users/dim/dev/MS/pg_auto_failover/tmux/node3"
-   17:49:42 12504 INFO  /Applications/Postgres.app/Contents/Versions/12/bin/pg_ctl --pgdata /Users/dim/dev/MS/pg_auto_failover/tmux/node3 --wait stop --mode fast
-   17:49:42 12504 INFO  /Applications/Postgres.app/Contents/Versions/12/bin/pg_ctl status -D /Users/dim/dev/MS/pg_auto_failover/tmux/node3 [3]
-   17:49:42 12504 INFO  pg_ctl: no server running
-   17:49:42 12504 INFO  pg_ctl stop failed, but PostgreSQL is not running anyway
-   17:49:42 12504 INFO  Removing "/Users/dim/dev/MS/pg_auto_failover/tmux/node3"
-   17:49:42 12504 INFO  Removing "/Users/dim/dev/MS/pg_auto_failover/tmux/config/pg_autoctl/Users/dim/dev/MS/pg_auto_failover/tmux/node3/pg_autoctl.cfg"
+   17:52:21 54201 INFO  Reaching assigned state "secondary"
+   17:52:21 54201 INFO  Removing node with name "node3" in formation "default" from the monitor
+   17:52:21 54201 WARN  Postgres is not running and we are in state secondary
+   17:52:21 54201 WARN  Failed to update the keeper's state from the local PostgreSQL instance, see above for details.
+   17:52:21 54201 INFO  Calling node_active for node default/4/0 with current state: PostgreSQL is running is false, sync_state is "", latest WAL LSN is 0/0.
+   17:52:21 54201 INFO  FSM transition to "dropped": This node is being dropped from the monitor
+   17:52:21 54201 INFO  Transition complete: current state is now "dropped"
+   17:52:21 54201 INFO  This node with id 4 in formation "default" and group 0 has been dropped from the monitor
+   17:52:21 54201 INFO  Stopping PostgreSQL at "/Users/dim/dev/MS/pg_auto_failover/tmux/node3"
+   17:52:21 54201 INFO  /Applications/Postgres.app/Contents/Versions/12/bin/pg_ctl --pgdata /Users/dim/dev/MS/pg_auto_failover/tmux/node3 --wait stop --mode fast
+   17:52:21 54201 INFO  /Applications/Postgres.app/Contents/Versions/12/bin/pg_ctl status -D /Users/dim/dev/MS/pg_auto_failover/tmux/node3 [3]
+   17:52:21 54201 INFO  pg_ctl: no server running
+   17:52:21 54201 INFO  pg_ctl stop failed, but PostgreSQL is not running anyway
+   17:52:21 54201 INFO  Removing "/Users/dim/dev/MS/pg_auto_failover/tmux/node3"
+   17:52:21 54201 INFO  Removing "/Users/dim/dev/MS/pg_auto_failover/tmux/config/pg_autoctl/Users/dim/dev/MS/pg_auto_failover/tmux/node3/pg_autoctl.cfg"

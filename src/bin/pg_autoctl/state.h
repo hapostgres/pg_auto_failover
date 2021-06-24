@@ -51,6 +51,7 @@ typedef enum
 	REPORT_LSN_STATE,
 	FAST_FORWARD_STATE,
 	JOIN_SECONDARY_STATE,
+	DROPPED_STATE,
 
 	/* Allow some wildcard-matching transitions (from ANY state to) */
 	ANY_STATE = 128

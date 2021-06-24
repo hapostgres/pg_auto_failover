@@ -255,6 +255,18 @@ Missing WAL bytes are fetched from one of the most advanced standby nodes by
 using Postgres cascading replication features: it is possible to use any
 standby node in the ``primary_conninfo``.
 
+Dropped
+^^^^^^^
+
+The dropped state is assigned to a node when the ``pg_autoctl drop node``
+command is used. This allows the node to implement specific local actions
+before being entirely removed from the monitor database.
+
+When a node reports reaching the dropped state, the monitor removes its
+entry. If a node is not reporting anymore, maybe because it's completely
+unavailable, then it's possible to run the ``pg_autoctl drop node --force``
+command, and then the node entry is removed from the monitor.
+
 Failover logic
 --------------
 

@@ -4,8 +4,66 @@
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
 \echo Use "CREATE EXTENSION pgautofailover" to load this file. \quit
 
-ALTER TABLE pgautofailover.node
-	RENAME TO node_upgrade_old;
+DROP FUNCTION
+     pgautofailover.register_node(text,text,int,name,text,bigint,int,int,
+                                  pgautofailover.replication_state,text,
+                                  int,bool,text);
+
+DROP FUNCTION
+     pgautofailover.node_active(text,int,int,
+                                pgautofailover.replication_state,bool,pg_lsn,text);
+
+DROP FUNCTION pgautofailover.get_other_nodes(int);
+
+DROP FUNCTION pgautofailover.get_other_nodes
+              (integer,pgautofailover.replication_state);
+
+DROP FUNCTION pgautofailover.current_state(text);
+DROP FUNCTION pgautofailover.current_state(text,int);
+
+DROP TRIGGER disable_secondary_check ON pgautofailover.formation;
+DROP FUNCTION pgautofailover.update_secondary_check();
+
+ALTER TYPE pgautofailover.replication_state RENAME TO old_replication_state;
+
+CREATE TYPE pgautofailover.replication_state
+    AS ENUM
+ (
+    'unknown',
+    'init',
+    'single',
+    'wait_primary',
+    'primary',
+    'draining',
+    'demote_timeout',
+    'demoted',
+    'catchingup',
+    'secondary',
+    'prepare_promotion',
+    'stop_replication',
+    'wait_standby',
+    'maintenance',
+    'join_primary',
+    'apply_settings',
+    'prepare_maintenance',
+    'wait_maintenance',
+    'report_lsn',
+    'fast_forward',
+    'join_secondary',
+    'dropped'
+ );
+
+-- Note the double cast here, first to text and only then to the new enums
+ALTER TABLE pgautofailover.event
+      ALTER COLUMN goalstate
+              TYPE pgautofailover.replication_state
+             USING goalstate::text::pgautofailover.replication_state,
+
+      ALTER COLUMN reportedstate
+              TYPE pgautofailover.replication_state
+             USING reportedstate::text::pgautofailover.replication_state;
+
+ALTER TABLE pgautofailover.node RENAME TO node_upgrade_old;
 
 ALTER TABLE pgautofailover.node_upgrade_old
       RENAME CONSTRAINT system_identifier_is_null_at_init_only
@@ -54,9 +112,19 @@ CREATE TABLE pgautofailover.node
     -- at the time we call the register_node() function.
     --
     CONSTRAINT system_identifier_is_null_at_init_only
-         CHECK (  (    sysidentifier IS NULL
-                   AND reportedstate in ('init', 'wait_standby', 'catchingup') )
-                OR sysidentifier IS NOT NULL),
+         CHECK (
+                  (
+                       sysidentifier IS NULL
+                   AND reportedstate
+                       IN (
+                           'init',
+                           'wait_standby',
+                           'catchingup',
+                           'dropped'
+                          )
+                   )
+                OR sysidentifier IS NOT NULL
+               ),
 
     CONSTRAINT same_system_identifier_within_group
        EXCLUDE USING gist(formationid with =,
@@ -82,22 +150,20 @@ INSERT INTO pgautofailover.node
  )
  SELECT formationid, nodeid, groupid,
         nodename, nodehost, nodeport, sysidentifier,
-        goalstate, reportedstate, reportedpgisrunning, reportedrepstate, reporttime,
+        goalstate::text::pgautofailover.replication_state,
+        reportedstate::text::pgautofailover.replication_state,
+        reportedpgisrunning, reportedrepstate, reporttime,
         1 as reportedtli,
         reportedlsn, walreporttime, health, healthchecktime, statechangetime,
         candidatepriority, replicationquorum, nodecluster
    FROM pgautofailover.node_upgrade_old;
 
 DROP TABLE pgautofailover.node_upgrade_old;
+DROP TYPE pgautofailover.old_replication_state;
 
 GRANT SELECT ON ALL TABLES IN SCHEMA pgautofailover TO autoctl_node;
 
 
-
-DROP FUNCTION
-     pgautofailover.register_node(text,text,int,name,text,bigint,int,int,
-                                  pgautofailover.replication_state,text,
-                                  int,bool,text);
 
 CREATE FUNCTION pgautofailover.register_node
  (
@@ -130,10 +196,6 @@ grant execute on function
                                    int,bool,text)
    to autoctl_node;
 
-
-DROP FUNCTION
-     pgautofailover.node_active(text,int,int,
-                                pgautofailover.replication_state,bool,pg_lsn,text);
 
 CREATE FUNCTION pgautofailover.node_active
  (
@@ -204,8 +266,6 @@ grant execute on function pgautofailover.get_primary(text,int)
    to autoctl_node;
 
 
-DROP FUNCTION pgautofailover.get_other_nodes(int);
-
 CREATE FUNCTION pgautofailover.get_other_nodes
  (
     IN nodeid           bigint,
@@ -224,8 +284,6 @@ comment on function pgautofailover.get_other_nodes(bigint)
 
 grant execute on function pgautofailover.get_other_nodes(bigint)
    to autoctl_node;
-
-DROP FUNCTION pgautofailover.get_other_nodes(int,pgautofailover.replication_state);
 
 CREATE FUNCTION pgautofailover.get_other_nodes
  (
@@ -254,15 +312,33 @@ DROP FUNCTION pgautofailover.remove_node(int);
 
 CREATE FUNCTION pgautofailover.remove_node
  (
-   node_id bigint
+   node_id bigint,
+   force   bool default 'false'
  )
 RETURNS bool LANGUAGE C STRICT SECURITY DEFINER
 AS 'MODULE_PATHNAME', $$remove_node_by_nodeid$$;
 
-comment on function pgautofailover.remove_node(bigint)
+comment on function pgautofailover.remove_node(bigint,bool)
         is 'remove a node from the monitor';
 
-grant execute on function pgautofailover.remove_node(bigint)
+grant execute on function pgautofailover.remove_node(bigint,bool)
+   to autoctl_node;
+
+DROP FUNCTION pgautofailover.remove_node(text,int);
+
+CREATE FUNCTION pgautofailover.remove_node
+ (
+   node_host text,
+   node_port int default 5432,
+   force     bool default 'false'
+ )
+RETURNS bool LANGUAGE C STRICT SECURITY DEFINER
+AS 'MODULE_PATHNAME', $$remove_node_by_host$$;
+
+comment on function pgautofailover.remove_node(text,int,bool)
+        is 'remove a node from the monitor';
+
+grant execute on function pgautofailover.remove_node(text,int,bool)
    to autoctl_node;
 
 DROP FUNCTION pgautofailover.start_maintenance(node_id int);
@@ -322,8 +398,12 @@ begin
 end
 $$;
 
+CREATE TRIGGER disable_secondary_check
+	BEFORE UPDATE
+	ON pgautofailover.formation
+	FOR EACH ROW
+	EXECUTE PROCEDURE pgautofailover.update_secondary_check();
 
-DROP FUNCTION pgautofailover.current_state(text);
 
 CREATE FUNCTION pgautofailover.current_state
  (
@@ -359,8 +439,6 @@ grant execute on function pgautofailover.current_state(text)
 
 comment on function pgautofailover.current_state(text)
         is 'get the current state of both nodes of a formation';
-
-DROP FUNCTION pgautofailover.current_state(text, int);
 
 CREATE FUNCTION pgautofailover.current_state
  (

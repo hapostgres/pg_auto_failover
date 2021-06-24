@@ -40,7 +40,8 @@ CREATE TYPE pgautofailover.replication_state
     'wait_maintenance',
     'report_lsn',
     'fast_forward',
-    'join_secondary'
+    'join_secondary',
+    'dropped'
  );
 
 CREATE TABLE pgautofailover.formation
@@ -136,9 +137,19 @@ CREATE TABLE pgautofailover.node
     -- at the time we call the register_node() function.
     --
     CONSTRAINT system_identifier_is_null_at_init_only
-         CHECK (  (    sysidentifier IS NULL
-                   AND reportedstate in ('init', 'wait_standby', 'catchingup') )
-                OR sysidentifier IS NOT NULL),
+         CHECK (
+                  (
+                       sysidentifier IS NULL
+                   AND reportedstate
+                       IN (
+                           'init',
+                           'wait_standby',
+                           'catchingup',
+                           'dropped'
+                          )
+                   )
+                OR sysidentifier IS NOT NULL
+               ),
 
     CONSTRAINT same_system_identifier_within_group
        EXCLUDE USING gist(formationid with =,
@@ -413,29 +424,31 @@ grant execute on function pgautofailover.get_most_advanced_standby(text,int)
 
 CREATE FUNCTION pgautofailover.remove_node
  (
-   node_id bigint
+   node_id bigint,
+   force   bool default 'false'
  )
 RETURNS bool LANGUAGE C STRICT SECURITY DEFINER
 AS 'MODULE_PATHNAME', $$remove_node_by_nodeid$$;
 
-comment on function pgautofailover.remove_node(bigint)
+comment on function pgautofailover.remove_node(bigint,bool)
         is 'remove a node from the monitor';
 
-grant execute on function pgautofailover.remove_node(bigint)
+grant execute on function pgautofailover.remove_node(bigint,bool)
    to autoctl_node;
 
 CREATE FUNCTION pgautofailover.remove_node
  (
    node_host text,
-   node_port int default 5432
+   node_port int default 5432,
+   force     bool default 'false'
  )
 RETURNS bool LANGUAGE C STRICT SECURITY DEFINER
 AS 'MODULE_PATHNAME', $$remove_node_by_host$$;
 
-comment on function pgautofailover.remove_node(text,int)
+comment on function pgautofailover.remove_node(text,int,bool)
         is 'remove a node from the monitor';
 
-grant execute on function pgautofailover.remove_node(text,int)
+grant execute on function pgautofailover.remove_node(text,int,bool)
    to autoctl_node;
 
 CREATE FUNCTION pgautofailover.perform_failover

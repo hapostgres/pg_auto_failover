@@ -153,6 +153,7 @@ typedef enum FormationKind
 /* public function declarations */
 extern List * AllAutoFailoverNodes(char *formationId);
 extern List * AutoFailoverNodeGroup(char *formationId, int groupId);
+extern List * AutoFailoverAllNodesInGroup(char *formationId, int groupId);
 extern List * AutoFailoverOtherNodesList(AutoFailoverNode *pgAutoFailoverNode);
 extern List * AutoFailoverOtherNodesListInState(AutoFailoverNode *pgAutoFailoverNode,
 												ReplicationState currentState);

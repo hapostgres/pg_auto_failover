@@ -35,7 +35,7 @@
 #include "string_utils.h"
 
 static bool supervisor_init(Supervisor *supervisor);
-static bool supervisor_loop(Supervisor *supervisor);
+static SupervisorExitMode supervisor_loop(Supervisor *supervisor);
 
 static bool supervisor_find_service(Supervisor *supervisor, pid_t pid,
 									Service **result);
@@ -145,7 +145,7 @@ supervisor_start(Service services[], int serviceCount, const char *pidfile)
 		log_fatal("Failed to update pidfile \"%s\", stopping all services now",
 				  supervisor.pidfile);
 
-		supervisor.cleanExit = false;
+		supervisor.exitMode = SUPERVISOR_EXIT_ERROR;
 		supervisor.shutdownSequenceInProgress = true;
 
 		(void) supervisor_stop_subprocesses(&supervisor);
@@ -154,11 +154,29 @@ supervisor_start(Service services[], int serviceCount, const char *pidfile)
 	}
 
 	/* now supervise sub-processes and implement retry strategy */
-	if (!supervisor_loop(&supervisor))
+	switch (supervisor_loop(&supervisor))
 	{
-		log_fatal("Something went wrong in sub-process supervision, "
-				  "stopping now. See above for details.");
-		success = false;
+		case SUPERVISOR_EXIT_FATAL:
+		{
+			log_fatal("A subprocess has reported a fatal error, stopping now. "
+					  "See above for details.");
+			success = false;
+			break;
+		}
+
+		case SUPERVISOR_EXIT_ERROR:
+		{
+			log_fatal("Something went wrong in sub-process supervision, "
+					  "stopping now. See above for details.");
+			success = false;
+			break;
+		}
+
+		case SUPERVISOR_EXIT_CLEAN:
+		{
+			success = true;
+			break;
+		}
 	}
 
 	return supervisor_stop(&supervisor) && success;
@@ -170,7 +188,7 @@ supervisor_start(Service services[], int serviceCount, const char *pidfile)
  * implement our main activities have stopped, and then it cleans-up the PID
  * file.
  */
-static bool
+static SupervisorExitMode
 supervisor_loop(Supervisor *supervisor)
 {
 	int subprocessCount = supervisor->serviceCount;
@@ -278,7 +296,7 @@ supervisor_loop(Supervisor *supervisor)
 	}
 
 	/* we track in the main loop if it's a cleanExit or not */
-	return supervisor->cleanExit;
+	return supervisor->exitMode;
 }
 
 
@@ -518,7 +536,7 @@ supervisor_handle_signals(Supervisor *supervisor)
 	/* the first time we receive a signal, set the shutdown properties */
 	if (!supervisor->shutdownSequenceInProgress)
 	{
-		supervisor->cleanExit = true;
+		supervisor->exitMode = SUPERVISOR_EXIT_CLEAN;
 		supervisor->shutdownSequenceInProgress = true;
 	}
 
@@ -650,6 +668,27 @@ supervisor_restart_service(Supervisor *supervisor, Service *service, int status)
 	{
 		int returnCode = WEXITSTATUS(status);
 
+		/* sometimes we don't want to restart even a PERMANENT service */
+		if (returnCode == EXIT_CODE_DROPPED)
+		{
+			supervisor->exitMode = SUPERVISOR_EXIT_CLEAN;
+			supervisor->shutdownSequenceInProgress = true;
+
+			(void) supervisor_stop_other_services(supervisor, service->pid);
+
+			return false;
+		}
+		else if (returnCode == EXIT_CODE_FATAL)
+		{
+			supervisor->exitMode = SUPERVISOR_EXIT_FATAL;
+			supervisor->shutdownSequenceInProgress = true;
+
+			(void) supervisor_stop_other_services(supervisor, service->pid);
+
+			return false;
+		}
+
+		/* general case, log and continue to restart the service */
 		log_level(logLevel, "pg_autoctl service %s exited with exit status %d",
 				  service->name, returnCode);
 	}
@@ -695,7 +734,7 @@ supervisor_restart_service(Supervisor *supervisor, Service *service, int status)
 	else
 	{
 		/* exit with a non-zero exit code, and process with shutdown sequence */
-		supervisor->cleanExit = false;
+		supervisor->exitMode = SUPERVISOR_EXIT_ERROR;
 		supervisor->shutdownSequenceInProgress = true;
 
 		(void) supervisor_stop_other_services(supervisor, service->pid);
@@ -721,7 +760,7 @@ supervisor_restart_service(Supervisor *supervisor, Service *service, int status)
 		WEXITSTATUS(status) == EXIT_CODE_QUIT)
 	{
 		/* exit with a happy exit code, and process with shutdown sequence */
-		supervisor->cleanExit = true;
+		supervisor->exitMode = SUPERVISOR_EXIT_CLEAN;
 		supervisor->shutdownSequenceInProgress = true;
 
 		(void) supervisor_stop_other_services(supervisor, service->pid);
@@ -743,7 +782,7 @@ supervisor_restart_service(Supervisor *supervisor, Service *service, int status)
 		log_fatal("Failed to restart service %s", service->name);
 
 		/* exit with a non-zero exit code, and process with shutdown sequence */
-		supervisor->cleanExit = false;
+		supervisor->exitMode = SUPERVISOR_EXIT_ERROR;
 		supervisor->shutdownSequenceInProgress = true;
 
 		(void) supervisor_stop_other_services(supervisor, service->pid);
@@ -761,7 +800,7 @@ supervisor_restart_service(Supervisor *supervisor, Service *service, int status)
 		log_fatal("Failed to update pidfile \"%s\", stopping all services now",
 				  supervisor->pidfile);
 
-		supervisor->cleanExit = false;
+		supervisor->exitMode = SUPERVISOR_EXIT_ERROR;
 		supervisor->shutdownSequenceInProgress = true;
 
 		(void) supervisor_stop_subprocesses(supervisor);

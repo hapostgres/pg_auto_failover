@@ -1846,8 +1846,23 @@ class PGAutoCtl:
         self.datadir = pgnode.datadir
         self.pgnode = pgnode
 
-        self.program = shutil.which("pg_autoctl")
         self.command = None
+        self.program = shutil.which("pg_autoctl")
+
+        if self.program is None:
+            pg_config = shutil.which("pg_config")
+
+            if pg_config is None:
+                raise Exception(
+                    "Failed to find pg_config in %s" % os.environ["PATH"]
+                )
+            else:
+                # run pg_config --bindir
+                p = subprocess.run(
+                    [pg_config, "--bindir"], text=True, capture_output=True
+                )
+                bindir = p.stdout.splitlines()[0]
+                self.program = os.path.join(bindir, "pg_autoctl")
 
         self.run_proc = None
         self.last_returncode = None
