@@ -510,7 +510,32 @@ reach_initial_state(Keeper *keeper)
 			 */
 			if (!keeper_fsm_reach_assigned_state(keeper))
 			{
-				/* errors have already been logged */
+				/*
+				 * One reason why we failed to reach the CATCHING-UP state is
+				 * that we've been DROPPED while doing the pg_basebackup or
+				 * some other step of that migration. Check about that now.
+				 */
+				bool dropped = false;
+
+				if (!keeper_ensure_node_has_been_dropped(keeper, &dropped))
+				{
+					log_fatal(
+						"Failed to determine if node %d with current state \"%s\" "
+						" in formation \"%s\" and group %d "
+						"has been dropped from the monitor, see above for details",
+						keeper->state.current_node_id,
+						NodeStateToString(keeper->state.current_role),
+						keeper->config.formation,
+						keeper->config.groupId);
+					return false;
+				}
+
+				if (dropped)
+				{
+					log_fatal("This node has been dropped from the monitor");
+					exit(EXIT_CODE_DROPPED);
+				}
+
 				return false;
 			}
 

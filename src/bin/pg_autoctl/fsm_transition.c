@@ -859,7 +859,7 @@ fsm_init_standby_from_upstream(Keeper *keeper)
 
 	if (!standby_init_database(postgres, config->hostname, skipBaseBackup))
 	{
-		log_error("Failed initialize standby server, see above for details");
+		log_error("Failed to initialize standby server, see above for details");
 		return false;
 	}
 
