@@ -22,7 +22,7 @@ DROP FUNCTION pgautofailover.current_state(text);
 DROP FUNCTION pgautofailover.current_state(text,int);
 
 DROP TRIGGER disable_secondary_check ON pgautofailover.formation;
-DROP FUNCTION pgautofailover.update_secondary_check() CASCADE;
+DROP FUNCTION pgautofailover.update_secondary_check();
 
 ALTER TYPE pgautofailover.replication_state RENAME TO old_replication_state;
 
