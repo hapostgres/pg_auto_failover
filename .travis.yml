@@ -35,6 +35,11 @@ matrix:
     - env: PGVERSION=13 TEST=ssl
     - env: PGVERSION=14 TEST=ssl
     - env: LINTING=true
+  allow_failures:
+    - env: PGVERSION=14 TEST=multi
+    - env: PGVERSION=14 TEST=single
+    - env: PGVERSION=14 TEST=monitor
+    - env: PGVERSION=14 TEST=ssl
 before_install:
   - git clone -b v0.7.18 --depth 1 https://github.com/citusdata/tools.git
   - sudo make -C tools install
