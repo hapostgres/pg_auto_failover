@@ -199,6 +199,7 @@ KeeperFSMTransition KeeperFSM[] = {
 	 * Started as a single, no nothing
 	 */
 	{ INIT_STATE, SINGLE_STATE, COMMENT_INIT_TO_SINGLE, &fsm_init_primary },
+	{ DROPPED_STATE, SINGLE_STATE, COMMENT_INIT_TO_SINGLE, &fsm_init_primary },
 
 
 	/*
