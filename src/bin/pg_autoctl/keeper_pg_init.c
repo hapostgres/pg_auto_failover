@@ -46,6 +46,7 @@ bool keeperInitWarnings = false;
 
 static bool keeper_pg_init_and_register_primary(Keeper *keeper);
 static bool reach_initial_state(Keeper *keeper);
+static bool exit_if_dropped(Keeper *keeper);
 static bool wait_until_primary_is_ready(Keeper *config,
 										MonitorAssignedState *assignedState);
 static bool wait_until_primary_has_created_our_replication_slot(Keeper *keeper,
@@ -499,8 +500,8 @@ reach_initial_state(Keeper *keeper)
 			/* busy loop until we are asked to be in CATCHINGUP_STATE */
 			if (!wait_until_primary_is_ready(keeper, &assignedState))
 			{
-				/* errors have already been logged */
-				return false;
+				/* the node might have been dropped early */
+				return exit_if_dropped(keeper);
 			}
 
 			/*
@@ -515,28 +516,7 @@ reach_initial_state(Keeper *keeper)
 				 * that we've been DROPPED while doing the pg_basebackup or
 				 * some other step of that migration. Check about that now.
 				 */
-				bool dropped = false;
-
-				if (!keeper_ensure_node_has_been_dropped(keeper, &dropped))
-				{
-					log_fatal(
-						"Failed to determine if node %d with current state \"%s\" "
-						" in formation \"%s\" and group %d "
-						"has been dropped from the monitor, see above for details",
-						keeper->state.current_node_id,
-						NodeStateToString(keeper->state.current_role),
-						keeper->config.formation,
-						keeper->config.groupId);
-					return false;
-				}
-
-				if (dropped)
-				{
-					log_fatal("This node has been dropped from the monitor");
-					exit(EXIT_CODE_DROPPED);
-				}
-
-				return false;
+				return exit_if_dropped(keeper);
 			}
 
 			/*
@@ -600,6 +580,39 @@ reach_initial_state(Keeper *keeper)
 
 	/* everything went fine, get rid of the init state file */
 	return unlink_file(config->pathnames.init);
+}
+
+
+/*
+ * exit_if_dropped checks if the node has been dropped during its
+ * initialization phase, and if that's the case, finished the DROP protocol and
+ * exits with a specific exit code.
+ */
+static bool
+exit_if_dropped(Keeper *keeper)
+{
+	bool dropped = false;
+
+	if (!keeper_ensure_node_has_been_dropped(keeper, &dropped))
+	{
+		log_fatal(
+			"Failed to determine if node %d with current state \"%s\" "
+			" in formation \"%s\" and group %d "
+			"has been dropped from the monitor, see above for details",
+			keeper->state.current_node_id,
+			NodeStateToString(keeper->state.current_role),
+			keeper->config.formation,
+			keeper->config.groupId);
+		return false;
+	}
+
+	if (dropped)
+	{
+		log_fatal("This node has been dropped from the monitor");
+		exit(EXIT_CODE_DROPPED);
+	}
+
+	return false;
 }
 
 
@@ -680,6 +693,12 @@ wait_until_primary_is_ready(Keeper *keeper,
 		if (!groupStateHasChanged)
 		{
 			++tries;
+		}
+
+		/* if the node has been dropped while trying to init, exit early */
+		if (assignedState->state == DROPPED_STATE)
+		{
+			return false;
 		}
 
 		if (tries == 3)

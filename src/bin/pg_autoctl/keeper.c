@@ -433,6 +433,11 @@ keeper_update_pg_state(Keeper *keeper, int logLevel)
 
 	log_debug("Update local PostgreSQL state");
 
+	/* reinitialize the replication state values each time we update */
+	postgres->pgIsRunning = false;
+	memset(postgres->pgsrSyncState, 0, PGSR_SYNC_STATE_MAXLENGTH);
+	strlcpy(postgres->currentLSN, "0/0", sizeof(postgres->currentLSN));
+
 	/* when running with --disable-monitor, we might get here early */
 	if (keeperState->current_role == INIT_STATE)
 	{
@@ -440,11 +445,6 @@ keeper_update_pg_state(Keeper *keeper, int logLevel)
 	}
 
 	*pgSetup = config->pgSetup;
-
-	/* reinitialize the replication state values each time we update */
-	postgres->pgIsRunning = false;
-	memset(postgres->pgsrSyncState, 0, PGSR_SYNC_STATE_MAXLENGTH);
-	strlcpy(postgres->currentLSN, "0/0", sizeof(postgres->currentLSN));
 
 	/*
 	 * When PostgreSQL is running, do some extra checks that are going to be
