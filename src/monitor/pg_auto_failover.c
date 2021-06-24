@@ -40,6 +40,8 @@ ProcessUtility_hook_type PreviousProcessUtility_hook = NULL;
 
 void _PG_init(void);
 static void StartMonitorNode(void);
+
+#if (PG_VERSION_NUM < 140000)
 static void pgautofailover_ProcessUtility(PlannedStmt *pstmt,
 										  const char *queryString,
 										  ProcessUtilityContext context,
@@ -47,7 +49,16 @@ static void pgautofailover_ProcessUtility(PlannedStmt *pstmt,
 										  struct QueryEnvironment *queryEnv,
 										  DestReceiver *dest,
 										  QueryCompletion *completionTag);
-
+#else
+static void pgautofailover_ProcessUtility(PlannedStmt *pstmt,
+										  const char *queryString,
+										  bool readOnlyTree,
+										  ProcessUtilityContext context,
+										  ParamListInfo params,
+										  struct QueryEnvironment *queryEnv,
+										  DestReceiver *dest,
+										  QueryCompletion *completionTag);
+#endif
 
 PG_MODULE_MAGIC;
 
@@ -162,6 +173,7 @@ StartMonitorNode(void)
  * executed. As long as the background worker is connected, the DROP DATABASE
  * command would otherwise fail to complete.
  */
+#if (PG_VERSION_NUM < 140000)
 void
 pgautofailover_ProcessUtility(PlannedStmt *pstmt,
 							  const char *queryString,
@@ -170,6 +182,17 @@ pgautofailover_ProcessUtility(PlannedStmt *pstmt,
 							  struct QueryEnvironment *queryEnv,
 							  DestReceiver *dest,
 							  QueryCompletion *completionTag)
+#else
+void
+pgautofailover_ProcessUtility(PlannedStmt * pstmt,
+							  const char * queryString,
+							  bool readOnlyTree,
+							  ProcessUtilityContext context,
+							  ParamListInfo params,
+							  struct QueryEnvironment *queryEnv,
+							  DestReceiver * dest,
+							  QueryCompletion * completionTag)
+#endif
 {
 	Node *parsetree = pstmt->utilityStmt;
 
@@ -191,12 +214,22 @@ pgautofailover_ProcessUtility(PlannedStmt *pstmt,
 
 	if (PreviousProcessUtility_hook)
 	{
+#if (PG_VERSION_NUM < 140000)
 		PreviousProcessUtility_hook(pstmt, queryString, context,
 									params, queryEnv, dest, completionTag);
+#else
+		PreviousProcessUtility_hook(pstmt, queryString, readOnlyTree, context,
+									params, queryEnv, dest, completionTag);
+#endif
 	}
 	else
 	{
+#if (PG_VERSION_NUM < 140000)
 		standard_ProcessUtility(pstmt, queryString, context,
 								params, queryEnv, dest, completionTag);
+#else
+		standard_ProcessUtility(pstmt, queryString, readOnlyTree, context,
+								params, queryEnv, dest, completionTag);
+#endif
 	}
 }
