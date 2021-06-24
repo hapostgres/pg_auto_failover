@@ -1861,8 +1861,8 @@ class PGAutoCtl:
                 p = subprocess.run(
                     [pg_config, "--bindir"], text=True, capture_output=True
                 )
-
-                self.program = p.stdout.split("\n")[0]
+                bindir = p.stdout.splitlines()[0]
+                self.program = os.path.join(bindir, "pg_autoctl")
 
         self.run_proc = None
         self.last_returncode = None
