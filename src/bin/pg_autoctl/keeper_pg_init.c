@@ -136,7 +136,19 @@ keeper_pg_init_and_register(Keeper *keeper)
 	{
 		bool dropped = false;
 
-		if (!keeper_node_has_been_dropped(keeper, &dropped) && dropped)
+		if (!keeper_node_has_been_dropped(keeper, &dropped))
+		{
+			log_fatal("Failed to determine if node %d with current state \"%s\" "
+					  " in formation \"%s\" and group %d "
+					  "has been dropped from the monitor, see above for details",
+					  keeper->state.current_node_id,
+					  NodeStateToString(keeper->state.current_role),
+					  keeper->config.formation,
+					  keeper->config.groupId);
+			return false;
+		}
+
+		if (dropped)
 		{
 			log_info("This node had been dropped previously, now trying to "
 					 "register it again");

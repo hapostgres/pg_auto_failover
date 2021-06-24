@@ -416,16 +416,16 @@ keeper_fsm_step(Keeper *keeper)
 	 */
 	(void) keeper_update_pg_state(keeper, LOG_DEBUG);
 
-	log_info("Calling node_active for node %s/%d/%d with current state: "
-			 "PostgreSQL is running is %s, "
-			 "sync_state is \"%s\", "
-			 "latest WAL LSN is %s.",
-			 config->formation,
-			 keeperState->current_node_id,
-			 keeperState->current_group,
-			 postgres->pgIsRunning ? "true" : "false",
-			 postgres->pgsrSyncState,
-			 postgres->currentLSN);
+	log_debug("Calling node_active for node %s/%d/%d with current state: "
+			  "PostgreSQL is running is %s, "
+			  "sync_state is \"%s\", "
+			  "latest WAL LSN is %s.",
+			  config->formation,
+			  keeperState->current_node_id,
+			  keeperState->current_group,
+			  postgres->pgIsRunning ? "true" : "false",
+			  postgres->pgsrSyncState,
+			  postgres->currentLSN);
 
 	if (!monitor_node_active(monitor,
 							 config->formation,
