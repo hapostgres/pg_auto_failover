@@ -38,6 +38,7 @@
 #include "service_keeper_init.h"
 #include "service_monitor.h"
 #include "service_monitor_init.h"
+#include "signals.h"
 #include "string_utils.h"
 
 /*
@@ -580,6 +581,10 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 	if (!wait_for_pid_to_exit(config->pathnames.pid, 30, &pid))
 	{
 		/* if the service isn't terminated in 30s, signal it to quit now */
+		log_info("Sending signal %s to pg_autoctl process %d",
+				 signal_to_string(SIGQUIT),
+				 pid);
+
 		if (kill(pid, SIGQUIT) != 0)
 		{
 			log_error("Failed to send SIGQUIT to the keeper's pid %d: %m", pid);
@@ -604,7 +609,7 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 	 */
 	bool dropped = false;
 
-	if (keeper_node_has_been_dropped(&keeper, &dropped) && dropped)
+	if (keeper_ensure_node_has_been_dropped(&keeper, &dropped) && dropped)
 	{
 		log_info("This node with id %lld in formation \"%s\" and group %d "
 				 "has been dropped from the monitor",

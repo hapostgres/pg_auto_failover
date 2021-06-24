@@ -273,7 +273,7 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 	{
 		bool dropped = false;
 
-		if (!keeper_node_has_been_dropped(keeper, &dropped))
+		if (!keeper_ensure_node_has_been_dropped(keeper, &dropped))
 		{
 			/* errors have already been logged */
 			return false;

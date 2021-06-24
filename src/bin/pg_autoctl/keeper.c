@@ -1245,11 +1245,13 @@ keeper_node_active(Keeper *keeper, bool doInit,
 
 
 /*
- * keeper_node_has_been_dropped checks if the local node is being dropped or
- * has been dropped already from the monitor.
+ * keeper_ensure_node_has_been_dropped checks if the local node is being
+ * dropped or has been dropped already from the monitor, and when a drop has
+ * been engaged and is not finished, the function implements the remaining
+ * steps of the DROP protocol.
  */
 bool
-keeper_node_has_been_dropped(Keeper *keeper, bool *dropped)
+keeper_ensure_node_has_been_dropped(Keeper *keeper, bool *dropped)
 {
 	Monitor *monitor = &(keeper->monitor);
 	KeeperConfig *config = &(keeper->config);

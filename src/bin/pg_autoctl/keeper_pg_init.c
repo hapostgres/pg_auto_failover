@@ -136,7 +136,7 @@ keeper_pg_init_and_register(Keeper *keeper)
 	{
 		bool dropped = false;
 
-		if (!keeper_node_has_been_dropped(keeper, &dropped))
+		if (!keeper_ensure_node_has_been_dropped(keeper, &dropped))
 		{
 			log_fatal("Failed to determine if node %d with current state \"%s\" "
 					  " in formation \"%s\" and group %d "
