@@ -2039,9 +2039,7 @@ keeper_refresh_other_nodes(Keeper *keeper, bool forceCacheInvalidation)
 	Monitor *monitor = &(keeper->monitor);
 	KeeperConfig *config = &(keeper->config);
 
-	NodeAddressArray *otherNodesArray = &(keeper->otherNodes);
 	NodeAddressArray newNodesArray = { 0 };
-	NodeAddressArray diffNodesArray = { 0 };
 
 	int64_t nodeId = keeper->state.current_node_id;
 
@@ -2064,30 +2062,83 @@ keeper_refresh_other_nodes(Keeper *keeper, bool forceCacheInvalidation)
 		}
 	}
 
+	/*
+	 * In case of success, copy the current nodes array to the keeper's cache.
+	 */
+	bool success =
+		keeper_call_refresh_hooks(keeper, &newNodesArray, forceCacheInvalidation);
+
+	if (success)
+	{
+		keeper->otherNodes = newNodesArray;
+	}
+
+	return success;
+}
+
+
+/*
+ * keeper_call_refresh_hooks loops over the KeeperNodesArrayRefreshArray and
+ * calls each hook in turn. It returns true when all the hooks have returned
+ * true.
+ */
+bool
+keeper_call_refresh_hooks(Keeper *keeper,
+						  NodeAddressArray *newNodesArray,
+						  bool forceCacheInvalidation)
+{
+	bool success = true;
+
+	for (int index = 0; KeeperRefreshHooks[index]; index++)
+	{
+		KeeperNodesArrayRefreshFunction hookFun = KeeperRefreshHooks[index];
+
+		bool ret = (*hookFun)(keeper, newNodesArray, forceCacheInvalidation);
+
+		success = success && ret;
+	}
+
+	return success;
+}
+
+
+/*
+ * keeper_refresh_hba is a KeeperNodesArrayRefreshFunction that adds new
+ * entries in the Postgres HBA file for new nodes that have been added to our
+ * group.
+ */
+bool
+keeper_refresh_hba(Keeper *keeper,
+				   NodeAddressArray *newNodesArray,
+				   bool forceCacheInvalidation)
+{
+	NodeAddressArray *otherNodesArray = &(keeper->otherNodes);
+	NodeAddressArray diffNodesArray = { 0 };
+
 	/* compute nodes that need an HBA change (new ones, new hostnames) */
 	if (forceCacheInvalidation)
 	{
-		diffNodesArray = newNodesArray;
+		diffNodesArray = *newNodesArray;
 	}
 	else
 	{
-		(void) diff_nodesArray(otherNodesArray, &newNodesArray, &diffNodesArray);
+		(void) diff_nodesArray(otherNodesArray, newNodesArray, &diffNodesArray);
 	}
 
 	/*
 	 * When we're alone in the group, and also when there's no change, then we
 	 * are done here already.
 	 */
-	if (newNodesArray.count == 0 || diffNodesArray.count == 0)
+	if (newNodesArray->count == 0 || diffNodesArray.count == 0)
 	{
 		/* refresh the keeper's cache with the current other nodes array */
-		keeper->otherNodes = newNodesArray;
+		keeper->otherNodes = *newNodesArray;
 		return true;
 	}
 
 	log_info("Fetched current list of %d other nodes from the monitor "
 			 "to update HBA rules, including %d changes.",
-			 newNodesArray.count, diffNodesArray.count);
+			 newNodesArray->count, diffNodesArray.count);
 
 	/*
 	 * We have a new list of other nodes, update the HBA file. We only update
@@ -2102,11 +2153,6 @@ keeper_refresh_other_nodes(Keeper *keeper, bool forceCacheInvalidation)
 
 		return false;
 	}
-
-	/*
-	 * In case of success, copy the current nodes array to the keeper's cache.
-	 */
-	keeper->otherNodes = newNodesArray;
 
 	return true;
 }
