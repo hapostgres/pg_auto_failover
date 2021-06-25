@@ -44,6 +44,16 @@ KeeperReloadFunction KeeperReloadHooksArray[] = {
 
 KeeperReloadFunction *KeeperReloadHooks = KeeperReloadHooksArray;
 
+/* list of hooks to run to update a list of nodes, at node active time */
+KeeperNodesArrayRefreshFunction KeeperNodesArrayRefreshArray[] = {
+	&keeper_refresh_hba,
+	NULL
+};
+
+KeeperNodesArrayRefreshFunction *KeeperRefreshHooks =
+	KeeperNodesArrayRefreshArray;
+
+
 static bool service_keeper_node_active(Keeper *keeper, bool doInit);
 static void check_for_network_partitions(Keeper *keeper);
 static bool is_network_healthy(Keeper *keeper);
