@@ -121,7 +121,7 @@ service_keeper_init_start(void *context, pid_t *pid)
 			if (!keeper_pg_init_and_register(keeper))
 			{
 				/* errors have already been logged */
-				exit(EXIT_CODE_INTERNAL_ERROR);
+				exit(EXIT_CODE_FATAL);
 			}
 
 			if (keeperInitWarnings)

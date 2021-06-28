@@ -347,6 +347,7 @@ keeper_pg_init_and_register_primary(Keeper *keeper)
 				  "see above for details",
 				  config->hostname, config->pgSetup.pgport,
 				  config->pgSetup.pgdata, scrubbedConnectionString);
+		return false;
 	}
 
 	log_info("Successfully registered as \"%s\" to the monitor.",

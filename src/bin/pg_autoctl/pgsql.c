@@ -32,6 +32,8 @@
 #define ERRCODE_OBJECT_IN_USE "55006"
 #define ERRCODE_UNDEFINED_OBJECT "42704"
 
+#define ERRCODE_EXCLUSION_VIOLATION "23P01"
+
 static char * ConnectionTypeToString(ConnectionType connectionType);
 static void log_connection_error(PGconn *connection, int logLevel);
 static void pgAutoCtlDefaultNoticeProcessor(void *arg, const char *message);
