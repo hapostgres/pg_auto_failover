@@ -1,0 +1,73 @@
+version: "3.9"  # optional since v1.27.0
+services:
+  monitor:
+    image: citusdata/pg_auto_failover:demo
+    environment:
+      PGDATA: /tmp/pgaf
+      PG_AUTOCTL_DEBUG: 1
+    command: pg_autoctl create monitor --ssl-self-signed --auth trust --run
+    expose:
+      - 5432
+  node1:
+    image: citusdata/pg_auto_failover:demo
+    environment:
+      PGDATA: /tmp/pgaf
+      PG_AUTOCTL_DEBUG: 1
+    command: [
+    "pg_autoctl", "create", "postgres",
+    "--ssl-self-signed",
+    "--auth", "trust",
+    "--pg-hba-lan",
+    "--username", "ad",
+    "--dbname", "analytics",
+    "--monitor", "postgresql://autoctl_node@monitor/pg_auto_failover",
+    "--run"]
+    expose:
+      - 5432
+  node2:
+    image: citusdata/pg_auto_failover:demo
+    expose:
+      - 5432
+    environment:
+      PGDATA: /tmp/pgaf
+      PG_AUTOCTL_DEBUG: 1
+    command: [
+    "pg_autoctl", "create", "postgres",
+    "--ssl-self-signed",
+    "--auth", "trust",
+    "--pg-hba-lan",
+    "--username", "ad",
+    "--dbname", "analytics",
+    "--monitor", "postgresql://autoctl_node@monitor/pg_auto_failover",
+    "--run"]
+    expose:
+      - 5432
+  node3:
+    image: citusdata/pg_auto_failover:demo
+    environment:
+      PGDATA: /tmp/pgaf
+      PG_AUTOCTL_DEBUG: 1
+    command: [
+    "pg_autoctl", "create", "postgres",
+    "--ssl-self-signed",
+    "--auth", "trust",
+    "--pg-hba-lan",
+    "--username", "ad",
+    "--dbname", "analytics",
+    "--monitor", "postgresql://autoctl_node@monitor/pg_auto_failover",
+    "--run"]
+    expose:
+      - 5432
+  demo-app:
+    image: citusdata/pg_auto_failover:demo
+    environment:
+      PGDATA: /tmp/pgaf
+      PG_AUTOCTL_DEBUG: 1
+    command: [
+    "pg_autoctl", "do", "demo", "run",
+    "--username", "ad",
+    "--clients", "10",
+    "--duration", "125",
+    "--first-failover", "45",
+    "--failover-freq", "30",
+    "--monitor", "postgresql://autoctl_node@monitor/pg_auto_failover"]

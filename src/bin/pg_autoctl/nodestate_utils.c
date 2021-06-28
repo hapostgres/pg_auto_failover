@@ -6,6 +6,7 @@
  * Licensed under the PostgreSQL License.
  *
  */
+#include <inttypes.h>
 
 #include "file_utils.h"
 #include "log.h"
@@ -28,9 +29,9 @@ nodestatePrepareHeaders(CurrentNodeStateArray *nodesArray,
 	nodesArray->headers.maxNameSize = 4;  /* "Name" */
 	nodesArray->headers.maxHostSize = 10; /* "Host:Port" */
 	nodesArray->headers.maxNodeSize = 5;  /* "Node" */
-	nodesArray->headers.maxLSNSize = 3;   /* "LSN" */
+	nodesArray->headers.maxLSNSize = 9;   /* "TLI:  LSN" */
 	nodesArray->headers.maxStateSize = MAX_NODE_STATE_LEN;
-	nodesArray->headers.maxHealthSize = strlen("Reachable");
+	nodesArray->headers.maxHealthSize = strlen("read-write *");
 
 	/*
 	 * Dynamically adjust our display output to the length of the longer
@@ -116,38 +117,21 @@ void
 nodestateAdjustHeaders(NodeAddressHeaders *headers,
 					   NodeAddress *node, int groupId)
 {
+	char hostport[BUFSIZE] = { 0 };
+	char composedId[BUFSIZE] = { 0 };
+	char tliLSN[BUFSIZE] = { 0 };
+
+	(void) nodestatePrepareNode(headers,
+								node,
+								groupId,
+								hostport,
+								composedId,
+								tliLSN);
+
 	int nameLen = strlen(node->name);
-
-	/* compute strlen of host:port */
-	IntString portString = intToString(node->port);
-	int hostLen =
-		strlen(node->host) + strlen(portString.strValue) + 1;
-
-	/* compute strlen of groupId/nodeId, as in "0/1" */
-	IntString nodeIdString = intToString(node->nodeId);
-	int nodeLen = 0;
-
-	int lsnLen = strlen(node->lsn);
-
-	switch (headers->nodeKind)
-	{
-		case NODE_KIND_STANDALONE:
-		{
-			nodeLen = strlen(nodeIdString.strValue);
-			break;
-		}
-
-		default:
-		{
-			IntString groupIdString = intToString(groupId);
-
-			nodeLen =
-				strlen(groupIdString.strValue) +
-				strlen(nodeIdString.strValue) + 1;
-
-			break;
-		}
-	}
+	int hostLen = strlen(hostport);
+	int nodeLen = strlen(composedId);
+	int lsnLen = strlen(tliLSN);
 
 	/*
 	 * In order to have a static nice table output even when using
@@ -177,18 +161,18 @@ nodestateAdjustHeaders(NodeAddressHeaders *headers,
 
 	if (headers->maxLSNSize == 0)
 	{
-		/* Unknown LSN is going to be "0/0" */
-		headers->maxLSNSize = 3;
+		/* Unknown LSN is going to be "  1: 0/0" */
+		headers->maxLSNSize = 9;
 	}
 
 	if (headers->maxHealthSize == 0)
 	{
 		/*
-		 * Reachable, which is longer than "unknown", "yes", and "no", so
-		 * that's all we use here, a static length actually. Which is good,
-		 * because a NodeAddress does not know its own health anyway.
+		 * Connection is one of "read-only", "read-write", or "unknown",
+		 * followed by a mark for the health check (*, !, or ?), so we need as
+		 * much space as the full sample "read-write *":
 		 */
-		headers->maxHealthSize = strlen("Reachable");
+		headers->maxHealthSize = strlen("read-write *");
 	}
 
 	if (nameLen > headers->maxNameSize)
@@ -223,8 +207,8 @@ nodestatePrintHeader(NodeAddressHeaders *headers)
 			headers->maxNameSize, "Name",
 			headers->maxNodeSize, "Node",
 			headers->maxHostSize, "Host:Port",
-			headers->maxLSNSize, "LSN",
-			headers->maxHealthSize, "Reachable",
+			headers->maxLSNSize, "TLI: LSN",
+			headers->maxHealthSize, "Connection",
 			headers->maxStateSize, "Current State",
 			headers->maxStateSize, "Assigned State");
 
@@ -249,19 +233,33 @@ nodestatePrintNodeState(NodeAddressHeaders *headers,
 {
 	char hostport[BUFSIZE] = { 0 };
 	char composedId[BUFSIZE] = { 0 };
+	char tliLSN[BUFSIZE] = { 0 };
+	char connection[BUFSIZE] = { 0 };
+	char healthChar = nodestateHealthToChar(nodeState->health);
 
 	(void) nodestatePrepareNode(headers,
 								&(nodeState->node),
 								nodeState->groupId,
 								hostport,
-								composedId);
+								composedId,
+								tliLSN);
+
+	if (healthChar == ' ')
+	{
+		sformat(connection, BUFSIZE, "%s", nodestateConnectionType(nodeState));
+	}
+	else
+	{
+		sformat(connection, BUFSIZE, "%s %c",
+				nodestateConnectionType(nodeState), healthChar);
+	}
 
 	fformat(stdout, "%*s | %*s | %*s | %*s | %*s | %*s | %*s\n",
 			headers->maxNameSize, nodeState->node.name,
 			headers->maxNodeSize, composedId,
 			headers->maxHostSize, hostport,
-			headers->maxLSNSize, nodeState->node.lsn,
-			headers->maxHealthSize, nodestateHealthToString(nodeState->health),
+			headers->maxLSNSize, tliLSN,
+			headers->maxHealthSize, connection,
 			headers->maxStateSize, NodeStateToString(nodeState->reportedState),
 			headers->maxStateSize, NodeStateToString(nodeState->goalState));
 }
@@ -274,21 +272,23 @@ nodestatePrintNodeState(NodeAddressHeaders *headers,
  */
 void
 nodestatePrepareNode(NodeAddressHeaders *headers, NodeAddress *node,
-					 int groupId, char *hostport, char *composedId)
+					 int groupId, char *hostport,
+					 char *composedId, char *tliLSN)
 {
 	sformat(hostport, BUFSIZE, "%s:%d", node->host, node->port);
+	sformat(tliLSN, BUFSIZE, "%3d: %s", node->tli, node->lsn);
 
 	switch (headers->nodeKind)
 	{
 		case NODE_KIND_STANDALONE:
 		{
-			sformat(composedId, BUFSIZE, "%d", node->nodeId);
+			sformat(composedId, BUFSIZE, "%" PRId64, node->nodeId);
 			break;
 		}
 
 		default:
 		{
-			sformat(composedId, BUFSIZE, "%d/%d", groupId, node->nodeId);
+			sformat(composedId, BUFSIZE, "%d/%" PRId64, groupId, node->nodeId);
 			break;
 		}
 	}
@@ -340,11 +340,16 @@ nodestateAsJSON(CurrentNodeState *nodeState, JSON_Value *js)
 	json_object_set_string(jsobj, "assigned_group_state",
 						   NodeStateToString(nodeState->goalState));
 
+	json_object_set_number(jsobj, "timeline", (double) nodeState->node.tli);
+
 	json_object_set_string(jsobj, "Minimum Recovery Ending LSN",
 						   nodeState->node.lsn);
 
 	json_object_set_string(jsobj, "reachable",
 						   nodestateHealthToString(nodeState->health));
+
+	json_object_set_string(jsobj, "conntype",
+						   nodestateConnectionType(nodeState));
 
 	return true;
 }
@@ -383,16 +388,104 @@ nodestateHealthToString(int health)
 
 
 /*
+ * Transform the health column from a monitor into a single char.
+ */
+char
+nodestateHealthToChar(int health)
+{
+	switch (health)
+	{
+		case -1:
+		{
+			return '?';
+		}
+
+		case 0:
+		{
+			return '!';
+		}
+
+		case 1:
+		{
+			return ' ';
+		}
+
+		default:
+		{
+			log_error("BUG in nodestateHealthToString: health = %d", health);
+			return '-';
+		}
+	}
+}
+
+
+/*
+ * nodestateConnectionType returns one of "read-write" or "read-only".
+ */
+char *
+nodestateConnectionType(CurrentNodeState *nodeState)
+{
+	switch (nodeState->reportedState)
+	{
+		case SINGLE_STATE:
+		case PRIMARY_STATE:
+		case WAIT_PRIMARY_STATE:
+		case JOIN_PRIMARY_STATE:
+		case PREPARE_MAINTENANCE_STATE:
+		case APPLY_SETTINGS_STATE:
+		{
+			return "read-write";
+		}
+
+		case SECONDARY_STATE:
+		case CATCHINGUP_STATE:
+		case PREP_PROMOTION_STATE:
+		case STOP_REPLICATION_STATE:
+		case WAIT_MAINTENANCE_STATE:
+		case FAST_FORWARD_STATE:
+		case JOIN_SECONDARY_STATE:
+		case REPORT_LSN_STATE:
+		{
+			return "read-only";
+		}
+
+		/* in those states Postgres is known to be stopped/down */
+		case NO_STATE:
+		case INIT_STATE:
+		case DROPPED_STATE:
+		case WAIT_STANDBY_STATE:
+		case DEMOTED_STATE:
+		case DEMOTE_TIMEOUT_STATE:
+		case DRAINING_STATE:
+		case MAINTENANCE_STATE:
+		{
+			return "none";
+		}
+
+		case ANY_STATE:
+		{
+			return "unknown";
+		}
+
+			/* default: is intentionally left out to have compiler check */
+	}
+
+	return "unknown";
+}
+
+
+/*
  * nodestate_log logs a CurrentNodeState, usually that comes from a
  * notification message we parse.
  */
 void
-nodestate_log(CurrentNodeState *nodeState, int logLevel, int nodeId)
+nodestate_log(CurrentNodeState *nodeState, int logLevel, int64_t nodeId)
 {
 	if (nodeState->node.nodeId == nodeId)
 	{
 		log_level(logLevel,
-				  "New state for this node (node %d, \"%s\") (%s:%d): %s ➜ %s",
+				  "New state for this node "
+				  "(node %" PRId64 ", \"%s\") (%s:%d): %s ➜ %s",
 				  nodeState->node.nodeId,
 				  nodeState->node.name,
 				  nodeState->node.host,
@@ -403,7 +496,7 @@ nodestate_log(CurrentNodeState *nodeState, int logLevel, int nodeId)
 	else
 	{
 		log_level(logLevel,
-				  "New state for node %d \"%s\" (%s:%d): %s ➜ %s",
+				  "New state for node %" PRId64 " \"%s\" (%s:%d): %s ➜ %s",
 				  nodeState->node.nodeId,
 				  nodeState->node.name,
 				  nodeState->node.host,
@@ -448,14 +541,14 @@ printNodeArray(NodeAddressArray *nodesArray)
 void
 printNodeHeader(NodeAddressHeaders *headers)
 {
-	fformat(stdout, "%*s | %*s | %*s | %18s | %8s\n",
+	fformat(stdout, "%*s | %*s | %*s | %21s | %8s\n",
 			headers->maxNameSize, "Name",
 			headers->maxNodeSize, "Node",
 			headers->maxHostSize, "Host:Port",
-			"LSN",
+			"TLI: LSN",
 			"Primary?");
 
-	fformat(stdout, "%*s-+-%*s-+-%*s-+-%18s-+-%8s\n",
+	fformat(stdout, "%*s-+-%*s-+-%*s-+-%21s-+-%8s\n",
 			headers->maxNameSize, headers->nameSeparatorHeader,
 			headers->maxNodeSize, headers->nodeSeparatorHeader,
 			headers->maxHostSize, headers->hostSeparatorHeader,
@@ -471,13 +564,14 @@ printNodeEntry(NodeAddressHeaders *headers, NodeAddress *node)
 {
 	char hostport[BUFSIZE] = { 0 };
 	char composedId[BUFSIZE] = { 0 };
+	char tliLSN[BUFSIZE] = { 0 };
 
-	(void) nodestatePrepareNode(headers, node, 0, hostport, composedId);
+	(void) nodestatePrepareNode(headers, node, 0, hostport, composedId, tliLSN);
 
-	fformat(stdout, "%*s | %*s | %*s | %18s | %8s\n",
+	fformat(stdout, "%*s | %*s | %*s | %21s | %8s\n",
 			headers->maxNameSize, node->name,
 			headers->maxNodeSize, composedId,
 			headers->maxHostSize, hostport,
-			node->lsn,
+			tliLSN,
 			node->isPrimary ? "yes" : "no");
 }

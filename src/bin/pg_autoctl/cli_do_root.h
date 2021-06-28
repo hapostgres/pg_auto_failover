@@ -25,6 +25,12 @@ extern CommandLine do_service_postgres_ctl_commands;
 
 /* src/bin/pg_autoctl/cli_do_show.c */
 extern CommandLine do_show_commands;
+extern CommandLine do_pgsetup_commands;
+extern CommandLine do_service_postgres_ctl_commands;
+extern CommandLine do_service_commands;
+
+/* src/bin/pg_autoctl/cli_do_demo.c */
+extern CommandLine do_demo_commands;
 
 /* src/bin/pg_autoctl/cli_do_root.c */
 extern CommandLine do_primary_adduser;
@@ -60,6 +66,9 @@ extern CommandLine do_standby_promote;
 
 extern CommandLine do_discover;
 
+extern CommandLine do_tmux_commands;
+
+/* src/bin/pg_autoctl/cli_do_azure.c */
 extern CommandLine do_azure_ssh;
 
 extern CommandLine do_commands;
@@ -87,6 +96,7 @@ void keeper_cli_create_replication_user(int argc, char **argv);
 void keeper_cli_add_standby_to_hba(int argc, char **argv);
 void keeper_cli_init_standby(int argc, char **argv);
 void keeper_cli_rewind_old_primary(int argc, char **argv);
+void keeper_cli_maybe_do_crash_recovery(int argc, char **argv);
 void keeper_cli_promote_standby(int argc, char **argv);
 void keeper_cli_receiwal(int argc, char **argv);
 void keeper_cli_identify_system(int argc, char **argv);

@@ -118,6 +118,9 @@
 #define COMMENT_INIT_TO_WAIT_STANDBY \
 	"Start following a primary"
 
+#define COMMENT_SECONARY_TO_WAIT_STANDBY \
+	"Registering to a new monitor"
+
 #define COMMENT_SECONDARY_TO_WAIT_MAINTENANCE \
 	"Waiting for the primary to disable sync replication before " \
 	"going to maintenance."
@@ -141,6 +144,12 @@
 #define COMMENT_SECONDARY_TO_REPORT_LSN \
 	"Reporting the last write-ahead log location received"
 
+#define COMMENT_DRAINING_TO_REPORT_LSN \
+	"Reporting the last write-ahead log location after draining"
+
+#define COMMENT_DEMOTED_TO_REPORT_LSN \
+	"Reporting the last write-ahead log location after being demoted"
+
 #define COMMENT_REPORT_LSN_TO_PREP_PROMOTION \
 	"Stop traffic to primary, " \
 	"wait for it to finish draining."
@@ -163,6 +172,12 @@
 #define COMMENT_FAST_FORWARD_TO_PREP_PROMOTION \
 	"Got the missing WAL bytes, promoted"
 
+#define COMMENT_INIT_TO_REPORT_LSN \
+	"Creating a new node from a standby node that is not a candidate."
+
+#define COMMENT_ANY_TO_DROPPED \
+	"This node is being dropped from the monitor"
+
 
 /* *INDENT-OFF* */
 
@@ -184,6 +199,7 @@ KeeperFSMTransition KeeperFSM[] = {
 	 * Started as a single, no nothing
 	 */
 	{ INIT_STATE, SINGLE_STATE, COMMENT_INIT_TO_SINGLE, &fsm_init_primary },
+	{ DROPPED_STATE, SINGLE_STATE, COMMENT_INIT_TO_SINGLE, &fsm_init_primary },
 
 
 	/*
@@ -228,6 +244,11 @@ KeeperFSMTransition KeeperFSM[] = {
 	 */
 	{ DRAINING_STATE, DEMOTE_TIMEOUT_STATE, COMMENT_DRAINING_TO_DEMOTE_TIMEOUT, &fsm_stop_postgres },
 	{ DEMOTE_TIMEOUT_STATE, DEMOTED_STATE, COMMENT_DEMOTE_TIMEOUT_TO_DEMOTED,  &fsm_stop_postgres},
+
+	/*
+	 * wait_primary stops reporting, is (supposed) dead now
+	 */
+	{ WAIT_PRIMARY_STATE, DEMOTED_STATE, COMMENT_PRIMARY_TO_DEMOTED, &fsm_stop_postgres },
 
 	/*
 	 * was demoted after a failure, but standby was forcibly removed
@@ -280,7 +301,7 @@ KeeperFSMTransition KeeperFSM[] = {
 	/*
 	 * We're asked to be a standby.
 	 */
-	{ CATCHINGUP_STATE, SECONDARY_STATE, COMMENT_CATCHINGUP_TO_SECONDARY, &fsm_maintain_replication_slots },
+	{ CATCHINGUP_STATE, SECONDARY_STATE, COMMENT_CATCHINGUP_TO_SECONDARY, &fsm_prepare_for_secondary },
 
 	/*
 	 * The standby is asked to prepare its own promotion
@@ -303,6 +324,13 @@ KeeperFSMTransition KeeperFSM[] = {
 	 * Just wait until primary is ready
 	 */
 	{ INIT_STATE, WAIT_STANDBY_STATE, COMMENT_INIT_TO_WAIT_STANDBY, NULL },
+	{ DROPPED_STATE, WAIT_STANDBY_STATE, COMMENT_INIT_TO_WAIT_STANDBY, NULL },
+
+	/*
+	 * When losing a monitor and then connecting to a new monitor as a
+	 * secondary, we need to be able to follow the init sequence again.
+	 */
+	{ SECONDARY_STATE, WAIT_STANDBY_STATE, COMMENT_SECONARY_TO_WAIT_STANDBY, NULL },
 
 	/*
 	 * In case of maintenance of the standby server, we stop PostgreSQL.
@@ -341,6 +369,24 @@ KeeperFSMTransition KeeperFSM[] = {
 	{ JOIN_SECONDARY_STATE, SECONDARY_STATE, COMMENT_JOIN_SECONDARY_TO_SECONDARY, &fsm_follow_new_primary },
 
 	/*
+	 * When an old primary gets back online and reaches draining/draining, if a
+	 * failover is on-going then have it join the selection process.
+	 */
+	{ DRAINING_STATE, REPORT_LSN_STATE, COMMENT_DRAINING_TO_REPORT_LSN, &fsm_report_lsn },
+	{ DEMOTED_STATE, REPORT_LSN_STATE, COMMENT_DEMOTED_TO_REPORT_LSN, &fsm_report_lsn },
+
+	/*
+	 * When adding a new node and there is no primary, but there are existing
+	 * nodes that are not candidates for failover.
+	 */
+	{ INIT_STATE, REPORT_LSN_STATE, COMMENT_INIT_TO_REPORT_LSN, &fsm_init_from_standby },
+
+	/*
+	 * Dropping a node is a two-step process
+	 */
+	{ ANY_STATE, DROPPED_STATE, COMMENT_ANY_TO_DROPPED, &fsm_drop_node },
+
+	/*
 	 * This is the end, my friend.
 	 */
 	{ NO_STATE, NO_STATE, NULL, NULL },
@@ -369,23 +415,18 @@ keeper_fsm_step(Keeper *keeper)
 	 * as in the main loop: we continue with default WAL lag of -1 and an empty
 	 * string for pgsrSyncState.
 	 */
-	if (!keeper_update_pg_state(keeper))
-	{
-		log_error("Failed to update the keeper's state from the local "
-				  "PostgreSQL instance, see above for details.");
-		return false;
-	}
+	(void) keeper_update_pg_state(keeper, LOG_DEBUG);
 
-	log_info("Calling node_active for node %s/%d/%d with current state: "
-			 "PostgreSQL is running is %s, "
-			 "sync_state is \"%s\", "
-			 "latest WAL LSN is %s.",
-			 config->formation,
-			 keeperState->current_node_id,
-			 keeperState->current_group,
-			 postgres->pgIsRunning ? "true" : "false",
-			 postgres->pgsrSyncState,
-			 postgres->currentLSN);
+	log_debug("Calling node_active for node %s/%d/%d with current state: "
+			  "PostgreSQL is running is %s, "
+			  "sync_state is \"%s\", "
+			  "latest WAL LSN is %s.",
+			  config->formation,
+			  keeperState->current_node_id,
+			  keeperState->current_group,
+			  postgres->pgIsRunning ? "true" : "false",
+			  postgres->pgsrSyncState,
+			  postgres->currentLSN);
 
 	if (!monitor_node_active(monitor,
 							 config->formation,
@@ -393,6 +434,7 @@ keeper_fsm_step(Keeper *keeper)
 							 keeperState->current_group,
 							 keeperState->current_role,
 							 postgres->pgIsRunning,
+							 postgres->postgresSetup.control.timeline_id,
 							 postgres->currentLSN,
 							 postgres->pgsrSyncState,
 							 &assignedState))
@@ -471,11 +513,21 @@ keeper_fsm_reach_assigned_state(Keeper *keeper)
 		{
 			bool ret = false;
 
-			log_info("FSM transition from \"%s\" to \"%s\"%s%s",
-					 NodeStateToString(transition.current),
-					 NodeStateToString(transition.assigned),
-					 transition.comment ? ": " : "",
-					 transition.comment ? transition.comment : "");
+			if (transition.current != ANY_STATE)
+			{
+				log_info("FSM transition from \"%s\" to \"%s\"%s%s",
+						 NodeStateToString(transition.current),
+						 NodeStateToString(transition.assigned),
+						 transition.comment ? ": " : "",
+						 transition.comment ? transition.comment : "");
+			}
+			else
+			{
+				log_info("FSM transition to \"%s\"%s%s",
+						 NodeStateToString(transition.assigned),
+						 transition.comment ? ": " : "",
+						 transition.comment ? transition.comment : "");
+			}
 
 			if (transition.transitionFunction)
 			{

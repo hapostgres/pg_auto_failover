@@ -32,9 +32,10 @@
 
 /* human-readable names for addressing columns of health check queries */
 #define TLIST_NUM_NODE_ID 1
-#define TLIST_NUM_NODE_HOST 2
-#define TLIST_NUM_NODE_PORT 3
-#define TLIST_NUM_HEALTH_STATUS 4
+#define TLIST_NUM_NODE_NAME 2
+#define TLIST_NUM_NODE_HOST 3
+#define TLIST_NUM_NODE_PORT 4
+#define TLIST_NUM_HEALTH_STATUS 5
 
 
 /* GUCs */
@@ -69,7 +70,7 @@ LoadNodeHealthList(void)
 	{
 		initStringInfo(&query);
 		appendStringInfo(&query,
-						 "SELECT nodeid, nodehost, nodeport, health "
+						 "SELECT nodeid, nodename, nodehost, nodeport, health "
 						 "FROM " AUTO_FAILOVER_NODE_TABLE);
 
 		pgstat_report_activity(STATE_RUNNING, query.data);
@@ -155,6 +156,8 @@ TupleToNodeHealth(HeapTuple heapTuple, TupleDesc tupleDescriptor)
 
 	Datum nodeIdDatum = SPI_getbinval(heapTuple, tupleDescriptor,
 									  TLIST_NUM_NODE_ID, &isNull);
+	Datum nodeNameDatum = SPI_getbinval(heapTuple, tupleDescriptor,
+										TLIST_NUM_NODE_NAME, &isNull);
 	Datum nodeHostDatum = SPI_getbinval(heapTuple, tupleDescriptor,
 										TLIST_NUM_NODE_HOST, &isNull);
 	Datum nodePortDatum = SPI_getbinval(heapTuple, tupleDescriptor,
@@ -163,7 +166,8 @@ TupleToNodeHealth(HeapTuple heapTuple, TupleDesc tupleDescriptor)
 										   TLIST_NUM_HEALTH_STATUS, &isNull);
 
 	NodeHealth *nodeHealth = palloc0(sizeof(NodeHealth));
-	nodeHealth->nodeId = DatumGetInt32(nodeIdDatum);
+	nodeHealth->nodeId = DatumGetInt64(nodeIdDatum);
+	nodeHealth->nodeName = TextDatumGetCString(nodeNameDatum);
 	nodeHealth->nodeHost = TextDatumGetCString(nodeHostDatum);
 	nodeHealth->nodePort = DatumGetInt32(nodePortDatum);
 	nodeHealth->healthState = DatumGetInt32(healthStateDatum);
@@ -176,7 +180,10 @@ TupleToNodeHealth(HeapTuple heapTuple, TupleDesc tupleDescriptor)
  * SetNodeHealthState updates the health state of a node in the metadata.
  */
 void
-SetNodeHealthState(int nodeId, char *nodeHost, uint16 nodePort,
+SetNodeHealthState(int64 nodeId,
+				   char *nodeName,
+				   char *nodeHost,
+				   uint16 nodePort,
 				   int previousHealthState,
 				   int healthState)
 {
@@ -192,26 +199,42 @@ SetNodeHealthState(int nodeId, char *nodeHost, uint16 nodePort,
 		appendStringInfo(&query,
 						 "UPDATE " AUTO_FAILOVER_NODE_TABLE
 						 "   SET health = %d, healthchecktime = now() "
-						 " WHERE nodehost = %s AND nodeport = %d",
+						 " WHERE nodeid = %lld "
+						 "   AND nodehost = %s AND nodeport = %d "
+						 " RETURNING node.*",
 						 healthState,
+						 (long long) nodeId,
 						 quote_literal_cstr(nodeHost),
 						 nodePort);
 
 		pgstat_report_activity(STATE_RUNNING, query.data);
 
 		spiStatus = SPI_execute(query.data, false, 0);
-		Assert(spiStatus == SPI_OK_UPDATE);
+		Assert(spiStatus == SPI_OK_UPDATE_RETURNING);
 
-		if (healthState != previousHealthState)
+		/*
+		 * We should have 0 or 1 row impacted, because of pkey on nodeid. We
+		 * might have updated zero rows when a node is concurrently being
+		 * DELETEd, because of the default REPETEABLE READ isolation level.
+		 */
+		if (SPI_processed == 1)
 		{
-			char message[BUFSIZE] = { 0 };
+			if (healthState != previousHealthState)
+			{
+				HeapTuple heapTuple = SPI_tuptable->vals[0];
+				AutoFailoverNode *pgAutoFailoverNode =
+					TupleToAutoFailoverNode(SPI_tuptable->tupdesc, heapTuple);
 
-			LogAndNotifyMessage(message, sizeof(message),
-								"Node %d (%s:%d) is marked as %s by the monitor",
-								nodeId,
-								nodeHost,
-								nodePort,
-								healthState == 0 ? "unhealthy" : "healthy");
+				char message[BUFSIZE] = { 0 };
+
+				LogAndNotifyMessage(message, sizeof(message),
+									"Node " NODE_FORMAT
+									" is marked as %s by the monitor",
+									NODE_FORMAT_ARGS(pgAutoFailoverNode),
+									healthState == 0 ? "unhealthy" : "healthy");
+
+				NotifyStateChange(pgAutoFailoverNode, message);
+			}
 		}
 	}
 	else

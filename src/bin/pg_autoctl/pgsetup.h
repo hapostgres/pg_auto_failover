@@ -28,6 +28,20 @@
 #define PG_LSN_MAXLENGTH 18
 
 /*
+ * System status indicator. From postgres:src/include/catalog/pg_control.h
+ */
+typedef enum DBState
+{
+	DB_STARTUP = 0,
+	DB_SHUTDOWNED,
+	DB_SHUTDOWNED_IN_RECOVERY,
+	DB_SHUTDOWNING,
+	DB_IN_CRASH_RECOVERY,
+	DB_IN_ARCHIVE_RECOVERY,
+	DB_IN_PRODUCTION
+} DBState;
+
+/*
  * To be able to check if a minor upgrade should be scheduled, and to check for
  * system WAL compatiblity, we use some parts of the pg_controldata output.
  *
@@ -36,10 +50,12 @@
  */
 typedef struct pg_control_data
 {
+	uint64_t system_identifier;
 	uint32_t pg_control_version;        /* PG_CONTROL_VERSION */
 	uint32_t catalog_version_no;        /* see catversion.h */
-	uint64_t system_identifier;
+	DBState state;                      /* see enum above */
 	char latestCheckpointLSN[PG_LSN_MAXLENGTH];
+	uint32_t timeline_id;
 } PostgresControlData;
 
 /*
@@ -127,6 +143,22 @@ typedef struct NodeReplicationSettings
 	bool replicationQuorum;     /* true if participates in write quorum */
 } NodeReplicationSettings;
 
+
+/*
+ * How much should we edit the Postgres HBA file?
+ *
+ * The default value is HBA_EDIT_MINIMAL and pg_autoctl then add entries for
+ * the monitor to be able to connect to the local node, and an entry for the
+ * other nodes to be able to connect with streaming replication privileges.
+ */
+typedef enum
+{
+	HBA_EDIT_UNKNOWN = 0,
+	HBA_EDIT_SKIP,
+	HBA_EDIT_MINIMAL,
+	HBA_EDIT_LAN,
+} HBAEditLevel;
+
 /*
  * pg_auto_failover also support SSL settings.
  */
@@ -175,6 +207,8 @@ typedef struct pg_setup
 	char listen_addresses[MAXPGPATH];       /* listen_addresses */
 	int proxyport;                          /* Proxy port */
 	char authMethod[NAMEDATALEN];           /* auth method, defaults to trust */
+	char hbaLevelStr[NAMEDATALEN];          /* user choice of HBA editing */
+	HBAEditLevel hbaLevel;                  /* user choice of HBA editing */
 	PostmasterStatus pm_status;             /* Postmaster status */
 	bool is_in_recovery;                    /* select pg_is_in_recovery() */
 	PostgresControlData control;            /* pg_controldata pgdata */
@@ -182,6 +216,7 @@ typedef struct pg_setup
 	PgInstanceKind pgKind;                  /* standalone/coordinator/worker */
 	NodeReplicationSettings settings;       /* node replication settings */
 	SSLOptions ssl;                         /* ssl options */
+	char citusClusterName[NAMEDATALEN];     /* citus.cluster_name */
 } PostgresSetup;
 
 #define IS_EMPTY_STRING_BUFFER(strbuf) (strbuf[0] == '\0')
@@ -212,9 +247,6 @@ char * pmStatusToString(PostmasterStatus pm_status);
 
 char * pg_setup_get_username(PostgresSetup *pgSetup);
 
-#define SKIP_HBA(authMethod) \
-	(strncmp(authMethod, SKIP_HBA_AUTH_METHOD, strlen(SKIP_HBA_AUTH_METHOD)) == 0)
-
 char * pg_setup_get_auth_method(PostgresSetup *pgSetup);
 bool pg_setup_skip_hba_edits(PostgresSetup *pgSetup);
 
@@ -230,5 +262,8 @@ char * pgsetup_sslmode_to_string(SSLMode sslMode);
 
 bool pg_setup_standby_slot_supported(PostgresSetup *pgSetup, int logLevel);
 
+HBAEditLevel pgsetup_parse_hba_level(const char *level);
+char * pgsetup_hba_level_to_string(HBAEditLevel hbaLevel);
+const char * dbstateToString(DBState state);
 
 #endif /* PGSETUP_H */

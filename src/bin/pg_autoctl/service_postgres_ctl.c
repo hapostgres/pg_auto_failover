@@ -140,7 +140,8 @@ service_postgres_ctl_runprogram()
 	args[argsIndex] = NULL;
 
 	/* we do not want to call setsid() when running this program. */
-	Program program = initialize_program(args, false);
+	Program program = { 0 };
+	(void) initialize_program(&program, args, false);
 
 	program.capture = false;    /* redirect output, don't capture */
 	program.stdOutFd = STDOUT_FILENO;
@@ -186,6 +187,16 @@ service_postgres_ctl_loop(LocalPostgresServer *postgres)
 
 	/* make sure to initialize the expected Postgres status to unknown */
 	pgStatus->pgExpectedStatus = PG_EXPECTED_STATUS_UNKNOWN;
+
+	if (pg_setup_pgdata_exists(pgSetup))
+	{
+		if (!local_postgres_set_status_path(postgres, true))
+		{
+			log_error("Failed to clean-up postgres state file pathname, "
+					  "see above for details.");
+			exit(EXIT_CODE_BAD_STATE);
+		}
+	}
 
 	for (;;)
 	{
@@ -284,6 +295,7 @@ service_postgres_ctl_loop(LocalPostgresServer *postgres)
 							  "see above for details.");
 
 					/* maybe next round will have better luck? */
+					pg_usleep(100 * 1000);  /* 100ms */
 					continue;
 				}
 
@@ -322,6 +334,8 @@ service_postgres_ctl_loop(LocalPostgresServer *postgres)
 			{
 				*pgSetup = newPgSetup;
 			}
+
+			pg_usleep(100 * 1000);  /* 100ms */
 			continue;
 		}
 
@@ -343,6 +357,7 @@ service_postgres_ctl_loop(LocalPostgresServer *postgres)
 			if (!keeper_postgres_state_read(pgStatus, filename))
 			{
 				/* errors have already been logged, will try again */
+				pg_usleep(100 * 1000);  /* 100ms */
 				continue;
 			}
 

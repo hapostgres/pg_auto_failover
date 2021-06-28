@@ -21,6 +21,9 @@
 #include "parsing.h"
 #include "string_utils.h"
 
+static bool parse_controldata_field_dbstate(const char *controlDataString,
+											DBState *state);
+
 static bool parse_controldata_field_uint32(const char *controlDataString,
 										   const char *fieldName,
 										   uint32_t *dest);
@@ -93,8 +96,8 @@ regexp_first_match(const char *string, const char *regex)
 	}
 	else
 	{
-		int start = m[1].rm_so;
-		int finish = m[1].rm_eo;
+		regoff_t start = m[1].rm_so;
+		regoff_t finish = m[1].rm_eo;
 		int length = finish - start + 1;
 		char *result = (char *) malloc(length * sizeof(char));
 
@@ -116,10 +119,127 @@ regexp_first_match(const char *string, const char *regex)
  * Parse the version number output from pg_ctl --version:
  *    pg_ctl (PostgreSQL) 10.3
  */
-char *
-parse_version_number(const char *version_string)
+bool
+parse_version_number(const char *version_string,
+					 char *pg_version_string,
+					 size_t size,
+					 int *pg_version)
 {
-	return regexp_first_match(version_string, "([[:digit:].]+)");
+	char *match = regexp_first_match(version_string, "([0-9.]+)");
+
+	if (match == NULL)
+	{
+		log_error("Failed to parse Postgres version number \"%s\"",
+				  version_string);
+		return false;
+	}
+
+	/* first, copy the version number in our expected result string buffer */
+	strlcpy(pg_version_string, match, size);
+
+	if (!parse_pg_version_string(pg_version_string, pg_version))
+	{
+		/* errors have already been logged */
+		free(match);
+		return false;
+	}
+
+	free(match);
+	return true;
+}
+
+
+/*
+ * parse_dotted_version_string parses a major.minor dotted version string such
+ * as "12.6" into a single number in the same format as the pg_control_version,
+ * such as 1206.
+ */
+bool
+parse_dotted_version_string(const char *pg_version_string, int *pg_version)
+{
+	/* now, parse the numbers into an integer, ala pg_control_version */
+	bool dotFound = false;
+	char major[INTSTRING_MAX_DIGITS] = { 0 };
+	char minor[INTSTRING_MAX_DIGITS] = { 0 };
+
+	int majorIdx = 0;
+	int minorIdx = 0;
+
+	if (pg_version_string == NULL)
+	{
+		log_debug("BUG: parse_pg_version_string got NULL");
+		return false;
+	}
+
+	for (int i = 0; pg_version_string[i] != '\0'; i++)
+	{
+		if (pg_version_string[i] == '.')
+		{
+			if (dotFound)
+			{
+				log_error("Failed to parse Postgres version number \"%s\"",
+						  pg_version_string);
+				return false;
+			}
+
+			dotFound = true;
+			continue;
+		}
+
+		if (dotFound)
+		{
+			minor[minorIdx++] = pg_version_string[i];
+		}
+		else
+		{
+			major[majorIdx++] = pg_version_string[i];
+		}
+	}
+
+	/* Postgres alpha/beta versions report version "14" instead of "14.0" */
+	if (!dotFound)
+	{
+		strlcpy(minor, "0", INTSTRING_MAX_DIGITS);
+	}
+
+	int maj = 0;
+	int min = 0;
+
+	if (!stringToInt(major, &maj) ||
+		!stringToInt(minor, &min))
+	{
+		log_error("Failed to parse Postgres version number \"%s\"",
+				  pg_version_string);
+		return false;
+	}
+
+	/* transform "12.6" into 1206, that is 12 * 100 + 6 */
+	*pg_version = (maj * 100) + min;
+
+	return true;
+}
+
+
+/*
+ * parse_pg_version_string parses a Postgres version string such as "12.6" into
+ * a single number in the same format as the pg_control_version, such as 1206.
+ */
+bool
+parse_pg_version_string(const char *pg_version_string, int *pg_version)
+{
+	return parse_dotted_version_string(pg_version_string, pg_version);
+}
+
+
+/*
+ * parse_pgaf_version_string parses a pg_auto_failover version string such as
+ * "1.4" into a single number in the same format as the pg_control_version,
+ * such as 104.
+ */
+bool
+parse_pgaf_extension_version_string(const char *version_string, int *version)
+{
+	return parse_dotted_version_string(version_string, version);
 }
 
 
@@ -135,7 +255,10 @@ bool
 parse_controldata(PostgresControlData *pgControlData,
 				  const char *control_data_string)
 {
-	if (!parse_controldata_field_uint32(control_data_string,
+	if (!parse_controldata_field_dbstate(control_data_string,
+										 &(pgControlData->state)) ||
+
+		!parse_controldata_field_uint32(control_data_string,
 										"pg_control version number",
 										&(pgControlData->pg_control_version)) ||
 
@@ -149,11 +272,75 @@ parse_controldata(PostgresControlData *pgControlData,
 
 		!parse_controldata_field_lsn(control_data_string,
 									 "Latest checkpoint location",
-									 pgControlData->latestCheckpointLSN))
+									 pgControlData->latestCheckpointLSN) ||
+
+		!parse_controldata_field_uint32(control_data_string,
+										"Latest checkpoint's TimeLineID",
+										&(pgControlData->timeline_id)))
 	{
 		log_error("Failed to parse pg_controldata output");
 		return false;
 	}
+	return true;
+}
+
+
+#define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
+
+/*
+ * parse_controldata_field_dbstate matches pg_controldata output for Database
+ * cluster state and fills in the value string as an enum value.
+ */
+static bool
+parse_controldata_field_dbstate(const char *controlDataString, DBState *state)
+{
+	char regex[BUFSIZE] = { 0 };
+
+	sformat(regex, BUFSIZE, "Database cluster state: *(.*)$");
+
+	char *match = regexp_first_match(controlDataString, regex);
+
+	if (match == NULL)
+	{
+		return false;
+	}
+
+	if (streq(match, "starting up"))
+	{
+		*state = DB_STARTUP;
+	}
+	else if (streq(match, "shut down"))
+	{
+		*state = DB_SHUTDOWNED;
+	}
+	else if (streq(match, "shut down in recovery"))
+	{
+		*state = DB_SHUTDOWNED_IN_RECOVERY;
+	}
+	else if (streq(match, "shutting down"))
+	{
+		*state = DB_SHUTDOWNING;
+	}
+	else if (streq(match, "in crash recovery"))
+	{
+		*state = DB_IN_CRASH_RECOVERY;
+	}
+	else if (streq(match, "in archive recovery"))
+	{
+		*state = DB_IN_ARCHIVE_RECOVERY;
+	}
+	else if (streq(match, "in production"))
+	{
+		*state = DB_IN_PRODUCTION;
+	}
+	else
+	{
+		log_error("Failed to parse database cluster state \"%s\"", match);
+		free(match);
+		return false;
+	}
+
+	free(match);
 	return true;
 }
 
@@ -253,8 +440,6 @@ parse_controldata_field_lsn(const char *controlDataString,
  * parse_notification_message parses pgautofailover state change notifications,
  * which are sent in the JSON format.
  */
-#define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
-
 bool
 parse_state_notification_message(CurrentNodeState *nodeState,
 								 const char *message)
@@ -267,6 +452,7 @@ parse_state_notification_message(CurrentNodeState *nodeState,
 	if (json_type(json) != JSONObject)
 	{
 		log_error("Failed to parse JSON notification message: \"%s\"", message);
+		json_value_free(json);
 		return false;
 	}
 
@@ -276,6 +462,7 @@ parse_state_notification_message(CurrentNodeState *nodeState,
 	{
 		log_error("Failed to parse JSOBJ notification state message: "
 				  "jsobj object type is not \"state\" as expected");
+		json_value_free(json);
 		return false;
 	}
 
@@ -285,6 +472,7 @@ parse_state_notification_message(CurrentNodeState *nodeState,
 	{
 		log_error("Failed to parse formation in JSON "
 				  "notification message \"%s\"", message);
+		json_value_free(json);
 		return false;
 	}
 	strlcpy(nodeState->formation, str, sizeof(nodeState->formation));
@@ -301,6 +489,7 @@ parse_state_notification_message(CurrentNodeState *nodeState,
 	{
 		log_error("Failed to parse node name in JSON "
 				  "notification message \"%s\"", message);
+		json_value_free(json);
 		return false;
 	}
 	strlcpy(nodeState->node.name, str, sizeof(nodeState->node.name));
@@ -311,6 +500,7 @@ parse_state_notification_message(CurrentNodeState *nodeState,
 	{
 		log_error("Failed to parse node host in JSON "
 				  "notification message \"%s\"", message);
+		json_value_free(json);
 		return false;
 	}
 	strlcpy(nodeState->node.host, str, sizeof(nodeState->node.host));
@@ -324,6 +514,7 @@ parse_state_notification_message(CurrentNodeState *nodeState,
 	{
 		log_error("Failed to parse reportedState in JSON "
 				  "notification message \"%s\"", message);
+		json_value_free(json);
 		return false;
 	}
 	nodeState->reportedState = NodeStateFromString(str);
@@ -334,6 +525,7 @@ parse_state_notification_message(CurrentNodeState *nodeState,
 	{
 		log_error("Failed to parse goalState in JSON "
 				  "notification message \"%s\"", message);
+		json_value_free(json);
 		return false;
 	}
 	nodeState->goalState = NodeStateFromString(str);
@@ -356,9 +548,11 @@ parse_state_notification_message(CurrentNodeState *nodeState,
 	{
 		log_error("Failed to parse health in JSON "
 				  "notification message \"%s\"", message);
+		json_value_free(json);
 		return false;
 	}
 
+	json_value_free(json);
 	return true;
 }
 
@@ -517,7 +711,8 @@ parse_bool(const char *value, bool *result)
 bool
 parse_pguri_info_key_vals(const char *pguri,
 						  KeyVal *overrides,
-						  URIParams *uriParameters)
+						  URIParams *uriParameters,
+						  bool checkForCompleteURI)
 {
 	char *errmsg;
 	PQconninfoOption *conninfo, *option;
@@ -606,31 +801,40 @@ parse_pguri_info_key_vals(const char *pguri,
 		}
 	}
 
+	PQconninfoFree(conninfo);
+
 	/*
 	 * Display an error message per missing field, and only then return false
 	 * if we're missing any one of those.
 	 */
-	if (!foundHost)
+	if (checkForCompleteURI)
 	{
-		log_error("Failed to find hostname in the pguri \"%s\"", pguri);
-	}
+		if (!foundHost)
+		{
+			log_error("Failed to find hostname in the pguri \"%s\"", pguri);
+		}
 
-	if (!foundPort)
+		if (!foundPort)
+		{
+			log_error("Failed to find port in the pguri \"%s\"", pguri);
+		}
+
+		if (!foundUser)
+		{
+			log_error("Failed to find username in the pguri \"%s\"", pguri);
+		}
+
+		if (!foundDBName)
+		{
+			log_error("Failed to find dbname in the pguri \"%s\"", pguri);
+		}
+
+		return foundHost && foundPort && foundUser && foundDBName;
+	}
+	else
 	{
-		log_error("Failed to find port in the pguri \"%s\"", pguri);
+		return true;
 	}
-
-	if (!foundUser)
-	{
-		log_error("Failed to find username in the pguri \"%s\"", pguri);
-	}
-
-	if (!foundDBName)
-	{
-		log_error("Failed to find dbname in the pguri \"%s\"", pguri);
-	}
-
-	return foundHost && foundPort && foundUser && foundDBName;
 }
 
 
@@ -670,6 +874,79 @@ buildPostgresURIfromPieces(URIParams *uriParams, char *pguri)
 					uriParams->parameters.keywords[index],
 					uriParams->parameters.values[index]);
 		}
+	}
+
+	return true;
+}
+
+
+/*
+ * parse_pguri_ssl_settings parses SSL settings from a Postgres connection
+ * string. Given the following connection string
+ *
+ *  "postgres://autoctl_node@localhost:5500/pg_auto_failover?sslmode=prefer"
+ *
+ * we then have an ssl->active = 1, ssl->sslMode = SSL_MODE_PREFER, etc.
+ */
+bool
+parse_pguri_ssl_settings(const char *pguri, SSLOptions *ssl)
+{
+	URIParams params = { 0 };
+	KeyVal overrides = { 0 };
+
+	bool checkForCompleteURI = true;
+
+	/* initialize SSL Params values */
+	if (!parse_pguri_info_key_vals(pguri,
+								   &overrides,
+								   &params,
+								   checkForCompleteURI))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	for (int index = 0; index < params.parameters.count; index++)
+	{
+		char *key = params.parameters.keywords[index];
+		char *val = params.parameters.values[index];
+
+		if (streq(key, "sslmode"))
+		{
+			ssl->sslMode = pgsetup_parse_sslmode(val);
+			strlcpy(ssl->sslModeStr, val, sizeof(ssl->sslModeStr));
+
+			if (ssl->sslMode > SSL_MODE_DISABLE)
+			{
+				ssl->active = true;
+			}
+		}
+		else if (streq(key, "sslrootcert"))
+		{
+			strlcpy(ssl->caFile, val, sizeof(ssl->caFile));
+		}
+		else if (streq(key, "sslcrl"))
+		{
+			strlcpy(ssl->crlFile, val, sizeof(ssl->crlFile));
+		}
+		else if (streq(key, "sslcert"))
+		{
+			strlcpy(ssl->serverCert, val, sizeof(ssl->serverCert));
+		}
+		else if (streq(key, "sslkey"))
+		{
+			strlcpy(ssl->serverKey, val, sizeof(ssl->serverKey));
+		}
+	}
+
+	/* cook-in defaults when the parsed URL contains no SSL settings */
+	if (ssl->sslMode == SSL_MODE_UNKNOWN)
+	{
+		ssl->active = true;
+		ssl->sslMode = SSL_MODE_PREFER;
+		strlcpy(ssl->sslModeStr,
+				pgsetup_sslmode_to_string(ssl->sslMode),
+				sizeof(ssl->sslModeStr));
 	}
 
 	return true;
@@ -737,7 +1014,7 @@ parseLSN(const char *str, uint64_t *lsn)
 bool
 parseNodesArray(const char *nodesJSON,
 				NodeAddressArray *nodesArray,
-				int nodeId)
+				int64_t nodeId)
 {
 	JSON_Value *template =
 		json_parse_string("[{"
@@ -761,6 +1038,8 @@ parseNodesArray(const char *nodesJSON,
 				  "[{node_id:number, node_name:string, "
 				  "node_host:string, node_port:number, node_lsn:string, "
 				  "node_is_primary:boolean}, ...]");
+		json_value_free(template);
+		json_value_free(json);
 		return false;
 	}
 
@@ -773,6 +1052,8 @@ parseNodesArray(const char *nodesJSON,
 				  "%d nodes: pg_autoctl supports up to %d nodes",
 				  len,
 				  NODE_ARRAY_MAX_COUNT);
+		json_value_free(template);
+		json_value_free(json);
 		return false;
 	}
 
@@ -812,6 +1093,8 @@ parseNodesArray(const char *nodesJSON,
 		if (!parseLSN(node->lsn, &lsn))
 		{
 			log_error("Failed to parse nodes array LSN value \"%s\"", node->lsn);
+			json_value_free(template);
+			json_value_free(json);
 			return false;
 		}
 
@@ -825,12 +1108,17 @@ parseNodesArray(const char *nodesJSON,
 			{
 				log_error("Failed to parse nodes array: more than one node "
 						  "is listed with \"node_is_primary\" true.");
+				json_value_free(template);
+				json_value_free(json);
 				return false;
 			}
 		}
 
 		++nodesArrayIndex;
 	}
+
+	json_value_free(template);
+	json_value_free(json);
 
 	/* now ensure the array is sorted by nodeId */
 	(void) pg_qsort(nodesArray->nodes,
@@ -852,6 +1140,82 @@ parseNodesArray(const char *nodesJSON,
 			return false;
 		}
 	}
+
+	return true;
+}
+
+
+/*
+ * uri_contains_password takes a Postgres connection string and checks to see
+ * if it contains a parameter called password. Returns true if a password
+ * keyword is present in the connection string.
+ */
+static bool
+uri_contains_password(const char *pguri)
+{
+	char *errmsg;
+	PQconninfoOption *conninfo, *option;
+
+	conninfo = PQconninfoParse(pguri, &errmsg);
+	if (conninfo == NULL)
+	{
+		log_error("Failed to parse pguri: %s", errmsg);
+
+		PQfreemem(errmsg);
+		return false;
+	}
+
+	/*
+	 * Look for a populated password connection parameter
+	 */
+	for (option = conninfo; option->keyword != NULL; option++)
+	{
+		if (strcmp(option->keyword, "password") == 0 &&
+			option->val != NULL &&
+			!IS_EMPTY_STRING_BUFFER(option->val))
+		{
+			PQconninfoFree(conninfo);
+			return true;
+		}
+	}
+
+	PQconninfoFree(conninfo);
+	return false;
+}
+
+
+/*
+ * parse_and_scrub_connection_string takes a Postgres connection string and
+ * populates scrubbedPguri with the password replaced with **** for logging.
+ * The scrubbedPguri parameter should point to a memory area that has been
+ * allocated by the caller and has at least MAXCONNINFO bytes.
+ */
+bool
+parse_and_scrub_connection_string(const char *pguri, char *scrubbedPguri)
+{
+	URIParams uriParams = { 0 };
+	KeyVal overrides = { 0 };
+
+	if (uri_contains_password(pguri))
+	{
+		overrides = (KeyVal) {
+			.count = 1,
+			.keywords = { "password" },
+			.values = { "****" }
+		};
+	}
+
+	bool checkForCompleteURI = false;
+
+	if (!parse_pguri_info_key_vals(pguri,
+								   &overrides,
+								   &uriParams,
+								   checkForCompleteURI))
+	{
+		return false;
+	}
+
+	buildPostgresURIfromPieces(&uriParams, scrubbedPguri);
 
 	return true;
 }

@@ -65,6 +65,11 @@ all the other nodes.
 
    pg_auto_failover Finite State Machine diagram
 
+In the previous diagram we can see that we have a list of six states where
+the application can connect to a read-write Postgres service: ``single``,
+``wait_primary``, ``primary``, ``prepare_maintenance``, ``apply_settings``,
+and ``join_primary``.
+
 Init
 ^^^^
 
@@ -249,6 +254,18 @@ reported in the report_lsn state.
 Missing WAL bytes are fetched from one of the most advanced standby nodes by
 using Postgres cascading replication features: it is possible to use any
 standby node in the ``primary_conninfo``.
+
+Dropped
+^^^^^^^
+
+The dropped state is assigned to a node when the ``pg_autoctl drop node``
+command is used. This allows the node to implement specific local actions
+before being entirely removed from the monitor database.
+
+When a node reports reaching the dropped state, the monitor removes its
+entry. If a node is not reporting anymore, maybe because it's completely
+unavailable, then it's possible to run the ``pg_autoctl drop node --force``
+command, and then the node entry is removed from the monitor.
 
 Failover logic
 --------------

@@ -286,10 +286,35 @@ ProbeConfigurationFileRole(const char *filename)
 
 	log_debug("Probing configuration file \"%s\"", filename);
 
-	if (!read_ini_file(filename, configOptions))
+	/*
+	 * There is a race condition at process startup where a configuration file
+	 * can disappear while being overwritten. Reduce the chances of that
+	 * happening by making more than one attempt at reading the file.
+	 */
+	char *fileContents = NULL;
+
+	for (int attempts = 0; fileContents == NULL && attempts < 3; attempts++)
 	{
-		log_fatal("Failed to parse configuration file \"%s\"", filename);
-		exit(EXIT_CODE_BAD_CONFIG);
+		long fileSize = 0L;
+
+		if (read_file_if_exists(filename, &fileContents, &fileSize))
+		{
+			break;
+		}
+
+		pg_usleep(100 * 1000);  /* 100ms */
+	}
+
+	if (fileContents == NULL)
+	{
+		log_error("Failed to read configuration file \"%s\"", filename);
+		return PG_AUTOCTL_ROLE_UNKNOWN;
+	}
+
+	if (!parse_ini_buffer(filename, fileContents, configOptions))
+	{
+		log_error("Failed to parse configuration file \"%s\"", filename);
+		return PG_AUTOCTL_ROLE_UNKNOWN;
 	}
 
 	log_debug("ProbeConfigurationFileRole: %s", config.role);

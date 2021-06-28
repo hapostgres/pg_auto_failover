@@ -27,6 +27,7 @@
 #include "pgsetup.h"
 #include "pgsql.h"
 #include "service_keeper_init.h"
+#include "signals.h"
 #include "state.h"
 
 
@@ -45,6 +46,7 @@ bool keeperInitWarnings = false;
 
 static bool keeper_pg_init_and_register_primary(Keeper *keeper);
 static bool reach_initial_state(Keeper *keeper);
+static bool exit_if_dropped(Keeper *keeper);
 static bool wait_until_primary_is_ready(Keeper *config,
 										MonitorAssignedState *assignedState);
 static bool wait_until_primary_has_created_our_replication_slot(Keeper *keeper,
@@ -109,7 +111,7 @@ keeper_pg_init_and_register(Keeper *keeper)
 
 	if (postgresInstanceExists)
 	{
-		if (!keeper_ensure_pg_configuration_files_in_pgdata(config))
+		if (!keeper_ensure_pg_configuration_files_in_pgdata(pgSetup))
 		{
 			log_fatal("Failed to setup your Postgres instance "
 					  "the PostgreSQL way, see above for details");
@@ -126,23 +128,61 @@ keeper_pg_init_and_register(Keeper *keeper)
 		return keeper_pg_init_continue(keeper);
 	}
 
+	/*
+	 * If we have a state file, we're either running the same command again
+	 * (such as pg_autoctl create postgres --run ...) or maybe the user has
+	 * changed their mind after having done a pg_autoctl drop node.
+	 */
 	if (file_exists(config->pathnames.state))
 	{
-		if (createAndRun)
+		bool dropped = false;
+
+		if (!keeper_ensure_node_has_been_dropped(keeper, &dropped))
 		{
-			if (!keeper_init(keeper, config))
+			log_fatal("Failed to determine if node %d with current state \"%s\" "
+					  " in formation \"%s\" and group %d "
+					  "has been dropped from the monitor, see above for details",
+					  keeper->state.current_node_id,
+					  NodeStateToString(keeper->state.current_role),
+					  keeper->config.formation,
+					  keeper->config.groupId);
+			return false;
+		}
+
+		if (dropped)
+		{
+			log_info("This node had been dropped previously, now trying to "
+					 "register it again");
+		}
+
+		/*
+		 * If the node has not been dropped previously, then the state file
+		 * indicates a second run of pg_autoctl create postgres command, and
+		 * when given --run we start the service normally.
+		 *
+		 * If dropped is true, the node has been dropped in the past and the
+		 * user is trying to cancel the pg_autoctl drop node command by doing a
+		 * pg_autoctl create postgres command again. Just continue then.
+		 */
+		if (!dropped)
+		{
+			if (createAndRun)
 			{
-				return false;
+				if (!keeper_init(keeper, config))
+				{
+					return false;
+				}
 			}
+			else
+			{
+				log_fatal("The state file \"%s\" exists and "
+						  "there's no init in progress",
+						  config->pathnames.state);
+				log_info("HINT: use `pg_autoctl run` to start the service.");
+				exit(EXIT_CODE_QUIT);
+			}
+			return createAndRun;
 		}
-		else
-		{
-			log_fatal("The state file \"%s\" exists and "
-					  "there's no init in progress", config->pathnames.state);
-			log_info("HINT: use `pg_autoctl run` to start the service.");
-			exit(EXIT_CODE_QUIT);
-		}
-		return createAndRun;
 	}
 
 	/*
@@ -153,6 +193,14 @@ keeper_pg_init_and_register(Keeper *keeper)
 	if (config->monitorDisabled)
 	{
 		return keeper_init_fsm(keeper);
+	}
+
+	char scrubbedConnectionString[MAXCONNINFO] = { 0 };
+	if (!parse_and_scrub_connection_string(config->monitor_pguri,
+										   scrubbedConnectionString))
+	{
+		log_error("Failed to parse the monitor connection string");
+		return false;
 	}
 
 	/*
@@ -177,7 +225,7 @@ keeper_pg_init_and_register(Keeper *keeper)
 					  "to the pg_auto_failover monitor at %s, "
 					  "see above for details",
 					  config->hostname, config->pgSetup.pgport,
-					  config->pgSetup.pgdata, config->monitor_pguri);
+					  config->pgSetup.pgdata, scrubbedConnectionString);
 			return false;
 		}
 
@@ -247,7 +295,7 @@ keeper_pg_init_and_register(Keeper *keeper)
 					  "to the pg_auto_failover monitor at %s, "
 					  "see above for details",
 					  config->hostname, config->pgSetup.pgport,
-					  config->pgSetup.pgdata, config->monitor_pguri);
+					  config->pgSetup.pgdata, scrubbedConnectionString);
 			return false;
 		}
 
@@ -278,6 +326,13 @@ keeper_pg_init_and_register_primary(Keeper *keeper)
 	KeeperConfig *config = &(keeper->config);
 	PostgresSetup *pgSetup = &(config->pgSetup);
 	char absolutePgdata[PATH_MAX];
+	char scrubbedConnectionString[MAXCONNINFO] = { 0 };
+	if (!parse_and_scrub_connection_string(config->monitor_pguri,
+										   scrubbedConnectionString))
+	{
+		log_error("Failed to parse the monitor connection string");
+		return false;
+	}
 
 	log_info("A postgres directory already exists at \"%s\", registering "
 			 "as a single node",
@@ -291,7 +346,7 @@ keeper_pg_init_and_register_primary(Keeper *keeper)
 				  "to the pg_auto_failover monitor at %s, "
 				  "see above for details",
 				  config->hostname, config->pgSetup.pgport,
-				  config->pgSetup.pgdata, config->monitor_pguri);
+				  config->pgSetup.pgdata, scrubbedConnectionString);
 	}
 
 	log_info("Successfully registered as \"%s\" to the monitor.",
@@ -445,8 +500,8 @@ reach_initial_state(Keeper *keeper)
 			/* busy loop until we are asked to be in CATCHINGUP_STATE */
 			if (!wait_until_primary_is_ready(keeper, &assignedState))
 			{
-				/* errors have already been logged */
-				return false;
+				/* the node might have been dropped early */
+				return exit_if_dropped(keeper);
 			}
 
 			/*
@@ -456,8 +511,12 @@ reach_initial_state(Keeper *keeper)
 			 */
 			if (!keeper_fsm_reach_assigned_state(keeper))
 			{
-				/* errors have already been logged */
-				return false;
+				/*
+				 * One reason why we failed to reach the CATCHING-UP state is
+				 * that we've been DROPPED while doing the pg_basebackup or
+				 * some other step of that migration. Check about that now.
+				 */
+				return exit_if_dropped(keeper);
 			}
 
 			/*
@@ -495,6 +554,12 @@ reach_initial_state(Keeper *keeper)
 			break;
 		}
 
+		case REPORT_LSN_STATE:
+		{
+			/* all the work is done in the INIT ➜ REPORT_LSN transition */
+			break;
+		}
+
 		default:
 
 			/* we don't support any other state at initialization time */
@@ -519,6 +584,39 @@ reach_initial_state(Keeper *keeper)
 
 
 /*
+ * exit_if_dropped checks if the node has been dropped during its
+ * initialization phase, and if that's the case, finished the DROP protocol and
+ * exits with a specific exit code.
+ */
+static bool
+exit_if_dropped(Keeper *keeper)
+{
+	bool dropped = false;
+
+	if (!keeper_ensure_node_has_been_dropped(keeper, &dropped))
+	{
+		log_fatal(
+			"Failed to determine if node %d with current state \"%s\" "
+			" in formation \"%s\" and group %d "
+			"has been dropped from the monitor, see above for details",
+			keeper->state.current_node_id,
+			NodeStateToString(keeper->state.current_role),
+			keeper->config.formation,
+			keeper->config.groupId);
+		return false;
+	}
+
+	if (dropped)
+	{
+		log_fatal("This node has been dropped from the monitor");
+		exit(EXIT_CODE_DROPPED);
+	}
+
+	return false;
+}
+
+
+/*
  * wait_until_primary_is_ready calls monitor_node_active every second until the
  * monitor tells us that we can move from our current state
  * (WAIT_STANDBY_STATE) to CATCHINGUP_STATE, which only happens when the
@@ -529,6 +627,7 @@ wait_until_primary_is_ready(Keeper *keeper,
 							MonitorAssignedState *assignedState)
 {
 	bool pgIsRunning = false;
+	int currentTLI = 1;
 	char currrentLSN[PG_LSN_MAXLENGTH] = "0/0";
 	char *pgsrSyncState = "";
 	int errors = 0, tries = 0;
@@ -536,6 +635,8 @@ wait_until_primary_is_ready(Keeper *keeper,
 
 	/* wait until the primary is ready for us to pg_basebackup */
 	do {
+		bool groupStateHasChanged = false;
+
 		if (firstLoop)
 		{
 			firstLoop = false;
@@ -546,14 +647,21 @@ wait_until_primary_is_ready(Keeper *keeper,
 			KeeperStateData *keeperState = &(keeper->state);
 			int timeoutMs = PG_AUTOCTL_KEEPER_SLEEP_TIME * 1000;
 
-			bool groupStateHasChanged = false;
-
+			(void) pgsql_prepare_to_wait(&(monitor->notificationClient));
 			(void) monitor_wait_for_state_change(monitor,
 												 keeper->config.formation,
 												 keeperState->current_group,
 												 keeperState->current_node_id,
 												 timeoutMs,
 												 &groupStateHasChanged);
+
+			/* when no state change has been notified, close the connection */
+			if (!groupStateHasChanged &&
+				monitor->notificationClient.connectionStatementType ==
+				PGSQL_CONNECTION_MULTI_STATEMENT)
+			{
+				pgsql_finish(&(monitor->notificationClient));
+			}
 		}
 
 		if (!monitor_node_active(&(keeper->monitor),
@@ -562,6 +670,7 @@ wait_until_primary_is_ready(Keeper *keeper,
 								 keeper->state.current_group,
 								 keeper->state.current_role,
 								 pgIsRunning,
+								 currentTLI,
 								 currrentLSN,
 								 pgsrSyncState,
 								 assignedState))
@@ -579,7 +688,18 @@ wait_until_primary_is_ready(Keeper *keeper,
 				return false;
 			}
 		}
-		++tries;
+
+		/* if state has changed, we didn't wait for a full timeout */
+		if (!groupStateHasChanged)
+		{
+			++tries;
+		}
+
+		/* if the node has been dropped while trying to init, exit early */
+		if (assignedState->state == DROPPED_STATE)
+		{
+			return false;
+		}
 
 		if (tries == 3)
 		{
@@ -630,18 +750,18 @@ wait_until_primary_has_created_our_replication_slot(Keeper *keeper,
 	KeeperConfig *config = &(keeper->config);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 	ReplicationSource *upstream = &(postgres->replicationSource);
-	NodeAddress *primaryNode = &(postgres->replicationSource.primaryNode);
+	NodeAddress primaryNode = { 0 };
 
 	bool hasReplicationSlot = false;
 
-	if (!keeper_get_primary(keeper, &(postgres->replicationSource.primaryNode)))
+	if (!keeper_get_primary(keeper, &primaryNode))
 	{
 		/* errors have already been logged */
 		return false;
 	}
 
 	if (!standby_init_replication_source(postgres,
-										 primaryNode,
+										 &primaryNode,
 										 PG_AUTOCTL_REPLICA_USERNAME,
 										 config->replication_password,
 										 config->replication_slot_name,
@@ -656,6 +776,11 @@ wait_until_primary_has_created_our_replication_slot(Keeper *keeper,
 	}
 
 	do {
+		if (asked_to_stop || asked_to_stop_fast || asked_to_quit)
+		{
+			return false;
+		}
+
 		if (firstLoop)
 		{
 			firstLoop = false;
@@ -671,11 +796,11 @@ wait_until_primary_has_created_our_replication_slot(Keeper *keeper,
 		{
 			++errors;
 
-			log_warn("Failed to contact the primary node %d \"%s\" (%s:%d)",
-					 primaryNode->nodeId,
-					 primaryNode->name,
-					 primaryNode->host,
-					 primaryNode->port);
+			log_warn("Failed to contact the primary node " NODE_FORMAT,
+					 primaryNode.nodeId,
+					 primaryNode.name,
+					 primaryNode.host,
+					 primaryNode.port);
 
 			if (errors > 5)
 			{
@@ -748,11 +873,33 @@ create_database_and_extension(Keeper *keeper)
 									   pgSetup->dbname,
 									   pg_setup_get_username(pgSetup),
 									   config->hostname,
-									   pg_setup_get_auth_method(pgSetup)))
+									   pg_setup_get_auth_method(pgSetup),
+									   pgSetup->hbaLevel))
 	{
 		log_error("Failed to edit \"%s\" to grant connections to \"%s\", "
 				  "see above for details", hbaFilePath, config->hostname);
 		return false;
+	}
+
+	/*
+	 * When --pg-hba-lan is used, we also open the local network CIDR
+	 * connections for the given --username and --dbname.
+	 */
+	if (pgSetup->hbaLevel == HBA_EDIT_LAN)
+	{
+		if (!pghba_enable_lan_cidr(&keeper->postgres.sqlClient,
+								   keeper->config.pgSetup.ssl.active,
+								   HBA_DATABASE_DBNAME,
+								   keeper->config.pgSetup.dbname,
+								   keeper->config.hostname,
+								   pg_setup_get_username(pgSetup),
+								   pg_setup_get_auth_method(pgSetup),
+								   pgSetup->hbaLevel,
+								   pgSetup->pgdata))
+		{
+			log_error("Failed to grant local network connections in HBA");
+			return false;
+		}
 	}
 
 	/*
@@ -771,7 +918,8 @@ create_database_and_extension(Keeper *keeper)
 										   NULL, /* all: no database name */
 										   NULL, /* no username, "all" */
 										   pgSetup->pghost,
-										   "trust"))
+										   "trust",
+										   HBA_EDIT_MINIMAL))
 		{
 			log_error("Failed to edit \"%s\" to grant connections to \"%s\", "
 					  "see above for details", hbaFilePath, pgSetup->pghost);
@@ -811,26 +959,28 @@ create_database_and_extension(Keeper *keeper)
 
 	/*
 	 * Ensure pg_stat_statements is available in the server extension dir used
-	 * to create the Postgres instance.
+	 * to create the Postgres instance. We only search for the control file to
+	 * offer better diagnostics in the logs in case the following CREATE
+	 * EXTENSION fails.
 	 */
 	if (!find_extension_control_file(config->pgSetup.pg_ctl,
 									 "pg_stat_statements"))
 	{
-		log_error("Failed to find extension control file for "
-				  "\"pg_stat_statements\"");
-		exit(EXIT_CODE_EXTENSION_MISSING);
+		log_warn("Failed to find extension control file for "
+				 "\"pg_stat_statements\"");
 	}
 
 	/*
 	 * Ensure citus extension is available in the server extension dir used to
-	 * create the Postgres instance.
+	 * create the Postgres instance. We only search for the control file to
+	 * offer better diagnostics in the logs in case the following CREATE
+	 * EXTENSION fails.
 	 */
 	if (IS_CITUS_INSTANCE_KIND(postgres->pgKind))
 	{
 		if (!find_extension_control_file(config->pgSetup.pg_ctl, "citus"))
 		{
-			log_error("Failed to find extension control file for \"citus\"");
-			exit(EXIT_CODE_EXTENSION_MISSING);
+			log_warn("Failed to find extension control file for \"citus\"");
 		}
 	}
 
@@ -839,7 +989,7 @@ create_database_and_extension(Keeper *keeper)
 	 * shared_preload_libraries when dealing with a Citus worker or coordinator
 	 * node.
 	 */
-	if (!postgres_add_default_settings(&initPostgres))
+	if (!postgres_add_default_settings(&initPostgres, config->hostname))
 	{
 		log_error("Failed to add default settings to newly initialized "
 				  "PostgreSQL instance, see above for details");
@@ -904,7 +1054,7 @@ create_database_and_extension(Keeper *keeper)
 	 * per the configuration settings, cleaning-up the local changes we made
 	 * before.
 	 */
-	if (!keeper_update_pg_state(keeper))
+	if (!keeper_update_pg_state(keeper, LOG_ERROR))
 	{
 		log_error("Failed to update the keeper's state from the local "
 				  "PostgreSQL instance, see above for details.");
@@ -941,6 +1091,7 @@ create_database_and_extension(Keeper *keeper)
 								   config->hostname,
 								   pg_setup_get_username(pgSetup),
 								   pg_setup_get_auth_method(pgSetup),
+								   pgSetup->hbaLevel,
 								   NULL))
 		{
 			log_error("Failed to grant local network connections in HBA");
@@ -993,7 +1144,7 @@ keeper_pg_init_node_active(Keeper *keeper)
 		return false;
 	}
 
-	keeper_update_pg_state(keeper);
+	(void) keeper_update_pg_state(keeper, LOG_WARN);
 
 	if (!monitor_node_active(&(keeper->monitor),
 							 keeper->config.formation,
@@ -1001,6 +1152,7 @@ keeper_pg_init_node_active(Keeper *keeper)
 							 keeper->state.current_group,
 							 keeper->state.current_role,
 							 ReportPgIsRunning(keeper),
+							 keeper->postgres.postgresSetup.control.timeline_id,
 							 keeper->postgres.currentLSN,
 							 keeper->postgres.pgsrSyncState,
 							 &assignedState))

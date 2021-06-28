@@ -138,16 +138,14 @@ def test_005_number_sync_standbys():
     assert node1.get_number_sync_standbys() == 2
 
     ssn = "ANY 2 (pgautofailover_standby_2, pgautofailover_standby_3, pgautofailover_standby_4)"
-    eq_(node1.get_synchronous_standby_names(), ssn)
-    eq_(node1.get_synchronous_standby_names_local(), ssn)
+    node1.check_synchronous_standby_names(ssn)
 
     print("set number_sync_standbys = 0")
     assert node1.set_number_sync_standbys(0)
     assert node1.get_number_sync_standbys() == 0
 
     ssn = "ANY 1 (pgautofailover_standby_2, pgautofailover_standby_3, pgautofailover_standby_4)"
-    eq_(node1.get_synchronous_standby_names(), ssn)
-    eq_(node1.get_synchronous_standby_names_local(), ssn)
+    node1.check_synchronous_standby_names(ssn)
 
     print("set number_sync_standbys = 1")
     assert node1.set_number_sync_standbys(1)
@@ -167,8 +165,7 @@ def test_006_number_sync_standbys_trigger():
     assert node1.wait_until_state(target_state="primary")
 
     ssn = "ANY 1 (pgautofailover_standby_2, pgautofailover_standby_3)"
-    eq_(node1.get_synchronous_standby_names(), ssn)
-    eq_(node1.get_synchronous_standby_names_local(), ssn)
+    node1.check_synchronous_standby_names(ssn)
 
     # there's no state change to instruct us that the replication slot
     # maintenance is now done, so we have to wait for awhile instead.
@@ -190,16 +187,9 @@ def test_007_create_t1():
     node1.run_sql_query("CHECKPOINT")
 
 
-@raises(Exception)
-def test_008a_set_candidate_priorities_to_zero():
-    # we need two nodes with non-zero candidate priority
-    node1.set_candidate_priority(0)
-    node2.set_candidate_priority(0)
-
-
-def test_008b_set_candidate_priorities():
+def test_008_set_candidate_priorities():
     # set priorities in a way that we know the candidate: node2
-    node1.set_candidate_priority(90)  # current primary
+    node1.set_candidate_priority(80)  # current primary
     node2.set_candidate_priority(90)
     node3.set_candidate_priority(70)
 
@@ -217,8 +207,7 @@ def test_009_failover():
     assert node1.wait_until_state(target_state="secondary")
 
     ssn = "ANY 1 (pgautofailover_standby_1, pgautofailover_standby_3)"
-    eq_(node2.get_synchronous_standby_names(), ssn)
-    eq_(node2.get_synchronous_standby_names_local(), ssn)
+    node2.check_synchronous_standby_names(ssn)
 
     assert node1.has_needed_replication_slots()
     assert node2.has_needed_replication_slots()
@@ -245,12 +234,13 @@ def test_012_fail_primary():
     print("Failing current primary node 2")
     node2.fail()
 
+    # explicitely allow for the 30s timeout in stop_replication
+    assert node1.wait_until_state(target_state="stop_replication")
     assert node1.wait_until_state(target_state="primary")
     assert node3.wait_until_state(target_state="secondary")
 
     ssn = "ANY 1 (pgautofailover_standby_2, pgautofailover_standby_3)"
-    eq_(node1.get_synchronous_standby_names(), ssn)
-    eq_(node1.get_synchronous_standby_names_local(), ssn)
+    node1.check_synchronous_standby_names(ssn)
 
 
 def test_013_restart_node2():
@@ -261,8 +251,7 @@ def test_013_restart_node2():
     assert node3.wait_until_state(target_state="secondary")
 
     ssn = "ANY 1 (pgautofailover_standby_2, pgautofailover_standby_3)"
-    eq_(node1.get_synchronous_standby_names(), ssn)
-    eq_(node1.get_synchronous_standby_names_local(), ssn)
+    node1.check_synchronous_standby_names(ssn)
 
 
 #
@@ -295,8 +284,7 @@ def test_014_002_fail_two_standby_nodes():
     node1.wait_until_state(target_state="primary")
 
     ssn = "ANY 1 (pgautofailover_standby_2, pgautofailover_standby_3)"
-    eq_(node1.get_synchronous_standby_names(), ssn)
-    eq_(node1.get_synchronous_standby_names_local(), ssn)
+    node1.check_synchronous_standby_names(ssn)
 
 
 def test_014_003_unblock_writes():
@@ -306,9 +294,7 @@ def test_014_003_unblock_writes():
     node1.wait_until_state(target_state="wait_primary")
     eq_(node1.get_number_sync_standbys(), 0)
 
-    ssn = ""
-    eq_(node1.get_synchronous_standby_names(), ssn)
-    eq_(node1.get_synchronous_standby_names_local(), ssn)
+    node1.check_synchronous_standby_names(ssn="")
 
 
 def test_014_004_restart_nodes():
@@ -320,8 +306,7 @@ def test_014_004_restart_nodes():
     assert node1.wait_until_state(target_state="primary")
 
     ssn = "ANY 1 (pgautofailover_standby_2, pgautofailover_standby_3)"
-    eq_(node1.get_synchronous_standby_names(), ssn)
-    eq_(node1.get_synchronous_standby_names_local(), ssn)
+    node1.check_synchronous_standby_names(ssn)
 
 
 #
@@ -363,8 +348,7 @@ def test_015_003_set_properties():
     eq_(node1.get_number_sync_standbys(), 1)
 
     ssn = "ANY 1 (pgautofailover_standby_2, pgautofailover_standby_3)"
-    eq_(node1.get_synchronous_standby_names(), ssn)
-    eq_(node1.get_synchronous_standby_names_local(), ssn)
+    node1.check_synchronous_standby_names(ssn)
 
 
 def test_015_004_restart_nodes():
@@ -376,11 +360,59 @@ def test_015_004_restart_nodes():
     assert node1.wait_until_state(target_state="primary")
 
     ssn = "ANY 1 (pgautofailover_standby_2, pgautofailover_standby_3)"
-    eq_(node1.get_synchronous_standby_names(), ssn)
-    eq_(node1.get_synchronous_standby_names_local(), ssn)
+    node1.check_synchronous_standby_names(ssn)
 
 
-def test_016_remove_old_primary():
+#
+# Now test a failover when all the nodes have candidate priority set to zero
+#
+def test_016_001_set_candidate_priorities_to_zero():
+    node1.set_candidate_priority(0)
+    node2.set_candidate_priority(0)
+    node3.set_candidate_priority(0)
+
+    # no candidate for failover, we're wait_primary
+    node1.wait_until_state(target_state="primary")
+
+
+def test_016_002_trigger_failover():
+    print()
+    print("Calling pgautofailover.failover() on the monitor")
+    monitor.failover()
+
+    assert node3.wait_until_state(target_state="report_lsn")
+    assert node2.wait_until_state(target_state="report_lsn")
+    assert node1.wait_until_state(target_state="report_lsn")
+
+
+def test_016_003_set_candidate_priority_to_one():
+    node2.set_candidate_priority(1)
+
+    # no candidate for failover, we're wait_primary
+    node2.wait_until_state(target_state="primary")
+    node1.wait_until_state(target_state="secondary")
+    node3.wait_until_state(target_state="secondary")
+
+
+def test_016_004_reset_candidate_priority():
+    node2.set_candidate_priority(0)
+
+    node2.wait_until_state(target_state="primary")
+    node1.wait_until_state(target_state="secondary")
+    node3.wait_until_state(target_state="secondary")
+
+
+def test_016_005_perform_promotion():
+    print()
+    print("Calling pg_autoctl perform promotion on node 1")
+    node1.perform_promotion()
+
+    node1.wait_until_state(target_state="primary")
+    node2.wait_until_state(target_state="secondary")
+    node3.wait_until_state(target_state="secondary")
+
+
+def test_017_remove_old_primary():
     node2.drop()
 
     assert node1.wait_until_state(target_state="primary")

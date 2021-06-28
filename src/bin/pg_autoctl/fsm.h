@@ -41,7 +41,7 @@ bool fsm_prepare_replication(Keeper *keeper);
 bool fsm_disable_replication(Keeper *keeper);
 bool fsm_resume_as_primary(Keeper *keeper);
 bool fsm_rewind_or_init(Keeper *keeper);
-bool fsm_maintain_replication_slots(Keeper *keeper);
+bool fsm_prepare_for_secondary(Keeper *keeper);
 
 bool fsm_init_standby(Keeper *keeper);
 bool fsm_promote_standby(Keeper *keeper);
@@ -68,6 +68,15 @@ bool fsm_fast_forward(Keeper *keeper);
 bool fsm_prepare_cascade(Keeper *keeper);
 bool fsm_follow_new_primary(Keeper *keeper);
 bool fsm_cleanup_and_resume_as_primary(Keeper *keeper);
+
+bool fsm_init_from_standby(Keeper *keeper);
+
+bool fsm_drop_node(Keeper *keeper);
+
+/*
+ * Extra helpers.
+ */
+bool prepare_replication(Keeper *keeper, NodeState otherNodeState);
 
 /*
  * Generic API to use the previous definitions.

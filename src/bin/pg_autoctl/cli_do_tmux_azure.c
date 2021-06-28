@@ -191,7 +191,7 @@ tmux_azure_start_or_attach_session(AzureRegionResources *azRegion)
 {
 	char tmux[MAXPGPATH] = { 0 };
 
-	PQExpBuffer script = createPQExpBuffer();
+	PQExpBuffer script;
 	char scriptName[MAXPGPATH] = { 0 };
 
 	if (setenv("PG_AUTOCTL_DEBUG", "1", 1) != 0)
@@ -222,6 +222,7 @@ tmux_azure_start_or_attach_session(AzureRegionResources *azRegion)
 		return false;
 	}
 
+	script = createPQExpBuffer();
 	if (script == NULL)
 	{
 		log_error("Failed to allocate memory");
@@ -248,12 +249,14 @@ tmux_azure_start_or_attach_session(AzureRegionResources *azRegion)
 		if (!write_file(script->data, script->len, scriptName))
 		{
 			log_fatal("Failed to write tmux script at \"%s\"", scriptName);
+			destroyPQExpBuffer(script);
 			return false;
 		}
 
-		if (!tmux_start_server(scriptName))
+		if (!tmux_start_server(scriptName, NULL))
 		{
 			log_fatal("Failed to start the tmux session, see above for details");
+			destroyPQExpBuffer(script);
 			return false;
 		}
 	}

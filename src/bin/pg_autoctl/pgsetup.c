@@ -24,8 +24,9 @@
 
 #include "defaults.h"
 #include "env_utils.h"
-#include "pgctl.h"
 #include "log.h"
+#include "parsing.h"
+#include "pgctl.h"
 #include "signals.h"
 #include "string_utils.h"
 
@@ -63,6 +64,21 @@ pg_setup_init(PostgresSetup *pgSetup,
 	pgSetup->control = options->control;
 
 	/*
+	 * Also make sure that we keep the hbaLevel to edit. Remember that
+	 * --skip-pg-hba is registered in the config as --auth skip.
+	 */
+	if (strcmp(options->authMethod, "skip") == 0)
+	{
+		pgSetup->hbaLevel = HBA_EDIT_SKIP;
+		strlcpy(pgSetup->hbaLevelStr, options->authMethod, NAMEDATALEN);
+	}
+	else
+	{
+		pgSetup->hbaLevel = options->hbaLevel;
+		strlcpy(pgSetup->hbaLevelStr, options->hbaLevelStr, NAMEDATALEN);
+	}
+
+	/*
 	 * Make sure that we keep the SSL options too.
 	 */
 	pgSetup->ssl.active = options->ssl.active;
@@ -73,6 +89,9 @@ pg_setup_init(PostgresSetup *pgSetup,
 	strlcpy(pgSetup->ssl.crlFile, options->ssl.crlFile, MAXPGPATH);
 	strlcpy(pgSetup->ssl.serverCert, options->ssl.serverCert, MAXPGPATH);
 	strlcpy(pgSetup->ssl.serverKey, options->ssl.serverKey, MAXPGPATH);
+
+	/* Also make sure we keep the citus specific clusterName option */
+	strlcpy(pgSetup->citusClusterName, options->citusClusterName, NAMEDATALEN);
 
 	/* check or find pg_ctl, unless we already have it */
 	if (IS_EMPTY_STRING_BUFFER(pgSetup->pg_ctl) ||
@@ -445,14 +464,19 @@ get_pgpid(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk)
 	{
 		/* yeah, that happens (race condition, kind of) */
 		log_debug("The PID file \"%s\" is empty", pidfile);
+		free(contents);
 		return false;
 	}
 	else if (splitLines(contents, lines, 1) != 1 ||
 			 !stringToInt(lines[0], &pid))
 	{
 		log_warn("Invalid data in PID file \"%s\"", pidfile);
+		free(contents);
 		return false;
 	}
+
+	free(contents);
+	contents = NULL;
 
 	/* postmaster PID (or negative of a standalone backend's PID) */
 	if (pid < 0)
@@ -660,15 +684,24 @@ read_pg_pidfile(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk, int maxRetries)
 void
 fprintf_pg_setup(FILE *stream, PostgresSetup *pgSetup)
 {
+	int pgversion = 0;
+
+	(void) parse_pg_version_string(pgSetup->pg_version, &pgversion);
+
 	fformat(stream, "pgdata:                %s\n", pgSetup->pgdata);
 	fformat(stream, "pg_ctl:                %s\n", pgSetup->pg_ctl);
-	fformat(stream, "pg_version:            %s\n", pgSetup->pg_version);
+
+	fformat(stream, "pg_version:            \"%s\" (%d)\n",
+			pgSetup->pg_version, pgversion);
+
 	fformat(stream, "pghost:                %s\n", pgSetup->pghost);
 	fformat(stream, "pgport:                %d\n", pgSetup->pgport);
 	fformat(stream, "proxyport:             %d\n", pgSetup->proxyport);
 	fformat(stream, "pid:                   %d\n", pgSetup->pidFile.pid);
 	fformat(stream, "is in recovery:        %s\n",
 			pgSetup->is_in_recovery ? "yes" : "no");
+	fformat(stream, "Control cluster state: %s\n",
+			dbstateToString(pgSetup->control.state));
 	fformat(stream, "Control Version:       %u\n",
 			pgSetup->control.pg_control_version);
 	fformat(stream, "Catalog Version:       %u\n",
@@ -749,6 +782,7 @@ pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 		!get_env_copy("PG_REGRESS_SOCK_DIR", pg_regress_sock_dir, MAXPGPATH))
 	{
 		/* errors have already been logged */
+		destroyPQExpBuffer(connStringBuffer);
 		return false;
 	}
 
@@ -799,10 +833,15 @@ pg_setup_get_local_connection_string(PostgresSetup *pgSetup,
 	{
 		log_error("Failed to copy connection string \"%s\" which is %lu bytes "
 				  "long, pg_autoctl only supports connection strings up to "
-				  " %d bytes",
-				  connStringBuffer->data, connStringBuffer->len, MAXCONNINFO);
+				  " %lu bytes",
+				  connStringBuffer->data,
+				  (unsigned long) connStringBuffer->len,
+				  (unsigned long) MAXCONNINFO);
+		destroyPQExpBuffer(connStringBuffer);
+		return false;
 	}
 
+	destroyPQExpBuffer(connStringBuffer);
 	return true;
 }
 
@@ -1307,7 +1346,7 @@ pg_setup_role(PostgresSetup *pgSetup)
 char *
 pg_setup_get_username(PostgresSetup *pgSetup)
 {
-	char userEnv[NAMEDATALEN];
+	char userEnv[NAMEDATALEN] = { 0 };
 
 	/* use a configured username if provided */
 	if (!IS_EMPTY_STRING_BUFFER(pgSetup->username))
@@ -1324,8 +1363,8 @@ pg_setup_get_username(PostgresSetup *pgSetup)
 	{
 		log_trace("username found in passwd: %s", pw->pw_name);
 
-		/* struct passwd is in thread shared space, return a copy */
-		return strdup(pw->pw_name);
+		strlcpy(pgSetup->username, pw->pw_name, sizeof(pgSetup->username));
+		return pgSetup->username;
 	}
 
 
@@ -1333,12 +1372,15 @@ pg_setup_get_username(PostgresSetup *pgSetup)
 	if (get_env_copy("USER", userEnv, NAMEDATALEN))
 	{
 		log_trace("username found in USER environment variable: %s", userEnv);
-		return strdup(userEnv);
+
+		strlcpy(pgSetup->username, userEnv, sizeof(pgSetup->username));
+		return pgSetup->username;
 	}
 
 	log_trace("username fallback to default: %s", DEFAULT_USERNAME);
+	strlcpy(pgSetup->username, DEFAULT_USERNAME, sizeof(pgSetup->username));
 
-	return DEFAULT_USERNAME;
+	return pgSetup->username;
 }
 
 
@@ -1368,8 +1410,7 @@ pg_setup_get_auth_method(PostgresSetup *pgSetup)
 bool
 pg_setup_skip_hba_edits(PostgresSetup *pgSetup)
 {
-	return !IS_EMPTY_STRING_BUFFER(pgSetup->authMethod) &&
-		   strcmp(pgSetup->authMethod, SKIP_HBA_AUTH_METHOD) == 0;
+	return pgSetup->hbaLevel == HBA_EDIT_SKIP;
 }
 
 
@@ -1827,31 +1868,42 @@ pgsetup_sslmode_to_string(SSLMode sslMode)
 bool
 pg_setup_standby_slot_supported(PostgresSetup *pgSetup, int logLevel)
 {
-	int major = pgSetup->control.pg_control_version / 100;
-	int minor = pgSetup->control.pg_control_version % 100;
+	int pg_version = 0;
+
+	if (!parse_pg_version_string(pgSetup->pg_version, &pg_version))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	int major = pg_version / 100;
+	int minor = pg_version % 100;
 
 	/* do we have Postgres 10 (or before, though we don't support that) */
-	if (pgSetup->control.pg_control_version < 1100)
+	if (pg_version < 1100)
 	{
-		log_trace("pg_setup_standby_slot_supported(%d): false",
-				  pgSetup->control.pg_control_version);
+		log_trace("pg_setup_standby_slot_supported(%d): false", pg_version);
 		return false;
 	}
 
 	/* Postgres 11.0 up to 11.8 included the bug */
-	if (pgSetup->control.pg_control_version >= 1100 &&
-		pgSetup->control.pg_control_version < 1109)
+	if (pg_version >= 1100 && pg_version < 1109)
 	{
 		log_level(logLevel,
 				  "Postgres %d.%d does not support replication slots "
 				  "on a standby node", major, minor);
 
 		return false;
+	}
+
+	/* Postgres 11.9 and up are good */
+	if (pg_version >= 1109 && pg_version < 1200)
+	{
+		return true;
 	}
 
 	/* Postgres 12.0 up to 12.3 included the bug */
-	if (pgSetup->control.pg_control_version >= 1200 &&
-		pgSetup->control.pg_control_version < 1204)
+	if (pg_version >= 1200 && pg_version < 1204)
 	{
 		log_level(logLevel,
 				  "Postgres %d.%d does not support replication slots "
@@ -1860,8 +1912,14 @@ pg_setup_standby_slot_supported(PostgresSetup *pgSetup, int logLevel)
 		return false;
 	}
 
+	/* Postgres 12.4 and up are good */
+	if (pg_version >= 1204 && pg_version < 1300)
+	{
+		return true;
+	}
+
 	/* Starting with Postgres 13, all versions are known to have the bug fix */
-	if (pgSetup->control.pg_control_version >= 1300)
+	if (pg_version >= 1300)
 	{
 		return true;
 	}
@@ -1869,7 +1927,112 @@ pg_setup_standby_slot_supported(PostgresSetup *pgSetup, int logLevel)
 	/* should not happen */
 	log_debug("BUG in pg_setup_standby_slot_supported(%d): "
 			  "unknown Postgres version, returning false",
-			  pgSetup->control.pg_control_version);
+			  pg_version);
 
 	return false;
+}
+
+
+/*
+ * pgsetup_parse_hba_level parses a string that represents an HBAEditLevel
+ * value.
+ */
+HBAEditLevel
+pgsetup_parse_hba_level(const char *level)
+{
+	HBAEditLevel enumArray[] = {
+		HBA_EDIT_SKIP,
+		HBA_EDIT_MINIMAL,
+		HBA_EDIT_LAN
+	};
+
+	char *levelArray[] = { "skip", "minimal", "app", NULL };
+
+	for (int i = 0; levelArray[i] != NULL; i++)
+	{
+		if (strcmp(level, levelArray[i]) == 0)
+		{
+			return enumArray[i];
+		}
+	}
+
+	return HBA_EDIT_UNKNOWN;
+}
+
+
+/*
+ * pgsetup_hba_level_to_string returns the string representation of an
+ * hbaLevel enum value.
+ */
+char *
+pgsetup_hba_level_to_string(HBAEditLevel hbaLevel)
+{
+	switch (hbaLevel)
+	{
+		case HBA_EDIT_SKIP:
+		{
+			return "skip";
+		}
+
+		case HBA_EDIT_MINIMAL:
+		{
+			return "minimal";
+		}
+
+		case HBA_EDIT_LAN:
+		{
+			return "app";
+		}
+
+		case HBA_EDIT_UNKNOWN:
+			return "unknown";
+	}
+
+	log_error("BUG: hbaLevel %d is unknown", hbaLevel);
+	return "unknown";
+}
+
+
+/*
+ * dbstateToString returns a string from a pgControlFile state enum.
+ */
+const char *
+dbstateToString(DBState state)
+{
+	switch (state)
+	{
+		case DB_STARTUP:
+		{
+			return "starting up";
+		}
+
+		case DB_SHUTDOWNED:
+		{
+			return "shut down";
+		}
+
+		case DB_SHUTDOWNED_IN_RECOVERY:
+		{
+			return "shut down in recovery";
+		}
+
+		case DB_SHUTDOWNING:
+		{
+			return "shutting down";
+		}
+
+		case DB_IN_CRASH_RECOVERY:
+		{
+			return "in crash recovery";
+		}
+
+		case DB_IN_ARCHIVE_RECOVERY:
+		{
+			return "in archive recovery";
+		}
+
+		case DB_IN_PRODUCTION:
+			return "in production";
+	}
+	return "unrecognized status code";
 }

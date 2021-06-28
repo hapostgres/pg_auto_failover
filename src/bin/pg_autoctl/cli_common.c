@@ -35,13 +35,11 @@
 KeeperConfig keeperOptions;
 bool createAndRun = false;
 bool outputJSON = false;
+bool openAppHBAonLAN = false;
 int ssl_flag = 0;
 
 /* stores --node-id, only used with --disable-monitor */
 int monitorDisabledNodeId = -1;
-
-static void stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathnames,
-													   PostgresSetup *pgSetup);
 
 /*
  * cli_common_keeper_getopts parses the CLI options for the pg_autoctl create
@@ -57,7 +55,8 @@ static void stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathname
  *		{ "proxyport", required_argument, NULL, 'y' },
  *		{ "username", required_argument, NULL, 'U' },
  *		{ "auth", required_argument, NULL, 'A' },
- *		{ "skip-pg-hba", required_argument, NULL, 'S' },
+ *		{ "skip-pg-hba", no_argument, NULL, 'S' },
+ *		{ "pg-hba-lan", no_argument, NULL, 'L' },
  *		{ "dbname", required_argument, NULL, 'd' },
  *		{ "name", required_argument, NULL, 'a' },
  *		{ "hostname", required_argument, NULL, 'n' },
@@ -70,6 +69,8 @@ static void stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathname
  *		{ "verbose", no_argument, NULL, 'v' },
  *		{ "quiet", no_argument, NULL, 'q' },
  *		{ "help", no_argument, NULL, 'h' },
+ *		{ "secondary", no_argument, NULL, 'z' }
+ *      { "citus-cluster", required_argument, NULL, 'Z' },
  *		{ "candidate-priority", required_argument, NULL, 'P'},
  *		{ "replication-quorum", required_argument, NULL, 'r'},
  *		{ "help", no_argument, NULL, 0 },
@@ -103,11 +104,12 @@ cli_common_keeper_getopts(int argc, char **argv,
 	LocalOptionConfig.prepare_promotion_walreceiver = -1;
 	LocalOptionConfig.postgresql_restart_failure_timeout = -1;
 	LocalOptionConfig.postgresql_restart_failure_max_retries = -1;
-	LocalOptionConfig.pgSetup.settings.candidatePriority =
-		FAILOVER_NODE_CANDIDATE_PRIORITY;
+	LocalOptionConfig.pgSetup.settings.candidatePriority = -1;
 	LocalOptionConfig.pgSetup.settings.replicationQuorum =
 		FAILOVER_NODE_REPLICATION_QUORUM;
 
+	/* default to a "primary" in citus node_role terms */
+	LocalOptionConfig.citusRole = CITUS_ROLE_PRIMARY;
 
 	optind = 0;
 
@@ -180,6 +182,26 @@ cli_common_keeper_getopts(int argc, char **argv,
 				break;
 			}
 
+			case 'z':
+			{
+				/* { "secondary", no_argument, NULL, 'z' } */
+				strlcpy(LocalOptionConfig.citusRoleStr, "secondary", NAMEDATALEN);
+				LocalOptionConfig.citusRole = CITUS_ROLE_SECONDARY;
+				log_trace("--secondary");
+				break;
+			}
+
+			case 'Z':
+			{
+				/* { "citus-cluster", required_argument, NULL, 'Z' }, */
+				strlcpy(LocalOptionConfig.pgSetup.citusClusterName,
+						optarg,
+						NAMEDATALEN);
+				log_trace("--citus-cluster %s",
+						  LocalOptionConfig.pgSetup.citusClusterName);
+				break;
+			}
+
 			case 'U':
 			{
 				/* { "username", required_argument, NULL, 'U' } */
@@ -191,7 +213,7 @@ cli_common_keeper_getopts(int argc, char **argv,
 			case 'A':
 			{
 				/* { "auth", required_argument, NULL, 'A' }, */
-				if (!IS_EMPTY_STRING_BUFFER(LocalOptionConfig.pgSetup.authMethod))
+				if (LocalOptionConfig.pgSetup.hbaLevel == HBA_EDIT_SKIP)
 				{
 					errors++;
 					log_error("Please use either --auth or --skip-pg-hba");
@@ -199,6 +221,15 @@ cli_common_keeper_getopts(int argc, char **argv,
 
 				strlcpy(LocalOptionConfig.pgSetup.authMethod, optarg, NAMEDATALEN);
 				log_trace("--auth %s", LocalOptionConfig.pgSetup.authMethod);
+
+				if (LocalOptionConfig.pgSetup.hbaLevel == HBA_EDIT_UNKNOWN)
+				{
+					strlcpy(LocalOptionConfig.pgSetup.hbaLevelStr,
+							pgsetup_hba_level_to_string(HBA_EDIT_MINIMAL),
+							sizeof(LocalOptionConfig.pgSetup.hbaLevelStr));
+
+					LocalOptionConfig.pgSetup.hbaLevel = HBA_EDIT_MINIMAL;
+				}
 				break;
 			}
 
@@ -211,10 +242,37 @@ cli_common_keeper_getopts(int argc, char **argv,
 					log_error("Please use either --auth or --skip-pg-hba");
 				}
 
+				/* force default authentication method then */
 				strlcpy(LocalOptionConfig.pgSetup.authMethod,
-						SKIP_HBA_AUTH_METHOD,
+						DEFAULT_AUTH_METHOD,
 						NAMEDATALEN);
+
+				strlcpy(LocalOptionConfig.pgSetup.hbaLevelStr,
+						pgsetup_hba_level_to_string(HBA_EDIT_SKIP),
+						sizeof(LocalOptionConfig.pgSetup.hbaLevelStr));
+
+				LocalOptionConfig.pgSetup.hbaLevel = HBA_EDIT_SKIP;
+
 				log_trace("--skip-pg-hba");
+				break;
+			}
+
+			case 'L':
+			{
+				/* { "pg-hba-lan", required_argument, NULL, 'L' }, */
+				if (LocalOptionConfig.pgSetup.hbaLevel == HBA_EDIT_SKIP)
+				{
+					errors++;
+					log_error("Please use either --skip-pg-hba or --pg-hba-lan");
+				}
+
+				strlcpy(LocalOptionConfig.pgSetup.hbaLevelStr,
+						pgsetup_hba_level_to_string(HBA_EDIT_LAN),
+						sizeof(LocalOptionConfig.pgSetup.hbaLevelStr));
+
+				LocalOptionConfig.pgSetup.hbaLevel = HBA_EDIT_LAN;
+
+				log_trace("--pg-hba-lan");
 				break;
 			}
 
@@ -472,10 +530,55 @@ cli_common_keeper_getopts(int argc, char **argv,
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
+	/* check --secondary and --candidate-priority */
+	if (LocalOptionConfig.pgSetup.settings.candidatePriority == -1)
+	{
+		/* --candidate-priority has not been used */
+		if (LocalOptionConfig.citusRole == CITUS_ROLE_SECONDARY)
+		{
+			/* a Citus secondary can't be a target for failover */
+			LocalOptionConfig.pgSetup.settings.candidatePriority = 0;
+		}
+		else
+		{
+			/* here we install the default candidate priority */
+			LocalOptionConfig.pgSetup.settings.candidatePriority =
+				FAILOVER_NODE_CANDIDATE_PRIORITY;
+		}
+	}
+	else if (LocalOptionConfig.pgSetup.settings.candidatePriority > 0 &&
+			 LocalOptionConfig.citusRole == CITUS_ROLE_SECONDARY)
+	{
+		log_fatal("Citus does not support secondary roles that are "
+				  "also a candidate for failover: please use --secondary "
+				  "with --candidate-priority 0");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	/* a --secondary citus worker requires a cluster name */
+	if (LocalOptionConfig.citusRole == CITUS_ROLE_SECONDARY)
+	{
+		if (IS_EMPTY_STRING_BUFFER(LocalOptionConfig.pgSetup.citusClusterName))
+		{
+			log_fatal("When using --secondary, also use --citus-cluster");
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+	}
+
 	if (errors > 0)
 	{
 		commandline_help(stderr);
 		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	/* the default HBA editing level is MINIMAL, time to install it */
+	if (LocalOptionConfig.pgSetup.hbaLevel == HBA_EDIT_UNKNOWN)
+	{
+		strlcpy(LocalOptionConfig.pgSetup.hbaLevelStr,
+				pgsetup_hba_level_to_string(HBA_EDIT_MINIMAL),
+				sizeof(LocalOptionConfig.pgSetup.hbaLevelStr));
+
+		LocalOptionConfig.pgSetup.hbaLevel = HBA_EDIT_MINIMAL;
 	}
 
 	/*
@@ -513,7 +616,8 @@ cli_common_keeper_getopts(int argc, char **argv,
  *		{ "proxyport", required_argument, NULL, 'y' },
  *		{ "username", required_argument, NULL, 'U' },
  *		{ "auth", required_argument, NULL, 'A' },
- *		{ "skip-pg-hba", required_argument, NULL, 'S' },
+ *		{ "skip-pg-hba", no_argument, NULL, 'S' },
+ *		{ "pg-hba-lan", no_argument, NULL, 'L' },
  *		{ "dbname", required_argument, NULL, 'd' },
  *		{ "hostname", required_argument, NULL, 'n' },
  *		{ "formation", required_argument, NULL, 'f' },
@@ -524,6 +628,8 @@ cli_common_keeper_getopts(int argc, char **argv,
  *		{ "verbose", no_argument, NULL, 'v' },
  *		{ "quiet", no_argument, NULL, 'q' },
  *		{ "help", no_argument, NULL, 'h' },
+ *		{ "secondary", no_argument, NULL, 'z' },
+ *      { "citus-cluster", required_argument, NULL, 'Z' },
  *		{ "candidate-priority", required_argument, NULL, 'P'},
  *		{ "replication-quorum", required_argument, NULL, 'r'},
  *		{ "help", no_argument, NULL, 0 },
@@ -1204,12 +1310,14 @@ cli_print_version_getopts(int argc, char **argv)
 void
 keeper_cli_print_version(int argc, char **argv)
 {
+	const char *version = PG_AUTOCTL_VERSION;
+
 	if (outputJSON)
 	{
 		JSON_Value *js = json_value_init_object();
 		JSON_Object *root = json_value_get_object(js);
 
-		json_object_set_string(root, "pg_autoctl", PG_AUTOCTL_VERSION);
+		json_object_set_string(root, "pg_autoctl", version);
 		json_object_set_string(root,
 							   "pgautofailover", PG_AUTOCTL_EXTENSION_VERSION);
 		json_object_set_string(root, "pg_major", PG_MAJORVERSION);
@@ -1221,12 +1329,12 @@ keeper_cli_print_version(int argc, char **argv)
 	}
 	else
 	{
-		fformat(stdout, "pg_autoctl version %s\n", PG_AUTOCTL_VERSION);
+		fformat(stdout, "pg_autoctl version %s\n", version);
 		fformat(stdout,
 				"pg_autoctl extension version %s\n",
 				PG_AUTOCTL_EXTENSION_VERSION);
 		fformat(stdout, "compiled with %s\n", PG_VERSION_STR);
-		fformat(stdout, "compatible with Postgres 10, 11, 12, and 13\n");
+		fformat(stdout, "compatible with Postgres 10, 11, 12, 13, and 14\n");
 	}
 
 	exit(0);
@@ -1247,175 +1355,6 @@ cli_pprint_json(JSON_Value *js)
 	/* free intermediate memory */
 	json_free_serialized_string(serialized_string);
 	json_value_free(js);
-}
-
-
-/*
- * cli_drop_local_node drops the local Postgres node.
- */
-void
-cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
-{
-	Keeper keeper = { 0 };
-
-	/*
-	 * Now also stop the pg_autoctl process.
-	 */
-	if (file_exists(config->pathnames.pid))
-	{
-		pid_t pid = 0;
-
-		if (read_pidfile(config->pathnames.pid, &pid))
-		{
-			log_info("An instance of pg_autoctl is running with PID %d, "
-					 "stopping it.", pid);
-
-			if (kill(pid, SIGQUIT) != 0)
-			{
-				log_error(
-					"Failed to send SIGQUIT to the keeper's pid %d: %m", pid);
-				exit(EXIT_CODE_INTERNAL_ERROR);
-			}
-		}
-	}
-
-	/* only keeper_remove when we still have a state file around */
-	if (!config->monitorDisabled)
-	{
-		if (file_exists(config->pathnames.state))
-		{
-			bool ignoreMonitorErrors = true;
-
-			/* keeper_remove uses log_info() to explain what's happening */
-			if (!keeper_remove(&keeper, config, ignoreMonitorErrors))
-			{
-				log_fatal("Failed to remove local node from the pg_auto_failover "
-						  "monitor, see above for details");
-
-				exit(EXIT_CODE_BAD_STATE);
-			}
-
-			log_info("Removed pg_autoctl node at \"%s\" from the monitor and "
-					 "removed the state file \"%s\"",
-					 config->pgSetup.pgdata,
-					 config->pathnames.state);
-		}
-		else
-		{
-			log_warn("Skipping node removal from the monitor: "
-					 "state file \"%s\" does not exist",
-					 config->pathnames.state);
-		}
-	}
-	else
-	{
-		/* when the monitor is disabled, just remove the state files */
-		if (!unlink_file(config->pathnames.init))
-		{
-			log_error("Failed to remove state init file \"%s\"",
-					  config->pathnames.init);
-		}
-
-		if (!unlink_file(config->pathnames.state))
-		{
-			log_error("Failed to remove state file \"%s\"",
-					  config->pathnames.state);
-		}
-	}
-
-	/*
-	 * Either --destroy the whole Postgres cluster and configuration, or leave
-	 * enough behind us that it's possible to re-join a formation later.
-	 */
-	if (dropAndDestroy)
-	{
-		(void)
-		stop_postgres_and_remove_pgdata_and_config(
-			&config->pathnames,
-			&config->pgSetup);
-	}
-	else
-	{
-		/*
-		 * We need to stop Postgres now, otherwise we won't be able to drop the
-		 * replication slot on the other node, because it's still active.
-		 */
-		log_info("Stopping PostgreSQL at \"%s\"", config->pgSetup.pgdata);
-
-		if (!pg_ctl_stop(config->pgSetup.pg_ctl, config->pgSetup.pgdata))
-		{
-			log_error("Failed to stop PostgreSQL at \"%s\"",
-					  config->pgSetup.pgdata);
-			exit(EXIT_CODE_PGCTL);
-		}
-
-		/*
-		 * Now give the whole picture to the user, who might have missed our
-		 * --destroy option and might want to use it now to start again with a
-		 * fresh environment.
-		 */
-		log_warn("Configuration file \"%s\" has been preserved",
-				 config->pathnames.config);
-
-		if (directory_exists(config->pgSetup.pgdata))
-		{
-			log_warn("Postgres Data Directory \"%s\" has been preserved",
-					 config->pgSetup.pgdata);
-		}
-
-		log_info("drop node keeps your data and setup safe, you can still run "
-				 "Postgres or re-join the pg_auto_failover cluster later");
-		log_info("HINT: to completely remove your local Postgres instance and "
-				 "setup, consider `pg_autoctl drop node --destroy`");
-	}
-
-	keeper_config_destroy(config);
-}
-
-
-/*
- * stop_postgres_and_remove_pgdata_and_config stops PostgreSQL and then removes
- * PGDATA, and then config and state files.
- */
-static void
-stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathnames,
-										   PostgresSetup *pgSetup)
-{
-	log_info("Stopping PostgreSQL at \"%s\"", pgSetup->pgdata);
-
-	if (!pg_ctl_stop(pgSetup->pg_ctl, pgSetup->pgdata))
-	{
-		log_error("Failed to stop PostgreSQL at \"%s\"", pgSetup->pgdata);
-		log_fatal("Skipping removal of directory \"%s\"", pgSetup->pgdata);
-		exit(EXIT_CODE_PGCTL);
-	}
-
-	/*
-	 * Only try to rm -rf PGDATA if we managed to stop PostgreSQL.
-	 */
-	if (directory_exists(pgSetup->pgdata))
-	{
-		log_info("Removing \"%s\"", pgSetup->pgdata);
-
-		if (!rmtree(pgSetup->pgdata, true))
-		{
-			log_error("Failed to remove directory \"%s\": %m", pgSetup->pgdata);
-			exit(EXIT_CODE_INTERNAL_ERROR);
-		}
-	}
-	else
-	{
-		log_warn("Skipping removal of \"%s\": directory does not exists",
-				 pgSetup->pgdata);
-	}
-
-	log_info("Removing \"%s\"", pathnames->config);
-
-	if (!unlink_file(pathnames->config))
-	{
-		/* errors have already been logged. */
-		exit(EXIT_CODE_BAD_CONFIG);
-	}
 }
 
 
@@ -1545,6 +1484,19 @@ cli_common_ensure_formation(KeeperConfig *options)
 	/* if --formation has been used, we're good */
 	if (!IS_EMPTY_STRING_BUFFER(options->formation))
 	{
+		return true;
+	}
+
+	/*
+	 * When --monitor has been used rather than --pgdata, we are operating at a
+	 * distance and we don't expect a configuration file to exist.
+	 */
+	if (IS_EMPTY_STRING_BUFFER(options->pgSetup.pgdata))
+	{
+		strlcpy(options->formation,
+				FORMATION_DEFAULT,
+				sizeof(options->formation));
+
 		return true;
 	}
 
@@ -1799,6 +1751,7 @@ cli_get_name_getopts(int argc, char **argv)
 
 	static struct option long_options[] = {
 		{ "pgdata", required_argument, NULL, 'D' },
+		{ "monitor", required_argument, NULL, 'm' },
 		{ "formation", required_argument, NULL, 'f' },
 		{ "name", required_argument, NULL, 'a' },
 		{ "json", no_argument, NULL, 'J' },
@@ -1838,6 +1791,19 @@ cli_get_name_getopts(int argc, char **argv)
 			{
 				strlcpy(options.pgSetup.pgdata, optarg, MAXPGPATH);
 				log_trace("--pgdata %s", options.pgSetup.pgdata);
+				break;
+			}
+
+			case 'm':
+			{
+				if (!validate_connection_string(optarg))
+				{
+					log_fatal("Failed to parse --monitor connection string, "
+							  "see above for details.");
+					exit(EXIT_CODE_BAD_ARGS);
+				}
+				strlcpy(options.monitor_pguri, optarg, MAXCONNINFO);
+				log_trace("--monitor %s", options.monitor_pguri);
 				break;
 			}
 
@@ -1924,7 +1890,23 @@ cli_get_name_getopts(int argc, char **argv)
 	}
 
 	/* now that we have the command line parameters, prepare the options */
-	(void) prepare_keeper_options(&options);
+	/* when we have a monitor URI we don't need PGDATA */
+	if (cli_use_monitor_option(&options))
+	{
+		if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
+		{
+			log_warn("Given --monitor URI, the --pgdata option is ignored");
+			log_info("Connecting to monitor at \"%s\"", options.monitor_pguri);
+
+			/* the rest of the program needs pgdata actually empty */
+			bzero((void *) options.pgSetup.pgdata,
+				  sizeof(options.pgSetup.pgdata));
+		}
+	}
+	else
+	{
+		(void) prepare_keeper_options(&options);
+	}
 
 	/* ensure --formation, or get it from the configuration file */
 	if (!cli_common_ensure_formation(&options))
@@ -1941,6 +1923,80 @@ cli_get_name_getopts(int argc, char **argv)
 
 
 /*
+ * cli_use_monitor_option returns true when the --monitor option should be
+ * used, or when PG_AUTOCTL_MONITOR has been set in the environment. In that
+ * case the options->monitor_pguri is also set to the value found in the
+ * environment.
+ */
+bool
+cli_use_monitor_option(KeeperConfig *options)
+{
+	/* if --monitor is used, then use it */
+	if (!IS_EMPTY_STRING_BUFFER(options->monitor_pguri))
+	{
+		return true;
+	}
+
+	/* otherwise, have a look at the PG_AUTOCTL_MONITOR environment variable */
+	if (env_exists(PG_AUTOCTL_MONITOR) &&
+		get_env_copy(PG_AUTOCTL_MONITOR,
+					 options->monitor_pguri,
+					 sizeof(options->monitor_pguri)) &&
+		!IS_EMPTY_STRING_BUFFER(options->monitor_pguri))
+	{
+		log_debug("Using environment PG_AUTOCTL_MONITOR \"%s\"",
+				  options->monitor_pguri);
+		return true;
+	}
+
+	/*
+	 * Still nothing? well don't use --monitor then.
+	 *
+	 * Now, on commands that are compatible with using just a monitor and no
+	 * local pg_autoctl node, we want to include an error message about the
+	 * lack of a --monitor when we also lack --pgdata.
+	 */
+	if (IS_EMPTY_STRING_BUFFER(options->pgSetup.pgdata) &&
+		!env_exists("PGDATA"))
+	{
+		log_error("Failed to get value for environment variable '%s', "
+				  "which is unset", PG_AUTOCTL_MONITOR);
+		log_warn("This command also supports the --monitor option, which "
+				 "is not used here");
+	}
+
+	return false;
+}
+
+
+/*
+ * cli_monitor_init_from_option_or_config initialises a monitor connection
+ * either from the --monitor Postgres URI given on the command line, or from
+ * the configuration file of the local node (monitor or keeper).
+ */
+void
+cli_monitor_init_from_option_or_config(Monitor *monitor, KeeperConfig *kconfig)
+{
+	if (IS_EMPTY_STRING_BUFFER(kconfig->monitor_pguri))
+	{
+		if (!monitor_init_from_pgsetup(monitor, &(kconfig->pgSetup)))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_CONFIG);
+		}
+	}
+	else
+	{
+		if (!monitor_init(monitor, kconfig->monitor_pguri))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+	}
+}
+
+
+/*
  * cli_ensure_node_name ensures that we have a node name to continue with,
  * either from the command line itself, or from the configuration file when
  * we're dealing with a keeper node.
@@ -1948,31 +2004,38 @@ cli_get_name_getopts(int argc, char **argv)
 void
 cli_ensure_node_name(Keeper *keeper)
 {
+	/* if we have a --name option, we're done already */
+	if (!IS_EMPTY_STRING_BUFFER(keeper->config.name))
+	{
+		return;
+	}
+
+	/* we might have --monitor instead of --pgdata */
+	if (IS_EMPTY_STRING_BUFFER(keeper->config.pgSetup.pgdata))
+	{
+		log_fatal("Please use either --name or --pgdata "
+				  "to target a specific node");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
 	switch (ProbeConfigurationFileRole(keeper->config.pathnames.config))
 	{
 		case PG_AUTOCTL_ROLE_MONITOR:
 		{
-			if (IS_EMPTY_STRING_BUFFER(keeper->config.name))
-			{
-				log_fatal("Please use --name to target a specific node");
-				exit(EXIT_CODE_BAD_ARGS);
-			}
+			log_fatal("Please use --name to target a specific node");
+			exit(EXIT_CODE_BAD_ARGS);
 			break;
 		}
 
 		case PG_AUTOCTL_ROLE_KEEPER:
 		{
-			/* when --name has not been used, fetch it from the config */
-			if (IS_EMPTY_STRING_BUFFER(keeper->config.name))
-			{
-				bool monitorDisabledIsOk = false;
+			bool monitorDisabledIsOk = false;
 
-				if (!keeper_config_read_file_skip_pgsetup(&(keeper->config),
-														  monitorDisabledIsOk))
-				{
-					/* errors have already been logged */
-					exit(EXIT_CODE_BAD_CONFIG);
-				}
+			if (!keeper_config_read_file_skip_pgsetup(&(keeper->config),
+													  monitorDisabledIsOk))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_CONFIG);
 			}
 			break;
 		}
@@ -1982,6 +2045,100 @@ cli_ensure_node_name(Keeper *keeper)
 			log_fatal("Unrecognized configuration file \"%s\"",
 					  keeper->config.pathnames.config);
 			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+	}
+}
+
+
+/*
+ * cli_set_groupId sets the kconfig.groupId depending on the --group argument
+ * given on the command line, and if that was not given then figures it out:
+ *
+ * - it could be that we have a single group in the formation, in that case
+ *   --group must be zero, so we set it that way,
+ *
+ * - we may have a local keeper node setup thanks to --pgdata, in that case
+ *   read the configuration file and grab the groupId from there.
+ */
+void
+cli_set_groupId(Monitor *monitor, KeeperConfig *kconfig)
+{
+	int groupsCount = 0;
+
+	if (!monitor_count_groups(monitor, kconfig->formation, &groupsCount))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_MONITOR);
+	}
+
+	if (groupsCount == 0)
+	{
+		/* nothing to be done here */
+		log_fatal("The monitor currently has no Postgres nodes "
+				  "registered in formation \"%s\"",
+				  kconfig->formation);
+		exit(EXIT_CODE_BAD_STATE);
+	}
+
+	/*
+	 * When --group was not given, we may proceed when there is only one
+	 * possible target group in the formation, which is the case with Postgres
+	 * standalone setups.
+	 */
+	if (kconfig->groupId == -1)
+	{
+		/*
+		 * When --group is not given and we have a keeper node, we can grab a
+		 * default from the configuration file. We have to support the usage
+		 * either --monitor or --pgdata. We have a local keeper node/role only
+		 * when we have been given --pgdata.
+		 */
+		if (!IS_EMPTY_STRING_BUFFER(kconfig->pgSetup.pgdata))
+		{
+			pgAutoCtlNodeRole role =
+				ProbeConfigurationFileRole(kconfig->pathnames.config);
+
+			if (role == PG_AUTOCTL_ROLE_KEEPER)
+			{
+				const bool missingPgdataIsOk = true;
+				const bool pgIsNotRunningIsOk = true;
+				const bool monitorDisabledIsOk = false;
+
+				if (!keeper_config_read_file(kconfig,
+											 missingPgdataIsOk,
+											 pgIsNotRunningIsOk,
+											 monitorDisabledIsOk))
+				{
+					/* errors have already been logged */
+					exit(EXIT_CODE_BAD_CONFIG);
+				}
+
+				log_info("Targetting group %d in formation \"%s\"",
+						 kconfig->groupId,
+						 kconfig->formation);
+			}
+		}
+	}
+
+	/*
+	 * We tried to see if we have a local keeper configuration to grab the
+	 * groupId from, what if we don't have a local setup, or the local setup is
+	 * not a keeper role.
+	 */
+	if (kconfig->groupId == -1)
+	{
+		if (groupsCount == 1)
+		{
+			/* we have only one group, it's group number zero, proceed */
+			kconfig->groupId = 0;
+			kconfig->pgSetup.pgKind = NODE_KIND_STANDALONE;
+		}
+		else
+		{
+			log_error("Please use the --group option to target a "
+					  "specific group in formation \"%s\"",
+					  kconfig->formation);
+			exit(EXIT_CODE_BAD_ARGS);
 		}
 	}
 }

@@ -374,10 +374,10 @@ pgtuning_edit_guc_settings(GUC *settings, DynamicTuning *tuning,
 	if (size < contents->len)
 	{
 		log_error("Failed to prepare Postgres tuning for the local system, "
-				  "the setup needs %ld bytes and pg_autoctl only support "
-				  "up to %ld bytes",
-				  contents->len,
-				  size);
+				  "the setup needs %lu bytes and pg_autoctl only support "
+				  "up to %lu bytes",
+				  (unsigned long) contents->len,
+				  (unsigned long) size);
 		destroyPQExpBuffer(contents);
 		return false;
 	}

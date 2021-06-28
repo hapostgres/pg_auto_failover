@@ -104,13 +104,21 @@ typedef struct Service
 	RestartCounters restartCounters;
 } Service;
 
+
+typedef enum
+{
+	SUPERVISOR_EXIT_ERROR = 0,
+	SUPERVISOR_EXIT_CLEAN,
+	SUPERVISOR_EXIT_FATAL
+} SupervisorExitMode;
+
 typedef struct Supervisor
 {
 	Service *services;
 	int serviceCount;
 	char pidfile[MAXPGPATH];
 	pid_t pid;
-	bool cleanExit;
+	SupervisorExitMode exitMode;
 	bool shutdownSequenceInProgress;
 	int shutdownSignal;
 	int stoppingLoopCounter;

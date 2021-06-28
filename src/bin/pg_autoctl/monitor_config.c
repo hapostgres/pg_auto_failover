@@ -195,6 +195,12 @@ monitor_config_init(MonitorConfig *config,
 	/* A part of the monitor's pgSetup is hard-coded. */
 	strlcpy(config->pgSetup.dbname, PG_AUTOCTL_MONITOR_DBNAME, NAMEDATALEN);
 	strlcpy(config->pgSetup.username, PG_AUTOCTL_MONITOR_USERNAME, NAMEDATALEN);
+
+	if (config->pgSetup.hbaLevel == HBA_EDIT_UNKNOWN)
+	{
+		strlcpy(config->pgSetup.hbaLevelStr, "app", NAMEDATALEN);
+		config->pgSetup.hbaLevel = HBA_EDIT_LAN;
+	}
 }
 
 
@@ -464,9 +470,12 @@ monitor_config_get_postgres_uri(MonitorConfig *config, char *connectionString,
 		 * PostgreSQL server to open it up to the local area network, e.g.
 		 * 129.168.1.0/23, so it should just work here.
 		 */
+		bool mayRetry = false;
+
 		if (!fetchLocalIPAddress(host, BUFSIZE,
 								 DEFAULT_INTERFACE_LOOKUP_SERVICE_NAME,
-								 DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT))
+								 DEFAULT_INTERFACE_LOOKUP_SERVICE_PORT,
+								 LOG_WARN, &mayRetry))
 		{
 			/* error is already logged */
 			return false;

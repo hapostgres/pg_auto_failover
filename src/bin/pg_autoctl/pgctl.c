@@ -46,11 +46,13 @@ static bool pg_include_config(const char *configFilePath,
 static bool ensure_default_settings_file_exists(const char *configFilePath,
 												GUC *settings,
 												PostgresSetup *pgSetup,
+												const char *hostname,
 												bool includeTuning);
 static bool prepare_guc_settings_from_pgsetup(const char *configFilePath,
 											  PQExpBuffer config,
 											  GUC *settings,
 											  PostgresSetup *pgSetup,
+											  const char *hostname,
 											  bool includeTuning);
 static void log_program_output(Program prog, int outLogLevel, int errorLogLevel);
 
@@ -59,7 +61,9 @@ static bool prepare_recovery_settings(const char *pgdata,
 									  ReplicationSource *replicationSource,
 									  char *primaryConnInfo,
 									  char *primarySlotName,
-									  char *targetLSN);
+									  char *targetLSN,
+									  char *targetAction,
+									  char *targetTimeline);
 
 static bool escape_recovery_conf_string(char *destination,
 										int destinationSize,
@@ -88,6 +92,8 @@ bool
 pg_ctl_version(PostgresSetup *pgSetup)
 {
 	Program prog = run_program(pgSetup->pg_ctl, "--version", NULL);
+	char pg_version_string[PG_VERSION_STRING_MAX] = { 0 };
+	int pg_version = 0;
 
 	if (prog.returnCode != 0)
 	{
@@ -98,16 +104,18 @@ pg_ctl_version(PostgresSetup *pgSetup)
 		return false;
 	}
 
-	char *version = parse_version_number(prog.stdOut);
-	free_program(&prog);
-
-	if (version == NULL)
+	if (!parse_version_number(prog.stdOut,
+							  pg_version_string,
+							  PG_VERSION_STRING_MAX,
+							  &pg_version))
 	{
+		/* errors have already been logged */
+		free_program(&prog);
 		return false;
 	}
+	free_program(&prog);
 
-	strlcpy(pgSetup->pg_version, version, PG_VERSION_STRING_MAX);
-	free(version);
+	strlcpy(pgSetup->pg_version, pg_version_string, PG_VERSION_STRING_MAX);
 
 	return true;
 }
@@ -123,6 +131,14 @@ bool
 set_pg_ctl_from_config_bindir(PostgresSetup *pgSetup, const char *pg_config)
 {
 	char pg_ctl[MAXPGPATH] = { 0 };
+
+	if (!file_exists(pg_config))
+	{
+		log_debug("set_pg_ctl_from_config_bindir: file not found: \"%s\"",
+				  pg_config);
+		return false;
+	}
+
 	Program prog = run_program(pg_config, "--bindir", NULL);
 
 	char *lines[1];
@@ -532,6 +548,121 @@ config_find_pg_ctl(PostgresSetup *pgSetup)
 
 
 /*
+ * find_pg_config_from_pg_ctl finds the path to pg_config from the known path
+ * to pg_ctl. If that exists, we first use the pg_config binary found in the
+ * same directory as the pg_ctl binary itself.
+ *
+ * Otherwise, we have a look at the PG_CONFIG environment variable.
+ *
+ * Finally, we search in the PATH list for all the matches, and for each of
+ * them we run pg_config --bindir, and if that's the directory where we have
+ * our known pg_ctl, that's our pg_config.
+ *
+ * Rationale: when using debian, the postgresql-common package installs a
+ * single entry for pg_config in /usr/bin/pg_config, and that's the system
+ * default.
+ *
+ * A version specific file path found in /usr/lib/postgresql/11/bin/pg_config
+ * when installing Postgres 11 is installed from the package
+ * postgresql-server-dev-11.
+ *
+ * There is no single default entry for pg_ctl, that said, so we are using the
+ * specific path /usr/lib/postgresql/11/bin/pg_config here.
+ *
+ * So depending on what packages have been deployed on this specific debian
+ * instance, we might or might not find a pg_config binary in the same
+ * directory as pg_ctl.
+ *
+ * Note that we could register the full path to whatever pg_config version we
+ * use at pg_autoctl create time, but in most cases that is going to be
+ * /usr/bin/pg_config, and it will point to a new pg_ctl (version 13 for
+ * instance) when you apt-get upgrade your debian testing distribution and it
+ * just migrated from Postgres 11 to Postgres 13 (bullseye cycle just did that
+ * in december 2020).
+ *
+ * Either package libpq-dev or postgresql-server-dev-11 (or another version)
+ * must be isntalled for this to work.
+ */
+bool
+find_pg_config_from_pg_ctl(const char *pg_ctl, char *pg_config, size_t size)
+{
+	char pg_config_path[MAXPGPATH] = { 0 };
+
+	/*
+	 * 1. try pg_ctl directory
+	 */
+	path_in_same_directory(pg_ctl, "pg_config", pg_config_path);
+
+	if (file_exists(pg_config_path))
+	{
+		log_debug("find_pg_config_from_pg_ctl: \"%s\" "
+				  "in same directory as pg_ctl",
+				  pg_config_path);
+		strlcpy(pg_config, pg_config_path, size);
+		return true;
+	}
+
+	/*
+	 * 2. try PG_CONFIG from the environment, and check pg_config --bindir
+	 */
+	if (env_exists("PG_CONFIG"))
+	{
+		PostgresSetup pgSetup = { 0 };
+		char PG_CONFIG[MAXPGPATH] = { 0 };
+
+		/* check that the pg_config we found relates to the given pg_ctl */
+		if (get_env_copy("PG_CONFIG", PG_CONFIG, sizeof(PG_CONFIG)) &&
+			file_exists(PG_CONFIG) &&
+			set_pg_ctl_from_config_bindir(&pgSetup, PG_CONFIG) &&
+			strcmp(pgSetup.pg_ctl, pg_ctl) == 0)
+		{
+			log_debug("find_pg_config_from_pg_ctl: \"%s\" "
+					  "from PG_CONFIG environment variable",
+					  pg_config_path);
+			strlcpy(pg_config, pg_config_path, size);
+			return true;
+		}
+	}
+
+	/*
+	 * 3. search our PATH for pg_config entries and keep the first one that
+	 *    relates to our known pg_ctl.
+	 */
+	SearchPath all_pg_configs = { 0 };
+	SearchPath pg_configs = { 0 };
+
+	if (!search_path("pg_config", &all_pg_configs))
+	{
+		return false;
+	}
+
+	if (!search_path_deduplicate_symlinks(&all_pg_configs, &pg_configs))
+	{
+		log_error("Failed to resolve symlinks found in PATH entries, "
+				  "see above for details");
+		return false;
+	}
+
+	for (int i = 0; i < pg_configs.found; i++)
+	{
+		PostgresSetup pgSetup = { 0 };
+
+		if (set_pg_ctl_from_config_bindir(&pgSetup, pg_configs.matches[i]) &&
+			strcmp(pgSetup.pg_ctl, pg_ctl) == 0)
+		{
+			log_debug("find_pg_config_from_pg_ctl: \"%s\" "
+					  "from PATH search",
+					  pg_configs.matches[i]);
+			strlcpy(pg_config, pg_configs.matches[i], size);
+			return true;
+		}
+	}
+
+	return false;
+}
+
+
+/*
  * find_extension_control_file ensures that the extension is present in the
  * given Postgres installation. This does the equivalent of:
  * ls -l $(pg_config --sharedir)/extension/pg_stat_statements.control
@@ -547,7 +678,11 @@ find_extension_control_file(const char *pg_ctl, const char *extName)
 
 	log_debug("Checking if the %s extension is installed", extName);
 
-	path_in_same_directory(pg_ctl, "pg_config", pg_config_path);
+	if (!find_pg_config_from_pg_ctl(pg_ctl, pg_config_path, MAXPGPATH))
+	{
+		log_warn("Failed to find pg_config from pg_ctl at \"%s\"", pg_ctl);
+		return false;
+	}
 
 	Program prog = run_program(pg_config_path, "--sharedir", NULL);
 
@@ -572,7 +707,8 @@ find_extension_control_file(const char *pg_ctl, const char *extName)
 		join_path_components(extension_path, extension_path, extension_control_file_name);
 		if (!file_exists(extension_path))
 		{
-			log_error("Failed to find extension control file \"%s\"", extension_path);
+			log_error("Failed to find extension control file \"%s\"",
+					  extension_path);
 			free_program(&prog);
 			return false;
 		}
@@ -597,7 +733,8 @@ find_extension_control_file(const char *pg_ctl, const char *extName)
  */
 bool
 pg_add_auto_failover_default_settings(PostgresSetup *pgSetup,
-									  char *configFilePath,
+									  const char *hostname,
+									  const char *configFilePath,
 									  GUC *settings)
 {
 	bool includeTuning = true;
@@ -616,6 +753,7 @@ pg_add_auto_failover_default_settings(PostgresSetup *pgSetup,
 	if (!ensure_default_settings_file_exists(pgAutoFailoverDefaultsConfigPath,
 											 settings,
 											 pgSetup,
+											 hostname,
 											 includeTuning))
 	{
 		return false;
@@ -736,17 +874,26 @@ static bool
 ensure_default_settings_file_exists(const char *configFilePath,
 									GUC *settings,
 									PostgresSetup *pgSetup,
+									const char *hostname,
 									bool includeTuning)
 {
 	PQExpBuffer defaultConfContents = createPQExpBuffer();
+
+	if (defaultConfContents == NULL)
+	{
+		log_error("Failed to allocate memory");
+		return false;
+	}
 
 	if (!prepare_guc_settings_from_pgsetup(configFilePath,
 										   defaultConfContents,
 										   settings,
 										   pgSetup,
+										   hostname,
 										   includeTuning))
 	{
 		/* errors have already been logged */
+		destroyPQExpBuffer(defaultConfContents);
 		return false;
 	}
 
@@ -816,6 +963,7 @@ prepare_guc_settings_from_pgsetup(const char *configFilePath,
 								  PQExpBuffer config,
 								  GUC *settings,
 								  PostgresSetup *pgSetup,
+								  const char *hostname,
 								  bool includeTuning)
 {
 	char tuning[BUFSIZE] = { 0 };
@@ -920,6 +1068,18 @@ prepare_guc_settings_from_pgsetup(const char *configFilePath,
 								  setting->name, pgSetup->ssl.serverKey);
 			}
 		}
+		else if (streq(setting->name, "recovery_target_lsn"))
+		{
+			if (streq(setting->value, "'immediate'"))
+			{
+				appendPQExpBuffer(config, "recovery_target = 'immediate'\n");
+			}
+			else
+			{
+				appendPQExpBuffer(config, "%s = %s\n",
+								  setting->name, setting->value);
+			}
+		}
 		else if (streq(setting->name, "citus.node_conninfo"))
 		{
 			appendPQExpBuffer(config, "%s = '", setting->name);
@@ -933,6 +1093,29 @@ prepare_guc_settings_from_pgsetup(const char *configFilePath,
 
 			appendPQExpBufferStr(config, "'\n");
 		}
+		else if (streq(setting->name, "citus.use_secondary_nodes"))
+		{
+			if (!IS_EMPTY_STRING_BUFFER(pgSetup->citusClusterName))
+			{
+				appendPQExpBuffer(config, "%s = 'always'\n", setting->name);
+			}
+		}
+		else if (streq(setting->name, "citus.cluster_name"))
+		{
+			if (!IS_EMPTY_STRING_BUFFER(pgSetup->citusClusterName))
+			{
+				appendPQExpBuffer(config, "%s = '%s'\n",
+								  setting->name, pgSetup->citusClusterName);
+			}
+		}
+		else if (streq(setting->name, "citus.local_hostname"))
+		{
+			if (hostname != NULL && !IS_EMPTY_STRING_BUFFER(hostname))
+			{
+				appendPQExpBuffer(config, "%s = '%s'\n",
+								  setting->name, hostname);
+			}
+		}
 		else if (setting->value != NULL &&
 				 !IS_EMPTY_STRING_BUFFER(setting->value))
 		{
@@ -940,7 +1123,8 @@ prepare_guc_settings_from_pgsetup(const char *configFilePath,
 							  setting->name,
 							  setting->value);
 		}
-		else
+		else if (setting->value == NULL ||
+				 IS_EMPTY_STRING_BUFFER(setting->value))
 		{
 			/*
 			 * Our GUC entry has a NULL (or empty) value. Skip the setting.
@@ -953,6 +1137,13 @@ prepare_guc_settings_from_pgsetup(const char *configFilePath,
 			 * expected.
 			 */
 			log_debug("GUC setting \"%s\" has a NULL value", setting->name);
+		}
+		else
+		{
+			/* the GUC setting in the array has not been processed */
+			log_error("BUG: GUC settings \"%s\" has not been processed",
+					  setting->name);
+			return false;
 		}
 	}
 
@@ -1047,8 +1238,14 @@ pg_basebackup(const char *pgdata,
 	args[argsIndex++] = "--max-rate";
 	args[argsIndex++] = replicationSource->maximumBackupRate;
 	args[argsIndex++] = "--wal-method=stream";
-	args[argsIndex++] = "--slot";
-	args[argsIndex++] = replicationSource->slotName;
+
+	/* we don't use a replication slot e.g. when upstream is a standby */
+	if (!IS_EMPTY_STRING_BUFFER(replicationSource->slotName))
+	{
+		args[argsIndex++] = "--slot";
+		args[argsIndex++] = replicationSource->slotName;
+	}
+
 	args[argsIndex] = NULL;
 
 	/*
@@ -1056,7 +1253,9 @@ pg_basebackup(const char *pgdata,
 	 * pg_basebackup subprogram is not intended to be its own session leader,
 	 * but remain a sub-process in the same group as pg_autoctl.
 	 */
-	Program program = initialize_program(args, false);
+	Program program = { 0 };
+
+	(void) initialize_program(&program, args, false);
 	program.processBuffer = &processBufferCallback;
 
 	/* log the exact command line we're using */
@@ -1166,7 +1365,9 @@ pg_rewind(const char *pgdata,
 	 * pg_rewind subprogram is not intended to be its own session leader, but
 	 * remain a sub-process in the same group as pg_autoctl.
 	 */
-	Program program = initialize_program(args, false);
+	Program program = { 0 };
+
+	(void) initialize_program(&program, args, false);
 	program.processBuffer = &processBufferCallback;
 
 	/* log the exact command line we're using */
@@ -1282,7 +1483,7 @@ pg_ctl_initdb(const char *pg_ctl, const char *pgdata)
  */
 bool
 pg_ctl_postgres(const char *pg_ctl, const char *pgdata, int pgport,
-				char *listen_addresses)
+				char *listen_addresses, bool listen)
 {
 	char postgres[MAXPGPATH];
 	char logfile[MAXPGPATH];
@@ -1306,10 +1507,21 @@ pg_ctl_postgres(const char *pg_ctl, const char *pgdata, int pgport,
 	args[argsIndex++] = "-p";
 	args[argsIndex++] = (char *) intToString(pgport).strValue;
 
-	if (!IS_EMPTY_STRING_BUFFER(listen_addresses))
+	if (listen)
 	{
+		if (IS_EMPTY_STRING_BUFFER(listen_addresses))
+		{
+			log_error("BUG: pg_ctl_postgres is given an empty listen_addresses "
+					  "with argument listen set to true");
+			return false;
+		}
 		args[argsIndex++] = "-h";
 		args[argsIndex++] = (char *) listen_addresses;
+	}
+	else
+	{
+		args[argsIndex++] = "-h";
+		args[argsIndex++] = "";
 	}
 
 	if (env_exists("PG_REGRESS_SOCK_DIR"))
@@ -1332,7 +1544,9 @@ pg_ctl_postgres(const char *pg_ctl, const char *pgdata, int pgport,
 	 * postgres subprogram is not intended to be its own session leader, but
 	 * remain a sub-process in the same group as pg_autoctl.
 	 */
-	Program program = initialize_program(args, false);
+	Program program = { 0 };
+
+	(void) initialize_program(&program, args, false);
 
 	/* we want to redirect the output to logfile */
 	int logFileDescriptor = open(logfile, FOPEN_FLAGS_W, 0644);
@@ -1765,12 +1979,14 @@ pg_write_recovery_conf(const char *pgdata, ReplicationSource *replicationSource)
 	char primaryConnInfo[MAXCONNINFO] = { 0 };
 	char primarySlotName[MAXCONNINFO] = { 0 };
 	char targetLSN[PG_LSN_MAXLENGTH] = { 0 };
+	char targetAction[NAMEDATALEN] = { 0 };
+	char targetTimeline[NAMEDATALEN] = { 0 };
 
 	GUC recoverySettingsStandby[] = {
 		{ "standby_mode", "'on'" },
 		{ "primary_conninfo", (char *) primaryConnInfo },
 		{ "primary_slot_name", (char *) primarySlotName },
-		{ "recovery_target_timeline", "'latest'" },
+		{ "recovery_target_timeline", (char *) targetTimeline },
 		{ NULL, NULL }
 	};
 
@@ -1778,10 +1994,10 @@ pg_write_recovery_conf(const char *pgdata, ReplicationSource *replicationSource)
 		{ "standby_mode", "'on'" },
 		{ "primary_conninfo", (char *) primaryConnInfo },
 		{ "primary_slot_name", (char *) primarySlotName },
-		{ "recovery_target_timeline", "'latest'" },
+		{ "recovery_target_timeline", (char *) targetTimeline },
 		{ "recovery_target_lsn", (char *) targetLSN },
 		{ "recovery_target_inclusive", "'true'" },
-		{ "recovery_target_action", "'pause'" },
+		{ "recovery_target_action", (char *) targetAction },
 		{ NULL, NULL }
 	};
 
@@ -1800,7 +2016,9 @@ pg_write_recovery_conf(const char *pgdata, ReplicationSource *replicationSource)
 								   replicationSource,
 								   primaryConnInfo,
 								   primarySlotName,
-								   targetLSN))
+								   targetLSN,
+								   targetAction,
+								   targetTimeline))
 	{
 		/* errors have already been logged */
 		return false;
@@ -1808,6 +2026,7 @@ pg_write_recovery_conf(const char *pgdata, ReplicationSource *replicationSource)
 
 	return ensure_default_settings_file_exists(recoveryConfPath,
 											   recoverySettings,
+											   NULL,
 											   NULL,
 											   includeTuning);
 }
@@ -1831,21 +2050,23 @@ pg_write_standby_signal(const char *pgdata,
 	char primaryConnInfo[MAXCONNINFO] = { 0 };
 	char primarySlotName[MAXCONNINFO] = { 0 };
 	char targetLSN[PG_LSN_MAXLENGTH] = { 0 };
+	char targetAction[NAMEDATALEN] = { 0 };
+	char targetTimeline[NAMEDATALEN] = { 0 };
 
 	GUC recoverySettingsStandby[] = {
 		{ "primary_conninfo", (char *) primaryConnInfo },
 		{ "primary_slot_name", (char *) primarySlotName },
-		{ "recovery_target_timeline", "'latest'" },
+		{ "recovery_target_timeline", (char *) targetTimeline },
 		{ NULL, NULL }
 	};
 
 	GUC recoverySettingsTargetLSN[] = {
 		{ "primary_conninfo", (char *) primaryConnInfo },
 		{ "primary_slot_name", (char *) primarySlotName },
-		{ "recovery_target_timeline", "'latest'" },
+		{ "recovery_target_timeline", (char *) targetTimeline },
 		{ "recovery_target_lsn", (char *) targetLSN },
 		{ "recovery_target_inclusive", "'true'" },
-		{ "recovery_target_action", "'pause'" },
+		{ "recovery_target_action", targetAction },
 		{ NULL, NULL }
 	};
 
@@ -1862,7 +2083,9 @@ pg_write_standby_signal(const char *pgdata,
 								   replicationSource,
 								   primaryConnInfo,
 								   primarySlotName,
-								   targetLSN))
+								   targetLSN,
+								   targetAction,
+								   targetTimeline))
 	{
 		/* errors have already been logged */
 		return false;
@@ -1904,6 +2127,7 @@ pg_write_standby_signal(const char *pgdata,
 	if (!ensure_default_settings_file_exists(standbyConfigFilePath,
 											 recoverySettings,
 											 NULL,
+											 NULL,
 											 includeTuning))
 	{
 		return false;
@@ -1938,7 +2162,9 @@ prepare_recovery_settings(const char *pgdata,
 						  ReplicationSource *replicationSource,
 						  char *primaryConnInfo,
 						  char *primarySlotName,
-						  char *targetLSN)
+						  char *targetLSN,
+						  char *targetAction,
+						  char *targetTimeline)
 {
 	bool escape = true;
 	NodeAddress *primaryNode = &(replicationSource->primaryNode);
@@ -1946,7 +2172,8 @@ prepare_recovery_settings(const char *pgdata,
 	/* when reaching REPORT_LSN we set recovery with no primary conninfo */
 	if (!IS_EMPTY_STRING_BUFFER(primaryNode->host))
 	{
-		log_debug("prepare_recovery_settings: primary node %d \"%s\" (%s:%d)",
+		log_debug("prepare_recovery_settings: "
+				  "primary node %" PRId64 " \"%s\" (%s:%d)",
 				  primaryNode->nodeId,
 				  primaryNode->name,
 				  primaryNode->host,
@@ -1982,11 +2209,33 @@ prepare_recovery_settings(const char *pgdata,
 				replicationSource->slotName);
 	}
 
+	/* The default target timeline is 'latest' */
+	if (IS_EMPTY_STRING_BUFFER(replicationSource->targetTimeline))
+	{
+		sformat(targetTimeline, NAMEDATALEN, "'latest'");
+	}
+	else
+	{
+		sformat(targetTimeline, NAMEDATALEN, "'%s'",
+				replicationSource->targetTimeline);
+	}
+
 	/* We use the targetLSN only when doing a WAL fast_forward operation */
 	if (!IS_EMPTY_STRING_BUFFER(replicationSource->targetLSN))
 	{
 		sformat(targetLSN, PG_LSN_MAXLENGTH, "'%s'",
 				replicationSource->targetLSN);
+	}
+
+	/* The default target Action is 'pause' */
+	if (IS_EMPTY_STRING_BUFFER(replicationSource->targetAction))
+	{
+		sformat(targetAction, NAMEDATALEN, "'pause'");
+	}
+	else
+	{
+		sformat(targetAction, NAMEDATALEN, "'%s'",
+				replicationSource->targetAction);
 	}
 
 	return true;
@@ -2147,6 +2396,12 @@ prepare_primary_conninfo(char *primaryConnInfo,
 
 	PQExpBuffer buffer = createPQExpBuffer();
 
+	if (buffer == NULL)
+	{
+		log_error("Failed to allocate memory");
+		return false;
+	}
+
 	/* application_name shows up in pg_stat_replication on the primary */
 	appendPQExpBuffer(buffer, "application_name=%s", applicationName);
 	appendPQExpBuffer(buffer, " host=%s", primaryHost);
@@ -2167,6 +2422,7 @@ prepare_primary_conninfo(char *primaryConnInfo,
 	if (!prepare_conninfo_sslmode(buffer, sslOptions))
 	{
 		/* errors have already been logged */
+		destroyPQExpBuffer(buffer);
 		return false;
 	}
 
@@ -2195,6 +2451,7 @@ prepare_primary_conninfo(char *primaryConnInfo,
 			log_error("BUG: the escaped primary_conninfo requires %d bytes and "
 					  "pg_auto_failover only support up to %d bytes",
 					  size, primaryConnInfoSize);
+			destroyPQExpBuffer(buffer);
 			return false;
 		}
 	}
@@ -2305,7 +2562,8 @@ pgctl_identify_system(ReplicationSource *replicationSource)
 		return false;
 	}
 
-	if (!pgsql_identify_system(&replicationClient))
+	if (!pgsql_identify_system(&replicationClient,
+							   &(replicationSource->system)))
 	{
 		/* errors have already been logged */
 		return false;

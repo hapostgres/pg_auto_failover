@@ -41,10 +41,12 @@
  */
 typedef struct CandidateList
 {
+	int numberSyncStandbys;
 	List *candidateNodesGroupList;
 	List *mostAdvancedNodesGroupList;
 	XLogRecPtr mostAdvancedReportedLSN;
 	int candidateCount;
+	int quorumCandidateCount;
 	int missingNodesCount;
 } CandidateList;
 
@@ -104,6 +106,33 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 		ereport(ERROR,
 				(errmsg("Formation for %s could not be found",
 						activeNode->formationId)));
+	}
+
+	/*
+	 * If the active node just reached the DROPPED state, proceed to remove it
+	 * from the pgautofailover.node table.
+	 */
+	if (IsCurrentState(activeNode, REPLICATION_STATE_DROPPED))
+	{
+		char message[BUFSIZE] = { 0 };
+
+		/* time to actually remove the current node */
+		RemoveAutoFailoverNode(activeNode);
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Removing " NODE_FORMAT " from formation \"%s\" and group %d",
+			NODE_FORMAT_ARGS(activeNode),
+			activeNode->formationId,
+			activeNode->groupId);
+
+		return true;
+	}
+
+	/* node reports secondary/dropped */
+	if (activeNode->goalState == REPLICATION_STATE_DROPPED)
+	{
+		return true;
 	}
 
 	/* when there's no other node anymore, not even one */
@@ -336,6 +365,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 		 IsCurrentState(primaryNode, REPLICATION_STATE_JOIN_PRIMARY) ||
 		 IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY)) &&
 		IsHealthy(activeNode) &&
+		activeNode->reportedTLI == primaryNode->reportedTLI &&
 		WalDifferenceWithin(activeNode, primaryNode, EnableSyncXlogThreshold))
 	{
 		char message[BUFSIZE] = { 0 };
@@ -633,6 +663,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 * concurrently making progress.
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_DEMOTED) &&
+		IsHealthy(primaryNode) &&
 		((primaryNode->reportedState == REPLICATION_STATE_WAIT_PRIMARY ||
 		  primaryNode->reportedState == REPLICATION_STATE_JOIN_PRIMARY) &&
 		 primaryNode->goalState == REPLICATION_STATE_PRIMARY))
@@ -658,6 +689,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 *  demoted -> catchingup
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_DEMOTED) &&
+		IsHealthy(primaryNode) &&
 		(IsCurrentState(primaryNode, REPLICATION_STATE_JOIN_PRIMARY) ||
 		 IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
 		 IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY)))
@@ -713,7 +745,8 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 		/* it's safe to rejoin as a secondary */
 		AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
 
-		return true;
+		/* compute next step for the primary depending on node settings */
+		return ProceedGroupStateForPrimaryNode(primaryNode);
 	}
 
 	/*
@@ -839,8 +872,27 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 		IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
 		IsCurrentState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS))
 	{
-		int potentialCandidateCount = otherNodesCount;
-		int failoverCandidateCount = otherNodesCount;
+		/*
+		 * We count our nodes in different ways, because of special cases we
+		 * want to be able to address. We want to distinguish nodes that are in
+		 * the replication quorum, nodes that are secondary, and nodes that are
+		 * secondary but do not participate in the quorum.
+		 *
+		 * - replicationQuorumCount is the count of nodes with
+		 *   replicationQuorum true, whether or not those nodes are currently
+		 *   in the SECONDARY state.
+		 *
+		 * - secondaryNodesCount is the count of nodes that are currently in
+		 *   the SECONDARY state.
+		 *
+		 * - secondaryQuorumNodesCount is the count of nodes that are both
+		 *   setup to participate in the replication quorum and also currently
+		 *   in the SECONDARY state.
+		 */
+		int replicationQuorumCount = otherNodesCount;
+		int secondaryNodesCount = otherNodesCount;
+		int secondaryQuorumNodesCount = otherNodesCount;
+
 		AutoFailoverFormation *formation =
 			GetFormation(primaryNode->formationId);
 		ListCell *nodeCell = NULL;
@@ -863,7 +915,8 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 			{
 				char message[BUFSIZE];
 
-				--failoverCandidateCount;
+				--secondaryNodesCount;
+				--secondaryQuorumNodesCount;
 
 				LogAndNotifyMessage(
 					message, BUFSIZE,
@@ -875,62 +928,112 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 				AssignGoalState(otherNode,
 								REPLICATION_STATE_CATCHINGUP, message);
 			}
-			else if (otherNode->candidatePriority == 0)
-			{
-				/* neither a potential not an actual candidate */
-				--failoverCandidateCount;
-				--potentialCandidateCount;
-			}
 			else if (!IsCurrentState(otherNode, REPLICATION_STATE_SECONDARY))
 			{
-				/* also not a candidate at this time */
-				--failoverCandidateCount;
+				--secondaryNodesCount;
+				--secondaryQuorumNodesCount;
 			}
 
-			/*
-			 * Disable synchronous replication to maintain availability.
-			 *
-			 * Note that we implement here a trade-off between availability (of
-			 * writes) against durability of the written data. In the case when
-			 * there's a single standby in the group, pg_auto_failover choice
-			 * is to maintain availability of the service, including writes.
-			 *
-			 * In the case when the user has setup a replication quorum of 2 or
-			 * more, then pg_auto_failover does not get in the way. You get
-			 * what you ask for, which is a strong guarantee on durability.
-			 *
-			 * To have number_sync_standbys == 2, you need to have at least 3
-			 * standby servers. To get to a point where writes are not possible
-			 * anymore, there needs to be a point in time where 2 of the 3
-			 * standby nodes are unavailable. In that case, pg_auto_failover
-			 * does not change the configured trade-offs. Writes are blocked
-			 * until one of the two defective standby nodes is available again.
-			 */
-			if (!IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) &&
-				failoverCandidateCount == 0)
+			/* at this point we are left with nodes in SECONDARY state */
+			else if (IsCurrentState(otherNode, REPLICATION_STATE_SECONDARY) &&
+					 !otherNode->replicationQuorum)
 			{
-				ReplicationState primaryGoalState =
-					formation->number_sync_standbys == 0
-					? REPLICATION_STATE_WAIT_PRIMARY
-					: REPLICATION_STATE_PRIMARY;
+				--secondaryQuorumNodesCount;
+			}
 
-				if (primaryNode->goalState != primaryGoalState)
-				{
-					char message[BUFSIZE] = { 0 };
+			/* now separately count nodes setup with replication quorum */
+			if (!otherNode->replicationQuorum)
+			{
+				--replicationQuorumCount;
+			}
+		}
 
-					LogAndNotifyMessage(
-						message, BUFSIZE,
-						"Setting goal state of " NODE_FORMAT
-						" to %s because none of the %d standby candidate nodes"
-						" are healthy at the moment.",
-						NODE_FORMAT_ARGS(primaryNode),
-						ReplicationStateGetName(primaryGoalState),
-						potentialCandidateCount);
+		/*
+		 * Special case first: when given a setup where all the nodes are async
+		 * (replicationQuorumCount == 0) we allow the "primary" state in almost
+		 * all cases, knowing that synchronous_standby_names is still going to
+		 * be computed as ''.
+		 *
+		 * That said, if we don't have a single node in the SECONDARY state, we
+		 * still want to switch to WAIT_PRIMARY to show that something
+		 * unexpected is happening.
+		 */
+		if (replicationQuorumCount == 0)
+		{
+			Assert(formation->number_sync_standbys == 0);
 
-					AssignGoalState(primaryNode, primaryGoalState, message);
+			ReplicationState primaryGoalState =
+				secondaryNodesCount == 0
+				? REPLICATION_STATE_WAIT_PRIMARY
+				: REPLICATION_STATE_PRIMARY;
 
-					return true;
-				}
+			if (primaryNode->goalState != primaryGoalState)
+			{
+				char message[BUFSIZE] = { 0 };
+
+				LogAndNotifyMessage(
+					message, BUFSIZE,
+					"Setting goal state of " NODE_FORMAT
+					" to %s because none of the secondary nodes"
+					" are healthy at the moment.",
+					NODE_FORMAT_ARGS(primaryNode),
+					ReplicationStateGetName(primaryGoalState));
+
+				AssignGoalState(primaryNode, primaryGoalState, message);
+
+				return true;
+			}
+
+			/* when all nodes are async, we're done here */
+			return true;
+		}
+
+		/*
+		 * Disable synchronous replication to maintain availability.
+		 *
+		 * Note that we implement here a trade-off between availability (of
+		 * writes) against durability of the written data. In the case when
+		 * there's a single standby in the group, pg_auto_failover choice is to
+		 * maintain availability of the service, including writes.
+		 *
+		 * In the case when the user has setup a replication quorum of 1 or
+		 * more, then pg_auto_failover does not get in the way. You get what
+		 * you ask for, which is a strong guarantee on durability.
+		 *
+		 * To have number_sync_standbys == 1, you need to have at least 2
+		 * standby servers. To get to a point where writes are not possible
+		 * anymore, there needs to be a point in time where 2 of the 2 standby
+		 * nodes are unavailable. In that case, pg_auto_failover does not
+		 * change the configured trade-offs. Writes are blocked until one of
+		 * the two defective standby nodes is available again.
+		 */
+		if (!IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) &&
+			secondaryQuorumNodesCount == 0)
+		{
+			/*
+			 * Allow wait_primary when number_sync_standbys = 0, otherwise
+			 * block writes on the primary.
+			 */
+			ReplicationState primaryGoalState =
+				formation->number_sync_standbys == 0
+				? REPLICATION_STATE_WAIT_PRIMARY
+				: REPLICATION_STATE_PRIMARY;
+
+			if (primaryNode->goalState != primaryGoalState)
+			{
+				char message[BUFSIZE] = { 0 };
+
+				LogAndNotifyMessage(
+					message, BUFSIZE,
+					"Setting goal state of " NODE_FORMAT
+					" to %s because none of the standby nodes in the quorum"
+					" are healthy at the moment.",
+					NODE_FORMAT_ARGS(primaryNode),
+					ReplicationStateGetName(primaryGoalState));
+
+				AssignGoalState(primaryNode, primaryGoalState, message);
+
+				return true;
 			}
 		}
 
@@ -940,16 +1043,17 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 		 *     wait_primary ➜ primary
 		 */
 		if (IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) &&
-			failoverCandidateCount > 0)
+			secondaryQuorumNodesCount > 0)
 		{
 			char message[BUFSIZE] = { 0 };
 
 			LogAndNotifyMessage(
 				message, BUFSIZE,
 				"Setting goal state of " NODE_FORMAT
-				" to primary now that at least one"
-				" secondary candidate node is healthy.",
-				NODE_FORMAT_ARGS(primaryNode));
+				" to primary now that we have %d healthy "
+				" secondary nodes in the quorum.",
+				NODE_FORMAT_ARGS(primaryNode),
+				secondaryQuorumNodesCount);
 
 			AssignGoalState(primaryNode, REPLICATION_STATE_PRIMARY, message);
 
@@ -977,7 +1081,8 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 			char message[BUFSIZE] = { 0 };
 
 			ReplicationState primaryGoalState =
-				failoverCandidateCount == 0
+				formation->number_sync_standbys == 0 &&
+				secondaryQuorumNodesCount == 0
 				? REPLICATION_STATE_WAIT_PRIMARY
 				: REPLICATION_STATE_PRIMARY;
 
@@ -1146,6 +1251,11 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 	 * different candidateNodesGroupList in which every node has reported their
 	 * LSN position, allowing progress to be made.
 	 */
+	char *formationId = activeNode->formationId;
+	AutoFailoverFormation *formation = GetFormation(formationId);
+
+	candidateList.numberSyncStandbys = formation->number_sync_standbys;
+
 	BuildCandidateList(nodesGroupList, &candidateList);
 
 	/*
@@ -1181,8 +1291,45 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 	 * So all the expected candidates did report their LSN, no node is missing.
 	 * Let's see about selecting a candidate for failover now, when we do have
 	 * candidates.
+	 *
+	 * To start the selection process, we require at least number_sync_standbys
+	 * nodes to have reported their LSN and be currently healthy, otherwise we
+	 * won't be able to maintain our guarantees: we would end-up with a node in
+	 * WAIT_PRIMARY state with all the writes blocked for lack of standby
+	 * nodes.
 	 */
-	if (candidateList.candidateCount > 0)
+	int minCandidates = formation->number_sync_standbys + 1;
+
+	/* no candidates is a hard pass */
+	if (candidateList.candidateCount == 0)
+	{
+		return false;
+	}
+
+	/* not enough candidates to promote and then accept writes, pass */
+	else if (candidateList.quorumCandidateCount < minCandidates)
+	{
+		char message[BUFSIZE] = { 0 };
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Failover still in progress with %d candidates that participate "
+			"in the quorum having reported their LSN: %d nodes are required "
+			"in the quorum to satisfy number_sync_standbys=%d in "
+			"formation \"%s\", activeNode is " NODE_FORMAT
+			" and reported state \"%s\"",
+			candidateList.quorumCandidateCount,
+			minCandidates,
+			formation->number_sync_standbys,
+			formation->formationId,
+			NODE_FORMAT_ARGS(activeNode),
+			ReplicationStateGetName(activeNode->reportedState));
+
+		return false;
+	}
+
+	/* enough candidates to promote and then accept writes, let's do it! */
+	else
 	{
 		/* build the list of most advanced standby nodes, not ordered */
 		List *mostAdvancedNodeList =
@@ -1259,7 +1406,18 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 
 /*
  * BuildCandidateList builds the list of current standby candidates that have
- * already reported their LSN, and sets
+ * already reported their LSN, and sets nodes that should be reporting to the
+ * REPORT_LSN goal state.
+ *
+ * A CandidateList keeps track of the list of candidate nodes, the list of most
+ * advanced nodes (in terms of LSN positions), and two counters, the count of
+ * candidate nodes (that's the length of the first list) and the count of nodes
+ * that are due to report their LSN but didn't yet, named the
+ * missingNodesCount.
+ *
+ * Managing the missingNodesCount allows a better message to be printed by the
+ * monitor and prevents early failover: when missingNodesCount > 0 then the
+ * caller for BuildCandidateList knows to refrain from any decision making.
  */
 static bool
 BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
@@ -1281,8 +1439,17 @@ BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
 			continue;
 		}
 
-		/* skip old and new primary nodes (if a selection has been made) */
-		if (StateBelongsToPrimary(node->goalState))
+		/*
+		 * Skip old and new primary nodes (if a selection has been made).
+		 *
+		 * When a failover is ongoing, a former primary node that has reached
+		 * DRAINING and is reporting should be asked to report their LSN.
+		 */
+		if ((IsInPrimaryState(node) ||
+			 IsBeingDemotedPrimary(node) ||
+			 IsDemotedPrimary(node)) &&
+			!(IsCurrentState(node, REPLICATION_STATE_DRAINING) ||
+			  IsCurrentState(node, REPLICATION_STATE_DEMOTED)))
 		{
 			elog(LOG,
 				 "Skipping candidate " NODE_FORMAT
@@ -1302,13 +1469,42 @@ BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
 				 "Skipping candidate " NODE_FORMAT ", which is unhealthy",
 				 NODE_FORMAT_ARGS(node));
 
+			/*
+			 * When a secondary node is now down, and had already reported its
+			 * LSN, then it's not "missing": we have its LSN and are able to
+			 * continue with the election mechanism.
+			 *
+			 * Otherwise, we didn't get its LSN and this node might be (one of)
+			 * the most advanced LSN. Picking it now might lead to loosing
+			 * commited data that was reported to the client connection, if
+			 * this node is the only one with the most advanted LSN.
+			 *
+			 * Only the nodes that participate in the quorum are required to
+			 * report their LSN, because only those nodes are waited by
+			 * Postgres to report a commit to the client connection.
+			 */
+			if (node->replicationQuorum &&
+				node->reportedState != REPLICATION_STATE_REPORT_LSN)
+			{
+				++(candidateList->missingNodesCount);
+			}
+
 			continue;
 		}
 
-		/* grab healthy standby nodes which have reached REPORT_LSN */
+		/*
+		 * Grab healthy standby nodes which have reached REPORT_LSN.
+		 */
 		if (IsCurrentState(node, REPLICATION_STATE_REPORT_LSN))
 		{
 			candidateNodesGroupList = lappend(candidateNodesGroupList, node);
+
+			/* when number_sync_standbys is zero, quorum isn't discriminant */
+			if (node->replicationQuorum ||
+				candidateList->numberSyncStandbys == 0)
+			{
+				++(candidateList->quorumCandidateCount);
+			}
 
 			continue;
 		}
@@ -1323,10 +1519,22 @@ BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
 
 		/*
 		 * Nodes in SECONDARY or CATCHINGUP states are candidates due to report
-		 * their LSN.
+		 * their LSN. Also old primary nodes in DEMOTED state are due to report
+		 * now. And also old primary nodes in DRAINING state, when the drain
+		 * timeout is over, are due to report.
+		 *
+		 * Finally, another interesting case for us here would be a node that
+		 * has been asked to re-join a newly elected primary, but the newly
+		 * elected primary has now failed and we're in the election process to
+		 * replace it. Then demoted/catchingup has been assigned, but there is
+		 * no primary to catch-up to anymore, join the REPORT_LSN crew.
 		 */
-		if (IsStateIn(node->reportedState, secondaryStates) &&
-			IsStateIn(node->goalState, secondaryStates))
+		if ((IsStateIn(node->reportedState, secondaryStates) &&
+			 IsStateIn(node->goalState, secondaryStates)) ||
+			((IsCurrentState(node, REPLICATION_STATE_DRAINING) ||
+			  IsCurrentState(node, REPLICATION_STATE_DEMOTED) ||
+			  (node->reportedState == REPLICATION_STATE_DEMOTED &&
+			   node->goalState == REPLICATION_STATE_CATCHINGUP))))
 		{
 			char message[BUFSIZE] = { 0 };
 
@@ -1418,7 +1626,10 @@ static AutoFailoverNode *
 SelectFailoverCandidateNode(CandidateList *candidateList,
 							AutoFailoverNode *primaryNode)
 {
-	/* build the list of failover candidate nodes, ordered by priority */
+	/*
+	 * Build the list of failover candidate nodes, ordered by priority.
+	 * Nodes with candidatePriority == 0 are skipped in GroupListCandidates.
+	 */
 	List *sortedCandidateNodesGroupList =
 		GroupListCandidates(candidateList->candidateNodesGroupList);
 
@@ -1595,7 +1806,7 @@ PromoteSelectedNode(AutoFailoverNode *selectedNode,
 	{
 		char message[BUFSIZE] = { 0 };
 
-		selectedNode->candidatePriority -= MAX_USER_DEFINED_CANDIDATE_PRIORITY;
+		selectedNode->candidatePriority -= CANDIDATE_PRIORITY_INCREMENT;
 
 		ReportAutoFailoverNodeReplicationSetting(
 			selectedNode->nodeId,
@@ -1695,7 +1906,9 @@ AssignGoalState(AutoFailoverNode *pgAutoFailoverNode,
 /*
  * WalDifferenceWithin returns whether the most recently reported relative log
  * position of the given nodes is within the specified bound. Returns false if
- * neither node has reported a relative xlog position
+ * neither node has reported a relative xlog position.
+ *
+ * Returns false when the nodes are not on the same reported timeline.
  */
 static bool
 WalDifferenceWithin(AutoFailoverNode *secondaryNode,

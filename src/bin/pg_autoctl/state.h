@@ -51,6 +51,7 @@ typedef enum
 	REPORT_LSN_STATE,
 	FAST_FORWARD_STATE,
 	JOIN_SECONDARY_STATE,
+	DROPPED_STATE,
 
 	/* Allow some wildcard-matching transitions (from ANY state to) */
 	ANY_STATE = 128
@@ -87,6 +88,15 @@ typedef enum
  *  - do not change the order of fields
  *  - do not add a new field in between, always add to the end
  *  - do not use any pointers
+ *
+ * The nodeId used to be a 32 bits integer on the monitor, and has been
+ * upgraded to a bigint (64 bits). That said, the on-disk state file still
+ * works internally with a 32 bits number for the nodeId.
+ *
+ * When that's needed, we could create a compatibility function that knows how
+ * to read the old state with an int32_t and then fill-in the new struct with a
+ * 664 bits number instead, and serialize that to disk transparently. As it is
+ * not expected to find nodeId in the wild, this work has not been done yet.
  */
 typedef struct
 {

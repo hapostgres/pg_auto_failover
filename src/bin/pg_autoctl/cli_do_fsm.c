@@ -166,7 +166,7 @@ cli_do_fsm_init(int argc, char **argv)
 		exit(EXIT_CODE_BAD_STATE);
 	}
 
-	if (!keeper_update_pg_state(&keeper))
+	if (!keeper_update_pg_state(&keeper, LOG_ERROR))
 	{
 		log_fatal("Failed to update the keeper's state from the local "
 				  "PostgreSQL instance, see above.");

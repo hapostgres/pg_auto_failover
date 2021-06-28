@@ -14,10 +14,10 @@
 #define PG_AUTOCTL_STATE_VERSION 1
 
 /* additional version information for printing version on CLI */
-#define PG_AUTOCTL_VERSION "1.4.1"
+#define PG_AUTOCTL_VERSION "1.6.0.3"
 
 /* version of the extension that we requite to talk to on the monitor */
-#define PG_AUTOCTL_EXTENSION_VERSION "1.4"
+#define PG_AUTOCTL_EXTENSION_VERSION "1.6"
 
 /* environment variable to use to make DEBUG facilities available */
 #define PG_AUTOCTL_DEBUG "PG_AUTOCTL_DEBUG"
@@ -26,13 +26,15 @@
 /* environment variable for containing the id of the logging semaphore */
 #define PG_AUTOCTL_LOG_SEMAPHORE "PG_AUTOCTL_LOG_SEMAPHORE"
 
+/* environment variable for --monitor, when used instead of --pgdata */
+#define PG_AUTOCTL_MONITOR "PG_AUTOCTL_MONITOR"
+
 /* default values for the pg_autoctl settings */
 #define POSTGRES_PORT 5432
 #define POSTGRES_DEFAULT_LISTEN_ADDRESSES "*"
 #define DEFAULT_DATABASE_NAME "postgres"
 #define DEFAULT_USERNAME "postgres"
 #define DEFAULT_AUTH_METHOD "trust"
-#define SKIP_HBA_AUTH_METHOD "skip"
 #define REPLICATION_SLOT_NAME_DEFAULT "pgautofailover_standby"
 #define REPLICATION_SLOT_NAME_PATTERN "^pgautofailover_standby_"
 #define REPLICATION_PASSWORD_DEFAULT NULL
@@ -41,6 +43,7 @@
 #define GROUP_ID_DEFAULT 0
 #define POSTGRES_CONNECT_TIMEOUT "2"
 #define MAXIMUM_BACKUP_RATE "100M"
+#define MAXIMUM_BACKUP_RATE_LEN 32
 
 
 /*
@@ -81,6 +84,9 @@
 
 #define POSTGRESQL_FAILS_TO_START_TIMEOUT 20
 #define POSTGRESQL_FAILS_TO_START_RETRIES 3
+
+#define DEFAULT_CITUS_ROLE "primary"
+#define DEFAULT_CITUS_CLUSTER_NAME "default"
 
 #define FAILOVER_FORMATION_NUMBER_SYNC_STANDBYS 1
 #define FAILOVER_NODE_CANDIDATE_PRIORITY 50
@@ -146,7 +152,8 @@
 #define EXIT_CODE_RELOAD 9
 #define EXIT_CODE_INTERNAL_ERROR 12
 #define EXIT_CODE_EXTENSION_MISSING 13
-
+#define EXIT_CODE_DROPPED 121   /* node was dropped, stop everything and quit */
+#define EXIT_CODE_FATAL 122     /* error is fatal, no retry, quit now */
 
 /*
  * This opens file write only and creates if it doesn't exist.

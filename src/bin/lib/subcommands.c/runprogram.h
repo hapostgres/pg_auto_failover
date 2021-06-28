@@ -52,7 +52,7 @@ typedef struct
 } Program;
 
 Program run_program(const char *program, ...);
-Program initialize_program(char **args, bool setsid);
+void initialize_program(Program *prog, char **args, bool setsid);
 void execute_subprogram(Program *prog);
 void execute_program(Program *prog);
 void free_program(Program *prog);
@@ -132,25 +132,27 @@ run_program(const char *program, ...)
  * caller to manipulate the structure for itself. Safe to change are program,
  * args and setsid structure slots.
  */
-Program
-initialize_program(char **args, bool setsid)
+void
+initialize_program(Program *prog, char **args, bool setsid)
 {
 	int argsIndex, nb_args = 0;
-	Program prog = { 0 };
 
-	prog.returnCode = -1;
-	prog.error = 0;
-	prog.setsid = setsid;
+	/* we want to have a deterministic starting point */
+	*prog = (Program) { 0 };
+
+	prog->returnCode = -1;
+	prog->error = 0;
+	prog->setsid = setsid;
 
 	/* this could be changed by the caller before calling execute_program */
-	prog.capture = true;
-	prog.tty = false;
-	prog.processBuffer = NULL;
-	prog.stdOutFd = -1;
-	prog.stdErrFd = -1;
+	prog->capture = true;
+	prog->tty = false;
+	prog->processBuffer = NULL;
+	prog->stdOutFd = -1;
+	prog->stdErrFd = -1;
 
-	prog.stdOut = NULL;
-	prog.stdErr = NULL;
+	prog->stdOut = NULL;
+	prog->stdErr = NULL;
 
 	for (argsIndex = 0; args[argsIndex] != NULL; argsIndex++)
 	{
@@ -158,16 +160,14 @@ initialize_program(char **args, bool setsid)
 	}
 
 	/* add another one nb_args for the terminating NULL entry */
-	prog.args = (char **) malloc(++nb_args * sizeof(char *));
-	memset(prog.args, 0, nb_args * sizeof(char *));
+	prog->args = (char **) malloc(++nb_args * sizeof(char *));
+	memset(prog->args, 0, nb_args * sizeof(char *));
 
 	for (argsIndex = 0; args[argsIndex] != NULL; argsIndex++)
 	{
-		prog.args[argsIndex] = strdup(args[argsIndex]);
+		prog->args[argsIndex] = strdup(args[argsIndex]);
 	}
-	prog.program = prog.args[0];
-
-	return prog;
+	prog->program = prog->args[0];
 }
 
 
@@ -538,14 +538,6 @@ read_from_pipes(Program *prog, pid_t childPid, int *outpipe, int *errpipe)
 		}
 	}
 
-	/*
-	 * Now we're done reading from both stdOut and stdErr of the child
-	 * process, so close the file descriptors and prepare the char *
-	 * strings output in our Program structure.
-	 */
-	close(outpipe[0]);
-	close(errpipe[0]);
-
 	if (outbuf->len > 0)
 	{
 		prog->stdOut = strndup(outbuf->data, outbuf->len);
@@ -561,6 +553,18 @@ read_from_pipes(Program *prog, pid_t childPid, int *outpipe, int *errpipe)
 
 	/* now, wait until the child process is done. */
 	(void) waitprogram(prog, childPid);
+
+	/*
+	 * Now we're done reading from both stdOut and stdErr of the child
+	 * process, so close the file descriptors and prepare the char *
+	 * strings output in our Program structure.
+	 *
+	 * We must close the pipe after the child process has exited,
+	 * or the program may be terminated by SIGPIPE, i.e. writing to
+	 * an closed pipe.
+	 */
+	close(outpipe[0]);
+	close(errpipe[0]);
 }
 
 
@@ -581,7 +585,21 @@ waitprogram(Program *prog, pid_t childPid)
 		}
 	} while (!WIFEXITED(status) && !WIFSIGNALED(status));
 
-	prog->returnCode = WEXITSTATUS(status);
+	if (WIFEXITED(status))
+	{
+		prog->returnCode = WEXITSTATUS(status);
+	}
+	else if (WIFSIGNALED(status))
+	{
+		int signo = WTERMSIG(status);
+		/* standard exit value with fatal error signal `n`: 128 + n */
+		prog->returnCode = 128 + signo;
+	}
+	else
+	{
+		log_fatal("unknown exit status: 0X%X", status);
+		prog->returnCode = -1;
+	}
 }
 
 
@@ -628,7 +646,24 @@ snprintf_program_command_line(Program *prog, char *buffer, int size)
 
 	for (index = 0; prog->args[index] != NULL; index++)
 	{
-		int n = snprintf(currentPtr, remainingBytes, " %s", prog->args[index]);
+		int n;
+
+		/* replace an empty char buffer with '' */
+		if (prog->args[index][0] == '\0')
+		{
+			n = snprintf(currentPtr, remainingBytes, " ''");
+		}
+		/* single-quote are needed when argument contains special chars */
+		else if (strchr(prog->args[index], ' ') != NULL ||
+				 strchr(prog->args[index], '?') != NULL ||
+				 strchr(prog->args[index], '!') != NULL)
+		{
+			n = snprintf(currentPtr, remainingBytes, " '%s'", prog->args[index]);
+		}
+		else
+		{
+			n = snprintf(currentPtr, remainingBytes, " %s", prog->args[index]);
+		}
 
 		if (n >= remainingBytes)
 		{

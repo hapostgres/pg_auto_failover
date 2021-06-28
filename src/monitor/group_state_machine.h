@@ -22,9 +22,10 @@
  */
 typedef struct AutoFailoverNodeState
 {
-	int32 nodeId;
+	int64 nodeId;
 	int32 groupId;
 	ReplicationState replicationState;
+	int32 reportedTLI;
 	XLogRecPtr reportedLSN;
 	SyncState pgsrSyncState;
 	bool pgIsRunning;

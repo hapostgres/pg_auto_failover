@@ -22,6 +22,7 @@ extern MonitorConfig monitorOptions;
 extern KeeperConfig keeperOptions;
 extern bool createAndRun;
 extern bool outputJSON;
+extern bool openAppHBAonLAN;
 
 #define SSL_CA_FILE_FLAG 1      /* root public certificate */
 #define SSL_CRL_FILE_FLAG 2     /* certificates revocation list */
@@ -108,7 +109,6 @@ extern CommandLine drop_formation_command;
 extern CommandLine perform_failover_command;
 extern CommandLine perform_switchover_command;
 
-
 extern CommandLine *perform_subcommands[];
 extern CommandLine perform_commands;
 
@@ -166,6 +166,7 @@ void set_first_pgctl(PostgresSetup *pgSetup);
 bool monitor_init_from_pgsetup(Monitor *monitor, PostgresSetup *pgSetup);
 
 void exit_unless_role_is_keeper(KeeperConfig *kconfig);
+void cli_set_groupId(Monitor *monitor, KeeperConfig *kconfig);
 
 /* cli_create_drop_node.c */
 bool cli_create_config(Keeper *keeper);
@@ -176,7 +177,6 @@ void keeper_cli_destroy_node(int argc, char **argv);
 bool cli_getopt_ssl_flags(int ssl_flag, char *optarg, PostgresSetup *pgSetup);
 bool cli_getopt_accept_ssl_options(SSLCommandLineOptions newSSLOption,
 								   SSLCommandLineOptions currentSSLOptions);
-void cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy);
 
 char * logLevelToString(int logLevel);
 
@@ -187,6 +187,9 @@ bool cli_pg_autoctl_reload(const char *pidfile);
 
 int cli_node_metadata_getopts(int argc, char **argv);
 int cli_get_name_getopts(int argc, char **argv);
+bool cli_use_monitor_option(KeeperConfig *options);
+void cli_monitor_init_from_option_or_config(Monitor *monitor,
+											KeeperConfig *kconfig);
 void cli_ensure_node_name(Keeper *keeper);
 
 bool discover_hostname(char *hostname, int size,

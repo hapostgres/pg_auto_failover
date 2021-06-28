@@ -1,0 +1,7 @@
+#!/bin/bash
+set -euo pipefail
+script_dir="${0%/*}"
+pid=$$
+mkdir -p valgrind
+exec /usr/bin/valgrind --quiet --leak-check=yes --error-markers=VALGRINDERROR-BEGIN,VALGRINDERROR-END --max-stackframe=16000000 --log-file=./valgrind/log.${pid} "${script_dir}/../bin/pg_autoctl/pg_autoctl" "$@"
+

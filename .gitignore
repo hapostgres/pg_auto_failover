@@ -50,3 +50,4 @@ docs/tikz/*.png
 
 # Exclude our demo/test tmux directory
 tmux/
+valgrind/

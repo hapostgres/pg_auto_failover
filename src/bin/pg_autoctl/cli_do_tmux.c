@@ -35,7 +35,14 @@
 
 #include "runprogram.h"
 
+char *tmux_banner[] = {
+	"# to quit tmux: type either `Ctrl+b d` or `tmux detach`",
+	"# to test failover: pg_autoctl perform failover",
+	NULL
+};
+
 TmuxOptions tmuxOptions = { 0 };
+TmuxNodeArray tmuxNodeArray = { 0 };
 
 char *xdg[][3] = {
 	{ "XDG_DATA_HOME", "share" },
@@ -46,6 +53,141 @@ char *xdg[][3] = {
 
 static void prepare_tmux_script(TmuxOptions *options, PQExpBuffer script);
 static bool tmux_stop_pg_autoctl(TmuxOptions *options);
+static bool parseCandidatePriority(char *priorityString,
+								   int pIndex, int *priorities);
+static bool prepareTmuxNodeArray(TmuxOptions *options, TmuxNodeArray *nodeArray);
+
+
+/*
+ * parseCandidatePriority parses a single candidate priority item into given
+ * index in the priorities integer array of MAX_NODES capacity
+ */
+static bool
+parseCandidatePriority(char *priorityString, int pIndex, int *priorities)
+{
+	if (MAX_NODES <= pIndex)
+	{
+		log_error("Failed to parse --node-priorities: "
+				  "pg_autoctl do tmux session supports up to %d nodes",
+				  MAX_NODES);
+		return false;
+	}
+
+	if (!stringToInt(priorityString, &(priorities[pIndex])))
+	{
+		log_error("Failed to parse --node-priorities \"%s\"", priorityString);
+		return false;
+	}
+
+	log_trace("parseCandidatePriorities[%d] = %d", pIndex, priorities[pIndex]);
+
+	return true;
+}
+
+
+/*
+ * parseCandidatePriorities parses the --node-priorities options on the command
+ * line and fills-in an array of nodes.
+ *
+ *   --node-priorities 50:       all node have 50
+ *   --node-priorities 50,50,0:  3+ nodes, first two have 50, then 0
+ */
+bool
+parseCandidatePriorities(char *prioritiesString, int *priorities)
+{
+	char sep = ',';
+	char *ptr = prioritiesString;
+	char *previous = prioritiesString;
+
+	int pIndex = 0;
+
+	if (strcmp(prioritiesString, "") == 0)
+	{
+		/* fill-in the priorities array with default values (50) */
+		for (int i = 0; i < MAX_NODES; i++)
+		{
+			priorities[i] = FAILOVER_NODE_CANDIDATE_PRIORITY;
+		}
+		return true;
+	}
+
+	while ((ptr = strchr(ptr, sep)) != NULL)
+	{
+		*ptr = '\0';
+
+		if (!parseCandidatePriority(previous, pIndex++, priorities))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
+		previous = ++ptr;
+	}
+
+	/* there is no separator left, parse the end of the option string */
+	if (!parseCandidatePriority(previous, pIndex++, priorities))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/* mark final entry in the array; remember that pIndex > 0 here */
+	for (int i = pIndex; i < MAX_NODES; i++)
+	{
+		priorities[i] = priorities[i - 1];
+	}
+
+	return true;
+}
+
+
+/*
+ * prepareTmuxNodeArray expands the command line options into an array of
+ * nodes, where each node name and properties have been computed.
+ */
+bool
+prepareTmuxNodeArray(TmuxOptions *options, TmuxNodeArray *nodeArray)
+{
+	/* first pgport is for the monitor */
+	int pgport = options->firstPort + 1;
+
+	/* make sure we initialize our nodes array */
+	nodeArray->count = 0;
+	nodeArray->numSync = options->numSync;
+
+	for (int i = 0; i < options->nodes; i++)
+	{
+		TmuxNode *node = &(nodeArray->nodes[i]);
+
+		sformat(node->name, sizeof(node->name), "node%d", i + 1);
+
+		node->pgport = pgport++;
+
+		/* the first nodes are sync, then async, threshold is asyncNodes */
+		node->replicationQuorum = i < (options->nodes - options->asyncNodes);
+
+		/* node priorities have been expanded correctly in the options */
+		node->candidatePriority = options->priorities[i];
+
+		++(nodeArray->count);
+	}
+
+
+	/* some useful debug information */
+	for (int i = 0; i < options->nodes; i++)
+	{
+		TmuxNode *node = &(nodeArray->nodes[i]);
+
+		log_debug("prepareTmuxNodeArray[%d]: %s %d %s %d",
+				  i,
+				  node->name,
+				  node->pgport,
+				  node->replicationQuorum ? "true" : "false",
+				  node->candidatePriority);
+	}
+
+	return true;
+}
 
 
 /*
@@ -66,8 +208,11 @@ cli_do_tmux_script_getopts(int argc, char **argv)
 		{ "first-pgport", required_argument, NULL, 'p' },
 		{ "nodes", required_argument, NULL, 'n' },
 		{ "async-nodes", required_argument, NULL, 'a' },
+		{ "node-priorities", required_argument, NULL, 'P' },
 		{ "sync-standbys", required_argument, NULL, 's' },
+		{ "skip-pg-hba", required_argument, NULL, 'S' },
 		{ "layout", required_argument, NULL, 'l' },
+		{ "binpath", required_argument, NULL, 'b' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
@@ -82,8 +227,16 @@ cli_do_tmux_script_getopts(int argc, char **argv)
 	options.nodes = 2;
 	options.asyncNodes = 0;
 	options.numSync = -1;       /* use pg_autoctl defaults */
+	options.skipHBA = false;
 	strlcpy(options.root, "/tmp/pgaf/tmux", sizeof(options.root));
 	strlcpy(options.layout, "even-vertical", sizeof(options.layout));
+	strlcpy(options.binpath, pg_autoctl_argv0, sizeof(options.binpath));
+
+	if (!parseCandidatePriorities("", options.priorities))
+	{
+		log_error("BUG: failed to initialize candidate priorities");
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
 
 	/*
 	 * The only command lines that are using keeper_cli_getopt_pgdata are
@@ -127,6 +280,15 @@ cli_do_tmux_script_getopts(int argc, char **argv)
 							  optarg);
 					errors++;
 				}
+
+				if (MAX_NODES < options.nodes)
+				{
+					log_error("pg_autoctl do tmux session supports up to %d "
+							  "nodes, and --nodes %d has been asked for",
+							  MAX_NODES, options.nodes);
+					errors++;
+				}
+
 				log_trace("--nodes %d", options.nodes);
 				break;
 			}
@@ -143,6 +305,22 @@ cli_do_tmux_script_getopts(int argc, char **argv)
 				break;
 			}
 
+			case 'P':
+			{
+				char priorities[BUFSIZE] = { 0 };
+
+				/* parsing mangles the string, keep a copy */
+				strlcpy(priorities, optarg, sizeof(priorities));
+
+				if (!parseCandidatePriorities(priorities, options.priorities))
+				{
+					log_error("Failed to parse --node-priorities \"%s\"",
+							  optarg);
+					errors++;
+				}
+				break;
+			}
+
 			case 's':
 			{
 				if (!stringToInt(optarg, &options.numSync))
@@ -155,10 +333,24 @@ cli_do_tmux_script_getopts(int argc, char **argv)
 				break;
 			}
 
+			case 'S':
+			{
+				options.skipHBA = true;
+				log_trace("--skip-pg-hba");
+				break;
+			}
+
 			case 'l':
 			{
 				strlcpy(options.layout, optarg, MAXPGPATH);
 				log_trace("--layout %s", options.layout);
+				break;
+			}
+
+			case 'b':
+			{
+				strlcpy(options.binpath, optarg, MAXPGPATH);
+				log_trace("--binpath %s", options.binpath);
 				break;
 			}
 
@@ -217,6 +409,13 @@ cli_do_tmux_script_getopts(int argc, char **argv)
 		}
 	}
 
+	if (!prepareTmuxNodeArray(&options, &tmuxNodeArray))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+
 	if (errors > 0)
 	{
 		commandline_help(stderr);
@@ -272,22 +471,70 @@ tmux_add_send_keys_command(PQExpBuffer script, const char *fmt, ...)
 
 /*
  * tmux_add_xdg_environment sets the environment variables that we need for the
- * whole session to be self-contained in the given root directory.
+ * whole session to be self-contained in the given root directory. The
+ * implementation of this function relies on the fact that the tmux script has
+ * been prepared with tmux set-environment commands, per tmux_setenv.
  */
 void
-tmux_add_xdg_environment(PQExpBuffer script, const char *root)
+tmux_add_xdg_environment(PQExpBuffer script)
 {
-	/*
-	 * For demo/tests purposes, arrange a self-contained setup where everything
-	 * is to be found in the given options.root directory.
-	 */
+	tmux_add_send_keys_command(script, "eval $(tmux show-environment -s)");
+}
+
+
+/*
+ * tmux_setenv adds setenv commands to the tmux script.
+ */
+void
+tmux_setenv(PQExpBuffer script,
+			const char *sessionName, const char *root, int firstPort)
+{
+	char PATH[BUFSIZE] = { 0 };
+	char PG_CONFIG[MAXPGPATH] = { 0 };
+	char monitor_pguri[MAXCONNINFO] = { 0 };
+
+	if (env_exists("PG_CONFIG"))
+	{
+		if (!get_env_copy("PG_CONFIG", PG_CONFIG, sizeof(PG_CONFIG)))
+		{
+			log_fatal("Failed to get PG_CONFIG from the environment");
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+
+		tmux_add_command(script,
+						 "set-environment -t %s PG_CONFIG \"%s\"",
+						 sessionName,
+						 PG_CONFIG);
+	}
+
+	if (!get_env_copy("PATH", PATH, sizeof(PATH)))
+	{
+		log_fatal("Failed to get PATH from the environment");
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	tmux_add_command(script,
+					 "set-environment -t %s PATH \"%s\"", sessionName, PATH);
+
+	sformat(monitor_pguri, sizeof(monitor_pguri),
+			"postgres://autoctl_node@localhost:%d/pg_auto_failover?sslmode=prefer",
+			firstPort);
+
+	tmux_add_command(script,
+					 "set-environment -t %s PG_AUTOCTL_MONITOR \"%s\"",
+					 sessionName,
+					 monitor_pguri);
+
 	for (int i = 0; xdg[i][0] != NULL; i++)
 	{
 		char *var = xdg[i][0];
 		char *dir = xdg[i][1];
 
-		tmux_add_send_keys_command(script,
-								   "export %s=\"%s/%s\"", var, root, dir);
+		tmux_add_command(script, "set-environment -t %s %s \"%s/%s\"",
+						 sessionName,
+						 var,
+						 root,
+						 dir);
 	}
 }
 
@@ -322,6 +569,7 @@ tmux_prepare_XDG_environment(const char *root, bool createDirectories)
 			if (pg_mkdir_p(env, 0700) == -1)
 			{
 				log_error("mkdir -p \"%s\": %m", env);
+				free(env);
 				return false;
 			}
 		}
@@ -329,6 +577,7 @@ tmux_prepare_XDG_environment(const char *root, bool createDirectories)
 		if (!normalize_filename(env, env, MAXPGPATH))
 		{
 			/* errors have already been logged */
+			free(env);
 			return false;
 		}
 
@@ -356,9 +605,13 @@ tmux_prepare_XDG_environment(const char *root, bool createDirectories)
 			if (pg_mkdir_p(targetPath, 0700) == -1)
 			{
 				log_error("mkdir -p \"%s\": %m", targetPath);
+
+				free(env);
 				return false;
 			}
 		}
+
+		free(env);
 	}
 
 	return true;
@@ -381,12 +634,13 @@ tmux_add_new_session(PQExpBuffer script, const char *root, int pgport)
 	 * For demo/tests purposes, arrange a self-contained setup where everything
 	 * is to be found in the given options.root directory.
 	 */
-	for (int i = 0; xdg[i][0] != NULL; i++)
-	{
-		char *var = xdg[i][0];
 
-		tmux_add_command(script, "set-option update-environment %s", var);
-	}
+	/* for (int i = 0; xdg[i][0] != NULL; i++) */
+	/* { */
+	/*  char *var = xdg[i][0]; */
+
+	/*  tmux_add_command(script, "set-option update-environment %s", var); */
+	/* } */
 
 	tmux_add_command(script, "new-session -s %s", sessionName);
 }
@@ -399,9 +653,14 @@ tmux_add_new_session(PQExpBuffer script, const char *root, int pgport)
 void
 tmux_pg_autoctl_create_monitor(PQExpBuffer script,
 							   const char *root,
-							   int pgport)
+							   const char *binpath,
+							   int pgport,
+							   bool skipHBA)
 {
-	char *pg_ctl_opts = "--hostname localhost --ssl-self-signed --auth trust";
+	char *pg_ctl_opts =
+		skipHBA
+		? "--hostname localhost --ssl-self-signed --skip-pg-hba"
+		: "--hostname localhost --ssl-self-signed --auth trust";
 
 	tmux_add_send_keys_command(script, "export PGPORT=%d", pgport);
 
@@ -410,7 +669,7 @@ tmux_pg_autoctl_create_monitor(PQExpBuffer script,
 
 	tmux_add_send_keys_command(script,
 							   "%s create monitor %s --run",
-							   pg_autoctl_argv0,
+							   binpath,
 							   pg_ctl_opts);
 }
 
@@ -422,19 +681,24 @@ tmux_pg_autoctl_create_monitor(PQExpBuffer script,
 void
 tmux_pg_autoctl_create_postgres(PQExpBuffer script,
 								const char *root,
+								const char *binpath,
 								int pgport,
 								const char *name,
 								bool replicationQuorum,
-								int candidatePriority)
+								int candidatePriority,
+								bool skipHBA)
 {
 	char monitor[BUFSIZE] = { 0 };
-	char *pg_ctl_opts = "--hostname localhost --ssl-self-signed --auth trust";
+	char *pg_ctl_opts =
+		skipHBA
+		? "--hostname localhost --ssl-self-signed --skip-pg-hba"
+		: "--hostname localhost --ssl-self-signed --auth trust --pg-hba-lan";
 
 	tmux_add_send_keys_command(script, "export PGPORT=%d", pgport);
 
 	sformat(monitor, sizeof(monitor),
-			"$(%s show uri --pgdata %s/monitor --monitor)",
-			pg_autoctl_argv0,
+			"$(%s show uri --pgdata %s/monitor --formation monitor)",
+			binpath,
 			root);
 
 	tmux_add_send_keys_command(script,
@@ -444,11 +708,13 @@ tmux_pg_autoctl_create_postgres(PQExpBuffer script,
 
 	tmux_add_send_keys_command(script,
 							   "%s create postgres %s "
-							   "--monitor %s --name %s "
+							   "--monitor %s "
+							   "--name %s "
+							   "--dbname demo "
 							   "--replication-quorum %s "
 							   "--candidate-priority %d "
 							   "--run",
-							   pg_autoctl_argv0,
+							   binpath,
 							   pg_ctl_opts,
 							   monitor,
 							   name,
@@ -475,27 +741,24 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 	tmux_add_command(script, "set-option -g default-shell /bin/bash");
 
 	(void) tmux_add_new_session(script, root, pgport);
+	(void) tmux_setenv(script, sessionName, root, options->firstPort);
 
 	/* start a monitor */
-	(void) tmux_add_xdg_environment(script, root);
-	tmux_pg_autoctl_create_monitor(script, root, pgport++);
+	(void) tmux_add_xdg_environment(script);
+	tmux_pg_autoctl_create_monitor(script, root, options->binpath, pgport++,
+								   options->skipHBA);
 
 	/* start the Postgres nodes, using the monitor URI */
 	sformat(previousName, sizeof(previousName), "monitor");
 
-	for (int i = 0; i < options->nodes; i++)
+	for (int i = 0; i < tmuxNodeArray.count; i++)
 	{
-		char name[NAMEDATALEN] = { 0 };
-
-		bool replicationQuorum = true;
-		int candidatePriority = 50;
-
-		sformat(name, sizeof(name), "node%d", i + 1);
+		TmuxNode *node = &(tmuxNodeArray.nodes[i]);
 
 		tmux_add_command(script, "split-window -v");
 		tmux_add_command(script, "select-layout even-vertical");
 
-		(void) tmux_add_xdg_environment(script, root);
+		(void) tmux_add_xdg_environment(script);
 
 		/*
 		 * Force node ordering to easy debugging of interactive sessions: each
@@ -504,69 +767,68 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 		tmux_add_send_keys_command(script,
 								   "PG_AUTOCTL_DEBUG=1 "
 								   "%s do tmux wait --root %s %s",
-								   pg_autoctl_argv0,
+								   options->binpath,
 								   options->root,
 								   previousName);
 
-		/* the first nodes are sync, then async, threshold is asyncNodes */
-		if ((options->nodes - options->asyncNodes) <= i)
-		{
-			replicationQuorum = false;
-			candidatePriority = 0;
-		}
+		tmux_pg_autoctl_create_postgres(script,
+										root,
+										options->binpath,
+										node->pgport,
+										node->name,
+										node->replicationQuorum,
+										node->candidatePriority,
+										options->skipHBA);
 
-		tmux_pg_autoctl_create_postgres(script, root, pgport++, name,
-										replicationQuorum,
-										candidatePriority);
-		tmux_add_send_keys_command(script, "pg_autoctl run");
-
-		strlcpy(previousName, name, sizeof(previousName));
+		strlcpy(previousName, node->name, sizeof(previousName));
 	}
 
 	/* add a window for pg_autoctl show state */
 	tmux_add_command(script, "split-window -v");
 	tmux_add_command(script, "select-layout even-vertical");
 
-	(void) tmux_add_xdg_environment(script, root);
+	(void) tmux_add_xdg_environment(script);
 	tmux_add_send_keys_command(script, "export PGDATA=\"%s/monitor\"", root);
 	tmux_add_send_keys_command(script,
 							   "PG_AUTOCTL_DEBUG=1 "
 							   "%s do tmux wait --root %s %s",
-							   pg_autoctl_argv0,
+							   options->binpath,
 							   options->root,
 							   "monitor");
 	tmux_add_send_keys_command(script,
 							   "watch -n 0.2 %s show state",
-							   pg_autoctl_argv0);
+							   options->binpath);
 
 	/* add a window for interactive pg_autoctl commands */
 	tmux_add_command(script, "split-window -v");
 	tmux_add_command(script, "select-layout even-vertical");
-	(void) tmux_add_xdg_environment(script, root);
-	tmux_add_send_keys_command(script, "export PGDATA=\"%s/monitor\"", root);
+	(void) tmux_add_xdg_environment(script);
 
 	if (options->numSync != -1)
 	{
 		/*
-		 * We need to wait until the first node is PRIMARY before we can go on
-		 * and change formation settings with pg_autoctl set formation ...
+		 * We need to wait until the first node is either WAIT_PRIMARY or
+		 * PRIMARY before we can go on and change formation settings with
+		 *   pg_autoctl set formation ...
 		 */
 		char firstNode[NAMEDATALEN] = { 0 };
+		NodeState targetPrimaryState =
+			options->numSync == 0 ? WAIT_PRIMARY_STATE : PRIMARY_STATE;
 
 		sformat(firstNode, sizeof(firstNode), "node%d", 1);
 
 		tmux_add_send_keys_command(script,
 								   "PG_AUTOCTL_DEBUG=1 "
 								   "%s do tmux wait --root %s %s %s",
-								   pg_autoctl_argv0,
+								   options->binpath,
 								   options->root,
 								   firstNode,
-								   NodeStateToString(PRIMARY_STATE));
+								   NodeStateToString(targetPrimaryState));
 
 		/* PGDATA has just been exported, rely on it */
 		tmux_add_send_keys_command(script,
 								   "%s set formation number-sync-standbys %d",
-								   pg_autoctl_argv0,
+								   options->binpath,
 								   options->numSync);
 	}
 
@@ -596,6 +858,11 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 			appendPQExpBuffer(script, "%s\n", extraLines[lineNumber]);
 		}
 	}
+
+	for (int i = 0; tmux_banner[i] != NULL; i++)
+	{
+		tmux_add_send_keys_command(script, "%s", tmux_banner[i]);
+	}
 }
 
 
@@ -603,7 +870,7 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
  * tmux_start_server starts a tmux session with the given script.
  */
 bool
-tmux_start_server(const char *scriptName)
+tmux_start_server(const char *scriptName, const char *binpath)
 {
 	char *args[8];
 	int argsIndex = 0;
@@ -614,6 +881,12 @@ tmux_start_server(const char *scriptName)
 	if (setenv("PG_AUTOCTL_DEBUG", "1", 1) != 0)
 	{
 		log_error("Failed to set environment PG_AUTOCTL_DEBUG: %m");
+		return false;
+	}
+
+	if (binpath && setenv("PG_AUTOCTL_DEBUG_BIN_PATH", binpath, 1) != 0)
+	{
+		log_error("Failed to set environment PG_AUTOCTL_DEBUG_BIN_PATH: %m");
 		return false;
 	}
 
@@ -628,7 +901,7 @@ tmux_start_server(const char *scriptName)
 	 *   tmux start-server \; source-file ${scriptName}
 	 */
 	args[argsIndex++] = (char *) tmux;
-	args[argsIndex++] = "-v";
+	args[argsIndex++] = "-u";
 	args[argsIndex++] = "start-server";
 	args[argsIndex++] = ";";
 	args[argsIndex++] = "source-file";
@@ -636,7 +909,9 @@ tmux_start_server(const char *scriptName)
 	args[argsIndex] = NULL;
 
 	/* we do not want to call setsid() when running this program. */
-	Program program = initialize_program(args, false);
+	Program program = { 0 };
+
+	(void) initialize_program(&program, args, false);
 
 	program.capture = false;    /* don't capture output */
 	program.tty = true;         /* allow sharing the parent's tty */
@@ -648,6 +923,7 @@ tmux_start_server(const char *scriptName)
 	(void) execute_subprogram(&program);
 
 	/* we only get there when the tmux session is done */
+	free_program(&program);
 	return true;
 }
 
@@ -659,7 +935,7 @@ tmux_start_server(const char *scriptName)
 bool
 tmux_attach_session(const char *tmux_path, const char *sessionName)
 {
-	Program program;
+	Program program = { 0 };
 
 	char *args[8];
 	int argsIndex = 0;
@@ -677,7 +953,7 @@ tmux_attach_session(const char *tmux_path, const char *sessionName)
 	args[argsIndex] = NULL;
 
 	/* we do not want to call setsid() when running this program. */
-	program = initialize_program(args, false);
+	(void) initialize_program(&program, args, false);
 
 	program.capture = false;    /* don't capture output */
 	program.tty = true;         /* allow sharing the parent's tty */
@@ -689,6 +965,8 @@ tmux_attach_session(const char *tmux_path, const char *sessionName)
 	(void) execute_subprogram(&program);
 
 	/* we only get there when the tmux session is done */
+	free_program(&program);
+
 	return true;
 }
 
@@ -1103,7 +1381,7 @@ cli_do_tmux_session(int argc, char **argv)
 	/*
 	 * Start a tmux session from the script.
 	 */
-	if (!tmux_start_server(scriptName))
+	if (!tmux_start_server(scriptName, options.binpath))
 	{
 		success = false;
 		log_fatal("Failed to start the tmux session, see above for details");
@@ -1231,6 +1509,7 @@ cli_do_tmux_wait(int argc, char **argv)
 			(void) snprintf_program_command_line(&program, command, BUFSIZE);
 
 			log_error("%s [%d]", command, program.returnCode);
+			free_program(&program);
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 
@@ -1255,7 +1534,11 @@ cli_do_tmux_wait(int argc, char **argv)
 			{
 				log_info("The monitor is ready at: %s", showUri.stdOut);
 			}
+
+			free_program(&showUri);
 		}
+
+		free_program(&program);
 
 		if (!ready)
 		{

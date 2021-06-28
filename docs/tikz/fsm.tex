@@ -39,11 +39,11 @@
    nodes={text height=.7em, text depth=.2em,
      draw=black!20, thick, fill=blue!20, font=\footnotesize}]
         {
-          init [circle,draw,x=-10,y=10,color=white,fill=black!70] -> single [circle,draw=black,color=white,fill=black!50];
+          init [circle,draw,x=-10,y=10,color=white,fill=black!70] -> single [font=\normalsize, draw=black, circle];
           init -> "wait standby" [fill=violet!30];
-          single -> "wait primary" ;
-          "wait primary" -> primary [circle,draw=black,circle];
-          "join primary" -> primary;
+          single -> "wait primary" [font=\normalsize, draw=black];
+          "wait primary" -> primary [font=\normalsize, draw=black, circle];
+          "join primary" [font=\normalsize, draw=black] -> primary;
           "wait standby" -> "catching up" [fill=violet!30];
           "catching up" -> secondary [circle,draw=black,circle,fill=violet!30];
           primary -> "join primary" ;
@@ -59,14 +59,14 @@
           draining -> "demote timeout" ;
           "demote timeout" -> demoted ;
 
-          primary -> "apply settings" [fill=green!20];
+          primary -> "apply settings" [font=\normalsize, draw=black];
           "apply settings" -> primary ;
           "apply settings" -> draining ;
           "apply settings" -> demoted ;
           "apply settings" -> "demote timeout" ;
           "apply settings" -> primary ;
 
-           primary -> "prepare maintenance" [fill=blue!10];
+           primary -> "prepare maintenance" [font=\normalsize, draw=black];
            "prepare maintenance" -> maintenance [fill=black!20];
            secondary -> "wait maintenance" [fill=violet!20];
            "catching up" -> "wait maintenance" ;

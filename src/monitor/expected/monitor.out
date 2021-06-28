@@ -85,11 +85,17 @@ assigned_group_state        | catchingup
 assigned_candidate_priority | 100
 assigned_replication_quorum | t
 
--- attempt to register node_3 now fails because node_1 is still in wait_primary
+-- register node_3 concurrently to node2 (probably) doing pg_basebackup
 select *
   from pgautofailover.register_node('default', 'localhost', 9879, 'postgres');
-ERROR:  primary node localhost:9876 is already in state wait_primary
-HINT:  Retry registering in a moment
+-[ RECORD 1 ]---------------+-------------
+assigned_node_id            | 3
+assigned_group_id           | 0
+assigned_group_state        | wait_standby
+assigned_candidate_priority | 100
+assigned_replication_quorum | t
+assigned_node_name          | node_3
+
 select formationid, nodename, goalstate, reportedstate
   from pgautofailover.node;
 -[ RECORD 1 ]-+-------------
@@ -102,6 +108,11 @@ formationid   | default
 nodename      | node_2
 goalstate     | catchingup
 reportedstate | wait_standby
+-[ RECORD 3 ]-+-------------
+formationid   | default
+nodename      | node_3
+goalstate     | wait_standby
+reportedstate | init
 
 table pgautofailover.formation;
 -[ RECORD 1 ]--------+---------
@@ -109,12 +120,13 @@ formationid          | default
 kind                 | pgsql
 dbname               | postgres
 opt_secondary        | t
-number_sync_standbys | 0
+number_sync_standbys | 1
 
 -- dump the pgautofailover.node table, omitting the timely columns
-select formationid, nodeid, groupid, nodehost, nodeport,
-       goalstate, reportedstate, reportedpgisrunning, reportedrepstate
-  from pgautofailover.node;
+  select formationid, nodeid, groupid, nodehost, nodeport,
+         goalstate, reportedstate, reportedpgisrunning, reportedrepstate
+    from pgautofailover.node
+order by nodeid;
 -[ RECORD 1 ]-------+-------------
 formationid         | default
 nodeid              | 1
@@ -135,6 +147,16 @@ goalstate           | catchingup
 reportedstate       | wait_standby
 reportedpgisrunning | t
 reportedrepstate    | unknown
+-[ RECORD 3 ]-------+-------------
+formationid         | default
+nodeid              | 3
+groupid             | 0
+nodehost            | localhost
+nodeport            | 9879
+goalstate           | wait_standby
+reportedstate       | init
+reportedpgisrunning | t
+reportedrepstate    | async
 
 select * from pgautofailover.get_primary('unknown formation');
 ERROR:  group has no writable node right now
@@ -162,7 +184,15 @@ node_host       | localhost
 node_port       | 9877
 node_lsn        | 0/0
 node_is_primary | f
+-[ RECORD 2 ]---+----------
+node_id         | 3
+node_name       | node_3
+node_host       | localhost
+node_port       | 9879
+node_lsn        | 0/0
+node_is_primary | f
 
+-- remove the primary node
 select pgautofailover.remove_node(1);
 -[ RECORD 1 ]--
 remove_node | t
@@ -175,20 +205,35 @@ dbname               | postgres
 opt_secondary        | t
 number_sync_standbys | 0
 
+select pgautofailover.remove_node(1, force => 'true');
+-[ RECORD 1 ]--
+remove_node | t
+
 -- dump the pgautofailover.node table, omitting the timely columns
-select formationid, nodeid, groupid, nodehost, nodeport,
-       goalstate, reportedstate, reportedpgisrunning, reportedrepstate
-  from pgautofailover.node;
+  select formationid, nodeid, groupid, nodehost, nodeport,
+         goalstate, reportedstate, reportedpgisrunning, reportedrepstate
+    from pgautofailover.node
+order by nodeid;
 -[ RECORD 1 ]-------+-------------
 formationid         | default
 nodeid              | 2
 groupid             | 0
 nodehost            | localhost
 nodeport            | 9877
-goalstate           | single
+goalstate           | report_lsn
 reportedstate       | wait_standby
 reportedpgisrunning | t
 reportedrepstate    | unknown
+-[ RECORD 2 ]-------+-------------
+formationid         | default
+nodeid              | 3
+groupid             | 0
+nodehost            | localhost
+nodeport            | 9879
+goalstate           | report_lsn
+reportedstate       | init
+reportedpgisrunning | t
+reportedrepstate    | async
 
 select *
   from pgautofailover.set_node_system_identifier(2, 6852685710417058800);
@@ -198,26 +243,6 @@ node_name | node_2
 node_host | localhost
 node_port | 9877
 
--- node_2 reports catchingup and gets assigned single, now alone
-select *
-  from pgautofailover.node_active('default', 2, 0,
-                                  current_group_role => 'catchingup');
--[ RECORD 1 ]---------------+-------
-assigned_node_id            | 2
-assigned_group_id           | 0
-assigned_group_state        | single
-assigned_candidate_priority | 100
-assigned_replication_quorum | t
-
-select * from pgautofailover.node_active('default', 2, 0);
--[ RECORD 1 ]---------------+-------
-assigned_node_id            | 2
-assigned_group_id           | 0
-assigned_group_state        | single
-assigned_candidate_priority | 100
-assigned_replication_quorum | t
-
 -- should fail as there's no primary at this point
 select pgautofailover.perform_failover();
-ERROR:  cannot fail over: group 0 in formation default currently has 1 node registered
-DETAIL:  At least 2 nodes are required to implement a failover
+ERROR:  couldn't find the primary node in formation "default", group 0

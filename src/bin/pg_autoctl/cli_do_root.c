@@ -57,32 +57,6 @@ CommandLine do_primary_adduser =
 					 "Create users on primary", NULL, NULL,
 					 NULL, do_primary_adduser_subcommands);
 
-CommandLine do_primary_syncrep_enable =
-	make_command("enable",
-				 "Enable synchronous replication on the primary server",
-				 "",
-				 "",
-				 NULL, keeper_cli_enable_synchronous_replication);
-
-CommandLine do_primary_syncrep_disable =
-	make_command("disable",
-				 "Disable synchronous replication on the primary server",
-				 "",
-				 "",
-				 NULL, keeper_cli_disable_synchronous_replication);
-
-CommandLine *do_primary_syncrep[] = {
-	&do_primary_syncrep_enable,
-	&do_primary_syncrep_disable,
-	NULL
-};
-
-CommandLine do_primary_syncrep_ =
-	make_command_set("syncrep",
-					 "Manage the synchronous replication setting on the primary server",
-					 NULL, NULL,
-					 NULL, do_primary_syncrep);
-
 CommandLine do_primary_slot_create =
 	make_command("create",
 				 "Create a replication slot on the primary server",
@@ -128,7 +102,6 @@ CommandLine do_primary_identify_system =
 
 CommandLine *do_primary[] = {
 	&do_primary_slot_,
-	&do_primary_syncrep_,
 	&do_primary_adduser,
 	&do_primary_defaults,
 	&do_primary_identify_system,
@@ -156,6 +129,14 @@ CommandLine do_standby_rewind =
 				 keeper_cli_keeper_setup_getopts,
 				 keeper_cli_rewind_old_primary);
 
+CommandLine do_standby_crash_recovery =
+	make_command("crash-recovery",
+				 "Setup postgres for crash-recovery and start postgres",
+				 " [ --pgdata ... ]",
+				 KEEPER_CLI_WORKER_SETUP_OPTIONS,
+				 keeper_cli_keeper_setup_getopts,
+				 keeper_cli_maybe_do_crash_recovery);
+
 CommandLine do_standby_promote =
 	make_command("promote",
 				 "Promote a standby server to become writable",
@@ -167,6 +148,7 @@ CommandLine do_standby_promote =
 CommandLine *do_standby[] = {
 	&do_standby_init,
 	&do_standby_rewind,
+	&do_standby_crash_recovery,
 	&do_standby_promote,
 	NULL
 };
@@ -243,10 +225,15 @@ CommandLine do_tmux_script =
 	make_command("script",
 				 "Produce a tmux script for a demo or a test case (debug only)",
 				 "[option ...]",
-				 "  --root          path where to create a cluster\n"
-				 "  --first-pgport  first Postgres port to use (5500)\n"
-				 "  --nodes         number of Postgres nodes to create (2)\n"
-				 "  --layout        tmux layout to use (even-vertical)",
+				 "  --root            path where to create a cluster\n"
+				 "  --first-pgport    first Postgres port to use (5500)\n"
+				 "  --nodes           number of Postgres nodes to create (2)\n"
+				 "  --async-nodes     number of async nodes within nodes (0)\n"
+				 "  --node-priorities list of nodes priorities (50)\n"
+				 "  --sync-standbys   number-sync-standbys to set (0 or 1)\n"
+				 "  --skip-pg-hba     use --skip-pg-hba when creating nodes\n"
+				 "  --layout          tmux layout to use (even-vertical)\n"
+				 "  --binpath         path to the pg_autoctl binary (current binary path)",
 				 cli_do_tmux_script_getopts,
 				 cli_do_tmux_script);
 
@@ -254,10 +241,15 @@ CommandLine do_tmux_session =
 	make_command("session",
 				 "Run a tmux session for a demo or a test case",
 				 "[option ...]",
-				 "  --root          path where to create a cluster\n"
-				 "  --first-pgport  first Postgres port to use (5500)\n"
-				 "  --nodes         number of Postgres nodes to create (2)\n"
-				 "  --layout        tmux layout to use (even-vertical)",
+				 "  --root            path where to create a cluster\n"
+				 "  --first-pgport    first Postgres port to use (5500)\n"
+				 "  --nodes           number of Postgres nodes to create (2)\n"
+				 "  --async-nodes     number of async nodes within nodes (0)\n"
+				 "  --node-priorities list of nodes priorities (50)\n"
+				 "  --sync-standbys   number-sync-standbys to set (0 or 1)\n"
+				 "  --skip-pg-hba     use --skip-pg-hba when creating nodes\n"
+				 "  --layout          tmux layout to use (even-vertical)\n"
+				 "  --binpath         path to the pg_autoctl binary (current binary path)",
 				 cli_do_tmux_script_getopts,
 				 cli_do_tmux_session);
 
@@ -286,9 +278,14 @@ CommandLine do_tmux_wait =
 	make_command("wait",
 				 "Wait until a given node has been registered on the monitor",
 				 "[option ...] nodename [ targetState ]",
-				 "  --root          path where to create a cluster\n"
-				 "  --first-pgport  first Postgres port to use (5500)\n"
-				 "  --nodes         number of Postgres nodes to create (2)",
+				 "  --root            path where to create a cluster\n"
+				 "  --first-pgport    first Postgres port to use (5500)\n"
+				 "  --nodes           number of Postgres nodes to create (2)\n"
+				 "  --async-nodes     number of async nodes within nodes (0)\n"
+				 "  --node-priorities list of nodes priorities (50)\n"
+				 "  --sync-standbys   number-sync-standbys to set (0 or 1)\n"
+				 "  --skip-pg-hba     use --skip-pg-hba when creating nodes\n"
+				 "  --layout          tmux layout to use (even-vertical)",
 				 cli_do_tmux_script_getopts,
 				 cli_do_tmux_wait);
 
@@ -303,7 +300,7 @@ CommandLine *do_tmux[] = {
 
 CommandLine do_tmux_commands =
 	make_command_set("tmux",
-					 "set of facilities to handle tmux interactive sessions",
+					 "Set of facilities to handle tmux interactive sessions",
 					 NULL, NULL, NULL, do_tmux);
 
 /*
@@ -493,7 +490,7 @@ CommandLine *do_azure[] = {
 
 CommandLine do_azure_commands =
 	make_command_set("azure",
-					 "manage a set of azure resources for a pg_auto_failover demo",
+					 "Manage a set of Azure resources for a pg_auto_failover demo",
 					 NULL, NULL, NULL, do_azure);
 
 
@@ -508,12 +505,13 @@ CommandLine *do_subcommands[] = {
 	&do_service_commands,
 	&do_tmux_commands,
 	&do_azure_commands,
+	&do_demo_commands,
 	NULL
 };
 
 CommandLine do_commands =
 	make_command_set("do",
-					 "Manually operate the keeper", NULL, NULL,
+					 "Internal commands and internal QA tooling", NULL, NULL,
 					 NULL, do_subcommands);
 
 
@@ -572,7 +570,7 @@ keeper_cli_keeper_setup_getopts(int argc, char **argv)
 
 	int optind = cli_common_keeper_getopts(argc, argv,
 										   long_options,
-										   "C:D:H:p:l:U:A:Sd:n:f:m:MRVvqhP:r:xsN",
+										   "C:D:H:p:l:U:A:SLd:n:f:m:MRVvqhP:r:xsN",
 										   &options,
 										   &sslCommandLineOptions);
 

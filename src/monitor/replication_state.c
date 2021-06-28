@@ -244,6 +244,11 @@ ReplicationStateGetName(ReplicationState replicationState)
 			return "join_secondary";
 		}
 
+		case REPLICATION_STATE_DROPPED:
+		{
+			return "dropped";
+		}
+
 		default:
 		{
 			ereport(ERROR,

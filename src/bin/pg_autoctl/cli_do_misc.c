@@ -80,50 +80,6 @@ keeper_cli_drop_replication_slot(int argc, char **argv)
 
 
 /*
- * keeper_cli_enable_synchronous_replication implements the CLI to enable
- * synchronous replication on the primary.
- */
-void
-keeper_cli_enable_synchronous_replication(int argc, char **argv)
-{
-	KeeperConfig config = keeperOptions;
-	LocalPostgresServer postgres = { 0 };
-	bool missingPgdataOk = false;
-	bool pgNotRunningOk = false;
-
-	keeper_config_init(&config, missingPgdataOk, pgNotRunningOk);
-	local_postgres_init(&postgres, &(config.pgSetup));
-
-	if (!primary_enable_synchronous_replication(&postgres))
-	{
-		exit(EXIT_CODE_PGSQL);
-	}
-}
-
-
-/*
- * keeper_cli_disable_synchronous_replication implements the CLI to disable
- * synchronous replication on the primary.
- */
-void
-keeper_cli_disable_synchronous_replication(int argc, char **argv)
-{
-	KeeperConfig config = keeperOptions;
-	LocalPostgresServer postgres = { 0 };
-	bool missingPgdataOk = false;
-	bool pgNotRunningOk = false;
-
-	keeper_config_init(&config, missingPgdataOk, pgNotRunningOk);
-	local_postgres_init(&postgres, &(config.pgSetup));
-
-	if (!primary_disable_synchronous_replication(&postgres))
-	{
-		exit(EXIT_CODE_PGSQL);
-	}
-}
-
-
-/*
  * keeper_cli_add_defaults implements the CLI to add pg_auto_failover default
  * settings to postgresql.conf
  */
@@ -132,13 +88,22 @@ keeper_cli_add_default_settings(int argc, char **argv)
 {
 	KeeperConfig config = keeperOptions;
 	LocalPostgresServer postgres = { 0 };
-	bool missingPgdataOk = false;
-	bool postgresNotRunningOk = false;
 
-	keeper_config_init(&config, missingPgdataOk, postgresNotRunningOk);
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = true;
+
+	if (!keeper_config_read_file(&config,
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
+	{
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
 	local_postgres_init(&postgres, &(config.pgSetup));
 
-	if (!postgres_add_default_settings(&postgres))
+	if (!postgres_add_default_settings(&postgres, config.hostname))
 	{
 		log_fatal("Failed to add the default settings for streaming replication "
 				  "used by pg_auto_failover to postgresql.conf, "
@@ -188,6 +153,7 @@ keeper_cli_create_monitor_user(int argc, char **argv)
 									  PG_AUTOCTL_HEALTH_PASSWORD,
 									  monitorHostname,
 									  "trust",
+									  HBA_EDIT_MINIMAL,
 									  connlimit))
 	{
 		log_fatal("Failed to create the database user that the pg_auto_failover "
@@ -263,6 +229,23 @@ keeper_cli_pgsetup_pg_ctl(int argc, char **argv)
 	log_info("`pg_autoctl create monitor` would use \"%s\" for Postgres %s",
 			 pgSetupMonitor.pg_ctl, pgSetupMonitor.pg_version);
 
+	/*
+	 * Now check that find_extension_control_file would be happy.
+	 */
+	if (find_extension_control_file(pgSetupMonitor.pg_ctl,
+									PG_AUTOCTL_MONITOR_EXTENSION_NAME))
+	{
+		log_info("Found the control file for extension \"%s\"",
+				 PG_AUTOCTL_MONITOR_EXTENSION_NAME);
+	}
+	else
+	{
+		log_fatal("pg_autoctl on the monitor would fail "
+				  "to find extension \"%s\"",
+				  PG_AUTOCTL_MONITOR_EXTENSION_NAME);
+		success = false;
+	}
+
 	if (!success)
 	{
 		exit(EXIT_CODE_INTERNAL_ERROR);
@@ -277,15 +260,19 @@ keeper_cli_pgsetup_pg_ctl(int argc, char **argv)
 void
 keeper_cli_pgsetup_discover(int argc, char **argv)
 {
-	bool missingPgdataOk = true;
-	PostgresSetup pgSetup = { 0 };
+	ConfigFilePaths pathnames = { 0 };
+	LocalPostgresServer postgres = { 0 };
+	PostgresSetup *pgSetup = &(postgres.postgresSetup);
 
-	if (!pg_setup_init(&pgSetup, &keeperOptions.pgSetup, true, true))
+	if (!cli_common_pgsetup_init(&pathnames, pgSetup))
 	{
-		exit(EXIT_CODE_PGCTL);
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	if (!pg_controldata(&pgSetup, missingPgdataOk))
+	bool missingPgdataOk = true;
+
+	if (!pg_controldata(pgSetup, missingPgdataOk))
 	{
 		exit(EXIT_CODE_PGCTL);
 	}
@@ -295,7 +282,7 @@ keeper_cli_pgsetup_discover(int argc, char **argv)
 		fformat(stdout, "Node Name:          %s\n", keeperOptions.hostname);
 	}
 
-	fprintf_pg_setup(stdout, &pgSetup);
+	fprintf_pg_setup(stdout, pgSetup);
 }
 
 
@@ -306,19 +293,22 @@ keeper_cli_pgsetup_discover(int argc, char **argv)
 void
 keeper_cli_pgsetup_is_ready(int argc, char **argv)
 {
-	PostgresSetup pgSetup = { 0 };
-	bool pgIsNotRunningIsOk = false;
+	ConfigFilePaths pathnames = { 0 };
+	LocalPostgresServer postgres = { 0 };
+	PostgresSetup *pgSetup = &(postgres.postgresSetup);
 
-	if (!pg_setup_init(&pgSetup, &keeperOptions.pgSetup, true, true))
+	if (!cli_common_pgsetup_init(&pathnames, pgSetup))
 	{
-		exit(EXIT_CODE_PGCTL);
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
 	log_debug("Initialized pgSetup, now calling pg_setup_is_ready()");
 
-	bool pgIsReady = pg_setup_is_ready(&pgSetup, pgIsNotRunningIsOk);
+	bool pgIsNotRunningIsOk = false;
+	bool pgIsReady = pg_setup_is_ready(pgSetup, pgIsNotRunningIsOk);
 
-	log_info("Postgres status is: \"%s\"", pmStatusToString(pgSetup.pm_status));
+	log_info("Postgres status is: \"%s\"", pmStatusToString(pgSetup->pm_status));
 
 	if (pgIsReady)
 	{
@@ -336,18 +326,22 @@ void
 keeper_cli_pgsetup_wait_until_ready(int argc, char **argv)
 {
 	int timeout = 30;
-	PostgresSetup pgSetup = { 0 };
 
-	if (!pg_setup_init(&pgSetup, &keeperOptions.pgSetup, true, true))
+	ConfigFilePaths pathnames = { 0 };
+	LocalPostgresServer postgres = { 0 };
+	PostgresSetup *pgSetup = &(postgres.postgresSetup);
+
+	if (!cli_common_pgsetup_init(&pathnames, pgSetup))
 	{
-		exit(EXIT_CODE_PGCTL);
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
 	log_debug("Initialized pgSetup, now calling pg_setup_wait_until_is_ready()");
 
-	bool pgIsReady = pg_setup_wait_until_is_ready(&pgSetup, timeout, LOG_INFO);
+	bool pgIsReady = pg_setup_wait_until_is_ready(pgSetup, timeout, LOG_INFO);
 
-	log_info("Postgres status is: \"%s\"", pmStatusToString(pgSetup.pm_status));
+	log_info("Postgres status is: \"%s\"", pmStatusToString(pgSetup->pm_status));
 
 	if (pgIsReady)
 	{
@@ -363,16 +357,19 @@ keeper_cli_pgsetup_wait_until_ready(int argc, char **argv)
 void
 keeper_cli_pgsetup_startup_logs(int argc, char **argv)
 {
-	PostgresSetup pgSetup = { 0 };
+	ConfigFilePaths pathnames = { 0 };
+	LocalPostgresServer postgres = { 0 };
+	PostgresSetup *pgSetup = &(postgres.postgresSetup);
 
-	if (!pg_setup_init(&pgSetup, &keeperOptions.pgSetup, true, true))
+	if (!cli_common_pgsetup_init(&pathnames, pgSetup))
 	{
-		exit(EXIT_CODE_PGCTL);
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
 	log_debug("Initialized pgSetup, now calling pg_log_startup()");
 
-	if (!pg_log_startup(pgSetup.pgdata, LOG_INFO))
+	if (!pg_log_startup(pgSetup->pgdata, LOG_INFO))
 	{
 		exit(EXIT_CODE_PGCTL);
 	}
@@ -518,6 +515,42 @@ keeper_cli_rewind_old_primary(int argc, char **argv)
 
 
 void
+keeper_cli_maybe_do_crash_recovery(int argc, char **argv)
+{
+	const bool missing_pgdata_is_ok = false;
+	const bool pg_not_running_is_ok = true;
+
+	KeeperConfig config = keeperOptions;
+	LocalPostgresServer postgres = { 0 };
+
+	keeper_config_init(&config, missing_pgdata_is_ok, pg_not_running_is_ok);
+	local_postgres_init(&postgres, &(config.pgSetup));
+
+	if (!standby_init_replication_source(&postgres,
+										 NULL, /* primaryNode is done */
+										 PG_AUTOCTL_REPLICA_USERNAME,
+										 config.replication_password,
+										 config.replication_slot_name,
+										 config.maximum_backup_rate,
+										 config.backupDirectory,
+										 NULL, /* no targetLSN */
+										 config.pgSetup.ssl,
+										 0))
+	{
+		/* can't happen at the moment */
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	if (!postgres_maybe_do_crash_recovery(&postgres))
+	{
+		log_fatal("Failed to implement postgres crash recovery, "
+				  "see above for details");
+		exit(EXIT_CODE_PGSQL);
+	}
+}
+
+
+void
 keeper_cli_promote_standby(int argc, char **argv)
 {
 	const bool missing_pgdata_is_ok = false;
@@ -588,5 +621,27 @@ keeper_cli_identify_system(int argc, char **argv)
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	IdentifySystem *system = &(replicationSource.system);
+
+	fformat(stdout, "Current timeline:  %d\n", system->timeline);
+	fformat(stdout, "Current WAL LSN:   %s\n", system->xlogpos);
+
+	for (int index = 0; index < system->timelines.count; index++)
+	{
+		TimeLineHistoryEntry *entry = &(system->timelines.history[index]);
+
+		char startLSN[PG_LSN_MAXLENGTH] = { 0 };
+
+		sformat(startLSN, sizeof(startLSN), "%X/%X",
+				(uint32_t) (entry->begin >> 32),
+				(uint32_t) entry->begin);
+
+		fformat(stdout, "Timeline %d:   %18s .. %X/%X\n",
+				entry->tli,
+				startLSN,
+				(uint32_t) (entry->end >> 32),
+				(uint32_t) entry->end);
 	}
 }

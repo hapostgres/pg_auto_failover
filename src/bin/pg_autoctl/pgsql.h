@@ -15,6 +15,7 @@
 #include <stdbool.h>
 
 #include "libpq-fe.h"
+#include "portability/instr_time.h"
 
 #include "defaults.h"
 #include "pgsetup.h"
@@ -57,7 +58,8 @@ typedef enum
 	PGSQL_CONN_LOCAL = 0,
 	PGSQL_CONN_MONITOR,
 	PGSQL_CONN_COORDINATOR,
-	PGSQL_CONN_UPSTREAM
+	PGSQL_CONN_UPSTREAM,
+	PGSQL_CONN_APP
 } ConnectionType;
 
 
@@ -87,10 +89,25 @@ typedef struct ConnectionRetryPolicy
 	int baseSleepTime;          /* in millisecond, base time to sleep for */
 	int sleepTime;              /* in millisecond, time waited for last round */
 
-	uint64_t startTime;         /* time of the first attempt */
+	instr_time startTime;       /* time of the first attempt */
+	instr_time connectTime;     /* time of successful connection */
 	int attempts;               /* how many attempts have been made so far */
 } ConnectionRetryPolicy;
 
+/*
+ * Denote if the connetion is going to be used for one, or multiple statements.
+ * This is used by psql_* functions to know if a connection is to be closed
+ * after successful completion, or if the the connection is to be maintained
+ * open for further queries.
+ *
+ * A common use case for maintaining a connection open, is while wishing to open
+ * and maintain a transaction block. Another, is while listening for events.
+ */
+typedef enum
+{
+	PGSQL_CONNECTION_SINGLE_STATEMENT = 0,
+	PGSQL_CONNECTION_MULTI_STATEMENT
+} ConnectionStatementType;
 
 /*
  * Allow higher level code to distinguish between failure to connect to the
@@ -109,12 +126,13 @@ typedef enum
 
 /* notification processing */
 typedef bool (*ProcessNotificationFunction)(int notificationGroupId,
-											int notificationNodeId,
+											int64_t notificationNodeId,
 											char *channel, char *payload);
 
 typedef struct PGSQL
 {
 	ConnectionType connectionType;
+	ConnectionStatementType connectionStatementType;
 	char connectionString[MAXCONNINFO];
 	PGconn *connection;
 	ConnectionRetryPolicy retryPolicy;
@@ -122,7 +140,7 @@ typedef struct PGSQL
 
 	ProcessNotificationFunction notificationProcessFunction;
 	int notificationGroupId;
-	int notificationNodeId;
+	int64_t notificationNodeId;
 	bool notificationReceived;
 } PGSQL;
 
@@ -137,10 +155,11 @@ typedef struct GUC
 /* network address of a node in an HA group */
 typedef struct NodeAddress
 {
-	int nodeId;
+	int64_t nodeId;
 	char name[_POSIX_HOST_NAME_MAX];
 	char host[_POSIX_HOST_NAME_MAX];
 	int port;
+	int tli;
 	char lsn[PG_LSN_MAXLENGTH];
 	bool isPrimary;
 } NodeAddress;
@@ -150,6 +169,50 @@ typedef struct NodeAddressArray
 	int count;
 	NodeAddress nodes[NODE_ARRAY_MAX_COUNT];
 } NodeAddressArray;
+
+
+/*
+ * TimeLineHistoryEntry is taken from Postgres definitions and adapted to
+ * client-size code where we don't have all the necessary infrastruture. In
+ * particular we don't define a XLogRecPtr data type nor do we define a
+ * TimeLineID data type.
+ *
+ * Zero is used indicate an invalid pointer. Bootstrap skips the first possible
+ * WAL segment, initializing the first WAL page at WAL segment size, so no XLOG
+ * record can begin at zero.
+ */
+#define InvalidXLogRecPtr 0
+#define XLogRecPtrIsInvalid(r) ((r) == InvalidXLogRecPtr)
+
+#define PG_AUTOCTL_MAX_TIMELINES 1024
+
+typedef struct TimeLineHistoryEntry
+{
+	uint32_t tli;
+	uint64_t begin;         /* inclusive */
+	uint64_t end;           /* exclusive, InvalidXLogRecPtr means infinity */
+} TimeLineHistoryEntry;
+
+
+typedef struct TimeLineHistory
+{
+	int count;
+	TimeLineHistoryEntry history[PG_AUTOCTL_MAX_TIMELINES];
+} TimeLineHistory;
+
+
+/*
+ * The IdentifySystem contains information that is parsed from the
+ * IDENTIFY_SYSTEM replication command, and then the TIMELINE_HISTORY result.
+ */
+typedef struct IdentifySystem
+{
+	uint64_t identifier;
+	uint32_t timeline;
+	char xlogpos[PG_LSN_MAXLENGTH];
+	char dbname[NAMEDATALEN];
+	TimeLineHistory timelines;
+} IdentifySystem;
 
 
 /*
@@ -164,11 +227,14 @@ typedef struct ReplicationSource
 	char userName[NAMEDATALEN];
 	char slotName[MAXCONNINFO];
 	char password[MAXCONNINFO];
-	char maximumBackupRate[MAXCONNINFO];
+	char maximumBackupRate[MAXIMUM_BACKUP_RATE_LEN];
 	char backupDir[MAXCONNINFO];
 	char applicationName[MAXCONNINFO];
 	char targetLSN[PG_LSN_MAXLENGTH];
+	char targetAction[NAMEDATALEN];
+	char targetTimeline[NAMEDATALEN];
 	SSLOptions sslOptions;
+	IdentifySystem system;
 } ReplicationSource;
 
 
@@ -209,6 +275,7 @@ typedef struct SingleValueResultContext
 	char sqlstate[SQLSTATE_LENGTH];
 	QueryResultType resultType;
 	bool parsedOk;
+	int ntuples;
 	bool boolVal;
 	int intVal;
 	uint64_t bigint;
@@ -258,6 +325,9 @@ bool pgsql_retry_policy_expired(ConnectionRetryPolicy *retryPolicy);
 void pgsql_finish(PGSQL *pgsql);
 void parseSingleValueResult(void *ctx, PGresult *result);
 void fetchedRows(void *ctx, PGresult *result);
+bool pgsql_begin(PGSQL *pgsql);
+bool pgsql_commit(PGSQL *pgsql);
+bool pgsql_rollback(PGSQL *pgsql);
 bool pgsql_execute(PGSQL *pgsql, const char *sql);
 bool pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 							   const Oid *paramTypes, const char **paramValues,
@@ -271,14 +341,12 @@ bool pgsql_replication_slot_exists(PGSQL *pgsql, const char *slotName,
 								   bool *slotExists);
 bool pgsql_create_replication_slot(PGSQL *pgsql, const char *slotName);
 bool pgsql_drop_replication_slot(PGSQL *pgsql, const char *slotName);
-bool postgres_sprintf_replicationSlotName(int nodeId, char *slotName, int size);
+bool postgres_sprintf_replicationSlotName(int64_t nodeId, char *slotName, int size);
 bool pgsql_set_synchronous_standby_names(PGSQL *pgsql,
 										 char *synchronous_standby_names);
 bool pgsql_replication_slot_create_and_drop(PGSQL *pgsql,
 											NodeAddressArray *nodeArray);
 bool pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray);
-bool postgres_sprintf_replicationSlotName(int nodeId, char *slotName, int size);
-bool pgsql_enable_synchronous_replication(PGSQL *pgsql);
 bool pgsql_disable_synchronous_replication(PGSQL *pgsql);
 bool pgsql_set_default_transaction_mode_read_only(PGSQL *pgsql);
 bool pgsql_set_default_transaction_mode_read_write(PGSQL *pgsql);
@@ -306,11 +374,15 @@ bool pgsql_one_slot_has_reached_target_lsn(PGSQL *pgsql,
 										   bool *hasReachedLSN);
 bool pgsql_has_reached_target_lsn(PGSQL *pgsql, char *targetLSN,
 								  char *currentLSN, bool *hasReachedLSN);
-bool pgsql_identify_system(PGSQL *pgsql);
+bool pgsql_identify_system(PGSQL *pgsql, IdentifySystem *system);
 bool pgsql_listen(PGSQL *pgsql, char *channels[]);
+bool pgsql_prepare_to_wait(PGSQL *pgsql);
 
 bool pgsql_alter_extension_update_to(PGSQL *pgsql,
 									 const char *extname, const char *version);
+
+bool parseTimeLineHistory(const char *filename, const char *content,
+						  IdentifySystem *system);
 
 
 #endif /* PGSQL_H */
