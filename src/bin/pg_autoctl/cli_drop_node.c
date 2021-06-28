@@ -607,9 +607,23 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 	 */
 	pid_t pid = 0;
 
-	if (!wait_for_pid_to_exit(config->pathnames.pid, 30, &pid))
+	/*
+	 * If --force isn't used then any running pg_autoctl process will detect
+	 * that it is dropped and clean itself up nicely and finally it will exit.
+	 * We give the process 30 seconds to exit by itself, if it didn't probably
+	 * something is wrong and we manually kill it. We will then complete the
+	 * transition to dropped from this process instead.
+	 *
+	 * If --force is used, we skip the transition to "dropped". So a currently
+	 * running process won't realise it's dropped, so it will not exit by
+	 * itself. So there's no point in waiting for 30 seconds. Instead we
+	 * manually kill it using SIGQUIT right away.
+	 */
+	int quit_timeout = dropForce ? 0 : 30;
+
+	if (!wait_for_pid_to_exit(config->pathnames.pid, quit_timeout, &pid))
 	{
-		/* if the service isn't terminated in 30s, signal it to quit now */
+		/* if the service isn't terminated, signal it to quit now */
 		log_info("Sending signal %s to pg_autoctl process %d",
 				 signal_to_string(SIGQUIT),
 				 pid);

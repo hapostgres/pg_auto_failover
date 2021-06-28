@@ -1113,6 +1113,7 @@ class DataNode(PGNode):
                 "drop",
                 "node",
                 "--destroy",
+                "--force",
                 timeout=3,
             )
         except Exception as e:
