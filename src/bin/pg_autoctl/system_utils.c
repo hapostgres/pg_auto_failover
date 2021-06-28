@@ -12,6 +12,7 @@
 #else
 #include <sys/types.h>
 #include <sys/sysctl.h>
+#include <sys/param.h>
 #endif
 
 #include <math.h>
@@ -73,18 +74,26 @@ get_system_info_linux(SystemInfo *sysInfo)
 
 
 /*
- * FreeBSD, OpenBSD, and darwin use the sysctlbyname(3) API.
+ * FreeBSD, OpenBSD, and darwin use the sysctl(3) API.
  */
 #if defined(__APPLE__) || defined(BSD)
 static bool
 get_system_info_bsd(SystemInfo *sysInfo)
 {
 	unsigned int ncpu = 0;      /* the API requires an integer here */
+	int ncpuMIB[2] = { CTL_HW, HW_NCPU };
+	#if defined(HW_MEMSIZE)
+	int ramMIB[2] = { CTL_HW, HW_MEMSIZE };   /* MacOS   */
+	#elif defined(HW_PHYSMEM64)
+	int ramMIB[2] = { CTL_HW, HW_PHYSMEM64 }; /* OpenBSD */
+	#else
+	int ramMIB[2] = { CTL_HW, HW_PHYSMEM };   /* FreeBSD */
+	#endif
 
 	size_t cpuSize = sizeof(ncpu);
 	size_t memSize = sizeof(sysInfo->totalram);
 
-	if (sysctlbyname("hw.ncpu", &ncpu, &cpuSize, NULL, 0) != 0)
+	if (sysctl(ncpuMIB, 2, &ncpu, &cpuSize, NULL, 0) == -1)
 	{
 		log_error("Failed to probe number of CPUs: %m");
 		return false;
@@ -92,7 +101,7 @@ get_system_info_bsd(SystemInfo *sysInfo)
 
 	sysInfo->ncpu = (unsigned short) ncpu;
 
-	if (sysctlbyname("hw.memsize", &(sysInfo->totalram), &memSize, NULL, 0) != 0)
+	if (sysctl(ramMIB, 2, &(sysInfo->totalram), &memSize, NULL, 0) == -1)
 	{
 		log_error("Failed to probe Physical Memory: %m");
 		return false;
