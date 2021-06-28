@@ -29,7 +29,7 @@ COMMON_LIBS += -I${SRC_DIR}../lib/parson/
 
 CC = $(shell $(PG_CONFIG) --cc)
 
-DEFAULT_CFLAGS = -std=c99 -D_GNU_SOURCE -g
+DEFAULT_CFLAGS = -std=c11 -D_GNU_SOURCE -g
 DEFAULT_CFLAGS += -I $(shell $(PG_CONFIG) --includedir)
 DEFAULT_CFLAGS += -I $(shell $(PG_CONFIG) --includedir-server)
 DEFAULT_CFLAGS += -I $(shell $(PG_CONFIG) --pkgincludedir)/internal
