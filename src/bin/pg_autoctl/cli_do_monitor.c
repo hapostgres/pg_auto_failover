@@ -352,7 +352,7 @@ cli_do_monitor_get_coordinator(int argc, char **argv)
 {
 	KeeperConfig config = keeperOptions;
 	Monitor monitor = { 0 };
-	NodeAddress coordinatorNode = { 0 };
+	CoordinatorNodeAddress coordinatorNode = { 0 };
 
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
@@ -381,7 +381,7 @@ cli_do_monitor_get_coordinator(int argc, char **argv)
 		exit(EXIT_CODE_MONITOR);
 	}
 
-	if (IS_EMPTY_STRING_BUFFER(coordinatorNode.host))
+	if (IS_EMPTY_STRING_BUFFER(coordinatorNode.node.host))
 	{
 		fformat(stdout, "%s has no coordinator ready yet\n", config.formation);
 		exit(EXIT_CODE_QUIT);
@@ -395,8 +395,8 @@ cli_do_monitor_get_coordinator(int argc, char **argv)
 
 		json_object_set_string(root, "formation", config.formation);
 		json_object_set_number(root, "groupId", (double) config.groupId);
-		json_object_set_string(root, "host", coordinatorNode.host);
-		json_object_set_number(root, "port", (double) coordinatorNode.port);
+		json_object_set_string(root, "host", coordinatorNode.node.host);
+		json_object_set_number(root, "port", (double) coordinatorNode.node.port);
 
 		(void) cli_pprint_json(js);
 	}
@@ -405,8 +405,8 @@ cli_do_monitor_get_coordinator(int argc, char **argv)
 		fformat(stdout,
 				"%s %s:%d\n",
 				config.formation,
-				coordinatorNode.host,
-				coordinatorNode.port);
+				coordinatorNode.node.host,
+				coordinatorNode.node.port);
 	}
 }
 

@@ -45,18 +45,11 @@
  * Global variables that we're going to use to "communicate" in between getopts
  * functions and their command implementation. We can't pass parameters around.
  */
-static bool dropAndDestroy = false;
+bool dropAndDestroy = false;
 static bool dropForce = false;
 
-static int cli_drop_node_getopts(int argc, char **argv);
-static void cli_drop_node(int argc, char **argv);
 static void cli_drop_monitor(int argc, char **argv);
 
-static void cli_drop_node_from_monitor(KeeperConfig *config,
-									   int64_t *nodeId,
-									   int *groupId);
-
-static void cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy);
 static void cli_drop_local_monitor(MonitorConfig *mconfig, bool dropAndDestroy);
 
 static void cli_drop_node_with_monitor_disabled(KeeperConfig *config,
@@ -98,7 +91,7 @@ CommandLine drop_node_command =
  * cli_drop_node_getopts parses the command line options necessary to drop or
  * destroy a local pg_autoctl node.
  */
-static int
+int
 cli_drop_node_getopts(int argc, char **argv)
 {
 	KeeperConfig options = { 0 };
@@ -337,7 +330,7 @@ cli_drop_node_getopts(int argc, char **argv)
  * cli_drop_node removes the local PostgreSQL node from the pg_auto_failover
  * monitor, and when it's a worker, from the Citus coordinator too.
  */
-static void
+void
 cli_drop_node(int argc, char **argv)
 {
 	KeeperConfig config = keeperOptions;
@@ -504,7 +497,7 @@ cli_drop_monitor(int argc, char **argv)
  * for the given --hostname and --pgport, or from the given --formation and
  * --name.
  */
-static void
+void
 cli_drop_node_from_monitor(KeeperConfig *config, int64_t *nodeId, int *groupId)
 {
 	Monitor monitor = { 0 };
@@ -563,7 +556,7 @@ cli_drop_node_from_monitor(KeeperConfig *config, int64_t *nodeId, int *groupId)
  * cli_drop_local_node drops the local node files, maybe including the PGDATA
  * directory (when --destroy has been used).
  */
-static void
+void
 cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 {
 	Keeper keeper = { 0 };
