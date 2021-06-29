@@ -149,6 +149,19 @@ secondary nodes in maintenance. The procedure then looks like the following:
 
 		pg_autoctl disable maintenance
 
+Extension dependencies when upgrading the monitor
+-------------------------------------------------
+
+Since version 1.4.0 the ``pgautofailover`` extension requires the Postgres
+contrib extension ``btree_gist``. The ``pg_autoctl`` command arranges for
+the creation of this dependency, and has been buggy in some releases.
+
+As a result, you might have trouble upgrade the pg_auto_failover monitor to
+a recent version. It is possible to fix the error by connecting to the
+monitor Postgres database and running the ``create extension`` command
+manually::
+
+  # create extension btree_gist;
 
 Cluster Management and Operations
 ---------------------------------
@@ -388,11 +401,11 @@ the following commands.
      a primary still, for each group in your formation(s), enable the
      monitor online again::
 
-	   $ pg_autoctl enable monitor --monitor postgresql://...
+	   $ pg_autoctl enable monitor postgresql://autoctl_node@.../pg_auto_failover
 
   5. On every other (secondary) node, enable the monitor online again::
 
-	   $ pg_autoctl enable monitor --monitor postgresql://...
+	   $ pg_autoctl enable monitor postgresql://autoctl_node@.../pg_auto_failover
 
 See :ref:`pg_autoctl_disable_monitor` and :ref:`pg_autoctl_enable_monitor`
 for details about those commands.
