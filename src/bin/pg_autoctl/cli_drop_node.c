@@ -623,6 +623,12 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 
 	if (!wait_for_pid_to_exit(config->pathnames.pid, quit_timeout, &pid))
 	{
+		if (pid == 0)
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+
 		/* if the service isn't terminated, signal it to quit now */
 		log_info("Sending signal %s to pg_autoctl process %d",
 				 signal_to_string(SIGQUIT),
