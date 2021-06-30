@@ -511,14 +511,16 @@ wait_for_pid_to_exit(const char *pidfile, int timeout, pid_t *pid)
 		if (read_pidfile(pidfile, pid))
 		{
 			/*
-			 * If we have a timeout of 0 passed in, this log message doesn't
-			 * make sense. We are not waiting for the process to stop.
+			 * If we have a timeout of 0 passed in, we can fail right away if
+			 * there is a pidfile.
 			 */
-			if (timeout > 0)
+			if (timeout == 0)
 			{
-				log_info("An instance of pg_autoctl is running with PID %d, "
-						 "waiting for it to stop.", *pid);
+				return false;
 			}
+
+			log_info("An instance of pg_autoctl is running with PID %d, "
+					 "waiting for it to stop.", *pid);
 
 			int timeout_counter = timeout;
 
