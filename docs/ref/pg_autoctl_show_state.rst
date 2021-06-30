@@ -79,9 +79,10 @@ The ``pg_autoctl show state`` outputs includes the following columns:
 
   - TLI: LSN
 
-	Timeline identifier and Postgres Log Sequence Number, which is the
-	current position in the WAL stream. This is a hexadecimal number. See
-	`pg_lsn`__ for more information.
+	Timeline identifier (TLI) and Postgres Log Sequence Number (LSN).
+
+	The LSN is the current position in the Postgres WAL stream. This is a
+	hexadecimal number. See `pg_lsn`__ for more information.
 
 	__ https://www.postgresql.org/docs/current/datatype-pg-lsn.html
 
