@@ -617,7 +617,8 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 	 * If --force is used, we skip the transition to "dropped". So a currently
 	 * running process won't realise it's dropped, so it will not exit by
 	 * itself. So there's no point in waiting for 30 seconds. Instead we
-	 * manually kill it using SIGQUIT right away.
+	 * manually kill it using SIGQUIT right away, because we would still like
+	 * the process to be stopped in that case.
 	 */
 	int quit_timeout = dropForce ? 0 : 30;
 
