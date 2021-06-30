@@ -77,13 +77,20 @@ The ``pg_autoctl show state`` outputs includes the following columns:
 
 	Hostname and port number used to connect to the node.
 
-  - LSN
+  - TLI: LSN
 
-	Postgres Log Sequence Number, which is the current position in the WAL
-	stream. This is a hexadecimal number. See `pg_lsn`__ for more
-	information.
+	Timeline identifier (TLI) and Postgres Log Sequence Number (LSN).
+
+	The LSN is the current position in the Postgres WAL stream. This is a
+	hexadecimal number. See `pg_lsn`__ for more information.
 
 	__ https://www.postgresql.org/docs/current/datatype-pg-lsn.html
+
+	The current `timeline`__ is incremented each time a failover happens, or
+	when doing Point In Time Recovery. A node can only reach the secondary
+	state when it is on the same timeline as its primary node.
+
+	__ https://www.postgresql.org/docs/current/continuous-archiving.html#BACKUP-TIMELINES
 
   - Connection
 
@@ -112,59 +119,62 @@ Examples
 ::
 
    $ pg_autoctl show state
-    Name |  Node |      Host:Port |       LSN |   Connection |       Current State |      Assigned State
-   ------+-------+----------------+-----------+--------------+---------------------+--------------------
-   node1 |     1 | localhost:5501 | 0/4000760 |   read-write |             primary |             primary
-   node2 |     2 | localhost:5502 | 0/4000760 |    read-only |           secondary |           secondary
-   node3 |     3 | localhost:5503 | 0/4000760 |    read-only |           secondary |           secondary
+    Name |  Node |      Host:Port |       TLI: LSN |   Connection |       Current State |      Assigned State
+   ------+-------+----------------+----------------+--------------+---------------------+--------------------
+   node1 |     1 | localhost:5501 |   1: 0/4000678 |   read-write |             primary |             primary
+   node2 |     2 | localhost:5502 |   1: 0/4000678 |    read-only |           secondary |           secondary
+   node3 |     3 | localhost:5503 |   1: 0/4000678 |    read-only |           secondary |           secondary
 
    $ pg_autoctl show state --local
-    Name |  Node |      Host:Port |       LSN |   Connection |       Current State |      Assigned State
-   ------+-------+----------------+-----------+--------------+---------------------+--------------------
-   node1 |     1 | localhost:5501 | 0/4000760 | read-write ? |             primary |             primary
+    Name |  Node |      Host:Port |       TLI: LSN |   Connection |       Current State |      Assigned State
+   ------+-------+----------------+----------------+--------------+---------------------+--------------------
+   node1 |     1 | localhost:5501 |   1: 0/4000678 | read-write ? |             primary |             primary
 
    $ pg_autoctl show state --json
    [
-    {
-        "health": 1,
-        "node_id": 1,
-        "group_id": 0,
-        "nodehost": "localhost",
-        "nodename": "node1",
-        "nodeport": 5501,
-        "reported_lsn": "0/4000760",
-        "formation_kind": "pgsql",
-        "candidate_priority": 50,
-        "replication_quorum": true,
-        "current_group_state": "primary",
-        "assigned_group_state": "primary"
-    },
-    {
-        "health": 1,
-        "node_id": 2,
-        "group_id": 0,
-        "nodehost": "localhost",
-        "nodename": "node2",
-        "nodeport": 5502,
-        "reported_lsn": "0/4000760",
-        "formation_kind": "pgsql",
-        "candidate_priority": 50,
-        "replication_quorum": true,
-        "current_group_state": "secondary",
-        "assigned_group_state": "secondary"
-    },
-    {
-        "health": 1,
-        "node_id": 3,
-        "group_id": 0,
-        "nodehost": "localhost",
-        "nodename": "node3",
-        "nodeport": 5503,
-        "reported_lsn": "0/4000760",
-        "formation_kind": "pgsql",
-        "candidate_priority": 50,
-        "replication_quorum": true,
-        "current_group_state": "secondary",
-        "assigned_group_state": "secondary"
-    }
+       {
+           "health": 1,
+           "node_id": 1,
+           "group_id": 0,
+           "nodehost": "localhost",
+           "nodename": "node1",
+           "nodeport": 5501,
+           "reported_lsn": "0/4000678",
+           "reported_tli": 1,
+           "formation_kind": "pgsql",
+           "candidate_priority": 50,
+           "replication_quorum": true,
+           "current_group_state": "primary",
+           "assigned_group_state": "primary"
+       },
+       {
+           "health": 1,
+           "node_id": 2,
+           "group_id": 0,
+           "nodehost": "localhost",
+           "nodename": "node2",
+           "nodeport": 5502,
+           "reported_lsn": "0/4000678",
+           "reported_tli": 1,
+           "formation_kind": "pgsql",
+           "candidate_priority": 50,
+           "replication_quorum": true,
+           "current_group_state": "secondary",
+           "assigned_group_state": "secondary"
+       },
+       {
+           "health": 1,
+           "node_id": 3,
+           "group_id": 0,
+           "nodehost": "localhost",
+           "nodename": "node3",
+           "nodeport": 5503,
+           "reported_lsn": "0/4000678",
+           "reported_tli": 1,
+           "formation_kind": "pgsql",
+           "candidate_priority": 50,
+           "replication_quorum": true,
+           "current_group_state": "secondary",
+           "assigned_group_state": "secondary"
+       }
    ]

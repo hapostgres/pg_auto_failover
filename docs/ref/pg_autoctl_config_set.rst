@@ -168,6 +168,25 @@ replication.backup_directory
   Can be changed online with a reload, will not affect already running
   ``pg_basebackup`` sub-processes.
 
+replication.password
+
+  Used as a parameter in the connection string to the upstream Postgres
+  node. The "replication" connection uses the password set-up in the
+  pg_autoctl configuration file.
+
+  Changing the ``replication.password`` of a pg_autoctl configuration has no
+  effect on the Postgres database itself. The password must match what the
+  Postgres upstream node expects, which can be set with the following SQL
+  command run on the upstream server (primary or other standby node)::
+
+	alter user pgautofailover_replicator password 'h4ckm3m0r3';
+
+  The ``replication.password`` can be changed online with a reload, but
+  requires restarting the Postgres service to be activated. Postgres only
+  reads the ``primary_conninfo`` connection string at start-up, up to and
+  including Postgres 12. With Postgres 13 and following, it is possible to
+  *reload* this Postgres paramater.
+
 timeout.network_partition_timeout
 
   Timeout (in seconds) that pg_autoctl waits before deciding that it is on
