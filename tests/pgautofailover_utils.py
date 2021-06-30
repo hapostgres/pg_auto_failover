@@ -181,12 +181,12 @@ class Cluster:
 
         return abspath
 
-    def destroy(self):
+    def destroy(self, force=True):
         """
         Cleanup whatever was created for this Cluster.
         """
         for datanode in list(reversed(self.datanodes)):
-            datanode.destroy()
+            datanode.destroy(force=force)
         if self.monitor:
             self.monitor.destroy()
         self.vlan.destroy()
@@ -1100,11 +1100,15 @@ class DataNode(PGNode):
 
         return self.name
 
-    def destroy(self):
+    def destroy(self, force=False):
         """
         Cleans up processes and files created for this data node.
         """
         self.stop_pg_autoctl()
+
+        flags = ["--destroy"]
+        if force:
+            flags.append("--force")
 
         try:
             destroy = PGAutoCtl(self)
@@ -1112,8 +1116,7 @@ class DataNode(PGNode):
                 "pg_autoctl drop node --destroy",
                 "drop",
                 "node",
-                "--destroy",
-                "--force",
+                *flags,
                 timeout=3,
             )
         except Exception as e:
