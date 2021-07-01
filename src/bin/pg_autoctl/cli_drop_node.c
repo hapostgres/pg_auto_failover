@@ -89,7 +89,8 @@ CommandLine drop_node_command =
 		"  --hostname    drop the node with given hostname and pgport\n"
 		"  --pgport      drop the node with given hostname and pgport\n"
 		"  --destroy     also destroy Postgres database\n"
-		"  --force       force dropping the node from the monitor\n",
+		"  --force       force dropping the node from the monitor\n"
+		"  --wait        how many seconds to wait, default to 60 \n",
 		cli_drop_node_getopts,
 		cli_drop_node);
 
@@ -893,20 +894,26 @@ cli_drop_node_from_monitor_and_wait(KeeperConfig *config)
 
 	(void) cli_monitor_init_from_option_or_config(&monitor, config);
 
-	/* establish a connection for notifications if none present */
-	(void) pgsql_prepare_to_wait(&(monitor.notificationClient));
-
 	/* call pgautofailover.remove_node() on the monitor */
 	int64_t nodeId;
 	int groupId;
 
 	(void) cli_drop_node_from_monitor(config, &nodeId, &groupId);
 
+	/* if the timeout is zero, just don't wait at all */
+	if (config->listen_notifications_timeout == 0)
+	{
+		return;
+	}
+
 	log_info("Waiting until the node with id %lld in group %d has been "
 			 "dropped from the monitor, or for %ds, whichever comes first",
 			 (long long) nodeId, groupId, config->listen_notifications_timeout);
 
 	uint64_t start = time(NULL);
+
+	/* establish a connection for notifications if none present */
+	(void) pgsql_prepare_to_wait(&(monitor.notificationClient));
 
 	while (!dropped)
 	{

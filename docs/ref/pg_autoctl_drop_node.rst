@@ -20,6 +20,7 @@ This command drops a Postgres node from the pg_auto_failover monitor::
   --pgport      drop the node with given hostname and pgport
   --destroy     also destroy Postgres database
   --force       force dropping the node from the monitor
+  --wait        how many seconds to wait, default to 60
 
 Description
 -----------
@@ -88,6 +89,14 @@ Options
   actions. When the target node to remove is not available anymore, it is
   possible to use the option ``--force`` to immediately remove the node from
   the monitor.
+
+--wait
+
+  How many seconds to wait for the node to be dropped entirely. The command
+  stops when the target node is not to be found on the monitor anymore, or
+  when the timeout has elapsed, whichever comes first. The value 0 (zero)
+  disables the timeout and disables waiting entirely, making the command
+  async.
 
 Examples
 --------
