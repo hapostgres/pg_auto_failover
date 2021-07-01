@@ -52,7 +52,10 @@ static int cli_drop_node_getopts(int argc, char **argv);
 static void cli_drop_node(int argc, char **argv);
 static void cli_drop_monitor(int argc, char **argv);
 
-static void cli_drop_node_from_monitor(KeeperConfig *config);
+static void cli_drop_node_from_monitor(KeeperConfig *config,
+									   int64_t *nodeId,
+									   int *groupId);
+
 static void cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy);
 static void cli_drop_local_monitor(MonitorConfig *mconfig, bool dropAndDestroy);
 
@@ -62,6 +65,8 @@ static void cli_drop_node_files_and_directories(KeeperConfig *config);
 static void stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathnames,
 													   PostgresSetup *pgSetup);
 
+static void wait_until_node_is_dropped(KeeperConfig *config,
+									   int64_t nodeId, int groupId);
 
 CommandLine drop_monitor_command =
 	make_command("monitor",
@@ -395,7 +400,12 @@ cli_drop_node(int argc, char **argv)
 			exit(EXIT_CODE_BAD_ARGS);
 		}
 
-		(void) cli_drop_node_from_monitor(&config);
+		int64_t nodeId = -1;
+		int groupId = -1;
+
+		(void) cli_drop_node_from_monitor(&config, &nodeId, &groupId);
+
+		(void) wait_until_node_is_dropped(&config, nodeId, groupId);
 	}
 }
 
@@ -483,7 +493,7 @@ cli_drop_monitor(int argc, char **argv)
  * --name.
  */
 static void
-cli_drop_node_from_monitor(KeeperConfig *config)
+cli_drop_node_from_monitor(KeeperConfig *config, int64_t *nodeId, int *groupId)
 {
 	Monitor monitor = { 0 };
 
@@ -498,7 +508,9 @@ cli_drop_node_from_monitor(KeeperConfig *config)
 		if (!monitor_remove_by_nodename(&monitor,
 										(char *) config->formation,
 										(char *) config->name,
-										dropForce))
+										dropForce,
+										nodeId,
+										groupId))
 		{
 			/* errors have already been logged */
 			exit(EXIT_CODE_MONITOR);
@@ -518,7 +530,9 @@ cli_drop_node_from_monitor(KeeperConfig *config)
 		if (!monitor_remove_by_hostname(&monitor,
 										(char *) config->hostname,
 										pgport,
-										dropForce))
+										dropForce,
+										nodeId,
+										groupId))
 		{
 			/* errors have already been logged */
 			exit(EXIT_CODE_MONITOR);
@@ -569,7 +583,10 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 	/* first drop the node from the monitor  */
 	if (keeperState->assigned_role != DROPPED_STATE)
 	{
-		(void) cli_drop_node_from_monitor(config);
+		int64_t nodeId = -1;
+		int groupId = -1;
+
+		(void) cli_drop_node_from_monitor(config, &nodeId, &groupId);
 	}
 
 	/*
@@ -849,5 +866,51 @@ stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathnames,
 	{
 		/* errors have already been logged. */
 		exit(EXIT_CODE_BAD_CONFIG);
+	}
+}
+
+
+/*
+ * wait_until_node_is_dropped waits until the node doesn't exist anymore on the
+ * monitor, meaning it's been fully dropped now.
+ */
+static void
+wait_until_node_is_dropped(KeeperConfig *config, int64_t nodeId, int groupId)
+{
+	bool dropped = false;
+	Monitor monitor = { 0 };
+
+	(void) cli_monitor_init_from_option_or_config(&monitor, config);
+
+
+	while (!dropped)
+	{
+		NodeAddressArray nodesArray = { 0 };
+
+		bool groupStateHasChanged = false;
+		int timeoutMs = PG_AUTOCTL_KEEPER_SLEEP_TIME * 1000;
+
+		/* establish a connection for notifications if none present */
+		(void) pgsql_prepare_to_wait(&(monitor.notificationClient));
+		(void) monitor_wait_for_state_change(&monitor,
+											 config->formation,
+											 groupId,
+											 nodeId,
+											 timeoutMs,
+											 &groupStateHasChanged);
+
+		if (!monitor_find_node_by_nodeid(&monitor,
+										 config->formation,
+										 groupId,
+										 nodeId,
+										 &nodesArray))
+		{
+			log_error("Failed to query monitor to see if node id %lld "
+					  "has been dropped already",
+					  (long long) nodeId);
+			exit(EXIT_CODE_MONITOR);
+		}
+
+		dropped = nodesArray.count == 0;
 	}
 }

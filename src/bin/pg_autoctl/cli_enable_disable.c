@@ -1714,11 +1714,16 @@ cli_disable_monitor(int argc, char **argv)
 					 nodesArray.nodes[nodeIndex].host,
 					 nodesArray.nodes[nodeIndex].port);
 
+			int64_t nodeId = -1;
+			int groupId = -1;
+
 			if (!monitor_remove_by_hostname(
 					monitor,
 					nodesArray.nodes[nodeIndex].host,
 					nodesArray.nodes[nodeIndex].port,
-					optForce))
+					optForce,
+					&nodeId,
+					&groupId))
 			{
 				/* errors have already been logged */
 				exit(EXIT_CODE_MONITOR);
