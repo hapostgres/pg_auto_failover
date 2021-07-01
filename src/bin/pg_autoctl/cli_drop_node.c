@@ -610,19 +610,17 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 	/*
 	 * Before continuing we need to make sure that a currently running service
 	 * has stopped.
-	 *
-	 * If --force isn't used then a running pg_autoctl process will detect that
-	 * it is dropped and clean itself up nicely and finally it will exit. We
-	 * give the process 30 seconds to exit by itself.
-	 *
-	 * If --force is used, we skip the transition to "dropped". So a currently
-	 * running process won't realise it's dropped, so it will not exit by
-	 * itself. So there's no point in waiting for 30 seconds.
 	 */
 	bool stopped;
-	if (!dropForce)
+	if (dropForce)
 	{
-		if (!wait_for_process_to_stop(config->pathnames.pid, 30, &stopped, &pid))
+		/*
+		 * If --force is used, we skip the transition to "dropped". So a
+		 * currently running process won't realise it's dropped, which means it
+		 * will not exit by itself. Thus all we need to know is if it's running
+		 * now or not.
+		 */
+		if (!is_process_stopped(config->pathnames.pid, &stopped, &pid))
 		{
 			/* errors have already been logged */
 			exit(EXIT_CODE_INTERNAL_ERROR);
@@ -630,7 +628,12 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 	}
 	else
 	{
-		if (!is_process_stopped(config->pathnames.pid, &stopped, &pid))
+		/*
+		 * If --force isn't used then a running pg_autoctl process will detect
+		 * that it is dropped and clean itself up nicely and finally it will
+		 * exit. We give the process 30 seconds to exit by itself.
+		 */
+		if (!wait_for_process_to_stop(config->pathnames.pid, 30, &stopped, &pid))
 		{
 			/* errors have already been logged */
 			exit(EXIT_CODE_INTERNAL_ERROR);
