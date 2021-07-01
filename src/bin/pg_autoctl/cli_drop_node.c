@@ -65,8 +65,7 @@ static void cli_drop_node_files_and_directories(KeeperConfig *config);
 static void stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathnames,
 													   PostgresSetup *pgSetup);
 
-static void wait_until_node_is_dropped(KeeperConfig *config,
-									   int64_t nodeId, int groupId);
+static void cli_drop_node_from_monitor_and_wait(KeeperConfig *config);
 
 CommandLine drop_monitor_command =
 	make_command("monitor",
@@ -113,6 +112,7 @@ cli_drop_node_getopts(int argc, char **argv)
 		{ "hostname", required_argument, NULL, 'n' },
 		{ "pgport", required_argument, NULL, 'p' },
 		{ "formation", required_argument, NULL, 'f' },
+		{ "wait", required_argument, NULL, 'w' },
 		{ "name", required_argument, NULL, 'a' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
@@ -122,6 +122,9 @@ cli_drop_node_getopts(int argc, char **argv)
 	};
 
 	optind = 0;
+
+	options.listen_notifications_timeout =
+		PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT;
 
 	while ((c = getopt_long(argc, argv, "D:dn:p:Vvqh",
 							long_options, &option_index)) != -1)
@@ -193,6 +196,19 @@ cli_drop_node_getopts(int argc, char **argv)
 				/* { "name", required_argument, NULL, 'a' }, */
 				strlcpy(options.name, optarg, _POSIX_HOST_NAME_MAX);
 				log_trace("--name %s", options.name);
+				break;
+			}
+
+			case 'w':
+			{
+				/* { "wait", required_argument, NULL, 'w' }, */
+				if (!stringToInt(optarg, &options.listen_notifications_timeout))
+				{
+					log_fatal("--wait argument is not a valid timeout: \"%s\"",
+							  optarg);
+					exit(EXIT_CODE_BAD_ARGS);
+				}
+				log_trace("--wait %d", options.listen_notifications_timeout);
 				break;
 			}
 
@@ -400,12 +416,7 @@ cli_drop_node(int argc, char **argv)
 			exit(EXIT_CODE_BAD_ARGS);
 		}
 
-		int64_t nodeId = -1;
-		int groupId = -1;
-
-		(void) cli_drop_node_from_monitor(&config, &nodeId, &groupId);
-
-		(void) wait_until_node_is_dropped(&config, nodeId, groupId);
+		(void) cli_drop_node_from_monitor_and_wait(&config);
 	}
 }
 
@@ -871,17 +882,31 @@ stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathnames,
 
 
 /*
- * wait_until_node_is_dropped waits until the node doesn't exist anymore on the
- * monitor, meaning it's been fully dropped now.
+ * cli_drop_node_from_monitor_and_wait waits until the node doesn't exist
+ * anymore on the monitor, meaning it's been fully dropped now.
  */
 static void
-wait_until_node_is_dropped(KeeperConfig *config, int64_t nodeId, int groupId)
+cli_drop_node_from_monitor_and_wait(KeeperConfig *config)
 {
 	bool dropped = false;
 	Monitor monitor = { 0 };
 
 	(void) cli_monitor_init_from_option_or_config(&monitor, config);
 
+	/* establish a connection for notifications if none present */
+	(void) pgsql_prepare_to_wait(&(monitor.notificationClient));
+
+	/* call pgautofailover.remove_node() on the monitor */
+	int64_t nodeId;
+	int groupId;
+
+	(void) cli_drop_node_from_monitor(config, &nodeId, &groupId);
+
+	log_info("Waiting until the node with id %lld in group %d has been "
+			 "dropped from the monitor, or for %ds, whichever comes first",
+			 (long long) nodeId, groupId, config->listen_notifications_timeout);
+
+	uint64_t start = time(NULL);
 
 	while (!dropped)
 	{
@@ -890,8 +915,14 @@ wait_until_node_is_dropped(KeeperConfig *config, int64_t nodeId, int groupId)
 		bool groupStateHasChanged = false;
 		int timeoutMs = PG_AUTOCTL_KEEPER_SLEEP_TIME * 1000;
 
-		/* establish a connection for notifications if none present */
-		(void) pgsql_prepare_to_wait(&(monitor.notificationClient));
+		uint64_t now = time(NULL);
+
+		if ((now - start) > config->listen_notifications_timeout)
+		{
+			log_error("Failed to wait until the node has been dropped");
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+
 		(void) monitor_wait_for_state_change(&monitor,
 											 config->formation,
 											 groupId,
@@ -912,5 +943,12 @@ wait_until_node_is_dropped(KeeperConfig *config, int64_t nodeId, int groupId)
 		}
 
 		dropped = nodesArray.count == 0;
+
+		if (dropped)
+		{
+			log_info("Node with id %lld in group %d has been successfully "
+					 "dropped from the monitor",
+					 (long long) nodeId, groupId);
+		}
 	}
 }
