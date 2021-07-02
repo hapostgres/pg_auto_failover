@@ -164,7 +164,8 @@ fsm_init_primary(Keeper *keeper)
 			}
 		}
 	}
-	else if (initState->pgInitState >= PRE_INIT_STATE_RUNNING)
+	else if (initState->pgInitState >= PRE_INIT_STATE_RUNNING &&
+			 keeper->state.current_role != DROPPED_STATE)
 	{
 		log_error("PostgreSQL is already running at \"%s\", refusing to "
 				  "initialize a new cluster on-top of the current one.",

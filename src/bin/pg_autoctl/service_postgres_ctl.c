@@ -188,16 +188,6 @@ service_postgres_ctl_loop(LocalPostgresServer *postgres)
 	/* make sure to initialize the expected Postgres status to unknown */
 	pgStatus->pgExpectedStatus = PG_EXPECTED_STATUS_UNKNOWN;
 
-	if (pg_setup_pgdata_exists(pgSetup))
-	{
-		if (!local_postgres_set_status_path(postgres, true))
-		{
-			log_error("Failed to clean-up postgres state file pathname, "
-					  "see above for details.");
-			exit(EXIT_CODE_BAD_STATE);
-		}
-	}
-
 	for (;;)
 	{
 		int status;
