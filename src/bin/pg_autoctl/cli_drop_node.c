@@ -607,9 +607,47 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 	 */
 	pid_t pid = 0;
 
-	if (!wait_for_pid_to_exit(config->pathnames.pid, 30, &pid))
+	/*
+	 * Before continuing we need to make sure that a currently running service
+	 * has stopped.
+	 */
+	bool stopped;
+	if (dropForce)
 	{
-		/* if the service isn't terminated in 30s, signal it to quit now */
+		/*
+		 * If --force is used, we skip the transition to "dropped". So a
+		 * currently running process won't realise it's dropped, which means it
+		 * will not exit by itself. Thus all we need to know is if it's running
+		 * now or not.
+		 */
+		if (!is_process_stopped(config->pathnames.pid, &stopped, &pid))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+	}
+	else
+	{
+		/*
+		 * If --force isn't used then a running pg_autoctl process will detect
+		 * that it is dropped and clean itself up nicely and finally it will
+		 * exit. We give the process 30 seconds to exit by itself.
+		 */
+		if (!wait_for_process_to_stop(config->pathnames.pid, 30, &stopped, &pid))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+	}
+
+	/*
+	 * If the service is not stopped yet,  we just want to process to exit
+	 * so we can take over. This can happen either because --force was used
+	 * or because 30 seconds was not enough time for the service to exit.
+	 */
+	if (!stopped)
+	{
+		/* if the service isn't terminated, signal it to quit now */
 		log_info("Sending signal %s to pg_autoctl process %d",
 				 signal_to_string(SIGQUIT),
 				 pid);
@@ -620,7 +658,8 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 
-		if (!wait_for_pid_to_exit(config->pathnames.pid, 30, &pid))
+		if (!wait_for_process_to_stop(config->pathnames.pid, 30, &stopped, &pid) ||
+			!stopped)
 		{
 			log_fatal("Failed to stop the pg_autoctl process with pid %d", pid);
 			exit(EXIT_CODE_INTERNAL_ERROR);
@@ -712,7 +751,9 @@ cli_drop_node_with_monitor_disabled(KeeperConfig *config, bool dropAndDestroy)
 				exit(EXIT_CODE_INTERNAL_ERROR);
 			}
 
-			if (!wait_for_pid_to_exit(config->pathnames.pid, 30, &pid))
+			bool stopped;
+			if (!wait_for_process_to_stop(config->pathnames.pid, 30, &stopped, &pid) ||
+				!stopped)
 			{
 				log_fatal(
 					"Failed to stop the pg_autoctl process with pid %d",
@@ -779,7 +820,9 @@ cli_drop_local_monitor(MonitorConfig *mconfig, bool dropAndDestroy)
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 
-		if (!wait_for_pid_to_exit(mconfig->pathnames.pid, 30, &pid))
+		bool stopped;
+		if (!wait_for_process_to_stop(mconfig->pathnames.pid, 30, &stopped, &pid) ||
+			!stopped)
 		{
 			log_fatal("Failed to stop the pg_autoctl process with pid %d", pid);
 			exit(EXIT_CODE_INTERNAL_ERROR);
