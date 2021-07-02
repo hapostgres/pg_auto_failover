@@ -1463,8 +1463,9 @@ fsm_init_from_standby(Keeper *keeper)
 /*
  * fsm_drop_node is called to finish dropping a node on the client side.
  *
- * This stops postgres. It also cleans up any existing init file, which can
- * confuse a possible future re-init of the node.
+ * This stops postgres and updates the postgres state file to say that postgres
+ * should be stopped. It also cleans up any existing init file. Not doing these
+ * two things can confuse a possible future re-init of the node.
  */
 bool
 fsm_drop_node(Keeper *keeper)
