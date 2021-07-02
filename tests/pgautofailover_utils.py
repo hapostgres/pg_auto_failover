@@ -1106,6 +1106,9 @@ class DataNode(PGNode):
         """
         Cleans up processes and files created for this data node.
         """
+
+        self.stop_pg_autoctl()
+
         flags = ["--destroy"]
         if force:
             flags.append("--force")
