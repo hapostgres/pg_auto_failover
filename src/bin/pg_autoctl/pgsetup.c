@@ -1038,6 +1038,10 @@ pg_setup_wait_until_is_ready(PostgresSetup *pgSetup, int timeout, int logLevel)
 
 	for (attempts = 1; !pgIsRunning; attempts++)
 	{
+		if (asked_to_stop || asked_to_stop_fast || asked_to_quit)
+		{
+			return false;
+		}
 		uint64_t now = time(NULL);
 
 		/* sleep 100 ms in between postmaster.pid probes */
