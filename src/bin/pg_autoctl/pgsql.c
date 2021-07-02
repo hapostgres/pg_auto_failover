@@ -478,7 +478,7 @@ log_connection_error(PGconn *connection, int logLevel)
 /*
  * pgsql_open_connection opens a PostgreSQL connection, given a PGSQL client
  * instance. If a connection is already open in the client (it's not NULL),
- * then pgsql_open_connection reuses it and returns it immediately.
+ * then this errors, unless we are inside a transaction opened by pgsql_begin.
  */
 static PGconn *
 pgsql_open_connection(PGSQL *pgsql)
@@ -873,17 +873,21 @@ pgAutoCtlDebugNoticeProcessor(void *arg, const char *message)
 bool
 pgsql_begin(PGSQL *pgsql)
 {
-	PGconn *connection;
-
-	pgsql->connectionStatementType = PGSQL_CONNECTION_MULTI_STATEMENT;
-	connection = pgsql_open_connection(pgsql);
-	if (connection == NULL)
+	if (!pgsql_execute(pgsql, "BEGIN"))
 	{
-		/* error message was logged in pgsql_open_connection */
+		/*
+		 * connection is closed by pgsql_execute already, so no need for
+		 * further cleanup.
+		 */
 		return false;
 	}
 
-	return pgsql_execute(pgsql, "BEGIN");
+	/*
+	 * Indicate that we're in a transaction so that we can detect bugs easily.
+	 */
+	pgsql->connectionStatementType = PGSQL_CONNECTION_MULTI_STATEMENT;
+
+	return true;
 }
 
 
