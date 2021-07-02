@@ -52,7 +52,10 @@ static int cli_drop_node_getopts(int argc, char **argv);
 static void cli_drop_node(int argc, char **argv);
 static void cli_drop_monitor(int argc, char **argv);
 
-static void cli_drop_node_from_monitor(KeeperConfig *config);
+static void cli_drop_node_from_monitor(KeeperConfig *config,
+									   int64_t *nodeId,
+									   int *groupId);
+
 static void cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy);
 static void cli_drop_local_monitor(MonitorConfig *mconfig, bool dropAndDestroy);
 
@@ -62,6 +65,7 @@ static void cli_drop_node_files_and_directories(KeeperConfig *config);
 static void stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathnames,
 													   PostgresSetup *pgSetup);
 
+static void cli_drop_node_from_monitor_and_wait(KeeperConfig *config);
 
 CommandLine drop_monitor_command =
 	make_command("monitor",
@@ -85,7 +89,8 @@ CommandLine drop_node_command =
 		"  --hostname    drop the node with given hostname and pgport\n"
 		"  --pgport      drop the node with given hostname and pgport\n"
 		"  --destroy     also destroy Postgres database\n"
-		"  --force       force dropping the node from the monitor\n",
+		"  --force       force dropping the node from the monitor\n"
+		"  --wait        how many seconds to wait, default to 60 \n",
 		cli_drop_node_getopts,
 		cli_drop_node);
 
@@ -108,6 +113,7 @@ cli_drop_node_getopts(int argc, char **argv)
 		{ "hostname", required_argument, NULL, 'n' },
 		{ "pgport", required_argument, NULL, 'p' },
 		{ "formation", required_argument, NULL, 'f' },
+		{ "wait", required_argument, NULL, 'w' },
 		{ "name", required_argument, NULL, 'a' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
@@ -117,6 +123,9 @@ cli_drop_node_getopts(int argc, char **argv)
 	};
 
 	optind = 0;
+
+	options.listen_notifications_timeout =
+		PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT;
 
 	while ((c = getopt_long(argc, argv, "D:dn:p:Vvqh",
 							long_options, &option_index)) != -1)
@@ -188,6 +197,19 @@ cli_drop_node_getopts(int argc, char **argv)
 				/* { "name", required_argument, NULL, 'a' }, */
 				strlcpy(options.name, optarg, _POSIX_HOST_NAME_MAX);
 				log_trace("--name %s", options.name);
+				break;
+			}
+
+			case 'w':
+			{
+				/* { "wait", required_argument, NULL, 'w' }, */
+				if (!stringToInt(optarg, &options.listen_notifications_timeout))
+				{
+					log_fatal("--wait argument is not a valid timeout: \"%s\"",
+							  optarg);
+					exit(EXIT_CODE_BAD_ARGS);
+				}
+				log_trace("--wait %d", options.listen_notifications_timeout);
 				break;
 			}
 
@@ -395,7 +417,7 @@ cli_drop_node(int argc, char **argv)
 			exit(EXIT_CODE_BAD_ARGS);
 		}
 
-		(void) cli_drop_node_from_monitor(&config);
+		(void) cli_drop_node_from_monitor_and_wait(&config);
 	}
 }
 
@@ -483,7 +505,7 @@ cli_drop_monitor(int argc, char **argv)
  * --name.
  */
 static void
-cli_drop_node_from_monitor(KeeperConfig *config)
+cli_drop_node_from_monitor(KeeperConfig *config, int64_t *nodeId, int *groupId)
 {
 	Monitor monitor = { 0 };
 
@@ -498,7 +520,9 @@ cli_drop_node_from_monitor(KeeperConfig *config)
 		if (!monitor_remove_by_nodename(&monitor,
 										(char *) config->formation,
 										(char *) config->name,
-										dropForce))
+										dropForce,
+										nodeId,
+										groupId))
 		{
 			/* errors have already been logged */
 			exit(EXIT_CODE_MONITOR);
@@ -518,7 +542,9 @@ cli_drop_node_from_monitor(KeeperConfig *config)
 		if (!monitor_remove_by_hostname(&monitor,
 										(char *) config->hostname,
 										pgport,
-										dropForce))
+										dropForce,
+										nodeId,
+										groupId))
 		{
 			/* errors have already been logged */
 			exit(EXIT_CODE_MONITOR);
@@ -569,7 +595,10 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 	/* first drop the node from the monitor  */
 	if (keeperState->assigned_role != DROPPED_STATE)
 	{
-		(void) cli_drop_node_from_monitor(config);
+		int64_t nodeId = -1;
+		int groupId = -1;
+
+		(void) cli_drop_node_from_monitor(config, &nodeId, &groupId);
 	}
 
 	/*
@@ -849,5 +878,84 @@ stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathnames,
 	{
 		/* errors have already been logged. */
 		exit(EXIT_CODE_BAD_CONFIG);
+	}
+}
+
+
+/*
+ * cli_drop_node_from_monitor_and_wait waits until the node doesn't exist
+ * anymore on the monitor, meaning it's been fully dropped now.
+ */
+static void
+cli_drop_node_from_monitor_and_wait(KeeperConfig *config)
+{
+	bool dropped = false;
+	Monitor monitor = { 0 };
+
+	(void) cli_monitor_init_from_option_or_config(&monitor, config);
+
+	/* call pgautofailover.remove_node() on the monitor */
+	int64_t nodeId;
+	int groupId;
+
+	(void) cli_drop_node_from_monitor(config, &nodeId, &groupId);
+
+	/* if the timeout is zero, just don't wait at all */
+	if (config->listen_notifications_timeout == 0)
+	{
+		return;
+	}
+
+	log_info("Waiting until the node with id %lld in group %d has been "
+			 "dropped from the monitor, or for %ds, whichever comes first",
+			 (long long) nodeId, groupId, config->listen_notifications_timeout);
+
+	uint64_t start = time(NULL);
+
+	/* establish a connection for notifications if none present */
+	(void) pgsql_prepare_to_wait(&(monitor.notificationClient));
+
+	while (!dropped)
+	{
+		NodeAddressArray nodesArray = { 0 };
+
+		bool groupStateHasChanged = false;
+		int timeoutMs = PG_AUTOCTL_KEEPER_SLEEP_TIME * 1000;
+
+		uint64_t now = time(NULL);
+
+		if ((now - start) > config->listen_notifications_timeout)
+		{
+			log_error("Failed to wait until the node has been dropped");
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+
+		(void) monitor_wait_for_state_change(&monitor,
+											 config->formation,
+											 groupId,
+											 nodeId,
+											 timeoutMs,
+											 &groupStateHasChanged);
+
+		if (!monitor_find_node_by_nodeid(&monitor,
+										 config->formation,
+										 groupId,
+										 nodeId,
+										 &nodesArray))
+		{
+			log_error("Failed to query monitor to see if node id %lld "
+					  "has been dropped already",
+					  (long long) nodeId);
+			exit(EXIT_CODE_MONITOR);
+		}
+
+		dropped = nodesArray.count == 0;
+
+		if (dropped)
+		{
+			log_info("Node with id %lld in group %d has been successfully "
+					 "dropped from the monitor",
+					 (long long) nodeId, groupId);
+		}
 	}
 }

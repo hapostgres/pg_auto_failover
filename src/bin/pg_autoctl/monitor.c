@@ -71,6 +71,15 @@ typedef struct CurrentNodeStateContext
 	bool parsedOK;
 } CurrentNodeStateContext;
 
+typedef struct RemoveNodeContext
+{
+	char sqlstate[SQLSTATE_LENGTH];
+	int64_t nodeId;
+	int groupId;
+	bool removed;
+	bool parsedOK;
+} RemoveNodeContext;
+
 /* either "monitor" or "formation" */
 #define CONNTYPE_LENGTH 10
 
@@ -100,6 +109,7 @@ static bool parseCurrentNodeState(PGresult *result, int rowNumber,
 								  CurrentNodeState *nodeState);
 static bool parseCurrentNodeStateArray(CurrentNodeStateArray *nodesArray,
 									   PGresult *result);
+static void parseRemoveNodeContext(void *ctx, PGresult *result);
 static void printCurrentState(void *ctx, PGresult *result);
 static void printLastEvents(void *ctx, PGresult *result);
 static void printFormationSettings(void *ctx, PGresult *result);
@@ -1215,11 +1225,15 @@ monitor_set_formation_number_sync_standbys(Monitor *monitor, char *formation,
  * on the monitor.
  */
 bool
-monitor_remove_by_hostname(Monitor *monitor, char *host, int port, bool force)
+monitor_remove_by_hostname(Monitor *monitor, char *host, int port, bool force,
+						   int64_t *nodeId, int *groupId)
 {
-	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BOOL, false };
+	RemoveNodeContext context = { 0 };
 	PGSQL *pgsql = &monitor->pgsql;
-	const char *sql = "SELECT pgautofailover.remove_node($1, $2, $3)";
+	const char *sql =
+		"SELECT nodeid, groupid, pgautofailover.remove_node($1, $2, $3) "
+		"  FROM pgautofailover.node"
+		" WHERE nodehost = $1 and nodeport = $2";
 	int paramCount = 3;
 	Oid paramTypes[3] = { TEXTOID, INT4OID, BOOLOID };
 	const char *paramValues[3];
@@ -1230,7 +1244,7 @@ monitor_remove_by_hostname(Monitor *monitor, char *host, int port, bool force)
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
-								   &context, &parseSingleValueResult))
+								   &context, &parseRemoveNodeContext))
 	{
 		/* if we fail to find the node we want to remove, we're good */
 		if (strcmp(context.sqlstate, STR_ERRCODE_UNDEFINED_OBJECT) == 0)
@@ -1242,7 +1256,7 @@ monitor_remove_by_hostname(Monitor *monitor, char *host, int port, bool force)
 		return false;
 	}
 
-	if (!context.parsedOk)
+	if (!context.parsedOK)
 	{
 		log_error("Failed to remove node %s:%d from the monitor: "
 				  "could not parse monitor's result.", host, port);
@@ -1257,6 +1271,9 @@ monitor_remove_by_hostname(Monitor *monitor, char *host, int port, bool force)
 	 * The only case where we return false here is when we failed to run the
 	 * pgautofailover.remove_node function on the monitor, see above.
 	 */
+	*nodeId = context.nodeId;
+	*groupId = context.groupId;
+
 	return true;
 }
 
@@ -1267,12 +1284,13 @@ monitor_remove_by_hostname(Monitor *monitor, char *host, int port, bool force)
  */
 bool
 monitor_remove_by_nodename(Monitor *monitor,
-						   char *formation, char *name, bool force)
+						   char *formation, char *name, bool force,
+						   int64_t *nodeId, int *groupId)
 {
-	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BOOL, false };
+	RemoveNodeContext context = { 0 };
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
-		"SELECT pgautofailover.remove_node(nodeid::int, $3) "
+		"SELECT nodeid, groupid, pgautofailover.remove_node(nodeid::int, $3) "
 		"  FROM pgautofailover.node"
 		" WHERE formationid = $1 and nodename = $2";
 
@@ -1282,22 +1300,20 @@ monitor_remove_by_nodename(Monitor *monitor,
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
-								   &context, &parseSingleValueResult))
+								   &context, &parseRemoveNodeContext))
 	{
 		log_error("Failed to remove node \"%s\" in formation \"%s\" "
 				  "from the monitor", name, formation);
 		return false;
 	}
 
-	if (!context.parsedOk && context.ntuples == 0)
+	if (!context.parsedOK)
 	{
-		log_error("Failed to find node \"%s\" in formation \"%s\" "
-				  "on the monitor", name, formation);
 		log_error("Failed to remove node \"%s\" in formation \"%s\" "
 				  "from the monitor", name, formation);
 		return false;
 	}
-	else if (!context.parsedOk)
+	else if (!context.parsedOK)
 	{
 		log_error("Failed to remove node \"%s\" in formation \"%s\" "
 				  "from the monitor: could not parse monitor's result.",
@@ -1313,7 +1329,80 @@ monitor_remove_by_nodename(Monitor *monitor,
 	 * The only case where we return false here is when we failed to run the
 	 * pgautofailover.remove_node function on the monitor, see above.
 	 */
+	*nodeId = context.nodeId;
+	*groupId = context.groupId;
+
 	return true;
+}
+
+
+/*
+ * parseRemoveNodeContext parses a nodeid and groupid, and the result of the
+ * monitor's function call pgautofailover.remove_node which is a boolean.
+ */
+static void
+parseRemoveNodeContext(void *ctx, PGresult *result)
+{
+	int errors = 0;
+	RemoveNodeContext *context = (RemoveNodeContext *) ctx;
+
+	context->parsedOK = false;
+
+	if (PQntuples(result) == 0)
+	{
+		log_error("Failed to find the node to remove on the monitor");
+		context->parsedOK = false;
+		return;
+	}
+	else if (PQntuples(result) != 1)
+	{
+		log_error("Query returned %d rows, expected 1", PQntuples(result));
+		context->parsedOK = false;
+		return;
+	}
+
+	if (PQnfields(result) != 3)
+	{
+		log_error("Query returned %d columns, expected 3", PQnfields(result));
+		context->parsedOK = false;
+		return;
+	}
+
+	char *value = PQgetvalue(result, 0, 0);
+
+	if (!stringToInt64(value, &context->nodeId))
+	{
+		log_error("Invalid node ID \"%s\" returned by monitor", value);
+		++errors;
+	}
+
+	value = PQgetvalue(result, 0, 1);
+
+	if (!stringToInt(value, &context->groupId))
+	{
+		log_error("Invalid group ID \"%s\" returned by monitor", value);
+		++errors;
+	}
+
+	value = PQgetvalue(result, 0, 2);
+	if (value == NULL || ((*value != 't') && (*value != 'f')))
+	{
+		log_error("Invalid boolean value \"%s\" returned by monitor", value);
+		++errors;
+	}
+	else
+	{
+		context->removed = (*value) == 't';
+	}
+
+	if (errors > 0)
+	{
+		context->parsedOK = false;
+		return;
+	}
+
+	/* if we reach this line, then we're good. */
+	context->parsedOK = true;
 }
 
 
