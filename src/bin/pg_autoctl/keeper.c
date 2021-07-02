@@ -1685,6 +1685,7 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 	if (keeper->state.current_role == DROPPED_STATE &&
 		!file_exists(keeper->config.pathnames.init))
 	{
+		log_info("Making sure postgres was stopped, when it was previously dropped");
 		ensure_postgres_service_is_stopped(&keeper->postgres);
 	}
 
