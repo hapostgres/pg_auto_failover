@@ -1674,6 +1674,22 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 	}
 
 	/*
+	 * If we dropped a primary using --force, it's possible that the postgres
+	 * state file still says that postgres should be running. In that case
+	 * postgres would probably be running now. The problem is that our
+	 * fsm_init_primary transation errors out when a postgres is running during
+	 * initialization. So if we were dropped and this is the first time
+	 * create is run after that, then we first stop postgres and record this
+	 * in our postgres state file.
+	 */
+	if (keeper->state.current_role == DROPPED_STATE &&
+		!file_exists(keeper->config.pathnames.init))
+	{
+		log_info("Making sure postgres was stopped, when it was previously dropped");
+		ensure_postgres_service_is_stopped(&keeper->postgres);
+	}
+
+	/*
 	 * Leave a track record that we're ok to initialize in PGDATA, so that in
 	 * case of `pg_autoctl create` being interrupted, we may resume operations
 	 * and accept to work on already running PostgreSQL primary instances.
