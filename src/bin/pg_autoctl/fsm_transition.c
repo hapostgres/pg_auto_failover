@@ -1325,11 +1325,11 @@ fsm_fast_forward(Keeper *keeper)
 
 
 /*
- * fsm_cleanup_and_resume_as_primary cleans-up the replication setting and
- * start the local node as primary. It's called after a fast-forward operation.
+ * fsm_cleanup_as_primary cleans-up the replication setting. It's called after
+ * a fast-forward operation.
  */
 bool
-fsm_cleanup_and_resume_as_primary(Keeper *keeper)
+fsm_cleanup_as_primary(Keeper *keeper)
 {
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
@@ -1337,13 +1337,6 @@ fsm_cleanup_and_resume_as_primary(Keeper *keeper)
 	{
 		log_error("Failed to cleanup replication settings and restart Postgres "
 				  "to continue as a primary, see above for details");
-		return false;
-	}
-
-	if (!keeper_restart_postgres(keeper))
-	{
-		log_error("Failed to restart Postgres after changing its "
-				  "primary conninfo, see above for details");
 		return false;
 	}
 

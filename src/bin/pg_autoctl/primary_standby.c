@@ -1303,6 +1303,14 @@ standby_promote(LocalPostgresServer *postgres)
 		log_info("Waiting for postgres to promote");
 		pg_usleep(AWAIT_PROMOTION_SLEEP_TIME_MS * 1000);
 
+		if (asked_to_stop || asked_to_stop_fast)
+		{
+			log_trace("standby_promote: signaled");
+			pgsql_finish(pgsql);
+
+			return false;
+		}
+
 		if (!pgsql_is_in_recovery(pgsql, &inRecovery))
 		{
 			log_error("Failed to determine whether postgres is in "

@@ -575,3 +575,60 @@ printNodeEntry(NodeAddressHeaders *headers, NodeAddress *node)
 			tliLSN,
 			node->isPrimary ? "yes" : "no");
 }
+
+
+/*
+ * nodestateFilterArrayGroup filters the given nodesArray to only the nodes
+ * that are in the same group as the given node name.
+ */
+bool
+nodestateFilterArrayGroup(CurrentNodeStateArray *nodesArray, const char *name)
+{
+	int groupId = -1;
+	CurrentNodeStateArray nodesInSameGroup = { 0 };
+
+	/* first, find the groupId of the target node name */
+	for (int index = 0; index < nodesArray->count; index++)
+	{
+		CurrentNodeState *nodeState = &(nodesArray->nodes[index]);
+
+		if (strcmp(nodeState->node.name, name) == 0)
+		{
+			groupId = nodeState->groupId;
+
+			break;
+		}
+	}
+
+	/* return false when the node name was not found */
+	if (groupId == -1)
+	{
+		/* turn the given nodesArray into a all-zero empty array */
+		memset(nodesArray, 0, sizeof(CurrentNodeStateArray));
+
+		return false;
+	}
+
+	/* now, build a new nodesArray with only the nodes in the same group */
+	for (int index = 0; index < nodesArray->count; index++)
+	{
+		CurrentNodeState *nodeState = &(nodesArray->nodes[index]);
+
+		if (nodeState->groupId == groupId)
+		{
+			nodesInSameGroup.nodes[nodesInSameGroup.count] = *nodeState;
+			++nodesInSameGroup.count;
+		}
+	}
+
+	/*
+	 * Finally, override the nodesArray parameter with the new contents. Note
+	 * that we want to preserve the headers.
+	 */
+	NodeAddressHeaders headers = nodesArray->headers;
+
+	*nodesArray = nodesInSameGroup;
+	nodesArray->headers = headers;
+
+	return true;
+}
