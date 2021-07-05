@@ -176,6 +176,7 @@ CREATE TABLE pgautofailover.event
     reportedstate     pgautofailover.replication_state not null,
     goalstate         pgautofailover.replication_state not null,
     reportedrepstate  text,
+    reportedtli       int not null default 1 check (reportedtli > 0),
     reportedlsn       pg_lsn not null default '0/0',
     candidatepriority int,
     replicationquorum bool,
@@ -510,7 +511,7 @@ with last_events as
   select eventid, eventtime, formationid,
          nodeid, groupid, nodename, nodehost, nodeport,
          reportedstate, goalstate,
-         reportedrepstate, reportedlsn,
+         reportedrepstate, reportedtli, reportedlsn,
          candidatepriority, replicationquorum, description
     from pgautofailover.event
 order by eventid desc
@@ -521,6 +522,9 @@ $$;
 
 comment on function pgautofailover.last_events(int)
         is 'retrieve last COUNT events';
+
+grant execute on function pgautofailover.last_events(int)
+   to autoctl_node;
 
 CREATE FUNCTION pgautofailover.last_events
  (
@@ -534,7 +538,7 @@ with last_events as
     select eventid, eventtime, formationid,
            nodeid, groupid, nodename, nodehost, nodeport,
            reportedstate, goalstate,
-           reportedrepstate, reportedlsn,
+           reportedrepstate, reportedtli, reportedlsn,
            candidatepriority, replicationquorum, description
       from pgautofailover.event
      where formationid = formation_id
@@ -546,6 +550,9 @@ $$;
 
 comment on function pgautofailover.last_events(text,int)
         is 'retrieve last COUNT events for given formation';
+
+grant execute on function pgautofailover.last_events(text,int)
+   to autoctl_node;
 
 CREATE FUNCTION pgautofailover.last_events
  (
@@ -560,7 +567,7 @@ with last_events as
     select eventid, eventtime, formationid,
            nodeid, groupid, nodename, nodehost, nodeport,
            reportedstate, goalstate,
-           reportedrepstate, reportedlsn,
+           reportedrepstate, reportedtli, reportedlsn,
            candidatepriority, replicationquorum, description
       from pgautofailover.event
      where formationid = formation_id
@@ -573,6 +580,9 @@ $$;
 
 comment on function pgautofailover.last_events(text,int,int)
         is 'retrieve last COUNT events for given formation and group';
+
+grant execute on function pgautofailover.last_events(text,int,int)
+   to autoctl_node;
 
 CREATE FUNCTION pgautofailover.current_state
  (

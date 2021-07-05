@@ -2232,7 +2232,7 @@ monitor_print_last_events(Monitor *monitor, char *formation, int group, int coun
 								   paramCount, paramTypes, paramValues,
 								   &context, &printLastEvents))
 	{
-		log_error("Failed to retrieve current state from the monitor");
+		log_error("Failed to retrieve last events from the monitor");
 		return false;
 	}
 

@@ -18,6 +18,10 @@ DROP FUNCTION pgautofailover.get_other_nodes(int);
 DROP FUNCTION pgautofailover.get_other_nodes
               (integer,pgautofailover.replication_state);
 
+DROP FUNCTION pgautofailover.last_events(int);
+DROP FUNCTION pgautofailover.last_events(text,int);
+DROP FUNCTION pgautofailover.last_events(text,int,int);
+
 DROP FUNCTION pgautofailover.current_state(text);
 DROP FUNCTION pgautofailover.current_state(text,int);
 
@@ -158,6 +162,51 @@ INSERT INTO pgautofailover.node
         candidatepriority, replicationquorum, nodecluster
    FROM pgautofailover.node_upgrade_old;
 
+
+ALTER TABLE pgautofailover.event
+	RENAME TO event_upgrade_old;
+
+CREATE TABLE pgautofailover.event
+ (
+    eventid           bigint not null DEFAULT nextval('pgautofailover.event_eventid_seq'::regclass),
+    eventtime         timestamptz not null default now(),
+    formationid       text not null,
+    nodeid            bigint not null,
+    groupid           int not null,
+    nodename          text not null,
+    nodehost          text not null,
+    nodeport          integer not null,
+    reportedstate     pgautofailover.replication_state not null,
+    goalstate         pgautofailover.replication_state not null,
+    reportedrepstate  text,
+    reportedtli       int not null default 1 check (reportedtli > 0),
+    reportedlsn       pg_lsn not null default '0/0',
+    candidatepriority int,
+    replicationquorum bool,
+    description       text,
+
+    PRIMARY KEY (eventid)
+ );
+
+ALTER SEQUENCE pgautofailover.event_eventid_seq
+      OWNED BY pgautofailover.event.eventid;
+
+INSERT INTO pgautofailover.event
+ (
+  eventid, eventtime, formationid, nodeid, groupid,
+  nodename, nodehost, nodeport,
+  reportedstate, goalstate, reportedrepstate,
+  reportedtli, reportedlsn, candidatepriority, replicationquorum,
+  description
+ )
+ SELECT eventid, eventtime, formationid, nodeid, groupid,
+        nodename, nodehost, nodeport,
+        reportedstate, goalstate, reportedrepstate,
+        1 as reportedtli, reportedlsn, candidatepriority, replicationquorum,
+        description
+   FROM pgautofailover.event_upgrade_old as event;
+
+DROP TABLE pgautofailover.event_upgrade_old;
 DROP TABLE pgautofailover.node_upgrade_old;
 DROP TYPE pgautofailover.old_replication_state;
 
@@ -403,6 +452,91 @@ CREATE TRIGGER disable_secondary_check
 	ON pgautofailover.formation
 	FOR EACH ROW
 	EXECUTE PROCEDURE pgautofailover.update_secondary_check();
+
+
+CREATE FUNCTION pgautofailover.last_events
+ (
+  count int default 10
+ )
+RETURNS SETOF pgautofailover.event LANGUAGE SQL STRICT
+AS $$
+with last_events as
+(
+  select eventid, eventtime, formationid,
+         nodeid, groupid, nodename, nodehost, nodeport,
+         reportedstate, goalstate,
+         reportedrepstate, reportedtli, reportedlsn,
+         candidatepriority, replicationquorum, description
+    from pgautofailover.event
+order by eventid desc
+   limit count
+)
+select * from last_events order by eventtime, eventid;
+$$;
+
+comment on function pgautofailover.last_events(int)
+        is 'retrieve last COUNT events';
+
+grant execute on function pgautofailover.last_events(int)
+   to autoctl_node;
+
+CREATE FUNCTION pgautofailover.last_events
+ (
+  formation_id text default 'default',
+  count        int  default 10
+ )
+RETURNS SETOF pgautofailover.event LANGUAGE SQL STRICT
+AS $$
+with last_events as
+(
+    select eventid, eventtime, formationid,
+           nodeid, groupid, nodename, nodehost, nodeport,
+           reportedstate, goalstate,
+           reportedrepstate, reportedtli, reportedlsn,
+           candidatepriority, replicationquorum, description
+      from pgautofailover.event
+     where formationid = formation_id
+  order by eventid desc
+     limit count
+)
+select * from last_events order by eventtime, eventid;
+$$;
+
+comment on function pgautofailover.last_events(text,int)
+        is 'retrieve last COUNT events for given formation';
+
+grant execute on function pgautofailover.last_events(text,int)
+   to autoctl_node;
+
+CREATE FUNCTION pgautofailover.last_events
+ (
+  formation_id text,
+  group_id     int,
+  count        int default 10
+ )
+RETURNS SETOF pgautofailover.event LANGUAGE SQL STRICT
+AS $$
+with last_events as
+(
+    select eventid, eventtime, formationid,
+           nodeid, groupid, nodename, nodehost, nodeport,
+           reportedstate, goalstate,
+           reportedrepstate, reportedtli, reportedlsn,
+           candidatepriority, replicationquorum, description
+      from pgautofailover.event
+     where formationid = formation_id
+       and groupid = group_id
+  order by eventid desc
+     limit count
+)
+select * from last_events order by eventtime, eventid;
+$$;
+
+comment on function pgautofailover.last_events(text,int,int)
+        is 'retrieve last COUNT events for given formation and group';
+
+grant execute on function pgautofailover.last_events(text,int,int)
+   to autoctl_node;
 
 
 CREATE FUNCTION pgautofailover.current_state
