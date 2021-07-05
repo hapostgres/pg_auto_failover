@@ -523,6 +523,9 @@ $$;
 comment on function pgautofailover.last_events(int)
         is 'retrieve last COUNT events';
 
+grant execute on function pgautofailover.last_events(int)
+   to autoctl_node;
+
 CREATE FUNCTION pgautofailover.last_events
  (
   formation_id text default 'default',
@@ -547,6 +550,9 @@ $$;
 
 comment on function pgautofailover.last_events(text,int)
         is 'retrieve last COUNT events for given formation';
+
+grant execute on function pgautofailover.last_events(text,int)
+   to autoctl_node;
 
 CREATE FUNCTION pgautofailover.last_events
  (
@@ -574,6 +580,9 @@ $$;
 
 comment on function pgautofailover.last_events(text,int,int)
         is 'retrieve last COUNT events for given formation and group';
+
+grant execute on function pgautofailover.last_events(text,int,int)
+   to autoctl_node;
 
 CREATE FUNCTION pgautofailover.current_state
  (
