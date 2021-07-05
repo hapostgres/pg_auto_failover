@@ -134,6 +134,7 @@ InsertEvent(AutoFailoverNode *node, char *description)
 		replicationStateTypeOid, /* reportedstate */
 		replicationStateTypeOid, /* goalstate */
 		TEXTOID, /* pg_stat_replication.sync_state */
+		INT4OID, /* timeline_id */
 		LSNOID,  /* reportedLSN */
 		INT4OID, /* candidate_priority */
 		BOOLOID, /* replication_quorum */
@@ -150,6 +151,7 @@ InsertEvent(AutoFailoverNode *node, char *description)
 		ObjectIdGetDatum(reportedStateOid), /* reportedstate */
 		ObjectIdGetDatum(goalStateOid),     /* goalstate */
 		CStringGetTextDatum(SyncStateToString(node->pgsrSyncState)), /* sync_state */
+		Int32GetDatum(node->reportedTLI),         /* reportedTLI */
 		LSNGetDatum(node->reportedLSN),           /* reportedLSN */
 		Int32GetDatum(node->candidatePriority),   /* candidate_priority */
 		BoolGetDatum(node->replicationQuorum),    /* replication_quorum */
@@ -162,9 +164,9 @@ InsertEvent(AutoFailoverNode *node, char *description)
 	const char *insertQuery =
 		"INSERT INTO " AUTO_FAILOVER_EVENT_TABLE
 		"(formationid, nodeid, groupid, nodename, nodehost, nodeport,"
-		" reportedstate, goalstate, reportedrepstate, reportedlsn,"
+		" reportedstate, goalstate, reportedrepstate, reportedtli, reportedlsn,"
 		" candidatepriority, replicationquorum, description) "
-		"VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) "
+		"VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) "
 		"RETURNING eventid";
 
 	SPI_connect();

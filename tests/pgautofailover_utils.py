@@ -669,19 +669,19 @@ class PGNode:
         if events:
             return "\n".join(
                 [
-                    "%32s %8s %17s/%-17s %7s %10s %s"
+                    "%32s %8s %17s/%-17s %10s %10s %s"
                     % (
                         "eventtime",
                         "name",
                         "state",
                         "goal state",
                         "repl st",
-                        "lsn",
+                        "tli:lsn",
                         "event",
                     )
                 ]
                 + [
-                    "%32s %8s %17s/%-17s %7s %10s %s" % result
+                    "%32s %8s %17s/%-17s %3d:%7s %10s %s" % result
                     for result in events
                 ]
             )
@@ -1274,7 +1274,7 @@ SELECT reportedstate, goalstate
             last_events_query = (
                 "select eventtime, nodename, "
                 "reportedstate, goalstate, "
-                "reportedrepstate, reportedlsn, description "
+                "reportedrepstate, reportedtli, reportedlsn, description "
                 "from pgautofailover.last_events('default', count => 20)"
             )
             return self.monitor.get_events()
@@ -1842,7 +1842,7 @@ class MonitorNode(PGNode):
         last_events_query = (
             "select eventtime, nodename, "
             "reportedstate, goalstate, "
-            "reportedrepstate, reportedlsn, description "
+            "reportedrepstate, reportedtli, reportedlsn, description "
             "from pgautofailover.last_events('default', count => 20)"
         )
 
