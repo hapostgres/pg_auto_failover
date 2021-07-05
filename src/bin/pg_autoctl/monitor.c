@@ -1848,7 +1848,12 @@ monitor_get_current_state(Monitor *monitor, char *formation, int group,
 		case -1:
 		{
 			sql =
-				"SELECT * FROM pgautofailover.current_state($1) "
+				"  SELECT formation_kind, nodename, nodehost, nodeport, "
+				"         group_id, node_id, "
+				"         current_group_state, assigned_group_state, "
+				"         candidate_priority, replication_quorum, "
+				"         reported_tli, reported_lsn, health, nodecluster "
+				"    FROM pgautofailover.current_state($1) "
 				"ORDER BY group_id, node_id";
 
 			paramCount = 1;
@@ -1861,7 +1866,12 @@ monitor_get_current_state(Monitor *monitor, char *formation, int group,
 		default:
 		{
 			sql =
-				"SELECT * FROM pgautofailover.current_state($1,$2) "
+				"  SELECT formation_kind, nodename, nodehost, nodeport, "
+				"         group_id, node_id, "
+				"         current_group_state, assigned_group_state, "
+				"         candidate_priority, replication_quorum, "
+				"         reported_tli, reported_lsn, health, nodecluster "
+				"    FROM pgautofailover.current_state($1, $2) "
 				"ORDER BY group_id, node_id";
 
 			groupStr = intToString(group);
@@ -1906,7 +1916,7 @@ parseCurrentNodeState(PGresult *result, int rowNumber,
 	int errors = 0;
 
 	/* we don't expect any of the column to be NULL */
-	for (colNumber = 0; colNumber < 13; colNumber++)
+	for (colNumber = 0; colNumber < 14; colNumber++)
 	{
 		if (PQgetisnull(result, rowNumber, 0))
 		{
@@ -1930,6 +1940,7 @@ parseCurrentNodeState(PGresult *result, int rowNumber,
 	 * 10 - OUT reported_tli         int,
 	 * 11 - OUT reported_lsn         pg_lsn,
 	 * 12 - OUT health               integer
+	 * 13 - OUT nodecluster          text
 	 *
 	 * We need the groupId to parse the formation kind into a nodeKind, so we
 	 * begin at column 1 and get back to column 0 later, after column 4.
@@ -2054,6 +2065,16 @@ parseCurrentNodeState(PGresult *result, int rowNumber,
 		++errors;
 	}
 
+	value = PQgetvalue(result, rowNumber, 13);
+	length = strlcpy(nodeState->citusClusterName, value, NAMEDATALEN);
+	if (length >= NAMEDATALEN)
+	{
+		log_error("Cluster name \"%s\" returned by monitor is %d characters, "
+				  "the maximum supported by pg_autoctl is %d",
+				  value, length, NAMEDATALEN - 1);
+		++errors;
+	}
+
 	return errors == 0;
 }
 
@@ -2080,9 +2101,9 @@ parseCurrentNodeStateArray(CurrentNodeStateArray *nodesArray, PGresult *result)
 	}
 
 	/* pgautofailover.current_state returns 11 columns */
-	if (PQnfields(result) != 13)
+	if (PQnfields(result) != 14)
 	{
-		log_error("Query returned %d columns, expected 13", PQnfields(result));
+		log_error("Query returned %d columns, expected 14", PQnfields(result));
 		return false;
 	}
 
