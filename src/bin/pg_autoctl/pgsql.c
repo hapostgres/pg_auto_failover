@@ -1077,6 +1077,7 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 		 * with a badly formed SQL query etc.
 		 */
 		if (pgsql->connectionType == PGSQL_CONN_MONITOR &&
+			sqlstate != NULL &&
 			!(strcmp(sqlstate, ERRCODE_INVALID_OBJECT_DEFINITION) == 0 ||
 			  strcmp(sqlstate, ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE) == 0 ||
 			  strcmp(sqlstate, ERRCODE_OBJECT_IN_USE) == 0 ||
