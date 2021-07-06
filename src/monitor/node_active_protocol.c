@@ -1124,9 +1124,6 @@ RemoveNode(AutoFailoverNode *currentNode, bool force)
 	/* review the FSM for every other node, when removing the primary */
 	if (currentNodeIsPrimary)
 	{
-		int nodeCount = 0;
-		int candidates = 0;
-
 		foreach(nodeCell, otherNodesGroupList)
 		{
 			char message[BUFSIZE] = { 0 };
@@ -1137,13 +1134,6 @@ RemoveNode(AutoFailoverNode *currentNode, bool force)
 				/* shouldn't happen */
 				ereport(ERROR, (errmsg("BUG: node is NULL")));
 				continue;
-			}
-
-			++nodeCount;
-
-			if (node->candidatePriority > 0)
-			{
-				++candidates;
 			}
 
 			/* skip nodes that are currently in maintenance */
@@ -1159,21 +1149,6 @@ RemoveNode(AutoFailoverNode *currentNode, bool force)
 				NODE_FORMAT_ARGS(node));
 
 			SetNodeGoalState(node, REPLICATION_STATE_REPORT_LSN, message);
-		}
-
-		/*
-		 * Refuse to remove the primary node when there is no candidate, unless
-		 * the primary is the only node left of course.
-		 */
-		if (nodeCount > 0 && candidates == 0)
-		{
-			ereport(NOTICE,
-					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-					 errmsg("cannot remove current primary node " NODE_FORMAT,
-							NODE_FORMAT_ARGS(currentNode)),
-					 errdetail("At least one node with candidate priority "
-							   "greater than zero is needed to remove a "
-							   "primary node.")));
 		}
 	}
 

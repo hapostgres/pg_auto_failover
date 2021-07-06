@@ -1890,10 +1890,11 @@ pg_ctl_status(const char *pg_ctl, const char *pgdata, bool log_output)
 bool
 pg_ctl_promote(const char *pg_ctl, const char *pgdata)
 {
-	Program program = run_program(pg_ctl, "promote", "-D", pgdata, "-w", NULL);
+	Program program =
+		run_program(pg_ctl, "promote", "-D", pgdata, "--no-wait", NULL);
 	int returnCode = program.returnCode;
 
-	log_debug("%s promote -D %s", pg_ctl, pgdata);
+	log_debug("%s promote -D %s --no-wait", pg_ctl, pgdata);
 
 	if (program.stdErr != NULL)
 	{

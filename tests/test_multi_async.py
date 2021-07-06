@@ -263,7 +263,7 @@ def test_014_003_restart_node1():
     # node1 used to be primary, now demoted, and meanwhile node2 was primary
     # node1 is assigned report_lsn and then is selected (only node with
     # candidate priority > 0) ; and thus needs to go through fast_forward
-    assert node1.wait_until_state(target_state="fast_forward")
+    assert node1.wait_until_assigned_state(target_state="fast_forward")
     assert node1.wait_until_state(target_state="stop_replication")
     assert node1.wait_until_state(target_state="wait_primary")
     assert node3.wait_until_state(target_state="secondary")

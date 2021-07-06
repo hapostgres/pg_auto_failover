@@ -14,6 +14,7 @@
 
 #include "pgsql.h"
 #include "monitor_config.h"
+#include "nodestate_utils.h"
 #include "primary_standby.h"
 #include "state.h"
 
@@ -53,6 +54,12 @@ typedef struct MonitorExtensionVersion
 	char installedVersion[BUFSIZE];
 } MonitorExtensionVersion;
 
+typedef struct CoordinatorNodeAddress
+{
+	bool found;
+	NodeAddress node;
+} CoordinatorNodeAddress;
+
 #define NODE_FORMAT "%" PRId64 " \"%s\" (%s:%d)"
 
 bool monitor_init(Monitor *monitor, char *url);
@@ -84,7 +91,7 @@ bool monitor_print_other_nodes_as_json(Monitor *monitor,
 bool monitor_get_primary(Monitor *monitor, char *formation, int groupId,
 						 NodeAddress *node);
 bool monitor_get_coordinator(Monitor *monitor, char *formation,
-							 NodeAddress *node);
+							 CoordinatorNodeAddress *coordinatorNodeAddress);
 bool monitor_get_most_advanced_standby(Monitor *monitor,
 									   char *formation, int groupId,
 									   NodeAddress *node);
@@ -138,6 +145,8 @@ bool monitor_get_groupId_from_name(Monitor *monitor,
 bool monitor_perform_failover(Monitor *monitor, char *formation, int group);
 bool monitor_perform_promotion(Monitor *monitor, char *formation, char *name);
 
+bool monitor_get_current_state(Monitor *monitor, char *formation, int group,
+							   CurrentNodeStateArray *nodesArray);
 bool monitor_print_state(Monitor *monitor, char *formation, int group);
 bool monitor_print_last_events(Monitor *monitor,
 							   char *formation, int group, int count);

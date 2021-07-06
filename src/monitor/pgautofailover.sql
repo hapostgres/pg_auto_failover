@@ -599,14 +599,15 @@ CREATE FUNCTION pgautofailover.current_state
    OUT replication_quorum	bool,
    OUT reported_tli         int,
    OUT reported_lsn         pg_lsn,
-   OUT health               integer
+   OUT health               integer,
+   OUT nodecluster          text
  )
 RETURNS SETOF record LANGUAGE SQL STRICT
 AS $$
    select kind, nodename, nodehost, nodeport, groupid, nodeid,
           reportedstate, goalstate,
    		  candidatepriority, replicationquorum,
-          reportedtli, reportedlsn, health
+          reportedtli, reportedlsn, health, nodecluster
      from pgautofailover.node
      join pgautofailover.formation using(formationid)
     where formationid = formation_id
@@ -632,14 +633,15 @@ CREATE FUNCTION pgautofailover.current_state
    OUT replication_quorum	bool,
    OUT reported_tli         int,
    OUT reported_lsn         pg_lsn,
-   OUT health               integer
+   OUT health               integer,
+   OUT nodecluster          text
  )
 RETURNS SETOF record LANGUAGE SQL STRICT
 AS $$
    select kind, nodename, nodehost, nodeport, groupid, nodeid,
           reportedstate, goalstate,
    		  candidatepriority, replicationquorum,
-          reportedtli, reportedlsn, health
+          reportedtli, reportedlsn, health, nodecluster
      from pgautofailover.node
      join pgautofailover.formation using(formationid)
     where formationid = formation_id

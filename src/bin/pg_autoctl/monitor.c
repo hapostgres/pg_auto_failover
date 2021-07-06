@@ -110,7 +110,7 @@ static bool parseCurrentNodeState(PGresult *result, int rowNumber,
 static bool parseCurrentNodeStateArray(CurrentNodeStateArray *nodesArray,
 									   PGresult *result);
 static void parseRemoveNodeContext(void *ctx, PGresult *result);
-static void printCurrentState(void *ctx, PGresult *result);
+static void getCurrentState(void *ctx, PGresult *result);
 static void printLastEvents(void *ctx, PGresult *result);
 static void printFormationSettings(void *ctx, PGresult *result);
 static void printFormationURI(void *ctx, PGresult *result);
@@ -671,14 +671,21 @@ monitor_get_primary(Monitor *monitor, char *formation, int groupId,
  * monitor_get_coordinator gets the coordinator node in a given formation.
  */
 bool
-monitor_get_coordinator(Monitor *monitor, char *formation, NodeAddress *node)
+monitor_get_coordinator(Monitor *monitor, char *formation,
+						CoordinatorNodeAddress *coordinatorNodeAddress)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql = "SELECT * FROM pgautofailover.get_coordinator($1)";
+
 	int paramCount = 1;
 	Oid paramTypes[1] = { TEXTOID };
 	const char *paramValues[1];
-	NodeAddressParseContext parseContext = { { 0 }, node, false };
+
+	NodeAddressParseContext parseContext = {
+		{ 0 },
+		&(coordinatorNodeAddress->node),
+		false
+	};
 
 	paramValues[0] = formation;
 
@@ -711,8 +718,11 @@ monitor_get_coordinator(Monitor *monitor, char *formation, NodeAddress *node)
 		return false;
 	}
 
+	coordinatorNodeAddress->found = true;
+
 	log_debug("The coordinator node returned by the monitor is %s:%d",
-			  node->host, node->port);
+			  coordinatorNodeAddress->node.host,
+			  coordinatorNodeAddress->node.port);
 
 	return true;
 }
@@ -1782,7 +1792,48 @@ bool
 monitor_print_state(Monitor *monitor, char *formation, int group)
 {
 	CurrentNodeStateArray nodesArray = { 0 };
-	CurrentNodeStateContext context = { { 0 }, &nodesArray, false };
+	NodeAddressHeaders *headers = &(nodesArray.headers);
+	PgInstanceKind firstNodeKind = NODE_KIND_UNKNOWN;
+
+	if (!monitor_get_current_state(monitor, formation, group, &nodesArray))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	if (nodesArray.count > 0)
+	{
+		firstNodeKind = nodesArray.nodes[0].pgKind;
+	}
+
+	(void) nodestatePrepareHeaders(&nodesArray, firstNodeKind);
+	(void) nodestatePrintHeader(headers);
+
+	for (int position = 0; position < nodesArray.count; position++)
+	{
+		CurrentNodeState *nodeState = &(nodesArray.nodes[position]);
+
+		(void) nodestatePrintNodeState(headers, nodeState);
+	}
+
+	fformat(stdout, "\n");
+
+	return true;
+}
+
+
+/*
+ * monitor_get_current_state gets the current state of a formation in the given
+ * pre-allocated nodesArray. When group is -1, the state of all the nodes that
+ * belong to the formation is retrieved. When group is 0 or more, the state for
+ * only the nodes that belong to the given group in the given formation is
+ * retrieved.
+ */
+bool
+monitor_get_current_state(Monitor *monitor, char *formation, int group,
+						  CurrentNodeStateArray *nodesArray)
+{
+	CurrentNodeStateContext context = { { 0 }, nodesArray, false };
 	PGSQL *pgsql = &monitor->pgsql;
 	char *sql = NULL;
 	int paramCount = 0;
@@ -1797,7 +1848,12 @@ monitor_print_state(Monitor *monitor, char *formation, int group)
 		case -1:
 		{
 			sql =
-				"SELECT * FROM pgautofailover.current_state($1) "
+				"  SELECT formation_kind, nodename, nodehost, nodeport, "
+				"         group_id, node_id, "
+				"         current_group_state, assigned_group_state, "
+				"         candidate_priority, replication_quorum, "
+				"         reported_tli, reported_lsn, health, nodecluster "
+				"    FROM pgautofailover.current_state($1) "
 				"ORDER BY group_id, node_id";
 
 			paramCount = 1;
@@ -1810,7 +1866,12 @@ monitor_print_state(Monitor *monitor, char *formation, int group)
 		default:
 		{
 			sql =
-				"SELECT * FROM pgautofailover.current_state($1,$2) "
+				"  SELECT formation_kind, nodename, nodehost, nodeport, "
+				"         group_id, node_id, "
+				"         current_group_state, assigned_group_state, "
+				"         candidate_priority, replication_quorum, "
+				"         reported_tli, reported_lsn, health, nodecluster "
+				"    FROM pgautofailover.current_state($1, $2) "
 				"ORDER BY group_id, node_id";
 
 			groupStr = intToString(group);
@@ -1827,7 +1888,7 @@ monitor_print_state(Monitor *monitor, char *formation, int group)
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
-								   &context, &printCurrentState))
+								   &context, &getCurrentState))
 	{
 		log_error("Failed to retrieve current state from the monitor");
 		return false;
@@ -1855,7 +1916,7 @@ parseCurrentNodeState(PGresult *result, int rowNumber,
 	int errors = 0;
 
 	/* we don't expect any of the column to be NULL */
-	for (colNumber = 0; colNumber < 13; colNumber++)
+	for (colNumber = 0; colNumber < 14; colNumber++)
 	{
 		if (PQgetisnull(result, rowNumber, 0))
 		{
@@ -1879,6 +1940,7 @@ parseCurrentNodeState(PGresult *result, int rowNumber,
 	 * 10 - OUT reported_tli         int,
 	 * 11 - OUT reported_lsn         pg_lsn,
 	 * 12 - OUT health               integer
+	 * 13 - OUT nodecluster          text
 	 *
 	 * We need the groupId to parse the formation kind into a nodeKind, so we
 	 * begin at column 1 and get back to column 0 later, after column 4.
@@ -2003,6 +2065,16 @@ parseCurrentNodeState(PGresult *result, int rowNumber,
 		++errors;
 	}
 
+	value = PQgetvalue(result, rowNumber, 13);
+	length = strlcpy(nodeState->citusClusterName, value, NAMEDATALEN);
+	if (length >= NAMEDATALEN)
+	{
+		log_error("Cluster name \"%s\" returned by monitor is %d characters, "
+				  "the maximum supported by pg_autoctl is %d",
+				  value, length, NAMEDATALEN - 1);
+		++errors;
+	}
+
 	return errors == 0;
 }
 
@@ -2029,9 +2101,9 @@ parseCurrentNodeStateArray(CurrentNodeStateArray *nodesArray, PGresult *result)
 	}
 
 	/* pgautofailover.current_state returns 11 columns */
-	if (PQnfields(result) != 13)
+	if (PQnfields(result) != 14)
 	{
-		log_error("Query returned %d columns, expected 13", PQnfields(result));
+		log_error("Query returned %d columns, expected 14", PQnfields(result));
 		return false;
 	}
 
@@ -2050,16 +2122,14 @@ parseCurrentNodeStateArray(CurrentNodeStateArray *nodesArray, PGresult *result)
 
 
 /*
- * printCurrentState loops over pgautofailover.current_state() results and
- * prints them, one per line.
+ * getCurrentState loops over pgautofailover.current_state() results and adds
+ * them to the context's nodes array.
  */
 static void
-printCurrentState(void *ctx, PGresult *result)
+getCurrentState(void *ctx, PGresult *result)
 {
 	CurrentNodeStateContext *context = (CurrentNodeStateContext *) ctx;
 	CurrentNodeStateArray *nodesArray = context->nodesArray;
-	NodeAddressHeaders *headers = &(nodesArray->headers);
-	PgInstanceKind firstNodeKind = NODE_KIND_UNKNOWN;
 
 	if (!parseCurrentNodeStateArray(nodesArray, result))
 	{
@@ -2067,23 +2137,6 @@ printCurrentState(void *ctx, PGresult *result)
 		context->parsedOK = false;
 		return;
 	}
-
-	if (nodesArray->count > 0)
-	{
-		firstNodeKind = nodesArray->nodes[0].pgKind;
-	}
-
-	(void) nodestatePrepareHeaders(nodesArray, firstNodeKind);
-	(void) nodestatePrintHeader(headers);
-
-	for (int position = 0; position < context->nodesArray->count; position++)
-	{
-		CurrentNodeState *nodeState = &(nodesArray->nodes[position]);
-
-		(void) nodestatePrintNodeState(headers, nodeState);
-	}
-
-	fformat(stdout, "\n");
 
 	context->parsedOK = true;
 }

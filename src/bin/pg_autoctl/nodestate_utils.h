@@ -24,6 +24,7 @@ typedef struct CurrentNodeState
 	NodeAddress node;
 
 	char formation[NAMEDATALEN];
+	char citusClusterName[NAMEDATALEN];
 	int groupId;
 	PgInstanceKind pgKind;
 
@@ -98,5 +99,8 @@ void nodestate_log(CurrentNodeState *nodeState, int logLevel, int64_t nodeId);
 void printNodeArray(NodeAddressArray *nodesArray);
 void printNodeHeader(NodeAddressHeaders *headers);
 void printNodeEntry(NodeAddressHeaders *headers, NodeAddress *node);
+
+bool nodestateFilterArrayGroup(CurrentNodeStateArray *nodesArray,
+							   const char *name);
 
 #endif /* NODESTATE_H */

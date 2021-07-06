@@ -23,6 +23,7 @@ extern KeeperConfig keeperOptions;
 extern bool createAndRun;
 extern bool outputJSON;
 extern bool openAppHBAonLAN;
+extern bool dropAndDestroy;
 
 #define SSL_CA_FILE_FLAG 1      /* root public certificate */
 #define SSL_CRL_FILE_FLAG 2     /* certificates revocation list */
@@ -172,7 +173,14 @@ void cli_set_groupId(Monitor *monitor, KeeperConfig *kconfig);
 bool cli_create_config(Keeper *keeper);
 void cli_create_pg(Keeper *keeper);
 bool check_or_discover_hostname(KeeperConfig *config);
+
+int cli_drop_node_getopts(int argc, char **argv);
+void cli_drop_node(int argc, char **argv);
 void keeper_cli_destroy_node(int argc, char **argv);
+
+void cli_drop_node_from_monitor(KeeperConfig *config,
+								int64_t *nodeId, int *groupId);
+void cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy);
 
 bool cli_getopt_ssl_flags(int ssl_flag, char *optarg, PostgresSetup *pgSetup);
 bool cli_getopt_accept_ssl_options(SSLCommandLineOptions newSSLOption,

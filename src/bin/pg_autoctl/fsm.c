@@ -175,6 +175,9 @@
 #define COMMENT_INIT_TO_REPORT_LSN \
 	"Creating a new node from a standby node that is not a candidate."
 
+#define COMMENT_DROPPED_TO_REPORT_LSN \
+	"This node is being reinitialized after having been dropped"
+
 #define COMMENT_ANY_TO_DROPPED \
 	"This node is being dropped from the monitor"
 
@@ -200,7 +203,7 @@ KeeperFSMTransition KeeperFSM[] = {
 	 */
 	{ INIT_STATE, SINGLE_STATE, COMMENT_INIT_TO_SINGLE, &fsm_init_primary },
 	{ DROPPED_STATE, SINGLE_STATE, COMMENT_INIT_TO_SINGLE, &fsm_init_primary },
-
+	{ DROPPED_STATE, REPORT_LSN_STATE, COMMENT_DROPPED_TO_REPORT_LSN, &fsm_init_from_standby },
 
 	/*
 	 * The previous implementation has a transition from any state to the INIT
@@ -362,7 +365,7 @@ KeeperFSMTransition KeeperFSM[] = {
 	{ REPORT_LSN_STATE, PREP_PROMOTION_STATE, COMMENT_REPORT_LSN_TO_PREP_PROMOTION, &fsm_prepare_standby_for_promotion },
 
 	{ REPORT_LSN_STATE, FAST_FORWARD_STATE, COMMENT_REPORT_LSN_TO_FAST_FORWARD, &fsm_fast_forward },
-	{ FAST_FORWARD_STATE, PREP_PROMOTION_STATE, COMMENT_FAST_FORWARD_TO_PREP_PROMOTION, &fsm_cleanup_and_resume_as_primary },
+	{ FAST_FORWARD_STATE, PREP_PROMOTION_STATE, COMMENT_FAST_FORWARD_TO_PREP_PROMOTION, &fsm_cleanup_as_primary },
 
 	{ REPORT_LSN_STATE, JOIN_SECONDARY_STATE, COMMENT_REPORT_LSN_TO_JOIN_SECONDARY, &fsm_checkpoint_and_stop_postgres },
 	{ REPORT_LSN_STATE, SECONDARY_STATE, COMMENT_REPORT_LSN_TO_JOIN_SECONDARY, &fsm_follow_new_primary },
@@ -513,6 +516,7 @@ keeper_fsm_reach_assigned_state(Keeper *keeper)
 		{
 			bool ret = false;
 
+			/* avoid logging "#any state#" to the user */
 			if (transition.current != ANY_STATE)
 			{
 				log_info("FSM transition from \"%s\" to \"%s\"%s%s",
@@ -551,10 +555,19 @@ keeper_fsm_reach_assigned_state(Keeper *keeper)
 			}
 			else
 			{
-				log_error("Failed to transition from state \"%s\" "
-						  "to state \"%s\", see above.",
-						  NodeStateToString(transition.current),
-						  NodeStateToString(transition.assigned));
+				/* avoid logging "#any state#" to the user */
+				if (transition.current != ANY_STATE)
+				{
+					log_error("Failed to transition from state \"%s\" "
+							  "to state \"%s\", see above.",
+							  NodeStateToString(transition.current),
+							  NodeStateToString(transition.assigned));
+				}
+				else
+				{
+					log_error("Failed to transition to state \"%s\", see above.",
+							  NodeStateToString(transition.assigned));
+				}
 			}
 
 			return ret;

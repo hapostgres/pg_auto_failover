@@ -135,9 +135,18 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 		return true;
 	}
 
-	/* when there's no other node anymore, not even one */
+	/*
+	 * A node that is alone in its group should be SINGLE.
+	 *
+	 * Exception arises when it used to be other nodes in the group, and the
+	 * only node left has Candidate Priority of zero. In that case the setup is
+	 * clear, it can't allow writes, so it can't be SINGLE. In that case, it
+	 * should be REPORT_LSN, waiting for either a change of settings, or the
+	 * introduction of a new node.
+	 */
 	if (nodesCount == 1 &&
-		!IsCurrentState(activeNode, REPLICATION_STATE_SINGLE))
+		!IsCurrentState(activeNode, REPLICATION_STATE_SINGLE) &&
+		activeNode->candidatePriority > 0)
 	{
 		char message[BUFSIZE];
 
@@ -149,6 +158,25 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		/* other node may have been removed */
 		AssignGoalState(activeNode, REPLICATION_STATE_SINGLE, message);
+
+		return true;
+	}
+	else if (nodesCount == 1 &&
+			 !IsCurrentState(activeNode, REPLICATION_STATE_SINGLE) &&
+			 activeNode->candidatePriority == 0)
+	{
+		char message[BUFSIZE];
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of " NODE_FORMAT
+			" to report_lsn as there is no other node"
+			" and candidate priority is %d.",
+			NODE_FORMAT_ARGS(activeNode),
+			activeNode->candidatePriority);
+
+		/* other node may have been removed */
+		AssignGoalState(activeNode, REPLICATION_STATE_REPORT_LSN, message);
 
 		return true;
 	}
@@ -496,6 +524,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 *   prepare_promotion -> wait_primary
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_PREPARE_PROMOTION) &&
+		primaryNode &&
 		IsCitusFormation(formation) && activeNode->groupId > 0)
 	{
 		char message[BUFSIZE];
@@ -513,6 +542,28 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		/* done draining, node is presumed dead */
 		AssignGoalState(primaryNode, REPLICATION_STATE_DEMOTED, message);
+
+		return true;
+	}
+
+	/*
+	 * when a worker blocked writes and the primary has been removed:
+	 *   prepare_promotion -> wait_primary
+	 */
+	if (IsCurrentState(activeNode, REPLICATION_STATE_PREPARE_PROMOTION) &&
+		primaryNode == NULL &&
+		IsCitusFormation(formation) && activeNode->groupId > 0)
+	{
+		char message[BUFSIZE];
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of " NODE_FORMAT
+			" to wait_primary after the coordinator metadata was updated.",
+			NODE_FORMAT_ARGS(activeNode));
+
+		/* node is now taking writes */
+		AssignGoalState(activeNode, REPLICATION_STATE_WAIT_PRIMARY, message);
 
 		return true;
 	}
@@ -561,7 +612,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Setting goal state of and " NODE_FORMAT
+			"Setting goal state of " NODE_FORMAT
 			" to wait_primary after " NODE_FORMAT
 			" converged to prepare_promotion.",
 			NODE_FORMAT_ARGS(activeNode),
@@ -632,6 +683,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 *   stop_replication -> wait_primary
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_STOP_REPLICATION) &&
+		primaryNode &&
 		IsCitusFormation(formation) && activeNode->groupId > 0)
 	{
 		char message[BUFSIZE];
@@ -649,6 +701,28 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		/* done draining, node is presumed dead */
 		AssignGoalState(primaryNode, REPLICATION_STATE_DEMOTED, message);
+
+		return true;
+	}
+
+	/*
+	 * when a worker blocked writes, and the primary has been dropped:
+	 *   stop_replication -> wait_primary
+	 */
+	if (IsCurrentState(activeNode, REPLICATION_STATE_STOP_REPLICATION) &&
+		primaryNode == NULL &&
+		IsCitusFormation(formation) && activeNode->groupId > 0)
+	{
+		char message[BUFSIZE];
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of " NODE_FORMAT
+			" to wait_primary after the coordinator metadata was updated.",
+			NODE_FORMAT_ARGS(activeNode));
+
+		/* node is now taking writes */
+		AssignGoalState(activeNode, REPLICATION_STATE_WAIT_PRIMARY, message);
 
 		return true;
 	}
