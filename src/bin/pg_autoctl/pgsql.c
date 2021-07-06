@@ -873,19 +873,23 @@ pgAutoCtlDebugNoticeProcessor(void *arg, const char *message)
 bool
 pgsql_begin(PGSQL *pgsql)
 {
+	/*
+	 * Indicate that we're running a transaction, so that the connection is not
+	 * closed after each query automatically. It also allows us to detect bugs
+	 * easily. We need to do this before executing BEGIN, because otherwise the
+	 * connection is closed after the BEGIN statement automatically.
+	 */
+	pgsql->connectionStatementType = PGSQL_CONNECTION_MULTI_STATEMENT;
+
 	if (!pgsql_execute(pgsql, "BEGIN"))
 	{
 		/*
-		 * connection is closed by pgsql_execute already, so no need for
-		 * further cleanup.
+		 * We need to manually call pgsql_finish to clean up here in case of
+		 * this failure, because we have set the statement type to MULTI.
 		 */
+		pgsql_finish(pgsql);
 		return false;
 	}
-
-	/*
-	 * Indicate that we're in a transaction so that we can detect bugs easily.
-	 */
-	pgsql->connectionStatementType = PGSQL_CONNECTION_MULTI_STATEMENT;
 
 	return true;
 }
