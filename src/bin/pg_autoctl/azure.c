@@ -1146,8 +1146,8 @@ azure_prepare_target_versions(KeyVal *env)
 
 	/* default values */
 	sformat(env->values[0], MAXCONNINFO, "13");   /* AZ_PG_VERSION */
-	sformat(env->values[1], MAXCONNINFO, "1.5"); /* AZ_PGAF_DEB_VERSION */
-	sformat(env->values[2], MAXCONNINFO, "1.5.2-1"); /* AZ_PGAF_DEB_REVISION */
+	sformat(env->values[1], MAXCONNINFO, "1.6"); /* AZ_PGAF_DEB_VERSION */
+	sformat(env->values[2], MAXCONNINFO, "1.6.1-1"); /* AZ_PGAF_DEB_REVISION */
 
 	for (int i = 0; i < 3; i++)
 	{

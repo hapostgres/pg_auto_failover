@@ -1,3 +1,36 @@
+### pg_auto_failover v1.6.1 (July 7, 2021) ###
+
+This release contains monitor schema changes, so the monitor extension gets
+a version bump from 1.5 to 1.6, and this is the first release in the 1.6
+series.
+
+In this release we introduce a new state in the FSM: "dropped". This state
+allows a node to realise it's been dropped from the monitor, and act
+accordingly (mostly, stops cleanly and register it's been dropped).
+
+#### Added
+* Feature crash recovery before pg rewind (#656)
+* Allow building pg_auto_failover with Postgres 14. (#716)
+* Fix Postgres 14 beta2 incompatibility. (#739)
+* Track nodes current timeline on the monitor. (#730)
+* Implement drop-at-a-distance semantics. (#734)
+* Add the reported timeline id to the monitor events table. (#753)
+
+#### Changed
+* Fix how many nodes need to report their LSN to perform a failover. (#707)
+* Allow an old primary node (demoted/catchingup) to join another election. (#727)
+* Have pg_autoctl drop node comment wait until the node has been removed. (#748)
+
+#### Fixed
+* Fix/consider timeline when reaching secondary (#695)
+* Install btree_gist when upgrade to >= 1.4, not just 1.4. (#714)
+* Fix a race condition issue around health check updates. (#720)
+* Not all the monitor code got the memo about nodeid being a bigint. (#729)
+* Use sysctl(3) on BSD (#733)
+* Fix transaction begin failure handling (#751)
+* Fix monitor postgres not starting up the first time (#752)
+* Fix a connection leak at SIGINT. (#759)
+
 ### pg_auto_failover v1.5.2 (May 20, 2021) ###
 
 This is a bugfix release for the v1.5 series.
