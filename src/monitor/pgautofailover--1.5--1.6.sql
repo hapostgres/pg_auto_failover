@@ -447,6 +447,9 @@ begin
 end
 $$;
 
+comment on function pgautofailover.update_secondary_check()
+        is 'performs a check when changes to hassecondary on pgautofailover.formation are made, verifying cluster state allows the change';
+
 CREATE TRIGGER disable_secondary_check
 	BEFORE UPDATE
 	ON pgautofailover.formation
