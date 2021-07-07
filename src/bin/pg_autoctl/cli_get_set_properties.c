@@ -680,10 +680,10 @@ set_node_candidate_priority(Keeper *keeper, int candidatePriority)
 								   config->groupId,
 								   &nodesArray))
 	{
-		log_fatal("Failed to get the list of all the nodes in formation \"%s\" "
-				  "from the monitor, see above for details",
-				  keeper->config.formation);
-		return false;
+		/* ignore the error, just don't wait in that case */
+		log_warn("Failed to get the list of all the nodes in formation \"%s\" "
+				 "from the monitor, see above for details",
+				 keeper->config.formation);
 	}
 
 	/* ignore the result of the filtering, worst case we don't wait */
