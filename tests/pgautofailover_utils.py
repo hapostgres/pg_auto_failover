@@ -1819,7 +1819,9 @@ class MonitorNode(PGNode):
         print("pg_autoctl show state --pgdata %s" % self.datadir)
 
         command = PGAutoCtl(self)
-        out, err, ret = command.execute("show state", "show", "state")
+        out, err, ret = command.execute(
+            "show state", "show", "state", "--formation", formation
+        )
         print("%s" % out)
 
     def get_other_nodes(self, nodeid):

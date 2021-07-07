@@ -736,7 +736,8 @@ begin
 		  into nodeid, reportedstate
 		  from pgautofailover.node
 		 where node.formationid = new.formationid
-		   and node.reportedstate <> 'single';
+		   and node.reportedstate <> 'single'
+           and node.goalstate <> 'dropped';
 
 		if nodeid is not null
 		then
