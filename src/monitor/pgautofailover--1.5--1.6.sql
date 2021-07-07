@@ -605,6 +605,7 @@ AS $$
     where formationid = formation_id
       and groupid = group_id
  order by groupid, nodeid;
+$$;
 
 grant execute on function pgautofailover.current_state(text, int)
    to autoctl_node;
