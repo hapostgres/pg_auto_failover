@@ -295,6 +295,7 @@ monitor_service_run(Monitor *monitor)
 	}
 
 	pgsql_finish(&(monitor->pgsql));
+	pgsql_finish(&(monitor->notificationClient));
 
 	return true;
 }

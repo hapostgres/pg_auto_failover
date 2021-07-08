@@ -617,6 +617,9 @@ $$;
 comment on function pgautofailover.current_state(text)
         is 'get the current state of both nodes of a formation';
 
+grant execute on function pgautofailover.current_state(text)
+   to autoctl_node;
+
 CREATE FUNCTION pgautofailover.current_state
  (
     IN formation_id         text,
@@ -651,6 +654,9 @@ $$;
 
 comment on function pgautofailover.current_state(text, int)
         is 'get the current state of both nodes of a group in a formation';
+
+grant execute on function pgautofailover.current_state(text, int)
+   to autoctl_node;
 
 
 CREATE FUNCTION pgautofailover.formation_uri
@@ -730,7 +736,8 @@ begin
 		  into nodeid, reportedstate
 		  from pgautofailover.node
 		 where node.formationid = new.formationid
-		   and node.reportedstate <> 'single';
+		   and node.reportedstate <> 'single'
+           and node.goalstate <> 'dropped';
 
 		if nodeid is not null
 		then

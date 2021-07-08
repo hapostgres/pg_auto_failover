@@ -668,21 +668,26 @@ static bool
 set_node_candidate_priority(Keeper *keeper, int candidatePriority)
 {
 	KeeperConfig *config = &(keeper->config);
-	NodeAddressArray nodesArray = { 0 };
+	CurrentNodeStateArray nodesArray = { 0 };
 
 	/*
 	 * There might be some race conditions here, but it's all to be
 	 * user-friendly so in the worst case we're going to be less friendly that
 	 * we could have.
 	 */
-	if (!monitor_get_nodes(&(keeper->monitor),
-						   config->formation,
-						   config->groupId,
-						   &nodesArray))
+	if (!monitor_get_current_state(&(keeper->monitor),
+								   config->formation,
+								   config->groupId,
+								   &nodesArray))
 	{
 		/* ignore the error, just don't wait in that case */
-		log_warn("Failed to get_nodes() on the monitor");
+		log_warn("Failed to get the list of all the nodes in formation \"%s\" "
+				 "from the monitor, see above for details",
+				 keeper->config.formation);
 	}
+
+	/* ignore the result of the filtering, worst case we don't wait */
+	(void) nodestateFilterArrayGroup(&nodesArray, config->name);
 
 	/* listen for state changes BEFORE we apply new settings */
 	if (nodesArray.count > 1)

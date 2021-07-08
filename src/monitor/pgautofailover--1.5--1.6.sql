@@ -431,7 +431,8 @@ begin
 		  into nodeid, reportedstate
 		  from pgautofailover.node
 		 where node.formationid = new.formationid
-		   and node.reportedstate <> 'single';
+		   and node.reportedstate <> 'single'
+           and node.goalstate <> 'dropped';
 
 		if nodeid is not null
 		then
@@ -446,6 +447,9 @@ begin
     return new;
 end
 $$;
+
+comment on function pgautofailover.update_secondary_check()
+        is 'performs a check when changes to hassecondary on pgautofailover.formation are made, verifying cluster state allows the change';
 
 CREATE TRIGGER disable_secondary_check
 	BEFORE UPDATE
@@ -605,6 +609,7 @@ AS $$
     where formationid = formation_id
       and groupid = group_id
  order by groupid, nodeid;
+$$;
 
 grant execute on function pgautofailover.current_state(text, int)
    to autoctl_node;
