@@ -150,7 +150,7 @@ keeper_cli_create_monitor_user(int argc, char **argv)
 
 	if (!primary_create_user_with_hba(&postgres,
 									  PG_AUTOCTL_HEALTH_USERNAME,
-									  PG_AUTOCTL_HEALTH_PASSWORD,
+									  NULL, /* no password */
 									  monitorHostname,
 									  "trust",
 									  HBA_EDIT_MINIMAL,

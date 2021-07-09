@@ -271,7 +271,7 @@ fsm_init_primary(Keeper *keeper)
 		 */
 		if (!primary_create_user_with_hba(postgres,
 										  PG_AUTOCTL_HEALTH_USERNAME,
-										  PG_AUTOCTL_HEALTH_PASSWORD,
+										  NULL, /* no password */
 										  monitorHostname,
 										  "trust",
 										  pgSetup->hbaLevel,

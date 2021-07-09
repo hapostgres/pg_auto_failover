@@ -2221,7 +2221,7 @@ pgsql_create_user(PGSQL *pgsql, const char *userName, const char *password,
 	{
 		appendPQExpBuffer(query, " CONNECTION LIMIT %d", connlimit);
 	}
-	if (password)
+	if (password && !IS_EMPTY_STRING_BUFFER(password))
 	{
 		/* show the statement before we append the password */
 		log_debug("Running command on Postgres: %s PASSWORD '*****';", query->data);
