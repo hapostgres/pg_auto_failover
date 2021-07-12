@@ -37,6 +37,7 @@ static void cli_show_cidr(int argc, char **argv);
 static void cli_show_lookup(int argc, char **argv);
 static void cli_show_hostname(int argc, char **argv);
 static void cli_show_reverse(int argc, char **argv);
+static void cli_show_version(int arg, char **argv);
 
 static CommandLine do_show_ipaddr_command =
 	make_command("ipaddr",
@@ -65,12 +66,18 @@ static CommandLine do_show_reverse_command =
 				 "Lookup given hostname and check reverse DNS setup", "", "",
 				 NULL, cli_show_reverse);
 
+static CommandLine do_show_version_command =
+	make_command("version",
+				 "Run pg_autoctl version --json and parses the output", "", "",
+				 NULL, cli_show_version);
+
 CommandLine *do_show_subcommands[] = {
 	&do_show_ipaddr_command,
 	&do_show_cidr_command,
 	&do_show_lookup_command,
 	&do_show_hostname_command,
 	&do_show_reverse_command,
+	&do_show_version_command,
 	NULL
 };
 
@@ -338,4 +345,27 @@ cli_show_reverse(int argc, char **argv)
 	log_info("Hostname \"%s\" resolves to IP address %s and back",
 			 hostname,
 			 ipaddr);
+}
+
+
+/*
+ * cli_show_version runs pg_autoctl version --json and parses the version
+ * string.
+ */
+static void
+cli_show_version(int arg, char **argv)
+{
+	Keeper keeper = { 0 };
+	KeeperVersion version = { 0 };
+
+	log_debug("cli_show_version");
+
+	if (!keeper_pg_autoctl_get_version_from_disk(&keeper, &version))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	log_info("pg_autoctl \"%s\"", version.pg_autoctl_version);
+	log_info("pgautofailover \"%s\"", version.required_extension_version);
 }

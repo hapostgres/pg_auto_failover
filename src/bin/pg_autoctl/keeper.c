@@ -16,6 +16,7 @@
 #include "parson.h"
 
 #include "cli_common.h"
+#include "cli_root.h"
 #include "env_utils.h"
 #include "file_utils.h"
 #include "fsm.h"
@@ -29,6 +30,7 @@
 #include "signals.h"
 #include "state.h"
 
+#include "runprogram.h"
 
 static bool keeper_state_check_postgres(Keeper *keeper,
 										PostgresControlData *control);
@@ -1160,7 +1162,9 @@ keeper_node_active(Keeper *keeper, bool doInit,
 	 * restart node active process, and an extra error message in the logs
 	 * during the live upgrade of pg_auto_failover.
 	 */
-	if (!keeper_check_monitor_extension_version(keeper))
+	MonitorExtensionVersion monitorVersion = { 0 };
+
+	if (!keeper_check_monitor_extension_version(keeper, &monitorVersion))
 	{
 		/*
 		 * We could fail here for two different reasons:
@@ -1194,7 +1198,24 @@ keeper_node_active(Keeper *keeper, bool doInit,
 		 * with the expected version of pg_autoctl that matches the monitor's
 		 * extension version.
 		 */
-		exit(EXIT_CODE_MONITOR);
+		KeeperVersion keeperVersion = { 0 };
+
+		if (!keeper_pg_autoctl_get_version_from_disk(keeper, &keeperVersion))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
+		/*
+		 * Only call exit() when the on-disk pg_autoctl required extension
+		 * version matches the current monitor extension version, ensuring that
+		 * the restart is going to be effective.
+		 */
+		if (strcmp(monitorVersion.installedVersion,
+				   keeperVersion.required_extension_version) == 0)
+		{
+			exit(EXIT_CODE_MONITOR);
+		}
 	}
 
 	if (doInit)
@@ -1380,12 +1401,12 @@ keeper_ensure_node_has_been_dropped(Keeper *keeper, bool *dropped)
  * has an extension version compatible with our expectations.
  */
 bool
-keeper_check_monitor_extension_version(Keeper *keeper)
+keeper_check_monitor_extension_version(Keeper *keeper,
+									   MonitorExtensionVersion *version)
 {
 	Monitor *monitor = &(keeper->monitor);
-	MonitorExtensionVersion version = { 0 };
 
-	if (!monitor_get_extension_version(monitor, &version))
+	if (!monitor_get_extension_version(monitor, version))
 	{
 		/*
 		 * Only output a FATAL error message when we could connect and then
@@ -1402,21 +1423,22 @@ keeper_check_monitor_extension_version(Keeper *keeper)
 	}
 
 	/* from a member of the cluster, we don't try to upgrade the extension */
-	if (strcmp(version.installedVersion, PG_AUTOCTL_EXTENSION_VERSION) != 0)
+	if (strcmp(version->installedVersion, PG_AUTOCTL_EXTENSION_VERSION) != 0)
 	{
 		log_fatal("The monitor at \"%s\" has extension \"%s\" version \"%s\", "
 				  "this pg_autoctl version requires version \"%s\".",
 				  keeper->config.monitor_pguri,
 				  PG_AUTOCTL_MONITOR_EXTENSION_NAME,
 				  PG_AUTOCTL_EXTENSION_VERSION,
-				  version.installedVersion);
+				  version->installedVersion);
 		log_info("Please connect to the monitor node and restart pg_autoctl.");
 		return false;
 	}
 	else
 	{
 		log_trace("The version of extension \"%s\" is \"%s\" on the monitor",
-				  PG_AUTOCTL_MONITOR_EXTENSION_NAME, version.installedVersion);
+				  PG_AUTOCTL_MONITOR_EXTENSION_NAME,
+				  version->installedVersion);
 	}
 
 	return true;
@@ -2896,4 +2918,75 @@ keeper_get_most_advanced_standby(Keeper *keeper, NodeAddress *upstreamNode)
 	}
 
 	return false;
+}
+
+
+/*
+ * keeper_pg_autoctl_get_version_from_disk calls pg_autoctl version --json and
+ * parses the output to fill-in the keeper version.
+ */
+bool
+keeper_pg_autoctl_get_version_from_disk(Keeper *keeper, KeeperVersion *version)
+{
+	char buffer[BUFSIZE];
+	Program program = run_program(pg_autoctl_argv0, "version", "--json", NULL);
+
+	log_debug("%s version --json", pg_autoctl_argv0);
+
+	if (program.returnCode != 0)
+	{
+		log_error("%s version --json exited with code %d",
+				  pg_autoctl_argv0,
+				  program.returnCode);
+
+		free_program(&program);
+		return false;
+	}
+
+	/* make a local copy of the program output, for JSON parsing */
+	strlcpy(buffer, program.stdOut, sizeof(buffer));
+	free_program(&program);
+
+	JSON_Value *json = json_parse_string(buffer);
+
+	if (json == NULL || json_type(json) != JSONObject)
+	{
+		log_error("Failed to parse pg_autoctl version --json");
+		json_value_free(json);
+		return false;
+	}
+
+	JSON_Object *jsObj = json_value_get_object(json);
+
+	char *str = (char *) json_object_get_string(jsObj, "pg_autoctl");
+
+	if (str != NULL)
+	{
+		strlcpy(version->pg_autoctl_version, str,
+				sizeof(version->pg_autoctl_version));
+	}
+	else
+	{
+		log_error("Failed to validate pg_autoctl version --json");
+		json_value_free(json);
+		return false;
+	}
+
+	str = (char *) json_object_get_string(jsObj, "pgautofailover");
+
+	if (str != NULL)
+	{
+		strlcpy(version->required_extension_version, str,
+				sizeof(version->required_extension_version));
+	}
+	else
+	{
+		log_error("Failed to validate pg_autoctl version --json");
+		json_value_free(json);
+		return false;
+	}
+
+	json_value_free(json);
+
+	return true;
 }
