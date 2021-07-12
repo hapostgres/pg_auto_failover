@@ -1191,8 +1191,8 @@ keeper_node_active(Keeper *keeper, bool doInit,
 		 * In that case we exit, and because the keeper node-active service is
 		 * RP_PERMANENT the supervisor is going to restart this process. The
 		 * restart happens with fork() and exec(), so it uses the current
-		 * version of pg_autoctl binary on disk, which with luck has been
-		 * updated to e.g. 1.5 too.
+		 * version of pg_autoctl binary on disk, which has been updated to e.g.
+		 * 1.5 too.
 		 *
 		 * TL;DR: just exit now, have the service restarted by the supervisor
 		 * with the expected version of pg_autoctl that matches the monitor's
@@ -1214,6 +1214,11 @@ keeper_node_active(Keeper *keeper, bool doInit,
 		if (strcmp(monitorVersion.installedVersion,
 				   keeperVersion.required_extension_version) == 0)
 		{
+			log_info("pg_autoctl version \"%s\" with compatibility with "
+					 "monitor extension \"%s\" has been found on-disk, "
+					 "exiting for a restart of the node-active process.",
+					 keeperVersion.pg_autoctl_version,
+					 keeperVersion.required_extension_version);
 			exit(EXIT_CODE_MONITOR);
 		}
 	}
@@ -1425,13 +1430,12 @@ keeper_check_monitor_extension_version(Keeper *keeper,
 	/* from a member of the cluster, we don't try to upgrade the extension */
 	if (strcmp(version->installedVersion, PG_AUTOCTL_EXTENSION_VERSION) != 0)
 	{
-		log_fatal("The monitor at \"%s\" has extension \"%s\" version \"%s\", "
-				  "this pg_autoctl version requires version \"%s\".",
-				  keeper->config.monitor_pguri,
-				  PG_AUTOCTL_MONITOR_EXTENSION_NAME,
-				  PG_AUTOCTL_EXTENSION_VERSION,
-				  version->installedVersion);
-		log_info("Please connect to the monitor node and restart pg_autoctl.");
+		log_info("The monitor at \"%s\" has extension \"%s\" version \"%s\", "
+				 "this pg_autoctl version requires version \"%s\".",
+				 keeper->config.monitor_pguri,
+				 PG_AUTOCTL_MONITOR_EXTENSION_NAME,
+				 version->installedVersion,
+				 PG_AUTOCTL_EXTENSION_VERSION);
 		return false;
 	}
 	else
