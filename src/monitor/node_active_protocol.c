@@ -1394,6 +1394,32 @@ perform_failover(PG_FUNCTION_ARGS)
 
 		SetNodeGoalState(primaryNode, REPLICATION_STATE_DRAINING, message);
 
+		/*
+		 * When a failover is performed with all the nodes up and running, the
+		 * old primary is often in the best situation to win the election. In
+		 * that case, we trick the candidate priority in a way that makes the
+		 * node lose the election.
+		 */
+		if (primaryNode)
+		{
+			primaryNode->candidatePriority -= CANDIDATE_PRIORITY_INCREMENT;
+
+			ReportAutoFailoverNodeReplicationSetting(
+				primaryNode->nodeId,
+				primaryNode->nodeHost,
+				primaryNode->nodePort,
+				primaryNode->candidatePriority,
+				primaryNode->replicationQuorum);
+
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Updating candidate priority to %d for " NODE_FORMAT,
+				primaryNode->candidatePriority,
+				NODE_FORMAT_ARGS(primaryNode));
+
+			NotifyStateChange(primaryNode, message);
+		}
+
 		/* now proceed with the failover, starting with the first standby */
 		(void) ProceedGroupState(firstStandbyNode);
 	}
