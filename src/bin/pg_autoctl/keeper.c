@@ -1221,6 +1221,40 @@ keeper_node_active(Keeper *keeper, bool doInit,
 					 keeperVersion.required_extension_version);
 			exit(EXIT_CODE_MONITOR);
 		}
+
+		/*
+		 * If the monitor is of a different version number than the one
+		 * required by this instance of pg_autoctl, and then the on-disk
+		 * pg_autoctl binary still reports the same extension version required,
+		 * then issue an error now: we don't know how to use the monitor's
+		 * protocol.
+		 */
+		log_warn("pg_autoctl version \"%s\" requires monitor extension "
+				 "version \"%s\" and current version on the monitor is \"%s\"",
+				 keeperVersion.pg_autoctl_version,
+				 keeperVersion.required_extension_version,
+				 monitorVersion.installedVersion);
+
+		int pg_autoctl_version = 0;
+		int monitor_version = 0;
+
+		if (parse_pgaf_extension_version_string(
+				monitorVersion.installedVersion,
+				&monitor_version) &&
+			parse_pgaf_extension_version_string(
+				keeperVersion.required_extension_version,
+				&pg_autoctl_version) &&
+			pg_autoctl_version < monitor_version)
+		{
+			log_info("HINT: the monitor has been upgraded to the more recent "
+					 "version \"%s\", "
+					 "\"%s\" needs to be upgraded to the same version",
+					 monitorVersion.installedVersion,
+					 pg_autoctl_program);
+		}
+
+		/* refrain from using our version of the monitor API/protocol */
+		return false;
 	}
 
 	if (doInit)
