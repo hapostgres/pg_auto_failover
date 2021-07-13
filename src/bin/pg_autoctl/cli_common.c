@@ -704,12 +704,19 @@ cli_create_node_getopts(int argc, char **argv,
 		log_fatal("Use either --monitor or --disable-monitor, not both.");
 		exit(EXIT_CODE_BAD_ARGS);
 	}
-	else if (IS_EMPTY_STRING_BUFFER(options->monitor_pguri) &&
-			 !options->monitorDisabled)
+	else if (!options->monitorDisabled)
 	{
-		log_fatal("Failed to set the monitor URI: "
-				  "use either --monitor postgresql://... or --disable-monitor");
-		exit(EXIT_CODE_BAD_ARGS);
+		if (IS_EMPTY_STRING_BUFFER(options->monitor_pguri) &&
+			!(env_exists(PG_AUTOCTL_MONITOR) &&
+			  get_env_copy(PG_AUTOCTL_MONITOR,
+						   options->monitor_pguri,
+						   sizeof(options->monitor_pguri))))
+		{
+			log_fatal("Failed to set the monitor URI: "
+					  "use either --monitor postgresql://... "
+					  "or --disable-monitor");
+			exit(EXIT_CODE_BAD_ARGS);
+		}
 	}
 	else if (options->monitorDisabled)
 	{

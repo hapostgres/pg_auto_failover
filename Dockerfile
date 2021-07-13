@@ -102,7 +102,7 @@ RUN apt-get update\
 	&& apt-get install -y --no-install-recommends postgresql-${PGVERSION} \
 	&& rm -rf /var/lib/apt/lists/*
 
-RUN adduser --disabled-password --gecos '' docker
+RUN adduser --disabled-password --gecos '' --home /var/lib/postgres docker
 RUN adduser docker sudo
 RUN adduser docker postgres
 RUN echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
@@ -111,8 +111,19 @@ COPY --from=build-test /usr/lib/postgresql/${PGVERSION}/lib/pgautofailover.so /u
 COPY --from=build-test /usr/share/postgresql/${PGVERSION}/extension/pgautofailover* /usr/share/postgresql/${PGVERSION}/extension/
 COPY --from=build-test /usr/lib/postgresql/${PGVERSION}/bin/pg_autoctl /usr/local/bin
 
+#
+# In tests/upgrade/docker-compose.yml we use internal docker volumes in
+# order to be able to restart the nodes and keep the data around. For that
+# to work, we must prepare a mount-point that is owned by our target user
+# (docker), so that once the volume in mounted there by docker compose,
+# pg_autoctl has the necessary set of privileges.
+#
+RUN mkdir -p /var/lib/postgres \
+ && chown -R docker /var/lib/postgres
+
 USER docker
 ENV PATH /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/postgresql/${PGVERSION}/bin
 ENV PG_AUTOCTL_DEBUG 1
+ENV PGDATA /var/lib/postgres/pgaf
 
-CMD pg_autoctl do tmux session --nodes 3
+CMD pg_autoctl do tmux session --nodes 3 --binpath /usr/local/bin/pg_autoctl
