@@ -3,6 +3,7 @@ version: "3.9"  # optional since v1.27.0
 services:
   monitor:
     build: ../..
+    hostname: monitor
     volumes:
       - monitor_data:/var/lib/postgres:rw
     environment:
@@ -12,6 +13,7 @@ services:
       - 5432
   node1:
     build: ../..
+    hostname: node1
     volumes:
       - node1_data:/var/lib/postgres:rw
     environment:
@@ -24,6 +26,7 @@ services:
       - 5432
   node2:
     build: ../..
+    hostname: node2
     volumes:
       - node2_data:/var/lib/postgres:rw
     environment:
@@ -36,6 +39,7 @@ services:
       - 5432
   node3:
     build: ../..
+    hostname: node3
     volumes:
       - node3_data:/var/lib/postgres:rw
     environment:

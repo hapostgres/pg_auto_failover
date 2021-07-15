@@ -1,0 +1,62 @@
+diff --git a/src/bin/pg_autoctl/defaults.h b/src/bin/pg_autoctl/defaults.h
+index 8e7e2eaf..643dc96a 100644
+--- a/src/bin/pg_autoctl/defaults.h
++++ b/src/bin/pg_autoctl/defaults.h
+@@ -17,7 +17,7 @@
+ #define PG_AUTOCTL_VERSION "1.6.1"
+ 
+ /* version of the extension that we requite to talk to on the monitor */
+-#define PG_AUTOCTL_EXTENSION_VERSION "1.6"
++#define PG_AUTOCTL_EXTENSION_VERSION "1.7"
+ 
+ /* environment variable to use to make DEBUG facilities available */
+ #define PG_AUTOCTL_DEBUG "PG_AUTOCTL_DEBUG"
+diff --git a/src/monitor/Makefile b/src/monitor/Makefile
+index 8e6bf321..478fb2a7 100644
+--- a/src/monitor/Makefile
++++ b/src/monitor/Makefile
+@@ -2,7 +2,7 @@
+ # Licensed under the PostgreSQL License.
+ 
+ EXTENSION = pgautofailover
+-EXTVERSION = 1.6
++EXTVERSION = 1.7
+ 
+ SRC_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+ 
+diff --git a/src/monitor/metadata.h b/src/monitor/metadata.h
+index 9e50ab72..0f8b39a3 100644
+--- a/src/monitor/metadata.h
++++ b/src/monitor/metadata.h
+@@ -15,7 +15,7 @@
+ 
+ #include "storage/lockdefs.h"
+ 
+-#define AUTO_FAILOVER_EXTENSION_VERSION "1.6"
++#define AUTO_FAILOVER_EXTENSION_VERSION "1.7"
+ #define AUTO_FAILOVER_EXTENSION_NAME "pgautofailover"
+ #define AUTO_FAILOVER_SCHEMA_NAME "pgautofailover"
+ #define AUTO_FAILOVER_FORMATION_TABLE "pgautofailover.formation"
+diff --git a/src/monitor/pgautofailover--1.6--1.7.sql b/src/monitor/pgautofailover--1.6--1.7.sql
+new file mode 100644
+index 00000000..7167ee17
+--- /dev/null
++++ b/src/monitor/pgautofailover--1.6--1.7.sql
+@@ -0,0 +1,6 @@
++--
++-- dummy extension update file that does nothing
++--
++-- complain if script is sourced in psql, rather than via CREATE EXTENSION
++\echo Use "ALTER EXTENSION pgautofailover UPDATE TO dummy" to load this file. \quit
++
+diff --git a/src/monitor/pgautofailover.control b/src/monitor/pgautofailover.control
+index a649eb76..d0504410 100644
+--- a/src/monitor/pgautofailover.control
++++ b/src/monitor/pgautofailover.control
+@@ -1,5 +1,5 @@
+ comment = 'pg_auto_failover'
+-default_version = '1.6'
++default_version = '1.7'
+ module_pathname = '$libdir/pgautofailover'
+ relocatable = false
+ requires = 'btree_gist'
