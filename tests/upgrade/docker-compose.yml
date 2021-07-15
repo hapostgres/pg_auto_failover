@@ -49,6 +49,14 @@ services:
 
 volumes:
   monitor_data:
+    external: true
+    name: volm
   node1_data:
+    external: true
+    name: vol1
   node2_data:
+    external: true
+    name: vol2
   node3_data:
+    external: true
+    name: vol3
