@@ -32,6 +32,7 @@
 #include "ipaddr.h"
 #include "log.h"
 #include "pgsetup.h"
+#include "pgsql.h"
 #include "string_utils.h"
 
 static unsigned int countSetBits(unsigned int n);
@@ -42,6 +43,10 @@ static bool fetchIPAddressFromInterfaceList(char *localIpAddress, int size);
 static bool ipaddr_sockaddr_to_string(struct addrinfo *ai,
 									  char *ipaddr, size_t size);
 static bool ipaddr_getsockname(int sock, char *ipaddr, size_t size);
+static bool GetAddrInfo(const char *restrict node,
+						const char *restrict service,
+						const struct addrinfo *restrict hints,
+						struct addrinfo **restrict res);
 
 
 /*
@@ -74,14 +79,12 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 	hints.ai_socktype = SOCK_STREAM; /* we only want TCP sockets */
 	hints.ai_protocol = IPPROTO_TCP; /* we only want TCP sockets */
 
-	int error = getaddrinfo(serviceName,
-							intToString(servicePort).strValue,
-							&hints,
-							&lookup);
-	if (error != 0)
+	if (!GetAddrInfo(serviceName,
+					 intToString(servicePort).strValue,
+					 &hints,
+					 &lookup))
 	{
-		log_warn("Failed to parse host name or IP address \"%s\": %s",
-				 serviceName, gai_strerror(error));
+		/* errors have already been logged */
 		return false;
 	}
 
@@ -473,11 +476,9 @@ findHostnameLocalAddress(const char *hostname, char *localIpAddress, int size)
 	struct addrinfo *dns_addr;
 	struct ifaddrs *ifaddrList, *ifaddr;
 
-	int error = getaddrinfo(hostname, NULL, 0, &dns_lookup_addr);
-	if (error != 0)
+	if (!GetAddrInfo(hostname, NULL, 0, &dns_lookup_addr))
 	{
-		log_warn("Failed to resolve DNS name \"%s\": %s",
-				 hostname, gai_strerror(error));
+		/* errors have already been logged */
 		return false;
 	}
 
@@ -628,19 +629,17 @@ findHostnameFromLocalIpAddress(char *localIpAddress, char *hostname, int size)
 	struct addrinfo *lookup, *ai;
 
 	/* parse ipv4 or ipv6 address using getaddrinfo() */
-	int ret = getaddrinfo(localIpAddress, NULL, 0, &lookup);
-	if (ret != 0)
+	if (!GetAddrInfo(localIpAddress, NULL, 0, &lookup))
 	{
-		log_warn("Failed to resolve DNS name \"%s\": %s",
-				 localIpAddress, gai_strerror(ret));
+		/* errors have already been logged */
 		return false;
 	}
 
 	/* now reverse lookup (NI_NAMEREQD) the address with getnameinfo() */
 	for (ai = lookup; ai; ai = ai->ai_next)
 	{
-		ret = getnameinfo(ai->ai_addr, ai->ai_addrlen,
-						  hbuf, sizeof(hbuf), NULL, 0, NI_NAMEREQD);
+		int ret = getnameinfo(ai->ai_addr, ai->ai_addrlen,
+							  hbuf, sizeof(hbuf), NULL, 0, NI_NAMEREQD);
 
 		if (ret != 0)
 		{
@@ -686,12 +685,9 @@ resolveHostnameForwardAndReverse(const char *hostname, char *ipaddr, int size,
 
 	*foundHostnameFromAddress = false;
 
-	int error = getaddrinfo(hostname, NULL, 0, &lookup);
-
-	if (error != 0)
+	if (!GetAddrInfo(hostname, NULL, 0, &lookup))
 	{
-		log_warn("Failed to resolve DNS name \"%s\": %s",
-				 hostname, gai_strerror(error));
+		/* errors have already been logged */
 		return false;
 	}
 
@@ -866,4 +862,56 @@ ipaddrGetLocalHostname(char *hostname, size_t size)
 	strlcpy(hostname, hostnameCandidate, size);
 
 	return true;
+}
+
+
+/*
+ * GetAddrInfo calls getaddrinfo and
+ */
+static bool
+GetAddrInfo(const char *restrict node,
+			const char *restrict service,
+			const struct addrinfo *restrict hints,
+			struct addrinfo **restrict res)
+{
+	bool success = false;
+	ConnectionRetryPolicy retryPolicy = { 0 };
+
+	(void) pgsql_set_interactive_retry_policy(&retryPolicy);
+
+	while (!pgsql_retry_policy_expired(&retryPolicy))
+	{
+		int error = getaddrinfo(node, service, hints, res);
+
+		/*
+		 * Given docker/kubernetes environments, we treat permanent DNS
+		 * failures (EAI_FAIL) as a retryable condition, same as EAI_AGAIN.
+		 */
+		if (error != 0 && error != EAI_AGAIN && error != EAI_FAIL)
+		{
+			log_warn("Failed to resolve DNS name \"%s\": %s",
+					 node, gai_strerror(error));
+			return false;
+		}
+		else if (error != 0)
+		{
+			log_debug("Failed to resolve DNS name \"%s\": %s",
+					  node, gai_strerror(error));
+		}
+
+		success = (error == 0);
+
+		if (success)
+		{
+			break;
+		}
+
+		int sleepTimeMs =
+			pgsql_compute_connection_retry_sleep_time(&retryPolicy);
+
+		/* we have milliseconds, pg_usleep() wants microseconds */
+		(void) pg_usleep(sleepTimeMs * 1000);
+	}
+
+	return success;
 }
