@@ -1399,6 +1399,8 @@ perform_failover(PG_FUNCTION_ARGS)
 		 * old primary is often in the best situation to win the election. In
 		 * that case, we trick the candidate priority in a way that makes the
 		 * node lose the election.
+		 *
+		 * We undo this change in priority once the election completes.
 		 */
 		if (primaryNode)
 		{
