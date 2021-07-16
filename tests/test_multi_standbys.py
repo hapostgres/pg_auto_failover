@@ -189,7 +189,7 @@ def test_007_create_t1():
 
 def test_008_set_candidate_priorities():
     # set priorities in a way that we know the candidate: node2
-    node1.set_candidate_priority(80)  # current primary
+    node1.set_candidate_priority(90)  # current primary
     node2.set_candidate_priority(90)
     node3.set_candidate_priority(70)
 
