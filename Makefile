@@ -133,6 +133,7 @@ test:
 	sudo -E env "PATH=${PATH}" USER=$(shell whoami) \
 		$(NOSETESTS)			\
 		--verbose				\
+		--nologcapture			\
 		--nocapture				\
 		--stop					\
 		${TEST_ARGUMENT}
