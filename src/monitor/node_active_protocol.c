@@ -1268,9 +1268,6 @@ perform_failover(PG_FUNCTION_ARGS)
 	char *formationId = text_to_cstring(formationIdText);
 	int32 groupId = PG_GETARG_INT32(1);
 
-
-	char message[BUFSIZE] = { 0 };
-
 	LockFormation(formationId, ShareLock);
 	LockNodeGroup(formationId, groupId, ExclusiveLock);
 
@@ -1363,6 +1360,8 @@ perform_failover(PG_FUNCTION_ARGS)
 							 "perform a manual failover")));
 		}
 
+		char message[BUFSIZE] = { 0 };
+
 		LogAndNotifyMessage(
 			message, BUFSIZE,
 			"Setting goal state of " NODE_FORMAT
@@ -1381,7 +1380,7 @@ perform_failover(PG_FUNCTION_ARGS)
 	{
 		List *standbyNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
 		AutoFailoverNode *firstStandbyNode = linitial(standbyNodesGroupList);
-		char message[BUFSIZE];
+		char message[BUFSIZE] = { 0 };
 
 		/* so we have at least one candidate, let's get started */
 		LogAndNotifyMessage(
@@ -1404,6 +1403,8 @@ perform_failover(PG_FUNCTION_ARGS)
 		 */
 		if (primaryNode)
 		{
+			char message[BUFSIZE] = { 0 };
+
 			primaryNode->candidatePriority -= CANDIDATE_PRIORITY_INCREMENT;
 
 			ReportAutoFailoverNodeReplicationSetting(

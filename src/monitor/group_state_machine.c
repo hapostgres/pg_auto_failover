@@ -1860,6 +1860,13 @@ PromoteSelectedNode(AutoFailoverNode *selectedNode,
 					AutoFailoverNode *primaryNode,
 					CandidateList *candidateList)
 {
+	/* selectedNode can't be NULL here */
+	if (selectedNode == NULL)
+	{
+		ereport(ERROR,
+				(errmsg("BUG: selectedNode is NULL in PromoteSelectedNode")));
+	}
+
 	/*
 	 * Ok so we now may start the failover process, we have selected a
 	 * candidate after all nodes reported their LSN. We still have two
@@ -1907,32 +1914,35 @@ PromoteSelectedNode(AutoFailoverNode *selectedNode,
 	 * As the primaryNode parameter might be NULL, we loop over all the
 	 * candidates and reset any negative priority found in the list.
 	 */
-	ListCell *nodeCell = NULL;
-
-	foreach(nodeCell, candidateList->candidateNodesGroupList)
+	if (candidateList->candidateNodesGroupList != NULL)
 	{
-		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+		ListCell *nodeCell = NULL;
 
-		if (node && node->candidatePriority < 0)
+		foreach(nodeCell, candidateList->candidateNodesGroupList)
 		{
-			char message[BUFSIZE] = { 0 };
+			AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
 
-			node->candidatePriority += CANDIDATE_PRIORITY_INCREMENT;
+			if (node && node->candidatePriority < 0)
+			{
+				char message[BUFSIZE] = { 0 };
 
-			ReportAutoFailoverNodeReplicationSetting(
-				node->nodeId,
-				node->nodeHost,
-				node->nodePort,
-				node->candidatePriority,
-				node->replicationQuorum);
+				node->candidatePriority += CANDIDATE_PRIORITY_INCREMENT;
 
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Updating candidate priority to %d for " NODE_FORMAT,
-				node->candidatePriority,
-				NODE_FORMAT_ARGS(node));
+				ReportAutoFailoverNodeReplicationSetting(
+					node->nodeId,
+					node->nodeHost,
+					node->nodePort,
+					node->candidatePriority,
+					node->replicationQuorum);
 
-			NotifyStateChange(node, message);
+				LogAndNotifyMessage(
+					message, BUFSIZE,
+					"Updating candidate priority to %d for " NODE_FORMAT,
+					node->candidatePriority,
+					NODE_FORMAT_ARGS(node));
+
+				NotifyStateChange(node, message);
+			}
 		}
 	}
 
