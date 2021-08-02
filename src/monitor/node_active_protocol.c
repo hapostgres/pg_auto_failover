@@ -1268,9 +1268,6 @@ perform_failover(PG_FUNCTION_ARGS)
 	char *formationId = text_to_cstring(formationIdText);
 	int32 groupId = PG_GETARG_INT32(1);
 
-
-	char message[BUFSIZE] = { 0 };
-
 	LockFormation(formationId, ShareLock);
 	LockNodeGroup(formationId, groupId, ExclusiveLock);
 
@@ -1363,6 +1360,8 @@ perform_failover(PG_FUNCTION_ARGS)
 							 "perform a manual failover")));
 		}
 
+		char message[BUFSIZE] = { 0 };
+
 		LogAndNotifyMessage(
 			message, BUFSIZE,
 			"Setting goal state of " NODE_FORMAT
@@ -1381,7 +1380,7 @@ perform_failover(PG_FUNCTION_ARGS)
 	{
 		List *standbyNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
 		AutoFailoverNode *firstStandbyNode = linitial(standbyNodesGroupList);
-		char message[BUFSIZE];
+		char message[BUFSIZE] = { 0 };
 
 		/* so we have at least one candidate, let's get started */
 		LogAndNotifyMessage(
@@ -1393,6 +1392,36 @@ perform_failover(PG_FUNCTION_ARGS)
 			(uint32) primaryNode->reportedLSN);
 
 		SetNodeGoalState(primaryNode, REPLICATION_STATE_DRAINING, message);
+
+		/*
+		 * When a failover is performed with all the nodes up and running, the
+		 * old primary is often in the best situation to win the election. In
+		 * that case, we trick the candidate priority in a way that makes the
+		 * node lose the election.
+		 *
+		 * We undo this change in priority once the election completes.
+		 */
+		if (primaryNode)
+		{
+			char message[BUFSIZE] = { 0 };
+
+			primaryNode->candidatePriority -= CANDIDATE_PRIORITY_INCREMENT;
+
+			ReportAutoFailoverNodeReplicationSetting(
+				primaryNode->nodeId,
+				primaryNode->nodeHost,
+				primaryNode->nodePort,
+				primaryNode->candidatePriority,
+				primaryNode->replicationQuorum);
+
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Updating candidate priority to %d for " NODE_FORMAT,
+				primaryNode->candidatePriority,
+				NODE_FORMAT_ARGS(primaryNode));
+
+			NotifyStateChange(primaryNode, message);
+		}
 
 		/* now proceed with the failover, starting with the first standby */
 		(void) ProceedGroupState(firstStandbyNode);

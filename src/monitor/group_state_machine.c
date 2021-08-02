@@ -1860,6 +1860,13 @@ PromoteSelectedNode(AutoFailoverNode *selectedNode,
 					AutoFailoverNode *primaryNode,
 					CandidateList *candidateList)
 {
+	/* selectedNode can't be NULL here */
+	if (selectedNode == NULL)
+	{
+		ereport(ERROR,
+				(errmsg("BUG: selectedNode is NULL in PromoteSelectedNode")));
+	}
+
 	/*
 	 * Ok so we now may start the failover process, we have selected a
 	 * candidate after all nodes reported their LSN. We still have two
@@ -1896,6 +1903,54 @@ PromoteSelectedNode(AutoFailoverNode *selectedNode,
 			NODE_FORMAT_ARGS(selectedNode));
 
 		NotifyStateChange(selectedNode, message);
+	}
+
+	/*
+	 * When a failover is performed with all the nodes up and running, we tweak
+	 * the priority of the primary in a way that prevents its re-election. Now
+	 * that the election is done, it's time to reset the primary priority back
+	 * to its former value.
+	 *
+	 * As the primaryNode parameter might be NULL, we loop over all the
+	 * candidates and reset any negative priority found in the list.
+	 */
+	if (candidateList->candidateNodesGroupList != NULL)
+	{
+		ListCell *nodeCell = NULL;
+
+		foreach(nodeCell, candidateList->candidateNodesGroupList)
+		{
+			AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+			if (node == NULL)
+			{
+				/* shouldn't happen */
+				ereport(ERROR, (errmsg("BUG: node is NULL")));
+				continue;
+			}
+
+			if (node->candidatePriority < 0)
+			{
+				char message[BUFSIZE] = { 0 };
+
+				node->candidatePriority += CANDIDATE_PRIORITY_INCREMENT;
+
+				ReportAutoFailoverNodeReplicationSetting(
+					node->nodeId,
+					node->nodeHost,
+					node->nodePort,
+					node->candidatePriority,
+					node->replicationQuorum);
+
+				LogAndNotifyMessage(
+					message, BUFSIZE,
+					"Updating candidate priority back to %d for " NODE_FORMAT,
+					node->candidatePriority,
+					NODE_FORMAT_ARGS(node));
+
+				NotifyStateChange(node, message);
+			}
+		}
 	}
 
 	if (selectedNode->reportedLSN == candidateList->mostAdvancedReportedLSN)
