@@ -695,9 +695,7 @@ GroupListCandidates(List *groupNodeList)
 	List *sortedNodeList = list_copy(groupNodeList);
 
 	#if (PG_VERSION_NUM >= 130000)
-	sortedNodeList =
-		list_sort(sortedNodeList,
-				  pgautofailover_node_candidate_priority_compare);
+	list_sort(sortedNodeList, pgautofailover_node_candidate_priority_compare);
 	#else
 	sortedNodeList =
 		list_qsort(sortedNodeList,
