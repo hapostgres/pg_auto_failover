@@ -1922,7 +1922,14 @@ PromoteSelectedNode(AutoFailoverNode *selectedNode,
 		{
 			AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
 
-			if (node && node->candidatePriority < 0)
+			if (node == NULL)
+			{
+				/* shouldn't happen */
+				ereport(ERROR, (errmsg("BUG: node is NULL")));
+				continue;
+			}
+
+			if (node->candidatePriority < 0)
 			{
 				char message[BUFSIZE] = { 0 };
 
@@ -1937,7 +1944,7 @@ PromoteSelectedNode(AutoFailoverNode *selectedNode,
 
 				LogAndNotifyMessage(
 					message, BUFSIZE,
-					"Updating candidate priority to %d for " NODE_FORMAT,
+					"Updating candidate priority back to %d for " NODE_FORMAT,
 					node->candidatePriority,
 					NODE_FORMAT_ARGS(node));
 
