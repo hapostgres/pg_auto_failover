@@ -175,15 +175,24 @@ debian_find_postgres_configuration_files(PostgresSetup *pgSetup,
 		return true;
 	}
 
-	/* is it a debian postgres-common style setup then? */
-	if (debian_init_postgres_config_files(pgSetup,
-										  &debianConfFiles,
-										  PG_CONFIG_TYPE_DEBIAN))
+	/*
+	 * Is it a debian postgresql-common style setup then?
+	 *
+	 * We only search for debian style setup when the main postgresql.conf file
+	 * was not found. The previous call to debian_init_postgres_config_files
+	 * might see a partial failure because of e.g. missing only pg_ident.conf.
+	 */
+	if (!file_exists(postgresConfFiles.conf))
 	{
-		/* so we're dealing with a "normal" Postgres installation */
-		*pgConfigFiles = debianConfFiles;
+		if (debian_init_postgres_config_files(pgSetup,
+											  &debianConfFiles,
+											  PG_CONFIG_TYPE_DEBIAN))
+		{
+			/* so we're dealing with a "debian style" Postgres installation */
+			*pgConfigFiles = debianConfFiles;
 
-		return true;
+			return true;
+		}
 	}
 
 	/* well that's all we know how to detect at this point */
