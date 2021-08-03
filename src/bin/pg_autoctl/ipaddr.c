@@ -866,7 +866,10 @@ ipaddrGetLocalHostname(char *hostname, size_t size)
 
 
 /*
- * GetAddrInfo calls getaddrinfo and
+ * GetAddrInfo calls getaddrinfo and implement a retry policy in case we get a
+ * transient failure from the system. And for kubernetes compatibility, we also
+ * retry when the plain EAI_FAIL error code is returned, because DNS entries in
+ * this environments are dynamic.
  */
 static bool
 GetAddrInfo(const char *restrict node,
