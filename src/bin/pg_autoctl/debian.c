@@ -218,21 +218,7 @@ debian_init_postgres_config_files(PostgresSetup *pgSetup,
 			initPostgresConfigFiles(pgdata, pgConfigFiles,
 									PG_CONFIG_TYPE_POSTGRES);
 
-			if (postgresConfigFilesAllExist(pgConfigFiles))
-			{
-				return true;
-			}
-			else
-			{
-				/*
-				 * WARN the user about the unexpected nature of our setup here,
-				 * even if we then move on to make it the way we expect it.
-				 */
-				log_warn("Failed to find Postgres configuration files in PGDATA, "
-						 "as expected: \"%s\" does not exists",
-						 pgConfigFiles->conf);
-				return false;
-			}
+			return postgresConfigFilesAllExist(pgConfigFiles);
 		}
 
 		case PG_CONFIG_TYPE_DEBIAN:
@@ -251,21 +237,7 @@ debian_init_postgres_config_files(PostgresSetup *pgSetup,
 			initPostgresConfigFiles(debPathnames.confDirectory,
 									pgConfigFiles, PG_CONFIG_TYPE_DEBIAN);
 
-			if (postgresConfigFilesAllExist(pgConfigFiles))
-			{
-				return true;
-			}
-			else
-			{
-				/*
-				 * WARN the user about the unexpected nature of our setup here,
-				 * even if we then move on to make it the way we expect it.
-				 */
-				log_warn("Failed to find Postgres configuration files in PGDATA, "
-						 "as expected: \"%s\" does not exists",
-						 pgConfigFiles->conf);
-				return false;
-			}
+			return postgresConfigFilesAllExist(pgConfigFiles);
 		}
 	}
 
@@ -501,6 +473,31 @@ initPostgresConfigFiles(const char *dirname,
 static bool
 postgresConfigFilesAllExist(PostgresConfigFiles *pgConfigFiles)
 {
+	/*
+	 * WARN the user about the unexpected nature of our setup here, even if we
+	 * then move on to make it the way we expect it.
+	 */
+	if (!file_exists(pgConfigFiles->conf))
+	{
+		log_warn("Failed to find Postgres configuration files in PGDATA, "
+				 "as expected: \"%s\" does not exists",
+				 pgConfigFiles->conf);
+	}
+
+	if (!file_exists(pgConfigFiles->ident))
+	{
+		log_warn("Failed to find Postgres configuration files in PGDATA, "
+				 "as expected: \"%s\" does not exists",
+				 pgConfigFiles->ident);
+	}
+
+	if (!file_exists(pgConfigFiles->hba))
+	{
+		log_warn("Failed to find Postgres configuration files in PGDATA, "
+				 "as expected: \"%s\" does not exists",
+				 pgConfigFiles->hba);
+	}
+
 	return file_exists(pgConfigFiles->conf) &&
 		   file_exists(pgConfigFiles->ident) &&
 		   file_exists(pgConfigFiles->hba);
