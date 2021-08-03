@@ -1851,6 +1851,21 @@ class MonitorNode(PGNode):
         if self.pg_is_running():
             return self.run_sql_query(last_events_query)
 
+    def run_sql_query(self, query, *args):
+        """
+        Run a SQL query on the monitor. When exception OperationalError is
+        raised, it might be a SEGFAULT on the Postgres side of things,
+        within the pgautofailover extension. To help debug, then print the
+        Postgres logs.
+        """
+        try:
+            return super().run_sql_query(query, *args)
+        except psycopg2.OperationalError:
+            # Did we SEGFAULT? let's see the Postgres logs.
+            pglogs = self.get_postgres_logs()
+            print(f"POSTGRES LOGS FOR {self.datadir}:\n{pglogs}\n")
+            raise
+
 
 class PGAutoCtl:
     def __init__(self, pgnode, argv=None):

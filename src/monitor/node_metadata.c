@@ -692,12 +692,13 @@ GroupListCandidates(List *groupNodeList)
 	ListCell *nodeCell = NULL;
 	List *candidateNodesList = NIL;
 
-	#if (PG_VERSION_NUM >= 130000)
 	List *sortedNodeList = list_copy(groupNodeList);
+
+	#if (PG_VERSION_NUM >= 130000)
 	list_sort(sortedNodeList, pgautofailover_node_candidate_priority_compare);
 	#else
-	List *sortedNodeList =
-		list_qsort(groupNodeList,
+	sortedNodeList =
+		list_qsort(sortedNodeList,
 				   pgautofailover_node_candidate_priority_compare);
 	#endif
 
