@@ -1704,6 +1704,7 @@ pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray)
 		"  FROM pg_replication_slots s JOIN nodes USING(slot_name), "
 		"       LATERAL pg_replication_slot_advance(slot_name, lsn) a"
 		" WHERE nodes.lsn <> '0/0' and nodes.lsn >= s.restart_lsn "
+		"   and not s.active "
 		"), \n"
 		"created as ("
 		"SELECT c.slot_name, c.lsn "
