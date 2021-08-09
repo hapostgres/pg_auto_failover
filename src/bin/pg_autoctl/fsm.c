@@ -195,156 +195,302 @@
  */
 KeeperFSMTransition KeeperFSM[] = {
 	/*
-	 * CURRENT_STATE,   ASSIGNED_STATE,  COMMENT,  TRANSTION_FUNCTION
+	 * CURRENT_STATE, ASSIGNED_STATE, NODE_KIND,
+	 * COMMENT,
+	 * TRANSTION_FUNCTION
 	 */
 
 	/*
 	 * Started as a single, no nothing
 	 */
-	{ INIT_STATE, SINGLE_STATE, COMMENT_INIT_TO_SINGLE, &fsm_init_primary },
-	{ DROPPED_STATE, SINGLE_STATE, COMMENT_INIT_TO_SINGLE, &fsm_init_primary },
-	{ DROPPED_STATE, REPORT_LSN_STATE, COMMENT_DROPPED_TO_REPORT_LSN, &fsm_init_from_standby },
+	{ INIT_STATE, SINGLE_STATE, NODE_KIND_ANY,
+	  COMMENT_INIT_TO_SINGLE,
+	  &fsm_init_primary },
 
-	/*
-	 * The previous implementation has a transition from any state to the INIT
-	 * state that ensures PostgreSQL is down, but I can't quite figure out what
-	 * role the INIT state plays exactly in there.
-	 *
-	 * {ANY_STATE, INIT_STATE, "Revert to initial state", &fsm_stop_postgres},
-	 */
+	{ DROPPED_STATE, SINGLE_STATE, NODE_KIND_ANY,
+	  COMMENT_INIT_TO_SINGLE,
+	  &fsm_init_primary },
+
+	{ DROPPED_STATE, REPORT_LSN_STATE, NODE_KIND_ANY,
+	  COMMENT_DROPPED_TO_REPORT_LSN,
+	  &fsm_init_from_standby },
 
 	/*
 	 * other node(s) was forcibly removed, now single
 	 */
-	{ PRIMARY_STATE, SINGLE_STATE, COMMENT_PRIMARY_TO_SINGLE, &fsm_disable_replication },
-	{ WAIT_PRIMARY_STATE, SINGLE_STATE, COMMENT_PRIMARY_TO_SINGLE, &fsm_disable_replication },
-	{ JOIN_PRIMARY_STATE, SINGLE_STATE, COMMENT_PRIMARY_TO_SINGLE, &fsm_disable_replication },
+	{ PRIMARY_STATE, SINGLE_STATE, NODE_KIND_ANY,
+	  COMMENT_PRIMARY_TO_SINGLE,
+	  &fsm_disable_replication },
+
+	{ WAIT_PRIMARY_STATE, SINGLE_STATE, NODE_KIND_ANY,
+	  COMMENT_PRIMARY_TO_SINGLE,
+	  &fsm_disable_replication },
+
+	{ JOIN_PRIMARY_STATE, SINGLE_STATE, NODE_KIND_ANY,
+	  COMMENT_PRIMARY_TO_SINGLE,
+	  &fsm_disable_replication },
 
 	/*
 	 * failover occurred, primary -> draining/demoted
 	 */
-	{ PRIMARY_STATE, DRAINING_STATE, COMMENT_PRIMARY_TO_DRAINING, &fsm_stop_postgres },
-	{ DRAINING_STATE, DEMOTED_STATE, COMMENT_DRAINING_TO_DEMOTED, &fsm_stop_postgres },
-	{ PRIMARY_STATE, DEMOTED_STATE, COMMENT_PRIMARY_TO_DEMOTED, &fsm_stop_postgres },
-	{ PRIMARY_STATE, DEMOTE_TIMEOUT_STATE, COMMENT_PRIMARY_TO_DEMOTED, &fsm_stop_postgres },
+	{ PRIMARY_STATE, DRAINING_STATE, NODE_KIND_ANY,
+	  COMMENT_PRIMARY_TO_DRAINING,
+	  &fsm_stop_postgres },
 
-	{ JOIN_PRIMARY_STATE, DRAINING_STATE, COMMENT_PRIMARY_TO_DRAINING, &fsm_stop_postgres },
-	{ JOIN_PRIMARY_STATE, DEMOTED_STATE, COMMENT_PRIMARY_TO_DEMOTED, &fsm_stop_postgres },
-	{ JOIN_PRIMARY_STATE, DEMOTE_TIMEOUT_STATE, COMMENT_PRIMARY_TO_DEMOTED, &fsm_stop_postgres },
+	{ DRAINING_STATE, DEMOTED_STATE, NODE_KIND_ANY,
+	  COMMENT_DRAINING_TO_DEMOTED,
+	  &fsm_stop_postgres },
 
-	{ APPLY_SETTINGS_STATE, DRAINING_STATE, COMMENT_PRIMARY_TO_DRAINING, &fsm_stop_postgres },
-	{ APPLY_SETTINGS_STATE, DEMOTED_STATE, COMMENT_PRIMARY_TO_DEMOTED, &fsm_stop_postgres },
-	{ APPLY_SETTINGS_STATE, DEMOTE_TIMEOUT_STATE, COMMENT_PRIMARY_TO_DEMOTED, &fsm_stop_postgres },
+	{ PRIMARY_STATE, DEMOTED_STATE, NODE_KIND_ANY,
+	  COMMENT_PRIMARY_TO_DEMOTED,
+	  &fsm_stop_postgres },
+
+	{ PRIMARY_STATE, DEMOTE_TIMEOUT_STATE, NODE_KIND_ANY,
+	  COMMENT_PRIMARY_TO_DEMOTED,
+	  &fsm_stop_postgres },
+
+	{ JOIN_PRIMARY_STATE, DRAINING_STATE, NODE_KIND_ANY,
+	  COMMENT_PRIMARY_TO_DRAINING,
+	  &fsm_stop_postgres },
+
+	{ JOIN_PRIMARY_STATE, DEMOTED_STATE, NODE_KIND_ANY,
+	  COMMENT_PRIMARY_TO_DEMOTED,
+	  &fsm_stop_postgres },
+
+	{ JOIN_PRIMARY_STATE, DEMOTE_TIMEOUT_STATE, NODE_KIND_ANY,
+	  COMMENT_PRIMARY_TO_DEMOTED,
+	  &fsm_stop_postgres },
+
+	{ APPLY_SETTINGS_STATE, DRAINING_STATE, NODE_KIND_ANY,
+	  COMMENT_PRIMARY_TO_DRAINING,
+	  &fsm_stop_postgres },
+
+	{ APPLY_SETTINGS_STATE, DEMOTED_STATE, NODE_KIND_ANY,
+	  COMMENT_PRIMARY_TO_DEMOTED,
+	  &fsm_stop_postgres },
+
+	{ APPLY_SETTINGS_STATE, DEMOTE_TIMEOUT_STATE, NODE_KIND_ANY,
+	  COMMENT_PRIMARY_TO_DEMOTED,
+	  &fsm_stop_postgres },
 
 	/*
 	 * primary is put to maintenance
 	 */
+<<<<<<< HEAD
 	{ PRIMARY_STATE, PREPARE_MAINTENANCE_STATE, COMMENT_PRIMARY_TO_PREPARE_MAINTENANCE, &fsm_stop_postgres_for_primary_maintenance },
 	{ PREPARE_MAINTENANCE_STATE, MAINTENANCE_STATE, COMMENT_PRIMARY_TO_MAINTENANCE, &fsm_stop_postgres_and_setup_standby },
 	{ PRIMARY_STATE, MAINTENANCE_STATE, COMMENT_PRIMARY_TO_MAINTENANCE, &fsm_stop_postgres_for_primary_maintenance },
+=======
+	{ PRIMARY_STATE, PREPARE_MAINTENANCE_STATE, NODE_KIND_ANY,
+	  COMMENT_PRIMARY_TO_PREPARE_MAINTENANCE,
+	  &fsm_stop_postgres_for_primary_maintenance },
+
+	{ PREPARE_MAINTENANCE_STATE, MAINTENANCE_STATE, NODE_KIND_ANY,
+	  COMMENT_PRIMARY_TO_MAINTENANCE,
+	  &fsm_stop_postgres_and_setup_standby },
+
+>>>>>>> 0ba4c660 (Add a PgInstanceKind guard in the Keeper FSM.)
 	/*
 	 * was demoted, need to be dead now.
 	 */
-	{ DRAINING_STATE, DEMOTE_TIMEOUT_STATE, COMMENT_DRAINING_TO_DEMOTE_TIMEOUT, &fsm_stop_postgres },
-	{ DEMOTE_TIMEOUT_STATE, DEMOTED_STATE, COMMENT_DEMOTE_TIMEOUT_TO_DEMOTED,  &fsm_stop_postgres},
+	{ DRAINING_STATE, DEMOTE_TIMEOUT_STATE, NODE_KIND_ANY,
+	  COMMENT_DRAINING_TO_DEMOTE_TIMEOUT,
+	  &fsm_stop_postgres },
+
+	{ DEMOTE_TIMEOUT_STATE, DEMOTED_STATE, NODE_KIND_ANY,
+	  COMMENT_DEMOTE_TIMEOUT_TO_DEMOTED,
+	  &fsm_stop_postgres},
 
 	/*
 	 * wait_primary stops reporting, is (supposed) dead now
 	 */
-	{ WAIT_PRIMARY_STATE, DEMOTED_STATE, COMMENT_PRIMARY_TO_DEMOTED, &fsm_stop_postgres },
+	{ WAIT_PRIMARY_STATE, DEMOTED_STATE, NODE_KIND_ANY,
+	  COMMENT_PRIMARY_TO_DEMOTED,
+	  &fsm_stop_postgres },
 
 	/*
 	 * was demoted after a failure, but standby was forcibly removed
 	 */
-	{ DEMOTED_STATE, SINGLE_STATE, COMMENT_DEMOTED_TO_SINGLE, &fsm_resume_as_primary },
-	{ DEMOTE_TIMEOUT_STATE, SINGLE_STATE, COMMENT_DEMOTED_TO_SINGLE, &fsm_resume_as_primary },
-	{ DRAINING_STATE, SINGLE_STATE, COMMENT_DEMOTED_TO_SINGLE, &fsm_resume_as_primary },
+	{ DEMOTED_STATE, SINGLE_STATE, NODE_KIND_ANY,
+	  COMMENT_DEMOTED_TO_SINGLE,
+	  &fsm_resume_as_primary },
+
+	{ DEMOTE_TIMEOUT_STATE, SINGLE_STATE, NODE_KIND_ANY,
+	  COMMENT_DEMOTED_TO_SINGLE,
+	  &fsm_resume_as_primary },
+
+	{ DRAINING_STATE, SINGLE_STATE, NODE_KIND_ANY,
+	  COMMENT_DEMOTED_TO_SINGLE,
+	  &fsm_resume_as_primary },
 
 	/*
 	 * primary was forcibly removed
 	 */
-	{ SECONDARY_STATE, SINGLE_STATE, COMMENT_LOST_PRIMARY, &fsm_promote_standby },
-	{ CATCHINGUP_STATE, SINGLE_STATE, COMMENT_LOST_PRIMARY, &fsm_promote_standby },
-	{ PREP_PROMOTION_STATE, SINGLE_STATE, COMMENT_LOST_PRIMARY, &fsm_promote_standby },
+	{ SECONDARY_STATE, SINGLE_STATE, NODE_KIND_ANY,
+	  COMMENT_LOST_PRIMARY,
+	  &fsm_promote_standby },
+
+	{ CATCHINGUP_STATE, SINGLE_STATE, NODE_KIND_ANY,
+	  COMMENT_LOST_PRIMARY,
+	  &fsm_promote_standby },
+
+	{ PREP_PROMOTION_STATE, SINGLE_STATE, NODE_KIND_ANY,
+	  COMMENT_LOST_PRIMARY,
+	  &fsm_promote_standby },
 
 	/*
 	 * went down to force the primary to time out, but then it was removed
 	 */
-	{ STOP_REPLICATION_STATE, SINGLE_STATE, COMMENT_REPLICATION_TO_SINGLE, &fsm_promote_standby },
+	{ STOP_REPLICATION_STATE, SINGLE_STATE, NODE_KIND_ANY,
+	  COMMENT_REPLICATION_TO_SINGLE,
+	  &fsm_promote_standby },
 
 	/*
 	 * all states should lead to SINGLE, including REPORT_LSN
 	 */
-	{ REPORT_LSN_STATE, SINGLE_STATE, COMMENT_REPORT_LSN_TO_SINGLE, &fsm_promote_standby },
+	{ REPORT_LSN_STATE, SINGLE_STATE, NODE_KIND_ANY,
+	  COMMENT_REPORT_LSN_TO_SINGLE,
+	  &fsm_promote_standby },
 
 
 	/*
 	 * On the Primary, wait for a standby to be ready: WAIT_PRIMARY
 	 */
-	{ SINGLE_STATE, WAIT_PRIMARY_STATE, COMMENT_SINGLE_TO_WAIT_PRIMARY, &fsm_prepare_replication },
-	{ PRIMARY_STATE, JOIN_PRIMARY_STATE, COMMENT_PRIMARY_TO_JOIN_PRIMARY, &fsm_prepare_replication },
-	{ PRIMARY_STATE, WAIT_PRIMARY_STATE, COMMENT_PRIMARY_TO_WAIT_PRIMARY, &fsm_disable_sync_rep },
-	{ JOIN_PRIMARY_STATE, WAIT_PRIMARY_STATE, COMMENT_PRIMARY_TO_WAIT_PRIMARY, &fsm_disable_sync_rep },
-	{ WAIT_PRIMARY_STATE, JOIN_PRIMARY_STATE, COMMENT_PRIMARY_TO_JOIN_PRIMARY, &fsm_prepare_replication },
+	{ SINGLE_STATE, WAIT_PRIMARY_STATE, NODE_KIND_ANY,
+	  COMMENT_SINGLE_TO_WAIT_PRIMARY,
+	  &fsm_prepare_replication },
+
+	{ PRIMARY_STATE, JOIN_PRIMARY_STATE, NODE_KIND_ANY,
+	  COMMENT_PRIMARY_TO_JOIN_PRIMARY,
+	  &fsm_prepare_replication },
+
+	{ PRIMARY_STATE, WAIT_PRIMARY_STATE, NODE_KIND_ANY,
+	  COMMENT_PRIMARY_TO_WAIT_PRIMARY,
+	  &fsm_disable_sync_rep },
+
+	{ JOIN_PRIMARY_STATE, WAIT_PRIMARY_STATE, NODE_KIND_ANY,
+	  COMMENT_PRIMARY_TO_WAIT_PRIMARY,
+	  &fsm_disable_sync_rep },
+
+	{ WAIT_PRIMARY_STATE, JOIN_PRIMARY_STATE, NODE_KIND_ANY,
+	  COMMENT_PRIMARY_TO_JOIN_PRIMARY,
+	  &fsm_prepare_replication },
 
 	/*
 	 * Situation is getting back to normal on the primary
 	 */
-	{ WAIT_PRIMARY_STATE, PRIMARY_STATE, COMMENT_WAIT_PRIMARY_TO_PRIMARY, &fsm_enable_sync_rep },
-	{ JOIN_PRIMARY_STATE, PRIMARY_STATE, COMMENT_JOIN_PRIMARY_TO_PRIMARY, &fsm_enable_sync_rep },
-	{ DEMOTE_TIMEOUT_STATE, PRIMARY_STATE, COMMENT_DEMOTE_TO_PRIMARY, &fsm_start_postgres },
+	{ WAIT_PRIMARY_STATE, PRIMARY_STATE, NODE_KIND_ANY,
+	  COMMENT_WAIT_PRIMARY_TO_PRIMARY,
+	  &fsm_enable_sync_rep },
+
+	{ JOIN_PRIMARY_STATE, PRIMARY_STATE, NODE_KIND_ANY,
+	  COMMENT_JOIN_PRIMARY_TO_PRIMARY,
+	  &fsm_enable_sync_rep },
+
+	{ DEMOTE_TIMEOUT_STATE, PRIMARY_STATE, NODE_KIND_ANY,
+	  COMMENT_DEMOTE_TO_PRIMARY,
+	  &fsm_start_postgres },
 
 	/*
 	 * The primary is now ready to accept a standby, we're the standby
 	 */
-	{ WAIT_STANDBY_STATE, CATCHINGUP_STATE, COMMENT_WAIT_STANDBY_TO_CATCHINGUP, &fsm_init_standby },
-	{ DEMOTED_STATE, CATCHINGUP_STATE, COMMENT_DEMOTED_TO_CATCHINGUP, &fsm_rewind_or_init },
-	{ SECONDARY_STATE, CATCHINGUP_STATE, COMMENT_SECONDARY_TO_CATCHINGUP, &fsm_follow_new_primary },
+	{ WAIT_STANDBY_STATE, CATCHINGUP_STATE, NODE_KIND_ANY,
+	  COMMENT_WAIT_STANDBY_TO_CATCHINGUP,
+	  &fsm_init_standby },
+
+	{ DEMOTED_STATE, CATCHINGUP_STATE, NODE_KIND_ANY,
+	  COMMENT_DEMOTED_TO_CATCHINGUP,
+	  &fsm_rewind_or_init },
+
+	{ SECONDARY_STATE, CATCHINGUP_STATE, NODE_KIND_ANY,
+	  COMMENT_SECONDARY_TO_CATCHINGUP,
+	  &fsm_follow_new_primary },
 
 	/*
 	 * We're asked to be a standby.
 	 */
-	{ CATCHINGUP_STATE, SECONDARY_STATE, COMMENT_CATCHINGUP_TO_SECONDARY, &fsm_prepare_for_secondary },
+	{ CATCHINGUP_STATE, SECONDARY_STATE, NODE_KIND_ANY,
+	  COMMENT_CATCHINGUP_TO_SECONDARY,
+	  &fsm_prepare_for_secondary },
 
 	/*
 	 * The standby is asked to prepare its own promotion
 	 */
-	{ SECONDARY_STATE, PREP_PROMOTION_STATE, COMMENT_SECONDARY_TO_PREP_PROMOTION, &fsm_prepare_standby_for_promotion },
-	{ CATCHINGUP_STATE, PREP_PROMOTION_STATE, COMMENT_SECONDARY_TO_PREP_PROMOTION, &fsm_prepare_standby_for_promotion },
+	{ SECONDARY_STATE, PREP_PROMOTION_STATE, NODE_KIND_ANY,
+	  COMMENT_SECONDARY_TO_PREP_PROMOTION,
+	  &fsm_prepare_standby_for_promotion },
+
+	{ CATCHINGUP_STATE, PREP_PROMOTION_STATE, NODE_KIND_ANY,
+	  COMMENT_SECONDARY_TO_PREP_PROMOTION,
+	  &fsm_prepare_standby_for_promotion },
 
 	/*
 	 * Forcefully stop replication by stopping the server.
 	 */
-	{ PREP_PROMOTION_STATE, STOP_REPLICATION_STATE, COMMENT_PROMOTION_TO_STOP_REPLICATION, &fsm_stop_replication },
+	{ PREP_PROMOTION_STATE, STOP_REPLICATION_STATE, NODE_KIND_ANY,
+	  COMMENT_PROMOTION_TO_STOP_REPLICATION,
+	  &fsm_stop_replication },
 
 	/*
 	 * finish the promotion
 	 */
-	{ STOP_REPLICATION_STATE, WAIT_PRIMARY_STATE, COMMENT_STOP_REPLICATION_TO_WAIT_PRIMARY, &fsm_promote_standby_to_primary },
-	{ PREP_PROMOTION_STATE, WAIT_PRIMARY_STATE, COMMENT_BLOCKED_WRITES, &fsm_promote_standby },
+	{ STOP_REPLICATION_STATE, WAIT_PRIMARY_STATE, NODE_KIND_ANY,
+	  COMMENT_STOP_REPLICATION_TO_WAIT_PRIMARY,
+	  &fsm_promote_standby_to_primary },
+
+	{ PREP_PROMOTION_STATE, WAIT_PRIMARY_STATE, NODE_KIND_ANY,
+	  COMMENT_BLOCKED_WRITES,
+	  &fsm_promote_standby },
 
 	/*
 	 * Just wait until primary is ready
 	 */
-	{ INIT_STATE, WAIT_STANDBY_STATE, COMMENT_INIT_TO_WAIT_STANDBY, NULL },
-	{ DROPPED_STATE, WAIT_STANDBY_STATE, COMMENT_INIT_TO_WAIT_STANDBY, NULL },
+	{ INIT_STATE, WAIT_STANDBY_STATE, NODE_KIND_ANY,
+	  COMMENT_INIT_TO_WAIT_STANDBY,
+	  NULL },
+
+	{ DROPPED_STATE, WAIT_STANDBY_STATE, NODE_KIND_ANY,
+	  COMMENT_INIT_TO_WAIT_STANDBY,
+	  NULL },
 
 	/*
 	 * When losing a monitor and then connecting to a new monitor as a
 	 * secondary, we need to be able to follow the init sequence again.
 	 */
-	{ SECONDARY_STATE, WAIT_STANDBY_STATE, COMMENT_SECONARY_TO_WAIT_STANDBY, NULL },
+	{ SECONDARY_STATE, WAIT_STANDBY_STATE, NODE_KIND_ANY,
+	  COMMENT_SECONARY_TO_WAIT_STANDBY,
+	  NULL },
 
 	/*
 	 * In case of maintenance of the standby server, we stop PostgreSQL.
 	 */
-	{ SECONDARY_STATE, WAIT_MAINTENANCE_STATE, COMMENT_SECONDARY_TO_WAIT_MAINTENANCE, NULL },
-	{ CATCHINGUP_STATE, WAIT_MAINTENANCE_STATE, COMMENT_SECONDARY_TO_WAIT_MAINTENANCE, NULL },
-	{ SECONDARY_STATE, MAINTENANCE_STATE, COMMENT_SECONDARY_TO_MAINTENANCE, &fsm_start_maintenance_on_standby },
-	{ CATCHINGUP_STATE, MAINTENANCE_STATE, COMMENT_SECONDARY_TO_MAINTENANCE, &fsm_start_maintenance_on_standby },
-	{ WAIT_MAINTENANCE_STATE, MAINTENANCE_STATE, COMMENT_SECONDARY_TO_MAINTENANCE, &fsm_start_maintenance_on_standby },
-	{ MAINTENANCE_STATE, CATCHINGUP_STATE, COMMENT_MAINTENANCE_TO_CATCHINGUP, &fsm_restart_standby },
-	{ PREPARE_MAINTENANCE_STATE, CATCHINGUP_STATE, COMMENT_MAINTENANCE_TO_CATCHINGUP, &fsm_restart_standby },
+	{ SECONDARY_STATE, WAIT_MAINTENANCE_STATE, NODE_KIND_ANY,
+	  COMMENT_SECONDARY_TO_WAIT_MAINTENANCE,
+	  NULL },
+
+	{ CATCHINGUP_STATE, WAIT_MAINTENANCE_STATE, NODE_KIND_ANY,
+	  COMMENT_SECONDARY_TO_WAIT_MAINTENANCE,
+	  NULL },
+
+	{ SECONDARY_STATE, MAINTENANCE_STATE, NODE_KIND_ANY,
+	  COMMENT_SECONDARY_TO_MAINTENANCE,
+	  &fsm_start_maintenance_on_standby },
+
+	{ CATCHINGUP_STATE, MAINTENANCE_STATE, NODE_KIND_ANY,
+	  COMMENT_SECONDARY_TO_MAINTENANCE,
+	  &fsm_start_maintenance_on_standby },
+
+	{ WAIT_MAINTENANCE_STATE, MAINTENANCE_STATE, NODE_KIND_ANY,
+	  COMMENT_SECONDARY_TO_MAINTENANCE,
+	  &fsm_start_maintenance_on_standby },
+
+	{ MAINTENANCE_STATE, CATCHINGUP_STATE, NODE_KIND_ANY,
+	  COMMENT_MAINTENANCE_TO_CATCHINGUP,
+	  &fsm_restart_standby },
+
+	{ PREPARE_MAINTENANCE_STATE, CATCHINGUP_STATE, NODE_KIND_ANY,
+	  COMMENT_MAINTENANCE_TO_CATCHINGUP,
+	  &fsm_restart_standby },
 
 	/*
 	 * Applying new replication/cluster settings (per node replication quorum,
@@ -352,53 +498,103 @@ KeeperFSMTransition KeeperFSM[] = {
 	 * have to fetch the new value for synchronous_standby_names from the
 	 * monitor.
 	 */
-	{ PRIMARY_STATE, APPLY_SETTINGS_STATE, COMMENT_PRIMARY_TO_APPLY_SETTINGS, NULL },
-	{ WAIT_PRIMARY_STATE, APPLY_SETTINGS_STATE, COMMENT_PRIMARY_TO_APPLY_SETTINGS, NULL },
-	{ APPLY_SETTINGS_STATE, PRIMARY_STATE, COMMENT_APPLY_SETTINGS_TO_PRIMARY, &fsm_enable_sync_rep },
+	{ PRIMARY_STATE, APPLY_SETTINGS_STATE, NODE_KIND_ANY,
+	  COMMENT_PRIMARY_TO_APPLY_SETTINGS,
+	  NULL },
 
-	{ APPLY_SETTINGS_STATE, SINGLE_STATE, COMMENT_PRIMARY_TO_SINGLE, &fsm_disable_replication },
-	{ APPLY_SETTINGS_STATE, WAIT_PRIMARY_STATE, COMMENT_PRIMARY_TO_WAIT_PRIMARY, &fsm_disable_sync_rep },
-	{ APPLY_SETTINGS_STATE, JOIN_PRIMARY_STATE, COMMENT_PRIMARY_TO_JOIN_PRIMARY, &fsm_prepare_replication },
+	{ WAIT_PRIMARY_STATE, APPLY_SETTINGS_STATE, NODE_KIND_ANY,
+	  COMMENT_PRIMARY_TO_APPLY_SETTINGS,
+	  NULL },
+
+	{ APPLY_SETTINGS_STATE, PRIMARY_STATE, NODE_KIND_ANY,
+	  COMMENT_APPLY_SETTINGS_TO_PRIMARY,
+	  &fsm_enable_sync_rep },
+
+	{ APPLY_SETTINGS_STATE, SINGLE_STATE, NODE_KIND_ANY,
+	  COMMENT_PRIMARY_TO_SINGLE,
+	  &fsm_disable_replication },
+
+	{ APPLY_SETTINGS_STATE, WAIT_PRIMARY_STATE, NODE_KIND_ANY,
+	  COMMENT_PRIMARY_TO_WAIT_PRIMARY,
+	  &fsm_disable_sync_rep },
+
+	{ APPLY_SETTINGS_STATE, JOIN_PRIMARY_STATE, NODE_KIND_ANY,
+	  COMMENT_PRIMARY_TO_JOIN_PRIMARY,
+	  &fsm_prepare_replication },
 
 	/*
 	 * In case of multiple standbys, failover begins with reporting current LSN
 	 */
-	{ SECONDARY_STATE, REPORT_LSN_STATE, COMMENT_SECONDARY_TO_REPORT_LSN, &fsm_report_lsn },
-	{ CATCHINGUP_STATE, REPORT_LSN_STATE, COMMENT_SECONDARY_TO_REPORT_LSN, &fsm_report_lsn },
-	{ MAINTENANCE_STATE, REPORT_LSN_STATE, COMMENT_SECONDARY_TO_REPORT_LSN, &fsm_report_lsn },
-	{ PREPARE_MAINTENANCE_STATE, REPORT_LSN_STATE, COMMENT_SECONDARY_TO_REPORT_LSN, &fsm_report_lsn },
 
-	{ REPORT_LSN_STATE, PREP_PROMOTION_STATE, COMMENT_REPORT_LSN_TO_PREP_PROMOTION, &fsm_prepare_standby_for_promotion },
+	{ CATCHINGUP_STATE, REPORT_LSN_STATE, NODE_KIND_ANY,
+	  COMMENT_SECONDARY_TO_REPORT_LSN,
+	  &fsm_report_lsn },
 
-	{ REPORT_LSN_STATE, FAST_FORWARD_STATE, COMMENT_REPORT_LSN_TO_FAST_FORWARD, &fsm_fast_forward },
-	{ FAST_FORWARD_STATE, PREP_PROMOTION_STATE, COMMENT_FAST_FORWARD_TO_PREP_PROMOTION, &fsm_cleanup_as_primary },
+	{ MAINTENANCE_STATE, REPORT_LSN_STATE, NODE_KIND_ANY,
+	  COMMENT_SECONDARY_TO_REPORT_LSN,
+	  &fsm_report_lsn },
 
-	{ REPORT_LSN_STATE, JOIN_SECONDARY_STATE, COMMENT_REPORT_LSN_TO_JOIN_SECONDARY, &fsm_checkpoint_and_stop_postgres },
-	{ REPORT_LSN_STATE, SECONDARY_STATE, COMMENT_REPORT_LSN_TO_JOIN_SECONDARY, &fsm_follow_new_primary },
-	{ JOIN_SECONDARY_STATE, SECONDARY_STATE, COMMENT_JOIN_SECONDARY_TO_SECONDARY, &fsm_follow_new_primary },
+	{ PREPARE_MAINTENANCE_STATE, REPORT_LSN_STATE, NODE_KIND_ANY,
+	  COMMENT_SECONDARY_TO_REPORT_LSN,
+	  &fsm_report_lsn },
+
+	{ REPORT_LSN_STATE, PREP_PROMOTION_STATE, NODE_KIND_ANY,
+	  COMMENT_REPORT_LSN_TO_PREP_PROMOTION,
+	  &fsm_prepare_standby_for_promotion },
+
+	{ REPORT_LSN_STATE, FAST_FORWARD_STATE, NODE_KIND_ANY,
+	  COMMENT_REPORT_LSN_TO_FAST_FORWARD,
+	  &fsm_fast_forward },
+
+	{ FAST_FORWARD_STATE, PREP_PROMOTION_STATE, NODE_KIND_ANY,
+	  COMMENT_FAST_FORWARD_TO_PREP_PROMOTION,
+	  &fsm_cleanup_as_primary },
+
+	{ REPORT_LSN_STATE, JOIN_SECONDARY_STATE, NODE_KIND_ANY,
+	  COMMENT_REPORT_LSN_TO_JOIN_SECONDARY,
+	  &fsm_checkpoint_and_stop_postgres },
+
+	{ REPORT_LSN_STATE, SECONDARY_STATE, NODE_KIND_ANY,
+	  COMMENT_REPORT_LSN_TO_JOIN_SECONDARY,
+	  &fsm_follow_new_primary },
+
+	{ JOIN_SECONDARY_STATE, SECONDARY_STATE, NODE_KIND_ANY,
+	  COMMENT_JOIN_SECONDARY_TO_SECONDARY,
+	  &fsm_follow_new_primary },
 
 	/*
 	 * When an old primary gets back online and reaches draining/draining, if a
 	 * failover is on-going then have it join the selection process.
 	 */
-	{ DRAINING_STATE, REPORT_LSN_STATE, COMMENT_DRAINING_TO_REPORT_LSN, &fsm_report_lsn_and_drop_replication_slots },
-	{ DEMOTED_STATE, REPORT_LSN_STATE, COMMENT_DEMOTED_TO_REPORT_LSN, &fsm_report_lsn_and_drop_replication_slots },
+	{ DRAINING_STATE, REPORT_LSN_STATE, NODE_KIND_ANY,
+	  COMMENT_DRAINING_TO_REPORT_LSN,
+	  &fsm_report_lsn_and_drop_replication_slots },
+
+	{ DEMOTED_STATE, REPORT_LSN_STATE, NODE_KIND_ANY,
+	  COMMENT_DEMOTED_TO_REPORT_LSN,
+	  &fsm_report_lsn_and_drop_replication_slots },
 
 	/*
 	 * When adding a new node and there is no primary, but there are existing
 	 * nodes that are not candidates for failover.
 	 */
-	{ INIT_STATE, REPORT_LSN_STATE, COMMENT_INIT_TO_REPORT_LSN, &fsm_init_from_standby },
+	{ INIT_STATE, REPORT_LSN_STATE, NODE_KIND_ANY,
+	  COMMENT_INIT_TO_REPORT_LSN,
+	  &fsm_init_from_standby },
 
 	/*
 	 * Dropping a node is a two-step process
 	 */
-	{ ANY_STATE, DROPPED_STATE, COMMENT_ANY_TO_DROPPED, &fsm_drop_node },
+	{ ANY_STATE, DROPPED_STATE, NODE_KIND_ANY,
+	  COMMENT_ANY_TO_DROPPED,
+	  &fsm_drop_node },
 
 	/*
 	 * This is the end, my friend.
 	 */
-	{ NO_STATE, NO_STATE, NULL, NULL },
+	{ NO_STATE, NO_STATE, NODE_KIND_ANY,
+	  NULL,
+	  NULL },
 };
 
 
@@ -518,7 +714,8 @@ keeper_fsm_reach_assigned_state(Keeper *keeper)
 	while (transition.current != NO_STATE)
 	{
 		if (state_matches(transition.current, keeperState->current_role) &&
-			state_matches(transition.assigned, keeperState->assigned_role))
+			state_matches(transition.assigned, keeperState->assigned_role) &&
+			pgKind_matches(transition.pgKind, keeper->config.pgSetup.pgKind))
 		{
 			bool ret = false;
 

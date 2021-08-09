@@ -115,21 +115,29 @@ typedef enum PostgresRole
  * fetches its coordinator hostname and port from the monitor and blocks writes
  * using the citus master_update_node() function call in a prepared
  * transaction.
+ *
+ * We use the PgInstanceKind in the FSM as a guard to choose the transition
+ * function depending on the kind of node we are dealing with. We match the
+ * node kind using bitwise & operator, so we need to use powers of two here.
+ * Also we represent "any kind" with the 0xff value. Any all-one value (when
+ * seen in binary) larger than the max enum value will do really.
  */
 
 typedef enum PgInstanceKind
 {
 	NODE_KIND_UNKNOWN = 0,
-	NODE_KIND_STANDALONE,
-	NODE_KIND_CITUS_COORDINATOR,
-	NODE_KIND_CITUS_WORKER
-} PgInstanceKind;
+	NODE_KIND_STANDALONE = 1,
+	NODE_KIND_CITUS_COORDINATOR = 2,
+	NODE_KIND_CITUS_WORKER = 4,
 
+	NODE_KIND_ANY = 0xff
+} PgInstanceKind;
 
 #define IS_CITUS_INSTANCE_KIND(x) \
 	(x == NODE_KIND_CITUS_COORDINATOR \
 	 || x == NODE_KIND_CITUS_WORKER)
 
+#define pgKind_matches(x, y) ((x & y) != 0)
 
 #define PG_VERSION_STRING_MAX 12
 

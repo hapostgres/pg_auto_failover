@@ -29,6 +29,7 @@ typedef struct KeeperFSMTransition
 {
 	NodeState current;
 	NodeState assigned;
+	PgInstanceKind pgKind;
 	const char *comment;
 	ReachAssignedStateFunction transitionFunction;
 } KeeperFSMTransition;
