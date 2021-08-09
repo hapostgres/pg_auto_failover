@@ -282,11 +282,6 @@ KeeperFSMTransition KeeperFSM[] = {
 	/*
 	 * primary is put to maintenance
 	 */
-<<<<<<< HEAD
-	{ PRIMARY_STATE, PREPARE_MAINTENANCE_STATE, COMMENT_PRIMARY_TO_PREPARE_MAINTENANCE, &fsm_stop_postgres_for_primary_maintenance },
-	{ PREPARE_MAINTENANCE_STATE, MAINTENANCE_STATE, COMMENT_PRIMARY_TO_MAINTENANCE, &fsm_stop_postgres_and_setup_standby },
-	{ PRIMARY_STATE, MAINTENANCE_STATE, COMMENT_PRIMARY_TO_MAINTENANCE, &fsm_stop_postgres_for_primary_maintenance },
-=======
 	{ PRIMARY_STATE, PREPARE_MAINTENANCE_STATE, NODE_KIND_ANY,
 	  COMMENT_PRIMARY_TO_PREPARE_MAINTENANCE,
 	  &fsm_stop_postgres_for_primary_maintenance },
@@ -295,7 +290,10 @@ KeeperFSMTransition KeeperFSM[] = {
 	  COMMENT_PRIMARY_TO_MAINTENANCE,
 	  &fsm_stop_postgres_and_setup_standby },
 
->>>>>>> 0ba4c660 (Add a PgInstanceKind guard in the Keeper FSM.)
+	{ PRIMARY_STATE, MAINTENANCE_STATE, NODE_KIND_ANY,
+	  COMMENT_PRIMARY_TO_MAINTENANCE,
+	  &fsm_stop_postgres_for_primary_maintenance },
+
 	/*
 	 * was demoted, need to be dead now.
 	 */
