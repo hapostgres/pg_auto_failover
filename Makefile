@@ -79,13 +79,24 @@ NODES ?= 2						# total count of Postgres nodes
 NODES_ASYNC ?= 0				# count of replication-quorum false nodes
 NODES_PRIOS ?= 50				# either "50", or "50,50", or "50,50,0" etc
 NODES_SYNC_SB ?= -1
-FIRST_PGPORT ?= 5500
+WITH_CITUS = 0
+WORKERS = 2
+NODES_SECONDARY = 0
 CLUSTER_OPTS = ""			# could be "--skip-pg-hba"
 
 TMUX_EXTRA_COMMANDS ?= ""
 TMUX_LAYOUT ?= even-vertical	# could be "tiled"
 TMUX_TOP_DIR = ./tmux
 TMUX_SCRIPT = ./tmux/script-$(FIRST_PGPORT).tmux
+
+ifeq ($(CITUS),1)
+	FIRST_PGPORT ?= 5600
+	CLUSTER_OPTS += --citus
+	TMUX_TOP_DIR = ./tmux/citus
+else
+	FIRST_PGPORT ?= 5500
+	TMUX_TOP_DIR = ./tmux/pgsql
+endif
 
 # make azcluster arguments
 AZURE_PREFIX ?= ha-demo-$(shell whoami)
@@ -295,6 +306,8 @@ $(TMUX_SCRIPT): bin
          --async-nodes $(NODES_ASYNC)     \
          --node-priorities $(NODES_PRIOS) \
          --sync-standbys $(NODES_SYNC_SB) \
+         --citus-workers $(WORKERS) \
+         --citus-secondaries $(NODES_SECONDARY) \
          $(CLUSTER_OPTS)                  \
          --binpath $(BINPATH)             \
 		 --layout $(TMUX_LAYOUT) > $@
@@ -305,7 +318,10 @@ tmux-clean: bin
 	$(PG_AUTOCTL) do tmux clean           \
          --root $(TMUX_TOP_DIR)           \
          --first-pgport $(FIRST_PGPORT)   \
-         --nodes $(NODES)
+         --nodes $(NODES)                 \
+         --citus-workers $(WORKERS)       \
+         --citus-secondaries $(NODES_SECONDARY) \
+         $(CLUSTER_OPTS)
 
 tmux-session: bin
 	$(PG_AUTOCTL) do tmux session         \
@@ -315,6 +331,8 @@ tmux-session: bin
          --async-nodes $(NODES_ASYNC)     \
          --node-priorities $(NODES_PRIOS) \
          --sync-standbys $(NODES_SYNC_SB) \
+         --citus-workers $(WORKERS)       \
+         --citus-secondaries $(NODES_SECONDARY) \
          $(CLUSTER_OPTS)                  \
          --binpath $(BINPATH)             \
          --layout $(TMUX_LAYOUT)

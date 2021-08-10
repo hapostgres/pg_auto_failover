@@ -50,3 +50,26 @@ are the following::
 
   $ pg_autoctl get formation settings
   $ pg_autoctl perform failover
+
+
+pg_autoctl do tmux session
+--------------------------
+
+This command runs a tmux session for a demo or a test case.
+
+::
+
+   usage: pg_autoctl do tmux session [option ...]
+
+     --root              path where to create a cluster
+     --first-pgport      first Postgres port to use (5500)
+     --nodes             number of Postgres nodes to create (2)
+     --async-nodes       number of async nodes within nodes (0)
+     --node-priorities   list of nodes priorities (50)
+     --sync-standbys     number-sync-standbys to set (0 or 1)
+     --skip-pg-hba       use --skip-pg-hba when creating nodes
+     --citus             start a Citus formation
+     --citus-workers     number of Citus workers to create (2)
+     --citus-secondaries number of Citus secondaries to create (0)
+     --layout            tmux layout to use (even-vertical)
+     --binpath           path to the pg_autoctl binary (current binary path)

@@ -285,15 +285,18 @@ CommandLine do_tmux_script =
 	make_command("script",
 				 "Produce a tmux script for a demo or a test case (debug only)",
 				 "[option ...]",
-				 "  --root            path where to create a cluster\n"
-				 "  --first-pgport    first Postgres port to use (5500)\n"
-				 "  --nodes           number of Postgres nodes to create (2)\n"
-				 "  --async-nodes     number of async nodes within nodes (0)\n"
-				 "  --node-priorities list of nodes priorities (50)\n"
-				 "  --sync-standbys   number-sync-standbys to set (0 or 1)\n"
-				 "  --skip-pg-hba     use --skip-pg-hba when creating nodes\n"
-				 "  --layout          tmux layout to use (even-vertical)\n"
-				 "  --binpath         path to the pg_autoctl binary (current binary path)",
+				 "  --root              path where to create a cluster\n"
+				 "  --first-pgport      first Postgres port to use (5500)\n"
+				 "  --nodes             number of Postgres nodes to create (2)\n"
+				 "  --async-nodes       number of async nodes within nodes (0)\n"
+				 "  --node-priorities   list of nodes priorities (50)\n"
+				 "  --sync-standbys     number-sync-standbys to set (0 or 1)\n"
+				 "  --skip-pg-hba       use --skip-pg-hba when creating nodes\n"
+				 "  --citus             start a Citus formation\n"
+				 "  --citus-workers     number of Citus workers to create (2)\n"
+				 "  --citus-secondaries number of Citus secondaries to create (0)\n"
+				 "  --layout            tmux layout to use (even-vertical)\n"
+				 "  --binpath           path to the pg_autoctl binary (current binary path)",
 				 cli_do_tmux_script_getopts,
 				 cli_do_tmux_script);
 
@@ -301,15 +304,18 @@ CommandLine do_tmux_session =
 	make_command("session",
 				 "Run a tmux session for a demo or a test case",
 				 "[option ...]",
-				 "  --root            path where to create a cluster\n"
-				 "  --first-pgport    first Postgres port to use (5500)\n"
-				 "  --nodes           number of Postgres nodes to create (2)\n"
-				 "  --async-nodes     number of async nodes within nodes (0)\n"
-				 "  --node-priorities list of nodes priorities (50)\n"
-				 "  --sync-standbys   number-sync-standbys to set (0 or 1)\n"
-				 "  --skip-pg-hba     use --skip-pg-hba when creating nodes\n"
-				 "  --layout          tmux layout to use (even-vertical)\n"
-				 "  --binpath         path to the pg_autoctl binary (current binary path)",
+				 "  --root              path where to create a cluster\n"
+				 "  --first-pgport      first Postgres port to use (5500)\n"
+				 "  --nodes             number of Postgres nodes to create (2)\n"
+				 "  --async-nodes       number of async nodes within nodes (0)\n"
+				 "  --node-priorities   list of nodes priorities (50)\n"
+				 "  --sync-standbys     number-sync-standbys to set (0 or 1)\n"
+				 "  --skip-pg-hba       use --skip-pg-hba when creating nodes\n"
+				 "  --citus             start a Citus formation\n"
+				 "  --citus-workers     number of Citus workers to create (2)\n"
+				 "  --citus-secondaries number of Citus secondaries to create (0)\n"
+				 "  --layout            tmux layout to use (even-vertical)\n"
+				 "  --binpath           path to the pg_autoctl binary (current binary path)",
 				 cli_do_tmux_script_getopts,
 				 cli_do_tmux_session);
 
@@ -320,7 +326,9 @@ CommandLine do_tmux_stop =
 				 "[option ...]",
 				 "  --root          path where to create a cluster\n"
 				 "  --first-pgport  first Postgres port to use (5500)\n"
-				 "  --nodes         number of Postgres nodes to create (2)",
+				 "  --nodes         number of Postgres nodes to stop\n"
+				 "  --citus         stop a Citus formation\n"
+				 "  --citus-workers number of Citus workers to stop\n",
 				 cli_do_tmux_script_getopts,
 				 cli_do_tmux_stop);
 
@@ -330,7 +338,9 @@ CommandLine do_tmux_clean =
 				 "[option ...]",
 				 "  --root          path where to create a cluster\n"
 				 "  --first-pgport  first Postgres port to use (5500)\n"
-				 "  --nodes         number of Postgres nodes to create (2)",
+				 "  --nodes         number of Postgres nodes to clean\n"
+				 "  --citus         clean a Citus formation\n"
+				 "  --citus-workers number of Citus workers to clean\n",
 				 cli_do_tmux_script_getopts,
 				 cli_do_tmux_clean);
 
