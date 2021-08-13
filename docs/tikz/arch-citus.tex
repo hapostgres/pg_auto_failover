@@ -22,9 +22,7 @@
 
   %% \draw [help lines] (-10,0) grid (10,20);
 
-  \node (flegend) at (0,19) {\textbf{\textt{number\_sync\_standby = 0}}} ;
-
-  \node  (c0a)   at (0,16)   [primary]
+  \node  (c0a)   at (0,19)   [primary]
          {\textbf{\normalsize Coord0A}
            \nodepart{second}
            \textbf{\Large Primary}
@@ -32,81 +30,85 @@
            \texttt{pg\_dist\_node}
          };
 
-  \node  (c0b)   at (-9,12)   [cstandby]
+  \node  (c0b)   at (0,11)   [cstandby]
          {\textbf{\normalsize Coord0B}
            \nodepart{second}
            \textbf{\Large Secondary}
          };
 
-  \node  (w1a)   at (-7,8)  [cprimary]
+  \node  (w1a)   at (9,21)  [cprimary]
          {\textbf{\normalsize Worker1A}
            \nodepart{second}
            \textbf{\Large Primary}
          };
 
-  \node  (w1b)   at (-7,4)  [cstandby]
+  \node  (w1b)   at (15,21)  [cstandby]
          {\textbf{\normalsize Worker1B}
            \nodepart{second}
            \textbf{\Large Secondary}
          };
 
-  \node  (w2a)   at (0,8)   [cprimary]
+  \node  (w2a)   at (9,15)   [cprimary]
          {\textbf{\normalsize Worker2A}
            \nodepart{second}
            \textbf{\Large Primary}
          };
 
-  \node  (w2b)   at (0,4)   [cstandby]
+  \node  (w2b)   at (15,15)   [cstandby]
          {\textbf{\normalsize Worker2B}
            \nodepart{second}
            \textbf{\Large Secondary}
          };
 
-  \node  (w3a)   at (7,8)   [cprimary]
+  \node  (w3a)   at (9,9)   [cprimary]
          {\textbf{\normalsize Worker3A}
            \nodepart{second}
            \textbf{\Large Primary}
          };
 
-  \node  (w3b)   at (7,4)   [cstandby]
+  \node  (w3b)   at (15,9)   [cstandby]
          {\textbf{\normalsize Worker3B}
            \nodepart{second}
            \textbf{\Large Secondary}
          };
 
-  \node  (app) at (-8,18)  [app]        {\Large Application};
-  \node  (m)   at (8,18)   [monitor]    {\Large Monitor};
+  \node  (app) at (-4,15)  [app]        {\Large Application};
+  \node  (m)   at (4,15)    [monitor]    {\Large Monitor};
 
-  \node  (mid1) at (4,13)  [coordinate] {};
-  \node  (mid2) at (4,10)  [coordinate] {};
-  \node  (mid3) at (4,8)  [coordinate] {};
+  \node  (midc) at (5,19)  [coordinate] {};
 
-  \path (app) edge [sql,out=0,in=180]  node[above,near start] {SQL} (c0a)
-              edge [sqlf,out=0,in=45]  node[left,near end] {SQL (fallback)} (c0b.north east)
+  \node  (mid1) at (7,18)  [coordinate] {};
+  \node  (mid2) at (7,12)  [coordinate] {};
+  \node  (mid3) at (12,12)  [coordinate] {};
 
-        (m)   edge [hc,out=-90,in=0] (c0a)
-              edge [hc,<-,out=-90,in=90] node[below] {Health checks} (mid1)
+  \path (app) edge [sql,out=90,in=180]  node {SQL} (c0a)
+              edge [sqlf,out=-90,in=180]  node[below] {SQL (fallback)} (c0b)
 
-        (mid1) edge [hc,->,out=-90,in=0] (c0b.east)
-               edge [hc,->,out=-90,in=45] (w1a.north east)
-               edge [hcmid,out=-90,in=90] (mid2)
+        (m)   edge [hc,out=90,in=0]  (c0a)
+              edge [hc,out=-90,in=0] (c0b)
+              edge [hc,<-,out=90,in=180] (mid1)
+              edge [hc,<-,out=-90,in=180] (mid2)
 
-        (mid2) edge [hc,->,out=-90,in=0] (w2a.east)
-               edge [hc,->,out=-90,in=180] (w3a.west)
-               edge [hcmid,out=-90,in=90] (mid3)
+        (mid1) edge [hc,->,out=0,in=-90] (w1a)
+               edge [hc,->,out=0,in=-90] (w1b)
 
-        (mid3) edge [hc,->,out=-90,in=45] (w1b.north east)
-               edge [hc,->,out=-90,in=0] (w2b.east)
-               edge [hc,->,out=-90,in=180] (w3b.west)
+        (mid2) edge [hc,->,out=0,in=-90] (w2a)
+               edge [hc,->,out=0,in=90] (w3a)
+               edge [hcmid,out=0,in=180] (mid3)
 
-         (c0a) edge [sr] node[above] {Streaming} node[below] {Replication} (c0b)
+        (mid3) edge [hc,->,out=0,in=-90] (w2b)
+               edge [hc,->,out=0,in=90] node[below] {Health checks} (w3b)
+
+        (c0a) edge [sr] node[above] {Streaming} node[below] {Replication} (c0b)
         (w1a) edge [sr] (w1b)
         (w2a) edge [sr] (w2b)
         (w3a) edge [sr] (w3b)
 
-        (c0a.south) edge [cw,out=-90,in=90] (w1a)
-        (c0a.south) edge [cw,out=-90,in=90] node[left] {Citus} node[right] {Connection} (w2a)
-        (c0a.south) edge [cw,out=-90,in=90] (w3a);
+        (c0a.south east) edge [cw,<-,out=-35,in=180] node[above] {Citus Connection} (midc)
+
+        (midc) edge [cw,->,out=0,in=180] (w1a)
+               edge [cw,->,out=0,in=180] (w2a)
+               edge [cw,->,out=0,in=180] (w3a);
 
 \end{tikzpicture}
 

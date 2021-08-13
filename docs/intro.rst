@@ -70,19 +70,19 @@ system always maintains a minimum of two copies of the data set: one on the
 primary, another one on one on either node B or node D. Whenever we lose one
 of those nodes, we can hold to this guarantee of two copies of the data set.
 
-Adding to that, we have the standby server C which has been set up to not
-participate in the replication quorum. Node C will not be found in the
-``synchronous_standby_names`` list of nodes. Also, node C is set up in a way to
+Adding to that, we have the standby server D which has been set up to not
+participate in the replication quorum. Node D will not be found in the
+``synchronous_standby_names`` list of nodes. Also, node D is set up in a way to
 never be a candidate for failover, with ``candidate-priority = 0``.
 
-This architecture would fit a situation where nodes A, B, and D are deployed
-in the same data center or availability zone, and node C in another.
-Those three nodes are set up to support the main production traffic and
-implement high availability of both the Postgres service and the data set.
+This architecture would fit a situation where nodes A, B, and C are deployed
+in the same data center or availability zone, and node D in another. Those
+three nodes are set up to support the main production traffic and implement
+high availability of both the Postgres service and the data set.
 
-Node C might be set up for Business Continuity in case the first data center is
-lost, or maybe for reporting the need for deployment on another application
-domain.
+Node D might be set up for Business Continuity in case the first data center
+is lost, or maybe for reporting the need for deployment on another
+application domain.
 
 Citus Architecture
 ------------------
