@@ -301,20 +301,20 @@ Sample architecture with three standby nodes, one async
 In this case, the system is set up with two standby nodes participating in the
 replication quorum, allowing for ``number_sync_standbys = 1``. The system
 always maintains at least two copies of the data set, one on the primary,
-another on either node B or node D. Whenever we lose one of those nodes, we can
+another on either node B or node C. Whenever we lose one of those nodes, we can
 hold to the guarantee of having two copies of the data set.
 
-Additionally, we have the standby server C which has been set up to not
-participate in the replication quorum. Node C will not be found in the
-``synchronous_standby_names`` list of nodes. Also, node C is set up to
+Additionally, we have the standby server D which has been set up to not
+participate in the replication quorum. Node D will not be found in the
+``synchronous_standby_names`` list of nodes. Also, node D is set up to
 never be a candidate for failover, with ``candidate-priority = 0``.
 
-This architecture would fit a situation with nodes A, B, and D are deployed
-in the same data center or availability zone and node C in another one.
+This architecture would fit a situation with nodes A, B, and C are deployed
+in the same data center or availability zone and node D in another one.
 Those three nodes are set up to support the main production traffic and
 implement high availability of both the Postgres service and the data set.
 
-Node C might be set up for Business Continuity in case the first data center
+Node D might be set up for Business Continuity in case the first data center
 is lost, or maybe for reporting needs on another application domain.
 
 With this architecture diagram, here's the summary that we obtain::
@@ -323,12 +323,12 @@ With this architecture diagram, here's the summary that we obtain::
     Context |    Name |                   Setting | Value
   ----------+---------+---------------------------+-------------------------------------------------------------
   formation | default |      number_sync_standbys | 1
-    primary |  node_A | synchronous_standby_names | 'ANY 1 (pgautofailover_standby_4, pgautofailover_standby_2)'
+    primary |  node_A | synchronous_standby_names | 'ANY 1 (pgautofailover_standby_2, pgautofailover_standby_3)'
        node |  node_A |        replication quorum | true
        node |  node_B |        replication quorum | true
-       node |  node_C |        replication quorum | false
-       node |  node_D |        replication quorum | true
+       node |  node_C |        replication quorum | true
+       node |  node_D |        replication quorum | false
        node |  node_A |        candidate priority | 50
        node |  node_B |        candidate priority | 50
-       node |  node_C |        candidate priority | 0
-       node |  node_D |        candidate priority | 50
+       node |  node_C |        candidate priority | 50
+       node |  node_D |        candidate priority | 0

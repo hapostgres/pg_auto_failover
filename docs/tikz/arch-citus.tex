@@ -73,13 +73,13 @@
          };
 
   \node  (app) at (-4,15)  [app]        {\Large Application};
-  \node  (m)   at (4,15)    [monitor]    {\Large Monitor};
+  \node  (m)   at (4.5,15)   [monitor]    {\Large Monitor};
 
-  \node  (midc) at (5,19)  [coordinate] {};
+  \node  (midc) at (5.5,19)  [coordinate] {};
 
   \node  (mid1) at (7,18)  [coordinate] {};
   \node  (mid2) at (7,12)  [coordinate] {};
-  \node  (mid3) at (12,12)  [coordinate] {};
+  \node  (mid3) at (12,12) [coordinate] {};
 
   \path (app) edge [sql,out=90,in=180]  node {SQL} (c0a)
               edge [sqlf,out=-90,in=180]  node[below] {SQL (fallback)} (c0b)
@@ -93,22 +93,22 @@
                edge [hc,->,out=0,in=-90] (w1b)
 
         (mid2) edge [hc,->,out=0,in=-90] (w2a)
-               edge [hc,->,out=0,in=90] (w3a)
-               edge [hcmid,out=0,in=180] (mid3)
+               edge [hc,->,out=0,in=90]  (w3a)
+               edge [hcmid,out=0,in=180] node[below,near end] {Health checks} (mid3)
 
         (mid3) edge [hc,->,out=0,in=-90] (w2b)
-               edge [hc,->,out=0,in=90] node[below] {Health checks} (w3b)
+               edge [hc,->,out=0,in=90]  (w3b)
 
         (c0a) edge [sr] node[above] {Streaming} node[below] {Replication} (c0b)
         (w1a) edge [sr] (w1b)
         (w2a) edge [sr] (w2b)
         (w3a) edge [sr] (w3b)
 
-        (c0a.south east) edge [cw,<-,out=-35,in=180] node[above] {Citus Connection} (midc)
+        (c0a.south east) edge [cw,<-,out=-35,in=180] (midc)
 
-        (midc) edge [cw,->,out=0,in=180] (w1a)
-               edge [cw,->,out=0,in=180] (w2a)
-               edge [cw,->,out=0,in=180] (w3a);
+        (midc) edge [cw,->,out=0,in=-135] node {Citus Connections}(w1a.south west)
+               edge [cw,->,out=-35,in=100] (w2a.north west)
+               edge [cw,->,out=-35,in=135] (w3a.north west);
 
 \end{tikzpicture}
 
