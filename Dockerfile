@@ -72,7 +72,7 @@ ENV PATH /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/p
 ENV PG_AUTOCTL_DEBUG 1
 
 
-FROM debian:stable-slim as run
+FROM debian:buster-slim as run
 
 ENV PGVERSION 10
 
