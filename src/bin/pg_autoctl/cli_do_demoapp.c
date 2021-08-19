@@ -329,16 +329,33 @@ cli_do_demoapp_getopts(int argc, char **argv)
 
 	if (IS_EMPTY_STRING_BUFFER(options.monitor_pguri))
 	{
-		log_fatal("Please provide --monitor");
-		errors++;
+		if (env_exists(PG_AUTOCTL_MONITOR) &&
+			get_env_copy(PG_AUTOCTL_MONITOR,
+						 options.monitor_pguri,
+						 sizeof(options.monitor_pguri)))
+		{
+			log_debug("Using environment PG_AUTOCTL_MONITOR \"%s\"",
+					  options.monitor_pguri);
+		}
+		else
+		{
+			log_fatal("Please provide --monitor");
+			errors++;
+		}
 	}
 
 	if (IS_EMPTY_STRING_BUFFER(options.username))
 	{
-		PostgresSetup pgSetup = { 0 };
-		char *username = pg_setup_get_username(&pgSetup);
+		if (!get_env_copy_with_fallback("PGUSER",
+										options.username,
+										NAMEDATALEN,
+										""))
+		{
+			PostgresSetup pgSetup = { 0 };
+			char *username = pg_setup_get_username(&pgSetup);
 
-		strlcpy(options.username, username, sizeof(options.username));
+			strlcpy(options.username, username, sizeof(options.username));
+		}
 	}
 
 	/* set our Postgres username as the PGUSER environment variable now */

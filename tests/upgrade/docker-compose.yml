@@ -1,0 +1,66 @@
+version: "3.9"  # optional since v1.27.0
+
+services:
+  monitor:
+    build: ../..
+    hostname: monitor
+    volumes:
+      - monitor_data:/var/lib/postgres:rw
+    environment:
+      PGDATA: /var/lib/postgres/pgaf
+    command: pg_autoctl create monitor --ssl-self-signed --auth trust --run
+    expose:
+      - 5432
+  node1:
+    build: ../..
+    hostname: node1
+    volumes:
+      - node1_data:/var/lib/postgres:rw
+    environment:
+      PGDATA: /var/lib/postgres/pgaf
+      PGUSER: ad
+      PGDATABASE: analytics
+      PG_AUTOCTL_MONITOR: "postgresql://autoctl_node@monitor/pg_auto_failover"
+    command:  pg_autoctl create postgres --ssl-self-signed --auth trust --pg-hba-lan --run
+    expose:
+      - 5432
+  node2:
+    build: ../..
+    hostname: node2
+    volumes:
+      - node2_data:/var/lib/postgres:rw
+    environment:
+      PGDATA: /var/lib/postgres/pgaf
+      PGUSER: ad
+      PGDATABASE: analytics
+      PG_AUTOCTL_MONITOR: "postgresql://autoctl_node@monitor/pg_auto_failover"
+    command:  pg_autoctl create postgres --ssl-self-signed --auth trust --pg-hba-lan --run
+    expose:
+      - 5432
+  node3:
+    build: ../..
+    hostname: node3
+    volumes:
+      - node3_data:/var/lib/postgres:rw
+    environment:
+      PGDATA: /var/lib/postgres/pgaf
+      PGUSER: ad
+      PGDATABASE: analytics
+      PG_AUTOCTL_MONITOR: "postgresql://autoctl_node@monitor/pg_auto_failover"
+    command:  pg_autoctl create postgres --ssl-self-signed --auth trust --pg-hba-lan --run
+    expose:
+      - 5432
+
+volumes:
+  monitor_data:
+    external: true
+    name: volm
+  node1_data:
+    external: true
+    name: vol1
+  node2_data:
+    external: true
+    name: vol2
+  node3_data:
+    external: true
+    name: vol3

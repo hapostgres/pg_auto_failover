@@ -36,6 +36,13 @@ typedef struct Keeper
 } Keeper;
 
 
+typedef struct KeeperVersion
+{
+	char pg_autoctl_version[BUFSIZE];
+	char required_extension_version[BUFSIZE];
+} KeeperVersion;
+
+
 bool keeper_init(Keeper *keeper, KeeperConfig *config);
 bool keeper_init_fsm(Keeper *keeper);
 bool keeper_register_and_init(Keeper *keeper, NodeState initialState);
@@ -59,7 +66,8 @@ bool keeper_node_active(Keeper *keeper, bool doInit,
 bool keeper_ensure_node_has_been_dropped(Keeper *keeper, bool *dropped);
 bool ReportPgIsRunning(Keeper *keeper);
 bool keeper_remove(Keeper *keeper, KeeperConfig *config);
-bool keeper_check_monitor_extension_version(Keeper *keeper);
+bool keeper_check_monitor_extension_version(Keeper *keeper,
+											MonitorExtensionVersion *version);
 bool keeper_state_as_json(Keeper *keeper, char *json, int size);
 bool keeper_update_group_hba(Keeper *keeper, NodeAddressArray *diffNodesArray);
 bool keeper_refresh_other_nodes(Keeper *keeper, bool forceCacheInvalidation);
@@ -107,6 +115,10 @@ bool keeper_refresh_hba(Keeper *keeper,
 bool keeper_read_nodes_from_file(Keeper *keeper, NodeAddressArray *nodesArray);
 bool keeper_get_primary(Keeper *keeper, NodeAddress *primaryNode);
 bool keeper_get_most_advanced_standby(Keeper *keeper, NodeAddress *primaryNode);
+
+
+bool keeper_pg_autoctl_get_version_from_disk(Keeper *keeper,
+											 KeeperVersion *version);
 
 
 #endif /* KEEPER_H */

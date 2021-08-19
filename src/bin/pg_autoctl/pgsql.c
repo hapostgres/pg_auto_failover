@@ -709,9 +709,8 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 						 */
 						(void) log_connection_error(pgsql->connection, LOG_DEBUG);
 
-						log_warn("Failed to connect after successful ping");
+						log_debug("Failed to connect after successful ping");
 					}
-					pgsql_finish(pgsql);
 				}
 				break;
 			}
