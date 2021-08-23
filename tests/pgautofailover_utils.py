@@ -525,7 +525,7 @@ class PGNode:
         Simulates a data node failure by terminating the keeper and stopping
         postgres.
         """
-        self.stop_pg_autoctl(sig=signal.SIGQUIT)
+        self.stop_pg_autoctl(sig=signal.SIGINT)
 
         # stopping pg_autoctl also stops Postgres, unless bugs.
         if self.pg_is_running():
@@ -654,7 +654,7 @@ class PGNode:
     def logs(self):
         log_string = ""
         if self.running():
-            out, err, ret = self.stop_pg_autoctl(sig=signal.SIGINT)
+            out, err, ret = self.stop_pg_autoctl(sig=signal.SIGQUIT)
             log_string += f"STDOUT OF PG_AUTOCTL FOR {self.datadir}:\n"
             log_string += f"{self.pg_autoctl.cmd}\n{out}\n"
             log_string += f"STDERR OF PG_AUTOCTL FOR {self.datadir}:\n{err}\n"
@@ -682,7 +682,7 @@ class PGNode:
                     )
                 ]
                 + [
-                    "%32s %8s %17s/%-17s %3d:%7s %10s %s" % result
+                    "%32s %8s %17s/%-17s %3s:%7s %10s %s" % result
                     for result in events
                 ]
             )
