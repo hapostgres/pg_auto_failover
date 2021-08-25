@@ -192,11 +192,15 @@ def test_008b_node2_to_maintenance():
     # node3 is the current primary
     assert node3.get_number_sync_standbys() == 1
 
-    # should fail, because then we would not have enough standby nodes
     print("Enabling maintenance on node2")
     node2.enable_maintenance()
 
-    assert node3.wait_until_state(target_state="wait_primary")
+    assert node3.wait_until_state(target_state="primary")
+
+    # when both secondaries are put to maintenance, writes are blocked on
+    # the primary
+    ssn = "ANY 1 (pgautofailover_standby_1, pgautofailover_standby_2)"
+    node3.check_synchronous_standby_names(ssn)
 
 
 def test_009_disable_maintenance():

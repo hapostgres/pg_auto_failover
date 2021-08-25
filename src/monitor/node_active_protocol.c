@@ -1766,7 +1766,7 @@ start_maintenance(PG_FUNCTION_ARGS)
 		 * the count is one (not zero).
 		 */
 		ReplicationState primaryGoalState =
-			secondaryNodesCount == 1
+			secondaryNodesCount == 1 && formation->number_sync_standbys == 0
 			? REPLICATION_STATE_WAIT_PRIMARY
 			: REPLICATION_STATE_JOIN_PRIMARY;
 
