@@ -1665,50 +1665,34 @@ start_maintenance(PG_FUNCTION_ARGS)
 	/*
 	 * We need to always have at least formation->number_sync_standbys nodes in
 	 * the SECONDARY state participating in the quorum, otherwise writes may be
-	 * blocked on the primary. So we refuse to put a node in maintenance when
-	 * it would force blocking writes.
+	 * blocked on the primary. In case when we know we will have to block
+	 * writes, warn our user.
+	 *
+	 * As they might still need to operate this maintenance operation, we won't
+	 * forbid it by erroring out, though.
 	 */
 	List *secondaryNodesList =
 		AutoFailoverOtherNodesListInState(primaryNode,
 										  REPLICATION_STATE_SECONDARY);
 
-	int secondaryNodesCount = list_length(secondaryNodesList);
+	int secondaryNodesCount = CountHealthySyncStandbys(secondaryNodesList);
 
 	if (formation->number_sync_standbys > 0 &&
 		secondaryNodesCount <= formation->number_sync_standbys)
 	{
-		ereport(ERROR,
+		ereport(WARNING,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("cannot start maintenance: we currently have %d "
-						"node(s) in the \"secondary\" state and require at "
-						"least %d sync standbys in formation \"%s\"",
-						secondaryNodesCount,
-						formation->number_sync_standbys,
-						formation->formationId)));
-	}
-
-	/*
-	 * Because replication quorum and candidate priority are managed
-	 * separately, we also need another test to ensure that we have at least
-	 * one candidate to failover to.
-	 */
-	if (currentNode->candidatePriority > 0)
-	{
-		List *candidateNodesList =
-			AutoFailoverCandidateNodesListInState(currentNode,
-												  REPLICATION_STATE_SECONDARY);
-
-		int candidateNodesCount = list_length(candidateNodesList);
-
-		if (formation->number_sync_standbys > 0 &&
-			candidateNodesCount < 1)
-		{
-			ereport(ERROR,
-					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-					 errmsg("cannot start maintenance: we would then have %d "
-							"node(s) that would be candidate for promotion",
-							candidateNodesCount)));
-		}
+				 errmsg("Starting maintenance on " NODE_FORMAT
+						" will block writes on the primary " NODE_FORMAT,
+						NODE_FORMAT_ARGS(currentNode),
+						NODE_FORMAT_ARGS(primaryNode)),
+				 errdetail("we now have %d "
+						   "healthy node(s) left in the \"secondary\" state "
+						   "and formation \"%s\" number-sync-standbys requires "
+						   "%d sync standbys",
+						   secondaryNodesCount - 1,
+						   formation->formationId,
+						   formation->number_sync_standbys)));
 	}
 
 	/*
