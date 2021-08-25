@@ -185,9 +185,10 @@ def test_008a_node1_to_maintenance():
     print("Enabling maintenance on node1")
     node1.enable_maintenance()
 
+    assert node3.wait_until_state(target_state="primary")
 
-@raises(Exception)
-def test_008b_node2_to_maintenance_fails():
+
+def test_008b_node2_to_maintenance():
     # node3 is the current primary
     assert node3.get_number_sync_standbys() == 1
 
@@ -195,12 +196,16 @@ def test_008b_node2_to_maintenance_fails():
     print("Enabling maintenance on node2")
     node2.enable_maintenance()
 
+    assert node3.wait_until_state(target_state="wait_primary")
+
 
 def test_009_disable_maintenance():
-    print("Disabling maintenance on node1")
+    print("Disabling maintenance on node1 and node2")
     node1.disable_maintenance()
+    node2.disable_maintenance()
 
     assert node1.wait_until_state(target_state="secondary")
+    assert node2.wait_until_state(target_state="secondary")
     assert node3.wait_until_state(target_state="primary")
 
 

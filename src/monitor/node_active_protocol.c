@@ -1791,7 +1791,7 @@ start_maintenance(PG_FUNCTION_ARGS)
 						NODE_FORMAT
 						" is \"%s\", expected \"secondary\" or \"catchingup\", "
 						"and current state for primary " NODE_FORMAT
-						"is \"%s\" ➜ \"%s\" ",
+						" is \"%s\" ➜ \"%s\" ",
 						NODE_FORMAT_ARGS(currentNode),
 						ReplicationStateGetName(currentNode->reportedState),
 						NODE_FORMAT_ARGS(primaryNode),
