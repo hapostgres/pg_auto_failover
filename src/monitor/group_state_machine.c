@@ -228,10 +228,18 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 		 * unhealty or with candidate priority set to zero.
 		 *
 		 * Otherwise stop replication from the primary and proceed with
-		 * candidate election for primary replacement.
+		 * candidate election for primary replacement, whenever we have at
+		 * least one candidates for failover.
 		 */
+		List *candidateNodesList =
+			AutoFailoverOtherNodesListInState(primaryNode,
+											  REPLICATION_STATE_SECONDARY);
+
+		int candidatesCount = CountHealthyCandidates(candidateNodesList);
+
 		if (IsInPrimaryState(primaryNode) &&
-			!IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY))
+			!IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) &&
+			candidatesCount >= 1)
 		{
 			char message[BUFSIZE] = { 0 };
 

@@ -898,6 +898,33 @@ CountHealthySyncStandbys(List *groupNodeList)
 
 
 /*
+ * CountHealthyCandidates returns how many standby nodes have their
+ * candidatePriority > 0 in the given groupNodeList, counting only nodes that
+ * are currently in REPLICATION_STATE_SECONDARY and known healthy.
+ */
+int
+CountHealthyCandidates(List *groupNodeList)
+{
+	int count = 0;
+	ListCell *nodeCell = NULL;
+
+	foreach(nodeCell, groupNodeList)
+	{
+		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (node->candidatePriority > 0 &&
+			IsCurrentState(node, REPLICATION_STATE_SECONDARY) &&
+			IsHealthy(node))
+		{
+			++count;
+		}
+	}
+
+	return count;
+}
+
+
+/*
  * GetAutoFailoverNode returns a single AutoFailover node by hostname and port.
  */
 AutoFailoverNode *

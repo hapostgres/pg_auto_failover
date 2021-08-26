@@ -170,6 +170,7 @@ extern List * GroupListSyncStandbys(List *groupNodeList);
 extern bool AllNodesHaveSameCandidatePriority(List *groupNodeList);
 extern int CountSyncStandbys(List *groupNodeList);
 extern int CountHealthySyncStandbys(List *groupNodeList);
+extern int CountHealthyCandidates(List *groupNodeList);
 extern bool IsFailoverInProgress(List *groupNodeList);
 extern AutoFailoverNode * FindMostAdvancedStandby(List *groupNodeList);
 extern AutoFailoverNode * FindCandidateNodeBeingPromoted(List *groupNodeList);
