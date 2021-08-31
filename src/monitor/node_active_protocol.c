@@ -1675,6 +1675,7 @@ start_maintenance(PG_FUNCTION_ARGS)
 		AutoFailoverOtherNodesListInState(primaryNode,
 										  REPLICATION_STATE_SECONDARY);
 
+	int candidatesCount = CountHealthyCandidates(secondaryNodesList);
 	int secondaryNodesCount = CountHealthySyncStandbys(secondaryNodesList);
 
 	if (formation->number_sync_standbys > 0 &&
@@ -1690,7 +1691,12 @@ start_maintenance(PG_FUNCTION_ARGS)
 						   "healthy node(s) left in the \"secondary\" state "
 						   "and formation \"%s\" number-sync-standbys requires "
 						   "%d sync standbys",
-						   secondaryNodesCount - 1,
+
+		                   /*
+		                    * We might double count a standby node when put to
+		                    * maintenance and e.g. already unhealthy.
+		                    */
+						   secondaryNodesCount > 0 ? secondaryNodesCount - 1 : 0,
 						   formation->formationId,
 						   formation->number_sync_standbys)));
 	}
@@ -1708,6 +1714,22 @@ start_maintenance(PG_FUNCTION_ARGS)
 		List *standbyNodesGroupList = AutoFailoverOtherNodesList(currentNode);
 		AutoFailoverNode *firstStandbyNode = linitial(standbyNodesGroupList);
 		char message[BUFSIZE] = { 0 };
+
+		/*
+		 * We need at least one candidate note to initiate a failover and allow
+		 * the primary to reach maintenance.
+		 */
+		if (candidatesCount < 1)
+		{
+			ereport(ERROR,
+					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					 errmsg("Starting maintenance on " NODE_FORMAT
+							" in state \"%s\" is not currently possible",
+							NODE_FORMAT_ARGS(currentNode),
+							ReplicationStateGetName(currentNode->reportedState)),
+					 errdetail("there is currently %d candidate nodes available",
+							   candidatesCount)));
+		}
 
 		/*
 		 * Set the primary to prepare_maintenance now, and if we have a single

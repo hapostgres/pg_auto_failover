@@ -116,7 +116,7 @@ def test_005_set_candidate_priorities():
     node1.check_synchronous_standby_names(ssn)
 
 
-def test_006_maintenance_and_failover():
+def test_006a_maintenance_and_failover():
     print()
     print("Enabling maintenance on node2")
     node2.enable_maintenance()
@@ -173,12 +173,12 @@ def test_006_maintenance_and_failover():
     assert node3.has_needed_replication_slots()
 
 
-def test_007_read_from_new_primary():
+def test_006b_read_from_new_primary():
     results = node3.run_sql_query("SELECT * FROM t1")
     assert results == [(1,), (2,), (3,), (4,)]
 
 
-def test_008a_node1_to_maintenance():
+def test_007a_node1_to_maintenance():
     print()
     assert node3.wait_until_state(target_state="primary")
 
@@ -188,7 +188,7 @@ def test_008a_node1_to_maintenance():
     assert node3.wait_until_state(target_state="primary")
 
 
-def test_008b_node2_to_maintenance():
+def test_007b_node2_to_maintenance():
     # node3 is the current primary
     assert node3.get_number_sync_standbys() == 1
 
@@ -201,6 +201,22 @@ def test_008b_node2_to_maintenance():
     # the primary
     ssn = "ANY 1 (pgautofailover_standby_1, pgautofailover_standby_2)"
     node3.check_synchronous_standby_names(ssn)
+
+
+def test_008a_stop_primary():
+    # node3 is the current primary
+    assert node3.get_state().assigned == "primary"
+    node3.fail()
+
+    # check that even after 30s node3 is still not set to draining
+    node3.sleep(30)
+    assert not node3.get_state().assigned == "draining"
+    assert node3.get_state().assigned == "primary"
+
+
+def test_008a_start_primary():
+    node3.run()
+    assert node3.wait_until_state(target_state="primary")
 
 
 def test_009_disable_maintenance():
