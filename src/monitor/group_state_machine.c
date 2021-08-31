@@ -1611,6 +1611,11 @@ BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
 		 * now. And also old primary nodes in DRAINING state, when the drain
 		 * timeout is over, are due to report.
 		 *
+		 * When a node has been asked to re-join the group after a maintenance
+		 * period, and been assigned catching-up but failed to connect to the
+		 * primary, and a failover now happens, we need that node to join the
+		 * REPORT_LSN crew.
+		 *
 		 * Finally, another interesting case for us here would be a node that
 		 * has been asked to re-join a newly elected primary, but the newly
 		 * elected primary has now failed and we're in the election process to
@@ -1619,6 +1624,8 @@ BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
 		 */
 		if ((IsStateIn(node->reportedState, secondaryStates) &&
 			 IsStateIn(node->goalState, secondaryStates)) ||
+			(node->reportedState == REPLICATION_STATE_MAINTENANCE &&
+			 node->goalState == REPLICATION_STATE_CATCHINGUP) ||
 			((IsCurrentState(node, REPLICATION_STATE_DRAINING) ||
 			  IsCurrentState(node, REPLICATION_STATE_DEMOTED) ||
 			  (node->reportedState == REPLICATION_STATE_DEMOTED &&
