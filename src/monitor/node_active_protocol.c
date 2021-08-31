@@ -1716,7 +1716,7 @@ start_maintenance(PG_FUNCTION_ARGS)
 		char message[BUFSIZE] = { 0 };
 
 		/*
-		 * We need at least one candidate note to initiate a failover and allow
+		 * We need at least one candidate node to initiate a failover and allow
 		 * the primary to reach maintenance.
 		 */
 		if (candidatesCount < 1)

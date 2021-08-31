@@ -214,12 +214,17 @@ def test_008a_stop_primary():
     assert node3.get_state().assigned == "primary"
 
 
-def test_008a_start_primary():
+def test_008b_start_primary():
     node3.run()
     assert node3.wait_until_state(target_state="primary")
 
 
-def test_009_disable_maintenance():
+@raises(Exception)
+def test_009a_enable_maintenance_on_primary_should_fail():
+    node3.enable_maintenance(allowFailover=True)
+
+
+def test_009b_disable_maintenance():
     print("Disabling maintenance on node1 and node2")
     node1.disable_maintenance()
     node2.disable_maintenance()
