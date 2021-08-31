@@ -129,6 +129,16 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	}
 
 	/*
+	 * A node in "maintenance" state can only get out of maintenance through an
+	 * explicit call to stop_maintenance(), the FSM will not assign a new state
+	 * to a node that is currently in maintenance.
+	 */
+	if (IsCurrentState(activeNode, REPLICATION_STATE_MAINTENANCE))
+	{
+		return true;
+	}
+
+	/*
 	 * A node that is alone in its group should be SINGLE.
 	 *
 	 * Exception arises when it used to be other nodes in the group, and the

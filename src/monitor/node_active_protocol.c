@@ -1731,23 +1731,23 @@ start_maintenance(PG_FUNCTION_ARGS)
 							   candidatesCount)));
 		}
 
-		/*
-		 * Set the primary to prepare_maintenance now, and if we have a single
-		 * secondary we assign it prepare_promotion, otherwise we need to elect
-		 * a secondary, same as in perform_failover.
-		 */
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to prepare_maintenance "
-			"after a user-initiated start_maintenance call.",
-			NODE_FORMAT_ARGS(currentNode));
-
-		SetNodeGoalState(currentNode,
-						 REPLICATION_STATE_PREPARE_MAINTENANCE, message);
-
 		if (totalNodesCount == 2)
 		{
+			/*
+			 * Set the primary to prepare_maintenance now, and if we have a
+			 * single secondary we assign it prepare_promotion, otherwise we
+			 * need to elect a secondary, same as in perform_failover.
+			 */
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of " NODE_FORMAT
+				" to prepare_maintenance "
+				"after a user-initiated start_maintenance call.",
+				NODE_FORMAT_ARGS(currentNode));
+
+			SetNodeGoalState(currentNode,
+							 REPLICATION_STATE_PREPARE_MAINTENANCE, message);
+
 			AutoFailoverNode *otherNode = firstStandbyNode;
 
 			/*
@@ -1767,6 +1767,47 @@ start_maintenance(PG_FUNCTION_ARGS)
 		}
 		else
 		{
+			/* put the primary directly to maintenance */
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of " NODE_FORMAT
+				" to maintenance "
+				"after a user-initiated start_maintenance call.",
+				NODE_FORMAT_ARGS(currentNode));
+
+			SetNodeGoalState(currentNode,
+							 REPLICATION_STATE_MAINTENANCE, message);
+
+			/* now set all the standby nodes to REPORT_LSN for an election */
+			ListCell *nodeCell = NULL;
+			List *otherNodesGroupList = AutoFailoverOtherNodesList(currentNode);
+
+			foreach(nodeCell, otherNodesGroupList)
+			{
+				AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+				if (node == NULL)
+				{
+					/* shouldn't happen */
+					ereport(ERROR, (errmsg("BUG: node is NULL")));
+					continue;
+				}
+
+				/* skip nodes that are currently in maintenance */
+				if (IsInMaintenance(node))
+				{
+					continue;
+				}
+
+				LogAndNotifyMessage(
+					message, BUFSIZE,
+					"Setting goal state of " NODE_FORMAT
+					" to report_lsn after primary node removal.",
+					NODE_FORMAT_ARGS(node));
+
+				SetNodeGoalState(node, REPLICATION_STATE_REPORT_LSN, message);
+			}
+
 			/* now proceed with the failover, starting with the first standby */
 			(void) ProceedGroupState(firstStandbyNode);
 		}
@@ -1838,8 +1879,7 @@ stop_maintenance(PG_FUNCTION_ARGS)
 
 	int64 nodeId = PG_GETARG_INT64(0);
 
-
-	char message[BUFSIZE];
+	char message[BUFSIZE] = { 0 };
 
 	AutoFailoverNode *currentNode = GetAutoFailoverNodeById(nodeId);
 	if (currentNode == NULL)
@@ -1849,6 +1889,11 @@ stop_maintenance(PG_FUNCTION_ARGS)
 
 	LockFormation(currentNode->formationId, ShareLock);
 	LockNodeGroup(currentNode->formationId, currentNode->groupId, ExclusiveLock);
+
+	List *groupNodesList =
+		AutoFailoverNodeGroup(currentNode->formationId, currentNode->groupId);
+
+	int totalNodesCount = list_length(groupNodesList);
 
 	if (!IsCurrentState(currentNode, REPLICATION_STATE_MAINTENANCE))
 	{
@@ -1873,19 +1918,33 @@ stop_maintenance(PG_FUNCTION_ARGS)
 		GetPrimaryOrDemotedNodeInGroup(currentNode->formationId,
 									   currentNode->groupId);
 
-	if (primaryNode == NULL)
+	/*
+	 * When there is no primary, we might be in trouble, we just want to join
+	 * the possibily ongoing election.
+	 */
+	if (totalNodesCount == 1)
+	{
+		(void) ProceedGroupState(currentNode);
+	}
+	else if (primaryNode == NULL && totalNodesCount == 2)
 	{
 		ereport(ERROR,
 				(errmsg("couldn't find the primary node in formation \"%s\", "
 						"group %d",
 						currentNode->formationId, currentNode->groupId)));
 	}
+	else if (primaryNode == NULL && totalNodesCount > 2)
+	{
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of " NODE_FORMAT
+			" to report_lsn  after a user-initiated stop_maintenance call.",
+			NODE_FORMAT_ARGS(currentNode));
 
-	LogAndNotifyMessage(
-		message, BUFSIZE,
-		"Setting goal state of " NODE_FORMAT
-		" to catchingup  after a user-initiated stop_maintenance call.",
-		NODE_FORMAT_ARGS(currentNode));
+		SetNodeGoalState(currentNode, REPLICATION_STATE_REPORT_LSN, message);
+
+		PG_RETURN_BOOL(true);
+	}
 
 	/*
 	 * When a failover is in progress and stop_maintenance() is called (by
@@ -1893,15 +1952,24 @@ stop_maintenance(PG_FUNCTION_ARGS)
 	 * join the crew on REPORT_LSN: the last known primary can be presumed
 	 * down.
 	 */
-	List *groupNodesList =
-		AutoFailoverNodeGroup(currentNode->formationId, currentNode->groupId);
-
 	if (IsFailoverInProgress(groupNodesList))
 	{
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of " NODE_FORMAT
+			" to catchingup  after a user-initiated stop_maintenance call.",
+			NODE_FORMAT_ARGS(currentNode));
+
 		SetNodeGoalState(currentNode, REPLICATION_STATE_REPORT_LSN, message);
 	}
 	else
 	{
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of " NODE_FORMAT
+			" to catchingup  after a user-initiated stop_maintenance call.",
+			NODE_FORMAT_ARGS(currentNode));
+
 		SetNodeGoalState(currentNode, REPLICATION_STATE_CATCHINGUP, message);
 	}
 

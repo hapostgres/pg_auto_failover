@@ -241,7 +241,7 @@ KeeperFSMTransition KeeperFSM[] = {
 	 */
 	{ PRIMARY_STATE, PREPARE_MAINTENANCE_STATE, COMMENT_PRIMARY_TO_PREPARE_MAINTENANCE, &fsm_stop_postgres_for_primary_maintenance },
 	{ PREPARE_MAINTENANCE_STATE, MAINTENANCE_STATE, COMMENT_PRIMARY_TO_MAINTENANCE, &fsm_stop_postgres_and_setup_standby },
-
+	{ PRIMARY_STATE, MAINTENANCE_STATE, COMMENT_PRIMARY_TO_MAINTENANCE, &fsm_stop_postgres_for_primary_maintenance },
 	/*
 	 * was demoted, need to be dead now.
 	 */
