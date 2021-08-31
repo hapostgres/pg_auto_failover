@@ -1887,7 +1887,23 @@ stop_maintenance(PG_FUNCTION_ARGS)
 		" to catchingup  after a user-initiated stop_maintenance call.",
 		NODE_FORMAT_ARGS(currentNode));
 
-	SetNodeGoalState(currentNode, REPLICATION_STATE_CATCHINGUP, message);
+	/*
+	 * When a failover is in progress and stop_maintenance() is called (by
+	 * means of pg_autoctl disable maintenance or otherwise), then we should
+	 * join the crew on REPORT_LSN: the last known primary can be presumed
+	 * down.
+	 */
+	List *groupNodesList =
+		AutoFailoverNodeGroup(currentNode->formationId, currentNode->groupId);
+
+	if (IsFailoverInProgress(groupNodesList))
+	{
+		SetNodeGoalState(currentNode, REPLICATION_STATE_REPORT_LSN, message);
+	}
+	else
+	{
+		SetNodeGoalState(currentNode, REPLICATION_STATE_CATCHINGUP, message);
+	}
 
 	PG_RETURN_BOOL(true);
 }
