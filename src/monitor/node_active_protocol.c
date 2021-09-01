@@ -1776,7 +1776,7 @@ start_maintenance(PG_FUNCTION_ARGS)
 				NODE_FORMAT_ARGS(currentNode));
 
 			SetNodeGoalState(currentNode,
-							 REPLICATION_STATE_MAINTENANCE, message);
+							 REPLICATION_STATE_PREPARE_MAINTENANCE, message);
 
 			/* now set all the standby nodes to REPORT_LSN for an election */
 			ListCell *nodeCell = NULL;
@@ -1896,7 +1896,8 @@ stop_maintenance(PG_FUNCTION_ARGS)
 
 	int totalNodesCount = list_length(groupNodesList);
 
-	if (!IsCurrentState(currentNode, REPLICATION_STATE_MAINTENANCE))
+	if (!IsCurrentState(currentNode, REPLICATION_STATE_MAINTENANCE) &&
+		!IsCurrentState(currentNode, REPLICATION_STATE_PREPARE_MAINTENANCE))
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -1926,6 +1927,8 @@ stop_maintenance(PG_FUNCTION_ARGS)
 	if (totalNodesCount == 1)
 	{
 		(void) ProceedGroupState(currentNode);
+
+		PG_RETURN_BOOL(true);
 	}
 	else if (primaryNode == NULL && totalNodesCount == 2)
 	{
