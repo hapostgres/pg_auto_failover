@@ -486,7 +486,7 @@ cli_service_status(int argc, char **argv)
 
 	if (!file_exists(pathnames->pid))
 	{
-		log_debug("pg_autoctl pid file \"%s\" does not exists", pathnames->pid);
+		log_debug("pg_autoctl pid file \"%s\" does not exist", pathnames->pid);
 
 		/*
 		 * pg_autoctl should be the parent process of Postgres. That said, when

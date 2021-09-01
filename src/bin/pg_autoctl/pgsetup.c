@@ -540,7 +540,7 @@ read_pg_pidfile(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk, int maxRetries)
 		 */
 		if (maxRetries > 0)
 		{
-			log_trace("read_pg_pidfile: \"%s\" does not exists [%d]",
+			log_trace("read_pg_pidfile: \"%s\" does not exist [%d]",
 					  pidfile, maxRetries);
 			pg_usleep(250 * 1000); /* wait for 250ms and try again */
 			return read_pg_pidfile(pgSetup, pgIsNotRunningIsOk, maxRetries - 1);

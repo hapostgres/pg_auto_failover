@@ -348,7 +348,7 @@ reload_configuration(Monitor *monitor)
 	}
 	else
 	{
-		log_warn("Configuration file \"%s\" does not exists, "
+		log_warn("Configuration file \"%s\" does not exist, "
 				 "continuing with the same configuration.",
 				 config->pathnames.config);
 	}

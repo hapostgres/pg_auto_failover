@@ -1387,7 +1387,7 @@ pgsql_set_synchronous_standby_names(PGSQL *pgsql,
 /*
  * pgsql_replication_slot_maintain advances the current confirmed position of
  * the given replication slot up to the given LSN position, create the
- * replication slot if it does not exists yet, and remove the slots that exist
+ * replication slot if it does not exist yet, and remove the slots that exist
  * in Postgres but are ommited in the given array of slots.
  */
 typedef struct ReplicationSlotMaintainContext

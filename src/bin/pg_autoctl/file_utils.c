@@ -32,7 +32,7 @@ static bool read_file_internal(FILE *fileStream,
 
 /*
  * file_exists returns true if the given filename is known to exist
- * on the file system or false if it does not exists or in case of
+ * on the file system or false if it does not exist or in case of
  * error.
  */
 bool
@@ -44,7 +44,7 @@ file_exists(const char *filename)
 		/*
 		 * Only log "interesting" errors here.
 		 *
-		 * The fact that the file does not exists is not interesting: we're
+		 * The fact that the file does not exist is not interesting: we're
 		 * retuning false and the caller figures it out, maybe then creating
 		 * the file.
 		 */
@@ -730,7 +730,7 @@ set_program_absolute_path(char *program, int size)
 		}
 		else
 		{
-			/* when the file does not exists, we try our next guess */
+			/* when the file does not exist, we try our next guess */
 			if (errno != ENOENT && errno != ENOTDIR)
 			{
 				log_error("Failed to get absolute path for the "

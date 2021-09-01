@@ -643,7 +643,7 @@ PreInitPostgreInstanceStateToString(PreInitPostgreInstanceState pgInitState)
 	{
 		case PRE_INIT_STATE_EMPTY:
 		{
-			return "PGDATA does not exists";
+			return "PGDATA does not exist";
 		}
 
 		case PRE_INIT_STATE_EXISTS:

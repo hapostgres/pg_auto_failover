@@ -1148,7 +1148,7 @@ tmux_kill_session_by_name(const char *sessionName)
 
 	if (!tmux_has_session(tmux, sessionName))
 	{
-		log_info("Tmux session \"%s\" does not exists", sessionName);
+		log_info("Tmux session \"%s\" does not exist", sessionName);
 		return true;
 	}
 
@@ -1231,7 +1231,7 @@ tmux_cleanup_stale_directory(TmuxOptions *options)
 {
 	if (!directory_exists(options->root))
 	{
-		log_info("Directory \"%s\" does not exists, nothing to clean-up",
+		log_info("Directory \"%s\" does not exist, nothing to clean-up",
 				 options->root);
 		return;
 	}

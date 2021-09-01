@@ -1035,7 +1035,7 @@ prepare_keeper_options(KeeperConfig *options)
 	 */
 	if (!file_exists(options->pathnames.config))
 	{
-		log_fatal("Expected configuration file does not exists: \"%s\"",
+		log_fatal("Expected configuration file does not exist: \"%s\"",
 				  options->pathnames.config);
 
 		if (!directory_exists(options->pgSetup.pgdata))
