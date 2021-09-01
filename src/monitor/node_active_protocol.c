@@ -1867,10 +1867,11 @@ start_maintenance(PG_FUNCTION_ARGS)
 
 
 /*
- * stop_maintenance sets the given node back in catchingup state.
+ * stop_maintenance brings a node back from maintenance to a participating
+ * member of the formation. Depending on the state of the formation it's either
+ * assigned catchingup or report_lsn.
  *
- * This operation is only allowed on a secondary node. To do so on a primary
- * node, first failover so that it's now a secondary.
+ * This operation is only allowed on a node that's in the maintenance state.
  */
 Datum
 stop_maintenance(PG_FUNCTION_ARGS)
