@@ -93,6 +93,10 @@ chain involves the following software:
 Current TeX distributions should include luatex and tikz for you already.
 One such distribution is TexLive and is widely available.
 
+If you want to use TexLive, note that you may need to install some extra
+packages for the styles we use in our PDFs. For example `texlive-fonts-extra`
+is needed for Debian.
+
 #### For Ubuntu
 ```
 sudo apt-get install latexmk texlive texlive-luatex texlive-latex-extra poppler-utils
