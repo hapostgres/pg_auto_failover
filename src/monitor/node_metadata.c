@@ -1831,6 +1831,7 @@ IsInMaintenance(AutoFailoverNode *node)
 {
 	return node != NULL &&
 		   (node->goalState == REPLICATION_STATE_PREPARE_MAINTENANCE ||
+			node->goalState == REPLICATION_STATE_WAIT_MAINTENANCE ||
 			node->goalState == REPLICATION_STATE_MAINTENANCE);
 }
 
