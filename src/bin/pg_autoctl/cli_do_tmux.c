@@ -12,6 +12,8 @@
 #include <fcntl.h>
 #include <getopt.h>
 #include <inttypes.h>
+// #include <limits.h>
+#include <linux/limits.h>
 #include <termios.h>
 #include <signal.h>
 #include <stdio.h>
@@ -440,7 +442,7 @@ cli_do_tmux_script_getopts(int argc, char **argv)
 void
 tmux_add_command(PQExpBuffer script, const char *fmt, ...)
 {
-	char buffer[BUFSIZE] = { 0 };
+	char buffer[ARG_MAX] = { 0 };
 	va_list args;
 
 	va_start(args, fmt);
@@ -489,7 +491,7 @@ void
 tmux_setenv(PQExpBuffer script,
 			const char *sessionName, const char *root, int firstPort)
 {
-	char PATH[BUFSIZE] = { 0 };
+	char PATH[ARG_MAX] = { 0 };
 	char PG_CONFIG[MAXPGPATH] = { 0 };
 	char monitor_pguri[MAXCONNINFO] = { 0 };
 
