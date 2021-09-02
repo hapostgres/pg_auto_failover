@@ -1778,36 +1778,6 @@ start_maintenance(PG_FUNCTION_ARGS)
 			SetNodeGoalState(currentNode,
 							 REPLICATION_STATE_PREPARE_MAINTENANCE, message);
 
-			/* now set all the standby nodes to REPORT_LSN for an election */
-			ListCell *nodeCell = NULL;
-			List *otherNodesGroupList = AutoFailoverOtherNodesList(currentNode);
-
-			foreach(nodeCell, otherNodesGroupList)
-			{
-				AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
-
-				if (node == NULL)
-				{
-					/* shouldn't happen */
-					ereport(ERROR, (errmsg("BUG: node is NULL")));
-					continue;
-				}
-
-				/* skip nodes that are currently in maintenance */
-				if (IsInMaintenance(node))
-				{
-					continue;
-				}
-
-				LogAndNotifyMessage(
-					message, BUFSIZE,
-					"Setting goal state of " NODE_FORMAT
-					" to report_lsn after primary node removal.",
-					NODE_FORMAT_ARGS(node));
-
-				SetNodeGoalState(node, REPLICATION_STATE_REPORT_LSN, message);
-			}
-
 			/* now proceed with the failover, starting with the first standby */
 			(void) ProceedGroupState(firstStandbyNode);
 		}
@@ -1897,7 +1867,8 @@ stop_maintenance(PG_FUNCTION_ARGS)
 	int totalNodesCount = list_length(groupNodesList);
 
 	if (!IsCurrentState(currentNode, REPLICATION_STATE_MAINTENANCE) &&
-		!IsCurrentState(currentNode, REPLICATION_STATE_PREPARE_MAINTENANCE))
+		!(totalNodesCount > 2 &&
+		  IsCurrentState(currentNode, REPLICATION_STATE_PREPARE_MAINTENANCE)))
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
