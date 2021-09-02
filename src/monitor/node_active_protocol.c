@@ -1793,28 +1793,37 @@ start_maintenance(PG_FUNCTION_ARGS)
 			 IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY))
 	{
 		/*
-		 * When putting the last secondary node to maintenance, we disable sync
+		 * In most cases we can simply put a secondary directly into
+		 * maintenance mode.
+		 */
+		ReplicationState primaryGoalState = REPLICATION_STATE_PRIMARY;
+		ReplicationState maintenanceGoalState = REPLICATION_STATE_MAINTENANCE;
+
+		/*
+		 * However, when putting the last secondary node to maintenance, we disable sync
 		 * rep on the primary by switching it to wait_primary. Because we
 		 * didn't change the state of any standby node yet, we get there when
 		 * the count is one (not zero).
 		 */
-		ReplicationState primaryGoalState =
-			secondaryNodesCount == 1 && formation->number_sync_standbys == 0
-			? REPLICATION_STATE_WAIT_PRIMARY
-			: REPLICATION_STATE_JOIN_PRIMARY;
+		if (secondaryNodesCount == 1 && formation->number_sync_standbys == 0)
+		{
+			primaryGoalState = REPLICATION_STATE_WAIT_PRIMARY;
+			maintenanceGoalState = REPLICATION_STATE_WAIT_MAINTENANCE;
+		}
 
 		LogAndNotifyMessage(
 			message, BUFSIZE,
 			"Setting goal state of " NODE_FORMAT
 			" to %s and " NODE_FORMAT
-			" to wait_maintenance "
+			" to %s "
 			"after a user-initiated start_maintenance call.",
 			NODE_FORMAT_ARGS(primaryNode),
 			ReplicationStateGetName(primaryGoalState),
-			NODE_FORMAT_ARGS(currentNode));
+			NODE_FORMAT_ARGS(currentNode),
+			ReplicationStateGetName(maintenanceGoalState));
 
 		SetNodeGoalState(primaryNode, primaryGoalState, message);
-		SetNodeGoalState(currentNode, REPLICATION_STATE_WAIT_MAINTENANCE, message);
+		SetNodeGoalState(currentNode, maintenanceGoalState, message);
 	}
 	else
 	{
