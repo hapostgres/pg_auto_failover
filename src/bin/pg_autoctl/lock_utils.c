@@ -169,7 +169,7 @@ semaphore_unlink(Semaphore *semaphore)
 /*
  * semaphore_cleanup is used when we find a stale PID file, to remove a
  * possibly left behind semaphore. The user could also use ipcs and ipcrm to
- * figure that out, if the stale pidfile does not exists anymore.
+ * figure that out, if the stale pidfile does not exist anymore.
  */
 bool
 semaphore_cleanup(const char *pidfile)

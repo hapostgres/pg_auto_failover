@@ -347,7 +347,7 @@ cli_drop_node(int argc, char **argv)
 	/*
 	 * The configuration file is the last bit we remove, so we don't have to
 	 * implement "continue from previous failed attempt" when the configuration
-	 * file does not exists.
+	 * file does not exist.
 	 */
 	if (dropLocalNode && !file_exists(config.pathnames.config))
 	{
@@ -429,7 +429,7 @@ cli_drop_monitor(int argc, char **argv)
 	/*
 	 * The configuration file is the last bit we remove, so we don't have to
 	 * implement "continue from previous failed attempt" when the configuration
-	 * file does not exists.
+	 * file does not exist.
 	 */
 	if (!file_exists(config.pathnames.config))
 	{
@@ -904,7 +904,7 @@ stop_postgres_and_remove_pgdata_and_config(ConfigFilePaths *pathnames,
 	}
 	else
 	{
-		log_warn("Skipping removal of \"%s\": directory does not exists",
+		log_warn("Skipping removal of \"%s\": directory does not exist",
 				 pgSetup->pgdata);
 	}
 

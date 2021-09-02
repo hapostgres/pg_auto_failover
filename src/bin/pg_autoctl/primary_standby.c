@@ -868,7 +868,7 @@ standby_init_database(LocalPostgresServer *postgres,
 		/*
 		 * pg_basebackup has this bug where it will copy over the whole PGDATA
 		 * contents even if the WAL receiver subprocess fails early, typically
-		 * when the replication slot does not exists on the target connection.
+		 * when the replication slot does not exist on the target connection.
 		 *
 		 * We want to protect against this case here, so we manually check that
 		 * the replication exists before calling pg_basebackup.

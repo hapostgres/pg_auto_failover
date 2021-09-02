@@ -2758,7 +2758,7 @@ keeper_reload_configuration(Keeper *keeper, bool firstLoop, bool doInit)
 	}
 	else
 	{
-		log_warn("Configuration file \"%s\" does not exists, "
+		log_warn("Configuration file \"%s\" does not exist, "
 				 "continuing with the same configuration.",
 				 config->pathnames.config);
 	}
@@ -2806,10 +2806,10 @@ keeper_read_nodes_from_file(Keeper *keeper, NodeAddressArray *nodesArray)
 		return true;
 	}
 
-	/* if the file does not exists, we're done */
+	/* if the file does not exist, we're done */
 	if (!file_exists(config->pathnames.nodes))
 	{
-		log_debug("Nodes files \"%s\" does not exists, done processing",
+		log_debug("Nodes files \"%s\" does not exist, done processing",
 				  config->pathnames.nodes);
 		return true;
 	}

@@ -489,21 +489,21 @@ postgresConfigFilesAllExist(PostgresConfigFiles *pgConfigFiles)
 	if (!file_exists(pgConfigFiles->conf))
 	{
 		log_warn("Failed to find Postgres configuration files in PGDATA, "
-				 "as expected: \"%s\" does not exists",
+				 "as expected: \"%s\" does not exist",
 				 pgConfigFiles->conf);
 	}
 
 	if (!file_exists(pgConfigFiles->ident))
 	{
 		log_warn("Failed to find Postgres configuration files in PGDATA, "
-				 "as expected: \"%s\" does not exists",
+				 "as expected: \"%s\" does not exist",
 				 pgConfigFiles->ident);
 	}
 
 	if (!file_exists(pgConfigFiles->hba))
 	{
 		log_warn("Failed to find Postgres configuration files in PGDATA, "
-				 "as expected: \"%s\" does not exists",
+				 "as expected: \"%s\" does not exist",
 				 pgConfigFiles->hba);
 	}
 
