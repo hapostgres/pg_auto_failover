@@ -84,7 +84,7 @@ itself. In case of state corruption, see the trouble shooting section of the
 documentation.
 
 This initialization state file only exists during the initialization of a
-pg_auto_failover node. In normal operations, this file does not exists.
+pg_auto_failover node. In normal operations, this file does not exist.
 
 It is possible to get the location of the state file by using the command
 ``pg_autoctl show file --init --pgdata /data/pgsql`` and to output its

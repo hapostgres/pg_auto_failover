@@ -1824,7 +1824,7 @@ pg_ctl_stop(const char *pg_ctl, const char *pgdata)
 	bool pgdata_exists = directory_exists(pgdata);
 	if (!pgdata_exists)
 	{
-		log_info("pgdata \"%s\" does not exists, consider this as PostgreSQL "
+		log_info("pgdata \"%s\" does not exist, consider this as PostgreSQL "
 				 "not running", pgdata);
 		free_program(&program);
 		return true;

@@ -581,7 +581,7 @@ class PGNode:
                 logs += ["\n\n%s:\n" % conf]
                 logs += open(conf).readlines()
             else:
-                logs += ["\n\n%s does not exists\n" % conf]
+                logs += ["\n\n%s does not exist\n" % conf]
 
         return "".join(logs)
 

@@ -592,7 +592,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 	 * We're not using pg_setup_init() here: we are following a very different
 	 * set of rules. We just want to check:
 	 *
-	 *   - PGDATA is set and the directory does not exists
+	 *   - PGDATA is set and the directory does not exist
 	 *   - PGPORT is either set or defaults to 5432
 	 *
 	 * Also we use the first pg_ctl binary found in the PATH, we're not picky

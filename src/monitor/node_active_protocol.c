@@ -133,7 +133,7 @@ register_node(PG_FUNCTION_ARGS)
 	if (formation == NULL)
 	{
 		ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-						errmsg("formation \"%s\" does not exists", formationId),
+						errmsg("formation \"%s\" does not exist", formationId),
 						errhint("Use `pg_autoctl create formation` "
 								"to create the target formation first")));
 	}

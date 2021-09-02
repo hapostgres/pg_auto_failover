@@ -213,7 +213,7 @@ keeper_pg_init_and_register(Keeper *keeper)
 	 * keeper are concurrently registering other nodes.
 	 *
 	 * So our strategy is to ask the monitor to pick a state for us and then
-	 * implement whatever was decided. After all PGDATA does not exists yet so
+	 * implement whatever was decided. After all PGDATA does not exist yet so
 	 * we can decide to either pg_ctl initdb or pg_basebackup to create it.
 	 */
 	if (!postgresInstanceExists)

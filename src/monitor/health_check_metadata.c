@@ -80,7 +80,7 @@ LoadNodeHealthList(void)
 		/*
 		 * When we start the monitor during an upgrade (from 1.3 to 1.4), the
 		 * background worker might be reading the 1.3 pgautofailover catalogs
-		 * still, where the "nodehost" column does not exists.
+		 * still, where the "nodehost" column does not exist.
 		 */
 		if (spiStatus != SPI_OK_SELECT)
 		{
