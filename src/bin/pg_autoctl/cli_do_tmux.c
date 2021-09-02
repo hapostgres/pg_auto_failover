@@ -12,12 +12,14 @@
 #include <fcntl.h>
 #include <getopt.h>
 #include <inttypes.h>
-// #include <limits.h>
-#include <linux/limits.h>
 #include <termios.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+#if defined(__linux__)
+#include <linux/limits.h>
+#endif
 
 #include "postgres_fe.h"
 #include "pqexpbuffer.h"
