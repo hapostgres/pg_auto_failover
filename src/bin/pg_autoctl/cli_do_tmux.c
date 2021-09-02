@@ -17,6 +17,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#if defined(__linux__)
+#include <linux/limits.h>
+#endif
+
 #include "postgres_fe.h"
 #include "pqexpbuffer.h"
 #include "snprintf.h"
@@ -440,7 +444,7 @@ cli_do_tmux_script_getopts(int argc, char **argv)
 void
 tmux_add_command(PQExpBuffer script, const char *fmt, ...)
 {
-	char buffer[BUFSIZE] = { 0 };
+	char buffer[ARG_MAX] = { 0 };
 	va_list args;
 
 	va_start(args, fmt);
@@ -489,7 +493,7 @@ void
 tmux_setenv(PQExpBuffer script,
 			const char *sessionName, const char *root, int firstPort)
 {
-	char PATH[BUFSIZE] = { 0 };
+	char PATH[ARG_MAX] = { 0 };
 	char PG_CONFIG[MAXPGPATH] = { 0 };
 	char monitor_pguri[MAXCONNINFO] = { 0 };
 
