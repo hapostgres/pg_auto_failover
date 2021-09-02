@@ -720,7 +720,7 @@ fsm_stop_postgres_and_setup_standby(Keeper *keeper)
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	KeeperConfig *config = &(keeper->config);
 
-	NodeAddress *primaryNode = NULL;
+	NodeAddress upstreamNode = { 0 };
 
 	if (!ensure_postgres_service_is_stopped(postgres))
 	{
@@ -737,17 +737,9 @@ fsm_stop_postgres_and_setup_standby(Keeper *keeper)
 		return false;
 	}
 
-	/* get the primary node to follow */
-	if (!keeper_get_primary(keeper, &(postgres->replicationSource.primaryNode)))
-	{
-		log_error("Failed to initialize standby for lack of a primary node, "
-				  "see above for details");
-		return false;
-	}
-
 	/* prepare a standby setup */
 	if (!standby_init_replication_source(postgres,
-										 primaryNode,
+										 &upstreamNode,
 										 PG_AUTOCTL_REPLICA_USERNAME,
 										 config->replication_password,
 										 config->replication_slot_name,

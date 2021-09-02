@@ -263,6 +263,25 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 		}
 
 		/*
+		 * In a multiple standby system we can assign maintenance as soon as
+		 * prepare_maintenance has been reached, at the same time than an
+		 * election is triggered. This also allows the operator to disable
+		 * maintenance on the old-primary and have it join the election.
+		 */
+		else if (IsCurrentState(primaryNode, REPLICATION_STATE_PREPARE_MAINTENANCE))
+		{
+			char message[BUFSIZE] = { 0 };
+
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of " NODE_FORMAT
+				" to maintenance after it converged to prepare_maintenance.",
+				NODE_FORMAT_ARGS(primaryNode));
+
+			AssignGoalState(primaryNode, REPLICATION_STATE_MAINTENANCE, message);
+		}
+
+		/*
 		 * ProceedGroupStateForMSFailover chooses the failover candidate when
 		 * there's more than one standby node around, by applying the
 		 * candidatePriority and comparing the reportedLSN. The function also
