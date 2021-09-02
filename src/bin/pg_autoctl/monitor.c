@@ -169,7 +169,8 @@ typedef struct WaitUntilNodeStateNotificationContext
 	int groupId;
 	int64_t nodeId;
 	NodeAddressHeaders *headers;
-	NodeState targetState;
+	NodeState *targetStates;
+	int targetStatesLength;
 	bool done;
 	bool firstLoop;
 } WaitUntilNodeStateNotificationContext;
@@ -4092,11 +4093,15 @@ monitor_check_node_report_state(void *context, CurrentNodeState *nodeState)
 			NodeStateToString(nodeState->reportedState),
 			NodeStateToString(nodeState->goalState));
 
-	if (nodeState->goalState == ctx->targetState &&
-		nodeState->reportedState == ctx->targetState &&
-		!ctx->firstLoop)
+	for (int i = 0; i < ctx->targetStatesLength; i++)
 	{
-		ctx->done = true;
+		if (nodeState->goalState == ctx->targetStates[i] &&
+			nodeState->reportedState == ctx->targetStates[i] &&
+			nodeState->node.nodeId == ctx->nodeId &&
+			!ctx->firstLoop)
+		{
+			ctx->done = true;
+		}
 	}
 
 	if (ctx->firstLoop)
@@ -4120,7 +4125,8 @@ monitor_wait_until_node_reported_state(Monitor *monitor,
 									   int groupId,
 									   int64_t nodeId,
 									   PgInstanceKind nodeKind,
-									   NodeState targetState)
+									   NodeState *targetStates,
+									   int targetStatesLength)
 {
 	PGconn *connection = monitor->notificationClient.connection;
 
@@ -4132,7 +4138,8 @@ monitor_wait_until_node_reported_state(Monitor *monitor,
 		groupId,
 		nodeId,
 		&headers,
-		targetState,
+		targetStates,
+		targetStatesLength,
 		false,                  /* done */
 		true                    /* firstLoop */
 	};
