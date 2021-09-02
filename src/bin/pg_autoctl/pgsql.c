@@ -521,17 +521,10 @@ pgsql_open_connection(PGSQL *pgsql)
 		/*
 		 * Implement the retry policy:
 		 *
-		 * - for a local Postgres node, we always expect to be able to connect
-		 *   and defer managing this at the Postgres Controller level, so we
-		 *   never retry.
-		 *
-		 * - for MONITOR or COORDINATOR (remote) connections, we may have a
-		 *   specific policy to follow. In any case we observe first the maxR
-		 *   property: maximum retries allowed. When set to zero, we don't
-		 *   retry at all.
+		 * First observe the maxR property: maximum retries allowed. When set
+		 * to zero, we don't retry at all.
 		 */
-		if (pgsql->connectionType == PGSQL_CONN_LOCAL ||
-			pgsql->retryPolicy.maxR == 0)
+		if (pgsql->retryPolicy.maxR == 0)
 		{
 			INSTR_TIME_SET_CURRENT(pgsql->retryPolicy.connectTime);
 
