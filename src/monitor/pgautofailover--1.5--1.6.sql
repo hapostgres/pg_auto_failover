@@ -4,6 +4,13 @@
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
 \echo Use "CREATE EXTENSION pgautofailover" to load this file. \quit
 
+-- remove a possible leftover from pg_auto_failover 1.4 that was not correctly
+-- removed in a migration to 1.5
+DROP FUNCTION IF EXISTS
+     pgautofailover.register_node(text,text,int,name,text,bigint,int,
+                                  pgautofailover.replication_state,text,
+                                  int,bool);
+
 DROP FUNCTION
      pgautofailover.register_node(text,text,int,name,text,bigint,int,int,
                                   pgautofailover.replication_state,text,
