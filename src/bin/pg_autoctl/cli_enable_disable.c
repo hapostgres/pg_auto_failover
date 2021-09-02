@@ -553,15 +553,17 @@ cli_enable_maintenance(int argc, char **argv)
 		exit(EXIT_CODE_QUIT);
 	}
 
+	NodeState targetStates[] = { MAINTENANCE_STATE };
 	if (!monitor_wait_until_node_reported_state(
 			&(keeper.monitor),
 			keeper.config.formation,
 			keeper.config.groupId,
 			keeper.state.current_node_id,
 			keeper.config.pgSetup.pgKind,
-			MAINTENANCE_STATE))
+			targetStates,
+			lengthof(targetStates)))
 	{
-		log_error("Failed to wait until a node reached the wait_primary state");
+		log_error("Failed to wait until the node reached the maintenance state");
 		exit(EXIT_CODE_MONITOR);
 	}
 }
@@ -651,15 +653,18 @@ cli_disable_maintenance(int argc, char **argv)
 		(void) pg_usleep(sleepTimeMs * 1000);
 	}
 
+	NodeState targetStates[] = { SECONDARY_STATE, PRIMARY_STATE };
+
 	if (!monitor_wait_until_node_reported_state(
 			&(keeper.monitor),
 			keeper.config.formation,
 			keeper.config.groupId,
 			keeper.state.current_node_id,
 			keeper.config.pgSetup.pgKind,
-			SECONDARY_STATE))
+			targetStates,
+			lengthof(targetStates)))
 	{
-		log_error("Failed to wait until a node reached the secondary state");
+		log_error("Failed to wait until a node reached the secondary or primary state");
 		exit(EXIT_CODE_MONITOR);
 	}
 }

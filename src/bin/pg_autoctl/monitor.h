@@ -218,7 +218,8 @@ bool monitor_wait_until_node_reported_state(Monitor *monitor,
 											int groupId,
 											int64_t nodeId,
 											PgInstanceKind nodeKind,
-											NodeState targetState);
+											NodeState *targetStates,
+											int targetStatesLength);
 bool monitor_wait_for_state_change(Monitor *monitor,
 								   const char *formation,
 								   int groupId,

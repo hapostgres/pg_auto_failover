@@ -48,6 +48,12 @@
 #include "utils/syscache.h"
 
 
+/* GUC variables */
+int DrainTimeoutMs = 30 * 1000;
+int UnhealthyTimeoutMs = 20 * 1000;
+int StartupGracePeriodMs = 10 * 1000;
+
+
 /*
  * AllAutoFailoverNodes returns all AutoFailover nodes in a formation as a
  * list.
@@ -854,6 +860,61 @@ CountSyncStandbys(List *groupNodeList)
 		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
 
 		if (node->replicationQuorum)
+		{
+			++count;
+		}
+	}
+
+	return count;
+}
+
+
+/*
+ * CountHealthySyncStandbys returns how many standby nodes have their
+ * replicationQuorum property set to true in the given groupNodeList, counting
+ * only nodes that are currently in REPLICATION_STATE_SECONDARY and known
+ * healthy.
+ */
+int
+CountHealthySyncStandbys(List *groupNodeList)
+{
+	int count = 0;
+	ListCell *nodeCell = NULL;
+
+	foreach(nodeCell, groupNodeList)
+	{
+		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (node->replicationQuorum &&
+			IsCurrentState(node, REPLICATION_STATE_SECONDARY) &&
+			IsHealthy(node))
+		{
+			++count;
+		}
+	}
+
+	return count;
+}
+
+
+/*
+ * CountHealthyCandidates returns how many standby nodes have their
+ * candidatePriority > 0 in the given groupNodeList, counting only nodes that
+ * are currently in REPLICATION_STATE_SECONDARY and known healthy.
+ */
+int
+CountHealthyCandidates(List *groupNodeList)
+{
+	int count = 0;
+	ListCell *nodeCell = NULL;
+
+	foreach(nodeCell, groupNodeList)
+	{
+		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (node->candidatePriority > 0 &&
+			IsCurrentState(node, REPLICATION_STATE_SECONDARY) &&
+			IsHealthy(node))
 		{
 			++count;
 		}
@@ -1770,6 +1831,7 @@ IsInMaintenance(AutoFailoverNode *node)
 {
 	return node != NULL &&
 		   (node->goalState == REPLICATION_STATE_PREPARE_MAINTENANCE ||
+			node->goalState == REPLICATION_STATE_WAIT_MAINTENANCE ||
 			node->goalState == REPLICATION_STATE_MAINTENANCE);
 }
 
@@ -1792,4 +1854,147 @@ IsStateIn(ReplicationState state, List *allowedStates)
 	}
 
 	return false;
+}
+
+
+/*
+ * IsHealthy returns whether the given node is heathly, meaning it succeeds the
+ * last health check and its PostgreSQL instance is reported as running by the
+ * keeper.
+ */
+bool
+IsHealthy(AutoFailoverNode *pgAutoFailoverNode)
+{
+	TimestampTz now = GetCurrentTimestamp();
+	int nodeActiveCallsFrequencyMs = 1 * 1000; /* keeper sleep time */
+
+	if (pgAutoFailoverNode == NULL)
+	{
+		return false;
+	}
+
+	/*
+	 * If the keeper has been reporting that Postgres is running after our last
+	 * background check run, and within the node-active protocol client-time
+	 * sleep time (1 second), then trust pg_autoctl node reporting: we might be
+	 * out of a network split or node-local failure mode, and our background
+	 * checks might not have run yet to clarify that "back to good" situation.
+	 *
+	 * In any case, the pg_autoctl node-active process could connect to the
+	 * monitor, so there is no network split at this time.
+	 */
+	if (pgAutoFailoverNode->health == NODE_HEALTH_BAD &&
+		TimestampDifferenceExceeds(pgAutoFailoverNode->healthCheckTime,
+								   pgAutoFailoverNode->reportTime,
+								   0) &&
+		TimestampDifferenceExceeds(pgAutoFailoverNode->reportTime,
+								   now,
+								   nodeActiveCallsFrequencyMs))
+	{
+		return pgAutoFailoverNode->pgIsRunning;
+	}
+
+	/* nominal case: trust background checks + reported Postgres state */
+	return pgAutoFailoverNode->health == NODE_HEALTH_GOOD &&
+		   pgAutoFailoverNode->pgIsRunning == true;
+}
+
+
+/*
+ * IsUnhealthy returns whether the given node is unhealthy, meaning it failed
+ * its last health check and has not reported for more than UnhealthyTimeoutMs,
+ * and it's PostgreSQL instance has been reporting as running by the keeper.
+ */
+bool
+IsUnhealthy(AutoFailoverNode *pgAutoFailoverNode)
+{
+	TimestampTz now = GetCurrentTimestamp();
+
+	if (pgAutoFailoverNode == NULL)
+	{
+		return true;
+	}
+
+	/* if the keeper isn't reporting, trust our Health Checks */
+	if (TimestampDifferenceExceeds(pgAutoFailoverNode->reportTime,
+								   now,
+								   UnhealthyTimeoutMs))
+	{
+		if (pgAutoFailoverNode->health == NODE_HEALTH_BAD &&
+			TimestampDifferenceExceeds(PgStartTime,
+									   pgAutoFailoverNode->healthCheckTime,
+									   0))
+		{
+			if (TimestampDifferenceExceeds(PgStartTime,
+										   now,
+										   StartupGracePeriodMs))
+			{
+				return true;
+			}
+		}
+	}
+
+	/*
+	 * If the keeper reports that PostgreSQL is not running, then the node
+	 * isn't Healthy.
+	 */
+	if (!pgAutoFailoverNode->pgIsRunning)
+	{
+		return true;
+	}
+
+	/* clues show that everything is fine, the node is not unhealthy */
+	return false;
+}
+
+
+/*
+ * IsReporting returns whether the given node has reported recently, within the
+ * UnhealthyTimeoutMs interval.
+ */
+bool
+IsReporting(AutoFailoverNode *pgAutoFailoverNode)
+{
+	TimestampTz now = GetCurrentTimestamp();
+
+	if (pgAutoFailoverNode == NULL)
+	{
+		return false;
+	}
+
+	if (TimestampDifferenceExceeds(pgAutoFailoverNode->reportTime,
+								   now,
+								   UnhealthyTimeoutMs))
+	{
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * IsDrainTimeExpired returns whether the node should be done according
+ * to the drain time-outs.
+ */
+bool
+IsDrainTimeExpired(AutoFailoverNode *pgAutoFailoverNode)
+{
+	bool drainTimeExpired = false;
+
+	if (pgAutoFailoverNode == NULL ||
+		pgAutoFailoverNode->goalState != REPLICATION_STATE_DEMOTE_TIMEOUT)
+	{
+		return false;
+	}
+
+	TimestampTz now = GetCurrentTimestamp();
+	if (TimestampDifferenceExceeds(pgAutoFailoverNode->stateChangeTime,
+								   now,
+								   DrainTimeoutMs))
+	{
+		drainTimeExpired = true;
+	}
+
+	return drainTimeExpired;
 }

@@ -1665,50 +1665,40 @@ start_maintenance(PG_FUNCTION_ARGS)
 	/*
 	 * We need to always have at least formation->number_sync_standbys nodes in
 	 * the SECONDARY state participating in the quorum, otherwise writes may be
-	 * blocked on the primary. So we refuse to put a node in maintenance when
-	 * it would force blocking writes.
+	 * blocked on the primary. In case when we know we will have to block
+	 * writes, warn our user.
+	 *
+	 * As they might still need to operate this maintenance operation, we won't
+	 * forbid it by erroring out, though.
 	 */
 	List *secondaryNodesList =
 		AutoFailoverOtherNodesListInState(primaryNode,
 										  REPLICATION_STATE_SECONDARY);
 
-	int secondaryNodesCount = list_length(secondaryNodesList);
+	int candidatesCount = CountHealthyCandidates(secondaryNodesList);
+	int secondaryNodesCount = CountHealthySyncStandbys(secondaryNodesList);
 
 	if (formation->number_sync_standbys > 0 &&
 		secondaryNodesCount <= formation->number_sync_standbys)
 	{
-		ereport(ERROR,
+		ereport(WARNING,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("cannot start maintenance: we currently have %d "
-						"node(s) in the \"secondary\" state and require at "
-						"least %d sync standbys in formation \"%s\"",
-						secondaryNodesCount,
-						formation->number_sync_standbys,
-						formation->formationId)));
-	}
+				 errmsg("Starting maintenance on " NODE_FORMAT
+						" will block writes on the primary " NODE_FORMAT,
+						NODE_FORMAT_ARGS(currentNode),
+						NODE_FORMAT_ARGS(primaryNode)),
+				 errdetail("we now have %d "
+						   "healthy node(s) left in the \"secondary\" state "
+						   "and formation \"%s\" number-sync-standbys requires "
+						   "%d sync standbys",
 
-	/*
-	 * Because replication quorum and candidate priority are managed
-	 * separately, we also need another test to ensure that we have at least
-	 * one candidate to failover to.
-	 */
-	if (currentNode->candidatePriority > 0)
-	{
-		List *candidateNodesList =
-			AutoFailoverCandidateNodesListInState(currentNode,
-												  REPLICATION_STATE_SECONDARY);
-
-		int candidateNodesCount = list_length(candidateNodesList);
-
-		if (formation->number_sync_standbys > 0 &&
-			candidateNodesCount < 1)
-		{
-			ereport(ERROR,
-					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-					 errmsg("cannot start maintenance: we would then have %d "
-							"node(s) that would be candidate for promotion",
-							candidateNodesCount)));
-		}
+		                   /*
+		                    * We might double count a standby node when put to
+		                    * maintenance and e.g. already unhealthy.
+		                    */
+						   secondaryNodesCount > 0 ? secondaryNodesCount - 1 : 0,
+						   formation->formationId,
+						   formation->number_sync_standbys)));
 	}
 
 	/*
@@ -1726,22 +1716,38 @@ start_maintenance(PG_FUNCTION_ARGS)
 		char message[BUFSIZE] = { 0 };
 
 		/*
-		 * Set the primary to prepare_maintenance now, and if we have a single
-		 * secondary we assign it prepare_promotion, otherwise we need to elect
-		 * a secondary, same as in perform_failover.
+		 * We need at least one candidate node to initiate a failover and allow
+		 * the primary to reach maintenance.
 		 */
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to prepare_maintenance "
-			"after a user-initiated start_maintenance call.",
-			NODE_FORMAT_ARGS(currentNode));
-
-		SetNodeGoalState(currentNode,
-						 REPLICATION_STATE_PREPARE_MAINTENANCE, message);
+		if (candidatesCount < 1)
+		{
+			ereport(ERROR,
+					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					 errmsg("Starting maintenance on " NODE_FORMAT
+							" in state \"%s\" is not currently possible",
+							NODE_FORMAT_ARGS(currentNode),
+							ReplicationStateGetName(currentNode->reportedState)),
+					 errdetail("there is currently %d candidate nodes available",
+							   candidatesCount)));
+		}
 
 		if (totalNodesCount == 2)
 		{
+			/*
+			 * Set the primary to prepare_maintenance now, and if we have a
+			 * single secondary we assign it prepare_promotion, otherwise we
+			 * need to elect a secondary, same as in perform_failover.
+			 */
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of " NODE_FORMAT
+				" to prepare_maintenance "
+				"after a user-initiated start_maintenance call.",
+				NODE_FORMAT_ARGS(currentNode));
+
+			SetNodeGoalState(currentNode,
+							 REPLICATION_STATE_PREPARE_MAINTENANCE, message);
+
 			AutoFailoverNode *otherNode = firstStandbyNode;
 
 			/*
@@ -1761,6 +1767,17 @@ start_maintenance(PG_FUNCTION_ARGS)
 		}
 		else
 		{
+			/* put the primary directly to maintenance */
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of " NODE_FORMAT
+				" to maintenance "
+				"after a user-initiated start_maintenance call.",
+				NODE_FORMAT_ARGS(currentNode));
+
+			SetNodeGoalState(currentNode,
+							 REPLICATION_STATE_PREPARE_MAINTENANCE, message);
+
 			/* now proceed with the failover, starting with the first standby */
 			(void) ProceedGroupState(firstStandbyNode);
 		}
@@ -1782,7 +1799,7 @@ start_maintenance(PG_FUNCTION_ARGS)
 		 * the count is one (not zero).
 		 */
 		ReplicationState primaryGoalState =
-			secondaryNodesCount == 1
+			secondaryNodesCount == 1 && formation->number_sync_standbys == 0
 			? REPLICATION_STATE_WAIT_PRIMARY
 			: REPLICATION_STATE_JOIN_PRIMARY;
 
@@ -1807,7 +1824,7 @@ start_maintenance(PG_FUNCTION_ARGS)
 						NODE_FORMAT
 						" is \"%s\", expected \"secondary\" or \"catchingup\", "
 						"and current state for primary " NODE_FORMAT
-						"is \"%s\" ➜ \"%s\" ",
+						" is \"%s\" ➜ \"%s\" ",
 						NODE_FORMAT_ARGS(currentNode),
 						ReplicationStateGetName(currentNode->reportedState),
 						NODE_FORMAT_ARGS(primaryNode),
@@ -1820,10 +1837,11 @@ start_maintenance(PG_FUNCTION_ARGS)
 
 
 /*
- * stop_maintenance sets the given node back in catchingup state.
+ * stop_maintenance brings a node back from maintenance to a participating
+ * member of the formation. Depending on the state of the formation it's either
+ * assigned catchingup or report_lsn.
  *
- * This operation is only allowed on a secondary node. To do so on a primary
- * node, first failover so that it's now a secondary.
+ * This operation is only allowed on a node that's in the maintenance state.
  */
 Datum
 stop_maintenance(PG_FUNCTION_ARGS)
@@ -1832,8 +1850,7 @@ stop_maintenance(PG_FUNCTION_ARGS)
 
 	int64 nodeId = PG_GETARG_INT64(0);
 
-
-	char message[BUFSIZE];
+	char message[BUFSIZE] = { 0 };
 
 	AutoFailoverNode *currentNode = GetAutoFailoverNodeById(nodeId);
 	if (currentNode == NULL)
@@ -1844,7 +1861,14 @@ stop_maintenance(PG_FUNCTION_ARGS)
 	LockFormation(currentNode->formationId, ShareLock);
 	LockNodeGroup(currentNode->formationId, currentNode->groupId, ExclusiveLock);
 
-	if (!IsCurrentState(currentNode, REPLICATION_STATE_MAINTENANCE))
+	List *groupNodesList =
+		AutoFailoverNodeGroup(currentNode->formationId, currentNode->groupId);
+
+	int totalNodesCount = list_length(groupNodesList);
+
+	if (!IsCurrentState(currentNode, REPLICATION_STATE_MAINTENANCE) &&
+		!(totalNodesCount > 2 &&
+		  IsCurrentState(currentNode, REPLICATION_STATE_PREPARE_MAINTENANCE)))
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -1867,21 +1891,62 @@ stop_maintenance(PG_FUNCTION_ARGS)
 		GetPrimaryOrDemotedNodeInGroup(currentNode->formationId,
 									   currentNode->groupId);
 
-	if (primaryNode == NULL)
+	/*
+	 * When there is no primary, we might be in trouble, we just want to join
+	 * the possibily ongoing election.
+	 */
+	if (totalNodesCount == 1)
+	{
+		(void) ProceedGroupState(currentNode);
+
+		PG_RETURN_BOOL(true);
+	}
+	else if (primaryNode == NULL && totalNodesCount == 2)
 	{
 		ereport(ERROR,
 				(errmsg("couldn't find the primary node in formation \"%s\", "
 						"group %d",
 						currentNode->formationId, currentNode->groupId)));
 	}
+	else if (primaryNode == NULL && totalNodesCount > 2)
+	{
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of " NODE_FORMAT
+			" to report_lsn  after a user-initiated stop_maintenance call.",
+			NODE_FORMAT_ARGS(currentNode));
 
-	LogAndNotifyMessage(
-		message, BUFSIZE,
-		"Setting goal state of " NODE_FORMAT
-		" to catchingup  after a user-initiated stop_maintenance call.",
-		NODE_FORMAT_ARGS(currentNode));
+		SetNodeGoalState(currentNode, REPLICATION_STATE_REPORT_LSN, message);
 
-	SetNodeGoalState(currentNode, REPLICATION_STATE_CATCHINGUP, message);
+		PG_RETURN_BOOL(true);
+	}
+
+	/*
+	 * When a failover is in progress and stop_maintenance() is called (by
+	 * means of pg_autoctl disable maintenance or otherwise), then we should
+	 * join the crew on REPORT_LSN: the last known primary can be presumed
+	 * down.
+	 */
+	if (IsFailoverInProgress(groupNodesList))
+	{
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of " NODE_FORMAT
+			" to catchingup  after a user-initiated stop_maintenance call.",
+			NODE_FORMAT_ARGS(currentNode));
+
+		SetNodeGoalState(currentNode, REPLICATION_STATE_REPORT_LSN, message);
+	}
+	else
+	{
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of " NODE_FORMAT
+			" to catchingup  after a user-initiated stop_maintenance call.",
+			NODE_FORMAT_ARGS(currentNode));
+
+		SetNodeGoalState(currentNode, REPLICATION_STATE_CATCHINGUP, message);
+	}
 
 	PG_RETURN_BOOL(true);
 }

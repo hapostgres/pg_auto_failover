@@ -681,7 +681,7 @@ class PGNode:
                     )
                 ]
                 + [
-                    "%32s %8s %17s/%-17s %3d:%7s %10s %s" % result
+                    "%32s %8s %17s/%-17s %10s %3s:%7s %s" % result
                     for result in events
                 ]
             )

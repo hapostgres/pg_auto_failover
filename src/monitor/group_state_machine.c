@@ -70,20 +70,13 @@ static bool PromoteSelectedNode(AutoFailoverNode *selectedNode,
 
 static void AssignGoalState(AutoFailoverNode *pgAutoFailoverNode,
 							ReplicationState state, char *description);
-static bool IsDrainTimeExpired(AutoFailoverNode *pgAutoFailoverNode);
 static bool WalDifferenceWithin(AutoFailoverNode *secondaryNode,
 								AutoFailoverNode *primaryNode,
 								int64 delta);
-static bool IsHealthy(AutoFailoverNode *pgAutoFailoverNode);
-static bool IsUnhealthy(AutoFailoverNode *pgAutoFailoverNode);
-static bool IsReporting(AutoFailoverNode *pgAutoFailoverNode);
 
 /* GUC variables */
 int EnableSyncXlogThreshold = DEFAULT_XLOG_SEG_SIZE;
 int PromoteXlogThreshold = DEFAULT_XLOG_SEG_SIZE;
-int DrainTimeoutMs = 30 * 1000;
-int UnhealthyTimeoutMs = 20 * 1000;
-int StartupGracePeriodMs = 10 * 1000;
 
 
 /*
@@ -131,6 +124,16 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 	/* node reports secondary/dropped */
 	if (activeNode->goalState == REPLICATION_STATE_DROPPED)
+	{
+		return true;
+	}
+
+	/*
+	 * A node in "maintenance" state can only get out of maintenance through an
+	 * explicit call to stop_maintenance(), the FSM will not assign a new state
+	 * to a node that is currently in maintenance.
+	 */
+	if (IsCurrentState(activeNode, REPLICATION_STATE_MAINTENANCE))
 	{
 		return true;
 	}
@@ -235,10 +238,18 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 		 * unhealty or with candidate priority set to zero.
 		 *
 		 * Otherwise stop replication from the primary and proceed with
-		 * candidate election for primary replacement.
+		 * candidate election for primary replacement, whenever we have at
+		 * least one candidates for failover.
 		 */
+		List *candidateNodesList =
+			AutoFailoverOtherNodesListInState(primaryNode,
+											  REPLICATION_STATE_SECONDARY);
+
+		int candidatesCount = CountHealthyCandidates(candidateNodesList);
+
 		if (IsInPrimaryState(primaryNode) &&
-			!IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY))
+			!IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) &&
+			candidatesCount >= 1)
 		{
 			char message[BUFSIZE] = { 0 };
 
@@ -249,6 +260,25 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 				NODE_FORMAT_ARGS(primaryNode));
 
 			AssignGoalState(primaryNode, REPLICATION_STATE_DRAINING, message);
+		}
+
+		/*
+		 * In a multiple standby system we can assign maintenance as soon as
+		 * prepare_maintenance has been reached, at the same time than an
+		 * election is triggered. This also allows the operator to disable
+		 * maintenance on the old-primary and have it join the election.
+		 */
+		else if (IsCurrentState(primaryNode, REPLICATION_STATE_PREPARE_MAINTENANCE))
+		{
+			char message[BUFSIZE] = { 0 };
+
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of " NODE_FORMAT
+				" to maintenance after it converged to prepare_maintenance.",
+				NODE_FORMAT_ARGS(primaryNode));
+
+			AssignGoalState(primaryNode, REPLICATION_STATE_MAINTENANCE, message);
 		}
 
 		/*
@@ -1192,6 +1222,16 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 			AutoFailoverNode *otherNode = (AutoFailoverNode *) lfirst(nodeCell);
 
 			/*
+			 * Prevent the transition to primary when we have nodes in
+			 * wait_maintenance.
+			 */
+			if (otherNode->goalState == REPLICATION_STATE_WAIT_MAINTENANCE)
+			{
+				allSecondariesAreHealthy = false;
+				break;
+			}
+
+			/*
 			 * Skip nodes that are not failover candidates, and avoid ping-pong
 			 * bewtween JOIN_PRIMARY and PRIMARY while setting up a node
 			 * registered with --candidate-priority 0.
@@ -1213,20 +1253,23 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 			}
 		}
 
-		if (allSecondariesAreHealthy)
+		if (!allSecondariesAreHealthy)
 		{
-			char message[BUFSIZE] = { 0 };
-
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Setting goal state of " NODE_FORMAT " to primary",
-				NODE_FORMAT_ARGS(primaryNode));
-
-			AssignGoalState(primaryNode, REPLICATION_STATE_PRIMARY, message);
-
-			return true;
+			return false;
 		}
+
+		char message[BUFSIZE] = { 0 };
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of " NODE_FORMAT " to primary",
+			NODE_FORMAT_ARGS(primaryNode));
+
+		AssignGoalState(primaryNode, REPLICATION_STATE_PRIMARY, message);
+
+		return true;
 	}
+
 	return false;
 }
 
@@ -1597,6 +1640,11 @@ BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
 		 * now. And also old primary nodes in DRAINING state, when the drain
 		 * timeout is over, are due to report.
 		 *
+		 * When a node has been asked to re-join the group after a maintenance
+		 * period, and been assigned catching-up but failed to connect to the
+		 * primary, and a failover now happens, we need that node to join the
+		 * REPORT_LSN crew.
+		 *
 		 * Finally, another interesting case for us here would be a node that
 		 * has been asked to re-join a newly elected primary, but the newly
 		 * elected primary has now failed and we're in the election process to
@@ -1605,6 +1653,8 @@ BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
 		 */
 		if ((IsStateIn(node->reportedState, secondaryStates) &&
 			 IsStateIn(node->goalState, secondaryStates)) ||
+			(node->reportedState == REPLICATION_STATE_MAINTENANCE &&
+			 node->goalState == REPLICATION_STATE_CATCHINGUP) ||
 			((IsCurrentState(node, REPLICATION_STATE_DRAINING) ||
 			  IsCurrentState(node, REPLICATION_STATE_DEMOTED) ||
 			  (node->reportedState == REPLICATION_STATE_DEMOTED &&
@@ -2060,147 +2110,4 @@ WalDifferenceWithin(AutoFailoverNode *secondaryNode,
 	int64 walDifference = Abs(otherNodeLsn - secondaryLsn);
 
 	return walDifference <= delta;
-}
-
-
-/*
- * IsHealthy returns whether the given node is heathly, meaning it succeeds the
- * last health check and its PostgreSQL instance is reported as running by the
- * keeper.
- */
-static bool
-IsHealthy(AutoFailoverNode *pgAutoFailoverNode)
-{
-	TimestampTz now = GetCurrentTimestamp();
-	int nodeActiveCallsFrequencyMs = 1 * 1000; /* keeper sleep time */
-
-	if (pgAutoFailoverNode == NULL)
-	{
-		return false;
-	}
-
-	/*
-	 * If the keeper has been reporting that Postgres is running after our last
-	 * background check run, and within the node-active protocol client-time
-	 * sleep time (1 second), then trust pg_autoctl node reporting: we might be
-	 * out of a network split or node-local failure mode, and our background
-	 * checks might not have run yet to clarify that "back to good" situation.
-	 *
-	 * In any case, the pg_autoctl node-active process could connect to the
-	 * monitor, so there is no network split at this time.
-	 */
-	if (pgAutoFailoverNode->health == NODE_HEALTH_BAD &&
-		TimestampDifferenceExceeds(pgAutoFailoverNode->healthCheckTime,
-								   pgAutoFailoverNode->reportTime,
-								   0) &&
-		TimestampDifferenceExceeds(pgAutoFailoverNode->reportTime,
-								   now,
-								   nodeActiveCallsFrequencyMs))
-	{
-		return pgAutoFailoverNode->pgIsRunning;
-	}
-
-	/* nominal case: trust background checks + reported Postgres state */
-	return pgAutoFailoverNode->health == NODE_HEALTH_GOOD &&
-		   pgAutoFailoverNode->pgIsRunning == true;
-}
-
-
-/*
- * IsUnhealthy returns whether the given node is unhealthy, meaning it failed
- * its last health check and has not reported for more than UnhealthyTimeoutMs,
- * and it's PostgreSQL instance has been reporting as running by the keeper.
- */
-static bool
-IsUnhealthy(AutoFailoverNode *pgAutoFailoverNode)
-{
-	TimestampTz now = GetCurrentTimestamp();
-
-	if (pgAutoFailoverNode == NULL)
-	{
-		return true;
-	}
-
-	/* if the keeper isn't reporting, trust our Health Checks */
-	if (TimestampDifferenceExceeds(pgAutoFailoverNode->reportTime,
-								   now,
-								   UnhealthyTimeoutMs))
-	{
-		if (pgAutoFailoverNode->health == NODE_HEALTH_BAD &&
-			TimestampDifferenceExceeds(PgStartTime,
-									   pgAutoFailoverNode->healthCheckTime,
-									   0))
-		{
-			if (TimestampDifferenceExceeds(PgStartTime,
-										   now,
-										   StartupGracePeriodMs))
-			{
-				return true;
-			}
-		}
-	}
-
-	/*
-	 * If the keeper reports that PostgreSQL is not running, then the node
-	 * isn't Healthy.
-	 */
-	if (!pgAutoFailoverNode->pgIsRunning)
-	{
-		return true;
-	}
-
-	/* clues show that everything is fine, the node is not unhealthy */
-	return false;
-}
-
-
-/*
- * IsReporting returns whether the given node has reported recently, within the
- * UnhealthyTimeoutMs interval.
- */
-static bool
-IsReporting(AutoFailoverNode *pgAutoFailoverNode)
-{
-	TimestampTz now = GetCurrentTimestamp();
-
-	if (pgAutoFailoverNode == NULL)
-	{
-		return false;
-	}
-
-	if (TimestampDifferenceExceeds(pgAutoFailoverNode->reportTime,
-								   now,
-								   UnhealthyTimeoutMs))
-	{
-		return false;
-	}
-
-	return true;
-}
-
-
-/*
- * IsDrainTimeExpired returns whether the node should be done according
- * to the drain time-outs.
- */
-static bool
-IsDrainTimeExpired(AutoFailoverNode *pgAutoFailoverNode)
-{
-	bool drainTimeExpired = false;
-
-	if (pgAutoFailoverNode == NULL ||
-		pgAutoFailoverNode->goalState != REPLICATION_STATE_DEMOTE_TIMEOUT)
-	{
-		return false;
-	}
-
-	TimestampTz now = GetCurrentTimestamp();
-	if (TimestampDifferenceExceeds(pgAutoFailoverNode->stateChangeTime,
-								   now,
-								   DrainTimeoutMs))
-	{
-		drainTimeExpired = true;
-	}
-
-	return drainTimeExpired;
 }
