@@ -404,6 +404,9 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 		/* start replication */
 		AssignGoalState(activeNode, REPLICATION_STATE_CATCHINGUP, message);
 
+		/* edit synchronous_standby_names to add the new standby now */
+		AssignGoalState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS, message);
+
 		return true;
 	}
 
