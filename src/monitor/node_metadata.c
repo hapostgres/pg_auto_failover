@@ -870,6 +870,20 @@ CountSyncStandbys(List *groupNodeList)
 
 
 /*
+ * IsHealthySyncStandby returns true if the node its replicationQuorum property
+ * set to true in the given groupNodeList, but only if only if that node is
+ * currently currently in REPLICATION_STATE_SECONDARY and known healthy.
+ */
+bool
+IsHealthySyncStandby(AutoFailoverNode *node)
+{
+	return node->replicationQuorum &&
+		   IsCurrentState(node, REPLICATION_STATE_SECONDARY) &&
+		   IsHealthy(node);
+}
+
+
+/*
  * CountHealthySyncStandbys returns how many standby nodes have their
  * replicationQuorum property set to true in the given groupNodeList, counting
  * only nodes that are currently in REPLICATION_STATE_SECONDARY and known
@@ -885,9 +899,7 @@ CountHealthySyncStandbys(List *groupNodeList)
 	{
 		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
 
-		if (node->replicationQuorum &&
-			IsCurrentState(node, REPLICATION_STATE_SECONDARY) &&
-			IsHealthy(node))
+		if (IsHealthySyncStandby(node))
 		{
 			++count;
 		}

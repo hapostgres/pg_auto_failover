@@ -498,14 +498,13 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	}
 
 	/*
-	 * when secondary is put to maintenance and we have more standby nodes
-	 *  wait_maintenance -> maintenance
-	 *  join_primary -> primary
+	 * when secondary is in wait_maintenance state and goal state of primary is
+	 * not wait_primary anymore, e.g. another node joined and made it primary
+	 * again or it got demoted. Then we don't need to wait anymore and we can
+	 * transition directly to maintenance.
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_WAIT_MAINTENANCE) &&
-		primaryNode->reportedState == REPLICATION_STATE_JOIN_PRIMARY &&
-		(primaryNode->goalState == REPLICATION_STATE_JOIN_PRIMARY ||
-		 primaryNode->goalState == REPLICATION_STATE_PRIMARY))
+		primaryNode->goalState != REPLICATION_STATE_WAIT_PRIMARY)
 	{
 		char message[BUFSIZE];
 
@@ -513,15 +512,13 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 			message, BUFSIZE,
 			"Setting goal state of " NODE_FORMAT
 			" to maintenance after " NODE_FORMAT
-			" converged to wait_primary.",
+			" got assigned %s as goal state.",
 			NODE_FORMAT_ARGS(activeNode),
-			NODE_FORMAT_ARGS(primaryNode));
+			NODE_FORMAT_ARGS(primaryNode),
+			ReplicationStateGetName(primaryNode->goalState));
 
 		/* secondary reached maintenance */
 		AssignGoalState(activeNode, REPLICATION_STATE_MAINTENANCE, message);
-
-		/* set the primary back to its normal state (we can failover still) */
-		AssignGoalState(primaryNode, REPLICATION_STATE_PRIMARY, message);
 
 		return true;
 	}
@@ -1220,16 +1217,6 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 		foreach(nodeCell, otherNodesGroupList)
 		{
 			AutoFailoverNode *otherNode = (AutoFailoverNode *) lfirst(nodeCell);
-
-			/*
-			 * Prevent the transition to primary when we have nodes in
-			 * wait_maintenance.
-			 */
-			if (otherNode->goalState == REPLICATION_STATE_WAIT_MAINTENANCE)
-			{
-				allSecondariesAreHealthy = false;
-				break;
-			}
 
 			/*
 			 * Skip nodes that are not failover candidates, and avoid ping-pong
