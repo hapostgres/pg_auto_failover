@@ -1679,7 +1679,8 @@ start_maintenance(PG_FUNCTION_ARGS)
 	int secondaryNodesCount = CountHealthySyncStandbys(secondaryNodesList);
 
 	if (formation->number_sync_standbys > 0 &&
-		secondaryNodesCount <= formation->number_sync_standbys)
+		secondaryNodesCount <= formation->number_sync_standbys &&
+		IsHealthySyncStandby(currentNode))
 	{
 		ereport(WARNING,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -1691,12 +1692,7 @@ start_maintenance(PG_FUNCTION_ARGS)
 						   "healthy node(s) left in the \"secondary\" state "
 						   "and formation \"%s\" number-sync-standbys requires "
 						   "%d sync standbys",
-
-		                   /*
-		                    * We might double count a standby node when put to
-		                    * maintenance and e.g. already unhealthy.
-		                    */
-						   secondaryNodesCount > 0 ? secondaryNodesCount - 1 : 0,
+						   secondaryNodesCount - 1,
 						   formation->formationId,
 						   formation->number_sync_standbys)));
 	}
@@ -1794,36 +1790,39 @@ start_maintenance(PG_FUNCTION_ARGS)
 	{
 		/*
 		 * In most cases we can simply put a secondary directly into
-		 * maintenance mode.
+		 * maintenance mode. However, when putting the last secondary node
+		 * that's part of the replication quorum to maintenance, we disable
+		 * sync rep on the primary by switching it to wait_primary. Otherwise
+		 * the primary won't be able to accept writes until the monitor assigns
+		 * it wait_primary. This way we're nice about it and don't bring the
+		 * secondary down before that happens. Because we didn't change the
+		 * state of any standby node yet, we get there when the count is one
+		 * (not zero).
 		 */
-		ReplicationState primaryGoalState = REPLICATION_STATE_PRIMARY;
-		ReplicationState maintenanceGoalState = REPLICATION_STATE_MAINTENANCE;
-
-		/*
-		 * However, when putting the last secondary node to maintenance, we disable sync
-		 * rep on the primary by switching it to wait_primary. Because we
-		 * didn't change the state of any standby node yet, we get there when
-		 * the count is one (not zero).
-		 */
-		if (secondaryNodesCount == 1 && formation->number_sync_standbys == 0)
+		if (formation->number_sync_standbys == 0 && secondaryNodesCount == 1 &&
+			IsHealthySyncStandby(currentNode))
 		{
-			primaryGoalState = REPLICATION_STATE_WAIT_PRIMARY;
-			maintenanceGoalState = REPLICATION_STATE_WAIT_MAINTENANCE;
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of " NODE_FORMAT
+				" to wait_primary and " NODE_FORMAT
+				" to wait_maintenance "
+				"after a user-initiated start_maintenance call.",
+				NODE_FORMAT_ARGS(primaryNode),
+				NODE_FORMAT_ARGS(currentNode));
+			SetNodeGoalState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY, message);
+			SetNodeGoalState(currentNode, REPLICATION_STATE_WAIT_MAINTENANCE, message);
 		}
-
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to %s and " NODE_FORMAT
-			" to %s "
-			"after a user-initiated start_maintenance call.",
-			NODE_FORMAT_ARGS(primaryNode),
-			ReplicationStateGetName(primaryGoalState),
-			NODE_FORMAT_ARGS(currentNode),
-			ReplicationStateGetName(maintenanceGoalState));
-
-		SetNodeGoalState(primaryNode, primaryGoalState, message);
-		SetNodeGoalState(currentNode, maintenanceGoalState, message);
+		else
+		{
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of " NODE_FORMAT
+				" to maintenance "
+				"after a user-initiated start_maintenance call.",
+				NODE_FORMAT_ARGS(currentNode));
+			SetNodeGoalState(currentNode, REPLICATION_STATE_MAINTENANCE, message);
+		}
 	}
 	else
 	{

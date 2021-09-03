@@ -169,6 +169,7 @@ extern List * ListMostAdvancedStandbyNodes(List *groupNodeList);
 extern List * GroupListSyncStandbys(List *groupNodeList);
 extern bool AllNodesHaveSameCandidatePriority(List *groupNodeList);
 extern int CountSyncStandbys(List *groupNodeList);
+extern bool IsHealthySyncStandby(AutoFailoverNode *node);
 extern int CountHealthySyncStandbys(List *groupNodeList);
 extern int CountHealthyCandidates(List *groupNodeList);
 extern bool IsFailoverInProgress(List *groupNodeList);
