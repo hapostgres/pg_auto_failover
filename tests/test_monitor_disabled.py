@@ -27,7 +27,6 @@ def test_001_init_primary():
 
 
 def test_002_init_to_single():
-    print()
     node1.do_fsm_assign("single")
 
 
@@ -88,7 +87,7 @@ def test_010_fsm_nodes_set():
 
 
 def test_011_init_to_wait_standby():
-    node1.do_fsm_assign("join_primary")
+    node1.do_fsm_assign("primary")
     node3.do_fsm_assign("wait_standby")
 
     eq_(node1.get_synchronous_standby_names_local(), "*")
