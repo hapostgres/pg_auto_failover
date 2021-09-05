@@ -100,7 +100,7 @@ Then build pg_auto_failover from sources with the following instructions:
 
 ~~~ bash
 $ make
-$ sudo make install
+$ sudo make install -j10
 ~~~
 
 For this to work though, the PostgreSQL client (libpq) and server
