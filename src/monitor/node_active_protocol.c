@@ -1810,6 +1810,7 @@ start_maintenance(PG_FUNCTION_ARGS)
 				"after a user-initiated start_maintenance call.",
 				NODE_FORMAT_ARGS(primaryNode),
 				NODE_FORMAT_ARGS(currentNode));
+
 			SetNodeGoalState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY, message);
 			SetNodeGoalState(currentNode, REPLICATION_STATE_WAIT_MAINTENANCE, message);
 		}
@@ -1818,9 +1819,13 @@ start_maintenance(PG_FUNCTION_ARGS)
 			LogAndNotifyMessage(
 				message, BUFSIZE,
 				"Setting goal state of " NODE_FORMAT
-				" to maintenance "
+				" to maintenance and " NODE_FORMAT
+				" to apply_settings "
 				"after a user-initiated start_maintenance call.",
-				NODE_FORMAT_ARGS(currentNode));
+				NODE_FORMAT_ARGS(currentNode),
+				NODE_FORMAT_ARGS(primaryNode));
+
+			SetNodeGoalState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS, message);
 			SetNodeGoalState(currentNode, REPLICATION_STATE_MAINTENANCE, message);
 		}
 	}
@@ -1950,9 +1955,13 @@ stop_maintenance(PG_FUNCTION_ARGS)
 		LogAndNotifyMessage(
 			message, BUFSIZE,
 			"Setting goal state of " NODE_FORMAT
-			" to catchingup  after a user-initiated stop_maintenance call.",
-			NODE_FORMAT_ARGS(currentNode));
+			" to catchingup and " NODE_FORMAT
+			" to apply_settings"
+			" after a user-initiated stop_maintenance call.",
+			NODE_FORMAT_ARGS(currentNode),
+			NODE_FORMAT_ARGS(primaryNode));
 
+		SetNodeGoalState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS, message);
 		SetNodeGoalState(currentNode, REPLICATION_STATE_CATCHINGUP, message);
 	}
 
@@ -2447,14 +2456,38 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 
 		int count = list_length(syncStandbyNodesGroupList);
 
-		if (count == 0 ||
-			IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY))
+		/*
+		 * Nodes in maintenance are filtered out in GroupListSyncStandbys,
+		 * so we might have had an empty list there, if the operator has
+		 * put all the nodes to maintenance at the same time.
+		 *
+		 * Now, an empty list when number_sync_standbys is zero would be ok,
+		 * and we could return an empty string. Also any time the primary is in
+		 * state WAIT_PRIMARY, an empty string is okay.
+		 */
+		if (IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
+			(count == 0 && formation->number_sync_standbys == 0))
 		{
-			/*
-			 *  If no standby participates in the replication Quorum, we
-			 * disable synchronous replication.
-			 */
 			PG_RETURN_TEXT_P(cstring_to_text(""));
+		}
+
+		/*
+		 * That said when we have no standby node left (all are in maintenance)
+		 * and number_sync_standbys is at least one, well then we need to make
+		 * sure that the nodes in maintenance won't acknowledge sync commits
+		 * for the application.
+		 *
+		 * In case of a failover, nodes in maintenance do not participate in an
+		 * election, so we want to avoid those nodes to hold commits that we
+		 * would might then risk losing.
+		 *
+		 * For that we want to block writes on the primary by listing a name
+		 * that won't connect and risk participate in the quorum.
+		 */
+		else if (count == 0 && formation->number_sync_standbys > 0)
+		{
+			PG_RETURN_TEXT_P(
+				cstring_to_text("pgautofailover_maintenance_blocks_writes"));
 		}
 		else
 		{

@@ -126,8 +126,8 @@ def test_006a_maintenance_and_failover():
     # assigned and goal state must be the same
     assert node1.wait_until_state(target_state="primary")
 
-    # ssn is not changed during maintenance operations
-    ssn = "ANY 1 (pgautofailover_standby_3, pgautofailover_standby_2)"
+    # ssn is changed during maintenance operations
+    ssn = "ANY 1 (pgautofailover_standby_3)"
     eq_(node1.get_synchronous_standby_names(), ssn)
     eq_(node1.get_synchronous_standby_names_local(), ssn)
 
@@ -137,7 +137,7 @@ def test_006a_maintenance_and_failover():
     assert node1.wait_until_state(target_state="secondary")
 
     # now that node3 is primary, synchronous_standby_names has changed
-    ssn = "ANY 1 (pgautofailover_standby_1, pgautofailover_standby_2)"
+    ssn = "ANY 1 (pgautofailover_standby_1)"
     node3.check_synchronous_standby_names(ssn)
 
     print("Disabling maintenance on node2, should connect to the new primary")
@@ -165,7 +165,8 @@ def test_006a_maintenance_and_failover():
     assert node2.wait_until_state(target_state="secondary")
     assert node3.wait_until_state(target_state="primary")
 
-    # ssn is not changed during maintenance operations
+    # ssn is changed during maintenance operations
+    ssn = "ANY 1 (pgautofailover_standby_1, pgautofailover_standby_2)"
     node3.check_synchronous_standby_names(ssn)
 
     assert node1.has_needed_replication_slots()
@@ -199,7 +200,7 @@ def test_007b_node2_to_maintenance():
 
     # when both secondaries are put to maintenance, writes are blocked on
     # the primary
-    ssn = "ANY 1 (pgautofailover_standby_1, pgautofailover_standby_2)"
+    ssn = "pgautofailover_maintenance_blocks_writes"
     node3.check_synchronous_standby_names(ssn)
 
 

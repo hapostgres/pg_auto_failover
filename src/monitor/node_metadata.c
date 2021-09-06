@@ -834,7 +834,9 @@ GroupListSyncStandbys(List *groupNodeList)
 	{
 		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
 
-		if (node->replicationQuorum)
+		if (node->replicationQuorum &&
+			node->goalState != REPLICATION_STATE_MAINTENANCE &&
+			node->goalState != REPLICATION_STATE_WAIT_MAINTENANCE)
 		{
 			syncStandbyNodesList = lappend(syncStandbyNodesList, node);
 		}
@@ -1829,8 +1831,17 @@ bool
 IsInPrimaryState(AutoFailoverNode *pgAutoFailoverNode)
 {
 	return pgAutoFailoverNode != NULL &&
-		   pgAutoFailoverNode->goalState == pgAutoFailoverNode->reportedState &&
-		   CanTakeWritesInState(pgAutoFailoverNode->goalState);
+		   ((pgAutoFailoverNode->goalState == pgAutoFailoverNode->reportedState &&
+			 CanTakeWritesInState(pgAutoFailoverNode->goalState)) ||
+
+	        /*
+	         * We accept both apply_settings -> primary and primary ->
+	         * apply_settings as primary states.
+	         */
+			((pgAutoFailoverNode->goalState == REPLICATION_STATE_APPLY_SETTINGS ||
+			  pgAutoFailoverNode->goalState == REPLICATION_STATE_PRIMARY) &&
+			 (pgAutoFailoverNode->reportedState == REPLICATION_STATE_PRIMARY ||
+			  pgAutoFailoverNode->reportedState == REPLICATION_STATE_APPLY_SETTINGS)));
 }
 
 

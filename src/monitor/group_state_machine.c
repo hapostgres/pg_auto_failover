@@ -958,6 +958,35 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 	}
 
 	/*
+	 * when another node wants to go to maintenance:
+	 *  apply_settings -> primary
+	 *  wait_maintenance -> maintenance
+	 */
+	if (IsCurrentState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS))
+	{
+		ListCell *nodeCell = NULL;
+
+		foreach(nodeCell, otherNodesGroupList)
+		{
+			AutoFailoverNode *otherNode = (AutoFailoverNode *) lfirst(nodeCell);
+
+			if (IsCurrentState(otherNode, REPLICATION_STATE_WAIT_MAINTENANCE))
+			{
+				char message[BUFSIZE] = { 0 };
+
+				LogAndNotifyMessage(
+					message, BUFSIZE,
+					"Setting goal state of " NODE_FORMAT
+					" to maintenance after primary applied settings.",
+					NODE_FORMAT_ARGS(otherNode));
+
+				AssignGoalState(otherNode,
+								REPLICATION_STATE_MAINTENANCE, message);
+			}
+		}
+	}
+
+	/*
 	 * when secondary unhealthy:
 	 *   secondary ➜ catchingup
 	 *     primary ➜ wait_primary

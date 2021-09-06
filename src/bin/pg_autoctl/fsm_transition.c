@@ -563,7 +563,9 @@ fsm_enable_sync_rep(Keeper *keeper)
 	 * actually enable sync rep here. In that case don't bother making sure the
 	 * standbys have reached a meaningful LSN target before continuing.
 	 */
-	if (streq(postgres->synchronousStandbyNames, ""))
+	if (streq(postgres->synchronousStandbyNames, "") ||
+		streq(postgres->synchronousStandbyNames,
+			  "pgautofailover_maintenance_blocks_writes"))
 	{
 		return true;
 	}
