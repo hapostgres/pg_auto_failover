@@ -387,8 +387,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_WAIT_STANDBY) &&
 		(IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
-		 IsCurrentState(primaryNode, REPLICATION_STATE_JOIN_PRIMARY) ||
-		 IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY)))
+		 IsCurrentState(primaryNode, REPLICATION_STATE_JOIN_PRIMARY)))
 	{
 		char message[BUFSIZE];
 
@@ -397,6 +396,31 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 			"Setting goal state of " NODE_FORMAT
 			" to catchingup after " NODE_FORMAT
 			" converged to %s.",
+			NODE_FORMAT_ARGS(activeNode),
+			NODE_FORMAT_ARGS(primaryNode),
+			ReplicationStateGetName(primaryNode->reportedState));
+
+		/* start replication */
+		AssignGoalState(activeNode, REPLICATION_STATE_CATCHINGUP, message);
+
+		return true;
+	}
+
+	/*
+	 * when primary node is ready for replication:
+	 *  wait_standby -> catchingup
+	 *  primary -> apply_settings
+	 */
+	if (IsCurrentState(activeNode, REPLICATION_STATE_WAIT_STANDBY) &&
+		IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY))
+	{
+		char message[BUFSIZE];
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of " NODE_FORMAT
+			" to catchingup and " NODE_FORMAT
+			" to %s to edit synchronous_standby_names.",
 			NODE_FORMAT_ARGS(activeNode),
 			NODE_FORMAT_ARGS(primaryNode),
 			ReplicationStateGetName(primaryNode->reportedState));
