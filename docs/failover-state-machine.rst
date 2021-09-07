@@ -67,8 +67,7 @@ all the other nodes.
 
 In the previous diagram we can see that we have a list of six states where
 the application can connect to a read-write Postgres service: ``single``,
-``wait_primary``, ``primary``, ``prepare_maintenance``, ``apply_settings``,
-and ``join_primary``.
+``wait_primary``, ``primary``, ``prepare_maintenance``, and ``apply_settings``.
 
 Init
 ^^^^
@@ -110,6 +109,12 @@ Applied to a primary node when another standby is joining the group. This
 allows the primary node to apply necessary changes to its HBA setup before
 allowing the new node joining the system to run the ``pg_basebackup``
 command.
+
+.. important::
+
+   This state has been deprecated, and is no longer assigned to nodes. Any
+   time we would have used ``join_primary`` before, we now use ``primary``
+   instead.
 
 Primary
 ^^^^^^^

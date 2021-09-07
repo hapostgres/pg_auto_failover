@@ -565,8 +565,6 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 
 	keeper.config = *config;
 
-	(void) cli_monitor_init_from_option_or_config(monitor, config);
-
 	if (config->monitorDisabled)
 	{
 		(void) cli_drop_node_with_monitor_disabled(config, dropAndDestroy);
@@ -574,6 +572,8 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 		/* make sure we're done now */
 		exit(EXIT_CODE_QUIT);
 	}
+
+	(void) cli_monitor_init_from_option_or_config(monitor, config);
 
 	/*
 	 * First, read the state file and check that it has been assigned the
@@ -729,6 +729,8 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 static void
 cli_drop_node_with_monitor_disabled(KeeperConfig *config, bool dropAndDestroy)
 {
+	log_trace("cli_drop_node_with_monitor_disabled");
+
 	if (dropAndDestroy)
 	{
 		pid_t pid = 0;

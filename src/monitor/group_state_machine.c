@@ -383,7 +383,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 	/*
 	 * when primary node is ready for replication:
-	 *  prepare_standby -> catchingup
+	 *  wait_standby -> catchingup
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_WAIT_STANDBY) &&
 		(IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
@@ -399,6 +399,57 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 			NODE_FORMAT_ARGS(activeNode),
 			NODE_FORMAT_ARGS(primaryNode),
 			ReplicationStateGetName(primaryNode->reportedState));
+
+		/* start replication */
+		AssignGoalState(activeNode, REPLICATION_STATE_CATCHINGUP, message);
+
+		return true;
+	}
+
+	/*
+	 * when primary node is ready for replication:
+	 *  wait_standby -> catchingup
+	 *  primary -> apply_settings
+	 */
+	if (IsCurrentState(activeNode, REPLICATION_STATE_WAIT_STANDBY) &&
+		IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY) &&
+		activeNode->replicationQuorum)
+	{
+		char message[BUFSIZE];
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of " NODE_FORMAT
+			" to catchingup and " NODE_FORMAT
+			" to %s to edit synchronous_standby_names.",
+			NODE_FORMAT_ARGS(activeNode),
+			NODE_FORMAT_ARGS(primaryNode),
+			ReplicationStateGetName(primaryNode->reportedState));
+
+		/* start replication */
+		AssignGoalState(activeNode, REPLICATION_STATE_CATCHINGUP, message);
+
+		/* edit synchronous_standby_names to add the new standby now */
+		AssignGoalState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS, message);
+
+		return true;
+	}
+
+	/*
+	 * when primary node is ready for replication:
+	 *  wait_standby -> catchingup
+	 */
+	if (IsCurrentState(activeNode, REPLICATION_STATE_WAIT_STANDBY) &&
+		IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY) &&
+		!activeNode->replicationQuorum)
+	{
+		char message[BUFSIZE];
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of " NODE_FORMAT
+			" to catchingup.",
+			NODE_FORMAT_ARGS(activeNode));
 
 		/* start replication */
 		AssignGoalState(activeNode, REPLICATION_STATE_CATCHINGUP, message);
@@ -924,40 +975,6 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 	}
 
 	/*
-	 * when another node wants to become standby:
-	 *  primary -> join_primary
-	 */
-	if (IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY))
-	{
-		ListCell *nodeCell = NULL;
-
-		foreach(nodeCell, otherNodesGroupList)
-		{
-			AutoFailoverNode *otherNode = (AutoFailoverNode *) lfirst(nodeCell);
-
-			if (IsCurrentState(otherNode, REPLICATION_STATE_WAIT_STANDBY))
-			{
-				char message[BUFSIZE];
-
-				LogAndNotifyMessage(
-					message, BUFSIZE,
-					"Setting goal state of " NODE_FORMAT
-					" to join_primary after " NODE_FORMAT
-					" joined.",
-					NODE_FORMAT_ARGS(primaryNode),
-					NODE_FORMAT_ARGS(otherNode));
-
-				/* prepare replication slot and pg_hba.conf */
-				AssignGoalState(primaryNode,
-								REPLICATION_STATE_JOIN_PRIMARY,
-								message);
-
-				return true;
-			}
-		}
-	}
-
-	/*
 	 * when secondary unhealthy:
 	 *   secondary ➜ catchingup
 	 *     primary ➜ wait_primary
@@ -1203,48 +1220,14 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 	}
 
 	/*
-	 * when a secondary node has been removed during registration, or when
-	 * there's no visible reason to not be a primary rather than either
-	 * wait_primary or join_primary
-	 *
-	 *    join_primary ➜ primary
+	 * We don't use the join_primary state any more, though for backwards
+	 * compatibility if a node reports JOIN_PRIMARY well then we assign PRIMARY
+	 * to the node. After all it might be that an operator upgrades while a
+	 * node is in JOIN_PRIMARY and we certainly want to be able to handle the
+	 * situation.
 	 */
 	if (IsCurrentState(primaryNode, REPLICATION_STATE_JOIN_PRIMARY))
 	{
-		ListCell *nodeCell = NULL;
-		bool allSecondariesAreHealthy = true;
-
-		foreach(nodeCell, otherNodesGroupList)
-		{
-			AutoFailoverNode *otherNode = (AutoFailoverNode *) lfirst(nodeCell);
-
-			/*
-			 * Skip nodes that are not failover candidates, and avoid ping-pong
-			 * bewtween JOIN_PRIMARY and PRIMARY while setting up a node
-			 * registered with --candidate-priority 0.
-			 */
-			if (otherNode->candidatePriority == 0 &&
-				!IsCurrentState(otherNode, REPLICATION_STATE_WAIT_STANDBY))
-			{
-				continue;
-			}
-
-			allSecondariesAreHealthy =
-				allSecondariesAreHealthy &&
-				otherNode->goalState == REPLICATION_STATE_SECONDARY &&
-				IsHealthy(otherNode);
-
-			if (!allSecondariesAreHealthy)
-			{
-				break;
-			}
-		}
-
-		if (!allSecondariesAreHealthy)
-		{
-			return false;
-		}
-
 		char message[BUFSIZE] = { 0 };
 
 		LogAndNotifyMessage(

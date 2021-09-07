@@ -1829,8 +1829,18 @@ bool
 IsInPrimaryState(AutoFailoverNode *pgAutoFailoverNode)
 {
 	return pgAutoFailoverNode != NULL &&
-		   pgAutoFailoverNode->goalState == pgAutoFailoverNode->reportedState &&
-		   CanTakeWritesInState(pgAutoFailoverNode->goalState);
+
+		   ((pgAutoFailoverNode->goalState == pgAutoFailoverNode->reportedState &&
+			 CanTakeWritesInState(pgAutoFailoverNode->goalState)) ||
+
+	        /*
+	         * We accept both apply_settings -> primary and primary ->
+	         * apply_settings as primary states.
+	         */
+			((pgAutoFailoverNode->goalState == REPLICATION_STATE_APPLY_SETTINGS ||
+			  pgAutoFailoverNode->goalState == REPLICATION_STATE_PRIMARY) &&
+			 (pgAutoFailoverNode->reportedState == REPLICATION_STATE_PRIMARY ||
+			  pgAutoFailoverNode->reportedState == REPLICATION_STATE_APPLY_SETTINGS)));
 }
 
 

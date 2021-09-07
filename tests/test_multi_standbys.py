@@ -193,7 +193,6 @@ def test_008_set_candidate_priorities():
     node2.set_candidate_priority(90)
     node3.set_candidate_priority(70)
 
-    # when we set candidate priority we go to join_primary then primary
     print()
     assert node1.wait_until_state(target_state="primary")
 

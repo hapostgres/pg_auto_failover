@@ -43,19 +43,14 @@
           init -> "wait standby" [fill=violet!30];
           single -> "wait primary" [font=\normalsize, draw=black];
           "wait primary" -> primary [font=\normalsize, draw=black, circle];
-          "join primary" [font=\normalsize, draw=black] -> primary;
           "wait standby" -> "catching up" [fill=violet!30];
           "catching up" -> secondary [circle,draw=black,circle,fill=violet!30];
-          primary -> "join primary" ;
           primary -> "wait primary" ;
 
           primary -> draining [fill=red!30];
           draining -> demoted [fill=red!30];
           primary -> demoted ;
           primary -> "demote timeout" [fill=red!30];
-          "join primary" -> draining ;
-          "join primary" -> demoted ;
-          "join primary" -> "demote timeout" ;
           draining -> "demote timeout" ;
           "demote timeout" -> demoted ;
 
@@ -91,7 +86,6 @@
 
            %% primary -> single ;
            %% "wait primary" -> single ;
-           %% "join primary" -> single ;
            %% demoted -> single ;
            %% "demote timeout" -> single ;
            %% draining -> single ;
