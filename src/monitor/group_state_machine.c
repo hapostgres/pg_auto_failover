@@ -412,7 +412,8 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 *  primary -> apply_settings
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_WAIT_STANDBY) &&
-		IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY))
+		IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY) &&
+		activeNode->replicationQuorum)
 	{
 		char message[BUFSIZE];
 
@@ -430,6 +431,28 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 		/* edit synchronous_standby_names to add the new standby now */
 		AssignGoalState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS, message);
+
+		return true;
+	}
+
+	/*
+	 * when primary node is ready for replication:
+	 *  wait_standby -> catchingup
+	 */
+	if (IsCurrentState(activeNode, REPLICATION_STATE_WAIT_STANDBY) &&
+		IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY) &&
+		!activeNode->replicationQuorum)
+	{
+		char message[BUFSIZE];
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of " NODE_FORMAT
+			" to catchingup.",
+			NODE_FORMAT_ARGS(activeNode));
+
+		/* start replication */
+		AssignGoalState(activeNode, REPLICATION_STATE_CATCHINGUP, message);
 
 		return true;
 	}
