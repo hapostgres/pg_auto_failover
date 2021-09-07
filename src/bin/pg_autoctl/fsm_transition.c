@@ -201,6 +201,19 @@ fsm_init_primary(Keeper *keeper)
 	}
 
 	/*
+	 * When dealing with a pg_autoctl create postgres command with a
+	 * pre-existing PGDATA directory, make sure we can start the cluster
+	 * without being in sync-rep already. The target state here is SINGLE
+	 * after all.
+	 */
+	if (!fsm_disable_replication(keeper))
+	{
+		log_error("Failed to disable synchronous replication in order to "
+				  "initialize as a primary, see above for details");
+		return false;
+	}
+
+	/*
 	 * FIXME: In the current FSM, I am not sure this can happen anymore. That
 	 * said we might want to remain compatible with initializing a SINGLE from
 	 * an pre-existing standby. I wonder why/how it would come to that though.
