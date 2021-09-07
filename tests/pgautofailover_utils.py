@@ -922,6 +922,7 @@ class DataNode(PGNode):
         self.listen_flag = listen_flag
         self.formation = formation
         self.monitorDisabled = None
+        self.slots = None
 
     def create(
         self,
@@ -1545,15 +1546,35 @@ SELECT reportedstate, goalstate
         """
         Returns a list of the replication slot names on the local Postgres.
         """
+        slots = {}
+        nameList = []
+
         query = (
-            "select slot_name from pg_replication_slots "
+            "select oid, slot_name from pg_replication_slots "
             + "where slot_name ~ '^pgautofailover_standby_' "
             + " and slot_type = 'physical'"
         )
 
         try:
             result = self.run_sql_query(query)
-            return [row[0] for row in result]
+
+            for (oid, name) in result:
+                slots[name] = oid
+                nameList.append(name)
+
+            # make sure that slots with the same name always have the same OID
+            if self.slots:
+                for name in self.slots:
+                    if self.slots[name] != slots[name]:
+                        raise Exception(
+                            'Slot "%s" OID is now %d, used to be %d'
+                            % (slots[name], self.slots[name])
+                        )
+
+            self.slots = slots
+
+            return nameList
+
         except Exception as e:
             self.print_debug_logs()
             raise e
