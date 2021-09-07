@@ -661,6 +661,7 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 
 	/* One last check that we do not have any connections open */
 	pgsql_finish(&(keeper->monitor.pgsql));
+	pgsql_finish(&(monitor->notificationClient));
 
 	if (nodeHasBeenDroppedFromTheMonitor)
 	{
