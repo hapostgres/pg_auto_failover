@@ -1717,8 +1717,8 @@ pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray)
 	if (!BuildNodesArrayValues(nodeArray, &sqlParams, values))
 	{
 		/* errors have already been logged */
-		PQfreemem(query);
-		PQfreemem(values);
+		destroyPQExpBuffer(query);
+		destroyPQExpBuffer(values);
 
 		return false;
 	}
@@ -1735,8 +1735,8 @@ pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray)
 								  &context,
 								  parseReplicationSlotMaintain);
 
-	PQfreemem(query);
-	PQfreemem(values);
+	destroyPQExpBuffer(query);
+	destroyPQExpBuffer(values);
 
 	return success;
 }
