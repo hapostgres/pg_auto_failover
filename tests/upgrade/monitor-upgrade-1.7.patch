@@ -3,12 +3,12 @@ index 8e7e2eaf..643dc96a 100644
 --- a/src/bin/pg_autoctl/defaults.h
 +++ b/src/bin/pg_autoctl/defaults.h
 @@ -17,7 +17,7 @@
- #define PG_AUTOCTL_VERSION "1.6.1"
- 
+ #define PG_AUTOCTL_VERSION "1.6.2"
+
  /* version of the extension that we requite to talk to on the monitor */
 -#define PG_AUTOCTL_EXTENSION_VERSION "1.6"
 +#define PG_AUTOCTL_EXTENSION_VERSION "1.7"
- 
+
  /* environment variable to use to make DEBUG facilities available */
  #define PG_AUTOCTL_DEBUG "PG_AUTOCTL_DEBUG"
 diff --git a/src/monitor/Makefile b/src/monitor/Makefile
@@ -17,21 +17,21 @@ index 8e6bf321..478fb2a7 100644
 +++ b/src/monitor/Makefile
 @@ -2,7 +2,7 @@
  # Licensed under the PostgreSQL License.
- 
+
  EXTENSION = pgautofailover
 -EXTVERSION = 1.6
 +EXTVERSION = 1.7
- 
+
  SRC_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
- 
+
 diff --git a/src/monitor/metadata.h b/src/monitor/metadata.h
 index 9e50ab72..0f8b39a3 100644
 --- a/src/monitor/metadata.h
 +++ b/src/monitor/metadata.h
 @@ -15,7 +15,7 @@
- 
+
  #include "storage/lockdefs.h"
- 
+
 -#define AUTO_FAILOVER_EXTENSION_VERSION "1.6"
 +#define AUTO_FAILOVER_EXTENSION_VERSION "1.7"
  #define AUTO_FAILOVER_EXTENSION_NAME "pgautofailover"

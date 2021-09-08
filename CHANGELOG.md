@@ -1,3 +1,25 @@
+### pg_auto_failover v1.6.2 (September 8, 2021) ###
+
+This is a bug fix release for the 1.6 series.
+
+#### Added
+* Also retry libpq connections to a local host. (#793)
+
+#### Changed
+* Only exit at upgrade when the on-disk binary is ready. (#771)
+* Only use wait_maintenance to wait for wait_primary (#794)
+* Get rid of the JOIN_PRIMARY state. (#796)
+* Make sure to disable sync rep when initializing a primary. (#801)
+
+#### Fixed
+* Avoid re-electing primary during a switchover. (#772)
+* Improve error messages for missing configuration files. (#779)
+* Fix replication slot maintenance on secondary nodes. (#781)
+* Fix problems with bad migration to 1.5 (#792)
+* Fix maintenance state related transitions. (#786)
+* Per valgrind, fix some memory leaks. (#799)
+* When creating from an existing PGDATA, fix missing initialization. (#802)
+
 ### pg_auto_failover v1.6.1 (July 7, 2021) ###
 
 This release contains monitor schema changes, so the monitor extension gets
