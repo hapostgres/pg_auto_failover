@@ -58,7 +58,7 @@ keeper_cli_create_replication_slot(int argc, char **argv)
 
 
 /*
- * keeper_cli_create_replication_slot implements the CLI to drop a replication
+ * keeper_cli_drop_replication_slot implements the CLI to drop a replication
  * slot on the primary.
  */
 void
