@@ -573,9 +573,7 @@ set_formation_number_sync_standbys(PG_FUNCTION_ARGS)
 
 	if (primaryNode == NULL)
 	{
-		ereport(ERROR,
-				(errmsg("Couldn't find the primary node in formation \"%s\", "
-						"group %d", formation->formationId, groupId)));
+		ErrorOutForNotFoundPrimary(formation->formationId, groupId);
 	}
 
 	/*
@@ -772,4 +770,15 @@ AutoFailoverFormationGetDatum(FunctionCallInfo fcinfo, AutoFailoverFormation *fo
 	Datum resultDatum = HeapTupleGetDatum(resultTuple);
 
 	PG_RETURN_DATUM(resultDatum);
+}
+
+/*
+ * ErrorOutForNotFoundPrimary gives an error for when a
+ * primary node is not found in the given formation and group.
+ */
+void ErrorOutForNotFoundPrimary(const char* formationId, int groupId) {
+	ereport(ERROR,
+		(errmsg("Couldn't find the primary node in "
+					"formation \"%s\", group %d",
+							formationId, groupId)));
 }

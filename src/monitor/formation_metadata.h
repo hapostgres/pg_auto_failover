@@ -65,3 +65,4 @@ extern bool SetFormationNumberSyncStandbys(const char *formationId,
 extern FormationKind FormationKindFromString(const char *kind);
 extern char * FormationKindToString(FormationKind kind);
 extern FormationKind FormationKindFromNodeKindString(const char *nodeKind);
+extern void ErrorOutForNotFoundPrimary(const char* formationId, int groupId);

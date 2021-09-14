@@ -1288,9 +1288,7 @@ perform_failover(PG_FUNCTION_ARGS)
 
 	if (primaryNode == NULL)
 	{
-		ereport(ERROR,
-				(errmsg("couldn't find the primary node in formation \"%s\", "
-						"group %d", formationId, groupId)));
+		ErrorOutForNotFoundPrimary(formationId, groupId);
 	}
 
 	/*
@@ -1655,10 +1653,7 @@ start_maintenance(PG_FUNCTION_ARGS)
 
 		if (primaryNode == NULL)
 		{
-			ereport(ERROR,
-					(errmsg("couldn't find the primary node in formation \"%s\", "
-							"group %d",
-							currentNode->formationId, currentNode->groupId)));
+			ErrorOutForNotFoundPrimary(currentNode->formationId, currentNode->groupId);
 		}
 	}
 
@@ -1911,10 +1906,7 @@ stop_maintenance(PG_FUNCTION_ARGS)
 	}
 	else if (primaryNode == NULL && totalNodesCount == 2)
 	{
-		ereport(ERROR,
-				(errmsg("couldn't find the primary node in formation \"%s\", "
-						"group %d",
-						currentNode->formationId, currentNode->groupId)));
+		ErrorOutForNotFoundPrimary(currentNode->formationId, currentNode->groupId);
 	}
 	else if (primaryNode == NULL && totalNodesCount > 2)
 	{
@@ -2181,11 +2173,7 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 
 		if (primaryNode == NULL)
 		{
-			/* maybe we could use an Assert() instead? */
-			ereport(ERROR,
-					(errmsg("Couldn't find the primary node in "
-							"formation \"%s\", group %d",
-							formation->formationId, currentNode->groupId)));
+			ErrorOutForNotFoundPrimary(formation->formationId, currentNode->groupId);
 		}
 
 		if (!FormationNumSyncStandbyIsValid(formation,
@@ -2394,9 +2382,7 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 
 	if (primaryNode == NULL)
 	{
-		ereport(ERROR,
-				(errmsg("Couldn't find the primary node in formation \"%s\", "
-						"group %d", formationId, groupId)));
+		ErrorOutForNotFoundPrimary(formationId, groupId);
 	}
 
 	List *standbyNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
