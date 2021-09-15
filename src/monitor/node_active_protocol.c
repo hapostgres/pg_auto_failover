@@ -2392,13 +2392,6 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 	/* when we have more than one node, fetch the primary */
 	AutoFailoverNode *primaryNode = GetPrimaryNodeInGroup(formationId, groupId);
 
-	if (primaryNode == NULL)
-	{
-		ereport(ERROR,
-				(errmsg("Couldn't find the primary node in formation \"%s\", "
-						"group %d", formationId, groupId)));
-	}
-
 	List *standbyNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
 
 	/*
