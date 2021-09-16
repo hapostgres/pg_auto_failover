@@ -77,6 +77,20 @@ ColPolicy ColumnPolicies[] = {
 		}
 	},
 	{
+		"standard",
+		0,
+		{
+			{ COLUMN_TYPE_NAME, "Name", 0 },
+			{ COLUMN_TYPE_ID, "Id", 0 },
+			{ COLUMN_TYPE_REPLICATION_QUORUM, "QRM", 0 },
+			{ COLUMN_TYPE_CANDIDATE_PRIORITY, "PRIO", 0 },
+			{ COLUMN_TYPE_CONN_HEALTH, "Connection", 0 },
+			{ COLUMN_TYPE_REPORTED_STATE, "Reported State", 0 },
+			{ COLUMN_TYPE_ASSIGNED_STATE, "Assigned State", 0 },
+			{ COLUMN_TYPE_LAST, "", 0 }
+		}
+	},
+	{
 		"verbose",
 		0,
 		{

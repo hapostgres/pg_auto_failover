@@ -44,14 +44,15 @@
 
 volatile sig_atomic_t window_size_changed = 0;      /* SIGWINCH */
 
-static bool print_nodes_array(WatchContext *context, int r, int c);
+static int print_watch_header(WatchContext *context, int r);
+static int print_watch_footer(WatchContext *context);
+static int print_nodes_array(WatchContext *context, int r, int c);
+static int print_events_array(WatchContext *context, int r, int c);
 
 static ColPolicy * pick_column_policy(WatchContext *context);
 static bool compute_column_spec_lens(WatchContext *context);
 static int compute_column_size(ColumnType type, NodeAddressHeaders *headers);
 
-static bool print_watch_header(WatchContext *context, int r);
-static bool print_watch_footer(WatchContext *context);
 
 static void print_column_headers(WatchContext *context,
 								 ColPolicy *policy,
@@ -63,6 +64,8 @@ static void print_node_state(WatchContext *context,
 							 int index,
 							 int r,
 							 int c);
+
+static void print_events_headers(WatchContext *context, int r, int c);
 
 static void clear_line_at(int row);
 
@@ -159,6 +162,13 @@ watch_update(WatchContext *context)
 {
 	Monitor *monitor = &(context->monitor);
 	CurrentNodeStateArray *nodesArray = &(context->nodesArray);
+	MonitorEventsArray *eventsArray = &(context->eventsArray);
+
+	/*
+	 * We use a transaction despite being read-only, because we want to re-use
+	 * a single connection to the monitor.
+	 */
+	monitor->pgsql.connectionStatementType = PGSQL_CONNECTION_MULTI_STATEMENT;
 
 	if (!monitor_get_current_state(monitor,
 								   context->formation,
@@ -177,6 +187,17 @@ watch_update(WatchContext *context)
 		/* errors have already been logged */
 		return false;
 	}
+
+	if (!monitor_get_last_events(monitor, context->formation, context->groupId,
+								 EVENTS_BUFFER_COUNT,
+								 eventsArray))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/* time to finish our connection */
+	pgsql_finish(&(monitor->pgsql));
 
 	/* we have setup ncurses in non-blocking behaviour */
 	int ch = getch();
@@ -215,8 +236,15 @@ bool
 watch_render(WatchContext *context)
 {
 	(void) print_watch_header(context, 0);
-	(void) print_nodes_array(context, 2, 0);
-	(void) print_watch_footer(context);
+
+	int nodeRows = print_nodes_array(context, 2, 0);
+
+	(void) print_events_array(context, 2 + nodeRows + 1, 0);
+
+	if (false)
+	{
+		(void) print_watch_footer(context);
+	}
 
 	refresh();
 
@@ -229,7 +257,7 @@ watch_render(WatchContext *context)
  * formation that's being displayed, the number_sync_standbys, and the current
  * time.
  */
-static bool
+static int
 print_watch_header(WatchContext *context, int r)
 {
 	uint64_t now = time(NULL);
@@ -249,14 +277,15 @@ print_watch_header(WatchContext *context, int r)
 			 context->formation,
 			 context->number_sync_standbys);
 
-	return true;
+	/* we only use one row */
+	return 1;
 }
 
 
 /*
  * print_watch_footer prints the last line of the screen, an help message.
  */
-static bool
+static int
 print_watch_footer(WatchContext *context)
 {
 	int r = context->rows - 1;
@@ -265,7 +294,8 @@ print_watch_footer(WatchContext *context)
 	clear_line_at(r);
 	mvprintw(r, context->cols - strlen(help) - 1, help);
 
-	return true;
+	/* we only use one row */
+	return 1;
 }
 
 
@@ -273,11 +303,12 @@ print_watch_footer(WatchContext *context)
  * print_nodes_array prints a nodes array at the given position (r, c) in a
  * window of size (context->rows, context->cols).
  */
-static bool
+static int
 print_nodes_array(WatchContext *context, int r, int c)
 {
 	CurrentNodeStateArray *nodesArray = &(context->nodesArray);
 
+	int lines = 0;
 	int currentRow = r;
 
 	(void) compute_column_spec_lens(context);
@@ -297,14 +328,23 @@ print_nodes_array(WatchContext *context, int r, int c)
 	clear_line_at(currentRow);
 	(void) print_column_headers(context, columnPolicy, currentRow++, c);
 
+	++lines;
+
 	/* display the data */
 	for (int index = 0; index < nodesArray->count; index++)
 	{
 		clear_line_at(currentRow);
+
 		(void) print_node_state(context, columnPolicy, index, currentRow++, c);
+		++lines;
+
+		if (context->rows <= currentRow)
+		{
+			break;
+		}
 	}
 
-	return true;
+	return lines;
 }
 
 
@@ -463,19 +503,19 @@ print_column_headers(WatchContext *context, ColPolicy *policy, int r, int c)
 {
 	int cc = c;
 
-	attron(A_STANDOUT | A_UNDERLINE);
+	attron(A_STANDOUT);
 
 	for (int col = 0; col < COLUMN_TYPE_LAST; col++)
 	{
 		int len = policy->specs[col].len;
 		char *name = policy->specs[col].name;
 
-		mvprintw(r, cc, "%*s", len, name);
+		mvprintw(r, cc, "%*s ", len, name);
 
 		cc += len + 1;
 	}
 
-	attroff(A_STANDOUT | A_UNDERLINE);
+	attroff(A_STANDOUT);
 }
 
 
@@ -599,4 +639,57 @@ clear_line_at(int row)
 {
 	move(row, 0);
 	clrtoeol();
+}
+
+
+/*
+ * print_events_array prints an events array at the given position (r, c) in a
+ * window of size (context-rows, context->cols).
+ */
+static int
+print_events_array(WatchContext *context, int r, int c)
+{
+	MonitorEventsArray *eventsArray = &(context->eventsArray);
+
+	int lines = 0;
+	int currentRow = r;
+
+	(void) print_events_headers(context, currentRow++, c);
+	++lines;
+
+	int capacity = context->rows - r - 1;
+	int start = eventsArray->count - capacity;
+
+	for (int index = start; index < eventsArray->count; index++)
+	{
+		MonitorEvent *event = &(eventsArray->events[index]);
+
+		clear_line_at(currentRow);
+
+		mvprintw(currentRow, 0, "%19s  %s", event->eventTime, event->description);
+
+		if (context->rows < currentRow)
+		{
+			break;
+		}
+
+		++currentRow;
+		++lines;
+	}
+
+	return lines;
+}
+
+
+/*
+ * print_event_headers prints the headers of the event list
+ */
+static void
+print_events_headers(WatchContext *context, int r, int c)
+{
+	attron(A_STANDOUT);
+
+	mvprintw(r, c, "%19s  %-*s", "Event Time", context->cols - 20, "Description");
+
+	attroff(A_STANDOUT);
 }
