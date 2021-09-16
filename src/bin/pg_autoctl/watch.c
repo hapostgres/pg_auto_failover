@@ -11,6 +11,7 @@
 #include <getopt.h>
 #include <unistd.h>
 
+#include <curses.h>
 #include <ncurses.h>
 
 #include <sys/ioctl.h>
@@ -39,11 +40,31 @@
 #include "state.h"
 #include "string_utils.h"
 #include "watch.h"
+#include "watch_colspecs.h"
 
 volatile sig_atomic_t window_size_changed = 0;      /* SIGWINCH */
 
 static bool print_nodes_array(WatchContext *context, int r, int c);
 
+static ColPolicy * pick_column_policy(WatchContext *context);
+static bool compute_column_spec_lens(WatchContext *context);
+static int compute_column_size(ColumnType type, NodeAddressHeaders *headers);
+
+static bool print_watch_header(WatchContext *context, int r);
+static bool print_watch_footer(WatchContext *context);
+
+static void print_column_headers(WatchContext *context,
+								 ColPolicy *policy,
+								 int r,
+								 int c);
+
+static void print_node_state(WatchContext *context,
+							 ColPolicy *policy,
+							 int index,
+							 int r,
+							 int c);
+
+static void clear_line_at(int row);
 
 /*
  * catch_sigwinch is registered as the SIGWINCH signal handler.
@@ -62,33 +83,27 @@ catch_sigwinch(int sig)
  * command, or similar to what top(1) would be doing.
  */
 void
-watch_main_loop(Monitor *monitor, char *formation, int groupId)
+watch_main_loop(WatchContext *context)
 {
-	WatchContext context = { 0 };
-
-	context.monitor = monitor;
-	strlcpy(context.formation, formation, sizeof(context.formation));
-	context.groupId = groupId;
-
-	(void) watch_init_window(&context);
+	(void) watch_init_window(context);
 
 	/* the main loop */
 	for (;;)
 	{
 		/* we quit when watch_update returns false */
-		if (!watch_update(&context))
+		if (!watch_update(context))
 		{
 			break;
 		}
 
 		/* now display the context we have */
-		(void) watch_render(&context);
+		(void) watch_render(context);
 
 		/* and then sleep for 250 ms */
 		pg_usleep(250 * 1000);
 	}
 
-	(void) watch_end_window(&context);
+	(void) watch_end_window(context);
 }
 
 
@@ -142,12 +157,22 @@ watch_end_window(WatchContext *context)
 bool
 watch_update(WatchContext *context)
 {
+	Monitor *monitor = &(context->monitor);
 	CurrentNodeStateArray *nodesArray = &(context->nodesArray);
 
-	if (!monitor_get_current_state(context->monitor,
+	if (!monitor_get_current_state(monitor,
 								   context->formation,
 								   context->groupId,
 								   nodesArray))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	if (!monitor_get_formation_number_sync_standbys(
+			monitor,
+			context->formation,
+			&(context->number_sync_standbys)))
 	{
 		/* errors have already been logged */
 		return false;
@@ -189,11 +214,56 @@ watch_update(WatchContext *context)
 bool
 watch_render(WatchContext *context)
 {
-	mvprintw(0, 0, "Press F1 to exit [%dx%d]", context->rows, context->cols);
-
+	(void) print_watch_header(context, 0);
 	(void) print_nodes_array(context, 2, 0);
+	(void) print_watch_footer(context);
 
 	refresh();
+
+	return true;
+}
+
+
+/*
+ * print_watch_header prints the first line of the screen, with the current
+ * formation that's being displayed, the number_sync_standbys, and the current
+ * time.
+ */
+static bool
+print_watch_header(WatchContext *context, int r)
+{
+	uint64_t now = time(NULL);
+	char timestring[MAXCTIMESIZE] = { 0 };
+
+	/* format the current time to be user-friendly */
+	epoch_to_string(now, timestring);
+
+	/* "Wed Jun 30 21:49:08 1993" -> "21:49:08" */
+	timestring[11 + 8] = '\0';
+
+	clear_line_at(r);
+
+	mvprintw(r, context->cols - 9, "%s", timestring + 11);
+
+	mvprintw(r, 0, "Formation: %s - Sync Standbys: %d",
+			 context->formation,
+			 context->number_sync_standbys);
+
+	return true;
+}
+
+
+/*
+ * print_watch_footer prints the last line of the screen, an help message.
+ */
+static bool
+print_watch_footer(WatchContext *context)
+{
+	int r = context->rows - 1;
+	char *help = "Press F1 to exit";
+
+	clear_line_at(r);
+	mvprintw(r, context->cols - strlen(help) - 1, help);
 
 	return true;
 }
@@ -209,6 +279,74 @@ print_nodes_array(WatchContext *context, int r, int c)
 	CurrentNodeStateArray *nodesArray = &(context->nodesArray);
 
 	int currentRow = r;
+
+	(void) compute_column_spec_lens(context);
+
+	ColPolicy *columnPolicy = pick_column_policy(context);
+
+	if (columnPolicy == NULL)
+	{
+		clear();
+		mvprintw(0, 0, "Window too small: %dx%d", context->rows, context->cols);
+		refresh();
+
+		return false;
+	}
+
+	/* display the headers */
+	clear_line_at(currentRow);
+	(void) print_column_headers(context, columnPolicy, currentRow++, c);
+
+	/* display the data */
+	for (int index = 0; index < nodesArray->count; index++)
+	{
+		clear_line_at(currentRow);
+		(void) print_node_state(context, columnPolicy, index, currentRow++, c);
+	}
+
+	return true;
+}
+
+
+/*
+ * pick_column_spec chooses which column spec should be used depending on the
+ * current size (rows, cols) of the display, and given update column specs with
+ * the actual lenghts of the data to be displayed.
+ */
+static ColPolicy *
+pick_column_policy(WatchContext *context)
+{
+	ColPolicy *bestPolicy = NULL;
+
+	for (int i = 0; i < ColumnPoliciesCount; i++)
+	{
+		/* minimal, terse, verbose, full */
+		ColPolicy *policy = &(ColumnPolicies[i]);
+
+		if (policy->totalSize <= context->cols && bestPolicy == NULL)
+		{
+			bestPolicy = policy;
+		}
+		else if (policy->totalSize <= context->cols &&
+				 policy->totalSize >= bestPolicy->totalSize)
+		{
+			bestPolicy = policy;
+		}
+	}
+
+	return bestPolicy;
+}
+
+
+/*
+ * compute_column_spec_lens computes the len of each known column
+ * specification, given the actual data to print.
+ */
+static bool
+compute_column_spec_lens(WatchContext *context)
+{
+	CurrentNodeStateArray *nodesArray = &(context->nodesArray);
+
 	PgInstanceKind firstNodeKind = NODE_KIND_UNKNOWN;
 
 	if (nodesArray->count > 0)
@@ -218,60 +356,247 @@ print_nodes_array(WatchContext *context, int r, int c)
 
 	(void) nodestatePrepareHeaders(nodesArray, firstNodeKind);
 
-	/* display the headers */
-	attron(A_STANDOUT | A_UNDERLINE);
-
-	mvprintw(currentRow++, c,
-			 "%*s",
-			 nodesArray->headers.maxNameSize,
-			 "Name");
-
-	attroff(A_STANDOUT | A_UNDERLINE);
-
-	for (int index = 0; index < nodesArray->count; index++)
+	for (int i = 0; i < ColumnPoliciesCount; i++)
 	{
-		CurrentNodeState *nodeState = &(nodesArray->nodes[index]);
+		/* minimal, terse, verbose, full */
+		ColPolicy *policy = &(ColumnPolicies[i]);
 
-		char hostport[BUFSIZE] = { 0 };
-		char composedId[BUFSIZE] = { 0 };
-		char tliLSN[BUFSIZE] = { 0 };
-		char connection[BUFSIZE] = { 0 };
-		char healthChar = nodestateHealthToChar(nodeState->health);
+		/* reset last computed size */
+		policy->totalSize = 0;
 
-		(void) nodestatePrepareNode(&(nodesArray->headers),
-									&(nodeState->node),
-									nodeState->groupId,
-									hostport,
-									composedId,
-									tliLSN);
-
-		if (healthChar == ' ')
+		for (int col = 0; policy->specs[col].type != COLUMN_TYPE_LAST; col++)
 		{
-			sformat(connection, BUFSIZE, "%s", nodestateConnectionType(nodeState));
-		}
-		else
-		{
-			sformat(connection, BUFSIZE, "%s %c",
-					nodestateConnectionType(nodeState), healthChar);
+			ColumnType cType = policy->specs[col].type;
+
+			int headerLen = strlen(policy->specs[col].name);
+			int dataLen = compute_column_size(cType, &(nodesArray->headers));
+
+			/* the column header name might be larger than the data */
+			int len = headerLen > dataLen ? headerLen : dataLen;
+
+			policy->specs[col].len = len;
+			policy->totalSize += len + 1; /* add one space between columns */
 		}
 
-		int currentCol = c;
-
-		mvprintw(currentRow, currentCol, "%*s",
-				 nodesArray->headers.maxNameSize,
-				 nodeState->node.name);
-
-		currentCol += nodesArray->headers.maxNameSize + 1;
-
-		if ((currentCol + nodesArray->headers.maxHealthSize) < context->cols)
-		{
-			mvprintw(currentRow, currentCol, "%*s",
-					 nodesArray->headers.maxHealthSize,
-					 connection);
-		}
-
-		++currentRow;
+		/* remove extra space after last column */
+		policy->totalSize -= 1;
 	}
 
 	return true;
+}
+
+
+/*
+ * compute_column_size returns the size needed to display a given column type
+ * given the pre-computed size of the nodes array header, where the alignment
+ * with the rest of the array is taken in consideration.
+ */
+static int
+compute_column_size(ColumnType type, NodeAddressHeaders *headers)
+{
+	switch (type)
+	{
+		case COLUMN_TYPE_NAME:
+		{
+			return headers->maxNameSize;
+		}
+
+		case COLUMN_TYPE_ID:
+		{
+			return headers->maxNodeSize;
+		}
+
+		case COLUMN_TYPE_REPLICATION_QUORUM:
+		{
+			/* that one is going to be "yes" or "no" */
+			return 3;
+		}
+
+		case COLUMN_TYPE_CANDIDATE_PRIORITY:
+		{
+			/* that's an integer in the range 0..100 */
+			return 3;
+		}
+
+		case COLUMN_TYPE_HOST_PORT:
+		{
+			return headers->maxHostSize;
+		}
+
+		case COLUMN_TYPE_TLI_LSN:
+		{
+			return headers->maxLSNSize;
+		}
+
+		case COLUMN_TYPE_CONN_HEALTH:
+		{
+			return headers->maxHealthSize;
+		}
+
+		case COLUMN_TYPE_REPORTED_STATE:
+		{
+			return headers->maxStateSize;
+		}
+
+		case COLUMN_TYPE_ASSIGNED_STATE:
+		{
+			return headers->maxStateSize;
+		}
+
+		default:
+		{
+			log_fatal("BUG: compute_column_size(%d)", type);
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+	}
+
+	/* keep compiler happy */
+	return 0;
+}
+
+
+/*
+ * print_column_headers prints the headers of the selection column policy.
+ */
+static void
+print_column_headers(WatchContext *context, ColPolicy *policy, int r, int c)
+{
+	int cc = c;
+
+	attron(A_STANDOUT | A_UNDERLINE);
+
+	for (int col = 0; col < COLUMN_TYPE_LAST; col++)
+	{
+		int len = policy->specs[col].len;
+		char *name = policy->specs[col].name;
+
+		mvprintw(r, cc, "%*s", len, name);
+
+		cc += len + 1;
+	}
+
+	attroff(A_STANDOUT | A_UNDERLINE);
+}
+
+
+/*
+ * print_node_state prints the given nodestate with the selected column policy.
+ */
+static void
+print_node_state(WatchContext *context, ColPolicy *policy,
+				 int index, int r, int c)
+{
+	CurrentNodeStateArray *nodesArray = &(context->nodesArray);
+	CurrentNodeState *nodeState = &(nodesArray->nodes[index]);
+
+	char hostport[BUFSIZE] = { 0 };
+	char composedId[BUFSIZE] = { 0 };
+	char tliLSN[BUFSIZE] = { 0 };
+	char connection[BUFSIZE] = { 0 };
+	char healthChar = nodestateHealthToChar(nodeState->health);
+
+	(void) nodestatePrepareNode(&(nodesArray->headers),
+								&(nodeState->node),
+								nodeState->groupId,
+								hostport,
+								composedId,
+								tliLSN);
+
+	if (healthChar == ' ')
+	{
+		sformat(connection, BUFSIZE, "%s", nodestateConnectionType(nodeState));
+	}
+	else
+	{
+		sformat(connection, BUFSIZE, "%s %c",
+				nodestateConnectionType(nodeState), healthChar);
+	}
+
+	int cc = c;
+
+	for (int col = 0; policy->specs[col].type != COLUMN_TYPE_LAST; col++)
+	{
+		ColumnType cType = policy->specs[col].type;
+		int len = policy->specs[col].len;
+
+		switch (cType)
+		{
+			case COLUMN_TYPE_NAME:
+			{
+				mvprintw(r, cc, "%*s", len, nodeState->node.name);
+				break;
+			}
+
+			case COLUMN_TYPE_ID:
+			{
+				mvprintw(r, cc, "%*s", len, composedId);
+				break;
+			}
+
+			case COLUMN_TYPE_REPLICATION_QUORUM:
+			{
+				mvprintw(r, cc, "%*s", len,
+						 nodeState->replicationQuorum ? "yes" : "no");
+				break;
+			}
+
+			case COLUMN_TYPE_CANDIDATE_PRIORITY:
+			{
+				mvprintw(r, cc, "%*d", len, nodeState->candidatePriority);
+				break;
+			}
+
+			case COLUMN_TYPE_HOST_PORT:
+			{
+				mvprintw(r, cc, "%*s", len, hostport);
+				break;
+			}
+
+			case COLUMN_TYPE_TLI_LSN:
+			{
+				mvprintw(r, cc, "%*s", len, tliLSN);
+				break;
+			}
+
+			case COLUMN_TYPE_CONN_HEALTH:
+			{
+				mvprintw(r, cc, "%*s", len, connection);
+				break;
+			}
+
+			case COLUMN_TYPE_REPORTED_STATE:
+			{
+				mvprintw(r, cc, "%*s", len,
+						 NodeStateToString(nodeState->reportedState));
+				break;
+			}
+
+			case COLUMN_TYPE_ASSIGNED_STATE:
+			{
+				mvprintw(r, cc, "%*s", len,
+						 NodeStateToString(nodeState->goalState));
+				break;
+			}
+
+			default:
+			{
+				log_fatal("BUG: print_node_state(%d)", cType);
+				exit(EXIT_CODE_INTERNAL_ERROR);
+			}
+		}
+
+		cc += len + 1;
+	}
+}
+
+
+/*
+ * clear_line_at clears the line at given row number by displaying space
+ * characters on the whole line.
+ */
+static void
+clear_line_at(int row)
+{
+	move(row, 0);
+	clrtoeol();
 }

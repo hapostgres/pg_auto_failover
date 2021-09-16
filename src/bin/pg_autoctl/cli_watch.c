@@ -233,10 +233,13 @@ cli_watch_getopts(int argc, char **argv)
 static void
 cli_watch(int argc, char **argv)
 {
+	WatchContext context = { 0 };
 	KeeperConfig config = keeperOptions;
-	Monitor monitor = { 0 };
 
-	(void) cli_monitor_init_from_option_or_config(&monitor, &config);
+	(void) cli_monitor_init_from_option_or_config(&(context.monitor), &config);
 
-	(void) watch_main_loop(&monitor, config.formation, config.groupId);
+	strlcpy(context.formation, config.formation, sizeof(context.formation));
+	context.groupId = config.groupId;
+
+	(void) watch_main_loop(&context);
 }
