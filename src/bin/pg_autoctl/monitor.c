@@ -49,6 +49,13 @@ typedef struct NodeAddressArrayParseContext
 	bool parsedOK;
 } NodeAddressArrayParseContext;
 
+typedef struct MonitorEventsArrayParseContext
+{
+	char sqlstate[SQLSTATE_LENGTH];
+	MonitorEventsArray *eventsArray;
+	bool parsedOK;
+} MonitorEventsArrayParseContext;
+
 typedef struct MonitorAssignedStateParseContext
 {
 	char sqlstate[SQLSTATE_LENGTH];
@@ -112,6 +119,7 @@ static bool parseCurrentNodeStateArray(CurrentNodeStateArray *nodesArray,
 static void parseRemoveNodeContext(void *ctx, PGresult *result);
 static void getCurrentState(void *ctx, PGresult *result);
 static void printLastEvents(void *ctx, PGresult *result);
+static void getLastEvents(void *ctx, PGresult *result);
 static void printFormationSettings(void *ctx, PGresult *result);
 static void printFormationURI(void *ctx, PGresult *result);
 static void parseCoordinatorNode(void *ctx, PGresult *result);
@@ -2433,6 +2441,255 @@ printLastEvents(void *ctx, PGresult *result)
 				currentState, goalState, description);
 	}
 	fformat(stdout, "\n");
+
+	context->parsedOK = true;
+}
+
+
+/*
+ * monitor_get_last_events calls the function pgautofailover.last_events on
+ * the monitor, and fills-in the given array of MonitorEvents.
+ */
+bool
+monitor_get_last_events(Monitor *monitor, char *formation, int group, int count,
+						MonitorEventsArray *monitorEventsArray)
+{
+	MonitorEventsArrayParseContext context =
+	{ { 0 }, monitorEventsArray, false };
+
+	PGSQL *pgsql = &monitor->pgsql;
+	char *sql = NULL;
+	int paramCount = 0;
+	Oid paramTypes[3];
+	const char *paramValues[3];
+	IntString countStr;
+	IntString groupStr;
+
+	log_trace("monitor_print_last_events(%s, %d, %d)", formation, group, count);
+
+	switch (group)
+	{
+		case -1:
+		{
+			sql =
+				"SELECT eventId, to_char(eventTime, 'YYYY-MM-DD HH24:MI:SS'), "
+				"       formationId, nodeid, groupid, "
+				"       nodename, nodehost, nodeport, "
+				"       reportedstate, goalState, "
+				"       reportedrepstate, reportedtli, reportedlsn, "
+				"       candidatepriority, replicationquorum, "
+				"       description "
+				"  FROM pgautofailover.last_events($1, count => $2)";
+
+			countStr = intToString(count);
+
+			paramCount = 2;
+			paramTypes[0] = TEXTOID;
+			paramValues[0] = formation;
+			paramTypes[1] = INT4OID;
+			paramValues[1] = countStr.strValue;
+
+			break;
+		}
+
+		default:
+		{
+			sql =
+				"SELECT eventId, to_char(eventTime, 'YYYY-MM-DD HH24:MI:SS'), "
+				"       formationId, nodeid, groupid, "
+				"       reportedstate, goalState, "
+				"       reportedrepstate, reportedtli, reportedlsn, "
+				"       candidatepriority, replicationquorum, "
+				"       description "
+				"  FROM pgautofailover.last_events($1,$2,$3)";
+
+			countStr = intToString(count);
+			groupStr = intToString(group);
+
+			paramCount = 3;
+			paramTypes[0] = TEXTOID;
+			paramValues[0] = formation;
+			paramTypes[1] = INT4OID;
+			paramValues[1] = groupStr.strValue;
+			paramTypes[2] = INT4OID;
+			paramValues[2] = countStr.strValue;
+
+			break;
+		}
+	}
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &getLastEvents))
+	{
+		log_error("Failed to retrieve last events from the monitor");
+		return false;
+	}
+
+	if (!context.parsedOK)
+	{
+		log_error("Failed to parse last events from the monitor, "
+				  "see above for details");
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * getLastEvents loops over pgautofailover.last_events() results and fills in
+ * the given MonitorEventsArray.
+ */
+static void
+getLastEvents(void *ctx, PGresult *result)
+{
+	MonitorEventsArrayParseContext *context =
+		(MonitorEventsArrayParseContext *) ctx;
+
+	MonitorEventsArray *eventsArray = context->eventsArray;
+
+	int currentTupleIndex = 0;
+	int nTuples = PQntuples(result);
+
+	int errors = 0;
+
+	log_trace("getLastEvents: %d tuples", nTuples);
+
+	if (nTuples > EVENTS_ARRAY_MAX_COUNT)
+	{
+		log_error("Query returned %d rows, pg_auto_failover supports only up "
+				  "to %d standby nodes at the moment",
+				  PQntuples(result), EVENTS_ARRAY_MAX_COUNT);
+		context->parsedOK = false;
+		return;
+	}
+
+	if (PQnfields(result) != 16)
+	{
+		log_error("Query returned %d columns, expected 16", PQnfields(result));
+		context->parsedOK = false;
+		return;
+	}
+
+	eventsArray->count = nTuples;
+
+	for (currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
+	{
+		MonitorEvent *event = &(eventsArray->events[currentTupleIndex]);
+
+		char *value = PQgetvalue(result, currentTupleIndex, 0);
+
+		/* eventId */
+		if (!stringToInt64(value, &(event->eventId)))
+		{
+			log_error("Invalid event ID \"%s\" returned by monitor", value);
+			++errors;
+		}
+
+		/* eventTime */
+		value = PQgetvalue(result, currentTupleIndex, 1);
+		strlcpy(event->eventTime, value, sizeof(event->eventTime));
+
+		/* formationId */
+		value = PQgetvalue(result, currentTupleIndex, 2);
+		strlcpy(event->formationId, value, sizeof(event->formationId));
+
+		/* nodeId */
+		value = PQgetvalue(result, currentTupleIndex, 3);
+
+		if (!stringToInt64(value, &(event->nodeId)))
+		{
+			log_error("Invalid node ID \"%s\" returned by monitor", value);
+			++errors;
+		}
+
+		/* groupId */
+		value = PQgetvalue(result, currentTupleIndex, 4);
+
+		if (!stringToInt(value, &(event->groupId)))
+		{
+			log_error("Invalid group ID \"%s\" returned by monitor", value);
+			++errors;
+		}
+
+		/* nodeName */
+		value = PQgetvalue(result, currentTupleIndex, 5);
+		strlcpy(event->nodeName, value, sizeof(event->nodeName));
+
+		/* nodeHost */
+		value = PQgetvalue(result, currentTupleIndex, 6);
+		strlcpy(event->nodeHost, value, sizeof(event->nodeHost));
+
+		/* nodePort */
+		value = PQgetvalue(result, currentTupleIndex, 7);
+
+		if (!stringToInt(value, &(event->nodePort)))
+		{
+			log_error("Invalid group ID \"%s\" returned by monitor", value);
+			++errors;
+		}
+
+		/* reportedState */
+		value = PQgetvalue(result, currentTupleIndex, 8);
+
+		event->reportedState = NodeStateFromString(value);
+		if (event->reportedState == NO_STATE)
+		{
+			log_error("Invalid node state \"%s\" returned by monitor", value);
+			++errors;
+		}
+
+		/* assignedState */
+		value = PQgetvalue(result, currentTupleIndex, 9);
+
+		event->assignedState = NodeStateFromString(value);
+		if (event->assignedState == NO_STATE)
+		{
+			log_error("Invalid node state \"%s\" returned by monitor", value);
+			++errors;
+		}
+
+		/* repolicationState */
+		value = PQgetvalue(result, currentTupleIndex, 10);
+		strlcpy(event->replicationState, value, sizeof(event->replicationState));
+
+		/* timeline */
+		value = PQgetvalue(result, currentTupleIndex, 11);
+
+		if (!stringToInt(value, &(event->timeline)))
+		{
+			log_error("Invalid timeline \"%s\" returned by monitor", value);
+			++errors;
+		}
+
+		/* LSN */
+		value = PQgetvalue(result, currentTupleIndex, 12);
+		strlcpy(event->lsn, value, PG_LSN_MAXLENGTH);
+
+		/* candidatePriority */
+		value = PQgetvalue(result, currentTupleIndex, 13);
+
+		if (!stringToInt(value, &(event->candidatePriority)))
+		{
+			log_error("Invalid candidate priority \"%s\" returned by monitor", value);
+			++errors;
+		}
+
+		/* replicationQuorum */
+		value = PQgetvalue(result, currentTupleIndex, 14);
+		event->replicationQuorum = strcmp(value, "t") == 0;
+
+		/* description */
+		value = PQgetvalue(result, currentTupleIndex, 15);
+		strlcpy(event->description, value, sizeof(event->description));
+
+		if (errors > 0)
+		{
+			context->parsedOK = false;
+			return;
+		}
+	}
 
 	context->parsedOK = true;
 }

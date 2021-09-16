@@ -21,12 +21,8 @@
 #include "monitor.h"
 #include "nodestate_utils.h"
 
-/* a ring-buffer of the last 1024 monitor events */
-typedef struct EventsBuffer
-{
-	int pos;
-	CurrentNodeState events[BUFSIZE];
-} EventsBuffer;
+/* a ring-buffer of the last monitor events */
+#define EVENTS_BUFFER_COUNT 24
 
 /* share a context between the update and render functions */
 typedef struct WatchContext
@@ -40,7 +36,7 @@ typedef struct WatchContext
 	int number_sync_standbys;
 
 	CurrentNodeStateArray nodesArray;
-	EventsBuffer eventsBuffer;
+	MonitorEventsArray eventsArray;
 } WatchContext;
 
 void watch_main_loop(WatchContext *context);
