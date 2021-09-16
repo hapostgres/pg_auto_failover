@@ -38,23 +38,10 @@
 #include "pidfile.h"
 #include "state.h"
 #include "string_utils.h"
+#include "watch.h"
 
 static int cli_watch_getopts(int argc, char **argv);
 static void cli_watch(int argc, char **argv);
-
-static WINDOW * create_newwin(int height, int width, int starty, int startx);
-static void destroy_win(WINDOW *local_win);
-
-volatile sig_atomic_t window_size_changed = 0;      /* SIGWINCH */
-
-
-static void
-catch_sigwinch(int sig)
-{
-	window_size_changed = 1;
-	pqsignal(sig, catch_sigwinch);
-}
-
 
 CommandLine watch_command =
 	make_command("watch",
@@ -246,141 +233,10 @@ cli_watch_getopts(int argc, char **argv)
 static void
 cli_watch(int argc, char **argv)
 {
-	int row, col;                /* to store the number of rows and */
-	int ch;
+	KeeperConfig config = keeperOptions;
+	Monitor monitor = { 0 };
 
-	int startx, starty, width, height;
+	(void) cli_monitor_init_from_option_or_config(&monitor, &config);
 
-	struct winsize size = { 0 };
-	int ioctl_result = 0;
-
-	if ((ioctl_result = ioctl(STDOUT_FILENO, TIOCGWINSZ, (char *) &size)) >= 0)
-	{
-		resize_term(size.ws_row, size.ws_col);
-	}
-
-	initscr();                  /* Start curses mode          */
-
-	cbreak();                   /* Line buffering disabled	*/
-	intrflush(stdscr, FALSE);   /* No flushing on interrupts */
-	keypad(stdscr, TRUE);       /* We get F1, F2 etc..		*/
-	noecho();                   /* Don't echo() while we do getch */
-	nodelay(stdscr, TRUE);      /* Non blocking getch() variants */
-
-	pqsignal(SIGWINCH, catch_sigwinch);
-
-	height = 3;
-	width = 10;
-	starty = (LINES - height) / 2;  /* Calculating for a center placement */
-	startx = (COLS - width) / 2;    /* of the window		*/
-
-	printw("Press F1 to exit");
-	refresh();
-
-	WINDOW *my_win = create_newwin(height, width, starty, startx);
-
-	while ((ch = getch()) != KEY_F(1))
-	{
-		if (ch == KEY_RESIZE || window_size_changed == 1)
-		{
-			window_size_changed = 0;
-
-			/* get current terminal rows and columns and resize our display */
-			ioctl_result = ioctl(STDOUT_FILENO, TIOCGWINSZ, (char *) &size);
-
-			if (ioctl_result >= 0)
-			{
-				row = size.ws_row;
-				col = size.ws_col;
-
-				resizeterm(row, col);
-			}
-
-			mvprintw(0, 0, "Press F1 to exit [%dx%d]", row, col);
-
-			mvwprintw(my_win, 1, 1, "%d x %d", row, col);
-			wrefresh(my_win);
-		}
-
-		switch (ch)
-		{
-			case KEY_LEFT:
-			{
-				destroy_win(my_win);
-				my_win = create_newwin(height, width, starty, --startx);
-				break;
-			}
-
-			case KEY_RIGHT:
-			{
-				destroy_win(my_win);
-				my_win = create_newwin(height, width, starty, ++startx);
-				break;
-			}
-
-			case KEY_UP:
-			{
-				destroy_win(my_win);
-				my_win = create_newwin(height, width, --starty, startx);
-				break;
-			}
-
-			case KEY_DOWN:
-			{
-				destroy_win(my_win);
-				my_win = create_newwin(height, width, ++starty, startx);
-				break;
-			}
-		}
-	}
-
-	getmaxyx(stdscr, row, col);       /* get the number of rows and columns */
-	mvprintw(row - 2, 0, "This screen has %d rows and %d columns\n", row, col);
-
-	refresh();                  /* Print it on to the real screen */
-	getch();                    /* Wait for user input */
-	endwin();                   /* End curses mode		  */
-}
-
-
-static WINDOW *
-create_newwin(int height, int width, int starty, int startx)
-{
-	WINDOW *local_win;
-
-	local_win = newwin(height, width, starty, startx);
-	box(local_win, 0, 0);       /* 0, 0 gives default characters
-	                             * for the vertical and horizontal
-	                             * lines			*/
-
-	mvwprintw(local_win, 1, 1, "%d x %d", LINES, COLS);
-
-	wrefresh(local_win);        /* Show that box        */
-
-	return local_win;
-}
-
-
-static void
-destroy_win(WINDOW *local_win)
-{
-	/* box(local_win, ' ', ' '); : This won't produce the desired
-	 * result of erasing the window. It will leave it's four corners
-	 * and so an ugly remnant of window.
-	 */
-	wborder(local_win, ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ');
-
-	/* The parameters taken are
-	 * 1. win: the window on which to operate
-	 * 2. ls: character to be used for the left side of the window
-	 * 3. rs: character to be used for the right side of the window
-	 * 4. ts: character to be used for the top side of the window
-	 * 5. bs: character to be used for the bottom side of the window
-	 * 6. tl: character to be used for the top left corner of the window
-	 * 7. tr: character to be used for the top right corner of the window
-	 * 8. bl: character to be used for the bottom left corner of the window
-	 * 9. br: character to be used for the bottom right corner of the window
-	 */
-	wrefresh(local_win);
-	delwin(local_win);
+	(void) watch_main_loop(&monitor, config.formation, config.groupId);
 }
