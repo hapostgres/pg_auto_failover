@@ -22,7 +22,7 @@
 #include "nodestate_utils.h"
 
 /* a ring-buffer of the last monitor events */
-#define EVENTS_BUFFER_COUNT 24
+#define EVENTS_BUFFER_COUNT 80
 
 /* share a context between the update and render functions */
 typedef struct WatchContext

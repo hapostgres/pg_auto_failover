@@ -1861,8 +1861,16 @@ monitor_get_current_state(Monitor *monitor, char *formation, int group,
 				"         group_id, node_id, "
 				"         current_group_state, assigned_group_state, "
 				"         candidate_priority, replication_quorum, "
-				"         reported_tli, reported_lsn, health, nodecluster "
-				"    FROM pgautofailover.current_state($1) "
+				"         reported_tli, reported_lsn, health, nodecluster, "
+				"         healthlag, reportlag"
+				"    FROM pgautofailover.current_state($1) cs "
+				"    JOIN ("
+				"          select nodeid, "
+				"                 extract(epoch from now() - healthchecktime), "
+				"                 extract(epoch from now() - reporttime) "
+				"            from pgautofailover.node "
+				"         ) as n(nodeid, healthlag, reportlag)"
+				"         on n.nodeid = cs.node_id "
 				"ORDER BY group_id, node_id";
 
 			paramCount = 1;
@@ -1879,8 +1887,16 @@ monitor_get_current_state(Monitor *monitor, char *formation, int group,
 				"         group_id, node_id, "
 				"         current_group_state, assigned_group_state, "
 				"         candidate_priority, replication_quorum, "
-				"         reported_tli, reported_lsn, health, nodecluster "
-				"    FROM pgautofailover.current_state($1, $2) "
+				"         reported_tli, reported_lsn, health, nodecluster, "
+				"         healthlag, reportlag"
+				"    FROM pgautofailover.current_state($1, $2) cs "
+				"    JOIN ("
+				"          select nodeid, "
+				"                 extract(epoch from now() - healthchecktime), "
+				"                 extract(epoch from now() - reporttime) "
+				"            from pgautofailover.node "
+				"         ) as n(nodeid, healthlag, reportlag)"
+				"         on n.nodeid = cs.node_id "
 				"ORDER BY group_id, node_id";
 
 			groupStr = intToString(group);
@@ -1925,7 +1941,7 @@ parseCurrentNodeState(PGresult *result, int rowNumber,
 	int errors = 0;
 
 	/* we don't expect any of the column to be NULL */
-	for (colNumber = 0; colNumber < 14; colNumber++)
+	for (colNumber = 0; colNumber < 16; colNumber++)
 	{
 		if (PQgetisnull(result, rowNumber, 0))
 		{
@@ -1950,6 +1966,8 @@ parseCurrentNodeState(PGresult *result, int rowNumber,
 	 * 11 - OUT reported_lsn         pg_lsn,
 	 * 12 - OUT health               integer
 	 * 13 - OUT nodecluster          text
+	 * 14 -     healthlag            int (extract epoch from interval)
+	 * 15 -     reportlag            int (extract epoch from interval)
 	 *
 	 * We need the groupId to parse the formation kind into a nodeKind, so we
 	 * begin at column 1 and get back to column 0 later, after column 4.
@@ -2084,6 +2102,22 @@ parseCurrentNodeState(PGresult *result, int rowNumber,
 		++errors;
 	}
 
+	value = PQgetvalue(result, rowNumber, 14);
+
+	if (!stringToDouble(value, &(nodeState->healthLag)))
+	{
+		log_error("Invalid health lag \"%s\" returned by monitor", value);
+		++errors;
+	}
+
+	value = PQgetvalue(result, rowNumber, 15);
+
+	if (!stringToDouble(value, &(nodeState->reportLag)))
+	{
+		log_error("Invalid report lag \"%s\" returned by monitor", value);
+		++errors;
+	}
+
 	return errors == 0;
 }
 
@@ -2110,9 +2144,9 @@ parseCurrentNodeStateArray(CurrentNodeStateArray *nodesArray, PGresult *result)
 	}
 
 	/* pgautofailover.current_state returns 11 columns */
-	if (PQnfields(result) != 14)
+	if (PQnfields(result) != 16)
 	{
-		log_error("Query returned %d columns, expected 14", PQnfields(result));
+		log_error("Query returned %d columns, expected 16", PQnfields(result));
 		return false;
 	}
 

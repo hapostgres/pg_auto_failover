@@ -10,6 +10,7 @@
 #include <errno.h>
 #include <inttypes.h>
 #include <limits.h>
+#include <float.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -399,6 +400,95 @@ stringToUInt32(const char *str, uint32_t *number)
 	}
 
 	*number = n;
+
+	return true;
+}
+
+
+/*
+ * converts given string to a double precision float value.
+ * returns 0 upon failure and sets error flag
+ */
+bool
+stringToDouble(const char *str, double *number)
+{
+	char *endptr;
+
+	if (str == NULL)
+	{
+		return false;
+	}
+
+	if (number == NULL)
+	{
+		return false;
+	}
+
+	errno = 0;
+	double n = strtod(str, &endptr);
+
+	if (str == endptr)
+	{
+		return false;
+	}
+	else if (errno != 0)
+	{
+		return false;
+	}
+	else if (*endptr != '\0')
+	{
+		return false;
+	}
+	else if (n > DBL_MAX)
+	{
+		return false;
+	}
+
+	*number = n;
+
+	return true;
+}
+
+
+/*
+ * IntervalToString prepares a string buffer to represent a given interval
+ * value given as a double precision float number.
+ */
+bool
+IntervalToString(double seconds, char *buffer, size_t size)
+{
+	if (seconds < 1.0)
+	{
+		sformat(buffer, size, "  .%02d", (int) (100.0 * seconds));
+	}
+	else if (seconds < 60.0)
+	{
+		int s = (int) seconds;
+
+		sformat(buffer, size, "%2ds%02d", s, (int) (100.0 * (seconds - s)));
+	}
+	else if (seconds < (60.0 * 60.0))
+	{
+		int mins = (int) (seconds / 60.0);
+		int secs = (int) (seconds - (mins * 60.0));
+
+		sformat(buffer, size, "%2dm%02ds", mins, secs);
+	}
+	else if (seconds < (24.0 * 60.0 * 60.0))
+	{
+		int hours = (int) (seconds / (60.0 * 60.0));
+		int mins = (int) ((seconds - (hours * 60.0 * 60.0)) / 60.0);
+
+		sformat(buffer, size, "%2dh%02dm", hours, mins);
+	}
+	else
+	{
+		int days = (int) (seconds / (24.0 * 60.0 * 60.0));
+		int hours =
+			(int) ((seconds - (days * 24.0 * 60.0 * 60.0)) / (60.0 * 60.0));
+
+		sformat(buffer, size, "%2dd%02dm", days, hours);
+	}
 
 	return true;
 }
