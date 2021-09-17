@@ -20,6 +20,7 @@ pg_autoctl provides the following commands::
   + set      Set a pg_auto_failover node, or formation setting
   + perform  Perform an action orchestrated by the monitor
     run      Run the pg_autoctl service (monitor or keeper)
+    watch    Display a dashboard to watch monitor's events and state
     stop     signal the pg_autoctl service for it to stop
     reload   signal the pg_autoctl for it to reload its configuration
     status   Display the current status of the pg_autoctl service

@@ -18,6 +18,7 @@ registered to the pg_auto_failover monitor::
   --formation   formation to query, defaults to 'default'
   --group       group to query formation, defaults to all
   --local       show local data, do not connect to the monitor
+  --watch       display an auto-updating dashboard
   --json        output data in the JSON format
 
 Options
@@ -51,6 +52,16 @@ Options
 
   Print the local state information without connecting to the monitor.
 
+--watch
+
+  Take control of the terminal and display the current state of the system
+  and the last events from the monitor. The display is updated automatically
+  every 500 milliseconds (half a second) and reacts properly to window size
+  change.
+
+  Depending on the terminal window size, a different set of columns is
+  visible in the state part of the output.
+
 --json
 
   Output a JSON formated data instead of a table formatted list.
@@ -58,7 +69,7 @@ Options
 Description
 -----------
 
-The ``pg_autoctl show state`` outputs includes the following columns:
+The ``pg_autoctl show state`` output includes the following columns:
 
   - Name
 
