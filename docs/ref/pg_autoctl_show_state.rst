@@ -60,7 +60,7 @@ Options
   change.
 
   Depending on the terminal window size, a different set of columns is
-  visible in the state part of the output.
+  visible in the state part of the output. See :ref:`pg_autoctl_watch`.
 
 --json
 

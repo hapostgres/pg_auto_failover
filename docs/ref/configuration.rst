@@ -1,3 +1,5 @@
+.. _configuration:
+
 Configuring pg_auto_failover
 ============================
 

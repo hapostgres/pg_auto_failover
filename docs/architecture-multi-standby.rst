@@ -85,6 +85,8 @@ following three replication settings:
   - Replication quorum
   - Candidate priority
 
+.. _number_sync_standbys:
+
 Number Sync Standbys
 ^^^^^^^^^^^^^^^^^^^^
 

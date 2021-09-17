@@ -49,10 +49,18 @@ Options
 Description
 -----------
 
-The ``pg_autoctl watch`` output can includes the following columns, and
-picks which columns are part of the output depending on the terminal window
-size. This choice is dynamic and changes if your terminal window size
-changes:
+The ``pg_autoctl watch`` output is divided in 3 sections.
+
+The first section is a single header line which includes the name of the
+currently selected formation, the formation replication setting
+:ref:`number_sync_standbys`, and then in the right most position the current
+time.
+
+The second section displays one line per node, and each line contains a list
+of columns that describe the current state for the node. This list can
+includes the following columns, and which columns are part of the output
+depends on the terminal window size. This choice is dynamic and changes if
+your terminal window size changes:
 
   - Name
 
@@ -124,3 +132,8 @@ changes:
 	the Postgres node might have not retrieved the assigned state yet, or
 	might still be implementing the FSM transition from the current state to
 	the assigned state.
+
+The third and last section lists the most recent events that the monitor has
+registered, the more recent event is found at the bottom of the screen.
+
+To quit the command hit either the ``F1`` key or the ``q`` key.
