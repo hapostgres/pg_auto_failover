@@ -32,9 +32,11 @@
 #include "pidfile.h"
 #include "state.h"
 #include "string_utils.h"
+#include "watch.h"
 
 static int eventCount = 10;
 static bool localState = false;
+static bool watch = false;
 
 static int cli_show_state_getopts(int argc, char **argv);
 static void cli_show_state(int argc, char **argv);
@@ -182,6 +184,7 @@ cli_show_state_getopts(int argc, char **argv)
 		{ "group", required_argument, NULL, 'g' },
 		{ "count", required_argument, NULL, 'n' },
 		{ "local", no_argument, NULL, 'L' },
+		{ "watch", no_argument, NULL, 'W' },
 		{ "json", no_argument, NULL, 'J' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
@@ -309,6 +312,13 @@ cli_show_state_getopts(int argc, char **argv)
 				break;
 			}
 
+			case 'W':
+			{
+				watch = true;
+				log_trace("--watch");
+				break;
+			}
+
 			case 'J':
 			{
 				outputJSON = true;
@@ -327,6 +337,18 @@ cli_show_state_getopts(int argc, char **argv)
 	if (errors > 0)
 	{
 		commandline_help(stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (watch && localState)
+	{
+		log_error("Please use either --local or --watch, but not both");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (watch && outputJSON)
+	{
+		log_error("Please use either --json or --watch, but not both");
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
@@ -384,6 +406,20 @@ cli_show_events(int argc, char **argv)
 {
 	KeeperConfig config = keeperOptions;
 	Monitor monitor = { 0 };
+
+	if (watch)
+	{
+		WatchContext context = { 0 };
+
+		(void) cli_monitor_init_from_option_or_config(&(context.monitor), &config);
+
+		strlcpy(context.formation, config.formation, sizeof(context.formation));
+		context.groupId = config.groupId;
+
+		(void) watch_main_loop(&context);
+
+		exit(EXIT_CODE_QUIT);
+	}
 
 	(void) cli_monitor_init_from_option_or_config(&monitor, &config);
 
@@ -455,6 +491,20 @@ cli_show_state(int argc, char **argv)
 			(void) cli_show_local_state();
 			exit(EXIT_CODE_QUIT);
 		}
+	}
+
+	if (watch)
+	{
+		WatchContext context = { 0 };
+
+		(void) cli_monitor_init_from_option_or_config(&(context.monitor), &config);
+
+		strlcpy(context.formation, config.formation, sizeof(context.formation));
+		context.groupId = config.groupId;
+
+		(void) watch_main_loop(&context);
+
+		exit(EXIT_CODE_QUIT);
 	}
 
 	(void) cli_monitor_init_from_option_or_config(&monitor, &config);
