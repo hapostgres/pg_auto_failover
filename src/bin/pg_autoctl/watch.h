@@ -21,7 +21,15 @@
 #include "monitor.h"
 #include "nodestate_utils.h"
 
-/* a ring-buffer of the last monitor events */
+typedef enum
+{
+	WATCH_MOVE_FOCUS_NONE = 0,
+	WATCH_MOVE_FOCUS_LEFT,
+	WATCH_MOVE_FOCUS_RIGHT,
+	WATCH_MOVE_FOCUS_HOME,
+	WATCH_MOVE_FOCUS_END
+} WatchMoveFocus;
+
 #define EVENTS_BUFFER_COUNT 80
 
 /* share a context between the update and render functions */
@@ -29,6 +37,9 @@ typedef struct WatchContext
 {
 	int rows;
 	int cols;
+	int selectedRow;
+	int startCol;
+	WatchMoveFocus move;
 
 	Monitor monitor;
 	char formation[NAMEDATALEN];

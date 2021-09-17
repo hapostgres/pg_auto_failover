@@ -214,31 +214,146 @@ watch_update(WatchContext *context)
 	/* time to finish our connection */
 	pgsql_finish(&(monitor->pgsql));
 
-	/* we have setup ncurses in non-blocking behaviour */
-	int ch = getch();
+	int ch;
 
-	if (ch == KEY_F(1) || ch == 'q')
+	/*
+	 * Reset our move from the last update session. We need to keep the END
+	 * movement set in between update calls, though, because this one is
+	 * handled on a line-by-line basis, and is not reflected on the value of
+	 * context->startCol.
+	 */
+	if (context->move != WATCH_MOVE_FOCUS_END)
 	{
-		return false;
+		context->move = WATCH_MOVE_FOCUS_NONE;
 	}
 
-	if (ch == KEY_RESIZE || window_size_changed == 1)
-	{
-		struct winsize size = { 0 };
+	do {
+		/* we have setup ncurses in non-blocking behaviour */
+		ch = getch();
 
-		window_size_changed = 0;
-
-		/* get current terminal rows and columns and resize our display */
-		int ioctl_result = ioctl(STDOUT_FILENO, TIOCGWINSZ, (char *) &size);
-
-		if (ioctl_result >= 0)
+		if (ch == KEY_F(1) || ch == 'q')
 		{
-			context->rows = size.ws_row;
-			context->cols = size.ws_col;
-
-			resizeterm(context->rows, context->cols);
+			return false;
 		}
-	}
+		else if (ch == KEY_RESIZE || window_size_changed == 1)
+		{
+			struct winsize size = { 0 };
+
+			window_size_changed = 0;
+
+			/* get current terminal rows and columns and resize our display */
+			int ioctl_result = ioctl(STDOUT_FILENO, TIOCGWINSZ, (char *) &size);
+
+			if (ioctl_result >= 0)
+			{
+				context->rows = size.ws_row;
+				context->cols = size.ws_col;
+
+				resizeterm(context->rows, context->cols);
+			}
+		}
+
+		/* left and right moves are conditionnal / relative */
+		else if (ch == KEY_LEFT || ch == 'b' || ch == 'h')
+		{
+			if (context->move == WATCH_MOVE_FOCUS_NONE)
+			{
+				context->move = WATCH_MOVE_FOCUS_LEFT;
+
+				if (context->startCol > 0)
+				{
+					context->startCol -= context->cols - 10;
+
+					if (context->startCol < 0)
+					{
+						context->startCol = 0;
+					}
+				}
+			}
+			else if (context->move == WATCH_MOVE_FOCUS_RIGHT)
+			{
+				context->move = WATCH_MOVE_FOCUS_NONE;
+			}
+		}
+
+		/* left and right moves are conditionnal / relative */
+		else if (ch == KEY_RIGHT || ch == 'f' || ch == 'l')
+		{
+			if (context->move == WATCH_MOVE_FOCUS_NONE)
+			{
+				context->move = WATCH_MOVE_FOCUS_RIGHT;
+
+				context->startCol += context->cols - 10;
+			}
+			else if (context->move == WATCH_MOVE_FOCUS_LEFT)
+			{
+				context->move = WATCH_MOVE_FOCUS_NONE;
+			}
+		}
+
+		/* home and end moves are unconditionnal / absolute */
+		else if (ch == KEY_HOME || ch == 'a' || ch == '0')
+		{
+			context->move = WATCH_MOVE_FOCUS_HOME;
+
+			context->startCol = 0;
+		}
+		else if (ch == KEY_END || ch == 'e' || ch == '$')
+		{
+			context->move = WATCH_MOVE_FOCUS_END;
+		}
+
+		/* up is C-p in Emacs, C-u in less/more, k in vi(m) */
+		else if (ch == KEY_UP || ch == 'p' || ch == 'u' || ch == 'k')
+		{
+			if (context->selectedRow > 0)
+			{
+				--context->selectedRow;
+			}
+		}
+
+		/* page up */
+		else if (ch == KEY_PPAGE)
+		{
+			if (context->selectedRow > 0 && context->selectedRow <= 6)
+			{
+				context->selectedRow = 1;
+			}
+			else if (context->selectedRow > 6)
+			{
+				context->selectedRow -= 5;
+			}
+		}
+
+		/* down is C-n in Emacs, C-d in less/more, j in vi(m) */
+		else if (ch == KEY_DOWN || ch == 'n' || ch == 'd' || ch == 'j')
+		{
+			if (context->selectedRow < context->rows)
+			{
+				++context->selectedRow;
+			}
+		}
+
+		/* page down */
+		else if (ch == KEY_NPAGE)
+		{
+			if (context->selectedRow < context->rows &&
+				context->selectedRow >= (context->rows - 6))
+			{
+				context->selectedRow = context->rows - 1;
+			}
+			else if (context->selectedRow < (context->rows - 6))
+			{
+				context->selectedRow += 5;
+			}
+		}
+
+		/* cancel current selected row */
+		else if (ch == KEY_DL || ch == KEY_DC)
+		{
+			context->selectedRow = 0;
+		}
+	} while (ch != ERR);
 
 	return true;
 }
@@ -257,12 +372,25 @@ watch_render(WatchContext *context)
 	(void) clear_line_at(1);
 	++printedRows;
 
+	/* skip empty lines and headers */
+	if (context->selectedRow > 0 && context->selectedRow < 3)
+	{
+		context->selectedRow = 3;
+	}
+
 	int nodeRows = print_nodes_array(context, 2, 0);
 
 	printedRows += nodeRows;
 
 	(void) clear_line_at(2 + nodeRows);
 	++printedRows;
+
+	/* skip empty lines and headers */
+	if (context->selectedRow >= (2 + nodeRows) &&
+		context->selectedRow <= 2 + nodeRows + 1)
+	{
+		context->selectedRow = 2 + nodeRows + 2;
+	}
 
 	printedRows += print_events_array(context, 2 + nodeRows + 1, 0);
 
@@ -393,9 +521,22 @@ print_nodes_array(WatchContext *context, int r, int c)
 	/* display the data */
 	for (int index = 0; index < nodesArray->count; index++)
 	{
+		bool selected = currentRow == context->selectedRow;
+
 		clear_line_at(currentRow);
 
+		if (selected)
+		{
+			attron(A_REVERSE);
+		}
+
 		(void) print_node_state(context, columnPolicy, index, currentRow++, c);
+
+		if (selected)
+		{
+			attroff(A_REVERSE);
+		}
+
 		++lines;
 
 		if (context->rows <= currentRow)
@@ -749,7 +890,8 @@ print_node_state(WatchContext *context, ColPolicy *policy,
 			}
 		}
 
-		cc += len + 1;
+		cc += len;
+		mvprintw(r, cc++, " ");
 	}
 }
 
@@ -843,11 +985,53 @@ print_events_array(WatchContext *context, int r, int c)
 	for (int index = start; index < eventsArray->count; index++)
 	{
 		MonitorEvent *event = &(eventsArray->events[index]);
+		bool selected = currentRow == context->selectedRow;
+
+		char *text = event->description;
+		int len = strlen(text);
+
+		/* when KEY_END is used, ensure we see the end of text */
+		if (context->move == WATCH_MOVE_FOCUS_END)
+		{
+			/* the eventTime format plus spacing takes up 21 chars on-screen */
+			if (strlen(text) > (context->cols - 21))
+			{
+				text = text + len - 21;
+			}
+		}
+		else if (context->startCol > 0 && len > (context->cols - 21))
+		{
+			/*
+			 * Shift our text following the current startCol, or if we don't
+			 * have that many chars in the text, then shift from as much as we
+			 * can in steps of 10 increments.
+			 */
+			for (int sc = context->startCol; sc > 0; sc -= 10)
+			{
+				if (len >= sc)
+				{
+					text = text + sc;
+					break;
+				}
+			}
+		}
 
 		clear_line_at(currentRow);
 
-		mvprintw(currentRow, 0, "%19s  %s", event->eventTime,
-				 event->description);
+		if (selected)
+		{
+			attron(A_REVERSE);
+		}
+
+		mvprintw(currentRow, 0, "%19s %s%s",
+				 event->eventTime,
+				 text == event->description ? " " : " -- ",
+				 text);
+
+		if (selected)
+		{
+			attroff(A_REVERSE);
+		}
 
 		if (context->rows < currentRow)
 		{
