@@ -289,9 +289,37 @@ print_watch_header(WatchContext *context, int r)
 
 	mvprintw(r, context->cols - 9, "%s", timestring + 11);
 
-	mvprintw(r, 0, "Formation: %s - Sync Standbys: %d",
-			 context->formation,
-			 context->number_sync_standbys);
+	int c = 0;
+
+	mvprintw(r, c, "Formation: "); /* that's 11 chars */
+	c += 11;
+
+	attron(A_BOLD);
+	mvprintw(r, c, "%s", context->formation);
+	attroff(A_BOLD);
+
+	c += strlen(context->formation);
+
+	/*
+	 * Check if we have enough room for a full label here:
+	 *  - add  9 cols for the date at the end of the line
+	 *  - add 18 cols for the label " - Sync Standbys: "
+	 *  - add  3 cols for the number itself (e.g. "1")
+	 */
+	if (context->cols > (c + 9 + 18 + 3))
+	{
+		mvprintw(r, c, " - Sync Standbys: "); /* that's 18 chars */
+		c += 18;
+	}
+	else
+	{
+		mvprintw(r, c, " - nss: "); /* that's 8 chars */
+		c += 8;
+	}
+
+	attron(A_BOLD);
+	mvprintw(r, c, "%d", context->number_sync_standbys);
+	attroff(A_BOLD);
 
 	/* we only use one row */
 	return 1;
