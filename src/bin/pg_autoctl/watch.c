@@ -93,6 +93,11 @@ watch_main_loop(WatchContext *context)
 	/* the main loop */
 	for (bool first = true;; first = false)
 	{
+		instr_time start;
+		instr_time duration;
+
+		INSTR_TIME_SET_CURRENT(start);
+
 		/* we quit when watch_update returns false */
 		if (!watch_update(context))
 		{
@@ -107,8 +112,13 @@ watch_main_loop(WatchContext *context)
 
 		(void) watch_render(context);
 
-		/* and then sleep for 500 ms */
-		pg_usleep(500 * 1000);
+		/* and then sleep for the rest of the 500 ms */
+		INSTR_TIME_SET_CURRENT(duration);
+		INSTR_TIME_SUBTRACT(duration, start);
+
+		int sleepMs = 500 - INSTR_TIME_GET_MILLISEC(duration);
+
+		pg_usleep(sleepMs * 1000);
 	}
 
 	(void) watch_end_window(context);
