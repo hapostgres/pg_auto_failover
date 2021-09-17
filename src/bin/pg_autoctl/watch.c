@@ -90,10 +90,8 @@ catch_sigwinch(int sig)
 void
 watch_main_loop(WatchContext *context)
 {
-	(void) watch_init_window(context);
-
 	/* the main loop */
-	for (;;)
+	for (bool first = true;; first = false)
 	{
 		/* we quit when watch_update returns false */
 		if (!watch_update(context))
@@ -102,6 +100,11 @@ watch_main_loop(WatchContext *context)
 		}
 
 		/* now display the context we have */
+		if (first)
+		{
+			(void) watch_init_window(context);
+		}
+
 		(void) watch_render(context);
 
 		/* and then sleep for 500 ms */
@@ -278,6 +281,9 @@ print_watch_header(WatchContext *context, int r)
 {
 	uint64_t now = time(NULL);
 	char timestring[MAXCTIMESIZE] = { 0 };
+
+	/* make sure we start with an empty line */
+	(void) clear_line_at(0);
 
 	/* format the current time to be user-friendly */
 	epoch_to_string(now, timestring);
@@ -559,6 +565,8 @@ print_column_headers(WatchContext *context, ColPolicy *policy, int r, int c)
 {
 	int cc = c;
 
+	clear_line_at(r);
+
 	attron(A_STANDOUT);
 
 	for (int col = 0; col < COLUMN_TYPE_LAST; col++)
@@ -749,7 +757,6 @@ watch_set_state_attributes(NodeState state, bool toggle)
 		case DEMOTE_TIMEOUT_STATE:
 		case DRAINING_STATE:
 		case REPORT_LSN_STATE:
-		case STOP_REPLICATION_STATE:
 		{
 			if (toggle)
 			{
@@ -851,6 +858,8 @@ print_events_array(WatchContext *context, int r, int c)
 static void
 print_events_headers(WatchContext *context, int r, int c)
 {
+	clear_line_at(r);
+
 	attron(A_STANDOUT);
 
 	mvprintw(r, c, "%19s  %-*s", "Event Time", context->cols - 20, "Description");
