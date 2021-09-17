@@ -23,6 +23,8 @@ typedef enum
 	COLUMN_TYPE_HOST_PORT,
 	COLUMN_TYPE_TLI_LSN,
 	COLUMN_TYPE_CONN_HEALTH,
+	COLUMN_TYPE_CONN_HEALTH_LAG,
+	COLUMN_TYPE_CONN_REPORT_LAG,
 	COLUMN_TYPE_REPORTED_STATE,
 	COLUMN_TYPE_ASSIGNED_STATE,
 
@@ -64,13 +66,23 @@ ColPolicy ColumnPolicies[] = {
 		}
 	},
 	{
+		"very terse",
+		0,
+		{
+			{ COLUMN_TYPE_ID, "Id", 0 },
+			{ COLUMN_TYPE_CONN_REPORT_LAG, "Lag(R)", 0 },
+			{ COLUMN_TYPE_REPORTED_STATE, "Reported State", 0 },
+			{ COLUMN_TYPE_ASSIGNED_STATE, "Assigned State", 0 },
+			{ COLUMN_TYPE_LAST, "", 0 }
+		}
+	},
+	{
 		"terse",
 		0,
 		{
 			{ COLUMN_TYPE_ID, "Id", 0 },
-			{ COLUMN_TYPE_REPLICATION_QUORUM, "QRM", 0 },
-			{ COLUMN_TYPE_CANDIDATE_PRIORITY, "PRIO", 0 },
-			{ COLUMN_TYPE_TLI_LSN, "TLI: LSN", 0 },
+			{ COLUMN_TYPE_CONN_REPORT_LAG, "Lag(R)", 0 },
+			{ COLUMN_TYPE_CONN_HEALTH, "Connection", 0 },
 			{ COLUMN_TYPE_REPORTED_STATE, "Reported State", 0 },
 			{ COLUMN_TYPE_ASSIGNED_STATE, "Assigned State", 0 },
 			{ COLUMN_TYPE_LAST, "", 0 }
@@ -82,8 +94,21 @@ ColPolicy ColumnPolicies[] = {
 		{
 			{ COLUMN_TYPE_NAME, "Name", 0 },
 			{ COLUMN_TYPE_ID, "Id", 0 },
-			{ COLUMN_TYPE_REPLICATION_QUORUM, "QRM", 0 },
-			{ COLUMN_TYPE_CANDIDATE_PRIORITY, "PRIO", 0 },
+			{ COLUMN_TYPE_CONN_REPORT_LAG, "Lag(R)", 0 },
+			{ COLUMN_TYPE_CONN_HEALTH, "Connection", 0 },
+			{ COLUMN_TYPE_REPORTED_STATE, "Reported State", 0 },
+			{ COLUMN_TYPE_ASSIGNED_STATE, "Assigned State", 0 },
+			{ COLUMN_TYPE_LAST, "", 0 }
+		}
+	},
+	{
+		"semi verbose",
+		0,
+		{
+			{ COLUMN_TYPE_NAME, "Name", 0 },
+			{ COLUMN_TYPE_ID, "Id", 0 },
+			{ COLUMN_TYPE_CONN_REPORT_LAG, "Lag(R)", 0 },
+			{ COLUMN_TYPE_CONN_HEALTH_LAG, "Lag(H)", 0 },
 			{ COLUMN_TYPE_CONN_HEALTH, "Connection", 0 },
 			{ COLUMN_TYPE_REPORTED_STATE, "Reported State", 0 },
 			{ COLUMN_TYPE_ASSIGNED_STATE, "Assigned State", 0 },
@@ -98,6 +123,25 @@ ColPolicy ColumnPolicies[] = {
 			{ COLUMN_TYPE_ID, "Node", 0 },
 			{ COLUMN_TYPE_HOST_PORT, "Host:Port", 0 },
 			{ COLUMN_TYPE_TLI_LSN, "TLI: LSN", 0 },
+			{ COLUMN_TYPE_CONN_REPORT_LAG, "Lag(R)", 0 },
+			{ COLUMN_TYPE_CONN_HEALTH_LAG, "Lag(H)", 0 },
+			{ COLUMN_TYPE_CONN_HEALTH, "Connection", 0 },
+			{ COLUMN_TYPE_REPORTED_STATE, "Reported State", 0 },
+			{ COLUMN_TYPE_ASSIGNED_STATE, "Assigned State", 0 },
+			{ COLUMN_TYPE_LAST, "", 0 }
+		}
+	},
+	{
+		"almost full",
+		0,
+		{
+			{ COLUMN_TYPE_NAME, "Name", 0 },
+			{ COLUMN_TYPE_ID, "Node", 0 },
+			{ COLUMN_TYPE_REPLICATION_QUORUM, "Quorum", 0 },
+			{ COLUMN_TYPE_CANDIDATE_PRIORITY, "Priority", 0 },
+			{ COLUMN_TYPE_TLI_LSN, "TLI: LSN", 0 },
+			{ COLUMN_TYPE_CONN_REPORT_LAG, "Report-Lag", 0 },
+			{ COLUMN_TYPE_CONN_HEALTH_LAG, "Health-Lag", 0 },
 			{ COLUMN_TYPE_CONN_HEALTH, "Connection", 0 },
 			{ COLUMN_TYPE_REPORTED_STATE, "Reported State", 0 },
 			{ COLUMN_TYPE_ASSIGNED_STATE, "Assigned State", 0 },
@@ -114,6 +158,8 @@ ColPolicy ColumnPolicies[] = {
 			{ COLUMN_TYPE_CANDIDATE_PRIORITY, "Priority", 0 },
 			{ COLUMN_TYPE_HOST_PORT, "Host:Port", 0 },
 			{ COLUMN_TYPE_TLI_LSN, "TLI: LSN", 0 },
+			{ COLUMN_TYPE_CONN_REPORT_LAG, "Report-Lag", 0 },
+			{ COLUMN_TYPE_CONN_HEALTH_LAG, "Health-Lag", 0 },
 			{ COLUMN_TYPE_CONN_HEALTH, "Connection", 0 },
 			{ COLUMN_TYPE_REPORTED_STATE, "Reported State", 0 },
 			{ COLUMN_TYPE_ASSIGNED_STATE, "Assigned State", 0 },

@@ -67,6 +67,8 @@ static void print_node_state(WatchContext *context,
 
 static void print_events_headers(WatchContext *context, int r, int c);
 
+static void watch_set_state_attributes(NodeState state, bool toggle);
+
 static void clear_line_at(int row);
 
 /*
@@ -102,8 +104,8 @@ watch_main_loop(WatchContext *context)
 		/* now display the context we have */
 		(void) watch_render(context);
 
-		/* and then sleep for 250 ms */
-		pg_usleep(250 * 1000);
+		/* and then sleep for 500 ms */
+		pg_usleep(500 * 1000);
 	}
 
 	(void) watch_end_window(context);
@@ -235,14 +237,28 @@ watch_update(WatchContext *context)
 bool
 watch_render(WatchContext *context)
 {
-	(void) print_watch_header(context, 0);
+	int printedRows = 0;
+
+	printedRows += print_watch_header(context, 0);
+
+	(void) clear_line_at(1);
+	++printedRows;
 
 	int nodeRows = print_nodes_array(context, 2, 0);
 
-	(void) print_events_array(context, 2 + nodeRows + 1, 0);
+	printedRows += nodeRows;
 
-	if (false)
+	(void) clear_line_at(2 + nodeRows);
+	++printedRows;
+
+	printedRows += print_events_array(context, 2 + nodeRows + 1, 0);
+
+	if (printedRows < context->rows)
 	{
+		for (int r = printedRows; r < (context->rows - 1); r++)
+		{
+			(void) clear_line_at(r);
+		}
 		(void) print_watch_footer(context);
 	}
 
@@ -473,6 +489,18 @@ compute_column_size(ColumnType type, NodeAddressHeaders *headers)
 			return headers->maxHealthSize;
 		}
 
+		case COLUMN_TYPE_CONN_HEALTH_LAG:
+		{
+			/* that's an interval in seconds/mins/hours/days: XXuYYu */
+			return 7;
+		}
+
+		case COLUMN_TYPE_CONN_REPORT_LAG:
+		{
+			/* that's an interval in seconds/mins/hours/days: XXuYYu */
+			return 7;
+		}
+
 		case COLUMN_TYPE_REPORTED_STATE:
 		{
 			return headers->maxStateSize;
@@ -600,21 +628,71 @@ print_node_state(WatchContext *context, ColPolicy *policy,
 
 			case COLUMN_TYPE_CONN_HEALTH:
 			{
+				if (nodeState->health != 1)
+				{
+					attron(A_REVERSE | A_BOLD);
+				}
+
 				mvprintw(r, cc, "%*s", len, connection);
+
+				if (nodeState->health != 1)
+				{
+					attroff(A_REVERSE | A_BOLD);
+				}
+
+				break;
+			}
+
+			case COLUMN_TYPE_CONN_HEALTH_LAG:
+			{
+				char str[9] = { 0 };
+
+				(void) IntervalToString(nodeState->healthLag, str, sizeof(str));
+
+				mvprintw(r, cc, "%*s", len, str);
+				break;
+			}
+
+			case COLUMN_TYPE_CONN_REPORT_LAG:
+			{
+				char str[9] = { 0 };
+
+				if (nodeState->reportLag > 10.0)
+				{
+					attron(A_REVERSE);
+				}
+
+				(void) IntervalToString(nodeState->reportLag, str, sizeof(str));
+
+				mvprintw(r, cc, "%*s", len, str);
+
+				if (nodeState->reportLag > 10.0)
+				{
+					attroff(A_REVERSE);
+				}
+
 				break;
 			}
 
 			case COLUMN_TYPE_REPORTED_STATE:
 			{
+				watch_set_state_attributes(nodeState->reportedState, true);
+
 				mvprintw(r, cc, "%*s", len,
 						 NodeStateToString(nodeState->reportedState));
+
+				watch_set_state_attributes(nodeState->reportedState, false);
 				break;
 			}
 
 			case COLUMN_TYPE_ASSIGNED_STATE:
 			{
+				watch_set_state_attributes(nodeState->goalState, true);
+
 				mvprintw(r, cc, "%*s", len,
 						 NodeStateToString(nodeState->goalState));
+
+				watch_set_state_attributes(nodeState->goalState, false);
 				break;
 			}
 
@@ -626,6 +704,61 @@ print_node_state(WatchContext *context, ColPolicy *policy,
 		}
 
 		cc += len + 1;
+	}
+}
+
+
+/*
+ * Routine used to set attributes to display node states.
+ */
+static void
+watch_set_state_attributes(NodeState state, bool toggle)
+{
+	switch (state)
+	{
+		/* states where Postgres is not running */
+		case DEMOTED_STATE:
+		case DEMOTE_TIMEOUT_STATE:
+		case DRAINING_STATE:
+		case REPORT_LSN_STATE:
+		case STOP_REPLICATION_STATE:
+		{
+			if (toggle)
+			{
+				attron(A_BOLD);
+			}
+			else
+			{
+				attroff(A_BOLD);
+			}
+
+			break;
+		}
+
+		/* states where the node is not participating in the failover */
+		case MAINTENANCE_STATE:
+		case WAIT_MAINTENANCE_STATE:
+		case PREPARE_MAINTENANCE_STATE:
+		case WAIT_STANDBY_STATE:
+		case DROPPED_STATE:
+		{
+			if (toggle)
+			{
+				attron(A_DIM | A_UNDERLINE);
+			}
+			else
+			{
+				attroff(A_DIM | A_UNDERLINE);
+			}
+
+			break;
+		}
+
+		default:
+		{
+			/* do not change attributes for most cases */
+			break;
+		}
 	}
 }
 
@@ -657,8 +790,10 @@ print_events_array(WatchContext *context, int r, int c)
 	(void) print_events_headers(context, currentRow++, c);
 	++lines;
 
-	int capacity = context->rows - r - 1;
-	int start = eventsArray->count - capacity;
+	int capacity = context->rows - currentRow;
+
+	int start =
+		eventsArray->count <= capacity ? 0 : eventsArray->count - capacity;
 
 	for (int index = start; index < eventsArray->count; index++)
 	{
@@ -666,7 +801,8 @@ print_events_array(WatchContext *context, int r, int c)
 
 		clear_line_at(currentRow);
 
-		mvprintw(currentRow, 0, "%19s  %s", event->eventTime, event->description);
+		mvprintw(currentRow, 0, "%19s  %s", event->eventTime,
+				 event->description);
 
 		if (context->rows < currentRow)
 		{

@@ -800,7 +800,7 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 							   options->root,
 							   "monitor");
 	tmux_add_send_keys_command(script,
-							   "watch -n 0.2 %s show state",
+							   "%s watch",
 							   options->binpath);
 
 	/* add a window for interactive pg_autoctl commands */
