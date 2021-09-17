@@ -262,7 +262,7 @@ watch_update(WatchContext *context)
 
 				if (context->startCol > 0)
 				{
-					context->startCol -= context->cols - 10;
+					context->startCol -= context->cols - 30;
 
 					if (context->startCol < 0)
 					{
@@ -283,7 +283,7 @@ watch_update(WatchContext *context)
 			{
 				context->move = WATCH_MOVE_FOCUS_RIGHT;
 
-				context->startCol += context->cols - 10;
+				context->startCol += context->cols - 30;
 			}
 			else if (context->move == WATCH_MOVE_FOCUS_LEFT)
 			{
@@ -973,6 +973,7 @@ print_events_array(WatchContext *context, int r, int c)
 
 	int lines = 0;
 	int currentRow = r;
+	int maxStartCol = 0;
 
 	(void) print_events_headers(context, currentRow++, c);
 	++lines;
@@ -1006,11 +1007,16 @@ print_events_array(WatchContext *context, int r, int c)
 			 * have that many chars in the text, then shift from as much as we
 			 * can in steps of 10 increments.
 			 */
-			for (int sc = context->startCol; sc > 0; sc -= 10)
+			for (int sc = context->startCol; sc > 0; sc -= 30)
 			{
 				if (len >= sc)
 				{
 					text = text + sc;
+
+					if (sc > maxStartCol)
+					{
+						maxStartCol = sc;
+					}
 					break;
 				}
 			}
@@ -1040,6 +1046,12 @@ print_events_array(WatchContext *context, int r, int c)
 
 		++currentRow;
 		++lines;
+	}
+
+	/* reset context->startCol to something sensible when it needs to be */
+	if (maxStartCol > 0 && maxStartCol < context->startCol)
+	{
+		context->startCol = maxStartCol;
 	}
 
 	return lines;
