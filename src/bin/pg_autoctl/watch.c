@@ -303,8 +303,8 @@ watch_update(WatchContext *context)
 			context->move = WATCH_MOVE_FOCUS_END;
 		}
 
-		/* up is C-p in Emacs, C-u in less/more, k in vi(m) */
-		else if (ch == KEY_UP || ch == 'p' || ch == 'u' || ch == 'k')
+		/* up is C-p in Emacs, k in vi(m) */
+		else if (ch == KEY_UP || ch == 'p' || ch == 'k')
 		{
 			if (context->selectedRow > 0)
 			{
@@ -312,8 +312,8 @@ watch_update(WatchContext *context)
 			}
 		}
 
-		/* page up */
-		else if (ch == KEY_PPAGE)
+		/* page up, which is also C-u in the terminal with less/more etc */
+		else if (ch == KEY_PPAGE || ch == 'u')
 		{
 			if (context->selectedRow > 0 && context->selectedRow <= 6)
 			{
@@ -325,8 +325,8 @@ watch_update(WatchContext *context)
 			}
 		}
 
-		/* down is C-n in Emacs, C-d in less/more, j in vi(m) */
-		else if (ch == KEY_DOWN || ch == 'n' || ch == 'd' || ch == 'j')
+		/* down is C-n in Emacs, j in vi(m) */
+		else if (ch == KEY_DOWN || ch == 'n' || ch == 'j')
 		{
 			if (context->selectedRow < context->rows)
 			{
@@ -334,8 +334,8 @@ watch_update(WatchContext *context)
 			}
 		}
 
-		/* page down */
-		else if (ch == KEY_NPAGE)
+		/* page down, which is also C-d in the terminal with less/more etc */
+		else if (ch == KEY_NPAGE || ch == 'd')
 		{
 			if (context->selectedRow < context->rows &&
 				context->selectedRow >= (context->rows - 6))
