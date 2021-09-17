@@ -465,7 +465,7 @@ IntervalToString(double seconds, char *buffer, size_t size)
 	{
 		int s = (int) seconds;
 
-		sformat(buffer, size, "%2ds%02d", s, (int) (100.0 * (seconds - s)));
+		sformat(buffer, size, "%2ds", s);
 	}
 	else if (seconds < (60.0 * 60.0))
 	{
