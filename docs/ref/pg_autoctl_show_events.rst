@@ -18,6 +18,7 @@ about state changes of the pg_auto_failover nodes managed by the monitor::
   --formation   formation to query, defaults to 'default'
   --group       group to query formation, defaults to all
   --count       how many events to fetch, defaults to 10
+  --watch       display an auto-updating dashboard
   --json        output data in the JSON format
 
 Options
@@ -45,6 +46,16 @@ Options
 --count
 
   By default only the last 10 events are printed.
+
+--watch
+
+  Take control of the terminal and display the current state of the system
+  and the last events from the monitor. The display is updated automatically
+  every 500 milliseconds (half a second) and reacts properly to window size
+  change.
+
+  Depending on the terminal window size, a different set of columns is
+  visible in the state part of the output.
 
 --json
 

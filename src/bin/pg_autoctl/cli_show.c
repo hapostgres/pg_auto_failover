@@ -84,6 +84,7 @@ CommandLine show_events_command =
 				 "  --formation   formation to query, defaults to 'default' \n"
 				 "  --group       group to query formation, defaults to all \n"
 				 "  --count       how many events to fetch, defaults to 10 \n"
+				 "  --watch       display an auto-updating dashboard\n"
 				 "  --json        output data in the JSON format\n",
 				 cli_show_state_getopts,
 				 cli_show_events);
@@ -97,6 +98,7 @@ CommandLine show_state_command =
 				 "  --formation   formation to query, defaults to 'default' \n"
 				 "  --group       group to query formation, defaults to all \n"
 				 "  --local       show local data, do not connect to the monitor\n"
+				 "  --watch       display an auto-updating dashboard\n"
 				 "  --json        output data in the JSON format\n",
 				 cli_show_state_getopts,
 				 cli_show_state);

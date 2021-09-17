@@ -418,6 +418,13 @@ man_pages = [
         1,
     ),
     (
+        "ref/pg_autoctl_watch",
+        "pg_autoctl watch",
+        "pg_autoctl watch",
+        [author],
+        1,
+    ),
+    (
         "ref/pg_autoctl_stop",
         "pg_autoctl stop",
         "pg_autoctl stop",
