@@ -90,6 +90,8 @@ catch_sigwinch(int sig)
 void
 watch_main_loop(WatchContext *context)
 {
+	int step = 0;
+
 	/* the main loop */
 	for (bool first = true;; first = false)
 	{
@@ -98,9 +100,17 @@ watch_main_loop(WatchContext *context)
 
 		INSTR_TIME_SET_CURRENT(start);
 
-		/* we quit when watch_update returns false */
-		if (!watch_update(context))
+		/*
+		 * First, update the data that we want to display, and process key
+		 * strokes. We are going to update our data set twice per second, and
+		 * we want to react to key strokes and other events much faster than
+		 * this, every 50ms.
+		 */
+		step = (step + 1) % 10;
+
+		if (!watch_update(context, step))
 		{
+			/* we quit when watch_update returns false */
 			break;
 		}
 
@@ -112,11 +122,11 @@ watch_main_loop(WatchContext *context)
 
 		(void) watch_render(context);
 
-		/* and then sleep for the rest of the 500 ms */
+		/* and then sleep for the rest of the 50 ms */
 		INSTR_TIME_SET_CURRENT(duration);
 		INSTR_TIME_SUBTRACT(duration, start);
 
-		int sleepMs = 500 - INSTR_TIME_GET_MILLISEC(duration);
+		int sleepMs = 50 - INSTR_TIME_GET_MILLISEC(duration);
 
 		pg_usleep(sleepMs * 1000);
 	}
@@ -173,46 +183,53 @@ watch_end_window(WatchContext *context)
  * watch_update updates the context to be displayed on the terminal window.
  */
 bool
-watch_update(WatchContext *context)
+watch_update(WatchContext *context, int step)
 {
 	Monitor *monitor = &(context->monitor);
 	CurrentNodeStateArray *nodesArray = &(context->nodesArray);
 	MonitorEventsArray *eventsArray = &(context->eventsArray);
 
-	/*
-	 * We use a transaction despite being read-only, because we want to re-use
-	 * a single connection to the monitor.
-	 */
-	monitor->pgsql.connectionStatementType = PGSQL_CONNECTION_MULTI_STATEMENT;
-
-	if (!monitor_get_current_state(monitor,
-								   context->formation,
-								   context->groupId,
-								   nodesArray))
+	if (step == 0)
 	{
-		/* errors have already been logged */
-		return false;
-	}
+		/*
+		 * We use a transaction despite being read-only, because we want to
+		 * re-use a single connection to the monitor.
+		 */
+		PGSQL *pgsql = &(monitor->pgsql);
 
-	if (!monitor_get_formation_number_sync_standbys(
-			monitor,
-			context->formation,
-			&(context->number_sync_standbys)))
-	{
-		/* errors have already been logged */
-		return false;
-	}
+		pgsql->connectionStatementType = PGSQL_CONNECTION_MULTI_STATEMENT;
 
-	if (!monitor_get_last_events(monitor, context->formation, context->groupId,
-								 EVENTS_BUFFER_COUNT,
-								 eventsArray))
-	{
-		/* errors have already been logged */
-		return false;
-	}
+		if (!monitor_get_current_state(monitor,
+									   context->formation,
+									   context->groupId,
+									   nodesArray))
+		{
+			/* errors have already been logged */
+			return false;
+		}
 
-	/* time to finish our connection */
-	pgsql_finish(&(monitor->pgsql));
+		if (!monitor_get_formation_number_sync_standbys(
+				monitor,
+				context->formation,
+				&(context->number_sync_standbys)))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
+		if (!monitor_get_last_events(monitor,
+									 context->formation,
+									 context->groupId,
+									 EVENTS_BUFFER_COUNT,
+									 eventsArray))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
+		/* time to finish our connection */
+		pgsql_finish(pgsql);
+	}
 
 	int ch;
 

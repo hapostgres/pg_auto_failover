@@ -54,7 +54,7 @@ void watch_main_loop(WatchContext *context);
 void watch_init_window(WatchContext *context);
 void watch_end_window(WatchContext *context);
 
-bool watch_update(WatchContext *context);
+bool watch_update(WatchContext *context, int step);
 bool watch_render(WatchContext *context);
 
 #endif  /* WATCH_H */
