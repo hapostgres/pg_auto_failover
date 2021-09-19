@@ -279,7 +279,8 @@ watch_update(WatchContext *context, int step)
 
 				if (context->startCol > 0)
 				{
-					context->startCol -= context->cols - 30;
+					/* move by half the description column */
+					context->startCol -= (context->cols - 21) / 2;
 
 					if (context->startCol < 0)
 					{
@@ -300,7 +301,8 @@ watch_update(WatchContext *context, int step)
 			{
 				context->move = WATCH_MOVE_FOCUS_RIGHT;
 
-				context->startCol += context->cols - 30;
+				/* move by half the description column */
+				context->startCol += (context->cols - 21) / 2;
 			}
 			else if (context->move == WATCH_MOVE_FOCUS_LEFT)
 			{
@@ -1024,7 +1026,7 @@ print_events_array(WatchContext *context, int r, int c)
 			 * have that many chars in the text, then shift from as much as we
 			 * can in steps of 10 increments.
 			 */
-			for (int sc = context->startCol; sc > 0; sc -= 30)
+			for (int sc = context->startCol; sc > 0; sc -= (context->cols - 21) / 2)
 			{
 				if (len >= sc)
 				{
