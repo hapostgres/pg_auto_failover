@@ -53,7 +53,37 @@ semaphore_init(Semaphore *semaphore)
 	}
 	else
 	{
-		return semaphore_create(semaphore);
+		bool success = semaphore_create(semaphore);
+
+		/*
+		 * Only the main process should unlink the semaphore at exit time.
+		 *
+		 * When we create a semaphore, ensure we put our semId in the expected
+		 * environment variable (PG_AUTOCTL_LOG_SEMAPHORE). That way, in case
+		 * of an early failure in execv(), the semaphore is not dropped from
+		 * under the main program.
+		 *
+		 * A typical way execv() would fail is when calling run_program() on a
+		 * pathname that does not exists.
+		 *
+		 * Per atexit(3) manual page:
+		 *
+		 *   When a child process is created via fork(2), it inherits copies of
+		 *   its parent's registrations. Upon a successful call to one of the
+		 *   exec(3) functions, all registrations are removed.
+		 *
+		 * And that's why it's important that we don't remove the semaphore in
+		 * the atexit() cleanup function when a call to run_command() fails
+		 * early.
+		 */
+		if (success)
+		{
+			IntString semIdString = intToString(semaphore->semId);
+
+			setenv(PG_AUTOCTL_LOG_SEMAPHORE, semIdString.strValue, 1);
+		}
+
+		return success;
 	}
 }
 
