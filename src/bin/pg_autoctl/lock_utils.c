@@ -59,9 +59,16 @@ semaphore_init(Semaphore *semaphore)
 		 * Only the main process should unlink the semaphore at exit time.
 		 *
 		 * When we create a semaphore, ensure we put our semId in the expected
-		 * environment variable (PG_AUTOCTL_LOG_SEMAPHORE). That way, in case
-		 * of an early failure in execv(), the semaphore is not dropped from
-		 * under the main program.
+		 * environment variable (PG_AUTOCTL_LOG_SEMAPHORE), and we assign the
+		 * current process' pid as the semaphore owner.
+		 *
+		 * When we open a pre-existing semaphore using PG_AUTOCTL_LOG_SEMAPHORE
+		 * as the semId, the semaphore owner is left to zero.
+		 *
+		 * The atexit(3) function that removes the semaphores only acts when
+		 * the owner is our current pid. That way, in case of an early failure
+		 * in execv(), the semaphore is not dropped from under the main
+		 * program.
 		 *
 		 * A typical way execv() would fail is when calling run_program() on a
 		 * pathname that does not exists.
@@ -94,14 +101,32 @@ semaphore_init(Semaphore *semaphore)
 bool
 semaphore_finish(Semaphore *semaphore)
 {
-	if (env_exists(PG_AUTOCTL_LOG_SEMAPHORE))
+	/*
+	 * At initialization time we either create a new semaphore and register
+	 * getpid() as the owner, or we open a previously existing semaphore from
+	 * its semId as found in our environment variable PG_AUTOCTL_LOG_SEMAPHORE.
+	 *
+	 * At finish time (called from the atexit(3) registry), we remove the
+	 * semaphore only when we are the owner of it. We expect semaphore->owner
+	 * to be either zero (0), or to have been filled with our own pid.
+	 */
+	if (semaphore->owner == 0)
 	{
 		/* there's no semaphore closing protocol in SysV */
 		return true;
 	}
-	else
+	else if (semaphore->owner == getpid())
 	{
 		return semaphore_unlink(semaphore);
+	}
+	else
+	{
+		log_fatal("BUG: semaphore_finish semId %d owner is %d, getpid is %d",
+				  semaphore->semId,
+				  semaphore->owner,
+				  getpid());
+
+		return false;
 	}
 }
 
@@ -114,6 +139,7 @@ semaphore_create(Semaphore *semaphore)
 {
 	union semun semun;
 
+	semaphore->owner = getpid();
 	semaphore->semId = semget(IPC_PRIVATE, 1, 0600);
 
 	if (semaphore->semId < 0)
@@ -152,7 +178,10 @@ semaphore_create(Semaphore *semaphore)
 bool
 semaphore_open(Semaphore *semaphore)
 {
-	char semIdString[BUFSIZE];
+	char semIdString[BUFSIZE] = { 0 };
+
+	/* ensure the owner is set to zero when we re-open an existing semaphore */
+	semaphore->owner = 0;
 
 	if (!get_env_copy(PG_AUTOCTL_LOG_SEMAPHORE, semIdString, BUFSIZE))
 	{
