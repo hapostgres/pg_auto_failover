@@ -30,7 +30,7 @@ char *ps_buffer;                /* will point to argv area */
 size_t ps_buffer_size;          /* space determined at run time */
 size_t last_status_len;         /* use to minimize length of clobber */
 
-Semaphore log_semaphore;        /* allows inter-process locking */
+Semaphore log_semaphore = { 0 }; /* allows inter-process locking */
 
 
 static void set_logger(void);

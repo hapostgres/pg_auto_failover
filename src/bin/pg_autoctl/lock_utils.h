@@ -19,6 +19,7 @@
 typedef struct Semaphore
 {
 	int semId;
+	pid_t owner;
 } Semaphore;
 
 

@@ -185,8 +185,6 @@ demoapp_run(const char *pguri, DemoAppOptions *demoAppOptions)
 	int startedClientsCount = 0;
 	pid_t clientsPidArray[MAX_CLIENTS_COUNT + 1] = { 0 };
 
-	IntString semIdString = intToString(log_semaphore.semId);
-
 	log_info("Starting %d concurrent clients as sub-processes", clientsCount);
 
 
@@ -195,7 +193,6 @@ demoapp_run(const char *pguri, DemoAppOptions *demoAppOptions)
 	fflush(stderr);
 
 	/* we want to use the same logs semaphore in the sub-processes */
-	setenv(PG_AUTOCTL_LOG_SEMAPHORE, semIdString.strValue, 1);
 
 	for (int index = 0; index <= clientsCount; index++)
 	{

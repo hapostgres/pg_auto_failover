@@ -126,15 +126,12 @@ service_monitor_init_start(void *context, pid_t *pid)
 			 * then quit, avoiding to call the atexit() semaphore clean-up
 			 * function.
 			 */
-			IntString semIdString = intToString(log_semaphore.semId);
 
 			const char *serviceName = createAndRun ?
 									  "pg_autoctl: monitor listener" :
 									  "pg_autoctl: monitor installer";
 
 			(void) set_ps_title(serviceName);
-
-			setenv(PG_AUTOCTL_LOG_SEMAPHORE, semIdString.strValue, 1);
 
 			/* finish the install if necessary */
 			if (!monitor_install(config->hostname, *pgSetup, false))
