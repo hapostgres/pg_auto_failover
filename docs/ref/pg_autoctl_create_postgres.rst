@@ -40,6 +40,7 @@ registered too, and is known to be healthy).
      --server-cert     set the Postgres ssl_cert_file to that file path
      --candidate-priority    priority of the node to be promoted to become primary
      --replication-quorum    true if node participates in write quorum
+     --maximum-backup-rate    maximum transfer rate of data transferred from the server during initial sync
 
 Description
 -----------
@@ -260,6 +261,12 @@ The following options are available to ``pg_autoctl create postgres``:
   Sets this node replication setting for replication quorum to the given
   value (either ``true`` or ``false``) at node registration on the monitor.
   Defaults to ``true``, which enables synchronous replication.
+
+--maximum-backup-rate
+
+  Sets the maximum transfer rate of data transferred from the server during
+  initial sync. This is used by ``pg_basebackup``.
+  Defaults to ``100M``.
 
 --run
 
