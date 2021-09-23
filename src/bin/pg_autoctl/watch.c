@@ -419,8 +419,9 @@ watch_render(WatchContext *context)
 		{
 			(void) clear_line_at(r);
 		}
-		(void) print_watch_footer(context);
 	}
+
+	(void) print_watch_footer(context);
 
 	refresh();
 
@@ -498,8 +499,11 @@ print_watch_footer(WatchContext *context)
 	int r = context->rows - 1;
 	char *help = "Press F1 to exit";
 
-	clear_line_at(r);
+	attron(A_STANDOUT);
+
 	mvprintw(r, context->cols - strlen(help) - 1, help);
+
+	attroff(A_STANDOUT);
 
 	/* we only use one row */
 	return 1;
