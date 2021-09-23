@@ -189,6 +189,9 @@ execute_subprogram(Program *prog)
 		fprintf(stderr, "Failed to find executable program at \"%s\": %s",
 				prog->program,
 				strerror(errno));
+
+		prog->returnCode = -1;
+		prog->error = errno;
 		return;
 	}
 
@@ -341,6 +344,9 @@ execute_program(Program *prog)
 		fprintf(stderr, "Failed to find executable program at \"%s\": %s",
 				prog->program,
 				strerror(errno));
+
+		prog->returnCode = -1;
+		prog->error = errno;
 		return;
 	}
 
