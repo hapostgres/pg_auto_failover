@@ -393,8 +393,10 @@ cli_common_keeper_getopts(int argc, char **argv,
 			case 'R':
 			{
 				/* { "maximum-backup-rate", required_argument, NULL, 'R' } */
-				strlcpy(LocalOptionConfig.maximum_backup_rate, optarg, MAXIMUM_BACKUP_RATE_LEN);
-				log_trace("--maximum-backup-rate %s", LocalOptionConfig.maximum_backup_rate);
+				strlcpy(LocalOptionConfig.maximum_backup_rate, optarg,
+						MAXIMUM_BACKUP_RATE_LEN);
+				log_trace("--maximum-backup-rate %s",
+						  LocalOptionConfig.maximum_backup_rate);
 				break;
 			}
 
