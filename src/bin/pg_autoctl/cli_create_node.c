@@ -92,7 +92,7 @@ CommandLine create_postgres_command =
 		KEEPER_CLI_SSL_OPTIONS
 		"  --candidate-priority    priority of the node to be promoted to become primary\n"
 		"  --replication-quorum    true if node participates in write quorum\n"
-		"  --maximum-backup-rate	maximum transfer rate of data transferred from the server during initial sync\n",
+		"  --maximum-backup-rate   maximum transfer rate of data transferred from the server during initial sync\n",
 		cli_create_postgres_getopts,
 		cli_create_postgres);
 

@@ -40,7 +40,7 @@ registered too, and is known to be healthy).
      --server-cert     set the Postgres ssl_cert_file to that file path
      --candidate-priority    priority of the node to be promoted to become primary
      --replication-quorum    true if node participates in write quorum
-     --maximum-backup-rate    maximum transfer rate of data transferred from the server during initial sync
+     --maximum-backup-rate   maximum transfer rate of data transferred from the server during initial sync
 
 Description
 -----------
