@@ -73,6 +73,7 @@ int monitorDisabledNodeId = -1;
  *      { "citus-cluster", required_argument, NULL, 'Z' },
  *		{ "candidate-priority", required_argument, NULL, 'P'},
  *		{ "replication-quorum", required_argument, NULL, 'r'},
+ *		{ "maximum-backup-rate", required_argument, NULL, 'R' },
  *		{ "help", no_argument, NULL, 0 },
  *		{ "run", no_argument, NULL, 'x' },
  *      { "ssl-self-signed", no_argument, NULL, 's' },
@@ -386,6 +387,16 @@ cli_common_keeper_getopts(int argc, char **argv,
 
 				LocalOptionConfig.pgSetup.settings.replicationQuorum = replicationQuorum;
 				log_trace("--replication-quorum %s", boolToString(replicationQuorum));
+				break;
+			}
+
+			case 'R':
+			{
+				/* { "maximum-backup-rate", required_argument, NULL, 'R' } */
+				strlcpy(LocalOptionConfig.maximum_backup_rate, optarg,
+						MAXIMUM_BACKUP_RATE_LEN);
+				log_trace("--maximum-backup-rate %s",
+						  LocalOptionConfig.maximum_backup_rate);
 				break;
 			}
 

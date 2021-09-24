@@ -91,7 +91,8 @@ CommandLine create_postgres_command =
 		"  --pg-hba-lan      edit pg_hba.conf rules for --dbname in detected LAN\n"
 		KEEPER_CLI_SSL_OPTIONS
 		"  --candidate-priority    priority of the node to be promoted to become primary\n"
-		"  --replication-quorum    true if node participates in write quorum\n",
+		"  --replication-quorum    true if node participates in write quorum\n"
+		"  --maximum-backup-rate   maximum transfer rate of data transferred from the server during initial sync\n",
 		cli_create_postgres_getopts,
 		cli_create_postgres);
 
@@ -272,6 +273,7 @@ cli_create_postgres_getopts(int argc, char **argv)
 		{ "help", no_argument, NULL, 'h' },
 		{ "candidate-priority", required_argument, NULL, 'P' },
 		{ "replication-quorum", required_argument, NULL, 'r' },
+		{ "maximum-backup-rate", required_argument, NULL, 'R' },
 		{ "run", no_argument, NULL, 'x' },
 		{ "no-ssl", no_argument, NULL, 'N' },
 		{ "ssl-self-signed", no_argument, NULL, 's' },
