@@ -488,7 +488,7 @@ IntervalToString(double seconds, char *buffer, size_t size)
 		int hours =
 			(int) ((seconds - (days * 24.0 * 60.0 * 60.0)) / (60.0 * 60.0));
 
-		sformat(buffer, size, "%2dd%02dm", days, hours);
+		sformat(buffer, size, "%2dd%02dh", days, hours);
 	}
 
 	return true;
