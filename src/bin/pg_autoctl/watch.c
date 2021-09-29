@@ -65,11 +65,27 @@ static void print_node_state(WatchContext *context,
 							 int r,
 							 int c);
 
-static void print_events_headers(WatchContext *context, int r, int c);
+static EventColPolicy * pick_event_column_policy(WatchContext *context);
+static bool compute_event_column_spec_lens(WatchContext *context);
+static bool compute_events_sizes(WatchContext *context);
+static int compute_event_column_size(EventColumnType type,
+									 MonitorEventsHeaders *headers);
+
+static void print_events_headers(WatchContext *context,
+								 EventColPolicy *policy,
+								 int r,
+								 int c);
+
+static int print_event(WatchContext *context,
+					   EventColPolicy *policy,
+					   int index,
+					   int r,
+					   int c);
 
 static void watch_set_state_attributes(NodeState state, bool toggle);
 
 static void clear_line_at(int row);
+
 
 /*
  * catch_sigwinch is registered as the SIGWINCH signal handler.
@@ -83,12 +99,12 @@ catch_sigwinch(int sig)
 
 
 /*
- * watch_display_window takes over the terminal window and displays the state
- * and events in there, refreshing the output often, as when using the watch(1)
+ * watch_main_loop takes over the terminal window and displays the state and
+ * events in there, refreshing the output often, as when using the watch(1)
  * command, or similar to what top(1) would be doing.
  */
 void
-watch_main_loop(WatchContext *context)
+cli_watch_main_loop(WatchContext *context)
 {
 	int step = 0;
 
@@ -108,7 +124,7 @@ watch_main_loop(WatchContext *context)
 		 */
 		step = (step + 1) % 10;
 
-		if (!watch_update(context, step))
+		if (!cli_watch_update(context, step))
 		{
 			/* we quit when watch_update returns false */
 			break;
@@ -117,10 +133,10 @@ watch_main_loop(WatchContext *context)
 		/* now display the context we have */
 		if (first)
 		{
-			(void) watch_init_window(context);
+			(void) cli_watch_init_window(context);
 		}
 
-		(void) watch_render(context);
+		(void) cli_watch_render(context);
 
 		/* and then sleep for the rest of the 50 ms */
 		INSTR_TIME_SET_CURRENT(duration);
@@ -131,7 +147,7 @@ watch_main_loop(WatchContext *context)
 		pg_usleep(sleepMs * 1000);
 	}
 
-	(void) watch_end_window(context);
+	(void) cli_watch_end_window(context);
 }
 
 
@@ -140,7 +156,7 @@ watch_main_loop(WatchContext *context)
  * interactive terminal window, handled with the ncurses API.
  */
 void
-watch_init_window(WatchContext *context)
+cli_watch_init_window(WatchContext *context)
 {
 	struct winsize size = { 0 };
 	int ioctl_result = 0;
@@ -172,7 +188,7 @@ watch_init_window(WatchContext *context)
  * watch_end_window finishes our ncurses session and gives control back.
  */
 void
-watch_end_window(WatchContext *context)
+cli_watch_end_window(WatchContext *context)
 {
 	refresh();
 	endwin();
@@ -183,7 +199,7 @@ watch_end_window(WatchContext *context)
  * watch_update updates the context to be displayed on the terminal window.
  */
 bool
-watch_update(WatchContext *context, int step)
+cli_watch_update(WatchContext *context, int step)
 {
 	Monitor *monitor = &(context->monitor);
 	CurrentNodeStateArray *nodesArray = &(context->nodesArray);
@@ -385,7 +401,7 @@ watch_update(WatchContext *context, int step)
  * watch_render displays the context on the terminal window.
  */
 bool
-watch_render(WatchContext *context)
+cli_watch_render(WatchContext *context)
 {
 	int printedRows = 0;
 
@@ -991,6 +1007,152 @@ clear_line_at(int row)
 
 
 /*
+ * pick_event_column_policy chooses which column spec should be used depending
+ * on the current size (rows, cols) of the display, and given update column
+ * specs with the actual lenghts of the data to be displayed.
+ */
+static EventColPolicy *
+pick_event_column_policy(WatchContext *context)
+{
+	EventColPolicy *bestPolicy = NULL;
+
+	for (int i = 0; i < EventColumnPoliciesCount; i++)
+	{
+		/* minimal, terse, verbose, full */
+		EventColPolicy *policy = &(EventColumnPolicies[i]);
+
+		if (policy->totalSize <= context->cols && bestPolicy == NULL)
+		{
+			bestPolicy = policy;
+		}
+		else if (policy->totalSize <= context->cols &&
+				 policy->totalSize >= bestPolicy->totalSize)
+		{
+			bestPolicy = policy;
+		}
+	}
+
+	return bestPolicy;
+}
+
+
+/*
+ * compute_column_spec_lens computes the len of each known column
+ * specification, given the actual data to print.
+ */
+static bool
+compute_event_column_spec_lens(WatchContext *context)
+{
+	MonitorEventsHeaders *headers = &(context->eventsHeaders);
+
+	(void) compute_events_sizes(context);
+
+	for (int i = 0; i < EventColumnPoliciesCount; i++)
+	{
+		/* minimal, terse, verbose, full */
+		EventColPolicy *policy = &(EventColumnPolicies[i]);
+
+		/* reset last computed size */
+		policy->totalSize = 0;
+
+		for (int col = 0; policy->specs[col].type != EVENT_COLUMN_TYPE_LAST; col++)
+		{
+			EventColumnType cType = policy->specs[col].type;
+
+			int headerLen = strlen(policy->specs[col].name);
+			int dataLen = compute_event_column_size(cType, headers);
+
+			/* the column header name might be larger than the data */
+			int len = headerLen > dataLen ? headerLen : dataLen;
+
+			policy->specs[col].len = len;
+			policy->totalSize += len + 1; /* add one space between columns */
+		}
+
+		/* remove extra space after last column */
+		policy->totalSize -= 1;
+	}
+
+	return true;
+}
+
+
+/*
+ * compute events len properties (maximum length for the columns we have)
+ */
+static bool
+compute_events_sizes(WatchContext *context)
+{
+	MonitorEventsArray *eventsArray = &(context->eventsArray);
+	MonitorEventsHeaders *headers = &(context->eventsHeaders);
+
+	for (int index = 0; index < eventsArray->count; index++)
+	{
+		MonitorEvent *event = &(eventsArray->events[index]);
+
+		int idSize = log10(event->eventId) + 1;
+		int timeSize = 19;      /* "YYYY-MM-DD HH:MI:SS" is 19 chars long */
+		int descSize = 60;      /* desc. has horizontal scrolling */
+
+		if (headers->maxEventIdSize < idSize)
+		{
+			headers->maxEventIdSize = idSize;
+		}
+
+		if (headers->maxEventTimeSize < timeSize)
+		{
+			headers->maxEventTimeSize = timeSize;
+		}
+
+		if (headers->maxEventDescSize < descSize)
+		{
+			headers->maxEventDescSize = descSize;
+		}
+	}
+
+	return true;
+}
+
+
+/*
+ * compute_event_column_size returns the size needed to display a given column
+ * type given the pre-computed size of the events array header, where the
+ * alignment with the rest of the array is taken in consideration.
+ */
+static int
+compute_event_column_size(EventColumnType type, MonitorEventsHeaders *headers)
+{
+	switch (type)
+	{
+		case EVENT_COLUMN_TYPE_ID:
+		{
+			return headers->maxEventIdSize;
+		}
+
+		case EVENT_COLUMN_TYPE_TIME:
+		{
+			return headers->maxEventTimeSize;
+		}
+
+		case EVENT_COLUMN_TYPE_DESCRIPTION:
+		{
+			/* we have horizontal scrolling for the description */
+			return 30;
+		}
+
+		default:
+		{
+			log_fatal("BUG: compute_event_column_size(%d)", type);
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+	}
+
+	/* keep compiler happy */
+	return 0;
+}
+
+
+/*
  * print_events_array prints an events array at the given position (r, c) in a
  * window of size (context-rows, context->cols).
  */
@@ -1003,7 +1165,23 @@ print_events_array(WatchContext *context, int r, int c)
 	int currentRow = r;
 	int maxStartCol = 0;
 
-	(void) print_events_headers(context, currentRow++, c);
+	/* compute column sizes */
+	(void) compute_event_column_spec_lens(context);
+
+	/* pick a display policy for the events table */
+	EventColPolicy *eventColumnPolicy = pick_event_column_policy(context);
+
+	if (eventColumnPolicy == NULL)
+	{
+		clear();
+		mvprintw(0, 0, "Window too small: %dx%d", context->rows, context->cols);
+		refresh();
+
+		return false;
+	}
+
+	/* display the events headers */
+	(void) print_events_headers(context, eventColumnPolicy, currentRow++, c);
 	++lines;
 
 	int capacity = context->rows - currentRow;
@@ -1011,44 +1189,10 @@ print_events_array(WatchContext *context, int r, int c)
 	int start =
 		eventsArray->count <= capacity ? 0 : eventsArray->count - capacity;
 
-	for (int index = start; index < eventsArray->count; index++)
+	/* display most recent events first */
+	for (int index = eventsArray->count - 1; index >= start; index--)
 	{
-		MonitorEvent *event = &(eventsArray->events[index]);
 		bool selected = currentRow == context->selectedRow;
-
-		char *text = event->description;
-		int len = strlen(text);
-
-		/* when KEY_END is used, ensure we see the end of text */
-		if (context->move == WATCH_MOVE_FOCUS_END)
-		{
-			/* the eventTime format plus spacing takes up 21 chars on-screen */
-			if (strlen(text) > (context->cols - 21))
-			{
-				text = text + len - 21;
-			}
-		}
-		else if (context->startCol > 0 && len > (context->cols - 21))
-		{
-			/*
-			 * Shift our text following the current startCol, or if we don't
-			 * have that many chars in the text, then shift from as much as we
-			 * can in steps of 10 increments.
-			 */
-			for (int sc = context->startCol; sc > 0; sc -= (context->cols - 21) / 2)
-			{
-				if (len >= sc)
-				{
-					text = text + sc;
-
-					if (sc > maxStartCol)
-					{
-						maxStartCol = sc;
-					}
-					break;
-				}
-			}
-		}
 
 		clear_line_at(currentRow);
 
@@ -1057,10 +1201,12 @@ print_events_array(WatchContext *context, int r, int c)
 			attron(A_REVERSE);
 		}
 
-		mvprintw(currentRow, 0, "%19s %s%s",
-				 event->eventTime,
-				 text == event->description ? " " : " -- ",
-				 text);
+		int sc = print_event(context, eventColumnPolicy, index, currentRow, c);
+
+		if (sc > maxStartCol)
+		{
+			maxStartCol = sc;
+		}
 
 		if (selected)
 		{
@@ -1087,16 +1233,125 @@ print_events_array(WatchContext *context, int r, int c)
 
 
 /*
- * print_event_headers prints the headers of the event list
+ * print_node_state prints the given nodestate with the selected column policy.
+ */
+static int
+print_event(WatchContext *context, EventColPolicy *policy, int index, int r, int c)
+{
+	MonitorEventsArray *eventsArray = &(context->eventsArray);
+	MonitorEvent *event = &(eventsArray->events[index]);
+
+	int cc = c;
+	int startCol = context->startCol;
+
+	for (int col = 0; policy->specs[col].type != EVENT_COLUMN_TYPE_LAST; col++)
+	{
+		EventColumnType cType = policy->specs[col].type;
+		int len = policy->specs[col].len;
+
+		switch (cType)
+		{
+			case EVENT_COLUMN_TYPE_ID:
+			{
+				mvprintw(r, cc, "%*d", len, event->eventId);
+				break;
+			}
+
+			case EVENT_COLUMN_TYPE_TIME:
+			{
+				mvprintw(r, cc, "%*s", len, event->eventTime);
+				break;
+			}
+
+			case EVENT_COLUMN_TYPE_DESCRIPTION:
+			{
+				char *text = event->description;
+				int len = strlen(text);
+
+				/* when KEY_END is used, ensure we see the end of text */
+				if (context->move == WATCH_MOVE_FOCUS_END)
+				{
+					/*
+					 * The eventTime format plus spacing takes up 21 chars
+					 * on-screen
+					 */
+					if (strlen(text) > (context->cols - 21))
+					{
+						text = text + len - 21;
+					}
+				}
+				else if (context->startCol > 0 && len > (context->cols - 21))
+				{
+					/*
+					 * Shift our text following the current startCol, or if we
+					 * don't have that many chars in the text, then shift from
+					 * as much as we can in steps of 10 increments.
+					 */
+					int step = (context->cols - 21) / 2;
+
+					for (; startCol > 0; startCol -= step)
+					{
+						if (len >= startCol)
+						{
+							text = text + startCol;
+
+							break;
+						}
+					}
+				}
+
+				mvprintw(r, cc, "%s%s",
+						 text == event->description ? " " : " -- ",
+						 text);
+
+				break;
+			}
+
+			default:
+			{
+				log_fatal("BUG: print_event(%d)", cType);
+				exit(EXIT_CODE_INTERNAL_ERROR);
+			}
+		}
+
+		cc += len;
+		mvprintw(r, cc++, " ");
+	}
+
+	return startCol;
+}
+
+
+/*
+ * print_column_headers prints the headers of the selection column policy.
  */
 static void
-print_events_headers(WatchContext *context, int r, int c)
+print_events_headers(WatchContext *context, EventColPolicy *policy, int r, int c)
 {
+	int cc = c;
+
 	clear_line_at(r);
 
 	attron(A_STANDOUT);
 
-	mvprintw(r, c, "%19s  %-*s", "Event Time", context->cols - 20, "Description");
+	for (int col = 0; col < EVENT_COLUMN_TYPE_LAST; col++)
+	{
+		int len = policy->specs[col].len;
+		char *name = policy->specs[col].name;
+		EventColumnType cType = policy->specs[col].type;
+
+		/* the description field takes all that's left on the display */
+		if (cType == EVENT_COLUMN_TYPE_DESCRIPTION)
+		{
+			mvprintw(r, cc, " %-*s", context->cols - cc - 1, name);
+		}
+		else
+		{
+			mvprintw(r, cc, "%*s ", len, name);
+		}
+
+		cc += len + 1;
+	}
 
 	attroff(A_STANDOUT);
 }

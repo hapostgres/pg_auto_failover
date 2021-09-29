@@ -2593,7 +2593,7 @@ getLastEvents(void *ctx, PGresult *result)
 	if (nTuples > EVENTS_ARRAY_MAX_COUNT)
 	{
 		log_error("Query returned %d rows, pg_auto_failover supports only up "
-				  "to %d standby nodes at the moment",
+				  "to %d events at the moment",
 				  PQntuples(result), EVENTS_ARRAY_MAX_COUNT);
 		context->parsedOK = false;
 		return;

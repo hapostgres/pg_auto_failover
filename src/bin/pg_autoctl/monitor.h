@@ -48,10 +48,12 @@ typedef struct StateNotification
 	int nodePort;
 } StateNotification;
 
+#define MONITOR_EVENT_TIME_LEN 20 /* "YYYY-MM-DD HH:MI:SS" */
+
 typedef struct MonitorEvent
 {
 	int64_t eventId;
-	char eventTime[NAMEDATALEN];
+	char eventTime[MONITOR_EVENT_TIME_LEN];
 	char formationId[NAMEDATALEN];
 	int64_t nodeId;
 	int groupId;

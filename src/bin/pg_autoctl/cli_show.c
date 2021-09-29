@@ -418,7 +418,7 @@ cli_show_events(int argc, char **argv)
 		strlcpy(context.formation, config.formation, sizeof(context.formation));
 		context.groupId = config.groupId;
 
-		(void) watch_main_loop(&context);
+		(void) cli_watch_main_loop(&context);
 
 		exit(EXIT_CODE_QUIT);
 	}
@@ -504,7 +504,7 @@ cli_show_state(int argc, char **argv)
 		strlcpy(context.formation, config.formation, sizeof(context.formation));
 		context.groupId = config.groupId;
 
-		(void) watch_main_loop(&context);
+		(void) cli_watch_main_loop(&context);
 
 		exit(EXIT_CODE_QUIT);
 	}
