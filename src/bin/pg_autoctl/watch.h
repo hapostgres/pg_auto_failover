@@ -43,17 +43,26 @@ typedef struct MonitorEventsHeaders
 /* share a context between the update and render functions */
 typedef struct WatchContext
 {
+	/* state of the display */
 	int rows;
 	int cols;
 	int selectedRow;
 	int startCol;
 	WatchMoveFocus move;
 
+	/* internal state */
+	bool initialized;
+	bool cookedMode;
+	bool shouldExit;            /* true when q or F1 have been pressed */
+	bool couldContactMonitor;
+
+	/* parameters used to fetch the data we display */
 	Monitor monitor;
 	char formation[NAMEDATALEN];
 	int groupId;
 	int number_sync_standbys;
 
+	/* data to display */
 	CurrentNodeStateArray nodesArray;
 	MonitorEventsArray eventsArray;
 	MonitorEventsHeaders eventsHeaders;

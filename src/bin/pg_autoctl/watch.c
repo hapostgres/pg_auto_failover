@@ -44,10 +44,15 @@
 
 volatile sig_atomic_t window_size_changed = 0;      /* SIGWINCH */
 
+static bool cli_watch_update_from_monitor(WatchContext *context);
+static bool cli_watch_process_keys(WatchContext *context);
+
 static int print_watch_header(WatchContext *context, int r);
 static int print_watch_footer(WatchContext *context);
 static int print_nodes_array(WatchContext *context, int r, int c);
 static int print_events_array(WatchContext *context, int r, int c);
+
+static void print_current_time(WatchContext *context, int r);
 
 static ColPolicy * pick_column_policy(WatchContext *context);
 static bool compute_column_spec_lens(WatchContext *context);
@@ -106,10 +111,10 @@ catch_sigwinch(int sig)
 void
 cli_watch_main_loop(WatchContext *context)
 {
-	int step = 0;
+	int step = -1;
 
 	/* the main loop */
-	for (bool first = true;; first = false)
+	for (;;)
 	{
 		instr_time start;
 		instr_time duration;
@@ -124,19 +129,25 @@ cli_watch_main_loop(WatchContext *context)
 		 */
 		step = (step + 1) % 10;
 
-		if (!cli_watch_update(context, step))
+		(void) cli_watch_update(context, step);
+
+		if (context->shouldExit)
 		{
-			/* we quit when watch_update returns false */
 			break;
 		}
 
 		/* now display the context we have */
-		if (first)
+		if (context->couldContactMonitor)
 		{
-			(void) cli_watch_init_window(context);
+			(void) cli_watch_render(context);
 		}
-
-		(void) cli_watch_render(context);
+		else
+		{
+			/* get back to "cooked" terminal mode, showing stderr logs */
+			context->cookedMode = true;
+			def_prog_mode();
+			endwin();
+		}
 
 		/* and then sleep for the rest of the 50 ms */
 		INSTR_TIME_SET_CURRENT(duration);
@@ -144,7 +155,10 @@ cli_watch_main_loop(WatchContext *context)
 
 		int sleepMs = 50 - INSTR_TIME_GET_MILLISEC(duration);
 
-		pg_usleep(sleepMs * 1000);
+		if (sleepMs > 0)
+		{
+			pg_usleep(sleepMs * 1000);
+		}
 	}
 
 	(void) cli_watch_end_window(context);
@@ -201,52 +215,82 @@ cli_watch_end_window(WatchContext *context)
 bool
 cli_watch_update(WatchContext *context, int step)
 {
+	/* only update data from the monitor at step 0 */
+	if (step == 0)
+	{
+		context->couldContactMonitor = cli_watch_update_from_monitor(context);
+	}
+
+	/* now process any key pressed by the user */
+	bool processKeys = cli_watch_process_keys(context);
+
+	/* failure to process keys signals we should exit now */
+	context->shouldExit = (processKeys == false);
+
+	return true;
+}
+
+
+/*
+ * cli_watch_update_from_monitor fetches the data to display from the
+ * pg_auto_failover monitor database.
+ */
+static bool
+cli_watch_update_from_monitor(WatchContext *context)
+{
 	Monitor *monitor = &(context->monitor);
 	CurrentNodeStateArray *nodesArray = &(context->nodesArray);
 	MonitorEventsArray *eventsArray = &(context->eventsArray);
 
-	if (step == 0)
+	/*
+	 * We use a transaction despite being read-only, because we want to re-use
+	 * a single connection to the monitor.
+	 */
+	PGSQL *pgsql = &(monitor->pgsql);
+
+	pgsql->connectionStatementType = PGSQL_CONNECTION_MULTI_STATEMENT;
+
+	if (!monitor_get_current_state(monitor,
+								   context->formation,
+								   context->groupId,
+								   nodesArray))
 	{
-		/*
-		 * We use a transaction despite being read-only, because we want to
-		 * re-use a single connection to the monitor.
-		 */
-		PGSQL *pgsql = &(monitor->pgsql);
-
-		pgsql->connectionStatementType = PGSQL_CONNECTION_MULTI_STATEMENT;
-
-		if (!monitor_get_current_state(monitor,
-									   context->formation,
-									   context->groupId,
-									   nodesArray))
-		{
-			/* errors have already been logged */
-			return false;
-		}
-
-		if (!monitor_get_formation_number_sync_standbys(
-				monitor,
-				context->formation,
-				&(context->number_sync_standbys)))
-		{
-			/* errors have already been logged */
-			return false;
-		}
-
-		if (!monitor_get_last_events(monitor,
-									 context->formation,
-									 context->groupId,
-									 EVENTS_BUFFER_COUNT,
-									 eventsArray))
-		{
-			/* errors have already been logged */
-			return false;
-		}
-
-		/* time to finish our connection */
-		pgsql_finish(pgsql);
+		/* errors have already been logged */
+		return false;
 	}
 
+	if (!monitor_get_formation_number_sync_standbys(
+			monitor,
+			context->formation,
+			&(context->number_sync_standbys)))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	if (!monitor_get_last_events(monitor,
+								 context->formation,
+								 context->groupId,
+								 EVENTS_BUFFER_COUNT,
+								 eventsArray))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/* time to finish our connection */
+	pgsql_finish(pgsql);
+
+	return true;
+}
+
+
+/*
+ * cli_watch_process_keys processes the user input.
+ */
+static bool
+cli_watch_process_keys(WatchContext *context)
+{
 	int ch;
 
 	/*
@@ -405,6 +449,20 @@ cli_watch_render(WatchContext *context)
 {
 	int printedRows = 0;
 
+	if (!context->initialized)
+	{
+		(void) cli_watch_init_window(context);
+		context->initialized = true;
+	}
+
+	if (context->cookedMode)
+	{
+		reset_prog_mode();
+		refresh();
+
+		context->cookedMode = false;
+	}
+
 	printedRows += print_watch_header(context, 0);
 
 	(void) clear_line_at(1);
@@ -458,23 +516,9 @@ cli_watch_render(WatchContext *context)
 static int
 print_watch_header(WatchContext *context, int r)
 {
-	uint64_t now = time(NULL);
-	char timestring[MAXCTIMESIZE] = { 0 };
-
-	/* make sure we start with an empty line */
-	(void) clear_line_at(0);
-
-	/* format the current time to be user-friendly */
-	epoch_to_string(now, timestring);
-
-	/* "Wed Jun 30 21:49:08 1993" -> "21:49:08" */
-	timestring[11 + 8] = '\0';
-
-	clear_line_at(r);
-
-	mvprintw(r, context->cols - 9, "%s", timestring + 11);
-
 	int c = 0;
+
+	(void) print_current_time(context, r);
 
 	mvprintw(r, c, "Formation: "); /* that's 11 chars */
 	c += 11;
@@ -508,6 +552,31 @@ print_watch_header(WatchContext *context, int r)
 
 	/* we only use one row */
 	return 1;
+}
+
+
+/*
+ * print_current_time prints the current time on the far right of the first
+ * line of the screen.
+ */
+static void
+print_current_time(WatchContext *context, int r)
+{
+	uint64_t now = time(NULL);
+	char timestring[MAXCTIMESIZE] = { 0 };
+
+	/* make sure we start with an empty line */
+	(void) clear_line_at(0);
+
+	/* format the current time to be user-friendly */
+	epoch_to_string(now, timestring);
+
+	/* "Wed Jun 30 21:49:08 1993" -> "21:49:08" */
+	timestring[11 + 8] = '\0';
+
+	clear_line_at(r);
+
+	mvprintw(r, context->cols - 9, "%s", timestring + 11);
 }
 
 
@@ -1275,19 +1344,19 @@ print_event(WatchContext *context, EventColPolicy *policy, int index, int r, int
 					 * The eventTime format plus spacing takes up 21 chars
 					 * on-screen
 					 */
-					if (strlen(text) > (context->cols - 21))
+					if (strlen(text) > (context->cols - cc))
 					{
-						text = text + len - 21;
+						text = text + len - cc;
 					}
 				}
-				else if (context->startCol > 0 && len > (context->cols - 21))
+				else if (context->startCol > 0 && len > (context->cols - cc))
 				{
 					/*
 					 * Shift our text following the current startCol, or if we
 					 * don't have that many chars in the text, then shift from
 					 * as much as we can in steps of 10 increments.
 					 */
-					int step = (context->cols - 21) / 2;
+					int step = (context->cols - cc) / 2;
 
 					for (; startCol > 0; startCol -= step)
 					{
@@ -1315,7 +1384,8 @@ print_event(WatchContext *context, EventColPolicy *policy, int index, int r, int
 		}
 
 		cc += len;
-		mvprintw(r, cc++, " ");
+		mvprintw(r, cc, "  ");
+		cc += 2;
 	}
 
 	return startCol;
@@ -1347,10 +1417,12 @@ print_events_headers(WatchContext *context, EventColPolicy *policy, int r, int c
 		}
 		else
 		{
-			mvprintw(r, cc, "%*s ", len, name);
+			mvprintw(r, cc, "%*s", len, name);
 		}
 
-		cc += len + 1;
+		cc += len;
+		mvprintw(r, cc, "  ");
+		cc += 2;
 	}
 
 	attroff(A_STANDOUT);
