@@ -263,10 +263,13 @@ watch_update(WatchContext *context, int step)
 
 			if (ioctl_result >= 0)
 			{
-				context->rows = size.ws_row;
-				context->cols = size.ws_col;
+				if (context->rows != size.ws_row || context->cols != size.ws_col)
+				{
+					context->rows = size.ws_row;
+					context->cols = size.ws_col;
 
-				resizeterm(context->rows, context->cols);
+					resizeterm(context->rows, context->cols);
+				}
 			}
 		}
 
