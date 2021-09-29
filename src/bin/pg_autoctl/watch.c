@@ -9,6 +9,7 @@
  */
 #include <inttypes.h>
 #include <getopt.h>
+#include <math.h>
 #include <unistd.h>
 
 #include <curses.h>
