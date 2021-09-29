@@ -416,14 +416,16 @@ watch_render(WatchContext *context)
 
 	printedRows += print_events_array(context, 2 + nodeRows + 1, 0);
 
+	/* clean the remaining rows that we didn't use for displaying events */
 	if (printedRows < context->rows)
 	{
-		for (int r = printedRows; r < (context->rows - 1); r++)
+		for (int r = printedRows; r < context->rows; r++)
 		{
 			(void) clear_line_at(r);
 		}
 	}
 
+	/* now display the footer */
 	(void) print_watch_footer(context);
 
 	refresh();
@@ -504,7 +506,7 @@ print_watch_footer(WatchContext *context)
 
 	attron(A_STANDOUT);
 
-	mvprintw(r, context->cols - strlen(help) - 1, help);
+	mvprintw(r, context->cols - strlen(help), help);
 
 	attroff(A_STANDOUT);
 
