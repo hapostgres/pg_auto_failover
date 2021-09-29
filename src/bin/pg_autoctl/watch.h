@@ -27,7 +27,9 @@ typedef enum
 	WATCH_MOVE_FOCUS_LEFT,
 	WATCH_MOVE_FOCUS_RIGHT,
 	WATCH_MOVE_FOCUS_HOME,
-	WATCH_MOVE_FOCUS_END
+	WATCH_MOVE_FOCUS_END,
+	WATCH_MOVE_FOCUS_UP,
+	WATCH_MOVE_FOCUS_DOWN
 } WatchMoveFocus;
 
 /* compute max size of items to display for events */
@@ -47,6 +49,7 @@ typedef struct WatchContext
 	int rows;
 	int cols;
 	int selectedRow;
+	int selectedArea;           /* area 1: node states, area 2: node events */
 	int startCol;
 	WatchMoveFocus move;
 

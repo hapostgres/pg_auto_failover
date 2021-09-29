@@ -186,6 +186,7 @@ cli_watch_init_window(WatchContext *context)
 	intrflush(stdscr, FALSE);   /* No flushing on interrupts */
 	keypad(stdscr, TRUE);       /* We get F1, F2 etc..		*/
 	noecho();                   /* Don't echo() while we do getch */
+	nonl();                     /* Do not translate RETURN key */
 	nodelay(stdscr, TRUE);      /* Non blocking getch() variants */
 	curs_set(0);                /* Do not display the cursor */
 
@@ -285,6 +286,9 @@ cli_watch_update_from_monitor(WatchContext *context)
 }
 
 
+/* Capture CTRL + a key */
+#define ctrl(x) ((x) & 0x1f)
+
 /*
  * cli_watch_process_keys processes the user input.
  */
@@ -334,7 +338,7 @@ cli_watch_process_keys(WatchContext *context)
 		}
 
 		/* left and right moves are conditionnal / relative */
-		else if (ch == KEY_LEFT || ch == 'b' || ch == 'h')
+		else if (ch == KEY_LEFT || ch == ctrl('b') || ch == 'h')
 		{
 			if (context->move == WATCH_MOVE_FOCUS_NONE)
 			{
@@ -358,7 +362,7 @@ cli_watch_process_keys(WatchContext *context)
 		}
 
 		/* left and right moves are conditionnal / relative */
-		else if (ch == KEY_RIGHT || ch == 'f' || ch == 'l')
+		else if (ch == KEY_RIGHT || ch == ctrl('f') || ch == 'l')
 		{
 			if (context->move == WATCH_MOVE_FOCUS_NONE)
 			{
@@ -374,20 +378,22 @@ cli_watch_process_keys(WatchContext *context)
 		}
 
 		/* home and end moves are unconditionnal / absolute */
-		else if (ch == KEY_HOME || ch == 'a' || ch == '0')
+		else if (ch == KEY_HOME || ch == ctrl('a') || ch == '0')
 		{
 			context->move = WATCH_MOVE_FOCUS_HOME;
 
 			context->startCol = 0;
 		}
-		else if (ch == KEY_END || ch == 'e' || ch == '$')
+		else if (ch == KEY_END || ch == ctrl('e') || ch == '$')
 		{
 			context->move = WATCH_MOVE_FOCUS_END;
 		}
 
 		/* up is C-p in Emacs, k in vi(m) */
-		else if (ch == KEY_UP || ch == 'p' || ch == 'k')
+		else if (ch == KEY_UP || ch == ctrl('p') || ch == 'k')
 		{
+			context->move = WATCH_MOVE_FOCUS_UP;
+
 			if (context->selectedRow > 0)
 			{
 				--context->selectedRow;
@@ -395,7 +401,7 @@ cli_watch_process_keys(WatchContext *context)
 		}
 
 		/* page up, which is also C-u in the terminal with less/more etc */
-		else if (ch == KEY_PPAGE || ch == 'u')
+		else if (ch == KEY_PPAGE || ch == ctrl('u'))
 		{
 			if (context->selectedRow > 0 && context->selectedRow <= 6)
 			{
@@ -408,8 +414,10 @@ cli_watch_process_keys(WatchContext *context)
 		}
 
 		/* down is C-n in Emacs, j in vi(m) */
-		else if (ch == KEY_DOWN || ch == 'n' || ch == 'j')
+		else if (ch == KEY_DOWN || ch == ctrl('n') || ch == 'j')
 		{
+			context->move = WATCH_MOVE_FOCUS_DOWN;
+
 			if (context->selectedRow < context->rows)
 			{
 				++context->selectedRow;
@@ -417,7 +425,7 @@ cli_watch_process_keys(WatchContext *context)
 		}
 
 		/* page down, which is also C-d in the terminal with less/more etc */
-		else if (ch == KEY_NPAGE || ch == 'd')
+		else if (ch == KEY_NPAGE || ch == ctrl('d'))
 		{
 			if (context->selectedRow < context->rows &&
 				context->selectedRow >= (context->rows - 6))
@@ -434,6 +442,7 @@ cli_watch_process_keys(WatchContext *context)
 		else if (ch == KEY_DL || ch == KEY_DC)
 		{
 			context->selectedRow = 0;
+			context->selectedArea = 0;
 		}
 	} while (ch != ERR);
 
@@ -463,32 +472,64 @@ cli_watch_render(WatchContext *context)
 		context->cookedMode = false;
 	}
 
+	/* adjust selected row to fit the selected area */
+	int nodeHeaderRow = 2;
+	int firstNodeRow = nodeHeaderRow + 1;
+	int lastNodeRow = firstNodeRow + context->nodesArray.count - 1;
+
+	int eventHeaderRow = lastNodeRow + 2; /* blank line, evenzt headers */
+	int firstEventRow = eventHeaderRow + 1;
+	int lastEventRow = firstEventRow + context->eventsArray.count - 1;
+
+	if (lastEventRow > context->rows)
+	{
+		lastEventRow = context->rows;
+	}
+
+	/* first usage of the arrow keys select an area */
+	if (context->selectedArea == 0 && context->selectedRow > 0)
+	{
+		context->selectedArea = 1;
+	}
+
+	if (context->selectedArea == 1)
+	{
+		if (context->selectedRow < firstNodeRow)
+		{
+			context->selectedRow = firstNodeRow;
+		}
+		else if (context->selectedRow > lastNodeRow)
+		{
+			context->selectedArea = 2;
+			context->selectedRow = firstEventRow;
+		}
+	}
+	else if (context->selectedArea == 2)
+	{
+		if (context->selectedRow < firstEventRow)
+		{
+			context->selectedArea = 1;
+			context->selectedRow = lastNodeRow;
+		}
+		else if (context->selectedRow > lastEventRow)
+		{
+			context->selectedRow = lastEventRow;
+		}
+	}
+
 	printedRows += print_watch_header(context, 0);
 
+	/* skip empty lines and headers */
 	(void) clear_line_at(1);
 	++printedRows;
 
-	/* skip empty lines and headers */
-	if (context->selectedRow > 0 && context->selectedRow < 3)
-	{
-		context->selectedRow = 3;
-	}
-
-	int nodeRows = print_nodes_array(context, 2, 0);
-
+	int nodeRows = print_nodes_array(context, nodeHeaderRow, 0);
 	printedRows += nodeRows;
 
-	(void) clear_line_at(2 + nodeRows);
-	++printedRows;
+	(void) clear_line_at(printedRows);
+	(void) clear_line_at(++printedRows);
 
-	/* skip empty lines and headers */
-	if (context->selectedRow >= (2 + nodeRows) &&
-		context->selectedRow <= 2 + nodeRows + 1)
-	{
-		context->selectedRow = 2 + nodeRows + 2;
-	}
-
-	printedRows += print_events_array(context, 2 + nodeRows + 1, 0);
+	printedRows += print_events_array(context, eventHeaderRow, 0);
 
 	/* clean the remaining rows that we didn't use for displaying events */
 	if (printedRows < context->rows)
