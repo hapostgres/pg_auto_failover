@@ -1246,8 +1246,7 @@ compute_event_column_size(EventColumnType type, MonitorEventsHeaders *headers)
 
 		case EVENT_COLUMN_TYPE_DESCRIPTION:
 		{
-			/* we have horizontal scrolling for the description */
-			return 30;
+			return headers->maxEventDescSize;
 		}
 
 		default:
@@ -1354,7 +1353,7 @@ print_event(WatchContext *context, EventColPolicy *policy, int index, int r, int
 	int cc = c;
 	int startCol = context->startCol;
 
-	for (int col = 0; policy->specs[col].type != EVENT_COLUMN_TYPE_LAST; col++)
+	for (int col = 0; policy->specs[col].type < EVENT_COLUMN_TYPE_LAST; col++)
 	{
 		EventColumnType cType = policy->specs[col].type;
 		int len = policy->specs[col].len;
@@ -1424,9 +1423,17 @@ print_event(WatchContext *context, EventColPolicy *policy, int index, int r, int
 			}
 		}
 
-		cc += len;
-		mvprintw(r, cc, "  ");
-		cc += 2;
+		/* We know DESCRIPTION is the last column, and we skip computing its
+		 * actual size... so the len of this field is a static value (60).
+		 * Avoid printing the column separator in the middle of the actual
+		 * description text.
+		 */
+		if (cType != EVENT_COLUMN_TYPE_DESCRIPTION)
+		{
+			cc += len;
+			mvprintw(r, cc, "  ");
+			cc += 2;
+		}
 	}
 
 	return startCol;
