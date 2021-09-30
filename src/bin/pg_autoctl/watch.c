@@ -112,6 +112,8 @@ catch_sigwinch(int sig)
 void
 cli_watch_main_loop(WatchContext *context)
 {
+	WatchContext previous = { 0 };
+
 	int step = -1;
 
 	/* the main loop */
@@ -140,9 +142,9 @@ cli_watch_main_loop(WatchContext *context)
 		/* now display the context we have */
 		if (context->couldContactMonitor)
 		{
-			(void) cli_watch_render(context);
+			(void) cli_watch_render(context, &previous);
 		}
-		else
+		else if (!context->cookedMode)
 		{
 			/* get back to "cooked" terminal mode, showing stderr logs */
 			context->cookedMode = true;
@@ -160,6 +162,9 @@ cli_watch_main_loop(WatchContext *context)
 		{
 			pg_usleep(sleepMs * 1000);
 		}
+
+		/* update the previous context */
+		previous = *context;
 	}
 
 	(void) cli_watch_end_window(context);
@@ -337,7 +342,6 @@ cli_watch_process_keys(WatchContext *context)
 				}
 			}
 		}
-
 		/* left and right moves are conditionnal / relative */
 		else if (ch == KEY_LEFT || ch == ctrl('b') || ch == 'h')
 		{
@@ -361,7 +365,6 @@ cli_watch_process_keys(WatchContext *context)
 				context->move = WATCH_MOVE_FOCUS_NONE;
 			}
 		}
-
 		/* left and right moves are conditionnal / relative */
 		else if (ch == KEY_RIGHT || ch == ctrl('f') || ch == 'l')
 		{
@@ -377,7 +380,6 @@ cli_watch_process_keys(WatchContext *context)
 				context->move = WATCH_MOVE_FOCUS_NONE;
 			}
 		}
-
 		/* home and end moves are unconditionnal / absolute */
 		else if (ch == KEY_HOME || ch == ctrl('a') || ch == '0')
 		{
@@ -389,7 +391,6 @@ cli_watch_process_keys(WatchContext *context)
 		{
 			context->move = WATCH_MOVE_FOCUS_END;
 		}
-
 		/* up is C-p in Emacs, k in vi(m) */
 		else if (ch == KEY_UP || ch == ctrl('p') || ch == 'k')
 		{
@@ -400,7 +401,6 @@ cli_watch_process_keys(WatchContext *context)
 				--context->selectedRow;
 			}
 		}
-
 		/* page up, which is also C-u in the terminal with less/more etc */
 		else if (ch == KEY_PPAGE || ch == ctrl('u'))
 		{
@@ -413,7 +413,6 @@ cli_watch_process_keys(WatchContext *context)
 				context->selectedRow -= 5;
 			}
 		}
-
 		/* down is C-n in Emacs, j in vi(m) */
 		else if (ch == KEY_DOWN || ch == ctrl('n') || ch == 'j')
 		{
@@ -424,7 +423,6 @@ cli_watch_process_keys(WatchContext *context)
 				++context->selectedRow;
 			}
 		}
-
 		/* page down, which is also C-d in the terminal with less/more etc */
 		else if (ch == KEY_NPAGE || ch == ctrl('d'))
 		{
@@ -438,7 +436,6 @@ cli_watch_process_keys(WatchContext *context)
 				context->selectedRow += 5;
 			}
 		}
-
 		/* cancel current selected row */
 		else if (ch == KEY_DL || ch == KEY_DC)
 		{
@@ -455,16 +452,24 @@ cli_watch_process_keys(WatchContext *context)
  * watch_render displays the context on the terminal window.
  */
 bool
-cli_watch_render(WatchContext *context)
+cli_watch_render(WatchContext *context, WatchContext *previous)
 {
 	int printedRows = 0;
 
+	/* on the first call to render, initialize the ncurses terminal control */
 	if (!context->initialized)
 	{
 		(void) cli_watch_init_window(context);
 		context->initialized = true;
 	}
 
+	/*
+	 * When we fail to contact the monitor, we switch the terminal back to
+	 * cookedMode so that the usual stderr logs are visible. In that case the
+	 * render function is not called. When cli_watch_render() is called again,
+	 * it means we could contact the monitor and get an update, and we need to
+	 * take control of the terminal again.
+	 */
 	if (context->cookedMode)
 	{
 		reset_prog_mode();
@@ -493,6 +498,15 @@ cli_watch_render(WatchContext *context)
 		context->selectedArea = 1;
 	}
 
+	/*
+	 * Adjust the selectedRow position to make sure we always select a row
+	 * that's part of the data: avoid empty separation lines, avoid header
+	 * lines.
+	 *
+	 * We conceptually divide the screen in two areas: first, the nodes array
+	 * area, and then the events area. When scrolling away from an area we may
+	 * jump to the other area directly.
+	 */
 	if (context->selectedArea == 1)
 	{
 		if (context->selectedRow < firstNodeRow)
@@ -518,6 +532,9 @@ cli_watch_render(WatchContext *context)
 		}
 	}
 
+	/*
+	 * Print the main header and then the nodes array.
+	 */
 	printedRows += print_watch_header(context, 0);
 
 	/* skip empty lines and headers */
@@ -528,16 +545,36 @@ cli_watch_render(WatchContext *context)
 	printedRows += nodeRows;
 
 	(void) clear_line_at(printedRows);
-	(void) clear_line_at(++printedRows);
 
-	printedRows += print_events_array(context, eventHeaderRow, 0);
+	/*
+	 * Now print the events array. Because that operation is more expensive,
+	 * and because most of the times there is no event happening, we compare
+	 * the current context with the previous one and avoid this part of the
+	 * code entirely when we figure out that we would only redisplay what's
+	 * already visible on the terminal.
+	 */
 
-	/* clean the remaining rows that we didn't use for displaying events */
-	if (printedRows < context->rows)
+	if (context->rows != previous->rows ||
+		context->cols != previous->cols ||
+		context->selectedRow != previous->selectedRow ||
+		context->selectedArea != previous->selectedArea ||
+		context->startCol != previous->startCol ||
+		context->cookedMode != previous->cookedMode ||
+		context->eventsArray.count != previous->eventsArray.count ||
+		(context->eventsArray.events[0].eventId !=
+		 previous->eventsArray.events[0].eventId))
 	{
-		for (int r = printedRows; r < context->rows; r++)
+		(void) clear_line_at(++printedRows);
+
+		printedRows += print_events_array(context, eventHeaderRow, 0);
+
+		/* clean the remaining rows that we didn't use for displaying events */
+		if (printedRows < context->rows)
 		{
-			(void) clear_line_at(r);
+			for (int r = printedRows; r < context->rows; r++)
+			{
+				(void) clear_line_at(r);
+			}
 		}
 	}
 

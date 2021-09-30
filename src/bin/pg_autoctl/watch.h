@@ -76,6 +76,6 @@ void cli_watch_init_window(WatchContext *context);
 void cli_watch_end_window(WatchContext *context);
 
 bool cli_watch_update(WatchContext *context, int step);
-bool cli_watch_render(WatchContext *context);
+bool cli_watch_render(WatchContext *context, WatchContext *previous);
 
 #endif  /* WATCH_H */
