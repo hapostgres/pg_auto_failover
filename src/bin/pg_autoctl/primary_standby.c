@@ -512,6 +512,38 @@ primary_drop_replication_slot(LocalPostgresServer *postgres,
 
 
 /*
+ * primary_drop_all_replication_slots drops all the replication slots found on
+ * a node.
+ *
+ * When a node has been demoted, the replication slots that used to be
+ * maintained by the streaming replication protocol are now going to be
+ * maintained "manually" by pg_autoctl using pg_replication_slot_advance().
+ *
+ * There is a problem in pg_replication_slot_advance() in that it only
+ * maintains the restart_lsn property of a replication slot, it does not
+ * maintain the xmin of it. When re-using the pre-existing replication slots,
+ * we want to have a NULL xmin, so we drop the slots, and then create them
+ * again.
+ */
+bool
+primary_drop_all_replication_slots(LocalPostgresServer *postgres)
+{
+	NodeAddressArray otherNodesArray = { 0 };
+
+	log_info("Dropping replication slots (to reset their xmin)");
+
+	if (!postgres_replication_slot_create_and_drop(postgres, &otherNodesArray))
+	{
+		log_error("Failed to drop replication slots on the local Postgres "
+				  "instance, see above for details");
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
  * postgres_replication_slot_create_and_drop drops the replication slots that
  * belong to dropped nodes on a primary server, and creates replication slots
  * for newly created nodes on the monitor.

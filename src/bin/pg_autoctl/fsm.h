@@ -64,6 +64,7 @@ bool fsm_start_maintenance_on_standby(Keeper *keeper);
 bool fsm_restart_standby(Keeper *keeper);
 
 bool fsm_report_lsn(Keeper *keeper);
+bool fsm_report_lsn_and_drop_replication_slots(Keeper *keeper);
 bool fsm_fast_forward(Keeper *keeper);
 bool fsm_prepare_cascade(Keeper *keeper);
 bool fsm_follow_new_primary(Keeper *keeper);

@@ -1025,6 +1025,24 @@ fsm_rewind_or_init(Keeper *keeper)
 		}
 	}
 
+	/*
+	 * This node is now demoted: it used to be a primary node, it's not
+	 * anymore. The replication slots that used to be maintained by the
+	 * streaming replication protocol are now going to be maintained "manually"
+	 * by pg_autoctl using pg_replication_slot_advance().
+	 *
+	 * There is a problem in pg_replication_slot_advance() in that it only
+	 * maintains the restart_lsn property of a replication slot, it does not
+	 * maintain the xmin of it. When re-using the pre-existing replication
+	 * slots, we want to have a NULL xmin, so we drop the slots, and then
+	 * create them again.
+	 */
+	if (!primary_drop_all_replication_slots(postgres))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
 	return true;
 }
 
@@ -1262,6 +1280,29 @@ fsm_report_lsn(Keeper *keeper)
 	}
 
 	return true;
+}
+
+
+/*
+ * fsm_report_lsn_and_drop_replication_slots is used when a former primary node
+ * has been demoted and gets back online during the secondary election.
+ *
+ * As Postgres pg_replication_slot_advance() function does not maintain the
+ * xmin property of the slot, we want to create new inactive slots now rather
+ * than continue using previously-active (streaming replication) slots.
+ */
+bool
+fsm_report_lsn_and_drop_replication_slots(Keeper *keeper)
+{
+	LocalPostgresServer *postgres = &(keeper->postgres);
+
+	if (!fsm_report_lsn(keeper))
+	{
+		/* errors have already been reported */
+		return false;
+	}
+
+	return primary_drop_all_replication_slots(postgres);
 }
 
 
