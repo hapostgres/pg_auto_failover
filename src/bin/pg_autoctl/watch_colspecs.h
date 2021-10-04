@@ -270,11 +270,22 @@ EventColPolicy EventColumnPolicies[] = {
 		}
 	},
 	{
+		"almost verbose",
+		0,
+		{
+			{ EVENT_COLUMN_TYPE_ID, "Id", 0 },
+			{ EVENT_COLUMN_TYPE_TIME, "Event Time", 0 },
+			{ EVENT_COLUMN_TYPE_DESCRIPTION, "Description", 0 },
+			{ EVENT_COLUMN_TYPE_LAST, "", 0 }
+		}
+	},
+	{
 		"verbose",
 		0,
 		{
 			{ EVENT_COLUMN_TYPE_ID, "Id", 0 },
 			{ EVENT_COLUMN_TYPE_TIME, "Event Time", 0 },
+			{ EVENT_COLUMN_TYPE_NODE_NAME, "Name", 0 },
 			{ EVENT_COLUMN_TYPE_DESCRIPTION, "Description", 0 },
 			{ EVENT_COLUMN_TYPE_LAST, "", 0 }
 		}

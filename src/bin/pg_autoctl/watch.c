@@ -1239,6 +1239,7 @@ compute_events_sizes(WatchContext *context)
 		MonitorEvent *event = &(eventsArray->events[index]);
 
 		int idSize = log10(event->eventId) + 1;
+		int nameSize = strlen(event->nodeName);
 		int timeSize = 19;      /* "YYYY-MM-DD HH:MI:SS" is 19 chars long */
 		int descSize = 60;      /* desc. has horizontal scrolling */
 
@@ -1250,6 +1251,11 @@ compute_events_sizes(WatchContext *context)
 		if (headers->maxEventTimeSize < timeSize)
 		{
 			headers->maxEventTimeSize = timeSize;
+		}
+
+		if (headers->maxEventNodeNameSize < nameSize)
+		{
+			headers->maxEventNodeNameSize = nameSize;
 		}
 
 		if (headers->maxEventDescSize < descSize)
@@ -1280,6 +1286,11 @@ compute_event_column_size(EventColumnType type, MonitorEventsHeaders *headers)
 		case EVENT_COLUMN_TYPE_TIME:
 		{
 			return headers->maxEventTimeSize;
+		}
+
+		case EVENT_COLUMN_TYPE_NODE_NAME:
+		{
+			return headers->maxEventNodeNameSize;
 		}
 
 		case EVENT_COLUMN_TYPE_DESCRIPTION:
@@ -1407,6 +1418,12 @@ print_event(WatchContext *context, EventColPolicy *policy, int index, int r, int
 			case EVENT_COLUMN_TYPE_TIME:
 			{
 				mvprintw(r, cc, "%*s", len, event->eventTime);
+				break;
+			}
+
+			case EVENT_COLUMN_TYPE_NODE_NAME:
+			{
+				mvprintw(r, cc, "%*s", len, event->nodeName);
 				break;
 			}
 
