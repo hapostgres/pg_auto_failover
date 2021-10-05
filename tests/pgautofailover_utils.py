@@ -1952,9 +1952,8 @@ class PGAutoCtl:
 
             self.last_returncode = proc.returncode
             if proc.returncode > 0:
-                raise Exception(
-                    "%s failed\n%s\n%s\n%s"
-                    % (name, " ".join(self.command), out, err)
+                raise subprocess.CalledProcessError(
+                    proc.returncode, self.cmd, out, err
                 )
 
             return out, err, proc.returncode

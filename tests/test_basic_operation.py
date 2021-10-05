@@ -1,6 +1,9 @@
 import pgautofailover_utils as pgautofailover
-from nose.tools import raises, eq_
+from nose.tools import assert_raises, raises, eq_
 
+import os
+import shutil
+import subprocess
 import time
 
 cluster = None
@@ -356,3 +359,34 @@ def test_025_drop_primary():
     node3.drop()
     assert not node3.pg_is_running()
     assert node2.wait_until_state(target_state="single")
+
+
+def test_026_config_set_bug():
+    pg_ctl = monitor.config_get("postgresql.pg_ctl")
+
+    # set monitor config postgresql.pg_ctl to something invalid
+    with assert_raises(subprocess.CalledProcessError):
+        monitor.config_set("postgresql.pg_ctl", "invalid")
+
+    # it should not get changed
+    eq_(monitor.config_get("postgresql.pg_ctl"), pg_ctl)
+
+    # try again with a keeper
+    pg_ctl = node1.config_get("postgresql.pg_ctl")
+
+    # set the keeper to something invalid
+    with assert_raises(subprocess.CalledProcessError):
+        node1.config_set("postgresql.pg_ctl", "invalid")
+
+    # it should not get changed
+    eq_(node1.config_get("postgresql.pg_ctl"), pg_ctl)
+
+    # pg_ctl can be moved and `config set` will still operate.
+    shutil.copy(pg_ctl, "/tmp/pg_ctl")
+    monitor.config_set("postgresql.pg_ctl", "/tmp/pg_ctl")
+
+    # "move" pg_ctl
+    os.remove("/tmp/pg_ctl")
+    monitor.config_set("postgresql.pg_ctl", pg_ctl)
+
+    eq_(monitor.config_get("postgresql.pg_ctl"), pg_ctl)
