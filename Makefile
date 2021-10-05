@@ -26,6 +26,7 @@ TESTS_SINGLE += test_create_run
 TESTS_SINGLE += test_create_standby_with_pgdata
 TESTS_SINGLE += test_ensure
 TESTS_SINGLE += test_skip_pg_hba
+TESTS_SINGLE += test_config_get_set
 
 # Tests for SSL
 TESTS_SSL  = test_enable_ssl

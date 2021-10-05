@@ -21,6 +21,11 @@ PGVERSION = os.getenv("PGVERSION", "11")
 
 NodeState = namedtuple("NodeState", "reported assigned")
 
+# Append stderr output to default CalledProcessError message
+class CalledProcessError(subprocess.CalledProcessError):
+    def __str__(self):
+        return super().__str__() + "\n\t" + self.stderr
+
 
 class Role(Enum):
     Monitor = 1
@@ -1952,10 +1957,7 @@ class PGAutoCtl:
 
             self.last_returncode = proc.returncode
             if proc.returncode > 0:
-                raise Exception(
-                    "%s failed\n%s\n%s\n%s"
-                    % (name, " ".join(self.command), out, err)
-                )
+                raise CalledProcessError(proc.returncode, self.cmd, out, err)
 
             return out, err, proc.returncode
 
