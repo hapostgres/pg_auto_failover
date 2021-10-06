@@ -185,6 +185,48 @@ CREATE TABLE pgautofailover.event
     PRIMARY KEY (eventid)
  );
 
+CREATE TABLE pgautofailover.archiver_policy
+ (
+    formationid          text not null default 'default',
+    target               text not null,
+    config               jsonb not null,
+
+    backup_interval      interval not null default '6 hours',
+    backup_max_count     integer not null default 10,
+    backup_max_age       interval not null default '2 days',
+
+    PRIMARY KEY (formationid, target),
+    FOREIGN KEY (formationid) REFERENCES pgautofailover.formation(formationid)
+ );
+
+CREATE TABLE pgautofailover.basebackup
+ (
+    nodeid                bigint not null,
+
+    name                  text not null,
+    start_time            timestamptz not null,
+    finish_time           timestamptz not null,
+    start_lsn             pg_lsn not null,
+    finish_lsn            pg_lsn not null,
+    uncompressed_size     bigint,
+    compressed_size       bigint,
+
+    PRIMARY KEY (nodeid, name),
+    FOREIGN KEY (nodeid) REFERENCES pgautofailover.node(nodeid)
+ );
+
+CREATE TABLE pgautofailover.pg_wal
+ (
+    nodeid                bigint not null,
+
+    filename              text not null,
+    filesize              bigint not null,
+    md5                   uuid not null,
+
+    PRIMARY KEY(nodeid, filename),
+    FOREIGN KEY (nodeid) REFERENCES pgautofailover.node(nodeid)
+ );
+
 GRANT SELECT ON ALL TABLES IN SCHEMA pgautofailover TO autoctl_node;
 
 CREATE FUNCTION pgautofailover.set_node_system_identifier

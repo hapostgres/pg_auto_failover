@@ -80,6 +80,11 @@ extern int monitorDisabledNodeId;
 
 #define CLI_PGDATA_USAGE " [ --pgdata ] [ --json ] "
 
+/* cli_archive.c */
+extern CommandLine archive_commands;
+
+/* cli_restore.c */
+extern CommandLine restore_commands;
 
 /* cli_do.c */
 extern CommandLine do_commands;
