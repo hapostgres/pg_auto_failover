@@ -16,6 +16,7 @@
 
 #include "postgres_fe.h"
 
+#include "archiving.h"
 #include "cli_common.h"
 #include "commandline.h"
 #include "env_utils.h"
@@ -38,8 +39,7 @@
 #include "service_monitor.h"
 #include "service_monitor_init.h"
 #include "string_utils.h"
-
-#include "runprogram.h"
+#include "wal-g.h"
 
 char configFilename[MAXPGPATH] = { 0 };
 
@@ -53,11 +53,8 @@ CommandLine archive_wal_command =
 	make_command(
 		"wal",
 		"Archive a WAL file",
-		" [ --pgdata | --monitor ] [ --formation --group ] [ --json ] filename",
+		" [ --pgdata ] [ --config ] [ --json ] filename",
 		"  --pgdata      path to data directory\n"
-		"  --monitor     pg_auto_failover Monitor Postgres URL\n"
-		"  --formation   archive WAL for given formation\n"
-		"  --name        pg_auto_failover node name\n"
 		"  --config      archive command configuration\n"
 		"  --json        output data in the JSON format\n",
 		cli_archive_getopts,
@@ -67,11 +64,9 @@ CommandLine archive_pgdata_command =
 	make_command(
 		"pgdata",
 		"Archive a PGDATA directory (a base backup)",
-		" [ --pgdata | --monitor ] [ --formation --group ] [ --json ]",
+		" [ --pgdata ] [ --config ] [ --json ] filename",
 		"  --pgdata      path to data directory\n"
-		"  --monitor     pg_auto_failover Monitor Postgres URL\n"
-		"  --formation   archive WAL for given formation\n"
-		"  --name        pg_auto_failover node name\n"
+		"  --config      archive command configuration\n"
 		"  --json        output data in the JSON format\n",
 		cli_archive_getopts,
 		cli_archive_pgdata);
@@ -80,7 +75,7 @@ CommandLine archive_show_command =
 	make_command(
 		"show",
 		"Show archives (basebackups and WAL files)",
-		" [ --pgdata | --monitor ] [ --formation --group ] [ --json ]",
+		" [ --pgdata | --monitor ] [ --formation ] [ --json ]",
 		"  --pgdata      path to data directory\n"
 		"  --monitor     pg_auto_failover Monitor Postgres URL\n"
 		"  --formation   archive WAL for given formation\n"
@@ -117,9 +112,6 @@ cli_archive_getopts(int argc, char **argv)
 
 	static struct option long_options[] = {
 		{ "pgdata", required_argument, NULL, 'D' },
-		{ "monitor", required_argument, NULL, 'm' },
-		{ "formation", required_argument, NULL, 'f' },
-		{ "name", required_argument, NULL, 'a' },
 		{ "json", no_argument, NULL, 'J' },
 		{ "config", required_argument, NULL, 'C' },
 		{ "version", no_argument, NULL, 'V' },
@@ -158,34 +150,6 @@ cli_archive_getopts(int argc, char **argv)
 			{
 				strlcpy(options.pgSetup.pgdata, optarg, MAXPGPATH);
 				log_trace("--pgdata %s", options.pgSetup.pgdata);
-				break;
-			}
-
-			case 'm':
-			{
-				if (!validate_connection_string(optarg))
-				{
-					log_fatal("Failed to parse --monitor connection string, "
-							  "see above for details.");
-					exit(EXIT_CODE_BAD_ARGS);
-				}
-				strlcpy(options.monitor_pguri, optarg, MAXCONNINFO);
-				log_trace("--monitor %s", options.monitor_pguri);
-				break;
-			}
-
-			case 'f':
-			{
-				strlcpy(options.formation, optarg, NAMEDATALEN);
-				log_trace("--formation %s", options.formation);
-				break;
-			}
-
-			case 'a':
-			{
-				/* { "name", required_argument, NULL, 'a' }, */
-				strlcpy(options.name, optarg, _POSIX_HOST_NAME_MAX);
-				log_trace("--name %s", options.name);
 				break;
 			}
 
@@ -279,10 +243,6 @@ cli_archive_getopts(int argc, char **argv)
 		}
 	}
 
-	/* now that we have the command line parameters, prepare the options */
-	(void) cli_use_monitor_option(&options);
-
-	/* even when we have a monitor URI we still need a PGDATA */
 	if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 	{
 		(void) prepare_keeper_options(&options);
@@ -317,7 +277,7 @@ static void
 cli_archive_wal(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
-	char wal[MAXPGPATH] = { 0 };
+	KeeperConfig *config = &(keeper.config);
 
 	keeper.config = keeperOptions;
 
@@ -330,65 +290,33 @@ cli_archive_wal(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	char *filename = argv[0];
+	bool missingPgdataIsOk = false;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = false;
 
-	if (filename[0] == '/')
+	if (!keeper_config_read_file(config,
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
 	{
-		if (!file_exists(filename))
-		{
-			log_error("WAL file \"%s\" does not exists", filename);
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-
-		strlcpy(wal, filename, sizeof(wal));
-	}
-	else
-	{
-		/* if the provided filename is relative, find it in pg_wal */
-		PostgresSetup *pgSetup = &(keeper.config.pgSetup);
-
-		if (!normalize_filename(pgSetup->pgdata, pgSetup->pgdata, MAXPGPATH))
-		{
-			/* errors have already been logged */
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-
-		sformat(wal, MAXPGPATH, "%s/pg_wal/%s", pgSetup->pgdata, filename);
+		log_fatal("Failed to read configuration file \"%s\"",
+				  config->pathnames.config);
+		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	char walg[MAXPGPATH] = { 0 };
-
-	if (!search_path_first("wal-g", walg, LOG_ERROR))
+	if (!keeper_init(&keeper, config))
 	{
-		log_fatal("Failed to find program wal-g in PATH");
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	const char *filename = argv[0];
+
+	if (!archive_wal(&keeper, configFilename, filename))
+	{
+		/* errors have already been logged */
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
-
-	Program program =
-		run_program(
-			walg,
-			"wal-push",
-			"--config",
-			configFilename,
-			wal,
-			NULL);
-
-	/* log the exact command line we're using */
-	char command[BUFSIZE] = { 0 };
-	(void) snprintf_program_command_line(&program, command, BUFSIZE);
-
-	log_info("Archiving WAL \"%s\" with wal-g", filename);
-	log_info("%s", command);
-
-	if (program.returnCode != 0)
-	{
-		log_fatal("Failed to archive WAL \"%s\" with wal-g", filename);
-		free_program(&program);
-
-		exit(EXIT_CODE_INTERNAL_ERROR);
-	}
-
-	free_program(&program);
 }
 
 
