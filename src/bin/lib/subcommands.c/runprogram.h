@@ -186,7 +186,7 @@ execute_subprogram(Program *prog)
 	/* first level sanity check */
 	if (access(prog->program, F_OK | X_OK) == -1)
 	{
-		fprintf(stderr, "Failed to find executable program at \"%s\": %s",
+		fprintf(stderr, "Failed to find executable program at \"%s\": %s\n",
 				prog->program,
 				strerror(errno));
 
@@ -341,7 +341,7 @@ execute_program(Program *prog)
 	/* first level sanity check */
 	if (access(prog->program, F_OK | X_OK) == -1)
 	{
-		fprintf(stderr, "Failed to find executable program at \"%s\": %s",
+		fprintf(stderr, "Failed to find executable program at \"%s\": %s\n",
 				prog->program,
 				strerror(errno));
 
