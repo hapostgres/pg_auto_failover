@@ -127,6 +127,9 @@ extern CommandLine show_settings_command;
 extern CommandLine show_file_command;
 extern CommandLine show_standby_names_command;
 
+/* cli_watch.c */
+extern CommandLine watch_command;
+
 /* cli_systemd.c */
 extern CommandLine systemd_cat_service_file_command;
 

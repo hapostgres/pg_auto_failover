@@ -7,6 +7,20 @@ and your question and its answer might make it to this FAQ.
 
 __ https://github.com/citusdata/pg_auto_failover/issues_
 
+I stopped the primary and no failover is happening for 20s to 30s, why?
+-----------------------------------------------------------------------
+
+In order to avoid spurious failovers when the network connectivity is not
+stable, pg_auto_failover implements a timeout of 20s before acting on a node
+that is known unavailable. This needs to be added to the delay between
+health checks and the retry policy.
+
+See the :ref:`configuration` part for more information about how to setup
+the different delays and timeouts that are involved in the decision making.
+
+See also :ref:`pg_autoctl watch` to have a dashboard that helps
+understanding the system and what's going on in the moment.
+
 The secondary is blocked in the CATCHING_UP state, what should I do?
 --------------------------------------------------------------------
 

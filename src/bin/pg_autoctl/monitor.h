@@ -48,6 +48,36 @@ typedef struct StateNotification
 	int nodePort;
 } StateNotification;
 
+#define MONITOR_EVENT_TIME_LEN 20 /* "YYYY-MM-DD HH:MI:SS" */
+
+typedef struct MonitorEvent
+{
+	int64_t eventId;
+	char eventTime[MONITOR_EVENT_TIME_LEN];
+	char formationId[NAMEDATALEN];
+	int64_t nodeId;
+	int groupId;
+	char nodeName[NAMEDATALEN];
+	char nodeHost[_POSIX_HOST_NAME_MAX];
+	int nodePort;
+	NodeState reportedState;
+	NodeState assignedState;
+	char replicationState[NAMEDATALEN];
+	int timeline;
+	char lsn[PG_LSN_MAXLENGTH];
+	int candidatePriority;
+	bool replicationQuorum;
+	char description[BUFSIZE];
+} MonitorEvent;
+
+#define EVENTS_ARRAY_MAX_COUNT 1024
+
+typedef struct MonitorEventsArray
+{
+	int count;
+	MonitorEvent events[EVENTS_ARRAY_MAX_COUNT];
+} MonitorEventsArray;
+
 typedef struct MonitorExtensionVersion
 {
 	char defaultVersion[BUFSIZE];
@@ -147,6 +177,9 @@ bool monitor_perform_promotion(Monitor *monitor, char *formation, char *name);
 
 bool monitor_get_current_state(Monitor *monitor, char *formation, int group,
 							   CurrentNodeStateArray *nodesArray);
+bool monitor_get_last_events(Monitor *monitor, char *formation, int group,
+							 int count,
+							 MonitorEventsArray *monitorEventsArray);
 bool monitor_print_state(Monitor *monitor, char *formation, int group);
 bool monitor_print_last_events(Monitor *monitor,
 							   char *formation, int group, int count);

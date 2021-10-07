@@ -58,6 +58,7 @@ LIBS += -L $(shell $(PG_CONFIG) --libdir)
 LIBS += $(shell $(PG_CONFIG) --ldflags)
 LIBS += $(shell $(PG_CONFIG) --libs)
 LIBS += -lpq
+LIBS += -lncurses
 
 all: $(PG_AUTOCTL) ;
 

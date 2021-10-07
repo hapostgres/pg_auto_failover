@@ -34,6 +34,8 @@ typedef struct CurrentNodeState
 	bool replicationQuorum;
 
 	int health;
+	double healthLag;
+	double reportLag;
 } CurrentNodeState;
 
 

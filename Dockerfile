@@ -20,6 +20,8 @@ RUN apt-get update \
     libxml2-dev \
     libxslt1-dev \
     libselinux1-dev \
+	libncurses-dev \
+    libncurses6 \
     make \
     openssl \
     pipenv \
@@ -84,7 +86,8 @@ RUN apt-get update \
     make \
     sudo \
     tmux \
-    watch \
+	watch \
+    libncurses6 \
     lsof \
     psutils \
     dnsutils \
