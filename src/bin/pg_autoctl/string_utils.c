@@ -562,3 +562,29 @@ processBufferCallback(const char *buffer, bool error)
 		}
 	}
 }
+
+
+/*
+ * UUIDstringToMD5 transforms a string representation of a Postgres UUID value
+ * into an MD5 checksum string. We use UUID to store md5 in Postgres because
+ * that's fitting just right in 128 bits on-disk (and in-memory), so that's
+ * pretty efficient. We just don't want the UUID formating separators.
+ *
+ * MD5:  63d231d051459aba35f141cba0b2de32
+ * UUID: 63d231d0-5145-9aba-35f1-41cba0b2de32
+ *
+ * The target md5 buffer should have a size of at least 33 bytes.
+ */
+bool
+UUIDstringToMD5(const char *uuidString, char *md5)
+{
+	for (int i = 0, m = 0; uuidString[i] != '\0'; i++)
+	{
+		if (uuidString[i] != '-')
+		{
+			md5[m++] = uuidString[i];
+		}
+	}
+
+	return true;
+}

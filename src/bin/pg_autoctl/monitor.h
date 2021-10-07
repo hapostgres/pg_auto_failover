@@ -90,6 +90,20 @@ typedef struct CoordinatorNodeAddress
 	NodeAddress node;
 } CoordinatorNodeAddress;
 
+#define MD5LEN 33
+
+typedef struct MonitorWALFile
+{
+	char formation[NAMEDATALEN];
+	int groupId;
+	int64_t nodeId;
+	char filename[MAXPGPATH];
+	uint64_t filesize;
+	char md5[MD5LEN];
+	char startTime[BUFSIZE];
+	char finishTime[BUFSIZE];
+} MonitorWALFile;
+
 #define NODE_FORMAT "%" PRId64 " \"%s\" (%s:%d)"
 
 bool monitor_init(Monitor *monitor, char *url);
@@ -271,5 +285,14 @@ bool monitor_find_node_by_nodeid(Monitor *monitor,
 								 int groupId,
 								 int64_t nodeId,
 								 NodeAddressArray *nodesArray);
+
+bool monitor_register_wal(Monitor *monitor,
+						  const char *formation,
+						  int groupId,
+						  int64_t nodeId,
+						  const char *filename,
+						  int64_t filesize,
+						  const char *md5,
+						  MonitorWALFile *walFile);
 
 #endif /* MONITOR_H */

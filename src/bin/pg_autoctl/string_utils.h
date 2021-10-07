@@ -40,4 +40,6 @@ bool IntervalToString(double seconds, char *buffer, size_t size);
 int splitLines(char *errorMessage, char **linesArray, int size);
 void processBufferCallback(const char *buffer, bool error);
 
+bool UUIDstringToMD5(const char *uuidString, char *md5);
+
 #endif /* STRING_UTILS_h */

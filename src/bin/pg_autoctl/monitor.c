@@ -106,6 +106,13 @@ typedef struct MonitorExtensionVersionParseContext
 	bool parsedOK;
 } MonitorExtensionVersionParseContext;
 
+typedef struct MonitorUpsertWalParseContext
+{
+	char sqlstate[SQLSTATE_LENGTH];
+	MonitorWALFile *walFile;
+	bool parsedOK;
+} MonitorUpsertWalParseContext;
+
 
 static bool parseNode(PGresult *result, int rowNumber, NodeAddress *node);
 static void parseNodeResult(void *ctx, PGresult *result);
@@ -124,6 +131,7 @@ static void printFormationSettings(void *ctx, PGresult *result);
 static void printFormationURI(void *ctx, PGresult *result);
 static void parseCoordinatorNode(void *ctx, PGresult *result);
 static void parseExtensionVersion(void *ctx, PGresult *result);
+static void parseUpsertWal(void *ctx, PGresult *result);
 
 static bool prepare_connection_to_current_system_user(Monitor *source,
 													  Monitor *target);
@@ -4882,4 +4890,157 @@ monitor_find_node_by_nodeid(Monitor *monitor,
 	}
 
 	return true;
+}
+
+
+/*
+ * monitor_upsert_wal calls the function pgautofailover.register_wal on the
+ * monitor, and fills-in the given MonitorWALFile structure with the result
+ * obtained.
+ */
+bool
+monitor_register_wal(Monitor *monitor,
+					 const char *formation,
+					 int groupId,
+					 int64_t nodeId,
+					 const char *filename,
+					 int64_t filesize,
+					 const char *md5,
+					 MonitorWALFile *walFile)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT formationid, groupid, nodeid, filename, filesize, md5, "
+		"       start_time, finish_time "
+		"  FROM pgautofailover.register_wal($1, $2, $3, $4, $5, $6)";
+	int paramCount = 6;
+	Oid paramTypes[6] = { TEXTOID, INT4OID, INT8OID, TEXTOID, INT8OID, TEXTOID };
+	const char *paramValues[6];
+
+	MonitorUpsertWalParseContext parseContext = { { 0 }, walFile, false };
+
+	paramValues[0] = formation;
+	paramValues[1] = intToString(groupId).strValue;
+	paramValues[2] = intToString(nodeId).strValue;
+	paramValues[3] = filename;
+	paramValues[4] = intToString(filesize).strValue;
+	paramValues[5] = md5;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &parseContext, parseUpsertWal))
+	{
+		log_error("Failed to call upsert_wal for wal \"%s\" in "
+				  "group %d in formation \"%s\" "
+				  "from the monitor",
+				  filename, groupId, formation);
+		return false;
+	}
+
+	if (!parseContext.parsedOK)
+	{
+		log_error("Failed to call upsert_wal for wal \"%s\" in "
+				  "group %d in formation \"%s\" "
+				  "from the monitor",
+				  filename, groupId, formation);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * parseUpsertWal parses the result of calling pgautofailover.register_wal on
+ * the monitor.
+ */
+static void
+parseUpsertWal(void *ctx, PGresult *result)
+{
+	MonitorUpsertWalParseContext *context =
+		(MonitorUpsertWalParseContext *) ctx;
+
+	int errors = 0;
+
+	/* we have rows: we accept only one */
+	if (PQntuples(result) != 1)
+	{
+		log_error("Query returned %d rows, expected 1", PQntuples(result));
+		++errors;
+	}
+
+	if (PQnfields(result) != 8)
+	{
+		log_error("Query returned %d columns, expected 8", PQnfields(result));
+		++errors;
+	}
+
+	/* short circuit parsing values if those first checks didn't pass */
+	if (errors > 0)
+	{
+		context->parsedOK = false;
+		return;
+	}
+
+	char *value = PQgetvalue(result, 0, 0);
+	strlcpy(context->walFile->formation, value, NAMEDATALEN);
+
+	value = PQgetvalue(result, 0, 1);
+
+	if (!stringToInt(value, &(context->walFile->groupId)))
+	{
+		log_error("Invalid groupId \"%s\" returned by monitor", value);
+		++errors;
+	}
+
+	value = PQgetvalue(result, 0, 2);
+
+	if (!stringToInt64(value, &(context->walFile->nodeId)))
+	{
+		log_error("Invalid nodeId \"%s\" returned by monitor", value);
+		++errors;
+	}
+
+	value = PQgetvalue(result, 0, 3);
+	int length = strlcpy(context->walFile->filename, value, MAXPGPATH);
+	if (length >= MAXPGPATH)
+	{
+		log_error("filename \"%s\" returned by monitor is %d characters, "
+				  "the maximum supported by pg_autoctl is %d",
+				  value, length, MAXPGPATH - 1);
+		++errors;
+	}
+
+	value = PQgetvalue(result, 0, 4);
+
+	if (!stringToUInt64(value, &(context->walFile->filesize)))
+	{
+		log_error("Invalid filesize \"%s\" returned by monitor", value);
+		++errors;
+	}
+
+	value = PQgetvalue(result, 0, 5);
+
+	if (!UUIDstringToMD5(value, context->walFile->md5))
+	{
+		log_error("Invalid UUID \"%s\" returned by monitor", value);
+		++errors;
+	}
+
+	value = PQgetvalue(result, 0, 6);
+	strlcpy(context->walFile->startTime, value, BUFSIZE);
+
+	if (!PQgetisnull(result, 0, 7))
+	{
+		value = PQgetvalue(result, 0, 7);
+		strlcpy(context->walFile->finishTime, value, BUFSIZE);
+	}
+
+	if (errors > 0)
+	{
+		context->parsedOK = false;
+		return;
+	}
+
+	context->parsedOK = true;
 }

@@ -217,13 +217,19 @@ CREATE TABLE pgautofailover.basebackup
 
 CREATE TABLE pgautofailover.pg_wal
  (
-    nodeid                bigint not null,
+    formationid          text not null default 'default',
+    groupid              int not null,
+    nodeid               bigint not null,
 
-    filename              text not null,
-    filesize              bigint not null,
-    md5                   uuid not null,
+    filename             text not null,
+    filesize             bigint not null,
+    md5                  uuid not null,
 
-    PRIMARY KEY(nodeid, filename),
+    start_time           timestamptz not null,
+    finish_time          timestamptz,
+
+    CONSTRAINT pg_wal_pkey PRIMARY KEY (formationid, groupid, filename),
+    FOREIGN KEY (formationid) REFERENCES pgautofailover.formation(formationid),
     FOREIGN KEY (nodeid) REFERENCES pgautofailover.node(nodeid)
  );
 
@@ -916,3 +922,32 @@ $$;
 
 comment on function pgautofailover.formation_settings(text)
         is 'get the current replication settings a formation';
+
+
+CREATE FUNCTION pgautofailover.register_wal
+ (
+    IN formation_id         text,
+    IN group_id             int,
+    IN node_id              bigint,
+    IN filename             text,
+    IN filesize             bigint,
+    IN md5                  text,
+
+   OUT formationid          text,
+   OUT groupid              int,
+   OUT nodeid               bigint,
+   OUT filename             text,
+   OUT filesize             bigint,
+   OUT md5                  text,
+   OUT start_time           timestamptz,
+   OUT finish_time          timestamptz
+ )
+RETURNS record LANGUAGE C STRICT SECURITY DEFINER
+AS 'MODULE_PATHNAME', $$register_wal$$;
+
+grant execute on function
+      pgautofailover.register_wal(text,int,bigint,text,bigint,text)
+   to autoctl_node;
+
+comment on function pgautofailover.register_wal(text,int,bigint,text,bigint,text)
+        is 'register a WAL to be archived, or return the previous registration';
