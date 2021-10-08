@@ -110,6 +110,19 @@ archive_wal(Keeper *keeper, const char *config_filename, const char *wal)
 		return false;
 	}
 
+	/* mismatching MD5 are a serious thing to consider first */
+	if (strcmp(walFile.md5, registeredWalFile.md5) != 0)
+	{
+		log_error("Computed MD5 for local WAL file is \"%s\", and the monitor "
+				  "already has a registration for this WAL file by node %lld "
+				  "with MD5 \"%s\", started archiving at %s",
+				  walFile.md5,
+				  (long long) registeredWalFile.nodeId,
+				  registeredWalFile.md5,
+				  registeredWalFile.startTime);
+		return false;
+	}
+
 	/* if the monitor returns a different entry for the walFile, we skip */
 	if (walFile.nodeId != registeredWalFile.nodeId)
 	{
@@ -125,17 +138,7 @@ archive_wal(Keeper *keeper, const char *config_filename, const char *wal)
 					 registeredWalFile.filename,
 					 (long long) registeredWalFile.nodeId);
 		}
-	}
 
-	if (strcmp(walFile.md5, registeredWalFile.md5) != 0)
-	{
-		log_error("Computed MD5 for local WAL file is \"%s\", and the monitor "
-				  "already has a registration for this WAL file by node %lld "
-				  "with MD5 \"%s\", started archiving at %s",
-				  walFile.md5,
-				  (long long) registeredWalFile.nodeId,
-				  registeredWalFile.md5,
-				  registeredWalFile.startTime);
 		return false;
 	}
 

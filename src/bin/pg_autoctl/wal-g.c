@@ -15,10 +15,14 @@
 #include "defaults.h"
 #include "file_utils.h"
 #include "log.h"
+#include "string_utils.h"
 
 #include "wal-g.h"
 
 #include "runprogram.h"
+
+static void log_walg_errors(Program *program);
+static void log_walg_error_lines(int logLevel, char *buffer);
 
 
 /*
@@ -46,13 +50,56 @@ walg_wal_push(const char *config, const char *wal)
 
 	if (program.returnCode != 0)
 	{
-		log_fatal("Failed to archive WAL \"%s\" with wal-g", wal);
+		(void) log_walg_errors(&program);
 		free_program(&program);
 
+		log_fatal("Failed to archive WAL \"%s\" with wal-g, "
+				  "see above for details", wal);
+
 		return false;
+	}
+
+	if (program.stdOut != NULL)
+	{
+		log_walg_error_lines(LOG_DEBUG, program.stdOut);
 	}
 
 	free_program(&program);
 
 	return true;
+}
+
+
+/*
+ * log_walg_errors logs the output of the given program.
+ */
+static void
+log_walg_errors(Program *program)
+{
+	if (program->stdOut != NULL)
+	{
+		log_walg_error_lines(LOG_ERROR, program->stdOut);
+	}
+
+	if (program->stdErr != NULL)
+	{
+		log_walg_error_lines(LOG_ERROR, program->stdErr);
+	}
+}
+
+
+/*
+ * log_walg_error_lines logs given program output buffer as separate lines.
+ */
+static void
+log_walg_error_lines(int logLevel, char *buffer)
+{
+	char *lines[BUFSIZE];
+	int lineCount = splitLines(buffer, lines, BUFSIZE);
+	int lineNumber = 0;
+
+	for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
+	{
+		log_level(logLevel, "wal-g: %s", lines[lineNumber]);
+	}
 }
