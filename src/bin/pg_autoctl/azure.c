@@ -156,8 +156,6 @@ azure_start_command(Program *program)
 	pid_t fpid;
 	char command[BUFSIZE] = { 0 };
 
-	IntString semIdString = intToString(log_semaphore.semId);
-
 	(void) snprintf_program_command_line(program, command, sizeof(command));
 
 	if (dryRun)
@@ -173,9 +171,6 @@ azure_start_command(Program *program)
 	/* Flush stdio channels just before fork, to avoid double-output problems */
 	fflush(stdout);
 	fflush(stderr);
-
-	/* we want to use the same logs semaphore in the sub-processes */
-	setenv(PG_AUTOCTL_LOG_SEMAPHORE, semIdString.strValue, 1);
 
 	/* time to create the node_active sub-process */
 	fpid = fork();

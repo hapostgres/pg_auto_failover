@@ -126,9 +126,7 @@ service_postgres_ctl_runprogram()
 		? keeperOptions.pgSetup.pgdata
 		: monitorOptions.pgSetup.pgdata;
 
-	IntString semIdString = intToString(log_semaphore.semId);
 	setenv(PG_AUTOCTL_DEBUG, "1", 1);
-	setenv(PG_AUTOCTL_LOG_SEMAPHORE, semIdString.strValue, 1);
 
 	args[argsIndex++] = (char *) pg_autoctl_program;
 	args[argsIndex++] = "do";

@@ -183,6 +183,18 @@ execute_subprogram(Program *prog)
 	int outpipe[2] = { 0, 0 };
 	int errpipe[2] = { 0, 0 };
 
+	/* first level sanity check */
+	if (access(prog->program, F_OK | X_OK) == -1)
+	{
+		fprintf(stderr, "Failed to find executable program at \"%s\": %s\n",
+				prog->program,
+				strerror(errno));
+
+		prog->returnCode = -1;
+		prog->error = errno;
+		return;
+	}
+
 	/* Flush stdio channels just before fork, to avoid double-output problems */
 	fflush(stdout);
 	fflush(stderr);
@@ -323,6 +335,18 @@ execute_program(Program *prog)
 	if (prog->capture)
 	{
 		fprintf(stderr, "BUG: can't execute_program and capture the output");
+		return;
+	}
+
+	/* first level sanity check */
+	if (access(prog->program, F_OK | X_OK) == -1)
+	{
+		fprintf(stderr, "Failed to find executable program at \"%s\": %s\n",
+				prog->program,
+				strerror(errno));
+
+		prog->returnCode = -1;
+		prog->error = errno;
 		return;
 	}
 

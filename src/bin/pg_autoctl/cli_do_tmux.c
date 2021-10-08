@@ -882,6 +882,15 @@ tmux_start_server(const char *scriptName, const char *binpath)
 	char tmux[MAXPGPATH] = { 0 };
 	char command[BUFSIZE] = { 0 };
 
+	/*
+	 * Here we are going to remain the parent process of multiple pg_autoctl
+	 * top-level processes, one per node (and the monitor). We don't want all
+	 * those processes to use the same semaphore for logging, so make sure we
+	 * remove ourselves from the environment before we start all the
+	 * sub-processes.
+	 */
+	unsetenv(PG_AUTOCTL_LOG_SEMAPHORE);
+
 	if (setenv("PG_AUTOCTL_DEBUG", "1", 1) != 0)
 	{
 		log_error("Failed to set environment PG_AUTOCTL_DEBUG: %m");
