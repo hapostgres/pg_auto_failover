@@ -78,18 +78,18 @@ archive_wal(Keeper *keeper, const char *config_filename, const char *wal)
 
 	(void) pretty_print_bytes(sizeStr, sizeof(sizeStr), walFile.filesize);
 
-	log_info("Archiving WAL file \"%s\" for "
-			 "node %lld (\"%s\") in formation \"%s\" and group %d",
+	log_info("Archiving WAL file \"%s\" for node %lld \"%s\" "
+			 "in formation \"%s\" and group %d",
 			 walFile.filename,
 			 (long long) walFile.nodeId,
 			 config->name,
 			 walFile.formation,
 			 walFile.groupId);
 
-	log_info("WAL file \"%s\" has size %s and md5 \"%s\"",
-			 walFile.filename,
-			 sizeStr,
-			 walFile.md5);
+	log_debug("WAL file \"%s\" has size %s and md5 \"%s\"",
+			  walFile.filename,
+			  sizeStr,
+			  walFile.md5);
 
 	/*
 	 * Now proceed to archiving the WAL file, unless another node is already
@@ -113,15 +113,15 @@ archive_wal(Keeper *keeper, const char *config_filename, const char *wal)
 	/* if the monitor returns a different entry for the walFile, we skip */
 	if (walFile.nodeId != registeredWalFile.nodeId)
 	{
-		if (IS_EMPTY_STRING_BUFFER(walFile.finishTime))
+		if (IS_EMPTY_STRING_BUFFER(registeredWalFile.finishTime))
 		{
-			log_warn("WAL file \"%s\" is already being archived by node %lld",
+			log_warn("WAL file \"%s\" is being archived by node %lld",
 					 registeredWalFile.filename,
 					 (long long) registeredWalFile.nodeId);
 		}
 		else
 		{
-			log_warn("WAL file \"%s\" has already being archived by node %lld",
+			log_info("WAL file \"%s\" has already been archived by node %lld",
 					 registeredWalFile.filename,
 					 (long long) registeredWalFile.nodeId);
 		}
@@ -141,17 +141,26 @@ archive_wal(Keeper *keeper, const char *config_filename, const char *wal)
 
 	/* if we got the registration at our nodeId, now archive the WAL */
 	if (walFile.nodeId == registeredWalFile.nodeId &&
-		strcmp(walFile.md5, registeredWalFile.md5) == 0)
+		strcmp(walFile.md5, registeredWalFile.md5) == 0 &&
+		IS_EMPTY_STRING_BUFFER(registeredWalFile.finishTime))
 	{
 		bool success = walg_wal_push(config_filename, wal_pathname);
 
 		if (success)
 		{
-			log_info("Archived WAL file \"%s\" with MD5 \"%s\" successfully",
-					 walFile.filename,
-					 walFile.md5);
+			if (!monitor_finish_wal(monitor,
+									registeredWalFile.formation,
+									registeredWalFile.groupId,
+									registeredWalFile.filename,
+									&registeredWalFile))
+			{
+				/* errors have already been logged */
+				return false;
+			}
 
-			/* TODO monitor_update_wal_finish_time */
+			log_info("Archived WAL file \"%s\" successfully at %s",
+					 registeredWalFile.filename,
+					 registeredWalFile.finishTime);
 		}
 
 		return success;

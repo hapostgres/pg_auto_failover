@@ -951,3 +951,29 @@ grant execute on function
 
 comment on function pgautofailover.register_wal(text,int,bigint,text,bigint,text)
         is 'register a WAL to be archived, or return the previous registration';
+
+
+CREATE FUNCTION pgautofailover.finish_wal
+ (
+    IN formation_id         text,
+    IN group_id             int,
+    IN filename             text,
+
+   OUT formationid          text,
+   OUT groupid              int,
+   OUT nodeid               bigint,
+   OUT filename             text,
+   OUT filesize             bigint,
+   OUT md5                  text,
+   OUT start_time           timestamptz,
+   OUT finish_time          timestamptz
+ )
+RETURNS record LANGUAGE C STRICT SECURITY DEFINER
+AS 'MODULE_PATHNAME', $$finish_wal$$;
+
+grant execute on function
+      pgautofailover.finish_wal(text,int,text)
+   to autoctl_node;
+
+comment on function pgautofailover.finish_wal(text,int,text)
+        is 'mark the WAL file archiving finished';

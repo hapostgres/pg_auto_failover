@@ -168,6 +168,65 @@ AddAutoFailoverPGWal(char *formationId,
 
 
 /*
+ * FinishAutoFailoverPGWAL updates the pgAutoFailoverPGWal finish_time column
+ * to the current time, and updates the structure to reflect that information.
+ */
+bool
+FinishAutoFailoverPGWal(AutoFailoverPGWal *pgAutoFailoverPGWal)
+{
+	Oid argTypes[] = {
+		TEXTOID, /* formationid */
+		INT4OID, /* groupid */
+		TEXTOID  /* filename */
+	};
+
+	Datum argValues[] = {
+		CStringGetTextDatum(pgAutoFailoverPGWal->formationId),   /* formationid */
+		Int32GetDatum(pgAutoFailoverPGWal->groupId),             /* groupid */
+		CStringGetTextDatum(pgAutoFailoverPGWal->fileName)      /* filename */
+	};
+	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
+
+	const char *updateQuery =
+		"   UPDATE pgautofailover." AUTO_FAILOVER_PG_WAL_TABLE_NAME
+		"      SET finish_time = now() "
+		"    WHERE formationid = $1 and groupid = $2 and filename = $3 "
+		"RETURNING finish_time";
+
+	SPI_connect();
+
+	int spiStatus = SPI_execute_with_args(updateQuery,
+										  argCount, argTypes, argValues,
+										  NULL, false, 0);
+
+	if (spiStatus == SPI_OK_UPDATE_RETURNING && SPI_processed > 0)
+	{
+		bool isNull = false;
+
+		Datum finishTimeDatum = SPI_getbinval(SPI_tuptable->vals[0],
+											  SPI_tuptable->tupdesc,
+											  1,
+											  &isNull);
+
+		if (isNull)
+		{
+			elog(ERROR, "could not update " AUTO_FAILOVER_PG_WAL_TABLE_NAME);
+		}
+
+		pgAutoFailoverPGWal->finishTime = DatumGetTimestampTz(finishTimeDatum);
+	}
+	else
+	{
+		elog(ERROR, "could not update " AUTO_FAILOVER_PG_WAL_TABLE_NAME);
+	}
+
+	SPI_finish();
+
+	return true;
+}
+
+
+/*
  * TupleToAutoFailoverNode constructs a AutoFailoverNode from a heap tuple.
  */
 AutoFailoverPGWal *

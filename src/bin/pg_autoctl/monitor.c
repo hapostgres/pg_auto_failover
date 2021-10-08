@@ -4894,7 +4894,7 @@ monitor_find_node_by_nodeid(Monitor *monitor,
 
 
 /*
- * monitor_upsert_wal calls the function pgautofailover.register_wal on the
+ * monitor_register_wal calls the function pgautofailover.register_wal on the
  * monitor, and fills-in the given MonitorWALFile structure with the result
  * obtained.
  */
@@ -4930,7 +4930,7 @@ monitor_register_wal(Monitor *monitor,
 								   paramCount, paramTypes, paramValues,
 								   &parseContext, parseUpsertWal))
 	{
-		log_error("Failed to call upsert_wal for wal \"%s\" in "
+		log_error("Failed to call pgautofailover.register_wal for wal \"%s\" in "
 				  "group %d in formation \"%s\" "
 				  "from the monitor",
 				  filename, groupId, formation);
@@ -4939,7 +4939,58 @@ monitor_register_wal(Monitor *monitor,
 
 	if (!parseContext.parsedOK)
 	{
-		log_error("Failed to call upsert_wal for wal \"%s\" in "
+		log_error("Failed to call pgautofailover.register_wal for wal \"%s\" in "
+				  "group %d in formation \"%s\" "
+				  "from the monitor",
+				  filename, groupId, formation);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * monitor_finish_wal calls the function pgautofailover.finish_wal on the
+ * monitor, and fills-in the given MonitorWALFile structure with the result
+ * obtained.
+ */
+bool
+monitor_finish_wal(Monitor *monitor,
+				   const char *formation,
+				   int groupId,
+				   const char *filename,
+				   MonitorWALFile *walFile)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT formationid, groupid, nodeid, filename, filesize, md5, "
+		"       start_time, finish_time "
+		"  FROM pgautofailover.finish_wal($1, $2, $3)";
+	int paramCount = 3;
+	Oid paramTypes[3] = { TEXTOID, INT4OID, TEXTOID };
+	const char *paramValues[3];
+
+	MonitorUpsertWalParseContext parseContext = { { 0 }, walFile, false };
+
+	paramValues[0] = formation;
+	paramValues[1] = intToString(groupId).strValue;
+	paramValues[2] = filename;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &parseContext, parseUpsertWal))
+	{
+		log_error("Failed to call pgautofailover.finish_wal for wal \"%s\" in "
+				  "group %d in formation \"%s\" "
+				  "from the monitor",
+				  filename, groupId, formation);
+		return false;
+	}
+
+	if (!parseContext.parsedOK)
+	{
+		log_error("Failed to call pgautofailover.finish_wal for wal \"%s\" in "
 				  "group %d in formation \"%s\" "
 				  "from the monitor",
 				  filename, groupId, formation);

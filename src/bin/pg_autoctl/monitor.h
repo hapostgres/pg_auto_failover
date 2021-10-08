@@ -295,4 +295,10 @@ bool monitor_register_wal(Monitor *monitor,
 						  const char *md5,
 						  MonitorWALFile *walFile);
 
+bool monitor_finish_wal(Monitor *monitor,
+						const char *formation,
+						int groupId,
+						const char *filename,
+						MonitorWALFile *walFile);
+
 #endif /* MONITOR_H */

@@ -37,7 +37,25 @@
 
 /* SQL-callable function declarations */
 PG_FUNCTION_INFO_V1(register_wal);
+PG_FUNCTION_INFO_V1(finish_wal);
 
+
+/*
+ * register_wal registers a WAL filename into pgautofailover.pg_wal.
+ *
+ * Several Postgres nodes might be calling this command concurrently in the
+ * context of the archive_command (pg_autoctl archive wal). In this
+ * implementation we mke sure that only one of the callers gets to archive the
+ * WAL, thanks to using the ON CONFLICT ON CONSTRAINT pkey DO NOTHING.
+ *
+ * When such a conflict happens, we take another transaction snapshot and
+ * SELECT from the pgautofailover.pg_wal table to get the information about the
+ * concurrent registration for the WAL; it will have a different node name to
+ * it.
+ *
+ * TODO: implement some invalidation strategy where after a timeout we can
+ * re-assign the archiving of the WAL to the node that's asking for it.
+ */
 Datum
 register_wal(PG_FUNCTION_ARGS)
 {
@@ -117,6 +135,69 @@ register_wal(PG_FUNCTION_ARGS)
 	{
 		values[7] = TimestampTzGetDatum(pgAutoFailoverPGWal->finishTime);
 	}
+
+	TypeFuncClass resultTypeClass =
+		get_call_result_type(fcinfo, NULL, &resultDescriptor);
+
+	if (resultTypeClass != TYPEFUNC_COMPOSITE)
+	{
+		ereport(ERROR, (errmsg("return type must be a row type")));
+	}
+
+	HeapTuple resultTuple = heap_form_tuple(resultDescriptor, values, isNulls);
+	Datum resultDatum = HeapTupleGetDatum(resultTuple);
+
+	PG_RETURN_DATUM(resultDatum);
+}
+
+
+/*
+ * finish_wal updates the pgautofailover.pg_wal.finish_time, marking the WAL as
+ * successfully archived now.
+ */
+Datum
+finish_wal(PG_FUNCTION_ARGS)
+{
+	checkPgAutoFailoverVersion();
+
+	text *formationIdText = PG_GETARG_TEXT_P(0);
+	char *formationId = text_to_cstring(formationIdText);
+
+	int32 groupId = PG_GETARG_INT32(1);
+
+	text *fileNameText = PG_GETARG_TEXT_P(2);
+	char *fileName = text_to_cstring(fileNameText);
+
+	AutoFailoverPGWal *pgAutoFailoverPGWal =
+		GetAutoFailoverPGWal(formationId, groupId, fileName);
+
+	if (pgAutoFailoverPGWal == NULL)
+	{
+		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+						errmsg("couldn't register a pg_wal entry for "
+							   "WAL %s in formation %s and group %d",
+							   fileName,
+							   formationId,
+							   groupId)));
+	}
+
+	FinishAutoFailoverPGWal(pgAutoFailoverPGWal);
+
+	TupleDesc resultDescriptor = NULL;
+	Datum values[8];
+	bool isNulls[8];
+
+	memset(values, 0, sizeof(values));
+	memset(isNulls, false, sizeof(isNulls));
+
+	values[0] = CStringGetTextDatum(pgAutoFailoverPGWal->formationId);
+	values[1] = Int32GetDatum(pgAutoFailoverPGWal->groupId);
+	values[2] = Int64GetDatum(pgAutoFailoverPGWal->nodeId);
+	values[3] = CStringGetTextDatum(pgAutoFailoverPGWal->fileName);
+	values[4] = Int64GetDatum(pgAutoFailoverPGWal->fileSize);
+	values[5] = CStringGetTextDatum(pgAutoFailoverPGWal->md5);
+	values[6] = TimestampTzGetDatum(pgAutoFailoverPGWal->startTime);
+	values[7] = TimestampTzGetDatum(pgAutoFailoverPGWal->finishTime);
 
 	TypeFuncClass resultTypeClass =
 		get_call_result_type(fcinfo, NULL, &resultDescriptor);

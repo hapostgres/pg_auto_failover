@@ -76,5 +76,7 @@ extern AutoFailoverPGWal * AddAutoFailoverPGWal(char *formationId,
 												int64 fileSize,
 												char *md5);
 
+extern bool FinishAutoFailoverPGWal(AutoFailoverPGWal *pgAutoFailoverPGWal);
+
 extern AutoFailoverPGWal * TupleToAutoFailoverPGWal(TupleDesc tupleDescriptor,
 													HeapTuple heapTuple);
