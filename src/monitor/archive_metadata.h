@@ -78,5 +78,8 @@ extern AutoFailoverPGWal * AddAutoFailoverPGWal(char *formationId,
 
 extern bool FinishAutoFailoverPGWal(AutoFailoverPGWal *pgAutoFailoverPGWal);
 
+extern bool UpdateAutoFailoverPGWalNode(AutoFailoverPGWal *pgAutoFailoverPGWal,
+										int64 nodeId);
+
 extern AutoFailoverPGWal * TupleToAutoFailoverPGWal(TupleDesc tupleDescriptor,
 													HeapTuple heapTuple);

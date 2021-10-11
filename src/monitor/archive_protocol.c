@@ -35,6 +35,10 @@
 #include "utils/uuid.h"
 
 
+/* GUC variables */
+int ArchiveUpdateNodeTimeoutMs = 60 * 1000;
+
+
 /* SQL-callable function declarations */
 PG_FUNCTION_INFO_V1(register_wal);
 PG_FUNCTION_INFO_V1(finish_wal);
@@ -53,8 +57,10 @@ PG_FUNCTION_INFO_V1(finish_wal);
  * concurrent registration for the WAL; it will have a different node name to
  * it.
  *
- * TODO: implement some invalidation strategy where after a timeout we can
- * re-assign the archiving of the WAL to the node that's asking for it.
+ * Finally, when a node as registered itself to archive a particular WAL
+ * segment but then couldn't finish the archiving within
+ * ArchiveUpdateNodeTimeoutMs (defaults to 1 min), we re-assign the WAL to any
+ * new node that calls the pgautofailover.register_wal() function.
  */
 Datum
 register_wal(PG_FUNCTION_ARGS)
@@ -110,6 +116,25 @@ register_wal(PG_FUNCTION_ARGS)
 		}
 
 		PopActiveSnapshot();
+	}
+
+	/*
+	 * If we found a previous entry for another node, with a NULL finishTime
+	 * and a startTime that's older than ArchiveUpdateNodeTimeoutMs, then we
+	 * allow the current node calling register_wal to take over and proceed
+	 * with the archiving.
+	 */
+	if (pgAutoFailoverPGWal->nodeId != nodeId &&
+		pgAutoFailoverPGWal->finishTime == 0)
+	{
+		TimestampTz now = GetCurrentTimestamp();
+
+		if (TimestampDifferenceExceeds(pgAutoFailoverPGWal->startTime,
+									   now,
+									   ArchiveUpdateNodeTimeoutMs))
+		{
+			UpdateAutoFailoverPGWalNode(pgAutoFailoverPGWal, nodeId);
+		}
 	}
 
 	TupleDesc resultDescriptor = NULL;

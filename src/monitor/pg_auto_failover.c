@@ -148,6 +148,12 @@ StartMonitorNode(void)
 							NULL, &StartupGracePeriodMs, 10 * 1000, 1, INT_MAX,
 							PGC_SIGHUP, GUC_UNIT_MS, NULL, NULL, NULL);
 
+	DefineCustomIntVariable("pgautofailover.archive_update_node_timeout",
+							"Give the node that registers a WAL that much time "
+							"before allowing another node to take over.",
+							NULL, &ArchiveUpdateNodeTimeoutMs, 60 * 1000, 1, INT_MAX,
+							PGC_SIGHUP, GUC_UNIT_MS, NULL, NULL, NULL);
+
 	PreviousProcessUtility_hook = ProcessUtility_hook;
 	ProcessUtility_hook = pgautofailover_ProcessUtility;
 

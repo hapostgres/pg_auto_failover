@@ -43,3 +43,4 @@ extern int PromoteXlogThreshold;
 extern int DrainTimeoutMs;
 extern int UnhealthyTimeoutMs;
 extern int StartupGracePeriodMs;
+extern int ArchiveUpdateNodeTimeoutMs;

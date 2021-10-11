@@ -227,6 +227,69 @@ FinishAutoFailoverPGWal(AutoFailoverPGWal *pgAutoFailoverPGWal)
 
 
 /*
+ * UpdateAutoFailoverPGWalNode updates the nodeid and the startTime of the
+ * given pgautofailover.pg_wal record, allowing another node to take over the
+ * archiving of a WAL.
+ */
+bool
+UpdateAutoFailoverPGWalNode(AutoFailoverPGWal *pgAutoFailoverPGWal, int64 nodeId)
+{
+	Oid argTypes[] = {
+		TEXTOID, /* formationid */
+		INT4OID, /* groupid */
+		INT8OID, /* nodeid */
+		TEXTOID  /* filename */
+	};
+
+	Datum argValues[] = {
+		CStringGetTextDatum(pgAutoFailoverPGWal->formationId),   /* formationid */
+		Int32GetDatum(pgAutoFailoverPGWal->groupId),             /* groupid */
+		Int64GetDatum(nodeId),                                   /* nodeid */
+		CStringGetTextDatum(pgAutoFailoverPGWal->fileName)       /* filename */
+	};
+	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
+
+	const char *updateQuery =
+		"   UPDATE pgautofailover." AUTO_FAILOVER_PG_WAL_TABLE_NAME
+		"      SET nodeid = $3, start_time = now() "
+		"    WHERE formationid = $1 and groupid = $2 and filename = $4 "
+		"RETURNING start_time";
+
+	SPI_connect();
+
+	int spiStatus = SPI_execute_with_args(updateQuery,
+										  argCount, argTypes, argValues,
+										  NULL, false, 0);
+
+	if (spiStatus == SPI_OK_UPDATE_RETURNING && SPI_processed > 0)
+	{
+		bool isNull = false;
+
+		Datum startTimeDatum = SPI_getbinval(SPI_tuptable->vals[0],
+											 SPI_tuptable->tupdesc,
+											 1,
+											 &isNull);
+
+		if (isNull)
+		{
+			elog(ERROR, "could not update " AUTO_FAILOVER_PG_WAL_TABLE_NAME);
+		}
+
+		pgAutoFailoverPGWal->nodeId = nodeId;
+		pgAutoFailoverPGWal->startTime = DatumGetTimestampTz(startTimeDatum);
+	}
+	else
+	{
+		elog(ERROR, "could not update " AUTO_FAILOVER_PG_WAL_TABLE_NAME);
+	}
+
+	SPI_finish();
+
+	return true;
+}
+
+
+/*
  * TupleToAutoFailoverNode constructs a AutoFailoverNode from a heap tuple.
  */
 AutoFailoverPGWal *
