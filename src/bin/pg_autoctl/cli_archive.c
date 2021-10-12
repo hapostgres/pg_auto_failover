@@ -239,10 +239,7 @@ cli_archive_getopts(int argc, char **argv)
 		}
 	}
 
-	if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
-	{
-		(void) prepare_keeper_options(&options);
-	}
+	(void) prepare_keeper_options(&options);
 
 	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata) &&
 		IS_EMPTY_STRING_BUFFER(configFilename))

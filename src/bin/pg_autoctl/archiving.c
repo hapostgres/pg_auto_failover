@@ -258,10 +258,21 @@ ensure_absolute_wal_filename(const char *pgdata, const char *filename,
 
 		strlcpy(wal, filename, MAXPGPATH);
 	}
+	else if (strchr(filename, '/') == NULL)
+	{
+		/* if we have just the WAL filename (%f), find it in PGDATA/pg_wal/ */
+		sformat(wal, MAXPGPATH, "%s/pg_wal/%s", pgdata, filename);
+
+		if (!file_exists(wal))
+		{
+			log_error("WAL file \"%s\" does not exists", wal);
+			return false;
+		}
+	}
 	else
 	{
-		/* if the provided filename is relative, find it in pg_wal */
-		sformat(wal, MAXPGPATH, "%s/pg_wal/%s", pgdata, filename);
+		/* if the provided filename is relative, find it in PGDATA/ (%p) */
+		sformat(wal, MAXPGPATH, "%s/%s", pgdata, filename);
 
 		if (!file_exists(wal))
 		{

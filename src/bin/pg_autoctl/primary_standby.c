@@ -63,7 +63,10 @@ static void local_postgres_update_pg_failures_tracking(LocalPostgresServer *post
 	{ "ssl_crl_file", "" }, \
 	{ "ssl_cert_file", "" }, \
 	{ "ssl_key_file", "" }, \
-	{ "ssl_ciphers", "'" DEFAULT_SSL_CIPHERS "'" }
+	{ "ssl_ciphers", "'" DEFAULT_SSL_CIPHERS "'" }, \
+	{ "archive_mode", "'always'" }, \
+	{ "archive_command", "'pg_autoctl archive wal %f'" }, \
+	{ "archive_timeout", "'5 min'" }
 
 #define DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER_PRE_13 \
 	DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER, \
