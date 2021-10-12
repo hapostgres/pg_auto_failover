@@ -106,6 +106,13 @@ typedef struct MonitorExtensionVersionParseContext
 	bool parsedOK;
 } MonitorExtensionVersionParseContext;
 
+typedef struct ArchiverPolicyArrayParseContext
+{
+	char sqlstate[SQLSTATE_LENGTH];
+	MonitorArchiverPolicyArray *policiesArray;
+	bool parsedOK;
+} ArchiverPolicyArrayParseContext;
+
 typedef struct MonitorUpsertWalParseContext
 {
 	char sqlstate[SQLSTATE_LENGTH];
@@ -131,6 +138,9 @@ static void printFormationSettings(void *ctx, PGresult *result);
 static void printFormationURI(void *ctx, PGresult *result);
 static void parseCoordinatorNode(void *ctx, PGresult *result);
 static void parseExtensionVersion(void *ctx, PGresult *result);
+static bool parseCurrentArchiverPolicy(PGresult *result, int rowNumber,
+									   MonitorArchiverPolicy *policy);
+static void parseArchiverPolicyArray(void *ctx, PGresult *result);
 static void parseUpsertWal(void *ctx, PGresult *result);
 
 static bool prepare_connection_to_current_system_user(Monitor *source,
@@ -4894,13 +4904,220 @@ monitor_find_node_by_nodeid(Monitor *monitor,
 
 
 /*
+ * monitor_register_archiver_policy calls the function
+ * pgautofailover.monitor_register_archiver_policy on the monitor and fills-in
+ * the MonitorArchiverPolicy structure with the result obtained.
+ */
+bool
+monitor_register_archiver_policy(Monitor *monitor,
+								 char *formation,
+								 char *target,
+								 char *method,
+								 char *config,
+								 char *backupInterval,
+								 int backupMaxCount,
+								 char *backupMaxAge,
+								 MonitorArchiverPolicy *policy)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT pgautofailover.register_archiver_policy($1,$2,$3,$4,$5,$6,$7)";
+
+	int paramCount = 7;
+	Oid paramTypes[7] = {
+		TEXTOID, TEXTOID, TEXTOID, TEXTOID,
+		INTERVALOID, INT4OID, INTERVALOID
+	};
+	const char *paramValues[7];
+
+	SingleValueResultContext parseContext = { { 0 }, PGSQL_RESULT_BIGINT, false };
+
+	paramValues[0] = formation;
+	paramValues[1] = target;
+	paramValues[2] = method;
+	paramValues[3] = config;
+	paramValues[4] = backupInterval;
+	paramValues[5] = intToString(backupMaxCount).strValue;
+	paramValues[6] = backupMaxAge;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &parseContext, parseSingleValueResult))
+	{
+		log_error("Failed to call pgautofailover.register_archiver_policy "
+				  "for formation \"%s\" and target \"%s\" from the monitor",
+				  formation, target);
+		return false;
+	}
+
+	if (!parseContext.parsedOk)
+	{
+		log_error("Failed to call pgautofailover.register_archiver_policy "
+				  "for formation \"%s\" and target \"%s\" from the monitor",
+				  formation, target);
+		return false;
+	}
+
+	policy->policyId = parseContext.bigint;
+	strlcpy(policy->formation, formation, sizeof(policy->formation));
+	strlcpy(policy->target, target, sizeof(policy->target));
+	strlcpy(policy->method, method, sizeof(policy->method));
+	strlcpy(policy->config, config, sizeof(policy->config));
+	strlcpy(policy->backupInterval, backupInterval, sizeof(policy->backupInterval));
+	policy->backupMaxCount = backupMaxCount;
+	strlcpy(policy->backupMaxAge, backupMaxAge, sizeof(policy->backupMaxAge));
+
+	return true;
+}
+
+
+/*
+ * monitor_get_archiver_policies returns an array of policies attached to the
+ * given formation.
+ */
+bool
+monitor_get_archiver_policies(Monitor *monitor, char *formation,
+							  MonitorArchiverPolicyArray *policyArray)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT archiver_policy_id, formationid, target, method, config, "
+		"       backup_interval, backup_max_count, backup_max_age "
+		"  FROM pgautofailover.archiver_policy "
+		" WHERE formationid = $1";
+	int paramCount = 1;
+	Oid paramTypes[1] = { TEXTOID };
+	const char *paramValues[1];
+
+	ArchiverPolicyArrayParseContext parseContext = { { 0 }, policyArray, false };
+
+	paramValues[0] = formation;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &parseContext, parseArchiverPolicyArray))
+	{
+		log_error("Failed to get archiver policies for formation \"%s\" "
+				  "from the monitor", formation);
+		return false;
+	}
+
+	if (!parseContext.parsedOK)
+	{
+		log_error("Failed to get archiver policies for formation \"%s\" "
+				  "from the monitor", formation);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * parseUpsertWal parses a result list of pgautofailover.archiver_policy.
+ */
+static void
+parseArchiverPolicyArray(void *ctx, PGresult *result)
+{
+	ArchiverPolicyArrayParseContext *context =
+		(ArchiverPolicyArrayParseContext *) ctx;
+
+	MonitorArchiverPolicyArray *policiesArray = context->policiesArray;
+
+	int nTuples = PQntuples(result);
+
+	if (nTuples > ARCHIVER_POLICIES_MAX_COUNT)
+	{
+		log_error("Query returned %d rows, pg_auto_failover supports only up "
+				  "to %d archiver policies per formation at the moment",
+				  nTuples, ARCHIVER_POLICIES_MAX_COUNT);
+		context->parsedOK = false;
+		return;
+	}
+
+	if (PQnfields(result) != 8)
+	{
+		log_error("Query returned %d columns, expected 8", PQnfields(result));
+		context->parsedOK = false;
+
+		return;
+	}
+
+	policiesArray->count = PQntuples(result);
+
+	bool parsedOk = true;
+
+	for (int rowNumber = 0; rowNumber < PQntuples(result); rowNumber++)
+	{
+		MonitorArchiverPolicy *policy = &(policiesArray->policies[rowNumber]);
+
+		parsedOk = parsedOk &&
+				   parseCurrentArchiverPolicy(result, rowNumber, policy);
+	}
+
+	context->parsedOK = parsedOk;
+}
+
+
+/*
+ * parseCurrentArchiverPolicy parses a single row of type
+ * pgautofailover.archiver_policy into its position in an array.
+ */
+static bool
+parseCurrentArchiverPolicy(PGresult *result, int rowNumber,
+						   MonitorArchiverPolicy *policy)
+{
+	int errors = 0;
+	char *value = PQgetvalue(result, rowNumber, 0);
+
+	if (!stringToInt64(value, &(policy->policyId)))
+	{
+		log_error("Invalid policyId \"%s\" returned by monitor", value);
+		++errors;
+	}
+
+	value = PQgetvalue(result, rowNumber, 1);
+	strlcpy(policy->formation, value, sizeof(policy->formation));
+
+	value = PQgetvalue(result, rowNumber, 2);
+	strlcpy(policy->target, value, sizeof(policy->target));
+
+	value = PQgetvalue(result, rowNumber, 3);
+	strlcpy(policy->method, value, sizeof(policy->method));
+
+	value = PQgetvalue(result, rowNumber, 4);
+	strlcpy(policy->config, value, sizeof(policy->config));
+
+	value = PQgetvalue(result, rowNumber, 5);
+	strlcpy(policy->backupInterval, value, sizeof(policy->backupInterval));
+
+	value = PQgetvalue(result, rowNumber, 6);
+	if (!stringToInt(value, &(policy->backupMaxCount)))
+	{
+		log_error("Invalid backup_max_count \"%s\" returned by monitor", value);
+		++errors;
+	}
+
+	value = PQgetvalue(result, rowNumber, 7);
+	strlcpy(policy->backupMaxAge, value, sizeof(policy->backupMaxAge));
+
+	if (errors > 0)
+	{
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
  * monitor_register_wal calls the function pgautofailover.register_wal on the
  * monitor, and fills-in the given MonitorWALFile structure with the result
  * obtained.
  */
 bool
 monitor_register_wal(Monitor *monitor,
-					 const char *formation,
+					 int64_t policyId,
 					 int groupId,
 					 int64_t nodeId,
 					 const char *filename,
@@ -4910,16 +5127,16 @@ monitor_register_wal(Monitor *monitor,
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
-		"SELECT formationid, groupid, nodeid, filename, filesize, md5, "
+		"SELECT archiver_policy_id, groupid, nodeid, filename, filesize, md5, "
 		"       start_time, finish_time "
 		"  FROM pgautofailover.register_wal($1, $2, $3, $4, $5, $6)";
 	int paramCount = 6;
-	Oid paramTypes[6] = { TEXTOID, INT4OID, INT8OID, TEXTOID, INT8OID, TEXTOID };
+	Oid paramTypes[6] = { INT8OID, INT4OID, INT8OID, TEXTOID, INT8OID, TEXTOID };
 	const char *paramValues[6];
 
 	MonitorUpsertWalParseContext parseContext = { { 0 }, walFile, false };
 
-	paramValues[0] = formation;
+	paramValues[0] = intToString(policyId).strValue;
 	paramValues[1] = intToString(groupId).strValue;
 	paramValues[2] = intToString(nodeId).strValue;
 	paramValues[3] = filename;
@@ -4931,18 +5148,16 @@ monitor_register_wal(Monitor *monitor,
 								   &parseContext, parseUpsertWal))
 	{
 		log_error("Failed to call pgautofailover.register_wal for wal \"%s\" in "
-				  "group %d in formation \"%s\" "
-				  "from the monitor",
-				  filename, groupId, formation);
+				  "group %d for archiver policy %lld from the monitor",
+				  filename, groupId, (long long) policyId);
 		return false;
 	}
 
 	if (!parseContext.parsedOK)
 	{
 		log_error("Failed to call pgautofailover.register_wal for wal \"%s\" in "
-				  "group %d in formation \"%s\" "
-				  "from the monitor",
-				  filename, groupId, formation);
+				  "group %d for archiver policy %lld from the monitor",
+				  filename, groupId, (long long) policyId);
 		return false;
 	}
 
@@ -4957,23 +5172,23 @@ monitor_register_wal(Monitor *monitor,
  */
 bool
 monitor_finish_wal(Monitor *monitor,
-				   const char *formation,
+				   int64_t policyId,
 				   int groupId,
 				   const char *filename,
 				   MonitorWALFile *walFile)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
-		"SELECT formationid, groupid, nodeid, filename, filesize, md5, "
+		"SELECT archiver_policy_id, groupid, nodeid, filename, filesize, md5, "
 		"       start_time, finish_time "
 		"  FROM pgautofailover.finish_wal($1, $2, $3)";
 	int paramCount = 3;
-	Oid paramTypes[3] = { TEXTOID, INT4OID, TEXTOID };
+	Oid paramTypes[3] = { INT8OID, INT4OID, TEXTOID };
 	const char *paramValues[3];
 
 	MonitorUpsertWalParseContext parseContext = { { 0 }, walFile, false };
 
-	paramValues[0] = formation;
+	paramValues[0] = intToString(policyId).strValue;
 	paramValues[1] = intToString(groupId).strValue;
 	paramValues[2] = filename;
 
@@ -4982,18 +5197,16 @@ monitor_finish_wal(Monitor *monitor,
 								   &parseContext, parseUpsertWal))
 	{
 		log_error("Failed to call pgautofailover.finish_wal for wal \"%s\" in "
-				  "group %d in formation \"%s\" "
-				  "from the monitor",
-				  filename, groupId, formation);
+				  "group %d for archiver policy %lld from the monitor",
+				  filename, groupId, (long long) policyId);
 		return false;
 	}
 
 	if (!parseContext.parsedOK)
 	{
 		log_error("Failed to call pgautofailover.finish_wal for wal \"%s\" in "
-				  "group %d in formation \"%s\" "
-				  "from the monitor",
-				  filename, groupId, formation);
+				  "group %d for archiver policy %lld from the monitor",
+				  filename, groupId, (long long) policyId);
 		return false;
 	}
 
@@ -5034,7 +5247,12 @@ parseUpsertWal(void *ctx, PGresult *result)
 	}
 
 	char *value = PQgetvalue(result, 0, 0);
-	strlcpy(context->walFile->formation, value, NAMEDATALEN);
+
+	if (!stringToInt64(value, &(context->walFile->policyId)))
+	{
+		log_error("Invalid policyId \"%s\" returned by monitor", value);
+		++errors;
+	}
 
 	value = PQgetvalue(result, 0, 1);
 

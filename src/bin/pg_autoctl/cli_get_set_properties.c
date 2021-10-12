@@ -100,6 +100,7 @@ static CommandLine get_formation_command =
 static CommandLine *get_subcommands[] = {
 	&get_node_command,
 	&get_formation_command,
+	&get_archiver_policy_command,
 	NULL
 };
 
@@ -184,6 +185,7 @@ static CommandLine set_formation_command =
 static CommandLine *set_subcommands[] = {
 	&set_node_command,
 	&set_formation_command,
+	&set_archiver_policy_command,
 	NULL
 };
 

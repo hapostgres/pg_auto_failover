@@ -21,10 +21,6 @@
 #include "commandline.h"
 #include "env_utils.h"
 #include "defaults.h"
-#include "fsm.h"
-#include "ini_file.h"
-#include "ipaddr.h"
-#include "keeper_config.h"
 #include "keeper_pg_init.h"
 #include "keeper.h"
 #include "monitor.h"
@@ -277,6 +273,7 @@ static void
 cli_archive_wal(int argc, char **argv)
 {
 	Keeper keeper = { 0 };
+	Monitor *monitor = &(keeper.monitor);
 	KeeperConfig *config = &(keeper.config);
 
 	keeper.config = keeperOptions;
@@ -310,12 +307,39 @@ cli_archive_wal(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	const char *filename = argv[0];
+	MonitorArchiverPolicyArray policiesArray = { 0 };
 
-	if (!archive_wal(&keeper, configFilename, filename))
+	if (!monitor_get_archiver_policies(monitor,
+									   config->formation,
+									   &policiesArray))
 	{
 		/* errors have already been logged */
-		exit(EXIT_CODE_INTERNAL_ERROR);
+		exit(EXIT_CODE_MONITOR);
+	}
+
+	const char *filename = argv[0];
+
+	if (policiesArray.count == 0)
+	{
+		log_info("Skipping archiving of WAL file \"%s\": no archiving policy "
+				 "has been set-up for formation \"%s\"",
+				 filename,
+				 config->formation);
+		log_info("HINT: Create an archiving policy using the command: "
+				 "pg_autoctl create archiver-policy");
+
+		exit(EXIT_CODE_QUIT);
+	}
+
+	for (int i = 0; i < policiesArray.count; i++)
+	{
+		MonitorArchiverPolicy *policy = &(policiesArray.policies[i]);
+
+		if (!archive_wal(&keeper, policy, filename))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
 	}
 }
 

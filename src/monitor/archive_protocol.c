@@ -40,8 +40,55 @@ int ArchiveUpdateNodeTimeoutMs = 60 * 1000;
 
 
 /* SQL-callable function declarations */
+PG_FUNCTION_INFO_V1(register_archiver_policy);
 PG_FUNCTION_INFO_V1(register_wal);
 PG_FUNCTION_INFO_V1(finish_wal);
+
+
+/*
+ * register_archiver_policy registers an archiver policy for a given formation.
+ */
+Datum
+register_archiver_policy(PG_FUNCTION_ARGS)
+{
+	checkPgAutoFailoverVersion();
+
+	text *formationIdText = PG_GETARG_TEXT_P(0);
+	char *formationId = text_to_cstring(formationIdText);
+
+	text *targetText = PG_GETARG_TEXT_P(1);
+	char *target = text_to_cstring(targetText);
+
+	text *methodText = PG_GETARG_TEXT_P(2);
+	char *method = text_to_cstring(methodText);
+
+	text *configText = PG_GETARG_TEXT_P(3);
+	char *config = text_to_cstring(configText);
+
+	Interval *backupInterval = PG_GETARG_INTERVAL_P(4);
+	int backupMaxCount = PG_GETARG_INT32(5);
+	Interval *backupMaxAge = PG_GETARG_INTERVAL_P(6);
+
+	AutoFailoverArchiverPolicy *pgAutoFailoverPolicy =
+		AddAutoFailoverArchiverPolicy(
+			formationId,
+			target,
+			method,
+			config,
+			backupInterval,
+			backupMaxCount,
+			backupMaxAge);
+
+	if (pgAutoFailoverPolicy == NULL)
+	{
+		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+						errmsg("couldn't register an archiver policy for "
+							   "formation %s and target %s",
+							   formationId, target)));
+	}
+
+	PG_RETURN_INT64(pgAutoFailoverPolicy->policyId);
+}
 
 
 /*
@@ -67,9 +114,7 @@ register_wal(PG_FUNCTION_ARGS)
 {
 	checkPgAutoFailoverVersion();
 
-	text *formationIdText = PG_GETARG_TEXT_P(0);
-	char *formationId = text_to_cstring(formationIdText);
-
+	int64 policyId = PG_GETARG_INT64(0);
 	int32 groupId = PG_GETARG_INT32(1);
 	int64 nodeId = PG_GETARG_INT64(2);
 
@@ -83,7 +128,7 @@ register_wal(PG_FUNCTION_ARGS)
 
 	AutoFailoverPGWal *pgAutoFailoverPGWal =
 		AddAutoFailoverPGWal(
-			formationId,
+			policyId,
 			groupId,
 			nodeId,
 			fileName,
@@ -103,15 +148,16 @@ register_wal(PG_FUNCTION_ARGS)
 		PushActiveSnapshot(GetLatestSnapshot());
 
 		pgAutoFailoverPGWal =
-			GetAutoFailoverPGWal(formationId, groupId, fileName);
+			GetAutoFailoverPGWal(policyId, groupId, fileName);
 
 		if (pgAutoFailoverPGWal == NULL)
 		{
 			ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
 							errmsg("couldn't register a pg_wal entry for "
-								   "WAL %s in formation %s and group %d",
+								   "WAL %s for archiver_policy_id %lld "
+								   "and group %d",
 								   fileName,
-								   formationId,
+								   (long long) policyId,
 								   groupId)));
 		}
 
@@ -144,7 +190,7 @@ register_wal(PG_FUNCTION_ARGS)
 	memset(values, 0, sizeof(values));
 	memset(isNulls, false, sizeof(isNulls));
 
-	values[0] = CStringGetTextDatum(pgAutoFailoverPGWal->formationId);
+	values[0] = Int64GetDatum(pgAutoFailoverPGWal->policyId);
 	values[1] = Int32GetDatum(pgAutoFailoverPGWal->groupId);
 	values[2] = Int64GetDatum(pgAutoFailoverPGWal->nodeId);
 	values[3] = CStringGetTextDatum(pgAutoFailoverPGWal->fileName);
@@ -185,24 +231,22 @@ finish_wal(PG_FUNCTION_ARGS)
 {
 	checkPgAutoFailoverVersion();
 
-	text *formationIdText = PG_GETARG_TEXT_P(0);
-	char *formationId = text_to_cstring(formationIdText);
-
+	int64 policyId = PG_GETARG_INT64(0);
 	int32 groupId = PG_GETARG_INT32(1);
 
 	text *fileNameText = PG_GETARG_TEXT_P(2);
 	char *fileName = text_to_cstring(fileNameText);
 
 	AutoFailoverPGWal *pgAutoFailoverPGWal =
-		GetAutoFailoverPGWal(formationId, groupId, fileName);
+		GetAutoFailoverPGWal(policyId, groupId, fileName);
 
 	if (pgAutoFailoverPGWal == NULL)
 	{
 		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
 						errmsg("couldn't register a pg_wal entry for "
-							   "WAL %s in formation %s and group %d",
+							   "WAL %s in archiver_policy_id %lld and group %d",
 							   fileName,
-							   formationId,
+							   (long long) policyId,
 							   groupId)));
 	}
 
@@ -215,7 +259,7 @@ finish_wal(PG_FUNCTION_ARGS)
 	memset(values, 0, sizeof(values));
 	memset(isNulls, false, sizeof(isNulls));
 
-	values[0] = CStringGetTextDatum(pgAutoFailoverPGWal->formationId);
+	values[0] = Int64GetDatum(pgAutoFailoverPGWal->policyId);
 	values[1] = Int32GetDatum(pgAutoFailoverPGWal->groupId);
 	values[2] = Int64GetDatum(pgAutoFailoverPGWal->nodeId);
 	values[3] = CStringGetTextDatum(pgAutoFailoverPGWal->fileName);

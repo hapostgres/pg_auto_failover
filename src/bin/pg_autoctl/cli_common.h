@@ -86,6 +86,12 @@ extern CommandLine archive_commands;
 /* cli_restore.c */
 extern CommandLine restore_commands;
 
+/* cli_archive_policy */
+extern CommandLine create_archiver_policy_command;
+extern CommandLine drop_archiver_policy_command;
+extern CommandLine get_archiver_policy_command;
+extern CommandLine set_archiver_policy_command;
+
 /* cli_do.c */
 extern CommandLine do_commands;
 

@@ -12,6 +12,7 @@
 
 #include "postgres_fe.h"
 
+#include "config.h"
 #include "defaults.h"
 #include "file_utils.h"
 #include "log.h"
@@ -21,8 +22,8 @@
 
 #include "runprogram.h"
 
-static void log_walg_errors(Program *program);
-static void log_walg_error_lines(int logLevel, char *buffer);
+static void walg_log_errors(Program *program);
+static void walg_log_error_lines(int logLevel, char *buffer);
 
 
 /*
@@ -50,7 +51,7 @@ walg_wal_push(const char *config, const char *wal)
 
 	if (program.returnCode != 0)
 	{
-		(void) log_walg_errors(&program);
+		(void) walg_log_errors(&program);
 		free_program(&program);
 
 		log_fatal("Failed to archive WAL \"%s\" with wal-g, "
@@ -61,7 +62,12 @@ walg_wal_push(const char *config, const char *wal)
 
 	if (program.stdOut != NULL)
 	{
-		log_walg_error_lines(LOG_DEBUG, program.stdOut);
+		walg_log_error_lines(LOG_INFO, program.stdOut);
+	}
+
+	if (program.stdErr != NULL)
+	{
+		walg_log_error_lines(LOG_INFO, program.stdErr);
 	}
 
 	free_program(&program);
@@ -71,19 +77,55 @@ walg_wal_push(const char *config, const char *wal)
 
 
 /*
+ * walg_prepare_config prepares the configuration in a configuration file.
+ *
+ * The WAL-G configuration is maintained on the monitor as part of the
+ * pgautofailover.archiver_policy table, in a JSONB column. The wal-g command
+ * wants a filename where to read the same contents, so that's what we have to
+ * prepare now.
+ */
+bool
+walg_prepare_config(const char *pgdata, const char *config,
+					char *archiverConfigPathname)
+{
+	if (!build_xdg_path(archiverConfigPathname,
+						XDG_RUNTIME,
+						pgdata,
+						WAL_G_CONFIGURATION_FILENAME))
+	{
+		/* highly unexpected */
+		log_error("Failed to build wal-g configuration file pathname, "
+				  "see above for details.");
+		return false;
+	}
+
+	log_debug("walg_prepare_config: %s", archiverConfigPathname);
+
+	if (!write_file((char *) config, strlen(config), archiverConfigPathname))
+	{
+		log_error("Failed to write WAL-G configuration to file \"%s\"",
+				  archiverConfigPathname);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
  * log_walg_errors logs the output of the given program.
  */
 static void
-log_walg_errors(Program *program)
+walg_log_errors(Program *program)
 {
 	if (program->stdOut != NULL)
 	{
-		log_walg_error_lines(LOG_ERROR, program->stdOut);
+		walg_log_error_lines(LOG_ERROR, program->stdOut);
 	}
 
 	if (program->stdErr != NULL)
 	{
-		log_walg_error_lines(LOG_ERROR, program->stdErr);
+		walg_log_error_lines(LOG_ERROR, program->stdErr);
 	}
 }
 
@@ -92,7 +134,7 @@ log_walg_errors(Program *program)
  * log_walg_error_lines logs given program output buffer as separate lines.
  */
 static void
-log_walg_error_lines(int logLevel, char *buffer)
+walg_log_error_lines(int logLevel, char *buffer)
 {
 	char *lines[BUFSIZE];
 	int lineCount = splitLines(buffer, lines, BUFSIZE);

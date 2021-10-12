@@ -26,6 +26,7 @@ CommandLine *create_subcommands[] = {
 	&create_monitor_command,
 	&create_postgres_command,
 	&create_formation_command,
+	&create_archiver_policy_command,
 	NULL
 };
 
@@ -70,6 +71,7 @@ CommandLine *drop_subcommands[] = {
 	&drop_monitor_command,
 	&drop_node_command,
 	&drop_formation_command,
+	&drop_archiver_policy_command,
 	NULL
 };
 

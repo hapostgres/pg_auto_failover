@@ -26,10 +26,11 @@ static bool ensure_absolute_wal_filename(const char *pgdata,
 										 const char *filename,
 										 char *wal);
 
-static bool prepareWalFile(const char *formation,
+static bool prepareWalFile(PostgresSetup *pgSetup,
+						   int64_t policyId,
 						   int groupId,
 						   int64_t nodeId,
-						   const char *wal_pathname,
+						   const char *filename,
 						   MonitorWALFile *walFile);
 
 static char * get_walfile_name(const char *filename);
@@ -42,32 +43,18 @@ static bool get_walfile_md5(const char *filename, char *md5);
  * using WAL-G.
  */
 bool
-archive_wal(Keeper *keeper, const char *config_filename, const char *wal)
+archive_wal(Keeper *keeper, MonitorArchiverPolicy *policy, const char *filename)
 {
 	Monitor *monitor = &(keeper->monitor);
 	KeeperConfig *config = &(keeper->config);
 	PostgresSetup *pgSetup = &(config->pgSetup);
-
-	char wal_pathname[MAXPGPATH] = { 0 };
-
-	if (!normalize_filename(pgSetup->pgdata, pgSetup->pgdata, MAXPGPATH))
-	{
-		/* errors have already been logged */
-		return false;
-	}
-
-	if (!ensure_absolute_wal_filename(pgSetup->pgdata, wal, wal_pathname))
-	{
-		/* errors have already been logged */
-		return false;
-	}
-
 	MonitorWALFile walFile = { 0 };
 
-	if (!prepareWalFile(config->formation,
+	if (!prepareWalFile(pgSetup,
+						policy->policyId,
 						config->groupId,
 						keeper->state.current_node_id,
-						wal_pathname,
+						filename,
 						&walFile))
 	{
 		/* errors have already been logged */
@@ -79,12 +66,13 @@ archive_wal(Keeper *keeper, const char *config_filename, const char *wal)
 	(void) pretty_print_bytes(sizeStr, sizeof(sizeStr), walFile.filesize);
 
 	log_info("Archiving WAL file \"%s\" for node %lld \"%s\" "
-			 "in formation \"%s\" and group %d",
+			 "in formation \"%s\" and group %d for target \"%s\"",
 			 walFile.filename,
 			 (long long) walFile.nodeId,
 			 config->name,
-			 walFile.formation,
-			 walFile.groupId);
+			 config->formation,
+			 walFile.groupId,
+			 policy->target);
 
 	log_debug("WAL file \"%s\" has size %s and md5 \"%s\"",
 			  walFile.filename,
@@ -98,7 +86,7 @@ archive_wal(Keeper *keeper, const char *config_filename, const char *wal)
 	MonitorWALFile registeredWalFile = { 0 };
 
 	if (!monitor_register_wal(monitor,
-							  config->formation,
+							  policy->policyId,
 							  config->groupId,
 							  keeper->state.current_node_id,
 							  walFile.filename,
@@ -128,15 +116,19 @@ archive_wal(Keeper *keeper, const char *config_filename, const char *wal)
 	{
 		if (IS_EMPTY_STRING_BUFFER(registeredWalFile.finishTime))
 		{
-			log_warn("WAL file \"%s\" is being archived by node %lld",
+			log_warn("WAL file \"%s\" is being archived by node %lld "
+					 "for target \"%s\"",
 					 registeredWalFile.filename,
-					 (long long) registeredWalFile.nodeId);
+					 (long long) registeredWalFile.nodeId,
+					 policy->target);
 		}
 		else
 		{
-			log_info("WAL file \"%s\" has already been archived by node %lld",
+			log_info("WAL file \"%s\" has already been archived by node %lld "
+					 "for target \"%s\"",
 					 registeredWalFile.filename,
-					 (long long) registeredWalFile.nodeId);
+					 (long long) registeredWalFile.nodeId,
+					 policy->target);
 		}
 
 		return false;
@@ -147,12 +139,20 @@ archive_wal(Keeper *keeper, const char *config_filename, const char *wal)
 		strcmp(walFile.md5, registeredWalFile.md5) == 0 &&
 		IS_EMPTY_STRING_BUFFER(registeredWalFile.finishTime))
 	{
-		bool success = walg_wal_push(config_filename, wal_pathname);
+		/* first, handle the configuration file */
+		char archiverConfigPathname[MAXPGPATH] = { 0 };
+
+		/* now call wal-g wal-push --config filename WAL */
+		bool success =
+			walg_prepare_config(pgSetup->pgdata,
+								policy->config,
+								archiverConfigPathname) &&
+			walg_wal_push(archiverConfigPathname, walFile.pathname);
 
 		if (success)
 		{
 			if (!monitor_finish_wal(monitor,
-									registeredWalFile.formation,
+									policy->policyId,
 									registeredWalFile.groupId,
 									registeredWalFile.filename,
 									&registeredWalFile))
@@ -161,18 +161,22 @@ archive_wal(Keeper *keeper, const char *config_filename, const char *wal)
 				return false;
 			}
 
-			log_info("Archived WAL file \"%s\" successfully at %s",
+			log_info("Archived WAL file \"%s\" successfully at %s "
+					 "for target \"%s\"",
 					 registeredWalFile.filename,
-					 registeredWalFile.finishTime);
+					 registeredWalFile.finishTime,
+					 policy->target);
 		}
 
 		return success;
 	}
 	else
 	{
-		log_info("WAL file \"%s\" with MD5 \"%s\" was finished achiving at %s",
+		log_info("WAL file \"%s\" with MD5 \"%s\" was finished achiving "
+				 "for target \"%s\" at %s",
 				 registeredWalFile.filename,
 				 registeredWalFile.md5,
+				 policy->target,
 				 registeredWalFile.finishTime);
 	}
 
@@ -185,19 +189,35 @@ archive_wal(Keeper *keeper, const char *config_filename, const char *wal)
  * checksum and size.
  */
 static bool
-prepareWalFile(const char *formation,
+prepareWalFile(PostgresSetup *pgSetup,
+			   int64_t policyId,
 			   int groupId,
 			   int64_t nodeId,
-			   const char *wal_pathname,
+			   const char *filename,
 			   MonitorWALFile *walFile)
 {
-	strlcpy(walFile->formation, formation, sizeof(walFile->formation));
-
+	walFile->policyId = policyId;
 	walFile->groupId = groupId;
 	walFile->nodeId = nodeId;
 
+	char wal_pathname[MAXPGPATH] = { 0 };
+
+	if (!normalize_filename(pgSetup->pgdata, pgSetup->pgdata, MAXPGPATH))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	if (!ensure_absolute_wal_filename(pgSetup->pgdata, filename, wal_pathname))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/* just the WAL filename, without the absolute path now */
 	char *walFileName = get_walfile_name(wal_pathname);
 
+	strlcpy(walFile->pathname, wal_pathname, sizeof(walFile->pathname));
 	strlcpy(walFile->filename, walFileName, sizeof(walFile->filename));
 
 	if (!get_walfile_md5(wal_pathname, walFile->md5))

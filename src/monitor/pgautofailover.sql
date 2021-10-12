@@ -187,8 +187,10 @@ CREATE TABLE pgautofailover.event
 
 CREATE TABLE pgautofailover.archiver_policy
  (
+    archiver_policy_id   bigserial not null,
     formationid          text not null default 'default',
     target               text not null,
+    method               text not null check (method in ('wal-g')),
     config               jsonb not null,
 
     backup_interval      interval not null default '6 hours',
@@ -196,28 +198,34 @@ CREATE TABLE pgautofailover.archiver_policy
     backup_max_age       interval not null default '2 days',
 
     PRIMARY KEY (formationid, target),
+    UNIQUE (archiver_policy_id),
     FOREIGN KEY (formationid) REFERENCES pgautofailover.formation(formationid)
  );
 
 CREATE TABLE pgautofailover.basebackup
  (
+    archiver_policy_id    bigserial not null,
     nodeid                bigint not null,
 
-    name                  text not null,
+    name                  text,
     start_time            timestamptz not null,
-    finish_time           timestamptz not null,
-    start_lsn             pg_lsn not null,
-    finish_lsn            pg_lsn not null,
+    finish_time           timestamptz,
+    start_lsn             pg_lsn,
+    finish_lsn            pg_lsn,
     uncompressed_size     bigint,
     compressed_size       bigint,
 
-    PRIMARY KEY (nodeid, name),
+    PRIMARY KEY (nodeid, start_time),
+
+    FOREIGN KEY (archiver_policy_id)
+     REFERENCES pgautofailover.archiver_policy(archiver_policy_id),
+
     FOREIGN KEY (nodeid) REFERENCES pgautofailover.node(nodeid)
  );
 
 CREATE TABLE pgautofailover.pg_wal
  (
-    formationid          text not null default 'default',
+    archiver_policy_id   bigint not null,
     groupid              int not null,
     nodeid               bigint not null,
 
@@ -228,9 +236,13 @@ CREATE TABLE pgautofailover.pg_wal
     start_time           timestamptz not null,
     finish_time          timestamptz,
 
-    CONSTRAINT pg_wal_pkey PRIMARY KEY (formationid, groupid, filename),
-    FOREIGN KEY (formationid) REFERENCES pgautofailover.formation(formationid),
-    FOREIGN KEY (nodeid) REFERENCES pgautofailover.node(nodeid)
+    CONSTRAINT pg_wal_pkey PRIMARY KEY (archiver_policy_id, groupid, filename),
+
+    FOREIGN KEY (archiver_policy_id)
+     REFERENCES pgautofailover.archiver_policy(archiver_policy_id),
+
+    -- allow pg_autoctl drop node without deleting all the WAL entries
+    FOREIGN KEY (nodeid) REFERENCES pgautofailover.node(nodeid) ON DELETE SET NULL
  );
 
 GRANT SELECT ON ALL TABLES IN SCHEMA pgautofailover TO autoctl_node;
@@ -924,16 +936,39 @@ comment on function pgautofailover.formation_settings(text)
         is 'get the current replication settings a formation';
 
 
-CREATE FUNCTION pgautofailover.register_wal
+CREATE FUNCTION pgautofailover.register_archiver_policy
  (
     IN formation_id         text,
+    IN target               text,
+    IN method               text,
+    IN config               text,
+    IN backup_interval      interval default '6 hours',
+    IN backup_max_count     integer default 10,
+    IN backup_max_age       interval default '2 days'
+ )
+RETURNS bigint LANGUAGE C STRICT SECURITY DEFINER
+AS 'MODULE_PATHNAME', $$register_archiver_policy$$;
+
+grant execute on function
+      pgautofailover.register_archiver_policy
+      (text,text,text,text,interval,integer,interval)
+   to autoctl_node;
+
+comment on function pgautofailover.register_archiver_policy
+                    (text,text,text,text,interval,integer,interval)
+        is 'register an archiver policy for a given formation';
+
+
+CREATE FUNCTION pgautofailover.register_wal
+ (
+    IN archiver_policy_id   bigint,
     IN group_id             int,
     IN node_id              bigint,
     IN filename             text,
     IN filesize             bigint,
     IN md5                  text,
 
-   OUT formationid          text,
+   OUT archiver_policy_id   bigint,
    OUT groupid              int,
    OUT nodeid               bigint,
    OUT filename             text,
@@ -946,20 +981,20 @@ RETURNS record LANGUAGE C STRICT SECURITY DEFINER
 AS 'MODULE_PATHNAME', $$register_wal$$;
 
 grant execute on function
-      pgautofailover.register_wal(text,int,bigint,text,bigint,text)
+      pgautofailover.register_wal(bigint,int,bigint,text,bigint,text)
    to autoctl_node;
 
-comment on function pgautofailover.register_wal(text,int,bigint,text,bigint,text)
+comment on function pgautofailover.register_wal(bigint,int,bigint,text,bigint,text)
         is 'register a WAL to be archived, or return the previous registration';
 
 
 CREATE FUNCTION pgautofailover.finish_wal
  (
-    IN formation_id         text,
+    IN archiver_policy_id   bigint,
     IN group_id             int,
     IN filename             text,
 
-   OUT formationid          text,
+   OUT archiver_policy_id   bigint,
    OUT groupid              int,
    OUT nodeid               bigint,
    OUT filename             text,
@@ -972,8 +1007,8 @@ RETURNS record LANGUAGE C STRICT SECURITY DEFINER
 AS 'MODULE_PATHNAME', $$finish_wal$$;
 
 grant execute on function
-      pgautofailover.finish_wal(text,int,text)
+      pgautofailover.finish_wal(bigint,int,text)
    to autoctl_node;
 
-comment on function pgautofailover.finish_wal(text,int,text)
+comment on function pgautofailover.finish_wal(bigint,int,text)
         is 'mark the WAL file archiving finished';

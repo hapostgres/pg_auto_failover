@@ -31,7 +31,7 @@
 #define INT8OID 20
 #define TEXTOID 25
 #define LSNOID 3220
-#define UUIDOID 2950
+#define INTERVALOID 1186
 
 /*
  * Maximum connection info length as used in walreceiver.h

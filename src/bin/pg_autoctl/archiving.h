@@ -13,7 +13,10 @@
 #include <stdbool.h>
 
 #include "keeper.h"
+#include "monitor.h"
 
-bool archive_wal(Keeper *keeper, const char *config_filename, const char *wal);
+bool archive_wal(Keeper *keeper,
+				 MonitorArchiverPolicy *policy,
+				 const char *filename);
 
 #endif  /* ARCHIVING_H */

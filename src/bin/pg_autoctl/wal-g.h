@@ -13,7 +13,11 @@
 #include <errno.h>
 #include <stdbool.h>
 
-bool walg_wal_push(const char *config, const char *wal);
+#define WAL_G_CONFIGURATION_FILENAME "wal-g.json"
 
+bool walg_prepare_config(const char *pgdata, const char *config,
+						 char *archiverConfigPathname);
+
+bool walg_wal_push(const char *config, const char *wal);
 
 #endif  /* WAL_G_H */

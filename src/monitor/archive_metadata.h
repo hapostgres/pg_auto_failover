@@ -21,12 +21,12 @@
 
 #define AUTO_FAILOVER_PG_WAL_TABLE_NAME "pg_wal"
 
-/* column indexes for pgautofailover.node
+/* column indexes for pgautofailover.pg_wal
  * indices must match with the columns given
  * in the following definition.
  */
 #define Natts_pgautofailover_pg_wal 8
-#define Anum_pgautofailover_pg_wal_formationid 1
+#define Anum_pgautofailover_pg_wal_archiver_policy_id 1
 #define Anum_pgautofailover_pg_wal_groupid 2
 #define Anum_pgautofailover_pg_wal_nodeid 3
 #define Anum_pgautofailover_pg_wal_filename 4
@@ -36,7 +36,7 @@
 #define Anum_pgautofailover_pg_wal_finish_time 8
 
 #define AUTO_FAILOVER_PG_WAL_TABLE_ALL_COLUMNS \
-	"formationid, " \
+	"archiver_policy_id, " \
 	"groupid, " \
 	"nodeid, " \
 	"filename, " \
@@ -55,7 +55,7 @@
  */
 typedef struct AutoFailoverPGWal
 {
-	char *formationId;
+	int64 policyId;
 	int groupId;
 	int64 nodeId;
 	char *fileName;
@@ -65,11 +65,69 @@ typedef struct AutoFailoverPGWal
 	TimestampTz finishTime;
 } AutoFailoverPGWal;
 
-extern AutoFailoverPGWal * GetAutoFailoverPGWal(char *formationId,
+
+#define AUTO_FAILOVER_ARCHIVER_POLICY_TABLE_NAME "archiver_policy"
+
+/* column indexes for pgautofailover.archiver_policy
+ * indices must match with the columns given
+ * in the following definition.
+ */
+#define Natts_pgautofailover_archiver_policy 8
+#define Anum_pgautofailover_archiver_policy_archiver_policy_id 1
+#define Anum_pgautofailover_archiver_policy_formationid 2
+#define Anum_pgautofailover_archiver_policy_target 3
+#define Anum_pgautofailover_archiver_policy_method 4
+#define Anum_pgautofailover_archiver_policy_config 5
+#define Anum_pgautofailover_archiver_policy_backup_interval 6
+#define Anum_pgautofailover_archiver_policy_backup_max_count 7
+#define Anum_pgautofailover_archiver_policy_backup_max_age 8
+
+#define AUTO_FAILOVER_ARCHIVER_POLICY_TABLE_ALL_COLUMNS \
+	"archiver_policy_id, " \
+	"formationid, " \
+	"target, " \
+	"method, " \
+	"config, " \
+	"backup_interval, " \
+	"backup_max_count, " \
+	"backup_max_age, "
+
+#define SELECT_ALL_FROM_AUTO_FAILOVER_ARCHIVER_POLICY_TABLE \
+	"SELECT " AUTO_FAILOVER_ARCHIVER_POLICY_TABLE_ALL_COLUMNS \
+	" FROM pgautofailover." AUTO_FAILOVER_ARCHIVER_POLICY_TABLE_NAME
+
+
+/*
+ * AutoFailoverArchiverPolicy represents an archiver_policy entry that is being
+ * tracked by the pg_auto_failover monitor.
+ */
+typedef struct AutoFailoverArchiverPolicy
+{
+	int64 policyId;
+	char *formationId;
+	char *target;
+	char *method;
+	char *config;
+	Interval *backupInterval;
+	int backupMaxCount;
+	Interval *backupMaxAge;
+} AutoFailoverArchiverPolicy;
+
+
+extern AutoFailoverArchiverPolicy * AddAutoFailoverArchiverPolicy(char *formationId,
+																  char *target,
+																  char *method,
+																  char *config,
+																  Interval *backupInterval,
+																  int backupMaxCount,
+																  Interval *backdupMaxAge);
+
+
+extern AutoFailoverPGWal * GetAutoFailoverPGWal(int64 policyId,
 												int groupId,
 												char *fileName);
 
-extern AutoFailoverPGWal * AddAutoFailoverPGWal(char *formationId,
+extern AutoFailoverPGWal * AddAutoFailoverPGWal(int64 policyId,
 												int groupId,
 												int64 nodeId,
 												char *fileName,

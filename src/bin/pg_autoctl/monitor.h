@@ -90,14 +90,35 @@ typedef struct CoordinatorNodeAddress
 	NodeAddress node;
 } CoordinatorNodeAddress;
 
+typedef struct MonitorArchiverPolicy
+{
+	int64_t policyId;
+	char formation[NAMEDATALEN];
+	char target[NAMEDATALEN];
+	char method[NAMEDATALEN];
+	char config[MAXPGPATH];
+	char backupInterval[BUFSIZE];
+	int backupMaxCount;
+	char backupMaxAge[BUFSIZE];
+} MonitorArchiverPolicy;
+
+#define ARCHIVER_POLICIES_MAX_COUNT 12
+
+typedef struct MonitorArchiverPolicyArray
+{
+	int count;
+	MonitorArchiverPolicy policies[ARCHIVER_POLICIES_MAX_COUNT];
+} MonitorArchiverPolicyArray;
+
 #define MD5LEN 33
 
 typedef struct MonitorWALFile
 {
-	char formation[NAMEDATALEN];
+	int64_t policyId;
 	int groupId;
 	int64_t nodeId;
-	char filename[MAXPGPATH];
+	char pathname[MAXPGPATH];   /* absolute pathname */
+	char filename[MAXPGPATH];   /* just the WAL file name */
 	uint64_t filesize;
 	char md5[MD5LEN];
 	char startTime[BUFSIZE];
@@ -286,8 +307,22 @@ bool monitor_find_node_by_nodeid(Monitor *monitor,
 								 int64_t nodeId,
 								 NodeAddressArray *nodesArray);
 
+bool monitor_register_archiver_policy(Monitor *monitor,
+									  char *formation,
+									  char *target,
+									  char *method,
+									  char *config,
+									  char *backupInterval,
+									  int backupMaxCount,
+									  char *backupMaxAge,
+									  MonitorArchiverPolicy *policy);
+
+bool monitor_get_archiver_policies(Monitor *monitor, char *formation,
+								   MonitorArchiverPolicyArray *policyArray);
+
+
 bool monitor_register_wal(Monitor *monitor,
-						  const char *formation,
+						  int64_t policyId,
 						  int groupId,
 						  int64_t nodeId,
 						  const char *filename,
@@ -296,7 +331,7 @@ bool monitor_register_wal(Monitor *monitor,
 						  MonitorWALFile *walFile);
 
 bool monitor_finish_wal(Monitor *monitor,
-						const char *formation,
+						int64_t policyId,
 						int groupId,
 						const char *filename,
 						MonitorWALFile *walFile);
