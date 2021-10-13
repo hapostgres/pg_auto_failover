@@ -43,6 +43,7 @@ CommandLine create_archiver_policy_command =
 		"archiver-policy",
 		"Create an archiving policy for a given formation",
 		"--formation --method --target --config filename [ ... ] ",
+		"  --monitor          pg_auto_failover Monitor Postgres URL\n"
 		"  --formation        pg_auto_failover formation\n"
 		"  --target           archiving target name (default)\n"
 		"  --method           archiving method to use for this policy (wal-g)\n"

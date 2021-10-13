@@ -11,3 +11,4 @@ pg_autoctl create - Create a pg_auto_failover node, or formation
    pg_autoctl_create_monitor
    pg_autoctl_create_postgres
    pg_autoctl_create_formation
+   pg_autoctl_create_archiver_policy

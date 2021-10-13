@@ -99,7 +99,7 @@ todo_include_todos = False
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 #
-html_theme = "sphinx_rtd_theme_citus"
+html_theme = "sphinx_rtd_theme"
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
@@ -281,6 +281,20 @@ man_pages = [
         "ref/pg_autoctl_show_standby_names",
         "pg_autoctl show standby-names",
         "pg_autoctl show standby-names",
+        [author],
+        1,
+    ),
+    (
+        "ref/pg_autoctl_archive_wal",
+        "pg_autoctl archive wal",
+        "pg_autoctl archive wal",
+        [author],
+        1,
+    ),
+    (
+        "ref/pg_autoctl_restore_wal",
+        "pg_autoctl restore wal",
+        "pg_autoctl restore wal",
         [author],
         1,
     ),

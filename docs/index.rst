@@ -17,6 +17,7 @@ Welcome to pg_auto_failover's documentation!
    architecture-multi-standby
    failover-state-machine
    fault-tolerance
+   disaster-recovery
    install
    security
    ref/manual

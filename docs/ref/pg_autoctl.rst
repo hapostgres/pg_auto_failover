@@ -14,6 +14,8 @@ pg_autoctl provides the following commands::
   + drop     Drop a pg_auto_failover node, or formation
   + config   Manages the pg_autoctl configuration
   + show     Show pg_auto_failover information
+  + archive  Archive WAL files and PGDATA base backups
+  + restore  Restore WAL files and PGDATA base backups
   + enable   Enable a feature on a formation
   + disable  Disable a feature on a formation
   + get      Get a pg_auto_failover node, or formation setting
@@ -50,6 +52,16 @@ pg_autoctl provides the following commands::
     standby-names  Prints synchronous_standby_names for a given group
     file           List pg_autoctl internal files (config, state, pid)
     systemd        Print systemd service file for this node
+
+  pg_autoctl archive
+    wal     Archive a WAL file
+    pgdata  Archive a PGDATA directory (a base backup)
+    show    Show archives (basebackups and WAL files)
+
+  pg_autoctl restore
+    wal     Restore a WAL file
+    pgdata  Restore a PGDATA directory (a base backup)
+    show    Show restores (basebackups and WAL files)
 
   pg_autoctl enable
     secondary    Enable secondary nodes on a formation

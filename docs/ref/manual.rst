@@ -15,6 +15,8 @@ have their own manual page.
    pg_autoctl_drop
    pg_autoctl_config
    pg_autoctl_show
+   pg_autoctl_archive
+   pg_autoctl_restore
    pg_autoctl_enable
    pg_autoctl_disable
    pg_autoctl_get
