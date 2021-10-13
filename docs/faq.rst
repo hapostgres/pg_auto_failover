@@ -18,7 +18,7 @@ health checks and the retry policy.
 See the :ref:`configuration` part for more information about how to setup
 the different delays and timeouts that are involved in the decision making.
 
-See also :ref:`pg_autoctl watch` to have a dashboard that helps
+See also :ref:`pg_autoctl_watch` to have a dashboard that helps
 understanding the system and what's going on in the moment.
 
 The secondary is blocked in the CATCHING_UP state, what should I do?

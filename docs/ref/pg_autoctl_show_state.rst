@@ -111,10 +111,10 @@ The ``pg_autoctl show state`` output includes the following columns:
 	to connect to this node, and ``?`` when the monitor didn't connect to
 	the node yet.
 
-  - Current State
+  - Reported State
 
-	The current FSM state as reported to the monitor by the pg_autoctl
-	process running on the Postgres node.
+	The latest reported FSM state, as reported to the monitor by the
+	pg_autoctl process running on the Postgres node.
 
   - Assigned State
 
@@ -130,14 +130,14 @@ Examples
 ::
 
    $ pg_autoctl show state
-    Name |  Node |      Host:Port |       TLI: LSN |   Connection |       Current State |      Assigned State
+    Name |  Node |      Host:Port |       TLI: LSN |   Connection |      Reported State |      Assigned State
    ------+-------+----------------+----------------+--------------+---------------------+--------------------
    node1 |     1 | localhost:5501 |   1: 0/4000678 |   read-write |             primary |             primary
    node2 |     2 | localhost:5502 |   1: 0/4000678 |    read-only |           secondary |           secondary
    node3 |     3 | localhost:5503 |   1: 0/4000678 |    read-only |           secondary |           secondary
 
    $ pg_autoctl show state --local
-    Name |  Node |      Host:Port |       TLI: LSN |   Connection |       Current State |      Assigned State
+    Name |  Node |      Host:Port |       TLI: LSN |   Connection |      Reported State |      Assigned State
    ------+-------+----------------+----------------+--------------+---------------------+--------------------
    node1 |     1 | localhost:5501 |   1: 0/4000678 | read-write ? |             primary |             primary
 
