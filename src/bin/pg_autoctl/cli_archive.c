@@ -39,8 +39,6 @@
 
 char configFilename[MAXPGPATH] = { 0 };
 
-static int cli_archive_getopts(int argc, char **argv);
-
 static void cli_archive_wal(int argc, char **argv);
 static void cli_archive_pgdata(int argc, char **argv);
 static void cli_archive_show(int argc, char **argv);
@@ -99,7 +97,7 @@ CommandLine archive_commands =
  * cli_archive_getopts parses command line options for pg_autoctl archive
  * commands.
  */
-static int
+int
 cli_archive_getopts(int argc, char **argv)
 {
 	KeeperConfig options = { 0 };
@@ -317,7 +315,7 @@ cli_archive_wal(int argc, char **argv)
 	 *   configuration, and in this case we don't want to contact the monitor
 	 *   and register the WAL at all.
 	 *
-	 * When using --config foo, we don't implement a monitor archiver_policy
+	 * When using --config foo, we don't implement a monitor archiver_policy.
 	 */
 	if (!IS_EMPTY_STRING_BUFFER(configFilename))
 	{

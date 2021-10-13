@@ -16,28 +16,19 @@
 
 #include "postgres_fe.h"
 
+#include "archiving.h"
 #include "cli_common.h"
 #include "commandline.h"
 #include "env_utils.h"
 #include "defaults.h"
-#include "fsm.h"
-#include "ini_file.h"
-#include "ipaddr.h"
 #include "keeper_config.h"
-#include "keeper_pg_init.h"
 #include "keeper.h"
 #include "monitor.h"
 #include "monitor_config.h"
-#include "monitor_pg_init.h"
-#include "pgctl.h"
-#include "pghba.h"
-#include "pidfile.h"
-#include "primary_standby.h"
-#include "service_keeper.h"
-#include "service_keeper_init.h"
-#include "service_monitor.h"
-#include "service_monitor_init.h"
 #include "string_utils.h"
+
+/* cli_archive.c */
+extern char configFilename[MAXPGPATH];
 
 static int cli_restore_getopts(int argc, char **argv);
 
@@ -49,14 +40,12 @@ CommandLine restore_wal_command =
 	make_command(
 		"wal",
 		"Restore a WAL file",
-		" [ --pgdata | --monitor ] [ --formation --group ] [ --json ] filename",
+		" [ --pgdata | --monitor ] [ --formation --group ] [ --json ] "
+		"filename [ destination ]",
 		"  --pgdata      path to data directory\n"
-		"  --monitor     pg_auto_failover Monitor Postgres URL\n"
-		"  --formation   restore WAL for given formation\n"
-		"  --group       restore WAL for given group\n"
 		"  --config      restore command configuration\n"
 		"  --json        output data in the JSON format\n",
-		cli_restore_getopts,
+		cli_archive_getopts,
 		cli_restore_wal);
 
 CommandLine restore_pgdata_command =
@@ -118,6 +107,113 @@ cli_restore_getopts(int argc, char **argv)
 static void
 cli_restore_wal(int argc, char **argv)
 {
+	Keeper keeper = { 0 };
+	Monitor *monitor = &(keeper.monitor);
+	KeeperConfig *config = &(keeper.config);
+	PostgresSetup *pgSetup = &(config->pgSetup);
+
+	keeper.config = keeperOptions;
+
+	if (argc < 1 || argc > 2)
+	{
+		log_error("Failed to parse command line arguments");
+		commandline_help(stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	bool monitorDisabledIsOk = false;
+
+	if (!keeper_config_read_file_skip_pgsetup(config,
+											  monitorDisabledIsOk))
+	{
+		log_fatal("Failed to read configuration file \"%s\"",
+				  config->pathnames.config);
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (!keeper_init(&keeper, config))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	const char *filename = argv[0];
+	char dest[MAXPGPATH] = { 0 };
+
+	if (argc == 2)
+	{
+		strlcpy(dest, argv[1], sizeof(dest));
+	}
+	else
+	{
+		sformat(dest, sizeof(dest), "%s/pg_wal/%s", pgSetup->pgdata, filename);
+	}
+
+	log_debug("Restoring WAL file \"%s\"", filename);
+	log_debug("Restoring to destination \"%s\"", dest);
+
+	/*
+	 * The `pg_autoctl restore wal` command can be used in two modes:
+	 *
+	 * - either as the restore_command where we apply the archiver_policy
+	 *   maintained on the monitor, using the configuration found on the
+	 *   monitor.
+	 *
+	 * - or as an interactive command that's used to test and validate a local
+	 *   configuration, and in this case we don't want to contact the monitor
+	 *   at all.
+	 *
+	 * When using --config foo, we don't implement a monitor archiver_policy.
+	 */
+	if (!IS_EMPTY_STRING_BUFFER(configFilename))
+	{
+		if (!restore_wal_with_config(&keeper, configFilename, filename, dest))
+		{
+			log_fatal("Failed to restore WAL file \"%s\"", filename);
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+
+		exit(EXIT_CODE_QUIT);
+	}
+
+	/*
+	 * When the --config option has not been used, we are handling the monitor
+	 * archiver_policy settings. So first grab the policies, and then loop over
+	 * each policy and try restoring the WAL file with the given policies.
+	 *
+	 * Of course we only need to restore the WAL file once, so as soon as any
+	 * of the policies we got is successful, that's when we stop.
+	 */
+	MonitorArchiverPolicyArray policiesArray = { 0 };
+
+	if (!monitor_get_archiver_policies(monitor,
+									   config->formation,
+									   &policiesArray))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_MONITOR);
+	}
+
+	if (policiesArray.count == 0)
+	{
+		log_fatal("Failed to find an archiver policy for this node "
+				  "in formation \"%s\" on the monitor",
+				  config->formation);
+
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	for (int i = 0; i < policiesArray.count; i++)
+	{
+		MonitorArchiverPolicy *policy = &(policiesArray.policies[i]);
+
+		if (restore_wal_for_policy(&keeper, policy, filename, dest))
+		{
+			exit(EXIT_CODE_QUIT);
+		}
+	}
+
+	/* if we reach this line, we failed to restore using any policy */
 	exit(EXIT_CODE_INTERNAL_ERROR);
 }
 

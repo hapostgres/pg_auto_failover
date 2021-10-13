@@ -77,6 +77,87 @@ walg_wal_push(const char *config, const char *wal)
 
 
 /*
+ * walg_wal_fetch calls the command "wal-g wal-push" to restore the given WAL
+ * file to the destination path.
+ */
+bool
+walg_wal_fetch(const char *pgdata, const char *config, const char *wal,
+			   const char *dest)
+{
+	char walg[MAXPGPATH] = { 0 };
+
+	if (!search_path_first("wal-g", walg, LOG_ERROR))
+	{
+		log_fatal("Failed to find program wal-g in PATH");
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	/*
+	 * There is a problem with wal-g prefetching of WAL files and usage of
+	 * pg_rewind starting with Postgres 13, where wal-g would add files in the
+	 * wrong place by default. We need to work around the wal-g behaviour here.
+	 */
+	char walgPrefetchDir[MAXPGPATH] = { 0 };
+
+	if (!build_xdg_path(walgPrefetchDir,
+						XDG_RUNTIME,
+						pgdata,
+						WAL_G_PREFETCH_DIRNAME))
+	{
+		/* highly unexpected */
+		log_error("Failed to build wal-g prefetch directory pathname, "
+				  "see above for details.");
+		return false;
+	}
+
+	setenv("WALG_PREFETCH_DIR", walgPrefetchDir, 1);
+
+	/*
+	 * The configuration file might override this, we just don't want to use
+	 * the wal-g default here. When prefetching files, the restore_command
+	 * might fail or wait for a long time for files that don't exist, so unless
+	 * our user specifically ask for the prefetch behavior, we would rather
+	 * disable it.
+	 */
+	setenv("WALG_DOWNLOAD_CONCURRENCY", "1", 1);
+
+	Program program =
+		run_program(walg, "wal-fetch", "--config", config, wal, dest, NULL);
+
+	/* log the exact command line we're using */
+	char command[BUFSIZE] = { 0 };
+	(void) snprintf_program_command_line(&program, command, BUFSIZE);
+
+	log_info("%s", command);
+
+	if (program.returnCode != 0)
+	{
+		(void) walg_log_errors(&program);
+		free_program(&program);
+
+		log_fatal("Failed to archive WAL \"%s\" with wal-g, "
+				  "see above for details", wal);
+
+		return false;
+	}
+
+	if (program.stdOut != NULL)
+	{
+		walg_log_error_lines(LOG_INFO, program.stdOut);
+	}
+
+	if (program.stdErr != NULL)
+	{
+		walg_log_error_lines(LOG_INFO, program.stdErr);
+	}
+
+	free_program(&program);
+
+	return true;
+}
+
+
+/*
  * walg_prepare_config prepares the configuration in a configuration file.
  *
  * The WAL-G configuration is maintained on the monitor as part of the

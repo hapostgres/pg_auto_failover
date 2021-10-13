@@ -220,4 +220,8 @@ bool discover_hostname(char *hostname, int size,
 /* cli_get_set_properties.c */
 void cli_get_formation_settings(int argc, char **argv);
 
+/* cli_archive.c */
+int cli_archive_getopts(int argc, char **argv);
+
+
 #endif  /* CLI_COMMON_H */

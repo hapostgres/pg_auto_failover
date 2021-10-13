@@ -39,8 +39,8 @@ static bool get_walfile_md5(const char *filename, char *md5);
 
 
 /*
- * archive_wal prepares the archiving of a given WAL file, and archives it
- * using WAL-G.
+ * archive_wal_with_config prepares the archiving of a given WAL file, and
+ * archives it using WAL-G.
  */
 bool
 archive_wal_with_config(Keeper *keeper,
@@ -84,8 +84,12 @@ archive_wal_with_config(Keeper *keeper,
 
 
 /*
- * archive_wal prepares the archiving of a given WAL file, and archives it
- * using WAL-G.
+ * archive_wal_for_policy prepares the archiving of a given WAL file, and
+ * archives it using WAL-G.
+ *
+ * The WAL-G configuration is found on the monitor for the given policy, so the
+ * command has to create a local configuration file for wal-g --config
+ * <filename>.
  */
 bool
 archive_wal_for_policy(Keeper *keeper,
@@ -168,6 +172,9 @@ archive_wal_for_policy(Keeper *keeper,
 					 registeredWalFile.filename,
 					 (long long) registeredWalFile.nodeId,
 					 policy->target);
+
+			/* we might want to try later */
+			return false;
 		}
 		else
 		{
@@ -176,9 +183,10 @@ archive_wal_for_policy(Keeper *keeper,
 					 registeredWalFile.filename,
 					 (long long) registeredWalFile.nodeId,
 					 policy->target);
-		}
 
-		return false;
+			/* that's success, tell Postgres we're good */
+			return true;
+		}
 	}
 
 	/* if we got the registration at our nodeId, now archive the WAL */
@@ -233,6 +241,166 @@ archive_wal_for_policy(Keeper *keeper,
 	}
 
 	return true;
+}
+
+
+/*
+ * restore_wal_with_config restores a WAL file using the configuration pathname
+ * given as an argument.
+ */
+bool
+restore_wal_with_config(Keeper *keeper,
+						const char *archiverConfigPathname,
+						const char *filename,
+						const char *dest)
+{
+	KeeperConfig *config = &(keeper->config);
+	PostgresSetup *pgSetup = &(config->pgSetup);
+
+	MonitorWALFile walFile = { 0 };
+
+	/* we don't have an archiving policy */
+	int64_t policyId = 0;
+
+	if (!prepareWalFile(pgSetup,
+						policyId,
+						config->groupId,
+						keeper->state.current_node_id,
+						filename,
+						&walFile))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	log_info("Restoring WAL file \"%s\"", walFile.filename);
+
+	bool success =
+		walg_wal_fetch(
+			pgSetup->pgdata,
+			archiverConfigPathname,
+			walFile.filename,
+			dest);
+
+	if (success)
+	{
+		log_info("Restored WAL file \"%s\" successfully", walFile.filename);
+	}
+
+	return success;
+}
+
+
+/*
+ * restore_wal_for_policy restores a WAL file at the given destination.
+ */
+bool
+restore_wal_for_policy(Keeper *keeper,
+					   MonitorArchiverPolicy *policy,
+					   const char *filename,
+					   const char *dest)
+{
+	Monitor *monitor = &(keeper->monitor);
+	KeeperConfig *config = &(keeper->config);
+	PostgresSetup *pgSetup = &(config->pgSetup);
+
+	log_info("Restoring WAL file \"%s\"", filename);
+
+	/*
+	 * We try to grab the WAL metadata from the archiver call to the monitor
+	 * register_wal function. When we have the metadata, then we can check that
+	 * the MD5 of the WAL file being restored is the same as the MD5 of the WAL
+	 * file we did archive, which is a nice property to check.
+	 *
+	 * That said, the user could have been migrating to pg_autoctl archive and
+	 * restore commands recently and they could have the WAL available on their
+	 * archive target without pg_auto_failover having the metadata, so failing
+	 * to grab the metadata is just a warning.
+	 */
+	MonitorWALFile registeredWalFile = { 0 };
+
+	if (monitor_get_pg_wal(monitor,
+						   policy->policyId,
+						   config->groupId,
+						   filename,
+						   &registeredWalFile))
+	{
+		log_debug("Found a registered WAL \"%s\" with MD5 \"%s\"",
+				  registeredWalFile.filename,
+				  registeredWalFile.md5);
+	}
+	else
+	{
+		log_warn("Failed to get the WAL file metadata from the monitor "
+				 "for WAL \"%s\" in groupId %d for target %s",
+				 filename,
+				 config->groupId,
+				 policy->target);
+	}
+
+	/* first, handle the configuration file */
+	char archiverConfigPathname[MAXPGPATH] = { 0 };
+
+	if (!walg_prepare_config(pgSetup->pgdata,
+							 policy->config,
+							 archiverConfigPathname))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	bool success =
+		walg_wal_fetch(
+			pgSetup->pgdata,
+			archiverConfigPathname,
+			filename,
+			dest);
+
+	/*
+	 * After fetching the WAL file, we can compute its MD5 and compare it to
+	 * the one we have on the monitor's metadata.
+	 */
+	if (success && !IS_EMPTY_STRING_BUFFER(registeredWalFile.md5))
+	{
+		/* compute the just received WAL file MD5 */
+		MonitorWALFile walFile = { 0 };
+
+		if (!prepareWalFile(pgSetup,
+							policy->policyId,
+							config->groupId,
+							keeper->state.current_node_id,
+							dest,
+							&walFile))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
+		log_debug("Fetched WAL \"%s\" with MD5 \"%s\"",
+				  walFile.pathname,
+				  walFile.md5);
+
+		success = success &&
+				  strcmp(registeredWalFile.md5, walFile.md5) == 0;
+
+		if (!success)
+		{
+			log_error("WAL file \"%s\" for group %d has MD5 \"%s\" "
+					  "on the monitor, but we fetched a WAL file with MD5 "
+					  "\"%s\" instead",
+					  walFile.filename,
+					  config->groupId,
+					  registeredWalFile.md5,
+					  walFile.md5);
+		}
+	}
+
+	if (success)
+	{
+		log_info("Restored WAL file \"%s\" successfully", filename);
+	}
+
+	return success;
 }
 
 

@@ -113,12 +113,12 @@ typedef struct ArchiverPolicyArrayParseContext
 	bool parsedOK;
 } ArchiverPolicyArrayParseContext;
 
-typedef struct MonitorUpsertWalParseContext
+typedef struct MonitorWALFileParseContext
 {
 	char sqlstate[SQLSTATE_LENGTH];
 	MonitorWALFile *walFile;
 	bool parsedOK;
-} MonitorUpsertWalParseContext;
+} MonitorWalFileParseContext;
 
 
 static bool parseNode(PGresult *result, int rowNumber, NodeAddress *node);
@@ -141,7 +141,7 @@ static void parseExtensionVersion(void *ctx, PGresult *result);
 static bool parseCurrentArchiverPolicy(PGresult *result, int rowNumber,
 									   MonitorArchiverPolicy *policy);
 static void parseArchiverPolicyArray(void *ctx, PGresult *result);
-static void parseUpsertWal(void *ctx, PGresult *result);
+static void parseWalFile(void *ctx, PGresult *result);
 
 static bool prepare_connection_to_current_system_user(Monitor *source,
 													  Monitor *target);
@@ -5014,7 +5014,8 @@ monitor_get_archiver_policies(Monitor *monitor, char *formation,
 
 
 /*
- * parseUpsertWal parses a result list of pgautofailover.archiver_policy.
+ * parseArchiverPolicyArray parses a result list of
+ * pgautofailover.archiver_policy.
  */
 static void
 parseArchiverPolicyArray(void *ctx, PGresult *result)
@@ -5111,6 +5112,56 @@ parseCurrentArchiverPolicy(PGresult *result, int rowNumber,
 
 
 /*
+ * monitor_get_pg_wal gets the pg_wal entry for the given archiver_policy_id
+ * and WAL filename, and fills-in the given MonitorWALFile structure with the
+ * result obtained.
+ */
+bool
+monitor_get_pg_wal(Monitor *monitor,
+				   int64_t policyId,
+				   int groupId,
+				   const char *filename,
+				   MonitorWALFile *walFile)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT archiver_policy_id, groupid, nodeid, filename, filesize, md5, "
+		"       start_time, finish_time "
+		"  FROM pgautofailover.pg_wal "
+		" WHERE archiver_policy_id = $1 and groupid = $2 and filename = $3";
+	int paramCount = 3;
+	Oid paramTypes[3] = { INT8OID, INT4OID, TEXTOID };
+	const char *paramValues[3];
+
+	MonitorWalFileParseContext parseContext = { { 0 }, walFile, false };
+
+	paramValues[0] = intToString(policyId).strValue;
+	paramValues[1] = intToString(groupId).strValue;
+	paramValues[2] = filename;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &parseContext, parseWalFile))
+	{
+		log_error("Failed to select pg_wal \"%s\" in "
+				  "group %d for archiver policy %lld from the monitor",
+				  filename, groupId, (long long) policyId);
+		return false;
+	}
+
+	if (!parseContext.parsedOK)
+	{
+		log_error("Failed to select pg_wal \"%s\" in "
+				  "group %d for archiver policy %lld from the monitor",
+				  filename, groupId, (long long) policyId);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
  * monitor_register_wal calls the function pgautofailover.register_wal on the
  * monitor, and fills-in the given MonitorWALFile structure with the result
  * obtained.
@@ -5134,7 +5185,7 @@ monitor_register_wal(Monitor *monitor,
 	Oid paramTypes[6] = { INT8OID, INT4OID, INT8OID, TEXTOID, INT8OID, TEXTOID };
 	const char *paramValues[6];
 
-	MonitorUpsertWalParseContext parseContext = { { 0 }, walFile, false };
+	MonitorWalFileParseContext parseContext = { { 0 }, walFile, false };
 
 	paramValues[0] = intToString(policyId).strValue;
 	paramValues[1] = intToString(groupId).strValue;
@@ -5145,7 +5196,7 @@ monitor_register_wal(Monitor *monitor,
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
-								   &parseContext, parseUpsertWal))
+								   &parseContext, parseWalFile))
 	{
 		log_error("Failed to call pgautofailover.register_wal for wal \"%s\" in "
 				  "group %d for archiver policy %lld from the monitor",
@@ -5186,7 +5237,7 @@ monitor_finish_wal(Monitor *monitor,
 	Oid paramTypes[3] = { INT8OID, INT4OID, TEXTOID };
 	const char *paramValues[3];
 
-	MonitorUpsertWalParseContext parseContext = { { 0 }, walFile, false };
+	MonitorWalFileParseContext parseContext = { { 0 }, walFile, false };
 
 	paramValues[0] = intToString(policyId).strValue;
 	paramValues[1] = intToString(groupId).strValue;
@@ -5194,7 +5245,7 @@ monitor_finish_wal(Monitor *monitor,
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
-								   &parseContext, parseUpsertWal))
+								   &parseContext, parseWalFile))
 	{
 		log_error("Failed to call pgautofailover.finish_wal for wal \"%s\" in "
 				  "group %d for archiver policy %lld from the monitor",
@@ -5215,14 +5266,14 @@ monitor_finish_wal(Monitor *monitor,
 
 
 /*
- * parseUpsertWal parses the result of calling pgautofailover.register_wal on
- * the monitor.
+ * parseWalFile parses the result of calling pgautofailover.register_wal on the
+ * monitor.
  */
 static void
-parseUpsertWal(void *ctx, PGresult *result)
+parseWalFile(void *ctx, PGresult *result)
 {
-	MonitorUpsertWalParseContext *context =
-		(MonitorUpsertWalParseContext *) ctx;
+	MonitorWalFileParseContext *context =
+		(MonitorWalFileParseContext *) ctx;
 
 	int errors = 0;
 

@@ -2055,6 +2055,7 @@ pg_write_standby_signal(const char *pgdata,
 	char targetTimeline[NAMEDATALEN] = { 0 };
 
 	GUC recoverySettingsStandby[] = {
+		{ "restore_command", "'pg_autoctl restore wal %f %p'" },
 		{ "primary_conninfo", (char *) primaryConnInfo },
 		{ "primary_slot_name", (char *) primarySlotName },
 		{ "recovery_target_timeline", (char *) targetTimeline },
@@ -2062,6 +2063,7 @@ pg_write_standby_signal(const char *pgdata,
 	};
 
 	GUC recoverySettingsTargetLSN[] = {
+		{ "restore_command", "'pg_autoctl restore wal %f %p'" },
 		{ "primary_conninfo", (char *) primaryConnInfo },
 		{ "primary_slot_name", (char *) primarySlotName },
 		{ "recovery_target_timeline", (char *) targetTimeline },

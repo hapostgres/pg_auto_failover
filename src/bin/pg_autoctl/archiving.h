@@ -23,4 +23,14 @@ bool archive_wal_for_policy(Keeper *keeper,
 							MonitorArchiverPolicy *policy,
 							const char *filename);
 
+bool restore_wal_with_config(Keeper *keeper,
+							 const char *archiverConfigPathname,
+							 const char *filename,
+							 const char *dest);
+
+bool restore_wal_for_policy(Keeper *keeper,
+							MonitorArchiverPolicy *policy,
+							const char *filename,
+							const char *dest);
+
 #endif  /* ARCHIVING_H */

@@ -320,6 +320,11 @@ bool monitor_register_archiver_policy(Monitor *monitor,
 bool monitor_get_archiver_policies(Monitor *monitor, char *formation,
 								   MonitorArchiverPolicyArray *policyArray);
 
+bool monitor_get_pg_wal(Monitor *monitor,
+						int64_t policyId,
+						int groupId,
+						const char *filename,
+						MonitorWALFile *walFile);
 
 bool monitor_register_wal(Monitor *monitor,
 						  int64_t policyId,
